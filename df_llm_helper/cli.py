@@ -735,7 +735,8 @@ def cmd_forecast(args) -> int:
         s = series_from_metrics(args.file)
         for res in ("food", "drink"):
             r = backtest(s, res, int(p.cfg.get("forecast.window", 5)), float(args.horizon))
-            print(f"{res}: {r['n']} predictions, mean error {r['mean_err']}, median {r['median_err']}")
+            print(f"{res}: {r['n']} predictions, mean error {r['mean_err']}, median {r['median_err']}"
+                  + ("" if r["n"] else f" (series of {len(s)} points too short for horizon {args.horizon:g})"))
         return 0
     fc = Forecaster(p.store, p.clock, p.cfg.get("forecast", {}))
     line, news = fc.update(p.snapshot(), record=not args.dry_run)
@@ -823,7 +824,7 @@ def cmd_reboot(args) -> int:
             p.clock.sleep(0 if args.dry_run else 4)
         return 0
     lines = rb.run(dry=args.dry_run)
-    print("\n".join(ln for ln in lines if args.verbose or not ln.startswith(("ok ", "[dry] claude/advance"))))
+    print("\n".join(ln for ln in lines if args.verbose or not ln.startswith("ok ")))     # dry: the whole plan (BUG-216)
     return 0 if not any("NOT" in ln for ln in lines) else 1
 
 
@@ -1064,8 +1065,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_care)
     s = sub.add_parser("forecast", help="Famine forecast (spec 05): show|backtest")
     s.add_argument("action", nargs="?", default="show", choices=["show", "backtest"])
-    s.add_argument("--file", default=str(Path(__file__).resolve().parents[2] / "metrics.csv"))
-    s.add_argument("--horizon", default=3)
+    s.add_argument("--file", default=None, help="backtest: metrics.csv (default runtime/metrics.csv, else ../metrics.csv)")
+    s.add_argument("--horizon", type=float, default=3, help="backtest: game days ahead (>= 1)")
     s.add_argument("--dry-run", action="store_true")
     s.set_defaults(fn=cmd_forecast)
     s = sub.add_parser("workload", help="Workload control (spec 06)")
