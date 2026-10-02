@@ -32,3 +32,11 @@ Read-only analysis. The planner only proposes orders (existing `orders` flow); n
 
 ## Info needed
 Player: recorded answer of `claude/gesund` (or `pilot_care`) with at least one patient; list of stone types present in stock (`claude/material`) to build the plaster fixture.
+
+## Addendum 2026-10-02 (root cause found live): hospital location posts were all empty
+The hospital (location 11, zone 3760) has 8 location posts (occupations 6..13: 2x DOCTOR, 2x DIAGNOSTICIAN, 2x SURGEON, 2x BONE_DOCTOR in `world.occupations.all`, field `location_id`, `unit_id` -1 = unfilled). With no post filled the hospital counts as not functional (DFHack `notify` shows this, see also run 1/run 5 notes) and **no care jobs are created at all** (no diagnosis, no water, no dressing), even if citizens have the labors. Labors alone do not help.
+Required in the watcher / planner:
+1. Check per hospital location that at least one DOCTOR post, or DIAGNOSTICIAN + SURGEON + BONE_DOCTOR, is filled by a living adult unit; report `HOSPITAL: no staff posts filled` as critical when patients exist.
+2. Suggest candidates (alive, adult, not in a squad on duty, not in a mood, low stress, healthy) and, with an exception register entry, fill the posts the way the location menu does: `occupation.unit_id`, `occupation.histfig_id` and `unit.occupations:insert` (tested live 02.10.2026, FP13, 8 posts filled), plus the care labors DIAGNOSE, SURGERY, BONE_SETTING, SUTURING, DRESSING_WOUNDS, FEED_WATER_CIVILIANS, RECOVER_WOUNDED.
+3. Re-check after deaths (the post keeps pointing at the dead unit); orphaned HOSPITAL locations without a zone (ids 0, 3, 4, 10) should be listed.
+Acceptance: fixture "8 posts unfilled" -> critical + 8 suggestions; fixture "all filled by living units" -> ok; fixture "post points at dead unit" -> treated as unfilled.
