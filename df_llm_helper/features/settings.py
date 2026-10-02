@@ -172,6 +172,8 @@ class Settings:
             raise SettingsError(f"{key}: verification after the write failed, original restored")
         now = self.clock.now().epoch
         pend = self.pending()
+        if not pend:                                     # BUG-218: the file as it was before the first open change
+            self.store.set("settings.origin_backup", str(backup))
         first = pend.get(key)
         pend[key] = {"old": first["old"] if first else old, "new": new, "ts": now,
                  "backup": first["backup"] if first else str(backup),
@@ -181,7 +183,20 @@ class Settings:
                               f"reason: {reason.strip()}"[:200])
         eff = self.known[key].get("effect")
         return [f"{key}: {old} -> {new} (backup {backup.name})",
-                f"takes effect only after a restart: {key} {new}" if eff == "restart" else f"{key} is effective now"]
+                f"takes effect only after a restart: {key} {new}" if eff == "restart" else f"{key} is effective now"] \
+            + self.cross_warnings()
+
+    def cross_warnings(self) -> list[str]:
+        """BUG-218: the hard cap below the soft cap stops every migrant AND every birth - warn (the player decides)."""
+        v = self.values()
+        try:
+            soft, hard = int(v["POPULATION_CAP"]), int(v["STRICT_POPULATION_CAP"])
+        except (KeyError, ValueError):
+            return []
+        if hard < soft:
+            return [f"WARNING: STRICT_POPULATION_CAP {hard} < POPULATION_CAP {soft}: the hard cap wins (no migrants, "
+                    "no births above it) - intended?"]
+        return []
 
     def revert(self, key: str) -> list[str]:
         if key not in self.known:
@@ -207,7 +222,9 @@ class Settings:
         self.store.log_action(now, "settings", "settings", "revert", key, f"{key} -> {e['old']}", False, True,
                               f"backup {Path(e['backup']).name}")
         out = [f"{key}: back to {e['old']}"]
-        bk = Path(e["backup"])
+        bk = Path(self.store.get("settings.origin_backup") or e["backup"])   # BUG-218: compare with the original
+        if not pend:
+            self.store.set("settings.origin_backup", None)
         if not pend and bk.is_file():
             out.append("file byte-identical to the backup" if bk.read_bytes() == out_data
                        else "NOTE: file differs from the backup in other lines (edited by hand?)")
