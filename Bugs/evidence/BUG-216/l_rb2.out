@@ -1,0 +1,13 @@
+Restart: 10 services started (ueberwacher, arbeit, orders, auslastung, trinken, essen, material, gesund, migranten, raster)
+schau off: HUD ticker, not active as a permanent job live on 01.10.; if needed claude/schau start
+kohle off: Permanent job deliberately off (live 01.10.: 9.4 s freeze per run); if needed run claude/kohle run 10 once
+[dry] claude/ueberwacher start
+[dry] claude/arbeit start
+[dry] claude/orders start
+[dry] claude/auslastung start
+[dry] claude/trinken start
+[dry] claude/essen start
+[dry] claude/material start
+[dry] claude/gesund start
+[dry] claude/migranten start
+[dry] claude/raster start

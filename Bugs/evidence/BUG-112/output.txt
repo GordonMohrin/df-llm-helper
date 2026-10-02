@@ -1,0 +1,40 @@
+stdout encoding of a child process without PYTHONUTF8/PYTHONIOENCODING: cp1252 cp1252
+
+===== A) overlay text with U+263C (the sun character that Dwarf Fortress puts around artifact names) =====
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_buzz3rfk\cfg.yaml overlay "Test ☼ ok"
+Error: 'charmap' codec can't encode character '\u263c' in position 23: character maps to <undefined>
+[exit=2]
+
+
+===== B) wake: two new CRITICAL events, one with U+263C -> error, and the events are gone on the next run =====
+$ python -m df_llm_helper --config C:\Users\admin\AppData\Local\Temp\dfh_core_w4sfl_xn\wk.yaml wake
+
+[exit=0]
+
+$ python -m df_llm_helper --config C:\Users\admin\AppData\Local\Temp\dfh_core_w4sfl_xn\wk.yaml wake
+Error: 'charmap' codec can't encode character '\u263c' in position 69: character maps to <undefined>
+[exit=2]
+
+-> second run (events already consumed, nothing printed):
+$ python -m df_llm_helper --config C:\Users\admin\AppData\Local\Temp\dfh_core_w4sfl_xn\wk.yaml wake
+
+[exit=0]
+
+
+===== C) plan trade with a unicode item name =====
+$ python -m df_llm_helper plan trade --json C:\Users\admin\AppData\Local\Temp\dfh_core_buzz3rfk\t.json
+Buy 50 / sell 200 (ratio 4.0), weight 5.0, method exact
+  buy  5x Brot (food) at 10 each
+Error: 'charmap' codec can't encode character '\u263c' in position 15: character maps to <undefined>
+[exit=2]
+
+
+===== control: the same B with PYTHONUTF8=1 =====
+$ python -m df_llm_helper --config C:\Users\admin\AppData\Local\Temp\dfh_core_mfqbevds\wk.yaml wake
+
+[exit=0]
+
+$ python -m df_llm_helper --config C:\Users\admin\AppData\Local\Temp\dfh_core_mfqbevds\wk.yaml wake
+WAKE critical [MASTERPIECE_CRAFTED]: Urist has created a masterpiece ☼goblin figurine☼! -> python -m df_llm_helper digest
+[exit=0]
+

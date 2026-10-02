@@ -1,0 +1,2 @@
+STRICT_POPULATION_CAP: 100 -> 10 (backup d_init.txt.bak-2026-10-02-3)
+takes effect only after a restart: STRICT_POPULATION_CAP 10

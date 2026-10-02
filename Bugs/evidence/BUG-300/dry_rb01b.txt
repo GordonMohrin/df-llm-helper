@@ -1,0 +1,4 @@
+$ python -m df_llm_helper --mock fixtures/run5 runbook run rb01b_e18_foreign --dry-run
+rb01b_e18_foreign: approval
+  refused: rb01b_e18_foreign needs the player's yes in the exception register (action FP08). Without an entry it is not executed.
+[exit 1]

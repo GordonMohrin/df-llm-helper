@@ -1,0 +1,4 @@
+$ python -c "does the runbook rb01c_e18_release mentioned in rb01_e18_pick.notes exist?"
+rb01 note mentions rb01c_e18_release; exists: False
+runbook ids: rb01_e18_pick, rb01b_e18_foreign, rb02_grabstau, rb03_kochschleife, rb04_alarm_burrow, rb05_waechter_blind, rb06_karawane, rb06b_karawane_abschluss, rb07_stimmung, rb08_hospital, rb09_aquifer, rb10_timestream, rb15_hunger_trotz_essen, rb16_abbruchschleife, rb17_koks_brennstoff, rb18_manager_buero, rb19_dienste_starten, rb20_fertigwaren_lager, rb21_flut
+[exit 0]

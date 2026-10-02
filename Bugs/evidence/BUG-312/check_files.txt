@@ -1,0 +1,4 @@
+$ grep -c 'Map Kaserne' tmp_bug/a.html tmp_bug/b.html
+a.html contains the map: False
+b.html contains the map: True
+[exit 0]

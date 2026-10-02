@@ -1,0 +1,3 @@
+{"own":[{"id":"o1","name":"Steinkrug ä ö ü ☼","category":"other","value":100,"weight":2,"qty":10},{"id":"o2","name":"Barrel","category":"other","value":20,"weight":5,"qty":3}],
+ "offer":[{"id":"f1","name":"Plump helmet","category":"food","value":10,"weight":1,"qty":20},{"id":"f2","name":"Log","category":"wood","value":15,"weight":10,"qty":10},{"id":"f3","name":"Gem","category":"gem","value":50,"weight":0.1,"qty":5}],
+ "ratio":2.3,"reserves":{"o2":3},"max_weight":100}

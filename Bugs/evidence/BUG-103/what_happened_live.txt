@@ -1,0 +1,10 @@
+Observed side effect on the LIVE data/state.db during the test run (2026-10-02 ~11:55, tester's own mistake, reproduced by the bug above):
+
+  python -m df_llm_helper --config <path that did not exist> wake      (intended: temp folder, the config file had not been created)
+
+  - The missing config was ignored -> state_db = <repo>/data/state.db (the LIVE database), tools = <repo>/runtime/tools (empty).
+  - kv 'wake.state' before the run (read-only sqlite query a few minutes earlier): {"events_n": 4322, "initialized": true, "seen": {... ev:..., warn:... keys}, ...}
+  - kv 'wake.state' after the run:  events_n = 0   (the events.log of that wrong tools folder does not exist -> len(lines) = 0)
+  - Consequence: the next real `wake` in the live installation re-read all 4326 lines of the live events.log and printed ~100 old CRITICAL events
+    (CITIZEN_DEATH, BERSERK_CITIZEN, ... from Sept./Oct.) as if they were new, plus all flag WAKEs. It self-healed (events_n back to 4326) after that one run.
+  - The tester did not (and was not allowed to) repair the live DB by hand.

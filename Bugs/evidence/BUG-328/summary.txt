@@ -1,0 +1,10 @@
+$ python Bugs/evidence/BUG-328/mini_pytest/run_tests.py <clean checkout>      # pytest is not installed; this is a 250-line stand-in
+test_settings.py: pass=18 fail=1 skip=0
+test_siege.py: pass=10 fail=0 skip=0
+test_tools_v3.py: pass=22 fail=0 skip=0
+test_transport.py: pass=148 fail=0 skip=1
+test_waechter.py: pass=13 fail=0 skip=0
+test_water.py: pass=6 fail=0 skip=1
+test_workload.py: pass=9 fail=0 skip=0
+TOTAL pass=2014 fail=4 skip=22 in 27.2s
+[... per-file lines for the other files: see mini_pytest_full_output.txt ...]

@@ -1,0 +1,2 @@
+[dry] 4 services, testable 2: claude-milguard claude-watchdog
+[dry] without start command (never switched off): claude-tempo claude-watchdog-alert

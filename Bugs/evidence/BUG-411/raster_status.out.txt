@@ -1,0 +1,10 @@
+{
+	"budget": 250,
+	"cursor": 349,
+	"eintraege": 356,
+	"etappen_gesamt": 60,
+	"first": 66,
+	"min_offen": 300,
+	"min_z": 104,
+	"offen": 0
+}

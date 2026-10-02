@@ -1,0 +1,7 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 journal postmortem
+## Decisions with outcome (action log)
+- guard/warn=None: 1x
+- reach/measure: 1x
+
+## Open items (critical warnings of the last 24 h)
+[exit 0]

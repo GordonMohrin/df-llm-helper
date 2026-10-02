@@ -1,0 +1,7 @@
+paths:
+  tools: tmp_bug/tools
+  scopes: tmp_bug/scopes
+  state_db: tmp_bug/state.db
+  data: tmp_bug/data
+  exceptions: tmp_bug/data/exceptions.jsonl
+journal: {chronik: tmp_bug/chronik.md, metrics: tmp_bug/metrics.csv, postmortem: tmp_bug/POSTMORTEM.md, kb_out: tmp_bug/journal_kb.jsonl, events_log: tmp_bug/tools/events.log}

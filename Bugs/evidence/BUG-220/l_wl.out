@@ -1,0 +1,3 @@
+Idle 57 % (68 idle, 101 jobs open, dig queue 0)
+- Dig queue 0 < 100 -> new dig stage: start raster refill (`claude/raster start`, miners busy) [dry]
+- 17 jobs blocked -> check suspendmanager, clarify building material/access (proposal)

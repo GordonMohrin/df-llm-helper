@@ -1,0 +1,4 @@
+guard --loop --interval 0.2 --dry-run                   -> bytes received after 3 s (process still looping, then killed): 0
+autopilot --loop --interval 0.2 --dry-run               -> bytes received after 3 s (process still looping, then killed): 0
+
+flush=True in cmd_waechter (watcher): 1  in cmd_wake: 1  in cmd_autopilot/cmd_guard loops: 0 (print() without flush)

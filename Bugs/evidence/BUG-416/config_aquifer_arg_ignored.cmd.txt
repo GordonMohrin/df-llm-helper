@@ -1,0 +1,2 @@
+dfhack-run.exe claude/config aquifer
+exit=0 time=0.48s

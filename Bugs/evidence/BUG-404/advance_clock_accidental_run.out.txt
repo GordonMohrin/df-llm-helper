@@ -1,0 +1,12 @@
+{
+	"date": {
+		"day": 27,
+		"month": "Granite",
+		"season": "Spring",
+		"text": "27. Granite, Jahr 118",
+		"year": 118,
+		"year_tick": 31871
+	},
+	"paused": true,
+	"timer_active": false
+}

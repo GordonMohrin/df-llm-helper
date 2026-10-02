@@ -1,0 +1,4 @@
+$ cat data/exceptions.jsonl
+{"example": true, "ts": "2026-01-01T00:00:00Z", "action": "FP09", "objects": [], "reason": "example (ignored): send stuck traders home via flags1.left", "player_consent": "<verbatim quote from the player>"}
+
+[exit 0]

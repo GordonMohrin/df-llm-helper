@@ -1,0 +1,6 @@
+{
+	"beruf": "MINER",
+	"kind": false,
+	"schritte": [ "claude/mil add 25 315 --apply   (Miliz-Miner: nur Erwachsene)", "claude/mil workmode 25 on --apply   (Uniform nur Spitzhacke, MINE+Miners)", "claude/workdetail list / assign 315 <Gruppe> true   (Haulers/Plant gatherers nach Bedarf)", "Betten: freie Betten >= Buerger (claude/migranten status -> betten)", "Labors NICHT abschalten (nur Amtstraeger: claude/aemter nolabors)" ],
+	"unit": "Stinth├ñd ├▓nulfeb \"Mirroredarrows\", Min"
+}

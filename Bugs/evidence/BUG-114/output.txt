@@ -1,0 +1,59 @@
+
+===== autopilot enable <nothing / unknown rule> =====
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_ycpyopv7\cfg.yaml autopilot enable
+Rule None active again
+[exit=0]
+
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_ycpyopv7\cfg.yaml autopilot enable no_such_rule
+Rule no_such_rule active again
+[exit=0]
+
+rule_state rows now: [(None, 0), ('no_such_rule', 0)]    <- junk rows 'None' and 'no_such_rule'
+
+===== guard ack-gate <nothing / negative / a gate that does not exist> =====
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_ycpyopv7\cfg.yaml guard ack-gate
+Pop gate None acknowledged
+[exit=0]
+
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_ycpyopv7\cfg.yaml guard ack-gate -5
+Pop gate -5 acknowledged
+[exit=0]
+
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_ycpyopv7\cfg.yaml guard ack-gate 61
+Pop gate 61 acknowledged
+[exit=0]
+
+guard.state.gates_acked: [None, -5, 61]    <- None, -5, 61 stored (valid gates are config guard.pop_gates = [60, 80])
+
+===== plan armor / plan supply: malformed or unknown inputs are ignored silently =====
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_ycpyopv7\cfg.yaml plan armor --bars iron
+Quota 2 soldiers (now 6, missing 0); bars needed 78, available 0, missing 78
+  deferred 6x weapon (bars missing)
+  deferred 6x breastplate (bars missing)
+  deferred 6x helm (bars missing)
+  deferred 6x shield (bars missing)
+  deferred 6x greaves (bars missing)
+  deferred 6x boots (bars missing)
+  deferred 6x gauntlets (bars missing)
+  Note: 6 soldiers > quota 2
+  Note: 42 pieces deferred (bars missing: 78)
+[exit=0]
+
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_ycpyopv7\cfg.yaml plan supply --prod bogus=5
+drink: stock 109, empty in 76 days
+food: stock 72, empty in 126 days
+[exit=0]
+
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_ycpyopv7\cfg.yaml plan supply --growth -1
+drink: stock 109, no shortage within the horizon
+food: stock 72, no shortage within the horizon
+[exit=0]
+
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_ycpyopv7\cfg.yaml plan dig --area-file fixtures/run5/area_z130.txt
+
+[exit=0]
+
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_ycpyopv7\cfg.yaml plan blueprint
+
+[exit=0]
+

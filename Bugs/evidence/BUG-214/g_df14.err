@@ -1,0 +1,23 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\admin\claude gordons projects\dfpilot-public\df_llm_helper\__main__.py", line 6, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "C:\Users\admin\claude gordons projects\dfpilot-public\df_llm_helper\cli.py", line 1208, in main
+    return int(args.fn(args) or 0)
+               ~~~~~~~^^^^^^
+  File "C:\Users\admin\claude gordons projects\dfpilot-public\df_llm_helper\features\defense.py", line 265, in _dispatch
+    return cmd_defense(args)
+  File "C:\Users\admin\claude gordons projects\dfpilot-public\df_llm_helper\features\defense.py", line 147, in cmd_defense
+    return _status(args)
+  File "C:\Users\admin\claude gordons projects\dfpilot-public\df_llm_helper\features\defense.py", line 210, in _status
+    data = json.loads(Path(args.file).read_text(encoding="utf-8"))
+                      ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\pathlib\__init__.py", line 787, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\pathlib\__init__.py", line 771, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'nofile.json'

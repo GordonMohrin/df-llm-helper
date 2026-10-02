@@ -1,0 +1,3 @@
+$ head -c 160 data/exceptions.jsonl   # (in a throw-away copy of the repo)
+{"example": true, "ts": "2026-01-01T00:00:00Z", "action": "FP09", "objects": [], "reason": "example (ignored): send stuck traders home via flags1.left", "player
+[exit 0]

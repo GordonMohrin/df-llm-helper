@@ -1,0 +1,13 @@
+$ python -m df_llm_helper.selftest --cov
+df-llm-helper self-test (without DF)
+  [ok] Digest fixtures/run5 <= 600 tokens: 73 tokens
+  [ok] Digest without change <= 30 tokens: 17 tokens
+  [ok] Load rules, no conflicts: 13 rules
+  [ok] Runbooks valid (>= 12): 19 runbooks
+  [ok] Diagnosis on fixtures: rb01_e18_pick, rb08_hospital, rb20_fertigwaren_lager, rb06_karawane
+  [ok] Load KB: 37 entries
+  [ok] Briefings <= 1500 tokens (12 scopes): max 599 tokens
+  [ok] Scenarios (10): all ok
+  [ok] Fair-play block: createitem blocked
+  [!] pytest not installed - only quick checks ran (pip install pytest after confirming with the player)
+[exit 0]

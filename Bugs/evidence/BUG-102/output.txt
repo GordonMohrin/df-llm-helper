@@ -1,0 +1,8 @@
+$ python -m df_llm_helper --mock C:\Users\admin\AppData\Local\Temp\dfh_core_3mya0023\fx --config C:\Users\admin\AppData\Local\Temp\dfh_core_3mya0023\cfg.yaml digest
+Status Y102 Hematite 12 | Pop 24 (7 idle 30%) | Drinks 76d Food 189d | Jobs 199 (dig 63, 3 digging) | fps 250 | PAUSE
+!! 5 enemies on map, Threat: {'n': 1, 'name': 'Snodub Emgen "Jackalluster", Goblin Thief'}; {'n': 1, 'name': 
+!! Hunger>40k: Tekkud414=47k, Eral3473=40k
+! Caravan Muboomon: Approaching, 3055 ticks (prepare trade)
+[exit=0]
+
+expected: '!! 5 enemies on map, Threat: Snodub Emgen "Jackalluster", Goblin Thief; Smunstu Ezrûamxu ...'

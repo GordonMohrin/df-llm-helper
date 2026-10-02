@@ -1,0 +1,12 @@
+$ python -m df_llm_helper --mock fixtures/run5 runbook show rb01_e18_pick
+rb01_e18_pick: Pickaxes are not picked up (E18) - militia miners
+Symptom: dig_jobs is not None and dig_jobs >= 30 and diggers * 20 < dig_jobs and len(miners) > diggers
+KB: e18_pick, e18_release
+Player consent needed: False
+ 1. cmd: claude/mil status, why: Check squad/leader; without a leader the squad accepts no add (then claude/mil create <name> <leader> --apply)
+ 2. cmd: claude/mil workmode {squad_id} on --apply, why: Uniform = pickaxe only, labor MINE, work detail Miners
+ 3. wait_s: 90
+ 4. cmd: claude/mil equip --squad {squad_id}, why: check assigned vs. carried
+Verify: pick_holders >= 2 or diggers >= 3
+Note: Do NOT run workmode repeatedly (it wipes assignments). If assigned but not picked up: release the stale item IDs (runbook rb01c_e18_release, the player's decision), then run workmode exactly ONCE more. A squad without a leader accepts no add.
+[exit 0]

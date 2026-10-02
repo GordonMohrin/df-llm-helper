@@ -1,0 +1,11 @@
+$ python -c "for several 'now' values print whether each FP11 entry would still be valid (fairplay.py find(): expires < now)"
+2026-10-02T00:00:00Z expires=2026-13-45             -> still valid: True
+2026-10-02T00:00:00Z expires=2026-02-30             -> still valid: False
+2026-10-02T00:00:00Z expires=2026-10-02             -> still valid: False
+2026-10-02T12:00:00Z expires=2026-13-45             -> still valid: True
+2026-10-02T12:00:00Z expires=2026-02-30             -> still valid: False
+2026-10-02T12:00:00Z expires=2026-10-02             -> still valid: False
+2026-10-03T00:00:00Z expires=2026-13-45             -> still valid: True
+2026-10-03T00:00:00Z expires=2026-02-30             -> still valid: False
+2026-10-03T00:00:00Z expires=2026-10-02             -> still valid: False
+[exit 0]

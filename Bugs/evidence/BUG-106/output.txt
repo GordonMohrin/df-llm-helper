@@ -1,0 +1,59 @@
+$ python -m df_llm_helper --mock fixtures/run5_live --config C:\Users\admin\AppData\Local\Temp\dfh_core_o5svekld\cfg.yaml heartbeat
+Heartbeat set
+[exit=0]
+
+
+===== DF unreadable: what do the safety commands say? =====
+$ python -m df_llm_helper --mock fixtures/run5_live --config C:\Users\admin\AppData\Local\Temp\dfh_core_o5svekld\cfg.yaml digest
+Status ?
+!! Query failed: claude/status: no fixture for 'claude/status' (check DF/dfhack-run)
+[exit=0]
+
+$ python -m df_llm_helper --mock fixtures/run5_live --config C:\Users\admin\AppData\Local\Temp\dfh_core_o5svekld\cfg.yaml tempo status
+Time lapse: off, fps ? (normal ?), running
+Guard: no blockers, 'tempo on' would be allowed
+[exit=0]
+
+$ python -m df_llm_helper --mock fixtures/run5_live --config C:\Users\admin\AppData\Local\Temp\dfh_core_o5svekld\cfg.yaml guard
+warn (tools/events.log missing (watcher is not writing))
+Target fps 100, time lapse allowed: True
+[exit=0]
+
+$ python -m df_llm_helper --mock fixtures/run5_live --config C:\Users\admin\AppData\Local\Temp\dfh_core_o5svekld\cfg.yaml tempo on --dry-run
+[dry] claude/tempo on (no blockers)
+[exit=0]
+
+$ python -m df_llm_helper --mock fixtures/run5_live --config C:\Users\admin\AppData\Local\Temp\dfh_core_o5svekld\cfg.yaml tempo on
+Time lapse on (claude/tempo on)
+[exit=0]
+
+
+===== same data, but readable and with real blockers (control) =====
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_o5svekld\cfg.yaml tempo status
+Time lapse: off, fps 250 (normal 250), paused
+Guard: blockers: caravan, supplies
+[exit=0]
+
+
+===== plan armor / plan supply with an unreadable game print zeros as if they were real =====
+$ python -m df_llm_helper --mock fixtures/run5_live --config C:\Users\admin\AppData\Local\Temp\dfh_core_o5svekld\cfg.yaml plan armor
+Quota 0 soldiers (now 0, missing 0); bars needed 0, available 0, missing 0
+[exit=0]
+
+$ python -m df_llm_helper --mock fixtures/run5_live --config C:\Users\admin\AppData\Local\Temp\dfh_core_o5svekld\cfg.yaml plan supply
+drink: stock 0, no shortage within the horizon
+food: stock 0, no shortage within the horizon
+[exit=0]
+
+
+===== the watcher step with an unreadable game: silent, exit 0, and out/waechter.alive is refreshed (guard then believes the watcher is alive) =====
+$ python -m df_llm_helper --mock fixtures/run5_live --config C:\Users\admin\AppData\Local\Temp\dfh_core_o5svekld\cfg.yaml waechter
+
+[exit=0]
+
+waechter.alive exists: True
+$ python -m df_llm_helper --mock fixtures/run5_live --config C:\Users\admin\AppData\Local\Temp\dfh_core_o5svekld\cfg.yaml guard
+Guard: all quiet
+Target fps 100, time lapse allowed: True
+[exit=0]
+

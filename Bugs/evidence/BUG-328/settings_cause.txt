@@ -1,0 +1,3 @@
+$ python -c "str(Path('prefs')/'backups'/'x').startswith('prefs/backups/')"
+prefs\backups\x | startswith("prefs/backups/") -> False
+[exit 0]

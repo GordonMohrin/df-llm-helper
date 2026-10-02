@@ -1,0 +1,7 @@
+lua\claude\bauprog.lua:83: L10 reading a tile without checking 'discovered' (designation.hidden) (warning)
+lua\claude\gesund.lua:200: L10 reading a tile without checking 'discovered' (designation.hidden) (warning)
+lua\claude\mood.lua:82: L10 reading a tile without checking 'discovered' (designation.hidden) (warning)
+lua\claude\mood.lua:213: L10 reading a tile without checking 'discovered' (designation.hidden) (warning)
+lua\claude\raster.lua:128: L10 reading a tile without checking 'discovered' (designation.hidden) (warning)
+5 findings (0 errors)
+exit=0

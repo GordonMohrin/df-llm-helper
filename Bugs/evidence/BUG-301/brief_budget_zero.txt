@@ -1,0 +1,6 @@
+$ python -m df_llm_helper --mock fixtures/run5 brief bau --budget 0
+# Briefing bau
+## Mission
+Layout (LAYOUT-run5.md, bau owns ALL coordinates): accesses, stairs, gates, refuge, workshop halls, farms, crypt, depot, stockpiles, zones. Check every site with claude/area.
+[... 13 more lines cut]
+[exit 0]

@@ -1,0 +1,18 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 brief bau
+# Briefing bau
+## Mission
+Layout (LAYOUT-run5.md, bau owns ALL coordinates): accesses, stairs, gates, refuge, workshop halls, farms, crypt, depot, stockpiles, zones. Check every site with claude/area.
+## Situation Y102 Hematite 12
+Unfinished buildings 7 (target < 5); Full stockpiles 5 (target 0); Dig jobs 63 (target -)
+## Known traps (python -m df_llm_helper kb get <id>)
+- [fertigwaren_lager] Crafts unsellable: no finished-goods stockpile with containers: Finished-goods stockpile (quickfort g) with bins near the workshops; bins need wood; tie MakeCrafts to storage space. Runbook rb20.
+- [quickfort_fallen] Quickfort traps (Git Bash, zone keys, duplicate zones): MSYS_NO_PATHCONV=1; zone keys m b h D B o T d; crypt blueprints only once; own grids in dfhack-config/blueprints/claude/.
+- [zuflucht_burrow] Alert burrow too small / never rebuild it during a fight: Burrow = beds+food+water+workshops+stockpiles, build ahead of time (claude/mil refuge).…
+- [hunger_erreichbarkeit] Hunger despite full meal stocks: Check paths/doors/burrow, Orderlies group, hospital. Runbook rb15.
+## Commands
+- claude/area z x y w h; claude/buildings; claude/dig z x1 y1 x2 y2 [mode]; quickfort run claude/<own>.csv -c x,y,z (MSYS_NO_PATHCONV=1)
+## Fair Play
+Fair play: player actions only (dig/build/zones/stockpiles/orders/squads/offices/trade, quickfort own grids). Forbidden: createitem, dig-now, build-now, reveal, prospect all, direct unit/item edits. Exceptions only with the player's yes.
+## Report
+Report <= 10 lines: 1) KPIs before->after 2) done (command -> effect) 3) blocked/needs 4) messages to scopes (python -m df_llm_helper bus post) 5) next pass. Update the memory.
+[exit 0]

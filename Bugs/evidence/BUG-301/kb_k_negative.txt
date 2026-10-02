@@ -1,0 +1,10 @@
+$ python -m df_llm_helper --mock fixtures/run5 kb search -k -1 pickaxe
+[e18_pick] E18: miners do not pick up pickaxes
+Cause: Only dwarves with a brought/assigned pick dig; free picks (often foreign=true from the wagon) are not picked up. work_weapons stays small.
+Fix: Militia squad 'Miners' (leader: claude/mil create <name> <id> --apply), claude/mil add <squad> <id> --apply, claude/mil workmode <squad> on --apply (uniform = pick only, labor MINE, group Miners). Verify: work_weapons/diggers rise within <= 90 s. Do not run workmode repeatedly (it wipes assignments). Runbook rb01_e18_pick.
+Source: SPEC appendix A1; session Run 5 (12 interventions 07:04-08:50)
++ [fairplay_foreign] Fair play: foreign flag on the embark tools
++ [e18_release] E18: pick assigned but not picked up (stale assignment)
++ [deadman_heartbeat] Deadman: game runs on without supervision
++ [makler_squad] Broker loses the trade job (squad/labors)
+[exit 0]

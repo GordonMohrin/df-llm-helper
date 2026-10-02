@@ -1,0 +1,17 @@
+
+===== A) a REAL (stale) alert.flag lies in the configured tools folder =====
+flag exists before: True
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_uha2ez3r\cfg.yaml autopilot
+stale_alert_flag: delete_flag flag:alert -> deleted
+stale_alert_flag: warn warn:alert.flag deleted after 238 min without -> alert.flag deleted after 238 min without danger (text: 11:46:50 [AMBUSH_SNATCHER
+[exit=0]
+
+flag exists after : False    state.db written: True
+-> a MOCK run deleted the real flag file and wrote its fixture data (pop 24, Y102) into the configured state.db
+
+===== B) control: --mock WITHOUT --config is isolated (runtime/mock, temp via DF_LLM_HELPER_HOME) =====
+$ python -m df_llm_helper --mock fixtures/run5 autopilot
+no action
+[exit=0]
+
+flag exists after control run (must be True): True

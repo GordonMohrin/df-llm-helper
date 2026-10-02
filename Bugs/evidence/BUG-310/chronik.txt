@@ -1,0 +1,6 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 journal chronik
+- 10-02 10:00 Emergency: Make rock floodgate (1) has been completed.; You have discovered a magma pool. (+1 more)
+- 10-02 10:10 Mood: Id Ozkaktun, militia captain has bestowed the name Nolethkib upon a iron battle axe!
+- 10-02 10:20 Death: 1 deaths: Urist McMiner has been found dead (? 1x)
+(coverage 100 % of the events)
+[exit 0]

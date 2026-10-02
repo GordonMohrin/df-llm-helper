@@ -1,0 +1,3 @@
+WAKE perimeter: forbidden access to the core at (99,94,z133) 1 tile -> seal (python -m df_llm_helper perimeter seal --dry-run)
+Accesses: 0 allowed, 1 forbidden (checked 12:03)
+  FORBIDDEN: (99,94,z133) 1 tile, bypasses the traps

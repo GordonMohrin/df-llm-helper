@@ -1,0 +1,3 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 exception add FP08 --objects 187405,187429 --reason 'E18 picks' --ja 'yes, do it'
+Exception registered: FP10 ['189175', '3738']
+[exit 0]

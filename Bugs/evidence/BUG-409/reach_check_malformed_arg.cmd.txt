@@ -1,0 +1,2 @@
+dfhack-run.exe claude/pilot_reach check 100 96 130 101,96,130 102,97,130+ 9999,9999,9999 foo -1,-1,-1
+exit=0 time=0.10s

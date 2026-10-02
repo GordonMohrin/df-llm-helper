@@ -1,0 +1,1 @@
+task given: 749 chars; task found in prompt: 400 chars; ends with ...'word word word word word word '

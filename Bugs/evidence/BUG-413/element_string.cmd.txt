@@ -1,0 +1,2 @@
+dfhack-run.exe claude/pilot_batch 'C:/Users/admin/claude gordons projects/dfpilot-public/Bugs/evidence/BUG-413/req_cmds_element_is_string.json'
+exit=0 time=0.10s

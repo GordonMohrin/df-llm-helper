@@ -1,0 +1,22 @@
+# autopilot run against a PRIVATE COPY of the live installation (tools folder + state.db copied; dfhack-run replaced by a proxy that passes reads to the real game and BLOCKS writes), 2026-10-02 12:12
+# -> the three service starts were blocked, so the verify checks must fail; the output does not tell pass from fail:
+$ python -m df_llm_helper --config <copy>.yaml autopilot
+stale_flag_generic: delete_flag flag:dig -> deleted
+stale_flag_generic: verify - -> not flags[item.name].exists
+stale_flag_generic: delete_flag flag:migranten -> deleted
+stale_flag_generic: verify - -> not flags[item.name].exists
+stale_flag_generic: delete_flag flag:notfall -> deleted
+stale_flag_generic: verify - -> not flags[item.name].exists
+stale_flag_generic: delete_flag flag:wirtschaft -> deleted
+stale_flag_generic: verify - -> not flags[item.name].exists
+stale_mood_flag: delete_flag flag:mood -> deleted
+food_flag_clear: delete_flag flag:food -> deleted
+food_flag_clear: verify - -> not flags['food'].exists
+service_restart: claude/arbeit start
+service_restart: verify - -> services[item.name].running == True        <- this check FAILED (writes blocked by the proxy)
+service_restart: claude/trinken start
+service_restart: verify - -> services[item.name].running == True        <- FAILED
+service_restart: claude/ueberwacher start
+service_restart: verify - -> services[item.name].running == True        <- FAILED
+[exit=0]
+(the next `cycle`/`digest` then printed: ! [autopilot] rule service_restart: check 'services[item.name].running == True' not satisfied after the action (3x). ...)

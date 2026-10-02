@@ -1,0 +1,4 @@
+{
+	"error": "Aufruf: start [modus] | stop | status | mode m | say \"text\" [prio] | show x y z \"text\" [prio] | show unit id \"text\" | hold [s] | release | on | off | clear | announce on|off",
+	"ok": false
+}

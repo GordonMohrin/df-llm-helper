@@ -1,0 +1,5 @@
+$ python -c "print size/U+FFFD/first lines of tmp_bug/scopes/essen.md"
+1586 bytes after compact (the command reported the size above)
+contains U+FFFD: True
+['# Kopf', '## Offen', '- F�sser pr�fen', '## Durchlauf 1 (short)', 'Zeile � � � � text', 'Zeile � � � � text']
+[exit 0]

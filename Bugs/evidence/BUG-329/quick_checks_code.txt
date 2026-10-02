@@ -1,0 +1,4 @@
+$ grep -n "Diagnosis on fixtures\|memory_text=None" df_llm_helper/selftest.py
+selftest.py:44: res.append(("Diagnosis on fixtures", True, ", ".join(h.runbook.id for h in diagnose(rbs, ctx)[:4])))
+selftest.py:48: worst = max(tokens(build_brief(sc, scopes_def=sd, ctx=ctx, snap=s, kb=kb, memory_text=None, inbox_lines=None,
+[exit 0]

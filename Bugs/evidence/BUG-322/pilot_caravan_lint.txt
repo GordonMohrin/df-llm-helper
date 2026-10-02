@@ -1,0 +1,4 @@
+$ python -m df_llm_helper --mock fixtures/run5 lint lua/pilot_caravan.lua
+lua\pilot_caravan.lua:21: L07 setting unit 'left' (stuck traders, exception required)
+1 findings (1 errors)
+[exit 1]

@@ -1,0 +1,113 @@
+----- bedroom_zone.csv
+#zone label(bz) Schlafzimmer
+"b{name=""Verwalter-Schlafzimmer"" assigned_unit=manager}(3x3)"
+
+----- essen3_farm.csv
+#build label(farm) Farmhalle Felder essen
+p(3x3),,,p(3x3),,,p(3x3),,,p(3x3),,
+,,
+,,
+,,,,,,,,,,,,
+p(3x3),,,p(3x3),,,p(3x3),,,p(3x3),,
+,,
+,,
+
+----- essen4_fischzone.csv
+#zone label(fisch3)
+f(5x4)
+
+----- essen5_train.csv
+#zone label(train)
+t{name="Tiertraining"}(1x4)
+
+----- graeber.csv
+#zone label(gz) Einzelgraeber
+T,,T,,T,,T,,T
+,
+T,,T,,T,,T,,T
+,
+T,,T,,T,,T,,T
+,
+T,,T,,T,,T,,T
+
+----- handel_jeweler.csv
+#build jeweler
+wj,wj,wj
+wj,wj,wj
+wj,wj,wj
+
+----- handel_weide.csv
+#zone Weide fuer Nutztiere
+n,n,n,n,n
+n,n,n,n,n
+n,n,n,n,n
+n,n,n,n,n
+
+----- hosp_pond.csv
+#zone label(pond) Krankenhaus-Zisterne
+p{pond=true name="Hospital cistern 2"}
+
+----- nest13.csv
+#zone label(n13) Nistkasten
+"n{name=""Nestbox 13""}","n{name=""Nestbox 14""}"
+
+----- office.csv
+#zone label(office) Verwalterbuero
+"o{name=""Verwalterbuero"" assigned_unit=manager}(3x1)"
+
+$ python -m df_llm_helper plan blueprint "C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-109\blueprints\bedroom_zone.csv" "C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-109\blueprints\essen3_farm.csv" "C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-109\blueprints\essen4_fischzone.csv" "C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-109\blueprints\essen5_train.csv" "C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-109\blueprints\graeber.csv" "C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-109\blueprints\handel_jeweler.csv" "C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-109\blueprints\handel_weide.csv" "C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-109\blueprints\hosp_pond.csv" "C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-109\blueprints\nest13.csv" "C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-109\blueprints\office.csv"
+C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-109\blueprints\bedroom_zone.csv: 
+  2:1 error E_CELL invalid character '"' in key '"b' (cell '"b{name=""Verwalter-Schlafzimm')
+C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-109\blueprints\essen3_farm.csv: 
+  3:1 warning W_COLS 3 columns instead of 12
+  4:1 warning W_COLS 3 columns instead of 12
+  5:1 warning W_COLS 13 columns instead of 12
+  7:1 warning W_COLS 3 columns instead of 12
+  8:1 warning W_COLS 3 columns instead of 12
+C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-109\blueprints\essen4_fischzone.csv: 
+  2:1 error E_ZONEKEY unknown zone key 'f' (allowed: BDTabdhmo)
+C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-109\blueprints\essen5_train.csv: 
+  2:1 error E_ZONEKEY unknown zone key 't' (allowed: BDTabdhmo)
+C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-109\blueprints\graeber.csv: 
+  3:1 warning W_COLS 2 columns instead of 9
+  5:1 warning W_COLS 2 columns instead of 9
+  7:1 warning W_COLS 2 columns instead of 9
+C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-109\blueprints\handel_jeweler.csv: 
+  2:2 error E_OVERLAP 'wj' overlaps 'wj' (line 2, column 1) on level 0
+  2:3 error E_OVERLAP 'wj' overlaps 'wj' (line 2, column 1) on level 0
+  3:1 error E_OVERLAP 'wj' overlaps 'wj' (line 2, column 1) on level 0
+  3:2 error E_OVERLAP 'wj' overlaps 'wj' (line 2, column 1) on level 0
+  3:3 error E_OVERLAP 'wj' overlaps 'wj' (line 2, column 1) on level 0
+  4:1 error E_OVERLAP 'wj' overlaps 'wj' (line 2, column 1) on level 0
+  4:2 error E_OVERLAP 'wj' overlaps 'wj' (line 2, column 1) on level 0
+  4:3 error E_OVERLAP 'wj' overlaps 'wj' (line 2, column 1) on level 0
+C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-109\blueprints\handel_weide.csv: 
+  2:1 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  2:2 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  2:3 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  2:4 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  2:5 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  3:1 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  3:2 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  3:3 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  3:4 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  3:5 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  4:1 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  4:2 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  4:3 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  4:4 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  4:5 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  5:1 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  5:2 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  5:3 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  5:4 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  5:5 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-109\blueprints\hosp_pond.csv: 
+  2:1 error E_ZONEKEY unknown zone key 'p' (allowed: BDTabdhmo)
+C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-109\blueprints\nest13.csv: 
+  2:1 error E_CELL invalid character '"' in key '"n' (cell '"n{name=""Nestbox 13""}"')
+  2:2 error E_CELL invalid character '"' in key '"n' (cell '"n{name=""Nestbox 14""}"')
+C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-109\blueprints\office.csv: 
+  2:1 error E_CELL invalid character '"' in key '"o' (cell '"o{name=""Verwalterbuero"" ass')
+[exit=1]
+

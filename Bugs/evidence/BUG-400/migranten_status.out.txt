@@ -1,0 +1,57 @@
+{
+	"betten": 326,
+	"buerger": 174,
+	"caravan": {
+		"anzahl": 0,
+		"haendler": []
+	},
+	"datum": {
+		"day": 27,
+		"month": "Granite",
+		"season": "Spring",
+		"text": "27. Granite, Jahr 118",
+		"year": 118,
+		"year_tick": 31871
+	},
+	"diagnose": [ "ZUGAENGE: 24 Randpunkt-Ziel-Paare NICHT erreichbar", "1 Tueren verboten", "POPULATIONSLIMIT erreicht" ],
+	"einheiten_in_liste": 1565,
+	"erreichbarkeit": {
+		"liste": [ "(0,95,133)->R2", "(0,95,133)->R1", "(0,95,133)->R4", "(95,0,129)->R2", "(95,0,129)->R1", "(95,0,129)->R4", "(191,95,129)->R2", "(191,95,129)->R1", "(191,95,129)->R4", "(95,191,135)->R2", "(95,191,135)->R1", "(95,191,135)->R4", "(47,0,129)->R2", "(47,0,129)->R1", "(47,0,129)->R4", "(143,191,135)->R2", "(143,191,135)->R1", "(143,191,135)->R4", "(0,47,129)->R2", "(0,47,129)->R1", "(0,47,129)->R4", "(191,143,133)->R2", "(191,143,133)->R1", "(191,143,133)->R4" ],
+		"nicht_erreichbar": 24,
+		"randpunkte": 8
+	},
+	"fort": {
+		"ausgegrabene_kacheln": 64004,
+		"exportiert": 54898,
+		"gefaehrlichkeit": 3,9375,
+		"importiert": 402437,
+		"migrant_wave_idx": 0,
+		"pop": 174,
+		"tote_gesamt": 19,
+		"tote_hist": [ 1, 2, 2, 3, 3 ],
+		"wohlstand_gesamt": 1126365
+	},
+	"heimat_bericht": {
+		"gefaehrlichkeit": 5,9375,
+		"hinweis": "Stand der LETZTEN Karawanen-Abreise (nur dann aktualisiert)",
+		"importiert": 403518,
+		"migrant_wave_idx": 0,
+		"pop": 174,
+		"tote_hist": [ 2, 2, 3 ],
+		"veraltet": false,
+		"wohlstand": 1085241
+	},
+	"jahreszeit": {
+		"hinweis": "Migrantenentscheidung zu Fruehling/Sommer/Herbst-Beginn (Gamelog \"attracted no migrants this season\"), im Winter keine",
+		"season": 0,
+		"ticks_bis_naechste": 68929
+	},
+	"limits": {
+		"population_cap": 155,
+		"strict_population_cap": 300,
+		"visitor_cap": 300
+	},
+	"meeting_halls": 10,
+	"timed_events": [ "Migrants", "EvaluateAttackAndSendImmediateArmy", "Megabeast", "WildlifeCurious", "WildlifeCurious", "WildlifeCurious", "WildlifeFlier" ],
+	"tueren_verboten": 1
+}

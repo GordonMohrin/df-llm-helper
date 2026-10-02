@@ -1,0 +1,2 @@
+dfhack-run.exe claude/mil enemies
+exit=0 time=0.07s

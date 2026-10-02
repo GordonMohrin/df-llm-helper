@@ -1,0 +1,34 @@
+{
+	"alert_dz": 10,
+	"alert_range": 45,
+	"aquifer_confirmed": [],
+	"aquifer_gesehen_z": [],
+	"dig_min_z": 104,
+	"embark": {
+		"tick": 263900,
+		"year": 100
+	},
+	"feinde_nah": 0,
+	"feinde_slowmo": 0,
+	"fort": {
+		"x": 96,
+		"y": 96,
+		"z": 133
+	},
+	"fps_ist": 250,
+	"normal_fps": 250,
+	"run5_unset": false,
+	"slowmo_aktiv": false,
+	"slowmo_fps": 50,
+	"slowmo_range": 90,
+	"surface_z": 133,
+	"suspect": {
+		"bottom": 131,
+		"top": 132
+	},
+	"timestream": true,
+	"unset": [],
+	"z_max": 145,
+	"z_min": 101,
+	"zuflucht_platzhalter": false
+}

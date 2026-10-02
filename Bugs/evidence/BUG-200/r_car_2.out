@@ -1,0 +1,11 @@
+  ok claude/handel select --live
+  ok claude/handel confirm --live
+  ok claude/handel accept --live
+  ok claude/handel finish --live
+  ok claude/handel release --live
+  ok claude/advance run
+  ok claude/advance run
+Caravan: DONE (trade)
+Must-have goods in offer: wood 62, food 155
+approved: Must-have goods: food; ratio 2.43
+Trade completed

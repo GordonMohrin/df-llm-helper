@@ -1,0 +1,9 @@
+KRITISCH 11:20:32 [CITIZEN_DEATH] ├«ton Uristelbel, Gem Cutter has been struck down.
+KRITISCH 13:46:47 [MASTERPIECE_CRAFTED] Kikrost Kilrudbuk├¿t has created a masterpiece Γÿ╝bronze figurine of goblinsΓÿ╝!
+KRITISCH 13:49:33 [CITIZEN_DEATH] Reg Sefolfikod, Carpenter has been found dead, dehydrated.
+KRITISCH 14:19:51 [COMBAT_BLOCK] The goblin thief strikes at the swordsdwarf but the shot is blocked!
+KRITISCH 17:02:00 [NO_BREAK_GRIP] The goblin hammerman is unable to break the grip of The Elite Wrestler's right upper arm on The goblin hammerman's right upper leg!
+KRITISCH 17:02:04 [RESOLVE_SHARED_ITEMS] The goblin spearman gains possession of the ({silver spear}).
+KRITISCH 00:12:33 [VOMIT] The goblin thief vomits.
+KRITISCH 05:14:08 [MASTERPIECE_CRAFTED] Ral Stukosidräth has created a masterpiece ☼cherry wood figurine of goblins☼!
+KRITISCH 08:42:41 [DODGE_FLYING_OBJECT] The goblin Pikemaster jumps out of the goblin Pikemaster's flight path!

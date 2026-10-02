@@ -1,0 +1,513 @@
+SAME advance.lua
+DIFF 2 aemter.lua
+-local LOG = reqscript('claude/util').home() .. '/tools/out/aemter-log.json'
++local LOG = 'C:/Users/admin/claude gordons projects/dwarf-fortress/tools/out/aemter-log.json'
+SAME alert.lua
+DIFF 5 arbeit.lua
+-{ 'Jewelers', 6, { { 'cut gems', function(s) return (s.rough or 0) >= 5 end } } },
++{ 'Jewelers', 6, { { 'cut gems', function(s) return (s.rough or 0) >= 13 end } } },
+-elseif L and restore and not u.status.labors[L] then u.status.labors[L] = true; n = n + 1 end
++elseif L and restore and name ~= 'FISH' and not u.status.labors[L] then u.status.labors[L] = true; n = n + 1 end
++if SUP.no_engrave then en, enw = {}, {} end
+SAME area.lua
+DIFF 2 auslastung.lua
+-local BASE = reqscript('claude/util').home() .. '/'
++local BASE = 'C:/Users/admin/claude gordons projects/dwarf-fortress/'
+SAME bauhelp.lua
+DIFF 4 bauprog.lua
+-local STATE = reqscript('claude/util').home() .. '/state/bauprog.json'
++local STATE = 'C:/Users/admin/claude gordons projects/dwarf-fortress/state/bauprog.json'
+-local f = loadfile(reqscript('claude/util').home() .. '/state/bauprog_extra.lua')
++local f = loadfile('C:/Users/admin/claude gordons projects/dwarf-fortress/state/bauprog_extra.lua')
+SAME buildings.lua
+SAME cam.lua
+DIFF 8 config.lua
+-SMOOTH_SUPPLY = { x1 = 60, x2 = 150, y1 = 80, y2 = 130, z1 = 124, z2 = 130, ax = 101, ay = 96, az = 130, batch = 80, min_open = 40 }
++SMOOTH_SUPPLY = { x1 = 60, x2 = 126, y1 = 100, y2 = 131, z1 = 116, z2 = 116, ax = 99, ay = 122, az = 116, batch = 60, min_open = 30, no_engrave = true }
+-TIMESTREAM = false
+-TIMESTREAM_FPS = 500
++TIMESTREAM = true
++TIMESTREAM_FPS = 200
+-SCHACHT_OFFEN_FLAG = reqscript('claude/util').home() .. '/tools/schacht.offen'
++SCHACHT_OFFEN_FLAG = 'C:/Users/admin/claude gordons projects/dwarf-fortress/tools/schacht.offen'
+SAME dig.lua
+DIFF 98 erzdig.lua
+-local gref = dfhack.maps.getWalkableGroup(xyz2pos(anc.x, anc.y, anc.z))
++local grefs = {}
++for _, p in ipairs({ { anc.x, anc.y, anc.z }, { 99, 94, 130 } }) do local g = dfhack.maps.getWalkableGroup(xyz2pos(p[1], p[2], p[3])) if g ~= 0 then grefs[g] = true end end
+-if dfhack.maps.getWalkableGroup(xyz2pos(x + dx, y + dy, bz)) == gref then ok = true end
++if grefs[dfhack.maps.getWalkableGroup(xyz2pos(x + dx, y + dy, bz))] then ok = true end
++function spur(ore, zmin, zmax, maxTiles, dry)
++local mx, my = dfhack.maps.getTileSize()
++local anc = cfg.anchor()
++local grefs = {}
++for _, p in ipairs({ { anc.x, anc.y, anc.z }, { 99, 94, 130 } }) do local g = dfhack.maps.getWalkableGroup(xyz2pos(p[1], p[2], p[3])) if g ~= 0 then grefs[g] = true end end
++local function isgem(raw)
++if ore == 'GEMS' then return raw.material.flags.IS_GEM end
++if ore == 'ALL' then return #raw.metal_ore.mat_index > 0 end
++return raw.id == ore
++end
++local function wall_ok(x, y, z)
++local blk = dfhack.maps.getTileBlock(x, y, z)
++if not blk then return false end
++local d = blk.designation[x % 16][y % 16]
++if d.hidden or d.water_table or in_fortbox(x, y, z) or cfg.is_sperre(x, y, z) then return false end
++return df.tiletype_shape[df.tiletype.attrs[blk.tiletype[x % 16][y % 16]].shape] == 'WALL'
++end
++local function reach(x, y, z)
++return walkable(x, y, z) and grefs[dfhack.maps.getWalkableGroup(xyz2pos(x, y, z))]
++end
++local plans = {}
++for bz = zmin, zmax do
++if bz >= cfg.dig_min_z(cfg.aquifer_seen()) then
++for bx = 0, mx // 16 - 1 do for by = 0, my // 16 - 1 do
++local blk = dfhack.maps.getBlock(bx, by, bz)
++if blk then for _, ev in ipairs(blk.block_events) do
++if df.block_square_event_mineralst:is_instance(ev) then
++local raw = df.inorganic_raw.find(ev.inorganic_mat)
++if raw and isgem(raw) then
++for ey = 0, 15 do local bits = ev.tile_bitmask.bits[ey]
++if bits ~= 0 then for ex = 0, 15 do if bits & (1 << ex) ~= 0 then
++local x, y = blk.map_pos.x + ex, blk.map_pos.y + ey
++local d = blk.designation[ex][ey]
++if d.dig == DD.No and wall_ok(x, y, bz) then
++local direct = false
++for dx = -1, 1 do for dy = -1, 1 do if reach(x + dx, y + dy, bz) then direct = true end end end
++if not direct then
++local prev, frontier, found = { [x .. ',' .. y] = false }, { { x, y } }, nil
++for depth = 1, 3 do
++local nxt = {}
++for _, p in ipairs(frontier) do
++for dx = -1, 1 do for dy = -1, 1 do
++local nx, ny = p[1] + dx, p[2] + dy
++local key = nx .. ',' .. ny
++if not found and prev[key] == nil then
++if reach(nx, ny, bz) then found = p
++elseif wall_ok(nx, ny, bz) then prev[key] = p[1] .. ',' .. p[2] nxt[#nxt + 1] = { nx, ny } end
++end
++end end
++if found then break end
++end
++if found then
++local path, cur = {}, found
++while cur do path[#path + 1] = { cur[1], cur[2], bz } local pk = prev[cur[1] .. ',' .. cur[2]] if pk then local sx, sy = pk:match('(-?%d+),(-?%d+)') cur = { tonumber(sx), tonumber(sy) } else cur = nil end end
++plans[#plans + 1] = { path = path, len = #path }
++break
++end
++frontier = nxt
++end
++end
++end
++end end end
++end
++end
++end
++end end
++end end
++end
++end
++table.sort(plans, function(a, b) return a.len < b.len end)
++local set, cnt = {}, 0
++for _, pl in ipairs(plans) do
++local add = {}
++for _, t in ipairs(pl.path) do local k = t[1] .. ',' .. t[2] .. ',' .. t[3] if not set[k] then add[#add + 1] = t end end
++if cnt + #add > maxTiles then break end
++for _, t in ipairs(add) do
++set[t[1] .. ',' .. t[2] .. ',' .. t[3]] = true
++cnt = cnt + 1
++if not dry then
++local blk = dfhack.maps.getTileBlock(t[1], t[2], t[3])
++blk.designation[t[1] % 16][t[2] % 16].dig = DD.Default
++blk.flags.designated = true
++end
++end
++end
++return cnt, #plans
++end
+-if a[1] == 'purge' then
++if a[1] == 'spur' then
++local dry = false for _, v in ipairs(a) do if v == '--dry' then dry = true end end
++local n, k = spur((a[2] or 'GEMS'):upper(), tonumber(a[3]) or 104, tonumber(a[4]) or 133, tonumber(a[5]) or 100, dry)
++util.emit({ tiles = n, plaene = k, dry = dry })
++elseif a[1] == 'purge' then
+DIFF 4 essen.lua
+-local STATE = reqscript('claude/util').home() .. '/state/essen.json'
++local STATE = 'C:/Users/admin/claude gordons projects/dwarf-fortress/state/essen.json'
+-if not banned then set_ban(true) banned = true table.insert(acts, 'ban PH-Kochen (player rule)') end
++if not banned then set_ban(true) banned = true table.insert(acts, 'ban PH-Kochen (Gordon-Regel)') end
+SAME felder.lua
+DIFF 2 gefahr.lua
+-local TOOLS = reqscript('claude/util').home() .. '/tools/'
++local TOOLS = 'C:/Users/admin/claude gordons projects/dwarf-fortress/tools/'
+SAME geo.lua
+DIFF 4 gesund.lua
+-local DIR = reqscript('claude/util').home() .. '/tools/out/'
++local DIR = 'C:/Users/admin/claude gordons projects/dwarf-fortress/tools/out/'
+-local BP = dfhack.getDFPath() .. '/dfhack-config/blueprints/claude/r3g_slab1.csv'
++local BP = 'E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3g_slab1.csv'
+DIFF 33 handel.lua
+-local BASE = reqscript('claude/util').home() .. '/'
++local BASE = 'C:/Users/admin/claude gordons projects/dwarf-fortress/'
++local remain = {}
++for ty, _ in pairs(R.keep or {}) do
++local lst = df.global.world.items.other[ty]
++if lst then
++local n = 0
++for _, it in ipairs(lst) do if not it.flags.trader then n = n + 1 end end
++remain[ty] = n
++end
++end
++local function keep_ok(s)
++local k = R.keep and R.keep[s.type]
++if not k or remain[s.type] == nil then return true end
++if remain[s.type] <= k then return false end
++remain[s.type] = remain[s.type] - 1
++return true
++end
+-if S + s.value <= need * (1 + R.overshoot_tol) or #chosen_sell == 0 then
++if (S + s.value <= need * (1 + R.overshoot_tol) or #chosen_sell == 0) and keep_ok(s) then
+-if not used and S + s.value <= need * (1 + R.overshoot_tol) then
++if not used and S + s.value <= need * (1 + R.overshoot_tol) and keep_ok(s) then
++if not hit then
++for _, m in ipairs(find_text('Trade', rows)) do
++if m.y >= y1 and m.y <= y2 then hit = true; cx, cy = (m.x + m.x2) // 2, m.y end
++end
++end
+-return emit({ ok = true, note = 'kein DFHack-Dialog offen (Handel evtl. schon durch)', focus = focus_list() })
+-end
+-if not screen_has('trade the selected goods') then
++return emit({ ok = false, note = 'kein DFHack-Dialog offen (Bestaetigung nicht erschienen)', focus = focus_list() })
++end
++if not (screen_has('Confirm trade') or screen_has('trade the selected')) then
+NOLIVE C:/Users/admin/claude gordons projects/dfpilot-public/lua/claude/killorder.lua
+SAME kohle.lua
+DIFF 19 material.lua
+-{ key = 'ARMOR:ITEM_ARMOR_BREASTPLATE', job = 'MakeArmor', bars = 3, t1 = 9, t2 = 9 },
+-{ key = 'HELM:ITEM_HELM_HELM', job = 'MakeHelm', bars = 1, t1 = 9, t2 = 9 },
+-{ key = 'WEAPON:ITEM_WEAPON_AXE_BATTLE', job = 'MakeWeapon', bars = 1, t1 = 9, t2 = 9 },
+-{ key = 'SHIELD:ITEM_SHIELD_SHIELD', job = 'MakeShield', bars = 2, t1 = 9, t2 = 9 },
+-{ key = 'PANTS:ITEM_PANTS_GREAVES', job = 'MakePants', bars = 2, t1 = 9, t2 = 9 },
+-{ key = 'SHOES:ITEM_SHOES_BOOTS', job = 'MakeShoes', bars = 1, t1 = 18, t2 = 18 },
+-{ key = 'GLOVES:ITEM_GLOVES_GAUNTLETS', job = 'MakeGloves', bars = 1, t1 = 18, t2 = 18 },
++{ key = 'ARMOR:ITEM_ARMOR_BREASTPLATE', job = 'MakeArmor', bars = 3, t1 = 16, t2 = 24 },
++{ key = 'HELM:ITEM_HELM_HELM', job = 'MakeHelm', bars = 1, t1 = 16, t2 = 24 },
++{ key = 'WEAPON:ITEM_WEAPON_AXE_BATTLE', job = 'MakeWeapon', bars = 1, t1 = 16, t2 = 18 },
++{ key = 'SHIELD:ITEM_SHIELD_SHIELD', job = 'MakeShield', bars = 2, t1 = 16, t2 = 24 },
++{ key = 'PANTS:ITEM_PANTS_GREAVES', job = 'MakePants', bars = 2, t1 = 16, t2 = 24 },
++{ key = 'SHOES:ITEM_SHOES_BOOTS', job = 'MakeShoes', bars = 1, t1 = 32, t2 = 48 },
++{ key = 'GLOVES:ITEM_GLOVES_GAUNTLETS', job = 'MakeGloves', bars = 1, t1 = 32, t2 = 48 },
+-local p = reqscript('claude/util').home() .. '/state/material.json'
++local p = 'C:/Users/admin/claude gordons projects/dwarf-fortress/state/material.json'
+-if not f.melt and (mat_id(it) == 'IRON' or mat_id(it) == 'STEEL') then
++local usable = f.in_inventory or not (f.forbid or (f.foreign and f.on_ground))
++if usable and not f.melt and (mat_id(it) == 'IRON' or mat_id(it) == 'STEEL') then
+DIFF 2 migranten.lua
+-local TOOLS = reqscript('claude/util').home() .. '/tools/'
++local TOOLS = 'C:/Users/admin/claude gordons projects/dwarf-fortress/tools/'
+DIFF 26 mil.lua
+-local LOG = reqscript('claude/util').home() .. '/tools/out/mil.log'
++local LOG = 'C:/Users/admin/claude gordons projects/dwarf-fortress/tools/out/mil.log'
+-local KILL_SCRIPT = dfhack.getDFPath() .. '/hack/scripts/claude/killorder.lua'
++local KILL_SCRIPT = 'C:/Users/admin/claude gordons projects/dwarf-fortress/tools/killorder.lua'
+-local f = io.open(reqscript('claude/util').home() .. '/tools/out/mil-tabelle.txt', 'w')
++local f = io.open('C:/Users/admin/claude gordons projects/dwarf-fortress/tools/out/mil-tabelle.txt', 'w')
++elseif cmd == 'ammo' then
++local s = find_squad(tonumber(pos[1]))
++if not s then out({ error = 'usage: ammo <squad_id> [amount] [subtype] [--apply]' }) return end
++local amount, sub = tonumber(pos[2]) or 25, tonumber(pos[3]) or 0
++local plan = { squad = s.id, amount = amount, subtype = sub, vorhanden = #s.ammo.ammunition, dry = dry }
++if dry then out(plan) return end
++for i = #s.ammo.ammunition - 1, 0, -1 do local o = s.ammo.ammunition[i] s.ammo.ammunition:erase(i) pcall(function() o:delete() end) end
++local sp = df.squad_ammo_spec:new()
++sp.item_type, sp.item_subtype = df.item_type.AMMO, sub
++sp.material_class, sp.mattype, sp.matindex = -1, -1, -1
++sp.amount = amount
++sp.flags.use_combat, sp.flags.use_training = true, true
++s.ammo.ammunition:insert('#', sp)
++s.ammo.update.ammo = true
++df.global.plotinfo.equipment.update.ammo, df.global.plotinfo.equipment.update.quiver = true, true
++log('ammo squad ' .. s.id .. ' ' .. amount .. 'x subtype ' .. sub)
++plan.applied = true
++out(plan)
+-out({ error = 'unbekannt: ' .. tostring(cmd), usage = 'status|report|equip|routines|enemies|plan|train|station|kill|release|create|add|remove|uniform|workmode|pickfix|barracks|update|refuge|guard' })
++out({ error = 'unbekannt: ' .. tostring(cmd), usage = 'status|report|equip|routines|enemies|plan|train|station|kill|release|create|add|remove|uniform|workmode|pickfix|ammo|barracks|update|refuge|guard' })
+DIFF 12 mood.lua
+-local FLAG = reqscript('claude/util').home() .. '/tools/mood.flag'
+-local LOG = reqscript('claude/util').home() .. '/tools/out/mood.log'
+-local BPDIR = dfhack.getDFPath() .. '/dfhack-config/blueprints/claude/'
+-MIN = { metall = 3, rohgem = 3, schliffgem = 2, knochen = 5, holz = 10, stein = 5, leder = 3, stoff = 3, seide = 2 }
++local FLAG = 'C:/Users/admin/claude gordons projects/dwarf-fortress/tools/mood.flag'
++local LOG = 'C:/Users/admin/claude gordons projects/dwarf-fortress/tools/out/mood.log'
++local BPDIR = 'E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/'
++MIN = { metall = 3, rohgem = 12, schliffgem = 10, knochen = 5, holz = 14, stein = 5, leder = 3, stoff = 3, seide = 3 }
+-return not (f.forbid or f.in_job or f.owned or f.rotten or f.in_inventory or f.trader or f.garbage_collect or f.removed
++return not (f.forbid or f.in_job or f.owned or f.rotten or f.trader or f.garbage_collect or f.removed
+-if usable(f) then
++if usable(f) and not (f.in_inventory and dfhack.items.getHolderUnit(it)) then
+DIFF 63 muell.lua
+-local function is_fort(z, x, y) return z <= 131 and x >= 40 and x <= 150 and y >= 60 and y <= 130 end
++local function is_fort(z, x, y) return z <= 135 and x >= 40 and x <= 150 and y >= 60 and y <= 130 end
++local dzones = {}
+-if b:getType() == df.building_type.Civzone and df.civzone_type[b.type] == 'Dump' then dumps = dumps + 1 end
++if b:getType() == df.building_type.Civzone and df.civzone_type[b.type] == 'Dump' then dumps = dumps + 1; dzones[#dzones + 1] = b end
++end
++local function in_dumpzone(x, y, z)
++for _, b in ipairs(dzones) do
++if z == b.z and x >= b.x1 and x <= b.x2 and y >= b.y1 and y <= b.y2 then return true end
++end
++return false
+-local by, byz, total, dumped = {}, {}, 0, 0
++local by, byz, total, dumped, stapel = {}, {}, 0, 0, 0
+-if ok then
++if ok and in_dumpzone(x, y, z) then
++stapel = stapel + 1
++elseif ok then
+-util.emit({ lose_stapel = total, davon_dump_markiert = dumped, dump_zonen = dumps, typen = table.concat(s, ' '), boulder_je_z = table.concat(zs, ' ') })
++util.emit({ lose_stapel = total, auf_stapelpunkt_entsorgt = stapel, davon_dump_markiert = dumped, dump_zonen = dumps, typen = table.concat(s, ' '), boulder_je_z = table.concat(zs, ' ') })
+-local n = tonumber(a[2]) or 500
+-local zmin, zmax = tonumber(a[3]) or 115, tonumber(a[4]) or 120
+-if dumps == 0 then util.emit({ error = 'keine Dump-Zone vorhanden' }) return end
++local n = tonumber(a[2]) or 150
++local zones = {}
++for _, b in ipairs(df.global.world.buildings.all) do
++if b:getType() == df.building_type.Civzone and df.civzone_type[b.type] == 'Dump' then
++local c = xyz2pos(math.floor((b.x1 + b.x2) / 2), math.floor((b.y1 + b.y2) / 2), b.z)
++local g = dfhack.maps.getWalkableGroup(c)
++zones[#zones + 1] = { x = c.x, y = c.y, z = c.z, g = g }
++end
++end
++if #zones == 0 then util.emit({ error = 'keine Dump-Zone vorhanden' }) return end
++local fr = df.global.plotinfo.race_id
++local cand, skipped = {}, { dwarf = 0, unreachable = 0 }
+-if m >= n then break end
++local t = IT[it:getType()]
++if t == 'CORPSE' or t == 'CORPSEPIECE' or t == 'REMAINS' then
+-local t = IT[it:getType()]
+-if ((t == 'CORPSE' or t == 'CORPSEPIECE' or t == 'REMAINS') and is_fort(z, x, y)) then
+-it.flags.dump = true
+-m = m + 1
++if t ~= 'REMAINS' and it.race == fr then skipped.dwarf = skipped.dwarf + 1
++else
++local g = dfhack.maps.getWalkableGroup(xyz2pos(x, y, z))
++local best
++for _, zn in ipairs(zones) do
++if g ~= 0 and g == zn.g then
++local d = math.abs(zn.x - x) + math.abs(zn.y - y) + 3 * math.abs(zn.z - z)
++if not best or d < best then best = d end
++end
++end
++if best then cand[#cand + 1] = { it = it, d = best, t = t } else skipped.unreachable = skipped.unreachable + 1 end
+-util.emit({ marked = m, vorher_markiert = pend })
++table.sort(cand, function(p, q) return p.d < q.d end)
++local by = {}
++for i = 1, math.min(n, #cand) do
++cand[i].it.flags.dump = true
++m = m + 1
++by[cand[i].t] = (by[cand[i].t] or 0) + 1
++end
++util.emit({ marked = m, vorher_markiert = pend, kandidaten_erreichbar = #cand, uebersprungen = skipped, je_typ = by,
++naechster_rest_dist = cand[n + 1] and cand[n + 1].d or nil })
++end
+DIFF 8 orders.lua
+-local STATE = reqscript('claude/util').home() .. '/state/orders.json'
++local STATE = 'C:/Users/admin/claude gordons projects/dwarf-fortress/state/orders.json'
+-cond = function(x) return { wood(2), less(x.beds_cap, 'BED') } end,
++cond = function(x) return { wood(14), less(x.beds_cap, 'BED') } end,
+-text = 'Steinbecher (Trinken aus Bechern, Stimmung; 1 je Buerger, Ziel 80 Buerger): < 60' },
++text = 'Steinbecher (Trinken aus Bechern, Stimmung; 1 je Buerger, Ziel 80 Buerger): < 60 (D13)' },
+-cond = function() return { C('AtLeast', 40, 'SMALLGEM') } end,
++cond = function() return { C('AtLeast', 120, 'SMALLGEM') } end,
+SAME ores.lua
+DIFF 2 pickfix.lua
+-local LOG = reqscript('claude/util').home() .. '/tools/out/mil.log'
++local LOG = 'C:/Users/admin/claude gordons projects/dwarf-fortress/tools/out/mil.log'
+SAME pilot_batch.lua
+SAME pilot_wd.lua
+SAME positions.lua
+SAME probe.lua
+SAME raster.lua
+DIFF 2 report.lua
+-local path = reqscript('claude/util').home() .. '/metrics.csv'
++local path = 'C:/Users/admin/claude gordons projects/dwarf-fortress/metrics.csv'
+SAME schacht.lua
+DIFF 83 schau.lua
+-local TOOLS = reqscript('claude/util').home() .. '/tools/'
++local TOOLS = 'C:/Users/admin/claude gordons projects/dwarf-fortress/tools/'
+-local PROFILE_FILE = TOOLS .. 'schau_profile.json'
+-local function prof_num(k, d)
+-local v = S.profile and tonumber(S.profile[k])
+-if v == nil then return d end
+-return v
+-end
+-function load_profile()
+-local f = io.open(PROFILE_FILE, 'r')
+-if not f then return false, 'no profile file ' .. PROFILE_FILE end
+-local raw = f:read('*a')
+-f:close()
+-local ok, p = pcall(function() return require('json').decode(raw) end)
+-if not ok or type(p) ~= 'table' or type(p.job_weights) ~= 'table' then return false, 'profile file unreadable' end
+-local jw = {}
+-for _, e in ipairs(p.job_weights) do
+-local w = type(e) == 'table' and tonumber(e.w)
+-if not (w and w >= 0 and type(e.p) == 'string') then return false, 'invalid weight entry' end
+-jw[#jw + 1] = { e.p, w, e.cat }
+-end
+-p.job_w = jw
+-S.profile = p
+-return true, tostring(p.name or '?')
+-end
+-function clear_profile() S.profile = nil end
+-local steps = (d <= 4 and 1) or (d > 70 and 1) or math.max(1, math.floor(prof_num('pan_steps', 4)))
++local steps = (d <= 4 and 1) or (d > 70 and 1) or 4
+-function weight_for(n, soldier)
+-if not n then
+-if soldier then return prof_num('soldier_idle_weight', 0.005), 'soldier_idle' end
+-return prof_num('idle_weight', 0.01), 'idle'
+-end
+-for _, e in ipairs((S.profile and S.profile.job_w) or JOB_W) do
+-if n:find(e[1]) then return e[2], e[3] end
+-end
+-return prof_num('default_weight', 1), nil
+-end
+-if not j then return (weight_for(nil, u.military.squad_id >= 0)), nil end
++if not j then return (u.military.squad_id >= 0) and 0.005 or 0.01, nil end
+-return (weight_for(n, false)), n
+-end
+-local STAT_WINDOW = 30 * 60 * 1000
+-local function record_pick(cat)
+-S.picks = S.picks or {}
+-local t = now()
+-S.picks[#S.picks + 1] = { t = t, c = cat }
+-while #S.picks > 0 and (t - S.picks[1].t > STAT_WINDOW or #S.picks > 2000) do table.remove(S.picks, 1) end
+-end
+-function pick_stats()
+-local out, t = {}, now()
+-for _, p in ipairs(S.picks or {}) do
+-if t - p.t <= STAT_WINDOW then out[p.c] = (out[p.c] or 0) + 1 end
+-end
+-return out
++for _, e in ipairs(JOB_W) do
++if n:find(e[1]) then return e[2], n end
++end
++return 1, n
+-if was_recent(u.id) then w = w * prof_num('recent_factor', 0.15) end
+-if S.last_cat and job_cat(jn) == S.last_cat then w = w * prof_num('variety_factor', 0.3) end
++if was_recent(u.id) then w = w * 0.15 end
++if S.last_cat and job_cat(jn) == S.last_cat then w = w * 0.3 end
+-local _, pc = weight_for(jn2, pick.u.military.squad_id >= 0)
+-S.pick_cat = pc or job_cat(jn2)
+-record_pick(((ev.prio or 0) == 0 and (S.pick_cat or 'idle')) or ('event:' .. tostring(ev.kind or '?')))
+-local d1, d2 = prof_num('dwell_min_s', 18) * 1000, prof_num('dwell_max_s', 24) * 1000
+-apply({ prio = 0, kind = 'Ambiente', dwell = math.floor(d1 + math.random() * math.max(0, d2 - d1)) }, u)
++apply({ prio = 0, kind = 'Ambiente', dwell = 18000 + math.random(0, 6000) }, u)
+-pcall(load_profile)
+-profile = S.profile and tostring(S.profile.name or '?') or 'builtin', cats = pick_stats(),
+-elseif cmd == 'profile' then
+-if a[2] == 'reload' then
+-local ok, r = load_profile()
+-util.emit({ ok = ok, profile = ok and r or nil, error = (not ok) and r or nil })
+-elseif a[2] == 'default' then
+-clear_profile()
+-util.emit({ ok = true, profile = 'builtin' })
+-util.emit({ ok = true, profile = S.profile and tostring(S.profile.name or '?') or 'builtin', cats = pick_stats() })
+-end
+-else
+-util.emit({ ok = false, error = 'Aufruf: start [modus] | stop | status | mode m | say "text" [prio] | show x y z "text" [prio] | show unit id "text" | hold [s] | release | on | off | clear | announce on|off | profile reload|default' })
++util.emit({ ok = false, error = 'Aufruf: start [modus] | stop | status | mode m | say "text" [prio] | show x y z "text" [prio] | show unit id "text" | hold [s] | release | on | off | clear | announce on|off' })
+DIFF 2 sperre.lua
+-local TOOLS = reqscript('claude/util').home() .. '/tools/'
++local TOOLS = 'C:/Users/admin/claude gordons projects/dwarf-fortress/tools/'
+SAME stages.lua
+SAME status.lua
+SAME task.lua
+DIFF 2 tempo.lua
+-local TOOLS = reqscript('claude/util').home() .. '/tools/'
++local TOOLS = 'C:/Users/admin/claude gordons projects/dwarf-fortress/tools/'
+SAME timer.lua
+SAME trinken.lua
+DIFF 2 ueberwacher.lua
+-local TOOLS = reqscript('claude/util').home() .. '/tools/'
++local TOOLS = 'C:/Users/admin/claude gordons projects/dwarf-fortress/tools/'
+DIFF 4 units.lua
+-local ok = pcall(function() injured = u.health.flags.needs_healthcare and true or false end)
+-if not ok then pcall(function() injured = #u.body.wounds > 0 end) end
++local okh = pcall(function() injured = u.health.flags.needs_healthcare and true or false end)
++if not okh then pcall(function() injured = #u.body.wounds > 0 end) end
+DIFF 4 util.lua
+-local h = os.getenv('DF_LLM_HELPER_HOME') or os.getenv('DFPILOT_HOME')
++local h = os.getenv('DFPILOT_HOME')
+-return dfhack.getDFPath() .. '/df-llm-helper-runtime'
++return 'C:/Users/admin/claude gordons projects/dwarf-fortress'
+DIFF 2 watchdog.lua
+-local TOOLS = reqscript('claude/util').home() .. '/tools/'
++local TOOLS = 'C:/Users/admin/claude gordons projects/dwarf-fortress/tools/'
+SAME workdetail.lua
+DIFF 25 zugaenge.lua
++local blk = {}
++if blk[x..','..y..','..z] then return false, out end
++local MINCOMP = 3000
++do
++local outs, cid, comp = {}, {}, 0
+-if w and out then seen[key(x,y,z)]=true queue[#queue+1]={x,y,z} end
++if w and out then outs[key(x,y,z)]={x,y,z} end
++for k,c in pairs(outs) do
++if not cid[k] then
++comp = comp + 1
++local st, members, sp = {c}, {}, 1
++cid[k]=comp
++while sp<=#st do
++local cur=st[sp] sp=sp+1 members[#members+1]=cur
++for _,n in ipairs(neighbors(cur[1],cur[2],cur[3])) do
++local k2=key(n[1],n[2],n[3])
++if outs[k2] and not cid[k2] then cid[k2]=comp st[#st+1]=n end
++end
++end
++if #members >= MINCOMP then
++for _,m in ipairs(members) do seen[key(m[1],m[2],m[3])]=true queue[#queue+1]=m end
++end
++end
++end
++end
+DIFF 8 pilot_batch.lua
+-if not path then print(json.encode({ { ok = false, out = '', err = 'Usage: claude/pilot_batch <request.json>' } })) return end
++if not path then print(json.encode({ { ok = false, out = '', err = 'Aufruf: claude/pilot_batch <anfrage.json>' } })) return end
+-if not f then print(json.encode({ { ok = false, out = '', err = 'Request not readable: ' .. path } })) return end
++if not f then print(json.encode({ { ok = false, out = '', err = 'Anfrage nicht lesbar: ' .. path } })) return end
+-print(json.encode({ { ok = false, out = '', err = 'Request is not valid JSON' } }))
++print(json.encode({ { ok = false, out = '', err = 'Anfrage kein gueltiges JSON' } }))
+-if #out > max_bytes then out = out:sub(1, max_bytes) .. '\n... truncated (' .. #out .. ' Bytes)' end
++if #out > max_bytes then out = out:sub(1, max_bytes) .. '\n... gekuerzt (' .. #out .. ' Bytes)' end
+SAME pilot_caravan.lua
+SAME pilot_care.lua
+SAME pilot_defense.lua
+SAME pilot_digcheck.lua
+SAME pilot_hygiene.lua
+DIFF 17 pilot_mood.lua
+-local function stock_for(itype, u, mine)
++local function stock_for(itype, u)
+-if it:getType() == itype and not (mine and mine[it.id]) then
++if it:getType() == itype then
+-local mine, held = {}, {}
+-for _, ref in ipairs(j.items) do
+-if ref.item then
+-mine[ref.item.id] = true
+-held[ref.job_item_idx] = (held[ref.job_item_idx] or 0) + ref.item:getStackSize()
+-end
+-end
+-for idx, el in ipairs(j.job_items.elements) do
+-local free, bound, nearest = stock_for(el.item_type, u, mine)
++for _, el in ipairs(j.job_items.elements) do
++local free, bound, nearest = stock_for(el.item_type, u)
+-free = free, bound = bound, nearest = nearest, held = held[idx] or 0 }
++free = free, bound = bound, nearest = nearest }
+SAME pilot_perimeter.lua
+SAME pilot_reach.lua
+SAME pilot_remote.lua
+SAME pilot_siege.lua
+SAME pilot_tools.lua
+SAME pilot_water.lua
+DIFF 4 pilot_wd.lua
+-util.emit({ error = 'Usage: claude/pilot_wd mode <work_detail> <EverybodyDoesThis|OnlySelectedDoesThis|NobodyDoesThis> [--apply]' })
++util.emit({ error = 'Aufruf: claude/pilot_wd mode <Arbeitsgruppe> <EverybodyDoesThis|OnlySelectedDoesThis|NobodyDoesThis> [--apply]' })
+-if not d then util.emit({ error = 'no work detail "' .. tostring(name) .. '"' }) return end
++if not d then util.emit({ error = 'keine Arbeitsgruppe "' .. tostring(name) .. '"' }) return end

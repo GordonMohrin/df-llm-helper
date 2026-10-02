@@ -1,0 +1,12 @@
+LIVE data/state.db, read only, newest warnings:
+(14, 1790935317.829212, 'perimeter', 'perimeter:forbidden', 'crit', 'WAKE perimeter: forbidden access to the core at (96,88,z132) 1 tile -> seal (python -m df_llm_helper', 1)
+(13, 1790923097.242246, 'care', 'care:dup_hospital', 'warn', 'Hospital location without zone (orphaned): [0, 4] - report only, nothing deleted', 1)
+(12, 1790923038.2764518, 'tools', 'tools:fp08', 'warn', 'pickfix refused: it writes the per-unit pickup flag (uniform.pickup_flags.update) and needs an excep', 1)
+(11, 1790923529.1043847, 'reach', 'reach:unreachable', 'crit', 'UNREACHABLE: Well (cause unknown)', 1)
+(10, 1790922670.7887657, 'siege', 'siege:pilot_siege status not readabl', 'crit', 'pilot_siege status not readable - run the siege by hand', 1)
+(9, 1790922670.0851564, 'mood', 'mood:reserve', 'warn', 'Mood reserve missing: bone 1/5, leather 2/3, metal 0/3, rough gems 0/4, wood 0/10', 1)
+perimeter kv:
+('perimeter.last_ts', '1790935318.368974')
+('perimeter.pending', 'null')
+('perimeter.sig', '[]')
+('perimeter.last', '{"accesses": ["allowed: (99,94,z132) 1 tile, through the traps"], "line": "Accesses: 1 allowed, 0 forbidden (checked 12:01)", "ts": 1790935318.368974}')

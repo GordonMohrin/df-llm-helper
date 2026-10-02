@@ -1,0 +1,15 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 brief essen
+# Briefing essen
+## Mission
+Farming, kitchen, mill + bags, hunting/fishing, livestock, winter stock. Never ban-cooking all/seeds or seedwatch.
+## Situation Y102 Hematite 12
+Food days 189 (target >= 60 (red < 60)); Meals 52 (target > 150 before winter); Fish/meat 20/0 (target -); Hungry >40k 2 (target 0)
+## Alerts
+- !! Hunger>40k: Tekkud414=47k, Eral3473=40k
+## Open (memory)
+- F�sser pr�fen
+## Last state
+- (Durchlauf 11)
+- Zeile � � � � text
+[... 15 more lines cut]
+[exit 0]

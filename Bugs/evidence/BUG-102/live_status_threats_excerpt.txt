@@ -1,0 +1,8 @@
+... live claude/status (excerpt, recorded 2026-10-02 12:17, game paused) ...
+"threats": [ {
+		"n": 1,
+		"name": "Snodub Emgen \"Jackalluster\", Goblin Thief"
+	}, {
+		"n": 1,
+		"name": "Smunstu Ezrûamxu \"Crewseduced\", Goblin Thief"
+	} ]

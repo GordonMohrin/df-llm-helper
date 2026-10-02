@@ -1,0 +1,6 @@
+Observed during the test run (wall time of the dfhack-run.exe process, game paused):
+  claude/mil                 8.24 s   (first call of a python batch, previous call minutes earlier)
+  claude/mil guard           9.40 s   (same situation)
+Every other call of the same scripts, minutes later or right before: 0.06-0.20 s.
+Control: poll.py ran `claude/alert` once per second for 150 s (poll_claude_alert_every_1s_150x.txt):
+  max 0.85 s, 2 more samples > 0.3 s; no stall in the 8-9 s range.

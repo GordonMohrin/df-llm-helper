@@ -1,0 +1,2 @@
+dfhack-run.exe claude/schacht status
+exit=1 time=0.07s

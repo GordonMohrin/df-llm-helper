@@ -1,0 +1,11 @@
+$ sed -n '/## Alarmprozedur/,+8p' tmp_bug/scopes/militaer.md   # the real content behind "Insights" 1-5
+## Alarmprozedur Run 5 (Hauptthread bei Gefahr)
+1. Automatisch (watchdog 60 Ticks + mil guard): `gefahr.handle` -> Pause, alert.flag/siege.flag/pause.hold, civ_alert_idx=1, `schau say`; Zeitlupe fps 50 bei Bodenfeind <= 90 Kacheln.
+2. Hauptthread: fps <= 50 oder Schrittbetrieb (`claude/advance N`); `claude/mil enemies`, `claude/mil status` (ALLE Bürger+Soldaten prüfen, nicht nur den Feind), Flags danach löschen.
+3. Wache aktivieren: `claude/mil train 33 2 --apply` (Constant training = Uniform an, geht zur Kaserne); Kill-Befehl nur per `tools/killorder.lua` (danach entfernen, `sq.orders` prüfen).
+4. Klasse A (Bestie/Megabestie) zu Fuß am Tor: alle Zivilisten in den Kern, Miner/Stollen heraufrufen, **P1 (101,99,z130) und P2 (100,94,z132) von innen bauen** (Konstruktionswand, Boulder >= 2 im Ker
+5. Entwarnung: watchdog nimmt civ_alert nach 5 ruhigen Prüfungen (300 Ticks) zurück; Trupp zurück `mil train 33 0 --apply`, Befehle `mil release` (experimental) bzw. killorder --release.
+
+## Offen / nächster Durchlauf
+1. Prüfen, ob Kosoth+Kib die Streitäxte tragen (`claude/mil equip --squad 33`, `tabelle`); Wache bei Pop >= 15 aufstocken (nicht Miner/Mason/Brauer/Planter).
+[exit 0]

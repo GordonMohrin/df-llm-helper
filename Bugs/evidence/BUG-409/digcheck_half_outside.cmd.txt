@@ -1,0 +1,2 @@
+dfhack-run.exe claude/pilot_digcheck dump 500 0 130 600 5 130
+exit=0 time=0.06s

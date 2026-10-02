@@ -1,0 +1,3 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --replay-file tmp_bug/rep.jsonl dashboard map Test 85 96 130 10 3
+Map 'Test' saved (6 lines)
+[exit 0]

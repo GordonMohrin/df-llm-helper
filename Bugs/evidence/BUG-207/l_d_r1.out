@@ -1,0 +1,2 @@
+digcheck rect 103 90 90 95 95: unsafe (36 tiles, 36 unrevealed not judged)
+unrevealed (not judged): 36 tiles, e.g. (90,90,z103)

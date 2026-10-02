@@ -1,0 +1,2 @@
+dfhack-run.exe claude/tempo status
+exit=0 time=0.19s

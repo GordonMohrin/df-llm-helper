@@ -1,0 +1,1 @@
+POPULATION_CAP = 80 (default 200, effect: after restart) [pending restart: 75 -> 80] - Migrant waves stop once the fortress population reaches this value (births continue)

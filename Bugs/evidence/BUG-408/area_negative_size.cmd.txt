@@ -1,0 +1,2 @@
+dfhack-run.exe claude/area 130 80 90 -5 -5
+exit=0 time=0.09s

@@ -1,0 +1,3 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 exception add L99 --reason r --ja q
+Exception registered: L99 []
+[exit 0]

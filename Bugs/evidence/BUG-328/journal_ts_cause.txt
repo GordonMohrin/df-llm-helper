@@ -1,0 +1,4 @@
+$ python -c "datetime.fromtimestamp(1000.0).astimezone()"   # the test stores snapshots at ts=1000.0+i
+1000.0 ERR [Errno 22] Invalid argument
+86400.0 1970-01-02 01:00:00+01:00
+[exit 0]

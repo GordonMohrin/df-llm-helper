@@ -1,0 +1,2 @@
+dfhack-run.exe claude/units
+exit=0 time=0.11s

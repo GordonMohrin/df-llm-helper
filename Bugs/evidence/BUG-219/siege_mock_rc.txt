@@ -1,0 +1,12 @@
+Siege ABORTED: 0 attackers, 0 steps
+pilot_siege status not readable - run the siege by hand
+rc=1 (siege )
+Siege ABORTED: 0 attackers, 0 steps
+pilot_siege status not readable - run the siege by hand
+rc=1 (siege --once)
+Siege ABORTED: 0 attackers, 0 steps
+pilot_siege status not readable - run the siege by hand
+rc=0 (siege --dry-run)
+Siege ABORTED: 0 attackers, 0 steps
+pilot_siege status not readable - run the siege by hand
+rc=0 (siege --once --dry-run)

@@ -1,0 +1,89 @@
+
+===== A) a queued crit warning from 3.5 hours ago is shown as a current '!!' line without its age =====
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_9v2henkp\cfg.yaml digest
+Status Y102 Hematite 12 | Pop 24 (7 idle 30%) | Drinks 76d Food 189d | Jobs 199 (dig 63, 3 digging) | fps 250 | PAUSE
+!! Hunger>40k: Tekkud414=47k, Eral3473=40k
+!! [reach] UNREACHABLE: Well (cause unknown)
+! Caravan Muboomon: Approaching, 3055 ticks (prepare trade)
+[exit=0]
+
+
+===== B) `check --dry-run` is not 'dry' for the report: it consumes warnings and the delta (next real check says nothing) =====
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_0jvppn6z\cfg.yaml check --dry-run
+Status Y102 Hematite 12 | Pop 24 (7 idle 30%) | Drinks 76d Food 189d | Jobs 199 (dig 63, 3 digging) | fps 250 | PAUSE
+!! Hunger>40k: Tekkud414=47k, Eral3473=40k
+!! [test] TEST-WARNING pending for the orchestrator
+! Caravan Muboomon: Approaching, 3055 ticks (prepare trade)
+Hygiene: measurement failed (no fixture for 'claude/pilot_hygiene status 0 20000')
+Remote: claude/pilot_remote status not readable (script installed?)
+Tools: claude/pilot_tools status not readable (script installed?)
+[exit=0]
+
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_0jvppn6z\cfg.yaml check
+Status Y102 Hematite 12 | Pop 24 (7 idle 30%) | Drinks 76d Food 189d | Jobs 199 (dig 63, 3 digging) | fps 250 | PAUSE
+! [guard] tools/events.log missing (watcher is not writing)
+still open: Caravan, Hunger
+Hygiene: measurement failed (no fixture for 'claude/pilot_hygiene status 0 20000')
+Remote: claude/pilot_remote status not readable (script installed?)
+Tools: claude/pilot_tools status not readable (script installed?)
+[exit=0]
+
+
+===== C) a death report 'resolves' on the very next call although nothing changed =====
+$ python -m df_llm_helper --mock "C:\Users\admin\claude gordons projects\dfpilot-public\fixtures\run5" --config C:\Users\admin\AppData\Local\Temp\dfh_core_f3wxlga7\cfg.yaml digest
+Status Y102 Hematite 12 | Pop 24 (7 idle 30%) | Drinks 76d Food 189d | Jobs 199 (dig 63, 3 digging) | fps 250 | PAUSE
+!! Hunger>40k: Tekkud414=47k, Eral3473=40k
+! Caravan Muboomon: Approaching, 3055 ticks (prepare trade)
+[exit=0]
+
+$ python -m df_llm_helper --mock C:\Users\admin\AppData\Local\Temp\dfh_core_f3wxlga7\fx --config C:\Users\admin\AppData\Local\Temp\dfh_core_f3wxlga7\cfg.yaml digest
+Status Y102 Hematite 12 | Pop 22 (7 idle 30%) | Drinks 76d Food 189d | Jobs 199 (dig 63, 3 digging) | fps 250 | PAUSE
+!! Population -2 (24->22): deaths?
+still open: Caravan, Hunger
+[exit=0]
+
+$ python -m df_llm_helper --mock C:\Users\admin\AppData\Local\Temp\dfh_core_f3wxlga7\fx --config C:\Users\admin\AppData\Local\Temp\dfh_core_f3wxlga7\cfg.yaml digest
+Status Y102 Hematite 12 | Pop 22 (7 idle 30%) | Drinks 76d Food 189d | Jobs 199 (dig 63, 3 digging) | fps 250 | PAUSE
+ok resolved: Losses
+still open: Caravan, Hunger
+[exit=0]
+
+
+===== D) autopilot/cycle action lines: verify lines look the same for pass and fail; warn lines show the raw key and repeat the text 3x =====
+$ python -m df_llm_helper --mock C:\Users\admin\AppData\Local\Temp\dfh_core_zzqjmd68\fxb --config C:\Users\admin\AppData\Local\Temp\dfh_core_zzqjmd68\cfg.yaml autopilot
+stale_flag_generic: delete_flag flag:dig -> deleted
+stale_flag_generic: verify - -> not flags[item.name].exists
+drink_low_trinken: claude/trinken start
+drink_low_trinken: warn warn:Drinks 25 days: claude/trinken started ( -> Drinks 25 days: claude/trinken started (plants 25, empty barrels 7)
+[exit=0]
+
+$ python -m df_llm_helper --mock C:\Users\admin\AppData\Local\Temp\dfh_core_zzqjmd68\fxb --config C:\Users\admin\AppData\Local\Temp\dfh_core_zzqjmd68\cfg.yaml check
+Status Y102 Hematite 12 | Pop 24 (7 idle 30%) | Drinks 25d Food 189d | Jobs 199 (dig 63, 3 digging) | fps 250 | PAUSE
+!! Drinks 25 days (<30)
+!! Hunger>40k: Tekkud414=47k, Eral3473=40k
+! Caravan Muboomon: Approaching, 3055 ticks (prepare trade)
+! [guard] tools/events.log missing (watcher is not writing)
+! [autopilot] Drinks 25 days: claude/trinken started (plants 25, empty barrels 7)
+Hygiene: measurement failed (no fixture for 'claude/pilot_hygiene status 0 20000')
+Remote: claude/pilot_remote status not readable (script installed?)
+Tools: claude/pilot_tools status not readable (script installed?)
+[exit=0]
+
+
+===== E) 'None' leaks into the status line / mood line when a value is missing =====
+$ python -m df_llm_helper --mock C:\Users\admin\AppData\Local\Temp\dfh_core_1xv7lo25\fxn --config C:\Users\admin\AppData\Local\Temp\dfh_core_1xv7lo25\cfg.yaml digest
+Status Y102 Hematite 12 | Pop 24 (7 idle 30%) | Drinks 76d Food 189d | Jobs 199 (dig None, 3 digging) | fps 250 | PAUSE
+!! Mood active: 1, None; gaps: holz 0/10, knochen 1/5, leder 2/3, metall 0/3
+! Caravan Muboomon: Approaching, 3055 ticks (prepare trade)
+[exit=0]
+
+
+===== F) scoped digest: first call and unknown scope both say 'No change since last check.' =====
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_8lnh91om\cfg.yaml digest --scope trinken
+No change since last check.
+[exit=0]
+
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_8lnh91om\cfg.yaml digest --scope no_such_scope
+No change since last check.
+[exit=0]
+

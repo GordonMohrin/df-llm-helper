@@ -1,0 +1,3 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 journal ingest --events tmp_bug/nonexist.log
+Event log missing: tmp_bug\nonexist.log
+[exit 1]

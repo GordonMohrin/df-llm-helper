@@ -1,0 +1,24 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 digest
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "<tmp>\repo_copy\df_llm_helper\__main__.py", line 6, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "<tmp>\repo_copy\df_llm_helper\cli.py", line 1208, in main
+    return int(args.fn(args) or 0)
+               ~~~~~~~^^^^^^
+  File "<tmp>\repo_copy\df_llm_helper\cli.py", line 59, in cmd_digest
+    p = _pilot(args)
+  File "<tmp>\repo_copy\df_llm_helper\cli.py", line 45, in _pilot
+    client = _client(args, cfg, clock)
+  File "<tmp>\repo_copy\df_llm_helper\cli.py", line 18, in _client
+    reg = ExceptionRegistry(cfg.path("exceptions"))
+  File "<tmp>\repo_copy\df_llm_helper\fairplay.py", line 79, in __init__
+    self.load()
+    ~~~~~~~~~^^
+  File "<tmp>\repo_copy\df_llm_helper\fairplay.py", line 105, in load
+    if d.get("example"):
+       ^^^^^
+AttributeError: 'list' object has no attribute 'get'
+[exit 1]

@@ -1,0 +1,6 @@
+$ grep -n FP09 docs/MANUAL.md docs/INTEGRATION.md data/README.md CHANGELOG.md README.md
+docs/MANUAL.md:144: - **Stuck caravan** (`Leaving`, 0 ticks, longer than `stuck_ticks` game ticks): `claude/pilot_caravan release --apply` sets `flags1.left` for merchant units only. Works *
+docs/INTEGRATION.md:79: - [x] Register entry FP09 (the player's standing permission, 2026-10-01) is in `data/exceptions.jsonl`; `python -m df_llm_helper exception list` shows it.
+CHANGELOG.md:107: - `df_llm_helper/caravan.py` (trade/skip decision from the real offer + `data/trade/wants.yaml`, approval only with a must-have good and ratio ≥ 2.0, skip without pause, 
+CHANGELOG.md:110: - Register FP09 entered (the player's standing permission, 2026-10-01: send stuck merchants home via `flags1.left`).
+[exit 0]

@@ -1,0 +1,5 @@
+--config 'config.yaml'                      exists=True  -> state_db=C:\Users\admin\claude gordons projects\dfpilot-public\data\state.db  tools=C:\Users\admin\claude gordons projects\dwarf-fortress\tools  dfhack_run=E:\Program Files (x86)\Steam\steamapps\common\Dwarf Fortress\hack\dfhack-run.exe
+--config 'tpyo-config.yaml'                 exists=False -> state_db=C:\Users\admin\claude gordons projects\dfpilot-public\data\state.db  tools=C:\Users\admin\claude gordons projects\dfpilot-public\runtime\tools  dfhack_run=C:\Program Files (x86)\Steam\steamapps\common\Dwarf Fortress\hack\dfhack-run.exe
+--config 'C:\\no\\such\\dir\\config.yaml'   exists=False -> state_db=C:\Users\admin\claude gordons projects\dfpilot-public\data\state.db  tools=C:\Users\admin\claude gordons projects\dfpilot-public\runtime\tools  dfhack_run=C:\Program Files (x86)\Steam\steamapps\common\Dwarf Fortress\hack\dfhack-run.exe
+
+-> a misspelled/missing --config path gives no error and silently selects data/state.db + runtime/tools + the default DFHack path.

@@ -1,0 +1,17 @@
+TRACEBACK exit=1  replay <missing file>                   | FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\admin\\AppData\\Local\\Temp\\dfh_core_3r6ra6y5\\nope.jsonl'
+TRACEBACK exit=1  replay <directory>                      | PermissionError: [Errno 13] Permission denied: 'C:\\Users\\admin\\AppData\\Local\\Temp\\dfh_core_3r6ra6y5'
+message   exit=0  replay <empty file> (false OK)          | empty: OK (0 steps)
+TRACEBACK exit=1  plan blueprint <missing file>           | FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\admin\\AppData\\Local\\Temp\\dfh_core_3r6ra6y5\\nope.csv'
+TRACEBACK exit=1  plan blueprint <directory>              | PermissionError: [Errno 13] Permission denied: 'C:\\Users\\admin\\AppData\\Local\\Temp\\dfh_core_3r6ra6y5'
+TRACEBACK exit=1  plan trade (no --json)                  | TypeError: argument should be a str or an os.PathLike object where __fspath__ returns a str, not 'NoneType'
+TRACEBACK exit=1  plan trade --json <missing>             | FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\admin\\AppData\\Local\\Temp\\dfh_core_3r6ra6y5\\nope.json'
+TRACEBACK exit=1  plan trade --json <directory>           | PermissionError: [Errno 13] Permission denied: 'C:\\Users\\admin\\AppData\\Local\\Temp\\dfh_core_3r6ra6y5'
+TRACEBACK exit=1  plan trade --json <list root>           | AttributeError: 'list' object has no attribute 'get'
+TRACEBACK exit=1  plan trade --json <item w/o fields>     | TypeError: TradeItem.__init__() missing 4 required positional arguments: 'name', 'category', 'value', and 'weight'
+TRACEBACK exit=1  plan dig --area-file <missing>          | FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\admin\\AppData\\Local\\Temp\\dfh_core_3r6ra6y5\\nope.txt'
+TRACEBACK exit=1  metrics --out <missing dir>             | FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\admin\\AppData\\Local\\Temp\\dfh_core_3r6ra6y5\\no\\dir\\m.csv'
+TRACEBACK exit=1  metrics --out <directory>               | PermissionError: [Errno 13] Permission denied: 'C:\\Users\\admin\\AppData\\Local\\Temp\\dfh_core_3r6ra6y5'
+TRACEBACK exit=1  heartbeat (tools path is a file)        | FileExistsError: [WinError 183] Cannot create a file when that file already exists: 'C:\\Users\\admin\\AppData\\Local\\Temp\\dfh_core_3r6ra6y5\\t2\\to
+TRACEBACK exit=1  --config <directory>                    | PermissionError: [Errno 13] Permission denied: 'C:\\Users\\admin\\AppData\\Local\\Temp\\dfh_core_3r6ra6y5'
+TRACEBACK exit=1  --config guard: 5 (wrong type)          | TypeError: 'int' object is not subscriptable
+TRACEBACK exit=1  --config thresholds: abc                | TypeError: '<' not supported between instances of 'int' and 'str'

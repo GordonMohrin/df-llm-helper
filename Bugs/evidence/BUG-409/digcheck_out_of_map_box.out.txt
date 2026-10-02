@@ -1,0 +1,4 @@
+{
+	"error": "box too large: 94864 tiles (max 20000)",
+	"ok": false
+}

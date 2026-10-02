@@ -1,0 +1,3 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 bus import
+inbox-bau.md: 1 new, 0 already present
+[exit 0]

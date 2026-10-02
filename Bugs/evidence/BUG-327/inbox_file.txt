@@ -1,0 +1,3 @@
+$ python -c "print(repr(tmp_bug/scopes/inbox-bau.md))"
+'- from trinken, 02.10. 12:36: Fässer knapp\r\n'
+[exit 0]

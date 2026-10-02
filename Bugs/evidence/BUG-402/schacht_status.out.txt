@@ -1,0 +1,8 @@
+...de gordons projects/dwarf-fortress/lua/claude/sperre.lua:49: attempt to index a nil value (local 't')
+stack traceback:
+	...de gordons projects/dwarf-fortress/lua/claude/sperre.lua:49: in global 'tile_info'
+	...de gordons projects/dwarf-fortress/lua/claude/sperre.lua:138: in global 'kopf_state'
+	...de gordons projects/dwarf-fortress/lua/claude/sperre.lua:392: in field 'status'
+	...e gordons projects/dwarf-fortress/lua/claude/schacht.lua:46: in local 'script_code'
+	...team\steamapps\common\Dwarf Fortress\hack\lua\dfhack.lua:1117: in function 'dfhack.run_script_with_env'
+	(...tail calls...)

@@ -1,0 +1,3 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 bus post '' --from a --to b
+#1 to b
+[exit 0]

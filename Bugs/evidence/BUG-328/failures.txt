@@ -1,0 +1,20 @@
+FAIL test_journal.py test_metrics_export_same_header_as_metrics_csv
+  File "<project folder>\tests\test_journal.py", line 96, in test_metrics_export_same_header_as_metrics_csv
+  File "<project folder>\df_llm_helper\journal.py", line 271, in monthly_metrics
+  File "<project folder>\df_llm_helper\metrics.py", line 93, in export_csv
+OSError: [Errno 22] Invalid argument
+
+FAIL test_m3.py test_stats_helpers_and_reader
+  File "<project folder>\tests\test_m3.py", line 72, in test_stats_helpers_and_reader
+    assert len(GamelogReader(big, Store()).new_lines(max_bytes=100)) == 50
+AssertionError
+
+FAIL test_scenarios_cli.py test_at_least_8_scenarios_and_generator_reproducible
+  File "<project folder>\tests\test_scenarios_cli.py", line 28, in test_at_least_8_scenarios_and_generator_reproducible
+    assert (tmp_path / p.name).read_bytes() == p.read_bytes(), f"{p.name} outdated: python tests/make_fixtures.py"
+AssertionError: s01_getraenke_fallen.jsonl outdated: python tests/make_fixtures.py
+
+FAIL test_settings.py test_write_boundary
+  File "<project folder>\tests\test_settings.py", line 139, in test_write_boundary
+    assert all(k.startswith("prefs/backups/") for k in changed) and changed
+AssertionError

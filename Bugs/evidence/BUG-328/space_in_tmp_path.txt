@@ -1,0 +1,6 @@
+$ MINI_PYTEST_TMP='<folder with a space>' python Bugs/evidence/BUG-328/mini_pytest/run_tests.py . test_lint_bus test_report_fixes
+test_lint_bus.py: pass=39 fail=1 skip=0
+test_report_fixes.py: pass=18 fail=1 skip=0
+TOTAL pass=57 fail=2 skip=0 in 1.9s
+FAIL test_lint_bus.py test_lint_command_variants
+FAIL test_report_fixes.py test_lint_command_reads_windows_paths

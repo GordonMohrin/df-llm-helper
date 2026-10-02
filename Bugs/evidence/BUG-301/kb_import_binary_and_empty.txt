@@ -1,0 +1,4 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 kb import tmp_bug/binary.md tmp_bug/empty.md
+tmp_bug/binary.md: 1 entries -> imported_binary.jsonl (unreviewed)
+tmp_bug/empty.md: 0 entries -> imported_empty.jsonl (unreviewed)
+[exit 0]

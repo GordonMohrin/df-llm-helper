@@ -1,0 +1,12 @@
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_pngxs01m\cfg.yaml digest --full
+Status Y102 Hematite 12 | Pop 24 (7 idle 30%) | Drinks 76d Food 189d | Jobs 199 (dig 63, 3 digging) | fps 250 | PAUSE
+!! Hunger>40k: Tekkud414=47k, Eral3473=40k
+! Caravan Muboomon: Approaching, 3055 ticks (prepare trade)
+[exit=0]
+
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_pngxs01m\cfg.yaml plan supply
+drink: stock 109, empty in 76 days
+food: stock 72, empty in 126 days
+[exit=0]
+
+fixtures/run5: mahlzeiten 52 + fisch 20 + fleisch 0 = 72 (plan supply) ; pflanzen 25 not counted ; status.food_days = 189

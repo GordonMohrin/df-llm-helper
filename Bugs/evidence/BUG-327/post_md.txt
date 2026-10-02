@@ -1,0 +1,3 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 bus post 'Fässer knapp' --from trinken --to bau --md --prio warn
+#1 to bau
+[exit 0]

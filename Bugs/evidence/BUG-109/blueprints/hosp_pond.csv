@@ -1,0 +1,2 @@
+#zone label(pond) Krankenhaus-Zisterne
+p{pond=true name="Hospital cistern 2"}

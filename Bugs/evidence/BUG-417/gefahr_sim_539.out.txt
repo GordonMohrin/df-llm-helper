@@ -1,0 +1,5 @@
+{
+	"aktionen": [ "alert.flag", "siege.flag", "pause.hold", "pause_state=true", "civ_alert on", "schau say: GEFAHR: A Thanethaomethusapi \"Th (96,96,133) nah" ],
+	"ereignis": "12:11:53 GEFAHR-ALARM (gefahr.lua) 27. Granite, Jahr 118 [TROCKENLAUF]◙A/FEATURE_BEAST FORGOTTEN_BEAST_27 id 539 Thanethaomethusapi \"The Ungodly Hollow S bei (96,96,133) zone=nah dist=0 erreichbar=true◙Zuflucht: burrow=0 civ_alert_burrows=1 ok=true KONFLIKT: A id 539 bei (96,96,133) nahe Zufluchtstreppe (99,94)",
+	"sim": [ "A/FEATURE_BEAST FORGOTTEN_BEAST_27 id539 (96,96,133) zone=nah d=0 reach=true alarm=true warn=false slow=true [SIM]" ]
+}

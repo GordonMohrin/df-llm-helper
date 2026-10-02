@@ -1,0 +1,4 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 exception list
+ L31 ['1', '2', '3']: objects as a string (player consent: yes)
+Register error: line 1: not JSON (Unexpected UTF-8 BOM (decode using utf-8-sig))
+[exit 0]

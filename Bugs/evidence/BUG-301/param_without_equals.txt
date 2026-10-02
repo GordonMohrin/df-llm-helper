@@ -1,0 +1,3 @@
+$ python -m df_llm_helper --mock fixtures/run5 runbook run rb21_flut --dry-run --param x
+Error: dictionary update sequence element #0 has length 1; 2 is required
+[exit 2]

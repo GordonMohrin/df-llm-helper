@@ -1,0 +1,9 @@
+z=130  x=80..89  y=90..94  (Karte 192x192x153)
+     8         
+     0123456789
+  90 ??????????
+  91 ??????????
+  92 ??????????
+  93 ??????????
+  94 ??????????
+Legende: #Fels ,Erde *Erz/Edelstein-Ader TBaum tSetzling "Gras/Busch .Boden oFelsbrocken (Leerzeichen)=offen/Luft ?unentdeckt ~Wasser %Magma <>X Treppen ^Rampe vRampenoberseite +gebauter Boden CKonstruktion FSchiessscharte dGrab-Auftrag W Werkstatt S Lager b Bett D Tuer n Moebel f Feld w Wagen B sonst. Gebaeude @Zwerg !Feind a Tier

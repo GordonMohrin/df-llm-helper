@@ -1,0 +1,6 @@
+$ python -m df_llm_helper --mock fixtures/run5 kb get guard_start
+[guard_start] PowerShell guard dies after starting
+Cause: Start-Process -WindowStyle Hidden ends the process together with the calling shell.
+Fix: Start via Invoke-CimMethod Win32_Process Create (independent process); check the syntax first; restart after a script change.
+Source: Session Run 5
+[exit 0]

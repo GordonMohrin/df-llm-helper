@@ -1,0 +1,4 @@
+$ dfhack-run.exe claude/area 130 85 96 10 3        # LIVE, read only, game paused (raw bytes saved as live_area_raw.bin)
+first 90 bytes: b'z=130  x=85..94  y=96..98  (Karte 192x192x153)\r\n          9    \r\n     5678901234\r\n  96 ###'
+CRLF count: 7, bare LF count: 0
+[exit 0]

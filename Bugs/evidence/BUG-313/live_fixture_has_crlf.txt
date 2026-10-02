@@ -1,0 +1,3 @@
+$ python -c "print(repr(stdout[:60])) of the first record of fixtures/run5_live/trade_step1.jsonl (a recording of the real dfhack-run)"
+'{\r\n\t"caravans": [ {\r\n\t\t"entity": 35,\r\n\t\t"idx": 0,\r\n\t\t"mood":'
+[exit 0]

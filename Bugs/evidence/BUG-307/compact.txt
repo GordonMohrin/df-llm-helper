@@ -1,0 +1,3 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 memory compact essen
+essen.md: 1244 -> 1526 bytes, archive essen.20261002T123223.md
+[exit 0]

@@ -1,0 +1,17 @@
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_vkgsn6ra\cfg.yaml metrics
+echtzeit;spieldatum;buerger;erwachsene;kinder;ohne_auftrag;mahlzeiten;getraenke;pflanzen;tierkadaver;zwergenleichen;trupp;grabjobs;feinde;sawdeadbody;death;ghosthaunt;zivilwarnung
+2026-10-02 12:26:09;12. Hematite, Jahr 102;24;23;1;7;52;109;25;;0;6;63;0;;;;0
+2026-10-02 12:26:10;12. Hematite, Jahr 102;24;23;1;7;52;109;25;;0;6;63;0;;;;0
+2026-10-02 12:26:10;12. Hematite, Jahr 102;24;23;1;7;52;109;25;;0;6;63;0;;;;0
+2026-10-02 12:26:10;12. Hematite, Jahr 102;24;23;1;7;52;109;25;;0;6;63;0;;;;0
+[exit=0]
+
+columns that are empty in every row: ['tierkadaver', 'sawdeadbody', 'death', 'ghosthaunt']
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_vkgsn6ra\cfg.yaml budget
+Scope | Calls | Bytes in/out | Tokens | Trend
+---|---|---|---|---
+orchestrator | 4 | 2464/541 | 180 | new
+Total today: 180 tokens (no daily budget set)
+[exit=0]
+
+-> 'Bytes in' = sum of len(command) of the DF calls (cli.py _usage: sum(len(c) for c in pilot.client.calls)), not the answer size.

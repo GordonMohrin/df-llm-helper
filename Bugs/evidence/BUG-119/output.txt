@@ -1,0 +1,47 @@
+
+===== 1) Python version =====
+  README.md:40: Requirements: Python 3.11+, standard library only (pytest for tests; `lua5.4` optional for Lua tests).
+  docs/OVERVIEW.md:7: - Python 3.12+ (usually `python` on Windows). The package needs only the standard library; `pytest` (and optionally `coverage`) is only for the tests.
+  docs/MANUAL.md:11: python --version                      # 3.12+ ("python", not "python3")
+  docs/PLANNERS.md:3: Package `df_llm_helper/planners/`, tests `tests/test_planners.py` (`python3.12 -m pytest tests/test_planners.py -q`).
+  docs/INTEGRATION.md:8: - [ ] `python --version` reports 3.12 or newer. Then `python -m df_llm_helper.selftest --quick`, expected: all `[ok]`, `Self-test GREEN`.
+
+===== 2) OVERVIEW: `record --record x.jsonl [commands]` (documented form) vs MANUAL: `--record x.jsonl record <command>` =====
+  docs/OVERVIEW.md:33: | `record --record x.jsonl [commands…]` | record DF responses (supply fixtures) | |
+  docs/MANUAL.md:118: | DF response format unknown | record it with `python -m df_llm_helper --record x.jsonl record <command>` and put it in `fixtures/`. The parsers are tolerant |
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_wfiu9ow9\cfg.yaml record --record C:\Users\admin\AppData\Local\Temp\dfh_core_wfiu9ow9\x.jsonl claude/status
+usage: df-llm-helper [-h] [--config CONFIG] [--mock MOCK]
+                     [--replay-file REPLAY_FILE] [--record RECORD]
+                     {digest,check,cycle,autopilot,guard,waechter,tempo,siege,caravan,mood,care,forecast,workload,bottleneck,water,reboot,agents,dashboard,journal,heartbeat,wake,runbook,kb,brief,replay,record,exception,memory,bus,lint,budget,overlay,trade,plan,metrics,camera,defense,digcheck,dig,hygiene,perf,perimeter,reach,remote,settings,tools} ...
+df-llm-helper: error: unrecognized arguments: --record
+[exit=2]
+
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_wfiu9ow9\cfg.yaml --record C:\Users\admin\AppData\Local\Temp\dfh_core_wfiu9ow9\x.jsonl record claude/status
+ok  claude/status (1143 B)
+[exit=0]
+
+
+===== 3) file names =====
+  docs/OVERVIEW.md:47: `lua/`: thin, **live-untested** DFHack scripts (`pilot_wd.lua`, `pilot_batch.lua`). Short start prompt for agents: `AGENT-PROMPT.md`. Known lint findings: `LINT-BEFUNDE.md`. `tools/luacheck_
+  docs/ contains: ['LINT-FINDINGS.md']
+
+===== 4) what is lua/ and which files are installed? =====
+  README.md:47: 2. Copy `lua/pilot_*.lua` and `lua/claude/*.lua` to `<Dwarf Fortress>/hack/scripts/claude/` and set the
+  README.md:70: lua/          DFHack scripts: pilot_*.lua + companion toolkit lua/claude/*.lua
+  docs/MANUAL.md:14: cp lua/pilot_wd.lua lua/pilot_batch.lua "<DF install folder>/hack/scripts/claude/"
+  docs/OVERVIEW.md:47: `lua/`: thin, **live-untested** DFHack scripts (`pilot_wd.lua`, `pilot_batch.lua`). Short start prompt for agents: `AGENT-PROMPT.md`. Known lint findings: `LINT-BEFUNDE.md`. `tools/luacheck_
+  COMPANION.md:6: 1. `lua/pilot_*.lua` – thin scripts written for df-llm-helper (siege, caravan, mood, care, water, work details, batching).
+  COMPANION.md:7: 2. `lua/claude/*.lua` – the fortress toolkit the original project played with (`claude/status`, `claude/report`,
+  COMPANION.md:11: Install: copy `lua/pilot_*.lua` and `lua/claude/*.lua` into `<Dwarf Fortress>/hack/scripts/claude/`.
+  lua/ contains: 14 pilot_*.lua and 50 claude/*.lua
+
+===== 5) selftest: documented duration / exit code without pytest =====
+  README.md:37: python -m df_llm_helper.selftest                            # full test suite (~10 s), needs pytest
+  docs/MANUAL.md:106: After every change: `python -m df_llm_helper.selftest` (≈ 30 s, no DF needed).
+  selftest --quick  exit=0  last line: Self-test GREEN in 0.7 s
+  selftest (no flag) exit=0  last line:   [!] pytest not installed - only quick checks ran (pip install pytest after confirming with the player)
+  -> without pytest the full run prints a '[!]' hint and exits 0 (looks green to a script); nothing like 'Self-test GREEN' / 'NOT RUN'.
+
+===== 6) OVERVIEW 'Structure' section names =====
+  docs/OVERVIEW.md:45: `df-llm-helper/`: `client` (Real/Mock/Replay/Recording), `snapshot` (tolerant parser), `digest`, `rules` (autopilot), `guard`, `runbooks`, `kb`, `brief`, `memory`, `wake`, `bus`, `lint`, `tr
+  actual package folder: ['df_llm_helper']

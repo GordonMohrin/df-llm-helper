@@ -1,0 +1,36 @@
+$ python -m df_llm_helper --mock "C:\Users\admin\claude gordons projects\dfpilot-public\fixtures\run5" --config C:\Users\admin\AppData\Local\Temp\dfh_core_j7gp8l9f\cfg.yaml digest
+Status Y102 Hematite 12 | Pop 24 (7 idle 30%) | Drinks 76d Food 189d | Jobs 199 (dig 63, 3 digging) | fps 250 | PAUSE
+!! Hunger>40k: Tekkud414=47k, Eral3473=40k
+! Caravan Muboomon: Approaching, 3055 ticks (prepare trade)
+[exit=0]
+
+$ python -m df_llm_helper --mock "C:\Users\admin\claude gordons projects\dfpilot-public\fixtures\run5" --config C:\Users\admin\AppData\Local\Temp\dfh_core_j7gp8l9f\cfg.yaml guard ack-gate 60
+Pop gate 60 acknowledged
+[exit=0]
+
+$ python -m df_llm_helper --mock "C:\Users\admin\claude gordons projects\dfpilot-public\fixtures\run5" --config C:\Users\admin\AppData\Local\Temp\dfh_core_j7gp8l9f\cfg.yaml guard
+warn (heartbeat.txt missing: the orchestrator should call 'python -m df_llm_helper heartbeat'); warn (tools/events.log missing (watcher is not writing))
+Target fps 250, time lapse allowed: False (blockers: caravan, supplies, no_supervision)
+[exit=0]
+
+   [state.db before] game_id="Windrings|100|263900"  guard.state gates_acked=[60]  rule_state=[('drink_low_trinken', 1)]
+
+===== config query fails once =====
+$ python -m df_llm_helper --mock C:\Users\admin\AppData\Local\Temp\dfh_core_j7gp8l9f\fx_config_fails --config C:\Users\admin\AppData\Local\Temp\dfh_core_j7gp8l9f\cfg.yaml digest
+Status Y102 Hematite 12 | Pop 24 (7 idle 30%) | Drinks 76d Food 189d | Jobs 199 (dig 63, 3 digging) | fps 250 | PAUSE
+!! Hunger>40k: Tekkud414=47k, Eral3473=40k
+! Caravan Muboomon: Approaching, 3055 ticks (prepare trade)
+! [pilot] NEW GAME detected (Windrings): counters/caches reset
+[exit=0]
+
+   [state.db after the failed config query] game_id="Windrings|?|?"  guard.state gates_acked=<<deleted>>  rule_state=[]
+
+===== config answers again =====
+$ python -m df_llm_helper --mock "C:\Users\admin\claude gordons projects\dfpilot-public\fixtures\run5" --config C:\Users\admin\AppData\Local\Temp\dfh_core_j7gp8l9f\cfg.yaml digest
+Status Y102 Hematite 12 | Pop 24 (7 idle 30%) | Drinks 76d Food 189d | Jobs 199 (dig 63, 3 digging) | fps 250 | PAUSE
+!! Hunger>40k: Tekkud414=47k, Eral3473=40k
+! Caravan Muboomon: Approaching, 3055 ticks (prepare trade)
+! [pilot] NEW GAME detected (Windrings): counters/caches reset
+[exit=0]
+
+   [state.db after config is back] game_id="Windrings|100|263900"  guard.state gates_acked=<<deleted>>  rule_state=[]

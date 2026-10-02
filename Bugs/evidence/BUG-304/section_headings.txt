@@ -1,0 +1,12 @@
+$ (section headings of the output above)
+## Task
+## Briefing
+## Mission
+## Situation Y102 Hematite 12
+## Known traps (python -m df_llm_helper kb get <id>)
+## Commands
+## Fair Play
+## Report
+## Report format (mandatory, <= 12 lines, otherwise truncated)
+## Fair Play
+## Commands

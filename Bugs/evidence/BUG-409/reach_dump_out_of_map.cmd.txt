@@ -1,0 +1,2 @@
+dfhack-run.exe claude/pilot_reach dump 500 500 130 600 600 130
+exit=0 time=0.07s

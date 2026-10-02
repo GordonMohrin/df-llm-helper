@@ -1,0 +1,3 @@
+$ python -c "regenerate scenarios/s03_deadman.jsonl with tests/make_fixtures.write_scenarios and compare bytes"
+checked-in file: CRLF count 0 | regenerated on Windows: CRLF count 40 | equal after newline normalisation: True
+[exit 0]

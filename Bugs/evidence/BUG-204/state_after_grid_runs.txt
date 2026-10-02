@@ -1,0 +1,10 @@
+warnings (id,source,key,level,shown):
+(1, 'reach', 'reach:unreachable', 'crit', 0)
+(2, 'perimeter', 'perimeter:forbidden', 'crit', 0)
+kv:
+('reach.last', '{"bad": ["F1", "F3", "F4", "F5", "Kitchens", "Stills"], "line": "UNREACHABLE: F1, F3, F4, ')
+('reach.last_ts', '1790936285.954549')
+('digcheck.unreported', '"digcheck rect 131 100 70 122 77: refused (184 tiles, R2 x46)"')
+('perimeter.sig', '[[24, 22, 132], [27, 17, 131]]')
+('perimeter.last', '{"accesses": ["FORBIDDEN: (96,88,z132) 1 tile, bypasses the traps", "FORBIDDEN: (111,70,z1')
+('perimeter.last_ts', '1790936286.6160903')

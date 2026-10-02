@@ -1,0 +1,9 @@
+#build lange wand
+Cw(200x1)
+
+EXPECTED.txt says: ['bad_footprint_outside_map.csv;E_BOUNDS']
+$ python -m df_llm_helper plan blueprint "C:\Users\admin\claude gordons projects\dfpilot-public\tests\blueprints_bad\bad_footprint_outside_map.csv"
+C:\Users\admin\claude gordons projects\dfpilot-public\tests\blueprints_bad\bad_footprint_outside_map.csv: ok
+[exit=0]
+
+API with map_size: ['2:1 error E_BOUNDS footprint x0..199 y0..0 lies outside the map 192x192']

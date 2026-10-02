@@ -1,0 +1,4 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 lint tmp_bug/nonexist_dir
+tmp_bug\nonexist_dir:0: IO not readable: [Errno 2] No such file or directory: 'tmp_bug\\nonexist_dir' (warning)
+1 findings (0 errors)
+[exit 0]

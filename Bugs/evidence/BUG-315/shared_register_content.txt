@@ -1,0 +1,5 @@
+$ cat tmp_bug/data/exceptions.jsonl   # what was really written
+{"example": true, "ts": "2026-01-01T00:00:00Z", "action": "FP09", "objects": [], "reason": "example (ignored): send stuck traders 
+{"ts": "2026-10-02T10:38:19Z", "action": "FP08", "objects": ["187405", "187429"], "reason": "E18 picks", "player_consent": "yes, d
+{"ts": "2026-10-02T10:38:19Z", "action": "L31", "objects": [], "reason": "dig near water", "player_consent": "yes, do it"}
+[exit 0]

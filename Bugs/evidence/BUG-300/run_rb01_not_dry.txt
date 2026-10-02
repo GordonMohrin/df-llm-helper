@@ -1,0 +1,5 @@
+$ python -m df_llm_helper --mock fixtures/run5 runbook run rb01_e18_pick --param squad_id=1
+rb01_e18_pick: step_failed
+  ERROR: claude/mil status (no fixture for 'claude/mil status')
+  Aborted. Check the rollback: python -m df_llm_helper runbook show rb01_e18_pick
+[exit 1]

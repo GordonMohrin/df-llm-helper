@@ -1,0 +1,3 @@
+$ size of tmp_bug/scopes/militaer.md after 'restore --dry-run'
+16738 bytes tmp_bug\scopes\militaer.md
+[exit 0]

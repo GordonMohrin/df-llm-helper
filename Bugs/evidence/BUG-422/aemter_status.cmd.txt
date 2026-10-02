@@ -1,0 +1,2 @@
+dfhack-run.exe claude/aemter status
+exit=0 time=0.07s

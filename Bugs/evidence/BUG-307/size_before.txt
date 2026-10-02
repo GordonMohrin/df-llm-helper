@@ -1,0 +1,3 @@
+$ wc -c tmp_bug/scopes/essen.md
+1244 bytes  tmp_bug/scopes/essen.md
+[exit 0]

@@ -1,0 +1,15 @@
+$ python -m df_llm_helper [--mock fixtures/run5] brief <scope> | tokens = len(text)//3
+scope        mock(no memory)  live(real memory+inbox)
+trinken        538     786
+essen          530     894
+bau            560    1165
+erkundung      502     928
+wirtschaft     608     780
+auslastung     451     641
+material       509     685
+militaer       502     955
+verteidigung   527     839
+gesundheit     542     821
+handel         595    1024
+infra          549     919
+(the selftest checks only the first column: max 599)

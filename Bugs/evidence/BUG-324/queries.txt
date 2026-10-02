@@ -1,0 +1,19 @@
+$ for q in <queries>: python -m df_llm_helper --mock fixtures/run5 kb search "$q"      # top hits (ids)
+Zwerge                       -> No hits
+Händler hängt                -> No hits
+Überschwemmung               -> No hits
+Grundwasser                  -> No hits
+Küche                        -> No hits
+Flagge                       -> No hits
+Ruckeln                      -> No hits
+Bestie                       -> kavernen_schleuse, flags_stale
+Holzkohle                    -> bett_ohne_holz, waechter_blind, koks_brennstoff
+Betten Holz                  -> bett_ohne_holz, waechter_blind, koks_brennstoff
+Leerlauf                     -> zuflucht_burrow
+dwarves die of thirst        -> getraenke_wueste, grabstau_arbeitsgruppen, e18_pick
+Wasser fließt diagonal       -> wasser_diagonal, wasser_quelle, zuflucht_burrow
+Karawane Händler             -> handel_ablauf, flags_stale, makler_squad
+Spitzhacke                   -> e18_pick, fairplay_foreign, e18_release
+Wächter blind                -> waechter_blind, guard_start, belagerung_pop
+Verletzte ohne Krankenhaus   -> hospital, bett_ohne_holz, wasser_quelle
+[exit 0]

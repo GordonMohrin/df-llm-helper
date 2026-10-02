@@ -1,0 +1,5 @@
+Result: ok
+Measurements (before/after): 1 -> 2
+Changed: Fässer ä
+Open: y
+Risk: z

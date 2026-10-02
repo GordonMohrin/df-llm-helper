@@ -1,0 +1,8 @@
+$ head -c 160 data/exceptions.jsonl
+# POSTMORTEM
+
+Skeleton from state.db (python -m df_llm_helper journal postmortem). Measured data only; add the assessment by hand.
+
+## Timeline
+- (no events in 
+[exit 0]

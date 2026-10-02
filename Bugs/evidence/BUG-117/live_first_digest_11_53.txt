@@ -1,0 +1,27 @@
+# first live `python -m df_llm_helper digest` of the test session, 2026-10-02 11:53 (game paused, Y118 Granite 27), copied verbatim from the console (long lines were cut at ~100 chars by the tester's display)
+Status Y118 Granite 27 | Pop 174 (68 idle 57%) | Drinks 49d Food 85d | Jobs 101 (dig 0, 0 digging) | fps 250 | PAUSE
+!! 5 enemies on map, Threat: {'n': 1, 'name': 'Snodub Emgen "Jackalluster", Goblin Thief'}; {'n': 1, 'name': 
+!! alert.flag open (6 min): 11:46:50 [AMBUSH_SNATCHER] Snatcher! Protect the children!
+!! siege.flag open (6 min): 11:46:50 [AMBUSH_SNATCHER] Snatcher! Protect the children!
+!! Hunger>40k: Aban486=50k, Ber4165=50k, Tholtig1029=46k, Kib4338=45k, +1
+!! [reach] UNREACHABLE: Well (cause unknown)                      <- warning stored 08:45
+!! [siege] pilot_siege status not readable - run the siege by hand   <- stored 08:31
+! Civilian alert active
+! Drinks 49 days (<50)
+! dig.flag open (141 min): 09:31:47 Grabqueue niedrig: 0
+! food.flag open (135 min): Vorraete knapp: Mahlzeiten+Fleisch+Fisch=0, Getraenke=0, Pfl
+! migranten.flag open (160 min): 09:13:00 NEUE BUERGER (1): 6468 Litast Gulnaslibash "Islanda
+! mood.flag open (15 min): 2026-10-02 08:47:50 Kivish Duralkib "Honorednets", Carpenter
+! notfall.flag open (160 min): 09:13:00 NOTFALL 971 Tun Likotmishthem "Inksc durst=31388 hu
+! pause.hold.flag open (6 min): alarm
+! wirtschaft.flag open (146 min): 09:27:04 AUSLASTUNG 8% Auslastung (5/63 arbeiten, Idle 58, S
+! Idle 57% (68 of 119 adults)
+! [care] Hospital location without zone (orphaned): [0, 4] - report only, nothing deleted        <- stored 08:38
+! [mood] Mood reserve missing: bone 1/5, leather 2/3, metal 0/3, rough gems 0/4, wood 0/10      <- stored 08:31 (live stocks now: bone 226, leather 260, metal 86, wood 177)
+! [tools] pickfix refused: it writes the per-unit pickup flag (uniform.pickup_flags.update) and needs an exception-register entry FP08 ... (dfpilot exception add FP08 --reason "pick fix: per-unit pickup flag" --ja "<player quote>")   <- stored 08:37, still names the old command `dfpilot`
+~ Dig jobs 63->0 (diggers: 0)          <- trends against the mock rows in the live DB, see BUG-104
+~ Drink days falling 76->49
+~ Food days falling 189->85
+~ Idle 30%->57% (68 dwarves)
+~ Open jobs 199->101
+(+10 truncated)

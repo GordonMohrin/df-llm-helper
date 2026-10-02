@@ -1,0 +1,3 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 dashboard --offline --out tmp_bug/d.html
+tmp_bug\d.html (2 KB, newly written)
+[exit 0]

@@ -1,0 +1,5 @@
+(2, 1790935282.518678, 'siege', 'siege:pilot_siege status not readabl', 'crit', 'pilot_siege status not readable - run the siege by hand', 1)
+(3, 1790934920.1896024, 'caravan', 'caravan:review', 'warn', 'Trade waits for the orchestrator: Ratio 1.20 < 2.0', 1)
+(4, 1790935285.191954, 'mood', 'mood:reserve', 'warn', 'Mood reserve missing: bone 1/5, leather 2/3, metal 0/3, roug', 1)
+(7, 1790936083.5882008, 'mood', 'mood:fail:5000', 'crit', 'Mood 5000 will fail: 2000 ticks < ~7800 needed', 0)
+(12, 1790936125.5493803, 'caravan', 'caravan:review', 'warn', 'Trade waits for the orchestrator: Dry run not readable', 0)

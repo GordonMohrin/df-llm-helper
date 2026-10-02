@@ -1,0 +1,6 @@
+$ python -c "print(key in kb.SYNONYMS for the German words ...)"
+False False False False False False
+['water', 'groundwater', 'grundwasser']
+['caravan', 'trade', 'haendler']
+['flagge']
+[exit 0]

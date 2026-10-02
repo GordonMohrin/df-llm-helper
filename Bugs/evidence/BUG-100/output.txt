@@ -1,0 +1,22 @@
+
+===== events.log with 100 filler lines, then one CRITICAL line appended =====
+$ python -m df_llm_helper --config C:\Users\admin\AppData\Local\Temp\dfh_core_x_de7j8w\cfg.yaml wake
+
+[exit=0]
+
+-> expected: WAKE critical [FEATURE_BEAST] ... (lines in file: 101)
+$ python -m df_llm_helper --config C:\Users\admin\AppData\Local\Temp\dfh_core_x_de7j8w\cfg.yaml wake
+WAKE critical [FEATURE_BEAST]: A forgotten beast has come! -> python -m df_llm_helper digest
+[exit=0]
+
+
+===== events.log with 5100 filler lines, then one CRITICAL line appended =====
+$ python -m df_llm_helper --config C:\Users\admin\AppData\Local\Temp\dfh_core_bzohocn9\cfg.yaml wake
+
+[exit=0]
+
+-> expected: WAKE critical [FEATURE_BEAST] ... (lines in file: 5101)
+$ python -m df_llm_helper --config C:\Users\admin\AppData\Local\Temp\dfh_core_bzohocn9\cfg.yaml wake
+
+[exit=0]
+

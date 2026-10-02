@@ -1,0 +1,5 @@
+[ {
+	"err": "Anfrage kein gueltiges JSON",
+	"ok": false,
+	"out": ""
+} ]

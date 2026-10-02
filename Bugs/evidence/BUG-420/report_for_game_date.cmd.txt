@@ -1,0 +1,2 @@
+dfhack-run.exe claude/report
+exit=0 time=0.28s

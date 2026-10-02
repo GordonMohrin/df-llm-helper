@@ -1,0 +1,38 @@
+
+===== A) overlay FIRST (display only, no --send), then the orchestrator's digest =====
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_5w23ekno\cfg.yaml overlay
+claude/schau say "Hunger>40k: Tekkud414=47k, Eral3473=40k" 3
+claude/schau say "Caravan Muboomon: Approaching, 3055 ticks (prepare trade)" 3
+[exit=0]
+
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_5w23ekno\cfg.yaml digest
+No change since 12:16 (2 open: Caravan, Hunger).
+[exit=0]
+
+-> expected: digest still reports the hunger/caravan items (the orchestrator never saw them); actual: 'No change since ...'
+
+===== B) second overlay call: the player display gets a useless 'No change' line =====
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_5w23ekno\cfg.yaml overlay --send
+claude/schau say "No change since 12:16 (2 open: Caravan, Hunger)." 3
+[exit=0]
+
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_5w23ekno\cfg.yaml overlay --send
+nothing new for the display
+[exit=0]
+
+
+===== C) control: digest first, then overlay -> overlay shows only the status line / No change =====
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_melzxyh3\cfg.yaml digest
+Status Y102 Hematite 12 | Pop 24 (7 idle 30%) | Drinks 76d Food 189d | Jobs 199 (dig 63, 3 digging) | fps 250 | PAUSE
+!! Hunger>40k: Tekkud414=47k, Eral3473=40k
+! Caravan Muboomon: Approaching, 3055 ticks (prepare trade)
+[exit=0]
+
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_melzxyh3\cfg.yaml overlay
+claude/schau say "No change since 12:16 (2 open: Caravan, Hunger)." 3
+[exit=0]
+
+
+===== D) side issue: the send command is split with shlex(posix=True) by RealClient; a trailing backslash breaks it =====
+'claude/schau say "Path C:\\dir\\" 3' -> ValueError: No closing quotation    (main() prints 'Error: No closing quotation', exit 2)
+'claude/schau say "ok text" 3' -> ['claude/schau', 'say', 'ok text', '3']

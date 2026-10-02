@@ -1,0 +1,222 @@
+{
+	"lager": [ {
+		"id": 1364,
+		"max_barrels": 0,
+		"name": "Essen Farm",
+		"role": "essen"
+	}, {
+		"id": 1365,
+		"max_barrels": 15,
+		"name": "Getraenke Farm",
+		"role": "getraenke"
+	}, {
+		"id": 1371,
+		"max_barrels": 0,
+		"name": "Stein Steinbruch",
+		"role": "sonst"
+	}, {
+		"id": 1372,
+		"max_barrels": 0,
+		"name": "Bloecke Steinbruch",
+		"role": "sonst"
+	}, {
+		"id": 1467,
+		"max_barrels": 0,
+		"name": "Edelsteine Handel",
+		"role": "sonst"
+	}, {
+		"id": 1502,
+		"max_barrels": 0,
+		"name": "Essen Kern",
+		"role": "essen"
+	}, {
+		"id": 1503,
+		"max_barrels": 0,
+		"name": "Holz Kern",
+		"role": "sonst"
+	}, {
+		"id": 1588,
+		"max_barrels": 0,
+		"name": "Barren Kern",
+		"role": "sonst"
+	}, {
+		"id": 1589,
+		"max_barrels": 0,
+		"name": "Erz Kern",
+		"role": "sonst"
+	}, {
+		"id": 1590,
+		"max_barrels": 0,
+		"name": "Kohle Kern",
+		"role": "sonst"
+	}, {
+		"id": 1600,
+		"max_barrels": 0,
+		"name": "",
+		"role": "sonst"
+	}, {
+		"id": 1601,
+		"max_barrels": 0,
+		"name": "",
+		"role": "sonst"
+	}, {
+		"id": 1607,
+		"max_barrels": 0,
+		"name": "Edelsteine Depot B",
+		"role": "sonst"
+	}, {
+		"id": 1608,
+		"max_barrels": 0,
+		"name": "Edelsteine Depot A",
+		"role": "sonst"
+	}, {
+		"id": 1616,
+		"max_barrels": 0,
+		"name": "Fertigwaren Kern",
+		"role": "sonst"
+	}, {
+		"id": 1617,
+		"max_barrels": 0,
+		"name": "Nahrung Kern",
+		"role": "essen"
+	}, {
+		"id": 1618,
+		"max_barrels": 0,
+		"name": "Fertigwaren Mitte",
+		"role": "sonst"
+	}, {
+		"id": 1706,
+		"max_barrels": 0,
+		"name": "Essen Sued",
+		"role": "essen"
+	}, {
+		"id": 1815,
+		"max_barrels": 0,
+		"name": "Stein Tiefenlager",
+		"role": "sonst"
+	}, {
+		"id": 1816,
+		"max_barrels": 0,
+		"name": "Bloecke Tiefenlager",
+		"role": "sonst"
+	}, {
+		"id": 1820,
+		"max_barrels": 0,
+		"name": "Dolomit Flux",
+		"role": "sonst"
+	}, {
+		"id": 1821,
+		"max_barrels": 0,
+		"name": "Essen Kaserne",
+		"role": "essen"
+	}, {
+		"id": 1822,
+		"max_barrels": 0,
+		"name": "Erz Schacht z121",
+		"role": "sonst"
+	}, {
+		"id": 1823,
+		"max_barrels": 0,
+		"name": "Erz Schacht z112",
+		"role": "sonst"
+	}, {
+		"id": 1824,
+		"max_barrels": 0,
+		"name": "Erz Schacht z105",
+		"role": "sonst"
+	}, {
+		"id": 1828,
+		"max_barrels": 0,
+		"name": "Essen Hospital",
+		"role": "essen"
+	}, {
+		"id": 2065,
+		"max_barrels": 0,
+		"name": "Eimer Hospital",
+		"role": "sonst"
+	}, {
+		"id": 2068,
+		"max_barrels": 0,
+		"name": "Eimer Ufer",
+		"role": "sonst"
+	}, {
+		"id": 2070,
+		"max_barrels": 0,
+		"name": "Kohle Schachtkopf",
+		"role": "sonst"
+	}, {
+		"id": 2071,
+		"max_barrels": 0,
+		"name": "Kohle Schmelzer O",
+		"role": "sonst"
+	}, {
+		"id": 2072,
+		"max_barrels": 0,
+		"name": "Kohle West",
+		"role": "sonst"
+	}, {
+		"id": 2098,
+		"max_barrels": 0,
+		"name": "Fertigwaren Tief",
+		"role": "sonst"
+	}, {
+		"id": 2099,
+		"max_barrels": 0,
+		"name": "Tuch Tief",
+		"role": "sonst"
+	}, {
+		"id": 2100,
+		"max_barrels": 0,
+		"name": "Stein z120",
+		"role": "sonst"
+	}, {
+		"id": 2101,
+		"max_barrels": 0,
+		"name": "Stein z119",
+		"role": "sonst"
+	}, {
+		"id": 2218,
+		"max_barrels": 0,
+		"name": "Stein Fallen",
+		"role": "sonst"
+	}, {
+		"id": 2225,
+		"max_barrels": 0,
+		"name": "Munition Galerie",
+		"role": "sonst"
+	}, {
+		"id": 3613,
+		"max_barrels": 0,
+		"name": "",
+		"role": "sonst"
+	}, {
+		"id": 3748,
+		"max_barrels": 0,
+		"name": "Essen Kueche",
+		"role": "essen"
+	}, {
+		"id": 3749,
+		"max_barrels": 0,
+		"name": "Essen Kueche 2",
+		"role": "essen"
+	} ],
+	"manager": true,
+	"stats": {
+		"barrel_jobs": 0,
+		"barrel_orders": 2,
+		"barrels": 136,
+		"barrels_empty": 43,
+		"boulders": 12573,
+		"brew_jobs": 0,
+		"drinks": 512,
+		"fruit": 0,
+		"fruit_jobs": 0,
+		"logs": 177,
+		"plants": 173,
+		"plants_all": 173,
+		"pot_jobs": 0,
+		"pot_orders": 2,
+		"pots": 69,
+		"pots_empty": 60
+	}
+}

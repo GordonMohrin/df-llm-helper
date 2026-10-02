@@ -1,0 +1,17 @@
+$ python -m df_llm_helper digest --full
+Status Y118 Granite 27 | Pop 174 (68 idle 57%) | Drinks 49d Food 85d | Jobs 101 (dig 0, 0 digging) | fps 250 | PAUSE
+!! 5 enemies on map, Threat: {'n': 1, 'name': 'Snodub Emgen "Jackalluster", Goblin Thief'}; {'n': 1, 'name': 
+!! alert.flag open (30 min): 11:46:50 [AMBUSH_SNATCHER] Snatcher! Protect the children!
+!! siege.flag open (30 min): 11:46:50 [AMBUSH_SNATCHER] Snatcher! Protect the children!
+!! Hunger>40k: Aban486=50k, Ber4165=50k, Tholtig1029=46k, Kib4338=45k, +1
+! Civilian alert active
+! Drinks 49 days (<50)
+! dig.flag open (165 min): 09:31:47 Grabqueue niedrig: 0
+! food.flag open (159 min): Vorraete knapp: Mahlzeiten+Fleisch+Fisch=0, Getraenke=0, Pfl
+! migranten.flag open (184 min): 09:13:00 NEUE BUERGER (1): 6468 Litast Gulnaslibash "Islanda
+! mood.flag open (39 min): 2026-10-02 08:47:50 Kivish Duralkib "Honorednets", Carpenter
+! notfall.flag open (184 min): 09:13:00 NOTFALL 971 Tun Likotmishthem "Inksc durst=31388 hu
+! pause.hold.flag open (30 min): alarm
+! wirtschaft.flag open (170 min): 09:27:04 AUSLASTUNG 8% Auslastung (5/63 arbeiten, Idle 58, S
+! Idle 57% (68 of 119 adults)
+[exit=0]

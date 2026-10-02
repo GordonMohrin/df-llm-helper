@@ -1,0 +1,35 @@
+# excerpt of <DF>/hack/docs/docs/guides/quickfort-user-guide.html (DFHack's own quickfort manual)
+
+Buildings larger than 1x1, like workshops, can be represented in any of three
+ways. You can designate just their center tile with empty cells around it to
+leave room for the footprint, like this:
+#build a mason workshop in row 2, col 2 that will occupy the 3x3 area
+` `  ` #
+` wm ` #
+` `  ` #
+# #  # #
+
+
+Or you can fill out the entire footprint like this:
+#build a mason workshop
+wm wm wm #
+wm wm wm #
+wm wm wm #
+#  #  #  #
+
+
+This format may be verbose for regular workshops, but it can be very helpful for
+laying out structures like screw pump towers and waterwheels, whose “center
+point” can be non-obvious.
+Or you can use area expansion syntax:
+#build a mason workshop
+wm(3x3)  #
+`  `  `  #
+`  `  `  #
+#  #  #  #
+
+
+This style can be convenient for laying out multiple buildings of the same type.
+If you are building a large-scale block factory, for example, this will create
+20 mason workshops all in a row:
+#build lin

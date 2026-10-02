@@ -1,0 +1,10 @@
+  ok claude/advance 0
+  ok quicksave
+  ok claude/handel prep --live
+  ok claude/handel broker --live --force-job
+  ERROR claude/handel plan
+  ok claude/handel mark --live
+  ok claude/handel open --live
+  ok claude/handel select --dry
+Caravan: REVIEW (trade)
+Must-have goods in offer: wood 62, food 155

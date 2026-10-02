@@ -1,0 +1,15 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\admin\claude gordons projects\dfpilot-public\df_llm_helper\__main__.py", line 6, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "C:\Users\admin\claude gordons projects\dfpilot-public\df_llm_helper\cli.py", line 1208, in main
+    return int(args.fn(args) or 0)
+               ~~~~~~~^^^^^^
+  File "C:\Users\admin\claude gordons projects\dfpilot-public\df_llm_helper\cli.py", line 726, in cmd_forecast
+    s = series_from_metrics(args.file)
+  File "C:\Users\admin\claude gordons projects\dfpilot-public\df_llm_helper\forecast.py", line 214, in series_from_metrics
+    with open(path, encoding="utf-8", errors="replace") as f:
+         ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'nonexist.csv'

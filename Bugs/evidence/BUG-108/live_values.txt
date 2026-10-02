@@ -1,0 +1,18 @@
+# live, 2026-10-02 ~12:25, game paused, Y118
+$ dfhack-run claude/status   (excerpt: drink_days, food_days, stock)
+"drink_days": 49
+"food_days": 85
+"stock": {"barrels": 134,"bars": 106,"beds": 6,"bins": 30,"boulders": 11988,"cloth": 39,"drink": 512,"food": 354,"seeds": 209,"wood": 177}
+
+$ dfhack-run claude/report  (excerpt)
+"buerger": 174
+"fisch": 0
+"fleisch": 0
+"getraenke": 512
+"mahlzeiten": 176
+"pflanzen": 174
+
+$ python -m df_llm_helper plan supply
+drink: stock 512, empty in 49 days
+food: stock 176, empty in 42 days
+[exit=0]

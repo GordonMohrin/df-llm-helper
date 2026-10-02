@@ -1,0 +1,6 @@
+$ python -m df_llm_helper --mock fixtures/run5 autopilot log
+usage: df-llm-helper autopilot [-h] [--dry-run] [--loop] [--once]
+                               [--interval INTERVAL]
+                               [{run,rules,conflicts,enable}] [rule]
+df-llm-helper autopilot: error: argument action: invalid choice: 'log' (choose from run, rules, conflicts, enable)
+[exit 2]

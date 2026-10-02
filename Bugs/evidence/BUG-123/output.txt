@@ -1,0 +1,70 @@
+$ python -m df_llm_helper plan trade --help
+usage: df-llm-helper plan [-h] [--json JSON] [--area AREA]
+                          [--area-file AREA_FILE] [--targets TARGETS]
+                          [--picks PICKS] [--max-open MAX_OPEN] [--csv]
+                          [--bars BARS] [--prod PROD] [--growth GROWTH]
+                          {blueprint,trade,dig,armor,supply} [files ...]
+
+positional arguments:
+  {blueprint,trade,dig,armor,supply}
+  files
+
+options:
+  -h, --help            show this help message and exit
+  --json JSON           trade: input {own:[...], offer:[...], ratio, reserves,
+                        max_weight}
+  --area AREA           dig: 'z x y w h' (live via claude/area)
+  --area-file AREA_FILE
+                        dig: saved claude/area output
+  --targets TARGETS     dig: 'x,y[,prio];x,y;...'
+  --picks PICKS
+  --max-open MAX_OPEN
+  --csv                 dig: print the quickfort #dig CSV per batch
+  --bars BARS           armor: bars per metal, e.g. iron=32,bronze=31
+  --prod PROD           supply: production per day, e.g. drink=10,food=4
+  --growth GROWTH       supply: immigrants per day
+[exit=0]
+
+
+===== A) the example with the shape of TradeItem (id,name,category,value,weight,qty) works; 'gem' is never bought =====
+$ python -m df_llm_helper plan trade --json "C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-123\working_example_trade.json"
+Buy 320 / sell 800 (ratio 2.5), weight 100.0, method exact
+  buy  20x Plump helmet (food) at 10 each
+  buy  8x Log (wood) at 15 each
+  sell 8x Steinkrug ä ö ü ☼ at 100 each
+  Note: 1 offer items in unlisted categories are not bought
+  Note: purchase limited by the weight limit
+[exit=0]
+
+
+===== B) same file with "priorities": ["gem", "food"] -> ignored (same result, no warning) =====
+$ python -m df_llm_helper plan trade --json C:\Users\admin\AppData\Local\Temp\dfh_core_e1so1urd\prio.json
+Buy 320 / sell 800 (ratio 2.5), weight 100.0, method exact
+  buy  20x Plump helmet (food) at 10 each
+  buy  8x Log (wood) at 15 each
+  sell 8x Steinkrug ä ö ü ☼ at 100 each
+  Note: 1 offer items in unlisted categories are not bought
+  Note: purchase limited by the weight limit
+[exit=0]
+
+
+===== C) a plausible hand-written file (field names guessed: 'price', 'amount') -> traceback =====
+$ python -m df_llm_helper plan trade --json C:\Users\admin\AppData\Local\Temp\dfh_core_e1so1urd\guess.json
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\admin\claude gordons projects\dfpilot-public\df_llm_helper\__main__.py", line 6, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "C:\Users\admin\claude gordons projects\dfpilot-public\df_llm_helper\cli.py", line 1208, in main
+    return int(args.fn(args) or 0)
+               ~~~~~~~^^^^^^
+  File "C:\Users\admin\claude gordons projects\dfpilot-public\df_llm_helper\cli.py", line 601, in cmd_plan
+    plan = pl.plan_trade(mk(d.get("own", [])), mk(d.get("offer", [])), ratio=float(d.get("ratio", 2.3)),
+                         ~~^^^^^^^^^^^^^^^^^^
+  File "C:\Users\admin\claude gordons projects\dfpilot-public\df_llm_helper\cli.py", line 600, in <lambda>
+    mk = lambda xs: [pl.TradeItem(**x) for x in xs]  # noqa: E731
+                     ~~~~~~~~~~~~^^^^^
+TypeError: TradeItem.__init__() got an unexpected keyword argument 'price'
+[exit=1]
+

@@ -1,0 +1,7 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 check
+Status Y102 Hematite 12 | Pop 24 (7 idle 30%) | Drinks 76d Food 189d | Jobs 199 (dig 63, 3 digging) | fps 250 | PAUSE
+!! Hunger>40k: Tekkud414=47k, Eral3473=40k
+! Caravan Muboomon: Approaching, 3055 ticks (prepare trade)
+! [guard] tools/events.log missing (watcher is not writing)
+[... 3 more lines cut]
+[exit 0]

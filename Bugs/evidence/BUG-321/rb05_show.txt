@@ -1,0 +1,9 @@
+$ python -m df_llm_helper --mock fixtures/run5 runbook show rb05_waechter_blind
+rb05_waechter_blind: Guard blind: last-report-id larger than the highest report
+Symptom: last_report_id is not None and max_report_id is not None and max_report_id >= 0 and last_report_id > max_report_id
+KB: waechter_blind
+Player consent needed: False
+ 1. action: reset_report_id
+ 2. manual: Restart unpause-guard.ps1 (own process, e.g. Invoke-CimMethod Win32_Process Create); Start-Process -WindowStyle Hidden dies
+Verify: last_report_id is not None and max_report_id is not None and last_report_id <= max_report_id
+[exit 0]

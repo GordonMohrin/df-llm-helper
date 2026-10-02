@@ -1,0 +1,4 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 journal chronik --append
+(coverage 100 % of the events)
+appended to <tmp>\repo_copy\tmp_bug\chronik.md
+[exit 0]

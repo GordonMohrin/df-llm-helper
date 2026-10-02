@@ -1,0 +1,27 @@
+trap-regex matches (line no, text):
+70001: Nil Zanegetest, Miner cancels Load cage trap: Needs empty cage.
+78401: Vutok Avuzum, broker cancels Load cage trap: Needs empty cage.
+81201: �zum Isakbomrek, Miner cancels Load cage trap: Needs empty cage.
+82601: �zum Isakbomrek, Miner cancels Load cage trap: Needs empty cage.
+85401: Logem Udilging, Carpenter cancels Load cage trap: Needs empty cage.
+99401: Zas Ecemoddom, Mechanic cancels Load cage trap: Needs empty cage.
+118301: Sibrek Sodeludil, Farmer cancels Load cage trap: Needs empty cage.
+123201: Adil Sazirsezuk, Fisherdwarf cancels Load cage trap: Needs empty cage.
+124601: Id Ozkaktun, Stonecrafter cancels Load cage trap: Needs empty cage.
+126701: Tholtig Nishzon, Mason cancels Load cage trap: Needs empty cage.
+127401: Sibrek Sodeludil, Planter cancels Load cage trap: Needs empty cage.
+134401: Tobul Kezatbomrek, Carpenter cancels Load cage trap: Needs empty cage.
+
+attack-regex matches:
+9001: The siege operator latches on firmly!
+135001: The wrestler attacks the militia captain but She jumps away!
+146701: The axedwarf attacks the wrestler but She jumps away!
+154801: The wrestler attacks the militia captain but She jumps away!
+162001: The wrestler attacks the militia captain but She jumps away!
+169201: The Axe Lord attacks the wrestler but She jumps away!
+178201: The wrestler attacks the Axe Lord but He jumps away!
+187201: The wrestler attacks the militia captain but She jumps away!
+200701: The wrestler attacks the expedition leader but He jumps away!
+201601: The wrestler attacks the Axe Lord but He jumps away!
+234901: The Elite Wrestler attacks the Axe Lord but He jumps away!
+247501: The Axe Lord attacks the militia captain but She jumps away!

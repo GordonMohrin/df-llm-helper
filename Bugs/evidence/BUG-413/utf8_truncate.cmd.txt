@@ -1,0 +1,2 @@
+dfhack-run.exe claude/pilot_batch 'C:/Users/admin/claude gordons projects/dfpilot-public/Bugs/evidence/BUG-413/req_utf8_truncate_max110.json'
+exit=0 time=0.13s

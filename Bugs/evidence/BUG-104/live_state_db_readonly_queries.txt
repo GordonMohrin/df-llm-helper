@@ -1,0 +1,22 @@
+READ-ONLY queries on the live data/state.db (2026-10-02 ~12:20):
+
+-- SELECT id, ts, game_id, <date from facts> FROM snapshots
+1 08:07:37 Windrings|100|263900 12. Hematite, Jahr 102 pop 24 drink_days 76 jobs 199
+2 08:07:50 Windrings|100|263900 26. Opal, Jahr 116 pop 176 drink_days 62 jobs 237
+3 08:08:00 Windrings|100|263900 26. Opal, Jahr 116 pop 176 drink_days 62 jobs 269
+4 08:29:21 Windrings|100|263900 12. Hematite, Jahr 102 pop 24 drink_days 76 jobs 199
+5 11:53:41 Windrings|100|263900 27. Granite, Jahr 118 pop 174 drink_days 49 jobs 101
+6 11:53:44 Windrings|100|263900 27. Granite, Jahr 118 pop 174 drink_days 49 jobs 101
+7 11:53:47 Windrings|100|263900 27. Granite, Jahr 118 pop 174 drink_days 49 jobs 101
+8 11:59:01 Windrings|100|263900 27. Granite, Jahr 118 pop 174 drink_days 49 jobs 101
+9 11:59:17 Windrings|100|263900 27. Granite, Jahr 118 pop 174 drink_days 49 jobs 101
+10 12:10:01 Windrings|100|263900 27. Granite, Jahr 118 pop 174 drink_days 49 jobs 101
+11 12:17:29 Windrings|100|263900 27. Granite, Jahr 118 pop 174 drink_days 49 jobs 101
+
+-- distinct (ts, game_date) in kpis (first rows)
+08:07:37 12. Hematite, Jahr 102
+08:07:50 26. Opal, Jahr 116
+08:08:00 26. Opal, Jahr 116
+08:29:21 12. Hematite, Jahr 102
+11:53:41 27. Granite, Jahr 118
+11:53:44 27. Granite, Jahr 118

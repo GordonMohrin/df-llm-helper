@@ -1,0 +1,3 @@
+$ python -m df_llm_helper --mock fixtures/run5 journal metrics --out ../metrics.csv
+Write refused: <tmp>\metrics.csv lies outside df-llm-helper/ and is not configured
+[exit 1]

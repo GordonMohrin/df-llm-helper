@@ -1,0 +1,382 @@
+{
+	"orders": [ {
+		"active": false,
+		"id": 34,
+		"job": "ConstructWeaponRack",
+		"left": 1,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 35,
+		"job": "ConstructArmorStand",
+		"left": 1,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 36,
+		"job": "ConstructHatchCover",
+		"left": 1,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 37,
+		"job": "ConstructGrate",
+		"left": 1,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 38,
+		"job": "ConstructFloodgate",
+		"left": 1,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 39,
+		"job": "ConstructSlab",
+		"left": 1,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 42,
+		"job": "ConstructMechanisms",
+		"left": 3,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 45,
+		"job": "MakeGoblet",
+		"left": 3,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 406,
+		"job": "MakeTool",
+		"left": 2,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 467,
+		"job": "MakeCrafts",
+		"left": 8,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 468,
+		"job": "MakeCrafts",
+		"left": 3,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 1045,
+		"job": "MakeCrafts",
+		"left": 4,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 1828,
+		"job": "MakeBucket",
+		"left": 4,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 1987,
+		"job": "ConstructStatue",
+		"left": 2,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 2673,
+		"job": "ConstructDoor",
+		"left": 2,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 2709,
+		"job": "ConstructBed",
+		"left": 4,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 2717,
+		"job": "MakeBarrel",
+		"left": 2,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 2718,
+		"job": "MakeBucket",
+		"left": 2,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 2719,
+		"job": "MakeCage",
+		"left": 2,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 2720,
+		"job": "ConstructDoor",
+		"left": 2,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 2721,
+		"job": "ConstructTable",
+		"left": 2,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 2722,
+		"job": "ConstructThrone",
+		"left": 2,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 2723,
+		"job": "ConstructCoffin",
+		"left": 1,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 2820,
+		"job": "MakeCrafts",
+		"left": 3,
+		"validated": true
+	}, {
+		"active": true,
+		"id": 2899,
+		"job": "MakeArmor",
+		"left": 1,
+		"validated": true
+	}, {
+		"active": false,
+		"id": 2900,
+		"job": "EncrustWithGems",
+		"left": 4,
+		"validated": true
+	} ],
+	"positions": [ {
+		"assignment": 0,
+		"code": "DUNGEON_MASTER",
+		"histfig": -1,
+		"histfig2": -1,
+		"idx": 0,
+		"in_assignments_by_type": [ false, false ],
+		"own_idx": 12,
+		"position_vector_idx": -1,
+		"required_office": 250,
+		"responsibilities": [ 25, 28 ]
+	}, {
+		"assignment": 1,
+		"code": "HAMMERER",
+		"histfig": -1,
+		"histfig2": -1,
+		"idx": 1,
+		"in_assignments_by_type": [ false ],
+		"own_idx": 11,
+		"position_vector_idx": -1,
+		"required_office": 0,
+		"responsibilities": [ 13 ]
+	}, {
+		"assignment": 2,
+		"code": "CHAMPION",
+		"histfig": -1,
+		"histfig2": -1,
+		"idx": 2,
+		"in_assignments_by_type": [ false ],
+		"own_idx": 10,
+		"position_vector_idx": -1,
+		"required_office": 0,
+		"responsibilities": [ 23 ]
+	}, {
+		"assignment": 3,
+		"code": "BOOKKEEPER",
+		"histfig": -1,
+		"histfig2": -1,
+		"idx": 3,
+		"in_assignments_by_type": [ false ],
+		"own_idx": 9,
+		"position_vector_idx": -1,
+		"required_office": 1,
+		"responsibilities": [ 6 ]
+	}, {
+		"assignment": 4,
+		"code": "BROKER",
+		"histfig": -1,
+		"histfig2": -1,
+		"idx": 4,
+		"in_assignments_by_type": [ false ],
+		"own_idx": 8,
+		"position_vector_idx": -1,
+		"required_office": 0,
+		"responsibilities": [ 5 ]
+	}, {
+		"assignment": 5,
+		"code": "CHIEF_MEDICAL_DWARF",
+		"histfig": -1,
+		"histfig2": -1,
+		"idx": 5,
+		"in_assignments_by_type": [ false ],
+		"own_idx": 7,
+		"position_vector_idx": -1,
+		"required_office": 0,
+		"responsibilities": [ 24 ]
+	}, {
+		"assignment": 6,
+		"code": "MANAGER",
+		"histfig": 1774,
+		"histfig2": 1774,
+		"holder": {
+			"hf": 1774,
+			"id": 4079,
+			"name": "Rovod Konossezuk \"Brassslap\", manager"
+		},
+		"idx": 6,
+		"in_assignments_by_type": [ true ],
+		"own_idx": 6,
+		"position_vector_idx": 6,
+		"required_office": 1,
+		"responsibilities": [ 4 ]
+	}, {
+		"assignment": 7,
+		"code": "MAYOR",
+		"histfig": 1834,
+		"histfig2": 1834,
+		"holder": {
+			"hf": 1834,
+			"id": 4216,
+			"name": "Atîs Monomlensham \"Paperden\", mayor"
+		},
+		"idx": 7,
+		"in_assignments_by_type": [ true, true, true ],
+		"own_idx": 5,
+		"position_vector_idx": 5,
+		"required_office": 500,
+		"responsibilities": [ 2, 3, 18 ]
+	}, {
+		"assignment": 8,
+		"code": "EXPEDITION_LEADER",
+		"histfig": -1,
+		"histfig2": 1756,
+		"holder": {
+			"hf": 1756,
+			"id": 3750,
+			"name": "Monom Rigòthrith \"Craftedbell\", militia captain"
+		},
+		"idx": 8,
+		"in_assignments_by_type": [ false, false, false ],
+		"own_idx": 4,
+		"position_vector_idx": -1,
+		"required_office": 0,
+		"responsibilities": [ 2, 3, 18 ]
+	}, {
+		"assignment": 9,
+		"code": "CAPTAIN_OF_THE_GUARD",
+		"histfig": -1,
+		"histfig2": -1,
+		"idx": 9,
+		"in_assignments_by_type": [ false ],
+		"own_idx": 3,
+		"position_vector_idx": -1,
+		"required_office": 250,
+		"responsibilities": [ 1 ]
+	}, {
+		"assignment": 10,
+		"code": "SHERIFF",
+		"histfig": -1,
+		"histfig2": -1,
+		"idx": 10,
+		"in_assignments_by_type": [ false ],
+		"own_idx": 2,
+		"position_vector_idx": -1,
+		"required_office": 100,
+		"responsibilities": [ 1 ]
+	}, {
+		"assignment": 11,
+		"code": "MILITIA_COMMANDER",
+		"histfig": -1,
+		"histfig2": -1,
+		"idx": 11,
+		"in_assignments_by_type": [ false ],
+		"own_idx": 0,
+		"position_vector_idx": -1,
+		"required_office": 0,
+		"responsibilities": [ 19 ]
+	}, {
+		"assignment": 12,
+		"code": "MILITIA_CAPTAIN",
+		"histfig": 1756,
+		"histfig2": 1756,
+		"holder": {
+			"hf": 1756,
+			"id": 3750,
+			"name": "Monom Rigòthrith \"Craftedbell\", militia captain"
+		},
+		"idx": 12,
+		"in_assignments_by_type": [],
+		"own_idx": 1,
+		"position_vector_idx": 1,
+		"required_office": 0,
+		"responsibilities": []
+	}, {
+		"assignment": 13,
+		"code": "MILITIA_CAPTAIN",
+		"histfig": 1758,
+		"histfig2": 1758,
+		"holder": {
+			"hf": 1758,
+			"id": 3748,
+			"name": "Kosoth ïtebmeban Emetestrith \"Poststreams the Fresh Spy\", militia captain"
+		},
+		"idx": 13,
+		"in_assignments_by_type": [],
+		"own_idx": 1,
+		"position_vector_idx": 1,
+		"required_office": 0,
+		"responsibilities": []
+	}, {
+		"assignment": 14,
+		"code": "MILITIA_CAPTAIN",
+		"histfig": 1000,
+		"histfig2": 1000,
+		"holder": {
+			"hf": 1000,
+			"id": 842,
+			"name": "Lòr èrithrilem \"Laboryouth\", militia captain"
+		},
+		"idx": 14,
+		"in_assignments_by_type": [],
+		"own_idx": 1,
+		"position_vector_idx": 1,
+		"required_office": 0,
+		"responsibilities": []
+	}, {
+		"assignment": 15,
+		"code": "MILITIA_CAPTAIN",
+		"histfig": -1,
+		"histfig2": -1,
+		"idx": 15,
+		"in_assignments_by_type": [],
+		"own_idx": 1,
+		"position_vector_idx": -1,
+		"required_office": 0,
+		"responsibilities": []
+	}, {
+		"assignment": 16,
+		"code": "MILITIA_CAPTAIN",
+		"histfig": 1936,
+		"histfig2": 1936,
+		"holder": {
+			"hf": 1936,
+			"id": 4416,
+			"name": "Dôbar Dallithkel \"Riddlemetals\", militia captain"
+		},
+		"idx": 16,
+		"in_assignments_by_type": [],
+		"own_idx": 1,
+		"position_vector_idx": 1,
+		"required_office": 0,
+		"responsibilities": []
+	} ]
+}

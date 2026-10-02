@@ -1,0 +1,26 @@
+Trupp | Id | Name | Waffe | Teile/9 | Training | Skills
+Bergleute | 3750 | Monom Rigòthrith "Cra | - | 0/9 | nein (-) | -
+Bergleute | 3746 | Uzol Ularmeng "Idollas | pick | 1/9 | nein (Dig) | -
+Bergleute | 3745 | Inod Loloranan "Letter | - | 0/9 | nein (BringItemToDepot) | -
+Wache | 3748 | Kosoth ïtebmeban "Pos | battle axe | 1/9 | ja (Constant) (-) | AXE7,MEL9,WRE2,DOD4
+Wache | 4080 | Mafol Alåthnish "Bolt | - | 0/9 | ja (Constant) (-) | AXE2,SPE2,SHI2,ARM2,MEL5,WRE2,DOD4
+Wache | 3473 | Eral Likotginet "Inkyc | - | 0/9 | ja (Constant) (Eat) | AXE1,MEL4,WRE2,DOD4
+Summe: 6 Soldaten, Ruestungsteile 2/54, trainierend (Routine 2): 3
+
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_1wfwi0bx\cfg.yaml plan armor --bars iron=32,bronze=31
+Quota 2 soldiers (now 6, missing 0); bars needed 78, available 63, missing 15
+  forge 6x weapon from iron (18 bars)
+  forge 4x breastplate from iron (12 bars)
+  forge 2x breastplate from bronze (6 bars)
+  forge 2x helm from iron (2 bars)
+  forge 4x helm from bronze (4 bars)
+  forge 6x shield from bronze (12 bars)
+  forge 4x greaves from bronze (8 bars)
+  forge 1x boots from bronze (1 bars)
+  deferred 2x greaves (bars missing)
+  deferred 5x boots (bars missing)
+  deferred 6x gauntlets (bars missing)
+  Note: 6 soldiers > quota 2
+  Note: 13 pieces deferred (bars missing: 15)
+[exit=0]
+

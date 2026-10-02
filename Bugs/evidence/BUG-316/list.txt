@@ -1,0 +1,8 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 exception list
+2026-10-02T10:38:20Z FP11 []: r (player consent: q)
+2026-10-02T10:38:20Z FP11 []: r (player consent: q)
+2026-10-02T10:38:20Z FP11 []: r (player consent: q)
+2026-10-02T10:38:21Z FP0 []: r (player consent: q)
+2026-10-02T10:38:21Z L99 []: r (player consent: q)
+2026-10-02T10:38:22Z FP13 [' ', 'a b', 'ä']: r (player consent: q)
+[exit 0]

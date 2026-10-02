@@ -1,0 +1,28 @@
+{
+	"civ": {
+		"alerts": 2,
+		"burrow_blocks_max": 42,
+		"civ_alert_idx": 1
+	},
+	"enemies": [ {
+		"dist": 83,
+		"flier": false,
+		"great": false,
+		"id": 6508,
+		"name": "Snodub Emgen \"Jackalluster\", Goblin Thie",
+		"near": false,
+		"x": 13,
+		"y": 16,
+		"z": 129
+	}, {
+		"dist": 84,
+		"flier": false,
+		"great": false,
+		"id": 6509,
+		"name": "Smunstu Ezr├╗amxu \"Crewseduced\", Goblin ",
+		"near": false,
+		"x": 12,
+		"y": 14,
+		"z": 129
+	} ]
+}

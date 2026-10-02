@@ -1,0 +1,1 @@
+feinde=2 nah=0 civ=1 Bergleute[6/10 r0 o0 dur0 hun0 eq0] Wache[7/10 r2 o0 dur0 hun0 eq1] Elite2[7/10 r2 o0 dur0 hun0 eq7] Schuetzen-alt-leer[0/10 r2 o0 dur0 hun0 eq0] Schuetzen[7/10 r2 o0 dur0 hun0 eq1]

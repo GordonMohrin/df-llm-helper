@@ -1,0 +1,3 @@
+$ python -m df_llm_helper --mock fixtures/run5 journal postmortem --out data/exceptions.jsonl
+Postmortem skeleton -> <tmp>\repo_copy\data\exceptions.jsonl
+[exit 0]

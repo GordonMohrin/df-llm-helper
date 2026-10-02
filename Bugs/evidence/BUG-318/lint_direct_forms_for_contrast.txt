@@ -1,0 +1,8 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 lint tmp_bug/sane
+L04_direct.lua:1: L04 reveal/revflood uncovers the map
+L08_direct.lua:1: L08 setting position directly (teleport)
+L10_direct.lua:1: L10 reading a tile without checking 'discovered' (designation.hidden) (warning)
+L17_direct.lua:1: L17 changing terrain
+L21_direct.lua:1: L21 changing item material
+5 findings (4 errors)
+[exit 1]

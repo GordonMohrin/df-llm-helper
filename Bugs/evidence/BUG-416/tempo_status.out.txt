@@ -1,0 +1,22 @@
+{
+	"civ_alert_idx": 1,
+	"config": true,
+	"config_ziel": 200,
+	"danger_jetzt": "zivilwarnung",
+	"enabler_fps": 250,
+	"faktor_x100": 100,
+	"fehler": [],
+	"frames_pro_s": 91,
+	"gfps": 30,
+	"grund_aus": "zivilwarnung",
+	"kalender_ticks_pro_s": 91,
+	"manuell_aus": false,
+	"normal_fps": 250,
+	"resumes": 0,
+	"slowmo": false,
+	"suspends": 0,
+	"timestream": false,
+	"wachjob": true,
+	"watchdog_alert": true,
+	"ziel_fps": 200
+}

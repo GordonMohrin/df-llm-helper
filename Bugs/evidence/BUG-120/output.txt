@@ -1,0 +1,66 @@
+
+===== A) options/positionals of the core commands WITHOUT help text (argparse introspection) =====
+digest     description=none  no-help: --scope
+check      description=none  no-help: --dry-run
+cycle      description=none  no-help: --dry-run
+autopilot  description=none  no-help: action, rule, --dry-run, --loop, --once, --interval
+guard      description=none  no-help: action, gate, --dry-run, --loop, --once, --interval
+waechter   description=none  no-help: --loop, --interval
+tempo      description=none  no-help: action, --dry-run
+heartbeat  description=none  no-help: -
+wake       description=none  no-help: --loop, --interval
+overlay    description=none  no-help: text, --send
+replay     description=none  no-help: files, -v
+record     description=none  no-help: commands
+budget     description=none  no-help: -
+metrics    description=none  no-help: --out
+plan       description=none  no-help: kind, files, --picks, --max-open
+total without help: 31
+
+===== B) --once is accepted by autopilot and guard but never read (cli.py: args.once unused) =====
+occurrences of 'args.once' in cli.py: 1 (siege uses it; autopilot/guard do not)
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_eqympszj\cfg.yaml autopilot --once
+no action
+[exit=0]
+
+
+===== C) a global option after the sub-command gives an unhelpful argparse error (OVERVIEW shows `record --record x.jsonl`) =====
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_eqympszj\cfg.yaml record --record C:\Users\admin\AppData\Local\Temp\dfh_core_eqympszj\x.jsonl claude/status
+usage: df-llm-helper [-h] [--config CONFIG] [--mock MOCK]
+                     [--replay-file REPLAY_FILE] [--record RECORD]
+                     {digest,check,cycle,autopilot,guard,waechter,tempo,siege,caravan,mood,care,forecast,workload,bottleneck,water,reboot,agents,dashboard,journal,heartbeat,wake,runbook,kb,brief,replay,record,exception,memory,bus,lint,budget,overlay,trade,plan,metrics,camera,defense,digcheck,dig,hygiene,perf,perimeter,reach,remote,settings,tools} ...
+df-llm-helper: error: unrecognized arguments: --record
+[exit=2]
+
+$ python -m df_llm_helper --version
+usage: df-llm-helper [-h] [--config CONFIG] [--mock MOCK]
+                     [--replay-file REPLAY_FILE] [--record RECORD]
+                     {digest,check,cycle,autopilot,guard,waechter,tempo,siege,caravan,mood,care,forecast,workload,bottleneck,water,reboot,agents,dashboard,journal,heartbeat,wake,runbook,kb,brief,replay,record,exception,memory,bus,lint,budget,overlay,trade,plan,metrics,camera,defense,digcheck,dig,hygiene,perf,perimeter,reach,remote,settings,tools} ...
+df-llm-helper: error: the following arguments are required: cmd
+[exit=2]
+
+$ python -m df_llm_helper help
+usage: df-llm-helper [-h] [--config CONFIG] [--mock MOCK]
+                     [--replay-file REPLAY_FILE] [--record RECORD]
+                     {digest,check,cycle,autopilot,guard,waechter,tempo,siege,caravan,mood,care,forecast,workload,bottleneck,water,reboot,agents,dashboard,journal,heartbeat,wake,runbook,kb,brief,replay,record,exception,memory,bus,lint,budget,overlay,trade,plan,metrics,camera,defense,digcheck,dig,hygiene,perf,perimeter,reach,remote,settings,tools} ...
+df-llm-helper: error: argument cmd: invalid choice: 'help' (choose from digest, check, cycle, autopilot, guard, waechter, tempo, siege, caravan, mood, care, forecast, workload, bottleneck, water, reboot, agents, dashboard, journal, heartbeat, wake, runbook, kb, brief, replay, record, exception, memory, bus, lint, budget, overlay, trade, plan, metrics, camera, defense, digcheck, dig, hygiene, perf, perimeter, reach, remote, settings, tools)
+[exit=2]
+
+
+===== D) --mock with a folder that does not exist / is a file is accepted; the failure shows up later as 'Query failed' =====
+$ python -m df_llm_helper --mock C:\Users\admin\AppData\Local\Temp\dfh_core_eqympszj\no_such_folder --config C:\Users\admin\AppData\Local\Temp\dfh_core_eqympszj\cfg.yaml digest
+Status ?
+!! Query failed: claude/status: no fixture for 'claude/status' (check DF/dfhack-run)
+[exit=0]
+
+$ python -m df_llm_helper --mock fixtures/run5/status.txt --config C:\Users\admin\AppData\Local\Temp\dfh_core_eqympszj\cfg.yaml digest
+No change since 12:25 (1 open: Query).
+[exit=0]
+
+
+===== E) `digest --scope <unknown>` (see BUG-117 F) and `tempo` without action =====
+$ python -m df_llm_helper --mock fixtures/run5 --config C:\Users\admin\AppData\Local\Temp\dfh_core_eqympszj\cfg.yaml tempo
+usage: df-llm-helper tempo [-h] [--dry-run] {on,off,status}
+df-llm-helper tempo: error: the following arguments are required: action
+[exit=2]
+

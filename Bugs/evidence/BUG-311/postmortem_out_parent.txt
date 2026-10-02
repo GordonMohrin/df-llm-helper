@@ -1,0 +1,3 @@
+$ python -m df_llm_helper --mock fixtures/run5 journal postmortem --out ../POSTMORTEM-runN.md
+Write refused: <tmp>\POSTMORTEM-runN.md lies outside df-llm-helper/ and is not configured
+[exit 1]

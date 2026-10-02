@@ -1,0 +1,3 @@
+$ grep -rn 'autopilot log' docs
+docs/manual-v3/05-tools.md:34: - Every action is in `state.db` (`python -m df_llm_helper autopilot log` / table `actions`, rules `tools_miners`, `tools_pickfix`) with
+[exit 0]

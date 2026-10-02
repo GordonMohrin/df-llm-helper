@@ -1,0 +1,2 @@
+!! Water in the fort at (120,99,128): 5 tiles (before 0)
+Emergency wall: runbook rb21_flut --param x=128 --param y=99 --param z=128 (Quickfort claude/r5_notwand.csv); dig ban around the front

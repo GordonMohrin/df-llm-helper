@@ -1,0 +1,29 @@
+Trupp | Id | Name | Waffe | Teile/9 | Training | Skills
+Bergleute | 3750 | Monom Rigòthrith "Cra | pick | 1/9 | nein (-) | -
+Bergleute | 4156 | Sibrek Udibittás "Syr | pick | 1/9 | nein (StoreItemInStockpile) | -
+Bergleute | 3745 | Inod Loloranan "Letter | pick | 1/9 | nein (-) | MEL1
+Bergleute | 4163 | Olon Ogradkel "Reasonm | pick | 1/9 | nein (StoreItemInStockpile) | -
+Bergleute | 4206 | Asmel Thobarzes "Girde | pick | 1/9 | nein (-) | -
+Bergleute | 4178 | Ral Stukosidräth "Raz | pick | 1/9 | nein (-) | -
+Wache | 3748 | Kosoth ïtebmeban Emet | battle axe | 8/9 | ja (Constant) (-) | AXE108,SHI50,ARM30,MEL122,WRE37,DOD23
+Wache | 4419 | Kadol Kemsordodók "En | - | 7/9 | ja (Constant) (Rest) | AXE55,SHI29,ARM19,MEL75,WRE21,DOD15
+Wache | 4351 | Uvash Inenakrul "Hillt | battle axe | 8/9 | ja (Constant) (-) | AXE54,SHI33,ARM19,MEL73,WRE21,DOD16
+Wache | 3473 | Eral Likotginet "Inkyc | battle axe | 6/9 | ja (Constant) (Rest) | AXE21,SHI12,ARM7,MEL33,WRE14,DOD7
+Wache | 4347 | Sibrek Zonmeban "Helme | - | 8/9 | ja (Constant) (-) | AXE35,SHI37,ARM17,MEL57,WRE18,DOD16
+Wache | 4354 | Dodók Kanzudducim "Co | battle axe | 8/9 | ja (Constant) (Rest) | AXE47,ARM15,MEL54,WRE19,DOD14
+Wache | 1026 | Ber îgamzon "Gorgedhe | battle axe | 8/9 | ja (Constant) (-) | AXE15,ARM4,MEL17,WRE9,DOD9
+Elite2 | 842 | Lòr èrithrilem "Labo | - | 3/9 | ja (Constant) (StoreItemInBin) | ARM5,MEL13,WRE8,DOD5
+Elite2 | 4243 | Ber Inethmeng "Citylas | - | 2/9 | ja (Constant) (PickupEquipment) | ARM5,MEL12,WRE7,DOD5
+Elite2 | 4288 | Solon Mörulanam "Page | - | 2/9 | ja (Constant) (-) | ARM4,MEL10,WRE7,DOD4
+Elite2 | 4310 | Kulet Urolonol "Closem | - | 2/9 | ja (Constant) (Sleep) | ARM4,MEL12,WRE6,DOD5
+Elite2 | 4337 | Ducim Ozkakkikrost "Ca | - | 0/9 | ja (Constant) (DrinkItem) | ARM3,MEL10,WRE7,DOD5
+Elite2 | 4358 | Zulban Emetiden "Fresh | - | 0/9 | ja (Constant) (-) | ARM4,MEL12,WRE7,DOD5
+Elite2 | 4410 | Cerol Dasnastubbul "St | - | 0/9 | ja (Constant) (-) | ARM4,MEL11,WRE7,DOD5
+Schuetzen | 4416 | Dôbar Dallithkel "Rid | - | 7/9 | ja (Constant) (Rest) | ARM1,MEL3,WRE2,DOD5
+Schuetzen | 4423 | Edëm Zimeshcatten "Ph | crossbow* | 9/9 | ja (Constant) (-) | MEL3,WRE3,DOD4
+Schuetzen | 4512 | Kivish Oddomabsam "Clo | crossbow* | 9/9 | ja (Constant) (-) | ARM5,MEL6,WRE5,DOD6
+Schuetzen | 4513 | Såkzul Cogamem "Bootc | crossbow* | 9/9 | ja (Constant) (-) | HAM1,MEL4,WRE5,DOD5
+Schuetzen | 4515 | Edëm Besmararek "Pull | crossbow* | 9/9 | ja (Constant) (-) | MEL2,WRE2,DOD3
+Schuetzen | 4530 | Rigòth Atorcog "Perfe | crossbow* | 8/9 | ja (Constant) (-) | HAM1,MEL4,WRE2,DOD5
+Schuetzen | 4531 | Zaneg Domasgébar "Gui | crossbow* | 8/9 | ja (Constant) (-) | MEL2,WRE2,DOD6
+Summe: 27 Soldaten, Ruestungsteile 127/243, trainierend (Routine 2): 21

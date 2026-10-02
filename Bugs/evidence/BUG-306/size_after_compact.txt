@@ -1,0 +1,3 @@
+$ size of tmp_bug/scopes/militaer.md after compact
+5745 bytes tmp_bug\scopes\militaer.md
+[exit 0]

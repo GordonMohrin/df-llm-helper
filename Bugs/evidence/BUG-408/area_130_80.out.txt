@@ -1,0 +1,6 @@
+attempt to compare nil with number
+stack traceback:
+	[C]: in function 'math.min'
+	...aude gordons projects/dwarf-fortress/lua/claude/area.lua:31: in local 'script_code'
+	...team\steamapps\common\Dwarf Fortress\hack\lua\dfhack.lua:1117: in function 'dfhack.run_script_with_env'
+	(...tail calls...)

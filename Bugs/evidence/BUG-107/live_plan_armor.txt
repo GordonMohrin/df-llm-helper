@@ -1,0 +1,16 @@
+$ python -m df_llm_helper plan armor --bars iron=32,bronze=31
+Quota 18 soldiers (now 27, missing 0); bars needed 351, available 63, missing 288
+  forge 10x weapon from iron (30 bars)
+  forge 10x weapon from bronze (30 bars)
+  forge 2x helm from iron (2 bars)
+  forge 1x helm from bronze (1 bars)
+  deferred 7x weapon (bars missing)
+  deferred 27x breastplate (bars missing)
+  deferred 24x helm (bars missing)
+  deferred 27x shield (bars missing)
+  deferred 27x greaves (bars missing)
+  deferred 27x boots (bars missing)
+  deferred 27x gauntlets (bars missing)
+  Note: 27 soldiers > quota 18
+  Note: 166 pieces deferred (bars missing: 288)
+[exit=0]

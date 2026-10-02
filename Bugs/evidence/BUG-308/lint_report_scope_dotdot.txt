@@ -1,0 +1,6 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 agents lint-report tmp_bug/victim.md --scope x/../../../escape
+Original archived: tmp_bug\tools\out\berichte\20261002-123224-x\..\..\..\escape.md
+Report: Mandatory fields missing: Result, Measurements, Changed, Open, Risk; 56 lines > 12
+# Scope militaer+verteidigung – Gedächtnis (Run 5, Windrings, Wüste, Weltkachel (26,10))
+[... 11 more lines cut]
+[exit 1]

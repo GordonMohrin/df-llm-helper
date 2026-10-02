@@ -1,0 +1,11 @@
+Note: citizens/merchants: the door is only reachable through the lane (traps do not fire on citizens; the depot must be reached from the map edge, not through the lane)
+Written: C:\Users\admin\AppData\Local\Temp\claude\C--Users-admin-claude-gordons-projects\2a46845f-7ea2-4b7a-9f30-43d41c1737e6\scratchpad\at\out3\sub\..\escape.csv (+ .txt sketch)
+Build later (explicit): quickfort run claude/../escape.csv -n /walls -c 98,93,133
+Build later (explicit): quickfort run claude/../escape.csv -n /traps -c 98,93,133
+Build later (explicit): quickfort run claude/../escape.csv -n /niche -c 98,93,133
+C:/Users/admin/AppData/Local/Temp/claude/C--Users-admin-claude-gordons-projects/2a46845f-7ea2-4b7a-9f30-43d41c1737e6/scratchpad/at/out3:
+escape.csv
+escape.txt
+sub
+
+C:/Users/admin/AppData/Local/Temp/claude/C--Users-admin-claude-gordons-projects/2a46845f-7ea2-4b7a-9f30-43d41c1737e6/scratchpad/at/out3/sub:

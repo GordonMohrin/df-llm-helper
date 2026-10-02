@@ -1,0 +1,4 @@
+$ python -c "show the first bytes of the <pre> block and count b'\\r\\r\\n' in tmp_bug/d.html"
+b'<pre>z=130  x=85..94  y=96..98\r\r\n          9    \r\r\n     5678901234\r\r\n  96 ##########\r\r\n  97 WWWWWWWWWW\r\r\n  98 '
+\r\r\n sequences: 5
+[exit 0]

@@ -1,0 +1,3 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 exception add FP13 --objects ',, ,a b,ä' --reason r --ja q
+Exception registered: FP13 [' ', 'a b', 'ä']
+[exit 0]

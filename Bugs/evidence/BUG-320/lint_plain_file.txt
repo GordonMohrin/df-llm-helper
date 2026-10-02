@@ -1,0 +1,4 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 lint tmp_bug/lint/plain.lua
+tmp_bug\lint\plain.lua:1: L02 dig-now digs instantly
+1 findings (1 errors)
+[exit 1]

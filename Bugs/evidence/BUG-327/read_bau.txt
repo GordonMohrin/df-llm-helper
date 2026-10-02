@@ -1,0 +1,4 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 bus read --to bau
+! #1 trinken: Fässer knapp
+! #2 trinken [02.10. 12:36]: Fässer knapp
+[exit 0]

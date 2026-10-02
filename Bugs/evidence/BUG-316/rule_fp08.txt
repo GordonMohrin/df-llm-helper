@@ -1,0 +1,3 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 exception add fp08 --reason r --ja q
+FAIR PLAY: [fp08] unknown rule id (expected FPnn or Lnn, e.g. FP08, L31)
+[exit 3]

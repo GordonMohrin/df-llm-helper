@@ -1,0 +1,22 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 journal ingest --events tmp_bug/dir_as_file
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "<tmp>\repo_copy\df_llm_helper\__main__.py", line 6, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "<tmp>\repo_copy\df_llm_helper\cli.py", line 1208, in main
+    return int(args.fn(args) or 0)
+               ~~~~~~~^^^^^^
+  File "<tmp>\repo_copy\df_llm_helper\cli.py", line 940, in cmd_journal
+    text = read_text_tolerant(src)
+  File "<tmp>\repo_copy\df_llm_helper\toolsfs.py", line 16, in read_text_tolerant
+    data = path.read_bytes()
+  File "C:\Python314\Lib\pathlib\__init__.py", line 777, in read_bytes
+    with self.open(mode='rb', buffering=0) as f:
+         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\pathlib\__init__.py", line 771, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied: 'tmp_bug\\dir_as_file'
+[exit 1]

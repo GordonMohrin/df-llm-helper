@@ -1,0 +1,103 @@
+test_agents.py: pass=18 fail=0 skip=0
+test_bottleneck.py: pass=88 fail=0 skip=0
+test_camera.py: pass=17 fail=0 skip=2
+test_caravan.py: pass=13 fail=0 skip=1
+test_care.py: pass=129 fail=0 skip=0
+test_core.py: pass=60 fail=0 skip=0
+Status Y102 Hematite 12 | Pop 24 (7 idle 30%) | Drinks 76d Food 189d | Jobs 199 (dig 63, 3 digging) | fps 250 | PAUSE
+!! Hunger>40k: Tekkud414=47k, Eral3473=40k
+! Caravan Muboomon: Approaching, 3055 ticks (prepare trade)
+> material 10:50: Koks-Henne-Ei-Problem. Die Reaktion 'make coke from bituminous coal' hat [FUEL] (data/vanilla…
+> militaer 10:38: Elite-Wache = 3 Mann (Kosoth 3748 Hauptmann MELEE 9/AXE 6, Mafol 4080, Eral 3473), alle Routi…
+> erkundung 10:28: ZINN: CASSITERIT 5 Kacheln bei (98,97),(98,98),(99,98),(99,99),(100,98) z121 (Chert, 3 Kache…
+> bau: UMGESETZT: Kaserne z128 + Hospital z128 + S3 sind GEGRABEN (Hospital-Zone gesetzt); Zonen Tempel/Taverne…
+> erkundung 10:25: (a) HAEMATIT (IRON) 4 Kacheln bei (89,85),(89,86),(89,87),(90,85) z105 (Siltstone, Nordweste…
+> trinken+essen 10:06: Slaughter-Auftrag: nur Perlhuhn 3757 markiert (Rentier/Cavy/Pferde existieren nicht mehr…
+> +18 more inbox lines (python -m df_llm_helper bus read)
+Hygiene: measurement failed (no fixture for 'claude/pilot_hygiene status 0 20000')
+Remote: claude/pilot_remote status not readable (script installed?)
+Tools: claude/pilot_tools status not readable (script installed?)
+test_dashboard.py: pass=7 fail=0 skip=0
+test_defense.py: pass=29 fail=0 skip=1
+test_digcheck.py: pass=12 fail=0 skip=1
+test_digest.py: pass=160 fail=0 skip=0
+test_forecast.py: pass=48 fail=0 skip=0
+test_freeze_guard.py: pass=15 fail=0 skip=0
+test_guard.py: pass=47 fail=0 skip=0
+test_hygiene.py: pass=58 fail=0 skip=3
+test_journal.py: pass=6 fail=1 skip=0
+test_kb_brief_memory.py: pass=48 fail=0 skip=0
+test_lint_bus.py: pass=40 fail=0 skip=0
+test_lua.py: pass=18 fail=0 skip=2
+test_m3.py: pass=221 fail=1 skip=0
+test_metrics_cli2.py: pass=6 fail=0 skip=0
+test_moods.py: pass=72 fail=0 skip=0
+test_perf.py: pass=24 fail=0 skip=0
+test_perimeter.py: pass=14 fail=0 skip=3
+test_planners.py: pass=469 fail=0 skip=1
+test_reach.py: pass=11 fail=0 skip=4
+test_reboot.py: pass=8 fail=0 skip=0
+test_remote.py: pass=15 fail=0 skip=2
+Status Y102 Hematite 12 | Pop 24 (7 idle 30%) | Drinks 76d Food 189d | Jobs 199 (dig 63, 3 digging) | fps 250 | PAUSE
+!! Hunger>40k: Tekkud414=47k, Eral3473=40k
+! Caravan Muboomon: Approaching, 3055 ticks (prepare trade)
+test_report_fixes.py: pass=19 fail=0 skip=0
+test_rules.py: pass=32 fail=0 skip=0
+test_runbooks.py: pass=58 fail=0 skip=0
+test_scenarios_cli.py: pass=26 fail=1 skip=0
+test_settings.py: pass=18 fail=1 skip=0
+test_siege.py: pass=10 fail=0 skip=0
+test_tools_v3.py: pass=22 fail=0 skip=0
+test_transport.py: pass=148 fail=0 skip=1
+test_waechter.py: pass=13 fail=0 skip=0
+test_water.py: pass=6 fail=0 skip=1
+test_workload.py: pass=9 fail=0 skip=0
+TOTAL pass=2014 fail=4 skip=22 in 27.2s
+======================================================================
+FAIL test_journal.py test_metrics_export_same_header_as_metrics_csv
+Traceback (most recent call last):
+  File "C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-328\mini_pytest\run_tests.py", line 203, in main
+    fn(**args)
+    ~~^^^^^^^^
+  File "<project folder>\tests\test_journal.py", line 96, in test_metrics_export_same_header_as_metrics_csv
+    out = _journal(st).monthly_metrics()
+  File "<project folder>\df_llm_helper\journal.py", line 271, in monthly_metrics
+    text = export_csv(self.store)
+  File "<project folder>\df_llm_helper\metrics.py", line 93, in export_csv
+    e = rows.setdefault(r["ts"], {"echtzeit": datetime.fromtimestamp(r["ts"]).astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+                                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+OSError: [Errno 22] Invalid argument
+
+======================================================================
+FAIL test_m3.py test_stats_helpers_and_reader
+Traceback (most recent call last):
+  File "C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-328\mini_pytest\run_tests.py", line 203, in main
+    fn(**args)
+    ~~^^^^^^^^
+  File "<project folder>\tests\test_m3.py", line 72, in test_stats_helpers_and_reader
+    assert len(GamelogReader(big, Store()).new_lines(max_bytes=100)) == 50
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+
+======================================================================
+FAIL test_scenarios_cli.py test_at_least_8_scenarios_and_generator_reproducible
+Traceback (most recent call last):
+  File "C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-328\mini_pytest\run_tests.py", line 203, in main
+    fn(**args)
+    ~~^^^^^^^^
+  File "<project folder>\tests\test_scenarios_cli.py", line 28, in test_at_least_8_scenarios_and_generator_reproducible
+    assert (tmp_path / p.name).read_bytes() == p.read_bytes(), f"{p.name} outdated: python tests/make_fixtures.py"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: s01_getraenke_fallen.jsonl outdated: python tests/make_fixtures.py
+
+======================================================================
+FAIL test_settings.py test_write_boundary
+Traceback (most recent call last):
+  File "C:\Users\admin\claude gordons projects\dfpilot-public\Bugs\evidence\BUG-328\mini_pytest\run_tests.py", line 203, in main
+    fn(**args)
+    ~~^^^^^^^^
+  File "<project folder>\tests\test_settings.py", line 139, in test_write_boundary
+    assert all(k.startswith("prefs/backups/") for k in changed) and changed
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+

@@ -1,0 +1,3 @@
+$ wc -l tmp_bug/chronik.md
+102 lines; 100 non-empty; 50 distinct (every chronicle line now exists twice)
+[exit 0]

@@ -1,0 +1,3 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 agents lint-report tmp_bug/r_bom.txt
+Report: Mandatory fields missing: Result
+[exit 1]

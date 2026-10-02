@@ -1,0 +1,733 @@
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/auslastung_bloecke_z118.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/auslastung_stein_z118.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/bau_o1_sp.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/bau_o1_sp2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/bau_o1_ws.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/bau_o2_furn.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/bau_o2_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/bau_o3_furn.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/bau_o3_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/bau_o5_furn.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/bau_o5_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/bau_o6_sp.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/bed_int.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/bedroom_zone.csv: 
+  2:1 error E_CELL invalid character '"' in key '"b' (cell '"b{name=""Verwalter-Schlafzimm')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/bett1.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/brunnen133.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/brunnen_bach.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/butcher.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/cagetrap.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/crypt_build.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/crypt_build3.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/crypt_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/crypt_zone3.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/depot.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/depot149.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/depot_r3.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/dig_one.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/dorm_build.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/dorm_dig.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/dorm_link_n.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/dorm_link_s.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/dorm_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/dump2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/dump3.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/dump4.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/dump_door.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/dump_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/essen3_farm.csv: 
+  3:1 warning W_COLS 3 columns instead of 12
+  4:1 warning W_COLS 3 columns instead of 12
+  5:1 warning W_COLS 13 columns instead of 12
+  7:1 warning W_COLS 3 columns instead of 12
+  8:1 warning W_COLS 3 columns instead of 12
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/essen3_quern.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/essen3_sp.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/essen3_ws.csv: 
+  3:1 warning W_COLS 3 columns instead of 4
+  4:1 warning W_COLS 3 columns instead of 4
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/essen4_fischzone.csv: 
+  2:1 error E_ZONEKEY unknown zone key 'f' (allowed: BDTabdhmo)
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/essen4_fishery.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/essen5_train.csv: 
+  2:1 error E_ZONEKEY unknown zone key 't' (allowed: BDTabdhmo)
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/essen6_farm8.csv: 
+  3:1 warning W_COLS 3 columns instead of 1
+  4:1 warning W_COLS 3 columns instead of 1
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/essen6_sp.csv: 
+  3:1 warning W_COLS 3 columns instead of 4
+  4:1 warning W_COLS 3 columns instead of 4
+  5:1 warning W_COLS 3 columns instead of 4
+  6:1 warning W_COLS 10 columns instead of 4
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/essen6_ws.csv: 
+  3:1 warning W_COLS 3 columns instead of 10
+  4:1 warning W_COLS 3 columns instead of 10
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/explore2_coal.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/explore2_s.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/explore2_se120.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/explore2_se136.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/explore2_sw120.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/explore2_sw136.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/explore2_w56.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/explore2_w68.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/explore_e.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/explore_n.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/explore_s.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/explore_w.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/fallen148_ost.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/fallen_fortif.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/fallen_lager.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/fallen_schleuse.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/fallen_teppich.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/fallen_tuer2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/fallen_tueren.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/farm3.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/farmhall_build.csv: 
+  3:1 warning W_COLS 3 columns instead of 24
+  4:1 warning W_COLS 3 columns instead of 24
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/farmhall_dig.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/farmhall_link.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/fishery.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/food_ws.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/gather.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/graeber.csv: 
+  3:1 warning W_COLS 2 columns instead of 9
+  5:1 warning W_COLS 2 columns instead of 9
+  7:1 warning W_COLS 2 columns instead of 9
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/handel_jeweler.csv: 
+  2:2 error E_OVERLAP 'wj' overlaps 'wj' (line 2, column 1) on level 0
+  2:3 error E_OVERLAP 'wj' overlaps 'wj' (line 2, column 1) on level 0
+  3:1 error E_OVERLAP 'wj' overlaps 'wj' (line 2, column 1) on level 0
+  3:2 error E_OVERLAP 'wj' overlaps 'wj' (line 2, column 1) on level 0
+  3:3 error E_OVERLAP 'wj' overlaps 'wj' (line 2, column 1) on level 0
+  4:1 error E_OVERLAP 'wj' overlaps 'wj' (line 2, column 1) on level 0
+  4:2 error E_OVERLAP 'wj' overlaps 'wj' (line 2, column 1) on level 0
+  4:3 error E_OVERLAP 'wj' overlaps 'wj' (line 2, column 1) on level 0
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/handel_ruestlager.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/handel_weide.csv: 
+  2:1 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  2:2 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  2:3 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  2:4 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  2:5 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  3:1 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  3:2 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  3:3 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  3:4 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  3:5 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  4:1 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  4:2 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  4:3 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  4:4 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  4:5 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  5:1 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  5:2 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  5:3 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  5:4 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+  5:5 error E_ZONEKEY unknown zone key 'n' (allowed: BDTabdhmo)
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/holzofen148.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/hosp_pond.csv: 
+  2:1 error E_ZONEKEY unknown zone key 'p' (allowed: BDTabdhmo)
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/hospital.csv: 
+  4:1 warning W_COLS 9 columns instead of 5
+  5:1 warning W_COLS 9 columns instead of 5
+  6:1 warning W_COLS 8 columns instead of 5
+  7:1 warning W_COLS 9 columns instead of 5
+  8:1 warning W_COLS 9 columns instead of 5
+  9:1 warning W_COLS 7 columns instead of 5
+  10:1 warning W_COLS 7 columns instead of 5
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/hospital145_build.csv: 
+  3:1 warning W_COLS 8 columns instead of 2
+  5:1 warning W_COLS 10 columns instead of 2
+  7:1 warning W_COLS 8 columns instead of 2
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/hospital145_traction.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/hospital145_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/hospital_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/kadaver2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/kaserne144_build.csv: 
+  3:1 warning W_COLS 11 columns instead of 2
+  9:1 warning W_COLS 11 columns instead of 2
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/kaserne144_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/kaserne_betten.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/kaserne_betten2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/kitchen.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/knochen.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/krypta145_door.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/krypta145_saerge.csv: 
+  3:1 warning W_COLS 10 columns instead of 2
+  5:1 warning W_COLS 10 columns instead of 2
+  7:1 warning W_COLS 10 columns instead of 2
+  9:1 warning W_COLS 10 columns instead of 2
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/krypta145_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/mason2_148.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/mech148.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/mil5_kaserne_temp.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/mil_bowyer.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/mil_lager144.csv: 
+  3:1 warning W_COLS 2 columns instead of 8
+  4:1 warning W_COLS 1 columns instead of 8
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/mil_lederei.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/mil_schmiede.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/mil_tanner.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/mil_tierlager.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/muell_stapel.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/nahrung_farm1.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/nahrung_farm2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/nahrung_farm3.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/nahrung_farmu1.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/nahrung_farmu2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/nahrung_fish1.csv: 
+  2:1 error E_ZONEKEY unknown zone key 'f' (allowed: BDTabdhmo)
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/nahrung_kueche.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/nahrung_lager1.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/nahrung_lager2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/nahrung_quern.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/nahrung_still.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/nest13.csv: 
+  2:1 error E_CELL invalid character '"' in key '"n' (cell '"n{name=""Nestbox 13""}"')
+  2:2 error E_CELL invalid character '"' in key '"n' (cell '"n{name=""Nestbox 14""}"')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/nf_train.csv: 
+  2:1 error E_ZONEKEY unknown zone key 't' (allowed: BDTabdhmo)
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/office.csv: 
+  2:1 error E_CELL invalid character '"' in key '"o' (cell '"o{name=""Verwalterbuero"" ass')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/office_acc147.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/office_brk147.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/office_door.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/office_furn.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/office_furn_n.csv: 
+  3:1 warning W_COLS 3 columns instead of 2
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/office_furn_s.csv: 
+  4:1 warning W_COLS 3 columns instead of 2
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/office_int.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/office_mgr147.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/office_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/pens_fix.csv: 
+  2:1 error E_CELL invalid character '"' in key '"n' (cell '"n{name=""Male birds""}(7x3)"')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_betten_N.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_betten_S.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_betten_S12.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_depot.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_door1.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_dump.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_erzlager.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_gangD_traps.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_gangD_traps2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_gangD_traps3.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_gemlager.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_graeber_zone.csv: 
+  3:1 warning W_COLS 2 columns instead of 15
+  5:1 warning W_COLS 2 columns instead of 15
+  7:1 warning W_COLS 2 columns instead of 15
+  9:1 warning W_COLS 2 columns instead of 15
+  11:1 warning W_COLS 2 columns instead of 15
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_handelsware.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_hof_N.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_hospital_betten.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_hospital_furn.csv: 
+  4:1 warning W_COLS 7 columns instead of 8
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_hospital_traction.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_hospital_zone.csv: 
+  2:1 error E_CELL invalid character '"' in key '"m' (cell '"m{location=hospital}(8x4)"')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_juwelier.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_kaefiglager.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_kaserne_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_metall_forge.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_metall_holzofen.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_metall_lager_barren.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_metall_lager_erz.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_metall_schmelzer.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_metall_schmelzer2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_moebel_N.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_moebel_S.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_office_furn.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_office_zone_b.csv: 
+  2:1 error E_CELL invalid character '"' in key '"o' (cell '"o{name=""Buero Buchhalter""}(')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_office_zone_m.csv: 
+  2:1 error E_CELL invalid character '"' in key '"o' (cell '"o{name=""Buero Verwalter""}(3')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_p1_sp.csv: 
+  3:1 warning W_COLS 2 columns instead of 1
+  4:1 warning W_COLS 2 columns instead of 1
+  5:1 warning W_COLS 2 columns instead of 1
+  6:1 warning W_COLS 2 columns instead of 1
+  7:1 warning W_COLS 2 columns instead of 1
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_p1_sp2.csv: 
+  3:1 warning W_COLS 2 columns instead of 1
+  4:1 warning W_COLS 2 columns instead of 1
+  5:1 warning W_COLS 2 columns instead of 1
+  6:1 warning W_COLS 2 columns instead of 1
+  7:1 warning W_COLS 2 columns instead of 1
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_p1_sp3.csv: 
+  3:1 warning W_COLS 2 columns instead of 1
+  4:1 warning W_COLS 2 columns instead of 1
+  5:1 warning W_COLS 2 columns instead of 1
+  6:1 warning W_COLS 2 columns instead of 1
+  7:1 warning W_COLS 2 columns instead of 1
+  8:1 warning W_COLS 2 columns instead of 1
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_p1_sp4.csv: 
+  3:1 warning W_COLS 2 columns instead of 1
+  4:1 warning W_COLS 2 columns instead of 1
+  5:1 warning W_COLS 2 columns instead of 1
+  6:1 warning W_COLS 2 columns instead of 1
+  7:1 warning W_COLS 2 columns instead of 1
+  8:1 warning W_COLS 2 columns instead of 1
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_p1_wc.csv: 
+  3:1 warning W_COLS 3 columns instead of 4
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_p1_ws.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_p1_ws2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_refuse.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_ring_A.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_ring_E.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_ring_N.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_ring_S.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_ring_S2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_saerge.csv: 
+  3:1 warning W_COLS 2 columns instead of 15
+  5:1 warning W_COLS 2 columns instead of 15
+  7:1 warning W_COLS 2 columns instead of 15
+  9:1 warning W_COLS 2 columns instead of 15
+  11:1 warning W_COLS 2 columns instead of 15
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_speisesaal_furn.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_speisesaal_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_wall1.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_zdoors.csv: 
+  3:1 warning W_COLS 2 columns instead of 7
+  4:1 warning W_COLS 2 columns instead of 7
+  5:1 warning W_COLS 2 columns instead of 7
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3_zzone.csv: 
+  3:1 warning W_COLS 2 columns instead of 9
+  4:1 warning W_COLS 2 columns instead of 9
+  5:1 warning W_COLS 2 columns instead of 9
+  6:1 warning W_COLS 2 columns instead of 9
+  7:1 warning W_COLS 2 columns instead of 9
+  8:1 warning W_COLS 2 columns instead of 9
+  9:1 warning W_COLS 2 columns instead of 9
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3g_engrave_tempel.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3g_mood_Bowyers.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3g_mood_Clothiers.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3g_mood_GlassFurnace.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3g_mood_Leatherworks.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3g_mood_Loom.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3g_mood_MetalsmithsForge.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3g_mood_Tanners.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3g_mood_bowyer.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3g_refuse_kreuz.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3g_slabs.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3g_smooth_tempel.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3g_taverne.csv: 
+  2:1 error E_CELL invalid character '"' in key '"m' (cell '"m{location=tavern}(8x4)"')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3g_tempel.csv: 
+  2:1 error E_CELL invalid character '"' in key '"m' (cell '"m{location=temple name=""Temp')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3g_tempel_statuen.csv: 
+  7:1 warning W_COLS 9 columns instead of 10
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3w_beds_new.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3w_bedzones.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3w_engrave_z142.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3w_engrave_z143.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3w_engrave_z144.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3w_gather_z91.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3w_kueche.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3w_smooth_z142.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3w_smooth_z143.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3w_smooth_z144.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3w_wohn_betten.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r3w_wohn_dorm.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r4_brunnen.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r4_d_dorm_beds.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r4_d_dorm_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r4_d_speise.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r4_d_speise_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r4_depot.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r4_feld.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r4_fischerei.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r4_fischzone.csv: 
+  2:1 error E_ZONEKEY unknown zone key 'f' (allowed: BDTabdhmo)
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r4_kueche.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r4_meeting.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r4_metzger.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r4_sp_drink.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r4_sp_essen.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r4_still.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r4_tischler.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r4_z109_lager.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r4_z109_wsN.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r4_z109_wsS.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_f2_beete.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_f3_beete.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_farm_erw.csv: 
+  5:1 warning W_COLS 3 columns instead of 8
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_farmhalle_build.csv: 
+  7:1 warning W_COLS 5 columns instead of 3
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_farmhalle_lager.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_farmtest.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_feld91.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_gems.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_killbox2_e1_fallen.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_killbox2_e1_waende.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_killbox2_tw.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_killbox_e1_lane.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_killbox_e1_w101.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_killbox_e1_w91.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_killbox_e1_w91s.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_killbox_e2_dig.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_killbox_e2_door.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_killbox_e2_galerie.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_killbox_e3_fallen.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_killbox_e4_lager.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_killbox_e4_munition.csv: 
+  2:1 error E_CELL unexpected character ':' after the group (cell 'c{name="Munition Galerie" bins')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_killbox_e4_staender.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_kueche.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_nest.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_notwand.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_p1_door.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_pfropfen_P1.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_pfropfen_P2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_pfropfen_PB.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_still.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_terr_w1.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_terr_w2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_terr_w3.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_terr_w4.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_terrasse_ring.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_test_cw.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_turm_betten.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_turm_betten_eg.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_turm_dig_ostwand.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_turm_galerie_ausbau.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_turm_z133.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_turm_z134.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_turm_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_turm_zone_turm.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_wfalle.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z105_erz.csv: 
+  2:1 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Schacht z105" bins')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z112_erz.csv: 
+  2:1 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Schacht z112" bins')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z115_gemeinschaft_build.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z115_gemeinschaft_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z115_taverne_fass.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z116_zellen_build.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z116_zellen_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z117_training_build.csv: 
+  2:2 error E_OVERLAP 'r' overlaps 'a' (line 2, column 1) on level 0
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z117_training_racks.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z117_training_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z117_zellen_build.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z117_zellen_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z117_zone_rest.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z118_dump.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z119_dump.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z119_fertig.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z119_stein.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z119_tuch.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z120_dump.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z120_stein.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z121_erz.csv: 
+  2:1 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Schacht z121" bins')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z127_crypt2_build.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z127_crypt2_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z127_crypt_build.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z127_crypt_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z127_eimer_ufer.csv: 
+  2:1 error E_CELL unexpected character ':' after the group (cell 'c{name="Eimer Ufer" bins=0 whe')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z127_wassertor.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z127_wassertor_staender.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z127_wassertor_tuer.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z128_eimer_hosp.csv: 
+  2:1 error E_CELL unexpected character ':' after the group (cell 'c{name="Eimer Hospital" bins=0')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z128_hosp_ausbau.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z128_hosp_betten.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z128_hosp_chests.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z128_hosp_essen.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z128_hospital_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z128_kaserne_essen.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z128_ruest2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z128_suiten_build.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z128_suiten_office.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z128_suiten_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z128_training_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_betten.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_betten2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_dormS_betten.csv: 
+  3:1 warning W_COLS 14 columns instead of 1
+  4:1 warning W_COLS 14 columns instead of 1
+  5:1 warning W_COLS 14 columns instead of 1
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_dormS_betten2.csv: 
+  3:1 warning W_COLS 5 columns instead of 1
+  4:1 warning W_COLS 5 columns instead of 1
+  5:1 warning W_COLS 5 columns instead of 1
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_dormS_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_dorm_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_gilden_build.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_gilden_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_office.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_schlafhalle_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_speise.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_speise_ost.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_speise_ost_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_speise_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_taverne_mobel.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_taverne_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_tempel_statuen.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_tempel_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_zellen_betten.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_zellen_dig.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_zellen_tueren.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z129_zellen_zonen.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_butcher.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_butcher2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_carp2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_fallen_torB.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_fertigwaren.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_fischerei.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_flux.csv: 
+  2:1 error E_CELL unexpected character ':' after the group (cell 'c{name="Dolomit Flux" bins=0 w')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_holzofen.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_kohle_87.csv: 
+  2:1 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Schmelzer W" bin')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_kohle_93.csv: 
+  2:1 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Schmelzer O" bin')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_kohle_q.csv: 
+  2:1 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Schachtkopf" bin')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_kohle_west.csv: 
+  2:1 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle West" bins=0 whe')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_lager_kern.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_lager_mitte.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_lager_sued.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_muell_bruecke.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_muell_hebel.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_muell_tmp.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_muell_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_qdoor.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_schmiede2.csv: 
+  3:1 warning W_COLS 7 columns instead of 8
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_smelter.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_ws12.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_ws56.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_wsN.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_ws_ost2.csv: 
+  3:1 warning W_COLS 7 columns instead of 8
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_ws_s.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_ws_so.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_ws_west.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z130_zbdoor.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z132_kueche2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z132_kueche_essen.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z132_kueche_essen2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z132_kueche_essen3.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z133_fallen.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z133_fallen2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z133_fallen_a2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z133_fallen_b.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z133_torA_door.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z133_torB_door.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z133_torhausA.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_z133_torhausB.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_zb_wall.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_zimmer_B_betten.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_zimmer_B_tueren.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_zimmer_B_waende.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_zimmer_B_zonen.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_zimmer_C_betten.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_zimmer_C_tueren.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_zimmer_C_waende.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_zimmer_C_zonen.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_zimmer_D_betten.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_zimmer_D_tueren.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_zimmer_D_waende.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_zimmer_D_zonen.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_zugang_nord.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5_zugang_stummel.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5g_hospital_build.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5g_hospital_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5g_taverne.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5g_tempel.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5h_depot.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5h_gems.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5h_gems2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5h_vorrat.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5m_kaserne_build.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5m_kaserne_lager.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5m_kaserne_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/r5m_lager.csv: 
+  2:1 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  2:2 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  2:3 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  2:4 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  2:5 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  2:6 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  2:7 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  2:9 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Kern" bins=0 whe')
+  2:10 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Kern" bins=0 whe')
+  2:11 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Kern" bins=0 whe')
+  2:12 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Kern" bins=0 whe')
+  2:13 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Kern" bins=0 whe')
+  2:18 error E_CELL unexpected character ':' after the group (cell 'c{name="Barren Kern" bins=0 wh')
+  2:19 error E_CELL unexpected character ':' after the group (cell 'c{name="Barren Kern" bins=0 wh')
+  3:1 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  3:2 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  3:3 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  3:4 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  3:5 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  3:6 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  3:7 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  3:9 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Kern" bins=0 whe')
+  3:10 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Kern" bins=0 whe')
+  3:11 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Kern" bins=0 whe')
+  3:12 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Kern" bins=0 whe')
+  3:13 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Kern" bins=0 whe')
+  3:18 error E_CELL unexpected character ':' after the group (cell 'c{name="Barren Kern" bins=0 wh')
+  3:19 error E_CELL unexpected character ':' after the group (cell 'c{name="Barren Kern" bins=0 wh')
+  4:1 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  4:2 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  4:3 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  4:4 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  4:5 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  4:6 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  4:7 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  4:9 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Kern" bins=0 whe')
+  4:10 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Kern" bins=0 whe')
+  4:11 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Kern" bins=0 whe')
+  4:12 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Kern" bins=0 whe')
+  4:13 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Kern" bins=0 whe')
+  4:15 error E_CELL unexpected character ':' after the group (cell 'c{name="Barren Kern" bins=0 wh')
+  4:16 error E_CELL unexpected character ':' after the group (cell 'c{name="Barren Kern" bins=0 wh')
+  4:17 error E_CELL unexpected character ':' after the group (cell 'c{name="Barren Kern" bins=0 wh')
+  4:18 error E_CELL unexpected character ':' after the group (cell 'c{name="Barren Kern" bins=0 wh')
+  4:19 error E_CELL unexpected character ':' after the group (cell 'c{name="Barren Kern" bins=0 wh')
+  5:1 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  5:2 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  5:3 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  5:4 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  5:5 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  5:6 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  5:7 error E_CELL unexpected character ':' after the group (cell 'c{name="Erz Kern" bins=0 wheel')
+  5:9 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Kern" bins=0 whe')
+  5:10 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Kern" bins=0 whe')
+  5:11 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Kern" bins=0 whe')
+  5:12 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Kern" bins=0 whe')
+  5:13 error E_CELL unexpected character ':' after the group (cell 'c{name="Kohle Kern" bins=0 whe')
+  5:15 error E_CELL unexpected character ':' after the group (cell 'c{name="Barren Kern" bins=0 wh')
+  5:16 error E_CELL unexpected character ':' after the group (cell 'c{name="Barren Kern" bins=0 wh')
+  5:17 error E_CELL unexpected character ':' after the group (cell 'c{name="Barren Kern" bins=0 wh')
+  5:18 error E_CELL unexpected character ':' after the group (cell 'c{name="Barren Kern" bins=0 wh')
+  5:19 error E_CELL unexpected character ':' after the group (cell 'c{name="Barren Kern" bins=0 wh')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/refuse.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/refuse148.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/refuse148_door.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/refuse_room.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/room_door.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/room_walls.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/s1_hatch.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/schlaf.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/sp147_food.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/sp148_mf.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/sp148_stein_holz.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/speisesaal147.csv: 
+  3:1 warning W_COLS 2 columns instead of 9
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/speisesaal147_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/speisesaal_z147.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/starter_sp.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/starter_ws.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/statuen_z147.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/tavern147.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/taverne.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/tempel.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/tempel_statue.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/test_refuse.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/textil148.csv: 
+  4:1 warning W_COLS 7 columns instead of 2
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/treff147_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/trinken5_still2.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/trinken_sp.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/tuer_schacht.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wall148.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wasser_s1.csv: 
+  2:1 error E_ZONEKEY unknown zone key 'w' (allowed: BDTabdhmo)
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wasserquelle.csv: 
+  2:1 error E_ZONEKEY unknown zone key 'w' (allowed: BDTabdhmo)
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/werkzeug_lager.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_craft.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_craft3.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_dump5.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_e1.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_e_bedN.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_e_flur.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_e_hosp.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_e_kaserne.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_e_krypta.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_engrave_hall.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_engrave_tempel.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_farm3_build.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_farm3_dig.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_farmer.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_hosp_beds.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_hosp_zone.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_jeweler.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_lagerost_dig.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_loom.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_meet.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_s_bedN.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_s_flur.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_s_hosp.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_s_kaserne.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_s_krypta.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_smooth_hall.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_smooth_tempel.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_sp5.csv: 
+  3:1 warning W_COLS 5 columns instead of 4
+  4:1 warning W_COLS 5 columns instead of 4
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_sp7_so.csv: 
+  2:8 error E_OVERLAP 'u' overlaps 'g' (line 2, column 1) on level 0
+  3:1 warning W_COLS 15 columns instead of 14
+  4:1 warning W_COLS 15 columns instead of 14
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_sp7_sw.csv: 
+  3:1 warning W_COLS 2 columns instead of 1
+  4:1 warning W_COLS 2 columns instead of 1
+  5:1 warning W_COLS 2 columns instead of 1
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_sp_ost.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_sp_quarry.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wirt_start.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wohn146_beds.csv: 
+  3:1 warning W_COLS 2 columns instead of 17
+  4:1 warning W_COLS 2 columns instead of 17
+  5:1 warning W_COLS 2 columns instead of 17
+  6:1 warning W_COLS 2 columns instead of 17
+  7:1 warning W_COLS 2 columns instead of 17
+  8:1 warning W_COLS 2 columns instead of 17
+  9:1 warning W_COLS 2 columns instead of 17
+  10:1 warning W_COLS 2 columns instead of 17
+  11:1 warning W_COLS 2 columns instead of 17
+  12:1 warning W_COLS 5 columns instead of 17
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wohn146_cab.csv: 
+  3:1 warning W_COLS 2 columns instead of 19
+  4:1 warning W_COLS 2 columns instead of 19
+  5:1 warning W_COLS 2 columns instead of 19
+  6:1 warning W_COLS 2 columns instead of 19
+  7:1 warning W_COLS 2 columns instead of 19
+  8:1 warning W_COLS 2 columns instead of 19
+  9:1 warning W_COLS 2 columns instead of 19
+  10:1 warning W_COLS 2 columns instead of 19
+  11:1 warning W_COLS 2 columns instead of 19
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wohn146_doors.csv: 
+  5:1 warning W_COLS 18 columns instead of 2
+  9:1 warning W_COLS 18 columns instead of 2
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wohnen_ost_build.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wohnen_ost_dig.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/wohnen_ost_zone.csv: 
+  2:2 error E_CELL invalid character '"' in key '"b' (cell '"b{name=Schlafzimmer}(3x3)"')
+  2:6 error E_CELL invalid character '"' in key '"b' (cell '"b{name=Schlafzimmer}(3x3)"')
+  2:10 error E_CELL invalid character '"' in key '"b' (cell '"b{name=Schlafzimmer}(3x3)"')
+  2:14 error E_CELL invalid character '"' in key '"b' (cell '"b{name=Schlafzimmer}(3x3)"')
+  2:18 error E_CELL invalid character '"' in key '"b' (cell '"b{name=Schlafzimmer}(3x3)"')
+  10:2 error E_CELL invalid character '"' in key '"b' (cell '"b{name=Schlafzimmer}(3x3)"')
+  10:6 error E_CELL invalid character '"' in key '"b' (cell '"b{name=Schlafzimmer}(3x3)"')
+  10:10 error E_CELL invalid character '"' in key '"b' (cell '"b{name=Schlafzimmer}(3x3)"')
+  10:14 error E_CELL invalid character '"' in key '"b' (cell '"b{name=Schlafzimmer}(3x3)"')
+  10:18 error E_CELL invalid character '"' in key '"b' (cell '"b{name=Schlafzimmer}(3x3)"')
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/ws148.csv: 
+  3:1 warning W_COLS 10 columns instead of 2
+  11:1 warning W_COLS 14 columns instead of 2
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/zimmer_n.csv: ok
+E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/dfhack-config/blueprints/claude/zimmer_s.csv: ok

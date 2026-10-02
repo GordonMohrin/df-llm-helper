@@ -1,0 +1,17 @@
+$ python -m df_llm_helper --config C:\Users\admin\AppData\Local\Temp\dfh_core_rvkq6fyd\cfg.yaml wake
+
+[exit=0]
+
+$ python -m df_llm_helper --config C:\Users\admin\AppData\Local\Temp\dfh_core_rvkq6fyd\cfg.yaml wake
+WAKE critical [CITIZEN_DEATH]: ├«ton Uristelbel, Gem Cutter has been struck down. -> python -m df_llm_helper digest
+WAKE critical [MASTERPIECE_CRAFTED]: Kikrost Kilrudbuk├¿t has created a masterpiece Γÿ╝bronze figurine of goblinsΓÿ╝! -> python -m df_llm_helper digest
+WAKE critical [CITIZEN_DEATH]: Reg Sefolfikod, Carpenter has been found dead, dehydrated. -> python -m df_llm_helper digest
+WAKE critical [NO_BREAK_GRIP]: The goblin hammerman is unable to break the grip of The Elite Wrestler's right upper arm on The goblin hammerman's right upper leg! -> python -m df_llm_helper digest
+WAKE critical [RESOLVE_SHARED_ITEMS]: The goblin spearman gains possession of the ({silver spear}). -> python -m df_llm_helper digest
+WAKE critical [VOMIT]: The goblin thief vomits. -> python -m df_llm_helper digest
+WAKE critical [MASTERPIECE_CRAFTED]: Ral Stukosidräth has created a masterpiece ☼cherry wood figurine of goblins☼! -> python -m df_llm_helper digest
+WAKE critical [DODGE_FLYING_OBJECT]: The goblin Pikemaster jumps out of the goblin Pikemaster's flight path! -> python -m df_llm_helper digest
+[exit=0]
+
+-> VOMIT / RESOLVE_SHARED_ITEMS / DODGE_FLYING_OBJECT / NO_BREAK_GRIP / MASTERPIECE_CRAFTED are not actionable (they contain the word 'goblin');
+   lines with '├«'/'Γÿ╝' are CP437 mojibake of UTF-8 written by the old PowerShell watcher (journal.fix_mojibake repairs them, wake does not).

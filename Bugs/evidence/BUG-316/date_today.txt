@@ -1,0 +1,3 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 exception add FP11 --reason r --ja q --expires 2026-10-02
+Exception registered: FP11 []
+[exit 0]

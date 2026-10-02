@@ -1,0 +1,283 @@
+{
+	"beds_built": 326,
+	"beds_cap": 2,
+	"cage_cap": 6,
+	"craft_cap": 450,
+	"idle_namen": [ "Asën", "Urist", "Tun", "Vucar", "Ducim", "Såkzul", "Uzol", "ònul", "Dôbar", "èzum", "Datan", "Avuz", "Erush", "Uvash", "Ducim", "Vucar", "Atîs", "Onget", "Fath", "Rakust", "Thob", "Ardes", "åblel", "Urvad", "Rakust", "Likot", "Solon", "Kivish", "Minkot", "Minkot", "Rovod", "Sarvesh", "Dumat", "Zon", "Uvash", "Kivish", "Dodók", "Bëmbul", "Kumil", "Zulban", "Vabôk", "Limul", "Limul", "ùshrir", "Stodir", "Iden", "ònul", "Zuntîr", "Lokum", "Kib" ],
+	"idle_zivilisten": 50,
+	"katalog": 32,
+	"liste": [ {
+		"aktiv": false,
+		"bed": "AtLeast 40 BOULDER[non_economichard]; LessThan 6 WEAPONRACK",
+		"bestand": "6/6",
+		"eigen": "waffenregal",
+		"freq": "Daily",
+		"id": 34,
+		"job": "ConstructWeaponRack",
+		"links": "1/1",
+		"mat": "INORGANIC",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 40 BOULDER[non_economichard]; LessThan 6 ARMORSTAND",
+		"bestand": "8/6",
+		"eigen": "ruestungsstaender",
+		"freq": "Daily",
+		"id": 35,
+		"job": "ConstructArmorStand",
+		"links": "1/1",
+		"mat": "INORGANIC",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 40 BOULDER[non_economichard]; LessThan 2 HATCH_COVER",
+		"bestand": "2/2",
+		"eigen": "luke",
+		"freq": "Daily",
+		"id": 36,
+		"job": "ConstructHatchCover",
+		"links": "1/1",
+		"mat": "INORGANIC",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 40 BOULDER[non_economichard]; LessThan 2 GRATE",
+		"bestand": "2/2",
+		"eigen": "gitter",
+		"freq": "Daily",
+		"id": 37,
+		"job": "ConstructGrate",
+		"links": "1/1",
+		"mat": "INORGANIC",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 40 BOULDER[non_economichard]; LessThan 2 FLOODGATE",
+		"bestand": "2/2",
+		"eigen": "schleuse",
+		"freq": "Daily",
+		"id": 38,
+		"job": "ConstructFloodgate",
+		"links": "1/1",
+		"mat": "INORGANIC",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 40 BOULDER[non_economichard]; LessThan 2 SLAB",
+		"bestand": "2/2",
+		"eigen": "platte",
+		"freq": "Daily",
+		"id": 39,
+		"job": "ConstructSlab",
+		"links": "1/1",
+		"mat": "INORGANIC",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 40 BOULDER[non_economichard]; LessThan 60 TRAPPARTS",
+		"bestand": "65/60",
+		"eigen": "mechanismen",
+		"freq": "Daily",
+		"id": 42,
+		"job": "ConstructMechanisms",
+		"links": "3/3",
+		"mat": "INORGANIC",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 40 BOULDER[non_economichard]; LessThan 348 GOBLET",
+		"bestand": "400/60",
+		"eigen": "becher",
+		"freq": "Daily",
+		"id": 45,
+		"job": "MakeGoblet",
+		"links": "3/3",
+		"mat": "INORGANIC",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 40 BOULDER[non_economichard]; LessThan 60 TOOL",
+		"eigen": "topf",
+		"freq": "Daily",
+		"id": 406,
+		"job": "MakeTool",
+		"links": "2/2",
+		"mat": "INORGANIC",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 38 BOULDER[non_economichard]; LessThan 450 FIGURINE; LessThan 450 AMULET; LessThan 450 SCEPTER; LessThan 450 CROWN; LessThan 450 RING; LessThan 450 EARRING; LessThan 450 BRACELET",
+		"eigen": "krims_stein",
+		"freq": "Daily",
+		"id": 467,
+		"job": "MakeCrafts",
+		"links": "8/8",
+		"mat": "INORGANIC",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 3 NONE[body_part+bone]; LessThan 450 FIGURINE; LessThan 450 AMULET; LessThan 450 SCEPTER; LessThan 450 CROWN; LessThan 450 RING; LessThan 450 EARRING; LessThan 450 BRACELET",
+		"eigen": "krims_knochen",
+		"freq": "Daily",
+		"id": 468,
+		"job": "MakeCrafts",
+		"links": "3/3",
+		"mat": "bone",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 14 BAR; LessThan 450 FIGURINE; LessThan 450 AMULET; LessThan 450 SCEPTER; LessThan 450 CROWN; LessThan 450 RING; LessThan 450 EARRING; LessThan 450 BRACELET",
+		"eigen": "krims_bronze",
+		"freq": "Daily",
+		"id": 1045,
+		"job": "MakeCrafts",
+		"links": "4/4",
+		"mat": "",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "LessThan 30 BUCKET[empty]",
+		"eigen": "eimer_eisen",
+		"freq": "Daily",
+		"id": 1828,
+		"job": "MakeBucket",
+		"links": "4/4",
+		"mat": "",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 100 BOULDER[non_economichard]; LessThan 60 STATUE",
+		"bestand": "67/60",
+		"eigen": "statue",
+		"freq": "Daily",
+		"id": 1987,
+		"job": "ConstructStatue",
+		"links": "2/2",
+		"mat": "INORGANIC",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 40 BOULDER[non_economichard]; LessThan 4 DOOR",
+		"bestand": "8/4",
+		"eigen": "tuer",
+		"freq": "Daily",
+		"id": 2673,
+		"job": "ConstructDoor",
+		"links": "2/2",
+		"mat": "INORGANIC",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 2 WOOD; LessThan 2 BED",
+		"bestand": "6/12",
+		"eigen": "bett",
+		"freq": "Daily",
+		"id": 2709,
+		"job": "ConstructBed",
+		"links": "4/4",
+		"mat": "wood",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 30 WOOD; LessThan 10 BARREL[empty]",
+		"eigen": "faesser",
+		"freq": "Daily",
+		"id": 2717,
+		"job": "MakeBarrel",
+		"links": "2/2",
+		"mat": "wood",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 20 WOOD; LessThan 4 BUCKET[empty]",
+		"eigen": "eimer",
+		"freq": "Daily",
+		"id": 2718,
+		"job": "MakeBucket",
+		"links": "2/2",
+		"mat": "wood",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 20 WOOD; LessThan 6 CAGE[empty]",
+		"eigen": "kaefig",
+		"freq": "Daily",
+		"id": 2719,
+		"job": "MakeCage",
+		"links": "2/2",
+		"mat": "wood",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 12 WOOD; LessThan 6 DOOR",
+		"eigen": "tuer_holz",
+		"freq": "Daily",
+		"id": 2720,
+		"job": "ConstructDoor",
+		"links": "2/2",
+		"mat": "wood",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 12 WOOD; LessThan 6 TABLE",
+		"eigen": "tisch_holz",
+		"freq": "Daily",
+		"id": 2721,
+		"job": "ConstructTable",
+		"links": "2/2",
+		"mat": "wood",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 12 WOOD; LessThan 12 CHAIR",
+		"eigen": "stuhl_holz",
+		"freq": "Daily",
+		"id": 2722,
+		"job": "ConstructThrone",
+		"links": "2/2",
+		"mat": "wood",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 16 WOOD; LessThan 4 COFFIN",
+		"eigen": "sarg_holz",
+		"freq": "Daily",
+		"id": 2723,
+		"job": "ConstructCoffin",
+		"links": "1/1",
+		"mat": "wood",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 80 WOOD; LessThan 450 FIGURINE; LessThan 450 AMULET; LessThan 450 SCEPTER; LessThan 450 CROWN; LessThan 450 RING; LessThan 450 EARRING; LessThan 450 BRACELET",
+		"eigen": "krims_holz",
+		"freq": "Daily",
+		"id": 2820,
+		"job": "MakeCrafts",
+		"links": "3/3",
+		"mat": "wood",
+		"validiert": true
+	}, {
+		"aktiv": true,
+		"bed": "",
+		"eigen": "fremd",
+		"freq": "OneTime",
+		"id": 2899,
+		"job": "MakeArmor",
+		"links": "1/4",
+		"mat": "",
+		"validiert": true
+	}, {
+		"aktiv": false,
+		"bed": "AtLeast 40 SMALLGEM",
+		"eigen": "edelsteinfassung",
+		"freq": "Daily",
+		"id": 2900,
+		"job": "EncrustWithGems",
+		"links": "4/4",
+		"mat": "",
+		"validiert": true
+	} ],
+	"orders": 26,
+	"pop": 174
+}

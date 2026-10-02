@@ -1,0 +1,3 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 exception add FP11 --reason r --ja q --expires 30.09.2026
+FAIR PLAY: [FP11] expires must be an ISO date (YYYY-MM-DD), got '30.09.2026'
+[exit 3]

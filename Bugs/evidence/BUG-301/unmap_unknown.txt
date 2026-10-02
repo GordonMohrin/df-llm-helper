@@ -1,0 +1,2 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 dashboard unmap nonexistent
+[exit 0]

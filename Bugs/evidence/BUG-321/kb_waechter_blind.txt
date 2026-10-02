@@ -1,0 +1,6 @@
+$ python -m df_llm_helper --mock fixtures/run5 kb get waechter_blind
+[waechter_blind] Guard blind: events.log empty, last-report-id too large
+Cause: After a new game report IDs restart at 0; last-report-id.txt (e.g. 28181) stays -> no report is read. Runs 4 and 5.
+Fix: Set the file to the highest report ID (python -m df_llm_helper guard does this), restart the guard (Invoke-CimMethod Win32_Process Create; Start-Process -WindowStyle Hidden dies). Runbook rb05_waechter_blind.
+Source: SPEC appendix A5; session Run 5 08:01
+[exit 0]

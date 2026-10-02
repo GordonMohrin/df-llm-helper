@@ -1,0 +1,15 @@
+UNREACHABLE: F1, F3, F4, F5, Kitchens, Stills (cut at (101,99,z130))
+F1 (106,92,z132): cut by construction (101,99,z130), (100,94,z132) -> remove it (designate 'remove construction') or replace it with a door
+F3 (112,93,z131): cut by construction (101,99,z130) -> remove it (designate 'remove construction') or replace it with a door
+F4 (114,95,z131): cut by construction (101,99,z130) -> remove it (designate 'remove construction') or replace it with a door
+F5 (110,91,z131): cut by construction (101,99,z130) -> remove it (designate 'remove construction') or replace it with a door
+Kitchens (106,85,z132): cut by construction (101,99,z130), (100,94,z132) -> remove it (designate 'remove construction') or replace it with a door
+Stills (110,89,z132): cut by construction (101,99,z130), (100,94,z132) -> remove it (designate 'remove construction') or replace it with a door
+digcheck rect 131 100 70 122 77: refused (184 tiles, R2 x46)
+R2 outside contact within 2: x100..122 y70..71 z131 (46 tiles), e.g. outside tile (98,68,z131)
+WAKE perimeter: forbidden access to the core at (96,88,z132) 1 tile -> seal (python -m df_llm_helper perimeter seal --dry-run)
+WAKE perimeter: forbidden access to the core at (111,70,z131) 23 tiles -> seal (python -m df_llm_helper perimeter seal --dry-run)
+Accesses: 1 allowed, 2 forbidden (checked 12:18)
+  FORBIDDEN: (96,88,z132) 1 tile, bypasses the traps
+  FORBIDDEN: (111,70,z131) 23 tiles, bypasses the traps
+  allowed: (99,94,z132) 1 tile, through the traps

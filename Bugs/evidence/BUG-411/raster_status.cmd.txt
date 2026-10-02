@@ -1,0 +1,2 @@
+dfhack-run.exe claude/raster status
+exit=0 time=0.48s

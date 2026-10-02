@@ -1,0 +1,4 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 brief verteidigung   # identical to militaer (shared memory file)
+[... identical to brief_militaer.txt except the heading ...]
+# Briefing verteidigung
+[exit 0]

@@ -1,0 +1,3 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 journal ingest --events tmp_bug/utf8.log --date 2026-10-02
+2 chronicle events in the log, 2 new; 0 critical df-llm-helper warnings taken over
+[exit 0]

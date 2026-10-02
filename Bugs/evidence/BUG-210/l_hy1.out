@@ -1,0 +1,9 @@
+loose stacks 14k: boulders 11.8k (ok), corpses 1.2k (dump 0 jobs), goblets 391 (cap)
+types: BOULDER=11781 CORPSEPIECE=763 BLOCKS=482 CORPSE=444 GOBLET=391 BUCKET=43 PLANT=38 REMAINS=23
+areas: cavern=12891 hidden=1693 surface=1139; corpses dwarf=125 other=1105; rotten=0
+marked pending=2 (unreachable 0); dump jobs=0; zones=1
+Dump: cause 'zone too far' -> propose zone D z130 x86..88,y112..114 (nearest zone 55 tiles from the marked items)
+Goblets 391 loose: never dump (trade goods); order cap goblets <= 60 (claude/orders) + stockpile with bins
+Boulders: never dumped (building material); if needed propose an extra stone stockpile
+!! Dwarf corpses 125 > free coffins 14: ghost risk - build coffins/tombs
+measurement 0.4 s in 2 blocks (slowest 0.2 s)

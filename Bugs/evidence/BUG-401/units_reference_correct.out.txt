@@ -1,0 +1,1650 @@
+{
+	"count": 174,
+	"units": [ {
+		"child": false,
+		"id": 315,
+		"job": "Store item in bag",
+		"name": "Stinthäd ònulfeb \"Mirroredarrows\", Miner",
+		"pos": [ 105, 101, 129 ],
+		"profession": "Miner",
+		"skills": "MINING:11, CARPENTRY:8, PERSUASION:8",
+		"stress": "sehr ungluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 342,
+		"job": "Store item in stockpile",
+		"name": "Olon Logemegen \"Paintgift\", Planter",
+		"pos": [ 106, 101, 128 ],
+		"profession": "Planter",
+		"skills": "SITUATIONAL_AWARENESS:10, PLANT:9, MASONRY:7",
+		"stress": "ungluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 344,
+		"job": "Give food",
+		"name": "Unib Likotònul \"Inkmirrors\", Miner",
+		"pos": [ 108, 92, 132 ],
+		"profession": "Miner",
+		"skills": "MINING:22, PLANT:12, SITUATIONAL_AWARENESS:9",
+		"stress": "gluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 390,
+		"injured": true,
+		"job": "Rest",
+		"name": "Dodók Batôkkadol \"Problemhatchet\", Carpenter",
+		"pos": [ 104, 98, 128 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:11, KNOWLEDGE_ACQUISITION:7, CONCENTRATION:7",
+		"stress": "sehr gluecklich",
+		"work_details": "Woodcutters"
+	}, {
+		"child": false,
+		"id": 399,
+		"injured": true,
+		"job": "Rest",
+		"name": "Tobul Ledzugob \"Rackgrand\", Carpenter",
+		"pos": [ 110, 101, 128 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:9, KNOWLEDGE_ACQUISITION:6, CONCENTRATION:6",
+		"stress": "neutral",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 407,
+		"name": "Asën Delerothbem Bëmbulsedur Tobot \"Steelpink the Mechanical Emerald of Authority\", Mechanic",
+		"pos": [ 109, 100, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:11, INTIMIDATION:10, MASONRY:10",
+		"stress": "ungluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 414,
+		"injured": true,
+		"job": "Rest",
+		"name": "Tekkud Koganlerteth \"Boatstangles\", Miner",
+		"pos": [ 105, 100, 128 ],
+		"profession": "Miner",
+		"skills": "MINING:26, PLANT:10, MECHANICS:4",
+		"stress": "sehr gluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 417,
+		"job": "Store item in stockpile",
+		"name": "Kivish Thobmozib \"Girderswallows\", Carpenter",
+		"pos": [ 132, 129, 129 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:12, MECHANICS:9, CONCENTRATION:9",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 486,
+		"injured": true,
+		"job": "Rest",
+		"name": "Aban Stelidkol \"Washedwheels\", Mechanic",
+		"pos": [ 105, 102, 128 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:11, CARPENTRY:9, KNOWLEDGE_ACQUISITION:8",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 842,
+		"job": "Store item in bin",
+		"name": "Lòr èrithrilem \"Laboryouth\", militia captain",
+		"pos": [ 86, 98, 128 ],
+		"profession": "militia captain",
+		"skills": "SITUATIONAL_AWARENESS:35, PLANT:29, DISCIPLINE:16",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 895,
+		"name": "Urist Kabineth \"Namecity\", Planter",
+		"pos": [ 111, 100, 129 ],
+		"profession": "Planter",
+		"skills": "PLANT:20, CARPENTRY:14, SITUATIONAL_AWARENESS:10",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 920,
+		"job": "Store item in stockpile",
+		"name": "äs Ubbulunol \"Vaultsouls\", Mechanic",
+		"pos": [ 101, 99, 130 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:19, MASONRY:17, CARPENTRY:17",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 971,
+		"name": "Tun Likotmishthem \"Inkscholars\", Mechanic",
+		"pos": [ 106, 110, 130 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:18, CARPENTRY:17, KNOWLEDGE_ACQUISITION:13",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 1026,
+		"name": "Ber îgamzon \"Gorgedhelms\", Axe Lord",
+		"pos": [ 94, 96, 128 ],
+		"profession": "Axe Lord",
+		"skills": "SITUATIONAL_AWARENESS:39, MECHANICS:23, CARPENTRY:22",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 1029,
+		"injured": true,
+		"job": "Rest",
+		"name": "Tholtig Rithvumom \"Bellssavant\", Peasant",
+		"pos": [ 105, 100, 128 ],
+		"profession": "Peasant",
+		"skills": "PLANT:0, SITUATIONAL_AWARENESS:0, PACIFY:0",
+		"stress": "sehr ungluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 1088,
+		"job": "Store item in stockpile",
+		"name": "Libash Kinemkib \"Beautynet\", Mechanic",
+		"pos": [ 91, 104, 130 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:21, CARPENTRY:18, PLANT:15",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 1592,
+		"name": "Vucar Idolon \"Rocksgear\", Mechanic",
+		"pos": [ 84, 118, 116 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:23, CARPENTRY:17, CONCENTRATION:16",
+		"stress": "gluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 2120,
+		"name": "Ducim Mengtan \"Lashtick\", Carpenter",
+		"pos": [ 105, 98, 129 ],
+		"profession": "Carpenter",
+		"skills": "MASONRY:17, CARPENTRY:17, KNOWLEDGE_ACQUISITION:16",
+		"stress": "gluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 3446,
+		"job": "Store item in stockpile",
+		"name": "Aban Thobvukrig \"Girderrifts\", Brewer",
+		"pos": [ 95, 100, 130 ],
+		"profession": "Brewer",
+		"skills": "BREWING:25, MECHANICS:20, CARPENTRY:18",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 3473,
+		"injured": true,
+		"job": "Rest",
+		"name": "Eral Likotginet \"Inkycrews\", Elite Wrestler",
+		"pos": [ 104, 96, 128 ],
+		"profession": "Elite Wrestler",
+		"skills": "SITUATIONAL_AWARENESS:36, MELEE_COMBAT:33, DISCIPLINE:30",
+		"stress": "sehr ungluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 3579,
+		"job": "Store item in stockpile",
+		"name": "Sodel Lärimtun \"Neodoor\", Carpenter",
+		"pos": [ 89, 102, 130 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:23, KNOWLEDGE_ACQUISITION:15, CONCENTRATION:15",
+		"stress": "neutral",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 3744,
+		"name": "Såkzul Rithrobek \"Bellsbarbs\", Planter",
+		"pos": [ 106, 101, 129 ],
+		"profession": "Planter",
+		"skills": "PLANT:41, MINING:24, SITUATIONAL_AWARENESS:9",
+		"stress": "sehr gluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 3745,
+		"name": "Inod Loloranan \"Letternights\", Planter",
+		"pos": [ 108, 100, 129 ],
+		"profession": "Planter",
+		"skills": "PLANT:59, MINING:9, SITUATIONAL_AWARENESS:9",
+		"stress": "zufrieden",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 3746,
+		"name": "Uzol Ularmeng \"Idollashed\", Miner",
+		"pos": [ 106, 98, 129 ],
+		"profession": "Miner",
+		"skills": "MINING:28, CARPENTRY:20, MECHANICS:18",
+		"stress": "sehr gluecklich",
+		"work_details": "Miners, Woodcutters"
+	}, {
+		"child": false,
+		"id": 3748,
+		"name": "Kosoth ïtebmeban Emetestrith \"Poststreams the Fresh Spy\", militia captain",
+		"pos": [ 93, 99, 128 ],
+		"profession": "militia captain",
+		"skills": "MELEE_COMBAT:122, SITUATIONAL_AWARENESS:119, AXE:108",
+		"stress": "gluecklich",
+		"work_details": "Fisherdwarves"
+	}, {
+		"child": false,
+		"id": 3749,
+		"injured": true,
+		"job": "Rest",
+		"name": "Mestthos Nubamedëm \"Tealkeys\", Planter",
+		"pos": [ 109, 102, 128 ],
+		"profession": "Planter",
+		"skills": "PLANT:16, STONECRAFT:14, CARPENTRY:10",
+		"stress": "sehr gluecklich",
+		"work_details": "Stonecutters, Engravers"
+	}, {
+		"child": false,
+		"id": 3750,
+		"name": "Monom Rigòthrith \"Craftedbell\", militia captain",
+		"pos": [ 107, 101, 129 ],
+		"profession": "militia captain",
+		"skills": "PLANT:48, MINING:22, SITUATIONAL_AWARENESS:10",
+		"stress": "sehr gluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 4078,
+		"name": "ònul Engigakrul \"Flaxentin\", Stonecrafter",
+		"pos": [ 106, 101, 129 ],
+		"profession": "Stonecrafter",
+		"skills": "STONECRAFT:23, MECHANICS:23, CARPENTRY:21",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4079,
+		"name": "Rovod Konossezuk \"Brassslap\", manager",
+		"pos": [ 71, 96, 129 ],
+		"profession": "manager",
+		"skills": "PLANT:24, CARPENTRY:23, MECHANICS:23",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4148,
+		"job": "Sleep",
+		"name": "Likot Gikutsazir \"Dabbledbridges\", Mechanic",
+		"pos": [ 109, 113, 116 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:27, CONCENTRATION:18, KNOWLEDGE_ACQUISITION:18",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4155,
+		"job": "Sleep",
+		"name": "Sigun Tobulkir \"Canyonmerged\", Carpenter",
+		"pos": [ 116, 110, 129 ],
+		"profession": "Carpenter",
+		"skills": "MECHANICS:23, CARPENTRY:23, MASONRY:17",
+		"stress": "neutral",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 4156,
+		"job": "Store item in stockpile",
+		"name": "Sibrek Udibittás \"Syruptender\", Mechanic",
+		"pos": [ 88, 102, 130 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:25, CARPENTRY:24, MINING:20",
+		"stress": "zufrieden",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 4160,
+		"name": "Dôbar Dumator \"Roughnesslarge\", Mechanic",
+		"pos": [ 105, 98, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:23, STONECRAFT:22, KNOWLEDGE_ACQUISITION:14",
+		"stress": "gluecklich",
+		"work_details": "Woodcutters, Stonecutters, Engravers"
+	}, {
+		"child": false,
+		"id": 4161,
+		"job": "Sleep",
+		"name": "Adil Tenshedatîs \"Chancestake\", Mechanic",
+		"pos": [ 99, 102, 116 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:25, CARPENTRY:20, APPRAISAL:19",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4163,
+		"job": "Store item in stockpile",
+		"name": "Olon Ogradkel \"Reasonmetals\", Planter",
+		"pos": [ 89, 104, 130 ],
+		"profession": "Planter",
+		"skills": "PLANT:38, MINING:17, SITUATIONAL_AWARENESS:11",
+		"stress": "gluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": true,
+		"id": 4165,
+		"injured": true,
+		"job": "Rest",
+		"name": "Ber Thadudib \"Crowdedsyrups\", Dwarven Child",
+		"pos": [ 104, 101, 128 ],
+		"profession": "Dwarven Child",
+		"skills": "ARMOR:0, WRESTLING:0, GRASP_STRIKE:0",
+		"stress": "ungluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4176,
+		"name": "èzum Isethoslan \"Questwinds\", Planter",
+		"pos": [ 99, 95, 129 ],
+		"profession": "Planter",
+		"skills": "PLANT:34, SITUATIONAL_AWARENESS:10, MECHANICS:6",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4177,
+		"name": "Datan Erlinkosoth \"Highpalace\", Mechanic",
+		"pos": [ 107, 100, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:27, CARPENTRY:26, KNOWLEDGE_ACQUISITION:19",
+		"stress": "gluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 4178,
+		"name": "Ral Stukosidräth \"Razortreasures\", Mechanic",
+		"pos": [ 108, 98, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:26, CARPENTRY:22, MINING:19",
+		"stress": "sehr gluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 4182,
+		"injured": true,
+		"job": "Rest",
+		"name": "Sodel Amemilral \"Curledtreaties\", Mechanic",
+		"pos": [ 107, 102, 128 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:19, CARPENTRY:14, KNOWLEDGE_ACQUISITION:13",
+		"stress": "ungluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 4185,
+		"job": "Drink",
+		"name": "Solon Bomrekakath \"Whipwinter\", Mechanic",
+		"pos": [ 106, 101, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:22, KNOWLEDGE_ACQUISITION:14, CONCENTRATION:14",
+		"stress": "zufrieden",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 4191,
+		"name": "Avuz Libadùshrir \"Praisedquakes\", Mechanic",
+		"pos": [ 110, 100, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:20, PLANT:18, CARPENTRY:17",
+		"stress": "gluecklich",
+		"work_details": "Stonecutters, Engravers"
+	}, {
+		"child": false,
+		"id": 4193,
+		"job": "Drink",
+		"name": "Urvad Gineturist \"Crewdaggers\", Brewer",
+		"pos": [ 104, 99, 128 ],
+		"profession": "Brewer",
+		"skills": "BREWING:36, MECHANICS:15, MINING:12",
+		"stress": "zufrieden",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 4198,
+		"name": "Erush Kilrudetar \"Bronzeking\", Planter",
+		"pos": [ 92, 105, 130 ],
+		"profession": "Planter",
+		"skills": "PLANT:27, CARPENTRY:10, SITUATIONAL_AWARENESS:10",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4199,
+		"name": "Uvash Tostoddom \"Visedcloisters\", Mechanic",
+		"pos": [ 111, 99, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:22, CONCENTRATION:13, KNOWLEDGE_ACQUISITION:13",
+		"stress": "zufrieden",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 4206,
+		"name": "Asmel Thobarzes \"Girderknights\", Mechanic",
+		"pos": [ 108, 100, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:23, MINING:19, MASONRY:15",
+		"stress": "sehr ungluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 4207,
+		"injured": true,
+		"job": "Rest",
+		"name": "Cilob Febmelbil \"Arrowtome\", Stone Carver",
+		"pos": [ 107, 98, 128 ],
+		"profession": "Stone Carver",
+		"skills": "CARVE_STONE:15, DANCE:1, POETRY:1",
+		"stress": "sehr ungluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4208,
+		"job": "Sleep",
+		"name": "Endok Uristtomus \"Daggershoved\", Carpenter",
+		"pos": [ 100, 110, 129 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:23, MECHANICS:22, KNOWLEDGE_ACQUISITION:17",
+		"stress": "sehr gluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 4209,
+		"name": "Ducim Olongamil \"Gearedtrusted\", Carpenter",
+		"pos": [ 104, 98, 129 ],
+		"profession": "Carpenter",
+		"skills": "MECHANICS:26, CARPENTRY:26, MASONRY:21",
+		"stress": "gluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 4211,
+		"name": "Vucar Nosingnil \"Brushedhammers\", Mechanic",
+		"pos": [ 104, 98, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:26, CARPENTRY:25, KNOWLEDGE_ACQUISITION:20",
+		"stress": "zufrieden",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4216,
+		"name": "Atîs Monomlensham \"Paperden\", mayor",
+		"pos": [ 115, 99, 128 ],
+		"profession": "mayor",
+		"skills": "PACIFY:28, CONSOLE:26, COMEDY:21",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4220,
+		"name": "Onget Ngalákstâkud \"Abyssmachine\", Brewer",
+		"pos": [ 108, 100, 129 ],
+		"profession": "Brewer",
+		"skills": "BREWING:32, MECHANICS:25, CARPENTRY:24",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4221,
+		"name": "Fath Berothil \"Earthweakened\", Carpenter",
+		"pos": [ 80, 95, 129 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:28, MECHANICS:24, KNOWLEDGE_ACQUISITION:18",
+		"stress": "sehr gluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 4222,
+		"name": "Rakust Gemeshlikot \"Conflictinks\", Stonecrafter",
+		"pos": [ 105, 100, 129 ],
+		"profession": "Stonecrafter",
+		"skills": "SITUATIONAL_AWARENESS:22, STONECRAFT:16, CARPENTRY:11",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4223,
+		"injured": true,
+		"job": "Rest",
+		"name": "Mistêm èzumasob \"Hameboard\", Dwarven Child",
+		"pos": [ 104, 101, 128 ],
+		"profession": "Dwarven Child",
+		"skills": "ARMOR:0, SPEAKING:0, POETRY:0",
+		"stress": "neutral",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4225,
+		"name": "Thob Tathuroslan \"Scribedwound\", Mechanic",
+		"pos": [ 107, 98, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:27, CARPENTRY:25, KNOWLEDGE_ACQUISITION:21",
+		"stress": "gluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 4226,
+		"name": "Ardes Dorenarust \"Diamondbowls\", Carpenter",
+		"pos": [ 78, 102, 129 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:27, MECHANICS:26, KNOWLEDGE_ACQUISITION:23",
+		"stress": "gluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 4241,
+		"name": "åblel Etostlibash \"Containaxe\", Mechanic",
+		"pos": [ 109, 100, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:27, CARPENTRY:22, CONCENTRATION:22",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4242,
+		"job": "Sleep",
+		"name": "Alåth Taremzefon \"Fatefountain\", Mechanic",
+		"pos": [ 91, 113, 116 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:25, MASONRY:18, CONCENTRATION:17",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4243,
+		"job": "Pickup equipment",
+		"name": "Ber Inethmeng \"Citylashed\", Wrestler",
+		"pos": [ 83, 101, 128 ],
+		"profession": "Wrestler",
+		"skills": "SITUATIONAL_AWARENESS:33, CARPENTRY:24, MECHANICS:18",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4246,
+		"name": "Urvad Cattenkel \"Channelmetals\", Mechanic",
+		"pos": [ 80, 103, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:27, CARPENTRY:26, CONCENTRATION:23",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4247,
+		"name": "Rakust Oshurcatten \"Circlechannels\", Mechanic",
+		"pos": [ 106, 101, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:27, CARPENTRY:24, CONCENTRATION:18",
+		"stress": "gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4286,
+		"injured": true,
+		"job": "Rest",
+		"name": "Udib Zimkol \"Crestwheel\", Mechanic",
+		"pos": [ 104, 99, 128 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:13, CARPENTRY:12, MINING:12",
+		"stress": "neutral",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 4287,
+		"name": "Likot Ecemfath \"Tubesacks\", Mechanic",
+		"pos": [ 109, 98, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:28, CARPENTRY:27, KNOWLEDGE_ACQUISITION:22",
+		"stress": "sehr gluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 4288,
+		"name": "Solon Mörulanam \"Pageage\", Wrestler",
+		"pos": [ 88, 97, 128 ],
+		"profession": "Wrestler",
+		"skills": "SITUATIONAL_AWARENESS:33, CARPENTRY:25, KNOWLEDGE_ACQUISITION:19",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4290,
+		"name": "Solon Bomrekolon \"Whippedgears\", Carpenter",
+		"pos": [ 76, 97, 129 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:28, MECHANICS:22, MASONRY:20",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4299,
+		"job": "Sleep",
+		"name": "Kumil Shorastdatan \"Wireiron\", Fish Cleaner",
+		"pos": [ 111, 115, 116 ],
+		"profession": "Fish Cleaner",
+		"skills": "PROCESSFISH:25, CARPENTRY:21, CONCENTRATION:12",
+		"stress": "zufrieden",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4300,
+		"name": "Kivish Dakostmes \"Floorcreature\", Carpenter",
+		"pos": [ 78, 103, 129 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:26, MECHANICS:21, MASONRY:20",
+		"stress": "sehr gluecklich",
+		"work_details": "Woodcutters"
+	}, {
+		"child": false,
+		"id": 4301,
+		"injured": true,
+		"job": "Rest",
+		"name": "Ber Uzolothôs \"Oiledwilted\", Miner",
+		"pos": [ 109, 100, 128 ],
+		"profession": "Miner",
+		"skills": "MINING:28, PERSUASION:12, KNOWLEDGE_ACQUISITION:7",
+		"stress": "sehr ungluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 4302,
+		"name": "Minkot Oddomdastot \"Cloisteredswords\", Mechanic",
+		"pos": [ 83, 101, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:27, CARPENTRY:26, CONCENTRATION:25",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4304,
+		"injured": true,
+		"job": "Rest",
+		"name": "Urdim Mistêmmothdast \"Portalonslaught\", Carpenter",
+		"pos": [ 105, 98, 128 ],
+		"profession": "Carpenter",
+		"skills": "INTIMIDATION:13, PERSUASION:10, CARPENTRY:9",
+		"stress": "sehr ungluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4309,
+		"name": "Minkot Asteshavuz \"Cudgelmine\", Mechanic",
+		"pos": [ 76, 96, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:27, CARPENTRY:26, KNOWLEDGE_ACQUISITION:22",
+		"stress": "zufrieden",
+		"work_details": "Woodcutters"
+	}, {
+		"child": false,
+		"id": 4310,
+		"job": "Sleep",
+		"name": "Kulet Urolonol \"Closemountains\", Wrestler",
+		"pos": [ 117, 113, 116 ],
+		"profession": "Wrestler",
+		"skills": "SITUATIONAL_AWARENESS:32, MECHANICS:26, CARPENTRY:22",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4312,
+		"job": "Drink",
+		"name": "Limul Kûbukgim \"Lancetwists\", Mechanic",
+		"pos": [ 111, 90, 132 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:25, CARPENTRY:21, MASONRY:19",
+		"stress": "gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4315,
+		"job": "Sleep",
+		"name": "Shorast Kuletöntak \"Abbeyarm\", Mechanic",
+		"pos": [ 116, 118, 116 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:27, CARPENTRY:26, CONCENTRATION:23",
+		"stress": "gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4316,
+		"job": "Sleep",
+		"name": "Medtob Kadôlmelbil \"Gemtome\", Carpenter",
+		"pos": [ 87, 113, 116 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:26, MECHANICS:24, KNOWLEDGE_ACQUISITION:21",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4317,
+		"name": "Rovod Emuthlikot \"Beakink\", Cook",
+		"pos": [ 101, 101, 129 ],
+		"profession": "Cook",
+		"skills": "COOK:24, MECHANICS:19, MASONRY:19",
+		"stress": "ungluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4318,
+		"name": "Sarvesh Såkzulastel \"Trumpetallied\", Carpenter",
+		"pos": [ 110, 100, 129 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:27, MECHANICS:27, CONCENTRATION:20",
+		"stress": "zufrieden",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4319,
+		"job": "Slaughter animal",
+		"name": "Fikod Kogandostob \"Boatsclearings\", Carpenter",
+		"pos": [ 91, 107, 130 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:26, MECHANICS:21, CONCENTRATION:20",
+		"stress": "zufrieden",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4320,
+		"name": "Dumat Usânlitast \"Murdertorch\", Carpenter",
+		"pos": [ 77, 97, 129 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:28, MECHANICS:27, CONCENTRATION:21",
+		"stress": "gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4321,
+		"injured": true,
+		"job": "Rest",
+		"name": "Rovod Umrildumat \"Pinerough\", Peasant",
+		"pos": [ 104, 96, 128 ],
+		"profession": "Peasant",
+		"skills": "ARMOR:0, PACIFY:0, CONSOLE:0",
+		"stress": "gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4334,
+		"name": "Sibrek Kironbesmar \"Holypulley\", Dwarven Child",
+		"pos": [ 114, 90, 132 ],
+		"profession": "Dwarven Child",
+		"skills": "CARPENTRY:10, SPEAKING:4, KNOWLEDGE_ACQUISITION:3",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4335,
+		"name": "Zon Nilstîgil \"Hammerjaw\", Carpenter",
+		"pos": [ 79, 98, 129 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:28, MECHANICS:27, CONCENTRATION:21",
+		"stress": "gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4337,
+		"job": "Drink",
+		"name": "Ducim Ozkakkikrost \"Carrystockade\", Wrestler",
+		"pos": [ 114, 91, 132 ],
+		"profession": "Wrestler",
+		"skills": "SITUATIONAL_AWARENESS:33, MECHANICS:25, CARPENTRY:23",
+		"stress": "zufrieden",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4338,
+		"injured": true,
+		"job": "Rest",
+		"name": "Kib Nishorshar \"Tradewebs\", Mechanic",
+		"pos": [ 104, 96, 128 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:26, CONCENTRATION:22, KNOWLEDGE_ACQUISITION:22",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4339,
+		"name": "Uvash Sulusdeler \"Cratersteel\", Mechanic",
+		"pos": [ 106, 101, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:27, CARPENTRY:23, KNOWLEDGE_ACQUISITION:21",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4347,
+		"name": "Sibrek Zonmeban \"Helmedstream\", Axe Lord",
+		"pos": [ 97, 100, 128 ],
+		"profession": "Axe Lord",
+		"skills": "SITUATIONAL_AWARENESS:81, MELEE_COMBAT:57, DISCIPLINE:40",
+		"stress": "zufrieden",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4349,
+		"name": "Kivish Duralkib \"Honorednets\", Carpenter",
+		"pos": [ 111, 102, 129 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:31, MECHANICS:25, KNOWLEDGE_ACQUISITION:19",
+		"stress": "zufrieden",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 4350,
+		"job": "Sleep",
+		"name": "Inod Akgoskûbuk \"Clinchlance\", Mechanic",
+		"pos": [ 77, 115, 116 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:29, MASONRY:17, KNOWLEDGE_ACQUISITION:14",
+		"stress": "gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4351,
+		"name": "Uvash Inenakrul \"Hilltin\", Axe Lord",
+		"pos": [ 97, 100, 128 ],
+		"profession": "Axe Lord",
+		"skills": "SITUATIONAL_AWARENESS:76, MELEE_COMBAT:73, AXE:54",
+		"stress": "zufrieden",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4354,
+		"injured": true,
+		"job": "Rest",
+		"name": "Dodók Kanzudducim \"Conventwork\", Axe Lord",
+		"pos": [ 109, 98, 128 ],
+		"profession": "Axe Lord",
+		"skills": "SITUATIONAL_AWARENESS:68, MELEE_COMBAT:54, AXE:47",
+		"stress": "neutral",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4355,
+		"injured": true,
+		"job": "Rest",
+		"name": "Thob Cilobdesor \"Roofentranced\", Cook",
+		"pos": [ 104, 96, 128 ],
+		"profession": "Cook",
+		"skills": "COOK:29, CUTGEM:19, ENCRUSTGEM:17",
+		"stress": "gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4356,
+		"job": "Store item in stockpile",
+		"name": "Bëmbul Gusilrithzâm \"Copperbulwark\", Carpenter",
+		"pos": [ 83, 100, 129 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:30, MECHANICS:19, MASONRY:18",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4358,
+		"name": "Zulban Emetiden \"Freshpaddled\", Wrestler",
+		"pos": [ 83, 98, 128 ],
+		"profession": "Wrestler",
+		"skills": "SITUATIONAL_AWARENESS:32, MECHANICS:25, CARPENTRY:22",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4367,
+		"name": "èrith Kikrostavuz \"Stockademine\", Dwarven Child",
+		"pos": [ 79, 118, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "CARPENTRY:7, SITUATIONAL_AWARENESS:5, SPEAKING:4",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4404,
+		"name": "Udil Loloksosh \"Granitesandal\", Dwarven Child",
+		"pos": [ 81, 113, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "CARPENTRY:5, PERSUASION:3, SPEAKING:2",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4405,
+		"name": "Dodók Solozèrith \"Worshiplabored\", Mechanic",
+		"pos": [ 79, 96, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:27, CARPENTRY:24, KNOWLEDGE_ACQUISITION:21",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4408,
+		"name": "Bëmbul èzumsoloz \"Hameworshipped\", Mechanic",
+		"pos": [ 110, 98, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:27, CARPENTRY:25, CONCENTRATION:19",
+		"stress": "gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4409,
+		"job": "Drink",
+		"name": "Tirist Oltaranam \"Gildage\", Mechanic",
+		"pos": [ 88, 101, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:27, CARPENTRY:23, KNOWLEDGE_ACQUISITION:20",
+		"stress": "zufrieden",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4410,
+		"name": "Cerol Dasnastubbul \"Steppevaults\", Wrestler",
+		"pos": [ 83, 101, 128 ],
+		"profession": "Wrestler",
+		"skills": "SITUATIONAL_AWARENESS:34, MECHANICS:26, CARPENTRY:24",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4411,
+		"name": "Kumil Zasitnïng \"Knifeburned\", Mechanic",
+		"pos": [ 110, 100, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:26, CARPENTRY:24, CONCENTRATION:20",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4415,
+		"name": "Zulban Dodóknefek \"Claspfancied\", Carpenter",
+		"pos": [ 85, 100, 129 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:21, MASONRY:20, KNOWLEDGE_ACQUISITION:18",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4416,
+		"injured": true,
+		"job": "Rest",
+		"name": "Dôbar Dallithkel \"Riddlemetals\", militia captain",
+		"pos": [ 104, 96, 128 ],
+		"profession": "militia captain",
+		"skills": "MECHANICS:27, CARPENTRY:26, TEACHING:25",
+		"stress": "zufrieden",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4418,
+		"name": "Vabôk Amostgérig \"Townbank\", Mechanic",
+		"pos": [ 108, 100, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:25, CARPENTRY:18, CONCENTRATION:17",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4419,
+		"injured": true,
+		"job": "Rest",
+		"name": "Kadol Kemsordodók \"Entranceclasps\", Mechanic",
+		"pos": [ 110, 102, 128 ],
+		"profession": "Mechanic",
+		"skills": "MELEE_COMBAT:75, SITUATIONAL_AWARENESS:72, AXE:55",
+		"stress": "ungluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4421,
+		"name": "Limul Zefonstorlut \"Fountaindimpled\", Carpenter",
+		"pos": [ 80, 96, 129 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:28, MECHANICS:26, KNOWLEDGE_ACQUISITION:21",
+		"stress": "gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4423,
+		"name": "Edëm Zimeshcatten \"Phantomchannels\", Wrestler",
+		"pos": [ 76, 99, 133 ],
+		"profession": "Wrestler",
+		"skills": "CARPENTRY:21, MASONRY:18, MECHANICS:17",
+		"stress": "gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4424,
+		"name": "Limul Idashdumat \"Moistenroughness\", Mechanic",
+		"pos": [ 111, 101, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:26, CARPENTRY:22, KNOWLEDGE_ACQUISITION:17",
+		"stress": "neutral",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4425,
+		"name": "ùshrir Lamushat \"Stonebasement\", Carpenter",
+		"pos": [ 85, 101, 129 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:27, CLOTHESMAKING:21, KNOWLEDGE_ACQUISITION:16",
+		"stress": "gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4426,
+		"job": "Sleep",
+		"name": "Shorast Feshfath \"Wingsacks\", Mechanic",
+		"pos": [ 69, 115, 116 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:27, CARPENTRY:23, MASONRY:20",
+		"stress": "zufrieden",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4427,
+		"job": "Sleep",
+		"name": "Erib èrithumril \"Laboredpines\", Mechanic",
+		"pos": [ 99, 110, 116 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:26, MASONRY:20, CARPENTRY:20",
+		"stress": "gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4431,
+		"name": "Sarvesh Zanegbûnem \"Relicsoothed\", Dwarven Child",
+		"pos": [ 74, 110, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "CARPENTRY:9, CONCENTRATION:3, KNOWLEDGE_ACQUISITION:3",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4507,
+		"name": "Stodir Isonbomrek \"Plannedwhips\", Mechanic",
+		"pos": [ 111, 98, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:24, CARPENTRY:21, CONCENTRATION:21",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4510,
+		"name": "Iden Athellogem \"Ringpainted\", Carpenter",
+		"pos": [ 73, 97, 129 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:24, MECHANICS:23, MASONRY:18",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4511,
+		"name": "ònul Melbilakath \"Tomewinter\", Mason",
+		"pos": [ 103, 101, 129 ],
+		"profession": "Mason",
+		"skills": "MASONRY:20, CARPENTRY:19, COOK:18",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4512,
+		"name": "Kivish Oddomabsam \"Cloistersearch\", Wrestler",
+		"pos": [ 75, 99, 133 ],
+		"profession": "Wrestler",
+		"skills": "MECHANICS:18, CARPENTRY:13, CONCENTRATION:13",
+		"stress": "gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4513,
+		"name": "Såkzul Cogamem \"Bootcurls\", Wrestler",
+		"pos": [ 74, 98, 133 ],
+		"profession": "Wrestler",
+		"skills": "MECHANICS:27, CARPENTRY:23, CONCENTRATION:20",
+		"stress": "gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4515,
+		"name": "Edëm Besmararek \"Pulleychurches\", Wrestler",
+		"pos": [ 75, 98, 133 ],
+		"profession": "Wrestler",
+		"skills": "MECHANICS:26, CARPENTRY:20, KNOWLEDGE_ACQUISITION:17",
+		"stress": "gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4516,
+		"job": "Drink",
+		"name": "Lolor Asmelkogan \"Merchantboat\", Carpenter",
+		"pos": [ 101, 92, 132 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:27, MECHANICS:25, KNOWLEDGE_ACQUISITION:21",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4529,
+		"name": "Zuntîr Ostathast \"Esteemsabres\", Mechanic",
+		"pos": [ 109, 98, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:26, CARPENTRY:18, KNOWLEDGE_ACQUISITION:15",
+		"stress": "zufrieden",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4530,
+		"name": "Rigòth Atorcog \"Perfectboot\", Wrestler",
+		"pos": [ 74, 99, 133 ],
+		"profession": "Wrestler",
+		"skills": "MECHANICS:27, CARPENTRY:20, CONCENTRATION:17",
+		"stress": "neutral",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4531,
+		"name": "Zaneg Domasgébar \"Guildlauds\", Wrestler",
+		"pos": [ 75, 98, 133 ],
+		"profession": "Wrestler",
+		"skills": "CARPENTRY:20, MECHANICS:20, KNOWLEDGE_ACQUISITION:17",
+		"stress": "neutral",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4532,
+		"injured": true,
+		"job": "Rest",
+		"name": "Fikod Fikodstorlut \"Glazeddimple\", Engineer",
+		"pos": [ 104, 96, 128 ],
+		"profession": "Engineer",
+		"skills": "MECHANICS:23, CARPENTRY:21, KNOWLEDGE_ACQUISITION:18",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4542,
+		"name": "Dôbar Athelud \"Ringedwills\", Dwarven Child",
+		"pos": [ 77, 118, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "SPEAKING:6, MASONRY:4, KNOWLEDGE_ACQUISITION:1",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4564,
+		"job": "Drink",
+		"name": "Goden Lorbamingtak \"Standardtwilight\", Dwarven Child",
+		"pos": [ 119, 90, 132 ],
+		"profession": "Dwarven Child",
+		"skills": "CARPENTRY:2, SPEAKING:2, PERSUASION:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4565,
+		"name": "îton Amkindakost \"Gladnessfloors\", Dwarven Child",
+		"pos": [ 64, 110, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "SPEAKING:3, SITUATIONAL_AWARENESS:2, CARPENTRY:1",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4566,
+		"job": "Drink",
+		"name": "Edzul Oltardumat \"Giltrough\", Dwarven Child",
+		"pos": [ 99, 95, 130 ],
+		"profession": "Dwarven Child",
+		"skills": "SPEAKING:4, MECHANICS:2, PACIFY:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4586,
+		"name": "Lokum Zasitbecor \"Knifetempted\", Mechanic",
+		"pos": [ 65, 98, 129 ],
+		"profession": "Mechanic",
+		"skills": "MECHANICS:27, CARPENTRY:24, KNOWLEDGE_ACQUISITION:21",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4589,
+		"name": "Kib Asënlist \"Gravelgaze\", Carpenter",
+		"pos": [ 79, 103, 129 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:27, MECHANICS:27, CONCENTRATION:20",
+		"stress": "gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4590,
+		"name": "Kulet Amkolbomrek \"Counselledwhips\", Dwarven Child",
+		"pos": [ 91, 115, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "SITUATIONAL_AWARENESS:8, SPEAKING:3, MECHANICS:2",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4606,
+		"name": "Solon Ustuthgigin \"Fenceflew\", Dwarven Child",
+		"pos": [ 79, 121, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "SPEAKING:4, MECHANICS:2, CARPENTRY:1",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4681,
+		"name": "Stukos Eteszon \"Blowinghelms\", Dwarven Child",
+		"pos": [ 117, 120, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "MECHANICS:1, SPEAKING:1, NEGOTIATION:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4685,
+		"name": "Mistêm Ruladil \"Mutewall\", Dwarven Child",
+		"pos": [ 119, 117, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "CARPENTRY:3, SPEAKING:2, MECHANICS:1",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4693,
+		"name": "Zuglar Rigòthdatan \"Craftedirons\", Dwarven Child",
+		"pos": [ 87, 107, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "CARPENTRY:8, SPEAKING:3, KNOWLEDGE_ACQUISITION:2",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4698,
+		"name": "Melbil Rûlkol \"Submergewheels\", Dwarven Child",
+		"pos": [ 99, 95, 119 ],
+		"profession": "Dwarven Child",
+		"skills": "MECHANICS:3, SPEAKING:2, NEGOTIATION:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4743,
+		"name": "Reg Gusilkinem \"Copperbeauty\", Dwarven Child",
+		"pos": [ 121, 123, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "CARPENTRY:16, SITUATIONAL_AWARENESS:4, SPEAKING:2",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4825,
+		"name": "Rovod Olongan \"Geardishes\", Dwarven Child",
+		"pos": [ 107, 107, 129 ],
+		"profession": "Dwarven Child",
+		"skills": "CARPENTRY:3, SPEAKING:3, NEGOTIATION:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4837,
+		"name": "Etur Atolrimtar \"Truecastle\", Dwarven Child",
+		"pos": [ 140, 100, 129 ],
+		"profession": "Dwarven Child",
+		"skills": "CARPENTRY:5, CONCENTRATION:2, KNOWLEDGE_ACQUISITION:2",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4838,
+		"job": "Sleep",
+		"name": "Ubbul Cilobavéd \"Roofclobbers\", Dwarven Child",
+		"pos": [ 99, 95, 123 ],
+		"profession": "Dwarven Child",
+		"skills": "CARPENTRY:2, CONCENTRATION:2, KNOWLEDGE_ACQUISITION:2",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4882,
+		"name": "îton Cerolrath \"Lenstemple\", Dwarven Child",
+		"pos": [ 73, 113, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "SPEAKING:2, CONCENTRATION:1, KNOWLEDGE_ACQUISITION:1",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4898,
+		"name": "Bëmbul Geshudfeb \"Fortressarrow\", Dwarven Child",
+		"pos": [ 123, 126, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "CARPENTRY:4, SPEAKING:3, MECHANICS:2",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4932,
+		"name": "Vucar Kûbukborik \"Lancedtrench\", Dwarven Child",
+		"pos": [ 70, 110, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "SPEAKING:2, CONSOLE:0, COMEDY:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4970,
+		"name": "Adil Dalkamkeskal \"Leanshot\", Dwarven Child",
+		"pos": [ 141, 99, 129 ],
+		"profession": "Dwarven Child",
+		"skills": "SPEAKING:2, MECHANICS:1, PACIFY:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4989,
+		"name": "ùshrir Kekimlogem \"Splatterpainted\", Dwarven Child",
+		"pos": [ 117, 101, 129 ],
+		"profession": "Dwarven Child",
+		"skills": "SPEAKING:2, CONSOLE:0, COMEDY:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5019,
+		"job": "Sleep",
+		"name": "Nish Absamgeshud \"Searchedfortress\", Dwarven Child",
+		"pos": [ 115, 113, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "MECHANICS:2, SPEAKING:2, KNOWLEDGE_ACQUISITION:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5079,
+		"name": "Datan Likotmörul \"Inkpage\", Dwarven Child",
+		"pos": [ 95, 100, 129 ],
+		"profession": "Dwarven Child",
+		"skills": "SITUATIONAL_AWARENESS:5, GRASP_STRIKE:3, MELEE_COMBAT:3",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5174,
+		"name": "Tulon Kûbukallas \"Lancedseas\", Dwarven Child",
+		"pos": [ 138, 99, 129 ],
+		"profession": "Dwarven Child",
+		"skills": "BONECARVE:16, SPEAKING:2, PACIFY:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5307,
+		"name": "Minkot Aknûnkadol \"Hawkhatchets\", Dwarven Child",
+		"pos": [ 141, 100, 129 ],
+		"profession": "Dwarven Child",
+		"skills": "SPEAKING:2, PACIFY:0, CONSOLE:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5314,
+		"name": "Zon Akrulanan \"Tinnights\", Dwarven Child",
+		"pos": [ 81, 115, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "CARPENTRY:1, SPEAKING:1, NEGOTIATION:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5413,
+		"name": "Deler Ralustir \"Silverycrow\", Dwarven Child",
+		"pos": [ 139, 99, 129 ],
+		"profession": "Dwarven Child",
+		"skills": "SPEAKING:1, PACIFY:0, CONSOLE:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5425,
+		"name": "Zuglar ôsustnomal \"Tamedstaves\", Dwarven Child",
+		"pos": [ 111, 112, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "SPEAKING:2, COMEDY:0, CONSOLE:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5443,
+		"name": "Shorast Alåthnikot \"Boltedactions\", Dwarven Child",
+		"pos": [ 115, 129, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "SPEAKING:1, COMEDY:0, CONSOLE:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5543,
+		"job": "Drink",
+		"name": "îton ònulmörul \"Mirroredpage\", Dwarven Child",
+		"pos": [ 99, 96, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "GRASP_STRIKE:3, MELEE_COMBAT:3, SPEAKING:3",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5579,
+		"job": "Drink",
+		"name": "Olon Nishemäth \"Tradedbanded\", Dwarven Child",
+		"pos": [ 104, 92, 132 ],
+		"profession": "Dwarven Child",
+		"skills": "SPEAKING:1, COMEDY:0, CONSOLE:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5608,
+		"name": "Uvash Rovodèrith \"Archlabored\", Dwarven Child",
+		"pos": [ 71, 124, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "CARPENTRY:3, SPEAKING:2, MECHANICS:1",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5619,
+		"name": "Asën Rigòthuthar \"Craftfirst\", Dwarven Child",
+		"pos": [ 119, 129, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "SPEAKING:1, CONSOLE:0, PACIFY:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5628,
+		"name": "Ber Sefoldodók \"Entryclasps\", Dwarven Child",
+		"pos": [ 140, 100, 129 ],
+		"profession": "Dwarven Child",
+		"skills": "SPEAKING:1, COMEDY:0, CONSOLE:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5761,
+		"name": "Erush Ustuthzat \"Fencestab\", Dwarven Child",
+		"pos": [ 123, 115, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "SPEAKING:1, PACIFY:0, CONSOLE:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5846,
+		"name": "Dodók Uzolabsam \"Oilsearched\", Dwarven Child",
+		"pos": [ 140, 98, 129 ],
+		"profession": "Dwarven Child",
+		"skills": "SPEAKING:1, COMEDY:0, CONSOLE:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5888,
+		"name": "Kosoth Likotsalul \"Inkedskins\", Dwarven Child",
+		"pos": [ 120, 118, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "PERSUASION:0, COMEDY:0, CONSOLE:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5889,
+		"name": "Udil Artoburvad \"Combinedseal\", Dwarven Child",
+		"pos": [ 139, 98, 129 ],
+		"profession": "Dwarven Child",
+		"skills": "PERSUASION:0, COMEDY:0, CONSOLE:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5892,
+		"name": "Shem Solammeng \"Nationlash\", Dwarven Child",
+		"pos": [ 140, 98, 129 ],
+		"profession": "Dwarven Child",
+		"skills": "INTIMIDATION:1, PERSUASION:0, CONSOLE:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5906,
+		"name": "Ast Avuziden \"Minepaddled\", Dwarven Child",
+		"pos": [ 107, 109, 129 ],
+		"profession": "Dwarven Child",
+		"skills": "PERSUASION:0, CONVERSATION:0, COMEDY:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5922,
+		"name": "Momuz Eturaran \"Bouldersculpted\", Dwarven Child",
+		"pos": [ 116, 97, 128 ],
+		"profession": "Dwarven Child",
+		"skills": "PERSUASION:0, COMEDY:0, CONSOLE:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5923,
+		"name": "Tulon Nëlasmosus \"Flickerroom\", Dwarven Child",
+		"pos": [ 139, 99, 129 ],
+		"profession": "Dwarven Child",
+		"skills": "PERSUASION:0, COMEDY:0, CONSOLE:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5925,
+		"name": "èrith Egarïteb \"Oldposts\", Dwarven Child",
+		"pos": [ 139, 99, 129 ],
+		"profession": "Dwarven Child",
+		"skills": "PERSUASION:0, COMEDY:0, CONSOLE:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 5947,
+		"name": "Sibrek Zudensolon \"Keeperflag\", Dwarven Child",
+		"pos": [ 139, 99, 129 ],
+		"profession": "Dwarven Child",
+		"skills": "NEGOTIATION:0, CONSOLE:0, PACIFY:0",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 6115,
+		"name": "Minkot Stukosâm \"Razorspeech\", Dwarven Child",
+		"pos": [ 113, 127, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "CARPENTRY:3, KNOWLEDGE_ACQUISITION:1, CONCENTRATION:1",
+		"stress": "sehr gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 6118,
+		"name": "Vabôk Rabkib \"Glowingnet\", Dwarven Child",
+		"pos": [ 63, 105, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "PERSUASION:0, COMEDY:0, CONSOLE:0",
+		"stress": "neutral",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 6204,
+		"name": "Inod Mörulsemor \"Pagedunited\", Dwarven Child",
+		"pos": [ 139, 100, 129 ],
+		"profession": "Dwarven Child",
+		"skills": "PERSUASION:0, COMEDY:0, CONSOLE:0",
+		"stress": "neutral",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 6216,
+		"name": "èzum Noramdoren \"Relievediamond\", Dwarven Child",
+		"pos": [ 85, 118, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "SITUATIONAL_AWARENESS:3, COMEDY:0, CONSOLE:0",
+		"stress": "gluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 6237,
+		"name": "Kib Udibtölún \"Syrupsaints\", Dwarven Child",
+		"pos": [ 141, 98, 129 ],
+		"profession": "Dwarven Child",
+		"skills": "PERSUASION:0, FLATTERY:0, COMEDY:0",
+		"stress": "ungluecklich",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 6254,
+		"name": "Endok Loloksanreb \"Graniteown\", Dwarven Child",
+		"pos": [ 101, 115, 116 ],
+		"profession": "Dwarven Child",
+		"skills": "KNOWLEDGE_ACQUISITION:1, FORGE_WEAPON:1, CONCENTRATION:1",
+		"stress": "zufrieden",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 6468,
+		"name": "Litast Gulnaslibash \"Islandaxe\", Dwarven Baby",
+		"pos": [ 103, 101, 129 ],
+		"profession": "Dwarven Baby",
+		"skills": "",
+		"stress": "zufrieden",
+		"work_details": ""
+	} ]
+}

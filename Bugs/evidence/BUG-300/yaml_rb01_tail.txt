@@ -1,0 +1,5 @@
+$ python -c "...load data/runbooks/rb01_e18_pick.yaml and print params / preconditions / rollback"
+params       : {'squad_id': {'default': None, 'desc': 'Squad ID of the miners (claude/mil status)'}}
+preconditions: [{'when': 'not danger', 'msg': 'not during danger (reorganise the squad only in peacetime)'}]
+rollback     : [{'cmd': 'claude/mil workmode {squad_id} off --apply'}]
+[exit 0]

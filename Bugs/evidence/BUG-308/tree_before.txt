@@ -1,0 +1,4 @@
+$ wc -c tmp_bug/victim.md; ls tmp_bug/scopes
+16738 bytes  tmp_bug/victim.md (OUTSIDE tmp_bug/scopes)
+tmp_bug/scopes: []
+[exit 0]

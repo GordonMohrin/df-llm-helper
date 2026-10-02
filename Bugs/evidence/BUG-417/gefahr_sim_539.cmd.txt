@@ -1,0 +1,2 @@
+dfhack-run.exe claude/gefahr sim 539 96 96 133
+exit=0 time=0.08s

@@ -1,0 +1,5 @@
+[ {
+	"err": "...team\\steamapps\\common\\Dwarf Fortress\\hack\\lua\\dfhack.lua:1158: Invalid arguments",
+	"ok": false,
+	"out": ""
+} ]

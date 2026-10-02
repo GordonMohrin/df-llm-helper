@@ -1,0 +1,55 @@
+ 2085 noise  COMBAT_STRIKE_DETAILS   | KRITISCH 11:20:23 [COMBAT_STRIKE_DETAILS] The gem cutter bends the dwarven child's left hand with Th
+  552 noise  LOSE_HOLD_OF_ITEM   | KRITISCH 13:41:43 [LOSE_HOLD_OF_ITEM] The goblin thief loses hold of the {giant cave spider silk bag
+  414 noise  CONFLICT_CONVERSATION   | KRITISCH 13:41:39 [CONFLICT_CONVERSATION] Smunstu Ng├╗tdogozru, Goblin Thief: Help!  Save me!
+   90 noise  COMBAT_BLOCK   | KRITISCH 14:19:51 [COMBAT_BLOCK] The goblin thief strikes at the swordsdwarf but the shot is blocked
+   85 noise  CANCEL_JOB   | KRITISCH 11:19:41 [CANCEL_JOB] ├«ton Uristelbel, Gem Cutter cancels Strange mood: Went insane.
+   85 noise  COMBAT_DODGE   | KRITISCH 13:41:32 [COMBAT_DODGE] The spinning chert misses the goblin thief!
+   80 noise  COMBAT_JUMP_DODGE_STRIKE   | KRITISCH 14:19:43 [COMBAT_JUMP_DODGE_STRIKE] The axedwarf attacks the goblin bowman but He jumps awa
+   61 noise  COMBAT_PARRY   | KRITISCH 14:19:51 [COMBAT_PARRY] The goblin thief strikes at the swordsdwarf but the shot is deftly 
+   40 noise  COMBAT_START_CHARGE   | KRITISCH 14:19:45 [COMBAT_START_CHARGE] The Axe Lord charges at the goblin bowman!
+   38 WAKES  CITIZEN_DEATH   | KRITISCH 11:20:32 [CITIZEN_DEATH] ├«ton Uristelbel, Gem Cutter has been struck down.
+   37 WAKES  AMBUSH_SNATCHER   | KRITISCH 11:35:12 [AMBUSH_SNATCHER] Snatcher!  Protect the children!
+   33 noise  COMBAT_CHARGE_COLLISION   | KRITISCH 14:19:45 [COMBAT_CHARGE_COLLISION] The Axe Lord collides with the goblin bowman!
+   32 noise  COMBAT_WRESTLE_RELEASE_GRIP   | KRITISCH 14:19:31 [COMBAT_WRESTLE_RELEASE_GRIP] The wrestler releases the grip of The wrestler's rig
+   28 noise  COMBAT_EVENT_WINDED   | KRITISCH 13:41:43 [COMBAT_EVENT_WINDED] The goblin thief is having trouble breathing!
+   25 noise  EXHAUSTION   | KRITISCH 10:37:51 [EXHAUSTION] The wrestler collapses and falls to the ground from over-exertion.
+   25 noise  COMBAT_SURPRISE_CHARGE   | KRITISCH 14:19:45 [COMBAT_SURPRISE_CHARGE] The goblin bowman looks surprised by the ferocity of The 
+   23 noise  PET_DEATH   | KRITISCH 11:10:55 [PET_DEATH] The Stray Baby Llama (Tame) has been found, starved to death.
+   20 WAKES  AMBUSH_SNATCHER_SUPPORT   | KRITISCH 14:19:23 [AMBUSH_SNATCHER_SUPPORT] An ambush!  Curse them!
+   18 noise  PAIN_KO   | KRITISCH 13:41:43 [PAIN_KO] The goblin thief gives in to pain.
+   18 noise  FALL_OVER   | KRITISCH 14:19:31 [FALL_OVER] The goblin bowman falls over.
+   18 noise  COMBAT_EVENT_KNOCKED_OUT   | KRITISCH 14:19:45 [COMBAT_EVENT_KNOCKED_OUT] The goblin bowman has been knocked unconscious!
+   15 noise  STAND_UP   | KRITISCH 13:41:32 [STAND_UP] The goblin thief stands up.
+   14 noise  COMBAT_CHARGE_DEFENDER_TUMBLES   | KRITISCH 14:19:45 [COMBAT_CHARGE_DEFENDER_TUMBLES] The goblin bowman is knocked over and tumbles bac
+   14 noise  COMBAT_EVENT_NAUSEATED   | KRITISCH 17:02:04 [COMBAT_EVENT_NAUSEATED] The goblin hammerman looks sick!
+   12 WAKES  UNDEAD_ATTACK   | KRITISCH 15:29:48 [UNDEAD_ATTACK] An army is invading![B]The army is commanded by the elf Uxun Stand
+   12 noise  NOT_STUNNED   | KRITISCH 15:40:26 [NOT_STUNNED] The goblin crossbowman is no longer stunned.
+   11 noise  COMBAT_EVENT_ENRAGED   | KRITISCH 14:19:38 [COMBAT_EVENT_ENRAGED] The goblin bowman has become enraged!
+   11 WAKES  AMBUSH_AMBUSHER_NATURE   | KRITISCH 15:31:47 [AMBUSH_AMBUSHER_NATURE] An ambush!  Curse all friends of nature!
+   10 noise  COMBAT_WRESTLE_RELEASE_LATCH   | KRITISCH 14:19:51 [COMBAT_WRESTLE_RELEASE_LATCH] The goblin thief breaks the grip of The swordsdwarf
+   10 WAKES  VOMIT   | KRITISCH 00:12:33 [VOMIT] The goblin thief vomits.
+    9 noise  COMBAT_WRESTLE_LOCK   | KRITISCH 14:19:31 [COMBAT_WRESTLE_LOCK] The wrestler locks the goblin bowman's right elbow with The 
+    7 noise  COMBAT_JUMP_DODGE_PROJ   | KRITISCH 13:41:32 [COMBAT_JUMP_DODGE_PROJ] The goblin thief jumps away from The spinning chert!
+    7 noise  COMBAT_WRESTLE_RELEASE_LOCK   | KRITISCH 14:19:31 [COMBAT_WRESTLE_RELEASE_LOCK] The wrestler releases the joint lock of The wrestler
+    6 noise  COMBAT_EVENT_STUNNED   | KRITISCH 02:19:07 [COMBAT_EVENT_STUNNED] The goblin hammerman has been stunned!
+    5 WAKES  BERSERK_CITIZEN   | KRITISCH 11:19:41 [BERSERK_CITIZEN] ├«ton Uristelbel, Gem Cutter has gone berserk!
+    5 noise  COMBAT_TWIST_WEAPON   | KRITISCH 17:02:04 [COMBAT_TWIST_WEAPON] The goblin spearman pulls on the embedded ({silver spear}).
+    5 WAKES  RESOLVE_SHARED_ITEMS   | KRITISCH 17:02:04 [RESOLVE_SHARED_ITEMS] The goblin spearman gains possession of the ({silver spear}
+    5 noise  COMBAT_CHARGE_DEFENDER_KNOCKED_OVER   | KRITISCH 18:13:42 [COMBAT_CHARGE_DEFENDER_KNOCKED_OVER] The goblin lasher is knocked over!
+    5 noise  UNIT_PROJECTILE_SLAM   | KRITISCH 19:26:56 [UNIT_PROJECTILE_SLAM] The goblin lasher slams into an obstacle!
+    4 WAKES  CITIZEN_TANTRUM   | KRITISCH 19:24:20 [CITIZEN_TANTRUM] ònul Engigakrul, Stonecrafter is throwing a tantrum!
+    4 noise  REGAIN_CONSCIOUSNESS   | KRITISCH 02:17:59 [REGAIN_CONSCIOUSNESS] The goblin axeman regains consciousness.
+    3 noise  BREAK_GRIP   | KRITISCH 14:19:31 [BREAK_GRIP] The wrestler releases the grip of The wrestler's right hand from The 
+    3 noise  COMBAT_WRESTLE_STRUGGLE   | KRITISCH 17:02:04 [COMBAT_WRESTLE_STRUGGLE] The goblin hammerman struggles in vain against the grip 
+    3 noise  COMBAT_EVENT_LATCH_GENERAL   | KRITISCH 17:02:04 [COMBAT_EVENT_LATCH_GENERAL] The goblin hammerman latches on firmly!
+    2 WAKES  MASTERPIECE_CRAFTED   | KRITISCH 13:46:47 [MASTERPIECE_CRAFTED] Kikrost Kilrudbuk├¿t has created a masterpiece Γÿ╝bronze fig
+    2 noise  COMBAT_CHARGE_ATTACKER_TUMBLES   | KRITISCH 02:17:52 [COMBAT_CHARGE_ATTACKER_TUMBLES] The goblin swordsman is knocked over!
+    2 noise  COMBAT_EVENT_PROPELLED_AWAY   | KRITISCH 02:18:54 [COMBAT_EVENT_PROPELLED_AWAY] The goblin hammerman is propelled away by the force 
+    2 WAKES  DODGE_FLYING_OBJECT   | KRITISCH 08:42:41 [DODGE_FLYING_OBJECT] The goblin Pikemaster jumps out of the goblin Pikemaster's f
+    1 WAKES  GUARD   | KRITISCH 11:54:55 [GUARD] DEADMAN: kein Orchestrator-Herzschlag seit 20 Min -> fps 30
+    1 WAKES  NO_BREAK_GRIP   | KRITISCH 17:02:00 [NO_BREAK_GRIP] The goblin hammerman is unable to break the grip of The Elite Wres
+    1 noise  COMBAT_CHARGE_ATTACKER_BOUNCE_BACK   | KRITISCH 02:17:52 [COMBAT_CHARGE_ATTACKER_BOUNCE_BACK] The goblin spearman bounces backward!
+    1 noise  LOSE_EMOTION   | KRITISCH 02:18:34 [LOSE_EMOTION] Smunstu Kudauksos, Goblin Crossbowman is no longer enraged.
+    1 noise  LOSE_HOLD_OF_SURFACE   | KRITISCH 08:43:47 [LOSE_HOLD_OF_SURFACE] The goblin hammerman loses hold of the Chert Block Wall.
+    1 noise  COMBAT_WRESTLE_CHOKEHOLD   | KRITISCH 08:44:23 [COMBAT_WRESTLE_CHOKEHOLD] The militia captain places a chokehold on the goblin ha
+4001 critical lines; 54 tags; total lines 4326

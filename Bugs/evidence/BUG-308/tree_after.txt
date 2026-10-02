@@ -1,0 +1,5 @@
+$ wc -c tmp_bug/victim.md; ls tmp_bug/scopes tmp_bug/archive
+5745 bytes  tmp_bug/victim.md
+tmp_bug/scopes: []
+tmp_bug/archive: ['victim.20261002T123223.md']
+[exit 0]

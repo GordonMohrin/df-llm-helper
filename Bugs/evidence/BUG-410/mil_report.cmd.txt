@@ -1,0 +1,2 @@
+dfhack-run.exe claude/mil report
+exit=0 time=0.10s

@@ -1,0 +1,9 @@
+$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 lint tmp_bug/lint
+L01_message_text.lua:1: L01 createitem creates items out of nothing
+L08_identifier_teleporting_label.lua:1: L08 setting position directly (teleport)
+L17_identifier_tiletypes.lua:1: L17 changing terrain
+L18_identifier_liquids.lua:1: L18 setting liquids
+L25_deathcause_read_only.lua:1: L25 cheat tool
+L25_identifier_cleaners.lua:1: L25 cheat tool
+6 findings (6 errors)
+[exit 1]

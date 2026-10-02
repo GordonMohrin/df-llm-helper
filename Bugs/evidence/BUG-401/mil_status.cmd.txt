@@ -1,0 +1,2 @@
+dfhack-run.exe claude/mil status
+exit=0 time=0.08s

@@ -1,0 +1,9 @@
+$ python -c "parse every ~/.claude/projects/**/subagents/*.jsonl with agents.parse_transcript; compare .output vs .out_est" (run on the player's machine)
+transcripts: 128 | usage.output_tokens sum > estimated output (Out~ column): 11
+ratio output_tokens/out_est: median 0.13, min 0.00, max 2.64
+agent-ad6d14a276abd0141    calls= 93  Out~(table)= 167271  usage.output_tokens= 441146
+agent-a188cd1838d632f23    calls= 75  Out~(table)= 172448  usage.output_tokens= 429239
+agent-ac1c73c60c861b2f9    calls= 85  Out~(table)= 169877  usage.output_tokens= 398507
+agent-afb46eca3b184e041    calls=130  Out~(table)= 190088  usage.output_tokens= 398288
+agent-a1e41bff1d78c9641    calls=147  Out~(table)= 180463  usage.output_tokens= 392333
+[exit 0]

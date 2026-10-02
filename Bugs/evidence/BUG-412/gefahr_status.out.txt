@@ -1,0 +1,21 @@
+{
+	"alarm": 0,
+	"alarm_A": 0,
+	"civ_alert_idx": 1,
+	"fps": 250,0,
+	"gelistet": 6,
+	"hits": 0,
+	"refuge": {
+		"alerts": 2,
+		"burrow": 0,
+		"civ_burrows": 1,
+		"konflikt": [],
+		"ok": true,
+		"tile_probe": true
+	},
+	"scans": 439,
+	"selbsttest": [],
+	"slow": 0,
+	"top": [ "A/FEATURE_BEAST FORGOTTEN_BEAST_8 id557 (53,37,92) zone=- d=59 reach=nil alarm=false warn=false slow=false", "A/FEATURE_BEAST FORGOTTEN_BEAST_24 id542 (12,131,44) zone=- d=84 reach=nil alarm=false warn=false slow=false", "A/FEATURE_BEAST FORGOTTEN_BEAST_2 id563 (4,102,41) zone=- d=92 reach=nil alarm=false warn=false slow=false", "A/DEMON DEMON_18 id4377 (35,3,2) zone=- d=93 reach=nil alarm=false warn=false slow=false", "A/DEMON DEMON_18 id4376 (35,1,2) zone=- d=95 reach=nil alarm=false warn=false slow=false", "A/DEMON DEMON_18 id4375 (34,0,2) zone=- d=96 reach=nil alarm=false warn=false slow=false" ],
+	"warn": 0
+}
