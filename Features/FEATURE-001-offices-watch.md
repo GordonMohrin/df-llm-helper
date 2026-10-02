@@ -45,3 +45,6 @@ Reading is free. Writing = existing `aemter` functions only (the same thing the 
 ## Info needed
 - Recorded answer of `claude/aemter status` and a unit dump (mood, wounds, stress, skills) from the live game: the local orchestrator can supply `Bugs/evidence`-style files on request.
 - Decision: should the captain of the guard be a mandatory office (the player says yes: "king of the guard is important")?
+
+## Nachtrag 2026-10-03
+After the second attack the militia commander and the chief medical dwarf were dead again (assignment points to a dead histfig). Reassigning via `claude/aemter vacate` + `assign` worked live. `offices --apply` should use exactly this sequence for dead holders.

@@ -48,3 +48,7 @@ The enable path has no memory of a manual `alert off` and no supply check; the s
 
 ## Info needed
 Decision: should an unsupplied refuge block the *automatic* alarm completely (citizens walk around during a siege), or is a warning plus automatic burrow extension enough? Player: which `config.ZUFLUCHT.rects` were active when the citizens died.
+
+## Nachtrag 2026-10-03 (second invasion, Run 5)
+- **Gefangene Feinde loesen Alarm aus:** the watchdog keeps `civ_alert_idx` = 1 as long as a *caged* enemy (cave dragoness in a cage trap at (101,96,z130), d=5) is inside `ALERT_RANGE`. Loop: `ZIVILWARNUNG seit > 3 Min AN -> claude/alert off + Watchdog neu starten`. Caged/chained units (`flags1.caged`/`flags1.chained`) must be excluded from the enemy count in `watchdog.lua`/`gefahr.lua` (same cause as BUG-426).
+- **Verpflegung im Burrow:** after invasion J125 citizens died of thirst; fixed by hand by extending the burrow with the well (139,99..140,99,z129), drink store (117..121,88..92,z132), food store (109..113,108..114,z130) and paths between them (idea: BFS from the hospital to the targets). Feature request: `Features/FEATURE-005-refuge-check-supply-reachability.md`.

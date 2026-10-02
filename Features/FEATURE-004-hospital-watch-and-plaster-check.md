@@ -40,3 +40,6 @@ Required in the watcher / planner:
 2. Suggest candidates (alive, adult, not in a squad on duty, not in a mood, low stress, healthy) and, with an exception register entry, fill the posts the way the location menu does: `occupation.unit_id`, `occupation.histfig_id` and `unit.occupations:insert` (tested live 02.10.2026, FP13, 8 posts filled), plus the care labors DIAGNOSE, SURGERY, BONE_SETTING, SUTURING, DRESSING_WOUNDS, FEED_WATER_CIVILIANS, RECOVER_WOUNDED.
 3. Re-check after deaths (the post keeps pointing at the dead unit); orphaned HOSPITAL locations without a zone (ids 0, 3, 4, 10) should be listed.
 Acceptance: fixture "8 posts unfilled" -> critical + 8 suggestions; fixture "all filled by living units" -> ok; fixture "post points at dead unit" -> treated as unfilled.
+
+## Nachtrag 2026-10-03
+- The hospital workplace slots (occupations) were empty -> no care jobs. Staffing via Lua worked live (8 slots): set `occupation.unit_id` / `occupation.histfig_id` and `unit.occupations:insert(...)`. After a death the slot still points at the dead unit -> `hospital` should detect dead holders and refill (with `--apply`).
