@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-__all__ = ["TradeObs", "TradeFlow", "STATES", "ALLOWED", "obs_from_status"]
+__all__ = ["TradeObs", "TradeFlow", "STATES", "ALLOWED", "TERMINAL", "obs_from_status"]
 
 STATES = ["IDLE", "PAUSE", "SAVE", "BROKER", "MARK", "OPEN", "SELECT_DRY", "REVIEW", "SELECT_LIVE", "CONFIRM",
           "FINISH", "RELEASE", "RESUME", "DONE", "ABORT", "FAILED"]
@@ -31,6 +31,7 @@ ALLOWED = {
     "ABORT": {"claude/handel abort --live", "claude/handel finish --live", "claude/handel release --live",
               "claude/advance run"},
 }
+TERMINAL = ("DONE", "ABORT", "FAILED")
 FOCUS_TRADE = "dwarfmode/Trade/Default"
 TIMEOUT_S = {"BROKER": 300, "OPEN": 60, "SELECT_DRY": 60, "REVIEW": 900, "SELECT_LIVE": 60, "CONFIRM": 60,
              "FINISH": 60, "MARK": 600}
@@ -72,6 +73,8 @@ class TradeFlow:
     def _go(self, state: str, now: float, why: str = "") -> None:
         self.log.append(f"{self.state} -> {state}" + (f" ({why})" if why else ""))
         self.state, self.since = state, now
+        if state in TERMINAL:
+            self.approved = False          # an approval is valid for ONE trade only (BUG-202: stale approval)
 
     def _retry(self, key: str, limit: int) -> bool:
         self.retries[key] = self.retries.get(key, 0) + 1
@@ -80,7 +83,15 @@ class TradeFlow:
     def approve(self) -> None:
         self.approved = True
 
+    def renew_if_gone(self, o: TradeObs) -> bool:
+        """Terminal state and no caravan on the map any more -> fresh automaton for the next caravan (BUG-202)."""
+        if self.state in TERMINAL and o.caravan_state is None:
+            self.__init__()
+            return True
+        return False
+
     def step(self, o: TradeObs, now: float) -> list[str]:
+        self.renew_if_gone(o)
         s = self.state
         # global abort conditions
         if s not in ("IDLE", "DONE", "ABORT", "FAILED", "RESUME", "RELEASE") and o.caravan_state in (None, "Leaving"):

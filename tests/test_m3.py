@@ -265,8 +265,8 @@ def test_cli_overlay_and_trade(cfg3, capsys):
     assert main(base + ["trade", "status"]) == 0 and "State IDLE" in capsys.readouterr().out
     assert main(base + ["trade", "step", "--dry-run"]) == 0
     assert "State now: IDLE" in capsys.readouterr().out          # caravan still 'Approaching'
-    main(base + ["trade", "approve"])
-    assert "approved" in capsys.readouterr().out
+    assert main(base + ["trade", "approve"]) == 2                  # BUG-201: nothing in REVIEW -> refused
+    assert "Refused: no trade waits for an approval" in capsys.readouterr().out
     main(base + ["trade", "reset"])
     assert "reset" in capsys.readouterr().out
 

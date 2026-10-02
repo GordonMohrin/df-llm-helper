@@ -539,14 +539,16 @@ def cmd_trade(args) -> int:
         p.store.set("trade.flow", asdict(TradeFlow()))
         print("Trade automaton reset")
         return 0
-    if args.action == "approve":
-        flow.approve()
-        p.store.set("trade.flow", asdict(flow))
-        print(f"Live selection approved (state {flow.state})")
-        return 0
+    if args.action == "approve":                # BUG-201: reaches the caravan autopilot too; only in REVIEW
+        from .caravan import approve_review
+        ok, msg = approve_review(p.store)
+        print(msg)
+        return 0 if ok else 2
     if args.action == "status":
+        from .caravan import status_line
         print(f"State {flow.state}{' (' + flow.abort_reason + ')' if flow.abort_reason else ''}; "
               f"approved: {flow.approved}; last steps: {' | '.join(flow.log[-4:])}")
+        print(status_line(p.store))
         return 0
     st = p.client.run("claude/handel status")
     clock = p.client.run("claude/advance clock")
@@ -572,6 +574,12 @@ def cmd_trade(args) -> int:
     if not args.dry_run:                       # dry run: the state machine must not advance past commands never sent
         p.store.set("trade.flow", asdict(flow))
     print(f"State now: {flow.state}" + (f" ({flow.abort_reason})" if flow.abort_reason else ""))
+    if flow.state in ("DONE", "ABORT", "FAILED") and obs.caravan_state:     # BUG-202
+        print(f"State {flow.state} (previous trade) - nothing to do; to trade with this caravan again: "
+              "python -m df_llm_helper trade reset")
+    elif flow.state == "REVIEW" and not flow.approved:                       # BUG-201
+        print("Review: judge the dry run (python -m df_llm_helper caravan evaluates goods and ratio), then "
+              "python -m df_llm_helper trade approve - or trade reset")
     return 0
 
 
@@ -663,10 +671,11 @@ def cmd_siege(args) -> int:
         for ln in log:
             print("  " + ln)
     if flow.state == "IDLE":
-        print("no attackers on the map")
+        print("no attackers on the map (only invaders count; thieves/ambushers: see claude/status threats)")
         return 0
+    from .siege import exit_code
     print("\n".join(flow.summary()))
-    return 0 if flow.state in ("DONE", "ENGAGE", "PREPARE") or args.dry_run else 1
+    return exit_code(flow)
 
 
 def cmd_caravan(args) -> int:
@@ -702,7 +711,7 @@ def cmd_mood(args) -> int:
     from .moods import MoodManager
     p = _pilot(args)
     mm = MoodManager(p.client, p.tools, p.store, p.clock, p.cfg.get("mood", {}))
-    lines = mm.reserve() if args.action == "reserve" else mm.check(dry=args.dry_run)
+    lines = mm.reserve(dry=args.dry_run) if args.action == "reserve" else mm.check(dry=args.dry_run)
     print("\n".join(lines))
     return 0
 

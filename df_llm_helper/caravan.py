@@ -19,9 +19,10 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from . import yamlmini
-from .trade_flow import TradeFlow, obs_from_status
+from .trade_flow import TERMINAL, TradeFlow, obs_from_status
 
-__all__ = ["Good", "parse_list", "load_wants", "boost_wants", "classify", "decide", "dry_ok", "CaravanPilot", "DEFAULTS"]
+__all__ = ["Good", "parse_list", "load_wants", "boost_wants", "classify", "decide", "dry_ok", "CaravanPilot", "DEFAULTS",
+           "approve_review", "status_line"]
 
 DEFAULTS = {"min_ratio": 2.0, "skip_if_offer_empty": True, "stuck_ticks": 2000, "release_stuck": True,
             "wants_file": "data/trade/wants.yaml", "max_steps": 40}
@@ -165,12 +166,19 @@ class CaravanPilot:
         log.append(("ok " if r.ok else "ERROR ") + cmd)
         return r
 
-    def _resume(self, st: CaravanState, dry: bool, log: list, why: str) -> None:
+    def _resume(self, st: CaravanState, dry: bool, log: list, why: str, *, run: bool = True) -> None:
         if not dry:
             self.tools.delete_flag("caravan")
             self.tools.delete_flag("pause.hold")
-        self._run("claude/advance run", dry, log)
-        st.report.append(why)
+        if run:
+            self._run("claude/advance run", dry, log)
+        if why not in st.report:
+            st.report.append(why)
+
+    def _warn(self, key: str, msg: str, dry: bool) -> None:
+        """Warnings only in a real run: a dry run must not wake the orchestrator (BUG-203)."""
+        if not dry:
+            self.store.warn(self.clock.now().epoch, "caravan", key, msg, "warn")
 
     def _release_stuck(self, status: dict, game_tick: int | None, st: CaravanState, dry: bool, log: list) -> None:
         cars = [c for c in status.get("caravans") or [] if isinstance(c, dict)]
@@ -190,7 +198,7 @@ class CaravanPilot:
                    "python -m df_llm_helper exception add FP09 --reason 'stuck merchants' --ja '<quote>'")
             if msg not in st.report:
                 st.report.append(msg)
-                self.store.warn(self.clock.now().epoch, "caravan", "caravan:stuck", msg, "warn")
+                self._warn("caravan:stuck", msg, dry)
             return
         r = self._run("claude/pilot_caravan release --apply", dry, log)
         st.released = True
@@ -212,6 +220,7 @@ class CaravanPilot:
         cars = [c for c in j.get("caravans") or [] if isinstance(c, dict)]
         at_depot = any(c.get("state") == "AtDepot" for c in cars)
         flow = TradeFlow(**st.flow) if st.flow else TradeFlow()
+        before = flow.state
 
         # orphaned flags without an active caravan (rule stale_caravan_flag covers legacy leftovers; here right after departure)
         if not cars and flow.state in ("IDLE", "DONE", "ABORT", "FAILED"):
@@ -226,6 +235,10 @@ class CaravanPilot:
         if flow.state == "IDLE" and not at_depot:
             self._save(st)
             return "waiting", log
+        if flow.state in TERMINAL:
+            # BUG-200: this caravan is finished (it stays on the map for days): no commands, no flag deletions
+            self._save(st)
+            return flow.state.lower(), log
 
         # decision as soon as the offer is readable (trade window open)
         if flow.state in ("REVIEW", "SELECT_DRY") and st.decision in ("", "unknown"):
@@ -246,20 +259,27 @@ class CaravanPilot:
             lst = self.client.run("claude/handel list 0")
             offer = parse_list(lst.json, self.wants) or []
             ok, why = dry_ok(sel.json, offer, self.wants, self.cfg["min_ratio"])
-            st.report.append(("approved: " if ok else "NOT approved: ") + why)
+            line = ("approved: " if ok else "NOT approved: ") + why
+            if line not in st.report:                              # BUG-201: no pile-up of the same line per call
+                st.report.append(line)
             if ok:
                 flow.approve()
             else:
-                self.store.warn(self.clock.now().epoch, "caravan", "caravan:review", "Trade waits for the orchestrator: " + why,
-                                "warn")
+                hint = (" -> approve by hand: python -m df_llm_helper trade approve (or caravan reset / adjust "
+                        "tools/scopes/handel-regeln.md)")
+                if not any(r.startswith("Waiting for approval") for r in st.report):
+                    st.report.append("Waiting for approval" + hint)
+                self._warn("caravan:review", "Trade waits for the orchestrator: " + why + hint, dry)
 
         clock = self.client.run("claude/advance clock")
         paused = bool((clock.json or {}).get("paused")) if isinstance(clock.json, dict) else False
         obs = obs_from_status(j, paused=paused, stable_s=stable_s, last_ok=stat.ok)
         for c in flow.step(obs, self.clock.now().epoch):
             self._run(c, dry, log)
-        if flow.state == "DONE":
-            self._resume(st, dry, log, "Trade completed")
+        if flow.state == "DONE" and before != "DONE":
+            # only on the transition; 'advance run' was already sent by the automaton (RELEASE -> RESUME) (BUG-200)
+            sent = any(x.startswith(("RELEASE -> RESUME", "RESUME -> DONE")) for x in flow.log)
+            self._resume(st, dry, log, "Trade completed", run=not sent)
         elif flow.state in ("ABORT", "FAILED"):
             st.report.append(f"Trade aborted ({flow.abort_reason}); quicksave from the start of the trade available "
                              f"(load only via the title menu/the player)")
@@ -274,3 +294,35 @@ class CaravanPilot:
         flow = TradeFlow(**st.flow) if st.flow else TradeFlow()
         lines = [f"Caravan: {flow.state}" + (f" ({st.decision})" if st.decision else "")] + st.report
         return lines[:8]
+
+
+def status_line(store) -> str:
+    """One line about the caravan autopilot's trade (shown by `trade status`, BUG-201)."""
+    st = store.get("caravan.state") or {}
+    flow = st.get("flow") or {}
+    if not flow:
+        return "Caravan autopilot: no trade"
+    return (f"Caravan autopilot: {flow.get('state', 'IDLE')}" + (f" ({st.get('decision')})" if st.get("decision") else "")
+            + f"; approved: {bool(flow.get('approved'))}")
+
+
+def approve_review(store) -> tuple[bool, str]:
+    """`trade approve` (BUG-201): approve the live selection of the trade that waits in REVIEW - the caravan autopilot's
+    (kv caravan.state) and/or the manual automaton (kv trade.flow). Refused when nothing waits for an approval, so a
+    stale approval can never skip the review of a later trade."""
+    done = []
+    st = store.get("caravan.state") or {}
+    if (st.get("flow") or {}).get("state") == "REVIEW":
+        st["flow"]["approved"] = True
+        store.set("caravan.state", st)
+        done.append("caravan")
+    tf = store.get("trade.flow") or {}
+    if tf.get("state") == "REVIEW":
+        tf["approved"] = True
+        store.set("trade.flow", tf)
+        done.append("trade")
+    if not done:
+        states = f"caravan {(st.get('flow') or {}).get('state', 'IDLE')}, trade {tf.get('state', 'IDLE')}"
+        return False, f"Refused: no trade waits for an approval (state {states}); approve only in REVIEW"
+    return True, ("Live selection approved (state REVIEW: " + ", ".join(done) + ") - next: "
+                  + ("python -m df_llm_helper caravan --loop" if "caravan" in done else "python -m df_llm_helper trade step"))

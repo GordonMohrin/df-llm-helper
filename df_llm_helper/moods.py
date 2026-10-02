@@ -264,7 +264,7 @@ class MoodManager:
                     self.store.warn(now, "mood", f"mood:fail:{uid}", msg, "crit")
         return out[:6]
 
-    def reserve(self) -> list[str]:
+    def reserve(self, dry: bool = False) -> list[str]:
         j = self.status()
         st = self.client.run("claude/status")
         popd = (st.json or {}).get("population") if isinstance(st.json, dict) else None
@@ -276,6 +276,7 @@ class MoodManager:
         if pop < self.cfg["min_pop_reserve"]:
             return [f"Pop {pop} < {self.cfg['min_pop_reserve']}: no reserve check"]
         if gaps:
-            self.store.warn(self.clock.now().epoch, "mood", "mood:reserve", "Mood reserve missing: " + ", ".join(gaps))
+            if not dry:                                              # BUG-203: a dry run writes no warning
+                self.store.warn(self.clock.now().epoch, "mood", "mood:reserve", "Mood reserve missing: " + ", ".join(gaps))
             return ["Mood reserve missing: " + ", ".join(gaps)]
         return ["Mood reserve ok"]
