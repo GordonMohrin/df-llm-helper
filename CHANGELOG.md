@@ -1,5 +1,11 @@
 # CHANGELOG dfpilot
 
+## v3 live test (2026-10-02)
+- `reach`: a point on a building tile that blocks walking (the well) was reported "UNREACHABLE". `pilot_reach check` now tests the tiles around the building (`via` in the answer, `x,y,z+` forces it), `dump` marks such tiles `W`, the grid logic (`measure`, cause search, what-if) reaches a `W`/`adjacent` point from its neighbours; `reach.yaml` field `adjacent`.
+- `perimeter`: obstacle buildings (well/statue) are walls for the scan; documented why the scan finds `(108,92,z132)` that `claude/zugaenge` hides (it treats workshops as walls, DF does not).
+- `remote`: names in the status/rescue lines drop the nickname instead of cutting it mid-word.
+- Tests with the Lua grid mock for the well and for a blocking building in the perimeter scan.
+
 ## v3 (2026-10-01) – eleven features from Run 5 (`docs/specs-v3/`, manual `docs/manual-v3/`)
 - New plug-in mechanism `dfpilot/features/` (KEY, DEFAULTS, register, check_hook): features add commands, config and check lines without touching cli/config.
 - `perimeter` (01), `digcheck` (02), `reach` (11): access guard with clustering, allow-list, seal CSV (stairs rule, what-if before sealing), dig rules R1–R6 in blocks, reachability with cutting-construction search and gamelog correlation; Lua `pilot_perimeter/digcheck/reach.lua`; grid fixtures reproduce the Run-5 situations.

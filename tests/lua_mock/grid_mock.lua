@@ -94,7 +94,8 @@ df = {
                           'SHRUB', 'SAPLING', 'TWIG', 'ENDLESS_PIT' }),
   tiletype_material = enum({ 'NONE', 'STONE', 'SOIL', 'CONSTRUCTION' }),
   tile_liquid = enum({ 'Water', 'Magma' }),
-  building_type = enum({ 'Chair', 'Bed', 'Door', 'Hatch', 'Trap', 'Workshop' }),
+  building_type = enum({ 'Chair', 'Bed', 'Door', 'Hatch', 'Trap', 'Workshop', 'Well' }),
+  tile_building_occ = enum({ 'None', 'Planned', 'Passable', 'Obstacle', 'Well', 'Floor', 'Impassable', 'Dynamic' }),
   global = { world = { map = { x_count = tonumber(mx), y_count = tonumber(my), z_count = tonumber(mz) } } },
 }
 local S, MAT = df.tiletype_shape, df.tiletype_material
@@ -114,6 +115,7 @@ local CH = {
   ['_'] = { 'EMPTY', subterranean = false }, ["'"] = { 'EMPTY', outside = true, subterranean = false },
   V = { 'EMPTY' }, ['~'] = { 'FLOOR', flow = 7 }, M = { 'FLOOR', flow = 7, magma = true },
   D = { 'FLOOR', building = 'Door' }, T = { 'FLOOR', building = 'Trap' },
+  W = { 'EMPTY', building = 'Well', occ = 'Well' },      -- well: open space in DF, blocks walking (walk group 0)
 }
 local tiles = {}
 do
@@ -144,6 +146,16 @@ dfhack = {
                flow_size = c.flow or 0, liquid_type = c.magma and df.tile_liquid.Magma or df.tile_liquid.Water }
     end,
     getTileType = function(x, y, z) local _, c = tile(x, y, z) return c[1] end,
+    -- block with occupancy[x%16][y%16].building (tile_building_occ value)
+    getTileBlock = function(x, y, z)
+      local bx, by = x - x % 16, y - y % 16
+      return { occupancy = setmetatable({}, { __index = function(_, xi)
+        return setmetatable({}, { __index = function(_, yi)
+          local _, c = tile(bx + xi, by + yi, z)
+          return { building = df.tile_building_occ[c.occ or 'None'] }
+        end })
+      end }) }
+    end,
     canWalkBetween = function(p1, p2)
       local a = tiles[p1.x .. ',' .. p1.y .. ',' .. p1.z]
       local b = tiles[p2.x .. ',' .. p2.y .. ',' .. p2.z]
@@ -155,7 +167,7 @@ dfhack = {
       local _, c = tile(x, y, z)
       if not c.building then return nil end
       local bt = df.building_type[c.building]
-      return { getType = function() return bt end }
+      return { getType = function() return bt end, x1 = x, y1 = y, x2 = x, y2 = y }
     end,
   },
 }

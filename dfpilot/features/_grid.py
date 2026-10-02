@@ -10,6 +10,7 @@ One character per tile. The same encoding is used by the grid fixtures (fixtures
     _  open space inside (above ground)   '  open space outside (sky)   V  open space underground (void)
     ~  water (flow > 0)        M  magma (flow > 0)
     D  door/hatch/floodgate (walkable building)    T  trap (walkable building, part of a trap corridor)
+    W  building tile that blocks walking (well, statue): not walkable itself, reached from its neighbours
 
 Movement (mirrors lua/claude/zugaenge.lua): 8 directions on a level; stairs up/down when both ends are stairs;
 ramps connect to the 8 neighbors one level up (and back). Liquids are not walkable (conservative, as in the prototype).
@@ -22,7 +23,7 @@ from __future__ import annotations
 from collections import deque
 from pathlib import Path
 
-__all__ = ["Grid", "WALK", "OUTSIDE", "STAIRS", "fmt", "clusters", "in_box", "box_dist", "entries", "core_sets"]
+__all__ = ["Grid", "WALK", "OUTSIDE", "STAIRS", "BLOCKING", "fmt", "clusters", "in_box", "box_dist", "entries", "core_sets"]
 
 WALK = set(".,Xx<>^/DT")
 OUTSIDE = set(",x/'")
@@ -31,6 +32,7 @@ UP = set("Xx<")
 DOWN = set("Xx>")
 RAMP = set("^/")
 SOLID = set("#AC")
+BLOCKING = set("W")            # building tile that blocks walking: the target is reached from its neighbours
 LIQUID = set("~M")
 DIRS8 = [(dx, dy) for dy in (-1, 0, 1) for dx in (-1, 0, 1) if dx or dy]
 
@@ -166,7 +168,22 @@ class Grid:
         return seen
 
     def reachable(self, a, b, ok=None) -> bool:
-        return tuple(b) in self.bfs([a], ok)
+        return self.reached(self.bfs([a], ok), b)
+
+    def ring(self, p, soft: str = "") -> list:
+        """The 8 same-level neighbours of p that can be stood on (walkable; plus the `soft` characters)."""
+        x, y, z = p
+        return [q for q in ((x + dx, y + dy, z) for dx, dy in DIRS8) if self.get(q) in WALK or self.get(q) in soft]
+
+    def reached(self, seen, p, adjacent: bool = False) -> bool:
+        """Is point p in the BFS result `seen`? A tile that blocks walking (well, statue: 'W', or a point marked
+        `adjacent`) counts as reached when one of its neighbours is (DF has no walk group on such a tile)."""
+        p = tuple(p)
+        if p in seen:
+            return True
+        if adjacent or self.get(p) in BLOCKING:
+            return any(q in seen for q in self.ring(p))
+        return False
 
     def components(self) -> dict:
         """Walk group per walkable tile (like DF's walkable groups, for the Lua mock's canWalkBetween)."""
@@ -179,11 +196,19 @@ class Grid:
                 comp[q] = gid
         return comp
 
-    def cutting_constructions(self, a, b, soft: str = "C") -> list | None:
+    def cutting_constructions(self, a, b, soft: str = "C", adjacent: bool = False) -> list | None:
         """0-1 BFS a -> b where constructed walls cost 1 (treated as passable floor) and everything walkable costs 0.
         Returns the constructions on the cheapest path (in path order, from a), [] if b is reachable anyway,
-        None if b stays unreachable even without constructions (cause elsewhere: natural wall, unrevealed, box)."""
+        None if b stays unreachable even without constructions (cause elsewhere: natural wall, unrevealed, box).
+        A target that blocks walking ('W' or `adjacent`) is approached from its neighbours: the cheapest of them counts."""
         a, b = tuple(a), tuple(b)
+        if (adjacent or self.get(b) in BLOCKING) and not self.walkable(b):
+            best = None
+            for n in self.ring(b, soft):
+                r = self.cutting_constructions(a, n, soft)
+                if r is not None and (best is None or len(r) < len(best)):
+                    best = r
+            return best
         relaxed = self.copy()
         for p, ch in self.tiles.items():
             if ch in soft:

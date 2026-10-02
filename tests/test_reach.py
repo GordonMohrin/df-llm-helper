@@ -216,3 +216,81 @@ def test_cli_reach_offline(capsys, tmp_path, monkeypatch):
     assert "farm: 493x" in capsys.readouterr().out
     assert cli.main(["reach", "points"]) == 0
     assert "Farm hall F1 (106,92,z132)" in capsys.readouterr().out
+
+
+# ---- building tiles that block walking (live finding 02.10.: "UNREACHABLE: Well (140,99,z129)" although reachable)
+WELL_TXT = """@origin 0 0
+@core 1 1 130
+@point Well 4 1 130 well
+@point Behind 7 1 130 farm
+z 130
+##########
+#...W....#
+##########
+"""
+WELL_WALLED_TXT = WELL_TXT.replace("#...W....#", "#..CW....#")
+
+
+def _pts(g):
+    return R.points_from_grid(g, MAND)
+
+
+def test_well_tile_is_reached_from_a_neighbour():
+    """The well tile has no walk group (canWalkBetween false): the check tests the tiles around it."""
+    g = Grid.from_text(WELL_TXT)
+    start, pts = _pts(g)
+    assert g.get((4, 1, 130)) == "W" and not g.walkable((4, 1, 130))
+    st = R.measure_grid(g, start, pts)
+    assert st["Well"] is True                                  # (3,1) is reachable
+    assert st["Behind"] is False                               # the well blocks the one-tile corridor
+    assert R.find_causes(g, start, pts)["Well"] == []          # nothing cuts it
+
+
+def test_well_cut_by_construction_names_the_wall():
+    g = Grid.from_text(WELL_WALLED_TXT)
+    start, pts = _pts(g)
+    w = R.ReachWatch(MockClient({}), Store(), FakeClock(0), {}, points=pts, start=start)
+    status, causes, lines = w.run(grid=g)
+    assert status["Well"] is False
+    assert causes["Well"] == [(3, 1, 130)]                     # before the fix: None ("no path even without constructions")
+    assert "Well (cut at (3,1,z130))" in lines[0]
+
+
+def test_what_if_wall_beside_the_well_cuts_it():
+    g = Grid.from_text(WELL_TXT)
+    start, pts = _pts(g)
+    w = R.ReachWatch(MockClient({}), Store(), FakeClock(0), {}, points=pts, start=start)
+    res = w.what_if([(3, 1, 130)], grid=g)
+    assert [p.name for p in res.cut] == ["Well"]
+    assert w.what_if([(7, 1, 130)], grid=g).safe              # a wall behind the well changes nothing for the well
+
+
+def test_adjacent_point_flag_without_building_char(tmp_path):
+    """reach.yaml `adjacent: true`: a point on a non-walkable tile (not marked 'W') is tested from its neighbours."""
+    f = tmp_path / "reach.yaml"
+    f.write_text("start: [1, 1, 130]\npoints:\n  - {name: Well, xyz: [4, 1, 130], cat: well, adjacent: true}\n"
+                 "  - {name: Wall, xyz: [4, 1, 130], cat: farm}\n", encoding="utf-8")
+    start, pts = R.load_points(f, MAND)
+    assert [p.adjacent for p in pts] == [True, False]
+    g = Grid.from_text(WELL_TXT.replace("W", "#"))
+    st = R.measure_grid(g, start, pts)
+    assert st == {"Well": True, "Wall": False}
+
+
+@pytest.mark.skipif(not LUA, reason="lua5.4 missing")
+def test_well_through_lua_mock(tmp_path):
+    """pilot_reach.lua check: well tile -> via neighbour; dump emits 'W' and the Python cause search accepts it."""
+    clock = FakeClock(0)
+    g = Grid.from_text(WELL_TXT)
+    start, pts = _pts(g)
+    m = lua_client(g, tmp_path, clock)
+    w = R.ReachWatch(m, Store(), clock, {}, points=pts, start=start)
+    assert w.measure() == {"Well": True, "Behind": False}
+    j = json.loads(m.run("claude/pilot_reach check 1 1 130 4,1,130 4,1,130+ 2,1,130").stdout)
+    assert j["results"] == [True, True, True] and j["via"] == [True, True, False]
+    d = json.loads(m.run("claude/pilot_reach dump 0 0 130 9 2 130").stdout)
+    assert d["levels"]["130"] == ["##########", "#...W....#", "##########"]
+    g2 = Grid.from_text(WELL_WALLED_TXT)
+    w2 = R.ReachWatch(lua_client(g2, tmp_path / "b", clock), Store(), clock, {}, points=pts, start=start)
+    status, causes, lines = w2.run()
+    assert status["Well"] is False and causes["Well"] == [(3, 1, 130)]

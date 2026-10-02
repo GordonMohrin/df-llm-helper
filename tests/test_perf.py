@@ -316,3 +316,10 @@ def test_check_hook_and_cli(tmp_path, tools_dir, capsys):
     assert perf.check_hook(p, None, True) == []
     p.tools.write_flag("perf", "Game hangs: 1.0 outliers/min (max 3.0 s)")
     assert perf.check_hook(p, None, False) == ["Game hangs: 1.0 outliers/min (max 3.0 s)"]
+
+
+def test_list_command_uses_list_scheduled_and_parses_live_output():
+    """Live 02.10.: DF 53 repeat-util has no `scheduled` table (nil -> 'No repeat-util services found')."""
+    assert "listScheduled" in LIST_CMD and "r.scheduled" in LIST_CMD          # new API first, old tables as fallback
+    live = "S claude-arbeit claude-gesund claude-tempo control-panel/fix/general-strike control-panel/fix/stuck-instruments"
+    assert parse_list(live) == ["claude-arbeit", "claude-gesund", "claude-tempo"]   # '/' keys are not ours

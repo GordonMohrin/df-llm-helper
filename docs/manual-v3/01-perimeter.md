@@ -29,6 +29,16 @@ Two scans without a change print no WAKE line. New forbidden accesses raise a cr
 `<paths.tools>/zugang-erlaubt.txt`, one `x,y,z  comment` per line, e.g. `99,94,132  trap stair T1`. An access is
 allowed when its cluster center lies within +-4 x/y and +-2 z of an entry (shift by 3 = allowed, by 6 = not).
 
+## What counts as an access (live comparison 02.10.2026)
+The scan uses DF's own walkability: floors, ramps, stairs; a tile with a building that blocks walking (well, statue:
+occupancy `Obstacle`/`Well`) is a wall, **workshops and furnaces are walkable** (occupancy `Passable`; dwarves stand
+on them). The companion script `claude/zugaenge` (live copy) treats workshops/furnaces as walls: on the run-5 map this
+hides the access `(108,92,z132)`: outside ramp `(105,84,z131)` -> the kitchen workshop tile `(106,85,z132)` -> farm
+terrace (flagged "outside" by DF) -> farm hall F1. If you consider a workshop a barrier, allow that access in the
+allow-list; otherwise seal it (`seal --dry-run`, walls may only go on free floor, not on a farm plot). The entry tile of an
+access is reported as the first inside tile (a stair top can lie one level above the allow-list line: `99,94,133` is
+allowed by `99,94,132` through the z tolerance).
+
 ## Seal rules
 - Wall (`Cw`) on every entry tile of a forbidden cluster.
 - Stairs and ramps cannot carry a construction: the walls go on the adjacent **inside floor** tiles of the same level.

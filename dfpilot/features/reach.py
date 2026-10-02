@@ -49,6 +49,7 @@ class Point:
     xyz: tuple
     cat: str = ""
     mandatory: bool = True
+    adjacent: bool = False      # the point is a building tile (well, ...): reached from a neighbouring tile
 
     def label(self) -> str:
         return f"{self.name} {fmt(self.xyz)}"
@@ -63,7 +64,7 @@ def _as_point(d: dict, mandatory_cats) -> Point | None:
         mand = bool(d["mandatory"])
     else:
         mand = cat in (mandatory_cats or []) and not d.get("optional", False)
-    return Point(str(d["name"]), tuple(int(v) for v in xyz), cat, mand)
+    return Point(str(d["name"]), tuple(int(v) for v in xyz), cat, mand, bool(d.get("adjacent", False)))
 
 
 def load_points(path, mandatory_cats=None) -> tuple:
@@ -90,7 +91,7 @@ def points_from_grid(grid: Grid, mandatory_cats) -> tuple:
 def measure_grid(grid: Grid, start, points) -> dict:
     """Reference implementation of the Lua check on a grid: name -> reachable."""
     reach = grid.bfs([start])
-    return {p.name: tuple(p.xyz) in reach for p in points}
+    return {p.name: grid.reached(reach, p.xyz, p.adjacent) for p in points}
 
 
 def parse_check(j, points) -> dict:
@@ -103,7 +104,7 @@ def parse_check(j, points) -> dict:
 
 def find_causes(grid: Grid, start, points) -> dict:
     """name -> constructions on the cheapest path ([] = reachable in the grid, None = no path even without constructions)."""
-    return {p.name: grid.cutting_constructions(start, p.xyz) for p in points}
+    return {p.name: grid.cutting_constructions(start, p.xyz, adjacent=p.adjacent) for p in points}
 
 
 @dataclass
@@ -137,9 +138,10 @@ def what_if_grid(grid: Grid, start, points, walls, live: dict | None = None) -> 
     for p in points:
         if not p.mandatory:
             continue
-        if p.xyz in before and p.xyz not in after:
+        was, now = grid.reached(before, p.xyz, p.adjacent), grid.reached(after, p.xyz, p.adjacent)
+        if was and not now:
             res.cut.append(p)
-        elif p.xyz not in before and live and live.get(p.name):
+        elif not was and live and live.get(p.name):
             res.uncertain.append(p)
     return res
 
@@ -242,7 +244,7 @@ class ReachWatch:
         if not self.points:
             return {}
         s = self.start
-        cmd = f"claude/pilot_reach check {s[0]} {s[1]} {s[2]} " + " ".join(",".join(map(str, p.xyz)) for p in self.points)
+        cmd = f"claude/pilot_reach check {s[0]} {s[1]} {s[2]} " + " ".join(",".join(map(str, p.xyz)) + ("+" if p.adjacent else "") for p in self.points)
         return parse_check(self._run(cmd), self.points)
 
     def dump(self, box) -> Grid | None:

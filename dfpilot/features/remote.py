@@ -22,6 +22,7 @@ Never selected: soldiers (squad), children; no labor change for dwarves inside a
 """
 from __future__ import annotations
 
+import re
 import shlex
 from dataclasses import dataclass, field
 
@@ -81,6 +82,12 @@ def nearest_supply(c: dict, supplies: list, z_penalty: int = 3) -> tuple[int | N
 def selectable(c: dict) -> bool:
     """Never soldiers, children or dwarves in a hospital zone."""
     return not c.get("squad") and not c.get("child") and c.get("hospital") is None
+
+
+def short_name(name, n: int = 28) -> str:
+    """Name for one line: nickname in quotes dropped (it used to be cut mid-word: 'Dodok Batokkadol "Pr')."""
+    s = re.sub(r'\s*"[^"]*"', "", str(name or "")).strip()
+    return s[:n]
 
 
 def _need(c: dict, cfg: dict) -> int:
@@ -238,7 +245,7 @@ class RemoteCare:
             handled.add(_i(u["id"]))
             if not dry:
                 last[uid] = now
-            resc.append(f"{u['id']} {str(u.get('name', ''))[:20]}: " + " + ".join(parts) + f" ({reason})")
+            resc.append(f"{u['id']} {short_name(u.get('name'))}: " + " + ".join(parts) + f" ({reason})")
             if t["dist"] is not None and t["dist"] > int(c["far_tiles"]):
                 out.append(f"Proposal: food stockpile/drink barrel near {where} (work place {t['dist']} tiles from "
                            f"the nearest supply point)")
@@ -281,7 +288,7 @@ class RemoteCare:
             if level > int(esc.get(uid, 0)):
                 esc[uid] = level
                 place = f"({u.get('x')},{u.get('y')},{u.get('z')})"
-                txt = (f"!! critical: {u.get('id')} {str(u.get('name', ''))[:24]} hunger {u.get('hunger')}, thirst "
+                txt = (f"!! critical: {u.get('id')} {short_name(u.get('name'))} hunger {u.get('hunger')}, thirst "
                        f"{u.get('thirst')} at {place}")
                 if level == 2:
                     txt += " - only moving the dwarf by hand helps now (burrow/station)"
@@ -336,7 +343,7 @@ class RemoteCare:
             if _need(u, self.cfg) < int(self.cfg["hunger_warn"]) and u.get("job") not in self.cfg["long_jobs"]:
                 continue
             dist, _ = nearest_supply(u, obs.supplies, int(self.cfg["z_penalty"]))
-            lines.append(f"{u.get('id')} {str(u.get('name', ''))[:20]}: hunger {u.get('hunger')}, thirst "
+            lines.append(f"{u.get('id')} {short_name(u.get('name'))}: hunger {u.get('hunger')}, thirst "
                          f"{u.get('thirst')}, job {u.get('job')}, distance {dist}")
         for lab, size in (self.cfg["labor_pool"] or {}).items():
             n = sum(1 for u in obs.citizens if lab in (u.get("labors") or []) and not u.get("squad"))

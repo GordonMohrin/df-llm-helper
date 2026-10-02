@@ -132,7 +132,7 @@ The recordings from 1.1/1.2 replace the synthetic responses (fixture gaps in `CH
 - [ ] `reach check`: set real points in `data/reach.yaml`; verify `canWalkBetween`/`findAtTile` under DF 53.16; ≤ 1 s for 20 points.
 - [ ] `perimeter scan`: full-map scan ≤ 15 s, chunked (does `dfhack.timeout` run while paused?); compare with `claude/zugaenge`; test that a generated seal CSV builds.
 - [ ] `digcheck` on a real stage before designating; R5 uses configured cavern boxes (lint L28 forbids cavern data).
-- [ ] `perf sample` with raster on/off to tune the 1.5 s outlier threshold; does reading `repeat-util` `scheduled` work?
+- [ ] `perf sample` with raster on/off to tune the 1.5 s outlier threshold; reading the services works live via `repeat-util.listScheduled()` (not `scheduled`)
 - [ ] Standstill guard: does LEAVESCREEN close Info/Justice, does SELECT close the DFHack MessageBox, is `cur_year_tick` right; trade aftercare after a real trade.
 - [ ] `tools`: add FP08 with the player's consent before the first automatic pick fix; check `work_weapons` after the fix.
 - [ ] `remote`: does `dfhack.job.removeJob` end a Fish job; does `labor off` stick with DF 50+ work details.

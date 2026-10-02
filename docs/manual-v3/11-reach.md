@@ -33,6 +33,13 @@ points:
 The shipped file holds **example values from run 5** - replace them for every fortress. A point is mandatory when its
 `cat` is in `reach.mandatory` (unless `optional: true`), or explicitly with `mandatory: true|false`.
 
+A building tile that blocks walking (a **well**, a statue) has no walk group of its own, so `canWalkBetween` is always
+false for it. `pilot_reach check` therefore tests the tiles around the building (its footprint + 1, same level) and
+reports `via: true` for such points; `x,y,z+` forces this test, `adjacent: true` in `reach.yaml` sets it per point (also
+for grid fixtures, where the building tile is the character `W`). Live test 02.10.2026: `Well (140,99,z129)` was
+reported unreachable before, all 9 example points are reachable now. Workshops/furnaces are walkable in DF (occupancy
+`Passable`, same walk group as the fort) and are not treated as obstacles.
+
 ## Configuration (`reach:` in config.yaml)
 `start`, `points_file` (data/reach.yaml), `interval_s` (300), `mandatory` ([farm, kitchen, still, well, hospital,
 barracks]), `margin` (6, dump box around start + points), `max_tiles` (150000), `cancel_min` (20), `in_check` (true).

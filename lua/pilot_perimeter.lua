@@ -27,12 +27,24 @@ for _, nm in ipairs({ 'FLOOR', 'BOULDER', 'PEBBLES', 'SHRUB', 'SAPLING', 'TWIG',
 end
 local OUTFILE = util.home() .. '/tools/out/perimeter_scan.json'
 
+-- building tile that blocks walking (well, statue ...): block occupancy Well/Obstacle (= walk group 0 in DF 53).
+-- Workshops/furnaces are NOT blocking in DF (occupancy 'Passable', walk group of the fort; dwarves stand on them).
+local OCC = df.tile_building_occ
+local function blocked_by_building(x, y, z)
+  if not OCC then return false end
+  local blk = dfhack.maps.getTileBlock(x, y, z)
+  if not blk then return false end
+  local o = blk.occupancy[x % 16][y % 16].building
+  return o == OCC.Obstacle or o == OCC.Well
+end
+
 -- tile classes (same encoding as dfpilot/features/_grid.py, reduced to what the path logic needs)
 local function tch(x, y, z)
   if x < 0 or y < 0 or z < 0 or x >= XM or y >= YM or z >= ZM then return '#' end
   local d = dfhack.maps.getTileFlags(x, y, z)
   if not d or d.hidden then return '?' end
   if d.flow_size > 0 then return '~' end
+  if blocked_by_building(x, y, z) then return 'W' end
   local tt = dfhack.maps.getTileType(x, y, z)
   local at = tt and df.tiletype.attrs[tt]
   if not at then return '#' end

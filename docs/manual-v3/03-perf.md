@@ -31,4 +31,4 @@ flag_repeat_min 30, max_bisect_per_hour 2, in_check true`
 - Protected services are switched off only in peace (no alert/siege flag, no 'alarm'/'gefahr' hold) and never longer
   than `bisect_pause_s`; services without a start command (watchdog-alert) are never switched off.
 - No automatic Lua patch; the fix (bigger interval, scan in blocks, on demand) is yours.
-- The service listing (`repeat-util` table `scheduled`) and the probe are LIVE-UNTESTED. A bisect takes 3-4 minutes.
+- The service listing uses `repeat-util.listScheduled()` (DF 53 has no `scheduled` table; fixed after the live test 02.10.2026; keys with `/` such as `control-panel/...` are not bisected). The probe works live; the very first probe of a sample can be a one-off outlier (game busy). A bisect takes 3-4 minutes.

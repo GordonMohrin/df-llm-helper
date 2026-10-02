@@ -1,7 +1,11 @@
--- claude/pilot_reach check sx sy sz x,y,z [x,y,z ...] | dump x1 y1 z1 x2 y2 z2     (dfpilot spec v3-11, LIVE-UNTESTED)
+-- claude/pilot_reach check sx sy sz x,y,z[+] [x,y,z ...] | dump x1 y1 z1 x2 y2 z2     (dfpilot spec v3-11, LIVE-UNTESTED)
 -- check: dfhack.maps.canWalkBetween(start, point) for every point in ONE call (walk groups, cheap)
---        -> {"ok":true,"start":[x,y,z],"results":[true,false,...]} (same order as the arguments).
--- dump:  one character per tile for a box (encoding in dfpilot/features/_grid.py); dfpilot does the path logic
+--        -> {"ok":true,"start":[x,y,z],"results":[true,false,...],"via":[false,true,...]} (same order as the arguments).
+--        A point on a building tile that blocks walking (well, statue, ...) is not walkable itself (walk group 0):
+--        it counts as reachable when a tile around the building (its footprint + 1) is (via = true). An argument
+--        'x,y,z+' forces that neighbour test (data/reach.yaml: adjacent: true), also for a tile without a building.
+-- dump:  one character per tile for a box (encoding in dfpilot/features/_grid.py; 'W' = building tile that blocks walking:
+--        occupancy Well/Obstacle); dfpilot does the path logic
 --        (cause search with/without constructions, what-if walls). Unrevealed tiles are emitted as '?' and nothing
 --        else is read about them (fair play). Max 200000 tiles per call.
 -- Read only: no designations, no buildings, no map changes.
@@ -32,6 +36,16 @@ local function bchar(x, y, z)
   return nil
 end
 
+-- building tile that blocks walking (well, statue ...): block occupancy Well/Obstacle (= walk group 0 in DF 53)
+local OCC = df.tile_building_occ
+local function blocked_by_building(x, y, z)
+  if not OCC then return false end
+  local blk = dfhack.maps.getTileBlock(x, y, z)
+  if not blk then return false end
+  local o = blk.occupancy[x % 16][y % 16].building
+  return o == OCC.Obstacle or o == OCC.Well
+end
+
 local function tch(x, y, z)
   if x < 0 or y < 0 or z < 0 or x >= XM or y >= YM or z >= ZM then return '#' end
   local d = dfhack.maps.getTileFlags(x, y, z)
@@ -42,6 +56,7 @@ local function tch(x, y, z)
   if not at then return '#' end
   local sh = at.shape
   if d.flow_size > 0 then return d.liquid_type == df.tile_liquid.Magma and 'M' or '~' end
+  if blocked_by_building(x, y, z) then return 'W' end   -- (a well tile is open space (EMPTY) in DF, so test first)
   local out = d.outside
   if sh == SHAPE.WALL or sh == SHAPE.FORTIFICATION then
     if at.material == df.tiletype_material.CONSTRUCTION then return 'C' end
@@ -62,18 +77,42 @@ local function tch(x, y, z)
   return '#'
 end
 
-if cmd == 'check' then
-  local sx, sy, sz = n(2), n(3), n(4)
-  if not (sx and sy and sz) then util.emit({ ok = false, error = 'check sx sy sz x,y,z ...' }) return end
-  local res = {}
-  for i = 5, #a do
-    local x, y, z = a[i]:match('^(-?%d+),(-?%d+),(-?%d+)$')
-    if x then
-      res[#res + 1] = dfhack.maps.canWalkBetween(xyz2pos(sx, sy, sz), xyz2pos(tonumber(x), tonumber(y), tonumber(z)))
-        and true or false
+-- walkable from the start? -> reached, via_neighbour. A building tile that blocks walking (well, statue, workshop
+-- centre ...) never has a walk group itself: test the tiles around the building's footprint (same level) instead.
+local function can_reach(start, x, y, z, force_adjacent)
+  if dfhack.maps.canWalkBetween(start, xyz2pos(x, y, z)) then return true, false end
+  local x1, y1, x2, y2 = x, y, x, y
+  local ok, b = pcall(function() return dfhack.buildings.findAtTile(x, y, z) end)
+  if ok and b then
+    x1, y1, x2, y2 = b.x1 or x, b.y1 or y, b.x2 or x, b.y2 or y
+  elseif not force_adjacent then
+    return false, false
+  end
+  for yy = y1 - 1, y2 + 1 do
+    for xx = x1 - 1, x2 + 1 do
+      if (xx < x1 or xx > x2 or yy < y1 or yy > y2) and xx >= 0 and yy >= 0 and xx < XM and yy < YM
+        and dfhack.maps.canWalkBetween(start, xyz2pos(xx, yy, z)) then
+        return true, true
+      end
     end
   end
-  util.emit({ ok = true, start = { sx, sy, sz }, results = res })
+  return false, false
+end
+
+if cmd == 'check' then
+  local sx, sy, sz = n(2), n(3), n(4)
+  if not (sx and sy and sz) then util.emit({ ok = false, error = 'check sx sy sz x,y,z[+] ...' }) return end
+  local res, via = {}, {}
+  local start = xyz2pos(sx, sy, sz)
+  for i = 5, #a do
+    local x, y, z, plus = a[i]:match('^(-?%d+),(-?%d+),(-?%d+)(%+?)$')
+    if x then
+      local r, v = can_reach(start, tonumber(x), tonumber(y), tonumber(z), plus == '+')
+      res[#res + 1] = r and true or false
+      via[#via + 1] = v and true or false
+    end
+  end
+  util.emit({ ok = true, start = { sx, sy, sz }, results = res, via = via })
 elseif cmd == 'dump' then
   local x1, y1, z1, x2, y2, z2 = n(2), n(3), n(4), n(5), n(6), n(7)
   if not (x1 and y1 and z1 and x2 and y2 and z2) then util.emit({ ok = false, error = 'dump x1 y1 z1 x2 y2 z2' }) return end

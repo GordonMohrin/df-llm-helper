@@ -254,3 +254,30 @@ def test_parse_scan_and_cli_offline(tmp_path, capsys, monkeypatch):
     assert cli.main(["perimeter", "status"]) == 0
     assert cli.main(["perimeter", "scan"]) == 2                           # no DF: not readable
     assert "not readable" in capsys.readouterr().out
+
+
+# ---- a building tile that blocks walking (statue/well, 'W') is no way in; workshops are (DF: walkable, live 02.10.)
+STATUE_TXT = """@origin 0 0
+@core 7 1 130
+z 130
+##########
+#,,,W...##
+##########
+"""
+
+
+def test_blocking_building_tile_is_not_an_access():
+    g = Grid.from_text(STATUE_TXT)
+    assert P.scan_grid(g, (7, 1, 130), ZR) == []                          # the statue plugs the only opening
+    g2 = Grid.from_text(STATUE_TXT.replace("W", "."))
+    assert [tuple(e[:3]) for e in P.scan_grid(g2, (7, 1, 130), ZR)] == [(4, 1, 130)]
+    assert [tuple(e[:3]) for e in P.scan_grid(g2, (7, 1, 130), ZR) if e[3]] == [(4, 1, 130)]
+
+
+@pytest.mark.skipif(not LUA, reason="lua5.4 missing")
+def test_lua_scan_blocking_building_equals_python(tmp_path):
+    for txt, n in ((STATUE_TXT, 0), (STATUE_TXT.replace("W", "."), 1)):
+        g = Grid.from_text(txt)
+        out, _ = lua_run(g, tmp_path / str(n), "pilot_perimeter", "scan", 7, 1, 130, 100, 136)
+        j = json.loads(out.splitlines()[0])
+        assert len(j["entries"]) == n

@@ -341,3 +341,10 @@ def test_lua_tools_status_shape(tmp_path):
     obs = T.obs_from_status(out)
     assert obs.ok and obs.work_weapons == 2 and obs.miners == 1
     assert next(c for c in obs.citizens if c["id"] == 12)["hospital"] == 900
+
+
+def test_short_name_drops_the_nickname_instead_of_cutting_it():
+    """Live 02.10.: 'Dodok Batokkadol "Problemhatchet", Carpenter'[:20] gave a line ending in '"Pr'."""
+    assert R.short_name('Dodók Batôkkadol "Problemhatchet", Carpenter') == "Dodók Batôkkadol, Carpenter"
+    assert R.short_name('Tekkud "Boatstangles", Miner', 10) == "Tekkud, Mi"
+    assert R.short_name(None) == "" and R.short_name("Urist") == "Urist"

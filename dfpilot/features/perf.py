@@ -44,7 +44,11 @@ DEFAULTS = {
 RULE = "perf"
 EXTERNAL = "<no listed service>"
 PROBE_CMD = 'lua "print(df.global.world.frame_counter)"'
-LIST_CMD = ('lua "local r=require(\'repeat-util\') local t={} for k in pairs(r.scheduled or {}) do t[#t+1]=k end '
+# DF 53 repeat-util has no `scheduled` table (live 02.10.: nil -> "No repeat-util services found"): listScheduled()
+# returns the keys; older versions keep them in `repeating`/`scheduled`
+LIST_CMD = ('lua "local r=require(\'repeat-util\') local t={} if r.listScheduled then '
+            'for _,k in ipairs(r.listScheduled()) do t[#t+1]=k end else '
+            'for k in pairs(r.scheduled or r.repeating or {}) do t[#t+1]=k end end '
             "table.sort(t) print('S '..table.concat(t,' '))\"")
 _KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
