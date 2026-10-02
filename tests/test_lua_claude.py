@@ -358,3 +358,22 @@ def test_area_size_at_least_one(tmp_path, w, h):
 def test_felder_muell_errors_are_json(tmp_path, script, args):
     out, r = run(script, *args, tmp_path=tmp_path)
     assert r.returncode == 0 and "error" in one_json(out)
+
+
+# ---------------------------------------------------------------- BUG-412 (+ BUG-400 end to end on gefahr status)
+def test_gefahr_status_selftest_sees_a_stopped_scan_and_fps_is_valid_json(tmp_path):
+    out, r = run("gefahr", "status", tmp_path=tmp_path, setup="df.global.enabler.fps = 250.0",
+                 env={"MOCK_DECIMAL_COMMA": "1"})
+    assert r.returncode == 0, r.stderr
+    j = one_json(out)
+    assert j["fps"] == 250.0
+    assert any(p.startswith("ALARMSYSTEM") for p in j["selbsttest"])
+
+
+@pytest.mark.parametrize("args", [["sim", 99999, 1, 1, 1], ["fire"], ["firetest", 5]])
+def test_gefahr_sim_fire_check_unit_and_arguments(tmp_path, args):
+    out, r = run("gefahr", *args, tmp_path=tmp_path)
+    assert r.returncode == 0, r.stderr
+    j = one_json(out)
+    assert "error" in j and "aktionen" not in j
+    assert not list((tmp_path / "home" / "tools").glob("*.flag"))
