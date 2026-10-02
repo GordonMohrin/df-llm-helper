@@ -321,7 +321,7 @@ def loads(src: str) -> Any:
 
 
 def load_file(path) -> Any:
-    with open(path, encoding="utf-8") as f:
+    with open(path, encoding="utf-8-sig") as f:          # a BOM (Notepad/PowerShell) must not hide the first key
         try:
             return loads(f.read())
         except YamlError as e:

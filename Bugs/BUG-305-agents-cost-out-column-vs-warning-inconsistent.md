@@ -1,6 +1,6 @@
 # BUG-305: `agents cost`: the `Out~` column and the "stuck?" warning quote different output numbers (up to 2.6x apart)
 
-- **Status:** open
+- **Status:** fixed in c06df7e
 - **Severity:** S3
 - **Area:** `agents cost` (`df_llm_helper/agents.py:parse_transcript`, `cost_report`)
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -43,3 +43,6 @@ Print the same figure in the table and in the warning (e.g. an extra column `Aus
 
 ## Info needed
 Info for the player (local test): please run `python -m df_llm_helper agents cost --dir <folder with ONE recent transcript>` and compare `Out~` with the value shown in the Claude Code UI for that agent. Is `usage.output_tokens` the real total?
+
+## Fix
+One figure `AgentCost.out_tokens = max(usage output, block estimate)` for column `Out~`, total, warning and `--compare`; MANUAL 9.10 explains it. The player question (is `usage.output_tokens` the real total?) stays open for a local check.

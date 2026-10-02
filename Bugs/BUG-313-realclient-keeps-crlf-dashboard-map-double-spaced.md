@@ -1,6 +1,6 @@
 # BUG-313: `RealClient` returns `dfhack-run` output with CRLF while `MockClient` always yields LF; the dashboard map block gets `\r\r\n` and renders double-spaced; other text consumers see stray `\r`
 
-- **Status:** open
+- **Status:** fixed in 1e94283
 - **Severity:** S3
 - **Area:** `df_llm_helper/client.py:RealClient._run`, `dashboard map`
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -55,3 +55,6 @@ Normalise in `RealClient._run`: `out.replace("\r\n", "\n")`; make the mock fixtu
 
 ## Info needed
 None.
+
+## Fix
+Dashboard symptom fixed: stored maps and the rendering normalise CRLF, the page is written as bytes. Normalising `Result.stdout` for all consumers belongs to `client.py:RealClient` (core agent, not changed here).

@@ -1,6 +1,6 @@
 # BUG-319: Fair-play linter reports harmless code: identifiers (`teleporting_label`, `tiletypes`, `liquids`, `cleaners`), the read-only command `deathcause`, and message text that mentions `createitem`
 
-- **Status:** open
+- **Status:** open (info needed); identifier part fixed in 6e0db06
 - **Severity:** S3
 - **Area:** `df_llm_helper/lint.py` (rules L01, L08, L17, L18, L25)
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -41,3 +41,6 @@ Anchor the command rules to `run_command(` / `lua "..."` string starts or to the
 
 ## Info needed
 Question for the cloud session: are `deathcause` and `gaydar` really cheats in the player's fair-play definition? They only read data.
+
+## Fix
+Command words (teleport, tiletypes, liquids, cleaners, ...) count only as DFHack commands (string literal, `run_command/run_script` argument or a bare command line), so `local tiletypes = {}` etc. are no longer reported. Left unchanged on purpose (fair play must not get weaker without the player): L01 also reports `createitem` inside message text, and `deathcause`/`gaydar` stay L25. Info needed: does the player count `deathcause` and `gaydar` (read-only) as cheats?

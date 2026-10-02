@@ -14,7 +14,17 @@ __all__ = ["FlagInfo", "ToolsDir", "read_text_tolerant"]
 
 
 def read_text_tolerant(path: Path) -> str:
-    data = path.read_bytes()
+    """UTF-8 (with/without BOM), UTF-16 with BOM (PowerShell 5.1 '>' / Out-File), else cp1252, else latin-1."""
+    return decode_tolerant(Path(path).read_bytes())
+
+
+def decode_tolerant(data: bytes) -> str:
+    """Bytes -> text like read_text_tolerant."""
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        try:
+            return data.decode("utf-16")
+        except UnicodeDecodeError:
+            pass
     for enc in ("utf-8-sig", "cp1252"):
         try:
             return data.decode(enc)

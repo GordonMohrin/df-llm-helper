@@ -1,6 +1,6 @@
 # BUG-327: `bus post --md` writes the message to `inbox-<to>.md`; a later `bus import` (default: all inbox files) imports it again as a second message
 
-- **Status:** open
+- **Status:** fixed in 1e94283
 - **Severity:** S3
 - **Area:** `bus post --md`, `bus import` (`df_llm_helper/bus.py:export_to_inbox/import_inbox`)
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -53,3 +53,6 @@ Store the exported line's hash as the message's dedupe key at `post --md` time, 
 
 ## Info needed
 None.
+
+## Fix
+`export_to_inbox` stores the key of the exported line (kv `bus.exported_md`); `bus import` skips it.

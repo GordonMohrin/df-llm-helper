@@ -76,7 +76,7 @@ The recordings from 1.1/1.2 replace the synthetic responses (fixture gaps in `CH
 
 ## v2-02 Caravan (spec 02) – verify live
 - [ ] `cp lua/pilot_caravan.lua ".../hack/scripts/claude/"`; with a stuck caravan first `dfhack-run claude/pilot_caravan release` (without `--apply`) → `candidates` = merchant IDs only.
-- [x] Register entry FP09 (the player's standing permission, 2026-10-01) is in `data/exceptions.jsonl`; `python -m df_llm_helper exception list` shows it.
+- [ ] Register entry FP09 (the player's standing permission, 2026-10-01) is in the local register `data/exceptions.local.jsonl` (git-ignored; the public `data/exceptions.jsonl` has only an ignored example); `python -m df_llm_helper exception list` shows it.
 - [ ] Next caravan: `python -m df_llm_helper caravan --dry-run`, then `python -m df_llm_helper caravan --loop`; verify that `claude/handel list 0` in the open window returns the offer and the decision is right.
 - [ ] `claude/handel` finds the trade-window buttons by text search (`scan`), not via fixed coordinates – on failure `claude/handel scan Trade`.
 

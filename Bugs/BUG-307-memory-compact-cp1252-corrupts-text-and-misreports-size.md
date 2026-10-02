@@ -1,6 +1,6 @@
 # BUG-307: `memory compact` on a non-UTF-8 (cp1252) memory file replaces all umlauts by U+FFFD and reports a wrong size; `brief`/`agents prompt` show the same replacement characters
 
-- **Status:** open
+- **Status:** fixed in 793a4b7
 - **Severity:** S2
 - **Area:** `memory compact` (`df_llm_helper/memory.py:compact_file`), `brief` (`cli.py:cmd_brief`), `agents prompt`
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -66,3 +66,6 @@ Decode with the tolerant reader (utf-8-sig, then cp1252), write back with `newli
 
 ## Info needed
 Question: are the real memory files (`dwarf-fortress/tools/scopes/*.md`) UTF-8 or cp1252? (They were all UTF-8 in this test run; agents on Windows may write cp1252 via PowerShell.)
+
+## Fix
+`compact_file` decodes tolerantly (UTF-8/BOM, UTF-16, cp1252), writes UTF-8 bytes with the original line endings and reports the bytes really written; `brief`/`agents prompt` read memory with `read_text_tolerant`.

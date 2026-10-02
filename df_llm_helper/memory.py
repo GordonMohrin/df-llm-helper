@@ -11,18 +11,21 @@ Idempotent; the archive holds the original byte-identical; 'restore' undoes it.
 """
 from __future__ import annotations
 
+import glob
 import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-__all__ = ["Section", "parse_sections", "classify", "compact_text", "compact_file", "restore", "shorten"]
+__all__ = ["Section", "parse_sections", "classify", "compact_text", "compact_file", "restore", "shorten",
+           "valid_memory_name", "memory_age_note"]
 
 KEEP_OFFEN = re.compile(r"\bopen\b|\bnext\b|todo|\btasks?\b|offen|n(ae|ä)chst|aufgabe", re.I)
 KEEP_ERK = re.compile(r"insight|finding|lesson|\brules?\b|procedure|important|erkenntnis|lehre|regel|prozedur|wichtig", re.I)
 STATUS = re.compile(r"status|\bstate\b|zustand", re.I)
 PASS = re.compile(r"durchlauf|\bpass\b|\bround\b|iteration", re.I)
 SHORT_MARK = " (short)"
+LABEL_MIN = 60                             # shorten(): no cut at a colon before this many characters
 SHORT_MARKS = (SHORT_MARK, " (kurz)")      # " (kurz)" = marker written by older versions
 
 
@@ -71,9 +74,18 @@ def shorten(line: str, width: int = 110) -> str:
         return s
     m = re.match(r"^(\s*[-*]\s+|\s*\d+\.\s+)?(.*)$", s)
     prefix, rest = (m.group(1) or ""), m.group(2)
-    # sentence end = punctuation after a non-digit (not the dots of a date "01.10." and not the colon of a time "14:05:")
-    cut = re.split(r"(?<=[^\d\s][.;!?])\s|\s->\s|(?<=\D):\s", rest, maxsplit=1)[0]
-    cut = cut if len(prefix + cut) <= width else rest[: width - len(prefix) - 1]
+    # sentence end = punctuation after a non-digit (not the dots of a date "01.10." and not the colon of a time "14:05:");
+    # a colon only after >= LABEL_MIN characters: "2. Main thread: fps <= 50 ..." must not shrink to its label (BUG-326)
+    cut = rest
+    for m in re.finditer(r"(?<=[^\d\s][.;!?])\s|\s->\s|(?<=\D):\s", rest):
+        if m.group(0).startswith(":") and m.start() < LABEL_MIN:
+            continue
+        cut = rest[:m.start()]
+        break
+    if len(prefix + cut) > width:                    # cut at the width, at a word boundary if there is one nearby
+        cut = rest[: width - len(prefix) - 1]
+        sp = cut.rfind(" ")
+        cut = cut[:sp] if sp > (width - len(prefix)) * 0.6 else cut
     return (prefix + cut).rstrip() + "…"
 
 
@@ -142,11 +154,15 @@ def compact_text(text: str, *, keep_logs: int = 2, keep_inbox: int = 8, short_li
 
 
 def compact_file(path: Path, archive_dir: Path | None = None, *, stamp: str, dry_run: bool = False, **kw) -> dict:
+    """Compacts the file in place (UTF-8, line endings of the original); 'after' = bytes really written."""
+    from .toolsfs import decode_tolerant
     path = Path(path)
     raw = path.read_bytes()
-    text = raw.decode("utf-8", errors="replace")
+    text = decode_tolerant(raw)                      # cp1252/UTF-16 memory files (PowerShell) keep their umlauts
     new = compact_text(text, **kw)
-    res = {"file": str(path), "before": len(raw), "after": len(new.encode("utf-8")), "changed": new != text}
+    crlf = b"\r\n" in raw
+    out = (new.replace("\r\n", "\n").replace("\n", "\r\n") if crlf else new).encode("utf-8")
+    res = {"file": str(path), "before": len(raw), "after": len(out), "changed": new != text}
     if dry_run or not res["changed"]:
         return res
     archive_dir = Path(archive_dir) if archive_dir else path.parent / "archive"
@@ -157,19 +173,43 @@ def compact_file(path: Path, archive_dir: Path | None = None, *, stamp: str, dry
         n += 1
         arch = archive_dir / f"{path.stem}.{stamp}_{n}{path.suffix}"
     shutil.copyfile(path, arch)          # byte-identical
-    path.write_text(new, encoding="utf-8")
+    path.write_bytes(out)
     res["archive"] = str(arch)
     return res
 
 
-def restore(path: Path, archive_dir: Path | None = None) -> Path | None:
+def restore(path: Path, archive_dir: Path | None = None, *, dry_run: bool = False) -> Path | None:
+    """Newest archive -> working file; dry_run only returns the archive that would be restored."""
     path = Path(path)
     archive_dir = Path(archive_dir) if archive_dir else path.parent / "archive"
-    cands = sorted(archive_dir.glob(f"{path.stem}.*{path.suffix}"))
+    cands = sorted(archive_dir.glob(f"{glob.escape(path.stem)}.*{path.suffix}"))
     if not cands:
         return None
-    shutil.copyfile(cands[-1], path)
+    if not dry_run:
+        shutil.copyfile(cands[-1], path)
     return cands[-1]
+
+
+def valid_memory_name(name: str) -> bool:
+    """memory compact/restore <name>: a scope (data/scopes) or inbox-<scope|orchestrator>; never a path."""
+    from .brief import SCOPES
+    if not name or re.search(r"[\\/:]|\.\.", name):
+        return False
+    return name in SCOPES or (name.startswith("inbox-") and name[6:] in (*SCOPES, "orchestrator"))
+
+
+_YEAR = re.compile(r"\b(?:J|Y|Jahr|year)\s?(\d{2,4})\b", re.I)
+
+
+def memory_age_note(text: str, year: int | None, min_years: int = 2) -> str | None:
+    """'(memory ... J102 ...)' when the newest game year named in the memory is >= min_years behind the fort's year."""
+    if not text or year is None:
+        return None
+    years = [int(y) for y in _YEAR.findall(text) if int(y) <= year]
+    if not years or year - max(years) < min_years:
+        return None
+    return (f"Memory is old: newest game year named in it is {max(years)}, the fort is in year {year} "
+            f"({year - max(years)} years later) - check before acting on it")
 
 
 def extract_for_brief(text: str) -> dict:

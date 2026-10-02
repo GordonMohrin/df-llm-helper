@@ -41,13 +41,30 @@ def quick_checks() -> list[tuple[str, bool, str]]:
     rbs = load_runbooks(HOME / "data" / "runbooks")
     res.append(("Runbooks valid (>= 12)", len(rbs) >= 12, f"{len(rbs)} runbooks"))
     ctx = build_context(s, cfg=DEFAULTS)
-    res.append(("Diagnosis on fixtures", True, ", ".join(h.runbook.id for h in diagnose(rbs, ctx)[:4])))
+    hits = [h.runbook.id for h in diagnose(rbs, ctx)]
+    want = {"rb01_e18_pick", "rb08_hospital"}             # known symptoms of fixtures/run5 (BUG-329: can fail now)
+    res.append(("Diagnosis on fixtures", want <= set(hits),
+                ", ".join(hits[:4]) + ("" if want <= set(hits) else f" (missing {sorted(want - set(hits))})")))
     kb = KB.load_dir(HOME / "data" / "kb")
     res.append(("Load KB", len(kb.entries) > 30, f"{len(kb.entries)} entries"))
     sd = load_scopes(HOME / "data" / "scopes.yaml")
-    worst = max(tokens(build_brief(sc, scopes_def=sd, ctx=ctx, snap=s, kb=kb, memory_text=None, inbox_lines=None,
-                                   th=DEFAULTS["thresholds"])) for sc in SCOPES)
-    res.append(("Briefings <= 1500 tokens (12 scopes)", worst <= 1500, f"max {worst} tokens"))
+    # with a real-size memory and inbox (fixtures/run5/scopes_sample), the case that can exceed the budget (BUG-329)
+    sample = fix / "scopes_sample"
+    from .toolsfs import read_text_tolerant
+    mem_big = read_text_tolerant(sample / "militaer.md")
+    inbox = [ln for ln in read_text_tolerant(sample / "inbox-orchestrator.md").splitlines() if ln.startswith("- ")]
+
+    def brief_tokens(sc: str, mem: bool) -> int:
+        own = sample / f"{sc}.md"
+        text = (read_text_tolerant(own) if own.is_file() else mem_big) if mem else None
+        return tokens(build_brief(sc, scopes_def=sd, ctx=ctx, snap=s, kb=kb, memory_text=text,
+                                  inbox_lines=inbox if mem else None, th=DEFAULTS["thresholds"]))
+    try:
+        worst = max(brief_tokens(sc, m) for sc in SCOPES for m in (False, True))
+        res.append(("Briefings <= 1500 tokens (12 scopes, with/without memory+inbox)", worst <= 1500,
+                    f"max {worst} tokens"))
+    except Exception as e:                     # BriefError: mandatory parts exceed the budget
+        res.append(("Briefings <= 1500 tokens (12 scopes, with/without memory+inbox)", False, str(e)[:120]))
     scen = sorted((HOME / "scenarios").glob("*.jsonl"))
     fails = [p.stem for p in scen if check_expectations(run_scenario(p))]
     res.append((f"Scenarios ({len(scen)})", not fails and len(scen) >= 8, "all ok" if not fails else ",".join(fails)))
@@ -130,6 +147,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--cov", action="store_true", help="measure line coverage of the core modules (target >= 90 %%)")
     ap.add_argument("--quick", action="store_true", help="quick checks only, no pytest")
     args = ap.parse_args(argv)
+    if args.cov and args.quick:
+        ap.error("--cov measures the pytest run; it cannot be combined with --quick")
     t0 = time.time()
     ok = True
     cov = None
@@ -151,6 +170,9 @@ def main(argv: list[str] | None = None) -> int:
             import pytest
         except ImportError:
             print("  [!] pytest not installed - only quick checks ran (pip install pytest after confirming with the player)")
+            if args.cov:                       # BUG-329: never report coverage as measured when it was not
+                print("  [FAIL] --cov: no coverage measured without pytest")
+                return 1
             # BUG-119: a script must be able to tell 'full suite green' from 'not run'
             print(f"\nSelf-test INCOMPLETE (pytest missing; quick checks {'ok' if ok else 'RED'}) in {time.time() - t0:.1f} s")
             return 2 if ok else 1

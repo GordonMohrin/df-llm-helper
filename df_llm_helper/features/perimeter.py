@@ -29,8 +29,7 @@ KEY = "perimeter"
 DEFAULTS = {"core": [100, 101, 130], "interval_s": 1200, "allow_file": "zugang-erlaubt.txt", "tolerance_xy": 4,
             "tolerance_z": 2, "z_range": [100, 136], "cluster_xy": 2, "cluster_z": 1, "chunked": True,
             "budget": 20000, "poll_s": 2.0, "timeout_s": 120, "blueprint": "claude/df_llm_helper_seal.csv",
-            "blueprints_dir": None, "in_check": True,
-            "min_outside": 3000}   # enclave filter of pilot_perimeter (arg 8): outside areas smaller than this are not "outside"
+            "blueprints_dir": None, "in_check": True, "min_outside": 3000}
 LINE_MAX = 120
 
 
@@ -70,10 +69,36 @@ class Access:
         return f"{kind}: {self.label()}{trap}"
 
 
-def scan_grid(grid: Grid, core, z_range=None) -> list:
-    """Python reference of pilot_perimeter.lua on a grid fixture -> [(x,y,z,core,notrap)]."""
+def _outside_area_ok(grid: Grid, start, min_outside: int, memo: dict) -> bool:
+    """Enclave filter of pilot_perimeter.lua: the connected outside area of `start` has >= min_outside tiles."""
+    if start in memo:
+        return memo[start]
+    seen, q, i = {start}, [start], 0
+    while i < len(q) and len(q) < min_outside:
+        for n in grid.neighbors(q[i]):
+            if n not in seen and grid.outside(n):
+                seen.add(n)
+                q.append(n)
+        i += 1
+    big = len(q) >= min_outside
+    for p in seen:
+        memo[p] = big
+    return big
+
+
+def scan_grid(grid: Grid, core, z_range=None, min_outside: int = 0) -> list:
+    """Python reference of pilot_perimeter.lua on a grid fixture -> [(x,y,z,core,notrap)].
+    min_outside > 1: an entry counts only if an adjacent reached outside area has >= min_outside tiles (enclave filter,
+    same as the Lua 8th argument; the small fixture grids use 0 = no filter)."""
     allc, notrap = core_sets(grid, tuple(core), z_range)
-    return [(e[0], e[1], e[2], e in allc, e in notrap) for e in entries(grid, z_range)]
+    ents = entries(grid, z_range)
+    if min_outside > 1:
+        zr = z_range or (-10**9, 10**9)
+        memo: dict = {}
+        ents = [e for e in ents
+                if any(zr[0] <= n[2] <= zr[1] and grid.outside(n) and _outside_area_ok(grid, n, min_outside, memo)
+                       for n in grid.neighbors(e))]
+    return [(e[0], e[1], e[2], e in allc, e in notrap) for e in ents]
 
 
 def parse_scan(j) -> list | None:
@@ -250,8 +275,7 @@ class Perimeter:
 
     def _args(self) -> str:
         c, zr = self.cfg["core"], self.cfg["z_range"]
-        return (f"{c[0]} {c[1]} {c[2]} {zr[0]} {zr[1]} {int(self.cfg['budget'])} "
-                f"{int(self.cfg.get('min_outside', 3000))}")
+        return f"{c[0]} {c[1]} {c[2]} {zr[0]} {zr[1]} {int(self.cfg['budget'])} {int(self.cfg['min_outside'])}"
 
     # ---- live scan
     def start(self) -> bool:

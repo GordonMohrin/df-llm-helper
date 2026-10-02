@@ -1,6 +1,6 @@
 # BUG-317: A hand-edited exception register crashes every command (`[1,2]` line), drops a BOM-prefixed first entry, splits a string `objects` into characters, and a text `max_uses` raises `TypeError` at use time
 
-- **Status:** open
+- **Status:** fixed in 4bfefa4
 - **Severity:** S2
 - **Area:** `df_llm_helper/fairplay.py:ExceptionRegistry.load/find`
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -87,3 +87,6 @@ In `load()`: `if not isinstance(d, dict): error`, open with `utf-8-sig`, coerce/
 
 ## Info needed
 None.
+
+## Fix
+`load()` reads with BOM tolerance; non-object lines, string `objects`, non-integer `max_uses` and invalid `expires` become `Register error: ...` and the entry is skipped (fail closed) - no crash of any command.

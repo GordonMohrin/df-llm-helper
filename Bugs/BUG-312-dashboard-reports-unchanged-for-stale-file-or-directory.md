@@ -1,6 +1,6 @@
 # BUG-312: `dashboard --out <file>` reports `(unchanged)` and skips the write when the file is stale (the hash is global, not per file); `--out <directory>` also reports `unchanged`
 
-- **Status:** open
+- **Status:** fixed in 1e94283
 - **Severity:** S2
 - **Area:** `dashboard` (`df_llm_helper/dashboard.py:write_if_changed`)
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -59,3 +59,6 @@ Key the hash by resolved output path (`dashboard.hash.<path>`) or compare with t
 
 ## Info needed
 None.
+
+## Fix
+`write_if_changed` compares with the content of the target file itself (not a global hash), writes bytes (LF), and `--out <directory>` is refused (exit 2).

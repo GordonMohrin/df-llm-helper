@@ -1,6 +1,6 @@
 # BUG-300: `runbook show` omits params, preconditions and rollback although `runbook run` refers to it for the rollback
 
-- **Status:** open
+- **Status:** fixed in e4af55c
 - **Severity:** S3
 - **Area:** `runbook show`, `df_llm_helper/cli.py:cmd_runbook`, `df_llm_helper/runbooks.py:run_runbook`
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -67,3 +67,6 @@ Print `Params:` (name, default/required, description), `Preconditions:` (when + 
 
 ## Info needed
 Question for the cloud session: is the refusal of `run --dry-run` for `needs_player_approval` runbooks intended (the agent cannot preview the steps) or should it only block the real run? (`runbook show rb01b_e18_foreign` works, so the steps are readable anyway.)
+
+## Fix
+`runbook show` prints Params (required/default), Preconditions and Rollback; an aborted run lists the rendered rollback steps. Answer to the question: a consent-gated runbook can now be previewed with `run --dry-run` (header `NOT approved: ...`, nothing runs); the real run is still refused without the register entry.

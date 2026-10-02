@@ -1,6 +1,6 @@
 # BUG-320: `lint <typo path>` exits 0 with `0 errors`; a UTF-16 Lua file (PowerShell default) containing `dig-now` is reported clean
 
-- **Status:** open
+- **Status:** fixed in 6e0db06
 - **Severity:** S2
 - **Area:** `lint` (`df_llm_helper/lint.py:lint_paths/lint_file`, `cli.py:cmd_lint`)
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -53,3 +53,6 @@ Missing path -> `Finding(level="error")` or argparse error; decode via `read_tex
 
 ## Info needed
 None.
+
+## Fix
+A missing path is an error finding (exit 1); unreadable files are errors; UTF-16 with BOM is decoded (`read_text_tolerant`), NUL bytes without BOM are an error `not a text file`.

@@ -141,7 +141,7 @@ def test_player_approval_required(tmp_path):
                       registry=ExceptionRegistry(tmp_path / "ex.jsonl"))
     assert res.status == "approval" and mc.calls == []
     res = run_runbook(rb, mc, lambda: ctx, clock=FakeClock(), dry_run=True, params={"item_ids": "187405"}, registry=None)
-    assert res.status == "approval"
+    assert res.status == "dry" and any(ln.startswith("NOT approved") for ln in res.log) and mc.calls == []  # BUG-300
     reg = ExceptionRegistry(tmp_path / "ex.jsonl")
     reg.add("FP08", "E18", "ja, mach foreign=false", objects=[187405])
     res = run_runbook(rb, mc, lambda: ctx, clock=FakeClock(), dry_run=False, params={"item_ids": "187405"},

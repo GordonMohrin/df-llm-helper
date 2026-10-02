@@ -1,6 +1,6 @@
 # BUG-318: Fair-play linter misses indirect forms: `reveal` via a variable, variables named like `order` (`border.pos.x = ...`), `unit.pos = {...}`, `blk.tiletype[i][j] = ...`, `mat_type` on variables not named item/it/itm, `getTileType` when `.hidden` appears anywhere else in the file
 
-- **Status:** open
+- **Status:** fixed in 6e0db06
 - **Severity:** S2
 - **Area:** `df_llm_helper/lint.py` (rules L04, L08, L10, L17, L21)
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -51,3 +51,6 @@ Cheap hardening: L04 also match `reveal` as a whole word inside any string liter
 
 ## Info needed
 Question for the cloud session: is the linter meant to be a hard gate against deliberate evasion, or a safety net against accidental cheating? (This decides how far to go with AST-based checks.)
+
+## Fix
+L04 any string starting with `reveal`; L08 also `.pos = {...}` and the order/job exemption only for whole words; L17 indexed `tiletype[..][..] =`; L21 `.mat_type/.mat_index =` on any variable outside job/order/filter objects; L10 needs a hidden check within 30 lines before / 10 after the read. Answer: the linter is a safety net against accidental cheating (regex), not a hard gate against deliberate evasion; a `.hidden` reference right next to the read still counts as a check.

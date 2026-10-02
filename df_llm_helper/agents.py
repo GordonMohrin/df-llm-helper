@@ -42,18 +42,44 @@ FORMAT = ("## Report format (mandatory, <= {n} lines, otherwise truncated)\nResu
 FAIRPLAY = ("## Fair Play\nPlayer-level operation only (orders, stockpiles, labors, squads, offices, quickfort with own rasters). "
             "Forbidden: createitem, dig-now, build-now, reveal, prospect all, changing units/items directly. Exceptions only "
             "with a register entry (the player's yes).")
-COMMANDS = ("## Commands\nkb search \"<symptom>\" | runbook diagnose | runbook run <id> --dry-run | "
+COMMANDS = ("## Commands\n{scope_cmds}kb search \"<symptom>\" | runbook diagnose | runbook run <id> --dry-run | "
             "bus post \"<text>\" --from {scope} --to orchestrator | memory compact {scope}. One pass, <= 40 tool calls.")
+TASK_MAX = 400
+# sections of the briefing that the prompt replaces by its own (one report format, one fair-play and command block)
+_REPLACED = ("Fair Play", "Report", "Commands")
+
+
+def _split_brief(brief_text: str) -> tuple[str, list[str]]:
+    """Briefing without its Fair Play / Report / Commands sections; returns (text, scope command lines)."""
+    keep, cmds, cur = [], [], None
+    for ln in brief_text.strip().splitlines():
+        m = re.match(r"^##\s+(.*)$", ln)
+        if m:
+            cur = m.group(1).strip()
+            if cur in _REPLACED:
+                continue
+        if cur in _REPLACED:
+            if cur == "Commands" and ln.strip():
+                cmds.append(re.sub(r"^\s*[-*]\s+", "", ln.strip()))
+            continue
+        keep.append(ln)
+    return "\n".join(keep).strip(), cmds
 
 
 def build_prompt(scope: str, task: str, brief_text: str, *, fort: str = "?", max_lines: int = 12,
                  budget: int = 1500) -> str:
-    """Prompt from fixed mandatory blocks + briefing; the briefing is truncated until everything is <= budget tokens."""
-    task = " ".join(task.split())[:400] or "One pass according to the briefing."
+    """Prompt from fixed mandatory blocks + briefing; the briefing is truncated until everything is <= budget tokens.
+    The briefing's own Fair Play / Report / Commands blocks are replaced by the prompt's (BUG-304): exactly one
+    report format (the one agents lint-report checks)."""
+    task = " ".join(task.split())
+    if len(task) > TASK_MAX:
+        task = task[:TASK_MAX].rstrip() + f" [task shortened: {TASK_MAX} of {len(task)} characters]"
+    task = task or "One pass according to the briefing."
+    brief, scope_cmds = _split_brief(brief_text)
     fixed = [HEAD.format(marker=MARKER, scope=scope, fort=fort), TASK.format(task=task),
-             FORMAT.format(n=max_lines), FAIRPLAY, COMMANDS.format(scope=scope)]
+             FORMAT.format(n=max_lines), FAIRPLAY,
+             COMMANDS.format(scope=scope, scope_cmds="".join(c + "\n" for c in scope_cmds))]
     room = budget - tokens("\n\n".join(fixed)) - tokens("\n\n## Briefing\n") - 2
-    brief = brief_text.strip()
     if tokens(brief) > room:
         lines, keep = brief.splitlines(), []
         for ln in lines:
@@ -109,6 +135,12 @@ class AgentCost:
     out_est: int = 0            # output estimated from block lengths (chars/3): usage.output_tokens in the transcript
                                 # is the value at stream start (often 2..8) and underestimates heavily
     warnings: list = field(default_factory=list)
+
+    @property
+    def out_tokens(self) -> int:
+        """THE output figure of the table and the warning (BUG-305): the larger of usage.output_tokens and the block
+        estimate (usage is the stream-start value for short agents; the estimate misses empty thinking blocks)."""
+        return max(self.output, self.out_est)
 
 
 def _ts(s: str | None) -> datetime | None:
@@ -169,8 +201,8 @@ def parse_transcript(path: Path, cfg: dict | None = None) -> AgentCost:
     ac.calls = len(usage)
     if first and last:
         ac.duration_s = (last - first).total_seconds()
-    if ac.calls > c["warn_calls"] or max(ac.output, ac.out_est) > c["warn_output_k"] * 1000:
-        ac.warnings.append(f"{ac.agent}: {ac.calls} calls/~{max(ac.output, ac.out_est)} output - stuck? check the result, shrink the task")
+    if ac.calls > c["warn_calls"] or ac.out_tokens > c["warn_output_k"] * 1000:
+        ac.warnings.append(f"{ac.agent}: {ac.calls} calls/~{ac.out_tokens} output - stuck? check the result, shrink the task")
     return ac
 
 
@@ -178,11 +210,11 @@ def cost_report(paths: list[Path], cfg: dict | None = None) -> tuple[list[AgentC
     rows = [parse_transcript(p, cfg) for p in sorted(paths)]
     out = [f"{'Agent':<28} {'Calls':>5} {'CacheRead':>11} {'CacheWr':>9} {'Out~':>7} {'Dur':>6}  Task"]
     for r in rows:
-        out.append(f"{r.agent[:28]:<28} {r.calls:>5} {r.cache_read:>11} {r.cache_write:>9} {r.out_est:>7} "
+        out.append(f"{r.agent[:28]:<28} {r.calls:>5} {r.cache_read:>11} {r.cache_write:>9} {r.out_tokens:>7} "
                    f"{r.duration_s / 60:>5.1f}m  {('[B] ' if r.briefing else '') + r.description[:40]}")
     if rows:
         out.append(f"{'Total':<28} {sum(r.calls for r in rows):>5} {sum(r.cache_read for r in rows):>11} "
-                   f"{sum(r.cache_write for r in rows):>9} {sum(r.out_est for r in rows):>7} "
+                   f"{sum(r.cache_write for r in rows):>9} {sum(r.out_tokens for r in rows):>7} "
                    f"{sum(r.duration_s for r in rows) / 60:>5.1f}m  ({len(rows)} agents, [B] = briefing prompt)")
     warns = [w for r in rows for w in r.warnings]
     out += warns[:5]                      # one line per stuck agent would flood the report (58 lines in a long project)
@@ -200,7 +232,7 @@ def compare(rows: list[AgentCost]) -> str:
 
     def mean(xs, k):
         return statistics.mean(getattr(x, k) for x in xs)
-    d_out = (1 - mean(b, "out_est") / mean(a, "out_est")) * 100 if mean(a, "out_est") else 0.0
+    d_out = (1 - mean(b, "out_tokens") / mean(a, "out_tokens")) * 100 if mean(a, "out_tokens") else 0.0
     d_cr = (1 - mean(b, "cache_read") / mean(a, "cache_read")) * 100 if mean(a, "cache_read") else 0.0
     note = "" if len(a) >= 3 and len(b) >= 3 else " (too few runs for acceptance 4: >= 3 each)"
     def pct(d: float) -> str:

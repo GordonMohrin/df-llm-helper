@@ -92,7 +92,7 @@ def test_metrics_export_same_header_as_metrics_csv():
     for i, (day, mon) in enumerate([(3, "Granite"), (20, "Granite"), (5, "Slate"), (27, "Slate"), (1, "Felsite")]):
         snap = snap_for(pop=20 + i)
         snap.date_text = f"{day}. {mon}, Jahr 102"
-        record_kpis(st, 1000.0 + i, snap)
+        record_kpis(st, 1_790_840_000.0 + i, snap)   # not 1970: Windows cannot localise ts < 1 day
     out = _journal(st).monthly_metrics()
     rows = out.splitlines()
     assert rows[0] == real_header == ";".join(METRICS_HEADER)
@@ -134,7 +134,7 @@ def test_write_targets_restricted(tmp_path, tools_dir, capsys):
                  f"  gamelog: {tmp_path / 'g'}\njournal:\n  chronik: {chron}\n  metrics: {tmp_path / 'm.csv'}\n"
                  f"  postmortem: {tmp_path / 'pm.md'}\n  events_log: {LOG}\n", encoding="utf-8")
     assert main(["--config", str(c), "--mock", str(FIX), "journal", "ingest", "--date", "2026-09-30"]) == 0
-    assert "318 chronicle events" in capsys.readouterr().out
+    assert "314 chronicle events" in capsys.readouterr().out  # BUG-310: was 318
     assert main(["--config", str(c), "--mock", str(FIX), "journal", "chronik", "--append"]) == 0
     assert "deaths" in chron.read_text(encoding="utf-8")
     assert main(["--config", str(c), "--mock", str(FIX), "journal", "postmortem", "--out", str(tmp_path / "pm.md")]) == 0

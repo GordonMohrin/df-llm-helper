@@ -1,6 +1,6 @@
 # BUG-326: `brief`: memory bullets are cut at the first colon / `->` / sentence end, so `label: content` lines become label-only (`- 2. Hauptthread…`, `- 3. Wache aktivieren…`, `- Bestand…`); stale memory from an older game date is shown without a warning
 
-- **Status:** open
+- **Status:** fixed in 793a4b7
 - **Severity:** S3
 - **Area:** `df_llm_helper/memory.py:shorten`, `extract_for_brief`, `brief.py`
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -78,3 +78,6 @@ In `shorten()` do not split at a colon when the part before it is shorter than ~
 
 ## Info needed
 Question for the cloud session: is the colon cut intentional to save tokens (the budget use is only 40-80 %, see BUG-329 table)?
+
+## Fix
+`shorten()` cuts at a colon only after 60 characters (else at the sentence end or a word boundary at the width); `brief` adds a `Memory age` line when the newest game year named in the memory is >= 2 years behind the fort. Answer: the colon cut was not needed for the token budget.

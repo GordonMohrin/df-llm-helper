@@ -156,6 +156,8 @@ def test_lua_scan_equals_python_reference(tmp_path, name):
     out, _ = lua_run(g, tmp_path, "pilot_perimeter", "scan", 100, 101, 130, 100, 136, 20000, 0)
     j = json.loads(out.splitlines()[0])
     assert j["done"] and sorted(j["entries"]) == sorted(ref) and j["traps"] == 2
+    out, _ = lua_run(g, tmp_path, "pilot_perimeter", "scan", 100, 101, 130, 100, 136, 20000, 3000)
+    assert json.loads(out.splitlines()[0])["entries"] == []               # enclave filter 3000: grid too small
     out, err = lua_run(g, tmp_path, "pilot_perimeter", "start", 100, 101, 130, 100, 136, 200, 0)
     assert json.loads(out)["started"] is True
     ticks = int(err.split("ticks=")[1].split()[0])
@@ -281,3 +283,37 @@ def test_lua_scan_blocking_building_equals_python(tmp_path):
         out, _ = lua_run(g, tmp_path / str(n), "pilot_perimeter", "scan", 7, 1, 130, 100, 136, 20000, 0)
         j = json.loads(out.splitlines()[0])
         assert len(j["entries"]) == n
+
+
+# ---- enclave filter (commit aefbb0f): a walled-in outside terrace (< min_outside tiles) is not the outside world
+ENCLAVE_TXT = """@origin 0 0
+@core 7 3 130
+z 130
+############
+#,,,,,,,,..#
+############
+#,,........#
+############
+"""
+
+
+def test_enclave_filter_python_reference():
+    g = Grid.from_text(ENCLAVE_TXT)
+    assert sorted(tuple(e[:3]) for e in P.scan_grid(g, (7, 3, 130), ZR)) == [(3, 3, 130), (9, 1, 130)]
+    assert [tuple(e[:3]) for e in P.scan_grid(g, (7, 3, 130), ZR, min_outside=5)] == [(9, 1, 130)]
+    assert P.scan_grid(g, (7, 3, 130), ZR, min_outside=9) == []           # 8 outside tiles < 9
+    assert len(P.scan_grid(g, (7, 3, 130), ZR, min_outside=8)) == 1        # exactly 8 counts (>=)
+
+
+@pytest.mark.skipif(not LUA, reason="lua5.4 missing")
+@pytest.mark.parametrize("mincomp", [0, 5, 8, 9])
+def test_lua_enclave_filter_equals_python(tmp_path, mincomp):
+    g = Grid.from_text(ENCLAVE_TXT)
+    ref = sorted(list(e[:3]) + [int(e[3]), int(e[4])] for e in P.scan_grid(g, (7, 3, 130), ZR, min_outside=mincomp))
+    out, _ = lua_run(g, tmp_path, "pilot_perimeter", "scan", 7, 3, 130, 100, 136, 20000, mincomp)
+    assert sorted(json.loads(out.splitlines()[0])["entries"]) == ref
+
+
+def test_live_args_pass_min_outside(tmp_path):
+    assert per(tmp_path)._args().endswith(" 20000 3000")
+    assert per(tmp_path / "b", cfg={"min_outside": 0})._args().endswith(" 20000 0")

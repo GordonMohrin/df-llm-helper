@@ -27,4 +27,4 @@ rollback:
   - {cmd: "claude/mil workmode {squad_id} off --apply"}
 notes: >-
   Do NOT run workmode repeatedly (it wipes assignments). If assigned but not picked up: release the stale item IDs
-  (runbook rb01c_e18_release, the player's decision), then run workmode exactly ONCE more. A squad without a leader accepts no add.
+  (python -m df_llm_helper kb get e18_release; it touches equipment data, the player's decision), then run workmode exactly ONCE more. A squad without a leader accepts no add.

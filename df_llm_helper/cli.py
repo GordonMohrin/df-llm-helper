@@ -305,11 +305,15 @@ def cmd_wake(args) -> int:
 
 def _runbooks(p):
     from .runbooks import load_runbooks
-    return load_runbooks(Path(p.cfg.get("paths.data")) / "runbooks")
+    errors: list = []
+    rbs = load_runbooks(Path(p.cfg.get("paths.data")) / "runbooks", errors)
+    for e in errors:
+        print(f"Runbook skipped: {e}", file=sys.stderr)
+    return rbs
 
 
 def cmd_runbook(args) -> int:
-    from .runbooks import diagnose, plan_commands, run_runbook
+    from .runbooks import RunbookError, diagnose, format_runbook, parse_params, run_runbook
     p = _pilot(args)
     rbs = {r.id: r for r in _runbooks(p)}
     if args.action == "list":
@@ -321,20 +325,22 @@ def cmd_runbook(args) -> int:
         hits = diagnose(list(rbs.values()), p.context(snap, p.cancels()))
         print("\n".join(h.line() for h in hits) or "no runbook hits")
         return 0
-    if not args.id or args.id not in rbs:
-        print(f"Unknown runbook: {args.id}. List: python -m df_llm_helper runbook list", file=sys.stderr)
+    if not args.id:
+        print(f"Runbook id missing: python -m df_llm_helper runbook {args.action} <id> (list: runbook list)",
+              file=sys.stderr)
+        return 2
+    if args.id not in rbs:
+        print(f"Unknown runbook: {args.id!r}. List: python -m df_llm_helper runbook list", file=sys.stderr)
         return 2
     rb = rbs[args.id]
     if args.action == "show":
-        print(f"{rb.id}: {rb.title}\nSymptom: {rb.symptom['when']}\nKB: {', '.join(rb.kb)}"
-              f"\nPlayer consent needed: {rb.needs_player_approval}")
-        for i, st in enumerate(rb.steps, 1):
-            print(f" {i}. " + ", ".join(f"{k}: {v}" for k, v in st.items()))
-        print(f"Verify: {rb.verify['when']}")
-        if rb.notes:
-            print("Note: " + rb.notes)
+        print("\n".join(format_runbook(rb)))
         return 0
-    params = dict(kv.split("=", 1) for kv in (args.param or []))
+    try:
+        params = parse_params(args.param)
+    except RunbookError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 2
     snapctx = lambda: p.context(p.snapshot())  # noqa: E731
 
     def internal(action: str) -> str:
@@ -361,24 +367,48 @@ def cmd_runbook(args) -> int:
 
 
 def cmd_kb(args) -> int:
-    from .kb import KB, format_entry, format_hits, import_markdown, write_jsonl
+    from .kb import KB, _slug, format_entry, format_hits, import_markdown, looks_binary, write_jsonl
     cfg = load_config(args.config)
     if args.action == "import":
-        for f in args.files:
-            es = import_markdown(Path(f))
-            target = Path(cfg.get("paths.data")) / "kb" / f"imported_{Path(f).stem.lower()}.jsonl"
+        files = list(args.query) + list(args.files or [])
+        if not files:
+            print("Usage: python -m df_llm_helper kb import <notes.md> [...]", file=sys.stderr)
+            return 2
+        rc = 0
+        for f in files:
+            fp = Path(f)
+            if not fp.is_file():
+                print(f"{f}: not found (or not a file) - skipped", file=sys.stderr)
+                rc = 2
+                continue
+            if looks_binary(fp):
+                print(f"{f}: not a text file - skipped", file=sys.stderr)
+                rc = 2
+                continue
+            es = import_markdown(fp)
+            if not es:
+                print(f"{f}: no entries (empty or no section with text) - nothing written")
+                continue
+            target = Path(cfg.get("paths.data")) / "kb" / f"imported_{_slug(fp.stem)}.jsonl"
             write_jsonl(es, target)
             print(f"{f}: {len(es)} entries -> {target.name} (unreviewed)")
-        return 0
+        return rc
+    if args.action == "search" and args.k < 1:
+        print(f"Error: -k must be >= 1, got {args.k}", file=sys.stderr)
+        return 2
+    if args.action in ("search", "get") and not args.query:
+        print(f"Usage: python -m df_llm_helper kb {args.action} " + ("<id>" if args.action == "get" else "<words>"),
+              file=sys.stderr)
+        return 2
     kb = KB.load(cfg)
     if args.action == "search":
         print(format_hits(kb.search(" ".join(args.query), k=args.k), kb.current_run, kb.stale_before,
                           int(cfg.get("kb.max_tokens", 400))))
         return 0
     if args.action == "get":
-        e = kb.get(args.query[0]) if args.query else None
+        e = kb.get(args.query[0])
         if not e:
-            print("unknown ID (python -m df_llm_helper kb search ...)", file=sys.stderr)
+            print(f"unknown KB id {args.query[0]!r} (python -m df_llm_helper kb search ... / kb list)", file=sys.stderr)
             return 2
         print(format_entry(e, kb.current_run, kb.stale_before, int(cfg.get("kb.max_tokens", 400))))
         return 0
@@ -391,6 +421,10 @@ def cmd_kb(args) -> int:
 def cmd_brief(args) -> int:
     from .brief import build_brief, load_scopes
     from .kb import KB
+    from .toolsfs import read_text_tolerant
+    if args.budget is not None and args.budget < 1:
+        print(f"Error: --budget must be a positive number of tokens, got {args.budget}", file=sys.stderr)
+        return 2
     p = _pilot(args)
     t0 = time.time()
     snap = p.snapshot()
@@ -398,9 +432,9 @@ def cmd_brief(args) -> int:
     mem = p.tools.memory_file(scope_file)
     out = build_brief(args.scope, scopes_def=load_scopes(Path(p.cfg.get("paths.data")) / "scopes.yaml"),
                       ctx=p.context(snap, p.cancels()), snap=snap, kb=KB.load(p.cfg),
-                      memory_text=mem.read_text(encoding="utf-8", errors="replace") if mem.exists() else None,
+                      memory_text=read_text_tolerant(mem) if mem.is_file() else None,
                       inbox_lines=p.tools.inbox_lines(args.scope), th=p.cfg.th,
-                      budget=int(args.budget or p.cfg.get("brief.budget", 1500)),
+                      budget=int(args.budget if args.budget is not None else p.cfg.get("brief.budget", 1500)),
                       date_text=snap.date.text() if snap.date else "")
     print(out)
     _usage(p, args.scope, "brief", out, t0)
@@ -410,6 +444,11 @@ def cmd_brief(args) -> int:
 def cmd_replay(args) -> int:
     from .scenario import check_expectations, run_scenario
     files = [Path(f) for f in args.files] or sorted((HOME / "scenarios").glob("*.jsonl"))
+    missing = [f for f in files if not f.is_file()]
+    if missing:
+        print("Error: scenario file not found: " + ", ".join(f"{f} (a directory, not a file)" if f.is_dir() else str(f)
+                                                          for f in missing), file=sys.stderr)
+        return 2
     bad = 0
     for f in files:
         res = run_scenario(f)
@@ -442,9 +481,9 @@ def cmd_exception(args) -> int:
     cfg = load_config(args.config)
     reg = ExceptionRegistry(cfg.path("exceptions"))
     if args.action == "add":
-        objs = [o for o in (args.objects or "").split(",") if o]
+        objs = [o.strip() for o in (args.objects or "").split(",") if o.strip()]
         e = reg.add(args.rule, args.reason, args.ja or "", objects=objs, max_uses=args.max_uses, expires=args.expires)
-        print(f"Exception registered: {e.action} {e.objects}")
+        print(f"Exception registered: {e.action} {e.objects} (in {reg.path.name})")
         return 0
     for e in reg.entries:
         print(f"{e.ts} {e.action} {e.objects}: {e.reason} (player consent: {e.player_consent})")
@@ -454,9 +493,13 @@ def cmd_exception(args) -> int:
 
 
 def cmd_memory(args) -> int:
-    from .memory import compact_file, restore
+    from .memory import compact_file, restore, valid_memory_name
     cfg = load_config(args.config)
     scopes = Path(cfg.get("paths.scopes"))
+    if args.scope not in ("all", "alle") and not valid_memory_name(args.scope):
+        print(f"Error: unknown scope {args.scope!r} (a scope from data/scopes.yaml, inbox-<scope> or all)",
+              file=sys.stderr)
+        return 2
     if args.scope in ("all", "alle"):     # memory + inbox files only; rule/registry files (handel-regeln.md, REGISTRY.md) stay
         from .brief import SCOPES
         targets = [f for f in sorted(scopes.glob("*.md"))
@@ -468,8 +511,11 @@ def cmd_memory(args) -> int:
             print(f"{p.name}: missing", file=sys.stderr)
             return 2
         if args.action == "restore":
-            a = restore(p)
-            print(f"{p.name}: restored from {a.name}" if a else f"{p.name}: no archive")
+            a = restore(p, dry_run=args.dry_run)
+            if args.dry_run:
+                print(f"(dry-run) {p.name}: would restore from {a.name}" if a else f"{p.name}: no archive")
+            else:
+                print(f"{p.name}: restored from {a.name}" if a else f"{p.name}: no archive")
             continue
         res = compact_file(p, stamp=time.strftime("%Y%m%dT%H%M%S"), dry_run=args.dry_run)
         tag = "(dry-run) " if args.dry_run else ""
@@ -485,6 +531,12 @@ def cmd_bus(args) -> int:
     store = Store(cfg.path("state_db"))
     bus = Bus(store, clock)
     if args.action == "post":
+        if not " ".join(args.text).strip():
+            print("Error: message text is empty", file=sys.stderr)
+            return 2
+        if not args.sender:
+            print("Error: --from <scope> missing (who sends the message?)", file=sys.stderr)
+            return 2
         mid = bus.post(args.sender, args.to, " ".join(args.text), prio=args.prio, topic=args.topic or "",
                        dedupe_key=args.key)
         if args.md:
@@ -494,6 +546,9 @@ def cmd_bus(args) -> int:
         print(f"#{mid} to {args.to}")
         return 0
     if args.action == "read":
+        if args.limit < 1:
+            print(f"Error: --limit must be >= 1, got {args.limit}", file=sys.stderr)
+            return 2
         msgs = bus.read(args.to, limit=args.limit)
         print("\n".join(m.line() for m in msgs) or f"no unread messages for {args.to}")
         return 0
@@ -505,10 +560,15 @@ def cmd_bus(args) -> int:
         from .toolsfs import ToolsDir
         tools = ToolsDir(cfg.path("tools"), clock, cfg.path("scopes"))
         files = [Path(f) for f in args.text] or sorted(tools.scopes.glob("inbox-*.md"))
+        missing = [f for f in files if not f.is_file()]
+        for f in missing:
+            print(f"{f}: not found (or not a file)", file=sys.stderr)
         for f in files:
+            if f in missing:
+                continue
             new, skip = bus.import_inbox(f)
             print(f"{f.name}: {new} new, {skip} already present")
-        return 0
+        return 2 if missing else 0
     return 2
 
 
@@ -1010,6 +1070,7 @@ def cmd_agents(args) -> int:
     if args.action == "prompt":
         from .brief import build_brief, load_scopes
         from .kb import KB
+        from .toolsfs import read_text_tolerant
         p = _pilot(args)
         args.scope = args.target
         if not args.scope:
@@ -1025,14 +1086,26 @@ def cmd_agents(args) -> int:
         mem = p.tools.memory_file(scope_file)
         brief = build_brief(args.scope, scopes_def=load_scopes(Path(p.cfg.get("paths.data")) / "scopes.yaml"),
                             ctx=p.context(snap, p.cancels()), snap=snap, kb=KB.load(p.cfg),
-                            memory_text=mem.read_text(encoding="utf-8", errors="replace") if mem.exists() else None,
+                            memory_text=read_text_tolerant(mem) if mem.is_file() else None,
                             inbox_lines=p.tools.inbox_lines(args.scope), th=p.cfg.th,
                             budget=int(cfg["prompt_budget"]), date_text=snap.date.text() if snap.date else "")
         print(ag.build_prompt(args.scope, args.task or "", brief, fort=snap.fort or "?",
                               max_lines=int(cfg["max_report_lines"]), budget=int(cfg["prompt_budget"])))
         return 0
     if args.action == "lint-report":
-        src = sys.stdin.read() if args.target in (None, "-") else Path(args.target).read_text(encoding="utf-8")
+        import re
+
+        from .toolsfs import decode_tolerant
+        if args.scope is not None and not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", args.scope):
+            print(f"Error: --scope must be a plain scope name, got {args.scope!r}", file=sys.stderr)
+            return 2
+        if args.target in (None, "-"):
+            src = decode_tolerant(sys.stdin.buffer.read()) if hasattr(sys.stdin, "buffer") else sys.stdin.read()
+        elif not Path(args.target).is_file():
+            print(f"Error: report file not found: {args.target}", file=sys.stderr)
+            return 2
+        else:
+            src = decode_tolerant(Path(args.target).read_bytes())      # BOM / UTF-16 / cp1252 (Windows tools)
         rc = ag.lint_report(src, int(cfg["max_report_lines"]))
         if rc.truncated:
             arch = ag.archive_report(src, args.scope or "agent",
@@ -1070,14 +1143,22 @@ def cmd_dashboard(args) -> int:
             print("claude/area failed: " + (r.stderr or "")[:100])
             return 1
         maps = dict(p.store.get("dashboard.maps") or {})
-        maps[name] = r.stdout.rstrip("\n")
+        txt = r.stdout.replace("\r\n", "\n").rstrip("\n")         # dfhack-run answers with CRLF (BUG-313)
+        maps[name] = txt
         p.store.set("dashboard.maps", maps)
-        print(f"Map '{name}' saved ({len(r.stdout.splitlines())} lines)")
+        print(f"Map '{name}' saved ({len(txt.splitlines())} lines)")
         return 0
     if args.action == "unmap":
         maps = dict(p.store.get("dashboard.maps") or {})
-        maps.pop(args.rest[0] if args.rest else "", None)
+        if len(args.rest) != 1:
+            print("Usage: python -m df_llm_helper dashboard unmap <name>", file=sys.stderr)
+            return 2
+        if args.rest[0] not in maps:
+            print(f"No map named {args.rest[0]!r} (saved: {', '.join(sorted(maps)) or 'none'})", file=sys.stderr)
+            return 1
+        maps.pop(args.rest[0])
         p.store.set("dashboard.maps", maps)
+        print(f"Map '{args.rest[0]}' removed")
         return 0
     if not args.offline:                                   # refresh the building counters for the build plan (read only)
         from .client import register_read
@@ -1092,6 +1173,9 @@ def cmd_dashboard(args) -> int:
     text = drender(dcollect(p.store, p.clock.now().epoch, dcfg), dcfg)
     errs = validate_html(text)
     out = Path(args.out) if args.out else Path(p.cfg.get("paths.tools")) / dcfg.get("out", "out/dashboard.html")
+    if out.is_dir():
+        print(f"Error: --out is a directory, not a file: {out}", file=sys.stderr)
+        return 2
     changed = write_if_changed(text, out, p.store)
     print(f"{out} ({len(text.encode('utf-8')) // 1024} KB, {'newly written' if changed else 'unchanged'})"
           + (" ERROR: " + "; ".join(errs) if errs else ""))
@@ -1099,11 +1183,17 @@ def cmd_dashboard(args) -> int:
 
 
 def _journal_target(cfg_j: dict, path: str | None, key: str) -> Path:
-    """Spec 12 acceptance 5: write only under df-llm-helper/ or to the configured file."""
+    """Spec 12 acceptance 5 (BUG-311): write only to the configured journal files or below the runtime folder
+    (default df-llm-helper/runtime) - never over project files such as data/exceptions.jsonl or config.yaml."""
+    from .config import RUNTIME
     p = (HOME / (path or cfg_j[key])).resolve()
     allowed = {(HOME / cfg_j[k]).resolve() for k in ("chronik", "metrics", "postmortem") if cfg_j.get(k)}
-    if p not in allowed and HOME.resolve() not in p.parents:
-        raise SystemExit(f"Write refused: {p} lies outside df-llm-helper/ and is not configured")
+    if p in allowed:
+        return p
+    if RUNTIME.resolve() not in p.parents or p.suffix.lower() in (".py", ".lua", ".yaml", ".yml", ".jsonl", ".db") \
+            or p.name.lower().startswith("exceptions"):
+        raise SystemExit(f"Write refused: {p} is not a configured journal file (journal.{key} in config.yaml) and "
+                         f"not a report file below {RUNTIME}")
     return p
 
 
@@ -1118,18 +1208,27 @@ def cmd_journal(args) -> int:
     j = Journal(p.store, cj, HOME, registry=p.client.registry)
     if args.action == "ingest":
         src = Path(args.events) if args.events else (HOME / cj["events_log"])
-        if not src.exists():
-            print(f"Event log missing: {src}")
+        if not src.is_file():
+            print(f"Event log missing: {src}" + (" (a directory, not a file)" if src.is_dir() else ""))
             return 1
         text = read_text_tolerant(src)
         if args.date:
-            day0 = _date.fromisoformat(args.date)
+            try:
+                day0 = _date.fromisoformat(args.date)
+            except ValueError:
+                print(f"Error: --date must be a real date YYYY-MM-DD, got {args.date!r}", file=sys.stderr)
+                return 2
         else:        # the log only has times of day: its last line is "today" (mtime), count day changes backwards
             from .journal import infer_first_day
             day0 = infer_first_day(text, _date.fromtimestamp(src.stat().st_mtime))
         new, total = j.ingest_log(text, day0)
         w = j.ingest_warnings()
         print(f"{total} chronicle events in the log, {new} new; {w} critical df-llm-helper warnings taken over")
+        from .journal import count_log_lines
+        n_lines, n_ok = count_log_lines(text)
+        if n_lines and not n_ok:
+            print(f"WARNING: 0 of {n_lines} lines recognised as watcher events - wrong encoding or not an events.log?")
+            return 1
         return 0
     if args.action == "chronik":
         lines = j.chronik()
@@ -1137,7 +1236,8 @@ def cmd_journal(args) -> int:
         print(f"(coverage {j.coverage() * 100:.0f} % of the events)")
         if args.append and lines:
             _journal_target(cj, None, "chronik")
-            print(f"appended to {j.append_chronik(lines)}")
+            target, n = j.append_chronik(lines)
+            print(f"appended {n} new lines to {target}" if n else f"nothing new for {target} (all lines already there)")
         return 0
     if args.action == "lessons":
         ls = j.lessons()
@@ -1157,6 +1257,7 @@ def cmd_journal(args) -> int:
         text = j.monthly_metrics()
         if args.out:
             t = _journal_target(cj, args.out, "metrics")
+            t.parent.mkdir(parents=True, exist_ok=True)
             t.write_text(text, encoding="utf-8")
             print(f"{text.count(chr(10)) - 1} monthly lines -> {t}")
         else:
@@ -1165,6 +1266,7 @@ def cmd_journal(args) -> int:
     text = j.postmortem()
     if args.out:
         t = _journal_target(cj, args.out, "postmortem")
+        t.parent.mkdir(parents=True, exist_ok=True)
         t.write_text(text, encoding="utf-8")
         print(f"Postmortem skeleton -> {t}")
     else:
@@ -1384,7 +1486,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("action", choices=["post", "read", "ack", "import"])
     s.add_argument("text", nargs="*")
     s.add_argument("--to", default="orchestrator")
-    s.add_argument("--from", dest="sender", default="orchestrator")
+    s.add_argument("--from", dest="sender", default=None, help="post: sending scope (required)")
     s.add_argument("--prio", choices=["crit", "warn", "info"])
     s.add_argument("--topic")
     s.add_argument("--key", help="dedupe key")

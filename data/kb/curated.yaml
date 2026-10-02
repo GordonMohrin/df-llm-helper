@@ -67,7 +67,7 @@
   title: "Guard blind: events.log empty, last-report-id too large"
   symptom_keywords: [guard, watcher, blind, last-report-id, events.log empty, new game, monitoring]
   ursache: "After a new game report IDs restart at 0; last-report-id.txt (e.g. 28181) stays -> no report is read. Runs 4 and 5."
-  fix: "Set the file to the highest report ID (python -m df_llm_helper guard does this), restart the guard (Invoke-CimMethod Win32_Process Create; Start-Process -WindowStyle Hidden dies). Runbook rb05_waechter_blind."
+  fix: "Set the file to the highest report ID (python -m df_llm_helper guard does this), restart the watcher python -m df_llm_helper waechter --loop (Invoke-CimMethod Win32_Process Create; Start-Process -WindowStyle Hidden dies). Runbook rb05_waechter_blind."
   quelle: "SPEC appendix A5; session Run 5 08:01"
   run: 5
   scopes: [infra, orchestrator]
@@ -231,6 +231,14 @@
   quelle: "POSTMORTEM-run3; CLAUDE.md"
   run: 3
   scopes: [verteidigung, bau, erkundung]
+- id: bestie_megabestie
+  title: "Forgotten beast / megabeast at the fort"
+  symptom_keywords: [forgotten beast, megabeast, beast, titan, building destroyer, monster, bestie, megabestie]
+  ursache: "Beasts with BUILDINGDESTROYER break doors and hatches. Run 3 fell (J89) to two forgotten beasts that came up through an opened shaft."
+  fix: "Classify with claude/gefahr (raw flags). Civilians into the refuge burrow, close accesses with construction walls (doors do not hold), soldiers only in full metal armor; never open a cavern lock (kb kavernen_schleuse)."
+  quelle: "POSTMORTEM-run3; CLAUDE.md"
+  run: 3
+  scopes: [verteidigung, militaer]
 - id: belagerung_pop
   title: "Sieges from population 80"
   symptom_keywords: [siege, goblin, pop 80, guard, armor, pop gate]
@@ -256,10 +264,10 @@
   run: 5
   scopes: [essen]
 - id: guard_start
-  title: "PowerShell guard dies after starting"
-  symptom_keywords: [unpause-guard, start-process, hidden, guard does not start, powershell]
-  ursache: "Start-Process -WindowStyle Hidden ends the process together with the calling shell."
-  fix: "Start via Invoke-CimMethod Win32_Process Create (independent process); check the syntax first; restart after a script change."
+  title: "Watcher (waechter) dies after starting"
+  symptom_keywords: [unpause-guard, waechter, watcher, start-process, hidden, guard does not start, powershell]
+  ursache: "Start-Process -WindowStyle Hidden ends the process together with the calling shell (seen with the old unpause-guard.ps1, replaced 2026-10-01 by python -m df_llm_helper waechter --loop)."
+  fix: "Start python -m df_llm_helper waechter --loop via Invoke-CimMethod Win32_Process Create (independent process, MANUAL 1); restart it after an update."
   quelle: "Session Run 5"
   run: 5
   scopes: [infra]

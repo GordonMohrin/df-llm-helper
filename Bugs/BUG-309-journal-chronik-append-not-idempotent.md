@@ -1,6 +1,6 @@
 # BUG-309: `journal chronik --append` appends the whole chronicle again on every call (duplicates in `chronik.md`)
 
-- **Status:** open
+- **Status:** fixed in 1e94283
 - **Severity:** S2
 - **Area:** `journal chronik --append` (`df_llm_helper/journal.py:append_chronik`, `cli.py:cmd_journal`)
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -54,3 +54,6 @@ Store the id/hash of appended clusters in `kv` (like `journal.lessons`) and appe
 
 ## Info needed
 None.
+
+## Fix
+`append_chronik` appends only lines not yet in the target file and returns the count; a repeated call prints `nothing new`.

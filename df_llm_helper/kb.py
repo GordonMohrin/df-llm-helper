@@ -72,6 +72,13 @@ SYNONYMS = {
     "craft": ["finished goods", "trade", "handwerk"], "flood": ["water", "wall", "diagonal"],
     "airlock": ["cavern", "shaft", "door"], "cavern": ["airlock", "shaft", "forgotten"],
     "kaverne": ["cavern", "airlock", "shaft"],
+    # German symptom words of the players/agents (BUG-324); the reverse direction is added automatically below
+    "zwerg": ["dwarf", "citizen"], "haendler": ["merchant", "caravan", "trade"], "haeng": ["stuck", "hang"],
+    "stuck": ["hang", "leaving"], "ueberschwemm": ["flood", "water"], "grundwasser": ["aquifer", "water"],
+    "kueche": ["kitchen", "cook", "meal"], "kitchen": ["cook", "meal"], "flagge": ["flag"],
+    "ruckel": ["fps", "slow", "lag", "tempo"], "holzkohl": ["charcoal", "coke", "coal", "fuel"],
+    "charcoal": ["coke", "coal", "fuel"], "megabest": ["megabeast", "beast", "forgotten"],
+    "monster": ["beast", "megabeast"], "verhungert": ["hunger", "food", "starve"], "verdurst": ["thirst", "drink"],
 }
 _STOP = set("the a an of to is are for on with in at by from it its this that these those be been was were not no or "
             "and as but if then when how what which does do did can will would should only still also very into onto "
@@ -107,14 +114,30 @@ def tokenize(text: str) -> list[str]:
     return [_stem(w) for w in words if w not in _STOP and len(w) > 1]
 
 
-_SYN_STEMMED = [(_stem(_fold(k)), [t for x in v for t in tokenize(x)]) for k, v in SYNONYMS.items()]
+def _build_synonyms() -> list[tuple[str, list[str]]]:
+    """Stemmed key -> stemmed aliases; symmetric: an alias that is no key of its own maps back to its key."""
+    fwd: dict[str, list[str]] = {}
+    for k, v in SYNONYMS.items():
+        fwd.setdefault(_stem(_fold(k)), []).extend(t for x in v for t in tokenize(x))
+    back: dict[str, list[str]] = {}
+    for k, syns in fwd.items():
+        for a in syns:
+            if a not in fwd and a != k and len(a) >= 4:
+                back.setdefault(a, []).append(k)
+    return list(fwd.items()) + list(back.items())
+
+
+_SYN_STEMMED = _build_synonyms()
 
 
 def expand(tokens: list[str]) -> list[str]:
+    """Adds the aliases of the longest matching key(s): 'holzkohle' uses 'holzkohl' (charcoal), not 'holz' (wood)."""
     out = list(tokens)
     for t in tokens:
-        for key, syns in _SYN_STEMMED:
-            if t == key or (len(key) >= 4 and t.startswith(key)):
+        keys = [(key, syns) for key, syns in _SYN_STEMMED if t == key or (len(key) >= 4 and t.startswith(key))]
+        longest = max((len(k) for k, _ in keys), default=0)
+        for key, syns in keys:
+            if len(key) == longest or t == key:
                 out += syns
     return out
 
@@ -286,6 +309,17 @@ def _slug(s: str) -> str:
 
 
 _RUN = re.compile(r"\bRun\s*(\d)\b", re.I)
+
+
+def looks_binary(path: Path, probe: int = 4096) -> bool:
+    """NUL bytes (without a UTF-16 BOM) or mostly control characters in the first bytes: not a notes file."""
+    data = Path(path).read_bytes()[:probe]
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return False
+    if b"\x00" in data:
+        return True
+    ctrl = sum(1 for b in data if b < 32 and b not in (9, 10, 13))
+    return bool(data) and ctrl > len(data) * 0.05
 
 
 def import_markdown(path: Path, *, prefix: str | None = None, min_chars: int = 40) -> list[Entry]:

@@ -1,6 +1,6 @@
 # BUG-316: `exception add`: impossible dates (`2026-13-45`, `2026-02-30`) are accepted and never expire, a date-only `--expires` is already expired at noon of that day, unknown rule ids (`FP0`, `L99`) and junk objects are accepted
 
-- **Status:** open
+- **Status:** fixed in 4bfefa4
 - **Severity:** S2
 - **Area:** `df_llm_helper/fairplay.py:ExceptionRegistry.add/find`
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -93,3 +93,6 @@ Parse with `datetime.date.fromisoformat` / `datetime.fromisoformat`, treat a dat
 
 ## Info needed
 Question for the cloud session: which FPnn ids exist (docs mention FP08, FP09, FP10)? A list in `data/` would let `exception add` reject unknown ids.
+
+## Fix
+Rule id must be a known rule (FP01-FP13 from `FORBIDDEN_COMMANDS`, L01-L31 from the linter); `expires` must be a real ISO date or timestamp, a date-only value is valid through the end of that day and expiry is compared as datetime; objects must be numeric ids; `max_uses` an integer >= 1.

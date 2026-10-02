@@ -68,7 +68,7 @@ def test_stats_helpers_and_reader(tmp_path):
     assert cancel_loops(r.recent(), min_count=3)[0].job == "Make bed"
     assert GamelogReader(None, st).new_lines() == []
     big = tmp_path / "big.txt"
-    big.write_text("x\n" * 1000)
+    big.write_bytes(b"x\n" * 1000)                                   # bytes: write_text gives CRLF on Windows
     assert len(GamelogReader(big, Store()).new_lines(max_bytes=100)) == 50
 
 

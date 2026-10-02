@@ -84,6 +84,10 @@ The quote is stored in the field `player_consent` of `data/exceptions.jsonl` (ol
 
 If the rule ID (FPxx or Lxx) is in the register, the client lets the command through for exactly those objects.
 
+`exception add` accepts only known rule ids (FP01-FP13, L01-L31), numeric object ids, `--max-uses` >= 1 and a real
+calendar date for `--expires` (`YYYY-MM-DD` = valid through the end of that day, or `YYYY-MM-DDTHH:MM:SSZ`). A broken
+register line is listed as `Register error: ...` by `exception list` and never grants anything.
+
 ## 6. Extending (for the next agent)
 
 | What | Where | Required fields | Verify with |
@@ -141,7 +145,7 @@ After every change: `python -m df_llm_helper.selftest` (≈ 30 s, no DF needed; 
 - **When:** `WAKE caravan`. `python -m df_llm_helper caravan --loop` drives the trade automaton (F15) to completion or to the approval wait point; `caravan status` shows the report (≤ 8 lines), `caravan reset` resets.
 - **Decision:** As soon as the trade window is open, df-llm-helper reads the offer (`claude/handel list 0`) and compares it with `data/trade/wants.yaml` (must-have goods: wood, fuel, tools/chains/buckets, metal, food, seeds). No must-have good → **skip**: window closed, broker freed, `caravan.flag`/`pause.hold` removed, `advance run` (no more long pauses).
 - **Approval:** The dry run `select --dry` is released only if it buys a must-have good and the ratio is ≥ `caravan.min_ratio` (2.0). Otherwise trading waits; warning in the situation report → `python -m df_llm_helper trade approve` by hand, or adjust `tools/scopes/handel-regeln.md`.
-- **Stuck caravan** (`Leaving`, 0 ticks, longer than `stuck_ticks` game ticks): `claude/pilot_caravan release --apply` sets `flags1.left` for merchant units only. Works **only with register entry FP09**; it has been in `data/exceptions.jsonl` since 2026-10-01 (the player's standing permission, quote in the entry). Without the entry df-llm-helper refuses. Log `tools/out/caravan-release.log`.
+- **Stuck caravan** (`Leaving`, 0 ticks, longer than `stuck_ticks` game ticks): `claude/pilot_caravan release --apply` sets `flags1.left` for merchant units only. Works **only with register entry FP09** (the player's consent, quoted in the entry). The public repository ships only an ignored example line: the entry belongs to your own installation in `data/exceptions.local.jsonl` (git-ignored, see `data/README.md`) or is added with `python -m df_llm_helper exception add FP09 ...`. Without the entry df-llm-helper refuses, and `lint lua` reports `pilot_caravan.lua:21 L07` as an error (documented in `docs/LINT-FINDINGS.md`). Log `tools/out/caravan-release.log`.
 - **Abort** (caravan leaves, window closed, timeout): clean way back (abort/finish/release/advance run); the quicksave from the start of trading stays, loading only via the title menu.
 - **Lua:** copy `lua/pilot_caravan.lua` to `hack/scripts/claude/`.
 
@@ -207,7 +211,7 @@ After every change: `python -m df_llm_helper.selftest` (≈ 30 s, no DF needed; 
 - **Report:** fields `Result`, `Measurements (before/after)`, `Changed`, `Open`, `Risk` (German field names such as `Ergebnis` are accepted), ≤ 12 lines. `agents lint-report <file|-> [--scope s]` checks; reports that are too long are output shortened, the original goes to `tools/out/berichte/`.
 - **Cost:** `agents cost [--dir <folder>] [--compare]` reads Claude Code transcripts (`**/subagents/*.jsonl` under `agents.transcript_dir`). Two measuring rules:
   - **Count each requestId once:** The transcript contains every response per content block; a naive sum would be about twice as high.
-  - **Output is estimated:** It comes from block lengths (column `Ausg~`), because `usage.output_tokens` in the transcript is only the value at stream start.
+  - **Output is estimated:** column `Out~` = the larger of the block-length estimate and the summed `usage.output_tokens` (usually only the stream-start value, but larger for long agents whose thinking blocks are empty in the transcript); the warning uses the same figure.
 - **Comparison:** `--compare` sets runs with the marker against old prompts. Meaningful from 3 runs each (acceptance 4).
 - **Warning:** over 60 calls or over 40k estimated output → "stuck? check the result, shrink the task".
 
@@ -228,11 +232,11 @@ After every change: `python -m df_llm_helper.selftest` (≈ 30 s, no DF needed; 
 ### 9.12 Chronicle and lessons: `python -m df_llm_helper journal` (spec 12)
 - **At session end:**
   1. `python -m df_llm_helper journal ingest [--events <log> --date YYYY-MM-DD]`: take the watcher event log and critical df-llm-helper warnings into the `events` table. Combat and everyday noise is filtered, duplicate entries are detected, names are repaired (CP437).
-  2. `journal chronik` shows the draft (date + fact, clustered per type in 30-min clusters). `--append` appends it to `journal.chronik`.
+  2. `journal chronik` shows the draft (date + fact, clustered per type in 30-min clusters). `--append` appends the lines that are not in `journal.chronik` yet (a repeated call adds nothing). `ingest` warns (exit 1) when no line of the file is in the watcher format (wrong file or encoding).
 - **Lessons:** `journal lessons` lists patterns with at least 2 identical causes (e.g. `mood failed | wood`), each pattern exactly once. Approval via `--accept '<key>'` writes a KB draft to `data/kb/journal.jsonl`. Memory files stay manual work.
-- **Metrics:** `journal metrics [--out ../metrics.csv]` outputs one line per game month, header like `metrics.csv`.
-- **Downfall:** `journal postmortem [--out ../POSTMORTEM-runN.md]` generates the skeleton from `state.db`: timeline, causes of death, actions with outcome, open critical warnings, key figures, fair-play exceptions from the register. Add the assessment by hand.
-- **Write boundary:** only under `df-llm-helper/` and in the files from `journal.chronik|metrics|postmortem`; everything else is refused.
+- **Metrics:** `journal metrics [--out runtime/metrics.csv]` outputs one line per game month, header like `metrics.csv`.
+- **Downfall:** `journal postmortem [--out runtime/POSTMORTEM-runN.md]` generates the skeleton from `state.db`: timeline, causes of death, actions with outcome, open critical warnings, key figures, fair-play exceptions from the register. Add the assessment by hand.
+- **Write boundary:** only the files from `journal.chronik|metrics|postmortem` and report files below the runtime folder (`runtime/`, or `DF_LLM_HELPER_HOME`); everything else is refused (project files such as `data/exceptions.jsonl` or `config.yaml` can never be overwritten). To write the player's `../metrics.csv` or `../POSTMORTEM-runN.md`, set `journal.metrics` / `journal.postmortem` in `config.yaml`.
 
 ## 10. v3 features (`specs-v3/`, not yet live-tested)
 Access guard, dig checker, freeze profiler, standstill guard, tool manager, remote-worker protection, item hygiene, defense designer, settings, camera profiles, reachability guard: see **[manual-v3/README.md](manual-v3/README.md)** (one page per feature).

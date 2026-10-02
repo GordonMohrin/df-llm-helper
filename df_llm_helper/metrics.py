@@ -104,12 +104,19 @@ def record_kpis(store, ts: float, snap, *, min_interval_s: float = KPI_MIN_INTER
     return len(vals)
 
 
+def _local_time(ts: float) -> str:
+    """Local time text; Windows cannot localise timestamps < 1 day after the epoch (OSError) -> UTC then."""
+    try:
+        return datetime.fromtimestamp(ts).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    except (OSError, OverflowError, ValueError):
+        return datetime.fromtimestamp(max(ts, 0), tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def export_csv(store) -> str:
     """One row per measurement time, columns as in metrics.csv; unknown columns empty."""
     rows: dict[float, dict] = {}
     for r in store.db.execute("SELECT ts, game_date, name, value FROM kpis ORDER BY ts, id"):
-        e = rows.setdefault(r["ts"], {"echtzeit": datetime.fromtimestamp(r["ts"]).astimezone().strftime("%Y-%m-%d %H:%M:%S"),
-                                      "spieldatum": r["game_date"]})
+        e = rows.setdefault(r["ts"], {"echtzeit": _local_time(r["ts"]), "spieldatum": r["game_date"]})
         col = KPI_COLUMNS.get(r["name"])
         if col:
             v = r["value"]

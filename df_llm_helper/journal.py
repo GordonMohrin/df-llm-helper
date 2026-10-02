@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-__all__ = ["DEFAULTS", "NOISE", "TYPE_OF", "parse_events_log", "infer_first_day", "Journal", "is_chronicle_event", "classify_tag",
+__all__ = ["DEFAULTS", "NOISE", "TYPE_OF", "parse_events_log", "infer_first_day", "count_log_lines", "Journal", "is_chronicle_event", "classify_tag",
            "fix_mojibake"]
 
 DEFAULTS = {"chronik": "../chronik.md", "metrics": "../metrics.csv", "append": False, "suggest_after_repeats": 2,
@@ -28,12 +28,23 @@ DEFAULTS = {"chronik": "../chronik.md", "metrics": "../metrics.csv", "append": F
 # combat/everyday noise (like wake.NOISE_TAGS) - does not count as a chronicle event
 NOISE = re.compile(r"COMBAT_|LOSE_HOLD_OF_ITEM|FALL_OVER|PAIN_KO|CONFLICT_CONVERSATION|CANCEL_JOB|EXHAUSTION|"
                    r"PET_DEATH|BREAK_GRIP|LOSE_HOLD|STAND_UP|GRAB|RESOLVE_SHARED_ITEMS|VOMIT|MASTERPIECE|"
-                   r"NOT_STUNNED|REGAIN_CONSCIOUSNESS|UNIT_PROJECTILE_SLAM|LOSE_EMOTION|BIRTH_(?:WILD_)?ANIMAL")
-TYPE_OF = [  # (pattern in the tag, type)
-    (r"CITIZEN_DEATH|DEATH", "Death"), (r"MEGABEAST|AMBUSH|SIEGE|INVADER|THIEF|SNATCHER|BEAST|NIGHT_CREATURE|TITAN|"
-                                      r"CAVE_DRAGON|ATTACK", "Attack"),
-    (r"ARTIFACT|MOOD|BERSERK|INSANE|MELANCHOLY", "Mood"), (r"CARAVAN|MERCHANT|LIAISON|DIPLOMAT", "Caravan"),
-    (r"BUILDING_DESTROYED|COLLAPSE|FLOOD|FIRE|NOTFALL|EMERGENCY", "Emergency"), (r"MIGRANT|BIRTH|PEAK", "Population"),
+                   r"NOT_STUNNED|REGAIN_CONSCIOUSNESS|UNIT_PROJECTILE_SLAM|LOSE_EMOTION|BIRTH_(?:WILD_)?ANIMAL|"
+                   r"DODGE|QUOTA_FILLED")
+
+
+def _tok(alts: str) -> str:
+    """Whole words of a tag (CITIZEN_DEATH, BUILDING_DESTROYED_OR_TOPPLED): FLOOD must not match FLOODGATE (BUG-310)."""
+    return rf"(?:^|_)(?:{alts})(?:_|$)"
+
+
+TYPE_OF = [  # (pattern on the tag only, type); first match wins
+    (_tok("NAMED_ARTIFACT|FEATURE_DISCOVERY|DISCOVERY"), "Info"),
+    (_tok("DEATH"), "Death"),
+    (_tok("MEGABEAST|AMBUSH|SIEGE|INVADERS?|THIEF|SNATCHER|BEAST|NIGHT_CREATURE|TITAN|CAVE_DRAGON|ATTACK"), "Attack"),
+    (_tok("ARTIFACT|MOOD|BERSERK|INSANE|MELANCHOLY"), "Mood"),
+    (_tok("CARAVANS?|MERCHANTS?|LIAISON|DIPLOMAT"), "Caravan"),
+    (_tok("BUILDING_DESTROYED|COLLAPSE|FLOOD|FLOODING|FIRE|NOTFALL|EMERGENCY"), "Emergency"),
+    (_tok("MIGRANTS?|BIRTH|PEAK"), "Population"),
 ]
 DEATH_CAUSE = re.compile(r"\b(dehydrated|starved|drowned|suffocated|struck down|burned|bled|crushed|fell|frozen|"
                          r"died of \w+)\b", re.I)
@@ -86,6 +97,12 @@ def parse_events_log(text: str, day0: date) -> list[dict]:
         out.append({"ts": datetime.combine(day, t).timestamp(), "level": m.group("lvl"), "tag": m.group("tag"),
                     "text": m.group("txt").strip()})
     return out
+
+
+def count_log_lines(text: str) -> tuple[int, int]:
+    """(non-empty lines, lines in the watcher format) - 0 recognised = wrong file or encoding (BUG-330)."""
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    return len(lines), sum(1 for ln in lines if _LINE.match(fix_mojibake(ln.strip())))
 
 
 def infer_first_day(text: str, last_day: date) -> date:
@@ -219,11 +236,16 @@ class Journal:
         covered = sum(len(c["items"]) for c in self.clusters())
         return covered / len(evs) if evs else 1.0
 
-    def append_chronik(self, lines: list[str]) -> Path:
+    def append_chronik(self, lines: list[str]) -> tuple[Path, int]:
+        """Appends only lines that are not in the file yet (BUG-309: a retry must not duplicate the chronicle)."""
+        from .toolsfs import read_text_tolerant
         p = (self.home / self.cfg["chronik"]).resolve()
-        with p.open("a", encoding="utf-8") as f:
-            f.write("\n" + "\n".join(lines) + "\n")
-        return p
+        have = {ln.strip() for ln in read_text_tolerant(p).splitlines()} if p.is_file() else set()
+        new = [ln for ln in dict.fromkeys(lines) if ln.strip() not in have]
+        if new:
+            with p.open("a", encoding="utf-8", newline="\n") as f:
+                f.write("\n" + "\n".join(new) + "\n")
+        return p, len(new)
 
     # ------------------------------------------------------------------ lessons
     def lessons(self) -> list[Lesson]:
