@@ -1,6 +1,6 @@
 # BUG-208: `reach --points <missing file>` prints `Reachable: 0/0 mandatory points` (exit 0); points outside the map / the core itself are accepted without comment
 
-- **Status:** fixed in e47790f
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2 (a typo in the path = "all reachable" in a check whose job is to wake the orchestrator when farms are cut off)
 - **Area:** `df_llm_helper/features/reach.py` (points loading, `--points` / `reach.points_file`)
 - **Reported:** 2026-10-02, commit `6dedd96`

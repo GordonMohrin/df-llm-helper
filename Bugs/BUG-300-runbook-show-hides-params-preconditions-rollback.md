@@ -1,6 +1,6 @@
 # BUG-300: `runbook show` omits params, preconditions and rollback although `runbook run` refers to it for the rollback
 
-- **Status:** fixed in e4af55c
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `runbook show`, `df_llm_helper/cli.py:cmd_runbook`, `df_llm_helper/runbooks.py:run_runbook`
 - **Reported:** 2026-10-02, commit `50cee52`

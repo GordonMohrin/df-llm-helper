@@ -1,6 +1,6 @@
 # BUG-108: `plan supply` food forecast (42 days) disagrees with the digest's `Food 85d` for the same live data (plants counted differently, not documented)
 
-- **Status:** fixed in 626d04f
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `df_llm_helper/cli.py:643-652` (`plan supply`: `food = meals + fish + meat`), `df_llm_helper/digest.py:252-253` (status line uses `claude/status` `food_days`), `df_llm_helper/forecast.py` (`include_raw_plants: True`)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)

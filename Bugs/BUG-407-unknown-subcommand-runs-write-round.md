@@ -1,6 +1,6 @@
 # BUG-407: unknown/typo arguments run a full write round (essen, arbeit, trinken, material, orders, ueberwacher); `claude/erzdig` without `--dry` designates; `mil update`/`mil refuge` ignore the documented `--apply` gate
 
-- **Status:** fixed in ae17aef
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05) [static code review; lua5.4 not available, mock not run]
 - **Severity:** S2 (wrong action on the game from a typo, `--help`, `status` of the wrong script)
 - **Area:** `lua/claude/essen.lua:259-278`, `arbeit.lua:534-544`, `trinken.lua:255-269`, `material.lua:455-474`, `orders.lua:417-432`, `ueberwacher.lua:104-113`, `erzdig.lua:109-121`, `mil.lua:555-558,589-613`
 - **Reported:** 2026-10-02, commit `6dedd96`

@@ -1,6 +1,6 @@
 # BUG-301: Several CLI arguments are not validated: `--param x`, `kb -k -1`, empty `bus post`, `kb import` junk, `dashboard unmap` unknown, unknown ids reported as `None`
 
-- **Status:** fixed in 793a4b7
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `runbook`, `kb`, `bus`, `dashboard` in `df_llm_helper/cli.py`
 - **Reported:** 2026-10-02, commit `50cee52`

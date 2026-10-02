@@ -1,6 +1,6 @@
 # BUG-303: `agents lint-report` cannot read reports saved by Windows tools (UTF-8 BOM, UTF-16, cp1252): false "Mandatory fields missing" or a decode error
 
-- **Status:** fixed in 793a4b7
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2
 - **Area:** `agents lint-report` (`df_llm_helper/cli.py:851`), `df_llm_helper/agents.py:lint_report`
 - **Reported:** 2026-10-02, commit `50cee52`

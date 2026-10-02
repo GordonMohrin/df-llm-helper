@@ -1,6 +1,6 @@
 # BUG-120: `--help` of the core commands is nearly empty (31 options without text), `--once` does nothing, no `--version`/`help`, `--mock <missing folder>` is accepted
 
-- **Status:** fixed in bf01075
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `df_llm_helper/cli.py:991-1187` (`build_parser`), `cli.py:164-207` (`autopilot`/`guard`: `--once` never read), `cli.py:17-22` (`_client`: mock folder not checked)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)

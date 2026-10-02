@@ -1,6 +1,6 @@
 # BUG-411: `x and f() or fallback` idiom turns "job not running" (`false`) into `'unbekannt'` (kohle) / a missing key (raster) / `cmd=='start'` (watchdog)
 
-- **Status:** fixed in ce278a8
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05) [static code review; lua5.4 not available, mock not run]
 - **Severity:** S3
 - **Area:** `lua/claude/kohle.lua:71`, `lua/claude/raster.lua:240`, `lua/claude/watchdog.lua:420`, `lua/claude/ueberwacher.lua:113`
 - **Reported:** 2026-10-02, commit `6dedd96`

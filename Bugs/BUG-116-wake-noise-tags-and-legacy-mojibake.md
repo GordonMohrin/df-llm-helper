@@ -1,6 +1,6 @@
 # BUG-116: `wake` raises "WAKE critical" for harmless message types (VOMIT, RESOLVE_SHARED_ITEMS, DODGE_FLYING_OBJECT, NO_BREAK_GRIP, MASTERPIECE_CRAFTED) and prints legacy mojibake
 
-- **Status:** fixed in 626d04f
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3 (noise; the purpose of `wake` is "no wake-up without need for action")
 - **Area:** `df_llm_helper/wake.py:31-33` (`NOISE_TAGS`, matched with `.match(tag)` = prefix only), `df_llm_helper/waechter.py:35-39` (`CRITICAL` regex matches words like `goblin`/`thief` anywhere in the text), `df_llm_helper/toolsfs.py:137-140`
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)

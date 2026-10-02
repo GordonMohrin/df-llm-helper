@@ -1,6 +1,6 @@
 # BUG-313: `RealClient` returns `dfhack-run` output with CRLF while `MockClient` always yields LF; the dashboard map block gets `\r\r\n` and renders double-spaced; other text consumers see stray `\r`
 
-- **Status:** fixed in 1e94283
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `df_llm_helper/client.py:RealClient._run`, `dashboard map`
 - **Reported:** 2026-10-02, commit `50cee52`

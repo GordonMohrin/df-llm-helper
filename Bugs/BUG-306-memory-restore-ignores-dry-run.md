@@ -1,6 +1,6 @@
 # BUG-306: `memory restore <scope> --dry-run` really restores (overwrites the working memory file); `--dry-run` is accepted but ignored
 
-- **Status:** fixed in 793a4b7
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2
 - **Area:** `memory restore` (`df_llm_helper/cli.py:cmd_memory`)
 - **Reported:** 2026-10-02, commit `50cee52`

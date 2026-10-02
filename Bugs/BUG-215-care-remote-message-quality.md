@@ -1,6 +1,6 @@
 # BUG-215: `care` cuts names at 24 characters (open quote), critical lines name no action; `remote check` always prints an unexplained `Fish N` line and never `Remote ok`
 
-- **Status:** fixed in 05ca8e4
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3 (messages; the orchestrator gets lines it cannot act on)
 - **Area:** `df_llm_helper/care.py` (`str(p.get('name',''))[:24]`, `!! ... hospital/outside` line), `df_llm_helper/features/remote.py` (`fish_line`, `if not out: "Remote ok"`, `short_name`)
 - **Reported:** 2026-10-02, commit `6dedd96`

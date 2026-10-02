@@ -1,6 +1,6 @@
 # BUG-318: Fair-play linter misses indirect forms: `reveal` via a variable, variables named like `order` (`border.pos.x = ...`), `unit.pos = {...}`, `blk.tiletype[i][j] = ...`, `mat_type` on variables not named item/it/itm, `getTileType` when `.hidden` appears anywhere else in the file
 
-- **Status:** fixed in 6e0db06
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2
 - **Area:** `df_llm_helper/lint.py` (rules L04, L08, L10, L17, L21)
 - **Reported:** 2026-10-02, commit `50cee52`

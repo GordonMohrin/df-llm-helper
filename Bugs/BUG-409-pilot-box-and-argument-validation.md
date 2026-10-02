@@ -1,6 +1,6 @@
 # BUG-409: pilot_digcheck / pilot_reach box handling (out-of-map box, fractional numbers), pilot_reach `check` drops malformed points, pilot_siege unknown command
 
-- **Status:** fixed in 50bfce4
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05) [static code review; lua5.4 not available, mock not run]
 - **Severity:** S3
 - **Area:** `lua/pilot_digcheck.lua:67-75`, `lua/pilot_reach.lua:118-126,128-142`, `lua/pilot_siege.lua:~96`
 - **Reported:** 2026-10-02, commit `6dedd96`

@@ -1,6 +1,6 @@
 # BUG-314: A guard `warn` action is logged as `guard/warn=None` with an empty reason; the dashboard events table and the postmortem show `[guard] warn=None:` / `guard/warn=None: 1x`
 
-- **Status:** fixed in 1e94283
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `df_llm_helper/guard.py:274`, dashboard `Events`, `journal postmortem`
 - **Reported:** 2026-10-02, commit `50cee52`

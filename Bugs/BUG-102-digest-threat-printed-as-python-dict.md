@@ -1,6 +1,6 @@
 # BUG-102: danger line of the digest prints `Threat:` as raw Python dict reprs (`{'n': 1, 'name': ...}`) and cuts the second threat in half
 
-- **Status:** fixed in 513db2e
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2
 - **Area:** `df_llm_helper/snapshot.py:308` (`snap.alerts.threats = [str(a) for a in _l(j.get("threats"))]`), used by `df_llm_helper/digest.py:104-105`
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)

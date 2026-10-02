@@ -1,6 +1,6 @@
 # BUG-207: `digcheck` reports `ok (0 tiles)` (exit 0) when nothing was checked: unknown stage name, empty CSV, non-`#dig` CSV; R1/R4 are skipped for unrevealed tiles
 
-- **Status:** fixed in e47790f
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2 (typo in a stage name = green light; the checker is meant to gate dig orders)
 - **Area:** `df_llm_helper/features/digcheck.py` `parse_stages` / `parse_qf_csv` / `cmd_digcheck` (no check for an empty target set), `check_targets` (the `if ch == "?": ... continue` comes before R1 and R4)
 - **Reported:** 2026-10-02, commit `6dedd96`

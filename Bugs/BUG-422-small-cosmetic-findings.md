@@ -1,6 +1,6 @@
 # BUG-422: small cosmetic / robustness findings in the Lua helpers (orders flag lists, file-handle leak, answer sizes, aemter numbers, pilot_siege visitors)
 
-- **Status:** fixed in 157b535
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05) [static code review; lua5.4 not available, mock not run]
 - **Severity:** S3
 - **Area:** `lua/claude/orders.lua:222-227,373`, `lua/claude/gesund.lua:399`, `lua/claude/aemter.lua:~93`, `lua/claude/mood.lua` (`plan`), `lua/claude/units.lua`, `lua/pilot_care.lua`, `lua/pilot_siege.lua:~19`
 - **Reported:** 2026-10-02, commit `6dedd96`

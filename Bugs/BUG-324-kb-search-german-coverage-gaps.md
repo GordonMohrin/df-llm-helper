@@ -1,6 +1,6 @@
 # BUG-324: `kb search` with natural German terms returns no hits or a wrong first hit (`Zwerge`, `Händler hängt`, `Überschwemmung`, `Grundwasser`, `Küche`, `Flagge`, `Ruckeln`; `Holzkohle` ranks `bett_ohne_holz` first)
 
-- **Status:** fixed in 4c7e963
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `kb search` (`df_llm_helper/kb.py:SYNONYMS`, `data/kb/curated.yaml`)
 - **Reported:** 2026-10-02, commit `50cee52`

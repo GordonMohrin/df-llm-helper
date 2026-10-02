@@ -1,6 +1,6 @@
 # BUG-124: `autopilot --loop` and `guard --loop` print without `flush`; a monitor reading the pipe sees nothing for a long time
 
-- **Status:** fixed in 626d04f
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `df_llm_helper/cli.py:181-188` (`cmd_autopilot` loop), `cli.py:200-207` (`cmd_guard` loop) - plain `print()`; `cmd_waechter`/`cmd_wake` use `flush=True`
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)

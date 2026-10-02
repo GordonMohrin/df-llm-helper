@@ -1,6 +1,6 @@
 # BUG-319: Fair-play linter reports harmless code: identifiers (`teleporting_label`, `tiletypes`, `liquids`, `cleaners`), the read-only command `deathcause`, and message text that mentions `createitem`
 
-- **Status:** fixed in af96561 (identifier part: 6e0db06)
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `df_llm_helper/lint.py` (rules L01, L08, L17, L18, L25)
 - **Reported:** 2026-10-02, commit `50cee52`

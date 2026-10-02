@@ -1,6 +1,6 @@
 # BUG-418: `df_llm_helper lint lua/claude lua/` exits 1 (pilot_caravan L07 without a register entry), prints every `lua/claude` finding twice, and 5 L10 "undiscovered tile" warnings are real fair-play notes
 
-- **Status:** fixed in 4446691 (lint consent: 367df0a; lint de-duplication, bauprog: b0a2741)
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `df_llm_helper/lint.py` (scan of nested dirs), `data/exceptions.jsonl` (only an `"example": true` row), `lua/pilot_caravan.lua:21`, `lua/claude/bauprog.lua:83`, `mood.lua:82,213`, `gesund.lua:200`, `raster.lua:128`, `dig.lua` / `probe.lua`
 - **Reported:** 2026-10-02, commit `6dedd96`

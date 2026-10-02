@@ -1,6 +1,6 @@
 # BUG-117: report wording/semantics problems in `digest` / `check` / `autopilot` (stale warnings without age, `--dry-run` consumes the report, deaths "resolve", verify lines identical for pass/fail, raw keys, `None`)
 
-- **Status:** fixed in 513db2e
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3 (several small items, one file; split if you prefer)
 - **Area:** `df_llm_helper/pilot.py:104-127,185-186` (digest persists state, also on `dry_run`), `df_llm_helper/digest.py:117-121,255,128,278-331`, `df_llm_helper/rules.py:257-259` (`ActionRecord.line`), `rules.py:395-400` (warn key), `df_llm_helper/store.py` (`take_warnings`)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)

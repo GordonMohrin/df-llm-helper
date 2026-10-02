@@ -1,6 +1,6 @@
 # BUG-416: documentation vs behaviour mismatches in the Lua helpers (`config aquifer`, `tempo rate`, "read-only" report, positions `--force`, handel.log growth)
 
-- **Status:** fixed in 989f25e
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05) [static code review; lua5.4 not available, mock not run]
 - **Severity:** S3
 - **Area:** `lua/claude/config.lua:6,15` + `:308-323`, `lua/claude/tempo.lua:2`, `lua/claude/report.lua:1,171-186`, `lua/claude/positions.lua:62`, `lua/claude/handel.lua:44` (`emit` -> `log`), COMPANION.md
 - **Reported:** 2026-10-02, commit `6dedd96`

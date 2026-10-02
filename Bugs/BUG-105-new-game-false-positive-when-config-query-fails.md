@@ -1,6 +1,6 @@
 # BUG-105: one failed `claude/config` query counts as "NEW GAME" and wipes guard acknowledgements, loop-protection state and unread warnings (twice: when it fails and when it is back)
 
-- **Status:** fixed in 513db2e
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2
 - **Area:** `df_llm_helper/snapshot.py:166-170` (`Snapshot.game_id`), `df_llm_helper/pilot.py:57-70` (`_check_new_game`), `df_llm_helper/store.py:117-122` (`reset_game_state`)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)

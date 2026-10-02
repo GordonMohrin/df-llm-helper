@@ -1,6 +1,6 @@
 # BUG-100: `wake` silently stops reporting new events once `events.log` has more than 5000 lines
 
-- **Status:** fixed in 626d04f
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2
 - **Area:** `df_llm_helper/wake.py:68-83` (offset logic), `df_llm_helper/toolsfs.py:137-140` (`events_lines`)
 - **Reported:** 2026-10-02, commit `50cee52` (Python code identical to `6dedd96`)

@@ -1,6 +1,6 @@
 # BUG-406: `claude/trinken lager` writes stockpile settings but is whitelisted as a read command (`_READ_SUB`); `_NO_STATUS` is stale for bauprog/raster
 
-- **Status:** fixed in 9f7b226
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2 (false "read" classification disables the write protections: loop guard, `max_per_hour`, state.db log)
 - **Area:** `df_llm_helper/client.py:63-68` (`_READ_SUB`, `_NO_STATUS`), `lua/claude/trinken.lua:156-187,262-263`
 - **Reported:** 2026-10-02, commit `6dedd96`

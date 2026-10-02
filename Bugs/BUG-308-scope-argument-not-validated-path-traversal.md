@@ -1,6 +1,6 @@
 # BUG-308: `memory compact|restore <scope>` and `agents lint-report --scope` use the scope name as a file name without validation (`../victim` compacts a file outside the scopes folder)
 
-- **Status:** fixed in 793a4b7
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `df_llm_helper/cli.py:cmd_memory`, `cmd_agents` (`lint-report --scope`)
 - **Reported:** 2026-10-02, commit `50cee52`

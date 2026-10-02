@@ -1,6 +1,6 @@
 # BUG-414: `claude/pilot_water scan` has no limit on the box size (freeze risk), also `near` radius
 
-- **Status:** fixed in 50bfce4
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05) [static code review; lua5.4 not available, mock not run]
 - **Severity:** S3 (S2 if a caller can pass a whole-map box)
 - **Area:** `lua/pilot_water.lua:30-61` (`scan`), `:63-73` (`near`)
 - **Reported:** 2026-10-02, commit `6dedd96`

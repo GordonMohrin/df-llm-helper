@@ -1,6 +1,6 @@
 # BUG-202: `trade step` never leaves DONE/ABORT/FAILED: the next caravan is silently ignored, and the old `approved: True` stays (live state.db right now)
 
-- **Status:** fixed in ab33904
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2 (next caravan is not traded; no message says why; a stale approval is stored)
 - **Area:** `df_llm_helper/trade_flow.py` `TradeFlow.step` (terminal states return `[]`), `df_llm_helper/cli.py` `cmd_trade` (no auto-reset), `docs/MANUAL.md` section 2 ("call trade step repeatedly")
 - **Reported:** 2026-10-02, commit `6dedd96`

@@ -1,6 +1,6 @@
 # BUG-410: scripts that do not print one JSON object (`felder`, `area`, `mil report`, `mil tabelle`) or print nothing at all (`felder foo`, `muell foo`)
 
-- **Status:** fixed in 04eda95
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05) [static code review; lua5.4 not available, mock not run]
 - **Severity:** S3 (doc mismatch; `muell`/`felder` silent branches are S3 too)
 - **Area:** `lua/claude/felder.lua:15-35`, `lua/claude/muell.lua:20-70` (no `else`), `lua/claude/area.lua`, `lua/claude/mil.lua` (`report`, `tabelle`), COMPANION.md ("All scripts print one JSON object (`util.emit`)")
 - **Reported:** 2026-10-02, commit `6dedd96`

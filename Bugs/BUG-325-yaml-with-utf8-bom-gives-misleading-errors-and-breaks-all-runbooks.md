@@ -1,6 +1,6 @@
 # BUG-325: A YAML file saved with a UTF-8 BOM (Notepad, PowerShell) makes `runbook list/diagnose` fail for ALL runbooks with "required field 'id' missing"; the same for `scopes.yaml` -> `brief`
 
-- **Status:** fixed in e4af55c
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `df_llm_helper/yamlmini.py:load_file`, `runbooks.py:load_runbooks`, `brief.py:load_scopes`
 - **Reported:** 2026-10-02, commit `50cee52`

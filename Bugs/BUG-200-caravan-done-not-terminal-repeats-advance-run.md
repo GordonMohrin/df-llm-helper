@@ -1,6 +1,6 @@
 # BUG-200: `caravan` after a finished trade is not terminal: every further call repeats `claude/advance run`, deletes `pause.hold`/`caravan.flag` again and duplicates "Trade completed"
 
-- **Status:** fixed in ab33904
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2 (a repeated call un-pauses the game and deletes a `pause.hold` that may belong to something else, e.g. an alarm hold)
 - **Area:** `df_llm_helper/caravan.py` (`CaravanPilot.step`, final `if flow.state == "DONE": self._resume(...)`), `df_llm_helper/cli.py` (`cmd_caravan`)
 - **Reported:** 2026-10-02, commit `6dedd96`

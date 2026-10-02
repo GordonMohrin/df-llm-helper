@@ -1,6 +1,6 @@
 # BUG-401: unit names with non-ASCII characters are UTF-8 encoded twice (mojibake) in mil/gefahr/migranten output
 
-- **Status:** fixed in eea3f60
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05) [static code review; lua5.4 not available, mock not run]
 - **Severity:** S2
 - **Area:** `lua/claude/mil.lua:56` (`nm()`), `lua/claude/gefahr.lua:134`, `lua/claude/migranten.lua:18` in combination with `lua/claude/util.lua:14-24` (`emit`)
 - **Reported:** 2026-10-02, commit `6dedd96`

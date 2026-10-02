@@ -1,6 +1,6 @@
 # BUG-421: two `dfhack-run` calls (`claude/mil`, `claude/mil guard`) took 8-9 s while the same calls normally take 0.07 s (not reproducible; Gordon's "main thread blocked" suspicion)
 
-- **Status:** fixed in 42d0018 (diagnostics; root cause still to be confirmed from the live `tools/out/stall.log`)
+- **Status:** fixed, live check pending (see TESTPLAN-live) [diagnostics reviewed + python tests pass; root cause needs live stall.log]
 - **Severity:** S3 (becomes S2 if it turns out that a periodic script blocks the main thread for seconds)
 - **Area:** unknown - candidates: periodic DFHack jobs (`claude-watchdog`/`claude-watchdog-alert`, `claude-milguard` via `tempo.schedule`, `claude-tempo`), DF autosave, the `mil` script itself
 - **Reported:** 2026-10-02, commit `6dedd96`

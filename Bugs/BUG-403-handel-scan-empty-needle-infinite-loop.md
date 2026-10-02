@@ -1,6 +1,6 @@
 # BUG-403: `claude/handel scan ""` (empty search text) loops forever in the game's main thread
 
-- **Status:** fixed in 99c5dbb
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05) [static code review; lua5.4 not available, mock not run]
 - **Severity:** S1 (hangs Dwarf Fortress; no timeout inside DFHack for a Lua loop)
 - **Area:** `lua/claude/handel.lua:108-123` (`find_text`), reached from `cmd.scan` (`handel.lua:776-782`) and from `cmd.open`/`cmd.accept` (those pass non-empty constants, so only `scan` is exposed)
 - **Reported:** 2026-10-02, commit `6dedd96`

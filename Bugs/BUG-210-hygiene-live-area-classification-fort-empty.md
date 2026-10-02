@@ -1,6 +1,6 @@
 # BUG-210: live `hygiene`: no item is classified as `fort` (12.9k loose items = `cavern`), so marking finds 0 candidates, the dump diagnosis is wrong, and "125 dwarf corpses > 14 coffins: ghost risk" contradicts `claude/gesund krypta` (0 open corpses)
 
-- **Status:** fixed in c387d5d
+- **Status:** fixed, live check pending (see TESTPLAN-live)
 - **Severity:** S2 (wrong area split drives `hygiene mark` and the cause text; the `!!` ghost-risk line is probably a false alarm)
 - **Area:** `lua/pilot_hygiene.lua` `fort_ref()` / `reachable()` / `area_of()` (reference tile = `claude/config` `FORT_REFS[1]` = (94,96,133)), `is_dwarf_corpse()` (`hist_figure_id >= 0`, fail-safe `not ok`); `df_llm_helper/features/hygiene.py` (`diagnose`, `status`)
 - **Reported:** 2026-10-02, commit `6dedd96`

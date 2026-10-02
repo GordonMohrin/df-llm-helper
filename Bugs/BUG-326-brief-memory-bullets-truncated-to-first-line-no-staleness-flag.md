@@ -1,6 +1,6 @@
 # BUG-326: `brief`: memory bullets are cut at the first colon / `->` / sentence end, so `label: content` lines become label-only (`- 2. Hauptthread…`, `- 3. Wache aktivieren…`, `- Bestand…`); stale memory from an older game date is shown without a warning
 
-- **Status:** fixed in 793a4b7
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `df_llm_helper/memory.py:shorten`, `extract_for_brief`, `brief.py`
 - **Reported:** 2026-10-02, commit `50cee52`

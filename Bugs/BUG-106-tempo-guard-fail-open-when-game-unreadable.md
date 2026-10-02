@@ -1,6 +1,6 @@
 # BUG-106: with an unreadable game `tempo status` / `guard` / `tempo on` say "no blockers, time lapse allowed" (fail-open); `plan armor/supply` print zeros as real results
 
-- **Status:** fixed in 626d04f
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2
 - **Area:** `df_llm_helper/cli.py:229-257` (`cmd_tempo`), `df_llm_helper/guard.py:84-100` (`tempo_blockers`) and `GuardRunner.inputs` (`getattr(snap, "drink_days", None)` etc.), `df_llm_helper/cli.py:629-652` (`plan armor/supply`)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)

@@ -1,6 +1,6 @@
 # BUG-304: `agents prompt` repeats Fair Play / Report / Commands twice and gives two contradicting report formats (<= 10 lines vs <= 12 lines with different fields); long tasks are cut silently
 
-- **Status:** fixed in c06df7e
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2
 - **Area:** `agents prompt` (`df_llm_helper/agents.py:build_prompt`, `df_llm_helper/brief.py`)
 - **Reported:** 2026-10-02, commit `50cee52`

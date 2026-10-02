@@ -1,6 +1,6 @@
 # BUG-415: `claude/ores`, `claude/geo` (classified as plain reads) and other whole-map scanners will block the game's main thread for > 20 s - not run, extrapolated
 
-- **Status:** fixed in ce278a8
+- **Status:** fixed, live check pending (see TESTPLAN-live) [budget code reviewed; needs Measure-Command of ores/geo]
 - **Severity:** S2 (a "read" command that freezes the game; the helper polls reads freely)
 - **Area:** `lua/claude/ores.lua:33-39`, `lua/claude/geo.lua:15-37,70-85`, `lua/claude/zugaenge.lua` (header: "~10 s runtime (main thread)!"), `lua/claude/kohle.lua:21-45`, `lua/claude/erzdig.lua` (also with `--dry`), `lua/pilot_perimeter.lua` (`scan`, synchronous), classification `df_llm_helper/client.py:61-62` (`_READ_EXACT`: `claude/ores`, `claude/geo`)
 - **Reported:** 2026-10-02, commit `6dedd96`

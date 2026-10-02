@@ -1,6 +1,6 @@
 # BUG-204: offline `--grid` runs of `perimeter`, `reach`, `digcheck` write CRIT warnings and kv state into the configured (live) state.db
 
-- **Status:** fixed in e47790f
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2 (a documented offline fixture test raised a false critical alarm "forbidden access to the core" in the live store; it was displayed once - warning row 14 in the live `data/state.db`, now `shown=1`)
 - **Area:** `df_llm_helper/features/perimeter.py` `Perimeter.evaluate` (`store.warn`, `store.set` guarded only by `dry`), `df_llm_helper/features/reach.py` (`reach.last`, `reach:unreachable` warning), `df_llm_helper/features/digcheck.py` (`digcheck.unreported`); docs `docs/manual-v3/01-perimeter.md`, `02-digcheck.md`, `11-reach.md` ("`--grid ...` offline on a grid fixture")
 - **Reported:** 2026-10-02, commit `6dedd96`

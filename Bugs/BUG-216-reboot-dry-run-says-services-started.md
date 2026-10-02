@@ -1,6 +1,6 @@
 # BUG-216: `reboot --dry-run` prints "Restart: 10 services started (...)" although nothing was started
 
-- **Status:** fixed in c34cd95
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3 (misleading wording; an LLM reading the first line believes the services run)
 - **Area:** `df_llm_helper/reboot.py` `Reboot.run` (`out.append(f"Restart: {len(started)} services started ...")`, `do()` returns True in dry mode)
 - **Reported:** 2026-10-02, commit `6dedd96`

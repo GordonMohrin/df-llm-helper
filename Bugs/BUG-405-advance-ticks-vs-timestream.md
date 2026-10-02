@@ -1,6 +1,6 @@
 # BUG-405: `claude/advance <ticks>` counts frames, not calendar ticks -> overshoots when timestream is on (hypothesis, needs a run with running time)
 
-- **Status:** fixed in 9f7b226
+- **Status:** fixed, live check pending (see TESTPLAN-live) [code reviewed; needs timestream run]
 - **Severity:** S2 (time-lapse guard is a core safety feature of df-llm-helper)
 - **Area:** `lua/claude/timer.lua:15-25` (`start`), `lua/claude/advance.lua:55-64`; evidence for the semantic is the author's own comment in `lua/claude/tempo.lua:13-15`
 - **Reported:** 2026-10-02, commit `6dedd96`

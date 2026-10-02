@@ -1,6 +1,6 @@
 # BUG-217: `perimeter`: `seal` says "nothing to do" for a forbidden stair access (no explanation, advice loop); `allow` hides notes and accepts out-of-map coordinates; docs say "through the traps" while live says "bypasses the traps" for the allowed access
 
-- **Status:** fixed in e47790f
+- **Status:** fixed, live check pending (see TESTPLAN-live)
 - **Severity:** S3
 - **Area:** `df_llm_helper/features/perimeter.py` (`seal_walls`/`plan_seal`/`seal`, `allow` command), `docs/manual-v3/01-perimeter.md`
 - **Reported:** 2026-10-02, commit `6dedd96`

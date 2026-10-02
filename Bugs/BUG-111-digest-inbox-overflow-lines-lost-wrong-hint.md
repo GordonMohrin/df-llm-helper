@@ -1,6 +1,6 @@
 # BUG-111: digest drops inbox lines beyond the display limit for good; the hint "+N more inbox lines (... bus read)" points to a place where they are not
 
-- **Status:** fixed in 513db2e
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2 (an agent message such as "caravan is here" can be lost without trace)
 - **Area:** `df_llm_helper/digest.py:210-243` (`inbox_items`: all fresh lines go into `new_hashes`, only `max_lines` are shown, the rest only counted in `skipped`), `digest.py:319` (hint text), `df_llm_helper/pilot.py:129-134` (`bus_lines`)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)

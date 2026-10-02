@@ -1,6 +1,6 @@
 # BUG-107: `plan armor` ignores the equipment soldiers already wear and the free stock, and counts the miner squad as soldiers
 
-- **Status:** fixed in 626d04f
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2
 - **Area:** `df_llm_helper/cli.py:629-642` (`cmd_plan`, kind `armor`): `soldiers = [pl.Soldier(id=m.id, name=m.name) ...]`, `pl.plan_armor(snap.pop_total or 0, soldiers, {}, bars)`
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)

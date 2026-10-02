@@ -1,6 +1,6 @@
 # BUG-400: util.emit prints non-integer numbers with a decimal comma -> invalid JSON (gefahr `fps: 250,0`, migranten `gefaehrlichkeit: 3,9375`)
 
-- **Status:** fixed in eea3f60
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05) [static code review; lua5.4 not available, mock not run]
 - **Severity:** S2
 - **Area:** `lua/claude/util.lua` (`emit`), triggered by `lua/claude/gefahr.lua:330`, `lua/claude/migranten.lua:103,109`
 - **Reported:** 2026-10-02, commit `6dedd96`

@@ -1,6 +1,6 @@
 # BUG-209: live `reach` reports the mandatory point "Kitchens (106,85,z132)" as UNREACHABLE: the point lies on a constructed wall; the advice "remove the construction" is dangerous
 
-- **Status:** fixed in e47790f
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2 (permanent false CRIT every `check` interval - `reach:unreachable` wakes the orchestrator - and a harmful repair suggestion)
 - **Area:** `data/reach.yaml` (shipped EXAMPLE values from run 5), `df_llm_helper/features/reach.py` (cause search `cut by construction ...`)
 - **Reported:** 2026-10-02, commit `6dedd96`

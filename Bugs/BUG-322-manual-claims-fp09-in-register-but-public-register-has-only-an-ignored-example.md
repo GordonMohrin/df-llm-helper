@@ -1,6 +1,6 @@
 # BUG-322: MANUAL 9.2 says the standing exception FP09 "has been in `data/exceptions.jsonl` since 2026-10-01"; the shipped register contains only an ignored example, so `exception list` is empty and `lint` reports `pilot_caravan.lua` as an error
 
-- **Status:** fixed in e4af55c
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** docs/MANUAL.md 9.2 (and 5), `data/exceptions.jsonl`, `data/README.md`
 - **Reported:** 2026-10-02, commit `50cee52`

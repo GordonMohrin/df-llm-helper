@@ -1,6 +1,6 @@
 # BUG-218: `settings set` accepts STRICT_POPULATION_CAP lower than POPULATION_CAP (and vice versa); `settings revert` prints a false "file differs from the backup in other lines (edited by hand?)"
 
-- **Status:** fixed in 535791a
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `df_llm_helper/features/settings.py` (`set`, `revert`), `data/settings.yaml`
 - **Reported:** 2026-10-02, commit `6dedd96`

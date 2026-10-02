@@ -1,6 +1,6 @@
 # BUG-412: `claude/gefahr status` reports `selbsttest: []` ("alarm system alive") because it scans first; `gefahr sim <unknown id>` answers with empty lists
 
-- **Status:** fixed in 6003340
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05) [static code review; lua5.4 not available, mock not run]
 - **Severity:** S3 (misleading health check; no automatic consumer found in `df_llm_helper`)
 - **Area:** `lua/claude/gefahr.lua:326-329` (`status`), `:289-296` (`selbsttest`), `:332-339` (`sim`)
 - **Reported:** 2026-10-02, commit `6dedd96`

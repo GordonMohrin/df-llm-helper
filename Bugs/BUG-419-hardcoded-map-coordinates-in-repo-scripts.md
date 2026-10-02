@@ -1,6 +1,6 @@
 # BUG-419: map-specific coordinates are hard-coded in several repo scripts although README/COMPANION say they live in `config.lua`
 
-- **Status:** fixed in 5b5249c
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05) [static code review; lua5.4 not available, mock not run]
 - **Severity:** S3 (wrong results on any other map, no crash; also the reason why `schacht status` crashes, BUG-402)
 - **Area:** `lua/claude/muell.lua:20`, `kohle.lua:37`, `sperre.lua:124,136,181-186`, `stages.lua` (whole file), `bauprog.lua:20-59,116`, `zugaenge.lua:5`, `geo.lua:12,69`
 - **Reported:** 2026-10-02, commit `6dedd96`

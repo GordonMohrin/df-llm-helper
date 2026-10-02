@@ -1,6 +1,6 @@
 # BUG-315: `exception add FP08 ...` answers `Exception registered: FP10 [...]` - it prints the last entry of the merged register (the local file), not the entry that was just written
 
-- **Status:** fixed in 4bfefa4
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2
 - **Area:** `exception add` (`df_llm_helper/cli.py:cmd_exception`, `df_llm_helper/fairplay.py:ExceptionRegistry.add`)
 - **Reported:** 2026-10-02, commit `50cee52`

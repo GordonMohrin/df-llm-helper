@@ -1,6 +1,6 @@
 # BUG-121: `metrics` writes one row per digest call (identical rows seconds apart), four of the 18 columns are never filled, `budget` "Bytes in" is the command length
 
-- **Status:** fixed in 3fff919
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `df_llm_helper/metrics.py:28-31,86-99` (`KPI_COLUMNS`, `export_csv`), `df_llm_helper/pilot.py:124-126` (`record_kpis` on every orchestrator digest), `df_llm_helper/cli.py:53-55` (`_usage`)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)

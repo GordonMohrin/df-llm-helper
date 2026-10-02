@@ -1,6 +1,6 @@
 # BUG-311: MANUAL 9.12 documents `journal metrics --out ../metrics.csv` / `postmortem --out ../POSTMORTEM-runN.md`, but both are refused with the shipped config; the same boundary lets `--out` overwrite any file inside the project (e.g. `data/exceptions.jsonl`)
 
-- **Status:** fixed in 1e94283
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `df_llm_helper/cli.py:_journal_target`, docs/MANUAL.md 9.12, docs/INTEGRATION.md
 - **Reported:** 2026-10-02, commit `50cee52`

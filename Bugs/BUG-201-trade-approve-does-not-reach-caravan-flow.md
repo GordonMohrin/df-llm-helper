@@ -1,6 +1,6 @@
 # BUG-201: `trade approve` has no effect on `caravan` (two separate state machines); `trade status` shows IDLE while `caravan` waits in REVIEW; `trade step` in REVIEW shows nothing to judge
 
-- **Status:** fixed in ab33904
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2 (documented manual approval path does not work; the orchestrator is told to run a command that changes nothing)
 - **Area:** `df_llm_helper/cli.py` `cmd_trade` (kv `trade.flow`) vs. `df_llm_helper/caravan.py` (kv `caravan.state` -> `["flow"]`); docs `docs/MANUAL.md` 9.2 and section 2 table ("trade approve after the dry run")
 - **Reported:** 2026-10-02, commit `6dedd96`

@@ -1,6 +1,6 @@
 # BUG-220: plausibility findings against the live game: `mood reserve` says ok while `claude/mood` lists a gap; `workload` ignores stopped services when many jobs are open; `bottleneck` says "no stock data" for items that exist; `hygiene zones` proposes a dump zone next to an existing one; `perf sample` on a paused game is meaningless
 
-- **Status:** fixed in 50b7560 (items 2, 4, 5: c387d5d)
+- **Status:** fixed, live check pending (see TESTPLAN-live)
 - **Severity:** S3
 - **Area:** `df_llm_helper/config.py` (`mood.reserves`) vs `lua/claude/mood.lua` (`minimum`); `df_llm_helper/workload.py` `diagnose` (`if not many_open:` around the service checks); `data/graphs/produktion.yaml`; `df_llm_helper/features/hygiene.py` (`suggest_zone`); `df_llm_helper/features/perf.py` `sample`
 - **Reported:** 2026-10-02, commit `6dedd96`

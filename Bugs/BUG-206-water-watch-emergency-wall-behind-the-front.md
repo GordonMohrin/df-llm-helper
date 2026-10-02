@@ -1,6 +1,6 @@
 # BUG-206: `water watch` proposes the emergency wall at a choke point that lies BEHIND the water front (default `fort_center: None` disables the "between front and fort" test)
 
-- **Status:** fixed in f15d3b5
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2 (wrong action advice during a flood: the runbook `rb21_flut` would wall off the dry side of the water)
 - **Area:** `df_llm_helper/water.py` `notwand_for` (`center is None or ...`), `DEFAULTS["fort_center"] = None`, `WaterWatch.watch`
 - **Reported:** 2026-10-02, commit `6dedd96`

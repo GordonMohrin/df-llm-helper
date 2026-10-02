@@ -1,6 +1,6 @@
 # BUG-321: Stale references after the watcher replacement: runbook rb05 and the KB entries `waechter_blind`/`guard_start` still tell the reader to restart `unpause-guard.ps1`; `rb01c_e18_release` and `autopilot log` do not exist; `docs/LINT-FINDINGS.md` lists findings that are gone
 
-- **Status:** fixed in e4af55c
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `data/runbooks/rb05_waechter_blind.yaml`, `data/kb/curated.yaml` (waechter_blind, guard_start), `data/runbooks/rb01_e18_pick.yaml`, `docs/manual-v3/05-tools.md`, `docs/LINT-FINDINGS.md`
 - **Reported:** 2026-10-02, commit `50cee52`

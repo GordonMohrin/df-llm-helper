@@ -1,6 +1,6 @@
 # BUG-320: `lint <typo path>` exits 0 with `0 errors`; a UTF-16 Lua file (PowerShell default) containing `dig-now` is reported clean
 
-- **Status:** fixed in 6e0db06
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2
 - **Area:** `lint` (`df_llm_helper/lint.py:lint_paths/lint_file`, `cli.py:cmd_lint`)
 - **Reported:** 2026-10-02, commit `50cee52`

@@ -1,6 +1,6 @@
 # BUG-214: missing input files end in a Python traceback; malformed numeric arguments produce raw Python messages (`not enough values to unpack`, `invalid literal for int()`); `water lint-cmd` without a command says `ok`
 
-- **Status:** fixed in e47790f
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `df_llm_helper/features/perimeter.py:364` (`Grid.from_file`), `digcheck.py:372/376` (`--csv`, `--stages`), `defense.py:158/210` (`--terrain`, `--file`), `cli.py` `cmd_water` (`x, y, z = ...`), `perimeter.py` `allow`, `digcheck.py` (`-c`), `reach.py` (`--wall a b c`), `forecast` (see BUG-213)
 - **Reported:** 2026-10-02, commit `6dedd96`

@@ -1,6 +1,6 @@
 # BUG-330: `journal ingest` reports `0 chronicle events ... 0 new` (exit 0) for a UTF-16 event log or for a file that is not an event log at all; invalid `--date` shows the raw Python error
 
-- **Status:** fixed in 1e94283
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `journal ingest` (`df_llm_helper/cli.py:cmd_journal`, `df_llm_helper/journal.py:parse_events_log`)
 - **Reported:** 2026-10-02, commit `50cee52`

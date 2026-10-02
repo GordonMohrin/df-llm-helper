@@ -1,6 +1,6 @@
 # BUG-114: missing/unknown arguments are accepted as success (`autopilot enable`, `guard ack-gate`, `plan ...`) and some write junk into `state.db`
 
-- **Status:** fixed in 626d04f
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `df_llm_helper/cli.py:177-180` (`autopilot enable`), `:191-199` (`guard ack-gate`), `:578-584` (`_kv`), `:589-652` (`plan ...`)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)

@@ -1,6 +1,6 @@
 # BUG-420: hint - repo Lua and the live Lua in the game folder differ (paths, feature set, tuning); duplicates inside the repo
 
-- **Status:** fixed in 4c66249
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05) [static code review; lua5.4 not available, mock not run]
 - **Severity:** S3
 - **Area:** `lua/claude/*.lua`, `lua/pilot_*.lua` vs `C:\Users\admin\claude gordons projects\dwarf-fortress\lua\claude` (the folder DFHack really uses: `dfhack-config/script-paths.txt` has `+C:\Users\admin\claude gordons projects\dwarf-fortress\lua`)
 - **Reported:** 2026-10-02, commit `6dedd96`

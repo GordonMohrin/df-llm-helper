@@ -1,6 +1,6 @@
 # BUG-219: `siege` with an unreadable `pilot_siege status` ends as "Siege ABORTED" + crit warning + `notify.flag` (push to the player) although no siege exists; exit code differs between real (1) and `--dry-run` (0)
 
-- **Status:** fixed in ab33904
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3 (S2 if `siege` is ever called from automation while DF is not reachable)
 - **Area:** `df_llm_helper/siege.py` `SiegeRunner.run` (`if not o.ok: ... flow.state = "ABORT"`, `finally:` -> `store.warn(... "crit")`, `tools.write_flag("notify", ...)`), `df_llm_helper/cli.py` `cmd_siege` return code
 - **Reported:** 2026-10-02, commit `6dedd96`

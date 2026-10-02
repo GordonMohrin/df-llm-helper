@@ -1,6 +1,6 @@
 # BUG-329: `selftest`: `--cov` is silently ignored, the check `Diagnosis on fixtures` is constant `True`, and the briefing-size check runs on empty memory (max 599 tokens) while real briefs reach 1165 tokens
 
-- **Status:** fixed in 4c7e963
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `df_llm_helper/selftest.py`
 - **Reported:** 2026-10-02, commit `50cee52`

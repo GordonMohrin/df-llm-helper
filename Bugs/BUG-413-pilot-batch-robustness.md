@@ -1,6 +1,6 @@
 # BUG-413: `claude/pilot_batch` cuts UTF-8 characters in half when truncating (invalid UTF-8 output), aborts on a non-list command entry, rejects a BOM
 
-- **Status:** fixed in 596a890
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05) [static code review; lua5.4 not available, mock not run]
 - **Severity:** S2 (output of the batch transport is not valid UTF-8 as soon as a truncated sub-command output contains a non-ASCII character; `transport.batch` is off by default - `config.py:35` "batch=true only after a live test")
 - **Area:** `lua/pilot_batch.lua:24-30` (and the identical `lua/claude/pilot_batch.lua`)
 - **Reported:** 2026-10-02, commit `6dedd96`

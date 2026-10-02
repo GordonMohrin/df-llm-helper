@@ -1,6 +1,6 @@
 # BUG-213: `forecast backtest` default `--file` points outside the repo (traceback); `--horizon 0/-3` and garbage files are accepted silently; live `forecast` shows "Food 267±6409 days" from a series with a 5,000-day-old point
 
-- **Status:** fixed in c34cd95
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3 (S2 for the stale-series part if the line is used for decisions; it carries `[confidence 0.3]`)
 - **Area:** `df_llm_helper/cli.py:1056` (`--file` default `Path(__file__).resolve().parents[2] / "metrics.csv"`), `cmd_forecast` (`series_from_metrics`), `df_llm_helper/forecast.py` (series window / band)
 - **Reported:** 2026-10-02, commit `6dedd96`

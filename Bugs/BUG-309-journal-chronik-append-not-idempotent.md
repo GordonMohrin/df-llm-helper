@@ -1,6 +1,6 @@
 # BUG-309: `journal chronik --append` appends the whole chronicle again on every call (duplicates in `chronik.md`)
 
-- **Status:** fixed in 1e94283
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2
 - **Area:** `journal chronik --append` (`df_llm_helper/journal.py:append_chronik`, `cli.py:cmd_journal`)
 - **Reported:** 2026-10-02, commit `50cee52`

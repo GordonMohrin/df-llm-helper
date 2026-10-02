@@ -1,6 +1,6 @@
 # BUG-317: A hand-edited exception register crashes every command (`[1,2]` line), drops a BOM-prefixed first entry, splits a string `objects` into characters, and a text `max_uses` raises `TypeError` at use time
 
-- **Status:** fixed in 4bfefa4
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2
 - **Area:** `df_llm_helper/fairplay.py:ExceptionRegistry.load/find`
 - **Reported:** 2026-10-02, commit `50cee52`

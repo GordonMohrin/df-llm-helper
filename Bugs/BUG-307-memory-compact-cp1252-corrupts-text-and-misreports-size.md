@@ -1,6 +1,6 @@
 # BUG-307: `memory compact` on a non-UTF-8 (cp1252) memory file replaces all umlauts by U+FFFD and reports a wrong size; `brief`/`agents prompt` show the same replacement characters
 
-- **Status:** fixed in 793a4b7
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2
 - **Area:** `memory compact` (`df_llm_helper/memory.py:compact_file`), `brief` (`cli.py:cmd_brief`), `agents prompt`
 - **Reported:** 2026-10-02, commit `50cee52`

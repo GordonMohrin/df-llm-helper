@@ -1,6 +1,6 @@
 # BUG-302: Missing or unreadable input file produces a Python traceback in `kb import`, `bus import`, `agents lint-report`, `replay`, `journal ingest`
 
-- **Status:** fixed in 793a4b7
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2
 - **Area:** `kb import`, `bus import`, `agents lint-report`, `replay`, `journal ingest --events <dir>`
 - **Reported:** 2026-10-02, commit `50cee52`

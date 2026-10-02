@@ -1,6 +1,6 @@
 # BUG-203: `--dry-run` is not dry for `mood reserve`, `siege`, `caravan`: critical/warn rows are written to state.db and show up in the next `check`
 
-- **Status:** fixed in ab33904
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2 (a dry run can raise a CRIT warning that wakes the orchestrator; verified for siege, mood reserve and caravan)
 - **Area:** `df_llm_helper/cli.py:705` (`cmd_mood`: `mm.reserve()` gets no `dry`), `df_llm_helper/moods.py:279` (`reserve`: `store.warn` unconditional); `df_llm_helper/siege.py` `SiegeRunner.run` `finally:` block (`self.store.warn(...)` for every `flow.notify` even with `dry=True`); `df_llm_helper/caravan.py` `step` (`self.store.warn(... "caravan:review" ...)` and in `_release_stuck`, no `dry` guard)
 - **Reported:** 2026-10-02, commit `6dedd96`

@@ -1,6 +1,6 @@
 # BUG-101: `overlay` (even without `--send`) consumes the orchestrator's digest delta, and the player display gets "No change since ..." lines
 
-- **Status:** fixed in 513db2e
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2
 - **Area:** `df_llm_helper/cli.py:521-530` (`cmd_overlay`), `df_llm_helper/overlay.py:23-35` (`overlay_lines`), `df_llm_helper/pilot.py:104-127` (`digest` writes state)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)

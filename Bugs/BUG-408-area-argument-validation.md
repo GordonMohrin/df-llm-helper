@@ -1,6 +1,6 @@
 # BUG-408: `claude/area z x` (x without y) crashes with a traceback; zero/negative width/height print an empty degenerate grid
 
-- **Status:** fixed in 04eda95
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05) [static code review; lua5.4 not available, mock not run]
 - **Severity:** S3
 - **Area:** `lua/claude/area.lua:14-31`
 - **Reported:** 2026-10-02, commit `6dedd96`

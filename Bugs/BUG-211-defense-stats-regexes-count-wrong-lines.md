@@ -1,6 +1,6 @@
 # BUG-211: `defense stats` counts job-cancel and sparring lines as trap/attack messages, reads the whole 146 MB gamelog on every call (10 s), and prints a false `!!` alarm; `--tail` accepts 0/negative values
 
-- **Status:** fixed in e47790f
+- **Status:** reopened (retest 2026-10-02): 'siege'/'thief' still match combat lines ('troll siege engineer', 'goblin thief'): 273 of 283 invasion announcements are false
 - **Severity:** S2 (meaningless numbers + false alarm "enemies bypass the lane? check claude/zugaenge")
 - **Area:** `df_llm_helper/features/defense.py` `gamelog_stats` (regexes `\btrap\b`, `caught|cage`, `load`, `siege|ambush|vile force|attack`), `_stats` (`read_text().splitlines()`, `if args.tail:`)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -44,3 +44,12 @@ Gordon / next real attack: please copy 20 gamelog lines around a trap firing (`c
 
 ## Fix
 `gamelog_stats`: job lines (`cancels`, `Load ... trap`, suspend/construction) are no trap events; `cancels Load ... trap` counts as `reload problems`; attacks = invasion announcements only (vile force, ambush, siege but not `siege operator`, snatcher, thief, ...), sparring is ignored; the file is read from the end (last 8 MB), `--tail` must be >= 1. Test: `test_bug211_*` (`fixtures/bugs/BUG-211/gamelog_samples.txt`). Info still welcome: real trap/invasion lines of the next attack to verify the patterns.
+
+## Retest 2026-10-02
+Run against the live gamelog (read only, 146 MB file): runtime 1.7 s (was 10 s), `--tail -5` / `--tail 0` refused (rc 2), job-cancel lines are `reload problems 2`, sparring ignored. Still wrong: the invasion pattern matches ordinary combat lines.
+```
+$ python -m df_llm_helper defense stats --gamelog "<gamelog.txt>"
+Defense stats (gamelog): trap events 0 (caught 0, hits 0), reload problems 2, invasion announcements 283
+!! invasion without any trap event: enemies bypass the lane? check `claude/zugaenge` (spec v3-01)
+```
+Matches in the last 8 MB by pattern: `siege` 223 (e.g. "The militia captain hacks the troll siege engineer in the right foot ..."), `thief` 50 ("The spinning rock salt misses the goblin thief!"), real announcements: `an ambush` 7, `snatcher` 2, `vile force` 1. Suggested: anchor on announcement texts only ("A vile force of darkness has arrived", "An ambush!", "Snatcher!  Protect the children!", "... have come") and drop the bare `siege`/`thief` words.

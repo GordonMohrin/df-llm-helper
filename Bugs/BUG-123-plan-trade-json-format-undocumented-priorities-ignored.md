@@ -1,6 +1,6 @@
 # BUG-123: `plan trade --json`: item field names are not documented anywhere, `priorities` (documented for `plan_trade`) cannot be passed, other categories than food/wood/metal/cloth/other are silently never bought
 
-- **Status:** fixed in 626d04f
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `df_llm_helper/cli.py:598-611` (`cmd_plan` kind `trade`), `df_llm_helper/planners/trade.py:36-52` (`TradeItem`), `docs/PLANNERS.md` (row `trade.py`), `--help` of `plan`
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)

@@ -1,6 +1,6 @@
 # BUG-103: `--config <file that does not exist>` is silently ignored and the defaults (incl. the live `data/state.db`) are used
 
-- **Status:** fixed in 626d04f
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2
 - **Area:** `df_llm_helper/config.py:171-183` (`load_config`: `if p.exists(): ...`), `df_llm_helper/cli.py` (`load_config(args.config)` everywhere)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)

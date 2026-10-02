@@ -1,6 +1,6 @@
 # BUG-417: `util.emit` runs `df2utf` over multi-line strings: newlines become the CP437 glyph `◙` (U+25D9)
 
-- **Status:** fixed in eea3f60
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05) [static code review; lua5.4 not available, mock not run]
 - **Severity:** S3
 - **Area:** `lua/claude/util.lua:14-24` (`to_utf8` / `emit`), visible in `lua/claude/gefahr.lua` (`handle()` text), any script that emits strings containing `\n` or other control characters
 - **Reported:** 2026-10-02, commit `6dedd96`

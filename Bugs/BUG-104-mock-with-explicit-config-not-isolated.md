@@ -1,6 +1,6 @@
 # BUG-104: `--mock` together with `--config` is not isolated: a mock run deletes real flag files and writes fixture data into the live `state.db`; the live DB already contains mock rows
 
-- **Status:** fixed in 53f1bcb (isolation: 626d04f)
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2
 - **Area:** `df_llm_helper/cli.py:1203-1204` (`force_overrides(mock_overrides() if (args.mock or args.replay_file) and not args.config else None)`), `df_llm_helper/config.py:161-168`
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)

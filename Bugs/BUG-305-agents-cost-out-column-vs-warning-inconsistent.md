@@ -1,6 +1,6 @@
 # BUG-305: `agents cost`: the `Out~` column and the "stuck?" warning quote different output numbers (up to 2.6x apart)
 
-- **Status:** fixed in c06df7e
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `agents cost` (`df_llm_helper/agents.py:parse_transcript`, `cost_report`)
 - **Reported:** 2026-10-02, commit `50cee52`

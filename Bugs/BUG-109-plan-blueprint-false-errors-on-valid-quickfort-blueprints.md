@@ -1,6 +1,6 @@
 # BUG-109: `plan blueprint` reports errors (zone keys `n f t p w`, quoted CSV cells, filled workshop footprints) for blueprints that quickfort accepts and that were used in the live game
 
-- **Status:** fixed in 6d7faa3
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2 (false alarms on the fair-play/validation path; a valid blueprint is refused, exit 1)
 - **Area:** `df_llm_helper/planners/blueprint.py:28` (`ZONE_KEYS = frozenset("mbhDBoTda")`), cell parser `blueprint.py:160-215` (no CSV quote handling -> `E_CELL`), overlap check `blueprint.py:290-320` (`E_OVERLAP`), `blueprint.py:375` (`W_COLS`)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)

@@ -1,6 +1,6 @@
 # BUG-404: `claude/advance clock` (documented and classified as read-only) deletes the game's message popups
 
-- **Status:** fixed in 9f7b226
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05) [static code review; lua5.4 not available, mock not run]
 - **Severity:** S2
 - **Area:** `lua/claude/advance.lua:12-22`; classification `df_llm_helper/client.py:62` (`_READ_EXACT` contains `"claude/advance clock"`), COMPANION.md ("`advance clock` must contain `"paused"`", header of advance.lua: "`claude/advance clock` - only report time/pause status")
 - **Reported:** 2026-10-02, commit `6dedd96`

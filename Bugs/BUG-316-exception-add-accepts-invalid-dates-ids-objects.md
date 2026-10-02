@@ -1,6 +1,6 @@
 # BUG-316: `exception add`: impossible dates (`2026-13-45`, `2026-02-30`) are accepted and never expire, a date-only `--expires` is already expired at noon of that day, unknown rule ids (`FP0`, `L99`) and junk objects are accepted
 
-- **Status:** fixed in 4bfefa4
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S2
 - **Area:** `df_llm_helper/fairplay.py:ExceptionRegistry.add/find`
 - **Reported:** 2026-10-02, commit `50cee52`

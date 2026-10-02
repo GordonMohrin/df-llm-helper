@@ -1,6 +1,6 @@
 # BUG-402: `claude/schacht` / `claude/schacht status` crashes with a Lua traceback when no cavern barrier is configured (KOPF = nil)
 
-- **Status:** fixed in 59e973b
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05) [static code review; lua5.4 not available, mock not run]
 - **Severity:** S2
 - **Area:** `lua/claude/sperre.lua:137-146` (`kopf_state`), `:390-407` (`status`), called by `lua/claude/schacht.lua:46`
 - **Reported:** 2026-10-02, commit `6dedd96`

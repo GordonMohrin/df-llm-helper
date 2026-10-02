@@ -1,6 +1,6 @@
 # BUG-328: Test suite on Windows without pytest: 4 tests fail, all 4 are test/fixture portability problems (epoch ts < 1 day, `\n` -> `\r\n` on write, `\\` in a path prefix check); 22 Lua tests are skipped (no lua5.4)
 
-- **Status:** fixed in 6cfa014
+- **Status:** verified fixed (retest 2026-10-02, 8e67f05)
 - **Severity:** S3
 - **Area:** `tests/test_journal.py:96`, `tests/test_m3.py:72`, `tests/test_scenarios_cli.py:28` + `tests/make_fixtures.py:290`, `tests/test_settings.py:139`
 - **Reported:** 2026-10-02, commit `50cee52`
