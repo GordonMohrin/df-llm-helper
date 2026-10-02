@@ -1,5 +1,11 @@
 # CHANGELOG df-llm-helper
 
+## Decisions the player delegated (2026-10-02)
+- BUG-104: opening the live `state.db` removes the snapshot/kpi rows old `--mock` runs wrote into it. Marker: the
+  fixture identity (`data/mock_fingerprints.json`, kept in sync with `fixtures/run5` by a test) AND a contradiction with
+  the game's time line (another snapshot of the same game several game years away, stored minutes apart). Real rows,
+  the isolated mock db and `--mock` runs are never touched; idempotent (`df_llm_helper/mockrows.py`).
+
 ## Neutral map config, embark scripts (2026-10-02)
 - `lua/claude/config.lua` and `lua/claude/stages.lua` ship neutral (nil/empty; defaults come from the loaded map). The real
   Run-5 values moved to `examples/windrings/` (reference only).

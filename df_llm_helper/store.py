@@ -38,6 +38,32 @@ class Store:
             self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA busy_timeout=30000")
         self.db.executescript(SCHEMA)
+        self.purged = {"snapshots": 0, "kpis": 0}
+        if self._is_live():
+            self._purge_mock_rows()
+
+    def _is_live(self) -> bool:
+        """BUG-104: the fort's own state.db (not :memory:, not the isolated mock db, not during a --mock run)."""
+        if self.path == ":memory:":
+            return False
+        from . import config
+        if config._FORCED:
+            return False
+        try:
+            mock_dir = (config.RUNTIME / "mock").resolve()
+            return mock_dir not in Path(self.path).resolve().parents
+        except OSError:
+            return False
+
+    def _purge_mock_rows(self) -> None:
+        """BUG-104 (player delegated the decision): fixture rows of old --mock runs are removed from the live db."""
+        from .mockrows import purge_mock_rows
+        try:
+            self.purged = purge_mock_rows(self.db)
+        except sqlite3.Error:
+            return
+        if self.purged["snapshots"]:
+            self.set("migration.mock_rows_purged", self.purged)
 
     def close(self) -> None:
         self.db.close()
