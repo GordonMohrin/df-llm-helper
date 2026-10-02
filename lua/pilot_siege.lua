@@ -12,9 +12,11 @@ local CX, CY, CZ = cfg.FORT_X or 0, cfg.FORT_Y or 0, cfg.SURFACE_Z or 0
 
 local function dist(p) return math.max(math.abs(p.x - CX), math.abs(p.y - CY), math.abs(p.z - CZ)) end
 
+-- Visitors count as friendly only when they are not invaders: isVisitor is also true for Forgotten Beasts
+-- (visitor_uninvited, see lua/claude/gefahr.lua), which must stay valid kill targets (BUG-422).
 local function friendly(u)
   return dfhack.units.isCitizen(u) or dfhack.units.isFortControlled(u) or dfhack.units.isPet(u)
-      or dfhack.units.isMerchant(u) or dfhack.units.isVisitor(u)
+      or dfhack.units.isMerchant(u) or (dfhack.units.isVisitor(u) and not dfhack.units.isInvader(u))
 end
 
 local function squad_of(id)

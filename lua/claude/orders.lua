@@ -226,9 +226,17 @@ local function flaglist(f)
   return table.concat(t, '+')
 end
 
+-- flags1..3 of an item condition as one '+' list (concatenating the three lists glued names together,
+-- e.g. 'non_economichard', and let different flag combinations share a signature, BUG-422)
+local function condflags(c)
+  local t = {}
+  for _, f in ipairs({ flaglist(c.flags1), flaglist(c.flags2), flaglist(c.flags3) }) do if f ~= '' then t[#t + 1] = f end end
+  return table.concat(t, '+')
+end
+
 local function order_sig(o)
   local ct = {}
-  for _, c in ipairs(o.item_conditions) do ct[#ct + 1] = (df.item_type[c.item_type] or '-') .. ':' .. flaglist(c.flags1) .. flaglist(c.flags2) .. flaglist(c.flags3) end
+  for _, c in ipairs(o.item_conditions) do ct[#ct + 1] = (df.item_type[c.item_type] or '-') .. ':' .. condflags(c) end
   table.sort(ct)
   return table.concat({ df.job_type[o.job_type], tostring(o.item_subtype), o.reaction_name, tostring(o.mat_type), tostring(o.mat_index),
     flaglist(o.material_category), flaglist(o.specflag.encrust_flags), tostring(o.frequency), tostring(#o.item_conditions) .. '#' .. table.concat(ct, ',') }, '|')
@@ -370,7 +378,7 @@ end
 local function cond_text(o)
   local t = {}
   for _, c in ipairs(o.item_conditions) do
-    local f = flaglist(c.flags1) .. flaglist(c.flags2) .. flaglist(c.flags3)
+    local f = condflags(c)
     t[#t + 1] = string.format('%s %d %s%s', df.logic_condition_type[c.compare_type], c.compare_val, df.item_type[c.item_type] or '*', f ~= '' and ('[' .. f .. ']') or '')
   end
   return table.concat(t, '; ')

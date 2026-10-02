@@ -97,7 +97,8 @@ local function status()
     local resp, inbt = {}, {}
     if pos then
       for _, rk in ipairs(responsibilities(pos)) do
-        resp[#resp + 1] = df.entity_position_responsibility[rk]
+        -- names (MANAGE_PRODUCTION ...); pairs() already yields the names, the enum lookup turned them into numbers (BUG-422)
+        resp[#resp + 1] = type(rk) == 'string' and rk or df.entity_position_responsibility[rk]
         inbt[#inbt + 1] = by_type_has(rk, asg) ~= nil
       end
     end
