@@ -163,3 +163,13 @@ def test_bus_concurrent_writers_no_loss(tmp_path):
     singles = [r for r in rows if r["text"] != "gemeinsam"]
     shared = [r for r in rows if r["text"] == "gemeinsam"]
     assert len(singles) == 100 and len(shared) == 1 and shared[0]["count"] == 20
+
+
+def test_lint_command_unquoted_path_with_blanks(tmp_path):
+    """BUG-328: the player's project path contains blanks; an unquoted lua -f <path> is still linted."""
+    d = tmp_path / "My Games" / "df x"
+    d.mkdir(parents=True)
+    f = d / "x.lua"
+    f.write_text("dfhack.run_command('reveal')\n")
+    assert [x.rule for x in lint_command(f"lua -f {f}")] == ["L04"]
+    assert [x.rule for x in lint_command(f'lua -f "{f}"')] == ["L04"]

@@ -287,7 +287,8 @@ def write_scenarios(target: Path = HOME / "scenarios") -> list[Path]:
     paths = []
     for name, lines in build_scenarios().items():
         p = target / f"{name}.jsonl"
-        p.write_text("".join(json.dumps(x, ensure_ascii=False, sort_keys=True) + "\n" for x in lines), encoding="utf-8")
+        with open(p, "w", encoding="utf-8", newline="\n") as f:          # LF on every OS (checked-in files are LF)
+            f.write("".join(json.dumps(x, ensure_ascii=False, sort_keys=True) + "\n" for x in lines))
         paths.append(p)
     return paths
 

@@ -92,7 +92,7 @@ def test_metrics_export_same_header_as_metrics_csv():
     for i, (day, mon) in enumerate([(3, "Granite"), (20, "Granite"), (5, "Slate"), (27, "Slate"), (1, "Felsite")]):
         snap = snap_for(pop=20 + i)
         snap.date_text = f"{day}. {mon}, Jahr 102"
-        record_kpis(st, 1000.0 + i, snap)
+        record_kpis(st, 1_790_840_000.0 + i, snap)   # not 1970: Windows cannot localise ts < 1 day
     out = _journal(st).monthly_metrics()
     rows = out.splitlines()
     assert rows[0] == real_header == ";".join(METRICS_HEADER)

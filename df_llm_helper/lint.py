@@ -123,6 +123,8 @@ def lint_command(cmd: str, registry: ExceptionRegistry | None = None) -> list[Fi
     mf = re.match(r'\s*lua\s+-f\s+(?:"([^"]+)"|\'([^\']+)\'|(\S+))', cmd)
     if mf:                       # Windows paths (C:\dir\x.lua) must not go through posix shlex: it eats the backslashes
         p = Path(mf.group(1) or mf.group(2) or mf.group(3))
+        if not p.exists() and mf.group(3):      # unquoted path with blanks (C:\My Games\x.lua): try the whole rest
+            p = Path(cmd[mf.start(3):].strip())
         return lint_file(p, registry) if p.exists() else []
     try:
         parts = shlex.split(cmd, posix=True)
