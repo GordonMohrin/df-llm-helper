@@ -780,11 +780,11 @@ def cmd_bottleneck(args) -> int:
 def cmd_water(args) -> int:
     """Spec 08: scan | check x y z | watch (water in the fort) | lint-cmd "<command>"."""
     from .lint import lint_dig
-    from .water import WaterWatch
+    from .water import WaterWatch, parse_xyz
     p = _pilot(args)
     ww = WaterWatch(p.client, p.tools, p.store, p.clock, p.cfg.get("water", {}))
     if args.action == "check":
-        x, y, z = (int(v) for v in args.xyz)
+        x, y, z = parse_xyz(args.xyz)
         v = ww.check(x, y, z)
         print(v.line())
         return 0 if v.result == "ok" else 1
@@ -796,6 +796,8 @@ def cmd_water(args) -> int:
                                  f"levels {j.get('by_z')}"))
         return 0
     if args.action == "lint-cmd":
+        if not args.xyz:
+            raise ValueError('usage: water lint-cmd "<command>" (e.g. "claude/dig 130 100 90 110 95")')
         fs = lint_dig(" ".join(args.xyz), ww.cfg["forbid_dig"], p.client.registry)
         print("\n".join(map(str, fs)) or "ok")
         return 1 if fs else 0

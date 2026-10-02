@@ -1,0 +1,1 @@
+{"cmd": "claude/pilot_water scan 60 40 126 127 130 133", "ok": true, "stdout": "{\"ok\": true, \"water\": 0, \"magma\": 0, \"hidden\": 10, \"units\": 0, \"front\": null, \"by_z\": {\"128\": 0}}"}
