@@ -17,10 +17,16 @@ end
 local cz, best = mz // 2, -1
 for z, n in pairs(zc) do if n > best then best, cz = n, z end end
 
-local z = tonumber(a[1]) or cz
-local w = math.min(tonumber(a[4]) or 60, 100)
-local h = math.min(tonumber(a[5]) or 40, 100)
-local x0, y0 = tonumber(a[2]), tonumber(a[3])
+-- whole numbers only (fractions are floored)
+local function int(v) v = tonumber(v) return v and math.floor(v) or nil end
+local z = int(a[1]) or cz
+local w = math.max(1, math.min(int(a[4]) or 60, 100))   -- at least 1x1 (0/negative printed an empty grid, BUG-408)
+local h = math.max(1, math.min(int(a[5]) or 40, 100))
+local x0, y0 = int(a[2]), int(a[3])
+if (x0 == nil) ~= (y0 == nil) then
+  print('Aufruf: claude/area [z [x0 y0 [w h]]]  (x0 und y0 nur zusammen)')
+  return
+end
 if not x0 then
   local cx = zc[z] and sx[z] // zc[z] or (zc[cz] and sx[cz] // zc[cz]) or mx // 2
   local cy = zc[z] and sy[z] // zc[z] or (zc[cz] and sy[cz] // zc[cz]) or my // 2

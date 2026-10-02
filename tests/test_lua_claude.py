@@ -334,3 +334,27 @@ def test_kohle_and_raster_report_laeuft_false_when_not_scheduled(tmp_path):
     out, _ = run("raster", "status", tmp_path=tmp_path,
                  setup="dfhack.maps.getTileSize = function() return 32, 32, 10 end")
     assert one_json(out)["laeuft"] is False
+
+
+# ---------------------------------------------------------------- BUG-408 / BUG-410 (area, felder, muell)
+AREA = ("dfhack.maps.getTileSize = function() return 192, 192, 153 end\n"
+        "dfhack.units.getCitizens = function() return {} end\n")
+
+
+def test_area_x_without_y_prints_usage(tmp_path):
+    out, r = run("area", 130, 80, tmp_path=tmp_path, setup=AREA)
+    assert r.returncode == 0, r.stderr
+    assert out.startswith("Aufruf: claude/area")
+
+
+@pytest.mark.parametrize("w,h", [(0, 0), (-5, -5)])
+def test_area_size_at_least_one(tmp_path, w, h):
+    out, r = run("area", 130, 80, 90, w, h, tmp_path=tmp_path, setup=AREA)
+    assert r.returncode == 0, r.stderr
+    assert out.splitlines()[0].startswith("z=130  x=80..80  y=90..90")
+
+
+@pytest.mark.parametrize("script,args", [("felder", ["foo"]), ("felder", ["set"]), ("muell", ["foo"])])
+def test_felder_muell_errors_are_json(tmp_path, script, args):
+    out, r = run(script, *args, tmp_path=tmp_path)
+    assert r.returncode == 0 and "error" in one_json(out)
