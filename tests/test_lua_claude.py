@@ -211,3 +211,19 @@ def test_schacht_write_commands_refuse_without_barrier(tmp_path, cmd):
     out, r = run("schacht", cmd, tmp_path=tmp_path)
     assert r.returncode == 0 and "keine Kavernen-Sperre" in one_json(out)["error"]
     assert not (tmp_path / "home" / "tools" / "schacht.offen").exists()
+
+
+# ---------------------------------------------------------------- BUG-413 (pilot_batch, both copies)
+@pytest.mark.parametrize("script", [ROOT / "lua" / "pilot_batch.lua", ROOT / "lua" / "claude" / "pilot_batch.lua"])
+def test_pilot_batch_utf8_cut_bad_entries_and_bom(tmp_path, script):
+    dmock = ROOT / "tests" / "lua_mock" / "dfhack_mock.lua"
+    req = tmp_path / "req.json"
+    req.write_bytes(b"\xef\xbb\xbf" + json.dumps({"cmds": [123, ["utf8"], "claude/alert", [], ["claude/status"]],
+                                                   "max_bytes": 51}).encode())
+    r = subprocess.run([LUA, str(dmock), str(script), str(req)], capture_output=True, timeout=20)
+    assert r.returncode == 0, r.stderr
+    text = r.stdout.decode("utf-8")                        # strict: must be valid UTF-8
+    out = json.loads(text.splitlines()[0])
+    assert [e["ok"] for e in out] == [False, True, False, False, True]
+    assert out[1]["out"].startswith("ä" * 25) and "(120 Bytes)" in out[1]["out"]
+    assert out[4]["out"] == "out:claude/status"
