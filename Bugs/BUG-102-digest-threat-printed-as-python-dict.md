@@ -1,6 +1,6 @@
 # BUG-102: danger line of the digest prints `Threat:` as raw Python dict reprs (`{'n': 1, 'name': ...}`) and cuts the second threat in half
 
-- **Status:** open
+- **Status:** fixed in 513db2e
 - **Severity:** S2
 - **Area:** `df_llm_helper/snapshot.py:308` (`snap.alerts.threats = [str(a) for a in _l(j.get("threats"))]`), used by `df_llm_helper/digest.py:104-105`
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)
@@ -41,3 +41,6 @@ and cut at a word boundary / per threat instead of a flat `[:80]`.
 
 ## Info needed
 None.
+
+## Fix
+`_parse_status` converts `{"n", "name"}` threats to `name` (`Nx name` if n > 1), plain strings still work; the danger line truncates per threat (45 chars) and adds `(+N more)`. Test with the live excerpt: `test_bug102_threat_names_not_dict_repr`.

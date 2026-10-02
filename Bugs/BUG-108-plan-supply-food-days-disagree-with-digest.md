@@ -1,6 +1,6 @@
 # BUG-108: `plan supply` food forecast (42 days) disagrees with the digest's `Food 85d` for the same live data (plants counted differently, not documented)
 
-- **Status:** open
+- **Status:** fixed in 626d04f
 - **Severity:** S3
 - **Area:** `df_llm_helper/cli.py:643-652` (`plan supply`: `food = meals + fish + meat`), `df_llm_helper/digest.py:252-253` (status line uses `claude/status` `food_days`), `df_llm_helper/forecast.py` (`include_raw_plants: True`)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)
@@ -39,3 +39,6 @@ Print the composition in `plan supply` (`food: stock 176 (meals 176, fish 0, mea
 
 ## Info needed
 Cloud session / Gordon: which definition of "food days" is wanted for decisions - game `food_days` (incl. plants) or meals+fish+meat only?
+
+## Fix
+`plan supply` prints the composition (`meals, fish, meat; raw plants N not counted`) and a note that the digest's `Food Nd` is the game's `food_days` incl. plants; documented in PLANNERS.md. The definition itself (decision for Gordon) is unchanged. Test: `test_bug108_*`.

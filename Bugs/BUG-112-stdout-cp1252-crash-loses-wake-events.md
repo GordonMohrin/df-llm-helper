@@ -1,6 +1,6 @@
 # BUG-112: with the default Windows console encoding (cp1252) any output containing a character outside cp1252 (e.g. `☼`) aborts the command; `wake` has already consumed the events
 
-- **Status:** open
+- **Status:** fixed in 626d04f
 - **Severity:** S2
 - **Area:** `df_llm_helper/cli.py:1193-1214` (`main`: no stdout configuration; `UnicodeEncodeError` is a `ValueError` -> `Error: 'charmap' codec ...`, exit 2), `df_llm_helper/wake.py:99-111` (state is stored before the lines are printed), `cli.py:268-280` (`cmd_wake`)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)
@@ -37,3 +37,6 @@ At the top of `cli.main()`: `for s in (sys.stdout, sys.stderr): s.reconfigure(en
 
 ## Info needed
 Gordon: do the orchestrator/monitor processes that call `wake`/`check` run with `PYTHONUTF8=1`? If not, events with `☼` have probably been lost already.
+
+## Fix
+`cli.main` reconfigures stdout/stderr to UTF-8 with `errors=replace` (never fatal); `wake_check(..., sink=print)` prints every line before it stores its state, so a print error loses no event. Tests: `test_bug112_*` (subprocess with `PYTHONIOENCODING=cp1252`).

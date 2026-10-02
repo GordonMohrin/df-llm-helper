@@ -1,6 +1,6 @@
 # BUG-101: `overlay` (even without `--send`) consumes the orchestrator's digest delta, and the player display gets "No change since ..." lines
 
-- **Status:** open
+- **Status:** fixed in 513db2e
 - **Severity:** S2
 - **Area:** `df_llm_helper/cli.py:521-530` (`cmd_overlay`), `df_llm_helper/overlay.py:23-35` (`overlay_lines`), `df_llm_helper/pilot.py:104-127` (`digest` writes state)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)
@@ -53,3 +53,6 @@ Side issue (same command): `claude/schau say "<text>" 3` is split with `shlex.sp
 
 ## Info needed
 Cloud session: should the overlay show only `!!`/`!` lines of the *current* snapshot (stateless), or "what is new since the last overlay" (own state key)? The current code mixes both.
+
+## Fix
+`overlay` builds its lines from a read-only, stateless digest (`Pilot.digest(persist=False, since_last=False)`): the orchestrator's delta, inbox/bus marks, warnings, snapshot/KPI rows stay untouched. `overlay_lines` never returns a `No change ...` row and, for the computed digest, nothing when there is no `!!`/`!` line (decision for the Info question: stateless, current `!!`/`!` items; the 10-min de-dupe prevents repeats). A trailing backslash is stripped before quoting. Tests: `test_bug101_*`, `tests/test_m3.py`.

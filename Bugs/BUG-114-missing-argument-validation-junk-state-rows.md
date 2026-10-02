@@ -1,6 +1,6 @@
 # BUG-114: missing/unknown arguments are accepted as success (`autopilot enable`, `guard ack-gate`, `plan ...`) and some write junk into `state.db`
 
-- **Status:** open
+- **Status:** fixed in 626d04f
 - **Severity:** S3
 - **Area:** `df_llm_helper/cli.py:177-180` (`autopilot enable`), `:191-199` (`guard ack-gate`), `:578-584` (`_kv`), `:589-652` (`plan ...`)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)
@@ -39,3 +39,6 @@ $ plan dig --area-file <file>         ->  no output, exit 0 (no --targets)      
 
 ## Info needed
 None.
+
+## Fix
+`autopilot enable` requires a known rule id; `guard ack-gate` requires a gate from `guard.pop_gates` (junk entries of older versions are dropped); `_kv` rejects parts without `=`, non-numbers, negatives and unknown resources; `plan supply --growth` must not be negative; `plan dig` needs `--targets` and `--area/--area-file`, `--picks/--max-open >= 1`; `plan blueprint` needs a file. Tests: `test_bug114_*`.

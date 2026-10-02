@@ -1,6 +1,6 @@
 # BUG-106: with an unreadable game `tempo status` / `guard` / `tempo on` say "no blockers, time lapse allowed" (fail-open); `plan armor/supply` print zeros as real results
 
-- **Status:** open
+- **Status:** fixed in 626d04f
 - **Severity:** S2
 - **Area:** `df_llm_helper/cli.py:229-257` (`cmd_tempo`), `df_llm_helper/guard.py:84-100` (`tempo_blockers`) and `GuardRunner.inputs` (`getattr(snap, "drink_days", None)` etc.), `df_llm_helper/cli.py:629-652` (`plan armor/supply`)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)
@@ -47,3 +47,6 @@ See above; add a test with an empty `MockClient`.
 
 ## Info needed
 Cloud session: should `waechter` not running / `events.log` stale (the guard warns about them) also block `tempo on`? In time lapse nobody pauses on an ambush if the watcher is down; MANUAL section 8 lists the blockers (deadman, danger, mood, caravan, supplies, no supervision, pop gate) but not the watcher.
+
+## Fix
+Fail closed: `GuardInputs.no_data` (snapshot missing, `claude/status` failed or no population) adds the tempo blocker `no_data` (`tempo on` refused, `guard` says not allowed); `tempo status` prints `unknown`/`pause state unknown`; `plan armor/supply` print `Error: no data from the game ...` and exit 1; `waechter` raises `cannot read reports` (exit 1 in one-step mode) and refreshes `waechter.alive` only after a successful report query. Not done: blocking `tempo on` when the watcher is down (Info question left to Gordon). Tests: `test_bug106_*`.

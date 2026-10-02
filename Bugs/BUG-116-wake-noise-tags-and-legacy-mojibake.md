@@ -1,6 +1,6 @@
 # BUG-116: `wake` raises "WAKE critical" for harmless message types (VOMIT, RESOLVE_SHARED_ITEMS, DODGE_FLYING_OBJECT, NO_BREAK_GRIP, MASTERPIECE_CRAFTED) and prints legacy mojibake
 
-- **Status:** open
+- **Status:** fixed in 626d04f
 - **Severity:** S3 (noise; the purpose of `wake` is "no wake-up without need for action")
 - **Area:** `df_llm_helper/wake.py:31-33` (`NOISE_TAGS`, matched with `.match(tag)` = prefix only), `df_llm_helper/waechter.py:35-39` (`CRITICAL` regex matches words like `goblin`/`thief` anywhere in the text), `df_llm_helper/toolsfs.py:137-140`
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)
@@ -43,3 +43,6 @@ As above; add the 9 sample lines as a test (`wake` must print only the 2 `CITIZE
 
 ## Info needed
 Gordon / cloud session: which tags should wake the orchestrator? Candidate allow-list from the statistics file: AMBUSH_SNATCHER, AMBUSH_SNATCHER_SUPPORT, AMBUSH_AMBUSHER_NATURE, UNDEAD_ATTACK, CITIZEN_DEATH, BERSERK_CITIZEN, CITIZEN_TANTRUM, GUARD.
+
+## Fix
+`NOISE_TAGS` matched with `search` (so `NO_BREAK_GRIP` is noise) and extended by `VOMIT`, `RESOLVE_SHARED_ITEMS`, `DODGE_FLYING_OBJECT`, `MASTERPIECE_CRAFTED` (these four are not even counted as combat noise); printed text goes through `fix_mojibake` (+ the `Γÿ╝` = `☼` case). Unknown tags still wake (fail-safe deny list; the allow-list question stays with Gordon). Test with the 9 live sample lines: only the 2 `CITIZEN_DEATH` lines wake.

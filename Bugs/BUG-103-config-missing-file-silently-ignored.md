@@ -1,6 +1,6 @@
 # BUG-103: `--config <file that does not exist>` is silently ignored and the defaults (incl. the live `data/state.db`) are used
 
-- **Status:** open
+- **Status:** fixed in 626d04f
 - **Severity:** S2
 - **Area:** `df_llm_helper/config.py:171-183` (`load_config`: `if p.exists(): ...`), `df_llm_helper/cli.py` (`load_config(args.config)` everywhere)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)
@@ -38,3 +38,6 @@ In `cli.main` (or `load_config(..., must_exist=True)` when `args.config` is set)
 
 ## Info needed
 None.
+
+## Fix
+`cli.main` checks an explicit `--config` (missing -> `Error: config file not found: ...`, directory -> `Error: --config is a directory ...`, exit 2) and also `--mock <folder>` / `--replay-file <file>` before anything runs; only the implicit default `config.yaml` stays optional. Test: `test_bug103_*`.
