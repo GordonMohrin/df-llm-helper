@@ -1,16 +1,20 @@
--- claude/pilot_tools status     (df-llm-helper spec v3-05 tool/pick manager, LIVE-UNTESTED)
+-- claude/pilot_tools status [--full]     (df-llm-helper spec v3-05 tool/pick manager, LIVE-UNTESTED)
 -- Read-only measurement for `python -m df_llm_helper tools`: picks (total, free with location, holders), number of granted work picks,
 -- citizens (MINE labor, pick held, idle, hunger/thirst, squad, child, wounds, hospital zone, mining skill),
 -- open dig jobs and current diggers. All actions go through existing scripts:
 --   claude/pickfix --apply                       (frees reservations, sets equipment update flags; FP08 register entry)
 --   claude/workdetail assign <id> Miners true    (work detail menu)
 -- This script never writes anything.
+-- Answer size (BUG-422): citizen names are left out by default (features/tools.py never reads them); `--full` adds `name`.
 local util = reqscript('claude/util')
 local utils = require('utils')
 if not util.require_fort() then return end
 
 local a = { ... }
 local cmd = a[1] or 'status'
+local full = false
+for _, v in ipairs(a) do if v == '--full' then full = true end end
+if cmd == '--full' then cmd = 'status' end
 
 local function safe(f, d) local ok, v = pcall(f) if ok and v ~= nil then return v end return d end
 
@@ -84,7 +88,7 @@ if cmd == 'status' then
     local jn = j and df.job_type[j.job_type] or nil
     if jn and DIG[jn] then diggers = diggers + 1 end
     cit[#cit + 1] = {
-      id = u.id, name = dfhack.units.getReadableName(u), mine = u.status.labors[df.unit_labor.MINE] and true or false,
+      id = u.id, name = full and dfhack.units.getReadableName(u) or nil, mine = u.status.labors[df.unit_labor.MINE] and true or false,
       pick = holds_pick(u), idle = j == nil, job = jn, hunger = u.counters2.hunger_timer, thirst = u.counters2.thirst_timer,
       squad = in_squad(u), child = not dfhack.units.isAdult(u), wounds = safe(function() return #u.body.wounds end, 0),
       cant_stand = safe(function() return u.status2.limbs_stand_count == 0 end, false), hospital = inside(u.pos, hs),

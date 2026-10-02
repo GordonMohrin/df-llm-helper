@@ -691,3 +691,56 @@ def test_zugaenge_enclave_filter_reads_perimeter_mincomp(tmp_path, mincomp, clus
     out, r = run("zugaenge", 9, 9, 0, 0, 0, tmp_path=tmp_path, setup=map_setup(ZUG, post))
     assert r.returncode == 0, r.stderr
     assert f"Einstiegscluster gesamt\t{clusters}" in out      # 40 outside tiles: an enclave only below the threshold
+
+
+# ---------------------------------------------------------------- BUG-422 item 4 (answer sizes: compact default, --full)
+GESUND = """
+local function cit(id, stress)
+  return { id = id, status = { current_soul = { personality = { stress = stress, longterm_stress = 0, emotions = {}, needs = {} } },
+           labors = {} }, job = {}, counters2 = { sleepiness_timer = 0 } }
+end
+CITS = {}
+for i = 1, 20 do CITS[i] = cit(i, i * 5000) end          -- stress 5000 .. 100000; LOW = 45000 -> ids 9..20
+dfhack.units.getCitizens = function() return CITS end
+dfhack.units.isAlive = function() return true end
+dfhack.units.isAdult = function() return true end
+local g = reqscript('claude/gesund')
+"""
+
+
+def test_gesund_status_and_gedanken_are_compact_by_default(tmp_path):
+    code = GESUND + ("local r = g.gedanken() print(#r.buerger, r.buerger_anzahl, r.buerger[1].stress)\n"
+                     "print(#g.gedanken(true).buerger)\n"
+                     "g.cli({ 'status' })\n"
+                     "g.cli({ 'status', '--full' })\n")
+    lines = run_snippet(code, tmp_path).splitlines()
+    assert lines[0].split() == ["15", "20", "100000"] and lines[1] == "20"
+    compact, full = json.loads(lines[2]), json.loads(lines[3])
+    assert compact["buerger_anzahl"] == full["buerger_anzahl"] == 20
+    assert sorted(u["id"] for u in compact["buerger"]) == list(range(9, 21)) and len(full["buerger"]) == 20
+
+
+def test_mood_plan_compact_keeps_only_risky_skills(tmp_path):
+    code = ("local m = reqscript('claude/mood')\n"
+            "local full = {\n"
+            "  { id = 1, name = 'A', skills = { { skill = 'CARPENTRY', rating = 8, werkstatt = 'Carpenters', status = 'vorhanden',\n"
+            "                                    material = 'holz', vorrat = 3, min = 14 },\n"
+            "                                  { skill = 'MECHANICS', rating = 5, werkstatt = 'Mechanics', status = 'vorhanden' } } },\n"
+            "  { id = 2, name = 'B', skills = { { skill = 'MASONRY', rating = 6, werkstatt = 'Masons', status = 'vorhanden',\n"
+            "                                    material = 'stein', vorrat = 900, min = 5 } } },\n"
+            "  { id = 3, name = 'C', skills = { { skill = 'BOWYER', rating = 2, werkstatt = 'Bowyers', status = 'FEHLT' } } },\n"
+            "}\n"
+            "local r, ok, mat = m.plan_compact(full)\n"
+            "util = reqscript('claude/util') util.emit({ r = r, ok = ok, mat = mat })\n")
+    j = json.loads(run_snippet(code, tmp_path))
+    assert j["ok"] == 1 and j["mat"] == {"holz": "3/14", "stein": "900/5"}
+    assert j["r"] == [{"id": 1, "name": "A", "risiko": ["CARPENTRY:8 Carpenters holz 3/14"]},
+                      {"id": 3, "name": "C", "risiko": ["BOWYER:2 Bowyers FEHLT"]}]
+
+
+def test_pilot_tools_status_leaves_names_out_unless_full(tmp_path):
+    from test_remote import _lua as remote_lua
+    out, _ = remote_lua(tmp_path, "pilot_tools.lua", "status")
+    assert out["citizens"] and not any("name" in c for c in out["citizens"])
+    out, _ = remote_lua(tmp_path, "pilot_tools.lua", "status", "--full")
+    assert all(c.get("name") for c in out["citizens"])

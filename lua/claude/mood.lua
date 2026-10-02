@@ -13,6 +13,9 @@
 --  * clears blocked mood workshops (removes orders there) when the dwarf claims no workshop for 1200 calendar ticks,
 --  * reports every running mood immediately in tools/mood.flag + claude/schau say (watch, called by watchdog every 60 calendar ticks),
 --  * `claude/mood` = status as JSON, `claude/mood prebuild` = build all missing mood workshops now, `claude/mood werkstaetten`.
+--  * `claude/mood plan [--full]` = risk per citizen. Default (BUG-422, answer size): only citizens with an AT-RISK mood skill (workshop
+--    missing/under construction or material below the minimum), one text per skill, material stock once in `material`;
+--    `ohne_risiko` = number of citizens without risk. `--full` = every skill of every citizen (old answer, ~145 KB at 174 citizens).
 local util = reqscript('claude/util')
 local FLAG = reqscript('claude/util').home() .. '/tools/mood.flag'
 local LOG = reqscript('claude/util').home() .. '/tools/out/mood.log'
@@ -419,6 +422,24 @@ function plan()
   return out
 end
 
+-- compact risk plan: only at-risk skills, 'SKILL:rating Workshop status' / 'SKILL:rating Workshop material stock/min'
+function plan_compact(full_plan)
+  local out, ok, mat = {}, 0, {}
+  for _, e in ipairs(full_plan or plan()) do
+    local r = {}
+    for _, sk in ipairs(e.skills) do
+      if sk.material and sk.min then mat[sk.material] = (sk.vorrat or 0) .. '/' .. sk.min end
+      local short = sk.material and sk.min and (sk.vorrat or 0) < sk.min
+      if sk.status ~= 'vorhanden' or short then
+        r[#r + 1] = string.format('%s:%d %s %s', sk.skill, sk.rating, tostring(sk.werkstatt),
+          sk.status ~= 'vorhanden' and sk.status or (sk.material .. ' ' .. (sk.vorrat or 0) .. '/' .. sk.min))
+      end
+    end
+    if #r > 0 then out[#out + 1] = { id = e.id, name = e.name, risiko = r } else ok = ok + 1 end
+  end
+  return out, ok, mat
+end
+
 -- Summary for claude/gesund status
 function summary()
   local a = active()
@@ -438,7 +459,13 @@ elseif cmd == 'dry' then
 elseif cmd == 'werkstaetten' then
   util.emit({ werkstaetten = werkstaetten() })
 elseif cmd == 'plan' then
-  util.emit({ risiko = plan(), luecken = missing() })
+  local full = false
+  for _, v in ipairs({ ... }) do if v == '--full' then full = true end end
+  if full then util.emit({ risiko = plan(), luecken = missing() })
+  else
+    local r, ok, mat = plan_compact()
+    util.emit({ risiko = r, ohne_risiko = ok, material = mat, luecken = missing() })
+  end
 else
   local s, alle = stock()
   util.emit({ vorrat = s, vorrat_gesamt_inkl_unerreichbar = alle, minimum = MIN, luecken = missing(s), stimmungen = active(), werkstaetten = werkstaetten() })

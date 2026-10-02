@@ -41,6 +41,11 @@ appends one row to `<home>/metrics.csv`, at most once per in-game day: when the 
 that way. The read-only command is `status` (`orders` also `list`; `arbeit` has none, use `claude/auslastung`); any other
 word prints a usage error and changes nothing.
 
+**Answer sizes.** Big per-citizen answers are compact by default; `--full` gives the old answer:
+`claude/mood plan` (only at-risk mood skills), `claude/gesund status` (`buerger` only with stress >= LOW or at rest),
+`claude/gesund gedanken` (15 most stressed citizens; aggregates complete), `claude/pilot_tools status` (no `name`).
+No df-llm-helper parser reads the dropped fields.
+
 **Optional scripts** (generic, but only meaningful once their config keys are set after embark; not called by
 df-llm-helper on its own):
 

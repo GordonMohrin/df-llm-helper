@@ -11,12 +11,16 @@
 -- arbeit.lua (sync_labors) skips resting dwarves (is_ruhe).
 --  4. STRANGE MOODS (30.09. after 3 deaths + 1 berserk): workshop types + reachable material see claude/mood (watch by the watchdog, prebuild here every 6000 ticks),
 --     timestream off during a mood (tempo.danger 'stimmung').
---   claude/gesund start|stop|status|rest <id>|release <id>|amt|slabs
+--   claude/gesund start|stop|status [--full]|gedanken [--full]|krypta|rest <id>|release <id>|amt|slabs
+-- Answer size (BUG-422): `status` lists in `buerger` only citizens with stress >= LOW or at rest (count in `buerger_anzahl`), `gedanken`
+-- only the STRESS_TOP most stressed citizens (aggregates stay complete); `--full` gives every citizen as before. No df-llm-helper
+-- parser reads these per-citizen lists (snapshot reads only the service state).
 local util = reqscript('claude/util')
 local json = require('json')
 local repeatUtil = require('repeat-util')
 
 local KEY = 'claude-gesund'
+local STRESS_TOP = 15   -- gedanken: citizens listed without --full (BUG-422)
 local DIR = reqscript('claude/util').home() .. '/tools/out/'
 local STATE_FILE = DIR .. 'gesund_state.json'
 local CSV_FILE = DIR .. 'gesund.csv'
@@ -250,7 +254,7 @@ function krypta_status()
 end
 
 -- Thoughts/needs per adult (READ ONLY): weighty thoughts, unfulfilled needs (focus_level < 0), stress
-function gedanken()
+function gedanken(full)
   local out, agg, bed = {}, {}, {}
   for _, u in ipairs(citizens()) do
     local p = u.status.current_soul.personality
@@ -290,7 +294,12 @@ function gedanken()
   local bl = {}
   for k, v in pairs(bed) do bl[#bl + 1] = k .. '=' .. v end
   table.sort(bl)
-  return { buerger = out, gedanken_gesamt = agl, bedarfe_unerfuellt_gesamt = bl }
+  local n_all = #out
+  if not full and #out > STRESS_TOP then
+    table.sort(out, function(a, b) return a.stress > b.stress end)
+    for i = #out, STRESS_TOP + 1, -1 do out[i] = nil end
+  end
+  return { buerger = out, buerger_anzahl = n_all, gedanken_gesamt = agl, bedarfe_unerfuellt_gesamt = bl }
 end
 
 -- Report: log + game (claude/schau say), per key at most every 'cd' ticks
@@ -425,7 +434,7 @@ function stop()
   S.running = false
 end
 
-local function status()
+local function status(full)
   load_state()
   local units = {}
   for _, u in ipairs(citizens()) do
@@ -434,15 +443,24 @@ local function status()
       schlaf = u.counters2.sleepiness_timer, ruhe = S.ruhe[u.id] ~= nil, labors = #labor_names(u),
       job = u.job.current_job and df.job_type[u.job.current_job.job_type] or nil }
   end
+  local n_all = #units
+  if not full then
+    local keep = {}
+    for _, e in ipairs(units) do if e.stress >= LOW or e.ruhe then keep[#keep + 1] = e end end
+    units = keep
+  end
   local r = {}
   for id, v in pairs(S.ruhe) do r[#r + 1] = { id = id, seit = v.since, stress_damals = v.stress, labors_gemerkt = #(v.labors or {}) } end
   return { laeuft = S.running or false, runs = S.runs, fehler = S.errors, letzter_fehler = S.last_error, hoch = HIGH, niedrig = LOW, max_ruhe = MAXRUHE,
-    ruhe = r, amt = S.amt, ruhe_aktiv = RUHE_AKTIV, geister = ghosts(), krypta = (function() local ok, k = pcall(krypta_status) return ok and k or nil end)(), ungueltige_auftraege = orders_unvalidated(), buerger = units,
+    ruhe = r, amt = S.amt, ruhe_aktiv = RUHE_AKTIV, geister = ghosts(), krypta = (function() local ok, k = pcall(krypta_status) return ok and k or nil end)(), ungueltige_auftraege = orders_unvalidated(), buerger = units, buerger_anzahl = n_all,
     stimmungen = (function() local ok, r = pcall(function() return reqscript('claude/mood').summary() end) return ok and r or nil end)() }
 end
 
 function cli(a)
   local cmd = a[1] or 'status'
+  local full = false
+  for _, v in ipairs(a) do if v == '--full' then full = true end end
+  if cmd == '--full' then cmd = 'status' end
   if cmd == 'start' then start(); util.emit(status())
   elseif cmd == 'stop' then stop(); util.emit({ ok = true, stopped = true })
   elseif cmd == 'rest' then
@@ -456,7 +474,7 @@ function cli(a)
     if not u then util.emit({ error = 'unit nicht gefunden' }) return end
     local n = release(u, 'manuell')
     util.emit({ ok = true, labors_zurueck = n })
-  elseif cmd == 'gedanken' then util.emit(gedanken())
+  elseif cmd == 'gedanken' then util.emit(gedanken(full))
   elseif cmd == 'krypta' then util.emit(krypta_status())
   elseif cmd == 'amt' then
     load_state(); amt_tick(citizens()); util.emit({ amt = S.amt, ungueltige_auftraege = orders_unvalidated() })
@@ -470,7 +488,7 @@ function cli(a)
     for name in tostring(a[3] or ''):gmatch('[^,]+') do labs[#labs + 1] = name end
     put_rest(u, 'manuell (seed)', labs)
     util.emit(status())
-  else util.emit(status()) end
+  else util.emit(status(full)) end
 end
 
 if dfhack_flags and dfhack_flags.module then return end
