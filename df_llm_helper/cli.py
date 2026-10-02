@@ -958,9 +958,10 @@ def cmd_dashboard(args) -> int:
             print("claude/area failed: " + (r.stderr or "")[:100])
             return 1
         maps = dict(p.store.get("dashboard.maps") or {})
-        maps[name] = r.stdout.rstrip("\n")
+        txt = r.stdout.replace("\r\n", "\n").rstrip("\n")         # dfhack-run answers with CRLF (BUG-313)
+        maps[name] = txt
         p.store.set("dashboard.maps", maps)
-        print(f"Map '{name}' saved ({len(r.stdout.splitlines())} lines)")
+        print(f"Map '{name}' saved ({len(txt.splitlines())} lines)")
         return 0
     if args.action == "unmap":
         maps = dict(p.store.get("dashboard.maps") or {})
@@ -987,6 +988,9 @@ def cmd_dashboard(args) -> int:
     text = drender(dcollect(p.store, p.clock.now().epoch, dcfg), dcfg)
     errs = validate_html(text)
     out = Path(args.out) if args.out else Path(p.cfg.get("paths.tools")) / dcfg.get("out", "out/dashboard.html")
+    if out.is_dir():
+        print(f"Error: --out is a directory, not a file: {out}", file=sys.stderr)
+        return 2
     changed = write_if_changed(text, out, p.store)
     print(f"{out} ({len(text.encode('utf-8')) // 1024} KB, {'newly written' if changed else 'unchanged'})"
           + (" ERROR: " + "; ".join(errs) if errs else ""))
@@ -994,11 +998,17 @@ def cmd_dashboard(args) -> int:
 
 
 def _journal_target(cfg_j: dict, path: str | None, key: str) -> Path:
-    """Spec 12 acceptance 5: write only under df-llm-helper/ or to the configured file."""
+    """Spec 12 acceptance 5 (BUG-311): write only to the configured journal files or below the runtime folder
+    (default df-llm-helper/runtime) - never over project files such as data/exceptions.jsonl or config.yaml."""
+    from .config import RUNTIME
     p = (HOME / (path or cfg_j[key])).resolve()
     allowed = {(HOME / cfg_j[k]).resolve() for k in ("chronik", "metrics", "postmortem") if cfg_j.get(k)}
-    if p not in allowed and HOME.resolve() not in p.parents:
-        raise SystemExit(f"Write refused: {p} lies outside df-llm-helper/ and is not configured")
+    if p in allowed:
+        return p
+    if RUNTIME.resolve() not in p.parents or p.suffix.lower() in (".py", ".lua", ".yaml", ".yml", ".jsonl", ".db") \
+            or p.name.lower().startswith("exceptions"):
+        raise SystemExit(f"Write refused: {p} is not a configured journal file (journal.{key} in config.yaml) and "
+                         f"not a report file below {RUNTIME}")
     return p
 
 
@@ -1018,13 +1028,22 @@ def cmd_journal(args) -> int:
             return 1
         text = read_text_tolerant(src)
         if args.date:
-            day0 = _date.fromisoformat(args.date)
+            try:
+                day0 = _date.fromisoformat(args.date)
+            except ValueError:
+                print(f"Error: --date must be a real date YYYY-MM-DD, got {args.date!r}", file=sys.stderr)
+                return 2
         else:        # the log only has times of day: its last line is "today" (mtime), count day changes backwards
             from .journal import infer_first_day
             day0 = infer_first_day(text, _date.fromtimestamp(src.stat().st_mtime))
         new, total = j.ingest_log(text, day0)
         w = j.ingest_warnings()
         print(f"{total} chronicle events in the log, {new} new; {w} critical df-llm-helper warnings taken over")
+        from .journal import count_log_lines
+        n_lines, n_ok = count_log_lines(text)
+        if n_lines and not n_ok:
+            print(f"WARNING: 0 of {n_lines} lines recognised as watcher events - wrong encoding or not an events.log?")
+            return 1
         return 0
     if args.action == "chronik":
         lines = j.chronik()
@@ -1032,7 +1051,8 @@ def cmd_journal(args) -> int:
         print(f"(coverage {j.coverage() * 100:.0f} % of the events)")
         if args.append and lines:
             _journal_target(cj, None, "chronik")
-            print(f"appended to {j.append_chronik(lines)}")
+            target, n = j.append_chronik(lines)
+            print(f"appended {n} new lines to {target}" if n else f"nothing new for {target} (all lines already there)")
         return 0
     if args.action == "lessons":
         ls = j.lessons()
@@ -1052,6 +1072,7 @@ def cmd_journal(args) -> int:
         text = j.monthly_metrics()
         if args.out:
             t = _journal_target(cj, args.out, "metrics")
+            t.parent.mkdir(parents=True, exist_ok=True)
             t.write_text(text, encoding="utf-8")
             print(f"{text.count(chr(10)) - 1} monthly lines -> {t}")
         else:
@@ -1060,6 +1081,7 @@ def cmd_journal(args) -> int:
     text = j.postmortem()
     if args.out:
         t = _journal_target(cj, args.out, "postmortem")
+        t.parent.mkdir(parents=True, exist_ok=True)
         t.write_text(text, encoding="utf-8")
         print(f"Postmortem skeleton -> {t}")
     else:

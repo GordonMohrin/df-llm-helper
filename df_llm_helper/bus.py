@@ -16,6 +16,7 @@ __all__ = ["Message", "Bus", "PRIO", "guess_prio", "parse_inbox_line"]
 PRIO = {"crit": 0, "warn": 1, "info": 2}
 _CRIT = re.compile(r"KRITISCH|CRITICAL|\bROT\b|\bRED\b|sofort|immediately|urgent|dringend|!!|Tote?\b|\bdead\b|stirbt|dies\b|verhungert|starves|verdurstet|dies of thirst|Belagerung|siege", re.I)
 _WARN = re.compile(r"WICHTIG|IMPORTANT|Engpass|bottleneck|Entscheidung|decision|blockiert|blocked|fehlt|missing|knapp|scarce|< ?50 ?%|player", re.I)
+EXPORTED_KV = "bus.exported_md"        # md keys of lines written by export_to_inbox (import skips them, BUG-327)
 _LINE = re.compile(r"^- (?:von|from) ([^,]+),\s*(.*?):\s+(.*)$")
 
 
@@ -127,16 +128,17 @@ class Bus:
         """Reads all '- von/from ...' lines; returns (new, skipped). Idempotent via dedupe_key=hash."""
         from .toolsfs import read_text_tolerant
         recipient = recipient or Path(path).stem.removeprefix("inbox-")
+        exported = dict(self.store.get(EXPORTED_KV) or {})
         new = skipped = 0
         for line in read_text_tolerant(Path(path)).splitlines():
             if not line.startswith("- "):
                 continue
             p = parse_inbox_line(line)
             sender, when, text = p if p else ("?", "", line[2:].strip())
-            key = "md:" + hashlib.sha1(line.strip().encode("utf-8")).hexdigest()[:16]
+            key = _md_key(line)
             exists = self.db.execute("SELECT 1 FROM messages WHERE recipient=? AND dedupe_key=?",
                                      (recipient, key)).fetchone()
-            if exists:
+            if exists or key in exported:
                 skipped += 1
                 continue
             self.post(sender, recipient, text, topic=when[:40], dedupe_key=key)
@@ -147,5 +149,13 @@ class Bus:
         return f"- from {msg.sender}, {msg.topic or self.clock.now().local().strftime('%d.%m. %H:%M')}: {msg.text}"
 
     def export_to_inbox(self, path: Path, msg: Message) -> None:
+        line = self.export_line(msg)
+        exported = dict(self.store.get(EXPORTED_KV) or {})
+        exported[_md_key(line)] = msg.id                 # this line is already message #id: import must not add it again
+        self.store.set(EXPORTED_KV, dict(list(exported.items())[-2000:]))
         with Path(path).open("a", encoding="utf-8") as f:
-            f.write(self.export_line(msg) + "\n")
+            f.write(line + "\n")
+
+
+def _md_key(line: str) -> str:
+    return "md:" + hashlib.sha1(line.strip().encode("utf-8")).hexdigest()[:16]

@@ -134,7 +134,7 @@ def test_write_targets_restricted(tmp_path, tools_dir, capsys):
                  f"  gamelog: {tmp_path / 'g'}\njournal:\n  chronik: {chron}\n  metrics: {tmp_path / 'm.csv'}\n"
                  f"  postmortem: {tmp_path / 'pm.md'}\n  events_log: {LOG}\n", encoding="utf-8")
     assert main(["--config", str(c), "--mock", str(FIX), "journal", "ingest", "--date", "2026-09-30"]) == 0
-    assert "318 chronicle events" in capsys.readouterr().out
+    assert "314 chronicle events" in capsys.readouterr().out  # BUG-310: was 318
     assert main(["--config", str(c), "--mock", str(FIX), "journal", "chronik", "--append"]) == 0
     assert "deaths" in chron.read_text(encoding="utf-8")
     assert main(["--config", str(c), "--mock", str(FIX), "journal", "postmortem", "--out", str(tmp_path / "pm.md")]) == 0

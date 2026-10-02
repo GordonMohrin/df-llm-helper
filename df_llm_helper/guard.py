@@ -271,7 +271,10 @@ class GuardRunner:
                     self.tools.append_event("CRITICAL" if a.level == "crit" else "info", str(a.value), "HELPER-GUARD")
                 if a.kind in ("warn", "set_fps", "reset_report_id", "tempo_off") and a.level in ("warn", "crit"):
                     self.store.warn(now, "guard", f"guard:{a.kind}:{a.reason[:30]}", a.reason, a.level)
-            self.store.log_action(now, "guard", "guard", f"{a.kind}={a.value}", a.kind, cmd or "", dry_run, ok, a.reason)
+            if a.kind == "warn" and not cmd:      # a pure warning is in the warnings table already (BUG-314: no 'warn=None')
+                continue
+            act = a.kind if a.value is None else f"{a.kind}={a.value}"
+            self.store.log_action(now, "guard", "guard", act, a.kind, cmd or "", dry_run, ok, a.reason)
         if not dry_run:
             self.store.set("guard.state", new.to_dict())
         info = {"slowed": new.slowed, "target_fps": target_fps(new, inp, g),

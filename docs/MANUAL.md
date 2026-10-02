@@ -232,11 +232,11 @@ After every change: `python -m df_llm_helper.selftest` (≈ 30 s, no DF needed).
 ### 9.12 Chronicle and lessons: `python -m df_llm_helper journal` (spec 12)
 - **At session end:**
   1. `python -m df_llm_helper journal ingest [--events <log> --date YYYY-MM-DD]`: take the watcher event log and critical df-llm-helper warnings into the `events` table. Combat and everyday noise is filtered, duplicate entries are detected, names are repaired (CP437).
-  2. `journal chronik` shows the draft (date + fact, clustered per type in 30-min clusters). `--append` appends it to `journal.chronik`.
+  2. `journal chronik` shows the draft (date + fact, clustered per type in 30-min clusters). `--append` appends the lines that are not in `journal.chronik` yet (a repeated call adds nothing). `ingest` warns (exit 1) when no line of the file is in the watcher format (wrong file or encoding).
 - **Lessons:** `journal lessons` lists patterns with at least 2 identical causes (e.g. `mood failed | wood`), each pattern exactly once. Approval via `--accept '<key>'` writes a KB draft to `data/kb/journal.jsonl`. Memory files stay manual work.
-- **Metrics:** `journal metrics [--out ../metrics.csv]` outputs one line per game month, header like `metrics.csv`.
-- **Downfall:** `journal postmortem [--out ../POSTMORTEM-runN.md]` generates the skeleton from `state.db`: timeline, causes of death, actions with outcome, open critical warnings, key figures, fair-play exceptions from the register. Add the assessment by hand.
-- **Write boundary:** only under `df-llm-helper/` and in the files from `journal.chronik|metrics|postmortem`; everything else is refused.
+- **Metrics:** `journal metrics [--out runtime/metrics.csv]` outputs one line per game month, header like `metrics.csv`.
+- **Downfall:** `journal postmortem [--out runtime/POSTMORTEM-runN.md]` generates the skeleton from `state.db`: timeline, causes of death, actions with outcome, open critical warnings, key figures, fair-play exceptions from the register. Add the assessment by hand.
+- **Write boundary:** only the files from `journal.chronik|metrics|postmortem` and report files below the runtime folder (`runtime/`, or `DF_LLM_HELPER_HOME`); everything else is refused (project files such as `data/exceptions.jsonl` or `config.yaml` can never be overwritten). To write the player's `../metrics.csv` or `../POSTMORTEM-runN.md`, set `journal.metrics` / `journal.postmortem` in `config.yaml`.
 
 ## 10. v3 features (`specs-v3/`, not yet live-tested)
 Access guard, dig checker, freeze profiler, standstill guard, tool manager, remote-worker protection, item hygiene, defense designer, settings, camera profiles, reachability guard: see **[manual-v3/README.md](manual-v3/README.md)** (one page per feature).
