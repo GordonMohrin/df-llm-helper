@@ -63,6 +63,7 @@ SPERR_BOXEN = {}                         -- RUN5: set after embark ({ {x1,y1,x2,
 SCHACHT_PRUEF = nil                      -- RUN5: set after embark ({ von = {x,y,z}, nach = {x,y,z} } self-test 'cavern connected to fort on foot'; von/nach may also be lists of points)
 HINTER_SPERRE = nil                      -- RUN5: with a cavern barrier ({ cave_z_max = z, boxen = { {x1,y1,x2,y2,z1,z2}, ... } } = 'behind the barrier' for the lock-in protection of claude/schacht seal)
 BAU_PHASES_RUN3 = false                  -- claude/bauprog: true only on the run-3 map (east wing phases O1..O6); own phases in state/bauprog_extra.lua
+PERIMETER_MINCOMP = 3000                 -- pilot_perimeter/zugaenge enclave filter: outside areas smaller than this (walled sky terraces) are not 'outside'
 DIG_CAVERN_Z = nil                       -- RUN5: set after embark (erzdig exception from DIG_MIN_Z for caverns; normally nil)
 
 -- ---------------------------------------------------------------- DEFAULTS (so nothing crashes while values are missing)

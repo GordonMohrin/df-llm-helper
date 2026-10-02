@@ -432,3 +432,22 @@ def test_no_run3_coordinates_left_in_scripts():
             "zugaenge.lua": r"ZMIN, ZMAX = 100, 136|CORE=\{100,101,130\}", "geo.lua": r"or 110\b|or 97\b"}
     for name, pat in pats.items():
         assert not re.search(pat, (CLAUDE / name).read_text(encoding="utf-8")), name
+
+
+# ---------------------------------------------------------------- pilot_perimeter enclave filter (threshold from config)
+def test_perimeter_enclave_filter_threshold_from_config(tmp_path):
+    from df_llm_helper.features._grid import Grid
+    g = Grid.from_file(ROOT / "fixtures" / "v3" / "grid" / "perimeter_j109_open.grid")
+    gp = tmp_path / "grid.json"
+    gp.write_text(json.dumps(g.to_mock()))
+    (tmp_path / "tools" / "out").mkdir(parents=True)
+
+    def entries(mincomp):
+        r = subprocess.run([LUA, str(GRID), str(ROOT / "lua" / "pilot_perimeter.lua"), "scan", "100", "101", "130", "100",
+                            "136"], capture_output=True, text=True, timeout=120,
+                           env={"PATH": "/usr/bin:/bin", "MOCK_GRID": str(gp), "MOCK_HOME": str(tmp_path),
+                                "MOCK_MAP": "130,110,140", "MOCK_MINCOMP": str(mincomp)})
+        assert r.returncode == 0, r.stderr
+        return json.loads(r.stdout.splitlines()[0])["entries"]
+    assert entries(1)                      # no filter: the openings of the fixture are found
+    assert entries(100000) == []           # every outside area of the small fixture counts as an enclave

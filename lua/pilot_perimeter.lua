@@ -150,7 +150,10 @@ local function new_job(cx, cy, cz, zmin, zmax, budget)
         J.entries = {}
         -- Enklaven-Filter (bau J113): ein Aussen-Nachbar zaehlt nur, wenn seine zusammenhaengende Aussenflaeche >= MINCOMP Kacheln hat
         -- (abgemauerte Terrassen mit Himmelsflag sind keine Aussenwelt); identisch zu lua/claude/zugaenge.lua (MINCOMP 3000)
-        local MINCOMP, compmemo = 3000, {}
+        -- threshold from config.PERIMETER_MINCOMP (default 3000); small synthetic test maps set it to 1 (= no filter,
+        -- like the Python reference features/_grid.py)
+        local okc, pcfg = pcall(reqscript, 'claude/config')
+        local MINCOMP, compmemo = (okc and type(pcfg) == 'table' and tonumber(pcfg.PERIMETER_MINCOMP)) or 3000, {}
         local function real_outside(startk)
           if compmemo[startk] ~= nil then return compmemo[startk] end
           local seenc, qc, qi, big = { [startk] = true }, { startk }, 1, false
