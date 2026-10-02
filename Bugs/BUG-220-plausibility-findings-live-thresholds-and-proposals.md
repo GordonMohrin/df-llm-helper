@@ -1,6 +1,6 @@
 # BUG-220: plausibility findings against the live game: `mood reserve` says ok while `claude/mood` lists a gap; `workload` ignores stopped services when many jobs are open; `bottleneck` says "no stock data" for items that exist; `hygiene zones` proposes a dump zone next to an existing one; `perf sample` on a paused game is meaningless
 
-- **Status:** open (info needed) - items 2, 4, 5 fixed in c387d5d
+- **Status:** fixed in 50b7560 (items 2, 4, 5: c387d5d)
 - **Severity:** S3
 - **Area:** `df_llm_helper/config.py` (`mood.reserves`) vs `lua/claude/mood.lua` (`minimum`); `df_llm_helper/workload.py` `diagnose` (`if not many_open:` around the service checks); `data/graphs/produktion.yaml`; `df_llm_helper/features/hygiene.py` (`suggest_zone`); `df_llm_helper/features/perf.py` `sample`
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -30,9 +30,14 @@ See each item. No crash; no wrong game action.
 ## Info needed
 Gordon: (1) which reserve values are authoritative (`config.py` or `mood.lua`)? (2) are the five services off on purpose? (3) should `hygiene zones` ignore proposals within ~5 tiles of an existing dump zone? The cloud session can adopt whatever you decide.
 
-## Fix (partial)
+Decided (player delegated the decision): (1) `claude/mood` (`minimum`) is authoritative, `config mood.reserves` is the fallback, config defaults follow mood.lua; (2) the services were not off on purpose, the restart proposal stays; (3) `block` and `mechanism` get a stock source; (4) the 5-tile zone gap stays.
+
+## Fix
 - Item 2: `workload` reports stopped `orders`/`arbeit` services also with a job backlog (restart proposal, auto + loop guard as before); the blocked-jobs line names `suspendmanager`/`unsuspend`.
 - Item 4: `hygiene` proposes no dump zone within `hygiene.zone_min_gap` (5 tiles) of an existing one (default chosen; Gordon may change it).
 - Item 5: `perf sample` says `game PAUSED (frame counter did not move)` when the frame counter is constant.
 - Tests: `tests/test_bugs_autopilots.py::test_bug220_*`.
-- Open: item 1 (which reserve thresholds are binding: `config.py mood.reserves` or `mood.lua minimum`) and item 3 (stock mapping for `block`/`mechanism` in `data/graphs/produktion.yaml`; needs a stock source for them) need Gordon's decision; item 2 question (services off on purpose?) is his call too.
+- Items 1 and 3 and the item 2 question: decided, see below.
+- Item 1 (50b7560): `mood reserve` checks against the `minimum` of `claude/mood status` when the answer has one (per category, the config fills categories the script does not list) and says which minima it used (`Mood reserve missing: rough gems 6/12 (minima: claude/mood minimum)` on the evidence = the game's own gap). Config defaults: rough gems 12, cut gems 10, wood 14 (live mood.lua), bone 5, leather 3, metal 3, cloth 3, stone 5, silk 2 (repo mood.lua). Note: the repo copy of `lua/claude/mood.lua` still has `MIN` rohgem 3 / schliffgem 2 / holz 10 / seide 2, the live game reports 12 / 10 / 14 / 3 (Lua side to sync).
+- Item 3 (50b7560): `data/graphs/produktion.yaml` gets `sources`: `mechanism` <- `claude/pilot_defense status` `stock.mechanisms`, `blocks` <- `claude/muell status` `typen` `BLOCKS=N` (loose blocks outside stockpiles: a lower bound; absent = unknown, never 0). Only used when `claude/material status` `stock` lacks the key, so `stock.mechanism` / `stock.blocks` reported by `claude/material status` win (Lua field wanted there; `claude/muell status` is a full item scan).
+- Tests: `tests/test_bugs_decided.py::test_bug220_*`, `tests/test_moods.py`.

@@ -1,6 +1,6 @@
 # BUG-104: `--mock` together with `--config` is not isolated: a mock run deletes real flag files and writes fixture data into the live `state.db`; the live DB already contains mock rows
 
-- **Status:** fixed in 626d04f
+- **Status:** fixed in 53f1bcb (isolation: 626d04f)
 - **Severity:** S2
 - **Area:** `df_llm_helper/cli.py:1203-1204` (`force_overrides(mock_overrides() if (args.mock or args.replay_file) and not args.config else None)`), `df_llm_helper/config.py:161-168`
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)
@@ -47,5 +47,9 @@ The isolation overrides are applied only `if ... and not args.config`. `--mock` 
 ## Info needed
 Gordon: the live `data/state.db` has mock rows in `snapshots`/`kpis` (ids 1 and 4). Do you want them removed (e.g. `DELETE FROM snapshots WHERE id IN (1,4)` + matching `kpis`) or `state.db` rebuilt? The tester did not touch it.
 
+Decided (player delegated the decision): the mock rows are removed automatically when the live `state.db` is opened; real rows are never touched.
+
 ## Fix
-`--mock`/`--replay-file` always force the isolated paths; `mock_overrides(explicit_config)` keeps a path of an explicit `--config` only if it differs from the live/default one (state_db, tools, scopes, gamelog, journal.events_log), so `--mock ... --config config.yaml` is isolated while tests with private temp paths keep working. Test: `test_bug104_*`. The cleanup of the two mock rows in the live `data/state.db` is still Gordon's decision (see Info needed).
+`--mock`/`--replay-file` always force the isolated paths; `mock_overrides(explicit_config)` keeps a path of an explicit `--config` only if it differs from the live/default one (state_db, tools, scopes, gamelog, journal.events_log), so `--mock ... --config config.yaml` is isolated while tests with private temp paths keep working. Test: `test_bug104_*`. The cleanup of the mock rows: see below.
+
+Cleanup (53f1bcb): `Store` runs `mockrows.purge_mock_rows` when it opens the live db (not `:memory:`, not `runtime/mock/`, not during a `--mock`/`--replay-file` run). A mock row has no source column (real `game_id`, wall-clock `ts`), so the marker is the fixture identity in `data/mock_fingerprints.json` (fort, date `12. Hematite, Jahr 102`, pop 24, drinks, meals, open/dig jobs, wealth ...; generated from `fixtures/run5`, a test keeps it in sync) AND a contradiction with the game's time line (a snapshot of the same game >= 2 game years away stored less than 5 real minutes per year apart). Ids 1 and 4 of the evidence match both; a real snapshot taken at the fixture moment keeps its place. The kpis of a removed snapshot (same game date, ts within 5 s) go with it; the counts are kept in kv `migration.mock_rows_purged`. Idempotent. Tests: `tests/test_bugs_decided.py::test_bug104_*`.
