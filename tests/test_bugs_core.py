@@ -448,3 +448,18 @@ def test_bug117_wording(tmp_path, capsys, clk):
     assert rc == 2 and "unknown scope" in err
     rc, out, _ = run(capsys, "--config", mkcfg(tmp_path), "--mock", FIX, "digest", "--scope", "bau")
     assert rc == 0 and out.startswith("Status")
+
+
+# ---------------------------------------------------------------- BUG-109 real quickfort blueprints validate
+def test_bug109_real_blueprints_from_evidence_are_ok():
+    from df_llm_helper.planners import has_errors, validate_blueprint
+    files = sorted((EVID / "BUG-109" / "blueprints").glob("*.csv"))
+    assert len(files) == 10
+    for f in files:
+        fs = validate_blueprint(f.read_text(encoding="utf-8"))
+        assert not has_errors(fs), (f.name, [str(x) for x in fs])
+        assert not [x for x in fs if x.code == "W_COLS"], f.name
+    # still errors: a different building key in the footprint, an unknown zone key, a broken quoted cell
+    assert has_errors(validate_blueprint("#build\nwj,wj,wj\nwj,wm,wj\n"))
+    assert has_errors(validate_blueprint("#zone\nZ\n"))
+    assert has_errors(validate_blueprint('#zone\n"n{name=""x}"\n'))
