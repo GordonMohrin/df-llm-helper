@@ -1,0 +1,12 @@
+# data/reach.yaml as shipped before BUG-209 (Kitchens/Stills guessed; (106,85,z132) is a constructed wall)
+start: [100, 101, 130]
+points:
+  - {name: "Farm hall F1", xyz: [106, 92, 132], cat: farm}
+  - {name: "Farm hall F3", xyz: [112, 93, 131], cat: farm}
+  - {name: "Kitchens", xyz: [106, 85, 132], cat: kitchen}
+  - {name: "Stills", xyz: [110, 89, 132], cat: still}
+  - {name: "Well", xyz: [140, 99, 129], cat: well, adjacent: true}
+  - {name: "Hospital", xyz: [107, 99, 128], cat: hospital}
+  - {name: "Barracks", xyz: [90, 100, 128], cat: barracks}
+  - {name: "Workshops west", xyz: [70, 100, 130], cat: workshop}
+  - {name: "Depot", xyz: [112, 98, 133], cat: depot, optional: true}

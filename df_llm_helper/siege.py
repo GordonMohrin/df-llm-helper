@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-__all__ = ["SiegeObs", "SiegeFlow", "SiegeRunner", "obs_from_status", "DEFAULTS"]
+__all__ = ["SiegeObs", "SiegeFlow", "SiegeRunner", "obs_from_status", "exit_code", "DEFAULTS"]
 
 DEFAULTS = {"alert_radius": 40, "kill_radius": 45, "flee_dist": 70, "step_far": 300, "step_mid": 120, "step_near": 60,
             "min_blood_pct": 60, "max_losses": 2, "squad_alias": "Wache", "max_steps": 60, "rally": None,
@@ -157,6 +157,8 @@ class SiegeFlow:
         return cmds
 
     def summary(self, losses: int | None = None) -> list[str]:
+        if self.state == "ERROR":                   # tool error, not a siege (BUG-219)
+            return ["Siege autopilot ERROR (no siege action taken)"] + self.report[:3]
         head = {"DONE": "Siege finished", "ABORT": "Siege ABORTED"}.get(self.state, f"Siege {self.state}")
         lines = [f"{head}: {self.max_invaders} attackers, {self.steps} steps"
                  + (f", {losses} soldiers lost" if losses is not None else "")]
@@ -210,8 +212,15 @@ class SiegeRunner:
             while True:
                 o = self.observe()
                 if not o.ok:
-                    flow.notify.append("pilot_siege status not readable - run the siege by hand")
-                    flow.state = "ABORT"
+                    # BUG-219: an unreadable status is an error of the tool, not an aborted siege: no crit warning,
+                    # no notify.flag (push to the player); if a siege really runs, the alarm flags of the guard report it
+                    flow.report.append(f"{STATUS_CMD} not readable: is DF running / is lua/pilot_siege.lua installed?"
+                                       + (" (steps so far: " + str(flow.steps) + ")" if flow.steps else ""))
+                    if flow.steps:              # it failed in the middle of a siege: the orchestrator must take over
+                        flow.notify.append("Siege: pilot_siege status lost during the siege - orchestrator takes over")
+                        flow.state = "ABORT"
+                    else:
+                        flow.state = "ERROR"
                     break
                 sid = (o.squad or {}).get("id", sid)
                 cmds = flow.step(o)
@@ -222,8 +231,13 @@ class SiegeRunner:
             if flow.orders_set and flow.state != "DONE" and sid is not None and not dry:
                 self.client.run(f"claude/pilot_siege clear {sid}")     # never leave orphaned orders
                 flow.orders_set = False
-            for n in flow.notify:
+            for n in flow.notify if not dry else []:          # a dry run writes nothing (BUG-203)
                 self.store.warn(self.clock.now().epoch, "siege", f"siege:{n[:30]}", n, "crit")
             if flow.notify and not dry and flow.state == "ABORT":
                 self.tools.write_flag("notify", "\n".join(flow.notify[:6]))
         return flow, log
+
+
+def exit_code(flow: SiegeFlow) -> int:
+    """Same code for a real and a dry run (BUG-219): 0 = nothing to do / running / done, 1 = aborted, 2 = tool error."""
+    return {"ABORT": 1, "ERROR": 2}.get(flow.state, 0)

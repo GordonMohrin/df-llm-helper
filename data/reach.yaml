@@ -9,8 +9,8 @@ start: [100, 101, 130]          # core point (a citizen's bed would also do)
 points:
   - {name: "Farm hall F1", xyz: [106, 92, 132], cat: farm}
   - {name: "Farm hall F3", xyz: [112, 93, 131], cat: farm}
-  - {name: "Kitchens", xyz: [106, 85, 132], cat: kitchen}
-  - {name: "Stills", xyz: [110, 89, 132], cat: still}
+  - {name: "Kitchens", xyz: [106, 98, 132], cat: kitchen}     # kitchen 1367 x105..107 y97..99 (claude/buildings 02.10.2026; (106,85) is a wall)
+  - {name: "Stills", xyz: [103, 98, 132], cat: still}         # still 1366 x102..104 y97..99 (claude/buildings 02.10.2026)
   - {name: "Well", xyz: [140, 99, 129], cat: well, adjacent: true}
   - {name: "Hospital", xyz: [107, 99, 128], cat: hospital}
   - {name: "Barracks", xyz: [90, 100, 128], cat: barracks}

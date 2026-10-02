@@ -97,7 +97,10 @@ class Grid:
 
     @classmethod
     def from_file(cls, path) -> "Grid":
-        return cls.from_text(Path(path).read_text(encoding="utf-8"))
+        p = Path(path)
+        if not p.is_file():                      # usage error (rc 2), not a traceback (BUG-214)
+            raise ValueError(f"grid file not found: {path}")
+        return cls.from_text(p.read_text(encoding="utf-8"))
 
     @classmethod
     def from_dump(cls, j: dict) -> "Grid":

@@ -216,6 +216,9 @@ def test_cli_and_alias_and_check_hook(tmp_path, capsys, monkeypatch):
     assert cli.main(["digcheck", "104", "62", "62", "64", "62", "--grid", str(GRID / "dig_cavern_unreachable.grid"),
                      "--gamelog", str(GRID / "gamelog_run5_cancels.txt")]) == 2
     assert "41x 'Inappropriate dig square' (29 dwarves)" in capsys.readouterr().out
+    assert D.check_hook(pil, None, False) == []                          # BUG-204: offline --grid stores nothing
+    D.DigCheck(pil.client, pil.store, clock).check(D.parse_rect("104 62 62 64 62"), "rect 104 62 62 64 62",
+                                                   grid=Grid.from_file(GRID / "dig_cavern_unreachable.grid"))
     lines = D.check_hook(pil, None, False)
     assert len(lines) == 1 and lines[0].startswith("digcheck rect 104 62 62 64 62: refused") and len(lines[0]) <= 120
     assert D.check_hook(pil, None, False) == []                          # reported once

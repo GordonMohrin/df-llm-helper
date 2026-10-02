@@ -1,6 +1,6 @@
 # BUG-218: `settings set` accepts STRICT_POPULATION_CAP lower than POPULATION_CAP (and vice versa); `settings revert` prints a false "file differs from the backup in other lines (edited by hand?)"
 
-- **Status:** open
+- **Status:** fixed in 535791a
 - **Severity:** S3
 - **Area:** `df_llm_helper/features/settings.py` (`set`, `revert`), `data/settings.yaml`
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -40,3 +40,6 @@ Cross-check `STRICT >= POPULATION` on set; compare the file against "original + 
 
 ## Info needed
 None. Gordon FYI (not a bug): live caps are POPULATION_CAP 75 / STRICT 100 while the fort has 174 inhabitants (the caps only stop new migrants).
+
+## Fix
+`settings set` warns `STRICT_POPULATION_CAP x < POPULATION_CAP y: the hard cap wins ... intended?` (warning, the player decides); the revert note compares with the backup taken before the first open change (kv `settings.origin_backup`), so the last revert reports `byte-identical`. Test: `test_bug218_*`.

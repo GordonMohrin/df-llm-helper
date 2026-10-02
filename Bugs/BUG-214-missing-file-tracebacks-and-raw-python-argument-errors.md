@@ -1,6 +1,6 @@
 # BUG-214: missing input files end in a Python traceback; malformed numeric arguments produce raw Python messages (`not enough values to unpack`, `invalid literal for int()`); `water lint-cmd` without a command says `ok`
 
-- **Status:** open
+- **Status:** fixed in e47790f
 - **Severity:** S3
 - **Area:** `df_llm_helper/features/perimeter.py:364` (`Grid.from_file`), `digcheck.py:372/376` (`--csv`, `--stages`), `defense.py:158/210` (`--terrain`, `--file`), `cli.py` `cmd_water` (`x, y, z = ...`), `perimeter.py` `allow`, `digcheck.py` (`-c`), `reach.py` (`--wall a b c`), `forecast` (see BUG-213)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -45,3 +45,6 @@ Catch `OSError` in `cli.main` and print `Error: cannot read <path>: <reason>` (r
 
 ## Info needed
 None.
+
+## Fix
+Module-specific causes fixed (generic traceback handling in `cli.main`: BUG-113): `Grid.from_file`, digcheck `--csv/--stages/--gamelog/-c`, defense `--terrain/--stock/--file`, reach `--points/--gamelog/--wall`, perimeter `allow` and water `check`/`lint-cmd` (commit f15d3b5) give one-line usage errors with rc 2. Tests: `test_bug214_*`.

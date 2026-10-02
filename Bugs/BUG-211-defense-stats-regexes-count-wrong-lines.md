@@ -1,6 +1,6 @@
 # BUG-211: `defense stats` counts job-cancel and sparring lines as trap/attack messages, reads the whole 146 MB gamelog on every call (10 s), and prints a false `!!` alarm; `--tail` accepts 0/negative values
 
-- **Status:** open
+- **Status:** fixed in e47790f
 - **Severity:** S2 (meaningless numbers + false alarm "enemies bypass the lane? check claude/zugaenge")
 - **Area:** `df_llm_helper/features/defense.py` `gamelog_stats` (regexes `\btrap\b`, `caught|cage`, `load`, `siege|ambush|vile force|attack`), `_stats` (`read_text().splitlines()`, `if args.tail:`)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -41,3 +41,6 @@ Stream the file from the end (seek to the last N MB), cap `--tail` to >= 1, use 
 
 ## Info needed
 Gordon / next real attack: please copy 20 gamelog lines around a trap firing (`caught in a cage trap`, `... stone-fall trap ...`) and around the arrival of an invasion into `Bugs/evidence/BUG-211/` so the cloud session can write the real patterns. Not testable without time running.
+
+## Fix
+`gamelog_stats`: job lines (`cancels`, `Load ... trap`, suspend/construction) are no trap events; `cancels Load ... trap` counts as `reload problems`; attacks = invasion announcements only (vile force, ambush, siege but not `siege operator`, snatcher, thief, ...), sparring is ignored; the file is read from the end (last 8 MB), `--tail` must be >= 1. Test: `test_bug211_*` (`fixtures/bugs/BUG-211/gamelog_samples.txt`). Info still welcome: real trap/invasion lines of the next attack to verify the patterns.

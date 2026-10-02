@@ -1,6 +1,6 @@
 # BUG-208: `reach --points <missing file>` prints `Reachable: 0/0 mandatory points` (exit 0); points outside the map / the core itself are accepted without comment
 
-- **Status:** open
+- **Status:** fixed in e47790f
 - **Severity:** S2 (a typo in the path = "all reachable" in a check whose job is to wake the orchestrator when farms are cut off)
 - **Area:** `df_llm_helper/features/reach.py` (points loading, `--points` / `reach.points_file`)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -35,3 +35,6 @@ Raise on a missing file; warn on points with x/y/z outside `claude/status.map_si
 
 ## Info needed
 None.
+
+## Fix
+`reach --points <missing>` -> `Error: reach: points file not found` (rc 2); no watch points -> rc 2 with a message; points outside `claude/status.map_size` are reported as `config error` (status not readable, no CRIT); `cause unknown` lines say what to check. Test: `test_bug208_*` (points file `fixtures/bugs/BUG-208/pts_test.yaml`).

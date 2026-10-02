@@ -1,6 +1,6 @@
 # BUG-219: `siege` with an unreadable `pilot_siege status` ends as "Siege ABORTED" + crit warning + `notify.flag` (push to the player) although no siege exists; exit code differs between real (1) and `--dry-run` (0)
 
-- **Status:** open
+- **Status:** fixed in ab33904
 - **Severity:** S3 (S2 if `siege` is ever called from automation while DF is not reachable)
 - **Area:** `df_llm_helper/siege.py` `SiegeRunner.run` (`if not o.ok: ... flow.state = "ABORT"`, `finally:` -> `store.warn(... "crit")`, `tools.write_flag("notify", ...)`), `df_llm_helper/cli.py` `cmd_siege` return code
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -39,3 +39,6 @@ Separate `ERROR` from `ABORT`; only ABORT paths after a siege started write the 
 
 ## Info needed
 Live behaviour with real attackers cannot be tested while the game is paused (see report: needs a running siege). Please run `python -m df_llm_helper siege --once -v` at the next real attack (as INTEGRATION v2-01 asks) and attach the output.
+
+## Fix
+An unreadable `pilot_siege status` before any siege step is state `ERROR`: `Siege autopilot ERROR (no siege action taken)` + the cause, no crit warning, no `notify.flag`; lost in the middle of a siege it still aborts and notifies. Exit codes via `siege.exit_code` for real and dry runs alike (0 ok, 1 abort, 2 error); `no attackers on the map` mentions that only invaders count. Test: `test_bug219_*`. Live check at the next real attack stays (INTEGRATION v2-01).

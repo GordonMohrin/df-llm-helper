@@ -18,10 +18,12 @@ from dataclasses import dataclass
 from .clock import TICKS_PER_DAY, GameDate
 
 __all__ = ["DEFAULTS", "Estimate", "point_from_snapshot", "estimate", "fmt_line", "Forecaster", "backtest",
-           "series_from_metrics"]
+           "series_from_metrics", "default_metrics_file"]
 
 DEFAULTS = {"warn_days": 30, "crit_days": 10, "window": 5, "include_raw_plants": True, "max_points": 50,
-            "min_dt_days": 0.25}
+            "min_dt_days": 0.25, "max_age_days": 60}
+# max_age_days (BUG-213): points older than this (game days, relative to the newest point) are dropped - a series that
+# mixed a 14-year-old point (population 24) with today's (174) gave "Food 267±6409 days"
 RES = ("food", "drink")
 LABEL = {"food": "Food", "drink": "Drink"}
 
@@ -99,7 +101,7 @@ def _num(x: float) -> str:
     return f"{x:+.1f}"
 
 
-def fmt_line(ests: dict) -> str:
+def fmt_line(ests: dict, band: bool = True) -> str:
     parts = []
     for res in RES:
         e = ests.get(res)
@@ -109,12 +111,14 @@ def fmt_line(ests: dict) -> str:
         if e.days is None:
             parts.append(f"{LABEL[res]} stable ({_num(e.net)}/day)")
             continue
-        band = ""
-        if e.spread is not None and e.lo is not None and e.hi is not None:
-            band = f"±{e.spread:.0f}" if e.spread >= 0.5 else ""
+        b = ""
+        if not band:
+            pass                                          # low confidence: a band would only suggest precision
+        elif e.spread is not None and e.lo is not None and e.hi is not None:
+            b = f"±{e.spread:.0f}" if e.spread >= 0.5 else ""
         elif e.lo is not None and e.hi is None:
-            band = f" (min {e.lo:.0f})"
-        parts.append(f"{LABEL[res]} {e.days:.0f}{band} days ({_num(e.net)}/day)")
+            b = f" (min {e.lo:.0f})"
+        parts.append(f"{LABEL[res]} {e.days:.0f}{b} days ({_num(e.net)}/day)")
     return ("Forecast: " + ", ".join(parts))[:120]
 
 
@@ -141,7 +145,15 @@ class Forecaster:
         self.cfg = {**DEFAULTS, **(cfg or {})}
 
     def series(self) -> list:
-        return list(self.store.get("forecast.series") or [])
+        return self._recent(list(self.store.get("forecast.series") or []))
+
+    def _recent(self, s: list) -> list:
+        """Only points within max_age_days of the newest one (BUG-213: rates across epochs are meaningless)."""
+        age = self.cfg.get("max_age_days")
+        if not s or not age:
+            return s
+        last = s[-1][0]
+        return [p for p in s if last - p[0] <= float(age)]
 
     def add_point(self, pt: list) -> None:
         s = self.series()
@@ -152,7 +164,7 @@ class Forecaster:
             s[-1] = pt
         else:
             s.append(pt)
-        self.store.set("forecast.series", s[-int(self.cfg["max_points"]):])
+        self.store.set("forecast.series", self._recent(s)[-int(self.cfg["max_points"]):])
 
     def _calibrate(self, s: list, pt: list) -> None:
         pred = self.store.get("forecast.pred") or {}
@@ -187,8 +199,8 @@ class Forecaster:
         if record and pt:
             self.store.set("forecast.pred", {r: {"day": pt[0], "stock": e.stock, "net": e.net}
                                              for r, e in ests.items() if e is not None})
-        line = fmt_line(ests)
         conf = self.confidence()
+        line = fmt_line(ests, band=conf >= 0.5)
         if conf < 0.7 and len(line) < 100:
             line = (line + f" [confidence {conf:.1f}]")[:120]
         news = []
@@ -207,12 +219,40 @@ class Forecaster:
         return line, news
 
 
+METRICS_COLUMNS = ("spieldatum", "buerger", "mahlzeiten", "getraenke")
+
+
+def default_metrics_file(home=None):
+    """forecast backtest without --file (BUG-213): runtime/metrics.csv (output of `journal metrics --out ...`), else
+    the project's metrics.csv one level up (the player's layout); None when neither exists."""
+    from pathlib import Path
+    if home is None:
+        from .config import HOME as home
+    for p in (Path(home) / "runtime" / "metrics.csv", Path(home).parent / "metrics.csv"):
+        if p.is_file():
+            return p
+    return None
+
+
 def series_from_metrics(path, include_raw: bool = True) -> list:
-    """metrics.csv (run 5, ';'-separated) -> time series. Food = mahlzeiten (+ pflanzen)."""
+    """metrics.csv (run 5, ';'-separated) -> time series. Food = mahlzeiten (+ pflanzen).
+    Missing file / file without the metrics header -> ValueError (one-line error, rc 2)."""
     import csv
+    from pathlib import Path
+    if path is None:
+        path = default_metrics_file()
+        if path is None:
+            raise ValueError("no metrics file: create one with `python -m df_llm_helper journal metrics --out "
+                             "runtime/metrics.csv` or pass --file")
+    if not Path(path).is_file():
+        raise ValueError(f"metrics file not found: {path}")
     out = []
     with open(path, encoding="utf-8", errors="replace") as f:
-        for row in csv.DictReader(f, delimiter=";"):
+        rd = csv.DictReader(f, delimiter=";")
+        missing = [c for c in METRICS_COLUMNS if c not in (rd.fieldnames or [])]
+        if missing:
+            raise ValueError(f"{path} is not a metrics file (';'-separated, columns missing: {', '.join(missing)})")
+        for row in rd:
             d = GameDate.parse_text(row.get("spieldatum", ""))
             try:
                 pop = int(row["buerger"])
@@ -229,6 +269,8 @@ def series_from_metrics(path, include_raw: bool = True) -> list:
 def backtest(series: list, res: str = "food", window: int = 5, horizon_days: float = 10.0) -> dict:
     """For each point: forecast from the past only, predict the stock in ~horizon_days, compare with the real value.
     Error relative to the stock (|pred-real| / max(real, pred, 1)), stock never below 0."""
+    if not horizon_days >= 1:
+        raise ValueError(f"--horizon must be >= 1 game day (got {horizon_days})")
     errs = []
     for i in range(window + 1, len(series) - 1):
         hist = series[:i + 1]

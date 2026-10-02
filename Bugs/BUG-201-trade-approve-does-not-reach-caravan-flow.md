@@ -1,6 +1,6 @@
 # BUG-201: `trade approve` has no effect on `caravan` (two separate state machines); `trade status` shows IDLE while `caravan` waits in REVIEW; `trade step` in REVIEW shows nothing to judge
 
-- **Status:** open
+- **Status:** fixed in ab33904
 - **Severity:** S2 (documented manual approval path does not work; the orchestrator is told to run a command that changes nothing)
 - **Area:** `df_llm_helper/cli.py` `cmd_trade` (kv `trade.flow`) vs. `df_llm_helper/caravan.py` (kv `caravan.state` -> `["flow"]`); docs `docs/MANUAL.md` 9.2 and section 2 table ("trade approve after the dry run")
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -55,3 +55,6 @@ One persistent flow for both commands (or `trade approve` writes `caravan.state.
 
 ## Info needed
 Which of the two commands is the intended primary interface during a real trade (INTEGRATION section 8 uses `trade step`, MANUAL 9.2 uses `caravan --loop`)? The cloud session should decide and make the other one a thin alias. Gordon: with the next real caravan, please run `trade status` and `caravan status` side by side once and attach both outputs.
+
+## Fix
+Decision: `caravan` is the primary interface (MANUAL 9.2); `trade approve` now approves the trade that waits in REVIEW in the caravan autopilot (kv `caravan.state`) and/or the manual automaton (kv `trade.flow`) via `caravan.approve_review`, and is refused (rc 2) when nothing waits in REVIEW. `trade status` adds a `Caravan autopilot: <state>` line; REVIEW lines no longer pile up and name the next command; `trade step` in REVIEW prints how to judge and approve. Test: `test_bug201_*` (replay `fixtures/bugs/BUG-201/car_replay_low.jsonl`). Live check for Gordon (next caravan): `trade status` and `caravan status` side by side.

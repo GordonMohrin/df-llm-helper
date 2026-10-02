@@ -136,7 +136,7 @@ def test_obs_parsing_and_unreadable(tmp_path):
     m = MockClient({}, clock=clock)
     r = SiegeRunner(m, ToolsDir(tmp_path, clock), Store(), clock, DEFAULTS)
     flow, _ = r.run()
-    assert flow.state == "ABORT" and "not readable" in flow.notify[0]
+    assert flow.state == "ERROR" and "not readable" in flow.report[0] and not flow.notify   # BUG-219
 
 
 def test_cli_siege(tmp_path, tools_dir, capsys):
@@ -147,7 +147,7 @@ def test_cli_siege(tmp_path, tools_dir, capsys):
                  f"  gamelog: {tmp_path / 'g'}\n", encoding="utf-8")
     rc = main(["--config", str(c), "--mock", str(FIX), "siege", "--dry-run"])
     out = capsys.readouterr().out
-    assert "Siege ABORTED" in out or "no attackers" in out
+    assert "Siege autopilot ERROR" in out or "no attackers" in out
 
 
 def test_alert_on_sent_only_once_per_step():

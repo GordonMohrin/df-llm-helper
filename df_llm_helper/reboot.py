@@ -191,7 +191,8 @@ class Reboot:
                 self.store.warn(now, "reboot", "reboot:fail", out[-1], "crit")
         else:
             do("claude/advance run", "run")
-            out.append(f"Restart: {len(started)} services started ({', '.join(started)})")
+            out.append(f"Restart (dry run): would start {len(started)} services ({', '.join(started)}) - nothing started"
+                       if dry else f"Restart: {len(started)} services started ({', '.join(started)})")   # BUG-216
             if not dry:
                 self.store.warn(now, "reboot", "reboot:ok", out[-1], "warn")
         out += [f"{s.name} off: {s.note}" for s in manual]

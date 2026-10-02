@@ -1,6 +1,6 @@
 # BUG-202: `trade step` never leaves DONE/ABORT/FAILED: the next caravan is silently ignored, and the old `approved: True` stays (live state.db right now)
 
-- **Status:** open
+- **Status:** fixed in ab33904
 - **Severity:** S2 (next caravan is not traded; no message says why; a stale approval is stored)
 - **Area:** `df_llm_helper/trade_flow.py` `TradeFlow.step` (terminal states return `[]`), `df_llm_helper/cli.py` `cmd_trade` (no auto-reset), `docs/MANUAL.md` section 2 ("call trade step repeatedly")
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -49,3 +49,6 @@ In `cmd_trade` step: if the flow is terminal and no caravan is `AtDepot` (or the
 
 ## Info needed
 Gordon / orchestrator: is the DONE+approved state in the live `data/state.db` from the Run 5 trades? It is harmless today but will block the next caravan; `python -m df_llm_helper trade reset` clears it (I did not run it - write action on the live store).
+
+## Fix
+`TradeFlow.step` renews a terminal automaton (DONE/ABORT/FAILED) as soon as no caravan is on the map; `approved` is cleared whenever a trade ends; `trade step` in a terminal state with a caravan still present says `run trade reset`. The live DONE+approved row in `data/state.db` is renewed by the next `trade step` after the caravan left (or `trade reset`). Test: `test_bug202_*`.

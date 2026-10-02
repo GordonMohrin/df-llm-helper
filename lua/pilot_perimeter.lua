@@ -1,4 +1,4 @@
--- claude/pilot_perimeter scan|start cx cy cz zmin zmax [budget] | result            (df-llm-helper spec v3-01, LIVE-UNTESTED)
+-- claude/pilot_perimeter scan|start cx cy cz zmin zmax [budget] [mincomp] | result            (df-llm-helper spec v3-01, LIVE-UNTESTED)
 -- Accesses from outside into the fort (algorithm of lua/claude/zugaenge.lua, JSON output):
 --   1. multi-source BFS from every walkable tile with designation.outside (levels zmin..zmax)
 --   2. entry = reached walkable INSIDE tile that has a reached outside tile as move neighbor
@@ -69,10 +69,10 @@ local UP = { X = true, x = true, ['<'] = true }
 local DOWN = { X = true, x = true, ['>'] = true }
 local RAMP = { ['^'] = true, ['/'] = true }
 
-local function new_job(cx, cy, cz, zmin, zmax, budget)
+local function new_job(cx, cy, cz, zmin, zmax, budget, mincomp)
   local J = { cx = cx, cy = cy, cz = cz, zmin = math.max(0, zmin), zmax = math.min(ZM - 1, zmax),
               budget = budget or 20000, phase = 'seed', zc = math.max(0, zmin), cache = {}, seen = {}, q = {}, qi = 1,
-              visited = 0, t0 = os.clock() }
+              visited = 0, t0 = os.clock(), mincomp = mincomp }
   J.zc = J.zmin
   local function key(x, y, z) return (z * YM + y) * XM + x end
   local function unkey(k) local x = k % XM local r = (k - x) // XM return x, r % YM, r // YM end
@@ -146,8 +146,9 @@ local function new_job(cx, cy, cz, zmin, zmax, budget)
         J.entries = {}
         -- Enklaven-Filter (bau J113): ein Aussen-Nachbar zaehlt nur, wenn seine zusammenhaengende Aussenflaeche >= MINCOMP Kacheln hat
         -- (abgemauerte Terrassen mit Himmelsflag sind keine Aussenwelt); identisch zu lua/claude/zugaenge.lua (MINCOMP 3000)
-        local MINCOMP, compmemo = 3000, {}
+        local MINCOMP, compmemo = J.mincomp or 3000, {}   -- arg 8 (0 = filter off, grid fixtures)
         local function real_outside(startk)
+          if MINCOMP <= 0 then return true end
           if compmemo[startk] ~= nil then return compmemo[startk] end
           local seenc, qc, qi, big = { [startk] = true }, { startk }, 1, false
           while qc[qi] do
@@ -234,10 +235,10 @@ end
 if cmd == 'scan' or cmd == 'start' then
   local cx, cy, cz, zmin, zmax = n(2), n(3), n(4), n(5), n(6)
   if not (cx and cy and cz and zmin and zmax) then
-    util.emit({ ok = false, error = cmd .. ' cx cy cz zmin zmax [budget]' })
+    util.emit({ ok = false, error = cmd .. ' cx cy cz zmin zmax [budget] [mincomp]' })
     return
   end
-  local J = new_job(cx, cy, cz, zmin, zmax, n(7))
+  local J = new_job(cx, cy, cz, zmin, zmax, n(7), n(8))
   if cmd == 'scan' then
     while not J.step() do end
     util.emit(J.result())
@@ -263,5 +264,5 @@ elseif cmd == 'result' then
   local s = read_file()
   if s then print(s) else util.emit({ ok = false, error = 'no scan result' }) end
 else
-  util.emit({ ok = false, error = 'Usage: claude/pilot_perimeter scan|start cx cy cz zmin zmax [budget] | result' })
+  util.emit({ ok = false, error = 'Usage: claude/pilot_perimeter scan|start cx cy cz zmin zmax [budget] [mincomp] | result' })
 end

@@ -190,15 +190,18 @@ def check_targets(grid: Grid, targets: dict, cfg: dict | None = None, *, forbid_
             continue
         ch = grid.get(t)
         x, y, z = t
-        if ch == "?":
-            rep.unrevealed.append(t)
-            continue
+        # R1/R4 are geometry of the target, also judged for unrevealed tiles (BUG-207)
         if not c["z_min"] <= z <= c["z_max"]:
             rep.findings.append(Finding("R1", t, f"z{z} outside {c['z_min']}..{c['z_max']}"))
         for b in boxes:
             if in_box(t, b):
                 rep.findings.append(Finding("R4", t, f"in blocked box {list(b)}"))
                 break
+        if min(t) < 0:
+            rep.findings.append(Finding("R1", t, "outside the map (negative coordinate)"))
+        if ch == "?":
+            rep.unrevealed.append(t)
+            continue
         hidden_n = False
         r2 = int(c["roof_min_surface"] if z >= c["surface_z"] else c["roof_min"])
         r = max(r2, 2)
@@ -364,27 +367,53 @@ class DigCheck:
 
 # ---------------------------------------------------------------- CLI + check hook
 
+def _read(path: str, what: str) -> str:
+    """Input file -> text; a missing/unreadable file is a usage error (rc 2), not a traceback (BUG-214)."""
+    from ..toolsfs import read_text_tolerant
+    p = Path(path)
+    if not p.is_file():
+        raise ValueError(f"{what} file not found: {path}")
+    try:
+        return read_text_tolerant(p)
+    except OSError as e:
+        raise ValueError(f"cannot read {what} file {path}: {e.strerror or e}") from None
+
+
+def _cursor(text: str) -> list:
+    parts = [v.strip() for v in str(text).split(",")]
+    if len(parts) != 3 or not all(re.fullmatch(r"-?\d+", v) for v in parts):
+        raise ValueError(f"-c needs x,y,z (three integers), got {text!r}")
+    return [int(v) for v in parts]
+
+
 def _targets(args) -> tuple:
+    """-> (targets, name, why-empty)."""
     if args.csv:
         if not args.cursor:
             raise ValueError("--csv needs -c x,y,z")
-        cur = [int(v) for v in args.cursor.split(",")]
-        return parse_qf_csv(Path(args.csv).read_text(encoding="utf-8"), cur), Path(args.csv).name
+        cur = _cursor(args.cursor)
+        text = _read(args.csv, "--csv")
+        why = ("no #dig cells (empty file or not a '#dig' blueprint)" if "#dig" in text
+               else "not a '#dig' blueprint (no '#dig' line)")
+        return parse_qf_csv(text, cur), Path(args.csv).name, why
     if args.stages:
         if not args.stage:
             raise ValueError("--stages needs --stage NAME")
-        t, _ = parse_stages(Path(args.stages).read_text(encoding="utf-8"), args.stage)
-        return t, args.stage
+        t, _ = parse_stages(_read(args.stages, "--stages"), args.stage)
+        return t, args.stage, (f"stage {args.stage!r} not found in {Path(args.stages).name} "
+                               f"(only literal add('name', z, x1, y1, x2, y2) lines are read)")
     if args.rect:
-        return parse_rect(" ".join(args.rect)), "rect " + " ".join(args.rect)
+        return parse_rect(" ".join(args.rect)), "rect " + " ".join(args.rect), "empty rectangle"
     raise ValueError("digcheck: give rect z x1 y1 x2 y2 [mode] | --csv FILE -c x,y,z | --stages FILE --stage NAME")
 
 
 def cmd_digcheck(args) -> int:
     from ..cli import _pilot
-    from ..toolsfs import read_text_tolerant
     p = _pilot(args)
-    targets, name = _targets(args)
+    targets, name, why = _targets(args)
+    if not [t for t, m in targets.items() if m != "x"]:
+        print(f"digcheck {name}: refused - nothing to check ({why})")       # never 'ok' for 0 tiles (BUG-207)
+        return 2
     pcfg = p.cfg.get("perimeter", {}) or {}
     allow = []
     try:
@@ -392,13 +421,14 @@ def cmd_digcheck(args) -> int:
         allow = Perimeter(p.client, p.tools, p.store, p.clock, pcfg).allow()
     except Exception:
         pass
-    dc = DigCheck(p.client, p.store, p.clock, p.cfg.get(KEY, {}) or {}, water_boxes=p.cfg.get("water.forbid_dig"),
+    from ..store import Store
+    dc = DigCheck(p.client, Store() if args.grid else p.store, p.clock,          # BUG-204: --grid = offline, no state p.cfg.get(KEY, {}) or {}, water_boxes=p.cfg.get("water.forbid_dig"),
                   allow=allow, tol=(int(pcfg.get("tolerance_xy", 4)), int(pcfg.get("tolerance_z", 2))))
     grid = Grid.from_file(args.grid) if args.grid else None
     rep = dc.check(targets, name, grid=grid)
     lines = rep.lines()
     if args.gamelog:
-        n, who = inappropriate_cancels(read_text_tolerant(Path(args.gamelog)).splitlines())
+        n, who = inappropriate_cancels(_read(args.gamelog, "--gamelog").splitlines())
         if n:
             lines.append(f"gamelog: {n}x 'Inappropriate dig square' ({who} dwarves) - check R6 targets")
     if args.strip and rep.result != "ok":

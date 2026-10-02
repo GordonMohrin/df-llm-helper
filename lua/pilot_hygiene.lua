@@ -89,21 +89,50 @@ local function is_bone_or_skin(it)
   return false
 end
 
--- reference tile inside the fort for reachability: config FORT_REFS[1], otherwise the first citizen
-local function fort_ref()
+-- reference tiles inside the fort for reachability: EVERY config FORT_REFS entry plus up to 5 citizens standing on an
+-- inside tile (BUG-210: FORT_REFS[1] alone was a surface point outside the closed gatehouse -> no item counted 'fort')
+local function fort_refs()
+  local refs = {}
   local cfg = safe(function() return reqscript('claude/config') end, nil)
-  local r = cfg and cfg.FORT_REFS and cfg.FORT_REFS[1]
-  if r then return xyz2pos(r[1], r[2], r[3]) end
-  for _, u in ipairs(dfhack.units.getCitizens(true)) do
-    if u.pos.x >= 0 then return xyz2pos(u.pos.x, u.pos.y, u.pos.z) end
+  for _, r in ipairs(cfg and cfg.FORT_REFS or {}) do
+    if type(r) == 'table' and r[3] then refs[#refs + 1] = xyz2pos(r[1], r[2], r[3]) end
   end
-  return nil
+  local cit = 0
+  for _, u in ipairs(safe(function() return dfhack.units.getCitizens(true) end, {})) do
+    if cit >= 5 then break end
+    if u.pos.x >= 0 then
+      local fl = dfhack.maps.getTileFlags(u.pos.x, u.pos.y, u.pos.z)
+      if fl and not fl.outside then
+        refs[#refs + 1] = xyz2pos(u.pos.x, u.pos.y, u.pos.z)
+        cit = cit + 1
+      end
+    end
+  end
+  return refs
 end
 
-local REF = fort_ref()
+local REFS = fort_refs()
+local REF = REFS[1]
 local function reachable(x, y, z)
-  if not REF then return true end
-  return safe(function() return dfhack.maps.canWalkBetween(REF, xyz2pos(x, y, z)) end, false)
+  if #REFS == 0 then return true end
+  local p = xyz2pos(x, y, z)
+  for _, r in ipairs(REFS) do
+    if safe(function() return dfhack.maps.canWalkBetween(r, p) end, false) then return true end
+  end
+  return false
+end
+
+-- for COUNTING only (status): corpse of the fort race (item race or its unit). Named invaders (hist figure) are
+-- 'other' here (BUG-210); the mark filter keeps the fail-safe is_dwarf_corpse.
+local function fort_race_corpse(it, t)
+  if not CORPSE_T[t] then return false end
+  if safe(function() return it.race end, -1) == FORT_RACE then return true end
+  local uid = safe(function() return it.unit_id end, -1)
+  if uid >= 0 then
+    local u = safe(function() return df.unit.find(uid) end, nil)
+    if u and u.race == FORT_RACE then return true end
+  end
+  return false
 end
 
 local function area_of(x, y, z)
@@ -124,7 +153,8 @@ if cmd == 'status' then
   local stop = math.min(total, start + n)
   local out = { ok = true, start = start, next = stop, total = total, done = stop >= total, scanned = stop - start,
                 loose = 0, by_type = {}, boulder_z = {}, area = {}, corpses = { dwarf = 0, other = 0, other_fort = 0 },
-                marked = { pending = 0, unreachable = 0, sx = 0, sy = 0, sz = 0 }, rotten = 0, ref = REF and { REF.x, REF.y, REF.z } or nil }
+                marked = { pending = 0, unreachable = 0, sx = 0, sy = 0, sz = 0 }, rotten = 0, ref = REF and { REF.x, REF.y, REF.z } or nil,
+                refs = #REFS }
   for i = start, stop - 1 do
     local it = all[i]
     local ok, x, y, z = loose(it)
@@ -139,7 +169,7 @@ if cmd == 'status' then
         inc(out.area, ar)
         if t == 'BOULDER' then inc(out.boulder_z, tostring(z)) end
         if CORPSE_T[t] then
-          if is_dwarf_corpse(it, t) then out.corpses.dwarf = out.corpses.dwarf + 1
+          if fort_race_corpse(it, t) then out.corpses.dwarf = out.corpses.dwarf + 1
           else
             out.corpses.other = out.corpses.other + 1
             if ar == 'fort' then out.corpses.other_fort = out.corpses.other_fort + 1 end

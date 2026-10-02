@@ -1,6 +1,6 @@
 # BUG-200: `caravan` after a finished trade is not terminal: every further call repeats `claude/advance run`, deletes `pause.hold`/`caravan.flag` again and duplicates "Trade completed"
 
-- **Status:** open
+- **Status:** fixed in ab33904
 - **Severity:** S2 (a repeated call un-pauses the game and deletes a `pause.hold` that may belong to something else, e.g. an alarm hold)
 - **Area:** `df_llm_helper/caravan.py` (`CaravanPilot.step`, final `if flow.state == "DONE": self._resume(...)`), `df_llm_helper/cli.py` (`cmd_caravan`)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -55,3 +55,6 @@ Run `_resume` only on the transition into DONE (compare the state before/after `
 
 ## Info needed
 None for the fix. Live check for Gordon with a real caravan (only possible with time running): after the trade finished, call `python -m df_llm_helper caravan --dry-run` twice and check that no `[dry] claude/advance run` is listed.
+
+## Fix
+`CaravanPilot.step` returns early (no command, no flag deletion) while the persisted flow is DONE/ABORT/FAILED and the caravan is still listed; `_resume` runs only on the transition into DONE and does not send a second `advance run` (the automaton already sent it in RELEASE -> RESUME); report lines are not duplicated. Test: `tests/test_bugs_autopilots.py::test_bug200_*` (replay `fixtures/bugs/BUG-200/car_replay.jsonl`).

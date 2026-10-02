@@ -67,11 +67,14 @@ def _as_point(d: dict, mandatory_cats) -> Point | None:
     return Point(str(d["name"]), tuple(int(v) for v in xyz), cat, mand, bool(d.get("adjacent", False)))
 
 
-def load_points(path, mandatory_cats=None) -> tuple:
-    """data/reach.yaml -> (start or None, [Point])."""
+def load_points(path, mandatory_cats=None, *, required: bool = False) -> tuple:
+    """data/reach.yaml -> (start or None, [Point]). required: a missing file is an error (explicit --points, BUG-208)
+    instead of an empty list that reads as 'Reachable: 0/0'."""
     from .. import yamlmini
     p = Path(path)
     if not p.exists():
+        if required:
+            raise ValueError(f"reach: points file not found: {path}")
         return None, []
     data = yamlmini.load_file(p) or {}
     pts = [q for q in (_as_point(d, mandatory_cats) for d in (data.get("points") or []) if isinstance(d, dict)) if q]
@@ -190,22 +193,33 @@ def correlate(lines, points, unreachable: set, min_count: int = 20) -> list:
     return out
 
 
-def digest_line(points, status: dict, causes: dict | None = None) -> str:
+WALL_TILES = set("#AC")        # a watch point ON such a tile is a data error of the points file (BUG-209)
+
+
+def digest_line(points, status: dict, causes: dict | None = None, on_wall=None) -> str:
     mand = [p for p in points if p.mandatory]
     bad = [p for p in mand if status.get(p.name) is False]
     unk = [p for p in mand if status.get(p.name) is None]
     if not bad:
+        if not mand:
+            return "Reachable: no mandatory watch points (points file missing/empty?)"
         s = f"Reachable: {len(mand) - len(unk)}/{len(mand)} mandatory points"
         return s + (f" ({len(unk)} not readable)" if unk else "")
     groups: dict = {}
     for p in bad:
         cut = (causes or {}).get(p.name)
-        key = fmt(cut[0]) if cut else ("?" if cut is None else "no construction")
+        if p.name in (on_wall or ()):
+            key = "on a wall"
+        else:
+            key = fmt(cut[0]) if cut else ("?" if cut is None else "no construction")
         groups.setdefault(key, []).append(p.name)
     parts = []
     for key, names in groups.items():
-        parts.append(f"{', '.join(names)} (cut at {key})" if key not in ("?", "no construction") else
-                     f"{', '.join(names)} (cause unknown)")
+        if key == "on a wall":
+            parts.append(f"{', '.join(names)} (point on a wall tile: fix the points file)")
+        else:
+            parts.append(f"{', '.join(names)} (cut at {key})" if key not in ("?", "no construction") else
+                         f"{', '.join(names)} (cause unknown)")
     s = "UNREACHABLE: " + "; ".join(parts)
     if len(s) > LINE_MAX:
         s = s[:LINE_MAX - 1].rstrip() + "…"
@@ -232,6 +246,7 @@ class ReachWatch:
             start = start or fstart
         self.points = list(points)
         self.start = tuple(start or self.cfg["start"])
+        self._map = "?"
 
     # ---- live calls (pilot_reach.lua)
     def _run(self, cmd: str):
@@ -239,6 +254,20 @@ class ReachWatch:
         register_read(cmd)                                   # pure read command (no write effect)
         r = self.client.run(cmd)
         return r.json if r.ok else None
+
+    def outside_map(self) -> list:
+        """Points outside the map (claude/status map_size); [] when the size is unknown."""
+        self._map = "?"
+        if not self.points:
+            return []
+        r = self.client.run("claude/status")
+        m = (r.json or {}).get("map_size") if r.ok and isinstance(r.json, dict) else None
+        try:
+            mx, my, mz = int(m["x"]), int(m["y"]), int(m["z"])
+        except (TypeError, KeyError, ValueError):
+            return [p for p in self.points if min(p.xyz) < 0]
+        self._map = f"({mx}x{my}x{mz})"
+        return [p for p in self.points if min(p.xyz) < 0 or p.xyz[0] >= mx or p.xyz[1] >= my or p.xyz[2] >= mz]
 
     def measure(self) -> dict:
         if not self.points:
@@ -263,28 +292,43 @@ class ReachWatch:
         t0 = time.time()
         now = self.clock.now().epoch
         status = measure_grid(grid, self.start, self.points) if grid is not None else self.measure()
+        outside = self.outside_map() if grid is None else []
+        for p in outside:
+            status[p.name] = None                 # configuration error, not "unreachable" (BUG-208)
         bad = [p for p in self.points if p.mandatory and status.get(p.name) is False]
         causes: dict = {}
+        on_wall: set = set()
+        g = None
         if bad:
             g = grid if grid is not None else self.grid_for(bad)
             if g is not None:
                 causes = find_causes(g, self.start, bad)
-        lines = [digest_line(self.points, status, causes)]
+                on_wall = {p.name for p in bad if not p.adjacent and g.get(p.xyz) in WALL_TILES}
+        lines = [digest_line(self.points, status, causes, on_wall)]
+        for p in outside:
+            lines.append(f"config error: point {p.label()} is outside the map {self._map}: fix the points file")
         for p in bad:
             cut = causes.get(p.name)
-            if cut:
-                lines.append(f"{p.label()}: cut by construction {', '.join(fmt(c) for c in cut)} -> remove it "
-                             f"(designate 'remove construction') or replace it with a door")
+            if p.name in on_wall:                 # BUG-209: never advise removing the wall the point sits in
+                lines.append(f"{p.label()}: the watch point lies ON a wall tile ('{g.get(p.xyz)}') - fix its "
+                             f"coordinates in the points file ({self.cfg['points_file']}); do not remove the construction")
+            elif cut:
+                lines.append(f"{p.label()}: cut by construction {', '.join(fmt(c) for c in cut)} -> check it, then "
+                             f"remove it (designate 'remove construction') or replace it with a door (player decision)")
             elif cut is None and causes:
                 lines.append(f"{p.label()}: no path even without constructions (natural wall/unrevealed/box)")
+            elif not causes:
+                lines.append(f"{p.label()}: cause unknown (tile dump not readable) - point revealed? inside a "
+                             "wall/building? check the points file")
         if gamelog_lines:
             for c in correlate(gamelog_lines, self.points, {p.name for p in bad}, int(self.cfg["cancel_min"])):
                 if c.points:
                     lines.append(c.line())
         if not dry:
             key = "reach:unreachable"
-            if bad:
-                self.store.warn(now, "reach", key, lines[0], "crit")
+            if bad:                             # only config errors (points on walls) -> warn, not crit (BUG-209)
+                self.store.warn(now, "reach", key, lines[0],
+                                "warn" if all(p.name in on_wall for p in bad) else "crit")
             self.store.set("reach.last", {"ts": now, "bad": [p.name for p in bad], "line": lines[0]})
             self.store.set("reach.last_ts", now)
         self.store.log_action(now, "reach", "reach", "measure", "reach", "claude/pilot_reach check", dry, not bad,
@@ -316,7 +360,7 @@ def _watch(p, args=None) -> ReachWatch:
         g = Grid.from_file(args.grid)
         start, pts = points_from_grid(g, {**DEFAULTS, **cfg}["mandatory"])
     elif args is not None and getattr(args, "points", None):
-        start, pts = load_points(args.points, {**DEFAULTS, **cfg}["mandatory"])
+        start, pts = load_points(args.points, {**DEFAULTS, **cfg}["mandatory"], required=True)
     return ReachWatch(p.client, p.store, p.clock, cfg, points=pts, start=start)
 
 
@@ -325,13 +369,20 @@ def cmd_reach(args) -> int:
     p = _pilot(args)
     w = _watch(p, args)
     grid = Grid.from_file(args.grid) if getattr(args, "grid", None) else None
+    if grid is not None:
+        from ..store import Store
+        w.store = Store()            # BUG-204: an offline fixture run never touches the fort's state.db
     if args.action == "points":
         for q in w.points:
             print(f"{'*' if q.mandatory else ' '} {q.label()} [{q.cat}]")
         print(f"start {fmt(w.start)}; * = mandatory")
         return 0
     if args.action == "what-if":
-        walls = [tuple(int(v) for v in t) for t in (args.wall or [])]
+        walls = []
+        for t in args.wall or []:
+            if not all(str(v).lstrip("-").isdigit() for v in t):          # BUG-214: no raw int() error
+                raise ValueError(f"usage: reach what-if --wall X Y Z (three integers), got {' '.join(t)}")
+            walls.append(tuple(int(v) for v in t))
         if not walls:
             print("what-if needs --wall x y z")
             return 2
@@ -342,9 +393,14 @@ def cmd_reach(args) -> int:
     gl = []
     if args.gamelog:
         from ..toolsfs import read_text_tolerant
+        if not Path(args.gamelog).is_file():
+            raise ValueError(f"--gamelog file not found: {args.gamelog}")
         gl = read_text_tolerant(Path(args.gamelog)).splitlines()
     elif args.action == "correlate":
         gl = p.gamelog().recent()
+    if not w.points and args.action == "check":
+        print(f"reach: no watch points (points file {args.points or w.cfg['points_file']} missing or empty)")
+        return 2
     status, causes, lines = w.run(dry=args.dry_run, gamelog_lines=gl, grid=grid)
     if args.action == "correlate":
         bad = {k for k, v in status.items() if v is False}

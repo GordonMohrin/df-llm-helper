@@ -95,23 +95,30 @@ def status_lines(ev: dict, warn_pct: float = 70) -> list[str]:
 
 # ---------------------------------------------------------------- stats (pure, gamelog)
 _TRAP = re.compile(r"\btrap\b", re.I)
+# job/announcement lines that mention a trap but are not a trap event (BUG-211: 'X cancels Load cage trap: ...')
+_JOBLINE = re.compile(r"\bcancels\b|suspend|construction|\bLoad\b.*\btrap\b|\btrap\b.*(?:built|completed)", re.I)
+_RELOAD = re.compile(r"\bcancels\b.*\bLoad\b.*\btrap\b", re.I)
+# invasion announcements only; 'X attacks Y but Y jumps away' is sparring, 'siege operator' a profession (BUG-211)
+_INVASION = re.compile(r"vile force|an ambush|\bambush\b|laying siege|siege(?! operator)|snatcher|\bthief\b|"
+                       r"have come|\bare attacking\b", re.I)
 
 
 def gamelog_stats(lines: list[str]) -> dict:
-    """Counts trap-related gamelog lines. Message texts are NOT verified live (only 'trap' is matched)."""
-    trap = [ln for ln in lines if _TRAP.search(ln)]
-    caught = sum(1 for ln in trap if re.search(r"caught|cage", ln, re.I))
-    hits = sum(1 for ln in trap if re.search(r"struck|crush|falls|hit|slash|kill|dies|dead", ln, re.I))
-    load = sum(1 for ln in trap if re.search(r"load", ln, re.I))
-    attacks = sum(1 for ln in lines if re.search(r"siege|ambush|vile force|attack", ln, re.I))
+    """Counts trap events and invasion announcements in gamelog lines. Message texts are NOT verified live: job
+    cancels ('cancels Load cage trap') count as reload problems, not as trap events; soldiers sparring is no attack."""
+    trap = [ln for ln in lines if _TRAP.search(ln) and not _JOBLINE.search(ln)]
+    caught = sum(1 for ln in trap if re.search(r"\bcaught\b", ln, re.I))
+    hits = sum(1 for ln in trap if re.search(r"struck|crush|falls|falling|hit|slash|kill|dies|dead", ln, re.I))
+    load = sum(1 for ln in lines if _RELOAD.search(ln))
+    attacks = sum(1 for ln in lines if _INVASION.search(ln))
     return {"trap_lines": len(trap), "caught": caught, "hits": hits, "load_msgs": load, "attack_lines": attacks}
 
 
 def stats_lines(s: dict) -> list[str]:
-    out = [f"Defense stats (gamelog): trap lines {s['trap_lines']} (caught {s['caught']}, hits {s['hits']}, "
-           f"load messages {s['load_msgs']}), attack lines {s['attack_lines']}"]
+    out = [f"Defense stats (gamelog): trap events {s['trap_lines']} (caught {s['caught']}, hits {s['hits']}), "
+           f"reload problems {s['load_msgs']}, invasion announcements {s['attack_lines']}"]
     if s["attack_lines"] and not s["trap_lines"]:
-        out.append("!! attacks without any trap message: enemies bypass the lane? check `claude/zugaenge` (spec v3-01)")
+        out.append("!! invasion without any trap event: enemies bypass the lane? check `claude/zugaenge` (spec v3-01)")
     elif s["trap_lines"] and s["hits"] + s["caught"] == 0:
         out.append("Hint: traps mentioned but no hits/captures: lane too short or traps empty (`defense status`)")
     return out
@@ -148,15 +155,46 @@ def cmd_defense(args) -> int:
     return _stats(args)
 
 
+_NAME = re.compile(r"[A-Za-z0-9_-]{1,40}")
+
+
+def _read(path: str, what: str) -> str:
+    """Input file -> text; missing/unreadable = usage error (rc 2), not a traceback (BUG-214)."""
+    p = Path(path)
+    if not p.is_file():
+        raise ValueError(f"{what} file not found: {path}")
+    try:
+        return p.read_text(encoding="utf-8-sig", errors="replace")
+    except OSError as e:
+        raise ValueError(f"cannot read {what} file {path}: {e.strerror or e}") from None
+
+
+def _json(path: str, what: str):
+    try:
+        return json.loads(_read(path, what))
+    except json.JSONDecodeError as e:
+        raise ValueError(f"{what} file {path} is not valid JSON: {e.msg} (line {e.lineno})") from None
+
+
 def _design(args) -> int:
-    from ..planners.defense import design_defense, parse_terrain
+    from ..planners.defense import WALKABLE, design_defense, parse_terrain
     cfg = _cfg(args)
-    if args.lane_len:
+    name = args.name if args.name is not None else (cfg.get("blueprint_name") or "defense")
+    if not _NAME.fullmatch(str(name)):           # BUG-212: becomes a file name and a quickfort blueprint name
+        raise ValueError(f"--name must be 1-40 characters A-Z a-z 0-9 _ - (got {name!r})")
+    if args.lane_len is not None:                # BUG-212: 0 was silently ignored
+        if args.lane_len < 3:
+            raise ValueError(f"--lane-len must be >= 3 (got {args.lane_len})")
         cfg["lane_len"] = int(args.lane_len)
     if args.no_niche:
         cfg["shooter_niche"] = False
-    terrain = parse_terrain(Path(args.terrain).read_text(encoding="utf-8"))
-    stock = json.loads(Path(args.stock).read_text(encoding="utf-8")) if args.stock else None
+    terrain = parse_terrain(_read(args.terrain, "--terrain"))
+    stock = _json(args.stock, "--stock") if args.stock else None
+    free = sum(1 for row in terrain.rows for ch in row if ch in WALKABLE)
+    if int(cfg["lane_len"]) > free:              # fail fast instead of a long search (BUG-212)
+        print(f"Defense design FAILED: no lane of length {cfg['lane_len']} fits (the terrain has only {free} "
+              "walkable tiles); shorten --lane-len or enlarge the cut-out")
+        return 1
     plan = design_defense(terrain, _pt(args.door), _pt(args.access), stock=stock, cfg=cfg)
     if terrain.synthetic:
         print("Note: terrain fixture is marked SYNTHETIC")
@@ -174,7 +212,6 @@ def _design(args) -> int:
         print("Stage " + s)
     for n in plan.notes:
         print("Note: " + n)
-    name = args.name or cfg.get("blueprint_name") or "defense"
     if args.out:
         od = Path(args.out)
         od.mkdir(parents=True, exist_ok=True)
@@ -207,7 +244,7 @@ def _design(args) -> int:
 def _status(args) -> int:
     cfg = _cfg(args)
     if args.file:
-        data = json.loads(Path(args.file).read_text(encoding="utf-8"))
+        data = _json(args.file, "--file")
     else:
         from ..cli import _pilot
         r = _pilot(args).client.run(STATUS_CMD)
@@ -230,11 +267,35 @@ def _stats(args) -> int:
     if not p.exists():
         print(f"Defense stats: gamelog not found: {p}")
         return 2
-    lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-    if args.tail:
-        lines = lines[-int(args.tail):]
-    print("\n".join(stats_lines(gamelog_stats(lines))))
+    if args.tail is not None and args.tail < 1:
+        raise ValueError(f"--tail must be >= 1 (got {args.tail})")
+    lines, cut = tail_lines(p, args.tail, STATS_MAX_BYTES)
+    out = stats_lines(gamelog_stats(lines))
+    if cut:
+        out.append(f"(only the last {len(lines)} lines / {STATS_MAX_BYTES // 1_000_000} MB of the gamelog; --tail N)")
+    print("\n".join(out))
     return 0
+
+
+STATS_MAX_BYTES = 8_000_000
+
+
+def tail_lines(path: Path, n: int | None, max_bytes: int) -> tuple[list[str], bool]:
+    """Last n lines (or all lines of the last max_bytes) without reading the whole file (BUG-211: 146 MB = 10 s).
+    -> (lines, cut: True when the start of the file was not read)."""
+    size = path.stat().st_size
+    with path.open("rb") as f:
+        start = max(0, size - max_bytes)
+        f.seek(start)
+        data = f.read()
+    text = data.decode("utf-8", errors="replace")
+    lines = text.splitlines()
+    if start > 0 and lines:
+        lines = lines[1:]                        # first line is cut in the middle
+    if n is not None:
+        cut = start > 0 or len(lines) > n
+        return lines[-n:], cut and len(lines) >= n
+    return lines, start > 0
 
 
 def register(sub) -> None:

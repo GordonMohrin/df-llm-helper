@@ -1,6 +1,6 @@
 # BUG-217: `perimeter`: `seal` says "nothing to do" for a forbidden stair access (no explanation, advice loop); `allow` hides notes and accepts out-of-map coordinates; docs say "through the traps" while live says "bypasses the traps" for the allowed access
 
-- **Status:** open
+- **Status:** fixed in e47790f
 - **Severity:** S3
 - **Area:** `df_llm_helper/features/perimeter.py` (`seal_walls`/`plan_seal`/`seal`, `allow` command), `docs/manual-v3/01-perimeter.md`
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -51,3 +51,6 @@ Add a note for "stair/ramp entry without inside neighbour: seal by hand (door/wa
 
 ## Info needed
 Gordon: the only allowed access (stair T1) is reported as "bypasses the traps" by both `perimeter` and the live `claude/zugaenge` (`umgeht_Fallen = true`). Is that real (trap tiles not on the walking path of the gatehouse) or is the trap coverage test wrong? Compare with `defense status`: 58 stone traps loaded, 81 trap buildings in total.
+
+## Fix
+`seal_walls` adds a note for a stair/ramp entry without inside floor neighbour (`seal by hand`); `seal` then prints `no automatic proposal for ...` with rc 1 instead of `nothing to do`. `perimeter allow` lists notes, refuses tiles outside the map (claude/status map_size, negative values) and warns when an entry lies within the tolerance of the core. Doc example marked as fixture output. Test: `test_bug217_*` (dump `fixtures/bugs/BUG-217/l_dump.jsonl`). Gordon's question (does T1 really bypass the traps?) stays a live check.

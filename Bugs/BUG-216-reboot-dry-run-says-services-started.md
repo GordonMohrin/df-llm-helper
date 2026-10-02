@@ -1,6 +1,6 @@
 # BUG-216: `reboot --dry-run` prints "Restart: 10 services started (...)" although nothing was started
 
-- **Status:** open
+- **Status:** fixed in c34cd95
 - **Severity:** S3 (misleading wording; an LLM reading the first line believes the services run)
 - **Area:** `df_llm_helper/reboot.py` `Reboot.run` (`out.append(f"Restart: {len(started)} services started ...")`, `do()` returns True in dry mode)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -41,3 +41,6 @@ Prefix `Restart (dry run): would start N services`.
 
 ## Info needed
 Gordon: is it intended that arbeit/orders/auslastung/trinken/essen/material/gesund/migranten/raster are off right now (68 of 119 adults idle)? If not, a real `python -m df_llm_helper reboot` (not run by me) restarts them.
+
+## Fix
+Dry run prints `Restart (dry run): would start N services (...) - nothing started`; without `-v` only `ok ...` lines are hidden, so the dry plan lists all commands consistently. Test: `test_bug216_*` (replay `fixtures/bugs/BUG-216/l_rb.jsonl`).

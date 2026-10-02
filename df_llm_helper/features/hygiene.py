@@ -38,6 +38,7 @@ DEFAULTS = {
     "dump_zones": [{"name": "D", "z": 130, "x": [86, 88], "y": [112, 114], "note": "near refuse room/crypt/barracks"}],
     "block": 20000, "max_block_s": 1.0, "max_measure_s": 5.0, "far_tiles": 30, "effect_min_ratio": 0.10,
     "measure_every_s": 1800, "auto_mark": False, "max_marks_per_hour": 2, "corpse_warn": 50, "goblet_cap": 60,
+    "zone_min_gap": 5,             # no zone proposal within this distance of an existing dump zone (BUG-220)
     "in_check": True,
 }
 
@@ -170,8 +171,10 @@ def zone_text(c: dict) -> str:
 
 def suggest_zone(cfg: dict, existing: list[dict], near: tuple | None) -> dict | None:
     """Nearest configured candidate that is not already a dump zone (proposal only, nothing is built)."""
-    taken = {_zone_center(z) for z in existing or []}
-    cands = [c for c in cfg.get("dump_zones") or [] if _zone_center(c) not in taken]
+    taken = [_zone_center(z) for z in existing or []]
+    gap = int(cfg.get("zone_min_gap", 5))           # BUG-220: no proposal right next to an existing dump zone
+    cands = [c for c in cfg.get("dump_zones") or []
+             if not any(_dist(_zone_center(c), t) <= gap for t in taken)]
     if not cands:
         return None
     if near is None:
@@ -210,6 +213,15 @@ def diagnose(m: Measurement, rep: dict | None, cfg: dict) -> tuple[str, str] | N
             return "zone too far", sug_t + f" (nearest zone {d} tiles from the marked items)"
         return "unclear", "wild/rotten corpses are often never hauled (kb aufraeumen); check stockpile_delay"
     return "zone too far", sug_t
+
+
+def area_split_failed(m) -> str:
+    """BUG-210: many loose items but none in the area 'fort' = the reference tile reaches nothing (e.g. it lies outside a
+    closed gatehouse). Returns the warning line or ''."""
+    if int(m.area.get("fort", 0)) == 0 and m.loose > 1000:
+        return ("!! area classification failed: no loose item is reachable from the fort reference "
+                "(claude/config FORT_REFS outside a closed gate?) - areas and dump diagnosis unreliable")
+    return ""
 
 
 def _k(n: int) -> str:
@@ -322,7 +334,10 @@ class Hygiene:
                    + f"; corpses dwarf={m.dwarf_corpses} other={m.other_corpses}; rotten={m.rotten}")
         out.append(f"marked pending={m.pending} (unreachable {m.unreachable}); dump jobs={rep.get('dump_jobs', '?')}; "
                    f"zones={len(rep.get('dump_zones') or [])}")
-        dg = diagnose(m, rep, self.cfg)
+        bad_split = area_split_failed(m)
+        if bad_split:                     # BUG-210: every diagnosis below would build on a wrong area split
+            out.append(bad_split)
+        dg = None if bad_split else diagnose(m, rep, self.cfg)
         if dg:
             out.append(f"Dump: cause '{dg[0]}' -> {dg[1]}")
         g = int(m.by_type.get("GOBLET", 0))
@@ -351,6 +366,16 @@ class Hygiene:
         ghosts = int(k.get("geister") or 0)
         if free is None:
             return [f"Dwarf corpses loose: {m.dwarf_corpses} (never dumped; crypt status not readable)"]
+        opened = k.get("leichen_offen")
+        if isinstance(opened, (int, float)) and int(opened) < m.dwarf_corpses:
+            # BUG-210: the crypt script counts the corpses that really wait for a burial; trust it for the alarm
+            if int(opened) <= 0:
+                return [f"Dwarf corpses (item count) {m.dwarf_corpses}, crypt status: 0 waiting for burial "
+                        f"({free} coffins free) - no ghost risk"]
+            if int(free) < int(opened):
+                return [f"!! Dwarf corpses waiting for burial {int(opened)} > free coffins {free}: ghost risk - "
+                        "build coffins/tombs" + (f" ({ghosts} ghosts)" if ghosts else "")]
+            return [f"Dwarf corpses waiting for burial {int(opened)}: {free} coffins free (burial runs, never dumped)"]
         if int(free) < m.dwarf_corpses:
             return [f"!! Dwarf corpses {m.dwarf_corpses} > free coffins {free}: ghost risk - build coffins/tombs"
                     + (f" ({ghosts} ghosts)" if ghosts else "")]
@@ -365,7 +390,10 @@ class Hygiene:
         rep = self.report()
         zones = rep.get("dump_zones") or []
         out = []
-        dg = diagnose(m, rep, self.cfg)
+        bad_split = area_split_failed(m)
+        if bad_split:                     # BUG-210: every diagnosis below would build on a wrong area split
+            out.append(bad_split)
+        dg = None if bad_split else diagnose(m, rep, self.cfg)
         if dg:
             out.append(f"Dump: cause '{dg[0]}' -> {dg[1]}")
         if not zones:

@@ -1,6 +1,6 @@
 # BUG-215: `care` cuts names at 24 characters (open quote), critical lines name no action; `remote check` always prints an unexplained `Fish N` line and never `Remote ok`
 
-- **Status:** open
+- **Status:** fixed in 05ca8e4
 - **Severity:** S3 (messages; the orchestrator gets lines it cannot act on)
 - **Area:** `df_llm_helper/care.py` (`str(p.get('name',''))[:24]`, `!! ... hospital/outside` line), `df_llm_helper/features/remote.py` (`fish_line`, `if not out: "Remote ok"`, `short_name`)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -40,3 +40,6 @@ Hard `[:24]` slice; no action text in `CareWatch.run`; `fish_line` returns a str
 
 ## Info needed
 None.
+
+## Fix
+`care`: `!! <id> <name without nickname> (child)`: hunger/thirst, `patient in hospital <zone> (<job>): feeding jobs N, meals M -> check FEED_WATER_CIVILIANS labor and food/drink stockpile near the hospital`, or `not in a hospital ... -> food/drink reachable?`. `remote check`: `Remote ok (...)` unless an action/proposal exists, `Fish catch counter N (F fishers)`; `remote status` marks children. Test: `test_bug215_*` (replay `fixtures/bugs/BUG-215/l_care.jsonl`).

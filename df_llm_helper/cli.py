@@ -539,14 +539,16 @@ def cmd_trade(args) -> int:
         p.store.set("trade.flow", asdict(TradeFlow()))
         print("Trade automaton reset")
         return 0
-    if args.action == "approve":
-        flow.approve()
-        p.store.set("trade.flow", asdict(flow))
-        print(f"Live selection approved (state {flow.state})")
-        return 0
+    if args.action == "approve":                # BUG-201: reaches the caravan autopilot too; only in REVIEW
+        from .caravan import approve_review
+        ok, msg = approve_review(p.store)
+        print(msg)
+        return 0 if ok else 2
     if args.action == "status":
+        from .caravan import status_line
         print(f"State {flow.state}{' (' + flow.abort_reason + ')' if flow.abort_reason else ''}; "
               f"approved: {flow.approved}; last steps: {' | '.join(flow.log[-4:])}")
+        print(status_line(p.store))
         return 0
     st = p.client.run("claude/handel status")
     clock = p.client.run("claude/advance clock")
@@ -572,6 +574,12 @@ def cmd_trade(args) -> int:
     if not args.dry_run:                       # dry run: the state machine must not advance past commands never sent
         p.store.set("trade.flow", asdict(flow))
     print(f"State now: {flow.state}" + (f" ({flow.abort_reason})" if flow.abort_reason else ""))
+    if flow.state in ("DONE", "ABORT", "FAILED") and obs.caravan_state:     # BUG-202
+        print(f"State {flow.state} (previous trade) - nothing to do; to trade with this caravan again: "
+              "python -m df_llm_helper trade reset")
+    elif flow.state == "REVIEW" and not flow.approved:                       # BUG-201
+        print("Review: judge the dry run (python -m df_llm_helper caravan evaluates goods and ratio), then "
+              "python -m df_llm_helper trade approve - or trade reset")
     return 0
 
 
@@ -663,10 +671,11 @@ def cmd_siege(args) -> int:
         for ln in log:
             print("  " + ln)
     if flow.state == "IDLE":
-        print("no attackers on the map")
+        print("no attackers on the map (only invaders count; thieves/ambushers: see claude/status threats)")
         return 0
+    from .siege import exit_code
     print("\n".join(flow.summary()))
-    return 0 if flow.state in ("DONE", "ENGAGE", "PREPARE") or args.dry_run else 1
+    return exit_code(flow)
 
 
 def cmd_caravan(args) -> int:
@@ -702,7 +711,7 @@ def cmd_mood(args) -> int:
     from .moods import MoodManager
     p = _pilot(args)
     mm = MoodManager(p.client, p.tools, p.store, p.clock, p.cfg.get("mood", {}))
-    lines = mm.reserve() if args.action == "reserve" else mm.check(dry=args.dry_run)
+    lines = mm.reserve(dry=args.dry_run) if args.action == "reserve" else mm.check(dry=args.dry_run)
     print("\n".join(lines))
     return 0
 
@@ -726,7 +735,8 @@ def cmd_forecast(args) -> int:
         s = series_from_metrics(args.file)
         for res in ("food", "drink"):
             r = backtest(s, res, int(p.cfg.get("forecast.window", 5)), float(args.horizon))
-            print(f"{res}: {r['n']} predictions, mean error {r['mean_err']}, median {r['median_err']}")
+            print(f"{res}: {r['n']} predictions, mean error {r['mean_err']}, median {r['median_err']}"
+                  + ("" if r["n"] else f" (series of {len(s)} points too short for horizon {args.horizon:g})"))
         return 0
     fc = Forecaster(p.store, p.clock, p.cfg.get("forecast", {}))
     line, news = fc.update(p.snapshot(), record=not args.dry_run)
@@ -771,11 +781,11 @@ def cmd_bottleneck(args) -> int:
 def cmd_water(args) -> int:
     """Spec 08: scan | check x y z | watch (water in the fort) | lint-cmd "<command>"."""
     from .lint import lint_dig
-    from .water import WaterWatch
+    from .water import WaterWatch, parse_xyz
     p = _pilot(args)
     ww = WaterWatch(p.client, p.tools, p.store, p.clock, p.cfg.get("water", {}))
     if args.action == "check":
-        x, y, z = (int(v) for v in args.xyz)
+        x, y, z = parse_xyz(args.xyz)
         v = ww.check(x, y, z)
         print(v.line())
         return 0 if v.result == "ok" else 1
@@ -787,6 +797,8 @@ def cmd_water(args) -> int:
                                  f"levels {j.get('by_z')}"))
         return 0
     if args.action == "lint-cmd":
+        if not args.xyz:
+            raise ValueError('usage: water lint-cmd "<command>" (e.g. "claude/dig 130 100 90 110 95")')
         fs = lint_dig(" ".join(args.xyz), ww.cfg["forbid_dig"], p.client.registry)
         print("\n".join(map(str, fs)) or "ok")
         return 1 if fs else 0
@@ -812,7 +824,7 @@ def cmd_reboot(args) -> int:
             p.clock.sleep(0 if args.dry_run else 4)
         return 0
     lines = rb.run(dry=args.dry_run)
-    print("\n".join(ln for ln in lines if args.verbose or not ln.startswith(("ok ", "[dry] claude/advance"))))
+    print("\n".join(ln for ln in lines if args.verbose or not ln.startswith("ok ")))     # dry: the whole plan (BUG-216)
     return 0 if not any("NOT" in ln for ln in lines) else 1
 
 
@@ -1053,8 +1065,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_care)
     s = sub.add_parser("forecast", help="Famine forecast (spec 05): show|backtest")
     s.add_argument("action", nargs="?", default="show", choices=["show", "backtest"])
-    s.add_argument("--file", default=str(Path(__file__).resolve().parents[2] / "metrics.csv"))
-    s.add_argument("--horizon", default=3)
+    s.add_argument("--file", default=None, help="backtest: metrics.csv (default runtime/metrics.csv, else ../metrics.csv)")
+    s.add_argument("--horizon", type=float, default=3, help="backtest: game days ahead (>= 1)")
     s.add_argument("--dry-run", action="store_true")
     s.set_defaults(fn=cmd_forecast)
     s = sub.add_parser("workload", help="Workload control (spec 06)")

@@ -1,6 +1,6 @@
 # BUG-220: plausibility findings against the live game: `mood reserve` says ok while `claude/mood` lists a gap; `workload` ignores stopped services when many jobs are open; `bottleneck` says "no stock data" for items that exist; `hygiene zones` proposes a dump zone next to an existing one; `perf sample` on a paused game is meaningless
 
-- **Status:** open (decisions/info needed, no crash)
+- **Status:** open (info needed) - items 2, 4, 5 fixed in c387d5d
 - **Severity:** S3
 - **Area:** `df_llm_helper/config.py` (`mood.reserves`) vs `lua/claude/mood.lua` (`minimum`); `df_llm_helper/workload.py` `diagnose` (`if not many_open:` around the service checks); `data/graphs/produktion.yaml`; `df_llm_helper/features/hygiene.py` (`suggest_zone`); `df_llm_helper/features/perf.py` `sample`
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -29,3 +29,10 @@ See each item. No crash; no wrong game action.
 
 ## Info needed
 Gordon: (1) which reserve values are authoritative (`config.py` or `mood.lua`)? (2) are the five services off on purpose? (3) should `hygiene zones` ignore proposals within ~5 tiles of an existing dump zone? The cloud session can adopt whatever you decide.
+
+## Fix (partial)
+- Item 2: `workload` reports stopped `orders`/`arbeit` services also with a job backlog (restart proposal, auto + loop guard as before); the blocked-jobs line names `suspendmanager`/`unsuspend`.
+- Item 4: `hygiene` proposes no dump zone within `hygiene.zone_min_gap` (5 tiles) of an existing one (default chosen; Gordon may change it).
+- Item 5: `perf sample` says `game PAUSED (frame counter did not move)` when the frame counter is constant.
+- Tests: `tests/test_bugs_autopilots.py::test_bug220_*`.
+- Open: item 1 (which reserve thresholds are binding: `config.py mood.reserves` or `mood.lua minimum`) and item 3 (stock mapping for `block`/`mechanism` in `data/graphs/produktion.yaml`; needs a stock source for them) need Gordon's decision; item 2 question (services off on purpose?) is his call too.
