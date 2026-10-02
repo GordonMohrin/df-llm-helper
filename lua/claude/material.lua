@@ -150,7 +150,9 @@ local function stock(sm)
         end
       elseif COUNTED[t] then
         -- stock incl. carried/stored pieces (not: marked for melting)
-        if not f.melt and (mat_id(it) == 'IRON' or mat_id(it) == 'STEEL') then
+        -- only pieces the fort can use: carried ones, or not forbidden and not foreign loot lying around (live copy, BUG-420)
+        local usable = f.in_inventory or not (f.forbid or (f.foreign and f.on_ground))
+        if usable and not f.melt and (mat_id(it) == 'IRON' or mat_id(it) == 'STEEL') then
           local sid = it.subtype and it.subtype.id
           if sid then
             local key = t .. ':' .. sid

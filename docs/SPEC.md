@@ -85,7 +85,7 @@ Examples: `fixtures/run5/logs/`, `fixtures/run5/scopes_sample/`.
 `claude/status|report|units|buildings|area z x y w h|dig z x1 y1 x2 y2 [d|j|u|i|r|h|x]|ores|geo|probe`, `claude/mil tabelle|report|create|add|remove|workmode|update|refuge|uniform|barracks`,
 `claude/workdetail list|assign`, `claude/aemter status|assign|vacate`, `claude/handel status|plan|prep|open|select|confirm|finish|release`, `claude/tempo on|off|status`,
 `claude/advance N|0|run|clock`, `claude/schau say|show`, `claude/config`, `claude/gefahr status|sim`, `claude/mood status|plan|prebuild`, `claude/orders`, `claude/essen`, `claude/trinken`, `claude/gesund`,
-`quickfort run <blueprint> -c x,y,z`, `lua -f <file>`. df-llm-helper may add new Lua scripts under `lua/claude/pilot_*.lua` (additive, syntax-checked).
+`quickfort run <blueprint> -c x,y,z`, `lua -f <file>`. df-llm-helper may add new Lua scripts under `lua/pilot_*.lua` (additive, syntax-checked).
 
 ## 6. Features (prioritized) – each with benefit, behavior and acceptance criteria
 

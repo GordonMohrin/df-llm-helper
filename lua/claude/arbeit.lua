@@ -296,7 +296,8 @@ local function sync_labors()
             for _, name in ipairs(STRIP) do
               local L = df.unit_labor[name]
               if L and strip and u.status.labors[L] then u.status.labors[L] = false; n = n + 1
-              elseif L and restore and not u.status.labors[L] then u.status.labors[L] = true; n = n + 1 end
+              -- FISH is not given back on restore (live copy, BUG-420: fishing miners leave the fort and spoil raw fish)
+              elseif L and restore and name ~= 'FISH' and not u.status.labors[L] then u.status.labors[L] = true; n = n + 1 end
             end
           end
         end
@@ -420,6 +421,7 @@ local function smooth_supply()
       end
     end
   end
+  if SUP.no_engrave then en, enw = {}, {} end   -- config SMOOTH_SUPPLY.no_engrave = true: smooth only (live copy, BUG-420)
   local function byd(a, b) return a[4] < b[4] end
   table.sort(sm, byd); table.sort(en, byd); table.sort(smw, byd); table.sort(enw, byd)
   local n = 0

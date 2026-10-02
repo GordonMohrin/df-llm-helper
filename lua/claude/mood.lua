@@ -69,7 +69,7 @@ local function log(msg)
 end
 
 local function usable(f)
-  return not (f.forbid or f.in_job or f.owned or f.rotten or f.in_inventory or f.trader or f.garbage_collect or f.removed
+  return not (f.forbid or f.in_job or f.owned or f.rotten or f.trader or f.garbage_collect or f.removed
               or f.construction or f.dump or f.hostile)
 end
 
@@ -98,7 +98,8 @@ function stock()
   end
   for _, it in ipairs(df.global.world.items.all) do
     local f = it.flags
-    if usable(f) then
+    -- items in containers (bins/bags) count, items carried by a unit do not (live copy, BUG-420)
+    if usable(f) and not (f.in_inventory and dfhack.items.getHolderUnit(it)) then
       local t = it:getType()
       local cat, n = nil, it.stack_size
       if t == df.item_type.BAR then

@@ -8,7 +8,11 @@ df-llm-helper talks to Dwarf Fortress only through `dfhack-run` and DFHack Lua s
    watchdog, trade, military, mood, …). Comments are English; output keys and in-game texts are still German
    (df-llm-helper parses them, so they are part of the protocol).
 
-Install: copy `lua/pilot_*.lua` and `lua/claude/*.lua` into `<Dwarf Fortress>/hack/scripts/claude/`.
+Install: copy `lua/pilot_*.lua` and `lua/claude/*.lua` into `<Dwarf Fortress>/hack/scripts/claude/` and **overwrite the
+live copies**. The repo is the single source of truth (BUG-420): live-only features were ported into it, so nothing is lost
+by overwriting. If `dfhack-config/script-paths.txt` adds another folder with older `claude/*.lua` copies (DFHack searches
+those first), overwrite the copies there as well or remove that line; otherwise the old scripts keep running. Each
+`pilot_*` script exists once (in `lua/`), so the copy order does not matter. Tuning stays in `config.lua`.
 
 **Fortress-specific values** live in `lua/claude/config.lua` (coordinates, burrows, interior boxes) and
 `lua/claude/stages.lua` (dig stages). Both ship **neutral** (nil/empty); until you set them, safe defaults are derived

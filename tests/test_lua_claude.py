@@ -213,8 +213,8 @@ def test_schacht_write_commands_refuse_without_barrier(tmp_path, cmd):
     assert not (tmp_path / "home" / "tools" / "schacht.offen").exists()
 
 
-# ---------------------------------------------------------------- BUG-413 (pilot_batch, both copies)
-@pytest.mark.parametrize("script", [ROOT / "lua" / "pilot_batch.lua", ROOT / "lua" / "claude" / "pilot_batch.lua"])
+# ---------------------------------------------------------------- BUG-413 (pilot_batch; one copy since BUG-420)
+@pytest.mark.parametrize("script", [ROOT / "lua" / "pilot_batch.lua"])
 def test_pilot_batch_utf8_cut_bad_entries_and_bom(tmp_path, script):
     dmock = ROOT / "tests" / "lua_mock" / "dfhack_mock.lua"
     req = tmp_path / "req.json"
@@ -553,3 +553,141 @@ def test_report_uses_the_daily_row():
     src = (CLAUDE / "report.lua").read_text(encoding="utf-8")
     assert "append_daily_row" in src and "io.open(path, 'a')" not in src
     assert "ONCE PER IN-GAME DAY" in src.split("local util")[0]
+
+
+# ---------------------------------------------------------------- BUG-420 (live-only features ported, duplicates removed)
+@pytest.mark.parametrize("script", ["muell", "kohle", "bauprog", "geo", "zugaenge", "schacht"])
+def test_optional_scripts_say_what_they_need(script):
+    """BUG-419: the optional map scripts stay; each header names its purpose and config keys."""
+    text = (CLAUDE / f"{script}.lua").read_text(encoding="utf-8")
+    assert "Used for:" in text and "config keys" in text
+
+
+def test_pilot_duplicates_removed_from_lua_claude():
+    assert not list(CLAUDE.glob("pilot_*.lua"))
+    assert (ROOT / "lua" / "pilot_batch.lua").exists() and (ROOT / "lua" / "pilot_wd.lua").exists()
+
+
+MIL = """
+df.global.plotinfo.group_id = 7
+local function vec()
+  return setmetatable({ n = 0 }, { __len = function(t) return t.n end, __index = {
+    erase = function(t, i) for k = i, t.n - 2 do t[k] = t[k + 1] end t[t.n - 1] = nil t.n = t.n - 1 end,
+    insert = function(t, _, x) t[t.n] = x t.n = t.n + 1 end } })
+end
+SQ = { id = 3, entity_id = 7, ammo = { ammunition = vec(), update = {} } }
+SQ.ammo.ammunition:insert('#', { amount = 5, flags = {}, delete = function() DELETED = true end })
+df.squad.find = function(id) if id == 3 then return SQ end end
+df.squad_ammo_spec = { new = function() return { flags = {} } end }
+df.item_type.AMMO = 'AMMO'
+"""
+
+
+def test_mil_ammo_dry_and_apply(tmp_path):
+    after = tmp_path / "after.lua"
+    after.write_text("local a = SQ.ammo.ammunition print(#a, a[0].amount, a[0].item_subtype, a[0].flags.use_training,"
+                     " tostring(df.global.plotinfo.equipment.update.quiver == true), tostring(DELETED))\n")
+    out, r = run("mil", "ammo", 3, 40, tmp_path=tmp_path, setup=MIL, env={"MOCK_AFTER": str(after)})
+    assert r.returncode == 0, r.stderr
+    lines = out.splitlines()
+    assert json.loads(lines[0]) == {"squad": 3, "amount": 40, "subtype": 0, "vorhanden": 1, "dry": True}
+    assert lines[1].split() == ["1", "5", "nil", "nil", "false", "nil"]          # dry run: nothing changed
+    out, r = run("mil", "ammo", 3, 40, 2, "--apply", tmp_path=tmp_path, setup=MIL, env={"MOCK_AFTER": str(after)})
+    lines = out.splitlines()
+    assert json.loads(lines[0])["applied"] is True
+    assert lines[1].split() == ["1", "40", "2", "true", "true", "true"]
+    out, _ = run("mil", "ammo", 99, tmp_path=tmp_path, setup=MIL)
+    assert "usage: ammo" in one_json(out)["error"]
+
+
+def test_handel_keep_checker_holds_back_the_reserve(tmp_path):
+    code = ("df.global.world.items.other.WEAPON = { { flags = {} }, { flags = {} }, { flags = { trader = true } } }\n"
+            "local h = reqscript('claude/handel')\n"
+            "local ok = h.keep_checker({ keep = { WEAPON = 1 } })\n"
+            "print(ok({ type = 'WEAPON' }), ok({ type = 'WEAPON' }), ok({ type = 'ARMOR' }))\n")
+    assert run_snippet(code, tmp_path).split() == ["true", "false", "true"]
+
+
+ORE = """
+-- corridor y=5 (x 2..10) reachable; HEMATITE tile at (6,8): two walls (y 6/7) between -> 3-tile tunnel
+SHAPE = {}
+for x = 2, 10 do SHAPE[x .. ',5,5'] = 'FLOOR' end
+local bits = {}
+for i = 0, 15 do bits[i] = 0 end
+bits[8] = 1 << 6
+EVENTS = { ['0,0,5'] = { { _mineral = true, inorganic_mat = 1, tile_bitmask = { bits = bits } } } }
+df.block_square_event_mineralst = { is_instance = function(_, e) return e._mineral end }
+df.inorganic_raw.find = function() return { id = 'HEMATITE', material = { flags = {} }, metal_ore = { mat_index = { 1 } } } end
+"""
+ORE_CFG = """
+local c = reqscript('claude/config')
+c.FORT_REFS = { { 2, 5, 5 } }
+c.DIG_MIN_Z = 0
+c.SURFACE_Z = 9
+"""
+
+
+@pytest.mark.parametrize("hidden,tiles", [("", 3), ("HIDDEN = {} for x = 0, 15 do HIDDEN[x .. ',6,5'] = true end", 0)])
+def test_erzdig_spur_designates_a_short_tunnel_over_discovered_walls(tmp_path, hidden, tiles):
+    after = tmp_path / "after.lua"
+    after.write_text("local n = 0 for x = 0, 15 do for y = 0, 15 do if DIG_AT(x, y, 5) ~= 0 then n = n + 1 end end end print(n)\n")
+    for dry, expect in (("--dry", 0), (None, tiles)):
+        args = ["spur", "HEMATITE", 5, 5, 100] + ([dry] if dry else [])
+        out, r = run("erzdig", *args, tmp_path=tmp_path, setup=map_setup(ORE + hidden, ORE_CFG),
+                     env={"MOCK_AFTER": str(after)})
+        assert r.returncode == 0, r.stderr
+        lines = out.splitlines()
+        j = json.loads(lines[0])
+        assert j["tiles"] == tiles and j["plaene"] == (1 if tiles else 0)
+        assert int(lines[1]) == expect                          # --dry designates nothing
+
+
+MUELL = """
+df.building_type = { Civzone = 1, Stockpile = 2 }
+df.civzone_type = { [5] = 'Dump' }
+df.global.world.buildings.all = { { type = 5, x1 = 10, x2 = 12, y1 = 10, y2 = 12, z = 5, getType = function() return 1 end } }
+df.item_type = setmetatable({}, { __index = function(_, k) return k end })
+df.global.plotinfo.race_id = 1
+local function item(t, x, y, race) return { flags = { on_ground = true }, pos = { x = x, y = y, z = 5 }, race = race,
+                                            getType = function() return t end } end
+ITEMS = { item('CORPSE', 11, 11, 2), item('CORPSE', 15, 15, 2), item('CORPSE', 13, 13, 2), item('CORPSE', 25, 25, 2),
+          item('CORPSE', 14, 14, 1), item('BOULDER', 3, 3) }
+df.global.world.items.all = ITEMS
+dfhack.items.getPosition = function(it) return it.pos.x, it.pos.y, it.pos.z end
+dfhack.maps.getWalkableGroup = function(p) return p.x < 20 and 1 or 2 end
+"""
+
+
+def test_muell_status_counts_dump_zone_items_separately(tmp_path):
+    out, r = run("muell", "status", tmp_path=tmp_path, setup=MUELL)
+    assert r.returncode == 0, r.stderr
+    j = one_json(out)
+    assert (j["lose_stapel"], j["auf_stapelpunkt_entsorgt"], j["dump_zonen"]) == (5, 1, 1)
+
+
+def test_muell_dump_marks_nearest_reachable_corpses_only(tmp_path):
+    after = tmp_path / "after.lua"
+    after.write_text("local s = {} for i, it in ipairs(ITEMS) do s[#s + 1] = tostring(it.flags.dump == true) end print(table.concat(s, ' '))\n")
+    out, r = run("muell", "dump", 1, tmp_path=tmp_path, setup=MUELL, env={"MOCK_AFTER": str(after)})
+    assert r.returncode == 0, r.stderr
+    lines = out.splitlines()
+    j = json.loads(lines[0])
+    assert j["marked"] == 1 and j["kandidaten_erreichbar"] == 2 and j["naechster_rest_dist"] == 8
+    assert j["uebersprungen"] == {"dwarf": 1, "unreachable": 1}
+    # only the corpse at 13,13 (nearest, reachable); not the one already on the dump, not the dwarf, not the unreachable one
+    assert lines[1].split() == ["false", "false", "true", "false", "false", "false"]
+
+
+ZUG = """
+MAP_W, MAP_H, MAP_ZMIN, MAP_ZMAX = 10, 10, 0, 0
+SHAPE, OUTSIDE = {}, {}
+for x = 0, 9 do for y = 0, 9 do SHAPE[x .. ',' .. y .. ',0'] = 'FLOOR' OUTSIDE[x .. ',' .. y .. ',0'] = x <= 3 end end
+"""
+
+
+@pytest.mark.parametrize("mincomp,clusters", [(40, 1), (41, 0)])
+def test_zugaenge_enclave_filter_reads_perimeter_mincomp(tmp_path, mincomp, clusters):
+    post = f"reqscript('claude/config').PERIMETER_MINCOMP = {mincomp}\n"
+    out, r = run("zugaenge", 9, 9, 0, 0, 0, tmp_path=tmp_path, setup=map_setup(ZUG, post))
+    assert r.returncode == 0, r.stderr
+    assert f"Einstiegscluster gesamt\t{clusters}" in out      # 40 outside tiles: an enclave only below the threshold

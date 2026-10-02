@@ -11,7 +11,7 @@
 --   open                   open the depot sheet and click the "Trade" button (2 calls needed; --live)
 --   select                 trade window: purchase/sale selection per rules (--live sets goodflag.selected)
 --   confirm                check ratio, click the "Trade" button (--live)  [DFHack confirm dialog follows]
---   accept                 confirm the DFHack confirmation dialog "trade the selected goods" with SELECT (=Return) (--live)
+--   accept                 confirm the DFHack confirmation dialog ("Confirm trade" / "trade the selected goods") with SELECT (=Return) (--live)
 --   abort                  clear selection (--live) and leave the window
 --   finish                 leave the window (LEAVESCREEN, at most 3x), print final status (--live)
 --   scan <text>            search the screen text (readTile) for <text> - for calibration, read only
@@ -285,6 +285,28 @@ local function sell_candidates(R, mer)
     list = out
   end
   return list, byType
+end
+
+-- Reserve check for the trade window (rule keep <TYPE> <n>, ported from the live copy, BUG-420): returns keep_ok(s)
+-- for sale candidates { type = 'WEAPON', ... }; a piece of a kept type passes only while the fort still has more than
+-- n pieces of that type (all items of the type that are not trader goods); every passed piece lowers the count.
+function keep_checker(R)
+  local remain = {}
+  for ty in pairs(R.keep or {}) do
+    local okl, lst = pcall(function() return df.global.world.items.other[ty] end)   -- unknown type name -> no reserve
+    if okl and lst then
+      local n = 0
+      for _, it in ipairs(lst) do if not it.flags.trader then n = n + 1 end end
+      remain[ty] = n
+    end
+  end
+  return function(s)
+    local k = R.keep and R.keep[s.type]
+    if not k or remain[s.type] == nil then return true end
+    if remain[s.type] <= k then return false end
+    remain[s.type] = remain[s.type] - 1
+    return true
+  end
 end
 
 ------------------------------------------------------------------ Commands
@@ -635,11 +657,13 @@ function cmd.select(opts)
     end
   end
   -- 4. Choose the sale so that S >= ratio*(1+margin)*T, without overshooting much
+  --    Reserve (rule keep): see keep_checker
+  local keep_ok = keep_checker(R)
   local need = T * need_factor
   local chosen_sell, S = {}, 0
   for _, s in ipairs(sells) do
     if S >= need then break end
-    if S + s.value <= need * (1 + R.overshoot_tol) or #chosen_sell == 0 then
+    if (S + s.value <= need * (1 + R.overshoot_tol) or #chosen_sell == 0) and keep_ok(s) then
       S = S + s.value
       chosen_sell[#chosen_sell + 1] = s
     end
@@ -648,7 +672,7 @@ function cmd.select(opts)
     if S >= need then break end
     local used = false
     for _, c in ipairs(chosen_sell) do if c.i == s.i then used = true end end
-    if not used and S + s.value <= need * (1 + R.overshoot_tol) then
+    if not used and S + s.value <= need * (1 + R.overshoot_tol) and keep_ok(s) then
       S = S + s.value
       chosen_sell[#chosen_sell + 1] = s
     end
@@ -721,6 +745,12 @@ function cmd.confirm(opts)
   for _, m in ipairs(find_text('Trade', rows)) do
     if m.y >= y1 and m.y <= y2 and m.x >= x1 and m.x2 <= x2 then hit = true end
   end
+  if not hit then
+    -- second search (live copy, BUG-420): label in the button rows but shifted sideways (other window width) -> click its centre
+    for _, m in ipairs(find_text('Trade', rows)) do
+      if m.y >= y1 and m.y <= y2 then hit = true; cx, cy = (m.x + m.x2) // 2, m.y end
+    end
+  end
   res.click = { x = cx, y = cy, rect = { x1, y1, x2, y2 }, label_found = hit }
   if not hit then res.ok = false; res.abort = 'Beschriftung "Trade" nicht im erwarteten Button-Rechteck'; return emit(res) end
   if opts.dry then return emit(res) end
@@ -736,7 +766,7 @@ function cmd.accept(opts)
   if not focus_has('^dfhack/') then
     return emit({ ok = true, note = 'kein DFHack-Dialog offen (Handel evtl. schon durch)', focus = focus_list() })
   end
-  if not screen_has('trade the selected goods') then
+  if not (screen_has('Confirm trade') or screen_has('trade the selected')) then
     return fail('offener Dialog ist nicht der Handels-Bestaetigungsdialog', { focus = focus_list() })
   end
   if opts.dry then return emit({ ok = true, dry = true, would = 'SELECT an Dialog', focus = focus_list() }) end

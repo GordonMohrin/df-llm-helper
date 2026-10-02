@@ -48,7 +48,7 @@ SLAB_TILES = {}                          -- { {x,y,z}, ... } crypt/memorial slab
 MOOD_SLOTS = {}                          -- { {x,y,z}, {x,y,z, kind = 'MetalsmithsForge'}, ... } reserved mood workshop slots
 SMOOTH_ENGRAVE = {}                      -- { {glaetten.csv, gravieren.csv, 'x,y,z'}, ... } quickfort series; empty = none
 ENGRAVE_BLUEPRINTS = {}                  -- { {'claude/x.csv','x,y,z'}, ... }; empty = none
-SMOOTH_SUPPLY = nil                      -- { x1, x2, y1, y2, z1, z2, ax, ay, az, batch, min_open } smoothing area; nil = off
+SMOOTH_SUPPLY = nil                      -- { x1, x2, y1, y2, z1, z2, ax, ay, az, batch, min_open [, no_engrave = true] } smoothing area; nil = off
 TREE_BAND = nil                          -- { zmin, zmax, ax, ay } woodcutting band (default: around the surface at the center)
 GATHER = nil                             -- { blueprint, 'x,y,z' } wild plant gathering via quickfort; nil = off
 GATHER_Z = nil                           -- { zmin, zmax } cavern levels with gatherable plants; nil = no gathering

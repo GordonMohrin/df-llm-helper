@@ -2,6 +2,11 @@
 -- Accesses into the fort: entry points from outside (outside=true) into walkable interior rooms, grouped, with trap coverage
 -- Usage: claude/zugaenge [cx cy cz [zmin zmax]]  core point (default config.FORT_REFS[1]) and z range (default
 -- config.Z_MIN..Z_MAX); the run-3/4 values (core 100,101,130, z 100..136) were hard-coded (BUG-419).
+-- Enclave filter (ported from the live copy, BUG-420): connected walkable outside areas smaller than config.PERIMETER_MINCOMP tiles
+-- (walled sky terraces, light wells) are not 'outside' and do not start the search.
+-- Fair play: undiscovered tiles count as not walkable (nothing is read from them).
+-- Used for: defence planning (where can enemies get in, which entrances bypass the traps); optional script.
+-- Needs config keys: FORT_REFS (or FORT_X/FORT_Y/SURFACE_Z), Z_MIN/Z_MAX (from SURFACE_Z/Z_DOWN/Z_UP), PERIMETER_MINCOMP.
 local cfg = reqscript('claude/config')
 local args = { ... }
 local function iarg(i) local v = tonumber(args[i]) return v and math.tointeger(v) or nil end
@@ -14,7 +19,9 @@ for _,n in ipairs{'FLOOR','BOULDER','PEBBLES','BROOK_TOP','SHRUB','SAPLING','RAM
 local function info(x,y,z)
   if x<0 or y<0 or x>=XM or y>=YM then return nil end
   local b=dfhack.maps.getTileBlock(x,y,z) if not b then return nil end
-  local tt=b.tiletype[x%16][y%16] local d=b.designation[x%16][y%16]
+  local d=b.designation[x%16][y%16]
+  if d.hidden then return nil end
+  local tt=b.tiletype[x%16][y%16]
   local sh=df.tiletype.attrs[tt].shape
   return sh, d.outside, d.flow_size>0
 end
@@ -53,10 +60,32 @@ end
 -- Multi-source BFS: all walkable outside tiles (outside) as start; entry = first interior tile
 local seen, entries = {}, {}
 local queue, qi = {}, 1
-for z=ZMIN,ZMAX do for x=0,XM-1 do for y=0,YM-1 do
-  local w,out = walk(x,y,z)
-  if w and out then seen[key(x,y,z)]=true queue[#queue+1]={x,y,z} end
-end end end
+local MINCOMP = tonumber(cfg.PERIMETER_MINCOMP) or 0
+do
+  local outs, cid, comp = {}, {}, 0
+  for z=ZMIN,ZMAX do for x=0,XM-1 do for y=0,YM-1 do
+    local w,out = walk(x,y,z)
+    if w and out then outs[key(x,y,z)]={x,y,z} end
+  end end end
+  -- connected outside components; only those with >= MINCOMP tiles seed the search (enclave filter)
+  for k,c in pairs(outs) do
+    if not cid[k] then
+      comp = comp + 1
+      local st, members, sp = {c}, {}, 1
+      cid[k]=comp
+      while sp<=#st do
+        local cur=st[sp] sp=sp+1 members[#members+1]=cur
+        for _,n in ipairs(neighbors(cur[1],cur[2],cur[3])) do
+          local k2=key(n[1],n[2],n[3])
+          if outs[k2] and not cid[k2] then cid[k2]=comp st[#st+1]=n end
+        end
+      end
+      if #members >= MINCOMP then
+        for _,m in ipairs(members) do seen[key(m[1],m[2],m[3])]=true queue[#queue+1]=m end
+      end
+    end
+  end
+end
 local innen = {}
 while qi<=#queue do
   local c=queue[qi] qi=qi+1

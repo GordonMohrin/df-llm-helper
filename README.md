@@ -22,7 +22,8 @@ Setup
 2. Run: python -m df_llm_helper.selftest --quick  (must end with "Self-test GREEN").
 3. Find my Dwarf Fortress install. Copy config.yaml.example to config.yaml and set
    dfhack_run (path to dfhack-run) and paths.gamelog (gamelog.txt in the DF folder).
-4. Copy lua/pilot_*.lua and lua/claude/*.lua to <Dwarf Fortress>/hack/scripts/claude/.
+4. Copy lua/pilot_*.lua and lua/claude/*.lua to <Dwarf Fortress>/hack/scripts/claude/ and overwrite older copies there
+   (and in any folder listed in dfhack-config/script-paths.txt); the repo is authoritative (COMPANION.md).
 5. Set the environment variable DF_LLM_HELPER_HOME to a shared runtime folder so the game
    and the helper see the same flags and logs (see COMPANION.md). Ask me before changing
    system-wide settings; the game may need a restart (again through DFHack) to see the variable.

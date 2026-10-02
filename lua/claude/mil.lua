@@ -23,6 +23,8 @@
 --                                              off = battle axe + metal armor (template 1) + constant training (routine 2). Without --apply display only.
 --   pickfix [--apply] [--ensure ids]           E18 SOLUTION run 5: releases reserved free picks, removes pick uniform specs of all squads, update.weapon
 --                                              -> engine distributes work picks to all MINE dwarves (see pickfix.lua). Replaces workmode on.
+--   ammo <squad> [amount=25] [subtype=0] [--apply]   squad ammunition (UI: squad equipment -> ammunition): one AMMO spec
+--                                              (combat + training) replaces the existing ones, then ammo/quiver update
 --   refuge [--apply]                           create/check refuge burrow (config.ZUFLUCHT.rects) + civilian alert; existing
 --                                              tiles are only replaced when rects are configured
 --   guard start|stop|status                    guard job (60 ticks): visible intruder in the INTERIOR (config.INNEN_BOXEN) -> tools/killorder.lua --watch
@@ -567,6 +569,32 @@ local ok, err = pcall(function()
     local okp, errp = pcall(dfhack.run_command, 'claude/pickfix', table.unpack(pa))
     if not okp then out({ error = tostring(errp) }) end
 
+  elseif cmd == 'ammo' then
+    -- ammunition of a squad (= UI squad equipment -> ammunition): ONE spec 'amount x AMMO subtype', combat + training;
+    -- replaces the squad's existing ammo specs, then triggers the ammo/quiver update (ported from the live copy, BUG-420)
+    local s = find_squad(tonumber(pos[1]))
+    if not s then out({ error = 'usage: ammo <squad_id> [amount] [subtype] [--apply]' }) return end
+    local amount, sub = tonumber(pos[2]) or 25, tonumber(pos[3]) or 0
+    if amount < 1 or sub < 0 then out({ error = 'usage: ammo <squad_id> [amount >= 1] [subtype >= 0] [--apply]' }) return end
+    local plan = { squad = s.id, amount = amount, subtype = sub, vorhanden = #s.ammo.ammunition, dry = dry }
+    if dry then out(plan) return end
+    for i = #s.ammo.ammunition - 1, 0, -1 do
+      local o = s.ammo.ammunition[i]
+      s.ammo.ammunition:erase(i)
+      pcall(function() o:delete() end)
+    end
+    local sp = df.squad_ammo_spec:new()
+    sp.item_type, sp.item_subtype = df.item_type.AMMO, sub
+    sp.material_class, sp.mattype, sp.matindex = -1, -1, -1
+    sp.amount = amount
+    sp.flags.use_combat, sp.flags.use_training = true, true
+    s.ammo.ammunition:insert('#', sp)
+    s.ammo.update.ammo = true
+    df.global.plotinfo.equipment.update.ammo, df.global.plotinfo.equipment.update.quiver = true, true
+    log('ammo squad ' .. s.id .. ' ' .. amount .. 'x subtype ' .. sub)
+    plan.applied = true
+    out(plan)
+
   elseif cmd == 'guard' then
     local sub = pos[1] or 'status'
     local G = rawget(_G, 'CLAUDE_MILGUARD')
@@ -616,7 +644,7 @@ local ok, err = pcall(function()
     out({ burrow = b.id, blocks = #dfhack.burrows.listBlocks(b), alerts = #alerts.list, civ_burrows = #alerts.list[1].burrows, civ_alert_idx = alerts.civ_alert_idx })
 
   else
-    out({ error = 'unbekannt: ' .. tostring(cmd), usage = 'status|report|equip|routines|enemies|plan|train|station|kill|release|create|add|remove|uniform|workmode|pickfix|barracks|update|refuge|guard' })
+    out({ error = 'unbekannt: ' .. tostring(cmd), usage = 'status|report|equip|routines|enemies|plan|train|station|kill|release|create|add|remove|uniform|workmode|pickfix|ammo|barracks|update|refuge|guard' })
   end
 end)
 if not ok then
