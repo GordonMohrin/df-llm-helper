@@ -1,6 +1,6 @@
 # BUG-107: `plan armor` ignores the equipment soldiers already wear and the free stock, and counts the miner squad as soldiers
 
-- **Status:** open
+- **Status:** fixed in 626d04f
 - **Severity:** S2
 - **Area:** `df_llm_helper/cli.py:629-642` (`cmd_plan`, kind `armor`): `soldiers = [pl.Soldier(id=m.id, name=m.name) ...]`, `pl.plan_armor(snap.pop_total or 0, soldiers, {}, bars)`
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)
@@ -46,3 +46,6 @@ Fetch `claude/mil equip` once; map to `Soldier.equipped` / `stock`; skip the min
 ## Info needed
 Cloud session: `claude/mil equip` (read-only) was recorded live: `Bugs/evidence/BUG-107/live_mil_equip_raw.txt` (per squad `members` and an `incomplete` list with `assigned/worn/slots/weapon` per soldier that lacks pieces; no slot *names*, only counts).
 Is that enough to derive "pieces missing" per slot, or do you need another Lua output (per-slot list)? Note the output has the mojibake of BUG-401 in `name`.
+
+## Fix
+`plan armor` skips pick carriers (mining squad), treats a carried weapon as the weapon slot and 9/9 as a full set, and prints an `UPPER BOUND` note for soldiers below 9/9 (worn armor slots unknown, free stock not checked). Exact per-slot planning still needs a per-slot Lua output (`claude/mil equip` has only counts) - see Info needed. Test with the live `claude/mil tabelle`: `test_bug107_*`.

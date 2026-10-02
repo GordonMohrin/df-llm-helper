@@ -1,6 +1,6 @@
 # BUG-100: `wake` silently stops reporting new events once `events.log` has more than 5000 lines
 
-- **Status:** open
+- **Status:** fixed in 626d04f
 - **Severity:** S2
 - **Area:** `df_llm_helper/wake.py:68-83` (offset logic), `df_llm_helper/toolsfs.py:137-140` (`events_lines`)
 - **Reported:** 2026-10-02, commit `50cee52` (Python code identical to `6dedd96`)
@@ -45,3 +45,6 @@ Store the byte offset (or total line count of the whole file) instead of the win
 
 ## Info needed
 None for the cloud session. Gordon: if `wake --loop` has been running unattended for days, check whether `tools/events.log` is already above 5000 lines (then wake has been blind since).
+
+## Fix
+`wake` keeps a byte offset (`events_pos`) plus a hash of the first line (`events_head`) via `ToolsDir.events_since()`; a shorter file or a new first line = rotated log -> read from the start; an incomplete last line waits for the next call; old `events_n` state is migrated. Tests: `tests/test_bugs_core.py::test_bug100_*` (6000-line log, rotation, old state).

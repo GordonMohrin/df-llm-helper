@@ -59,6 +59,10 @@ def test_pilot_cycle_with_fixtures(cfg, mock, clock):
     assert "Status Y102" in rep.digest and rep.snapshot.fort == "Windrings"
     assert mock.write_calls == []          # quiet situation: no write action
     rep2 = p.cycle()
+    for _ in range(4):                     # BUG-111: unread inbox lines beyond the limit come in the next digests
+        if rep2.digest.startswith("No change"):
+            break
+        rep2 = p.cycle()
     assert rep2.digest.startswith("No change")
     assert p.digest(scope="militaer").startswith(("No change", "Status"))
 
@@ -126,7 +130,10 @@ def test_cli_digest_runbook_kb_brief(cli_cfg, capsys):
     base = ["--config", cli_cfg, "--mock", str(FIX)]
     rc, out, _ = run_cli(capsys, *base, "digest")
     assert rc == 0 and "Status Y102" in out and "Cancel loop Make bed" in out
-    rc, out, _ = run_cli(capsys, *base, "digest")
+    for _ in range(5):                     # BUG-111: the rest of the inbox comes with the next digests
+        rc, out, _ = run_cli(capsys, *base, "digest")
+        if out.startswith("No change"):
+            break
     assert out.startswith("No change")
     rc, out, _ = run_cli(capsys, *base, "runbook", "diagnose")
     assert "rb16_abbruchschleife" in out
@@ -225,5 +232,8 @@ def test_cli_check_and_bus_in_digest(cli_cfg, capsys, tools_dir):
     rc, out, _ = run_cli(capsys, *base, "check")
     assert rc == 0 and "Status Y102" in out and "> gesundheit: [CRIT] Mood without wood" in out
     assert (tools_dir / "heartbeat.txt").exists()
-    rc, out, _ = run_cli(capsys, *base, "check")
+    for _ in range(5):                     # BUG-111: the rest of the inbox comes with the next checks
+        rc, out, _ = run_cli(capsys, *base, "check")
+        if out.startswith("No change"):
+            break
     assert out.startswith("No change")

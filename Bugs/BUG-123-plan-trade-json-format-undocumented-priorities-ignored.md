@@ -1,6 +1,6 @@
 # BUG-123: `plan trade --json`: item field names are not documented anywhere, `priorities` (documented for `plan_trade`) cannot be passed, other categories than food/wood/metal/cloth/other are silently never bought
 
-- **Status:** open
+- **Status:** fixed in 626d04f
 - **Severity:** S3
 - **Area:** `df_llm_helper/cli.py:598-611` (`cmd_plan` kind `trade`), `df_llm_helper/planners/trade.py:36-52` (`TradeItem`), `docs/PLANNERS.md` (row `trade.py`), `--help` of `plan`
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)
@@ -32,3 +32,6 @@ Pass `priorities=d.get("priorities")`; validate keys with a friendly message lis
 
 ## Info needed
 Cloud session: is the trade planner meant to be fed by `claude/handel list` output (live JSON in `fixtures/run5_live/handel_list_*.json`)? If yes a converter (`plan trade --from-handel`) would remove the need for hand-written JSON.
+
+## Fix
+`plan trade` validates the JSON (object root, item fields `id, name, category, value, weight[, qty, priority_category]`, friendly message with the allowed fields and an example), passes `priorities`, and the note names the skipped items and their categories; format documented in PLANNERS.md (6d7faa3). Not done: a `--from-handel` converter (Info question). Test: `test_bug123_*`.

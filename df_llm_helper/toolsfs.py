@@ -2,6 +2,7 @@
 last-report-id.txt, tools/scopes/inbox-*.md. Age is always computed via the clock (testable with FakeClock)."""
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 from dataclasses import dataclass
@@ -138,6 +139,51 @@ class ToolsDir:
         if not self.events_log.exists():
             return []
         return read_text_tolerant(self.events_log).splitlines()[-last_n:]
+
+    def events_since(self, pos: int, head: str | None = None, max_lines: int = 5000) -> tuple[list[str], int, str]:
+        """New complete lines of events.log after byte offset `pos` (BUG-100: a line-count window of the last N lines
+        goes blind once the file is longer than N). `head` = hash of the first line from the previous call: a
+        different first line or a shorter file means the log was rotated/recreated -> read from the start.
+        Returns (lines, new_pos, head); a trailing line without newline is left for the next call."""
+        p = self.events_log
+        try:
+            with p.open("rb") as f:
+                first = f.readline(4096)
+                size = f.seek(0, 2)
+                h = hashlib.sha1(first.rstrip(b"\r\n")).hexdigest()[:10] if first.endswith(b"\n") else ""
+                if pos < 0 or pos > size or (head and h and head != h):
+                    pos = 0
+                f.seek(pos)
+                data = f.read()
+        except (FileNotFoundError, IsADirectoryError, PermissionError):
+            return [], 0, ""
+        end = data.rfind(b"\n")
+        if end < 0:
+            return [], pos, h
+        chunk = data[:end + 1]
+        for enc in ("utf-8-sig" if pos == 0 else "utf-8", "cp1252"):
+            try:
+                text = chunk.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            text = chunk.decode("latin-1")
+        return text.splitlines()[-max_lines:], pos + end + 1, h
+
+    def events_offset_after(self, n_lines: int) -> int:
+        """Byte offset after the first n lines (migration of the old line-count state of wake)."""
+        try:
+            data = self.events_log.read_bytes()
+        except OSError:
+            return 0
+        off = 0
+        for _ in range(max(0, n_lines)):
+            i = data.find(b"\n", off)
+            if i < 0:
+                return len(data)
+            off = i + 1
+        return off
 
     # ---- inbox (markdown, backwards compatibility)
     def inbox_file(self, scope: str) -> Path:

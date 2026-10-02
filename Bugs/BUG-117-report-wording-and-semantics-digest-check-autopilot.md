@@ -1,6 +1,6 @@
 # BUG-117: report wording/semantics problems in `digest` / `check` / `autopilot` (stale warnings without age, `--dry-run` consumes the report, deaths "resolve", verify lines identical for pass/fail, raw keys, `None`)
 
-- **Status:** open
+- **Status:** fixed in 513db2e
 - **Severity:** S3 (several small items, one file; split if you prefer)
 - **Area:** `df_llm_helper/pilot.py:104-127,185-186` (digest persists state, also on `dry_run`), `df_llm_helper/digest.py:117-121,255,128,278-331`, `df_llm_helper/rules.py:257-259` (`ActionRecord.line`), `rules.py:395-400` (warn key), `df_llm_helper/store.py` (`take_warnings`)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)
@@ -34,3 +34,6 @@ A: store `ts` in the warning line and render `(Nh ago)`; B: `persist=not dry_run
 
 ## Info needed
 Cloud session: confirm which of A-G are intended behaviour.
+
+## Fix
+A: queued warnings older than 30 min carry `(Nh ago)`/`(N min ago)`. B: `check/cycle --dry-run` use a read-only digest (`persist=False`). C: `Losses` is an event and never listed as `resolved`. D: `ActionRecord.line()` prints `verify ok|FAILED (...)`, warn/propose lines without the internal key, `FAILED` for failed actions. E: no `None` in the status/mood line. F: unknown `--scope` -> `Error: unknown scope ...`; the first call for a scope shows the status line. G: `pause.hold open (...)`. Not done in A: dropping warnings whose source re-measured OK. Test: `test_bug117_*`.

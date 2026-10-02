@@ -1,6 +1,6 @@
 # BUG-121: `metrics` writes one row per digest call (identical rows seconds apart), four of the 18 columns are never filled, `budget` "Bytes in" is the command length
 
-- **Status:** open
+- **Status:** fixed in 3fff919
 - **Severity:** S3
 - **Area:** `df_llm_helper/metrics.py:28-31,86-99` (`KPI_COLUMNS`, `export_csv`), `df_llm_helper/pilot.py:124-126` (`record_kpis` on every orchestrator digest), `df_llm_helper/cli.py:53-55` (`_usage`)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)
@@ -36,3 +36,6 @@ As above.
 
 ## Info needed
 None (the mapping is in `lua/claude/report.lua`, see Analysis).
+
+## Fix
+`record_kpis` adds no row when the last row is < 60 s old and has the same values; `tierkadaver` (kadaver_tiere_in_festung) and `sawdeadbody/death/ghosthaunt` (negative_gedanken_top, 0 if absent) are filled like `lua/claude/report.lua`; the budget header is `Bytes sent/printed`. Mock rows in the live DB: see BUG-104. Tests: `test_bug121_*`, adapted `tests/test_metrics_cli2.py`.

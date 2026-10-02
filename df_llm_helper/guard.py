@@ -13,7 +13,8 @@ from typing import Any
 
 from .rules import SET_FPS_CMD
 
-__all__ = ["GuardInputs", "GuardState", "GuardAction", "decide", "GuardRunner", "ProcessProbe"]
+__all__ = ["GuardInputs", "GuardState", "GuardAction", "decide", "GuardRunner", "ProcessProbe",
+           "snapshot_unreadable"]
 
 
 @dataclass
@@ -35,6 +36,7 @@ class GuardInputs:
     normal_fps: float | None = None
     paused: bool | None = None
     stale_flags: list = field(default_factory=list)
+    no_data: bool = False           # BUG-106: game state unreadable (claude/status failed) -> fail closed
 
 
 @dataclass
@@ -74,8 +76,20 @@ class GuardAction:
         return f"{self.kind}={self.value} ({self.reason})" if self.value is not None else f"{self.kind} ({self.reason})"
 
 
+def snapshot_unreadable(snap) -> bool:
+    """True if the game state could not be read (no snapshot, claude/status failed or no population): decisions that
+    need the game state must then refuse instead of treating missing values as 'all fine' (BUG-106)."""
+    if snap is None:
+        return True
+    if any(str(f).startswith("claude/status") for f in (getattr(snap, "failed", None) or [])):
+        return True
+    return getattr(snap, "pop_total", None) is None
+
+
 def tempo_blockers(inp: GuardInputs, st: GuardState, g: dict) -> list[str]:
     reasons = []
+    if inp.no_data:
+        reasons.append("no_data")
     if st.slowed:
         reasons.append("deadman")
     if inp.danger:
@@ -247,7 +261,7 @@ class GuardRunner:
             caravan_active=bool(snap.caravan_active) if snap is not None else False,
             pop=getattr(snap, "pop_total", None), timestream=getattr(snap, "timestream", None),
             fps=getattr(snap, "fps", None), normal_fps=getattr(snap, "normal_fps", None),
-            paused=getattr(snap, "paused", None), stale_flags=sorted(stale))
+            paused=getattr(snap, "paused", None), stale_flags=sorted(stale), no_data=snapshot_unreadable(snap))
 
     def cycle(self, snap, *, dry_run: bool = False) -> tuple[list[GuardAction], GuardState, dict]:
         g = self.cfg["guard"]

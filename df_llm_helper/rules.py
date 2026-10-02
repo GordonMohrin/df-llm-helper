@@ -255,8 +255,13 @@ class ActionRecord:
     detail: str = ""
 
     def line(self) -> str:
-        what = self.cmd or f"{self.kind} {self.resource}"
-        return f"{'[dry] ' if self.dry_run else ''}{self.rule}: {what}{' -> ' + self.detail if self.detail else ''}"
+        # BUG-117 D: verify lines say whether the check passed; warn/propose lines without the internal key
+        if self.kind == "verify":
+            return f"{self.rule}: verify {'ok' if self.ok else 'FAILED'} ({self.detail})"
+        what = self.cmd or (self.kind if self.kind in ("warn", "propose") else f"{self.kind} {self.resource}")
+        fail = " FAILED" if not self.ok and not self.dry_run else ""
+        return (f"{'[dry] ' if self.dry_run else ''}{self.rule}: {what}{fail}"
+                f"{' -> ' + self.detail if self.detail else ''}")
 
 
 def build_context(snap, *, flags: dict | None = None, services: dict | None = None, guard: dict | None = None,

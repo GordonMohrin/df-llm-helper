@@ -1,6 +1,6 @@
 # BUG-119: documentation contradictions found by running the documented examples (`record --record` form, Python version, selftest duration/exit code, file names, which Lua files to install)
 
-- **Status:** open
+- **Status:** fixed in bf01075
 - **Severity:** S3
 - **Area:** `docs/OVERVIEW.md:7,33,45,47`, `README.md:37,40,47`, `docs/MANUAL.md:11,14,106,118`, `docs/PLANNERS.md:3`, `docs/INTEGRATION.md:8`, `df_llm_helper/selftest.py:150-153`
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)
@@ -31,3 +31,6 @@ Fix the OVERVIEW row (`--record x.jsonl record [commands…]`) and make the pars
 
 ## Info needed
 Cloud session: which minimum Python version is real (3.11 or 3.12)? Does the code use 3.12-only features?
+
+## Fix
+OVERVIEW `--record x.jsonl record [commands]` (+ global options first), Python 3.11+ in README/OVERVIEW/MANUAL/INTEGRATION/PLANNERS (the suite runs green on 3.11), selftest duration (~30 s), `LINT-FINDINGS.md`, `df_llm_helper/`, Lua install line (`lua/pilot_*.lua` + `lua/claude/*.lua`) in MANUAL/INTEGRATION/OVERVIEW; `selftest` without pytest prints `Self-test INCOMPLETE ...` and exits 2. The untracked local `dfpilot/` folder is not in the repo (delete locally). Tests: `test_bug119_*`.

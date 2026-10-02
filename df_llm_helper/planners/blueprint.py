@@ -10,7 +10,12 @@ Assumptions (verify live against quickfort):
 - Cells with ``(WxH)`` occupy a rectangle with the cell as the top-left corner (negative values: to the left/up);
   ``(WxHxD)`` additionally occupies D levels. Without a size, workshops/furnaces (``w?``/``e?``) occupy 3x3 and the
   trade depot key ``D`` in #build 5x5, each centered on the cell, everything else 1x1.
-- Zone keys (layout notes, section 9): m b h D B o T d, plus a (archery range, used in the project); parameter ``zone_keys`` is extensible.
+- Zone keys: the full quickfort zone table (``hack/scripts/internal/quickfort/zone.lua``): m b h n p w j f s o D B a d t T g c;
+  parameter ``zone_keys`` is extensible (BUG-109).
+- Cells may be CSV-quoted (``"n{name=""Nest""}"``, needed when a cell contains ``"``); they are unquoted first.
+- quickfort accepts a building key in EVERY tile of its footprint (``wj,wj,wj`` x 3): identical adjacent keys without a
+  size are one building (their bounding box), not overlapping buildings.
+- W_COLS only for a row with content beyond the width of the section's first row (ragged/filler rows are normal).
 - Overlaps are checked per section (#build/#place: error, #zone: only identical keys as a warning).
 - The lower map boundary is only checked against ``origin`` if ``origin`` is given.
 """
@@ -18,14 +23,15 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable, Optional, Sequence
 
 __all__ = ["Finding", "CODES", "ZONE_KEYS", "validate_blueprint", "has_errors"]
 
-# m Meeting, b Bedroom, h Dining Hall, D Dormitory, B Barracks, o Office, T Tomb, d Dump (layout notes, section 9);
-# additionally a = Archery range (assumption: valid according to quickfort)
-ZONE_KEYS = frozenset("mbhDBoTda")
+# quickfort zone keys (DFHack quickfort zone.lua): m Meeting area, b Bedroom, h Dining hall, n Pen/pasture, p Pit/pond,
+# w Water source, j Dungeon, f Fishing, s Sand, o Office, D Dormitory, B Barracks, a Archery range, d Garbage dump,
+# t Animal training, T Tomb, g Gather fruit, c Clay
+ZONE_KEYS = frozenset("mbhnpwjfsoDBadtTgc")
 ACTIVE_MODES = ("dig", "build", "place", "zone")
 PASSIVE_MODES = ("notes", "meta", "query", "ignore", "aliases")
 MAX_EXTENT = 10_000
@@ -94,6 +100,31 @@ class _Section:
     z: int = 0
     ncols: Optional[int] = None
     cells: int = 0
+    pending: list = field(default_factory=list)     # multi-tile build cells without size (filled footprints)
+
+
+def _components(cells: list) -> list[list]:
+    """Groups (key, x, y, z, line, col) cells: same key and level, 4-neighbours -> one group (input order kept)."""
+    pos = {(c[0], c[3], c[1], c[2]): i for i, c in enumerate(cells)}
+    seen: set = set()
+    out = []
+    for i, c in enumerate(cells):
+        if i in seen:
+            continue
+        comp, stack = [], [i]
+        seen.add(i)
+        while stack:
+            j = stack.pop()
+            comp.append(cells[j])
+            k, x, y, z = cells[j][0], cells[j][1], cells[j][2], cells[j][3]
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                n = pos.get((k, z, x + dx, y + dy))
+                if n is not None and n not in seen:
+                    seen.add(n)
+                    stack.append(n)
+        comp.sort(key=lambda t: (t[4], t[5]))
+        out.append(comp)
+    return out
 
 
 def _split_cells(line: str) -> list[str]:
@@ -294,10 +325,30 @@ def validate_blueprint(text: str, map_size: Optional[Sequence[int]] = None, orig
     if map_size is not None:
         mx, my = int(map_size[0]), int(map_size[1])
 
+    def check_bounds(rs: Sequence[_Rect], ln: int, col: int) -> None:
+        if mx is None or my is None:
+            return
+        for r in rs:
+            ox, oy = origin if origin is not None else (0, 0)
+            low = origin is not None and (r.x1 + ox < 0 or r.y1 + oy < 0)
+            if r.x2 + ox >= mx or r.y2 + oy >= my or low:
+                add(ln, col, "E_BOUNDS",
+                    f"footprint x{r.x1 + ox}..{r.x2 + ox} y{r.y1 + oy}..{r.y2 + oy} lies outside the map {mx}x{my}")
+
     def flush() -> None:
-        nonlocal sec, sec_rects
+        nonlocal sec, sec_rects, rect_idx
         if sec is None:
             return
+        for comp in _components(sec.pending):
+            key, x, y, z, ln0, col0 = comp[0]
+            if len(comp) == 1:
+                rs = _rects(sec.mode, key, None, x, y, z, ln0, col0, rect_idx)
+            else:                                  # identical adjacent keys = one building filling its footprint
+                xs, ys = [c[1] for c in comp], [c[2] for c in comp]
+                rs = [_Rect(z, min(xs), min(ys), max(xs), max(ys), key, ln0, col0, rect_idx)]
+            rect_idx += len(rs)
+            check_bounds(rs, ln0, col0)
+            sec_rects.extend(rs)
         if sec.cells == 0:
             add(sec.line, 1, "W_EMPTY_SECTION", f"#{sec.mode} without cells")
         if sec.mode in ("build", "place"):
@@ -369,12 +420,17 @@ def validate_blueprint(text: str, map_size: Optional[Sequence[int]] = None, orig
             continue
 
         cells = _split_cells(raw.rstrip("\r\n"))
+        used = len(cells)
+        while used and not cells[used - 1].strip():
+            used -= 1
         if sec.ncols is None:
             sec.ncols = len(cells)
-        elif len(cells) != sec.ncols:
-            add(ln, 1, "W_COLS", f"{len(cells)} columns instead of {sec.ncols}")
+        elif used > sec.ncols:
+            add(ln, 1, "W_COLS", f"content in {used} columns, the section's first row has {sec.ncols}")
         for x, cell in enumerate(cells):
             cell = cell.strip()
+            if len(cell) >= 2 and cell[0] == '"' and cell[-1] == '"':      # CSV quoting (BUG-109)
+                cell = cell[1:-1].replace('""', '"').strip()
             if not cell:
                 continue
             col = x + 1
@@ -390,15 +446,12 @@ def validate_blueprint(text: str, map_size: Optional[Sequence[int]] = None, orig
             if props:
                 for tok in _prop_problems(props):
                     add(ln, col, "W_PROP", f"property {tok!r} without key=value")
+            if ext is None and sec.mode == "build" and _fixed_size(sec.mode, key) != (1, 1):
+                sec.pending.append((key, x, sec.y, sec.z, ln, col))   # maybe a filled footprint: decided in flush()
+                continue
             rects = _rects(sec.mode, key, ext, x, sec.y, sec.z, ln, col, rect_idx)
             rect_idx += len(rects)
-            if mx is not None and my is not None:
-                for r in rects[:1]:
-                    ox, oy = origin if origin is not None else (0, 0)
-                    low = origin is not None and (r.x1 + ox < 0 or r.y1 + oy < 0)
-                    if r.x2 + ox >= mx or r.y2 + oy >= my or low:
-                        add(ln, col, "E_BOUNDS",
-                            f"footprint x{r.x1 + ox}..{r.x2 + ox} y{r.y1 + oy}..{r.y2 + oy} lies outside the map {mx}x{my}")
+            check_bounds(rects[:1], ln, col)
             if sec.mode in ("build", "place", "zone"):
                 sec_rects.extend(rects)
         sec.y += 1

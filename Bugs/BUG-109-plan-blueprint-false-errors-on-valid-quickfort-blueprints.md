@@ -1,6 +1,6 @@
 # BUG-109: `plan blueprint` reports errors (zone keys `n f t p w`, quoted CSV cells, filled workshop footprints) for blueprints that quickfort accepts and that were used in the live game
 
-- **Status:** open
+- **Status:** fixed in 6d7faa3
 - **Severity:** S2 (false alarms on the fair-play/validation path; a valid blueprint is refused, exit 1)
 - **Area:** `df_llm_helper/planners/blueprint.py:28` (`ZONE_KEYS = frozenset("mbhDBoTda")`), cell parser `blueprint.py:160-215` (no CSV quote handling -> `E_CELL`), overlap check `blueprint.py:290-320` (`E_OVERLAP`), `blueprint.py:375` (`W_COLS`)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)
@@ -54,3 +54,6 @@ Take the zone key set from quickfort (`m b h n p w j f s o D B a d t T g c`), pa
 
 ## Info needed
 Gordon / cloud session: should `plan blueprint` be the gate in front of `quickfort run`? If yes, this must be fixed before; if it is only advice, make the exit code 0 for warnings and show errors as "possible". Also see BUG-110 (no map-bounds check from the CLI).
+
+## Fix
+Zone keys = quickfort's zone table (`m b h n p w j f s o D B a d t T g c`); CSV-quoted cells are unquoted; identical adjacent building keys without a size are one building (bounding box) instead of overlaps; `W_COLS` only for content beyond the first row's width. All 10 real sample blueprints from the evidence validate without errors (`test_bug109_*`); the bad fixtures still fail. The exit-code/gate question (Info needed) is unchanged: errors -> exit 1.

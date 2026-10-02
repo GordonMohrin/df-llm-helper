@@ -102,22 +102,37 @@ class Pilot:
 
     # ---- Digest
     def digest(self, snap: Snapshot | None = None, *, scope: str | None = None, since_last: bool = True,
-               include_warnings: bool = True) -> str:
+               include_warnings: bool = True, persist: bool = True) -> str:
+        """persist=False (BUG-101/BUG-117 B: overlay, --dry-run): a read-only report - the delta state, inbox/bus
+        'seen' marks, warnings, snapshot and KPI rows stay untouched, so the orchestrator's next digest is complete."""
         snap = snap or self.snapshot()
         key = f"digest.state.{scope or 'all'}"
         state = DigestState.from_dict(self.store.get(key))
         inbox_scope = scope or self.cfg.get("digest.inbox_scope", "orchestrator")
-        warnings = self.store.take_warnings() if include_warnings and (scope in (None, "orchestrator")) else []
+        warnings: list = []
+        if include_warnings and scope in (None, "orchestrator"):
+            warnings = self.store.take_warnings() if persist else self.store.peek_warnings()
+            warnings = [_with_age(w, self.clock.now().epoch) for w in warnings]
         if scope in (None, "orchestrator"):
             warnings += self.trend_warnings(snap)
+        bus_map = self._bus_unread(inbox_scope)
         text, new = build_digest(snap, state, th=self.cfg.th, max_tokens=int(self.cfg.get("digest.max_tokens", 600)),
                                  flags=self.tools.flags(),
-                                 inbox=self.tools.inbox_lines(inbox_scope) + self.bus_lines(inbox_scope),
+                                 inbox=self.tools.inbox_lines(inbox_scope) + list(bus_map),
                                  warnings=warnings, scope=scope,
                                  now_hhmm=self._last_hhmm(state), since_last=since_last,
                                  inbox_max=int(self.cfg.get("digest.inbox_max_lines", 6)),
                                  inbox_width=int(self.cfg.get("digest.inbox_line_chars", 110)),
-                                 cancels=self.cancels(), hint=self.kb_hint)
+                                 cancels=self.cancels(refresh=persist), hint=self.kb_hint)
+        if not persist:
+            return text
+        # BUG-111: only bus messages that were really shown are marked read; the rest stays unread
+        import hashlib
+        shown = set(new.inbox_seen) - set(state.inbox_seen)
+        ids = [mid for ln, mid in bus_map.items() if hashlib.sha1(ln.encode("utf-8")).hexdigest()[:12] in shown]
+        if ids:
+            self.store.db.execute(f"UPDATE messages SET status='read' WHERE status='new' AND id IN "
+                                  f"({','.join('?' * len(ids))})", tuple(ids))
         new.ts = self.clock.now().epoch
         self.store.set(key, new.to_dict())
         self.store.add_snapshot(self.clock.now().epoch, snap.game_id, snap.facts())
@@ -126,12 +141,24 @@ class Pilot:
             record_kpis(self.store, self.clock.now().epoch, snap)
         return text
 
+    def _bus_unread(self, recipient: str) -> dict:
+        """Unread bus messages as inbox lines -> message id (not marked read here)."""
+        from .bus import Bus
+        out: dict = {}
+        for m in Bus(self.store, self.clock).read(recipient, limit=50, mark=False):
+            out.setdefault(self._bus_line(m), m.id)
+        return out
+
+    @staticmethod
+    def _bus_line(m) -> str:
+        return (f"- from {m.sender}, {m.topic or 'bus'}: {('[' + m.prio.upper() + '] ') if m.prio != 'info' else ''}"
+                f"{m.text}" + (f" (x{m.count})" if m.count > 1 else ""))
+
     def bus_lines(self, recipient: str) -> list[str]:
         """Unread bus messages as inbox lines (they are marked as read in the process)."""
         from .bus import Bus
         bus = Bus(self.store, self.clock)
-        return [f"- from {m.sender}, {m.topic or 'bus'}: {('[' + m.prio.upper() + '] ') if m.prio != 'info' else ''}"
-                f"{m.text}" + (f" (x{m.count})" if m.count > 1 else "") for m in bus.read(recipient, limit=50)]
+        return [self._bus_line(m) for m in bus.read(recipient, limit=50)]
 
     def trend_warnings(self, snap: Snapshot) -> list[dict]:
         """F14: robust trend anomalies (MAD) on the snapshot history, with a KB cause hint."""
@@ -182,12 +209,24 @@ class Pilot:
         gacts, _, _ = self.guard(snap, dry_run=dry_run)
         rep.guard = gacts
         rep.actions = self.autopilot(snap, dry_run=dry_run)
-        if digest:
-            rep.digest = self.digest(snap)
+        if digest:      # BUG-117 B: a dry run must not consume the report of the next real check
+            rep.digest = self.digest(snap, persist=not dry_run)
         return rep
 
     def heartbeat(self) -> None:
         self.tools.touch_heartbeat()
+
+
+def _with_age(w: dict, now: float, min_age_s: float = 1800) -> dict:
+    """BUG-117 A: a queued warning older than 30 min says how old it is (it may be obsolete by now)."""
+    try:
+        age = now - float(w.get("ts"))
+    except (TypeError, ValueError):
+        return w
+    if age < min_age_s:
+        return w
+    ago = f"{age / 3600:.0f}h" if age >= 5400 else f"{age / 60:.0f} min"
+    return {**w, "text": f"{w.get('text')} ({ago} ago)"}
 
 
 def token_report(text: str) -> str:

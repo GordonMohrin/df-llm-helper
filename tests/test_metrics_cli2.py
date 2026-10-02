@@ -41,7 +41,9 @@ def test_kpis_csv_export_loads_with_csv_module():
     rows = list(csv.DictReader(io.StringIO(out), delimiter=";"))
     assert list(rows[0].keys()) == METRICS_HEADER
     assert [r["buerger"] for r in rows] == ["24", "25", "26"] and [r["feinde"] for r in rows] == ["0", "1", "2"]
-    assert rows[0]["spieldatum"] == "12. Hematite, Jahr 102" and rows[0]["sawdeadbody"] == ""
+    assert rows[0]["spieldatum"] == "12. Hematite, Jahr 102"
+    # BUG-121: filled like lua/claude/report.lua (negative_gedanken_top, kadaver_tiere_in_festung; 0 if absent)
+    assert (rows[0]["sawdeadbody"], rows[0]["death"], rows[0]["ghosthaunt"], rows[0]["tierkadaver"]) == ("88", "0", "0", "4")
     real = (ROOT / "fixtures" / "run5" / "logs" / "metrics_tail.csv").read_text().splitlines()[0].split(";")
     assert real == METRICS_HEADER
 

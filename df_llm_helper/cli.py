@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -55,7 +56,18 @@ def _usage(pilot, scope: str, command: str, out: str, t0: float) -> None:
     record_usage(pilot.store, time.time(), scope, command, time.time() - t0, sum(len(c) for c in pilot.client.calls), out)
 
 
+def _check_scope(scope: str | None) -> None:
+    """BUG-117 F: an unknown --scope is an error (it used to report 'No change')."""
+    if scope is None:
+        return
+    from .brief import SCOPES
+    known = [*SCOPES, "orchestrator"]
+    if scope not in known:
+        raise ValueError(f"unknown scope '{scope}' (known: {', '.join(known)})")
+
+
 def cmd_digest(args) -> int:
+    _check_scope(args.scope)
     p = _pilot(args)
     t0 = time.time()
     out = p.digest(scope=args.scope, since_last=not args.full)
@@ -175,14 +187,19 @@ def cmd_autopilot(args) -> int:
         print("\n".join(res) if res else "no conflicts")
         return 1 if any(x.startswith("CONFLICT") for x in res) else 0
     if args.action == "enable":
+        known = [r.id for r in p.rules()]
+        if not args.rule:
+            raise ValueError("autopilot enable needs a rule id (see: python -m df_llm_helper autopilot rules)")
+        if args.rule not in known:
+            raise ValueError(f"unknown rule '{args.rule}' (see: python -m df_llm_helper autopilot rules)")
         p.store.update_rule(args.rule, disabled=0, reason=None)
         print(f"Rule {args.rule} active again")
         return 0
     while True:
         snap = p.snapshot()
         recs = p.autopilot(snap, dry_run=args.dry_run)
-        print("\n".join(r.line() for r in recs) or "no action")
-        if not args.loop:
+        print("\n".join(r.line() for r in recs) or "no action", flush=True)
+        if not args.loop or args.once:
             return 0
         time.sleep(float(args.interval))
 
@@ -191,7 +208,13 @@ def cmd_guard(args) -> int:
     p = _pilot(args)
     if args.action == "ack-gate":
         from .guard import GuardState
+        gates = [int(g) for g in (p.cfg.get("guard.pop_gates") or [])]
+        if args.gate is None:
+            raise ValueError(f"guard ack-gate needs the gate number (configured pop gates: {gates})")
+        if args.gate not in gates:
+            raise ValueError(f"unknown pop gate {args.gate} (configured: {gates})")
         st = GuardState.from_dict(p.store.get("guard.state"))
+        st.gates_acked = [g for g in st.gates_acked if isinstance(g, int)]      # drop junk of older versions
         if args.gate not in st.gates_acked:
             st.gates_acked.append(args.gate)
         p.store.set("guard.state", st.to_dict())
@@ -199,10 +222,10 @@ def cmd_guard(args) -> int:
         return 0
     while True:
         acts, st, info = p.guard(dry_run=args.dry_run)
-        print("; ".join(a.line() for a in acts) or "Guard: all quiet")
+        print("; ".join(a.line() for a in acts) or "Guard: all quiet", flush=True)
         print(f"Target fps {info['target_fps']}, time lapse allowed: {info['timestream_allowed']}"
-              + (f" (blockers: {', '.join(info['blockers'])})" if info["blockers"] else ""))
-        if not args.loop:
+              + (f" (blockers: {', '.join(info['blockers'])})" if info["blockers"] else ""), flush=True)
+        if not args.loop or args.once:
             return 0
         time.sleep(float(args.interval))
 
@@ -234,8 +257,9 @@ def cmd_tempo(args) -> int:
         _, _, info = p.guard(snap, dry_run=True)
         fps = f"{snap.fps:.0f}" if snap.fps is not None else "?"
         norm = f"{snap.normal_fps:.0f}" if snap.normal_fps else "?"
-        print(f"Time lapse: {'ON' if snap.timestream else 'off'}, fps {fps} (normal {norm}), "
-              f"{'paused' if snap.paused else 'running'}")
+        ts = "unknown" if snap.timestream is None else ("ON" if snap.timestream else "off")
+        run_state = "pause state unknown" if snap.paused is None else ("paused" if snap.paused else "running")
+        print(f"Time lapse: {ts}, fps {fps} (normal {norm}), {run_state}")
         print("Guard: " + ("no blockers, 'tempo on' would be allowed" if not info["blockers"]
                            else "blockers: " + ", ".join(info["blockers"])))
         return 0
@@ -273,8 +297,7 @@ def cmd_wake(args) -> int:
     store = Store(cfg.path("state_db"))
     tools = ToolsDir(cfg.path("tools"), clock)
     while True:
-        for line in wake_check(tools, store, clock, emit_existing=args.emit_existing):
-            print(line, flush=True)
+        wake_check(tools, store, clock, emit_existing=args.emit_existing, sink=lambda ln: print(ln, flush=True))
         if not args.loop:
             return 0
         time.sleep(float(args.interval))
@@ -391,6 +414,8 @@ def cmd_replay(args) -> int:
     for f in files:
         res = run_scenario(f)
         errs = check_expectations(res)
+        if not res.steps:
+            errs = [*errs, "scenario has no steps (empty or meta-only file)"]
         print(f"{f.stem}: {'OK' if not errs else 'FAIL'} ({len(res.steps)} steps)")
         for e in errs:
             print("   " + e)
@@ -521,9 +546,11 @@ def cmd_metrics(args) -> int:
 def cmd_overlay(args) -> int:
     from .overlay import overlay_lines, overlay_send
     p = _pilot(args)
-    digest = p.digest(include_warnings=False) if not args.text else " ".join(args.text)
+    # BUG-101: stateless - the current !!/! items of a read-only digest; the orchestrator's delta stays untouched
+    digest = (p.digest(include_warnings=False, since_last=False, persist=False) if not args.text
+              else " ".join(args.text))
     lines = overlay_lines(digest, max_lines=int(p.cfg.get("overlay.max_lines", 3)),
-                          max_chars=int(p.cfg.get("overlay.max_chars", 120)))
+                          max_chars=int(p.cfg.get("overlay.max_chars", 120)), fallback=bool(args.text))
     cmds = overlay_send(lines, p.store, p.client, time.time(), dedupe_min=float(p.cfg.get("overlay.dedupe_min", 10)),
                         dry_run=not args.send)
     print("\n".join(cmds) or "nothing new for the display")
@@ -583,31 +610,124 @@ def cmd_trade(args) -> int:
     return 0
 
 
-def _kv(text: str | None) -> dict:
+def _kv(text: str | None, allowed: tuple[str, ...] | None = None, what: str = "value") -> dict:
+    """'k=v,k=v' -> {k: float}. BUG-114: a part without '=', a non-number or an unknown key is an error."""
     out = {}
     for part in (text or "").split(","):
-        if "=" in part:
-            k, v = part.split("=", 1)
-            out[k.strip()] = float(v)
+        if not part.strip():
+            continue
+        if "=" not in part:
+            raise ValueError(f"expected name=number, got '{part.strip()}' (e.g. iron=32,bronze=31)")
+        k, v = part.split("=", 1)
+        k = k.strip()
+        if not k:
+            raise ValueError(f"missing name in '{part.strip()}'")
+        if allowed is not None and k not in allowed:
+            raise ValueError(f"unknown {what} '{k}' (allowed: {', '.join(allowed)})")
+        try:
+            out[k] = float(v)
+        except ValueError:
+            raise ValueError(f"'{k}': not a number: '{v.strip()}'") from None
+        if out[k] < 0:
+            raise ValueError(f"'{k}': must not be negative ({v.strip()})")
     return out
+
+
+TRADE_ITEM_KEYS = ("id", "name", "category", "value", "weight", "qty", "priority_category")
+TRADE_EXAMPLE = ('{"own": [{"id": "o1", "name": "Rock mug", "category": "other", "value": 100, "weight": 2, "qty": 10}], '
+                 '"offer": [{"id": "f1", "name": "Plump helmet", "category": "food", "value": 10, "weight": 1, "qty": 20}], '
+                 '"ratio": 2.3, "reserves": {"o1": 2}, "max_weight": 100, '
+                 '"priorities": ["food", "wood", "metal", "cloth", "other"]}')
+
+
+def _trade_items(xs, where: str) -> list:
+    """BUG-113/BUG-123: validate the hand-written trade JSON with a message that names the allowed fields."""
+    from .planners import TradeItem
+    if xs is None:
+        return []
+    if not isinstance(xs, list):
+        raise ValueError(f"--json: '{where}' must be a list of items")
+    out = []
+    for i, x in enumerate(xs):
+        if not isinstance(x, dict):
+            raise ValueError(f"--json: {where}[{i}] must be an object")
+        unknown = [k for k in x if k not in TRADE_ITEM_KEYS]
+        missing = [k for k in TRADE_ITEM_KEYS[:5] if k not in x]
+        if unknown or missing:
+            raise ValueError(f"--json: {where}[{i}]: " + (f"unknown field(s) {unknown}; " if unknown else "")
+                             + (f"missing field(s) {missing}; " if missing else "")
+                             + f"fields: {', '.join(TRADE_ITEM_KEYS)} (qty, priority_category optional)")
+        try:
+            out.append(TradeItem(id=str(x["id"]), name=str(x["name"]), category=str(x["category"]),
+                                 value=int(x["value"]), weight=float(x["weight"]), qty=int(x.get("qty", 1)),
+                                 priority_category=x.get("priority_category")))
+        except (TypeError, ValueError):
+            raise ValueError(f"--json: {where}[{i}]: value/weight/qty must be numbers") from None
+    return out
+
+
+def _map_size(text: str | None) -> tuple[int, int] | None:
+    if not text:
+        return None
+    import re as _re
+    m = _re.fullmatch(r"\s*(\d+)\s*[xX,]\s*(\d+)(?:\s*[xX,]\s*\d+)?\s*", text)
+    if not m:
+        raise ValueError(f"--map-size: expected WxH (e.g. 192x192), got '{text}'")
+    return int(m.group(1)), int(m.group(2))
+
+
+def _origin(text: str | None) -> tuple[int, int] | None:
+    if not text:
+        return None
+    try:
+        x, y = (int(v) for v in text.replace(" ", "").split(",")[:2])
+    except ValueError:
+        raise ValueError(f"--origin: expected x,y (e.g. 100,80), got '{text}'") from None
+    return x, y
+
+
+def _no_data(snap) -> str | None:
+    """BUG-106: the planners must not compute with 0 when the game could not be read."""
+    from .guard import snapshot_unreadable
+    if not snapshot_unreadable(snap):
+        return None
+    why = "; ".join(str(f) for f in (snap.failed if snap is not None else [])[:2]) or "no population value"
+    return f"no data from the game (query failed: {why}) - check DF/dfhack-run"
 
 
 def cmd_plan(args) -> int:
     from . import planners as pl
     if args.kind == "blueprint":
+        if not args.files:
+            raise ValueError("plan blueprint needs at least one CSV file")
+        msize, origin = _map_size(args.map_size), _origin(args.origin)
+        if origin and not msize:
+            raise ValueError("--origin needs --map-size")
         bad = 0
         for f in args.files:
-            fs = pl.validate_blueprint(Path(f).read_text(encoding="utf-8", errors="replace"))
+            fs = pl.validate_blueprint(Path(f).read_text(encoding="utf-8", errors="replace"),
+                                       **({"map_size": msize} if msize else {}),
+                                       **({"origin": origin} if origin else {}))
             print(f"{f}: {'ok' if not fs else ''}")
             for x in fs:
                 print(f"  {x}")
             bad += pl.has_errors(fs)
+        if not msize:
+            print("Note: map bounds (E_BOUNDS) not checked; give --map-size WxH [--origin x,y]")
         return 1 if bad else 0
     if args.kind == "trade":
-        d = json.loads(Path(args.json).read_text(encoding="utf-8"))
-        mk = lambda xs: [pl.TradeItem(**x) for x in xs]  # noqa: E731
-        plan = pl.plan_trade(mk(d.get("own", [])), mk(d.get("offer", [])), ratio=float(d.get("ratio", 2.3)),
-                             reserves=d.get("reserves"), max_weight=d.get("max_weight"))
+        if not args.json:
+            raise ValueError("plan trade needs --json <file>; example: " + TRADE_EXAMPLE)
+        d = json.loads(Path(args.json).read_text(encoding="utf-8-sig"))
+        if not isinstance(d, dict):
+            raise ValueError("--json: top level must be an object, e.g. " + TRADE_EXAMPLE)
+        pr = d.get("priorities")
+        if pr is not None and not (isinstance(pr, list) and all(isinstance(x, str) for x in pr)):
+            raise ValueError("--json: 'priorities' must be a list of category names, e.g. [\"food\", \"gem\"]")
+        kw = {"priorities": pr} if pr is not None else {}
+        plan = pl.plan_trade(_trade_items(d.get("own"), "own"), _trade_items(d.get("offer"), "offer"),
+                             ratio=float(d.get("ratio", 2.3)), reserves=d.get("reserves"),
+                             max_weight=d.get("max_weight"), **kw)
         print(f"Buy {plan.buy_value} / sell {plan.sell_value} (ratio {plan.ratio}), weight {plan.weight}, "
               f"method {plan.method}")
         for ln in plan.buy:
@@ -618,12 +738,29 @@ def cmd_plan(args) -> int:
             print("  Note: " + n)
         return 0
     if args.kind == "dig":
-        p = _pilot(args)
-        text = Path(args.area_file).read_text(encoding="utf-8") if args.area_file else \
-            p.client.run(f"claude/area {args.area}").stdout
+        if not args.targets or not args.targets.strip():
+            raise ValueError("plan dig needs --targets 'x,y[,prio];x,y;...'")
+        if not args.area and not args.area_file:
+            raise ValueError("plan dig needs --area 'z x y w h' or --area-file <file>")
+        try:
+            targets = [tuple(int(v) for v in t.split(",")) for t in args.targets.split(";") if t.strip()]
+        except ValueError:
+            raise ValueError(f"--targets: expected 'x,y[,prio];...', got '{args.targets}'") from None
+        if any(len(t) not in (2, 3) for t in targets):
+            raise ValueError(f"--targets: each target is x,y or x,y,prio, got '{args.targets}'")
+        try:
+            picks, max_open = int(args.picks), int(args.max_open)
+        except ValueError:
+            raise ValueError("--picks/--max-open must be whole numbers") from None
+        if picks < 1 or max_open < 1:
+            raise ValueError("--picks and --max-open must be at least 1")
+        if args.area_file:
+            text = Path(args.area_file).read_text(encoding="utf-8")
+        else:
+            p = _pilot(args)
+            text = p.client.run(f"claude/area {args.area}").stdout
         area = pl.parse_area(text)
-        targets = [tuple(int(v) for v in t.split(",")) for t in (args.targets or "").split(";") if t.strip()]
-        plan = pl.plan_dig(area, targets, picks=int(args.picks), max_open=int(args.max_open))
+        plan = pl.plan_dig(area, targets, picks=picks, max_open=max_open)
         for i, b in enumerate(plan.batches, 1):
             print(f"Batch {i}: {len(b)} tiles " + " ".join(f"({x},{y})" for x, y in b[:12]) + (" …" if len(b) > 12 else ""))
             if args.csv:
@@ -633,12 +770,34 @@ def cmd_plan(args) -> int:
             print("unreachable: " + " ".join(f"({x},{y})" for x, y in plan.unreachable))
         for n in plan.notes:
             print("Note: " + n)
+        if not plan.batches and not plan.unreachable:
+            print("nothing to dig")
         return 0
+    bars = {k: int(v) for k, v in _kv(args.bars).items()} if args.kind == "armor" else {}
+    prod = _kv(args.prod, ("drink", "food"), "resource") if args.kind == "supply" else {}
+    if args.kind == "supply" and args.growth is not None and args.growth < 0:
+        raise ValueError(f"--growth must not be negative ({args.growth})")
     p = _pilot(args)
     snap = p.snapshot()
+    nd = _no_data(snap)
+    if nd:
+        print(f"Error: {nd}", file=sys.stderr)
+        return 1
     if args.kind == "armor":
-        soldiers = [pl.Soldier(id=m.id, name=m.name) for q in snap.squads for m in q.members]
-        plan = pl.plan_armor(snap.pop_total or 0, soldiers, {}, {k: int(v) for k, v in _kv(args.bars).items()})
+        # BUG-107: militia miners (pick only) are no soldiers; a carried weapon and a full set (9/9) are equipment
+        # the plan must not forge again. claude/mil tabelle gives only a piece COUNT, not which armor slots are worn.
+        soldiers, miners, partial = [], 0, 0
+        for q in snap.squads:
+            for m in q.members:
+                weapon = (m.weapon or "").lower().rstrip("*")
+                if weapon == "pick":
+                    miners += 1
+                    continue
+                full = m.parts is not None and m.parts >= 9
+                eq = list(pl.armor.SLOTS) if full else (["weapon"] if weapon else [])
+                partial += 0 if full else 1
+                soldiers.append(pl.Soldier(id=m.id, name=m.name, equipped=eq))
+        plan = pl.plan_armor(snap.pop_total, soldiers, {}, bars)
         print(f"Quota {plan.quota} soldiers (now {plan.soldiers_now}, missing {plan.recruits_needed}); "
               f"bars needed {plan.bars_needed}, available {plan.bars_available}, missing {plan.bars_missing}")
         for o in plan.orders:
@@ -647,14 +806,27 @@ def cmd_plan(args) -> int:
             print(f"  deferred {o.qty}x {o.slot} (bars missing)")
         for n in plan.notes:
             print("  Note: " + n)
+        if miners:
+            print(f"  Note: {miners} pick carriers (mining squad) not counted as soldiers")
+        if partial:
+            print(f"  Note: UPPER BOUND - for {partial} soldiers below 9/9 pieces the worn armor slots are unknown "
+                  f"(claude/mil tabelle gives only a count) and free stock is not checked; compare with claude/mil equip")
         return 0
     if args.kind == "supply":
         st = snap.stocks
-        stock = {"drink": float(st.drink or 0), "food": float((st.meals or 0) + (st.fish or 0) + (st.meat or 0))}
-        fc = pl.forecast(stock, float(snap.pop_total or 0), production=_kv(args.prod) or None, growth=args.growth)
+        meals, fish, meat = (st.meals or 0), (st.fish or 0), (st.meat or 0)
+        stock = {"drink": float(st.drink or 0), "food": float(meals + fish + meat)}
+        fc = pl.forecast(stock, float(snap.pop_total or 0), production=prod or None, growth=args.growth)
         for res, d in fc.days_left.items():
-            print(f"{res}: stock {stock[res]:.0f}, " + (f"empty in {d:.0f} days" if d is not None else
-                                                       "no shortage within the horizon"))
+            extra = ""
+            if res == "food":       # BUG-108: say what is counted (the digest 'Food Nd' is the game's food_days)
+                plants = getattr(st, "plants", None)
+                extra = f" (meals {meals}, fish {fish}, meat {meat}" + (
+                    f"; raw plants {plants} not counted" if plants else "") + ")"
+            print(f"{res}: stock {stock[res]:.0f}{extra}, " + (f"empty in {d:.0f} days" if d is not None else
+                                                                "no shortage within the horizon"))
+        if getattr(snap, "food_days", None) is not None:
+            print(f"Note: the digest shows the game's food_days ({snap.food_days}), which include raw plants")
         for w in fc.warn:
             print("Warning: " + w)
         return 0
@@ -1000,47 +1172,97 @@ def cmd_journal(args) -> int:
     return 0
 
 
+class _Parser(argparse.ArgumentParser):
+    def error(self, message: str):
+        if "unrecognized arguments" in message and any(g in message for g in GLOBAL_OPTS):
+            message += (" (global options " + ", ".join(GLOBAL_OPTS) + " must come BEFORE the command, "
+                        "e.g. python -m df_llm_helper --record x.jsonl record claude/status)")
+        super().error(message)
+
+
+GLOBAL_OPTS = ("--config", "--mock", "--replay-file", "--record")
+
+
+def _help(ap: argparse.ArgumentParser, topic: str | None) -> int:
+    if not topic:
+        ap.print_help()
+        return 0
+    sub = next(a for a in ap._actions if isinstance(a, argparse._SubParsersAction))
+    if topic not in sub.choices:
+        raise ValueError(f"unknown command '{topic}' (see: python -m df_llm_helper help)")
+    sub.choices[topic].print_help()
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="df-llm-helper", description="Helper for LLM control of Dwarf Fortress")
+    ap = _Parser(prog="df-llm-helper", description="Helper for LLM control of Dwarf Fortress")
     ap.add_argument("--config", default=None, help="config.yaml (default: config.yaml in the project folder)")
     ap.add_argument("--mock", default=None, help="fixture folder instead of a real DF (e.g. fixtures/run5)")
     ap.add_argument("--replay-file", default=None, help="recorded session (*.jsonl) instead of a real DF")
     ap.add_argument("--record", default=None, help="record all DF calls into this JSONL file")
+    from . import __version__
+    ap.add_argument("--version", action="version", version=f"df-llm-helper {__version__}")
+    ap.epilog = ("global options (--config, --mock, --replay-file, --record) come BEFORE the command, "
+                 "e.g. python -m df_llm_helper --record x.jsonl record claude/status; "
+                 "details: python -m df_llm_helper <command> --help")
     sub = ap.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("help", help="this overview, or the help of one command: help <command>")
+    s.add_argument("topic", nargs="?")
+    s.set_defaults(fn=lambda a: _help(ap, a.topic))
 
-    s = sub.add_parser("digest", help="compact status report (delta)")
-    s.add_argument("--scope")
+    def cmd_parser(name: str, help_: str, *examples: str, description: str | None = None):
+        """BUG-120: every core command gets a description and examples in its --help."""
+        ep = ("examples:\n" + "\n".join("  python -m df_llm_helper " + e for e in examples)) if examples else None
+        return sub.add_parser(name, help=help_, description=description or help_, epilog=ep,
+                              formatter_class=argparse.RawDescriptionHelpFormatter)
+
+    dry_help = ("no writing DF command, no flag change, and the report is not consumed (the next real call reports "
+                "the same)")
+    s = cmd_parser("digest", "compact status report (delta since the last call)", "digest", "digest --full",
+                   "digest --scope trinken")
+    s.add_argument("--scope", help="report for one scope agent (trinken, essen, bau, ..., or orchestrator)")
     s.add_argument("--full", action="store_true", help="without delta (everything notable)")
     s.set_defaults(fn=cmd_digest)
-    s = sub.add_parser("check", help="orchestrator check: heartbeat + guard + autopilot + digest (one call)")
-    s.add_argument("--dry-run", action="store_true")
+    s = cmd_parser("check", "orchestrator check: heartbeat + guard + autopilot + digest (one call)", "check",
+                   "check --dry-run")
+    s.add_argument("--dry-run", action="store_true", help=dry_help)
     s.set_defaults(fn=cmd_check)
-    s = sub.add_parser("cycle", help="one cycle: guard + autopilot + digest")
-    s.add_argument("--dry-run", action="store_true")
+    s = cmd_parser("cycle", "one cycle: guard + autopilot + digest", "cycle --dry-run")
+    s.add_argument("--dry-run", action="store_true", help=dry_help)
     s.set_defaults(fn=cmd_cycle)
-    s = sub.add_parser("autopilot", help="deterministic rules")
-    s.add_argument("action", nargs="?", default="run", choices=["run", "rules", "conflicts", "enable"])
-    s.add_argument("rule", nargs="?")
-    s.add_argument("--dry-run", action="store_true")
-    s.add_argument("--loop", action="store_true")
-    s.add_argument("--once", action="store_true")
-    s.add_argument("--interval", default=60)
+    s = cmd_parser("autopilot", "deterministic rules (data/rules): run | rules | conflicts | enable <rule>",
+                   "autopilot --dry-run", "autopilot rules", "autopilot enable stale_flag_generic",
+                   "autopilot --loop --interval 60")
+    s.add_argument("action", nargs="?", default="run", choices=["run", "rules", "conflicts", "enable"],
+                   help="run (default): one pass; rules: list; conflicts: check; enable: re-arm a rule switched off "
+                        "by the loop protection")
+    s.add_argument("rule", nargs="?", help="enable: rule id (see 'autopilot rules')")
+    s.add_argument("--dry-run", action="store_true", help="show the actions, execute nothing")
+    s.add_argument("--loop", action="store_true", help="repeat every --interval seconds (output flushed per pass)")
+    s.add_argument("--once", action="store_true", help="exactly one pass (default; overrides --loop)")
+    s.add_argument("--interval", type=float, default=60, help="seconds between passes with --loop (default 60)")
     s.set_defaults(fn=cmd_autopilot)
-    s = sub.add_parser("guard", help="deadman/tempo/watcher check")
-    s.add_argument("action", nargs="?", default="run", choices=["run", "ack-gate"])
-    s.add_argument("gate", nargs="?", type=int)
-    s.add_argument("--dry-run", action="store_true")
-    s.add_argument("--loop", action="store_true")
-    s.add_argument("--once", action="store_true")
-    s.add_argument("--interval", default=60)
+    s = cmd_parser("guard", "deadman/tempo/watcher check: run | ack-gate <N>", "guard --dry-run", "guard ack-gate 60",
+                   "guard --loop --interval 60")
+    s.add_argument("action", nargs="?", default="run", choices=["run", "ack-gate"],
+                   help="run (default): one guard pass; ack-gate: acknowledge a population gate (config guard.pop_gates)")
+    s.add_argument("gate", nargs="?", type=int, help="ack-gate: the gate number, e.g. 60 or 80")
+    s.add_argument("--dry-run", action="store_true", help="decide only, change no fps/tempo")
+    s.add_argument("--loop", action="store_true", help="repeat every --interval seconds (output flushed per pass)")
+    s.add_argument("--once", action="store_true", help="exactly one pass (default; overrides --loop)")
+    s.add_argument("--interval", type=float, default=60, help="seconds between passes with --loop (default 60)")
     s.set_defaults(fn=cmd_guard)
-    s = sub.add_parser("waechter", help="real-time watcher (replaces unpause-guard.ps1), permanent with --loop")
-    s.add_argument("--loop", action="store_true")
-    s.add_argument("--interval", default=None)
+    s = cmd_parser("waechter", "real-time watcher (replaces unpause-guard.ps1): reports -> events.log, flags, pauses",
+                   "waechter", "waechter --loop")
+    s.add_argument("--loop", action="store_true", help="run permanently (one step without it)")
+    s.add_argument("--interval", type=float, default=None,
+                   help="seconds between steps (default config guard.waechter_interval_s = 2)")
     s.set_defaults(fn=cmd_waechter)
-    s = sub.add_parser("tempo", help="time lapse: status (display only) | on (only without guard blockers) | off")
-    s.add_argument("action", choices=["on", "off", "status"])
-    s.add_argument("--dry-run", action="store_true")
+    s = cmd_parser("tempo", "time lapse: status (display only) | on (only without guard blockers) | off",
+                   "tempo status", "tempo on --dry-run", "tempo off")
+    s.add_argument("action", choices=["on", "off", "status"],
+                   help="status: show; on: switch on only if the guard reports no blocker; off: switch off")
+    s.add_argument("--dry-run", action="store_true", help="show what would be sent")
     s.set_defaults(fn=cmd_tempo)
     s = sub.add_parser("siege", help="Siege autopilot (spec 01): until the end (default), --once for one step")
     s.add_argument("--once", action="store_true")
@@ -1109,11 +1331,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--accept", default=None, help="lessons: approve a proposal (KB draft)")
     s.add_argument("--out", default=None)
     s.set_defaults(fn=cmd_journal)
-    s = sub.add_parser("heartbeat", help="set the orchestrator heartbeat")
+    s = cmd_parser("heartbeat", "set the orchestrator heartbeat (tools/heartbeat.txt; the deadman slows the game "
+                                "after 20 min without it)", "heartbeat")
     s.set_defaults(fn=cmd_heartbeat)
-    s = sub.add_parser("wake", help="wake filter for the monitor (files only, one line per event)")
-    s.add_argument("--loop", action="store_true")
-    s.add_argument("--interval", default=10)
+    s = cmd_parser("wake", "wake filter for the monitor (files only, one line per event)", "wake",
+                   "wake --loop --interval 10")
+    s.add_argument("--loop", action="store_true", help="run permanently (lines flushed immediately)")
+    s.add_argument("--interval", type=float, default=10, help="seconds between checks with --loop (default 10)")
     s.add_argument("--emit-existing", action="store_true", help="also report legacy flags on the first run")
     s.set_defaults(fn=cmd_wake)
     s = sub.add_parser("runbook", help="Runbooks: list|show|run|diagnose")
@@ -1133,12 +1357,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("scope")
     s.add_argument("--budget", type=int)
     s.set_defaults(fn=cmd_brief)
-    s = sub.add_parser("replay", help="replay and check scenarios")
-    s.add_argument("files", nargs="*")
-    s.add_argument("-v", "--verbose", action="store_true")
+    s = cmd_parser("replay", "replay and check scenarios (scenarios/*.jsonl)", "replay",
+                   "replay scenarios/s03_deadman.jsonl -v")
+    s.add_argument("files", nargs="*", help="scenario files (default: all of scenarios/)")
+    s.add_argument("-v", "--verbose", action="store_true", help="print every step")
     s.set_defaults(fn=cmd_replay)
-    s = sub.add_parser("record", help="execute and record commands (with --record)")
-    s.add_argument("commands", nargs="*")
+    s = cmd_parser("record", "execute and record DF commands (global --record <file> BEFORE the command)",
+                   "--record x.jsonl record \"claude/mil equip\"", "--record x.jsonl record")
+    s.add_argument("commands", nargs="*", help="DF commands (default: the read commands of the snapshot)")
     s.set_defaults(fn=cmd_record)
     s = sub.add_parser("exception", help="exception register (fair play)")
     s.add_argument("action", choices=["list", "add"])
@@ -1168,33 +1394,39 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("lint", help="fair-play linter (F9) for Lua files/folders")
     s.add_argument("paths", nargs="+")
     s.set_defaults(fn=cmd_lint)
-    s = sub.add_parser("budget", help="token budget per scope (F13)")
+    s = cmd_parser("budget", "token budget per scope (F13): calls, bytes sent/printed, tokens today", "budget")
     s.set_defaults(fn=cmd_budget)
-    s = sub.add_parser("overlay", help="short text for claude/schau say (F16), display only without --send")
-    s.add_argument("text", nargs="*")
-    s.add_argument("--send", action="store_true")
+    s = cmd_parser("overlay", "short text for claude/schau say (F16), display only without --send",
+                   "overlay", "overlay --send", "overlay \"Caravan is here\" --send")
+    s.add_argument("text", nargs="*", help="own text (default: the current critical/warning lines)")
+    s.add_argument("--send", action="store_true", help="really send to the game (same line at most every 10 min)")
     s.set_defaults(fn=cmd_overlay)
     s = sub.add_parser("trade", help="trade automaton (F15): step|status|approve|reset")
     s.add_argument("action", choices=["step", "status", "approve", "reset"])
     s.add_argument("--dry-run", action="store_true")
     s.add_argument("--stable-s", default=2.0, help="seconds the focus has been stable (measured by the caller)")
     s.set_defaults(fn=cmd_trade)
-    s = sub.add_parser("plan", help="planners (F11): blueprint|trade|dig|armor|supply")
-    s.add_argument("kind", choices=["blueprint", "trade", "dig", "armor", "supply"])
-    s.add_argument("files", nargs="*")
+    s = cmd_parser("plan", "planners (F11): blueprint|trade|dig|armor|supply (read only, nothing is sent)",
+                   "plan blueprint bp/*.csv --map-size 192x192", "plan trade --json trade.json",
+                   "plan dig --area-file area.txt --targets \"100,90;104,92\" --csv",
+                   "plan armor --bars iron=32,bronze=31", "plan supply --prod drink=10 --growth 0.5")
+    s.add_argument("kind", choices=["blueprint", "trade", "dig", "armor", "supply"], help="planner")
+    s.add_argument("files", nargs="*", help="blueprint: quickfort CSV files")
     s.add_argument("--json", help="trade: input {own:[...], offer:[...], ratio, reserves, max_weight}")
     s.add_argument("--area", help="dig: 'z x y w h' (live via claude/area)")
     s.add_argument("--area-file", help="dig: saved claude/area output")
     s.add_argument("--targets", help="dig: 'x,y[,prio];x,y;...'")
-    s.add_argument("--picks", default=1)
-    s.add_argument("--max-open", default=150)
+    s.add_argument("--picks", default=1, help="dig: number of miners (batch size factor, default 1)")
+    s.add_argument("--max-open", default=150, help="dig: maximum open dig designations per batch (default 150)")
     s.add_argument("--csv", action="store_true", help="dig: print the quickfort #dig CSV per batch")
     s.add_argument("--bars", help="armor: bars per metal, e.g. iron=32,bronze=31")
     s.add_argument("--prod", help="supply: production per day, e.g. drink=10,food=4")
     s.add_argument("--growth", type=float, default=None, help="supply: immigrants per day")
+    s.add_argument("--map-size", help="blueprint: map size WxH (e.g. 192x192, claude/status map_size) -> E_BOUNDS check")
+    s.add_argument("--origin", help="blueprint: quickfort cursor x,y (with --map-size: also the lower bound)")
     s.set_defaults(fn=cmd_plan)
-    s = sub.add_parser("metrics", help="KPI time series as CSV (header like metrics.csv)")
-    s.add_argument("--out")
+    s = cmd_parser("metrics", "KPI time series as CSV (header like metrics.csv)", "metrics", "metrics --out m.csv")
+    s.add_argument("--out", help="write to this file instead of printing")
     s.set_defaults(fn=cmd_metrics)
     return ap
 
@@ -1202,7 +1434,55 @@ def build_parser() -> argparse.ArgumentParser:
 EXTENSIONS: list = []   # M2/M3 commands register here (fn(sub))
 
 
+def _utf8_streams() -> None:
+    """BUG-112: on Windows a piped stdout uses the ANSI code page (cp1252); game text such as '\u263c' then aborts the
+    command. Always write UTF-8 (unencodable characters are replaced, never fatal) and flush per line."""
+    for s in (sys.stdout, sys.stderr):
+        reconf = getattr(s, "reconfigure", None)
+        if reconf is None:
+            continue
+        try:
+            if (getattr(s, "encoding", "") or "").lower().replace("-", "") != "utf8":
+                reconf(encoding="utf-8", errors="replace")
+            else:
+                reconf(errors="replace")
+        except (ValueError, OSError, TypeError):
+            pass
+
+
+def _error_text(e: BaseException) -> str:
+    """One line for an input/IO error (BUG-113): what went wrong and which file."""
+    if isinstance(e, IsADirectoryError) or (isinstance(e, PermissionError) and e.filename
+                                            and Path(str(e.filename)).is_dir()):
+        return f"is a directory, expected a file: {e.filename}"
+    if isinstance(e, FileNotFoundError) and e.filename:
+        return f"file or folder not found: {e.filename}"
+    if isinstance(e, FileExistsError) and e.filename:
+        return f"cannot create, a file is in the way: {e.filename}"
+    if isinstance(e, OSError) and e.filename:
+        return f"{e.strerror or type(e).__name__}: {e.filename}"
+    if isinstance(e, KeyError):
+        return f"missing key {e}"
+    text = str(e) or type(e).__name__
+    return text if isinstance(e, (ValueError, OSError)) else f"{type(e).__name__}: {text}"
+
+
+def _check_global_args(args) -> None:
+    """BUG-103/BUG-120 D: an explicit --config / --mock / --replay-file must exist (no silent fallback to defaults)."""
+    if args.config:
+        c = Path(args.config)
+        if c.is_dir():
+            raise ValueError(f"--config is a directory, expected a file: {c}")
+        if not c.is_file():
+            raise ValueError(f"config file not found: {c}")
+    if args.mock and not Path(args.mock).is_dir():
+        raise ValueError(f"fixture folder not found: {args.mock}")
+    if args.replay_file and not Path(args.replay_file).is_file():
+        raise ValueError(f"replay file not found: {args.replay_file}")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _utf8_streams()
     ap = build_parser()
     sub = next(a for a in ap._actions if isinstance(a, argparse._SubParsersAction))
     for ext in EXTENSIONS:
@@ -1212,17 +1492,26 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(mod, "register"):
             mod.register(sub)
     args = ap.parse_args(argv)
-    # --mock/--replay-file with the default config: never touch the live state.db/tools (an explicit --config wins)
-    force_overrides(mock_overrides() if (args.mock or args.replay_file) and not args.config else None)
     if args.cmd == "kb" and args.action == "import" and args.query and not args.files:
         args.files = args.query
+    debug = bool(os.environ.get("DF_LLM_HELPER_DEBUG"))
     try:
+        _check_global_args(args)
+        # BUG-104: --mock/--replay-file never touch the live state.db/tools folder. An explicit --config may still
+        # choose its OWN paths (tests, private copies); paths equal to the live/default ones are replaced.
+        force_overrides(mock_overrides(args.config) if (args.mock or args.replay_file) else None)
         return int(args.fn(args) or 0)
     except FairPlayError as e:
         print(f"FAIR PLAY: {e}", file=sys.stderr)
         return 3
-    except (ValueError, KeyError) as e:
-        print(f"Error: {e}", file=sys.stderr)
+    except KeyboardInterrupt:
+        print("Interrupted", file=sys.stderr)
+        return 130
+    except (ValueError, KeyError, OSError, TypeError, AttributeError, IndexError) as e:
+        # BUG-113: user/input/IO errors -> one line + exit 2 (traceback only with DF_LLM_HELPER_DEBUG=1)
+        if debug:
+            raise
+        print(f"Error: {_error_text(e)}"[:500], file=sys.stderr)
         return 2
     finally:
         force_overrides(None)         # the mock isolation lives only for this call (tests call main() in-process)

@@ -1,6 +1,6 @@
 # BUG-104: `--mock` together with `--config` is not isolated: a mock run deletes real flag files and writes fixture data into the live `state.db`; the live DB already contains mock rows
 
-- **Status:** open
+- **Status:** fixed in 626d04f
 - **Severity:** S2
 - **Area:** `df_llm_helper/cli.py:1203-1204` (`force_overrides(mock_overrides() if (args.mock or args.replay_file) and not args.config else None)`), `df_llm_helper/config.py:161-168`
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)
@@ -46,3 +46,6 @@ The isolation overrides are applied only `if ... and not args.config`. `--mock` 
 
 ## Info needed
 Gordon: the live `data/state.db` has mock rows in `snapshots`/`kpis` (ids 1 and 4). Do you want them removed (e.g. `DELETE FROM snapshots WHERE id IN (1,4)` + matching `kpis`) or `state.db` rebuilt? The tester did not touch it.
+
+## Fix
+`--mock`/`--replay-file` always force the isolated paths; `mock_overrides(explicit_config)` keeps a path of an explicit `--config` only if it differs from the live/default one (state_db, tools, scopes, gamelog, journal.events_log), so `--mock ... --config config.yaml` is isolated while tests with private temp paths keep working. Test: `test_bug104_*`. The cleanup of the two mock rows in the live `data/state.db` is still Gordon's decision (see Info needed).

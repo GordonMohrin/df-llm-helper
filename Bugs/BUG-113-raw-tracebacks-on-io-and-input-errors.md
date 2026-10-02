@@ -1,6 +1,6 @@
 # BUG-113: missing/unreadable files, wrong JSON shapes and wrong config types end in raw Python tracebacks (exit 1) instead of a one-line error (exit 2); `replay` of an empty file says `OK`
 
-- **Status:** open
+- **Status:** fixed in 626d04f
 - **Severity:** S2 (the orchestrator parses stderr/exit codes; a traceback is long, unstable and costs tokens)
 - **Area:** `df_llm_helper/cli.py:1208-1214` (`main` catches only `ValueError`, `KeyError`, `FairPlayError`), call sites `cli.py:392` (`replay`), `:592/:599/:614` (`plan`), `:515` (`metrics --out`), `:263` (`heartbeat`), `df_llm_helper/config.py:171-183` (`load_config`, no type checks), `df_llm_helper/scenario.py:70`, `df_llm_helper/client.py:294` (`load_records`)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)
@@ -49,3 +49,6 @@ As above + a test per row of the table (`pytest` parametrised, `main([...])` ret
 
 ## Info needed
 None.
+
+## Fix
+Shared handling in `cli.main`: `OSError`, `TypeError`, `AttributeError`, `IndexError`, `ValueError`, `KeyError` -> one line `Error: ...` (file not found / is a directory / ...) and exit 2; traceback only with `DF_LLM_HELPER_DEBUG=1`. `load_config` type-checks sections (mapping), numbers and lists against the defaults; `plan trade` validates `--json`; `replay` of a scenario without steps is `FAIL`; `--interval` is parsed by argparse (`type=float`) before any work. Tests: `test_bug113_*` (one per row of the report).

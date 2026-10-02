@@ -102,7 +102,9 @@ def compute_alerts(snap: Snapshot, th: dict, flags: dict | None = None, prev_fac
         if a.danger_alarm:
             bits.append(f"danger alarm {a.danger_alarm}")
         if a.threats:
-            bits.append("Threat: " + "; ".join(a.threats[:2])[:80])
+            shown = [t if len(t) <= 45 else t[:44].rstrip() + "…" for t in a.threats[:2]]
+            more = f" (+{len(a.threats) - 2} more)" if len(a.threats) > 2 else ""
+            bits.append("Threat: " + "; ".join(shown) + more)
         add(Item("crit", "danger", "Danger", ", ".join(bits), f"{a.enemies}|{a.enemies_near}|{a.danger_alarm}|{len(a.threats)}",
                  ("verteidigung", "militaer")))
     elif (a.enemies or 0) > 0:      # hostiles on the map but none near the fort (caverns): one quiet line, no alarm
@@ -125,7 +127,8 @@ def compute_alerts(snap: Snapshot, th: dict, flags: dict | None = None, prev_fac
     # moods
     if a.moods_active:
         gaps = ("; gaps: " + ", ".join(snap.stocks.mood_gaps[:4])) if snap.stocks.mood_gaps else ""
-        add(Item("crit", "mood", "Mood", f"Mood active: {', '.join(map(str, a.moods_active))[:60]}{gaps}",
+        who = ", ".join(str(m) for m in a.moods_active if m not in (None, "None", "")) or str(len(a.moods_active))
+        add(Item("crit", "mood", "Mood", f"Mood active: {who[:60]}{gaps}",
                  "|".join(map(str, a.moods_active)), ("gesundheit",)))
     ip = snap.idle_pct
     if ip is not None and ip >= th.get("idle_pct_warn", 40):
@@ -148,7 +151,8 @@ def compute_alerts(snap: Snapshot, th: dict, flags: dict | None = None, prev_fac
         age = f"{int(fi.age_min)} min" if fi.age_min is not None else "?"
         txt = re.sub(r"\s+", " ", fi.text)[:60]
         lvl = "crit" if name in ("alert", "siege") else "warn"
-        add(Item(lvl, f"flag:{name}", f"{name} flag", f"{name}.flag open ({age}): {txt}".rstrip(": "),
+        fname = name if name == "pause.hold" else f"{name}.flag"        # BUG-117 G
+        add(Item(lvl, f"flag:{name}", f"{name} flag", f"{fname} open ({age}): {txt}".rstrip(": "),
                  fi.text[:40], ("orchestrator",)))
     # cancel loops (gamelog)
     for c in cancels or []:
@@ -208,17 +212,19 @@ def _norm(s: str) -> str:
 
 
 def inbox_items(lines: list[str], seen: set, max_lines: int, width: int) -> tuple[list[Item], list[str], int]:
-    """New inbox lines (deduplicated, truncated). Returns: items, new hashes, number omitted."""
+    """New inbox lines (deduplicated, truncated). Returns: items, hashes to remember as seen (shown items and text
+    duplicates of them), number omitted. BUG-111: omitted lines are NOT remembered, they come with the next digest."""
     items: list[Item] = []
     new_hashes: list[str] = []
+    fresh_h: set = set()
     seen_text: set = set()
     skipped = 0
     fresh: list[tuple[str, str]] = []
     for ln in lines:
         h = hashlib.sha1(ln.encode("utf-8")).hexdigest()[:12]
-        if h in seen or h in new_hashes:
+        if h in seen or h in fresh_h:
             continue
-        new_hashes.append(h)
+        fresh_h.add(h)
         fresh.append((h, ln))
     for h, ln in reversed(fresh):  # newest first
         m = _INBOX.match(ln)
@@ -231,11 +237,13 @@ def inbox_items(lines: list[str], seen: set, max_lines: int, width: int) -> tupl
         text = re.sub(r"\*\*|`", "", text)
         dk = _norm(text)[:60]
         if dk in seen_text:
+            new_hashes.append(h)             # duplicate of a shown line: consumed with it
             continue
-        seen_text.add(dk)
         if len(items) >= max_lines:
             skipped += 1
             continue
+        seen_text.add(dk)
+        new_hashes.append(h)
         body = f"{head}: {text}" if head else text
         if len(body) > width:
             body = body[:width - 1].rstrip() + "…"
@@ -252,12 +260,17 @@ def status_line(snap: Snapshot) -> str:
     if f["drink_days"] is not None or f["food_days"] is not None:
         parts.append(f"Drinks {f['drink_days']}d Food {f['food_days']}d")
     if f["jobs_open"] is not None:
-        parts.append(f"Jobs {f['jobs_open']} (dig {f['dig_jobs']}, {f['diggers']} digging)")
+        q = lambda v: "?" if v is None else v  # noqa: E731  (BUG-117 E: no 'None' in the report)
+        parts.append(f"Jobs {f['jobs_open']} (dig {q(f['dig_jobs'])}, {q(f['diggers'])} digging)")
     if f["fps"] is not None:
         parts.append(f"fps {f['fps']:.0f}" + (" TS" if f["timestream"] else ""))
     if f["paused"]:
         parts.append("PAUSE")
     return " | ".join(parts)
+
+
+# BUG-117 C: event alerts (derived from the previous report) are shown once; they never 'resolve'
+ONE_SHOT = {"pop_loss"}
 
 
 def build_digest(snap: Snapshot, state: DigestState, *, th: dict, max_tokens: int = 600,
@@ -285,7 +298,7 @@ def build_digest(snap: Snapshot, state: DigestState, *, th: dict, max_tokens: in
     fresh = [a for a in alerts if a.key not in prev_alerts or prev_alerts[a.key].get("sig") != a.sig]
     still = [a for a in alerts if a not in fresh and a.level != "info"]   # info items are shown once, never as 'still open'
     resolved = [v.get("label", k) for k, v in sorted(prev_alerts.items()) if k not in {a.key for a in alerts}
-                and not k.startswith("w:")]
+                and not k.startswith("w:") and k not in ONE_SHOT]
 
     fresh.sort(key=lambda i: (RANK[i.level], i.key))
     trends.sort(key=lambda i: i.key)
@@ -293,7 +306,8 @@ def build_digest(snap: Snapshot, state: DigestState, *, th: dict, max_tokens: in
     if new_game:
         header.append(f"NEW GAME detected ({snap.fort}): counters/caches reset.")
 
-    if not (fresh or trends or ib or resolved or new_game):
+    first = since_last and not state.facts and not state.alerts and not state.ts     # BUG-117 F
+    if not (fresh or trends or ib or resolved or new_game or first):
         open_labels = sorted({a.label for a in still})
         txt = f"No change since {now_hhmm or 'last check'}"
         if open_labels:
@@ -316,14 +330,17 @@ def build_digest(snap: Snapshot, state: DigestState, *, th: dict, max_tokens: in
             optional.append("still open: " + ", ".join(sorted({a.label for a in still}))[:100])
         optional += [i.line() for i in ib]
         if skipped:
-            optional.append(f"> +{skipped} more inbox lines (python -m df_llm_helper bus read)")
+            optional.append(f"> +{skipped} more inbox lines (still unread: shown by the next digest)")
         lines += body
         dropped = 0
+        ib_lines = {i.line(): i.sig for i in ib}
         for ln in optional:
             if tokens("\n".join(lines + [ln])) + 8 <= max_tokens:
                 lines.append(ln)
             else:
                 dropped += 1
+                if ln in ib_lines:           # BUG-111: an inbox line cut by the budget stays unread
+                    new_hashes = [h for h in new_hashes if h != ib_lines[ln]]
         if dropped:
             lines.append(f"(+{dropped} truncated)")
         text = "\n".join(lines)

@@ -1,6 +1,6 @@
 # BUG-111: digest drops inbox lines beyond the display limit for good; the hint "+N more inbox lines (... bus read)" points to a place where they are not
 
-- **Status:** open
+- **Status:** fixed in 513db2e
 - **Severity:** S2 (an agent message such as "caravan is here" can be lost without trace)
 - **Area:** `df_llm_helper/digest.py:210-243` (`inbox_items`: all fresh lines go into `new_hashes`, only `max_lines` are shown, the rest only counted in `skipped`), `digest.py:319` (hint text), `df_llm_helper/pilot.py:129-134` (`bus_lines`)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)
@@ -40,3 +40,6 @@ Add only displayed hashes to `inbox_seen`; show "+N more (still unread; call dig
 
 ## Info needed
 Cloud session: is `digest.inbox_max_lines` = 6 meant to be a hard cap per call? If yes, the remainder must stay pending until the next call.
+
+## Fix
+`inbox_items` remembers only shown lines (and text duplicates of them); omitted lines and lines cut by the token budget stay unread and come with the next digest (`> +N more inbox lines (still unread: shown by the next digest)`). Bus messages are read without marking and only the shown ones are marked read. Decision for the Info question: `inbox_max_lines` is a per-call cap with carry-over. Tests: `test_bug111_*`, adapted `tests/test_digest.py`/`tests/test_scenarios_cli.py`.

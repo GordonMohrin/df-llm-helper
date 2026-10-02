@@ -5,9 +5,9 @@ The cloud session had **no DF/DFHack**. Everything below is tested against mocks
 Working folder: `cd "<path>/df-llm-helper"` (Git Bash, Python is called `python`).
 
 ## 0. Preparation
-- [ ] `python --version` reports 3.12 or newer. Then `python -m df_llm_helper.selftest --quick`, expected: all `[ok]`, `Self-test GREEN`.
+- [ ] `python --version` reports 3.11 or newer. Then `python -m df_llm_helper.selftest --quick`, expected: all `[ok]`, `Self-test GREEN`.
 - [ ] `cp config.yaml.example config.yaml` and check the paths: `dfhack_run`, `paths.tools`, `paths.scopes`, `paths.gamelog`.
-- [ ] Install the Lua scripts (live-untested): `cp lua/pilot_wd.lua "<DF install folder>/hack/scripts/claude/"`. Alternatively copy into `../lua/claude/` if that folder is linked.
+- [ ] Install the Lua scripts (live-untested): `cp lua/pilot_*.lua lua/claude/*.lua "<DF install folder>/hack/scripts/claude/"`. Alternatively copy into `../lua/claude/` if that folder is linked.
 
 ## 1. RealClient – read commands (no effect in the game)
 | Step | Command | Expected |

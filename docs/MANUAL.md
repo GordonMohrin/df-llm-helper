@@ -8,10 +8,10 @@ df-llm-helper sits between Claude and Dwarf Fortress (DFHack). It delivers compa
 
 ```bash
 cd "<path>/df-llm-helper"
-python --version                      # 3.12+ ("python", not "python3")
+python --version                      # 3.11+ ("python", not "python3")
 python -m df_llm_helper.selftest --quick    # must report "Self-test GREEN"
 cp config.yaml.example config.yaml    # optional: the default paths fit the player's machine
-cp lua/pilot_wd.lua lua/pilot_batch.lua "<DF install folder>/hack/scripts/claude/"
+cp lua/pilot_*.lua lua/claude/*.lua "<DF install folder>/hack/scripts/claude/"
 ```
 
 **Replacing the PowerShell watcher** (player decision: only df-llm-helper's deadman brake from now on):
@@ -103,7 +103,7 @@ Expressions in `when`/`verify`/`expr` are safe Python (no eval). Available, amon
 
 Texts may contain `{expression}`. `{{` and `}}` are literals.
 
-After every change: `python -m df_llm_helper.selftest` (≈ 30 s, no DF needed).
+After every change: `python -m df_llm_helper.selftest` (≈ 30 s, no DF needed; needs pytest, without it the result is `Self-test INCOMPLETE`, exit 2; `--quick` < 1 s).
 
 ## 7. Troubleshooting
 

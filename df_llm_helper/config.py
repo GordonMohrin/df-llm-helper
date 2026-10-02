@@ -158,23 +158,77 @@ def force_overrides(over: dict | None) -> None:
     _FORCED.update(over or {})
 
 
-def mock_overrides() -> dict:
-    """--mock/--replay-file without an explicit --config: own state.db/tools folder, so fixture warnings, flags and
-    snapshots never leak into the live state (and live flags never leak into a mock run)."""
+_ISOLATED = (("paths", "state_db"), ("paths", "tools"), ("paths", "scopes"), ("paths", "gamelog"),
+             ("journal", "events_log"))
+
+
+def _same_path(a: Any, b: Any) -> bool:
+    if not a or not b:
+        return False
+    try:
+        return Path(str(a)).expanduser().resolve() == Path(str(b)).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        return str(a) == str(b)
+
+
+def mock_overrides(explicit_config: str | Path | None = None) -> dict:
+    """--mock/--replay-file: own state.db/tools folder, so fixture warnings, flags and snapshots never leak into the
+    live state (and live flags never leak into a mock run).
+
+    BUG-104: with an explicit --config the isolation still applies to every path that equals the live one (the paths of
+    the default config.yaml or the built-in defaults); only paths the explicit config points ELSEWHERE are kept."""
     base = RUNTIME / "mock"
-    return {"paths": {"state_db": str(base / "state.db"), "tools": str(base / "tools"),
+    over = {"paths": {"state_db": str(base / "state.db"), "tools": str(base / "tools"),
                       "scopes": str(base / "tools" / "scopes"),
                       "gamelog": str(base / "gamelog.txt")},
             "journal": {"events_log": str(base / "tools" / "events.log")}}
+    if not explicit_config:
+        return over
+    saved = dict(_FORCED)
+    _FORCED.clear()
+    try:
+        mine = load_config(explicit_config)
+        refs = [Config(_merge(copy.deepcopy(DEFAULTS), _feature_defaults()))]
+        try:
+            refs.append(load_config(None))
+        except (ValueError, OSError):
+            pass
+    finally:
+        _FORCED.update(saved)
+    for sec, key in _ISOLATED:
+        val = mine.get(f"{sec}.{key}")
+        if val and not any(_same_path(val, r.get(f"{sec}.{key}")) for r in refs):
+            over[sec].pop(key, None)        # the explicit config chose its own, non-live path
+    return over
+
+
+def _check_types(defaults: dict, loaded: dict, where: str = "") -> None:
+    """BUG-113: wrong types in config.yaml give a clear error instead of a traceback deep in the code
+    (a section must stay a mapping, a number must stay a number)."""
+    for k, v in loaded.items():
+        if k not in defaults or v is None:
+            continue
+        d = defaults[k]
+        name = f"{where}{k}"
+        if isinstance(d, dict):
+            if not isinstance(v, dict):
+                raise ValueError(f"config: '{name}' must be a mapping (section), got {type(v).__name__} {v!r}"[:200])
+            _check_types(d, v, name + ".")
+        elif isinstance(d, (int, float)) and not isinstance(d, bool):
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise ValueError(f"config: '{name}' must be a number, got {v!r}"[:200])
+        elif isinstance(d, list) and not isinstance(v, list):
+            raise ValueError(f"config: '{name}' must be a list, got {v!r}"[:200])
 
 
 def load_config(path: str | Path | None = None, overrides: dict | None = None) -> Config:
     data = _merge(copy.deepcopy(DEFAULTS), _feature_defaults())
     p = Path(path) if path else HOME / "config.yaml"
-    if p.exists():
+    if p.is_file():
         loaded = yamlmini.load_file(p) or {}
         if not isinstance(loaded, dict):
             raise ValueError(f"{p}: top level must be a mapping")
+        _check_types(data, loaded)
         data = _merge(data, loaded)
     if overrides:
         data = _merge(data, overrides)

@@ -15,13 +15,14 @@ def _clean(line: str) -> str:
     return line
 
 
-def overlay_lines(digest: str, *, max_lines: int = 3, max_chars: int = 120) -> list[str]:
-    """Critical first, then warnings; the status line only if nothing else is there."""
-    rows = digest.splitlines()
+def overlay_lines(digest: str, *, max_lines: int = 3, max_chars: int = 120, fallback: bool = True) -> list[str]:
+    """Critical first, then warnings; the status line only if nothing else is there (fallback=False: nothing).
+    BUG-101: a 'No change since ...' row is no information for the player and is never shown."""
+    rows = [r for r in digest.splitlines() if not r.startswith("No change")]
     crit = [r for r in rows if r.startswith("!! ")]
     warn = [r for r in rows if r.startswith("! ")]
     pick = (crit + warn)[:max_lines]
-    if not pick:
+    if not pick and fallback:
         lage = [r for r in rows if r.startswith("Status ")]
         pick = lage[:1] or rows[:1]
     out = []
@@ -42,6 +43,9 @@ def overlay_send(lines: list[str], store, client, now: float, *, dedupe_min: flo
     for ln in lines:
         h = hashlib.sha1(ln.encode("utf-8")).hexdigest()[:12]
         if now - sent.get(h, -1e18) < dedupe_min * 60:
+            continue
+        ln = ln.rstrip("\\").strip()          # a trailing backslash would escape the closing quote (BUG-101)
+        if not ln:
             continue
         cmd = f'claude/schau say "{ln}" {prio}'
         cmds.append(cmd)

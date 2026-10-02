@@ -1,6 +1,6 @@
 # BUG-110: `plan blueprint` has no way to check the map bounds: the repo's own "bad" file `bad_footprint_outside_map.csv` passes as `ok`
 
-- **Status:** open
+- **Status:** fixed in 626d04f
 - **Severity:** S3
 - **Area:** `df_llm_helper/cli.py:589-597` (`validate_blueprint(text)` without `map_size`/`origin`), `df_llm_helper/planners/blueprint.py:393-401` (E_BOUNDS only if `map_size` is given)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)
@@ -38,3 +38,6 @@ Add the options, mention them in `--help` (see BUG-120), and document in PLANNER
 
 ## Info needed
 None.
+
+## Fix
+`plan blueprint --map-size WxH [--origin x,y]` passes the map size/origin to the validator (E_BOUNDS); without it the output says `Note: map bounds (E_BOUNDS) not checked`. PLANNERS.md updated. Test: `test_bug110_*`.

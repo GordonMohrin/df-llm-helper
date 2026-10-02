@@ -114,7 +114,7 @@ That is what the LLM sees every five minutes instead of the raw game. More:
 ```
 python -m df_llm_helper --mock fixtures/run5 runbook diagnose
 python -m df_llm_helper --mock fixtures/run5 dashboard --out runtime/dashboard.html
-python -m df_llm_helper.selftest                            # full test suite (~10 s), needs pytest
+python -m df_llm_helper.selftest                            # full test suite (~30 s), needs pytest (else INCOMPLETE, exit 2)
 ```
 
 Requirements: Python 3.11+, standard library only (pytest for tests; `lua5.4` optional for Lua tests). Run all commands from the project folder; the package was formerly called *dfpilot* (`DFPILOT_HOME` still works as an alias for `DF_LLM_HELPER_HOME`).

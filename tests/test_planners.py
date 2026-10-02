@@ -946,7 +946,9 @@ def test_blueprint_zone_keys():
     assert validate_blueprint('#zone\nm{name="Meine Halle" location=tavern}\n') == []
     assert "E_ZONEKEY" in codes("#zone\nq\n")
     assert "E_ZONEKEY" in codes("#zone\nmm\n")
-    assert "E_ZONEKEY" in codes("#zone\nt(2x2)\n")        # t is a table in #build, not a zone
+    assert validate_blueprint("#zone\nt(2x2)\n") == []     # BUG-109: t = animal training in quickfort's zone table
+    for k in "npwjfsgc":                                   # BUG-109: the rest of quickfort's zone keys
+        assert validate_blueprint(f"#zone\n{k}\n") == []
     assert validate_blueprint("#zone\nX\n", zone_keys="X") == []
     # the same letter in #build is not a zone key
     assert validate_blueprint("#build\nD(5x5)\n") == []
@@ -1015,8 +1017,10 @@ def test_blueprint_order_warning():
 
 
 def test_blueprint_column_count_warning():
-    f = validate_blueprint("#build\nb,,b\nb,b\n,,,\n")
-    assert [x.code for x in f] == ["W_COLS", "W_COLS"]
+    # BUG-109: ragged/filler rows (fewer columns, trailing commas) are normal quickfort CSV
+    assert validate_blueprint("#build\nb,,b\nb,b\n,,,\n") == []
+    f = validate_blueprint("#build\nb,b\nb,,b\n")             # content beyond the first row's width
+    assert [x.code for x in f] == ["W_COLS"]
     assert not has_errors(f)
     # a level change resets the expectation, blank lines do not count
     assert validate_blueprint("#dig\nd,d\n\nd,d\n#>\nd\n") == []

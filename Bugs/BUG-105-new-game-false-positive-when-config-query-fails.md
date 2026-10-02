@@ -1,6 +1,6 @@
 # BUG-105: one failed `claude/config` query counts as "NEW GAME" and wipes guard acknowledgements, loop-protection state and unread warnings (twice: when it fails and when it is back)
 
-- **Status:** open
+- **Status:** fixed in 513db2e
 - **Severity:** S2
 - **Area:** `df_llm_helper/snapshot.py:166-170` (`Snapshot.game_id`), `df_llm_helper/pilot.py:57-70` (`_check_new_game`), `df_llm_helper/store.py:117-122` (`reset_game_state`)
 - **Reported:** 2026-10-02, commit `50cee52` (code identical to `6dedd96`)
@@ -44,3 +44,6 @@ In `Snapshot.game_id` return `None` unless both `fort` and `embark` are known; `
 
 ## Info needed
 Cloud session: is `fort|embark` the intended identity of a save? (A reload of an older save of the same fort keeps the same id, so "load" is detected only through the report-id drop in `reboot.detect_loaded`.)
+
+## Fix
+`Snapshot.game_id` is `None` unless fort AND embark (year, tick) are known; `_check_new_game` already ignores `None`, so a failed `claude/config` neither triggers `NEW GAME` nor wipes acks/rule state/warnings (and no second reset when it is back). Answer to the Info question: yes, `fort|embark` is the save identity; a reload of an older save is detected by `reboot.detect_loaded`. Test: `test_bug105_*`.
