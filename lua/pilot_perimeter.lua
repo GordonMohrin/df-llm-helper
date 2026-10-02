@@ -144,12 +144,32 @@ local function new_job(cx, cy, cz, zmin, zmax, budget)
     elseif J.phase == 'out' then
       if bfs_step(J.seen, J.q, function(c) return WALK[c] end) then
         J.entries = {}
+        -- Enklaven-Filter (bau J113): ein Aussen-Nachbar zaehlt nur, wenn seine zusammenhaengende Aussenflaeche >= MINCOMP Kacheln hat
+        -- (abgemauerte Terrassen mit Himmelsflag sind keine Aussenwelt); identisch zu lua/claude/zugaenge.lua (MINCOMP 3000)
+        local MINCOMP, compmemo = 3000, {}
+        local function real_outside(startk)
+          if compmemo[startk] ~= nil then return compmemo[startk] end
+          local seenc, qc, qi, big = { [startk] = true }, { startk }, 1, false
+          while qc[qi] do
+            local ck = qc[qi]; qi = qi + 1
+            if #qc >= MINCOMP then big = true break end
+            local cx, cy, cz = unkey(ck)
+            for _, nk in ipairs(neighbors(cx, cy, cz)) do
+              if not seenc[nk] then
+                local nx, ny, nz = unkey(nk)
+                if OUT[ch(nx, ny, nz)] then seenc[nk] = true qc[#qc + 1] = nk end
+              end
+            end
+          end
+          for k2 in pairs(seenc) do compmemo[k2] = big end
+          return big
+        end
         for k in pairs(J.seen) do
           local x, y, z = unkey(k)
           if not OUT[ch(x, y, z)] then
             for _, nk in ipairs(neighbors(x, y, z)) do
               local nx, ny, nz = unkey(nk)
-              if J.seen[nk] and OUT[ch(nx, ny, nz)] then J.entries[#J.entries + 1] = k break end
+              if J.seen[nk] and OUT[ch(nx, ny, nz)] and real_outside(nk) then J.entries[#J.entries + 1] = k break end
             end
           end
         end
