@@ -1,78 +1,109 @@
 # df-llm-helper
 
-A deterministic co-pilot for LLM agents that play **Dwarf Fortress** through **DFHack**.
+**Claude ran a real game of Dwarf Fortress for 10 hours: from 7 dwarves to 158 citizens over seven in-game years, with cheat commands blocked in code.** This repo is the layer that made it possible.
 
-An LLM orchestrator (e.g. Claude) is good at judgement and bad at watching a game every few seconds. df-llm-helper takes
-the routine off its hands: it collects the game state in one call, turns it into a short delta report, runs
-maintenance rules, keeps known fixes as runbooks, guards against unsupervised time-lapse, and enforces
-**fair play** (no cheating commands) technically.
+![Run 5 "Windrings": citizens over real time, 7 at embark to 158 in Year 107](docs/img/run5-population.svg)
 
-Package `df_llm_helper` (formerly *dfpilot*); every command is `python -m df_llm_helper <command>`, run from the
-project folder. Shared runtime folder: environment variable `DF_LLM_HELPER_HOME` (old name `DFPILOT_HOME` still works).
+<sub>Real data from `fixtures/run5_live/metrics_run5.csv` (DF 53.16 + DFHack, 2026).</sub>
 
-Built and battle-tested while Claude played a real fortress (Run 5 "Windrings", DF 53.16 + DFHack, 2026).
-Documentation lives in `docs/` (`MANUAL.md`, `OVERVIEW.md`, `INTEGRATION.md`); this README, the code and the tests are enough to get started.
+## Why this exists
 
-## What it does
+Run 5 was not the first attempt. Run 4 died because the game kept running for years at 250 fps while nobody was watching, and the watchdog was blind. In another log, 15 dwarves died of dehydration in a single day without the reporting picking up the pattern.
 
-| Area | Commands |
-|---|---|
-| Situation report (≤ 600 tokens, delta only) | `check`, `digest`, `cycle` |
-| Maintenance autopilot with loop protection | `autopilot`, `guard`, `waechter` (real-time watcher), `tempo` |
-| Knowledge | `runbook diagnose/show/run`, `kb search`, `brief <scope>` (agent briefing ≤ 1500 tokens) |
-| Agents | `agents prompt/lint-report/cost`, `bus` (message bus), `memory compact` |
-| Autopilots (v2) | `siege`, `caravan`, `trade`, `mood`, `care`, `workload`, `bottleneck`, `water`, `reboot` |
-| Autopilots (v3) | `perimeter`, `digcheck`, `reach`, `perf`, `tools`, `remote`, `hygiene`, `defense`, `settings`, `camera`; standstill/window guard inside `waechter` – see `docs/manual-v3/` |
-| Reporting | `forecast`, `dashboard` (static HTML), `journal` (chronicle, lessons, post-mortem), `metrics`, `budget` |
-| Fair play | `lint` (30+ rules on Lua), exception register `exception list/add` |
+The lesson: an LLM is good at judgement and bad at watching a real-time game every few seconds. Polling the game with an LLM is slow, expensive and still misses things. So df-llm-helper does the watching deterministically and hands the LLM only what needs a decision:
 
-Every write action is logged in `data/state.db` with its reason; every rule has a `max_per_hour`.
+- **One call, one short report.** `check` collects the whole game state and returns a *delta* of at most ~600 tokens: what changed, what is urgent, what is still open.
+- **Routine runs itself.** Maintenance rules (food flags, stockpiles, caravans, moods, sieges, water…) run on an autopilot with cooldowns and loop protection. Every write action is logged with its reason.
+- **Known problems have runbooks.** `runbook diagnose` matches symptoms to fixes learned in earlier runs.
+- **No unsupervised time-lapse.** A deadman switch and a tempo governor slow the game down when the orchestrator stops checking in. Never again Run 4.
+- **Fair play is enforced in code**, not by prompt. `createitem`, `dig-now`, `reveal` and friends are refused by the client and a Lua linter.
 
-## Quick start (no game needed)
+```
+ LLM agent (Claude, …)  ──  python -m df_llm_helper check / runbook / brief …
+          │                                │
+          │  decisions                     │  ≤ 600-token delta reports, wake-up events
+          ▼                                ▼
+                  df-llm-helper (Python, stdlib only)
+          autopilot · guard · watcher · runbooks · fair-play linter
+                               │
+                        dfhack-run + Lua scripts
+                               │
+                         Dwarf Fortress
+```
 
-```bash
-python -m df_llm_helper --mock fixtures/run5 check          # report from recorded real game answers (own state in runtime/mock/)
+## Try it in 30 seconds (no game needed)
+
+Recorded answers from the real Run 5 fortress ship with the repo, so everything works without Dwarf Fortress:
+
+```
+git clone https://github.com/GordonMohrin/df-llm-helper && cd df-llm-helper
+python -m df_llm_helper --mock fixtures/run5 check
+```
+
+```
+Status Y102 Hematite 12 | Pop 24 (7 idle 30%) | Drinks 76d Food 189d | Jobs 199 (dig 63, 3 digging) | fps 250 | PAUSE
+!! Hunger>40k: Tekkud414=47k, Eral3473=40k
+! Caravan Muboomon: Approaching, 3055 ticks (prepare trade)
+```
+
+That is what the LLM sees every five minutes instead of the raw game. More:
+
+```
 python -m df_llm_helper --mock fixtures/run5 runbook diagnose
 python -m df_llm_helper --mock fixtures/run5 dashboard --out runtime/dashboard.html
 python -m df_llm_helper.selftest                            # full test suite (~10 s), needs pytest
 ```
 
-Requirements: Python 3.11+, standard library only (pytest for tests; `lua5.4` optional for Lua tests).
-Run all commands from this folder.
+Requirements: Python 3.11+, standard library only (pytest for tests; `lua5.4` optional for Lua tests). Run all commands from the project folder; the package was formerly called *dfpilot* (`DFPILOT_HOME` still works as an alias for `DF_LLM_HELPER_HOME`).
+
+## What it does
+
+| Area                                        | Commands                                                                                                                                                                   |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Situation report (≤ 600 tokens, delta only) | `check`, `digest`, `cycle`                                                                                                                                                 |
+| Maintenance autopilot with loop protection  | `autopilot`, `guard`, `waechter` (real-time watcher), `tempo`                                                                                                              |
+| Knowledge                                   | `runbook diagnose/show/run`, `kb search`, `brief <scope>` (agent briefing ≤ 1500 tokens)                                                                                   |
+| Agents                                      | `agents prompt/lint-report/cost`, `bus` (message bus), `memory compact`                                                                                                    |
+| Autopilots (v2)                             | `siege`, `caravan`, `trade`, `mood`, `care`, `workload`, `bottleneck`, `water`, `reboot`                                                                                   |
+| Autopilots (v3)                             | `perimeter`, `digcheck`, `reach`, `perf`, `tools`, `remote`, `hygiene`, `defense`, `settings`, `camera`; standstill/window guard inside `waechter` – see `docs/manual-v3/` |
+| Reporting                                   | `forecast`, `dashboard` (static HTML), `journal` (chronicle, lessons, post-mortem), `metrics`, `budget`                                                                    |
+| Fair play                                   | `lint` (30+ rules on Lua), exception register `exception list/add`                                                                                                         |
+
+Every rule has a `max_per_hour`; a rule that fires too often switches itself off and raises a warning. Full reference: `docs/MANUAL.md`, `docs/OVERVIEW.md`.
 
 ## Against a real game
 
-1. `cp config.yaml.example config.yaml`, set `dfhack_run` and `paths.gamelog`; fortress-specific values
-   (squad name, water boxes, rally point) go there too.
-2. Copy `lua/pilot_*.lua` and `lua/claude/*.lua` to `<Dwarf Fortress>/hack/scripts/claude/` and set the
-   environment variable `DF_LLM_HELPER_HOME` (shared folder for flags/logs) – see **`COMPANION.md`**.
+1. `cp config.yaml.example config.yaml`, set `dfhack_run` and `paths.gamelog`; fortress-specific values (squad name, water boxes, rally point) go there too.
+2. Copy `lua/pilot_*.lua` and `lua/claude/*.lua` to `<Dwarf Fortress>/hack/scripts/claude/` and set the environment variable `DF_LLM_HELPER_HOME` (shared folder for flags/logs) – see **`COMPANION.md`**.
 3. Adjust the fortress-specific values in `lua/claude/config.lua` after embark (example values ship from the original fortress).
-4. Orchestrator loop: `python -m df_llm_helper check` every 5 minutes, `python -m df_llm_helper waechter --loop` as a background
-   process, `python -m df_llm_helper wake --loop` as the wake-up filter. Details: `docs/MANUAL.md`.
+4. Orchestrator loop: `python -m df_llm_helper check` every 5 minutes, `python -m df_llm_helper waechter --loop` as a background process, `python -m df_llm_helper wake --loop` as the wake-up filter. Details: `docs/MANUAL.md`, start prompt for agents: `docs/AGENT-PROMPT.md`.
+
+**Bring your own agent.** This repo is the helper layer, not the orchestrator. Any LLM agent that can run shell commands can drive it; Run 5 used Claude as orchestrator with scope sub-agents (military, trade, construction, …).
 
 ## Fair play
 
-Only what a human player could do through the UI: designations, build orders, stockpiles, work orders, labors,
-squads, alerts, trading, quickfort with *own* blueprints, DFHack convenience automation. Refused by the linter and
-the client: `createitem`, `dig-now`, `build-now`, `reveal`, `prospect all`, direct unit/item manipulation.
-Exceptions only via an entry in `data/exceptions.jsonl` that quotes the human player's explicit consent.
+Only what a human player could do through the UI: designations, build orders, stockpiles, work orders, labors, squads, alerts, trading, quickfort with *own* blueprints, DFHack convenience automation. Refused by the linter and the client: `createitem`, `dig-now`, `build-now`, `reveal`, `prospect all`, direct unit/item manipulation. Exceptions only via an entry in `data/exceptions.jsonl` that quotes the human player's explicit consent.
 
 ## Status
 
-- Core (M1–M3) is live-tested; v2 and v3 autopilots are tested against recorded data, their Lua parts are marked
-  *live-untested* (`docs/INTEGRATION.md` lists the live checks). See `CHANGELOG.md`, open deviations included.
+- Core (M1–M3) is live-tested; v2 and v3 autopilots are tested against recorded data, their Lua parts are marked *live-untested* (`docs/INTEGRATION.md` lists the live checks). See `CHANGELOG.md`, open deviations included.
+- Some Lua output keys and in-game texts are still German (they are part of the protocol between Lua and Python); all user-facing Python output is English.
 - Specs: `docs/SPEC.md`, `docs/specs-v2/`, `docs/specs-v3/`.
+
+## Contributing
+
+Issues and PRs welcome, especially live test reports for the *live-untested* parts, runbooks from your own fortress, and experiences with other LLMs as orchestrator. Bug report template: `Bugs/TEMPLATE.md`.
 
 ## Layout
 
 ```
-df-llm-helper/      Python package (CLI: python -m df_llm_helper)
-lua/          DFHack scripts: pilot_*.lua + companion toolkit lua/claude/*.lua
-tools/        luacheck_min.py (Lua structure check), embark/ (menu automation without a desktop)
-data/         rules, runbooks, knowledge base, graphs, scopes, services
-fixtures/     real recorded game answers (Run 5), anonymised agent transcripts
-scenarios/    replay scenarios; tests/  pytest suite incl. a minimal DFHack mock for Lua
-docs/         manual, overview, specs, integration checklist
+df_llm_helper/  Python package (CLI: python -m df_llm_helper)
+lua/            DFHack scripts: pilot_*.lua + companion toolkit lua/claude/*.lua
+tools/          luacheck_min.py (Lua structure check), embark/ (menu automation without a desktop)
+data/           rules, runbooks, knowledge base, graphs, scopes, services
+fixtures/       real recorded game answers (Run 5), anonymised agent transcripts
+scenarios/      replay scenarios; tests/  pytest suite incl. a minimal DFHack mock for Lua
+docs/           manual, overview, specs, integration checklist
 ```
 
 ## License
