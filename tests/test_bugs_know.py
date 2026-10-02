@@ -143,3 +143,52 @@ def test_bug320_missing_path_and_utf16_are_errors(tmp_path, capsys):
     nobom.write_bytes('dfhack.run_command("dig-now")'.encode("utf-16-le"))
     assert [(f.rule, f.level) for f in lint_paths([nobom])] == [("IO", "error")]
     assert main(["lint", str(tmp_path / "typo.lua")]) == 1
+
+
+# ---------------------------------------------------------------- BUG-300 / 301 / 321 / 325: runbooks
+def test_bug300_show_lists_params_preconditions_rollback(capsys):
+    rc, out, _ = run(capsys, "--mock", FIX, "runbook", "show", "rb01_e18_pick")
+    assert rc == 0
+    assert "Params:\n  squad_id (required: --param squad_id=<value>)" in out
+    assert "Preconditions:\n  not danger" in out and "Rollback:\n 1. cmd: claude/mil workmode {squad_id} off --apply" in out
+    assert "rb01c_e18_release" not in out                                 # BUG-321: no such runbook
+
+
+def test_bug300_consent_runbook_can_be_previewed_not_run(capsys):
+    rc, out, _ = run(capsys, "--mock", FIX, "runbook", "run", "rb01b_e18_foreign", "--dry-run", "--param", "item_ids=1,2")
+    assert rc == 0 and "NOT approved" in out and "dry-run: nothing executed" in out
+    rc, out, _ = run(capsys, "--mock", FIX, "runbook", "run", "rb01b_e18_foreign", "--param", "item_ids=1,2")
+    assert rc == 1 and "refused" in out
+
+
+def test_bug301_runbook_argument_errors(capsys):
+    rc, _, err = run(capsys, "--mock", FIX, "runbook", "run", "rb21_flut", "--dry-run", "--param", "x")
+    assert rc == 2 and "--param expects name=value, got 'x'" in err
+    rc, _, err = run(capsys, "--mock", FIX, "runbook", "show")
+    assert rc == 2 and "Runbook id missing" in err and "None" not in err
+    rc, _, err = run(capsys, "--mock", FIX, "runbook", "show", "nope")
+    assert rc == 2 and "Unknown runbook: 'nope'" in err
+
+
+def test_bug321_no_stale_watcher_references(capsys):
+    rc, out, _ = run(capsys, "--mock", FIX, "runbook", "show", "rb05_waechter_blind")
+    assert "waechter --loop" in out and "Restart unpause-guard" not in out
+    for kid in ("waechter_blind", "guard_start"):
+        rc, out, _ = run(capsys, "--mock", FIX, "kb", "get", kid)
+        assert "waechter --loop" in out
+    assert "autopilot log" not in (ROOT / "docs" / "manual-v3" / "05-tools.md").read_text(encoding="utf-8")
+
+
+def test_bug325_bom_yaml_and_bad_runbook_isolated(env, capsys):
+    tmp, c = env
+    rb = tmp / "data" / "runbooks"
+    src = (rb / "rb09_aquifer.yaml").read_text(encoding="utf-8").replace("id: rb09_aquifer", "id: rb98_bom", 1)
+    (rb / "rb98_bom.yaml").write_bytes(b"\xef\xbb\xbf" + src.encode("utf-8"))
+    (rb / "rb99_broken.yaml").write_text("id: rb99\ntitle: x\n", encoding="utf-8")
+    rc, out, err = run(capsys, "--config", c, "--mock", FIX, "runbook", "list")
+    assert rc == 0 and "rb98_bom" in out and "rb01_e18_pick" in out
+    assert "Runbook skipped: rb99_broken.yaml" in err
+    sc = tmp / "data" / "scopes.yaml"
+    sc.write_bytes(b"\xef\xbb\xbf" + sc.read_bytes())
+    rc, out, _ = run(capsys, "--config", c, "--mock", FIX, "brief", "bau")
+    assert rc == 0 and out.startswith("# Briefing bau")

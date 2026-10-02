@@ -10,7 +10,7 @@ symptom:
     - {when: "events_age_min is None or events_age_min > 30", add: 0.05, why: "events.log is not growing"}
 steps:
   - {action: reset_report_id}
-  - {manual: "Restart unpause-guard.ps1 (own process, e.g. Invoke-CimMethod Win32_Process Create); Start-Process -WindowStyle Hidden dies"}
+  - {manual: "Restart the watcher 'python -m df_llm_helper waechter --loop' as an independent process (Invoke-CimMethod Win32_Process Create, see MANUAL 1); Start-Process -WindowStyle Hidden dies"}
 verify:
   when: "last_report_id is not None and max_report_id is not None and last_report_id <= max_report_id"
   timeout_s: 30

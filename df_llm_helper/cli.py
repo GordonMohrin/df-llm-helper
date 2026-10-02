@@ -282,11 +282,15 @@ def cmd_wake(args) -> int:
 
 def _runbooks(p):
     from .runbooks import load_runbooks
-    return load_runbooks(Path(p.cfg.get("paths.data")) / "runbooks")
+    errors: list = []
+    rbs = load_runbooks(Path(p.cfg.get("paths.data")) / "runbooks", errors)
+    for e in errors:
+        print(f"Runbook skipped: {e}", file=sys.stderr)
+    return rbs
 
 
 def cmd_runbook(args) -> int:
-    from .runbooks import diagnose, plan_commands, run_runbook
+    from .runbooks import RunbookError, diagnose, format_runbook, parse_params, run_runbook
     p = _pilot(args)
     rbs = {r.id: r for r in _runbooks(p)}
     if args.action == "list":
@@ -298,20 +302,22 @@ def cmd_runbook(args) -> int:
         hits = diagnose(list(rbs.values()), p.context(snap, p.cancels()))
         print("\n".join(h.line() for h in hits) or "no runbook hits")
         return 0
-    if not args.id or args.id not in rbs:
-        print(f"Unknown runbook: {args.id}. List: python -m df_llm_helper runbook list", file=sys.stderr)
+    if not args.id:
+        print(f"Runbook id missing: python -m df_llm_helper runbook {args.action} <id> (list: runbook list)",
+              file=sys.stderr)
+        return 2
+    if args.id not in rbs:
+        print(f"Unknown runbook: {args.id!r}. List: python -m df_llm_helper runbook list", file=sys.stderr)
         return 2
     rb = rbs[args.id]
     if args.action == "show":
-        print(f"{rb.id}: {rb.title}\nSymptom: {rb.symptom['when']}\nKB: {', '.join(rb.kb)}"
-              f"\nPlayer consent needed: {rb.needs_player_approval}")
-        for i, st in enumerate(rb.steps, 1):
-            print(f" {i}. " + ", ".join(f"{k}: {v}" for k, v in st.items()))
-        print(f"Verify: {rb.verify['when']}")
-        if rb.notes:
-            print("Note: " + rb.notes)
+        print("\n".join(format_runbook(rb)))
         return 0
-    params = dict(kv.split("=", 1) for kv in (args.param or []))
+    try:
+        params = parse_params(args.param)
+    except RunbookError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 2
     snapctx = lambda: p.context(p.snapshot())  # noqa: E731
 
     def internal(action: str) -> str:

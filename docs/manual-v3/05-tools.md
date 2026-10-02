@@ -31,7 +31,7 @@ itself is never written by df-llm-helper (lint rule L11).
 ## Safety
 - Loop guard: max `max_pickfix_per_hour` (6) pick fixes per hour; the same observation (work picks, free picks, miners,
   picks) within `repeat_block_s` (600 s) after a pick fix → "waiting for the effect", no new call.
-- Every action is in `state.db` (`python -m df_llm_helper autopilot log` / table `actions`, rules `tools_miners`, `tools_pickfix`) with
+- Every action is in `state.db` (table `actions`, rules `tools_miners`, `tools_pickfix`; shown by `python -m df_llm_helper journal postmortem` and the dashboard events) with
   its reason; added miners in kv `tools.added_miners`.
 - `--dry-run` writes nothing.
 

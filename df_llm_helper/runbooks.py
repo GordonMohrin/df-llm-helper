@@ -21,7 +21,7 @@ from .expr import ExprError, compile_expr, evaluate
 from .fairplay import ExceptionRegistry, FairPlayError, check_command
 from .rules import placeholders, render
 
-__all__ = ["Runbook", "RunbookError", "load_runbooks", "validate_runbook", "Hit", "diagnose", "plan_commands",
+__all__ = ["Runbook", "RunbookError", "load_runbooks", "parse_params", "format_runbook", "validate_runbook", "Hit", "diagnose", "plan_commands",
            "RunResult", "run_runbook"]
 
 STEP_KINDS = {"cmd", "manual", "wait_s", "check", "action"}
@@ -145,15 +145,63 @@ def validate_runbook(d: Any, source: str = "") -> Runbook:
                    rollback=rollback, notes=str(d.get("notes") or ""), source=source)
 
 
-def load_runbooks(path: Path) -> list[Runbook]:
+def load_runbooks(path: Path, errors: list | None = None) -> list[Runbook]:
+    """All runbooks of a folder. errors=None: the first invalid file raises RunbookError (selftest, tests);
+    with a list: invalid files are reported there and the valid runbooks stay usable (CLI)."""
     files = sorted(path.glob("*.yaml")) if path.is_dir() else [path]
     out, seen = [], set()
     for f in files:
-        rb = validate_runbook(yamlmini.load_file(f), f.name)
-        if rb.id in seen:
-            raise RunbookError(f"{f.name}: duplicate runbook id: {rb.id}")
+        try:
+            rb = validate_runbook(yamlmini.load_file(f), f.name)
+            if rb.id in seen:
+                raise RunbookError(f"{f.name}: duplicate runbook id: {rb.id}")
+        except (RunbookError, yamlmini.YamlError, OSError, UnicodeDecodeError) as e:
+            if errors is None:
+                raise RunbookError(str(e)) from None
+            errors.append(str(e))
+            continue
         seen.add(rb.id)
         out.append(rb)
+    return out
+
+
+def parse_params(items: list | None) -> dict:
+    """--param name=value (repeatable) -> dict; RunbookError for anything else."""
+    out = {}
+    for kv in items or []:
+        name, sep, val = str(kv).partition("=")
+        if not sep or not name.strip():
+            raise RunbookError(f"--param expects name=value, got {kv!r}")
+        out[name.strip()] = val
+    return out
+
+
+def _step_line(st: dict) -> str:
+    return ", ".join(f"{k}: {v}" for k, v in st.items())
+
+
+def format_runbook(rb: Runbook) -> list[str]:
+    """runbook show: the complete recipe (params, preconditions, steps, verify, rollback, notes)."""
+    out = [f"{rb.id}: {rb.title}", f"Symptom: {rb.symptom['when']}", f"KB: {', '.join(rb.kb)}",
+           f"Player consent needed: {rb.needs_player_approval}"
+           + (f" (register action {rb.approval_action})" if rb.needs_player_approval else "")]
+    if rb.params:
+        out.append("Params:")
+        for name, spec in rb.params.items():
+            spec = spec if isinstance(spec, dict) else {"default": spec}
+            d = spec.get("default")
+            need = f"required: --param {name}=<value>" if d is None else f"default {d}"
+            out.append(f"  {name} ({need})" + (f": {spec['desc']}" if spec.get("desc") else ""))
+    if rb.preconditions:
+        out.append("Preconditions:")
+        out += [f"  {p['when']}" + (f" ({p['msg']})" if p.get("msg") else "") for p in rb.preconditions]
+    out += [f" {i}. " + _step_line(st) for i, st in enumerate(rb.steps, 1)]
+    out.append(f"Verify: {rb.verify['when']}")
+    if rb.rollback:
+        out.append("Rollback:")
+        out += [f" {i}. " + _step_line(st) for i, st in enumerate(rb.rollback, 1)]
+    if rb.notes:
+        out.append("Note: " + rb.notes)
     return out
 
 
@@ -249,17 +297,21 @@ def run_runbook(rb: Runbook, client, ctx_fn: Callable[[], dict], *, clock, dry_r
                 internal: Callable[[str], str] | None = None, stop_at_manual: bool = True) -> RunResult:
     """Run a runbook. ctx_fn() returns a fresh context (new snapshot)."""
     ctx = ctx_fn()
+    consent_note = []
     if rb.needs_player_approval:
         act = rb.approval_action or rb.id
         if registry is None or not registry.allows(act):
-            return RunResult(rb.id, False, "approval", [f"refused: {rb.id} needs the player's yes in the exception register "
-                                                        f"(action {act}). Without an entry it is not executed."])
+            msg = (f"{rb.id} needs the player's yes in the exception register (action {act}). "
+                   f"Without an entry it is not executed.")
+            if not dry_run:
+                return RunResult(rb.id, False, "approval", ["refused: " + msg])
+            consent_note = ["NOT approved: " + msg]          # preview only: nothing runs in a dry run
     try:
         cmds = plan_commands(rb, ctx, params)
     except RunbookError as e:
         return RunResult(rb.id, False, "precondition", [str(e)])
     if dry_run:
-        return RunResult(rb.id, True, "dry", ["dry-run: nothing executed"], cmds)
+        return RunResult(rb.id, True, "dry", ["dry-run: nothing executed"] + consent_note, cmds)
     for p in rb.preconditions:
         if not evaluate(str(p["when"]), ctx):
             return RunResult(rb.id, False, "precondition", [f"Precondition not met: {p.get('msg', p['when'])}"])
@@ -280,6 +332,8 @@ def run_runbook(rb: Runbook, client, ctx_fn: Callable[[], dict], *, clock, dry_r
             if not r.ok and not st.get("allow_fail"):
                 res.status = "step_failed"
                 res.log.append("Aborted. Check the rollback: python -m df_llm_helper runbook show " + rb.id)
+                for rst in rb.rollback:
+                    res.log.append("  rollback: " + (render(rst["cmd"], lctx) if "cmd" in rst else _step_line(rst)))
                 return res
         elif "manual" in st:
             res.log.append("MANUAL: " + render(st["manual"], lctx))
