@@ -105,9 +105,11 @@ local function screen_rows()
 end
 
 -- all occurrences (plain text, no patterns) of needle
+-- An empty needle matches nothing (string.find with '' never advances -> endless loop in the main thread, BUG-403).
 local function find_text(needle, rows)
-  rows = rows or screen_rows()
   local res = {}
+  if type(needle) ~= 'string' or needle == '' then return res end
+  rows = rows or screen_rows()
   local low = needle:lower()
   for y, row in pairs(rows) do
     local rl = row:lower()
@@ -117,7 +119,7 @@ local function find_text(needle, rows)
       if not s then break end
       res[#res + 1] = { x = s - 1, y = y, x2 = e - 1,
         before = row:sub(math.max(1, s - 1), s - 1), after = row:sub(e + 1, e + 12) }
-      init = e + 1
+      init = math.max(e, s) + 1   -- always advance, even for a zero-length match
     end
   end
   table.sort(res, function(a, b) if a.y ~= b.y then return a.y < b.y end return a.x < b.x end)
@@ -777,7 +779,7 @@ end
 function cmd.scan(opts)
   if not fort_ok() then return fail('keine Festung geladen') end
   local needle = opts.arg1
-  if not needle then return fail('scan <text>') end
+  if not needle or needle:match('^%s*$') then return fail('scan <text>') end
   emit({ ok = true, needle = needle, hits = find_text(needle), focus = focus_list() })
 end
 
