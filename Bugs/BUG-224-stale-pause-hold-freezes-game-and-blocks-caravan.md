@@ -22,3 +22,13 @@ none recorded; `tools/pause.hold` content `alarm` / `karawane`, `pause_state=tru
 
 ## Analysis (reporter's hypothesis)
 Writers of `pause.hold` exist in `siege.py`, `caravan.py`, `waechter.py`, `freeze_guard.py`, `settings.py`, `perf.py`, `camera.py` but there is no common owner/expiry. Suggest a hold file with `reason`, `ts`, `max_age_s` and a check that reports `stale hold` when the game is paused, no danger is active and the age exceeds the limit.
+
+## Nachtrag 2026-10-02 (spaeter am Tag, Live): zwei weitere Ursachen fuer "Spiel steht"
+
+1. **`pause.hold` wird bei jedem Alarm geschrieben, aber nie automatisch geloescht.** Schreiber: der Python-Waechter (`waechter.py`, `_hold("alarm")`) und die Lua-Skripte `claude/gefahr.lua` (schreibt `pause.hold` mit Text `gefahr HH:MM:SS`) und `claude/watchdog.lua`. Der einzige Ablauf im Code ist `waechter.py` ~Zeile 222: nur Holds mit Text, der mit `gefahr` beginnt, nach > 20 min. Holds mit `alarm` oder `karawane` laufen nie ab, und wenn der Waechter nicht laeuft, gar nichts.
+2. **Ein offenes `dwarfmode/Squads/Default`-Fenster haelt das Spiel an** (UI-Pause, **kein** Hold, keine Datei): `pause.hold` fehlt, `alert.flag` fehlt, trotzdem Frame-Zaehler steht, `claude/advance run` ohne Wirkung. Der Waechter (`UNPAUSE_RE` / `CLEAR_CMD`, `waechter.py` ~Zeile 234) entscheidet nur ueber Fokus `dwarfmode/Default`, das Squads-Fenster wird nicht erkannt und nicht geschlossen.
+   - Manuelle Loesung (live bestaetigt): `df.global.game.main_interface.squads.open = false` und danach `df.global.pause_state = false`.
+   - Erwartet: `digest`/`check` meldet `!! game frozen: squads window open (focus dwarfmode/Squads/Default), no pause.hold`; der Waechter schliesst das Fenster (nur wenn kein Squad-Befehl in Arbeit ist) und hebt die Pause auf.
+3. Zusammenspiel mit BUG-225: ein Hold/Squads-Fenster verhindert `claude/handel open --live`; der Trade-Flow sollte beides sehen.
+
+Info needed: Fixture der Antwort von `claude/status` (Fokus-String) bei offenem Squads-Fenster; Spieler kann sie mit `dfhack-run lua "print(dfhack.gui.getCurFocus()[1])"` aufnehmen und unter `Bugs/evidence/BUG-224/` ablegen.
