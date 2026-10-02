@@ -1,6 +1,6 @@
 # BUG-301: Several CLI arguments are not validated: `--param x`, `kb -k -1`, empty `bus post`, `kb import` junk, `dashboard unmap` unknown, unknown ids reported as `None`
 
-- **Status:** open
+- **Status:** fixed in 793a4b7
 - **Severity:** S3
 - **Area:** `runbook`, `kb`, `bus`, `dashboard` in `df_llm_helper/cli.py`
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -118,3 +118,6 @@ Use argparse `type=` validators (`positive int`, `key=value`), reject empty text
 
 ## Info needed
 None (cosmetic/robustness).
+
+## Fix
+Runbook part in e4af55c (`--param` without `=`, missing/unknown id). 793a4b7: `kb get/search/import` (`-k >= 1`, id named, binary/empty files, slug target names), `bus post` (empty text, `--from` required), `bus read --limit >= 1`, `dashboard unmap` (usage / unknown map), `brief --budget >= 1`. All exit 2 with a one-line message (unknown map: exit 1).

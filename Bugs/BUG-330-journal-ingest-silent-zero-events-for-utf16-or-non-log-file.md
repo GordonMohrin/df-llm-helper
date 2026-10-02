@@ -1,6 +1,6 @@
 # BUG-330: `journal ingest` reports `0 chronicle events ... 0 new` (exit 0) for a UTF-16 event log or for a file that is not an event log at all; invalid `--date` shows the raw Python error
 
-- **Status:** open
+- **Status:** fixed in 1e94283
 - **Severity:** S3
 - **Area:** `journal ingest` (`df_llm_helper/cli.py:cmd_journal`, `df_llm_helper/journal.py:parse_events_log`)
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -55,3 +55,6 @@ In `read_text_tolerant` check the BOM for UTF-16 (`ÿþ`/`þÿ`) first; print `N
 
 ## Info needed
 None.
+
+## Fix
+UTF-16 with BOM is decoded (`read_text_tolerant`, 6e0db06); `journal ingest` warns and exits 1 when no line has the watcher format; a bad `--date` gives `--date must be a real date YYYY-MM-DD`.

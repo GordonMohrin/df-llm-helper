@@ -1,6 +1,6 @@
 # BUG-324: `kb search` with natural German terms returns no hits or a wrong first hit (`Zwerge`, `Händler hängt`, `Überschwemmung`, `Grundwasser`, `Küche`, `Flagge`, `Ruckeln`; `Holzkohle` ranks `bett_ohne_holz` first)
 
-- **Status:** open
+- **Status:** fixed in 4c7e963
 - **Severity:** S3
 - **Area:** `kb search` (`df_llm_helper/kb.py:SYNONYMS`, `data/kb/curated.yaml`)
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -56,3 +56,6 @@ Add the missing German keys (and make `SYNONYMS` symmetric automatically), add `
 
 ## Info needed
 Question for the cloud session / player: which German terms do agents really use when they search? (The scope memories are in German.)
+
+## Fix
+German keys added, `SYNONYMS` made symmetric automatically, the longest matching key wins (`Holzkohle` -> charcoal/coke), new curated entry `bestie_megabestie`. All queries of this report except the vague `Zwerge` now return the expected entry in the top 3.

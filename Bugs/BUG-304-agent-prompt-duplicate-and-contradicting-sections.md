@@ -1,6 +1,6 @@
 # BUG-304: `agents prompt` repeats Fair Play / Report / Commands twice and gives two contradicting report formats (<= 10 lines vs <= 12 lines with different fields); long tasks are cut silently
 
-- **Status:** open
+- **Status:** fixed in c06df7e
 - **Severity:** S2
 - **Area:** `agents prompt` (`df_llm_helper/agents.py:build_prompt`, `df_llm_helper/brief.py`)
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -54,3 +54,6 @@ Strip `## Fair Play`, `## Commands` and `## Report` from the briefing before emb
 
 ## Info needed
 Question for the cloud session: which of the two report formats is the authoritative one (`lint-report` and MANUAL 9.10 say Result/Measurements/Changed/Open/Risk)?
+
+## Fix
+The prompt drops the briefing's own Fair Play / Report / Commands blocks (scope commands are merged into the prompt's Commands block). Answer: the authoritative format is the lint-report one (Result/Measurements/Changed/Open/Risk, <= 12 lines); `brief` uses the same wording now. Tasks > 400 characters are marked `[task shortened: 400 of N characters]`.

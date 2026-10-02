@@ -1,6 +1,6 @@
 # BUG-322: MANUAL 9.2 says the standing exception FP09 "has been in `data/exceptions.jsonl` since 2026-10-01"; the shipped register contains only an ignored example, so `exception list` is empty and `lint` reports `pilot_caravan.lua` as an error
 
-- **Status:** open
+- **Status:** fixed in e4af55c
 - **Severity:** S3
 - **Area:** docs/MANUAL.md 9.2 (and 5), `data/exceptions.jsonl`, `data/README.md`
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -52,3 +52,6 @@ Reword MANUAL 9.2: "requires register entry FP09 in `data/exceptions.local.jsonl
 
 ## Info needed
 Question for the cloud session: should `lint lua` exit 0 for the bundled `pilot_caravan.lua` (documented in LINT-FINDINGS as 'intended')? At the moment the documented, intended finding makes `lint lua` exit 1.
+
+## Fix
+MANUAL 9.2 and INTEGRATION.md say FP09 belongs in the local register `data/exceptions.local.jsonl` (public register has only an example) and that `lint lua` then reports `pilot_caravan.lua:21 L07`. Answer: `lint lua` stays exit 1 without FP09 - the documented finding is not suppressed (fair play must not get weaker).

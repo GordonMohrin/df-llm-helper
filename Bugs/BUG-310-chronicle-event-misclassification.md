@@ -1,6 +1,6 @@
 # BUG-310: `journal chronik`: ordinary game messages are classified as `Emergency`/`Mood` (finished floodgate order, magma pool discovery, artifact naming) and a combat dodge line is not filtered as noise
 
-- **Status:** open
+- **Status:** fixed in 1e94283
 - **Severity:** S3
 - **Area:** `df_llm_helper/journal.py:TYPE_OF`, `NOISE`
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -45,3 +45,6 @@ Match on the tag only (anchored: `^(CITIZEN_)?DEATH$`, `^ARTIFACT_(BEGUN|CREATED
 
 ## Info needed
 None.
+
+## Fix
+Types match whole tag words (`FLOOD` no longer matches `FLOODGATE`); `NAMED_ARTIFACT`/`FEATURE_DISCOVERY` are type `Info`; `DODGE*` and `QUOTA_FILLED` are noise.

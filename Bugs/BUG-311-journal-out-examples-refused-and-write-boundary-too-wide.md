@@ -1,6 +1,6 @@
 # BUG-311: MANUAL 9.12 documents `journal metrics --out ../metrics.csv` / `postmortem --out ../POSTMORTEM-runN.md`, but both are refused with the shipped config; the same boundary lets `--out` overwrite any file inside the project (e.g. `data/exceptions.jsonl`)
 
-- **Status:** open
+- **Status:** fixed in 1e94283
 - **Severity:** S3
 - **Area:** `df_llm_helper/cli.py:_journal_target`, docs/MANUAL.md 9.12, docs/INTEGRATION.md
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -57,3 +57,6 @@ Allow only the configured files plus `<RUNTIME>/**`; update MANUAL 9.12 / INTEGR
 
 ## Info needed
 Question: should the orchestrator be allowed to write `../metrics.csv` (the player's original folder layout)? If yes, document that `journal.metrics: ../metrics.csv` must be set in `config.yaml`.
+
+## Fix
+`--out` is allowed only for the configured `journal.*` files or report files below the runtime folder (never `.py/.lua/.yaml/.jsonl/.db` or `exceptions*`). Answer: `../metrics.csv` only when configured as `journal.metrics` in `config.yaml`; MANUAL 9.12 shows `runtime/...` paths and this rule.

@@ -1,6 +1,6 @@
 # BUG-302: Missing or unreadable input file produces a Python traceback in `kb import`, `bus import`, `agents lint-report`, `replay`, `journal ingest`
 
-- **Status:** open
+- **Status:** fixed in 793a4b7
 - **Severity:** S2
 - **Area:** `kb import`, `bus import`, `agents lint-report`, `replay`, `journal ingest --events <dir>`
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -84,3 +84,6 @@ Catch `OSError` in `main()` (print `Error: <strerror>: <path>`, exit 2) or check
 
 ## Info needed
 None.
+
+## Fix
+Module-specific causes only: `kb import`, `bus import`, `agents lint-report`, `replay` and `journal ingest` check `is_file()` and print one line (exit 1/2). The generic OSError handling in `main()` is the core agent's BUG-113.

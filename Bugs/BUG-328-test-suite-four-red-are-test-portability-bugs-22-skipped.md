@@ -1,6 +1,6 @@
 # BUG-328: Test suite on Windows without pytest: 4 tests fail, all 4 are test/fixture portability problems (epoch ts < 1 day, `\n` -> `\r\n` on write, `\\` in a path prefix check); 22 Lua tests are skipped (no lua5.4)
 
-- **Status:** open
+- **Status:** fixed in 6cfa014
 - **Severity:** S3
 - **Area:** `tests/test_journal.py:96`, `tests/test_m3.py:72`, `tests/test_scenarios_cli.py:28` + `tests/make_fixtures.py:290`, `tests/test_settings.py:139`
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -88,3 +88,6 @@ Fix the four tests as described; add `.gitattributes` (`*.jsonl text eol=lf`, `*
 
 ## Info needed
 Info for the player (local test): please install `lua5.4` (e.g. `choco install lua` or the lua-for-windows binary on PATH as `lua5.4`) and run `python Bugs/evidence/BUG-328/mini_pytest/run_tests.py .` (or pytest) again - the 22 skipped Lua-mock tests have never run on this machine. The cloud session can run them on Linux.
+
+## Fix
+Windows portability in 6cfa014: realistic timestamps (+ UTC fallback in `metrics.export_csv`), `write_bytes` in test_m3, `make_fixtures` writes LF, `.gitattributes` keeps `*.jsonl`/`*.csv` LF, posix paths in test_settings, unquoted `lua -f <path with blanks>` is linted. The 4 perimeter failures on Linux (lua5.4 installed) were a separate regression of aefbb0f (enclave filter >= 3000 outside tiles in `pilot_perimeter.lua` only, the synthetic grids are smaller): fixed in c81d71f with `perimeter.min_outside` (8th Lua argument), the same filter in the Python reference and parity tests. Info needed (player, local): install lua5.4 on Windows and run the suite once.

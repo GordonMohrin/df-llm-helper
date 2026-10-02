@@ -1,6 +1,6 @@
 # BUG-321: Stale references after the watcher replacement: runbook rb05 and the KB entries `waechter_blind`/`guard_start` still tell the reader to restart `unpause-guard.ps1`; `rb01c_e18_release` and `autopilot log` do not exist; `docs/LINT-FINDINGS.md` lists findings that are gone
 
-- **Status:** open
+- **Status:** fixed in e4af55c
 - **Severity:** S3
 - **Area:** `data/runbooks/rb05_waechter_blind.yaml`, `data/kb/curated.yaml` (waechter_blind, guard_start), `data/runbooks/rb01_e18_pick.yaml`, `docs/manual-v3/05-tools.md`, `docs/LINT-FINDINGS.md`
 - **Reported:** 2026-10-02, commit `50cee52`
@@ -101,3 +101,6 @@ rb05 step 2 / KB waechter_blind + guard_start: replace by `python -m df_llm_help
 
 ## Info needed
 Already reported elsewhere (not repeated here): `LINT-BEFUNDE.md` file name in OVERVIEW/CHANGELOG -> BUG-119 item 4.
+
+## Fix
+rb05 and KB `waechter_blind`/`guard_start` point to `python -m df_llm_helper waechter --loop`; rb01 note points to `kb get e18_release`; `manual-v3/05-tools.md` no longer names `autopilot log`. `docs/LINT-FINDINGS.md` was updated in 6e0db06 and the test now also fails for a documented finding that is no longer reported.
