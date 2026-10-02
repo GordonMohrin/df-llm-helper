@@ -74,16 +74,92 @@ Requirements: Python 3.11+, standard library only (pytest for tests; `lua5.4` op
 
 ## What it does
 
-| Area                                        | Commands                                                                                                                                                                   |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Situation report (≤ 600 tokens, delta only) | `check`, `digest`, `cycle`                                                                                                                                                 |
-| Maintenance autopilot with loop protection  | `autopilot`, `guard`, `waechter` (real-time watcher), `tempo`                                                                                                              |
-| Knowledge                                   | `runbook diagnose/show/run`, `kb search`, `brief <scope>` (agent briefing ≤ 1500 tokens)                                                                                   |
-| Agents                                      | `agents prompt/lint-report/cost`, `bus` (message bus), `memory compact`                                                                                                    |
-| Autopilots (v2)                             | `siege`, `caravan`, `trade`, `mood`, `care`, `workload`, `bottleneck`, `water`, `reboot`                                                                                   |
-| Autopilots (v3)                             | `perimeter`, `digcheck`, `reach`, `perf`, `tools`, `remote`, `hygiene`, `defense`, `settings`, `camera`; standstill/window guard inside `waechter` – see `docs/manual-v3/` |
-| Reporting                                   | `forecast`, `dashboard` (static HTML), `journal` (chronicle, lessons, post-mortem), `metrics`, `budget`                                                                    |
-| Fair play                                   | `lint` (30+ rules on Lua), exception register `exception list/add`                                                                                                         |
+Every command is `python -m df_llm_helper <command>`; add `--mock fixtures/run5` to try it without the game.
+
+**Orchestrator loop**
+
+| Command | What it does |
+|---|---|
+| `check` | The one call per orchestrator check: heartbeat, guard, autopilot and situation report together |
+| `digest` | Compact situation report, only what changed (≤ 600 tokens) |
+| `cycle` | One round of guard, autopilot and digest |
+| `heartbeat` | Tells the guard the orchestrator is still awake |
+| `wake` | Filters events down to the ones that need a decision, one line each |
+
+**Safety and tempo**
+
+| Command | What it does |
+|---|---|
+| `guard` | Deadman switch and tempo governor: slows the game when nobody is supervising |
+| `waechter` | Real-time watcher in the background (messages, flags, pauses, frozen game, stuck windows) |
+| `tempo` | Shows or switches time-lapse, only when no guard blocker is active |
+| `perf` | Finds what freezes or slows the game (latency sampling, safe bisect) |
+| `reboot` | After a restart or save load, brings back the background jobs that do not survive loading |
+| `settings` | Edits `d_init.txt` with backup, verify and revert |
+
+**Routine autopilot**
+
+| Command | What it does |
+|---|---|
+| `autopilot` | Runs the deterministic maintenance rules (cooldowns, loop protection) |
+| `care` | Watches hunger, thirst and the hospital |
+| `mood` | Strange moods: checks material gaps and reserves supplies |
+| `workload` | Turns a high idle rate into the right fix (empty dig queue, too few picks, missing material, full stockpiles) |
+| `bottleneck` | Spots material and fuel shortages before production stalls |
+| `water` | Flood and water watcher; checks commands for flooding risk |
+| `hygiene` | Loose stacks, dump marking, refuse zone proposals |
+| `tools` | Keeps enough picks and miners, suggests forging |
+| `remote` | Rescues dwarves stuck on long, far-away jobs |
+
+**Military and trade**
+
+| Command | What it does |
+|---|---|
+| `siege` | Handles sieges, raids and beasts without LLM turns: pause, targets, kill orders, civilian warning, cleanup |
+| `defense` | Designs kill boxes and traps; builds only with `--apply --confirm` |
+| `caravan` | Caravan arrival and preparation, step by step |
+| `trade` | Trading as a state machine, from opening the depot to finishing |
+
+**Map and digging**
+
+| Command | What it does |
+|---|---|
+| `digcheck` (alias `dig check`) | Checks dig orders before designating: no new openings to the outside, no aquifer, water or cavern breach |
+| `perimeter` | Finds open access paths into the fortress, plans sealing |
+| `reach` | Checks which places dwarves can still walk to, and what cut them off |
+| `camera` | Camera profiles for watching (ambient, combat, build, events, calm) |
+
+**Knowledge and agents**
+
+| Command | What it does |
+|---|---|
+| `runbook` | Known problems as recipes: diagnose symptoms, show and run fixes |
+| `kb` | Searches the knowledge base (≤ 400 tokens per hit) |
+| `brief` | Builds a compact briefing for a sub-agent (≤ 1,500 tokens) |
+| `agents` | Sub-agent prompts, report linting and cost measurement |
+| `bus` | Message bus between agents (priorities, dedupe) |
+| `memory` | Compacts agent memory files, keeps the original in an archive |
+| `overlay` | Short in-game text for the human player watching |
+
+**Planning and reporting**
+
+| Command | What it does |
+|---|---|
+| `plan` | Planners for blueprints, trade, digging, armor and supply |
+| `forecast` | Predicts famine before it happens |
+| `dashboard` | Static HTML dashboard of the fortress |
+| `journal` | Chronicle, lessons learned and post-mortem from the event log |
+| `metrics` | KPI time series as CSV |
+| `budget` | Token consumption per agent scope against a daily budget |
+
+**Fair play and testing**
+
+| Command | What it does |
+|---|---|
+| `lint` | Fair-play linter for Lua scripts (30+ rules) |
+| `exception` | Register of exceptions, each with the player's quoted consent |
+| `record` | Records real game answers as fixtures |
+| `replay` | Replays recorded scenarios and checks the results |
 
 Every rule has a `max_per_hour`; a rule that fires too often switches itself off and raises a warning. Full reference: `docs/MANUAL.md`, `docs/OVERVIEW.md`.
 
