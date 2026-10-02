@@ -16,8 +16,8 @@ nodes:
   - {id: pick, label: Pickaxes, stock: "have.WEAPON:ITEM_WEAPON_PICK", needs: [forge], trade: tools}
   - {id: chain, label: Chain, stock: chain, needs: [forge], trade: tools}
   - {id: bucket, label: Bucket, stock: bucket, any: [wood, forge], trade: tools}
-  - {id: mechanism, label: Mechanism, stock: mechanism}
-  - {id: block, label: Blocks, stock: blocks}
+  - {id: mechanism, label: Mechanism, stock: mechanism}   # source: see 'sources' below (BUG-220)
+  - {id: block, label: Blocks, stock: blocks}              # source: see 'sources' below (BUG-220)
   - {id: well, label: Well, needs: [chain, bucket, mechanism, block]}
   - {id: bed, label: Beds, needs: [wood]}
   - {id: mood_wood, label: Wood mood reserve, stock: wood, reserve: wood_reserve, trade: wood, group: wood}
@@ -26,3 +26,11 @@ goals:
   - {id: well, target: 1, label: Well}
   - {id: bed, target: 1, label: Beds}
   - {id: mood_wood, target: 1, label: Wood mood reserve}
+# Extra stock sources (BUG-220) for keys that claude/material status does not count yet. Used only when 'stock' has no
+# such key: claude/material status 'stock.mechanism' / 'stock.blocks' win as soon as the Lua side reports them.
+# cmd = read-only game script, path = field in its JSON answer; item = one 'TYPE=N' token of a text field;
+# lower_bound = the number covers only part of the stock (claude/muell counts loose blocks outside stockpiles, top 8
+# types), so it proves "at least N" but its absence is "unknown", never 0.
+sources:
+  - {key: mechanism, cmd: "claude/pilot_defense status", path: stock.mechanisms}
+  - {key: blocks, cmd: "claude/muell status", path: typen, item: BLOCKS, lower_bound: true}

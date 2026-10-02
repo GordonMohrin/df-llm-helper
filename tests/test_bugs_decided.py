@@ -100,3 +100,56 @@ def test_bug104_no_cleanup_in_mock_db_or_mock_run(tmp_path, monkeypatch):
     assert Store(live).purged["snapshots"] == 0
     monkeypatch.setattr(C, "_FORCED", {})
     assert Store(live).purged["snapshots"] == 2
+
+
+# ---------------------------------------------------------------- BUG-220 mood minima, block/mechanism stock
+def _mood_live() -> str:
+    for ln in (EVID / "BUG-220" / "l_mood_res.jsonl").read_text(encoding="utf-8").splitlines():
+        d = json.loads(ln)
+        if d.get("cmd") == "claude/mood status":
+            return d["stdout"]
+    raise AssertionError("no claude/mood status in the evidence")
+
+
+def test_bug220_mood_reserve_uses_claude_mood_minimum(tmp_path):
+    from df_llm_helper.moods import MoodManager
+    from df_llm_helper.toolsfs import ToolsDir
+    clk = FakeClock(1_790_840_000.0)
+    status = json.dumps({"population": {"total": 174}})
+    m = MockClient({"claude/mood status": _mood_live(), "claude/status": status}, clock=clk)
+    mm = MoodManager(m, ToolsDir(tmp_path, clk), Store(), clk, DEFAULTS["mood"])
+    out = mm.reserve(dry=True)
+    assert out == ["Mood reserve missing: rough gems 6/12 (minima: claude/mood minimum)"]     # same gap as the game
+    # unreadable claude/mood answer without 'minimum' -> config fallback with the raised defaults
+    j = json.loads(_mood_live())
+    j.pop("minimum")
+    m.set("claude/mood status", json.dumps(j))
+    assert mm.reserve(dry=True) == ["Mood reserve missing: rough gems 6/12 (minima: config mood.reserves)"]
+    assert DEFAULTS["mood"]["reserves"]["rough_gems"] == 12 and DEFAULTS["mood"]["reserves"]["cut_gems"] == 10
+    assert DEFAULTS["mood"]["reserves"]["wood"] == 14
+
+
+def test_bug220_bottleneck_block_and_mechanism_have_a_stock_source():
+    from df_llm_helper.bottleneck import DEFAULTS as BD, BottleneckWatch
+    clk = FakeClock(0)
+    mat = json.dumps({"stock": {"wood": 177, "coke": 12, "coal": 697, "bars": {"IRON": 32}, "chain": 3,
+                                "bucket": 4, "have": {"WEAPON:ITEM_WEAPON_PICK": 20}}})
+    m = MockClient({"claude/material status": mat,
+                    "claude/pilot_defense status": json.dumps({"ok": True, "stock": {"mechanisms": 65}}),
+                    "claude/muell status": json.dumps({"lose_stapel": 900, "typen": "BOULDER=300 BLOCKS=482"})},
+                   clock=clk)
+    bw = BottleneckWatch(m, Store(), clk, BD, HOME)
+    st = bw.stock()
+    assert st["mechanism"] == 65 and st["blocks"] == 482
+    out = bw.run(dry=True)
+    assert out[0] == "No bottleneck in the production chains" and not any("no stock data" in ln for ln in out)
+    # claude/material status reporting the keys itself wins; unknown sources stay 'unknown' (never 0)
+    m.set("claude/material status", json.dumps({"stock": {**json.loads(mat)["stock"], "mechanism": 2, "blocks": 7}}))
+    m.calls.clear()
+    st2 = bw.stock()
+    assert st2["mechanism"] == 2 and st2["blocks"] == 7 and m.calls == ["claude/material status"]
+    m2 = MockClient({"claude/material status": mat,
+                     "claude/pilot_defense status": json.dumps({"ok": True, "stock": {"mechanisms": -1}}),
+                     "claude/muell status": json.dumps({"typen": "BOULDER=300"})}, clock=clk)
+    out2 = BottleneckWatch(m2, Store(), clk, BD, HOME).run(dry=True)
+    assert any(ln.startswith("no stock data: block, mechanism") for ln in out2)

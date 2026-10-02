@@ -5,6 +5,11 @@
   fixture identity (`data/mock_fingerprints.json`, kept in sync with `fixtures/run5` by a test) AND a contradiction with
   the game's time line (another snapshot of the same game several game years away, stored minutes apart). Real rows,
   the isolated mock db and `--mock` runs are never touched; idempotent (`df_llm_helper/mockrows.py`).
+- BUG-220: `mood reserve` uses the `minimum` of `claude/mood status` (authoritative) and falls back to `mood.reserves`;
+  config defaults follow mood.lua (rough gems 12, cut gems 10, wood 14, bone 5, leather 3, metal 3, cloth 3, stone 5,
+  silk 2). `bottleneck`: `mechanism` from `claude/pilot_defense status` (`stock.mechanisms`), `blocks` from
+  `claude/muell status` (`typen` BLOCKS=N, a lower bound) via the new `sources` list in `data/graphs/produktion.yaml`;
+  `claude/material status` `stock.mechanism`/`stock.blocks` win once the Lua side reports them.
 
 ## Neutral map config, embark scripts (2026-10-02)
 - `lua/claude/config.lua` and `lua/claude/stages.lua` ship neutral (nil/empty; defaults come from the loaded map). The real
