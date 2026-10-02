@@ -30,8 +30,11 @@ for _, u in ipairs(util.citizens()) do
   for i = 1, math.min(3, #skills) do top[i] = skills[i].skill .. ':' .. skills[i].rating end
 
   local job = u.job.current_job
+  -- needs_healthcare = the game's own "needs treatment" flag (live: 18 patients). #wounds > 0 also counts healed
+  -- scars (live: 144 of 176 citizens) and made every runbook/rule think the whole fort was injured.
   local injured = false
-  pcall(function() injured = #u.body.wounds > 0 end)
+  local ok = pcall(function() injured = u.health.flags.needs_healthcare and true or false end)
+  if not ok then pcall(function() injured = #u.body.wounds > 0 end) end
 
   out[#out + 1] = {
     id = u.id,

@@ -61,6 +61,13 @@ def _names(cs, attr: str, limit: int = 4) -> str:
     return ", ".join(parts)
 
 
+def _need_sig(cs, attr: str) -> str:
+    """Signature of a hunger/thirst list: size bucket + worst value bucket. The exact id list changes on every check
+    (dwarves cross the threshold back and forth) and would repeat the line each time; a new bucket re-reports it."""
+    worst = max(getattr(c, attr) for c in cs)
+    return f"{len(cs) // 5}|{worst // 10000}"
+
+
 def compute_alerts(snap: Snapshot, th: dict, flags: dict | None = None, prev_facts: dict | None = None,
                    cancels: list | None = None, hint=None) -> list[Item]:
     """All threshold violations/anomalies (without the delta filter)."""
@@ -79,23 +86,28 @@ def compute_alerts(snap: Snapshot, th: dict, flags: dict | None = None, prev_fac
     hungry = sorted(snap.hungry(th["hunger_crit"]), key=lambda c: -c.hunger)
     if hungry:
         add(Item("crit", "hunger", "Hunger", f"Hunger>{th['hunger_crit'] // 1000}k: {_names(hungry, 'hunger')}",
-                 ",".join(str(c.id) for c in hungry), ("essen", "gesundheit")))
+                 _need_sig(hungry, "hunger"), ("essen", "gesundheit")))
     thirsty = sorted(snap.thirsty(th["thirst_crit"]), key=lambda c: -c.thirst)
     if thirsty:
         add(Item("crit", "thirst", "Thirst", f"Thirst>{th['thirst_crit'] // 1000}k: {_names(thirsty, 'thirst')}",
-                 ",".join(str(c.id) for c in thirsty), ("trinken", "gesundheit")))
+                 _need_sig(thirsty, "thirst"), ("trinken", "gesundheit")))
     # danger
     a = snap.alerts
-    if (a.enemies or 0) > 0 or (a.danger_alarm or 0) > 0 or a.threats:
+    if snap.danger:
         bits = []
         if a.enemies:
-            bits.append(f"{a.enemies} enemies on map")
+            bits.append(f"{a.enemies} enemies on map" + (f" ({a.enemies_near} near)" if a.enemies_near else ""))
+        elif a.enemies_near:
+            bits.append(f"{a.enemies_near} enemies near")
         if a.danger_alarm:
             bits.append(f"danger alarm {a.danger_alarm}")
         if a.threats:
             bits.append("Threat: " + "; ".join(a.threats[:2])[:80])
-        add(Item("crit", "danger", "Danger", ", ".join(bits), f"{a.enemies}|{a.danger_alarm}|{len(a.threats)}",
+        add(Item("crit", "danger", "Danger", ", ".join(bits), f"{a.enemies}|{a.enemies_near}|{a.danger_alarm}|{len(a.threats)}",
                  ("verteidigung", "militaer")))
+    elif (a.enemies or 0) > 0:      # hostiles on the map but none near the fort (caverns): one quiet line, no alarm
+        add(Item("info", "enemies_far", "Hostiles far", f"{a.enemies} hostiles on the map, none near the fort",
+                 str(a.enemies), ("verteidigung", "militaer")))
     if a.civ_alert:
         add(Item("warn", "civ_alert", "Civilian alert", "Civilian alert active", "1", ("verteidigung",)))
     if a.refuge_ok is False:
@@ -271,7 +283,7 @@ def build_digest(snap: Snapshot, state: DigestState, *, th: dict, max_tokens: in
 
     prev_alerts = state.alerts if since_last else {}
     fresh = [a for a in alerts if a.key not in prev_alerts or prev_alerts[a.key].get("sig") != a.sig]
-    still = [a for a in alerts if a not in fresh]
+    still = [a for a in alerts if a not in fresh and a.level != "info"]   # info items are shown once, never as 'still open'
     resolved = [v.get("label", k) for k, v in sorted(prev_alerts.items()) if k not in {a.key for a in alerts}
                 and not k.startswith("w:")]
 
@@ -285,7 +297,14 @@ def build_digest(snap: Snapshot, state: DigestState, *, th: dict, max_tokens: in
         open_labels = sorted({a.label for a in still})
         txt = f"No change since {now_hhmm or 'last check'}"
         if open_labels:
-            txt += f" ({len(open_labels)} open: {', '.join(open_labels)[:40]})"
+            shown, used = [], 0
+            for lb in open_labels:
+                if used + len(lb) + 2 > 40 and shown:
+                    break
+                shown.append(lb)
+                used += len(lb) + 2
+            more = f", +{len(open_labels) - len(shown)}" if len(shown) < len(open_labels) else ""
+            txt += f" ({len(open_labels)} open: {', '.join(shown)}{more})"
         text = txt + "."
     else:
         lines = header + [status_line(snap)]

@@ -135,7 +135,7 @@ def build_brief(scope: str, *, scopes_def: dict, ctx: dict, snap, kb: KB | None,
         order = sorted(secs, key=lambda s: (0 if s.title.startswith(("Mission", "Situation")) else 2 if s.required else 1))
         blocks = []
         for s in order:
-            body = "\n".join(x if s.required else f"- {x}" for x in s.lines)
+            body = "\n".join(x if s.required else "- " + re.sub(r"^\s*[-*]\s+", "", x) for x in s.lines)  # no "- - "
             blocks.append(f"## {s.title.strip()}\n{body}")
         return head + "\n" + "\n".join(blocks)
 

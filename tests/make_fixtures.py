@@ -99,6 +99,7 @@ def responses(*, pop: int | None = None, drink_days: int | None = None, food_day
     if hunger is not None or thirst is not None:
         rp["gefaehrdet"] = gef
     rp["feinde_auf_karte"] = enemies
+    cf["feinde_nah"] = enemies              # synthetic enemies stand at the fort (real fixtures: 0 = far away)
     rp["hoher_stress"] = stress_high
     rp["zwergenleichen_unbestattet"] = corpses
     gf["alarm"] = danger_alarm

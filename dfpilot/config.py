@@ -149,6 +149,25 @@ def _feature_defaults() -> dict:
     return {m.KEY: m.DEFAULTS for m in modules() if hasattr(m, "KEY") and hasattr(m, "DEFAULTS")}
 
 
+_FORCED: dict = {}      # set by the CLI for --mock/--replay-file (see force_overrides)
+
+
+def force_overrides(over: dict | None) -> None:
+    """Overrides that win over config.yaml (the CLI isolates --mock runs from the live state with this)."""
+    _FORCED.clear()
+    _FORCED.update(over or {})
+
+
+def mock_overrides() -> dict:
+    """--mock/--replay-file without an explicit --config: own state.db/tools folder, so fixture warnings, flags and
+    snapshots never leak into the live state (and live flags never leak into a mock run)."""
+    base = RUNTIME / "mock"
+    return {"paths": {"state_db": str(base / "state.db"), "tools": str(base / "tools"),
+                      "scopes": str(base / "tools" / "scopes"),
+                      "gamelog": str(base / "gamelog.txt")},
+            "journal": {"events_log": str(base / "tools" / "events.log")}}
+
+
 def load_config(path: str | Path | None = None, overrides: dict | None = None) -> Config:
     data = _merge(copy.deepcopy(DEFAULTS), _feature_defaults())
     p = Path(path) if path else HOME / "config.yaml"
@@ -159,4 +178,6 @@ def load_config(path: str | Path | None = None, overrides: dict | None = None) -
         data = _merge(data, loaded)
     if overrides:
         data = _merge(data, overrides)
+    if _FORCED:
+        data = _merge(data, _FORCED)
     return Config(data)

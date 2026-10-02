@@ -20,20 +20,23 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-__all__ = ["DEFAULTS", "NOISE", "TYPE_OF", "parse_events_log", "Journal", "is_chronicle_event", "classify_tag",
+__all__ = ["DEFAULTS", "NOISE", "TYPE_OF", "parse_events_log", "infer_first_day", "Journal", "is_chronicle_event", "classify_tag",
            "fix_mojibake"]
 
 DEFAULTS = {"chronik": "../chronik.md", "metrics": "../metrics.csv", "append": False, "suggest_after_repeats": 2,
             "cluster_min": 30, "events_log": None, "kb_out": "data/kb/journal.jsonl"}
 # combat/everyday noise (like wake.NOISE_TAGS) - does not count as a chronicle event
 NOISE = re.compile(r"COMBAT_|LOSE_HOLD_OF_ITEM|FALL_OVER|PAIN_KO|CONFLICT_CONVERSATION|CANCEL_JOB|EXHAUSTION|"
-                   r"PET_DEATH|BREAK_GRIP|LOSE_HOLD|STAND_UP|GRAB|RESOLVE_SHARED_ITEMS|VOMIT|MASTERPIECE")
+                   r"PET_DEATH|BREAK_GRIP|LOSE_HOLD|STAND_UP|GRAB|RESOLVE_SHARED_ITEMS|VOMIT|MASTERPIECE|"
+                   r"NOT_STUNNED|REGAIN_CONSCIOUSNESS|UNIT_PROJECTILE_SLAM|LOSE_EMOTION|BIRTH_(?:WILD_)?ANIMAL")
 TYPE_OF = [  # (pattern in the tag, type)
     (r"CITIZEN_DEATH|DEATH", "Death"), (r"MEGABEAST|AMBUSH|SIEGE|INVADER|THIEF|SNATCHER|BEAST|NIGHT_CREATURE|TITAN|"
                                       r"CAVE_DRAGON|ATTACK", "Attack"),
     (r"ARTIFACT|MOOD|BERSERK|INSANE|MELANCHOLY", "Mood"), (r"CARAVAN|MERCHANT|LIAISON|DIPLOMAT", "Caravan"),
     (r"BUILDING_DESTROYED|COLLAPSE|FLOOD|FIRE|NOTFALL|EMERGENCY", "Emergency"), (r"MIGRANT|BIRTH|PEAK", "Population"),
 ]
+DEATH_CAUSE = re.compile(r"\b(dehydrated|starved|drowned|suffocated|struck down|burned|bled|crushed|fell|frozen|"
+                         r"died of \w+)\b", re.I)
 _LINE = re.compile(r"^\ufeff?(?P<lvl>\w+)\s+(?P<t>\d\d:\d\d:\d\d)\s+\[(?P<tag>[A-Z_0-9]+)\]\s*(?P<txt>.*)$")
 _NAME = re.compile(r"^(?P<name>[^,]+), (?P<prof>.+?) (?P<rest>(?:has|was|is) .+?)\.?$")
 
@@ -85,6 +88,21 @@ def parse_events_log(text: str, day0: date) -> list[dict]:
     return out
 
 
+def infer_first_day(text: str, last_day: date) -> date:
+    """The watcher log only has times of day. The last line belongs to `last_day` (log file mtime); every jump back in
+    the time of day (> 1 h) before it is a day change -> the first line lies that many days earlier."""
+    prev, jumps = None, 0
+    for ln in text.splitlines():
+        m = _LINE.match(fix_mojibake(ln.strip()))
+        if not m:
+            continue
+        t = datetime.strptime(m.group("t"), "%H:%M:%S").time()
+        if prev is not None and (datetime.combine(last_day, t) < datetime.combine(last_day, prev) - timedelta(hours=1)):
+            jumps += 1
+        prev = t
+    return last_day - timedelta(days=jumps)
+
+
 @dataclass
 class Lesson:
     key: str
@@ -105,9 +123,13 @@ class Journal:
         self.store.db.execute(SCHEMA)
 
     # ------------------------------------------------------------------ events
-    def _game_date(self, ts: float) -> str | None:
-        r = self.store.db.execute("SELECT facts FROM snapshots ORDER BY ABS(ts - ?) LIMIT 1", (ts,)).fetchone()
-        return json.loads(r["facts"]).get("date") if r else None
+    def _game_date(self, ts: float, max_gap_s: float = 1800.0) -> str | None:
+        """Game date of the nearest snapshot - only if it was taken within max_gap_s of the event (otherwise the date
+        of an old event would show today's game date)."""
+        r = self.store.db.execute("SELECT ts, facts FROM snapshots ORDER BY ABS(ts - ?) LIMIT 1", (ts,)).fetchone()
+        if not r or abs(r["ts"] - ts) > max_gap_s:
+            return None
+        return json.loads(r["facts"]).get("date")
 
     def add(self, ts: float, typ: str, tag: str, text: str, *, who: str = "", outcome: str = "", cause: str = "",
             source: str = "") -> bool:
@@ -208,8 +230,15 @@ class Journal:
         """Same cause >= suggest_after_repeats -> exactly one proposal per pattern (not ones already proposed)."""
         cnt: Counter = Counter()
         for e in self.events():
-            if e["outcome"] and e["cause"]:
-                cnt[f"{e['typ']} {e['outcome']} | {e['cause']}"] += 1
+            outcome, cause = e["outcome"], e["cause"]
+            if e["typ"] == "Death" and outcome and not cause:
+                m = DEATH_CAUSE.search(outcome)
+                if m:
+                    outcome, cause = "died", m.group(1).lower().replace(" ", "_")
+                    if cause in ("struck_down", "bled", "crushed", "fell"):
+                        cause = "combat"
+            if outcome and cause:
+                cnt[f"{e['typ']} {outcome} | {cause}"] += 1
         done = set(self.store.get("journal.lessons") or [])
         out = []
         for key, n in sorted(cnt.items()):

@@ -33,11 +33,13 @@ class Rule:
     needs: re.Pattern | None = None  # this pattern must additionally occur in the same line
     unless_file: re.Pattern | None = None  # file contains this pattern -> rule does not apply
     unless_line: re.Pattern | None = None  # line contains this pattern -> no finding (e.g. jobs/orders)
+    unless_prev: re.Pattern | None = None  # one of the 3 previous lines contains this -> no finding
 
 
-def R(i, pat, reason, level="error", needs=None, unless_file=None, unless_line=None):
+def R(i, pat, reason, level="error", needs=None, unless_file=None, unless_line=None, unless_prev=None):
     return Rule(i, re.compile(pat), reason, level, re.compile(needs) if needs else None,
-                re.compile(unless_file) if unless_file else None, re.compile(unless_line) if unless_line else None)
+                re.compile(unless_file) if unless_file else None, re.compile(unless_line) if unless_line else None,
+                re.compile(unless_prev) if unless_prev else None)
 
 
 RULES: list[Rule] = [
@@ -49,7 +51,8 @@ RULES: list[Rule] = [
     R("L06", r"flags\d?\.foreign\s*=(?!=)", "changing the foreign flag (exception FP08/L06 required)"),
     R("L07", r"flags\d?\.left\s*=\s*true", "setting unit 'left' (stuck traders, exception required)"),
     R("L08", r"\.pos\.[xyz]\s*=(?!=)|setPos\s*\(|teleport", "setting position directly (teleport)",
-      unless_line=r"order|\bjob\b|job_item"),
+      unless_line=r"order|\bjob\b|job_item",
+      unless_prev=r"squad_order_\w+:new\(|\bjob_item\b"),   # target position of a squad order/job object, not a unit
     R("L09", r"\.hidden\s*=\s*false|designation\.hidden\s*=(?!=)", "uncovering hidden tiles"),
     R("L10", r"getTileType\s*\(", "reading a tile without checking 'discovered' (designation.hidden)", "warn",
       unless_file=r"\.hidden\b|isTileVisible|hidden\s*\("),
@@ -104,7 +107,8 @@ def lint_source(src: str, name: str = "<lua>", registry: ExceptionRegistry | Non
             continue
         for no, ln in enumerate(lines, 1):
             if rule.pattern.search(ln) and (rule.needs is None or rule.needs.search(ln)) and \
-                    not (rule.unless_line and rule.unless_line.search(ln)):
+                    not (rule.unless_line and rule.unless_line.search(ln)) and \
+                    not (rule.unless_prev and rule.unless_prev.search("\n".join(lines[max(0, no - 4):no - 1]))):
                 out.append(Finding(name, no, rule.id, rule.reason, rule.level))
     out.sort(key=lambda f: (f.file, f.line, f.rule))
     return out
@@ -116,6 +120,10 @@ def lint_file(path: Path, registry: ExceptionRegistry | None = None) -> list[Fin
 
 def lint_command(cmd: str, registry: ExceptionRegistry | None = None) -> list[Finding]:
     """Check lua "<code>" / lua -e "<code>" / lua -f <file>; check other commands as a line of code."""
+    mf = re.match(r'\s*lua\s+-f\s+(?:"([^"]+)"|\'([^\']+)\'|(\S+))', cmd)
+    if mf:                       # Windows paths (C:\dir\x.lua) must not go through posix shlex: it eats the backslashes
+        p = Path(mf.group(1) or mf.group(2) or mf.group(3))
+        return lint_file(p, registry) if p.exists() else []
     try:
         parts = shlex.split(cmd, posix=True)
     except ValueError:

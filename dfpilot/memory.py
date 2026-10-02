@@ -71,7 +71,8 @@ def shorten(line: str, width: int = 110) -> str:
         return s
     m = re.match(r"^(\s*[-*]\s+|\s*\d+\.\s+)?(.*)$", s)
     prefix, rest = (m.group(1) or ""), m.group(2)
-    cut = re.split(r"(?<=[.;!?])\s|\s->\s|:\s", rest, maxsplit=1)[0]
+    # sentence end = punctuation after a non-digit (not the dots of a date "01.10." and not the colon of a time "14:05:")
+    cut = re.split(r"(?<=[^\d\s][.;!?])\s|\s->\s|(?<=\D):\s", rest, maxsplit=1)[0]
     cut = cut if len(prefix + cut) <= width else rest[: width - len(prefix) - 1]
     return (prefix + cut).rstrip() + "…"
 
@@ -97,7 +98,8 @@ def _compact_inbox(text: str, keep: int) -> str:
 def compact_text(text: str, *, keep_logs: int = 2, keep_inbox: int = 8, short_lines: int = 3,
                  max_bytes: int = 6000) -> str:
     if re.search(r"^# Inbox", text, re.M) or (len(re.findall(r"\n- (?:von|from) ", text)) >= 3 and "## " not in text):
-        return _compact_inbox(text, keep_inbox)
+        new = _compact_inbox(text, keep_inbox)
+        return new if len(new.encode("utf-8")) <= 0.95 * len(text.encode("utf-8")) else text   # quiet when already compact
     secs = parse_sections(text)
     kinds = [classify(s) for s in secs]
     # Units for "last N in full": level-1 blocks 'Pass ...' / 'Durchlauf ...' (with subsections), otherwise sections
@@ -134,8 +136,8 @@ def compact_text(text: str, *, keep_logs: int = 2, keep_inbox: int = 8, short_li
             break
         out[i] = _summarize(out[i], short_lines)
         text_out = render(out)
-    if len(text_out.encode("utf-8")) >= len(text.encode("utf-8")):
-        return text            # nothing gained -> leave unchanged
+    if len(text_out.encode("utf-8")) > 0.95 * len(text.encode("utf-8")):
+        return text            # (almost) nothing gained -> leave unchanged: a second run must not re-archive/rewrite
     return text_out
 
 
@@ -150,6 +152,10 @@ def compact_file(path: Path, archive_dir: Path | None = None, *, stamp: str, dry
     archive_dir = Path(archive_dir) if archive_dir else path.parent / "archive"
     archive_dir.mkdir(parents=True, exist_ok=True)
     arch = archive_dir / f"{path.stem}.{stamp}{path.suffix}"
+    n = 1
+    while arch.exists():                 # never overwrite an archive (same second): '_2' sorts after the plain name
+        n += 1
+        arch = archive_dir / f"{path.stem}.{stamp}_{n}{path.suffix}"
     shutil.copyfile(path, arch)          # byte-identical
     path.write_text(new, encoding="utf-8")
     res["archive"] = str(arch)

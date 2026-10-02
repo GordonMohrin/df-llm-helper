@@ -40,6 +40,7 @@ What the watcher does (like the old ps1, plus the deadman):
 | knowledge on a symptom | `python -m dfpilot kb search "Koks refined coal"`, `kb get <id>` | ≤ 400 tokens instead of whole Markdown files |
 | start an agent | prompt from `AGENT-PROMPT.md`; the agent calls `python -m dfpilot brief <scope>` | briefing ≤ 1500 tokens |
 | caravan at the depot | call `python -m dfpilot trade step` repeatedly, `trade approve` after the dry run | state machine with rollback |
+| time-lapse state | `python -m dfpilot tempo status` | display only: time lapse, fps, guard blockers (changes nothing) |
 | time-lapse on | `python -m dfpilot tempo on` | switches on only if the guard reports no blocker, otherwise names the blockers |
 | inform the player | `python -m dfpilot overlay --send` | ≤ 3 lines in the game, no repetition within 10 min |
 

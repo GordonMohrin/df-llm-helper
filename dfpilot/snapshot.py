@@ -210,8 +210,13 @@ class Snapshot:
 
     @property
     def danger(self) -> bool:
+        """Real danger: alarm, enemies near the fort, named threats. Hostiles far away (forgotten beasts in the
+        caverns: 'enemies on the map' > 0 while claude/config reports feinde_nah = 0) are not a danger; only when the
+        proximity is unknown (enemies_near is None) any enemy counts."""
         a = self.alerts
-        return bool((a.enemies or 0) > 0 or (a.danger_alarm or 0) > 0 or (a.enemies_near or 0) > 0 or a.threats)
+        if (a.danger_alarm or 0) > 0 or (a.enemies_near or 0) > 0 or a.threats:
+            return True
+        return a.enemies_near is None and (a.enemies or 0) > 0
 
     def facts(self) -> dict:
         """Flat key figures for delta/digest/metrics."""

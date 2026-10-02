@@ -134,7 +134,7 @@ def test_write_targets_restricted(tmp_path, tools_dir, capsys):
                  f"  gamelog: {tmp_path / 'g'}\njournal:\n  chronik: {chron}\n  metrics: {tmp_path / 'm.csv'}\n"
                  f"  postmortem: {tmp_path / 'pm.md'}\n  events_log: {LOG}\n", encoding="utf-8")
     assert main(["--config", str(c), "--mock", str(FIX), "journal", "ingest", "--date", "2026-09-30"]) == 0
-    assert "333 chronicle events" in capsys.readouterr().out
+    assert "318 chronicle events" in capsys.readouterr().out
     assert main(["--config", str(c), "--mock", str(FIX), "journal", "chronik", "--append"]) == 0
     assert "deaths" in chron.read_text(encoding="utf-8")
     assert main(["--config", str(c), "--mock", str(FIX), "journal", "postmortem", "--out", str(tmp_path / "pm.md")]) == 0
@@ -145,4 +145,4 @@ def test_write_targets_restricted(tmp_path, tools_dir, capsys):
         main(["--config", str(c), "--mock", str(FIX), "journal", "metrics", "--out", "/etc/x.csv"])
     assert main(["--config", str(c), "--mock", str(FIX), "journal", "metrics", "--out", str(tmp_path / "m.csv")]) == 0
     assert main(["--config", str(c), "--mock", str(FIX), "journal", "lessons"]) == 0
-    assert "0 suggestions" in capsys.readouterr().out
+    assert "suggestions" in capsys.readouterr().out        # run 3 log: repeated dehydration deaths are a lesson

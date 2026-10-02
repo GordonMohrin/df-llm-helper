@@ -137,6 +137,14 @@ class ExceptionRegistry:
     def add(self, action: str, reason: str, player_consent: str, objects: list | None = None, **extra) -> Exception_:
         if not player_consent.strip():
             raise FairPlayError(action, "an entry without the player's consent is not allowed")
+        if not re.fullmatch(r"(?:FP|L)\d{1,3}", action or ""):      # a typo would silently never match any rule
+            raise FairPlayError(action, "unknown rule id (expected FPnn or Lnn, e.g. FP08, L31)")
+        exp = extra.get("expires")
+        if exp is not None and not re.fullmatch(r"\d{4}-\d\d-\d\d(?:T[\d:.]+Z?)?", str(exp)):
+            raise FairPlayError(action, f"expires must be an ISO date (YYYY-MM-DD), got {exp!r}")
+        mu = extra.get("max_uses")
+        if mu is not None and int(mu) < 1:
+            raise FairPlayError(action, "max_uses must be >= 1")
         if not self.path:
             raise FairPlayError(action, "no register path configured")
         d = {"ts": self._now_iso(), "action": action, "objects": objects or [], "reason": reason,

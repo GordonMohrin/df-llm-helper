@@ -57,6 +57,8 @@ SYNONYMS = {
     "manager": ["order", "office", "validate", "auftrag", "buero"], "order": ["manager", "job"],
     "auftrag": ["order", "manager"],
     "aquifer": ["water", "groundwater", "grundwasser"],
+    "wasser": ["water", "well", "flood"], "quelle": ["source", "well"], "water": ["well", "wasser"],
+    "flut": ["flood", "water", "wall"],
     "stockpile": ["bins", "container", "lager"], "lager": ["stockpile", "bins", "container"],
     "flag": ["flagge"],
     "heartbeat": ["deadman", "herzschlag"], "deadman": ["heartbeat", "herzschlag"], "herzschlag": ["heartbeat", "deadman"],
@@ -219,6 +221,7 @@ class KB:
             toks = tokenize(e.text())
             # weight title and keywords more strongly
             toks += tokenize(e.title) * 2 + tokenize(" ".join(map(str, e.symptom_keywords))) * 3
+            toks += tokenize(e.id.replace("_", " ")) * 2          # the id is a handle people type (wasser_quelle)
             c = Counter(toks)
             self.docs.append(c)
             self.lens.append(sum(c.values()))

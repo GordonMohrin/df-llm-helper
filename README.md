@@ -28,7 +28,7 @@ Every write action is logged in `data/state.db` with its reason; every rule has 
 ## Quick start (no game needed)
 
 ```bash
-python -m dfpilot --mock fixtures/run5 check          # report from recorded real game answers
+python -m dfpilot --mock fixtures/run5 check          # report from recorded real game answers (own state in runtime/mock/)
 python -m dfpilot --mock fixtures/run5 runbook diagnose
 python -m dfpilot --mock fixtures/run5 dashboard --out runtime/dashboard.html
 python -m dfpilot.selftest                            # full test suite (~10 s), needs pytest

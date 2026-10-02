@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .client import DFClient, MockClient, RealClient, RecordingClient, ReplayClient
 from .clock import SystemClock
-from .config import HOME, Config, load_config
+from .config import HOME, Config, force_overrides, load_config, mock_overrides
 from .fairplay import ExceptionRegistry, FairPlayError
 from .store import Store
 
@@ -78,6 +78,31 @@ def cmd_cycle(args) -> int:
     return 0
 
 
+HOOK_REPEAT_MIN = 120          # an unchanged feature line is repeated at most every 2 h
+
+
+def _fresh_hook_lines(p, key: str, lines: list[str], *, record: bool = True) -> list[str]:
+    """Feature hooks (hygiene, reach, tools, ...) print their standing findings on every check - 5-7 identical lines
+    (~150 tokens) after a 'No change'. Report a line when its text changed (numbers are ignored) or after
+    HOOK_REPEAT_MIN minutes; a dry run reads the memory but never writes it."""
+    import re as _re
+    now = p.clock.now().epoch
+    kv = f"check.hooks.{key}"
+    seen = dict(p.store.get(kv) or {})
+    out, cur = [], {}
+    for ln in lines:
+        sig = _re.sub(r"\d+(?:[.,]\d+)?k?", "#", ln)[:120]
+        last = seen.get(sig)
+        if last is None or now - last >= HOOK_REPEAT_MIN * 60:
+            out.append(ln)
+            cur[sig] = now
+        else:
+            cur[sig] = last
+    if record:
+        p.store.set(kv, cur)
+    return out
+
+
 def cmd_check(args) -> int:
     """Orchestrator check in one call: heartbeat + guard + autopilot + digest (incl. bus)."""
     p = _pilot(args)
@@ -126,7 +151,8 @@ def cmd_check(args) -> int:
         if hook is None or not p.cfg.get(f"{mod.KEY}.in_check", True):
             continue
         try:
-            lines += [ln for ln in (hook(p, rep, args.dry_run) or []) if ln]
+            lines += _fresh_hook_lines(p, mod.KEY, [ln for ln in (hook(p, rep, args.dry_run) or []) if ln],
+                                       record=not args.dry_run)
         except Exception as e:                             # a feature must never break the check
             lines.append(f"{mod.KEY} error: {e}"[:120])
     out = "\n".join(lines)
@@ -203,7 +229,20 @@ def cmd_waechter(args) -> int:
 def cmd_tempo(args) -> int:
     """Time lapse on ONLY if the guard reports no blocker (the orchestrator may ask, the guard decides)."""
     p = _pilot(args)
+    if args.action == "status":                  # display only: nothing is changed in the game
+        snap = p.snapshot()
+        _, _, info = p.guard(snap, dry_run=True)
+        fps = f"{snap.fps:.0f}" if snap.fps is not None else "?"
+        norm = f"{snap.normal_fps:.0f}" if snap.normal_fps else "?"
+        print(f"Time lapse: {'ON' if snap.timestream else 'off'}, fps {fps} (normal {norm}), "
+              f"{'paused' if snap.paused else 'running'}")
+        print("Guard: " + ("no blockers, 'tempo on' would be allowed" if not info["blockers"]
+                           else "blockers: " + ", ".join(info["blockers"])))
+        return 0
     if args.action == "off":
+        if args.dry_run:
+            print("[dry] claude/tempo off")
+            return 0
         print("ok" if p.client.run("claude/tempo off").ok else "Error: claude/tempo off")
         return 0
     acts, st, info = p.guard(dry_run=True)
@@ -393,7 +432,12 @@ def cmd_memory(args) -> int:
     from .memory import compact_file, restore
     cfg = load_config(args.config)
     scopes = Path(cfg.get("paths.scopes"))
-    targets = [scopes / f"{args.scope}.md"] if args.scope not in ("all", "alle") else sorted(scopes.glob("*.md"))
+    if args.scope in ("all", "alle"):     # memory + inbox files only; rule/registry files (handel-regeln.md, REGISTRY.md) stay
+        from .brief import SCOPES
+        targets = [f for f in sorted(scopes.glob("*.md"))
+                   if f.stem in SCOPES or (f.stem.startswith("inbox-") and f.stem[6:] in (*SCOPES, "orchestrator"))]
+    else:
+        targets = [scopes / f"{args.scope}.md"]
     for p in targets:
         if not p.exists():
             print(f"{p.name}: missing", file=sys.stderr)
@@ -689,7 +733,8 @@ def cmd_forecast(args) -> int:
     print(line)
     for n in news:
         print(n)
-    print(f"Points {len(fc.series())}, confidence {fc.confidence():.2f}")
+    conf = f"{fc.confidence():.2f}" if fc.store.get("forecast.errors") else "n/a (no calibration yet)"
+    print(f"Points {len(fc.series())}, confidence {conf}")
     return 0
 
 
@@ -892,8 +937,13 @@ def cmd_journal(args) -> int:
         if not src.exists():
             print(f"Event log missing: {src}")
             return 1
-        day0 = _date.fromisoformat(args.date) if args.date else _date.fromtimestamp(src.stat().st_mtime)
-        new, total = j.ingest_log(read_text_tolerant(src), day0)
+        text = read_text_tolerant(src)
+        if args.date:
+            day0 = _date.fromisoformat(args.date)
+        else:        # the log only has times of day: its last line is "today" (mtime), count day changes backwards
+            from .journal import infer_first_day
+            day0 = infer_first_day(text, _date.fromtimestamp(src.stat().st_mtime))
+        new, total = j.ingest_log(text, day0)
         w = j.ingest_warnings()
         print(f"{total} chronicle events in the log, {new} new; {w} critical dfpilot warnings taken over")
         return 0
@@ -976,8 +1026,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--loop", action="store_true")
     s.add_argument("--interval", default=None)
     s.set_defaults(fn=cmd_waechter)
-    s = sub.add_parser("tempo", help="time lapse: on (only without guard blockers) | off")
-    s.add_argument("action", choices=["on", "off"])
+    s = sub.add_parser("tempo", help="time lapse: status (display only) | on (only without guard blockers) | off")
+    s.add_argument("action", choices=["on", "off", "status"])
     s.add_argument("--dry-run", action="store_true")
     s.set_defaults(fn=cmd_tempo)
     s = sub.add_parser("siege", help="Siege autopilot (spec 01): until the end (default), --once for one step")
@@ -1150,6 +1200,8 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(mod, "register"):
             mod.register(sub)
     args = ap.parse_args(argv)
+    # --mock/--replay-file with the default config: never touch the live state.db/tools (an explicit --config wins)
+    force_overrides(mock_overrides() if (args.mock or args.replay_file) and not args.config else None)
     if args.cmd == "kb" and args.action == "import" and args.query and not args.files:
         args.files = args.query
     try:
@@ -1160,3 +1212,5 @@ def main(argv: list[str] | None = None) -> int:
     except (ValueError, KeyError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 2
+    finally:
+        force_overrides(None)         # the mock isolation lives only for this call (tests call main() in-process)

@@ -184,8 +184,10 @@ def cost_report(paths: list[Path], cfg: dict | None = None) -> tuple[list[AgentC
         out.append(f"{'Total':<28} {sum(r.calls for r in rows):>5} {sum(r.cache_read for r in rows):>11} "
                    f"{sum(r.cache_write for r in rows):>9} {sum(r.out_est for r in rows):>7} "
                    f"{sum(r.duration_s for r in rows) / 60:>5.1f}m  ({len(rows)} agents, [B] = briefing prompt)")
-    for r in rows:
-        out += r.warnings
+    warns = [w for r in rows for w in r.warnings]
+    out += warns[:5]                      # one line per stuck agent would flood the report (58 lines in a long project)
+    if len(warns) > 5:
+        out.append(f"(+{len(warns) - 5} more agents over the limits: --dir <folder> with fewer transcripts)")
     return rows, out
 
 
