@@ -10,11 +10,11 @@ df-llm-helper sits between an LLM agent (e.g. Claude) and **Dwarf Fortress** run
 
 **Requirements:** Dwarf Fortress (Steam, 53.x) with DFHack installed, and an LLM agent that can run shell commands on the same machine as the game (e.g. Claude Code). Developed and played on Windows with Git Bash.
 
-Start Dwarf Fortress, then paste this prompt into your agent. It clones the repo, sets everything up and starts playing:
+Start the game **through DFHack** (DFHack launches Dwarf Fortress; started any other way, DFHack and the helper cannot see the game). Then paste this prompt into your agent. It clones the repo, sets everything up and starts playing:
 
 ```
 Play Dwarf Fortress for me through DFHack, using df-llm-helper as your helper layer.
-Dwarf Fortress with DFHack is installed on this machine and running.
+Dwarf Fortress is installed on this machine and running, launched through DFHack.
 
 Setup
 1. Clone https://github.com/GordonMohrin/df-llm-helper and work from that folder.
@@ -25,7 +25,7 @@ Setup
 4. Copy lua/pilot_*.lua and lua/claude/*.lua to <Dwarf Fortress>/hack/scripts/claude/.
 5. Set the environment variable DF_LLM_HELPER_HOME to a shared runtime folder so the game
    and the helper see the same flags and logs (see COMPANION.md). Ask me before changing
-   system-wide settings; DF may need a restart to see the variable.
+   system-wide settings; the game may need a restart (again through DFHack) to see the variable.
 6. Check the connection with the read-only steps of docs/INTEGRATION.md
    (python -m df_llm_helper digest must return a status line). Parts of the Lua side are
    live-untested: if an answer differs from the expected one, record it and tell me.
