@@ -54,3 +54,8 @@ Gordon: the only allowed access (stair T1) is reported as "bypasses the traps" b
 
 ## Fix
 `seal_walls` adds a note for a stair/ramp entry without inside floor neighbour (`seal by hand`); `seal` then prints `no automatic proposal for ...` with rc 1 instead of `nothing to do`. `perimeter allow` lists notes, refuses tiles outside the map (claude/status map_size, negative values) and warns when an entry lies within the tolerance of the core. Doc example marked as fixture output. Test: `test_bug217_*` (dump `fixtures/bugs/BUG-217/l_dump.jsonl`). Gordon's question (does T1 really bypass the traps?) stays a live check.
+
+Retest note (2026-10-02): `Bugs/evidence/BUG-217/l_per_scan_dry.jsonl` recorded `pilot_perimeter start ... 20000` before
+the enclave threshold became the 8th argument; the record now carries the default ` 3000` (same behaviour as the live
+run), so `--replay-file Bugs/evidence/BUG-217/l_per_scan_dry.jsonl perimeter scan --dry-run` replays again
+(`FORBIDDEN: (99,94,z133) 1 tile, bypasses the traps`). The trap-bypass question stays live.
