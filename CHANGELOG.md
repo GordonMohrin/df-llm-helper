@@ -1,5 +1,9 @@
 # CHANGELOG df-llm-helper
 
+## install-lua (2026-10-02)
+- `python -m df_llm_helper install-lua [--apply] [--df <folder>]`: installs the bundled Lua scripts into the game,
+  merges `config.lua` with the live values, keeps `stages.lua`, follows `dfhack-config/script-paths.txt`, backs up first.
+
 ## Retest fixes (2026-10-02)
 - BUG-221: the trade automaton runs the game while the broker walks and the haulers carry, and waits in MARK until
   the depot has no `BringItemToDepot` job left (at most 600 s, then it opens with what is there).

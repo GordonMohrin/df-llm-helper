@@ -586,6 +586,19 @@ def cmd_lint(args) -> int:
     return 1 if errors else 0
 
 
+def cmd_install_lua(args) -> int:
+    from .install_lua import apply_install, plan_install
+    cfg = load_config(args.config)
+    df_dir = Path(args.df) if args.df else Path(str(cfg.get("dfhack_run"))).parent.parent
+    plan = plan_install(HOME, df_dir)
+    print("\n".join(plan.lines()))
+    if not args.apply:
+        print("(plan only - add --apply to write; replaced files are backed up first)")
+        return 0
+    print("\n".join(apply_install(plan, Path(args.backup) if args.backup else cfg.path("tools") / "out")))
+    return 0
+
+
 def cmd_budget(args) -> int:
     from .metrics import budget_report
     cfg = load_config(args.config)
@@ -1503,6 +1516,13 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("lint", help="fair-play linter (F9) for Lua files/folders")
     s.add_argument("paths", nargs="+")
     s.set_defaults(fn=cmd_lint)
+    s = cmd_parser("install-lua", "copy lua/claude/*.lua + lua/pilot_*.lua into <DF>/hack/scripts/claude (config.lua "
+                   "merged with the live values, stages.lua kept, backup first)", "install-lua", "install-lua --apply",
+                   "install-lua --df \"E:/Games/Dwarf Fortress\" --apply")
+    s.add_argument("--df", help="Dwarf Fortress folder (default: two levels above config dfhack_run)")
+    s.add_argument("--apply", action="store_true", help="really write (default: show the plan)")
+    s.add_argument("--backup", help="backup folder (default: <tools>/out)")
+    s.set_defaults(fn=cmd_install_lua)
     s = cmd_parser("budget", "token budget per scope (F13): calls, bytes sent/printed, tokens today", "budget")
     s.set_defaults(fn=cmd_budget)
     s = cmd_parser("overlay", "short text for claude/schau say (F16), display only without --send",
