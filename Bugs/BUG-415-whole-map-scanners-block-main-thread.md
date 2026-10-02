@@ -1,6 +1,6 @@
 # BUG-415: `claude/ores`, `claude/geo` (classified as plain reads) and other whole-map scanners will block the game's main thread for > 20 s - not run, extrapolated
 
-- **Status:** open (static + extrapolation; I was told not to run Lua over the whole map after the 3-minute `map_blocks` freeze)
+- **Status:** fixed in ce278a8
 - **Severity:** S2 (a "read" command that freezes the game; the helper polls reads freely)
 - **Area:** `lua/claude/ores.lua:33-39`, `lua/claude/geo.lua:15-37,70-85`, `lua/claude/zugaenge.lua` (header: "~10 s runtime (main thread)!"), `lua/claude/kohle.lua:21-45`, `lua/claude/erzdig.lua` (also with `--dry`), `lua/pilot_perimeter.lua` (`scan`, synchronous), classification `df_llm_helper/client.py:61-62` (`_READ_EXACT`: `claude/ores`, `claude/geo`)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -35,3 +35,6 @@ Chunk like `pilot_perimeter start` (budget per frame via `dfhack.timeout(1,'fram
 
 ## Info needed
 - Player: at a safe moment (fort saved, no siege) please run `Measure-Command { dfhack-run.exe claude/ores }` and `claude/geo` once and add the seconds here. >20 s confirms the bug; <5 s means the extrapolation is wrong and the severity drops to S3.
+
+## Fix
+`ores` (optional z range) and `geo` (one pass instead of two) scan top-down and stop after a time budget (`--budget`, default 2 s / 3 s) with `unvollstaendig` and the continuation; `client.is_write` treats ores/geo/zugaenge/kohle (except status)/erzdig as never-free (also with --dry). zugaenge/kohle run/erzdig/perimeter scan are not chunked (marked heavy, COMPANION.md). Info needed (player): `Measure-Command` of `claude/ores` and `claude/geo` once.

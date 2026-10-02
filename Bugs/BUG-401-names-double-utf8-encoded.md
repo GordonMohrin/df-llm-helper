@@ -1,6 +1,6 @@
 # BUG-401: unit names with non-ASCII characters are UTF-8 encoded twice (mojibake) in mil/gefahr/migranten output
 
-- **Status:** open
+- **Status:** fixed in eea3f60
 - **Severity:** S2
 - **Area:** `lua/claude/mil.lua:56` (`nm()`), `lua/claude/gefahr.lua:134`, `lua/claude/migranten.lua:18` in combination with `lua/claude/util.lua:14-24` (`emit`)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -46,3 +46,6 @@ Remove the `df2utf` in `mil.lua:56`, `gefahr.lua:134`, `migranten.lua:18` (keep 
 
 ## Info needed
 - Cloud session: please check `df_llm_helper` code that matches or prints names from `mil`/`migranten` output (fixtures `fixtures/run5/mil_*.txt` are ASCII-only, so tests cannot see this).
+
+## Fix
+`util.emit` converts only runs of bytes >= 0x80 and leaves strings that are already valid UTF-8 alone (no double conversion); mil/gefahr/migranten/ueberwacher/watchdog/killorder cut names with the new `util.cut` (UTF-8 character boundary) instead of `:sub` after `df2utf`. Python side: names are only displayed, no matching found.

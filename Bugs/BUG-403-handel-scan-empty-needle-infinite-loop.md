@@ -1,6 +1,6 @@
 # BUG-403: `claude/handel scan ""` (empty search text) loops forever in the game's main thread
 
-- **Status:** open (found by code reading, **deliberately NOT executed** - it would hang the running game)
+- **Status:** fixed in 99c5dbb
 - **Severity:** S1 (hangs Dwarf Fortress; no timeout inside DFHack for a Lua loop)
 - **Area:** `lua/claude/handel.lua:108-123` (`find_text`), reached from `cmd.scan` (`handel.lua:776-782`) and from `cmd.open`/`cmd.accept` (those pass non-empty constants, so only `scan` is exposed)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -45,3 +45,6 @@ Missing `needle == ''` check and a non-advancing step for zero-length matches. `
 ## Info needed
 - Cloud session: a mock test is possible without the game (`("abc"):find("", 1, true)` in a real Lua 5.3/5.4 returns `1 0`).
 - Player: **do not** test this on the live game. If you want to confirm, do it on a throw-away fort after saving.
+
+## Fix
+`find_text` returns no hits for an empty needle and always advances; `cmd.scan` rejects empty/blank text with `{"ok":false,"abort":"scan <text>"}`. Reproduced (hang) and verified with the new mock `tests/lua_mock/claude_mock.lua`.

@@ -1,6 +1,6 @@
 # BUG-412: `claude/gefahr status` reports `selbsttest: []` ("alarm system alive") because it scans first; `gefahr sim <unknown id>` answers with empty lists
 
-- **Status:** open
+- **Status:** fixed in 6003340
 - **Severity:** S3 (misleading health check; no automatic consumer found in `df_llm_helper`)
 - **Area:** `lua/claude/gefahr.lua:326-329` (`status`), `:289-296` (`selbsttest`), `:332-339` (`sim`)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -29,3 +29,6 @@ Evaluate `local st = selbsttest()` **before** `scan()` in the `status` branch; i
 
 ## Info needed
 none.
+
+## Fix
+`status` evaluates the self-test before its own scan; `sim`/`fire`/`firetest` answer with an error for unknown units or missing coordinates.

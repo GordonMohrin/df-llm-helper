@@ -1,6 +1,6 @@
 # BUG-421: two `dfhack-run` calls (`claude/mil`, `claude/mil guard`) took 8-9 s while the same calls normally take 0.07 s (not reproducible; Gordon's "main thread blocked" suspicion)
 
-- **Status:** open (observation, **not reproducible**)
+- **Status:** open (info needed)
 - **Severity:** S3 (becomes S2 if it turns out that a periodic script blocks the main thread for seconds)
 - **Area:** unknown - candidates: periodic DFHack jobs (`claude-watchdog`/`claude-watchdog-alert`, `claude-milguard` via `tempo.schedule`, `claude-tempo`), DF autosave, the `mil` script itself
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -31,3 +31,6 @@ Measure from inside: add a `claude/watchdog timing` that records `os.clock()` pe
 
 ## Info needed
 - Player: do you see the game freeze for a few seconds periodically (autosave every N minutes? every 600/1200 ticks?). Please run `Bugs/evidence/BUG-421/poll.py 600` (10 minutes, changes nothing) and send `poll.log`; a regular spike period identifies the job.
+
+## Fix
+Not reproducible here. Diagnostic in 4774f54: `claude/watchdog status` now reports `timing` (last/max ms per sub-step of the watchdog jobs). Player: after a stall run `claude/watchdog status` and attach `timing`, plus `poll.py 600`.

@@ -1,6 +1,6 @@
 # BUG-400: util.emit prints non-integer numbers with a decimal comma -> invalid JSON (gefahr `fps: 250,0`, migranten `gefaehrlichkeit: 3,9375`)
 
-- **Status:** open
+- **Status:** fixed in eea3f60
 - **Severity:** S2
 - **Area:** `lua/claude/util.lua` (`emit`), triggered by `lua/claude/gefahr.lua:330`, `lua/claude/migranten.lua:103,109`
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -43,3 +43,6 @@ Rounding the float in `to_utf8` is not enough (the encoder formats it again with
 ## Info needed
 - Cloud session: can the Lua mock (`tests/`) set `LC_NUMERIC=de_DE` and assert that `util.emit({x=1.5})` yields `1.5`? (Only possible if the mock uses a real Lua; `lua5.4` is optional.)
 - Player: please run `os.setlocale(nil,'numeric')` once via `dfhack-run lua` to confirm the game's numeric locale (I did not run ad-hoc Lua against the game on purpose).
+
+## Fix
+`util.emit` encodes a copy in which non-integer numbers are placeholders, replaced after `json.encode` by locale-independent text (`250.0`, also inside arrays); NaN/inf -> null. Mock test with an emulated German locale (`MOCK_DECIMAL_COMMA=1`, `tests/test_lua_claude.py`), also end to end on `gefahr status`. Not changed: empty tables still encode as `[]` (consumers are tolerant). Player: re-install `util.lua`; `os.setlocale` check no longer needed.

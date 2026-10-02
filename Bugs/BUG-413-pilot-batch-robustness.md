@@ -1,6 +1,6 @@
 # BUG-413: `claude/pilot_batch` cuts UTF-8 characters in half when truncating (invalid UTF-8 output), aborts on a non-list command entry, rejects a BOM
 
-- **Status:** open
+- **Status:** fixed in 596a890
 - **Severity:** S2 (output of the batch transport is not valid UTF-8 as soon as a truncated sub-command output contains a non-ASCII character; `transport.batch` is off by default - `config.py:35` "batch=true only after a live test")
 - **Area:** `lua/pilot_batch.lua:24-30` (and the identical `lua/claude/pilot_batch.lua`)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -37,3 +37,6 @@ Cut at a character boundary: `local cut = max_bytes; while cut > 0 and (out:byte
 
 ## Info needed
 - Cloud session: does `transport.py` decode with `errors="strict"`? (then case 1 raises). The mock in `tests/` cannot show it.
+
+## Fix
+Both copies: truncation at UTF-8 boundaries, non-list entries reported per entry (unpack inside the pcall), BOM stripped, `max_bytes` floored, header corrected. `client.py`/`transport.py` decode with `errors=replace`, so they never raised.

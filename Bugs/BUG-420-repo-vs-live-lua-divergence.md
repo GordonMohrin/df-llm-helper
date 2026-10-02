@@ -1,6 +1,6 @@
 # BUG-420: hint - repo Lua and the live Lua in the game folder differ (paths, feature set, tuning); duplicates inside the repo
 
-- **Status:** open (information for the cloud session; not a defect of one script)
+- **Status:** open (info needed)
 - **Severity:** S3
 - **Area:** `lua/claude/*.lua`, `lua/pilot_*.lua` vs `C:\Users\admin\claude gordons projects\dwarf-fortress\lua\claude` (the folder DFHack really uses: `dfhack-config/script-paths.txt` has `+C:\Users\admin\claude gordons projects\dwarf-fortress\lua`)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -31,3 +31,6 @@ Decide per script which side wins; keep tuning values out of code (`config.lua`)
 
 ## Info needed
 - Player: please say which differences are intended (live-only features to port into the repo: `mil ammo`, `handel keep`, `erzdig spur`, `muell` zones, `zugaenge` MINCOMP) and whether the live copies may be overwritten from the repo.
+
+## Fix
+No code change possible without the player's decision. Both pilot_batch copies got the same fixes (596a890). Recommendation: install from the repo, keep tuning in `config.lua`, delete one of the duplicate pairs (`lua/pilot_batch.lua`+`lua/pilot_wd.lua` vs `lua/claude/...`), port the live-only features (mil ammo, handel keep, erzdig spur, muell zones, zugaenge MINCOMP - now `config.PERIMETER_MINCOMP` for pilot_perimeter).

@@ -1,6 +1,6 @@
 # BUG-409: pilot_digcheck / pilot_reach box handling (out-of-map box, fractional numbers), pilot_reach `check` drops malformed points, pilot_siege unknown command
 
-- **Status:** open
+- **Status:** fixed in 50bfce4
 - **Severity:** S3
 - **Area:** `lua/pilot_digcheck.lua:67-75`, `lua/pilot_reach.lua:118-126,128-142`, `lua/pilot_siege.lua:~96`
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -39,3 +39,6 @@ After clamping: `if x1 > x2 or y1 > y2 or z1 > z2 then error 'box outside the ma
 
 ## Info needed
 - Cloud session: does `df_llm_helper/features/reach.py` rely on `len(results) == len(points)`? (then item 4 is S2).
+
+## Fix
+Integer-only coordinates (digcheck/reach/perimeter/water), `box outside the map` instead of negative counts, reach `check` keeps one result per argument (+ `invalid` indices; `features/reach.parse_check` maps them to None), start outside the map -> ok:false, pilot_siege usage before the squad lookup.

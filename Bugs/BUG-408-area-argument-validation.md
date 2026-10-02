@@ -1,6 +1,6 @@
 # BUG-408: `claude/area z x` (x without y) crashes with a traceback; zero/negative width/height print an empty degenerate grid
 
-- **Status:** open
+- **Status:** fixed in 04eda95
 - **Severity:** S3
 - **Area:** `lua/claude/area.lua:14-31`
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -42,3 +42,6 @@ Everything else behaved correctly: z clamped (`9999` -> 152), x0/y0 clamped to t
 
 ## Info needed
 none. (Output is plain text by design, not JSON - see BUG-410.)
+
+## Fix
+`x0` without `y0` prints the usage line; width/height clamped to >= 1; fractions floored.

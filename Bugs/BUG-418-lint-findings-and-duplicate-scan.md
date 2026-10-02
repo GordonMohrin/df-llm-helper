@@ -1,6 +1,6 @@
 # BUG-418: `df_llm_helper lint lua/claude lua/` exits 1 (pilot_caravan L07 without a register entry), prints every `lua/claude` finding twice, and 5 L10 "undiscovered tile" warnings are real fair-play notes
 
-- **Status:** open
+- **Status:** fixed in b0a2741
 - **Severity:** S3
 - **Area:** `df_llm_helper/lint.py` (scan of nested dirs), `data/exceptions.jsonl` (only an `"example": true` row), `lua/pilot_caravan.lua:21`, `lua/claude/bauprog.lua:83`, `mood.lua:82,213`, `gesund.lua:200`, `raster.lua:128`, `dig.lua` / `probe.lua`
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -30,3 +30,6 @@ De-duplicate paths in `lint.py` (resolve + set); decide whether the shipped lint
 
 ## Info needed
 - Player: is it acceptable that the repo's own lint run reports the FP09 error? Is the `dig.lua` behaviour (designating undiscovered wall tiles) allowed under the fair-play rule?
+
+## Fix
+`lint_paths` de-duplicates files; `bauprog.shape_at` skips undiscovered tiles; LINT-FINDINGS.md updated. Info needed (player): FP09 entry in `data/exceptions.jsonl` so the shipped lint is green (pilot_caravan L07), and whether `claude/dig` should skip undiscovered tiles (header corrected, behaviour unchanged).

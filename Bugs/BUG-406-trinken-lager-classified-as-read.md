@@ -1,6 +1,6 @@
 # BUG-406: `claude/trinken lager` writes stockpile settings but is whitelisted as a read command (`_READ_SUB`); `_NO_STATUS` is stale for bauprog/raster
 
-- **Status:** open
+- **Status:** fixed in 9f7b226
 - **Severity:** S2 (false "read" classification disables the write protections: loop guard, `max_per_hour`, state.db log)
 - **Area:** `df_llm_helper/client.py:63-68` (`_READ_SUB`, `_NO_STATUS`), `lua/claude/trinken.lua:156-187,262-263`
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -37,3 +37,6 @@ Remove `"lager"` from `_READ_SUB`; add explicit `("claude/trinken", "lager")` ha
 
 ## Info needed
 - Cloud session: grep `data/` and `df_llm_helper/` for callers of `claude/trinken lager` (rule/runbook may rely on it being "free").
+
+## Fix
+`client.is_write`: `lager` removed from `_READ_SUB` (no caller relied on it), `--file`/`--say` make a command a write, bauprog/raster removed from `_NO_STATUS`; ueberwacher stays conservative because older installed copies still run a round for `status`.

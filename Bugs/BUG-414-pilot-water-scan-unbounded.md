@@ -1,6 +1,6 @@
 # BUG-414: `claude/pilot_water scan` has no limit on the box size (freeze risk), also `near` radius
 
-- **Status:** open (static finding; only small boxes were run)
+- **Status:** fixed in 50bfce4
 - **Severity:** S3 (S2 if a caller can pass a whole-map box)
 - **Area:** `lua/pilot_water.lua:30-61` (`scan`), `:63-73` (`near`)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -31,3 +31,6 @@ Same normalisation and cap as `pilot_reach.lua:118-126` (e.g. 200000), cap `r` a
 
 ## Info needed
 - Player: what box sizes does `df_llm_helper/water.py` actually send? (`grep -n "pilot_water" df_llm_helper/water.py`)
+
+## Fix
+`scan` normalises reversed boxes, clamps to the map, max 200000 tiles; `near` radius 0..10. (`water.py` sends `near ... 2` and config boxes.)

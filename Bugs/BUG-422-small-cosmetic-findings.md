@@ -1,6 +1,6 @@
 # BUG-422: small cosmetic / robustness findings in the Lua helpers (orders flag lists, file-handle leak, answer sizes, aemter numbers, pilot_siege visitors)
 
-- **Status:** open
+- **Status:** fixed in 3f00ff7
 - **Severity:** S3
 - **Area:** `lua/claude/orders.lua:222-227,373`, `lua/claude/gesund.lua:399`, `lua/claude/aemter.lua:~93`, `lua/claude/mood.lua` (`plan`), `lua/claude/units.lua`, `lua/pilot_care.lua`, `lua/pilot_siege.lua:~19`
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -23,3 +23,6 @@ Per item above; items 4/7 only if you want to cut tokens/log growth.
 
 ## Info needed
 none.
+
+## Fix
+1 flag sets joined with `+` (cond_text and order_sig), 2 CSV probe handle closed, 3 responsibilities as names, 5 pilot_siege visitors friendly only when not invaders, 6 report nil checks; 7 logs rotate (c3b327d). 4 (answer sizes) not changed: needs a decision which fields to drop (wontfix for now).

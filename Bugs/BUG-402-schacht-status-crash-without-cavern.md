@@ -1,6 +1,6 @@
 # BUG-402: `claude/schacht` / `claude/schacht status` crashes with a Lua traceback when no cavern barrier is configured (KOPF = nil)
 
-- **Status:** open
+- **Status:** fixed in 59e973b
 - **Severity:** S2
 - **Area:** `lua/claude/sperre.lua:137-146` (`kopf_state`), `:390-407` (`status`), called by `lua/claude/schacht.lua:46`
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -41,3 +41,6 @@ In `sperre.status()` return early `{ aktiv = false, hinweis = 'keine Kavernen-Sp
 
 ## Info needed
 - Player: is `claude/schacht` supposed to work on the current map (Windrings, no shaft/cavern barrier)? If the whole script is Run-3 only, say so in COMPANION.md and in the `df_llm_helper` rules that call it (`grep -rn schacht data/ df_llm_helper/`).
+
+## Fix
+`sperre.configured()`; `status` answers `{aktiv:false, kopf:{state:"n/a"}, barrieren:{}}` without KOPF/KAV_BARRIEREN; kopf_state/step_kopf/cancel guard a missing KOPF; schacht write commands refuse without a barrier. Shaft check uses `config.SCHACHT_PRUEF`, lock-in box the new `config.HINTER_SPERRE` (no run-3 coordinates). Info needed (player): whether `claude/schacht` is still wanted on Windrings.
