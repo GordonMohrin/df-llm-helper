@@ -1,14 +1,61 @@
 # df-llm-helper
 
-**Claude ran a real game of Dwarf Fortress for 10 hours: from 7 dwarves to 158 citizens over seven in-game years, with cheat commands blocked in code.** This repo is the layer that made it possible.
+df-llm-helper sits between an LLM agent (e.g. Claude) and **Dwarf Fortress** running with **DFHack**. It reads the game state in one batched call and turns it into a short report of only what changed, runs routine fortress maintenance (supplies, moods, caravans, sieges, digging safety…) with deterministic rules instead of LLM turns, keeps known fixes as runbooks and a searchable knowledge base, slows the game down when the agent stops checking in, and blocks cheat commands in code. The LLM keeps the decisions; the helper does the watching. The result: far fewer tokens per check and faster reactions in the game.
 
 ![Claude (left) running the fortress Windrings in Dwarf Fortress (right): Year 118, 174 citizens, Metropolis rank](docs/img/claude-playing-windrings.png)
 
-<sub>Left: Claude as orchestrator, reporting what its sub-agents did (new dig designations, living quarters, storage hall). Right: the same fortress, still alive in Year 118 with 174 citizens and Metropolis rank.</sub>
+<sub>Left: Claude as orchestrator, reporting what its sub-agents did (new dig designations, living quarters, storage hall). Right: the fortress Windrings, embarked with 7 dwarves in Year 100, still alive in Year 118 with 174 citizens and Metropolis rank (DF 53.16 + DFHack, 2026).</sub>
 
-![Run 5 "Windrings": citizens over real time, 7 at embark to 158 in Year 107](docs/img/run5-population.svg)
+## Let your LLM play
 
-<sub>The first 10 hours of that fortress, real data from `fixtures/run5_live/metrics_run5.csv` (DF 53.16 + DFHack, 2026).</sub>
+**Requirements:** Dwarf Fortress (Steam, 53.x) with DFHack installed, and an LLM agent that can run shell commands on the same machine as the game (e.g. Claude Code). Developed and played on Windows with Git Bash.
+
+Start Dwarf Fortress, then paste this prompt into your agent. It clones the repo, sets everything up and starts playing:
+
+```
+Play Dwarf Fortress for me through DFHack, using df-llm-helper as your helper layer.
+Dwarf Fortress with DFHack is installed on this machine and running.
+
+Setup
+1. Clone https://github.com/GordonMohrin/df-llm-helper and work from that folder.
+   Read README.md, COMPANION.md and docs/MANUAL.md.
+2. Run: python -m df_llm_helper.selftest --quick  (must end with "Self-test GREEN").
+3. Find my Dwarf Fortress install. Copy config.yaml.example to config.yaml and set
+   dfhack_run (path to dfhack-run) and paths.gamelog (gamelog.txt in the DF folder).
+4. Copy lua/pilot_*.lua and lua/claude/*.lua to <Dwarf Fortress>/hack/scripts/claude/.
+5. Set the environment variable DF_LLM_HELPER_HOME to a shared runtime folder so the game
+   and the helper see the same flags and logs (see COMPANION.md). Ask me before changing
+   system-wide settings; DF may need a restart to see the variable.
+6. Check the connection with the read-only steps of docs/INTEGRATION.md
+   (python -m df_llm_helper digest must return a status line). Parts of the Lua side are
+   live-untested: if an answer differs from the expected one, record it and tell me.
+
+New fortress
+7. If no fortress is loaded, ask me to create a world and embark (prefer a site without an
+   aquifer), or try the experimental embark scripts in tools/embark/.
+8. lua/claude/config.lua ships neutral (no map values; examples/windrings/ shows a filled-in file).
+   Run claude/config via dfhack-run, set every value from the checklist at the top of config.lua
+   for this map, then restart the permanent jobs as described there.
+9. Start as background processes and keep them running:
+   python -m df_llm_helper waechter --loop
+   python -m df_llm_helper wake --loop --interval 10
+
+Playing
+- Fair play: only what a human player could do through the UI. Never createitem, dig-now,
+  build-now, reveal or direct unit/item edits. The linter refuses them; do not work around it.
+- Every 5 minutes: python -m df_llm_helper check, and act on what it reports.
+- React to every WAKE line from the wake filter.
+- When something looks wrong: runbook diagnose, then runbook run <id> --dry-run before the
+  real run. Knowledge: kb search "<symptom>".
+- Delegate bigger jobs to sub-agents with the prompt from
+  python -m df_llm_helper agents prompt <scope> --task "<one sentence>" (pass it unchanged).
+- After every load or restart of the game: python -m df_llm_helper reboot.
+- Time-lapse only via python -m df_llm_helper tempo on (it refuses while a guard blocker is active).
+- Plan the first year (shelter, food, drinks, workshops) and report to me in at most 10 lines,
+  then keep playing and report only what needs my decision.
+```
+
+Prefer to set it up by hand? The same steps are in `COMPANION.md` and `docs/MANUAL.md`.
 
 ## Why this exists
 
@@ -74,28 +121,94 @@ Requirements: Python 3.11+, standard library only (pytest for tests; `lua5.4` op
 
 ## What it does
 
-| Area                                        | Commands                                                                                                                                                                   |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Situation report (≤ 600 tokens, delta only) | `check`, `digest`, `cycle`                                                                                                                                                 |
-| Maintenance autopilot with loop protection  | `autopilot`, `guard`, `waechter` (real-time watcher), `tempo`                                                                                                              |
-| Knowledge                                   | `runbook diagnose/show/run`, `kb search`, `brief <scope>` (agent briefing ≤ 1500 tokens)                                                                                   |
-| Agents                                      | `agents prompt/lint-report/cost`, `bus` (message bus), `memory compact`                                                                                                    |
-| Autopilots (v2)                             | `siege`, `caravan`, `trade`, `mood`, `care`, `workload`, `bottleneck`, `water`, `reboot`                                                                                   |
-| Autopilots (v3)                             | `perimeter`, `digcheck`, `reach`, `perf`, `tools`, `remote`, `hygiene`, `defense`, `settings`, `camera`; standstill/window guard inside `waechter` – see `docs/manual-v3/` |
-| Reporting                                   | `forecast`, `dashboard` (static HTML), `journal` (chronicle, lessons, post-mortem), `metrics`, `budget`                                                                    |
-| Fair play                                   | `lint` (30+ rules on Lua), exception register `exception list/add`                                                                                                         |
+Every command is `python -m df_llm_helper <command>`; add `--mock fixtures/run5` to try it without the game.
+
+**Orchestrator loop**
+
+| Command | What it does |
+|---|---|
+| `check` | The one call per orchestrator check: heartbeat, guard, autopilot and situation report together |
+| `digest` | Compact situation report, only what changed (≤ 600 tokens) |
+| `cycle` | One round of guard, autopilot and digest |
+| `heartbeat` | Tells the guard the orchestrator is still awake |
+| `wake` | Filters events down to the ones that need a decision, one line each |
+
+**Safety and tempo**
+
+| Command | What it does |
+|---|---|
+| `guard` | Deadman switch and tempo governor: slows the game when nobody is supervising |
+| `waechter` | Real-time watcher in the background (messages, flags, pauses, frozen game, stuck windows) |
+| `tempo` | Shows or switches time-lapse, only when no guard blocker is active |
+| `perf` | Finds what freezes or slows the game (latency sampling, safe bisect) |
+| `reboot` | After a restart or save load, brings back the background jobs that do not survive loading |
+| `settings` | Edits `d_init.txt` with backup, verify and revert |
+
+**Routine autopilot**
+
+| Command | What it does |
+|---|---|
+| `autopilot` | Runs the deterministic maintenance rules (cooldowns, loop protection) |
+| `care` | Watches hunger, thirst and the hospital |
+| `mood` | Strange moods: checks material gaps and reserves supplies |
+| `workload` | Turns a high idle rate into the right fix (empty dig queue, too few picks, missing material, full stockpiles) |
+| `bottleneck` | Spots material and fuel shortages before production stalls |
+| `water` | Flood and water watcher; checks commands for flooding risk |
+| `hygiene` | Loose stacks, dump marking, refuse zone proposals |
+| `tools` | Keeps enough picks and miners, suggests forging |
+| `remote` | Rescues dwarves stuck on long, far-away jobs |
+
+**Military and trade**
+
+| Command | What it does |
+|---|---|
+| `siege` | Handles sieges, raids and beasts without LLM turns: pause, targets, kill orders, civilian warning, cleanup |
+| `defense` | Designs kill boxes and traps; builds only with `--apply --confirm` |
+| `caravan` | Caravan arrival and preparation, step by step |
+| `trade` | Trading as a state machine, from opening the depot to finishing |
+
+**Map and digging**
+
+| Command | What it does |
+|---|---|
+| `digcheck` (alias `dig check`) | Checks dig orders before designating: no new openings to the outside, no aquifer, water or cavern breach |
+| `perimeter` | Finds open access paths into the fortress, plans sealing |
+| `reach` | Checks which places dwarves can still walk to, and what cut them off |
+| `camera` | Camera profiles for watching (ambient, combat, build, events, calm) |
+
+**Knowledge and agents**
+
+| Command | What it does |
+|---|---|
+| `runbook` | Known problems as recipes: diagnose symptoms, show and run fixes |
+| `kb` | Searches the knowledge base (≤ 400 tokens per hit) |
+| `brief` | Builds a compact briefing for a sub-agent (≤ 1,500 tokens) |
+| `agents` | Sub-agent prompts, report linting and cost measurement |
+| `bus` | Message bus between agents (priorities, dedupe) |
+| `memory` | Compacts agent memory files, keeps the original in an archive |
+| `overlay` | Short in-game text for the human player watching |
+
+**Planning and reporting**
+
+| Command | What it does |
+|---|---|
+| `plan` | Planners for blueprints, trade, digging, armor and supply |
+| `forecast` | Predicts famine before it happens |
+| `dashboard` | Static HTML dashboard of the fortress |
+| `journal` | Chronicle, lessons learned and post-mortem from the event log |
+| `metrics` | KPI time series as CSV |
+| `budget` | Token consumption per agent scope against a daily budget |
+
+**Fair play and testing**
+
+| Command | What it does |
+|---|---|
+| `lint` | Fair-play linter for Lua scripts (30+ rules) |
+| `exception` | Register of exceptions, each with the player's quoted consent |
+| `record` | Records real game answers as fixtures |
+| `replay` | Replays recorded scenarios and checks the results |
 
 Every rule has a `max_per_hour`; a rule that fires too often switches itself off and raises a warning. Full reference: `docs/MANUAL.md`, `docs/OVERVIEW.md`.
-
-## Against a real game
-
-1. `cp config.yaml.example config.yaml`, set `dfhack_run` and `paths.gamelog`; fortress-specific values (squad name, water boxes, rally point) go there too.
-2. Copy `lua/pilot_*.lua` and `lua/claude/*.lua` to `<Dwarf Fortress>/hack/scripts/claude/` and set the environment variable `DF_LLM_HELPER_HOME` (shared folder for flags/logs) – see **`COMPANION.md`**.
-3. Set the fortress-specific values in `lua/claude/config.lua` right after embark (it ships neutral; checklist at the top;
-   a filled-in real example is in `examples/windrings/`).
-4. Orchestrator loop: `python -m df_llm_helper check` every 5 minutes, `python -m df_llm_helper waechter --loop` as a background process, `python -m df_llm_helper wake --loop` as the wake-up filter. Details: `docs/MANUAL.md`, start prompt for agents: `docs/AGENT-PROMPT.md`.
-
-**Bring your own agent.** This repo is the helper layer, not the orchestrator. Any LLM agent that can run shell commands can drive it; Run 5 used Claude as orchestrator with scope sub-agents (military, trade, construction, …).
 
 ## Fair play
 
