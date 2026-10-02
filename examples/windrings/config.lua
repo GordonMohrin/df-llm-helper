@@ -6,11 +6,14 @@
 -- Display: `claude/config` (values, UNSET list + aquifer scan of the DISCOVERED tiles), `claude/config aquifer`.
 --
 -- ====================================================================================================================
--- SHIPPED NEUTRAL: all map-specific values below are nil/empty. Set them for YOUR map right after embark (checklist).
--- Real example of a filled-in file: examples/windrings/config.lua (Run 5, fortress Windrings, desert, world tile (26,10)).
+-- RUN 5 - as of 01.10.2026: ALL map-specific values are NEUTRALIZED (nil). Run 4 state (Canyonsyrups, world tile (4,10)):
+--   tools/scopes/run4/config-run4.lua.txt;  run 3: tools/scopes/run3/config-run3.lua.txt.
+-- Location/geology of the run 5 embark: EMBARK-run5.md.
+-- AS OF 01.10.2026 (infra, fortress Windrings, world tile (26,10), desert): core values SET (lines marked SET below: SURFACE_Z 133, FORT 96/96/133, Z 101..145, DIG_MIN_Z 108, EMBARK 100/263900, FORT_REFS, INNEN_BOXEN rough,
+--   ZUFLUCHT = PLACEHOLDER). STILL OPEN for bau (LAYOUT-run5.md): ZUFLUCHT (underground), REFUSE_BOX, DUMP_TILES, LAYOUT_BOXEN, SLAB_TILES, MOOD_SLOTS, narrow INNEN_BOXEN; erkundung: stages.lua, lower DIG_MIN_Z (hematite z104-107) after probe.
 --
 -- CHECKLIST AFTER EMBARK: infra sets these values from `claude/status` / `claude/area` / aquifer measurement (`claude/config aquifer`,
--- water_table per z level) IMMEDIATELY after loading the fortress (section "MAP VALUES" below):
+-- water_table per z level) IMMEDIATELY after loading the fortress (section "RUN-5-VALUES" below, lines with `-- RUN5: set after embark`):
 --   [ ] SURFACE_Z, FORT_X, FORT_Y, FORT_Z            surface and center of the starting camp (wagon)
 --   [ ] EMBARK_YEAR, EMBARK_TICK                     df.global.cur_year / cur_year_tick at embark (depot deadline in the ueberwacher)
 --   [ ] DIG_MIN_Z, Z_DOWN, Z_UP                      deepest dig level (lower only AFTER aquifer measurement and cavern world data), relevant levels
@@ -27,38 +30,37 @@
 -- (top layers only), placeholder refuge at the fort center. `UNSET` lists what is still missing; `RUN5_UNSET` = true as long as one of the core values is missing.
 -- ====================================================================================================================
 
--- ---------------------------------------------------------------- MAP VALUES (set after embark)
--- Shipped NEUTRAL (nil / empty): the DEFAULTS section below derives safe placeholders from the loaded map until you set them.
--- A complete, real example (fortress "Windrings", Run 5, desert) is in examples/windrings/config.lua.
-SURFACE_Z = nil                          -- set after embark: surface level at the starting camp
-FORT_X, FORT_Y, FORT_Z = nil, nil, nil   -- set after embark: center of the starting camp (wagon); FORT_Z follows SURFACE_Z if nil
-EMBARK_YEAR, EMBARK_TICK = nil, nil      -- set after embark: df.global.cur_year / cur_year_tick at embark
-Z_DOWN, Z_UP = nil, nil                  -- set after embark: relevant levels below/above the surface (defaults 40/15)
-DIG_MIN_Z = nil                          -- set after embark: deepest dig level (default SURFACE_Z - 3 until aquifer/cavern are measured)
-AQUIFER_CONFIRMED = {}                   -- measured aquifer levels {[z] = true}
-AQUIFER_SUSPECT_Z = nil                  -- optional { top = z, bottom = z } from world data
-FORT_REFS = nil                          -- set after embark: walkable reference points { {x,y,z}, ... } (default: fort center)
-ZUFLUCHT = nil                           -- set after embark: alarm burrow { rects = { {x1,y1,x2,y2,z[,z2]}, ... }, probe = {x,y,z}, treppe = {x,y} }
-INNEN_BOXEN = nil                        -- set after embark: interior boxes { {name=, x1=, x2=, y1=, y2=, z1=, z2=}, ... }
-REFUSE_BOX = nil                         -- {x1,y1,x2,y2,z} refuse/corpse room; nil = not built yet
-DUMP_TILES = {}                          -- { {x1,y1,x2,y2,z}, ... } further dump sites
-LAYOUT_BOXEN = {}                        -- { {x1,y1,x2,y2,z1,z2}, ... } fort boxes where raster/erzdig must not dig
-SLAB_TILES = {}                          -- { {x,y,z}, ... } crypt/memorial slab places (ghosts!)
-MOOD_SLOTS = {}                          -- { {x,y,z}, {x,y,z, kind = 'MetalsmithsForge'}, ... } reserved mood workshop slots
-SMOOTH_ENGRAVE = {}                      -- { {glaetten.csv, gravieren.csv, 'x,y,z'}, ... } quickfort series; empty = none
-ENGRAVE_BLUEPRINTS = {}                  -- { {'claude/x.csv','x,y,z'}, ... }; empty = none
-SMOOTH_SUPPLY = nil                      -- { x1, x2, y1, y2, z1, z2, ax, ay, az, batch, min_open } smoothing area; nil = off
-TREE_BAND = nil                          -- { zmin, zmax, ax, ay } woodcutting band (default: around the surface at the center)
-GATHER = nil                             -- { blueprint, 'x,y,z' } wild plant gathering via quickfort; nil = off
-GATHER_Z = nil                           -- { zmin, zmax } cavern levels with gatherable plants; nil = no gathering
+-- ---------------------------------------------------------------- RUN-5-VALUES (set after embark)
+SURFACE_Z = 133                          -- SET 01.10. infra: surface at the wagon/camp z133 (majority of columns around the camp; desert, sand, hilly z129..137; whole map discovered: z129 10884 columns, z133 6393, z134 5557, z135 6649)
+FORT_X, FORT_Y, FORT_Z = 96, 96, 133    -- SET 01.10. infra: wagon (95..97,95..97,z133) -> center of the starting camp; bau may adjust if the core lies elsewhere
+EMBARK_YEAR, EMBARK_TICK = 100, 263900   -- SET 01.10. infra: embark Y100 Sandstone 24 (cur_year_tick 285732 - world.frame_counter 21832 at measurement; +-100 ticks; run 5 'Windrings')
+Z_DOWN, Z_UP = 32, 12                    -- SET 01.10. infra: relevant levels z101..z145 (cavern 1 per world data z92-96 lies below, hills up to z137)
+DIG_MIN_Z = 104                          -- SET 01.10. infra: deepest dig level z108 = dolomite/magnetite layer (depth 18..24 from first solid tile z132 -> z114..z108); siltstone/hematite/tetrahedrite z107..104 only release after measurement (probe); cavern 1 (world data z92-96) stays >= 12 levels below; dig_min_z() raises on discovered water_table
+AQUIFER_CONFIRMED = {}                   -- 01.10. infra: NONE confirmed (aquifer_seen: 0 water_table in all 36,864 discovered surface columns z128..137, red sand 0/36,879); deeper layers undiscovered -> repeat `claude/config aquifer` for every newly discovered tunnel
+AQUIFER_SUSPECT_Z = { top = 132, bottom = 131 }  -- Info 01.10.: only AQ-flag layer per world data = red sand (depth 0..1, rain 0 -> 0 measured water_table); stone below without AQ layer (salt/chert/claystone/dolomite/siltstone/diorite/granite), edge risk neighbor geo (25,11)/(25-27,9) sandstone/conglomerate
+FORT_REFS = { { 94, 96, 133 }, { 98, 99, 133 }, { 102, 100, 133 }, { 90, 100, 133 } }  -- SET 01.10. infra: walkable surface points at the camp (checked with canWalkBetween from citizen 3744); bau adds underground tiles
+ZUFLUCHT = { rects = { { 100, 92, 109, 100, 132 }, { 99, 94, 99, 94, 131, 132 }, { 80, 94, 127, 114, 127, 130 }, { 99, 91, 109, 97, 131, 131 }, { 110, 91, 119, 98, 131, 131 } }, probe = { 101, 101, 130 }, treppe = { 99, 94 } }  -- SET 01.10. militaer (per bau proposal LAYOUT-run5.md sect. 8): farm hall F1 z132 + stair column T1 z131..132 + whole core x80..127,y94..114,z127..130 (format x1,y1,x2,y2,z[,z2] with z <= z2!). Access A = T1 head (99,94,z133), plug place outside (gatehouse A, see tools/scopes/militaer.md)
+INNEN_BOXEN = { { name = 'Fort', x1 = 76, x2 = 130, y1 = 92, y2 = 118, z1 = 101, z2 = 131 }, { name = 'F1', x1 = 99, x2 = 109, y1 = 92, y2 = 100, z1 = 132, z2 = 132 } }  -- SET 01.10. militaer: core + E shaft z101..131 and farm hall F1 z132 (surface z133 and ramps z132 outside F1 are NOT interior); ore tunnels outside the box trigger via 'nah' (ALERT_RANGE)
+REFUSE_BOX = nil                         -- RUN5: set after embark ({x1,y1,x2,y2,z} refuse/corpse room; nil = not built yet)
+DUMP_TILES = {}                          -- RUN5: set after embark ({ {x1,y1,x2,y2,z}, ... } further dump sites)
+LAYOUT_BOXEN = {}                        -- RUN5: set after embark ({ {x1,y1,x2,y2,z1,z2}, ... } fort boxes where raster/erzdig must not dig)
+SLAB_TILES = { {100,106,127}, {102,106,127}, {104,106,127}, {106,106,127}, {108,106,127}, {110,106,127}, {112,106,127}, {114,106,127}, {116,106,127}, {118,106,127} }   -- SET 01.10. gesundheit per bau info (inbox-wirtschaft 'Krypta z127 v1: 10 slab places y=106 straight x'); bau may adjust
+MOOD_SLOTS = { {92,97,130}, {95,97,130}, {106,97,130}, {109,97,130}, {112,97,130}, {115,97,130},
+  { 85, 103, 130, kind = 'MetalsmithsForge' }, { 91, 103, 130, kind = 'GlassFurnace' } }   -- WN5/WN6 + WE row (wirtschaft 01.10., LAYOUT-run5 sect. 4/8); + reserved WS slots per kind (gesundheit 01.10.: smithy = middle (86,104), glass = (92,104); smelter (89,104)/kiln (95,104) stay bau); bau may adjust
+SMOOTH_ENGRAVE = {}                      -- RUN5: set after embark ({ {glaetten.csv, gravieren.csv, 'x,y,z'}, ... } quickfort series; empty = none)
+ENGRAVE_BLUEPRINTS = {}                  -- RUN5: set after embark ({ {'claude/x.csv','x,y,z'}, ... }; empty = none)
+SMOOTH_SUPPLY = { x1 = 60, x2 = 150, y1 = 80, y2 = 130, z1 = 124, z2 = 130, ax = 101, ay = 96, az = 130, batch = 80, min_open = 40 }   -- D12 wirtschaft: whole residential/common area z124..130, large batch for ~100 idle
+TREE_BAND = { zmin = 133, zmax = 137, ax = 96, ay = 96 }  -- 01.10. infra: DESERT, 0 surface trees (world.plants: 497 tree_dry all underground z18..67: mushroom wood/goblin cap/tunnel tube/blood thorn); band stays in case of later cavern trees, does nothing as long as no mature tile is visible
+GATHER = nil                             -- RUN5: set after embark ({ blueprint, 'x,y,z' } wild plant gathering via quickfort; nil = off)
+GATHER_Z = nil                           -- RUN5: set after embark ({ zmin, zmax } cavern levels with gatherable plants; nil = no gathering)
 -- Cavern access (only if built; rule: DOUBLE barrier = 2 construction walls + gate, never open before the second stands):
-SCHACHT_D_SAEULE = nil                   -- legacy; nil
-KAV_BARRIEREN = {}                       -- claude/sperre: { name = { door = {x,y,z}, plugs = { {x,y,z}, ... }, cav = {x,y,z} } }
-KAV_ORDER = {}                           -- order of the barriers
-KOPF = nil                               -- {x,y,z} shaft head, only with a shaft
-SPERR_BOXEN = {}                         -- { {x1,y1,x2,y2,z1,z2}, ... } never dig/designate
-SCHACHT_PRUEF = nil                      -- { von = {x,y,z}, nach = {x,y,z} } self-test 'cavern connected to fort on foot'
-DIG_CAVERN_Z = nil                       -- erzdig exception from DIG_MIN_Z for caverns; normally nil
+SCHACHT_D_SAEULE = nil                   -- RUN5: set after embark (run 3 legacy only; nil)
+KAV_BARRIEREN = {}                       -- RUN5: set after embark (claude/sperre: { name = { door = {x,y,z}, plugs = { {x,y,z}, ... }, cav = {x,y,z} } })
+KAV_ORDER = {}                           -- RUN5: set after embark (order of the barriers)
+KOPF = nil                               -- RUN5: set after embark ({x,y,z} shaft head, only with a shaft)
+SPERR_BOXEN = {}                         -- RUN5: set after embark ({ {x1,y1,x2,y2,z1,z2}, ... } never dig/designate)
+SCHACHT_PRUEF = nil                      -- RUN5: set after embark ({ von = {x,y,z}, nach = {x,y,z} } self-test 'cavern connected to fort on foot')
+DIG_CAVERN_Z = nil                       -- RUN5: set after embark (erzdig exception from DIG_MIN_Z for caverns; normally nil)
 
 -- ---------------------------------------------------------------- DEFAULTS (so nothing crashes while values are missing)
 UNSET = {}   -- Names of the run 5 values not yet set (display: `claude/config`)

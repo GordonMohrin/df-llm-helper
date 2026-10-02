@@ -1,5 +1,6 @@
-# Embark without a desktop (DFHack Lua, as of 01.10.2026)
-Scripts from the scratchpad session; adjust the `SP=` paths in `probe.sh`/`scan2.sh`.
+# Embark without a desktop (DFHack Lua, EXPERIMENTAL, as of 01.10.2026)
+Used once to pick and confirm the Run-5 embark; not covered by tests. `probe.sh`/`scan2.sh` (Git Bash) call the Lua helpers in
+this folder; set `DF_DIR` if Dwarf Fortress is not in the default Steam folder (`EMBARK_DIR` defaults to this folder).
 - `screen.lua`: print the screen's text buffer (menus, popups, info panel on the right).
 - `findclick.lua <text>` / `findclick_bottom.lua <text>`: search the buffer for text and click it (from the top or bottom respectively; pixel = tile_pixel_x/y, which change with the window size!).
 - `clickpx2.lua px py`: click at a pixel (WORLD MAP: set `scr.region_cent_x/y`, then click at the screen center -> zooms to that world tile; screen center = (screen_pixel_x/2, screen_pixel_y/2)).

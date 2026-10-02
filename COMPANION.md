@@ -10,9 +10,11 @@ df-llm-helper talks to Dwarf Fortress only through `dfhack-run` and DFHack Lua s
 
 Install: copy `lua/pilot_*.lua` and `lua/claude/*.lua` into `<Dwarf Fortress>/hack/scripts/claude/`.
 
-**Fortress-specific values** live in `lua/claude/config.lua` (coordinates, burrows, grid stages in `stages.lua`).
-The shipped values are an example from the original fortress "Windrings" – set them for your own map after embark
-(checklist at the top of `config.lua`). Own quickfort blueprints go to `dfhack-config/blueprints/claude/`.
+**Fortress-specific values** live in `lua/claude/config.lua` (coordinates, burrows, interior boxes) and
+`lua/claude/stages.lua` (dig stages). Both ship **neutral** (nil/empty); until you set them, safe defaults are derived
+from the loaded map (`claude/config` lists what is still unset). Fill them in right after embark (checklist at the top
+of `config.lua`). A complete real example from the original fortress is in `examples/windrings/` – reference only, do
+not install it on another map. Own quickfort blueprints go to `dfhack-config/blueprints/claude/`.
 
 **Shared folder:** set the environment variable `DF_LLM_HELPER_HOME` (system-wide, so DF sees it) to e.g.
 `C:\df-llm-helper\runtime`. The Lua scripts write flags/logs below it (`util.home()`), df-llm-helper reads `<DF_LLM_HELPER_HOME>/tools`.

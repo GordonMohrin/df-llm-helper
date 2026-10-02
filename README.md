@@ -91,7 +91,8 @@ Every rule has a `max_per_hour`; a rule that fires too often switches itself off
 
 1. `cp config.yaml.example config.yaml`, set `dfhack_run` and `paths.gamelog`; fortress-specific values (squad name, water boxes, rally point) go there too.
 2. Copy `lua/pilot_*.lua` and `lua/claude/*.lua` to `<Dwarf Fortress>/hack/scripts/claude/` and set the environment variable `DF_LLM_HELPER_HOME` (shared folder for flags/logs) – see **`COMPANION.md`**.
-3. Adjust the fortress-specific values in `lua/claude/config.lua` after embark (example values ship from the original fortress).
+3. Set the fortress-specific values in `lua/claude/config.lua` right after embark (it ships neutral; checklist at the top;
+   a filled-in real example is in `examples/windrings/`).
 4. Orchestrator loop: `python -m df_llm_helper check` every 5 minutes, `python -m df_llm_helper waechter --loop` as a background process, `python -m df_llm_helper wake --loop` as the wake-up filter. Details: `docs/MANUAL.md`, start prompt for agents: `docs/AGENT-PROMPT.md`.
 
 **Bring your own agent.** This repo is the helper layer, not the orchestrator. Any LLM agent that can run shell commands can drive it; Run 5 used Claude as orchestrator with scope sub-agents (military, trade, construction, …).

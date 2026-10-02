@@ -182,7 +182,7 @@ def test_inputs_csv_and_stages():
     t = D.parse_qf_csv(csv, (10, 20, 131))
     assert t == {(10, 20, 131): "d", (11, 20, 131): "d", (13, 20, 131): "h", (11, 21, 131): "j", (10, 20, 130): "d"}
     assert D.parse_qf_csv("#build\nCw\n", (0, 0, 0)) == {}
-    stages = (ROOT / "lua" / "claude" / "stages.lua").read_text(encoding="utf-8")
+    stages = (ROOT / "examples" / "windrings" / "stages.lua").read_text(encoding="utf-8")
     t, rects = D.parse_stages(stages, "N11")
     assert rects == [(116, 80, 85, 118, 94), (116, 99, 102, 99, 106)]
     assert len(t) == 39 * 10 + 5

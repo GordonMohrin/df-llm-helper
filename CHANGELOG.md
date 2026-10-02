@@ -1,5 +1,11 @@
 # CHANGELOG df-llm-helper
 
+## Neutral map config, embark scripts (2026-10-02)
+- `lua/claude/config.lua` and `lua/claude/stages.lua` ship neutral (nil/empty; defaults come from the loaded map). The real
+  Run-5 values moved to `examples/windrings/` (reference only).
+- `tools/embark/probe.sh` and `scan2.sh` added (were referenced but missing); generic paths via `DF_DIR`/`EMBARK_DIR`;
+  the embark automation stays marked experimental.
+
 ## Rename (2026-10-02): dfpilot -> df-llm-helper
 - Project renamed to **df-llm-helper**; Python package `dfpilot` -> `df_llm_helper` (`python -m df_llm_helper ...`).
 - Environment variable `DF_LLM_HELPER_HOME` (Python and `lua/claude/util.lua`); `DFPILOT_HOME` is still read as fallback.
