@@ -5,7 +5,7 @@ __pycache__/
 htmlcov/
 config.yaml
 data/state.db*
-data/exceptions.jsonl.local
+data/exceptions.local.jsonl
 data/kb/journal.jsonl
 runtime/
 *.egg-info/

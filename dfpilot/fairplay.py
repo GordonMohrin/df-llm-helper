@@ -78,12 +78,22 @@ class ExceptionRegistry:
         self._now = now_iso
         self.load()
 
+    @property
+    def local_path(self) -> Path:
+        return self.path.with_name(self.path.stem + ".local" + self.path.suffix)
+
     def load(self) -> None:
         self.entries.clear()
         self.errors.clear()
-        if not self.path or not self.path.exists():
+        if not self.path:
             return
-        for no, line in enumerate(self.path.read_text(encoding="utf-8").splitlines(), 1):
+        # Shared register + optional local, git-ignored register next to it (exceptions.local.jsonl):
+        # player consents for one installation that must not ship with the public repository.
+        lines: list[str] = []
+        for f in (self.path, self.local_path):
+            if f.exists():
+                lines += f.read_text(encoding="utf-8").splitlines()
+        for no, line in enumerate(lines, 1):
             line = line.strip()
             if not line or line.startswith("#") or line.startswith("//"):
                 continue

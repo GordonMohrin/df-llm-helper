@@ -290,3 +290,16 @@ def test_pilot_tools_lua_lint_clean_and_parses():
     luac = shutil.which("luac5.4")
     if luac:
         assert subprocess.run([luac, "-p", str(f)], capture_output=True).returncode == 0
+
+
+def test_local_register_file_is_merged(tmp_path):
+    """A git-ignored exceptions.local.jsonl next to the register holds installation-specific consents (FP08)."""
+    from dfpilot.fairplay import ExceptionRegistry
+    from dfpilot.features.tools import fp08_entry
+    main = tmp_path / "exceptions.jsonl"
+    main.write_text('{"example": true, "action": "FP09", "reason": "x", "player_consent": "<q>"}\n', encoding="utf-8")
+    assert fp08_entry(ExceptionRegistry(main)) is None
+    (tmp_path / "exceptions.local.jsonl").write_text(
+        '{"action": "FP08", "objects": [], "reason": "pick fix: pickup flag", "player_consent": "yes"}\n', encoding="utf-8")
+    reg = ExceptionRegistry(main)
+    assert fp08_entry(reg) is not None and reg.errors == []

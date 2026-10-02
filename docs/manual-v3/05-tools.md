@@ -42,3 +42,7 @@ repeat_block_s 600, pickfix_cmd "claude/pickfix --apply", after_load true, in_ch
 ## Live check (open)
 Install `lua/pilot_tools.lua` as `hack/scripts/claude/pilot_tools.lua`; compare `tools status` with the game
 (picks, bin location, work picks); add the FP08 entry with the player's consent; run `tools check --dry-run`, then live.
+
+**Consent for your installation:** put the FP08 entry into `data/exceptions.local.jsonl` (git-ignored, merged with
+`data/exceptions.jsonl` when loading). Example line:
+`{"action": "FP08", "objects": [], "reason": "pick fix: pickup flag for MINE dwarves", "player_consent": "<your words>"}`
