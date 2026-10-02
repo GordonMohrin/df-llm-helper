@@ -1,0 +1,6 @@
+{"_synthetic": "J109 counts split over two blocks", "ok": true, "start": 0, "next": 60000, "total": 101234, "done": false, "scanned": 60000,
+ "loose": 7400, "by_type": {"BOULDER": 6100, "THREAD": 500, "GOBLET": 410, "CORPSE": 230, "CORPSEPIECE": 160},
+ "boulder_z": {"115": 2100, "116": 2000, "130": 2000},
+ "area": {"fort": 6200, "surface": 900, "cavern": 300, "hidden": 40},
+ "corpses": {"dwarf": 3, "other": 387, "other_fort": 250}, "rotten": 0,
+ "marked": {"pending": 0, "unreachable": 0, "sx": 0, "sy": 0, "sz": 0}, "ref": [94, 96, 133]}

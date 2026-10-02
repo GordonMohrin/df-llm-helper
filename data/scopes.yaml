@@ -1,0 +1,110 @@
+# Scope definitions for briefings (F5). Source: tools/agents/SCOPES-run3.md (scope table + building blocks), RUN5-START.md.
+# Required fields per scope: mission, kpis (name/expr/ziel = target), commands, kb_query. Optional: memory, inbox, kb_ids, focus.
+trinken:
+  mission: "Drinks + water: brewing, barrels/pots, still, well/hospital water. Barrels are the bottleneck; brewing orders only with an empty container."
+  kpis:
+    - {name: "Drink days", expr: "drink_days", ziel: ">= 100 (red < 100)"}
+    - {name: "Drinks", expr: "drinks", ziel: ">= 4/head"}
+    - {name: "Empty barrels", expr: "barrels_empty", ziel: ">= 10 (red < 4)"}
+    - {name: "Thirsty >30k", expr: "len([c for c in citizens if c.thirst is not None and c.thirst > 30000])", ziel: "0"}
+  commands: ["claude/trinken status|once|start", "claude/essen status", "claude/report"]
+  kb_query: "drinks thirst brewing barrels plants water"
+  kb_ids: [getraenke_wueste, wasser_quelle]
+essen:
+  mission: "Farming, kitchen, mill + bags, hunting/fishing, livestock, winter stock. Never ban-cooking all/seeds or seedwatch."
+  kpis:
+    - {name: "Food days", expr: "food_days", ziel: ">= 60 (red < 60)"}
+    - {name: "Meals", expr: "meals", ziel: "> 150 before winter"}
+    - {name: "Fish/meat", expr: "str(fish) + '/' + str(meat)", ziel: "-"}
+    - {name: "Hungry >40k", expr: "len([c for c in citizens if c.hunger is not None and c.hunger > 40000])", ziel: "0"}
+  commands: ["claude/essen status|once|gather", "claude/report", "ban-cooking brew mill fruit --unban (repair only)"]
+  kb_query: "food hunger meals cooking plants"
+  kb_ids: [kochschleife, food_days_schwankt]
+bau:
+  mission: "Layout (LAYOUT-run5.md, bau owns ALL coordinates): accesses, stairs, gates, refuge, workshop halls, farms, crypt, depot, stockpiles, zones. Check every site with claude/area."
+  kpis:
+    - {name: "Unfinished buildings", expr: "jobs.unfinished_buildings", ziel: "< 5"}
+    - {name: "Full stockpiles", expr: "len(full_stockpiles)", ziel: "0"}
+    - {name: "Dig jobs", expr: "dig_jobs", ziel: "-"}
+  commands: ["claude/area z x y w h", "claude/buildings", "claude/dig z x1 y1 x2 y2 [mode]", "quickfort run claude/<own>.csv -c x,y,z (MSYS_NO_PATHCONV=1)"]
+  kb_query: "stockpile quickfort zone building finished goods burrow"
+  kb_ids: [fertigwaren_lager, quickfort_fallen]
+erkundung:
+  mission: "Ore/coal first: geology evaluation, 1-wide grid tunnels without aquifer layers, report every find immediately; mines only after a find."
+  kpis:
+    - {name: "Dig jobs", expr: "dig_jobs", ziel: ">= 30"}
+    - {name: "Diggers", expr: "diggers", ziel: ">= 3"}
+    - {name: "Pick carriers in squad", expr: "pick_holders", ziel: ">= 3"}
+    - {name: "Aquifer z", expr: "aquifer_z", ziel: "[] or avoided"}
+  commands: ["claude/ores", "claude/geo", "claude/dig ...", "claude/area ..."]
+  kb_query: "ore pick pickaxe dig aquifer"
+  kb_ids: [e18_pick, aquifer]
+wirtschaft:
+  mission: "Workshop orders, work details, fill idle time, trade goods; no orders without a material condition; do not burden manager/broker."
+  kpis:
+    - {name: "Idle %", expr: "idle_pct", ziel: "< 20"}
+    - {name: "Open jobs", expr: "jobs_open", ziel: "-"}
+    - {name: "Orders unvalidated", expr: "orders_unvalidated", ziel: "0"}
+    - {name: "Cancel loops", expr: "len(cancels)", ziel: "0"}
+  commands: ["claude/orders status|once", "claude/workdetail list|assign", "claude/arbeit start (status is NOT a status command!)", "claude/aemter status"]
+  kb_query: "idle order cancel loop manager work detail"
+  kb_ids: [abbruchschleife, manager_buero, status_nebenwirkung]
+auslastung:
+  mission: "Monitor workload (HUD), find the cause for each idle dwarf (labors, tools, reachability, wanderers), recommendations via the bus to wirtschaft/erkundung/material."
+  kpis:
+    - {name: "Idle %", expr: "idle_pct", ziel: "< 20 (red < 50 % utilisation 3x)"}
+    - {name: "Dig jobs/diggers", expr: "str(dig_jobs) + '/' + str(diggers)", ziel: "diggers >= 3"}
+  commands: ["claude/auslastung status|report", "claude/units", "claude/workdetail list"]
+  kb_query: "idle workload tool dig backlog work detail"
+  kb_ids: [grabstau_arbeitsgruppen, e18_pick]
+material:
+  mission: "Wood, tools, metal, leather, mood stock, shopping list. Metal chain: ore -> smelting (fuel!) -> forging."
+  kpis:
+    - {name: "Mood gaps", expr: "mood_gaps", ziel: "[]"}
+    - {name: "Pick carriers", expr: "pick_holders", ziel: ">= 3"}
+  commands: ["claude/material status|start", "claude/mood status", "claude/orders status"]
+  kb_query: "coke fuel wood metal tool mood stock"
+  kb_ids: [koks_brennstoff, strange_mood]
+militaer:
+  mission: "Squads, barracks, training (constant), uniforms, equipment. ~10 % soldiers, quality over quantity (the player, 01.10.)."
+  kpis:
+    - {name: "Soldiers", expr: "squad_members", ziel: "~10 % of pop"}
+    - {name: "Pop", expr: "pop", ziel: "Gate 60: guard in metal"}
+  commands: ["claude/mil status|report|equip|tabelle", "claude/mil add|remove|uniform|barracks ... --apply", "claude/mil workmode <squad> on|off --apply"]
+  kb_query: "military squad armor siege training"
+  kb_ids: [belagerung_pop, e18_pick]
+verteidigung:
+  mission: "Survive sieges: >= 2 separate accesses with gate/lever, traps, refuge burrow (rehearsal), alarm procedure; caverns only through a double airlock."
+  kpis:
+    - {name: "Enemies", expr: "enemies", ziel: "0"}
+    - {name: "Civilian alert", expr: "civ_alert", ziel: "0 without enemy"}
+    - {name: "Refuge ok", expr: "snap.alerts.refuge_ok", ziel: "True"}
+  commands: ["claude/gefahr status", "claude/mil refuge", "claude/alert on|off", "claude/mil guard status"]
+  kb_query: "alarm burrow refuge siege cavern airlock"
+  kb_ids: [zuflucht_burrow, kavernen_schleuse]
+gesundheit:
+  mission: "Hospital, injured, stress, strange moods (material!), dead/graves/corpses, children."
+  kpis:
+    - {name: "Injured", expr: "len(injured)", ziel: "0"}
+    - {name: "High stress", expr: "stress_high", ziel: "0"}
+    - {name: "Moods", expr: "moods", ziel: "material available"}
+  commands: ["claude/gesund status|krypta", "claude/mood status|prebuild"]
+  kb_query: "hospital injured mood ghost stress"
+  kb_ids: [hospital, strange_mood, autoslab_geister]
+handel:
+  mission: "Caravans with claude/handel (dry run first), depot check, broker without squad, shopping list (food/wood/metal first), price ratio 2.3:1."
+  kpis:
+    - {name: "Caravans", expr: "join([c.name + ':' + c.state for c in caravans])", ziel: "-"}
+    - {name: "Broker in depot", expr: "broker.in_depot if broker else None", ziel: "on arrival"}
+  commands: ["claude/handel status|plan|prep|broker|mark|open|select|confirm|accept|finish|release (--live only after --dry)", "dfpilot runbook show rb06_karawane"]
+  kb_query: "caravan trade broker depot finished goods"
+  kb_ids: [handel_ablauf, makler_squad, fertigwaren_lager]
+infra:
+  mission: "Automation runs (all jobs running), config.lua, save states, flags, guard alive, metrics; checklist after loading."
+  kpis:
+    - {name: "Stopped services", expr: "stopped_services", ziel: "[]"}
+    - {name: "fps/timestream", expr: "str(fps) + '/' + str(timestream)", ziel: "as set by the guard"}
+    - {name: "Heartbeat min", expr: "heartbeat_age_min", ziel: "< 20"}
+  commands: ["dfpilot guard --dry-run", "dfpilot autopilot --dry-run", "claude/tempo status", "claude/config"]
+  kb_query: "guard blind heartbeat services flags loading"
+  kb_ids: [waechter_blind, deadman_heartbeat, nach_laden]

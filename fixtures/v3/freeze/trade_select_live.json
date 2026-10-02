@@ -1,0 +1,3 @@
+{"_source": "SYNTHETIC: trade window open while the trade automaton is in SELECT_LIVE (must never be closed)",
+ "screens": ["dwarfmode/Trade/Default"], "paused": false, "fc": 5100000, "yt": 210000, "time_moves_with_window": false,
+ "trade_flow": {"state": "SELECT_LIVE"}}

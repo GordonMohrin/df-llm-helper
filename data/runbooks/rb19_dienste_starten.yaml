@@ -1,0 +1,24 @@
+id: rb19_dienste_starten
+title: "After load/embark: permanent jobs are not running"
+needs_player_approval: false
+kb: [nach_laden]
+symptom:
+  when: "len(stopped_services) >= 3"
+  confidence: 0.8
+  explain: "stopped: {join(stopped_services)}"
+  signals:
+    - {when: "'watchdog' in stopped_services", add: 0.15, why: "watchdog (alarm/slow motion) off"}
+steps:
+  - {cmd: "claude/watchdog start"}
+  - {cmd: "claude/ueberwacher start"}
+  - {cmd: "claude/arbeit start"}
+  - {cmd: "claude/trinken start"}
+  - {cmd: "claude/essen start"}
+  - {cmd: "claude/orders start"}
+  - {cmd: "claude/gesund start"}
+  - {cmd: "claude/auslastung start"}
+  - {cmd: "claude/mil guard start"}
+  - {cmd: "claude/tempo off", why: "timestream only after drinks/food/wood (the player decides)"}
+verify:
+  when: "len(stopped_services) == 0"
+  timeout_s: 30

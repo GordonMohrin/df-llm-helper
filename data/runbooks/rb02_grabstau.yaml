@@ -1,0 +1,22 @@
+id: rb02_grabstau
+title: "Dig backlog: Stonecutters/Engravers on EverybodyDoesThis"
+needs_player_approval: false
+kb: [grabstau_arbeitsgruppen]
+symptom:
+  when: "dig_jobs is not None and dig_jobs >= 20 and any(w.mode == 'EverybodyDoesThis' for w in workdetails if w.name in ['Stonecutters', 'Engravers'])"
+  confidence: 0.7
+  explain: "{dig_jobs} dig jobs open, smoothing/engraving for everybody"
+  signals:
+    - {when: "job_count('SmoothFloor') + job_count('DetailFloor') + job_count('DetailWall') > 10", add: 0.15, why: "many smoothing/engraving jobs"}
+    - {when: "diggers <= 2", add: 0.1, why: "hardly any diggers"}
+steps:
+  - {cmd: "claude/workdetail list"}
+  - {cmd: "claude/pilot_wd mode Stonecutters OnlySelectedDoesThis --apply", why: "only selected dwarves smooth (pilot_wd.lua, not tested live)"}
+  - {cmd: "claude/pilot_wd mode Engravers OnlySelectedDoesThis --apply"}
+  - {manual: "Keep 2-3 dwarves in Stonecutters/Engravers (claude/workdetail assign <id> Stonecutters false for the rest); Miners = pick carriers only"}
+verify:
+  when: "not any(w.mode == 'EverybodyDoesThis' for w in workdetails if w.name in ['Stonecutters', 'Engravers'])"
+  timeout_s: 30
+  poll_s: 10
+rollback:
+  - {cmd: "claude/pilot_wd mode Stonecutters EverybodyDoesThis --apply"}

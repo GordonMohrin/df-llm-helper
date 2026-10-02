@@ -1,0 +1,19 @@
+id: rb04_alarm_burrow
+title: "Alert burrow too small: everything stands still on a civilian alert"
+needs_player_approval: false
+kb: [zuflucht_burrow]
+symptom:
+  when: "civ_alert and idle_pct is not None and idle_pct >= 50"
+  confidence: 0.6
+  explain: "Civilian alert on, {idle_pct}% idle"
+  signals:
+    - {when: "snap.alerts.refuge_ok == False", add: 0.3, why: "claude/gefahr reports the refuge as not ok"}
+preconditions:
+  - {when: "not danger", msg: "NEVER rebuild the burrow during a fight (civilians run past the enemy)"}
+steps:
+  - {cmd: "claude/gefahr status"}
+  - {cmd: "claude/mil refuge", why: "check/create refuge + civilian alert"}
+  - {manual: "Extend the burrow: beds + food + water + workshops + stockpiles must be inside (after the fight)"}
+verify:
+  when: "snap.alerts.refuge_ok == True"
+  timeout_s: 30

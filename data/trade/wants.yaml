@@ -1,0 +1,12 @@
+# Shopping wishes for the caravan autopilot (spec 02). Order = priority.
+# must: true = must-have good (trading is only worthwhile if at least one is on offer).
+# match: item types (from 'claude/handel list 0', field 2) and/or words in the name (field 6, lowercase).
+# Spec 07 (bottleneck watcher) can raise the order dynamically at runtime.
+- {category: wood, must: true, types: [WOOD]}
+- {category: fuel, must: true, types: [BAR], words: [coal, coke, charcoal]}
+- {category: tools, must: true, types: [WEAPON, BUCKET, CHAIN, TRAPPARTS], words: [pick, bucket, chain, rope]}
+- {category: metal, must: true, types: [BAR], words: [iron, steel, bronze, copper, tin, pig iron]}
+- {category: food, must: true, types: [FOOD, MEAT, FISH, CHEESE, PLANT, PLANT_GROWTH, EGG, DRINK]}
+- {category: seeds, must: true, types: [SEEDS]}
+- {category: cloth, must: false, types: [CLOTH, THREAD, SKIN_TANNED]}
+- {category: containers, must: false, types: [BIN, BARREL, BOX]}

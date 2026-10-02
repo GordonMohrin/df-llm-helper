@@ -1,0 +1,16 @@
+id: rb16_abbruchschleife
+title: "Cancel loop in the gamelog (order without material)"
+needs_player_approval: false
+kb: [abbruchschleife]
+symptom:
+  when: "len(cancels) > 0 and cancels[0]['count'] >= 50"
+  confidence: 0.6
+  explain: "{cancels[0]['job']}: {cancels[0]['reason']} {cancels[0]['count']}x"
+  signals:
+    - {when: "cancels[0]['count'] >= 300", add: 0.2, why: "> 300 cancels"}
+steps:
+  - {cmd: "claude/orders status"}
+  - {manual: "Find the producer (watchdog feed/arbeit/orders): add a material gate or remove the order. Known: 'Make bed: Needs logs' (wood), 'Needs refined coal' (rb17), 'cookable' (rb03)"}
+verify:
+  when: "len(cancels) == 0 or cancels[0]['count'] < 50"
+  timeout_s: 120

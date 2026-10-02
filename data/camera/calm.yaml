@@ -1,0 +1,7 @@
+# Camera profile 'calm' (spec v3-10): slow pans, only one unit per 40 s.
+name: calm
+extends: ambient
+description: "slow pans, one unit per 40 s"
+mode: auto
+dwell_s: [40, 40]
+pan_steps: 8

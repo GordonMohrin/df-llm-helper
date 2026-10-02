@@ -1,0 +1,19 @@
+id: rb07_stimmung
+title: "Strange mood: secure workshop + material, timestream off"
+needs_player_approval: false
+kb: [strange_mood]
+symptom:
+  when: "moods > 0"
+  confidence: 0.6
+  explain: "Mood active: {join(snap.alerts.moods_active)}"
+  signals:
+    - {when: "len(mood_gaps) > 0", add: 0.3, why: "material gaps in the mood stock"}
+    - {when: "timestream", add: 0.05, why: "timestream is running"}
+steps:
+  - {cmd: "claude/tempo off", why: "a mood lasts ~50000 ticks; the reaction must be timely"}
+  - {cmd: "claude/mood status"}
+  - {cmd: "claude/mood prebuild", why: "build missing workshop types"}
+  - {manual: "Obtain missing material (trade/hunting/cavern only via the airlock): {join(mood_gaps)}"}
+verify:
+  when: "moods == 0"
+  timeout_s: 60

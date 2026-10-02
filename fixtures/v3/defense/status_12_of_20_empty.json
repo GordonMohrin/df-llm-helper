@@ -1,0 +1,236 @@
+{
+ "_note": "SYNTHETIC fixture (not a live dump of claude/pilot_defense status): 20 stone traps, 12 empty, 8 loaded",
+ "ok": true,
+ "traps": [
+  {
+   "id": 5000,
+   "x": 96,
+   "y": 96,
+   "z": 132,
+   "trap_type": "StoneFallTrap",
+   "kind": "stone",
+   "loaded": true,
+   "load_job": false
+  },
+  {
+   "id": 5001,
+   "x": 97,
+   "y": 96,
+   "z": 132,
+   "trap_type": "StoneFallTrap",
+   "kind": "stone",
+   "loaded": false,
+   "load_job": false
+  },
+  {
+   "id": 5002,
+   "x": 98,
+   "y": 96,
+   "z": 132,
+   "trap_type": "StoneFallTrap",
+   "kind": "stone",
+   "loaded": true,
+   "load_job": false
+  },
+  {
+   "id": 5003,
+   "x": 99,
+   "y": 96,
+   "z": 132,
+   "trap_type": "StoneFallTrap",
+   "kind": "stone",
+   "loaded": false,
+   "load_job": true
+  },
+  {
+   "id": 5004,
+   "x": 100,
+   "y": 96,
+   "z": 132,
+   "trap_type": "StoneFallTrap",
+   "kind": "stone",
+   "loaded": false,
+   "load_job": false
+  },
+  {
+   "id": 5005,
+   "x": 96,
+   "y": 97,
+   "z": 132,
+   "trap_type": "StoneFallTrap",
+   "kind": "stone",
+   "loaded": true,
+   "load_job": false
+  },
+  {
+   "id": 5006,
+   "x": 97,
+   "y": 97,
+   "z": 132,
+   "trap_type": "StoneFallTrap",
+   "kind": "stone",
+   "loaded": false,
+   "load_job": true
+  },
+  {
+   "id": 5007,
+   "x": 98,
+   "y": 97,
+   "z": 132,
+   "trap_type": "StoneFallTrap",
+   "kind": "stone",
+   "loaded": true,
+   "load_job": false
+  },
+  {
+   "id": 5008,
+   "x": 99,
+   "y": 97,
+   "z": 132,
+   "trap_type": "StoneFallTrap",
+   "kind": "stone",
+   "loaded": false,
+   "load_job": false
+  },
+  {
+   "id": 5009,
+   "x": 100,
+   "y": 97,
+   "z": 132,
+   "trap_type": "StoneFallTrap",
+   "kind": "stone",
+   "loaded": false,
+   "load_job": true
+  },
+  {
+   "id": 5010,
+   "x": 96,
+   "y": 98,
+   "z": 132,
+   "trap_type": "StoneFallTrap",
+   "kind": "stone",
+   "loaded": true,
+   "load_job": false
+  },
+  {
+   "id": 5011,
+   "x": 97,
+   "y": 98,
+   "z": 132,
+   "trap_type": "StoneFallTrap",
+   "kind": "stone",
+   "loaded": false,
+   "load_job": false
+  },
+  {
+   "id": 5012,
+   "x": 98,
+   "y": 98,
+   "z": 132,
+   "trap_type": "StoneFallTrap",
+   "kind": "stone",
+   "loaded": true,
+   "load_job": false
+  },
+  {
+   "id": 5013,
+   "x": 99,
+   "y": 98,
+   "z": 132,
+   "trap_type": "StoneFallTrap",
+   "kind": "stone",
+   "loaded": false,
+   "load_job": false
+  },
+  {
+   "id": 5014,
+   "x": 100,
+   "y": 98,
+   "z": 132,
+   "trap_type": "StoneFallTrap",
+   "kind": "stone",
+   "loaded": false,
+   "load_job": false
+  },
+  {
+   "id": 5100,
+   "x": 95,
+   "y": 99,
+   "z": 133,
+   "trap_type": "StoneFallTrap",
+   "kind": "stone",
+   "loaded": true,
+   "load_job": false
+  },
+  {
+   "id": 5101,
+   "x": 95,
+   "y": 100,
+   "z": 133,
+   "trap_type": "StoneFallTrap",
+   "kind": "stone",
+   "loaded": false,
+   "load_job": false
+  },
+  {
+   "id": 5102,
+   "x": 95,
+   "y": 101,
+   "z": 133,
+   "trap_type": "StoneFallTrap",
+   "kind": "stone",
+   "loaded": true,
+   "load_job": false
+  },
+  {
+   "id": 5103,
+   "x": 95,
+   "y": 102,
+   "z": 133,
+   "trap_type": "StoneFallTrap",
+   "kind": "stone",
+   "loaded": false,
+   "load_job": true
+  },
+  {
+   "id": 5104,
+   "x": 95,
+   "y": 103,
+   "z": 133,
+   "trap_type": "StoneFallTrap",
+   "kind": "stone",
+   "loaded": false,
+   "load_job": false
+  },
+  {
+   "id": 5200,
+   "x": 100,
+   "y": 97,
+   "z": 132,
+   "trap_type": "WeaponTrap",
+   "kind": "weapon",
+   "loaded": null,
+   "load_job": false
+  },
+  {
+   "id": 5201,
+   "x": 101,
+   "y": 97,
+   "z": 132,
+   "trap_type": "CageTrap",
+   "kind": "cage",
+   "loaded": null,
+   "load_job": false
+  }
+ ],
+ "jobs": {
+  "LoadStoneTrap | Load Stone Trap": 5,
+  "LoadCageTrap | Load Cage Trap": 1
+ },
+ "stock": {
+  "mechanisms": 7,
+  "trap_components": 2,
+  "boulders": 340
+ },
+ "live_tested": false
+}

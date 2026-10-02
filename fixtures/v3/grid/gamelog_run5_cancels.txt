@@ -1,0 +1,589 @@
+** SYNTHETIC gamelog excerpt (spec v3-11/v3-02): counts from the run-5 notes (493x plump helmet spawn by 43 dwarves, 41x Inappropriate dig square by 29 dwarves); names and order are made up.
+Dwarf22 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+The dwarves have struck plump helmet spawn!
+Dwarf29 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf19 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf01 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf19 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf08 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf02 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf21 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf12 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf25 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf16 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf38 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf28 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf20 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf04 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf38 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf06 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf16 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf26 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf20 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf02 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf03 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf02 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf31 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf01 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf16 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf12 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf32 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf40 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf16 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf32 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf05 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf16 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf02 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf28 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf00 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf26 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf14 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf02 Testname, Broker cancels Bring Item to Depot: Could not find path.
+Dwarf05 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf42 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf09 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf22 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf15 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf02 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf40 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf04 Testname, Broker cancels Bring Item to Depot: Could not find path.
+Dwarf18 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf03 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf19 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf34 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+The dwarves have struck plump helmet spawn!
+Dwarf32 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf00 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf08 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf39 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf18 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf06 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf00 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf27 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf04 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf00 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf41 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf01 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf00 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf17 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf21 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf02 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf33 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf08 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf33 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf03 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf42 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf01 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf20 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf01 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf38 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf24 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf02 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf07 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf35 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf30 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf04 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf03 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf28 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf29 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf35 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf05 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf41 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf20 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf09 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf25 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf31 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf28 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf19 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf36 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf16 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf37 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf17 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf05 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf20 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf07 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+The dwarves have struck plump helmet spawn!
+Dwarf04 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf09 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf35 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf15 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf19 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf05 Testname, Broker cancels Bring Item to Depot: Could not find path.
+Dwarf02 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf08 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf40 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf18 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf35 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf35 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf00 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf03 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf02 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf32 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf26 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf24 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf25 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf01 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf07 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf08 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf05 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf17 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf26 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf12 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf22 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf03 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf13 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf28 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf26 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf42 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf19 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf36 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf34 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf00 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf33 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf09 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf01 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf01 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf33 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf38 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf07 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf24 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf20 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf08 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf37 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf39 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf08 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf00 Testname, Broker cancels Bring Item to Depot: Could not find path.
+The dwarves have struck plump helmet spawn!
+Dwarf06 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf23 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf27 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf18 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf30 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf24 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf26 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf31 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf37 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf33 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf11 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf34 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf35 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf32 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf33 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf10 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf36 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf40 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf07 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf00 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf01 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf14 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf22 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf01 Testname, Broker cancels Bring Item to Depot: Could not find path.
+Dwarf13 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf23 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf36 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf03 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf02 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf28 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf41 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf27 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf36 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf39 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf37 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf00 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf15 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf00 Testname, Broker cancels Bring Item to Depot: Could not find path.
+Dwarf08 Testname, Broker cancels Bring Item to Depot: Could not find path.
+Dwarf28 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf27 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf12 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf07 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf40 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf19 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf03 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf38 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf10 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf38 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf19 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+The dwarves have struck plump helmet spawn!
+Dwarf27 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf20 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf39 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf31 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf06 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf11 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf14 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf01 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf11 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf35 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf05 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf03 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf26 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf21 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf41 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf34 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf04 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf14 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf10 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf23 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf17 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf03 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf12 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf00 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf05 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf36 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf33 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf40 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf37 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf24 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf23 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf10 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf18 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf20 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf09 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf32 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf28 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf09 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf08 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf28 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf19 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf16 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf40 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf03 Testname, Broker cancels Bring Item to Depot: Could not find path.
+Dwarf11 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf22 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf25 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf13 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf38 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf03 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+The dwarves have struck plump helmet spawn!
+Dwarf10 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf26 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf34 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf33 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf15 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf13 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf23 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf37 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf24 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf24 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf11 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf17 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf05 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf25 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf08 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf03 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf31 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf29 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf35 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf05 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf10 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf29 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf31 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf07 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf06 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf00 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf01 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf27 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf00 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf19 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf42 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf00 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf36 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf22 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf37 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf23 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf40 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf34 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf01 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf13 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf08 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf41 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf01 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf13 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf25 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf27 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf41 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf01 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf26 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf21 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+The dwarves have struck plump helmet spawn!
+Dwarf02 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf26 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf24 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf10 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf15 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf38 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf14 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf14 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf09 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf25 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf25 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf39 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf06 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf04 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf14 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf01 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf41 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf14 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf15 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf29 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf04 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf15 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf42 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf13 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf01 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf07 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf27 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf23 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf15 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf02 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf07 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf04 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf39 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf28 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf13 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf06 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf21 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf30 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf41 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf18 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf22 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf12 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf37 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf26 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf11 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf27 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf00 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf39 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf34 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf31 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+The dwarves have struck plump helmet spawn!
+Dwarf04 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf03 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf09 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf02 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf33 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf14 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf41 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf01 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf03 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf17 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf17 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf21 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf42 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf11 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf10 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf32 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf12 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf42 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf22 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf05 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf10 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf36 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf02 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf17 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf01 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf04 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf06 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf05 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf14 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf21 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf14 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf26 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf01 Testname, Broker cancels Bring Item to Depot: Could not find path.
+Dwarf25 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf24 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf11 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf30 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf18 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf29 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf36 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf34 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf09 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf09 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf17 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf16 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf17 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf29 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf21 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf34 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf30 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+The dwarves have struck plump helmet spawn!
+Dwarf12 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf18 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf07 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf00 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf11 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf39 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf07 Testname, Broker cancels Bring Item to Depot: Could not find path.
+Dwarf21 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf17 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf30 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf30 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf22 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf31 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf42 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf03 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf23 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf02 Testname, Broker cancels Bring Item to Depot: Could not find path.
+Dwarf25 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf28 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf31 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf00 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf32 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf18 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf09 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf36 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf04 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf03 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf35 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf35 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf16 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf35 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf15 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf06 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf41 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf24 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf24 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf39 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf32 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf29 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf08 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf27 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf33 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf19 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf40 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf38 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf04 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf27 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf33 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf07 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf30 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+The dwarves have struck plump helmet spawn!
+Dwarf04 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf21 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf15 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf12 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf30 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf32 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf13 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf11 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf06 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf02 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf20 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf03 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf02 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf18 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf22 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf10 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf16 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf21 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf12 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf01 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf00 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf12 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf08 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf10 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf42 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf10 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf27 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf09 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf06 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf04 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf21 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf32 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf02 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf39 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf42 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf17 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf14 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf15 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf18 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf06 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf18 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf23 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf16 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf04 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf00 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf07 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf20 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf15 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf11 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf16 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+The dwarves have struck plump helmet spawn!
+Dwarf23 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf09 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf34 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf02 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf11 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf39 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf13 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf11 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf04 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf06 Testname, Broker cancels Bring Item to Depot: Could not find path.
+Dwarf04 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf15 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf08 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf10 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf13 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf17 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf22 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf19 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf12 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf19 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf16 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf24 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf02 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf03 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf07 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf38 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf23 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf12 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf20 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf09 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf37 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf25 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf22 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf04 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf05 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf29 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf04 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf37 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf31 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf20 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf38 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf41 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf40 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf05 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf42 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf05 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf01 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf06 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf00 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf25 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+The dwarves have struck plump helmet spawn!
+Dwarf13 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf30 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf34 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf11 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf14 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf28 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf30 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf06 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf13 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf04 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf18 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf00 Testname, Carpenter cancels Make wooden bed: Needs logs.
+Dwarf02 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf37 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf07 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf36 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf29 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf31 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf10 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf40 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf03 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf29 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf08 Testname, Miner cancels Dig: Inappropriate dig square.
+Dwarf23 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.
+Dwarf03 Testname, Planter cancels Plant Seeds: Needs plump helmet spawn.

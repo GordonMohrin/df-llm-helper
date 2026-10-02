@@ -1,0 +1,1 @@
+feinde=0 nah=0 civ=0 Bergleute[3/10 r0 o0 dur0 hun0 eq3] Wache[3/10 r2 o0 dur0 hun1 eq3]

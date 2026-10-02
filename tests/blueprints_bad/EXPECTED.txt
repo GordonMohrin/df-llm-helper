@@ -1,0 +1,10 @@
+bad_unknown_header.csv;E_HEAD
+bad_unbalanced_paren.csv;E_PAREN
+bad_unbalanced_brace.csv;E_BRACE
+bad_size_missing_height.csv;E_SIZE
+bad_unknown_zone_key.csv;E_ZONEKEY
+bad_overlap_workshops.csv;E_OVERLAP
+bad_footprint_outside_map.csv;E_BOUNDS
+bad_empty_file.csv;E_EMPTY
+bad_no_section.csv;E_NOSECTION
+bad_illegal_cell_char.csv;E_CELL

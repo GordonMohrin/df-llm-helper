@@ -1,0 +1,21 @@
+# 20 symptom queries (as an agent would ask them) -> expected KB entries (one of them in the top 3)
+- {q: "miners do not pick up the pickaxe", soll: [e18_pick, e18_release]}
+- {q: "many dig jobs open but everybody smooths the floor", soll: [grabstau_arbeitsgruppen]}
+- {q: "hundreds of cancels Prepare easy meal cookable", soll: [kochschleife]}
+- {q: "Make bed Needs logs loop", soll: [bett_ohne_holz]}
+- {q: "during an alarm all dwarves stand idle", soll: [zuflucht_burrow]}
+- {q: "events.log stays empty after a new game", soll: [waechter_blind]}
+- {q: "game ran for hours unsupervised in time lapse", soll: [deadman_heartbeat, timestream_sicherheit]}
+- {q: "old alert.flag blocks new alarms", soll: [flags_stale]}
+- {q: "caravan has arrived how to trade without a mouse", soll: [handel_ablauf]}
+- {q: "crafts cannot be sold", soll: [fertigwaren_lager]}
+- {q: "dwarf in a strange mood needs material", soll: [strange_mood]}
+- {q: "injured dwarf lying at the map edge", soll: [hospital]}
+- {q: "light aquifer at embark", soll: [aquifer]}
+- {q: "Needs refined coal for coke", soll: [koks_brennstoff]}
+- {q: "manager does not validate the work orders", soll: [manager_buero]}
+- {q: "broker loses the trade job", soll: [makler_squad]}
+- {q: "after loading the jobs no longer run", soll: [nach_laden]}
+- {q: "Give water No water source", soll: [wasser_quelle]}
+- {q: "goblin siege from which population", soll: [belagerung_pop]}
+- {q: "opening the cavern forgotten beast", soll: [kavernen_schleuse]}

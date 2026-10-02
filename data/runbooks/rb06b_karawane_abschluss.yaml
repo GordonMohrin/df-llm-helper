@@ -1,0 +1,22 @@
+id: rb06b_karawane_abschluss
+title: "Caravan: set the selection live, confirm, finish, clean up"
+needs_player_approval: false
+kb: [handel_ablauf]
+symptom:
+  when: "any(c.state == 'AtDepot' for c in caravans) and flags['caravan'].exists"
+  confidence: 0.4
+  explain: "caravan at the depot, caravan.flag open"
+preconditions:
+  - {when: "not danger", msg: "no trading during danger"}
+steps:
+  - {cmd: "claude/handel select --live"}
+  - {cmd: "claude/handel confirm --live"}
+  - {cmd: "claude/handel accept --live"}
+  - {cmd: "claude/handel finish --live"}
+  - {cmd: "claude/handel release --live", why: "release the broker, restore labors"}
+  - {action: "delete_flag:caravan"}
+  - {action: "delete_flag:pause.hold"}
+  - {cmd: "claude/advance run"}
+verify:
+  when: "not flags['caravan'].exists"
+  timeout_s: 30

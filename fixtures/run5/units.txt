@@ -1,0 +1,241 @@
+{
+	"count": 24,
+	"units": [ {
+		"child": false,
+		"id": 3744,
+		"job": "Dig",
+		"name": "Såkzul Rithrobek \"Bellsbarbs\", Miner",
+		"pos": [ 107, 104, 121 ],
+		"profession": "Miner",
+		"skills": "MINING:13, APPRAISAL:4, PLANT:3",
+		"stress": "sehr gluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 3745,
+		"job": "Bring item to depot",
+		"name": "Inod Loloranan \"Letternights\", Planter",
+		"pos": [ 111, 94, 133 ],
+		"profession": "Planter",
+		"skills": "PLANT:10, RECORD_KEEPING:5, STONECRAFT:3",
+		"stress": "sehr gluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 3746,
+		"job": "Dig",
+		"name": "Uzol Ularmeng \"Idollashed\", Miner",
+		"pos": [ 110, 92, 121 ],
+		"profession": "Miner",
+		"skills": "MINING:9, CARPENTRY:6, WOODCUTTING:3",
+		"stress": "sehr gluecklich",
+		"work_details": "Miners, Woodcutters"
+	}, {
+		"child": false,
+		"id": 3747,
+		"job": "Drink",
+		"name": "Kib Abanlisid \"Constructclash\", Stonecrafter",
+		"pos": [ 104, 93, 132 ],
+		"profession": "Stonecrafter",
+		"skills": "STONECRAFT:8, METALCRAFT:5, CONCENTRATION:3",
+		"stress": "sehr gluecklich",
+		"work_details": "Stonecutters, Engravers"
+	}, {
+		"child": false,
+		"id": 3748,
+		"name": "Kosoth ïtebmeban \"Poststreams\", militia captain",
+		"pos": [ 87, 96, 128 ],
+		"profession": "militia captain",
+		"skills": "MELEE_COMBAT:9, DISCIPLINE:8, AXE:7",
+		"stress": "sehr gluecklich",
+		"work_details": "Fisherdwarves"
+	}, {
+		"child": false,
+		"id": 3749,
+		"job": "Make rock crafts",
+		"name": "Mestthos Nubamedëm \"Tealkeys\", Stonecrafter",
+		"pos": [ 89, 98, 130 ],
+		"profession": "Stonecrafter",
+		"skills": "STONECRAFT:6, MASONRY:5, CUT_STONE:4",
+		"stress": "gluecklich",
+		"work_details": "Stonecutters, Engravers"
+	}, {
+		"child": false,
+		"id": 3750,
+		"injured": true,
+		"name": "Monom Rigòthrith \"Craftedbell\", expedition leader",
+		"pos": [ 87, 98, 129 ],
+		"profession": "expedition leader",
+		"skills": "SPEAKING:4, CUT_STONE:2, CONVERSATION:2",
+		"stress": "sehr gluecklich",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 4155,
+		"name": "Sigun Tobulkir \"Canyonmerged\", Stonecrafter",
+		"pos": [ 112, 98, 133 ],
+		"profession": "Stonecrafter",
+		"skills": "STONECRAFT:4, CHEESEMAKING:3, PROCESSFISH:3",
+		"stress": "zufrieden",
+		"work_details": "Stonecutters, Engravers"
+	}, {
+		"child": false,
+		"id": 4160,
+		"job": "Make rock crafts",
+		"name": "Dôbar Dumator \"Roughnesslarge\", Stonecrafter",
+		"pos": [ 99, 95, 130 ],
+		"profession": "Stonecrafter",
+		"skills": "STONECRAFT:11, PROCESSPLANTS:5, JUDGING_INTENT:2",
+		"stress": "neutral",
+		"work_details": "Stonecutters, Engravers"
+	}, {
+		"child": false,
+		"id": 4161,
+		"job": "Detail floor",
+		"name": "Adil Tenshedatîs \"Chancestake\", broker",
+		"pos": [ 86, 97, 129 ],
+		"profession": "broker",
+		"skills": "BONECARVE:10, PERSUASION:4, BOWYER:3",
+		"stress": "neutral",
+		"work_details": "Stonecutters, Engravers"
+	}, {
+		"child": false,
+		"id": 4156,
+		"job": "Plant seeds",
+		"name": "Sibrek Udibittás \"Syruptender\", Gem Cutter",
+		"pos": [ 109, 95, 132 ],
+		"profession": "Gem Cutter",
+		"skills": "MAKE_MUSIC:3, INTIMIDATION:2, JUDGING_INTENT:2",
+		"stress": "zufrieden",
+		"work_details": "Stonecutters, Engravers"
+	}, {
+		"child": false,
+		"id": 4078,
+		"injured": true,
+		"job": "Make rock weapon rack",
+		"name": "ònul Engigakrul \"Flaxentin\", Stonecrafter",
+		"pos": [ 99, 95, 127 ],
+		"profession": "Stonecrafter",
+		"skills": "JUDGING_INTENT:4, CONVERSATION:4, PERSUASION:4",
+		"stress": "zufrieden",
+		"work_details": "Stonecutters, Engravers"
+	}, {
+		"child": false,
+		"id": 4162,
+		"name": "Tun Zegiden \"Tattoopaddle\", Gem Cutter",
+		"pos": [ 99, 94, 131 ],
+		"profession": "Gem Cutter",
+		"skills": "CUTGEM:7, INTIMIDATION:3, PACIFY:3",
+		"stress": "neutral",
+		"work_details": "Stonecutters, Engravers"
+	}, {
+		"child": false,
+		"id": 4079,
+		"injured": true,
+		"name": "Rovod Konossezuk \"Brassslap\", manager",
+		"pos": [ 107, 100, 129 ],
+		"profession": "manager",
+		"skills": "WOODCRAFT:6, CONVERSATION:4, PERSUASION:3",
+		"stress": "zufrieden",
+		"work_details": "Stonecutters, Engravers"
+	}, {
+		"child": false,
+		"id": 4080,
+		"name": "Mafol Alåthnish \"Boltedtrade\", Wrestler",
+		"pos": [ 88, 98, 128 ],
+		"profession": "Wrestler",
+		"skills": "METALCRAFT:10, DISCIPLINE:6, SITUATIONAL_AWARENESS:6",
+		"stress": "zufrieden",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4081,
+		"job": "Bring item to depot",
+		"name": "Avuz Lemisoddom \"Vinecloistered\", Stonecrafter",
+		"pos": [ 101, 92, 132 ],
+		"profession": "Stonecrafter",
+		"skills": "CONVERSATION:3, LYING:3, JUDGING_INTENT:3",
+		"stress": "zufrieden",
+		"work_details": "Stonecutters, Engravers"
+	}, {
+		"child": false,
+		"id": 414,
+		"job": "Dig",
+		"name": "Tekkud Koganlerteth \"Boatstangles\", Miner",
+		"pos": [ 114, 86, 121 ],
+		"profession": "Miner",
+		"skills": "MINING:6, STONECRAFT:2, DISCIPLINE:0",
+		"stress": "zufrieden",
+		"work_details": "Miners"
+	}, {
+		"child": false,
+		"id": 1029,
+		"injured": true,
+		"job": "Rest",
+		"name": "Tholtig Rithvumom \"Bellssavant\", Peasant",
+		"pos": [ 103, 95, 130 ],
+		"profession": "Peasant",
+		"skills": "SPEAKING:2, SITUATIONAL_AWARENESS:0, PACIFY:0",
+		"stress": "sehr ungluecklich",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 4163,
+		"job": "Store item in stockpile",
+		"name": "Olon Ogradkel \"Reasonmetals\", Soap Maker",
+		"pos": [ 99, 95, 129 ],
+		"profession": "Soap Maker",
+		"skills": "COMEDY:3, CONVERSATION:2, SPEAKING:2",
+		"stress": "neutral",
+		"work_details": ""
+	}, {
+		"child": true,
+		"id": 4165,
+		"name": "Ber Thadudib \"Crowdedsyrups\", Dwarven Baby",
+		"pos": [ 103, 98, 132 ],
+		"profession": "Dwarven Baby",
+		"skills": "",
+		"stress": "neutral",
+		"work_details": ""
+	}, {
+		"child": false,
+		"id": 344,
+		"job": "Bring item to depot",
+		"name": "Unib Likotònul \"Inkmirrors\", Stonecutter",
+		"pos": [ 111, 97, 133 ],
+		"profession": "Stonecutter",
+		"skills": "POETRY:3, DANCE:2, CUT_STONE:1",
+		"stress": "zufrieden",
+		"work_details": "Stonecutters, Engravers"
+	}, {
+		"child": false,
+		"id": 3473,
+		"job": "Eat",
+		"name": "Eral Likotginet \"Inkycrews\", Wrestler",
+		"pos": [ 103, 98, 132 ],
+		"profession": "Wrestler",
+		"skills": "SITUATIONAL_AWARENESS:5, DISCIPLINE:5, CONSOLE:4",
+		"stress": "sehr gluecklich",
+		"work_details": "Stonecutters, Engravers"
+	}, {
+		"child": false,
+		"id": 3476,
+		"injured": true,
+		"job": "Bring item to depot",
+		"name": "Etur Lavathkikrost \"Roundedstockades\", Carpenter",
+		"pos": [ 101, 99, 130 ],
+		"profession": "Carpenter",
+		"skills": "CARPENTRY:3, CONCENTRATION:3, DODGING:3",
+		"stress": "sehr gluecklich",
+		"work_details": "Stonecutters, Engravers"
+	}, {
+		"child": false,
+		"id": 3449,
+		"name": "Tosid Kûbukokol \"Lancevoiced\", Carpenter",
+		"pos": [ 105, 94, 132 ],
+		"profession": "Carpenter",
+		"skills": "POETRY:3, CONVERSATION:3, DANCE:3",
+		"stress": "zufrieden",
+		"work_details": "Stonecutters, Engravers"
+	} ]
+}

@@ -1,0 +1,87 @@
+{
+	"betten": 7,
+	"buerger": 24,
+	"caravan": {
+		"anzahl": 1,
+		"haendler": [ {
+			"am_rand": false,
+			"id": 4168,
+			"race": "HUMAN",
+			"x": 163,
+			"y": 154,
+			"z": 134
+		}, {
+			"am_rand": false,
+			"id": 4169,
+			"race": "HORSE",
+			"x": 163,
+			"y": 155,
+			"z": 134
+		}, {
+			"am_rand": false,
+			"id": 4171,
+			"race": "HUMAN",
+			"x": 165,
+			"y": 162,
+			"z": 134
+		}, {
+			"am_rand": false,
+			"id": 4172,
+			"race": "HORSE",
+			"x": 166,
+			"y": 163,
+			"z": 133
+		} ],
+		"time_remaining": 3038,
+		"zustand": "Approaching"
+	},
+	"datum": {
+		"day": 12,
+		"month": "Hematite",
+		"season": "Summer",
+		"text": "12. Hematite, Jahr 102",
+		"year": 102,
+		"year_tick": 114503
+	},
+	"diagnose": [ "HEIMAT-BERICHT VERALTET: Karawane hat seit langem nichts gemeldet (Reichtum 18002 statt 46183, Pop 15 statt 24)" ],
+	"einheiten_in_liste": 100,
+	"erreichbarkeit": {
+		"liste": [],
+		"nicht_erreichbar": 0,
+		"randpunkte": 8
+	},
+	"fort": {
+		"ausgegrabene_kacheln": 2676,
+		"exportiert": 1010,
+		"gefaehrlichkeit": 0,0,
+		"importiert": 10069,
+		"migrant_wave_idx": 0,
+		"pop": 24,
+		"tote_gesamt": 0,
+		"tote_hist": [ 0, 0, 0, 0, 0 ],
+		"wohlstand_gesamt": 46183
+	},
+	"heimat_bericht": {
+		"gefaehrlichkeit": 0,0,
+		"hinweis": "Stand der LETZTEN Karawanen-Abreise (nur dann aktualisiert)",
+		"importiert": 7458,
+		"migrant_wave_idx": 1,
+		"pop": 15,
+		"tote_hist": [ 0, 0, 0 ],
+		"veraltet": true,
+		"wohlstand": 18002
+	},
+	"jahreszeit": {
+		"hinweis": "Migrantenentscheidung zu Fruehling/Sommer/Herbst-Beginn (Gamelog \"attracted no migrants this season\"), im Winter keine",
+		"season": 1,
+		"ticks_bis_naechste": 87097
+	},
+	"limits": {
+		"population_cap": 155,
+		"strict_population_cap": 300,
+		"visitor_cap": 300
+	},
+	"meeting_halls": 5,
+	"timed_events": [ "Migrants", "Diplomat", "EvaluateAttackAndSendImmediateArmy", "WildlifeMischievous", "WildlifeMischievous", "WildlifeCurious", "WildlifeMischievous", "WildlifeFlier" ],
+	"tueren_verboten": 0
+}

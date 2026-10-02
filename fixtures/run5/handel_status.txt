@@ -1,0 +1,43 @@
+{
+	"broker": {
+		"id": 4161,
+		"in_depot": false,
+		"job": "DetailFloor",
+		"x": 86,
+		"y": 97,
+		"z": 129
+	},
+	"caravans": [ {
+		"entity": 35,
+		"idx": 0,
+		"mood": 50,
+		"name": "Muboomon",
+		"ngoods": 0,
+		"offended": false,
+		"seized": false,
+		"state": "Approaching",
+		"state_id": 1,
+		"time_remaining": 3055
+	} ],
+	"civ_alert_idx": 0,
+	"depots": [ {
+		"anyone_can_trade": false,
+		"id": 1389,
+		"items_ours": 13,
+		"items_theirs": 0,
+		"jobs": [ "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot", "BringItemToDepot" ],
+		"trader_requested": true,
+		"x": 112,
+		"y": 98,
+		"z": 133
+	} ],
+	"focus": [ "dwarfmode/Default" ],
+	"ok": true,
+	"trade_ui": {
+		"choosing_merchant": false,
+		"focus_exact": false,
+		"havetalker": 1,
+		"open": false,
+		"stillunloading": 0
+	}
+}

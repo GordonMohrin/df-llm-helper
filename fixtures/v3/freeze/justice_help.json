@@ -1,0 +1,3 @@
+{"_source": "SYNTHETIC replay of the live incident Run 5 Y109: Info/Justice OPEN_CASES and Help open, pause_state false, game time stood still for 5 minutes",
+ "screens": ["dwarfmode/Info/JUSTICE/OPEN_CASES", "dwarfmode/Help"], "paused": false, "fc": 4711000, "yt": 120000,
+ "time_moves_with_window": false}

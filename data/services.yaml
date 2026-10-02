@@ -1,0 +1,21 @@
+# Services after load/restart (spec 09). Order = start order; depends = must be running/ok first.
+# key = repeat-util key (checked via isScheduled), check = own check command (preconditions).
+# start: null = do not start automatically (reason in note).
+services:
+  - {name: config, check: "claude/config", kind: precondition, note: "Map constants must be set (config.lua)"}
+  - {name: watchdog, key: claude-watchdog, start: "claude/watchdog start", depends: [config]}
+  - {name: watchdog_alert, key: claude-watchdog-alert, start: null, depends: [watchdog], note: "comes with claude/watchdog start; if it is missing alone: claude/watchdog stop, then start"}
+  - {name: ueberwacher, key: claude-ueberwacher, start: "claude/ueberwacher start", depends: [watchdog]}
+  - {name: milguard, key: claude-milguard, start: "claude/mil guard start", depends: [watchdog]}
+  - {name: arbeit, key: claude-arbeit, start: "claude/arbeit start", depends: [config]}
+  - {name: orders, key: claude-orders, start: "claude/orders start", depends: [config]}
+  - {name: auslastung, key: claude-auslastung, start: "claude/auslastung start", depends: [config]}
+  - {name: trinken, key: claude-trinken, start: "claude/trinken start", depends: [config]}
+  - {name: essen, key: claude-essen, start: "claude/essen start", depends: [config]}
+  - {name: material, key: claude-material, start: "claude/material start", depends: [config]}
+  - {name: gesund, key: claude-gesund, start: "claude/gesund start", depends: [config]}
+  - {name: migranten, key: claude-migranten, start: "claude/migranten start", depends: [config]}
+  - {name: schau, key: claude-schau, start: null, depends: [config], note: "HUD ticker, not active as a permanent job live on 01.10.; if needed claude/schau start"}
+  - {name: raster, key: claude-raster, start: "claude/raster start", depends: [config]}
+  - {name: kohle, key: claude-kohle, start: null, depends: [config], note: "Permanent job deliberately off (live 01.10.: 9.4 s freeze per run); if needed run claude/kohle run 10 once"}
+  - {name: tempo, key: claude-tempo, start: null, depends: [watchdog], note: "Timestream only via 'dfpilot tempo on' with a guard check (the player, 01.10., decision 6)"}

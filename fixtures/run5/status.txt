@@ -1,0 +1,80 @@
+{
+	"alerts": [ "7 von 23 Zwergen untaetig", "3 Jobs gesperrt (suspended)" ],
+	"center": {
+		"x": 104,
+		"y": 95,
+		"z": 132
+	},
+	"date": {
+		"day": 12,
+		"month": "Hematite",
+		"season": "Summer",
+		"text": "12. Hematite, Jahr 102",
+		"year": 102,
+		"year_tick": 114200
+	},
+	"drink_days": 76,
+	"food_days": 189,
+	"fort": "Windrings",
+	"jobs": {
+		"open": 199,
+		"suspended": 3
+	},
+	"map_size": {
+		"x": 192,
+		"y": 192,
+		"z": 153
+	},
+	"mood": {
+		"content": 14,
+		"happy": 9,
+		"miserable": 0,
+		"unhappy": 1
+	},
+	"paused": true,
+	"population": {
+		"adults": 23,
+		"children": 1,
+		"idle": 7,
+		"total": 24
+	},
+	"stock": {
+		"barrels": 21,
+		"bars": 0,
+		"beds": 0,
+		"bins": 0,
+		"boulders": 119,
+		"cloth": 9,
+		"drink": 109,
+		"food": 108,
+		"seeds": 26,
+		"wood": 0
+	},
+	"threats": [],
+	"top_jobs": [ {
+		"job": "BringItemToDepot",
+		"n": 4
+	}, {
+		"job": "Dig",
+		"n": 3
+	}, {
+		"job": "MakeCrafts",
+		"n": 2
+	}, {
+		"job": "DetailFloor",
+		"n": 1
+	}, {
+		"job": "PlantSeeds",
+		"n": 1
+	}, {
+		"job": "Eat",
+		"n": 1
+	}, {
+		"job": "ConstructWeaponRack",
+		"n": 1
+	}, {
+		"job": "StoreItemInStockpile",
+		"n": 1
+	} ],
+	"wealth": 46183
+}

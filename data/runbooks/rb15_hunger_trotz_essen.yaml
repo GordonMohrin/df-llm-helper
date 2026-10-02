@@ -1,0 +1,17 @@
+id: rb15_hunger_trotz_essen
+title: "Hunger despite meals: reachability/cancel loop"
+needs_player_approval: false
+kb: [hunger_erreichbarkeit]
+symptom:
+  when: "len([c for c in citizens if c.hunger is not None and c.hunger > th.hunger_crit]) >= 3 and meals is not None and meals > 100"
+  confidence: 0.6
+  explain: "{len([c for c in citizens if c.hunger is not None and c.hunger > th.hunger_crit])} hungry with {meals} meals"
+  signals:
+    - {when: "cancel('could not find path') >= 5", add: 0.3, why: "cancels 'Could not find path'"}
+    - {when: "len(injured) > 0", add: 0.05, why: "injured (feeding by caretakers)"}
+steps:
+  - {cmd: "claude/units"}
+  - {manual: "Check paths: forbidden doors, burrow borders, food only in unreachable stockpiles? Orderlies work detail for the bedridden"}
+verify:
+  when: "len([c for c in citizens if c.hunger is not None and c.hunger > th.hunger_crit]) < 3"
+  timeout_s: 120

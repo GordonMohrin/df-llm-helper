@@ -1,0 +1,5 @@
+{"_source": "LIVE measurements 01.10.2026 (Run 5, Y109), numbers only; used by the mock game in tests/test_perf.py",
+ "claude-raster": {"freeze_s": 11.0, "period_s": 25.0},
+ "claude-kohle": {"run_s": 9.4},
+ "claude-bauprog": {"run_s": 3.5},
+ "guard_cycle": {"run_s": 5.9, "commands": 13}}

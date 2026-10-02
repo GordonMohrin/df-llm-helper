@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+config.yaml
+data/state.db*
+data/exceptions.jsonl.local
+data/kb/journal.jsonl
+runtime/
+*.egg-info/
+build/
+dist/

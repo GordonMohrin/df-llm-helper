@@ -1,0 +1,13 @@
+{
+	"banned": true,
+	"drinks": 109,
+	"fish": 20,
+	"fish_raw": 6,
+	"fish_raw_rotten": 0,
+	"gatherjobs": 0,
+	"meals": 52,
+	"meat": 0,
+	"ph": 73,
+	"plants": 25,
+	"rotten": 0
+}

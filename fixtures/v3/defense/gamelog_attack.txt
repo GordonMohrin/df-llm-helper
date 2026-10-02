@@ -1,0 +1,7 @@
+# SYNTHETIC gamelog excerpt (invented message texts, not verified against DF 53.16)
+The goblin axeman has been caught in a cage trap!
+A vile force of darkness has arrived!
+The goblin lasher is struck by a falling stone from a trap!
+The goblin lasher has been struck down.
+The goblin bowman is caught in a cage trap!
+Urist McMechanic cancels Load Stone Trap: Needs stone.

@@ -1,0 +1,54 @@
+# Camera profile 'ambient' (default since 2026-10-01, spec v3-10): "a bit of everything" - furniture/building,
+# burial, harvest, fetching water; almost never combat training or sparring. First matching pattern wins
+# (Lua pattern on the DF job type name); cat = category for `dfpilot camera stats`.
+name: ambient
+description: "a bit of everything: building, furniture, burial, harvest, water; no sparring"
+mode: auto
+job_weights:
+  - {p: "^PlaceItemInTomb", w: 8, cat: burial}
+  - {p: "^ConstructBuilding", w: 7, cat: build}
+  - {p: "^Construct", w: 6, cat: furniture}
+  - {p: "^PlantSeeds", w: 6, cat: harvest}
+  - {p: "^HarvestPlants", w: 6, cat: harvest}
+  - {p: "^GatherPlants", w: 6, cat: harvest}
+  - {p: "^GiveWater", w: 7, cat: water}
+  - {p: "^FillWaterskin", w: 7, cat: water}
+  - {p: "^PullLever", w: 5, cat: lever}
+  - {p: "^DestroyBuilding", w: 4, cat: build}
+  - {p: "^PrepareMeal", w: 4, cat: kitchen}
+  - {p: "^Brew", w: 4, cat: kitchen}
+  - {p: "^Spar", w: 0, cat: sparring}
+  - {p: "^Dig", w: 3, cat: dig}
+  - {p: "^Carve", w: 3, cat: dig}
+  - {p: "^Smooth", w: 3, cat: dig}
+  - {p: "^Fell", w: 3, cat: wood}
+  - {p: "^Make", w: 3, cat: craft}
+  - {p: "^Smelt", w: 3, cat: craft}
+  - {p: "^Forge", w: 3, cat: craft}
+  - {p: "^Weave", w: 3, cat: craft}
+  - {p: "^Spin", w: 3, cat: craft}
+  - {p: "^Cut", w: 3, cat: craft}
+  - {p: "^Engrave", w: 3, cat: craft}
+  - {p: "^Mill", w: 2, cat: food}
+  - {p: "^Process", w: 2, cat: food}
+  - {p: "^Butcher", w: 2, cat: food}
+  - {p: "^Tan", w: 2, cat: craft}
+  - {p: "^Fish", w: 2, cat: food}
+  - {p: "^Hunt", w: 2, cat: food}
+  - {p: "^Extract", w: 2, cat: craft}
+  - {p: "^Collect", w: 2, cat: food}
+  - {p: "^Store", w: 1, cat: haul}
+  - {p: "^Haul", w: 1, cat: haul}
+  - {p: "^Clean", w: 1, cat: haul}
+  - {p: "^Sleep", w: 0, cat: rest}
+  - {p: "^Rest", w: 0, cat: rest}
+  - {p: "^Eat", w: 0, cat: rest}
+  - {p: "^Drink", w: 0, cat: rest}
+  - {p: "^Get", w: 0, cat: rest}
+default_weight: 1
+idle_weight: 0.01
+soldier_idle_weight: 0.005
+variety_factor: 0.3
+recent_factor: 0.15
+dwell_s: [18, 24]
+pan_steps: 4

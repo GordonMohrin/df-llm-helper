@@ -1,0 +1,14 @@
+id: rb10_timestream
+title: "Timestream running despite risk (supplies, mood, danger, caravan)"
+needs_player_approval: false
+kb: [timestream_sicherheit]
+symptom:
+  when: "timestream and ((drink_days is not None and drink_days < 100) or moods > 0 or danger or caravan_active)"
+  confidence: 0.9
+  explain: "timestream on with drinks {drink_days} d, moods {moods}, danger {danger}, caravan {caravan_active}"
+steps:
+  - {cmd: "claude/tempo off"}
+  - {cmd: "claude/tempo status"}
+verify:
+  when: "not timestream"
+  timeout_s: 30

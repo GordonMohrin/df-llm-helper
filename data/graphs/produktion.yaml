@@ -1,0 +1,28 @@
+# Dependency graph for the bottleneck watcher (spec 07). Node = resource/product, needs = all required,
+# any = one alternative suffices. stock = path in the stock data (claude/material status 'stock', '+' sums,
+# 'wood_spare' = wood above the reserve). trade = category in data/trade/wants.yaml.
+# show: false = do not name in the blocked chain; group = bottleneck counts as this node.
+# Source of the chains: tools/scopes/material.md (Run 5: coke needs a [FUEL] starter, charcoal 1:1 from wood, 9 coke per coal).
+nodes:
+  - {id: wood, label: Wood, stock: wood, trade: wood}
+  - {id: wood_spare, label: Wood below reserve, stock: wood_spare, base: wood, show: false}
+  - {id: charcoal, label: Charcoal starter, needs: [wood_spare]}
+  - {id: coal, label: Coal, stock: coal, reserve: coal_reserve, trade: fuel}   # the player 01.10.: 20 coal as reserve
+  - {id: coke_make, label: Coke, needs: [coal, charcoal]}
+  - {id: fuel, label: Fuel, stock: coke, any: [coke_make, charcoal], trade: fuel, show: false}
+  - {id: iron_ore, label: Iron ore, stock: "ore.HEMATITE+ore.MAGNETITE+ore.LIMONITE", trade: metal}
+  - {id: iron_bar, label: Iron bars, stock: bars.IRON, needs: [iron_ore, fuel], trade: metal, show: false}
+  - {id: forge, label: Forge, needs: [iron_bar, fuel]}
+  - {id: pick, label: Pickaxes, stock: "have.WEAPON:ITEM_WEAPON_PICK", needs: [forge], trade: tools}
+  - {id: chain, label: Chain, stock: chain, needs: [forge], trade: tools}
+  - {id: bucket, label: Bucket, stock: bucket, any: [wood, forge], trade: tools}
+  - {id: mechanism, label: Mechanism, stock: mechanism}
+  - {id: block, label: Blocks, stock: blocks}
+  - {id: well, label: Well, needs: [chain, bucket, mechanism, block]}
+  - {id: bed, label: Beds, needs: [wood]}
+  - {id: mood_wood, label: Wood mood reserve, stock: wood, reserve: wood_reserve, trade: wood, group: wood}
+goals:
+  - {id: pick, target: 15, label: Pickaxe goal}
+  - {id: well, target: 1, label: Well}
+  - {id: bed, target: 1, label: Beds}
+  - {id: mood_wood, target: 1, label: Wood mood reserve}

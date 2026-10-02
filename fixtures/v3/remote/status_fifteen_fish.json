@@ -1,0 +1,264 @@
+{
+ "_note": "SYNTHETIC fixture (not recorded live): numbers follow the run-5 E18/remote-worker notes; the Lua status script is live-untested. 15 civilians with FISH (run 5), all near the fort and fed.",
+ "ok": true,
+ "citizens": [
+  {
+   "id": 5000,
+   "name": "Dwarf 5000",
+   "x": 90,
+   "y": 95,
+   "z": 130,
+   "hunger": 3000,
+   "thirst": 5000,
+   "job": null,
+   "squad": false,
+   "child": false,
+   "hospital": null,
+   "labors": [
+    "FISH"
+   ]
+  },
+  {
+   "id": 5001,
+   "name": "Dwarf 5001",
+   "x": 90,
+   "y": 95,
+   "z": 130,
+   "hunger": 4000,
+   "thirst": 5000,
+   "job": "Haul",
+   "squad": false,
+   "child": false,
+   "hospital": null,
+   "labors": [
+    "FISH"
+   ]
+  },
+  {
+   "id": 5002,
+   "name": "Dwarf 5002",
+   "x": 90,
+   "y": 95,
+   "z": 130,
+   "hunger": 5000,
+   "thirst": 5000,
+   "job": null,
+   "squad": false,
+   "child": false,
+   "hospital": null,
+   "labors": [
+    "FISH"
+   ]
+  },
+  {
+   "id": 5003,
+   "name": "Dwarf 5003",
+   "x": 90,
+   "y": 95,
+   "z": 130,
+   "hunger": 6000,
+   "thirst": 5000,
+   "job": "Haul",
+   "squad": false,
+   "child": false,
+   "hospital": null,
+   "labors": [
+    "FISH"
+   ]
+  },
+  {
+   "id": 5004,
+   "name": "Dwarf 5004",
+   "x": 90,
+   "y": 95,
+   "z": 130,
+   "hunger": 7000,
+   "thirst": 5000,
+   "job": null,
+   "squad": false,
+   "child": false,
+   "hospital": null,
+   "labors": [
+    "FISH"
+   ]
+  },
+  {
+   "id": 5005,
+   "name": "Dwarf 5005",
+   "x": 90,
+   "y": 95,
+   "z": 130,
+   "hunger": 8000,
+   "thirst": 5000,
+   "job": "Haul",
+   "squad": false,
+   "child": false,
+   "hospital": null,
+   "labors": [
+    "FISH"
+   ]
+  },
+  {
+   "id": 5006,
+   "name": "Dwarf 5006",
+   "x": 90,
+   "y": 95,
+   "z": 130,
+   "hunger": 9000,
+   "thirst": 5000,
+   "job": null,
+   "squad": false,
+   "child": false,
+   "hospital": null,
+   "labors": [
+    "FISH"
+   ]
+  },
+  {
+   "id": 5007,
+   "name": "Dwarf 5007",
+   "x": 90,
+   "y": 95,
+   "z": 130,
+   "hunger": 10000,
+   "thirst": 5000,
+   "job": "Haul",
+   "squad": false,
+   "child": false,
+   "hospital": null,
+   "labors": [
+    "FISH"
+   ]
+  },
+  {
+   "id": 5008,
+   "name": "Dwarf 5008",
+   "x": 90,
+   "y": 95,
+   "z": 130,
+   "hunger": 11000,
+   "thirst": 5000,
+   "job": null,
+   "squad": false,
+   "child": false,
+   "hospital": null,
+   "labors": [
+    "FISH"
+   ]
+  },
+  {
+   "id": 5009,
+   "name": "Dwarf 5009",
+   "x": 90,
+   "y": 95,
+   "z": 130,
+   "hunger": 12000,
+   "thirst": 5000,
+   "job": "Haul",
+   "squad": false,
+   "child": false,
+   "hospital": null,
+   "labors": [
+    "FISH"
+   ]
+  },
+  {
+   "id": 5010,
+   "name": "Dwarf 5010",
+   "x": 90,
+   "y": 95,
+   "z": 130,
+   "hunger": 13000,
+   "thirst": 5000,
+   "job": null,
+   "squad": false,
+   "child": false,
+   "hospital": null,
+   "labors": [
+    "FISH"
+   ]
+  },
+  {
+   "id": 5011,
+   "name": "Dwarf 5011",
+   "x": 90,
+   "y": 95,
+   "z": 130,
+   "hunger": 14000,
+   "thirst": 5000,
+   "job": "Haul",
+   "squad": false,
+   "child": false,
+   "hospital": null,
+   "labors": [
+    "FISH"
+   ]
+  },
+  {
+   "id": 5012,
+   "name": "Dwarf 5012",
+   "x": 90,
+   "y": 95,
+   "z": 130,
+   "hunger": 15000,
+   "thirst": 5000,
+   "job": null,
+   "squad": false,
+   "child": false,
+   "hospital": null,
+   "labors": [
+    "FISH"
+   ]
+  },
+  {
+   "id": 5013,
+   "name": "Dwarf 5013",
+   "x": 90,
+   "y": 95,
+   "z": 130,
+   "hunger": 16000,
+   "thirst": 5000,
+   "job": "Haul",
+   "squad": false,
+   "child": false,
+   "hospital": null,
+   "labors": [
+    "FISH"
+   ]
+  },
+  {
+   "id": 5014,
+   "name": "Dwarf 5014",
+   "x": 90,
+   "y": 95,
+   "z": 130,
+   "hunger": 17000,
+   "thirst": 5000,
+   "job": null,
+   "squad": false,
+   "child": false,
+   "hospital": null,
+   "labors": [
+    "FISH"
+   ]
+  }
+ ],
+ "supplies": [
+  {
+   "kind": "food",
+   "id": 500,
+   "x": 92,
+   "y": 97,
+   "z": 130
+  },
+  {
+   "kind": "well",
+   "id": 501,
+   "x": 88,
+   "y": 96,
+   "z": 129
+  }
+ ],
+ "fish": 30,
+ "wd_everybody": []
+}

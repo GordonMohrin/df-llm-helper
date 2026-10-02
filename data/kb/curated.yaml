@@ -1,0 +1,297 @@
+# Curated knowledge entries (reviewed). Sources: SPEC appendix A, CLAUDE.md, POSTMORTEMs, orchestrator session Run 5.
+- id: e18_pick
+  title: "E18: miners do not pick up pickaxes"
+  symptom_keywords: [pickaxe, pick, e18, dig jobs, work_weapons, miner does not dig, tool]
+  ursache: "Only dwarves with a brought/assigned pick dig; free picks (often foreign=true from the wagon) are not picked up. work_weapons stays small."
+  fix: "Militia squad 'Miners' (leader: claude/mil create <name> <id> --apply), claude/mil add <squad> <id> --apply, claude/mil workmode <squad> on --apply (uniform = pick only, labor MINE, group Miners). Verify: work_weapons/diggers rise within <= 90 s. Do not run workmode repeatedly (it wipes assignments). Runbook rb01_e18_pick."
+  quelle: "SPEC appendix A1; session Run 5 (12 interventions 07:04-08:50)"
+  run: 5
+  scopes: [erkundung, bau, militaer, wirtschaft]
+- id: e18_release
+  title: "E18: pick assigned but not picked up (stale assignment)"
+  symptom_keywords: [pick holder nil, removed_assignments 0, items_assigned, stale, workmode has no effect]
+  ursache: "Old item IDs are still listed in squad.positions[].equipment.assigned_items and plotinfo.equipment.items_assigned.WEAPON."
+  fix: "Move the IDs to items_unassigned.WEAPON, then run workmode exactly ONCE more, wait 60-90 s, check work_weapons. 'mil update' alone does nothing. Run 5: 4 of 5 picks fixed this way. Touching equipment data is an orchestrator decision."
+  quelle: "Session Run 5; memory reference_df_e18_miliz_picken"
+  run: 5
+  scopes: [militaer, erkundung]
+- id: fairplay_foreign
+  title: "Fair play: foreign flag on the embark tools"
+  symptom_keywords: [foreign, embark, picks, exception, fair play]
+  ursache: "Embark picks/axes are foreign=true and are not used."
+  fix: "Only with the player's yes (standing exception since Run 4, RUN5-START lesson 3) and an entry in the exception register (dfpilot exception add FP08 --objects <ids>). Runbook rb01b_e18_foreign."
+  quelle: "CLAUDE.md fair play; SPEC 3"
+  run: 5
+  scopes: [infra, erkundung]
+- id: grabstau_arbeitsgruppen
+  title: "Dig backlog: everybody smooths/engraves instead of digging"
+  symptom_keywords: [dig backlog, dig jobs open, smoothfloor, detailfloor, everybodydoesthis, stonecutters, engravers]
+  ursache: "Work details Stonecutters/Engravers in mode EverybodyDoesThis: miners smooth instead of digging."
+  fix: "Mode OnlySelectedDoesThis, only 2-3 dwarves; Miners group = pick carriers only. Runbook rb02_grabstau. Run 5 07:23: Dig=75, SmoothFloor=22 -> after the change Uzol digs."
+  quelle: "SPEC appendix A2; session Run 5"
+  run: 5
+  scopes: [bau, auslastung, erkundung]
+- id: kochschleife
+  title: "Cooking loop 'Prepare easy meal: Needs unrotten cookable solid item'"
+  symptom_keywords: [cooking, cookable, meal, cancel, kitchen, prepare meal]
+  ursache: "Cooking order without ingredients (the watchdog queued orders whenever food<60)."
+  fix: "Queue only with meat >= 2, eat plump helmets raw (ban cooking them); if plants are banned: ban-cooking brew mill fruit --unban. NO ban-cooking all/seeds, NO seedwatch."
+  quelle: "SPEC appendix A3; CLAUDE.md economy"
+  run: 5
+  scopes: [essen, wirtschaft]
+- id: bett_ohne_holz
+  title: "'Make bed: Needs logs' cancel loop"
+  symptom_keywords: [bed, needs logs, wood, logs, carpenter, cancel loop]
+  ursache: "Bed orders without wood (desert, no trees); Run 5: 5600x in the gamelog (watchdog feed)."
+  fix: "Wooden furniture only with free logs (material gate in the watchdog, D6); get wood via trade/cavern; there are no stone beds."
+  quelle: "Session Run 5; gamelog_selected.txt"
+  run: 5
+  scopes: [wirtschaft, bau]
+- id: wasser_quelle
+  title: "'Give water: No water source' - injured get no water"
+  symptom_keywords: [give water, no water source, water, well, injured drink]
+  ursache: "No well/water source reachable (Run 5 desert: river 100+ tiles away)."
+  fix: "Provide a well/channel or water containers; until then supply drinks for the caretakers; the hospital needs a water source."
+  quelle: "gamelog_selected.txt (61x); inbox trinken+essen"
+  run: 5
+  scopes: [gesundheit, trinken]
+- id: zuflucht_burrow
+  title: "Alert burrow too small / never rebuild it during a fight"
+  symptom_keywords: [civilian alert, alarm, burrow, refuge, idle during alarm, pickupequipment]
+  ursache: "Burrow without beds/food/water/workshops -> at alarm >= 50 % idle."
+  fix: "Burrow = beds+food+water+workshops+stockpiles, build ahead of time (claude/mil refuge). Never rebuild during a fight (civilians run past the enemy). Give the rect with z1<=z2 (130,127 yields 0 blocks)."
+  quelle: "SPEC appendix A4; CLAUDE.md; session Run 5"
+  run: 5
+  scopes: [verteidigung, militaer]
+- id: waechter_blind
+  title: "Guard blind: events.log empty, last-report-id too large"
+  symptom_keywords: [guard, watcher, blind, last-report-id, events.log empty, new game, monitoring]
+  ursache: "After a new game report IDs restart at 0; last-report-id.txt (e.g. 28181) stays -> no report is read. Runs 4 and 5."
+  fix: "Set the file to the highest report ID (dfpilot guard does this), restart the guard (Invoke-CimMethod Win32_Process Create; Start-Process -WindowStyle Hidden dies). Runbook rb05_waechter_blind."
+  quelle: "SPEC appendix A5; session Run 5 08:01"
+  run: 5
+  scopes: [infra, orchestrator]
+- id: deadman_heartbeat
+  title: "Deadman: game runs on without supervision"
+  symptom_keywords: [heartbeat, deadman, unattended, fps, timestream, time lapse, run 4]
+  ursache: "Run 4: after a question to the player the game kept running for 8.4 h in timestream, 0 citizens."
+  fix: "The orchestrator touches tools/heartbeat.txt (dfpilot heartbeat) at least every 20 min; older -> fps 30 + CRITICAL. Timestream only under active supervision."
+  quelle: "POSTMORTEM-run4; SPEC F8"
+  run: 5
+  scopes: [infra, orchestrator]
+- id: flags_stale
+  title: "Stale flags block alarms"
+  symptom_keywords: [flag, alert.flag, caravan.flag, food.flag, outdated, stale, delete]
+  ursache: "Run 3: an old alert.flag (horse dead) swallowed the alarm for the forgotten beast (14 dead)."
+  fix: "Delete flags after editing; dfpilot autopilot deletes stale flags without danger automatically (stale_* rules)."
+  quelle: "CLAUDE.md; UEBERWACHUNG.md"
+  run: 3
+  scopes: [infra, orchestrator]
+- id: handel_ablauf
+  title: "Caravan: trading without a desktop"
+  symptom_keywords: [caravan, trade, broker, tradeatdepot, depot, merchant]
+  ursache: "At high speed the caravan leaves without trading (Run 2); broker job missing."
+  fix: "Pause, quicksave, claude/handel prep --live, broker --live --force-job (TradeAtDepot, needed every time in Run 5), plan, mark, open (2x), check select --dry, select --live, confirm, accept, finish, release. Broker without squad/manager office. Runbooks rb06/rb06b."
+  quelle: "SPEC appendix A6; HANDEL-AUTOMATION.md; session Run 5 (3 caravans)"
+  run: 5
+  scopes: [handel]
+- id: fertigwaren_lager
+  title: "Crafts unsellable: no finished-goods stockpile with containers"
+  symptom_keywords: [finished goods, bins, containers, stockpile full, crafts, small trade value]
+  ursache: "Without a stockpile goods stay in the workshops; without bins a tile holds only 1 item (Run 5: ~650 crafts, buying budget ~800 instead of thousands)."
+  fix: "Finished-goods stockpile (quickfort g) with bins near the workshops; bins need wood; tie MakeCrafts to storage space. Runbook rb20."
+  quelle: "Session Run 5 08:57-09:00"
+  run: 5
+  scopes: [bau, wirtschaft, handel]
+- id: strange_mood
+  title: "Strange mood without workshop/material -> death"
+  symptom_keywords: [mood, strange mood, artifact, workshop, material, madness, possessed]
+  ursache: "Missing workshop type or unreachable material; a mood lasts ~50000 ticks."
+  fix: "claude/mood status|prebuild, keep stock (stone/metal/rough gems/wood/leather/silk/bone), timestream off during a mood. Runbook rb07."
+  quelle: "SPEC appendix A7; mood.lua (Run 3: 4 mood deaths)"
+  run: 5
+  scopes: [gesundheit, wirtschaft]
+- id: hospital
+  title: "Injured dwarf without a hospital"
+  symptom_keywords: [injured, hospital, sleeping, leg gone, bedridden, wounded]
+  ursache: "Without a hospital zone + beds the injured stays lying (Run 5: Tholtig 1029 at the map edge, sleep 126k-148k)."
+  fix: "Hospital zone m{location=hospital allow=residents} + 2 beds (+ table, chest, water), wait for the rescue. Runbook rb08."
+  quelle: "SPEC appendix A8; session Run 5"
+  run: 5
+  scopes: [gesundheit]
+- id: aquifer
+  title: "Aquifer site / aquifer layers"
+  symptom_keywords: [aquifer, light aquifer, groundwater, site, embark, ground]
+  ursache: "Run 4: ground aquifer z106/107 blocked access to stone, everybody died."
+  fix: "Embark popup 'light aquifer' = unsuitable; avoid ground layers with the AQUIFER flag; do not dig into aquifer layers. Runbook rb09."
+  quelle: "SPEC appendix A9; POSTMORTEM-run4"
+  run: 4
+  scopes: [erkundung, bau, infra]
+- id: timestream_sicherheit
+  title: "Using timestream (time lapse) safely"
+  symptom_keywords: [timestream, time lapse, tempo, faster, fps 250]
+  ursache: "Run 4 died in time lapse; moods/danger/caravans require a reaction."
+  fix: "Never on with drink days < 100, without active supervision, during a mood, danger or caravan. dfpilot guard only switches it OFF; switching it on is decided by the player/orchestrator."
+  quelle: "SPEC appendix A10; tempo.lua"
+  run: 5
+  scopes: [infra, orchestrator]
+- id: quickfort_fallen
+  title: "Quickfort traps (Git Bash, zone keys, duplicate zones)"
+  symptom_keywords: [quickfort, msys_no_pathconv, zone, blueprint, duplicate, unsuitable tiles]
+  ursache: "Git Bash rewrites paths; running a blueprint twice creates duplicate zones."
+  fix: "MSYS_NO_PATHCONV=1; zone keys m b h D B o T d; crypt blueprints only once; own grids in dfhack-config/blueprints/claude/."
+  quelle: "SPEC appendix A11; CLAUDE.md"
+  run: 5
+  scopes: [bau]
+- id: absturz_schutz
+  title: "DF crash on fast UI clicks"
+  symptom_keywords: [crash, click, embark, quicksave]
+  ursache: "Fast click sequences/double clicks at embark (Run 5: 1 crash)."
+  fix: "Pauses between clicks; quicksave before a caravan/menu work."
+  quelle: "SPEC appendix A12"
+  run: 5
+  scopes: [infra, handel]
+- id: dig_prioritaet
+  title: "Dig priority trap"
+  symptom_keywords: [dig priority, priority, dig jobs stop, 4000]
+  ursache: "Script-set dig priorities (single tiles != 4000) stop jobs."
+  fix: "Do not touch priorities."
+  quelle: "SPEC appendix A13"
+  run: 4
+  scopes: [bau, erkundung]
+- id: geister_items
+  title: "Ghost items do not count as stock"
+  symptom_keywords: [ghost, item, pos.x, wrong stock, invisible]
+  ursache: "Items with pos.x < 0 that are not inside containers."
+  fix: "Exclude them when counting."
+  quelle: "SPEC appendix A14"
+  run: 4
+  scopes: [wirtschaft, material]
+- id: hunger_erreichbarkeit
+  title: "Hunger despite full meal stocks"
+  symptom_keywords: [hunger, meals, reachability, could not find path, food unreachable]
+  ursache: "Food unreachable (doors, burrow, stockpiles) or bedridden without caretakers."
+  fix: "Check paths/doors/burrow, Orderlies group, hospital. Runbook rb15."
+  quelle: "SPEC appendix B7"
+  run: 5
+  scopes: [essen, gesundheit]
+- id: abbruchschleife
+  title: "Cancel loops caused by our own automation"
+  symptom_keywords: [cancels, cancel loop, needs, order without material, gamelog]
+  ursache: "Orders/jobs without material (Run 5: Make bed 5600x, Prepare meal >300x, MakeBucket, WeaveCloth, Needs refined coal, Needs hard stone boulders)."
+  fix: "Count the gamelog (dfpilot digest shows the top 3), find the producer, add a material gate. Runbook rb16."
+  quelle: "Session Run 5; SPEC F14"
+  run: 5
+  scopes: [wirtschaft, auslastung]
+- id: koks_brennstoff
+  title: "Coke: 'Needs refined coal'"
+  symptom_keywords: [coke, refined coal, fuel, coal, smelter]
+  ursache: "The reaction 'make coke from bituminous coal' has [FUEL] and itself needs a fuel bar; the fort had 0 wood/0 charcoal."
+  fix: "Wood furnace + wood (trade) -> charcoal as a starter; after that the chain sustains itself. Queue coke jobs only with free fuel. Runbook rb17."
+  quelle: "Session Run 5 (material, 08:56)"
+  run: 5
+  scopes: [material, wirtschaft]
+- id: manager_buero
+  title: "Manager does not validate orders"
+  symptom_keywords: [manager, office, orders not validated, required_office, order]
+  ursache: "The manager position requires an office (required_office); without an office no validation. Kosoth was both manager and squad leader."
+  fix: "Assign an office zone with chair+table (Run 5: zone 1613), separate the offices, claude/aemter repair. Runbook rb18."
+  quelle: "Session Run 5"
+  run: 5
+  scopes: [wirtschaft]
+- id: makler_squad
+  title: "Broker loses the trade job (squad/labors)"
+  symptom_keywords: [broker, squad, tradeatdepot, labors, arbeit.lua]
+  ursache: "A broker who was squad captain lost TradeAtDepot; arbeit.lua cleared the BROKER labors."
+  fix: "Broker without a squad (claude/handel prep picks one), restore labors only after the trade (release)."
+  quelle: "Session Run 5"
+  run: 5
+  scopes: [handel]
+- id: nach_laden
+  title: "After load/embark: start the permanent jobs"
+  symptom_keywords: [load, embark, services, watchdog start, jobs stopped, after loading]
+  ursache: "Permanent jobs (repeat-util) do not survive a reload."
+  fix: "Start watchdog, ueberwacher, arbeit, trinken, essen, orders, gesund, auslastung, mil guard; tempo off until supplies are in place. Runbook rb19; autopilot rule service_restart."
+  quelle: "Session Run 5 (startup sequence)"
+  run: 5
+  scopes: [infra]
+- id: status_nebenwirkung
+  title: "'claude/arbeit status' is NOT a status command"
+  symptom_keywords: [arbeit status, ueberwacher status, side effect, status command]
+  ursache: "arbeit.lua/ueberwacher.lua only know start/stop; any other argument runs a work round."
+  fix: "Query running jobs side-effect free via repeat-util.isScheduled (dfpilot collects this automatically)."
+  quelle: "lua/claude/arbeit.lua, ueberwacher.lua (read 01.10.2026)"
+  run: 5
+  scopes: [infra]
+- id: kavernen_schleuse
+  title: "Caverns only through a doubly locked airlock"
+  symptom_keywords: [cavern, shaft, forgotten beast, airlock, door]
+  ursache: "Run 3 fell: the shaft head was opened for building, forgotten beasts came up. Doors do not stop building destroyers."
+  fix: "2 construction walls + gate; never open the lock before the second wall stands."
+  quelle: "POSTMORTEM-run3; CLAUDE.md"
+  run: 3
+  scopes: [verteidigung, bau, erkundung]
+- id: belagerung_pop
+  title: "Sieges from population 80"
+  symptom_keywords: [siege, goblin, pop 80, guard, armor, pop gate]
+  ursache: "Run 2: 44 goblins at pop >= 80."
+  fix: "Guard in full metal armor on duty, barracks assigned before pop 60; alarm rehearsal. ~10 % soldiers, quality over quantity (the player, 01.10.)."
+  quelle: "POSTMORTEM-run2; CLAUDE.md; player 08:33"
+  run: 5
+  scopes: [militaer, verteidigung]
+- id: autoslab_geister
+  title: "Ghosts: memorial slabs/coffins"
+  symptom_keywords: [ghost, coffin, slab, memorial, unburied corpses]
+  ursache: "Unburied dead haunt the fort."
+  fix: "Enable autoslab (mandatory), crypt with coffins (claude/gesund krypta)."
+  quelle: "CLAUDE.md"
+  run: 5
+  scopes: [gesundheit]
+- id: food_days_schwankt
+  title: "food_days jumps implausibly"
+  symptom_keywords: [food_days, food days, fluctuates, implausible, food supply days]
+  ursache: "Run 5: 360 -> 54 -> 144 -> 28 -> 183 within 2 h; different counts (meals vs. everything edible)."
+  fix: "For decisions use meals+meat+fish and drinks per head from claude/report; look at trends over several measurements."
+  quelle: "Session Run 5"
+  run: 5
+  scopes: [essen]
+- id: guard_start
+  title: "PowerShell guard dies after starting"
+  symptom_keywords: [unpause-guard, start-process, hidden, guard does not start, powershell]
+  ursache: "Start-Process -WindowStyle Hidden ends the process together with the calling shell."
+  fix: "Start via Invoke-CimMethod Win32_Process Create (independent process); check the syntax first; restart after a script change."
+  quelle: "Session Run 5"
+  run: 5
+  scopes: [infra]
+- id: python_git_bash
+  title: "python3 missing in Git Bash"
+  symptom_keywords: [python3, git bash, py, command not found]
+  ursache: "On the player's machine Python is called 'python' or 'py -3'."
+  fix: "Call dfpilot as 'python -m dfpilot ...'."
+  quelle: "Session Run 5"
+  run: 5
+  scopes: [infra]
+- id: getraenke_wueste
+  title: "Drinks without plants (desert)"
+  symptom_keywords: [drinks, plants, brewing, plump helmet, seeds, desert, thirst]
+  ursache: "Brewing needs plants; Run 5 desert without trees/shrubs, plump helmet seed scarce ('Needs plump helmet spawn')."
+  fix: "Fields with seeds, do not cook plump helmets (essen.lua bans it), buy drinks/seeds via trade, claude/trinken start."
+  quelle: "inbox trinken+essen Run 5; essen.lua"
+  run: 5
+  scopes: [trinken, essen]
+- id: wasser_diagonal
+  title: "Water flows diagonally: access to the riverbank floods the tunnel"
+  symptom_keywords: [water, flood, tunnel, bank, river, diagonal, emergency wall, flooding]
+  ursache: "Dwarf Fortress lets water flow DIAGONALLY between two rock edges. Run 5: access tile (184,43,z128) diagonal to river water (185,42) -> tunnel W filled up (~40 tiles, ~110 units)."
+  fix: "First run 'dfpilot water check x y z' (forbidden = do not dig). On a flood immediately build an emergency wall (construction wall) between the front and the fort: runbook rb21_flut; never reopen the wall; dig ban water.forbid_dig."
+  quelle: "LAYOUT-run5.md section 11 (incident Y106 Limestone 9)"
+  run: 5
+  scopes: [bau, erkundung, infra]
+- id: perf_hanger
+  title: "Game freezes every few seconds (periodic hang)"
+  symptom_keywords: [freeze, hang, hangs, stutter, latency, outlier, slow, perf, raster, kohle, erzdig, reapply, timeout]
+  ursache: "Run 5: a repeat-util job with a map scan (claude/raster reapply + erzdig ALL every 1500 ticks, claude/kohle 9.4 s, bauprog 3.5 s) froze the game ~11 s every ~25 s. Period ~ interval in ticks / tick rate; timestream raises the tick rate, so the hangs come more often."
+  fix: "dfpilot perf sample (outliers, max, period) -> dfpilot perf bisect (finds the job; protected watchdog/milguard only in peace, < 40 s). Then raise the interval, split the scan into blocks or run it only on demand; never patch Lua automatically. Run perf sample after every Lua update."
+  quelle: "Spec v3-03, Run 5 Y109 (diagnosis by hand took 15 turns)"
+  run: 5
+  scopes: [infra, auslastung]

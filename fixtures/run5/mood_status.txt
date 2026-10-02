@@ -1,0 +1,99 @@
+{
+	"luecken": [ "holz 0/10", "knochen 1/5", "leder 2/3", "metall 0/3", "rohgem 0/3", "seide 0/2" ],
+	"minimum": {
+		"holz": 10,
+		"knochen": 5,
+		"leder": 3,
+		"metall": 3,
+		"rohgem": 3,
+		"schliffgem": 2,
+		"seide": 2,
+		"stein": 5,
+		"stoff": 3
+	},
+	"stimmungen": [],
+	"vorrat": {
+		"holz": 0,
+		"knochen": 1,
+		"leder": 2,
+		"metall": 0,
+		"rohgem": 0,
+		"schliffgem": 29,
+		"seide": 0,
+		"stein": 128,
+		"stoff": 9
+	},
+	"vorrat_gesamt_inkl_unerreichbar": {
+		"holz": 0,
+		"knochen": 1,
+		"leder": 2,
+		"metall": 2,
+		"rohgem": 0,
+		"schliffgem": 29,
+		"seide": 0,
+		"stein": 128,
+		"stoff": 9
+	},
+	"werkstaetten": {
+		"Bowyers": {
+			"fertig": 1,
+			"frei": 1,
+			"geplant": 0
+		},
+		"Carpenters": {
+			"fertig": 1,
+			"frei": 1,
+			"geplant": 0
+		},
+		"Clothiers": {
+			"fertig": 1,
+			"frei": 1,
+			"geplant": 0
+		},
+		"Craftsdwarfs": {
+			"fertig": 3,
+			"frei": 0,
+			"geplant": 0
+		},
+		"GlassFurnace": {
+			"fertig": 1,
+			"frei": 1,
+			"geplant": 0
+		},
+		"Jewelers": {
+			"fertig": 1,
+			"frei": 0,
+			"geplant": 0
+		},
+		"Leatherworks": {
+			"fertig": 1,
+			"frei": 1,
+			"geplant": 0
+		},
+		"Loom": {
+			"fertig": 1,
+			"frei": 1,
+			"geplant": 0
+		},
+		"Masons": {
+			"fertig": 2,
+			"frei": 1,
+			"geplant": 0
+		},
+		"Mechanics": {
+			"fertig": 1,
+			"frei": 1,
+			"geplant": 0
+		},
+		"MetalsmithsForge": {
+			"fertig": 1,
+			"frei": 1,
+			"geplant": 0
+		},
+		"Tanners": {
+			"fertig": 1,
+			"frei": 1,
+			"geplant": 0
+		}
+	}
+}

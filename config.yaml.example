@@ -1,0 +1,13 @@
+# Kopie nach config.yaml und anpassen (nur Abweichungen vom Standard noetig; Standard: dfpilot/config.py DEFAULTS).
+# Copy to config.yaml and adjust (only values that differ from dfpilot/config.py DEFAULTS).
+dfhack_run: 'C:\Program Files (x86)\Steam\steamapps\common\Dwarf Fortress\hack\dfhack-run.exe'
+# Shared runtime folder: set the environment variable DFPILOT_HOME (system-wide, so Dwarf Fortress sees it too) to
+# e.g. C:\dfpilot\runtime. dfpilot uses <DFPILOT_HOME>/tools, the Lua scripts use the same folder (util.home()).
+paths:
+  gamelog: 'C:\Program Files (x86)\Steam\steamapps\common\Dwarf Fortress\gamelog.txt'
+# Festungsspezifisch (Beispielwerte aus Run 5 "Windrings" - fuer die eigene Karte ersetzen):
+siege: {squad_alias: Wache, rally: null}
+water:
+  fort_box: [60, 40, 126, 127, 130, 133]
+  forbid_dig: []
+  chokepoints: []

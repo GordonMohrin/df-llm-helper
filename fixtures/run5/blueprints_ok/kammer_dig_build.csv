@@ -1,0 +1,8 @@
+#dig label(kammer) Schlafkammer graben (Ursprung 90,100)
+d(4x3),,,
+,,,
+,,,
+#build label(kammer_moebel) Betten und Tuer (Ursprung 90,100)
+b,,b,
+,,,d
+,,,

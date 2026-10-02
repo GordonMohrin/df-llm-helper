@@ -1,0 +1,13 @@
+{
+	"bereit": true,
+	"geister": 0,
+	"leichen_offen": 0,
+	"saerge_frei": 14,
+	"saerge_gebaut": 50,
+	"slabs_blank": 2,
+	"slabs_gebaut": 0,
+	"slabs_gedenk": 0,
+	"zonen_besetzt": 0,
+	"zonen_frei": 50,
+	"zonen_gesamt": 50
+}

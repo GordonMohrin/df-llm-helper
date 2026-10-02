@@ -1,0 +1,17 @@
+id: rb08_hospital
+title: "Injured without a hospital (sleep 100k+, dwarf at the map edge)"
+needs_player_approval: false
+kb: [hospital]
+symptom:
+  when: "len(injured) >= 1"
+  confidence: 0.35
+  explain: "{len(injured)} injured: {join([c.name for c in injured][:4])}"
+  signals:
+    - {when: "len(injured) >= 3", add: 0.2, why: "several injured"}
+    - {when: "any(c.stress == 'sehr ungluecklich' for c in injured)", add: 0.15, why: "injured dwarf very unhappy"}
+steps:
+  - {cmd: "claude/gesund status"}
+  - {manual: "Hospital zone (m{{location=hospital allow=residents}}) + 2 beds + table/chest via your own quickfort grid; wait for the rescue"}
+verify:
+  when: "len(injured) == 0"
+  timeout_s: 60

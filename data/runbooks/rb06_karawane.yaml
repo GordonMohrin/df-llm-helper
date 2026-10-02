@@ -1,0 +1,28 @@
+id: rb06_karawane
+title: "Caravan: prepare trading up to the dry-run selection"
+needs_player_approval: false
+kb: [handel_ablauf, fertigwaren_lager]
+symptom:
+  when: "caravan_active"
+  confidence: 0.5
+  explain: "{join([c.name + ' ' + c.state for c in caravans])}" 
+  signals:
+    - {when: "any(c.state == 'AtDepot' for c in caravans)", add: 0.4, why: "caravan at the depot"}
+    - {when: "broker is not None and broker.in_depot == False", add: 0.05, why: "broker not in the depot"}
+preconditions:
+  - {when: "not danger", msg: "no trading during danger"}
+steps:
+  - {cmd: "claude/advance 0", why: "pause"}
+  - {cmd: "quicksave", why: "crash protection before UI click sequences"}
+  - {cmd: "claude/handel prep --live", why: "appoint a broker without a squad, nolabors, request"}
+  - {cmd: "claude/handel broker --live --force-job", why: "create the TradeAtDepot job (needed for all 3 caravans in Run 5)"}
+  - {cmd: "claude/handel plan"}
+  - {cmd: "claude/handel mark --live"}
+  - {cmd: "claude/handel open --live"}
+  - {cmd: "claude/handel open --live", why: "2 calls needed"}
+  - {cmd: "claude/handel select --dry"}
+  - {manual: "Check the selection (food/wood/metal first, ratio >= 2.3:1, never set goodflag blindly), then rb06b_karawane_abschluss"}
+verify:
+  when: "True"
+  timeout_s: 1
+notes: "Without a finished-goods stockpile with containers, crafts stay in the workshops (Run 5: ~650 unsellable)."

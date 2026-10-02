@@ -1,0 +1,21 @@
+id: rb01b_e18_foreign
+title: "Embark picks foreign=true - fair-play exception (only with the player's yes)"
+needs_player_approval: true
+approval_action: FP08
+kb: [e18_pick, fairplay_foreign]
+symptom:
+  when: "dig_jobs is not None and dig_jobs >= 20 and pick_holders == 0 and diggers <= 1"
+  confidence: 0.3
+  explain: "no pick carrier in the squad, {diggers} digging"
+  signals:
+    - {when: "pop is not None and pop <= 10", add: 0.2, why: "embark phase (picks from the wagon are foreign)"}
+params:
+  item_ids: {default: null, desc: "Item IDs of the embark picks, comma-separated (from claude/mil equip)"}
+steps:
+  - {manual: "Ask the player: foreign=false for items {item_ids}? Entry: dfpilot exception add FP08 --objects {item_ids} --ja '<quote>'"}
+  - {cmd: "lua \"for _,id in ipairs({{{item_ids}}}) do df.item.find(id).flags.foreign=false end\""}
+verify:
+  when: "pick_holders >= 1 or diggers >= 2"
+  timeout_s: 120
+  poll_s: 20
+notes: "Standing exception since Run 4 per RUN5-START.md lesson 3 - still document it in the register."

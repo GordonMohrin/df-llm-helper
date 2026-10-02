@@ -1,0 +1,8 @@
+#zone label(hospital) Hospital z128 (Ursprung 104,96)
+m{location=hospital allow=residents}(7x7),,,,,,
+,,,,,,
+,,,,,,
+,,,,,,
+,,,,,,
+,,,,,,
+,,,,,,

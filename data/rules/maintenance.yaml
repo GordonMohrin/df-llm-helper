@@ -1,0 +1,125 @@
+# Autopilot rules (F2). Each rule: id, why (reason taken from real failures), when, do, optional verify/cooldown.
+# Classes: maintenance (upkeep, runs without asking), safety (protection, like the PowerShell guard),
+# game (game decision -> only a proposal in the digest). Enabled via config.yaml autopilot.allow_classes.
+
+- id: stale_flag_generic
+  why: "Leftover flags wake agents endlessly or block new reports (Run 3: an old alert.flag swallowed the beast alarm)."
+  class: maintenance
+  for_each: "[f for f in flag_list if f.name in ['migranten', 'wirtschaft', 'notfall', 'dig'] and f.age_min > cfg.flags.stale_min]"
+  when: "True"
+  do:
+    - delete_flag: "{item.name}"
+  verify: "not flags[item.name].exists"
+  cooldown_s: 60
+
+- id: stale_mood_flag
+  why: "mood.flag stays behind after the mood ends; delete it only when no mood is running any more."
+  class: maintenance
+  when: "flags['mood'].exists and flags['mood'].age_min > cfg.flags.stale_min and moods == 0"
+  do:
+    - delete_flag: mood
+  cooldown_s: 300
+
+- id: stale_alert_flag
+  why: "Run 3: an old alert.flag (horse dead) blocked the forgotten beast alarm (14 dead). Delete only without danger."
+  class: maintenance
+  for_each: "[f for f in flag_list if f.name in ['alert', 'siege'] and f.age_min > cfg.flags.stale_min]"
+  when: "not danger and not civ_alert"
+  do:
+    - delete_flag: "{item.name}"
+    - warn: "{item.name}.flag deleted after {item.age_min // 1} min without danger (text: {item.text})"
+  cooldown_s: 120
+
+- id: stale_caravan_flag
+  why: "caravan.flag without an active caravan keeps the orchestrator/guard in trade readiness."
+  class: maintenance
+  when: "flags['caravan'].exists and flags['caravan'].age_min > cfg.flags.stale_min and not caravan_active"
+  do:
+    - delete_flag: caravan
+  cooldown_s: 300
+  mutex_with: [caravan_at_depot]
+
+- id: food_flag_clear
+  why: "food.flag stays behind after the supplies are refilled and needlessly wakes the orchestrator."
+  class: maintenance
+  when: "flags['food'].exists and meals is not None and meals > th.meals_food_flag_clear and drinks is not None and drinks > th.drinks_food_flag_clear"
+  do:
+    - delete_flag: food
+  verify: "not flags['food'].exists"
+  cooldown_s: 120
+
+- id: service_restart
+  why: "After a load/crash watchdog/ueberwacher/arbeit/trinken were no longer running (Run 4/5). Only these four (SPEC F2); other services via runbook rb19."
+  class: maintenance
+  for_each: "[x for x in service_list if x.running == False and x.name in ['watchdog', 'ueberwacher', 'arbeit', 'trinken']]"
+  when: "True"
+  do:
+    - service: {name: "{item.name}", op: start}
+  verify: "services[item.name].running == True"
+  cooldown_s: 600
+  max_per_hour: 3
+
+- id: fps_drift
+  why: "fps stayed wrong after step mode/deadman (Run 4: 250 fps unsupervised). Target = guard target; do not touch the watchdog slow motion."
+  class: maintenance
+  when: "fps is not None and guard.target_fps is not None and fps != guard.target_fps and not slowmo and not danger and not guard.slowed"
+  do:
+    - set_fps: "{guard.target_fps}"
+  cooldown_s: 300
+  max_per_hour: 4
+
+- id: civ_alert_on_danger
+  why: "Enemy in the fort without a civilian alert: civilians run past the enemy (Run 2/3). The PowerShell guard does the same."
+  class: safety
+  when: "danger_alarm is not None and danger_alarm > 0 and civ_alert == 0"
+  do:
+    - alert: "on"
+    - say: "Alarm: enemy in the fort, civilian alert on"
+  cooldown_s: 120
+  mutex_with: [civ_alert_off_calm]
+
+- id: civ_alert_off_calm
+  why: "A civilian alert without danger paralyses the work. Switching it off is a game decision -> proposal only."
+  class: game
+  when: "civ_alert and not danger and not flags['alert'].exists and not flags['siege'].exists"
+  do:
+    - alert: "off"
+  cooldown_s: 900
+  mutex_with: [civ_alert_on_danger]
+
+- id: caravan_at_depot
+  why: "Run 2: the caravan left without trading at high speed. Arrival -> pause + caravan.flag (like the guard)."
+  class: safety
+  when: "any(c.state == 'AtDepot' for c in caravans) and not flags['caravan'].exists"
+  do:
+    - write_flag: {name: caravan, text: "Caravan at the depot (dfpilot) {date}"}
+    - cmd: "claude/advance 0"
+    - propose: "Caravan at the depot: dfpilot runbook show rb06_karawane"
+  cooldown_s: 600
+  mutex_with: [stale_caravan_flag]
+
+- id: drink_low_trinken
+  why: "Drinks dropped unnoticed (thirst kills before hunger). Make sure the brewing loop runs."
+  class: maintenance
+  when: "drink_days is not None and drink_days < th.drink_days_crit and services.trinken.running != True"
+  do:
+    - service: {name: trinken, op: start}
+    - warn: "Drinks {drink_days} days: claude/trinken started (plants {plants}, empty barrels {barrels_empty})"
+  cooldown_s: 900
+
+- id: drink_low_once
+  why: "Brewing loop is running, drinks are still scarce: trigger one immediate round."
+  class: maintenance
+  when: "drink_days is not None and drink_days < th.drink_days_crit and services.trinken.running == True"
+  do:
+    - cmd: "claude/trinken once"
+  cooldown_s: 900
+  max_per_hour: 2
+
+- id: drink_low_no_plants
+  why: "No brewing without plants (Run 5 desert): the decision (trade/fields/water) belongs to the orchestrator."
+  class: maintenance
+  when: "drink_days is not None and drink_days < th.drink_days_crit and (plants is None or plants < 5)"
+  do:
+    - warn: "Drinks {drink_days} days and only {plants} plants: check fields/seeds/trade (dfpilot kb search 'drinks plants')"
+  cooldown_s: 1800

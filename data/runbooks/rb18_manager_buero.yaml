@@ -1,0 +1,16 @@
+id: rb18_manager_buero
+title: "Manager validates no orders (no office / office conflict)"
+needs_player_approval: false
+kb: [manager_buero]
+symptom:
+  when: "orders_unvalidated is not None and orders_unvalidated >= 3"
+  confidence: 0.6
+  explain: "{orders_unvalidated} of {orders_total} orders not validated"
+steps:
+  - {cmd: "claude/aemter status"}
+  - {manual: "The manager needs an office (required_office): assign an office zone with chair+table; the manager must not also be a squad leader"}
+  - {cmd: "claude/aemter repair"}
+verify:
+  when: "orders_unvalidated is not None and orders_unvalidated < 3"
+  timeout_s: 120
+  poll_s: 30

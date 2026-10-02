@@ -1,0 +1,5 @@
+{"_synthetic": "490 dump-marked corpses inside the fort, centroid ~ (98,108,129)", "ok": true, "start": 0, "next": 50000, "total": 50000, "done": true, "scanned": 50000,
+ "loose": 11200, "by_type": {"BOULDER": 10000, "CORPSE": 400, "CORPSEPIECE": 390, "GOBLET": 410},
+ "boulder_z": {"116": 10000}, "area": {"fort": 11000, "surface": 200},
+ "corpses": {"dwarf": 0, "other": 790, "other_fort": 790}, "rotten": 0,
+ "marked": {"pending": 490, "unreachable": 0, "sx": 48020, "sy": 52920, "sz": 63210}, "ref": [94, 96, 133]}

@@ -1,0 +1,32 @@
+# Known d_init.txt keys for `dfpilot settings` (spec v3-09). Only these keys can be changed.
+# type: int | int_pair ("a:b"); min/max apply to every number; default = DF default (verify against your DF version);
+# effect: restart = DF reads the value only at game start (no DFHack field at runtime), immediate = takes effect at once.
+settings:
+  - key: POPULATION_CAP
+    type: int
+    min: 0
+    max: 1000
+    default: 200
+    effect: restart
+    description: "Migrant waves stop once the fortress population reaches this value (births continue)"
+  - key: STRICT_POPULATION_CAP
+    type: int
+    min: 0
+    max: 1000
+    default: 220
+    effect: restart
+    description: "Hard cap: no migrants and no new pregnancies above this value"
+  - key: BABY_CHILD_CAP
+    type: int_pair
+    min: 0
+    max: 1000
+    default: "1000:1000"
+    effect: restart
+    description: "Children/babies cap 'absolute:percent of population'; no new pregnancies above the smaller value"
+  - key: VISITOR_CAP
+    type: int
+    min: 0
+    max: 1000
+    default: 100
+    effect: restart
+    description: "Maximum number of visitors (taverns, temples, libraries) at the same time"

@@ -1,0 +1,58 @@
+{
+	"details": [ {
+		"labors": [ "MINE" ],
+		"members": [ 3744, 3750, 3746, 3745, 414 ],
+		"mode": "OnlySelectedDoesThis",
+		"name": "Miners"
+	}, {
+		"labors": [ "CUTWOOD" ],
+		"members": [ 3746 ],
+		"mode": "OnlySelectedDoesThis",
+		"name": "Woodcutters"
+	}, {
+		"labors": [ "HUNT" ],
+		"members": [],
+		"mode": "OnlySelectedDoesThis",
+		"name": "Hunters"
+	}, {
+		"labors": [ "PLANT" ],
+		"members": [],
+		"mode": "EverybodyDoesThis",
+		"name": "Planters"
+	}, {
+		"labors": [ "FISH" ],
+		"members": [ 3748 ],
+		"mode": "OnlySelectedDoesThis",
+		"name": "Fisherdwarves"
+	}, {
+		"labors": [ "HERBALIST" ],
+		"members": [],
+		"mode": "EverybodyDoesThis",
+		"name": "Plant gatherers"
+	}, {
+		"labors": [ "STONECUTTER" ],
+		"members": [ 3747, 3749, 3476, 3473, 4078, 4079, 4081, 344, 3449, 4155, 4156, 4160, 4161, 4162 ],
+		"mode": "OnlySelectedDoesThis",
+		"name": "Stonecutters"
+	}, {
+		"labors": [ "ENGRAVER" ],
+		"members": [ 3747, 3749, 3476, 3473, 4078, 4079, 4081, 344, 3449, 4155, 4156, 4160, 4161, 4162 ],
+		"mode": "OnlySelectedDoesThis",
+		"name": "Engravers"
+	}, {
+		"labors": [ "HAUL_STONE", "HAUL_WOOD", "HAUL_BODY", "HAUL_FOOD", "HAUL_REFUSE", "HAUL_ITEM", "HAUL_FURNITURE", "HAUL_ANIMALS", "HANDLE_VEHICLES", "HAUL_TRADE", "HAUL_WATER" ],
+		"members": [],
+		"mode": "EverybodyDoesThis",
+		"name": "Haulers"
+	}, {
+		"labors": [ "SUTURING", "DRESSING_WOUNDS", "FEED_WATER_CIVILIANS", "RECOVER_WOUNDED" ],
+		"members": [],
+		"mode": "EverybodyDoesThis",
+		"name": "Orderlies"
+	}, {
+		"labors": [ "SIEGEOPERATE" ],
+		"members": [],
+		"mode": "EverybodyDoesThis",
+		"name": "Siege operators"
+	} ]
+}

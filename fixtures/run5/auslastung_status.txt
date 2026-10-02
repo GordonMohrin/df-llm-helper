@@ -1,0 +1,34 @@
+{
+	"age_s": 2,
+	"hud": true,
+	"last_flag": {
+		"text": "40% Auslastung (4/10 arbeiten, Idle 6, Schlaf 0, Aemter 1, Wanderer 0, Grabjobs 60); Idle: ònul (Metalsmith), Rovod (Woodcrafter), Mafol (Metalcrafter), Avuz (Bookbinder), Eral (Fish Dissector), Etur (Carpenter); Ursache: WERKZEUG: 60 Grabjobs offen, nur 1 graben, 2 Zwerge mit Spitzhacke (Picken fehlen/nicht geholt?)",
+		"time": 1790840417
+	},
+	"low_n": 0,
+	"measure": {
+		"aemter": 2,
+		"andere_offene_jobs": 72,
+		"arbeiten": 12,
+		"buerger": 24,
+		"datum": "J102 Hematite 12",
+		"erwachsene": 23,
+		"getraenke": 109,
+		"grabjobs": 40,
+		"idle": 3,
+		"kinder": 1,
+		"mahlzeiten": 52,
+		"pause": 2,
+		"pct": 80,
+		"schlaf": 1,
+		"taetig": "BringItemToDepot 4, Dig 3, MakeCrafts 2, ConstructWeaponRack 1",
+		"trupp": 3,
+		"wanderer": 0
+	},
+	"running": true,
+	"stats": {
+		"errors": 0,
+		"flags": 3,
+		"measures": 1250
+	}
+}

@@ -1,0 +1,3 @@
+{"_source": "SYNTHETIC: a Help window that does not react to LEAVESCREEN (loop protection test)",
+ "screens": ["dwarfmode/Help"], "paused": false, "fc": 5300000, "yt": 230000, "time_moves_with_window": false,
+ "stuck": true}

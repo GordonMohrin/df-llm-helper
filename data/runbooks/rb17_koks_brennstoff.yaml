@@ -1,0 +1,16 @@
+id: rb17_koks_brennstoff
+title: "Coke: 'Needs refined coal' - the reaction itself needs fuel"
+needs_player_approval: false
+kb: [koks_brennstoff]
+symptom:
+  when: "cancel('refined coal') >= 5"
+  confidence: 0.7
+  explain: "{cancel('refined coal')}x 'Needs refined coal'"
+  signals:
+    - {when: "snap.stocks.wood is not None and snap.stocks.wood == 0", add: 0.2, why: "no wood for the charcoal starter"}
+steps:
+  - {cmd: "claude/material status"}
+  - {manual: "Starter: wood furnace + wood (trade) -> charcoal; after that coal->coke sustains itself. Remove stuck coke jobs at the smelter"}
+verify:
+  when: "cancel('refined coal') < 5"
+  timeout_s: 120

@@ -1,0 +1,8 @@
+Trupp | Id | Name | Waffe | Teile/9 | Training | Skills
+Bergleute | 3750 | Monom Rigòthrith "Cra | - | 0/9 | nein (-) | -
+Bergleute | 3746 | Uzol Ularmeng "Idollas | pick | 1/9 | nein (Dig) | -
+Bergleute | 3745 | Inod Loloranan "Letter | - | 0/9 | nein (BringItemToDepot) | -
+Wache | 3748 | Kosoth ïtebmeban "Pos | battle axe | 1/9 | ja (Constant) (-) | AXE7,MEL9,WRE2,DOD4
+Wache | 4080 | Mafol Alåthnish "Bolt | - | 0/9 | ja (Constant) (-) | AXE2,SPE2,SHI2,ARM2,MEL5,WRE2,DOD4
+Wache | 3473 | Eral Likotginet "Inkyc | - | 0/9 | ja (Constant) (Eat) | AXE1,MEL4,WRE2,DOD4
+Summe: 6 Soldaten, Ruestungsteile 2/54, trainierend (Routine 2): 3

@@ -1,0 +1,37 @@
+# SYNTHETIC fixture (Run-5-like, NOT a live dump): plateau z133 x93..105,y88..111 in front of trap stair T1.
+# Built from the Run-5 facts in docs/specs-v3/08-verteidigungs-designer.md; real tiles (z133 around (99,94)) still to be dumped live.
+# Legend: . floor (buildable)  # rock/wall  _ open air (cliff edge, impassable on this z)  ^ ramp (walkable, not buildable)
+#         > door / stair down to T1 (99,94,z132)  T existing stone trap (walkable, not buildable)
+origin: 90 86
+z: 133
+door: 99 94
+access: 99 113
+grid:
+###________________
+###________________
+###.............___
+###.............___
+###.............___
+###.............___
+###.............___
+###.............___
+###......>......___
+###.............___
+###.............___
+###.............___
+###.............___
+###.............___
+###..T..........___
+###..T..........___
+###..T..........___
+###..T..........___
+###.............___
+###.............___
+###.............___
+###.............___
+###.............___
+###.............___
+###.............___
+###.............___
+###______^_________
+###______^_________

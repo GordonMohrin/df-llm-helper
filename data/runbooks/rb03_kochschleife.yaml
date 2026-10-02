@@ -1,0 +1,17 @@
+id: rb03_kochschleife
+title: "Cooking loop: 'Prepare meal: Needs unrotten cookable solid item'"
+needs_player_approval: false
+kb: [kochschleife]
+symptom:
+  when: "cancel('cookable') >= 20"
+  confidence: 0.7
+  explain: "{cancel('cookable')} cooking cancels in the gamelog"
+  signals:
+    - {when: "meat is not None and meat < 2", add: 0.2, why: "no meat (order without ingredients)"}
+steps:
+  - {cmd: "claude/essen status"}
+  - {manual: "Queue cooking orders only with meat >= 2 (check the watchdog gate); let plump helmets be eaten raw (ban cooking them)"}
+  - {cmd: "ban-cooking brew mill fruit --unban", why: "if plants were banned by mistake"}
+verify:
+  when: "cancel('cookable') < 20"
+  timeout_s: 60

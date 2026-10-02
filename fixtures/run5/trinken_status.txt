@@ -1,0 +1,92 @@
+{
+	"lager": [ {
+		"id": 1364,
+		"max_barrels": 0,
+		"name": "Essen Farm",
+		"role": "essen"
+	}, {
+		"id": 1365,
+		"max_barrels": 15,
+		"name": "Getraenke Farm",
+		"role": "getraenke"
+	}, {
+		"id": 1371,
+		"max_barrels": 0,
+		"name": "Stein Steinbruch",
+		"role": "sonst"
+	}, {
+		"id": 1372,
+		"max_barrels": 0,
+		"name": "Bloecke Steinbruch",
+		"role": "sonst"
+	}, {
+		"id": 1467,
+		"max_barrels": 0,
+		"name": "Edelsteine Handel",
+		"role": "sonst"
+	}, {
+		"id": 1502,
+		"max_barrels": 0,
+		"name": "Essen Kern",
+		"role": "essen"
+	}, {
+		"id": 1503,
+		"max_barrels": 0,
+		"name": "Holz Kern",
+		"role": "sonst"
+	}, {
+		"id": 1588,
+		"max_barrels": 0,
+		"name": "Barren Kern",
+		"role": "sonst"
+	}, {
+		"id": 1589,
+		"max_barrels": 0,
+		"name": "Erz Kern",
+		"role": "sonst"
+	}, {
+		"id": 1590,
+		"max_barrels": 0,
+		"name": "Kohle Kern",
+		"role": "sonst"
+	}, {
+		"id": 1600,
+		"max_barrels": 0,
+		"name": "",
+		"role": "sonst"
+	}, {
+		"id": 1601,
+		"max_barrels": 0,
+		"name": "",
+		"role": "sonst"
+	}, {
+		"id": 1607,
+		"max_barrels": 0,
+		"name": "Edelsteine Depot B",
+		"role": "sonst"
+	}, {
+		"id": 1608,
+		"max_barrels": 0,
+		"name": "Edelsteine Depot A",
+		"role": "sonst"
+	} ],
+	"manager": true,
+	"stats": {
+		"barrel_jobs": 0,
+		"barrel_orders": 0,
+		"barrels": 24,
+		"barrels_empty": 6,
+		"boulders": 129,
+		"brew_jobs": 5,
+		"drinks": 109,
+		"fruit": 0,
+		"fruit_jobs": 0,
+		"logs": 0,
+		"plants": 23,
+		"plants_all": 23,
+		"pot_jobs": 0,
+		"pot_orders": 2,
+		"pots": 21,
+		"pots_empty": 10
+	}
+}

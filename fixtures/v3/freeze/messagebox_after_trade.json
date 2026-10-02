@@ -1,0 +1,4 @@
+{"_source": "SYNTHETIC replay of the live trade test F15 (01.10.2026): after the trade a DFHack MessageBox held the game, pause.hold 'karawane' and caravan.flag stayed",
+ "screens": ["dfhack/lua/MessageBox"], "paused": true, "fc": 5000000, "yt": 200000, "time_moves_with_window": false,
+ "flags": {"pause.hold": "karawane", "caravan": "12:00:00 [CARAVAN_ARRIVAL] A human caravan from X has arrived."},
+ "trade_flow": {"state": "DONE"}}

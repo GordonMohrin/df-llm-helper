@@ -1,0 +1,14 @@
+id: rb09_aquifer
+title: "Aquifer layers in the fort: do not dig into them / check the site"
+needs_player_approval: false
+kb: [aquifer]
+symptom:
+  when: "len(aquifer_z) > 0"
+  confidence: 0.7
+  explain: "Aquifer at z {aquifer_z}"
+steps:
+  - {cmd: "claude/config"}
+  - {manual: "Keep DIG_MIN_Z/dig plans above the aquifer layers; Run 4 died of the ground aquifer (z106/107)"}
+verify:
+  when: "True"
+  timeout_s: 1

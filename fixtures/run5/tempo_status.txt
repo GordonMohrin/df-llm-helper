@@ -1,0 +1,22 @@
+{
+	"civ_alert_idx": 0,
+	"config": false,
+	"config_ziel": 500,
+	"danger_jetzt": "config aus",
+	"enabler_fps": 250,
+	"faktor_x100": 100,
+	"fehler": [],
+	"frames_pro_s": 99,
+	"gfps": 30,
+	"grund_aus": "stimmung",
+	"kalender_ticks_pro_s": 99,
+	"manuell_aus": true,
+	"normal_fps": 250,
+	"resumes": 0,
+	"slowmo": false,
+	"suspends": 0,
+	"timestream": false,
+	"wachjob": false,
+	"watchdog_alert": true,
+	"ziel_fps": 500
+}

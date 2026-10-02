@@ -1,0 +1,3 @@
+{"_synthetic": "player has a unit sheet open", "enabled": true, "running": true, "mode": "auto", "gate": false,
+ "gate_reason": "Fokus dwarfmode/ViewSheets/UNIT", "hold_s": 0, "queue": [], "enemies": 0,
+ "focus": "dwarfmode/ViewSheets/UNIT", "paused": false, "profile": "builtin", "cats": {}}

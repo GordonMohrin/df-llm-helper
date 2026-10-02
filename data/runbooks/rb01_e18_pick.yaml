@@ -1,0 +1,30 @@
+id: rb01_e18_pick
+title: "Pickaxes are not picked up (E18) - militia miners"
+needs_player_approval: false
+kb: [e18_pick, e18_release]
+symptom:
+  when: "dig_jobs is not None and dig_jobs >= 30 and diggers * 20 < dig_jobs and len(miners) > diggers"
+  confidence: 0.5
+  explain: "{dig_jobs} dig jobs, only {diggers} digging, {len(miners)} in Miners"
+  signals:
+    - {when: "pick_holders < len(miners)", add: 0.2, why: "fewer pick carriers in the squad than miners"}
+    - {when: "idle_pct is not None and idle_pct >= 25", add: 0.1, why: "lots of idle time"}
+    - {when: "dig_jobs >= 100", add: 0.1, why: "dig backlog > 100"}
+params:
+  squad_id: {default: null, desc: "Squad ID of the miners (claude/mil status)"}
+preconditions:
+  - {when: "not danger", msg: "not during danger (reorganise the squad only in peacetime)"}
+steps:
+  - {cmd: "claude/mil status", why: "Check squad/leader; without a leader the squad accepts no add (then claude/mil create <name> <leader> --apply)"}
+  - {cmd: "claude/mil workmode {squad_id} on --apply", why: "Uniform = pickaxe only, labor MINE, work detail Miners"}
+  - {wait_s: 90}
+  - {cmd: "claude/mil equip --squad {squad_id}", why: "check assigned vs. carried"}
+verify:
+  when: "pick_holders >= 2 or diggers >= 3"
+  timeout_s: 90
+  poll_s: 15
+rollback:
+  - {cmd: "claude/mil workmode {squad_id} off --apply"}
+notes: >-
+  Do NOT run workmode repeatedly (it wipes assignments). If assigned but not picked up: release the stale item IDs
+  (runbook rb01c_e18_release, the player's decision), then run workmode exactly ONCE more. A squad without a leader accepts no add.

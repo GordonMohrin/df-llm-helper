@@ -1,0 +1,16 @@
+# Rekonstruierte Zeitlinie Run 5 (01.10.2026) fuer den Engpass-Backtest (Spec 07, Abnahme 5).
+# KEINE Messreihe: Werte stammen aus chronik.md und tools/scopes/material.md (Zitate je Eintrag).
+# Fehlende Werte = unbekannt (nicht 0). manual: true = erste dokumentierte Diagnose von Hand.
+- time: "09:25"
+  quelle: "chronik.md 09:25 gesundheit: 'Befunde: Holz 0 (Tischler verbrauchte die 3 Staemme), Metall/Knochen/Leder/Seide 0'"
+  stock: {wood: 0, bars: {}}
+- time: "10:30"
+  quelle: "chronik.md 10:30 erkundung: 'Eisen (Haematit z105, Magnetit z112 Ost), Kohle 246 (z124)' (Kacheln, noch nicht gegraben)"
+  stock: {wood: 0, bars: {}}
+- time: "10:45"
+  quelle: "tools/scopes/material.md: 'Erz im Bestand erreichbar (01.10. 10:45): Hematit 16, Magnetit 16, ... Kohle-Boulder 16 frei. Barren 0, Koks 0, Holz 0.'"
+  stock: {wood: 0, coke: 0, coal: 16, ore: {HEMATITE: 16, MAGNETITE: 16}, bars: {}, have: {}}
+- time: "11:30"
+  quelle: "chronik.md ~11:30 material: \"Henne-Ei-Befund 'make coke' braucht [FUEL]-Anlasser\""
+  manual: true
+  stock: {wood: 0, coke: 0, coal: 16, ore: {HEMATITE: 16, MAGNETITE: 16}, bars: {}, have: {}}

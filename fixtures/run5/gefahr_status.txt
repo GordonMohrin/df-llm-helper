@@ -1,0 +1,21 @@
+{
+	"alarm": 0,
+	"alarm_A": 0,
+	"civ_alert_idx": 0,
+	"fps": 250,0,
+	"gelistet": 2,
+	"hits": 0,
+	"refuge": {
+		"alerts": 2,
+		"burrow": 0,
+		"civ_burrows": 1,
+		"konflikt": [],
+		"ok": true,
+		"tile_probe": true
+	},
+	"scans": 10963,
+	"selbsttest": [],
+	"slow": 0,
+	"top": [ "A/DEMON DEMON_11 id4144 (189,27,0) zone=- d=93 reach=nil alarm=false warn=false slow=false", "A/DEMON DEMON_11 id4130 (189,156,0) zone=- d=93 reach=nil alarm=false warn=false slow=false" ],
+	"warn": 0
+}

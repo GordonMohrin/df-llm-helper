@@ -1,0 +1,87 @@
+{
+ "_note": "SYNTHETIC fixture (not recorded live): numbers follow the run-5 E18/remote-worker notes; the Lua status script is live-untested. Fisher 4156 ~100 tiles from food, hunger 62k (run 5); 344/3449/4281 values invented.",
+ "ok": true,
+ "citizens": [
+  {
+   "id": 4156,
+   "name": "Miner 4156 (fisher at the river)",
+   "x": 192,
+   "y": 12,
+   "z": 140,
+   "hunger": 62000,
+   "thirst": 21000,
+   "job": "Fish",
+   "squad": false,
+   "child": false,
+   "hospital": null,
+   "labors": [
+    "FISH",
+    "MINE"
+   ]
+  },
+  {
+   "id": 344,
+   "name": "Dwarf 344",
+   "x": 90,
+   "y": 95,
+   "z": 130,
+   "hunger": 12000,
+   "thirst": 5000,
+   "job": null,
+   "squad": false,
+   "child": false,
+   "hospital": null,
+   "labors": [
+    "FISH"
+   ]
+  },
+  {
+   "id": 3449,
+   "name": "Dwarf 3449",
+   "x": 90,
+   "y": 95,
+   "z": 130,
+   "hunger": 20000,
+   "thirst": 5000,
+   "job": "Eat",
+   "squad": false,
+   "child": false,
+   "hospital": null,
+   "labors": [
+    "FISH"
+   ]
+  },
+  {
+   "id": 4281,
+   "name": "Dwarf 4281",
+   "x": 110,
+   "y": 100,
+   "z": 128,
+   "hunger": 41000,
+   "thirst": 5000,
+   "job": "Haul",
+   "squad": false,
+   "child": false,
+   "hospital": null,
+   "labors": []
+  }
+ ],
+ "supplies": [
+  {
+   "kind": "food",
+   "id": 500,
+   "x": 92,
+   "y": 97,
+   "z": 130
+  },
+  {
+   "kind": "well",
+   "id": 501,
+   "x": 88,
+   "y": 96,
+   "z": 129
+  }
+ ],
+ "fish": 14,
+ "wd_everybody": []
+}

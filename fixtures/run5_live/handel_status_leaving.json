@@ -1,0 +1,48 @@
+{
+ "broker": {
+  "id": 1675,
+  "in_depot": false,
+  "x": 156,
+  "y": 147,
+  "z": 142
+ },
+ "caravans": [
+  {
+   "entity": 29,
+   "idx": 0,
+   "mood": 61,
+   "name": "Catten �tthat",
+   "ngoods": 258,
+   "offended": false,
+   "seized": false,
+   "state": "Leaving",
+   "state_id": 3,
+   "time_remaining": 0
+  }
+ ],
+ "civ_alert_idx": 0,
+ "depots": [
+  {
+   "anyone_can_trade": false,
+   "id": 991,
+   "items_ours": 17,
+   "items_theirs": 194,
+   "jobs": [],
+   "trader_requested": true,
+   "x": 149,
+   "y": 129,
+   "z": 146
+  }
+ ],
+ "focus": [
+  "dwarfmode/Default"
+ ],
+ "ok": true,
+ "trade_ui": {
+  "choosing_merchant": false,
+  "focus_exact": false,
+  "havetalker": 0,
+  "open": false,
+  "stillunloading": 0
+ }
+}

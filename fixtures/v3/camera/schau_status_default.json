@@ -1,0 +1,3 @@
+{"_synthetic": "shape of claude/schau status", "enabled": true, "running": true, "mode": "auto", "gate": true, "gate_reason": "ok",
+ "hold_s": 0, "queue": [], "enemies": 0, "focus": "dwarfmode/Default", "paused": false, "profile": "builtin",
+ "cats": {"burial": 7, "build": 9, "furniture": 8, "harvest": 6, "water": 5, "dig": 4, "haul": 2, "event:Stimmung": 1}}

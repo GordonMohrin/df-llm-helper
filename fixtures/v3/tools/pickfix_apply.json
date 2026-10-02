@@ -1,0 +1,23 @@
+{
+ "_note": "SYNTHETIC fixture (not recorded live): numbers follow the run-5 E18/remote-worker notes; the Lua status script is live-untested. Output shape of lua/claude/pickfix.lua --apply.",
+ "dry": false,
+ "released": [],
+ "specs_removed": 0,
+ "picks": [
+  {
+   "item": 9000,
+   "holder": null
+  },
+  {
+   "item": 9001,
+   "holder": null
+  },
+  {
+   "item": 9002,
+   "holder": null
+  }
+ ],
+ "work_weapons": 34,
+ "mine_without_pick": 19,
+ "flagged": 19
+}

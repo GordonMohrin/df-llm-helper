@@ -1,0 +1,16 @@
+id: rb20_fertigwaren_lager
+title: "Full stockpiles / crafts unsellable (finished-goods stockpile without containers)"
+needs_player_approval: false
+kb: [fertigwaren_lager]
+symptom:
+  when: "len(full_stockpiles) >= 3"
+  confidence: 0.4
+  explain: "{len(full_stockpiles)} full stockpiles"
+  signals:
+    - {when: "caravan_active", add: 0.3, why: "caravan on its way: goods must reach the depot"}
+steps:
+  - {cmd: "claude/buildings"}
+  - {manual: "Finished-goods stockpile (quickfort g) with bins near the workshops; bins need wood -> wirtschaft; tie MakeCrafts to storage space"}
+verify:
+  when: "len(full_stockpiles) < 3"
+  timeout_s: 120
