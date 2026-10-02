@@ -25,3 +25,12 @@ Resolved: `bauprog.lua` L10 (BUG-418: `shape_at` returns nothing for undiscovere
 counts walls in unrevealed rock). `lint lua/claude lua/` reports each file once (paths are de-duplicated).
 Open decision (BUG-418): `pilot_caravan.lua` L07 stays an error until the player's FP09 consent is in
 `data/exceptions.jsonl`; `claude/dig` judges undiscovered tiles by their real shape (designate blindly or skip them? its header now says so).
+
+## Not reported (BUG-319, decided)
+
+- `deathcause` and `gaydar` are no cheats: they only read and show what the game UI also shows (L25 and the
+  runtime rule FP07 no longer list them).
+- `createitem` in pure message text is no command: a line that only passes text to `print`, `qerror`,
+  `dfhack.printerr`, `util.emit`, `say`, `log`, ... and executes nothing, and comments. As a command it stays an L01
+  error: a `run_command`/`run_script` argument, a bare command line, a string that may be executed (any other string
+  literal, `os.execute`, `io.popen`, `load`).

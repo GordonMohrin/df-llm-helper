@@ -153,3 +153,24 @@ def test_bug220_bottleneck_block_and_mechanism_have_a_stock_source():
                      "claude/muell status": json.dumps({"typen": "BOULDER=300"})}, clock=clk)
     out2 = BottleneckWatch(m2, Store(), clk, BD, HOME).run(dry=True)
     assert any(ln.startswith("no stock data: block, mechanism") for ln in out2)
+
+
+# ---------------------------------------------------------------- BUG-319 deathcause/gaydar, message text
+def test_bug319_read_only_commands_and_message_text_not_reported():
+    from df_llm_helper.fairplay import FairPlayError, check_command
+    from df_llm_helper.lint import lint_paths, lint_source
+    ins = EVID / "BUG-319" / "inputs"
+    assert lint_paths([ins]) == []
+    for ok in ("dfhack.run_command('deathcause')", "dfhack.run_command('gaydar')", "print('do not use createitem')",
+               "qerror('createitem is forbidden')", "dfhack.printerr(\"no createitem\")",
+               "util.emit({error = 'createitem not allowed'})", "-- createitem in a comment"):
+        assert lint_source(ok) == [], ok
+    for bad in ("dfhack.run_command('createitem', 'X')", "print(dfhack.run_command_silent('createitem x'))",
+                "local c = 'createitem X'", "createitem WEAPON:ITEM_WEAPON_PICK", "os.execute('createitem')",
+                "say('x') dfhack.run_script('createitem')", "print(load('createitem'))"):
+        assert [f.rule for f in lint_source(bad)] == ["L01"], bad
+    assert [f.rule for f in lint_source("dfhack.run_command('fastdwarf', '1')")] == ["L25"]
+    check_command("deathcause")                       # runtime gate: read-only, allowed
+    check_command("gaydar")
+    with pytest.raises(FairPlayError):
+        check_command("fastdwarf 1")

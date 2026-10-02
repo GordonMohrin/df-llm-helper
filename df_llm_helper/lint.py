@@ -46,6 +46,13 @@ def _cmd(words: str) -> str:
             rf"""(?![\w-])|^\s*(?:{words})(?![\w-])(?!\s*[=.(\[:,])""")      # last: a bare command line (lint_command)
 
 
+# BUG-319 (player delegated the decision): a line that only passes text to a message function (print, qerror,
+# dfhack.printerr, util.emit, say, log ...) and executes nothing (no run_command/run_script, os.execute, io.popen,
+# load) mentions a command word as message text, e.g. print('never use createitem'). Comments are stripped anyway.
+_MESSAGE_ONLY = (r"^(?!.*(?:run_\w*|\bexecute\b|\bpopen\b|\bload(?:string)?\s*[({'\"]|dfhack\.script\w*))"
+                 r".*(?<!\w)(?:print|printerr|println|print_\w+|qerror|error|emit|say|log|log_\w+|warn|notify)"
+                 r"\s*\(")
+
 # "order"/"job" as a word (squad/manager order, job object) - not a substring of border/recorder/jobless
 _JOBORDER = r"(?<![A-Za-z])(?:orders?|jobs?)(?![A-Za-z])"
 
@@ -58,7 +65,8 @@ def R(i, pat, reason, level="error", needs=None, unless_file=None, unless_line=N
 
 
 RULES: list[Rule] = [
-    R("L01", r"\bcreateitem\b|gui/create-item", "createitem creates items out of nothing"),
+    R("L01", r"\bcreateitem\b|gui/create-item", "createitem creates items out of nothing",
+      unless_line=_MESSAGE_ONLY),        # BUG-319: message text is no command; run_command('createitem') stays an error
     R("L02", r"\bdig-?now\b", "dig-now digs instantly"),
     R("L03", r"\bbuild-?now\b", "build-now builds instantly"),
     R("L04", r"['\"]\s*reveal\b|run_command\([^)]*\breveal\b|\brevflood\b", "reveal/revflood uncovers the map"),
@@ -80,7 +88,7 @@ RULES: list[Rule] = [
     R("L15", r"\.counters2?\.\w+\s*=(?!=)", "setting hunger/thirst/sleep counters directly"),
     R("L16", r"\.rating\s*=(?!=)|\.experience\s*=(?!=)|soul[\w.]*\.skills\[[^]]*\]\s*=(?!=)",
       "setting skills directly"),
-    R("L17", r"setTileType\s*\(|\.tiletype\s*(?:\[[^\]]*\]\s*)*=(?!=)|" + _cmd("tiletypes[\w-]*|changelayer|changevein"),
+    R("L17", r"setTileType\s*\(|\.tiletype\s*(?:\[[^\]]*\]\s*)*=(?!=)|" + _cmd(r"tiletypes[\w-]*|changelayer|changevein"),
       "changing terrain"),
     R("L18", r"\.flow_size\s*=(?!=)|\.liquid_type\s*=(?!=)|" + _cmd("liquids|gui/liquids"), "setting liquids"),
     R("L19", r"df\.global\.world\.raws[\w.\[\]]*\s*=(?!=)", "changing raws at runtime"),
@@ -91,7 +99,8 @@ RULES: list[Rule] = [
     R("L22", r"\.stack_size\s*=(?!=)|setStackSize\s*\(", "changing stack size (quantity)"),
     R("L23", r"flags1\.(caged|inactive|dead)\s*=(?!=)|flags2\.killed\s*=(?!=)", "setting unit state directly"),
     R("L24", r"units\.kill\s*\(|\bexterminate\b|\bslayrace\b", "killing units directly"),
-    R("L25", _cmd("fastdwarf|full-heal|cleaners?|regrass|deathcause|gaydar") + r"|\bfastdwarf\b|\bfull-heal\b",
+    # BUG-319 (player delegated the decision): deathcause and gaydar are no cheats - read only, the game UI shows the same
+    R("L25", _cmd("fastdwarf|full-heal|cleaners?|regrass") + r"|\bfastdwarf\b|\bfull-heal\b",
       "cheat tool"),
     R("L26", r"gm-editor|gm-unit|gui/gm-", "data editor (direct manipulation)"),
     R("L27", r"\.civ_id\s*=(?!=)|\.population_id\s*=(?!=)|\.hist_figure_id\s*=(?!=)", "changing affiliation"),

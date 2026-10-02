@@ -35,7 +35,7 @@ FORBIDDEN_COMMANDS: list[tuple[str, re.Pattern, str]] = [
     ("FP05", re.compile(r"(^|[\s'\"(;])prospect\s+all\b"), "prospect all shows hidden ore deposits"),
     ("FP06", re.compile(r"(^|[\s'\"(;])(gui/)?gm-(editor|unit)\b"), "gm-editor/gm-unit = direct data manipulation"),
     ("FP07", re.compile(r"(^|[\s'\"(;])(teleport|cleaners?|fastdwarf|tiletypes|changelayer|changevein|"
-                        r"changeitem|deathcause|full-heal|exterminate|gaydar|plants\s+create|regrass|liquids|"
+                        r"changeitem|full-heal|exterminate|plants\s+create|regrass|liquids|"
                         r"modtools/create-unit|gui/liquids|gui/create-item)\b"), "cheat/editor tool"),
     ("FP08", re.compile(r"flags\d?\.foreign\s*=\s*(false|true)"), "changing the item flag foreign (player exception required)"),
     ("FP09", re.compile(r"flags\d?\.left\s*=\s*true"), "setting unit 'left' (player exception required)"),
