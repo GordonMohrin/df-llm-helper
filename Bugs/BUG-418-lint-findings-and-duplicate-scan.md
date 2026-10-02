@@ -1,6 +1,6 @@
 # BUG-418: `df_llm_helper lint lua/claude lua/` exits 1 (pilot_caravan L07 without a register entry), prints every `lua/claude` finding twice, and 5 L10 "undiscovered tile" warnings are real fair-play notes
 
-- **Status:** fixed in b0a2741
+- **Status:** fixed in 4446691
 - **Severity:** S3
 - **Area:** `df_llm_helper/lint.py` (scan of nested dirs), `data/exceptions.jsonl` (only an `"example": true` row), `lua/pilot_caravan.lua:21`, `lua/claude/bauprog.lua:83`, `mood.lua:82,213`, `gesund.lua:200`, `raster.lua:128`, `dig.lua` / `probe.lua`
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -30,6 +30,9 @@ De-duplicate paths in `lint.py` (resolve + set); decide whether the shipped lint
 
 ## Info needed
 - Player: is it acceptable that the repo's own lint run reports the FP09 error? Is the `dig.lua` behaviour (designating undiscovered wall tiles) allowed under the fair-play rule?
+- Decided (player delegated the decision): `claude/dig` designates undiscovered tiles blindly, exactly like a player dragging a dig box over unrevealed rock: no tiletype/shape read, no skipping based on hidden info; revealed tiles keep the current checks. (The FP09 lint error of pilot_caravan stays as documented: the player's standing permission for `flags1.left` is not a register entry of the public repo.)
 
 ## Fix
 `lint_paths` de-duplicates files; `bauprog.shape_at` skips undiscovered tiles; LINT-FINDINGS.md updated. Info needed (player): FP09 entry in `data/exceptions.jsonl` so the shipped lint is green (pilot_caravan L07), and whether `claude/dig` should skip undiscovered tiles (header corrected, behaviour unchanged).
+
+Decision applied (4446691): for a hidden tile `claude/dig` reads only `designation.hidden` and the configured barrier boxes (new `config.in_sperr_box`, split out of `is_sperre` so no tile is read), then designates; output field `blind` counts these tiles. Header rewritten accordingly. Test `test_dig_designates_hidden_tiles_blindly_without_reading_their_shape` (map mock: a hidden open tile is designated like a hidden wall, zero tiletype reads of hidden tiles) and `test_dig_header_documents_blind_designation`.

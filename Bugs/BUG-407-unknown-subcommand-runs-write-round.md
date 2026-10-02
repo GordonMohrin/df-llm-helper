@@ -1,6 +1,6 @@
 # BUG-407: unknown/typo arguments run a full write round (essen, arbeit, trinken, material, orders, ueberwacher); `claude/erzdig` without `--dry` designates; `mil update`/`mil refuge` ignore the documented `--apply` gate
 
-- **Status:** fixed in 9f7b226
+- **Status:** fixed in ae17aef
 - **Severity:** S2 (wrong action on the game from a typo, `--help`, `status` of the wrong script)
 - **Area:** `lua/claude/essen.lua:259-278`, `arbeit.lua:534-544`, `trinken.lua:255-269`, `material.lua:455-474`, `orders.lua:417-432`, `ueberwacher.lua:104-113`, `erzdig.lua:109-121`, `mil.lua:555-558,589-613`
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -38,6 +38,9 @@ Historic pattern "no argument = do the periodic round once" extended to "anythin
 
 ## Info needed
 - Player: do you want the no-argument default (`claude/essen`, `claude/trinken`, `claude/material`, ...) to stay "run one round"? (README of the helper says `status` is the read command.)
+- Decided (player delegated the decision): keep "no argument = run one round" for essen/trinken/material/arbeit/orders/ueberwacher, because the orchestrator, the watchdog and the scopes rely on it; document it.
 
 ## Fix
 essen/arbeit/trinken/material/orders/ueberwacher: unknown words -> JSON usage error, no round (no argument and `once` still run one round; ueberwacher got a read-only `status`); erzdig without ore -> usage; `mil update`/`mil refuge` need `--apply` (gefahr/watchdog/rb04/scopes.yaml pass it), refuge keeps the tiles when `ZUFLUCHT.rects` is empty. Info needed (player): keep 'no argument = one round'?
+
+Decision applied (ae17aef): behaviour confirmed and unchanged. Every script header now says "No argument (or `once`) = run ONE round now", why the default stays, and which command is read-only (`status`; `orders` also `list`; `arbeit` none, use `claude/auslastung`); COMPANION.md has the same paragraph. Test `test_round_scripts_document_the_no_argument_default`.

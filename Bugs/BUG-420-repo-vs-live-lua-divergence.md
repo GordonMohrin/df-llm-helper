@@ -1,6 +1,6 @@
 # BUG-420: hint - repo Lua and the live Lua in the game folder differ (paths, feature set, tuning); duplicates inside the repo
 
-- **Status:** open (info needed)
+- **Status:** fixed in 4c66249
 - **Severity:** S3
 - **Area:** `lua/claude/*.lua`, `lua/pilot_*.lua` vs `C:\Users\admin\claude gordons projects\dwarf-fortress\lua\claude` (the folder DFHack really uses: `dfhack-config/script-paths.txt` has `+C:\Users\admin\claude gordons projects\dwarf-fortress\lua`)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -31,6 +31,19 @@ Decide per script which side wins; keep tuning values out of code (`config.lua`)
 
 ## Info needed
 - Player: please say which differences are intended (live-only features to port into the repo: `mil ammo`, `handel keep`, `erzdig spur`, `muell` zones, `zugaenge` MINCOMP) and whether the live copies may be overwritten from the repo.
+- Decided (player delegated the decision): the repo is authoritative and the live copies may be overwritten from it. Port the live-only features where the evidence shows their code (`mil ammo`, `handel keep`, `erzdig spur`, `muell` zones, `zugaenge` MINCOMP), remove the duplicate pilot pair, add an install note.
 
 ## Fix
 No code change possible without the player's decision. Both pilot_batch copies got the same fixes (596a890). Recommendation: install from the repo, keep tuning in `config.lua`, delete one of the duplicate pairs (`lua/pilot_batch.lua`+`lua/pilot_wd.lua` vs `lua/claude/...`), port the live-only features (mil ammo, handel keep, erzdig spur, muell zones, zugaenge MINCOMP - now `config.PERIMETER_MINCOMP` for pilot_perimeter).
+
+Decision applied (4c66249), from `Bugs/evidence/BUG-420/diff_repo_vs_live_comments_stripped.txt`:
+- `mil ammo <squad> [amount=25] [subtype=0] [--apply]`: ported 1:1 (dry run without `--apply`, argument check added).
+- `handel keep`: the reserve rule now also holds in the trade window (`select`, new module function `keep_checker`); also ported the second "Trade" label search in `confirm` and the "Confirm trade" text in `accept`. Not ported: the live change of `accept` to `ok=false` when no dialog is open (no reason in the evidence; behaviour kept).
+- `erzdig spur [ORE|GEMS] [zmin] [zmax] [max] [--dry]`: ported; the live hard-coded second anchor (99,94,130) became "walk group of any `config.FORT_REFS` point" (also used by the normal run). Path tiles must be discovered walls.
+- `muell`: dump-zone counting (`auf_stapelpunkt_entsorgt`), `dump [N=150]` marks the corpses nearest to a reachable dump zone, skips the fort's own race (burial) and unreachable ones; additionally skips items already lying on the dump.
+- `zugaenge`: enclave filter reads `config.PERIMETER_MINCOMP`; undiscovered tiles now count as not walkable (fair play).
+- Small live fixes ported as well: `arbeit` does not give FISH back on restore, `SMOOTH_SUPPLY.no_engrave`; `material` usable-item filter; `mood` counts items in containers but not carried ones.
+- Not ported: map tuning of the live copy (config values, material/mood targets, orders thresholds, Jewelers threshold) - tuning belongs in `config.lua`/state files of the player's map; `zugaenge_dbg.lua` (debug copy). Hard-coded live paths are replaced by `util.home()` in the repo anyway. Features that exist only in the repo (`schau profile`, `pilot_mood` held/mine, `killorder.lua`) reach the game by the install below.
+- Duplicates: the client calls `claude/pilot_batch` / `claude/pilot_wd` (`df_llm_helper/transport.py`, runbook rb02); docs and tests use `lua/pilot_*.lua`, so `lua/claude/pilot_batch.lua` and `lua/claude/pilot_wd.lua` were deleted (test parametrisation and `docs/SPEC.md` updated).
+- Install note (COMPANION.md, README.md): copy `lua/pilot_*.lua` and `lua/claude/*.lua` to `hack/scripts/claude/` and overwrite the live copies, also in any folder listed in `dfhack-config/script-paths.txt` (DFHack searches those first).
+Tests: `test_mil_ammo_dry_and_apply`, `test_handel_keep_checker_holds_back_the_reserve`, `test_erzdig_spur_designates_a_short_tunnel_over_discovered_walls`, `test_muell_status_counts_dump_zone_items_separately`, `test_muell_dump_marks_nearest_reachable_corpses_only`, `test_zugaenge_enclave_filter_reads_perimeter_mincomp`, `test_pilot_duplicates_removed_from_lua_claude`.

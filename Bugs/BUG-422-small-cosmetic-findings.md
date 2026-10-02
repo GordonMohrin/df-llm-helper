@@ -1,6 +1,6 @@
 # BUG-422: small cosmetic / robustness findings in the Lua helpers (orders flag lists, file-handle leak, answer sizes, aemter numbers, pilot_siege visitors)
 
-- **Status:** fixed in 3f00ff7
+- **Status:** fixed in 157b535
 - **Severity:** S3
 - **Area:** `lua/claude/orders.lua:222-227,373`, `lua/claude/gesund.lua:399`, `lua/claude/aemter.lua:~93`, `lua/claude/mood.lua` (`plan`), `lua/claude/units.lua`, `lua/pilot_care.lua`, `lua/pilot_siege.lua:~19`
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -23,6 +23,13 @@ Per item above; items 4/7 only if you want to cut tokens/log growth.
 
 ## Info needed
 none.
+- Decided (player delegated the decision): trim fields that no Python consumer reads and that make answers big, only where grep in `df_llm_helper/`, tests and `data/` proves it; compact default with `--full` for the old output.
 
 ## Fix
 1 flag sets joined with `+` (cond_text and order_sig), 2 CSV probe handle closed, 3 responsibilities as names, 5 pilot_siege visitors friendly only when not invaders, 6 report nil checks; 7 logs rotate (c3b327d). 4 (answer sizes) not changed: needs a decision which fields to drop (wontfix for now).
+
+Item 4 applied (157b535). Proof by grep: no parser for `claude/mood plan` or `claude/gesund gedanken`; `claude/gesund status` is only read by the snapshot service parser (`running`); `features/tools.py` never reads the citizen `name` of `pilot_tools status`. Compact defaults, `--full` = old answer:
+- `claude/mood plan`: only citizens with an at-risk mood skill (workshop missing/under construction or material below minimum), one text per skill, material stock once (`material`), `ohne_risiko` count.
+- `claude/gesund status`: `buerger` only with stress >= LOW or at rest, plus `buerger_anzahl`; `claude/gesund gedanken`: the 15 most stressed citizens, aggregates complete.
+- `claude/pilot_tools status`: no `name` per citizen.
+Not trimmed (every field is read by a parser): `claude/units` (snapshot), `pilot_care status` (care.py), `pilot_remote status` (features/remote.py). `buildings` already has a limit. Tests `test_gesund_status_and_gedanken_are_compact_by_default`, `test_mood_plan_compact_keeps_only_risky_skills`, `test_pilot_tools_status_leaves_names_out_unless_full`.

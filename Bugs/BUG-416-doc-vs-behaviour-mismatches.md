@@ -1,6 +1,6 @@
 # BUG-416: documentation vs behaviour mismatches in the Lua helpers (`config aquifer`, `tempo rate`, "read-only" report, positions `--force`, handel.log growth)
 
-- **Status:** fixed in c3b327d
+- **Status:** fixed in 989f25e
 - **Severity:** S3
 - **Area:** `lua/claude/config.lua:6,15` + `:308-323`, `lua/claude/tempo.lua:2`, `lua/claude/report.lua:1,171-186`, `lua/claude/positions.lua:62`, `lua/claude/handel.lua:44` (`emit` -> `log`), COMPANION.md
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -26,6 +26,9 @@ Implement `config aquifer [x1 y1 x2 y2 z1 z2]` (the function `aquifer_seen(x1,..
 
 ## Info needed
 - Player: is the metrics.csv side effect of `report` wanted on every call, or only for the periodic call of the orchestrator?
+- Decided (player delegated the decision): `claude/report` writes the metrics.csv row at most once per in-game day; a call whose game date equals the last row's date writes nothing (extra rows are noise for the time series).
 
 ## Fix
 `config aquifer [x1 y1 x2 y2 z1 z2]` implemented; tempo usage lists `say`, not `rate`; report header + COMPANION.md mention the metrics.csv row; positions assign/vacate always refused; logs (handel/mil/gefahr/pickfix) rotate at 1 MB. Info needed (player): metrics.csv row on every `report` call or only for the orchestrator's periodic call? Items 6/7 see BUG-420/BUG-407.
+
+Decision applied (989f25e): new `util.append_daily_row(path, header, fields)` reads only the tail of the file and skips the row when the last row has the same `spieldatum`; `claude/report` uses it and reports `metrics_zeile` (true = row written). Report header and COMPANION.md say "at most once per in-game day". Tests `test_daily_row_is_written_once_per_game_date`, `test_report_uses_the_daily_row`.
