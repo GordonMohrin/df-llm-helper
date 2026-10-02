@@ -6,59 +6,56 @@ df-llm-helper sits between an LLM agent (e.g. Claude) and **Dwarf Fortress** run
 
 <sub>Left: Claude as orchestrator, reporting what its sub-agents did (new dig designations, living quarters, storage hall). Right: the fortress Windrings, embarked with 7 dwarves in Year 100, still alive in Year 118 with 174 citizens and Metropolis rank (DF 53.16 + DFHack, 2026).</sub>
 
-## Let your LLM play: start a new game
+## Let your LLM play
 
-You need Dwarf Fortress (Steam, 53.x) with DFHack, Python 3 and an LLM agent that can run shell commands **on the same machine as the game** (e.g. Claude Code), because the helper talks to the game through `dfhack-run`. Developed and played on Windows with Git Bash.
+**Requirements:** Dwarf Fortress (Steam, 53.x) with DFHack installed, and an LLM agent that can run shell commands on the same machine as the game (e.g. Claude Code). Developed and played on Windows with Git Bash.
 
-**1. Install the helper (once)**
-
-```
-git clone https://github.com/GordonMohrin/df-llm-helper && cd df-llm-helper
-python -m df_llm_helper.selftest --quick      # must end with "Self-test GREEN"
-cp config.yaml.example config.yaml            # set dfhack_run and paths.gamelog to your DF install
-```
-
-Copy `lua/pilot_*.lua` and `lua/claude/*.lua` to `<Dwarf Fortress>/hack/scripts/claude/` and set the environment variable `DF_LLM_HELPER_HOME` system-wide to a shared folder (e.g. `C:\df-llm-helper\runtime`), so the game and the helper find the same flags and logs. Details: `COMPANION.md`.
-
-**2. Create a world and embark**
-
-Do this yourself in the game as usual. Prefer a site without an aquifer (the embark info panel shows it). Experimental: `tools/embark/` contains DFHack scripts that let the agent read and click the embark menus itself.
-
-**3. Start the background processes**
+Start Dwarf Fortress, then paste this prompt into your agent. It clones the repo, sets everything up and starts playing:
 
 ```
-python -m df_llm_helper waechter --loop                 # real-time watcher, keep it running
-python -m df_llm_helper wake --loop --interval 10       # wake-up filter: one line per event that needs a decision
-```
+Play Dwarf Fortress for me through DFHack, using df-llm-helper as your helper layer.
+Dwarf Fortress with DFHack is installed on this machine and running.
 
-**4. Give the agent this start prompt**
+Setup
+1. Clone https://github.com/GordonMohrin/df-llm-helper and work from that folder.
+   Read README.md, COMPANION.md and docs/MANUAL.md.
+2. Run: python -m df_llm_helper.selftest --quick  (must end with "Self-test GREEN").
+3. Find my Dwarf Fortress install. Copy config.yaml.example to config.yaml and set
+   dfhack_run (path to dfhack-run) and paths.gamelog (gamelog.txt in the DF folder).
+4. Copy lua/pilot_*.lua and lua/claude/*.lua to <Dwarf Fortress>/hack/scripts/claude/.
+5. Set the environment variable DF_LLM_HELPER_HOME to a shared runtime folder so the game
+   and the helper see the same flags and logs (see COMPANION.md). Ask me before changing
+   system-wide settings; DF may need a restart to see the variable.
+6. Check the connection with the read-only steps of docs/INTEGRATION.md
+   (python -m df_llm_helper digest must return a status line). Parts of the Lua side are
+   live-untested: if an answer differs from the expected one, record it and tell me.
 
-```
-You are the orchestrator of a Dwarf Fortress fortress, played through DFHack with df-llm-helper.
-Working folder: <path>/df-llm-helper. Read README.md and docs/MANUAL.md once, then work through the helper.
+New fortress
+7. If no fortress is loaded, ask me to create a world and embark (prefer a site without an
+   aquifer), or try the experimental embark scripts in tools/embark/.
+8. lua/claude/config.lua contains values from the example fortress Windrings. Run claude/config
+   via dfhack-run, set every value from the checklist at the top of config.lua for this map,
+   then restart the permanent jobs as described there.
+9. Start as background processes and keep them running:
+   python -m df_llm_helper waechter --loop
+   python -m df_llm_helper wake --loop --interval 10
 
-Rules
+Playing
 - Fair play: only what a human player could do through the UI. Never createitem, dig-now,
   build-now, reveal or direct unit/item edits. The linter refuses them; do not work around it.
-- Every 5 minutes: python -m df_llm_helper check. Act on what it reports.
+- Every 5 minutes: python -m df_llm_helper check, and act on what it reports.
 - React to every WAKE line from the wake filter.
-- When something looks wrong: python -m df_llm_helper runbook diagnose, then
-  runbook run <id> --dry-run before the real run. Knowledge: kb search "<symptom>".
-- Delegate bigger jobs to sub-agents, with the prompt from
+- When something looks wrong: runbook diagnose, then runbook run <id> --dry-run before the
+  real run. Knowledge: kb search "<symptom>".
+- Delegate bigger jobs to sub-agents with the prompt from
   python -m df_llm_helper agents prompt <scope> --task "<one sentence>" (pass it unchanged).
 - After every load or restart of the game: python -m df_llm_helper reboot.
 - Time-lapse only via python -m df_llm_helper tempo on (it refuses while a guard blocker is active).
-
-Start
-1. This is a new fortress. The fortress values in lua/claude/config.lua are from the example
-   fortress Windrings: run claude/config, set every value from the checklist at the top of
-   config.lua for this map, then restart the permanent jobs as described there.
-2. Plan the first year (shelter, food, drinks, workshops) and report to me in at most 10 lines.
+- Plan the first year (shelter, food, drinks, workshops) and report to me in at most 10 lines,
+  then keep playing and report only what needs my decision.
 ```
 
-**5. First time: run the live checklist**
-
-Parts of the Lua side are still *live-untested*. Before the first real fortress, let the agent go through `docs/INTEGRATION.md` once; it compares each step with the expected answer.
+Prefer to set it up by hand? The same steps are in `COMPANION.md` and `docs/MANUAL.md`.
 
 ## Why this exists
 
