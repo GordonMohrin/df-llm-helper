@@ -1,4 +1,4 @@
-# Spec 05: Famine Forecast (`dfpilot forecast`)
+# Spec 05: Famine Forecast (`python -m df_llm_helper forecast`)
 
 Priority: P1 | As of: 01.10.2026 (Run 5, Windrings) | Status: implemented (PR v2-05), not yet live-tested; acceptance 5 food 33 % instead of ≤ 30 % (see CHANGELOG) | Framework: see README.md
 

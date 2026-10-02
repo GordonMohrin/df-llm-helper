@@ -1,17 +1,17 @@
-"""Spec v3-03: freeze profiler (dfpilot/features/perf.py) + watcher auto detection."""
+"""Spec v3-03: freeze profiler (df_llm_helper/features/perf.py) + watcher auto detection."""
 import json
 
 import pytest
 
 from conftest import HOME
-from dfpilot.client import MAX_REPORT_ID_CMD, MockClient, ReplayClient, Result
-from dfpilot.config import DEFAULTS, load_config
-from dfpilot.features import perf
-from dfpilot.features.perf import (EXTERNAL, LIST_CMD, PROBE_CMD, Bisect, LatencyMonitor, digest_line, parse_list,
+from df_llm_helper.client import MAX_REPORT_ID_CMD, MockClient, ReplayClient, Result
+from df_llm_helper.config import DEFAULTS, load_config
+from df_llm_helper.features import perf
+from df_llm_helper.features.perf import (EXTERNAL, LIST_CMD, PROBE_CMD, Bisect, LatencyMonitor, digest_line, parse_list,
                                    recover, sample, state_path, suggest)
-from dfpilot.store import Store
-from dfpilot.toolsfs import ToolsDir
-from dfpilot.waechter import CARAVANS_CMD, CLEAR_CMD, FOOD_CMD, Waechter
+from df_llm_helper.store import Store
+from df_llm_helper.toolsfs import ToolsDir
+from df_llm_helper.waechter import CARAVANS_CMD, CLEAR_CMD, FOOD_CMD, Waechter
 
 FIXV3 = HOME / "fixtures" / "v3" / "perf"
 RUNTIMES = json.loads((FIXV3 / "service_runtimes.json").read_text(encoding="utf-8"))
@@ -294,7 +294,7 @@ def test_suggest_has_line_reference():
 
 
 def test_check_hook_and_cli(tmp_path, tools_dir, capsys):
-    from dfpilot.cli import main
+    from df_llm_helper.cli import main
     from conftest import FIX
     c = tmp_path / "c.yaml"
     c.write_text(f"paths:\n  tools: {tools_dir}\n  scopes: {tools_dir / 'scopes'}\n  state_db: {tmp_path / 's.db'}\n"
@@ -303,7 +303,7 @@ def test_check_hook_and_cli(tmp_path, tools_dir, capsys):
     assert main(base + ["perf", "sample", "--n", "3", "--gap", "0"]) == 0
     assert "Sample 3" in capsys.readouterr().out
     assert main(base + ["perf", "bisect", "--dry-run"]) == 0
-    (tools_dir / "perf.flag").write_text("Game hangs: 2.0 outliers/min (max 10.5 s, period 25 s) -> dfpilot perf bisect")
+    (tools_dir / "perf.flag").write_text("Game hangs: 2.0 outliers/min (max 10.5 s, period 25 s) -> python -m df_llm_helper perf bisect")
     assert main(base + ["perf", "status", "--clear"]) == 0
     out = capsys.readouterr().out
     assert "perf.flag: Game hangs" in out and "perf.flag deleted" in out
@@ -311,7 +311,7 @@ def test_check_hook_and_cli(tmp_path, tools_dir, capsys):
     class P:
         pass
     p = P()
-    clock = __import__("dfpilot.clock", fromlist=["FakeClock"]).FakeClock()
+    clock = __import__("df_llm_helper.clock", fromlist=["FakeClock"]).FakeClock()
     p.tools, p.client, p.store, p.clock = ToolsDir(tools_dir, clock), MockClient({}), Store(), clock
     assert perf.check_hook(p, None, True) == []
     p.tools.write_flag("perf", "Game hangs: 1.0 outliers/min (max 3.0 s)")

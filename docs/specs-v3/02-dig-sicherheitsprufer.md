@@ -1,6 +1,6 @@
-# Spec v3-02: Dig safety checker (`dfpilot dig check`)
+# Spec v3-02: Dig safety checker (`python -m df_llm_helper dig check`)
 
-Priority: P0 | As of: 01.10.2026 (run 5, J109) | Status: **implemented (v3), not yet live-tested** (`dfpilot/features/digcheck.py`, command `dfpilot digcheck` with alias `dfpilot dig check`, `lua/pilot_digcheck.lua`, manual `../manual-v3/02-digcheck.md`) | Framework: see `../specs-v2/README.md`
+Priority: P0 | As of: 01.10.2026 (run 5, J109) | Status: **implemented (v3), not yet live-tested** (`df_llm_helper/features/digcheck.py`, command `python -m df_llm_helper digcheck` with alias `python -m df_llm_helper dig check`, `lua/pilot_digcheck.lua`, manual `../manual-v3/02-digcheck.md`) | Framework: see `../specs-v2/README.md`
 
 ## Goal and benefit
 Check dig orders **before** they are set, so that they do not open new holes to the outside, and do not tap an aquifer, water or a cavern. Causes in run 5: the farm hall on z131 broke through at the surface (north opening), the diagonal water access flooded the tunnel, stages ran into the blocked boxes. So far an agent checked this by hand each time.

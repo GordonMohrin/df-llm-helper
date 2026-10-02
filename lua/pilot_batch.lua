@@ -1,9 +1,9 @@
--- claude/pilot_batch <request.json>   (dfpilot F10, NOT TESTED LIVE: checked in the cloud against a mock DFHack only)
+-- claude/pilot_batch <request.json>   (df-llm-helper F10, NOT TESTED LIVE: checked in the cloud against a mock DFHack only)
 -- Runs several DFHack commands in ONE dfhack-run session and returns a JSON list:
 --   Input (file): {"cmds": [["claude/status"], ["claude/mil", "tabelle"], ...], "max_bytes": 20000}
 --   Output (stdout, one line): [{"ok": true, "out": "..."}, {"ok": false, "out": "...", "err": "..."}, ...]
 -- An error in one sub-command does not stop the others (pcall per command).
--- Fair play: dfpilot checks every sub-command BEFORE writing the request (fairplay.check_command + linter).
+-- Fair play: df-llm-helper checks every sub-command BEFORE writing the request (fairplay.check_command + linter).
 local json = require('json')
 
 local path = ({ ... })[1]

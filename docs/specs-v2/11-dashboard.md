@@ -1,4 +1,4 @@
-# Spec 11: Dashboard for the Player (`dfpilot dashboard`)
+# Spec 11: Dashboard for the Player (`python -m df_llm_helper dashboard`)
 
 Priority: P2 | As of: 01.10.2026 (Run 5, Windrings) | Status: implemented (PR v2-11), not yet live-tested | Framework: see README.md
 
@@ -16,8 +16,8 @@ The player wants to see at a glance how the fort is doing, without me writing te
 - Map excerpt as ASCII for chosen coordinates (`dashboard map x y z w h`), e.g. tunnel end.
 
 ## Behavior
-1. `dfpilot dashboard --out tools/out/dashboard.html` generates the file from `state.db`; no live server.
-2. Publication as an artifact is done by the orchestrator (not part of dfpilot, no network).
+1. `python -m df_llm_helper dashboard --out tools/out/dashboard.html` generates the file from `state.db`; no live server.
+2. Publication as an artifact is done by the orchestrator (not part of df-llm-helper, no network).
 3. Update at every `check`, only when values change (hash comparison).
 
 ## Configuration

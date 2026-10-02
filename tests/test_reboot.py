@@ -4,13 +4,13 @@ from pathlib import Path
 import pytest
 
 from conftest import FIX
-from dfpilot import yamlmini
-from dfpilot.client import MockClient, SERVICES_CMD
-from dfpilot.clock import FakeClock
-from dfpilot.config import HOME
-from dfpilot.reboot import (DEFAULTS, STATE_CMD, Reboot, ServicesError, load_commands, load_services,
+from df_llm_helper import yamlmini
+from df_llm_helper.client import MockClient, SERVICES_CMD
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.config import HOME
+from df_llm_helper.reboot import (DEFAULTS, STATE_CMD, Reboot, ServicesError, load_commands, load_services,
                             order_services, parse_repeat, repeat_query, validate_services)
-from dfpilot.store import Store
+from df_llm_helper.store import Store
 
 SVCS = load_services(HOME / DEFAULTS["services_file"])
 Q = repeat_query(SVCS)
@@ -106,7 +106,7 @@ def test_every_service_has_check_and_validation():
     errs = validate_services(bad)
     assert any("a: no check command" in e for e in errs) and any("zz" in e for e in errs)
     assert any("duplicate" in e for e in errs) and any("c: start missing" in e for e in errs)
-    from dfpilot.reboot import Service
+    from df_llm_helper.reboot import Service
     with pytest.raises(ServicesError):
         order_services([Service("x", "k", "s", depends=["y"]), Service("y", "k2", "s", depends=["x"])])
 
@@ -144,7 +144,7 @@ def test_detect_loaded_and_parse_and_dry():
 
 
 def test_cli_reboot(tmp_path, tools_dir, capsys):
-    from dfpilot.cli import main
+    from df_llm_helper.cli import main
     c = tmp_path / "c.yaml"
     c.write_text(f"paths:\n  tools: {tools_dir}\n  scopes: {tools_dir / 'scopes'}\n  state_db: {tmp_path / 's.db'}\n"
                  f"  gamelog: {tmp_path / 'g'}\nreboot:\n  wait_s: 0\n", encoding="utf-8")

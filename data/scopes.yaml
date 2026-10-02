@@ -96,7 +96,7 @@ handel:
   kpis:
     - {name: "Caravans", expr: "join([c.name + ':' + c.state for c in caravans])", ziel: "-"}
     - {name: "Broker in depot", expr: "broker.in_depot if broker else None", ziel: "on arrival"}
-  commands: ["claude/handel status|plan|prep|broker|mark|open|select|confirm|accept|finish|release (--live only after --dry)", "dfpilot runbook show rb06_karawane"]
+  commands: ["claude/handel status|plan|prep|broker|mark|open|select|confirm|accept|finish|release (--live only after --dry)", "python -m df_llm_helper runbook show rb06_karawane"]
   kb_query: "caravan trade broker depot finished goods"
   kb_ids: [handel_ablauf, makler_squad, fertigwaren_lager]
 infra:
@@ -105,6 +105,6 @@ infra:
     - {name: "Stopped services", expr: "stopped_services", ziel: "[]"}
     - {name: "fps/timestream", expr: "str(fps) + '/' + str(timestream)", ziel: "as set by the guard"}
     - {name: "Heartbeat min", expr: "heartbeat_age_min", ziel: "< 20"}
-  commands: ["dfpilot guard --dry-run", "dfpilot autopilot --dry-run", "claude/tempo status", "claude/config"]
+  commands: ["python -m df_llm_helper guard --dry-run", "python -m df_llm_helper autopilot --dry-run", "claude/tempo status", "claude/config"]
   kb_query: "guard blind heartbeat services flags loading"
   kb_ids: [waechter_blind, deadman_heartbeat, nach_laden]

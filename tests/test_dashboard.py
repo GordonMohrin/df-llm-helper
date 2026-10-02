@@ -5,13 +5,13 @@ import json
 import re
 
 from conftest import FIX
-from dfpilot.client import MockClient
-from dfpilot.clock import FakeClock
-from dfpilot.config import DEFAULTS as CFG
-from dfpilot.dashboard import (BUILDPLAN, DEFAULTS, LOCATIONS_CMD, collect, parse_locations, render, validate_html,
+from df_llm_helper.client import MockClient
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.config import DEFAULTS as CFG
+from df_llm_helper.dashboard import (BUILDPLAN, DEFAULTS, LOCATIONS_CMD, collect, parse_locations, render, validate_html,
                                write_if_changed)
-from dfpilot.digest import DigestState, build_digest
-from dfpilot.store import Store
+from df_llm_helper.digest import DigestState, build_digest
+from df_llm_helper.store import Store
 from helpers import snap_for
 
 T0 = 1_790_000_000.0
@@ -77,7 +77,7 @@ def test_warnings_match_digest():
 
 def test_map_reproduces_fixture_matrix(tmp_path, tools_dir, capsys):
     """Acceptance 5 (map excerpt; fixture fixtures/run5/area_z130.txt = claude/area 130 80 90 40 28)."""
-    from dfpilot.cli import main
+    from df_llm_helper.cli import main
     c = tmp_path / "c.yaml"
     c.write_text(f"paths:\n  tools: {tools_dir}\n  scopes: {tools_dir / 'scopes'}\n  state_db: {tmp_path / 's.db'}\n"
                  f"  gamelog: {tmp_path / 'g'}\n", encoding="utf-8")
@@ -116,7 +116,7 @@ def test_sections_from_other_specs_and_hash(tmp_path):
 
 
 def test_check_writes_dashboard(tmp_path, tools_dir):
-    from dfpilot.cli import main
+    from df_llm_helper.cli import main
     c = tmp_path / "c.yaml"
     c.write_text(f"paths:\n  tools: {tools_dir}\n  scopes: {tools_dir / 'scopes'}\n  state_db: {tmp_path / 's.db'}\n"
                  f"  gamelog: {tmp_path / 'g'}\n", encoding="utf-8")

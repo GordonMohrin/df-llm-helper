@@ -1,7 +1,7 @@
--- claude/pilot_reach check sx sy sz x,y,z [x,y,z ...] | dump x1 y1 z1 x2 y2 z2     (dfpilot spec v3-11, LIVE-UNTESTED)
+-- claude/pilot_reach check sx sy sz x,y,z [x,y,z ...] | dump x1 y1 z1 x2 y2 z2     (df-llm-helper spec v3-11, LIVE-UNTESTED)
 -- check: dfhack.maps.canWalkBetween(start, point) for every point in ONE call (walk groups, cheap)
 --        -> {"ok":true,"start":[x,y,z],"results":[true,false,...]} (same order as the arguments).
--- dump:  one character per tile for a box (encoding in dfpilot/features/_grid.py); dfpilot does the path logic
+-- dump:  one character per tile for a box (encoding in df_llm_helper/features/_grid.py); df-llm-helper does the path logic
 --        (cause search with/without constructions, what-if walls). Unrevealed tiles are emitted as '?' and nothing
 --        else is read about them (fair play). Max 200000 tiles per call.
 -- Read only: no designations, no buildings, no map changes.

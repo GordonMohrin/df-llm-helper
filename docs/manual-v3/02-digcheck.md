@@ -1,4 +1,4 @@
-# Dig safety checker: `dfpilot digcheck` / `dfpilot dig check` (spec v3-02)
+# Dig safety checker: `python -m df_llm_helper digcheck` / `python -m df_llm_helper dig check` (spec v3-02)
 
 Status: implemented, **not yet live-tested**. Read only: it never designates anything.
 
@@ -7,12 +7,12 @@ Run it before every dig stage. Findings mean: do not designate this stage (or us
 ## Commands
 | Command | What it does |
 |---|---|
-| `python -m dfpilot digcheck Z X1 Y1 X2 Y2 [MODE]` | check a rectangle (like `claude/dig`) |
-| `python -m dfpilot digcheck --csv FILE -c X,Y,Z` | check a quickfort `#dig` CSV at the cursor |
-| `python -m dfpilot digcheck --stages lua/claude/stages.lua --stage N11` | check a stage (literal `add(...)` lines) |
+| `python -m df_llm_helper digcheck Z X1 Y1 X2 Y2 [MODE]` | check a rectangle (like `claude/dig`) |
+| `python -m df_llm_helper digcheck --csv FILE -c X,Y,Z` | check a quickfort `#dig` CSV at the cursor |
+| `python -m df_llm_helper digcheck --stages lua/claude/stages.lua --stage N11` | check a stage (literal `add(...)` lines) |
 | `... --strip` | additionally print the dig orders without the rows that hold a finding/unrevealed tile |
 | `... --gamelog FILE` | count `Inappropriate dig square` cancels |
-| `python -m dfpilot dig check ...` | alias |
+| `python -m df_llm_helper dig check ...` | alias |
 | `--grid FILE` | offline on a grid fixture |
 
 Exit codes: 0 ok, 1 unsafe (only unrevealed/uncertain tiles), 2 refused (findings or not readable).
@@ -45,7 +45,7 @@ call) with `pause_s` (0.2 s) between blocks; more than `max_cells` (3000) target
 `z_min` 104, `z_max` 140, `roof_min` 1, `roof_min_surface` 2, `surface_z` 130, `forbid_boxes` [], `use_water_boxes`
 true, `cavern_boxes` [], `cavern_void_min` 8, `max_cells` 3000, `block` 500, `pause_s` 0.2, `in_check` true.
 
-## In `dfpilot check`
+## In `python -m df_llm_helper check`
 After a refused/unsafe check one summary line is shown once. Every check is logged (`source=digcheck`).
 
 ## Fair play / lint

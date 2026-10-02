@@ -1,6 +1,6 @@
 # Camera profile 'ambient' (default since 2026-10-01, spec v3-10): "a bit of everything" - furniture/building,
 # burial, harvest, fetching water; almost never combat training or sparring. First matching pattern wins
-# (Lua pattern on the DF job type name); cat = category for `dfpilot camera stats`.
+# (Lua pattern on the DF job type name); cat = category for `python -m df_llm_helper camera stats`.
 name: ambient
 description: "a bit of everything: building, furniture, burial, harvest, water; no sparring"
 mode: auto

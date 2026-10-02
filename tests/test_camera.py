@@ -8,12 +8,12 @@ import subprocess
 
 import pytest
 
-from dfpilot.client import MockClient
-from dfpilot.clock import FakeClock
-from dfpilot.config import HOME
-from dfpilot.features import camera as cam
-from dfpilot.store import Store
-from dfpilot.toolsfs import ToolsDir
+from df_llm_helper.client import MockClient
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.config import HOME
+from df_llm_helper.features import camera as cam
+from df_llm_helper.store import Store
+from df_llm_helper.toolsfs import ToolsDir
 
 FIX = HOME / "fixtures" / "v3" / "camera"
 LUA = shutil.which("lua5.4") or shutil.which("lua")
@@ -198,7 +198,7 @@ def test_hold_hint(world):
 
 
 def test_check_hook_no_df_call_without_attack(world, cfg):
-    from dfpilot.pilot import Pilot
+    from df_llm_helper.pilot import Pilot
     d, sch, m, clock, tools = world
     p = Pilot(cfg, m, store=d.store, clock=clock, tools=tools)
     n = len(m.calls)
@@ -240,9 +240,9 @@ def test_lua_without_profile_file_keeps_builtin(tmp_path):
 
 
 def test_cli_profile_list_and_refusal(world, monkeypatch, capsys):
-    import dfpilot.cli as cli
-    from dfpilot.config import load_config
-    from dfpilot.pilot import Pilot
+    import df_llm_helper.cli as cli
+    from df_llm_helper.config import load_config
+    from df_llm_helper.pilot import Pilot
     d, sch, m, clock, tools = world
     monkeypatch.setattr(cli, "_pilot", lambda a: Pilot(load_config(overrides={"paths": {"tools": str(tools.path)}}),
                                                        m, store=d.store, clock=clock, tools=tools))

@@ -4,12 +4,12 @@ from pathlib import Path
 import pytest
 
 from conftest import FIX, REPO
-from dfpilot import yamlmini
-from dfpilot.brief import (FAIRPLAY_BLOCK, REPORT_FORMAT, SCOPES, BriefError, build_brief, load_scopes, shingles)
-from dfpilot.config import DEFAULTS
-from dfpilot.digest import tokens
-from dfpilot.kb import KB, Entry, expand, format_entry, format_hits, import_markdown, tokenize, write_jsonl
-from dfpilot.memory import classify, compact_file, compact_text, extract_for_brief, parse_sections, restore, shorten
+from df_llm_helper import yamlmini
+from df_llm_helper.brief import (FAIRPLAY_BLOCK, REPORT_FORMAT, SCOPES, BriefError, build_brief, load_scopes, shingles)
+from df_llm_helper.config import DEFAULTS
+from df_llm_helper.digest import tokens
+from df_llm_helper.kb import KB, Entry, expand, format_entry, format_hits, import_markdown, tokenize, write_jsonl
+from df_llm_helper.memory import classify, compact_file, compact_text, extract_for_brief, parse_sections, restore, shorten
 from helpers import ROOT, ctx_for
 
 KB_ALL = KB.load_dir(ROOT / "data" / "kb", current_run=5, stale_before=4)

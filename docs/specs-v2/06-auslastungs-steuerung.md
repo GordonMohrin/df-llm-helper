@@ -1,4 +1,4 @@
-# Spec 06: Utilization Control (`dfpilot workload`)
+# Spec 06: Utilization Control (`python -m df_llm_helper workload`)
 
 Priority: P1 | As of: 01.10.2026 (Run 5, Windrings) | Status: implemented (PR v2-06), not yet live-tested | Framework: see README.md
 

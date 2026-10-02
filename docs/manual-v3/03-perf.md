@@ -1,22 +1,22 @@
-# Freeze profiler (`dfpilot perf`, spec v3-03)
+# Freeze profiler (`python -m df_llm_helper perf`, spec v3-03)
 
-**When:** the game stutters or stops for seconds at regular intervals, `dfpilot check` shows `Game hangs: ...`
+**When:** the game stutters or stops for seconds at regular intervals, `python -m df_llm_helper check` shows `Game hangs: ...`
 (perf.flag), or after every Lua update of the companion scripts (regression probe).
 
 ## Commands
-- `python -m dfpilot perf sample [--n 40] [--gap 0.6]` - probes the game (frame counter) n times; prints outliers
+- `python -m df_llm_helper perf sample [--n 40] [--gap 0.6]` - probes the game (frame counter) n times; prints outliers
   (> 1.5 s), maximum, period in seconds and ticks, tick rate. Exit code 1 if there were outliers.
-- `python -m dfpilot perf bisect [--dry-run] [--force]` - baseline sample; only with outliers it switches the
+- `python -m df_llm_helper perf bisect [--dry-run] [--force]` - baseline sample; only with outliers it switches the
   repeat-util services off half by half (`repeat-util.cancel`), measures again and restarts them
   (`claude/<name> start` from `data/services.yaml`). Prints the culprit, the measured freeze and a proposal with line
   references into `lua/claude/<name>.lua`. `--dry-run` only lists what it would test. At most 2 runs per hour.
-- `python -m dfpilot perf status [--clear]` - perf.flag, services still switched off, last sample/bisect; `--clear`
+- `python -m df_llm_helper perf status [--clear]` - perf.flag, services still switched off, last sample/bisect; `--clear`
   deletes perf.flag after you handled it.
 
 ## What happens automatically
 - The watcher measures the latency of its two light queries every tick. >= 5 outliers in 5 min and an outlier rate
-  > 5 % -> `tools/perf.flag` with `Game hangs: 2.0 outliers/min (max 10.5 s, period 25 s) -> dfpilot perf bisect`
-  (shown by `dfpilot check`; set again at most every 30 min after you deleted it).
+  > 5 % -> `tools/perf.flag` with `Game hangs: 2.0 outliers/min (max 10.5 s, period 25 s) -> python -m df_llm_helper perf bisect`
+  (shown by `python -m df_llm_helper check`; set again at most every 30 min after you deleted it).
 - Crash safety: before a bisect switches anything off it writes `tools/out/perf_bisect.json`. The watcher restarts
   every listed service whose deadline passed (protected: 40 s, others: 600 s); `perf` and `check` restart everything
   when the bisect process is gone (no heartbeat for 30 s).

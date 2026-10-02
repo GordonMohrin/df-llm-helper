@@ -10,11 +10,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from dfpilot.client import MockClient
-from dfpilot.clock import FakeClock
-from dfpilot.features import reach as R
-from dfpilot.features._grid import Grid
-from dfpilot.store import Store
+from df_llm_helper.client import MockClient
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.features import reach as R
+from df_llm_helper.features._grid import Grid
+from df_llm_helper.store import Store
 from helpers import ROOT
 
 LUA = shutil.which("lua5.4") or shutil.which("lua")
@@ -199,9 +199,9 @@ def test_check_hook_interval_lines_and_recovery(tmp_path):
 
 
 def test_cli_reach_offline(capsys, tmp_path, monkeypatch):
-    import dfpilot.cli as cli
-    from dfpilot.config import load_config
-    from dfpilot.pilot import Pilot
+    import df_llm_helper.cli as cli
+    from df_llm_helper.config import load_config
+    from df_llm_helper.pilot import Pilot
     clock = FakeClock(0)
     monkeypatch.setattr(cli, "_pilot", lambda args: Pilot(load_config(overrides={"paths": {"tools": str(tmp_path)}}),
                                                           MockClient({}, clock=clock), store=Store(), clock=clock))

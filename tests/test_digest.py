@@ -4,15 +4,15 @@ import random
 import pytest
 
 from conftest import FIX
-from dfpilot.anomaly import CancelLoop
-from dfpilot.config import DEFAULTS, load_config
-from dfpilot.digest import DigestState, build_digest, compute_alerts, inbox_items, tokens
-from dfpilot.snapshot import fixture_snapshot
-from dfpilot.toolsfs import FlagInfo, read_text_tolerant
+from df_llm_helper.anomaly import CancelLoop
+from df_llm_helper.config import DEFAULTS, load_config
+from df_llm_helper.digest import DigestState, build_digest, compute_alerts, inbox_items, tokens
+from df_llm_helper.snapshot import fixture_snapshot
+from df_llm_helper.toolsfs import FlagInfo, read_text_tolerant
 from helpers import snap_for
 from make_fixtures import random_responses
-from dfpilot.client import MockClient
-from dfpilot.snapshot import collect
+from df_llm_helper.client import MockClient
+from df_llm_helper.snapshot import collect
 from helpers import CMDS
 
 TH = DEFAULTS["thresholds"]

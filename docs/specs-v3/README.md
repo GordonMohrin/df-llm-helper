@@ -1,12 +1,12 @@
-# dfpilot v3: further specs from Run 5 (Y109)
+# df-llm-helper v3: further specs from Run 5 (Y109)
 
 Addition to `../specs-v2/` (12 specs). These eleven specs came from things that appeared after the v2 list or only
 showed up while playing. Framework and Definition of Done as in `../specs-v2/README.md`. All eleven are implemented
-as feature plug-ins under `dfpilot/features/` (manual: `../manual-v3/`), not yet live-tested.
+as feature plug-ins under `df_llm_helper/features/` (manual: `../manual-v3/`), not yet live-tested.
 
-**Question "Should dfpilot take over the access guard?" Answer: yes** (spec 01). It is pure monitoring, repeats
+**Question "Should df-llm-helper take over the access guard?" Answer: yes** (spec 01). It is pure monitoring, repeats
 forever and in Run 5 would have caught unnoticed breaches. The prototype (`lua/claude/zugaenge.lua`) is the base of
-`dfpilot perimeter`.
+`python -m df_llm_helper perimeter`.
 
 | No | Feature | Command | Prio | What happened in Run 5 |
 |---|---|---|---|---|

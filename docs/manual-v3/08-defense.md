@@ -1,4 +1,4 @@
-# Defense designer (`dfpilot defense`) – spec v3-08
+# Defense designer (`python -m df_llm_helper defense`) – spec v3-08
 
 Status: implemented, **not yet live-tested**. The Lua part (`lua/pilot_defense.lua`, installed as
 `claude/pilot_defense`) is read-only and LIVE-UNTESTED.
@@ -6,10 +6,10 @@ Status: implemented, **not yet live-tested**. The Lua part (`lua/pilot_defense.l
 ## Commands
 | Command | What it does | DF access |
 |---|---|---|
-| `python -m dfpilot defense design --terrain <file> [--door x,y] [--access x,y] [--lane-len N] [--no-niche] [--stock stock.json] [--out DIR] [--name defense] [--csv]` | Designs lane, walls, traps, shooter niche; prints sketch, materials, missing stock, stages; writes `<name>.csv` + `<name>.txt` with `--out` | none |
+| `python -m df_llm_helper defense design --terrain <file> [--door x,y] [--access x,y] [--lane-len N] [--no-niche] [--stock stock.json] [--out DIR] [--name defense] [--csv]` | Designs lane, walls, traps, shooter niche; prints sketch, materials, missing stock, stages; writes `<name>.csv` + `<name>.txt` with `--out` | none |
 | `... defense design ... --apply --confirm` | Builds: copies the CSV to `defense.blueprint_dir` (if set) and runs `quickfort run claude/<name>.csv -n /<label> -c x,y,z` for `walls`, `traps`, `niche` | quickfort (build orders) |
-| `python -m dfpilot defense status [--file status.json]` | Stone traps loaded/empty, open load jobs, mechanisms/trap components/boulders in stock; `!!` and exit code 1 below `reload_warn_pct` | `claude/pilot_defense status` (without `--file`) |
-| `python -m dfpilot defense stats [--gamelog FILE] [--tail N]` | Trap lines in the gamelog (caught/hits/load messages) vs. attack lines; warns on attacks without any trap message | reads the gamelog file |
+| `python -m df_llm_helper defense status [--file status.json]` | Stone traps loaded/empty, open load jobs, mechanisms/trap components/boulders in stock; `!!` and exit code 1 below `reload_warn_pct` | `claude/pilot_defense status` (without `--file`) |
+| `python -m df_llm_helper defense stats [--gamelog FILE] [--tail N]` | Trap lines in the gamelog (caught/hits/load messages) vs. attack lines; warns on attacks without any trap message | reads the gamelog file |
 
 `--apply` without `--confirm` is refused (exit 2). `design` alone never contacts DF.
 
@@ -28,8 +28,8 @@ Characters: `.` floor (buildable), `#` rock, `_`/space open air, `^` ramp, `> < 
 
 ## Example (synthetic Run-5 plateau)
 ```
-python -m dfpilot defense design --terrain fixtures/v3/defense/plateau_z133.txt --stock fixtures/v3/defense/stock.json
-python -m dfpilot defense status --file fixtures/v3/defense/status_12_of_20_empty.json   # -> !! 12 of 20 stone traps empty
+python -m df_llm_helper defense design --terrain fixtures/v3/defense/plateau_z133.txt --stock fixtures/v3/defense/stock.json
+python -m df_llm_helper defense status --file fixtures/v3/defense/status_12_of_20_empty.json   # -> !! 12 of 20 stone traps empty
 ```
 Result on the fixture: lane of 20 tiles from (99,95) south to y109 and east to the mouth at (104,108); 12 Ts, 6 Tw,
 2 Tc = 20 mechanisms; 53 Cw + 3 CF; cursor (98,93,133).

@@ -2,10 +2,10 @@
 import pytest
 
 from conftest import set_age
-from dfpilot.config import DEFAULTS
-from dfpilot.guard import GuardInputs, GuardRunner, GuardState, ProcessProbe, decide, target_fps, tempo_blockers
-from dfpilot.store import Store
-from dfpilot.toolsfs import ToolsDir
+from df_llm_helper.config import DEFAULTS
+from df_llm_helper.guard import GuardInputs, GuardRunner, GuardState, ProcessProbe, decide, target_fps, tempo_blockers
+from df_llm_helper.store import Store
+from df_llm_helper.toolsfs import ToolsDir
 from helpers import snap_for
 
 G = DEFAULTS["guard"]

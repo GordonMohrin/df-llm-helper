@@ -1,4 +1,4 @@
-# Reachability watcher: `dfpilot reach` (spec v3-11)
+# Reachability watcher: `python -m df_llm_helper reach` (spec v3-11)
 
 Status: implemented, **not yet live-tested**. Read only.
 
@@ -8,10 +8,10 @@ reachable from the core. Run 5: two emergency plugs cut the farms off for years 
 ## Commands
 | Command | What it does |
 |---|---|
-| `python -m dfpilot reach` | measure all points (one `claude/pilot_reach check` call); for unreachable mandatory points: cause search |
-| `python -m dfpilot reach what-if --wall X Y Z [--wall ...]` | before building a wall/plug: would it cut off a mandatory point? exit 1 = yes/unprovable |
-| `python -m dfpilot reach correlate [--gamelog FILE]` | gamelog cancels (`Could not find path`, `Needs ... spawn`) -> point category -> unreachable points |
-| `python -m dfpilot reach points` | list the watch points (`*` = mandatory) |
+| `python -m df_llm_helper reach` | measure all points (one `claude/pilot_reach check` call); for unreachable mandatory points: cause search |
+| `python -m df_llm_helper reach what-if --wall X Y Z [--wall ...]` | before building a wall/plug: would it cut off a mandatory point? exit 1 = yes/unprovable |
+| `python -m df_llm_helper reach correlate [--gamelog FILE]` | gamelog cancels (`Could not find path`, `Needs ... spawn`) -> point category -> unreachable points |
+| `python -m df_llm_helper reach points` | list the watch points (`*` = mandatory) |
 | `--grid fixtures/v3/grid/reach_p1p2_built.grid` | offline on a grid fixture (`@core`/`@point` lines) instead of live DF |
 
 Exit codes: 0 all mandatory points reachable / what-if safe; 1 unreachable / what-if warns.
@@ -37,7 +37,7 @@ The shipped file holds **example values from run 5** - replace them for every fo
 `start`, `points_file` (data/reach.yaml), `interval_s` (300), `mandatory` ([farm, kitchen, still, well, hospital,
 barracks]), `margin` (6, dump box around start + points), `max_tiles` (150000), `cancel_min` (20), `in_check` (true).
 
-## In `dfpilot check`
+## In `python -m df_llm_helper check`
 Every `interval_s` one measurement. Lines only while mandatory points are unreachable (digest line + cause/correlation,
 each <= 120 chars) and once when everything is reachable again (`Reachable: 7/7 mandatory points (again)`).
 Unreachable points also raise a critical warning (`reach:unreachable`, wakes the orchestrator). Actions are logged in
@@ -45,7 +45,7 @@ the store (`source=reach`, actions `measure`, `what-if`).
 
 ## How it works
 - `claude/pilot_reach check sx sy sz x,y,z ...` -> `canWalkBetween` per point (walk groups, cheap).
-- `claude/pilot_reach dump x1 y1 z1 x2 y2 z2` -> one character per tile (encoding in `dfpilot/features/_grid.py`);
+- `claude/pilot_reach dump x1 y1 z1 x2 y2 z2` -> one character per tile (encoding in `df_llm_helper/features/_grid.py`);
   unrevealed tiles are `?`. Python does a 0-1 path search where constructed walls cost 1: the constructions on the
   cheapest path are the cutting ones.
 - what-if adds the planned walls to the dump and compares reachability before/after. A point that is reachable live

@@ -1,7 +1,7 @@
--- claude/pilot_caravan release [--apply]   (dfpilot spec 02, NOT TESTED LIVE)
+-- claude/pilot_caravan release [--apply]   (df-llm-helper spec 02, NOT TESTED LIVE)
 -- Send a stuck caravan home: sets unit.flags1.left = true ONLY for merchant units (isMerchant, incl. caravan animals
 -- with the merchant flag), never for citizens/pets/guests. Fair-play exception: the player's standing permission 2026-10-01
--- (exception register FP09); dfpilot calls this only with a register entry. Without --apply it only displays.
+-- (exception register FP09); df-llm-helper calls this only with a register entry. Without --apply it only displays.
 local util = reqscript('claude/util')
 if not util.require_fort() then return end
 

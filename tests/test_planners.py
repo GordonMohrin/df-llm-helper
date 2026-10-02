@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from dfpilot.planners import (Area, DigTarget, Finding, Soldier, TradeItem, forecast, has_errors, parse_area, plan_armor,
+from df_llm_helper.planners import (Area, DigTarget, Finding, Soldier, TradeItem, forecast, has_errors, parse_area, plan_armor,
                               plan_dig, plan_trade, soldier_quota, validate_blueprint)
-from dfpilot.planners import armor, blueprint, dig, supply, trade
-from dfpilot.planners.dig import batch_to_csv
+from df_llm_helper.planners import armor, blueprint, dig, supply, trade
+from df_llm_helper.planners.dig import batch_to_csv
 
 HOME = Path(__file__).resolve().parent.parent
 FIX = HOME / "fixtures" / "run5"

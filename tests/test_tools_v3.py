@@ -1,4 +1,4 @@
-"""Spec v3-05 tool/pick manager (`dfpilot tools`): acceptance criteria 1-5, FP08 gate, after-load, selection property.
+"""Spec v3-05 tool/pick manager (`python -m df_llm_helper tools`): acceptance criteria 1-5, FP08 gate, after-load, selection property.
 All `claude/pilot_tools status` / `claude/pickfix --apply` responses are SYNTHETIC (fixtures/v3/tools, fixture gap)."""
 import copy
 import json
@@ -10,13 +10,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from dfpilot.client import MockClient
-from dfpilot.clock import FakeClock
-from dfpilot.config import load_config
-from dfpilot.fairplay import ExceptionRegistry
-from dfpilot.features import tools as T
-from dfpilot.lint import lint_file
-from dfpilot.store import Store
+from df_llm_helper.client import MockClient
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.config import load_config
+from df_llm_helper.fairplay import ExceptionRegistry
+from df_llm_helper.features import tools as T
+from df_llm_helper.lint import lint_file
+from df_llm_helper.store import Store
 
 ROOT = Path(__file__).resolve().parent.parent
 FIX = ROOT / "fixtures" / "v3" / "tools"
@@ -275,7 +275,7 @@ def test_status_lines(tmp_path):
 def test_config_defaults_and_cli_registration(capsys):
     cfg = load_config(path=Path("/nonexistent/x.yaml"))
     assert cfg.get("tools.reserve") == 4 and cfg.get("tools.workdetail") == "Miners"
-    from dfpilot.cli import main
+    from df_llm_helper.cli import main
     with pytest.raises(SystemExit) as e:
         main(["tools", "--help"])
     assert e.value.code == 0 and "after-load" in capsys.readouterr().out
@@ -294,8 +294,8 @@ def test_pilot_tools_lua_lint_clean_and_parses():
 
 def test_local_register_file_is_merged(tmp_path):
     """A git-ignored exceptions.local.jsonl next to the register holds installation-specific consents (FP08)."""
-    from dfpilot.fairplay import ExceptionRegistry
-    from dfpilot.features.tools import fp08_entry
+    from df_llm_helper.fairplay import ExceptionRegistry
+    from df_llm_helper.features.tools import fp08_entry
     main = tmp_path / "exceptions.jsonl"
     main.write_text('{"example": true, "action": "FP09", "reason": "x", "player_consent": "<q>"}\n', encoding="utf-8")
     assert fp08_entry(ExceptionRegistry(main)) is None

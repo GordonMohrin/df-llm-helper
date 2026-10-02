@@ -46,8 +46,8 @@ defaults()
 
 local function now() return dfhack.getTickCount() end
 
--- ---------------------------------------------------------------- camera profiles (dfpilot spec v3-10, LIVE-UNTESTED)
--- `dfpilot camera profile <name>` writes <DFPILOT_HOME>/tools/schau_profile.json and then calls
+-- ---------------------------------------------------------------- camera profiles (df-llm-helper spec v3-10, LIVE-UNTESTED)
+-- `python -m df_llm_helper camera profile <name>` writes <DF_LLM_HELPER_HOME>/tools/schau_profile.json and then calls
 -- 'claude/schau profile reload'. Without that file (or after 'claude/schau profile default') the built-in
 -- weights and constants below apply unchanged. Only weights/timings change; safety rules stay as they are.
 local PROFILE_FILE = TOOLS .. 'schau_profile.json'
@@ -540,7 +540,7 @@ local function job_weight(u)
   return (weight_for(n, false)), n
 end
 
--- category statistics of the last 30 minutes (dfpilot camera stats)
+-- category statistics of the last 30 minutes (python -m df_llm_helper camera stats)
 local STAT_WINDOW = 30 * 60 * 1000
 local function record_pick(cat)
   S.picks = S.picks or {}
@@ -746,7 +746,7 @@ function start(mode)
   S.bld_known, S.queue, S.expect, S.cur, S.caption, S.enemy_ids = {}, {}, nil, nil, nil, {}
   S.next_eval, S.t_units, S.t_bld, S.hold_until = 0, 0, 0, 0
   S.enemy_cam_t = nil
-  pcall(load_profile)   -- a profile chosen earlier with dfpilot camera (no file: built-in weights)
+  pcall(load_profile)   -- a profile chosen earlier with python -m df_llm_helper camera (no file: built-in weights)
   repeatUtil.scheduleEvery(KEY, 20, 'frames', tick)
   S.running = true
   add_line('Schau: Kamera-Regie an (' .. S.mode .. ')', 1)

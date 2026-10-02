@@ -9,13 +9,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from dfpilot.client import MockClient
-from dfpilot.clock import FakeClock
-from dfpilot.features import perimeter as P
-from dfpilot.features import reach as R
-from dfpilot.features._grid import Grid
-from dfpilot.store import Store
-from dfpilot.toolsfs import ToolsDir
+from df_llm_helper.client import MockClient
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.features import perimeter as P
+from df_llm_helper.features import reach as R
+from df_llm_helper.features._grid import Grid
+from df_llm_helper.store import Store
+from df_llm_helper.toolsfs import ToolsDir
 from helpers import ROOT
 
 LUA = shutil.which("lua5.4") or shutil.which("lua")
@@ -103,7 +103,7 @@ def test_stairs_rule_walls_on_inside_floor_not_on_the_stair(tmp_path):
                 cells.add((cur[0] + i, y, z))
         y += 1
     assert cells == {(96, 89, 132)} | {(x, 70, 131) for x in range(100, 123)}
-    assert csv.startswith("#build label(dfpilot_seal)")
+    assert csv.startswith("#build label(df_llm_helper_seal)")
     # a ramp entry is treated like a stair
     g2 = Grid.from_text("@origin 0 0\nz 5\n#.#\n.^.\n#.#\n")
     assert P.seal_walls(g2, P.Access([(1, 1, 5)], True, True))[0] == [(0, 1, 5), (1, 0, 5), (1, 2, 5), (2, 1, 5)]
@@ -223,8 +223,8 @@ def test_seal_dry_run_writes_csv_apply_needs_what_if(tmp_path):
     assert code == 2 and any("would CUT OFF Farm plot north (110,70,z131)" in ln for ln in lines)
     assert any(ln.startswith("REFUSED") for ln in lines) and pe.client.write_calls == []
     code, lines = pe.seal(acc, apply=True, grid=g, reach=reach, override="player: yes, close the stub stair")
-    assert code == 0 and pe.client.write_calls == ["quickfort run claude/dfpilot_seal.csv -c 96,70,132"]
-    assert (tmp_path / "bp" / "claude" / "dfpilot_seal.csv").exists()
+    assert code == 0 and pe.client.write_calls == ["quickfort run claude/df_llm_helper_seal.csv -c 96,70,132"]
+    assert (tmp_path / "bp" / "claude" / "df_llm_helper_seal.csv").exists()
     acts = [(a["action"], a["ok"]) for a in pe.store.actions() if a["source"] == "perimeter"]
     assert ("seal-refused", 0) in acts and ("seal", 1) in acts and ("seal-plan", 1) in acts
     # without a cut mandatory point --apply goes through directly
@@ -238,9 +238,9 @@ def test_seal_dry_run_writes_csv_apply_needs_what_if(tmp_path):
 def test_parse_scan_and_cli_offline(tmp_path, capsys, monkeypatch):
     assert P.parse_scan({"ok": True, "done": False}) is None
     assert P.parse_scan({"ok": True, "done": True, "entries": [[1, 2, 3, 1, 0], [1]]}) == [(1, 2, 3, True, False)]
-    import dfpilot.cli as cli
-    from dfpilot.config import load_config
-    from dfpilot.pilot import Pilot
+    import df_llm_helper.cli as cli
+    from df_llm_helper.config import load_config
+    from df_llm_helper.pilot import Pilot
     clock = FakeClock(1_790_840_000.0)
     cfg = load_config(overrides={"paths": {"tools": str(tmp_path / "tools"), "scopes": str(tmp_path / "s")}})
     monkeypatch.setattr(cli, "_pilot", lambda args: Pilot(cfg, MockClient({}, clock=clock), store=Store(), clock=clock))

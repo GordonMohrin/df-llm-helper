@@ -1,6 +1,6 @@
-# Spec v3-06: Remote-worker protection (`dfpilot care remote`)
+# Spec v3-06: Remote-worker protection (`python -m df_llm_helper care remote`)
 
-Priority: P1 | Date: 01.10.2026 (run 5, Y109) | Status: **implemented (v3), not yet live-tested** — as its own command `dfpilot remote` (`dfpilot/features/remote.py`, `lua/pilot_remote.lua`; `care.py` unchanged) | Framework: see `../specs-v2/README.md` | Manual: `../manual-v3/06-remote.md`
+Priority: P1 | Date: 01.10.2026 (run 5, Y109) | Status: **implemented (v3), not yet live-tested** — as its own command `python -m df_llm_helper remote` (`df_llm_helper/features/remote.py`, `lua/pilot_remote.lua`; `care.py` unchanged) | Framework: see `../specs-v2/README.md` | Manual: `../manual-v3/06-remote.md`
 
 ## Goal and benefit
 Save dwarves who work far away from food/drink from starving or dying of thirst in time. In run 5 a miner (4156) had been fishing for hours at the river in the north-east (100 tiles from the fort), hunger 62,000→67,000, and immediately took another fishing job after each cancelled job. Altogether several dwarves died of dehydration on long ways (fishers, deep diggers). 15 dwarves had the fishing labor.
@@ -17,7 +17,7 @@ Per dwarf: hunger, thirst, position, job type, distance to the nearest food/drin
 4. **Escalation:** hunger > 55,000: warning `critical` with name/place; hunger > 65,000: hint that only moving the dwarf by hand helps.
 5. **Check fishing as a food source:** yield (fish stock) in the digest; proposal to switch off if the yield < 1 fish per real hour.
 
-**Implementation details:** taking a labor away also removes the dwarf from selective work details granting it (work detail menu); those names are recorded and restored. Records live in kv `remote_care.taken` (kind `rescue` = returned automatically on recovery; kind `pool` = rule 2, returned only by `dfpilot remote restore`). Per dwarf at most one rescue per `repeat_block_s` (600 s); at most `max_actions_per_run` (20) writes per pass. Work details in mode "everybody does this" that grant the labor are reported (the removal cannot stick there).
+**Implementation details:** taking a labor away also removes the dwarf from selective work details granting it (work detail menu); those names are recorded and restored. Records live in kv `remote_care.taken` (kind `rescue` = returned automatically on recovery; kind `pool` = rule 2, returned only by `python -m df_llm_helper remote restore`). Per dwarf at most one rescue per `repeat_block_s` (600 s); at most `max_actions_per_run` (20) writes per pass. Work details in mode "everybody does this" that grant the labor are reported (the removal cannot stick there).
 
 ## Configuration
 `remote_care: {far_tiles: 40, hunger_warn: 40000, hunger_crit: 55000, long_jobs: [Fish, GatherPlants], labor_pool: {FISH: 3}}`
@@ -38,6 +38,6 @@ Cancelling jobs and setting labors is normal operation (labor menu). No exceptio
 **State:** `fixtures/v3/remote/*.json` are synthetic (labelled `_note`; only 4156's place/hunger follow run 5). Gaps: real `claude/pilot_remote status` output, real cancel/labor replies, real work detail membership for FISH, a raw-fish time series.
 
 ## Deviations from the draft
-- Command `dfpilot remote` instead of `dfpilot care remote` (care.py stays untouched; the help text names the spec).
+- Command `python -m df_llm_helper remote` instead of `python -m df_llm_helper care remote` (care.py stays untouched; the help text names the spec).
 - Rule 2 only reduces (never hands out new long-job labors); soldiers holding a pool labor are not counted and not changed.
 - Job duration is not tracked; "Dig deep below z110" / "HarvestPlants at the edge" are not special-cased (configure `long_jobs`).

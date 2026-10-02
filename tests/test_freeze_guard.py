@@ -1,17 +1,17 @@
-"""Spec v3-04: time-standstill and window guard (dfpilot/freeze_guard.py, called by the watcher)."""
+"""Spec v3-04: time-standstill and window guard (df_llm_helper/freeze_guard.py, called by the watcher)."""
 import json
 import re
 
 import pytest
 
 from conftest import HOME
-from dfpilot.client import MAX_REPORT_ID_CMD, MockClient
-from dfpilot.config import DEFAULTS
-from dfpilot.features.freeze_guard_cfg import DEFAULTS as FG_DEFAULTS
-from dfpilot.freeze_guard import (FocusObs, FreezeCtx, FreezeGuard, focus_classes, leave_cmd, parse_status)
-from dfpilot.store import Store
-from dfpilot.toolsfs import ToolsDir
-from dfpilot.waechter import CARAVANS_CMD, CLEAR_CMD, FOOD_CMD, UNPAUSE_RE, Waechter
+from df_llm_helper.client import MAX_REPORT_ID_CMD, MockClient
+from df_llm_helper.config import DEFAULTS
+from df_llm_helper.features.freeze_guard_cfg import DEFAULTS as FG_DEFAULTS
+from df_llm_helper.freeze_guard import (FocusObs, FreezeCtx, FreezeGuard, focus_classes, leave_cmd, parse_status)
+from df_llm_helper.store import Store
+from df_llm_helper.toolsfs import ToolsDir
+from df_llm_helper.waechter import CARAVANS_CMD, CLEAR_CMD, FOOD_CMD, UNPAUSE_RE, Waechter
 
 FIXV3 = HOME / "fixtures" / "v3" / "freeze"
 LEAVE_PREFIX = 'lua "local g=require(\'gui\') local f='

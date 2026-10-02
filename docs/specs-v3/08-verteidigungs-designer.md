@@ -1,7 +1,7 @@
-# Spec v3-08: Defense designer (`dfpilot defense design|status|stats`)
+# Spec v3-08: Defense designer (`python -m df_llm_helper defense design|status|stats`)
 
 Priority: P1 | As of: 01.10.2026 (Run 5, year 109) | Status: implemented (v3), not yet live-tested | Framework: see `../specs-v2/README.md`
-Implementation: `dfpilot/planners/defense.py` (pure design), `dfpilot/features/defense.py` (CLI), `lua/pilot_defense.lua`
+Implementation: `df_llm_helper/planners/defense.py` (pure design), `df_llm_helper/features/defense.py` (CLI), `lua/pilot_defense.lua`
 (read-only status, LIVE-UNTESTED), tests `tests/test_defense.py`, synthetic fixtures `fixtures/v3/defense/`, manual
 `../manual-v3/08-defense.md`.
 
@@ -28,7 +28,7 @@ components, stones, iron/steel), core and barracks position.
 4. **Citizen/merchant paths:** a separate safe path (depot (112,98,z133)) or a note that merchants walk through the lane.
 5. **Output:** quickfort grid (`#build`, zones, cursor), material list (mechanisms, stones, iron/steel for N weapon
    traps), order of stages, ASCII sketch.
-6. **Reloading:** `dfpilot defense status`: number of loaded/triggered stone traps (open `Load stone trap` jobs), trap
+6. **Reloading:** `python -m df_llm_helper defense status`: number of loaded/triggered stone traps (open `Load stone trap` jobs), trap
    parts in stock; warning below 70 % loaded; suggest a stone stockpile near the lane.
 7. **Effectiveness:** statistics after each attack: enemies in the lane, killed by traps (gamelog: "trap"), wounds of
    the guard; adjustment suggestions.
@@ -52,7 +52,7 @@ Only build orders, zones, quickfort with our own grids, orders for trap parts (f
 Terrain cut-out z133, trap coordinates (19 stone traps, 15 in gatehouse B), gamelog "Load stone trap".
 
 ## Implementation notes (v3)
-- Command: a new top-level command `dfpilot defense ...` (feature plug-in) instead of `plan defense`, because `plan`
+- Command: a new top-level command `python -m df_llm_helper defense ...` (feature plug-in) instead of `plan defense`, because `plan`
   lives in `cli.py`. Acceptance mapping: 1 `test_lane_length_and_only_path` (independent BFS in the test), 2
   `test_materials_match_traps`, 3 `test_csv_passes_blueprint_validator`, 4 `test_status_12_of_20_empty_warns` /
   `test_status_cli`, 5 `test_design_cli_never_builds` / `test_apply_plan_requires_confirm`.

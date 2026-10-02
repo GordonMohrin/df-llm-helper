@@ -8,13 +8,13 @@ from pathlib import Path
 import pytest
 
 from conftest import FIX, set_age
-from dfpilot.cli import main
-from dfpilot.client import MockClient
-from dfpilot.pilot import Pilot
-from dfpilot.scenario import check_expectations, run_scenario
-from dfpilot.store import Store
-from dfpilot.toolsfs import ToolsDir
-from dfpilot.wake import wake_check
+from df_llm_helper.cli import main
+from df_llm_helper.client import MockClient
+from df_llm_helper.pilot import Pilot
+from df_llm_helper.scenario import check_expectations, run_scenario
+from df_llm_helper.store import Store
+from df_llm_helper.toolsfs import ToolsDir
+from df_llm_helper.wake import wake_check
 from helpers import ROOT
 from make_fixtures import build_scenarios, write_scenarios
 
@@ -82,7 +82,7 @@ def test_wake_baseline_dedupe_and_new_events(tmp_path, clock):
     assert wake_check(tools, store, clock) == []
     tools.write_flag("mood", "Mestthos Possessed")
     out = wake_check(tools, store, clock)
-    assert out == ["WAKE mood: Mestthos Possessed -> dfpilot runbook show rb07_stimmung"]
+    assert out == ["WAKE mood: Mestthos Possessed -> python -m df_llm_helper runbook show rb07_stimmung"]
     tools.write_flag("mood", "Mestthos Possessed")                  # same content written again
     assert wake_check(tools, store, clock) == []
     tools.delete_flag("mood")
@@ -96,7 +96,7 @@ def test_wake_baseline_dedupe_and_new_events(tmp_path, clock):
     store.warn(clock.now().epoch, "guard", "k1", "DEADMAN", "crit")
     store.warn(clock.now().epoch, "guard", "k2", "info only", "warn")
     out = wake_check(tools, store, clock)
-    assert out == ["WAKE dfpilot: DEADMAN -> dfpilot digest"]
+    assert out == ["WAKE df-llm-helper: DEADMAN -> python -m df_llm_helper digest"]
     assert len(store.take_warnings()) == 2                            # the digest still receives them
 
 
@@ -198,13 +198,13 @@ def test_cli_real_client_without_df(cli_cfg, capsys):
 
 
 def test_module_entrypoint():
-    r = subprocess.run([sys.executable, "-m", "dfpilot", "kb", "search", "E18"], cwd=ROOT, capture_output=True,
+    r = subprocess.run([sys.executable, "-m", "df_llm_helper", "kb", "search", "E18"], cwd=ROOT, capture_output=True,
                        text=True, timeout=60)
     assert r.returncode == 0 and "e18" in r.stdout
 
 
 def test_selftest_quick(capsys):
-    from dfpilot.selftest import LineTracer, core_files, main as st_main, quick_checks
+    from df_llm_helper.selftest import LineTracer, core_files, main as st_main, quick_checks
     assert all(ok for _, ok, _ in quick_checks())
     assert st_main(["--quick"]) == 0
     assert "GREEN" in capsys.readouterr().out
@@ -212,7 +212,7 @@ def test_selftest_quick(capsys):
     assert {f.stem for f in files} >= {"digest", "rules", "runbooks", "kb", "brief", "guard"}
     tr = LineTracer([files[0]])
     with tr:
-        from dfpilot.digest import tokens
+        from df_llm_helper.digest import tokens
         tokens("abc")
     rep = tr.report()
     assert 0 < rep[files[0].stem] <= 100

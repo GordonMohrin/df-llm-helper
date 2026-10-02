@@ -1,4 +1,4 @@
-# Spec v3-09: Settings Manager (`dfpilot settings`)
+# Spec v3-09: Settings Manager (`python -m df_llm_helper settings`)
 
 Priority: P2 | As of: 01.10.2026 (Run 5, Y109) | Status: implemented (v3), not yet live-tested | Framework: see `../specs-v2/README.md`
 
@@ -7,8 +7,8 @@ Safely change, back up and document game settings that are only read at start (`
 **Expected gain:** traceable, reversible changes; no forgotten restart dependencies.
 
 ## Behavior
-1. `dfpilot settings get [key]` reads `prefs/d_init.txt` (lines `[KEY:value]`), shows value, default, effect time (`immediate` / `after restart`), description (from `data/settings.yaml`).
-2. `dfpilot settings set KEY value [--reason "..."]`: creates `d_init.txt.bak-<date>` first, changes exactly one line (format checked), logs (`state.db`, the player's quote in the exception register if it touches fair play), reports `takes effect only after a restart: <planned>`.
+1. `python -m df_llm_helper settings get [key]` reads `prefs/d_init.txt` (lines `[KEY:value]`), shows value, default, effect time (`immediate` / `after restart`), description (from `data/settings.yaml`).
+2. `python -m df_llm_helper settings set KEY value [--reason "..."]`: creates `d_init.txt.bak-<date>` first, changes exactly one line (format checked), logs (`state.db`, the player's quote in the exception register if it touches fair play), reports `takes effect only after a restart: <planned>`.
 3. **Restart planner:** `settings pending` lists changes that only take effect after a restart; the digest shows `1 setting waiting for a restart (POPULATION_CAP 75)`.
 4. **Restart help** (together with spec v2-09): before a restart pause, save, set `pause.hold`; afterwards restart the services and check the setting (`settings verify`: reads `d_init` and, if possible, behavior such as migrants/births).
 5. **Effect check:** after the restart, population development: are migrants and births suppressed (population trend, `migranten.flag`)?
@@ -31,7 +31,7 @@ Settings are game menus (Settings); deliberate change only on the player's word;
 `d_init.txt` (Run 5, lines 25–26), backup file.
 
 ## Implementation (v3)
-- **Code:** `dfpilot/features/settings.py` (`settings get|set|pending|verify|revert|restart-plan`, `check_hook`), known keys in `data/settings.yaml` (type `int` or `int_pair`, min/max, DF default, effect, description).
+- **Code:** `df_llm_helper/features/settings.py` (`settings get|set|pending|verify|revert|restart-plan`, `check_hook`), known keys in `data/settings.yaml` (type `int` or `int_pair`, min/max, DF default, effect, description).
 - **set:** validates key and value before reading or writing anything; `--reason` (the player's words) is required and goes into the `state.db` action log; the file is handled as bytes (line endings, Latin-1 bytes and the rest of the file stay byte-identical); after the write the file is re-read and must differ in exactly that one line, otherwise the original is written back. Backup `<backup_dir>/d_init.txt.bak-YYYY-MM-DD` (an existing backup with other content gets `-2`, `-3`, ...; the first backup of a key is kept for revert).
 - **pending/verify:** `state.db` key `settings.pending`. `verify` needs the new value in the file AND a DF restart after the change: DF uptime (`dfhack.getTickCount()`, ms since process start) must be shorter than the age of the change. For population caps the current population is compared with the cap (hint about migrants). `check` shows the pending line at most every `hint_every_s` (30 min).
 - **revert KEY:** puts the original line back; when no other change is pending the file is compared with the backup ("byte-identical" or a note).

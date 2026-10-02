@@ -1,4 +1,4 @@
--- claude/pilot_mood need <unit_id> | release-cutgems [--apply]     (dfpilot spec 03, NOT TESTED LIVE)
+-- claude/pilot_mood need <unit_id> | release-cutgems [--apply]     (df-llm-helper spec 03, NOT TESTED LIVE)
 -- need: real job elements of the mood (item_type, material, quantity, set flags1/2/3) + free/bound stock per type
 --       (free = not forbidden/trader/foreign/in job/rotten; reachable = canWalkBetween to the unit) + nearest distance.
 -- release-cutgems: remove CutGems jobs (UI action like 'cancel job') so rough gems become free for the mood.

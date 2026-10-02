@@ -6,12 +6,12 @@ import random
 import pytest
 
 from conftest import FIX
-from dfpilot.care import DEFAULTS, CareWatch, evaluate, is_patient, obs_from_status, pick_candidates
-from dfpilot.client import MockClient
-from dfpilot.clock import FakeClock
-from dfpilot.store import Store
-from dfpilot.toolsfs import ToolsDir
-from dfpilot.toolsfs import read_text_tolerant
+from df_llm_helper.care import DEFAULTS, CareWatch, evaluate, is_patient, obs_from_status, pick_candidates
+from df_llm_helper.client import MockClient
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.store import Store
+from df_llm_helper.toolsfs import ToolsDir
+from df_llm_helper.toolsfs import read_text_tolerant
 
 GAMELOG = read_text_tolerant(FIX / "logs" / "gamelog_selected.txt").splitlines()
 
@@ -144,7 +144,7 @@ def test_ok_and_unreadable_and_dry(tmp_path):
 
 
 def test_cli_care(tmp_path, tools_dir, capsys):
-    from dfpilot.cli import main
+    from df_llm_helper.cli import main
     c = tmp_path / "c.yaml"
     c.write_text(f"paths:\n  tools: {tools_dir}\n  scopes: {tools_dir / 'scopes'}\n  state_db: {tmp_path / 's.db'}\n"
                  f"  gamelog: {tmp_path / 'g'}\n", encoding="utf-8")

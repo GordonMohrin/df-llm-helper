@@ -1,4 +1,4 @@
-# Watch points for `dfpilot reach` (spec v3-11).
+# Watch points for `python -m df_llm_helper reach` (spec v3-11).
 # EXAMPLE VALUES from run 5 (Windrings, J110) - replace them for every new fortress (bau owns all coordinates).
 # Fields: name, xyz [x, y, z], cat (farm|kitchen|still|well|hospital|barracks|depot|workshop|storage|crypt|...),
 #         optional mandatory: true|false (default: cat listed in reach.mandatory), optional: true (never mandatory).

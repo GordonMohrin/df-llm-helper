@@ -1,4 +1,4 @@
-# Spec 04: Hunger and Hospital Watchdog (`dfpilot care`)
+# Spec 04: Hunger and Hospital Watchdog (`python -m df_llm_helper care`)
 
 Priority: P0 | As of: 01.10.2026 (Run 5, Windrings) | Status: implemented (PR v2-04), not yet live-tested | Framework: see README.md
 

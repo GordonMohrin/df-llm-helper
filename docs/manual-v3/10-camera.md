@@ -1,4 +1,4 @@
-# Camera profiles: `dfpilot camera` (spec v3-10, live-untested)
+# Camera profiles: `python -m df_llm_helper camera` (spec v3-10, live-untested)
 
 **What it does:** switches the weights of the camera director `claude/schau` without editing Lua.
 
@@ -11,7 +11,7 @@
 | calm | slow pans, one unit per 40 s | auto |
 
 ## Commands
-- `python -m dfpilot camera` (= `status`): profile, schau mode/gate, shares per category of the last 30 min.
+- `python -m df_llm_helper camera` (= `status`): profile, schau mode/gate, shares per category of the last 30 min.
 - `camera profile`: list; `camera profile <name>`: switch (writes `tools/schau_profile.json`, then
   `claude/schau profile reload` and `claude/schau mode <mode>`).
 - `camera stats`: shares per category (sum 100 %).

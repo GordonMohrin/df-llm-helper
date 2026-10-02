@@ -1,4 +1,4 @@
-# Spec 09: Restart and Load Runbook (`dfpilot reboot`)
+# Spec 09: Restart and Load Runbook (`python -m df_llm_helper reboot`)
 
 Priority: P0 | As of: 01.10.2026 (Run 5, Windrings) | Status: implemented (PR v2-09), not yet live-tested | Framework: see README.md
 

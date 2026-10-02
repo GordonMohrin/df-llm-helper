@@ -4,10 +4,10 @@ import random
 import pytest
 
 from conftest import FIX
-from dfpilot.clock import FakeClock
-from dfpilot.forecast import (DEFAULTS, Forecaster, backtest, estimate, fmt_line, point_from_snapshot,
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.forecast import (DEFAULTS, Forecaster, backtest, estimate, fmt_line, point_from_snapshot,
                               series_from_metrics)
-from dfpilot.store import Store
+from df_llm_helper.store import Store
 from helpers import snap_for
 
 LIVE = FIX.parent / "run5_live"
@@ -141,7 +141,7 @@ def test_property_never_negative_consumption_and_line_short(seed):
 
 
 def test_cli_forecast(tmp_path, tools_dir, capsys):
-    from dfpilot.cli import main
+    from df_llm_helper.cli import main
     c = tmp_path / "c.yaml"
     c.write_text(f"paths:\n  tools: {tools_dir}\n  scopes: {tools_dir / 'scopes'}\n  state_db: {tmp_path / 's.db'}\n"
                  f"  gamelog: {tmp_path / 'g'}\n", encoding="utf-8")

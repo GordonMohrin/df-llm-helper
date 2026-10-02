@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from dfpilot.client import MockClient, Result
-from dfpilot.clock import FakeClock
-from dfpilot.features import hygiene as hy
-from dfpilot.store import Store
+from df_llm_helper.client import MockClient, Result
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.features import hygiene as hy
+from df_llm_helper.store import Store
 
 ROOT = Path(__file__).resolve().parent.parent
 FIX = ROOT / "fixtures" / "v3" / "hygiene"
@@ -283,7 +283,7 @@ def test_dwarf_corpses_vs_coffins(clock):
 
 
 def test_check_hook_interval_and_warning(clock, cfg, tools_dir):
-    from dfpilot.pilot import Pilot
+    from df_llm_helper.pilot import Pilot
     m = client(clock, ["status_j109_block0.json", "status_j109_block1.json"], "report_no_zone.json")
     p = Pilot(cfg, m, store=Store(), clock=clock)
     lines = hy.check_hook(p, None, False)
@@ -293,9 +293,9 @@ def test_check_hook_interval_and_warning(clock, cfg, tools_dir):
 
 
 def test_cli_status_with_fixture_client(clock, monkeypatch, capsys):
-    import dfpilot.cli as cli
-    from dfpilot.pilot import Pilot
-    from dfpilot.config import load_config
+    import df_llm_helper.cli as cli
+    from df_llm_helper.pilot import Pilot
+    from df_llm_helper.config import load_config
     m = client(clock, ["status_490_marked.json"], "report_far_zone.json")
     monkeypatch.setattr(cli, "_pilot", lambda args: Pilot(load_config(overrides={}), m, store=Store(), clock=clock))
     assert cli.main(["hygiene", "zones"]) == 0
@@ -307,7 +307,7 @@ def test_cli_status_with_fixture_client(clock, monkeypatch, capsys):
 
 
 def test_check_hook_failure_is_rate_limited(clock, cfg):
-    from dfpilot.pilot import Pilot
+    from df_llm_helper.pilot import Pilot
     m = MockClient(clock=clock)
     p = Pilot(cfg, m, store=Store(), clock=clock)
     assert hy.check_hook(p, None, False)[0].startswith("Hygiene: measurement failed")

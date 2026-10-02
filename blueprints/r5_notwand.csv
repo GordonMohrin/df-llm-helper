@@ -1,2 +1,2 @@
-#build label(notwand) Notwand: 1 Konstruktionswand am Cursor (dfpilot Spec 08, Runbook rb21_flut). Nur kopieren, wenn dfhack-config/blueprints/claude/r5_notwand.csv fehlt.
+#build label(notwand) Notwand: 1 Konstruktionswand am Cursor (df-llm-helper Spec 08, Runbook rb21_flut). Nur kopieren, wenn dfhack-config/blueprints/claude/r5_notwand.csv fehlt.
 Cw

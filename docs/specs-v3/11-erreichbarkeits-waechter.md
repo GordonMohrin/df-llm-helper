@@ -1,6 +1,6 @@
-# Spec v3-11: Reachability watcher (`dfpilot reach`)
+# Spec v3-11: Reachability watcher (`python -m df_llm_helper reach`)
 
-Priority: P0 | As of: 01.10.2026 (run 5, J110) | Status: **implemented (v3), not yet live-tested** (`dfpilot/features/reach.py`, `lua/pilot_reach.lua`, manual `../manual-v3/11-reach.md`); a manual check with `canWalkBetween` found the original fault | Framework: see `../specs-v2/README.md`
+Priority: P0 | As of: 01.10.2026 (run 5, J110) | Status: **implemented (v3), not yet live-tested** (`df_llm_helper/features/reach.py`, `lua/pilot_reach.lua`, manual `../manual-v3/11-reach.md`); a manual check with `canWalkBetween` found the original fault | Framework: see `../specs-v2/README.md`
 
 ## Goal and benefit
 Important work and supply places must stay **reachable** from the fort. The plugs P1 `(101,99,z130)` and P2 `(100,94,z132)`, built as an emergency measure during the first elf army (J105), cut off the stair column T1 and with it **all farm halls (F1 z132, F3/F4/F5 z131), kitchens and stills** from the fort. Consequence over many game days: planters did not find seeds ("Needs plump helmet spawn" 493x, 43 dwarves), no harvest, production only from traded goods. This was only noticed in a manual check, about 5 game years later.
@@ -13,7 +13,7 @@ Per point: name, coordinate, category, mandatory. Examples from run 5: farm hall
 1. **Measurement** (`pilot_reach.lua`): `canWalkBetween(start, point)` per point, in one call, cheap (< 1 s).
 2. **Finding** for a mandatory point with `false`: message `critical` `Farm hall F1 (106,92,z132) not reachable from the core`.
 3. **Cause search:** path search with/without constructions (walls/plugs) and doors: shows **which construction** cuts the connection (coordinate, building ID, build date from the gamelog); proposal: removal (`designateRemove`) or a door instead of a wall.
-4. **Pre-check:** `dfpilot reach what-if --wall x y z` before a wall/plug is built; `perimeter seal` (v3-01) and `plan defense` (v3-08) always call it. Plugs that cut off a mandatory point are not built, or only with an explicit yes.
+4. **Pre-check:** `python -m df_llm_helper reach what-if --wall x y z` before a wall/plug is built; `perimeter seal` (v3-01) and `plan defense` (v3-08) always call it. Plugs that cut off a mandatory point are not built, or only with an explicit yes.
 5. **Chain of effects:** jobs that fail with `Could not find path` or `Needs ... spawn` (gamelog) are attributed to a mandatory point; high count + point unreachable = cause certain.
 6. **Digest:** `Reachable: 14/14 mandatory points` or `UNREACHABLE: Farm hall F1, Kitchens (P1 (101,99,z130))`.
 

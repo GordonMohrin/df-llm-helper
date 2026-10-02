@@ -6,10 +6,10 @@ import shutil
 import pytest
 
 from conftest import FIX
-from dfpilot.cli import main
-from dfpilot.clock import FakeClock
-from dfpilot.metrics import METRICS_HEADER, budget_report, budget_rows, export_csv, record_kpis, record_usage
-from dfpilot.store import Store
+from df_llm_helper.cli import main
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.metrics import METRICS_HEADER, budget_report, budget_rows, export_csv, record_kpis, record_usage
+from df_llm_helper.store import Store
 from helpers import ROOT, snap_for
 
 

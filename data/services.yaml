@@ -18,4 +18,4 @@ services:
   - {name: schau, key: claude-schau, start: null, depends: [config], note: "HUD ticker, not active as a permanent job live on 01.10.; if needed claude/schau start"}
   - {name: raster, key: claude-raster, start: "claude/raster start", depends: [config]}
   - {name: kohle, key: claude-kohle, start: null, depends: [config], note: "Permanent job deliberately off (live 01.10.: 9.4 s freeze per run); if needed run claude/kohle run 10 once"}
-  - {name: tempo, key: claude-tempo, start: null, depends: [watchdog], note: "Timestream only via 'dfpilot tempo on' with a guard check (the player, 01.10., decision 6)"}
+  - {name: tempo, key: claude-tempo, start: null, depends: [watchdog], note: "Timestream only via 'python -m df_llm_helper tempo on' with a guard check (the player, 01.10., decision 6)"}

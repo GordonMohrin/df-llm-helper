@@ -5,12 +5,12 @@ from pathlib import Path
 import pytest
 
 from conftest import FIX
-from dfpilot.bus import Bus, guess_prio, parse_inbox_line
-from dfpilot.client import RealClient
-from dfpilot.clock import FakeClock
-from dfpilot.fairplay import ExceptionRegistry
-from dfpilot.lint import RULES, gate_command, lint_command, lint_file, lint_paths, lint_source
-from dfpilot.store import Store
+from df_llm_helper.bus import Bus, guess_prio, parse_inbox_line
+from df_llm_helper.client import RealClient
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.fairplay import ExceptionRegistry
+from df_llm_helper.lint import RULES, gate_command, lint_command, lint_file, lint_paths, lint_source
+from df_llm_helper.store import Store
 from helpers import ROOT
 
 CASES = ROOT / "tests" / "lint_cases"
@@ -138,9 +138,9 @@ def test_guess_prio_and_parse():
 
 
 def _writer(db_path: str, n: int, who: int) -> None:
-    from dfpilot.bus import Bus
-    from dfpilot.clock import FakeClock
-    from dfpilot.store import Store
+    from df_llm_helper.bus import Bus
+    from df_llm_helper.clock import FakeClock
+    from df_llm_helper.store import Store
     b = Bus(Store(db_path), FakeClock(1000 + who))
     for i in range(n):
         b.post(f"p{who}", "orchestrator", f"Nachricht {who}-{i}", prio="info")

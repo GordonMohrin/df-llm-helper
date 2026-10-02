@@ -1,4 +1,4 @@
-# Access watcher: `dfpilot perimeter` (spec v3-01)
+# Access watcher: `python -m df_llm_helper perimeter` (spec v3-01)
 
 Status: implemented, **not yet live-tested**. Read only, except `seal --apply` (normal build orders).
 
@@ -8,16 +8,16 @@ core; every other access to the core is a finding and gets a wall proposal.
 ## Commands
 | Command | What it does |
 |---|---|
-| `python -m dfpilot perimeter` (`scan`) | start the chunked Lua scan, wait for the result, evaluate; exit 1 = forbidden access |
-| `python -m dfpilot perimeter status` | last stored result (no DF call) |
-| `python -m dfpilot perimeter seal` | write the Quickfort CSV (`tools/out/perimeter_seal.csv`) with `Cw` walls - dry run |
-| `python -m dfpilot perimeter seal --apply [--override "<reason>"]` | `reach what-if` first, then `quickfort run claude/dfpilot_seal.csv -c x,y,z` |
-| `python -m dfpilot perimeter allow [X Y Z --note TEXT]` | show / extend the allow-list |
+| `python -m df_llm_helper perimeter` (`scan`) | start the chunked Lua scan, wait for the result, evaluate; exit 1 = forbidden access |
+| `python -m df_llm_helper perimeter status` | last stored result (no DF call) |
+| `python -m df_llm_helper perimeter seal` | write the Quickfort CSV (`tools/out/perimeter_seal.csv`) with `Cw` walls - dry run |
+| `python -m df_llm_helper perimeter seal --apply [--override "<reason>"]` | `reach what-if` first, then `quickfort run claude/df_llm_helper_seal.csv -c x,y,z` |
+| `python -m df_llm_helper perimeter allow [X Y Z --note TEXT]` | show / extend the allow-list |
 | `--grid fixtures/v3/grid/perimeter_j109_open.grid` | offline on a grid fixture (`@core`, `@allow` lines) |
 
 ## Output
 ```
-WAKE perimeter: forbidden access to the core at (111,70,z131) 23 tiles -> seal (dfpilot perimeter seal --dry-run)
+WAKE perimeter: forbidden access to the core at (111,70,z131) 23 tiles -> seal (python -m df_llm_helper perimeter seal --dry-run)
 Accesses: 1 allowed, 2 forbidden (checked 20:05)
   FORBIDDEN: (111,70,z131) 23 tiles, bypasses the traps
   allowed: (99,94,z132) 1 tile, through the traps
@@ -35,17 +35,17 @@ allowed when its cluster center lies within +-4 x/y and +-2 z of an entry (shift
 - Door/trap tiles are left to the player (note in the output).
 - `--apply` never cuts a mandatory reach point: `reach what-if` runs first; if it warns (or cannot prove safety) the
   seal is refused unless `--override "<the player's yes>"`. The CSV is copied to
-  `<perimeter.blueprints_dir or <DF>/dfhack-config/blueprints>/claude/dfpilot_seal.csv`.
+  `<perimeter.blueprints_dir or <DF>/dfhack-config/blueprints>/claude/df_llm_helper_seal.csv`.
 
 ## Configuration (`perimeter:`)
 `core` ([100,101,130]), `interval_s` (1200), `allow_file` (zugang-erlaubt.txt, relative to paths.tools),
 `tolerance_xy` (4), `tolerance_z` (2), `z_range` ([100,136]), `cluster_xy` (2), `cluster_z` (1), `chunked` (true),
-`budget` (20000 nodes per frame), `poll_s` (2), `timeout_s` (120), `blueprint` (claude/dfpilot_seal.csv),
+`budget` (20000 nodes per frame), `poll_s` (2), `timeout_s` (120), `blueprint` (claude/df_llm_helper_seal.csv),
 `blueprints_dir` (null = derived from dfhack_run), `in_check` (true).
 
-## In `dfpilot check`
+## In `python -m df_llm_helper check`
 Never blocks: every `interval_s` (game running, no alert/siege flag) it starts `claude/pilot_perimeter start ...`
-(chunked over many frames, result file `<dfpilot home>/tools/out/perimeter_scan.json`); a later check fetches
+(chunked over many frames, result file `<df-llm-helper home>/tools/out/perimeter_scan.json`); a later check fetches
 `claude/pilot_perimeter result` and evaluates. Lines only on a change (WAKE lines + digest line).
 Actions are logged (`source=perimeter`: `scan`, `seal-plan`, `seal`, `seal-refused`, `allow`).
 
