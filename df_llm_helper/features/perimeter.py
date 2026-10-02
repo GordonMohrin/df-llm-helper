@@ -29,7 +29,8 @@ KEY = "perimeter"
 DEFAULTS = {"core": [100, 101, 130], "interval_s": 1200, "allow_file": "zugang-erlaubt.txt", "tolerance_xy": 4,
             "tolerance_z": 2, "z_range": [100, 136], "cluster_xy": 2, "cluster_z": 1, "chunked": True,
             "budget": 20000, "poll_s": 2.0, "timeout_s": 120, "blueprint": "claude/df_llm_helper_seal.csv",
-            "blueprints_dir": None, "in_check": True}
+            "blueprints_dir": None, "in_check": True,
+            "min_outside": 3000}   # enclave filter of pilot_perimeter (arg 8): outside areas smaller than this are not "outside"
 LINE_MAX = 120
 
 
@@ -205,7 +206,8 @@ class Perimeter:
 
     def _args(self) -> str:
         c, zr = self.cfg["core"], self.cfg["z_range"]
-        return f"{c[0]} {c[1]} {c[2]} {zr[0]} {zr[1]} {int(self.cfg['budget'])}"
+        return (f"{c[0]} {c[1]} {c[2]} {zr[0]} {zr[1]} {int(self.cfg['budget'])} "
+                f"{int(self.cfg.get('min_outside', 3000))}")
 
     # ---- live scan
     def start(self) -> bool:
