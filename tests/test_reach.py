@@ -166,7 +166,7 @@ def test_points_file_example_values():
     assert start == CORE
     by = {p.name: p for p in pts}
     assert by["Farm hall F1"].xyz == (106, 92, 132) and by["Farm hall F1"].mandatory
-    assert by["Kitchens"].xyz == (106, 85, 132) and by["Stills"].xyz == (110, 89, 132)
+    assert by["Kitchens"].xyz == (106, 98, 132) and by["Stills"].xyz == (103, 98, 132)     # BUG-209: real buildings
     assert by["Depot"].mandatory is False and by["Well"].mandatory
     assert R.load_points(ROOT / "nope.yaml") == (None, [])
 

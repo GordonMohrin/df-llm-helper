@@ -22,7 +22,7 @@ from pathlib import Path
 
 from ._grid import OUTSIDE, STAIRS, WALK, Grid, clusters, core_sets, entries, fmt
 
-__all__ = ["KEY", "DEFAULTS", "Access", "scan_grid", "parse_scan", "load_allow", "is_allowed", "build_accesses",
+__all__ = ["KEY", "DEFAULTS", "Access", "scan_grid", "parse_scan", "load_allow", "allow_entries", "is_allowed", "build_accesses",
            "signature", "digest_line", "diff_lines", "seal_walls", "seal_csv", "Perimeter", "register", "check_hook"]
 
 KEY = "perimeter"
@@ -102,6 +102,44 @@ def load_allow(path) -> list:
     return out
 
 
+def allow_entries(path) -> list:
+    """Allow-list with notes: [((x, y, z), note)] (BUG-217: the listing hid the notes)."""
+    p = Path(path)
+    if not p.exists():
+        return []
+    out = []
+    for ln in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        m = _ALLOW.match(ln)
+        if m:
+            out.append((tuple(int(v) for v in m.groups()), ln[m.end():].strip()))
+    return out
+
+
+def _allow_coords(words) -> tuple:
+    vals = [str(w).strip() for w in words]
+    if len(vals) != 3 or not all(v.lstrip("-").isdigit() for v in vals):
+        raise ValueError(f"usage: perimeter allow X Y Z [--note TEXT] (three integers), got {' '.join(vals)}")
+    return tuple(int(v) for v in vals)
+
+
+def _allow_warnings(p, per, xyz) -> list:
+    """Refuse coordinates outside the map; warn when the entry would legalise accesses next to the core (BUG-217)."""
+    x, y, z = xyz
+    ms = None
+    if min(xyz) >= 0:
+        r = p.client.run("claude/status")
+        m = (r.json or {}).get("map_size") if r.ok and isinstance(r.json, dict) else None
+        if isinstance(m, dict) and all(k in m for k in "xyz"):
+            ms = (int(m["x"]), int(m["y"]), int(m["z"]))
+    if min(xyz) < 0 or (ms and (x >= ms[0] or y >= ms[1] or z >= ms[2])):
+        return [f"Refused: ({x},{y},z{z}) is outside the map" + (f" ({ms[0]}x{ms[1]}x{ms[2]})" if ms else "")]
+    c = per.cfg["core"]
+    if is_allowed((x, y, z), [tuple(c)], int(per.cfg["tolerance_xy"]), int(per.cfg["tolerance_z"])):
+        return [f"WARNING: ({x},{y},z{z}) lies within the tolerance of the core {tuple(c)}: every access near the core "
+                "counts as allowed"]
+    return []
+
+
 def is_allowed(center, allow, tol_xy: int = 4, tol_z: int = 2) -> bool:
     return any(abs(center[0] - a[0]) <= tol_xy and abs(center[1] - a[1]) <= tol_xy and abs(center[2] - a[2]) <= tol_z
                for a in allow)
@@ -153,12 +191,18 @@ def seal_walls(grid: Grid, access: Access) -> tuple:
         c = grid.get(t)
         if c in STAIRS:
             x, y, z = t
+            found = False
             for dy in (-1, 0, 1):
                 for dx in (-1, 0, 1):
                     q = (x + dx, y + dy, z)
                     qc = grid.get(q)
                     if (dx or dy) and qc in WALK and qc not in OUTSIDE and qc not in STAIRS and qc not in "DT":
                         walls.add(q)
+                        found = True
+            if not found:                       # BUG-217: say why there is no proposal instead of "nothing to do"
+                notes.append(f"stair/ramp entry {fmt(t)} has no inside floor tile next to it on its level (only "
+                             "outside floor/walls) - seal by hand: wall/door on the level the stair leads to, or "
+                             "remove the stair")
         elif c in "DT":
             notes.append(f"building on entry tile {fmt(t)} - seal by hand")
         elif c in WALK:
@@ -293,7 +337,12 @@ class Perimeter:
         now = self.clock.now().epoch
         walls, notes = self.plan_seal(acc, grid)
         if not walls:
-            return 0, ["Seal: nothing to do (no forbidden access with a buildable tile)"] + notes
+            bad = [a for a in acc if a.forbidden]
+            if bad and not notes:
+                notes = [f"{a.label()}: no buildable entry tile found - seal by hand" for a in bad]
+            head = ("Seal: no automatic proposal for " + ", ".join(a.label() for a in bad[:3]) + " (see notes)"
+                    if bad else "Seal: nothing to do (no forbidden access)")
+            return (1 if bad else 0), [head] + notes
         csv, cur = seal_csv(walls)
         out = Path(self.tools.path) / "out" / "perimeter_seal.csv"
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -347,14 +396,19 @@ def cmd_perimeter(args) -> int:
     per = _perimeter(p)
     if args.action == "allow":
         if args.coords:
-            x, y, z = (int(v) for v in args.coords)
+            x, y, z = _allow_coords(args.coords)
+            for w in _allow_warnings(p, per, (x, y, z)):
+                if w.startswith("Refused"):
+                    print(w)
+                    return 2
+                print(w)
             per.allow_path.parent.mkdir(parents=True, exist_ok=True)
             with per.allow_path.open("a", encoding="utf-8") as f:
                 f.write(f"{x},{y},{z}  {args.note or 'added by python -m df_llm_helper perimeter allow'}\n")
             p.store.log_action(p.clock.now().epoch, "perimeter", "perimeter", "allow", "perimeter",
                                f"{x},{y},{z}", False, True, args.note or "")
-        for a in per.allow():
-            print(f"allowed: {a[0]},{a[1]},{a[2]}")
+        for a, note in allow_entries(per.allow_path) + [(tuple(a), "grid fixture") for a in per.extra_allow]:
+            print(f"allowed: {a[0]},{a[1]},{a[2]}" + (f"  ({note})" if note else ""))
         print(f"(file {per.allow_path}, tolerance +-{per.cfg['tolerance_xy']} xy / +-{per.cfg['tolerance_z']} z)")
         return 0
     if args.action == "status":
@@ -365,6 +419,8 @@ def cmd_perimeter(args) -> int:
         return 0
     grid = Grid.from_file(args.grid) if args.grid else None
     if grid is not None:
+        from ..store import Store
+        per.store = Store()          # BUG-204: an offline fixture run never touches the fort's state.db
         core = tuple(int(v) for v in (grid.meta.get("core") or [per.cfg["core"]])[0])
         per.extra_allow = [tuple(int(v) for v in a[:3]) for a in grid.meta.get("allow", [])]
         ents = scan_grid(grid, core, per.cfg["z_range"])

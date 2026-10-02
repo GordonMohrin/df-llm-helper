@@ -279,7 +279,7 @@ def test_apply_plan_requires_confirm(plan):
 def test_gamelog_stats(capsys):
     assert cli.main(["defense", "stats", "--gamelog", str(FIX / "gamelog_attack.txt")]) == 0
     s = feat.gamelog_stats((FIX / "gamelog_attack.txt").read_text(encoding="utf-8").splitlines())
-    assert s["trap_lines"] == 4 and s["caught"] == 2 and s["attack_lines"] == 1
+    assert s["trap_lines"] == 3 and s["caught"] == 2 and s["attack_lines"] == 1 and s["load_msgs"] == 1   # BUG-211
     lines = feat.stats_lines({"trap_lines": 0, "caught": 0, "hits": 0, "load_msgs": 0, "attack_lines": 2})
     assert lines[1].startswith("!!")
 

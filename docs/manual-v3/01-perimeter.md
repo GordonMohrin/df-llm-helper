@@ -12,10 +12,12 @@ core; every other access to the core is a finding and gets a wall proposal.
 | `python -m df_llm_helper perimeter status` | last stored result (no DF call) |
 | `python -m df_llm_helper perimeter seal` | write the Quickfort CSV (`tools/out/perimeter_seal.csv`) with `Cw` walls - dry run |
 | `python -m df_llm_helper perimeter seal --apply [--override "<reason>"]` | `reach what-if` first, then `quickfort run claude/df_llm_helper_seal.csv -c x,y,z` |
-| `python -m df_llm_helper perimeter allow [X Y Z --note TEXT]` | show / extend the allow-list |
+| `python -m df_llm_helper perimeter allow [X Y Z --note TEXT]` | show (with notes) / extend the allow-list; refuses tiles outside the map, warns near the core |
 | `--grid fixtures/v3/grid/perimeter_j109_open.grid` | offline on a grid fixture (`@core`, `@allow` lines) |
 
 ## Output
+Example from the grid fixture `perimeter_j109_open.grid` (live, the stair T1 is reported as `bypasses the traps` when
+the trap tiles are not on its walking path - same result as `claude/zugaenge`):
 ```
 WAKE perimeter: forbidden access to the core at (111,70,z131) 23 tiles -> seal (python -m df_llm_helper perimeter seal --dry-run)
 Accesses: 1 allowed, 2 forbidden (checked 20:05)
@@ -43,6 +45,8 @@ allowed by `99,94,132` through the z tolerance).
 - Wall (`Cw`) on every entry tile of a forbidden cluster.
 - Stairs and ramps cannot carry a construction: the walls go on the adjacent **inside floor** tiles of the same level.
 - Door/trap tiles are left to the player (note in the output).
+- A stair/ramp entry without any inside floor tile next to it gets a note "seal by hand" (no automatic proposal;
+  `seal` then exits 1 instead of claiming "nothing to do").
 - `--apply` never cuts a mandatory reach point: `reach what-if` runs first; if it warns (or cannot prove safety) the
   seal is refused unless `--override "<the player's yes>"`. The CSV is copied to
   `<perimeter.blueprints_dir or <DF>/dfhack-config/blueprints>/claude/df_llm_helper_seal.csv`.

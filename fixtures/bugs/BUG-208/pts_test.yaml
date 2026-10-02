@@ -1,0 +1,7 @@
+start: [100, 101, 130]
+points:
+  - {name: "Brunnen äöü", xyz: [140, 99, 129], cat: well}
+  - {name: "Brunnen-Nachbar", xyz: [139, 99, 129], cat: well}
+  - {name: "Aussen", xyz: [150, 150, 130], cat: farm}
+  - {name: "OutOfMap", xyz: [999, 999, 999], cat: farm}
+  - {name: "Core", xyz: [100, 101, 130], cat: farm}
