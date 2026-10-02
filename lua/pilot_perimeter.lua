@@ -1,4 +1,4 @@
--- claude/pilot_perimeter scan|start cx cy cz zmin zmax [budget] | result            (df-llm-helper spec v3-01, LIVE-UNTESTED)
+-- claude/pilot_perimeter scan|start cx cy cz zmin zmax [budget] [min_outside] | result            (df-llm-helper spec v3-01, LIVE-UNTESTED)
 -- Accesses from outside into the fort (algorithm of lua/claude/zugaenge.lua, JSON output):
 --   1. multi-source BFS from every walkable tile with designation.outside (levels zmin..zmax)
 --   2. entry = reached walkable INSIDE tile that has a reached outside tile as move neighbor
@@ -69,9 +69,9 @@ local UP = { X = true, x = true, ['<'] = true }
 local DOWN = { X = true, x = true, ['>'] = true }
 local RAMP = { ['^'] = true, ['/'] = true }
 
-local function new_job(cx, cy, cz, zmin, zmax, budget)
+local function new_job(cx, cy, cz, zmin, zmax, budget, mincomp)
   local J = { cx = cx, cy = cy, cz = cz, zmin = math.max(0, zmin), zmax = math.min(ZM - 1, zmax),
-              budget = budget or 20000, phase = 'seed', zc = math.max(0, zmin), cache = {}, seen = {}, q = {}, qi = 1,
+              budget = budget or 20000, mincomp = mincomp or 3000, phase = 'seed', zc = math.max(0, zmin), cache = {}, seen = {}, q = {}, qi = 1,
               visited = 0, t0 = os.clock() }
   J.zc = J.zmin
   local function key(x, y, z) return (z * YM + y) * XM + x end
@@ -144,10 +144,12 @@ local function new_job(cx, cy, cz, zmin, zmax, budget)
     elseif J.phase == 'out' then
       if bfs_step(J.seen, J.q, function(c) return WALK[c] end) then
         J.entries = {}
-        -- Enklaven-Filter (bau J113): ein Aussen-Nachbar zaehlt nur, wenn seine zusammenhaengende Aussenflaeche >= MINCOMP Kacheln hat
-        -- (abgemauerte Terrassen mit Himmelsflag sind keine Aussenwelt); identisch zu lua/claude/zugaenge.lua (MINCOMP 3000)
-        local MINCOMP, compmemo = 3000, {}
+        -- enclave filter (bau J113): an outside neighbour counts only if its connected outside area has >= MINCOMP tiles
+        -- (walled-in terraces with the sky flag are not the outside world); same as lua/claude/zugaenge.lua (MINCOMP 3000)
+        -- MINCOMP = optional 8th argument (default 3000; 0 = no filter, used by the small test grids)
+        local MINCOMP, compmemo = J.mincomp, {}
         local function real_outside(startk)
+          if MINCOMP <= 1 then return true end
           if compmemo[startk] ~= nil then return compmemo[startk] end
           local seenc, qc, qi, big = { [startk] = true }, { startk }, 1, false
           while qc[qi] do
@@ -161,6 +163,7 @@ local function new_job(cx, cy, cz, zmin, zmax, budget)
               end
             end
           end
+          big = big or #qc >= MINCOMP
           for k2 in pairs(seenc) do compmemo[k2] = big end
           return big
         end
@@ -234,10 +237,10 @@ end
 if cmd == 'scan' or cmd == 'start' then
   local cx, cy, cz, zmin, zmax = n(2), n(3), n(4), n(5), n(6)
   if not (cx and cy and cz and zmin and zmax) then
-    util.emit({ ok = false, error = cmd .. ' cx cy cz zmin zmax [budget]' })
+    util.emit({ ok = false, error = cmd .. ' cx cy cz zmin zmax [budget] [min_outside]' })
     return
   end
-  local J = new_job(cx, cy, cz, zmin, zmax, n(7))
+  local J = new_job(cx, cy, cz, zmin, zmax, n(7), n(8))
   if cmd == 'scan' then
     while not J.step() do end
     util.emit(J.result())
@@ -263,5 +266,5 @@ elseif cmd == 'result' then
   local s = read_file()
   if s then print(s) else util.emit({ ok = false, error = 'no scan result' }) end
 else
-  util.emit({ ok = false, error = 'Usage: claude/pilot_perimeter scan|start cx cy cz zmin zmax [budget] | result' })
+  util.emit({ ok = false, error = 'Usage: claude/pilot_perimeter scan|start cx cy cz zmin zmax [budget] [min_outside] | result' })
 end

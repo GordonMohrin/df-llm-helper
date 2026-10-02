@@ -153,10 +153,12 @@ def test_lua_scan_equals_python_reference(tmp_path, name):
     """pilot_perimeter.lua (sync scan and chunked start/result) == Python reference on the same grid."""
     g = grid(name)
     ref = [list(e[:3]) + [int(e[3]), int(e[4])] for e in P.scan_grid(g, CORE, ZR)]
-    out, _ = lua_run(g, tmp_path, "pilot_perimeter", "scan", 100, 101, 130, 100, 136)
+    out, _ = lua_run(g, tmp_path, "pilot_perimeter", "scan", 100, 101, 130, 100, 136, 20000, 0)
     j = json.loads(out.splitlines()[0])
     assert j["done"] and sorted(j["entries"]) == sorted(ref) and j["traps"] == 2
-    out, err = lua_run(g, tmp_path, "pilot_perimeter", "start", 100, 101, 130, 100, 136, 200)
+    out, _ = lua_run(g, tmp_path, "pilot_perimeter", "scan", 100, 101, 130, 100, 136)
+    assert json.loads(out.splitlines()[0])["entries"] == []               # default enclave filter 3000: grid too small
+    out, err = lua_run(g, tmp_path, "pilot_perimeter", "start", 100, 101, 130, 100, 136, 200, 0)
     assert json.loads(out)["started"] is True
     ticks = int(err.split("ticks=")[1].split()[0])
     assert ticks > 5                                                      # really chunked over several frames
@@ -183,7 +185,7 @@ def test_check_hook_never_blocks_start_then_evaluate(tmp_path):
     clock = FakeClock(1_790_840_000.0)
     g = grid("perimeter_j109_open.grid")
     pe = per(tmp_path, clock, _lua_client(g, tmp_path, clock))
-    pil = SimpleNamespace(cfg={"perimeter": {}}, client=pe.client, tools=pe.tools, store=pe.store, clock=clock)
+    pil = SimpleNamespace(cfg={"perimeter": {"min_outside": 0}}, client=pe.client, tools=pe.tools, store=pe.store, clock=clock)
     rep = SimpleNamespace(snapshot=SimpleNamespace(paused=False))
     assert P.check_hook(pil, rep, False) == []
     assert pe.store.get("perimeter.pending")
@@ -278,6 +280,40 @@ def test_blocking_building_tile_is_not_an_access():
 def test_lua_scan_blocking_building_equals_python(tmp_path):
     for txt, n in ((STATUE_TXT, 0), (STATUE_TXT.replace("W", "."), 1)):
         g = Grid.from_text(txt)
-        out, _ = lua_run(g, tmp_path / str(n), "pilot_perimeter", "scan", 7, 1, 130, 100, 136)
+        out, _ = lua_run(g, tmp_path / str(n), "pilot_perimeter", "scan", 7, 1, 130, 100, 136, 20000, 0)
         j = json.loads(out.splitlines()[0])
         assert len(j["entries"]) == n
+
+
+# ---- enclave filter (commit aefbb0f): a walled-in outside terrace (< min_outside tiles) is not the outside world
+ENCLAVE_TXT = """@origin 0 0
+@core 7 3 130
+z 130
+############
+#,,,,,,,,..#
+############
+#,,........#
+############
+"""
+
+
+def test_enclave_filter_python_reference():
+    g = Grid.from_text(ENCLAVE_TXT)
+    assert sorted(tuple(e[:3]) for e in P.scan_grid(g, (7, 3, 130), ZR)) == [(3, 3, 130), (9, 1, 130)]
+    assert [tuple(e[:3]) for e in P.scan_grid(g, (7, 3, 130), ZR, min_outside=5)] == [(9, 1, 130)]
+    assert P.scan_grid(g, (7, 3, 130), ZR, min_outside=9) == []           # 8 outside tiles < 9
+    assert len(P.scan_grid(g, (7, 3, 130), ZR, min_outside=8)) == 1        # exactly 8 counts (>=)
+
+
+@pytest.mark.skipif(not LUA, reason="lua5.4 missing")
+@pytest.mark.parametrize("mincomp", [0, 5, 8, 9])
+def test_lua_enclave_filter_equals_python(tmp_path, mincomp):
+    g = Grid.from_text(ENCLAVE_TXT)
+    ref = sorted(list(e[:3]) + [int(e[3]), int(e[4])] for e in P.scan_grid(g, (7, 3, 130), ZR, min_outside=mincomp))
+    out, _ = lua_run(g, tmp_path, "pilot_perimeter", "scan", 7, 3, 130, 100, 136, 20000, mincomp)
+    assert sorted(json.loads(out.splitlines()[0])["entries"]) == ref
+
+
+def test_live_args_pass_min_outside(tmp_path):
+    assert per(tmp_path)._args().endswith(" 20000 3000")
+    assert per(tmp_path / "b", cfg={"min_outside": 0})._args().endswith(" 20000 0")

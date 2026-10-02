@@ -51,7 +51,9 @@ allowed by `99,94,132` through the z tolerance).
 `core` ([100,101,130]), `interval_s` (1200), `allow_file` (zugang-erlaubt.txt, relative to paths.tools),
 `tolerance_xy` (4), `tolerance_z` (2), `z_range` ([100,136]), `cluster_xy` (2), `cluster_z` (1), `chunked` (true),
 `budget` (20000 nodes per frame), `poll_s` (2), `timeout_s` (120), `blueprint` (claude/df_llm_helper_seal.csv),
-`blueprints_dir` (null = derived from dfhack_run), `in_check` (true).
+`blueprints_dir` (null = derived from dfhack_run), `in_check` (true), `min_outside` (3000: enclave filter - an entry
+counts only if its outside area has at least this many connected tiles, so walled-in terraces with the sky flag are no
+access; 0 = off).
 
 ## In `python -m df_llm_helper check`
 Never blocks: every `interval_s` (game running, no alert/siege flag) it starts `claude/pilot_perimeter start ...`
@@ -60,7 +62,7 @@ Never blocks: every `interval_s` (game running, no alert/siege flag) it starts `
 Actions are logged (`source=perimeter`: `scan`, `seal-plan`, `seal`, `seal-refused`, `allow`).
 
 ## Lua: `claude/pilot_perimeter`
-`scan cx cy cz zmin zmax [budget]` (synchronous - blocks DF, only by hand), `start ...` (chunked), `result`.
+`scan cx cy cz zmin zmax [budget] [min_outside]` (synchronous - blocks DF, only by hand), `start ...` (chunked), `result`.
 Output: `entries` = `[x,y,z,core,notrap]` per entry tile; Python clusters (+-2 xy, +-1 z).
 
 ## Open live checks
