@@ -3,14 +3,20 @@
 --       'front' = tile closest to the fort center (config FORT_X/FORT_Y). Only DISCOVERED tiles (fair play).
 -- near: neighborhood (radius r, default 1, incl. z+-1, also diagonal) of a planned dig tile:
 --       per tile dx/dy/dz, flow, magma, hidden, shape (wall/floor/ramp ...). Hidden tiles: hidden=true without flow info.
--- Read only. No liquid changes.
+-- Box is normalised and clamped to the map, max 200000 tiles; near radius max 10. Read only. No liquid changes.
 local util = reqscript('claude/util')
 if not util.require_fort() then return end
 local cfg = reqscript('claude/config')
 
 local a = { ... }
 local cmd = a[1] or 'scan'
-local function n(i) return tonumber(a[i]) end
+local MAX_CELLS = 200000   -- scan box cap (pilot_reach measured 0.3 s for 180k tiles)
+local MAX_R = 10           -- near radius cap
+-- integer argument; fractions and text -> nil (getTileFlags rejects non-integers with a traceback, BUG-409)
+local function n(i)
+  local v = tonumber(a[i])
+  return v and math.tointeger(v) or nil
+end
 
 local function tile(x, y, z)
   local d = dfhack.maps.getTileFlags(x, y, z)
@@ -24,6 +30,15 @@ end
 if cmd == 'scan' then
   local x1, y1, z1, x2, y2, z2 = n(2), n(3), n(4), n(5), n(6), n(7)
   if not (x1 and y1 and z1 and x2 and y2 and z2) then util.emit({ ok = false, error = 'scan x1 y1 z1 x2 y2 z2' }) return end
+  -- normalise (reversed boxes) and clamp to the map; cap like pilot_reach (whole-map boxes froze the game, BUG-414)
+  local MAP = df.global.world.map
+  local XM, YM, ZM = MAP.x_count, MAP.y_count, MAP.z_count
+  x1, x2 = math.max(0, math.min(x1, x2)), math.min(XM - 1, math.max(x1, x2))
+  y1, y2 = math.max(0, math.min(y1, y2)), math.min(YM - 1, math.max(y1, y2))
+  z1, z2 = math.max(0, math.min(z1, z2)), math.min(ZM - 1, math.max(z1, z2))
+  if x1 > x2 or y1 > y2 or z1 > z2 then util.emit({ ok = false, error = 'box outside the map' }) return end
+  local cells = (x2 - x1 + 1) * (y2 - y1 + 1) * (z2 - z1 + 1)
+  if cells > MAX_CELLS then util.emit({ ok = false, error = 'box too large: ' .. cells .. ' tiles (max ' .. MAX_CELLS .. ')' }) return end
   local CX, CY = cfg.FORT_X or (x1 + x2) // 2, cfg.FORT_Y or (y1 + y2) // 2
   local out = { ok = true, water = 0, magma = 0, units = 0, by_z = {}, bbox = nil, front = nil, hidden = 0 }
   local best
@@ -54,6 +69,7 @@ if cmd == 'scan' then
 elseif cmd == 'near' then
   local x, y, z, r = n(2), n(3), n(4), n(5) or 1
   if not (x and y and z) then util.emit({ ok = false, error = 'near x y z [r]' }) return end
+  if r < 0 or r > MAX_R then util.emit({ ok = false, error = 'radius 0..' .. MAX_R }) return end
   local tiles = {}
   for dz = -1, 1 do
     for dy = -r, r do

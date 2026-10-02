@@ -396,7 +396,9 @@ local function tick_inner()
   local t = now_tick()
   if t - S.last_csv >= CSV_EVERY then
     S.last_csv = t
-    local new = not io.open(CSV_FILE, 'r')
+    local f0 = io.open(CSV_FILE, 'r')   -- probe only; close it again (handle leak, BUG-422)
+    local new = not f0
+    if f0 then f0:close() end
     local f = io.open(CSV_FILE, 'a')
     if f then
       if new then f:write('tick,unit,stress,longterm,sleepiness,hunger,thirst,job,status\n') end

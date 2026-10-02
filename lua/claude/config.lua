@@ -3,7 +3,8 @@
 -- watchdog, report, mil, ueberwacher, arbeit, raster, killorder, gefahr, tempo ... read them via `reqscript('claude/config')`.
 -- New map/new run: adjust ONLY this file (reqscript reloads on file change; running jobs fetch
 -- the values via config.X on every call, a restart of the jobs is only needed when interval values change).
--- Display: `claude/config` (values, UNSET list + aquifer scan of the DISCOVERED tiles), `claude/config aquifer`.
+-- Display: `claude/config` (values, UNSET list + aquifer scan of the DISCOVERED tiles in FORT_BOX, SURFACE_Z-40..SURFACE_Z),
+-- `claude/config aquifer [x1 y1 x2 y2 z1 z2]` (only the aquifer scan, optionally of another box, e.g. a new tunnel).
 --
 -- ====================================================================================================================
 -- SHIPPED NEUTRAL: all map-specific values below are nil/empty. Set them for YOUR map right after embark (checklist).
@@ -19,10 +20,10 @@
 --   [ ] LAYOUT_BOXEN, REFUSE_BOX, DUMP_TILES         from LAYOUT-run5.md (bau owns all coordinates)
 --   [ ] SLAB_TILES, MOOD_SLOTS                       crypt/memorial slabs (ghosts!), mood workshops
 --   [ ] SMOOTH_SUPPLY, TREE_BAND, GATHER, GATHER_Z   occupation in the fort, woodcutting (from day 1), gathering areas
---   [ ] KAV_BARRIEREN, KOPF, SPERR_BOXEN, SCHACHT_PRUEF, DIG_CAVERN_Z   ONLY with cavern access (double construction wall barrier + gate)
+--   [ ] KAV_BARRIEREN, KOPF, SPERR_BOXEN, SCHACHT_PRUEF, HINTER_SPERRE, DIG_CAVERN_Z   ONLY with cavern access (double construction wall barrier + gate)
 --   [ ] lua/claude/stages.lua (grid stages, leave empty until erkundung plans them)
 --   [ ] AFTERWARDS restart permanent jobs that read the values at load (otherwise they keep working with the defaults): arbeit (SMOOTH_SUPPLY/TREE_BAND/GATHER),
---       essen (FORT_X/FORT_Y/SURFACE_Z), mil guard (FORT_X/FORT_Y), mood (MOOD_SLOTS), gesund (SLAB_TILES); then `claude/mil refuge` (recreate the refuge burrow).
+--       essen (FORT_X/FORT_Y/SURFACE_Z), mil guard (FORT_X/FORT_Y), mood (MOOD_SLOTS), gesund (SLAB_TILES); then `claude/mil refuge --apply` (recreate the refuge burrow).
 -- As long as values are nil, the defaults in section "DEFAULTS" apply: map center/surface from the loaded map (or 96/96/100), DIG_MIN_Z = SURFACE_Z - 3
 -- (top layers only), placeholder refuge at the fort center. `UNSET` lists what is still missing; `RUN5_UNSET` = true as long as one of the core values is missing.
 -- ====================================================================================================================
@@ -57,7 +58,10 @@ KAV_BARRIEREN = {}                       -- claude/sperre: { name = { door = {x,
 KAV_ORDER = {}                           -- order of the barriers
 KOPF = nil                               -- {x,y,z} shaft head, only with a shaft
 SPERR_BOXEN = {}                         -- { {x1,y1,x2,y2,z1,z2}, ... } never dig/designate
-SCHACHT_PRUEF = nil                      -- { von = {x,y,z}, nach = {x,y,z} } self-test 'cavern connected to fort on foot'
+SCHACHT_PRUEF = nil                      -- { von = {x,y,z}, nach = {x,y,z} } self-test 'cavern connected to fort on foot'; von/nach may also be lists of points
+HINTER_SPERRE = nil                      -- with a cavern barrier: { cave_z_max = z, boxen = { {x1,y1,x2,y2,z1,z2}, ... } } = 'behind the barrier' (lock-in protection of claude/schacht)
+BAU_PHASES_RUN3 = false                  -- claude/bauprog: true only on the run-3 map (east wing phases O1..O6); own phases in state/bauprog_extra.lua
+PERIMETER_MINCOMP = 3000                 -- pilot_perimeter/zugaenge enclave filter: outside areas smaller than this (walled sky terraces) are not 'outside'
 DIG_CAVERN_Z = nil                       -- erzdig exception from DIG_MIN_Z for caverns; normally nil
 
 -- ---------------------------------------------------------------- DEFAULTS (so nothing crashes while values are missing)
@@ -307,6 +311,30 @@ if dfhack_flags and dfhack_flags.module then return end
 
 -- Called as a command: display values
 local util = reqscript('claude/util')
+local ca = { ... }
+if ca[1] == 'aquifer' then
+  -- aquifer scan of a box (default FORT_BOX x SURFACE_Z-40..SURFACE_Z); the argument used to be ignored (BUG-416)
+  local v = {}
+  for i = 2, 7 do v[i - 1] = math.tointeger(tonumber(ca[i]) or 0.5) end
+  if ca[2] and not (v[1] and v[2] and v[3] and v[4] and v[5] and v[6]) then
+    util.emit({ error = 'usage: claude/config aquifer [x1 y1 x2 y2 z1 z2] (ganze Zahlen)' }) return
+  end
+  local mx, my, mz = dfhack.maps.getTileSize()
+  local x1, y1, x2, y2, z1, z2 = v[1], v[2], v[3], v[4], v[5], v[6]
+  if x1 then
+    x1, x2 = math.max(0, math.min(x1, x2)), math.min(mx - 1, math.max(x1, x2))
+    y1, y2 = math.max(0, math.min(y1, y2)), math.min(my - 1, math.max(y1, y2))
+    z1, z2 = math.max(0, math.min(z1, z2)), math.min(mz - 1, math.max(z1, z2))
+    if x1 > x2 or y1 > y2 or z1 > z2 then util.emit({ error = 'Box ausserhalb der Karte' }) return end
+    if z2 - z1 > 60 then util.emit({ error = 'hoechstens 61 Ebenen pro Aufruf' }) return end
+  end
+  local s2 = aquifer_seen(x1, y1, x2, y2, z1, z2)
+  local list = {}
+  for z, n in pairs(s2) do list[#list + 1] = z .. '=' .. n end
+  table.sort(list)
+  util.emit({ box = x1 and { x1, y1, x2, y2, z1, z2 } or 'FORT_BOX', aquifer_gesehen_z = list, dig_min_z = dig_min_z(s2) })
+  return
+end
 local seen = aquifer_seen()
 local az = {}
 for z, n in pairs(seen) do az[#az + 1] = z .. '=' .. n end

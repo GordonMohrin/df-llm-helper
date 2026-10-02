@@ -1,6 +1,10 @@
 -- claude/felder list | set <plot_id|all> <PLANT_ID> [season|all]  (scope essen, run 4)
 -- Sets the crop per season (farm plot menu, fair play). Example: claude/felder set all PLUMP_HELMET all
+-- list prints plain text: one line per plot 'id z x1 y1 x2 y2 PLANT,PLANT,PLANT,PLANT' (tab separated).
+-- Errors and unknown commands print one JSON object {"error": ..., "usage": ...}.
+local util = reqscript('claude/util')
 local args = {...}
+local USAGE = 'claude/felder list | set <plot_id|all> <PLANT_ID> [season|all]'
 local cmd = args[1] or 'list'
 local function plant_index(id)
   for i, p in ipairs(df.global.world.raws.plants.all) do if p.id == id then return i end end
@@ -23,7 +27,7 @@ if cmd == 'list' then
   end
 elseif cmd == 'set' then
   local idx = plant_index(args[3])
-  if not idx then print('unbekannte Pflanze ' .. tostring(args[3])) return end
+  if not idx then util.emit({ error = 'unbekannte Pflanze ' .. tostring(args[3]), usage = USAGE }) return end
   local seas = args[4] or 'all'
   for _, b in ipairs(plots()) do
     if args[2] == 'all' or tonumber(args[2]) == b.id then
@@ -33,4 +37,6 @@ elseif cmd == 'set' then
       print('Feld ' .. b.id .. ' -> ' .. args[3])
     end
   end
+else
+  util.emit({ error = 'unbekannter Befehl: ' .. tostring(cmd), usage = USAGE })
 end

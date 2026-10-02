@@ -177,6 +177,8 @@ local util = { require_fort = function() return true end,
 package.loaded['json'] = { encode = encode, decode = decode }
 function reqscript(name)
   if name == 'claude/util' then return util end
+  -- the grid fixtures are small synthetic maps: no enclave filter in pilot_perimeter (MOCK_MINCOMP to test it)
+  if name == 'claude/config' then return { PERIMETER_MINCOMP = tonumber(os.getenv('MOCK_MINCOMP') or '1') } end
   error('reqscript ' .. name)
 end
 

@@ -1,6 +1,6 @@
 # BUG-405: `claude/advance <ticks>` counts frames, not calendar ticks -> overshoots when timestream is on (hypothesis, needs a run with running time)
 
-- **Status:** open (static finding, **cannot be verified while the game is paused**)
+- **Status:** fixed in 9f7b226
 - **Severity:** S2 (time-lapse guard is a core safety feature of df-llm-helper)
 - **Area:** `lua/claude/timer.lua:15-25` (`start`), `lua/claude/advance.lua:55-64`; evidence for the semantic is the author's own comment in `lua/claude/tempo.lua:13-15`
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -32,3 +32,6 @@ Use `claude/tempo`'s `schedule(key, calendar_ticks, fn)` (poll every few frames,
 
 ## Info needed
 - Player: with the civil alert off and timestream on (`claude/tempo status` -> `timestream: true`), run `claude/advance clock`, `claude/advance 600`, wait for the pause, `claude/advance clock` and send both `date.year_tick` values. Expected difference 600; a difference of ~1200-5400 confirms the bug. (Needs running game time; I was not allowed to unpause.)
+
+## Fix
+`timer.start` re-arms itself with a tenth of the remaining CALENDAR ticks and pauses when the calendar target is reached (overshoot at most one frame); mock simulation with 1/3/9 calendar ticks per frame. Info needed (player, live): the check from this report (`advance clock`, `advance 600`, `advance clock`) with timestream on; expected difference 600..609.

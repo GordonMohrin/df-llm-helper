@@ -177,10 +177,15 @@ def gate_command(registry: ExceptionRegistry | None, forbid_dig: list | None = N
 
 def lint_paths(paths: list[Path], registry: ExceptionRegistry | None = None) -> list[Finding]:
     out: list[Finding] = []
+    seen: set = set()                  # 'lint lua/claude lua/' must not report lua/claude twice (BUG-418)
     for p in paths:
         p = Path(p)
         files = sorted(p.rglob("*.lua")) if p.is_dir() else [p]
         for f in files:
+            key = f.resolve()
+            if key in seen:
+                continue
+            seen.add(key)
             try:
                 out += lint_file(f, registry)
             except OSError as e:

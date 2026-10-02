@@ -1,6 +1,6 @@
 # BUG-411: `x and f() or fallback` idiom turns "job not running" (`false`) into `'unbekannt'` (kohle) / a missing key (raster) / `cmd=='start'` (watchdog)
 
-- **Status:** open
+- **Status:** fixed in ce278a8
 - **Severity:** S3
 - **Area:** `lua/claude/kohle.lua:71`, `lua/claude/raster.lua:240`, `lua/claude/watchdog.lua:420`, `lua/claude/ueberwacher.lua:113`
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -29,3 +29,6 @@ cd "E:/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress/hack"
 
 ## Info needed
 none.
+
+## Fix
+kohle/raster/watchdog report real booleans (`laeuft: false`, key no longer missing); ueberwacher in 9f7b226. The tolerant workaround in `workload.py` stays for older installs.

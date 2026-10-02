@@ -35,7 +35,7 @@ end
 local dry = not opt.apply
 local eq = df.global.plotinfo.equipment
 local LOG = reqscript('claude/util').home() .. '/tools/out/mil.log'
-local function log(s) local f = io.open(LOG, 'a') if f then f:write(os.date('%H:%M:%S ') .. 'pickfix ' .. s .. '\n') f:close() end end
+local function log(s) util.append_log(LOG, os.date('%H:%M:%S ') .. 'pickfix ' .. s) end
 
 local function isPick(it)
   if not it or it:getType() ~= df.item_type.WEAPON then return false end

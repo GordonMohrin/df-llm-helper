@@ -1,4 +1,4 @@
--- claude/muell [status | dump N [zmin zmax]] - garbage management (bau, J109): counts loose items (on the floor, outside stockpile/container/workshop),
+-- claude/muell [status | dump N] - garbage management (bau, J109): counts loose items (on the floor, outside stockpile/container/workshop),
 -- and optionally marks N loose boulders/corpses for the garbage dump ('dump' as in the UI: mark item as garbage; haulers carry it to the 'Garbage Dump' zone).
 -- Fair play: only the UI marking (item.flags.dump), no removing/moving items.
 local util = reqscript('claude/util')
@@ -17,7 +17,13 @@ local function loose(it)
   if b and b:getType() == df.building_type.Stockpile then return false end
   return true, x, y, z
 end
-local function is_fort(z, x, y) return z <= 131 and x >= 40 and x <= 150 and y >= 60 and y <= 130 end
+-- fort area from config.FORT_BOX (was a hard-coded run-4 box x40..150 y60..130 z<=131, BUG-419)
+local cfg = reqscript('claude/config')
+local function is_fort(z, x, y) return cfg.in_fort_box(x, y, z) end
+if mode ~= 'status' and mode ~= 'dump' then
+  util.emit({ error = 'unbekannter Befehl: ' .. tostring(mode), usage = 'claude/muell [status | dump N]' })
+  return
+end
 -- Dump zones
 local dumps = 0
 for _, b in ipairs(df.global.world.buildings.all) do
@@ -48,7 +54,6 @@ if mode == 'status' then
 end
 if mode == 'dump' then
   local n = tonumber(a[2]) or 500
-  local zmin, zmax = tonumber(a[3]) or 115, tonumber(a[4]) or 120
   if dumps == 0 then util.emit({ error = 'keine Dump-Zone vorhanden' }) return end
   local m, pend = 0, 0
   for _, it in ipairs(df.global.world.items.all) do

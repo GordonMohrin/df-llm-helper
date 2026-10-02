@@ -119,10 +119,18 @@ local function walk(a, b)
   local ok, v = pcall(dfhack.maps.canWalkBetween, xyz2pos(a[1], a[2], a[3]), xyz2pos(b[1], b[2], b[3]))
   return ok and v or false
 end
--- Shaft column -> fort (ueberwacher/UEBERWACHUNG B4b): must be false when the barrier is closed
+-- Shaft column -> fort (ueberwacher/UEBERWACHUNG B4b): must be false when the barrier is closed.
+-- Points from config.SCHACHT_PRUEF ({ von = {x,y,z} or { {x,y,z}, ... }, nach = ... }); nil = no shaft -> not checked
+-- (run 3 used the hard-coded column (136,169,100/143) -> (136,160,144)/(149,150,144), BUG-419).
+local function points(p)
+  if type(p) ~= 'table' then return {} end
+  if type(p[1]) == 'number' then return { p } end
+  return p
+end
 function saeule_erreicht_fort()
-  local from = { { 136, 169, 100 }, { 136, 169, 143 } }
-  local to = { { 136, 160, 144 }, { 149, 150, 144 } }
+  local sp = C().SCHACHT_PRUEF
+  if not sp then return nil, { 'SCHACHT_PRUEF nicht gesetzt' } end
+  local from, to = points(sp.von), points(sp.nach)
   local r, any = {}, false
   for _, f in ipairs(from) do for _, t in ipairs(to) do
     local v = walk(f, t)
@@ -133,8 +141,14 @@ function saeule_erreicht_fort()
 end
 
 -- ---------------------------------------------------------------- State
-local TUNNEL = { { 137, 169, 138 }, { 137, 168, 138 }, { 137, 167, 138 } }   -- for kopf_state (head 'zu' also checks the tunnel barrier)
+-- true if a shaft head or a cavern barrier is configured (Run 5 default: neither -> nothing cavern-specific, BUG-402)
+function configured()
+  local c = C()
+  return c.KOPF ~= nil or next(c.KAV_BARRIEREN or {}) ~= nil
+end
+
 function kopf_state()
+  if not C().KOPF then return { state = 'n/a' } end
   local i = tile_info(C().KOPF)
   local s
   if is_cwall(i) then s = 'zu'
@@ -178,11 +192,17 @@ local function citizens_where(pred)
   end
   return res
 end
--- behind the barrier: shaft column with tunnel pieces (x135..137, y168..171, z<=143; the net tile (137,167) and y<=167 belong to the fort) or everything in the caves (z<=117)
+-- behind the barrier: config.HINTER_SPERRE = { cave_z_max = z, boxen = { {x1,y1,x2,y2,z1,z2}, ... } } (cave levels z <= cave_z_max
+-- plus the shaft column boxes; run 3: cave_z_max 117, box 135,168,137,171,0,143). Not configured -> nobody counts as behind it.
 function citizens_beyond()
+  local H = C().HINTER_SPERRE
+  if not H then return {} end
   return citizens_where(function(x, y, z)
-    if z <= 117 then return true end
-    return z <= 143 and x >= 135 and x <= 137 and y >= 168 and y <= 171
+    if H.cave_z_max and z <= H.cave_z_max then return true end
+    for _, b in ipairs(H.boxen or {}) do
+      if x >= b[1] and x <= b[3] and y >= b[2] and y <= b[4] and z >= b[5] and z <= b[6] then return true end
+    end
+    return false
   end)
 end
 
@@ -216,6 +236,7 @@ end
 -- ---------------------------------------------------------------- Steps (one step moves part of the way to the goal)
 -- Returns: done(bool), note
 local function step_kopf(tg)
+  if not C().KOPF then return true, 'kein Schachtkopf konfiguriert' end
   local k = kopf_state()
   local i = k.info
   local KOPF = C().KOPF
@@ -366,8 +387,8 @@ function cancel()
   repeatUtil.cancel(KEY)
   ST.plan, ST.phase, ST.step, ST.force = nil, nil, 'abgebrochen', nil
   local cfg = C()
-  cancel_mark(tile_info(cfg.KOPF), cfg.KOPF)
-  for _, k in ipairs(cfg.KAV_ORDER) do
+  if cfg.KOPF then cancel_mark(tile_info(cfg.KOPF), cfg.KOPF) end
+  for _, k in ipairs(cfg.KAV_ORDER or {}) do
     local B = cfg.KAV_BARRIEREN[k]
     cancel_mark(tile_info(B.door), B.door)
     for _, p in ipairs(B.plugs) do cancel_mark(tile_info(p), p) end
@@ -389,12 +410,16 @@ end
 -- Overall status (for claude/schacht status and ueberwacher)
 function status()
   local cfg = C()
+  if not configured() then
+    return { aktiv = false, hinweis = 'keine Kavernen-Sperre konfiguriert (config.KOPF/KAV_BARRIEREN leer)',
+             kopf = { state = 'n/a' }, barrieren = {}, plan = ST.plan, offen_markiert = cfg.schacht_offen() }
+  end
   local kp = kopf_state()
   local any, r = saeule_erreicht_fort()
   local res = { kopf = { state = kp.state, dig = kp.dig }, saeule_erreicht_fort = any, erreichbar = r,
     plan = ST.plan, phase = ST.phase, step = ST.step, since = ST.since, offen_markiert = cfg.schacht_offen() }
   res.barrieren = {}
-  for _, k in ipairs(cfg.KAV_ORDER) do
+  for _, k in ipairs(cfg.KAV_ORDER or {}) do
     local s = barrier_state(k)
     s.bedrohung = {}
     for i, t in ipairs(threats(k, 70)) do

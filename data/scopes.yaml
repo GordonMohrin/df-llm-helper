@@ -79,7 +79,7 @@ verteidigung:
     - {name: "Enemies", expr: "enemies", ziel: "0"}
     - {name: "Civilian alert", expr: "civ_alert", ziel: "0 without enemy"}
     - {name: "Refuge ok", expr: "snap.alerts.refuge_ok", ziel: "True"}
-  commands: ["claude/gefahr status", "claude/mil refuge", "claude/alert on|off", "claude/mil guard status"]
+  commands: ["claude/gefahr status", "claude/mil refuge --apply", "claude/alert on|off", "claude/mil guard status"]
   kb_query: "alarm burrow refuge siege cavern airlock"
   kb_ids: [zuflucht_burrow, kavernen_schleuse]
 gesundheit:

@@ -102,7 +102,8 @@ def parse_check(j, points) -> dict:
     if not isinstance(j, dict) or not j.get("ok") or not isinstance(j.get("results"), list):
         return {p.name: None for p in points}
     res = j["results"]
-    return {p.name: (bool(res[i]) if i < len(res) else None) for i, p in enumerate(points)}
+    bad = set(j.get("invalid") or [])            # unparsable point arguments (0-based), BUG-409
+    return {p.name: (bool(res[i]) if i < len(res) and i not in bad else None) for i, p in enumerate(points)}
 
 
 def find_causes(grid: Grid, start, points) -> dict:

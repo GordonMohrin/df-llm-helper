@@ -87,7 +87,8 @@ end
 
 df = {
   work_detail_mode = enum({ 'EverybodyDoesThis', 'NobodyDoesThis', 'OnlySelectedDoesThis' }),
-  global = { plotinfo = { labor_info = { work_details = nil } }, world = { status = { reports = {} } } },
+  global = { plotinfo = { labor_info = { work_details = nil } },
+             world = { status = { reports = {} }, map = { x_count = 200, y_count = 200, z_count = 200 } } },
 }
 local M = df.work_detail_mode
 df.global.plotinfo.labor_info.work_details = vec({
@@ -100,6 +101,7 @@ dfhack = { isMapLoaded = function() return true end, df2utf = function(s) return
              if cmd == 'boom' then error('intentional error') end
              if cmd == 'bad' then return 'kaputt', 1 end
              if cmd == 'big' then return string.rep('x', 100), 0 end
+             if cmd == 'utf8' then return string.rep('\195\164', 60), 0 end   -- 60 x 'ä' (2 bytes each)
              return 'out:' .. cmd .. (#args > 0 and (' ' .. table.concat(args, ' ')) or ''), 0
            end }
 CR_OK = 0

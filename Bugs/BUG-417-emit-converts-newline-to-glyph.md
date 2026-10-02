@@ -1,6 +1,6 @@
 # BUG-417: `util.emit` runs `df2utf` over multi-line strings: newlines become the CP437 glyph `◙` (U+25D9)
 
-- **Status:** open
+- **Status:** fixed in eea3f60
 - **Severity:** S3
 - **Area:** `lua/claude/util.lua:14-24` (`to_utf8` / `emit`), visible in `lua/claude/gefahr.lua` (`handle()` text), any script that emits strings containing `\n` or other control characters
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -32,3 +32,6 @@ In `to_utf8`: `t[k] = dfhack.df2utf(v):gsub('\xE2\x97\x99', '\n')` (U+25D9 = `E2
 
 ## Info needed
 none.
+
+## Fix
+`util.emit` no longer runs `df2utf` over ASCII control characters (only runs of bytes >= 0x80), so `\n`/`\t` stay real line breaks/tabs (mock test).

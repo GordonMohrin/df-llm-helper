@@ -60,6 +60,9 @@ KAV_ORDER = {}                           -- RUN5: set after embark (order of the
 KOPF = nil                               -- RUN5: set after embark ({x,y,z} shaft head, only with a shaft)
 SPERR_BOXEN = {}                         -- RUN5: set after embark ({ {x1,y1,x2,y2,z1,z2}, ... } never dig/designate)
 SCHACHT_PRUEF = nil                      -- RUN5: set after embark ({ von = {x,y,z}, nach = {x,y,z} } self-test 'cavern connected to fort on foot')
+HINTER_SPERRE = nil                      -- Windrings: no cavern barrier yet
+BAU_PHASES_RUN3 = false
+PERIMETER_MINCOMP = 3000
 DIG_CAVERN_Z = nil                       -- RUN5: set after embark (erzdig exception from DIG_MIN_Z for caverns; normally nil)
 
 -- ---------------------------------------------------------------- DEFAULTS (so nothing crashes while values are missing)

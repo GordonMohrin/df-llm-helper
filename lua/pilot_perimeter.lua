@@ -16,7 +16,11 @@ local json = require('json')
 
 local a = { ... }
 local cmd = a[1] or 'scan'
-local function n(i) return tonumber(a[i]) end
+-- integer argument; fractions and text -> nil (getTileFlags rejects non-integers with a traceback, BUG-409)
+local function n(i)
+  local v = tonumber(a[i])
+  return v and math.tointeger(v) or nil
+end
 local MAP = df.global.world.map
 local XM, YM, ZM = MAP.x_count, MAP.y_count, MAP.z_count
 local SHAPE = df.tiletype_shape
@@ -146,7 +150,12 @@ local function new_job(cx, cy, cz, zmin, zmax, budget, mincomp)
         J.entries = {}
         -- Enklaven-Filter (bau J113): ein Aussen-Nachbar zaehlt nur, wenn seine zusammenhaengende Aussenflaeche >= MINCOMP Kacheln hat
         -- (abgemauerte Terrassen mit Himmelsflag sind keine Aussenwelt); identisch zu lua/claude/zugaenge.lua (MINCOMP 3000)
-        local MINCOMP, compmemo = J.mincomp or 3000, {}   -- arg 8 (0 = filter off, grid fixtures)
+        -- threshold: arg 8 (J.mincomp; 0 = filter off, grid fixtures), else config.PERIMETER_MINCOMP, else 3000
+        local MINCOMP, compmemo = tonumber(J.mincomp), {}
+        if MINCOMP == nil then
+            local okc, pcfg = pcall(reqscript, 'claude/config')
+            MINCOMP = (okc and type(pcfg) == 'table' and tonumber(pcfg.PERIMETER_MINCOMP)) or 3000
+        end
         local function real_outside(startk)
           if MINCOMP <= 0 then return true end
           if compmemo[startk] ~= nil then return compmemo[startk] end

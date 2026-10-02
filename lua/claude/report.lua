@@ -1,4 +1,5 @@
--- claude/report  - compact fortress check for regular review (read-only, changes nothing)
+-- claude/report  - compact fortress check for regular review. Changes nothing in the game, but appends one row to
+-- <home>/metrics.csv on every call (trend data for the feedback loops).
 local util = reqscript('claude/util')
 if not util.require_fort() then return end
 local cfg = reqscript('claude/config')   -- Fort box / refuse room per map
@@ -118,12 +119,11 @@ do
 end
 
 -- Squad
-local sq = df.squad.find(df.global.plotinfo.main.fortress_entity and 0 or 0)
 local squad_n = 0
 local ent = df.historical_entity.find(df.global.plotinfo.group_id)
-for _, sid in ipairs(ent.squads) do
+for _, sid in ipairs(ent and ent.squads or {}) do
   local s = df.squad.find(sid)
-  for i = 0, #s.positions - 1 do
+  for i = 0, (s and #s.positions or 0) - 1 do
     local occ = s.positions[i].occupant
     if occ >= 0 then
       local hf = df.historical_figure.find(occ)

@@ -1,6 +1,6 @@
 # BUG-404: `claude/advance clock` (documented and classified as read-only) deletes the game's message popups
 
-- **Status:** open (static finding. `claude/advance` was **not run on purpose**; one single `claude/advance clock` was executed **by my own slip** at the very end of the session (typing error in a shell command). Answer: `paused: true`, date unchanged `27. Granite, Jahr 118` / tick 31871, `timer_active: false`, no `popups_dismissed` key -> there were no popups, so nothing was deleted and nothing changed; the game stayed paused. `Bugs/evidence/BUG-404/advance_clock_accidental_run.out.txt`)
+- **Status:** fixed in 9f7b226
 - **Severity:** S2
 - **Area:** `lua/claude/advance.lua:12-22`; classification `df_llm_helper/client.py:62` (`_READ_EXACT` contains `"claude/advance clock"`), COMPANION.md ("`advance clock` must contain `"paused"`", header of advance.lua: "`claude/advance clock` - only report time/pause status")
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -33,3 +33,6 @@ Move `local dismissed = dismiss_popups()` below the `clock` branch (or call it o
 ## Info needed
 - Player: is it intended that a status poll silently confirms announcements? If yes, drop `claude/advance clock` from `_READ_EXACT`.
 - Player (needs running time, see BUG-405): none for this bug.
+
+## Fix
+Popups are dismissed only by `run` and `<ticks>`; `clock`, `0` and invalid arguments change nothing (mock test). `claude/advance clock` stays a read in `client.is_write`.

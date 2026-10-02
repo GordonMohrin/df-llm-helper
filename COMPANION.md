@@ -24,7 +24,11 @@ The exact output format of each command is the matching file in `fixtures/run5/`
 game). Parsers are tolerant: missing fields are reported, not fatal.
 
 Shared state between the scripts and df-llm-helper lives in `paths.tools` (default `runtime/`): `*.flag` files,
-`events.log`, `out/`. All scripts print one JSON object (`util.emit`).
+`events.log`, `out/`. All scripts print one JSON object (`util.emit`), except the plain-text reports `claude/area`,
+`claude/mil report`, `claude/mil tabelle` and `claude/felder list` (errors of `felder` are JSON). `claude/report` also
+appends one row to `<home>/metrics.csv` on every call (trend data). `claude/ores`, `claude/geo`, `claude/zugaenge`,
+`claude/kohle run` and `claude/erzdig` scan the whole map in the game's main thread (seconds): never poll them
+(`ores`/`geo` stop after a time budget and say how to continue).
 
 | Command | Used by (df-llm-helper module / rule / runbook) | Reference answer |
 |---|---|---|

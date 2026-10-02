@@ -336,7 +336,7 @@ local function alert_check()
         if cfg.in_alert_zone(u, cits) then enemies = enemies + 1 end
         if cfg.in_slowmo_zone(u) and not util.unit_hidden(u) then
           slow = slow + 1
-          if #slow_list < 8 then slow_list[#slow_list + 1] = string.format('%d %s (%d,%d,%d) d=%d', u.id, dfhack.df2utf(dfhack.units.getReadableName(u)):sub(1, 30), u.pos.x, u.pos.y, u.pos.z, cfg.cheb(u)) end
+          if #slow_list < 8 then slow_list[#slow_list + 1] = string.format('%d %s (%d,%d,%d) d=%d', u.id, util.cut(dfhack.df2utf(dfhack.units.getReadableName(u)), 30), u.pos.x, u.pos.y, u.pos.z, cfg.cheb(u)) end
         end
       end
     end
@@ -375,7 +375,7 @@ local function alert_check()
     state.clean = 0
     -- Run 3: civ_alert_idx = 1 only if alarm 1 exists AND has a refuge burrow (before: index outside the list possible)
     if al.civ_alert_idx == 0 and not (#al.list > 1 and #al.list[1].burrows > 0) then
-      pcall(dfhack.run_command, 'claude/mil', 'refuge')   -- Alarm/burrow missing (often gone after loading): recreate idempotently
+      pcall(dfhack.run_command, 'claude/mil', 'refuge', '--apply')   -- Alarm/burrow missing (often gone after loading): recreate idempotently
     end
     if al.civ_alert_idx == 0 and #al.list > 1 and #al.list[1].burrows > 0 then
       al.civ_alert_idx = 1
@@ -388,13 +388,31 @@ local function alert_check()
   end
 end
 
+-- Timing per sub-step (BUG-421: sporadic 8-9 s stalls of dfhack-run): last and maximum milliseconds since the
+-- start of the job, reported as 'timing' by `claude/watchdog status`.
+local function now_ms()
+  local ok, t = pcall(dfhack.getTickCount)
+  if ok and type(t) == 'number' then return t end
+  return os.clock() * 1000
+end
+local function timed(name, fn)
+  local t0 = now_ms()
+  pcall(fn)
+  local ms = math.floor(now_ms() - t0)
+  state.timing = state.timing or {}
+  local e = state.timing[name] or { last = 0, max = 0 }
+  e.last = ms
+  if ms > e.max then e.max, e.max_at = ms, os.date('%H:%M:%S') end
+  state.timing[name] = e
+end
+
 local function check()
   if not util.fort_loaded() then return end
-  pcall(supplies)
-  pcall(feed)
-  pcall(corpses)
-  pcall(busy)
-  pcall(caravan_watch)
+  timed('supplies', supplies)
+  timed('feed', feed)
+  timed('corpses', corpses)
+  timed('busy', busy)
+  timed('caravan_watch', caravan_watch)
 
   local p = df.global.world.status.popups
   while #p > 0 do
@@ -411,14 +429,16 @@ if cmd == 'start' then
   -- stuck slow motion (restart of the job loses state) is reverted; alert_check immediately sets it again for enemies
   if df.global.enabler.fps == cfg.SLOWMO_FPS then set_fps(cfg.NORMAL_FPS) end
   sched(KEY, INTERVAL, check)
-  sched(KEY .. '-alert', 60, alert_check)
+  sched(KEY .. '-alert', 60, function() timed('alert_check', alert_check) end)
 elseif cmd == 'stop' then
   repeatUtil.cancel(KEY)
   repeatUtil.cancel(KEY .. '-alert')
   if state.slowmo then set_fps(cfg.NORMAL_FPS) state.slowmo = false cfg.rt.slowmo = false end
 end
-util.emit({ running = repeatUtil.isScheduled and repeatUtil.isScheduled(KEY) or (cmd == 'start'),
+local running = (cmd == 'start')
+if repeatUtil.isScheduled then running = repeatUtil.isScheduled(KEY) and true or false end
+util.emit({ running = running,
             brews = state.brews or 0, free_barrels = state.free_barrels, barrels_ordered = state.barrels_ordered or 0, fed = state.fed or 0, alarms = state.alarms, last_alarm = state.last_alarm, popups_dismissed = state.popups,
             civ_alert_active = df.global.plotinfo.alerts.civ_alert_idx, enemies_near = state.enemies_near, enemies_slowmo_range = state.enemies_slow,
             gefahr_A = state.gefahr_A, gefahr_warn = state.gefahr_warn, gefahr_error = state.gefahr_error, slowmo = state.slowmo or false, slowmo_count = state.slowmo_count or 0,
-            fps = math.floor(df.global.enabler.fps) })
+            fps = math.floor(df.global.enabler.fps), timing = state.timing })

@@ -1,6 +1,6 @@
 # BUG-416: documentation vs behaviour mismatches in the Lua helpers (`config aquifer`, `tempo rate`, "read-only" report, positions `--force`, handel.log growth)
 
-- **Status:** open
+- **Status:** fixed in c3b327d
 - **Severity:** S3
 - **Area:** `lua/claude/config.lua:6,15` + `:308-323`, `lua/claude/tempo.lua:2`, `lua/claude/report.lua:1,171-186`, `lua/claude/positions.lua:62`, `lua/claude/handel.lua:44` (`emit` -> `log`), COMPANION.md
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -26,3 +26,6 @@ Implement `config aquifer [x1 y1 x2 y2 z1 z2]` (the function `aquifer_seen(x1,..
 
 ## Info needed
 - Player: is the metrics.csv side effect of `report` wanted on every call, or only for the periodic call of the orchestrator?
+
+## Fix
+`config aquifer [x1 y1 x2 y2 z1 z2]` implemented; tempo usage lists `say`, not `rate`; report header + COMPANION.md mention the metrics.csv row; positions assign/vacate always refused; logs (handel/mil/gefahr/pickfix) rotate at 1 MB. Info needed (player): metrics.csv row on every `report` call or only for the orchestrator's periodic call? Items 6/7 see BUG-420/BUG-407.

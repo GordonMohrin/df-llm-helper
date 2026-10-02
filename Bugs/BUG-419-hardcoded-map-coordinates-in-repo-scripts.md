@@ -1,6 +1,6 @@
 # BUG-419: map-specific coordinates are hard-coded in several repo scripts although README/COMPANION say they live in `config.lua`
 
-- **Status:** open
+- **Status:** fixed in 67f330c
 - **Severity:** S3 (wrong results on any other map, no crash; also the reason why `schacht status` crashes, BUG-402)
 - **Area:** `lua/claude/muell.lua:20`, `kohle.lua:37`, `sperre.lua:124,136,181-186`, `stages.lua` (whole file), `bauprog.lua:20-59,116`, `zugaenge.lua:5`, `geo.lua:12,69`
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -32,3 +32,6 @@ Move to `config.lua` (`SHAFT`, `FORT_Z_MAX`, `ZUGAENGE_Z`, `BAU_PHASES`), or sta
 
 ## Info needed
 - Player: which of `muell`, `kohle`, `bauprog`, `geo`, `zugaenge`, `schacht` are still in use on the current map? Unused ones could be dropped from the public repo.
+
+## Fix
+muell (04eda95), sperre (59e973b), zugaenge, kohle, geo, bauprog read config values (`FORT_BOX`, `FORT_REFS`, `Z_MIN/Z_MAX`, `SCHACHT_PRUEF`, new `HINTER_SPERRE`, new `BAU_PHASES_RUN3 = false`). `stages.lua` stays (documented config-like data). Info needed (player): which of muell/kohle/bauprog/geo/zugaenge/schacht are still used.

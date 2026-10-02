@@ -1,4 +1,4 @@
--- claude/ueberwacher start|stop|once  - periodic emergency check (thirst/hunger, hospital, dig queue, depot, graves, station)
+-- claude/ueberwacher start|stop|once|status  - periodic emergency check (thirst/hunger, hospital, dig queue, depot, graves, station)
 -- Writes tools/notfall.flag / tools/dig.flag (monitor wakes Claude). Changes nothing in the game.
 local util = reqscript('claude/util')
 local function C() return reqscript('claude/config') end   -- Deadlines/thresholds per map
@@ -11,7 +11,7 @@ local cmd = a[1] or 'once'
 local function write_flag(name, text)
   local f = io.open(TOOLS .. name, 'w'); if f then f:write(text) f:close() end
 end
-local function name_of(u) return (dfhack.df2utf(dfhack.units.getReadableName(u))):sub(1, 24) end
+local function name_of(u) return util.cut(dfhack.df2utf(dfhack.units.getReadableName(u)), 24) end
 
 local function check()
   if not util.fort_loaded() then return end
@@ -107,7 +107,14 @@ if cmd == 'start' then
   if okT and T and T.schedule then T.schedule(KEY, 1200, check) else repeatUtil.scheduleEvery(KEY, 1200, 'ticks', check) end
 elseif cmd == 'stop' then
   repeatUtil.cancel(KEY)
-else
+elseif cmd == 'once' then
   check()
+elseif cmd ~= 'status' then
+  -- unknown sub-command (typo, --help, 'status' of a script without one): usage only, no work round (BUG-407)
+  util.emit({ error = 'unbekannter Befehl: ' .. tostring(cmd), usage = 'claude/ueberwacher start|stop|once|status' })
+  return
 end
-util.emit({ running = (cmd == 'start') or (repeatUtil.isScheduled and repeatUtil.isScheduled(KEY)), dig = state.dig, checks = state.checks })
+-- 'status' only reports (no check, no flags)
+local running = cmd == 'start'
+if not running and repeatUtil.isScheduled then running = repeatUtil.isScheduled(KEY) and true or false end
+util.emit({ running = running, dig = state.dig, checks = state.checks })

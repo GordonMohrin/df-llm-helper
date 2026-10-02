@@ -33,8 +33,7 @@ local FLAGS_A = { 'FEATURE_BEAST', 'MEGABEAST', 'SEMIMEGABEAST', 'TITAN', 'DEMON
   'NIGHT_CREATURE', 'NIGHT_CREATURE_HUNTER', 'NIGHT_CREATURE_BOGEYMAN', 'NIGHT_CREATURE_NIGHTMARE', 'NIGHT_CREATURE_EXPERIMENTER' }
 
 local function log(s)
-  local f = io.open(LOG, 'a')
-  if f then f:write(os.date('%H:%M:%S ') .. s .. '\n') f:close() end
+  util.append_log(LOG, os.date('%H:%M:%S ') .. s)
 end
 local function write_file(path, text)
   local f = io.open(path, 'w')
@@ -131,7 +130,7 @@ local function eval_unit(u, cits, cfg, o)
     end
     return false
   end
-  local e = { id = u.id, name = dfhack.df2utf(dfhack.units.getReadableName(u)):sub(1, 40), race = ri.id, klasse = kl, grund = grund,
+  local e = { id = u.id, name = util.cut(dfhack.df2utf(dfhack.units.getReadableName(u)), 40), race = ri.id, klasse = kl, grund = grund,
     x = pos.x, y = pos.y, z = pos.z, dist = cheb, alarm = false, slow = false, zone = nil, reach = nil }
   local hidden = o.hidden
   if hidden == nil then hidden = util.is_hidden(pos.x, pos.y, pos.z) end
@@ -212,7 +211,7 @@ function refuge_check(S, fix)
   if b and Z.probe then r.tile_probe = dfhack.burrows.isAssignedTile(b, xyz2pos(Z.probe[1], Z.probe[2], Z.probe[3])) end
   r.ok = (r.burrow ~= nil) and r.civ_burrows > 0 and (Z.probe == nil or r.tile_probe == true)
   if not r.ok and fix then
-    local okr, err = pcall(dfhack.run_command, 'claude/mil', 'refuge')
+    local okr, err = pcall(dfhack.run_command, 'claude/mil', 'refuge', '--apply')
     r.repariert = okr
     r.ok = #al.list > 1 and #al.list[1].burrows > 0
   end
@@ -307,7 +306,7 @@ function selbsttest()
     end
   end
   local al = df.global.plotinfo.alerts
-  if not (#al.list > 1 and #al.list[1].burrows > 0) then p[#p + 1] = 'ZUFLUCHT/ZIVILWARNUNG fehlt (claude/mil refuge)' end
+  if not (#al.list > 1 and #al.list[1].burrows > 0) then p[#p + 1] = 'ZUFLUCHT/ZIVILWARNUNG fehlt (claude/mil refuge --apply)' end
   return p
 end
 
@@ -323,15 +322,18 @@ local function brief(e)
 end
 
 if cmd == 'status' then
+  -- self-test BEFORE the scan: the scan itself sets last_scan_tick, so the 'alarm system alive?' check could never fail (BUG-412)
+  local st = selbsttest()
   local S = scan()
   local rows = {}
   for i, e in ipairs(S.list) do if i <= 12 then rows[#rows + 1] = brief(e) end end
-  util.emit({ alarm = S.alarm, alarm_A = S.alarm_A, warn = S.warn or 0, slow = S.slow, selbsttest = selbsttest(), gelistet = #S.list, top = rows, scans = ST.scans, hits = ST.hits, refuge = refuge_check(S, false),
+  util.emit({ alarm = S.alarm, alarm_A = S.alarm_A, warn = S.warn or 0, slow = S.slow, selbsttest = st, gelistet = #S.list, top = rows, scans = ST.scans, hits = ST.hits, refuge = refuge_check(S, false),
     civ_alert_idx = df.global.plotinfo.alerts.civ_alert_idx, fps = df.global.enabler.fps })
 
 elseif cmd == 'sim' then
   local id, x, y, z = tonumber(a[2]), tonumber(a[3]), tonumber(a[4]), tonumber(a[5])
   if not (id and x and y and z) then util.emit({ error = 'usage: claude/gefahr sim <unit_id> <x> <y> <z>   (Trockenlauf, Einheit wird als lebend an dieser Stelle simuliert)' }) return end
+  if not df.unit.find(id) then util.emit({ error = 'Einheit ' .. id .. ' nicht gefunden' }) return end
   local S = scan({ sim = { { id = id, x = x, y = y, z = z } } })
   local h = handle(S, { dry = true, force = true })
   local rows = {}
@@ -390,6 +392,8 @@ elseif cmd == 'selftest' then
 elseif cmd == 'fire' or cmd == 'firetest' then
   -- fire = LIVE event for a simulated unit (flags, pause!, civilian warning) - deliberate use only. firetest = same write paths, but only files in tools/out/test/ (no pause, no alarm).
   local id, x, y, z = tonumber(a[2]), tonumber(a[3]), tonumber(a[4]), tonumber(a[5])
+  if not (id and x and y and z) then util.emit({ error = 'usage: claude/gefahr ' .. cmd .. ' <unit_id> <x> <y> <z>' }) return end
+  if not df.unit.find(id) then util.emit({ error = 'Einheit ' .. id .. ' nicht gefunden' }) return end
   local S = scan({ sim = { { id = id, x = x, y = y, z = z } } })
   local h = handle(S, { force = true, test = (cmd == 'firetest') })
   util.emit({ ereignis = h.text, aktionen = h.actions })

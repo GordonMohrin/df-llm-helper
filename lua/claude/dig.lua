@@ -1,5 +1,7 @@
 -- claude/dig z x1 y1 x2 y2 [mode]   mode: d=dig (default) j=stairs down u=stairs up i=up+down r=ramp h=shaft (channel) x=remove designation
--- Sets dig designations like a player in the menu (only if the tile is discovered/not open; a designation on an open tile is skipped).
+-- Sets dig designations like a player in the menu: wall tiles (d/u/i/r) or wall/floor (j/h); open tiles are skipped.
+-- NOTE (BUG-418): undiscovered tiles are judged by their real shape as well (the menu lets a player designate them
+-- blindly); whether hidden tiles should be designated blindly or skipped is an open decision of the player.
 local util = reqscript('claude/util')
 local cfg = reqscript('claude/config')
 if not util.require_fort() then return end
