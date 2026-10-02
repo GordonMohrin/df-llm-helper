@@ -59,6 +59,15 @@ def test_diagonal_access_forbidden_even_if_orthogonal_rock():
     assert v.result == "forbidden" and "blocked box" in v.reasons[0]
 
 
+def test_blocked_box_reason_survives_the_four_reason_cut():
+    """Live: (128,99,128) lies in the blocked tunnel box AND has hidden neighbors; line() shows only 4 reasons, so the
+    decisive 'in blocked box' must not be sorted behind the hidden-neighbor hints."""
+    hidden = {(127 + dx, 98 + dy, 127 + dz) for dx in range(3) for dy in range(3) for dz in range(2)}
+    v = check_near(near(128, 99, 128, [], hidden=hidden), FORBID)
+    assert v.result == "forbidden" and v.reasons[0].startswith("in blocked box")
+    assert "blocked box" in v.line() and len(v.reasons) > 4
+
+
 def scan_resp(tiles, front=None):
     return json.dumps({"ok": True, "water": len(tiles), "magma": 0, "units": 5 * len(tiles), "by_z": {"128": len(tiles)},
                        "front": front, "hidden": 0})

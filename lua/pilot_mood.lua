@@ -24,10 +24,12 @@ local function free_item(it)
   return not (f.forbid or f.trader or f.foreign or f.in_job or f.rotten or f.dump or f.garbage_collect)
 end
 
-local function stock_for(itype, u)
+-- mine: set of item ids already attached to the mood job itself. They carry in_job, so they would count as 'bound'
+-- (never 'free'); the job holds them already, so they are reported separately (held) and are not demand that is missing.
+local function stock_for(itype, u, mine)
   local free, bound, nearest = 0, 0, nil
   for _, it in ipairs(df.global.world.items.other.IN_PLAY) do
-    if it:getType() == itype then
+    if it:getType() == itype and not (mine and mine[it.id]) then
       if free_item(it) then
         local p = xyz2pos(dfhack.items.getPosition(it))
         if p and u and dfhack.maps.canWalkBetween(u.pos, p) then
@@ -50,12 +52,19 @@ if cmd == 'need' then
   local out = { ok = true, id = u.id, mood = df.mood_type[u.mood] or tostring(u.mood), timeout = u.job.mood_timeout,
                 thirst = u.counters2.thirst_timer, elements = {} }
   if j then
-    for _, el in ipairs(j.job_items.elements) do
-      local free, bound, nearest = stock_for(el.item_type, u)
+    local mine, held = {}, {}
+    for _, ref in ipairs(j.items) do                    -- items attached to the job; job_item_idx = index into job_items.elements
+      if ref.item then
+        mine[ref.item.id] = true
+        held[ref.job_item_idx] = (held[ref.job_item_idx] or 0) + ref.item:getStackSize()
+      end
+    end
+    for idx, el in ipairs(j.job_items.elements) do
+      local free, bound, nearest = stock_for(el.item_type, u, mine)
       out.elements[#out.elements + 1] = {
         item_type = df.item_type[el.item_type] or tostring(el.item_type), mat_type = el.mat_type, mat_index = el.mat_index,
         quantity = el.quantity, flags1 = flagnames(el.flags1), flags2 = flagnames(el.flags2), flags3 = flagnames(el.flags3),
-        free = free, bound = bound, nearest = nearest }
+        free = free, bound = bound, nearest = nearest, held = held[idx] or 0 }
     end
   end
   util.emit(out)

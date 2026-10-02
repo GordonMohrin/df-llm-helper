@@ -205,6 +205,35 @@ def test_dry_run_no_writes(tmp_path):
     assert mc.write_calls == [] and log and all(x.startswith("[dry]") for x in log)
 
 
+def test_dry_run_does_not_move_the_persistent_state(tmp_path):
+    """A dry run prints the next commands but must not advance caravan.state (it would skip the quicksave, or approve
+    the live selection, without a single command having been sent)."""
+    cp, mc, tools = pilot(tmp_path, World(["0|WOOD|v3|n1|---|willow"]))
+    s, log = cp.step(dry=True)
+    assert s == "pause" and cp.store.get("caravan.state") is None
+    assert cp.report()[0] == "Caravan: PAUSE"                       # the report of the dry run itself still shows it
+    s, log = cp.step()                                              # the real run starts at IDLE, not at PAUSE
+    assert s == "pause" and "ok claude/advance 0" in log and cp.store.get("caravan.state")["flow"]["state"] == "PAUSE"
+
+
+def test_cli_trade_dry_run_does_not_persist(tmp_path, tools_dir, capsys):
+    from conftest import FIX
+    from dfpilot.cli import main
+    from dfpilot.store import Store
+    fx = tmp_path / "fx"
+    shutil.copytree(FIX, fx)
+    shutil.copy(LIVE / "handel_status_atdepot_open.json", fx / "handel_status.txt")
+    c = tmp_path / "c.yaml"
+    c.write_text(f"paths:\n  tools: {tools_dir}\n  scopes: {tools_dir / 'scopes'}\n  state_db: {tmp_path / 's.db'}\n"
+                 f"  gamelog: {tmp_path / 'g'}\n", encoding="utf-8")
+    assert main(["--config", str(c), "--mock", str(fx), "trade", "step", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "[dry] claude/advance 0" in out and "State now: PAUSE" in out
+    assert Store(tmp_path / "s.db").get("trade.flow") is None
+    main(["--config", str(c), "--mock", str(fx), "trade", "status"])
+    assert "State IDLE" in capsys.readouterr().out
+
+
 @pytest.mark.skipif(not LUA, reason="lua5.4 missing")
 @pytest.mark.parametrize("seed", range(25))
 def test_lua_release_only_merchants_property(tmp_path, seed):

@@ -148,3 +148,11 @@ def test_cli_siege(tmp_path, tools_dir, capsys):
     rc = main(["--config", str(c), "--mock", str(FIX), "siege", "--dry-run"])
     out = capsys.readouterr().out
     assert "Siege ABORTED" in out or "no attackers" in out
+
+
+def test_alert_on_sent_only_once_per_step():
+    """Close attackers while the civilian alert is off: PREPARE and ENGAGE run in the same step, 'alert on' once."""
+    flow = SiegeFlow()
+    cmds = flow.step(SiegeObs(invaders=elves(2, 30), squad={"id": SID, "members": [{"id": 1, "alive": True}]}))
+    assert cmds.count("claude/alert on") == 1
+    assert cmds[0] == "claude/advance 0" and any(c.startswith("claude/pilot_siege kill 33") for c in cmds)

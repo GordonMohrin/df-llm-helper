@@ -50,6 +50,7 @@ class Element:
     nearest: int | None = None
     flags: list = field(default_factory=list)
     decoded: str | None = None
+    held: int = 0            # already attached to the mood job itself (picked up / on the way): not 'missing'
 
 
 @dataclass
@@ -92,7 +93,7 @@ def case_from_need(j: dict) -> MoodCase | None:
             continue
         flags = list(e.get("flags1") or []) + list(e.get("flags2") or []) + list(e.get("flags3") or [])
         el = Element(str(e.get("item_type") or "?"), int(e.get("quantity") or 1), e.get("free"), e.get("bound"),
-                     e.get("nearest"), flags)
+                     e.get("nearest"), flags, held=int(e.get("held") or 0))
         if el.item_type == "NONE":
             el.decoded = decode_none(flags)
         els.append(el)
@@ -108,6 +109,7 @@ def analyse(case: MoodCase, cfg: dict) -> dict:
     c = {**DEFAULTS, **(cfg or {})}
     gaps, notes = [], []
     need: dict[str, int] = {}
+    held: dict[str, int] = {}
     stock: dict[str, Element] = {}
     for el in case.elements:
         if el.item_type == "NONE":
@@ -119,6 +121,7 @@ def analyse(case: MoodCase, cfg: dict) -> dict:
             continue
         # quantities >= 100 are cloth/thread units (CLOTHx20000) -> only check 'available?' (1 piece)
         need[el.item_type] = need.get(el.item_type, 0) + (el.quantity if el.quantity < 100 else 1)
+        held[el.item_type] = held.get(el.item_type, 0) + el.held
         stock.setdefault(el.item_type, el)
     release = wood = False
     worst = 0
@@ -127,9 +130,13 @@ def analyse(case: MoodCase, cfg: dict) -> dict:
         if el.free is None:
             continue
         label = CAT_LABEL.get(TYPE_CAT.get(t, ""), t.lower())
-        if el.free < n:
-            short = n - el.free
-            gaps.append(f"{label} missing {short} (need {n}, free {el.free}, bound {el.bound or 0})")
+        # material the mood job already holds (item attached to the job, so 'in_job' and never 'free') is not missing:
+        # otherwise a mood that has picked up its wood reports 'wood missing' and boosts trade / blocks charcoal for nothing
+        have = el.free + held.get(t, 0)
+        if have < n:
+            short = n - have
+            gaps.append(f"{label} missing {short} (need {n}, free {el.free}"
+                        + (f", held by the mood {held[t]}" if held.get(t) else "") + f", bound {el.bound or 0})")
             if t == "ROUGH" and (el.bound or 0) >= short and c["release_cutgems"]:
                 release = True
             if t == "WOOD":

@@ -525,7 +525,8 @@ def cmd_trade(args) -> int:
                 c2 = f"claude/handel open --live --x {best['x']} --y {best['y']}"
                 r2 = p.client.run(c2)
                 print(("ok   " if r2.ok else "ERROR ") + c2)
-    p.store.set("trade.flow", asdict(flow))
+    if not args.dry_run:                       # dry run: the state machine must not advance past commands never sent
+        p.store.set("trade.flow", asdict(flow))
     print(f"State now: {flow.state}" + (f" ({flow.abort_reason})" if flow.abort_reason else ""))
     return 0
 

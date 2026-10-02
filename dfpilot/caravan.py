@@ -143,13 +143,17 @@ class CaravanPilot:
         boost = list(dict.fromkeys(list(store.get("trade.boost") or []) + list(store.get("trade.boost_bottleneck") or [])))
         self.wants = boost_wants(load_wants(home / self.cfg["wants_file"]), boost)   # Spec 03 + Spec 07
         self.registry = registry
+        self._dry = False
+        self._last: CaravanState | None = None
 
     def _load(self) -> CaravanState:
         d = self.store.get("caravan.state") or {}
         return CaravanState(**{k: v for k, v in d.items() if k in CaravanState.__dataclass_fields__})
 
     def _save(self, st: CaravanState) -> None:
-        self.store.set("caravan.state", asdict(st))
+        self._last = st                       # report() of this run, also for a dry run
+        if not self._dry:                     # a dry run must not move the persistent state machine (approval, SAVE skipped...)
+            self.store.set("caravan.state", asdict(st))
 
     def _run(self, cmd: str, dry: bool, log: list) -> object:
         if dry:
@@ -200,6 +204,7 @@ class CaravanPilot:
 
     def step(self, *, dry: bool = False, game_tick: int | None = None, stable_s: float = 2.0) -> tuple[str, list]:
         st = self._load()
+        self._dry = dry
         log: list[str] = []
         stat = self.client.run("claude/handel status")
         j = stat.json if isinstance(stat.json, dict) else {}
@@ -265,7 +270,7 @@ class CaravanPilot:
         return flow.state.lower(), log
 
     def report(self) -> list[str]:
-        st = self._load()
+        st = self._last or self._load()
         flow = TradeFlow(**st.flow) if st.flow else TradeFlow()
         lines = [f"Caravan: {flow.state}" + (f" ({st.decision})" if st.decision else "")] + st.report
         return lines[:8]

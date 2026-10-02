@@ -134,8 +134,9 @@ class SiegeFlow:
                 cmds += [f"claude/pilot_siege clear {sid}", "claude/advance 0"]
                 self.notify.append(f"Siege: loop guard after {self._c('max_steps')} steps - pause")
                 return cmds
-            if not o.civ_alert and min(i.get("dist", 999) for i in active) <= self._c("alert_radius"):
-                cmds.append("claude/alert on")
+            if (not o.civ_alert and "claude/alert on" not in cmds
+                    and min(i.get("dist", 999) for i in active) <= self._c("alert_radius")):
+                cmds.append("claude/alert on")      # not twice in the same step (PREPARE just sent it)
             weak = [m for m in alive if m.get("blood_pct", 100) < self._c("min_blood_pct")]
             if weak:
                 self._note("Retreat: " + ", ".join(f"{m.get('id')} blood {m.get('blood_pct')}%" for m in weak)

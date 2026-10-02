@@ -73,8 +73,9 @@ def check_near(j: dict | None, forbid: list | None = None) -> Verdict:
             else:
                 unsure = True
                 reasons.append(f"{what} at distance 2 {where}")
-    reasons.sort(key=lambda r: (0 if ("diagonal" in r or "orthogonal" in r or "vertical" in r or "slanted" in r)
-                                else 1, r))
+    # decisive reasons first (blocked box / own tile / water next to the tile), hints last: line() shows only 4 of them
+    reasons.sort(key=lambda r: (0 if (r.startswith(("in blocked box", "tile itself")) or "diagonal" in r
+                                      or "orthogonal" in r or "vertical" in r or "slanted" in r) else 1, r))
     return Verdict("forbidden" if bad else "unsafe" if unsure else "ok", reasons)
 
 

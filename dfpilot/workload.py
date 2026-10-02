@@ -102,13 +102,13 @@ def diagnose(obs: WorkObs, cfg: dict | None = None) -> list[Measure]:
                                "check access/stairs (build)", prio=28))
     # ---- B) no work
     if obs.dig_queue is not None and obs.dig_queue < c["min_dig_queue"]:
-        if _svc(obs, "raster") is False:
-            out.append(Measure("grab-etappe", f"Dig queue {obs.dig_queue} < {c['min_dig_queue']}",
-                               "new dig stage: start raster refill", "claude/raster start", auto=True,
-                               prio=5 if not many_open else 20, effect="miners busy"))
-        elif obs.raster_known and obs.raster_next is None:
+        if obs.raster_known and obs.raster_next is None:      # nothing left to release, running or not
             out.append(Measure("grab-etappe", f"Dig queue {obs.dig_queue} < {c['min_dig_queue']}, no stage left",
                                "design a new dig stage (exploration: extend stages.lua)",
+                               prio=5 if not many_open else 20, effect="miners busy"))
+        elif _svc(obs, "raster") is False:
+            out.append(Measure("grab-etappe", f"Dig queue {obs.dig_queue} < {c['min_dig_queue']}",
+                               "new dig stage: start raster refill", "claude/raster start", auto=True,
                                prio=5 if not many_open else 20, effect="miners busy"))
         else:
             out.append(Measure("grab-etappe", f"Dig queue {obs.dig_queue} < {c['min_dig_queue']}",
@@ -168,8 +168,18 @@ def obs_from(snap, *, auslastung: dict | None = None, pickfix: dict | None = Non
         if isinstance(d, dict) and isinstance(d.get("laeuft"), bool):
             o.services[name] = d["laeuft"]
     if isinstance(raster, dict) and raster:
+        # live claude/raster status: `laeuft = isScheduled(KEY) or nil` -> the key is MISSING while the job is off, and
+        # there is no `naechste`, only cursor/eintraege (entries released so far / entries in stages.lua)
+        if "laeuft" not in raster and "cursor" in raster:
+            o.services["raster"] = False
         o.raster_known = True
-        o.raster_next = raster.get("naechste") if isinstance(raster.get("naechste"), str) else None
+        if isinstance(raster.get("naechste"), str):
+            o.raster_next = raster["naechste"]
+        elif isinstance(raster.get("cursor"), int) and isinstance(raster.get("eintraege"), int):
+            left = raster["eintraege"] - raster["cursor"]
+            o.raster_next = f"{left} of {raster['eintraege']} stage entries left" if left > 0 else None
+        else:
+            o.raster_next = None
     for cl in cancels or []:
         o.cancels[cl.reason] = o.cancels.get(cl.reason, 0) + cl.count
     return o

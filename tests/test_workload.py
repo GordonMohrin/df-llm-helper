@@ -128,6 +128,25 @@ def test_obs_from_real_fixtures():
     assert o2.cancels == {"Inappropriate dig square": 5}
 
 
+def test_obs_from_live_raster_status_without_laeuft_key():
+    """Live claude/raster status: `laeuft` is omitted (nil) while the job is off; no `naechste`, only cursor/eintraege.
+    Off + entries left -> start raster (not the false claim 'no stage left'); all entries released -> new stage."""
+    live = {"budget": 250, "cursor": 349, "eintraege": 356, "etappen_gesamt": 60, "first": 66, "min_offen": 300,
+            "min_z": 104, "offen": 0}
+    snap = snap_for()
+    o = obs_from(snap, raster=live)
+    assert o.services["raster"] is False and o.raster_known and o.raster_next
+    ms = diagnose(WorkObs(idle_pct=60, idle=50, jobs_open=10, dig_queue=0, services=o.services, raster_known=True,
+                          raster_next=o.raster_next))
+    assert any(m.key == "grab-etappe" and m.cmd == "claude/raster start" for m in ms)
+    done = obs_from(snap, raster=dict(live, cursor=356))
+    assert done.raster_known and done.raster_next is None and done.services["raster"] is False
+    ms = diagnose(WorkObs(idle_pct=60, idle=50, jobs_open=10, dig_queue=0, services=done.services, raster_known=True))
+    assert any(m.key == "grab-etappe" and m.cmd is None and "no stage left" in m.cause for m in ms)
+    running = obs_from(snap, raster=dict(live, laeuft=True))
+    assert running.services["raster"] is True
+
+
 def test_cli_workload(tmp_path, tools_dir, capsys):
     from dfpilot.cli import main
     c = tmp_path / "c.yaml"

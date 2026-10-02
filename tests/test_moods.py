@@ -131,6 +131,26 @@ def test_timeout_shorter_than_walk_warns(tmp_path):
     assert not any("fail" in ln for ln in mm2.check())
 
 
+def test_wood_held_by_the_mood_job_is_not_missing(tmp_path):
+    """Live false positive: the mood already picked up its wood (item attached to the job, in_job, so never 'free')
+    -> must not report 'wood missing', must not boost trade or block charcoal."""
+    held = el("WOOD", 2, 0, 0, 5)
+    held["held"] = 2
+    mm, m, _ = mgr(tmp_path, {"claude/mood status": status({"id": 4197, "mood": "Fey", "skill": "CARPENTRY"}),
+                              "claude/pilot_mood need 4197": need(4197, [held])})
+    out = mm.check()
+    assert out == ["Mood 4197 (Secretive), 49949 ticks: material ok"], out
+    assert not mm.store.get("trade.boost") and not mm.store.get("mood.block_charcoal")
+    # partly held: only the part that is still missing is reported
+    part = el("WOOD", 3, 0, 0, 5)
+    part["held"] = 1
+    res = analyse(case_from_need(json.loads(need(1, [part]))), DEFAULTS)
+    assert res["gaps"] == ["wood missing 2 (need 3, free 0, held by the mood 1, bound 0)"] and res["wood_missing"]
+    # nothing held (older pilot_mood without the field): behaviour unchanged
+    res = analyse(case_from_need(json.loads(need(1, [el("WOOD", 1, 0)]))), DEFAULTS)
+    assert res["gaps"] == ["wood missing 1 (need 1, free 0, bound 0)"]
+
+
 def test_duplicate_elements_summed():
     c = case_from_need(json.loads(need(1, [el("ROUGH", 1, 1), el("ROUGH", 1, 1), el("CLOTH", 20000, 1)])))
     res = analyse(c, DEFAULTS)
