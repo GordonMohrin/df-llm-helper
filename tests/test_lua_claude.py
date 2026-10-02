@@ -451,3 +451,80 @@ def test_perimeter_enclave_filter_threshold_from_config(tmp_path):
         return json.loads(r.stdout.splitlines()[0])["entries"]
     assert entries(1)                      # no filter: the openings of the fixture are found
     assert entries(100000) == []           # every outside area of the small fixture counts as an enclave
+
+
+# ---------------------------------------------------------------- tile map mock (dig, erzdig spur, zugaenge)
+# SHAPE/HIDDEN/OUTSIDE/GROUP keyed 'x,y,z'; tiletype values ARE the shape names; READS records tiletype reads of hidden tiles.
+MAP = """
+MAP_W, MAP_H, MAP_ZMIN, MAP_ZMAX = MAP_W or 32, MAP_H or 32, MAP_ZMIN or 0, MAP_ZMAX or 9
+SHAPE, HIDDEN, OUTSIDE, GROUP, READS, EVENTS = SHAPE or {}, HIDDEN or {}, OUTSIDE or {}, GROUP or {}, {}, EVENTS or {}
+local function K(x, y, z) return x .. ',' .. y .. ',' .. z end
+dfhack.maps.getTileSize = function() return MAP_W, MAP_H, MAP_ZMAX + 1 end
+df.global.world.map.x_count, df.global.world.map.y_count, df.global.world.map.z_count = MAP_W, MAP_H, MAP_ZMAX + 1
+df.tile_dig_designation = { No = 0, Default = 1, UpDownStair = 2, Channel = 3, Ramp = 4, UpStair = 5, DownStair = 6 }
+df.tiletype = { attrs = setmetatable({}, { __index = function(_, k) return { shape = k, material = 'STONE' } end }) }
+df.tiletype_shape = setmetatable({}, { __index = function(_, k) return k end })
+df.tiletype_material = setmetatable({}, { __index = function(_, k) return k end })
+local blocks = {}
+function MOCK_BLOCK(bx, by, z)
+  if bx < 0 or by < 0 or bx * 16 >= MAP_W or by * 16 >= MAP_H or z < MAP_ZMIN or z > MAP_ZMAX then return nil end
+  local k = K(bx, by, z)
+  if blocks[k] then return blocks[k] end
+  local b = { map_pos = { x = bx * 16, y = by * 16, z = z }, flags = {}, block_events = EVENTS[k] or {}, designation = {}, tiletype = {} }
+  for i = 0, 15 do
+    b.designation[i] = {}
+    b.tiletype[i] = setmetatable({}, { __index = function(_, j)
+      local t = K(bx * 16 + i, by * 16 + j, z)
+      if HIDDEN[t] then READS[#READS + 1] = t end
+      return SHAPE[t] or 'WALL'
+    end })
+    for j = 0, 15 do
+      local t = K(bx * 16 + i, by * 16 + j, z)
+      b.designation[i][j] = { dig = 0, hidden = HIDDEN[t] or false, water_table = false, outside = OUTSIDE[t] or false, flow_size = 0 }
+    end
+  end
+  blocks[k] = b
+  return b
+end
+dfhack.maps.getBlock = MOCK_BLOCK
+dfhack.maps.getTileBlock = function(x, y, z)
+  if x < 0 or y < 0 or x >= MAP_W or y >= MAP_H then return nil end
+  return MOCK_BLOCK(x // 16, y // 16, z)
+end
+dfhack.maps.getTileType = function(x, y, z)
+  local b = dfhack.maps.getTileBlock(x, y, z)
+  return b and b.tiletype[x % 16][y % 16]
+end
+dfhack.maps.getWalkableGroup = function(p)
+  local t = K(p.x, p.y, p.z)
+  if GROUP[t] then return GROUP[t] end
+  return (not HIDDEN[t] and SHAPE[t] == 'FLOOR') and 1 or 0
+end
+function DIG_AT(x, y, z) return dfhack.maps.getTileBlock(x, y, z).designation[x % 16][y % 16].dig end
+"""
+
+
+def map_setup(pre="", post=""):
+    """pre: globals before the map mock (SHAPE/HIDDEN/...), post: Lua after it (config overrides etc.)."""
+    return pre + "\n" + MAP + "\n" + post
+
+
+# ---------------------------------------------------------------- BUG-418 (claude/dig: undiscovered tiles blind)
+def test_dig_designates_hidden_tiles_blindly_without_reading_their_shape(tmp_path):
+    pre = ("SHAPE = { ['1,0,5'] = 'EMPTY', ['3,0,5'] = 'EMPTY' }\n"
+           "HIDDEN = { ['2,0,5'] = true, ['3,0,5'] = true }\n")      # 2 = hidden wall, 3 = hidden open tile
+    after = tmp_path / "after.lua"
+    after.write_text("print(DIG_AT(0,0,5), DIG_AT(1,0,5), DIG_AT(2,0,5), DIG_AT(3,0,5), #READS)\n")
+    out, r = run("dig", 5, 0, 0, 3, 0, tmp_path=tmp_path, setup=map_setup(pre), env={"MOCK_AFTER": str(after)})
+    assert r.returncode == 0, r.stderr
+    lines = out.splitlines()
+    j = json.loads(lines[0])
+    assert (j["gesetzt"], j["uebersprungen"], j["blind"]) == (3, 1, 2)
+    # revealed wall designated, revealed open tile skipped, hidden wall and hidden open tile treated the same;
+    # no tiletype read of a hidden tile at all
+    assert lines[1].split() == ["1", "0", "1", "1", "0"]
+
+
+def test_dig_header_documents_blind_designation():
+    head = (CLAUDE / "dig.lua").read_text(encoding="utf-8").split("local util")[0]
+    assert "blindly" in head and "open decision" not in head

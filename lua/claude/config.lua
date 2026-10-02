@@ -232,10 +232,14 @@ SCHACHT_D_OFFEN = false
 -- BARRIER TILES: never dig/designate/deconstruct (raster, erzdig, claude/dig, purge leave them alone):
 --  * every built construction (wall/pillar = shape WALL, otherwise 'Remove Construction' by raster: 131 jobs on 30.09. 19:0x),  [still applies, map independent]
 --  * SPERR_BOXEN (above): enter boxes for cavern barriers.
-function is_sperre(x, y, z)
+function in_sperr_box(x, y, z)   -- configured boxes only (no tile read: usable for undiscovered tiles, claude/dig)
   for _, b in ipairs(SPERR_BOXEN) do
     if x >= b.x1 and x <= b.x2 and y >= b.y1 and y <= b.y2 and z >= b.z1 and z <= b.z2 then return true end
   end
+  return false
+end
+function is_sperre(x, y, z)
+  if in_sperr_box(x, y, z) then return true end
   local tt = dfhack.maps.getTileType(x, y, z)
   if tt and df.tiletype_material[df.tiletype.attrs[tt].material] == 'CONSTRUCTION' then return true end
   return false
