@@ -1,4 +1,4 @@
--- claude/pilot_water scan x1 y1 z1 x2 y2 z2 | near x y z [r]      (dfpilot spec 08, NOT TESTED LIVE)
+-- claude/pilot_water scan x1 y1 z1 x2 y2 z2 | near x y z [r]      (df-llm-helper spec 08, NOT TESTED LIVE)
 -- scan: count tiles with liquid (flow_size > 0) in the box: count per kind, per level, bounding box,
 --       'front' = tile closest to the fort center (config FORT_X/FORT_Y). Only DISCOVERED tiles (fair play).
 -- near: neighborhood (radius r, default 1, incl. z+-1, also diagonal) of a planned dig tile:

@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from dfpilot.caravan import CaravanPilot, Good, classify, decide, dry_ok, load_wants, parse_list
-from dfpilot.client import MockClient
-from dfpilot.clock import FakeClock
-from dfpilot.fairplay import ExceptionRegistry
-from dfpilot.planners import TradeItem, plan_trade
-from dfpilot.store import Store
-from dfpilot.toolsfs import ToolsDir
+from df_llm_helper.caravan import CaravanPilot, Good, classify, decide, dry_ok, load_wants, parse_list
+from df_llm_helper.client import MockClient
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.fairplay import ExceptionRegistry
+from df_llm_helper.planners import TradeItem, plan_trade
+from df_llm_helper.store import Store
+from df_llm_helper.toolsfs import ToolsDir
 from helpers import ROOT
 
 LIVE = ROOT / "fixtures" / "run5_live"
@@ -218,8 +218,8 @@ def test_dry_run_does_not_move_the_persistent_state(tmp_path):
 
 def test_cli_trade_dry_run_does_not_persist(tmp_path, tools_dir, capsys):
     from conftest import FIX
-    from dfpilot.cli import main
-    from dfpilot.store import Store
+    from df_llm_helper.cli import main
+    from df_llm_helper.store import Store
     fx = tmp_path / "fx"
     shutil.copytree(FIX, fx)
     shutil.copy(LIVE / "handel_status_atdepot_open.json", fx / "handel_status.txt")
@@ -257,7 +257,7 @@ def test_lua_release_only_merchants_property(tmp_path, seed):
 
 def test_cli_caravan(tmp_path, tools_dir, capsys):
     from conftest import FIX
-    from dfpilot.cli import main
+    from df_llm_helper.cli import main
     c = tmp_path / "c.yaml"
     c.write_text(f"paths:\n  tools: {tools_dir}\n  scopes: {tools_dir / 'scopes'}\n  state_db: {tmp_path / 's.db'}\n"
                  f"  gamelog: {tmp_path / 'g'}\n", encoding="utf-8")

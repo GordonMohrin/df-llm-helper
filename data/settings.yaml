@@ -1,4 +1,4 @@
-# Known d_init.txt keys for `dfpilot settings` (spec v3-09). Only these keys can be changed.
+# Known d_init.txt keys for `python -m df_llm_helper settings` (spec v3-09). Only these keys can be changed.
 # type: int | int_pair ("a:b"); min/max apply to every number; default = DF default (verify against your DF version);
 # effect: restart = DF reads the value only at game start (no DFHack field at runtime), immediate = takes effect at once.
 settings:

@@ -7,10 +7,10 @@ import subprocess
 import pytest
 
 from conftest import FIX
-from dfpilot.client import MAX_REPORT_ID_CMD, MockClient, Result
-from dfpilot.fairplay import FairPlayError
-from dfpilot.snapshot import collect
-from dfpilot.transport import (BATCH_PREFIX, BatchingClient, attach_mock_batch, compress_text, project,
+from df_llm_helper.client import MAX_REPORT_ID_CMD, MockClient, Result
+from df_llm_helper.fairplay import FairPlayError
+from df_llm_helper.snapshot import collect
+from df_llm_helper.transport import (BATCH_PREFIX, BatchingClient, attach_mock_batch, compress_text, project,
                                shrink_json)
 from helpers import CMDS, ROOT
 from make_fixtures import responses

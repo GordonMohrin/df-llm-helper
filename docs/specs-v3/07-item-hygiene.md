@@ -1,4 +1,4 @@
-# Spec v3-07: Item Hygiene (`dfpilot hygiene`)
+# Spec v3-07: Item Hygiene (`python -m df_llm_helper hygiene`)
 
 Priority: P1 | As of: 01.10.2026 (Run 5, Y109) | Status: implemented (v3), not yet live-tested; Lua `claude/muell` exists (live prototype), new `lua/pilot_hygiene.lua` | Framework: see `../specs-v2/README.md`
 
@@ -39,7 +39,7 @@ Zones/stockpiles/orders/marks as in the interface; no item teleports (`autodump`
 `claude/muell status` outputs, item counts (loose boulders 7,808 etc.), zone coordinates A–D.
 
 ## Implementation (v3)
-- **Code:** `dfpilot/features/hygiene.py` (command `dfpilot hygiene status|mark [--apply]|zones`, `check_hook`), `lua/pilot_hygiene.lua` (`status <start> <n>` read only in index blocks, `report` read only, `mark <n> <TYPES> [--rotten] [--apply]`), config section `hygiene` (feature defaults).
+- **Code:** `df_llm_helper/features/hygiene.py` (command `python -m df_llm_helper hygiene status|mark [--apply]|zones`, `check_hook`), `lua/pilot_hygiene.lua` (`status <start> <n>` read only in index blocks, `report` read only, `mark <n> <TYPES> [--rotten] [--apply]`), config section `hygiene` (feature defaults).
 - **Hard rules in two places:** Python (`HARD_NEVER`, `effective_types`: config can never unlock boulders, goods, gear) and Lua (`NEVER`, dwarf corpse = fort race, a fort-race unit or any named/historical corpse; bones/skins via corpse flags and material flags; read errors count as "never mark").
 - **Marks:** only when a dump zone exists, only while fewer than `pending_max` marks are pending, at most min(`mark_batch`, 300) per cycle, only reachable, visible, unforbidden items; loop protection `max_marks_per_hour` via `state.db` actions. `check` only measures (every `measure_every_s`); marking in `check` needs `hygiene.auto_mark: true`.
 - **Diagnosis order:** no dump zone → zone under a stockpile (Run 1 lesson) → path blocked (≥ 50 % of the marks unreachable) → haulers busy (no idle citizen) → zone too far (centroid of the marks > `far_tiles` from the nearest zone, Chebyshev + 3 per z level) → "unclear" (wild/rotten corpses, KB hint).

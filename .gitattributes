@@ -1,0 +1,2 @@
+# Byte-exact fixtures (CRLF and non-UTF-8 bytes are part of the test data)
+fixtures/v3/settings/** -text

@@ -1,4 +1,4 @@
-# Spec 12: Chronicle and Lessons Writer (`dfpilot journal`)
+# Spec 12: Chronicle and Lessons Writer (`python -m df_llm_helper journal`)
 
 Priority: P2 | As of: 01.10.2026 (Run 5, Windrings) | Status: implemented (PR v2-12), not yet live-tested | Framework: see README.md
 
@@ -25,7 +25,7 @@ Only reading and writing the own documentation; memory files only with approval.
 2. A pattern (2× "mood fails, wood 0") produces exactly one lesson proposal, no duplicates.
 3. `metrics.csv` export has the same header line as the existing file.
 4. The postmortem scaffold contains timeline and causes of death, without inventions (only data from `state.db`).
-5. No write accesses outside `dfpilot/` and the configured files.
+5. No write accesses outside `df-llm-helper/` and the configured files.
 
 ## Fixtures/Tests
 `tools/events.log` excerpt (Run 5), `chronik.md`, `metrics.csv`, sample events.

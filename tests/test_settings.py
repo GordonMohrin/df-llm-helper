@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from dfpilot.client import MockClient
-from dfpilot.clock import FakeClock
-from dfpilot.config import HOME
-from dfpilot.features import settings as st
-from dfpilot.store import Store
+from df_llm_helper.client import MockClient
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.config import HOME
+from df_llm_helper.features import settings as st
+from df_llm_helper.store import Store
 
 FIX = HOME / "fixtures" / "v3" / "settings"
 
@@ -165,7 +165,7 @@ def test_backup_fixture_matches_defaults():
 
 def test_check_hook_shows_pending_line_rate_limited(env, cfg):
     s, df, clock, store, _ = env
-    from dfpilot.pilot import Pilot
+    from df_llm_helper.pilot import Pilot
     s.set("POPULATION_CAP", "60", "player: yes")
     p = Pilot(cfg, MockClient(clock=clock), store=store, clock=clock)
     assert st.check_hook(p, None, False) == ["1 setting waiting for a restart (POPULATION_CAP 60)"]
@@ -175,7 +175,7 @@ def test_check_hook_shows_pending_line_rate_limited(env, cfg):
 
 
 def test_cli_set_and_refusal(env, tmp_path, capsys, monkeypatch):
-    import dfpilot.cli as cli
+    import df_llm_helper.cli as cli
     s, df, *_ = env
     cfgf = tmp_path / "config.yaml"
     cfgf.write_text(f"settings:\n  file: '{df / 'prefs' / 'd_init.txt'}'\npaths:\n  state_db: '{tmp_path / 's.db'}'\n",

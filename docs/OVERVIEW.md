@@ -1,4 +1,4 @@
-# dfpilot
+# df-llm-helper
 
 A helper program between Claude (orchestrator/scope agents) and Dwarf Fortress/DFHack. It handles routine work deterministically, delivers compact situation reports, keeps known knowledge ready as runbooks and slows the game down when nobody is supervising. **Usage: `MANUAL.md`.** Mission: `SPEC.md`. Status: `../CHANGELOG.md`. Local hookup: `INTEGRATION.md`.
 
@@ -6,8 +6,8 @@ A helper program between Claude (orchestrator/scope agents) and Dwarf Fortress/D
 
 - Python 3.12+ (usually `python` on Windows). The package needs only the standard library; `pytest` (and optionally `coverage`) is only for the tests.
 - Configuration: copy `config.yaml.example` to `config.yaml` and check the paths (`dfhack_run`, `paths.tools`, `paths.gamelog`).
-- Always run from this folder: `python -m dfpilot <command>`.
-- Self-test without DF: `python -m dfpilot.selftest` (with `--cov` for coverage, `--quick` without pytest).
+- Always run from this folder: `python -m df_llm_helper <command>`.
+- Self-test without DF: `python -m df_llm_helper.selftest` (with `--cov` for coverage, `--quick` without pytest).
 
 ## Commands (examples)
 
@@ -24,7 +24,7 @@ With `--mock fixtures/run5` everything runs against the real sample responses in
 | `heartbeat` | set the orchestrator heartbeat (at least every 20 min) | `Heartbeat set` |
 | `waechter [--loop]` | real-time watcher, replaces `tools/unpause-guard.ps1` (messages, flags, pauses, deadman) | lines as in events.log |
 | `tempo on / off` | time-lapse on only without guard blockers | `Time-lapse NOT switched on, blockers: caravan` |
-| `wake [--loop --interval 10]` | wake-up filter for the monitor: only decision-ready events, one line per event | `WAKE caravan: Caravan at the depot … -> dfpilot runbook show rb06_karawane` |
+| `wake [--loop --interval 10]` | wake-up filter for the monitor: only decision-ready events, one line per event | `WAKE caravan: Caravan at the depot … -> python -m df_llm_helper runbook show rb06_karawane` |
 | `runbook diagnose` | check symptoms, matches with confidence | `rb16_abbruchschleife (0.80): … Make bed: Needs logs 314x` |
 | `runbook list / show <id> / run <id> --dry-run [--param k=v]` | known knowledge as a recipe | exact command list |
 | `kb search "Koks refined coal"`, `kb get <id>`, `kb import <md…>` | knowledge on demand (≤ 400 tokens) | `[koks_brennstoff] … Fix: wood furnace …` |
@@ -42,7 +42,7 @@ With `--mock fixtures/run5` everything runs against the real sample responses in
 
 ## Structure
 
-`dfpilot/`: `client` (Real/Mock/Replay/Recording), `snapshot` (tolerant parser), `digest`, `rules` (autopilot), `guard`, `runbooks`, `kb`, `brief`, `memory`, `wake`, `bus`, `lint`, `transport` (batching/compression), `metrics`, `anomaly`, `trade_flow`, `overlay`, `planners/`, `scenario`, `pilot` (cycle), `fairplay`, `expr` (safe expressions), `yamlmini`, `store` (SQLite), `toolsfs`, `clock`, `cli`, `selftest`.
+`df-llm-helper/`: `client` (Real/Mock/Replay/Recording), `snapshot` (tolerant parser), `digest`, `rules` (autopilot), `guard`, `runbooks`, `kb`, `brief`, `memory`, `wake`, `bus`, `lint`, `transport` (batching/compression), `metrics`, `anomaly`, `trade_flow`, `overlay`, `planners/`, `scenario`, `pilot` (cycle), `fairplay`, `expr` (safe expressions), `yamlmini`, `store` (SQLite), `toolsfs`, `clock`, `cli`, `selftest`.
 `data/`: `rules/`, `runbooks/`, `kb/` (curated + imported), `scopes.yaml`, `exceptions.jsonl`.
 `lua/`: thin, **live-untested** DFHack scripts (`pilot_wd.lua`, `pilot_batch.lua`). Short start prompt for agents: `AGENT-PROMPT.md`. Known lint findings: `LINT-BEFUNDE.md`. `tools/luacheck_min.py`: Lua structure check.
 `tests/`: pytest suite, `make_fixtures.py` (synthetic fixtures + scenario generator), `kb_queries.yaml`, `lua_mock/`.

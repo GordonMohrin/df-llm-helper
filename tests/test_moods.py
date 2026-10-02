@@ -7,13 +7,13 @@ import random
 import pytest
 
 from conftest import FIX
-from dfpilot.caravan import boost_wants
-from dfpilot.client import MockClient
-from dfpilot.clock import FakeClock
-from dfpilot.moods import (DEFAULTS, FLAG_HINTS, MoodManager, analyse, case_from_need, decode_none,
+from df_llm_helper.caravan import boost_wants
+from df_llm_helper.client import MockClient
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.moods import (DEFAULTS, FLAG_HINTS, MoodManager, analyse, case_from_need, decode_none,
                            parse_mood_log_line, reserve_gaps)
-from dfpilot.store import Store
-from dfpilot.toolsfs import ToolsDir
+from df_llm_helper.store import Store
+from df_llm_helper.toolsfs import ToolsDir
 
 LIVE = FIX.parent / "run5_live"
 
@@ -203,7 +203,7 @@ def test_reserve_gaps_real_status_and_threshold(tmp_path):
 
 
 def test_cli_mood(tmp_path, tools_dir, capsys):
-    from dfpilot.cli import main
+    from df_llm_helper.cli import main
     c = tmp_path / "c.yaml"
     c.write_text(f"paths:\n  tools: {tools_dir}\n  scopes: {tools_dir / 'scopes'}\n  state_db: {tmp_path / 's.db'}\n"
                  f"  gamelog: {tmp_path / 'g'}\n", encoding="utf-8")

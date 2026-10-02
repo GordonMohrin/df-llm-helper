@@ -1,4 +1,4 @@
-# Spec 01: Siege Autopilot (`dfpilot siege`)
+# Spec 01: Siege Autopilot (`python -m df_llm_helper siege`)
 
 Priority: P0 | As of: 01.10.2026 (Run 5, Windrings) | Status: implemented (PR v2-01), not yet live-tested | Framework: see README.md
 
@@ -18,7 +18,7 @@ A siege, raid or beast is handled without LLM turns: pause, record targets, kill
 4. **ENGAGE loop:** `advance(step)` adaptive (distance > 60: 300, 30–60: 120, < 30: 60); after each step re-set the kill order (targets within radius `kill_radius`) and measure state.
 5. **ABORT:** soldier blood < `min_blood_pct` or dead → retreat (move order to a reachable barracks point) and report; more than `max_losses` losses → pause and notification.
 6. **CLEANUP:** no invaders (or only fleeing ones > `flee_dist`): delete orders, alert off, flags gone, `advance run`, report (losses, dead, duration, turns saved).
-Runs as `dfpilot siege --loop` (started by the watchdog) or `--once` for tests.
+Runs as `python -m df_llm_helper siege --loop` (started by the watchdog) or `--once` for tests.
 
 ## Configuration (`config.yaml`)
 `siege: {alert_radius: 40, kill_radius: 45, flee_dist: 70, step_far: 300, step_mid: 120, step_near: 60, min_blood_pct: 60, max_losses: 2, squad_alias: Wache}`

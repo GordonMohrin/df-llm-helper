@@ -1,4 +1,4 @@
-SYNTHETIC fixture (dfpilot spec v3-09): shape of prefs/d_init.txt, Run 5 lines 25-26 after the edit.
+SYNTHETIC fixture (df-llm-helper spec v3-09): shape of prefs/d_init.txt, Run 5 lines 25-26 after the edit.
 DF ignores text outside of brackets.
 
 [AUTOSAVE:SEASONAL]

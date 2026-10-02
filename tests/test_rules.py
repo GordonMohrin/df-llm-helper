@@ -3,13 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from dfpilot import yamlmini
-from dfpilot.client import MockClient
-from dfpilot.clock import FakeClock
-from dfpilot.config import DEFAULTS
-from dfpilot.rules import Engine, RuleError, find_conflicts, load_rules, render, validate_rule
-from dfpilot.store import Store
-from dfpilot.toolsfs import ToolsDir
+from df_llm_helper import yamlmini
+from df_llm_helper.client import MockClient
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.config import DEFAULTS
+from df_llm_helper.rules import Engine, RuleError, find_conflicts, load_rules, render, validate_rule
+from df_llm_helper.store import Store
+from df_llm_helper.toolsfs import ToolsDir
 from helpers import ROOT, ctx_for
 
 RULES = load_rules(ROOT / "data" / "rules")

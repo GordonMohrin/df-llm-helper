@@ -8,13 +8,13 @@ from pathlib import Path
 import pytest
 
 from conftest import FIX
-from dfpilot.clock import FakeClock
-from dfpilot.config import HOME
-from dfpilot.fairplay import ExceptionRegistry
-from dfpilot.journal import NOISE, Journal, classify_tag, fix_mojibake, is_chronicle_event, parse_events_log
-from dfpilot.metrics import METRICS_HEADER, record_kpis
-from dfpilot.store import Store
-from dfpilot.toolsfs import read_text_tolerant
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.config import HOME
+from df_llm_helper.fairplay import ExceptionRegistry
+from df_llm_helper.journal import NOISE, Journal, classify_tag, fix_mojibake, is_chronicle_event, parse_events_log
+from df_llm_helper.metrics import METRICS_HEADER, record_kpis
+from df_llm_helper.store import Store
+from df_llm_helper.toolsfs import read_text_tolerant
 from helpers import snap_for
 
 LOG = FIX.parent / "run5_live" / "events_run3.log"          # real tools/out/events-run3.log (3015 lines)
@@ -125,8 +125,8 @@ def test_postmortem_only_real_data():
 
 
 def test_write_targets_restricted(tmp_path, tools_dir, capsys):
-    """Acceptance 5: only dfpilot/ and configured files."""
-    from dfpilot.cli import main
+    """Acceptance 5: only df-llm-helper/ and configured files."""
+    from df_llm_helper.cli import main
     chron = tmp_path / "chronik.md"
     chron.write_text("# Chronik\n", encoding="utf-8")
     c = tmp_path / "c.yaml"

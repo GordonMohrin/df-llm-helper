@@ -2,11 +2,11 @@
 import pytest
 
 from conftest import FIX, set_age
-from dfpilot.client import MAX_REPORT_ID_CMD, MockClient
-from dfpilot.config import DEFAULTS
-from dfpilot.store import Store
-from dfpilot.toolsfs import ToolsDir
-from dfpilot.waechter import CARAVANS_CMD, CLEAR_CMD, FOOD_CMD, Waechter, reports_cmd
+from df_llm_helper.client import MAX_REPORT_ID_CMD, MockClient
+from df_llm_helper.config import DEFAULTS
+from df_llm_helper.store import Store
+from df_llm_helper.toolsfs import ToolsDir
+from df_llm_helper.waechter import CARAVANS_CMD, CLEAR_CMD, FOOD_CMD, Waechter, reports_cmd
 
 
 def make(tmp_path, clock, reports="", maxid="100", last="90", food="S 50 0 10 100 20", clear="R 0 dwarfmode/Default",
@@ -104,7 +104,7 @@ def test_reports_cmd_shape():
 
 
 def test_guard_uses_alive_file(tmp_path, clock):
-    from dfpilot.guard import GuardRunner
+    from df_llm_helper.guard import GuardRunner
     tools = ToolsDir(tmp_path, clock)
     (tmp_path / "out").mkdir()
     (tmp_path / "out" / "waechter.alive").write_text("x")
@@ -116,7 +116,7 @@ def test_guard_uses_alive_file(tmp_path, clock):
 
 
 def test_cli_waechter_and_tempo(tmp_path, tools_dir, capsys):
-    from dfpilot.cli import main
+    from df_llm_helper.cli import main
     c = tmp_path / "c.yaml"
     c.write_text(f"paths:\n  tools: {tools_dir}\n  scopes: {tools_dir / 'scopes'}\n  state_db: {tmp_path / 's.db'}\n"
                  f"  gamelog: {tmp_path / 'g'}\n", encoding="utf-8")

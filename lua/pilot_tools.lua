@@ -1,5 +1,5 @@
--- claude/pilot_tools status     (dfpilot spec v3-05 tool/pick manager, LIVE-UNTESTED)
--- Read-only measurement for `dfpilot tools`: picks (total, free with location, holders), number of granted work picks,
+-- claude/pilot_tools status     (df-llm-helper spec v3-05 tool/pick manager, LIVE-UNTESTED)
+-- Read-only measurement for `python -m df_llm_helper tools`: picks (total, free with location, holders), number of granted work picks,
 -- citizens (MINE labor, pick held, idle, hunger/thirst, squad, child, wounds, hospital zone, mining skill),
 -- open dig jobs and current diggers. All actions go through existing scripts:
 --   claude/pickfix --apply                       (frees reservations, sets equipment update flags; FP08 register entry)

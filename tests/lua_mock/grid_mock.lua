@@ -1,7 +1,7 @@
 -- Grid mock for the v3 features reach/perimeter/digcheck (own copy; tests/lua_mock/dfhack_mock.lua stays untouched).
 -- Usage: lua5.4 tests/lua_mock/grid_mock.lua <script.lua> [args...]
--- MOCK_GRID = path to JSON [{x,y,z,c,g}] (c = tile character of dfpilot/features/_grid.py, g = walk group for
--- canWalkBetween); tiles not listed are natural wall. MOCK_HOME = dfpilot home (perimeter result file).
+-- MOCK_GRID = path to JSON [{x,y,z,c,g}] (c = tile character of df_llm_helper/features/_grid.py, g = walk group for
+-- canWalkBetween); tiles not listed are natural wall. MOCK_HOME = df-llm-helper home (perimeter result file).
 -- MOCK_MAP = "x,y,z" map size (default 200,200,200). dfhack.timeout callbacks run after the script returns.
 -- tiny JSON encoder (deterministic, sorted keys)
 local function encode(v)

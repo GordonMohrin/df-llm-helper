@@ -4,13 +4,13 @@ import json
 import pytest
 
 from conftest import FIX
-from dfpilot import yamlmini
-from dfpilot.client import (MAX_REPORT_ID_CMD, SERVICES_CMD, MockClient, RecordingClient, ReplayClient,
+from df_llm_helper import yamlmini
+from df_llm_helper.client import (MAX_REPORT_ID_CMD, SERVICES_CMD, MockClient, RecordingClient, ReplayClient,
                             ReplayMismatch, Result, is_write, load_records, parse_json_tolerant)
-from dfpilot.clock import FakeClock, GameDate, RealTime, TICKS_PER_DAY
-from dfpilot.expr import ExprError, evaluate, names_used
-from dfpilot.fairplay import LEGACY_CONSENT_KEY, ExceptionRegistry, FairPlayError, check_command
-from dfpilot.snapshot import collect, fixture_snapshot, parse_snapshot
+from df_llm_helper.clock import FakeClock, GameDate, RealTime, TICKS_PER_DAY
+from df_llm_helper.expr import ExprError, evaluate, names_used
+from df_llm_helper.fairplay import LEGACY_CONSENT_KEY, ExceptionRegistry, FairPlayError, check_command
+from df_llm_helper.snapshot import collect, fixture_snapshot, parse_snapshot
 
 
 # ---------------------------------------------------------------- yamlmini

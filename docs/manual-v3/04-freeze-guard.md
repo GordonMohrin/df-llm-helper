@@ -1,7 +1,7 @@
 # Time-standstill and window guard (spec v3-04)
 
-**When:** runs by itself inside `python -m dfpilot waechter --loop`; no command of its own. Look at it when
-`events.log` shows `time stood still (...)` or `dfpilot check` shows a critical `freeze_guard` warning.
+**When:** runs by itself inside `python -m df_llm_helper waechter --loop`; no command of its own. Look at it when
+`events.log` shows `time stood still (...)` or `python -m df_llm_helper check` shows a critical `freeze_guard` warning.
 
 ## What happens automatically
 - The watcher's status query reports pause state, focus and frame counter/year tick every 2 s. If time does not move

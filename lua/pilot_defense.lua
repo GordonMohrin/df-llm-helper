@@ -1,4 +1,4 @@
--- claude/pilot_defense status      (dfpilot spec v3-08 defense designer; LIVE-UNTESTED, structure check + lint only)
+-- claude/pilot_defense status      (df-llm-helper spec v3-08 defense designer; LIVE-UNTESTED, structure check + lint only)
 -- Read-only: lists traps (kind, position, loaded/empty if detectable), open trap load jobs (raw job type names and
 -- job names; Python matches case-insensitively on "stone trap"), trap parts in stock (mechanisms, trap components,
 -- boulders). Changes nothing: no jobs, no buildings, no items.

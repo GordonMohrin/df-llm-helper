@@ -7,13 +7,13 @@ from pathlib import Path
 import pytest
 
 from conftest import FIX
-from dfpilot.agents import (DEFAULTS, MARKER, AgentCost, TaskDedupe, build_prompt, compare, cost_report,
+from df_llm_helper.agents import (DEFAULTS, MARKER, AgentCost, TaskDedupe, build_prompt, compare, cost_report,
                             lint_report, parse_transcript, tokens)
-from dfpilot.brief import SCOPES, build_brief, load_scopes
-from dfpilot.clock import FakeClock
-from dfpilot.config import DEFAULTS as CFG
-from dfpilot.kb import KB
-from dfpilot.store import Store
+from df_llm_helper.brief import SCOPES, build_brief, load_scopes
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.config import DEFAULTS as CFG
+from df_llm_helper.kb import KB
+from df_llm_helper.store import Store
 from helpers import ROOT, ctx_for
 
 SUB = FIX.parent / "subagents"
@@ -121,7 +121,7 @@ def test_task_dedupe_10_min():
 
 
 def test_cli_agents(tmp_path, tools_dir, capsys):
-    from dfpilot.cli import main
+    from df_llm_helper.cli import main
     c = tmp_path / "c.yaml"
     c.write_text(f"paths:\n  tools: {tools_dir}\n  scopes: {tools_dir / 'scopes'}\n  state_db: {tmp_path / 's.db'}\n"
                  f"  gamelog: {tmp_path / 'g'}\n", encoding="utf-8")

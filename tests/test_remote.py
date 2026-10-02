@@ -1,4 +1,4 @@
-"""Spec v3-06 remote-worker protection (`dfpilot remote`, spec name `dfpilot care remote`): acceptance criteria 1-5,
+"""Spec v3-06 remote-worker protection (`python -m df_llm_helper remote`, spec name `python -m df_llm_helper care remote`): acceptance criteria 1-5,
 labor record/return, fish yield, selection property, Lua mock. All `claude/pilot_remote` responses are SYNTHETIC
 (fixtures/v3/remote, fixture gap)."""
 import copy
@@ -11,12 +11,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from dfpilot.client import MockClient
-from dfpilot.clock import FakeClock
-from dfpilot.config import load_config
-from dfpilot.features import remote as R
-from dfpilot.lint import lint_file
-from dfpilot.store import Store
+from df_llm_helper.client import MockClient
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.config import load_config
+from df_llm_helper.features import remote as R
+from df_llm_helper.lint import lint_file
+from df_llm_helper.store import Store
 
 ROOT = Path(__file__).resolve().parent.parent
 FIX = ROOT / "fixtures" / "v3" / "remote"
@@ -287,7 +287,7 @@ def test_check_hook_quiet_when_nothing_happens(tmp_path):
 def test_distance_and_cli_help(capsys):
     assert R.distance({"x": 0, "y": 0, "z": 0}, {"x": 10, "y": 4, "z": 2}) == 16
     assert R.nearest_supply({"x": 0, "y": 0, "z": 0}, []) == (None, None)
-    from dfpilot.cli import main
+    from df_llm_helper.cli import main
     with pytest.raises(SystemExit) as e:
         main(["remote", "--help"])
     out = capsys.readouterr().out
@@ -336,7 +336,7 @@ def test_lua_status_and_actions(tmp_path):
 
 @pytest.mark.skipif(not LUA, reason="lua5.4 not installed")
 def test_lua_tools_status_shape(tmp_path):
-    from dfpilot.features import tools as T
+    from df_llm_helper.features import tools as T
     out, _ = _lua(tmp_path, "pilot_tools.lua", "status")
     obs = T.obs_from_status(out)
     assert obs.ok and obs.work_weapons == 2 and obs.miners == 1

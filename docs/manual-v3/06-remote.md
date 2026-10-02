@@ -1,15 +1,15 @@
-# Remote-worker protection (`dfpilot remote`) – spec v3-06 ("dfpilot care remote")
+# Remote-worker protection (`python -m df_llm_helper remote`) – spec v3-06 ("python -m df_llm_helper care remote")
 
-Status: implemented, **not yet live-tested**. Own command (the spec name was `care remote`; `dfpilot care` is
+Status: implemented, **not yet live-tested**. Own command (the spec name was `care remote`; `python -m df_llm_helper care` is
 unchanged). Lua: `lua/pilot_remote.lua`, installed as `claude/pilot_remote` (LIVE-UNTESTED).
 
 ## Commands
 | Command | What it does | DF access |
 |---|---|---|
-| `python -m dfpilot remote status` | Hungry/thirsty or long-job dwarves with distance to the nearest food/drink place; pool sizes; labors held back | `claude/pilot_remote status FISH,HERBALISM,MINE,PLANT` |
-| `python -m dfpilot remote [check] [--dry-run]` | One maintenance pass (rules below) | + `claude/pilot_remote cancel <id>`, `claude/pilot_remote labor <id> <LABOR> off\|on [WD,...]` |
-| `python -m dfpilot remote restore [--dry-run]` | Gives back every labor held back (rescue and pool) | `labor ... on` |
-| `python -m dfpilot check` | Runs the pass as a feature hook; lines only on actions, escalations or a fishing proposal | as check |
+| `python -m df_llm_helper remote status` | Hungry/thirsty or long-job dwarves with distance to the nearest food/drink place; pool sizes; labors held back | `claude/pilot_remote status FISH,HERBALISM,MINE,PLANT` |
+| `python -m df_llm_helper remote [check] [--dry-run]` | One maintenance pass (rules below) | + `claude/pilot_remote cancel <id>`, `claude/pilot_remote labor <id> <LABOR> off\|on [WD,...]` |
+| `python -m df_llm_helper remote restore [--dry-run]` | Gives back every labor held back (rescue and pool) | `labor ... on` |
+| `python -m df_llm_helper check` | Runs the pass as a feature hook; lines only on actions, escalations or a fishing proposal | as check |
 
 ## Rules
 1. **Rescue:** hunger or thirst > 40,000 and (more than `far_tiles` 40 from food/drink, or job in `long_jobs`

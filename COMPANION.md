@@ -1,12 +1,12 @@
-# Companion Lua scripts (`claude/*`) – what dfpilot expects
+# Companion Lua scripts (`claude/*`) – what df-llm-helper expects
 
-dfpilot talks to Dwarf Fortress only through `dfhack-run` and DFHack Lua scripts installed under
+df-llm-helper talks to Dwarf Fortress only through `dfhack-run` and DFHack Lua scripts installed under
 `hack/scripts/claude/`. Everything is bundled:
 
-1. `lua/pilot_*.lua` – thin scripts written for dfpilot (siege, caravan, mood, care, water, work details, batching).
+1. `lua/pilot_*.lua` – thin scripts written for df-llm-helper (siege, caravan, mood, care, water, work details, batching).
 2. `lua/claude/*.lua` – the fortress toolkit the original project played with (`claude/status`, `claude/report`,
    watchdog, trade, military, mood, …). Comments are English; output keys and in-game texts are still German
-   (dfpilot parses them, so they are part of the protocol).
+   (df-llm-helper parses them, so they are part of the protocol).
 
 Install: copy `lua/pilot_*.lua` and `lua/claude/*.lua` into `<Dwarf Fortress>/hack/scripts/claude/`.
 
@@ -14,17 +14,17 @@ Install: copy `lua/pilot_*.lua` and `lua/claude/*.lua` into `<Dwarf Fortress>/ha
 The shipped values are an example from the original fortress "Windrings" – set them for your own map after embark
 (checklist at the top of `config.lua`). Own quickfort blueprints go to `dfhack-config/blueprints/claude/`.
 
-**Shared folder:** set the environment variable `DFPILOT_HOME` (system-wide, so DF sees it) to e.g.
-`C:\dfpilot\runtime`. The Lua scripts write flags/logs below it (`util.home()`), dfpilot reads `<DFPILOT_HOME>/tools`.
-Without the variable the Lua side uses `<Dwarf Fortress>/dfpilot-runtime` and dfpilot `<dfpilot>/runtime` – so set it.
+**Shared folder:** set the environment variable `DF_LLM_HELPER_HOME` (system-wide, so DF sees it) to e.g.
+`C:\df-llm-helper\runtime`. The Lua scripts write flags/logs below it (`util.home()`), df-llm-helper reads `<DF_LLM_HELPER_HOME>/tools`.
+Without the variable the Lua side uses `<Dwarf Fortress>/df-llm-helper-runtime` and df-llm-helper `<df-llm-helper>/runtime` – so set it.
 
 The exact output format of each command is the matching file in `fixtures/run5/` (real answers recorded in a live
 game). Parsers are tolerant: missing fields are reported, not fatal.
 
-Shared state between the scripts and dfpilot lives in `paths.tools` (default `runtime/`): `*.flag` files,
+Shared state between the scripts and df-llm-helper lives in `paths.tools` (default `runtime/`): `*.flag` files,
 `events.log`, `out/`. All scripts print one JSON object (`util.emit`).
 
-| Command | Used by (dfpilot module / rule / runbook) | Reference answer |
+| Command | Used by (df-llm-helper module / rule / runbook) | Reference answer |
 |---|---|---|
 | `claude/advance` | caravan, cli, client, maintenance, rb06_karawane, rb06b_karawane_absch | – |
 | `claude/aemter` | client, curated, rb18_manager_buero, scopes | `fixtures/run5/aemter_status.txt` |

@@ -5,16 +5,16 @@ kb: [wasser_diagonal]
 symptom:
   when: "'wasser' in [f.name for f in flag_list]"
   confidence: 0.9
-  explain: "wasser.flag open (dfpilot water watch)"
+  explain: "wasser.flag open (python -m df_llm_helper water watch)"
 params:
-  x: {default: null, desc: "Emergency wall x (suggestion from dfpilot water watch)"}
+  x: {default: null, desc: "Emergency wall x (suggestion from df_llm_helper water watch)"}
   y: {default: null, desc: "Emergency wall y"}
   z: {default: null, desc: "Emergency wall z"}
 steps:
   - {cmd: "claude/pilot_water near {x} {y} {z} 1", why: "Is the wall tile itself dry? Otherwise one tile further toward the fort"}
   - {cmd: "quickfort run claude/r5_notwand.csv -c {x},{y},{z}", why: "construction wall (ordinary build job); Run 5: built in < 1 min"}
   - {wait_s: 60}
-  - {manual: "python -m dfpilot water watch: has the rise stopped? Front before the wall?"}
+  - {manual: "python -m df_llm_helper water watch: has the rise stopped? Front before the wall?"}
   - {manual: "Dig ban around the front: add a box to config water.forbid_dig (lint L31 then refuses dig jobs there)"}
   - {manual: "NEVER remove/open the wall again; record it in LAYOUT and chronik.md"}
 verify:
@@ -23,4 +23,4 @@ verify:
   poll_s: 30
 notes: >-
   In Dwarf Fortress water also flows DIAGONALLY between two rock edges (Run 5, tunnel W, LAYOUT-run5.md 11).
-  Before any digging near water: python -m dfpilot water check x y z (forbidden/unsafe = do not dig).
+  Before any digging near water: python -m df_llm_helper water check x y z (forbidden/unsafe = do not dig).

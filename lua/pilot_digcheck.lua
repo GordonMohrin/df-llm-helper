@@ -1,7 +1,7 @@
--- claude/pilot_digcheck dump x1 y1 z1 x2 y2 z2                       (dfpilot spec v3-02, LIVE-UNTESTED)
--- Tile excerpt for the dig safety check (`dfpilot digcheck`): one character per tile (encoding in
--- dfpilot/features/_grid.py: outside, water/magma flow, aquifer wall, constructions, underground voids, stairs).
--- dfpilot calls it in blocks of <= 500 dig targets (box + margin 2) with a pause in between -> no freeze.
+-- claude/pilot_digcheck dump x1 y1 z1 x2 y2 z2                       (df-llm-helper spec v3-02, LIVE-UNTESTED)
+-- Tile excerpt for the dig safety check (`python -m df_llm_helper digcheck`): one character per tile (encoding in
+-- df_llm_helper/features/_grid.py: outside, water/magma flow, aquifer wall, constructions, underground voids, stairs).
+-- df-llm-helper calls it in blocks of <= 500 dig targets (box + margin 2) with a pause in between -> no freeze.
 -- Fair play: read only; only REVEALED tiles are classified, unrevealed ones are emitted as '?' and not judged
 -- (no cavern/region data is read: caverns are recognised from revealed underground open space 'V' and from
 -- configured boxes). Max 20000 tiles per call.

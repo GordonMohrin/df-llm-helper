@@ -23,7 +23,7 @@ def test_new_lua_files_pass_structure_check():
         assert check_file(f) == [], f
 
 
-@pytest.mark.skipif(not OLD_LUA, reason="companion scripts lua/claude/ not next to dfpilot (public version)")
+@pytest.mark.skipif(not OLD_LUA, reason="companion scripts lua/claude/ not next to df-llm-helper (public version)")
 def test_existing_lua_runs_through_without_crash():
     for f in OLD_LUA:
         assert isinstance(check_file(f), list)

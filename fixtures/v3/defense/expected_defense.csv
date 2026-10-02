@@ -1,4 +1,4 @@
-#build label(walls) dfpilot defense stage 1: lane walls origin 98 93 133
+#build label(walls) python -m df_llm_helper defense stage 1: lane walls origin 98 93 133
 Cw,Cw,Cw,,,,,
 Cw,,Cw,,,,,
 Cw,,Cw,,,,,
@@ -17,7 +17,7 @@ Cw,,Cw,,,,,
 Cw,,Cw,Cw,Cw,Cw,,Cw
 Cw,,,,,,,Cw
 Cw,Cw,Cw,Cw,Cw,Cw,Cw,Cw
-#build label(traps) dfpilot defense stage 2: traps mouth to door origin 98 93 133
+#build label(traps) python -m df_llm_helper defense stage 2: traps mouth to door origin 98 93 133
 ,,,,,,,
 ,,,,,,,
 ,Tc,,,,,,
@@ -36,7 +36,7 @@ Cw,Cw,Cw,Cw,Cw,Cw,Cw,Cw
 ,Ts,,,,,,
 ,Ts,Ts,Ts,Ts,Ts,Ts,
 ,,,,,,,
-#build label(niche) dfpilot defense stage 3: shooter niche origin 98 93 133
+#build label(niche) python -m df_llm_helper defense stage 3: shooter niche origin 98 93 133
 ,,,,,,,
 ,,,,,,,
 ,,,,,,,

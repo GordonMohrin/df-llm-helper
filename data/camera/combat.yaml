@@ -1,6 +1,6 @@
 # Camera profile 'combat' (spec v3-10): fights and enemies first. schau mode 'combat' only shows events with
 # priority >= 4 (enemies, deaths, alarms); combat reports are only shown while enemies are visible (S.enemy_n > 0),
-# so sparring stays hidden. dfpilot switches here automatically during attacks and back afterwards.
+# so sparring stays hidden. df-llm-helper switches here automatically during attacks and back afterwards.
 name: combat
 extends: ambient
 description: "fights and enemies first, sparring hidden"

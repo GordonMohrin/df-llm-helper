@@ -1,4 +1,4 @@
-# Spec v3-10: Camera Director Profiles (`dfpilot camera`)
+# Spec v3-10: Camera Director Profiles (`python -m df_llm_helper camera`)
 
 Priority: P2 | As of: 01.10.2026 (Run 5, Y109) | Status: implemented (v3), not yet live-tested; Lua `claude/schau` exists (auto/follow/events/combat), small profile hook added | Framework: see `../specs-v2/README.md`
 
@@ -14,7 +14,7 @@ The player wants to watch the fort, but **not** constant fights and sparring, ra
 - `calm`: slow pans, only one unit per 40 s.
 
 ## Behavior
-1. `dfpilot camera profile <name>` writes the weights into `config` and calls `claude/schau mode ... + reload`.
+1. `python -m df_llm_helper camera profile <name>` writes the weights into `config` and calls `claude/schau mode ... + reload`.
 2. **Event priority:** alarm level 5 (real attacks) overrides every profile; moods (level 3) briefly.
 3. **Context:** on attacks switch to `combat` automatically, afterwards back to the previous profile.
 4. **Statistics:** shares per category of the last 30 minutes, so that "fights/sparring too often" can be measured.
@@ -37,7 +37,7 @@ Only camera and overlay text.
 `schau status` outputs, job distribution (Dig, Construct, PlaceItemInTomb, GiveWater, Plant/Harvest), report types.
 
 ## Implementation (v3)
-- **Code:** `dfpilot/features/camera.py` (`camera status|profile [name]|stats|watch [--loop]`, `check_hook`), profiles `data/camera/{ambient,combat,build,events,calm}.yaml` (`extends:` inherits; English names instead of `kampf/bau/ereignisse/ruhig`).
+- **Code:** `df_llm_helper/features/camera.py` (`camera status|profile [name]|stats|watch [--loop]`, `check_hook`), profiles `data/camera/{ambient,combat,build,events,calm}.yaml` (`extends:` inherits; English names instead of `kampf/bau/ereignisse/ruhig`).
 - **Weight file instead of `config`:** a switch writes `<paths.tools>/schau_profile.json` (= `util.home()/tools/` in Lua), then `claude/schau profile reload` and `claude/schau mode <mode>`. Hook in `lua/claude/schau.lua`: `load_profile()`, `clear_profile()`, `weight_for(job, soldier)`, `pick_stats()`; new CLI `claude/schau profile reload|default`; `status` adds `profile` and `cats` (picks per category, last 30 min). Without the file the built-in `JOB_W` and constants apply unchanged (old behavior is the default); `start` loads an existing profile file.
 - **Gate:** no action (no file write, no DF write) while `pause.hold` exists or the focus is not `dwarfmode/Default`; `hold_s > 0` gives the note "director paused". Automatic switches never start a stopped director (`schau mode` would start it).
 - **Attack context:** attack = `siege.flag` or `alert.flag` (set by the watcher). `camera watch --loop` polls every `poll_s` (1 s) → switch within one poll; `check` does the same once per check (no DF call without an attack). After the attack it switches back to the stored previous profile. Level-5 events and moods are still handled inside schau itself (event queue), independent of the profile.

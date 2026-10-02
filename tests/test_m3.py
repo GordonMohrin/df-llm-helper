@@ -5,13 +5,13 @@ import random
 import pytest
 
 from conftest import FIX
-from dfpilot.anomaly import (CancelLoop, Detector, GamelogReader, cancel_anomalies, cancel_loops, detect_series, ewma,
+from df_llm_helper.anomaly import (CancelLoop, Detector, GamelogReader, cancel_anomalies, cancel_loops, detect_series, ewma,
                              mad, series_anomalies)
-from dfpilot.client import MockClient
-from dfpilot.kb import KB
-from dfpilot.overlay import overlay_lines, overlay_send
-from dfpilot.store import Store
-from dfpilot.trade_flow import ALLOWED, FOCUS_TRADE, TradeFlow, TradeObs, obs_from_status
+from df_llm_helper.client import MockClient
+from df_llm_helper.kb import KB
+from df_llm_helper.overlay import overlay_lines, overlay_send
+from df_llm_helper.store import Store
+from df_llm_helper.trade_flow import ALLOWED, FOCUS_TRADE, TradeFlow, TradeObs, obs_from_status
 from helpers import ROOT
 
 GAMELOG = (FIX / "logs" / "gamelog_selected.txt").read_bytes().decode("cp437").splitlines()
@@ -242,7 +242,7 @@ def test_overlay_no_duplicate_within_10_min():
 
 
 # ---------------------------------------------------------------- CLI F15/F16 + trend in the pilot
-from dfpilot.cli import main  # noqa: E402
+from df_llm_helper.cli import main  # noqa: E402
 
 
 @pytest.fixture
@@ -272,9 +272,9 @@ def test_cli_overlay_and_trade(cfg3, capsys):
 
 
 def test_pilot_trend_warning_in_digest(cfg, clock):
-    from dfpilot.pilot import Pilot
+    from df_llm_helper.pilot import Pilot
     from make_fixtures import responses
-    from dfpilot.client import MockClient
+    from df_llm_helper.client import MockClient
     p = Pilot(cfg, MockClient(responses(drink_days=120)), store=Store(), clock=clock)
     for i in range(14):
         p.client.set("claude/status", responses(drink_days=120 + (i % 2))["claude/status"])

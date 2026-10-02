@@ -1,8 +1,8 @@
-# Spec v3-01: Access watcher (`dfpilot perimeter`)
+# Spec v3-01: Access watcher (`python -m df_llm_helper perimeter`)
 
-Priority: P0 | As of: 01.10.2026 (run 5, Windrings, J109) | Status: **implemented (v3), not yet live-tested** (`dfpilot/features/perimeter.py`, `lua/pilot_perimeter.lua`, manual `../manual-v3/01-perimeter.md`); prototype: Lua `lua/claude/zugaenge.lua`, watcher `dfpilot/tools/zugang_watch.py` (private repo) | Framework: see `../specs-v2/README.md`
+Priority: P0 | As of: 01.10.2026 (run 5, Windrings, J109) | Status: **implemented (v3), not yet live-tested** (`df_llm_helper/features/perimeter.py`, `lua/pilot_perimeter.lua`, manual `../manual-v3/01-perimeter.md`); prototype: Lua `lua/claude/zugaenge.lua`, watcher `tools/zugang_watch.py` (private repo) | Framework: see `../specs-v2/README.md`
 
-## Answer to the question "should dfpilot take this over?"
+## Answer to the question "should df-llm-helper take this over?"
 **Yes.** It is pure maintenance and monitoring (read only), it repeats permanently and it prevented real damage in run 5. The player's order: "close everything except the trap path, keep an eye on whether new openings appear". A standing order belongs in the watcher, not in my head or an ad-hoc monitor.
 
 ## Goal and benefit
@@ -14,7 +14,7 @@ Keep all entries from outside into the core known; report unauthorized new openi
 2. **Core relation:** per cluster, whether an inside route leads to the core point (config) (`leads_to_core`), and whether it bypasses the trap tiles (`bypasses_traps`).
 3. **Allow-list** `tools/zugang-erlaubt.txt` (coordinates, tolerance +-4/+-2): only the trap path is allowed (stair T1 (99,94,z132)). Everything else with `leads_to_core=true` is a **finding**.
 4. **Message** per change, not per run: `WAKE perimeter: forbidden access to the core at (x,y,z) n tiles -> seal`; all-clear as soon as it is closed.
-5. **Proposal for closing:** Quickfort grid `Cw` on the entry tiles (for stairs: the adjacent floor tiles on the inside, not the stair itself, because stairs cannot be built on). `dfpilot perimeter seal --dry-run` creates the CSV, `--apply` runs it via Quickfort (build orders, fair play).
+5. **Proposal for closing:** Quickfort grid `Cw` on the entry tiles (for stairs: the adjacent floor tiles on the inside, not the stair itself, because stairs cannot be built on). `python -m df_llm_helper perimeter seal --dry-run` creates the CSV, `--apply` runs it via Quickfort (build orders, fair play).
 6. **Cadence:** the search occupies the main thread about 10 s. Therefore every 20 min (configurable), not in the watcher tick, only while the game runs and there is no alarm; additionally after every dig stage (hook from `raster`) and before every Quickfort dig (spec v3-02).
 
 ## Configuration
@@ -38,6 +38,6 @@ Tile excerpts (type, outside flag) around the north opening and the stub stair, 
 ## Implementation notes (v3)
 - Tests: `tests/test_perimeter.py` (all criteria; Lua scan == Python reference on the grid mock, sync and chunked). Fixtures `fixtures/v3/grid/perimeter_j109_open.grid` / `_sealed.grid` are **synthetic** (rebuilt from the run notes; T1, stub stair, 23-tile north row and the core are real, hall extent/corridors/trap tiles assumed). Real `claude/zugaenge` outputs are a fixture gap.
 - Entry definition is order-independent: a reached inside tile with a reached outside tile as move neighbor. Instead of one BFS per cluster the Lua script runs two inside-only BFS from the core (with/without traps) and flags every entry; Python clusters and aggregates.
-- **Non-blocking:** `pilot_perimeter start` works in chunks (`budget` nodes per frame via `dfhack.timeout`) and writes `<dfpilot home>/tools/out/perimeter_scan.json`; `dfpilot check` starts a scan every `interval_s` and evaluates it on a later check (never the synchronous `scan`). AC 5 (<= 15 s on the real map) is an open live check.
-- Seal: stairs and ramps get walls on their adjacent inside floor tiles; door/trap tiles are left to the player. `--apply` always runs `reach what-if` first and refuses if a mandatory point would be cut (or the check cannot prove safety) unless `--override "<reason>"` is given; the CSV goes to `<blueprints_dir>/claude/dfpilot_seal.csv` and `quickfort run claude/dfpilot_seal.csv -c x,y,z` is executed.
+- **Non-blocking:** `pilot_perimeter start` works in chunks (`budget` nodes per frame via `dfhack.timeout`) and writes `<df-llm-helper home>/tools/out/perimeter_scan.json`; `python -m df_llm_helper check` starts a scan every `interval_s` and evaluates it on a later check (never the synchronous `scan`). AC 5 (<= 15 s on the real map) is an open live check.
+- Seal: stairs and ramps get walls on their adjacent inside floor tiles; door/trap tiles are left to the player. `--apply` always runs `reach what-if` first and refuses if a mandatory point would be cut (or the check cannot prove safety) unless `--override "<reason>"` is given; the CSV goes to `<blueprints_dir>/claude/df_llm_helper_seal.csv` and `quickfort run claude/df_llm_helper_seal.csv -c x,y,z` is executed.
 - Not done here (other files): hook from `raster` after each dig stage.

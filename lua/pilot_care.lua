@@ -1,4 +1,4 @@
--- claude/pilot_care status | labors <unit_id> <LABOR,LABOR,...>     (dfpilot spec 04, NOT TESTED LIVE)
+-- claude/pilot_care status | labors <unit_id> <LABOR,LABOR,...>     (df-llm-helper spec 04, NOT TESTED LIVE)
 -- status: citizens with hunger/thirst/wounds (#wounds also counts healed scars -> hint only)/ability to stand/location (hospital zone?), squad, pickaxe, care labors,
 --         care skills, idleness; hospital zones (rectangle, beds/traction benches), care jobs, meals.
 -- labors: sets the given care labors (labor menu). Refuses soldiers and dwarves with a pickaxe.

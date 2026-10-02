@@ -1,5 +1,5 @@
 -- claude/pilot_siege status | kill <squad_id> <id,id,...> | move <squad_id> <x> <y> <z> | clear <squad_id>
--- dfpilot Spec 01 (siege autopilot). NOT TESTED LIVE (structure check + mock DFHack only).
+-- df-llm-helper Spec 01 (siege autopilot). NOT TESTED LIVE (structure check + mock DFHack only).
 -- Commands mirror the squad menu (kill list, move, clear orders); no unit/item manipulation.
 -- status: invaders (isInvader, never citizen/pet/merchant/guest), berserk citizens (report only), squads with blood/position.
 local util = reqscript('claude/util')

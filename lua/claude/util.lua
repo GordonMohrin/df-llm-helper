@@ -3,12 +3,12 @@
 
 local json = require('json')
 
--- Base folder for flags/logs/state (shared with dfpilot): environment variable DFPILOT_HOME,
--- otherwise <Dwarf Fortress>/dfpilot-runtime. Below it: tools/ (flags, events.log, out/), state/, metrics.csv.
+-- Base folder for flags/logs/state (shared with df-llm-helper): environment variable DF_LLM_HELPER_HOME,
+-- otherwise <Dwarf Fortress>/df-llm-helper-runtime. Below it: tools/ (flags, events.log, out/), state/, metrics.csv.
 function home()
-  local h = os.getenv('DFPILOT_HOME')
+  local h = os.getenv('DF_LLM_HELPER_HOME') or os.getenv('DFPILOT_HOME')
   if h and h ~= '' then return (h:gsub('[/\\]+$', '')) end
-  return dfhack.getDFPath() .. '/dfpilot-runtime'
+  return dfhack.getDFPath() .. '/df-llm-helper-runtime'
 end
 
 local function to_utf8(t)

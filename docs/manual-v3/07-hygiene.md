@@ -1,4 +1,4 @@
-# Item hygiene: `dfpilot hygiene` (spec v3-07, live-untested)
+# Item hygiene: `python -m df_llm_helper hygiene` (spec v3-07, live-untested)
 
 **What it does:** counts loose items, marks enemy/animal corpses and rotten food for the dump (garbage flag, like the
 item menu), at most 300 per cycle, and explains why dumping does not work.
@@ -8,7 +8,7 @@ skulls, shells, skins, leather, hair, trade goods (goblets, crafts, figurines, t
 `autodump` (item teleport) is never used.
 
 ## Commands
-- `python -m dfpilot hygiene` (= `status`): digest line, types, areas (fort/surface/cavern), corpses (dwarf/other),
+- `python -m df_llm_helper hygiene` (= `status`): digest line, types, areas (fort/surface/cavern), corpses (dwarf/other),
   pending marks, dump jobs, cause + zone proposal, goblet cap hint, coffins vs. dwarf corpses, measurement time.
   `--dry-run` does not record the history (growth per hour).
 - `hygiene zones`: existing dump zones (warns "UNDER A STOCKPILE") and the proposal from `hygiene.dump_zones`.
@@ -16,7 +16,7 @@ skulls, shells, skins, leather, hair, trade goods (goblets, crafts, figurines, t
 
 ## When nothing is marked
 - "No dump zone": build the proposed zone first (zone D z130 x86..88,y112..114 near refuse room/crypt/barracks).
-  dfpilot only proposes zones, it never builds them.
+  df-llm-helper only proposes zones, it never builds them.
 - "N marks still pending": the haulers have not caught up; wait.
 - "Loop protection": at most `max_marks_per_hour` (2) mark cycles per hour.
 
@@ -40,5 +40,5 @@ Marking inside `check` only with `hygiene.auto_mark: true` (off until live-teste
 `far_tiles`, `measure_every_s`, `auto_mark`, `max_marks_per_hour`, `corpse_warn`, `goblet_cap`.
 
 ## Install
-Copy `lua/pilot_hygiene.lua` to `hack/scripts/claude/pilot_hygiene.lua`. Without it dfpilot falls back to
+Copy `lua/pilot_hygiene.lua` to `hack/scripts/claude/pilot_hygiene.lua`. Without it df-llm-helper falls back to
 `claude/muell status` (types only).

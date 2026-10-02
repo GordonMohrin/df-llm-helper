@@ -1,4 +1,4 @@
-# Spec 08: Water and Flood Watchdog (`dfpilot water`)
+# Spec 08: Water and Flood Watchdog (`python -m df_llm_helper water`)
 
 Priority: P1 | As of: 01.10.2026 (Run 5, Windrings) | Status: implemented (PR v2-08), not yet live-tested | Framework: see README.md
 
@@ -8,7 +8,7 @@ Prevent water disasters. In Run 5 the attempt to run a tunnel diagonally to the 
 
 ## Behavior
 1. **Water scan** (`pilot_water.lua`, not yet live-tested): count tiles with `flow_size > 0` (water/magma) in configurable boxes and levels; output count, bounding box, level, "front".
-2. **Pre-check:** `dfpilot water check --designate x y z` checks whether a planned tile borders water or ramps with flow orthogonally, diagonally or vertically (z±1); result `ok/unsicher/verboten` (ok/uncertain/forbidden; conservative).
+2. **Pre-check:** `python -m df_llm_helper water check --designate x y z` checks whether a planned tile borders water or ramps with flow orthogonally, diagonally or vertically (z±1); result `ok/unsicher/verboten` (ok/uncertain/forbidden; conservative).
 3. **Watchdog** (in `check`): counts water tiles in the fort box; increase > 0 → critical warning "Wasser im Fort bei (x,y,z)" (water in the fort at) and proposal of an emergency wall (quickfort grid `r5_notwand.csv`, cursor at the narrowest corridor before the front).
 4. **Emergency wall runbook** `rb21_flut`: wall construction between front and fort, measurement after 60 ticks, dig ban in the region.
 5. **Restricted boxes** (`water.forbid_dig`): `lint` refuses dig designations in them (e.g. x ≥ 127, y 97–101, z 127–129 and x = 180).

@@ -1,4 +1,4 @@
-# Spec 03: Mood Manager (`dfpilot mood`)
+# Spec 03: Mood Manager (`python -m df_llm_helper mood`)
 
 Priority: P0 | As of: 01.10.2026 (Run 5, Windrings) | Status: implemented (PR v2-03), not yet live-tested | Framework: see README.md
 

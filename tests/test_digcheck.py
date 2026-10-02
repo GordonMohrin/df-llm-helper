@@ -9,12 +9,12 @@ import time
 
 import pytest
 
-from dfpilot.client import MockClient
-from dfpilot.clock import FakeClock
-from dfpilot.features import digcheck as D
-from dfpilot.features._grid import Grid
-from dfpilot.store import Store
-from dfpilot.water import DEFAULTS as WATER
+from df_llm_helper.client import MockClient
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.features import digcheck as D
+from df_llm_helper.features._grid import Grid
+from df_llm_helper.store import Store
+from df_llm_helper.water import DEFAULTS as WATER
 from helpers import ROOT
 
 LUA = shutil.which("lua5.4") or shutil.which("lua")
@@ -200,9 +200,9 @@ def test_strip_drops_problem_rows():
 
 
 def test_cli_and_alias_and_check_hook(tmp_path, capsys, monkeypatch):
-    import dfpilot.cli as cli
-    from dfpilot.config import load_config
-    from dfpilot.pilot import Pilot
+    import df_llm_helper.cli as cli
+    from df_llm_helper.config import load_config
+    from df_llm_helper.pilot import Pilot
     clock = FakeClock(0)
     cfg = load_config(overrides={"paths": {"tools": str(tmp_path / "tools"), "scopes": str(tmp_path / "s")}})
     pil = Pilot(cfg, MockClient({}, clock=clock), store=Store(), clock=clock)

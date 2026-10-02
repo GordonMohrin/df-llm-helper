@@ -1,4 +1,4 @@
-# Spec 07: Shortage Watchdog for Material and Fuel (`dfpilot bottleneck`)
+# Spec 07: Shortage Watchdog for Material and Fuel (`python -m df_llm_helper bottleneck`)
 
 Priority: P1 | As of: 01.10.2026 (Run 5, Windrings) | Status: implemented (PR v2-07), not yet live-tested; backtest only reconstructed (see CHANGELOG) | Framework: see README.md
 

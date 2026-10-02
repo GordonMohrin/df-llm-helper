@@ -1,11 +1,11 @@
 """F3 runbooks: schema validator, positive/negative test per runbook, exact dry-run commands, player approval, live run."""
 import pytest
 
-from dfpilot import yamlmini
-from dfpilot.client import MockClient
-from dfpilot.clock import FakeClock
-from dfpilot.fairplay import ExceptionRegistry
-from dfpilot.runbooks import (LEGACY_APPROVAL_KEY, RunbookError, diagnose, load_runbooks, plan_commands, run_runbook,
+from df_llm_helper import yamlmini
+from df_llm_helper.client import MockClient
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.fairplay import ExceptionRegistry
+from df_llm_helper.runbooks import (LEGACY_APPROVAL_KEY, RunbookError, diagnose, load_runbooks, plan_commands, run_runbook,
                               validate_runbook)
 from helpers import ROOT, ctx_for
 
@@ -224,12 +224,12 @@ def test_duplicate_runbook_ids(tmp_path):
 
 
 def test_runbook_commands_respect_fairplay():
-    from dfpilot.fairplay import check_command, FairPlayError
+    from df_llm_helper.fairplay import check_command, FairPlayError
     ctx, _ = _ctx({})
     for rb in RBS:
         params = {"squad_id": 32, "item_ids": "1,2", "x": 128, "y": 99, "z": 128}
         for c in plan_commands(rb, ctx, {k: v for k, v in params.items() if k in rb.params}):
-            if c.startswith(("MANUAL", "WAIT", "CHECK", "DFPILOT", "VERIFY")):
+            if c.startswith(("MANUAL", "WAIT", "CHECK", "HELPER", "VERIFY")):
                 continue
             if rb.needs_player_approval:
                 with pytest.raises(FairPlayError):
@@ -253,7 +253,7 @@ def test_runbook_engine_edge_cases(tmp_path):
     assert hits[0].confidence == 0.8 and hits[0].reasons == ["x=6"]   # broken signal ignored
     assert diagnose([rb], {"x": "a"}) == []                             # type error -> no hit
     cmds = plan_commands(rb, {"x": 6})
-    assert cmds[:5] == ["claude/status", "WAIT 5 s", "CHECK: x > 1", "claude/tempo off", "DFPILOT: heartbeat"]
+    assert cmds[:5] == ["claude/status", "WAIT 5 s", "CHECK: x > 1", "claude/tempo off", "HELPER: heartbeat"]
     assert cmds[5] == "claude/dig 130 60 1 2 2 d"
     clock = FakeClock(0)
     mc = MockClient({"claude/status": "{}"}, clock=clock, fail={"claude/tempo off": 1})

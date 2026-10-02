@@ -92,9 +92,9 @@
   class: safety
   when: "any(c.state == 'AtDepot' for c in caravans) and not flags['caravan'].exists"
   do:
-    - write_flag: {name: caravan, text: "Caravan at the depot (dfpilot) {date}"}
+    - write_flag: {name: caravan, text: "Caravan at the depot (df-llm-helper) {date}"}
     - cmd: "claude/advance 0"
-    - propose: "Caravan at the depot: dfpilot runbook show rb06_karawane"
+    - propose: "Caravan at the depot: python -m df_llm_helper runbook show rb06_karawane"
   cooldown_s: 600
   mutex_with: [stale_caravan_flag]
 
@@ -121,5 +121,5 @@
   class: maintenance
   when: "drink_days is not None and drink_days < th.drink_days_crit and (plants is None or plants < 5)"
   do:
-    - warn: "Drinks {drink_days} days and only {plants} plants: check fields/seeds/trade (dfpilot kb search 'drinks plants')"
+    - warn: "Drinks {drink_days} days and only {plants} plants: check fields/seeds/trade (python -m df_llm_helper kb search 'drinks plants')"
   cooldown_s: 1800

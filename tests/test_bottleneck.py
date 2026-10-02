@@ -5,14 +5,14 @@ from pathlib import Path
 import pytest
 
 from conftest import FIX
-from dfpilot import yamlmini
-from dfpilot.bottleneck import (DEFAULTS, BottleneckWatch, Graph, GraphError, backtest_timeline, find_blockers,
+from df_llm_helper import yamlmini
+from df_llm_helper.bottleneck import (DEFAULTS, BottleneckWatch, Graph, GraphError, backtest_timeline, find_blockers,
                                 load_graph, report_line, starter_budget, stock_value)
-from dfpilot.caravan import CaravanPilot
-from dfpilot.client import MockClient
-from dfpilot.clock import FakeClock
-from dfpilot.config import HOME
-from dfpilot.store import Store
+from df_llm_helper.caravan import CaravanPilot
+from df_llm_helper.client import MockClient
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.config import HOME
+from df_llm_helper.store import Store
 
 G = load_graph(HOME / DEFAULTS["graph"])
 LIVE = FIX.parent / "run5_live"
@@ -144,7 +144,7 @@ def test_backtest_run5_timeline():
 
 
 def test_cli_bottleneck(tmp_path, tools_dir, capsys):
-    from dfpilot.cli import main
+    from df_llm_helper.cli import main
     c = tmp_path / "c.yaml"
     c.write_text(f"paths:\n  tools: {tools_dir}\n  scopes: {tools_dir / 'scopes'}\n  state_db: {tmp_path / 's.db'}\n"
                  f"  gamelog: {tmp_path / 'g'}\n", encoding="utf-8")

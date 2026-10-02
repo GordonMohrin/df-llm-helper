@@ -9,20 +9,20 @@ from datetime import date, timedelta
 import pytest
 
 from conftest import FIX
-from dfpilot.agents import cost_report
-from dfpilot.brief import build_brief, load_scopes
-from dfpilot.cli import main
-from dfpilot.clock import FakeClock
-from dfpilot.config import DEFAULTS, force_overrides, load_config, mock_overrides
-from dfpilot.digest import DigestState, build_digest
-from dfpilot.fairplay import ExceptionRegistry, FairPlayError
-from dfpilot.journal import Journal, infer_first_day, is_chronicle_event
-from dfpilot.kb import KB
-from dfpilot.lint import lint_source
-from dfpilot.memory import compact_file, restore, shorten
-from dfpilot.rules import build_context
-from dfpilot.store import Store
-from dfpilot.wake import NOISE_TAGS
+from df_llm_helper.agents import cost_report
+from df_llm_helper.brief import build_brief, load_scopes
+from df_llm_helper.cli import main
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.config import DEFAULTS, force_overrides, load_config, mock_overrides
+from df_llm_helper.digest import DigestState, build_digest
+from df_llm_helper.fairplay import ExceptionRegistry, FairPlayError
+from df_llm_helper.journal import Journal, infer_first_day, is_chronicle_event
+from df_llm_helper.kb import KB
+from df_llm_helper.lint import lint_source
+from df_llm_helper.memory import compact_file, restore, shorten
+from df_llm_helper.rules import build_context
+from df_llm_helper.store import Store
+from df_llm_helper.wake import NOISE_TAGS
 from helpers import ROOT, snap_for
 
 TH = DEFAULTS["thresholds"]
@@ -225,7 +225,7 @@ def test_cost_warnings_are_capped(tmp_path):
 def test_standing_feature_lines_are_reported_once_per_two_hours():
     from types import SimpleNamespace
 
-    from dfpilot.cli import HOOK_REPEAT_MIN, _fresh_hook_lines
+    from df_llm_helper.cli import HOOK_REPEAT_MIN, _fresh_hook_lines
     clock = FakeClock(1_790_840_000.0)
     p = SimpleNamespace(clock=clock, store=Store())
     a = ["Hygiene: loose stacks 13.8k: boulders 11.8k (ok)", "!! Dwarf corpses 122 > free coffins 14: ghost risk"]
@@ -242,7 +242,7 @@ def test_standing_feature_lines_are_reported_once_per_two_hours():
 
 
 def test_lint_command_reads_windows_paths(tmp_path):
-    from dfpilot.lint import lint_command
+    from df_llm_helper.lint import lint_command
     f = tmp_path / "x.lua"
     f.write_text("dfhack.run_command('reveal')\n")
     for cmd in (f"lua -f {f}", f'lua -f "{f}"'):

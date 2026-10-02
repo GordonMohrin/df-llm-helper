@@ -12,7 +12,7 @@ symptom:
 params:
   item_ids: {default: null, desc: "Item IDs of the embark picks, comma-separated (from claude/mil equip)"}
 steps:
-  - {manual: "Ask the player: foreign=false for items {item_ids}? Entry: dfpilot exception add FP08 --objects {item_ids} --ja '<quote>'"}
+  - {manual: "Ask the player: foreign=false for items {item_ids}? Entry: python -m df_llm_helper exception add FP08 --objects {item_ids} --ja '<quote>'"}
   - {cmd: "lua \"for _,id in ipairs({{{item_ids}}}) do df.item.find(id).flags.foreign=false end\""}
 verify:
   when: "pick_holders >= 1 or diggers >= 2"

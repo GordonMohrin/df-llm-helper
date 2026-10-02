@@ -1,11 +1,11 @@
 -- claude/pilot_remote status [LABOR,LABOR,...] | cancel <unit_id> | labor <unit_id> <LABOR> off|on [WD,WD,...]
--- (dfpilot spec v3-06 remote-worker protection, LIVE-UNTESTED)
+-- (df-llm-helper spec v3-06 remote-worker protection, LIVE-UNTESTED)
 -- status: citizens with position, hunger/thirst, current job, squad/child/hospital, the requested labors and the work
 --         details granting them; supply points (food stockpiles, wells); raw fish count; work details in mode
 --         EverybodyDoesThis that grant a requested labor (labor removal cannot stick there).
 -- cancel: cancels the unit's current job (like "cancel job" in the UI).
 -- labor off: removes the labor (labor menu) and takes the unit out of selective work details granting it (work detail
---            menu); returns the names of those work details so dfpilot can give them back later.
+--            menu); returns the names of those work details so df-llm-helper can give them back later.
 -- labor on:  sets the labor again and re-adds the unit to the given work details.
 -- Refused for: non-citizens, soldiers (squad), children, dwarves inside a hospital zone.
 local util = reqscript('claude/util')

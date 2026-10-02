@@ -1,5 +1,5 @@
 -- claude/pilot_hygiene status <start> <n> | report | mark <n> <TYPE,TYPE,...> [--rotten] [--apply]
--- (dfpilot spec v3-07 item hygiene, LIVE-UNTESTED)
+-- (df-llm-helper spec v3-07 item hygiene, LIVE-UNTESTED)
 -- status: READ ONLY. Counts loose items (on the ground, outside stockpiles/containers/buildings) in the index block
 --         [start, start+n) of world.items.all, so a large world never freezes the game in one call.
 --         Per type, per z (boulders), per area (fort = reachable from the fort reference, surface = outside,

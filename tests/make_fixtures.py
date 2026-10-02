@@ -16,8 +16,8 @@ HOME = HERE.parent
 sys.path.insert(0, str(HOME))
 FIX = HOME / "fixtures" / "run5"
 
-from dfpilot.client import FIXTURE_COMMANDS, MAX_REPORT_ID_CMD, SERVICES_CMD, SERVICE_KEYS  # noqa: E402
-from dfpilot.client import parse_json_tolerant  # noqa: E402
+from df_llm_helper.client import FIXTURE_COMMANDS, MAX_REPORT_ID_CMD, SERVICES_CMD, SERVICE_KEYS  # noqa: E402
+from df_llm_helper.client import parse_json_tolerant  # noqa: E402
 
 _BASE: dict[str, str] = {}
 

@@ -1,4 +1,4 @@
-# Spec 02: Caravan Autopilot (`dfpilot caravan`)
+# Spec 02: Caravan Autopilot (`python -m df_llm_helper caravan`)
 
 Priority: P0 | As of: 01.10.2026 (Run 5, Windrings) | Status: implemented (PR v2-02), not yet live-tested | Framework: see README.md
 

@@ -1,12 +1,12 @@
 """Shared test helpers: snapshot/context from synthetic responses."""
 from pathlib import Path
 
-from dfpilot.anomaly import CancelLoop
-from dfpilot.client import MAX_REPORT_ID_CMD, SERVICES_CMD, MockClient
-from dfpilot.config import DEFAULTS
-from dfpilot.rules import build_context
-from dfpilot.snapshot import collect
-from dfpilot.toolsfs import FlagInfo
+from df_llm_helper.anomaly import CancelLoop
+from df_llm_helper.client import MAX_REPORT_ID_CMD, SERVICES_CMD, MockClient
+from df_llm_helper.config import DEFAULTS
+from df_llm_helper.rules import build_context
+from df_llm_helper.snapshot import collect
+from df_llm_helper.toolsfs import FlagInfo
 from make_fixtures import responses
 
 CMDS = list(DEFAULTS["collect"]["commands"]) + [MAX_REPORT_ID_CMD, SERVICES_CMD]

@@ -1,6 +1,6 @@
-# Spec v3-05: Tool/pick manager (`dfpilot tools`)
+# Spec v3-05: Tool/pick manager (`python -m df_llm_helper tools`)
 
-Priority: P0 | Date: 01.10.2026 (run 5, Y109) | Status: **implemented (v3), not yet live-tested** (`dfpilot/features/tools.py`, `lua/pilot_tools.lua`; uses the existing `claude/pickfix`) | Framework: see `../specs-v2/README.md` | Manual: `../manual-v3/05-tools.md`
+Priority: P0 | Date: 01.10.2026 (run 5, Y109) | Status: **implemented (v3), not yet live-tested** (`df_llm_helper/features/tools.py`, `lua/pilot_tools.lua`; uses the existing `claude/pickfix`) | Framework: see `../specs-v2/README.md` | Manual: `../manual-v3/05-tools.md`
 
 ## Goal and benefit
 Make sure every miner has a work pick and dig jobs do not hang on missing equipment. This problem (E18) cost hours: 15 picks at 575 open dig jobs, 19 more lay in a bin. Causes: (a) reservation by squad uniforms, (b) work picks are only granted to dwarves whose `uniform.pickup_flags.update` flag was processed (never for non-squad miners), (c) too few dwarves with the MINE labor (16 of 34 needed).
@@ -23,7 +23,7 @@ Implemented additionally: `dig_jobs_min: 100`, `max_pickfix_per_hour: 6`, `repea
 
 ## Fair play
 The per-dwarf engine flag (`pickup_flags.update`) is a direct write, but no item manipulation; documented in the exception register (FP08) with a reference to the player's yes to `foreign=false` and the pick fix. The player was informed about the flag (note from the pick agent, 01.10.).
-**Implementation:** dfpilot only calls the pick fix if the register holds an FP08 entry whose reason (or `cmd_contains`) mentions the pick fix and that is not bound to item ids (a pure foreign-flag entry does not count); otherwise the call is refused with a clear message and a digest warning. Example: `dfpilot exception add FP08 --reason "pick fix: per-unit pickup flag" --ja "<player quote>"`. Adding miners (work detail menu) is a normal UI action.
+**Implementation:** df-llm-helper only calls the pick fix if the register holds an FP08 entry whose reason (or `cmd_contains`) mentions the pick fix and that is not bound to item ids (a pure foreign-flag entry does not count); otherwise the call is refused with a clear message and a digest warning. Example: `python -m df_llm_helper exception add FP08 --reason "pick fix: per-unit pickup flag" --ja "<player quote>"`. Adding miners (work detail menu) is a normal UI action.
 
 ## Acceptance criteria (all covered by `tests/test_tools_v3.py`)
 1. Scenario "15 picks, 34 picks total, 16 miners": `pickfix` executed, afterwards `work_weapons=34`. → `test_e18_adds_18_miners_then_pickfix_gives_34`
@@ -38,5 +38,5 @@ The per-dwarf engine flag (`pickup_flags.update`) is a direct write, but no item
 
 ## Deviations from the draft
 - Rule 3 is a proposal only (no automatic forge order; the `material` scope or the player places it).
-- Rule 5 detects a reload by a dropping report id (own kv key `tools.last_report`), inside `dfpilot check`; by hand: `dfpilot tools after-load`.
+- Rule 5 detects a reload by a dropping report id (own kv key `tools.last_report`), inside `python -m df_llm_helper check`; by hand: `python -m df_llm_helper tools after-load`.
 - The pick fix is called as `claude/pickfix --apply` (alias of `claude/mil pickfix --apply`; configurable).

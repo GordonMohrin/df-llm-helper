@@ -1,6 +1,6 @@
-# dfpilot v2: Follow-up Specs from Run 5
+# df-llm-helper v2: Follow-up Specs from Run 5
 
-Twelve specs for functions that the orchestrator performed by hand in Run 5 (01.10.2026) and that dfpilot can take over. Each spec contains goal and benefit with an estimated efficiency gain, the Run 5 as-is state, behavior, configuration, fair-play limits and testable acceptance criteria.
+Twelve specs for functions that the orchestrator performed by hand in Run 5 (01.10.2026) and that df-llm-helper can take over. Each spec contains goal and benefit with an estimated efficiency gain, the Run 5 as-is state, behavior, configuration, fair-play limits and testable acceptance criteria.
 
 | No | Feature | Prio | File |
 |---|---|---|---|
@@ -28,10 +28,10 @@ Twelve specs for functions that the orchestrator performed by hand in Run 5 (01.
 - Game quality: fewer losses due to moods, care, hunger and water.
 
 ## Framework (applies to all specs in this folder)
-- Code only under `dwarf-fortress/dfpilot/`, Python 3.12+, standard library only (plus pytest), no network access.
+- Code only under `df-llm-helper/`, Python 3.12+, standard library only (plus pytest), no network access.
 - Everything testable against `DFClient` (Real/Mock/Replay) and `Clock`; fixtures from Run 5 under `fixtures/run5/` or record anew (`--record`).
 - Fair play remains technically enforced (exception register, linter). New exceptions only with the player's literal yes; standing permissions are in `CLAUDE.md` (e.g. stuck traders via `flags1.left`).
 - Lua parts thin, marked as "not yet live-tested", with structure check (`tools/luacheck_min.py`).
 - Every autopilot action is logged with its reason in `state.db`; loop protection (`max_per_hour`) is mandatory.
-- Definition of Done per feature: self-test green (`python -m dfpilot.selftest`), new tests, `CHANGELOG.md` entry, section in `docs/MANUAL.md`.
+- Definition of Done per feature: self-test green (`python -m df_llm_helper.selftest`), new tests, `CHANGELOG.md` entry, section in `docs/MANUAL.md`.
 - No `git push` by the development session; commits small, trailer as in the project.

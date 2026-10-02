@@ -7,12 +7,12 @@ import subprocess
 
 import pytest
 
-from dfpilot.client import MockClient, RealClient
-from dfpilot.clock import FakeClock
-from dfpilot.lint import gate_command, lint_dig
-from dfpilot.store import Store
-from dfpilot.toolsfs import ToolsDir
-from dfpilot.water import DEFAULTS, WaterWatch, check_near, notwand_for
+from df_llm_helper.client import MockClient, RealClient
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.lint import gate_command, lint_dig
+from df_llm_helper.store import Store
+from df_llm_helper.toolsfs import ToolsDir
+from df_llm_helper.water import DEFAULTS, WaterWatch, check_near, notwand_for
 from helpers import ROOT
 
 LUA = shutil.which("lua5.4") or shutil.which("lua")
@@ -122,7 +122,7 @@ def test_lint_refuses_dig_in_forbid_box(tmp_path):
     rc = RealClient(exe, lint=gate_command(None, FORBID))
     r = rc.run("claude/dig 128 150 99 160 99")
     assert not r.ok and "L31" in r.stderr
-    from dfpilot.fairplay import ExceptionRegistry
+    from df_llm_helper.fairplay import ExceptionRegistry
     reg = ExceptionRegistry(tmp_path / "ex.jsonl")
     reg.add("L31", "tunnel on purpose", "the player: yes, dig there")
     assert gate_command(reg, FORBID)("claude/dig 128 150 99 160 99") == []
@@ -153,7 +153,7 @@ def test_lua_scan_baseline_zero_and_tunnel_fixture(tmp_path):
 
 def test_cli_water(tmp_path, tools_dir, capsys):
     from conftest import FIX
-    from dfpilot.cli import main
+    from df_llm_helper.cli import main
     c = tmp_path / "c.yaml"
     c.write_text(f"paths:\n  tools: {tools_dir}\n  scopes: {tools_dir / 'scopes'}\n  state_db: {tmp_path / 's.db'}\n"
                  f"  gamelog: {tmp_path / 'g'}\n", encoding="utf-8")

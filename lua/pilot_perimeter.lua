@@ -1,13 +1,13 @@
--- claude/pilot_perimeter scan|start cx cy cz zmin zmax [budget] | result            (dfpilot spec v3-01, LIVE-UNTESTED)
+-- claude/pilot_perimeter scan|start cx cy cz zmin zmax [budget] | result            (df-llm-helper spec v3-01, LIVE-UNTESTED)
 -- Accesses from outside into the fort (algorithm of lua/claude/zugaenge.lua, JSON output):
 --   1. multi-source BFS from every walkable tile with designation.outside (levels zmin..zmax)
 --   2. entry = reached walkable INSIDE tile that has a reached outside tile as move neighbor
 --   3. two inside-only BFS from the core point (cx,cy,cz): with and without trap tiles
 --      -> per entry: core = leads to the core, notrap = reaches the core while bypassing all traps
--- dfpilot clusters the entries, applies the allow-list and proposes walls (pure logic in Python).
+-- df-llm-helper clusters the entries, applies the allow-list and proposes walls (pure logic in Python).
 -- scan:   synchronous, prints {"ok":true,"done":true,"entries":[[x,y,z,core,notrap],...],"traps":n,"visited":n,"ms":t}
 -- start:  same work in chunks of <budget> nodes per frame (dfhack.timeout) -> the main thread never blocks for long
---         (the prototype held it ~10 s); the result goes to <dfpilot home>/tools/out/perimeter_scan.json
+--         (the prototype held it ~10 s); the result goes to <df-llm-helper home>/tools/out/perimeter_scan.json
 -- result: prints that file ({"done":false} while running).
 -- Read only. Unrevealed tiles are never walked (they are not walkable here).
 local util = reqscript('claude/util')
@@ -38,7 +38,7 @@ local function blocked_by_building(x, y, z)
   return o == OCC.Obstacle or o == OCC.Well
 end
 
--- tile classes (same encoding as dfpilot/features/_grid.py, reduced to what the path logic needs)
+-- tile classes (same encoding as df_llm_helper/features/_grid.py, reduced to what the path logic needs)
 local function tch(x, y, z)
   if x < 0 or y < 0 or z < 0 or x >= XM or y >= YM or z >= ZM then return '#' end
   local d = dfhack.maps.getTileFlags(x, y, z)

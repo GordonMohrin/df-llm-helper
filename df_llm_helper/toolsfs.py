@@ -1,0 +1,153 @@
+"""Access to the files of the existing system (SPEC 5.3): tools/*.flag, heartbeat, events.log,
+last-report-id.txt, tools/scopes/inbox-*.md. Age is always computed via the clock (testable with FakeClock)."""
+from __future__ import annotations
+
+import os
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+from .clock import Clock
+
+__all__ = ["FlagInfo", "ToolsDir", "read_text_tolerant"]
+
+
+def read_text_tolerant(path: Path) -> str:
+    data = path.read_bytes()
+    for enc in ("utf-8-sig", "cp1252"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("latin-1")
+
+
+@dataclass
+class FlagInfo:
+    name: str
+    exists: bool
+    age_min: float | None = None
+    text: str = ""
+
+
+class ToolsDir:
+    def __init__(self, path: str | Path, clock: Clock, scopes: str | Path | None = None):
+        self.path = Path(path)
+        self.scopes = Path(scopes) if scopes else self.path / "scopes"
+        self.clock = clock
+
+    # ---- general
+    def age_min(self, p: Path) -> float | None:
+        try:
+            return max(0.0, (self.clock.now().epoch - p.stat().st_mtime) / 60.0)
+        except OSError:
+            return None
+
+    # ---- Flags
+    def flag_path(self, name: str) -> Path:
+        if name == "pause.hold" or name == "pause":
+            return self.path / "pause.hold"
+        return self.path / (name if name.endswith(".flag") else f"{name}.flag")
+
+    def flag(self, name: str) -> FlagInfo:
+        p = self.flag_path(name)
+        key = name.removesuffix(".flag")
+        if not p.exists():
+            return FlagInfo(key, False)
+        try:
+            text = read_text_tolerant(p).strip()
+        except OSError:
+            text = ""
+        return FlagInfo(key, True, self.age_min(p), text[:300])
+
+    def flags(self) -> dict[str, FlagInfo]:
+        out: dict[str, FlagInfo] = {}
+        if self.path.is_dir():
+            for p in sorted(self.path.glob("*.flag")):
+                out[p.stem] = self.flag(p.stem)
+            if (self.path / "pause.hold").exists():
+                out["pause.hold"] = self.flag("pause.hold")
+        return out
+
+    def delete_flag(self, name: str) -> bool:
+        p = self.flag_path(name)
+        try:
+            p.unlink()
+            return True
+        except FileNotFoundError:
+            return False
+
+    def write_flag(self, name: str, text: str) -> None:
+        p = self.flag_path(name)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+        t = self.clock.now().epoch
+        os.utime(p, (t, t))
+
+    # ---- heartbeat
+    @property
+    def heartbeat(self) -> Path:
+        return self.path / "heartbeat.txt"
+
+    def heartbeat_age_min(self) -> float | None:
+        return self.age_min(self.heartbeat)
+
+    def touch_heartbeat(self) -> None:
+        self.path.mkdir(parents=True, exist_ok=True)
+        now = self.clock.now()
+        self.heartbeat.write_text(now.local().strftime("%Y-%m-%dT%H:%M:%S"), encoding="utf-8")
+        os.utime(self.heartbeat, (now.epoch, now.epoch))
+
+    # ---- watcher files
+    @property
+    def last_report_file(self) -> Path:
+        return self.path / "last-report-id.txt"
+
+    def last_report_id(self) -> int | None:
+        try:
+            txt = read_text_tolerant(self.last_report_file).strip().splitlines()
+            return int(txt[0]) if txt and re.match(r"^-?\d+$", txt[0].strip()) else None
+        except (OSError, ValueError):
+            return None
+
+    def set_last_report_id(self, n: int) -> None:
+        self.path.mkdir(parents=True, exist_ok=True)
+        self.last_report_file.write_text(str(int(n)), encoding="utf-8")
+        t = self.clock.now().epoch
+        os.utime(self.last_report_file, (t, t))
+
+    @property
+    def events_log(self) -> Path:
+        return self.path / "events.log"
+
+    def events_info(self) -> tuple[int | None, float | None]:
+        p = self.events_log
+        if not p.exists():
+            return None, None
+        return p.stat().st_size, self.age_min(p)
+
+    def append_event(self, level: str, text: str, tag: str = "HELPER") -> str:
+        """Line in the format of the PowerShell watcher: 'CRITICAL HH:MM:SS [TAG] text' (legacy logs use 'KRITISCH')."""
+        line = f"{level} {self.clock.now().local().strftime('%H:%M:%S')} [{tag}] {text}"
+        self.path.mkdir(parents=True, exist_ok=True)
+        with self.events_log.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+        return line
+
+    def events_lines(self, last_n: int = 200) -> list[str]:
+        if not self.events_log.exists():
+            return []
+        return read_text_tolerant(self.events_log).splitlines()[-last_n:]
+
+    # ---- inbox (markdown, backwards compatibility)
+    def inbox_file(self, scope: str) -> Path:
+        return self.scopes / f"inbox-{scope}.md"
+
+    def inbox_lines(self, scope: str) -> list[str]:
+        p = self.inbox_file(scope)
+        if not p.exists():
+            return []
+        return [ln.rstrip() for ln in read_text_tolerant(p).splitlines() if ln.startswith("- ")]
+
+    def memory_file(self, scope: str) -> Path:
+        return self.scopes / f"{scope}.md"

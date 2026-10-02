@@ -1,4 +1,4 @@
-"""Spec v3-08 defense designer: planner (dfpilot/planners/defense.py), feature CLI (dfpilot/features/defense.py),
+"""Spec v3-08 defense designer: planner (df_llm_helper/planners/defense.py), feature CLI (df_llm_helper/features/defense.py),
 Lua status script (lua/pilot_defense.lua). All fixtures under fixtures/v3/defense/ are SYNTHETIC (see README.txt)."""
 from __future__ import annotations
 
@@ -10,11 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from dfpilot import cli
-from dfpilot.client import MockClient
-from dfpilot.features import defense as feat
-from dfpilot.planners.blueprint import validate_blueprint
-from dfpilot.planners.defense import design_defense, parse_terrain, trap_kinds
+from df_llm_helper import cli
+from df_llm_helper.client import MockClient
+from df_llm_helper.features import defense as feat
+from df_llm_helper.planners.blueprint import validate_blueprint
+from df_llm_helper.planners.defense import design_defense, parse_terrain, trap_kinds
 
 ROOT = Path(__file__).resolve().parent.parent
 FIX = ROOT / "fixtures" / "v3" / "defense"
@@ -285,14 +285,14 @@ def test_gamelog_stats(capsys):
 
 
 def test_feature_defaults_in_config():
-    from dfpilot.config import load_config
+    from df_llm_helper.config import load_config
     cfg = load_config("/nonexistent/config.yaml")
     assert cfg.get("defense.lane_len") == 20 and cfg.get("defense.reload_warn_pct") == 70
     assert cfg.get("defense.trap_mix") == {"Ts": 0.6, "Tw": 0.3, "Tc": 0.1}
 
 
 def test_lua_lint_clean():
-    from dfpilot.lint import lint_file
+    from df_llm_helper.lint import lint_file
     assert lint_file(ROOT / "lua" / "pilot_defense.lua") == []
 
 

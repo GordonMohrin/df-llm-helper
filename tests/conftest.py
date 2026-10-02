@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from dfpilot.client import MAX_REPORT_ID_CMD, SERVICES_CMD, MockClient
-from dfpilot.clock import FakeClock
-from dfpilot.config import load_config
-from dfpilot.store import Store
+from df_llm_helper.client import MAX_REPORT_ID_CMD, SERVICES_CMD, MockClient
+from df_llm_helper.clock import FakeClock
+from df_llm_helper.config import load_config
+from df_llm_helper.store import Store
 
 HERE = Path(__file__).resolve().parent
 HOME = HERE.parent

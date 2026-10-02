@@ -1,7 +1,7 @@
 -- claude/pilot_wd mode <work_detail> <EverybodyDoesThis|OnlySelectedDoesThis|NobodyDoesThis> [--apply]
--- dfpilot, runbook rb02_grabstau. NOT TESTED LIVE (checked in the cloud against a mock DFHack only).
+-- df-llm-helper, runbook rb02_grabstau. NOT TESTED LIVE (checked in the cloud against a mock DFHack only).
 -- Corresponds in the game to: labor -> work details -> group -> mode. Without --apply display only (dry run).
--- Installation: copy to hack/scripts/claude/pilot_wd.lua (see dfpilot/INTEGRATION.md).
+-- Installation: copy to hack/scripts/claude/pilot_wd.lua (see docs/INTEGRATION.md).
 local util = reqscript('claude/util')
 if not util.require_fort() then return end
 
