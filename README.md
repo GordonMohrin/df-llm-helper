@@ -1,14 +1,64 @@
 # df-llm-helper
 
-**Claude ran a real game of Dwarf Fortress for 10 hours: from 7 dwarves to 158 citizens over seven in-game years, with cheat commands blocked in code.** This repo is the layer that made it possible.
+df-llm-helper sits between an LLM agent (e.g. Claude) and **Dwarf Fortress** running with **DFHack**. It reads the game state in one batched call and turns it into a short report of only what changed, runs routine fortress maintenance (supplies, moods, caravans, sieges, digging safety…) with deterministic rules instead of LLM turns, keeps known fixes as runbooks and a searchable knowledge base, slows the game down when the agent stops checking in, and blocks cheat commands in code. The LLM keeps the decisions; the helper does the watching. The result: far fewer tokens per check and faster reactions in the game.
 
 ![Claude (left) running the fortress Windrings in Dwarf Fortress (right): Year 118, 174 citizens, Metropolis rank](docs/img/claude-playing-windrings.png)
 
-<sub>Left: Claude as orchestrator, reporting what its sub-agents did (new dig designations, living quarters, storage hall). Right: the same fortress, still alive in Year 118 with 174 citizens and Metropolis rank.</sub>
+<sub>Left: Claude as orchestrator, reporting what its sub-agents did (new dig designations, living quarters, storage hall). Right: the fortress Windrings, embarked with 7 dwarves in Year 100, still alive in Year 118 with 174 citizens and Metropolis rank (DF 53.16 + DFHack, 2026).</sub>
 
-![Run 5 "Windrings": citizens over real time, 7 at embark to 158 in Year 107](docs/img/run5-population.svg)
+## Let your LLM play: start a new game
 
-<sub>The first 10 hours of that fortress, real data from `fixtures/run5_live/metrics_run5.csv` (DF 53.16 + DFHack, 2026).</sub>
+You need Dwarf Fortress (Steam, 53.x) with DFHack, Python 3 and an LLM agent that can run shell commands **on the same machine as the game** (e.g. Claude Code), because the helper talks to the game through `dfhack-run`. Developed and played on Windows with Git Bash.
+
+**1. Install the helper (once)**
+
+```
+git clone https://github.com/GordonMohrin/df-llm-helper && cd df-llm-helper
+python -m df_llm_helper.selftest --quick      # must end with "Self-test GREEN"
+cp config.yaml.example config.yaml            # set dfhack_run and paths.gamelog to your DF install
+```
+
+Copy `lua/pilot_*.lua` and `lua/claude/*.lua` to `<Dwarf Fortress>/hack/scripts/claude/` and set the environment variable `DF_LLM_HELPER_HOME` system-wide to a shared folder (e.g. `C:\df-llm-helper\runtime`), so the game and the helper find the same flags and logs. Details: `COMPANION.md`.
+
+**2. Create a world and embark**
+
+Do this yourself in the game as usual. Prefer a site without an aquifer (the embark info panel shows it). Experimental: `tools/embark/` contains DFHack scripts that let the agent read and click the embark menus itself.
+
+**3. Start the background processes**
+
+```
+python -m df_llm_helper waechter --loop                 # real-time watcher, keep it running
+python -m df_llm_helper wake --loop --interval 10       # wake-up filter: one line per event that needs a decision
+```
+
+**4. Give the agent this start prompt**
+
+```
+You are the orchestrator of a Dwarf Fortress fortress, played through DFHack with df-llm-helper.
+Working folder: <path>/df-llm-helper. Read README.md and docs/MANUAL.md once, then work through the helper.
+
+Rules
+- Fair play: only what a human player could do through the UI. Never createitem, dig-now,
+  build-now, reveal or direct unit/item edits. The linter refuses them; do not work around it.
+- Every 5 minutes: python -m df_llm_helper check. Act on what it reports.
+- React to every WAKE line from the wake filter.
+- When something looks wrong: python -m df_llm_helper runbook diagnose, then
+  runbook run <id> --dry-run before the real run. Knowledge: kb search "<symptom>".
+- Delegate bigger jobs to sub-agents, with the prompt from
+  python -m df_llm_helper agents prompt <scope> --task "<one sentence>" (pass it unchanged).
+- After every load or restart of the game: python -m df_llm_helper reboot.
+- Time-lapse only via python -m df_llm_helper tempo on (it refuses while a guard blocker is active).
+
+Start
+1. This is a new fortress. The fortress values in lua/claude/config.lua are from the example
+   fortress Windrings: run claude/config, set every value from the checklist at the top of
+   config.lua for this map, then restart the permanent jobs as described there.
+2. Plan the first year (shelter, food, drinks, workshops) and report to me in at most 10 lines.
+```
+
+**5. First time: run the live checklist**
+
+Parts of the Lua side are still *live-untested*. Before the first real fortress, let the agent go through `docs/INTEGRATION.md` once; it compares each step with the expected answer.
 
 ## Why this exists
 
@@ -162,15 +212,6 @@ Every command is `python -m df_llm_helper <command>`; add `--mock fixtures/run5`
 | `replay` | Replays recorded scenarios and checks the results |
 
 Every rule has a `max_per_hour`; a rule that fires too often switches itself off and raises a warning. Full reference: `docs/MANUAL.md`, `docs/OVERVIEW.md`.
-
-## Against a real game
-
-1. `cp config.yaml.example config.yaml`, set `dfhack_run` and `paths.gamelog`; fortress-specific values (squad name, water boxes, rally point) go there too.
-2. Copy `lua/pilot_*.lua` and `lua/claude/*.lua` to `<Dwarf Fortress>/hack/scripts/claude/` and set the environment variable `DF_LLM_HELPER_HOME` (shared folder for flags/logs) – see **`COMPANION.md`**.
-3. Adjust the fortress-specific values in `lua/claude/config.lua` after embark (example values ship from the original fortress).
-4. Orchestrator loop: `python -m df_llm_helper check` every 5 minutes, `python -m df_llm_helper waechter --loop` as a background process, `python -m df_llm_helper wake --loop` as the wake-up filter. Details: `docs/MANUAL.md`, start prompt for agents: `docs/AGENT-PROMPT.md`.
-
-**Bring your own agent.** This repo is the helper layer, not the orchestrator. Any LLM agent that can run shell commands can drive it; Run 5 used Claude as orchestrator with scope sub-agents (military, trade, construction, …).
 
 ## Fair play
 
