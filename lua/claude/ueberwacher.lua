@@ -11,7 +11,7 @@ local cmd = a[1] or 'once'
 local function write_flag(name, text)
   local f = io.open(TOOLS .. name, 'w'); if f then f:write(text) f:close() end
 end
-local function name_of(u) return (dfhack.df2utf(dfhack.units.getReadableName(u))):sub(1, 24) end
+local function name_of(u) return util.cut(dfhack.df2utf(dfhack.units.getReadableName(u)), 24) end
 
 local function check()
   if not util.fort_loaded() then return end

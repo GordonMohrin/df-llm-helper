@@ -15,7 +15,7 @@ local cmd = a[1] or 'status'
 local G = rawget(_G, 'CLAUDE_MIGRANTEN')
 if not G then G = { known = nil, waves = 0 } rawset(_G, 'CLAUDE_MIGRANTEN', G) end
 
-local function nm(u) return (dfhack.df2utf(dfhack.units.getReadableName(u))):sub(1, 40) end
+local function nm(u) return util.cut(dfhack.df2utf(dfhack.units.getReadableName(u)), 40) end
 local function log(s)
   local f = io.open(TOOLS .. 'out/migranten.log', 'a')
   if f then f:write(os.date('%H:%M:%S') .. ' ' .. s .. '\n') f:close() end

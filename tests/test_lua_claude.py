@@ -46,3 +46,54 @@ def test_handel_scan_finds_all_occurrences(tmp_path):
     out, _ = run("handel", "scan", "ABC", tmp_path=tmp_path, setup="MOCK_SCREEN = { 'abc def abc', 'xx' }")
     j = one_json(out)
     assert j["ok"] and [(h["x"], h["y"]) for h in j["hits"]] == [(0, 0), (8, 0)]
+
+
+# ---------------------------------------------------------------- BUG-400 / BUG-401 / BUG-417 (util.emit)
+def run_snippet(code, tmp_path, env=None):
+    """Run a Lua snippet that can reqscript('claude/util') etc. from lua/claude."""
+    f = tmp_path / "snippet.lua"
+    f.write_text(code, encoding="utf-8")
+    e = {"MOCK_SCRIPT_DIR": str(CLAUDE)}
+    e.update(env or {})
+    home = tmp_path / "home"
+    (home / "tools" / "out").mkdir(parents=True, exist_ok=True)
+    r = subprocess.run([LUA, str(MOCK), str(f)], capture_output=True, timeout=10,
+                       env={"PATH": "/usr/bin:/bin", "DF_LLM_HELPER_HOME": str(home), **e})
+    assert r.returncode == 0, r.stderr.decode("utf-8", "replace")
+    return r.stdout.decode("utf-8")
+
+
+def test_mock_reproduces_the_decimal_comma_of_the_live_encoder(tmp_path):
+    out = run_snippet("print(require('json').encode({ fps = 250.0 }))", tmp_path, {"MOCK_DECIMAL_COMMA": "1"})
+    assert out.strip() == '{"fps":250,0}'
+
+
+def test_emit_prints_floats_with_dot_under_german_locale(tmp_path):
+    code = ("local util = reqscript('claude/util')\n"
+            "util.emit({ fps = 250.0, g = 3.9375, list = { 1.5, 2, 0.25 }, n = 7, inf = math.huge })\n")
+    out = run_snippet(code, tmp_path, {"MOCK_DECIMAL_COMMA": "1"})
+    j = json.loads(out)
+    assert j == {"fps": 250.0, "g": 3.9375, "list": [1.5, 2, 0.25], "n": 7, "inf": None}
+    assert isinstance(j["n"], int)
+
+
+def test_emit_converts_cp437_once_and_leaves_utf8_alone(tmp_path):
+    # unit name as DF stores it (CP437: o-grave = 0x95) and as mil/gefahr/migranten already convert it (df2utf)
+    code = ("local util = reqscript('claude/util')\n"
+            "local raw = 'Rig\\149thrith \"Craftedbell\"'\n"
+            "local t = { raw = raw, pre = dfhack.df2utf(raw), text = 'a\\nb\\tc' }\n"
+            "util.emit(t)\n"
+            "util.emit(t)\n")                       # emitting the same table twice must not convert twice
+    lines = run_snippet(code, tmp_path).splitlines()
+    for line in lines:
+        j = json.loads(line)
+        assert j["raw"] == j["pre"] == 'Rigòthrith "Craftedbell"'
+        assert j["text"] == "a\nb\tc"               # BUG-417: no CP437 picture glyphs for control characters
+
+
+def test_cut_never_splits_a_utf8_character(tmp_path):
+    code = ("local util = reqscript('claude/util')\n"
+            "local s = dfhack.df2utf('Stinth\\132d \\149nulfeb')\n"   # 'Stinthäd ònulfeb'
+            "for n = 1, #s do assert(utf8.len(util.cut(s, n)), n) end\n"
+            "print(util.cut(s, 7), util.cut('Stinth\\132d', 7) == 'Stinth\\132')\n")
+    assert run_snippet(code, tmp_path).strip() == "Stinth\ttrue"

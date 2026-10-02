@@ -1,11 +1,11 @@
 -- Generic DFHack mock for the companion scripts in lua/claude/ (the pilot_* scripts use dfhack_mock.lua / grid_mock.lua).
 -- Usage: lua5.4 tests/lua_mock/claude_mock.lua <script.lua> [args...]
---   reqscript('claude/<name>') loads lua/claude/<name>.lua as a module (dfhack_flags.module = true, own environment).
+--   reqscript('claude/<name>') loads <dir of script, or MOCK_SCRIPT_DIR>/<name>.lua as a module (dfhack_flags.module = true, own environment).
 --   `df` auto-vivifies: unknown fields are empty, callable tables (calling one returns nil), so scripts load without
 --   a game. MOCK_SETUP = path to a Lua file run after the base setup (defines units, screen text, globals ...).
 --   MOCK_DECIMAL_COMMA=1 emulates a German LC_NUMERIC in the json encoder (floats printed as 250,0 like the live game).
 --   dfhack.df2utf converts CP437 -> UTF-8 like the real one (incl. control characters -> glyphs, e.g. \n -> U+25D9).
-local SCRIPT_DIR = (arg[1] or ''):match('^(.*)/[^/]*$') or '.'
+local SCRIPT_DIR = os.getenv('MOCK_SCRIPT_DIR') or (arg[1] or ''):match('^(.*)/[^/]*$') or '.'
 
 ------------------------------------------------------------------ auto-vivifying proxy for df
 local auto_mt = {}

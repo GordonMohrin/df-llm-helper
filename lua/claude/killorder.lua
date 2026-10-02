@@ -132,7 +132,7 @@ local function status()
   print('Ziele im Inneren (sichtbar):', #t)
   for _, x in ipairs(t) do
     local u = x.unit
-    print(string.format('  %d %s (%d,%d,%d) %s', u.id, dfhack.df2utf(dfhack.units.getReadableName(u)):sub(1, 40), u.pos.x, u.pos.y, u.pos.z, x.where))
+    print(string.format('  %d %s (%d,%d,%d) %s', u.id, util.cut(dfhack.df2utf(dfhack.units.getReadableName(u)), 40), u.pos.x, u.pos.y, u.pos.z, x.where))
   end
   local w = rawget(_G, 'CLAUDE_KILLWATCH')
   print('Wachjob:', w and w.active and ('aktiv seit ' .. w.since) or 'aus')
@@ -210,7 +210,7 @@ end
 print('Ziele im Inneren:', #targets, opt.dry and '(Trockenlauf)' or '')
 for _, x in ipairs(targets) do
   local u = x.unit
-  print(string.format('  %d %s (%d,%d,%d) [%s]%s', u.id, dfhack.df2utf(dfhack.units.getReadableName(u)):sub(1, 40), u.pos.x, u.pos.y, u.pos.z, x.where, x.sim and ' SIMULIERT' or ''))
+  print(string.format('  %d %s (%d,%d,%d) [%s]%s', u.id, util.cut(dfhack.df2utf(dfhack.units.getReadableName(u)), 40), u.pos.x, u.pos.y, u.pos.z, x.where, x.sim and ' SIMULIERT' or ''))
 end
 if opt.dry then
   for _, s in ipairs(fort_squads()) do
@@ -227,7 +227,7 @@ if #targets > 0 then
   local n = apply(targets)
   log(string.format('apply %d Ziele, %d Trupps', #targets, n))
   local first = targets[1].unit
-  say(string.format('ALARM innen: %d Eindringlinge (%s) - Trupps greifen an', #targets, dfhack.df2utf(dfhack.units.getReadableName(first)):sub(1, 24)), 5)
+  say(string.format('ALARM innen: %d Eindringlinge (%s) - Trupps greifen an', #targets, util.cut(dfhack.df2utf(dfhack.units.getReadableName(first)), 24)), 5)
 end
 if opt.watch then
   rawset(_G, 'CLAUDE_KILLWATCH', { active = true, since = os.date('%H:%M:%S'), ticks = 0, clean = 0 })

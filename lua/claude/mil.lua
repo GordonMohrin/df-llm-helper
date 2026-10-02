@@ -53,7 +53,7 @@ local function log(s)
   local f = io.open(LOG, 'a')
   if f then f:write(os.date('%H:%M:%S ') .. cmd .. ' ' .. s .. '\n') f:close() end
 end
-local function nm(u) return dfhack.df2utf(dfhack.units.getReadableName(u)):sub(1, 40) end
+local function nm(u) return util.cut(dfhack.df2utf(dfhack.units.getReadableName(u)), 40) end
 local function out(t) util.emit(t) end
 
 local function squads()

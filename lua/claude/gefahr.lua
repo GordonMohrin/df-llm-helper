@@ -131,7 +131,7 @@ local function eval_unit(u, cits, cfg, o)
     end
     return false
   end
-  local e = { id = u.id, name = dfhack.df2utf(dfhack.units.getReadableName(u)):sub(1, 40), race = ri.id, klasse = kl, grund = grund,
+  local e = { id = u.id, name = util.cut(dfhack.df2utf(dfhack.units.getReadableName(u)), 40), race = ri.id, klasse = kl, grund = grund,
     x = pos.x, y = pos.y, z = pos.z, dist = cheb, alarm = false, slow = false, zone = nil, reach = nil }
   local hidden = o.hidden
   if hidden == nil then hidden = util.is_hidden(pos.x, pos.y, pos.z) end

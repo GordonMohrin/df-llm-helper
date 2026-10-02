@@ -11,17 +11,71 @@ function home()
   return dfhack.getDFPath() .. '/df-llm-helper-runtime'
 end
 
-local function to_utf8(t)
-  for k, v in pairs(t) do
-    local ty = type(v)
-    if ty == 'string' then t[k] = dfhack.df2utf(v)
-    elseif ty == 'table' then to_utf8(v) end
+-- DF strings are CP437; only runs of bytes >= 0x80 need converting. Pure ASCII stays as is, so control characters
+-- (\n, \t) are not turned into CP437 picture glyphs (BUG-417). A string that already is valid UTF-8 with multi-byte
+-- characters (a caller converted it with df2utf itself) is left alone instead of being encoded twice (BUG-401).
+function to_utf8(s)
+  if type(s) ~= 'string' or not s:find('[\128-\255]') then return s end
+  if utf8.len(s) then return s end
+  return (s:gsub('[\128-\255]+', dfhack.df2utf))
+end
+
+-- Cut a string to at most n bytes. CP437 strings (1 byte per character) are cut as bytes; a valid UTF-8 string is
+-- cut at a character boundary so no multi-byte character is split (invalid UTF-8 in the JSON, BUG-401).
+function cut(s, n)
+  if type(s) ~= 'string' or #s <= n then return s end
+  local c = n
+  if s:find('[\128-\255]') and utf8.len(s) then
+    while c > 0 do
+      local b = s:byte(c + 1)
+      if b < 0x80 or b >= 0xC0 then break end   -- the byte after the cut starts a character
+      c = c - 1
+    end
   end
+  return s:sub(1, c)
+end
+
+-- Locale-independent number text: DF runs with the Windows locale, Lua/sprintf would print 250,0 (BUG-400).
+local function num_text(v)
+  if v ~= v or v == math.huge or v == -math.huge then return 'null' end
+  local s = string.format('%.10g', v):gsub(',', '.')
+  if not s:find('[%.eE]') then s = s .. '.0' end
+  return s
+end
+
+-- Deep copy for the encoder: strings converted, non-integer numbers replaced by placeholders that are swapped for
+-- locale-independent number text after encoding (the caller's table is not modified).
+local function prepare(v, nums, seen)
+  local ty = type(v)
+  if ty == 'string' then return to_utf8(v) end
+  if ty == 'number' then
+    if math.type(v) == 'integer' then return v end
+    nums[#nums + 1] = num_text(v)
+    return '#~NUM' .. #nums .. '~#'
+  end
+  if ty ~= 'table' then return v end
+  if seen[v] then return '<cycle>' end
+  seen[v] = true
+  local out = {}
+  for k, x in pairs(v) do out[to_utf8(k)] = prepare(x, nums, seen) end
+  seen[v] = nil
+  local mt = getmetatable(v)
+  if type(mt) == 'table' then setmetatable(out, mt) end
+  return out
+end
+
+-- JSON text of a table with UTF-8 strings and dot decimals.
+function encode(t)
+  local nums = {}
+  local s = json.encode(prepare(t, nums, {}))
+  if #nums > 0 then
+    s = s:gsub('"#~NUM(%d+)~#"', function(i) return nums[tonumber(i)] end)
+  end
+  return s
 end
 
 function emit(t)
-  to_utf8(t)
-  print(json.encode(t))
+  print(encode(t))
 end
 
 function fort_loaded()

@@ -336,7 +336,7 @@ local function alert_check()
         if cfg.in_alert_zone(u, cits) then enemies = enemies + 1 end
         if cfg.in_slowmo_zone(u) and not util.unit_hidden(u) then
           slow = slow + 1
-          if #slow_list < 8 then slow_list[#slow_list + 1] = string.format('%d %s (%d,%d,%d) d=%d', u.id, dfhack.df2utf(dfhack.units.getReadableName(u)):sub(1, 30), u.pos.x, u.pos.y, u.pos.z, cfg.cheb(u)) end
+          if #slow_list < 8 then slow_list[#slow_list + 1] = string.format('%d %s (%d,%d,%d) d=%d', u.id, util.cut(dfhack.df2utf(dfhack.units.getReadableName(u)), 30), u.pos.x, u.pos.y, u.pos.z, cfg.cheb(u)) end
         end
       end
     end
