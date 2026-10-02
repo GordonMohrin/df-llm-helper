@@ -300,11 +300,11 @@ class RemoteCare:
             self.store.set("remote_care.escalated", esc)
         # ---- rule 5: fish yield
         fl = self.fish_line(obs, now, dry)
+        if not out and not fl.startswith("Proposal"):   # BUG-215: the info-only fish line no longer hides 'Remote ok'
+            out.append(f"Remote ok ({len(self.taken())} labors held back)")
         if fl:
             out.append(fl)
             show = show or fl.startswith("Proposal")
-        if not out:
-            out.append(f"Remote ok ({len(self.taken())} labors held back)")
         return out[:10], show
 
     def fish_line(self, obs: RemoteObs, now: float, dry: bool) -> str:
@@ -319,13 +319,13 @@ class RemoteCare:
         fishers = sum(1 for u in obs.citizens if "FISH" in (u.get("labors") or []))
         old = [p for p in ser if now - p[0] >= 3600]
         if not old or not fishers:
-            return f"Fish {obs.fish}"
+            return f"Fish catch counter {obs.fish} ({fishers} fishers)"
         base = old[-1]
         rate = max(0, obs.fish - base[1]) * 3600.0 / max(1.0, now - base[0])
         if rate < float(self.cfg["fish_min_per_hour"]):
             return (f"Proposal: fishing yields {rate:.1f} fish/h (< {self.cfg['fish_min_per_hour']}) with {fishers} "
                     f"fishers - switch FISH off (labor menu)")
-        return f"Fish {obs.fish} (+{rate:.1f}/h)"
+        return f"Fish catch counter {obs.fish} (+{rate:.1f}/h, {fishers} fishers)"
 
     def restore_all(self, *, dry: bool = False) -> list[str]:
         now = self.clock.now().epoch
@@ -343,7 +343,8 @@ class RemoteCare:
             if _need(u, self.cfg) < int(self.cfg["hunger_warn"]) and u.get("job") not in self.cfg["long_jobs"]:
                 continue
             dist, _ = nearest_supply(u, obs.supplies, int(self.cfg["z_penalty"]))
-            lines.append(f"{u.get('id')} {short_name(u.get('name'))}: hunger {u.get('hunger')}, thirst "
+            kid = " (child: never touched)" if u.get("child") else ""          # BUG-215
+            lines.append(f"{u.get('id')} {short_name(u.get('name'))}{kid}: hunger {u.get('hunger')}, thirst "
                          f"{u.get('thirst')}, job {u.get('job')}, distance {dist}")
         for lab, size in (self.cfg["labor_pool"] or {}).items():
             n = sum(1 for u in obs.citizens if lab in (u.get("labors") or []) and not u.get("squad"))

@@ -11,6 +11,8 @@ hunger/thirst > crit_* -> top-5 list.
 """
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 
 from .anomaly import cancel_loops
@@ -118,6 +120,25 @@ def evaluate(obs: CareObs, cfg: dict, *, water_cancels: int = 0) -> dict:
             "patients": patients}
 
 
+def short_name(name, n: int = 28) -> str:
+    """'Aban Stelidkol "Washedwheels", Mechanic' -> 'Aban Stelidkol' (BUG-215: [:24] cut inside the nickname)."""
+    s = re.sub(r'\s*"[^"]*"', "", str(name or "")).split(",")[0].strip()
+    return s[:n]
+
+
+def crit_line(p: dict, obs: CareObs) -> str:
+    """One actionable line per starving/dehydrated citizen (BUG-215): where, which feeding jobs are open, what to do."""
+    who = f"{p.get('id')} {short_name(p.get('name'))}" + (" (child)" if p.get("child") else "")
+    head = f"!! {who}: hunger {p.get('hunger')}, thirst {p.get('thirst')}"
+    feed = sum(int(v) for k, v in (obs.care_jobs or {}).items() if k in ("GiveFood", "GiveWater"))
+    meals = f", meals {obs.meals}" if obs.meals is not None else ""
+    if p.get("hospital") is not None:
+        return (f"{head}, patient in hospital {p.get('hospital')} ({p.get('job') or 'no job'}): feeding jobs "
+                f"{feed}{meals} -> check FEED_WATER_CIVILIANS labor and food/drink stockpile near the hospital")
+    return (f"{head}, not in a hospital ({p.get('job') or 'no job'}){meals} -> food/drink reachable? "
+            "(python -m df_llm_helper reach)")
+
+
 class CareWatch:
     def __init__(self, client, tools, store, clock, cfg: dict, gamelog_lines=None):
         self.client, self.tools, self.store, self.clock = client, tools, store, clock
@@ -137,9 +158,7 @@ class CareWatch:
         ev = evaluate(obs, self.cfg, water_cancels=self.water_cancels())
         out: list[str] = []
         for p in ev["critical"]:
-            where = "hospital" if p.get("hospital") is not None else "outside"
-            out.append(f"!! {p.get('id')} {str(p.get('name', ''))[:24]}: hunger {p.get('hunger')}, "
-                       f"thirst {p.get('thirst')}, {where}")
+            out.append(crit_line(p, obs))
         if ev["labor_targets"]:
             reason = (f"{len(ev['doctors'])} doctors < {self.cfg['min_doctors']}, {len(ev['patients'])} wounded")
             if not dry and self.store.count_actions("care_labors", "labors", now - 3600) >= \

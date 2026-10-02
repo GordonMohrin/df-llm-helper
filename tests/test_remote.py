@@ -252,7 +252,7 @@ def test_fish_yield_proposal_after_an_hour_without_fish():
     assert show and any(ln.startswith("Proposal: fishing yields 0.0 fish/h") for ln in lines)
     game.s["fish"] = 40
     rc.clock.advance(3700)
-    assert any(ln.startswith("Fish 40 (+") for ln in rc.run()[0])
+    assert any(ln.startswith("Fish catch counter 40 (+") for ln in rc.run()[0])
 
 
 def test_dry_run_writes_nothing():
