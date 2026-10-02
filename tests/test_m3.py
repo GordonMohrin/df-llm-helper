@@ -75,7 +75,7 @@ def test_stats_helpers_and_reader(tmp_path):
 # ---------------------------------------------------------------- F15
 def ok_obs(**kw):
     base = dict(caravan_state="AtDepot", broker_in_depot=False, broker_job="TradeAtDepot", focus="dwarfmode/Default",
-                trade_open=False, stable_s=0, paused=True, last_ok=True, plan_ok=True)
+                trade_open=False, stable_s=0, paused=True, last_ok=True, plan_ok=True, haul_pending=0)
     base.update(kw)
     return TradeObs(**base)
 
@@ -94,6 +94,8 @@ def run_happy(flow, approve=True, steps=30):
         for c in out:
             if c == "claude/advance 0":
                 world["paused"] = True
+            elif c == "claude/advance run":
+                world["paused"] = False
             elif c == "claude/handel broker --live --force-job":
                 world["broker"] = True
             elif c == "claude/handel open --live":
@@ -111,8 +113,9 @@ def test_trade_happy_path():
     cmds = run_happy(f)
     assert f.state == "DONE", f.log
     assert cmds == ["claude/advance 0", "quicksave", "claude/handel prep --live",
-                    "claude/handel broker --live --force-job", "claude/handel plan", "claude/handel mark --live",
-                    "claude/handel open --live", "claude/handel select --dry", "claude/handel select --live",
+                    "claude/handel broker --live --force-job", "claude/advance run", "claude/handel plan",
+                    "claude/handel mark --live", "claude/advance 0", "claude/handel open --live",
+                    "claude/handel select --dry", "claude/handel select --live",
                     "claude/handel confirm --live", "claude/handel accept --live", "claude/handel finish --live",
                     "claude/handel release --live", "claude/advance run"]
 
@@ -120,7 +123,32 @@ def test_trade_happy_path():
 def test_trade_waits_for_approval():
     f = TradeFlow()
     cmds = run_happy(f, approve=False)
-    assert f.state == "REVIEW" and "claude/handel select --live" not in cmds
+    # RETEST 2026-10-02: no approval -> window closed and the game runs on while waiting (WAIT)
+    assert f.state == "WAIT" and "claude/handel select --live" not in cmds
+    assert cmds[-2:] == ["claude/handel finish --live", "claude/advance run"]
+    f.approve()
+    assert f.step(ok_obs(), 1000.0) == ["claude/advance 0", "claude/handel open --live"] and f.state == "OPEN"
+
+
+def test_trade_mark_waits_for_the_haulers():
+    """RETEST 2026-10-02: MARK went on while 50 BringItemToDepot jobs were still open."""
+    f = TradeFlow(state="MARK", since=0.0)
+    assert f.step(ok_obs(broker_in_depot=True, haul_pending=50), 30.0) == [] and f.state == "MARK"
+    assert f.step(ok_obs(broker_in_depot=True, haul_pending=None), 60.0) == [] and f.state == "MARK"
+    assert f.step(ok_obs(broker_in_depot=True, haul_pending=0), 90.0) == ["claude/advance 0",
+                                                                          "claude/handel open --live"]
+    assert f.state == "OPEN" and "goods in the depot" in f.log[-1]
+    g = TradeFlow(state="MARK", since=0.0)
+    assert g.step(ok_obs(haul_pending=3), 601.0)[-1] == "claude/handel open --live"   # no endless wait, no abort
+    assert "3 haul jobs still open" in g.log[-1]
+
+
+def test_trade_obs_counts_haul_jobs():
+    from df_llm_helper.trade_flow import obs_from_status
+    j = {"depots": [{"jobs": ["BringItemToDepot", "BringItemToDepot", "TradeAtDepot"]}]}
+    assert obs_from_status(j).haul_pending == 2
+    assert obs_from_status({"depots": [{"jobs": []}]}).haul_pending == 0
+    assert obs_from_status({}).haul_pending is None
 
 
 def test_trade_window_not_open_aborts_with_rollback():

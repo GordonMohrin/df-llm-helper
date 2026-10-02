@@ -1,6 +1,6 @@
 # BUG-211: `defense stats` counts job-cancel and sparring lines as trap/attack messages, reads the whole 146 MB gamelog on every call (10 s), and prints a false `!!` alarm; `--tail` accepts 0/negative values
 
-- **Status:** reopened (retest 2026-10-02): 'siege'/'thief' still match combat lines ('troll siege engineer', 'goblin thief'): 273 of 283 invasion announcements are false
+- **Status:** fixed in COMMIT (retest 2026-10-02 reopened it: 'siege'/'thief' matched combat lines)
 - **Severity:** S2 (meaningless numbers + false alarm "enemies bypass the lane? check claude/zugaenge")
 - **Area:** `df_llm_helper/features/defense.py` `gamelog_stats` (regexes `\btrap\b`, `caught|cage`, `load`, `siege|ambush|vile force|attack`), `_stats` (`read_text().splitlines()`, `if args.tail:`)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -53,3 +53,9 @@ Defense stats (gamelog): trap events 0 (caught 0, hits 0), reload problems 2, in
 !! invasion without any trap event: enemies bypass the lane? check `claude/zugaenge` (spec v3-01)
 ```
 Matches in the last 8 MB by pattern: `siege` 223 (e.g. "The militia captain hacks the troll siege engineer in the right foot ..."), `thief` 50 ("The spinning rock salt misses the goblin thief!"), real announcements: `an ambush` 7, `snatcher` 2, `vile force` 1. Suggested: anchor on announcement texts only ("A vile force of darkness has arrived", "An ambush!", "Snatcher!  Protect the children!", "... have come") and drop the bare `siege`/`thief` words.
+
+## Fix (retest)
+`_INVASION` now matches only announcement texts: line starts with "A vile force of darkness has arrived", "An ambush",
+"Snatcher!", "Thief!" or "The dead walk", or contains "laying siege to", or ends with "has come!"/"have come". The
+bare words `siege`/`thief` and "are attacking" are gone. Test: `tests/test_bugs_autopilots.py::
+test_bug211_retest_invasion_only_counts_announcements` (the retest's combat lines count 0, six announcements count 6).

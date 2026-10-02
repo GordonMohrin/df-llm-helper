@@ -371,7 +371,8 @@ def cmd_kb(args) -> int:
     from .kb import KB, _slug, format_entry, format_hits, import_markdown, looks_binary, write_jsonl
     cfg = load_config(args.config)
     if args.action == "import":
-        files = list(args.query) + list(args.files or [])
+        # main() copies the positional words into args.files: each file once (RETEST 2026-10-02: every message twice)
+        files = list(dict.fromkeys(list(args.query) + list(args.files or [])))
         if not files:
             print("Usage: python -m df_llm_helper kb import <notes.md> [...]", file=sys.stderr)
             return 2
@@ -933,7 +934,9 @@ def cmd_caravan(args) -> int:
         state, log = cp.step(dry=args.dry_run, game_tick=tick, stable_s=float(args.stable_s))
         for ln in log:
             print("  " + ln)
-        if state in ("idle", "waiting", "skip", "done", "abort", "failed", "review") or args.dry_run:
+        approved = bool(((p.store.get("caravan.state") or {}).get("flow") or {}).get("approved"))
+        if state in ("idle", "waiting", "skip", "done", "abort", "failed", "wait") or args.dry_run or \
+                (state == "review" and not approved):        # an approved REVIEW goes on to the live selection
             break
         p.clock.sleep(float(args.interval))
     print("\n".join(cp.report()))

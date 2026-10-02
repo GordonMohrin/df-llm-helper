@@ -98,9 +98,10 @@ _TRAP = re.compile(r"\btrap\b", re.I)
 # job/announcement lines that mention a trap but are not a trap event (BUG-211: 'X cancels Load cage trap: ...')
 _JOBLINE = re.compile(r"\bcancels\b|suspend|construction|\bLoad\b.*\btrap\b|\btrap\b.*(?:built|completed)", re.I)
 _RELOAD = re.compile(r"\bcancels\b.*\bLoad\b.*\btrap\b", re.I)
-# invasion announcements only; 'X attacks Y but Y jumps away' is sparring, 'siege operator' a profession (BUG-211)
-_INVASION = re.compile(r"vile force|an ambush|\bambush\b|laying siege|siege(?! operator)|snatcher|\bthief\b|"
-                       r"have come|\bare attacking\b", re.I)
+# invasion ANNOUNCEMENTS only, anchored on the announcement texts (BUG-211 retest: bare 'siege'/'thief' matched 273 of
+# 283 combat lines such as 'hacks the troll siege engineer' / 'misses the goblin thief!'); sparring is no attack either
+_INVASION = re.compile(r"^\s*(?:a vile force of darkness has arrived|an ambush\b|(?:a )?snatcher!|(?:a )?thief!|"
+                       r"the dead walk\b)|\blaying siege to\b|\bha(?:s|ve) come!?\s*$", re.I)
 
 
 def gamelog_stats(lines: list[str]) -> dict:

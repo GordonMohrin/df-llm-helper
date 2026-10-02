@@ -29,9 +29,26 @@ def db(tmp_path):
 
 
 # ---------------------------------------------------------------- BUG-200 / 201 / 202 (caravan + trade automaton)
+def delivered(tmp_path, src):
+    """Copy of a recorded caravan replay in which the marked goods have arrived (no BringItemToDepot job left):
+    since the RETEST of 2026-10-02 MARK waits for the haulers, and the recording froze 50 open haul jobs."""
+    out = tmp_path / src.name
+    rows = []
+    for line in src.read_text(encoding="utf-8").splitlines():
+        r = json.loads(line)
+        if r.get("cmd") == "claude/handel status":
+            j = json.loads(r["stdout"])
+            for d in j.get("depots") or []:
+                d["jobs"] = [x for x in d.get("jobs") or [] if x != "BringItemToDepot"]
+            r["stdout"] = json.dumps(j)
+        rows.append(json.dumps(r))
+    out.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return out
+
+
 
 def test_bug200_caravan_done_is_terminal(tmp_path, tools_dir, cfgfile, capsys):
-    base = ["--config", cfgfile, "--replay-file", BUGS / "BUG-200" / "car_replay.jsonl"]
+    base = ["--config", cfgfile, "--replay-file", delivered(tmp_path, BUGS / "BUG-200" / "car_replay.jsonl")]
     rc, out = cli(capsys, *base, "caravan", "--loop", "--interval", "0", "--max-steps", "12")
     assert "Caravan: REVIEW" in out
     rc, out = cli(capsys, *base, "caravan", "--loop", "--interval", "0")
@@ -44,14 +61,14 @@ def test_bug200_caravan_done_is_terminal(tmp_path, tools_dir, cfgfile, capsys):
 
 
 def test_bug201_trade_approve_reaches_caravan(tmp_path, tools_dir, cfgfile, capsys):
-    base = ["--config", cfgfile, "--replay-file", BUGS / "BUG-201" / "car_replay_low.jsonl"]
+    base = ["--config", cfgfile, "--replay-file", delivered(tmp_path, BUGS / "BUG-201" / "car_replay_low.jsonl")]
     cli(capsys, *base, "caravan", "--loop", "--interval", "0", "--max-steps", "12")
     rc, out = cli(capsys, *base, "caravan", "--loop", "--interval", "0")
     assert "NOT approved: Ratio 1.20 < 2.0" in out and "trade approve" in out
     rc, out = cli(capsys, *base, "caravan", "--loop", "--interval", "0")
     assert out.count("NOT approved") == 1                                            # no pile-up
     rc, out = cli(capsys, *base, "trade", "status")
-    assert "Caravan autopilot: REVIEW" in out
+    assert "Caravan autopilot: WAIT" in out                  # window closed while waiting (RETEST 2026-10-02)
     rc, out = cli(capsys, *base, "trade", "approve")
     assert rc == 0 and "approved" in out and "caravan" in out
     rc, out = cli(capsys, *base, "caravan", "--loop", "--interval", "0")
@@ -76,7 +93,7 @@ def test_bug202_trade_flow_leaves_done(tmp_path, tools_dir, cfgfile, capsys):
     assert f2.state == "DONE" and not f2.approved                                    # no stale approval
     # cli: DONE with the caravan still at the depot says why nothing happens
     db(tmp_path).set("trade.flow", asdict(TradeFlow(state="DONE", log=["RESUME -> DONE"])))
-    base = ["--config", cfgfile, "--replay-file", BUGS / "BUG-200" / "car_replay.jsonl"]
+    base = ["--config", cfgfile, "--replay-file", delivered(tmp_path, BUGS / "BUG-200" / "car_replay.jsonl")]
     rc, out = cli(capsys, *base, "trade", "step")
     assert "State now: DONE" in out and "trade reset" in out
 
@@ -87,7 +104,7 @@ def test_bug203_dry_runs_write_no_warnings(tmp_path, tools_dir, cfgfile, capsys)
     from conftest import FIX
     cli(capsys, "--config", cfgfile, "--mock", FIX, "siege", "--dry-run")
     cli(capsys, "--config", cfgfile, "--mock", FIX, "mood", "reserve", "--dry-run")
-    base = ["--config", cfgfile, "--replay-file", BUGS / "BUG-201" / "car_replay_low.jsonl"]
+    base = ["--config", cfgfile, "--replay-file", delivered(tmp_path, BUGS / "BUG-201" / "car_replay_low.jsonl")]
     for _ in range(3):
         cli(capsys, *base, "caravan", "--dry-run", "--loop", "--interval", "0")
     assert db(tmp_path).take_warnings() == []
@@ -479,3 +496,16 @@ def test_bug220_perf_sample_says_paused():
     r = SampleResult(outlier_s=1.5)
     r.samples = [Sample(float(i), 0.1, 21609, True) for i in range(5)]
     assert "game PAUSED" in r.line()
+
+
+def test_bug211_retest_invasion_only_counts_announcements():
+    from df_llm_helper.features.defense import gamelog_stats
+    combat = ["The militia captain hacks the troll siege engineer in the right foot and the injured part is cloven asunder!",
+              "The spinning rock salt misses the goblin thief!",
+              "The goblin thief stabs the hammerdwarf in the left hand!",
+              "The siege operator cancels Load Catapult: Needs stones."]
+    real = ["A vile force of darkness has arrived!", "An ambush!  Curse them!", "Snatcher!  Protect the children!",
+            "Thief!  Protect the hoard from skulking filth!", "The forgotten beast Ozod has come!",
+            "The enemy have come and are laying siege to the fortress."]
+    assert gamelog_stats(combat)["attack_lines"] == 0
+    assert gamelog_stats(real)["attack_lines"] == len(real)

@@ -36,7 +36,7 @@ With `--mock fixtures/run5` everything runs against the real sample responses in
 | `memory compact <scope\|all> [--dry-run]`, `memory restore <scope>` | condense memory, original kept in the archive | `militaer.md: 16738 -> 5687 bytes` |
 | `lint <paths…>` | fair-play linter for Lua (30 rules, exceptions via the register) | `mil.lua:297: L08 …` |
 | `budget`, `metrics [--out file.csv]` | token consumption per scope (daily budget), KPI time series in the format of metrics.csv | |
-| `trade step [--dry-run] / status / approve / reset` | caravan as a state machine (pause … finish) | `State now: REVIEW` |
+| `trade step [--dry-run] / status / approve / reset` | caravan as a state machine (pause … finish; waits for the haulers in MARK, closes the window while waiting for approval in WAIT) | `State now: REVIEW` |
 | `overlay [--send]` | ≤ 3 lines for the player in the game (`claude/schau say`), without repetition | |
 | `plan trade|dig|armor|supply|blueprint …` | planners as pure functions (see `PLANNERS.md`) | |
 

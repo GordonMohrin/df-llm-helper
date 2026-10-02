@@ -312,17 +312,17 @@ def approve_review(store) -> tuple[bool, str]:
     stale approval can never skip the review of a later trade."""
     done = []
     st = store.get("caravan.state") or {}
-    if (st.get("flow") or {}).get("state") == "REVIEW":
+    if (st.get("flow") or {}).get("state") in ("REVIEW", "WAIT"):
         st["flow"]["approved"] = True
         store.set("caravan.state", st)
         done.append("caravan")
     tf = store.get("trade.flow") or {}
-    if tf.get("state") == "REVIEW":
+    if tf.get("state") in ("REVIEW", "WAIT"):
         tf["approved"] = True
         store.set("trade.flow", tf)
         done.append("trade")
     if not done:
         states = f"caravan {(st.get('flow') or {}).get('state', 'IDLE')}, trade {tf.get('state', 'IDLE')}"
-        return False, f"Refused: no trade waits for an approval (state {states}); approve only in REVIEW"
-    return True, ("Live selection approved (state REVIEW: " + ", ".join(done) + ") - next: "
+        return False, f"Refused: no trade waits for an approval (state {states}); approve only in REVIEW/WAIT"
+    return True, ("Live selection approved (REVIEW/WAIT: " + ", ".join(done) + ") - next: "
                   + ("python -m df_llm_helper caravan --loop" if "caravan" in done else "python -m df_llm_helper trade step"))

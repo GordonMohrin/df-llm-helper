@@ -210,6 +210,7 @@ def test_bug301_kb_bus_dashboard_brief_arguments(env, capsys):
     (tmp / "empty.md").write_text("", encoding="utf-8")
     rc, out, err = run(capsys, *base, "kb", "import", tmp / "binary.md", tmp / "empty.md")
     assert rc == 2 and "not a text file" in err and "nothing written" in out
+    assert err.count("not a text file") == 1 and out.count("nothing written") == 1   # RETEST: each message once
     assert not list((tmp / "data" / "kb").glob("imported_*"))
     rc, _, err = run(capsys, *base, "bus", "post", "", "--from", "a", "--to", "b")
     assert rc == 2 and "empty" in err

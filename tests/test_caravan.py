@@ -82,7 +82,7 @@ class World:
                                                  if self.caravan == "Leaving" else 1500}]
         return json.dumps({"caravans": cars, "broker": {"in_depot": self.broker, "job": "TradeAtDepot"},
                            "focus": ["dwarfmode/Trade/Default" if self.open else "dwarfmode/Default"],
-                           "trade_ui": {"open": self.open}})
+                           "trade_ui": {"open": self.open}, "depots": [{"jobs": []}]})
 
     def handle(self, mc):
         mc.set("claude/handel status", self.status)

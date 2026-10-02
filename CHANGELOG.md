@@ -1,5 +1,13 @@
 # CHANGELOG df-llm-helper
 
+## Retest fixes (2026-10-02)
+- BUG-221: the trade automaton runs the game while the broker walks and the haulers carry, and waits in MARK until
+  the depot has no `BringItemToDepot` job left (at most 600 s, then it opens with what is there).
+- BUG-222: without an immediate approval the trade window is closed and the game runs on (new state WAIT);
+  `trade approve` works in REVIEW and WAIT and reopens the window.
+- BUG-211: `defense stats` counts only invasion announcements, no combat lines with "siege engineer"/"goblin thief".
+- BUG-331: `kb import` reports each file once.
+
 ## Decisions the player delegated (2026-10-02)
 - BUG-104: opening the live `state.db` removes the snapshot/kpi rows old `--mock` runs wrote into it. Marker: the
   fixture identity (`data/mock_fingerprints.json`, kept in sync with `fixtures/run5` by a test) AND a contradiction with
