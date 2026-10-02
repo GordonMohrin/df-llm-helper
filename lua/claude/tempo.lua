@@ -1,5 +1,5 @@
 --@ module = true
--- claude/tempo [status|on|off|load|suspend|resume|rate]   (run 3, scope infra, 30.09.2026 - the player: "Let's use timestream.")
+-- claude/tempo [status|on|off|load|suspend|resume|say]   (run 3, scope infra, 30.09.2026 - the player: "Let's use timestream.")
 -- Owner of DFHack's `timestream` (convenience tool "Fix FPS death": several calendar ticks per simulation frame, action counters are
 -- counted proportionally; hunger/thirst/age/seasons stay the same per GAME time, only fewer frames per real time). See SCHNELLER-run3.md.
 --

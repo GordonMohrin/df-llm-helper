@@ -33,8 +33,7 @@ local FLAGS_A = { 'FEATURE_BEAST', 'MEGABEAST', 'SEMIMEGABEAST', 'TITAN', 'DEMON
   'NIGHT_CREATURE', 'NIGHT_CREATURE_HUNTER', 'NIGHT_CREATURE_BOGEYMAN', 'NIGHT_CREATURE_NIGHTMARE', 'NIGHT_CREATURE_EXPERIMENTER' }
 
 local function log(s)
-  local f = io.open(LOG, 'a')
-  if f then f:write(os.date('%H:%M:%S ') .. s .. '\n') f:close() end
+  util.append_log(LOG, os.date('%H:%M:%S ') .. s)
 end
 local function write_file(path, text)
   local f = io.open(path, 'w')

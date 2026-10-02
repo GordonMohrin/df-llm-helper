@@ -3,7 +3,8 @@
 -- watchdog, report, mil, ueberwacher, arbeit, raster, killorder, gefahr, tempo ... read them via `reqscript('claude/config')`.
 -- New map/new run: adjust ONLY this file (reqscript reloads on file change; running jobs fetch
 -- the values via config.X on every call, a restart of the jobs is only needed when interval values change).
--- Display: `claude/config` (values, UNSET list + aquifer scan of the DISCOVERED tiles), `claude/config aquifer`.
+-- Display: `claude/config` (values, UNSET list + aquifer scan of the DISCOVERED tiles in FORT_BOX, SURFACE_Z-40..SURFACE_Z),
+-- `claude/config aquifer [x1 y1 x2 y2 z1 z2]` (only the aquifer scan, optionally of another box, e.g. a new tunnel).
 --
 -- ====================================================================================================================
 -- RUN 5 - as of 01.10.2026: ALL map-specific values are NEUTRALIZED (nil). Run 4 state (Canyonsyrups, world tile (4,10)):
@@ -310,6 +311,30 @@ if dfhack_flags and dfhack_flags.module then return end
 
 -- Called as a command: display values
 local util = reqscript('claude/util')
+local ca = { ... }
+if ca[1] == 'aquifer' then
+  -- aquifer scan of a box (default FORT_BOX x SURFACE_Z-40..SURFACE_Z); the argument used to be ignored (BUG-416)
+  local v = {}
+  for i = 2, 7 do v[i - 1] = math.tointeger(tonumber(ca[i]) or 0.5) end
+  if ca[2] and not (v[1] and v[2] and v[3] and v[4] and v[5] and v[6]) then
+    util.emit({ error = 'usage: claude/config aquifer [x1 y1 x2 y2 z1 z2] (ganze Zahlen)' }) return
+  end
+  local mx, my, mz = dfhack.maps.getTileSize()
+  local x1, y1, x2, y2, z1, z2 = v[1], v[2], v[3], v[4], v[5], v[6]
+  if x1 then
+    x1, x2 = math.max(0, math.min(x1, x2)), math.min(mx - 1, math.max(x1, x2))
+    y1, y2 = math.max(0, math.min(y1, y2)), math.min(my - 1, math.max(y1, y2))
+    z1, z2 = math.max(0, math.min(z1, z2)), math.min(mz - 1, math.max(z1, z2))
+    if x1 > x2 or y1 > y2 or z1 > z2 then util.emit({ error = 'Box ausserhalb der Karte' }) return end
+    if z2 - z1 > 60 then util.emit({ error = 'hoechstens 61 Ebenen pro Aufruf' }) return end
+  end
+  local s2 = aquifer_seen(x1, y1, x2, y2, z1, z2)
+  local list = {}
+  for z, n in pairs(s2) do list[#list + 1] = z .. '=' .. n end
+  table.sort(list)
+  util.emit({ box = x1 and { x1, y1, x2, y2, z1, z2 } or 'FORT_BOX', aquifer_gesehen_z = list, dig_min_z = dig_min_z(s2) })
+  return
+end
 local seen = aquifer_seen()
 local az = {}
 for z, n in pairs(seen) do az[#az + 1] = z .. '=' .. n end

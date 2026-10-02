@@ -1,4 +1,5 @@
--- claude/report  - compact fortress check for regular review (read-only, changes nothing)
+-- claude/report  - compact fortress check for regular review. Changes nothing in the game, but appends one row to
+-- <home>/metrics.csv on every call (trend data for the feedback loops).
 local util = reqscript('claude/util')
 if not util.require_fort() then return end
 local cfg = reqscript('claude/config')   -- Fort box / refuse room per map

@@ -51,8 +51,7 @@ end
 local dry = not opt.apply
 
 local function log(s)
-  local f = io.open(LOG, 'a')
-  if f then f:write(os.date('%H:%M:%S ') .. cmd .. ' ' .. s .. '\n') f:close() end
+  util.append_log(LOG, os.date('%H:%M:%S ') .. cmd .. ' ' .. s)
 end
 local function nm(u) return util.cut(dfhack.df2utf(dfhack.units.getReadableName(u)), 40) end
 local function out(t) util.emit(t) end

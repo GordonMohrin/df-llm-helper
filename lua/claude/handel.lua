@@ -34,11 +34,8 @@ local TS = df.caravan_state.T_trade_state
 
 ------------------------------------------------------------------ Helpers
 local function log(msg)
-  local ok = pcall(function()
-    local f = io.open(LOG_FILE, 'a')
-    if f then f:write(os.date('%Y-%m-%d %H:%M:%S '), tostring(msg), '\n'); f:close() end
-  end)
-  return ok
+  util.append_log(LOG_FILE, os.date('%Y-%m-%d %H:%M:%S ') .. tostring(msg))
+  return true
 end
 
 local function emit(t) log(json.encode(t)); util.emit(t) end

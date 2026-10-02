@@ -377,3 +377,29 @@ def test_gefahr_sim_fire_check_unit_and_arguments(tmp_path, args):
     j = one_json(out)
     assert "error" in j and "aktionen" not in j
     assert not list((tmp_path / "home" / "tools").glob("*.flag"))
+
+
+# ---------------------------------------------------------------- BUG-416 (config aquifer, log rotation, positions)
+def test_append_log_rotates(tmp_path):
+    log = tmp_path / "x.log"
+    code = (f"local util = reqscript('claude/util')\n"
+            f"for i = 1, 30 do util.append_log('{log}', string.rep('a', 9), 50) end\n")
+    run_snippet(code, tmp_path)
+    assert log.stat().st_size <= 60 and (tmp_path / "x.log.1").exists()
+
+
+def test_config_aquifer_box_argument_is_used(tmp_path):
+    setup = ("dfhack.maps.getTileSize = function() return 192, 192, 153 end\n"
+             "local function blk(z)\n"
+             "  local des = {}\n"
+             "  for i = 0, 15 do des[i] = {} for j = 0, 15 do des[i][j] = { hidden = false, water_table = (z == 120) } end end\n"
+             "  return { designation = des }\n"
+             "end\n"
+             "dfhack.maps.getBlock = function(bx, by, z) return blk(z) end\n")
+    out, r = run("config", "aquifer", 0, 0, 15, 15, 118, 121, tmp_path=tmp_path, setup=setup)
+    assert r.returncode == 0, r.stderr
+    j = one_json(out)
+    assert j["box"] == [0, 0, 15, 15, 118, 121] and j["aquifer_gesehen_z"] == ["120=256"]
+    out, _ = run("config", "aquifer", 1, 2, tmp_path=tmp_path, setup=setup)
+    assert "usage" in one_json(out)["error"]
+

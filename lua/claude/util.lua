@@ -78,6 +78,25 @@ function emit(t)
   print(encode(t))
 end
 
+-- Append one line to a log file; when the file is larger than max_bytes (default 1 MB) it is renamed to <path>.1
+-- (one generation kept) so tools/out/*.log cannot grow without bound (BUG-416/BUG-422). Never raises.
+function append_log(path, line, max_bytes)
+  pcall(function()
+    local f = io.open(path, 'a')
+    if not f then return end
+    local size = f:seek('end') or 0
+    if size > (max_bytes or 1000000) then
+      f:close()
+      os.remove(path .. '.1')
+      os.rename(path, path .. '.1')
+      f = io.open(path, 'a')
+      if not f then return end
+    end
+    f:write(line, '\n')
+    f:close()
+  end)
+end
+
 function fort_loaded()
   return dfhack.isMapLoaded() and df.global.gamemode == df.game_mode.DWARF
 end

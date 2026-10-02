@@ -59,7 +59,8 @@ local function unlink(asg)
   asg.histfig, asg.histfig2 = -1, -1
 end
 
-if (a[1] == 'assign' or a[1] == 'vacate') and not a.force then
+-- DEPRECATED write paths: always refused (the old '--force' escape tested a.force, which was never set, BUG-416)
+if a[1] == 'assign' or a[1] == 'vacate' then
   util.emit({ error = 'veraltet: bitte claude/aemter assign|vacate benutzen (siehe AEMTER.md)' }) return
 end
 
