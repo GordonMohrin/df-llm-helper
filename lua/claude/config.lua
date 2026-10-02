@@ -22,7 +22,7 @@
 --   [ ] LAYOUT_BOXEN, REFUSE_BOX, DUMP_TILES         from LAYOUT-run5.md (bau owns all coordinates)
 --   [ ] SLAB_TILES, MOOD_SLOTS                       crypt/memorial slabs (ghosts!), mood workshops
 --   [ ] SMOOTH_SUPPLY, TREE_BAND, GATHER, GATHER_Z   occupation in the fort, woodcutting (from day 1), gathering areas
---   [ ] KAV_BARRIEREN, KOPF, SPERR_BOXEN, SCHACHT_PRUEF, DIG_CAVERN_Z   ONLY with cavern access (double construction wall barrier + gate)
+--   [ ] KAV_BARRIEREN, KOPF, SPERR_BOXEN, SCHACHT_PRUEF, HINTER_SPERRE, DIG_CAVERN_Z   ONLY with cavern access (double construction wall barrier + gate)
 --   [ ] lua/claude/stages.lua (grid stages, leave empty until erkundung plans them)
 --   [ ] AFTERWARDS restart permanent jobs that read the values at load (otherwise they keep working with the defaults): arbeit (SMOOTH_SUPPLY/TREE_BAND/GATHER),
 --       essen (FORT_X/FORT_Y/SURFACE_Z), mil guard (FORT_X/FORT_Y), mood (MOOD_SLOTS), gesund (SLAB_TILES); then `claude/mil refuge --apply` (recreate the refuge burrow).
@@ -59,7 +59,8 @@ KAV_BARRIEREN = {}                       -- RUN5: set after embark (claude/sperr
 KAV_ORDER = {}                           -- RUN5: set after embark (order of the barriers)
 KOPF = nil                               -- RUN5: set after embark ({x,y,z} shaft head, only with a shaft)
 SPERR_BOXEN = {}                         -- RUN5: set after embark ({ {x1,y1,x2,y2,z1,z2}, ... } never dig/designate)
-SCHACHT_PRUEF = nil                      -- RUN5: set after embark ({ von = {x,y,z}, nach = {x,y,z} } self-test 'cavern connected to fort on foot')
+SCHACHT_PRUEF = nil                      -- RUN5: set after embark ({ von = {x,y,z}, nach = {x,y,z} } self-test 'cavern connected to fort on foot'; von/nach may also be lists of points)
+HINTER_SPERRE = nil                      -- RUN5: with a cavern barrier ({ cave_z_max = z, boxen = { {x1,y1,x2,y2,z1,z2}, ... } } = 'behind the barrier' for the lock-in protection of claude/schacht seal)
 DIG_CAVERN_Z = nil                       -- RUN5: set after embark (erzdig exception from DIG_MIN_Z for caverns; normally nil)
 
 -- ---------------------------------------------------------------- DEFAULTS (so nothing crashes while values are missing)

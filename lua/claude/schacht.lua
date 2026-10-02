@@ -45,6 +45,9 @@ end
 if cmd == 'status' then
   util.emit(S.status())
 
+elseif not S.configured() and (cmd == 'bauen' or cmd == 'open' or cmd == 'seal' or cmd == 'notzu' or cmd == 'tuer' or cmd == 'cancel') then
+  util.emit({ error = 'keine Kavernen-Sperre konfiguriert (config.KOPF/KAV_BARRIEREN leer)', befehl = cmd })
+
 elseif cmd == 'bauen' or cmd == 'open' or cmd == 'seal' or cmd == 'notzu' then
   local plan
   if cmd == 'bauen' then plan = 'bauen'

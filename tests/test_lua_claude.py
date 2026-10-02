@@ -195,3 +195,19 @@ def test_advance_clock_and_errors_keep_popups(tmp_path):
         assert "popups_dismissed" not in out
     out, _ = run("advance", "600", tmp_path=tmp_path, setup=setup, env={"MOCK_AFTER": str(after)})
     assert out.splitlines()[-1] == "POPUPS 0" and json.loads(out.splitlines()[0])["popups_dismissed"] == 2
+
+
+# ---------------------------------------------------------------- BUG-402
+@pytest.mark.parametrize("args", [["status"], []])
+def test_schacht_status_without_cavern_barrier(tmp_path, args):
+    out, r = run("schacht", *args, tmp_path=tmp_path)
+    assert r.returncode == 0, r.stderr
+    j = one_json(out)
+    assert j["aktiv"] is False and j["kopf"] == {"state": "n/a"}
+
+
+@pytest.mark.parametrize("cmd", ["open", "seal", "notzu", "bauen", "cancel"])
+def test_schacht_write_commands_refuse_without_barrier(tmp_path, cmd):
+    out, r = run("schacht", cmd, tmp_path=tmp_path)
+    assert r.returncode == 0 and "keine Kavernen-Sperre" in one_json(out)["error"]
+    assert not (tmp_path / "home" / "tools" / "schacht.offen").exists()
