@@ -10,7 +10,11 @@ if not util.require_fort() then return end
 
 local a = { ... }
 local cmd = a[1] or 'dump'
-local function n(i) return tonumber(a[i]) end
+-- integer argument; fractions and text -> nil (getTileFlags rejects non-integers with a traceback, BUG-409)
+local function n(i)
+  local v = tonumber(a[i])
+  return v and math.tointeger(v) or nil
+end
 local MAP = df.global.world.map
 local XM, YM, ZM = MAP.x_count, MAP.y_count, MAP.z_count
 local SHAPE = df.tiletype_shape
@@ -68,6 +72,7 @@ if cmd == 'dump' then
   x1, x2 = math.max(0, math.min(x1, x2)), math.min(XM - 1, math.max(x1, x2))
   y1, y2 = math.max(0, math.min(y1, y2)), math.min(YM - 1, math.max(y1, y2))
   z1, z2 = math.max(0, math.min(z1, z2)), math.min(ZM - 1, math.max(z1, z2))
+  if x1 > x2 or y1 > y2 or z1 > z2 then util.emit({ ok = false, error = 'box outside the map' }) return end
   local cells = (x2 - x1 + 1) * (y2 - y1 + 1) * (z2 - z1 + 1)
   if cells > 20000 then util.emit({ ok = false, error = 'box too large: ' .. cells .. ' tiles (max 20000)' }) return end
   local levels = {}

@@ -227,3 +227,70 @@ def test_pilot_batch_utf8_cut_bad_entries_and_bom(tmp_path, script):
     assert [e["ok"] for e in out] == [False, True, False, False, True]
     assert out[1]["out"].startswith("ä" * 25) and "(120 Bytes)" in out[1]["out"]
     assert out[4]["out"] == "out:claude/status"
+
+
+# ---------------------------------------------------------------- BUG-409 / BUG-414 (pilot_* box handling)
+GRID = ROOT / "tests" / "lua_mock" / "grid_mock.lua"
+
+
+def grid_run(tmp_path, script, *args, mock=GRID):
+    gp = tmp_path / "grid.json"
+    gp.write_text("[]")
+    r = subprocess.run([LUA, str(mock), str(ROOT / "lua" / f"{script}.lua"), *map(str, args)], capture_output=True,
+                       text=True, timeout=30, env={"PATH": "/usr/bin:/bin", "MOCK_GRID": str(gp), "MOCK_MAP": "192,192,153",
+                                                   "MOCK_HOME": str(tmp_path)})
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout.splitlines()[0])
+
+
+@pytest.mark.parametrize("script", ["pilot_digcheck", "pilot_reach"])
+@pytest.mark.parametrize("box", [(500, 500, 130, 600, 600, 130), (500, 0, 130, 600, 5, 130)])
+def test_box_outside_the_map_is_an_error(tmp_path, script, box):
+    j = grid_run(tmp_path, script, "dump", *box)
+    assert j == {"ok": False, "error": "box outside the map"}
+
+
+@pytest.mark.parametrize("script", ["pilot_digcheck", "pilot_reach"])
+def test_fractional_coordinates_give_usage_not_traceback(tmp_path, script):
+    j = grid_run(tmp_path, script, "dump", 1.5, 2.5, 130, 5, 5, 130)
+    assert j["ok"] is False and "dump x1 y1 z1 x2 y2 z2" in j["error"]
+
+
+def test_reach_check_results_aligned_with_arguments(tmp_path):
+    j = grid_run(tmp_path, "pilot_reach", "check", 100, 96, 130, "101,96,130", "foo", "102,97,130+", "1.5,2,3")
+    assert len(j["results"]) == len(j["via"]) == 4 and j["invalid"] == [1, 3]
+    from df_llm_helper.features.reach import parse_check
+
+    class P:
+        def __init__(self, name):
+            self.name = name
+    pts = [P("a"), P("b"), P("c"), P("d")]
+    parsed = parse_check(j, pts)
+    assert parsed["b"] is None and parsed["d"] is None and parsed["a"] is not None
+
+
+def test_siege_unknown_command_prints_usage(tmp_path):
+    r = subprocess.run([LUA, str(MOCK), str(ROOT / "lua" / "pilot_siege.lua"), "foo"], capture_output=True, text=True,
+                       timeout=30, env={"PATH": "/usr/bin:/bin", "MOCK_HOME": str(tmp_path), "MOCK_SCRIPT_DIR": str(CLAUDE)})
+    assert "Usage: claude/pilot_siege" in r.stdout, r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("args,err", [
+    (("scan", 0, 0, 0, 191, 191, 152), "box too large"),
+    (("scan", 500, 500, 130, 600, 600, 130), "box outside the map"),
+    (("near", 100, 96, 130, 1000), "radius 0..10"),
+])
+def test_pilot_water_caps(tmp_path, args, err):
+    dmock = ROOT / "tests" / "lua_mock" / "dfhack_mock.lua"
+    r = subprocess.run([LUA, str(dmock), str(ROOT / "lua" / "pilot_water.lua"), *map(str, args)], capture_output=True,
+                       text=True, timeout=30)
+    assert err in json.loads(r.stdout.splitlines()[0])["error"]
+
+
+def test_pilot_water_reversed_box_is_normalised(tmp_path):
+    dmock = ROOT / "tests" / "lua_mock" / "dfhack_mock.lua"
+    tiles = tmp_path / "t.json"
+    tiles.write_text(json.dumps([{"x": 85, "y": 85, "z": 130, "flow": 3}]))
+    r = subprocess.run([LUA, str(dmock), str(ROOT / "lua" / "pilot_water.lua"), "scan", "90", "90", "130", "80", "80", "130"],
+                       capture_output=True, text=True, timeout=30, env={"PATH": "/usr/bin:/bin", "MOCK_TILES": str(tiles)})
+    assert json.loads(r.stdout.splitlines()[0])["water"] == 1

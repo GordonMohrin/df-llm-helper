@@ -87,7 +87,8 @@ end
 
 df = {
   work_detail_mode = enum({ 'EverybodyDoesThis', 'NobodyDoesThis', 'OnlySelectedDoesThis' }),
-  global = { plotinfo = { labor_info = { work_details = nil } }, world = { status = { reports = {} } } },
+  global = { plotinfo = { labor_info = { work_details = nil } },
+             world = { status = { reports = {} }, map = { x_count = 200, y_count = 200, z_count = 200 } } },
 }
 local M = df.work_detail_mode
 df.global.plotinfo.labor_info.work_details = vec({

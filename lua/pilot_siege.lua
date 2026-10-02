@@ -71,6 +71,10 @@ if cmd == 'status' then
   return
 end
 
+if cmd ~= 'clear' and cmd ~= 'kill' and cmd ~= 'move' then
+  util.emit({ ok = false, error = 'Usage: claude/pilot_siege status|kill|move|clear' })
+  return
+end
 local s = squad_of(a[2])
 if not s then util.emit({ ok = false, error = 'Squad ' .. tostring(a[2]) .. ' unknown' }) return end
 

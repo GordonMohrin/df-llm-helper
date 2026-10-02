@@ -16,7 +16,11 @@ local json = require('json')
 
 local a = { ... }
 local cmd = a[1] or 'scan'
-local function n(i) return tonumber(a[i]) end
+-- integer argument; fractions and text -> nil (getTileFlags rejects non-integers with a traceback, BUG-409)
+local function n(i)
+  local v = tonumber(a[i])
+  return v and math.tointeger(v) or nil
+end
 local MAP = df.global.world.map
 local XM, YM, ZM = MAP.x_count, MAP.y_count, MAP.z_count
 local SHAPE = df.tiletype_shape
