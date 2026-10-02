@@ -535,3 +535,21 @@ def test_dig_header_documents_blind_designation():
 def test_round_scripts_document_the_no_argument_default(script):
     head = (CLAUDE / f"{script}.lua").read_text(encoding="utf-8").split("local util")[0]
     assert "No argument" in head and "ONE" in head
+
+
+# ---------------------------------------------------------------- BUG-416 (metrics.csv at most once per game day)
+def test_daily_row_is_written_once_per_game_date(tmp_path):
+    csv = tmp_path / "metrics.csv"
+    code = (f"local util = reqscript('claude/util')\n"
+            f"local p = '{csv}'\n"
+            f"print(util.append_daily_row(p, 'echtzeit;spieldatum;a', table.pack('t1', '1. Granite, Jahr 118', 5)))\n"
+            f"print(util.append_daily_row(p, 'echtzeit;spieldatum;a', table.pack('t2', '1. Granite, Jahr 118', 6)))\n"
+            f"print(util.append_daily_row(p, 'echtzeit;spieldatum;a', table.pack('t3', '2. Granite, Jahr 118', nil)))\n")
+    assert run_snippet(code, tmp_path).split() == ["true", "false", "true"]
+    assert csv.read_text().splitlines() == ["echtzeit;spieldatum;a", "t1;1. Granite, Jahr 118;5", "t3;2. Granite, Jahr 118;"]
+
+
+def test_report_uses_the_daily_row():
+    src = (CLAUDE / "report.lua").read_text(encoding="utf-8")
+    assert "append_daily_row" in src and "io.open(path, 'a')" not in src
+    assert "ONCE PER IN-GAME DAY" in src.split("local util")[0]

@@ -97,6 +97,36 @@ function append_log(path, line, max_bytes)
   end)
 end
 
+-- Append a semicolon CSV row (fields[2] = game date) at most once per game date: nothing is written when the last row of
+-- the file already has that date (claude/report -> metrics.csv, BUG-416). Writes the header into a new file.
+-- Returns true when a row was written. Never raises.
+function append_daily_row(path, header, fields)
+  local wrote = false
+  pcall(function()
+    local fh = io.open(path, 'r')
+    local new = fh == nil
+    if fh then
+      local size = fh:seek('end') or 0
+      fh:seek('set', math.max(0, size - 4096))   -- only the tail: the file grows over a whole run
+      local tail = fh:read('a') or ''
+      fh:close()
+      local last
+      for line in tail:gmatch('[^\r\n]+') do last = line end
+      if last and last:match('^[^;]*;([^;]*)') == tostring(fields[2]) then return end
+      new = size == 0
+    end
+    fh = io.open(path, 'a')
+    if not fh then return end
+    if new then fh:write(header, '\n') end
+    local t = {}
+    for i = 1, (fields.n or #fields) do t[i] = tostring(fields[i] == nil and '' or fields[i]) end
+    fh:write(table.concat(t, ';'), '\n')
+    fh:close()
+    wrote = true
+  end)
+  return wrote
+end
+
 function fort_loaded()
   return dfhack.isMapLoaded() and df.global.gamemode == df.game_mode.DWARF
 end

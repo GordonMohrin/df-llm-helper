@@ -1,5 +1,6 @@
 -- claude/report  - compact fortress check for regular review. Changes nothing in the game, but appends one row to
--- <home>/metrics.csv on every call (trend data for the feedback loops).
+-- <home>/metrics.csv at most ONCE PER IN-GAME DAY (trend data for the feedback loops): the row is skipped when the last row
+-- of the file has the same game date (column `spieldatum`); output field `metrics_zeile` = true when a row was written (BUG-416).
 local util = reqscript('claude/util')
 if not util.require_fort() then return end
 local cfg = reqscript('claude/config')   -- Fort box / refuse room per map
@@ -158,17 +159,8 @@ add('feinde_auf_karte', hostile)
 add('zivilwarnung', df.global.plotinfo.alerts.civ_alert_idx)
 do local full = {}  for _, b in ipairs(df.global.world.buildings.other.STOCKPILE) do    local cap = (b.x2 - b.x1 + 1) * (b.y2 - b.y1 + 1)    local n = #dfhack.buildings.getStockpileContents(b)    if n >= cap then full[#full + 1] = string.format('#%d z%d %d,%d: %d/%d', b.id, b.z, b.x1, b.y1, n, cap) end  end  add('lager_voll', full)end
 add('spiel_pausiert', df.global.pause_state)
--- Measurement log for feedback loops: one line per call (trend can be evaluated over time)
-pcall(function()
-  local path = reqscript('claude/util').home() .. '/metrics.csv'
-  local fh = io.open(path, 'r')
-  local new = fh == nil
-  if fh then fh:close() end
-  fh = io.open(path, 'a')
-  if not fh then return end
-  if new then
-    fh:write('echtzeit;spieldatum;buerger;erwachsene;kinder;ohne_auftrag;mahlzeiten;getraenke;pflanzen;tierkadaver;zwergenleichen;trupp;grabjobs;feinde;sawdeadbody;death;ghosthaunt;zivilwarnung\n')
-  end
+-- Measurement log for feedback loops: at most one row per in-game day (more rows on the same day are noise for the series)
+do
   local function neg(k)
     for _, s in ipairs(out.negative_gedanken_top or {}) do
       local n = s:match('^' .. k .. '=(%d+)')
@@ -176,11 +168,10 @@ pcall(function()
     end
     return '0'
   end
-  fh:write(table.concat({
-    os.date('%Y-%m-%d %H:%M:%S'), out.datum, out.buerger, out.erwachsene, out.kinder, out.erwachsene_ohne_auftrag,
-    out.mahlzeiten, out.getraenke, out.pflanzen, out.kadaver_tiere_in_festung, out.zwergenleichen_unbestattet,
-    out.truppmitglieder, out.grabjobs, out.feinde_auf_karte, neg('SawDeadBody'), neg('Death'), neg('GhostHaunt'), out.zivilwarnung,
-  }, ';') .. '\n')
-  fh:close()
-end)
+  out.metrics_zeile = util.append_daily_row(util.home() .. '/metrics.csv',
+    'echtzeit;spieldatum;buerger;erwachsene;kinder;ohne_auftrag;mahlzeiten;getraenke;pflanzen;tierkadaver;zwergenleichen;trupp;grabjobs;feinde;sawdeadbody;death;ghosthaunt;zivilwarnung',
+    table.pack(os.date('%Y-%m-%d %H:%M:%S'), out.datum, out.buerger, out.erwachsene, out.kinder, out.erwachsene_ohne_auftrag,
+      out.mahlzeiten, out.getraenke, out.pflanzen, out.kadaver_tiere_in_festung, out.zwergenleichen_unbestattet,
+      out.truppmitglieder, out.grabjobs, out.feinde_auf_karte, neg('SawDeadBody'), neg('Death'), neg('GhostHaunt'), out.zivilwarnung))
+end
 util.emit(out)
