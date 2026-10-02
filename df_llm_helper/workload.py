@@ -92,8 +92,9 @@ def diagnose(obs: WorkObs, cfg: dict | None = None) -> list[Measure]:
                                    "Picks/fuel: trade for coke/wood, charcoal starter (kb koks_brennstoff)",
                                    prio=12))
         if (obs.suspended or 0) >= 10:
-            out.append(Measure("suspendiert", f"{obs.suspended} jobs blocked", "check suspendmanager, "
-                               "clarify building material/access", prio=30))
+            out.append(Measure("suspendiert", f"{obs.suspended} jobs blocked", "check suspendmanager "
+                               "(`suspendmanager` in DFHack, `unsuspend` once), clarify building material/access",
+                               prio=30))
         if _cancel(obs, "Inappropriate dig square") >= 10:
             out.append(Measure("grabfehler", f"'Inappropriate dig square' {_cancel(obs, 'Inappropriate dig square')}x",
                                "remove invalid dig designations (check raster)", prio=25))
@@ -115,11 +116,12 @@ def diagnose(obs: WorkObs, cfg: dict | None = None) -> list[Measure]:
                                "set a new dig stage" + (f" ({obs.raster_next})" if obs.raster_next else ""),
                                "claude/raster next", auto=True,
                                prio=5 if not many_open else 20, effect="miners busy"))
+    # BUG-220: a stopped job service is a cause also with a job backlog (68 idle, 101 open, arbeit/orders off)
+    for svc, cmd in (("orders", "claude/orders start"), ("arbeit", "claude/arbeit start")):
+        if _svc(obs, svc) is False:
+            out.append(Measure(f"dienst-{svc}", f"Service {svc} is not running", f"restart {svc}", cmd,
+                               auto=True, prio=8, effect="workshops/standing orders active again"))
     if not many_open:
-        for svc, cmd in (("orders", "claude/orders start"), ("arbeit", "claude/arbeit start")):
-            if _svc(obs, svc) is False:
-                out.append(Measure(f"dienst-{svc}", f"Service {svc} is not running", f"restart {svc}", cmd,
-                                   auto=True, prio=8, effect="workshops/standing orders active again"))
         if obs.full_stockpiles:
             out.append(Measure("lager", f"{obs.full_stockpiles} stockpiles full", "expand stockpiles (build)", prio=35))
         out.append(Measure("fuellarbeit", "hardly any open jobs", "filler orders: smoothing/engraving, communal buildings,"

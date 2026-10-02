@@ -148,7 +148,14 @@ class SampleResult:
                 s += f" (~{self.period_ticks} ticks)"
         if self.tick_rate:
             s += f", {self.tick_rate:.0f} ticks/s"
+        elif self.paused:                 # BUG-220: on a paused game only the dfhack-run round trip is measured
+            s += " - game PAUSED (frame counter did not move): freezes cannot show, sample again with time running"
         return s
+
+    @property
+    def paused(self) -> bool:
+        fcs = [s.fc for s in self.samples if s.fc is not None]
+        return len(fcs) >= 2 and max(fcs) == min(fcs)
 
     def to_dict(self) -> dict:
         return {"n": len(self.samples), "outliers": len(self.outliers), "max_s": round(self.max_s, 2),

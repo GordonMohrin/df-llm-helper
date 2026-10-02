@@ -340,3 +340,142 @@ def test_bug209_point_on_a_wall_is_a_data_error_not_a_removal(tmp_path, tools_di
 def test_bug214_reach_wall_arguments(tmp_path, tools_dir, cfgfile, capsys):
     rc, out = cli(capsys, "--config", cfgfile, "--mock", ROOT / "fixtures" / "run5", "reach", "what-if", "--wall", "a", "b", "c")
     assert rc == 2 and "usage: reach what-if --wall X Y Z" in out and "Traceback" not in out
+
+
+# ---------------------------------------------------------------- BUG-213 (forecast)
+
+def test_bug213_backtest_inputs(tmp_path, tools_dir, cfgfile, capsys, monkeypatch):
+    import df_llm_helper.forecast as F
+    monkeypatch.setattr(F, "default_metrics_file", lambda home=None: None)
+    rc, out = cli(capsys, "--config", cfgfile, "forecast", "backtest")
+    assert rc == 2 and "no metrics file" in out and "journal metrics" in out and "Traceback" not in out
+    live = ROOT / "fixtures" / "run5_live" / "metrics_run5.csv"
+    for h in ("0", "-3"):
+        rc, out = cli(capsys, "--config", cfgfile, "forecast", "backtest", "--file", live, "--horizon", h)
+        assert rc == 2 and "--horizon must be >= 1" in out
+    rc, out = cli(capsys, "--config", cfgfile, "forecast", "backtest", "--file", ROOT / "fixtures" / "run5" / "status.txt")
+    assert rc == 2 and "not a metrics file" in out
+    rc, out = cli(capsys, "--config", cfgfile, "forecast", "backtest", "--file", live, "--horizon", "9999")
+    assert rc == 0 and "too short for horizon 9999" in out
+
+
+def test_bug213_stale_points_are_dropped():
+    from df_llm_helper.clock import FakeClock
+    from df_llm_helper.forecast import Forecaster, fmt_line
+    st = Store()
+    st.set("forecast.series", [[34367.2, 24, 97, 109], [39281.5, 176, 384, 653], [39282.2, 176, 382, 648],
+                               [39674.6, 174, 350, 512]])                       # live data.db values (BUG-213)
+    fc = Forecaster(st, FakeClock(0), {})
+    assert fc.series() == [[39674.6, 174, 350, 512]]
+    assert fmt_line(fc.estimates()) == "Forecast: Food ?, Drink ?"
+    fc.add_point([39675.6, 174, 340, 500])
+    assert len(st.get("forecast.series")) == 2                                  # stored series pruned too
+
+
+# ---------------------------------------------------------------- BUG-215 (care / remote messages)
+
+def test_bug215_care_lines_are_actionable(tmp_path, tools_dir, cfgfile, capsys):
+    rc, out = cli(capsys, "--config", cfgfile, "--replay-file", BUGS / "BUG-215" / "l_care.jsonl", "care", "--dry-run")
+    crit = [ln for ln in out.splitlines() if ln.startswith("!! ")]
+    assert crit and all('"' not in ln for ln in crit)                            # no half nickname
+    a = next(ln for ln in crit if ln.startswith("!! 486 Aban Stelidkol:"))
+    assert "patient in hospital 1493" in a and "feeding jobs 2" in a and "meals 176" in a and "->" in a
+    assert any(ln.startswith("!! 4165 Ber Thadudib (child):") for ln in crit)
+
+
+def test_bug215_remote_says_ok_and_labels_fish(tmp_path, tools_dir, cfgfile, capsys):
+    from df_llm_helper.client import MockClient
+    from df_llm_helper.clock import FakeClock
+    from df_llm_helper.features.remote import RemoteCare
+    clock = FakeClock(1_790_000_000.0)
+    mc = MockClient({}, clock=clock)
+    mc.prefix_handlers.append(("claude/pilot_remote status", lambda c: json.dumps(
+        {"ok": True, "fish": 7, "citizens": [{"id": 1, "name": "A", "hunger": 0, "thirst": 0, "labors": []}],
+         "supplies": []})))
+    lines, show = RemoteCare(mc, Store(), clock, {}).run(dry=True)
+    assert lines[0].startswith("Remote ok") and "Fish catch counter 7 (0 fishers)" in lines
+
+
+# ---------------------------------------------------------------- BUG-216 (reboot dry-run wording)
+
+def test_bug216_reboot_dry_run_says_would_start(tmp_path, tools_dir, cfgfile, capsys):
+    rc, out = cli(capsys, "--config", cfgfile, "--replay-file", BUGS / "BUG-216" / "l_rb.jsonl", "reboot", "--dry-run")
+    assert "Restart (dry run): would start 10 services" in out and "services started" not in out
+    assert "[dry] claude/advance 0" in out and "[dry] claude/ueberwacher start" in out          # whole plan, consistent
+
+
+# ---------------------------------------------------------------- BUG-218 (settings)
+
+def test_bug218_cap_cross_check_and_revert_note(tmp_path):
+    import shutil
+    from df_llm_helper.clock import FakeClock
+    from df_llm_helper.config import HOME
+    from df_llm_helper.features import settings as st
+    f = tmp_path / "prefs dir" / "d_init.txt"
+    f.parent.mkdir()
+    shutil.copy(ROOT / "fixtures" / "v3" / "settings" / "d_init.txt", f)
+    orig = f.read_bytes()
+    s = st.Settings(Store(), FakeClock(1_790_000_000.0), {"file": str(f)}, home=HOME, client=None)
+    pop = s.values()["POPULATION_CAP"]
+    out = s.set("STRICT_POPULATION_CAP", "10", "x")
+    assert any(ln.startswith("WARNING: STRICT_POPULATION_CAP 10 < POPULATION_CAP") for ln in out)
+    s.set("VISITOR_CAP", "0", 'ö ü "q"')
+    out = s.set("POPULATION_CAP", "300", "x")
+    assert any("WARNING" in ln for ln in out)
+    s.revert("STRICT_POPULATION_CAP")
+    s.revert("VISITOR_CAP")
+    out = s.revert("POPULATION_CAP")
+    assert out[0] == f"POPULATION_CAP: back to {pop}"
+    assert f.read_bytes() == orig and "file byte-identical to the backup" in out
+    assert not any("edited by hand" in ln for ln in out)
+
+
+# ---------------------------------------------------------------- BUG-210 (hygiene area split, ghost alarm)
+
+def test_bug210_hygiene_flags_failed_area_split_and_trusts_crypt(tmp_path, tools_dir, cfgfile, capsys):
+    rc, out = cli(capsys, "--config", cfgfile, "--replay-file", BUGS / "BUG-210" / "hygiene_live.jsonl",
+                  "hygiene", "--dry-run")
+    assert "area classification failed" in out
+    assert "zone too far" not in out                                    # no diagnosis on a wrong split
+    assert "!! Dwarf corpses" not in out and "0 waiting for burial" in out   # claude/gesund krypta: leichen_offen 0
+
+
+@pytest.mark.skipif(not __import__("shutil").which("lua5.4") and not __import__("shutil").which("lua"),
+                    reason="lua missing")
+def test_bug210_lua_counts_named_invaders_as_other(tmp_path):
+    import shutil
+    import subprocess
+    lua = shutil.which("lua5.4") or shutil.which("lua")
+    fx = ROOT / "fixtures" / "v3" / "hygiene"
+    items = [{"id": 1, "type": "CORPSE", "x": 5, "y": 5, "z": 130, "race": 100, "hf": 77, "reach": True},
+             {"id": 2, "type": "CORPSE", "x": 6, "y": 5, "z": 130, "race": 572, "reach": True}]
+    f = tmp_path / "items.json"
+    f.write_text(json.dumps(items), encoding="utf-8")
+    import os
+    r = subprocess.run([lua, str(fx / "hygiene_mock.lua"), str(ROOT / "lua" / "pilot_hygiene.lua"), "status", "0", "100"],
+                       capture_output=True, text=True, timeout=30, env={**os.environ, "MOCK_ITEMS": str(f)})
+    j = json.loads(r.stdout.splitlines()[0])
+    assert j["corpses"]["dwarf"] == 1 and j["corpses"]["other"] == 1, r.stdout + r.stderr
+
+
+# ---------------------------------------------------------------- BUG-220 (plausibility: workload, zones, perf)
+
+def test_bug220_workload_reports_stopped_services_with_backlog():
+    from df_llm_helper.workload import WorkObs, diagnose
+    obs = WorkObs(idle_pct=57, idle=68, jobs_open=101, dig_queue=0, services={"arbeit": False, "orders": False})
+    keys = [m.key for m in diagnose(obs)]
+    assert "dienst-arbeit" in keys and "dienst-orders" in keys
+
+
+def test_bug220_no_dump_zone_proposal_next_to_an_existing_one():
+    from df_llm_helper.features.hygiene import DEFAULTS, suggest_zone
+    live = [{"id": 3743, "x1": 90, "x2": 92, "y1": 112, "y2": 114, "z": 130}]
+    assert suggest_zone(DEFAULTS, live, (90, 100, 130)) is None
+    assert suggest_zone(DEFAULTS, [], (90, 100, 130))["name"] == "D"
+
+
+def test_bug220_perf_sample_says_paused():
+    from df_llm_helper.features.perf import Sample, SampleResult
+    r = SampleResult(outlier_s=1.5)
+    r.samples = [Sample(float(i), 0.1, 21609, True) for i in range(5)]
+    assert "game PAUSED" in r.line()
