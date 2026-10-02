@@ -225,7 +225,7 @@ def test_overlay_lines_limits():
     lines = overlay_lines(DIGEST)
     assert len(lines) == 3 and all(len(x) <= 120 for x in lines)
     assert lines[0].startswith("Hunger") and lines[1].startswith("DEADMAN") and lines[2].startswith("Caravan")
-    assert overlay_lines("No change since 10:00.") == ["No change since 10:00."]
+    assert overlay_lines("No change since 10:00.") == []          # BUG-101: no 'No change' text for the player
     assert overlay_lines("Status Y1 | Pop 7\n> x") == ["Status Y1 | Pop 7"]
 
 

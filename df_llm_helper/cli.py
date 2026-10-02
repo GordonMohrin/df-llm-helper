@@ -56,7 +56,18 @@ def _usage(pilot, scope: str, command: str, out: str, t0: float) -> None:
     record_usage(pilot.store, time.time(), scope, command, time.time() - t0, sum(len(c) for c in pilot.client.calls), out)
 
 
+def _check_scope(scope: str | None) -> None:
+    """BUG-117 F: an unknown --scope is an error (it used to report 'No change')."""
+    if scope is None:
+        return
+    from .brief import SCOPES
+    known = [*SCOPES, "orchestrator"]
+    if scope not in known:
+        raise ValueError(f"unknown scope '{scope}' (known: {', '.join(known)})")
+
+
 def cmd_digest(args) -> int:
+    _check_scope(args.scope)
     p = _pilot(args)
     t0 = time.time()
     out = p.digest(scope=args.scope, since_last=not args.full)
@@ -535,9 +546,11 @@ def cmd_metrics(args) -> int:
 def cmd_overlay(args) -> int:
     from .overlay import overlay_lines, overlay_send
     p = _pilot(args)
-    digest = p.digest(include_warnings=False) if not args.text else " ".join(args.text)
+    # BUG-101: stateless - the current !!/! items of a read-only digest; the orchestrator's delta stays untouched
+    digest = (p.digest(include_warnings=False, since_last=False, persist=False) if not args.text
+              else " ".join(args.text))
     lines = overlay_lines(digest, max_lines=int(p.cfg.get("overlay.max_lines", 3)),
-                          max_chars=int(p.cfg.get("overlay.max_chars", 120)))
+                          max_chars=int(p.cfg.get("overlay.max_chars", 120)), fallback=bool(args.text))
     cmds = overlay_send(lines, p.store, p.client, time.time(), dedupe_min=float(p.cfg.get("overlay.dedupe_min", 10)),
                         dry_run=not args.send)
     print("\n".join(cmds) or "nothing new for the display")

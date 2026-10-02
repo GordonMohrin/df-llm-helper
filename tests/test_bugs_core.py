@@ -316,3 +316,135 @@ def test_bug124_guard_loop_flushes(tmp_path):
         p.kill()
         p.wait()
     assert b"Target fps" in got
+
+
+# ---------------------------------------------------------------- BUG-105 failed claude/config is no NEW GAME
+def test_bug105_failed_config_query_is_not_a_new_game(tmp_path, clk):
+    from df_llm_helper.client import MAX_REPORT_ID_CMD, MockClient
+    from df_llm_helper.config import load_config
+    from df_llm_helper.pilot import Pilot
+    cfg = load_config(tmp_path / "none.yaml", overrides={"paths": {"tools": str(tmp_path / "t"),
+                                                                    "scopes": str(tmp_path / "t" / "s"),
+                                                                    "gamelog": str(tmp_path / "g.txt")}})
+    m = MockClient.from_fixture_dir(FIX, clock=clk)
+    m.set(MAX_REPORT_ID_CMD, "5000")
+    p = Pilot(cfg, m, store=Store(), clock=clk)
+    p.digest()
+    gid = p.store.get("game_id")
+    assert gid and "?" not in gid
+    p.store.set("guard.state", {"gates_acked": [60]})
+    m.fail["claude/config"] = 1
+    s2 = p.snapshot()
+    assert s2.game_id is None and not p._new_game
+    assert "NEW GAME" not in p.digest(s2)
+    p.snapshot()                                                  # config is back
+    assert not p._new_game
+    assert p.store.get("guard.state")["gates_acked"] == [60] and p.store.get("game_id") == gid
+
+
+# ---------------------------------------------------------------- BUG-102 threats as objects
+def test_bug102_threat_names_not_dict_repr(tmp_path, capsys):
+    fx = tmp_path / "fx"
+    shutil.copytree(FIX, fx)
+    s = (fx / "status.txt").read_text(encoding="utf-8")
+    live = (EVID / "BUG-102" / "live_status_threats_excerpt.txt").read_text(encoding="utf-8")
+    threats = live[live.index('"threats"'):].strip().rstrip(",")
+    assert '"threats": []' in s
+    (fx / "status.txt").write_text(s.replace('"threats": []', threats), encoding="utf-8")
+    r = (fx / "report.txt").read_text(encoding="utf-8").replace('"feinde_auf_karte": 0', '"feinde_auf_karte": 5')
+    (fx / "report.txt").write_text(r, encoding="utf-8")
+    rc, out, _ = run(capsys, "--config", mkcfg(tmp_path), "--mock", fx, "digest")
+    line = next(ln for ln in out.splitlines() if "Threat:" in ln)
+    assert "{" not in line and "'n'" not in line
+    assert 'Snodub Emgen "Jackalluster", Goblin Thief; Smunstu' in line
+
+
+# ---------------------------------------------------------------- BUG-101 overlay does not consume the digest
+def test_bug101_overlay_is_read_only_and_never_sends_no_change(tmp_path, capsys):
+    base = ["--config", mkcfg(tmp_path), "--mock", FIX]
+    rc, out, _ = run(capsys, *base, "overlay")
+    assert rc == 0 and "Hunger" in out
+    rc, out, _ = run(capsys, *base, "digest")
+    assert "Hunger" in out and not out.startswith("No change")      # the orchestrator still gets it
+    for _ in range(4):
+        run(capsys, *base, "digest")
+    rc, out, _ = run(capsys, *base, "overlay", "--send")
+    assert "No change" not in out
+    from df_llm_helper.overlay import overlay_lines
+    assert overlay_lines("No change since 12:16 (2 open: Caravan, Hunger).", fallback=False) == []
+
+
+def test_bug101_overlay_send_trailing_backslash():
+    from df_llm_helper.client import MockClient
+    from df_llm_helper.overlay import overlay_send
+    cmds = overlay_send(["Path C:\\dir\\"], Store(), MockClient({}), 1000.0, dry_run=True)
+    assert cmds == ['claude/schau say "Path C:\\dir" 3']
+
+
+# ---------------------------------------------------------------- BUG-117 B dry runs do not consume the report
+def test_bug117b_check_dry_run_keeps_report(tmp_path, capsys):
+    base = ["--config", mkcfg(tmp_path), "--mock", FIX]
+    rc, out, _ = run(capsys, *base, "check", "--dry-run")
+    assert "Hunger" in out
+    rc, out, _ = run(capsys, *base, "check")
+    assert "Hunger" in out and not out.startswith("No change")
+
+
+# ---------------------------------------------------------------- BUG-111 inbox lines beyond the limit stay unread
+def test_bug111_inbox_overflow_comes_next_time(tmp_path, capsys):
+    c = mkcfg(tmp_path)
+    inbox = tmp_path / "tools" / "scopes" / "inbox-orchestrator.md"
+    texts = ["a1", "Tunnel fertig", "KARAWANE IST DA, bitte handeln", "Vorrat 20 Tage"] + [f"a{i}" for i in range(2, 8)]
+    inbox.write_text("".join(f"- von a, 12:{30 + i:02d}: {t}\n" for i, t in enumerate(texts)), encoding="utf-8")
+    run(capsys, "--config", c, "bus", "post", "bus", "message", "--from", "essen")
+    seen = ""
+    for _ in range(4):
+        seen += run(capsys, "--config", c, "--mock", FIX, "digest")[1]
+    for t in texts + ["bus message"]:
+        assert t in seen, t
+    assert "still unread" in seen
+
+
+# ---------------------------------------------------------------- BUG-117 report wording
+def test_bug117_wording(tmp_path, capsys, clk):
+    from df_llm_helper.client import MAX_REPORT_ID_CMD, MockClient
+    from df_llm_helper.config import load_config
+    from df_llm_helper.digest import DigestState, build_digest, status_line
+    from df_llm_helper.pilot import Pilot
+    from df_llm_helper.rules import ActionRecord
+    from df_llm_helper.toolsfs import FlagInfo
+    cfg = load_config(tmp_path / "none.yaml", overrides={"paths": {"tools": str(tmp_path / "t"),
+                                                                    "scopes": str(tmp_path / "t" / "s"),
+                                                                    "gamelog": str(tmp_path / "g.txt")}})
+    m = MockClient.from_fixture_dir(FIX, clock=clk)
+    m.set(MAX_REPORT_ID_CMD, "5000")
+    p = Pilot(cfg, m, store=Store(), clock=clk)
+    # A: age of an old queued warning
+    p.store.warn(clk.now().epoch - 3.5 * 3600, "reach", "r1", "UNREACHABLE: Well", "crit")
+    assert "UNREACHABLE: Well (4h ago)" in p.digest()
+    # C: a loss is not 'resolved'
+    snap = p.snapshot()
+    st = DigestState(facts={**snap.facts(), "pop": (snap.pop_total or 0) + 2}, ts=1.0)
+    t1, st1 = build_digest(snap, st, th=cfg.th)
+    assert "Population -2" in t1
+    t2, _ = build_digest(snap, st1, th=cfg.th)
+    assert "resolved: Losses" not in t2
+    # D: verify pass/fail, warn without internal key
+    assert "verify FAILED" in ActionRecord("r", "verify", "-", "fail", None, False, False, "x").line()
+    assert "verify ok" in ActionRecord("r", "verify", "-", "ok", None, False, True, "x").line()
+    w = ActionRecord("drink", "warn", "warn:Drinks 25 days: claude/trinken", "", None, False, True, "Drinks 25 days").line()
+    assert w == "drink: warn -> Drinks 25 days"
+    # E: no None
+    snap.jobs.dig = None
+    assert "None" not in status_line(snap)
+    snap.alerts.moods_active = ["None"]
+    t3, _ = build_digest(snap, DigestState(), th=cfg.th)
+    assert "None" not in t3
+    # G: pause.hold
+    t4, _ = build_digest(snap, DigestState(), th=cfg.th, flags={"pause.hold": FlagInfo("pause.hold", True, 6, "alarm")})
+    assert "pause.hold open (6 min): alarm" in t4 and "pause.hold.flag" not in t4
+    # F: unknown scope; first call for a scope shows the status
+    rc, _, err = run(capsys, "--config", mkcfg(tmp_path), "--mock", FIX, "digest", "--scope", "no_such_scope")
+    assert rc == 2 and "unknown scope" in err
+    rc, out, _ = run(capsys, "--config", mkcfg(tmp_path), "--mock", FIX, "digest", "--scope", "bau")
+    assert rc == 0 and out.startswith("Status")

@@ -25,8 +25,13 @@ def test_fixture_digest_within_600_tokens_and_second_call_short():
     t1, st = build_digest(s, DigestState(), th=TH, inbox=INBOX, now_hhmm="10:40")
     assert tokens(t1) <= 600
     assert "Hunger" in t1 and "Caravan" in t1 and t1.startswith("Status Y102 Hematite 12")
-    t2, st2 = build_digest(s, st, th=TH, inbox=INBOX, now_hhmm="10:40")
+    for _ in range(5):          # BUG-111: inbox lines beyond the display limit come with the next digests
+        t2, st = build_digest(s, st, th=TH, inbox=INBOX, now_hhmm="10:40")
+        if t2.startswith("No change"):
+            break
+        assert ">" in t2 and tokens(t2) <= 600
     assert tokens(t2) <= 30 and t2.startswith("No change")
+    assert len(st.inbox_seen) == len(set(INBOX))
     t3, _ = build_digest(s, DigestState(), th=TH)
     assert tokens(t3) <= 600
 

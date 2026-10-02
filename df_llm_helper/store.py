@@ -107,6 +107,10 @@ class Store:
             self.db.execute("INSERT INTO warnings(ts, source, key, level, text) VALUES(?,?,?,?,?)",
                             (ts, source, key, level, text))
 
+    def peek_warnings(self) -> list[dict]:
+        """Unshown warnings without marking them shown (read-only reports)."""
+        return [dict(r) for r in self.db.execute("SELECT * FROM warnings WHERE shown=0 ORDER BY id").fetchall()]
+
     def take_warnings(self) -> list[dict]:
         rows = self.db.execute("SELECT * FROM warnings WHERE shown=0 ORDER BY id").fetchall()
         if rows:

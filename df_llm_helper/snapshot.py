@@ -165,9 +165,11 @@ class Snapshot:
 
     @property
     def game_id(self) -> str | None:
-        if self.fort is None and self.embark is None:
+        # BUG-105: only a COMPLETE identity counts; a failed claude/config query (embark unknown) or a missing fort
+        # name must not look like a different save ("NEW GAME" would wipe acks, loop protection and warnings).
+        if not self.fort or not self.embark or len(self.embark) < 2 or None in self.embark[:2]:
             return None
-        return f"{self.fort}|{self.embark[0] if self.embark else '?'}|{self.embark[1] if self.embark else '?'}"
+        return f"{self.fort}|{self.embark[0]}|{self.embark[1]}"
 
     def hungry(self, limit: int) -> list:
         return [c for c in self.citizens if c.hunger is not None and c.hunger > limit]
@@ -305,7 +307,18 @@ def _parse_status(snap: Snapshot, j: dict) -> None:
     s.bars = _i(st.get("bars"))
     s.cloth = _i(st.get("cloth"))
     snap.alerts.status_alerts = [str(a) for a in _l(j.get("alerts"))]
-    snap.alerts.threats = [str(a) for a in _l(j.get("threats"))]
+    snap.alerts.threats = [t for t in (_threat(a) for a in _l(j.get("threats"))) if t]
+
+
+def _threat(t) -> str:
+    """BUG-102: claude/status gives threats as {"n": 1, "name": "..."} (older versions: plain strings)."""
+    if isinstance(t, dict):
+        name = str(t.get("name") or t.get("race") or "").strip()
+        n = _i(t.get("n"))
+        if not name:
+            return ""
+        return f"{n}x {name}" if n and n > 1 else name
+    return str(t).strip() if t is not None else ""
 
 
 def _parse_report(snap: Snapshot, j: dict) -> None:
