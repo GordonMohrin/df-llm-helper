@@ -139,12 +139,16 @@ class Waechter:
     def step(self) -> list[str]:
         self.log = []
         now = self.clock.now().epoch
-        self._alive()
         if self.last is None:
             self.last = self.tools.last_report_id() or 0
             if self.last <= 0:
                 self.last = self._int(self.client.run(MAX_REPORT_ID_CMD).stdout) or 0
-        mx = self._int(self._q(MAX_REPORT_ID_CMD).stdout)
+        rmx = self._q(MAX_REPORT_ID_CMD)
+        if not rmx.ok:          # BUG-106: a watcher that cannot see the game must not count as alive
+            raise RuntimeError("cannot read reports (" + ((rmx.stderr or "").strip()[:100]
+                                                         or "dfhack-run not reachable") + ")")
+        self._alive()
+        mx = self._int(rmx.stdout)
         if mx is not None and mx >= 0 and mx < self.last:
             self.last = mx
             self.tools.set_last_report_id(mx)

@@ -391,19 +391,23 @@ def plan_trade(own: Sequence[TradeItem], offer: Sequence[TradeItem], ratio: floa
     # buy side: only purchasable, valuable, non-empty items in listed categories
     pw = priority_weights(priorities)
     skipped_cat = skipped_zero = 0
+    skipped_names: list[str] = []
     buys: list[_Buy] = []
     for it in offer_l:
         if it.qty == 0:
             continue
         if it.prio_cat not in pw:
             skipped_cat += 1
+            skipped_names.append(f"{it.name} ({it.prio_cat})")
             continue
         if it.value == 0:
             skipped_zero += 1
             continue
         buys.append(_Buy(it, pw[it.prio_cat]))
     if skipped_cat:
-        notes.append(f"{skipped_cat} offer items in unlisted categories are not bought")
+        notes.append(f"{skipped_cat} offer items in unlisted categories are not bought: "
+                     + ", ".join(skipped_names[:5]) + (" ..." if len(skipped_names) > 5 else "")
+                     + " (add the category to 'priorities')")
     if skipped_zero:
         notes.append(f"{skipped_zero} offer items with value 0 skipped")
     order = sorted(buys, key=lambda b: (-b.pw, -b.v, b.item.id))
