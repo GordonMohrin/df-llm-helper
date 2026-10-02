@@ -1,6 +1,6 @@
 # BUG-207: `digcheck` reports `ok (0 tiles)` (exit 0) when nothing was checked: unknown stage name, empty CSV, non-`#dig` CSV; R1/R4 are skipped for unrevealed tiles
 
-- **Status:** open
+- **Status:** fixed in e47790f
 - **Severity:** S2 (typo in a stage name = green light; the checker is meant to gate dig orders)
 - **Area:** `df_llm_helper/features/digcheck.py` `parse_stages` / `parse_qf_csv` / `cmd_digcheck` (no check for an empty target set), `check_targets` (the `if ch == "?": ... continue` comes before R1 and R4)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -40,3 +40,6 @@ Move R1/R4 above the unrevealed `continue` (geometry only). If `not targets`: pr
 
 ## Info needed
 None. Also noted (S3, same area): coordinates outside the map (`digcheck 130 -5 -5 2 2`, `digcheck 999 0 0 5 5`) are handled as "unrevealed (not judged)" instead of "outside the map (192x192x153)".
+
+## Fix
+0 targets (unknown stage, empty CSV, CSV without `#dig`) -> `digcheck <name>: refused - nothing to check (<cause>)`, rc 2. R1/R4 (and negative coordinates as `outside the map`) are judged before the unrevealed `continue`. Test: `test_bug207_*` (recorded dump `fixtures/bugs/BUG-207/l_d_r1.jsonl`). Not done: tiles beyond the map size (no map size in the dump) stay 'unrevealed'.

@@ -1,6 +1,6 @@
 # BUG-206: `water watch` proposes the emergency wall at a choke point that lies BEHIND the water front (default `fort_center: None` disables the "between front and fort" test)
 
-- **Status:** open
+- **Status:** fixed in f15d3b5
 - **Severity:** S2 (wrong action advice during a flood: the runbook `rb21_flut` would wall off the dry side of the water)
 - **Area:** `df_llm_helper/water.py` `notwand_for` (`center is None or ...`), `DEFAULTS["fort_center"] = None`, `WaterWatch.watch`
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -36,3 +36,6 @@ Default the centre to the fort point of `claude/config` (or the centre of `fort_
 
 ## Info needed
 Gordon: confirm that (128,99,z128) is the *existing* emergency wall (`LAYOUT-run5.md` 11, MANUAL 9.8). If yes, any water inside the fort box is already behind the wall and the right advice is "wall is breached/not tight: check (128,99,128)".
+
+## Fix
+The fort centre defaults to the centre of `water.fort_box` (`water.fort_center` still wins); a front inside the fort box gets no proposal for a choke point outside the box but `Emergency wall: the water is already inside the fort box, the planned choke points ... lie behind the front - wall breached/not tight? check them; wall off the front by hand`. Test: `test_bug206_*` (replays `fixtures/bugs/BUG-206/`). Gordon's confirmation that (128,99,z128) is the existing wall matches this wording.

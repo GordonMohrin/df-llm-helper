@@ -1,6 +1,6 @@
 # BUG-212: `defense design --name` is not validated (path traversal out of `--out`, spaces break the printed `quickfort run` commands); `--lane-len 0` is silently ignored, `--lane-len 9999` burns 17 s CPU
 
-- **Status:** open
+- **Status:** fixed in e47790f
 - **Severity:** S2 (write outside the target folder; generated build commands that quickfort cannot parse)
 - **Area:** `df_llm_helper/features/defense.py` `_design` (`name = args.name or ...`, `od / f"{name}.csv"`, `if args.lane_len:`), `apply_commands`; `df_llm_helper/planners/defense.py` (lane search)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -40,3 +40,6 @@ No validation of `name`; `if args.lane_len:` treats 0 as "not given".
 
 ## Info needed
 None.
+
+## Fix
+`--name` must match `[A-Za-z0-9_-]{1,40}` (rc 2), `--lane-len` must be >= 3 (0 is no longer ignored) and a lane longer than the walkable tiles of the terrain fails at once. Test: `test_bug212_*`.

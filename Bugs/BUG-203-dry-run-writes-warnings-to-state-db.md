@@ -1,6 +1,6 @@
 # BUG-203: `--dry-run` is not dry for `mood reserve`, `siege`, `caravan`: critical/warn rows are written to state.db and show up in the next `check`
 
-- **Status:** open
+- **Status:** fixed in ab33904
 - **Severity:** S2 (a dry run can raise a CRIT warning that wakes the orchestrator; verified for siege, mood reserve and caravan)
 - **Area:** `df_llm_helper/cli.py:705` (`cmd_mood`: `mm.reserve()` gets no `dry`), `df_llm_helper/moods.py:279` (`reserve`: `store.warn` unconditional); `df_llm_helper/siege.py` `SiegeRunner.run` `finally:` block (`self.store.warn(...)` for every `flow.notify` even with `dry=True`); `df_llm_helper/caravan.py` `step` (`self.store.warn(... "caravan:review" ...)` and in `_release_stuck`, no `dry` guard)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -39,3 +39,6 @@ Pass `dry` to `MoodManager.reserve`, `SiegeRunner.run` (`finally`) and `CaravanP
 
 ## Info needed
 Please check the other `--dry-run` commands of the repo for the same pattern (`workload`, `care`, `water watch`, `tools`, `remote` looked clean when reading the code: their `store.warn`/`store.set` calls are inside `if not dry`; not verified row by row in the DB).
+
+## Fix
+`mood reserve --dry-run` passes `dry` (`MoodManager.reserve(dry=)`), `SiegeRunner.run` writes no warnings in a dry run, `CaravanPilot` writes `caravan:review`/`caravan:stuck` warnings only in a real run. Other `--dry-run` commands checked: workload/care/water/tools/remote/bottleneck/forecast/reboot already guard their writes. Generic part (mock/replay state isolation): BUG-104. Test: `test_bug203_*`.

@@ -1,6 +1,6 @@
 # BUG-209: live `reach` reports the mandatory point "Kitchens (106,85,z132)" as UNREACHABLE: the point lies on a constructed wall; the advice "remove the construction" is dangerous
 
-- **Status:** open
+- **Status:** fixed in e47790f
 - **Severity:** S2 (permanent false CRIT every `check` interval - `reach:unreachable` wakes the orchestrator - and a harmful repair suggestion)
 - **Area:** `data/reach.yaml` (shipped EXAMPLE values from run 5), `df_llm_helper/features/reach.py` (cause search `cut by construction ...`)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -36,3 +36,6 @@ Data problem plus a weak diagnosis: when the *target tile itself* is a construct
 
 ## Info needed
 Gordon: please confirm the coordinates of the kitchen and the stills (the buildings list above is truncated to 150 entries: `truncated: true`) and whether the wall at (103..112,85,z132) is the intended farm-terrace boundary. A live check after correcting `data/reach.yaml`: `python -m df_llm_helper reach` should print `Reachable: 7/7 mandatory points`.
+
+## Fix
+A mandatory point whose own tile is a wall (`#`, `A`, `C`) is reported as `point on a wall tile: fix the points file` with level `warn` (no CRIT) and never with the advice to remove the construction; the removal advice for real cutting constructions is marked `(player decision)`. `data/reach.yaml`: Kitchens (106,98,z132) and Stills (103,98,z132) from `claude/buildings` (kitchen 1367, still 1366). Test: `test_bug209_*` (replay `fixtures/bugs/BUG-209/l_r1.jsonl`). Live check: `python -m df_llm_helper reach` should print `Reachable: 7/7 mandatory points`.

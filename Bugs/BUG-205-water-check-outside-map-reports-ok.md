@@ -1,6 +1,6 @@
 # BUG-205: `water check x y z` answers `ok: no water nearby` (exit 0) for coordinates outside the map
 
-- **Status:** open
+- **Status:** fixed in f15d3b5
 - **Severity:** S2 (a "green" answer of the pre-dig safety check for a tile that does not exist; typos in x/y/z, or a swapped order such as z x y, pass silently)
 - **Area:** `df_llm_helper/water.py` `check_near` (empty `tiles` list -> `ok`), `lua/pilot_water.lua` (`near`, answers `ok:true, tiles:[]` for tiles without a map block); related to BUG-409 (box handling in the Lua scripts)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -39,3 +39,6 @@ In `check_near`: `if not j.get("self")` (or `tiles` empty) -> `Verdict("unsafe",
 
 ## Info needed
 None.
+
+## Fix
+`check_near` answers `unsafe: tile ... outside the map or not readable` when the Lua answer has no record of the tile itself; `WaterWatch.check` validates x/y/z against `claude/status.map_size` (and negative values) before the Lua call; an unrevealed tile itself is `unsafe`. Test: `test_bug205_*` (recorded answers `fixtures/bugs/BUG-205/`).

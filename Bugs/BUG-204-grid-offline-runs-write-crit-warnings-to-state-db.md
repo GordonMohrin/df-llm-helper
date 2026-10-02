@@ -1,6 +1,6 @@
 # BUG-204: offline `--grid` runs of `perimeter`, `reach`, `digcheck` write CRIT warnings and kv state into the configured (live) state.db
 
-- **Status:** open
+- **Status:** fixed in e47790f
 - **Severity:** S2 (a documented offline fixture test raised a false critical alarm "forbidden access to the core" in the live store; it was displayed once - warning row 14 in the live `data/state.db`, now `shown=1`)
 - **Area:** `df_llm_helper/features/perimeter.py` `Perimeter.evaluate` (`store.warn`, `store.set` guarded only by `dry`), `df_llm_helper/features/reach.py` (`reach.last`, `reach:unreachable` warning), `df_llm_helper/features/digcheck.py` (`digcheck.unreported`); docs `docs/manual-v3/01-perimeter.md`, `02-digcheck.md`, `11-reach.md` ("`--grid ...` offline on a grid fixture")
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -41,3 +41,6 @@ Treat `--grid` like `--mock` in `cli.main` (use `mock_overrides()` when any feat
 
 ## Info needed
 Gordon / orchestrator: warning row 14 (and kv `perimeter.sig/last`) in the live `data/state.db` are test artefacts of mine. I wanted to delete row 14 but the sandbox refused the DELETE (write action on the live store) and I left it. Please ignore it, or run one real `python -m df_llm_helper perimeter` to overwrite `perimeter.last/sig`. Only `perimeter` was affected in the live DB (reach/digcheck grid runs were done with `--mock`/temp state).
+
+## Fix
+`perimeter`, `reach` and `digcheck` with `--grid FILE` use a throw-away in-memory store: no warnings, kv or action rows in the configured state.db. Generic part (mock/replay isolation): BUG-104. Test: `test_bug204_grid_runs_do_not_touch_state`. The leaked live row 14 / `perimeter.sig/last` are overwritten by the next real `perimeter` scan.

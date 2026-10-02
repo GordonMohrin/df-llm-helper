@@ -1,6 +1,6 @@
 # BUG-210: live `hygiene`: no item is classified as `fort` (12.9k loose items = `cavern`), so marking finds 0 candidates, the dump diagnosis is wrong, and "125 dwarf corpses > 14 coffins: ghost risk" contradicts `claude/gesund krypta` (0 open corpses)
 
-- **Status:** open
+- **Status:** fixed in c387d5d
 - **Severity:** S2 (wrong area split drives `hygiene mark` and the cause text; the `!!` ghost-risk line is probably a false alarm)
 - **Area:** `lua/pilot_hygiene.lua` `fort_ref()` / `reachable()` / `area_of()` (reference tile = `claude/config` `FORT_REFS[1]` = (94,96,133)), `is_dwarf_corpse()` (`hist_figure_id >= 0`, fail-safe `not ok`); `df_llm_helper/features/hygiene.py` (`diagnose`, `status`)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -39,3 +39,6 @@ Use any of `FORT_REFS` (reachable-from-any), or read the core from `reach.start`
 
 ## Info needed
 Gordon: (1) are there really ~125 dwarf corpses/pieces lying loose in the fort? (`gesund krypta` says 0). (2) Should `FORT_REFS[1]` in `dwarf-fortress/lua/claude/config.lua` be changed to a tile inside the fort? I did not touch the live tool.
+
+## Fix
+`pilot_hygiene.lua`: reachability from every `FORT_REFS` entry plus up to 5 citizens standing on inside tiles; the corpse COUNT uses the fort race only (named invaders = `other`; the fail-safe mark filter is unchanged). `hygiene`: `!! area classification failed ...` when 0 of > 1000 loose items are in the fort (the dump diagnosis is then skipped); the ghost alarm uses `claude/gesund krypta.leichen_offen` when present. Test: `test_bug210_*` (replay `fixtures/bugs/BUG-210/hygiene_live.jsonl`, Lua mock). Still worth a live look (Gordon): `FORT_REFS[1]` in `lua/claude/config.lua` is a surface point.

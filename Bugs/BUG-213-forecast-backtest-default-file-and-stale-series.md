@@ -1,6 +1,6 @@
 # BUG-213: `forecast backtest` default `--file` points outside the repo (traceback); `--horizon 0/-3` and garbage files are accepted silently; live `forecast` shows "Food 267±6409 days" from a series with a 5,000-day-old point
 
-- **Status:** open
+- **Status:** fixed in c34cd95
 - **Severity:** S3 (S2 for the stale-series part if the line is used for decisions; it carries `[confidence 0.3]`)
 - **Area:** `df_llm_helper/cli.py:1056` (`--file` default `Path(__file__).resolve().parents[2] / "metrics.csv"`), `cmd_forecast` (`series_from_metrics`), `df_llm_helper/forecast.py` (series window / band)
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -42,3 +42,6 @@ Drop points older than e.g. 30 game days (or reset the series when the gap > N d
 
 ## Info needed
 None. (Live check for Gordon once time runs: after ~5 `check` cycles the line should converge towards `claude/status` food/drink days, or say `n/a`.)
+
+## Fix
+Default `--file` = `runtime/metrics.csv` (else `../metrics.csv`), one-line errors for a missing file (`journal metrics --out runtime/metrics.csv` hint) or a file without the metrics header, `--horizon` >= 1, `0 predictions` explained. Forecaster drops points older than `max_age_days` (60 game days) and shows no +- band below confidence 0.5 (the live series reduces to 1 point -> `Food ?` until new points arrive). Test: `test_bug213_*`.
