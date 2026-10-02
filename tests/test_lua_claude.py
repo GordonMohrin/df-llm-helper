@@ -403,3 +403,12 @@ def test_config_aquifer_box_argument_is_used(tmp_path):
     out, _ = run("config", "aquifer", 1, 2, tmp_path=tmp_path, setup=setup)
     assert "usage" in one_json(out)["error"]
 
+
+
+# ---------------------------------------------------------------- BUG-418 (lint de-duplication)
+def test_lint_paths_reports_nested_dirs_once():
+    from df_llm_helper.lint import lint_paths
+    once = lint_paths([ROOT / "lua"])
+    twice = lint_paths([ROOT / "lua" / "claude", ROOT / "lua"])
+    assert sorted(map(str, once)) == sorted(map(str, twice))
+    assert not any(f.file.endswith("bauprog.lua") for f in once)

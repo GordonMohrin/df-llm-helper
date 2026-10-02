@@ -79,7 +79,9 @@ local function note(st, s)
   while #st.log > 30 do table.remove(st.log, 1) end
 end
 
+-- undiscovered tiles: no shape (fair play: waende_offen must not count walls in unrevealed rock, BUG-418)
 local function shape_at(x, y, z)
+  if util.is_hidden(x, y, z) then return nil end
   local tt = dfhack.maps.getTileType(x, y, z)
   return tt and df.tiletype_shape[df.tiletype.attrs[tt].shape] or nil
 end
