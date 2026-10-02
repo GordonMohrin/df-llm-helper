@@ -8,14 +8,26 @@
 
 ## Why this exists
 
-Run 5 was not the first attempt. Run 4 died because the game kept running for years at 250 fps while nobody was watching, and the watchdog was blind. In another log, 15 dwarves died of dehydration in a single day without the reporting picking up the pattern.
+**To save tokens and to control the game faster.** Without a helper, every check means the LLM reads raw status dumps, re-reads its notes and re-derives known fixes, and every routine fix costs a full LLM turn. That is expensive, and it is slow: an LLM turn takes seconds to minutes, while a Dwarf Fortress fortress can get into trouble in a few in-game days.
 
-The lesson: an LLM is good at judgement and bad at watching a real-time game every few seconds. Polling the game with an LLM is slow, expensive and still misses things. So df-llm-helper does the watching deterministically and hands the LLM only what needs a decision:
+df-llm-helper moves everything that does not need judgement out of the LLM:
 
-- **One call, one short report.** `check` collects the whole game state and returns a *delta* of at most ~600 tokens: what changed, what is urgent, what is still open.
+| Task | Without helper | With df-llm-helper |
+|---|---|---|
+| Situation check | read 8–15 KB of status/report/inbox ≈ 3–5k tokens | delta report ≤ 600 tokens (Run 5 sample: ~170); "no change" ≈ 15 tokens |
+| Routine fixes (flags, services, fps, stockpiles…) | one LLM turn each, ~1–3k tokens | **0 tokens**, autopilot rules |
+| Knowledge for one symptom | read a whole notes file (30–100 KB) | `kb search` / `runbook diagnose` ≤ 400 tokens |
+| Starting a sub-agent | read 15–40 KB of docs ≈ 5–12k tokens | `brief <scope>` ≤ 1,500 tokens |
+| Reaction time | next LLM check (minutes) | watcher every 2 s, deterministic |
+
+<sub>"Without helper" figures are the measured/estimated baseline from the runs before, see `docs/SPEC.md` §7; token ≈ characters / 3.</sub>
+
+How it gets there:
+
+- **One call, one short report.** `check` collects the whole game state in one batched call and returns only what changed, what is urgent and what is still open.
 - **Routine runs itself.** Maintenance rules (food flags, stockpiles, caravans, moods, sieges, water…) run on an autopilot with cooldowns and loop protection. Every write action is logged with its reason.
-- **Known problems have runbooks.** `runbook diagnose` matches symptoms to fixes learned in earlier runs.
-- **No unsupervised time-lapse.** A deadman switch and a tempo governor slow the game down when the orchestrator stops checking in. Never again Run 4.
+- **Known problems have runbooks.** `runbook diagnose` matches symptoms to fixes learned in earlier runs, instead of the LLM working them out again.
+- **The LLM sleeps until it is needed.** `wake` filters events down to decision-ready ones; a deadman switch and tempo governor slow the game when the orchestrator stops checking in. (Run 4 died exactly that way: years at 250 fps with nobody watching.)
 - **Fair play is enforced in code**, not by prompt. `createitem`, `dig-now`, `reveal` and friends are refused by the client and a Lua linter.
 
 ```
