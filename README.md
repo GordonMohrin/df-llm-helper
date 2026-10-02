@@ -2,9 +2,13 @@
 
 **Claude ran a real game of Dwarf Fortress for 10 hours: from 7 dwarves to 158 citizens over seven in-game years, with cheat commands blocked in code.** This repo is the layer that made it possible.
 
+![Claude (left) running the fortress Windrings in Dwarf Fortress (right): Year 118, 174 citizens, Metropolis rank](docs/img/claude-playing-windrings.png)
+
+<sub>Left: Claude as orchestrator, reporting what its sub-agents did (new dig designations, living quarters, storage hall). Right: the same fortress, still alive in Year 118 with 174 citizens and Metropolis rank.</sub>
+
 ![Run 5 "Windrings": citizens over real time, 7 at embark to 158 in Year 107](docs/img/run5-population.svg)
 
-<sub>Real data from `fixtures/run5_live/metrics_run5.csv` (DF 53.16 + DFHack, 2026).</sub>
+<sub>The first 10 hours of that fortress, real data from `fixtures/run5_live/metrics_run5.csv` (DF 53.16 + DFHack, 2026).</sub>
 
 ## Why this exists
 
