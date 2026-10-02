@@ -463,3 +463,18 @@ def test_bug109_real_blueprints_from_evidence_are_ok():
     assert has_errors(validate_blueprint("#build\nwj,wj,wj\nwj,wm,wj\n"))
     assert has_errors(validate_blueprint("#zone\nZ\n"))
     assert has_errors(validate_blueprint('#zone\n"n{name=""x}"\n'))
+
+
+# ---------------------------------------------------------------- BUG-121 metrics rows
+def test_bug121_one_kpi_row_per_measurement_and_budget_header(tmp_path, capsys):
+    base = ["--config", mkcfg(tmp_path), "--mock", FIX]
+    for _ in range(3):
+        run(capsys, *base, "digest")
+    rc, out, _ = run(capsys, *base, "metrics")
+    rows = out.strip().splitlines()
+    assert len(rows) == 2                                   # header + ONE row for three digests within seconds
+    head, row = rows[0].split(";"), rows[1].split(";")
+    for col in ("tierkadaver", "sawdeadbody", "death", "ghosthaunt"):
+        assert row[head.index(col)] != ""
+    rc, out, _ = run(capsys, *base, "budget")
+    assert "Bytes sent/printed" in out

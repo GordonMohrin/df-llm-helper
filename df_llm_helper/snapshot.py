@@ -110,6 +110,8 @@ class Alerts:
     corpses_unburied: int | None = None
     stress_high: int | None = None
     refuge_ok: bool | None = None
+    animal_corpses: int | None = None                         # claude/report kadaver_tiere_in_festung
+    neg_thoughts: dict | None = None                          # claude/report negative_gedanken_top {name: count}
 
 
 @dataclass
@@ -353,6 +355,14 @@ def _parse_report(snap: Snapshot, j: dict) -> None:
     a.enemies = _i(j.get("feinde_auf_karte"))
     a.moods_active = [str(x) for x in _l(j.get("stimmungen_aktiv"))]
     a.corpses_unburied = _i(j.get("zwergenleichen_unbestattet"))
+    a.animal_corpses = _i(j.get("kadaver_tiere_in_festung"))
+    if "negative_gedanken_top" in j:
+        neg = {}
+        for x in _l(j.get("negative_gedanken_top")):
+            m = re.match(r"^\s*([A-Za-z_]+)\s*=\s*(\d+)", str(x))
+            if m:
+                neg[m.group(1)] = int(m.group(2))
+        a.neg_thoughts = neg
     a.stress_high = _i(j.get("hoher_stress"))
     if a.civ_alert is None:
         a.civ_alert = _i(j.get("zivilwarnung"))

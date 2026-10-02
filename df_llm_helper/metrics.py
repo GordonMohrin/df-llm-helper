@@ -17,7 +17,10 @@ METRICS_HEADER = ["echtzeit", "spieldatum", "buerger", "erwachsene", "kinder", "
 # KPI name in df-llm-helper -> column in metrics.csv
 KPI_COLUMNS = {"pop": "buerger", "adults": "erwachsene", "children": "kinder", "idle": "ohne_auftrag",
                "meals": "mahlzeiten", "drinks": "getraenke", "plants": "pflanzen", "corpses": "zwergenleichen",
-               "squad_members": "trupp", "dig_jobs": "grabjobs", "enemies": "feinde", "civ_alert": "zivilwarnung"}
+               "squad_members": "trupp", "dig_jobs": "grabjobs", "enemies": "feinde", "civ_alert": "zivilwarnung",
+               "animal_corpses": "tierkadaver", "neg_sawdeadbody": "sawdeadbody", "neg_death": "death",
+               "neg_ghosthaunt": "ghosthaunt"}
+KPI_MIN_INTERVAL_S = 60       # BUG-121: one row per measurement, not per digest call
 EXTRA_KPIS = ["drink_days", "food_days", "idle_pct", "jobs_open", "fps"]
 
 
@@ -58,7 +61,8 @@ def budget_rows(store, now: float) -> list[dict]:
 def budget_report(store, now: float, daily_budget: int) -> tuple[str, bool]:
     rows = budget_rows(store, now)
     total = sum(r["tokens"] for r in rows)
-    lines = ["Scope | Calls | Bytes in/out | Tokens | Trend", "---|---|---|---|---"]
+    # BUG-121: 'sent' = bytes of the commands sent to DF, 'printed' = bytes of the output (not what DF returned)
+    lines = ["Scope | Calls | Bytes sent/printed | Tokens | Trend", "---|---|---|---|---"]
     for r in rows:
         lines.append(f"{r['scope']} | {r['calls']} | {r['bytes_in']}/{r['bytes_out']} | {r['tokens']} | {r['trend']}")
     if daily_budget <= 0:                 # no daily budget (0 = off)
@@ -70,20 +74,34 @@ def budget_report(store, now: float, daily_budget: int) -> tuple[str, bool]:
     return "\n".join(lines), over
 
 
-def record_kpis(store, ts: float, snap) -> int:
+def record_kpis(store, ts: float, snap, *, min_interval_s: float = KPI_MIN_INTERVAL_S) -> int:
+    """Stores the KPIs of one measurement. BUG-121: a call within min_interval_s of the last row whose values did not
+    change adds nothing (several digests per minute are one measurement); the four ghost/miasma columns are filled
+    like lua/claude/report.lua does (tierkadaver, sawdeadbody/death/ghosthaunt from negative_gedanken_top, 0 if absent)."""
     f = snap.facts()
     f["children"] = snap.children
     f["corpses"] = snap.alerts.corpses_unburied
-    n = 0
+    f["animal_corpses"] = snap.alerts.animal_corpses
+    neg = snap.alerts.neg_thoughts
+    if neg is not None:
+        f["neg_sawdeadbody"], f["neg_death"], f["neg_ghosthaunt"] = (neg.get("SawDeadBody", 0), neg.get("Death", 0),
+                                                                     neg.get("GhostHaunt", 0))
+    vals = {}
     for k in list(KPI_COLUMNS) + EXTRA_KPIS:
         v = f.get(k)
         if isinstance(v, bool):
             v = int(v)
         if isinstance(v, (int, float)):
-            store.db.execute("INSERT INTO kpis(ts, game_date, name, value) VALUES(?,?,?,?)",
-                             (ts, snap.date_text or "", k, float(v)))
-            n += 1
-    return n
+            vals[k] = float(v)
+    last = store.db.execute("SELECT MAX(ts) AS ts FROM kpis").fetchone()
+    if last and last["ts"] is not None and 0 <= ts - last["ts"] < min_interval_s:
+        prev = {r["name"]: r["value"] for r in store.db.execute("SELECT name, value FROM kpis WHERE ts=?", (last["ts"],))}
+        if prev == vals:
+            return 0
+    for k, v in vals.items():
+        store.db.execute("INSERT INTO kpis(ts, game_date, name, value) VALUES(?,?,?,?)",
+                         (ts, snap.date_text or "", k, v))
+    return len(vals)
 
 
 def export_csv(store) -> str:
