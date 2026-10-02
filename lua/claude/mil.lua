@@ -17,13 +17,14 @@
 --   uniform <squad> <tpl_idx> [weapon_subtype] [--apply]   uniform template (entity.uniforms[i]) onto ALL positions; fixed weapon
 --                                              (default 1 = ITEM_WEAPON_AXE_BATTLE; -1 = template 'best melee weapon'); triggers update
 --   barracks <squad> <zone_id> [--apply]       assign barracks as training room (updateRoomAssignments train=true)
---   update                                     trigger 'Update equipment' (plotinfo.equipment.update.* = true)
+--   update [--apply]                           trigger 'Update equipment' (plotinfo.equipment.update.* = true)
 --   workmode <squad> on|off [--apply]          WORK MODE (E18 solution): squad works as militia miners. on = uniform only weapon pick (no armor),
 --                                              delete old weapon/armor assignments, routine 0 (Off duty, civilian clothes), labor MINE + work detail Miners.
 --                                              off = battle axe + metal armor (template 1) + constant training (routine 2). Without --apply display only.
 --   pickfix [--apply] [--ensure ids]           E18 SOLUTION run 5: releases reserved free picks, removes pick uniform specs of all squads, update.weapon
 --                                              -> engine distributes work picks to all MINE dwarves (see pickfix.lua). Replaces workmode on.
---   refuge                                     create/check refuge burrow + civilian alert (z141 x135..145 y152..160 + stairs N3)
+--   refuge [--apply]                           create/check refuge burrow (config.ZUFLUCHT.rects) + civilian alert; existing
+--                                              tiles are only replaced when rects are configured
 --   guard start|stop|status                    guard job (60 ticks): visible intruder in the INTERIOR (config.INNEN_BOXEN) -> tools/killorder.lua --watch
 -- Protection: pcall everywhere, log, no change without --apply; station/kill/release only with --experimental AND
 -- after agreement with scope agent militaer. Fair play: no unit/item manipulation, no reveal.
@@ -553,6 +554,7 @@ local ok, err = pcall(function()
     out(plan)
 
   elseif cmd == 'update' then
+    if dry then out({ dry = true, would = 'Ausruestungs-Zuweisung anstossen (update.*); mit --apply ausfuehren' }) return end
     for _, f in ipairs{ 'weapon', 'armor', 'shoes', 'shield', 'helm', 'gloves', 'pants' } do df.global.plotinfo.equipment.update[f] = true end
     log('update equipment')
     out({ ok = true, hinweis = 'Ausruestungs-Zuweisung angestossen (wie UI Update equipment); Ergebnis nach einigen Ticks mit `equip`' })
@@ -587,6 +589,12 @@ local ok, err = pcall(function()
           killwatch_active = (W and W.active) or false })
 
   elseif cmd == 'refuge' then
+    local Z = cfg.ZUFLUCHT
+    local rects = Z and Z.rects or {}
+    if dry then
+      out({ dry = true, rects = #rects, would = 'Zuflucht-Burrow + Zivilwarnung anlegen/pruefen; mit --apply ausfuehren' })
+      return
+    end
     local utils = require('utils')
     local burrows, alerts = df.global.plotinfo.burrows, df.global.plotinfo.alerts
     local b = dfhack.burrows.findByName('Zuflucht', true)
@@ -596,9 +604,9 @@ local ok, err = pcall(function()
       burrows.list:insert('#', b)
     end
     -- Run 4: tiles from config.ZUFLUCHT (placeholder at the wagon until bau fixes an underground refuge); old tiles (run 3: z141) are removed first
-    local Z = cfg.ZUFLUCHT
-    pcall(dfhack.burrows.clearTiles, b)
-    for _, r in ipairs(Z and Z.rects or {}) do
+    -- without configured rects keep the existing tiles (clearing would wipe the refuge of the civilian alert, BUG-407)
+    if #rects > 0 then pcall(dfhack.burrows.clearTiles, b) end
+    for _, r in ipairs(rects) do
       for y = r[2], r[4] do for x = r[1], r[3] do for z = r[5], (r[6] or r[5]) do dfhack.burrows.setAssignedTile(b, xyz2pos(x, y, z), true) end end end
     end
     while #alerts.list < 2 do

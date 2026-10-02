@@ -110,8 +110,11 @@ if not (dfhack_flags and dfhack_flags.module) then
   if a[1] == 'purge' then
     local n, kept, jobs = purge()
     util.emit({ entfernt = n, gueltig = kept, jobs_entfernt = jobs })
+  elseif not a[1] or a[1]:sub(1, 2) == '--' then
+    -- no ore given: usage only (it used to designate HEMATITE tiles, BUG-407)
+    util.emit({ error = 'Erz fehlt', usage = 'claude/erzdig <ORE|ALL|GEMS> <zmin> <zmax> [max] [--dry] | purge' })
   else
-    local ore, zmin, zmax = a[1] or 'HEMATITE', tonumber(a[2]) or cfg.dig_min_z(cfg.aquifer_seen()), tonumber(a[3]) or (cfg.SURFACE_Z - 1)
+    local ore, zmin, zmax = a[1], tonumber(a[2]) or cfg.dig_min_z(cfg.aquifer_seen()), tonumber(a[3]) or (cfg.SURFACE_Z - 1)
     local max = tonumber(a[4]) or 60
     local dry = false
     for _, v in ipairs(a) do if v == '--dry' then dry = true end end

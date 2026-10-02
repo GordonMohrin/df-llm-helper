@@ -272,8 +272,11 @@ elseif cmd == 'gather' and (arg2 == 'on' or arg2 == 'off') then
 elseif cmd == 'gather' then
   local k, avail = gather(tonumber(arg2) or GATHER_BATCH)
   print(('markiert %d PH (verfuegbar %d)'):format(k, avail))
-else
+elseif cmd == 'status' or cmd == 'once' then
   local m = (cmd == 'status') and measure() or run()
   if cmd == 'status' then m.banned = cook_banned() and true or false end
-  print(require('json').encode(m))
+  util.emit(m)
+else
+  -- unknown sub-command (typo, --help, 'status' of a script without one): usage only, no work round (BUG-407)
+  util.emit({ error = 'unbekannter Befehl: ' .. tostring(cmd), usage = 'claude/essen start|stop|once|status|gather [n|on|off]' })
 end

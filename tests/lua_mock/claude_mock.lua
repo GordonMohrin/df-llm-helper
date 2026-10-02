@@ -3,6 +3,7 @@
 --   reqscript('claude/<name>') loads <dir of script, or MOCK_SCRIPT_DIR>/<name>.lua as a module (dfhack_flags.module = true, own environment).
 --   `df` auto-vivifies: unknown fields are empty, callable tables (calling one returns nil), so scripts load without
 --   a game. MOCK_SETUP = path to a Lua file run after the base setup (defines units, screen text, globals ...).
+--   MOCK_AFTER = Lua file run after the script (prints state for assertions).
 --   MOCK_DECIMAL_COMMA=1 emulates a German LC_NUMERIC in the json encoder (floats printed as 250,0 like the live game).
 --   dfhack.df2utf converts CP437 -> UTF-8 like the real one (incl. control characters -> glyphs, e.g. \n -> U+25D9).
 local SCRIPT_DIR = os.getenv('MOCK_SCRIPT_DIR') or (arg[1] or ''):match('^(.*)/[^/]*$') or '.'
@@ -10,7 +11,10 @@ local SCRIPT_DIR = os.getenv('MOCK_SCRIPT_DIR') or (arg[1] or ''):match('^(.*)/[
 ------------------------------------------------------------------ auto-vivifying proxy for df
 local auto_mt = {}
 local function auto() return setmetatable({}, auto_mt) end
-auto_mt.__index = function(t, k) local v = auto(); rawset(t, k, v); return v end
+auto_mt.__index = function(t, k)
+  if type(k) == 'number' then return nil end   -- empty vectors (ipairs/loops terminate)
+  local v = auto(); rawset(t, k, v); return v
+end
 auto_mt.__call = function() return nil end
 auto_mt.__len = function() return 0 end
 
@@ -76,7 +80,17 @@ local function encode(v)
   return '"<' .. t .. '>"'
 end
 package.loaded['json'] = { encode = encode, decode = function() return nil end }
-package.loaded['gui'] = auto()
+-- any other DFHack library module (gui, utils, dfhack.workshops ...) is an auto-vivifying stub
+local real_require = require
+function require(name)
+  if package.loaded[name] then return package.loaded[name] end
+  local ok, m = pcall(real_require, name)
+  if ok then return m end
+  package.loaded[name] = auto()
+  return package.loaded[name]
+end
+xyz2pos = function(x, y, z) return { x = x, y = y, z = z } end
+copyall = function(t) local c = {} for k, v in pairs(t) do c[k] = v end return c end
 package.loaded['repeat-util'] = { scheduled = {}, isScheduled = function() return false end,
                                   scheduleEvery = function() end, cancel = function() end }
 
@@ -130,3 +144,6 @@ if setup then dofile(setup) end
 local args = {}
 for i = 2, #arg do args[#args + 1] = arg[i] end
 load_script(arg[1], false, table.unpack(args))
+-- MOCK_AFTER = Lua file run after the script (prints state for assertions)
+local after = os.getenv('MOCK_AFTER')
+if after then dofile(after) end

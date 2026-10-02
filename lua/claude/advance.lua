@@ -1,6 +1,8 @@
 -- claude/advance <ticks>  - let the game run and pause automatically after <ticks>.
 -- claude/advance 0        - pause immediately and discard the timer.
--- claude/advance clock    - only report time/pause status.
+-- claude/advance clock    - only report time/pause status (changes nothing).
+-- claude/advance run      - run continuously (no timer).
+-- <ticks> are calendar ticks (also with timestream on, see timer.lua); popups are dismissed only by run / <ticks>.
 local util = reqscript('claude/util')
 local timer = reqscript('claude/timer')
 if not util.require_fort() then return end
@@ -19,7 +21,9 @@ local function dismiss_popups()
   end
   return n
 end
-local dismissed = dismiss_popups()
+-- Only dismissed where the game is set running (run / <ticks>); 'clock', '0' and invalid arguments are pure reads
+-- and leave the announcement windows for the player (BUG-404).
+local dismissed = 0
 
 local function clock(extra)
   local out = {
@@ -36,6 +40,7 @@ end
 if arg == 'run' then
   -- run without a target (continuous operation); watchdog and popups are handled by claude/watchdog
   timer.cancel()
+  dismissed = dismiss_popups()
   df.global.pause_state = false
   clock({ action = 'running-continuous' })
   return
@@ -61,5 +66,6 @@ end
 
 -- Upper bound: one game month per call, so Claude checks in regularly.
 if ticks > util.TICKS_PER_MONTH then ticks = util.TICKS_PER_MONTH end
+dismissed = dismiss_popups()
 timer.start(ticks)
 clock({ action = 'running', ticks = ticks })

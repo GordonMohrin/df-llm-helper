@@ -97,3 +97,101 @@ def test_cut_never_splits_a_utf8_character(tmp_path):
             "for n = 1, #s do assert(utf8.len(util.cut(s, n)), n) end\n"
             "print(util.cut(s, 7), util.cut('Stinth\\132d', 7) == 'Stinth\\132')\n")
     assert run_snippet(code, tmp_path).strip() == "Stinth\ttrue"
+
+
+# ---------------------------------------------------------------- BUG-407
+@pytest.mark.parametrize("script", ["essen", "arbeit", "trinken", "material", "orders", "ueberwacher"])
+@pytest.mark.parametrize("word", ["foo", "--help", "stauts"])
+def test_unknown_subcommand_prints_usage_and_runs_no_round(tmp_path, script, word):
+    out, r = run(script, word, tmp_path=tmp_path)
+    assert r.returncode == 0, r.stderr
+    j = one_json(out)
+    assert "unbekannter Befehl" in j["error"] and script in j["usage"]
+    assert not list((tmp_path / "home" / "state").iterdir())          # no state written by a work round
+    assert not list((tmp_path / "home" / "tools").glob("*.flag"))     # ueberwacher check() writes flags
+
+
+def test_ueberwacher_status_is_a_pure_read(tmp_path):
+    out, _ = run("ueberwacher", "status", tmp_path=tmp_path)
+    assert one_json(out) == {"running": False}
+
+
+@pytest.mark.parametrize("args", [[], ["--dry"]])
+def test_erzdig_without_ore_prints_usage(tmp_path, args):
+    out, _ = run("erzdig", *args, tmp_path=tmp_path)
+    assert one_json(out)["error"] == "Erz fehlt"
+
+
+def test_mil_update_and_refuge_need_apply(tmp_path):
+    after = tmp_path / "after.lua"
+    after.write_text("print('UPDATE ' .. tostring(rawget(df.global.plotinfo.equipment.update, 'weapon')))\n")
+    out, _ = run("mil", "update", tmp_path=tmp_path, env={"MOCK_AFTER": str(after)})
+    lines = out.splitlines()
+    assert one_json(lines[0])["dry"] is True and lines[-1] == "UPDATE nil"
+    out, _ = run("mil", "update", "--apply", tmp_path=tmp_path, env={"MOCK_AFTER": str(after)})
+    assert out.splitlines()[-1] == "UPDATE true"
+    out, _ = run("mil", "refuge", tmp_path=tmp_path)
+    assert one_json(out.splitlines()[0])["dry"] is True
+
+
+# ---------------------------------------------------------------- BUG-406 (classification on the Python side)
+@pytest.mark.parametrize("cmd,write", [
+    ("claude/trinken lager", True), ("claude/trinken status", False), ("claude/bauprog status", False),
+    ("claude/raster status", False), ("claude/mil tabelle", False), ("claude/mil tabelle --file", True),
+    ("claude/mil tabelle --say", True), ("claude/advance clock", False), ("claude/arbeit status", True),
+    ("claude/ueberwacher status", True), ("claude/bauprog", True), ("claude/raster start", True),
+])
+def test_is_write_classification(cmd, write):
+    from df_llm_helper.client import is_write
+    assert is_write(cmd) is write
+
+
+# ---------------------------------------------------------------- BUG-404 / BUG-405 (advance / timer)
+SIM = """
+local pending, nid = {}, 0
+dfhack.timeout = function(n, unit, fn) nid = nid + 1; pending[nid] = { left = n, fn = fn }; return nid end
+dfhack.timeout_active = function(id, ...) if select('#', ...) > 0 then pending[id] = nil end return pending[id] end
+function SIM_FRAMES(factor, max_frames)
+  for f = 1, max_frames do
+    if df.global.pause_state then return f end
+    df.global.cur_year_tick = df.global.cur_year_tick + factor
+    local due = {}
+    for id, t in pairs(pending) do
+      t.left = t.left - 1
+      if t.left <= 0 then pending[id] = nil; due[#due + 1] = t.fn end
+    end
+    for _, fn in ipairs(due) do fn() end
+  end
+end
+"""
+
+
+@pytest.mark.parametrize("factor", [1, 3, 9])
+def test_timer_pauses_after_calendar_ticks_also_with_timestream(tmp_path, factor):
+    code = SIM + (f"local timer = reqscript('claude/timer')\n"
+                  f"local t0 = df.global.cur_year_tick\n"
+                  f"df.global.pause_state = true\n"
+                  f"timer.start(1200)\n"
+                  f"SIM_FRAMES({factor}, 100000)\n"
+                  f"print(df.global.cur_year_tick - t0, tostring(df.global.pause_state), tostring(timer.active()))\n")
+    ran, paused, active = run_snippet(code, tmp_path).split()
+    assert paused == "true" and active == "false"
+    assert 1200 <= int(ran) < 1200 + factor
+
+
+def test_advance_clock_and_errors_keep_popups(tmp_path):
+    setup = ("local pops = {}\n"
+             "for i = 0, 1 do pops[i] = { delete = function() end } end\n"
+             "pops.n = 2\n"
+             "df.global.world.status.popups = setmetatable(pops, { __len = function(t) return t.n end,\n"
+             "  __index = { erase = function(t, i) t[i] = nil; t.n = t.n - 1 end } })\n"
+             "df.global.pause_state = true\n")
+    after = tmp_path / "after.lua"
+    after.write_text("print('POPUPS ' .. #df.global.world.status.popups)\n")
+    for args in (["clock"], [], ["foo"], ["0"]):
+        out, r = run("advance", *args, tmp_path=tmp_path, setup=setup, env={"MOCK_AFTER": str(after)})
+        assert r.returncode == 0, r.stderr
+        assert out.splitlines()[-1] == "POPUPS 2", args
+        assert "popups_dismissed" not in out
+    out, _ = run("advance", "600", tmp_path=tmp_path, setup=setup, env={"MOCK_AFTER": str(after)})
+    assert out.splitlines()[-1] == "POPUPS 0" and json.loads(out.splitlines()[0])["popups_dismissed"] == 2

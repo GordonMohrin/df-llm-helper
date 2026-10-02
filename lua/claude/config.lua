@@ -25,7 +25,7 @@
 --   [ ] KAV_BARRIEREN, KOPF, SPERR_BOXEN, SCHACHT_PRUEF, DIG_CAVERN_Z   ONLY with cavern access (double construction wall barrier + gate)
 --   [ ] lua/claude/stages.lua (grid stages, leave empty until erkundung plans them)
 --   [ ] AFTERWARDS restart permanent jobs that read the values at load (otherwise they keep working with the defaults): arbeit (SMOOTH_SUPPLY/TREE_BAND/GATHER),
---       essen (FORT_X/FORT_Y/SURFACE_Z), mil guard (FORT_X/FORT_Y), mood (MOOD_SLOTS), gesund (SLAB_TILES); then `claude/mil refuge` (recreate the refuge burrow).
+--       essen (FORT_X/FORT_Y/SURFACE_Z), mil guard (FORT_X/FORT_Y), mood (MOOD_SLOTS), gesund (SLAB_TILES); then `claude/mil refuge --apply` (recreate the refuge burrow).
 -- As long as values are nil, the defaults in section "DEFAULTS" apply: map center/surface from the loaded map (or 96/96/100), DIG_MIN_Z = SURFACE_Z - 3
 -- (top layers only), placeholder refuge at the fort center. `UNSET` lists what is still missing; `RUN5_UNSET` = true as long as one of the core values is missing.
 -- ====================================================================================================================

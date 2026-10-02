@@ -212,7 +212,7 @@ function refuge_check(S, fix)
   if b and Z.probe then r.tile_probe = dfhack.burrows.isAssignedTile(b, xyz2pos(Z.probe[1], Z.probe[2], Z.probe[3])) end
   r.ok = (r.burrow ~= nil) and r.civ_burrows > 0 and (Z.probe == nil or r.tile_probe == true)
   if not r.ok and fix then
-    local okr, err = pcall(dfhack.run_command, 'claude/mil', 'refuge')
+    local okr, err = pcall(dfhack.run_command, 'claude/mil', 'refuge', '--apply')
     r.repariert = okr
     r.ok = #al.list > 1 and #al.list[1].burrows > 0
   end
@@ -307,7 +307,7 @@ function selbsttest()
     end
   end
   local al = df.global.plotinfo.alerts
-  if not (#al.list > 1 and #al.list[1].burrows > 0) then p[#p + 1] = 'ZUFLUCHT/ZIVILWARNUNG fehlt (claude/mil refuge)' end
+  if not (#al.list > 1 and #al.list[1].burrows > 0) then p[#p + 1] = 'ZUFLUCHT/ZIVILWARNUNG fehlt (claude/mil refuge --apply)' end
   return p
 end
 

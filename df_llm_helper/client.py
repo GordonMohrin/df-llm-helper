@@ -25,7 +25,8 @@ MAX_REPORT_ID_CMD = ('lua "local r=df.global.world.status.reports '
                      'print(#r>0 and r[#r-1].id or -1)"')
 
 # Query running background jobs without side effects (repeat-util keys of the claude/* scripts).
-# CAUTION: 'claude/arbeit status' / 'claude/ueberwacher status' run one round (they have no status command)!
+# 'claude/arbeit status' answers with a usage error; 'claude/ueberwacher status' is a pure read (BUG-407). Query
+# running jobs with SERVICES_CMD below instead.
 SERVICE_KEYS = ["watchdog", "arbeit", "trinken", "ueberwacher", "essen", "orders", "gesund", "auslastung",
                 "material", "tempo", "migranten", "schau"]
 SERVICES_CMD = ('lua "local r=require(\'repeat-util\') local t={} for _,k in ipairs({'
@@ -60,12 +61,16 @@ FIXTURE_COMMANDS: dict[str, str] = {
 _READ_EXACT = {"claude/status", "claude/report", "claude/units", "claude/buildings", "claude/config",
                "claude/ores", "claude/geo", "claude/probe", "claude/gefahr", "claude/mood", "claude/tempo",
                "claude/advance clock", "claude/migranten", "claude/auslastung", MAX_REPORT_ID_CMD, SERVICES_CMD}
-_READ_SUB = {"status", "list", "tabelle", "report", "plan", "clock", "lager", "equip", "routines",
+# not 'lager': claude/trinken lager rewrites max_barrels of every stockpile (BUG-406)
+_READ_SUB = {"status", "list", "tabelle", "report", "plan", "clock", "equip", "routines",
              "enemies", "krypta", "werkstaetten"}
 # df-llm-helper Lua (v2): pure read commands
 _READ_PILOT = {("claude/pilot_water", "scan"), ("claude/pilot_water", "near"), ("claude/pilot_mood", "need")}
-# scripts WITHOUT a status command: any argument other than start/stop runs a work round
-_NO_STATUS = {"claude/arbeit", "claude/ueberwacher", "claude/bauprog", "claude/raster"}
+# scripts WITHOUT a read-only status command (claude/arbeit only knows start|stop|once); bauprog/raster have one (BUG-406).
+# claude/ueberwacher got 'status' with BUG-407, but older installed copies run a round for it -> stays conservative.
+_NO_STATUS = {"claude/arbeit", "claude/ueberwacher"}
+# options that turn a read sub-command into a write (mil tabelle --file writes a file, --say announces in the game)
+_WRITE_OPTS = {"--file", "--say"}
 
 
 def register_read(cmd: str) -> None:
@@ -89,6 +94,8 @@ def is_write(cmd: str) -> bool:
         return False
     if len(parts) > 1 and (parts[0], parts[1]) in _READ_PILOT:
         return False
+    if any(p in _WRITE_OPTS for p in parts):
+        return True
     if parts[0].startswith("claude/") and len(parts) >= 2:
         sub = parts[1]
         if sub in _READ_SUB:

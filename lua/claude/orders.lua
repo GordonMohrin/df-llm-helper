@@ -426,7 +426,10 @@ elseif cmd == 'status' or cmd == 'list' then
   util.emit(ok and r or { error = tostring(r) })
 elseif cmd == 'reset' then
   util.emit(reset())
-else
+elseif cmd == 'once' then
   local ok, r = pcall(sync)
   util.emit(ok and r or { error = tostring(r) })
+else
+  -- unknown sub-command (typo, --help, 'status' of a script without one): usage only, no work round (BUG-407)
+  util.emit({ error = 'unbekannter Befehl: ' .. tostring(cmd), usage = 'claude/orders start|stop|once|status|list|reset' })
 end

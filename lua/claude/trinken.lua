@@ -263,7 +263,10 @@ elseif cmd == 'lager' then
   util.emit({ lager = lager(true) })
 elseif cmd == 'status' then
   util.emit({ stats = measure(), lager = lager(false), manager = has_manager() })
-else
+elseif cmd == 'once' then
   local s, act, l = run()
   util.emit({ stats = s, actions = act, lager = l })
+else
+  -- unknown sub-command (typo, --help, 'status' of a script without one): usage only, no work round (BUG-407)
+  util.emit({ error = 'unbekannter Befehl: ' .. tostring(cmd), usage = 'claude/trinken start|stop|once|lager|status' })
 end

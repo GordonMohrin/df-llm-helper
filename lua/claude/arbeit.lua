@@ -538,7 +538,10 @@ if cmd == 'start' then
 elseif cmd == 'stop' then
   repeatUtil.cancel(KEY)
   util.emit({ running = false })
-else
+elseif cmd == 'once' then
   local a, s = run()
   util.emit({ added = a, stock = s })
+else
+  -- unknown sub-command (typo, --help, 'status' of a script without one): usage only, no work round (BUG-407)
+  util.emit({ error = 'unbekannter Befehl: ' .. tostring(cmd), usage = 'claude/arbeit start|stop|once' })
 end

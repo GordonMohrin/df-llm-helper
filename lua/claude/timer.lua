@@ -12,14 +12,27 @@ function cancel()
   target = nil
 end
 
-function start(ticks)
-  cancel()
-  local total = df.global.cur_year_tick + ticks
-  target = { year = df.global.cur_year + total // 403200, tick = total % 403200 }
-  timeout_id = dfhack.timeout(ticks, 'ticks', function()
+local YEAR = 403200
+local function now_abs() return df.global.cur_year * YEAR + df.global.cur_year_tick end
+
+-- dfhack.timeout(n, 'ticks') counts simulation frames, not calendar ticks: with timestream 2..9 calendar ticks pass per
+-- frame (tempo.lua). So the timer re-arms itself with a fraction of the remaining CALENDAR ticks and pauses as soon as
+-- the calendar target is reached (overshoot at most one frame, BUG-405).
+local function arm(goal)
+  local rest = goal - now_abs()
+  if rest <= 0 then
     df.global.pause_state = true
     timeout_id = nil
-  end)
+    return
+  end
+  timeout_id = dfhack.timeout(math.max(1, rest // 10), 'ticks', function() arm(goal) end)
+end
+
+function start(ticks)
+  cancel()
+  local goal = now_abs() + ticks
+  target = { year = goal // YEAR, tick = goal % YEAR }
+  arm(goal)
   df.global.pause_state = false
 end
 

@@ -468,7 +468,10 @@ elseif cmd == 'status' then
   load_goals()
   local s = stock(furnaces('Smelter')[1])
   util.emit({ goals = GOALS, items = ITEMS, stock = s })
-else
+elseif cmd == 'once' then
   local s, log, d = run()
   util.emit({ stock = s, log = log, detail = d })
+else
+  -- unknown sub-command (typo, --help, 'status' of a script without one): usage only, no work round (BUG-407)
+  util.emit({ error = 'unbekannter Befehl: ' .. tostring(cmd), usage = 'claude/material once|start|stop|status' })
 end

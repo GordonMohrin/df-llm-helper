@@ -12,7 +12,7 @@ preconditions:
   - {when: "not danger", msg: "NEVER rebuild the burrow during a fight (civilians run past the enemy)"}
 steps:
   - {cmd: "claude/gefahr status"}
-  - {cmd: "claude/mil refuge", why: "check/create refuge + civilian alert"}
+  - {cmd: "claude/mil refuge --apply", why: "check/create refuge + civilian alert (without --apply only a dry run)"}
   - {manual: "Extend the burrow: beds + food + water + workshops + stockpiles must be inside (after the fight)"}
 verify:
   when: "snap.alerts.refuge_ok == True"

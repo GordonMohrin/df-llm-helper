@@ -375,7 +375,7 @@ local function alert_check()
     state.clean = 0
     -- Run 3: civ_alert_idx = 1 only if alarm 1 exists AND has a refuge burrow (before: index outside the list possible)
     if al.civ_alert_idx == 0 and not (#al.list > 1 and #al.list[1].burrows > 0) then
-      pcall(dfhack.run_command, 'claude/mil', 'refuge')   -- Alarm/burrow missing (often gone after loading): recreate idempotently
+      pcall(dfhack.run_command, 'claude/mil', 'refuge', '--apply')   -- Alarm/burrow missing (often gone after loading): recreate idempotently
     end
     if al.civ_alert_idx == 0 and #al.list > 1 and #al.list[1].burrows > 0 then
       al.civ_alert_idx = 1
