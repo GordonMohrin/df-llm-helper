@@ -344,24 +344,48 @@ def cmd_runbook(args) -> int:
 
 
 def cmd_kb(args) -> int:
-    from .kb import KB, format_entry, format_hits, import_markdown, write_jsonl
+    from .kb import KB, _slug, format_entry, format_hits, import_markdown, looks_binary, write_jsonl
     cfg = load_config(args.config)
     if args.action == "import":
-        for f in args.files:
-            es = import_markdown(Path(f))
-            target = Path(cfg.get("paths.data")) / "kb" / f"imported_{Path(f).stem.lower()}.jsonl"
+        files = list(args.query) + list(args.files or [])
+        if not files:
+            print("Usage: python -m df_llm_helper kb import <notes.md> [...]", file=sys.stderr)
+            return 2
+        rc = 0
+        for f in files:
+            fp = Path(f)
+            if not fp.is_file():
+                print(f"{f}: not found (or not a file) - skipped", file=sys.stderr)
+                rc = 2
+                continue
+            if looks_binary(fp):
+                print(f"{f}: not a text file - skipped", file=sys.stderr)
+                rc = 2
+                continue
+            es = import_markdown(fp)
+            if not es:
+                print(f"{f}: no entries (empty or no section with text) - nothing written")
+                continue
+            target = Path(cfg.get("paths.data")) / "kb" / f"imported_{_slug(fp.stem)}.jsonl"
             write_jsonl(es, target)
             print(f"{f}: {len(es)} entries -> {target.name} (unreviewed)")
-        return 0
+        return rc
+    if args.action == "search" and args.k < 1:
+        print(f"Error: -k must be >= 1, got {args.k}", file=sys.stderr)
+        return 2
+    if args.action in ("search", "get") and not args.query:
+        print(f"Usage: python -m df_llm_helper kb {args.action} " + ("<id>" if args.action == "get" else "<words>"),
+              file=sys.stderr)
+        return 2
     kb = KB.load(cfg)
     if args.action == "search":
         print(format_hits(kb.search(" ".join(args.query), k=args.k), kb.current_run, kb.stale_before,
                           int(cfg.get("kb.max_tokens", 400))))
         return 0
     if args.action == "get":
-        e = kb.get(args.query[0]) if args.query else None
+        e = kb.get(args.query[0])
         if not e:
-            print("unknown ID (python -m df_llm_helper kb search ...)", file=sys.stderr)
+            print(f"unknown KB id {args.query[0]!r} (python -m df_llm_helper kb search ... / kb list)", file=sys.stderr)
             return 2
         print(format_entry(e, kb.current_run, kb.stale_before, int(cfg.get("kb.max_tokens", 400))))
         return 0
@@ -374,6 +398,10 @@ def cmd_kb(args) -> int:
 def cmd_brief(args) -> int:
     from .brief import build_brief, load_scopes
     from .kb import KB
+    from .toolsfs import read_text_tolerant
+    if args.budget is not None and args.budget < 1:
+        print(f"Error: --budget must be a positive number of tokens, got {args.budget}", file=sys.stderr)
+        return 2
     p = _pilot(args)
     t0 = time.time()
     snap = p.snapshot()
@@ -381,9 +409,9 @@ def cmd_brief(args) -> int:
     mem = p.tools.memory_file(scope_file)
     out = build_brief(args.scope, scopes_def=load_scopes(Path(p.cfg.get("paths.data")) / "scopes.yaml"),
                       ctx=p.context(snap, p.cancels()), snap=snap, kb=KB.load(p.cfg),
-                      memory_text=mem.read_text(encoding="utf-8", errors="replace") if mem.exists() else None,
+                      memory_text=read_text_tolerant(mem) if mem.is_file() else None,
                       inbox_lines=p.tools.inbox_lines(args.scope), th=p.cfg.th,
-                      budget=int(args.budget or p.cfg.get("brief.budget", 1500)),
+                      budget=int(args.budget if args.budget is not None else p.cfg.get("brief.budget", 1500)),
                       date_text=snap.date.text() if snap.date else "")
     print(out)
     _usage(p, args.scope, "brief", out, t0)
@@ -393,6 +421,10 @@ def cmd_brief(args) -> int:
 def cmd_replay(args) -> int:
     from .scenario import check_expectations, run_scenario
     files = [Path(f) for f in args.files] or sorted((HOME / "scenarios").glob("*.jsonl"))
+    missing = [f for f in files if not f.is_file()]
+    if missing:
+        print("Error: scenario file not found: " + ", ".join(map(str, missing)), file=sys.stderr)
+        return 2
     bad = 0
     for f in files:
         res = run_scenario(f)
@@ -435,9 +467,13 @@ def cmd_exception(args) -> int:
 
 
 def cmd_memory(args) -> int:
-    from .memory import compact_file, restore
+    from .memory import compact_file, restore, valid_memory_name
     cfg = load_config(args.config)
     scopes = Path(cfg.get("paths.scopes"))
+    if args.scope not in ("all", "alle") and not valid_memory_name(args.scope):
+        print(f"Error: unknown scope {args.scope!r} (a scope from data/scopes.yaml, inbox-<scope> or all)",
+              file=sys.stderr)
+        return 2
     if args.scope in ("all", "alle"):     # memory + inbox files only; rule/registry files (handel-regeln.md, REGISTRY.md) stay
         from .brief import SCOPES
         targets = [f for f in sorted(scopes.glob("*.md"))
@@ -449,8 +485,11 @@ def cmd_memory(args) -> int:
             print(f"{p.name}: missing", file=sys.stderr)
             return 2
         if args.action == "restore":
-            a = restore(p)
-            print(f"{p.name}: restored from {a.name}" if a else f"{p.name}: no archive")
+            a = restore(p, dry_run=args.dry_run)
+            if args.dry_run:
+                print(f"(dry-run) {p.name}: would restore from {a.name}" if a else f"{p.name}: no archive")
+            else:
+                print(f"{p.name}: restored from {a.name}" if a else f"{p.name}: no archive")
             continue
         res = compact_file(p, stamp=time.strftime("%Y%m%dT%H%M%S"), dry_run=args.dry_run)
         tag = "(dry-run) " if args.dry_run else ""
@@ -466,6 +505,12 @@ def cmd_bus(args) -> int:
     store = Store(cfg.path("state_db"))
     bus = Bus(store, clock)
     if args.action == "post":
+        if not " ".join(args.text).strip():
+            print("Error: message text is empty", file=sys.stderr)
+            return 2
+        if not args.sender:
+            print("Error: --from <scope> missing (who sends the message?)", file=sys.stderr)
+            return 2
         mid = bus.post(args.sender, args.to, " ".join(args.text), prio=args.prio, topic=args.topic or "",
                        dedupe_key=args.key)
         if args.md:
@@ -475,6 +520,9 @@ def cmd_bus(args) -> int:
         print(f"#{mid} to {args.to}")
         return 0
     if args.action == "read":
+        if args.limit < 1:
+            print(f"Error: --limit must be >= 1, got {args.limit}", file=sys.stderr)
+            return 2
         msgs = bus.read(args.to, limit=args.limit)
         print("\n".join(m.line() for m in msgs) or f"no unread messages for {args.to}")
         return 0
@@ -486,10 +534,15 @@ def cmd_bus(args) -> int:
         from .toolsfs import ToolsDir
         tools = ToolsDir(cfg.path("tools"), clock, cfg.path("scopes"))
         files = [Path(f) for f in args.text] or sorted(tools.scopes.glob("inbox-*.md"))
+        missing = [f for f in files if not f.is_file()]
+        for f in missing:
+            print(f"{f}: not found (or not a file)", file=sys.stderr)
         for f in files:
+            if f in missing:
+                continue
             new, skip = bus.import_inbox(f)
             print(f"{f.name}: {new} new, {skip} already present")
-        return 0
+        return 2 if missing else 0
     return 2
 
 
@@ -832,6 +885,7 @@ def cmd_agents(args) -> int:
     if args.action == "prompt":
         from .brief import build_brief, load_scopes
         from .kb import KB
+        from .toolsfs import read_text_tolerant
         p = _pilot(args)
         args.scope = args.target
         if not args.scope:
@@ -847,14 +901,26 @@ def cmd_agents(args) -> int:
         mem = p.tools.memory_file(scope_file)
         brief = build_brief(args.scope, scopes_def=load_scopes(Path(p.cfg.get("paths.data")) / "scopes.yaml"),
                             ctx=p.context(snap, p.cancels()), snap=snap, kb=KB.load(p.cfg),
-                            memory_text=mem.read_text(encoding="utf-8", errors="replace") if mem.exists() else None,
+                            memory_text=read_text_tolerant(mem) if mem.is_file() else None,
                             inbox_lines=p.tools.inbox_lines(args.scope), th=p.cfg.th,
                             budget=int(cfg["prompt_budget"]), date_text=snap.date.text() if snap.date else "")
         print(ag.build_prompt(args.scope, args.task or "", brief, fort=snap.fort or "?",
                               max_lines=int(cfg["max_report_lines"]), budget=int(cfg["prompt_budget"])))
         return 0
     if args.action == "lint-report":
-        src = sys.stdin.read() if args.target in (None, "-") else Path(args.target).read_text(encoding="utf-8")
+        import re
+
+        from .toolsfs import decode_tolerant
+        if args.scope is not None and not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", args.scope):
+            print(f"Error: --scope must be a plain scope name, got {args.scope!r}", file=sys.stderr)
+            return 2
+        if args.target in (None, "-"):
+            src = decode_tolerant(sys.stdin.buffer.read()) if hasattr(sys.stdin, "buffer") else sys.stdin.read()
+        elif not Path(args.target).is_file():
+            print(f"Error: report file not found: {args.target}", file=sys.stderr)
+            return 2
+        else:
+            src = decode_tolerant(Path(args.target).read_bytes())      # BOM / UTF-16 / cp1252 (Windows tools)
         rc = ag.lint_report(src, int(cfg["max_report_lines"]))
         if rc.truncated:
             arch = ag.archive_report(src, args.scope or "agent",
@@ -898,8 +964,15 @@ def cmd_dashboard(args) -> int:
         return 0
     if args.action == "unmap":
         maps = dict(p.store.get("dashboard.maps") or {})
-        maps.pop(args.rest[0] if args.rest else "", None)
+        if len(args.rest) != 1:
+            print("Usage: python -m df_llm_helper dashboard unmap <name>", file=sys.stderr)
+            return 2
+        if args.rest[0] not in maps:
+            print(f"No map named {args.rest[0]!r} (saved: {', '.join(sorted(maps)) or 'none'})", file=sys.stderr)
+            return 1
+        maps.pop(args.rest[0])
         p.store.set("dashboard.maps", maps)
+        print(f"Map '{args.rest[0]}' removed")
         return 0
     if not args.offline:                                   # refresh the building counters for the build plan (read only)
         from .client import register_read
@@ -940,8 +1013,8 @@ def cmd_journal(args) -> int:
     j = Journal(p.store, cj, HOME, registry=p.client.registry)
     if args.action == "ingest":
         src = Path(args.events) if args.events else (HOME / cj["events_log"])
-        if not src.exists():
-            print(f"Event log missing: {src}")
+        if not src.is_file():
+            print(f"Event log missing: {src}" + (" (a directory, not a file)" if src.is_dir() else ""))
             return 1
         text = read_text_tolerant(src)
         if args.date:
@@ -1152,7 +1225,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("action", choices=["post", "read", "ack", "import"])
     s.add_argument("text", nargs="*")
     s.add_argument("--to", default="orchestrator")
-    s.add_argument("--from", dest="sender", default="orchestrator")
+    s.add_argument("--from", dest="sender", default=None, help="post: sending scope (required)")
     s.add_argument("--prio", choices=["crit", "warn", "info"])
     s.add_argument("--topic")
     s.add_argument("--key", help="dedupe key")

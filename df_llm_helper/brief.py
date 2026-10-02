@@ -14,7 +14,7 @@ from . import yamlmini
 from .digest import compute_alerts, tokens
 from .expr import ExprError, evaluate
 from .kb import KB
-from .memory import compact_text, extract_for_brief, shorten
+from .memory import compact_text, extract_for_brief, memory_age_note, shorten
 
 __all__ = ["BriefError", "FAIRPLAY_BLOCK", "REPORT_FORMAT", "load_scopes", "build_brief", "shingles", "SCOPES"]
 
@@ -93,6 +93,10 @@ def build_brief(scope: str, *, scopes_def: dict, ctx: dict, snap, kb: KB | None,
     # Memory (condensed)
     if memory_text:
         mem = extract_for_brief(compact_text(memory_text))
+        date = getattr(snap, "date", None)
+        note = memory_age_note(memory_text, getattr(date, "year", None))
+        if note:
+            sections.append(_Section("Memory age", [note], False, 1))
         if mem["offen"]:
             sections.append(_Section("Open (memory)", [shorten(x, 160) for x in mem["offen"]], False, 1))
         if mem["status"]:

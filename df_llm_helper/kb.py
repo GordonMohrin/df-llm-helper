@@ -288,6 +288,17 @@ def _slug(s: str) -> str:
 _RUN = re.compile(r"\bRun\s*(\d)\b", re.I)
 
 
+def looks_binary(path: Path, probe: int = 4096) -> bool:
+    """NUL bytes (without a UTF-16 BOM) or mostly control characters in the first bytes: not a notes file."""
+    data = Path(path).read_bytes()[:probe]
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return False
+    if b"\x00" in data:
+        return True
+    ctrl = sum(1 for b in data if b < 32 and b not in (9, 10, 13))
+    return bool(data) and ctrl > len(data) * 0.05
+
+
 def import_markdown(path: Path, *, prefix: str | None = None, min_chars: int = 40) -> list[Entry]:
     """Headings -> entries (status=unreviewed). Run number taken from heading/text."""
     from .toolsfs import read_text_tolerant
