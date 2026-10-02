@@ -174,3 +174,26 @@ def test_bug319_read_only_commands_and_message_text_not_reported():
     check_command("gaydar")
     with pytest.raises(FairPlayError):
         check_command("fastdwarf 1")
+
+
+# ---------------------------------------------------------------- BUG-418 local consent register for lint
+def test_bug418_lint_honours_local_fp09_consent(tmp_path, capsys):
+    from df_llm_helper.cli import main
+    from df_llm_helper.fairplay import ExceptionRegistry
+    from df_llm_helper.lint import lint_paths
+    lua = HOME / "lua" / "pilot_caravan.lua"
+    shared = tmp_path / "exceptions.jsonl"
+    shutil_copy = (HOME / "data" / "exceptions.jsonl").read_text(encoding="utf-8")
+    shared.write_text(shutil_copy, encoding="utf-8")
+    fs = [f for f in lint_paths([lua], ExceptionRegistry(shared)) if f.rule == "L07"]
+    assert len(fs) == 1 and "data/exceptions.local.jsonl" in fs[0].reason and "--local" in fs[0].reason
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text(f"paths:\n  exceptions: '{shared}'\n  state_db: '{tmp_path / 's.db'}'\n"
+                   f"  tools: '{tmp_path / 't'}'\n  scopes: '{tmp_path / 't' / 'scopes'}'\n", encoding="utf-8")
+    assert main(["--config", str(cfg), "exception", "add", "FP09", "--local", "--reason", "stuck merchants",
+                 "--ja", "yes, always send stuck traders home"]) == 0
+    assert "exceptions.local.jsonl" in capsys.readouterr().out
+    assert shared.read_text(encoding="utf-8") == shutil_copy            # the shipped register is unchanged
+    reg = ExceptionRegistry(shared)
+    assert reg.local_path.is_file() and reg.allows("FP09")
+    assert [f for f in lint_paths([lua], reg) if f.rule == "L07"] == []

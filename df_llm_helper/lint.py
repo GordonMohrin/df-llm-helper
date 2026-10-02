@@ -72,7 +72,9 @@ RULES: list[Rule] = [
     R("L04", r"['\"]\s*reveal\b|run_command\([^)]*\breveal\b|\brevflood\b", "reveal/revflood uncovers the map"),
     R("L05", r"prospect['\",\s]+all|prospect\s+all", "prospect all shows hidden ore deposits"),
     R("L06", r"flags\d?\.foreign\s*=(?!=)", "changing the foreign flag (exception FP08/L06 required)"),
-    R("L07", r"flags\d?\.left\s*=\s*true", "setting unit 'left' (stuck traders, exception required)"),
+    R("L07", r"flags\d?\.left\s*=\s*true",
+      "setting unit 'left' (stuck traders): needs the player's consent FP09 in data/exceptions.local.jsonl "
+      "(python -m df_llm_helper exception add FP09 --local --reason 'stuck merchants' --ja '<player quote>')"),
     R("L08", r"\.pos\.[xyz]\s*=(?!=)|\.pos\s*=(?!=)|setPos\s*\(|" + _cmd("teleport") + r"|\bteleport\s*\(",
       "setting position directly (teleport)",
       unless_line=_JOBORDER + r"|job_item",
@@ -111,6 +113,17 @@ RULES: list[Rule] = [
 ]
 
 
+# BUG-418: lint rule -> register id of the same action at runtime (fairplay.FORBIDDEN_COMMANDS). A consent is given
+# once per action (e.g. FP09 in data/exceptions.local.jsonl) and covers both the command gate and the lint rule.
+RULE_ALIASES = {"L06": "FP08", "L07": "FP09"}
+
+
+def _allowed(registry: ExceptionRegistry | None, rule_id: str) -> bool:
+    if registry is None:
+        return False
+    return registry.allows(rule_id) or (rule_id in RULE_ALIASES and registry.allows(RULE_ALIASES[rule_id]))
+
+
 @dataclass
 class Finding:
     file: str
@@ -131,7 +144,7 @@ def lint_source(src: str, name: str = "<lua>", registry: ExceptionRegistry | Non
     for rule in rules or RULES:
         if rule.unless_file and rule.unless_file.search(code):
             continue
-        if registry is not None and registry.allows(rule.id):
+        if _allowed(registry, rule.id):
             continue
         for no, ln in enumerate(lines, 1):
             if rule.pattern.search(ln) and (rule.needs is None or rule.needs.search(ln)) and \

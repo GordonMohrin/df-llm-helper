@@ -207,7 +207,10 @@ class ExceptionRegistry:
     def consume(self, action: str) -> None:
         self.uses[action] = self.uses.get(action, 0) + 1
 
-    def add(self, action: str, reason: str, player_consent: str, objects: list | None = None, **extra) -> Exception_:
+    def add(self, action: str, reason: str, player_consent: str, objects: list | None = None, *, local: bool = False,
+            **extra) -> Exception_:
+        """local=True writes to the git-ignored exceptions.local.jsonl (a consent of this player for this installation,
+        BUG-418); otherwise to the shared register."""
         if not player_consent.strip():
             raise FairPlayError(action, "an entry without the player's consent is not allowed")
         known = known_rule_ids()
@@ -228,8 +231,9 @@ class ExceptionRegistry:
             raise FairPlayError(action, "no register path configured")
         d = {"ts": self._now_iso(), "action": action, "objects": objs, "reason": reason,
              "player_consent": player_consent, **{k: v for k, v in extra.items() if v is not None}}
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as f:
+        target = self.local_path if local else self.path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("a", encoding="utf-8") as f:
             f.write(json.dumps(d, ensure_ascii=False) + "\n")
         self.load()
         # the entry just written (not entries[-1]: the local register is merged after the shared one)

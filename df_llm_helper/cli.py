@@ -482,8 +482,9 @@ def cmd_exception(args) -> int:
     reg = ExceptionRegistry(cfg.path("exceptions"))
     if args.action == "add":
         objs = [o.strip() for o in (args.objects or "").split(",") if o.strip()]
-        e = reg.add(args.rule, args.reason, args.ja or "", objects=objs, max_uses=args.max_uses, expires=args.expires)
-        print(f"Exception registered: {e.action} {e.objects} (in {reg.path.name})")
+        e = reg.add(args.rule, args.reason, args.ja or "", objects=objs, max_uses=args.max_uses, expires=args.expires,
+                    local=args.local)
+        print(f"Exception registered: {e.action} {e.objects} (in {(reg.local_path if args.local else reg.path).name})")
         return 0
     for e in reg.entries:
         print(f"{e.ts} {e.action} {e.objects}: {e.reason} (player consent: {e.player_consent})")
@@ -1477,6 +1478,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--max-uses", type=int)
     s.add_argument("--expires")
     s.set_defaults(fn=cmd_exception)
+    s.add_argument("--local", action="store_true",
+                   help="write to the git-ignored <register>.local.jsonl (consent of this player, not shipped)")
     s = sub.add_parser("memory", help="compact memory (F6): compact|restore <scope|all>")
     s.add_argument("action", choices=["compact", "restore"])
     s.add_argument("scope")

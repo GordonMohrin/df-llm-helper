@@ -195,7 +195,7 @@ class CaravanPilot:
             return
         if self.registry is None or not self.registry.allows("FP09"):
             msg = ("Caravan is stuck (Leaving, 0 ticks): sending it home needs the player's standing permission in the register: "
-                   "python -m df_llm_helper exception add FP09 --reason 'stuck merchants' --ja '<quote>'")
+                   "python -m df_llm_helper exception add FP09 --local --reason 'stuck merchants' --ja '<quote>'")
             if msg not in st.report:
                 st.report.append(msg)
                 self._warn("caravan:stuck", msg, dry)
