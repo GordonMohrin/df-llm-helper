@@ -59,7 +59,7 @@ FIXTURE_COMMANDS: dict[str, str] = {
 }
 
 _READ_EXACT = {"claude/status", "claude/report", "claude/units", "claude/buildings", "claude/config",
-               "claude/ores", "claude/geo", "claude/probe", "claude/gefahr", "claude/mood", "claude/tempo",
+               "claude/probe", "claude/gefahr", "claude/mood", "claude/tempo",
                "claude/advance clock", "claude/migranten", "claude/auslastung", MAX_REPORT_ID_CMD, SERVICES_CMD}
 # not 'lager': claude/trinken lager rewrites max_barrels of every stockpile (BUG-406)
 _READ_SUB = {"status", "list", "tabelle", "report", "plan", "clock", "equip", "routines",
@@ -69,6 +69,9 @@ _READ_PILOT = {("claude/pilot_water", "scan"), ("claude/pilot_water", "near"), (
 # scripts WITHOUT a read-only status command (claude/arbeit only knows start|stop|once); bauprog/raster have one (BUG-406).
 # claude/ueberwacher got 'status' with BUG-407, but older installed copies run a round for it -> stays conservative.
 _NO_STATUS = {"claude/arbeit", "claude/ueberwacher"}
+# whole-map scanners: they change nothing but hold the game's main thread for seconds (BUG-415) -> never treated as a
+# free read (loop guard / max_per_hour apply), also with --dry
+_HEAVY = {"claude/ores", "claude/geo", "claude/zugaenge", "claude/kohle", "claude/erzdig"}
 # options that turn a read sub-command into a write (mil tabelle --file writes a file, --say announces in the game)
 _WRITE_OPTS = {"--file", "--say"}
 
@@ -81,6 +84,8 @@ def register_read(cmd: str) -> None:
 def is_write(cmd: str) -> bool:
     """True if the command MAY have a write effect (conservative: unknown = write)."""
     c = " ".join(cmd.strip().split())
+    if c.split(" ")[0] in _HEAVY and c != "claude/kohle status":
+        return True
     if c in _READ_EXACT:
         return False
     if "--apply" in c or "--live" in c:

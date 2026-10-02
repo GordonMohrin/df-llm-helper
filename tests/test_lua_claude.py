@@ -294,3 +294,43 @@ def test_pilot_water_reversed_box_is_normalised(tmp_path):
     r = subprocess.run([LUA, str(dmock), str(ROOT / "lua" / "pilot_water.lua"), "scan", "90", "90", "130", "80", "80", "130"],
                        capture_output=True, text=True, timeout=30, env={"PATH": "/usr/bin:/bin", "MOCK_TILES": str(tiles)})
     assert json.loads(r.stdout.splitlines()[0])["water"] == 1
+
+
+# ---------------------------------------------------------------- BUG-415 (whole-map scanners: time budget)
+CLOCK = """
+local t = 0
+dfhack.getTickCount = function() t = t + 600; return t end     -- every clock read = 600 ms later
+dfhack.maps.getTileSize = function() return 32, 32, 10 end
+dfhack.maps.getBlock = function(bx, by, bz) return { block_events = {}, map_pos = { x = bx * 16, y = by * 16, z = bz } } end
+"""
+
+
+def test_ores_stops_after_budget_and_says_how_to_continue(tmp_path):
+    out, r = run("ores", tmp_path=tmp_path, setup=CLOCK)
+    assert r.returncode == 0, r.stderr
+    j = one_json(out)
+    assert j["unvollstaendig"] is True and j["weiter"].startswith("claude/ores 0 ")
+    lo, hi = j["z_bereich"]
+    assert hi == 9 and 0 < lo <= 9 and j["weiter"] == f"claude/ores 0 {lo - 1}"
+
+
+def test_ores_small_range_completes(tmp_path):
+    out, _ = run("ores", 3, 4, "--budget", 100000, tmp_path=tmp_path, setup=CLOCK)
+    j = one_json(out)
+    assert "unvollstaendig" not in j and j["z_bereich"] == [3, 4]
+
+
+def test_is_write_treats_whole_map_scanners_as_heavy():
+    from df_llm_helper.client import is_write
+    for c in ("claude/ores", "claude/geo", "claude/zugaenge", "claude/kohle run 10", "claude/erzdig ALL 104 132 60 --dry",
+              "claude/pilot_perimeter scan 100 101 130 100 140"):
+        assert is_write(c) is True, c
+
+
+# ---------------------------------------------------------------- BUG-411 (laeuft/running booleans)
+def test_kohle_and_raster_report_laeuft_false_when_not_scheduled(tmp_path):
+    out, _ = run("kohle", "status", tmp_path=tmp_path)
+    assert one_json(out) == {"laeuft": False}
+    out, _ = run("raster", "status", tmp_path=tmp_path,
+                 setup="dfhack.maps.getTileSize = function() return 32, 32, 10 end")
+    assert one_json(out)["laeuft"] is False

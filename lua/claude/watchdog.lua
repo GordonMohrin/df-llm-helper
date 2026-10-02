@@ -417,7 +417,9 @@ elseif cmd == 'stop' then
   repeatUtil.cancel(KEY .. '-alert')
   if state.slowmo then set_fps(cfg.NORMAL_FPS) state.slowmo = false cfg.rt.slowmo = false end
 end
-util.emit({ running = repeatUtil.isScheduled and repeatUtil.isScheduled(KEY) or (cmd == 'start'),
+local running = (cmd == 'start')
+if repeatUtil.isScheduled then running = repeatUtil.isScheduled(KEY) and true or false end
+util.emit({ running = running,
             brews = state.brews or 0, free_barrels = state.free_barrels, barrels_ordered = state.barrels_ordered or 0, fed = state.fed or 0, alarms = state.alarms, last_alarm = state.last_alarm, popups_dismissed = state.popups,
             civ_alert_active = df.global.plotinfo.alerts.civ_alert_idx, enemies_near = state.enemies_near, enemies_slowmo_range = state.enemies_slow,
             gefahr_A = state.gefahr_A, gefahr_warn = state.gefahr_warn, gefahr_error = state.gefahr_error, slowmo = state.slowmo or false, slowmo_count = state.slowmo_count or 0,

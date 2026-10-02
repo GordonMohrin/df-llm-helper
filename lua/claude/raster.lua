@@ -237,5 +237,7 @@ elseif cmd == 'reset' then
   set_state(s)
 end
 local s, ent = get_state(), entries()
-util.emit({ laeuft = repeatUtil.isScheduled and repeatUtil.isScheduled(KEY) or nil, cursor = s.cursor, first = s.first, eintraege = #ent, etappen_gesamt = #names(),
+local laeuft = nil   -- boolean (false no longer drops the key, BUG-411); nil only if repeat-util cannot tell
+if repeatUtil.isScheduled then laeuft = repeatUtil.isScheduled(KEY) and true or false end
+util.emit({ laeuft = laeuft, cursor = s.cursor, first = s.first, eintraege = #ent, etappen_gesamt = #names(),
   offen = open_count(), min_offen = MIN_OFFEN, budget = BUDGET, min_z = MIN_Z() })

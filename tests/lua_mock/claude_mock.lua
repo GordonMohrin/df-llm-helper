@@ -12,7 +12,7 @@ local SCRIPT_DIR = os.getenv('MOCK_SCRIPT_DIR') or (arg[1] or ''):match('^(.*)/[
 local auto_mt = {}
 local function auto() return setmetatable({}, auto_mt) end
 auto_mt.__index = function(t, k)
-  if type(k) == 'number' then return nil end   -- empty vectors (ipairs/loops terminate)
+  if type(k) == 'number' or k == 'next' then return nil end   -- empty vectors and linked lists (loops terminate)
   local v = auto(); rawset(t, k, v); return v
 end
 auto_mt.__call = function() return nil end

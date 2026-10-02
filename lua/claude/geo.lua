@@ -3,9 +3,26 @@
 -- and the resulting estimated offset OFF (z = OFF - depth d, depths from top_height/bottom_height, d = -height).
 -- Run 4 (Canyonsyrups): whole map GEO 110 (world tile 4,10). Output JSON; 'vorhersage' = expected z ranges per layer at the estimated OFF.
 -- Extra: open tiles below z<=ceil (cavern contact? = discovered EMPTY/FLOOR/RAMP tiles that do NOT belong to our buildings) -> field 'offen_tief'.
+-- HEAVY: runs in the game's main thread over every map block (BUG-415). One pass from the top down (layer statistics
+-- and cavern hint together); after --budget milliseconds (default 3000) it stops after the current level and the
+-- answer has unvollstaendig=true and gescannt_bis_z (lower levels are missing). Not for polling.
+-- Arguments: claude/geo [geo_index [off [ceil]]] [--budget ms]
 local util = reqscript('claude/util')
 if not util.require_fort() then return end
-local a = { ... }
+local a, budget = {}, 3000
+do
+  local raw = { ... }
+  local i = 1
+  while i <= #raw do
+    if raw[i] == '--budget' then budget = tonumber(raw[i + 1]) or budget i = i + 2
+    else a[#a + 1] = raw[i] i = i + 1 end
+  end
+end
+local function now_ms()
+  local ok, t = pcall(dfhack.getTickCount)
+  if ok and type(t) == 'number' then return t end
+  return os.clock() * 1000
+end
 local mx, my, mz = dfhack.maps.getTileSize()
 local rx, ry = dfhack.maps.getTileBiomeRgn(mx // 2, my // 2, mz - 19)
 local rb = dfhack.maps.getRegionBiome(rx, ry)
@@ -14,7 +31,12 @@ local gb = df.global.world.world_data.geo_biomes[GEO]
 local inorg = df.global.world.raws.inorganics.all
 
 local obs = {}   -- idx -> {zmin,zmax,n,wt}
-for bz = 0, mz - 1 do
+-- Cavern hint: discovered open tiles below the build level (bau tunnels/stairs also produce FLOOR)
+local ceil = tonumber(a[3]) or 97
+local OPEN = { FLOOR = true, EMPTY = true, RAMP = true, BOULDER = true, PEBBLES = true, SHRUB = true }
+local offen = {}
+local t0, stopped_at = now_ms(), nil
+for bz = mz - 1, 0, -1 do
   for bx = 0, mx // 16 - 1 do
     for by = 0, my // 16 - 1 do
       local b = dfhack.maps.getBlock(bx, by, bz)
@@ -30,11 +52,13 @@ for bz = 0, mz - 1 do
               if d.water_table then o.wt = o.wt + 1 end
               obs[d.geolayer_index] = o
             end
+            if bz <= ceil and OPEN[df.tiletype_shape[at.shape]] then offen[bz] = (offen[bz] or 0) + 1 end
           end
         end end
       end
     end
   end
+  if bz > 0 and now_ms() - t0 > budget then stopped_at = bz break end
 end
 
 local layers, offs = {}, {}
@@ -65,25 +89,10 @@ for i = 0, #gb.layers - 1 do
   pred[#pred + 1] = ('%s d%d..%d -> z%d..%d'):format(inorg[l.mat_index].id, -l.top_height, -l.bottom_height, off + l.top_height, off + l.bottom_height)
 end
 
--- Cavern: discovered open tiles below the build level (hint only; bau tunnels/stairs also produce FLOOR)
-local ceil = tonumber(a[3]) or 97
-local offen = {}
-for bz = 0, ceil do
-  for bx = 0, mx // 16 - 1 do for by = 0, my // 16 - 1 do
-    local b = dfhack.maps.getBlock(bx, by, bz)
-    if b then for i = 0, 15 do for j = 0, 15 do
-      if not b.designation[i][j].hidden then
-        local sh = df.tiletype_shape[df.tiletype.attrs[b.tiletype[i][j]].shape]
-        if sh == 'FLOOR' or sh == 'EMPTY' or sh == 'RAMP' or sh == 'BOULDER' or sh == 'PEBBLES' or sh == 'SHRUB' then
-          offen[bz] = (offen[bz] or 0) + 1
-        end
-      end
-    end end end
-  end end
-end
 local of = {}
 for z, n in pairs(offen) do of[#of + 1] = 'z' .. z .. '=' .. n end
 table.sort(of)
 
 util.emit({ geo = GEO, weltkachel = rx .. ',' .. ry, off_geschaetzt = off, regel = 'z = OFF - d (OFF aus beobachteten Schichten; Bodenschichten d0-3 mitgezaehlt)',
-  schichten = layers, vorhersage = pred, offen_tief_ab_z = ceil, offen_tief = of })
+  schichten = layers, vorhersage = pred, offen_tief_ab_z = ceil, offen_tief = of, ms = math.floor(now_ms() - t0),
+  unvollstaendig = stopped_at and true or nil, gescannt_bis_z = stopped_at or 0 })

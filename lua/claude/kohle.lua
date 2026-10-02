@@ -68,5 +68,8 @@ elseif cmd == 'stop' then
   repeatUtil.cancel(KEY)
   util.emit({ ok = true })
 else
-  util.emit({ laeuft = repeatUtil.isScheduled and repeatUtil.isScheduled(KEY) or 'unbekannt' })
+  -- boolean when repeat-util can tell (the old 'a and f() or x' idiom turned false into 'unbekannt', BUG-411)
+  local laeuft = 'unbekannt'
+  if repeatUtil.isScheduled then laeuft = repeatUtil.isScheduled(KEY) and true or false end
+  util.emit({ laeuft = laeuft })
 end
