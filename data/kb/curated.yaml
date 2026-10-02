@@ -231,6 +231,14 @@
   quelle: "POSTMORTEM-run3; CLAUDE.md"
   run: 3
   scopes: [verteidigung, bau, erkundung]
+- id: bestie_megabestie
+  title: "Forgotten beast / megabeast at the fort"
+  symptom_keywords: [forgotten beast, megabeast, beast, titan, building destroyer, monster, bestie, megabestie]
+  ursache: "Beasts with BUILDINGDESTROYER break doors and hatches. Run 3 fell (J89) to two forgotten beasts that came up through an opened shaft."
+  fix: "Classify with claude/gefahr (raw flags). Civilians into the refuge burrow, close accesses with construction walls (doors do not hold), soldiers only in full metal armor; never open a cavern lock (kb kavernen_schleuse)."
+  quelle: "POSTMORTEM-run3; CLAUDE.md"
+  run: 3
+  scopes: [verteidigung, militaer]
 - id: belagerung_pop
   title: "Sieges from population 80"
   symptom_keywords: [siege, goblin, pop 80, guard, armor, pop gate]
