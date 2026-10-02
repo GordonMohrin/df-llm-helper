@@ -412,3 +412,23 @@ def test_lint_paths_reports_nested_dirs_once():
     twice = lint_paths([ROOT / "lua" / "claude", ROOT / "lua"])
     assert sorted(map(str, once)) == sorted(map(str, twice))
     assert not any(f.file.endswith("bauprog.lua") for f in once)
+
+
+# ---------------------------------------------------------------- BUG-419 (map-specific values from config)
+def test_bauprog_has_no_run3_phases_by_default(tmp_path):
+    out, r = run("bauprog", "status", tmp_path=tmp_path, setup="dfhack.maps.getTileSize = function() return 32, 32, 10 end")
+    assert r.returncode == 0, r.stderr
+    assert one_json(out)["phasen"] == []
+
+
+def test_geo_without_known_geo_index_errors(tmp_path):
+    out, _ = run("geo", tmp_path=tmp_path, setup="dfhack.maps.getTileSize = function() return 32, 32, 10 end")
+    assert "geo_index" in one_json(out)["error"]
+
+
+def test_no_run3_coordinates_left_in_scripts():
+    import re
+    pats = {"muell.lua": r"z <= 131 and x >= 40", "kohle.lua": r"x - 99\)", "sperre.lua": r"\{ 136, 169",
+            "zugaenge.lua": r"ZMIN, ZMAX = 100, 136|CORE=\{100,101,130\}", "geo.lua": r"or 110\b|or 97\b"}
+    for name, pat in pats.items():
+        assert not re.search(pat, (CLAUDE / name).read_text(encoding="utf-8")), name

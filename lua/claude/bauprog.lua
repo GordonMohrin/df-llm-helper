@@ -1,6 +1,6 @@
 -- claude/bauprog start|stop|status|next|once|reset|force <id>   construction/production program (scope wirtschaft/bau, 30.09.2026 Y88)
 -- The player: "Make sure there is enough utilization." Demand is missing, not labor. This script keeps work available for the ~34 free dwarves permanently:
---   PHASES (PHASES below) = fort extensions (east wing x163..186, further bands). Each phase: 1. set dig designations (like claude/dig, walls only),
+--   PHASES = fort extensions from state/bauprog_extra.lua (run-3 east wing x163..186 only with config.BAU_PHASES_RUN3). Each phase: 1. set dig designations (like claude/dig, walls only),
 --   2. once the area is dug free: set quickfort blueprints (workshops, stockpiles, zones, furniture, beds, statues).
 --   Downstream, smoothing/engraving (arbeit.lua smooth_supply, box x125..190), stonemason/furniture orders (orders.lua) and hauling generate the work.
 -- The next phase starts when fewer than START_UNTER reachable dig designations are open (miners with picks are the bottleneck, not the phase).
@@ -17,7 +17,9 @@ local START_UNTER = 150
 
 -- Rectangle = { z, x1, y1, x2, y2 }; dig = list of rectangles (mode d: wall tiles only); steps = blueprints after digging:
 -- { bp = 'claude/file.csv', cur = 'x,y,z', need = { rectangles that must be free (FLOOR) } }
-local PHASES = {
+-- RUN3_PHASES: the run-3 east wing of 'Razordrums' (map-specific). They are only used when config.BAU_PHASES_RUN3 = true;
+-- on any other map they would designate meaningless tiles (BUG-419). Own phases: state/bauprog_extra.lua (below).
+local RUN3_PHASES = {
   { id = 'O1', name = 'Ostfluegel z144: Werkhalle (3 Masons/Crafts, Jeweler, Mechaniker) + Lager', cam = { 175, 150, 144 },
     dig = { { 144, 163, 149, 186, 151 }, { 144, 164, 145, 186, 148 }, { 144, 164, 152, 186, 155 } },
     steps = {
@@ -57,6 +59,9 @@ local PHASES = {
       { bp = 'claude/bau_o6_sp.csv', cur = '164,128,144', need = { { 144, 164, 128, 186, 140 } } },
     } },
 }
+local cfg = reqscript('claude/config')
+local PHASES = {}
+if cfg.BAU_PHASES_RUN3 then for _, p in ipairs(RUN3_PHASES) do PHASES[#PHASES + 1] = p end end
 -- further phases: PHASES_EXTRA from state/bauprog_extra.lua (optional, same structure) -> extendable without script changes
 do
   local f = loadfile(reqscript('claude/util').home() .. '/state/bauprog_extra.lua')
@@ -115,7 +120,7 @@ local function dig_open()
   end
   local NO = df.tile_dig_designation.No
   local mx, my = dfhack.maps.getTileSize()
-  for z = 100, 146 do
+  for z = cfg.Z_MIN, cfg.Z_MAX do   -- relevant fort levels (was the run-3 range 100..146)
     for bx = 0, mx // 16 - 1 do for by = 0, my // 16 - 1 do
       local b = dfhack.maps.getBlock(bx, by, z)
       if b and b.flags.designated then

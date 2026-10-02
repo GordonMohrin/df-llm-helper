@@ -34,7 +34,7 @@ function run(N)
               if not d.hidden and sh == 'WALL' and d.dig == df.tile_dig_designation.No and not d.water_table then
                 local x, y = blk.map_pos.x + ex, blk.map_pos.y + ey
                 if (walk(x + 1, y, bz) or walk(x - 1, y, bz) or walk(x, y + 1, bz) or walk(x, y - 1, bz)) and not cfg.is_sperre(x, y, bz) then
-                  list[#list + 1] = { x, y, bz, math.abs(x - 99) + math.abs(y - 95) }
+                  list[#list + 1] = { x, y, bz, math.abs(x - (cfg.FORT_X or 0)) + math.abs(y - (cfg.FORT_Y or 0)) }   -- nearest to the fort centre (was the run-3 shaft 99,95)
                 end
               end
             end end end

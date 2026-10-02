@@ -26,13 +26,14 @@ end
 local mx, my, mz = dfhack.maps.getTileSize()
 local rx, ry = dfhack.maps.getTileBiomeRgn(mx // 2, my // 2, mz - 19)
 local rb = dfhack.maps.getRegionBiome(rx, ry)
-local GEO = tonumber(a[1]) or (rb and rb.geo_index) or 110
-local gb = df.global.world.world_data.geo_biomes[GEO]
+local GEO = tonumber(a[1]) or (rb and rb.geo_index)   -- no run-4 default (110) any more (BUG-419)
+local okg, gb = pcall(function() return df.global.world.world_data.geo_biomes[GEO] end)
+if not GEO or not okg or not gb then util.emit({ error = 'geo_index unbekannt (claude/geo <geo_index>)' }) return end
 local inorg = df.global.world.raws.inorganics.all
 
 local obs = {}   -- idx -> {zmin,zmax,n,wt}
 -- Cavern hint: discovered open tiles below the build level (bau tunnels/stairs also produce FLOOR)
-local ceil = tonumber(a[3]) or 97
+local ceil = tonumber(a[3]) or (reqscript('claude/config').Z_MIN - 1)   -- below the relevant fort levels (was run-4 z97)
 local OPEN = { FLOOR = true, EMPTY = true, RAMP = true, BOULDER = true, PEBBLES = true, SHRUB = true }
 local offen = {}
 local t0, stopped_at = now_ms(), nil

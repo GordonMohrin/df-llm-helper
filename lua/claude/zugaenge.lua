@@ -1,8 +1,13 @@
 -- claude/zugaenge: computes all entrances into the fort from outside (pathfinding), output 'ZUGANG x y z n fuehrt_zum_Kern umgeht_Fallen'. ~10 s runtime (main thread)!
 -- Accesses into the fort: entry points from outside (outside=true) into walkable interior rooms, grouped, with trap coverage
+-- Usage: claude/zugaenge [cx cy cz [zmin zmax]]  core point (default config.FORT_REFS[1]) and z range (default
+-- config.Z_MIN..Z_MAX); the run-3/4 values (core 100,101,130, z 100..136) were hard-coded (BUG-419).
+local cfg = reqscript('claude/config')
+local args = { ... }
+local function iarg(i) local v = tonumber(args[i]) return v and math.tointeger(v) or nil end
 local M = df.global.world.map
 local XM, YM = M.x_count, M.y_count
-local ZMIN, ZMAX = 100, 136
+local ZMIN, ZMAX = iarg(4) or cfg.Z_MIN, iarg(5) or cfg.Z_MAX
 local SH = df.tiletype_shape
 local walkshape = {}
 for _,n in ipairs{'FLOOR','BOULDER','PEBBLES','BROOK_TOP','SHRUB','SAPLING','RAMP','STAIR_UP','STAIR_DOWN','STAIR_UPDOWN','TWIG','BROOK_BED','TRUNK_BRANCH'} do walkshape[SH[n]] = true end
@@ -89,7 +94,8 @@ for k,e in pairs(epos) do
   end
 end
 -- Reachability of the core without trap tiles, from cluster
-local CORE={100,101,130}
+local REF = (cfg.FORT_REFS or {})[1] or { cfg.FORT_X, cfg.FORT_Y, cfg.SURFACE_Z }
+local CORE = { iarg(1) or REF[1], iarg(2) or REF[2], iarg(3) or REF[3] }
 local function reach_core(cl)
   local s2, q2, i2 = {}, {}, 1
   for _,c in ipairs(cl) do local k=key(c[1],c[2],c[3]) if not trap[k] then s2[k]=true q2[#q2+1]=c end end
