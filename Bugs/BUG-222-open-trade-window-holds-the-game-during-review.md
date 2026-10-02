@@ -1,6 +1,6 @@
 # BUG-222: the open trade window holds the game paused while the trade waits for approval
 
-- **Status:** fixed in COMMIT
+- **Status:** fixed in 4012e2e
 - **Severity:** S2 (the fort stands still for up to 15 min of REVIEW)
 - **Area:** `df_llm_helper/trade_flow.py` (state REVIEW), `caravan.py` (`approve_review`), `cli.py` (`caravan --loop`)
 - **Reported:** 2026-10-02 (retest of 8e67f05, live trade), commit `61e5c13`

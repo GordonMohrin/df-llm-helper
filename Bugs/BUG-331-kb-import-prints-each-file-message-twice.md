@@ -1,6 +1,6 @@
 # BUG-331: `kb import` prints each per-file message twice
 
-- **Status:** fixed in COMMIT
+- **Status:** fixed in 4012e2e
 - **Severity:** S3 (cosmetic)
 - **Area:** `df_llm_helper/cli.py` (`cmd_kb`, `main`)
 - **Reported:** 2026-10-02 (retest of BUG-301/302), commit `61e5c13`

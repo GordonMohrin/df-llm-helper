@@ -1,6 +1,6 @@
 # BUG-221: trade automaton leaves MARK before the marked goods are in the depot
 
-- **Status:** fixed in COMMIT
+- **Status:** fixed in 4012e2e
 - **Severity:** S2 (the trade window opens with the goods still on their way; the review judges an incomplete offer)
 - **Area:** `df_llm_helper/trade_flow.py` (`TradeFlow.step`, state MARK), `caravan.py`
 - **Reported:** 2026-10-02 (retest of 8e67f05, live trade), commit `61e5c13`
