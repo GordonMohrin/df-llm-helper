@@ -417,9 +417,9 @@ def cmd_exception(args) -> int:
     cfg = load_config(args.config)
     reg = ExceptionRegistry(cfg.path("exceptions"))
     if args.action == "add":
-        objs = [o for o in (args.objects or "").split(",") if o]
+        objs = [o.strip() for o in (args.objects or "").split(",") if o.strip()]
         e = reg.add(args.rule, args.reason, args.ja or "", objects=objs, max_uses=args.max_uses, expires=args.expires)
-        print(f"Exception registered: {e.action} {e.objects}")
+        print(f"Exception registered: {e.action} {e.objects} (in {reg.path.name})")
         return 0
     for e in reg.entries:
         print(f"{e.ts} {e.action} {e.objects}: {e.reason} (player consent: {e.player_consent})")

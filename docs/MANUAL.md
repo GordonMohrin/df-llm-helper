@@ -84,6 +84,10 @@ The quote is stored in the field `player_consent` of `data/exceptions.jsonl` (ol
 
 If the rule ID (FPxx or Lxx) is in the register, the client lets the command through for exactly those objects.
 
+`exception add` accepts only known rule ids (FP01-FP13, L01-L31), numeric object ids, `--max-uses` >= 1 and a real
+calendar date for `--expires` (`YYYY-MM-DD` = valid through the end of that day, or `YYYY-MM-DDTHH:MM:SSZ`). A broken
+register line is listed as `Register error: ...` by `exception list` and never grants anything.
+
 ## 6. Extending (for the next agent)
 
 | What | Where | Required fields | Verify with |
