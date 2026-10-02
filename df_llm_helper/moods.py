@@ -11,9 +11,10 @@ import re
 from dataclasses import dataclass, field
 
 __all__ = ["MoodCase", "Element", "parse_mood_log_line", "decode_none", "case_from_need", "analyse", "MoodManager",
-           "reserve_gaps", "DEFAULTS", "FLAG_HINTS"]
+           "reserve_gaps", "reserve_wants", "DEFAULTS", "FLAG_HINTS"]
 
-DEFAULTS = {"reserves": {"wood": 10, "cut_gems": 3, "rough_gems": 4, "bone": 5, "leather": 3, "metal": 3},
+DEFAULTS = {"reserves": {"wood": 14, "cut_gems": 10, "rough_gems": 12, "bone": 5, "leather": 3, "metal": 3,
+                          "cloth": 3, "stone": 5, "silk": 2},
             "release_cutgems": True, "warn_timeout_ticks": 8000, "ticks_per_tile": 12, "work_ticks": 3000,
             "min_pop_reserve": 20, "max_releases_per_hour": 2, "fail_reserve_bump": 2}
 # config key (spec, English) -> category in `claude/mood status` (vorrat)
@@ -149,16 +150,33 @@ def analyse(case: MoodCase, cfg: dict) -> dict:
             "est_ticks": est, "notes": notes}
 
 
-def reserve_gaps(vorrat: dict, pop: int | None, cfg: dict, extra: dict | None = None) -> list[str]:
-    """Prevention: from pop >= min_pop_reserve on, check the stock (claude/mood status 'vorrat') against the reserves.
-    extra = surcharges after failed moods (kv mood.reserve_extra)."""
+def reserve_wants(cfg: dict, minimum: dict | None = None) -> tuple[dict, str]:
+    """Reserve per category (`claude/mood status` names) and its source. BUG-220 (player delegated the decision): the
+    game script's `minimum` (lua/claude/mood.lua) is authoritative; `mood.reserves` in the config is the fallback for
+    an unreadable answer and for categories the script does not list."""
+    c = {**DEFAULTS, **(cfg or {})}
+    wants = {RESERVE_KEYS.get(k, k): int(v) for k, v in (c["reserves"] or {}).items()}
+    used = False
+    for cat, v in (minimum or {}).items() if isinstance(minimum, dict) else ():
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            wants[str(cat)] = int(v)
+            used = True
+    return wants, ("claude/mood minimum" if used else "config mood.reserves")
+
+
+def reserve_gaps(vorrat: dict, pop: int | None, cfg: dict, extra: dict | None = None,
+                 minimum: dict | None = None) -> list[str]:
+    """Prevention: from pop >= min_pop_reserve on, check the stock (claude/mood status 'vorrat') against the reserves
+    (`minimum` of claude/mood status when given, else config mood.reserves; see reserve_wants).
+    extra = surcharges after failed moods (kv mood.reserve_extra, keyed by config name)."""
     c = {**DEFAULTS, **(cfg or {})}
     if pop is None or pop < c["min_pop_reserve"] or not isinstance(vorrat, dict):
         return []
+    wants, _ = reserve_wants(c, minimum)
+    extra_cat = {RESERVE_KEYS.get(k, k): int(v) for k, v in (extra or {}).items()}
     out = []
-    for k, v in sorted(c["reserves"].items()):
-        cat = RESERVE_KEYS.get(k, k)
-        want = int(v) + int((extra or {}).get(k, 0))
+    for cat in sorted(wants, key=lambda x: CAT_LABEL.get(x, x)):
+        want = wants[cat] + extra_cat.get(cat, 0)
         have = int(vorrat.get(cat) or 0)
         if have < want:
             out.append(f"{CAT_LABEL.get(cat, cat)} {have}/{want}")
@@ -269,8 +287,10 @@ class MoodManager:
         st = self.client.run("claude/status")
         popd = (st.json or {}).get("population") if isinstance(st.json, dict) else None
         pop = popd.get("total") if isinstance(popd, dict) else None
+        minimum = j.get("minimum") if isinstance(j.get("minimum"), dict) else None
         gaps = reserve_gaps(j.get("vorrat") or {}, pop if isinstance(pop, int) else None, self.cfg,
-                            self.store.get("mood.reserve_extra"))
+                            self.store.get("mood.reserve_extra"), minimum)
+        src = reserve_wants(self.cfg, minimum)[1]
         if pop is None:
             return ["Population unknown: reserve check skipped"]
         if pop < self.cfg["min_pop_reserve"]:
@@ -278,5 +298,5 @@ class MoodManager:
         if gaps:
             if not dry:                                              # BUG-203: a dry run writes no warning
                 self.store.warn(self.clock.now().epoch, "mood", "mood:reserve", "Mood reserve missing: " + ", ".join(gaps))
-            return ["Mood reserve missing: " + ", ".join(gaps)]
-        return ["Mood reserve ok"]
+            return ["Mood reserve missing: " + ", ".join(gaps) + f" (minima: {src})"]
+        return [f"Mood reserve ok (minima: {src})"]

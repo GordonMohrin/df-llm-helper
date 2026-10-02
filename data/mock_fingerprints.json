@@ -1,0 +1,22 @@
+{
+ "_comment": "BUG-104: identity of the --mock fixture snapshots; rows with these facts that contradict the game's time line are removed from the live state.db (df_llm_helper/mockrows.py). Regenerate with tests/test_bugs_decided.py when fixtures change.",
+ "fingerprints": [
+  {
+   "game_id": "Windrings|100|263900",
+   "facts": {
+    "fort": "Windrings",
+    "date": "12. Hematite, Jahr 102",
+    "pop": 24,
+    "adults": 23,
+    "drink_days": 76,
+    "food_days": 189,
+    "drinks": 109,
+    "meals": 52,
+    "jobs_open": 199,
+    "dig_jobs": 63,
+    "wealth": 46183
+   },
+   "source": "fixtures/run5"
+  }
+ ]
+}

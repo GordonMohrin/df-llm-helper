@@ -193,9 +193,10 @@ def test_unreadable_need_reported(tmp_path):
 def test_reserve_gaps_real_status_and_threshold(tmp_path):
     vorrat = json.loads((FIX / "mood_status.txt").read_text(encoding="utf-8"))["vorrat"]
     g = reserve_gaps(vorrat, 23, DEFAULTS)
-    assert "wood 0/10" in g and "rough gems 0/4" in g and not any(x.startswith("cut gems") for x in g)
+    # BUG-220: config defaults follow lua/claude/mood.lua (rough 12, cut 10, wood 14)
+    assert "wood 0/14" in g and "rough gems 0/12" in g and not any(x.startswith("cut gems") for x in g)
     assert reserve_gaps(vorrat, 19, DEFAULTS) == []
-    assert "wood 0/12" in reserve_gaps(vorrat, 23, DEFAULTS, {"wood": 2})
+    assert "wood 0/16" in reserve_gaps(vorrat, 23, DEFAULTS, {"wood": 2})
     mm, _, _ = mgr(tmp_path, {"claude/mood status": (FIX / "mood_status.txt").read_text(encoding="utf-8"),
                               "claude/status": (FIX / "status.txt").read_text(encoding="utf-8")})
     out = mm.reserve()

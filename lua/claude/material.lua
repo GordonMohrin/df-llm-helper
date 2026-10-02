@@ -114,7 +114,7 @@ local function furnaces(kind)
 end
 
 local function stock(sm)
-  local s = { coal = 0, coke = 0, wood = 0, flux = 0, ore = {}, bars = {}, have = {} }
+  local s = { coal = 0, coke = 0, wood = 0, flux = 0, mechanism = 0, blocks = 0, ore = {}, bars = {}, have = {} }
   local origin = sm and xyz2pos(sm.centerx, sm.centery, sm.z)
   local function reach(it)
     if not origin then return true end
@@ -137,6 +137,11 @@ local function stock(sm)
         end
       elseif t == 'WOOD' then
         if free and not f.in_inventory and reach(it) then s.wood = s.wood + it.stack_size end
+      elseif t == 'TRAPPARTS' or t == 'BLOCKS' then
+        -- BUG-220: mechanisms and blocks for the bottleneck graph (free, reachable, stockpiles included)
+        if free and not f.in_inventory and reach(it) then
+          if t == 'TRAPPARTS' then s.mechanism = s.mechanism + it.stack_size else s.blocks = s.blocks + it.stack_size end
+        end
       elseif t == 'BOULDER' then
         if free and not f.in_inventory then
           local m = mat_id(it)

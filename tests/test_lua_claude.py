@@ -744,3 +744,24 @@ def test_pilot_tools_status_leaves_names_out_unless_full(tmp_path):
     assert out["citizens"] and not any("name" in c for c in out["citizens"])
     out, _ = remote_lua(tmp_path, "pilot_tools.lua", "status", "--full")
     assert all(c.get("name") for c in out["citizens"])
+
+
+# ---------------------------------------------------------------- BUG-220 (Lua side)
+def test_material_stock_counts_mechanisms_and_blocks(tmp_path):
+    setup = """
+local function item(t, n, flags)
+  return { pos = { x = 1, y = 1, z = 1 }, flags = flags or {}, stack_size = n,
+           getType = function() return t end, subtype = nil }
+end
+df.item_type = setmetatable({ [10] = 'TRAPPARTS', [11] = 'BLOCKS' }, { __index = function(_, k) return k end })
+df.global.world.items.all = { item(10, 1), item(10, 1), item(11, 4), item(11, 3, { forbid = true }) }
+"""
+    out, r = run("material", "status", tmp_path=tmp_path, setup=setup)
+    assert r.returncode == 0, r.stderr
+    st = one_json(out)["stock"]
+    assert st["mechanism"] == 2 and st["blocks"] == 4                  # forbidden blocks are not free
+
+
+def test_mood_minimum_matches_the_live_game():
+    src = (CLAUDE / "mood.lua").read_text(encoding="utf-8")
+    assert "rohgem = 12, schliffgem = 10" in src and "holz = 14" in src and "seide = 3" in src

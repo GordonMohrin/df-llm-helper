@@ -1,6 +1,6 @@
 # BUG-421: two `dfhack-run` calls (`claude/mil`, `claude/mil guard`) took 8-9 s while the same calls normally take 0.07 s (not reproducible; Gordon's "main thread blocked" suspicion)
 
-- **Status:** open (info needed)
+- **Status:** fixed in 42d0018 (diagnostics; root cause still to be confirmed from the live `tools/out/stall.log`)
 - **Severity:** S3 (becomes S2 if it turns out that a periodic script blocks the main thread for seconds)
 - **Area:** unknown - candidates: periodic DFHack jobs (`claude-watchdog`/`claude-watchdog-alert`, `claude-milguard` via `tempo.schedule`, `claude-tempo`), DF autosave, the `mil` script itself
 - **Reported:** 2026-10-02, commit `6dedd96`
@@ -32,5 +32,14 @@ Measure from inside: add a `claude/watchdog timing` that records `os.clock()` pe
 ## Info needed
 - Player: do you see the game freeze for a few seconds periodically (autosave every N minutes? every 600/1200 ticks?). Please run `Bugs/evidence/BUG-421/poll.py 600` (10 minutes, changes nothing) and send `poll.log`; a regular spike period identifies the job.
 
+Decided (player delegated the decision): make the client robust and self-diagnosing (stall log, stall period, a failure needs 2 consecutive timeouts); the root cause is confirmed later from the live stall log.
+
 ## Fix
 Not reproducible here. Diagnostic in 4774f54: `claude/watchdog status` now reports `timing` (last/max ms per sub-step of the watchdog jobs). Player: after a stall run `claude/watchdog status` and attach `timing`, plus `poll.py 600`.
+
+Robustness and self-diagnosis (42d0018):
+- `RealClient` appends every dfhack-run call slower than 3 s (also timeouts) to `<tools>/out/stall.log` (ISO time, epoch, duration, ok|fail|timeout, command), rotated at 1 MB (`stall.log.1`); `df_llm_helper/stalllog.py`.
+- `python -m df_llm_helper perf status` prints `stall log: N stalls (... calls > 3 s, ... timeouts, longest ... s), stall period: median interval ... s, last ...; top: <commands>` (calls within 15 s are one stall).
+- Watcher: a single timeout of the report-id read only skips the pass (`waechter.alive` is refreshed); 2 consecutive timeouts are a failure (BUG-106 behaviour). The heartbeat is file based and never depends on a game call; the guard has no failure counter (an unreadable snapshot only blocks `tempo on` for that cycle, fail closed, unchanged). A 9 s stall is below the 40 s client timeout anyway.
+- Tests: `tests/test_bugs_decided.py::test_bug421_*`.
+- Root cause: still to be confirmed. After the next live stall send `tools/out/stall.log`, `perf status` and `claude/watchdog status` (timing).

@@ -22,7 +22,7 @@ local LOG = reqscript('claude/util').home() .. '/tools/out/mood.log'
 local BPDIR = dfhack.getDFPath() .. '/dfhack-config/blueprints/claude/'
 
 -- Minimum stock (category -> count, REACHABLE). Metal/gem/leather/cloth only via trade or hunting/weaving.
-MIN = { metall = 3, rohgem = 3, schliffgem = 2, knochen = 5, holz = 10, stein = 5, leder = 3, stoff = 3, seide = 2 }
+MIN = { metall = 3, rohgem = 12, schliffgem = 10, knochen = 5, holz = 14, stein = 5, leder = 3, stoff = 3, seide = 3 }   -- synced with the live game (BUG-220)
 
 local SKILL_CAT = {
   METALCRAFT='metall', FORGE_WEAPON='metall', FORGE_ARMOR='metall', FORGE_FURNITURE='metall', SMELT='metall', METAL_SMITH='metall',

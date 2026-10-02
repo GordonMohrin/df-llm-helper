@@ -153,6 +153,11 @@ class Result:
         return cls(ok=ok, stdout=stdout, stderr=stderr, elapsed_s=elapsed_s,
                    json=parse_json_tolerant(stdout) if ok else None, cmd=cmd)
 
+    @property
+    def timed_out(self) -> bool:
+        """BUG-421: the call hit its timeout (RealClient/MockClient stderr 'Timeout after ...')."""
+        return not self.ok and (self.stderr or "").startswith("Timeout after")
+
     def to_record(self) -> dict:
         d = asdict(self)
         d.pop("json", None)
@@ -201,10 +206,20 @@ class RealClient(DFClient):
     """Calls dfhack-run.exe (one process per command). Only usable locally on the player's machine."""
 
     def __init__(self, dfhack_run: str | Path, registry: ExceptionRegistry | None = None,
-                 clock: Clock | None = None, lint: Callable[[str], list] | None = None):
+                 clock: Clock | None = None, lint: Callable[[str], list] | None = None,
+                 stall_log: str | Path | None = None):
         super().__init__(registry, clock)
         self.exe = Path(dfhack_run)
         self.lint = lint
+        self.stall_log = Path(stall_log) if stall_log else None     # BUG-421: <tools>/out/stall.log
+
+    def _stall(self, start: float, res: Result) -> Result:
+        """BUG-421: every call slower than stalllog.STALL_S goes to the stall log (time, duration, command)."""
+        from .stalllog import STALL_S, append_stall
+        if self.stall_log is not None and res.elapsed_s > STALL_S:
+            append_stall(self.stall_log, start, res.elapsed_s, res.cmd,
+                         "timeout" if res.timed_out else ("ok" if res.ok else "fail"))
+        return res
 
     def available(self) -> bool:
         return self.exe.is_file()
@@ -218,17 +233,18 @@ class RealClient(DFClient):
             return Result(ok=False, stdout="", stderr=f"dfhack-run not found: {self.exe} "
                                                       f"(set the path in config.yaml dfhack_run)", cmd=cmd)
         args = [str(self.exe)] + shlex.split(cmd, posix=True)
+        start = self.clock.now().epoch
         t0 = time.monotonic()
         try:
             p = subprocess.run(args, cwd=str(self.exe.parent), capture_output=True, timeout=timeout)
         except subprocess.TimeoutExpired:
-            return Result(ok=False, stdout="", stderr=f"Timeout after {timeout}s: {cmd} (game hanging? "
-                                                      f"Try a smaller query or retry later)",
-                          elapsed_s=time.monotonic() - t0, cmd=cmd)
+            return self._stall(start, Result(ok=False, stdout="", stderr=f"Timeout after {timeout}s: {cmd} (game "
+                                                                         f"hanging? Try a smaller query or retry later)",
+                                             elapsed_s=time.monotonic() - t0, cmd=cmd))
         out = p.stdout.decode("utf-8", errors="replace")
         err = p.stderr.decode("utf-8", errors="replace")
         ok = p.returncode == 0 and "error" not in err.lower()[:200]
-        return Result.make(cmd, ok, out, err, time.monotonic() - t0)
+        return self._stall(start, Result.make(cmd, ok, out, err, time.monotonic() - t0))
 
 
 class MockClient(DFClient):

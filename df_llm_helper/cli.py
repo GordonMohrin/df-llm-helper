@@ -30,7 +30,8 @@ def _client(args, cfg: Config, clock) -> DFClient:
             lint = gate_command(reg, cfg.get("water.forbid_dig"))
         except ImportError:
             pass
-        c = RealClient(cfg.get("dfhack_run"), registry=reg, clock=clock, lint=lint)
+        c = RealClient(cfg.get("dfhack_run"), registry=reg, clock=clock, lint=lint,
+                       stall_log=Path(cfg.path("tools")) / "out" / "stall.log")       # BUG-421
         if cfg.get("transport.batch", False):
             from .transport import BatchingClient
             c = BatchingClient(c, Path(cfg.get("paths.tools")) / "out", max_bytes=int(cfg.get("transport.max_bytes", 20000)))
@@ -482,8 +483,9 @@ def cmd_exception(args) -> int:
     reg = ExceptionRegistry(cfg.path("exceptions"))
     if args.action == "add":
         objs = [o.strip() for o in (args.objects or "").split(",") if o.strip()]
-        e = reg.add(args.rule, args.reason, args.ja or "", objects=objs, max_uses=args.max_uses, expires=args.expires)
-        print(f"Exception registered: {e.action} {e.objects} (in {reg.path.name})")
+        e = reg.add(args.rule, args.reason, args.ja or "", objects=objs, max_uses=args.max_uses, expires=args.expires,
+                    local=args.local)
+        print(f"Exception registered: {e.action} {e.objects} (in {(reg.local_path if args.local else reg.path).name})")
         return 0
     for e in reg.entries:
         print(f"{e.ts} {e.action} {e.objects}: {e.reason} (player consent: {e.player_consent})")
@@ -1476,6 +1478,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--ja", help="verbatim quote of the player's consent")
     s.add_argument("--max-uses", type=int)
     s.add_argument("--expires")
+    s.add_argument("--local", action="store_true",
+                   help="write to the git-ignored <register>.local.jsonl (consent of this player, not shipped)")
     s.set_defaults(fn=cmd_exception)
     s = sub.add_parser("memory", help="compact memory (F6): compact|restore <scope|all>")
     s.add_argument("action", choices=["compact", "restore"])

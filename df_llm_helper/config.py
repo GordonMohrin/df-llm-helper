@@ -70,7 +70,8 @@ DEFAULTS: dict[str, Any] = {
     "caravan": {"min_ratio": 2.0, "skip_if_offer_empty": True, "stuck_ticks": 2000, "release_stuck": True,
                 "wants_file": "data/trade/wants.yaml"},
     # Spec 03 mood manager (reserves from pop >= min_pop_reserve; surcharge per failed mood)
-    "mood": {"reserves": {"wood": 10, "cut_gems": 3, "rough_gems": 4, "bone": 5, "leather": 3, "metal": 3},
+    "mood": {"reserves": {"wood": 14, "cut_gems": 10, "rough_gems": 12, "bone": 5, "leather": 3, "metal": 3,
+                          "cloth": 3, "stone": 5, "silk": 2},
              "release_cutgems": True, "warn_timeout_ticks": 8000, "ticks_per_tile": 12, "work_ticks": 3000,
              "min_pop_reserve": 20, "max_releases_per_hour": 2, "fail_reserve_bump": 2},
     # Spec 04 hunger/hospital guard

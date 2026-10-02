@@ -16,6 +16,8 @@ and keep only the deadman brake of df-llm-helper). Logic taken 1:1 from unpause-
     trade.flow == DONE (pause.hold 'karawane' + caravan.flag + MessageBox); never during SELECT_LIVE/CONFIRM/FINISH
 10. spec v3-03 (features/perf.py): latency of the light queries -> LatencyMonitor -> perf.flag after >= 5 outliers in
     5 min; services a crashed `perf bisect` left switched off are restarted when their deadline has passed
+11. BUG-421: a single timeout of the report-id read only skips the pass (watcher stays alive); 2 consecutive timeouts
+    are a failure; every dfhack-run call > 3 s is in tools/out/stall.log (perf status: stall period)
 Heartbeat: tools/out/waechter.alive (the guard checks it instead of the PowerShell process).
 """
 from __future__ import annotations
@@ -50,6 +52,7 @@ CLEAR_CMD = ('lua "local p=df.global.world.status.popups local n=#p while #p>0 d
 # pause lifted only on the plain map; the trailing frame counter/year tick (spec v3-04) is optional for older output
 UNPAUSE_RE = re.compile(r"^P \d+ dwarfmode/Default(?: fc=\d+)?(?: yt=\d+)?$")
 CARAVANS_CMD = 'lua "print(#df.global.plotinfo.caravans)"'
+TIMEOUTS_FOR_FAILURE = 2       # BUG-421: consecutive timeouts before the watcher counts as failed
 
 
 def reports_cmd(last: int) -> str:
@@ -73,6 +76,7 @@ class Waechter:
     log: list = field(default_factory=list)
     freeze: object = None                          # freeze_guard.FreezeGuard (spec v3-04)
     perf: object = None                            # features.perf.LatencyMonitor (spec v3-03)
+    timeouts: int = 0                              # BUG-421: consecutive timeouts of the report-id read
 
     def __post_init__(self) -> None:
         if self.freeze is None:
@@ -144,9 +148,18 @@ class Waechter:
             if self.last <= 0:
                 self.last = self._int(self.client.run(MAX_REPORT_ID_CMD).stdout) or 0
         rmx = self._q(MAX_REPORT_ID_CMD)
+        if not rmx.ok and rmx.timed_out and self.timeouts + 1 < TIMEOUTS_FOR_FAILURE:
+            # BUG-421: one slow call (the game's main thread busy for seconds) is no failure; the watcher stays alive
+            # and skips this pass. Two consecutive timeouts are a failure (BUG-106 below).
+            self.timeouts += 1
+            self._alive()
+            return [f"slow game answer: {MAX_REPORT_ID_CMD} timed out ({self.timeouts}/{TIMEOUTS_FOR_FAILURE}), "
+                    f"retry next pass (see tools/out/stall.log)"]
         if not rmx.ok:          # BUG-106: a watcher that cannot see the game must not count as alive
+            self.timeouts += int(rmx.timed_out)
             raise RuntimeError("cannot read reports (" + ((rmx.stderr or "").strip()[:100]
                                                          or "dfhack-run not reachable") + ")")
+        self.timeouts = 0
         self._alive()
         mx = self._int(rmx.stdout)
         if mx is not None and mx >= 0 and mx < self.last:

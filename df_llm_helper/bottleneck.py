@@ -13,7 +13,7 @@ from pathlib import Path
 from . import yamlmini
 
 __all__ = ["DEFAULTS", "Graph", "GraphError", "Blocker", "load_graph", "stock_value", "find_blockers", "report_line",
-           "BottleneckWatch", "backtest_timeline", "starter_budget"]
+           "BottleneckWatch", "backtest_timeline", "source_value", "starter_budget"]
 
 DEFAULTS = {"graph": "data/graphs/produktion.yaml", "wood_reserve": 12, "fuel_reserve": 2, "coal_reserve": 20,
             "escalate_days": 20}
@@ -30,6 +30,7 @@ class GraphError(ValueError):
 class Graph:
     nodes: dict
     goals: list
+    sources: list = field(default_factory=list)
 
     def validate(self) -> list[str]:
         errs = []
@@ -70,7 +71,11 @@ def load_graph(path: Path) -> Graph:
         if n["id"] in nodes:
             raise GraphError(f"{path}: duplicate node: {n['id']}")
         nodes[n["id"]] = n
-    g = Graph(nodes, list(d.get("goals") or []))
+    srcs = [s for s in (d.get("sources") or []) if isinstance(s, dict)]
+    for s in srcs:
+        if not s.get("key") or not s.get("cmd") or not s.get("path"):
+            raise GraphError(f"{path}: source needs key, cmd and path: {s}")
+    g = Graph(nodes, list(d.get("goals") or []), srcs)
     errs = g.validate()
     if errs:
         raise GraphError(f"{path}: " + "; ".join(errs))
@@ -84,6 +89,30 @@ def _get(stock: dict, path: str):
             return None
         cur = cur[part]
     return cur if isinstance(cur, (int, float)) else None
+
+
+def source_value(answer, src: dict):
+    """Value of one extra stock source (graph 'sources') from the JSON answer of its command; None = unknown.
+    A negative number (Lua 'could not count') is unknown; 'item' picks 'TYPE=N' out of a text field."""
+    cur = answer
+    for part in str(src["path"]).split("."):
+        if not isinstance(cur, dict) or part not in cur:
+            return None
+        cur = cur[part]
+    if src.get("item"):
+        if not isinstance(cur, str):
+            return None
+        for tok in cur.split():
+            k, _, v = tok.partition("=")
+            if k == src["item"]:
+                try:
+                    return float(v)
+                except ValueError:
+                    return None
+        return None
+    if isinstance(cur, bool) or not isinstance(cur, (int, float)) or cur < 0:
+        return None
+    return cur
 
 
 def stock_value(stock: dict, expr: str | None, cfg: dict):
@@ -234,7 +263,26 @@ class BottleneckWatch:
     def stock(self) -> dict | None:
         r = self.client.run("claude/material status")
         j = r.json if r.ok and isinstance(r.json, dict) else None
-        return j.get("stock") if j and isinstance(j.get("stock"), dict) else None
+        st = j.get("stock") if j and isinstance(j.get("stock"), dict) else None
+        if st is not None:
+            st = self.add_sources(dict(st))
+        return st
+
+    def add_sources(self, stock: dict) -> dict:
+        """BUG-220: keys claude/material status does not report (mechanism, blocks) from the graph's read-only
+        'sources' (claude/pilot_defense status, claude/muell status); one call per command, only for missing keys."""
+        answers: dict = {}
+        for src in self.graph.sources:
+            if src["key"] in stock:
+                continue
+            cmd = src["cmd"]
+            if cmd not in answers:
+                r = self.client.run(cmd)
+                answers[cmd] = r.json if r.ok and isinstance(r.json, dict) else None
+            v = source_value(answers[cmd], src) if answers[cmd] is not None else None
+            if v is not None:
+                stock[src["key"]] = v
+        return stock
 
     def run(self, stock: dict | None = None, game_day: float | None = None, *, dry: bool = False) -> list[str]:
         stock = stock if stock is not None else self.stock()

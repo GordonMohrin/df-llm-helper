@@ -15,7 +15,7 @@ These findings are documented and intentionally not "fixed". A new, undocumented
 | mood.lua:213 L10 | Warning: reads tiles for its own planning; verify only revealed tiles are read |
 | probe.lua:32 L10 | Warning: documented in its header: reads only the shape of hidden neighbour tiles (safe/unsafe, no material) |
 | raster.lua:128 L10 | Warning: reads tiles for its own planning; verify only revealed tiles are read |
-| pilot_caravan.lua:21 L07 | Intended: send stuck merchants home (`flags1.left`); df-llm-helper only calls it with an exception-register entry FP09 (player consent) |
+| pilot_caravan.lua:21 L07 | Expected and intended: send stuck merchants home (`flags1.left`); df-llm-helper only calls it with an exception-register entry FP09 (player consent). The public repository ships without that consent, so this error stays in the shipped lint run (see below) |
 
 Since BUG-318 the L10 check looks for a `hidden` check within 30 lines before / 10 lines after the tile read instead of
 anywhere in the file, which added the helper functions above. The table must match the real output in both
@@ -23,5 +23,23 @@ directions (the test also fails for a documented finding that no longer exists).
 
 Resolved: `bauprog.lua` L10 (BUG-418: `shape_at` returns nothing for undiscovered tiles, so `waende_offen` no longer
 counts walls in unrevealed rock). `lint lua/claude lua/` reports each file once (paths are de-duplicated).
-Open decision (BUG-418): `pilot_caravan.lua` L07 stays an error until the player's FP09 consent is in
-`data/exceptions.jsonl`; `claude/dig` judges undiscovered tiles by their real shape (designate blindly or skip them? its header now says so).
+## Consent per player: `pilot_caravan.lua` L07 (BUG-418, decided)
+
+A consent belongs to one player and one installation, so the public repository ships **without** an FP09 entry and
+its own `lint lua` run reports `pilot_caravan.lua:21 L07` as the one expected error. The player's consent lives in the
+git-ignored local register `data/exceptions.local.jsonl` (merged with `data/exceptions.jsonl` on load):
+
+    python -m df_llm_helper exception add FP09 --local --reason 'stuck merchants' --ja '<verbatim quote of the player>'
+
+Lint honours both registers, and a consent for the runtime rule also covers its lint rule (`L07` <-> `FP09`,
+`L06` <-> `FP08`). With the entry in place `lint lua` reports no L07; without it the L07 message says how to add it.
+Open: `claude/dig` judges undiscovered tiles by their real shape (designate blindly or skip them? its header says so).
+
+## Not reported (BUG-319, decided)
+
+- `deathcause` and `gaydar` are no cheats: they only read and show what the game UI also shows (L25 and the
+  runtime rule FP07 no longer list them).
+- `createitem` in pure message text is no command: a line that only passes text to `print`, `qerror`,
+  `dfhack.printerr`, `util.emit`, `say`, `log`, ... and executes nothing, and comments. As a command it stays an L01
+  error: a `run_command`/`run_script` argument, a bare command line, a string that may be executed (any other string
+  literal, `os.execute`, `io.popen`, `load`).
