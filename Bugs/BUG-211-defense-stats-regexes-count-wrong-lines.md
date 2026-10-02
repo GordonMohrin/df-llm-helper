@@ -1,6 +1,6 @@
 # BUG-211: `defense stats` counts job-cancel and sparring lines as trap/attack messages, reads the whole 146 MB gamelog on every call (10 s), and prints a false `!!` alarm; `--tail` accepts 0/negative values
 
-- **Status:** fixed in 4012e2e (retest 2026-10-02 reopened it: 'siege'/'thief' matched combat lines)
+- **Status:** verified fixed (live retest 2026-10-02, ae17fff): 10 invasion announcements = 7 ambush + 2 snatcher + 1 vile force, 0.9 s on the real gamelog
 - **Severity:** S2 (meaningless numbers + false alarm "enemies bypass the lane? check claude/zugaenge")
 - **Area:** `df_llm_helper/features/defense.py` `gamelog_stats` (regexes `\btrap\b`, `caught|cage`, `load`, `siege|ambush|vile force|attack`), `_stats` (`read_text().splitlines()`, `if args.tail:`)
 - **Reported:** 2026-10-02, commit `6dedd96`
