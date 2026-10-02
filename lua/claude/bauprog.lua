@@ -6,6 +6,8 @@
 -- The next phase starts when fewer than START_UNTER reachable dig designations are open (miners with picks are the bottleneck, not the phase).
 -- State: state/bauprog.json (survives restart). RESTART AFTER EVERY LOAD: claude/bauprog start (UEBERWACHUNG.md).
 -- Geometry/blueprints: tools/gen_bau.py (generates claude/bau_*.csv), tools/scopes/bau.md section construction program.
+-- Used for: a standing construction programme (optional script). Needs config keys: Z_MIN/Z_MAX (from SURFACE_Z/Z_DOWN/Z_UP) and own phases in
+-- state/bauprog_extra.lua; the run-3 east-wing phases stay behind config.BAU_PHASES_RUN3 (false = off, only for the run-3 map).
 local util = reqscript('claude/util')
 if not util.require_fort() then return end
 local bh = reqscript('claude/bauhelp')

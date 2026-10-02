@@ -1,7 +1,9 @@
 --@ module = true
 -- claude/kohle [run [N]|start|stop|status]  - coal supply (erkundung, run 5): designates up to N (default 40) DISCOVERED coal wall tiles
--- (COAL_BITUMINOUS, shape WALL, hidden=false, no dig designation yet, z >= config.dig_min_z, reachable = neighbor walkable) near the shaft (99,95).
+-- (COAL_BITUMINOUS, shape WALL, hidden=false, no dig designation yet, z >= config.dig_min_z, reachable = neighbor walkable) nearest to the fort centre.
 -- Fair play: discovered tiles only, dig designations only, NO priority events. start = `run` every 1500 ticks (repeat-util), afterwards `erzdig ALL`.
+-- Used for: fuel for smelter/forge on maps without wood (optional script). Needs config keys: FORT_X, FORT_Y, DIG_MIN_Z (+ AQUIFER_CONFIRMED),
+-- SPERR_BOXEN (set after embark; the defaults only search around the map centre and the top 3 levels).
 local util = reqscript('claude/util')
 if not util.require_fort() then return end
 local repeatUtil = require('repeat-util')

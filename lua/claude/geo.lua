@@ -7,6 +7,8 @@
 -- and cavern hint together); after --budget milliseconds (default 3000) it stops after the current level and the
 -- answer has unvollstaendig=true and gescannt_bis_z (lower levels are missing). Not for polling.
 -- Arguments: claude/geo [geo_index [off [ceil]]] [--budget ms]
+-- Used for: estimating where ore/flux/aquifer layers lie from the world geology (optional script). Needs config keys: SURFACE_Z/Z_DOWN
+-- (ceil default = Z_MIN - 1); geo_index comes from the region biome of the map (or the argument).
 local util = reqscript('claude/util')
 if not util.require_fort() then return end
 local a, budget = {}, 3000

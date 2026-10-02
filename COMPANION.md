@@ -37,6 +37,18 @@ appends one row to `<home>/metrics.csv`, at most once per in-game day: when the 
 that way. The read-only command is `status` (`orders` also `list`; `arbeit` has none, use `claude/auslastung`); any other
 word prints a usage error and changes nothing.
 
+**Optional scripts** (generic, but only meaningful once their config keys are set after embark; not called by
+df-llm-helper on its own):
+
+| Script | Used for | Needs config keys |
+|---|---|---|
+| `claude/muell` | marks corpses for the garbage dump, counts loose items | none (dump zones from the game) |
+| `claude/kohle` | coal designations on maps without wood | `FORT_X`, `FORT_Y`, `DIG_MIN_Z` (+ `AQUIFER_CONFIRMED`), `SPERR_BOXEN` |
+| `claude/bauprog` | standing construction programme | `Z_MIN`/`Z_MAX` + own phases in `state/bauprog_extra.lua`; run-3 phases only with `BAU_PHASES_RUN3 = true` |
+| `claude/geo` | where rock/ore/aquifer layers lie (world geology) | `SURFACE_Z`/`Z_DOWN` (ceil default `Z_MIN - 1`) |
+| `claude/zugaenge` | entrances into the fort, trap coverage | `FORT_REFS`, `Z_MIN`/`Z_MAX`, `PERIMETER_MINCOMP` |
+| `claude/schacht` | cavern access behind a double wall barrier | `KAV_BARRIEREN`, `KAV_ORDER`, `KOPF`, `SPERR_BOXEN`, `SCHACHT_PRUEF`, `HINTER_SPERRE` |
+
 | Command | Used by (df-llm-helper module / rule / runbook) | Reference answer |
 |---|---|---|
 | `claude/advance` | caravan, cli, client, maintenance, rb06_karawane, rb06b_karawane_absch | – |

@@ -12,6 +12,8 @@
 --   notzu  : EMERGENCY: plugs + lock immediately, without lock-in protection
 --   tuer   : only lock (`zu`) / unlock (`auf`) the door
 --   cancel : stop the guard job, revert deconstruction markers
+-- Used for: a cavern access with a double construction-wall barrier (optional script; without a barrier `status` says so and the write
+-- commands refuse). Needs config keys: KAV_BARRIEREN, KAV_ORDER, KOPF, SPERR_BOXEN, SCHACHT_PRUEF, HINTER_SPERRE (set after the barrier is built).
 local util = reqscript('claude/util')
 if not util.require_fort() then return end
 local S = reqscript('claude/sperre')
