@@ -39,9 +39,11 @@ def test_bundled_lua_scripts_linted_without_crash():
     assert all(":" in str(f) for f in fs)
     assert any(f.rule == "IO" for f in fs)
     known = set(re.findall(r"\| (\S+?):\d+ (L\d+) \|", (ROOT / "docs" / "LINT-FINDINGS.md").read_text(encoding="utf-8")))
+    found = {(Path(f.file).name, f.rule) for f in fs if f.rule != "IO"}
     for f in fs:
         if f.rule != "IO":
             assert (Path(f.file).name, f.rule) in known, f"undocumented finding: {f}"
+    assert known <= found, f"documented but no longer reported (BUG-321): {sorted(known - found)}"
 
 
 def test_allowlist_via_register(tmp_path):

@@ -92,3 +92,54 @@ def test_bug317_bad_lines_are_register_errors_not_crashes(tmp_path, capsys):
     p.write_text('{"action":"L31","reason":"text","player_consent":"yes","max_uses":"2"}\n', encoding="utf-8")
     reg = ExceptionRegistry(p)
     assert reg.find("L31") is None and any("max_uses" in e for e in reg.errors)   # fail closed, no TypeError
+
+
+# ---------------------------------------------------------------- BUG-318 / 319 / 320: linter
+from df_llm_helper.lint import lint_command, lint_paths, lint_source  # noqa: E402
+
+
+def _rules(src):
+    return sorted({f.rule for f in lint_source(src)})
+
+
+@pytest.mark.parametrize("src,rule", [
+    ('local c = "reveal hell"\ndfhack.run_command(c)\n', "L04"),
+    ("local border = u\nborder.pos.x = 5\n", "L08"),
+    ("u.pos = {x=1, y=2, z=3}\n", "L08"),
+    ("local tt = dfhack.maps.getTileType(1,2,3)\n" + "\n" * 40 + "local x = other_table.hidden\n", "L10"),
+    ("blk.tiletype[1][1] = 5\n", "L17"),
+    ("weapon.mat_type = 0\n", "L21"),
+    ("dfhack.run_command('tiletypes-command', 'p any')\n", "L17"),
+    ("dfhack.run_command('liquids')\n", "L18"),
+    ("dfhack.run_command('cleaners')\n", "L25"),
+    ("dfhack.run_command('teleport', '-x', '1')\n", "L08"),
+])
+def test_bug318_indirect_forms_detected(src, rule):
+    assert rule in _rules(src)
+
+
+@pytest.mark.parametrize("src", [
+    "local teleporting_label = 1\n", "local tiletypes = {}\n", "local liquids = {}\n", "local cleaners = {}\n",
+    "local recorder = {}\nrecorder.count = 1\n", "job.mat_type = 0\n",
+    "local f = df.job_item:new()\nf.item_type = 1\nf.mat_type = -1; f.mat_index = -1\n",
+])
+def test_bug319_identifiers_not_reported(src):
+    assert _rules(src) == []
+
+
+def test_bug319_bare_command_lines_still_checked():
+    assert [f.rule for f in lint_command("teleport -x 1")] == ["L08"]
+    assert [f.rule for f in lint_command("tiletypes-here")] == ["L17"]
+    assert [f.rule for f in lint_command("liquids")] == ["L18"]
+
+
+def test_bug320_missing_path_and_utf16_are_errors(tmp_path, capsys):
+    fs = lint_paths([tmp_path / "nonexist.lua", tmp_path / "nonexist_dir"])
+    assert [f.level for f in fs] == ["error", "error"]
+    u16 = tmp_path / "u16.lua"
+    u16.write_bytes('dfhack.run_command("dig-now")\r\n'.encode("utf-16"))
+    assert [f.rule for f in lint_paths([u16])] == ["L02"]
+    nobom = tmp_path / "nobom.lua"
+    nobom.write_bytes('dfhack.run_command("dig-now")'.encode("utf-16-le"))
+    assert [(f.rule, f.level) for f in lint_paths([nobom])] == [("IO", "error")]
+    assert main(["lint", str(tmp_path / "typo.lua")]) == 1
