@@ -30,6 +30,12 @@ appends one row to `<home>/metrics.csv` on every call (trend data). `claude/ores
 `claude/kohle run` and `claude/erzdig` scan the whole map in the game's main thread (seconds): never poll them
 (`ores`/`geo` stop after a time budget and say how to continue).
 
+**No argument = one round.** `claude/essen`, `claude/trinken`, `claude/material`, `claude/arbeit`, `claude/orders` and
+`claude/ueberwacher` called without an argument (or with `once`) run ONE work round immediately (they change the game;
+`ueberwacher` only writes flag files). This is intended: the orchestrator, the watchdog and the scope agents call them
+that way. The read-only command is `status` (`orders` also `list`; `arbeit` has none, use `claude/auslastung`); any other
+word prints a usage error and changes nothing.
+
 | Command | Used by (df-llm-helper module / rule / runbook) | Reference answer |
 |---|---|---|
 | `claude/advance` | caravan, cli, client, maintenance, rb06_karawane, rb06b_karawane_absch | – |

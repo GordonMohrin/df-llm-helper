@@ -1,5 +1,7 @@
 -- claude/ueberwacher start|stop|once|status  - periodic emergency check (thirst/hunger, hospital, dig queue, depot, graves, station)
 -- Writes tools/notfall.flag / tools/dig.flag (monitor wakes Claude). Changes nothing in the game.
+-- No argument (or `once`) = run ONE round now. This default is intended and stays: the orchestrator, the watchdog and
+-- the scope agents call `claude/ueberwacher` without arguments. The read-only command is `status`; a round only writes flag files; any other word prints usage and changes nothing (BUG-407).
 local util = reqscript('claude/util')
 local function C() return reqscript('claude/config') end   -- Deadlines/thresholds per map
 local repeatUtil = require('repeat-util')

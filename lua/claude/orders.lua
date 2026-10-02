@@ -6,6 +6,8 @@
 -- removes legacy orders (unconditional one-off orders from earlier arbeit.lua) and enforces the trade-goods cap.
 -- Orders are recognized by signature (job/material/frequency/condition types) -> no duplicates, even after a restart.
 -- NOT here: food/brewing (claude/essen, claude/trinken), iron/weapons/armor/coal (claude/material), coffins (watchdog).
+-- No argument (or `once`) = run ONE round now. This default is intended and stays: the orchestrator, the watchdog and
+-- the scope agents call `claude/orders` without arguments. Read-only commands are `status` and `list`; any other word prints usage and changes nothing (BUG-407).
 local util = reqscript('claude/util')
 if not util.require_fort() then return end
 local bh = reqscript('claude/bauhelp')

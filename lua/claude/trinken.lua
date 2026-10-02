@@ -7,6 +7,8 @@
 --  3. `lager`: check/enforce stockpile assignment: drink stockpile (DRINK only) may pull barrels (DRINK_BARRELS),
 --     all other stockpiles with food get max_barrels = FOOD_BARRELS (0) -> empty barrels are not sucked away.
 -- Workshop tasks only (fair play). Constants per map: up here (agreed with infra: later config.lua).
+-- No argument (or `once`) = run ONE round now. This default is intended and stays: the orchestrator, the watchdog and
+-- the scope agents call `claude/trinken` without arguments. The read-only command is `status`; any other word prints usage and changes nothing (BUG-407).
 local util = reqscript('claude/util')
 if not util.require_fort() then return end
 local repeatUtil = require('repeat-util')

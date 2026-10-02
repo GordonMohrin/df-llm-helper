@@ -1,5 +1,7 @@
 -- claude/arbeit start|stop|once - permanent routine: keeps workshops busy (the player's rule:
 -- as soon as workers have nothing to do, new orders immediately). Uses only workshop tasks + manager orders.
+-- No argument (or `once`) = run ONE round now. This default is intended and stays: the orchestrator, the watchdog and
+-- the scope agents call `claude/arbeit` without arguments. There is no read-only command (use `claude/auslastung`); any other word prints usage and changes nothing (BUG-407).
 local util = reqscript('claude/util')
 if not util.require_fort() then return end
 local cfg = reqscript('claude/config')

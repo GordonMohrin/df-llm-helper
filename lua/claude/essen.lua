@@ -10,6 +10,8 @@
 --    'prepare easy meal' per kitchen as long as meals < MEAL_TARGET and enough ingredients are available.
 -- 5. Gathering in cavern 2 only if `claude/essen gather on` (shaft D has been sealed since Y83 -> default OFF).
 -- Only zones/designations/kitchen list as via the interface (fair play).
+-- No argument (or `once`) = run ONE round now. This default is intended and stays: the orchestrator, the watchdog and
+-- the scope agents call `claude/essen` without arguments. The read-only command is `status`; any other word prints usage and changes nothing (BUG-407).
 local util = reqscript('claude/util')
 if not util.require_fort() then return end
 local repeatUtil = require('repeat-util')

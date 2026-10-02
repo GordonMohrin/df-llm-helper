@@ -528,3 +528,10 @@ def test_dig_designates_hidden_tiles_blindly_without_reading_their_shape(tmp_pat
 def test_dig_header_documents_blind_designation():
     head = (CLAUDE / "dig.lua").read_text(encoding="utf-8").split("local util")[0]
     assert "blindly" in head and "open decision" not in head
+
+
+# ---------------------------------------------------------------- BUG-407 (no argument = one round, documented)
+@pytest.mark.parametrize("script", ["essen", "arbeit", "trinken", "material", "orders", "ueberwacher"])
+def test_round_scripts_document_the_no_argument_default(script):
+    head = (CLAUDE / f"{script}.lua").read_text(encoding="utf-8").split("local util")[0]
+    assert "No argument" in head and "ONE" in head

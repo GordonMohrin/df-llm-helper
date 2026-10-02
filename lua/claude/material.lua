@@ -6,6 +6,8 @@
 -- Priority: tools (picks) before elite soldiers (player: ~10 % of dwarves, quality over quantity; first 3 soldiers = phase 1), then phase 2
 -- (6 soldiers + rest), cages. Per entry t1/t2 = total target (stock INCL. carried pieces) after phase 1 / 2. ITEMS order = priority.
 -- Mood reserve: mood_reserve bars per metal stay untouched (metalcrafter moods).
+-- No argument (or `once`) = run ONE round now. This default is intended and stays: the orchestrator, the watchdog and
+-- the scope agents call `claude/material` without arguments. The read-only command is `status`; any other word prints usage and changes nothing (BUG-407).
 local util = reqscript('claude/util')
 if not util.require_fort() then return end
 local repeatUtil = require('repeat-util')
