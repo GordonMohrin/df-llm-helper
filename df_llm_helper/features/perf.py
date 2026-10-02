@@ -504,6 +504,8 @@ def cmd_perf(args) -> int:
         print(f"last sample: {p.store.get('perf.sample') or '-'}")
         last = p.store.get("perf.last") or {}
         print(f"last bisect: {last.get('culprit') or '-'} ({last.get('measurements', 0)} measurements)")
+        from ..stalllog import stall_line                       # BUG-421: period of the dfhack-run stalls
+        print(stall_line(p.tools.path / "out" / "stall.log"))
         if args.clear and flag.exists:
             p.tools.delete_flag("perf")
             print("perf.flag deleted")

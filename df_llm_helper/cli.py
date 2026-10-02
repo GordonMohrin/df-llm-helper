@@ -30,7 +30,8 @@ def _client(args, cfg: Config, clock) -> DFClient:
             lint = gate_command(reg, cfg.get("water.forbid_dig"))
         except ImportError:
             pass
-        c = RealClient(cfg.get("dfhack_run"), registry=reg, clock=clock, lint=lint)
+        c = RealClient(cfg.get("dfhack_run"), registry=reg, clock=clock, lint=lint,
+                       stall_log=Path(cfg.path("tools")) / "out" / "stall.log")       # BUG-421
         if cfg.get("transport.batch", False):
             from .transport import BatchingClient
             c = BatchingClient(c, Path(cfg.get("paths.tools")) / "out", max_bytes=int(cfg.get("transport.max_bytes", 20000)))
@@ -1477,9 +1478,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--ja", help="verbatim quote of the player's consent")
     s.add_argument("--max-uses", type=int)
     s.add_argument("--expires")
-    s.set_defaults(fn=cmd_exception)
     s.add_argument("--local", action="store_true",
                    help="write to the git-ignored <register>.local.jsonl (consent of this player, not shipped)")
+    s.set_defaults(fn=cmd_exception)
     s = sub.add_parser("memory", help="compact memory (F6): compact|restore <scope|all>")
     s.add_argument("action", choices=["compact", "restore"])
     s.add_argument("scope")

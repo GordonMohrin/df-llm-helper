@@ -197,3 +197,64 @@ def test_bug418_lint_honours_local_fp09_consent(tmp_path, capsys):
     reg = ExceptionRegistry(shared)
     assert reg.local_path.is_file() and reg.allows("FP09")
     assert [f for f in lint_paths([lua], reg) if f.rule == "L07"] == []
+
+
+# ---------------------------------------------------------------- BUG-421 stall log, 2 timeouts = failure
+def _fake_exe(tmp_path: Path, sleep: float) -> Path:
+    if sys.platform.startswith("win"):
+        pytest.skip("shell script stand-in for dfhack-run")
+    exe = tmp_path / "dfhack-run"
+    exe.write_text(f"#!/bin/sh\nsleep {sleep}\necho 42\n", encoding="utf-8")
+    exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
+    return exe
+
+
+def test_bug421_slow_calls_go_to_the_stall_log(tmp_path, monkeypatch):
+    from df_llm_helper import stalllog
+    monkeypatch.setattr(stalllog, "STALL_S", 0.05)
+    log = tmp_path / "out" / "stall.log"
+    c = RealClient(_fake_exe(tmp_path, 0.2), stall_log=log)
+    assert c.run("claude/mil").ok
+    r = c.run("claude/mil guard", timeout=0.05)
+    assert r.timed_out
+    rows = stalllog.read_stalls(log)
+    assert [(s, cmd) for _, _, s, cmd in rows] == [("ok", "claude/mil"), ("timeout", "claude/mil guard")]
+    assert rows[0][1] >= 0.2
+
+
+def test_bug421_stall_period_and_rotation(tmp_path):
+    from df_llm_helper import stalllog
+    log = tmp_path / "stall.log"
+    t = 1_790_840_000.0
+    for i in range(6):                     # a stall every 600 s; two queued calls in the same stall count once
+        stalllog.append_stall(log, t + 600 * i, 8.5, "claude/mil")
+        stalllog.append_stall(log, t + 600 * i + 2, 6.0, "claude/alert")
+    s = stalllog.stall_stats(log)
+    assert s["stalls"] == 6 and s["calls"] == 12 and s["period_s"] == 600 and s["max_s"] == 8.5
+    assert "stall period: median interval 600 s" in stalllog.stall_line(log)
+    stalllog.append_stall(log, t + 9999, 4.0, "x", max_bytes=10)          # rotation at the size limit
+    assert (tmp_path / "stall.log.1").is_file() and len(log.read_text(encoding="utf-8").splitlines()) == 1
+    assert stalllog.stall_stats(log)["calls"] == 13                         # both generations are read
+    assert "no dfhack-run call" in stalllog.stall_line(tmp_path / "none.log")
+
+
+def test_bug421_one_timeout_is_no_watcher_failure(tmp_path):
+    from df_llm_helper.toolsfs import ToolsDir
+    from df_llm_helper.waechter import CLEAR_CMD, FOOD_CMD, Waechter
+    clk = FakeClock(1_790_840_000.0)
+    tools = ToolsDir(tmp_path, clk)
+    tools.set_last_report_id(90)
+    tools.touch_heartbeat()
+    slow = Result(ok=False, stdout="", stderr="Timeout after 40.0s: x", elapsed_s=40.0)
+    answers = [slow, "100", slow, slow]
+    m = MockClient({MAX_REPORT_ID_CMD: lambda c: answers.pop(0), FOOD_CMD: "S 50 0 10 100 20",
+                    CLEAR_CMD: "R 0 dwarfmode/Default"}, clock=clk)
+    m.prefix_handlers.append(('lua "local last=', lambda c: ""))
+    w = Waechter(m, tools, clk, Store(), DEFAULTS)
+    out = w.step()                                                   # 1st timeout: skipped, alive
+    assert "timed out (1/2)" in out[0] and (tmp_path / "out" / "waechter.alive").exists()
+    w.step()                                                         # answer again: counter reset
+    assert w.timeouts == 0
+    w.step()                                                         # 1 timeout
+    with pytest.raises(RuntimeError):                                # 2 consecutive timeouts: failure
+        w.step()

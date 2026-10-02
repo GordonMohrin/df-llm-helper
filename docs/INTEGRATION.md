@@ -133,6 +133,7 @@ The recordings from 1.1/1.2 replace the synthetic responses (fixture gaps in `CH
 - [ ] `perimeter scan`: full-map scan ≤ 15 s, chunked (does `dfhack.timeout` run while paused?); compare with `claude/zugaenge`; test that a generated seal CSV builds.
 - [ ] `digcheck` on a real stage before designating; R5 uses configured cavern boxes (lint L28 forbids cavern data).
 - [ ] `perf sample` with raster on/off to tune the 1.5 s outlier threshold; reading the services works live via `repeat-util.listScheduled()` (not `scheduled`)
+- [ ] BUG-421: after a few hours of play `python -m df_llm_helper perf status` -> "stall period" line from `tools/out/stall.log` (every dfhack-run call > 3 s); a regular period names the periodic job (compare with `claude/watchdog status` timing)
 - [ ] Standstill guard: does LEAVESCREEN close Info/Justice, does SELECT close the DFHack MessageBox, is `cur_year_tick` right; trade aftercare after a real trade.
 - [ ] `tools`: add FP08 with the player's consent before the first automatic pick fix; check `work_weapons` after the fix.
 - [ ] `remote`: does `dfhack.job.removeJob` end a Fish job; does `labor off` stick with DF 50+ work details.

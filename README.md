@@ -140,7 +140,7 @@ Every command is `python -m df_llm_helper <command>`; add `--mock fixtures/run5`
 | `guard` | Deadman switch and tempo governor: slows the game when nobody is supervising |
 | `waechter` | Real-time watcher in the background (messages, flags, pauses, frozen game, stuck windows) |
 | `tempo` | Shows or switches time-lapse, only when no guard blocker is active |
-| `perf` | Finds what freezes or slows the game (latency sampling, safe bisect) |
+| `perf` | Finds what freezes or slows the game (latency sampling, safe bisect; `perf status` shows the stall period from `tools/out/stall.log`) |
 | `reboot` | After a restart or save load, brings back the background jobs that do not survive loading |
 | `settings` | Edits `d_init.txt` with backup, verify and revert |
 
