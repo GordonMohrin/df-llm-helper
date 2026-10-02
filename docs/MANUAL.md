@@ -211,7 +211,7 @@ After every change: `python -m df_llm_helper.selftest` (≈ 30 s, no DF needed).
 - **Report:** fields `Result`, `Measurements (before/after)`, `Changed`, `Open`, `Risk` (German field names such as `Ergebnis` are accepted), ≤ 12 lines. `agents lint-report <file|-> [--scope s]` checks; reports that are too long are output shortened, the original goes to `tools/out/berichte/`.
 - **Cost:** `agents cost [--dir <folder>] [--compare]` reads Claude Code transcripts (`**/subagents/*.jsonl` under `agents.transcript_dir`). Two measuring rules:
   - **Count each requestId once:** The transcript contains every response per content block; a naive sum would be about twice as high.
-  - **Output is estimated:** It comes from block lengths (column `Ausg~`), because `usage.output_tokens` in the transcript is only the value at stream start.
+  - **Output is estimated:** column `Out~` = the larger of the block-length estimate and the summed `usage.output_tokens` (usually only the stream-start value, but larger for long agents whose thinking blocks are empty in the transcript); the warning uses the same figure.
 - **Comparison:** `--compare` sets runs with the marker against old prompts. Meaningful from 3 runs each (acceptance 4).
 - **Warning:** over 60 calls or over 40k estimated output → "stuck? check the result, shrink the task".
 

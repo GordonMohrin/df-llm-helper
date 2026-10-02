@@ -24,8 +24,9 @@ SCOPES = ["trinken", "essen", "bau", "erkundung", "wirtschaft", "auslastung", "m
 FAIRPLAY_BLOCK = ("Fair play: player actions only (dig/build/zones/stockpiles/orders/squads/offices/trade, quickfort "
                   "own grids). Forbidden: createitem, dig-now, build-now, reveal, prospect all, direct unit/item "
                   "edits. Exceptions only with the player's yes.")
-REPORT_FORMAT = ("Report <= 10 lines: 1) KPIs before->after 2) done (command -> effect) 3) blocked/needs "
-                 "4) messages to scopes (python -m df_llm_helper bus post) 5) next pass. Update the memory.")
+REPORT_FORMAT = ("Report <= 12 lines with the fields Result / Measurements (before/after) / Changed / Open / Risk "
+                 "(checked by agents lint-report); messages to scopes via python -m df_llm_helper bus post. "
+                 "Update the memory.")
 REQUIRED = ("mission", "kpis", "commands", "kb_query")
 
 
