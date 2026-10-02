@@ -478,3 +478,56 @@ def test_bug121_one_kpi_row_per_measurement_and_budget_header(tmp_path, capsys):
         assert row[head.index(col)] != ""
     rc, out, _ = run(capsys, *base, "budget")
     assert "Bytes sent/printed" in out
+
+
+# ---------------------------------------------------------------- BUG-119/120 help, version, global options, selftest
+CORE_CMDS = ["digest", "check", "cycle", "autopilot", "guard", "waechter", "tempo", "heartbeat", "wake", "overlay",
+             "replay", "record", "budget", "metrics", "plan"]
+
+
+def test_bug120_every_core_option_has_help():
+    import argparse
+    from df_llm_helper.cli import build_parser
+    ap = build_parser()
+    sub = next(a for a in ap._actions if isinstance(a, argparse._SubParsersAction))
+    for name in CORE_CMDS:
+        p = sub.choices[name]
+        assert p.description and p.epilog and "examples" in p.epilog, name
+        for a in p._actions:
+            if a.dest != "help":
+                assert a.help, (name, a.dest)
+
+
+def test_bug120_version_help_once_and_global_option_hint(tmp_path, capsys):
+    with pytest.raises(SystemExit) as e:
+        main(["--version"])
+    assert e.value.code == 0 and "df-llm-helper" in capsys.readouterr().out
+    assert main(["help", "plan"]) == 0 and "--map-size" in capsys.readouterr().out
+    with pytest.raises(SystemExit):
+        main(["record", "--record", "x.jsonl", "claude/status"])
+    assert "must come BEFORE the command" in capsys.readouterr().err
+    # --once wins over --loop (returns after one pass)
+    rc, out, _ = run(capsys, "--config", mkcfg(tmp_path), "--mock", FIX, "guard", "--loop", "--once", "--dry-run")
+    assert rc == 0 and out.count("Target fps") == 1
+
+
+def test_bug119_selftest_without_pytest_is_incomplete(monkeypatch, capsys):
+    import builtins
+    from df_llm_helper import selftest
+    real = builtins.__import__
+
+    def fake(name, *a, **k):
+        if name == "pytest":
+            raise ImportError("no pytest")
+        return real(name, *a, **k)
+    monkeypatch.setattr(builtins, "__import__", fake)
+    rc = selftest.main([])
+    out = capsys.readouterr().out
+    assert rc == 2 and "Self-test INCOMPLETE" in out and "Self-test GREEN" not in out
+
+
+def test_bug119_docs_agree():
+    over = (HOME / "docs" / "OVERVIEW.md").read_text(encoding="utf-8")
+    assert "record --record" not in over and "LINT-BEFUNDE" not in over
+    for f in ("README.md", "docs/OVERVIEW.md", "docs/MANUAL.md", "docs/INTEGRATION.md"):
+        assert "3.12" not in (HOME / f).read_text(encoding="utf-8"), f

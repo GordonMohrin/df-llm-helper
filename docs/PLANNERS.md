@@ -1,6 +1,6 @@
 # Planners (F11) – pure functions, no DF access
 
-Package `df_llm_helper/planners/`, tests `tests/test_planners.py` (`python3.12 -m pytest tests/test_planners.py -q`).
+Package `df_llm_helper/planners/`, tests `tests/test_planners.py` (`python -m pytest tests/test_planners.py -q`).
 
 | Module | Function | Core |
 |---|---|---|

@@ -4,7 +4,7 @@ A helper program between Claude (orchestrator/scope agents) and Dwarf Fortress/D
 
 ## Installation
 
-- Python 3.12+ (usually `python` on Windows). The package needs only the standard library; `pytest` (and optionally `coverage`) is only for the tests.
+- Python 3.11+ (usually `python` on Windows). The package needs only the standard library; `pytest` (and optionally `coverage`) is only for the tests.
 - Configuration: copy `config.yaml.example` to `config.yaml` and check the paths (`dfhack_run`, `paths.tools`, `paths.gamelog`).
 - Always run from this folder: `python -m df_llm_helper <command>`.
 - Self-test without DF: `python -m df_llm_helper.selftest` (with `--cov` for coverage, `--quick` without pytest).
@@ -30,7 +30,7 @@ With `--mock fixtures/run5` everything runs against the real sample responses in
 | `kb search "Koks refined coal"`, `kb get <id>`, `kb import <md…>` | knowledge on demand (≤ 400 tokens) | `[koks_brennstoff] … Fix: wood furnace …` |
 | `brief <scope> [--budget 1500]` | briefing package for a scope agent | mission, KPIs, open items, pitfalls, commands, fair play, report format |
 | `replay [file…] [-v]` | play back and check scenarios (`scenarios/*.jsonl`) | `s03_deadman: OK (3 steps)` |
-| `record --record x.jsonl [commands…]` | record DF responses (supply fixtures) | |
+| `--record x.jsonl record [commands…]` (global options such as `--record`, `--mock`, `--config` come before the command) | record DF responses (supply fixtures) | |
 | `exception list / add FP08 --objects 187405 --reason … --ja "<quote>"` | fair-play exception register | |
 | `bus post "<text>" --from bau --to orchestrator [--prio crit] [--key k] [--md]`, `bus read/ack --to <scope>`, `bus import` | event bus instead of inbox Markdown (dedupe, priorities) | `!! #3 gesundheit (x2): …` |
 | `memory compact <scope\|all> [--dry-run]`, `memory restore <scope>` | condense memory, original kept in the archive | `militaer.md: 16738 -> 5687 bytes` |
@@ -42,9 +42,9 @@ With `--mock fixtures/run5` everything runs against the real sample responses in
 
 ## Structure
 
-`df-llm-helper/`: `client` (Real/Mock/Replay/Recording), `snapshot` (tolerant parser), `digest`, `rules` (autopilot), `guard`, `runbooks`, `kb`, `brief`, `memory`, `wake`, `bus`, `lint`, `transport` (batching/compression), `metrics`, `anomaly`, `trade_flow`, `overlay`, `planners/`, `scenario`, `pilot` (cycle), `fairplay`, `expr` (safe expressions), `yamlmini`, `store` (SQLite), `toolsfs`, `clock`, `cli`, `selftest`.
+`df_llm_helper/`: `client` (Real/Mock/Replay/Recording), `snapshot` (tolerant parser), `digest`, `rules` (autopilot), `guard`, `runbooks`, `kb`, `brief`, `memory`, `wake`, `bus`, `lint`, `transport` (batching/compression), `metrics`, `anomaly`, `trade_flow`, `overlay`, `planners/`, `scenario`, `pilot` (cycle), `fairplay`, `expr` (safe expressions), `yamlmini`, `store` (SQLite), `toolsfs`, `clock`, `cli`, `selftest`.
 `data/`: `rules/`, `runbooks/`, `kb/` (curated + imported), `scopes.yaml`, `exceptions.jsonl`.
-`lua/`: thin, **live-untested** DFHack scripts (`pilot_wd.lua`, `pilot_batch.lua`). Short start prompt for agents: `AGENT-PROMPT.md`. Known lint findings: `LINT-BEFUNDE.md`. `tools/luacheck_min.py`: Lua structure check.
+`lua/`: thin, **live-untested** DFHack scripts `lua/pilot_*.lua` plus the companion toolkit `lua/claude/*.lua` (install both, see README). Short start prompt for agents: `AGENT-PROMPT.md`. Known lint findings: `LINT-FINDINGS.md`. `tools/luacheck_min.py`: Lua structure check.
 `tests/`: pytest suite, `make_fixtures.py` (synthetic fixtures + scenario generator), `kb_queries.yaml`, `lua_mock/`.
 
 ## Safety principles

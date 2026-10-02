@@ -199,7 +199,7 @@ def cmd_autopilot(args) -> int:
         snap = p.snapshot()
         recs = p.autopilot(snap, dry_run=args.dry_run)
         print("\n".join(r.line() for r in recs) or "no action", flush=True)
-        if not args.loop:
+        if not args.loop or args.once:
             return 0
         time.sleep(float(args.interval))
 
@@ -225,7 +225,7 @@ def cmd_guard(args) -> int:
         print("; ".join(a.line() for a in acts) or "Guard: all quiet", flush=True)
         print(f"Target fps {info['target_fps']}, time lapse allowed: {info['timestream_allowed']}"
               + (f" (blockers: {', '.join(info['blockers'])})" if info["blockers"] else ""), flush=True)
-        if not args.loop:
+        if not args.loop or args.once:
             return 0
         time.sleep(float(args.interval))
 
@@ -1160,47 +1160,97 @@ def cmd_journal(args) -> int:
     return 0
 
 
+class _Parser(argparse.ArgumentParser):
+    def error(self, message: str):
+        if "unrecognized arguments" in message and any(g in message for g in GLOBAL_OPTS):
+            message += (" (global options " + ", ".join(GLOBAL_OPTS) + " must come BEFORE the command, "
+                        "e.g. python -m df_llm_helper --record x.jsonl record claude/status)")
+        super().error(message)
+
+
+GLOBAL_OPTS = ("--config", "--mock", "--replay-file", "--record")
+
+
+def _help(ap: argparse.ArgumentParser, topic: str | None) -> int:
+    if not topic:
+        ap.print_help()
+        return 0
+    sub = next(a for a in ap._actions if isinstance(a, argparse._SubParsersAction))
+    if topic not in sub.choices:
+        raise ValueError(f"unknown command '{topic}' (see: python -m df_llm_helper help)")
+    sub.choices[topic].print_help()
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="df-llm-helper", description="Helper for LLM control of Dwarf Fortress")
+    ap = _Parser(prog="df-llm-helper", description="Helper for LLM control of Dwarf Fortress")
     ap.add_argument("--config", default=None, help="config.yaml (default: config.yaml in the project folder)")
     ap.add_argument("--mock", default=None, help="fixture folder instead of a real DF (e.g. fixtures/run5)")
     ap.add_argument("--replay-file", default=None, help="recorded session (*.jsonl) instead of a real DF")
     ap.add_argument("--record", default=None, help="record all DF calls into this JSONL file")
+    from . import __version__
+    ap.add_argument("--version", action="version", version=f"df-llm-helper {__version__}")
+    ap.epilog = ("global options (--config, --mock, --replay-file, --record) come BEFORE the command, "
+                 "e.g. python -m df_llm_helper --record x.jsonl record claude/status; "
+                 "details: python -m df_llm_helper <command> --help")
     sub = ap.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("help", help="this overview, or the help of one command: help <command>")
+    s.add_argument("topic", nargs="?")
+    s.set_defaults(fn=lambda a: _help(ap, a.topic))
 
-    s = sub.add_parser("digest", help="compact status report (delta)")
-    s.add_argument("--scope")
+    def cmd_parser(name: str, help_: str, *examples: str, description: str | None = None):
+        """BUG-120: every core command gets a description and examples in its --help."""
+        ep = ("examples:\n" + "\n".join("  python -m df_llm_helper " + e for e in examples)) if examples else None
+        return sub.add_parser(name, help=help_, description=description or help_, epilog=ep,
+                              formatter_class=argparse.RawDescriptionHelpFormatter)
+
+    dry_help = ("no writing DF command, no flag change, and the report is not consumed (the next real call reports "
+                "the same)")
+    s = cmd_parser("digest", "compact status report (delta since the last call)", "digest", "digest --full",
+                   "digest --scope trinken")
+    s.add_argument("--scope", help="report for one scope agent (trinken, essen, bau, ..., or orchestrator)")
     s.add_argument("--full", action="store_true", help="without delta (everything notable)")
     s.set_defaults(fn=cmd_digest)
-    s = sub.add_parser("check", help="orchestrator check: heartbeat + guard + autopilot + digest (one call)")
-    s.add_argument("--dry-run", action="store_true")
+    s = cmd_parser("check", "orchestrator check: heartbeat + guard + autopilot + digest (one call)", "check",
+                   "check --dry-run")
+    s.add_argument("--dry-run", action="store_true", help=dry_help)
     s.set_defaults(fn=cmd_check)
-    s = sub.add_parser("cycle", help="one cycle: guard + autopilot + digest")
-    s.add_argument("--dry-run", action="store_true")
+    s = cmd_parser("cycle", "one cycle: guard + autopilot + digest", "cycle --dry-run")
+    s.add_argument("--dry-run", action="store_true", help=dry_help)
     s.set_defaults(fn=cmd_cycle)
-    s = sub.add_parser("autopilot", help="deterministic rules")
-    s.add_argument("action", nargs="?", default="run", choices=["run", "rules", "conflicts", "enable"])
-    s.add_argument("rule", nargs="?")
-    s.add_argument("--dry-run", action="store_true")
-    s.add_argument("--loop", action="store_true")
-    s.add_argument("--once", action="store_true")
-    s.add_argument("--interval", type=float, default=60)
+    s = cmd_parser("autopilot", "deterministic rules (data/rules): run | rules | conflicts | enable <rule>",
+                   "autopilot --dry-run", "autopilot rules", "autopilot enable stale_flag_generic",
+                   "autopilot --loop --interval 60")
+    s.add_argument("action", nargs="?", default="run", choices=["run", "rules", "conflicts", "enable"],
+                   help="run (default): one pass; rules: list; conflicts: check; enable: re-arm a rule switched off "
+                        "by the loop protection")
+    s.add_argument("rule", nargs="?", help="enable: rule id (see 'autopilot rules')")
+    s.add_argument("--dry-run", action="store_true", help="show the actions, execute nothing")
+    s.add_argument("--loop", action="store_true", help="repeat every --interval seconds (output flushed per pass)")
+    s.add_argument("--once", action="store_true", help="exactly one pass (default; overrides --loop)")
+    s.add_argument("--interval", type=float, default=60, help="seconds between passes with --loop (default 60)")
     s.set_defaults(fn=cmd_autopilot)
-    s = sub.add_parser("guard", help="deadman/tempo/watcher check")
-    s.add_argument("action", nargs="?", default="run", choices=["run", "ack-gate"])
-    s.add_argument("gate", nargs="?", type=int)
-    s.add_argument("--dry-run", action="store_true")
-    s.add_argument("--loop", action="store_true")
-    s.add_argument("--once", action="store_true")
-    s.add_argument("--interval", type=float, default=60)
+    s = cmd_parser("guard", "deadman/tempo/watcher check: run | ack-gate <N>", "guard --dry-run", "guard ack-gate 60",
+                   "guard --loop --interval 60")
+    s.add_argument("action", nargs="?", default="run", choices=["run", "ack-gate"],
+                   help="run (default): one guard pass; ack-gate: acknowledge a population gate (config guard.pop_gates)")
+    s.add_argument("gate", nargs="?", type=int, help="ack-gate: the gate number, e.g. 60 or 80")
+    s.add_argument("--dry-run", action="store_true", help="decide only, change no fps/tempo")
+    s.add_argument("--loop", action="store_true", help="repeat every --interval seconds (output flushed per pass)")
+    s.add_argument("--once", action="store_true", help="exactly one pass (default; overrides --loop)")
+    s.add_argument("--interval", type=float, default=60, help="seconds between passes with --loop (default 60)")
     s.set_defaults(fn=cmd_guard)
-    s = sub.add_parser("waechter", help="real-time watcher (replaces unpause-guard.ps1), permanent with --loop")
-    s.add_argument("--loop", action="store_true")
-    s.add_argument("--interval", default=None)
+    s = cmd_parser("waechter", "real-time watcher (replaces unpause-guard.ps1): reports -> events.log, flags, pauses",
+                   "waechter", "waechter --loop")
+    s.add_argument("--loop", action="store_true", help="run permanently (one step without it)")
+    s.add_argument("--interval", type=float, default=None,
+                   help="seconds between steps (default config guard.waechter_interval_s = 2)")
     s.set_defaults(fn=cmd_waechter)
-    s = sub.add_parser("tempo", help="time lapse: status (display only) | on (only without guard blockers) | off")
-    s.add_argument("action", choices=["on", "off", "status"])
-    s.add_argument("--dry-run", action="store_true")
+    s = cmd_parser("tempo", "time lapse: status (display only) | on (only without guard blockers) | off",
+                   "tempo status", "tempo on --dry-run", "tempo off")
+    s.add_argument("action", choices=["on", "off", "status"],
+                   help="status: show; on: switch on only if the guard reports no blocker; off: switch off")
+    s.add_argument("--dry-run", action="store_true", help="show what would be sent")
     s.set_defaults(fn=cmd_tempo)
     s = sub.add_parser("siege", help="Siege autopilot (spec 01): until the end (default), --once for one step")
     s.add_argument("--once", action="store_true")
@@ -1269,11 +1319,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--accept", default=None, help="lessons: approve a proposal (KB draft)")
     s.add_argument("--out", default=None)
     s.set_defaults(fn=cmd_journal)
-    s = sub.add_parser("heartbeat", help="set the orchestrator heartbeat")
+    s = cmd_parser("heartbeat", "set the orchestrator heartbeat (tools/heartbeat.txt; the deadman slows the game "
+                                "after 20 min without it)", "heartbeat")
     s.set_defaults(fn=cmd_heartbeat)
-    s = sub.add_parser("wake", help="wake filter for the monitor (files only, one line per event)")
-    s.add_argument("--loop", action="store_true")
-    s.add_argument("--interval", type=float, default=10)
+    s = cmd_parser("wake", "wake filter for the monitor (files only, one line per event)", "wake",
+                   "wake --loop --interval 10")
+    s.add_argument("--loop", action="store_true", help="run permanently (lines flushed immediately)")
+    s.add_argument("--interval", type=float, default=10, help="seconds between checks with --loop (default 10)")
     s.add_argument("--emit-existing", action="store_true", help="also report legacy flags on the first run")
     s.set_defaults(fn=cmd_wake)
     s = sub.add_parser("runbook", help="Runbooks: list|show|run|diagnose")
@@ -1293,12 +1345,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("scope")
     s.add_argument("--budget", type=int)
     s.set_defaults(fn=cmd_brief)
-    s = sub.add_parser("replay", help="replay and check scenarios")
-    s.add_argument("files", nargs="*")
-    s.add_argument("-v", "--verbose", action="store_true")
+    s = cmd_parser("replay", "replay and check scenarios (scenarios/*.jsonl)", "replay",
+                   "replay scenarios/s03_deadman.jsonl -v")
+    s.add_argument("files", nargs="*", help="scenario files (default: all of scenarios/)")
+    s.add_argument("-v", "--verbose", action="store_true", help="print every step")
     s.set_defaults(fn=cmd_replay)
-    s = sub.add_parser("record", help="execute and record commands (with --record)")
-    s.add_argument("commands", nargs="*")
+    s = cmd_parser("record", "execute and record DF commands (global --record <file> BEFORE the command)",
+                   "--record x.jsonl record \"claude/mil equip\"", "--record x.jsonl record")
+    s.add_argument("commands", nargs="*", help="DF commands (default: the read commands of the snapshot)")
     s.set_defaults(fn=cmd_record)
     s = sub.add_parser("exception", help="exception register (fair play)")
     s.add_argument("action", choices=["list", "add"])
@@ -1328,26 +1382,30 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("lint", help="fair-play linter (F9) for Lua files/folders")
     s.add_argument("paths", nargs="+")
     s.set_defaults(fn=cmd_lint)
-    s = sub.add_parser("budget", help="token budget per scope (F13)")
+    s = cmd_parser("budget", "token budget per scope (F13): calls, bytes sent/printed, tokens today", "budget")
     s.set_defaults(fn=cmd_budget)
-    s = sub.add_parser("overlay", help="short text for claude/schau say (F16), display only without --send")
-    s.add_argument("text", nargs="*")
-    s.add_argument("--send", action="store_true")
+    s = cmd_parser("overlay", "short text for claude/schau say (F16), display only without --send",
+                   "overlay", "overlay --send", "overlay \"Caravan is here\" --send")
+    s.add_argument("text", nargs="*", help="own text (default: the current critical/warning lines)")
+    s.add_argument("--send", action="store_true", help="really send to the game (same line at most every 10 min)")
     s.set_defaults(fn=cmd_overlay)
     s = sub.add_parser("trade", help="trade automaton (F15): step|status|approve|reset")
     s.add_argument("action", choices=["step", "status", "approve", "reset"])
     s.add_argument("--dry-run", action="store_true")
     s.add_argument("--stable-s", default=2.0, help="seconds the focus has been stable (measured by the caller)")
     s.set_defaults(fn=cmd_trade)
-    s = sub.add_parser("plan", help="planners (F11): blueprint|trade|dig|armor|supply")
-    s.add_argument("kind", choices=["blueprint", "trade", "dig", "armor", "supply"])
-    s.add_argument("files", nargs="*")
+    s = cmd_parser("plan", "planners (F11): blueprint|trade|dig|armor|supply (read only, nothing is sent)",
+                   "plan blueprint bp/*.csv --map-size 192x192", "plan trade --json trade.json",
+                   "plan dig --area-file area.txt --targets \"100,90;104,92\" --csv",
+                   "plan armor --bars iron=32,bronze=31", "plan supply --prod drink=10 --growth 0.5")
+    s.add_argument("kind", choices=["blueprint", "trade", "dig", "armor", "supply"], help="planner")
+    s.add_argument("files", nargs="*", help="blueprint: quickfort CSV files")
     s.add_argument("--json", help="trade: input {own:[...], offer:[...], ratio, reserves, max_weight}")
     s.add_argument("--area", help="dig: 'z x y w h' (live via claude/area)")
     s.add_argument("--area-file", help="dig: saved claude/area output")
     s.add_argument("--targets", help="dig: 'x,y[,prio];x,y;...'")
-    s.add_argument("--picks", default=1)
-    s.add_argument("--max-open", default=150)
+    s.add_argument("--picks", default=1, help="dig: number of miners (batch size factor, default 1)")
+    s.add_argument("--max-open", default=150, help="dig: maximum open dig designations per batch (default 150)")
     s.add_argument("--csv", action="store_true", help="dig: print the quickfort #dig CSV per batch")
     s.add_argument("--bars", help="armor: bars per metal, e.g. iron=32,bronze=31")
     s.add_argument("--prod", help="supply: production per day, e.g. drink=10,food=4")
@@ -1355,8 +1413,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--map-size", help="blueprint: map size WxH (e.g. 192x192, claude/status map_size) -> E_BOUNDS check")
     s.add_argument("--origin", help="blueprint: quickfort cursor x,y (with --map-size: also the lower bound)")
     s.set_defaults(fn=cmd_plan)
-    s = sub.add_parser("metrics", help="KPI time series as CSV (header like metrics.csv)")
-    s.add_argument("--out")
+    s = cmd_parser("metrics", "KPI time series as CSV (header like metrics.csv)", "metrics", "metrics --out m.csv")
+    s.add_argument("--out", help="write to this file instead of printing")
     s.set_defaults(fn=cmd_metrics)
     return ap
 

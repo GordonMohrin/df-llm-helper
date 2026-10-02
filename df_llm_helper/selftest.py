@@ -151,7 +151,9 @@ def main(argv: list[str] | None = None) -> int:
             import pytest
         except ImportError:
             print("  [!] pytest not installed - only quick checks ran (pip install pytest after confirming with the player)")
-            return 0 if ok else 1
+            # BUG-119: a script must be able to tell 'full suite green' from 'not run'
+            print(f"\nSelf-test INCOMPLETE (pytest missing; quick checks {'ok' if ok else 'RED'}) in {time.time() - t0:.1f} s")
+            return 2 if ok else 1
         rc = pytest.main(["-q", "-p", "no:cacheprovider", str(HOME / "tests")])
         if cov is not None:
             cov.stop()
