@@ -3,6 +3,8 @@
 --   status   loose items by type, boulders per z; items already lying IN a dump zone count as `auf_stapelpunkt_entsorgt`, not as loose
 --   dump [N=150]   marks the N corpses/corpse pieces/remains NEAREST to a dump zone that are in the same walk group as that zone
 --                  (unreachable ones are skipped); corpses of the fort's own race are never dumped (burial). Ported from the live copy (BUG-420).
+--                  Bones/skulls/shells/horns/teeth/hides are craft material and are never dumped either (FEATURE-002 rule 6,
+--                  same filter as claude/pilot_hygiene mark); they are counted in uebersprungen.knochen.
 -- Used for: tidying up after fights/sieges (optional script). Needs config keys: none (dump zones are read from the game; FORT_BOX only
 -- for the old fort filter, which the reachability test replaced).
 -- Fair play: only the UI marking (item.flags.dump), no removing/moving items.
@@ -21,6 +23,22 @@ local function loose(it)
   local b = dfhack.buildings.findAtTile(xyz2pos(x, y, z))
   if b and b:getType() == df.building_type.Stockpile then return false end
   return true, x, y, z
+end
+-- bones/skulls/shells/skins/leather/hair (craft material): corpse flags or material flags, each read protected
+local BONE_FLAGS = { 'bone', 'skull', 'shell', 'skin', 'leather', 'hair_wool', 'yarn', 'horn', 'tooth', 'pearl', 'ivory',
+                     'silk' }
+local BONE_MATS = { 'BONE', 'SHELL', 'LEATHER', 'HORN', 'TOOTH', 'PEARL', 'SILK', 'YARN' }
+local function try(f) local ok, v = pcall(f) if ok then return v end return nil end
+local function is_bone(it)
+  local cf = try(function() return it.corpse_flags end)
+  if cf then
+    for _, k in ipairs(BONE_FLAGS) do if try(function() return cf[k] end) == true then return true end end
+  end
+  local fl = try(function() local mi = dfhack.matinfo.decode(it) return mi and mi.material and mi.material.flags end)
+  if fl then
+    for _, k in ipairs(BONE_MATS) do if try(function() return fl[k] end) == true then return true end end
+  end
+  return false
 end
 if mode ~= 'status' and mode ~= 'dump' then
   util.emit({ error = 'unbekannter Befehl: ' .. tostring(mode), usage = 'claude/muell [status | dump [N]]' })
@@ -76,13 +94,14 @@ if mode == 'dump' then
     if it.flags.dump and loose(it) then pend = pend + 1 end
   end
   if pend >= 400 then util.emit({ marked = 0, hinweis = 'noch ' .. pend .. ' markiert, abwarten' }) return end
-  local cand, skipped = {}, { dwarf = 0, unreachable = 0 }
+  local cand, skipped = {}, { dwarf = 0, unreachable = 0, knochen = 0 }
   for _, it in ipairs(df.global.world.items.all) do
     local ok, x, y, z = loose(it)
     if ok and not it.flags.dump and not it.flags.forbid and not in_dumpzone(x, y, z) then   -- already on the dump: done
       local t = IT[it:getType()]
       if t == 'CORPSE' or t == 'CORPSEPIECE' or t == 'REMAINS' then
         if t ~= 'REMAINS' and it.race == fr then skipped.dwarf = skipped.dwarf + 1   -- own race: burial, not the dump
+        elseif is_bone(it) then skipped.knochen = skipped.knochen + 1   -- craft material
         else
           local g = dfhack.maps.getWalkableGroup(xyz2pos(x, y, z))
           local best

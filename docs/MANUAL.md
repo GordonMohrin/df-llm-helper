@@ -86,7 +86,13 @@ The quote is stored in the field `player_consent` of `data/exceptions.jsonl` (ol
 
 If the rule ID (FPxx or Lxx) is in the register, the client lets the command through for exactly those objects.
 
-`exception add` accepts only known rule ids (FP01-FP13, L01-L31) and the consent actions OFFICES (`offices --apply`)
+FP14 (FEATURE-002) is not a cheat but a consent gate: `hygiene bins --apply` creates one manager order and raises a
+stockpile's `max_bins`, and the player asked to approve that once (`exception add FP14 --reason "bin planner" --ja
+"<quote>"`; one `bins --apply` uses the entry twice: order + max_bins). Unforbidding own items (`forbid-watch fix --apply`,
+`hygiene mark --unforbid --apply`) is the item menu's forbid toggle: no register entry, but always a dry run without
+`--apply`.
+
+`exception add` accepts only known rule ids (FP01-FP14, L01-L31) and the consent actions OFFICES (`offices --apply`)
 and HOSPITAL (`hospital staff --apply`), numeric object ids, `--max-uses` >= 1 and a real
 calendar date for `--expires` (`YYYY-MM-DD` = valid through the end of that day, or `YYYY-MM-DDTHH:MM:SSZ`). A broken
 register line is listed as `Register error: ...` by `exception list` and never grants anything.
@@ -255,6 +261,12 @@ Feature requests (`Features/`), same plug-in form:
   location (without them no care jobs), care labors, waiting patients, zone furniture, water from the hospital and in
   the refuge, supplies, plaster check (no plaster order without gypsum-class stone). See
   [manual-v3/13-hospital.md](manual-v3/13-hospital.md).
+
+Item features (FEATURE-002/003, live-untested): `hygiene flow [--hours 24] [--caps]`, `hygiene caps`,
+`hygiene bins [--apply] [--pile ID]`, `hygiene mark --unforbid [--apply]`, the garbage bridge in `hygiene zones`
+([manual-v3/07-hygiene.md](manual-v3/07-hygiene.md)) and `forbid-watch [--json]`, `forbid-watch fix [--classes ...]
+[--apply]` ([manual-v3/14-forbid-watch.md](manual-v3/14-forbid-watch.md)). Both report in `check` (wake lines only on a
+state change). Needs `lua/pilot_forbid.lua` and the updated `lua/pilot_hygiene.lua` + `lua/claude/muell.lua` in the game.
 
 ## 11. Refuge check and loop registry (2026-10-03, live-untested)
 

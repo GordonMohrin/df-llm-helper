@@ -43,6 +43,9 @@ FORBIDDEN_COMMANDS: list[tuple[str, re.Pattern, str]] = [
     ("FP11", re.compile(r"designation\.hidden\s*=(?!=)|\.hidden\s*=\s*false"), "uncovering hidden tiles"),
     ("FP12", re.compile(r"work_weapons[^=\n]*=(?!=)|work_weapons:insert"), "writing work_weapons directly"),
     ("FP13", re.compile(r"\.owner\s*=(?!=)|setOwner\s*\("), "changing the owner directly"),
+    # FEATURE-002: the bin planner's writes (one manager order, a stockpile's max_bins) only with the player's consent
+    ("FP14", re.compile(r"pilot_hygiene\s+(?:bins_order|max_bins)\b[^\n]*--apply"),
+     "bin planner order/stockpile setting (player exception required)"),
 ]
 
 

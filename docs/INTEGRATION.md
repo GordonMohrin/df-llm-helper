@@ -138,6 +138,8 @@ The recordings from 1.1/1.2 replace the synthetic responses (fixture gaps in `CH
 - [ ] `tools`: add FP08 with the player's consent before the first automatic pick fix; check `work_weapons` after the fix.
 - [ ] `remote`: does `dfhack.job.removeJob` end a Fish job; does `labor off` stick with DF 50+ work details.
 - [ ] `hygiene`: field names `corpse_flags`, `civzone_type.Dump`, `flags.rotten`; block time for 20,000 items; do marked wild corpses get DumpItem jobs.
+- [ ] FEATURE-002 `hygiene flow`: `df.global.item_next_id`, `settings.flags.<category>`, `storage.max_bins`, `room.extents`, block `occupancy.item`, bridge `gate_flags.raised` + `linked_mechanisms` -> `BUILDING_TRIGGER`, `df.global.standing_orders_forbid_*` (or `plotinfo.*`) readable under DF 53.16; two `hygiene status` 1 h apart give plausible inflow/sink; `hygiene bins --apply` (FP14 entry) creates exactly one ConstructBin order (workorder script).
+- [ ] FEATURE-003 `forbid-watch`: forbid one full drink barrel and one stack of blocks -> both counted (drinks blocked = the barrel's drinks), cause plausible; `forbid-watch fix` dry run lists them, `--apply` clears them and writes `tools/out/forbid-fix.log`; `cancels ...: Forbidden area` lines are counted from `gamelog.txt`.
 - [ ] `defense status`: how DF 53 shows a loaded stone-fall trap, job name of the reload job; does quickfort accept `CF`/`r`/`a`.
 - [ ] `settings`: location of `d_init.txt` in DF 53 (`settings.file`).
 - [ ] `camera`: does DFHack `json.decode` read the weight file; idle sparring soldiers have no `current_job`.
