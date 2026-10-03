@@ -45,7 +45,7 @@ local function fail(reason, extra)
   emit(t)
 end
 
-local function read_state()
+function read_state()
   local ok, res = pcall(function()
     local f = io.open(STATE_FILE, 'r'); if not f then return {} end
     local s = f:read('*a'); f:close()
@@ -53,10 +53,31 @@ local function read_state()
   end)
   return ok and res or {}
 end
-local function write_state(t)
-  pcall(function()
-    local f = io.open(STATE_FILE, 'w'); if f then f:write(json.encode(t)); f:close() end
+-- BUG-226: returns true, or false + reason (the stability mark must not get lost silently)
+function write_state(t)
+  local ok, err = pcall(function()
+    local f, e = io.open(STATE_FILE, 'w')
+    if not f then error(e or ('cannot open ' .. STATE_FILE), 0) end
+    f:write(json.encode(t)); f:close()
   end)
+  if ok then return true end
+  log('state: ' .. tostring(err))
+  return false, tostring(err)
+end
+
+-- Runtime problems for the JSON 'errors' list (BUG-226): runtime folder, rules file
+local function rules_problem()
+  local f = io.open(RULES_FILE, 'r')
+  if f then f:close() return nil end
+  return 'rules file missing: ' .. RULES_FILE .. ' (template: data/trade/handel-regeln.md; install-lua --apply copies it)'
+end
+local function runtime_errors()
+  local errs = {}
+  local he = util.home_error and util.home_error()
+  if he then errs[#errs + 1] = he end
+  local rp = rules_problem()
+  if rp then errs[#errs + 1] = rp end
+  return errs
 end
 
 local function focus_list()
@@ -133,13 +154,13 @@ local DEFAULT_RULES = {
   sell_types = {}, sell_exclude = {}, buys = {}, weights = {}, keep = {},
 }
 
-local function load_rules()
+function load_rules()
   local R = {}
   for k, v in pairs(DEFAULT_RULES) do R[k] = v end
   R.sell_types, R.sell_exclude, R.buys, R.weights, R.keep = {}, {}, {}, {}, {}
   local ok, err = pcall(function()
     local f = io.open(RULES_FILE, 'r')
-    if not f then error('Regeldatei fehlt') end
+    if not f then error('rules file missing: ' .. RULES_FILE, 0) end
     local inblock = false
     for line in f:lines() do
       if line:match('^```rules') then inblock = true
@@ -177,8 +198,21 @@ local function load_rules()
     end
     f:close()
   end)
-  if not ok then log('Regeln: ' .. tostring(err)) end
+  if not ok then
+    -- BUG-226: loud - the defaults have no sell types and no buy rules ("nothing sensible to select")
+    R.rules_error = tostring(err)
+    log('Regeln: ' .. R.rules_error)
+    pcall(dfhack.printerr, 'claude/handel: ' .. R.rules_error)
+  end
   return R
+end
+
+-- plan/mark/select refuse without a rules file instead of working with the empty defaults (BUG-226)
+local function rules_fail(R)
+  if not R.rules_error then return false end
+  fail(R.rules_error .. ' - template: data/trade/handel-regeln.md (install-lua --apply copies it)',
+    { rules_file = RULES_FILE })
+  return true
 end
 
 ------------------------------------------------------------------ Read helpers fort / caravan
@@ -244,25 +278,41 @@ local function item_desc(it)
 end
 
 ------------------------------------------------------------------ Sale candidates in the fort (without trade window)
-local function sell_candidates(R, mer)
+-- BUG-226: most finished goods sit in bins/barrels (flags.in_inventory = contained in an item, live: 396 of 429
+-- figurines). Like the player's "move goods to depot" list (DFHack movegoods) such an item is marked by itself with
+-- dfhack.items.markForTrade; the hauler takes it out of the bin. Skipped: items carried by a unit (no container) and
+-- items whose container is carried, forbidden, in a job or a trader's.
+local function stored_in_container(it)
+  local ok, c = pcall(dfhack.items.getContainer, it)
+  if not ok or not c then return false end
+  local cf = c.flags
+  return not (cf.in_inventory or cf.forbid or cf.in_job or cf.trader or cf.removed or cf.garbage_collect or cf.dump)
+end
+
+function sell_candidates(R, mer)
   local list, byType = {}, {}
   for _, it in ipairs(df.global.world.items.all) do
     local f = it.flags
     local tn = df.item_type[it:getType()]
     if R.sell_types[tn] and not R.sell_exclude[tn]
-       and not f.in_inventory and not f.rotten and not f.garbage_collect and not f.removed
+       and (not f.in_inventory or stored_in_container(it)) and not f.rotten and not f.garbage_collect and not f.removed
        and not f.owned and not f.forbid and not f.in_job and not f.trader and not f.dump
        and not f.melt and not f.hostile then
-      local ok, can = pcall(dfhack.items.canTradeWithContents, it)
+      -- canTradeWithContents refuses every item that is inside another item; for those the item itself is checked
+      local ok, can
+      if f.in_inventory then ok, can = pcall(dfhack.items.canTrade, it)
+      else ok, can = pcall(dfhack.items.canTradeWithContents, it) end
       -- already in the depot (trade goods delivered): do not mark again
+      local okp, pos = pcall(dfhack.items.getPosition, it)
+      pos = okp and pos or it.pos
       local at_dep = false
       for _, dep in ipairs(depots()) do
-        if it.pos.z == dep.z and it.pos.x >= dep.x1 and it.pos.x <= dep.x2 and it.pos.y >= dep.y1 and it.pos.y <= dep.y2 then at_dep = true end
+        if pos.z == dep.z and pos.x >= dep.x1 and pos.x <= dep.x2 and pos.y >= dep.y1 and pos.y <= dep.y2 then at_dep = true end
       end
       if ok and can and not at_dep then
         local v = mer and perceived_value(it, mer) or dfhack.items.getValue(it)
         if v >= R.sell_min_value then
-          list[#list + 1] = { id = it.id, type = tn, value = v, desc = item_desc(it) }
+          list[#list + 1] = { id = it.id, type = tn, value = v, desc = item_desc(it), in_container = f.in_inventory or nil }
           byType[tn] = (byType[tn] or 0) + 1
         end
       end
@@ -285,6 +335,34 @@ local function sell_candidates(R, mer)
     list = out
   end
   return list, byType
+end
+
+-- Sale choice (BUG-226: one figurine worth 26300 was sold for a purchase of a few hundred, the surplus is lost - the
+-- merchants give no change). `sells` sorted by value, most valuable first; need = sale value the ratio requires.
+--   1. most valuable first, but only pieces that keep the sum within need*(1+tol)  -> many small pieces
+--   2. still short: the CHEAPEST single remaining piece that closes the gap
+--   3. no piece closes it: the most valuable remaining pieces until need is reached
+-- keep_ok(s) (reserve, keep_checker) is asked only for a piece that is really taken. Returns chosen list, sum.
+function choose_sells(sells, need, tol, keep_ok)
+  keep_ok = keep_ok or function() return true end
+  local cap = need * (1 + (tol or 0))
+  local chosen, S, used = {}, 0, {}
+  local function take(k, s) chosen[#chosen + 1] = s; S = S + s.value; used[k] = true end
+  for k, s in ipairs(sells) do
+    if S >= need then break end
+    if S + s.value <= cap and keep_ok(s) then take(k, s) end
+  end
+  if S < need then
+    for k = #sells, 1, -1 do
+      local s = sells[k]
+      if not used[k] and S + s.value >= need and keep_ok(s) then take(k, s); break end
+    end
+  end
+  for k, s in ipairs(sells) do
+    if S >= need then break end
+    if not used[k] and keep_ok(s) then take(k, s) end
+  end
+  return chosen, S
 end
 
 -- Reserve check for the trade window (rule keep <TYPE> <n>, ported from the live copy, BUG-420): returns keep_ok(s)
@@ -321,6 +399,7 @@ function cmd.status(opts)
     caravans = caravan_info(),
     depots = {}, broker = d and broker_info(d) or broker_info(nil),
     civ_alert_idx = df.global.plotinfo.alerts.civ_alert_idx,
+    errors = runtime_errors(),
     trade_ui = { open = trade.open, choosing_merchant = trade.choosing_merchant,
       stillunloading = trade.stillunloading, havetalker = trade.havetalker,
       focus_exact = focus_trade_exact() },
@@ -346,7 +425,14 @@ function cmd.status(opts)
       if n0 + n1 > 0 and n0 == f0 and n1 == f1 then
         local tok = ('%s|%d|%d'):format(tostring(trade.mer), n0, n1)
         local st = read_state()
-        if st.token ~= tok then st = { token = tok, since = os.time() } ; write_state(st) end
+        if st.token ~= tok then
+          st = { token = tok, since = os.time() }
+          local okw, werr = write_state(st)
+          if not okw then
+            -- BUG-226: without the mark select/list/confirm refuse ("keine Stabilitaetsmarke") - say why
+            info.errors[#info.errors + 1] = 'stability mark not written (' .. STATE_FILE .. '): ' .. tostring(werr)
+          end
+        end
         info.trade_ui.stable_seconds = os.time() - (st.since or os.time())
       end
     end
@@ -357,6 +443,7 @@ end
 function cmd.plan(opts)
   if not fort_ok() then return fail('keine Festung geladen') end
   local R = load_rules()
+  if rules_fail(R) then return end
   local mer = at_depot_caravan()
   if not mer and #df.global.plotinfo.caravans > 0 then mer = df.global.plotinfo.caravans[0] end
   local list, byType = sell_candidates(R, mer)   -- mer=nil (no caravan): base values instead of trade agreement values
@@ -480,6 +567,7 @@ end
 function cmd.mark(opts)
   if not fort_ok() then return fail('keine Festung geladen') end
   local R = load_rules()
+  if rules_fail(R) then return end
   local d = depots()[1]
   if not d then return fail('kein Handelsdepot') end
   local mer = at_depot_caravan()
@@ -522,6 +610,12 @@ function cmd.open(opts)
   if focus_has('^dfhack/') then return fail('DFHack-Fenster offen: ' .. focus_str()) end
   if focus_has('^dwarfmode/Trade/') then return fail('Handelsfenster schon offen', { focus = focus_list() }) end
   local on_sheet = focus_has('^dwarfmode/ViewSheets/BUILDING/TradeDepot')
+  if not on_sheet and focus_has('^dwarfmode/Squads') then
+    -- BUG-224/225: an open Squads window holds the game and hides the depot sheet; close it like Escape
+    if opts.dry then return emit({ ok = true, dry = true, would = 'Squads-Fenster schliessen', focus = focus_list() }) end
+    mi.squads.open = false
+    return emit({ ok = true, step = 'squads_geschlossen', hinweis = '>=1 s warten, dann open erneut', focus = focus_list() })
+  end
   if not on_sheet then
     -- a window/menu is open that we do not know -> do not touch
     if not (focus_has('^dwarfmode/Default') or focus_has('^dwarfmode/Squads/Default') or focus_has('^dwarfmode/ViewSheets')) then
@@ -577,7 +671,11 @@ local function guard_trade_list(opts)
   if n0 ~= f0 or n1 ~= f1 then return nil, 'good/goodflag unterschiedlich lang (stale?)' end
   local st = read_state()
   local tok = ('%s|%d|%d'):format(tostring(mer), n0, n1)
-  if st.token ~= tok or not st.since then return nil, 'keine Stabilitaetsmarke: erst "status" aufrufen, >=2 s warten' end
+  if st.token ~= tok or not st.since then
+    local he = util.home_error and util.home_error()
+    return nil, 'keine Stabilitaetsmarke: erst "status" aufrufen, >=2 s warten' ..
+      (he and (' (' .. he .. ')') or (' (state file ' .. STATE_FILE .. ')'))
+  end
   local age = os.time() - st.since
   if age < 2 then return nil, 'Fenster erst ' .. age .. ' s stabil (>=2 s noetig)' end
   return { mer = mer, n0 = n0, n1 = n1 }
@@ -601,6 +699,7 @@ function cmd.select(opts)
   if not g then return fail(why) end
   local mer = g.mer
   local R = load_rules()
+  if rules_fail(R) then return end
   -- 1. Purchase candidates (list 0 = trader)
   local buys = {}
   for i = 0, g.n0 - 1 do
@@ -658,25 +757,8 @@ function cmd.select(opts)
   end
   -- 4. Choose the sale so that S >= ratio*(1+margin)*T, without overshooting much
   --    Reserve (rule keep): see keep_checker
-  local keep_ok = keep_checker(R)
   local need = T * need_factor
-  local chosen_sell, S = {}, 0
-  for _, s in ipairs(sells) do
-    if S >= need then break end
-    if (S + s.value <= need * (1 + R.overshoot_tol) or #chosen_sell == 0) and keep_ok(s) then
-      S = S + s.value
-      chosen_sell[#chosen_sell + 1] = s
-    end
-  end
-  for _, s in ipairs(sells) do -- Fine tuning with smaller pieces
-    if S >= need then break end
-    local used = false
-    for _, c in ipairs(chosen_sell) do if c.i == s.i then used = true end end
-    if not used and S + s.value <= need * (1 + R.overshoot_tol) and keep_ok(s) then
-      S = S + s.value
-      chosen_sell[#chosen_sell + 1] = s
-    end
-  end
+  local chosen_sell, S = choose_sells(sells, need, R.overshoot_tol, keep_checker(R))
   local plan = { ok = true, dry = opts.dry, buy_count = #chosen_buy, buy_value = T, sell_count = #chosen_sell,
     sell_value = S, ratio_x100 = T > 0 and math.floor(S / T * 100) or nil, need_ratio_x100 = math.floor(need_factor * 100), sell_pool = sell_total,
     buy_top = {}, sell_top = {} }

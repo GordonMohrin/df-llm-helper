@@ -19,6 +19,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from . import yamlmini
+from .holds import danger_reason, release_hold, run_helper
 from .trade_flow import TERMINAL, TradeFlow, obs_from_status
 
 __all__ = ["Good", "parse_list", "load_wants", "boost_wants", "classify", "decide", "dry_ok", "CaravanPilot", "DEFAULTS",
@@ -160,6 +161,10 @@ class CaravanPilot:
         if dry:
             log.append("[dry] " + cmd)
             return None
+        if cmd.startswith("HELPER "):              # BUG-223: the trade's pause.hold, executed locally
+            ok, txt = run_helper(cmd, self.tools)
+            log.append(("ok " if ok else "ERROR ") + cmd + f" ({txt})")
+            return None
         r = self.client.run(cmd)
         self.store.log_action(self.clock.now().epoch, "caravan", "caravan", cmd.split(" ")[0], "caravan", cmd, False,
                               r.ok, "")
@@ -169,7 +174,7 @@ class CaravanPilot:
     def _resume(self, st: CaravanState, dry: bool, log: list, why: str, *, run: bool = True) -> None:
         if not dry:
             self.tools.delete_flag("caravan")
-            self.tools.delete_flag("pause.hold")
+            release_hold(self.tools)              # never an alarm/gefahr hold (BUG-223/224)
         if run:
             self._run("claude/advance run", dry, log)
         if why not in st.report:
@@ -226,7 +231,7 @@ class CaravanPilot:
         if not cars and flow.state in ("IDLE", "DONE", "ABORT", "FAILED"):
             if self.tools.flag("caravan").exists and (self.tools.flag("caravan").age_min or 0) > 5 and not dry:
                 self.tools.delete_flag("caravan")
-                self.tools.delete_flag("pause.hold")
+                release_hold(self.tools)
                 log.append("orphaned caravan.flag deleted")
             if flow.state in ("DONE", "ABORT", "FAILED"):
                 st = CaravanState()
@@ -235,7 +240,12 @@ class CaravanPilot:
         if flow.state == "IDLE" and not at_depot:
             self._save(st)
             return "waiting", log
-        if flow.state in TERMINAL:
+        danger = danger_reason(self.tools, self.cfg.get("holds"))
+        for e in (j.get("errors") or [])[:3]:          # BUG-226: runtime folder / stability mark / rules file
+            self._warn("caravan:lua", f"claude/handel: {e}", dry)
+            log.append(f"!! claude/handel: {e}")
+        reenter = flow.state == "ABORT" and flow.can_reenter(obs_from_status(j, danger=danger))
+        if flow.state in TERMINAL and not reenter:
             # BUG-200: this caravan is finished (it stays on the map for days): no commands, no flag deletions
             self._save(st)
             return flow.state.lower(), log
@@ -273,9 +283,14 @@ class CaravanPilot:
 
         clock = self.client.run("claude/advance clock")
         paused = bool((clock.json or {}).get("paused")) if isinstance(clock.json, dict) else False
-        obs = obs_from_status(j, paused=paused, stable_s=stable_s, last_ok=stat.ok)
+        obs = obs_from_status(j, paused=paused, stable_s=stable_s, last_ok=stat.ok, danger=danger)
         for c in flow.step(obs, self.clock.now().epoch):
-            self._run(c, dry, log)
+            r = self._run(c, dry, log)
+            if c.startswith("claude/handel open") and r is not None:     # BUG-225: raw answer for the abort text
+                jr = r.json if isinstance(r.json, dict) else {}
+                flow.last_answer = str(jr.get("abort") or jr.get("step") or (r.stdout or "").strip()[:120])[:160]
+        if flow.note and flow.note not in st.report:
+            st.report = [x for x in st.report if not x.startswith("blocked: ")] + [flow.note]
         if flow.state == "DONE" and before != "DONE":
             # only on the transition; 'advance run' was already sent by the automaton (RELEASE -> RESUME) (BUG-200)
             sent = any(x.startswith(("RELEASE -> RESUME", "RESUME -> DONE")) for x in flow.log)
@@ -284,7 +299,7 @@ class CaravanPilot:
             st.report.append(f"Trade aborted ({flow.abort_reason}); quicksave from the start of the trade available "
                              f"(load only via the title menu/the player)")
             if not dry:
-                self.tools.delete_flag("pause.hold")
+                release_hold(self.tools)          # the trade's own hold only; an alarm hold stays (BUG-224/225)
         st.flow = asdict(flow)
         self._save(st)
         return flow.state.lower(), log

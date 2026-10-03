@@ -8,7 +8,8 @@ and keep only the deadman brake of df-llm-helper). Logic taken 1:1 from unpause-
  4. critical report (same type at most every 300 s) -> alert.flag (counts as open for 60 s only);
     siege/ambush/undead -> siege.flag; real enemies -> pause.hold 'alarm' + pause + civilian alert + tempo suspend
  5. supplies every ~10 s (at the earliest 3 min after the last alarm): meals+meat+fish < 25 or drinks < 40 -> food.flag
- 6. pause.hold 'gefahr...' older than 20 min -> delete pause.hold + alert.flag
+ 6. pause.hold 'gefahr...' older than 20 min -> delete pause.hold + alert.flag; BUG-224: any other stale hold (older
+    than its reason's limit in cfg holds.max_age_min, no active danger / no running trade, holds.py) is deleted too
  7. deadman/watcher self-check: python -m df_llm_helper guard (guard.py) every ~30 s, without a snapshot (only files + report IDs)
  8. dismiss message windows; lift the pause if there is no pause.hold/alert.flag and focus is dwarfmode/Default
  9. spec v3-04 (freeze_guard.py): game time stands still (frame counter + year tick unchanged for 3 ticks) while an
@@ -18,6 +19,8 @@ and keep only the deadman brake of df-llm-helper). Logic taken 1:1 from unpause-
     5 min; services a crashed `perf bisect` left switched off are restarted when their deadline has passed
 11. BUG-421: a single timeout of the report-id read only skips the pass (watcher stays alive); 2 consecutive timeouts
     are a failure; every dfhack-run call > 3 s is in tools/out/stall.log (perf status: stall period)
+12. BUG-224: a Squads window (dwarfmode/Squads/...) holds the game without any pause.hold; open with time standing
+    still for holds.squads_close_s -> close it like a player (main_interface.squads.open=false), resume if nothing holds
 Heartbeat: tools/out/waechter.alive (the guard checks it instead of the PowerShell process).
 """
 from __future__ import annotations
@@ -28,6 +31,7 @@ from dataclasses import dataclass, field
 from .client import MAX_REPORT_ID_CMD
 from .features.perf import LatencyMonitor, digest_line, recover as perf_recover, state_path as perf_state_path
 from . import freeze_guard as fg
+from . import holds as hl
 
 __all__ = ["Waechter", "reports_cmd", "CRITICAL", "INFO", "ENEMY", "SIEGE", "FOOD_CMD", "CLEAR_CMD", "UNPAUSE_RE"]
 
@@ -52,6 +56,9 @@ CLEAR_CMD = ('lua "local p=df.global.world.status.popups local n=#p while #p>0 d
 # pause lifted only on the plain map; the trailing frame counter/year tick (spec v3-04) is optional for older output
 UNPAUSE_RE = re.compile(r"^P \d+ dwarfmode/Default(?: fc=\d+)?(?: yt=\d+)?$")
 CARAVANS_CMD = 'lua "print(#df.global.plotinfo.caravans)"'
+# BUG-224: close the Squads window (like Escape); prints the focus afterwards
+SQUADS_CLOSE_CMD = ('lua "local s=df.global.game.main_interface.squads if s.open then s.open=false end '
+                    "print(table.concat(dfhack.gui.getCurFocus(true),'|'))\"")
 TIMEOUTS_FOR_FAILURE = 2       # BUG-421: consecutive timeouts before the watcher counts as failed
 
 
@@ -77,6 +84,8 @@ class Waechter:
     freeze: object = None                          # freeze_guard.FreezeGuard (spec v3-04)
     perf: object = None                            # features.perf.LatencyMonitor (spec v3-03)
     timeouts: int = 0                              # BUG-421: consecutive timeouts of the report-id read
+    squads_since: float | None = None              # BUG-224: Squads window open + time standing still since
+    squads_fc: int | None = None
 
     def __post_init__(self) -> None:
         if self.freeze is None:
@@ -138,6 +147,57 @@ class Waechter:
         if d.kind != "none":
             fg.apply(d, self.freeze, ctx, client=self.client, tools=self.tools, store=self.store, clock=self.clock,
                      event=self._event)
+
+    def _stale_hold_check(self, now: float) -> None:
+        """BUG-224: a hold nobody needs any more (alarm over, no trade running) is released after its limit."""
+        hc = self.cfg.get("holds") or {}
+        if not hc.get("auto_release", True):
+            return
+        h = hl.stale_hold(self.tools, self.store, cfg=hc)
+        if h is None:
+            return
+        self.tools.delete_flag("pause.hold")
+        if h.reason in hl.DANGER_REASONS:
+            self.tools.delete_flag("alert")
+        txt = (f"stale pause.hold '{h.text[:30]}' released after {int(h.age_min or 0)} min "
+               f"(limit {int(h.max_age_min or 0)} min, " +
+               ("no active danger)" if h.reason in hl.DANGER_REASONS else "no running trade)"))
+        self._event("info", txt)
+        self.store.warn(now, "waechter", "waechter:stale_hold", txt, "warn")
+        self.store.log_action(now, "waechter", "holds", "release_stale", "pause.hold", "", False, True, txt)
+
+    def _squads_check(self, line: str, now: float) -> None:
+        """BUG-224 addendum: an open Squads window keeps the game paused (no pause.hold, no alert.flag). Close it after
+        holds.squads_close_s of standstill, like a player pressing Escape, and resume if nothing holds the game."""
+        obs = fg.parse_status(line)
+        last_fc, self.squads_fc = self.squads_fc, (obs.fc if obs is not None else None)
+        if obs is None or "/Squads" not in obs.focus or not (obs.paused or obs.fc == last_fc):
+            self.squads_since = None
+            return
+        hold = self.tools.flag("pause.hold")
+        if hold.exists and hl.hold_reason(hold.text) in hl.DANGER_REASONS or hl.danger_reason(self.tools,
+                                                                                               self.cfg.get("holds")):
+            return                                  # alarm: the military may be giving orders in that window
+        if self.squads_since is None:
+            self.squads_since = now
+            return
+        if now - self.squads_since < float((self.cfg.get("holds") or {}).get("squads_close_s", 30)):
+            return
+        self.squads_since = None
+        res = self.client.run(SQUADS_CLOSE_CMD)
+        lines = (res.stdout or "").strip().splitlines()
+        focus = lines[-1].strip() if lines else ""
+        closed = res.ok and "/Squads" not in focus
+        resumed = closed and not self.tools.flag("pause.hold").exists and not self.tools.flag("alert").exists
+        if resumed:
+            self.client.run("claude/advance run")
+        txt = (f"game frozen: squads window open (focus {obs.focus}), no pause.hold - " +
+               ("closed" + (" and resumed" if resumed else " (pause kept: pause.hold/alert.flag)") if closed
+                else f"closing failed (focus now {focus or '?'})"))
+        self._event("info" if closed else "CRITICAL", txt)
+        self.store.warn(now, "waechter", "waechter:squads_window", txt, "warn" if closed else "crit")
+        self.store.log_action(now, "waechter", "holds", "close_squads", obs.focus, SQUADS_CLOSE_CMD, False, closed,
+                              txt)
 
     # ---- one pass (ps1: while loop, 2 s)
     def step(self) -> list[str]:
@@ -224,6 +284,8 @@ class Waechter:
             self.tools.delete_flag("pause.hold")
             self.tools.delete_flag("alert")
             self._event("info", "danger pause expired after 20 min (pause.hold/alert.flag deleted)")
+        else:
+            self._stale_hold_check(now)
         # deadman + watcher self-check (python -m df_llm_helper guard) about every 30 s
         if self.tick % 15 == 1:
             from .guard import GuardRunner
@@ -233,6 +295,7 @@ class Waechter:
         o = o[-1].strip() if o else ""
         if not self.tools.flag("pause.hold").exists and not self.tools.flag("alert").exists and UNPAUSE_RE.match(o):
             self.client.run("claude/advance run")
+        self._squads_check(o, now)
         # time stands still although not paused (Info/Help/MessageBox on top) + trade aftercare (spec v3-04)
         self._freeze_check(o)
         self._perf_check(now)

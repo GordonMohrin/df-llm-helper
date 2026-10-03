@@ -4,11 +4,52 @@
 local json = require('json')
 
 -- Base folder for flags/logs/state (shared with df-llm-helper): environment variable DF_LLM_HELPER_HOME,
--- otherwise <Dwarf Fortress>/df-llm-helper-runtime. Below it: tools/ (flags, events.log, out/), state/, metrics.csv.
+-- otherwise <Dwarf Fortress>/df-llm-helper-runtime. Below it: tools/ (flags, events.log, out/), tools/scopes/ (rules
+-- files such as handel-regeln.md), state/, metrics.csv.
+-- BUG-226: a missing folder made every write fail silently (the trade's stability mark, logs). home() now creates
+-- <home>/tools/out and <home>/tools/scopes; when that is impossible, home_error() returns the reason (also printed once
+-- to the DFHack console) and scripts report it in their JSON. A success is remembered per path, a failure is retried.
+HOME_ERROR = nil
+local home_ok = {}
+
+local function is_dir(p)
+  local ok, r = pcall(function() return dfhack.filesystem.isdir(p) end)
+  if ok and type(r) == 'boolean' then return r end
+  return nil                                   -- unknown (no filesystem API)
+end
+
+-- mkdir -p; true when the folder exists afterwards
+function ensure_dir(p)
+  if is_dir(p) then return true end
+  local ok, r = pcall(function() return dfhack.filesystem.mkdir_recursive(p) end)
+  local d = is_dir(p)
+  if d ~= nil then return d end
+  return ok and r == true
+end
+
 function home()
   local h = os.getenv('DF_LLM_HELPER_HOME') or os.getenv('DFPILOT_HOME')
-  if h and h ~= '' then return (h:gsub('[/\\]+$', '')) end
-  return dfhack.getDFPath() .. '/df-llm-helper-runtime'
+  if h and h ~= '' then h = h:gsub('[/\\]+$', '') else h = dfhack.getDFPath() .. '/df-llm-helper-runtime' end
+  if not home_ok[h] then
+    local bad
+    for _, sub in ipairs({ '/tools/out', '/tools/scopes' }) do
+      if not ensure_dir(h .. sub) then bad = h .. sub break end
+    end
+    if bad then
+      local first = HOME_ERROR == nil
+      HOME_ERROR = 'runtime folder missing and not creatable: ' .. bad ..
+        ' (set DF_LLM_HELPER_HOME for the game or create the folder)'
+      if first then pcall(dfhack.printerr, 'claude/util: ' .. HOME_ERROR) end
+    else
+      home_ok[h] = true
+      HOME_ERROR = nil
+    end
+  end
+  return h
+end
+
+function home_error()
+  return HOME_ERROR
 end
 
 -- DF strings are CP437; only runs of bytes >= 0x80 need converting. Pure ASCII stays as is, so control characters

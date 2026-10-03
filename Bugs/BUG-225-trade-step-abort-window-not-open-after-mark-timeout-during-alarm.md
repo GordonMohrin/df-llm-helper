@@ -1,6 +1,6 @@
 # BUG-225: `trade step` ends in ABORT "window not open" right after the MARK->OPEN timeout while an alarm / a paused game is active
 
-- **Status:** open
+- **Status:** fixed in c7602ac
 - **Severity:** S2 (the whole trade is lost although the caravan is still at the depot; the flow does not wait for the danger to pass)
 - **Area:** `df_llm_helper/trade_flow.py` (`TradeFlow.step`, states MARK -> OPEN, lines ~139-158), `caravan.py` (`claude/handel open --live`)
 - **Reported:** 2026-10-02 ~18:26 (real time, live trade), commit `22b9b03`
@@ -48,3 +48,26 @@ Replay with `fixtures/bugs/BUG-200/car_replay.jsonl`-style rows: caravan `AtDepo
 
 ## Info needed
 Player/orchestrator: the next time OPEN fails, save the raw output of `claude/handel open --live` and `claude/handel status` plus the current focus string (`df.global.game.main_interface` / `dfhack.gui.getCurFocus()`) under `Bugs/evidence/BUG-225/`.
+
+## Fix
+- `TradeObs.danger` (filled by `trade step` and the caravan autopilot from `holds.danger_reason`: alarm/gefahr hold,
+  `siege.flag`, `alert.flag` younger than 5 min) and `trade_flow.blocker()`: danger, a Squads window or any focus
+  other than `dwarfmode/Default`, `dwarfmode/ViewSheets...`, `dwarfmode/Trade...` blocks OPEN.
+- OPEN while blocked: no commands, no retries used, the OPEN timeout is suspended; `trade status` / `caravan status`
+  show `[blocked: alarm active (pause.hold 'alarm')]`; own limit `BLOCKED_MAX_S` = 600 s, then
+  `ABORT (blocked for 601 s: ...)`. When the blocker is gone: hold + `advance 0` + `handel open --live` afresh.
+- `handel open` retries: 5, at least 8 s apart (was 2 within seconds); the abort text carries the last answer of
+  `claude/handel open --live`, e.g. `window not open (last answer: Makler nicht am Depot mit Job TradeAtDepot)`.
+- Re-entry: after `window not open` or `blocked ...` the automaton goes ABORT -> OPEN on its own (at most 2 times per
+  caravan) while the caravan is still `AtDepot` and nothing blocks. The abort path never unmarks goods (it only
+  clears the selection, closes the window, frees the broker), so the marked goods stay in the depot and MARK is not
+  repeated.
+- Tests: `tests/test_live_trade.py::test_bug225_*` (10 blocked observations with `paused=true` + alert.flag -> stays
+  in OPEN, no ABORT, then SELECT_DRY; blockers; blocked too long -> abort -> re-entry; answer in the abort text and at
+  most 2 re-entries; caravan autopilot waits during an alarm hold and re-enters after the abort).
+
+## Info needed (after the fix)
+Live check: during a trade in OPEN write `alarm` into `tools/pause.hold` (or open the Squads window): `trade status`
+shows `[blocked: ...]` and no ABORT; delete the hold / close the window: the flow opens the window and continues.
+If OPEN still fails, save `trade step` output (it now contains the answer), `claude/handel status` and the focus
+string under `Bugs/evidence/BUG-225/`.

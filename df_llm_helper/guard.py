@@ -37,6 +37,8 @@ class GuardInputs:
     paused: bool | None = None
     stale_flags: list = field(default_factory=list)
     no_data: bool = False           # BUG-106: game state unreadable (claude/status failed) -> fail closed
+    stale_hold: str = ""            # BUG-224: warning text of a stale pause.hold ('' = none)
+    stale_hold_key: str = ""        # reason + write time of that hold (reported once per hold)
 
 
 @dataclass
@@ -53,6 +55,7 @@ class GuardState:
     no_heartbeat_reported: bool = False
     tempo_off_pending: int = 0
     normal_fps_seen: float | None = None       # last known NORMAL_FPS from claude/config (for the end of the deadman)
+    stale_hold_reported: str = ""               # BUG-224: key of the stale pause.hold already reported
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -204,6 +207,15 @@ def decide(inp: GuardInputs, state: GuardState, g: dict) -> tuple[list[GuardActi
     else:
         st.tempo_off_pending = 0
 
+    # BUG-224: a pause.hold nobody needs any more freezes the game silently -> one critical warning per hold
+    if inp.stale_hold:
+        if st.stale_hold_reported != inp.stale_hold_key:
+            st.stale_hold_reported = inp.stale_hold_key
+            acts.append(GuardAction("warn", None, "crit", inp.stale_hold))
+            acts.append(GuardAction("event", inp.stale_hold, "crit", "stale_hold"))
+    else:
+        st.stale_hold_reported = ""
+
     # (d) report stale flags (the autopilot deletes them)
     if inp.stale_flags:
         acts.append(GuardAction("info", ",".join(inp.stale_flags), "info", "stale flags"))
@@ -251,7 +263,18 @@ class GuardRunner:
             running = age is not None and age < float(self.cfg["guard"].get("waechter_dead_min", 2))
         else:
             running = self.probe.running() if self.probe is not None else None
+        from . import holds as hl
+        hc = self.cfg.get("holds") if hasattr(self.cfg, "get") else None
+        sh = hl.stale_hold(self.tools, self.store, danger=bool(snap.danger) if snap is not None else False, cfg=hc)
+        sh_text = hl.stale_text(sh, getattr(snap, "paused", None)) if sh is not None else ""
+        sh_key = ""
+        if sh is not None:
+            try:
+                sh_key = f"{sh.reason}@{int(self.tools.flag_path('pause.hold').stat().st_mtime)}"
+            except OSError:
+                sh_key = sh.reason
         return GuardInputs(
+            stale_hold=sh_text, stale_hold_key=sh_key,
             heartbeat_age_min=self.tools.heartbeat_age_min(), last_report_id=self.tools.last_report_id(),
             max_report_id=snap.max_report_id if snap is not None else None, events_size=size, events_age_min=age,
             guard_running=running,

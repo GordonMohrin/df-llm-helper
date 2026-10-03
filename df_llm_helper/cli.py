@@ -633,14 +633,24 @@ def cmd_overlay(args) -> int:
     return 0
 
 
+def _answer(r) -> str:
+    """Short text of a game answer: 'abort'/'step' of the JSON, else the first output line."""
+    j = r.json if isinstance(r.json, dict) else None
+    if j is not None:
+        return str(j.get("abort") or j.get("step") or ("ok" if j.get("ok") else j))[:160]
+    return ((r.stdout or r.stderr or "").strip().splitlines() or [""])[0][:160]
+
+
 def cmd_trade(args) -> int:
     from dataclasses import asdict
+    from .holds import danger_reason, release_hold, run_helper
     from .trade_flow import TradeFlow, obs_from_status
     p = _pilot(args)
     flow = TradeFlow(**(p.store.get("trade.flow") or {}))
     if args.action == "reset":
         p.store.set("trade.flow", asdict(TradeFlow()))
-        print("Trade automaton reset")
+        gone = release_hold(p.tools)                  # BUG-223: a reset must not leave the trade's hold behind
+        print("Trade automaton reset" + ("; pause.hold of the trade deleted" if gone else ""))
         return 0
     if args.action == "approve":                # BUG-201: reaches the caravan autopilot too; only in REVIEW
         from .caravan import approve_review
@@ -649,22 +659,31 @@ def cmd_trade(args) -> int:
         return 0 if ok else 2
     if args.action == "status":
         from .caravan import status_line
-        print(f"State {flow.state}{' (' + flow.abort_reason + ')' if flow.abort_reason else ''}; "
+        print(f"State {flow.state}{' (' + flow.abort_reason + ')' if flow.abort_reason else ''}"
+              f"{' [' + flow.note + ']' if flow.note else ''}; "
               f"approved: {flow.approved}; last steps: {' | '.join(flow.log[-4:])}")
         print(status_line(p.store))
         return 0
     st = p.client.run("claude/handel status")
     clock = p.client.run("claude/advance clock")
     paused = bool((clock.json or {}).get("paused")) if isinstance(clock.json, dict) else False
-    obs = obs_from_status(st.json if isinstance(st.json, dict) else {}, paused=paused,
-                          stable_s=float(args.stable_s), last_ok=st.ok)
+    sj = st.json if isinstance(st.json, dict) else {}
+    for e in (sj.get("errors") or [])[:3]:            # BUG-226: runtime folder / stability mark / rules file problems
+        print(f"!! claude/handel: {e}")
+    obs = obs_from_status(sj, paused=paused, stable_s=float(args.stable_s), last_ok=st.ok,
+                          danger=danger_reason(p.tools, p.cfg.get("holds", {})))
     cmds = flow.step(obs, time.time())
     for c in cmds:
         if args.dry_run:
             print("[dry] " + c)
+        elif c.startswith("HELPER "):               # BUG-223: pause.hold of the trade, executed here
+            ok, txt = run_helper(c, p.tools)
+            print(("ok   " if ok else "ERROR ") + c + f" ({txt})")
         else:
             r = p.client.run(c)
             print(("ok   " if r.ok else "ERROR ") + c)
+            if c.startswith("claude/handel open"):    # BUG-225: the raw answer goes into a 'window not open' abort
+                flow.last_answer = _answer(r)
             # Live lesson (Run 5): 'handel open' reports "Trade button not unique" with a candidate list when two texts
             # match. The real button is the topmost one (smallest y); the line "... at depot" is not a button.
             cand = (r.json or {}).get("candidates") if isinstance(r.json, dict) and c.startswith("claude/handel open") else None
@@ -674,9 +693,11 @@ def cmd_trade(args) -> int:
                 c2 = f"claude/handel open --live --x {best['x']} --y {best['y']}"
                 r2 = p.client.run(c2)
                 print(("ok   " if r2.ok else "ERROR ") + c2)
+                flow.last_answer = _answer(r2)
     if not args.dry_run:                       # dry run: the state machine must not advance past commands never sent
         p.store.set("trade.flow", asdict(flow))
-    print(f"State now: {flow.state}" + (f" ({flow.abort_reason})" if flow.abort_reason else ""))
+    print(f"State now: {flow.state}" + (f" ({flow.abort_reason})" if flow.abort_reason else "")
+          + (f" [{flow.note}]" if flow.note else ""))
     if flow.state in ("DONE", "ABORT", "FAILED") and obs.caravan_state:     # BUG-202
         print(f"State {flow.state} (previous trade) - nothing to do; to trade with this caravan again: "
               "python -m df_llm_helper trade reset")
@@ -935,7 +956,9 @@ def cmd_caravan(args) -> int:
     cp = CaravanPilot(p.client, p.tools, p.store, p.clock, p.cfg.get("caravan", {}), HOME, registry=p.client.registry)
     if args.action == "reset":
         p.store.set("caravan.state", {})
-        print("Caravan autopilot reset")
+        from .holds import release_hold
+        gone = release_hold(p.tools)                  # BUG-223: no trade hold left behind
+        print("Caravan autopilot reset" + ("; pause.hold of the trade deleted" if gone else ""))
         return 0
     if args.action == "status":
         print("\n".join(cp.report()))

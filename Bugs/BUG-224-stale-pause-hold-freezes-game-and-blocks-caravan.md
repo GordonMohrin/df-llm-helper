@@ -1,6 +1,6 @@
 # BUG-224: a stale `pause.hold` (reason "karawane" / "alarm") keeps the game paused for a long time; nothing warns, the caravan never arrives
 
-- **Status:** open
+- **Status:** fixed in c7602ac
 - **Severity:** S2 (game frozen for the player, approaching caravan can never reach the depot because no ticks run)
 - **Area:** `df_llm_helper/waechter.py` / `caravan.py` / `digest.py` (writers/readers of `tools/pause.hold`)
 - **Reported:** 2026-10-02, commit `ae17fff`
@@ -32,3 +32,35 @@ Writers of `pause.hold` exist in `siege.py`, `caravan.py`, `waechter.py`, `freez
 3. Zusammenspiel mit BUG-225: ein Hold/Squads-Fenster verhindert `claude/handel open --live`; der Trade-Flow sollte beides sehen.
 
 Info needed: Fixture der Antwort von `claude/status` (Fokus-String) bei offenem Squads-Fenster; Spieler kann sie mit `dfhack-run lua "print(dfhack.gui.getCurFocus()[1])"` aufnehmen und unter `Bugs/evidence/BUG-224/` ablegen.
+
+## Fix
+- `df_llm_helper/holds.py`: limits per reason (`holds.max_age_min` in the config: alarm 15, gefahr 20, karawane 10,
+  caravan 10, trade 30 min, others 30). A hold is stale when it is older than its limit and nothing justifies it:
+  for alarm/gefahr no `siege.flag`, no `alert.flag` younger than 5 min (`holds.alert_active_min`) and no snapshot
+  danger; for karawane/trade no running trade automaton (a running trade protects its hold up to 60 min).
+- `guard.py` (runs in `check`): a stale hold gives one critical warning per hold, e.g.
+  `!! [guard] pause.hold stale (age 15 min, reason "alarm", no active danger) - game is frozen; delete tools/pause.hold
+  if nothing needs the pause` (plus an events.log line). `digest.py` was not touched; the warning reaches the digest
+  through the warnings table.
+- `waechter.py`: deletes a stale hold (`holds.auto_release`, with `alert.flag` for alarm holds), logs it and leaves a
+  warning; the old `gefahr` 20-minute rule is kept unchanged. A `karawane` hold of an approaching caravan without a
+  trade is released after 10 min, so the caravan can reach the depot.
+- Squads window (addendum 2): the watcher sees `dwarfmode/Squads/...` in its status line; open with time standing still
+  (paused or frame counter unchanged) for `holds.squads_close_s` (30 s) -> `main_interface.squads.open=false` (like
+  Escape) and `claude/advance run` when no pause.hold/alert.flag exists; warning `game frozen: squads window open
+  (focus ...), no pause.hold - closed and resumed`. Never during an alarm (danger hold, siege.flag, fresh alert.flag)
+  and never while time runs (the player uses the window). `claude/handel open` also closes it first.
+- Addendum 3: the trade automaton sees both (BUG-225: `danger` and focus blockers).
+- Lua writers (`claude/gefahr.lua`, `claude/watchdog.lua`) are unchanged (gefahr.lua is edited elsewhere); their texts
+  `gefahr HH:MM:SS` / `karawane` already start with the reason the expiry uses.
+- Tests: `tests/test_live_trade.py::test_bug224_*` (stale rules, check reports once, watcher releases alarm/karawane,
+  keeps an alarm hold during a siege, closes the Squads window after 30 s, leaves it alone during an alarm or while
+  time runs).
+
+## Info needed
+- Fixture still wanted: watcher status line with the Squads window open, i.e. the output of the watcher's CLEAR_CMD
+  (`P 0 dwarfmode/Squads/Default fc=... yt=...`) and `dfhack-run lua "print(dfhack.gui.getCurFocus()[1])"`, under
+  `Bugs/evidence/BUG-224/`. If the focus string differs from `dwarfmode/Squads/...`, the token in `waechter.py`
+  (`"/Squads"`) must be adjusted.
+- Live check: write `alarm` into `tools/pause.hold`, wait 16 min without alert.flag/siege.flag: `check` shows the
+  stale-hold line once, the watcher deletes the hold and the game runs again.

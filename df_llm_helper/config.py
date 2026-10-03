@@ -56,6 +56,9 @@ DEFAULTS: dict[str, Any] = {
         "pop_gates": [60, 80],
         "waechter_interval_s": 2, "waechter_dead_min": 2,
     },
+    # pause.hold owners/expiry (BUG-224): limits per reason, watcher release, Squads window close (holds.py)
+    "holds": {"max_age_min": {"alarm": 15, "gefahr": 20, "karawane": 10, "caravan": 10, "trade": 30}, "default_max_age_min": 30,
+              "alert_active_min": 5, "trade_active_max_min": 60, "auto_release": True, "squads_close_s": 30},
     "autopilot": {"max_same_action_per_hour": 6, "allow_classes": ["maintenance", "safety"], "loop_interval_s": 60},
     "kb": {"max_tokens": 400, "stale_before_run": 4},
     "anomaly": {"cancel_min": 20, "cancel_top": 3},

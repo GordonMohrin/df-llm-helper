@@ -85,7 +85,7 @@ def test_bug202_trade_flow_leaves_done(tmp_path, tools_dir, cfgfile, capsys):
     f = TradeFlow(state="DONE", approved=True, log=["RESUME -> DONE"])
     assert f.step(TradeObs(caravan_state="AtDepot"), 10) == [] and f.state == "DONE"
     assert f.step(TradeObs(caravan_state=None), 20) == [] and f.state == "IDLE" and not f.approved and f.log == []
-    assert f.step(TradeObs(caravan_state="AtDepot"), 30) == ["claude/advance 0"]   # next caravan is traded
+    assert f.step(TradeObs(caravan_state="AtDepot"), 30) == ["HELPER hold trade", "claude/advance 0"]   # next caravan
     f2 = TradeFlow(state="FINISH")
     f2.approved = True
     for _ in range(3):

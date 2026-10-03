@@ -8,6 +8,9 @@
   refer to other names, e.g. `FORT_BOX = { x1 = FORT_X - ... }`) stay as in the repo. Live-only literal keys are kept
   in a block at the end of the map section.
 - Every file that is replaced is first copied to `<backup>/<folder name>/` (default `tools/out/lua-backup-<time>/`).
+- BUG-226: the Lua runtime folder `<DF>/df-llm-helper-runtime` (util.home() without DF_LLM_HELPER_HOME in the game's
+  environment) gets `tools/out` + `tools/scopes`, and the trade rules template `data/trade/handel-regeln.md` is copied
+  to `tools/scopes/handel-regeln.md` when no rules file exists there (an existing one is never touched).
 Without `--apply` only the plan is printed.
 """
 from __future__ import annotations
@@ -24,6 +27,7 @@ _ASSIGN = re.compile(r"^([A-Z][A-Z0-9_]*(?:\s*,\s*[A-Z][A-Z0-9_]*)*)\s*=(?!=)") 
 _KEEP_MARK = "-- kept from the live config (keys the repo does not have)"
 _DEFAULTS_MARK = re.compile(r"^--[-\s]*DEFAULTS\b", re.M)
 _LITERAL_WORDS = {"nil", "true", "false"}
+RUNTIME_DIR = "df-llm-helper-runtime"         # util.home() default inside the DF folder
 
 
 def _strip_strings_comments(text: str) -> str:
@@ -138,6 +142,7 @@ class InstallPlan:
     copies: list[tuple[Path, Path, str]] = field(default_factory=list)   # (source, destination, what)
     config: list[tuple[Path, str, list[str]]] = field(default_factory=list)  # (destination, merged text, notes)
     skipped: list[str] = field(default_factory=list)
+    runtime: list[tuple[Path, Path, str]] = field(default_factory=list)  # (source, destination, new|kept)
 
     def lines(self) -> list[str]:
         out = [f"Install into: " + ", ".join(str(t) for t in self.targets)]
@@ -148,6 +153,9 @@ class InstallPlan:
         for dst, _, notes in self.config:
             out.append(f"config.lua merged ({dst}): " + ("; ".join(notes[:12]) or "no differences")
                        + (f" (+{len(notes) - 12} more)" if len(notes) > 12 else ""))
+        for _, dst, what in self.runtime:
+            out.append(f"Trade rules {dst}: " + ("new (template data/trade/handel-regeln.md)" if what == "new" else
+                                                 "kept (existing rules file)"))
         out += self.skipped
         return out
 
@@ -170,6 +178,10 @@ def plan_install(repo: Path, df_dir: Path) -> InstallPlan:
                 continue
             what = "new" if not dst.exists() else ("same" if dst.read_bytes() == src.read_bytes() else "update")
             plan.copies.append((src, dst, what))
+    rules = repo / "data" / "trade" / "handel-regeln.md"
+    if rules.is_file():
+        dst = df_dir / RUNTIME_DIR / "tools" / "scopes" / "handel-regeln.md"
+        plan.runtime.append((rules, dst, "kept" if dst.exists() else "new"))
     return plan
 
 
@@ -196,6 +208,12 @@ def apply_install(plan: InstallPlan, backup_root: Path) -> list[str]:
         save(dst)
         dst.write_text(merged, encoding="utf-8", newline="\n")
         done += 1
+    for src, dst, what in plan.runtime:                  # BUG-226: runtime folder + rules template
+        (dst.parent.parent / "out").mkdir(parents=True, exist_ok=True)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if what == "new" and not dst.exists():
+            shutil.copy2(src, dst)
+            done += 1
     return [f"{done} files written; backup of the replaced files: {backup}",
             "Next: dfhack-run claude/config and python -m df_llm_helper check - reqscript reloads changed scripts, "
             "running repeat jobs (watchdog, mil guard, ...) pick them up on their next call or after `claude/tempo load`"]

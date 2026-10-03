@@ -27,6 +27,8 @@ What the watcher does (like the old ps1, plus the deadman):
 - Supplies low: `food.flag`.
 - Report-ID reset on a new game.
 - It closes message windows and then lifts the pause.
+- **`pause.hold` = "stay paused".** Every deliberate pause needs `tools/pause.hold` (first word = reason), or a pause guard lifts it again within seconds; while it exists, a pause guard pauses a running game again. The trade automaton writes and deletes its own hold (reason `trade`, BUG-223). A hold older than the limit of its reason (`holds.max_age_min`: alarm 15, gefahr 20, karawane 10, trade 30 min) without active danger (`siege.flag`, `alert.flag` younger than 5 min) or running trade is stale: `check` reports it once (`!! pause.hold stale ... game is frozen`) and the watcher deletes it (`holds.auto_release`, BUG-224).
+- An open Squads window (`dwarfmode/Squads/...`) holds the game without any `pause.hold`; after `holds.squads_close_s` (30 s) of standstill the watcher closes it like Escape and resumes (not during an alarm).
 - **Deadman:** If `tools/heartbeat.txt` is older than 20 min, it sets fps 30. Only when the heartbeat is younger than 10 min does it return to the normal fps.
 
 ## 2. Orchestrator: the normal cycle
@@ -147,6 +149,8 @@ After every change: `python -m df_llm_helper.selftest` (≈ 30 s, no DF needed; 
 - **Approval:** The dry run `select --dry` is released only if it buys a must-have good and the ratio is ≥ `caravan.min_ratio` (2.0). Otherwise trading waits; warning in the situation report → `python -m df_llm_helper trade approve` by hand, or adjust `tools/scopes/handel-regeln.md`.
 - **Stuck caravan** (`Leaving`, 0 ticks, longer than `stuck_ticks` game ticks): `claude/pilot_caravan release --apply` sets `flags1.left` for merchant units only. Works **only with register entry FP09** (the player's consent, quoted in the entry). The public repository ships only an ignored example line: the entry belongs to your own installation in `data/exceptions.local.jsonl` (git-ignored, see `data/README.md`) or is added with `python -m df_llm_helper exception add FP09 --local ...`. Without the entry df-llm-helper refuses, and `lint lua` reports `pilot_caravan.lua:21 L07` as an error (documented in `docs/LINT-FINDINGS.md`). Log `tools/out/caravan-release.log`.
 - **Abort** (caravan leaves, window closed, timeout): clean way back (abort/finish/release/advance run); the quicksave from the start of trading stays, loading only via the title menu.
+- **Alarm during OPEN** (BUG-225): with danger (alarm/gefahr hold, `siege.flag`, fresh `alert.flag`) or a foreign window on top (Squads, Info ...) the automaton waits in OPEN (`trade status`: `[blocked: ...]`, at most 600 s) instead of aborting; `handel open` is retried 5 times 8 s apart, the abort text carries its last answer, and after `window not open`/`blocked` the automaton re-enters OPEN (at most twice) while the caravan is still at the depot. Marked goods stay marked.
+- **Rules file** (BUG-226): `<DF>/df-llm-helper-runtime/tools/scopes/handel-regeln.md` (Lua runtime folder, or `DF_LLM_HELPER_HOME` of the game process). `install-lua --apply` creates the folder and copies the template `data/trade/handel-regeln.md` when no rules file exists; `claude/handel plan|mark|select` refuse without one (`rules file missing: <path>`), `status` lists runtime problems under `errors`.
 - **Lua:** copy `lua/pilot_caravan.lua` to `hack/scripts/claude/`.
 
 ### 9.3 Moods: `python -m df_llm_helper mood` (spec 03)
