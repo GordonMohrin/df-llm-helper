@@ -49,15 +49,19 @@ end
 local T = df.item_type
 local edible = { [T.FOOD] = true, [T.MEAT] = true, [T.FISH] = true, [T.CHEESE] = true,
                  [T.EGG] = true, [T.PLANT] = true, [T.PLANT_GROWTH] = true }
-local stock = { food = 0, drink = 0, seeds = 0, wood = 0, boulders = 0, bars = 0,
-                cloth = 0, barrels = 0, bins = 0, beds = 0 }
+-- BUG-125: food/drink count only what the dwarves may take; forbidden ones (own flag or a forbidden barrel/pot/bin
+-- around them) go to food_forbidden/drink_forbidden and never into food_days/drink_days.
+local stock = { food = 0, drink = 0, food_forbidden = 0, drink_forbidden = 0, seeds = 0, wood = 0, boulders = 0,
+                bars = 0, cloth = 0, barrels = 0, bins = 0, beds = 0 }
 for _, item in ipairs(df.global.world.items.other.IN_PLAY) do
   local f = item.flags
-  if not (f.rotten or f.dump or f.forbid or f.construction or f.trader or f.garbage_collect
-          or f.in_building) then
+  if not (f.rotten or f.dump or f.construction or f.trader or f.garbage_collect or f.in_building) then
     local ty, n = item:getType(), item:getStackSize()
-    if edible[ty] then stock.food = stock.food + n
-    elseif ty == T.DRINK then stock.drink = stock.drink + n
+    if edible[ty] or ty == T.DRINK then
+      local key = (ty == T.DRINK) and 'drink' or 'food'
+      if util.forbidden(item) then key = key .. '_forbidden' end
+      stock[key] = stock[key] + n
+    elseif f.forbid then -- other forbidden items are not stock
     elseif ty == T.SEEDS then stock.seeds = stock.seeds + n
     elseif ty == T.WOOD then stock.wood = stock.wood + n
     elseif ty == T.BOULDER then stock.boulders = stock.boulders + n
@@ -106,6 +110,8 @@ local alerts = {}
 local food_days, drink_days = days(stock.food, 2), days(stock.drink, 5)
 if food_days >= 0 and food_days < 20 then alerts[#alerts + 1] = 'Essen knapp (' .. food_days .. ' Tage)' end
 if drink_days >= 0 and drink_days < 20 then alerts[#alerts + 1] = 'Getraenke knapp (' .. drink_days .. ' Tage)' end
+if stock.drink_forbidden > 0 then alerts[#alerts + 1] = 'Drinks forbidden: ' .. stock.drink_forbidden .. ' (not drinkable)' end
+if stock.food_forbidden > 0 then alerts[#alerts + 1] = 'Food forbidden: ' .. stock.food_forbidden .. ' (not edible)' end
 if #threat_list > 0 then alerts[#alerts + 1] = 'Feinde auf der Karte' end
 if mood.miserable > 0 then alerts[#alerts + 1] = mood.miserable .. ' Zwerg(e) todungluecklich' end
 if adults > 0 and idle / adults >= 0.3 then alerts[#alerts + 1] = idle .. ' von ' .. adults .. ' Zwergen untaetig' end

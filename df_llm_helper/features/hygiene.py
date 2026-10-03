@@ -8,6 +8,9 @@ Keeps loose items under control without breaking the player's rules:
 - check:    DumpItem jobs < 10 % of the pending marks -> cause (no zone / zone under a stockpile / path blocked /
             haulers busy / zone too far) and a zone proposal from hygiene.dump_zones (proposed, never built)
 - digest:   one line <= 140 chars, e.g. 'loose stacks 12.5k (+200/h): boulders 10k (ok), corpses 900 (dump 6 jobs) ...'
+- forbid:   `claude/pilot_hygiene forbid` (read only, BUG-125): own forbidden items by class and the drinks/food that
+            sit in forbidden containers; a '!!' warning when drinks/food/containers/building material are forbidden
+            (Run 5: 1043 forbidden items, digest 'Getraenke 475', > 10 dwarves died of thirst, hygiene stayed silent)
 Hard rules (independent of config): boulders, dwarf corpses, bones/skins, trade goods, weapons/armor are never marked;
 `autodump` (item teleport) is never sent. Lua part: lua/pilot_hygiene.lua (LIVE-UNTESTED).
 """
@@ -17,7 +20,7 @@ from dataclasses import dataclass, field
 
 __all__ = ["KEY", "DEFAULTS", "HARD_CAP", "HARD_NEVER", "MARKABLE", "FOOD_ROT", "effective_types", "markable",
            "select_marks", "Measurement", "aggregate", "from_muell", "diagnose", "suggest_zone", "zone_text", "digest_line",
-           "Hygiene", "register", "check_hook"]
+           "forbid_lines", "Hygiene", "register", "check_hook"]
 
 KEY = "hygiene"
 HARD_CAP = 300                      # marks per cycle, never more (haulers must not be blocked)
@@ -39,6 +42,8 @@ DEFAULTS = {
     "block": 20000, "max_block_s": 1.0, "max_measure_s": 5.0, "far_tiles": 30, "effect_min_ratio": 0.10,
     "measure_every_s": 1800, "auto_mark": False, "max_marks_per_hour": 2, "corpse_warn": 50, "goblet_cap": 60,
     "zone_min_gap": 5,             # no zone proposal within this distance of an existing dump zone (BUG-220)
+    "forbid_every_s": 300,         # BUG-125: forbidden-supply check in `check` (cheap, own interval)
+    "forbid_material_warn": 10,    # forbidden own blocks/wood/bars/boulders from this count on -> warning
     "in_check": True,
 }
 
@@ -257,6 +262,36 @@ def digest_line(m: Measurement, rep: dict | None, rate_h: float | None, cfg: dic
     return line[:140]
 
 
+def _pct(a: int, b: int) -> str:
+    return f"{round(100 * a / b)} %" if b else "0 %"
+
+
+def forbid_lines(j: dict | None, cfg: dict) -> list[str]:
+    """BUG-125: `pilot_hygiene forbid` JSON -> lines. A line starting with '!!' is a warning (blocked drinks/food,
+    forbidden containers, or >= forbid_material_warn forbidden building material). Forbidden 'other' items (siege
+    loot, enemy gear) alone are only reported, never warned."""
+    if not isinstance(j, dict) or not j.get("ok"):
+        return ["forbidden own items: not readable (claude/pilot_hygiene forbid missing? reinstall the Lua scripts)"]
+    c = j.get("classes") if isinstance(j.get("classes"), dict) else {}
+    n = {k: int(c.get(k) or 0) for k in ("container", "drink", "food", "material", "other")}
+    dr = j.get("drink") if isinstance(j.get("drink"), dict) else {}
+    fo = j.get("food") if isinstance(j.get("food"), dict) else {}
+    d_tot, d_bl, d_in = (int(dr.get(k) or 0) for k in ("total", "blocked", "in_forbidden_container"))
+    f_tot, f_bl, f_in = (int(fo.get(k) or 0) for k in ("total", "blocked", "in_forbidden_container"))
+    total = int(j.get("total") or 0)
+    head = (f"forbidden own items: {total} (containers {n['container']}, drinks {n['drink']}, food {n['food']}, "
+            f"material {n['material']}, other {n['other']})")
+    if total == 0 and d_bl == 0 and f_bl == 0:
+        return [head]
+    blocked = (f"drinks blocked {d_bl}/{d_tot} ({_pct(d_bl, d_tot)}, {d_in} in forbidden containers), "
+               f"food blocked {f_bl}/{f_tot} ({_pct(f_bl, f_tot)})")
+    warn = d_bl > 0 or f_bl > 0 or n["container"] > 0 or n["material"] >= int(cfg.get("forbid_material_warn", 10))
+    if not warn:
+        return [head]
+    fix = "unforbid own barrels/drinks/food/blocks (dwarves cancel 'Drink: Forbidden area' and die of thirst)"
+    return [f"!! {head}; {blocked} -> {fix}"]
+
+
 # ------------------------------------------------------------------ runner
 class Hygiene:
     def __init__(self, client, store, clock, cfg: dict | None = None):
@@ -306,6 +341,10 @@ class Hygiene:
         r = self._run("claude/pilot_hygiene report")
         return r.json if r.ok and isinstance(r.json, dict) and r.json.get("ok") else {}
 
+    def forbid(self) -> dict | None:
+        r = self._run("claude/pilot_hygiene forbid")
+        return r.json if r.ok and isinstance(r.json, dict) else None
+
     def crypt(self) -> dict:
         r = self._run("claude/gesund krypta")
         return r.json if r.ok and isinstance(r.json, dict) else {}
@@ -347,6 +386,7 @@ class Hygiene:
         if int(m.by_type.get("BOULDER", 0)):
             out.append("Boulders: never dumped (building material); if needed propose an extra stone stockpile")
         out += self.crypt_lines(m)
+        out += forbid_lines(self.forbid(), self.cfg)           # BUG-125: never silent about forbidden supplies
         if m.error:
             out.append(f"note: {m.error}")
         speed = f"measurement {m.elapsed_s:.1f} s in {m.blocks} blocks (slowest {m.max_block_s:.1f} s)"
@@ -457,20 +497,45 @@ def register(sub) -> None:
     s.set_defaults(fn=_cmd)
 
 
+def _forbid_hook(pilot, h: "Hygiene", cfg: dict, now: float, dry: bool) -> list[str]:
+    """BUG-125: forbidden supplies on their own short interval; the warning repeats only when its text changes or
+    every 30 min (it is the cause of thirst deaths, not a cosmetic finding)."""
+    last = pilot.store.get("hygiene.forbid_last")
+    if last is not None and now - float(last) < float(cfg.get("forbid_every_s", 300)):
+        return []
+    j = h.forbid()
+    if not dry:
+        pilot.store.set("hygiene.forbid_last", now)
+    if j is None:                       # old Lua without 'forbid': stay quiet in check (status shows the hint)
+        return []
+    warn = [ln for ln in forbid_lines(j, cfg) if ln.startswith("!!")]
+    if not warn:
+        if not dry:
+            pilot.store.set("hygiene.forbid_warn", None)
+        return []
+    prev = pilot.store.get("hygiene.forbid_warn") or {}
+    if prev.get("text") == warn[0] and now - float(prev.get("ts") or 0) < 1800:
+        return []
+    if not dry:
+        pilot.store.set("hygiene.forbid_warn", {"text": warn[0], "ts": now})
+    return ["Hygiene: " + warn[0]]
+
+
 def check_hook(pilot, report, dry: bool) -> list[str]:
     cfg = {**DEFAULTS, **(pilot.cfg.get(KEY, {}) or {})}
     now = pilot.clock.now().epoch
+    h = Hygiene(pilot.client, pilot.store, pilot.clock, cfg)
+    forb = _forbid_hook(pilot, h, cfg, now, dry)
     last = pilot.store.get("hygiene.last_measure")
     if last is not None and now - float(last) < float(cfg["measure_every_s"]):
-        return []
-    h = Hygiene(pilot.client, pilot.store, pilot.clock, cfg)
+        return forb
     lines, m, rep = h.status(record=not dry)
     if not m.ok:
         if not dry:                     # rate-limit failures too (script missing -> one line per interval)
             pilot.store.set("hygiene.last_measure", now)
-        return [lines[0]]
-    out = []
-    warn = [ln for ln in lines if ln.startswith(("Dump: cause", "!!"))]
+        return [lines[0]] + forb
+    out = list(forb)
+    warn = [ln for ln in lines if ln.startswith(("Dump: cause", "!!")) and not ln.startswith("!! forbidden own")]
     if warn or m.other_corpses >= int(cfg["corpse_warn"]):
         out.append("Hygiene: " + lines[0])
         out += warn

@@ -61,7 +61,7 @@ local function check()
     local drinks, empty = 0, 0
     for _, i in ipairs(df.global.world.items.other.DRINK) do
       local f = i.flags
-      if not (f.forbid or f.rotten or f.dump or f.trader) then drinks = drinks + i:getStackSize() end
+      if not (f.rotten or f.dump or f.trader) and not util.forbidden(i) then drinks = drinks + i:getStackSize() end  -- BUG-125: forbidden barrel = no drink
     end
     for _, b in ipairs(df.global.world.items.other.BARREL) do
       local f = b.flags

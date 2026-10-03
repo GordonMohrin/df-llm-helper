@@ -49,7 +49,7 @@ local function measure()
     local f = it.flags
     if t == df.item_type.PLANT and free(f) and it:getMaterial() == phmt and it:getMaterialIndex() == ph.material_defs.idx.basic_mat then
       m.ph = m.ph + it:getStackSize()
-    elseif t == df.item_type.FOOD and free(f) then m.meals = m.meals + it:getStackSize()
+    elseif t == df.item_type.FOOD and free(f) and not util.forbidden(it) then  -- BUG-125: meals in a forbidden barrel m.meals = m.meals + it:getStackSize()
     elseif t == df.item_type.FISH_RAW then
       if f.rotten then m.fish_raw_rotten = m.fish_raw_rotten + 1
       elseif free(f) and not f.in_inventory then m.fish_raw = m.fish_raw + 1 end
@@ -67,7 +67,7 @@ local function measure()
   for _, it in ipairs(df.global.world.items.other.PLANT) do
     if real(it) and free(it.flags) and not it.flags.in_inventory and not (it:getMaterial() == phmt and it:getMaterialIndex() == ph.material_defs.idx.basic_mat) then m.plants = m.plants + it:getStackSize() end
   end
-  for _, i in ipairs(df.global.world.items.other.DRINK) do if free(i.flags) then m.drinks = m.drinks + i:getStackSize() end end
+  for _, i in ipairs(df.global.world.items.other.DRINK) do if free(i.flags) and not util.forbidden(i) then m.drinks = m.drinks + i:getStackSize() end end  -- BUG-125
   m.gatherjobs = 0
   local jl = df.global.world.jobs.list.next
   while jl do

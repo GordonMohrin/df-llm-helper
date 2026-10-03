@@ -765,3 +765,55 @@ df.global.world.items.all = { item(10, 1), item(10, 1), item(11, 4), item(11, 3,
 def test_mood_minimum_matches_the_live_game():
     src = (CLAUDE / "mood.lua").read_text(encoding="utf-8")
     assert "rohgem = 12, schliffgem = 10" in src and "holz = 14" in src and "seide = 3" in src
+
+
+# ---------------------------------------------------------------- BUG-125: drinks in forbidden barrels
+_FORBID_SETUP = """
+df.item_type = { DRINK = 'DRINK', FOOD = 'FOOD', MEAT = 'MEAT', FISH = 'FISH', CHEESE = 'CHEESE', EGG = 'EGG',
+  PLANT = 'PLANT', PLANT_GROWTH = 'PLANT_GROWTH', SEEDS = 'SEEDS', WOOD = 'WOOD', BOULDER = 'BOULDER', BAR = 'BAR',
+  CLOTH = 'CLOTH', BARREL = 'BARREL', BIN = 'BIN', BED = 'BED' }
+local function item(t, n, forbid, cont)
+  return { flags = { forbid = forbid or false }, _t = t, _n = n, _in = cont,
+           getType = function(s) return s._t end, getStackSize = function(s) return s._n end }
+end
+local list = {}
+for i = 1, 10 do
+  local b = item('BARREL', 1, MOCK_FORBID)
+  list[#list + 1] = b
+  list[#list + 1] = item('DRINK', 25, false, b)
+end
+list[#list + 1] = item('FOOD', 30, false)
+df.global.world.items.other.IN_PLAY = list
+dfhack.items.getContainer = function(it) return it._in end
+local u = { pos = { x = 1, y = 1, z = 1 }, job = {} }
+dfhack.units.getCitizens = function() return { u } end
+dfhack.units.getStressCategory = function() return 3 end
+dfhack.units.isChild = function() return false end
+dfhack.units.isBaby = function() return false end
+"""
+
+
+@pytest.mark.parametrize("forbid", [True, False])
+def test_bug125_status_does_not_count_drinks_in_forbidden_barrels(tmp_path, forbid):
+    setup = f"MOCK_FORBID = {'true' if forbid else 'false'}\n" + _FORBID_SETUP
+    out, r = run("status", tmp_path=tmp_path, setup=setup)
+    assert r.returncode == 0, r.stderr
+    j = one_json(out)
+    st = j["stock"]
+    if forbid:
+        assert (st["drink"], st["drink_forbidden"], j["drink_days"]) == (0, 250, 0)
+        assert "Drinks forbidden: 250 (not drinkable)" in j["alerts"]
+    else:
+        assert (st["drink"], st["drink_forbidden"]) == (250, 0)
+        assert not [a for a in j["alerts"] if "forbidden" in a]
+    assert st["food"] == 30 and st["food_forbidden"] == 0
+
+
+def test_bug125_util_forbidden_follows_nested_containers(tmp_path):
+    code = ("local util = reqscript('claude/util')\n"
+            "local wagon = { flags = { forbid = true } }\n"
+            "local barrel = { flags = { forbid = false }, _in = wagon }\n"
+            "local drink = { flags = { forbid = false }, _in = barrel }\n"
+            "dfhack.items.getContainer = function(it) return it._in end\n"
+            "print(util.forbidden(drink), util.forbidden(wagon), util.forbidden({ flags = { forbid = false } }))\n")
+    assert run_snippet(code, tmp_path).split() == ["true", "true", "false"]

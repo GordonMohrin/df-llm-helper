@@ -83,6 +83,19 @@ def compute_alerts(snap: Snapshot, th: dict, flags: dict | None = None, prev_fac
             add(Item("crit", key, label, f"{label} {val} days (<{crit})", f"c{val // 5}", (scope,)))
         elif val < warn:
             add(Item("warn", key, label, f"{label} {val} days (<{warn})", f"w{val // 10}", (scope,)))
+    # BUG-125: forbidden drinks/food (own flag or a forbidden barrel) are not supply; Run 5 died of thirst at 'Getraenke 475'
+    st = snap.stocks
+    for key, avail, forb, label, scope in (("drink_forbidden", st.drink, st.drink_forbidden, "Drinks", "trinken"),
+                                           ("food_forbidden", st.food, st.food_forbidden, "Food", "essen")):
+        if not forb or forb <= 0:
+            continue
+        total = (avail or 0) + forb
+        pct = round(100 * forb / total) if total else 100
+        lvl = "crit" if pct >= th.get("forbidden_supply_crit_pct", 50) else "warn"
+        av = "?" if avail is None else avail
+        add(Item(lvl, key, f"{label} forbidden",
+                 f"{label} {av} available (+{forb} forbidden, {pct}%): dwarves cannot take them -> unforbid the "
+                 f"barrels/items (hygiene shows the classes)", f"{lvl}{pct // 10}", (scope, "wirtschaft")))
     hungry = sorted(snap.hungry(th["hunger_crit"]), key=lambda c: -c.hunger)
     if hungry:
         add(Item("crit", "hunger", "Hunger", f"Hunger>{th['hunger_crit'] // 1000}k: {_names(hungry, 'hunger')}",
@@ -258,7 +271,10 @@ def status_line(snap: Snapshot) -> str:
         ip = f" ({f['idle']} idle {f['idle_pct']:.0f}%)" if f["idle"] is not None and f["idle_pct"] is not None else ""
         parts.append(f"Pop {f['pop']}{ip}")
     if f["drink_days"] is not None or f["food_days"] is not None:
-        parts.append(f"Drinks {f['drink_days']}d Food {f['food_days']}d")
+        st = snap.stocks           # BUG-125: days count available stock only; forbidden stock is shown next to it
+        df_ = f" (+{st.drink_forbidden} forbidden)" if st.drink_forbidden else ""
+        ff_ = f" (+{st.food_forbidden} forbidden)" if st.food_forbidden else ""
+        parts.append(f"Drinks {f['drink_days']}d{df_} Food {f['food_days']}d{ff_}")
     if f["jobs_open"] is not None:
         q = lambda v: "?" if v is None else v  # noqa: E731  (BUG-117 E: no 'None' in the report)
         parts.append(f"Jobs {f['jobs_open']} (dig {q(f['dig_jobs'])}, {q(f['diggers'])} digging)")

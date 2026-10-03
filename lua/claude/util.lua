@@ -181,6 +181,19 @@ function fort_name()
   return ok and name or nil
 end
 
+-- BUG-125: an item is forbidden for the dwarves when its own forbid flag is set OR any container around it (barrel,
+-- pot, bin, bag, wagon ...) is forbidden: a drink in a forbidden barrel is not flagged itself, yet nobody can drink it.
+-- Drink/food counters use this instead of item.flags.forbid alone (status/report/ueberwacher/trinken/essen ...).
+function forbidden(item)
+  local it, depth = item, 0
+  while it and depth < 5 do
+    if it.flags.forbid then return true end
+    it = dfhack.items.getContainer(it)
+    depth = depth + 1
+  end
+  return false
+end
+
 if dfhack_flags and dfhack_flags.module then
   return
 end

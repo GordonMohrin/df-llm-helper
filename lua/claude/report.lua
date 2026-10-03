@@ -21,7 +21,9 @@ add('buerger', #cits) add('erwachsene', adults) add('kinder', kids) add('erwachs
 
 -- Stocks
 local it = df.global.world.items.other
-local function cnt(v) local n = 0 for _, i in ipairs(v) do local f = i.flags if not (f.trader or f.forbid or f.rotten or f.dump) then n = n + i:getStackSize() end end return n end
+-- BUG-125: available = not forbidden itself and not inside a forbidden container (util.forbidden); cnt_forb = the rest
+local function cnt(v) local n = 0 for _, i in ipairs(v) do local f = i.flags if not (f.trader or f.rotten or f.dump) and not util.forbidden(i) then n = n + i:getStackSize() end end return n end
+local function cnt_forb(v) local n = 0 for _, i in ipairs(v) do local f = i.flags if not (f.trader or f.rotten or f.dump) and util.forbidden(i) then n = n + i:getStackSize() end end return n end
 do
   local eb = 0
   for _, b in ipairs(it.BARREL) do
@@ -33,6 +35,7 @@ end
 add('fps', math.floor(df.global.enabler.fps)) add('zeitlupe', cfg.rt.slowmo or false)
 add('mahlzeiten', cnt(it.FOOD)) add('fleisch', cnt(it.MEAT)) add('fisch', cnt(it.FISH)) add('getraenke', cnt(it.DRINK)) add('pflanzen', cnt(it.PLANT))
 add('getraenke_pro_kopf', #cits > 0 and cnt(it.DRINK) // #cits or 0)
+add('getraenke_gesperrt', cnt_forb(it.DRINK)) add('mahlzeiten_gesperrt', cnt_forb(it.FOOD))
 
 -- Mood: most frequent negative thoughts
 local neg = {}
