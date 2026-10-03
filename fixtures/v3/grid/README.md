@@ -14,6 +14,7 @@ Format and tile characters: `df_llm_helper/features/_grid.py` (`--` comment, `@o
 | dig_north_opening.grid | terrain before the farm-hall stage z131 y70..77 | assumed hillside/sky layout |
 | dig_river_diagonal.grid | access F=(184,43,z128), river water diagonal | river tiles from LAYOUT-run5.md 11; aquifer wall synthetic |
 | dig_cavern_unreachable.grid | underground void, isolated rock, construction, unrevealed tiles | fully synthetic |
+| refuge_j125.grid | refuge burrow = hospital only (J125); `@burrow`/`@target` lines for `refuge check/repair --grid` (FEATURE-005) | real: well (139,99,z129), drink store (117..121,88..92,z132), food store (109..113,108..114,z130); assumed: hospital, corridors, stair (106,100) |
 | gamelog_run5_cancels.txt | 493x "Needs plump helmet spawn" (43 dwarves), 41x "Inappropriate dig square" (29 dwarves), 12x depot path | counts real, names/order made up |
 
 Fixture gaps (to fill from a live session): real `claude/pilot_reach dump` of the farm area with P1/P2, real

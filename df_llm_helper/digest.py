@@ -125,9 +125,10 @@ def compute_alerts(snap: Snapshot, th: dict, flags: dict | None = None, prev_fac
                  str(a.enemies), ("verteidigung", "militaer")))
     if a.civ_alert:
         add(Item("warn", "civ_alert", "Civilian alert", "Civilian alert active", "1", ("verteidigung",)))
-    if a.refuge_ok is False:
-        add(Item("warn", "refuge", "Refuge", "Refuge burrow not ok (claude/gefahr status)", "0",
-                 ("verteidigung",)))
+    if a.refuge_ok is False:            # FEATURE-005: name the first problem and the command that checks/repairs it
+        why = f": {a.refuge_problems[0][:70]}" if a.refuge_problems else " (claude/gefahr status)"
+        add(Item("warn", "refuge", "Refuge", f"Refuge burrow not ok{why} -> python -m df_llm_helper refuge check",
+                 str(len(a.refuge_problems)), ("verteidigung",)))
     # deaths/population
     if prev_facts and prev_facts.get("pop") is not None and snap.pop_total is not None \
             and snap.pop_total < prev_facts["pop"]:
@@ -292,12 +293,14 @@ ONE_SHOT = {"pop_loss"}
 def build_digest(snap: Snapshot, state: DigestState, *, th: dict, max_tokens: int = 600,
                  flags: dict | None = None, inbox: list[str] | None = None, warnings: list[dict] | None = None,
                  scope: str | None = None, now_hhmm: str = "", inbox_max: int = 6, inbox_width: int = 110,
-                 since_last: bool = True, cancels: list | None = None, hint=None) -> tuple[str, DigestState]:
+                 since_last: bool = True, cancels: list | None = None, hint=None,
+                 extra: list | None = None) -> tuple[str, DigestState]:
     new_game = state.game_id is not None and snap.game_id is not None and snap.game_id != state.game_id
     if new_game:
         state = DigestState()
     prev_facts = state.facts if since_last else {}
     alerts = compute_alerts(snap, th, flags, prev_facts, cancels, hint)
+    alerts += list(extra or [])           # FEATURE-006 loop registry etc. (items with their own key/sig)
     facts = snap.facts()
     trends = compute_trends(facts, prev_facts, th)
     for w in warnings or []:

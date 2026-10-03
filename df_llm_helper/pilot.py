@@ -123,7 +123,8 @@ class Pilot:
                                  now_hhmm=self._last_hhmm(state), since_last=since_last,
                                  inbox_max=int(self.cfg.get("digest.inbox_max_lines", 6)),
                                  inbox_width=int(self.cfg.get("digest.inbox_line_chars", 110)),
-                                 cancels=self.cancels(refresh=persist), hint=self.kb_hint)
+                                 cancels=self.cancels(refresh=persist), hint=self.kb_hint,
+                                 extra=self.loop_items() if scope in (None, "orchestrator") else None)
         if not persist:
             return text
         # BUG-111: only bus messages that were really shown are marked read; the rest stays unread
@@ -140,6 +141,26 @@ class Pilot:
             from .metrics import record_kpis
             record_kpis(self.store, self.clock.now().epoch, snap)
         return text
+
+    def loop_items(self) -> list:
+        """FEATURE-006: duplicate/hanging background loops as digest items (delta: shown once, then 'still open')."""
+        from .digest import Item
+        try:
+            from .loops import scan
+            infos = scan(self.tools.path, self.cfg.get("loops", {}))
+        except Exception:  # noqa: BLE001 - the registry must never break the digest
+            return []
+        out = []
+        for name in sorted({i.name for i in infos if "DUPLICATE" in i.marks}):
+            pids = [str(i.pid) for i in infos if i.name == name and "DUPLICATE" in i.marks]
+            out.append(Item("warn", f"loop:dup:{name}", "Loops", f"Loop {name} runs {len(pids)}x (pids {', '.join(pids)})"
+                            f" -> python -m df_llm_helper loops list", str(len(pids)), ("orchestrator", "infra")))
+        for i in infos:
+            if "STALE" in i.marks and "DUPLICATE" not in i.marks:
+                out.append(Item("warn", f"loop:stale:{i.name}", "Loops", f"Loop {i.name} (pid {i.pid}) without "
+                                f"heartbeat -> python -m df_llm_helper loops stop {i.name} --kill", str(i.pid),
+                                ("orchestrator", "infra")))
+        return out
 
     def _bus_unread(self, recipient: str) -> dict:
         """Unread bus messages as inbox lines -> message id (not marked read here)."""

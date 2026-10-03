@@ -211,10 +211,16 @@ end
 
 -- ---------------------------------------------------------------- Refuge supply (BUG-423: citizens died of thirst in an unsupplied refuge)
 -- Counts inside the refuge burrow: non-forbidden drinks and food (also in barrels/bins), wells, visible water tiles, hospital zones.
--- Only what the player sees (hidden tiles are skipped). Reachability inside the burrow is NOT checked (live check, see BUG-423).
+-- Only what the player sees (hidden tiles are skipped).
+-- FEATURE-005: reachability. Anchor = centre of a hospital zone inside the burrow, else config.ZUFLUCHT.probe (must be a
+-- walkable burrow tile). A category counts only when one of its places is reachable on foot from the anchor
+-- (canWalkBetween; a well/water tile through its neighbours). This is the walk-group test of the whole map, not a path
+-- that stays inside the burrow: `python -m df_llm_helper refuge check` does that BFS on a tile dump. Status per category
+-- (status.water/drink/food/hospital): OK, MISSING (nothing in the burrow) or UNREACHABLE (in the burrow, no way from the anchor).
 local FOOD_CATS = { 'FOOD', 'MEAT', 'FISH', 'CHEESE', 'PLANT', 'EGG' }
+local MAXPOS = 20
 local function usable(it)
-  if it.flags.forbid or it.flags.dump or it.flags.garbage_collect or it.flags.rotten then return false end
+  if it.flags.forbid or it.flags.dump or it.flags.garbage_collect or it.flags.rotten or it.flags.in_inventory then return false end
   local okc, c = pcall(dfhack.items.getContainer, it)
   if okc and c and c.flags.forbid then return false end
   return true
@@ -224,72 +230,158 @@ local function in_burrow(b, pos)
   local ok, v = pcall(dfhack.burrows.isAssignedTile, b, pos)
   return ok and v or false
 end
+-- canWalkBetween -> true/false, nil = unknown (no answer: counted as reachable, never as a false alarm)
+local function walk(a, p)
+  local ok, v = pcall(dfhack.maps.canWalkBetween, a, p)
+  if not ok or v == nil then return nil end
+  return v and true or false
+end
+-- reachable from the anchor: the tile itself or (adjacent) one of its 8 neighbours on the same level
+local function reach_pos(anchor, p, adjacent)
+  if not anchor then return nil end
+  local v = walk(anchor, p)
+  if v ~= false then return v end
+  if not adjacent then return false end
+  for dy = -1, 1 do for dx = -1, 1 do
+    if dx ~= 0 or dy ~= 0 then
+      local w = walk(anchor, xyz2pos(p.x + dx, p.y + dy, p.z))
+      if w ~= false then return w end
+    end
+  end end
+  return false
+end
 local function count_items(b, cats, limit)
-  local n = 0
+  local n, pos = 0, {}
   for _, cat in ipairs(cats) do
     local okv, vec = pcall(function() return df.global.world.items.other[cat] end)
     if okv and vec then
       for _, it in ipairs(vec) do
         if usable(it) then
-          local okp, pos = pcall(dfhack.items.getPosition, it)
-          if okp and in_burrow(b, pos) then n = n + 1 if n >= limit then return n end end
+          local okp, p = pcall(dfhack.items.getPosition, it)
+          if okp and in_burrow(b, p) then
+            n = n + 1
+            if #pos < MAXPOS then pos[#pos + 1] = p end
+            if n >= limit then return n, pos end
+          end
         end
       end
     end
   end
-  return n
+  return n, pos
 end
 local function count_buildings(b, list)
-  local n = 0
+  local n, pos = 0, {}
   for _, bl in ipairs(list or {}) do
-    if in_burrow(b, xyz2pos(bl.centerx, bl.centery, bl.z)) then n = n + 1 end
+    local p = xyz2pos(bl.centerx, bl.centery, bl.z)
+    if in_burrow(b, p) then
+      n = n + 1
+      if #pos < MAXPOS then pos[#pos + 1] = p end
+    end
   end
-  return n
+  return n, pos
 end
 local function count_water(b)
-  local n = 0
+  local n, pos = 0, {}
   local okl, blocks = pcall(dfhack.burrows.listBlocks, b)
   for _, blk in ipairs((okl and blocks) or {}) do
     for x = 0, 15 do for y = 0, 15 do
       local d = blk.designation[x][y]
       if d.flow_size > 0 and not d.hidden and d.liquid_type == df.tile_liquid.Water then
-        local pos = xyz2pos(blk.map_pos.x + x, blk.map_pos.y + y, blk.map_pos.z)
-        if in_burrow(b, pos) then n = n + 1 end
+        local p = xyz2pos(blk.map_pos.x + x, blk.map_pos.y + y, blk.map_pos.z)
+        if in_burrow(b, p) then
+          n = n + 1
+          if #pos < MAXPOS then pos[#pos + 1] = p end
+        end
       end
     end end
   end
-  return n
+  return n, pos
 end
+local function anchor_of(b, hosp_pos)
+  local cands = {}
+  for _, p in ipairs(hosp_pos or {}) do cands[#cands + 1] = { p, 'hospital' } end
+  local Z = C().ZUFLUCHT or {}
+  if Z.probe then cands[#cands + 1] = { xyz2pos(Z.probe[1], Z.probe[2], Z.probe[3]), 'probe' } end
+  for _, c in ipairs(cands) do
+    if in_burrow(b, c[1]) and walk(c[1], c[1]) ~= false then return c[1], c[2] end
+  end
+  return nil, nil
+end
+-- status of one category: first reachable place (or first place when unknown) -> 'OK', places but none reachable -> 'UNREACHABLE'
+local function judge(anchor, list, adjacent)
+  if #list == 0 then return 'MISSING', nil end
+  if not anchor then return 'OK', list[1] end
+  for _, p in ipairs(list) do
+    if reach_pos(anchor, p, adjacent) ~= false then return 'OK', p end
+  end
+  return 'UNREACHABLE', list[1]
+end
+local function xyz(p) return p and { p.x, p.y, p.z } or nil end
 
 SUPPLY_CACHE = SUPPLY_CACHE or {}
--- refuge_supply(b?) -> { drink, food, wells, water_tiles, hospital, water_ok, ok, missing = {...}, problems = {...} }; cached 30 s real time
+-- refuge_supply(b?) -> { drink, food, wells, water_tiles, hospital, water_ok, ok, missing = {...}, problems = {...},
+--   status = {water=, drink=, food=, hospital=}, where = {cat = {x,y,z}}, anchor = {x,y,z}|nil, anchor_kind }; cached 30 s real time
 function refuge_supply(b, nocache)
   b = b or dfhack.burrows.findByName('Zuflucht', true)
-  if not b then return { ok = false, water_ok = false, missing = { 'burrow' }, problems = { 'ZUFLUCHT fehlt (claude/mil refuge --apply)' } } end
+  if not b then return { ok = false, water_ok = false, missing = { 'burrow' }, problems = { 'ZUFLUCHT fehlt (claude/mil refuge --apply)' },
+                         status = { water = 'MISSING', drink = 'MISSING', food = 'MISSING', hospital = 'MISSING' }, where = {} } end
   local now = os.time()
   if not nocache and SUPPLY_CACHE.id == b.id and SUPPLY_CACHE.t and now - SUPPLY_CACHE.t < 30 then return SUPPLY_CACHE.r end
-  local r = { burrow = b.id, missing = {}, problems = {} }
-  r.drink = count_items(b, { 'DRINK' }, 50)
-  r.food = count_items(b, FOOD_CATS, 50)
+  local r = { burrow = b.id, missing = {}, problems = {}, status = {}, where = {} }
+  local dpos, fpos, wpos, tpos, hpos
+  r.drink, dpos = count_items(b, { 'DRINK' }, 50)
+  r.food, fpos = count_items(b, FOOD_CATS, 50)
   local okw, wells = pcall(function() return df.global.world.buildings.other.WELL end)
-  r.wells = okw and count_buildings(b, wells) or 0
+  r.wells, wpos = 0, {}
+  if okw then r.wells, wpos = count_buildings(b, wells) end
   local okh, hosp = pcall(function() return df.global.world.buildings.other.ZONE_HOSPITAL end)
-  r.hospital = okh and count_buildings(b, hosp) or 0
-  local okt, wt = pcall(count_water, b)
-  r.water_tiles = okt and wt or 0
-  r.water_ok = r.drink > 0 or r.wells > 0 or r.water_tiles > 0
+  r.hospital, hpos = 0, {}
+  if okh then r.hospital, hpos = count_buildings(b, hosp) end
+  local okt, wt, wtp = pcall(count_water, b)
+  r.water_tiles, tpos = (okt and wt) or 0, (okt and wtp) or {}
+  local anchor, akind = anchor_of(b, hpos)
+  r.anchor, r.anchor_kind = xyz(anchor), akind
+  local water = {}
+  for _, p in ipairs(wpos) do water[#water + 1] = p end
+  for _, p in ipairs(tpos) do water[#water + 1] = p end
+  local w
+  r.status.water, w = judge(anchor, water, true)      r.where.water = xyz(w)
+  r.status.drink, w = judge(anchor, dpos, false)      r.where.drink = xyz(w)
+  r.status.food, w = judge(anchor, fpos, false)       r.where.food = xyz(w)
+  r.status.hospital, w = judge(anchor, hpos, false)   r.where.hospital = xyz(w)
+  r.water_ok = r.status.water == 'OK' or r.status.drink == 'OK'
+  local at = anchor and string.format(' vom Ankerpunkt (%d,%d,%d)', anchor.x, anchor.y, anchor.z) or ''
   if not r.water_ok then
     r.missing[#r.missing + 1] = 'water'
-    r.problems[#r.problems + 1] = 'ZUFLUCHT OHNE WASSER: keine Getraenke, kein Brunnen, kein Wasser im Burrow (Zuflucht um Brunnen/Getraenkelager erweitern)'
+    if r.drink + r.wells + r.water_tiles > 0 then
+      r.problems[#r.problems + 1] = 'ZUFLUCHT OHNE WASSER: Getraenke/Brunnen im Burrow' .. at .. ' nicht erreichbar (python -m df_llm_helper refuge repair)'
+    else
+      r.problems[#r.problems + 1] = 'ZUFLUCHT OHNE WASSER: keine Getraenke, kein Brunnen, kein Wasser im Burrow (Zuflucht um Brunnen/Getraenkelager erweitern)'
+    end
   end
-  if r.food == 0 then
+  if r.status.food ~= 'OK' then
     r.missing[#r.missing + 1] = 'food'
-    r.problems[#r.problems + 1] = 'ZUFLUCHT OHNE ESSEN: keine Nahrung im Burrow (Zuflucht um Nahrungslager erweitern)'
+    if r.food > 0 then
+      r.problems[#r.problems + 1] = 'ZUFLUCHT OHNE ESSEN: Nahrung im Burrow' .. at .. ' nicht erreichbar (python -m df_llm_helper refuge repair)'
+    else
+      r.problems[#r.problems + 1] = 'ZUFLUCHT OHNE ESSEN: keine Nahrung im Burrow (Zuflucht um Nahrungslager erweitern)'
+    end
   end
-  if r.hospital == 0 then r.missing[#r.missing + 1] = 'hospital' end   -- note only, no problem text
-  r.ok = r.water_ok and r.food > 0
+  if r.status.hospital ~= 'OK' then r.missing[#r.missing + 1] = 'hospital' end   -- note only, no problem text
+  r.ok = r.water_ok and r.status.food == 'OK'
   SUPPLY_CACHE.id, SUPPLY_CACHE.t, SUPPLY_CACHE.r = b.id, now, r
   return r
+end
+
+-- one line per category: 'water OK (139,99,z129)', 'food MISSING' (FEATURE-005)
+function refuge_lines(sup)
+  local out = {}
+  for _, k in ipairs({ 'water', 'drink', 'food', 'hospital' }) do
+    local st = (sup.status or {})[k] or 'MISSING'
+    local p = (sup.where or {})[k]
+    out[#out + 1] = k .. ' ' .. st .. (p and string.format(' (%d,%d,z%d)', p[1], p[2], p[3]) or '')
+  end
+  return out
 end
 
 -- ---------------------------------------------------------------- Manual 'alert off' hold (BUG-423: watchdog switched the alert on again within seconds)

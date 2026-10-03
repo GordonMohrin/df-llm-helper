@@ -240,6 +240,10 @@ class SiegeRunner:
                 log += self._exec(cmds, dry)
                 if flow.state in ("DONE", "ABORT") or (flow.state == "IDLE") or not loop or dry:
                     break
+                beat = getattr(self, "on_step", None)          # FEATURE-006: heartbeat; False = `loops stop siege`
+                if beat is not None and beat() is False:
+                    flow.report.append("stopped by `loops stop siege` (orders are cleared)")
+                    break
         finally:
             if flow.orders_set and flow.state != "DONE" and sid is not None and not dry:
                 self.client.run(f"claude/pilot_siege clear {sid}")     # never leave orphaned orders

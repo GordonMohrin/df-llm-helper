@@ -3,7 +3,7 @@
 df-llm-helper talks to Dwarf Fortress only through `dfhack-run` and DFHack Lua scripts installed under
 `hack/scripts/claude/`. Everything is bundled:
 
-1. `lua/pilot_*.lua` – thin scripts written for df-llm-helper (siege, caravan, mood, care, water, work details, batching).
+1. `lua/pilot_*.lua` – thin scripts written for df-llm-helper (siege, caravan, mood, care, water, work details, batching, refuge).
 2. `lua/claude/*.lua` – the fortress toolkit the original project played with (`claude/status`, `claude/report`,
    watchdog, trade, military, mood, …). Comments are English; output keys and in-game texts are still German
    (df-llm-helper parses them, so they are part of the protocol).
@@ -103,3 +103,15 @@ df-llm-helper on its own):
 
 Squads: DFHack has no way to delete a squad, and empty squads stay in the list. Reuse them with `claude/mil rename <squad>
 <name> --apply` and `claude/mil add <squad> <unit> --apply` instead of creating new ones (BUG-425).
+
+Refuge burrow (FEATURE-005): `claude/mil refuge check` reports per category (`refuge.status.water|drink|food|hospital`
+= `OK`, `MISSING` or `UNREACHABLE`, coordinates in `refuge.where`, ready-made `lines`). Reachability is the walk-group
+test (`canWalkBetween`) from the anchor: a hospital zone inside the burrow, else `config.ZUFLUCHT.probe`; a well or water
+tile counts through its neighbours, an unknown answer counts as reachable. `ZUFLUCHT OHNE WASSER`/`OHNE ESSEN` now also
+fire when the supply is in the burrow but not reachable, so `gefahr.civ_gate` (with `config.REFUGE_REQUIRE_WATER = true`)
+does not lock citizens in. `claude/pilot_refuge info [--name N]` (read only) lists the burrow tiles as runs
+`"z,y,x1,x2"`, the targets inside and outside the burrow (drink/food tiles with their stockpile rect, wells, visible water
+inside the burrow, hospital zones; only revealed tiles) and the Lua-side supply; `claude/pilot_refuge add [--apply]
+x,y,z|x1,y1,x2,y2,z ...` assigns tiles to the burrow (UI: paint the burrow; dry run without `--apply`, unrevealed and
+off-map tiles skipped, max 20000 per call). df-llm-helper does the BFS inside the burrow and the repair path
+(`python -m df_llm_helper refuge check|repair`, tile dump via `claude/pilot_reach dump`).

@@ -247,11 +247,14 @@ class Director:
             return out
         return []
 
-    def watch(self, *, iterations: int | None = None) -> list[str]:
+    def watch(self, *, iterations: int | None = None, beat=None) -> list[str]:
+        """beat (FEATURE-006 loop registry): called per poll; False = `loops stop camera` -> end."""
         out, i = [], 0
         while iterations is None or i < iterations:
             out += self.tick()
             i += 1
+            if beat is not None and beat() is False:
+                break
             self.clock.sleep(float(self.cfg["poll_s"]))
         return out
 
@@ -285,7 +288,10 @@ def _cmd(args) -> int:
             sh = shares(st.get("cats") or {})
             lines = [f"{k}: {v} %" for k, v in sh] or ["no picks in the last 30 minutes"]
         elif args.action == "watch":
-            lines = d.watch(iterations=None if args.loop else 1)
+            from ..loops import for_cli
+            with for_cli(p.cfg, "camera", enabled=bool(args.loop), interval_s=float(d.cfg["poll_s"]),
+                         report=lambda w: print(w, flush=True)) as lk:
+                lines = d.watch(iterations=None if args.loop else 1, beat=lk.beat)
             lines = lines or ["Camera: no change"]
         else:
             lines = d.status()

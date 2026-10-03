@@ -244,3 +244,44 @@ After every change: `python -m df_llm_helper.selftest` (≈ 30 s, no DF needed; 
 
 ## 10. v3 features (`specs-v3/`, not yet live-tested)
 Access guard, dig checker, freeze profiler, standstill guard, tool manager, remote-worker protection, item hygiene, defense designer, settings, camera profiles, reachability guard: see **[manual-v3/README.md](manual-v3/README.md)** (one page per feature).
+
+## 11. Refuge check and loop registry (2026-10-03, live-untested)
+
+### 11.1 Refuge: `python -m df_llm_helper refuge check|repair` (FEATURE-005)
+Run 5, invasion J125: the alarm burrow "Zuflucht" had no water, drink or food; citizens died of thirst in it (BUG-423).
+- `refuge check [--json] [--burrow NAME]` (read only): reads `claude/pilot_refuge info` and a tile dump of the burrow box
+  (`claude/pilot_reach dump`, in z slabs). Anchor = hospital zone inside the burrow, else `config.ZUFLUCHT.probe`, else the
+  largest walkable part of the burrow. A BFS from the anchor over burrow tiles only (citizens under the civilian alert
+  stay inside) judges each category: `water` (well or water tile), `drink` (non-forbidden drinks), `food`
+  (non-forbidden food), `hospital` - `OK`, `UNREACHABLE` (inside the burrow, no path inside it) or `MISSING` (nearest
+  target outside is named). Exit 0 = all OK, 1 = not OK, 2 = `pilot_refuge` not readable.
+- `refuge repair [--apply]`: BFS from the refuge core (the hospital first; without a usable burrow from the hospital
+  zone) over all walkable tiles to the nearest target of every category that is not OK; the path tiles plus the target
+  rect (stockpile, well with its ring, hospital zone) are listed (dry run, default) or assigned to the burrow
+  (`--apply`, `claude/pilot_refuge add`, the same as painting the burrow in the UI). Limits `refuge.max_path`,
+  `refuge.max_add_tiles`, `refuge.max_rect_tiles` (bigger stockpiles: only the tile and its ring).
+- `check` runs the refuge check every `refuge.interval_s` (900 s) and prints one line while the refuge is not OK; a
+  refuge without reachable water AND drink is a critical warning (the wake filter wakes on it). The digest line
+  "Refuge burrow not ok" names the first problem of `claude/gefahr status`.
+- Automation: the watchdog/gefahr gate stays in Lua. With `config.REFUGE_REQUIRE_WATER = true` the civilian alert is not
+  switched on while the refuge has no reachable drink or water (`notfall.flag ZUFLUCHT OHNE WASSER`, warning wake only);
+  the default `false` (player decision in BUG-423) still calls the citizens in during a siege and warns.
+- Offline: `refuge check|repair --grid fixtures/v3/grid/refuge_j125.grid` (meta lines `@burrow`, `@target`).
+
+### 11.2 Loop registry: `python -m df_llm_helper loops list|stop|clean|wrap` (FEATURE-006)
+Run 5: helper loops ran twice (two `holdguard.sh`, a forgotten siege loop) and gave contradicting orders (BUG-426).
+- Every loop of the helper registers itself: `waechter --loop`, `wake --loop`, `autopilot --loop`, `guard --loop`,
+  `caravan --loop`, `siege` (unless `--once`), `camera watch --loop`. Lockfile `tools/loops/<name>.lock` (pid, start,
+  command, interval) with a heartbeat per pass. One pass and `--dry-run` take no lock.
+- A second start of the same loop is refused (`Error: loop 'wake' already runs (pid ...)`, exit 2). With
+  `loops.on_duplicate: warn` it starts anyway, registers as `<name>.<pid>.lock` and is listed as DUPLICATE. A lock of a
+  dead process (or with a heartbeat older than `loops.reclaim_s`, PID reuse) is taken over.
+- `loops list [--json]`: name, pid, uptime, heartbeat age and marks `DUPLICATE`, `STALE` (process alive, no heartbeat
+  for max(`stale_min_s`, 3 x interval + 30 s)), `DEAD` (process gone, lock left). Exit 1 when anything is marked.
+- `loops stop <name> [--pid N] [--kill] [--wait S]`: stop request (`tools/loops/<name>.stop`, the loop ends after its
+  pass and removes its lock); `--kill` terminates it when it does not end in time, but only when its command line still
+  matches the lock (PID not reused). `loops clean` removes locks of dead processes.
+- `loops wrap <name> [--interval S] --cmd "<command>"`: runs a foreign loop (e.g. `holdguard.sh`) under the registry
+  (lock + heartbeat while the child runs, `loops stop` ends the child).
+- `check`, `digest` and `wake` report duplicates and loops without heartbeat. PID checks work without psutil
+  (POSIX `kill(pid, 0)`, Windows `OpenProcess`); psutil is used when installed.

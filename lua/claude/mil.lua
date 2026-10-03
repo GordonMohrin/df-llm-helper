@@ -33,7 +33,8 @@
 --   refuge [--apply]                           create/check refuge burrow (config.ZUFLUCHT.rects) + civilian alert; existing
 --                                              tiles are only replaced when rects are configured
 --   refuge check                               read only (BUG-423): drink/food/wells/water tiles/hospital inside the refuge burrow;
---                                              problems ZUFLUCHT OHNE WASSER / ZUFLUCHT OHNE ESSEN
+--                                              problems ZUFLUCHT OHNE WASSER / ZUFLUCHT OHNE ESSEN; FEATURE-005: status per
+--                                              category OK/MISSING/UNREACHABLE (canWalkBetween from the hospital/probe anchor), lines
 --   guard start|stop|status                    guard job (60 ticks): visible intruder in the INTERIOR (config.INNEN_BOXEN) -> tools/killorder.lua --watch
 -- Protection: pcall everywhere, log, no change without --apply; station/kill/release only with --experimental AND
 -- after agreement with scope agent militaer. Fair play: no unit/item manipulation, no reveal.
@@ -709,8 +710,9 @@ local ok, err = pcall(function()
       local G = reqscript('claude/gefahr')
       local sup = G.refuge_supply(nil, true)
       local al = df.global.plotinfo.alerts
-      out({ refuge = sup, civ_burrows = (#al.list > 1) and #al.list[1].burrows or 0, civ_alert_idx = al.civ_alert_idx,
-            require_water = cfg.REFUGE_REQUIRE_WATER ~= false })
+      out({ refuge = sup, lines = G.refuge_lines(sup), civ_burrows = (#al.list > 1) and #al.list[1].burrows or 0,
+            civ_alert_idx = al.civ_alert_idx, require_water = cfg.REFUGE_REQUIRE_WATER ~= false,
+            hint = 'BFS inside the burrow + repair: python -m df_llm_helper refuge check|repair' })
       return
     end
     if dry then

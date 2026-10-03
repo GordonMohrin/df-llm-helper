@@ -67,6 +67,16 @@ def _check_scope(scope: str | None) -> None:
         raise ValueError(f"unknown scope '{scope}' (known: {', '.join(known)})")
 
 
+def _loop_lock(cfg, name: str, args, interval_s: float, *, enabled: bool | None = None):
+    """FEATURE-006: lockfile + heartbeat for a real loop (--loop without --once/--dry-run); one pass takes no lock."""
+    from .loops import for_cli
+    if enabled is None:
+        enabled = bool(getattr(args, "loop", False)) and not getattr(args, "once", False) \
+            and not getattr(args, "dry_run", False)
+    return for_cli(cfg, name, enabled=enabled, interval_s=interval_s,
+                   report=lambda w: print(w, file=sys.stderr, flush=True))
+
+
 def cmd_digest(args) -> int:
     _check_scope(args.scope)
     p = _pilot(args)
@@ -196,13 +206,14 @@ def cmd_autopilot(args) -> int:
         p.store.update_rule(args.rule, disabled=0, reason=None)
         print(f"Rule {args.rule} active again")
         return 0
-    while True:
-        snap = p.snapshot()
-        recs = p.autopilot(snap, dry_run=args.dry_run)
-        print("\n".join(r.line() for r in recs) or "no action", flush=True)
-        if not args.loop or args.once:
-            return 0
-        time.sleep(float(args.interval))
+    with _loop_lock(p.cfg, "autopilot", args, float(args.interval)) as lk:      # FEATURE-006 registry
+        while True:
+            snap = p.snapshot()
+            recs = p.autopilot(snap, dry_run=args.dry_run)
+            print("\n".join(r.line() for r in recs) or "no action", flush=True)
+            if not args.loop or args.once or not lk.beat():
+                return 0
+            time.sleep(float(args.interval))
 
 
 def cmd_guard(args) -> int:
@@ -221,14 +232,15 @@ def cmd_guard(args) -> int:
         p.store.set("guard.state", st.to_dict())
         print(f"Pop gate {args.gate} acknowledged")
         return 0
-    while True:
-        acts, st, info = p.guard(dry_run=args.dry_run)
-        print("; ".join(a.line() for a in acts) or "Guard: all quiet", flush=True)
-        print(f"Target fps {info['target_fps']}, time lapse allowed: {info['timestream_allowed']}"
-              + (f" (blockers: {', '.join(info['blockers'])})" if info["blockers"] else ""), flush=True)
-        if not args.loop or args.once:
-            return 0
-        time.sleep(float(args.interval))
+    with _loop_lock(p.cfg, "guard", args, float(args.interval)) as lk:          # FEATURE-006 registry
+        while True:
+            acts, st, info = p.guard(dry_run=args.dry_run)
+            print("; ".join(a.line() for a in acts) or "Guard: all quiet", flush=True)
+            print(f"Target fps {info['target_fps']}, time lapse allowed: {info['timestream_allowed']}"
+                  + (f" (blockers: {', '.join(info['blockers'])})" if info["blockers"] else ""), flush=True)
+            if not args.loop or args.once or not lk.beat():
+                return 0
+            time.sleep(float(args.interval))
 
 
 def cmd_waechter(args) -> int:
@@ -237,17 +249,18 @@ def cmd_waechter(args) -> int:
     p = _pilot(args)
     w = Waechter(p.client, p.tools, p.clock, p.store, p.cfg.data)
     interval = float(args.interval or p.cfg.get("guard.waechter_interval_s", 2))
-    while True:
-        try:
-            for ln in w.step():
-                print(ln, flush=True)
-        except Exception as e:  # like ps1: never abort, report the error and carry on
-            print(f"Watcher error: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
-            if not args.loop:
-                return 1
-        if not args.loop:
-            return 0
-        time.sleep(interval)
+    with _loop_lock(p.cfg, "waechter", args, interval) as lk:                   # FEATURE-006 registry
+        while True:
+            try:
+                for ln in w.step():
+                    print(ln, flush=True)
+            except Exception as e:  # like ps1: never abort, report the error and carry on
+                print(f"Watcher error: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+                if not args.loop:
+                    return 1
+            if not args.loop or not lk.beat():
+                return 0
+            time.sleep(interval)
 
 
 def cmd_tempo(args) -> int:
@@ -297,11 +310,13 @@ def cmd_wake(args) -> int:
     clock = SystemClock()
     store = Store(cfg.path("state_db"))
     tools = ToolsDir(cfg.path("tools"), clock)
-    while True:
-        wake_check(tools, store, clock, emit_existing=args.emit_existing, sink=lambda ln: print(ln, flush=True))
-        if not args.loop:
-            return 0
-        time.sleep(float(args.interval))
+    with _loop_lock(cfg, "wake", args, float(args.interval)) as lk:              # FEATURE-006 registry
+        while True:
+            wake_check(tools, store, clock, emit_existing=args.emit_existing, sink=lambda ln: print(ln, flush=True),
+                       loops_cfg=cfg.get("loops", {}))
+            if not args.loop or not lk.beat():
+                return 0
+            time.sleep(float(args.interval))
 
 
 def _runbooks(p):
@@ -935,7 +950,10 @@ def cmd_siege(args) -> int:
     from .siege import SiegeRunner
     p = _pilot(args)
     runner = SiegeRunner(p.client, p.tools, p.store, p.clock, p.cfg.get("siege", {}))
-    flow, log = runner.run(loop=not args.once, dry=args.dry_run)
+    with _loop_lock(p.cfg, "siege", args, float(p.cfg.get("siege.max_wait_s", 120)) + 60,
+                    enabled=not args.once and not args.dry_run) as lk:           # FEATURE-006 registry
+        runner.on_step = lk.beat
+        flow, log = runner.run(loop=not args.once, dry=args.dry_run)
     if args.verbose:
         for ln in log:
             print("  " + ln)
@@ -950,7 +968,6 @@ def cmd_siege(args) -> int:
 def cmd_caravan(args) -> int:
     """Spec 02: decide on the caravan (trade/skip), trade via the trade automaton, release stuck merchants."""
     from .caravan import CaravanPilot
-    from .clock import GameDate
     from .config import HOME
     p = _pilot(args)
     cp = CaravanPilot(p.client, p.tools, p.store, p.clock, p.cfg.get("caravan", {}), HOME, registry=p.client.registry)
@@ -963,6 +980,15 @@ def cmd_caravan(args) -> int:
     if args.action == "status":
         print("\n".join(cp.report()))
         return 0
+    lk = _loop_lock(p.cfg, "caravan", args, float(args.interval) + 60)          # FEATURE-006 registry
+    with lk:
+        _caravan_loop(args, p, cp, lk)
+    print("\n".join(cp.report()))
+    return 0
+
+
+def _caravan_loop(args, p, cp, lk) -> None:
+    from .clock import GameDate
     for _ in range(int(args.max_steps) if args.loop else 1):
         st = p.client.run("claude/status")
         d = (st.json or {}).get("date") if isinstance(st.json, dict) else None
@@ -974,9 +1000,9 @@ def cmd_caravan(args) -> int:
         if state in ("idle", "waiting", "skip", "done", "abort", "failed", "wait") or args.dry_run or \
                 (state == "review" and not approved):        # an approved REVIEW goes on to the live selection
             break
+        if not lk.beat():
+            break
         p.clock.sleep(float(args.interval))
-    print("\n".join(cp.report()))
-    return 0
 
 
 def cmd_mood(args) -> int:

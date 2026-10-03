@@ -52,7 +52,8 @@ def _h(text: str) -> str:
     return hashlib.sha1(re.sub(r"\d{1,2}:\d{2}(:\d{2})?", "", text).encode("utf-8")).hexdigest()[:10]
 
 
-def wake_check(tools, store, clock, *, dedupe_min: float = 10.0, emit_existing: bool = False, sink=None) -> list[str]:
+def wake_check(tools, store, clock, *, dedupe_min: float = 10.0, emit_existing: bool = False, sink=None,
+               loops_cfg: dict | None = None) -> list[str]:
     """`sink(line)` (optional) is called for every line BEFORE the state is stored: if printing fails, the events are
     not marked as seen and come again on the next call (BUG-112)."""
     now = clock.now().epoch
@@ -112,6 +113,14 @@ def wake_check(tools, store, clock, *, dedupe_min: float = 10.0, emit_existing: 
     for r in rows:
         emit(f"warn:{r['key']}", _h(r["text"]), f"WAKE df-llm-helper: {r['text'][:150]} -> python -m df_llm_helper digest")
         st["warn_id"] = r["id"]
+
+    # FEATURE-006: duplicate or hanging background loops (lockfiles under tools/loops + PID check, no DF call)
+    try:
+        from .loops import wake_lines
+        for key, text in wake_lines(tools.path, loops_cfg):
+            emit(f"loop:{key}", _h(text), f"WAKE loops: {text}")
+    except Exception:  # noqa: BLE001 - the wake filter must never die on the registry
+        pass
 
     if sink is not None:
         for line in out:

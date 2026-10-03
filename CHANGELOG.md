@@ -1,5 +1,19 @@
 # CHANGELOG df-llm-helper
 
+## Refuge check and loop registry (2026-10-03)
+- FEATURE-005: `python -m df_llm_helper refuge check [--json]` checks that the refuge burrow contains reachable water
+  (well/water tile), drink, food and the hospital: BFS from the anchor (hospital zone, else `ZUFLUCHT.probe`) over burrow
+  tiles only, OK/UNREACHABLE/MISSING per category with coordinates. `refuge repair [--apply]` extends the burrow along
+  a BFS path from the refuge core (hospital first) to the nearest missing targets plus their rects (dry run by default).
+  New `lua/pilot_refuge.lua` (`info`, `add`). `claude/mil refuge check` and `gefahr.refuge_supply()` judge
+  reachability (`status`, `where`, `anchor`, `lines`); supplies that are in the burrow but unreachable now count as
+  `ZUFLUCHT OHNE WASSER/ESSEN`, so `REFUGE_REQUIRE_WATER = true` also blocks the alert for them. `check` reports an
+  unsupplied refuge every 15 min (critical without reachable water and drink -> wake); the digest names the problem.
+- FEATURE-006: `python -m df_llm_helper loops list|stop|clean|wrap`. The helper's loops (`waechter`, `wake`,
+  `autopilot`, `guard`, `caravan`, `siege`, `camera watch`) take a lockfile `tools/loops/<name>.lock` with heartbeat;
+  a second start is refused (or warned with `loops.on_duplicate: warn`); `check`, `digest` and `wake` report
+  DUPLICATE and STALE loops. PID liveness without psutil on Windows and Linux.
+
 ## Military and alarm fixes from the live siege (2026-10-03)
 - BUG-423: `claude/alert off` now holds (`config.ALERT_MANUAL_HOLD_S`, default 15 min) against the watchdog and `gefahr`
   unless the enemies near the fort grow by more than `ALERT_MANUAL_GROW` or a new major threat appears (flag
