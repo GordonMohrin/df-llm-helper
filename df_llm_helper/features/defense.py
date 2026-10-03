@@ -244,19 +244,37 @@ def _design(args) -> int:
 
 def _status(args) -> int:
     cfg = _cfg(args)
+    client = None
     if args.file:
         data = _json(args.file, "--file")
     else:
         from ..cli import _pilot
-        r = _pilot(args).client.run(STATUS_CMD)
+        client = _pilot(args).client
+        r = client.run(STATUS_CMD)
         data = r.json if r.ok and isinstance(r.json, dict) else None
         if not data or data.get("ok") is False:
             print(f"Defense: {STATUS_CMD} not readable (script installed?)")
             return 2
     warn = float(cfg.get("reload_warn_pct", 70))
     ev = evaluate_status(data, warn)
-    print("\n".join(status_lines(ev, warn)))
+    lines = status_lines(ev, warn)
+    if client is not None:
+        lines += _bridge_lines(client)
+    print("\n".join(lines))
     return 1 if ev["warn"] else 0
+
+
+def _bridge_lines(client) -> list[str]:
+    """BUG-427: the REAL bridge state (gate_flags of the bridge, via claude/pilot_lever list), never a lever guess."""
+    from .lever import LIST_CMD, bridge_states
+    r = client.run(LIST_CMD)
+    data = r.json if r.ok and isinstance(r.json, dict) and r.json.get("ok") else None
+    if data is None:
+        return []
+    states = bridge_states(data)
+    if not states:
+        return []
+    return ["Bridges: " + ", ".join(f"#{k} {v}" for k, v in sorted(states.items(), key=lambda kv: str(kv[0])))]
 
 
 def _stats(args) -> int:

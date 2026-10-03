@@ -66,7 +66,7 @@ _READ_SUB = {"status", "list", "tabelle", "report", "plan", "clock", "equip", "r
              "enemies", "krypta", "werkstaetten"}
 # df-llm-helper Lua (v2): pure read commands
 _READ_PILOT = {("claude/pilot_water", "scan"), ("claude/pilot_water", "near"), ("claude/pilot_mood", "need"),
-               ("claude/pilot_hygiene", "forbid")}
+               ("claude/pilot_hygiene", "forbid"), ("claude/pilot_lever", "list")}
 # scripts WITHOUT a read-only status command (claude/arbeit only knows start|stop|once); bauprog/raster have one (BUG-406).
 # claude/ueberwacher got 'status' with BUG-407, but older installed copies run a round for it -> stays conservative.
 _NO_STATUS = {"claude/arbeit", "claude/ueberwacher"}
