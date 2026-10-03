@@ -118,6 +118,11 @@ dfhack.screen.readTile = function(x, y)
   return { ch = c or 32 }
 end
 dfhack.gui.getCurFocus = function() return { 'dwarfmode/Default' } end
+-- filesystem like DFHack (util.home() creates the runtime folder, BUG-226); printerr goes to stderr
+local function sh_quote(p) return "'" .. tostring(p):gsub("'", "'\\''") .. "'" end
+dfhack.filesystem.isdir = function(p) return os.execute('test -d ' .. sh_quote(p)) == true end
+dfhack.filesystem.mkdir_recursive = function(p) return os.execute('mkdir -p ' .. sh_quote(p) .. ' 2>/dev/null') == true end
+dfhack.printerr = function(...) io.stderr:write(table.concat({ ... }, ' '), '\n') end
 dfhack.units.getReadableName = function(u) return u._name or '?' end
 CR_OK = 0
 

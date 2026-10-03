@@ -765,3 +765,141 @@ df.global.world.items.all = { item(10, 1), item(10, 1), item(11, 4), item(11, 3,
 def test_mood_minimum_matches_the_live_game():
     src = (CLAUDE / "mood.lua").read_text(encoding="utf-8")
     assert "rohgem = 12, schliffgem = 10" in src and "holz = 14" in src and "seide = 3" in src
+
+
+# ---------------------------------------------------------------- BUG-226 (runtime folder, rules, bins, sale choice)
+def test_bug226_home_creates_the_runtime_folder(tmp_path):
+    rt = tmp_path / "new" / "rt"
+    out = run_snippet("local util = reqscript('claude/util')\nprint(util.home(), util.home_error())\n", tmp_path,
+                      {"DF_LLM_HELPER_HOME": str(rt) + "/"})
+    assert out.split() == [str(rt), "nil"]
+    assert (rt / "tools" / "out").is_dir() and (rt / "tools" / "scopes").is_dir()
+    dfdir = tmp_path / "DF"
+    dfdir.mkdir()
+    out = run_snippet("print(reqscript('claude/util').home())\n", tmp_path, {"DF_LLM_HELPER_HOME": "",
+                                                                             "MOCK_HOME": str(dfdir)})
+    assert out.strip() == f"{dfdir}/df-llm-helper-runtime" and (dfdir / "df-llm-helper-runtime" / "tools" / "out").is_dir()
+
+
+def test_bug226_home_reports_an_uncreatable_folder(tmp_path):
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    f = tmp_path / "snippet.lua"
+    f.write_text("local util = reqscript('claude/util')\nutil.home() util.home()\nprint(util.home_error())\n")
+    r = subprocess.run([LUA, str(MOCK), str(f)], capture_output=True, timeout=10,
+                       env={"PATH": "/usr/bin:/bin", "MOCK_SCRIPT_DIR": str(CLAUDE),
+                            "DF_LLM_HELPER_HOME": str(blocker / "rt")})
+    out, err = r.stdout.decode(), r.stderr.decode()
+    assert out.startswith(f"runtime folder missing and not creatable: {blocker}/rt/tools/out")
+    assert err.count("claude/util: runtime folder missing") == 1          # printed once, not per call
+
+
+TRADE_OPEN = """
+df.global.game.main_interface.trade = { open = true, choosing_merchant = false, stillunloading = 0, havetalker = 1,
+  mer = 'M1', good = { [0] = { 1, 2 }, [1] = { 3 } }, goodflag = { [0] = { {}, {} }, [1] = { {} } } }
+dfhack.gui.getCurFocus = function() return { 'dwarfmode/Trade/Default' } end
+"""
+
+
+def test_bug226_status_reports_a_lost_stability_mark_and_missing_rules(tmp_path):
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    out, r = run("handel", "status", tmp_path=tmp_path, setup=TRADE_OPEN, env={"DF_LLM_HELPER_HOME": str(blocker)})
+    j = one_json(out)
+    errs = " | ".join(j["errors"])
+    assert "runtime folder missing and not creatable" in errs and "rules file missing" in errs
+    assert f"stability mark not written ({blocker}/tools/out/handel-state.json)" in errs
+    # healthy runtime with rules: no errors, the mark is written
+    home = tmp_path / "home"
+    (home / "tools" / "scopes").mkdir(parents=True)
+    (home / "tools" / "scopes" / "handel-regeln.md").write_text("```rules\nratio = 2.3\n```\n")
+    out, r = run("handel", "status", tmp_path=tmp_path, setup=TRADE_OPEN)
+    j = one_json(out)
+    assert j["errors"] == [] and j["trade_ui"]["stable_seconds"] == 0
+    assert (home / "tools" / "out" / "handel-state.json").read_text().startswith('{"since":')
+
+
+def test_bug226_plan_refuses_without_rules_file(tmp_path):
+    out, r = run("handel", "plan", tmp_path=tmp_path)
+    j = one_json(out)
+    assert j["ok"] is False and j["abort"].startswith("rules file missing: ")
+    assert "handel-regeln.md" in j["rules_file"] and "claude/handel: rules file missing" in r.stderr.decode()
+
+
+ITEMS = """
+df.item_type = { [1] = 'FIGURINE' }
+local function item(id, v, fl, cont)
+  return { id = id, flags = fl, _v = v, _c = cont, pos = { x = 50, y = 50, z = 1 }, getType = function() return 1 end }
+end
+local bin = { flags = {} }
+df.global.world.items.all = { item(1, 10, {}), item(2, 20, { in_inventory = true }, bin),
+  item(3, 30, { in_inventory = true }, nil), item(4, 40, { in_inventory = true }, { flags = { forbid = true } }),
+  item(5, 50, { in_inventory = true }, { flags = { in_inventory = true } }) }
+dfhack.items.getContainer = function(it) return it._c end
+dfhack.items.canTrade = function(it) return true end
+dfhack.items.canTradeWithContents = function(it) return not it.flags.in_inventory end
+dfhack.items.getValue = function(it) return it._v end
+dfhack.items.getContainedItems = function() return {} end
+dfhack.items.getDescription = function(it) return 'figurine ' .. it.id end
+dfhack.items.getPosition = function(it) return it.pos end
+"""
+
+
+def test_bug226_sell_candidates_include_goods_stored_in_bins(tmp_path):
+    code = ITEMS + ("local h = reqscript('claude/handel')\n"
+                    "local list = h.sell_candidates({ sell_types = { FIGURINE = true }, sell_exclude = {}, "
+                    "sell_min_value = 8 }, nil)\n"
+                    "for _, e in ipairs(list) do io.write(e.id, ':', tostring(e.in_container), ' ') end print()\n")
+    # 2 = in a bin of a stockpile (new); 1 = loose; 3 carried by a unit, 4 bin forbidden, 5 bin carried: skipped
+    assert run_snippet(code, tmp_path).split() == ["2:true", "1:nil"]
+
+
+def test_bug226_mark_marks_goods_in_bins_with_markForTrade(tmp_path):
+    home = tmp_path / "home"
+    (home / "tools" / "scopes").mkdir(parents=True)
+    (home / "tools" / "scopes" / "handel-regeln.md").write_text("```rules\nsell_types = FIGURINE\n```\n")
+    setup = ITEMS + """
+df.caravan_state.T_trade_state = { Approaching = 1, AtDepot = 2, [1] = 'Approaching', [2] = 'AtDepot' }
+local dep = { id = 9, x1 = 0, x2 = 4, y1 = 0, y2 = 4, z = 1, jobs = {} }
+df.global.world.buildings.other.TRADE_DEPOT = setmetatable({ [0] = dep }, { __len = function() return 1 end })
+local car = { entity = 1, trade_state = 2, time_remaining = 3000, flags = {}, goods = {} }
+df.global.plotinfo.caravans = setmetatable({ [0] = car }, { __len = function() return 1 end })
+df.item.find = function(id) for _, it in ipairs(df.global.world.items.all) do if it.id == id then return it end end end
+MARKED = {}
+dfhack.items.markForTrade = function(it, d) MARKED[#MARKED + 1] = it.id .. '@' .. d.id return true end
+"""
+    after = tmp_path / "after.lua"
+    after.write_text("print(table.concat(MARKED, ' '))\n")
+    out, r = run("handel", "mark", "--live", tmp_path=tmp_path, setup=setup, env={"MOCK_AFTER": str(after)})
+    lines = out.splitlines()
+    assert json.loads(lines[0])["marked"] == 2 and lines[1].split() == ["2@9", "1@9"], r.stderr
+
+
+def test_bug226_sale_prefers_many_small_pieces_over_one_huge_one(tmp_path):
+    code = ("local h = reqscript('claude/handel')\n"
+            "local function pick(vals, need, keep)\n"
+            "  local s = {} for i, v in ipairs(vals) do s[i] = { i = i, value = v, type = 'FIGURINE' } end\n"
+            "  local c, S = h.choose_sells(s, need, 0.2, keep)\n"
+            "  local t = {} for _, x in ipairs(c) do t[#t + 1] = x.value end\n"
+            "  print(table.concat(t, ',') .. '=' .. S)\n"
+            "end\n"
+            "pick({ 26300, 400, 300, 200, 150, 100 }, 1000)\n"     # the live case: small pieces, no 26300
+            "pick({ 5000, 700, 600 }, 1000)\n"                     # gap closed by the cheapest piece that fits
+            "pick({ 26300, 100 }, 1000)\n"                         # nothing else reaches the ratio
+            "pick({ 5000, 1100, 600, 500 }, 1000)\n"
+            "local n = 0\n"
+            "pick({ 600, 500, 400 }, 1000, function(s) n = n + 1 return s.value ~= 500 end)\n")
+    assert run_snippet(code, tmp_path).split() == ["400,300,200,150=1050", "700,600=1300", "100,26300=26400",
+                                                   "1100=1100", "600,400=1000"]
+
+
+def test_bug226_rules_template_has_a_generic_cloth_entry(tmp_path):
+    home = tmp_path / "home"
+    (home / "tools" / "scopes").mkdir(parents=True)
+    shutil.copy(ROOT / "data" / "trade" / "handel-regeln.md", home / "tools" / "scopes" / "handel-regeln.md")
+    code = ("local h = reqscript('claude/handel')\nlocal R = h.load_rules()\n"
+            "print(tostring(R.rules_error), R.ratio, R.sell_types.FIGURINE)\n"
+            "for _, b in ipairs(R.buys) do if b.type == 'CLOTH' then print(b.prio, b.sub, b.max) end end\n")
+    lines = run_snippet(code, tmp_path).splitlines()
+    assert lines[0].split() == ["nil", "2.3", "true"]
+    assert [ln.split() for ln in lines[1:]] == [["4", "silk", "10"], ["4", "*", "30"]]   # silk first, then any cloth

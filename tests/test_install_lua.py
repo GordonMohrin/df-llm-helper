@@ -101,3 +101,18 @@ def test_install_cli(tmp_path, capsys):
     assert (tgt / "mil.lua").exists()
     assert main(["install-lua", "--df", str(tmp_path / "nothing")]) == 2
     assert "not a Dwarf Fortress folder" in capsys.readouterr().err
+
+
+def test_bug226_install_creates_the_runtime_folder_and_the_rules_template_once(tmp_path):
+    df, _ = df_folder(tmp_path)
+    plan = plan_install(ROOT, df)
+    rules = df / "df-llm-helper-runtime" / "tools" / "scopes" / "handel-regeln.md"
+    assert any(ln.startswith(f"Trade rules {rules}: new") for ln in plan.lines())
+    apply_install(plan, tmp_path / "bk")
+    assert rules.read_text(encoding="utf-8") == (ROOT / "data" / "trade" / "handel-regeln.md").read_text(encoding="utf-8")
+    assert (df / "df-llm-helper-runtime" / "tools" / "out").is_dir()
+    rules.write_text("my own rules", encoding="utf-8")
+    plan = plan_install(ROOT, df)
+    assert any("kept (existing rules file)" in ln for ln in plan.lines())
+    apply_install(plan, tmp_path / "bk2")
+    assert rules.read_text(encoding="utf-8") == "my own rules"
