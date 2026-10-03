@@ -1,0 +1,479 @@
+{
+ "ok": true,
+ "_synthetic": "SYNTHETIC (FEATURE-004): shape of claude/pilot_hospital status; ids from the 02.10.2026 notes (location 11, zone 3760), values invented",
+ "tick": 48788200,
+ "citizens": [
+  {
+   "id": 4402,
+   "name": "Ast Omerlolum",
+   "wounds": 0,
+   "cant_stand": false,
+   "hospital": null,
+   "squad": false,
+   "pick": false,
+   "labors": [
+    "DIAGNOSE",
+    "BONE_SETTING",
+    "SUTURING",
+    "DRESSING_WOUNDS",
+    "FEED_WATER_CIVILIANS",
+    "RECOVER_WOUNDED"
+   ],
+   "care_skill": 14,
+   "idle": true,
+   "job": null,
+   "child": false,
+   "mood": false,
+   "stress": 0,
+   "prisoner": false,
+   "care_jobs": []
+  },
+  {
+   "id": 4500,
+   "name": "Domas Libashtosed",
+   "wounds": 0,
+   "cant_stand": false,
+   "hospital": null,
+   "squad": false,
+   "pick": false,
+   "labors": [
+    "DIAGNOSE",
+    "BONE_SETTING",
+    "SUTURING",
+    "DRESSING_WOUNDS",
+    "FEED_WATER_CIVILIANS",
+    "RECOVER_WOUNDED"
+   ],
+   "care_skill": 9,
+   "idle": false,
+   "job": "Haul",
+   "child": false,
+   "mood": false,
+   "stress": 0,
+   "prisoner": false,
+   "care_jobs": []
+  },
+  {
+   "id": 4501,
+   "name": "Litast Oddomgeshud",
+   "wounds": 0,
+   "cant_stand": false,
+   "hospital": null,
+   "squad": false,
+   "pick": false,
+   "labors": [
+    "DIAGNOSE",
+    "BONE_SETTING",
+    "SUTURING",
+    "DRESSING_WOUNDS",
+    "FEED_WATER_CIVILIANS",
+    "RECOVER_WOUNDED"
+   ],
+   "care_skill": 4,
+   "idle": false,
+   "job": "Haul",
+   "child": false,
+   "mood": false,
+   "stress": 0,
+   "prisoner": false,
+   "care_jobs": []
+  },
+  {
+   "id": 4600,
+   "name": "Civilian 0",
+   "wounds": 0,
+   "cant_stand": false,
+   "hospital": null,
+   "squad": false,
+   "pick": false,
+   "labors": [],
+   "care_skill": 0,
+   "idle": true,
+   "job": null,
+   "child": false,
+   "mood": false,
+   "stress": 0,
+   "prisoner": false,
+   "care_jobs": []
+  },
+  {
+   "id": 4601,
+   "name": "Civilian 1",
+   "wounds": 0,
+   "cant_stand": false,
+   "hospital": null,
+   "squad": false,
+   "pick": false,
+   "labors": [],
+   "care_skill": 1,
+   "idle": false,
+   "job": "Haul",
+   "child": false,
+   "mood": false,
+   "stress": 0,
+   "prisoner": false,
+   "care_jobs": []
+  },
+  {
+   "id": 4602,
+   "name": "Civilian 2",
+   "wounds": 0,
+   "cant_stand": false,
+   "hospital": null,
+   "squad": false,
+   "pick": false,
+   "labors": [],
+   "care_skill": 2,
+   "idle": true,
+   "job": null,
+   "child": false,
+   "mood": false,
+   "stress": 0,
+   "prisoner": false,
+   "care_jobs": []
+  },
+  {
+   "id": 4603,
+   "name": "Civilian 3",
+   "wounds": 0,
+   "cant_stand": false,
+   "hospital": null,
+   "squad": false,
+   "pick": false,
+   "labors": [],
+   "care_skill": 0,
+   "idle": false,
+   "job": "Haul",
+   "child": false,
+   "mood": false,
+   "stress": 0,
+   "prisoner": false,
+   "care_jobs": []
+  },
+  {
+   "id": 4604,
+   "name": "Civilian 4",
+   "wounds": 0,
+   "cant_stand": false,
+   "hospital": null,
+   "squad": false,
+   "pick": false,
+   "labors": [],
+   "care_skill": 1,
+   "idle": true,
+   "job": null,
+   "child": false,
+   "mood": false,
+   "stress": 0,
+   "prisoner": false,
+   "care_jobs": []
+  },
+  {
+   "id": 4605,
+   "name": "Civilian 5",
+   "wounds": 0,
+   "cant_stand": false,
+   "hospital": null,
+   "squad": false,
+   "pick": false,
+   "labors": [],
+   "care_skill": 2,
+   "idle": false,
+   "job": "Haul",
+   "child": false,
+   "mood": false,
+   "stress": 0,
+   "prisoner": false,
+   "care_jobs": []
+  },
+  {
+   "id": 4606,
+   "name": "Civilian 6",
+   "wounds": 0,
+   "cant_stand": false,
+   "hospital": null,
+   "squad": false,
+   "pick": false,
+   "labors": [],
+   "care_skill": 0,
+   "idle": true,
+   "job": null,
+   "child": false,
+   "mood": false,
+   "stress": 0,
+   "prisoner": false,
+   "care_jobs": []
+  },
+  {
+   "id": 4607,
+   "name": "Civilian 7",
+   "wounds": 0,
+   "cant_stand": false,
+   "hospital": null,
+   "squad": false,
+   "pick": false,
+   "labors": [],
+   "care_skill": 1,
+   "idle": false,
+   "job": "Haul",
+   "child": false,
+   "mood": false,
+   "stress": 0,
+   "prisoner": false,
+   "care_jobs": []
+  },
+  {
+   "id": 4608,
+   "name": "Civilian 8",
+   "wounds": 0,
+   "cant_stand": false,
+   "hospital": null,
+   "squad": false,
+   "pick": false,
+   "labors": [],
+   "care_skill": 2,
+   "idle": true,
+   "job": null,
+   "child": false,
+   "mood": false,
+   "stress": 0,
+   "prisoner": false,
+   "care_jobs": []
+  },
+  {
+   "id": 4609,
+   "name": "Civilian 9",
+   "wounds": 0,
+   "cant_stand": false,
+   "hospital": null,
+   "squad": false,
+   "pick": false,
+   "labors": [],
+   "care_skill": 0,
+   "idle": false,
+   "job": "Haul",
+   "child": false,
+   "mood": false,
+   "stress": 0,
+   "prisoner": false,
+   "care_jobs": []
+  },
+  {
+   "id": 4800,
+   "name": "Patient Rith",
+   "wounds": 3,
+   "cant_stand": true,
+   "hospital": 3760,
+   "squad": false,
+   "pick": false,
+   "labors": [],
+   "care_skill": 0,
+   "idle": false,
+   "job": "Rest",
+   "child": false,
+   "mood": false,
+   "stress": 0,
+   "prisoner": false,
+   "care_jobs": []
+  },
+  {
+   "id": 4801,
+   "name": "Patient Ushat",
+   "wounds": 2,
+   "cant_stand": false,
+   "hospital": 3760,
+   "squad": false,
+   "pick": false,
+   "labors": [],
+   "care_skill": 0,
+   "idle": false,
+   "job": "Rest",
+   "child": false,
+   "mood": false,
+   "stress": 0,
+   "prisoner": false,
+   "care_jobs": []
+  },
+  {
+   "id": 4802,
+   "name": "Patient Bomrek",
+   "wounds": 4,
+   "cant_stand": true,
+   "hospital": null,
+   "squad": false,
+   "pick": false,
+   "labors": [],
+   "care_skill": 0,
+   "idle": false,
+   "job": null,
+   "child": false,
+   "mood": false,
+   "stress": 0,
+   "prisoner": false,
+   "care_jobs": [
+    "RecoverWounded"
+   ]
+  }
+ ],
+ "hospitals": [
+  {
+   "id": 3760,
+   "x1": 120,
+   "y1": 100,
+   "x2": 126,
+   "y2": 104,
+   "z": 130,
+   "location": 11,
+   "beds": 4,
+   "tables": 1,
+   "traction": 1,
+   "containers": 2,
+   "water_reach": true
+  }
+ ],
+ "locations": [
+  {
+   "id": 11,
+   "zones": 1,
+   "posts": [
+    {
+     "id": 6,
+     "type": "DOCTOR",
+     "unit_id": 4402,
+     "hf": 13402,
+     "holder": {
+      "id": 4402,
+      "name": "Doc",
+      "alive": true,
+      "adult": true
+     }
+    },
+    {
+     "id": 7,
+     "type": "DOCTOR",
+     "unit_id": 4500,
+     "hf": 13500,
+     "holder": {
+      "id": 4500,
+      "name": "Doc",
+      "alive": true,
+      "adult": true
+     }
+    },
+    {
+     "id": 8,
+     "type": "DIAGNOSTICIAN",
+     "unit_id": 4402,
+     "hf": 13402,
+     "holder": {
+      "id": 4402,
+      "name": "Doc",
+      "alive": true,
+      "adult": true
+     }
+    },
+    {
+     "id": 9,
+     "type": "DIAGNOSTICIAN",
+     "unit_id": 4500,
+     "hf": 13500,
+     "holder": {
+      "id": 4500,
+      "name": "Doc",
+      "alive": true,
+      "adult": true
+     }
+    },
+    {
+     "id": 10,
+     "type": "SURGEON",
+     "unit_id": 4501,
+     "hf": 13501,
+     "holder": {
+      "id": 4501,
+      "name": "Doc",
+      "alive": true,
+      "adult": true
+     }
+    },
+    {
+     "id": 11,
+     "type": "SURGEON",
+     "unit_id": 4402,
+     "hf": 13402,
+     "holder": {
+      "id": 4402,
+      "name": "Doc",
+      "alive": true,
+      "adult": true
+     }
+    },
+    {
+     "id": 12,
+     "type": "BONE_DOCTOR",
+     "unit_id": 4500,
+     "hf": 13500,
+     "holder": {
+      "id": 4500,
+      "name": "Doc",
+      "alive": true,
+      "adult": true
+     }
+    },
+    {
+     "id": 13,
+     "type": "BONE_DOCTOR",
+     "unit_id": 4501,
+     "hf": 13501,
+     "holder": {
+      "id": 4501,
+      "name": "Doc",
+      "alive": true,
+      "adult": true
+     }
+    }
+   ]
+  }
+ ],
+ "care_jobs": {
+  "RecoverWounded": 1
+ },
+ "water": {
+  "wells": 1,
+  "drinks": 40,
+  "reach_hospital": true
+ },
+ "refuge": {
+  "ok": true,
+  "water_ok": true,
+  "drink": 40,
+  "wells": 1,
+  "water_tiles": 0,
+  "food": 80,
+  "burrow": 12,
+  "problems": []
+ },
+ "supplies": {
+  "cloth": 12,
+  "thread": 15,
+  "splint": 2,
+  "crutch": 1,
+  "plaster": 0,
+  "soap": 1,
+  "wood": 30,
+  "forbidden": {
+   "cloth": 0,
+   "thread": 0,
+   "splint": 0,
+   "crutch": 0,
+   "plaster": 0,
+   "soap": 0,
+   "wood": 0
+  }
+ },
+ "gypsum": {
+  "total": 0,
+  "forbidden": 0,
+  "by_mat": {}
+ }
+}

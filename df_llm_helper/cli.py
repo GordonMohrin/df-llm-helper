@@ -685,8 +685,10 @@ def cmd_trade(args) -> int:
     sj = st.json if isinstance(st.json, dict) else {}
     for e in (sj.get("errors") or [])[:3]:            # BUG-226: runtime folder / stability mark / rules file problems
         print(f"!! claude/handel: {e}")
+    from .features.offices import trade_precheck          # FEATURE-001: broker dead/unusable -> fail before PAUSE
     obs = obs_from_status(sj, paused=paused, stable_s=float(args.stable_s), last_ok=st.ok,
-                          danger=danger_reason(p.tools, p.cfg.get("holds", {})))
+                          danger=danger_reason(p.tools, p.cfg.get("holds", {})),
+                          broker_problem=trade_precheck(p.client, p.cfg.get("offices", {}), flow.state, sj))
     cmds = flow.step(obs, time.time())
     for c in cmds:
         if args.dry_run:

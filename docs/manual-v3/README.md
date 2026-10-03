@@ -16,10 +16,13 @@ All are tested against fixtures, **not yet live-tested**; the live checks are li
 | 09 Settings manager | `settings get/set/pending/verify/revert/restart-plan` | [09-settings.md](09-settings.md) |
 | 10 Camera director profiles | `camera status/profile/stats/watch` | [10-camera.md](10-camera.md) |
 | 11 Reachability guard | `reach check/what-if/correlate/points` | [11-reach.md](11-reach.md) |
+| F-001 Offices watch | `offices [--plan\|--apply]`, `offices watch` | [12-offices.md](12-offices.md) |
+| F-004 Hospital watch + plaster check | `hospital [staff\|plan]` | [13-hospital.md](13-hospital.md) |
 
 Add your own feature: create `df_llm_helper/features/<name>.py` with `KEY`, `DEFAULTS`, `register(sub)` and optionally
 `check_hook(pilot, report, dry)` (see the docstring of `df_llm_helper/features/__init__.py`).
 
 **Fair-play notes:** `tools` runs the pick fix only with an exception-register entry FP08 (player consent);
+`offices --apply` and `hospital staff --apply` need the register entries OFFICES / HOSPITAL;
 `settings set` needs `--reason` with the player's words; `perimeter seal --apply` and `defense design --apply --confirm`
 are explicit build orders, never automatic.

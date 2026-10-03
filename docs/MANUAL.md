@@ -86,7 +86,8 @@ The quote is stored in the field `player_consent` of `data/exceptions.jsonl` (ol
 
 If the rule ID (FPxx or Lxx) is in the register, the client lets the command through for exactly those objects.
 
-`exception add` accepts only known rule ids (FP01-FP13, L01-L31), numeric object ids, `--max-uses` >= 1 and a real
+`exception add` accepts only known rule ids (FP01-FP13, L01-L31) and the consent actions OFFICES (`offices --apply`)
+and HOSPITAL (`hospital staff --apply`), numeric object ids, `--max-uses` >= 1 and a real
 calendar date for `--expires` (`YYYY-MM-DD` = valid through the end of that day, or `YYYY-MM-DDTHH:MM:SSZ`). A broken
 register line is listed as `Register error: ...` by `exception list` and never grants anything.
 
@@ -167,6 +168,7 @@ After every change: `python -m df_llm_helper.selftest` (≈ 30 s, no DF needed; 
 - **Hospital** = a place (location) of type HOSPITAL on a zone (DF 53 has no zone type "hospital"). **Patient** = cannot stand, lies down (job `Rest`) or has wounds and is in the hospital; `#wounds` alone also counts healed scars (live: 56 instead of 6).
 - **Report only:** overlapping hospital zones, multiple or orphaned hospital locations (live: 3 locations, 2 without a zone; never delete), lying patients outside the hospital, "Give water: No water source" > 50 in the gamelog (→ `kb wasser_quelle`), meals < 0.2 per capita.
 - **Lua:** copy `lua/pilot_care.lua` to `hack/scripts/claude/` (live-untested).
+- **Hospital posts:** `care` sets labors; whether the hospital can work at all (staff posts of the location, water, supplies, plaster) is the hospital watch: `python -m df_llm_helper hospital` (FEATURE-004, section 10).
 
 ### 9.5 Forecast: `python -m df_llm_helper forecast` (spec 05)
 - **Automatic:** Every `python -m df_llm_helper check` appends a point to the time series (kv `forecast.series`, ≤ 50 points). A line appears in the check **only when crossing** `warn_days` (30) or `crit_days` (10), with measures (trade for food/seeds, farms, population stop, `tempo off`).
@@ -244,6 +246,15 @@ After every change: `python -m df_llm_helper.selftest` (≈ 30 s, no DF needed; 
 
 ## 10. v3 features (`specs-v3/`, not yet live-tested)
 Access guard, dig checker, freeze profiler, standstill guard, tool manager, remote-worker protection, item hygiene, defense designer, settings, camera profiles, reachability guard: see **[manual-v3/README.md](manual-v3/README.md)** (one page per feature).
+
+Feature requests (`Features/`), same plug-in form:
+- **Offices watch** `python -m df_llm_helper offices [--plan|--apply [--replace-unfit]]`, `offices watch` (FEATURE-001):
+  required offices alive and fit, one successor each, `claude/aemter` vacate/assign with the register entry OFFICES,
+  one wake line per state change, broker precheck in the trade automaton. See [manual-v3/12-offices.md](manual-v3/12-offices.md).
+- **Hospital watch** `python -m df_llm_helper hospital [staff [--apply]|plan]` (FEATURE-004): staff posts of the hospital
+  location (without them no care jobs), care labors, waiting patients, zone furniture, water from the hospital and in
+  the refuge, supplies, plaster check (no plaster order without gypsum-class stone). See
+  [manual-v3/13-hospital.md](manual-v3/13-hospital.md).
 
 ## 11. Refuge check and loop registry (2026-10-03, live-untested)
 

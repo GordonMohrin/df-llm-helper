@@ -17,7 +17,7 @@ from pathlib import Path
 # legacy name of the "player_consent" field in old register files (accepted as an alias when loading)
 LEGACY_CONSENT_KEY = "gor" "don_ja"
 
-__all__ = ["FairPlayError", "FORBIDDEN_COMMANDS", "check_command", "ExceptionRegistry", "Exception_"]
+__all__ = ["FairPlayError", "FORBIDDEN_COMMANDS", "CONSENT_ACTIONS", "check_command", "ExceptionRegistry", "Exception_"]
 
 
 class FairPlayError(PermissionError):
@@ -69,10 +69,23 @@ class Exception_:
     cmd_contains: str | None = None
 
 
+# consent gates that are no command pattern: the feature asks the register before it writes (FEATURE-001/004)
+CONSENT_ACTIONS = {
+    "OFFICES": "offices --apply: appoint successors via claude/aemter (nobles menu)",
+    "HOSPITAL": "hospital staff --apply: fill hospital location posts (location menu) + care labors",
+}
+
+
 def known_rule_ids() -> set[str]:
-    """Rule ids an exception can name: the command rules FPnn above and the lint rules Lnn (incl. L31 water)."""
+    """Rule ids an exception can name: the command rules FPnn above, the lint rules Lnn (incl. L31 water) and the
+    consent actions (OFFICES, HOSPITAL)."""
     from .lint import RULES          # lazy: lint imports this module
-    return {r for r, _, _ in FORBIDDEN_COMMANDS} | {r.id for r in RULES} | {"L31"}
+    return {r for r, _, _ in FORBIDDEN_COMMANDS} | {r.id for r in RULES} | {"L31"} | set(CONSENT_ACTIONS)
+
+
+def _rule_sort(r: str) -> tuple:
+    d = r.lstrip("FPL")
+    return (not d.isdigit(), r[0], int(d) if d.isdigit() else 0, r)
 
 
 def parse_expires(value) -> datetime | None:
@@ -216,7 +229,7 @@ class ExceptionRegistry:
         known = known_rule_ids()
         if action not in known:                                     # a typo would silently never match any rule
             raise FairPlayError(str(action), "unknown rule id (expected one of "
-                                             f"{', '.join(sorted(known, key=lambda r: (r[0], int(r.lstrip('FPL')))))})")
+                                             f"{', '.join(sorted(known, key=_rule_sort))})")
         exp = extra.get("expires")
         if exp is not None and parse_expires(exp) is None:
             raise FairPlayError(action, f"expires must be a real ISO date (YYYY-MM-DD, valid through the end of that "

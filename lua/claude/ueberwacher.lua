@@ -31,7 +31,7 @@ local function check()
       if c.thirst_timer > 45000 or c.hunger_timer > 60000 then
         local why = ''
         if sq >= 0 and squad_orders[sq] then why = why .. ' TRUPP-BEFEHL(' .. sq .. ')' end
-        if j == 'Rest' then why = why .. ' HOSPITAL/REST(Wasser?)' end
+        if j == 'Rest' then why = why .. ' HOSPITAL/REST(Wasser? Posten? df_llm_helper hospital)' end   -- FEATURE-004: the hospital watch checks posts, labors, water
         if u.mood ~= -1 then why = why .. ' STIMMUNG' end
         notf[#notf + 1] = string.format('%d %s durst=%d hunger=%d job=%s%s', u.id, name_of(u), c.thirst_timer, c.hunger_timer, j, why)
       end

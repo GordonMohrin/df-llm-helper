@@ -16,6 +16,8 @@ RELEASE_CMD never deletes an alarm/gefahr hold.
 OPEN during danger (BUG-225): with an alarm/siege (obs.danger) or a foreign window on top (Squads, a popup) the window
 cannot be opened; OPEN then waits ("blocked: ...", own timeout BLOCKED_MAX_S) instead of burning its retries, and an
 abort because the window did not open may re-enter OPEN while the caravan is still at the depot (marked goods stay).
+Broker precheck (FEATURE-001): the caller fills obs.broker_problem from the offices watch (dead/unusable broker); IDLE
+then fails at once with that message, sends nothing and writes no pause.hold, instead of timing out in BROKER.
 """
 from __future__ import annotations
 
@@ -75,6 +77,7 @@ class TradeObs:
     plan_ok: bool | None = None             # trade planner/dry run plausible?
     haul_pending: int | None = None         # BringItemToDepot jobs of the depot (None = unknown)
     danger: str = ""                        # BUG-225: danger state ('' = none; holds.danger_reason)
+    broker_problem: str = ""                # FEATURE-001: offices precheck ('' = broker usable or not checked)
 
 
 def blocker(o: TradeObs) -> str:
@@ -90,7 +93,7 @@ def blocker(o: TradeObs) -> str:
 
 
 def obs_from_status(j: dict, *, paused: bool = False, stable_s: float = 0.0, last_ok: bool = True,
-                    plan_ok: bool | None = None, danger: str = "") -> TradeObs:
+                    plan_ok: bool | None = None, danger: str = "", broker_problem: str = "") -> TradeObs:
     car = (j.get("caravans") or [{}])[0] if j.get("caravans") else {}
     broker = j.get("broker") or {}
     ui = j.get("trade_ui") or {}
@@ -101,7 +104,7 @@ def obs_from_status(j: dict, *, paused: bool = False, stable_s: float = 0.0, las
     return TradeObs(caravan_state=car.get("state"), broker_in_depot=bool(broker.get("in_depot")),
                     broker_job=broker.get("job"), focus=focus, trade_open=bool(ui.get("open")),
                     stable_s=stable_s, paused=paused, last_ok=last_ok, plan_ok=plan_ok,
-                    haul_pending=haul, danger=danger)
+                    haul_pending=haul, danger=danger, broker_problem=broker_problem)
 
 
 @dataclass
@@ -164,6 +167,10 @@ class TradeFlow:
             return self._abort_cmds(o)
 
         if s == "IDLE":
+            if o.caravan_state == "AtDepot" and o.broker_problem:
+                self.abort_reason = o.broker_problem      # FEATURE-001: no pause, no hold, no 300 s BROKER timeout
+                self._go("FAILED", now, o.broker_problem)
+                return []
             if o.caravan_state == "AtDepot":
                 self._go("PAUSE", now, "caravan at depot")
                 return [HOLD_CMD, "claude/advance 0"]
