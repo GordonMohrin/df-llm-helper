@@ -1,6 +1,6 @@
 # BUG-426: `killorder.lua` / `claude/mil guard` issue permanent KILL_LIST orders against a caged (trapped) enemy; the squads stay "in combat" and starve
 
-- **Status:** open (local workaround applied in the live game, not yet in the repo)
+- **Status:** fixed in 908dc28
 - **Severity:** S1 (soldiers did not eat or drink: hunger up to 71 000, thirst up to 48 000, `NOTFALL` wakes)
 - **Area:** `lua/claude/killorder.lua` (`is_target`), `claude/mil guard`, library module `siege` (same check needed)
 - **Reported:** 2026-10-03, commit `841361d`
@@ -39,3 +39,23 @@ The library `siege` module (target selection for kill orders) should apply the s
 
 ## Info needed
 Raw `unit` dump of the caged dragon (flags1 bits) and the squad order list before/after, if the player can capture them next time.
+
+## Fix
+- One shared helper `config.is_captive(u)` (caged, chained, or held in an item via `dfhack.units.getContainer`); `is_intruder` and
+  `is_ground_enemy` use it, `killorder.is_target` checks it first (as in the live workaround), `mil kill` skips such ids,
+  `pilot_siege` status/kill exclude them (also chained, before only caged), and the Python siege flow drops invaders reported as
+  `caged`/`chained`/`captive`.
+- Self-healing: `killorder.lua` is now also a module. `scrub_orders()` removes caged/chained/dead/missing units (and their histfigs) from
+  every kill order of the fort squads, deletes empty orders and logs each (squad, unit) once in `tools/out/killorder.log`. It runs on
+  every killorder run and watch tick and on every `claude/mil guard` tick, so no path keeps such an order alive.
+- Starving squads: a squad with a member at thirst > 40000 or hunger > 60000 gets no kill order and loses an existing one
+  (`apply`, and `relieve_starving()` on every `mil guard` tick); the next run sets the order again once they have eaten. The siege
+  flow does the same (`starve_thirst`/`starve_hunger`, `pilot_siege status` now reports member thirst/hunger): `pilot_siege clear`
+  plus a notice instead of a kill order.
+- Tests: `tests/test_bugs_live_mil.py` (caged/chained/contained enemy -> no order; free enemy -> order; old order on a caged unit
+  scrubbed; starving squad without order; `relieve_starving`; `mil kill`; siege flow; `pilot_siege status`).
+
+## Info needed
+Live check after `install-lua --apply`: `lua -f <hack>/scripts/claude/killorder.lua -- --status` with the caged dragoness in the fort:
+"Ziele im Inneren: 0"; squads 45/46/47 without KILL_LIST; `tools/out/killorder.log` shows `scrub ... (gefangen)` once if an old order
+was still there. The duplicate parallel loop (FEATURE-006) is not covered here.
