@@ -1,0 +1,84 @@
+{
+ "_synthetic": "SYNTHETIC (hand-written from the Run 5 numbers in the feature request, not recorded live)",
+ "area": {
+  "cavern": 2190,
+  "fort": 13000
+ },
+ "boulder_z": {
+  "130": 6000,
+  "131": 5550
+ },
+ "by_type": {
+  "BLOCKS": 569,
+  "BOULDER": 11550,
+  "CORPSE": 900,
+  "CORPSEPIECE": 405,
+  "FIGURINE": 57,
+  "GOBLET": 369,
+  "THREAD": 1340
+ },
+ "corpses": {
+  "dwarf": 0,
+  "other": 1305,
+  "other_fort": 455
+ },
+ "done": true,
+ "forb_corpses": {
+  "bone": 0,
+  "dwarf": 0,
+  "other": 0
+ },
+ "loose": 15190,
+ "marked": {
+  "pending": 0,
+  "sx": 0,
+  "sy": 0,
+  "sz": 0,
+  "unreachable": 0
+ },
+ "new": {},
+ "next": 60000,
+ "next_id": 500000,
+ "ok": true,
+ "reach_type": {
+  "BLOCKS": 569,
+  "BOULDER": 11550,
+  "CORPSE": 300,
+  "CORPSEPIECE": 155,
+  "FIGURINE": 57,
+  "GOBLET": 369
+ },
+ "ref": [
+  100,
+  100,
+  130
+ ],
+ "refs": 3,
+ "rotten": 0,
+ "scanned": 60000,
+ "since": null,
+ "start": 0,
+ "stock": {
+  "AMULET": 470,
+  "BIN": 30,
+  "BLOCKS": 700,
+  "BOULDER": 11553,
+  "BRACELET": 490,
+  "CORPSE": 900,
+  "CORPSEPIECE": 405,
+  "CROWN": 460,
+  "EARRING": 480,
+  "FIGURINE": 450,
+  "GOBLET": 420,
+  "RING": 480,
+  "SCEPTER": 470,
+  "THREAD": 1340,
+  "WOOD": 40
+ },
+ "total": 60000,
+ "unreach": {
+  "cavern": 2190,
+  "surface": 0,
+  "thread": 1340
+ }
+}

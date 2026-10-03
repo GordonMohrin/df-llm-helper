@@ -1,0 +1,79 @@
+{
+ "_synthetic": "SYNTHETIC (hand-written from the Run 5 numbers in the feature request, not recorded live)",
+ "by_class_cause": {
+  "container": {
+   "area": 300
+  },
+  "drink": {},
+  "food": {},
+  "material": {
+   "area": 743
+  },
+  "other": {}
+ },
+ "causes": {
+  "area": 1043,
+  "dump_zone": 0,
+  "foreign_made": 0,
+  "other_dead": 0,
+  "own_dead": 0,
+  "unknown": 0,
+  "used_ammo": 0
+ },
+ "classes": {
+  "container": 300,
+  "drink": 0,
+  "food": 0,
+  "material": 743,
+  "other": 0
+ },
+ "clusters": [
+  {
+   "classes": {
+    "container": 260,
+    "material": 640
+   },
+   "n": 900,
+   "pile": 495,
+   "x1": 86,
+   "x2": 101,
+   "y1": 112,
+   "y2": 127,
+   "z": 130
+  },
+  {
+   "classes": {
+    "container": 40,
+    "material": 103
+   },
+   "n": 143,
+   "x1": 96,
+   "x2": 111,
+   "y1": 100,
+   "y2": 111,
+   "z": 131
+  }
+ ],
+ "drink": {
+  "blocked": 475,
+  "in_forbidden_container": 475,
+  "total": 475
+ },
+ "flags": {
+  "dump": 0,
+  "in_job": 12
+ },
+ "food": {
+  "blocked": 0,
+  "in_forbidden_container": 0,
+  "total": 220
+ },
+ "hidden": 0,
+ "ok": true,
+ "standing": {
+  "forbid_other_dead_items": true,
+  "forbid_own_dead_items": false,
+  "forbid_used_ammo": false
+ },
+ "total": 1043
+}

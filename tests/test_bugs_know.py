@@ -61,7 +61,7 @@ def test_bug316_date_only_valid_through_end_of_day(tmp_path):
     assert parse_expires("2026-10-02T10:00:00Z") < parse_expires("2026-10-02")
 
 
-@pytest.mark.parametrize("rule", ["FP0", "L99", "FP14", "fp08", "FP08;rm", None, ""])
+@pytest.mark.parametrize("rule", ["FP0", "L99", "FP99", "fp08", "FP08;rm", None, ""])
 def test_bug316_unknown_rule_ids_refused(tmp_path, rule):
     with pytest.raises(FairPlayError):
         ExceptionRegistry(tmp_path / "ex.jsonl").add(rule, "r", "q")

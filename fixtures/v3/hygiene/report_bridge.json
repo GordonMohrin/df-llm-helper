@@ -1,0 +1,47 @@
+{
+ "_synthetic": "SYNTHETIC (hand-written from the Run 5 numbers in the feature request, not recorded live)",
+ "bridges": [
+  {
+   "by_type": {
+    "CORPSE": 300,
+    "CORPSEPIECE": 254,
+    "REMAINS": 100
+   },
+   "id": 4406,
+   "items": 654,
+   "levers": [
+    4410
+   ],
+   "state": "raised",
+   "x1": 130,
+   "x2": 132,
+   "y1": 105,
+   "y2": 107,
+   "z": 141,
+   "zone": 538
+  }
+ ],
+ "citizens": 55,
+ "dump_jobs": 4,
+ "dump_zones": [
+  {
+   "id": 538,
+   "under_stockpile": false,
+   "x1": 130,
+   "x2": 132,
+   "y1": 105,
+   "y2": 107,
+   "z": 141
+  }
+ ],
+ "idle": 6,
+ "ok": true,
+ "ref": [
+  100,
+  100,
+  130
+ ],
+ "standing": {
+  "forbid_other_dead_items": true
+ }
+}

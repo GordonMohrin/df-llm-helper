@@ -673,7 +673,7 @@ def test_muell_dump_marks_nearest_reachable_corpses_only(tmp_path):
     lines = out.splitlines()
     j = json.loads(lines[0])
     assert j["marked"] == 1 and j["kandidaten_erreichbar"] == 2 and j["naechster_rest_dist"] == 8
-    assert j["uebersprungen"] == {"dwarf": 1, "unreachable": 1}
+    assert j["uebersprungen"] == {"dwarf": 1, "unreachable": 1, "knochen": 0}
     # only the corpse at 13,13 (nearest, reachable); not the one already on the dump, not the dwarf, not the unreachable one
     assert lines[1].split() == ["false", "false", "true", "false", "false", "false"]
 

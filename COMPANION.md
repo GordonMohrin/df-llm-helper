@@ -54,7 +54,7 @@ df-llm-helper on its own):
 
 | Script | Used for | Needs config keys |
 |---|---|---|
-| `claude/muell` | marks corpses for the garbage dump, counts loose items | none (dump zones from the game) |
+| `claude/muell` | marks corpses for the garbage dump (never bones/skulls/shells/horns/teeth/hides: `uebersprungen.knochen`, FEATURE-002), counts loose items | none (dump zones from the game) |
 | `claude/kohle` | coal designations on maps without wood | `FORT_X`, `FORT_Y`, `DIG_MIN_Z` (+ `AQUIFER_CONFIRMED`), `SPERR_BOXEN` |
 | `claude/bauprog` | standing construction programme | `Z_MIN`/`Z_MAX` + own phases in `state/bauprog_extra.lua`; run-3 phases only with `BAU_PHASES_RUN3 = true` |
 | `claude/geo` | where rock/ore/aquifer layers lie (world geology) | `SURFACE_Z`/`Z_DOWN` (ceil default `Z_MIN - 1`) |
@@ -103,3 +103,26 @@ df-llm-helper on its own):
 
 Squads: DFHack has no way to delete a squad, and empty squads stay in the list. Reuse them with `claude/mil rename <squad>
 <name> --apply` and `claude/mil add <squad> <unit> --apply` instead of creating new ones (BUG-425).
+
+**Item flow and forbidden supplies (FEATURE-002/003, live-untested; fixtures are synthetic, see
+`fixtures/v3/hygiene/README.md` and `fixtures/v3/forbid/README.md`):**
+
+- `claude/pilot_forbid status` (read only): own forbidden items by class (container/drink/food/material/other), drinks and
+  food blocked by a forbidden container, `causes` per item (dump_zone, own_dead, other_dead, used_ammo, foreign_made,
+  area, unknown), the densest map blocks (`clusters`), the standing orders `forbid_*`, `flags.in_job`/`flags.dump` for
+  comparison, `hidden` (forbidden items on undiscovered tiles, counted only). Used by `forbid-watch`.
+- `claude/pilot_forbid fix <drink,food,container,material> [--max N] [--apply]`: clears the forbid flag of own items of
+  those classes (item menu); dry run without `--apply`; `other` (siege loot) refused; never foreign/trader goods, hidden
+  tiles or items on a dump zone; ids appended to `<home>/tools/out/forbid-fix.log`. Used by `forbid-watch fix`.
+- `claude/pilot_hygiene status <start> <n> [<since_id>]` now also returns `stock`, `new` (items with id >= since_id),
+  `reach_type`, `unreach` (cavern/surface/thread), `forb_corpses` (other/bone/dwarf) and `next_id`.
+- `claude/pilot_hygiene report` also returns `bridges` (bridge under a dump zone: state, items on it by type, levers) and
+  `standing` (standing orders `forbid_*`, read only).
+- `claude/pilot_hygiene piles` (read only): stockpiles (categories, tiles, free tiles, max_bins/max_barrels, bins inside),
+  all bins, free logs, open ConstructBin orders. `claude/pilot_hygiene caps` (read only): manager orders with their item
+  conditions and the stock of each condition's item type (total, in containers, loose).
+- `claude/pilot_hygiene mark <n> <TYPES> --unforbid [--apply]`: forbidden loose reachable non-dwarf corpses/parts get
+  forbid off + dump on (same hard rules as `mark`; `ids` in the answer).
+- `claude/pilot_hygiene bins_order <n> [--reserve <logs>] [--apply]`: one one-off `ConstructBin` (wood) manager order;
+  refused while one is open or when free logs < n + reserve. `claude/pilot_hygiene max_bins <stockpile> <n> [--apply]`:
+  the stockpile's max bins. Both with `--apply` only through df-llm-helper with the register entry FP14.

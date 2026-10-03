@@ -1,0 +1,213 @@
+{
+ "_synthetic": "SYNTHETIC (hand-written from the Run 5 numbers in the feature request, not recorded live)",
+ "ok": true,
+ "orders": [
+  {
+   "conds": [
+    {
+     "cmp": "AtLeast",
+     "flags": "hard+non_economic",
+     "subtype": -1,
+     "type": "BOULDER",
+     "value": 60
+    },
+    {
+     "cmp": "LessThan",
+     "flags": "",
+     "subtype": -1,
+     "type": "FIGURINE",
+     "value": 450
+    }
+   ],
+   "freq": "Daily",
+   "id": 10,
+   "job": "MakeCrafts",
+   "left": 8,
+   "total": 8
+  },
+  {
+   "conds": [
+    {
+     "cmp": "LessThan",
+     "flags": "",
+     "subtype": -1,
+     "type": "FIGURINE",
+     "value": 450
+    },
+    {
+     "cmp": "LessThan",
+     "flags": "",
+     "subtype": -1,
+     "type": "AMULET",
+     "value": 450
+    },
+    {
+     "cmp": "LessThan",
+     "flags": "",
+     "subtype": -1,
+     "type": "SCEPTER",
+     "value": 450
+    },
+    {
+     "cmp": "LessThan",
+     "flags": "",
+     "subtype": -1,
+     "type": "CROWN",
+     "value": 450
+    },
+    {
+     "cmp": "LessThan",
+     "flags": "",
+     "subtype": -1,
+     "type": "RING",
+     "value": 450
+    },
+    {
+     "cmp": "LessThan",
+     "flags": "",
+     "subtype": -1,
+     "type": "EARRING",
+     "value": 450
+    },
+    {
+     "cmp": "LessThan",
+     "flags": "",
+     "subtype": -1,
+     "type": "BRACELET",
+     "value": 450
+    }
+   ],
+   "freq": "Daily",
+   "id": 20,
+   "job": "MakeCrafts",
+   "left": 3,
+   "total": 3
+  },
+  {
+   "conds": [
+    {
+     "cmp": "LessThan",
+     "flags": "",
+     "subtype": -1,
+     "type": "GOBLET",
+     "value": 60
+    }
+   ],
+   "freq": "Daily",
+   "id": 30,
+   "job": "MakeGoblet",
+   "left": 3,
+   "total": 3
+  },
+  {
+   "conds": [
+    {
+     "cmp": "LessThan",
+     "flags": "",
+     "subtype": -1,
+     "type": "BLOCKS",
+     "value": 400
+    }
+   ],
+   "freq": "Daily",
+   "id": 31,
+   "job": "ConstructBlocks",
+   "left": 4,
+   "total": 4
+  },
+  {
+   "conds": [
+    {
+     "cmp": "LessThan",
+     "flags": "empty",
+     "subtype": -1,
+     "type": "BARREL",
+     "value": 10
+    }
+   ],
+   "freq": "Daily",
+   "id": 32,
+   "job": "MakeBarrel",
+   "left": 2,
+   "total": 2
+  },
+  {
+   "conds": [
+    {
+     "cmp": "LessThan",
+     "flags": "",
+     "subtype": -1,
+     "type": "BED",
+     "value": 40
+    }
+   ],
+   "freq": "Daily",
+   "id": 33,
+   "job": "ConstructBed",
+   "left": 4,
+   "total": 4
+  }
+ ],
+ "stock": {
+  "AMULET": {
+   "in_container": 420,
+   "loose": 50,
+   "stock": 470
+  },
+  "BARREL": {
+   "in_container": 0,
+   "loose": 0,
+   "stock": 30
+  },
+  "BED": {
+   "in_container": 0,
+   "loose": 0,
+   "stock": 10
+  },
+  "BLOCKS": {
+   "in_container": 0,
+   "loose": 569,
+   "stock": 700
+  },
+  "BOULDER": {
+   "in_container": 0,
+   "loose": 11550,
+   "stock": 11553
+  },
+  "BRACELET": {
+   "in_container": 420,
+   "loose": 70,
+   "stock": 490
+  },
+  "CROWN": {
+   "in_container": 400,
+   "loose": 60,
+   "stock": 460
+  },
+  "EARRING": {
+   "in_container": 420,
+   "loose": 60,
+   "stock": 480
+  },
+  "FIGURINE": {
+   "in_container": 400,
+   "loose": 50,
+   "stock": 450
+  },
+  "GOBLET": {
+   "in_container": 51,
+   "loose": 369,
+   "stock": 420
+  },
+  "RING": {
+   "in_container": 420,
+   "loose": 60,
+   "stock": 480
+  },
+  "SCEPTER": {
+   "in_container": 410,
+   "loose": 60,
+   "stock": 470
+  }
+ }
+}

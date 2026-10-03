@@ -11,15 +11,17 @@ All are tested against fixtures, **not yet live-tested**; the live checks are li
 | 04 Time-standstill / window guard | automatic in `waechter` | [04-freeze-guard.md](04-freeze-guard.md) |
 | 05 Work-tool manager | `tools check/status/after-load` | [05-tools.md](05-tools.md) |
 | 06 Remote-worker protection | `remote check/status/restore` | [06-remote.md](06-remote.md) |
-| 07 Item hygiene | `hygiene status/mark/zones` | [07-hygiene.md](07-hygiene.md) |
+| 07 Item hygiene (+ FEATURE-002 flow budget) | `hygiene status/mark/zones/flow/caps/bins` | [07-hygiene.md](07-hygiene.md) |
 | 08 Defense designer | `defense design/status/stats` | [08-defense.md](08-defense.md) |
 | 09 Settings manager | `settings get/set/pending/verify/revert/restart-plan` | [09-settings.md](09-settings.md) |
 | 10 Camera director profiles | `camera status/profile/stats/watch` | [10-camera.md](10-camera.md) |
 | 11 Reachability guard | `reach check/what-if/correlate/points` | [11-reach.md](11-reach.md) |
+| FEATURE-003 Forbidden supplies | `forbid-watch status/fix` | [12-forbid-watch.md](12-forbid-watch.md) |
 
 Add your own feature: create `df_llm_helper/features/<name>.py` with `KEY`, `DEFAULTS`, `register(sub)` and optionally
 `check_hook(pilot, report, dry)` (see the docstring of `df_llm_helper/features/__init__.py`).
 
 **Fair-play notes:** `tools` runs the pick fix only with an exception-register entry FP08 (player consent);
 `settings set` needs `--reason` with the player's words; `perimeter seal --apply` and `defense design --apply --confirm`
-are explicit build orders, never automatic.
+are explicit build orders, never automatic; `hygiene bins --apply` needs the register entry FP14; `forbid-watch fix --apply`
+and `hygiene mark --unforbid --apply` only clear the forbid flag of own items (dry run without `--apply`).
