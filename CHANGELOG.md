@@ -5,8 +5,9 @@
   unless the enemies near the fort grow by more than `ALERT_MANUAL_GROW` or a new major threat appears (flag
   `tools/alert-manual-off.flag`). Prisoners (caged, chained, held in a cage item: `config.is_captive`) never count as
   threats. The refuge burrow is checked for drink/water and food (`claude/mil refuge check`, `gefahr` selftest
-  `ZUFLUCHT OHNE WASSER`/`ZUFLUCHT OHNE ESSEN`, `refuge.supply` in `gefahr status`); automation does not lock citizens
-  into a refuge without drink or water (`config.REFUGE_REQUIRE_WATER`, warning in `notfall.flag`). The supervisor
+  `ZUFLUCHT OHNE WASSER`/`ZUFLUCHT OHNE ESSEN`, `refuge.supply` in `gefahr status`); with
+  `config.REFUGE_REQUIRE_WATER = true` automation does not lock citizens into a refuge without drink or water (warning in
+  `notfall.flag`); the default `false` still calls them in during a siege and warns. The supervisor
   names the real cause instead of recommending a command the watchdog undid.
 - BUG-425: `claude/mil add` picks an explicit free slot (leader slot last) and always reports `slot` or `reason`
   (`squad full`, `unit already in squad N`, `addToSquad refused ...`); `mil create` always returns `squad_id`

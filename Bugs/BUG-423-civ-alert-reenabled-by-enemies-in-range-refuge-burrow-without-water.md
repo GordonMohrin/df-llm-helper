@@ -69,10 +69,11 @@ Decision: should an unsupplied refuge block the *automatic* alarm completely (ci
   water) and `ZUFLUCHT OHNE ESSEN` go into the `gefahr` selftest (shown by `gefahr status`, used by the supervisor), into
   `refuge.supply` of `gefahr status`, into `mil refuge --apply`, and into the new read-only `claude/mil refuge check`. The snapshot sets
   `refuge_ok = False` and `refuge_problems` for an unsupplied refuge, so `digest` reports "Refuge burrow not ok".
-- **Decision (Info needed):** automation does NOT switch the alert on while the refuge has no drink and no water source
-  (`config.REFUGE_REQUIRE_WATER = true`); the watchdog writes `notfall.flag` `ZUFLUCHT OHNE WASSER: N Feinde in ALERT_RANGE,
-  Zivilwarnung NICHT eingeschaltet ...` every 5 min instead. Missing food only warns. Set `REFUGE_REQUIRE_WATER = false` to keep the
-  old behaviour (alert on, warning only). `claude/alert on` by hand always works.
+- **Decision (Info needed):** `config.REFUGE_REQUIRE_WATER` (default **false**, set in the merge of the fix): with an
+  unsupplied refuge the automation still switches the alert on during a siege (enemies kill faster than thirst) and reports
+  `ZUFLUCHT OHNE WASSER` (selftest, `mil refuge check`, digest "Refuge burrow not ok") so the refuge is extended before. With
+  `true` the automation does NOT switch the alert on while the refuge has no drink and no water source and writes `notfall.flag`
+  `ZUFLUCHT OHNE WASSER: ...` every 5 min instead. `claude/alert on` by hand always works.
 - **Supervisor:** the `ZIVILWARNUNG seit > 3 Min AN` text now names the cause (`N Feinde in ALERT_RANGE`, refuge check, hold time of
   `alert off`); "Watchdog neu starten" is only suggested when no enemy is near.
 - Tests: `tests/test_bugs_live_mil.py` (watchdog cycles with manual off / growing enemies / no supply / forbidden drinks / caged,

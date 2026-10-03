@@ -68,6 +68,7 @@ end
 if FORBIDDEN_SUPPLY then
   df.global.world.items.other.DRINK = { { flags = { forbid = true }, pos = { x = 95, y = 95, z = 100 } } }
 end
+if REQUIRE_WATER ~= nil then reqscript('claude/config').REFUGE_REQUIRE_WATER = REQUIRE_WATER end
 SCHED = {}
 package.loaded['repeat-util'].scheduleEvery = function(key, n, unit, fn) SCHED[key] = fn end
 """
@@ -138,7 +139,7 @@ def test_bug423_manual_off_yields_when_many_more_enemies_come(tmp_path):
 @lua
 @pytest.mark.parametrize("kw", [{}, {"FORBIDDEN_SUPPLY": "true"}])
 def test_bug423_refuge_without_water_is_not_used_and_reported(tmp_path, kw):
-    civ, gate, tools = cycles(tmp_path, **kw)
+    civ, gate, tools = cycles(tmp_path, REQUIRE_WATER="true", **kw)
     assert civ == ["0", "0", "0"] and gate[:2] == ["false", "refuge_no_water"]
     assert "ZUFLUCHT OHNE WASSER" in (tools / "notfall.flag").read_text()
 
@@ -170,7 +171,7 @@ def test_bug423_selftest_reports_the_unsupplied_refuge(tmp_path):
 def test_bug423_mil_refuge_check_is_read_only(tmp_path):
     out, r = run("mil", "refuge", "check", tmp_path=tmp_path, setup=world(tmp_path))
     j = json.loads(out)
-    assert j["refuge"]["water_ok"] is False and j["require_water"] is True
+    assert j["refuge"]["water_ok"] is False and j["require_water"] is False          # default: alert on + warning
     assert any("ZUFLUCHT OHNE WASSER" in p for p in j["refuge"]["problems"])
 
 
@@ -444,3 +445,12 @@ def test_bug426_pilot_siege_lists_no_caged_invader(tmp_path):
     assert r.returncode == 0, r.stderr
     j = json.loads(r.stdout.splitlines()[0])
     assert [i["id"] for i in j["invaders"]] == [2]
+
+
+@lua
+def test_bug423_default_unsupplied_refuge_still_calls_civilians_in_with_a_warning(tmp_path):
+    """Default REFUGE_REQUIRE_WATER = false: during a siege the citizens are still called in; the missing water is reported."""
+    civ, gate, tools = cycles(tmp_path)
+    assert civ == ["1", "1", "1"] and gate[0] == "true"
+    out, _ = run("gefahr", "status", tmp_path=tmp_path, setup=world(tmp_path))
+    assert any(p.startswith("ZUFLUCHT OHNE WASSER") for p in json.loads(out)["selbsttest"])

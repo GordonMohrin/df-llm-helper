@@ -136,9 +136,10 @@ SIEGE_MIN    = 6      -- >= this many ground enemies in SLOWMO_RANGE -> tools/si
 -- again earlier if the enemies near the fort grow by more than ALERT_MANUAL_GROW or a new major threat (class A) appears.
 ALERT_MANUAL_HOLD_S = 900
 ALERT_MANUAL_GROW   = 5
--- Refuge supply (BUG-423): true = automation does NOT switch the civilian alert on while the refuge burrow has neither drink nor a
--- well/water tile (citizens died of thirst in an unsupplied refuge); a warning flag is written instead. false = warn only.
-REFUGE_REQUIRE_WATER = true
+-- Refuge supply (BUG-423): false (default) = the civilian alert still goes on when the refuge burrow has neither drink nor a
+-- well/water tile, with a ZUFLUCHT OHNE WASSER warning (enemies kill faster than thirst; the selftest warns long before a
+-- siege). true = automation does NOT switch the alert on with an unsupplied refuge and writes the warning flag instead.
+REFUGE_REQUIRE_WATER = false
 
 -- Aquifer: 'unknown' until tiles are discovered. aquifer_seen() returns {z -> number of seen water_table tiles}.
 -- AQUIFER_CONFIRMED is added by infra/erkundung; dig_min_z() considers both. Lesson run 4: soil layers with AQUIFER flag
