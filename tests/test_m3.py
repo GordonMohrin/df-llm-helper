@@ -11,7 +11,7 @@ from df_llm_helper.client import MockClient
 from df_llm_helper.kb import KB
 from df_llm_helper.overlay import overlay_lines, overlay_send
 from df_llm_helper.store import Store
-from df_llm_helper.trade_flow import ALLOWED, FOCUS_TRADE, TradeFlow, TradeObs, obs_from_status
+from df_llm_helper.trade_flow import ALLOWED, FOCUS_TRADE, HOLD_CMD, RELEASE_CMD, TradeFlow, TradeObs, obs_from_status
 from helpers import ROOT
 
 GAMELOG = (FIX / "logs" / "gamelog_selected.txt").read_bytes().decode("cp437").splitlines()
@@ -112,12 +112,12 @@ def test_trade_happy_path():
     f = TradeFlow()
     cmds = run_happy(f)
     assert f.state == "DONE", f.log
-    assert cmds == ["claude/advance 0", "quicksave", "claude/handel prep --live",
-                    "claude/handel broker --live --force-job", "claude/advance run", "claude/handel plan",
-                    "claude/handel mark --live", "claude/advance 0", "claude/handel open --live",
+    assert cmds == [HOLD_CMD, "claude/advance 0", "quicksave", "claude/handel prep --live",
+                    "claude/handel broker --live --force-job", RELEASE_CMD, "claude/advance run", "claude/handel plan",
+                    "claude/handel mark --live", HOLD_CMD, "claude/advance 0", "claude/handel open --live",
                     "claude/handel select --dry", "claude/handel select --live",
                     "claude/handel confirm --live", "claude/handel accept --live", "claude/handel finish --live",
-                    "claude/handel release --live", "claude/advance run"]
+                    "claude/handel release --live", RELEASE_CMD, "claude/advance run"]
 
 
 def test_trade_waits_for_approval():
@@ -125,9 +125,9 @@ def test_trade_waits_for_approval():
     cmds = run_happy(f, approve=False)
     # RETEST 2026-10-02: no approval -> window closed and the game runs on while waiting (WAIT)
     assert f.state == "WAIT" and "claude/handel select --live" not in cmds
-    assert cmds[-2:] == ["claude/handel finish --live", "claude/advance run"]
+    assert cmds[-3:] == ["claude/handel finish --live", RELEASE_CMD, "claude/advance run"]
     f.approve()
-    assert f.step(ok_obs(), 1000.0) == ["claude/advance 0", "claude/handel open --live"] and f.state == "OPEN"
+    assert f.step(ok_obs(), 1000.0) == [HOLD_CMD, "claude/advance 0", "claude/handel open --live"] and f.state == "OPEN"
 
 
 def test_trade_mark_waits_for_the_haulers():
@@ -135,7 +135,7 @@ def test_trade_mark_waits_for_the_haulers():
     f = TradeFlow(state="MARK", since=0.0)
     assert f.step(ok_obs(broker_in_depot=True, haul_pending=50), 30.0) == [] and f.state == "MARK"
     assert f.step(ok_obs(broker_in_depot=True, haul_pending=None), 60.0) == [] and f.state == "MARK"
-    assert f.step(ok_obs(broker_in_depot=True, haul_pending=0), 90.0) == ["claude/advance 0",
+    assert f.step(ok_obs(broker_in_depot=True, haul_pending=0), 90.0) == [HOLD_CMD, "claude/advance 0",
                                                                           "claude/handel open --live"]
     assert f.state == "OPEN" and "goods in the depot" in f.log[-1]
     g = TradeFlow(state="MARK", since=0.0)
@@ -154,11 +154,13 @@ def test_trade_obs_counts_haul_jobs():
 def test_trade_window_not_open_aborts_with_rollback():
     f = TradeFlow(state="OPEN")
     cmds = []
-    for i in range(4):
-        cmds += f.step(ok_obs(broker_in_depot=True), float(i))
+    for i in range(12):                                    # BUG-225: 5 retries, 8 s apart, before the abort
+        cmds += f.step(ok_obs(broker_in_depot=True), float(i * 8))
+        if f.state == "ABORT":
+            break
     assert f.state == "ABORT" and f.abort_reason == "window not open"
-    assert cmds[-2:] == ["claude/handel release --live", "claude/advance run"]
-    assert cmds.count("claude/handel open --live") == 2
+    assert cmds[-3:] == ["claude/handel release --live", RELEASE_CMD, "claude/advance run"]
+    assert cmds.count("claude/handel open --live") == 5
 
 
 def test_trade_broker_loses_job_then_timeout():
@@ -181,10 +183,10 @@ def test_trade_caravan_leaves_aborts(state):
 def test_trade_other_failures():
     f = TradeFlow(state="PAUSE")
     for i in range(3):
-        assert f.step(ok_obs(paused=False), i) == ["claude/advance 0"]
-    assert f.step(ok_obs(paused=False), 4) == [] and f.state == "FAILED"
+        assert f.step(ok_obs(paused=False), i) == [HOLD_CMD, "claude/advance 0"]
+    assert f.step(ok_obs(paused=False), 4) == [RELEASE_CMD] and f.state == "FAILED"
     f = TradeFlow(state="SAVE")
-    assert f.step(ok_obs(last_ok=False), 1) == [] and f.state == "FAILED"
+    assert f.step(ok_obs(last_ok=False), 1) == [RELEASE_CMD] and f.state == "FAILED"
     f = TradeFlow(state="SELECT_DRY")
     f.step(ok_obs(trade_open=True, focus=FOCUS_TRADE, stable_s=3, plan_ok=False), 1)
     assert f.state == "ABORT" and "implausible" in f.abort_reason
