@@ -72,7 +72,7 @@ _READ_PILOT = {("claude/pilot_water", "scan"), ("claude/pilot_water", "near"), (
 _NO_STATUS = {"claude/arbeit", "claude/ueberwacher"}
 # whole-map scanners: they change nothing but hold the game's main thread for seconds (BUG-415) -> never treated as a
 # free read (loop guard / max_per_hour apply), also with --dry
-_HEAVY = {"claude/ores", "claude/geo", "claude/zugaenge", "claude/kohle", "claude/erzdig"}
+_HEAVY = {"claude/ores", "claude/geo", "claude/zugaenge", "claude/kohle", "claude/erzdig", "claude/pfadcheck"}
 # options that turn a read sub-command into a write (mil tabelle --file writes a file, --say announces in the game)
 _WRITE_OPTS = {"--file", "--say"}
 

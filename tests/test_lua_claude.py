@@ -817,3 +817,14 @@ def test_bug125_util_forbidden_follows_nested_containers(tmp_path):
             "dfhack.items.getContainer = function(it) return it._in end\n"
             "print(util.forbidden(drink), util.forbidden(wagon), util.forbidden({ flags = { forbid = false } }))\n")
     assert run_snippet(code, tmp_path).split() == ["true", "true", "false"]
+
+
+# ---------------------------------------------------------------- BUG-424: claude/pfadcheck = pilot_perimeter scan
+@pytest.mark.parametrize("args,expect", [([], ["-", "-", "-", "-", "-"]),
+                                         ([90, 100, 133, 127, 137], ["90", "100", "133", "127", "137"])])
+def test_bug424_pfadcheck_delegates_to_pilot_perimeter(tmp_path, args, expect):
+    setup = ("dfhack.run_script = function(name, ...)\n"
+             "  print(require('json').encode({ name = name, args = { ... } }))\nend\n")
+    out, r = run("pfadcheck", *args, tmp_path=tmp_path, setup=setup)
+    assert r.returncode == 0, r.stderr
+    assert one_json(out) == {"name": "claude/pilot_perimeter", "args": ["scan"] + expect}

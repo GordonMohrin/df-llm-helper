@@ -115,6 +115,8 @@ local CH = {
   ['_'] = { 'EMPTY', subterranean = false }, ["'"] = { 'EMPTY', outside = true, subterranean = false },
   V = { 'EMPTY' }, ['~'] = { 'FLOOR', flow = 7 }, M = { 'FLOOR', flow = 7, magma = true },
   D = { 'FLOOR', building = 'Door' }, T = { 'FLOOR', building = 'Trap' },
+  -- BUG-424: door whose block occupancy reads as blocking (worst case of a forbidden/locked door): still a way in
+  L = { 'FLOOR', building = 'Door', occ = 'Obstacle' },
   W = { 'EMPTY', building = 'Well', occ = 'Well' },      -- well: open space in DF, blocks walking (walk group 0)
 }
 local tiles = {}
@@ -178,7 +180,13 @@ package.loaded['json'] = { encode = encode, decode = decode }
 function reqscript(name)
   if name == 'claude/util' then return util end
   -- the grid fixtures are small synthetic maps: no enclave filter in pilot_perimeter (MOCK_MINCOMP to test it)
-  if name == 'claude/config' then return { PERIMETER_MINCOMP = tonumber(os.getenv('MOCK_MINCOMP') or '1') } end
+  -- MOCK_CORE = "x,y,z,zmin,zmax" -> FORT_REFS[1] / Z_MIN / Z_MAX of the fort config (BUG-424: '-' arguments)
+  if name == 'claude/config' then
+    local c = { PERIMETER_MINCOMP = tonumber(os.getenv('MOCK_MINCOMP') or '1') }
+    local x, y, z, z1, z2 = (os.getenv('MOCK_CORE') or ''):match('(%d+),(%d+),(%d+),(%d+),(%d+)')
+    if x then c.FORT_REFS, c.Z_MIN, c.Z_MAX = { { tonumber(x), tonumber(y), tonumber(z) } }, tonumber(z1), tonumber(z2) end
+    return c
+  end
   error('reqscript ' .. name)
 end
 

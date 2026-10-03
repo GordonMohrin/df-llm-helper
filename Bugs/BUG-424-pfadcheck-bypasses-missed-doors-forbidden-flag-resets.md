@@ -1,6 +1,6 @@
 # BUG-424: `claude/pfadcheck` missed bypasses of the trap alley (diagonal rule / box limits); `door_flags.forbidden` is reset by the game after seconds -> doors are no reliable seal
 
-- **Status:** open
+- **Status:** fixed in COMMIT
 - **Severity:** S2 (the defence plan relied on "enemies can only come through the traps"; two bypasses stayed unnoticed)
 - **Area:** `claude/pfadcheck.lua` (orchestrator script, lives only in the game folder `dwarf-fortress/lua/claude/pfadcheck.lua`, **not in the repo**), `lua/pilot_perimeter.lua` (8-neighbour rule, correct), `df_llm_helper` command `perimeter` (`seal` proposal)
 - **Reported:** 2026-10-02, commit `22b9b03`
@@ -39,3 +39,37 @@ Both fixtures pass; `perimeter` on a fixture with a forbidden door in the only g
 
 ## Info needed
 Player: raw answers of `claude/pfadcheck` plus the tile type and building at `(91,102,133)` and `(97,95,133)` (`dfhack.maps.getTileType`, `dfhack.buildings.findAtTile`) so that cause (a)-(d) can be fixed in a recorded fixture.
+
+## Fix
+The repo never had the game-folder `claude/pfadcheck`; its three suspect rules are now covered by the repo scanner, and
+the game copy is replaced on the next `install-lua`:
+
+- `lua/claude/pfadcheck.lua` (new, same name, so `install-lua --apply` overwrites the old copy): a front end of
+  `claude/pilot_perimeter scan` with the fort's config values. Output adds `core_reached` (= old "A"), `bypass`
+  (= old "B": reaches the core without a trap tile), `entries` `[x,y,z,core,notrap]` (notrap 1 = bypass tile) and
+  `door_entries`.
+- Cause (a), diagonal rule: `pilot_perimeter`/`_grid.py` already use DF's rule (8 directions, a diagonal step between
+  two corner-touching walls is allowed). Now pinned by the fixture `W.`/`.W` (`DIAG_TXT`) in Python and Lua.
+- Cause (b)/(d), doors: `pilot_perimeter` classifies door/hatch tiles as `D` **before** the building-occupancy test,
+  so a locked/forbidden door is always a way in, even if the game showed its tile as blocking (mock char `L` =
+  door with `Obstacle` occupancy; the previous script returned no entry there). `perimeter seal` no longer leaves a
+  door entry to the player: it proposes `Cw` walls on the inside floor behind the door, with the note "door/hatch ...
+  is no seal (forbidden/locked doors are reset by the game)"; no door at all on its own -> "deconstruct the door and
+  build a wall on its tile". Manual `docs/manual-v3/01-perimeter.md` says doors are never a seal.
+- Cause (c), box limits: `perimeter.core` and `perimeter.z_range` default to `null`; `pilot_perimeter` takes `-` for
+  them and uses `FORT_REFS[1]` and `Z_MIN..Z_MAX` from `claude/config` (x/y are always the whole map). Without
+  FORT_REFS it refuses with a usage error instead of guessing. `perimeter allow` warns near the core taken from the
+  last scan or the config fort centre.
+- Tests: `tests/test_perimeter.py` (`test_bug424_*`: diagonal gap, 1-tile hole -> `B=Y` and closed -> `B=n`, forbidden
+  door in the only gap -> reported open + wall proposal, Lua == Python, locked-door occupancy, `-` arguments with
+  `MOCK_CORE`), `tests/test_lua_claude.py` (`test_bug424_pfadcheck_delegates_to_pilot_perimeter`).
+
+## Info needed (live check)
+After `install-lua --apply`:
+1. `dfhack-run claude/pfadcheck` must report `"bypass": true` while the hole `(91,102,133)` or the side door
+   `(97,95,133)` is open, with these tiles (or their inside neighbour) among the `entries` with notrap 1.
+2. If it still misses them, record for both tiles: `dfhack.maps.getTileType`, `df.tiletype.attrs[tt].shape`,
+   `dfhack.maps.getTileFlags(x,y,z).outside`/`.hidden`, `dfhack.buildings.findAtTile(x,y,z)` type and the block
+   `occupancy[x%16][y%16].building` value; then a fixture can reproduce the remaining cause.
+3. Do not use door locks as a defence: `python -m df_llm_helper perimeter seal --dry-run` lists the walls instead.
+

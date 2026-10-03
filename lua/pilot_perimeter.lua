@@ -1,4 +1,6 @@
--- claude/pilot_perimeter scan|start cx cy cz zmin zmax [budget] [min_outside] | result            (df-llm-helper spec v3-01, LIVE-UNTESTED)
+-- claude/pilot_perimeter scan|start [cx cy cz zmin zmax [budget] [min_outside]] | result      (df-llm-helper spec v3-01, LIVE-UNTESTED)
+--   cx cy cz / zmin zmax may be '-' (or left out): core = config FORT_REFS[1], z range = config Z_MIN..Z_MAX (BUG-424:
+--   no hard-coded fort box; the old game-folder claude/pfadcheck used x30..150, y60..135, z127..137).
 -- Accesses from outside into the fort (algorithm of lua/claude/zugaenge.lua, JSON output):
 --   1. multi-source BFS from every walkable tile with designation.outside (levels zmin..zmax)
 --   2. entry = reached walkable INSIDE tile that has a reached outside tile as move neighbor
@@ -10,6 +12,10 @@
 --         (the prototype held it ~10 s); the result goes to <df-llm-helper home>/tools/out/perimeter_scan.json
 -- result: prints that file ({"done":false} while running).
 -- Read only. Unrevealed tiles are never walked (they are not walkable here).
+-- Movement = DF's rule (BUG-424): all 8 directions, a diagonal step is allowed even when BOTH orthogonal tiles are walls
+-- (two walls touching only at a corner do not seal). Doors/hatches are ALWAYS walkable ('D'), whatever their
+-- forbidden/locked state: the game resets door_flags.forbidden (live 02.10.), so a locked door is no seal.
+-- Result summary: core_reached (A: the outside reaches the core) and bypass (B: it does so without stepping on a trap).
 local util = reqscript('claude/util')
 if not util.require_fort() then return end
 local json = require('json')
@@ -43,25 +49,31 @@ local function blocked_by_building(x, y, z)
 end
 
 -- tile classes (same encoding as df_llm_helper/features/_grid.py, reduced to what the path logic needs)
+local function building_type(x, y, z)
+  if not (dfhack.buildings and dfhack.buildings.findAtTile) then return nil end
+  local b = dfhack.buildings.findAtTile(x, y, z)
+  return b and b:getType() or nil
+end
+
 local function tch(x, y, z)
   if x < 0 or y < 0 or z < 0 or x >= XM or y >= YM or z >= ZM then return '#' end
   local d = dfhack.maps.getTileFlags(x, y, z)
   if not d or d.hidden then return '?' end
   if d.flow_size > 0 then return '~' end
-  if blocked_by_building(x, y, z) then return 'W' end
   local tt = dfhack.maps.getTileType(x, y, z)
   local at = tt and df.tiletype.attrs[tt]
   if not at then return '#' end
   local sh, out = at.shape, d.outside
+  local bt = FLOORISH[sh] and building_type(x, y, z) or nil
+  -- BUG-424: a door/hatch is a way in, locked (forbidden) or not, whatever occupancy the game shows for it
+  if bt ~= nil and (bt == df.building_type.Door or bt == df.building_type.Hatch) then return 'D' end
+  if blocked_by_building(x, y, z) then return 'W' end
   if sh == SHAPE.RAMP then return out and '/' or '^' end
   if sh == SHAPE.STAIR_UPDOWN then return out and 'x' or 'X' end
   if sh == SHAPE.STAIR_UP then return '<' end
   if sh == SHAPE.STAIR_DOWN then return '>' end
   if FLOORISH[sh] then
-    if dfhack.buildings and dfhack.buildings.findAtTile then
-      local b = dfhack.buildings.findAtTile(x, y, z)
-      if b and b:getType() == df.building_type.Trap then return 'T' end
-    end
+    if bt ~= nil and bt == df.building_type.Trap then return 'T' end
     return out and ',' or '.'
   end
   return '#'
@@ -206,10 +218,13 @@ local function new_job(cx, cy, cz, zmin, zmax, budget, mincomp)
   end
 
   function J.result()
-    local list, traps = {}, 0
+    local list, traps, doors, a_core, b_bypass = {}, 0, {}, false, false
     for _, k in ipairs(J.entries or {}) do
       local x, y, z = unkey(k)
       list[#list + 1] = { x, y, z, J.core[k] and 1 or 0, J.nt[k] and 1 or 0 }
+      a_core = a_core or (J.core[k] and true or false)
+      b_bypass = b_bypass or (J.nt[k] and true or false)
+      if J.cache[k] == 'D' then doors[#doors + 1] = { x, y, z } end
     end
     table.sort(list, function(p, q)
       if p[3] ~= q[3] then return p[3] < q[3] end
@@ -218,6 +233,7 @@ local function new_job(cx, cy, cz, zmin, zmax, budget, mincomp)
     end)
     for _, c in pairs(J.cache) do if c == 'T' then traps = traps + 1 end end
     return { ok = true, done = true, core = { J.cx, J.cy, J.cz }, z_range = { J.zmin, J.zmax }, entries = list,
+             core_reached = a_core, bypass = b_bypass, door_entries = doors,
              traps = traps, visited = J.visited, ms = math.floor((os.clock() - J.t0) * 1000) }
   end
   return J
@@ -244,8 +260,17 @@ end
 
 if cmd == 'scan' or cmd == 'start' then
   local cx, cy, cz, zmin, zmax = n(2), n(3), n(4), n(5), n(6)
+  if not (cx and cy and cz and zmin and zmax) then       -- BUG-424: '-' / missing -> the fort's config values
+    local okc, pcfg = pcall(reqscript, 'claude/config')
+    pcfg = (okc and type(pcfg) == 'table') and pcfg or {}
+    local ref = type(pcfg.FORT_REFS) == 'table' and pcfg.FORT_REFS[1] or nil
+    if not (cx and cy and cz) and type(ref) == 'table' then cx, cy, cz = tonumber(ref[1]), tonumber(ref[2]), tonumber(ref[3]) end
+    zmin = zmin or tonumber(pcfg.Z_MIN)
+    zmax = zmax or tonumber(pcfg.Z_MAX)
+  end
   if not (cx and cy and cz and zmin and zmax) then
-    util.emit({ ok = false, error = cmd .. ' cx cy cz zmin zmax [budget] [min_outside]' })
+    util.emit({ ok = false, error = cmd .. ' cx cy cz zmin zmax [budget] [min_outside] (or - for the config values '
+                                         .. 'FORT_REFS[1], Z_MIN, Z_MAX: not set)' })
     return
   end
   local J = new_job(cx, cy, cz, zmin, zmax, n(7), n(8))
@@ -274,5 +299,5 @@ elseif cmd == 'result' then
   local s = read_file()
   if s then print(s) else util.emit({ ok = false, error = 'no scan result' }) end
 else
-  util.emit({ ok = false, error = 'Usage: claude/pilot_perimeter scan|start cx cy cz zmin zmax [budget] [min_outside] | result' })
+  util.emit({ ok = false, error = 'Usage: claude/pilot_perimeter scan|start [cx cy cz zmin zmax [budget] [min_outside]] | result' })
 end
