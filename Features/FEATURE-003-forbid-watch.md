@@ -1,6 +1,6 @@
 # FEATURE-003: `forbid-watch` - count forbidden own containers/food/drinks/building material and find the cause
 
-- **Status:** proposed
+- **Status:** implemented in 7067417
 - **Priority:** P1 (mass-forbidden barrels contributed to > 10 deaths by dehydration; nothing warned)
 - **Requested by:** Gordon (player), 2026-10-02, via the local orchestrator
 - **Area:** new `df_llm_helper forbid-watch` (+ Lua `lua/pilot_forbid.lua`), `digest`/`wake` integration, extension of `hygiene` (see BUG-125)
@@ -29,3 +29,43 @@ Reading is free. `--fix` only toggles the player-visible `forbid` flag of own it
 
 ## Info needed
 Player: one recorded `forbid-watch`-style Lua answer from the live game (a quick `dfhack-run lua` count of `item.flags.forbid` by type is enough) and 20 sample game log lines with `Forbidden area`.
+
+## Implementation
+Commit 7067417. Built on the BUG-125 fix (`util.forbidden()`, `claude/pilot_hygiene forbid`, digest `Drinks Nd (+M
+forbidden)`).
+
+- `lua/pilot_forbid.lua` (new): `status` (read only) - own forbidden items by class (container/drink/food/material/other),
+  drinks/food blocked by a forbidden container, `flags.in_job`/`flags.dump` for comparison, a cause per item (`dump_zone`,
+  `own_dead`, `other_dead`, `used_ammo`, `foreign_made`, `area` = >= 20 forbidden items in one 16x16 map block, `unknown`),
+  the 5 densest blocks with stockpile/dump-zone id, standing orders `forbid_*`, forbidden items on hidden tiles (count
+  only). `fix <classes> [--max N] [--apply]` clears `flags.forbid` of own items (drink/food/container/material; `other` =
+  siege loot refused; foreign/trader/hostile, hidden tiles and dump-zone items never), ids to `tools/out/forbid-fix.log`.
+- `df_llm_helper/features/forbid_watch.py` (new): `python -m df_llm_helper forbid-watch [status] [--json] [--dry-run]`,
+  `forbid-watch fix [--classes ...] [--max N] [--apply]` (`--fix` alias). Game-log correlation with an own read offset
+  (`forbid_watch.log_minutes`, default **10**; the first read counts only the last 300 lines), script-log hints from
+  `paths.tools` (`out/*.log`, `events.log`). Fallback to `claude/pilot_hygiene forbid` (counts only).
+- `check`: every 5 min; `Forbidden own items: N (drinks D/T, food F/T)` + the `FORBID:` line when drinks/food blocked >
+  20 % or Forbidden-area cancels > 10 (`cancel_warn`); a crit warning (one wake line, one digest line
+  `[forbid-watch] ...`) only on a change into a warning state; `resolved` when it clears. Hygiene's BUG-125 warning
+  stays quiet while forbid-watch reports.
+- Decision: the fix needs **no exception-register entry** (unforbidding own items is a normal UI action); it is a dry run
+  unless `--apply` is given, never automatic, at most 3 applied runs per hour.
+- Tests: `tests/test_forbid_watch.py` (acceptance 1-3 with `fixtures/v3/forbid/`, Lua mock tests of `pilot_forbid`
+  status/fix, wake once per change, digest line, fix dry/apply/refusal, fallback).
+
+Not done: DF stores no author per forbid flag, so "who forbade it" is a derived hint (position, race, maker, density,
+standing orders, script logs), not a record.
+
+### Live check (after `python -m df_llm_helper install-lua --apply`)
+1. `dfhack-run claude/pilot_forbid status` -> JSON with `ok: true`; note the numbers.
+2. In the game forbid one full drink barrel and one stack of blocks (item menu). `python -m df_llm_helper forbid-watch`:
+   `Forbidden own items` +2, drinks blocked = the barrel's drinks, `classes` container +1 / material +1, a cause line.
+3. `python -m df_llm_helper forbid-watch fix` (dry run) lists the barrel id and changes nothing; `forbid-watch fix
+   --apply` unforbids it; `tools/out/forbid-fix.log` has the id; the blocks stay forbidden unless `--classes material`.
+4. With `paths.gamelog` set: wait for a `cancels Drink: Forbidden area` line (or check a recorded log) and see it in the
+   `cancels:` line.
+5. Run `python -m df_llm_helper check` twice with the barrel forbidden: one wake line (`python -m df_llm_helper wake`),
+   no repeat on the second check.
+6. Please record one `claude/pilot_forbid status` answer and 20 game-log lines with `Forbidden area` into `fixtures/`
+   (the current fixtures are synthetic).
+

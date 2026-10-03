@@ -1,6 +1,6 @@
 # FEATURE-002: `flow` - item flow budget (inflow, sinks, free capacity) instead of counting loose stacks
 
-- **Status:** proposed (draft, written by the local agent "muell", not committed)
+- **Status:** implemented in 7067417
 - **Priority:** P2 (no crash, but ~14 000 loose stacks, FPS complaints, and every cleanup so far was manual)
 - **Requested by:** Gordon (player), 2026-10-02, via the local orchestrator
 - **Area:** extends `df_llm_helper hygiene` (+ Lua `lua/pilot_hygiene.lua`), new `hygiene flow`, `hygiene bins`, `orders` audit; digest/wake integration
@@ -62,3 +62,50 @@ Reading is free. Writes only through existing UI-equivalent actions: `flags.dump
 - Decision (player): how many trade goods per kind is enough (`flow.sale_capacity`; local value now 300 per kind, was 450).
 - Does the cloud session want per-type columns in `snapshots` (schema change) or a separate table? The local agent can supply two recorded `hygiene status` snapshots 1 h apart from the live game on request.
 - Recorded answer of `claude/muell status` and `claude/report` (fields `lager_voll`, `kadaver_lose`, `leichenteile_lose`) from the live game: available in `Bugs/evidence`-style files on request.
+
+## Implementation
+Commit 7067417.
+
+- `lua/pilot_hygiene.lua`: `status <start> <n> [<since_id>]` adds `stock`, `new` (item id >= since_id), `reach_type`,
+  `unreach` (cavern/surface/thread), `forb_corpses` (other/bone/dwarf, same filter as `mark`) and `next_id`; `report`
+  adds `bridges` (bridge under a dump zone: raised/lowered, items on it by type, linked levers) and `standing`; new read
+  commands `piles` (stockpile categories, tiles, free tiles, max_bins/max_barrels, bins, free logs, open ConstructBin
+  orders) and `caps` (manager orders with item conditions + stock per condition type: total, in containers, loose);
+  `mark ... --unforbid` (forbid off + dump on for forbidden reachable non-dwarf corpses/parts, ids returned);
+  `bins_order <n> [--reserve R] [--apply]` (one one-off ConstructBin order via the `workorder` script, refused while one
+  is open or without the wood) and `max_bins <pile> <n> [--apply]`.
+- `df_llm_helper/features/_itemflow.py` (new, pure logic) + `hygiene.py`: `hygiene flow [--hours 24] [--caps]`,
+  `hygiene caps`, `hygiene bins [--pile ID] [--apply]`, `hygiene mark --unforbid [--apply]`, garbage bridge lines in
+  `hygiene zones`/`status`. Flow snapshots: **separate table `item_flow`** in state.db (no schema change of
+  `snapshots`), one row per measurement (`hygiene status`, `check` every 30 min, `flow`); inflow = items created since
+  the previous snapshot, sink = what disappeared. KPIs/digest line count reachable stacks; `unreachable N ignored`.
+- Wake: `CRAFTS growing` and `garbage bridge landing > 300` give one crit warning per state change (wake + digest).
+- `bins --apply` needs the new register rule **FP14** (fair-play gate in `fairplay.py`, so the client refuses the
+  command without the entry); `mark --unforbid --apply` needs only `--apply` (own items, item-menu actions).
+- `lua/claude/muell.lua`: `dump` never dumps bones/skulls/shells/horns/teeth/hides (`uebersprungen.knochen`).
+- Tests: `tests/test_itemflow.py` (acceptance 1-6 with `fixtures/v3/hygiene/flow_post_siege.json`,
+  `report_bridge.json`, `piles_bins.json`, `caps_crafts.json`; Lua mock tests of status/report/piles/caps/bins_order/
+  max_bins/mark --unforbid; muell bone filter).
+- Config `hygiene.flow`: `hours` 24, `sale_capacity` **800** (default from the request; the player still has to decide,
+  locally 300 per kind was mentioned), `bin_capacity` 100, `wood_reserve` 10, `landing_warn` 300.
+
+Not done (safe subset): "lever last pulled" (DF keeps no time; only the current bridge state is shown); sinks are not
+split by event (built/sold/dumped come as one number between snapshots); "planned" goods are not part of the bin need;
+`standing_orders_forbid_other_dead_items` is only reported, never changed.
+
+### Live check (after `python -m df_llm_helper install-lua --apply`)
+1. `dfhack-run claude/pilot_hygiene status 0 20000` -> `stock`, `reach_type`, `unreach`, `next_id` present; time per
+   block as before (< 1 s).
+2. `python -m df_llm_helper hygiene` twice, at least 15 min apart, then `python -m df_llm_helper hygiene flow --caps`:
+   plausible inflow/sink for goblets/crafts/blocks, the unreachable line (webs/cavern), cap audit lines.
+3. `dfhack-run claude/pilot_hygiene piles` and `caps`: compare free tiles/bins/max_bins with the stockpile screens and
+   the conditions with the manager screen.
+4. `python -m df_llm_helper hygiene bins` (dry run); with consent `python -m df_llm_helper exception add FP14 --reason
+   "bin planner" --ja "<quote>" --max-uses 2`, then `hygiene bins --apply`: exactly one ConstructBin order appears in the
+   manager screen and the stockpile's max bins rises.
+5. `python -m df_llm_helper hygiene mark --unforbid` lists the forbidden non-dwarf corpses near the dump; `--apply` marks
+   them (forbid off, dump on); no dwarf corpse changes.
+6. `python -m df_llm_helper hygiene zones` with the garbage bridge: state and landing count match the game; a second run
+   prints no `WAKE` line.
+7. Please record two `hygiene status` answers 1 h apart and `claude/muell status` for real fixtures.
+
