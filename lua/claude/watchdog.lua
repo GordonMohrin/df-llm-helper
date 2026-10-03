@@ -18,7 +18,7 @@ local function stack_sum(vec, free_only)
   local n = 0
   for _, i in ipairs(vec) do
     local f = i.flags
-    if not (f.forbid or f.rotten or f.dump or f.trader or (free_only and f.in_job)) then n = n + i:getStackSize() end
+    if not (f.rotten or f.dump or f.trader or (free_only and f.in_job)) and not util.forbidden(i) then n = n + i:getStackSize() end  -- BUG-125
   end
   return n
 end

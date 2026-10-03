@@ -1,4 +1,4 @@
--- claude/pilot_hygiene status <start> <n> | report | mark <n> <TYPE,TYPE,...> [--rotten] [--apply]
+-- claude/pilot_hygiene status <start> <n> | report | forbid | mark <n> <TYPE,TYPE,...> [--rotten] [--apply]
 -- (df-llm-helper spec v3-07 item hygiene, LIVE-UNTESTED)
 -- status: READ ONLY. Counts loose items (on the ground, outside stockpiles/containers/buildings) in the index block
 --         [start, start+n) of world.items.all, so a large world never freezes the game in one call.
@@ -6,6 +6,8 @@
 --         cavern = inside but not reachable), dwarf/other corpses, already dump-marked items (pending, unreachable,
 --         position sums for the centroid). Hidden tiles are only counted as 'hidden' (fair play: fog of war).
 -- report: READ ONLY. Dump zones (rectangle, overlaps a stockpile?), DumpItem jobs, idle citizens (possible haulers).
+-- forbid: READ ONLY. Own forbidden items by class (container/drink/food/material/other) and drinks/food blocked by a
+--         forbidden container (BUG-125: 1043 forbidden items, nobody could drink, hygiene stayed silent).
 -- mark:   sets the UI garbage flag (item.flags.dump, exactly what the player does with 'dump' in the item menu)
 --         on at most min(n, 300) loose, reachable, unforbidden items of the given types. Without --apply: dry run.
 --         Never marked (hard-coded, independent of the arguments): boulders, dwarf corpses and named corpses,
@@ -258,6 +260,46 @@ elseif cmd == 'mark' then
   end
   if not apply then out.marked = 0 end
   util.emit(out)
+elseif cmd == 'forbid' then
+  -- BUG-125: own items with the forbid flag by class, plus drinks/food that are not forbidden themselves but sit in a
+  -- forbidden container (dwarves cannot take them either). READ ONLY; trader/foreign/hostile/removed items and
+  -- constructions/installed furniture are not counted (not the fort's stock).
+  local CONT = { BARREL = true, BIN = true, BOX = true, BUCKET = true, FLASK = true }
+  local MAT = { BLOCKS = true, WOOD = true, BAR = true, BOULDER = true }
+  local out = { ok = true, total = 0, classes = { container = 0, drink = 0, food = 0, material = 0, other = 0 },
+                drink = { total = 0, blocked = 0, in_forbidden_container = 0 },
+                food = { total = 0, blocked = 0, in_forbidden_container = 0 } }
+  local function forbidden_container(it)
+    local c, d = safe(function() return dfhack.items.getContainer(it) end, nil), 0
+    while c and d < 5 do
+      if c.flags.forbid then return true end
+      c, d = safe(function() return dfhack.items.getContainer(c) end, nil), d + 1
+    end
+    return false
+  end
+  for _, it in ipairs(df.global.world.items.other.IN_PLAY) do
+    local f = it.flags
+    if not (f.removed or f.trader or f.foreign or f.hostile or f.construction or f.in_building or f.garbage_collect) then
+      local t = tname(it)
+      local n = safe(function() return it:getStackSize() end, 1)
+      local edible = FOOD_ROT[t] and not f.rotten
+      local cls = (t == 'DRINK' and 'drink') or (edible and 'food') or nil
+      local in_forb = (cls ~= nil) and not f.forbid and forbidden_container(it)
+      if cls then
+        local c = out[cls]
+        c.total = c.total + n
+        if f.forbid or in_forb then c.blocked = c.blocked + n end
+        if in_forb then c.in_forbidden_container = c.in_forbidden_container + n end
+      end
+      if f.forbid then
+        local k = cls or (CONT[t] and 'container') or (MAT[t] and 'material') or 'other'
+        if t == 'TOOL' and safe(function() return #dfhack.items.getContainedItems(it) > 0 end, false) then k = 'container' end
+        out.classes[k] = out.classes[k] + 1
+        out.total = out.total + 1
+      end
+    end
+  end
+  util.emit(out)
 else
-  util.emit({ ok = false, error = 'Usage: claude/pilot_hygiene status <start> <n> | report | mark <n> <TYPES> [--rotten] [--apply]' })
+  util.emit({ ok = false, error = 'Usage: claude/pilot_hygiene status <start> <n> | report | forbid | mark <n> <TYPES> [--rotten] [--apply]' })
 end

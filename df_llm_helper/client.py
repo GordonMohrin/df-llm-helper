@@ -65,13 +65,14 @@ _READ_EXACT = {"claude/status", "claude/report", "claude/units", "claude/buildin
 _READ_SUB = {"status", "list", "tabelle", "report", "plan", "clock", "equip", "routines",
              "enemies", "krypta", "werkstaetten"}
 # df-llm-helper Lua (v2): pure read commands
-_READ_PILOT = {("claude/pilot_water", "scan"), ("claude/pilot_water", "near"), ("claude/pilot_mood", "need")}
+_READ_PILOT = {("claude/pilot_water", "scan"), ("claude/pilot_water", "near"), ("claude/pilot_mood", "need"),
+               ("claude/pilot_hygiene", "forbid"), ("claude/pilot_lever", "list")}
 # scripts WITHOUT a read-only status command (claude/arbeit only knows start|stop|once); bauprog/raster have one (BUG-406).
 # claude/ueberwacher got 'status' with BUG-407, but older installed copies run a round for it -> stays conservative.
 _NO_STATUS = {"claude/arbeit", "claude/ueberwacher"}
 # whole-map scanners: they change nothing but hold the game's main thread for seconds (BUG-415) -> never treated as a
 # free read (loop guard / max_per_hour apply), also with --dry
-_HEAVY = {"claude/ores", "claude/geo", "claude/zugaenge", "claude/kohle", "claude/erzdig"}
+_HEAVY = {"claude/ores", "claude/geo", "claude/zugaenge", "claude/kohle", "claude/erzdig", "claude/pfadcheck"}
 # options that turn a read sub-command into a write (mil tabelle --file writes a file, --say announces in the game)
 _WRITE_OPTS = {"--file", "--say"}
 

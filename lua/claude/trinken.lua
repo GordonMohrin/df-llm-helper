@@ -74,7 +74,7 @@ local function measure()
   local s = { drinks = 0, plants = 0, barrels = 0, barrels_empty = 0, pots_empty = 0, pots = 0, logs = 0, boulders = 0,
               brew_jobs = 0, barrel_jobs = 0, pot_jobs = 0 }
   local items = df.global.world.items.other
-  for _, i in ipairs(items.DRINK) do if real(i) and free(i.flags) then s.drinks = s.drinks + i:getStackSize() end end
+  for _, i in ipairs(items.DRINK) do if real(i) and free(i.flags) and not util.forbidden(i) then s.drinks = s.drinks + i:getStackSize() end end  -- BUG-125
   s.plants_all = 0
   for _, i in ipairs(items.PLANT) do
     if real(i) and free(i.flags) and not i.flags.in_job then

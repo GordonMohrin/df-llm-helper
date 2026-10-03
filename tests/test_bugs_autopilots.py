@@ -309,7 +309,7 @@ def test_bug217_bug214_perimeter_allow(tmp_path, tools_dir, cfgfile, capsys):
     base = ["--config", cfgfile, "--mock", ROOT / "fixtures" / "run5", "perimeter", "allow"]
     rc, out = cli(capsys, *base, "9999", "-5", "70000", "--note", "x")
     assert rc == 2 and "Refused" in out and "outside the map" in out
-    rc, out = cli(capsys, *base, "100", "100", "130", "--note", "near core")
+    rc, out = cli(capsys, *base, "97", "95", "133", "--note", "near core")      # BUG-424: core = config fort (96,96,133)
     assert rc == 0 and "WARNING" in out and "tolerance of the core" in out
     rc, out = cli(capsys, *base, "99", "94", "132", "--note", "trap stair T1")
     rc, out = cli(capsys, *base)

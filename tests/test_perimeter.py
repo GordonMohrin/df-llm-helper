@@ -22,7 +22,7 @@ LUA = shutil.which("lua5.4") or shutil.which("lua")
 GRID = ROOT / "fixtures" / "v3" / "grid"
 MOCK = ROOT / "tests" / "lua_mock" / "grid_mock.lua"
 CORE = (100, 101, 130)
-ZR = P.DEFAULTS["z_range"]
+ZR = [100, 136]          # run-5 J109 levels of the grid fixtures (DEFAULTS: None = claude/config)
 
 
 def grid(name):
@@ -108,7 +108,10 @@ def test_stairs_rule_walls_on_inside_floor_not_on_the_stair(tmp_path):
     g2 = Grid.from_text("@origin 0 0\nz 5\n#.#\n.^.\n#.#\n")
     assert P.seal_walls(g2, P.Access([(1, 1, 5)], True, True))[0] == [(0, 1, 5), (1, 0, 5), (1, 2, 5), (2, 1, 5)]
     g3 = Grid.from_text("@origin 0 0\nz 5\nD\n")
-    assert P.seal_walls(g3, P.Access([(0, 0, 5)], True, True))[1][0].startswith("building on entry tile")
+    # BUG-424: a door is no seal; with no floor behind it the note says to replace the door by a wall
+    assert P.seal_walls(g3, P.Access([(0, 0, 5)], True, True))[1][0].startswith("door/hatch on entry tile (0,0,z5) is no seal")
+    g4 = Grid.from_text("@origin 0 0\nz 5\nT\n")
+    assert P.seal_walls(g4, P.Access([(0, 0, 5)], True, True))[1][0].startswith("building on entry tile")
 
 
 @pytest.mark.parametrize("shift,allowed", [(0, True), (3, True), (4, True), (5, False), (6, False)])
@@ -185,7 +188,8 @@ def test_check_hook_never_blocks_start_then_evaluate(tmp_path):
     clock = FakeClock(1_790_840_000.0)
     g = grid("perimeter_j109_open.grid")
     pe = per(tmp_path, clock, _lua_client(g, tmp_path, clock))
-    pil = SimpleNamespace(cfg={"perimeter": {"min_outside": 0}}, client=pe.client, tools=pe.tools, store=pe.store, clock=clock)
+    pil = SimpleNamespace(cfg={"perimeter": {"min_outside": 0, "core": list(CORE), "z_range": ZR}}, client=pe.client,
+                          tools=pe.tools, store=pe.store, clock=clock)
     rep = SimpleNamespace(snapshot=SimpleNamespace(paused=False))
     assert P.check_hook(pil, rep, False) == []
     assert pe.store.get("perimeter.pending")
@@ -317,3 +321,108 @@ def test_lua_enclave_filter_equals_python(tmp_path, mincomp):
 def test_live_args_pass_min_outside(tmp_path):
     assert per(tmp_path)._args().endswith(" 20000 3000")
     assert per(tmp_path / "b", cfg={"min_outside": 0})._args().endswith(" 20000 0")
+
+
+# ---- BUG-424: bypasses missed by the old claude/pfadcheck; forbidden doors are no seal
+# two walls touching only at a corner: DF lets a creature step diagonally between them (the old check did not)
+DIAG_TXT = """@origin 0 0
+@core 6 1 130
+z 130
+########
+#,,#...#
+#,,,#..#
+########
+"""
+# trap alley (row 1) plus a 1-tile hole (8,2) in the wall line to the outside courtyard (row 3)
+HOLE_TXT = """@origin 0 0
+@core 9 1 130
+z 130
+###########
+#,,TTTT...#
+#,,#####.##
+#,,,,,,,,,#
+###########
+"""
+# a door is the only gap in the wall: whatever its forbidden flag, it is a way in
+DOOR_TXT = """@origin 0 0
+@core 6 1 130
+z 130
+########
+#,,D...#
+########
+"""
+
+
+def _ab(ents):
+    """(A, B) of the old pfadcheck: outside reaches the core / reaches it without a trap tile."""
+    return any(e[3] for e in ents), any(e[4] for e in ents)
+
+
+def test_bug424_diagonal_gap_between_corner_walls_is_passable():
+    g = Grid.from_text(DIAG_TXT)
+    assert (4, 1, 130) in g.neighbors((3, 2, 130))                         # both orthogonals are walls
+    ents = P.scan_grid(g, (6, 1, 130), ZR)
+    assert [tuple(e[:3]) for e in ents] == [(4, 1, 130)] and _ab(ents) == (True, True)
+    closed = Grid.from_text(DIAG_TXT.replace("#,,,#..#", "#,,##..#"))
+    assert P.scan_grid(closed, (6, 1, 130), ZR) == []
+
+
+def test_bug424_hole_in_the_wall_bypasses_the_traps():
+    ents = P.scan_grid(Grid.from_text(HOLE_TXT), (9, 1, 130), ZR)
+    assert _ab(ents) == (True, True)
+    assert [tuple(e[:3]) for e in ents if e[4]] == [(8, 2, 130)]           # the hole is the bypass tile
+    shut = P.scan_grid(Grid.from_text(HOLE_TXT.replace("#,,#####.##", "#,,########")), (9, 1, 130), ZR)
+    assert _ab(shut) == (True, False)                                      # only through the traps
+
+
+def test_bug424_forbidden_door_in_the_only_gap_is_open_and_gets_a_wall(tmp_path):
+    g = Grid.from_text(DOOR_TXT)
+    ents = P.scan_grid(g, (6, 1, 130), ZR)
+    assert [tuple(e[:3]) for e in ents] == [(3, 1, 130)] and _ab(ents) == (True, True)
+    acc, wake, line = per(tmp_path).evaluate(ents)
+    assert "1 forbidden" in line and wake                                  # reported open, not sealed
+    walls, notes = P.seal_walls(g, acc[0])
+    assert walls == [(4, 1, 130)] and "is no seal" in notes[0]
+    sealed = Grid.from_text(DOOR_TXT.replace("D...", "DC.."))              # the proposed wall closes it
+    assert _ab(P.scan_grid(sealed, (6, 1, 130), ZR)) == (False, False)  # door is a dead end now
+
+
+@pytest.mark.skipif(not LUA, reason="lua5.4 missing")
+@pytest.mark.parametrize("txt,core", [(DIAG_TXT, (6, 1, 130)), (HOLE_TXT, (9, 1, 130)), (DOOR_TXT, (6, 1, 130))])
+def test_bug424_lua_equals_python_and_locked_door_is_walkable(tmp_path, txt, core):
+    g = Grid.from_text(txt)
+    ref = sorted(list(e[:3]) + [int(e[3]), int(e[4])] for e in P.scan_grid(g, core, ZR))
+    out, _ = lua_run(g, tmp_path, "pilot_perimeter", "scan", *core, 100, 136, 20000, 0)
+    j = json.loads(out.splitlines()[0])
+    assert sorted(j["entries"]) == ref
+    assert (j["core_reached"], j["bypass"]) == _ab([tuple(e) for e in ref])
+    if "D" in txt:
+        assert j["door_entries"] == [[3, 1, 130]]
+        # worst case: the game shows the locked door's tile as blocking -> still an entry
+        locked = Grid(g.tiles)
+        mock = [dict(t, c="L") if t["c"] == "D" else t for t in g.to_mock()]
+        gp = tmp_path / "locked.json"
+        gp.write_text(json.dumps(mock))
+        r = subprocess.run([LUA, str(MOCK), str(ROOT / "lua" / "pilot_perimeter.lua"), "scan", *map(str, core),
+                            "100", "136", "20000", "0"], capture_output=True, text=True, timeout=60,
+                           env={**os.environ, "MOCK_GRID": str(gp), "MOCK_HOME": str(tmp_path)})
+        assert sorted(json.loads(r.stdout.splitlines()[0])["entries"]) == ref, r.stderr
+        assert locked.get((3, 1, 130)) == "D"
+
+
+@pytest.mark.skipif(not LUA, reason="lua5.4 missing")
+def test_bug424_no_hard_coded_core_or_box(tmp_path):
+    assert P.DEFAULTS["core"] is None and P.DEFAULTS["z_range"] is None
+    assert per(tmp_path)._args() == "- - - - - 20000 3000"
+    assert per(tmp_path / "b", cfg={"core": [1, 2, 3], "z_range": [4, 5]})._args() == "1 2 3 4 5 20000 3000"
+    g = Grid.from_text(HOLE_TXT)
+    gp = tmp_path / "g.json"
+    gp.write_text(json.dumps(g.to_mock()))
+    env = {**os.environ, "MOCK_GRID": str(gp), "MOCK_HOME": str(tmp_path)}
+    cmd = [LUA, str(MOCK), str(ROOT / "lua" / "pilot_perimeter.lua"), "scan", "-", "-", "-", "-", "-", "20000", "0"]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env={**env, "MOCK_CORE": "9,1,130,129,131"})
+    j = json.loads(r.stdout.splitlines()[0])
+    assert j["core"] == [9, 1, 130] and j["z_range"] == [129, 131] and j["bypass"] is True
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=env)     # config without FORT_REFS
+    j = json.loads(r.stdout.splitlines()[0])
+    assert j["ok"] is False and "FORT_REFS" in j["error"]

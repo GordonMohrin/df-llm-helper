@@ -8,8 +8,9 @@ armies walked past the traps. Standing order of the player: "close everything ex
           tolerance +-4 xy / +-2 z), findings = clusters leading to the core that are not allowed
 - report: only on change (signature of the forbidden clusters); all-clear when closed; digest line
           "Accesses: 1 allowed, 0 forbidden (checked 20:05)"
-- seal:   Quickfort '#build' CSV with Cw on the entry tiles; stairs/ramps are not buildable -> walls on the
-          adjacent inside floor tiles instead. --dry-run writes the CSV, --apply runs quickfort (build orders) after
+- seal:   Quickfort '#build' CSV with Cw on the entry tiles; stairs/ramps and doors/hatches are not buildable ->
+          walls on the adjacent inside floor tiles instead. A door is never a seal (BUG-424: the game resets
+          door_flags.forbidden, enemies walked through 'locked' doors): it always counts as open. --dry-run writes the CSV, --apply runs quickfort (build orders) after
           `reach what-if` (never cuts a mandatory point without --override).
 Read only except the explicit seal --apply (normal build orders, fair play).
 """
@@ -26,8 +27,10 @@ __all__ = ["KEY", "DEFAULTS", "Access", "scan_grid", "parse_scan", "load_allow",
            "signature", "digest_line", "diff_lines", "seal_walls", "seal_csv", "Perimeter", "register", "check_hook"]
 
 KEY = "perimeter"
-DEFAULTS = {"core": [100, 101, 130], "interval_s": 1200, "allow_file": "zugang-erlaubt.txt", "tolerance_xy": 4,
-            "tolerance_z": 2, "z_range": [100, 136], "cluster_xy": 2, "cluster_z": 1, "chunked": True,
+# core / z_range None = the fort's claude/config values (FORT_REFS[1], Z_MIN..Z_MAX; resolved by pilot_perimeter itself,
+# BUG-424: no hard-coded box). Set them in config.yaml (perimeter.core / perimeter.z_range) to override.
+DEFAULTS = {"core": None, "interval_s": 1200, "allow_file": "zugang-erlaubt.txt", "tolerance_xy": 4,
+            "tolerance_z": 2, "z_range": None, "cluster_xy": 2, "cluster_z": 1, "chunked": True,
             "budget": 20000, "poll_s": 2.0, "timeout_s": 120, "blueprint": "claude/df_llm_helper_seal.csv",
             "blueprints_dir": None, "in_check": True, "min_outside": 3000}
 LINE_MAX = 120
@@ -158,8 +161,13 @@ def _allow_warnings(p, per, xyz) -> list:
             ms = (int(m["x"]), int(m["y"]), int(m["z"]))
     if min(xyz) < 0 or (ms and (x >= ms[0] or y >= ms[1] or z >= ms[2])):
         return [f"Refused: ({x},{y},z{z}) is outside the map" + (f" ({ms[0]}x{ms[1]}x{ms[2]})" if ms else "")]
-    c = per.cfg["core"]
-    if is_allowed((x, y, z), [tuple(c)], int(per.cfg["tolerance_xy"]), int(per.cfg["tolerance_z"])):
+    c = per.cfg.get("core") or per.store.get("perimeter.core")      # BUG-424: core from the last scan (config)
+    if not c:                                                        # no scan yet: the fort centre of claude/config
+        r = p.client.run("claude/config")
+        f = (r.json or {}).get("fort") if r.ok and isinstance(r.json, dict) else None
+        if isinstance(f, dict) and all(isinstance(f.get(k), int) for k in "xyz"):
+            c = [f["x"], f["y"], f["z"]]
+    if c and is_allowed((x, y, z), [tuple(c)], int(per.cfg["tolerance_xy"]), int(per.cfg["tolerance_z"])):
         return [f"WARNING: ({x},{y},z{z}) lies within the tolerance of the core {tuple(c)}: every access near the core "
                 "counts as allowed"]
     return []
@@ -210,11 +218,22 @@ def diff_lines(prev_sig, accesses) -> list:
 
 def seal_walls(grid: Grid, access: Access) -> tuple:
     """Wall tiles for one access. Stairs/ramps cannot carry a construction: walls go on the adjacent INSIDE floor
-    tiles of the same level instead. Building tiles (door/trap) are left to the player. -> (walls, notes)."""
+    tiles of the same level instead. Doors/hatches likewise (BUG-424: a forbidden/locked door is no seal, the game
+    resets the flag): walls go behind the door. Trap tiles are left to the player. -> (walls, notes)."""
     walls, notes = set(), []
     for t in access.tiles:
         c = grid.get(t)
-        if c in STAIRS:
+        if c == "D":
+            x, y, z = t
+            behind = [(x + dx, y + dy, z) for dy in (-1, 0, 1) for dx in (-1, 0, 1)
+                      if (dx or dy) and grid.get((x + dx, y + dy, z)) in WALK
+                      and grid.get((x + dx, y + dy, z)) not in OUTSIDE
+                      and grid.get((x + dx, y + dy, z)) not in STAIRS and grid.get((x + dx, y + dy, z)) not in "DT"]
+            walls.update(behind)
+            notes.append(f"door/hatch on entry tile {fmt(t)} is no seal (forbidden/locked doors are reset by the "
+                         "game): " + (f"{len(behind)} wall(s) behind it proposed; or deconstruct the door and wall "
+                                      "its tile" if behind else "deconstruct the door and build a wall on its tile"))
+        elif c in STAIRS:
             x, y, z = t
             found = False
             for dy in (-1, 0, 1):
@@ -228,7 +247,7 @@ def seal_walls(grid: Grid, access: Access) -> tuple:
                 notes.append(f"stair/ramp entry {fmt(t)} has no inside floor tile next to it on its level (only "
                              "outside floor/walls) - seal by hand: wall/door on the level the stair leads to, or "
                              "remove the stair")
-        elif c in "DT":
+        elif c == "T":
             notes.append(f"building on entry tile {fmt(t)} - seal by hand")
         elif c in WALK:
             walls.add(t)
@@ -274,8 +293,11 @@ class Perimeter:
         return r.json if r.ok else None
 
     def _args(self) -> str:
-        c, zr = self.cfg["core"], self.cfg["z_range"]
-        return f"{c[0]} {c[1]} {c[2]} {zr[0]} {zr[1]} {int(self.cfg['budget'])} {int(self.cfg['min_outside'])}"
+        """'-' = the value of the fort's claude/config (pilot_perimeter resolves FORT_REFS[1] / Z_MIN / Z_MAX)."""
+        c, zr = self.cfg.get("core"), self.cfg.get("z_range")
+        cs = " ".join(str(int(v)) for v in c[:3]) if c else "- - -"
+        zs = f"{int(zr[0])} {int(zr[1])}" if zr else "- -"
+        return f"{cs} {zs} {int(self.cfg['budget'])} {int(self.cfg['min_outside'])}"
 
     # ---- live scan
     def start(self) -> bool:
@@ -289,7 +311,10 @@ class Perimeter:
         return ok
 
     def result(self):
-        return self._read("claude/pilot_perimeter result")
+        j = self._read("claude/pilot_perimeter result")
+        if isinstance(j, dict) and j.get("done") and isinstance(j.get("core"), list) and len(j["core"]) >= 3:
+            self.store.set("perimeter.core", j["core"][:3])          # the core pilot_perimeter really used
+        return j
 
     def scan_live(self) -> list | None:
         """Chunked (default): start + poll the result file; otherwise one synchronous call (blocks DF ~10 s)."""
@@ -445,7 +470,11 @@ def cmd_perimeter(args) -> int:
     if grid is not None:
         from ..store import Store
         per.store = Store()          # BUG-204: an offline fixture run never touches the fort's state.db
-        core = tuple(int(v) for v in (grid.meta.get("core") or [per.cfg["core"]])[0])
+        meta_core = grid.meta.get("core") or ([per.cfg["core"]] if per.cfg.get("core") else None)
+        if not meta_core:
+            print("Perimeter: grid fixture without '@core x y z' and no perimeter.core configured")
+            return 2
+        core = tuple(int(v) for v in meta_core[0])
         per.extra_allow = [tuple(int(v) for v in a[:3]) for a in grid.meta.get("allow", [])]
         ents = scan_grid(grid, core, per.cfg["z_range"])
     else:

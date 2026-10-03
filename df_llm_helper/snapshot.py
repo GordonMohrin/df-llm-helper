@@ -64,8 +64,10 @@ class Squad:
 
 @dataclass
 class Stocks:
-    drink: int | None = None
+    drink: int | None = None              # available only (BUG-125: forbidden or in a forbidden container excluded)
     food: int | None = None
+    drink_forbidden: int | None = None    # BUG-125: forbidden drinks (own flag or forbidden barrel), not drinkable
+    food_forbidden: int | None = None
     meals: int | None = None
     plants: int | None = None
     fish: int | None = None
@@ -303,6 +305,8 @@ def _parse_status(snap: Snapshot, j: dict) -> None:
     s = snap.stocks
     s.drink = _i(st.get("drink"))
     s.food = _i(st.get("food"))
+    s.drink_forbidden = _i(st.get("drink_forbidden"))
+    s.food_forbidden = _i(st.get("food_forbidden"))
     s.seeds = _i(st.get("seeds"))
     s.wood = _i(st.get("wood"))
     s.boulders = _i(st.get("boulders"))
@@ -335,6 +339,8 @@ def _parse_report(snap: Snapshot, j: dict) -> None:
         snap.idle = _i(j.get("erwachsene_ohne_auftrag"))
     s = snap.stocks
     s.drink = s.drink if s.drink is not None else _i(j.get("getraenke"))
+    if s.drink_forbidden is None:
+        s.drink_forbidden = _i(j.get("getraenke_gesperrt"))
     s.meals = _i(j.get("mahlzeiten"))
     s.plants = _i(j.get("pflanzen"))
     s.fish = _i(j.get("fisch"))

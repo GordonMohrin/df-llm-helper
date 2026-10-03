@@ -312,3 +312,54 @@ def test_check_hook_failure_is_rate_limited(clock, cfg):
     p = Pilot(cfg, m, store=Store(), clock=clock)
     assert hy.check_hook(p, None, False)[0].startswith("Hygiene: measurement failed")
     assert hy.check_hook(p, None, False) == []
+
+
+# ------------------------------------------------------------------ BUG-125: forbidden own items are never silent
+@pytest.mark.skipif(not LUA, reason="lua5.4 not installed")
+def test_bug125_lua_forbid_counts_drinks_in_forbidden_barrels(tmp_path):
+    items = []
+    for b in range(10):                                   # 10 forbidden barrels, each with 25 drinks (not forbidden)
+        items.append({"id": 100 + b, "type": "BARREL", "x": 1, "y": 1, "z": 1, "forbid": True})
+        items.append({"id": 200 + b, "type": "DRINK", "x": 1, "y": 1, "z": 1, "n": 25, "container": 100 + b})
+    items += [{"id": 300, "type": "BLOCKS", "x": 1, "y": 1, "z": 1, "forbid": True},
+              {"id": 301, "type": "WEAPON", "x": 1, "y": 1, "z": 1, "forbid": True, "foreign": True},
+              {"id": 302, "type": "FOOD", "x": 1, "y": 1, "z": 1, "n": 7}]
+    out, dumped = run_lua(tmp_path, items, "forbid")
+    assert not dumped                                     # read only
+    assert out["classes"] == {"container": 10, "drink": 0, "food": 0, "material": 1, "other": 0}
+    assert out["drink"] == {"total": 250, "blocked": 250, "in_forbidden_container": 250}
+    assert out["food"]["blocked"] == 0 and out["total"] == 11
+    lines = hy.forbid_lines(out, hy.DEFAULTS)
+    assert lines[0].startswith("!! forbidden own items: 11 (containers 10") and "drinks blocked 250/250 (100 %" in lines[0]
+    for it in items:
+        it["forbid"] = False
+    out, _ = run_lua(tmp_path, items, "forbid")
+    assert out["total"] == 0 and out["drink"]["blocked"] == 0
+    assert hy.forbid_lines(out, hy.DEFAULTS) == ["forbidden own items: 0 (containers 0, drinks 0, food 0, material 0, "
+                                                 "other 0)"]
+
+
+def test_bug125_forbid_lines_loot_only_is_no_warning():
+    j = {"ok": True, "total": 900, "classes": {"other": 900}, "drink": {"total": 50}, "food": {"total": 20}}
+    assert not hy.forbid_lines(j, hy.DEFAULTS)[0].startswith("!!")
+    assert "not readable" in hy.forbid_lines(None, hy.DEFAULTS)[0]
+
+
+def test_bug125_check_hook_warns_on_forbidden_drinks_and_repeats_only_on_change(clock, cfg):
+    from df_llm_helper.pilot import Pilot
+    m = client(clock, ["status_j109_block0.json", "status_j109_block1.json"], "report_no_zone.json")
+    forb = {"ok": True, "total": 1043, "classes": {"container": 300, "drink": 0, "food": 0, "material": 743},
+            "drink": {"total": 475, "blocked": 475, "in_forbidden_container": 475}, "food": {"total": 100}}
+    m.set("claude/pilot_hygiene forbid", json.dumps(forb))
+    p = Pilot(cfg, m, store=Store(), clock=clock)
+    lines = hy.check_hook(p, None, False)
+    assert lines[0].startswith("Hygiene: !! forbidden own items: 1043") and "drinks blocked 475/475" in lines[0]
+    assert sum("forbidden own items" in ln for ln in lines) == 1
+    clock.sleep(400)
+    assert hy.check_hook(p, None, False) == []            # same state: no repeat within 30 min
+    forb["drink"]["blocked"] = 100
+    m.set("claude/pilot_hygiene forbid", json.dumps(forb))
+    clock.sleep(400)
+    assert "drinks blocked 100/475" in hy.check_hook(p, None, False)[0]
+    h = hy.Hygiene(m, Store(), clock)
+    assert any(ln.startswith("!! forbidden own items") for ln in h.status(record=False)[0])

@@ -903,3 +903,130 @@ def test_bug226_rules_template_has_a_generic_cloth_entry(tmp_path):
     lines = run_snippet(code, tmp_path).splitlines()
     assert lines[0].split() == ["nil", "2.3", "true"]
     assert [ln.split() for ln in lines[1:]] == [["4", "silk", "10"], ["4", "*", "30"]]   # silk first, then any cloth
+
+# ---------------------------------------------------------------- BUG-125: drinks in forbidden barrels
+_FORBID_SETUP = """
+df.item_type = { DRINK = 'DRINK', FOOD = 'FOOD', MEAT = 'MEAT', FISH = 'FISH', CHEESE = 'CHEESE', EGG = 'EGG',
+  PLANT = 'PLANT', PLANT_GROWTH = 'PLANT_GROWTH', SEEDS = 'SEEDS', WOOD = 'WOOD', BOULDER = 'BOULDER', BAR = 'BAR',
+  CLOTH = 'CLOTH', BARREL = 'BARREL', BIN = 'BIN', BED = 'BED' }
+local function item(t, n, forbid, cont)
+  return { flags = { forbid = forbid or false }, _t = t, _n = n, _in = cont,
+           getType = function(s) return s._t end, getStackSize = function(s) return s._n end }
+end
+local list = {}
+for i = 1, 10 do
+  local b = item('BARREL', 1, MOCK_FORBID)
+  list[#list + 1] = b
+  list[#list + 1] = item('DRINK', 25, false, b)
+end
+list[#list + 1] = item('FOOD', 30, false)
+df.global.world.items.other.IN_PLAY = list
+dfhack.items.getContainer = function(it) return it._in end
+local u = { pos = { x = 1, y = 1, z = 1 }, job = {} }
+dfhack.units.getCitizens = function() return { u } end
+dfhack.units.getStressCategory = function() return 3 end
+dfhack.units.isChild = function() return false end
+dfhack.units.isBaby = function() return false end
+"""
+
+
+@pytest.mark.parametrize("forbid", [True, False])
+def test_bug125_status_does_not_count_drinks_in_forbidden_barrels(tmp_path, forbid):
+    setup = f"MOCK_FORBID = {'true' if forbid else 'false'}\n" + _FORBID_SETUP
+    out, r = run("status", tmp_path=tmp_path, setup=setup)
+    assert r.returncode == 0, r.stderr
+    j = one_json(out)
+    st = j["stock"]
+    if forbid:
+        assert (st["drink"], st["drink_forbidden"], j["drink_days"]) == (0, 250, 0)
+        assert "Drinks forbidden: 250 (not drinkable)" in j["alerts"]
+    else:
+        assert (st["drink"], st["drink_forbidden"]) == (250, 0)
+        assert not [a for a in j["alerts"] if "forbidden" in a]
+    assert st["food"] == 30 and st["food_forbidden"] == 0
+
+
+def test_bug125_util_forbidden_follows_nested_containers(tmp_path):
+    code = ("local util = reqscript('claude/util')\n"
+            "local wagon = { flags = { forbid = true } }\n"
+            "local barrel = { flags = { forbid = false }, _in = wagon }\n"
+            "local drink = { flags = { forbid = false }, _in = barrel }\n"
+            "dfhack.items.getContainer = function(it) return it._in end\n"
+            "print(util.forbidden(drink), util.forbidden(wagon), util.forbidden({ flags = { forbid = false } }))\n")
+    assert run_snippet(code, tmp_path).split() == ["true", "true", "false"]
+
+
+# ---------------------------------------------------------------- BUG-424: claude/pfadcheck = pilot_perimeter scan
+@pytest.mark.parametrize("args,expect", [([], ["-", "-", "-", "-", "-"]),
+                                         ([90, 100, 133, 127, 137], ["90", "100", "133", "127", "137"])])
+def test_bug424_pfadcheck_delegates_to_pilot_perimeter(tmp_path, args, expect):
+    setup = ("dfhack.run_script = function(name, ...)\n"
+             "  print(require('json').encode({ name = name, args = { ... } }))\nend\n")
+    out, r = run("pfadcheck", *args, tmp_path=tmp_path, setup=setup)
+    assert r.returncode == 0, r.stderr
+    assert one_json(out) == {"name": "claude/pilot_perimeter", "args": ["scan"] + expect}
+
+
+# ---------------------------------------------------------------- BUG-427: lever list reads the real bridge state
+_LEVER_SETUP = """
+local function vec(t) t.insert = function(self, _, v) self[#self + 1] = v end return t end
+df.building_type = { Trap = 'Trap', Bridge = 'Bridge', Floodgate = 'Floodgate', Door = 'Door', Hatch = 'Hatch' }
+df.trap_type = { Lever = 'Lever' }
+df.job_type = { PullLever = 'PullLever' }
+df.general_ref_type = { BUILDING_TRIGGERTARGET = 'TT' }
+local B = {}
+local function bld(t) t.getType = function(s) return s._t end B[t.id] = t return t end
+bld({ id = 4406, _t = 'Bridge', centerx = 90, centery = 100, z = 133, gate_flags = MOCK_GATE })
+bld({ id = 4408, _t = 'Floodgate', centerx = 91, centery = 100, z = 133, gate_flags = { closed = true } })
+local lever = bld({ id = 4407, _t = 'Trap', trap_type = 'Lever', centerx = 95, centery = 101, z = 133, state = 0,
+                    jobs = vec(MOCK_JOBS or {}), linked_mechanisms = { { _to = 4406 }, { _to = MOCK_SECOND } } })
+df.global.world.buildings.other.TRAP = { lever }
+df.building.find = function(id) return B[id] end
+dfhack.items.getGeneralRef = function(m) return m._to and { building_id = m._to } or nil end
+df.job = { new = function() return { general_refs = vec({}) } end }
+df.general_ref_building_holderst = { new = function() return {} end }
+dfhack.job.linkIntoWorld = function() MOCK_LINKED = (MOCK_LINKED or 0) + 1 end
+"""
+
+
+def run_lever(tmp_path, *args, gate="{ raised = true }", jobs="nil", second="nil"):
+    setup = tmp_path / "lever_setup.lua"
+    setup.write_text(f"MOCK_GATE = {gate}\nMOCK_JOBS = {jobs}\nMOCK_SECOND = {second}\n" + _LEVER_SETUP, encoding="utf-8")
+    after = tmp_path / "lever_after.lua"
+    after.write_text("print('LINKED ' .. tostring(MOCK_LINKED or 0))\n", encoding="utf-8")
+    home = tmp_path / "home"
+    (home / "tools" / "out").mkdir(parents=True, exist_ok=True)
+    r = subprocess.run([LUA, str(MOCK), str(ROOT / "lua" / "pilot_lever.lua"), *args], capture_output=True, timeout=10,
+                       env={"PATH": "/usr/bin:/bin", "DF_LLM_HELPER_HOME": str(home), "MOCK_SCRIPT_DIR": str(CLAUDE),
+                            "MOCK_SETUP": str(setup), "MOCK_AFTER": str(after)})
+    assert r.returncode == 0, r.stderr.decode()
+    lines = r.stdout.decode().splitlines()
+    return json.loads(lines[0]), int(lines[-1].split()[1])
+
+
+@pytest.mark.parametrize("gate,state,field", [("{ raised = true }", "raised", "gate_flags.raised"),
+                                              ("{ raised = false }", "lowered", "gate_flags.raised"),
+                                              ("{ closed = false }", "lowered", "gate_flags.closed"),
+                                              ("{ raised = true, lowering = true }", "moving", "gate_flags.lowering")])
+def test_bug427_lever_list_reads_the_bridge_flags(tmp_path, gate, state, field):
+    j, linked = run_lever(tmp_path, "list", gate=gate, second="4408")
+    lv = j["levers"][0]
+    assert lv["id"] == 4407 and lv["pull_jobs"] == 0 and linked == 0
+    assert lv["targets"][0] == {"id": 4406, "type": "Bridge", "state": state, "field": field, "x": 90, "y": 100,
+                                "z": 133}
+    assert lv["targets"][1]["type"] == "Floodgate" and lv["targets"][1]["state"] == "closed"
+
+
+def test_bug427_lever_set_pulls_only_when_the_state_differs(tmp_path):
+    j, linked = run_lever(tmp_path, "set", "4407", "raised", gate="{ raised = true }")
+    assert (j["pulled"], j["reason"], linked) == (False, "already raised", 0) and j["ok"] is True
+    j, linked = run_lever(tmp_path, "set", "4407", "lowered", gate="{ raised = true }")
+    assert j["pulled"] is True and linked == 1 and j["lever"]["pull_jobs"] == 1
+    j, linked = run_lever(tmp_path, "set", "4407", "lowered", jobs="{ { job_type = 'PullLever' } }")
+    assert (j["pulled"], j["reason"], linked) == (False, "pull already queued", 0)
+    j, linked = run_lever(tmp_path, "set", "4407", "open", gate="{ raised = true }")
+    assert j["pulled"] is False and j["ok"] is False and "no linked target" in j["reason"] and linked == 0
+    j, linked = run_lever(tmp_path, "pull", "4407")
+    assert j["pulled"] is True and linked == 1
+    j, _ = run_lever(tmp_path, "pull", "4406")                     # a bridge is no lever
+    assert j["ok"] is False and "no lever" in j["error"]

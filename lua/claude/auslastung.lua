@@ -95,7 +95,7 @@ local function items_data(force)
     local n = 0
     for _, i in ipairs(v) do
       local f = i.flags
-      if not (f.trader or f.forbid or f.rotten or f.dump) then n = n + i:getStackSize() end
+      if not (f.trader or f.rotten or f.dump) and not util.forbidden(i) then n = n + i:getStackSize() end  -- BUG-125
     end
     return n
   end

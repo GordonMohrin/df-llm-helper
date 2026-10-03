@@ -1,6 +1,6 @@
 # BUG-125: `digest` shows "Getraenke 475" although all barrels were forbidden; `hygiene` does not report mass-forbidden own containers/drinks/blocks
 
-- **Status:** open
+- **Status:** fixed in 14dbe1b
 - **Severity:** S2 (misleading output: the supply looked fine while nobody could drink; leads to deaths, see BUG-423)
 - **Area:** `df_llm_helper/digest.py` (food/drink items), `lua/pilot_hygiene.lua` (`hygiene`)
 - **Reported:** 2026-10-02, commit `22b9b03`
@@ -35,3 +35,30 @@ Fixture with 10 barrels, all `forbid=true`: `digest` prints `drinks 0 available 
 
 ## Info needed
 Player: one `digest` JSON with the forbidden state (before un-forbidding) if still available; otherwise the next occurrence.
+
+## Fix
+Cause: every drink/food counter (`claude/status`, `claude/report`, `ueberwacher`, `trinken`, `essen`, `watchdog`,
+`auslastung`) checked only `item.flags.forbid` of the drink itself. A drink in a forbidden barrel is not flagged, so
+all 475 drinks counted as supply while the dwarves cancelled `Drink: Forbidden area`.
+
+- `lua/claude/util.lua`: new `forbidden(item)` = own forbid flag OR a forbidden container around it (up to 5 levels:
+  drink -> barrel -> wagon ...).
+- `claude/status`: `stock.drink`/`stock.food` (and so `drink_days`/`food_days`) count available items only; new
+  `stock.drink_forbidden`/`stock.food_forbidden`; alert `Drinks forbidden: N (not drinkable)`.
+- `claude/report`: `getraenke`/`mahlzeiten` available only; new `getraenke_gesperrt`/`mahlzeiten_gesperrt`.
+- `ueberwacher` (notfall.flag), `trinken` (brew decision), `essen`, `watchdog`, `auslastung`: same rule, so a
+  forbidden stock now triggers brewing/emergency flags instead of hiding the shortage.
+- `digest`: status line `Drinks 0d (+475 forbidden) Food ...`; alert `Drinks 0 available (+475 forbidden, 100%) ...`
+  as `crit` from `thresholds.forbidden_supply_crit_pct` (default 50 %), `warn` below; same for food.
+- `hygiene`: new read-only `claude/pilot_hygiene forbid` (own forbidden items by class container/drink/food/material/
+  other, plus drinks/food blocked by forbidden containers; trader/foreign/hostile items excluded). `hygiene status`
+  always prints the line; `check` warns `Hygiene: !! forbidden own items: 1043 (containers ..., material ...); drinks
+  blocked 475/475 (100 %...)` on its own 5-min interval (`hygiene.forbid_every_s`), repeated only on change or after
+  30 min. Forbidden siege loot alone ("other") is reported but never warned.
+- Tests: `tests/test_digest.py` (`test_bug125_*`), `tests/test_hygiene.py` (`test_bug125_*`, Lua mock with 10
+  forbidden barrels), `tests/test_lua_claude.py` (`test_bug125_*`: `claude/status` under the mock, nested containers).
+
+Live check after `install-lua --apply`: forbid one full drink barrel in the game; `dfhack-run claude/status` must show
+`drink_forbidden` = its drinks; `python -m df_llm_helper digest` shows `(+N forbidden)`; `python -m df_llm_helper
+hygiene` shows the `forbidden own items` line. Unforbid it again.
+

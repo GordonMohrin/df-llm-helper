@@ -41,6 +41,7 @@ DEFAULTS: dict[str, Any] = {
         "jobs_open_delta_pct": 25, "dig_jobs_delta": 20,
         "stress_high_warn": 1,
         "meals_food_flag_clear": 25, "drinks_food_flag_clear": 40,
+        "forbidden_supply_crit_pct": 50,    # BUG-125: forbidden share of drinks/food from which the digest says crit
     },
     "digest": {"max_tokens": 600, "inbox_max_lines": 6, "inbox_line_chars": 110, "inbox_scope": "orchestrator"},
     "flags": {"stale_min": 30, "names": ["alert", "caravan", "food", "siege", "mood", "migranten", "wirtschaft",

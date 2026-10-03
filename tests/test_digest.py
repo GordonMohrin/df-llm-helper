@@ -175,3 +175,43 @@ def test_compute_alerts_misc():
     s.errors.append("x: broken")
     keys = {a.key for a in compute_alerts(s, TH)}
     assert {"stress", "corpses", "refuge", "parse"} <= keys
+
+
+# ---------------------------------------------------------------- BUG-125: forbidden drinks are no supply
+def _forbid_snap(drink, drink_forb, food=300, food_forb=0):
+    import json
+    from df_llm_helper.snapshot import parse_snapshot
+    st = {"fort": "F", "date": {"year": 110, "year_tick": 1000, "text": "1. Granite, Jahr 110"},
+          "population": {"total": 20, "adults": 20, "children": 0, "idle": 0},
+          "drink_days": drink * 84 // (20 * 5), "food_days": food * 84 // (20 * 2),
+          "stock": {"drink": drink, "drink_forbidden": drink_forb, "food": food, "food_forbidden": food_forb}}
+    return parse_snapshot({"claude/status": json.dumps(st)})
+
+
+def test_bug125_all_barrels_forbidden_shows_both_counts_and_crit():
+    s = _forbid_snap(0, 475)
+    assert s.stocks.drink == 0 and s.stocks.drink_forbidden == 475
+    t, _ = build_digest(s, DigestState(), th=TH)
+    assert "Drinks 0d (+475 forbidden)" in t
+    assert "!! Drinks 0 available (+475 forbidden, 100%)" in t
+    items = {a.key: a for a in compute_alerts(s, TH)}
+    assert items["drink_forbidden"].level == "crit" and "trinken" in items["drink_forbidden"].scopes
+
+
+def test_bug125_partly_forbidden_is_warn_and_none_forbidden_is_silent():
+    s = _forbid_snap(1200, 100, food_forb=20)
+    items = {a.key: a for a in compute_alerts(s, TH)}
+    assert items["drink_forbidden"].level == "warn" and "1200 available (+100 forbidden, 8%)" in items["drink_forbidden"].text
+    assert items["food_forbidden"].level == "warn"
+    s = _forbid_snap(1200, 0)
+    assert not {"drink_forbidden", "food_forbidden"} & {a.key for a in compute_alerts(s, TH)}
+    t, _ = build_digest(s, DigestState(), th=TH)
+    assert "forbidden" not in t
+
+
+def test_bug125_report_fallback_field():
+    import json
+    from df_llm_helper.snapshot import parse_snapshot
+    s = parse_snapshot({"claude/report": json.dumps({"datum": "1. Granite, Jahr 110", "getraenke": 12,
+                                                     "getraenke_gesperrt": 355})})
+    assert s.stocks.drink == 12 and s.stocks.drink_forbidden == 355

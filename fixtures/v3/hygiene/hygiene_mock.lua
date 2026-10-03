@@ -2,7 +2,7 @@
 -- Variant of tests/lua_mock/dfhack_mock.lua (copied, not shared). Usage:
 --   MOCK_ITEMS=items.json [MOCK_BUILDINGS=b.json] [MOCK_DUMPJOBS=n] lua5.4 hygiene_mock.lua lua/pilot_hygiene.lua <args>
 -- items.json: [{id, type, x, y, z, dump, forbid, race, unit_id, hf, bone, rotten, hidden, outside, reach,
---               stockpile, foreign, artifact}]
+--               stockpile, foreign, artifact, n (stack size), container (id of the item it sits in; BUG-125)}]
 -- Prints the emitted JSON, then 'STATE [ids with flags.dump=true]'.
 local function encode(v)
   local t = type(v)
@@ -106,7 +106,8 @@ end
 
 local TYPES = { 'BAR', 'SMALLGEM', 'BLOCKS', 'ROUGH', 'BOULDER', 'WOOD', 'CORPSE', 'CORPSEPIECE', 'REMAINS', 'MEAT',
   'FISH', 'FISH_RAW', 'PLANT', 'PLANT_GROWTH', 'THREAD', 'CLOTH', 'GOBLET', 'FIGURINE', 'WEAPON', 'ARMOR', 'SHOES',
-  'HELM', 'GLOVES', 'PANTS', 'AMMO', 'FOOD', 'EGG', 'CHEESE', 'GLOB', 'SKIN_TANNED', 'TOOL', 'CRAFTS', 'BARREL', 'BIN' }
+  'HELM', 'GLOVES', 'PANTS', 'AMMO', 'FOOD', 'EGG', 'CHEESE', 'GLOB', 'SKIN_TANNED', 'TOOL', 'CRAFTS', 'BARREL', 'BIN',
+  'DRINK' }
 df = {
   item_type = enum(TYPES),
   general_ref_type = enum({ 'CONTAINED_IN_ITEM' }),
@@ -124,15 +125,18 @@ for _, d in raw_ipairs(readjson('MOCK_ITEMS', {})) do
   tiles[key] = { hidden = d.hidden or false, outside = d.outside or false, reach = d.reach ~= false }
   if d.stockpile then piles[key] = true end
   local it = { id = d.id, _t = df.item_type[d.type], _x = d.x, _y = d.y, _z = d.z, race = d.race or 100,
-               unit_id = d.unit_id or -1, hist_figure_id = d.hf or -1,
+               unit_id = d.unit_id or -1, hist_figure_id = d.hf or -1, _n = d.n or 1, _in = d.container,
                corpse_flags = { bone = d.bone or false },
                flags = { on_ground = true, dump = d.dump or false, forbid = d.forbid or false, rotten = d.rotten or false,
                          foreign = d.foreign or false, artifact = d.artifact or false } }
   assert(it._t, 'unknown type ' .. tostring(d.type))
   function it:getType() return self._t end
+  function it:getStackSize() return self._n end
   items[#items + 1] = it
 end
-df.global.world.items = { all = vec(items) }
+local by_id = {}
+for _, it in raw_ipairs(items) do by_id[it.id] = it end
+df.global.world.items = { all = vec(items), other = { IN_PLAY = vec(items) } }
 
 local blds = {}
 for _, b in raw_ipairs(readjson('MOCK_BUILDINGS', {})) do
@@ -150,7 +154,13 @@ local STOCKPILE = { getType = function() return df.building_type.Stockpile end }
 function xyz2pos(x, y, z) return { x = x, y = y, z = z } end
 dfhack = {
   items = { getGeneralRef = function() return nil end,
-            getPosition = function(it) return it._x, it._y, it._z end },
+            getPosition = function(it) return it._x, it._y, it._z end,
+            getContainer = function(it) return it._in and by_id[it._in] or nil end,
+            getContainedItems = function(c)
+              local r = {}
+              for _, it in raw_ipairs(items) do if it._in == c.id then r[#r + 1] = it end end
+              return r
+            end },
   buildings = { findAtTile = function(p) return piles[p.x .. ',' .. p.y .. ',' .. p.z] and STOCKPILE or nil end },
   maps = { getTileFlags = function(x, y, z) return tiles[x .. ',' .. y .. ',' .. z] or { hidden = false, outside = false } end,
            canWalkBetween = function(_, p) local t = tiles[p.x .. ',' .. p.y .. ',' .. p.z] return not t or t.reach end },
