@@ -1,0 +1,596 @@
+{
+ "ok": true,
+ "_synthetic": "SYNTHETIC (FEATURE-001): shape of claude/pilot_offices status; names/ids from Run 5 notes, values invented",
+ "tick": 48787200,
+ "patients": 1,
+ "depot": true,
+ "positions": [
+  {
+   "code": "MANAGER",
+   "idx": 0,
+   "assignment": 100,
+   "hf": 13621,
+   "holder": {
+    "id": 4621,
+    "name": "Kol Rakustlolor",
+    "hf": 13621,
+    "prof": "Mechanic",
+    "alive": true,
+    "citizen": true,
+    "adult": true,
+    "mood": false,
+    "stress": 0,
+    "wounds": 0,
+    "cant_stand": false,
+    "patient": false,
+    "job": null,
+    "prisoner": false,
+    "squad": false,
+    "squad_leader": false,
+    "skills": {
+     "ORGANIZATION": 4,
+     "JUDGING_INTENT": 2
+    },
+    "care": 0,
+    "pick": false,
+    "offices": [
+     "MANAGER"
+    ],
+    "depot_reach": true
+   }
+  },
+  {
+   "code": "BOOKKEEPER",
+   "idx": 1,
+   "assignment": 101,
+   "hf": 13310,
+   "holder": {
+    "id": 4310,
+    "name": "Monom Dakostzefon",
+    "hf": 13310,
+    "prof": "Clerk",
+    "alive": true,
+    "citizen": true,
+    "adult": true,
+    "mood": false,
+    "stress": 0,
+    "wounds": 0,
+    "cant_stand": false,
+    "patient": false,
+    "job": null,
+    "prisoner": false,
+    "squad": false,
+    "squad_leader": false,
+    "skills": {
+     "RECORD_KEEPING": 5,
+     "ORGANIZATION": 2
+    },
+    "care": 0,
+    "pick": false,
+    "offices": [
+     "BOOKKEEPER"
+    ],
+    "depot_reach": true
+   }
+  },
+  {
+   "code": "BROKER",
+   "idx": 2,
+   "assignment": 102,
+   "hf": 13193,
+   "holder": {
+    "id": 4193,
+    "name": "Urist Ingizmorul",
+    "hf": 13193,
+    "prof": "Trader",
+    "alive": true,
+    "citizen": true,
+    "adult": true,
+    "mood": false,
+    "stress": 20000,
+    "wounds": 0,
+    "cant_stand": false,
+    "patient": false,
+    "job": null,
+    "prisoner": false,
+    "squad": false,
+    "squad_leader": false,
+    "skills": {
+     "NEGOTIATION": 5,
+     "APPRAISAL": 4,
+     "JUDGING_INTENT": 3
+    },
+    "care": 0,
+    "pick": false,
+    "offices": [
+     "BROKER"
+    ],
+    "depot_reach": true
+   }
+  },
+  {
+   "code": "CAPTAIN_OF_THE_GUARD",
+   "idx": 3,
+   "assignment": 103,
+   "hf": 13080,
+   "holder": {
+    "id": 4080,
+    "name": "Mafol Tunemsibrek",
+    "hf": 13080,
+    "prof": "Axedwarf",
+    "alive": true,
+    "citizen": true,
+    "adult": true,
+    "mood": false,
+    "stress": 0,
+    "wounds": 0,
+    "cant_stand": false,
+    "patient": false,
+    "job": null,
+    "prisoner": false,
+    "squad": true,
+    "squad_leader": true,
+    "skills": {
+     "LEADERSHIP": 3,
+     "AXE": 8,
+     "MELEE_COMBAT": 6,
+     "DISCIPLINE": 4
+    },
+    "care": 0,
+    "pick": false,
+    "offices": [
+     "CAPTAIN_OF_THE_GUARD"
+    ],
+    "depot_reach": true
+   }
+  },
+  {
+   "code": "MILITIA_COMMANDER",
+   "idx": 4,
+   "assignment": 104,
+   "hf": 12473,
+   "holder": {
+    "id": 3473,
+    "name": "Eral Ablelzulban",
+    "hf": 12473,
+    "prof": "Swordsdwarf",
+    "alive": true,
+    "citizen": true,
+    "adult": true,
+    "mood": false,
+    "stress": 0,
+    "wounds": 0,
+    "cant_stand": false,
+    "patient": false,
+    "job": null,
+    "prisoner": false,
+    "squad": true,
+    "squad_leader": false,
+    "skills": {
+     "LEADERSHIP": 2,
+     "SWORD": 7,
+     "MILITARY_TACTICS": 3,
+     "MELEE_COMBAT": 5
+    },
+    "care": 0,
+    "pick": false,
+    "offices": [
+     "MILITIA_COMMANDER"
+    ],
+    "depot_reach": true
+   }
+  },
+  {
+   "code": "CHIEF_MEDICAL_DWARF",
+   "idx": 5,
+   "assignment": 105,
+   "hf": 13402,
+   "holder": {
+    "id": 4402,
+    "name": "Ast Omerlolum",
+    "hf": 13402,
+    "prof": "Diagnostician",
+    "alive": true,
+    "citizen": true,
+    "adult": true,
+    "mood": false,
+    "stress": 0,
+    "wounds": 0,
+    "cant_stand": false,
+    "patient": false,
+    "job": null,
+    "prisoner": false,
+    "squad": false,
+    "squad_leader": false,
+    "skills": {
+     "DIAGNOSE": 6,
+     "SURGERY": 3,
+     "SET_BONE": 2
+    },
+    "care": 6,
+    "pick": false,
+    "offices": [
+     "CHIEF_MEDICAL_DWARF"
+    ],
+    "depot_reach": true
+   }
+  }
+ ],
+ "citizens": [
+  {
+   "id": 4621,
+   "name": "Kol Rakustlolor",
+   "hf": 13621,
+   "prof": "Mechanic",
+   "alive": true,
+   "citizen": true,
+   "adult": true,
+   "mood": false,
+   "stress": 0,
+   "wounds": 0,
+   "cant_stand": false,
+   "patient": false,
+   "job": null,
+   "prisoner": false,
+   "squad": false,
+   "squad_leader": false,
+   "skills": {
+    "ORGANIZATION": 4,
+    "JUDGING_INTENT": 2
+   },
+   "care": 0,
+   "pick": false,
+   "offices": [
+    "MANAGER"
+   ],
+   "depot_reach": true
+  },
+  {
+   "id": 4193,
+   "name": "Urist Ingizmorul",
+   "hf": 13193,
+   "prof": "Trader",
+   "alive": true,
+   "citizen": true,
+   "adult": true,
+   "mood": false,
+   "stress": 20000,
+   "wounds": 0,
+   "cant_stand": false,
+   "patient": false,
+   "job": null,
+   "prisoner": false,
+   "squad": false,
+   "squad_leader": false,
+   "skills": {
+    "NEGOTIATION": 5,
+    "APPRAISAL": 4,
+    "JUDGING_INTENT": 3
+   },
+   "care": 0,
+   "pick": false,
+   "offices": [
+    "BROKER"
+   ],
+   "depot_reach": true
+  },
+  {
+   "id": 4310,
+   "name": "Monom Dakostzefon",
+   "hf": 13310,
+   "prof": "Clerk",
+   "alive": true,
+   "citizen": true,
+   "adult": true,
+   "mood": false,
+   "stress": 0,
+   "wounds": 0,
+   "cant_stand": false,
+   "patient": false,
+   "job": null,
+   "prisoner": false,
+   "squad": false,
+   "squad_leader": false,
+   "skills": {
+    "RECORD_KEEPING": 5,
+    "ORGANIZATION": 2
+   },
+   "care": 0,
+   "pick": false,
+   "offices": [
+    "BOOKKEEPER"
+   ],
+   "depot_reach": true
+  },
+  {
+   "id": 4080,
+   "name": "Mafol Tunemsibrek",
+   "hf": 13080,
+   "prof": "Axedwarf",
+   "alive": true,
+   "citizen": true,
+   "adult": true,
+   "mood": false,
+   "stress": 0,
+   "wounds": 0,
+   "cant_stand": false,
+   "patient": false,
+   "job": null,
+   "prisoner": false,
+   "squad": true,
+   "squad_leader": true,
+   "skills": {
+    "LEADERSHIP": 3,
+    "AXE": 8,
+    "MELEE_COMBAT": 6,
+    "DISCIPLINE": 4
+   },
+   "care": 0,
+   "pick": false,
+   "offices": [
+    "CAPTAIN_OF_THE_GUARD"
+   ],
+   "depot_reach": true
+  },
+  {
+   "id": 3473,
+   "name": "Eral Ablelzulban",
+   "hf": 12473,
+   "prof": "Swordsdwarf",
+   "alive": true,
+   "citizen": true,
+   "adult": true,
+   "mood": false,
+   "stress": 0,
+   "wounds": 0,
+   "cant_stand": false,
+   "patient": false,
+   "job": null,
+   "prisoner": false,
+   "squad": true,
+   "squad_leader": false,
+   "skills": {
+    "LEADERSHIP": 2,
+    "SWORD": 7,
+    "MILITARY_TACTICS": 3,
+    "MELEE_COMBAT": 5
+   },
+   "care": 0,
+   "pick": false,
+   "offices": [
+    "MILITIA_COMMANDER"
+   ],
+   "depot_reach": true
+  },
+  {
+   "id": 4402,
+   "name": "Ast Omerlolum",
+   "hf": 13402,
+   "prof": "Diagnostician",
+   "alive": true,
+   "citizen": true,
+   "adult": true,
+   "mood": false,
+   "stress": 0,
+   "wounds": 0,
+   "cant_stand": false,
+   "patient": false,
+   "job": null,
+   "prisoner": false,
+   "squad": false,
+   "squad_leader": false,
+   "skills": {
+    "DIAGNOSE": 6,
+    "SURGERY": 3,
+    "SET_BONE": 2
+   },
+   "care": 6,
+   "pick": false,
+   "offices": [
+    "CHIEF_MEDICAL_DWARF"
+   ],
+   "depot_reach": true
+  },
+  {
+   "id": 4500,
+   "name": "Domas Libashtosed",
+   "hf": 13500,
+   "prof": "Bone Doctor",
+   "alive": true,
+   "citizen": true,
+   "adult": true,
+   "mood": false,
+   "stress": 0,
+   "wounds": 0,
+   "cant_stand": false,
+   "patient": false,
+   "job": null,
+   "prisoner": false,
+   "squad": false,
+   "squad_leader": false,
+   "skills": {
+    "SET_BONE": 5,
+    "SUTURE": 3
+   },
+   "care": 6,
+   "pick": false,
+   "offices": [],
+   "depot_reach": true
+  },
+  {
+   "id": 4501,
+   "name": "Tobul Kezatzon",
+   "hf": 13501,
+   "prof": "Miner",
+   "alive": true,
+   "citizen": true,
+   "adult": true,
+   "mood": false,
+   "stress": 0,
+   "wounds": 0,
+   "cant_stand": false,
+   "patient": false,
+   "job": null,
+   "prisoner": false,
+   "squad": false,
+   "squad_leader": false,
+   "skills": {
+    "ORGANIZATION": 6
+   },
+   "care": 0,
+   "pick": true,
+   "offices": [],
+   "depot_reach": true
+  },
+  {
+   "id": 4502,
+   "name": "Litast Oddomgeshud",
+   "hf": 13502,
+   "prof": "Peasant",
+   "alive": true,
+   "citizen": true,
+   "adult": true,
+   "mood": false,
+   "stress": 0,
+   "wounds": 0,
+   "cant_stand": false,
+   "patient": false,
+   "job": null,
+   "prisoner": false,
+   "squad": false,
+   "squad_leader": false,
+   "skills": {},
+   "care": 0,
+   "pick": false,
+   "offices": [],
+   "depot_reach": true
+  },
+  {
+   "id": 4503,
+   "name": "Rigoth Vabokcilob",
+   "hf": 13503,
+   "prof": "Peasant",
+   "alive": true,
+   "citizen": true,
+   "adult": true,
+   "mood": false,
+   "stress": 0,
+   "wounds": 0,
+   "cant_stand": false,
+   "patient": false,
+   "job": null,
+   "prisoner": false,
+   "squad": false,
+   "squad_leader": false,
+   "skills": {},
+   "care": 0,
+   "pick": false,
+   "offices": [],
+   "depot_reach": true
+  },
+  {
+   "id": 4600,
+   "name": "Fikod Ustuthkosoth",
+   "hf": 13600,
+   "prof": "Broker",
+   "alive": true,
+   "citizen": true,
+   "adult": true,
+   "mood": false,
+   "stress": 0,
+   "wounds": 3,
+   "cant_stand": true,
+   "patient": true,
+   "job": "Rest",
+   "prisoner": false,
+   "squad": false,
+   "squad_leader": false,
+   "skills": {
+    "NEGOTIATION": 9,
+    "APPRAISAL": 9
+   },
+   "care": 0,
+   "pick": false,
+   "offices": [],
+   "depot_reach": true
+  },
+  {
+   "id": 4601,
+   "name": "Zuglar Ostukrimtar",
+   "hf": 13601,
+   "prof": "Leader",
+   "alive": true,
+   "citizen": true,
+   "adult": true,
+   "mood": true,
+   "stress": 0,
+   "wounds": 0,
+   "cant_stand": false,
+   "patient": false,
+   "job": null,
+   "prisoner": false,
+   "squad": false,
+   "squad_leader": false,
+   "skills": {
+    "LEADERSHIP": 9,
+    "ORGANIZATION": 9,
+    "RECORD_KEEPING": 9
+   },
+   "care": 0,
+   "pick": false,
+   "offices": [],
+   "depot_reach": true
+  },
+  {
+   "id": 4602,
+   "name": "Iden Bembulkogan",
+   "hf": 13602,
+   "prof": "Child",
+   "alive": true,
+   "citizen": true,
+   "adult": false,
+   "mood": false,
+   "stress": 0,
+   "wounds": 0,
+   "cant_stand": false,
+   "patient": false,
+   "job": null,
+   "prisoner": false,
+   "squad": false,
+   "squad_leader": false,
+   "skills": {
+    "NEGOTIATION": 9
+   },
+   "care": 0,
+   "pick": false,
+   "offices": [],
+   "depot_reach": true
+  },
+  {
+   "id": 4603,
+   "name": "Sodel Ezumkadol",
+   "hf": 13603,
+   "prof": "Accountant",
+   "alive": true,
+   "citizen": true,
+   "adult": true,
+   "mood": false,
+   "stress": 180000,
+   "wounds": 0,
+   "cant_stand": false,
+   "patient": false,
+   "job": null,
+   "prisoner": false,
+   "squad": false,
+   "squad_leader": false,
+   "skills": {
+    "RECORD_KEEPING": 9,
+    "NEGOTIATION": 9
+   },
+   "care": 0,
+   "pick": false,
+   "offices": [],
+   "depot_reach": true
+  }
+ ]
+}

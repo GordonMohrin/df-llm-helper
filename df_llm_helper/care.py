@@ -8,6 +8,9 @@ plus gamelog). Rules:
   care_floor_zone        a lying patient outside the hospital -> hint.
 Escalation (hints only): 'Give water: No water source' > water_cancel_hint, meals/head < min_meals_per_head,
 hunger/thirst > crit_* -> top-5 list.
+FEATURE-004 extension (used by `python -m df_llm_helper hospital`, df_llm_helper/features/hospital.py): hospital staff
+posts (location occupations: without a filled post the game creates no care jobs at all, live 02.10.2026), labor
+holders per care labor, patients waiting without a care job, post candidates. Pure functions, no DF call.
 """
 from __future__ import annotations
 
@@ -18,7 +21,8 @@ from dataclasses import dataclass, field
 from .anomaly import cancel_loops
 
 __all__ = ["DEFAULTS", "CareObs", "obs_from_status", "doctors", "pick_candidates", "duplicate_hospitals",
-           "evaluate", "CareWatch"]
+           "evaluate", "CareWatch", "HOSPITAL_LABORS", "POST_TYPES", "post_filled", "location_staffed",
+           "unfilled_posts", "labor_staff", "post_candidates"]
 
 DEFAULTS = {"min_doctors": 3, "pick_count": 5, "crit_hunger": 50000, "crit_thirst": 50000,
             "labors": ["DIAGNOSE", "SURGERY", "BONE_SETTING", "SUTURING", "DRESSING_WOUNDS", "FEED_WATER_CIVILIANS",
@@ -187,3 +191,63 @@ class CareWatch:
                 self.store.warn(now, "care", f"care:crit:{p.get('id')}",
                                 f"Patient {p.get('id')} hunger {p.get('hunger')} thirst {p.get('thirst')}", "crit")
         return out[:8] or [f"Care ok ({len(ev['patients'])} wounded, {len(ev['doctors'])} doctors)"]
+
+
+# ------------------------------------------------------------------ FEATURE-004: hospital posts and staff (pure)
+HOSPITAL_LABORS = ("DIAGNOSE", "SURGERY", "BONE_SETTING", "SUTURING", "DRESSING_WOUNDS", "FEED_WATER_CIVILIANS")
+POST_TYPES = ("DOCTOR", "DIAGNOSTICIAN", "SURGEON", "BONE_DOCTOR")
+
+
+def post_filled(post: dict) -> bool:
+    """A post counts as filled only with a living adult holder; a post that still points at a dead unit is unfilled."""
+    h = post.get("holder") if isinstance(post.get("holder"), dict) else None
+    return int(post.get("unit_id") if post.get("unit_id") is not None else -1) >= 0 and bool(h) \
+        and bool(h.get("alive")) and h.get("adult", True) is not False
+
+
+def location_staffed(posts: list[dict]) -> bool:
+    """Working hospital: one DOCTOR post filled, or DIAGNOSTICIAN + SURGEON + BONE_DOCTOR filled."""
+    filled = {p.get("type") for p in posts if post_filled(p)}
+    return "DOCTOR" in filled or {"DIAGNOSTICIAN", "SURGEON", "BONE_DOCTOR"} <= filled
+
+
+def unfilled_posts(locations: list[dict]) -> list[dict]:
+    """Unfilled posts of hospital locations that have a zone (orphaned locations are listed separately), each with
+    'location' and 'dead_holder' (the post still points at a dead/missing unit)."""
+    out = []
+    for loc in locations:
+        if not loc.get("zones"):
+            continue
+        for p in loc.get("posts") or []:
+            if isinstance(p, dict) and not post_filled(p):
+                h = p.get("holder") if isinstance(p.get("holder"), dict) else None
+                out.append({**p, "location": loc.get("id"),
+                            "dead_holder": int(p.get("unit_id") if p.get("unit_id") is not None else -1) >= 0
+                            and not (h and h.get("alive"))})
+    return out
+
+
+def labor_staff(citizens: list[dict], labors=HOSPITAL_LABORS) -> dict:
+    """{labor: {'n', 'idle', 'injured', 'squad'}} over living citizens with that labor."""
+    out = {L: {"n": 0, "idle": 0, "injured": 0, "squad": 0} for L in labors}
+    for c in citizens:
+        for L in c.get("labors") or []:
+            if L in out:
+                d = out[L]
+                d["n"] += 1
+                d["idle"] += 1 if c.get("idle") else 0
+                d["injured"] += 1 if is_patient(c) else 0
+                d["squad"] += 1 if c.get("squad") else 0
+    return out
+
+
+def post_candidates(citizens: list[dict], n: int, *, stress_max: int = 75000, exclude=()) -> list[dict]:
+    """Candidates for hospital posts: alive adults, not in a squad, no mood, not a patient, no prisoner, no pickaxe
+    (miners keep digging), stress below the limit. Best care skill first, then id."""
+    ex = set(exclude)
+    pool = [c for c in citizens
+            if c.get("id") not in ex and not c.get("child") and not c.get("squad") and not c.get("mood")
+            and not c.get("prisoner") and not c.get("pick") and not is_patient(c)
+            and int(c.get("stress") or 0) <= stress_max]
+    pool.sort(key=lambda c: (-int(c.get("care_skill") or 0), int(c.get("id") or 0)))
+    return pool[:max(0, n)]

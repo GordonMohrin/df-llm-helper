@@ -3,7 +3,8 @@
 df-llm-helper talks to Dwarf Fortress only through `dfhack-run` and DFHack Lua scripts installed under
 `hack/scripts/claude/`. Everything is bundled:
 
-1. `lua/pilot_*.lua` – thin scripts written for df-llm-helper (siege, caravan, mood, care, water, work details, batching).
+1. `lua/pilot_*.lua` – thin scripts written for df-llm-helper (siege, caravan, mood, care, water, work details, batching,
+   offices, hospital).
 2. `lua/claude/*.lua` – the fortress toolkit the original project played with (`claude/status`, `claude/report`,
    watchdog, trade, military, mood, …). Comments are English; output keys and in-game texts are still German
    (df-llm-helper parses them, so they are part of the protocol).
@@ -103,3 +104,21 @@ df-llm-helper on its own):
 
 Squads: DFHack has no way to delete a squad, and empty squads stay in the list. Reuse them with `claude/mil rename <squad>
 <name> --apply` and `claude/mil add <squad> <unit> --apply` instead of creating new ones (BUG-425).
+
+**Offices and hospital watch (FEATURE-001/004, LIVE-UNTESTED):**
+- `claude/pilot_offices status` (read only): `{ok, positions: [{code, idx, assignment, hf, holder}], citizens: [...],
+  patients, depot, tick}`. `holder` = the unit behind the assignment's histfig (`histfig2` wins) with `id, name, prof,
+  alive, adult, mood, stress, wounds, cant_stand, patient, job, prisoner, squad, squad_leader, skills {SKILL: level},
+  care, pick, offices, depot_reach`, or `{hf, alive: false, dead, gone, name}` when the histfig has no unit on the map;
+  no `holder` = empty. `citizens` are the living citizens with the same fields. No write path: appointing stays with
+  `claude/aemter assign|vacate`.
+- `claude/pilot_hospital status` (read only): `{ok, citizens, hospitals, locations, care_jobs, water, refuge, supplies,
+  gypsum, tick}`. `locations` = HOSPITAL locations `{id, zones, posts: [{id, type, unit_id, hf, holder: {id, name,
+  alive, adult}}]}` (posts = occupations DOCTOR/DIAGNOSTICIAN/SURGEON/BONE_DOCTOR); `hospitals` = zones with `beds,
+  tables, traction, containers, water_reach`; citizens carry `care_jobs` (care jobs naming them as patient), `mood`,
+  `stress`, `prisoner`; `refuge` = `claude/gefahr` `refuge_supply` fields (BUG-423) or absent; `gypsum` = gypsum-class
+  boulders on visible tiles `{total, forbidden, by_mat}`.
+- `claude/pilot_hospital staff <occupation_id> <unit_id> [--apply]`: fills one hospital post like the location menu
+  (dry run without `--apply`; refuses living holders, orphaned locations, non-citizens, children, moods, soldiers,
+  patients, prisoners; log `tools/out/hospital-log.json`). df-llm-helper sends `--apply` only with the register entry
+  `HOSPITAL`.

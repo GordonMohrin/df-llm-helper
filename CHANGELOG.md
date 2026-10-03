@@ -1,5 +1,24 @@
 # CHANGELOG df-llm-helper
 
+## Offices and hospital watch (FEATURE-001, FEATURE-004, 2026-10-03)
+- FEATURE-001: `python -m df_llm_helper offices [--plan|--apply [--replace-unfit]] [--file F] [--json]` and
+  `offices watch`: required offices (manager, bookkeeper, broker, captain of the guard, militia commander, chief medical
+  dwarf; mayor when present) are `ok`, `empty`, `dead` (assignment on a dead unit/histfig) or `unfit` (mood, child,
+  prisoner, wounded, stress, depot unreachable, not a soldier); one distinct successor per problem by a pure score
+  (skills, stress, wounds, squad, pickaxe, caretaker). `--apply` uses `claude/aemter vacate` + `assign` and needs the
+  new register consent action `OFFICES`. `check` writes one warning per state change (crit for dead/empty = one wake
+  line). The trade automaton (`trade step`, `caravan`) fails at IDLE with the offices message when the broker is dead
+  or unusable, without pausing or writing `pause.hold`. New Lua `lua/pilot_offices.lua` (read only).
+- FEATURE-004: `python -m df_llm_helper hospital [staff [--apply]|plan] [--file F] [--json]`: hospital staff posts
+  (location occupations; without a filled post the game creates no care jobs; a post on a dead unit counts as
+  unfilled), care labors, patients waiting without a care job, zone furniture, water reachable from the hospital and in
+  the refuge burrow (BUG-423 `refuge_supply`), supplies (forbidden apart), orphaned locations; one warning per state
+  change. `hospital staff --apply` fills posts like the location menu and sets the care labors (register consent action
+  `HOSPITAL`). New planner `planners/medical.py`: no plaster-powder order without gypsum/alabaster/selenite/satinspar
+  (`plaster powder impossible: ...`). `care.py` got the pure post/staff functions. New Lua `lua/pilot_hospital.lua`;
+  `claude/ueberwacher` names the watch in its `HOSPITAL/REST` hint.
+- `exception add` also accepts the consent actions `OFFICES` and `HOSPITAL` (`fairplay.CONSENT_ACTIONS`).
+
 ## Military and alarm fixes from the live siege (2026-10-03)
 - BUG-423: `claude/alert off` now holds (`config.ALERT_MANUAL_HOLD_S`, default 15 min) against the watchdog and `gefahr`
   unless the enemies near the fort grow by more than `ALERT_MANUAL_GROW` or a new major threat appears (flag

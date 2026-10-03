@@ -283,7 +283,9 @@ class CaravanPilot:
 
         clock = self.client.run("claude/advance clock")
         paused = bool((clock.json or {}).get("paused")) if isinstance(clock.json, dict) else False
-        obs = obs_from_status(j, paused=paused, stable_s=stable_s, last_ok=stat.ok, danger=danger)
+        from .features.offices import trade_precheck      # FEATURE-001: broker dead/unusable -> fail before PAUSE
+        obs = obs_from_status(j, paused=paused, stable_s=stable_s, last_ok=stat.ok, danger=danger,
+                              broker_problem=trade_precheck(self.client, self.cfg.get("offices"), flow.state, j))
         for c in flow.step(obs, self.clock.now().epoch):
             r = self._run(c, dry, log)
             if c.startswith("claude/handel open") and r is not None:     # BUG-225: raw answer for the abort text
@@ -296,8 +298,12 @@ class CaravanPilot:
             sent = any(x.startswith(("RELEASE -> RESUME", "RESUME -> DONE")) for x in flow.log)
             self._resume(st, dry, log, "Trade completed", run=not sent)
         elif flow.state in ("ABORT", "FAILED"):
-            st.report.append(f"Trade aborted ({flow.abort_reason}); quicksave from the start of the trade available "
-                             f"(load only via the title menu/the player)")
+            if flow.abort_reason.startswith("offices:") and before == "IDLE":      # FEATURE-001 broker precheck
+                st.report.append(f"Trade not started ({flow.abort_reason})")
+                self._warn("caravan:broker", "Trade not started: " + flow.abort_reason, dry)
+            else:
+                st.report.append(f"Trade aborted ({flow.abort_reason}); quicksave from the start of the trade "
+                                 f"available (load only via the title menu/the player)")
             if not dry:
                 release_hold(self.tools)          # the trade's own hold only; an alarm hold stays (BUG-224/225)
         st.flow = asdict(flow)
