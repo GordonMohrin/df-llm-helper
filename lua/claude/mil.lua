@@ -11,9 +11,14 @@
 --   kill <squad> <unitid,...> [--apply --experimental]     kill order (UNTESTED)
 --   release <squad> [--apply --experimental]              delete orders (UNTESTED)
 -- Run 3 (30.09.2026, TESTED on the running game, no crash; documentation tools/scopes/militaer.md):
---   create <name> <leader_unit_id> [--apply]   create a new squad (MILITIA_CAPTAIN assignment + makeSquad + leader pos 0)
---   add <squad> <unit_id> [--apply]            member into the first free slot >= 1 (removes labors MINE/CUTWOOD/HUNT)
---   remove <squad> <unit_id> [--apply]         remove member
+--   create <name> <leader_unit_id> [--apply]   create a new squad (MILITIA_CAPTAIN assignment + makeSquad + leader pos 0); the answer always
+--                                              carries squad_id (or error); empty squads to reuse are listed as reuse_hint
+--   add <squad> <unit_id> [--apply]            member into the first free slot >= 1 (slot 0 = leader last); answer: ok + slot, or ok=false
+--                                              + reason (squad full / already in a squad / addToSquad refused); removes labors MINE/CUTWOOD/HUNT
+--   remove <squad> <unit_id> [--apply]         remove member (ok=false + reason on failure)
+--   rename <squad> <name> [--apply]            rename a squad (UI: squad name) - to REUSE an empty squad
+--   NOTE (BUG-425): squads can NOT be deleted through DFHack (no API, no player action we can mirror); empty squads stay in the list.
+--   Reuse them (rename + add) instead of creating new ones; `status` marks them with empty = true.
 --   uniform <squad> <tpl_idx> [weapon_subtype] [--apply]   uniform template (entity.uniforms[i]) onto ALL positions; fixed weapon
 --                                              (default 1 = ITEM_WEAPON_AXE_BATTLE; -1 = template 'best melee weapon'); triggers update
 --   barracks <squad> <zone_id> [--apply]       assign barracks as training room (updateRoomAssignments train=true)
@@ -27,6 +32,8 @@
 --                                              (combat + training) replaces the existing ones, then ammo/quiver update
 --   refuge [--apply]                           create/check refuge burrow (config.ZUFLUCHT.rects) + civilian alert; existing
 --                                              tiles are only replaced when rects are configured
+--   refuge check                               read only (BUG-423): drink/food/wells/water tiles/hospital inside the refuge burrow;
+--                                              problems ZUFLUCHT OHNE WASSER / ZUFLUCHT OHNE ESSEN
 --   guard start|stop|status                    guard job (60 ticks): visible intruder in the INTERIOR (config.INNEN_BOXEN) -> tools/killorder.lua --watch
 -- Protection: pcall everywhere, log, no change without --apply; station/kill/release only with --experimental AND
 -- after agreement with scope agent militaer. Fair play: no unit/item manipulation, no reveal.
@@ -90,11 +97,18 @@ local function worn_count(u)
   return worn, weapon
 end
 
+-- BUG-423/426: prisoners never count (config.is_captive; fallback for an old merged config.lua without it)
+local function captive(u)
+  local f = cfg.is_captive
+  if f then return f(u) end
+  return (u.flags1.caged or u.flags1.chained) and true or false
+end
+
 local function enemies()
   local res = {}
   for _, u in ipairs(df.global.world.units.active) do
     local ok = dfhack.units.isActive(u) and not dfhack.units.isDead(u) and dfhack.units.isDanger(u)
-      and not dfhack.units.isCitizen(u) and not (u.flags1.caged or u.flags1.chained)
+      and not dfhack.units.isCitizen(u) and not captive(u)
     if ok and not util.unit_hidden(u) then
       local d = math.max(math.abs(u.pos.x - FORT_X), math.abs(u.pos.y - FORT_Y))
       res[#res + 1] = { id = u.id, name = nm(u), x = u.pos.x, y = u.pos.y, z = u.pos.z, dist = d,
@@ -131,7 +145,7 @@ local function squad_info(s, detail)
   local ords = {}
   for _, o in ipairs(s.orders) do ords[#ords + 1] = df.squad_order_type[o:getType()] end
   return { id = s.id, name = dfhack.military.getSquadName(s.id), routine = s.cur_routine_idx,
-    routine_name = routines[s.cur_routine_idx] or '?', members = occ, of = #s.positions, orders = ords,
+    routine_name = routines[s.cur_routine_idx] or '?', members = occ, of = #s.positions, orders = ords, empty = (occ == 0),
     thirsty = minfo.thirsty, hungry = minfo.hungry, equip_incomplete = minfo.incomplete,
     detail = detail and members or nil }
 end
@@ -172,6 +186,15 @@ local function guard_tick()
       local now_t = df.global.cur_year * 403200 + df.global.cur_year_tick
       if GS and GS.last_scan_tick and now_t >= GS.last_scan_tick and now_t - GS.last_scan_tick <= 70 then return end
       local GF = reqscript('claude/gefahr') GF.handle(GF.scan())
+    end)
+    -- BUG-426: drop kill-order targets that are caged/chained/dead and orders of starving squads (every guard tick, also without killwatch)
+    pcall(function()
+      local K = reqscript('claude/killorder')
+      local sc, st = K.scrub_orders(), K.relieve_starving()
+      if sc > 0 or st > 0 then
+        local f = io.open(LOG, 'a')
+        if f then f:write(os.date('%H:%M:%S ') .. 'guard: ' .. sc .. ' Kill-Ziele (gefangen/tot) entfernt, ' .. st .. ' Trupps wegen Hunger/Durst entlassen' .. string.char(10)) f:close() end
+      end
     end)
     local W = rawget(_G, 'CLAUDE_KILLWATCH')
     if n > 0 and not (W and W.active) then
@@ -282,7 +305,7 @@ local ok, err = pcall(function()
       local ids, list = pos[2] or '', {}
       for id in ids:gmatch('%d+') do
         local u = df.unit.find(tonumber(id))
-        if u and dfhack.units.isDanger(u) and not dfhack.units.isCitizen(u) and not util.unit_hidden(u) then list[#list + 1] = u.id
+        if u and dfhack.units.isDanger(u) and not dfhack.units.isCitizen(u) and not captive(u) and not util.unit_hidden(u) then list[#list + 1] = u.id
         else plan.skipped = (plan.skipped or '') .. id .. ' ' end
       end
       plan.targets = list
@@ -320,6 +343,14 @@ local ok, err = pcall(function()
     local own_idx, cap
     for i = 0, #ent.positions.own - 1 do if ent.positions.own[i].code == 'MILITIA_CAPTAIN' then own_idx, cap = i, ent.positions.own[i] end end
     local plan = { create = name, leader = uid, dry = dry, position_idx = own_idx }
+    -- BUG-425: squads cannot be deleted -> point at empty squads that can be reused (rename + add)
+    local empty = {}
+    for _, sq0 in ipairs(squads()) do
+      local okc, inf = pcall(squad_info, sq0, false)
+      if okc and inf.members == 0 then empty[#empty + 1] = { id = sq0.id, name = inf.name } end
+    end
+    if #empty > 0 then plan.reuse_hint = { empty_squads = empty, hinweis = 'leere Trupps wiederverwenden: mil rename <squad> <name> --apply, dann mil add' } end
+    if not cap then plan.ok, plan.error = false, 'keine Position MILITIA_CAPTAIN in der Festungs-Entitaet' out(plan) return end
     if dry then out(plan) return end
     local asg = df.entity_position_assignment:new()
     asg.id = ent.positions.next_assignment_id
@@ -335,25 +366,35 @@ local ok, err = pcall(function()
       ent.positions.assignments:erase(ai) ent.positions.next_assignment_id = asg.id
       out({ error = 'makeSquad fehlgeschlagen (zurueckgerollt)', detail = tostring(sq) }) return
     end
-    sq.alias = name
-    sq.name.nickname = name
-    local hf = df.historical_figure.find(u.hist_figure_id)
-    asg.histfig, asg.histfig2, asg.position_vector_idx = hf.id, hf.id, own_idx
-    hf.entity_links:insert('#', { new = df.histfig_entity_link_positionst, entity_id = ent.id, entity_vector_idx = ent.id,
-      link_strength = 100, assignment_id = asg.id, assignment_vector_idx = ai, start_year = df.global.cur_year })
-    hf.entity_links:insert('#', { new = df.histfig_entity_link_squadst, entity_id = ent.id, entity_vector_idx = -1,
-      link_strength = 100, squad_id = sq.id, squad_position = 0, start_year = df.global.cur_year })
-    sq.positions[0].occupant = hf.id
-    u.military.squad_id, u.military.squad_position = sq.id, 0
-    for rk, v in pairs(cap.responsibilities) do
-      if v then
-        local vec, found = ent.assignments_by_type[rk], false
-        for i = 0, #vec - 1 do if vec[i].id == asg.id then found = true end end
-        if not found then vec:insert('#', asg) end
-      end
-    end
+    -- BUG-425: the squad exists from here on; report its id even if a later step fails (before: the outer pcall printed only 'error')
+    plan.squad, plan.squad_id, plan.assignment = sq.id, sq.id, asg.id
     log('create squad ' .. sq.id .. ' ' .. name .. ' leader ' .. uid)
-    plan.squad, plan.assignment = sq.id, asg.id
+    local okl, errl = pcall(function()
+      sq.alias = name
+      sq.name.nickname = name
+      local hf = df.historical_figure.find(u.hist_figure_id)
+      asg.histfig, asg.histfig2, asg.position_vector_idx = hf.id, hf.id, own_idx
+      hf.entity_links:insert('#', { new = df.histfig_entity_link_positionst, entity_id = ent.id, entity_vector_idx = ent.id,
+        link_strength = 100, assignment_id = asg.id, assignment_vector_idx = ai, start_year = df.global.cur_year })
+      hf.entity_links:insert('#', { new = df.histfig_entity_link_squadst, entity_id = ent.id, entity_vector_idx = -1,
+        link_strength = 100, squad_id = sq.id, squad_position = 0, start_year = df.global.cur_year })
+      sq.positions[0].occupant = hf.id
+      u.military.squad_id, u.military.squad_position = sq.id, 0
+      for rk, v in pairs(cap.responsibilities) do
+        if v then
+          local vec, found = ent.assignments_by_type[rk], false
+          for i = 0, #vec - 1 do if vec[i].id == asg.id then found = true end end
+          if not found then vec:insert('#', asg) end
+        end
+      end
+    end)
+    plan.ok = okl
+    if not okl then
+      plan.warning = 'Trupp angelegt, Anfuehrer-Zuweisung unvollstaendig: ' .. tostring(errl) .. ' (Trupp wiederverwenden: mil add ' .. sq.id .. ' <unit> --apply)'
+      log('create squad ' .. sq.id .. ' leader FEHLER ' .. tostring(errl))
+    end
+    local oki, inf = pcall(squad_info, sq, false)   -- status query afterwards
+    if oki then plan.status = { members = inf.members, of = inf.of, name = inf.name } end
     out(plan)
 
   elseif cmd == 'add' or cmd == 'remove' then
@@ -362,18 +403,63 @@ local ok, err = pcall(function()
     local u = uid and df.unit.find(uid)
     if not s or not u then out({ error = 'usage: ' .. cmd .. ' <squad_id> <unit_id> [--apply]' }) return end
     local plan = { cmd = cmd, squad = s.id, unit = uid, name = nm(u), dry = dry }
-    if cmd == 'add' and (not dfhack.units.isCitizen(u) or dfhack.units.isChild(u)) then plan.error = 'kein erwachsener Buerger' out(plan) return end
-    if dry then out(plan) return end
+    local function fail(reason) plan.ok, plan.reason = false, reason out(plan) end
     if cmd == 'add' then
-      local okk, r = pcall(dfhack.military.addToSquad, uid, s.id, -1)
-      plan.ok = okk and r
+      -- BUG-425: every refusal carries a reason; explicit slot instead of -1 (-1 landed on an empty/orphaned leader slot and failed silently)
+      if not dfhack.units.isCitizen(u) or dfhack.units.isChild(u) then plan.error = 'kein erwachsener Buerger' return fail('not an adult citizen') end
+      if dfhack.units.isDead(u) then return fail('unit is dead') end
+      if u.hist_figure_id < 0 then return fail('unit has no historical figure') end
+      if u.military.squad_id == s.id then return fail('unit already in this squad') end
+      if u.military.squad_id ~= -1 then return fail('unit already in squad ' .. u.military.squad_id .. ' (mil remove first)') end
+      local cand, orphan = {}, {}
+      local function classify(i)
+        local p = s.positions[i]
+        if p.occupant == -1 then cand[#cand + 1] = i return end
+        local m = member_unit(p)
+        if not m or dfhack.units.isDead(m) then orphan[#orphan + 1] = i end   -- histfig gone / dead occupant
+      end
+      for i = 1, #s.positions - 1 do classify(i) end
+      if #s.positions > 0 then classify(0) end   -- leader slot last
+      plan.free_slots, plan.orphaned_slots = cand, (#orphan > 0) and orphan or nil
+      if #cand == 0 then
+        return fail('squad full' .. ((#orphan > 0) and (' (orphaned slots ' .. table.concat(orphan, ',') .. ': occupant without a living unit)') or ''))
+      end
+      plan.slot = cand[1]
+      if dry then out(plan) return end
+      local tried = {}
+      for _, slot in ipairs(cand) do
+        local okk, r = pcall(dfhack.military.addToSquad, uid, s.id, slot)
+        if okk and r then plan.ok, plan.slot = true, slot break end
+        tried[#tried + 1] = slot .. ':' .. (okk and tostring(r) or ('error ' .. tostring(r)))
+      end
+      if not plan.ok then
+        plan.slot = nil
+        log('add ' .. uid .. ' -> squad ' .. s.id .. ' FEHLER ' .. table.concat(tried, ' '))
+        return fail('addToSquad refused every free slot (' .. table.concat(tried, ' ') .. ')')
+      end
+      plan.reason = nil
       -- Labors that collide with weapons/uniform (uniform-unstick hint)
       for _, lb in ipairs{ 'MINE', 'CUTWOOD', 'HUNT' } do u.status.labors[df.unit_labor[lb]] = false end
-      log('add ' .. uid .. ' -> squad ' .. s.id .. ' ok=' .. tostring(plan.ok))
+      log('add ' .. uid .. ' -> squad ' .. s.id .. ' slot ' .. plan.slot)
     else
-      plan.ok = pcall(dfhack.military.removeFromSquad, uid)
-      log('remove ' .. uid .. ' <- squad ' .. s.id)
+      if u.military.squad_id ~= s.id then return fail('unit not in this squad') end
+      if dry then out(plan) return end
+      local okk, r = pcall(dfhack.military.removeFromSquad, uid)
+      plan.ok = okk and r ~= false
+      if not plan.ok then plan.reason = okk and 'removeFromSquad refused' or ('error ' .. tostring(r)) end
+      log('remove ' .. uid .. ' <- squad ' .. s.id .. ' ok=' .. tostring(plan.ok))
     end
+    out(plan)
+
+  elseif cmd == 'rename' then
+    local s = find_squad(tonumber(pos[1]))
+    local name = pos[2]
+    if not s or not name or name == '' then out({ error = 'usage: rename <squad_id> <name> [--apply]' }) return end
+    local plan = { squad = s.id, from = dfhack.military.getSquadName(s.id), to = name, dry = dry }
+    if dry then out(plan) return end
+    s.alias = name
+    plan.ok = true
+    log('rename squad ' .. s.id .. ' -> ' .. name)
     out(plan)
 
   elseif cmd == 'uniform' then
@@ -618,6 +704,15 @@ local ok, err = pcall(function()
   elseif cmd == 'refuge' then
     local Z = cfg.ZUFLUCHT
     local rects = Z and Z.rects or {}
+    if pos[1] == 'check' then
+      -- BUG-423 (read only): is the refuge supplied? drink/water and food inside the burrow
+      local G = reqscript('claude/gefahr')
+      local sup = G.refuge_supply(nil, true)
+      local al = df.global.plotinfo.alerts
+      out({ refuge = sup, civ_burrows = (#al.list > 1) and #al.list[1].burrows or 0, civ_alert_idx = al.civ_alert_idx,
+            require_water = cfg.REFUGE_REQUIRE_WATER ~= false })
+      return
+    end
     if dry then
       out({ dry = true, rects = #rects, would = 'Zuflucht-Burrow + Zivilwarnung anlegen/pruefen; mit --apply ausfuehren' })
       return
@@ -641,10 +736,13 @@ local ok, err = pcall(function()
     end
     utils.insert_sorted(alerts.list[1].burrows, b.id)
     log('refuge burrow ' .. b.id)
-    out({ burrow = b.id, blocks = #dfhack.burrows.listBlocks(b), alerts = #alerts.list, civ_burrows = #alerts.list[1].burrows, civ_alert_idx = alerts.civ_alert_idx })
+    local res = { burrow = b.id, blocks = #dfhack.burrows.listBlocks(b), alerts = #alerts.list, civ_burrows = #alerts.list[1].burrows, civ_alert_idx = alerts.civ_alert_idx }
+    local oks, sup = pcall(function() return reqscript('claude/gefahr').refuge_supply(b, true) end)
+    if oks and sup then res.supply_ok, res.problems = sup.ok, sup.problems end   -- BUG-423: report an unsupplied refuge right away
+    out(res)
 
   else
-    out({ error = 'unbekannt: ' .. tostring(cmd), usage = 'status|report|equip|routines|enemies|plan|train|station|kill|release|create|add|remove|uniform|workmode|pickfix|ammo|barracks|update|refuge|guard' })
+    out({ error = 'unbekannt: ' .. tostring(cmd), usage = 'status|report|equip|routines|enemies|plan|train|station|kill|release|create|add|remove|rename|uniform|workmode|pickfix|ammo|barracks|update|refuge|guard' })
   end
 end)
 if not ok then

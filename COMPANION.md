@@ -97,5 +97,9 @@ df-llm-helper on its own):
 | `claude/units` | client, config, rb15_hunger_trotz_essen, scopes, snapshot | `fixtures/run5/units.txt` |
 | `claude/watchdog` | rb19_dienste_starten, services | – |
 | `claude/workdetail` | client, config, rb02_grabstau, scopes, snapshot | `fixtures/run5/workdetail_list.txt` |
-`claude/advance N|0|run|clock` (timer/pause), `claude/alert on|off` (civilian alert), `claude/schau say "<text>"`
+`claude/advance N|0|run|clock` (timer/pause), `claude/alert on|off` (civilian alert; `off` holds against the watchdog for
+`config.ALERT_MANUAL_HOLD_S`, BUG-423), `claude/schau say "<text>"`
 (in-game message) have no fixture: they return `{"ok": true}`-style JSON; `advance clock` must contain `"paused"`.
+
+Squads: DFHack has no way to delete a squad, and empty squads stay in the list. Reuse them with `claude/mil rename <squad>
+<name> --apply` and `claude/mil add <squad> <unit> --apply` instead of creating new ones (BUG-425).

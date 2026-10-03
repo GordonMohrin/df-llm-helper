@@ -97,7 +97,20 @@ local function check()
   -- Civilian alert on permanently? (run 2: on for > 1 month = standstill + hunger)
   if df.global.plotinfo.alerts.civ_alert_idx ~= 0 then
     state.alert_since = state.alert_since or os.time()
-    if os.time() - state.alert_since > 180 and (os.time() - (state.last_alert or 0)) > 300 then state.last_alert = os.time() write_flag('notfall.flag', os.date('%H:%M:%S') .. ' ZIVILWARNUNG seit > 3 Min AN (Watchdog-Enemies=' .. tostring(C().rt.enemies_near) .. ') -> claude/alert off + Watchdog neu starten') end
+    if os.time() - state.alert_since > 180 and (os.time() - (state.last_alert or 0)) > 300 then
+      state.last_alert = os.time()
+      -- BUG-423: name the real cause. With enemies in ALERT_RANGE a plain 'alert off' was undone by the watchdog within seconds (livelock);
+      -- now `claude/alert off` holds (config.ALERT_MANUAL_HOLD_S) unless more enemies come.
+      local n = tonumber(C().rt.enemies_near) or 0
+      local txt
+      if n > 0 then
+        txt = ' ZIVILWARNUNG seit > 3 Min AN: ' .. n .. ' Feinde in ALERT_RANGE (' .. tostring(C().ALERT_RANGE) .. ' Kacheln, claude/gefahr status). Zuflucht versorgt? '
+          .. '(claude/mil refuge check). Bewusst aufheben: claude/alert off (haelt ' .. math.floor((C().ALERT_MANUAL_HOLD_S or 900) / 60) .. ' Min, ausser mehr Feinde kommen)'
+      else
+        txt = ' ZIVILWARNUNG seit > 3 Min AN ohne Feinde in Reichweite (Watchdog-Enemies=0) -> claude/alert off; laeuft claude/watchdog?'
+      end
+      write_flag('notfall.flag', os.date('%H:%M:%S') .. txt)
+    end
   else state.alert_since = nil end
   state.checks = (state.checks or 0) + 1
 end

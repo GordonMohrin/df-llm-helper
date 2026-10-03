@@ -1,7 +1,8 @@
 -- claude/pilot_siege status | kill <squad_id> <id,id,...> | move <squad_id> <x> <y> <z> | clear <squad_id>
 -- df-llm-helper Spec 01 (siege autopilot). NOT TESTED LIVE (structure check + mock DFHack only).
 -- Commands mirror the squad menu (kill list, move, clear orders); no unit/item manipulation.
--- status: invaders (isInvader, never citizen/pet/merchant/guest), berserk citizens (report only), squads with blood/position.
+-- status: invaders (isInvader, never citizen/pet/merchant/guest, never caged/chained: BUG-426), berserk citizens (report only),
+--   squads with blood/position/thirst/hunger (the flow withdraws orders of starving squads).
 local util = reqscript('claude/util')
 if not util.require_fort() then return end
 local cfg = reqscript('claude/config')
@@ -17,6 +18,12 @@ local function dist(p) return math.max(math.abs(p.x - CX), math.abs(p.y - CY), m
 local function friendly(u)
   return dfhack.units.isCitizen(u) or dfhack.units.isFortControlled(u) or dfhack.units.isPet(u)
       or dfhack.units.isMerchant(u) or (dfhack.units.isVisitor(u) and not dfhack.units.isInvader(u))
+end
+
+-- BUG-426: prisoners (caged/chained, or held in a cage item) are never targets; older config.lua copies lack is_captive
+local function captive(u)
+  if cfg.is_captive then return cfg.is_captive(u) end
+  return (u.flags1.caged or u.flags1.chained) and true or false
 end
 
 local function squad_of(id)
@@ -42,7 +49,7 @@ if cmd == 'status' then
     if dfhack.units.isAlive(u) and u.pos.x >= 0 and not util.unit_hidden(u) then
       if dfhack.units.isCitizen(u) and dfhack.units.isCrazed(u) then
         berserk[#berserk + 1] = { id = u.id, x = u.pos.x, y = u.pos.y, z = u.pos.z }
-      elseif dfhack.units.isInvader(u) and not friendly(u) and not u.flags1.caged then
+      elseif dfhack.units.isInvader(u) and not friendly(u) and not captive(u) then
         local prof = df.profession[u.profession] or tostring(u.profession)
         local race = df.creature_raw.find(u.race)
         inv[#inv + 1] = { id = u.id, hf = u.hist_figure_id, race = race and race.creature_id or '?', prof = prof,
@@ -62,7 +69,8 @@ if cmd == 'status' then
         if u then
           local bmax = u.body.blood_max > 0 and u.body.blood_max or 1
           members[#members + 1] = { id = u.id, alive = dfhack.units.isAlive(u), blood_pct = math.floor(100 * u.body.blood_count / bmax),
-                                    x = u.pos.x, y = u.pos.y, z = u.pos.z, dist = dist(u.pos) }
+                                    x = u.pos.x, y = u.pos.y, z = u.pos.z, dist = dist(u.pos),
+                                    thirst = u.counters2 and u.counters2.thirst_timer, hunger = u.counters2 and u.counters2.hunger_timer }
         end
       end
       squads[#squads + 1] = { id = s.id, name = dfhack.military.getSquadName(s.id), orders = #s.orders, members = members }
@@ -87,7 +95,7 @@ elseif cmd == 'kill' then
   local n = 0
   for id in tostring(a[3] or ''):gmatch('%d+') do
     local u = df.unit.find(tonumber(id))
-    if u and dfhack.units.isInvader(u) and not friendly(u) then     -- never citizens/animals/merchants
+    if u and dfhack.units.isInvader(u) and not friendly(u) and not captive(u) then     -- never citizens/animals/merchants/prisoners (BUG-426)
       o.units:insert('#', u.id)
       if u.hist_figure_id >= 0 then o.histfigs:insert('#', u.hist_figure_id) end
       n = n + 1

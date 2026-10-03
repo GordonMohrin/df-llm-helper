@@ -1,3 +1,4 @@
+--@ module = true
 -- claude/killorder.lua (also: lua -f hack/scripts/claude/killorder.lua)  (run 3, Razordrums; scope militaer) - kill order for all squads against intruders in the INTERIOR
 -- Call (from the hack folder):  dfhack-run.exe lua -f "<path>/tools/killorder.lua" -- [options]
 --   (no option)        find targets and write the kill order (squad_order_kill_listst) into ALL squads with members
@@ -20,7 +21,10 @@
 --   (Drunians = curious beasts, run 3). Undiscovered tiles
 --   are never evaluated (fair play, as via the interface).
 -- The command corresponds to the kill menu of the squad window; ran without a crash in run 2 (Wheelsblows).
--- PROTECTION: squads without members / thirst > 40000 / hunger > 60000 are skipped or reported.
+-- PROTECTION: squads without members are skipped. BUG-426: caged/chained units are never targets (config.is_captive); squads with a
+--   member at thirst > 40000 / hunger > 60000 get NO kill order and lose an existing one (soldiers on a kill order never eat/drink);
+--   existing kill orders are scrubbed of caged/chained/dead targets on every run (scrub_orders, also from `claude/mil guard`).
+-- Module use (reqscript('claude/killorder')): scrub_orders(), relieve_starving() - the command part below is skipped.
 local util = reqscript('claude/util')
 local cfg = reqscript('claude/config')
 local repeatUtil = require('repeat-util')
@@ -57,7 +61,15 @@ local function interior(u)
   return nil
 end
 
+-- BUG-423/426: prisoners never count (config.is_captive; fallback for an old merged config.lua without it)
+local function captive(u)
+  local f = cfg.is_captive
+  if f then return f(u) end
+  return (u.flags1.caged or u.flags1.chained) and true or false
+end
+
 local function is_target(u)
+  if captive(u) then return false end   -- BUG-426: a caged dragon drew kill orders until the squads starved
   if util.unit_hidden(u) then return false end
   return cfg.is_intruder(u)
 end
@@ -93,8 +105,8 @@ local function fort_squads()
           local u = hf and df.unit.find(hf.unit_id)
           if u and dfhack.units.isActive(u) and not dfhack.units.isDead(u) then
             members = members + 1
-            if u.counters2.thirst_timer > 40000 then thirsty = thirsty + 1 end
-            if u.counters2.hunger_timer > 60000 then hungry = hungry + 1 end
+            if u.counters2.thirst_timer > 40000 then thirsty = thirsty + 1 end   -- = STARVE_THIRST
+            if u.counters2.hunger_timer > 60000 then hungry = hungry + 1 end     -- = STARVE_HUNGER
           end
         end
       end
@@ -109,6 +121,59 @@ local function clear_kill(sq)
   for i = #sq.orders - 1, 0, -1 do
     local o = sq.orders[i]
     if df.squad_order_kill_listst:is_instance(o) then sq.orders:erase(i) pcall(function() o:delete() end) n = n + 1 end
+  end
+  return n
+end
+
+local STARVE_THIRST, STARVE_HUNGER = 40000, 60000   -- same limits as fort_squads (thirsty/hungry)
+
+-- BUG-426 self-healing: remove caged/chained/dead/missing units from all kill orders of the fort squads; empty orders are deleted.
+-- Logs each (squad, unit) once. Returns the number of removed targets.
+SCRUBBED = SCRUBBED or {}
+function scrub_orders()
+  local n = 0
+  for _, s in ipairs(fort_squads()) do
+    for i = #s.sq.orders - 1, 0, -1 do
+      local o = s.sq.orders[i]
+      if df.squad_order_kill_listst:is_instance(o) then
+        for k = #o.units - 1, 0, -1 do
+          local id = o.units[k]
+          local u = df.unit.find(id)
+          if not u or dfhack.units.isDead(u) or captive(u) then
+            if u and u.hist_figure_id >= 0 then
+              for h = #o.histfigs - 1, 0, -1 do if o.histfigs[h] == u.hist_figure_id then o.histfigs:erase(h) end end
+            end
+            o.units:erase(k)
+            n = n + 1
+            local key = s.sq.id .. ':' .. id
+            if not SCRUBBED[key] then
+              SCRUBBED[key] = true
+              log(string.format('scrub Trupp %d: Ziel %d entfernt (%s)', s.sq.id, id, not u and 'fehlt' or (dfhack.units.isDead(u) and 'tot' or 'gefangen')))
+            end
+          end
+        end
+        if #o.units == 0 and #o.histfigs == 0 then s.sq.orders:erase(i) pcall(function() o:delete() end) end
+      end
+    end
+  end
+  return n
+end
+
+local function has_kill(sq)
+  for i = 0, #sq.orders - 1 do if df.squad_order_kill_listst:is_instance(sq.orders[i]) then return true end end
+  return false
+end
+
+-- BUG-426: squads standing on a kill order with a thirsty/hungry member lose the order (they eat/drink, the next run sets it again).
+-- Returns the number of relieved squads.
+function relieve_starving()
+  local n = 0
+  for _, s in ipairs(fort_squads()) do
+    if (s.thirsty > 0 or s.hungry > 0) and has_kill(s.sq) then
+      clear_kill(s.sq)
+      n = n + 1
+      log(string.format('Trupp %d: Kill-Befehl entzogen (%d durstig, %d hungrig) - Soldaten sollen essen/trinken', s.sq.id, s.thirsty, s.hungry))
+    end
   end
   return n
 end
@@ -141,12 +206,16 @@ end
 local function apply(targets)
   local done = 0
   for _, s in ipairs(fort_squads()) do
+    local starving = s.thirsty > 0 or s.hungry > 0
     if s.members == 0 then
       print('Trupp ' .. s.sq.id .. ': keine Mitglieder, uebersprungen')
-    elseif s.thirsty > 0 or s.hungry > 0 then
-      print(string.format('Trupp %d: WARNUNG %d durstig/%d hungrig - Befehl trotzdem gesetzt (Soldaten essen nur ohne Kampf)', s.sq.id, s.thirsty, s.hungry))
+    elseif starving then
+      -- BUG-426: soldiers on a kill order do not eat/drink -> no order (an old one is withdrawn) until they are fed
+      local n = clear_kill(s.sq)
+      print(string.format('Trupp %d: %d durstig/%d hungrig - KEIN Kill-Befehl%s (Soldaten essen nur ohne Befehl)', s.sq.id, s.thirsty, s.hungry, n > 0 and ', alter Befehl entzogen' or ''))
+      log(string.format('Trupp %d: hungrig/durstig, kein Kill-Befehl (%d entzogen)', s.sq.id, n))
     end
-    if s.members > 0 then
+    if s.members > 0 and not starving and #targets > 0 then
       clear_kill(s.sq)
       local o = df.squad_order_kill_listst:new()
       for _, x in ipairs(targets) do
@@ -172,6 +241,7 @@ local function watch_tick()
   if not W or not W.active then repeatUtil.cancel(WATCH_KEY) return end
   local ok, err = pcall(function()
     W.ticks = W.ticks + 120
+    scrub_orders()
     local t = find_targets()
     if #t == 0 then W.clean = W.clean + 1 else W.clean = 0 apply(t) end
     if W.clean >= 4 or W.ticks >= 3000 then
@@ -185,6 +255,9 @@ local function watch_tick()
   if not ok then log('watch FEHLER ' .. tostring(err)) end
 end
 
+-- module use: only the functions above (BUG-426, claude/mil guard)
+if dfhack_flags and dfhack_flags.module then return end
+
 if opt.unwatch then
   local W = rawget(_G, 'CLAUDE_KILLWATCH')
   if W then W.active = false end
@@ -195,6 +268,7 @@ end
 if opt.release then release() return end
 if opt.status then status() return end
 
+if not opt.dry then scrub_orders() end
 local targets = find_targets()
 if opt.selftest then
   local n = apply(targets)

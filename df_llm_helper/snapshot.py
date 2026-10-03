@@ -109,7 +109,8 @@ class Alerts:
     status_alerts: list = field(default_factory=list)
     corpses_unburied: int | None = None
     stress_high: int | None = None
-    refuge_ok: bool | None = None
+    refuge_ok: bool | None = None                             # burrow + alarm exist AND supplied (drink/water + food, BUG-423)
+    refuge_problems: list = field(default_factory=list)       # e.g. 'ZUFLUCHT OHNE WASSER ...' (claude/gefahr status refuge.supply)
     animal_corpses: int | None = None                         # claude/report kadaver_tiere_in_festung
     neg_thoughts: dict | None = None                          # claude/report negative_gedanken_top {name: count}
 
@@ -470,6 +471,11 @@ def _parse_gefahr(snap: Snapshot, j: dict) -> None:
     ref = _d(j.get("refuge"))
     if "ok" in ref:
         a.refuge_ok = bool(ref.get("ok"))
+    sup = _d(ref.get("supply"))
+    if sup:                                   # BUG-423: an unsupplied refuge (no drink/water or no food) is not ok
+        a.refuge_problems = [str(p) for p in _l(sup.get("problems"))]
+        if sup.get("ok") is False:
+            a.refuge_ok = False
 
 
 def _parse_mood(snap: Snapshot, j: dict) -> None:

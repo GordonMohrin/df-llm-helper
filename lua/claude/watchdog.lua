@@ -378,13 +378,29 @@ local function alert_check()
       pcall(dfhack.run_command, 'claude/mil', 'refuge', '--apply')   -- Alarm/burrow missing (often gone after loading): recreate idempotently
     end
     if al.civ_alert_idx == 0 and #al.list > 1 and #al.list[1].burrows > 0 then
-      al.civ_alert_idx = 1
-      state.alarms = state.alarms + 1
-      state.last_alarm = util.game_date().text
+      -- BUG-423: respect a manual `claude/alert off` (hold/hysteresis) and never lock citizens into a refuge without water
+      local gate_ok, why, info = true, nil, nil
+      if okg and G and G.civ_gate then
+        local okc, a, b, c = pcall(G.civ_gate, enemies, S and S.alarm_A or 0)
+        if okc then gate_ok, why, info = a, b, c end
+      end
+      state.civ_blocked = (not gate_ok) and why or nil
+      state.manual_off_until = info and info.manual_off_until or nil
+      if gate_ok then
+        al.civ_alert_idx = 1
+        state.alarms = state.alarms + 1
+        state.last_alarm = util.game_date().text
+      elseif why == 'refuge_no_water' and (os.time() - (state.last_supply_warn or 0)) > 300 then
+        state.last_supply_warn = os.time()
+        write_flag('notfall.flag', os.date('%H:%M:%S') .. ' ZUFLUCHT OHNE WASSER: ' .. enemies .. ' Feinde in ALERT_RANGE, Zivilwarnung NICHT eingeschaltet'
+          .. ' (Burrow Zuflucht ohne Getraenke/Brunnen/Wasser). Zuflucht erweitern (claude/mil refuge check), dann claude/alert on')
+      end
     end
   else
     state.clean = state.clean + 1
+    state.civ_blocked = nil
     if state.clean >= 5 and al.civ_alert_idx ~= 0 then al.civ_alert_idx = 0 end
+    if state.clean >= 5 and okg and G and G.manual_off_clear then pcall(G.manual_off_clear) state.manual_off_until = nil end   -- fight over: hold ends
   end
 end
 
@@ -440,5 +456,6 @@ if repeatUtil.isScheduled then running = repeatUtil.isScheduled(KEY) and true or
 util.emit({ running = running,
             brews = state.brews or 0, free_barrels = state.free_barrels, barrels_ordered = state.barrels_ordered or 0, fed = state.fed or 0, alarms = state.alarms, last_alarm = state.last_alarm, popups_dismissed = state.popups,
             civ_alert_active = df.global.plotinfo.alerts.civ_alert_idx, enemies_near = state.enemies_near, enemies_slowmo_range = state.enemies_slow,
+            civ_blocked = state.civ_blocked, manual_off_until = state.manual_off_until,
             gefahr_A = state.gefahr_A, gefahr_warn = state.gefahr_warn, gefahr_error = state.gefahr_error, slowmo = state.slowmo or false, slowmo_count = state.slowmo_count or 0,
             fps = math.floor(df.global.enabler.fps), timing = state.timing })

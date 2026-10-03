@@ -78,8 +78,15 @@ function klasse(u)
   return nil
 end
 
+-- BUG-423/426: prisoners never count (config.is_captive; fallback for an old merged config.lua without it)
+local function captive(u)
+  local f = C().is_captive
+  if f then return f(u) end
+  return (u.flags1.caged or u.flags1.chained) and true or false
+end
+
 local function excluded(u)
-  return dfhack.units.isCitizen(u) or dfhack.units.isTame(u) or u.flags1.caged or u.flags1.chained or u.flags1.merchant
+  return dfhack.units.isCitizen(u) or dfhack.units.isTame(u) or captive(u) or u.flags1.merchant
     or u.flags1.diplomat or u.flags2.resident or (u.flags2.visitor and not u.flags2.visitor_uninvited)   -- NOT isVisiting/isVisitor: they are true for Forgotten Beasts (visitor_uninvited)
 end
 
@@ -202,6 +209,126 @@ function scan(opts)
   return S
 end
 
+-- ---------------------------------------------------------------- Refuge supply (BUG-423: citizens died of thirst in an unsupplied refuge)
+-- Counts inside the refuge burrow: non-forbidden drinks and food (also in barrels/bins), wells, visible water tiles, hospital zones.
+-- Only what the player sees (hidden tiles are skipped). Reachability inside the burrow is NOT checked (live check, see BUG-423).
+local FOOD_CATS = { 'FOOD', 'MEAT', 'FISH', 'CHEESE', 'PLANT', 'EGG' }
+local function usable(it)
+  if it.flags.forbid or it.flags.dump or it.flags.garbage_collect or it.flags.rotten then return false end
+  local okc, c = pcall(dfhack.items.getContainer, it)
+  if okc and c and c.flags.forbid then return false end
+  return true
+end
+local function in_burrow(b, pos)
+  if not pos or pos.x < 0 then return false end
+  local ok, v = pcall(dfhack.burrows.isAssignedTile, b, pos)
+  return ok and v or false
+end
+local function count_items(b, cats, limit)
+  local n = 0
+  for _, cat in ipairs(cats) do
+    local okv, vec = pcall(function() return df.global.world.items.other[cat] end)
+    if okv and vec then
+      for _, it in ipairs(vec) do
+        if usable(it) then
+          local okp, pos = pcall(dfhack.items.getPosition, it)
+          if okp and in_burrow(b, pos) then n = n + 1 if n >= limit then return n end end
+        end
+      end
+    end
+  end
+  return n
+end
+local function count_buildings(b, list)
+  local n = 0
+  for _, bl in ipairs(list or {}) do
+    if in_burrow(b, xyz2pos(bl.centerx, bl.centery, bl.z)) then n = n + 1 end
+  end
+  return n
+end
+local function count_water(b)
+  local n = 0
+  local okl, blocks = pcall(dfhack.burrows.listBlocks, b)
+  for _, blk in ipairs((okl and blocks) or {}) do
+    for x = 0, 15 do for y = 0, 15 do
+      local d = blk.designation[x][y]
+      if d.flow_size > 0 and not d.hidden and d.liquid_type == df.tile_liquid.Water then
+        local pos = xyz2pos(blk.map_pos.x + x, blk.map_pos.y + y, blk.map_pos.z)
+        if in_burrow(b, pos) then n = n + 1 end
+      end
+    end end
+  end
+  return n
+end
+
+SUPPLY_CACHE = SUPPLY_CACHE or {}
+-- refuge_supply(b?) -> { drink, food, wells, water_tiles, hospital, water_ok, ok, missing = {...}, problems = {...} }; cached 30 s real time
+function refuge_supply(b, nocache)
+  b = b or dfhack.burrows.findByName('Zuflucht', true)
+  if not b then return { ok = false, water_ok = false, missing = { 'burrow' }, problems = { 'ZUFLUCHT fehlt (claude/mil refuge --apply)' } } end
+  local now = os.time()
+  if not nocache and SUPPLY_CACHE.id == b.id and SUPPLY_CACHE.t and now - SUPPLY_CACHE.t < 30 then return SUPPLY_CACHE.r end
+  local r = { burrow = b.id, missing = {}, problems = {} }
+  r.drink = count_items(b, { 'DRINK' }, 50)
+  r.food = count_items(b, FOOD_CATS, 50)
+  local okw, wells = pcall(function() return df.global.world.buildings.other.WELL end)
+  r.wells = okw and count_buildings(b, wells) or 0
+  local okh, hosp = pcall(function() return df.global.world.buildings.other.ZONE_HOSPITAL end)
+  r.hospital = okh and count_buildings(b, hosp) or 0
+  local okt, wt = pcall(count_water, b)
+  r.water_tiles = okt and wt or 0
+  r.water_ok = r.drink > 0 or r.wells > 0 or r.water_tiles > 0
+  if not r.water_ok then
+    r.missing[#r.missing + 1] = 'water'
+    r.problems[#r.problems + 1] = 'ZUFLUCHT OHNE WASSER: keine Getraenke, kein Brunnen, kein Wasser im Burrow (Zuflucht um Brunnen/Getraenkelager erweitern)'
+  end
+  if r.food == 0 then
+    r.missing[#r.missing + 1] = 'food'
+    r.problems[#r.problems + 1] = 'ZUFLUCHT OHNE ESSEN: keine Nahrung im Burrow (Zuflucht um Nahrungslager erweitern)'
+  end
+  if r.hospital == 0 then r.missing[#r.missing + 1] = 'hospital' end   -- note only, no problem text
+  r.ok = r.water_ok and r.food > 0
+  SUPPLY_CACHE.id, SUPPLY_CACHE.t, SUPPLY_CACHE.r = b.id, now, r
+  return r
+end
+
+-- ---------------------------------------------------------------- Manual 'alert off' hold (BUG-423: watchdog switched the alert on again within seconds)
+-- `claude/alert off` writes tools/alert-manual-off.flag ("<epoch> <enemies near> <class A near>"); `claude/alert on` deletes it.
+local MANUAL_FLAG = TOOLS .. 'alert-manual-off.flag'
+function manual_off_set(n, nA)
+  write_file(MANUAL_FLAG, string.format('%d %d %d\n', os.time(), n or 0, nA or 0))
+end
+function manual_off_clear() os.remove(MANUAL_FLAG) end
+function manual_off_get()
+  local f = io.open(MANUAL_FLAG, 'r')
+  if not f then return nil end
+  local txt = f:read('*a') or '' f:close()
+  local t, n, a = txt:match('^(%d+)%s+(%d+)%s+(%d+)')
+  if not t then return nil end
+  local hold = C().ALERT_MANUAL_HOLD_S or 900
+  return { t = tonumber(t), n = tonumber(n), a = tonumber(a), until_t = tonumber(t) + hold,
+           active = os.time() < tonumber(t) + hold }
+end
+
+-- civ_gate(n, nA) -> ok, reason, info.  May automation switch the civilian alert on? n = enemies near, nA = class A among them.
+--   * manual off younger than ALERT_MANUAL_HOLD_S and enemies not grown by more than ALERT_MANUAL_GROW and no new class A -> 'manual_off'
+--   * refuge without drink/well/water and config.REFUGE_REQUIRE_WATER -> 'refuge_no_water'
+function civ_gate(n, nA)
+  local cfg = C()
+  local info = {}
+  local m = manual_off_get()
+  if m and m.active then
+    info.manual_off_until = os.date('%H:%M:%S', m.until_t)
+    if (n or 0) <= m.n + (cfg.ALERT_MANUAL_GROW or 5) and (nA or 0) <= m.a then return false, 'manual_off', info end
+  end
+  local oks, sup = pcall(refuge_supply)
+  if oks and sup then
+    info.supply = sup
+    if not sup.water_ok and cfg.REFUGE_REQUIRE_WATER ~= false then return false, 'refuge_no_water', info end
+  end
+  return true, nil, info
+end
+
 -- ---------------------------------------------------------------- Check refuge (burrow + alarm 1) and path conflict
 function refuge_check(S, fix)
   local al = df.global.plotinfo.alerts
@@ -215,6 +342,14 @@ function refuge_check(S, fix)
     r.repariert = okr
     r.ok = #al.list > 1 and #al.list[1].burrows > 0
   end
+  -- supply (BUG-423): r.ok stays 'burrow + alarm exist'; r.supply carries drink/food/water, r.supply.ok = supplied
+  local nb = dfhack.burrows.findByName('Zuflucht', true)
+  if nb then
+    local oks, sup = pcall(refuge_supply, nb)
+    if oks then r.supply = sup end
+  end
+  local m = manual_off_get()
+  if m and m.active then r.manual_off_until = os.date('%H:%M:%S', m.until_t) end
   -- Path conflict: intruder near the refuge stairs (config.ZUFLUCHT.treppe, optional)
   local T = Z.treppe
   for _, e in ipairs((T and S and S.list) or {}) do
@@ -252,11 +387,15 @@ function handle(S, opts)
   end
   local ref = refuge_check(S, not opts.dry and not opts.test)
   lines[#lines + 1] = string.format('Zuflucht: burrow=%s civ_alert_burrows=%d ok=%s%s', tostring(ref.burrow), ref.civ_burrows, tostring(ref.ok), #ref.konflikt > 0 and (' KONFLIKT: ' .. table.concat(ref.konflikt, '; ')) or '')
+  if ref.supply and #(ref.supply.problems or {}) > 0 then lines[#lines + 1] = table.concat(ref.supply.problems, '; ') end
+  local gate_ok, gate_why = civ_gate(S.alarm, S.alarm_A)
   local text = table.concat(lines, '\n')
   res.text, res.refuge = text, ref
   local short = string.format('GEFAHR: %s %s (%d,%d,%d) %s', res.new[1].klasse, res.new[1].name:sub(1, 22), res.new[1].x, res.new[1].y, res.new[1].z, res.new[1].zone or '')
   if opts.dry then
-    res.actions = { 'alert.flag', anyA and 'siege.flag' or nil, 'pause.hold', 'pause_state=true', S.alarm > 0 and 'civ_alert on' or 'civ_alert bleibt (nur Warnung)', 'schau say: ' .. short }
+    local civ = 'civ_alert bleibt (nur Warnung)'
+    if S.alarm > 0 then civ = gate_ok and 'civ_alert on' or ('civ_alert gesperrt: ' .. tostring(gate_why)) end
+    res.actions = { 'alert.flag', anyA and 'siege.flag' or nil, 'pause.hold', 'pause_state=true', civ, 'schau say: ' .. short }
     return res
   end
   ST.hits = ST.hits + 1
@@ -274,8 +413,12 @@ function handle(S, opts)
     res.actions[#res.actions + 1] = 'pause'
     local al = df.global.plotinfo.alerts
     if S.alarm > 0 and al.civ_alert_idx == 0 and #al.list > 1 and #al.list[1].burrows > 0 then
-      al.civ_alert_idx = 1
-      res.actions[#res.actions + 1] = 'civ_alert on'
+      if gate_ok then
+        al.civ_alert_idx = 1
+        res.actions[#res.actions + 1] = 'civ_alert on'
+      else
+        res.actions[#res.actions + 1] = 'civ_alert gesperrt: ' .. tostring(gate_why)   -- BUG-423: manual off hold / refuge without water
+      end
     end
     pcall(function() reqscript('claude/schau').say(short, 5) end)
   end
@@ -307,6 +450,12 @@ function selbsttest()
   end
   local al = df.global.plotinfo.alerts
   if not (#al.list > 1 and #al.list[1].burrows > 0) then p[#p + 1] = 'ZUFLUCHT/ZIVILWARNUNG fehlt (claude/mil refuge --apply)' end
+  -- BUG-423: refuge must hold drink/water and food (citizens died of thirst in the alarm burrow)
+  local b = dfhack.burrows.findByName('Zuflucht', true)
+  if b then
+    local oks, sup = pcall(refuge_supply, b)
+    if oks and sup then for _, t in ipairs(sup.problems or {}) do p[#p + 1] = t end end
+  end
   return p
 end
 

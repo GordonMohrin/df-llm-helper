@@ -153,7 +153,7 @@ add('unfertige_gebaeude', waiting)
 -- Immigrants / enemies
 local hostile = 0
 for _, u in ipairs(df.global.world.units.active) do
-  if dfhack.units.isActive(u) and not dfhack.units.isDead(u) and not dfhack.units.isCitizen(u) and not (u.flags1.caged or u.flags1.chained) and dfhack.units.isDanger(u) and u.pos.z > 5 then hostile = hostile + 1 end
+  if dfhack.units.isActive(u) and not dfhack.units.isDead(u) and not dfhack.units.isCitizen(u) and not (cfg.is_captive and cfg.is_captive(u) or u.flags1.caged or u.flags1.chained) and dfhack.units.isDanger(u) and u.pos.z > 5 then hostile = hostile + 1 end   -- prisoners: BUG-423
 end
 add('feinde_auf_karte', hostile)
 add('zivilwarnung', df.global.plotinfo.alerts.civ_alert_idx)

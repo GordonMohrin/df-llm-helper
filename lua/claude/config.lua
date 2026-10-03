@@ -132,6 +132,13 @@ TIMESTREAM_FPS       = 500    -- Target FPS (calendar ticks/s ~ target, provided
 TIMESTREAM_CALM_S    = 8      -- this many seconds (real time) of calm before timestream switches on again after a danger
 TIMESTREAM_AUTOSTART = true   -- onMapLoad.init: `claude/tempo load` starts watchdog + mil guard (+ timestream only if TIMESTREAM = true) automatically
 SIEGE_MIN    = 6      -- >= this many ground enemies in SLOWMO_RANGE -> tools/siege.flag (suspected siege/major attack)
+-- Civilian alert hysteresis (BUG-423): `claude/alert off` holds for ALERT_MANUAL_HOLD_S real seconds; watchdog/gefahr only switch it on
+-- again earlier if the enemies near the fort grow by more than ALERT_MANUAL_GROW or a new major threat (class A) appears.
+ALERT_MANUAL_HOLD_S = 900
+ALERT_MANUAL_GROW   = 5
+-- Refuge supply (BUG-423): true = automation does NOT switch the civilian alert on while the refuge burrow has neither drink nor a
+-- well/water tile (citizens died of thirst in an unsupplied refuge); a warning flag is written instead. false = warn only.
+REFUGE_REQUIRE_WATER = true
 
 -- Aquifer: 'unknown' until tiles are discovered. aquifer_seen() returns {z -> number of seen water_table tiles}.
 -- AQUIFER_CONFIRMED is added by infra/erkundung; dig_min_z() considers both. Lesson run 4: soil layers with AQUIFER flag
@@ -166,9 +173,17 @@ function is_flier(u)
   return ok and f or false
 end
 
+-- Captive = harmless for alarm and kill orders (BUG-423/426: a cave dragoness in a cage trap kept the civilian alert on and drew
+-- permanent kill orders until the squads starved). Caged or chained, or held inside an item (cage) even if the flag is missing.
+function is_captive(u)
+  if u.flags1.caged or u.flags1.chained then return true end
+  local ok, c = pcall(dfhack.units.getContainer, u)
+  return (ok and c ~= nil) or false
+end
+
 function is_ground_enemy(u)
   if not dfhack.units.isActive(u) or dfhack.units.isDead(u) then return false end
-  if dfhack.units.isCitizen(u) or u.flags1.caged or u.flags1.chained then return false end
+  if dfhack.units.isCitizen(u) or is_captive(u) then return false end
   if not dfhack.units.isDanger(u) then return false end
   if is_flier(u) and not dfhack.units.isGreatDanger(u) then return false end
   return true
@@ -203,7 +218,7 @@ end
 function is_intruder(u)
   if not dfhack.units.isActive(u) or dfhack.units.isDead(u) then return false end
   if dfhack.units.isCitizen(u) or dfhack.units.isTame(u) then return false end
-  if u.flags1.caged or u.flags1.chained or u.flags1.merchant or u.flags1.diplomat then return false end
+  if is_captive(u) or u.flags1.merchant or u.flags1.diplomat then return false end
   -- Run 3 (30.09.): forgotten beasts/megabeasts carry flags2.visitor_uninvited -> isVisiting/isVisitor = TRUE (that is why the guard did not see the beast). Exempt only invited guests.
   if u.flags2.resident or (u.flags2.visitor and not u.flags2.visitor_uninvited) then return false end
   if dfhack.units.isInvader(u) or dfhack.units.isDanger(u) or dfhack.units.isAgitated(u) or dfhack.units.isCrazed(u) then return true end

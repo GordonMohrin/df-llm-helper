@@ -74,7 +74,7 @@ local hostiles = {}
 for _, u in ipairs(df.global.world.units.active) do
   if dfhack.units.isActive(u) and not dfhack.units.isDead(u) and dfhack.units.isDanger(u)
      and not dfhack.units.isCitizen(u) and not util.unit_hidden(u)
-     and not (u.flags1.caged or u.flags1.chained) then
+     and not (u.flags1.caged or u.flags1.chained) and not (dfhack.units.getContainer and dfhack.units.getContainer(u)) then   -- BUG-423: prisoner in a cage
     local name = dfhack.units.getReadableName(u)
     hostiles[name] = (hostiles[name] or 0) + 1
   end

@@ -1,5 +1,21 @@
 # CHANGELOG df-llm-helper
 
+## Military and alarm fixes from the live siege (2026-10-03)
+- BUG-423: `claude/alert off` now holds (`config.ALERT_MANUAL_HOLD_S`, default 15 min) against the watchdog and `gefahr`
+  unless the enemies near the fort grow by more than `ALERT_MANUAL_GROW` or a new major threat appears (flag
+  `tools/alert-manual-off.flag`). Prisoners (caged, chained, held in a cage item: `config.is_captive`) never count as
+  threats. The refuge burrow is checked for drink/water and food (`claude/mil refuge check`, `gefahr` selftest
+  `ZUFLUCHT OHNE WASSER`/`ZUFLUCHT OHNE ESSEN`, `refuge.supply` in `gefahr status`); automation does not lock citizens
+  into a refuge without drink or water (`config.REFUGE_REQUIRE_WATER`, warning in `notfall.flag`). The supervisor
+  names the real cause instead of recommending a command the watchdog undid.
+- BUG-425: `claude/mil add` picks an explicit free slot (leader slot last) and always reports `slot` or `reason`
+  (`squad full`, `unit already in squad N`, `addToSquad refused ...`); `mil create` always returns `squad_id`
+  (plus a warning if a later step fails) and lists empty squads to reuse; new `mil rename`. Squads cannot be deleted
+  through DFHack: reuse empty ones.
+- BUG-426: no kill orders on caged/chained units (`killorder`, `mil kill`, `mil guard`, `pilot_siege`, siege flow);
+  existing kill orders are scrubbed of such targets; squads with a thirsty/hungry member lose their kill order so
+  they can eat and drink.
+
 ## install-lua (2026-10-02)
 - `python -m df_llm_helper install-lua [--apply] [--df <folder>]`: installs the bundled Lua scripts into the game,
   merges `config.lua` with the live values, keeps `stages.lua`, follows `dfhack-config/script-paths.txt`, backs up first.

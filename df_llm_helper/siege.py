@@ -13,7 +13,7 @@ __all__ = ["SiegeObs", "SiegeFlow", "SiegeRunner", "obs_from_status", "exit_code
 
 DEFAULTS = {"alert_radius": 40, "kill_radius": 45, "flee_dist": 70, "step_far": 300, "step_mid": 120, "step_near": 60,
             "min_blood_pct": 60, "max_losses": 2, "squad_alias": "Wache", "max_steps": 60, "rally": None,
-            "poll_s": 3.0, "max_wait_s": 120.0}
+            "poll_s": 3.0, "max_wait_s": 120.0, "starve_thirst": 40000, "starve_hunger": 60000}
 STATUS_CMD = "claude/pilot_siege status"
 
 
@@ -33,7 +33,9 @@ def obs_from_status(j: dict | None, alias: str) -> SiegeObs:
     sq = next((s for s in squads if str(s.get("name", "")).lower() == alias.lower()), None)
     if sq is None:  # alias as part of the name (translations/suffixes)
         sq = next((s for s in squads if alias.lower() in str(s.get("name", "")).lower()), None)
-    return SiegeObs(invaders=[i for i in j.get("invaders") or [] if isinstance(i, dict)],
+    # BUG-426: caged/chained units are never targets (pilot_siege filters them; this guards older Lua copies that report the flags)
+    return SiegeObs(invaders=[i for i in j.get("invaders") or [] if isinstance(i, dict)
+                              and not (i.get("caged") or i.get("chained") or i.get("captive"))],
                     berserk=[b for b in j.get("berserk") or [] if isinstance(b, dict)],
                     squad=sq, civ_alert=int(j.get("civ_alert") or 0))
 
@@ -148,6 +150,17 @@ class SiegeFlow:
                     self.orders_set = True
                     cmds.append(f"claude/advance {self._advance_for(min(i.get('dist', 999) for i in active))}")
                     return cmds
+            # BUG-426: soldiers on a kill order never eat/drink -> withdraw the order while one of them is starving
+            starving = [m for m in alive if (m.get("thirst") or 0) > self._c("starve_thirst")
+                        or (m.get("hunger") or 0) > self._c("starve_hunger")]
+            if starving:
+                self._note("Squad hungry/thirsty: " + ", ".join(str(m.get("id")) for m in starving)
+                           + " - kill order withdrawn so they can eat and drink")
+                if self.orders_set or (o.squad or {}).get("orders"):
+                    cmds.append(f"claude/pilot_siege clear {sid}")
+                    self.orders_set = False
+                cmds.append(f"claude/advance {self._advance_for(min(i.get('dist', 999) for i in active))}")
+                return cmds
             targets = [i for i in active if i.get("dist", 999) <= self._c("kill_radius")]
             if targets and not self.retreat_sent:
                 ids = ",".join(str(i["id"]) for i in sorted(targets, key=lambda i: (i.get("dist", 0), i["id"])))
