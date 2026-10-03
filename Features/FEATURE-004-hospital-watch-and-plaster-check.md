@@ -1,6 +1,6 @@
 # FEATURE-004: `hospital` watch (doctors, care jobs, water in the burrow) and plaster-raw-material check for the planner
 
-- **Status:** proposed
+- **Status:** implemented in c8258fc
 - **Priority:** P1 (wounded citizens during the siege, nobody checked whether care was possible)
 - **Requested by:** Gordon (player), 2026-10-02, via the local orchestrator
 - **Area:** new `df_llm_helper hospital` (+ Lua `lua/pilot_hospital.lua`), extension of `care.py`, `digest`/`wake`, planner (`planners/`), `lua/claude/ueberwacher.lua:34`
@@ -43,3 +43,39 @@ Acceptance: fixture "8 posts unfilled" -> critical + 8 suggestions; fixture "all
 
 ## Nachtrag 2026-10-03
 - The hospital workplace slots (occupations) were empty -> no care jobs. Staffing via Lua worked live (8 slots): set `occupation.unit_id` / `occupation.histfig_id` and `unit.occupations:insert(...)`. After a death the slot still points at the dead unit -> `hospital` should detect dead holders and refill (with `--apply`).
+
+## Implementation
+Commit c8258fc. Code `df_llm_helper/features/hospital.py` (plug-in, config section `hospital`), pure post/staff rules
+in `df_llm_helper/care.py` (`post_filled`, `location_staffed`, `unfilled_posts`, `labor_staff`, `post_candidates`),
+planner `df_llm_helper/planners/medical.py` (`plan_medical`), Lua `lua/pilot_hospital.lua` (`status` read only,
+`staff <occupation> <unit> [--apply]`), hint in `lua/claude/ueberwacher.lua`; tests `tests/test_hospital.py`; fixtures
+`fixtures/v3/hospital/` (synthetic); manual `docs/manual-v3/13-hospital.md`.
+
+- Commands: `python -m df_llm_helper hospital [--json] [--file F]`, `hospital staff [--apply]`, `hospital plan`;
+  `check` runs the watch every `hospital.every_s` (600 s).
+- Staff posts (addendum): a location with a zone needs one DOCTOR or DIAGNOSTICIAN + SURGEON + BONE_DOCTOR filled by a
+  living adult; a post on a dead unit is unfilled; orphaned locations are listed (report only). `hospital staff
+  --apply` fills the posts as tested live (occupation unit/histfig + `unit.occupations` insert, dead holder unlinked
+  first, log `tools/out/hospital-log.json`) and sets the care labors through `claude/pilot_care labors`; it needs the
+  new register consent action `HOSPITAL` (`exception add HOSPITAL ...`), dry run otherwise.
+- Water: wells (tested from the tiles around them) and unforbidden drinks reachable from each hospital zone; the
+  refuge burrow is read from `claude/gefahr` `refuge_supply` (BUG-423 shape). The full refuge reachability check is
+  FEATURE-005 (not duplicated here).
+- Plaster: `plan_medical` proposes `MAKE_PLASTER_POWDER` (kiln) only when gypsum-class boulders exist (gypsum,
+  alabaster, selenite, satinspar, or reaction class GYPSUM; visible tiles only), otherwise the note
+  `plaster powder impossible: ...`. Proposals only; no order is created (the existing `claude/orders` flow has no
+  plaster order, so nothing there needed a gate).
+- Safe subset: patient waiting time is measured between watch runs (first tick without a care job, kept in state.db),
+  not from the game's own timers.
+
+### Live check
+1. `python -m df_llm_helper install-lua --apply` (installs `claude/pilot_hospital`), then `claude/pilot_hospital
+   status` in DFHack: compare `locations[].posts` with the hospital's location menu (8 posts, location 11) and
+   `hospitals[]` with the zone (beds, table, chest).
+2. `python -m df_llm_helper hospital`: summary line, posts, suggestions plausible? `hospital plan`: plaster note
+   correct for the fort's stone (no gypsum-class stone in Run 5)?
+3. `python -m df_llm_helper exception add HOSPITAL --local --reason "staff the hospital" --ja "<quote>"`, then
+   `hospital staff` (plan) and `hospital staff --apply`; check the location menu shows the staff and that care jobs
+   (DiagnosePatient, GiveWater) appear for a wounded dwarf.
+4. `python -m df_llm_helper check` twice: the hospital line only on a change; `wake` shows one line when a doctor dies
+   and his post points at the dead unit.

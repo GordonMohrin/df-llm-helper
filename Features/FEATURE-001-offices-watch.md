@@ -1,6 +1,6 @@
 # FEATURE-001: `offices` watch - are the fortress offices filled by someone who can do the job?
 
-- **Status:** proposed
+- **Status:** implemented in c8258fc
 - **Priority:** P1 (a missing broker cost a caravan trade, a dead captain of the guard went unnoticed through a whole siege)
 - **Requested by:** Gordon (player), 2026-10-02, via the local orchestrator
 - **Area:** new `df_llm_helper offices` (+ Lua `lua/pilot_offices.lua`), digest/wake integration, trade flow precheck
@@ -48,3 +48,35 @@ Reading is free. Writing = existing `aemter` functions only (the same thing the 
 
 ## Nachtrag 2026-10-03
 After the second attack the militia commander and the chief medical dwarf were dead again (assignment points to a dead histfig). Reassigning via `claude/aemter vacate` + `assign` worked live. `offices --apply` should use exactly this sequence for dead holders.
+
+## Implementation
+Commit c8258fc. Code `df_llm_helper/features/offices.py` (plug-in, config section `offices`), Lua
+`lua/pilot_offices.lua` (`status`, read only), trade precheck in `trade_flow.py` (`TradeObs.broker_problem`) filled by
+`cli.py trade step` and `caravan.py`; tests `tests/test_offices.py`; fixtures `fixtures/v3/offices/` (synthetic);
+manual `docs/manual-v3/12-offices.md`.
+
+- Commands: `python -m df_llm_helper offices [--json] [--plan] [--apply [--replace-unfit]] [--file F]`,
+  `offices watch`; `check` runs the watch every `offices.every_s` (300 s).
+- Decisions taken: the captain of the guard is mandatory (player: yes). `--apply` needs the new register consent action
+  `OFFICES` (`exception add OFFICES ...`); it fills `empty` and `dead` offices (dead: `vacate` + `assign`, as live
+  03.10.), `unfit` holders only with `--replace-unfit`; MAYOR (elected) is never suggested or assigned. A wake line
+  (crit warning) comes for dead/empty offices only; unfit-only changes are a digest warning. The trade precheck blocks
+  for a dead broker, mood/prisoner/child/wounded/depot unreachable, or an empty office without any candidate; an empty
+  office WITH a candidate passes because `claude/handel prep` appoints a broker per caravan (Run 5 design), and stress
+  alone does not block. `offices.on_demand: ["BROKER"]` silences "BROKER empty" for that design.
+- Safe subset: the "not a hospital caretaker" rule uses the citizen's care labors and the patient count (no job-level
+  link); "squad on duty" is "in a squad" (squad orders are not read).
+
+### Live check
+1. `python -m df_llm_helper install-lua --apply` (installs `claude/pilot_offices`), then in DFHack
+   `claude/pilot_offices status`: compare positions/holders with the nobles menu and `claude/aemter status`; a dead
+   holder must show `alive: false` (or `dead: true, gone: true`).
+2. `python -m df_llm_helper offices` and `offices --plan`: states and successors plausible? (record the JSON to
+   `Bugs/evidence` if not).
+3. `python -m df_llm_helper exception add OFFICES --local --reason "fill dead/empty offices" --ja "<quote>"`, then
+   `offices --apply`; check the nobles menu and `tools/out/aemter-log.json`.
+4. `python -m df_llm_helper check` twice: the offices line only on the first run / after a change; `wake` shows one
+   line after an office holder dies.
+5. With a caravan at the depot and a dead/moody broker: `python -m df_llm_helper trade step` must print
+   `State now: FAILED (offices: BROKER ...)` and leave no `tools/pause.hold`; after `offices --apply` and
+   `trade reset` the trade starts normally.
