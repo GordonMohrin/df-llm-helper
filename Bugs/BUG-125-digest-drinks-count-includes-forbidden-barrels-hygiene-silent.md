@@ -1,6 +1,6 @@
 # BUG-125: `digest` shows "Getraenke 475" although all barrels were forbidden; `hygiene` does not report mass-forbidden own containers/drinks/blocks
 
-- **Status:** fixed in COMMIT
+- **Status:** fixed in 14dbe1b
 - **Severity:** S2 (misleading output: the supply looked fine while nobody could drink; leads to deaths, see BUG-423)
 - **Area:** `df_llm_helper/digest.py` (food/drink items), `lua/pilot_hygiene.lua` (`hygiene`)
 - **Reported:** 2026-10-02, commit `22b9b03`

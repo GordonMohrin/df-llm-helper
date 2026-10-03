@@ -1,6 +1,6 @@
 # BUG-424: `claude/pfadcheck` missed bypasses of the trap alley (diagonal rule / box limits); `door_flags.forbidden` is reset by the game after seconds -> doors are no reliable seal
 
-- **Status:** fixed in COMMIT
+- **Status:** fixed in d385352
 - **Severity:** S2 (the defence plan relied on "enemies can only come through the traps"; two bypasses stayed unnoticed)
 - **Area:** `claude/pfadcheck.lua` (orchestrator script, lives only in the game folder `dwarf-fortress/lua/claude/pfadcheck.lua`, **not in the repo**), `lua/pilot_perimeter.lua` (8-neighbour rule, correct), `df_llm_helper` command `perimeter` (`seal` proposal)
 - **Reported:** 2026-10-02, commit `22b9b03`

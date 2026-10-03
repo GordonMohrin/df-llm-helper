@@ -1,6 +1,6 @@
 # BUG-427: `lever list` shows drawbridges always as "raised"; the real state is `gate_flags.raised`
 
-- **Status:** fixed in COMMIT
+- **Status:** fixed in 795f73b
 - **Severity:** S2 (wrong state shown; automation reading it decides wrongly about the defence line)
 - **Area:** `lever list` (Lua side of `lever`), `defense`, `pilot_*` scripts that read the bridge state
 - **Reported:** 2026-10-03, commit `841361d`
