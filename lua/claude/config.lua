@@ -115,6 +115,17 @@ if TREE_BAND == nil then TREE_BAND = { zmin = SURFACE_Z, zmax = SURFACE_Z + 4, a
 DEPOT_DUE_TICKS = 4 * 33600
 DEPOT_DUE_POP = 15
 
+-- ---------------------------------------------------------------- Permanent watchers (claude/wachen, claude/*wacht)
+-- Every key is optional (nil = built-in default of the script). Output goes to util.home()/tools/out/*.log and tools/events.log.
+GAMELOG = nil                            -- path of gamelog.txt for stresswacht; nil = <DF>/gamelog.txt
+WACHEN_LIST = nil                        -- list for `claude/wachen start|load`, e.g. { 'watchdog start', 'mil guard start', 'stresswacht start' }
+STRESS_WACHT = nil                       -- { warn = 50000, high = 80000, low = 40000, max_relieved = 10, period_s = 60, patterns = {...} }
+HOSPITAL_WACHT = nil                     -- { period_s = 120, max_stress = 80000, labors = {...}, posts = { 'DOCTOR', ... } }
+GEISTER_WACHT = nil                      -- { period_s = 30, crit = {...}, info = {...}, muell_dump = false,
+                                         --   slab_row = { x1=, x2=, step=2, y=, z=, blueprint = 'claude/slab.csv', label = '/slb1' } }
+AEMTER_WACHT = nil                       -- { period_s = 180, auto = { 'MANAGER', ... }, report_only = { 'MAYOR', ... } }
+BIN_WACHT = nil                          -- { free_min = 20, iron_min = 25, max_per_run = 10, max_open = 20, period_s = 120 }
+
 -- ---------------------------------------------------------------- Alarm, slow motion, tempo (map independent)
 ALERT_RANGE = 45     -- Civilian alert: ground enemy at most this many tiles (Chebyshev, x/y) from the fort center/citizen
 ALERT_DZ    = 10      -- ... AND at most this many levels above/below the fort center or citizen

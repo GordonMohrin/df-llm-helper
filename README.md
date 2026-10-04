@@ -211,6 +211,52 @@ Every command is `python -m df_llm_helper <command>`; add `--mock fixtures/run5`
 
 Every rule has a `max_per_hour`; a rule that fires too often switches itself off and raises a warning. Full reference: `docs/MANUAL.md`, `docs/OVERVIEW.md`.
 
+## Permanent watchers (Dauer-Wachen)
+
+Two kinds, both generic (fort values live in `lua/claude/config.lua` / `config.yaml`, no hard-wired paths):
+
+**1. `wake --loop` = the event source for your Claude monitor.** One line per event on stdout; the Monitor tool itself stays in Claude.
+`python -m df_llm_helper wake --loop --interval 10`. Sources: flags (`alert`, `siege`, `caravan`, `mood`, `pause.hold`, ...),
+`events.log` CRITICAL lines, helper warnings, loop registry, and the configurable **gamelog rules** (`df_llm_helper/wakerules.py`,
+reads `paths.gamelog` incrementally, rotation-safe, first run = baseline):
+
+| Rule | Category in the WAKE line | Matches |
+|---|---|---|
+| `alarm_hard` | `alarm/siege`, `alarm/ambush`, `alarm/forgotten-beast`, `alarm/megabeast`, `alarm/beast` | siege, ambush, forgotten beast, megabeast, titan arrival |
+| `death_tantrum_mood` | `unit/death`, `unit/tantrum`, `unit/berserk`, `unit/mood` | found dead, struck down, drained of blood, tantrum, berserk, stark raving, taken by a fey/secretive/possessed/macabre/fell mood (with the dwarf's name) |
+| `caravan` | `caravan` | first message `caravan from <civ>` (and "merchants have arrived", same rate limit) |
+| `ghost` | `ghost` | ghost, haunt, restless |
+
+Each rule has `cooldown_s` and `dedupe` (`category` = one line per category+kind, the rest counted as `(+N suppressed)`; `line` = identical line suppressed).
+Tune, disable or add rules in `config.yaml`:
+
+```yaml
+wake:
+  gamelog_rules:
+    enabled: true
+    rules: {ghost: {cooldown_s: 1800}, alarm_hard: {enabled: false}}
+    extra: [{name: plague, pattern: 'plague', next: 'look at it', cooldown_s: 600}]
+```
+
+**2. Lua watchers inside DFHack** (`lua/claude/*wacht.lua`, copied by `install-lua`; they act in the game and log to
+`<home>/tools/out/*.log` and `<home>/tools/events.log`, which `wake` reads). `claude/wachen start` starts the list `WACHEN_LIST`
+from `config.lua`; `claude/wachen load` does it from `dfhack-config/init/onMapLoad.init` once a fortress is loaded. After every load/restart start them again.
+
+| Watcher | Purpose | Start |
+|---|---|---|
+| `stresswacht` | stressed citizens: heavy labors off above `high`, restored below `low`; gamelog tantrum/berserk -> events.log | `claude/stresswacht start` |
+| `hospitalwacht` | hospital posts (doctor, diagnostician, surgeon, bone doctor) staffed with healthy citizens, medical labors, missing equipment | `claude/hospitalwacht start` |
+| `geisterwacht` | reads UI messages (`world.status.reports`): ghosts -> memorial slabs / ConstructSlab order, critical messages -> events.log | `claude/geisterwacht start` |
+| `aemterwacht` | vacant offices: economic offices auto-filled, military/political ones only reported | `claude/aemterwacht start` |
+| `binwacht` | keeps N free metal bins in stock (ConstructBin work order from iron) | `claude/binwacht start` |
+| `schmelzwacht` | marks useless iron/copper/bronze loot for melting (keep list per slot) | `claude/schmelzwacht start` |
+| `wachen` | starter: `start`, `status`, `load` | `claude/wachen start` |
+
+Known pitfalls: `util.home()` is the `df-llm-helper-runtime` folder (or `DF_LLM_HELPER_HOME`); a stray `pause.hold` or flag there blocks
+the timestream (`wake` reports `pause.hold`). `dfhack.units.getPosition` returns x, y, z (BUG-428), not a table. `abstract_building_hospitalst:is_instance` also
+matches locations without a building: count only `#contents.building_ids > 0`. The civilian alert can fire wrongly on a single tantrum. A burrow's block
+count (116 blocks) is not its tile count.
+
 ## Fair play
 
 Only what a human player could do through the UI: designations, build orders, stockpiles, work orders, labors, squads, alerts, trading, quickfort with *own* blueprints, DFHack convenience automation. Refused by the linter and the client: `createitem`, `dig-now`, `build-now`, `reveal`, `prospect all`, direct unit/item manipulation. Exceptions only via an entry in `data/exceptions.jsonl` that quotes the human player's explicit consent.

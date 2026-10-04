@@ -313,7 +313,8 @@ def cmd_wake(args) -> int:
     with _loop_lock(cfg, "wake", args, float(args.interval)) as lk:              # FEATURE-006 registry
         while True:
             wake_check(tools, store, clock, emit_existing=args.emit_existing, sink=lambda ln: print(ln, flush=True),
-                       loops_cfg=cfg.get("loops", {}))
+                       loops_cfg=cfg.get("loops", {}), gamelog=str(cfg.path("gamelog")),
+                       rules_cfg=cfg.get("wake.gamelog_rules", {}))
             if not args.loop or not lk.beat():
                 return 0
             time.sleep(float(args.interval))

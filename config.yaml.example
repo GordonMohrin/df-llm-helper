@@ -11,3 +11,9 @@ water:
   fort_box: [60, 40, 126, 127, 130, 133]
   forbid_dig: []
   chokepoints: []
+# wake: gamelog rules (alarms, deaths/tantrums/moods, caravan, ghosts); all optional
+wake:
+  gamelog_rules:
+    enabled: true
+    rules: {}            # e.g. {ghost: {cooldown_s: 1800}, alarm_hard: {enabled: false}}
+    extra: []            # e.g. [{name: plague, pattern: 'plague', next: 'look at it', cooldown_s: 600}]

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from pathlib import Path
 
 __all__ = ["WAKE_FLAGS", "wake_check"]
 
@@ -23,6 +24,7 @@ WAKE_FLAGS = {
     "food": ("supplies", "python -m df_llm_helper digest --scope essen"),
     "notfall": ("emergency", "python -m df_llm_helper digest"),
     "wasser": ("flood", "python -m df_llm_helper water watch; python -m df_llm_helper runbook show rb21_flut (emergency wall)"),
+    "pause.hold": ("pause", "a pause.hold in the runtime folder blocks the timestream: python -m df_llm_helper digest; delete it if stale"),
     "wirtschaft": ("workload", "Idle high: create new work (dig/build/stone/trade), then delete wirtschaft.flag"),
 }
 
@@ -53,7 +55,7 @@ def _h(text: str) -> str:
 
 
 def wake_check(tools, store, clock, *, dedupe_min: float = 10.0, emit_existing: bool = False, sink=None,
-               loops_cfg: dict | None = None) -> list[str]:
+               loops_cfg: dict | None = None, gamelog: str | None = None, rules_cfg: dict | None = None) -> list[str]:
     """`sink(line)` (optional) is called for every line BEFORE the state is stored: if printing fails, the events are
     not marked as seen and come again on the next call (BUG-112)."""
     now = clock.now().epoch
@@ -113,6 +115,15 @@ def wake_check(tools, store, clock, *, dedupe_min: float = 10.0, emit_existing: 
     for r in rows:
         emit(f"warn:{r['key']}", _h(r["text"]), f"WAKE df-llm-helper: {r['text'][:150]} -> python -m df_llm_helper digest")
         st["warn_id"] = r["id"]
+
+    # configurable gamelog rules (wakerules.py): hard alarms, deaths/tantrums/moods, caravan, ghosts
+    if gamelog and (rules_cfg or {}).get("enabled", True):
+        try:
+            from .wakerules import build_rules, gamelog_events
+            gst = st.setdefault("gamelog", {})
+            out.extend(gamelog_events(Path(gamelog), gst, build_rules(rules_cfg), now))
+        except Exception:  # noqa: BLE001 - the wake filter must never die on a rule
+            pass
 
     # FEATURE-006: duplicate or hanging background loops (lockfiles under tools/loops + PID check, no DF call)
     try:
