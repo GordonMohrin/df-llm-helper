@@ -42,7 +42,7 @@ CRITICAL = re.compile(r"(ambush|siege|invader|invasion|thief|thieves|snatcher|ki
 INFO = re.compile(r"(migrant|caravan|merchant|liaison|diplomat|strange mood|artifact|is now (spring|summer|autumn|winter)|"
                   r"has arrived|married|has given birth|grown to become)", re.I)
 NOT_ALARM = re.compile(r"COMBAT|CANCEL_JOB|TANTRUM|PET_DEATH|EXHAUSTION|ERA_CHANGE|MISCHIEVOUS|MASTERPIECE|SHOOT_WEB|"
-                       r"BREATHE_FIRE")
+                       r"BREATHE_FIRE|LOSE_EMOTION|NO_BREAK_GRIP")
 SIEGE = re.compile(r"(siege|vile force|force of darkness|UNDEAD_ATTACK|AMBUSH|ambush)")
 ENEMY = re.compile(r"(ambush|siege|invader|invasion|thief|thieves|snatcher|kidnap|titan|demon|werebeast|undead|zombie|"
                    r"vampire|goblin|elves|humans arrive|army|enemy|berserk|insane|went mad)", re.I)
@@ -261,7 +261,9 @@ class Waechter:
             joined = " ".join(crit)
             if SIEGE.search(joined) and not self.tools.flag("siege").exists:
                 self.tools.write_flag("siege", body)
-            if ENEMY.search(joined):
+            # Buerger-Vampire ("Dwarf Mechanic vampire") sind keine Feinde (04.10.2026: Fehlalarme mit Pause/Zivilalarm)
+            joined_enemy = re.sub(r"[Dd]warf [A-Za-z' ]*vampire", "", joined)
+            if ENEMY.search(joined_enemy):
                 self._hold("alarm")
                 for c in ("claude/advance 0", "claude/alert on", "claude/tempo suspend"):
                     self.client.run(c)
