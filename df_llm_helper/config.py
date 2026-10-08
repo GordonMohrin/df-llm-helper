@@ -56,6 +56,9 @@ DEFAULTS: dict[str, Any] = {
         "tempo_supply_days": 100, "tempo_supply_hyst": 10,      # timestream only from 100 days of supplies (+10 hysteresis)
         "pop_gates": [60, 80],
         "waechter_interval_s": 2, "waechter_dead_min": 2,
+        # extra orchestrator liveness signals besides heartbeat.txt (youngest wins), e.g. Claude Code transcripts
+        # '~/.claude/projects/<slug>/**/*.jsonl' or 'birth:%TEMP%/claude/<slug>/*/tasks/*.output' (creation time)
+        "liveness_globs": [],
     },
     # pause.hold owners/expiry (BUG-224): limits per reason, watcher release, Squads window close (holds.py)
     "holds": {"max_age_min": {"alarm": 15, "gefahr": 20, "karawane": 10, "caravan": 10, "trade": 30}, "default_max_age_min": 30,

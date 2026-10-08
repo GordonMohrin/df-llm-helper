@@ -103,6 +103,32 @@ class ToolsDir:
     def heartbeat_age_min(self) -> float | None:
         return self.age_min(self.heartbeat)
 
+    def liveness_age_min(self, patterns) -> float | None:
+        """Age (min) of the YOUNGEST file matching any glob in `patterns` (env vars and ~ expanded).
+        Prefix 'birth:' = use the creation time instead of the mtime (for output files of long-running background loops,
+        which keep being written even when the orchestrator hangs). None = no match."""
+        import glob as _glob
+        best = None
+        now = self.clock.now().epoch
+        for pat in patterns or []:
+            use_birth = pat.startswith("birth:")
+            pat = os.path.expanduser(os.path.expandvars(pat[6:] if use_birth else pat))
+            for f in _glob.iglob(pat, recursive=True):
+                try:
+                    st = os.stat(f)
+                except OSError:
+                    continue
+                t = (getattr(st, "st_birthtime", None) or st.st_ctime) if use_birth else st.st_mtime
+                age = max(0.0, (now - t) / 60.0)
+                if best is None or age < best:
+                    best = age
+        return best
+
+    def alive_age_min(self, patterns=None) -> float | None:
+        """Orchestrator liveness: youngest of heartbeat.txt and the liveness globs (guard.liveness_globs)."""
+        ages = [a for a in (self.heartbeat_age_min(), self.liveness_age_min(patterns)) if a is not None]
+        return min(ages) if ages else None
+
     def touch_heartbeat(self) -> None:
         self.path.mkdir(parents=True, exist_ok=True)
         now = self.clock.now()

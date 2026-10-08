@@ -11,6 +11,12 @@ water:
   fort_box: [60, 40, 126, 127, 130, 133]
   forbid_dig: []
   chokepoints: []
+# guard: extra orchestrator liveness signals for the deadman besides heartbeat.txt (youngest wins; birth: = creation time)
+# guard:
+#   liveness_globs:
+#     - '~/.claude/projects/<slug>/*.jsonl'
+#     - '~/.claude/projects/<slug>/*/subagents/*.jsonl'
+#     - 'birth:~/AppData/Local/Temp/claude/<slug>/*/tasks/*.output'
 # wake: gamelog rules (alarms, deaths/tantrums/moods, caravan, ghosts); all optional
 wake:
   gamelog_rules:

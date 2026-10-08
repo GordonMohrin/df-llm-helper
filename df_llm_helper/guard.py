@@ -275,7 +275,7 @@ class GuardRunner:
                 sh_key = sh.reason
         return GuardInputs(
             stale_hold=sh_text, stale_hold_key=sh_key,
-            heartbeat_age_min=self.tools.heartbeat_age_min(), last_report_id=self.tools.last_report_id(),
+            heartbeat_age_min=self.tools.alive_age_min(self.cfg["guard"].get("liveness_globs")), last_report_id=self.tools.last_report_id(),
             max_report_id=snap.max_report_id if snap is not None else None, events_size=size, events_age_min=age,
             guard_running=running,
             drink_days=getattr(snap, "drink_days", None), food_days=getattr(snap, "food_days", None),
