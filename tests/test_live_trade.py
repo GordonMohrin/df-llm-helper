@@ -152,6 +152,24 @@ def test_bug224_stale_hold_rules(tmp_path):
     assert holds.stale_hold(tools, store) is None                        # limit 20 min
 
 
+def test_handelauto_flag_protects_trade_hold(tmp_path):
+    """claude/handelauto (Lua) refreshes handel_aktiv.flag every 20 s: its trade hold is never stale, a danger hold still is."""
+    clock = FakeClock(10_000)
+    tools = ToolsDir(tmp_path, clock)
+    store = Store()
+    tools.write_flag("pause.hold", "trade handelauto 14:00:00")
+    set_age(tools.flag_path("pause.hold"), clock, 40)
+    assert holds.stale_hold(tools, store) is not None                   # no flag: stale
+    tools.write_flag("handel_aktiv", "handelauto 14:00:20")
+    assert holds.handel_aktiv(tools) and holds.stale_hold(tools, store) is None
+    set_age(tools.flag_path("handel_aktiv"), clock, 6)                  # flag older than 5 min: automaton dead
+    assert not holds.handel_aktiv(tools) and holds.stale_hold(tools, store) is not None
+    tools.write_flag("handel_aktiv", "x")
+    tools.write_flag("pause.hold", "alarm")
+    set_age(tools.flag_path("pause.hold"), clock, 16)
+    assert holds.stale_hold(tools, store) is not None                   # never protects a danger hold
+
+
 def test_bug224_check_reports_a_stale_hold_once(tmp_path, clock):
     tools = ToolsDir(tmp_path, clock)
     tools.write_flag("pause.hold", "alarm")

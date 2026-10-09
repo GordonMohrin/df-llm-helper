@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 __all__ = ["HoldInfo", "DEFAULTS", "TRADE_REASONS", "DANGER_REASONS", "HOLD_CMD", "RELEASE_CMD", "hold_reason",
-           "hold_info", "write_hold", "release_hold", "danger_reason", "trade_active", "stale_hold", "stale_text",
+           "hold_info", "write_hold", "release_hold", "danger_reason", "trade_active", "stale_hold", "stale_text", "handel_aktiv",
            "run_helper"]
 
 TRADE_REASONS = ("trade", "karawane", "caravan")   # holds the trade automaton owns (it may delete them)
@@ -31,6 +31,7 @@ DEFAULTS = {
     "trade_active_max_min": 60,     # a running trade protects its hold at most this long (abandoned flow)
     "auto_release": True,           # watcher deletes stale holds
     "squads_close_s": 30,           # watcher: Squads window open + game paused this long -> close it (BUG-224)
+    "handel_aktiv_max_min": 5,      # claude/handelauto: handel_aktiv.flag younger than this protects its trade hold
 }
 _ACTIVE_TRADE = ("PAUSE", "SAVE", "BROKER", "MARK", "OPEN", "SELECT_DRY", "REVIEW", "WAIT", "SELECT_LIVE", "CONFIRM",
                  "FINISH", "RELEASE", "RESUME")
@@ -96,6 +97,14 @@ def danger_reason(tools, cfg: dict | None = None) -> str:
     return ""
 
 
+def handel_aktiv(tools, cfg: dict | None = None) -> bool:
+    """Companion trade automaton `claude/handelauto` (Lua) runs: `handel_aktiv.flag` in the tools folder, refreshed every
+    20 s, younger than holds.handel_aktiv_max_min. Its trade hold is then never stale (it deletes it itself)."""
+    c = _cfg(cfg)
+    f = tools.flag("handel_aktiv")
+    return bool(f.exists and f.age_min is not None and f.age_min < float(c["handel_aktiv_max_min"]))
+
+
 def trade_active(store) -> bool:
     """A trade automaton (manual `trade` or the caravan autopilot) is between IDLE and its end."""
     states = [(store.get("trade.flow") or {}).get("state"),
@@ -109,6 +118,8 @@ def stale_hold(tools, store=None, *, danger: bool = False, cfg: dict | None = No
     c = _cfg(cfg)
     h = hold_info(tools, c)
     if not h.exists or h.age_min is None or h.age_min <= (h.max_age_min or 0):
+        return None
+    if h.reason in TRADE_REASONS and handel_aktiv(tools, c):
         return None
     if h.reason in DANGER_REASONS:
         a = tools.flag("alert")
