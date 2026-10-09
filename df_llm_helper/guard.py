@@ -105,7 +105,8 @@ def tempo_blockers(inp: GuardInputs, st: GuardState, g: dict) -> list[str]:
         reasons.append("supplies")
     if inp.heartbeat_age_min is None or inp.heartbeat_age_min > g["agents_active_min"]:
         reasons.append("no_supervision")
-    for gate in g.get("pop_gates", []):
+    # pop gates that switch the timestream off: guard.pop_gates_block (default: same as guard.pop_gates, i.e. unchanged behaviour)
+    for gate in g.get("pop_gates_block", g.get("pop_gates", [])):
         if inp.pop is not None and inp.pop >= gate and gate not in st.gates_acked:
             reasons.append(f"pop_gate_{gate}")
     return reasons
