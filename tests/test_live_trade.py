@@ -349,3 +349,19 @@ def test_bug225_caravan_pilot_waits_during_alarm_and_reenters(tmp_path):
     assert tools.flag("pause.hold").exists is False                     # the trade's own hold is released
     s, log = cp.step()                                                   # caravan still at the depot: re-enter
     assert s == "open" and "ok HELPER hold trade (pause.hold 'trade')" in log
+
+
+def test_stale_siege_flag_is_no_danger(tmp_path):
+    """Night audit 10.10.2026: a forgotten siege.flag (08.10.) kept every danger hold alive and the Squads/freeze guards off."""
+    clock = FakeClock()
+    tools = ToolsDir(tmp_path, clock)
+    store = Store()
+    tools.write_flag("siege", "22:43:52 [CONFLICT_CONVERSATION] ...")
+    assert holds.siege_active(tools) and holds.danger_reason(tools) == "siege.flag"
+    set_age(tools.flag_path("siege"), clock, 61)
+    assert not holds.siege_active(tools) and holds.danger_reason(tools) == ""
+    tools.write_flag("pause.hold", "gefahr 12:00:01")
+    set_age(tools.flag_path("pause.hold"), clock, 25)
+    assert holds.stale_hold(tools, store) is not None                   # stale siege.flag no longer protects the hold
+    tools.write_flag("siege_aktiv", "claude/siege start")               # running siege protocol: always danger
+    assert holds.siege_active(tools) and holds.stale_hold(tools, store) is None

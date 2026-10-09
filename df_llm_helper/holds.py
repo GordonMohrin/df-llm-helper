@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 __all__ = ["HoldInfo", "DEFAULTS", "TRADE_REASONS", "DANGER_REASONS", "HOLD_CMD", "RELEASE_CMD", "hold_reason",
-           "hold_info", "write_hold", "release_hold", "danger_reason", "trade_active", "stale_hold", "stale_text", "handel_aktiv",
+           "hold_info", "write_hold", "release_hold", "danger_reason", "siege_active", "trade_active", "stale_hold", "stale_text", "handel_aktiv",
            "run_helper"]
 
 TRADE_REASONS = ("trade", "karawane", "caravan")   # holds the trade automaton owns (it may delete them)
@@ -32,6 +32,7 @@ DEFAULTS = {
     "auto_release": True,           # watcher deletes stale holds
     "squads_close_s": 30,           # watcher: Squads window open + game paused this long -> close it (BUG-224)
     "handel_aktiv_max_min": 5,      # claude/handelauto: handel_aktiv.flag younger than this protects its trade hold
+    "siege_active_min": 60,         # night audit 10.10.2026: siege.flag counts as danger only this long (siege_aktiv.flag: always)
 }
 _ACTIVE_TRADE = ("PAUSE", "SAVE", "BROKER", "MARK", "OPEN", "SELECT_DRY", "REVIEW", "WAIT", "SELECT_LIVE", "CONFIRM",
                  "FINISH", "RELEASE", "RESUME")
@@ -83,13 +84,24 @@ def release_hold(tools, reasons=TRADE_REASONS) -> bool:
     return tools.delete_flag("pause.hold")
 
 
+def siege_active(tools, cfg: dict | None = None) -> bool:
+    """siege.flag younger than holds.siege_active_min, or the siege protocol's siege_aktiv.flag. Night audit 10.10.2026: a
+    forgotten siege.flag (08.10., written for a conflict conversation) made every danger hold permanent and kept the Squads
+    window guard and the freeze guard's resume switched off."""
+    c = _cfg(cfg)
+    s = tools.flag("siege")
+    if s.exists and (s.age_min is None or s.age_min < float(c["siege_active_min"])):
+        return True
+    return bool(tools.flag("siege_aktiv").exists)
+
+
 def danger_reason(tools, cfg: dict | None = None) -> str:
     """Why the game is in a danger state ('' = none): danger hold, siege.flag or a fresh alert.flag."""
     c = _cfg(cfg)
     h = tools.flag("pause.hold")
     if h.exists and hold_reason(h.text) in DANGER_REASONS:
         return f"pause.hold '{h.text[:30]}'"
-    if tools.flag("siege").exists:
+    if siege_active(tools, c):
         return "siege.flag"
     a = tools.flag("alert")
     if a.exists and (a.age_min is None or a.age_min < float(c["alert_active_min"])):
@@ -123,7 +135,7 @@ def stale_hold(tools, store=None, *, danger: bool = False, cfg: dict | None = No
         return None
     if h.reason in DANGER_REASONS:
         a = tools.flag("alert")
-        if danger or tools.flag("siege").exists or \
+        if danger or siege_active(tools, c) or \
                 (a.exists and a.age_min is not None and a.age_min < float(c["alert_active_min"])):
             return None
     if h.reason in TRADE_REASONS and store is not None and trade_active(store) and \

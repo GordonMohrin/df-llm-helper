@@ -175,7 +175,8 @@ def ctx_from(store, tools, now: float) -> FreezeCtx:
     hold = tools.flag("pause.hold")
     car = tools.flag("caravan")
     htxt = hold.text if hold.exists else None
-    enemy = tools.flag("siege").exists or (htxt or "").startswith(("alarm", "gefahr"))
+    from .holds import siege_active      # night audit 10.10.2026: a stale siege.flag is no enemy
+    enemy = siege_active(tools) or (htxt or "").startswith(("alarm", "gefahr"))
 
     def ts(f):
         return now - f.age_min * 60 if f.exists and f.age_min is not None else None
