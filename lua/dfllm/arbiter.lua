@@ -299,8 +299,9 @@ end
 local function popup_kind()
   local ok, text = pcall(function() return dfhack.df2utf(df.global.world.status.popups[0].text) end)
   if not ok or type(text) ~= 'string' then return nil end
+  text = text:lower()                     -- live L1b: "Merchants have arrived and ..." starts upper case
   for kind, marks in pairs(M.POPUPS) do
-    for _, m in ipairs(marks) do if text:find(m, 1, true) then return kind end end
+    for _, m in ipairs(marks) do if text:find(m:lower(), 1, true) then return kind end end
   end
 end
 

@@ -272,6 +272,9 @@ T.test('popups (live L0): a popup halts the game with pause_state false; migrant
   H.run(W, 6, {paused = false})
   T.eq(#popups, 0, 'the shipped whitelist clears the migrants popup')
   T.eq(df.global.pause_state, false)
+  popups:insert('#', {text = 'Merchants have arrived and are unloading their goods.'})   -- live L1b
+  H.run(W, 6, {paused = false})
+  T.eq(#popups, 0, 'matched without regard to case')
   popups:insert('#', {text = 'A vile force of darkness has arrived!'})
   H.run(W, 6, {paused = false})
   T.eq(#popups, 1, 'unknown popups stay for Gordon')
