@@ -263,6 +263,27 @@ T.test('popups: whitelisted kinds are dismissed and unpaused, others stay (owner
   kern.stop()
 end)
 
+T.test('popups (live L0): a popup halts the game with pause_state false; migrants are cleared', function()
+  local W = H.world{tag = 'popup2', ms_per_frame = 100}
+  boot(W)
+  local popups = df.global.world.status.popups
+  df.global.pause_state = false
+  popups:insert('#', {text = 'Some migrants have arrived.'})
+  H.run(W, 6, {paused = false})
+  T.eq(#popups, 0, 'the shipped whitelist clears the migrants popup')
+  T.eq(df.global.pause_state, false)
+  popups:insert('#', {text = 'A vile force of darkness has arrived!'})
+  H.run(W, 6, {paused = false})
+  T.eq(#popups, 1, 'unknown popups stay for Gordon')
+  kern.K().flush(); H.frame(W, 0)
+  T.eq(H.state(W).owners.pause, 'popup', 'a popup without pause_state still owns the pause')
+  popups:erase(0)
+  H.run(W, 3, {paused = false})
+  kern.K().flush(); H.frame(W, 0)
+  T.eq(H.state(W).owners.pause, nil)
+  kern.stop()
+end)
+
 T.test('crash heal on an unmarked save: only globals still at our profile value + overlays; ts and pop cap untouched', function()
   local W = H.world{tag = 'heal', marker = false}
   luahost.mkdir_recursive(W.rt)

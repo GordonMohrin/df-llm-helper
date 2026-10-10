@@ -13,7 +13,13 @@ local M = {name = 'arbiter', every = {ms = 500}, critical = true, on = {}, verbs
 M.MODE_FPS = {PEACE = 500, ALERT = 250, SIEGE = -1, BREACH = -1, RECOVERY = 250, DRILL = -1}
 M.PROFILE = {gfps = 30, autosave = 'YEARLY', overlays = true, visitor_cap = 30}
 M.KEEP_OVERLAY = 'notify'          -- headless overlay profile keeps widgets whose name contains this
-M.POPUPS = {}                      -- kind -> {plain text markers}: dismissed + unpaused [S8: fill from live]
+-- kind -> {plain text markers}: dismissed + unpaused. Live L0 (DF 53.16): an announcement popup
+-- (world.status.popups) halts the game while pause_state stays false; the only one seen so far is
+-- "Some migrants have arrived." (it froze the fort for minutes until it was clicked away), then
+-- "A caravan from <civ> has arrived. ..." + "The merchants need a trade depot ...". Informational
+-- popups only; threats (sieges, beasts) stay for Gordon (DECISION_NEEDED after 10 min).
+M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
+            caravan = {'A caravan from', 'merchants need a trade depot', 'merchants have arrived'}}
 M.ASK_AFTER_MS = 600000            -- foreign pause older than this -> DECISION_NEEDED
 M.REASSERT_MS = 60000              -- re-check the live timestream fps at most this often
 M.RETRY_MS = 30000                 -- back-off after a failed timestream write
@@ -259,7 +265,8 @@ end
 -- pause transitions: a pause we did not cause is foreign (a popup's or Gordon's) and ends our hold,
 -- so a TTL expiry can never unpause somebody else's pause
 local function observe(K)
-  local paused = df.global.pause_state == true
+  -- live L0: a popup halts the game without setting pause_state, so it counts as a pause too
+  local paused = df.global.pause_state == true or popup_count() > 0
   if paused and not st.pause_by then
     st.pause_by, st.pause_since, st.asked = (popup_count() > 0) and 'popup' or 'gordon', K.now().ms, false
     st.hold = nil
@@ -278,7 +285,8 @@ local function track_pause(K)
     if df.global.pause_state == true and st.pause_by == 'inbox' then K.act.set_paused(false) end
   end
   if not observe(K) then return end
-  if st.pause_by == 'popup' then
+  -- a whitelisted popup is also cleared once an expired inbox hold is all that is left
+  if st.pause_by == 'popup' or (st.pause_by == 'inbox' and not st.hold and popup_count() > 0) then
     local kind = popup_kind()
     if kind and K.act.dismiss_popup(kind) and popup_count() == 0 then K.act.set_paused(false) end
   end

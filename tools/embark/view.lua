@@ -151,6 +151,7 @@ function View:kind()
   end
   if self:focus_has('title') then return 'title' end
   if self:focus_has('choose_game_type') then return 'game_type' end
+  if self:focus_has('adopt_region') then return 'loading_world' end  -- "Loading world to start new game"
   return 'unknown'
 end
 

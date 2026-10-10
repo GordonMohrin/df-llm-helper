@@ -1,5 +1,35 @@
 # Embark with the vanilla UI only (v2, WP11)
 
+## Live L0 findings (2026-10-10, DF 53.16, window on a hidden virtual desktop)
+Proven live: `newgame`, `scan` (about 12 s per site, about 20 s with `--tiles`) and `embark … --play-now`
+(fort Rimtarlocun "Castlerisen", world tile 8,14, rectangle 131,233). Not working: Prepare carefully.
+- **No mouse focus.** DF never gets OS mouse events, so `enabler.mouse_focus` is false and DF writes
+  the mouse itself before every render frame (-1, or with the focus claimed the cached OS cursor).
+  The placing rectangle and the site panel follow the mouse that render frames see. `embark.lua`
+  therefore shows a pass-through DFHack screen (the *mouse injector*) on top of the embark screen
+  while the local map is used: it writes our mouse right before the native render, forwards input,
+  runs the native logic, and is dismissed before Confirm and at the end of every run.
+- **Placing:** the rectangle follows a held mouse, 16 px per embark tile:
+  `rect_min = zoom_cent + k + floor((px - window centre) / 16)`, k = (-1, 0) at 1716x1000. A map
+  click does not move it; it opens the Confirm popup on it. `location.region_pos` only changes after
+  placing; the zoomed world tile is `zoom_cent // 16`.
+- **Panel:** shown only in placing mode WITHOUT the popup, for the region of the HOVERED tile (the
+  rectangle can span several regions). The popup covers the whole rectangle. `site.read` reads the
+  panel first, then clicks and reads the popup; `--tiles` (default for `embark`) hovers all 16 tiles
+  and merges them (best water/trees/metals, worst evil/savagery/aquifer, nearest neighbours). Panel
+  lines: region name, biome, `Temperature:`, `Trees:`, `Other Vegetation:`, `Surroundings:`,
+  `Brook:/Stream: <name>`, soil, aquifer, metals, `Flux stone layer`, `Neighbors:` with
+  `Nearest site: …` (also `Here`). A site panel says `Cannot embark on another site.` (no popup).
+- **Captures:** `fixtures/live/*.txt` (tests use them).
+- **Window size:** returning to the title once left DF at 1522x1000 with a broken local map (garbage
+  rectangle); resizing the window back to 1716x1000 fixed it.
+- **Prepare carefully:** skill and dwarf rows ignore simulated clicks with or without focus, with the
+  injector and with raw `enabler.mouse_lbut` flags; keys do nothing there except Esc (menu). Buttons
+  (Embark!, Go back, menu items) work. Fallback used: Esc → Return to title → `newgame` → `embark …
+  --play-now` (DF's skilled default seven; 324 points unspent). Spending points needs Gordon (5 min).
+- **Never** leave `enabler.mouse_lbut*` set: a stuck flag plus the cached cursor over "Embark!" once
+  clicked Embark! (DF's unspent-points warning caught it).
+
 Picks a site by the DESIGN §5.1 checklist and embarks with every embark point spent, using only
 what the vanilla embark screens show and only clicks a player could make. Runs before
 `dfllm adopt`, so no kernel exists yet; this folder has its own small Lua runtime.

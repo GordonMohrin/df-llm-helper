@@ -76,30 +76,55 @@ local function same_rect(v, ex, ey)
 end
 
 ---------------------------------------------------------------- title -> world map
+-- Resumable (L0): a step whose screen is already behind us is skipped, so `newgame` can be re-run
+-- after a failure. Live 53.16: clicking the world name first shows "Loading world to start new
+-- game" (focus adopt_region) for minutes; only then comes "Select a game type".
+local LATER = {
+  ['title.new'] = {loading_world = true, game_type = true, world = true, ['local'] = true, placing = true},
+  ['title.world'] = {loading_world = true, game_type = true, world = true, ['local'] = true, placing = true},
+  ['title.fortress'] = {world = true, ['local'] = true, placing = true},
+}
+local function later(id, v) return LATER[id][v:kind()] == true end
 function S.newgame(world)
   local new = 'Start new game in existing world'
   return {
     {id = 'title.new', live = 'run4-6', timeout_ms = 30000,
-     wait = function(v) return v:has(new) end,
-     act = function(ui, v) tap(ui, v, new) end,
+     wait = function(v) return v:has(new) or later('title.new', v) end,
+     act = function(ui, v)
+       if later('title.new', v) then return 'skip', 'already past the title' end
+       tap(ui, v, new)
+     end,
      done = function(v) return not v:has(new) end},
     {id = 'title.world', live = 'run4-6', timeout_ms = 30000,
-     wait = function(v) return v:has(world) end,
-     act = function(ui, v) tap(ui, v, world) end,
+     wait = function(v) return v:has(world) or later('title.world', v) end,
+     act = function(ui, v)
+       if later('title.world', v) then return 'skip', 'world already chosen' end
+       tap(ui, v, world)
+     end,
      done = function(v) return not v:has(world) or v:has('Fortress') end},
-    {id = 'title.fortress', live = 'run4-6', timeout_ms = 30000,
-     wait = function(v) return v:has('Fortress') end,
-     act = function(ui, v) tap(ui, v, 'Fortress', {exact = true}) end,
+    {id = 'title.fortress', live = 'L0', timeout_ms = 600000,  -- the world loads before this screen
+     wait = function(v) return v:has('Fortress') or later('title.fortress', v) end,
+     act = function(ui, v)
+       if later('title.fortress', v) then return 'skip', 'game type already chosen' end
+       tap(ui, v, 'Fortress', {exact = true})
+     end,
      done = function(v) return not v:has('Select a game type') end},
     {id = 'title.load', live = 'run4-6', timeout_ms = 600000,  -- loading a big world takes minutes
      act = function() return 'wait', 'loading' end,
      done = function(v) return kind_in(v, 'world', 'local') or v:has('Skip tutorial'), 'loading' end},
-    {id = 'title.tutorial', live = 'run4-6', optional = true,
-     act = function(ui, v)
-       if v:has('Skip tutorial') then tap(ui, v, 'Skip tutorial') return end
-       return 'skip', 'no tutorial prompt'
+    -- live L0: the world map shows up about one poll before the tutorial prompt is drawn, so
+    -- look for the prompt for up to 20 polls (about 5 s) before skipping the step
+    {id = 'title.tutorial', live = 'L0', optional = true,
+     act = function(ui, v, ctx, w, mem)
+       if v:has('Skip tutorial') then tap(ui, v, 'Skip tutorial'); mem.clicked = true return end
+       mem.n = (mem.n or 0) + 1
+       if mem.clicked or mem.n > 20 then return 'skip', 'no tutorial prompt' end
+       return 'wait', 'waiting for the tutorial prompt'
      end,
-     done = function(v) return not v:has('Skip tutorial') end},
+     done = function(v, ctx, mem)
+       if v:has('Skip tutorial') then return false, 'tutorial prompt shown' end
+       return mem.clicked == true, 'no prompt yet'
+     end},
     {id = 'title.okay', live = 'run4-6', optional = true,
      act = function(ui, v)
        if kind_in(v, 'world') and cell(v, 'Okay') then tap(ui, v, 'Okay', {exact = true}) return end
@@ -113,11 +138,20 @@ end
 ---------------------------------------------------------------- world map -> local view
 -- closed loop: set the camera, click the map centre, read location.region_pos, learn the
 -- offset and repeat (the centre pixel is not exactly the map centre, Run 6)
+-- live 53.16: the zoomed tile is cs.zoom_world (zoom_cent // 16); location.region_pos only
+-- changes once a rectangle is placed, so it is the fallback for old captures only
+local function zoomed_tile(v)
+  local cs = v.cs
+  if not cs then return nil end
+  return cs.zoom_world or cs.region
+end
 function S.goto_world(wx, wy, cfg)
-  return {id = 'world.goto', live = 'run4-6', tries = 8, timeout_ms = 90000,
+  return {id = 'world.goto', live = 'L0', tries = 8, timeout_ms = 90000,
     wait = function(v) return kind_in(v, 'world', 'local', 'placing') end,
     act = function(ui, v, ctx, w)
-      local r = v.cs and v.cs.region
+      ui:release()
+      if w and w.inject and ctx.injected ~= nil then w.inject(false); ctx.injected = nil end
+      local r = zoomed_tile(v)
       if kind_in(v, 'local') and r and r[1] == wx and r[2] == wy then return 'done', 'already there' end
       ctx.w_new = false
       if not kind_in(v, 'world') then rclick(ui, cfg) return nil, 'zooming out' end
@@ -128,7 +162,7 @@ function S.goto_world(wx, wy, cfg)
       ui:click_pct(cfg.world_click[1], cfg.world_click[2])
     end,
     done = function(v, ctx)
-      local r = v.cs and v.cs.region
+      local r = zoomed_tile(v)
       if not kind_in(v, 'local') or not r then return false, 'not zoomed in' end
       if r[1] == wx and r[2] == wy then return true, 'at world tile ' .. wx .. ',' .. wy end
       if ctx.w_new then ctx.wofs = {r[1] - ctx.w_cam[1], r[2] - ctx.w_cam[2]} end
@@ -137,66 +171,284 @@ function S.goto_world(wx, wy, cfg)
 end
 
 ---------------------------------------------------------------- local view -> rectangle
--- rectangle min = camera + k (k depends on the window; Run 6: -7,0). Measure k after
--- the first click, then place exactly.
+-- Live 53.16 (L0, DF on a hidden desktop, mouse focus claimed by W.mouse): in placing mode the
+-- rectangle follows a mouse that is HELD over the map every frame, 16 px per embark tile:
+--   rect_min = cam_local + k + floor((P - C) / s)    C = window centre px, s = cfg.local_tile_px
+-- (measured k = -1,0 at 1716x1000). No camera write and no click are needed to place it: hold
+-- the pixel for the target, read the rectangle, learn k from the first miss, hold again.
+-- A click in placing mode does NOT move the rectangle; it opens the Confirm popup on it.
+local function centre_px(ui)
+  local w, h = ui.env.win()
+  local tpx, tpy = ui.env.tile_px()
+  return w * tpx // 2, h * tpy // 2
+end
+-- The cached OS cursor (input.lua probe) wins every render frame while the focus is claimed, so
+-- when it lies over the map the camera is moved until THAT pixel is on the target and the hold
+-- uses the same pixel: logic and render frames then agree. Otherwise a computed pixel is held.
+local function over_map(ui, r)
+  local w, h = ui.env.win()
+  local tpx, tpy = ui.env.tile_px()
+  return r and r[1] >= 40 and r[2] >= 60 and r[1] < w * tpx - 420 and r[2] < h * tpy - 90
+end
 function S.place(ex, ey, cfg)
-  return {id = 'local.place', live = 'run4-6', tries = 10, timeout_ms = 120000,
+  local s = cfg.local_tile_px or 16
+  return {id = 'local.place', live = 'L0', tries = 12, timeout_ms = 120000,
     wait = function(v) return kind_in(v, 'local', 'placing') end,
     act = function(ui, v, ctx, w)
-      local ab = popup_abort(v)
-      if ab then tap(ui, v, 'Abort', {exact = true}); ctx.p_new = false return nil, 'closing popup' end
+      if popup_abort(v) then ui:release(); tap(ui, v, 'Abort', {exact = true}); ctx.p_px = nil return nil, 'closing popup' end
       if kind_in(v, 'local') then
+        ui:release()
         if not tap(ui, v, 'Embark', {exact = true, from_bottom = true}) then return nil, 'no Embark button' end
-        ctx.p_new = false
+        ctx.p_px = nil
         return nil, 'Embark button'
       end
-      local k = ctx.pk or cfg.place_k
-      ctx.p_cam, ctx.p_new = {ex - k[1], ey - k[2]}, true
-      w.camera('local', ctx.p_cam[1], ctx.p_cam[2])
-      ui:wait(cfg.camera_ms)
-      ui:click_px(cfg.place_px[1], cfg.place_px[2], {hover_ms = cfg.place_hover_ms})
+      local zc = v.cs and v.cs.cam_local
+      if not zc then return 'fail', 'no local camera' end
+      if w and w.inject and ctx.injected == nil then  -- embark.lua mouse injector (render-time mouse)
+        ctx.injected = w.inject(true)
+        return nil, 'mouse injector ' .. (ctx.injected and 'on' or 'unavailable')
+      end
+      if ctx.real == nil and ui.probe then
+        if ui.real == nil then ui:probe(cfg.probe_frames or 150) return nil, 'probing the cursor' end
+        ctx.real = ui.real
+      end
+      local k = ctx.pk or cfg.local_k or {0, 0}
+      local cx, cy = centre_px(ui)
+      local r = ctx.real
+      if over_map(ui, r) then
+        local want = {ex - k[1] - (r[1] - cx) // s, ey - k[2] - (r[2] - cy) // s}
+        if zc[1] ~= want[1] or zc[2] ~= want[2] then
+          w.camera('local', want[1], want[2])
+          ui:wait(cfg.local_camera_ms or 300)
+        end
+        ui:hold(r[1], r[2])
+        ctx.p_px, ctx.p_c = {r[1], r[2]}, {cx, cy}
+        return nil, 'camera ' .. want[1] .. ',' .. want[2] .. ', holding the cursor pixel'
+      end
+      local px = cx + s * (ex - zc[1] - k[1]) + s // 2
+      local py = cy + s * (ey - zc[2] - k[2]) + s // 2
+      ui:hold(px, py)
+      ctx.p_px, ctx.p_c = {px, py}, {cx, cy}
+      return nil, 'holding ' .. px .. ',' .. py
     end,
+    -- live L0: DF still takes the real OS cursor when Gordon moves his mouse on another desktop
+    -- (about 1 frame in 15), so a miss teaches k only when the same rectangle is seen twice for
+    -- the same held pixel
     done = function(v, ctx)
       local m = v.cs and v.cs.emb_min
-      if not m or not ctx.p_cam then return false, 'no rectangle yet' end
-      if ctx.p_new and m[1] == ex and m[2] == ey then return true, 'rectangle at ' .. ex .. ',' .. ey end
-      if ctx.p_new then ctx.pk = {m[1] - ctx.p_cam[1], m[2] - ctx.p_cam[2]} end
+      if not m or not ctx.p_px then return false, 'no rectangle yet' end
+      if not v.cs.choosing_embark or popup_abort(v) then return false, 'not placing' end
+      if m[1] == ex and m[2] == ey then ctx.p_seen = nil return true, 'rectangle at ' .. ex .. ',' .. ey end
+      local p, zc, c = ctx.p_px, v.cs.cam_local, ctx.p_c
+      if not zc then return false, 'no local camera' end
+      local key = p[1] .. ',' .. p[2] .. '>' .. m[1] .. ',' .. m[2]
+      if ctx.p_seen == key then
+        ctx.pk = {m[1] - zc[1] - (p[1] - c[1]) // s, m[2] - zc[2] - (p[2] - c[2]) // s}
+      end
+      ctx.p_seen = key
       return false, 'rectangle at ' .. m[1] .. ',' .. m[2]
     end}
 end
 
 ---------------------------------------------------------------- read the site
--- ONE capture while the Confirm popup is open: the click fixed the rectangle, so popup, panel,
--- Neighbors section and cs all describe the placed rectangle (v1 probe.sh, Runs 4-5, read popup
--- and panel together this way; RUN6-START.md: the right panel lists aquifer, trees, metals,
--- soil and the neighbours with distances). Without the popup the rectangle follows the mouse,
--- so the rectangle must still be the target (ex, ey) that local.place verified.
+-- Live 53.16 (L0): the right-hand site panel (biome, temperature, trees, surroundings, soil,
+-- aquifer line, metals, flux, Neighbors with "Nearest site: ...") is drawn only in placing mode
+-- WITHOUT the popup and only while the mouse is held over the map; the Confirm popup hides it.
+-- So the read takes two views of the same rectangle: (1) the panel while local.place holds the
+-- mouse on the target, (2) one click on that pixel opens the popup (the rectangle stays fixed)
+-- and its warning sentences are merged in. Both views must show the target rectangle.
+local function merge_popup(rec, pop)
+  local seen = {}
+  for _, w in ipairs(rec.warnings) do seen[w] = true end
+  for _, w in ipairs(pop.warnings) do
+    if not seen[w] then seen[w] = true; rec.warnings[#rec.warnings + 1] = w end
+  end
+  if seen.heavy_aquifer then rec.aquifer = 'heavy'
+  elseif seen.light_aquifer and (rec.aquifer == nil or rec.aquifer == 'none') then rec.aquifer = 'light' end
+  return rec
+end
+S.merge_popup = merge_popup
+
+-- Live L0: the panel describes the region of the HOVERED tile, not the whole rectangle (the
+-- popup covers the rectangle). With tiles=true the rectangle's 16 tiles are hovered one by one
+-- (local.place on a shifted rectangle + site.tile) and merged here: water, trees and metals are
+-- the best found, flux any, evil/savagery/aquifer the worst, neighbours the nearest per race.
+local TREE_RANK = {none = 0, scarce = 1, sparse = 2, woodland = 3, heavily_forested = 4}
+local EVIL_RANK = {good = 0, neutral = 1, evil = 2}
+local SAV_RANK = {low = 0, medium = 1, high = 2}
+local AQ_RANK = {none = 0, light = 1, varied = 2, heavy = 3}
+local function merge_tiles(rec, tiles)
+  if not tiles or #tiles == 0 then return rec end
+  local seen_r, seen_m = {}, {}
+  for _, r in ipairs(rec.rivers or {}) do seen_r[r] = true end
+  for _, m in ipairs(rec.metals or {}) do seen_m[m] = true end
+  local near = {}
+  for _, n in ipairs(rec.neighbors or {}) do near[n.race] = n end
+  local nw, nt = 0, 0
+  for _, t in ipairs(tiles) do
+    for _, r in ipairs(t.rivers or {}) do
+      if not seen_r[r] then seen_r[r] = true; rec.rivers[#rec.rivers + 1] = r end
+    end
+    if t.water then nw = nw + 1 end
+    if (TREE_RANK[t.trees] or -1) > (TREE_RANK[rec.trees] or -1) then rec.trees = t.trees end
+    if (TREE_RANK[t.trees] or 0) >= 3 then nt = nt + 1 end
+    for _, m in ipairs(t.metals or {}) do
+      if not seen_m[m] then seen_m[m] = true; rec.metals = rec.metals or {}; rec.metals[#rec.metals + 1] = m end
+    end
+    if t.flux then rec.flux = true end
+    if (EVIL_RANK[t.evil] or -1) > (EVIL_RANK[rec.evil] or -1) then rec.evil = t.evil end
+    if (SAV_RANK[t.savagery] or -1) > (SAV_RANK[rec.savagery] or -1) then rec.savagery = t.savagery end
+    if (AQ_RANK[t.aquifer] or -1) > (AQ_RANK[rec.aquifer] or -1) then rec.aquifer = t.aquifer end
+    for _, n in ipairs(t.neighbors or {}) do
+      local o = near[n.race]
+      if not o or (n.rank or 99) < (o.rank or 99) then near[n.race] = n end
+    end
+  end
+  for _, w in ipairs(panel.WATER) do
+    if seen_r[w] then rec.water = w break end
+  end
+  local nb = {}
+  for _, n in pairs(near) do nb[#nb + 1] = n end
+  table.sort(nb, function(a, b) return (a.rank or 99) < (b.rank or 99) end)
+  if #nb > 0 then rec.neighbors = nb end
+  rec.tiles = {n = #tiles, water = nw, wood = nt}
+  return rec
+end
+S.merge_tiles = merge_tiles
+
+-- a stable text key of a panel record (facts the checklist uses)
+local function json_key(rec)
+  local nb = {}
+  for _, n in ipairs(rec.neighbors or {}) do nb[#nb + 1] = tostring(n.race) .. ':' .. tostring(n.travel) end
+  return table.concat({tostring(rec.trees), tostring(rec.water), tostring(rec.aquifer), tostring(rec.surroundings),
+    tostring(rec.temperature), tostring(rec.soil), table.concat(rec.metals or {}, '+'), tostring(rec.flux),
+    table.concat(nb, ',')}, '|')
+end
+S.json_key = json_key
+
+-- read the panel of one hovered tile (the rectangle was shifted there by local.place)
+function S.tile_read(n, rx, ry)
+  return {id = 'site.tile.' .. n, live = 'L0', optional = true, timeout_ms = 15000,
+    wait = function(v) return kind_in(v, 'placing') end,
+    act = function(ui, v, ctx, w, mem)
+      local ok = same_rect(v, rx, ry)
+      local rec = ok and panel.parse(v)
+      -- live L0: a single read once listed goblins that no other read of the same tile showed;
+      -- accept a tile only when two consecutive reads agree
+      local key = rec and rec.read > 0 and json_key(rec)
+      if not key or key ~= mem.key then
+        mem.key = key
+        mem.n = (mem.n or 0) + 1
+        if mem.n > 16 then return 'skip', 'tile ' .. n .. ' not read' end
+        return 'wait', 'waiting for tile ' .. n
+      end
+      ctx.tile_recs = ctx.tile_recs or {}
+      ctx.tile_recs[#ctx.tile_recs + 1] = rec
+      local gob = ''
+      for _, nb in ipairs(rec.neighbors or {}) do
+        if nb.race == 'goblins' then gob = ' goblins ' .. tostring(nb.travel) end
+      end
+      return 'done', 'tile ' .. n .. ': ' .. tostring(rec.trees) .. '/' .. tostring(rec.water or '-') .. '/' .. tostring(rec.aquifer) .. gob
+    end,
+    done = function() return false, 'reading tile' end}
+end
+
+local function record(ctx, tag, v, rec)
+  rec = merge_tiles(rec, ctx.tile_recs)
+  ctx.tile_recs = nil
+  local cs = v.cs
+  local world = {cs.emb_min[1] // 16, cs.emb_min[2] // 16}
+  local size = cs.emb_max and {cs.emb_max[1] - cs.emb_min[1] + 1, cs.emb_max[2] - cs.emb_min[2] + 1}
+  local verdict = checklist.evaluate(rec, ctx.rules, {world = world, size = size})
+  ctx.results = ctx.results or {}
+  local row = {tag = tag, world = world, emb = {cs.emb_min[1], cs.emb_min[2]}, size = size,
+    verdict = verdict.verdict, score = verdict.score, fails = verdict.fails, warns = verdict.warns,
+    unknown = verdict.unknown, items = verdict.items, rec = rec}
+  ctx.results[#ctx.results + 1] = row
+  ctx.last = row
+  return 'done', tag .. ' ' .. verdict.verdict .. ' ' .. verdict.score
+end
+-- Stages (mem.stage): 'panel' (hovered; read the panel, then give the mouse focus back) ->
+-- 'click' (unfocused: the rectangle no longer moves; if it is still the target, click it) ->
+-- 'popup' (read the warnings; a popup on another rectangle is aborted and the read restarts).
+-- The real OS cursor can win a frame while the focus is claimed (see local.place), hence the
+-- re-checks and bounded retries.
 function S.read_site(tag, ex, ey)
-  return {id = 'site.read', live = 'run4-6', timeout_ms = 15000,
-    wait = function(v) return cell(v, 'Confirm') ~= nil end,
-    act = function(ui, v, ctx)
+  return {id = 'site.read', live = 'L0', timeout_ms = 90000, tries = 16,
+    wait = function(v) return kind_in(v, 'placing') end,
+    act = function(ui, v, ctx, w, mem)
       local ok, why = same_rect(v, ex, ey)
-      if not ok then return 'fail', why .. ': read not attributable to the target' end
-      local rec = panel.parse(v)
-      local cs = v.cs
-      local world = {cs.emb_min[1] // 16, cs.emb_min[2] // 16}
-      local size = cs.emb_max and {cs.emb_max[1] - cs.emb_min[1] + 1, cs.emb_max[2] - cs.emb_min[2] + 1}
-      local verdict = checklist.evaluate(rec, ctx.rules, {world = world, size = size})
-      ctx.results = ctx.results or {}
-      local row = {tag = tag, world = world, emb = {cs.emb_min[1], cs.emb_min[2]}, size = size,
-        verdict = verdict.verdict, score = verdict.score, fails = verdict.fails, warns = verdict.warns,
-        unknown = verdict.unknown, items = verdict.items, rec = rec}
-      ctx.results[#ctx.results + 1] = row
-      ctx.last = row
+      local p = ctx.p_px
+      if not p then return 'fail', 'no held pixel (local.place did not run)' end
+      local stage = mem.stage or 'panel'
+      local function restart(msg)
+        mem.retry = (mem.retry or 0) + 1
+        if mem.retry > 4 then return 'fail', (why or 'rectangle on target') .. ': ' .. msg end
+        mem.stage, mem.miss, mem.empty = 'panel', 0, 0
+        ui:hold(p[1], p[2])
+        return nil, msg .. ', retrying'
+      end
+      if stage == 'panel' then
+        if popup_abort(v) then
+          if not mem.retry then return 'fail', 'popup open before the panel was read' end
+          tap(ui, v, 'Abort', {exact = true})
+          ui:hold(p[1], p[2])
+          return nil, 'closing a popup on the wrong rectangle'
+        end
+        if not ok then
+          mem.miss = (mem.miss or 0) + 1
+          if mem.miss < 40 then ui:hold(p[1], p[2]) return 'wait', why end
+          return 'fail', why .. ': read not attributable to the target'
+        end
+        local rec = panel.parse(v)
+        if rec.read == 0 then
+          mem.empty = (mem.empty or 0) + 1
+          if mem.empty < 8 then return 'wait', 'panel not drawn yet' end
+        end
+        local key = json_key(rec)  -- two consecutive reads must agree (see site.tile)
+        if key ~= mem.pkey and (mem.empty or 0) < 8 then
+          mem.pkey, mem.empty = key, (mem.empty or 0) + 1
+          return 'wait', 'panel read once'
+        end
+        mem.panel, mem.stage = rec, 'click'
+        if ctx.dump then ctx.dump('site-' .. tag .. '-panel', v) end
+        -- live L0: on an existing site the panel says "Cannot embark on another site." and a
+        -- click opens no popup: record the reject without clicking
+        for _, wid in ipairs(rec.warnings) do
+          if wid == 'cannot' then ui:release() return record(ctx, tag, v, rec) end
+        end
+        -- give the focus back NOW, in the frame whose capture showed the target: unfocused, the
+        -- rectangle stays where it is (live L0); a later unfocus could catch a render frame
+        ui:release()
+        if w and w.unfocus then w.unfocus() end
+        return nil, 'panel read (' .. rec.read .. ' facts), mouse released'
+      elseif stage == 'click' then
+        if popup_abort(v) then return restart('popup opened early') end
+        if not ok then return restart('rectangle moved before the click') end
+        mem.stage = 'popup'
+        ui:click_px(p[1], p[2], {hover_ms = 100})
+        return nil, 'opening the popup'
+      end
+      if not cell(v, 'Confirm') then
+        mem.wait_pop = (mem.wait_pop or 0) + 1
+        if mem.wait_pop > 20 then return restart('no popup after the click') end
+        return 'wait', 'waiting for the popup'
+      end
+      if not ok then
+        tap(ui, v, 'Abort', {exact = true})
+        return restart('popup on the wrong rectangle')
+      end
       if ctx.dump then ctx.dump('site-' .. tag, v) end
-      return 'done', tag .. ' ' .. verdict.verdict .. ' ' .. verdict.score
-    end}
+      return record(ctx, tag, v, merge_popup(mem.panel, panel.parse(v)))
+    end,
+    done = function() return false, 'reading' end}
 end
 
 -- close the popup with its own Abort (scan: next candidate; never the bottom-bar Abort)
 function S.abort_popup()
   return {id = 'site.abort', live = 'run4-6',
     act = function(ui, v)
+      ui:release()
       if not popup_abort(v) then return 'done', 'no popup' end
       tap(ui, v, 'Abort', {exact = true})
     end,
@@ -238,6 +490,9 @@ function S.confirm(ex, ey)
       if not mem.Confirm then
         local ok, why = same_rect(v, ex, ey)
         if not ok then return 'fail', why end
+        -- the popup freezes the rectangle; drop the mouse injector before DF changes screens
+        ui:release()
+        if w and w.inject and ctx.injected ~= nil then w.inject(false); ctx.injected = nil end
       end
       return press_once(ui, v, mem, 'Confirm', {exact = true})
     end,
@@ -373,10 +628,24 @@ end
 ---------------------------------------------------------------- run specs
 -- spec = {v=2, id, mode='newgame'|'scan'|'embark'|'prep', world='Zilirr', cands={{wx,wy,lx,ly}},
 --         site={wx,wy,lx,ly}, waive={criterion ids}, play_now=bool, allow_unspent=bool}
-local function place_and_read(out, c, cfg, tag)
+local function place_and_read(out, c, cfg, tag, tiles)
   local ex = 16 * c[1] + (c[3] or cfg.default_local[1])
   local ey = 16 * c[2] + (c[4] or cfg.default_local[2])
   out[#out + 1] = S.goto_world(c[1], c[2], cfg)
+  if tiles then  -- hover every tile of the target rectangle (hovered tile = rect min + hover offset)
+    local h = cfg.hover_offset or {1, 0}
+    local n = 0
+    for dy = 0, 3 do
+      for dx = 0, 3 do
+        n = n + 1
+        local rx, ry = ex + dx - h[1], ey + dy - h[2]
+        local st = S.place(rx, ry, cfg)
+        st.id, st.optional = 'local.place.t' .. n, true
+        out[#out + 1] = st
+        out[#out + 1] = S.tile_read(n, rx, ry)
+      end
+    end
+  end
   out[#out + 1] = S.place(ex, ey, cfg)
   out[#out + 1] = S.read_site(tag, ex, ey)
   return ex, ey
@@ -402,12 +671,12 @@ function S.build(spec, cfg, loadout)
     out = S.newgame(spec.world)
   elseif spec.mode == 'scan' then
     for n, c in ipairs(spec.cands or {}) do
-      place_and_read(out, c, cfg, spec.id .. '-' .. n)
+      place_and_read(out, c, cfg, spec.id .. '-' .. n, spec.tiles == true)
       out[#out + 1] = S.abort_popup()
     end
   elseif spec.mode == 'embark' then
     -- read, gate and confirm the same placed rectangle; the popup stays open in between
-    local ex, ey = place_and_read(out, spec.site, cfg, spec.id)
+    local ex, ey = place_and_read(out, spec.site, cfg, spec.id, spec.tiles ~= false)
     out[#out + 1] = S.gate(spec.waive)
     out[#out + 1] = S.confirm(ex, ey)
     prep_steps(out, spec, cfg, loadout)

@@ -41,7 +41,7 @@ P.METALS = {iron = 1, copper = 1, tin = 1, silver = 1, gold = 1, zinc = 1, lead 
   bismuth = 1, platinum = 1, aluminum = 1}
 P.RACES = {dwarves = 1, humans = 1, elves = 1, goblins = 1, kobolds = 1}
 -- Neighbors travel phrases -> rank (higher = farther); calibrate against tiles at L0
-P.TRAVEL = {{'inaccessible', 99}, {'your location', 0}, {'a short trip', 1}, {'a short walk', 1}, {"half day's travel", 2},
+P.TRAVEL = {{'inaccessible', 99}, {'your location', 0}, {'here', 0}, {'a short trip', 1}, {'a short walk', 1}, {"half day's travel", 2},
   {"1/2 day's travel", 2}, {"nearly a day's travel", 3}, {"more than a day's travel", 5},
   {"a day's travel", 4}}
 

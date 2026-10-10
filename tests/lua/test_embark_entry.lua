@@ -74,9 +74,12 @@ local function install(D)
       readTile = function(x, y) return {ch = (lines or D.lines())[y + 1]:byte(x + 1)} end},
   }
   _G.qerror = function(m) error(m, 0) end
+  -- the fake reads the mouse DF holds (gps), as the live placing rectangle does under a hold
+  D.mouse = setmetatable({}, {__index = function(_, i)
+    return ({gps.mouse_x, gps.mouse_y, gps.precise_mouse_x, gps.precise_mouse_y})[i]
+  end})
   package.loaded.gui = {simulateInput = function(s, keys)
     assert(s == scr)
-    D.mouse = {gps.mouse_x, gps.mouse_y, gps.precise_mouse_x, gps.precise_mouse_y}
     D.env.sim(keys)
   end}
   local chunk = assert(loadfile(repo .. '/tools/embark/embark.lua'))
@@ -115,7 +118,8 @@ end
 T.test('entry: state reads the placing screen and evaluates the site', function()
   local D = F.new({screen = 'placing'})
   D.zoom = {8 * 16 + 11, 30 * 16 + 4}
-  D.emb_min, D.region, D.popup = {8 * 16 + 6, 30 * 16 + 6}, {8, 30}, true  -- read with the popup open
+  -- live L0: the panel shows only without the popup; a fixed rectangle stands in for the hover
+  D.emb_min, D.region, D.popup, D.follow = {8 * 16 + 6, 30 * 16 + 6}, {8, 30}, false, false
   local cmd = install(D)
   local doc = json.decode(capture_print(function() cmd('state') end))
   T.eq(doc.kind, 'placing')

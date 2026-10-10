@@ -88,6 +88,11 @@ function Run:frame()
     return true
   end
   if self.t_poll and now - self.t_poll < self.poll_ms then return true end
+  -- live L0: the poll interval mostly runs out on a long render frame, and right after a render
+  -- DF's view state (the placing rectangle with the mouse focus claimed) reflects the real OS
+  -- cursor; capturing one frame later reads the state of an ordinary logic frame
+  if not self.armed then self.armed = true return true end
+  self.armed = false
   self.t_poll = now
   local v = self.env.capture()
   if self.phase == 'wait' then

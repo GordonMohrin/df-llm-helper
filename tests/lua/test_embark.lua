@@ -113,6 +113,26 @@ T.test('panel: one capture with the popup open has popup, panel and Neighbors', 
   T.eq(v.verdict, 'ok', T.show(v.unknown))  -- shipped rules: no dark_fortresses_seen, no waiver needed
 end)
 
+T.test('panel: live L0 captures (DF 53.16, 171x66): hovered-tile panel, popup, goblin pits', function()
+  local r = P.parse(fixture('live/l0_panel_woodland'))
+  T.eq(r.trees, 'woodland'); T.eq(r.surroundings, 'mirthful'); T.eq(r.evil, 'good'); T.eq(r.savagery, 'medium')
+  T.eq(r.temperature, 'temperate'); T.eq(r.soil, 'very_deep'); T.eq(r.aquifer, 'none'); T.eq(r.water, nil)
+  T.eq(r.neighbors_shown, true); T.eq(#r.neighbors, 2)
+  T.eq(r.neighbors[1], {race = 'elves', travel = "1/2 day's travel west", rank = 2})
+  T.eq(r.neighbors[2].race, 'humans'); T.eq(r.neighbors[2].rank, 6)
+  local pop = P.parse(fixture('live/l0_popup_light_aquifer'))
+  T.eq(pop.read, 0); T.eq(pop.warnings, {'light_aquifer'})
+  local m = S.merge_popup(r, pop)
+  T.eq(m.aquifer, 'light')
+  local g = P.parse(fixture('live/l0_panel_goblin_pits'))
+  T.ok(has(g.warnings, 'cannot'), 'Cannot embark on another site.')
+  T.eq(g.water, 'stream'); T.eq(g.temperature, 'hot')
+  local gob
+  for _, n in ipairs(g.neighbors) do if n.race == 'goblins' then gob = n end end
+  T.eq(gob.rank, 0, '"Nearest site: Here"')
+  T.eq(C.evaluate(g, RULES, {world = {2, 27}, size = {4, 4}}).verdict, 'reject')
+end)
+
 T.test('panel: nothing readable', function()
   local r = P.parse(fixture('title'))
   T.eq(r.read, 0); T.eq(r.aquifer, nil); T.eq(r.soil, nil)
@@ -185,15 +205,52 @@ T.test('input: hover, one press, hold; keys; pct', function()
   q:click_tile(3, 4)
   q:key('LEAVESCREEN')
   for _ = 1, 60 do q:frame(); t = t + 10 end
-  T.eq(mouse, {3, 4, 35, 67})
+  T.eq(mouse, {3, 4, 35, 67, false}, 'clicks do not claim the mouse focus')
   T.eq(#log, 2)
   T.eq(log[1], {_MOUSE_L = true, _MOUSE_L_DOWN = true})
   T.eq(log[2], 'LEAVESCREEN')
   T.ok(q:idle())
   q:click_pct(50, 50, {button = 'R', hover_ms = 0})
   for _ = 1, 10 do q:frame(); t = t + 10 end
-  T.eq(mouse, {50, 30, 500, 450})
+  T.eq(mouse, {50, 30, 500, 450, false})
   T.eq(log[3], {_MOUSE_R = true, _MOUSE_R_DOWN = true})
+end)
+
+T.test('input: hold claims the focus every frame, a click releases it first; probe learns the cursor', function()
+  local t, log, mouse, unf, peeks = 0, {}, nil, 0, 0
+  local env = {now = function() return t end, mouse = function(...) mouse = {...} end,
+    sim = function(k) log[#log + 1] = k end, tile_px = function() return 10, 15 end,
+    win = function() return 100, 60 end, unfocus = function() unf = unf + 1 end, claim = function() end,
+    peek = function() peeks = peeks + 1 if peeks % 3 == 0 then return 70, 80 end return 12, 34 end}
+  local q = I.new(env, {hover_ms = 50, after_ms = 20})
+  q:hold(205, 307)
+  q:frame()
+  T.eq(mouse, {20, 20, 205, 307, true})
+  q:click_px(5, 5)
+  q:frame()
+  T.eq(unf, 1, 'the click gave the focus back once')
+  T.eq(mouse, {0, 0, 5, 5, false})
+  for _ = 1, 20 do q:frame(); t = t + 10 end
+  T.ok(q:idle())
+  q:frame()
+  T.eq(mouse, {20, 20, 205, 307, true}, 'the hold resumes after the click')
+  q:probe(9)
+  for _ = 1, 12 do q:frame() end
+  T.eq(q.real, {12, 34}, 'most frequent position')
+  T.eq(q.held, nil, 'probe ends the hold')
+end)
+
+T.test('steps: merge_tiles keeps the best water/trees/metals and the worst evil/savagery/aquifer', function()
+  local rec = P.parse(fixture('site_good_panel'))
+  rec.water, rec.rivers, rec.metals, rec.flux = nil, {}, nil, nil
+  local t1 = {rivers = {'brook'}, water = 'brook', trees = 'none', metals = {'iron'}, flux = true, evil = 'neutral',
+    savagery = 'high', aquifer = 'light', neighbors = {{race = 'goblins', travel = 'a short trip', rank = 1}}}
+  local t2 = {rivers = {}, trees = 'heavily_forested', evil = 'evil', savagery = 'low', aquifer = 'none', neighbors = {}}
+  local m = S.merge_tiles(rec, {t1, t2})
+  T.eq(m.water, 'brook'); T.eq(m.trees, 'heavily_forested'); T.eq(m.metals, {'iron'}); T.eq(m.flux, true)
+  T.eq(m.evil, 'evil'); T.eq(m.savagery, 'high'); T.eq(m.aquifer, 'light')
+  T.eq(m.neighbors[1].race, 'goblins'); T.eq(m.tiles, {n = 2, water = 1, wood = 1})
+  T.eq(S.merge_tiles(rec, nil), rec)
 end)
 
 ---------------------------------------------------------------- runner + steps on the fake DF
@@ -311,14 +368,23 @@ T.test('runner: a read that is not of the placed target fails (rectangle follows
   T.eq(ctx.results[1].emb, target, 'read with the popup open')
   local moved = D.rect()
   T.ok(moved[1] ~= target[1] or moved[2] ~= target[2], 'after Abort the rectangle sits under the mouse')
-  -- the same read step on a popup whose rectangle is not the target
-  D = F.new({screen = 'placing'})
-  D.emb_min, D.region, D.popup = {moved[1], moved[2]}, {moved[1] // 16, moved[2] // 16}, true
+  -- the same read step while the rectangle is not the target: it waits (the real cursor can win a
+  -- frame, live L0), then fails as not attributable; a popup open before the panel read fails at once
+  D = F.new({screen = 'placing', follow = false})
+  D.emb_min, D.region, D.popup = {moved[1], moved[2]}, {moved[1] // 16, moved[2] // 16}, false
   local st = S.read_site('t', target[1], target[2])
   local v = D.capture()
   T.ok(st.wait(v))
-  local r, msg = st.act(nil, v, {rules = RULES})
+  local mem, ctx = {}, {rules = RULES, p_px = {1, 1}}
+  local ui = I.new(D.env, CFG)
+  local r, msg
+  for _ = 1, 40 do r, msg = st.act(ui, v, ctx, D.w_api, mem) end
   T.eq(r, 'fail'); T.ok(msg:find('not attributable', 1, true), msg)
+  D.popup = true
+  r, msg = st.act(ui, D.capture(), ctx, D.w_api, {})
+  T.eq(r, 'fail'); T.ok(msg:find('popup open before the panel was read', 1, true), msg)
+  r, msg = st.act(ui, v, {rules = RULES}, D.w_api, {})
+  T.eq(r, 'fail'); T.ok(msg:find('no held pixel', 1, true), msg)
 end)
 
 T.test('runner: wait results spend no tries; the timeout still ends them', function()
@@ -376,14 +442,19 @@ end)
 T.test('steps: build covers every mode; unknown mode raises', function()
   T.eq(#S.build({id = 'n', mode = 'newgame', world = 'W'}, CFG, LOADOUT), 7)
   T.eq(#S.build({id = 's', mode = 'scan', cands = {{1, 2}, {3, 4}}}, CFG, LOADOUT), 8)
-  local e = S.build({id = 'e', mode = 'embark', site = {1, 2}}, CFG, LOADOUT)
+  local e = S.build({id = 'e', mode = 'embark', site = {1, 2}, tiles = false}, CFG, LOADOUT)
   local ids = {}
   for _, st in ipairs(e) do
     ids[#ids + 1] = st.id
-    T.ok(st.live == 'run4-6' or st.live == 'untested', st.id)
+    T.ok(st.live == 'run4-6' or st.live == 'untested' or st.live == 'L0', st.id)
   end
   T.eq({ids[1], ids[2], ids[3], ids[4], ids[5]}, {'world.goto', 'local.place', 'site.read', 'site.gate', 'site.confirm'})
   T.eq(ids[#ids], 'prep.embark')
+  -- default embark (and scan with tiles=true): 16 hovered tiles before the final placement
+  e = S.build({id = 'e', mode = 'embark', site = {1, 2}}, CFG, LOADOUT)
+  T.eq({e[2].id, e[3].id, e[33].id, e[34].id, e[35].id, e[36].id},
+    {'local.place.t1', 'site.tile.1', 'site.tile.16', 'local.place', 'site.read', 'site.gate'})
+  T.eq(#S.build({id = 's', mode = 'scan', cands = {{1, 2}}, tiles = true}, CFG, LOADOUT), 36)
   T.raises(function() S.build({mode = 'x'}, CFG, LOADOUT) end, 'unknown mode')
 end)
 

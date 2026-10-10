@@ -1,0 +1,18 @@
+focus choose_start_site 171x66
+  1  Click on the map to embark!  Right click to abort.                                                                                  The Hills of Kindness
+  2                                                                                                                                      The Humorous Continents
+  4    4 x 4                                                                                                                             Temperate Shrubland
+  5                                                                                                                                      Temperature: Temperate
+  6                                                                                                                                      Trees: Woodland
+  7                                                                                                                                      Other Vegetation: Moderate
+  8                                                                                                                                      Surroundings: Mirthful
+  9  Recommended size.
+ 17                                                                                                                                      Clay
+ 18                                                                                                                                      Very deep soil
+ 25                                                                                                                                      Neighbors:
+ 27                                                                                                                                      Elves     War, few
+ 28                                                                                                                                       Nearest site: 1/2 day's travel west
+ 29                                                                                                                                      Humans    Hundreds
+ 30                                                                                                                                       Nearest site: 2 days' travel east
+ 63                                                                                                                           Abort      Show elevation     Show cliffs/grade
+ 65                                         FPS: 481 (30)

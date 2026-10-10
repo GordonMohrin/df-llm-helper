@@ -57,7 +57,7 @@ def parse_site(text: str) -> list[int]:
 
 def make_spec(mode: str, *, run_id: str | None = None, world: str | None = None, cands=None, site=None,
               waive=(), play_now: bool = False, allow_unspent: bool = False,
-              now: float | None = None) -> dict:
+              tiles: bool | None = None, now: float | None = None) -> dict:
     spec = {"v": 2, "id": run_id or f"{mode}{int(now if now is not None else time.time())}", "mode": mode}
     if mode == "newgame":
         spec["world"] = world or "Zilirr"
@@ -65,12 +65,16 @@ def make_spec(mode: str, *, run_id: str | None = None, world: str | None = None,
         if not cands:
             raise ValueError("scan needs at least one site")
         spec["cands"] = [list(c) for c in cands]
+        if tiles:
+            spec["tiles"] = True        # hover all 16 tiles of each rectangle (the panel shows one tile)
     elif mode == "embark":
         bad = sorted(set(waive) - set(WAIVABLE))
         if bad:
             raise ValueError(f"cannot waive {bad}; known: {list(WAIVABLE)}")
         spec["site"] = list(site)
         spec["waive"] = sorted(set(waive))
+        if tiles is False:
+            spec["tiles"] = False       # default: all 16 tiles are read before the gate
     elif mode != "prep":
         raise ValueError(f"unknown mode {mode}")
     if mode in ("embark", "prep"):
@@ -144,6 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--world", default="Zilirr", help="ASCII part of the world name (accents read as '?')")
     sp = sub.add_parser("scan")
     sp.add_argument("sites", nargs="+", type=parse_site)
+    sp.add_argument("--tiles", action="store_true", help="read the panel on all 16 tiles of each rectangle")
     for name in ("embark", "prep"):
         sp = sub.add_parser(name)
         if name == "embark":
@@ -151,6 +156,7 @@ def main(argv: list[str] | None = None) -> int:
             sp.add_argument("--waive", action="append", default=[], choices=WAIVABLE, metavar="ID",
                             help="accept this one criterion although the panel did not show it (checked by eye); "
                                  "repeatable; " + ", ".join(WAIVABLE))
+            sp.add_argument("--no-tiles", action="store_true", help="read only the hovered tile's panel")
         sp.add_argument("--play-now", action="store_true", help="fallback: DF defaults, skip Prepare carefully")
         sp.add_argument("--allow-unspent", action="store_true")
     for p in sub.choices.values():
@@ -166,7 +172,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     spec = make_spec(a.cmd, world=getattr(a, "world", None), cands=getattr(a, "sites", None),
                      site=getattr(a, "site", None), waive=getattr(a, "waive", ()),
-                     play_now=getattr(a, "play_now", False), allow_unspent=getattr(a, "allow_unspent", False))
+                     play_now=getattr(a, "play_now", False), allow_unspent=getattr(a, "allow_unspent", False),
+                     tiles=(True if getattr(a, "tiles", False) else False if getattr(a, "no_tiles", False) else None))
     path = write_spec(spec, out)
     print(call(["run", path.as_posix()]).strip())
     if a.no_wait:

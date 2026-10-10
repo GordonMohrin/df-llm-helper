@@ -1,7 +1,123 @@
 # df-llm-helper v2: status after the integration check
 
-Date 2026-10-10. Branch `v2`, nothing committed yet. **Offline only:** no v2 code has run in Dwarf
-Fortress. Everything below was checked with pytest, luahost (Lua 5.3 on `hack/lua53.dll`) and k_mock.
+Date 2026-10-10. Branch `v2`. §0 is the live slot L0 (first v2 code in Dwarf Fortress); §1-§9 are
+the offline integration state it started from (pytest, luahost on `hack/lua53.dll`, k_mock).
+
+## 0. Live slot L0 (2026-10-10, 20:47-23:10)
+**Fort for L1:** Rimtarlocun "Castlerisen", world Zilirréth (folder `region2`), world tile **8,14**,
+rectangle **131,233** (4x4), embarked y280 late summer, adopted, 16 modules ok, `selftest full` 9/9.
+At hand-over: y281 autumn, pop 19, PEACE, timestream 500, about 499 ticks/s, unpaused. DF on desktop 1,
+window 1716x1000. **The save folder is now `autosave 1`** (see L0-6): runtime `dfllm-runtime/autosave 1/`.
+
+**Results**
+1. **Migration** (`migrate_v2.py --apply --force`, at the title screen):
+   - `script-paths.txt` now holds only `+…\dfpilot-public\lua`; it is only read at startup, so the
+     running DF was switched in process (`removeScriptPath` repo B, `addScriptPath` repo A, first).
+   - `onMapLoad.init` runs only `dfllm boot`; `hack/scripts/claude` is in `_archive-v1/`; DF-Aufsicht
+     stays Disabled.
+   - **Open:** `df-llm-helper-runtime/` was not archived (WinError 5): five orphaned `tail.exe`
+     monitors from old sessions (08.-10.10.) hold its logs open; stopping them was refused by the
+     auto-mode classifier. Harmless for v2 (nothing reads that folder). Gordon: end them or reboot,
+     then re-run `migrate_v2.py --apply`.
+   - **Found and stopped:** an orphaned v1 bash loop from 07.10. (`while true; dfhack-run claude/advance
+     run; sleep 12`) unpaused DF every 12 s. It reached `claude/advance` through repo A's `lua/claude`
+     (gap §6.11, now proven harmful). The v1 scripts must leave the v2 script path (W3).
+2. **Embark tool, fixed live** (`tools/embark`, README "Live L0 findings"):
+   - resumable `newgame` (the world loads before "Select a game type", up to 10 min);
+   - tutorial prompt polled;
+   - zoomed tile = `zoom_cent // 16`;
+   - placement by a held mouse plus a **mouse injector** screen (DF writes the mouse before every render
+     frame because the hidden window has no focus);
+   - panel read before the popup;
+   - all 16 tiles hovered and merged (`--tiles`);
+   - two equal reads per panel;
+   - "Cannot embark" sites recorded without a click;
+   - poll one frame after a render frame.
+   - **Prepare carefully does not work** (rows ignore every simulated click/key), so the fort was
+     embarked with `--play-now`: DF's skilled seven, 324 points unspent.
+3. **Site choice** (about 100 rectangles scanned from the vanilla panel/popup only):
+   - Every tile ≥ 10 world tiles from all five old forts (y ≥ 24, or x ≤ 5 with y ≥ 20) is hot or
+     scorching, has a light or heavy aquifer and goblin pits within half a day, or is an existing site.
+   - Chosen: 8,14 local 3,9. The 16 hovered tiles give 8 woodland tiles (Hills of Kindness, mirthful,
+     no aquifer) and 2 brook tiles; the badlands part (Desert of Crafts) has a light aquifer, iron, gold,
+     silver, copper, nickel and flux. Temperate, very deep soil. Neighbours: elves at war half a day
+     west, humans 2 days east, **no goblin site listed**. Gate verdict ok 64 (warn aquifer, soil, popup).
+   - **Deviations from DESIGN §5.1:**
+     - `rules.json old_site_min` lowered 10 → 4 (4 tiles from Canyonsyrups, 7 from Wheelsblows,
+       18 from Trussroads);
+     - a light aquifer in part of the rectangle (probe protocol applies);
+     - elves at war nearby.
+4. **adopt/boot:** `dfllm adopt` booted 16 modules (none DISABLED), `selftest full` 9 pass. Python
+   `doctor/status/brief/follow` work (follow `--since 0` printed one merged wake line).
+   `DECISION_NEEDED squads` and `PLAN_EXHAUSTED` are open for L1.
+5. **Food crisis (fixed, partly open).**
+   - No plan was applied, so 9 game months passed at 500 ticks/s with 85-100 % idle: food 0, drink 0,
+     hunger up to 78,000.
+   - UI-equivalent emergency, by hand (quickfort apply_blueprint plus a native tool):
+     - butcher, still, kitchen and farmer's workshops near the wagon (98,95 / 99,90 / 103,93 / 108,95, z124);
+     - "gather plants" on 958 shrubs;
+     - `autobutcher target 0 0 0 0 CAMEL_2_HUMP WATER_BUFFALO DONKEY`.
+   - Result: meat 35, plants 237, plant growths 568, hunger max 39,000, nobody starving.
+   - **Open:**
+     - drink comes only from the brook in the SW corner, about 130 tiles from the wagon;
+     - **0 of 47 manager orders are validated because the fort has no manager**, so the still never brews;
+     - appointing a manager (nobles screen) has no act function (like S2): Gordon or a new act.
+6. **Save folder changes on autosave.** After the yearly autosave `cur_savegame.save_dir` is
+   `autosave 1`. The kernel kept writing `region2/` until the next boot, then switched to
+   `autosave 1/` (persist and seq continue: seq 710). Consequences:
+   - `region2/` is stale history;
+   - **S9 `load-save` must take the newest folder, never `region2`** (that is an older save);
+   - supervise/doctor follow `ACTIVE`.
+7. **Popups halt the game with `pause_state` false.**
+   - "Some migrants have arrived." froze the fort for about 8.5 min, then two caravan popups.
+   - Fix in `arbiter.lua`: popups count as a pause (owner `popup`). `M.POPUPS` whitelists migrants and
+     caravan/merchants, and an expired inbox hold also clears them. Threat popups stay for Gordon.
+   - Live: the kernel was reloaded (`dfllm stop`, `package.loaded` cleared, `dfllm boot`), and the
+     arbiter dismissed the caravan popups.
+
+**Spikes**
+- **S1 (kernel cost, clocks, gaps):**
+  - `os.clock` has 1 ms steps. `dfhack.getTickCount` has **16 ms steps** (the Windows tick), so gap
+    values are multiples of about 16 ms (median `gap_max` 47 ms).
+  - In frame callbacks `os.clock` and `getTickCount` cost 0.1 µs (55 µs per C call only inside a
+    `dfhack-run lua` console command).
+  - perf.csv over 23 min (47 rows, pop 7-19, timestream 500, FPS cap 500): ticks/s median 499;
+    `ms_s` median 15, p90 18, max 32 (boot window).
+  - Steady ms/s by module: dispatcher (`repeat`) 10.4, of which kernel I/O (`kern`) 9.4; sense 1.35,
+    siege 1.03, snapshot 0.29, threat 0.27; all others ≤ 0.12. **The kernel's own I/O costs about
+    3x all modules together.**
+  - **The baseline first apply is one 425 ms call** (KPI: any call ≤ 50 ms), so it should be sliced.
+  - Gaps > 3 s: 1, the yearly autosave, **6.1 s**. Two gaps of 2.3 s and 2.5 s were my own console
+    measurements and the large quickfort designation.
+  - While paused, the repeat-util callback keeps running (580 frames/s; the heartbeat advances, the
+    tick stays). The inbox `pause ttl_s=40` and `unpause` work.
+- **S4 (a/b state, live Python reader):** 75,721 reads in 60 s:
+  - 0 failed, 1 torn slot (the other slot was used), 0 permission errors, 0 seq regressions;
+  - read time p50 0.45 ms, p99 0.63 ms, max 16 ms;
+  - Python `listdir(inbox)` 0.08 ms;
+  - no kernel write error and no antivirus lock seen; ms/s unchanged (17-18) during the test.
+- **S7 (report ids, DF 53.16):** all `contract.REPORTS` names exist.
+  - Ids: CARAVAN_ARRIVAL 67, FIRST_CARAVAN_ARRIVAL 343, MERCHANTS_NEED_DEPOT 243,
+    MERCHANTS_LEAVING_SOON 245, MERCHANTS_EMBARKED 246, D_MIGRANTS_ARRIVAL 69, MIGRANT_ARRIVAL 50,
+    DIG_CANCEL_DAMP 52, DIG_CANCEL_WARM 51, FEATURE_DISCOVERY 2 (cavern), UNDEAD_ATTACK 150,
+    NIGHT_ATTACK_STARTS 136, BEAST_AMBUSH 95, AMBUSH_AMBUSHER 63, AMBUSH_THIEF 55, AMBUSH_SNATCHER 60,
+    MEGABEAST_ARRIVAL 93, WEREBEAST_ARRIVAL 94, STRUCK_DEEP_METAL 3, CAVE_COLLAPSE 82.
+  - No SIEGE/D_SIEGE/D_AMBUSH/CARAVAN types exist.
+  - Seen live: FIRST_CARAVAN_ARRIVAL, MERCHANTS_NEED_DEPOT, MERCHANTS_LEAVING_SOON, MERCHANTS_EMBARKED,
+    D_MIGRANTS_ARRIVAL, LIAISON_ARRIVAL, DIPLOMAT_LEFT_UNHAPPY.
+- **S8 (runtime settings):**
+  - `df.d_init_autosave`: NONE -1, SEASONAL 0, YEARLY 1, SEMIANNUAL 2; the live value is YEARLY.
+  - `enabler.gfps` 30, fps cap 500.
+  - Population cap original 90, read from `getBaseDir()` = `%APPDATA%/Bay 12 Games/Dwarf Fortress/prefs`;
+    pop-control then writes the global `population_cap` 22.
+  - `restore.json` written at adopt. Its `orig` already shows autosave YEARLY, gfps 30, timestream 500,
+    so the prefs or an earlier v1 setup had those values; the prefs files were not read.
+  - Overlay profile: 100 overlays disabled, 5 kept: the two notify panels, `dig.asciicarve`,
+    `autolabor.overlay`, and **`claude/tempohud.hud`, a v1 overlay from `lua/claude`**.
+  - `visitor_cap` stays 300 (D-07).
+  - Restore on a real map unload is **not tested** (S9); `dfllm stop` → `boot` ran twice without
+    error.
+- **Hook spike:** not run (this session is not a `dfpilot-public` Claude Code session).
 
 ## 1. Summary
 - **Complete offline.** All 16 modules of `contract.MODULES` exist, including `snapshot.lua`, which no
@@ -117,8 +233,9 @@ python -m pytest -q -o addopts="" tests/test_schema.py tests/test_luahost.py tes
   tests/test_lint.py tests/test_hook.py tests/test_fairplay.py tests/test_supervise.py tests/test_migrate_v2.py \
   tests/test_embark.py tests/test_kern_files.py tests/test_runner.py tests/test_siege_files.py tests/test_trade_files.py \
   tests/test_wp6_files.py tests/test_wp8_files.py tests/test_snapshot_files.py tests/test_integration_v2.py
-  -> 1087 passed, 0 failed (48 s)
+  -> 1087 passed, 0 failed (48 s; after L0: 1087 passed, 61 s)
 for f in tests/lua/test_*.lua: python tools/luahost.py --path tests/lua $f   -> 26 suites, 426 passed, 0 failed
+                                                                               (after L0: 430 passed, 0 failed)
 python -m df_llm_helper lint lua/dfllm        -> 0 finding(s)
 python -m df_llm_helper.lint --config         -> config ok
 ```
@@ -175,6 +292,19 @@ python -m df_llm_helper.lint --config         -> config ok
 15. **Size.** Most files are 2-3x the DESIGN line estimates (kern 1.1k lines, runner 1.1k, trade 1.2k,
     lint 1.5k, supervise 1.15k).
 
+**Found live in L0 (§0):**
+
+16. **No manager:** manager orders are never validated (0 of 47), so economy, brewing and the
+    orders library do nothing. Appointing a manager (and a bookkeeper and broker for trade) needs an
+    act function for the nobles screen, or Gordon. This blocks P0-P1.
+17. **Prepare carefully** cannot be driven by simulated input; embarks use Play now.
+18. **The save folder renames** to `autosave N` after an autosave. Kernel I/O and supervise/`load-save`
+    must follow the newest folder.
+19. **Kernel I/O cost** (`kern` 9.4 ms/s) is about 3x all modules; the baseline first apply is a single
+    425 ms call.
+20. **The P0 plan is not applied by adopt.** With timestream 500 and no plan the fort idles and
+    starves within a year. `adopt` (or L1 right after embark) must apply a plan before unpausing.
+
 ## 7. Contract changes to adopt (WP0 / orchestrator; implemented, CONTRACTS.md not edited)
 - §3.4: snapshot runs on `every={ms=250}` (an export also runs while paused).
 - §7 `snapshot.tile`:
@@ -205,7 +335,8 @@ python -m df_llm_helper.lint --config         -> config ok
   - Z4 merge cap (WP3).
 
 ## 8. Live spikes, in order (one live slot; `dfllm-runtime/live.lock`)
-**L0: embark and adopt.**
+**L0: embark and adopt.** Done on 2026-10-10 (results in §0). Still open: the hook spike, and restore
+on a real unload (S9).
 - Embark calibration (WP11 README §7):
   - popup, panel and Neighbors visible together;
   - rectangle fixed while the popup is open;

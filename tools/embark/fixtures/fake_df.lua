@@ -35,11 +35,14 @@ function F.new(opt)
     ignore = opt.ignore or {}, pressed = {}}
   for i = 1, 7 do D.units[i] = {picks = 10, lv = {}} end
 
-  -- the highlighted rectangle: fixed while the popup is open, else (placing) under the mouse
+  -- the highlighted rectangle: fixed while the popup is open, else (placing) under the mouse.
+  -- Live L0 model: 16 px per embark tile around the window centre pixel,
+  --   rect_min = zoom + k + floor((mouse px - centre px) / 16)
   function D.rect()
     local m, r = D.emb_min, D.region
     if D.screen == 'placing' and not D.popup and D.follow then
-      m = {D.zoom[1] + D.k[1] + D.mouse[1] - F.MAP_REF[1], D.zoom[2] + D.k[2] + D.mouse[2] - F.MAP_REF[2]}
+      local cx, cy = D.w * D.tpx // 2, D.h * D.tpy // 2
+      m = {D.zoom[1] + D.k[1] + (D.mouse[3] - cx) // 16, D.zoom[2] + D.k[2] + (D.mouse[4] - cy) // 16}
       r = {m[1] // 16, m[2] // 16}
     end
     if not m then return nil, nil, r end
@@ -73,7 +76,7 @@ function F.new(opt)
         add(60, 30, 'Confirm', function() D.popup = false; D.screen = 'preparing'; D.frames = 0 end)
         add(80, 30, 'Abort', function() D.popup = false end)
       end
-      if D.rect() then
+      if D.rect() and s == 'placing' and not D.popup then  -- live L0: the popup hides the panel
         local lines = {}
         for _, l in ipairs(site().panel or GOOD) do lines[#lines + 1] = l end
         for _, l in ipairs(site().neighbors or {}) do lines[#lines + 1] = l end
@@ -137,8 +140,10 @@ function F.new(opt)
       cs = function()
         if FOCUS[D.screen] and D.screen ~= 'preparing' then return nil end
         local m, x, r = D.rect()
-        return {zoomed_in = D.screen == 'local' or D.screen == 'placing', choosing_embark = D.screen == 'placing',
-          finder = false, region = r, emb_min = m, emb_max = x}
+        local zoomed = D.screen == 'local' or D.screen == 'placing'
+        return {zoomed_in = zoomed, choosing_embark = D.screen == 'placing',
+          finder = false, region = r, emb_min = m, emb_max = x, cam_local = {D.zoom[1], D.zoom[2]},
+          zoom_world = zoomed and {D.zoom[1] // 16, D.zoom[2] // 16} or nil}
       end,
       prep = function()
         if D.screen:sub(1, 5) ~= 'prep_' then return nil end
@@ -160,6 +165,7 @@ function F.new(opt)
       end
       if D.screen == 'world' then
         D.region = {D.cent[1] + D.world_err[1], D.cent[2] + D.world_err[2]}
+        D.zoom = {D.region[1] * 16 + 8, D.region[2] * 16 + 8}  -- live L0: the local view centres the tile
         D.screen = 'local'
       elseif D.screen == 'placing' and not D.popup then
         local m, _, r = D.rect()

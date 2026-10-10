@@ -82,8 +82,12 @@ local function source()
     cs = function()
       if not df.viewscreen_choose_start_sitest:is_instance(scr) then return nil end
       local l = scr.location  -- the highlighted rectangle (v1 place.sh read it live in Run 5/6)
+      -- live 53.16 (L0): location.region_pos keeps the previous embark tile until a rectangle is
+      -- placed; the zoomed-in local view is centred on zoom_cent (absolute embark tiles), so the
+      -- world tile shown is zoom_cent // 16
       return {zoomed_in = b(scr.zoomed_in), choosing_embark = b(scr.choosing_embark),
         finder = b(scr.doing_site_finder), region = {l.region_pos.x, l.region_pos.y},
+        zoom_world = {scr.zoom_cent_x // 16, scr.zoom_cent_y // 16},
         emb_min = {l.embark_pos_min.x, l.embark_pos_min.y}, emb_max = {l.embark_pos_max.x, l.embark_pos_max.y},
         cam_world = {scr.region_cent_x, scr.region_cent_y}, cam_local = {scr.zoom_cent_x, scr.zoom_cent_y}}
     end,
@@ -107,10 +111,81 @@ local function capture() return V.capture(source()) end
 
 ---------------------------------------------------------------- writes (UI state only)
 local W = {}
-function W.mouse(tx, ty, px, py)  -- required for simulated clicks (Lua API.txt:4208-4212)
-  local g = df.global.gps
-  g.mouse_x, g.mouse_y, g.precise_mouse_x, g.precise_mouse_y = tx, ty, px, py
+-- Live L0 findings (DF on a hidden virtual desktop, never focused):
+-- * DF has no mouse focus (enabler.mouse_focus false) and writes the mouse itself before every
+--   render frame: -1 without the focus, the cached OS cursor (wherever Gordon's mouse last was
+--   relative to the window) with it. The placing rectangle and the site panel follow the mouse
+--   that render frames see, so a mouse written between frames loses on every render frame.
+-- * Fix: a pass-through DFHack screen on top of the embark screen (the "mouse injector") writes
+--   our mouse right before the embark screen renders, forwards all input to it and runs its
+--   logic. It changes nothing but where DF believes the mouse is, i.e. the UI state "mouse over
+--   the window at (x, y)"; it is shown only while the local map is used and dismissed before any
+--   screen-changing click (Confirm) and at the end of every run.
+local Inj  -- class built on first use (the offline fake DF has no gui.Screen/defclass)
+local function inj_class()
+  if Inj or not (rawget(_G, 'defclass') and gui.Screen) then return Inj end
+  Inj = defclass(nil, gui.Screen)
+  Inj.ATTRS{focus_path = 'dfllm-embark/mouse'}
+  function Inj:render()
+    local p = self.pos
+    if p then
+      local g = df.global.gps
+      df.global.enabler.mouse_focus = true
+      g.mouse_x, g.mouse_y, g.precise_mouse_x, g.precise_mouse_y = p[1], p[2], p[3], p[4]
+    end
+    self:renderParent()
+  end
+  function Inj:onIdle()
+    local parent = self._native and self._native.parent
+    if not (parent and df.viewscreen_choose_start_sitest:is_instance(parent)) then self:dismiss() return end
+    parent:logic()
+  end
+  function Inj:onInput(keys)
+    self:sendInputToParent(keys)
+    return true
+  end
+  function Inj:onDismiss()
+    if rawget(_G, 'dfllm_embark_inj') == self then _G.dfllm_embark_inj = nil end
+    df.global.enabler.mouse_focus = false
+  end
+  return Inj
 end
+local function inj() local i = rawget(_G, 'dfllm_embark_inj') return (i and i._native) and i or nil end
+function W.inject(on)
+  local i = inj()
+  if on and not i then
+    local C = inj_class()
+    if not C or not df.viewscreen_choose_start_sitest:is_instance(native()) then return false end
+    _G.dfllm_embark_inj = C{}
+    _G.dfllm_embark_inj:show()
+  elseif not on and i then
+    i:dismiss()
+  end
+  return on and inj() ~= nil or false
+end
+-- required for simulated clicks (Lua API.txt:4208-4212); a hover (input.lua hold) also claims the
+-- mouse focus. With the injector shown the same position is written before every render frame.
+local function set_focus(on)  -- enabler.mouse_focus (absent in the offline fake)
+  local e = df.global.enabler
+  if e then e.mouse_focus = on end
+end
+function W.mouse(tx, ty, px, py, focus)
+  local g = df.global.gps
+  if focus then set_focus(true) end
+  g.mouse_x, g.mouse_y, g.precise_mouse_x, g.precise_mouse_y = tx, ty, px, py
+  local i = inj()
+  if i then i.pos = {tx, ty, px, py} end
+end
+-- only the focus flag (writing mouse -1 would move the placing rectangle); a no-op while the
+-- injector is shown: it keeps the focus and the position for render frames
+function W.unfocus() if not inj() then set_focus(false) end end
+function W.release_all()
+  W.inject(false)
+  set_focus(false)
+end
+function W.claim() set_focus(true) end
+-- read (not write) the mouse pixel DF holds; input.lua probe() learns the cached OS cursor from it
+local function peek() local g = df.global.gps return g.precise_mouse_x, g.precise_mouse_y end
 function W.sim(keys) gui.simulateInput(native(), keys) end                       -- gui.lua:58
 function W.camera(which, x, y)  -- = scrolling the map; changes nothing in the world
   local scr = native()
@@ -124,7 +199,7 @@ function W.select_unit(i)  -- = clicking a dwarf in the list (as startdwarf.lua:
 end
 
 local function input_env()
-  return {now = dfhack.getTickCount, mouse = W.mouse, sim = W.sim,
+  return {now = dfhack.getTickCount, mouse = W.mouse, unfocus = W.unfocus, claim = W.claim, peek = peek, sim = W.sim,
     tile_px = function() local g = df.global.gps return g.tile_pixel_x, g.tile_pixel_y end,
     win = function() return dfhack.screen.getWindowSize() end}
 end
@@ -150,9 +225,10 @@ local function loop()
   if not ok then
     a.run.state, a.run.msg = 'failed', 'lua error: ' .. tostring(more)
     pcall(a.run.push, a.run)
+    pcall(W.release_all)
     return
   end
-  if more then dfhack.timeout(1, 'frames', loop) end
+  if more then dfhack.timeout(1, 'frames', loop) else pcall(W.release_all) end
 end
 
 -- the steps rely on the Confirm popup after every placement click; without
@@ -172,6 +248,7 @@ local function start(spec)
     qerror('set Settings > "Confirmation window for all embarks" (d_init EMBARK_WARNING_ALWAYS:YES) first')
   end
   local steps = S.build(spec, CFG, LOADOUT)
+  W.release_all()  -- a stale injector from an earlier run
   local env = {capture = capture, now = dfhack.getTickCount, ui = I.new(input_env(), CFG), w = W,
     status = function(doc)
       write(OUT .. '/status.json', json.encode(doc) .. '\n')
@@ -220,6 +297,7 @@ elseif cmd == 'status' then
 elseif cmd == 'stop' then
   local a = package.loaded['embark.active']
   if a and a.run then a.run:stop('stopped by command') print('stopped ' .. a.run.id) else print('no run') end
+  W.release_all()
 else
   qerror('unknown command ' .. cmd)
 end

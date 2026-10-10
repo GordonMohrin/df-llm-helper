@@ -1,0 +1,26 @@
+focus choose_start_site 171x66
+  1  Click on the map to embark!  Right click to abort.                                                                                  The Hills of Slipping
+  2                                                                                                                                      The Humorous Continents
+  4    4 x 4                                                                                                                             Tropical Shrubland
+  5                                                                                                                                      Temperature: Hot
+  6                                                                                                                                      Trees: Woodland
+  7                                                                                                                                      Other Vegetation: Moderate
+  8                                                                                                                                      Surroundings: Wilderness
+  9  Cannot embark on another site.
+ 10                                                                                                                                      Slonungokang
+ 11                                                                                                                                       "Chantcurse"
+ 12                                                                                                                                       Dark goblin pits
+ 13                                                                                                                                      Stream: Ashensieged the Creep of ...
+ 17                                                                                                                                      Shallow Sand
+ 18                                                                                                                                      Very deep soil
+ 19                                                                                                                                      Light aquifer
+ 20                                                                                                                                      Flux stone layer
+ 25                                                                                                                                      Neighbors:
+ 27                                                                                                                                      Elves     War, few
+ 28                                                                                                                                       Nearest site: A day's travel north
+ 29                                                                                                                                      Humans    Hundreds
+ 30                                                                                                                                       Nearest site: 2 days' travel east
+ 31                                                                                                                                      Goblins   War, a thousand
+ 32                                                                                                                                       Nearest site: Here
+ 63                                                                                                                           Abort      Show elevation     Show cliffs/grade
+ 65                                         FPS: 498 (28)
