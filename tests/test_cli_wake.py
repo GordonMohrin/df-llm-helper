@@ -246,6 +246,29 @@ def test_follow_auto_audit(save, monkeypatch):
     assert json.loads((save / ".manifest.json").read_text("utf-8")) == manifest   # cached for site ranking
 
 
+def test_follow_auto_audit_reads_manifest_json(save, monkeypatch):
+    """Live L1: kern mirrors the manifest to <save>/manifest.json; the audit needs no inspect round trip and no
+    8 KB reply limit applies."""
+    calls = install_fake_bp(monkeypatch)
+    manifest = {"v": 2, "bridges": {"B1": {"role": "inner", "fp": [12, 21, 120, 12, 21, 120], "levers": [[10, 20, 120]]}},
+                "rooms": [{"id": f"r{i}", "tpl": "bedrooms", "use": "used", "bbox": [i, 0, 100, i, 0, 100], "tier": 500}
+                          for i in range(150)]}                 # > 8 KB as an inspect reply
+    assert len(json.dumps(manifest)) > 8192
+    files.write_json_atomic(save / "manifest.json", manifest)
+    c = Clock()
+    f, out = F(c)
+    f.poll()
+    append_events(save, [ev(8813, "SNAPSHOT_READY", "snap", {"id": "c200", "path": "snap/c200.json",
+                                                             "purpose": "audit"})])
+    f.poll()
+    (aud,) = inbox_docs(save)
+    assert aud["verb"] == "audit" and aud["args"]["snap"] == "c200"
+    assert calls["audit"] == [("c200", manifest)]
+    c.t += 30
+    f.poll()
+    assert out == []
+
+
 def test_follow_auto_audit_failure_wakes(save, monkeypatch):
     install_fake_bp(monkeypatch, audit_exc=RuntimeError("bfs exploded"))
     c = Clock()
@@ -622,3 +645,28 @@ def test_follow_loop_survives_poll_errors(save, monkeypatch, capsys):
                           "interval": 0.05})()
     assert wake.run(args) == 0 and len(calls) >= 2
     assert "poll error" in capsys.readouterr().err
+
+
+def test_follow_wakes_on_new_supervisor_alert(save):
+    """STATUS §6.8 / live L1: supervisor alerts reached only supervise.json; follow now wakes on each new one."""
+    rt = save.parent
+    files.write_json_atomic(rt / "supervise.json", {"v": 2, "said": {"stale": 999_000.0},
+                                                    "last": {"alerts": [{"key": "stale", "msg": "old"}]}})
+    c = Clock()
+    f, out = F(c)
+    f.poll()                                                   # first look: remembers, no wake for old alerts
+    c.t += 20
+    f.poll()
+    c.t += 20
+    f.poll()
+    assert out == []
+    files.write_json_atomic(rt / "supervise.json", {"v": 2, "said": {"stale": 999_000.0, "backup": c.t - 5},
+                                                    "last": {"alerts": [{"key": "backup", "msg": "disk full"}]}})
+    c.t += 20
+    f.poll()
+    c.t += 11
+    f.poll()
+    assert len(out) == 1 and "SUPERVISE" in out[0] and "backup: disk full" in out[0]
+    c.t += 400
+    f.poll()
+    assert len(out) == 1, "the same alert does not wake twice"

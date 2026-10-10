@@ -123,4 +123,17 @@ T.test('runtime folder = the save the fort was adopted in (DF renames saves to a
   T.eq(kern.runtime_key({save = '..'}, 'x'), 'x')
 end)
 
+T.test('manifest.json mirrors the persisted fort manifest (boot and every flush, live L1)', function()
+  local W = H.world{tag = 'manifestjson'}
+  local fake = {name = 'runner', every = {ticks = 600}}
+  function fake.init(K) K.persist.set('manifest', {v = 2, depot = {51, 8, 130}}) end
+  function fake.step(K) K.persist.set('manifest', {v = 2, depot = {52, 9, 130}, pit = {1, 2, 3}}) end
+  local ok, msg = H.boot(W, {modules = {fake}})
+  T.ok(ok, msg)
+  T.eq(H.json(W.sd .. '/manifest.json').depot, {51, 8, 130}, 'written at boot')
+  H.run(W, 700)
+  kern.stop()
+  T.eq(H.json(W.sd .. '/manifest.json'), {v = 2, depot = {52, 9, 130}, pit = {1, 2, 3}}, 'rewritten on flush')
+end)
+
 T.done()

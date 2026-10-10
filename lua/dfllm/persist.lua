@@ -69,7 +69,10 @@ function P.new(env)
         if v == MISSING then dfhack.persistent.deleteSiteData(dk)
         else dfhack.persistent.saveSiteDataString(dk, json.encode(v)) end
       end)
-      if ok then n = n + 1 else env.log('error', 'persist flush ' .. key .. ': ' .. tostring(err)) end
+      if ok then
+        n = n + 1
+        if env.on_flush and v ~= MISSING then pcall(env.on_flush, key, v) end
+      else env.log('error', 'persist flush ' .. key .. ': ' .. tostring(err)) end
     end
     return n
   end

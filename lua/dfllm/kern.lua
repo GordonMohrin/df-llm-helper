@@ -254,8 +254,17 @@ local function build(o)
   st.frame_top_ms, st.frame_top = 0, nil
 
   ------------------------------------------------------------ persist, act
+  -- <save>/manifest.json mirrors the persisted fort manifest for Python (follow's audit, bp sites): no
+  -- `inspect manifest` round trip and no 8 KB reply limit (STATUS §6.9, live L1)
+  local function write_manifest(v)
+    if not st.marked or not st.paths or not st.paths.save then return end
+    local ok, enc = pcall(json.encode, v)
+    if ok then fio.write(st.paths.save .. '/manifest.json', enc) end
+  end
+  st.write_manifest = write_manifest
   local papi, pstore = persistlib.new{who = function() return st.current end, violation = violation,
-                                      log = function(level, msg) log_as('kern', level, msg) end}
+                                      log = function(level, msg) log_as('kern', level, msg) end,
+                                      on_flush = function(key, v) if key == 'manifest' then write_manifest(v) end end}
   st.pstore = pstore
   local function as_kern(f, ...)
     local prev = st.current
@@ -1040,6 +1049,7 @@ function M.boot(opts)
     if e.M.init then st.call_in(e, 'init', e.M.init) end
   end
   S = st
+  pcall(st.write_manifest, K.manifest())
   -- eventful (enqueue only; registered on SC_MAP_LOADED = this boot)
   local eok, ev = pcall(require, 'plugins.eventful')
   if eok and type(ev) == 'table' then

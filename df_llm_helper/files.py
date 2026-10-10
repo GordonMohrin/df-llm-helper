@@ -417,3 +417,10 @@ def log_cli(save_dir: Path | None, origin: str, what: str, args: Any = None, res
             f.write(line)
     except OSError:
         pass
+
+
+def read_manifest(save_dir: Path) -> dict | None:
+    """<save>/manifest.json (kern mirrors the persisted fort manifest there, live L1), if it is a valid
+    manifest; None otherwise (callers fall back to `inspect manifest`)."""
+    doc = read_json(Path(save_dir) / "manifest.json")
+    return doc if isinstance(doc, dict) and not schema.validate("manifest", doc) else None

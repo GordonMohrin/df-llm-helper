@@ -301,6 +301,7 @@ Mode-driven duties (no call needed): arbiter applies tempo per mode in `on.MODE`
 | `<save>/plan.json` | Python (`plan apply`) | §9.7; kern reads on `plan.reload` |
 | `<save>/bp/<id>.json` | Python | §9.8 blueprint project files; the runner reads one on `bp.place`, and plan builds when their season is due, **at most one bp file per frame**, and copies it into persist once |
 | `<save>/snap/<id>.json` | kern (snapshot) | §9.10; Python prunes old ones |
+| `<save>/manifest.json` | kern | §11 fort manifest, rewritten in place at boot and whenever persist `manifest` is flushed (live L1); Python reads it instead of `inspect manifest` (no 8 KB limit) |
 | `<save>/perf.csv` | kern (perf) | §9.11 |
 | `<save>/commands.log`, `kern.log` | kern | §9.12; rotated at 1 MB to `.1` |
 

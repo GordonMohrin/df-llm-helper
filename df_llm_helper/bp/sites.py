@@ -3,7 +3,8 @@
 Fair play (DESIGN §11.1): the snapshot carries no hidden information (`?`). Hidden tiles count as unknown
 rock that may be dug (like designating into unexplored rock in the vanilla UI), with a small penalty, never
 as open or safe. Revealed open space, water, magma, trees, buildings and `marks` (damp, warm, cavern, water)
-inside a footprint or its wall ring reject the site.
+inside a footprint or its wall ring reject the site, and so does revealed water or magma on the level just above
+a dug rect (live L1: a farm room under a swamp pond hit "damp stone located" at once).
 
 Rooms need the fort manifest (fail closed: without zones.Z4 rank raises ValueError). The anchor is a floor
 or up/down-stair tile in Z4 that is *public*: reachable from Z4 without crossing a door into a room nobody
@@ -98,8 +99,9 @@ def _overlap(a, b) -> bool:
     return a[0] <= b[3] and b[0] <= a[3] and a[1] <= b[4] and b[1] <= a[4] and a[2] <= b[5] and b[2] <= a[5]
 
 
-def _check(rects, ax, ay, az, rot, bad, hid, mk, allow_below: bool):
-    """(unknown, missing_levels, box) or None if a rect holds a revealed obstacle or leaves the map."""
+def _check(rects, ax, ay, az, rot, bad, hid, mk, allow_below: bool, wet=None):
+    """(unknown, missing_levels, box) or None if a rect holds a revealed obstacle, has revealed liquid on the
+    level above, or leaves the map."""
     unknown, missing = 0, set()
     xs, ys, zs = [], [], []
     for w, lst in rects.items():
@@ -115,6 +117,8 @@ def _check(rects, ax, ay, az, rot, bad, hid, mk, allow_below: bool):
                 return None
             if b or mk.count(x0, y0, x1, y1, az + w):
                 return None
+            if wet is not None and (wet.count(x0, y0, x1, y1, az + w + 1) or 0):
+                return None                           # liquid right above: damp, never dig under it
             unknown += hid.count(x0, y0, x1, y1, az + w)
             xs += [x0, x1]
             ys += [y0, y1]
@@ -135,11 +139,12 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     bad = _Pref(snap, lambda c: c not in GOOD)
     hid = _Pref(snap, lambda c: c == "?")
     mk = _Pref(snap, points=marks)
+    wet = _Pref(snap, lambda c: c in WET)
     rects = footprint(tpl, p)
     if tpl == "fortcore":
-        cands = _fortcore(snap, rects, bad, hid, mk)
+        cands = _fortcore(snap, rects, bad, hid, mk, wet)
     else:
-        cands = _rooms(snap, tpl, p, rects, bad, hid, mk, manifest)
+        cands = _rooms(snap, tpl, p, rects, bad, hid, mk, manifest, wet)
     cands.sort(key=lambda c: (-c["score"], c["anchor"][2], c["anchor"][1], c["anchor"][0], c["rot"]))
     out: list[dict] = []
     for c in cands:
@@ -192,7 +197,7 @@ def _public(g: Graph, m: dict) -> bytearray:
     return bytearray(a & b for a, b in zip(seen, z4))
 
 
-def _rooms(snap, tpl, p, rects, bad, hid, mk, manifest):
+def _rooms(snap, tpl, p, rects, bad, hid, mk, manifest, wet=None):
     g = Graph(snap)
     steps_of = _stair_steps(g)
     keep_out = _keep_out(manifest)
@@ -216,7 +221,7 @@ def _rooms(snap, tpl, p, rects, bad, hid, mk, manifest):
             door = g.idx((ax + du, ay + dv, az))
             if door is None or g.t[door] not in GOOD:
                 continue
-            res = _check(rects, ax, ay, az, rot, bad, hid, mk, False)
+            res = _check(rects, ax, ay, az, rot, bad, hid, mk, False, wet)
             if res is None or any(_overlap(res[2], b) for b in keep_out):
                 continue
             unknown, _, box = res
@@ -234,7 +239,7 @@ def _rooms(snap, tpl, p, rects, bad, hid, mk, manifest):
     return out
 
 
-def _fortcore(snap, rects, bad, hid, mk):
+def _fortcore(snap, rects, bad, hid, mk, wet_above=None):
     rows = snap["rows"]
     x0, y0, z0, x1, y1, z1 = snap["bbox"]
     rough = _Pref(snap, lambda c: c != ".")
@@ -254,7 +259,7 @@ def _fortcore(snap, rects, bad, hid, mk):
                     ex0, ey0, ex1, ey1 = _rot_rect((-1, -2, 1, 0), ax, ay, rot)   # entrance + tiles in front
                     if rough.count(ex0, ey0, ex1, ey1, z) != 0:
                         continue
-                    res = _check(under, ax, ay, z, rot, bad, hid, mk, True)
+                    res = _check(under, ax, ay, z, rot, bad, hid, mk, True, wet_above)
                     if res is None:
                         continue
                     _, missing, box = res

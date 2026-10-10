@@ -21,6 +21,8 @@ M.CFG = {
   active = 3,            -- projects worked on at once (DESIGN §4)
   qf_per_slice = 1,      -- quickfort calls per slice
   probe = 300,           -- snapshot.tile probes per slice
+  hidden_wait = 2 * DAY, -- a dig stage whose only pending tiles are hidden completes after this long
+                         -- without progress (live L1: a 'j' above a 'u' stays hidden, DF posts no job)
   stall = 7 * DAY,       -- no progress for this long -> blocked 'stalled' (builds wait for materials)
   meas_every = 2 * DAY,  -- a stalled project without a slot is re-measured (no applies) this often
   meas_extra = 1,        -- such measure-only passes per run, outside the slot budget
@@ -377,7 +379,7 @@ local function probe(K, t, seen)
   S.slice.probes = S.slice.probes + 1
   local key = t[4]
   if type(v) ~= 'table' or v.c == nil or v.c == '?' then          -- hidden or off the map
-    if MINE[key] and on_map(t[1], t[2], t[3]) and not on_edge(t[1], t[2], t[3]) then return 'pend', nil, true end
+    if MINE[key] and on_map(t[1], t[2], t[3]) and not on_edge(t[1], t[2], t[3]) then return 'pend', nil, true, true end
     return 'skip'
   end
   if HAZARD[v.c] then return 'breach', HAZARD[v.c] end
@@ -446,7 +448,7 @@ local function measure_dig(K, P, d, R)
   local tiles = stage_tiles(P.id, d, P.stage)
   local m = S.meas[P.id]
   if not m or m.si ~= P.stage then
-    m = {si = P.stage, ci = 1, pend = 0, done = 0, snap = S.snap_ok}
+    m = {si = P.stage, ci = 1, pend = 0, done = 0, hid = 0, snap = S.snap_ok}
     if not m.snap then                       -- dry runs: one pass per dry_every, start to start
       if R.dry and now(K) - R.dry < M.CFG.dry_every then return 'done' end
       R.dry = now(K)
@@ -465,7 +467,8 @@ local function measure_dig(K, P, d, R)
         local sp = R.sp[sk] or ''
         for i, t in ipairs(tl) do
           local seen = sp:sub(i, i) == '1'
-          local r, why, mark = probe(K, t, seen)
+          local r, why, mark, hidden = probe(K, t, seen)
+          if hidden then m.hid = m.hid + 1 end
           if r == nil then S.snap_ok, S.meas[P.id] = false, nil; return 'yield' end   -- dry run instead
           if mark and not seen then sp = mask_set(sp, i); R.sp[sk] = sp; dirty() end
           if r == 'breach' then
@@ -505,7 +508,12 @@ local function measure_dig(K, P, d, R)
   end
   S.meas[P.id] = nil
   progress(K, P, d, R, R.cdt + m.done, tiles.n)
-  if m.pend > 0 then return 'done' end
+  if m.pend > 0 and not (m.snap and m.pend == m.hid and now(K) - R.last >= M.CFG.hidden_wait) then return 'done' end
+  if m.pend > 0 then
+    K.log('warn', '%s %s: %d hidden tiles never reached; stage completes without them', P.id,
+          d.stages[P.stage + 1].label, m.pend)
+    R.sk = (R.sk or 0) + m.pend
+  end
   R.lost = R.sk or 0                         -- tiles left undug because quickfort skipped them
   return 'complete'
 end

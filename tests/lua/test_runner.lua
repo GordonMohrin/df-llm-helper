@@ -365,6 +365,24 @@ T.test('probe: a hidden tile under a mine key is designated; revealed without de
   T.eq(ev[1].d, {proj = 'c1', why = 'warm', pos = {12, 10, 100}, src = 'cancel'})
 end)
 
+T.test('probe: a dig stage whose only pending tiles are hidden completes after hidden_wait (live L1)', function()
+  local W = fresh{tag = 'hiddenwait'}
+  H.place(W, 'c1', H.dig_doc(1))
+  W.tile(12, 10, 100).hidden = true
+  H.runs(W, 2)
+  local t = W.tile(12, 10, 100)
+  local keep = t.dig
+  t.dig = ''                                     -- H.dig skips it: nothing reaches it (a 'j' over a 'u')
+  H.dig(W)
+  t.dig = keep
+  H.runs(W, 1)
+  T.eq(H.proj(W, 'c1').done, 0, 'waits for the hidden tile first')
+  H.runs(W, runner.CFG.hidden_wait // 600 + 2)
+  T.eq(H.proj(W, 'c1').done, 1)
+  T.ok(logged(W, 'warn', '^c1 s1.dig: 1 hidden tiles never reached'))
+  T.eq(#W.find_events('BREACH_STOP'), 0)
+end)
+
 local function build_doc(cells, x)
   x = x or 10
   return {v = 2, tpl = 'hospital', site = 'S1', class = 'living', params = {}, anchor = {x, 10, 100}, rot = 0,

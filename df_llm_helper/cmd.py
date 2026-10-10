@@ -144,7 +144,7 @@ def fort_manifest(save_dir: Path) -> dict:
     """Manifest for site ranking (bp.sites.rank needs zones.Z4 for rooms): the cached kern manifest merged with
     the fragment of every bp/*.json in write order (applied projects, running or done) by the CONTRACTS §11
     rule (bp.primitives.merge_manifest). Offline, no inspect round trip and no 8 KB limit."""
-    base = files.read_json(Path(save_dir) / MANIFEST_CACHE)
+    base = files.read_manifest(save_dir) or files.read_json(Path(save_dir) / MANIFEST_CACHE)
     m = base if isinstance(base, dict) and not schema.validate("manifest", base) else {"v": 2}
     merge = getattr(load_bp("primitives"), "merge_manifest", None)
     if not callable(merge):

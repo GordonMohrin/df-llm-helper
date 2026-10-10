@@ -226,3 +226,21 @@ def test_rank_is_deterministic_and_respects_n(fort):
     assert a == bp.rank(snap, "tombs", {"n": 12}, manifest=man, n=5) and len(a) == 5
     with pytest.raises(ValueError):
         bp.rank(snap, "tombs", {"n": 99})
+
+
+def test_room_sites_never_under_revealed_liquid(fort):
+    """Live L1: a farm room under a swamp pond (water on the level above) hit 'damp stone located' at once."""
+    import copy
+    snap, man = fort
+    best = bp.rank(snap, "farms", manifest=man)[0]
+    doc = bp.emit("farms", {}, best)
+    dig = next(st for st in doc["stages"] if st["mode"] == "dig")
+    ch = dig["chunks"][0]
+    x, y, z = ch["pos"][0] + ch["cells"][0][0], ch["pos"][1] + ch["cells"][0][1], ch["pos"][2] + ch["cells"][0][2]
+    x0, y0, z0, x1, y1, z1 = snap["bbox"]
+    assert z + 1 <= z1, "the fixture has a level above the room"
+    wet = copy.deepcopy(snap)
+    row = wet["rows"][f"z{z + 1}"][y - y0]
+    wet["rows"][f"z{z + 1}"][y - y0] = row[:x - x0] + "w" + row[x - x0 + 1:]
+    again = bp.rank(wet, "farms", manifest=man)
+    assert all(s["anchor"] != best["anchor"] or s["rot"] != best["rot"] for s in again)

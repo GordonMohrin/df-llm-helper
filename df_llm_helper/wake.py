@@ -12,6 +12,7 @@ not wake; the follower acts on two of them without the LLM:
 The outbox reply of every automatic command is read; a refusal or no reply within AUTO_TIMEOUT_S
 wakes as AUTO_FAIL (a refused bp.place is rolled back). Unread replies are pruned after 10 min.
 Only wake lines go to stdout (one line = one Monitor notification); details go to <save>/cli.log.
+Supervisor alerts (<runtime>/supervise.json, each logged alert key) wake as SUPERVISE (STATUS §6.8, live L1).
 """
 from __future__ import annotations
 
@@ -25,12 +26,15 @@ from .events import clip, est_tokens, fmt_tick
 
 WAKE_TOKENS = 150
 WAKE_TYPES = {t for t, (c, _, _) in schema.EVENTS.items() if c == "A"}
-SYNTH = {"HB_STALE", "AUTO_FAIL"}          # follower's own wake reasons (not kern events)
-PRIO = ["BREACH", "GATE_FAIL", "DEATHS_3PLUS", "KERN_FAULT", "HB_STALE", "SIEGE_END", "DRILL_FAIL",
+SYNTH = {"HB_STALE", "AUTO_FAIL", "SUPERVISE"}   # follower's own wake reasons (not kern events)
+PRIO = ["BREACH", "GATE_FAIL", "DEATHS_3PLUS", "KERN_FAULT", "HB_STALE", "SUPERVISE", "SIEGE_END", "DRILL_FAIL",
         "PERF_DEGRADED", "DECISION_NEEDED", "PROJECT_BLOCKED", "PLAN_EXHAUSTED", "YEAR_REVIEW", "AUTO_FAIL"]
 NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propose",
         "DECISION_NEEDED": "ask Gordon in chat, then config/decisions.yaml", "KERN_FAULT": "dfllm doctor",
-        "PERF_DEGRADED": "dfllm doctor", "HB_STALE": "dfllm doctor", "AUTO_FAIL": "dfllm doctor"}
+        "PERF_DEGRADED": "dfllm doctor", "HB_STALE": "dfllm doctor", "AUTO_FAIL": "dfllm doctor",
+        "SUPERVISE": "dfllm supervise --once --dry-run"}
+SUPERVISE_EVERY_S = 15                         # supervise.json read cadence
+SUPERVISE_FRESH_S = 3600                       # alerts logged longer ago than this never wake
 HB_STALE_S = 300
 AUTO_TIMEOUT_S = 60
 TOMBS_COOLDOWN_S = 600
@@ -142,6 +146,8 @@ class Follower:
         self.hb_woken = False
         self._saved = ""
         self._pruned = 0.0
+        self.sup_seen: dict | None = None      # supervise alert key -> last 'said' wall seen
+        self._sup_read = 0.0
 
     @staticmethod
     def _print(line: str) -> None:
@@ -162,6 +168,9 @@ class Follower:
                 self.gate.load(st.get("gate") or {})
                 self.jobs = self._fresh_jobs(st.get("jobs") if isinstance(st.get("jobs"), dict) else {})
                 self.hb_woken = bool(st.get("hb_woken"))
+                if isinstance(st.get("sup_seen"), dict):
+                    self.sup_seen = {str(k): float(v) for k, v in st["sup_seen"].items()
+                                     if isinstance(v, (int, float)) and not isinstance(v, bool)}
             except Exception as e:             # noqa: BLE001 - a corrupt .follow.json must not block attaching
                 self.gate.__init__(self.gate.per_type_s, self.gate.merge_s, self.gate.quiet_s, self.gate.per_hour)
                 self.jobs = {}
@@ -197,6 +206,8 @@ class Follower:
             return
         doc = {"v": 2, "last_n": self.tail.last_n, "gate": self.gate.to_json(), "jobs": self.jobs,
                "hb_woken": self.hb_woken}
+        if self.sup_seen is not None:
+            doc["sup_seen"] = self.sup_seen
         text = files.dumps(doc)
         if text == self._saved:
             return                             # unchanged: no disk write every second
@@ -225,6 +236,7 @@ class Follower:
         for e in self.tail.poll():
             self._on_event(e, now)
         self._check_heartbeat(now)
+        self._check_supervise(now)
         if self.auto:
             self._run_jobs(now)
         if now - self._pruned >= PRUNE_EVERY_S:
@@ -272,6 +284,27 @@ class Follower:
         elif age is not None:
             self.hb_woken = False
 
+    def _check_supervise(self, now: float) -> None:
+        """A supervisor alert supervise logged (said[key] moved) since the last look -> one SUPERVISE wake."""
+        if now - self._sup_read < SUPERVISE_EVERY_S:
+            return
+        self._sup_read = now
+        doc = files.read_json(paths.runtime_root() / "supervise.json")
+        if not isinstance(doc, dict):
+            return
+        said = doc.get("said") if isinstance(doc.get("said"), dict) else {}
+        said = {str(k): float(v) for k, v in said.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
+        if self.sup_seen is None:              # first look: remember, do not wake on old alerts
+            self.sup_seen = said
+            return
+        last = doc.get("last") if isinstance(doc.get("last"), dict) else {}
+        msgs = {a.get("key"): a.get("msg") for a in last.get("alerts") or [] if isinstance(a, dict)}
+        for key, t in sorted(said.items()):
+            if t > self.sup_seen.get(key, 0.0):
+                self.sup_seen[key] = t
+                if now - t <= SUPERVISE_FRESH_S:
+                    self._synth("SUPERVISE", f"{key}: {msgs.get(key) or 'see supervise.log'}", now)
+
     # ------------------------------------------------------------ auto actions (no LLM)
     def _send(self, verb: str, args: dict, what: str | None, now: float, snap: dict | None = None) -> str:
         """Send without waiting; with `what`, the reply is read in _run_jobs (refusal/timeout -> AUTO_FAIL)."""
@@ -290,7 +323,10 @@ class Follower:
         mine = [self.jobs[k] for k in PLACE_KEYS if self.jobs.get(k) and sid and self.jobs[k].get("snap") == sid]
         for job in mine:
             job.update(path=rel or f"snap/{sid}.json", ready=now)
-        if not mine and purpose == "audit" and sid and rel:
+        if not mine and purpose == "audit" and sid and rel and files.read_manifest(self.dir) is not None:
+            # kern's <save>/manifest.json: no inspect round trip, no 8 KB reply limit (live L1)
+            self._audit(sid, rel, {"ok": True, "data": files.read_manifest(self.dir)}, now)
+        elif not mine and purpose == "audit" and sid and rel:
             try:
                 cid = self._send("inspect", {"what": "manifest"}, None, now)    # reply read by the audits job
             except Exception as e:             # noqa: BLE001
