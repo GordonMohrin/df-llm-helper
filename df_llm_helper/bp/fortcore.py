@@ -119,6 +119,10 @@ def _stage1(P: Plan, p: dict, zc: int, zr: int) -> None:
     pl.ent(-5, 34, -1, 36, zc, "f").ent(1, 34, 5, 36, zc, "w")
     pl.ent(-5, 38, -1, 40, zc, "s").ent(1, 38, 5, 40, zc, "u")
     pl.ent(7, 35, 11, 39, zc, "yr")
+    # live L1 (STATUS §6.4/§6.6): the trade pile next to the depot feeds caravans (autotrade, baseline
+    # registers it by name too); the melt pile takes goblinite (automelt)
+    pl.ent(-4, 15, 4, 16, ZE, "g", "name=dfllm-trade autotrade=true")
+    pl.ent(-4, 8, 4, 8, ZE, "pd", "name=dfllm-melt automelt=true")
     z = P.stage("s1.zone", "zone")
     z.ent(-13, 42, -5, 48, zc, "D").ent(-3, 42, 3, 48, zc, "m")
     z.ent(-1, 43, -1, 43, zc, "p", "pond=true")

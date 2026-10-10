@@ -1,0 +1,184 @@
+[
+ {
+  "anchor": [
+   70,
+   70,
+   100
+  ],
+  "class": "infra",
+  "manifest": {
+   "rooms": [
+    {
+     "bbox": [
+      66,
+      72,
+      100,
+      74,
+      75,
+      100
+     ],
+     "id": "furnaces70_70_100r0",
+     "tier": 0,
+     "tpl": "furnaces",
+     "use": "utility"
+    }
+   ],
+   "v": 2,
+   "workshops": [
+    {
+     "pos": [
+      68,
+      73,
+      100
+     ],
+     "type": "Smelter"
+    },
+    {
+     "pos": [
+      72,
+      73,
+      100
+     ],
+     "type": "WoodFurnace"
+    }
+   ],
+   "zones": {
+    "Z4": [
+     [
+      66,
+      71,
+      100,
+      74,
+      75,
+      100
+     ]
+    ]
+   }
+  },
+  "materials": {
+   "door": 1,
+   "workshop": 2
+  },
+  "params": {
+   "burrow": "Kern+",
+   "wood": 1
+  },
+  "rot": 0,
+  "site": "S1",
+  "stages": [
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        4,
+        0,
+        0,
+        "d"
+       ],
+       [
+        0,
+        1,
+        0,
+        "d(9x1)"
+       ],
+       [
+        0,
+        2,
+        0,
+        "d(9x1)"
+       ],
+       [
+        0,
+        3,
+        0,
+        "d(9x1)"
+       ],
+       [
+        0,
+        4,
+        0,
+        "d(9x1)"
+       ]
+      ],
+      "pos": [
+       66,
+       71,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        3,
+        0,
+        0,
+        "d"
+       ],
+       [
+        0,
+        1,
+        0,
+        "es(3x3)"
+       ],
+       [
+        4,
+        1,
+        0,
+        "ew(3x3)"
+       ]
+      ],
+      "pos": [
+       67,
+       71,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "build",
+    "mode": "build",
+    "orders": 1
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        4,
+        0,
+        0,
+        "a{name=Kern+ create=true}(1x1)"
+       ],
+       [
+        0,
+        1,
+        0,
+        "a{name=Kern+ create=true}(9x4)"
+       ]
+      ],
+      "pos": [
+       66,
+       71,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "burrow",
+    "mode": "burrow",
+    "orders": 0
+   }
+  ],
+  "tpl": "furnaces",
+  "v": 2
+ }
+]

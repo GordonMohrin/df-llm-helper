@@ -1,0 +1,177 @@
+[
+ {
+  "anchor": [
+   70,
+   70,
+   100
+  ],
+  "class": "living",
+  "manifest": {
+   "rooms": [
+    {
+     "bbox": [
+      69,
+      72,
+      100,
+      71,
+      74,
+      100
+     ],
+     "id": "office70_70_100r0",
+     "tier": 0,
+     "tpl": "office",
+     "use": "utility"
+    }
+   ],
+   "v": 2,
+   "zones": {
+    "Z4": [
+     [
+      69,
+      71,
+      100,
+      71,
+      74,
+      100
+     ]
+    ]
+   }
+  },
+  "materials": {
+   "chair": 1,
+   "door": 1
+  },
+  "params": {
+   "burrow": "Kern+",
+   "role": "manager"
+  },
+  "rot": 0,
+  "site": "S1",
+  "stages": [
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        1,
+        0,
+        0,
+        "d"
+       ],
+       [
+        0,
+        1,
+        0,
+        "d(3x1)"
+       ],
+       [
+        0,
+        2,
+        0,
+        "d(3x1)"
+       ],
+       [
+        0,
+        3,
+        0,
+        "d(3x1)"
+       ]
+      ],
+      "pos": [
+       69,
+       71,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "d"
+       ],
+       [
+        0,
+        2,
+        0,
+        "c"
+       ]
+      ],
+      "pos": [
+       70,
+       71,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "build",
+    "mode": "build",
+    "orders": 1
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "o{assigned_unit=manager name=Office}(3x3)"
+       ]
+      ],
+      "pos": [
+       69,
+       72,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "zone",
+    "mode": "zone",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        1,
+        0,
+        0,
+        "a{name=Kern+ create=true}(1x1)"
+       ],
+       [
+        0,
+        1,
+        0,
+        "a{name=Kern+ create=true}(3x3)"
+       ]
+      ],
+      "pos": [
+       69,
+       71,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "burrow",
+    "mode": "burrow",
+    "orders": 0
+   }
+  ],
+  "tpl": "office",
+  "v": 2
+ }
+]

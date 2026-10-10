@@ -1,5 +1,6 @@
 """Room templates (DESIGN §5.6, §5.9, §5.10, §5.2): dining, bedrooms, tombs, hospital, temple, tavern,
-workshops, farms.
+workshops, farms; since live L1 also furnaces (smelter + wood furnace), office (a noble's office with a
+chair) and captives (pit zone over a 1-tile drop, manifest `pit`).
 
 Local frame (rot 0): the anchor (0,0,0) is an *existing* walkable tile (a corridor of the core); the room
 is dug south of it. (0,1) is the doorway (door or open corridor start), the interior starts at v=2.
@@ -28,10 +29,15 @@ PARAMS = {
     "tavern": {"seats": (12, 4, 40)},
     "workshops": {"skip": ("", None, None)},
     "farms": {"plots": (2, 1, 4)},
+    "furnaces": {"wood": (1, 0, 2)},
+    "office": {"role": ("manager", None, None)},
+    "captives": {},
 }
+# quickfort `assigned_unit=` roles (preserve-rooms noble codes) an office may be reserved for
+OFFICE_ROLES = ("manager", "bookkeeper", "broker", "expedition_leader", "mayor", "chief_medical_dwarf")
 USE = {"dining": "used", "bedrooms": "used", "tombs": "used", "temple": "used"}
 # rooms nobody should walk through: sites.rank opens no new room from their tiles behind a door
-NO_THROUGH = frozenset({"bedrooms", "tombs", "hospital", "temple"})
+NO_THROUGH = frozenset({"bedrooms", "tombs", "hospital", "temple", "office", "captives"})
 
 
 def _box(P: Plan, W: int, H: int, door: bool = True):
@@ -197,8 +203,48 @@ def farms(p: dict) -> Plan:
     return P
 
 
+def furnaces(p: dict) -> Plan:
+    """Smelter plus `wood` wood furnaces (charcoal): metal from ore without magma (STATUS §6.5)."""
+    P = Plan("furnaces", "infra")
+    todo = [("es", "Smelter")] + [("ew", "WoodFurnace")] * p["wood"]
+    box = _box(P, 4 * len(todo) + 1, 4)
+    b = P.stage("build", "build", orders=1)
+    for i, (key, name) in enumerate(todo):
+        u, v = box[0] + 1 + 4 * i, box[1]
+        b.ent(u, v, u + 2, v + 2, 0, key)
+        P.workshops.append((name, (u + 1, v + 1, 0)))
+    _finish(P, p, box)
+    return P
+
+
+def office(p: dict) -> Plan:
+    """A noble's office: chair + office zone reserved for `role` (preserve-rooms). Live L1: the manager
+    validates work orders only from an office once the fort reaches a population threshold."""
+    role = str(p["role"]).lower()
+    if role not in OFFICE_ROLES:
+        raise ValueError(f"office: unknown role {role!r}; known: {', '.join(OFFICE_ROLES)}")
+    P = Plan("office", "living")
+    box = _box(P, 3, 3)
+    P.stage("build", "build", orders=1).tile(0, box[1] + 1, 0, "c")
+    _finish(P, p, box, "o", f"assigned_unit={role} name=Office")
+    return P
+
+
+def captives(p: dict) -> Plan:
+    """Captive pit: a 3x3 room with a 1-tile channel; the pit zone sits on the drop (manifest `pit`), away
+    from traps. Care assigns caged invaders to it."""
+    P = Plan("captives", "defense")
+    box = _box(P, 3, 3)
+    P.stage("dig", "dig").tile(0, box[1] + 1, 0, "h")
+    P.stage("zone", "zone").ent(0, box[1] + 1, 0, box[1] + 1, 0, "p")
+    P.manifest["pit"] = [0, box[1] + 1, 0]
+    _finish(P, p, box)
+    return P
+
+
 BUILD = {"dining": dining, "bedrooms": bedrooms, "tombs": tombs, "hospital": hospital, "temple": temple,
-         "tavern": tavern, "workshops": workshops, "farms": farms}
+         "tavern": tavern, "workshops": workshops, "farms": farms, "furnaces": furnaces, "office": office,
+         "captives": captives}
 
 
 def plot_rects(p: dict) -> list[tuple[int, int, int, int, int]]:

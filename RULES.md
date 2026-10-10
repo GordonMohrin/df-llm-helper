@@ -173,19 +173,20 @@ library. 0 naked. Stress KPI: share with category ≤ 1.
 **Water and caverns:** light aquifer only via the probe stair (damp report → stop, never
 re-designate); every breach of water or caverns through a 2-wall airlock; caverns stay sealed.
 **Trade:** depot in the bailey, O1 down only while no hostile is visible; ratio ≥ 1.5. Goods come
-from stockpiles named `dfllm-trade` (logistics autotrade; no template builds one yet: ask Gordon).
+from stockpiles named `dfllm-trade` (logistics autotrade; fortcore stage 1 builds one next to the depot,
+plus the `dfllm-melt` automelt pile).
 **Speed:** PEACE timestream 500, SIEGE/DRILL off; no Lua quicksaves; DF autosave yearly.
 
 ## 11. Phases (`plans/year1.json`; the runner advances when all deliverables pass)
 | Phase | Deliverables |
 |---|---|
 | P0 | baseline; probe stair (damp → stop); fortcore stage 1; farms (own template, soil sites) |
-| P1 | dining, well, depot, offices, craftsdwarf, carpenter, mason, still, kitchen |
-| P2 | trap hall, B1, barracks (fortcore stage 2), squad A |
-| P3 | all moodable workshops (incl. forge), hospital, orders basic + rockstock (no smelter template yet) |
+| P1 | dining, well, depot, office (manager: chair + office zone), craftsdwarf, carpenter, mason, still, kitchen |
+| P2 | trap hall, B1, barracks (fortcore stage 2), captive pit (`captives`), squad A |
+| P3 | all moodable workshops (incl. forge), smelter + wood furnace (`furnaces`), hospital, orders basic + rockstock |
 | P4 | 1 caravan traded, bedrooms, tombs, tavern, temple |
 | P5 | fortcore stage 3, squads B and C, drill 1 passed, R1, drink ≥ 170 d, food ≥ 60 d |
-| P6 ★ (Y2) | military orders, metal ≥ 80 %, ≥ 300 bolts, R2 cap raise (smelting returns with a smelter template) |
+| P6 ★ (Y2) | military orders, metal ≥ 80 %, ≥ 300 bolts, R2 cap raise |
 | P7 ★ | beauty in used rooms; R3 only with D-01 = B |
 ★ = entered only when your plan's `phase_target` reaches it.
 

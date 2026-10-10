@@ -1,5 +1,5 @@
 fortcore {'stage': 3, 'depth': 3, 'refuge': 3, 'beds': 8} anchor [70, 70, 100] rot 0
-  infra: s1.dig(91), s1.build(19), s1.place(5), s1.zone(3), s1.burrow(24)
+  infra: s1.dig(91), s1.build(19), s1.place(7), s1.zone(3), s1.burrow(24)
   materials: {'bed': 8, 'door': 4, 'trade_depot': 1, 'well': 1, 'workshop': 5}
   defense: s2.dig(44), s2.chan(7), s2.build(30), s2.zone(1)
   materials: {'armor_stand': 2, 'chest': 2, 'drawbridge': 1, 'fortification': 7, 'lever': 2, 'mechanism': 20, 'weapon_rack': 2, 'weapon_trap': 14}
