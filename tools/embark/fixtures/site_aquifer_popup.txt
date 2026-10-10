@@ -1,0 +1,19 @@
+# SYNTHETIC fixture (WP11). Labels and sentences are literal DF 53.16 strings (Dwarf Fortress.exe);
+# the layout and the values after Brook:/River: are invented. Replace with live L0 captures:
+#   dfhack-run lua -f <repo>/tools/embark/embark.lua screen <name>
+focus choose_start_site
+  2                                                                                                                              Temperate Grassland
+  4                                                                                                                              Temperature: Temperate
+  5                                                                                                                              Trees: Sparse
+  6                                                                                                                              Other Vegetation: Thick
+  7                                                                                                                              Surroundings: Wilderness
+  9                                                                                                                              River: Yes
+ 11                                                                                                                              Very deep soil
+ 12                                                                                                                              Light aquifer
+ 26                                                        You have selected an area with a light
+ 27                                                        aquifer.
+ 28                                                        Water might need to be pumped out or
+ 29                                                        carried away.
+ 30                                                             Confirm             Abort
+ 62           Click on the map to embark!  Right click to abort.
+ 64                                         Abort               Show elevation           Show cliffs/grade                  Embark

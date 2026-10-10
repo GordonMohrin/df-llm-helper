@@ -1,0 +1,20 @@
+# Gordon's answers to the v2 design decisions (DESIGN §15; options and effects: docs/v2/DECISIONS.md).
+# Format (CONTRACTS §9.16): one `D-NN: value  # comment` line per decision; values are bare words or
+# integers, no nesting, no quotes. Read by schema.parse_decisions, fairplay.get_decision and the kernel.
+# Only Gordon edits this file. A comment that starts with "default" marks an unanswered decision; the
+# default (off or unchanged) applies until he answers. To answer, change the value and the comment:
+#   D-07: visitor30  # answered 2026-10-12 by Gordon
+# An invalid value falls back to the default (python -m df_llm_helper.lint --config reports it).
+D-01: A  # default: Option A, pop cap at most 75 (B: grow to 80+ after R3)
+D-02: unchanged  # default: difficulty settings (invasion cap, siege frequency) untouched
+D-03: rule  # default: act only if idle >40 % for 3 game days and the useful backlog is not empty
+D-04: off  # default: work-now stays disabled
+D-05: off  # default: agitation-rebalance stays disabled
+D-06: off  # default: tailor does not confiscate, no cleanowned
+D-07: unchanged  # default: visitor cap, weather and baby caps untouched (visitor30 recommended)
+D-08: dropped  # default: no caravan flags1.left edit; fix/stuck-merchants instead
+D-09: no  # default: plump helmets are never cooked, not even in a famine
+D-10: off  # default: emigration and deteriorate stay disabled
+D-11: accepted  # default: timestream may change the game speed per mode
+D-12: 15/20  # default: army 15 % of adults at pop <=55, 20 % from 60
+D-13: no  # default: no automatic beauty pause at high wealth (wealth is logged)

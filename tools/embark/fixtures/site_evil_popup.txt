@@ -1,0 +1,16 @@
+# SYNTHETIC fixture (WP11). Labels and sentences are literal DF 53.16 strings (Dwarf Fortress.exe);
+# the layout and the values after Brook:/River: are invented. Replace with live L0 captures:
+#   dfhack-run lua -f <repo>/tools/embark/embark.lua screen <name>
+focus choose_start_site
+  2                                                                                                                              Taiga
+  4                                                                                                                              Temperature: Cold
+  5                                                                                                                              Trees: Scarce
+  6                                                                                                                              Other Vegetation: Sparse
+  7                                                                                                                              Surroundings: Haunted
+ 10                                                                                                                              Some soil
+ 26                                                        You have selected an evil area.
+ 27                                                        You may find very unpleasant
+ 28                                                        environs here.
+ 30                                                             Confirm             Abort
+ 62           Click on the map to embark!  Right click to abort.
+ 64                                         Abort               Show elevation           Show cliffs/grade                  Embark

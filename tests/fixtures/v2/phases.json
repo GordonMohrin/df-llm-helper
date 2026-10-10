@@ -1,0 +1,9 @@
+{"v":2,"kind":"phases","phases":[
+ {"id":"P0","title":"baseline and fortcore stage 1","approve":false,"deliver":[{"k":"baseline"},{"k":"proj","tpl":"fortcore","stage":1}]},
+ {"id":"P1","title":"dining, well, depot, craftsdwarf","approve":false,"deliver":[{"k":"proj","tpl":"dining"},{"k":"workshops","types":["Craftsdwarfs"]},{"k":"orders","lib":"library/basic"}]},
+ {"id":"P2","title":"trap hall, B1, barracks, squad A","approve":false,"deliver":[{"k":"proj","tpl":"fortcore","stage":2},{"k":"squads","n":1}]},
+ {"id":"P3","title":"smelter, forge, workshops, hospital, mood stock","approve":false,"deliver":[{"k":"workshops","types":["moodable"]},{"k":"proj","tpl":"hospital"},{"k":"orders","lib":"library/furnace"},{"k":"orders","lib":"library/smelting"},{"k":"orders","lib":"library/military"},{"k":"stock","key":"drink_d","min":170}]},
+ {"id":"P4","title":"trade, bedrooms, tombs, tavern, temple","approve":false,"deliver":[{"k":"trade","n":1},{"k":"proj","tpl":"bedrooms"},{"k":"proj","tpl":"tombs"},{"k":"proj","tpl":"tavern"},{"k":"proj","tpl":"temple"}]},
+ {"id":"P5","title":"stage 3, gallery, squads B and C, drill 1","approve":false,"deliver":[{"k":"proj","tpl":"fortcore","stage":3},{"k":"squads","n":3},{"k":"drill"}]},
+ {"id":"P6","title":"iron kits, bolts, R2 cap raise","approve":true,"deliver":[{"k":"metal","pct":80},{"k":"bolts","n":300},{"k":"ready","lvl":2}]},
+ {"id":"P7","title":"beauty; R3 only with D-01 = B","approve":true,"deliver":[{"k":"ready","lvl":1}]}]}

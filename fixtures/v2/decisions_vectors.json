@@ -1,0 +1,21 @@
+{"v": 2,
+ "about": "CONTRACTS §9.16: shared vectors for schema.parse_decisions and contract.parse_decisions (and the kernel reader)",
+ "vectors": [
+  {"name": "plain", "text": "D-01: B\n", "want": {"D-01": "B"}},
+  {"name": "bom", "text": "\ufeffD-01: B\nD-02: raised\n", "want": {"D-01": "B", "D-02": "raised"}},
+  {"name": "indented", "text": "  D-07: visitor30  # answered 2026-10-12 by Gordon\n\tD-12: 20/25\n",
+   "want": {"D-07": "visitor30", "D-12": "20/25"}},
+  {"name": "commented example", "text": "#   D-07: visitor30  # answered\n# D-01: B\n", "want": {}},
+  {"name": "crlf", "text": "D-09: yes\r\nD-11: rejected\r\n", "want": {"D-09": "yes", "D-11": "rejected"}},
+  {"name": "empty values", "text": "D-04:\nD-05:   # nothing yet\nD-06: \t\n", "want": {}},
+  {"name": "inline hash", "text": "D-03: rule#x\nD-06:off # c\n", "want": {"D-03": "rule", "D-06": "off"}},
+  {"name": "tabs around colon", "text": "D-10 \t:\t on \t\r\n", "want": {"D-10": "on"}},
+  {"name": "later line wins", "text": "D-01: A\nD-01: B\n", "want": {"D-01": "B"}},
+  {"name": "not decisions", "text": "D-1: x\nd-01: y\nD-001: z\nnot a line\nD-13 no colon\nxD-02: q\n", "want": {}},
+  {"name": "inner spaces kept", "text": "D-12: 20 / 25  # army\n", "want": {"D-12": "20 / 25"}},
+  {"name": "no final newline", "text": "D-08: dropped", "want": {"D-08": "dropped"}},
+  {"name": "trailing cr only", "text": "D-08: dropped \r", "want": {"D-08": "dropped"}},
+  {"name": "blank and comment lines", "text": "\n\n# header\n   \n\t\nD-13: yes\n\n", "want": {"D-13": "yes"}},
+  {"name": "unicode digits are not digits", "text": "D-\u0660\u0661: x\nD-0\u00b9: y\n", "want": {}},
+  {"name": "vertical tab is not stripped", "text": "D-02:\u000bx\n", "want": {"D-02": "\u000bx"}}
+ ]}

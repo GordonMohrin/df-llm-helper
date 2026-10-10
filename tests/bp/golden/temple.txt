@@ -1,0 +1,17 @@
+temple {'size': 7, 'tier': 2000, 'burrow': 'Kern+'} anchor [70, 70, 100] rot 0
+  living: dig(8), build(2), zone(1), burrow(3)
+  materials: {'door': 1, 'offering_place': 1}
+z100  (x 66..74, y 69..79)
+#########
+####.####
+####+####
+#.......#
+#.......#
+#.......#
+#.......#
+#.......#
+#.......#
+#...A...#
+#########
+legend: # rock  S smoothed  C wall  F fortification  . floor  _ open  < > X stairs  r/v ramp  + door  = bridge  H raised  ^ trap  ? hidden
+overlay: b bed  f cabinet  h chest  t table  c chair  n coffin  l well  k weapon rack  a armor stand  L lever  R traction bench  A altar  D depot  p farm plot  W workshop

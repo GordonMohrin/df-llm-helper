@@ -1,0 +1,15 @@
+tombs {'n': 10, 'tier': 0, 'burrow': 'Kern+'} anchor [70, 70, 100] rot 0
+  living: dig(6), build(11), zone(10), burrow(2)
+  materials: {'coffin': 10, 'door': 1}
+z100  (x 68..72, y 69..77)
+#####
+##.##
+##+##
+#n.n#
+#n.n#
+#n.n#
+#n.n#
+#n.n#
+#####
+legend: # rock  S smoothed  C wall  F fortification  . floor  _ open  < > X stairs  r/v ramp  + door  = bridge  H raised  ^ trap  ? hidden
+overlay: b bed  f cabinet  h chest  t table  c chair  n coffin  l well  k weapon rack  a armor stand  L lever  R traction bench  A altar  D depot  p farm plot  W workshop

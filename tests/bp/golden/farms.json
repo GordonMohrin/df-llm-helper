@@ -1,0 +1,232 @@
+[
+ {
+  "anchor": [
+   70,
+   70,
+   100
+  ],
+  "class": "infra",
+  "manifest": {
+   "rooms": [
+    {
+     "bbox": [
+      65,
+      72,
+      100,
+      75,
+      78,
+      100
+     ],
+     "id": "farms70_70_100r0",
+     "tier": 0,
+     "tpl": "farms",
+     "use": "utility"
+    }
+   ],
+   "v": 2,
+   "zones": {
+    "Z4": [
+     [
+      65,
+      71,
+      100,
+      75,
+      78,
+      100
+     ]
+    ]
+   }
+  },
+  "materials": {
+   "door": 1,
+   "farm_plot": 2
+  },
+  "params": {
+   "burrow": "Kern+",
+   "plots": 2
+  },
+  "rot": 0,
+  "site": "S1",
+  "stages": [
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        5,
+        0,
+        0,
+        "d"
+       ],
+       [
+        0,
+        1,
+        0,
+        "d(11x1)"
+       ],
+       [
+        0,
+        2,
+        0,
+        "d(11x1)"
+       ],
+       [
+        0,
+        3,
+        0,
+        "d(11x1)"
+       ]
+      ],
+      "pos": [
+       65,
+       71,
+       100
+      ]
+     },
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "d(11x1)"
+       ],
+       [
+        0,
+        1,
+        0,
+        "d(11x1)"
+       ],
+       [
+        0,
+        2,
+        0,
+        "d(11x1)"
+       ]
+      ],
+      "pos": [
+       65,
+       75,
+       100
+      ]
+     },
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "d(11x1)"
+       ]
+      ],
+      "pos": [
+       65,
+       78,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        5,
+        0,
+        0,
+        "d"
+       ],
+       [
+        0,
+        1,
+        0,
+        "p(5x7)"
+       ],
+       [
+        6,
+        1,
+        0,
+        "p(5x7)"
+       ]
+      ],
+      "pos": [
+       65,
+       71,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "build",
+    "mode": "build",
+    "orders": 1
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        5,
+        0,
+        0,
+        "a{name=Kern+ create=true}(1x1)"
+       ],
+       [
+        0,
+        1,
+        0,
+        "a{name=Kern+ create=true}(11x3)"
+       ]
+      ],
+      "pos": [
+       65,
+       71,
+       100
+      ]
+     },
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "a{name=Kern+ create=true}(11x3)"
+       ]
+      ],
+      "pos": [
+       65,
+       75,
+       100
+      ]
+     },
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "a{name=Kern+ create=true}(11x1)"
+       ]
+      ],
+      "pos": [
+       65,
+       78,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "burrow",
+    "mode": "burrow",
+    "orders": 0
+   }
+  ],
+  "tpl": "farms",
+  "v": 2
+ }
+]

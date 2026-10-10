@@ -1,0 +1,14 @@
+# SYNTHETIC fixture (WP11). Labels and sentences are literal DF 53.16 strings (Dwarf Fortress.exe);
+# the layout and the values after Brook:/River: are invented. Replace with live L0 captures:
+#   dfhack-run lua -f <repo>/tools/embark/embark.lua screen <name>
+focus choose_start_site
+  3                                                                                                                              Neighbors:
+  4                                                                                                                              Goblins
+  5                                                                                                                              Nearest site: A day's travel
+  6                                                                                                                              Population: ~3000
+  8                                                                                                                              Elves
+  9                                                                                                                              Nearest site: More than a day's travel
+ 11                                                                                                                              Humans
+ 12                                                                                                                              Nearest site: 3 days' travel
+ 62           Click on the map to embark!  Right click to abort.
+ 64                                         Abort               Show elevation           Show cliffs/grade                  Embark

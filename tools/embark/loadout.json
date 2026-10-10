@@ -1,0 +1,21 @@
+{"v": 2,
+ "about": "DESIGN 5.1 embark loadout for steps.lua. roles: one per starting dwarf, skills as df.job_skill names with target levels (1 pick per level, Run 6: 10 picks per dwarf; picks left over go to the first unfinished skill). items/animals: 'add' clicks on top of DF's default 'Prepare carefully' list (Run 6 default: 2 picks, 2 battle axes, 1 anvil, seeds, drink, food, about 218 wood); a click counts only if points_remaining drops. rest: bought in this order until a click no longer lowers the points, so no point stays unspent. Names are matched in the screen text (alt = fallbacks); exact row labels are [LIVE-UNTESTED].",
+ "roles": [
+   {"role": "miner", "skills": [["MINING", 5], ["ENGRAVE_STONE", 3], ["MASONRY", 2]]},
+   {"role": "miner", "skills": [["MINING", 5], ["WOODCUTTING", 3], ["CARPENTRY", 2]]},
+   {"role": "mason_engraver", "skills": [["MASONRY", 5], ["ENGRAVE_STONE", 5]]},
+   {"role": "carpenter", "skills": [["CARPENTRY", 5], ["WOODCUTTING", 3], ["MECHANICS", 2]]},
+   {"role": "brewer_grower", "skills": [["BREWING", 5], ["PLANT", 5]]},
+   {"role": "mechanic", "skills": [["MECHANICS", 5], ["MASONRY", 3], ["ENGRAVE_STONE", 2]]},
+   {"role": "cook_doctor", "skills": [["COOK", 3], ["DIAGNOSE", 3], ["SURGERY", 2], ["SET_BONE", 1], ["SUTURE", 1]]}],
+ "items": [
+   {"name": "pick", "add": 1},
+   {"name": "iron bar", "alt": ["steel bar", "bronze bar", "copper bar"], "add": 10},
+   {"name": "plump helmet spawn", "add": 10},
+   {"name": "seeds", "add": 10},
+   {"name": "log", "alt": ["wood"], "add": 20}],
+ "animals": [
+   {"name": "Turkey", "alt": ["Chicken", "Duck", "Goose"], "add": 2},
+   {"name": "Pig", "alt": ["Sheep", "Goat"], "add": 2}],
+ "rest": ["iron bar", "log"],
+ "never": ["cat"]}

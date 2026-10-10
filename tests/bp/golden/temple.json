@@ -1,0 +1,226 @@
+[
+ {
+  "anchor": [
+   70,
+   70,
+   100
+  ],
+  "class": "living",
+  "manifest": {
+   "rooms": [
+    {
+     "bbox": [
+      67,
+      72,
+      100,
+      73,
+      78,
+      100
+     ],
+     "id": "temple70_70_100r0",
+     "tier": 2000,
+     "tpl": "temple",
+     "use": "used"
+    }
+   ],
+   "v": 2,
+   "zones": {
+    "Z4": [
+     [
+      67,
+      71,
+      100,
+      73,
+      78,
+      100
+     ]
+    ]
+   }
+  },
+  "materials": {
+   "door": 1,
+   "offering_place": 1
+  },
+  "params": {
+   "burrow": "Kern+",
+   "size": 7,
+   "tier": 2000
+  },
+  "rot": 0,
+  "site": "S1",
+  "stages": [
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        3,
+        0,
+        0,
+        "d"
+       ],
+       [
+        0,
+        1,
+        0,
+        "d(7x1)"
+       ],
+       [
+        0,
+        2,
+        0,
+        "d(7x1)"
+       ],
+       [
+        0,
+        3,
+        0,
+        "d(7x1)"
+       ],
+       [
+        0,
+        4,
+        0,
+        "d(7x1)"
+       ],
+       [
+        0,
+        5,
+        0,
+        "d(7x1)"
+       ]
+      ],
+      "pos": [
+       67,
+       71,
+       100
+      ]
+     },
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "d(7x1)"
+       ],
+       [
+        0,
+        1,
+        0,
+        "d(7x1)"
+       ]
+      ],
+      "pos": [
+       67,
+       77,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "d"
+       ],
+       [
+        0,
+        7,
+        0,
+        "~a"
+       ]
+      ],
+      "pos": [
+       70,
+       71,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "build",
+    "mode": "build",
+    "orders": 1
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "m{location=temple name=Temple allow=residents}(7x7)"
+       ]
+      ],
+      "pos": [
+       67,
+       72,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "zone",
+    "mode": "zone",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        3,
+        0,
+        0,
+        "a{name=Kern+ create=true}(1x1)"
+       ],
+       [
+        0,
+        1,
+        0,
+        "a{name=Kern+ create=true}(7x5)"
+       ]
+      ],
+      "pos": [
+       67,
+       71,
+       100
+      ]
+     },
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "a{name=Kern+ create=true}(7x2)"
+       ]
+      ],
+      "pos": [
+       67,
+       77,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "burrow",
+    "mode": "burrow",
+    "orders": 0
+   }
+  ],
+  "tpl": "temple",
+  "v": 2
+ }
+]

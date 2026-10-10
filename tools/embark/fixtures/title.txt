@@ -1,0 +1,5 @@
+# SYNTHETIC fixture (WP11). Labels and sentences are literal DF 53.16 strings (Dwarf Fortress.exe);
+# the layout and the values after Brook:/River: are invented. Replace with live L0 captures:
+#   dfhack-run lua -f <repo>/tools/embark/embark.lua screen <name>
+focus title/Default
+ 22                                                             Start new game in existing world

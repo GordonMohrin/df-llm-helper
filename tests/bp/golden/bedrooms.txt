@@ -1,0 +1,29 @@
+bedrooms {'n': 10, 'tier': 500, 'burrow': 'Kern+'} anchor [70, 70, 100] rot 0
+  living: dig(40), build(40), zone(10), burrow(6)
+  materials: {'bed': 10, 'cabinet': 10, 'chest': 10, 'door': 10}
+z100  (x 65..75, y 69..91)
+###########
+#####.#####
+#####.#####
+#f..#.#..f#
+#b..+.+..b#
+#h..#.#..h#
+#####.#####
+#f..#.#..f#
+#b..+.+..b#
+#h..#.#..h#
+#####.#####
+#f..#.#..f#
+#b..+.+..b#
+#h..#.#..h#
+#####.#####
+#f..#.#..f#
+#b..+.+..b#
+#h..#.#..h#
+#####.#####
+#f..#.#..f#
+#b..+.+..b#
+#h..#.#..h#
+###########
+legend: # rock  S smoothed  C wall  F fortification  . floor  _ open  < > X stairs  r/v ramp  + door  = bridge  H raised  ^ trap  ? hidden
+overlay: b bed  f cabinet  h chest  t table  c chair  n coffin  l well  k weapon rack  a armor stand  L lever  R traction bench  A altar  D depot  p farm plot  W workshop

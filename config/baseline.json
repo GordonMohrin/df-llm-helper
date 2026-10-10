@@ -1,0 +1,90 @@
+{
+ "v": 2,
+ "baseline": {
+  "per_slice": 4,
+  "control_panel": ["suspendmanager", "autochop", "autobutcher", "autonestbox", "nestboxes", "autoslab",
+                    "preserve-tombs", "tailor", "seedwatch", "prioritize", "pop-control",
+                    "fix/dead-units", "fix/empty-wheelbarrows", "combine"],
+  "plugins": ["buildingplan", "logistics", "preserve-rooms", "burrow"],
+  "timestream": true,
+  "decision_tools": {"D-04": ["work-now"], "D-05": ["agitation-rebalance"], "D-10": ["emigration", "deteriorate"]},
+  "prioritize": ["-aq", "defaults"],
+  "autochop": {"max": 150, "min": 60},
+  "autobutcher": {"all": [2, 1, 2, 1], "races": {"CAT": [0, 0, 1, 1]}},
+  "tailor": {"materials": ["silk", "cloth", "yarn"]},
+  "popcap": {"max_pop": 55, "wave": 8},
+  "labormanager": {"mode": "monitor", "fallback": "monitor", "ab_to": "modern", "ab_days": 168,
+                   "balance": "balanced", "unmanaged": ["MINE"]},
+  "seedwatch": {"target": 12, "always": []},
+  "ban_cooking": ["booze", "honey", "milk", "oil", "tallow"],
+  "burial": ["-c"],
+  "melt_piles": ["dfllm-melt", "melt", "goblinite"], "trade_piles": ["dfllm-trade"],
+  "idle_crafting": {"workshop": "Craftsdwarfs"},
+  "retries": 3
+ },
+ "economy": {
+  "per_slice": 200,
+  "seed_milli": {"drink": 53, "food": 24},
+  "spike_x": 3,
+  "food_cats": ["FOOD", "MEAT", "FISH", "CHEESE", "EGG", "PLANT", "PLANT_GROWTH"],
+  "mood_keys": ["cloth", "leather", "bone", "shell", "gems", "bars"],
+  "mood_from_phase": "P3",
+  "kitchen": [{"plant": "MUSHROOM_HELMET_PLUMP", "mat": "STRUCTURAL", "item": "PLANT", "what": "Cook"},
+              {"plant": "MUSHROOM_HELMET_PLUMP", "mat": "SEED", "item": "SEEDS", "what": "Cook"}],
+  "famine_days": 10,
+  "stages": [
+   {"lib": "library/basic", "any": ["migrants", "cit>=10"]},
+   {"lib": "library/rockstock", "any": ["workshop:Masons"]},
+   {"lib": "library/furnace", "any": ["furnace:Smelter", "furnace:WoodFurnace"]},
+   {"lib": "library/smelting", "all": ["furnace:Smelter", "fuel"]},
+   {"lib": "library/military", "all": ["workshop:MetalsmithsForge"]}
+  ],
+  "signatures": {
+   "library/basic": {"job": "CustomReaction", "reaction": "BREW_DRINK_FROM_PLANT"},
+   "library/furnace": {"job": "MakeCharcoal"},
+   "library/smelting": {"job": "SmeltOre", "mat": "INORGANIC:GARNIERITE"},
+   "library/military": {"job": "MakeQuiver"},
+   "library/rockstock": {"job": "ConstructArmorStand", "mat": "INORGANIC"},
+   "library/glassstock": {"job": "ConstructArmorStand", "mat": "GLASS_GREEN"}
+  },
+  "supply": [
+   {"tag": "dfllm:drink", "key": "drink_d", "per_job": 5, "max_jobs": 30,
+    "spec": {"job": "CustomReaction", "reaction": "BREW_DRINK_FROM_PLANT", "frequency": "OneTime",
+             "item_conditions": [{"condition": "AtLeast", "flags": ["unrotten"], "item_type": "PLANT", "reaction_product": "DRINK_MAT", "value": 2},
+                                 {"condition": "AtLeast", "flags": ["empty", "food_storage"], "value": 1}]}},
+   {"tag": "dfllm:food", "key": "food_d", "per_job": 4, "max_jobs": 20,
+    "spec": {"job": "PrepareMeal", "meal_ingredients": 2, "frequency": "OneTime",
+             "item_conditions": [{"condition": "AtLeast", "flags": ["unrotten", "cookable"], "value": 10}]}},
+   {"tag": "dfllm:cloth", "key": "cloth", "per_job": 1, "max_jobs": 10, "from_phase": "P3",
+    "spec": {"job": "WeaveCloth", "material_category": ["plant"], "frequency": "OneTime",
+             "item_conditions": [{"condition": "AtLeast", "flags": ["collected", "plant"], "item_type": "THREAD", "value": 1}]}}
+  ],
+  "idle": {
+   "pct": 40, "days": 3, "boulders_min": 30, "blocks_cap": 200, "crafts_cap": 60, "combine_every": 3600,
+   "craft_cats": ["FIGURINE", "AMULET", "RING", "EARRING", "BRACELET", "SCEPTER", "CROWN", "TOTEM"],
+   "backlog": [
+    {"id": "blocks", "tag": "dfllm:idle_blocks", "amount": 10,
+     "spec": {"job": "ConstructBlocks", "material": "INORGANIC", "frequency": "OneTime"}},
+    {"id": "crafts", "tag": "dfllm:idle_crafts", "amount": 5,
+     "spec": {"job": "MakeCrafts", "material": "INORGANIC", "frequency": "OneTime"}},
+    {"id": "combine"}
+   ]
+  },
+  "cancel_loop": 5
+ },
+ "care": {
+  "units_per_slice": 50,
+  "items_per_slice": 200,
+  "tomb_margin": 6,
+  "tomb_request_every": 3600,
+  "corpse_old": 3600,
+  "approach_r": 15,
+  "captive_deadline": 600,
+  "captive_dump": true,
+  "unforbid_per_need": 5,
+  "corpse_acts_per_run": 30,
+  "barrels_per_run": 20,
+  "mood_nojob_ticks": 1200,
+  "stress_week": 8400
+ }
+}

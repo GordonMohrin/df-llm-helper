@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][IntPtr]$Hwnd, [int]$DesktopIndex = 1, [switch]$DryRun)
+param([IntPtr]$Hwnd = [IntPtr]::Zero, [int]$DesktopIndex = 1, [switch]$DryRun, [switch]$LoadOnly)
 # Move a top-level window of ANY process to virtual desktop N (Windows 11 24H2/25H2 internal API).
 # Safety: verifies GetCount() == registry desktop count and every desktop GetId() == registry GUID before MoveViewToDesktop.
 $src = @"
@@ -52,7 +52,8 @@ public static class VDI {
   }
 }
 "@
-Add-Type -TypeDefinition $src
+if (-not ('VDI' -as [type])) { Add-Type -TypeDefinition $src }
+if ($LoadOnly) { return "loaded" }
 $k = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VirtualDesktops'
 $ids = (Get-ItemProperty $k).VirtualDesktopIDs
 $n = $ids.Length / 16

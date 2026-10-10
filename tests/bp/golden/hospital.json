@@ -1,0 +1,246 @@
+[
+ {
+  "anchor": [
+   70,
+   70,
+   100
+  ],
+  "class": "living",
+  "manifest": {
+   "rooms": [
+    {
+     "bbox": [
+      67,
+      72,
+      100,
+      73,
+      76,
+      100
+     ],
+     "id": "hospital70_70_100r0",
+     "tier": 0,
+     "tpl": "hospital",
+     "use": "utility"
+    }
+   ],
+   "v": 2,
+   "zones": {
+    "Z4": [
+     [
+      67,
+      71,
+      100,
+      73,
+      76,
+      100
+     ]
+    ]
+   }
+  },
+  "materials": {
+   "bed": 4,
+   "chest": 2,
+   "door": 1,
+   "traction_bench": 1,
+   "well": 1
+  },
+  "params": {
+   "beds": 4,
+   "burrow": "Kern+"
+  },
+  "rot": 0,
+  "site": "S1",
+  "stages": [
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        3,
+        0,
+        0,
+        "d"
+       ],
+       [
+        0,
+        1,
+        0,
+        "d(7x1)"
+       ],
+       [
+        0,
+        2,
+        0,
+        "d(5x1)"
+       ],
+       [
+        5,
+        2,
+        0,
+        "h(2x1)"
+       ],
+       [
+        0,
+        3,
+        0,
+        "d(7x1)"
+       ],
+       [
+        0,
+        4,
+        0,
+        "d(7x1)"
+       ],
+       [
+        0,
+        5,
+        0,
+        "d(7x1)"
+       ]
+      ],
+      "pos": [
+       67,
+       71,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        3,
+        0,
+        0,
+        "d"
+       ],
+       [
+        0,
+        1,
+        0,
+        "h"
+       ],
+       [
+        1,
+        1,
+        0,
+        "h"
+       ],
+       [
+        5,
+        2,
+        0,
+        "l"
+       ],
+       [
+        0,
+        3,
+        0,
+        "R"
+       ],
+       [
+        0,
+        5,
+        0,
+        "b"
+       ],
+       [
+        1,
+        5,
+        0,
+        "b"
+       ],
+       [
+        2,
+        5,
+        0,
+        "b"
+       ],
+       [
+        3,
+        5,
+        0,
+        "b"
+       ]
+      ],
+      "pos": [
+       67,
+       71,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "build",
+    "mode": "build",
+    "orders": 1
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "m{location=hospital name=Hospital allow=residents}(7x5)"
+       ],
+       [
+        6,
+        1,
+        0,
+        "p{pond=true}(1x1)"
+       ]
+      ],
+      "pos": [
+       67,
+       72,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "zone",
+    "mode": "zone",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        3,
+        0,
+        0,
+        "a{name=Kern+ create=true}(1x1)"
+       ],
+       [
+        0,
+        1,
+        0,
+        "a{name=Kern+ create=true}(7x5)"
+       ]
+      ],
+      "pos": [
+       67,
+       71,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "burrow",
+    "mode": "burrow",
+    "orders": 0
+   }
+  ],
+  "tpl": "hospital",
+  "v": 2
+ }
+]
