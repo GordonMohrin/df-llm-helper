@@ -33,7 +33,7 @@
   "kitchen": [{"plant": "MUSHROOM_HELMET_PLUMP", "mat": "STRUCTURAL", "item": "PLANT", "what": "Cook"},
               {"plant": "MUSHROOM_HELMET_PLUMP", "mat": "SEED", "item": "SEEDS", "what": "Cook"}],
   "famine_days": 10,
-  "alarm": {"thirst": 25000, "hunger": 50000, "units": 2, "days": 10},
+  "alarm": {"thirst": 40000, "hunger": 50000, "units": 2, "days": 10},
   "labor": {"cycles": 100,
             "supply": ["BREWER", "PLANT", "COOK", "HERBALIST", "PROCESS_PLANT", "MILLER", "BUTCHER", "CARPENTER",
                        "MASON", "FEED_WATER_CIVILIANS", "RECOVER_WOUNDED", "MINE", "CUTWOOD", "HUNT", "FISH"],

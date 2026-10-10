@@ -463,6 +463,27 @@ T.test('orders: a failed call is retried next run (no build before it), given up
   T.eq(H.proj(W, 'h').done, 1)
 end)
 
+T.test('stall: a dig stage waiting while another project digs is not stalled (shared miners, live L1b)', function()
+  local W = fresh{tag = 'stall2'}
+  local week = runner.CFG.stall // 600
+  H.place(W, 'a1', H.dig_doc(4, {x = 10}))
+  H.place(W, 'b1', H.dig_doc(1, {x = 30}))
+  H.runs(W, 1)
+  local function dig_a(n)                          -- miners only work on a1
+    local keys = {}
+    for k, t in pairs(W.map) do
+      local x = tonumber(k:match('^(%d+),'))
+      if t.dig ~= '' and x and x < 20 then keys[#keys + 1] = k end
+    end
+    table.sort(keys)
+    for i = 1, math.min(n, #keys) do local t = W.map[keys[i]]; t.c, t.dig = '.', '' end
+  end
+  for _ = 1, week + 2 do dig_a(1); H.runs(W, 1) end
+  T.eq(H.proj(W, 'b1').blocked, '', 'b1 waits for the miners, it does not stall')
+  for _ = 1, week + 2 do H.runs(W, 1) end
+  T.eq(H.proj(W, 'b1').blocked, 'stalled', 'nobody digs anywhere: stalled')
+end)
+
 T.test('stalled projects leave their slots to others and are re-measured outside the slots', function()
   local W = fresh{tag = 'stallslot'}
   H.floor(W, 10, 10, 100, 40, 10)

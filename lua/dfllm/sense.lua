@@ -159,6 +159,9 @@ local function consider(hs, u)
       return 7
     end
     if U.isTame(u) or U.isFortControlled(u) then return 7 end
+    -- live L1b: the ghost of a dead citizen (isUndead, isOwnGroup) walked into Kern+ and held the fort in
+    -- BREACH for days; an own ghost is care's job (slab, burial), not the siege reflex's
+    if U.isGhost and U.isGhost(u) and U.isOwnGroup and U.isOwnGroup(u) then return 7 end
   end
   local x, y, z = U.getPosition(u)
   if not x then return 7 end

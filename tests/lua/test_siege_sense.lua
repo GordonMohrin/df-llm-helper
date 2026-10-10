@@ -61,6 +61,18 @@ T.test('census.h: visible only; distances to O1, bridges and outside citizens; i
   T.eq(W.K.census.u.caged, {205})
 end)
 
+T.test('census.h: the ghost of a dead citizen is no hostile (live L1b: it held the fort in BREACH)', function()
+  local W = world{
+    S.cit(1, 60, 70),
+    {id = 401, pos = {61, 70, Z}, undead = true, ghost = true, own_group = true},   -- own ghost inside Kern+
+    {id = 402, pos = {51, 30, Z}, undead = true, ghost = true},                     -- a foreign ghost still is
+  }
+  W.run(10)
+  local h = W.K.census.h
+  T.eq({h.vis, h.undead, h.inside}, {1, 1, 0})
+  T.eq(h.list[1].id, 402)
+end)
+
 T.test('census.h.list keeps the 40 nearest; kinds great/undead/inv/danger', function()
   local units = {S.cit(1, 60, 70)}
   for i = 1, 50 do units[#units + 1] = S.inv(200 + i, 100 + i, 10) end

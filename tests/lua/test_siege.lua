@@ -383,15 +383,15 @@ add{name = 'a visible hostile inside Kern+ is a BREACH: Tiefe+ alert, B2 up, B2_
     T.eq(#evs(W, 'GATE_FAIL'), 0)
   end}
 
-add{name = 'BREACH without a Tiefe+ burrow falls back to Kern+ and retries slowly',
+add{name = 'BREACH without a Tiefe+ burrow uses Kern+ and never asks for the missing refuge (live L1b)',
   tiefe = false,
   units = function() return units(S.army(6, 150, 150)) end,
   at = {{300, function(W) W.move(201, 60, 75, Z) end}}, run = 2000,
   modes = {'PEACE>SIEGE', 'SIEGE>BREACH'},
   check = function(W)
-    local fails = S.acts(W, 'alert_burrows', function(a) return a.args[1][1] == 'Tiefe+' end)
-    T.ok(#fails >= 1 and #fails <= 4, 'Tiefe+ retried every 600 ticks: ' .. #fails)
-    T.eq(fails[1].ok, false)
+    local tiefe = S.acts(W, 'alert_burrows', function(a) return a.args[1][1] == 'Tiefe+' end)
+    T.eq(#tiefe, 0, 'no ACT_FAIL every retry for a burrow fortcore stage 3 has not built yet')
+    T.eq(#W.find_events('ACT_FAIL'), 0)
     T.eq(df.global.plotinfo.alerts.civ_alert_idx, 1, 'alert stays on with Kern+')
   end}
 

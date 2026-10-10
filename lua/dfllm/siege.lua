@@ -261,12 +261,20 @@ local function alert_wanted(K, a, g, now)
   return st.civ == true
 end
 
+local function burrow_exists(name)
+  local ok, b = pcall(function() return dfhack.burrows.findByName(name) end)
+  return not ok or b ~= nil                -- unknown: let act decide
+end
+
 local function set_alert(K, on, burrow, g, now)
   local cur = alert_idx()
   if not on then
     if cur ~= nil and cur ~= 0 then K.act.civ_alert(false) end
     return
   end
+  -- live L1b: BREACH before fortcore stage 3 asked for Tiefe+ every RETRY (one ACT_FAIL each time); a refuge
+  -- that does not exist yet means Kern+ at once
+  if burrow ~= g.kern and not burrow_exists(burrow) then burrow = g.kern end
   if mem.burrow ~= burrow and now >= (mem.alert_retry or now) then
     if K.act.alert_burrows({burrow}) then mem.burrow = burrow
     else                                   -- e.g. no Tiefe+ yet: Kern+ beats no alert

@@ -27,7 +27,9 @@ M.DEFAULTS = {
   famine_days = 10,
   -- supply alarm (live L1: two dwarves died of hunger and thirst): >= units citizens over the thirst or
   -- hunger timer, or drink/food below `days`, holds arbiter's brake and wakes the LLM (weekly)
-  alarm = {thirst = 25000, hunger = 50000, units = 2, days = 10},
+  -- live L1b: 25000 is DF's plain "thirsty" (dwarves at work reach it daily: the brake flapped and woke the
+  -- LLM weekly with 135 drink days); 40000 leaves 10000 ticks to dehydration (50000), 35000 to death
+  alarm = {thirst = 40000, hunger = 50000, units = 2, days = 10},
   -- supply labors labormanager (modern) starved for >= cycles (LABOR_STARVED): a tool labor with a builtin
   -- detail (Miners, Woodcutters, Hunters, Fisherdwarves) left unmanaged becomes managed, so it staffs the
   -- detail; any other starved one makes baseline fall back to monitor mode (live L1: BREWER starved 243

@@ -307,8 +307,9 @@ end)
 
 T.test('supply alarm: >= 2 thirsty citizens or drink < 10 days -> alarm(), DECISION_NEEDED thirst weekly', function()
   local W, E = world{}
-  W.unit(1).counters2 = {thirst_timer = 30000, hunger_timer = 0}
-  W.unit(2).counters2 = {thirst_timer = 26000, hunger_timer = 0}
+  W.unit(1).counters2 = {thirst_timer = 45000, hunger_timer = 0}
+  W.unit(2).counters2 = {thirst_timer = 41000, hunger_timer = 0}
+  W.unit(3).counters2 = {thirst_timer = 39000, hunger_timer = 0}       -- plain "thirsty" (live L1b): no alarm
   days(W, 1)
   T.eq(W.K.call('economy', 'alarm'), true)
   T.eq(select(2, W.K.call('economy', 'alarm')), 'thirst 2')

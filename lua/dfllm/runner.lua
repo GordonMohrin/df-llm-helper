@@ -348,13 +348,17 @@ local function pct_of(P, d, frac)
   return clamp((100 * P.stage + clamp(frac, 0, 100)) // #d.stages, 0, 100)
 end
 
-local function progress(K, P, d, R, done, total)
+-- dig: true for a dig stage. Miners are shared: a dig stage only stalls when no dig stage of any project
+-- progressed for `stall` (live L1b: a dining hall queued behind a 200-tile workshop dig was reported
+-- blocked after 7 days while three miners dug next door)
+local function progress(K, P, d, R, done, total, dig)
   P.pct = pct_of(P, d, total > 0 and (100 * done) // total or 0)
   local t = now(K)
   if done > R.prog then
     R.prog, R.last = done, t
+    if dig then S.rt.dpt = t end
     if P.blocked == 'stalled' then set_blocked(K, P, '') end
-  elseif P.blocked == '' and t - R.last >= M.CFG.stall then
+  elseif P.blocked == '' and t - R.last >= M.CFG.stall and not (dig and t - (S.rt.dpt or -M.CFG.stall) < M.CFG.stall) then
     set_blocked(K, P, 'stalled')
   end
   dirty()
@@ -509,7 +513,7 @@ local function measure_dig(K, P, d, R)
     m.ci = ci + 1
   end
   S.meas[P.id] = nil
-  progress(K, P, d, R, R.cdt + m.done, tiles.n)
+  progress(K, P, d, R, R.cdt + m.done, tiles.n, true)
   if m.pend > 0 and not (m.snap and m.pend == m.hid and now(K) - R.last >= M.CFG.hidden_wait) then return 'done' end
   if m.pend > 0 then
     K.log('warn', '%s %s: %d hidden tiles never reached; stage completes without them', P.id,

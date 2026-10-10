@@ -159,6 +159,9 @@ function M.new(opts)
     return um(u).danger == true or um(u).insane == true or units.isInvader(u) or units.isGreatDanger(u)
   end
   function units.isTame(u) return um(u).tame == true end
+  function units.isGhost(u) return um(u).ghost == true end
+  -- dead citizens keep their group link (unlike isCitizen); own_group marks other members
+  function units.isOwnGroup(u) return um(u).citizen == true or um(u).own_group == true end
   function units.isMerchant(u) return um(u).merchant == true end
   function units.isVisitor(u) return um(u).visitor == true end
   function units.isAnimal(u) return um(u).animal == true end
