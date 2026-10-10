@@ -303,6 +303,39 @@ T.test('care actions: item flags (melt via dfhack.items), zone assignment like t
   T.eq({env.api.zone_assign(70, 7)}, {false, 'unit already assigned'})
 end)
 
+T.test('economy work_detail: builtin tool details only, sorted membership, labors follow the detail', function()
+  local W = H.world{tag = 'wd', units = {{id = 7, citizen = true}, {id = 8, citizen = true, adult = false}}}
+  local MINE, CUT, HAUL = 0, 1, 2
+  local function wd(name, labor, ids, mode)
+    return {name = name, assigned_units = kmock.vec(ids), allowed_labors = {[0] = labor == MINE, [1] = labor == CUT,
+            [2] = labor == HAUL}, flags = {mode = mode or 3}}
+  end
+  df.work_detail_mode = {EverybodyDoesThis = 1, OnlySelectedDoesThis = 3}
+  df.global.plotinfo.labor_info = {work_details = kmock.vec{wd('Miners', MINE, {3, 9}), wd('Woodcutters', CUT, {}),
+                                                              wd('Haulers', HAUL, {}, 1)}}
+  -- a 3-entry bool array like DF's (allowed_labors is sized by unit_labor)
+  for _, w in ipairs(df.global.plotinfo.labor_info.work_details) do
+    setmetatable(w.allowed_labors, {__len = function() return 3 end})
+  end
+  W.unit(7).status = {labors = {}}
+  local env = mk()
+  env.who_v = 'care'
+  T.eq({env.api.work_detail('Miners', 7, true)}, {false, 'not owner'})
+  env.who_v = 'economy'
+  T.eq({env.api.work_detail('Haulers', 7, true)}, {false, 'not a builtin tool detail: Haulers'})
+  T.eq({env.api.work_detail('Miners', 8, true)}, {false, 'not an adult citizen'})
+  T.eq({env.api.work_detail('Miners', 7, true)}, {true, 'added'})
+  local v = df.global.plotinfo.labor_info.work_details[0].assigned_units
+  T.eq({v[0], v[1], v[2]}, {3, 7, 9}, 'sorted insert')
+  T.eq(W.unit(7).status.labors[MINE], true)
+  T.eq({env.api.work_detail('Miners', 7, true)}, {true, 'already'})
+  T.eq({env.api.work_detail('Miners', 7, false)}, {true, 'removed'})
+  T.eq({#v, v[0], v[1]}, {2, 3, 9})
+  T.eq(W.unit(7).status.labors[MINE], false)
+  T.eq({env.api.work_detail('Miners', 9, false)}, {true, 'removed'}, 'a unit that left the fort is taken off')
+  T.eq({env.api.work_detail('Woodcutters', 7, false)}, {true, 'not a member'})
+end)
+
 T.test('arbiter actions: settings return old values, timestream old fps, overlays, popups, pause', function()
   local W = H.world{tag = 'arb'}
   local env = mk()

@@ -116,6 +116,21 @@ T.test('at most 3 projects are worked at once; the rest are queued by prio', fun
   T.eq(row(W, 'p5')[4], '')
 end)
 
+T.test('dig_backlog: tiles left in the running dig stages (economy sizes the Miners detail from it)', function()
+  local W = fresh{tag = 'backlog'}
+  H.place(W, 'b1', H.dig_doc(2))                         -- 2 chunks x 5 tiles of rock
+  H.settle(W)
+  T.eq(select(2, W.K.call('runner', 'dig_backlog')), 10)
+  W.frame(1); H.settle(W)
+  H.runs(W, 1)
+  H.dig(W, 4)
+  H.runs(W, 1)
+  T.eq(select(2, W.K.call('runner', 'dig_backlog')), 6)
+  H.dig(W)
+  H.runs(W, 2)
+  T.eq(select(2, W.K.call('runner', 'dig_backlog')), 0)
+end)
+
 T.test('mode gating: ALERT runs defense/infra only, SIEGE defense inside Z3/Z4, DRILL nothing', function()
   local W = fresh{tag = 'gate', mode = 'ALERT'}
   H.place(W, 'liv', H.doc{x = 10, class = 'living'})
@@ -410,6 +425,28 @@ T.test('orders: one call per stage before run, the created orders are counted an
   T.eq(#W2.orders, 1)
 end)
 
+T.test('orders: sliced to orders_cells per call (S6: 60 ms for one 19-cell stage), grouped by key', function()
+  local W = fresh{tag = 'orders3'}
+  H.floor(W, 10, 10, 100, 40, 12)
+  local cells = {}
+  for i = 0, 18 do cells[#cells + 1] = {i, i % 2, 0, i % 2 == 0 and 'b' or 'd'} end   -- 10 beds, 9 doors
+  H.place(W, 'h', build_doc(cells))
+  H.settle(W)
+  for _ = 1, 6 do W.frame(1); H.settle(W) end
+  T.eq(#W.orders, 3, '19 cells: 8 + 8 + 3')
+  local function keys(o)
+    local r = {}
+    for _, g in pairs(o.data) do for _, row in pairs(g) do for _, t in pairs(row) do r[#r + 1] = t end end end
+    table.sort(r)
+    return table.concat(r)
+  end
+  T.eq({keys(W.orders[1]), keys(W.orders[2]), keys(W.orders[3])}, {'bbbbbbbb', 'bbdddddd', 'ddd'})
+  T.eq(H.proj(W, 'h').orders_done, 1)
+  T.ok(logged(W, 'info', '^h build: 4 manager orders, 19 items'))
+  local R = W.K.persist.get('m.runner').p.h
+  T.eq({R.oc, R.on, R.ord}, {20, 4, 19})
+end)
+
 T.test('orders: a failed call is retried next run (no build before it), given up after fail_max', function()
   local W = fresh{tag = 'ordfail', strict = false}
   W.qf_fail_cmd = 'orders'
@@ -578,6 +615,38 @@ T.test('phases: a present module is asked; fortcore stage N passes through sN.* 
   T.eq(W.state().phase, 'P1')                    -- P2 needs phase_target >= P2
   local st = W.find_events('PROJECT_STAGE')
   T.eq({st[1].d.stage, st[1].d.defense}, {'s1.dig', 0})
+end)
+
+T.test('PLAN_EXHAUSTED fires again after each finished project (follow starts the next deliverable)', function()
+  local ph = {{id = 'P0', title = 'a', approve = false,
+               deliver = {{k = 'proj', tpl = 'dining'}, {k = 'proj', tpl = 'office'}}},
+              {id = 'P1', title = 'b', approve = false, deliver = {}}}
+  local W = fresh{tag = 'exh', phases = ph}
+  H.runs(W, 2)
+  T.eq(#W.find_events('PLAN_EXHAUSTED'), 1)
+  H.place(W, 'd1', H.dig_doc(1, {tpl = 'dining', class = 'living', params = {}}))
+  H.runs(W, 1); H.dig(W); H.runs(W, 2)
+  T.eq(H.proj(W, 'd1').done, 1)
+  T.eq(#W.find_events('PLAN_EXHAUSTED'), 2, 'dining done, office missing: once more')
+  H.runs(W, 3)
+  T.eq(#W.find_events('PLAN_EXHAUSTED'), 2, 'still once per finished project')
+end)
+
+T.test('phases: workshops pass through the manifest or a built workshop of the type (live L1b)', function()
+  local ph = {{id = 'P0', title = 'a', approve = false, deliver = {{k = 'workshops', types = {'Masons', 'Jewelers'}}}},
+              {id = 'P1', title = 'b', approve = false, deliver = {}}}
+  local W = fresh{tag = 'wsph', phases = ph, persist = {manifest = {v = 2, workshops = {{type = 'Masons', pos = {1, 2, 3}}}}}}
+  df.workshop_type = {Masons = 2, Jewelers = 4, [2] = 'Masons', [4] = 'Jewelers'}
+  df.furnace_type = {}
+  H.runs(W, 1)
+  T.eq(W.state().phase, 'P0')
+  local other = df.global.world.buildings.other
+  other.WORKSHOP_ANY:insert('#', {type = 4, getBuildStage = function() return 0 end, getMaxBuildStage = function() return 1 end})
+  H.runs(W, 1)
+  T.eq(W.state().phase, 'P0', 'an unbuilt jeweler does not count')
+  other.WORKSHOP_ANY:insert('#', {type = 4, getBuildStage = function() return 1 end, getMaxBuildStage = function() return 1 end})
+  H.runs(W, 1)
+  T.eq(W.state().phase, 'P1', 'a built jeweler (made by hand) counts')
 end)
 
 T.test('keepers: bedrooms once the phase is reached; cooldown; care owns tombs', function()

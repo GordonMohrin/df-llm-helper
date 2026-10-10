@@ -164,7 +164,8 @@ LUA_RULES = {
     "skill-write": "writing skills",
     "body-write": "writing body, wounds or attributes",
     "timer-write": "writing unit timers/counters",
-    "labor-write": "writing labors or work details (labormanager is the sole owner)",
+    "labor-write": "writing labors or work details (labormanager owns them; economy only the builtin tool "
+                   "details, through act.work_detail)",
     "armok": "armok/memory API",
     "blocked-command": "blocked command (config/allowlist.json 'blocked', inline lua or claude/*)",
     "not-allowlisted": "act.run command or arguments not in config/allowlist.json",
@@ -612,8 +613,11 @@ class _Lint:
         if "counters2" in names or (dfroot and inter & _COUNTERS) or \
                 (last and last.endswith("_timer") and (dfroot or "counters" in names)):
             hits.append("timer-write")
-        if ("labors" in names and (dfroot or "status" in every)) or \
-                ("work_details" in names and (dfroot or "labor_info" in names)):
+        if (("labors" in names and (dfroot or "status" in every)) or
+                ("work_details" in names and (dfroot or "labor_info" in names))) and \
+                not (self.role == "act" and self.in_func("work_detail")):
+            # live L1b: economy owns the builtin tool details; act.work_detail (the work details screen)
+            # is the one writer of their membership and the labors that follow it
             hits.append("labor-write")
         for r in hits:
             self.add(line, r)

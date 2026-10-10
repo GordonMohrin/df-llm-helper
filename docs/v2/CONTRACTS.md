@@ -216,12 +216,13 @@ Every function returns `ok, res_or_err`, never raises, writes one line to `comma
 | `order_suspend(order_id, on)` | int, bool | suspend button | economy |
 | `kitchen_exclude(item_type, subtype, mat_type, mat_index, what)` | `what='Cook'|'Brew'` | kitchen screen (`dfhack.kitchen.addExclusion`, :2658) | economy |
 | `appoint(code, unit_id)` → `ok, assignment_id` | position code (`MANAGER`, `BOOKKEEPER`, `BROKER`), int | nobles screen: choose a citizen for a vacant fort position (assignment histfig + the figure's position link; adult living citizen; position offered, `flags.ACTIVE`) | economy |
+| `work_detail(name, unit_id, on)` → `ok, 'added'|'already'|'removed'|'not a member'` | `Miners`, `Woodcutters` or `Hunters` (builtin tool details only), int, bool | work details screen: add an adult citizen to the detail (sorted `assigned_units`, the detail's labors switched on) or remove a unit (a unit that left the fort is only taken off the list; a labor is switched off only when no other detail of the unit, or an everybody-does-this detail, grants it; as DFHack's autofish.lua does) (live L1b) | economy |
 | `item_flag(item_id, flag, on)` | `flag='forbid'|'dump'|'melt'` | item flag toggles | care |
 | `zone_assign(zone_building_id, unit_id)` | ints | assign a caged unit to a pit/pond zone | care |
 | `trade(op, args)` | `op='request_broker'|'open'|'mark'|'offer'|'close'` [WP9 audit] | depot and trade screen | trade |
 | `run(cmd, ...)` → `ok, output` | command + string args | `dfhack.run_command_silent` after the allowlist check (§9.14); `'r'` entries are read-only queries | see `contract.ACT.run` |
 
-Not in act on purpose: labor/work-detail writes (labormanager is sole owner), unit/skill/position writes, job removal (except our own lever job), item creation, tile edits.
+Not in act on purpose: labor writes other than the builtin tool details (labormanager owns every other labor and detail; live L1b gave economy the Miners/Woodcutters/Hunters memberships, see DESIGN §3), unit/skill/position writes, job removal (except our own lever job), item creation, tile edits.
 
 ---
 
@@ -279,6 +280,8 @@ Only these are public across WPs; anything else is module-internal. "Returns" ar
 | `snapshot.tile(x, y, z)` | `nil` (hidden/invalid) or `{c=<legend char>, dig=<designation or ''>, bld=<building type or ''>}` | the only tile read for other modules; `dig='job'` when a designation job (Dig, channel, …) sits on the tile, because DF clears `designation.dig` while a miner works it (live L1) |
 | `economy.imported(lib)` | `bool` | orders library already imported |
 | `economy.alarm()` | `why` or `nil` | supply alarm (thirst/hunger of >= 2 citizens, drink or food < 10 days); arbiter brakes tempo while set (live L1) |
+| `runner.dig_backlog()` | `int` | tiles still to dig in the dig stage of every running project (tile count minus the last measured progress); economy sizes the Miners detail from it (live L1b) |
+| `runner.pending(tpl)` | `int` | projects of `tpl` not done yet (care waits for them before asking again) |
 | `trade.done()` | `int` | caravans traded this fort |
 
 Mode-driven duties (no call needed): arbiter applies tempo per mode in `on.MODE`; siege applies civ alert, alert burrows and posture; gate recomputes desired bridges; runner freezes; readiness freezes growth outside PEACE.
@@ -428,7 +431,7 @@ Written by Python from `bp.emit` (WP3) **before** the inbox `bp.place` (file id 
 
 **Size caps** (main-thread budget; `schema.validate('bp')` enforces them, so `bp` emit, `plan check`, `plan apply` and `cmd bp.place` refuse bigger documents): **≤ 1,000 cells in total** (`schema.BP_MAX_CELLS`) and **≤ 24 KB of compact JSON** (`json.dumps(separators=(',',':'), ensure_ascii=False)` in UTF-8, `schema.BP_MAX_BYTES` = 24,576). The kernel decodes a whole bp in one call: on lua53.dll that costs about 14 ms per 1,000 cells (13 KB) and 0.75-3 s for 40,000 cells. A bigger template is emitted as several projects (fortcore already emits one per stage); quickfort area syntax (`d(10x5)`) keeps the cell count low (the largest golden template has 161 cells, 6.8 KB).
 
-`stage = {label:str ≤24, mode:'dig'|'build'|'place'|'zone'|'burrow', orders:flag, defense:flag, chunks:[chunk] 1-500}`; `orders:1` → runner calls `act.quickfort{command='orders'}` once for the whole stage before `run`; `defense:1` → readiness re-audits after the stage. `chunk = {pos, cells:[[dx,dy,dz,text]] 1-40}`; the runner builds `data[dz][dy][dx] = text` (integer keys) and calls `act.quickfort{mode, data, pos}`. `text` ≤ 64 chars of quickfort cell syntax (e.g. `d`, `Cw`, `trackstop`, `bedroom/location=…`).
+`stage = {label:str ≤24, mode:'dig'|'build'|'place'|'zone'|'burrow', orders:flag, defense:flag, chunks:[chunk] 1-500}`; `orders:1` → runner calls `act.quickfort{command='orders'}` for the whole stage before `run`, sliced into calls of ≤ `runner.CFG.orders_cells` (8) cells grouped by building key, one call per slice (live L1b: one 19-cell call cost 60 ms); `defense:1` → readiness re-audits after the stage. `chunk = {pos, cells:[[dx,dy,dz,text]] 1-40}`; the runner builds `data[dz][dy][dx] = text` (integer keys) and calls `act.quickfort{mode, data, pos}`. `text` ≤ 64 chars of quickfort cell syntax (e.g. `d`, `Cw`, `trackstop`, `bedroom/location=…`).
 <!-- ex:bp -->
 ```json
 {"v":2,"id":"c123","tpl":"bedrooms","site":"S2","class":"living","params":{"n":20,"tier":500},
@@ -449,7 +452,7 @@ Written by Python from `bp.emit` (WP3) **before** the inbox `bp.place` (file id 
 | `proj` | `tpl`, `stage?` | a project with this template is done (or reached stage index `stage`) |
 | `squads` | `n` | `K.view().mil.squads >= n` |
 | `drill` | | `K.view().ready.drill_age >= 0` |
-| `workshops` | `types` (array, or `["moodable"]`) | manifest `workshops` covers the types (moodable = the 12 of DESIGN §5.9) |
+| `workshops` | `types` (array, or `["moodable"]`) | manifest `workshops` or a built workshop/furnace of the fort covers the types (moodable = the 12 of DESIGN §5.9; live L1b: also a workshop built by hand counts) |
 | `stock` | `key`, `min` | `K.view().stock[key] >= min` |
 | `orders` | `lib` | `K.call('economy','imported', lib)` |
 | `trade` | `n` | `K.call('trade','done') >= n` |
@@ -611,6 +614,7 @@ The fort-specific geometry, written by templates (bp `manifest` fragments) and m
 | STOCK_LOW | B | economy | **key** (str), days, min |
 | CANCEL_LOOP | B | economy | order, job (str), n |
 | LABOR_STARVED | B | economy | **labor** (str), cycles, to (str: managed, monitor) — a supply labor labormanager starved: a builtin tool labor becomes managed, otherwise labormanager falls back to monitor (live L1) |
+| WORK_DETAIL | B | economy | **detail** (str), **unit**, **on** (1 added, 0 removed), n (target), why (str) — economy changed a builtin tool detail (live L1b) |
 | CAPTURE | B | care | unit, race (str) |
 | BREACH_STOP | B | runner | proj (str), why (str: damp, warm, cavern, water), pos (int[3]) |
 | KERNEL_SLOW | B | kern | **module** (str), ms, factor |
@@ -645,7 +649,7 @@ Python (`dfllm cmd`, `plan apply`, follow) validates every inbox document with `
 
 | Verb | Handler | Modes | Args (closed objects) | Reply `data` |
 |---|---|---|---|---|
-| `plan.reload` | kern | any | `{}` | `{year, builds}` |
+| `plan.reload` | kern | any | `{}`; `{phases: true}` = replace the save's phase list with the repo's `plans/year1.json` (plan and current phase id kept; live L1b) | `{year, builds}`; `{phases}` |
 | `bp.place` | runner | any (queued while frozen) | `{tpl, site, p?:object, prio?:1-7}` + any other scalar key is merged into `p`; reads `bp/<cmd id>.json` | `{proj}` |
 | `bp.cancel` | runner | any | `{proj, undo?:bool}` | |
 | `drill` | drill | PEACE | `{why?:str}` | |
@@ -775,6 +779,7 @@ Each item names the WP that must adapt its code; WP0 changed the contract, `cont
 | R6 | `by` is a label; `unpause` releases only the inbox hold; `audit` only from follow/test with a snapshot of this boot; hook/lint trust rules | §9.5, §13 | **WP1** kern checks `VERB_BY`, arbiter `unpause`; **WP6** readiness records `EV:SNAPSHOT_READY` ids (purpose audit) and refuses others; **WP4** hook/lint rules incl. Write/Edit; **WP2** `cmd` must not offer `audit`/`--by follow` to the LLM path (follow writes audits itself) |
 | R7 | bp caps 1,000 cells / 24 KB (`schema.validate('bp')`); `bp.<id>` written once; at most one bp decode per frame | §8, §9.8, §10 | **WP3** emitters stay under the caps; **WP7** runner reads ≤ 1 bp per frame (today `plan_loads = 4`); **WP2** gets the caps through `schema.validate` |
 | R8 | No permanent disable: backoff (critical 30 s, others 10 min, doubling), auto re-enable, `module.enable` verb, `KERN_FAULT.d.backoff_s` | §3.3.5, §12, §13 | **WP1** kern fault/backoff + `module.enable` handler |
+| L1b | economy owns the builtin tool details (`act.work_detail`, event WORK_DETAIL, `runner.dig_backlog`); the `workshops` deliverable also counts built workshops; `plan.reload {phases:true}`; the runner slices the stage `orders` call (`orders_cells`) | §5, §7, §9.9, §12, §13 | done in live slot L1b (economy, act, runner, kern, lint) |
 
 ---
 
@@ -782,7 +787,7 @@ Each item names the WP that must adapt its code; WP0 changed the contract, `cont
 Generated by `python -m df_llm_helper.schema --write-appendix docs/v2/CONTRACTS.md`; `tests/test_schema.py` fails if this block is stale. The digest covers every schema and registry in `schema.py`, so any contract change shows up here.
 
 <!-- BEGIN GENERATED SCHEMAS -->
-Contract digest: `72014aa69a4d68cf54c26c28c96e7608535da94ceb41a4dbd1ec1b3b9524b903`
+Contract digest: `c2a9313e5e0704a3dc74b7673b5d25632d9ba7afca06ccf92221aef0b4925801`
 
 DESIGN §6 formats and the inbox verb args. Other kinds: `python -m df_llm_helper.schema --json-schema <kind>` with kind in heartbeat, phases, bp, restore, lock, allowlist, persist.marker, persist.projects, persist.plan, persist.phase, persist.mode, persist.drill, persist.kern. Per-type event `d` (§12) and per-verb `args` are checked by `validate()`; the envelopes leave them open. Compact JSON, keys sorted.
 
@@ -823,7 +828,7 @@ DESIGN §6 formats and the inbox verb args. Other kinds: `python -m df_llm_helpe
 
 **inbox.args.plan.reload**
 ```json
-{"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"title":"inbox.args.plan.reload","type":"object"}
+{"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"phases":{"type":"boolean"}},"title":"inbox.args.plan.reload","type":"object"}
 ```
 
 **inbox.args.bp.place**

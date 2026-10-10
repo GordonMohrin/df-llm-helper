@@ -80,7 +80,7 @@ function F.install(W)
   df.job_skill = enum_from({'MINING', 'BONECARVE', 'WOODCRAFT', 'CARPENTRY', 'MASONRY', 'STONECRAFT', 'CUTGEM',
                             'ENCRUSTGEM', 'FORGE_WEAPON', 'FORGE_ARMOR', 'FORGE_FURNITURE', 'METALCRAFT',
                             'GLASSMAKER', 'LEATHERWORK', 'TANNER', 'CLOTHESMAKING', 'WEAVING', 'BOWYER',
-                            'MECHANICS'}, 0)
+                            'MECHANICS', 'WOODCUTTING', 'AXE', 'CROSSBOW', 'BOW'}, 0)
   df.agreement_details_type = enum_from({'JoinParty', 'Residency', 'Citizenship', 'Location'}, 0)
   df.unit_inventory_item = {T_mode = {Hauled = 0, Weapon = 1, Worn = 2}}
   df.building_trapst = {is_instance = function(_, b) return type(b) == 'table' and b._trap == true end}

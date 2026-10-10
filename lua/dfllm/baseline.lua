@@ -6,7 +6,8 @@
 --     keeps seedwatch off every plant with a permanent cook exclusion (seedwatch calls
 --     Kitchen::allowPlantSeedCookery above target+20, which drops the exclusion; seedwatch.plug.dll
 --     imports it) and asks economy to re-check the exclusion after its seedwatch task;
---   * labor assignment belongs to labormanager itself (no work-detail writes anywhere in v2).
+--   * labor assignment belongs to labormanager itself; only the builtin tool details (Miners, Woodcutters,
+--     Hunters) are economy's while the engine is not modern (live L1b).
 -- labormanager (DESIGN §5.5): monitor mode first; after `ab_days` PEACE days an A/B test runs modern
 -- (+ balance, unmanaged labors) for as many PEACE days and keeps the mode with fewer starving days
 -- (economy reports the daily KPI through labor_day). The chosen mode is persisted and re-applied on load.

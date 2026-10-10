@@ -168,6 +168,20 @@ def test_place_skips_taken_sites_and_cache_rules(save, monkeypatch):
     assert calls["rank"][-1] == ("c999", "tombs", {"n": 8})
 
 
+def test_place_workshops_skips_types_the_fort_has(save, monkeypatch):
+    """Live L1b: the workshops template without `skip` builds only the moodable types missing from the fort
+    manifest (fortcore shops, earlier workshops projects)."""
+    calls = install_fake_bp(monkeypatch)
+    for p in cmd.bp_files(save):
+        p.unlink()
+    files.write_json_atomic(save / "bp" / "f1.json", {"v": 2, "tpl": "fortcore", "params": {"stage": 1}, "manifest": {
+        "v": 2, "workshops": [{"type": "Carpenters", "pos": [1, 1, 1]}, {"type": "Masons", "pos": [2, 1, 1]}]}})
+    cmd.place(save, "workshops", {}, "S1", "w1")
+    assert calls["rank"][-1] == ("c201", "workshops", {"skip": "Carpenters,Masons"})
+    cmd.place(save, "workshops", {"skip": ""}, "S1", "w2")                 # an explicit skip is kept
+    assert calls["rank"][-1] == ("c201", "workshops", {"skip": ""})
+
+
 def test_place_real_bp_param_mismatch_reranks(save):
     pytest.importorskip("df_llm_helper.bp.sites")
     for p in cmd.bp_files(save):

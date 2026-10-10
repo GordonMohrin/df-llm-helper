@@ -311,6 +311,25 @@ def test_forbidden_everywhere_including_act(src, rule):
     assert rule in rule_set(src, "lua/dfllm/act.lua")
 
 
+WORK_DETAIL = """
+    local I = {}
+    function I.work_detail(name, id, on)
+      local u = df.unit.find(id)
+      local wd = df.global.plotinfo.labor_info.work_details[0]
+      wd.assigned_units:insert(0, id)
+      u.status.labors[0] = on
+    end
+    function I.other(u) u.status.labors[0] = true end
+    return I
+"""
+
+
+def test_labor_write_only_inside_act_work_detail():
+    """live L1b: economy owns the builtin tool details; act.work_detail is their only writer."""
+    assert rules(WORK_DETAIL, "lua/dfllm/act.lua") == [(9, "labor-write")]
+    assert "labor-write" in rule_set(WORK_DETAIL, MOD)
+
+
 def test_sense_and_snapshot_may_read_but_must_filter():
     sense_ok = """
         for _, u in ipairs(df.global.world.units.active) do

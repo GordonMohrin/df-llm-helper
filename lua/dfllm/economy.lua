@@ -2,7 +2,8 @@
 -- staged orders-library imports, dfllm-tagged supply orders, the PLUMP_HELMET kitchen exclusion,
 -- the cancel-loop detector, labormanager starvation KPI and the idle rule D-03 (DESIGN §5.5, §5.9, §5.11).
 -- Reads: items.other vectors (sliced), buildings.other vectors, manager orders, citizens by census id.
--- Writes only through K.act (orders_import, orders, workorder, order_suspend, kitchen_exclude, run).
+-- Writes only through K.act (orders_import, orders, workorder, order_suspend, kitchen_exclude, appoint,
+-- work_detail, run). Since live L1b economy is the sole writer of the builtin tool work details.
 local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
 
@@ -19,7 +20,7 @@ M.DEFAULTS = {
   spike_x = 3,
   food_cats = {'FOOD', 'MEAT', 'FISH', 'CHEESE', 'EGG', 'PLANT', 'PLANT_GROWTH'},
   mood_keys = {'cloth', 'leather', 'bone', 'shell', 'gems', 'bars'},
-  mood_from_phase = 'P3',
+  mood_from_phase = 'P1',          -- live L1b: two dwarves died after failed moods; the mood stock is a P1 goal
   -- the plant and its seeds: seedwatch never manages these plants (baseline), so its seeds need the ban
   kitchen = {{plant = 'MUSHROOM_HELMET_PLUMP', mat = 'STRUCTURAL', item = 'PLANT', what = 'Cook'},
              {plant = 'MUSHROOM_HELMET_PLUMP', mat = 'SEED', item = 'SEEDS', what = 'Cook'}},
@@ -35,6 +36,17 @@ M.DEFAULTS = {
            supply = {'BREWER', 'PLANT', 'COOK', 'HERBALIST', 'PROCESS_PLANT', 'MILLER', 'BUTCHER', 'CARPENTER',
                      'MASON', 'FEED_WATER_CIVILIANS', 'RECOVER_WOUNDED', 'MINE', 'CUTWOOD', 'HUNT', 'FISH'},
            builtin = {'MINE', 'CUTWOOD', 'HUNT', 'FISH'}},
+  -- builtin tool details (live L1b): in labormanager's monitor mode nobody staffs them (L1: one miner for
+  -- the whole fort), so economy is their sole writer whenever the engine is not modern. Miners follow the
+  -- dig backlog (runner + designation jobs), woodcutters the log stock against autochop's band (wood:
+  -- {below -> n[1], below -> n[2], else n[3]}), hunters only a famine; each capped by its tools.
+  tools = {shrink_days = 3,
+           key_labors = {'MASON', 'CARPENTER', 'BREWER', 'PLANT', 'COOK', 'MECHANIC', 'DIAGNOSE', 'SMELT',
+                         'FORGE_WEAPON', 'FORGE_ARMOR'},
+           details = {{name = 'Miners', skill = 'MINING', melee = {'MINING'}, min = 2, max = 4, max_pop = 20,
+                       tiles_per = 40},
+                      {name = 'Woodcutters', skill = 'WOODCUTTING', melee = {'AXE'}, wood = {60, 150}, n = {2, 1, 0}},
+                      {name = 'Hunters', skill = 'CROSSBOW', ranged = {'CROSSBOW', 'BOW'}, famine = 2}}},
   stages = {
     {lib = 'library/basic', any = {'migrants', 'cit>=10'}},
     {lib = 'library/rockstock', any = {'workshop:Masons'}},
@@ -58,7 +70,7 @@ M.DEFAULTS = {
     {tag = 'dfllm:food', key = 'food_d', per_job = 4, max_jobs = 20,
      spec = {job = 'PrepareMeal', meal_ingredients = 2, frequency = 'OneTime',
              item_conditions = {{condition = 'AtLeast', flags = {'unrotten', 'cookable'}, value = 10}}}},
-    {tag = 'dfllm:cloth', key = 'cloth', per_job = 1, max_jobs = 10, from_phase = 'P3',
+    {tag = 'dfllm:cloth', key = 'cloth', per_job = 1, max_jobs = 10, from_phase = 'P1',
      spec = {job = 'WeaveCloth', material_category = {'plant'}, frequency = 'OneTime',
              item_conditions = {{condition = 'AtLeast', flags = {'collected', 'plant'}, item_type = 'THREAD', value = 1}}}},
   },
@@ -97,7 +109,7 @@ end
 local function decision(K, id) return tostring((K.cfg.decisions or {})[id] or C.DECISIONS[id] or '') end
 
 -- persist m.economy; maps are re-tagged as objects (a decoded empty map is an array, json.lua:104)
-local MAPS = {'imported', 'orders', 'low'}
+local MAPS = {'imported', 'orders', 'low', 'tools'}
 local function pstate(K)
   local p = K.persist.get('m.economy')
   if type(p) ~= 'table' then
@@ -637,10 +649,9 @@ function M.parse_labor_list(out)
   return r
 end
 
-local function labor_fix(K, c, p)
+local function labor_fix(K, c, p, engine)
   local lc = c.labor or M.DEFAULTS.labor
-  local okm, mode = K.act.run('labormanager', 'mode')
-  if not okm or not tostring(mode):lower():find('modern', 1, true) then return 0 end
+  if engine ~= 'modern' then return 0 end
   local ok, out = K.act.run('labormanager', 'list')
   if not ok then return 0 end
   local list, builtin, n, fallback = M.parse_labor_list(out), {}, 0, nil
@@ -664,6 +675,187 @@ local function labor_fix(K, c, p)
     end
   end
   return n
+end
+
+---------------------------------------------------------------- tool work details (live L1b)
+-- economy is the sole writer of the builtin Miners / Woodcutters / Hunters memberships (act.work_detail, the
+-- work details screen) while labormanager is not in modern mode; modern manages them itself. Members are
+-- adult citizens; a soldier, a member of an earlier tool detail or a unit that left the fort is removed at
+-- once. New members: no noble (militia posts excepted), no moody or insane dwarf, no sole holder of a key
+-- labor, nobody from another tool detail; the best skill joins first. Shrinking waits shrink_days and drops
+-- those it would not pick first, then the lowest skill.
+local DIG_JOBS = {Dig = true, CarveUpwardStaircase = true, CarveDownwardStaircase = true,
+                  CarveUpDownStaircase = true, CarveRamp = true, DigChannel = true}
+local MILITIA = {MILITIA_CAPTAIN = true, MILITIA_COMMANDER = true}
+
+-- designation jobs waiting in the job list (also digging nobody planned through the runner)
+local function dig_jobs()
+  local n = 0
+  pcall(function()
+    local link, i = df.global.world.jobs.list.next, 0
+    while link and i < 5000 do
+      local j = link.item
+      if j and DIG_JOBS[df.job_type[j.job_type] or ''] then n = n + 1 end
+      link, i = link.next, i + 1
+    end
+  end)
+  return n
+end
+
+-- weapons usable as the detail's tool (picks, axes, bows): item defs by skill, not forbidden or foreign
+local function tool_count(spec)
+  local want_m, want_r = {}, {}
+  for _, s in ipairs(spec.melee or {}) do if df.job_skill[s] then want_m[df.job_skill[s]] = true end end
+  for _, s in ipairs(spec.ranged or {}) do if df.job_skill[s] then want_r[df.job_skill[s]] = true end end
+  local n, defs = 0, {}
+  for _, it in ipairs(df.global.world.items.other.WEAPON) do
+    local f = it.flags
+    if not (f.forbid or f.trader or f.garbage_collect or f.removed or f.hostile) then
+      local s = subtype(it)
+      local d = defs[s]
+      if d == nil then
+        local def = dfhack.items.getSubtypeDef(df.item_type.WEAPON, s)
+        d = def ~= nil and (want_m[def.skill_melee] == true or want_r[def.skill_ranged] == true)
+        defs[s] = d
+      end
+      if d then n = n + 1 end
+    end
+  end
+  return n
+end
+
+local function tool_target(K, spec, cit, inv, p)
+  if spec.tiles_per then
+    local ok, rb = K.call('runner', 'dig_backlog')
+    local backlog = math.max(ok and math.tointeger(rb) or 0, dig_jobs())
+    local cap = cit >= (spec.max_pop or 0) and spec.max or spec.min
+    local want = (backlog + spec.tiles_per - 1) // spec.tiles_per
+    return math.max(spec.min, math.min(cap, want)), backlog
+  elseif spec.wood then
+    local w = inv.wood or 0
+    return (w < spec.wood[1] and spec.n[1]) or (w < spec.wood[2] and spec.n[2]) or spec.n[3], w
+  end
+  return p.famine and spec.famine or 0, p.famine and 1 or 0
+end
+
+local function noble(u)
+  local ok, np = pcall(dfhack.units.getNoblePositions, u)
+  if not ok or type(np) ~= 'table' and type(np) ~= 'userdata' then return false end
+  for _, e in ipairs(np) do
+    local code = e.position and e.position.code
+    if code and not MILITIA[code] then return true end
+  end
+  return false
+end
+
+local function labor_on(u, l)
+  local ok, v = pcall(function() return u.status.labors[l] end)
+  return ok and v == true
+end
+
+local function tools(K, c, p, inv, engine)
+  local tc = c.tools
+  local cu = K.census.u
+  if type(tc) ~= 'table' or engine == nil or engine == 'modern' then return 0 end
+  if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then return 0 end
+  local wds = {}
+  for _, w in ipairs(df.global.plotinfo.labor_info.work_details) do wds[dfhack.df2utf(w.name)] = w end
+  local cit, adults, count, holder = {}, {}, {}, {}
+  for _, id in ipairs(cu.ids) do
+    local u = df.unit.find(id)
+    if u and not dfhack.units.isDead(u) then
+      cit[id] = u
+      if dfhack.units.isAdult(u) then
+        adults[#adults + 1] = u
+        for _, l in ipairs(tc.key_labors or {}) do
+          if labor_on(u, l) then count[l] = (count[l] or 0) + 1; holder[l] = id end
+        end
+      end
+    end
+  end
+  local sole = {}
+  for l, n in pairs(count) do if n == 1 then sole[holder[l]] = true end end
+  local member = {}                          -- unit id -> name of its first tool detail
+  for _, spec in ipairs(tc.details or {}) do
+    local wd = wds[spec.name]
+    if wd then for _, id in ipairs(wd.assigned_units) do member[id] = member[id] or spec.name end end
+  end
+  local function soft_ok(u)                  -- may be picked
+    return not noble(u) and not sole[u.id] and not ((u.mood or -1) >= 0)
+  end
+  p.tools = json.object(type(p.tools) == 'table' and p.tools or {})
+  local now, changes, taken = K.now().tick, 0, {}
+  local function set(spec, id, on, why, target)
+    local ok = K.act.work_detail(spec.name, id, on)
+    if ok then
+      changes = changes + 1
+      local u = df.unit.find(id)
+      local who = u and dfhack.df2utf(dfhack.units.getReadableName(u)) or ('unit ' .. id)
+      K.emit('WORK_DETAIL', 'B', string.format('%s %s %s (%s, target %d)', spec.name, on and '+' or '-', who, why,
+                                               target), {detail = spec.name, unit = id, on = on and 1 or 0, n = target,
+                                                         why = why})
+    end
+    return ok
+  end
+  for _, spec in ipairs(tc.details or {}) do
+    local wd = wds[spec.name]
+    if wd then
+      local target, basis = tool_target(K, spec, #cu.ids, inv, p)
+      if target > 0 and (spec.melee or spec.ranged) then target = math.min(target, tool_count(spec)) end
+      local sid = df.job_skill[spec.skill]
+      local function skill(u) return sid and dfhack.units.getNominalSkill(u, sid, true) or 0 end
+      local keep = {}
+      for _, id in ipairs(wd.assigned_units) do keep[#keep + 1] = id end
+      local cur = {}
+      for _, id in ipairs(keep) do
+        local u = cit[id]
+        if not u or not dfhack.units.isAdult(u) or u.military.squad_id >= 0 or taken[id] then
+          set(spec, id, false, taken[id] and ('in ' .. taken[id]) or 'not eligible', target)
+        else cur[#cur + 1] = u end
+      end
+      local ps = p.tools[spec.name] or {}
+      if #cur < target then
+        ps.low = nil
+        local cand = {}
+        for _, u in ipairs(adults) do
+          if not member[u.id] and not taken[u.id] and u.military.squad_id < 0 and soft_ok(u) then cand[#cand + 1] = u end
+        end
+        table.sort(cand, function(a, b)
+          local sa, sb = skill(a), skill(b)
+          if sa ~= sb then return sa > sb end
+          return a.id < b.id
+        end)
+        for _, u in ipairs(cand) do
+          if #cur >= target then break end
+          if set(spec, u.id, true, string.format('basis %d', basis), target) then
+            cur[#cur + 1] = u
+            member[u.id] = spec.name
+          end
+        end
+      elseif #cur > target then
+        ps.low = ps.low or now
+        if now - ps.low >= (tc.shrink_days or 3) * DAY then
+          table.sort(cur, function(a, b)               -- the ones it would pick first stay
+            local oa, ob = soft_ok(a), soft_ok(b)
+            if oa ~= ob then return oa end
+            local sa, sb = skill(a), skill(b)
+            if sa ~= sb then return sa > sb end
+            return a.id < b.id
+          end)
+          while #cur > target do
+            local u = table.remove(cur)
+            if not set(spec, u.id, false, string.format('basis %d', basis), target) then cur[#cur + 1] = u; break end
+          end
+          ps.low = nil
+        end
+      else
+        ps.low = nil
+      end
+      p.tools[spec.name] = json.object(ps)
+      for _, u in ipairs(cur) do taken[u.id] = spec.name end
+    end
+  end
+  return changes
 end
 
 -- CONTRACTS §7: the supply alarm, or nil (arbiter brakes tempo while it is set)
@@ -733,7 +925,12 @@ local function daily(K, c)
   validation_watch(K, p)
   alarm_check(K, c, p, days)
   famine(K, c, p, days, inv)
-  pcall(labor_fix, K, c, p)
+  -- the engine decides who owns the builtin tool details: modern labormanager, otherwise economy (L1b)
+  local okm, mode_out = K.act.run('labormanager', 'mode')
+  local engine = okm and (tostring(mode_out):lower():find('modern', 1, true) and 'modern' or 'other') or nil
+  pcall(labor_fix, K, c, p, engine)
+  local okt, nt = pcall(tools, K, c, p, inv, engine)
+  if not okt then K.log('warn', 'tool details: %s', tostring(nt)) end
   supply(K, c, p, days, inv)
   imports(K, c, p)
   -- labor KPIs; PEACE days feed baseline's labormanager A/B test

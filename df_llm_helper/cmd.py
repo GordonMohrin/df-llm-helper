@@ -324,12 +324,38 @@ def emit_at(tpl: str, params: dict, site: dict, label: str, bp_id: str) -> dict:
     return doc
 
 
+def _moodable() -> list[str]:
+    try:
+        return list(load_bp("rooms").MOODABLE_TYPES)
+    except (BpUnavailable, AttributeError):
+        return []
+
+
+def workshops_missing(save_dir: Path, types: list | None = None) -> list[str]:
+    """Moodable workshop types (or `types`, 'moodable' expanded) that no workshop of the fort manifest has,
+    built or planned (fort_manifest merges every bp/*.json)."""
+    want: list[str] = []
+    for t in (types or ["moodable"]):
+        for n in (_moodable() if t == "moodable" else [t]):
+            if n not in want:
+                want.append(n)
+    have = {w.get("type") for w in fort_manifest(save_dir).get("workshops") or [] if isinstance(w, dict)}
+    return [n for n in want if n not in have]
+
+
 def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str, occ: Occupancy | None = None,
           same: dict | None = None, snap: dict | None = None) -> dict:
     """Emit tpl for a site label without overlapping other projects (occ, default: every bp/*.json but bp_id).
     'same' = the anchor/rot of this template's last placement (`same`, else bp/.placed-<tpl>.json);
-    'S<k>' = the k-th ranked site whose footprint is free, so S1 is always the best free site."""
+    'S<k>' = the k-th ranked site whose footprint is free, so S1 is always the best free site.
+    `workshops` without a `skip` param skips the moodable types the fort already has or has planned
+    (live L1b: the fortcore shops, earlier workshops projects)."""
     params = dict(params or {})
+    if tpl == "workshops" and "skip" not in params:
+        miss = set(workshops_missing(save_dir))
+        have = [n for n in _moodable() if n not in miss]
+        if have:
+            params["skip"] = ",".join(have)
     occ = occ if occ is not None else occupancy(save_dir, skip={bp_id})
     if label == SAME:
         s = same or files.read_json(_placed(save_dir, tpl))

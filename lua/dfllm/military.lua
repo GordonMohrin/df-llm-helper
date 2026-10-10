@@ -1,6 +1,7 @@
 -- military (WP6): squads A and B (melee) and C (crossbows), Constant training, never Off duty
 -- (DESIGN §5.3, CONTRACTS §7). Squads are adopted by name or created once; uniforms are set once;
--- recruits are picked read-only (no work-detail or labor writes: labormanager is the sole owner).
+-- recruits are picked read-only (no work-detail or labor writes: labormanager and, for the builtin tool
+-- details, economy own them).
 -- Postures (set by siege/drill through military.posture):
 --   TRAIN          all squads train (routine 'Constant training', orders cleared)
 --   STATION_B1     like TRAIN, the first melee squad stationed at manifest.stations.melee (inside B1)

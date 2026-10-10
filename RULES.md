@@ -163,8 +163,10 @@ manifest kill boxes, never into shafts or stairs. No civilian reserve squads.
 **Economy:** natives first (orders library, labormanager monitor, suspendmanager, buildingplan,
 autochop wood ≥ 14, autobutcher low, tailor, seedwatch on farmed crops at 12). KPI = 0 starving
 postings, not idle %. Idle > 40 % for 3 days → useful backlog only, never filler digging.
-**Moods:** all 12 moodable workshop types by the end of Y1; stock ≥ 10 cloth, leather, bone, shell,
-gems, bars; never cancel a mood job.
+**Moods:** all 12 moodable workshop types in P1; stock ≥ 10 cloth, leather, bone, shell, gems, bars
+from P1; never cancel a mood job.
+**Labor:** labormanager monitor; economy staffs the Miners (dig backlog, 2-4), Woodcutters (logs) and
+Hunters (famine only) details itself; you never change work details.
 **Dead:** one 1x1 tomb per coffin, free tombs ≥ open corpses + 6; autoslab, burial, preserve-tombs.
 **Food/drink:** drink ≥ 170 days, food ≥ 60, ≥ 5 meal kinds; plump helmets are brewed, never cooked.
 **Happiness:** dining hall → own bedrooms (≥ 500) → general temple (≥ 2,000 on petition) → tavern →
@@ -181,9 +183,9 @@ plus the `dfllm-melt` automelt pile).
 | Phase | Deliverables |
 |---|---|
 | P0 | baseline; probe stair (damp → stop); fortcore stage 1; farms (own template, soil sites) |
-| P1 | dining, well, depot, office (manager: chair + office zone), craftsdwarf, carpenter, mason, still, kitchen |
+| P1 | dining, office (manager: chair + office zone), all 12 moodable workshops (`workshops`) + still + kitchen, mood stock goals |
 | P2 | trap hall, B1, barracks (fortcore stage 2), captive pit (`captives`), squad A |
-| P3 | all moodable workshops (incl. forge), smelter + wood furnace (`furnaces`), hospital, orders basic + rockstock |
+| P3 | smelter + wood furnace (`furnaces`), hospital, orders basic + rockstock |
 | P4 | 1 caravan traded, bedrooms, tombs, tavern, temple |
 | P5 | fortcore stage 3, squads B and C, drill 1 passed, R1, drink ≥ 170 d, food ≥ 60 d |
 | P6 ★ (Y2) | military orders, metal ≥ 80 %, ≥ 300 bolts, R2 cap raise |

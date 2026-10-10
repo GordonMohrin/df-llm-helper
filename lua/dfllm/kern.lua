@@ -620,6 +620,21 @@ local INSPECT = {state = true, modules = true, census = true, manifest = true, p
 
 local function kern_verb(st, verb, args, cmd)
   local K = st.K
+  if verb == 'plan.reload' and args.phases == true then
+    -- live L1b: an adopted fort keeps the phase list of its adopt time; this replaces it with the repo's
+    -- plans/year1.json (the plan itself and the current phase id stay; runner re-checks the phase)
+    local repo = K.cfg.paths and K.cfg.paths.repo or '.'
+    local ph, err = fio.read_json(repo .. '/plans/year1.json')
+    if type(ph) ~= 'table' or ph.kind ~= 'phases' or type(ph.phases) ~= 'table' or #ph.phases == 0 then
+      return false, 'plans/year1.json: ' .. tostring(err or 'not a phase list')
+    end
+    local prev = K.persist.get('plan')
+    local doc = prev and prev.plan
+    if doc == json.null then doc = nil end
+    K.plan = M.with_defaults(doc, ph)
+    st.as_kern(K.persist.set, 'plan', {v = 2, plan = doc or json.null, phases = ph, loaded = st.now.tick})
+    return true, string.format('phases reloaded (%d)', #ph.phases), {phases = #ph.phases}
+  end
   if verb == 'plan.reload' then
     local doc, err = fio.read_json(st.paths.save .. '/plan.json')
     if type(doc) ~= 'table' then return false, 'plan.json: ' .. tostring(err) end

@@ -79,7 +79,7 @@ Claude Code orchestrator (≤60k ctx, Monitor on `dfllm follow`) → fresh Sonne
 | pop cap | readiness → `pop-control set max-pop` | readiness level ∧ plan ceiling | inbox can only lower it |
 | designations, buildings, zones, burrows, locations | runner (care asks the runner for tomb zones) | project queue | plan.json |
 | manager orders | economy (library imports, `quickfort orders`, `dfllm:`-tagged supply orders) | phase + stock days | plan.orders |
-| work details/labors | **labormanager only** | — | military only *reads* membership to filter recruits |
+| work details/labors | **labormanager**, except the builtin tool details Miners/Woodcutters/Hunters: **economy** (`act.work_detail`) whenever labormanager is not in modern mode (live L1b: in monitor mode nobody staffed them, one miner for the fort) | miners from the dig backlog (min 2, up to 4 from pop 20), woodcutters from logs vs autochop's band, hunters only in a famine; each capped by picks/axes/bows; no soldier, noble, moody dwarf or sole key-labor holder is picked | military only *reads* membership to filter recruits |
 | kitchen, seedwatch, stockpile settings | economy | baseline | — |
 | forbid/dump/melt flags on items | care (corpses, captives, mood materials) | care rules | — |
 | runtime settings (autosave, visitor cap, gfps, overlays) | arbiter at boot; restored on unload | profile + decisions | — |
@@ -143,7 +143,7 @@ Gameplay modules run on `cur_year_tick` deltas, which stay correct under timestr
 - **Routines:** Constant training, never Off duty. Minimum soldiers per order = half the squad.
 - **Setup [S2]:** routines are configured once, resolved by **name**, and verified on a backup save. At runtime only `cur_routine_idx` and the orders change.
 - **Uniform:** Replace clothing, full metal armor plus shield. Bronze and bought metal in Y1, iron and steel in Y2 via `library/military`. Goblin gear is melted through a `logistics add melt` pile.
-- **Recruits** are chosen read-only. Excluded: members of the builtin Miners, Woodcutters and Hunters details, sole holders of a key labor, nobles. Preferred: existing combat skill, then strength and toughness. There are **no work-detail writes** (labormanager is the sole owner).
+- **Recruits** are chosen read-only. Excluded: members of the builtin Miners, Woodcutters and Hunters details, sole holders of a key labor, nobles. Preferred: existing combat skill, then strength and toughness. military writes **no work details**: economy owns the tool details (it never picks soldiers and drops a member who joins a squad), labormanager the rest.
 - `autotraining` only runs a geared need-squad that is never drafted. No civilian squads.
 - **KPIs:** worn % (items worn ÷ uniform slots, measured at T+1,200 of a drill), combat value (weapon + shield + armor + dodge skill levels).
 
@@ -157,7 +157,8 @@ Gameplay modules run on `cur_year_tick` deltas, which stay correct under timestr
 **5.5 Economy and labor.**
 - **Baseline on adopt and on every load:** `control-panel enable` for the native list in §3; `prioritize -a defaults`; autochop with wood ≥14; autobutcher with low targets and ≤2 cats; `tailor materials silk cloth yarn`; `pop-control set max-pop 55` and `wave-size 8`; `labormanager mode monitor`.
 - **Staged orders imports:** `library/basic` after the first migrants, `rockstock` once a mason exists, `furnace`/`smelting` with a smelter and fuel, `military` with a forge, all followed by `orders sort` and `orders recheck`.
-- **labormanager:** after 2 seasons in monitor mode, an A/B test switches to `modern` + `balance balanced` + `labor MINE unmanaged`. The test compares starving postings and projects done [S5].
+- **labormanager:** monitor is the default. After 2 seasons in monitor mode an A/B test switches to `modern` + `balance balanced`; it compares the share of days with starving postings [S5]. Live L1 measured modern worse on Castlerisen (2,637 starving postings vs 758 in monitor; BREWER starved 243 cycles while dwarves died of thirst), so modern runs only behind the LABOR_STARVED fallback: a starved supply labor (≥ 100 cycles, about 2 game days at labormanager's cadence) switches back to monitor at once and ends the A/B test. That makes modern safe to try but not better: monitor stays the default until a fort measures modern better.
+- **Tool details (live L1b):** in monitor mode economy is the sole writer of the builtin Miners/Woodcutters/Hunters memberships (`act.work_detail`, the work details screen): miners = clamp(ceil(dig backlog / 40), 2, 4 from pop 20 else 2) where the backlog is `runner.dig_backlog()` or the designation jobs, whichever is larger; woodcutters 2 below 60 logs, 1 below 150, else 0; hunters 2 during a famine; every count capped by usable picks, axes or bows. Growth is immediate, shrinking waits 3 days. A dwarf is in at most one tool detail. In modern mode labormanager manages them itself and economy writes nothing.
 - **KPI:** starving postings = 0, parsed from `labormanager status` once per game day.
 - **Idle (D-03):** act only if idle >40 % for 3 game days **and** the useful backlog is not empty. The backlog holds boulders→blocks (capped), walls and overhangs, smoothing of *used* rooms, capped trade crafts, and `combine`. Never filler digging.
 - **Cancel-loop detector:** an order cancelled ≥5 times per day is suspended and reported (Run 4).
@@ -181,8 +182,8 @@ Gameplay modules run on `cur_year_tick` deltas, which stay correct under timestr
 - Stuck caravans: `fix/stuck-merchants` (D-08 drops the `flags1.left` edit).
 
 **5.9 Moods.**
-- All 12 moodable workshop types by the end of Y1, checked against the manifest.
-- A mood stock of cloth, leather, bone, shell, gems and bars ≥10 each, kept as order conditions.
+- All 12 moodable workshop types in **P1** (live L1b: two dwarves died after fey moods failed for want of a workshop): fortcore stage 1 builds carpenter, mason, craftsdwarf and mechanic, the `workshops` template the rest (it skips the types the fort already has or has planned). The deliverable counts the manifest and every built workshop.
+- A mood stock of cloth, leather, bone, shell, gems and bars ≥10 each from P1 on (STOCK_LOW per key, a cloth supply order).
 - On MOOD_START, care unforbids and un-dumps the needed materials and emits MOOD_NEED if a material is missing.
 - `act` has **no** job-removal function except `cancel_own_lever_job`. Lint enforces this.
 
@@ -202,9 +203,9 @@ Gameplay modules run on `cur_year_tick` deltas, which stay correct under timestr
 | Phase | Deliverables |
 |---|---|
 | P0 | baseline; probe stair (damp → stop); fortcore stage 1 |
-| P1 | dining, well, depot, offices, craftsdwarf workshop |
+| P1 | dining, office, all 12 moodable workshops + still + kitchen, mood stock goals (the well and the depot are fortcore stage 1) |
 | P2 | trap hall, B1, barracks, squad A |
-| P3 | smelter, forge, all workshop types, hospital, mood stock |
+| P3 | smelter + wood furnace, hospital, orders basic + rockstock |
 | P4 | caravan trade, bedrooms, tombs, tavern, temple |
 | P5 | stage 3, gallery, squads B and C, **drill 1** |
 | P6 (Y2) | iron or steel kits, ≥300 bolts, ★ R2 cap raise |
@@ -413,7 +414,7 @@ Wave 0 freezes the contracts. Waves 1 and 2 code in parallel against mock-K and 
 | Melee in an open killing field (kernel, native) | melee only inside B1, crossbows in a roofed gallery; kill boxes only (§5.2-5.3) |
 | GATE_FAIL with no in-game fallback (kernel) | BREACH: Tiefe+ alert, B2 seal, B2 hold, no LLM in the loop |
 | No per-save opt-in; global prefs patches (kernel, doctrine) | site marker + manifest in persistent data; runtime settings with restore; prefs untouched |
-| Two writers on work details (all three) | labormanager sole owner; military read-only filter |
+| Two writers on work details (all three) | one writer per detail: labormanager, except the builtin tool details (economy, only while labormanager is not modern); military read-only filter |
 | Lua untestable outside DF (all three) | `tools/luahost.py` on `hack/lua53.dll` (verified) + mock-K + in-game selftest |
 | Acceptance needs sieges (all three) | drill-based acceptance with real levers and routines (§14) |
 | os.rename is not atomic on Windows (kernel) | a/b slots with seq; new-name renames only (verified) |

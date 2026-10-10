@@ -371,6 +371,40 @@ def test_follow_plan_exhausted_p0_autostarts_first_deliverable(save, monkeypatch
     assert f.jobs["starter"]["tpl"] == "farms"
 
 
+def test_follow_plan_exhausted_p1_starts_the_workshops_deliverable(save, monkeypatch):
+    """Live L1b: two dwarves died after failed moods; P1 needs every moodable workshop type. With dining and
+    office applied, PLAN_EXHAUSTED in P1 starts the workshops template; once the fort manifest has every
+    moodable type (built or planned) nothing more is started."""
+    install_fake_bp(monkeypatch)
+    for p in (save / "bp").glob("*.json"):
+        p.unlink()
+    for i, tpl in enumerate(("dining", "office")):
+        files.write_json_atomic(save / "bp" / f"c90{i}.json", {"v": 2, "tpl": tpl, "params": {}})
+    st = files.read_state(save)
+    monkeypatch.setattr(files, "read_state", lambda d: dict(st or {}, proj=[]))
+    c = Clock()
+    f, out = F(c)
+    f.poll()
+    append_events(save, [ev(8813, "PLAN_EXHAUSTED", "plan exhausted in P1", {"phase": "P1", "year": 281})])
+    f.poll()
+    (snap_cmd,) = inbox_docs(save)
+    assert snap_cmd["verb"] == "snapshot" and f.jobs["starter"]["tpl"] == "workshops"
+    from df_llm_helper.bp.rooms import MOODABLE_TYPES
+    from df_llm_helper.cmd import workshops_missing
+    assert workshops_missing(save, ["moodable", "Still"])[:2] == MOODABLE_TYPES[:2]
+    files.write_json_atomic(save / "bp" / "c902.json", {"v": 2, "tpl": "fortcore", "params": {"stage": 1}, "manifest": {
+        "v": 2, "workshops": [{"type": t, "pos": [i, 0, 0]} for i, t in enumerate(MOODABLE_TYPES)]}})
+    assert workshops_missing(save, ["moodable"]) == []
+    assert workshops_missing(save, ["moodable", "Still"]) == ["Still"]
+    for p in (save / "inbox").glob("*.json"):
+        p.unlink()
+    f.jobs.pop("starter", None)
+    (save / "bp" / "c901.json").unlink()            # office missing again: that one is started, not workshops
+    append_events(save, [ev(8814, "PLAN_EXHAUSTED", "plan exhausted in P1", {"phase": "P1", "year": 281})])
+    f.poll()
+    assert f.jobs["starter"]["tpl"] == "office"
+
+
 def test_follow_plan_exhausted_outside_auto_phases_only_wakes(save, monkeypatch):
     install_fake_bp(monkeypatch)
     c = Clock()

@@ -361,6 +361,112 @@ T.test('starved supply labors: tool labors -> managed, others -> monitor fallbac
   T.eq(#W.find_events('LABOR_STARVED'), 0, 'monitor mode assigns nothing: left alone')
 end)
 
+-- live L1b: builtin tool details (Miners, Woodcutters, Hunters) in a fake labor_info, act.work_detail with effect
+local function tool_world(opts)
+  opts = opts or {}
+  local backlog, mode = opts.backlog or 0, opts.mode or 'Mode: monitor (labormanager)'
+  local ctl = {}
+  local W = world{cit = opts.cit or 12, setup = function(W)
+    local kmock = require('dfllm.util.k_mock')
+    local function wd(name, labor, ids)
+      return {name = name, assigned_units = kmock.vec(ids or {}), allowed_labors = {[0] = false, [labor] = true},
+              flags = {mode = 3}}
+    end
+    ctl.wds = {Miners = wd('Miners', 1, opts.miners), Woodcutters = wd('Woodcutters', 2, opts.cutters),
+               Hunters = wd('Hunters', 3, opts.hunters)}
+    df.global.plotinfo.labor_info = {work_details = kmock.vec{ctl.wds.Miners, ctl.wds.Woodcutters, ctl.wds.Hunters}}
+    W.load({name = 'runner', every = {ticks = 600}, dig_backlog = function() return ctl.backlog or backlog end})
+    W.act_result('run', function(cmd, a1)
+      if cmd == 'labormanager' and a1 == 'mode' then return true, ctl.mode or mode end
+      return true, ''
+    end)
+    W.act_result('work_detail', function(name, id, on)
+      local v = ctl.wds[name].assigned_units
+      for i = 0, #v - 1 do if v[i] == id then if not on then v:erase(i) end; return true end end
+      if on then v:insert('#', id) end
+      return true
+    end)
+    W.subdefs[1] = {id = 'ITEM_WEAPON_PICK', skill_melee = df.job_skill.MINING, skill_ranged = -1}
+    W.subdefs[2] = {id = 'ITEM_WEAPON_AXE_BATTLE', skill_melee = df.job_skill.AXE, skill_ranged = -1}
+    W.subdefs[3] = {id = 'ITEM_WEAPON_CROSSBOW', skill_melee = -1, skill_ranged = df.job_skill.CROSSBOW}
+    for _ = 1, opts.picks or 3 do F.item(W, 'WEAPON', {subtype = 1}) end
+    F.item(W, 'WEAPON', {subtype = 1, flags = {forbid = true}})
+    for _ = 1, opts.axes or 2 do F.item(W, 'WEAPON', {subtype = 2}) end
+    F.item(W, 'WEAPON', {subtype = 3})
+    for _ = 1, opts.wood or 200 do F.item(W, 'WOOD', {}) end
+    F.item(W, 'FOOD', {stack_size = opts.food or 500, subtype = 1})
+    F.item(W, 'DRINK', {stack_size = 500})
+    if opts.setup then opts.setup(W) end
+  end}
+  for i = 1, opts.cit or 12 do
+    local u = W.unit(i)
+    u.status.labors = {}
+    u.mood = -1
+    u._m.skills = {MINING = (i == 5 and 10) or (i == 7 and 6) or 0, WOODCUTTING = i == 9 and 4 or 0}
+  end
+  ctl.W = W
+  return W, ctl
+end
+
+local function members(ctl, name)
+  local r = {}
+  for _, id in ipairs(ctl.wds[name].assigned_units) do r[#r + 1] = id end
+  table.sort(r)
+  return r
+end
+
+T.test('tool details: miners follow the dig backlog (min 2, max 4 from pop 20), capped by picks; best skill first', function()
+  local W, ctl = tool_world{cit = 12, miners = {5}}
+  days(W, 1)
+  T.eq(members(ctl, 'Miners'), {5, 7}, 'min 2: the skilled miner stays, the next best joins')
+  T.eq(F.bad_runs(W), {})
+  local ev = W.find_events('WORK_DETAIL')
+  T.eq({ev[1].d.detail, ev[1].d.unit, ev[1].d.on, ev[1].d.n}, {'Miners', 7, 1, 2})
+  ctl.backlog = 400
+  days(W, 1)
+  T.eq(#members(ctl, 'Miners'), 2, 'below pop 20 the cap is the minimum')
+  local W2, ctl2 = tool_world{cit = 22, miners = {5}, backlog = 400, picks = 3}
+  days(W2, 1)
+  T.eq(#members(ctl2, 'Miners'), 3, 'pop 22, 10 tiles per... 400/40 = 10 > max 4, but only 3 usable picks')
+  local W3, ctl3 = tool_world{cit = 22, miners = {5}, backlog = 400, picks = 6}
+  days(W3, 1)
+  T.eq(#members(ctl3, 'Miners'), 4, 'max 4')
+  ctl3.backlog = 0
+  days(W3, 2)
+  T.eq(#members(ctl3, 'Miners'), 4, 'shrinking waits shrink_days')
+  days(W3, 2)
+  T.eq(members(ctl3, 'Miners'), {5, 7}, 'back to the minimum, the best skills stay')
+end)
+
+T.test('tool details: woodcutters by log stock, hunters only in a famine, one tool detail per dwarf', function()
+  local W, ctl = tool_world{cit = 12, miners = {5}, cutters = {5}, wood = 30}
+  days(W, 1)
+  T.eq(members(ctl, 'Miners'), {5, 7})
+  T.eq(members(ctl, 'Woodcutters'), {1, 9}, 'the miner left Woodcutters; wood 30 < 60: two cutters, best skill first')
+  T.eq(members(ctl, 'Hunters'), {}, 'no famine: no hunters')
+  local W2, ctl2 = tool_world{cit = 12, cutters = {3}, wood = 200}
+  days(W2, 4)
+  T.eq(members(ctl2, 'Woodcutters'), {}, 'logs above autochop max: woodcutters released after shrink_days')
+  local W3, ctl3 = tool_world{cit = 12, miners = {5, 7}, food = 0}
+  days(W3, 1)
+  T.eq(#members(ctl3, 'Hunters'), 1, 'famine: hunters, capped by the one usable crossbow')
+end)
+
+T.test('tool details: soldiers removed at once, nobles and moody dwarves never picked, modern mode left alone', function()
+  local W, ctl = tool_world{cit = 12, miners = {5, 6}, setup = function(W)
+    dfhack.units.getNoblePositions = function(u) return u._m.noble and {{position = {code = 'MANAGER'}}} or nil end
+  end}
+  W.unit(6).military.squad_id = 3
+  W.unit(7)._m.noble = true
+  W.unit(1).mood = 0
+  days(W, 1)
+  T.eq(members(ctl, 'Miners'), {2, 5}, 'soldier out; noble 7 and moody 1 skipped')
+  local W2, ctl2 = tool_world{cit = 12, miners = {5}, mode = 'Mode: modern (labormanager)'}
+  days(W2, 2)
+  T.eq(members(ctl2, 'Miners'), {5}, 'modern labormanager owns the tool details')
+  T.eq(#W2.find_acts('work_detail'), 0)
+end)
+
 T.test('D-03 rule: idle > 40 % for 3 days -> one useful backlog item, never filler digging', function()
   local W = world{cit = 4, setup = function(W) for _ = 1, 40 do F.item(W, 'BOULDER', {}) end end}
   W.unit(1).job.current_job, W.unit(2).job.current_job = nil, nil

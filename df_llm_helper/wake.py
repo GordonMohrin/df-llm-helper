@@ -361,9 +361,17 @@ class Follower:
         done = applied_builds(self.dir, files.read_state(self.dir))
         done_tpls = {t for t, _ in done}
         for dv in ph.get("deliver") or []:
-            if dv.get("k") != "proj":
+            if dv.get("k") not in ("proj", "workshops"):
                 continue
-            tpl, stage = dv.get("tpl"), dv.get("stage")
+            # live L1b: a `workshops` deliverable starts the workshops template (cmd.place skips the types
+            # the fort already has or has planned)
+            tpl, stage = (dv.get("tpl"), dv.get("stage")) if dv.get("k") == "proj" else ("workshops", None)
+            if dv.get("k") == "workshops":
+                from .cmd import _moodable, workshops_missing
+                mood = set(_moodable())
+                types = [t for t in dv.get("types") or [] if t == "moodable" or t in mood]
+                if not types or not workshops_missing(self.dir, types):
+                    continue                   # the template builds none of the missing types (or none is)
             staged = isinstance(stage, int) and not isinstance(stage, bool)
             if (stage is None and tpl in done_tpls) or (staged and any(
                     t == tpl and isinstance(s, int) and s >= stage for t, s in done)):

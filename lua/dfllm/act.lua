@@ -11,6 +11,8 @@ A.ORDER_LIBS = {['library/basic'] = true, ['library/furnace'] = true, ['library/
 local QF_MODES = {dig = true, build = true, place = true, zone = true, burrow = true}
 local QF_COMMANDS = {run = true, orders = true, undo = true}
 local ITEM_FLAGS = {forbid = true, dump = true, melt = true}
+-- builtin work details whose membership act.work_detail may change (each holds one tool labor)
+A.TOOL_DETAILS = {Miners = true, Woodcutters = true, Hunters = true}
 
 -- Used when config/allowlist.json (WP4) is missing: read-only status queries only.
 A.BUILTIN_ALLOWLIST = {v = 2, builtin = true, blocked = {}, armok_exceptions = {}, commands = {
@@ -772,6 +774,55 @@ local function impls(state)
     end
     vec:insert(pos, unit_id)
     return true
+  end
+
+  -- work details screen (labor > work details): add a citizen to, or remove one from, a builtin tool
+  -- detail (live L1b: economy owns these memberships while labormanager runs in monitor mode). The
+  -- screen applies a detail's labors to its members; as DFHack's autofish.lua:77-92 does, the unit's
+  -- labors follow the detail here. Leaving a detail clears a labor only when no other detail of the
+  -- unit (or an everybody-does-this detail) still grants it.
+  function I.work_detail(name, unit_id, on)
+    if not A.TOOL_DETAILS[name] then return false, 'not a builtin tool detail: ' .. tostring(name) end
+    local details = df.global.plotinfo.labor_info.work_details
+    local wd
+    for _, w in ipairs(details) do
+      if dfhack.df2utf(w.name) == name then wd = w; break end
+    end
+    if not wd then return false, 'no work detail ' .. name end
+    local id = int(unit_id)
+    if not id then return false, 'unit id required' end
+    local u = df.unit.find(id)
+    if on and (not u or not dfhack.units.isCitizen(u) or not dfhack.units.isAdult(u)) then
+      return false, 'not an adult citizen'
+    end
+    local vec, at, pos = wd.assigned_units, nil, #wd.assigned_units
+    for i = 0, #vec - 1 do
+      if vec[i] == id then at = i end
+      if vec[i] > id and pos == #vec then pos = i end
+    end
+    local al = wd.allowed_labors
+    if on then
+      if not at then vec:insert(pos, id) end
+      for l = 0, #al - 1 do if al[l] then u.status.labors[l] = true end end
+      return true, at and 'already' or 'added'
+    end
+    if not at then return true, 'not a member' end
+    vec:erase(at)                              -- a unit that left the fort (or died) is only taken off the list
+    if not u then return true, 'removed' end
+    local every = df.work_detail_mode and df.work_detail_mode.EverybodyDoesThis
+    for l = 0, #al - 1 do
+      if al[l] then
+        local keep = false
+        for _, w in ipairs(details) do
+          if dfhack.df2utf(w.name) ~= name and w.allowed_labors[l] then
+            if every and w.flags.mode == every then keep = true end
+            for _, x in ipairs(w.assigned_units) do if x == id then keep = true end end
+          end
+        end
+        if not keep then u.status.labors[l] = false end
+      end
+    end
+    return true, 'removed'
   end
 
   A.install_trade(I, gui_proxy(), int)

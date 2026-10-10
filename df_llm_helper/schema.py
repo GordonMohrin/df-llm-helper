@@ -69,7 +69,8 @@ ACT = {
     "squad_routine": ["military"], "squad_order": ["military"], "squad_uniform": ["military"],
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "popcap": ["readiness"], "quickfort": ["runner"],
     "orders_import": ["economy"], "orders": ["economy"], "workorder": ["economy"],
-    "order_suspend": ["economy"], "kitchen_exclude": ["economy"], "appoint": ["economy"], "item_flag": ["care"],
+    "order_suspend": ["economy"], "kitchen_exclude": ["economy"], "appoint": ["economy"],
+    "work_detail": ["economy"], "item_flag": ["care"],
     "zone_assign": ["care"], "trade": ["trade"],
     "run": ["baseline", "economy", "care", "military", "trade", "arbiter", "selftest", "runner"],
 }
@@ -415,6 +416,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "STOCK_LOW": ("B", "economy", _d("key:s", "days:i min:i")),
     "CANCEL_LOOP": ("B", "economy", _d(opt="order:i job:s n:i")),
     "LABOR_STARVED": ("B", "economy", _d("labor:s", "cycles:i to:s")),
+    "WORK_DETAIL": ("B", "economy", _d("detail:s unit:i on:i", "n:i why:s")),
     "CAPTURE": ("B", "care", _d(opt="unit:i race:s")),
     "BREACH_STOP": ("B", "runner", _d(opt="proj:s why:s pos:p")),
     "KERNEL_SLOW": ("B", "kern", _d("module:s", "ms:i factor:i")),
@@ -446,7 +448,7 @@ EVENT = Obj(req={"n": NAT, "tick": TICK, "type": Str(TYPE_RE), "cls": Str(enum=[
 
 # ---------------------------------------------------------------- verbs
 VERB_ARGS: dict[str, Obj] = {
-    "plan.reload": Obj(),
+    "plan.reload": Obj(opt={"phases": Bool()}),
     "bp.place": Obj(req={"tpl": TPL, "site": Str(ID_RE)},
                     opt={"p": Obj(extra=SCALAR), "prio": Int(1, 7)}, extra=SCALAR),
     "bp.cancel": Obj(req={"proj": ID}, opt={"undo": Bool()}),

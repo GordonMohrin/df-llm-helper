@@ -31,6 +31,8 @@ M.CFG = {
   keep_every = 3 * DAY, req_cool = 7 * DAY,
   lost_pct = 10,         -- buildings still missing after one re-apply that let a stage pass (%)
   plan_loads = 1, list_max = 64, done_keep = 16, fail_max = 3,
+  orders_cells = 8,      -- cells per quickfort 'orders' call (S6: one 19-cell call took 60 ms; KPI: any call
+                         -- <= 50 ms; about 8 ms fixed plus 1-2 ms per cell), one call per slice
   breach_r = 3, cavern_r = 10, undo_now = 2,
 }
 local MODES = {dig = true, build = true, place = true, zone = true, burrow = true}
@@ -597,23 +599,44 @@ local function apply(K, P, st, R)
   return true
 end
 
--- one 'orders' call for the whole stage, absolute coordinates. Each manager order created comes back
--- as an array entry = its quantity (orders.lua:162-165 is_order stats; act.quickfort must run
--- orders.create_orders, which apply_blueprint alone never does: quickfort.lua:43-56, command.lua:183).
--- false = failed, retried next run; after fail_max failures the stage is built without orders.
-local function orders(K, P, st, R)
-  local data = {}
+-- the stage's cells in absolute coordinates, grouped by building key (quickfort merges one key's items into
+-- one manager order, so a group seldom spans two calls): {{x, y, z, text}, ...}
+local function order_cells(st)
+  local list = {}
   for _, ch in ipairs(st.chunks) do
     for _, c in ipairs(ch.cells) do
-      local x, y, z = ch.pos[1] + c[1], ch.pos[2] + c[2], ch.pos[3] + c[3]
-      local gz = data[z] or {}
-      data[z] = gz
-      local row = gz[y] or {}
-      gz[y] = row
-      row[x] = c[4]
+      list[#list + 1] = {ch.pos[1] + c[1], ch.pos[2] + c[2], ch.pos[3] + c[3], c[4], #list + 1,
+                         c[4]:match('^[^{(:/]*')}
     end
   end
-  local ok, res = qf(K, {mode = st.mode, data = data, pos = {0, 0, 0}, command = 'orders'})
+  table.sort(list, function(a, b)
+    if a[6] ~= b[6] then return a[6] < b[6] end
+    return a[5] < b[5]
+  end)
+  return list
+end
+
+-- quickfort 'orders' for the stage, sliced (live L1b: one call for a whole stage took 60 ms): each call
+-- takes the next orders_cells cells (R.oc = next index). Each manager order created comes back as an array
+-- entry = its quantity (orders.lua:162-165 is_order stats; act.quickfort must run orders.create_orders,
+-- which apply_blueprint alone never does: quickfort.lua:43-56, command.lua:183). Returns true when the
+-- stage's orders are complete, 'more' after a slice, false = failed (retried next run; after fail_max
+-- failures the rest of the stage is built without orders).
+local function orders(K, P, st, R)
+  local cells = order_cells(st)
+  local i0 = math.max(1, int(R.oc) or 1)
+  local i1 = math.min(#cells, i0 + M.CFG.orders_cells - 1)
+  local data = {}
+  for i = i0, i1 do
+    local c = cells[i]
+    local gz = data[c[3]] or {}
+    data[c[3]] = gz
+    local row = gz[c[2]] or {}
+    gz[c[2]] = row
+    row[c[1]] = c[4]
+  end
+  local ok, res = true, {}
+  if i0 <= i1 then ok, res = qf(K, {mode = st.mode, data = data, pos = {0, 0, 0}, command = 'orders'}) end
   if not ok then
     R.of = (R.of or 0) + 1
     dirty()
@@ -623,17 +646,20 @@ local function orders(K, P, st, R)
     end
     K.log('error', '%s %s: quickfort orders failed %d times, building without orders: %s', P.id, st.label,
           R.of, tostring(res))
+    i1 = #cells
   else
     local n, q = 0, 0
     for k, v in pairs(type(res) == 'table' and res or {}) do
       if math.type(k) == 'integer' and type(v) == 'number' then n, q = n + 1, q + v end
     end
-    R.ord = q
-    if n > 0 then K.log('info', '%s %s: %d manager orders, %d items', P.id, st.label, n, q)
-    else K.log('warn', '%s %s: quickfort orders created no manager orders', P.id, st.label) end
+    R.on, R.ord = (R.on or 0) + n, (R.ord or 0) + (math.tointeger(q) or math.floor(q))
   end
-  P.orders_done = 1
+  R.oc = i1 + 1
   dirty()
+  if R.oc <= #cells then return 'more' end
+  if (R.on or 0) > 0 then K.log('info', '%s %s: %d manager orders, %d items', P.id, st.label, R.on, R.ord or 0)
+  else K.log('warn', '%s %s: quickfort orders created no manager orders', P.id, st.label) end
+  P.orders_done = 1
   return true
 end
 
@@ -682,7 +708,9 @@ local function work(K, P, meas)
     end
     if need_orders then
       if not qf_room() then return 'yield' end
-      if not orders(K, P, st, R) then return 'done' end
+      local r = orders(K, P, st, R)
+      if not r then return 'done' end
+      if r == 'more' then return 'yield' end               -- the next orders slice in the next frame
     end
     if P.chunk < #st.chunks then
       if not qf_room() then return 'yield' end
@@ -892,6 +920,15 @@ local CHECK = {
   workshops = function(K, dv)
     local have = {}
     for _, w in ipairs(K.manifest().workshops or {}) do have[w.type] = true end
+    -- live L1b: a mood needs the workshop type anywhere in the fort, also one built by hand
+    pcall(function()
+      for _, b in ipairs(df.global.world.buildings.other.WORKSHOP_ANY) do
+        if built(b) then have[df.workshop_type[b.type] or ''] = true end
+      end
+      for _, b in ipairs(df.global.world.buildings.other.FURNACE_ANY) do
+        if built(b) then have[df.furnace_type[b.type] or ''] = true end
+      end
+    end)
     for _, t in ipairs(dv.types or {}) do
       for _, n in ipairs(t == 'moodable' and M.MOODABLE or {t}) do if not have[n] then return false end end
     end
@@ -941,7 +978,10 @@ local function exhausted(K)
   if S.plan_pending or not S.stuck then return end
   for _, P in ipairs(S.pd.list) do if P.done ~= 1 then return end end
   local pp = K.persist.get('plan')
-  local key = string.format('%s:%s:%s', S.phase or '-', tostring(K.plan.year), tostring(pp and pp.loaded or 0))
+  -- live L1b: once more after every finished project, so follow can start a phase's next deliverable
+  local fin = 0
+  for _, h in pairs(S.rt.hist) do fin = fin + (int(h.n) or 0) end
+  local key = string.format('%s:%s:%s:%d', S.phase or '-', tostring(K.plan.year), tostring(pp and pp.loaded or 0), fin)
   if S.rt.exh == key then return end
   S.rt.exh = key
   dirty()
@@ -1132,6 +1172,24 @@ function M.step(K, budget, ctx)
 end
 
 function M.state(K) return {phase = S.phase, proj = S.rows} end
+
+-- WP8 (economy, live L1b): tiles still to dig in the dig stage every running project is in (its tile count
+-- minus the progress last measured); economy sizes the Miners detail from it
+function M.dig_backlog(K)
+  local n = 0
+  for _, P in ipairs(S.pd and S.pd.list or {}) do
+    if P.done ~= 1 and not halted(P) then
+      local d = doc(K, P.id)
+      local st = d and d.stages[P.stage + 1]
+      if st and st.mode == 'dig' then
+        local R = S.rt.p[P.id]
+        local prog = type(R) == 'table' and R.si == P.stage and int(R.prog) or 0
+        n = n + math.max(0, stage_tiles(P.id, d, P.stage).n - prog)
+      end
+    end
+  end
+  return n
+end
 
 -- WP7/WP8 (care): projects of a template that are not done yet (capacity requests wait for them)
 function M.pending(K, tpl)
