@@ -2,6 +2,7 @@
 --   dfllm boot                      start the kernel (onMapLoad.init); a no-op on saves without the marker
 --   dfllm adopt [--acceptance]      mark this fort as dfllm-managed (once), load plans/year1.json, boot
 --   dfllm stop                      unload the kernel (restores runtime settings)
+--   dfllm reload                    stop, drop the cached dfllm modules, boot the code on disk (not on acceptance saves)
 --   dfllm status                    one-screen summary
 --   dfllm selftest [quick|full] [--mock] [--exec FILE]
 --   dfllm restore                   restore runtime settings from dfllm-runtime/restore.json
@@ -34,6 +35,16 @@ elseif cmd == 'adopt' then
   say(kern.adopt{repo = repo, acceptance = has('--acceptance')})
 elseif cmd == 'stop' then
   say(kern.stop('stop'))
+elseif cmd == 'reload' then
+  -- live engineering: stop, drop every cached dfllm module, boot the code on disk (persist is flushed
+  -- by stop, so nothing is lost). Refused on acceptance saves.
+  local K = kern.K()
+  if K and K.cfg and K.cfg.acceptance then say(false, 'reload refused: acceptance save'); return end
+  kern.stop('reload')
+  for k in pairs(package.loaded) do
+    if k:match('^dfllm%.') then package.loaded[k] = nil end
+  end
+  say(require('dfllm.kern').boot{repo = repo})
 elseif cmd == 'restore' then
   say(kern.restore{repo = repo})
 elseif cmd == 'status' then
@@ -67,5 +78,5 @@ elseif cmd == 'selftest' then
   print(string.format('dfllm selftest: %d pass, %d fail %s', r.pass, r.fail,
                       #r.failed > 0 and ('(' .. table.concat(r.failed, ', ') .. ')') or ''))
 else
-  print('usage: dfllm boot | adopt [--acceptance] | stop | status | selftest [quick|full] [--mock] [--exec FILE] | restore')
+  print('usage: dfllm boot | adopt [--acceptance] | stop | reload | status | selftest [quick|full] [--mock] [--exec FILE] | restore')
 end

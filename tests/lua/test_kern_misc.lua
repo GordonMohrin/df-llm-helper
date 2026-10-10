@@ -113,4 +113,14 @@ T.test('dfllm.lua entry: usage, status when stopped, selftest --mock, restore wi
   T.eq(out[4], 'dfllm: nothing to restore')
 end)
 
+T.test('runtime folder = the save the fort was adopted in (DF renames saves to autosave N)', function()
+  T.eq(kern.runtime_key({save = 'region2'}, 'autosave 3'), 'region2')
+  T.eq(kern.runtime_key({save = 'region2'}, 'region2'), 'region2')
+  T.eq(kern.runtime_key(nil, 'autosave 3'), 'autosave 3', 'unmarked save: its own folder')
+  T.eq(kern.runtime_key({}, 'autosave 3'), 'autosave 3')
+  T.eq(kern.runtime_key({save = ''}, 'x'), 'x')
+  T.eq(kern.runtime_key({save = '../evil'}, 'x'), 'x', 'no path separators')
+  T.eq(kern.runtime_key({save = '..'}, 'x'), 'x')
+end)
+
 T.done()

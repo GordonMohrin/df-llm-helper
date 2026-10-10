@@ -25,10 +25,13 @@ M.DEFAULTS = {
   control_panel = {'suspendmanager', 'autochop', 'autobutcher', 'autonestbox', 'nestboxes', 'autoslab',
                    'preserve-tombs', 'tailor', 'seedwatch', 'prioritize', 'pop-control',
                    'fix/dead-units', 'fix/empty-wheelbarrows', 'combine'},
-  plugins = {'buildingplan', 'logistics', 'preserve-rooms', 'burrow'},
+  plugins = {'buildingplan', 'logistics', 'preserve-rooms', 'burrow', 'autofarm'},
   timestream = true,
   decision_tools = {['D-04'] = {'work-now'}, ['D-05'] = {'agitation-rebalance'}, ['D-10'] = {'emigration', 'deteriorate'}},
   prioritize = {'-aq', 'defaults'},
+  -- live L1: 1,300 gather jobs starved the brewers while dwarves died of thirst; drink and meals go first
+  prioritize_extra = {{'-aq', '-n', 'BREW_DRINK_FROM_PLANT,BREW_DRINK_FROM_PLANT_GROWTH', 'CustomReaction'},
+                      {'-aq', 'PrepareMeal'}},
   -- logs 60..150: never near the 14-log mood reserve, and above the WOOD>=100 MakeCharcoal order of
   -- library/furnace, the only charcoal source that reaches the COAL>=100 every SmeltOre order needs
   autochop = {max = 150, min = 60},
@@ -36,7 +39,7 @@ M.DEFAULTS = {
   tailor = {materials = {'silk', 'cloth', 'yarn'}},
   popcap = {max_pop = 55, wave = 8},
   labormanager = {mode = 'monitor', fallback = 'monitor', ab_to = 'modern', ab_days = 168,
-                  balance = 'balanced', unmanaged = {'MINE'}},
+                  balance = 'balanced', unmanaged = {}},   -- live L1: MINE unmanaged left 1 miner (economy.labor)
   seedwatch = {target = 12, always = {}},
   ban_cooking = {'booze', 'honey', 'milk', 'oil', 'tallow'},
   burial = {'-c'},
@@ -235,6 +238,7 @@ function M.plan(K, c)
   end
   for _, p in ipairs(c.plugins or {}) do cmd('en:' .. p, 'enable', p) end
   cmd('prioritize', 'prioritize', table.unpack(c.prioritize))
+  for i, e in ipairs(c.prioritize_extra or {}) do cmd('prioritize:' .. i, 'prioritize', table.unpack(e)) end
   cmd('autochop', 'autochop', 'target', fmt(c.autochop.max), fmt(c.autochop.min))
   local ab = c.autobutcher
   cmd('autobutcher', 'autobutcher', 'target', fmt(ab.all[1]), fmt(ab.all[2]), fmt(ab.all[3]), fmt(ab.all[4]), 'all')

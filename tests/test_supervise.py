@@ -787,3 +787,15 @@ def test_win32_bindings_smoke():
     assert abs(sv.proc_start(os.getpid()) - time.time()) < 3600
     h = sv.WinOS(Path("."), Path(".")).df_window()                   # DF is not running in tests
     assert h is None or isinstance(h, int)
+
+
+def test_loaded_save_from_state_slots(tmp_path):
+    """Live L1: the runtime folder keeps the adoption name (region2) while DF loads 'autosave N'."""
+    d = tmp_path / "region2"
+    d.mkdir()
+    assert sv.loaded_save(tmp_path, "region2") == "region2"          # no state yet: the key itself
+    (d / "state.a.json").write_text('{"seq": 5, "save": "autosave 3"}', encoding="utf-8")
+    (d / "state.b.json").write_text('{"seq": 4, "save": "autosave 2"}', encoding="utf-8")
+    assert sv.loaded_save(tmp_path, "region2") == "autosave 3"
+    (d / "state.b.json").write_text('{"seq": 6, "save": "../x"}', encoding="utf-8")
+    assert sv.loaded_save(tmp_path, "region2") == "autosave 3"       # no path separators

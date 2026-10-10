@@ -23,7 +23,7 @@ local PURPOSES = {audit = true, sites = true, debug = true}
 local ID_OK = '^[A-Za-z0-9_%-]+$'
 
 local job, queue, n_auto    -- running export, waiting exports, generated ids
-local tt_cache, occ, live_traps
+local tt_cache, occ, live_traps, live_jobs
 
 local function int(v) return math.type(v) == 'integer' and v or math.tointeger(v) end
 
@@ -176,6 +176,30 @@ local function designation(des, oc)
   return ''
 end
 
+-- tiles that carry a designation job (dig, channel, ramp, stairs, smooth, engrave, track). DF clears
+-- `designation.dig` when it posts the job for a dig designation, so a wall a miner is working on reads as
+-- an undesignated wall (live L1: that read was taken for a damp cancel and stopped fortcore twice).
+-- quickfort looks these jobs up the same way (internal/quickfort/dig.lua:770 get_dig_job_map).
+-- Built once per game tick: world.jobs.list is a linked list of every job.
+local function designation_jobs(now)
+  if live_jobs and live_jobs.tick == now then return live_jobs.map end
+  local map = {}
+  pcall(function()
+    local attrs = df.job_type.attrs
+    local link = df.global.world.jobs.list.next
+    local n = 0
+    while link and n < 100000 do
+      local j = link.item
+      if j and attrs[j.job_type].is_designation then
+        map[string.format('%d,%d,%d', j.pos.x, j.pos.y, j.pos.z)] = true
+      end
+      link, n = link.next, n + 1
+    end
+  end)
+  live_jobs = {tick = now, map = map}
+  return map
+end
+
 ---------------------------------------------------------------- public tile query (§7)
 -- nil (hidden or invalid) or {c = legend char, dig = pending designation or '', bld = building type
 -- (Door, Bridge, Trap, Well, ...), 'passable'/'impassable' (other buildings) or ''}
@@ -189,7 +213,9 @@ function M.tile(K, x, y, z)
     live_traps = {tick = now, idx = trap_index(nil)}
   end
   local c, bld = classify(x, y, z, des, oc, live_traps.idx, nil)
-  return {c = c, dig = designation(des, oc), bld = bld}
+  local dig = designation(des, oc)
+  if dig == '' and designation_jobs(now)[string.format('%d,%d,%d', x, y, z)] then dig = 'job' end
+  return {c = c, dig = dig, bld = bld}
 end
 
 ---------------------------------------------------------------- export
@@ -376,7 +402,7 @@ end
 
 ---------------------------------------------------------------- module
 function M.init(K)
-  job, queue, n_auto, tt_cache, live_traps = nil, {}, 0, {}, nil
+  job, queue, n_auto, tt_cache, live_traps, live_jobs = nil, {}, 0, {}, nil, nil
   occ = occ_values()
 end
 

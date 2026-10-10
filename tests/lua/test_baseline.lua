@@ -150,7 +150,7 @@ local function in_stage_b(extra)
   return p
 end
 
-T.test('labormanager A/B: 168 PEACE days monitor, then modern + balance + MINE unmanaged, then compare', function()
+T.test('labormanager A/B: 168 PEACE days monitor, then modern + balance (no unmanaged labors, live L1), then compare', function()
   local W, B = world()
   drain(W)
   W.clear()
@@ -161,7 +161,7 @@ T.test('labormanager A/B: 168 PEACE days monitor, then modern + balance + MINE u
   T.eq(B.every, B.APPLY_EVERY, 'the switch waits for no month')
   drain(W)
   T.eq(lm_runs(W), {'labormanager mode modern', 'labormanager mode', 'labormanager enable',
-                    'labormanager balance balanced', 'labormanager labor MINE unmanaged'})
+                    'labormanager balance balanced'})
   local p = W.K.persist.get('m.baseline')
   T.eq({p.lm, p.ab.stage, p.ab.a}, {'modern', 'B', {168, 167}})
   W.clear()

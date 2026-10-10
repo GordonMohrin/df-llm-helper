@@ -27,7 +27,7 @@ T.test('boot: originals written to restore.json before the profile is applied; u
   boot(W)
   local r = H.json(W.rt .. '/restore.json')
   T.eq({r.v, r.save, r.active}, {2, 'region1', 1})
-  T.eq(r.orig, {gfps = 250, autosave = 'SEASONAL', population_cap = 75, timestream_fps = 250,
+  T.eq(r.orig, {gfps = 250, fps_cap = 250, autosave = 'SEASONAL', population_cap = 75, timestream_fps = 250,
                 overlays = {['hotkeys.menu'] = true, ['unsuspend.overlay'] = true}})
   T.eq({g.enabler.gfps, g.d_init.feature.autosave, W.ts_fps}, {30, df.d_init_autosave.YEARLY, 500})
   T.eq({W.ov['hotkeys.menu'].enabled, W.ov['unsuspend.overlay'].enabled, W.ov['notify.panel'].enabled}, {false, false, true})
@@ -358,6 +358,40 @@ T.test('dfllm restore heals without booting', function()
   H.write(W2.rt .. '/restore.json', json.encode({v = 2, save = 'region1', wall = 1, active = 1, orig = {timestream_fps = 120}}))
   T.ok(kern.restore{modules = {arbiter}})
   T.eq(W2.ts_fps, 120)
+end)
+
+T.test('supply brake: economy.alarm or phase P0 hold tempo and FPS cap at BRAKE_FPS; off restores both', function()
+  local dir = H.tmpdir('kmockbrake')
+  local W = kmock.new{dfpath = dir}
+  luahost.mkdir_recursive(dir .. '/dfllm-runtime')
+  package.loaded['plugins.timestream'] = {timestream_getFps = function() return W.timestream_fps end}
+  package.loaded['plugins.overlay'] = nil
+  local alarm
+  local eco = {name = 'economy', every = {ticks = 1200}}
+  function eco.alarm(K) return alarm end
+  W.load(eco)
+  W.load(arbiter)
+  local function last(fn, a1)
+    local l = W.find_acts(fn)
+    for i = #l, 1, -1 do if a1 == nil or l[i].args[1] == a1 then return l[i] end end
+  end
+  T.eq(last('setting', 'fps_cap'), nil, 'no cap write without a brake')
+  alarm = 'thirst 3'
+  W.run(40, {paused = true})
+  T.eq(last('timestream').args[1], arbiter.BRAKE_FPS)
+  T.eq(last('setting', 'fps_cap').args[2], arbiter.BRAKE_FPS)
+  T.eq(W.state().owners.tempo, 'brake')
+  alarm = nil
+  W.run(40, {paused = true})
+  T.eq(last('timestream').args[1], 500)
+  T.eq(last('setting', 'fps_cap').args[2], 250, 'the captured original cap')
+  T.eq(W.state().owners.tempo, 'mode')
+  -- SIEGE: timestream is off anyway, no brake
+  alarm = 'drink 3 d'
+  W.K.set_mode('SIEGE', 'army')
+  W.run(40, {paused = true})
+  T.eq(last('timestream').args[1], -1)
+  T.eq(arbiter.brake_why(W.K), nil)
 end)
 
 T.test('arbiter on the reference k_mock K (strict contract checks)', function()

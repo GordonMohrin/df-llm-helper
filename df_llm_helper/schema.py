@@ -69,7 +69,7 @@ ACT = {
     "squad_routine": ["military"], "squad_order": ["military"], "squad_uniform": ["military"],
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "popcap": ["readiness"], "quickfort": ["runner"],
     "orders_import": ["economy"], "orders": ["economy"], "workorder": ["economy"],
-    "order_suspend": ["economy"], "kitchen_exclude": ["economy"], "item_flag": ["care"],
+    "order_suspend": ["economy"], "kitchen_exclude": ["economy"], "appoint": ["economy"], "item_flag": ["care"],
     "zone_assign": ["care"], "trade": ["trade"],
     "run": ["baseline", "economy", "care", "military", "trade", "arbiter", "selftest", "runner"],
 }
@@ -414,6 +414,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "PETITION": ("B", "care", _d(opt="kind:s")),
     "STOCK_LOW": ("B", "economy", _d("key:s", "days:i min:i")),
     "CANCEL_LOOP": ("B", "economy", _d(opt="order:i job:s n:i")),
+    "LABOR_STARVED": ("B", "economy", _d("labor:s", "cycles:i to:s")),
     "CAPTURE": ("B", "care", _d(opt="unit:i race:s")),
     "BREACH_STOP": ("B", "runner", _d(opt="proj:s why:s pos:p")),
     "KERNEL_SLOW": ("B", "kern", _d("module:s", "ms:i factor:i")),
@@ -508,7 +509,7 @@ STATE = Obj(
          "proj": Arr(Tup([ID, Str(maxbytes=24), PCT, Str(maxbytes=40)]), hi=8),
          "bridges": Obj(extra=Str(enum=BRIDGE_STATES), keys=BRIDGE_RE),
          "owners": Obj(req={"pause": AnyOf(Null(), Str(enum=["inbox", "gordon", "popup", "df"])),
-                            "tempo": Str(enum=["mode", "inbox"])}),
+                            "tempo": Str(enum=["mode", "inbox", "brake"])}),
          "mil": Obj(req={"squads": NAT, "soldiers": NAT, "worn": PCT, "cv": NAT, "metal_pct": PCT,
                          "on_station": NAT}),
          "trade": Obj(req={"caravan": FLAG, "ratio": NAT, "done": NAT})})
@@ -632,7 +633,7 @@ def _snapshot_post(doc: dict, out: list[str]) -> None:
 # ---------------------------------------------------------------- misc files
 RESTORE = Obj(req={"v": Const(V), "save": Str(maxbytes=120), "wall": NAT, "active": FLAG,
                    "orig": Obj(opt={"gfps": NAT, "autosave": Str(maxbytes=40), "visitor_cap": NAT,
-                                    "population_cap": NAT, "timestream_fps": Int(-1), "weather": Bool(),
+                                    "population_cap": NAT, "timestream_fps": Int(-1), "weather": Bool(), "fps_cap": NAT,
                                     "overlays": Obj(extra=Bool())})})
 LOCK = Obj(req={"holder": Str(maxbytes=40), "purpose": Str(maxbytes=200), "expires": NAT})
 ALLOWLIST = Obj(req={"v": Const(V),

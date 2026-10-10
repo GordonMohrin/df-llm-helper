@@ -185,7 +185,7 @@ T.test('quickfort: params passed to apply_blueprint, stats flattened, bad input 
   T.eq(stats, {dig_designated = 2, out_of_bounds = 0})
   T.eq(calls[1].pos, {x = 60, y = 40, z = 120})
   T.eq({calls[1].mode, calls[1].command, calls[1].priority, calls[1].dry_run}, {'dig', 'run', 3, false})
-  T.eq(env.lines[1][3], '[{"cells":2,"command":"run","mode":"dig","pos":[60,40,120]}]', 'data summarized in commands.log')
+  T.eq(env.lines[1][3], '[{"cells":2,"command":"run","mode":"dig","ms":0,"pos":[60,40,120]}]', 'data summarized in commands.log (ms = S6 cost)')
   T.eq((env.api.quickfort{mode = 'reveal', data = 'd'}), false)
   T.eq((env.api.quickfort{mode = 'dig', data = 'd', command = 'delete'}), false)
   T.eq((env.api.quickfort{mode = 'dig', data = 'd', priority = 9}), false)
@@ -231,6 +231,53 @@ T.test('economy actions: orders import/sort, workorder tag and id, kitchen exclu
   T.eq(cmds[2], 'orders sort')
 end)
 
+T.test('appoint: nobles screen records (assignment, histfig position link, assignments_by_type)', function()
+  local H2 = require('kern_world')
+  local W = H2.world{tag = 'appoint'}
+  local vec = kmock.vec
+  -- fort entity 321 at index 5 of world.entities.all; MANAGER (id 10) has MANAGE_PRODUCTION (4)
+  local asg_mgr = {id = 6, position_id = 10, histfig = -1, histfig2 = -1}
+  local asg_lead = {id = 8, position_id = 8, histfig = 4337, histfig2 = 4337}
+  local ent = {id = 321,
+               positions = {own = vec{{id = 8, code = 'EXPEDITION_LEADER', flags = {ACTIVE = true}, responsibilities = {[2] = true}},
+                                      {id = 10, code = 'MANAGER', flags = {ACTIVE = true}, responsibilities = {[4] = true}},
+                                      {id = 9, code = 'MAYOR', flags = {ACTIVE = false}, responsibilities = {}}},
+                            assignments = vec{asg_lead, asg_mgr}},
+               assignments_by_type = {[2] = vec{asg_lead}, [4] = vec{}}}
+  df.global.plotinfo = df.global.plotinfo or {}
+  df.global.plotinfo.main = {fortress_entity = ent}
+  df.global.world.entities = {all = vec{{id = 1}, {id = 2}, {id = 3}, {id = 4}, {id = 5}, ent}}
+  local hf = {id = 4188, entity_links = vec{}}
+  df.historical_figure = {find = function(id) return id == 4188 and hf or nil end}
+  df.histfig_entity_link_positionst = 'positionst'
+  local units = {[18833] = {id = 18833, hist_figure_id = 4188}, [5] = {id = 5, hist_figure_id = 99}}
+  local real_find = df.unit.find
+  df.unit.find = function(id) return units[id] end
+  local real = {isCitizen = dfhack.units.isCitizen, isAdult = dfhack.units.isAdult, isDead = dfhack.units.isDead}
+  dfhack.units.isCitizen = function(u) return true end
+  dfhack.units.isAdult = function(u) return u.id ~= 5 end
+  dfhack.units.isDead = function(u) return false end
+  local env = mk()
+  env.who_v = 'economy'
+  T.eq({env.api.appoint('MANAGER', 18833)}, {true, 6})
+  T.eq({asg_mgr.histfig, asg_mgr.histfig2}, {4188, 4188})
+  T.eq(#hf.entity_links, 1)
+  local l = hf.entity_links[0]
+  T.eq({l.new, l.entity_id, l.entity_vector_idx, l.assignment_id, l.assignment_vector_idx, l.link_strength},
+       {'positionst', 321, 5, 6, 1, 100})
+  T.eq(#ent.assignments_by_type[4], 1, 'DF finds the manager through assignments_by_type (live L1)')
+  T.eq(ent.assignments_by_type[4][0].id, 6)
+  T.eq({env.api.appoint('MANAGER', 18833)}, {true, 6}, 'idempotent')
+  T.eq(#ent.assignments_by_type[4], 1)
+  T.eq((env.api.appoint('MAYOR', 18833)), false, 'not offered yet')
+  T.eq((env.api.appoint('MANAGER', 5)), false, 'children are no candidates')
+  T.eq((env.api.appoint('manager', 18833)), false, 'bad code')
+  env.who_v = 'care'
+  T.eq({env.api.appoint('MANAGER', 18833)}, {false, 'not owner'})
+  df.unit.find = real_find
+  for k, f in pairs(real) do dfhack.units[k] = f end
+end)
+
 T.test('care actions: item flags (melt via dfhack.items), zone assignment like the zone screen', function()
   local W = H.world{tag = 'care', units = {{id = 7, pos = {1, 1, 1}}}}
   W.items_by_id = {[11] = {id = 11, flags = {forbid = false, dump = false}}}
@@ -267,7 +314,10 @@ T.test('arbiter actions: settings return old values, timestream old fps, overlay
   T.eq((env.api.setting('autosave', 'NEVER')), false)
   T.eq((env.api.setting('gfps', 0)), false)
   T.eq({env.api.setting('weather', false)}, {true, true})
-  T.eq((env.api.setting('fps_cap', 100)), false, 'unknown setting')
+  T.eq({env.api.setting('fps_cap', 150)}, {true, 250}, 'the vanilla FPS cap (supply brake)')
+  T.eq(df.global.enabler.fps, 150)
+  T.eq((env.api.setting('fps_cap', 5)), false, 'cap range 10..1000')
+  T.eq((env.api.setting('fps_magic', 100)), false, 'unknown setting')
   T.eq({env.api.timestream(500)}, {true, 250})
   T.eq(W.ts_fps, 500)
   T.eq((env.api.timestream(5)), false)

@@ -102,8 +102,9 @@ local function cmd_run(...)
   return true, trim(out, 4000)
 end
 
--- commands.log args: compact JSON, quickfort data summarized, ≤300 bytes
-local function describe(fn, args)
+-- commands.log args: compact JSON, quickfort data summarized, ≤300 bytes. `ms` = cost of the call on
+-- the cost clock (spike S6: apply_blueprint ms per chunk), quickfort only.
+local function describe(fn, args, ms)
   local a = {}
   for i = 1, args.n do a[i] = args[i] end
   if fn == 'quickfort' and type(a[1]) == 'table' then
@@ -111,7 +112,8 @@ local function describe(fn, args)
     if type(p.data) == 'table' then
       for _, g in pairs(p.data) do for _, r in pairs(g) do for _ in pairs(r) do n = n + 1 end end end
     end
-    a = {{mode = p.mode, command = p.command or 'run', pos = p.pos, cells = n}}
+    a = {{mode = p.mode, command = p.command or 'run', pos = p.pos, cells = n, ms = ms,
+          dry = p.dry_run == true and 1 or nil}}
   end
   local ok, s = pcall(json.encode, json.array(a))
   if not ok then s = '"?"' end
@@ -380,6 +382,10 @@ local function impls(state)
   local SETTINGS = {
     gfps = {get = function() return df.global.enabler.gfps end,
             set = function(v) df.global.enabler.gfps = v end, lo = 1, hi = 1000},
+    -- the vanilla FPS cap (Settings, prefs FPS_CAP; enabler.fps is a float): the only way to run slower
+    -- than DF's own frame rate, since timestream never slows below it (live L1 supply brake)
+    fps_cap = {get = function() return math.floor((df.global.enabler.fps or 0) + 0.5) end,
+               set = function(v) df.global.enabler.fps = v end, lo = 10, hi = 1000},
     visitor_cap = {get = function() return df.global.d_init.dwarf.visitor_cap end,
                    set = function(v) df.global.d_init.dwarf.visitor_cap = v end, lo = 0, hi = 10000},
     population_cap = {get = function() return df.global.d_init.dwarf.population_cap end,
@@ -601,6 +607,53 @@ local function impls(state)
     return true
   end
 
+  -- nobles screen (info > administrators > choose a candidate for a vacant fort position). The screen's
+  -- result is two records: the assignment names the citizen's historical figure (histfig, histfig2), and
+  -- the figure gets a position link to the fortress entity (the same records as the expedition leader's,
+  -- read live in L1, and hack/scripts/make-monarch.lua for the civ). Candidates as in the screen: an adult
+  -- citizen, alive; the position must be offered (flags.ACTIVE: population and market requirements met).
+  function I.appoint(code, unit_id)
+    if type(code) ~= 'string' or not code:match('^[A-Z_]+$') then return false, 'bad position code' end
+    local ent = df.global.plotinfo.main.fortress_entity
+    if not ent then return false, 'no fortress entity' end
+    local u = df.unit.find(int(unit_id) or -1)
+    if not u then return false, 'no unit ' .. tostring(unit_id) end
+    if not dfhack.units.isCitizen(u) or not dfhack.units.isAdult(u) or dfhack.units.isDead(u) then
+      return false, 'not an adult living citizen'
+    end
+    local hf = df.historical_figure.find(u.hist_figure_id)
+    if not hf then return false, 'no historical figure' end
+    local pos
+    for _, p in ipairs(ent.positions.own) do if p.code == code then pos = p; break end end
+    if not pos then return false, 'no position ' .. code end
+    if not pos.flags.ACTIVE then return false, code .. ' is not offered yet' end
+    local asg, idx
+    for i, a in ipairs(ent.positions.assignments) do
+      if a.position_id == pos.id then
+        if a.histfig == hf.id then return true, a.id end
+        if a.histfig == -1 and not asg then asg, idx = a, i end
+      end
+    end
+    if not asg then return false, code .. ' has no vacant assignment' end
+    local evi = ent.id                     -- index of the entity in world.entities.all (the leader's link has it)
+    for i, e in ipairs(df.global.world.entities.all) do if e.id == ent.id then evi = i; break end end
+    asg.histfig, asg.histfig2 = hf.id, hf.id
+    hf.entity_links:insert('#', {new = df.histfig_entity_link_positionst, entity_id = ent.id, link_strength = 100,
+                                 entity_vector_idx = evi, assignment_id = asg.id, assignment_vector_idx = idx,
+                                 start_year = df.global.cur_year})
+    -- DF finds the holder of a duty through entity.assignments_by_type[responsibility] (filled assignments
+    -- only; the expedition leader's three duties are listed there). Without it the manager never validates
+    -- an order (live L1: 0 of 48 after a month).
+    for r, on in pairs(pos.responsibilities) do
+      if on then
+        local v, has = ent.assignments_by_type[r], false
+        for _, x in ipairs(v) do if x.id == asg.id then has = true; break end end
+        if not has then v:insert('#', asg) end
+      end
+    end
+    return true, asg.id
+  end
+
   function I.popcap(n)
     n = int(n)
     if not n or n < 0 or n > 250 then return false, 'cap must be 0..250' end
@@ -756,18 +809,20 @@ function A.new(env)
     api[fn] = function(...)
       local who = env.who()
       local args = table.pack(...)
-      local ok, res
+      local ok, res, cost
       if who ~= nil and who ~= 'kern' and not owners[fn][who] then
         ok, res = false, 'not owner'
       elseif not f then
         ok, res = false, 'not implemented'
       else
+        local c0 = os.clock()
         local pok, a, b = pcall(f, ...)
+        cost = math.floor((os.clock() - c0) * 1000 + 0.5)
         if not pok then ok, res = false, tostring(a)
         else ok, res = a and true or false, b end
       end
       local result = ok and 'ok' or ('ERR ' .. tostring(res))
-      env.log_cmd(who or 'kern', 'act.' .. fn, describe(fn, args), result)
+      env.log_cmd(who or 'kern', 'act.' .. fn, describe(fn, args, cost), result)
       if not ok then env.fail(fn, trim(res, 160), who or 'kern') end
       return ok, res
     end

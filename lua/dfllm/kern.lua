@@ -985,14 +985,24 @@ local function preconditions()
   return true, save
 end
 
+-- The runtime folder of a fort is named after the save folder it was adopted in (marker.save), not the
+-- folder loaded now: DF renames the save to 'autosave N' at every autosave (live L0/L1), and a folder
+-- per name would split bp/, plan.json, snap/ and events across folders every game year. The loaded
+-- folder stays in state.save and the BOOT event (supervise loads the newest save by marker).
+function M.runtime_key(marker, save)
+  local k = type(marker) == 'table' and marker.save
+  if type(k) == 'string' and k ~= '' and k ~= '.' and k ~= '..' and not k:find('[/\\]') then return k end
+  return save
+end
+
 -- opts: {repo=path, modules=list (tests), strict=bool (tests)}
 function M.boot(opts)
   opts = opts or {}
   if S then M.stop('reboot') end
   local ok, save = preconditions()
   if not ok then return false, save end
-  local paths = fio.paths(dfhack.getDFPath(), save)
   local marker = read_marker()
+  local paths = fio.paths(dfhack.getDFPath(), M.runtime_key(marker, save))
   local st = build{opts = opts, paths = paths, save = save, marked = marker ~= nil}
   local repo = opts.repo or '.'
   if not marker then
@@ -1002,7 +1012,7 @@ function M.boot(opts)
     return false, 'no dfllm marker: save not adopted, kernel idle'
   end
   fio.ensure(paths)
-  fio.write(paths.runtime .. '/ACTIVE', save)
+  fio.write(paths.runtime .. '/ACTIVE', M.runtime_key(marker, save))
   st.cfg = load_cfg(st, repo, marker)
   st.K.cfg = st.cfg
   local K = st.K

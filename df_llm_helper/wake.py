@@ -5,6 +5,10 @@ Held events are never dropped: they wait (merged) for the next allowed wake. Cla
 not wake; the follower acts on two of them without the LLM:
   SNAPSHOT_READY purpose=audit -> inspect manifest -> bp.topo.audit(snap, manifest) -> inbox `audit`
   PROJECT_REQUEST tpl=tombs    -> snapshot purpose=sites -> best free site (cmd.place) -> bp.place
+  PLAN_EXHAUSTED phase P0/P1   -> the phase's first proj deliverable without a project (plans/year1.json),
+                                  placed the same way (S1, or 'same' for a later fortcore stage): the fort
+                                  never idles while it waits for an LLM (live L0/L1: a year idled, a dwarf
+                                  starved); the PLAN_EXHAUSTED wake still goes out, so the LLM reviews it
 The outbox reply of every automatic command is read; a refusal or no reply within AUTO_TIMEOUT_S
 wakes as AUTO_FAIL (a refused bp.place is rolled back). Unread replies are pruned after 10 min.
 Only wake lines go to stdout (one line = one Monitor notification); details go to <save>/cli.log.
@@ -30,6 +34,8 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
 HB_STALE_S = 300
 AUTO_TIMEOUT_S = 60
 TOMBS_COOLDOWN_S = 600
+PLACE_KEYS = ("tombs", "starter")             # automatic placements (one job each)
+AUTO_PHASES = ("P0", "P1")                    # PLAN_EXHAUSTED auto-start only for the basic infrastructure
 PRUNE_EVERY_S = 60
 ERR_EVERY_S = 60                               # stderr 'poll error' at most once per minute
 
@@ -178,9 +184,10 @@ class Follower:
             kept = {k: j for k, j in group.items() if fresh(j)}
             if kept:
                 out[key] = kept
-        t = jobs.get("tombs")
-        if isinstance(t, dict) and (t.get("placed") or fresh(t)):
-            out["tombs"] = t
+        for key in PLACE_KEYS:
+            t = jobs.get(key)
+            if isinstance(t, dict) and (t.get("placed") or fresh(t)):
+                out[key] = t
         if out != jobs:
             files.log_cli(self.dir, "follow", "resume", {}, f"dropped stale jobs {sorted(jobs)}")
         return out
@@ -244,6 +251,8 @@ class Follower:
                 self._on_snapshot(d, now)
             elif t == "PROJECT_REQUEST" and d.get("tpl") == "tombs":
                 self._request_tombs(d, now)
+            elif t == "PLAN_EXHAUSTED" and d.get("phase") in AUTO_PHASES:
+                self._request_starter(d, now)
         except Exception as ex:                # noqa: BLE001 - surfaces as one AUTO_FAIL wake
             self._fail(f"event #{e.get('n')} {t}", f"{type(ex).__name__}: {ex}", now)
 
@@ -278,10 +287,10 @@ class Follower:
 
     def _on_snapshot(self, d: dict, now: float) -> None:
         sid, rel, purpose = d.get("id"), d.get("path"), d.get("purpose")
-        tombs = self.jobs.get("tombs")
-        if tombs and sid and tombs.get("snap") == sid:
-            tombs.update(path=rel or f"snap/{sid}.json", ready=now)
-        elif purpose == "audit" and sid and rel:
+        mine = [self.jobs[k] for k in PLACE_KEYS if self.jobs.get(k) and sid and self.jobs[k].get("snap") == sid]
+        for job in mine:
+            job.update(path=rel or f"snap/{sid}.json", ready=now)
+        if not mine and purpose == "audit" and sid and rel:
             try:
                 cid = self._send("inspect", {"what": "manifest"}, None, now)    # reply read by the audits job
             except Exception as e:             # noqa: BLE001
@@ -289,15 +298,41 @@ class Follower:
             self.jobs.setdefault("audits", {})[sid] = {"path": rel, "inspect": cid, "since": now}
 
     def _request_tombs(self, d: dict, now: float) -> None:
-        job = self.jobs.get("tombs")
+        params = {"n": d["n"]} if isinstance(d.get("n"), int) and not isinstance(d.get("n"), bool) else {}
+        self._request_place("tombs", "tombs", params, "S1", now)
+
+    def _request_place(self, key: str, tpl: str, params: dict, site: str, now: float) -> None:
+        job = self.jobs.get(key)
         if job and now - job.get("since", 0) < (AUTO_TIMEOUT_S if not job.get("placed") else TOMBS_COOLDOWN_S):
             return
-        params = {"n": d["n"]} if isinstance(d.get("n"), int) and not isinstance(d.get("n"), bool) else {}
         try:
-            cid = self._send("snapshot", {"purpose": "sites"}, "tombs snapshot", now)
+            cid = self._send("snapshot", {"purpose": "sites"}, f"{tpl} snapshot", now)
         except Exception as e:                 # noqa: BLE001
-            return self._fail("tombs snapshot", e, now)
-        self.jobs["tombs"] = {"snap": cid, "since": now, "params": params}
+            return self._fail(f"{tpl} snapshot", e, now)
+        self.jobs[key] = {"snap": cid, "since": now, "params": params, "tpl": tpl, "site": site}
+
+    def _request_starter(self, d: dict, now: float) -> None:
+        """PLAN_EXHAUSTED in an auto phase: place the phase's first proj deliverable that has no project yet."""
+        from .plan import applied_builds, load_phases
+        phases = load_phases()
+        ph = next((x for x in (phases or {}).get("phases", []) if x.get("id") == d.get("phase")), None)
+        if ph is None:
+            return
+        done = applied_builds(self.dir, files.read_state(self.dir))
+        done_tpls = {t for t, _ in done}
+        for dv in ph.get("deliver") or []:
+            if dv.get("k") != "proj":
+                continue
+            tpl, stage = dv.get("tpl"), dv.get("stage")
+            staged = isinstance(stage, int) and not isinstance(stage, bool)
+            if (stage is None and tpl in done_tpls) or (staged and any(
+                    t == tpl and isinstance(s, int) and s >= stage for t, s in done)):
+                continue                       # built, running, or a later stage of it exists
+            params = {"stage": stage} if staged else {}
+            site = "same" if staged and stage >= 2 else "S1"
+            files.log_cli(self.dir, "follow", "auto:starter", {"tpl": tpl, "p": params, "site": site},
+                          f"PLAN_EXHAUSTED in {d.get('phase')}: placing {tpl}")
+            return self._request_place("starter", tpl, params, site, now)
 
     def _run_jobs(self, now: float) -> None:
         self._read_replies(now)
@@ -310,13 +345,14 @@ class Follower:
                 continue
             del self.jobs["audits"][sid]
             self._audit(sid, job["path"], reply, now)
-        tombs = self.jobs.get("tombs")
-        if tombs and not tombs.get("placed"):
-            if tombs.get("ready"):
-                self._place_tombs(tombs, now)
-            elif now - tombs["since"] > AUTO_TIMEOUT_S:
-                del self.jobs["tombs"]
-                self._fail("tombs", "no sites snapshot", now)
+        for key in PLACE_KEYS:
+            job = self.jobs.get(key)
+            if job and not job.get("placed"):
+                if job.get("ready"):
+                    self._place(key, job, now)
+                elif now - job["since"] > AUTO_TIMEOUT_S:
+                    del self.jobs[key]
+                    self._fail(job.get("tpl", key), "no sites snapshot", now)
 
     def _read_replies(self, now: float) -> None:
         """Outbox replies of auto commands: ok -> done; ok:false or none in time -> AUTO_FAIL."""
@@ -326,11 +362,13 @@ class Follower:
             if reply is None and now - r.get("since", 0) <= AUTO_TIMEOUT_S:
                 continue
             del replies[cid]
-            tombs = self.jobs.get("tombs")
-            mine = tombs is not None and cid in (tombs.get("snap"), tombs.get("placed"))
+            key = next((k for k in PLACE_KEYS if self.jobs.get(k) is not None
+                        and cid in (self.jobs[k].get("snap"), self.jobs[k].get("placed"))), None)
+            job = self.jobs.get(key) if key else None
+            mine = job is not None
             if reply is None:
                 if mine and r["verb"] == "snapshot":
-                    del self.jobs["tombs"]     # no second 'no sites snapshot' fail for the same cause
+                    del self.jobs[key]         # no second 'no sites snapshot' fail for the same cause
                 self._fail(r["what"], f"no reply to {r['verb']} {cid} within {AUTO_TIMEOUT_S}s", now)
                 continue
             files.log_cli(self.dir, "follow", f"reply:{r['verb']}", {"id": cid},
@@ -339,9 +377,9 @@ class Follower:
                 continue
             if r["verb"] == "bp.place" and r.get("tpl"):
                 from .cmd import unplace
-                unplace(self.dir, cid, r["tpl"], (tombs or {}).get("prev") if mine else None)
+                unplace(self.dir, cid, r["tpl"], (job or {}).get("prev") if mine else None)
             if mine:
-                del self.jobs["tombs"]         # a later PROJECT_REQUEST may try again
+                del self.jobs[key]             # a later PROJECT_REQUEST / PLAN_EXHAUSTED may try again
             self._fail(r["what"], f"{r['verb']} {cid} refused: {reply.get('msg', '')}", now)
         if not replies:
             self.jobs.pop("replies", None)
@@ -373,22 +411,23 @@ class Follower:
         files.log_cli(self.dir, "follow", "auto:audit", {"snap": sid}, f"ok={args['ok']} traps={args['min_traps']}")
         files.prune_snaps(self.dir)
 
-    def _place_tombs(self, job: dict, now: float) -> None:
+    def _place(self, key: str, job: dict, now: float) -> None:
         from .cmd import BpError, _placed
+        tpl = job.get("tpl") or key
         try:
             snap = files.read_snapshot(self.dir / str(job["path"]))
             if snap is None:
                 raise BpError(f"snapshot {job['path']} missing/invalid")
-            args = {"tpl": "tombs", "site": "S1"}          # S1 = best free site on this snapshot
+            args = {"tpl": tpl, "site": job.get("site") or "S1"}   # S1 = best free site on this snapshot
             if job.get("params"):
                 args["p"] = job["params"]
-            prev = files.read_json(_placed(self.dir, "tombs"))
-            cid = self._send("bp.place", args, "tombs", now, snap=snap)
+            prev = files.read_json(_placed(self.dir, tpl))
+            cid = self._send("bp.place", args, tpl, now, snap=snap)
         except Exception as e:                 # noqa: BLE001 - WP3 bugs included: one AUTO_FAIL, job dropped
-            self.jobs.pop("tombs", None)
-            return self._fail("tombs", e, now)
+            self.jobs.pop(key, None)
+            return self._fail(tpl, e, now)
         job.update(placed=cid, since=now, prev=prev if isinstance(prev, dict) else None)
-        files.log_cli(self.dir, "follow", "auto:tombs", args, f"placed {cid}")
+        files.log_cli(self.dir, "follow", f"auto:{key}", args, f"placed {cid}")
 
 
 def audit_args(sid: str, res: dict) -> dict:

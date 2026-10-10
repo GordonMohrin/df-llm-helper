@@ -397,6 +397,51 @@ end
 
 local breach -- forward
 
+-- DF announces a damp or warm stop with DIG_CANCEL_DAMP / DIG_CANCEL_WARM (spike S7 ids 52/51); this
+-- scans the newest `n` entries of the vanilla announcement log (world.status.reports, what the player
+-- reads) for one near `bb`. Returns 'damp'/'warm', nil when there is none, 'unknown' when the log cannot
+-- be read (callers then stay on the safe side).
+local CANCEL_REPORT = {DIG_CANCEL_DAMP = 'damp', DIG_CANCEL_WARM = 'warm'}
+function M.cancel_reported(bb, r, n)
+  local ok, why = pcall(function()
+    local reps = df.global.world.status.reports
+    for i = #reps - 1, math.max(0, #reps - (n or 200)), -1 do
+      local rep = reps[i]
+      local w = CANCEL_REPORT[df.announcement_type[rep.type] or '']
+      if w and near({rep.pos.x, rep.pos.y, rep.pos.z}, bb, r) then return w end
+    end
+  end)
+  if not ok then return 'unknown' end
+  return why
+end
+
+-- A designated tile turned into an undesignated wall. Live L1: this happened on the first ramp tiles of
+-- both fortcore sites with no damp report in the announcement log, and the very tile then dug fine, so a
+-- lost designation alone is no damp proof. Damp/warm stop on their vanilla reports (on.REPORT, or found
+-- here in the log); otherwise the chunk is designated again once (quickfort only re-marks walls still
+-- standing) and a second loss blocks the project ('dig_lost', PROJECT_BLOCKED after 2 days) without undo.
+local function lost(K, P, d, R, ci, t)
+  local ch = d.stages[P.stage + 1].chunks[ci]
+  local bb = stage_tiles(P.id, d, P.stage).bbox
+  local why = M.cancel_reported(bb, M.CFG.breach_r)
+  if why then return breach(K, P, why == 'unknown' and 'damp' or why, {t[1], t[2], t[3]}, 'cancel') end
+  R.rl = obj(R.rl)
+  local sk = tostring(ci)
+  if (R.rl[sk] or 0) >= 1 or not qf_room() then
+    if (R.rl[sk] or 0) >= 1 then
+      K.log('error', '%s %s chunk %d: designation at %d,%d,%d lost twice without a damp report: blocked', P.id,
+            d.stages[P.stage + 1].label, ci - 1, t[1], t[2], t[3])
+      set_blocked(K, P, 'dig_lost')
+    end
+    return
+  end
+  R.rl[sk] = 1                                  -- the seen marks stay: the tiles are designated again
+  qf(K, {mode = 'dig', data = chunk_data(ch), pos = ch.pos, priority = P.prio})
+  K.log('warn', '%s %s chunk %d: designation at %d,%d,%d lost without a damp report: chunk designated again', P.id,
+        d.stages[P.stage + 1].label, ci - 1, t[1], t[2], t[3])
+  dirty()
+end
+
 local function measure_dig(K, P, d, R)
   local tiles = stage_tiles(P.id, d, P.stage)
   local m = S.meas[P.id]
@@ -423,9 +468,14 @@ local function measure_dig(K, P, d, R)
           local r, why, mark = probe(K, t, seen)
           if r == nil then S.snap_ok, S.meas[P.id] = false, nil; return 'yield' end   -- dry run instead
           if mark and not seen then sp = mask_set(sp, i); R.sp[sk] = sp; dirty() end
-          if r == 'lost' or r == 'breach' then
+          if r == 'breach' then
             S.meas[P.id] = nil
-            breach(K, P, r == 'lost' and 'damp' or why, {t[1], t[2], t[3]}, r == 'lost' and 'cancel' or 'tile')
+            breach(K, P, why, {t[1], t[2], t[3]}, 'tile')
+            return 'done'
+          end
+          if r == 'lost' then
+            S.meas[P.id] = nil
+            lost(K, P, d, R, ci, t)
             return 'done'
           end
           if r == 'pend' then pend = pend + 1 elseif r == 'skip' then skip = skip + 1 else done = done + 1 end
@@ -1035,6 +1085,17 @@ function M.init(K)
   if type(rt.exh) ~= 'string' then rt.exh = '' end
   K.persist.set('m.runner', rt)
   S.rt = rt
+  -- 'dig_lost' is no safety stop (damp/warm/water are 'breach:*'): every boot retries such projects once
+  for _, P in ipairs(pd.list) do
+    if P.blocked == 'dig_lost' then
+      P.blocked, P.since = '', K.now().tick
+      local R = rt.p[P.id]
+      if type(R) == 'table' then R.rl = nil end
+      K.log('info', '%s: dig_lost block cleared at boot, digging resumes', P.id)
+      S.dirty = true
+    end
+  end
+  save(K)
   local ph = K.persist.get('phase')
   S.phase = type(ph) == 'table' and ph.phase or nil
   rows(K)

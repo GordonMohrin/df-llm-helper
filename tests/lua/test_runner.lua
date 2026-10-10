@@ -230,19 +230,43 @@ T.test('reports: far ones are ignored, no pos stops every digger, cave collapse 
   T.eq(H.proj(W, 'b').blocked, 'breach:water')
 end)
 
-T.test('tile checks: a cancelled designation (wall left) and revealed water stop the dig', function()
+T.test('tile checks: revealed water stops the dig; a lost designation without a damp report is re-marked once', function()
   local W = fresh{tag = 'tiles'}
   H.place(W, 'c1', H.dig_doc(2))
   H.place(W, 'c2', H.dig_doc(2, {x = 40}))
   H.runs(W, 2)                                   -- applied, then measured: designations seen
   T.eq(#W.find_events('BREACH_STOP'), 0)
-  W.tile(11, 10, 100).dig = ''                   -- DF cancelled it: still '#', no designation
+  W.tile(11, 10, 100).dig = ''                   -- still '#', no designation, no damp report (live L1)
   W.tile(41, 11, 100).c = '~'
+  local n = #H.qf_calls(W, 'dig', 'run')
   H.runs(W, 1)
   local ev = W.find_events('BREACH_STOP')
-  T.eq(#ev, 2)
+  T.eq(#ev, 1)
+  T.eq(ev[1].d, {proj = 'c2', why = 'water', pos = {41, 11, 100}, src = 'tile'})
+  T.eq(#H.qf_calls(W, 'dig', 'run'), n + 1, 'the chunk is designated again')
+  T.eq(W.tile(11, 10, 100).dig, 'd')
+  T.eq(H.proj(W, 'c1').blocked, '')
+  T.ok(logged(W, 'warn', '^c1 s1.dig chunk 0: designation at 11,10,100 lost without a damp report'))
+  W.tile(11, 10, 100).dig = ''                   -- lost again: blocked, nothing undone
+  local u = #H.qf_calls(W, 'dig', 'undo')
+  H.runs(W, 1)
+  T.eq(H.proj(W, 'c1').blocked, 'dig_lost')
+  T.eq(#H.qf_calls(W, 'dig', 'undo'), u)
+  T.eq(#W.find_events('BREACH_STOP'), 1)
+end)
+
+T.test('tile checks: a lost designation with a damp report in the announcement log is a damp breach', function()
+  local W = fresh{tag = 'tileslog'}
+  H.place(W, 'c1', H.dig_doc(2))
+  H.runs(W, 2)
+  -- the report reached the log but not the runner (e.g. the kernel was stopped when DF announced it)
+  df.global.world.status.reports:insert('#', {id = 9001, type = df.announcement_type.DIG_CANCEL_DAMP, text = 'damp',
+                                              pos = {x = 12, y = 10, z = 100}})
+  W.tile(11, 10, 100).dig = ''
+  H.runs(W, 1)
+  local ev = W.find_events('BREACH_STOP')
+  T.eq(#ev, 1)
   T.eq(ev[1].d, {proj = 'c1', why = 'damp', pos = {11, 10, 100}, src = 'cancel'})
-  T.eq(ev[2].d, {proj = 'c2', why = 'water', pos = {41, 11, 100}, src = 'tile'})
 end)
 
 T.test('stall: no progress for a week -> stalled, cleared by progress; PROJECT_BLOCKED once', function()
@@ -272,7 +296,7 @@ T.test('a probe breach undoes in the same run; a plain cancel waits for that und
   local W = fresh{tag = 'probeundo'}
   H.place(W, 'c1', H.dig_doc(3))
   H.runs(W, 2)
-  W.tile(10, 12, 100).dig = ''                   -- cancelled designation in the last chunk
+  W.tile(10, 12, 100).c = '~'                    -- water revealed in the last chunk
   H.runs(W, 1)
   T.eq(#W.find_events('BREACH_STOP'), 1)
   T.eq(#H.qf_calls(W, 'dig', 'undo'), 3)
@@ -319,7 +343,7 @@ T.test('probe: tiles quickfort never designated (soil, map edge, off map, F on r
   T.ok(logged(W, 'info', '^e1 s1.dig chunk 0: 1 tiles never designated, skipped'))
 end)
 
-T.test('probe: a hidden tile under a mine key is designated; revealed without designation = cancel', function()
+T.test('probe: a hidden tile under a mine key is designated; revealed without designation: report decides', function()
   local W = fresh{tag = 'hidden'}
   W.tile(12, 10, 100).hidden = true
   H.place(W, 'c1', H.dig_doc(1))
@@ -327,11 +351,18 @@ T.test('probe: a hidden tile under a mine key is designated; revealed without de
   T.eq(#W.find_events('BREACH_STOP'), 0)
   T.eq(W.K.persist.get('m.runner').p.c1.sp['1'], '11111')  -- tile 3 (hidden: snapshot nil) marked too
   local t = W.tile(12, 10, 100)
-  t.hidden, t.dig = nil, ''                      -- revealed as damp stone: DF dropped the designation
+  t.hidden, t.dig = nil, ''                      -- revealed, designation gone, no report: marked again
+  H.runs(W, 1)
+  T.eq(#W.find_events('BREACH_STOP'), 0)
+  T.eq(W.tile(12, 10, 100).dig, 'd')
+  T.eq(W.K.persist.get('m.runner').p.c1.rl['1'], 1)
+  df.global.world.status.reports:insert('#', {id = 9002, type = df.announcement_type.DIG_CANCEL_WARM, text = 'warm',
+                                              pos = {x = 12, y = 10, z = 100}})
+  W.tile(12, 10, 100).dig = ''                   -- now DF announced it in the log: a breach, never re-marked
   H.runs(W, 1)
   local ev = W.find_events('BREACH_STOP')
   T.eq(#ev, 1)
-  T.eq(ev[1].d, {proj = 'c1', why = 'damp', pos = {12, 10, 100}, src = 'cancel'})
+  T.eq(ev[1].d, {proj = 'c1', why = 'warm', pos = {12, 10, 100}, src = 'cancel'})
 end)
 
 local function build_doc(cells, x)

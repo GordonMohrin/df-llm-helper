@@ -304,6 +304,23 @@ def read_active(runtime: Path) -> tuple[str | None, float | None]:
     return name, mt
 
 
+def loaded_save(runtime: Path, key: str) -> str:
+    """The save folder DF has loaded for the fort whose runtime folder is `key`: state.save of the newer state
+    slot. Since live L1 the runtime folder is named after the save the fort was adopted in (kern.runtime_key),
+    while DF renames the loaded save to 'autosave N' at every autosave; save matching uses this name."""
+    best, name = -1, None
+    for slot in ("a", "b"):
+        try:
+            doc = json.loads((runtime / key / f"state.{slot}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        seq = doc.get("seq") if isinstance(doc, dict) else None
+        sv = doc.get("save") if isinstance(doc, dict) else None
+        if isinstance(seq, int) and seq > best and isinstance(sv, str) and sv and "/" not in sv and "\\" not in sv:
+            best, name = seq, sv
+    return name or key
+
+
 def read_heartbeat(p: Path, now: float) -> tuple[float | None, dict | None]:
     """(age from mtime, parsed doc or None). Liveness uses the mtime only; a torn line just gives doc None."""
     mt = _mtime(p)
@@ -1052,7 +1069,8 @@ def _crash(env, st, r, saves, name, amt, now, dry_run, alert, flush) -> None:
     if b:
         alert("crash_blocked", "DF down, no automatic restart: " + "; ".join(b))
         return
-    s, why = pick_save(saves, now, active=name, since=amt, ident=ident_of(saves, name),
+    loaded = loaded_save(env.runtime, name)
+    s, why = pick_save(saves, now, active=loaded, since=amt, ident=ident_of(saves, loaded) or ident_of(saves, name),
                        last_mt=(st.get("last_loaded") or {}).get("mt", 0.0))
     if not s:
         alert("crash_nosave", "DF down, nothing to load: " + why)
@@ -1075,8 +1093,9 @@ def _degraded(env, st, r, saves, name, amt, hb, hb_age, is_busy, now, dry_run, a
     if b:
         r["actions"].append("restart deferred: " + "; ".join(b))
         return
-    ident, last_mt = ident_of(saves, name), (st.get("last_loaded") or {}).get("mt", 0.0)
-    s, _why = pick_save(saves, now, active=name, since=amt, ident=ident, is_busy=is_busy, last_mt=last_mt)
+    loaded = loaded_save(env.runtime, name)
+    ident, last_mt = ident_of(saves, loaded) or ident_of(saves, name), (st.get("last_loaded") or {}).get("mt", 0.0)
+    s, _why = pick_save(saves, now, active=loaded, since=amt, ident=ident, is_busy=is_busy, last_mt=last_mt)
     floor = 0
     if not (s and now - s["mt"] <= FRESH_SAVE_S and amt is not None and s["mt"] >= amt - 5):
         secs = seconds_to_autosave(hb["tick"], hb_age or 0.0, d.get("tps_now"), env.autosave_ticks)

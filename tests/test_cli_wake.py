@@ -10,6 +10,8 @@ from cli_v2_helpers import append_events, ev, inbox_docs, install_fake_bp, make_
 from df_llm_helper import files, schema, wake
 from df_llm_helper.events import est_tokens
 
+TOMBS_COOLDOWN = wake.TOMBS_COOLDOWN_S + 1
+
 
 @pytest.fixture
 def save(tmp_path):
@@ -304,6 +306,59 @@ def test_follow_tombs_autoplace(save, monkeypatch):
     c.t += 30
     f.poll()
     assert out == []
+
+
+def test_follow_plan_exhausted_p0_autostarts_first_deliverable(save, monkeypatch):
+    """Live L0/L1: with no plan the fort idled a year and a dwarf starved. PLAN_EXHAUSTED in P0/P1 places the
+    phase's first proj deliverable without a project at once (no LLM); the wake still goes out."""
+    calls = install_fake_bp(monkeypatch)
+    for p in (save / "bp").glob("*.json"):
+        p.unlink()                                   # a fresh fort: nothing applied yet
+    st = files.read_state(save)
+    c = Clock()
+    f, out = F(c)
+    f.poll()
+    monkeypatch.setattr(files, "read_state", lambda d: dict(st or {}, proj=[]))
+    append_events(save, [ev(8813, "PLAN_EXHAUSTED", "plan exhausted in P0", {"phase": "P0", "year": 281})])
+    f.poll()
+    (snap_cmd,) = inbox_docs(save)
+    assert snap_cmd["verb"] == "snapshot" and snap_cmd["by"] == "follow"
+    for p in (save / "inbox").glob("*.json"):
+        p.unlink()
+    sid = snap_cmd["id"]
+    snap = json.loads((save / "snap" / "c201.json").read_text("utf-8"))
+    snap["id"] = sid
+    files.write_json_atomic(save / "snap" / f"{sid}.json", snap)
+    append_events(save, [ev(8814, "SNAPSHOT_READY", "", {"id": sid, "path": f"snap/{sid}.json", "purpose": "sites"})])
+    f.poll()
+    (place,) = inbox_docs(save)
+    assert place["verb"] == "bp.place" and place["args"] == {"tpl": "fortcore", "site": "S1", "p": {"stage": 1}}
+    assert calls["rank"][-1][1] == "fortcore"
+    c.t += 11
+    f.poll()
+    assert len(out) == 1 and "PLAN_EXHAUSTED" in out[0]   # the LLM still reviews the choice
+    # the next PLAN_EXHAUSTED (fortcore stage 1 applied) takes the next deliverable: farms
+    for p in (save / "inbox").glob("*.json"):
+        p.unlink()
+    c.t += TOMBS_COOLDOWN
+    append_events(save, [ev(8815, "PLAN_EXHAUSTED", "plan exhausted in P0", {"phase": "P0", "year": 281})])
+    f.poll()
+    (snap2,) = inbox_docs(save)
+    assert snap2["verb"] == "snapshot"
+    assert f.jobs["starter"]["tpl"] == "farms"
+
+
+def test_follow_plan_exhausted_outside_auto_phases_only_wakes(save, monkeypatch):
+    install_fake_bp(monkeypatch)
+    c = Clock()
+    f, out = F(c)
+    f.poll()
+    append_events(save, [ev(8813, "PLAN_EXHAUSTED", "plan exhausted in P2", {"phase": "P2", "year": 281})])
+    f.poll()
+    assert inbox_docs(save) == []
+    c.t += 11
+    f.poll()
+    assert len(out) == 1 and "PLAN_EXHAUSTED" in out[0]
 
 
 def test_follow_tombs_without_bp_wakes_auto_fail(save, monkeypatch):

@@ -16,6 +16,8 @@ local function world(opts)
   W.set_census('u', F.census_u(ids))
   F.mat(W, 419, 50, {token = 'PLANT:MUSHROOM_HELMET_PLUMP:STRUCTURAL', flags = {EDIBLE_RAW = true}})
   F.mat(W, 419, 51, {token = 'PLANT:GRASS_TAIL_PIG:STRUCTURAL', flags = {}})
+  F.mat(W, 419, 52, {token = 'PLANT:FEATHER:EGG', flags = {EDIBLE_COOKED = true}})   -- cook-only (live L1 yolks)
+  F.mat(W, 37, 0, {token = 'CREATURE:CAMEL_2_HUMP:MUSCLE', flags = {EDIBLE_RAW = true, EDIBLE_COOKED = true}})
   if opts.setup then opts.setup(W) end
   local E = fresh('economy')
   W.load(E)
@@ -44,7 +46,8 @@ T.test('item census: categories, exclusions, forbidden drinks, materials', funct
     F.item(W, 'FOOD', {stack_size = 4, subtype = 2})
     F.item(W, 'FOOD', {stack_size = 2, subtype = 1})
     F.item(W, 'FOOD', {stack_size = 7, subtype = 3, flags = {rotten = true}})
-    F.item(W, 'MEAT', {stack_size = 3})
+    F.item(W, 'MEAT', {stack_size = 3, mat_type = 37, mat_index = 0})
+    F.item(W, 'PLANT_GROWTH', {stack_size = 5, mat_type = 419, mat_index = 52})   -- cookable, not food
     F.item(W, 'PLANT', {stack_size = 4, mat_type = 419, mat_index = 50})
     F.item(W, 'PLANT', {stack_size = 6, mat_type = 419, mat_index = 51})
     F.item(W, 'CLOTH', {}); F.item(W, 'CLOTH', {})
@@ -66,8 +69,28 @@ T.test('item census: categories, exclusions, forbidden drinks, materials', funct
   local i = W.K.census.i
   T.ok(i, 'census published')
   T.eq({i.drink, i.drink_forb, i.food, i.meals, i.meal_kinds, i.cloth, i.leather, i.bone, i.shell, i.gems,
-        i.bars, i.fuel, i.bolts, i.wood, i.boulders, i.blocks, i.crafts},
-       {5, 8, 17, 10, 2, 2, 1, 2, 1, 3, 2, 1, 25, 3, 5, 2, 1})
+        i.bars, i.fuel, i.bolts, i.wood, i.boulders, i.blocks, i.crafts, i.cookable},
+       {5, 8, 17, 10, 2, 2, 1, 2, 1, 3, 2, 1, 25, 3, 5, 2, 1, 5})
+end)
+
+T.test('famine: below famine_days -> hunting and fishing allowed once, DECISION_NEEDED famine weekly', function()
+  local W = world{}
+  days(W, 2)
+  local function famines()
+    local n = 0
+    for _, e in ipairs(W.find_events('DECISION_NEEDED')) do if e.d.id == 'famine' then n = n + 1 end end
+    return n
+  end
+  T.eq(famines(), 1)
+  local hunt = 0
+  for _, a in ipairs(W.find_acts('run')) do
+    if a.args[1] == 'labormanager' and (a.args[2] == 'allow-hunting' or a.args[2] == 'allow-fishing') then hunt = hunt + 1 end
+  end
+  T.eq(hunt, 2)
+  days(W, 3)
+  T.eq(famines(), 1, 'at most once a week')
+  days(W, 5)
+  T.eq(famines(), 2)
 end)
 
 T.test('census is sliced over frames (per_slice items)', function()
@@ -280,6 +303,58 @@ T.test('labormanager status: starving postings parsed', function()
   end}
   W.run(1)
   T.eq(W.state().labor.starving, 3)
+end)
+
+T.test('supply alarm: >= 2 thirsty citizens or drink < 10 days -> alarm(), DECISION_NEEDED thirst weekly', function()
+  local W, E = world{}
+  W.unit(1).counters2 = {thirst_timer = 30000, hunger_timer = 0}
+  W.unit(2).counters2 = {thirst_timer = 26000, hunger_timer = 0}
+  days(W, 1)
+  T.eq(W.K.call('economy', 'alarm'), true)
+  T.eq(select(2, W.K.call('economy', 'alarm')), 'thirst 2')
+  local function thirst()
+    local n = 0
+    for _, e in ipairs(W.find_events('DECISION_NEEDED')) do if e.d.id == 'thirst' then n = n + 1 end end
+    return n
+  end
+  T.eq(thirst(), 1)
+  W.unit(2).counters2.thirst_timer = 100
+  days(W, 1)
+  T.eq(select(2, W.K.call('economy', 'alarm')), 'drink 0 d', 'no drink at all: still an alarm')
+  T.eq(thirst(), 1, 'weekly')
+  days(W, 7)
+  T.eq(thirst(), 2)
+end)
+
+T.test('starved supply labors: tool labors -> managed, others -> unmanaged, LABOR_STARVED, modern only', function()
+  local E = fresh('economy')
+  local list = table.concat({'MINE: unmanaged (starved 1384 cycles)', 'HAUL_STONE: managed',
+                             'BREWER: managed (starved 243 cycles)', 'COOK: managed (starved 12 cycles)',
+                             'HANDLE_VEHICLES: managed (starved 20957 cycles)', 'PLANT: unmanaged (starved 728 cycles)'}, '\n')
+  T.eq(E.parse_labor_list(list).BREWER, {managed = true, starved = 243})
+  T.eq(E.parse_labor_list(list).HAUL_STONE, {managed = true, starved = 0})
+  T.eq(E.parse_labor_list(list).MINE, {managed = false, starved = 1384})
+  local mode = 'Mode: modern (labormanager)'
+  local W = world{setup = function(W)
+    W.act_result('run', function(cmd, a1)
+      if cmd == 'labormanager' and a1 == 'mode' then return true, mode end
+      if cmd == 'labormanager' and a1 == 'list' then return true, list end
+      return true, ''
+    end)
+  end}
+  days(W, 1)
+  local sw = {}
+  for _, a in ipairs(W.find_acts('run')) do
+    if a.args[1] == 'labormanager' and a.args[2] == 'labor' then sw[#sw + 1] = a.args[3] .. ' ' .. a.args[4] end
+  end
+  table.sort(sw)
+  T.eq(sw, {'BREWER unmanaged', 'MINE managed'}, 'COOK below the threshold, PLANT already unmanaged, vehicles no supply labor')
+  local ev = W.find_events('LABOR_STARVED')
+  T.eq(#ev, 2)
+  W.clear()
+  mode = 'Mode: monitor (labormanager)'
+  days(W, 1)
+  T.eq(#W.find_events('LABOR_STARVED'), 0, 'monitor mode assigns nothing: left alone')
 end)
 
 T.test('D-03 rule: idle > 40 % for 3 days -> one useful backlog item, never filler digging', function()

@@ -13,6 +13,7 @@ import hashlib
 import importlib
 import inspect
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -424,6 +425,31 @@ def unplace(save_dir: Path, bp_id: str, tpl: str, prev_placed: dict | None) -> N
         pass
 
 
+def retire(save_dir: Path, proj: str) -> bool:
+    """After kern confirmed bp.cancel: move bp/<proj>.json to bp/.cancelled/ (kept for the record), so its tiles
+    no longer block new placements (occupancy) and plan propose may draft the template again; drop
+    bp/.placed-<tpl>.json if it names this project."""
+    src = Path(save_dir) / "bp" / f"{proj}.json"
+    doc = files.read_json(src)
+    if not src.is_file():
+        return False
+    dst = Path(save_dir) / "bp" / ".cancelled"
+    try:
+        dst.mkdir(parents=True, exist_ok=True)
+        os.replace(src, dst / src.name)
+    except OSError:
+        return False
+    tpl = doc.get("tpl") if isinstance(doc, dict) else None
+    if isinstance(tpl, str):
+        pl = files.read_json(_placed(save_dir, tpl))
+        if isinstance(pl, dict) and pl.get("bp") == proj:
+            try:
+                _placed(save_dir, tpl).unlink()
+            except OSError:
+                pass
+    return True
+
+
 def place_params(args: dict) -> dict:
     """bp.place args -> template params: `p` plus every other scalar key (kern merges them the same way)."""
     p = dict(args.get("p") or {})
@@ -463,6 +489,8 @@ def send(save_dir: Path, verb: str, args: dict, by: str = "cli", wait_s: float =
                       + str(reply.get("msg", "")))
         if verb == "bp.place" and not reply.get("ok"):
             unplace(save_dir, cmd_id, args["tpl"], prev)
+        if verb == "bp.cancel" and reply.get("ok") and isinstance(args.get("proj"), str):
+            retire(save_dir, args["proj"])
         if verb == "inspect" and args.get("what") == "manifest" and reply.get("ok"):
             cache_manifest(save_dir, reply.get("data"))
     return cmd_id, reply

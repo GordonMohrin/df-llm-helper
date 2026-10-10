@@ -24,6 +24,16 @@ M.DEFAULTS = {
   kitchen = {{plant = 'MUSHROOM_HELMET_PLUMP', mat = 'STRUCTURAL', item = 'PLANT', what = 'Cook'},
              {plant = 'MUSHROOM_HELMET_PLUMP', mat = 'SEED', item = 'SEEDS', what = 'Cook'}},
   famine_days = 10,
+  -- supply alarm (live L1: two dwarves died of hunger and thirst): >= units citizens over the thirst or
+  -- hunger timer, or drink/food below `days`, holds arbiter's brake and wakes the LLM (weekly)
+  alarm = {thirst = 25000, hunger = 50000, units = 2, days = 10},
+  -- supply labors labormanager (modern) starved for >= cycles get switched (LABOR_STARVED): tool labors with
+  -- a builtin detail (Miners, Woodcutters, Hunters, Fisherdwarves) to managed, so it staffs the detail;
+  -- every other one to unmanaged, so every dwarf may do it (live L1: BREWER starved 243 cycles, no brewer)
+  labor = {cycles = 100,
+           supply = {'BREWER', 'PLANT', 'COOK', 'HERBALIST', 'PROCESS_PLANT', 'MILLER', 'BUTCHER', 'CARPENTER',
+                     'MASON', 'FEED_WATER_CIVILIANS', 'RECOVER_WOUNDED', 'MINE', 'CUTWOOD', 'HUNT', 'FISH'},
+           builtin = {'MINE', 'CUTWOOD', 'HUNT', 'FISH'}},
   stages = {
     {lib = 'library/basic', any = {'migrants', 'cit>=10'}},
     {lib = 'library/rockstock', any = {'workshop:Masons'}},
@@ -147,9 +157,15 @@ local function classify(it, a, cat)
   elseif f.forbid then return end
   if cat == 'DRINK' then a.drink = a.drink + n
   elseif a.food_set[cat] then
-    if cat == 'PLANT' or cat == 'PLANT_GROWTH' then
+    -- food = what a dwarf can eat now: meals and raw-edible items. Cook-only items (egg yolks, raw fish,
+    -- flour) feed nobody without a kitchen job (live L1: 34 yolks reported as 250 food days while a
+    -- dwarf starved), so they count as `cookable`.
+    if cat ~= 'FOOD' then
       local mf = mat_flags(it)
-      if not (mf and (mf.EDIBLE_RAW or mf.EDIBLE_COOKED)) then return end
+      if not (mf and mf.EDIBLE_RAW) then
+        if mf and mf.EDIBLE_COOKED then a.cookable = a.cookable + n end
+        return
+      end
     end
     a.food = a.food + n
     if cat == 'FOOD' then a.meals = a.meals + n; a.kinds[subtype(it) or -1] = true end
@@ -171,7 +187,7 @@ local function new_acc(c)
   local fs = {}
   for _, k in ipairs(c.food_cats or {}) do fs[k] = true end
   return {drink = 0, food = 0, meals = 0, cloth = 0, leather = 0, bone = 0, shell = 0, gems = 0, bars = 0,
-          bolts = 0, wood = 0, fuel = 0, drink_forb = 0, food_forb = 0, kinds = {}, food_set = fs}
+          bolts = 0, wood = 0, fuel = 0, drink_forb = 0, food_forb = 0, cookable = 0, kinds = {}, food_set = fs}
 end
 
 -- one slice: at most per_slice items; true when every category is done
@@ -210,7 +226,8 @@ local function publish(K, c, a)
   K.census.i = {tick = K.now().tick, drink = a.drink, food = a.food, meals = a.meals, meal_kinds = kinds,
                 cloth = a.cloth, leather = a.leather, bone = a.bone, shell = a.shell, gems = a.gems,
                 bars = a.bars, bolts = a.bolts, wood = a.wood, fuel = a.fuel, drink_forb = a.drink_forb,
-                food_forb = a.food_forb, boulders = vlen('BOULDER'), blocks = vlen('BLOCKS'), crafts = crafts}
+                food_forb = a.food_forb, cookable = a.cookable, boulders = vlen('BOULDER'), blocks = vlen('BLOCKS'),
+                crafts = crafts}
 end
 
 ---------------------------------------------------------------- stock days (7-day moving average)
@@ -488,6 +505,191 @@ M.on.REPORT = function(K, ev)
   end
 end
 
+---------------------------------------------------------------- fort positions (nobles screen)
+-- Live L0/L1: without a manager no work order is ever validated (0 of 47), so brewing, the orders
+-- library and every supply order do nothing. Vacant economy positions are filled like a player does on
+-- the nobles screen (act.appoint): the citizen with the best matching skills, no soldier, nobody who
+-- already holds a position when someone else can.
+M.POSITIONS = {{code = 'MANAGER', skills = {'ORGANIZATION'}},
+               {code = 'BOOKKEEPER', skills = {'RECORD_KEEPING'}},
+               {code = 'BROKER', skills = {'APPRAISAL', 'NEGOTIATION', 'JUDGING_INTENT'}}}
+
+-- {code -> true} of vacant offered positions, and the histfig ids holding any position
+local function positions()
+  local vac, held = {}, {}
+  local ent = df.global.plotinfo.main.fortress_entity
+  if not ent then return vac, held end
+  local code_of = {}
+  for _, p in ipairs(ent.positions.own) do if p.flags.ACTIVE then code_of[p.id] = p.code end end
+  for _, a in ipairs(ent.positions.assignments) do
+    local code = code_of[a.position_id]
+    if a.histfig >= 0 then held[a.histfig] = true
+    elseif code then vac[code] = true end
+  end
+  return vac, held
+end
+
+local function skill_score(u, skills)
+  local s = 0
+  for _, name in ipairs(skills) do
+    local id = df.job_skill[name]
+    if id then s = s + (dfhack.units.getNominalSkill(u, id, true) or 0) end
+  end
+  return s
+end
+
+function M.appoint_vacant(K)
+  local ok, vac, held = pcall(positions)
+  if not ok then return 0 end
+  local cu = K.census.u
+  if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then return 0 end
+  local n = 0
+  for _, pos in ipairs(M.POSITIONS) do
+    if vac[pos.code] then
+      local best, bscore
+      for _, id in ipairs(cu.ids) do
+        local u = df.unit.find(id)
+        if u and dfhack.units.isAdult(u) and u.military.squad_id < 0 then
+          local score = skill_score(u, pos.skills) * 10 - (held[u.hist_figure_id] and 1000 or 0)
+          if not bscore or score > bscore then best, bscore = u, score end
+        end
+      end
+      if best then
+        local aok, res = K.act.appoint(pos.code, best.id)
+        if aok then
+          held[best.hist_figure_id] = true
+          n = n + 1
+          K.log('info', '%s appointed: unit %d (%s)', pos.code, best.id, dfhack.df2utf(dfhack.units.getReadableName(best)))
+        end
+      end
+    end
+  end
+  return n
+end
+
+-- Manager orders that never get validated (live L1: the MANAGER position has required_office 1, so above
+-- a population threshold the manager validates only from an office with a chair; DF posts no
+-- ManageWorkOrders job otherwise). After 3 days with orders, a manager and nothing validated: wake the LLM.
+local function validation_watch(K, p)
+  local ok, total, valid = pcall(function()
+    local t, v = 0, 0
+    for _, o in ipairs(orders_all()) do t = t + 1; if o.status.validated then v = v + 1 end end
+    return t, v
+  end)
+  if not ok or total == 0 or valid > 0 then p.unval = nil; return end
+  local vac = select(2, pcall(positions))
+  if type(vac) ~= 'table' or vac.MANAGER then p.unval = nil; return end   -- no manager yet: appoint first
+  local now = K.now().tick
+  p.unval = p.unval or {since = now, woke = 0}
+  if now - p.unval.since >= 3 * DAY and now - (p.unval.woke or 0) >= 7 * DAY then
+    p.unval.woke = now
+    K.emit('DECISION_NEEDED', 'A', string.format('%d manager orders, none validated for 3 days', total),
+           {id = 'manager_office', q = 'manager validates no orders: office zone with a chair for the manager?'})
+  end
+end
+
+---------------------------------------------------------------- supply alarm, starved labors (live L1)
+-- citizens over the thirst / hunger timers (looked up by id from the census, CONTRACTS §1.4)
+local function needs(K, a)
+  local cu = K.census.u
+  local thirsty, hungry = 0, 0
+  for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
+    local u = df.unit.find(id)
+    local cn = u and u.counters2
+    if cn then
+      if (cn.thirst_timer or 0) >= a.thirst then thirsty = thirsty + 1 end
+      if (cn.hunger_timer or 0) >= a.hunger then hungry = hungry + 1 end
+    end
+  end
+  return thirsty, hungry
+end
+
+local function alarm_check(K, c, p, days)
+  local a = c.alarm or M.DEFAULTS.alarm
+  local okn, thirsty, hungry = pcall(needs, K, a)
+  if not okn then thirsty, hungry = 0, 0 end
+  local why
+  if thirsty >= a.units then why = string.format('thirst %d', thirsty)
+  elseif hungry >= a.units then why = string.format('hunger %d', hungry)
+  elseif days.drink_d < a.days then why = string.format('drink %d d', days.drink_d)
+  elseif days.food_d < a.days then why = string.format('food %d d', days.food_d) end
+  if why ~= st.alarm then K.log(why and 'warn' or 'info', 'supply alarm %s', why or 'over') end
+  st.alarm, st.thirsty, st.hungry = why, thirsty, hungry
+  local now = K.now().tick
+  if (thirsty >= a.units or days.drink_d < a.days) and now - (p.thirst_woke or -1e9) >= 7 * DAY then
+    p.thirst_woke = now
+    K.emit('DECISION_NEEDED', 'A', string.format('thirst: %d citizens thirsty, drink %d days', thirsty, days.drink_d),
+           {id = 'thirst', q = string.format('%d thirsty, drink %d d: water near the fort (well), brewing, barrels?',
+                                             thirsty, days.drink_d)})
+  end
+end
+
+-- labormanager list: "BREWER: managed (starved 243 cycles)", "MINE: unmanaged (starved 1384 cycles)"
+function M.parse_labor_list(out)
+  local r = {}
+  for line in tostring(out or ''):gmatch('[^\r\n]+') do
+    local labor, mode = line:match('^([A-Z_0-9]+): (u?n?managed)')
+    if labor then
+      r[labor] = {managed = mode == 'managed', starved = math.tointeger(tonumber(line:match('starved ([0-9]+) cycles') or '0')) or 0}
+    end
+  end
+  return r
+end
+
+local function labor_fix(K, c, p)
+  local lc = c.labor or M.DEFAULTS.labor
+  local okm, mode = K.act.run('labormanager', 'mode')
+  if not okm or not tostring(mode):lower():find('modern', 1, true) then return 0 end
+  local ok, out = K.act.run('labormanager', 'list')
+  if not ok then return 0 end
+  local list, builtin, n = M.parse_labor_list(out), {}, 0
+  for _, l in ipairs(lc.builtin or {}) do builtin[l] = true end
+  for _, l in ipairs(lc.supply or {}) do
+    local e = list[l]
+    if e and e.starved >= (lc.cycles or 100) then
+      local to = builtin[l] and (not e.managed) and 'managed' or (not builtin[l] and e.managed) and 'unmanaged' or nil
+      if to and K.act.run('labormanager', 'labor', l, to) then
+        n = n + 1
+        p.labor = type(p.labor) == 'table' and p.labor or {}
+        p.labor[l] = to
+        K.log('warn', 'labor %s starved %d cycles: now %s', l, e.starved, to)
+        K.emit('LABOR_STARVED', 'B', string.format('%s starved %d cycles: %s', l, e.starved, to),
+               {labor = l, cycles = e.starved, to = to})
+      end
+    end
+  end
+  return n
+end
+
+-- CONTRACTS §7: the supply alarm, or nil (arbiter brakes tempo while it is set)
+function M.alarm(K) return st.alarm end
+
+---------------------------------------------------------------- famine (live L1: a dwarf starved unnoticed)
+-- Below famine_days of eatable food: let labormanager staff hunters and fishers (modern mode forbids both
+-- by default) and wake the LLM once per famine week (gathering zones, farms, trade are its tools).
+local function famine(K, c, p, days, inv)
+  local fd, dd = days.food_d, days.drink_d
+  local lim = c.famine_days or 10
+  if fd >= lim then
+    if p.famine then p.famine = nil; K.log('info', 'famine over: %d food days', fd) end
+    return
+  end
+  local now = K.now().tick
+  if not p.famine then
+    p.famine = {since = now, woke = 0}
+    K.act.run('labormanager', 'allow-hunting')
+    K.act.run('labormanager', 'allow-fishing')
+    K.log('warn', 'famine: %d food days (%d eatable, %d cookable), hunting and fishing allowed', fd, inv.food or 0,
+          inv.cookable or 0)
+  end
+  if now - (p.famine.woke or 0) >= 7 * DAY then
+    p.famine.woke = now
+    K.emit('DECISION_NEEDED', 'A', string.format('famine: %d food days, %d drink days', fd, dd),
+           {id = 'famine', q = string.format('food %d d (%d eatable, %d cookable), drink %d d: gather, farm, cook, trade?',
+                                             fd, inv.food or 0, inv.cookable or 0, dd)})
+  end
+end
+
 ---------------------------------------------------------------- the daily run
 local function daily(K, c)
   local p = pstate(K)
@@ -522,6 +724,11 @@ local function daily(K, c)
     p.migrants, st.mig = 1, nil
   end
   pcall(kitchen, K, c, days.food_d)
+  M.appoint_vacant(K)
+  validation_watch(K, p)
+  alarm_check(K, c, p, days)
+  famine(K, c, p, days, inv)
+  pcall(labor_fix, K, c, p)
   supply(K, c, p, days, inv)
   imports(K, c, p)
   -- labor KPIs; PEACE days feed baseline's labormanager A/B test

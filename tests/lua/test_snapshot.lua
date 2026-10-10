@@ -63,6 +63,24 @@ T.test('tile(): legend classes, hidden is nil, designations, buildings', functio
   T.eq(t(3, 1).c, '_')
 end)
 
+T.test('tile(): a wall with a designation job (DF cleared designation.dig) reads dig=job', function()
+  local W = world()
+  -- live L1: DF posts a Dig job and clears designation.dig while the miner works the wall
+  local DIG, HAUL = 1, 2
+  df.job_type = {[DIG] = 'Dig', [HAUL] = 'StoreItemInStockpile',
+                 attrs = {[DIG] = {is_designation = true}, [HAUL] = {is_designation = false}}}
+  local l2 = {item = {job_type = HAUL, pos = {x = 0, y = 3, z = Z}}}
+  local l1 = {item = {job_type = DIG, pos = {x = 0, y = 0, z = Z}}, next = l2}
+  df.global.world.jobs = {list = {next = l1}}
+  local function t(x, y) local _, r = W.K.call('snapshot', 'tile', x, y, Z); return r end
+  T.eq({t(0, 0).c, t(0, 0).dig}, {'#', 'job'})
+  T.eq(t(0, 3).dig, '', 'a non-designation job at a tile is no designation')
+  T.eq(t(7, 3).dig, 'default', 'a designation still wins')
+  df.global.world.jobs = nil                       -- unreadable job list: plain designations only
+  W.run(1)
+  T.eq(t(0, 0).dig, '')
+end)
+
 T.test('export: sliced, schema-shaped rows, manifest bridge from gate, traps, marks, SNAPSHOT_READY', function()
   local W, S = world()
   local saved = S.CFG.slice

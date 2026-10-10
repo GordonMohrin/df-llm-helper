@@ -3,6 +3,10 @@
 --   * never pauses on its own; holds an inbox pause until its TTL; honours a pause by Gordon
 --     (DECISION_NEEDED after 10 min); unpauses only whitelisted popups, which it dismisses.
 --   * timestream fps from the mode table, lowered by inbox tempo.lower (TTL), applied idempotently.
+--   * supply brake (live L1: a year idled at 500 ticks/s, two dwarves died of hunger and thirst): while
+--     the fort is in phase P0 or economy.alarm() reports a supply problem, tempo and the vanilla FPS cap
+--     are held at BRAKE_FPS (timestream alone never slows DF below its own frame rate); the original
+--     cap is captured in restore.json and put back when the brake ends and on unload.
 --   * runtime profile at boot (originals to restore.json first), restored on unload; a restore.json
 --     left active by a crash is healed first (also on unmarked saves, called by kern), see M.heal.
 local json = require('dfllm.util.json')
@@ -11,6 +15,7 @@ local fio = require('dfllm.io')
 local M = {name = 'arbiter', every = {ms = 500}, critical = true, on = {}, verbs = {}}
 
 M.MODE_FPS = {PEACE = 500, ALERT = 250, SIEGE = -1, BREACH = -1, RECOVERY = 250, DRILL = -1}
+M.BRAKE_FPS = 150                  -- tempo and FPS cap while the supply brake holds
 M.PROFILE = {gfps = 30, autosave = 'YEARLY', overlays = true, visitor_cap = 30}
 M.KEEP_OVERLAY = 'notify'          -- headless overlay profile keeps widgets whose name contains this
 -- kind -> {plain text markers}: dismissed + unpaused. Live L0 (DF 53.16): an announcement popup
@@ -22,7 +27,8 @@ M.KEEP_OVERLAY = 'notify'          -- headless overlay profile keeps widgets who
 M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
             caravan = {'A caravan from', 'merchants need a trade depot', 'merchants have arrived',
                        'The merchants from'},
-            diplomacy = {'diplomat could not complete a meeting', 'diplomat has arrived', 'liaison has arrived'}}
+            diplomacy = {'diplomat could not complete a meeting', 'diplomat has arrived', 'liaison has arrived'},
+            guild = {'has been established'}}   -- live L1: "The Misty Company, a farmers guild, has been established."
 M.ASK_AFTER_MS = 600000            -- foreign pause older than this -> DECISION_NEEDED
 M.REASSERT_MS = 60000              -- re-check the live timestream fps at most this often
 M.RETRY_MS = 30000                 -- back-off after a failed timestream write
@@ -93,7 +99,7 @@ end
 
 -- unload / dfllm stop: the same session that changed the settings puts every original back
 local function restore(K, orig)
-  for _, k in ipairs({'gfps', 'autosave', 'visitor_cap', 'population_cap', 'weather'}) do
+  for _, k in ipairs({'gfps', 'fps_cap', 'autosave', 'visitor_cap', 'population_cap', 'weather'}) do
     if orig[k] ~= nil then K.act.setting(k, orig[k]) end
   end
   if orig.timestream_fps ~= nil then K.act.timestream(orig.timestream_fps) end
@@ -103,11 +109,16 @@ end
 -- live value of each global the profile changes, and the value the profile writes
 local LIVE = {
   gfps = function() return df.global.enabler.gfps end,
+  fps_cap = function() return math.floor(df.global.enabler.fps + 0.5) end,
   autosave = autosave_name,
   visitor_cap = function() return df.global.d_init.dwarf.visitor_cap end,
   weather = function() return df.global.d_init.feature.flags.WEATHER == true end,
 }
-local function profile_value(k) if k == 'weather' then return false end return M.PROFILE[k] end
+local function profile_value(k)
+  if k == 'weather' then return false end
+  if k == 'fps_cap' then return M.BRAKE_FPS end      -- only the brake writes the cap
+  return M.PROFILE[k]
+end
 
 -- restore.json active:1 means the previous session ended without restoring (crash). The heal must
 -- not push one fort's values onto another save:
@@ -125,7 +136,7 @@ function M.heal(K, opts)
   local orig = type(doc.orig) == 'table' and doc.orig or {}
   local same = type(opts) == 'table' and opts.marked == true and doc.save == tostring(K.cfg.save or '')
   local done, skipped = {}, {}
-  for _, k in ipairs({'gfps', 'autosave', 'visitor_cap', 'weather'}) do
+  for _, k in ipairs({'gfps', 'fps_cap', 'autosave', 'visitor_cap', 'weather'}) do
     if orig[k] ~= nil then
       local ok, live = pcall(LIVE[k])
       if ok and live == profile_value(k) then
@@ -179,6 +190,9 @@ local function apply_profile(K)
   local ts_fps = ts_accepted(K) and (saved_ts_fps(K) or live_fps()) or nil
   local orig = {gfps = g.enabler.gfps, autosave = autosave_name(), timestream_fps = ts_fps,
                 population_cap = orig_popcap(K)}
+  local okc, cap = pcall(LIVE.fps_cap)
+  if okc and math.type(cap) == 'integer' and cap > 0 then orig.fps_cap = cap end
+  st.cap = orig.fps_cap                          -- the live value: no write until the brake needs one
   if visitor then orig.visitor_cap = g.d_init.dwarf.visitor_cap end
   if weather_off then
     local ok, on = pcall(function() return g.d_init.feature.flags.WEATHER == true end)
@@ -209,12 +223,34 @@ local function apply_profile(K)
 end
 
 ---------------------------------------------------------------- tempo
+-- why the supply brake holds, or nil: phase P0 (water, brewing, fields and hunting are not there yet)
+-- or economy.alarm() (thirst/hunger, drink or food days); only where timestream runs at all
+function M.brake_why(K)
+  if (M.MODE_FPS[K.mode()] or 250) <= 0 then return nil end
+  local v = K.view()
+  if type(v) == 'table' and v.phase == 'P0' then return 'P0' end
+  local ok, why = K.call('economy', 'alarm')
+  if ok and type(why) == 'string' and why ~= '' then return why end
+end
+
 local function desired(K)
   local base = M.MODE_FPS[K.mode()] or 250
   local t = st.tempo
   if t and K.now().ms >= t.until_ms then st.tempo, t = nil, nil end
-  if t and base > 0 and t.fps < base then return t.fps, 'inbox' end
-  return base, 'mode'
+  local fps, by = base, 'mode'
+  if st.brake and base > M.BRAKE_FPS then fps, by = M.BRAKE_FPS, 'brake' end
+  if t and fps > 0 and t.fps < fps then fps, by = t.fps, 'inbox' end
+  return fps, by
+end
+
+-- the FPS cap follows the brake: BRAKE_FPS while it holds, the captured original otherwise
+local function apply_cap(K)
+  local orig = st.orig and st.orig.fps_cap
+  if not orig then return end
+  local want = st.brake and math.min(orig, M.BRAKE_FPS) or orig
+  if st.cap == want then return end
+  local ok = K.act.setting('fps_cap', want)
+  if ok then st.cap = want end
 end
 
 -- idempotent: write timestream only when the desired value changed (or the live value drifted);
@@ -222,6 +258,12 @@ end
 function M.apply(K)
   if not ts_accepted(K) then return false end
   local now = K.now()
+  local why = M.brake_why(K)
+  if why ~= st.brake then
+    K.log('info', 'supply brake %s', why and ('on: ' .. why) or 'off')
+    st.brake = why
+  end
+  apply_cap(K)
   local fps, by = desired(K)
   st.tempo_by = by
   if st.applied == fps then
