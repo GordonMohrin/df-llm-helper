@@ -18,11 +18,11 @@ luahost on `hack/lua53.dll`, k_mock).
 - Office (104,86,z124, chair, assigned to the manager); carpenter's workshop (100,86); surface farm plot (108,86) + autofarm.
 - Piles `dfllm-melt` (102,62,122) and `dfllm-trade` (102,69,122) in the bailey.
 - `follow` runs in the L1 session's background (until about 03:40).
-- **Deaths: 2 citizens, plus 1 lost.**
+- **Deaths: 3 citizens.**
   - Nil (clothier) starved.
   - Datan (bowyer) died of dehydration (her ghost is put to rest): her **fey mood failed** for want of a workshop
     (MOOD_END ok 0 at tick 114,273,487), she went melancholy and stopped drinking, and died 55k ticks later.
-  - Ilral (herbalist) failed a fey mood the same way and is melancholy: no longer a citizen, likely lost.
+  - Ilral (herbalist) failed a fey mood the same way, went melancholy and died dehydrated (y284 summer).
   - See L1-15.
 
 **What went wrong and what was fixed (live first, then in the product, all tested)**
@@ -78,7 +78,8 @@ luahost on `hack/lua53.dll`, k_mock).
      now moves the bp file to `bp/.cancelled/`.
 9. **Runtime folder renamed with every autosave (L0-6).** kern names it after `marker.save` (`region2`); supervise matches
    saves through `state.save`. Seen live: autosave 2, autosave 3, autosave 1, all in `region2/`.
-10. **Popups:** guild establishment and "ghost put to rest" are whitelisted.
+10. **Popups:** guild establishment, "ghost put to rest" and "found dead" are whitelisted. A death notice halted the
+    fort; care already records the death (DEATH, DEATHS_3PLUS).
 11. **New templates:**
     - `furnaces` (smelter + wood furnaces), `office`, `captives` (pit zone over a drop, manifest `pit`);
     - fortcore stage 1 places the `dfllm-trade` (autotrade) and `dfllm-melt` (automelt) piles;
@@ -124,7 +125,7 @@ luahost on `hack/lua53.dll`, k_mock).
 | idle % | 83 % (no plan) → 68 % (modern, gather flood) → 0-6 % (monitor) |
 | stock days | drink 0 → 164; food (eatable) ~0 → 1,639 |
 | starving postings | 2,637 → 504 |
-| deaths | 2 (starvation, dehydration) |
+| deaths | 3 (starvation; 2 x dehydration after failed fey moods) |
 | manager orders validated | 0/48 → 70/71 |
 | tokens (this L1 session) | about 0.72 M (context budget used; no per-hour split available) |
 
