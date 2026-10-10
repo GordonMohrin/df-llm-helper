@@ -1,10 +1,121 @@
 # df-llm-helper v2: status after the integration check
 
-Date 2026-10-11. Branch `v2`. §0 is the live slot L1 (economy and building), §0a the live slot L0
-(first v2 code in Dwarf Fortress); §1-§9 are the offline integration state they started from (pytest,
-luahost on `hack/lua53.dll`, k_mock).
+Date 2026-10-11. Branch `v2`. §0 is the live slot L1b (labor, moods, P1), §0b the live slot L1 (economy and
+building), §0a the live slot L0 (first v2 code in Dwarf Fortress); §1-§9 are the offline integration state they
+started from (pytest, luahost on `hack/lua53.dll`, k_mock).
 
-## 0. Live slot L1 (2026-10-10 23:10 - 2026-10-11 00:40)
+## 0. Live slot L1b (2026-10-11 00:46 - 01:45)
+**Fort at hand-over:** Castlerisen, y286 spring d34, pop 25 (15 adults, 10 children and babies), PEACE, phase **P1**.
+- Runtime folder `dfllm-runtime/region2/`; the kernel booted `autosave 2`; DF wrote `autosave 3` at the y286 rollover.
+- About 400-550 ticks/s (timestream 500, no brake since P0 was delivered); DF on desktop 1.
+- Drink 360 days (696 drinks), food 108 days, stress 20-24 % (was 36 %), nobody hungry or thirsty.
+- Projects:
+  - fortcore stage 1 **done** (well, depot, 6 shops, dorm, piles, zones), well **repaired** after a tantrum;
+  - `workshops` **done** (9 shops; all 12 moodable types exist now);
+  - dining hall (20 seats) **done**;
+  - bedrooms x6, office (P1) and captives (P2) dug in stone at prio 1 for the moods, now waiting for furniture.
+- Labor: labormanager monitor; Miners 2 (from the dig backlog), Woodcutters 1, Hunters 0.
+- **Deaths: none in L1b.** Strange moods: one Secretive mason mood **succeeded**; a second one (unit 19664,
+  Masons) found no rock at first; the office and captives digs gave boulders and it holds an andesite boulder and
+  an amethyst at hand-over (still running).
+
+**Orchestrator decisions, implemented and live**
+1. **(a) Tool details owned by economy.**
+   - `act.work_detail(name, unit, on)` = the work details screen, builtin Miners/Woodcutters/Hunters only; lint
+     allows labor writes only inside it. New event WORK_DETAIL (B).
+   - economy, only while labormanager is not modern:
+     - miners = clamp(ceil(dig backlog / 40), 2, 4 from pop 20, else 2); backlog = max(`runner.dig_backlog()`,
+       designation jobs);
+     - woodcutters 2 / 1 / 0 by logs against autochop's 60/150; hunters 2 only during a famine;
+     - every count capped by usable picks, axes or bows; a dwarf is in one tool detail at most;
+     - no soldier, noble, moody dwarf or sole key-labor holder is picked; growth at once, shrinking after
+       3 days, lowest skill first.
+   - Live: Miners 1 → 3 (backlog 201); Atír left Woodcutters (he was in both); later 2 miners (backlog 68);
+     a woodcutter joined at 148 logs.
+   - My mistake, fixed: the first shrink order (ineligible members first) dropped the fort's only trained miner,
+     the bookkeeper. Shrinking is now skill first. He stays out, because nobles are never picked.
+   - **Modern re-evaluated:** usable behind the LABOR_STARVED → monitor fallback (≥ 100 starved cycles ends the
+     A/B test), but measured worse on this fort (L1: 2,637 vs 758 starving postings; BREWER starved 243 cycles
+     while dwarves died of thirst). Monitor stays the default (DESIGN §5.5). In modern mode labormanager keeps
+     the tool details and economy writes none.
+2. **(b) Moods.**
+   - plans/year1.json P1 = dining, office, `workshops` types `moodable` + Still + Kitchen; P3 lost its moodable
+     entry. Mood stock goals (STOCK_LOW per key, cloth order) count from P1.
+   - The `workshops` deliverable also counts built workshops. follow starts the `workshops` template for a missing
+     `workshops` deliverable, and `cmd.place` skips the moodable types the fort has or has planned.
+   - PLAN_EXHAUSTED fires again after each finished project (it fired once per phase; P1 has three deliverables).
+   - Live: `workshops` placed at once (skip carpenter, mason, craftsdwarf): jeweler, metalsmith's forge (the fort
+     has an anvil), bowyer, clothier, leather works, tanner, loom, glass furnace, mechanic; all built by y285
+     summer d23.
+3. **(c) Stage orders sliced:** at most 8 cells per quickfort `orders` call, grouped by building key, one call per
+   slice. Live: dining 41 cells = 6 calls of 5-14 ms; workshops 10 cells = 21 + 6 ms (L1: one 19-cell call, 60 ms).
+4. **(d) Live replan and stage 1.**
+   - `plan.reload {phases:true}` replaces the save's phase list with plans/year1.json (the plan and the current
+     phase id stay). The fort now has office (P1), captives (P2) and furnaces (P3).
+   - The well waited for a mechanism, the mechanism for a non-economic boulder, and **all 9 boulders sat in
+     buildings** (soil embark). The workshops dig in stone (z118) produced boulders; stage 1 was done at
+     y284 autumn d30.
+   - The pond zone over the sump is filled by buckets (3-4/7 deep by y285 summer).
+   - A tantrum **destroyed the well** (y285 spring). New `bp.place tpl=fortcore site=repair repair=<proj> keys=l`
+     re-applies only the named build cells of a project; the well stood again after about 3,000 ticks.
+5. **(e) Speed:** the brake lifted by itself at P0 → P1. It then flapped every game day, because the thirst alarm
+   (25,000) is DF's plain "thirsty"; it is 40,000 now. Season y285 summer in PEACE: **403 ticks/s median**
+   (p10 379), kernel 16.5 ms/s median, p90 28, max 28, no gap over 3 s (8 perf rows, 210 s real time).
+
+**Found live and fixed (all tested; 8 commits)**
+1. **Popups halted the fort.**
+   - "Merchants have arrived and are unloading their goods." (10 min; the whitelist compared case-sensitively);
+   - "… is throwing a tantrum!";
+   - "… has claimed a Stoneworker's Workshop." (mid-mood).
+   - Matching is case-insensitive now; tantrum and strange-mood notices are whitelisted.
+2. **BREACH for 33 days because of an own ghost.** Ilral's ghost (isUndead, isOwnGroup) walked into Kern+: civ
+   alert, projects frozen, idle 86 %. sense now ignores the ghosts of fort members. siege also asked for the
+   missing Tiefe+ every retry (36 ACT_FAIL); a refuge that does not exist yet now means Kern+ at once.
+3. **The melt pile ate the tools.** fortcore's `dfllm-melt` (automelt) held both spare picks and both battle axes,
+   marked for melting: two of three miners and every woodcutter had no tool.
+   - baseline registers the melt pile only once a smelter exists (`logistics clear` before);
+   - the pile refuses picks, battle axes and crossbows (`stockpiles import -f`, filtered on the item names,
+     checked live: `pick` disables ITEM_WEAPON_PICK only);
+   - care unmarks those tools when anything marks them for melting.
+4. **Brewing stopped for want of barrels** (0 empty, every brew order inactive, drink 46 → 22 days). economy
+   counts empty barrels and keeps ≥ 4 through a `dfllm:barrel` MakeBarrel order (workorder refuses
+   ConstructBarrel in DF 53). Drink went 22 → 251 days within a season.
+5. **Dig stalls were judged per project:** the dining hall, queued behind the workshops dig, was reported blocked.
+   A dig stage now stalls only when no dig stage of any project progressed for 7 days.
+6. **A mood without a boulder.** The Secretive mason found no rock (MOOD_NEED). A bedrooms dig at prio 1, placed
+   at once, gave the boulder; MOOD_END ok after about 26 days. care now also wakes the LLM (DECISION_NEEDED
+   `mood_material`). The same happened again at hand-over (see above).
+
+**KPIs measured (L1b)**
+| KPI | Value |
+|---|---|
+| ticks/s | 150 (P0 brake) → PEACE median 403-418 (y285 summer); 250-290 while the brake flapped |
+| kernel ms/s | median 16-18, p90 28, max 31 at 400-550 ticks/s (limit 25: **over at p90**; `repeat` 14-16 ms/s) |
+| any call | stage orders ≤ 21 ms (was 60); baseline's first apply after every boot is still one ~200 ms slice |
+| deaths | **0** |
+| moods | 1 succeeded (Secretive); 1 running at hand-over |
+| stress (category ≤ 1) | 36 % → 20 % |
+| stock days | drink 123 → 170-251; food 723 → 120-250 (pop 19 → 25) |
+| tool details | miners 1 → 2-3; woodcutters 0-1; hunters 0 |
+| phase | P0 → P1 (y284 autumn d30) |
+| projects done | fortcore stage 1, workshops (9 shops), dining (20 seats), well repair |
+| idle % | 6-86 % (winter; the D-03 backlog is empty without boulders) |
+| tokens (this L1b session) | about 1.0 M (no per-hour split available) |
+
+**Open for L2 / Gordon**
+- **Trade failed twice ("time")**: the caravan left before the trade screen opened (L4 spike area).
+- Kernel p90 28-31 ms/s at speed (limit 25), mostly `repeat` (the dispatcher) at 14-16 ms/s; 403-418 ticks/s
+  stays below the 450 KPI.
+- **Boulders are scarce on this soil embark:** rock orders (crafts, blocks, mechanisms) take every boulder, and two
+  mason moods found none. A stone reserve for moods and mechanisms is not managed (D-03 forbids filler digging);
+  until then the LLM has to answer `mood_material` with a stone dig.
+- `dfllm:barrel` keeps making barrels while brewing fills them (34 barrels, logs 183 → 66; the woodcutters follow).
+- PROJECT_BLOCKED 'stalled' still wakes for builds that wait for furniture (dining, bedrooms).
+- The only trained miner (the bookkeeper) is out of Miners by the noble rule; Gordon may want an exception.
+- `labor.starving` read 504 all slot long in monitor mode; check the parse.
+- P2 (fortcore stage 2, captives, squad A) needs the LLM; follow auto-places only P0/P1.
+
+## 0b. Live slot L1 (2026-10-10 23:10 - 2026-10-11 00:40)
 **Fort at hand-over:** Castlerisen, y284 spring d76, pop 20 (16 adults, 2 babies), PEACE, phase P0.
 - Runtime folder `dfllm-runtime/region2/` (stable now, see L1-9); the loaded save is `autosave 1`.
 - 152 ticks/s under the supply brake (P0); DF on desktop 1.
@@ -367,10 +478,12 @@ python -m pytest -q -o addopts="" tests/test_schema.py tests/test_luahost.py tes
   tests/test_lint.py tests/test_hook.py tests/test_fairplay.py tests/test_supervise.py tests/test_migrate_v2.py \
   tests/test_embark.py tests/test_kern_files.py tests/test_runner.py tests/test_siege_files.py tests/test_trade_files.py \
   tests/test_wp6_files.py tests/test_wp8_files.py tests/test_snapshot_files.py tests/test_integration_v2.py
-  -> 1087 passed, 0 failed (48 s; after L0: 1087 passed, 61 s; after L1: 1145 passed, 61 s)
+  -> 1087 passed, 0 failed (48 s; after L0: 1087 passed, 61 s; after L1: 1145 passed, 61 s;
+  after L1b: 1149 passed, 63 s)
 for f in tests/lua/test_*.lua: python tools/luahost.py --path tests/lua $f   -> 26 suites, 426 passed, 0 failed
                                                                                (after L0: 430 passed, 0 failed;
-                                                                                after L1: 442 passed, 0 failed)
+                                                                                after L1: 442 passed, 0 failed;
+                                                                                after L1b: 455 passed, 0 failed)
 python -m df_llm_helper lint lua/dfllm        -> 0 finding(s)
 python -m df_llm_helper.lint --config         -> config ok
 ```
