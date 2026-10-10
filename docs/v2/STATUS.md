@@ -18,8 +18,12 @@ luahost on `hack/lua53.dll`, k_mock).
 - Office (104,86,z124, chair, assigned to the manager); carpenter's workshop (100,86); surface farm plot (108,86) + autofarm.
 - Piles `dfllm-melt` (102,62,122) and `dfllm-trade` (102,69,122) in the bailey.
 - `follow` runs in the L1 session's background (until about 03:40).
-- **Deaths: 2 citizens** (Nil, clothier, starved; Datan, bowyer, dehydrated: ghost put to rest).
-  Both died of the supply gaps below, before the fixes landed.
+- **Deaths: 2 citizens, plus 1 lost.**
+  - Nil (clothier) starved.
+  - Datan (bowyer) died of dehydration (her ghost is put to rest): her **fey mood failed** for want of a workshop
+    (MOOD_END ok 0 at tick 114,273,487), she went melancholy and stopped drinking, and died 55k ticks later.
+  - Ilral (herbalist) failed a fey mood the same way and is melancholy: no longer a citizen, likely lost.
+  - See L1-15.
 
 **What went wrong and what was fixed (live first, then in the product, all tested)**
 1. **The fort idled with no plan (y281-283).** About 1.5 game years passed at 500 ticks/s after L0; food and
@@ -82,6 +86,14 @@ luahost on `hack/lua53.dll`, k_mock).
 12. **manifest.json:** kern mirrors the persisted manifest to `<save>/manifest.json` (boot plus every flush); `cmd` site
     ranking and follow's audit read it (no 8 KB limit).
 13. **Supervisor alerts → wake:** follow emits SUPERVISE when supervise logs a new alert.
+15. **Failed strange moods (2).** The fort is in P0 with 7 of 12 moodable workshop types missing.
+    - care only emitted MOOD_NEED (B, digest); nothing woke and nothing was built.
+    - Now a mood without a workshop also sends DECISION_NEEDED `mood_workshop` (A) and a `workshops` PROJECT_REQUEST,
+      which follow places itself (rooms need Z4, i.e. fortcore stage 1 done).
+    - The tombs flood is fixed too: care asked for tombs every 3 days while a tombs project was pending (3 tombs
+      projects); `runner.pending(tpl)` now suppresses that.
+    - **Open:** DESIGN has all 12 moodable workshops only in P3. Pull them into P1, or keep a moodable shop set in
+      fortcore stage 1.
 14. **Smaller:**
     - `dfllm reload` (dev reload of the kernel);
     - act logs the quickfort cost per call;
@@ -354,10 +366,10 @@ python -m pytest -q -o addopts="" tests/test_schema.py tests/test_luahost.py tes
   tests/test_lint.py tests/test_hook.py tests/test_fairplay.py tests/test_supervise.py tests/test_migrate_v2.py \
   tests/test_embark.py tests/test_kern_files.py tests/test_runner.py tests/test_siege_files.py tests/test_trade_files.py \
   tests/test_wp6_files.py tests/test_wp8_files.py tests/test_snapshot_files.py tests/test_integration_v2.py
-  -> 1087 passed, 0 failed (48 s; after L0: 1087 passed, 61 s; after L1: 1144 passed, 60 s)
+  -> 1087 passed, 0 failed (48 s; after L0: 1087 passed, 61 s; after L1: 1145 passed, 61 s)
 for f in tests/lua/test_*.lua: python tools/luahost.py --path tests/lua $f   -> 26 suites, 426 passed, 0 failed
                                                                                (after L0: 430 passed, 0 failed;
-                                                                                after L1: 441 passed, 0 failed)
+                                                                                after L1: 442 passed, 0 failed)
 python -m df_llm_helper lint lua/dfllm        -> 0 finding(s)
 python -m df_llm_helper.lint --config         -> config ok
 ```

@@ -1133,6 +1133,13 @@ end
 
 function M.state(K) return {phase = S.phase, proj = S.rows} end
 
+-- WP7/WP8 (care): projects of a template that are not done yet (capacity requests wait for them)
+function M.pending(K, tpl)
+  local n = 0
+  for _, P in ipairs(S.pd and S.pd.list or {}) do if P.tpl == tpl and P.done ~= 1 then n = n + 1 end end
+  return n
+end
+
 M.on = {
   -- damp/warm cancel and cavern reports stop the dig of every nearby project (no pos: all diggers)
   REPORT = function(K, ev)

@@ -117,6 +117,11 @@ T.test('moods: needs from the claimed workshop only (never job_items), MOOD_NEED
   need = W.find_events('MOOD_NEED')
   T.eq(#need, 2, 'bars not repeated; workshop once')
   T.eq({need[2].d.unit, need[2].d.need, need[2].d.skill}, {2, 'workshop', 'WOODCRAFT'})
+  local dn = W.find_events('DECISION_NEEDED')               -- live L1: a mood without a shop fails within days
+  T.eq({#dn, dn[1].d.id}, {1, 'mood_workshop'})
+  local wreq = 0
+  for _, e in ipairs(W.find_events('PROJECT_REQUEST')) do if e.d.tpl == 'workshops' then wreq = wreq + 1 end end
+  T.eq(wreq, 1, 'the moodable workshops are requested (follow places them)')
   T.eq(W.state().care.moods, 4)
   W.unit(1).mood = -1
   W.unit(2).mood = df.mood_type.Berserk
@@ -219,6 +224,14 @@ T.test('tombs: PROJECT_REQUEST when free < open corpses + 6, rate-limited; corps
   T.eq(req[2].d.n, 6)
   day(W, 1)
   T.eq(W.state().care.corpses_old, 1)
+end)
+
+T.test('tombs: no request while a tombs project is still pending (live L1: one every 3 days)', function()
+  local W = world{setup = function(W)
+    W.load({name = 'runner', every = {ticks = 600}, pending = function(K, tpl) return tpl == 'tombs' and 1 or 0 end})
+  end}
+  day(W, 3)
+  T.eq(W.find_events('PROJECT_REQUEST'), {})
 end)
 
 T.test('no core yet and nobody dead: no tomb request', function()

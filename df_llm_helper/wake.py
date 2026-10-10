@@ -5,6 +5,7 @@ Held events are never dropped: they wait (merged) for the next allowed wake. Cla
 not wake; the follower acts on two of them without the LLM:
   SNAPSHOT_READY purpose=audit -> inspect manifest -> bp.topo.audit(snap, manifest) -> inbox `audit`
   PROJECT_REQUEST tpl=tombs    -> snapshot purpose=sites -> best free site (cmd.place) -> bp.place
+  PROJECT_REQUEST tpl=workshops -> the same (care asks when a strange mood finds no workshop)
   PLAN_EXHAUSTED phase P0/P1   -> the phase's first proj deliverable without a project (plans/year1.json),
                                   placed the same way (S1, or 'same' for a later fortcore stage): the fort
                                   never idles while it waits for an LLM (live L0/L1: a year idled, a dwarf
@@ -38,7 +39,8 @@ SUPERVISE_FRESH_S = 3600                       # alerts logged longer ago than t
 HB_STALE_S = 300
 AUTO_TIMEOUT_S = 60
 TOMBS_COOLDOWN_S = 600
-PLACE_KEYS = ("tombs", "starter")             # automatic placements (one job each)
+PLACE_KEYS = ("tombs", "workshops", "starter")   # automatic placements (one job each)
+AUTO_REQUESTS = ("tombs", "workshops")            # PROJECT_REQUEST templates follow places itself
 AUTO_PHASES = ("P0", "P1")                    # PLAN_EXHAUSTED auto-start only for the basic infrastructure
 PRUNE_EVERY_S = 60
 ERR_EVERY_S = 60                               # stderr 'poll error' at most once per minute
@@ -263,6 +265,8 @@ class Follower:
                 self._on_snapshot(d, now)
             elif t == "PROJECT_REQUEST" and d.get("tpl") == "tombs":
                 self._request_tombs(d, now)
+            elif t == "PROJECT_REQUEST" and d.get("tpl") in AUTO_REQUESTS:
+                self._request_place(d["tpl"], d["tpl"], {}, "S1", now)   # live L1: a strange mood needs a shop
             elif t == "PLAN_EXHAUSTED" and d.get("phase") in AUTO_PHASES:
                 self._request_starter(d, now)
         except Exception as ex:                # noqa: BLE001 - surfaces as one AUTO_FAIL wake

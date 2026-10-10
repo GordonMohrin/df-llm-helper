@@ -235,6 +235,16 @@ local function mood_seen(K, c, r, p, u, kind)
       local skill = best_skill(u)
       K.emit('MOOD_NEED', 'B', string.format('mood unit %d has no workshop (best skill %s)', u.id, skill),
              {unit = u.id, kind = kind, need = 'workshop', skill = skill})
+      -- live L1: two fey moods failed for want of a workshop; the moody dwarves went insane and one died
+      -- of thirst. A failed mood is lost within days: wake the LLM and ask for the moodable workshops.
+      K.emit('DECISION_NEEDED', 'A', string.format('strange mood: unit %d has no workshop (best skill %s)', u.id, skill),
+             {id = 'mood_workshop', q = string.format('unit %d needs a workshop for %s now (workshops template or one shop)',
+                                                     u.id, skill)})
+      local okp, pend = K.call('runner', 'pending', 'workshops')
+      if not (okp and type(pend) == 'number' and pend > 0) then
+        K.emit('PROJECT_REQUEST', 'B', string.format('workshops for a strange mood (unit %d, %s)', u.id, skill),
+               {tpl = 'workshops', n = 1, why = 'mood'})
+      end
     end
     return
   end
@@ -567,7 +577,9 @@ local function finish(K, c, r, p)
   -- tombs: free >= open corpses + margin; ask only once the core exists or somebody is unburied
   local need = open + c.tomb_margin - r.tombs_free
   local core = (K.manifest().zones or {}).Z4 ~= nil
-  if need > 0 and (core or open > 0) and (p.tomb_req == nil or now - p.tomb_req >= c.tomb_request_every) then
+  local okp, pend = K.call('runner', 'pending', 'tombs')
+  local queued = okp and type(pend) == 'number' and pend > 0      -- live L1: a tombs project every 3 days
+  if need > 0 and not queued and (core or open > 0) and (p.tomb_req == nil or now - p.tomb_req >= c.tomb_request_every) then
     p.tomb_req = now
     K.emit('PROJECT_REQUEST', 'B', string.format('tombs: %d free < %d corpses + %d', r.tombs_free, open, c.tomb_margin),
            {tpl = 'tombs', n = need, why = 'tombs_free'})

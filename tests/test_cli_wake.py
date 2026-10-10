@@ -670,3 +670,15 @@ def test_follow_wakes_on_new_supervisor_alert(save):
     c.t += 400
     f.poll()
     assert len(out) == 1, "the same alert does not wake twice"
+
+
+def test_follow_places_requested_workshops(save, monkeypatch):
+    """Live L1: a strange mood without a workshop -> care's PROJECT_REQUEST workshops -> follow places them."""
+    install_fake_bp(monkeypatch)
+    c = Clock()
+    f, out = F(c)
+    f.poll()
+    append_events(save, [ev(8813, "PROJECT_REQUEST", "workshops for a mood", {"tpl": "workshops", "n": 1, "why": "mood"})])
+    f.poll()
+    (snap_cmd,) = inbox_docs(save)
+    assert snap_cmd["verb"] == "snapshot" and f.jobs["workshops"]["tpl"] == "workshops"
