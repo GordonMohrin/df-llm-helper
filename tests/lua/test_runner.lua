@@ -719,7 +719,7 @@ T.test('golden fortcore stage 1: every chunk applied once, probes per slice boun
   local P = H.proj(W, 'fc1')
   T.eq(P.done, 1, 'fortcore stage 1 finished: ' .. tostring(P.blocked) .. ' stage ' .. P.stage)
   T.eq(W.K.manifest().burrows['Kern+'].role, 'kern')
-  T.ok(#W.K.manifest().workshops == 5)
+  T.eq(#W.K.manifest().workshops, 6, 'carpenter, mason, craftsdwarf, still, kitchen, mechanics (live L1)')
 end)
 
 T.done()
