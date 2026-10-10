@@ -29,7 +29,9 @@ M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
                        'The merchants from'},
             diplomacy = {'diplomat could not complete a meeting', 'diplomat has arrived', 'liaison has arrived'},
             guild = {'has been established'},
-            ghost = {'has been put to rest'}}   -- live L1: "<name>, Ghostly Bowyer has been put to rest."   -- live L1: "The Misty Company, a farmers guild, has been established."
+            ghost = {'has been put to rest'},
+            -- deaths are recorded by care (DEATH, DEATHS_3PLUS wakes); the notice alone must not halt the fort
+            death = {'has been found dead'}}   -- live L1: "<name>, Ghostly Bowyer has been put to rest."   -- live L1: "The Misty Company, a farmers guild, has been established."
 M.ASK_AFTER_MS = 600000            -- foreign pause older than this -> DECISION_NEEDED
 M.REASSERT_MS = 60000              -- re-check the live timestream fps at most this often
 M.RETRY_MS = 30000                 -- back-off after a failed timestream write
