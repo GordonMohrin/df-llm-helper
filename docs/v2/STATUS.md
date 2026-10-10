@@ -1,9 +1,130 @@
 # df-llm-helper v2: status after the integration check
 
-Date 2026-10-10. Branch `v2`. §0 is the live slot L0 (first v2 code in Dwarf Fortress); §1-§9 are
-the offline integration state it started from (pytest, luahost on `hack/lua53.dll`, k_mock).
+Date 2026-10-11. Branch `v2`. §0 is the live slot L1 (economy and building), §0a the live slot L0
+(first v2 code in Dwarf Fortress); §1-§9 are the offline integration state they started from (pytest,
+luahost on `hack/lua53.dll`, k_mock).
 
-## 0. Live slot L0 (2026-10-10, 20:47-23:10)
+## 0. Live slot L1 (2026-10-10 23:10 - 2026-10-11 00:40)
+**Fort at hand-over:** Castlerisen, y284 spring d76, pop 20 (16 adults, 2 babies), PEACE, phase P0.
+- Runtime folder `dfllm-runtime/region2/` (stable now, see L1-9); the loaded save is `autosave 1`.
+- 152 ticks/s under the supply brake (P0); DF on desktop 1.
+- Drink 164 days, food 1,639 days (eatable), nobody hungry (max hunger 42k) or thirsty (max 20k).
+- 70 of 71 manager orders validated; labormanager in **monitor** mode; idle 0-6 %.
+- Projects:
+  - fortcore stage 1 (anchor 106,54,124 rot 0): dig done, build stage 38 %, waiting for beds, doors and a mechanism;
+  - farms (106,99,121 rot 2): build 55 %;
+  - two tombs projects;
+  - all "stalled" only while buildingplan waits for 5 beds, 6 coffins, 1 door and 1 mechanism.
+- Office (104,86,z124, chair, assigned to the manager); carpenter's workshop (100,86); surface farm plot (108,86) + autofarm.
+- Piles `dfllm-melt` (102,62,122) and `dfllm-trade` (102,69,122) in the bailey.
+- `follow` runs in the L1 session's background (until about 03:40).
+- **Deaths: 2 citizens** (Nil, clothier, starved; Datan, bowyer, dehydrated: ghost put to rest).
+  Both died of the supply gaps below, before the fixes landed.
+
+**What went wrong and what was fixed (live first, then in the product, all tested)**
+1. **The fort idled with no plan (y281-283).** About 1.5 game years passed at 500 ticks/s after L0; food and
+   drink ran out.
+   - Fix: `follow` places the first missing `proj` deliverable at S1 when PLAN_EXHAUSTED arrives in P0 or P1 (L1 used it
+     for farms and tombs).
+   - Fix: the **supply brake** (arbiter) holds tempo and the vanilla FPS cap (`act.setting fps_cap`, restored via
+     restore.json) at 150 while the phase is P0 or `economy.alarm()` is set. Timestream alone cannot slow DF below its own FPS.
+2. **False "damp" BREACH_STOP (twice, same relative tile).** DF clears `designation.dig` while a miner works the
+   tile (the Dig job holds it). The probe read "wall, no designation" and took it for a damp cancel.
+   - `snapshot.tile` now reports `dig='job'` for tiles with a designation job.
+   - A lost designation without a DIG_CANCEL_DAMP/WARM report (it also checks the vanilla announcement log) is
+     re-marked once, then blocks as `dig_lost` (no undo; cleared at boot).
+   - A real damp case later (farms under a swamp pond) stopped correctly on the report. `bp.sites` now rejects sites
+     with revealed water or magma on the level above.
+3. **No manager, no validated order (0/48).**
+   - New `act.appoint` (nobles screen records: assignment histfig, histfig position link incl. `entity_vector_idx`,
+     and **`entity.assignments_by_type[responsibility]`**, the index DF uses to find who manages production).
+   - economy fills vacant MANAGER/BOOKKEEPER/BROKER by skill.
+   - Validation then still failed: the MANAGER position has `required_office 1`, and above a population threshold
+     the manager validates only from an office. DF posts `ManageWorkOrders` only when the office has a chair.
+     L1 built a carpenter's workshop, one chair (workshop job built from DFHack's idle-crafting pattern) and an office
+     zone reserved via preserve-rooms. Then 13 of 49 orders were validated within 4,000 ticks.
+   - New template `office`; economy wakes the LLM (`DECISION_NEEDED manager_office`) after 3 days without a validated order.
+4. **Food counted wrong.** The census counted cook-only items (34 egg yolks) as food (status "250 days" while a dwarf
+   starved).
+   - Food now means raw-edible items plus meals; cook-only items count as `cookable`.
+   - Famine (< 10 days) allows hunting and fishing and sends a weekly DECISION_NEEDED famine.
+   - Live: 3,498 visible wild shrubs (berries, peas, lentils, grains, all raw-edible) were marked for gathering.
+5. **Thirst.** The nearest drinkable water is about 90 tiles away (32,144,117); the pond near the fort froze or
+   dried, and the 25 "drinks" were caravan goods.
+   - Live: brew jobs placed directly at the still (job items copied 1:1 from the reaction reagents), then the library orders.
+   - Product: economy thirst alarm (≥ 2 citizens ≥ 25k, or drink < 10 days) → brake plus weekly DECISION_NEEDED thirst;
+     brewing and meals prioritized (`prioritize -aq`).
+6. **labormanager.**
+   - `labormanager enable` always started the **modern** engine; the configured monitor never ran.
+   - Modern never staffed brewing (skilled labors go to specialists only; BREWER starved 243 cycles).
+   - Setting a labor "unmanaged" left it to the single dwarf outside the auto: work details (CARPENTER, BREWER, COOK: 1 holder each).
+   - Fix: baseline sets the engine with `autolabor mode X` + `enable autolabor`, and runs `labormanager disable` before
+     leaving modern (that removes its memberships).
+   - Fix: economy falls back to monitor when modern starves a supply labor (LABOR_STARVED); builtin tool labors
+     (MINE...) become managed.
+   - Live in monitor mode: all 16 adults hold every labor and idle fell from 68 % to 0-6 %.
+   - Mining stays with the vanilla Miners detail (1 member, 3 picks). v2 writes no work details: **Gordon decides**
+     (add miners in the UI or allow modern for MINE only).
+7. **Hidden stair tile stalled stage 1 forever.** A `j` above a `u` stays hidden and DF posts no job. A dig stage
+   whose only pending tiles are hidden now completes after 2 days without progress.
+8. **My own live error (not product):**
+   - A 190x190x10 quickfort `p` (gather) designation took a 41 s frame freeze (PERF_DEGRADED) and removed the fortcore
+     dig jobs at z119; the runner re-marked them by itself (§2 fix).
+   - The first fortcore had been placed twice (two instances of me); the duplicate was cancelled. `dfllm cmd bp.cancel`
+     now moves the bp file to `bp/.cancelled/`.
+9. **Runtime folder renamed with every autosave (L0-6).** kern names it after `marker.save` (`region2`); supervise matches
+   saves through `state.save`. Seen live: autosave 2, autosave 3, autosave 1, all in `region2/`.
+10. **Popups:** guild establishment and "ghost put to rest" are whitelisted.
+11. **New templates:**
+    - `furnaces` (smelter + wood furnaces), `office`, `captives` (pit zone over a drop, manifest `pit`);
+    - fortcore stage 1 places the `dfllm-trade` (autotrade) and `dfllm-melt` (automelt) piles;
+    - plans/year1.json: office P1, captives P2, furnaces P3. The live fort keeps its adopt-time phases.
+12. **manifest.json:** kern mirrors the persisted manifest to `<save>/manifest.json` (boot plus every flush); `cmd` site
+    ranking and follow's audit read it (no 8 KB limit).
+13. **Supervisor alerts → wake:** follow emits SUPERVISE when supervise logs a new alert.
+14. **Smaller:**
+    - `dfllm reload` (dev reload of the kernel);
+    - act logs the quickfort cost per call;
+    - doctor knows the brake;
+    - DECISION_NEEDED for famine, thirst and manager_office.
+
+**Spikes**
+- **S5 (labormanager):**
+  - `status` parses in both engines ("N starving (> 1200 ticks ...)", monitor: "labor monitor: N starving postings").
+  - Starving postings: modern 2,637 → monitor 758 → 504; the rest is the gather flood.
+  - Soldiers: none yet, untested.
+  - A/B: modern lost on this fort (see 6).
+- **S6 (quickfort, commands.log `ms`):**
+  - dig chunks (≤ 13 cells with extents) median 1 ms, p90 9 ms, max 16 ms (n = 68); dig undo median 1 ms;
+  - build chunk 5 ms (19 cells);
+  - the stage `orders` call **60 ms** (above the 50 ms KPI: one call per stage, consider slicing);
+  - `command='orders'` created 6 manager orders for 18 items, and buildingplan picks them up (beds, coffins, door,
+    mechanism waiting);
+  - farm plots: the farms stage reached build 55 % on soil.
+- **S1 follow-up:** kernel 6-10 ms/s (perf.csv median 9, p90 18, max 39 across reloads); max gap 171 ms in the last 10 min.
+  Gaps > 3 s: my mass designation (41 s) and reloads.
+
+**KPIs measured (L1)**
+| KPI | Value |
+|---|---|
+| ticks/s | 499 before L1 (idle fort), 150 under the brake (P0), 50 during the emergency |
+| kernel ms/s | median 9, p90 18 (limit 25) |
+| idle % | 83 % (no plan) → 68 % (modern, gather flood) → 0-6 % (monitor) |
+| stock days | drink 0 → 164; food (eatable) ~0 → 1,639 |
+| starving postings | 2,637 → 504 |
+| deaths | 2 (starvation, dehydration) |
+| manager orders validated | 0/48 → 70/71 |
+| tokens (this L1 session) | about 0.72 M (context budget used; no per-hour split available) |
+
+**Open for L2 / Gordon**
+- Miners: only 1 dwarf mines (vanilla Miners detail). Gordon adds miners in the UI, or allows modern for MINE.
+- The live fort has no well water nearby: the fortcore well spot needs its sump filled (pond zone, buckets). Until
+  then drink depends on brewing.
+- Stage-orders call 60 ms: slice it.
+- The live fort's phases are still the adopt-time year1 (without office, captives, furnaces): place those by `bp.place`.
+- S9 (supervised restart) and the hook spike are still open.
+
+## 0a. Live slot L0 (2026-10-10, 20:47-23:10)
 **Fort for L1:** Rimtarlocun "Castlerisen", world Zilirréth (folder `region2`), world tile **8,14**,
 rectangle **131,233** (4x4), embarked y280 late summer, adopted, 16 modules ok, `selftest full` 9/9.
 At hand-over: y281 autumn, pop 19, PEACE, timestream 500, about 499 ticks/s, unpaused. DF on desktop 1,
@@ -233,9 +354,10 @@ python -m pytest -q -o addopts="" tests/test_schema.py tests/test_luahost.py tes
   tests/test_lint.py tests/test_hook.py tests/test_fairplay.py tests/test_supervise.py tests/test_migrate_v2.py \
   tests/test_embark.py tests/test_kern_files.py tests/test_runner.py tests/test_siege_files.py tests/test_trade_files.py \
   tests/test_wp6_files.py tests/test_wp8_files.py tests/test_snapshot_files.py tests/test_integration_v2.py
-  -> 1087 passed, 0 failed (48 s; after L0: 1087 passed, 61 s)
+  -> 1087 passed, 0 failed (48 s; after L0: 1087 passed, 61 s; after L1: 1144 passed, 60 s)
 for f in tests/lua/test_*.lua: python tools/luahost.py --path tests/lua $f   -> 26 suites, 426 passed, 0 failed
-                                                                               (after L0: 430 passed, 0 failed)
+                                                                               (after L0: 430 passed, 0 failed;
+                                                                                after L1: 441 passed, 0 failed)
 python -m df_llm_helper lint lua/dfllm        -> 0 finding(s)
 python -m df_llm_helper.lint --config         -> config ok
 ```
@@ -260,19 +382,19 @@ python -m df_llm_helper.lint --config         -> config ok
 3. **Uniforms.** `act.squad_uniform` is a stub, so worn = 0 %. The drill then fails (`no_uniform`),
    which blocks P5 (drill 1, R1 needs a drill for R2) and R2. Needs [S2]; meanwhile Gordon assigns
    uniforms in the UI.
-4. **Trade pile.** No template builds one. Gordon names a stockpile next to the depot `dfllm-trade`,
+4. **Trade pile.** *Fixed in L1: fortcore stage 1 places `dfllm-trade` (autotrade).* No template builds one. Gordon names a stockpile next to the depot `dfllm-trade`,
    which baseline then registers. Without it P4 `{k:trade}` never passes.
-5. **No smelter or wood furnace template.** `library/furnace` and `library/smelting` are never
+5. *Fixed in L1: template `furnaces`.* **No smelter or wood furnace template.** `library/furnace` and `library/smelting` are never
    imported (year1 says so). Metal comes from trade only, which P6 metal ≥ 80 % depends on.
-6. **No templates for the captive pit or the melt pile** (care and baseline wait for them).
+6. *Fixed in L1: template `captives`, fortcore `dfllm-melt` pile.* **No templates for the captive pit or the melt pile** (care and baseline wait for them).
 
 **Operational:**
 
 7. **A supervised restart leaves the fort paused.** DF loads paused, the owner is `df`, and by R6 only
    Gordon unpauses. Unattended years (A2) need a decision, for example: the arbiter releases a `df`
    pause once after a supervised restart in PEACE.
-8. **Supervisor alerts reach only `supervise.json`.** There is no wake line (WP10).
-9. **The `inspect manifest` reply is capped at 8 KB.** follow's automatic audit stops (AUTO_FAIL) once
+8. *Fixed in L1: follow wakes SUPERVISE.* **Supervisor alerts reach only `supervise.json`.** There is no wake line (WP10).
+9. *Fixed in L1: `<save>/manifest.json`.* **The `inspect manifest` reply is capped at 8 KB.** follow's automatic audit stops (AUTO_FAIL) once
    the manifest grows past that, at roughly 40 room projects. Proposal: kern writes `<save>/manifest.json`.
 10. **`tempo.lower` cannot slow below the vanilla FPS cap.** timestream ignores targets below the actual
     FPS (tools/timestream.txt:43). The live prefs have FPS_CAP 500, so tempo.lower is close to a no-op.
@@ -294,15 +416,15 @@ python -m df_llm_helper.lint --config         -> config ok
 
 **Found live in L0 (§0):**
 
-16. **No manager:** manager orders are never validated (0 of 47), so economy, brewing and the
+16. *Fixed in L1: `act.appoint` + office (see §0-3).* **No manager:** manager orders are never validated (0 of 47), so economy, brewing and the
     orders library do nothing. Appointing a manager (and a bookkeeper and broker for trade) needs an
     act function for the nobles screen, or Gordon. This blocks P0-P1.
 17. **Prepare carefully** cannot be driven by simulated input; embarks use Play now.
-18. **The save folder renames** to `autosave N` after an autosave. Kernel I/O and supervise/`load-save`
+18. *Fixed in L1: runtime folder = `marker.save`.* **The save folder renames** to `autosave N` after an autosave. Kernel I/O and supervise/`load-save`
     must follow the newest folder.
 19. **Kernel I/O cost** (`kern` 9.4 ms/s) is about 3x all modules; the baseline first apply is a single
     425 ms call.
-20. **The P0 plan is not applied by adopt.** With timestream 500 and no plan the fort idles and
+20. *Fixed in L1: follow auto-places P0/P1 deliverables; supply brake.* **The P0 plan is not applied by adopt.** With timestream 500 and no plan the fort idles and
     starves within a year. `adopt` (or L1 right after embark) must apply a plan before unpausing.
 
 ## 7. Contract changes to adopt (WP0 / orchestrator; implemented, CONTRACTS.md not edited)

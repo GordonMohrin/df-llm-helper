@@ -28,7 +28,8 @@ M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
             caravan = {'A caravan from', 'merchants need a trade depot', 'merchants have arrived',
                        'The merchants from'},
             diplomacy = {'diplomat could not complete a meeting', 'diplomat has arrived', 'liaison has arrived'},
-            guild = {'has been established'}}   -- live L1: "The Misty Company, a farmers guild, has been established."
+            guild = {'has been established'},
+            ghost = {'has been put to rest'}}   -- live L1: "<name>, Ghostly Bowyer has been put to rest."   -- live L1: "The Misty Company, a farmers guild, has been established."
 M.ASK_AFTER_MS = 600000            -- foreign pause older than this -> DECISION_NEEDED
 M.REASSERT_MS = 60000              -- re-check the live timestream fps at most this often
 M.RETRY_MS = 30000                 -- back-off after a failed timestream write
