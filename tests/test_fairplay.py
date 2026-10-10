@@ -225,10 +225,12 @@ def test_kernel_baseline_is_allowed(line):
 @pytest.mark.parametrize("line", [
     "control-panel enable work-now", "enable work-now", "control-panel enable agitation-rebalance",
     "control-panel enable emigration", "control-panel enable deteriorate", "tailor confiscate true",
-    "cleanowned all", "labormanager mode legacy", "autolabor enable", "enable autolabor",
-    "enable labormanager",  # no such plugin: labormanager lives in autolabor.plug.dll (`labormanager enable`)
+    "cleanowned all", "labormanager mode legacy", "autolabor mode legacy", "autolabor enable",
+    "enable labormanager",  # no such plugin: labormanager lives in autolabor.plug.dll
 ])
 def test_decision_gated_tools_are_off_by_default(line):
+    # `enable autolabor` is allowed since live L1: it starts the engine `autolabor mode` chose (only monitor or
+    # modern are allowlisted); `labormanager enable` always started the modern engine instead
     """D-04/05/06/10 default off: the allowlist ships without them (docs/v2/DECISIONS.md)."""
     t = line.split()
     assert F.check_run(t[0], t[1:])[0] is False, line

@@ -74,6 +74,7 @@ def diagnose(save_dir: Path) -> tuple[list[str], list[str]]:
     if state is None and info.get("errors"):
         bad.append("state unreadable: " + "; ".join(f"{k}: {v}" for k, v in info["errors"].items())[:200])
     s = perf_summary(read_perf(d))
+    tempo_by = ((state or {}).get("owners") or {}).get("tempo")
     if s:
         tps = " ".join(f"{m} {med} ({lo}-{hi})" for m, (med, lo, hi) in sorted(s["tps"].items()))
         out.append(f"ticks/s median by mode over {s['span_s'] // 60} min: {tps}; last {s['last']['tps']} "
@@ -84,7 +85,10 @@ def diagnose(save_dir: Path) -> tuple[list[str], list[str]]:
             out.append("modules ms/s: " + " ".join(f"{k} {v:.1f}" for k, v in s["mods"][:8]))
         for m, (med, _, _) in s["tps"].items():
             if m in TPS_MIN and med < TPS_MIN[m] and not (m == "PEACE" and s["last"]["pop"] > 55):
-                bad.append(f"{m} median {med} ticks/s < {TPS_MIN[m]}")
+                if m == "PEACE" and tempo_by in ("brake", "inbox"):
+                    out.append(f"{m} median {med} ticks/s: tempo held by {tempo_by} (supply brake or tempo.lower)")
+                else:
+                    bad.append(f"{m} median {med} ticks/s < {TPS_MIN[m]}")
         if s["ms_s_avg"] > KERN_MS_S:
             bad.append(f"kernel {s['ms_s_avg']} ms/s > {KERN_MS_S}")
         if s["gaps3"]:

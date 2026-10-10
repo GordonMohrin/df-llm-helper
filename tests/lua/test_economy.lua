@@ -326,7 +326,7 @@ T.test('supply alarm: >= 2 thirsty citizens or drink < 10 days -> alarm(), DECIS
   T.eq(thirst(), 2)
 end)
 
-T.test('starved supply labors: tool labors -> managed, others -> unmanaged, LABOR_STARVED, modern only', function()
+T.test('starved supply labors: tool labors -> managed, others -> monitor fallback, LABOR_STARVED, modern only', function()
   local E = fresh('economy')
   local list = table.concat({'MINE: unmanaged (starved 1384 cycles)', 'HAUL_STONE: managed',
                              'BREWER: managed (starved 243 cycles)', 'COOK: managed (starved 12 cycles)',
@@ -335,7 +335,9 @@ T.test('starved supply labors: tool labors -> managed, others -> unmanaged, LABO
   T.eq(E.parse_labor_list(list).HAUL_STONE, {managed = true, starved = 0})
   T.eq(E.parse_labor_list(list).MINE, {managed = false, starved = 1384})
   local mode = 'Mode: modern (labormanager)'
+  local fell = {}
   local W = world{setup = function(W)
+    W.load({name = 'baseline', every = {ticks = 33600}, labor_fallback = function(K, why) fell[#fell + 1] = why end})
     W.act_result('run', function(cmd, a1)
       if cmd == 'labormanager' and a1 == 'mode' then return true, mode end
       if cmd == 'labormanager' and a1 == 'list' then return true, list end
@@ -348,9 +350,11 @@ T.test('starved supply labors: tool labors -> managed, others -> unmanaged, LABO
     if a.args[1] == 'labormanager' and a.args[2] == 'labor' then sw[#sw + 1] = a.args[3] .. ' ' .. a.args[4] end
   end
   table.sort(sw)
-  T.eq(sw, {'BREWER unmanaged', 'MINE managed'}, 'COOK below the threshold, PLANT already unmanaged, vehicles no supply labor')
+  T.eq(sw, {'MINE managed'}, 'never unmanaged: that leaves a labor to the dwarves outside the auto: details')
+  T.eq(fell, {'BREWER starved 243 cycles'}, 'modern starved a supply labor: monitor fallback (once per run)')
   local ev = W.find_events('LABOR_STARVED')
   T.eq(#ev, 2)
+  T.eq({ev[1].d.labor, ev[1].d.to}, {'BREWER', 'monitor'})
   W.clear()
   mode = 'Mode: monitor (labormanager)'
   days(W, 1)

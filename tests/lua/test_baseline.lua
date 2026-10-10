@@ -36,12 +36,12 @@ T.test('full apply on boot: native list, settings, labormanager monitor, crops, 
     'enable buildingplan', 'enable logistics', 'enable preserve-rooms', 'enable burrow',
     'prioritize -aq defaults', 'autochop target 150 60', 'autobutcher target 2 1 2 1 all',
     'autobutcher target 0 0 1 1 CAT', 'tailor materials silk cloth yarn', 'tailor confiscate false',
-    'pop-control set wave-size 8', 'pop-control set max-pop 55', 'labormanager mode monitor', 'labormanager enable',
+    'pop-control set wave-size 8', 'pop-control set max-pop 55', 'autolabor mode monitor', 'enable autolabor',
     'seedwatch clear', 'seedwatch MUSHROOM_HELMET_PLUMP 0', 'ban-cooking booze honey milk oil tallow',
     'burial -c'}) do
     T.ok(F.has(r, want), 'missing: ' .. want)
   end
-  for _, bad in ipairs({'labormanager mode modern', 'labormanager balance balanced',
+  for _, bad in ipairs({'autolabor mode modern', 'labormanager enable', 'labormanager balance balanced',
                         'labormanager labor MINE unmanaged', 'seedwatch MUSHROOM_HELMET_PLUMP 12'}) do
     T.ok(not F.has(r, bad), 'must not run: ' .. bad)
   end
@@ -139,7 +139,9 @@ end)
 
 local function lm_runs(W)
   local r = {}
-  for _, s in ipairs(F.runs(W)) do if s:match('^labormanager') then r[#r + 1] = s end end
+  for _, s in ipairs(F.runs(W)) do
+    if s:match('^labormanager') or s:match('^autolabor') or s == 'enable autolabor' then r[#r + 1] = s end
+  end
   return r
 end
 
@@ -160,7 +162,7 @@ T.test('labormanager A/B: 168 PEACE days monitor, then modern + balance (no unma
   W.K.call('baseline', 'labor_day', 0)                            -- ... of 168
   T.eq(B.every, B.APPLY_EVERY, 'the switch waits for no month')
   drain(W)
-  T.eq(lm_runs(W), {'labormanager mode modern', 'labormanager mode', 'labormanager enable',
+  T.eq(lm_runs(W), {'labormanager mode', 'autolabor mode modern', 'enable autolabor', 'labormanager mode',
                     'labormanager balance balanced'})
   local p = W.K.persist.get('m.baseline')
   T.eq({p.lm, p.ab.stage, p.ab.a}, {'modern', 'B', {168, 167}})
@@ -169,7 +171,7 @@ T.test('labormanager A/B: 168 PEACE days monitor, then modern + balance (no unma
   drain(W)
   p = W.K.persist.get('m.baseline')
   T.eq({p.lm, p.ab.stage, p.ab.win, p.ab.b}, {'modern', 'done', 'modern', {168, 0}}, 'modern starved less: kept')
-  T.eq(lm_runs(W)[1], 'labormanager mode modern')
+  T.eq(lm_runs(W)[2], 'autolabor mode modern')
   W.clear()
   W.K.call('baseline', 'labor_day', 5)
   drain(W)
@@ -179,11 +181,11 @@ end)
 T.test('labormanager A/B: modern no better -> back to monitor; disabled with ab_days 0', function()
   local W = world{persist = in_stage_b({ab = {stage = 'B', a = {168, 0}, b = {167, 0}, win = ''}})}
   drain(W)
-  T.ok(F.has(F.runs(W), 'labormanager mode modern'), 'the stored mode is re-applied on load')
+  T.ok(F.has(F.runs(W), 'autolabor mode modern'), 'the stored mode is re-applied on load')
   W.clear()
   W.K.call('baseline', 'labor_day', 0)
   drain(W)
-  T.eq(lm_runs(W), {'labormanager mode monitor', 'labormanager mode', 'labormanager enable'})
+  T.eq(lm_runs(W), {'labormanager mode', 'autolabor mode monitor', 'enable autolabor', 'labormanager mode'})
   T.eq(W.K.persist.get('m.baseline').ab.win, 'monitor')
   local cfg = F.cfg()
   cfg.baseline.labormanager.ab_days = 0
@@ -197,14 +199,14 @@ end)
 T.test('labormanager: modern refused in the B arm -> monitor fallback, no modern-only settings', function()
   local W = world{persist = in_stage_b(), setup = function(W)
     W.act_result('run', function(cmd, a1, a2)
-      if cmd == 'labormanager' and a1 == 'mode' and a2 == 'modern' then return false, 'nope' end
+      if cmd == 'autolabor' and a1 == 'mode' and a2 == 'modern' then return false, 'nope' end
       return true, ''
     end)
   end}
   drain(W)
   local r = F.runs(W)
-  T.ok(F.has(r, 'labormanager mode monitor'))
-  T.ok(F.has(r, 'labormanager enable'))
+  T.ok(F.has(r, 'autolabor mode monitor'))
+  T.ok(F.has(r, 'enable autolabor'))
   T.ok(not F.has(r, 'labormanager balance balanced'))
   local p = W.K.persist.get('m.baseline')
   T.eq({p.lm, p.ab.stage, p.ab.win}, {'monitor', 'done', 'monitor'})
@@ -218,16 +220,37 @@ T.test('labormanager: read-back naming another engine -> fallback', function()
     end)
   end}
   drain(W)
-  T.ok(F.has(F.runs(W), 'labormanager mode monitor'))
+  T.ok(F.has(F.runs(W), 'autolabor mode monitor'))
   T.eq(W.K.persist.get('m.baseline').lm, 'monitor')
+end)
+
+T.test('labormanager: leaving modern disables it first (its auto: details go); economy fallback (live L1)', function()
+  local mode = 'Mode: modern (labormanager)'
+  local W, B = world{persist = in_stage_b(), setup = function(W)
+    W.act_result('run', function(cmd, a1, a2)
+      if cmd == 'labormanager' and a1 == 'mode' and a2 == nil then return true, mode end
+      if cmd == 'autolabor' and a1 == 'mode' then mode = 'Mode: ' .. a2 end
+      return true, ''
+    end)
+  end}
+  drain(W)
+  T.eq(W.K.persist.get('m.baseline').lm, 'modern')
+  W.clear()
+  T.eq(W.K.call('baseline', 'labor_fallback', 'BREWER starved 243 cycles'), true)
+  drain(W)
+  T.eq(lm_runs(W), {'labormanager mode', 'labormanager disable', 'autolabor mode monitor', 'enable autolabor',
+                    'labormanager mode'})
+  local p = W.K.persist.get('m.baseline')
+  T.eq({p.lm, p.ab.stage, p.ab.win}, {'monitor', 'done', 'monitor'})
+  T.eq(select(2, W.K.call('baseline', 'labor_fallback', 'again')), false, 'already monitor')
 end)
 
 T.test('a save from before the A/B record starts over in monitor mode', function()
   local W = world{persist = {['m.baseline'] = {v = 2, done = 1, applied = 0, lm = 'modern', crops = {}, fails = {},
                                                pending = {}, tries = json.object{}}}}
   drain(W)
-  T.ok(F.has(F.runs(W), 'labormanager mode monitor'))
-  T.ok(not F.has(F.runs(W), 'labormanager mode modern'))
+  T.ok(F.has(F.runs(W), 'autolabor mode monitor'))
+  T.ok(not F.has(F.runs(W), 'autolabor mode modern'))
 end)
 
 T.test('seedwatch: only farmed crops at 12, never a cook-excluded plant; economy re-checks the kitchen', function()

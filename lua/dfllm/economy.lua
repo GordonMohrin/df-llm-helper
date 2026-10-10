@@ -27,9 +27,10 @@ M.DEFAULTS = {
   -- supply alarm (live L1: two dwarves died of hunger and thirst): >= units citizens over the thirst or
   -- hunger timer, or drink/food below `days`, holds arbiter's brake and wakes the LLM (weekly)
   alarm = {thirst = 25000, hunger = 50000, units = 2, days = 10},
-  -- supply labors labormanager (modern) starved for >= cycles get switched (LABOR_STARVED): tool labors with
-  -- a builtin detail (Miners, Woodcutters, Hunters, Fisherdwarves) to managed, so it staffs the detail;
-  -- every other one to unmanaged, so every dwarf may do it (live L1: BREWER starved 243 cycles, no brewer)
+  -- supply labors labormanager (modern) starved for >= cycles (LABOR_STARVED): a tool labor with a builtin
+  -- detail (Miners, Woodcutters, Hunters, Fisherdwarves) left unmanaged becomes managed, so it staffs the
+  -- detail; any other starved one makes baseline fall back to monitor mode (live L1: BREWER starved 243
+  -- cycles, no brewer; 'unmanaged' left each such labor to a single dwarf outside the auto: details)
   labor = {cycles = 100,
            supply = {'BREWER', 'PLANT', 'COOK', 'HERBALIST', 'PROCESS_PLANT', 'MILLER', 'BUTCHER', 'CARPENTER',
                      'MASON', 'FEED_WATER_CIVILIANS', 'RECOVER_WOUNDED', 'MINE', 'CUTWOOD', 'HUNT', 'FISH'},
@@ -642,19 +643,23 @@ local function labor_fix(K, c, p)
   if not okm or not tostring(mode):lower():find('modern', 1, true) then return 0 end
   local ok, out = K.act.run('labormanager', 'list')
   if not ok then return 0 end
-  local list, builtin, n = M.parse_labor_list(out), {}, 0
+  local list, builtin, n, fallback = M.parse_labor_list(out), {}, 0, nil
   for _, l in ipairs(lc.builtin or {}) do builtin[l] = true end
   for _, l in ipairs(lc.supply or {}) do
     local e = list[l]
     if e and e.starved >= (lc.cycles or 100) then
-      local to = builtin[l] and (not e.managed) and 'managed' or (not builtin[l] and e.managed) and 'unmanaged' or nil
-      if to and K.act.run('labormanager', 'labor', l, to) then
+      local to = builtin[l] and (not e.managed) and 'managed' or (not builtin[l]) and 'monitor' or nil
+      if to == 'managed' and K.act.run('labormanager', 'labor', l, to) then
         n = n + 1
-        p.labor = type(p.labor) == 'table' and p.labor or {}
-        p.labor[l] = to
-        K.log('warn', 'labor %s starved %d cycles: now %s', l, e.starved, to)
-        K.emit('LABOR_STARVED', 'B', string.format('%s starved %d cycles: %s', l, e.starved, to),
+        K.log('warn', 'labor %s starved %d cycles: now managed', l, e.starved)
+        K.emit('LABOR_STARVED', 'B', string.format('%s starved %d cycles: managed', l, e.starved),
                {labor = l, cycles = e.starved, to = to})
+      elseif to == 'monitor' and not fallback then
+        fallback = l
+        K.emit('LABOR_STARVED', 'B', string.format('%s starved %d cycles: labormanager falls back to monitor', l,
+                                                   e.starved), {labor = l, cycles = e.starved, to = to})
+        K.call('baseline', 'labor_fallback', string.format('%s starved %d cycles', l, e.starved))
+        n = n + 1
       end
     end
   end

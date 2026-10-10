@@ -610,7 +610,7 @@ The fort-specific geometry, written by templates (bp `manifest` fragments) and m
 | PETITION | B | care | kind (str) |
 | STOCK_LOW | B | economy | **key** (str), days, min |
 | CANCEL_LOOP | B | economy | order, job (str), n |
-| LABOR_STARVED | B | economy | **labor** (str), cycles, to (str: managed, unmanaged) — a supply labor labormanager starved; economy switched its management (live L1) |
+| LABOR_STARVED | B | economy | **labor** (str), cycles, to (str: managed, monitor) — a supply labor labormanager starved: a builtin tool labor becomes managed, otherwise labormanager falls back to monitor (live L1) |
 | CAPTURE | B | care | unit, race (str) |
 | BREACH_STOP | B | runner | proj (str), why (str: damp, warm, cavern, water), pos (int[3]) |
 | KERNEL_SLOW | B | kern | **module** (str), ms, factor |

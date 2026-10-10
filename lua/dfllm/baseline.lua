@@ -146,24 +146,39 @@ local function lm_want(c)
   return c.labormanager.mode
 end
 
--- tools/labormanager.txt: "labormanager mode [legacy|modern|monitor]", then "labormanager enable";
--- balance and unmanaged labors only matter in modern mode (monitor assigns nothing)
+local function engine(out)
+  local s = tostring(out or ''):lower()
+  for _, m in ipairs(LM_MODES) do if s:find(m, 1, true) then return m end end
+end
+
+-- The engine is chosen with `autolabor mode <m>` and started with `enable autolabor` (the plugin is
+-- autolabor; labormanager is its modern mode). Live L1: `labormanager enable` always started the modern
+-- engine, so the configured monitor never ran. Leaving modern, `labormanager disable` first: the plugin
+-- removes the memberships of its auto: work details (else they keep restricting every dwarf).
+-- Balance and unmanaged labors only matter in modern mode (monitor assigns nothing).
+local function set_engine(K, mode, cur)
+  if cur == 'modern' and mode ~= 'modern' then K.act.run('labormanager', 'disable') end
+  return K.act.run('autolabor', 'mode', mode) and K.act.run('enable', 'autolabor')
+end
+
 local function labor(K, c)
   local lm = c.labormanager
   local mode = lm_want(c)
   st.lm_due = nil                               -- a failure is retried like any task (monthly)
-  local ok = K.act.run('labormanager', 'mode', mode)
+  local _, cur_out = K.act.run('labormanager', 'mode')
+  local cur = engine(cur_out)
+  local ok = set_engine(K, mode, cur)
   if ok then
     local _, out = K.act.run('labormanager', 'mode')
     ok = lm_confirms(out, mode)
+    if not ok then cur = engine(out) end
   end
   if not ok and lm.fallback and lm.fallback ~= mode then
     mode = lm.fallback
-    ok = K.act.run('labormanager', 'mode', mode)
+    ok = set_engine(K, mode, cur)
     if st.ab and st.ab.stage == 'B' then st.ab.stage, st.ab.win = 'done', mode end   -- B cannot run
   end
   if not ok then return false, 'labormanager mode failed' end
-  if not K.act.run('labormanager', 'enable') then return false, 'labormanager enable failed' end
   if mode == 'modern' then
     if lm.balance then K.act.run('labormanager', 'balance', lm.balance) end
     for _, l in ipairs(lm.unmanaged or {}) do K.act.run('labormanager', 'labor', l, 'unmanaged') end
@@ -326,6 +341,21 @@ function M.labor_day(K, starving)
     M.every = M.APPLY_EVERY
   end
   save(K)
+end
+
+-- WP8-internal, called by economy: modern starved a supply labor (live L1: no brewer while dwarves died of
+-- thirst; skilled labors only go to specialists). The A/B test ends with monitor, applied at once.
+function M.labor_fallback(K, why)
+  local lm = M.conf(K).labormanager
+  local to = lm.fallback or 'monitor'
+  if st.lm == to then return false end
+  st.ab = type(st.ab) == 'table' and st.ab or new_ab()
+  st.ab.stage, st.ab.win = 'done', to
+  st.lm, st.lm_due = to, true
+  M.every = M.APPLY_EVERY
+  K.log('warn', 'labormanager: %s -> %s (%s)', tostring(lm_want(M.conf(K))), to, tostring(why))
+  save(K)
+  return true
 end
 
 ---------------------------------------------------------------- module

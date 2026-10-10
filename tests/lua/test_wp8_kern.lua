@@ -43,7 +43,7 @@ T.test('real kernel: baseline applies through the real allowlist while paused', 
   H.run(W, 40, {paused = true})
   for _, line in ipairs({'control-panel enable autochop', 'control-panel enable pop-control', 'enable logistics',
                          'prioritize -aq defaults', 'autochop target 150 60', 'pop-control set wave-size 8',
-                         'labormanager mode monitor', 'labormanager enable', 'seedwatch clear',
+                         'autolabor mode monitor', 'enable autolabor', 'seedwatch clear',
                          'seedwatch MUSHROOM_HELMET_PLUMP 0',
                          'ban-cooking booze honey milk oil tallow', 'tailor materials silk cloth yarn'}) do
     T.ok(has_cmd(W, line), 'not run: ' .. line)
