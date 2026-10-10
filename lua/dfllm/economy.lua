@@ -72,6 +72,10 @@ M.DEFAULTS = {
     {tag = 'dfllm:food', key = 'food_d', per_job = 4, max_jobs = 20,
      spec = {job = 'PrepareMeal', meal_ingredients = 2, frequency = 'OneTime',
              item_conditions = {{condition = 'AtLeast', flags = {'unrotten', 'cookable'}, value = 10}}}},
+    -- live L1b: 0 empty barrels, every brew order inactive ("needs empty food storage item") at 46 drink
+    -- days; the DF 53 job is MakeBarrel (workorder refuses ConstructBarrel)
+    {tag = 'dfllm:barrel', key = 'barrels_empty', min = 4, per_job = 1, max_jobs = 6,
+     spec = {job = 'MakeBarrel', material_category = {'wood'}, frequency = 'OneTime'}},
     {tag = 'dfllm:cloth', key = 'cloth', per_job = 1, max_jobs = 10, from_phase = 'P1',
      spec = {job = 'WeaveCloth', material_category = {'plant'}, frequency = 'OneTime',
              item_conditions = {{condition = 'AtLeast', flags = {'collected', 'plant'}, item_type = 'THREAD', value = 1}}}},
@@ -127,7 +131,7 @@ end
 
 ---------------------------------------------------------------- item census (sliced, items.other)
 local CATS = {'DRINK', 'FOOD', 'MEAT', 'FISH', 'CHEESE', 'EGG', 'PLANT', 'PLANT_GROWTH', 'CLOTH', 'SKIN_TANNED',
-              'CORPSEPIECE', 'SMALLGEM', 'ROUGH', 'BAR', 'AMMO', 'WOOD'}
+              'CORPSEPIECE', 'SMALLGEM', 'ROUGH', 'BAR', 'AMMO', 'WOOD', 'BARREL'}
 local SKIP = {'trader', 'garbage_collect', 'removed', 'dump', 'hostile', 'in_building', 'construction', 'rotten'}
 
 local mcache, bolt_sub = {}, {}
@@ -195,14 +199,18 @@ local function classify(it, a, cat)
   elseif cat == 'BAR' then
     if it.mat_type == 0 then a.bars = a.bars + n elseif it.mat_type == COAL then a.fuel = a.fuel + n end
   elseif cat == 'AMMO' then if is_bolt(it) then a.bolts = a.bolts + n end
-  elseif cat == 'WOOD' then a.wood = a.wood + n end
+  elseif cat == 'WOOD' then a.wood = a.wood + n
+  elseif cat == 'BARREL' then             -- live L1b: brewing stalled for want of an empty barrel
+    if #dfhack.items.getContainedItems(it) == 0 then a.barrels_empty = a.barrels_empty + 1 end
+  end
 end
 
 local function new_acc(c)
   local fs = {}
   for _, k in ipairs(c.food_cats or {}) do fs[k] = true end
   return {drink = 0, food = 0, meals = 0, cloth = 0, leather = 0, bone = 0, shell = 0, gems = 0, bars = 0,
-          bolts = 0, wood = 0, fuel = 0, drink_forb = 0, food_forb = 0, cookable = 0, kinds = {}, food_set = fs}
+          bolts = 0, wood = 0, fuel = 0, drink_forb = 0, food_forb = 0, cookable = 0, barrels_empty = 0, kinds = {},
+          food_set = fs}
 end
 
 -- one slice: at most per_slice items; true when every category is done
@@ -242,7 +250,7 @@ local function publish(K, c, a)
                 cloth = a.cloth, leather = a.leather, bone = a.bone, shell = a.shell, gems = a.gems,
                 bars = a.bars, bolts = a.bolts, wood = a.wood, fuel = a.fuel, drink_forb = a.drink_forb,
                 food_forb = a.food_forb, cookable = a.cookable, boulders = vlen('BOULDER'), blocks = vlen('BLOCKS'),
-                crafts = crafts}
+                crafts = crafts, barrels_empty = a.barrels_empty}
 end
 
 ---------------------------------------------------------------- stock days (7-day moving average)
@@ -366,7 +374,7 @@ local function supply(K, c, p, days, inv)
           jobs = (units + e.per_job - 1) // e.per_job
         end
       else
-        local target, have = math.tointeger(sup.mood_stock) or 10, inv[e.key] or 0
+        local target, have = math.tointeger(e.min) or math.tointeger(sup.mood_stock) or 10, inv[e.key] or 0
         if have < target then jobs = (target - have + e.per_job - 1) // e.per_job end
       end
       jobs = math.min(jobs, e.max_jobs or 20)

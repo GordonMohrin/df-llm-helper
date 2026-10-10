@@ -68,6 +68,8 @@
    {"tag": "dfllm:food", "key": "food_d", "per_job": 4, "max_jobs": 20,
     "spec": {"job": "PrepareMeal", "meal_ingredients": 2, "frequency": "OneTime",
              "item_conditions": [{"condition": "AtLeast", "flags": ["unrotten", "cookable"], "value": 10}]}},
+   {"tag": "dfllm:barrel", "key": "barrels_empty", "min": 4, "per_job": 1, "max_jobs": 6,
+    "spec": {"job": "MakeBarrel", "material_category": ["wood"], "frequency": "OneTime"}},
    {"tag": "dfllm:cloth", "key": "cloth", "per_job": 1, "max_jobs": 10, "from_phase": "P1",
     "spec": {"job": "WeaveCloth", "material_category": ["plant"], "frequency": "OneTime",
              "item_conditions": [{"condition": "AtLeast", "flags": ["collected", "plant"], "item_type": "THREAD", "value": 1}]}}

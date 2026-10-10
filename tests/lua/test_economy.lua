@@ -18,6 +18,7 @@ local function world(opts)
   F.mat(W, 419, 51, {token = 'PLANT:GRASS_TAIL_PIG:STRUCTURAL', flags = {}})
   F.mat(W, 419, 52, {token = 'PLANT:FEATHER:EGG', flags = {EDIBLE_COOKED = true}})   -- cook-only (live L1 yolks)
   F.mat(W, 37, 0, {token = 'CREATURE:CAMEL_2_HUMP:MUSCLE', flags = {EDIBLE_RAW = true, EDIBLE_COOKED = true}})
+  for _ = 1, opts.barrels or 4 do F.item(W, 'BARREL', {}) end     -- empty: no dfllm:barrel order by default
   if opts.setup then opts.setup(W) end
   local E = fresh('economy')
   W.load(E)
@@ -144,6 +145,20 @@ T.test('STOCK_LOW on change only; supply order sized from the deficit, never dup
   days(W, 1)
   T.eq(#W.find_acts('workorder'), 3)
   T.eq(W.find_acts('workorder')[3].args[1].tag, 'dfllm:drink')
+  T.eq(F.bad_runs(W), {})
+end)
+
+T.test('empty barrels: below 4 a MakeBarrel order (live L1b: brewing stalled without one)', function()
+  local W = world{barrels = 0, setup = function(W)
+    F.item(W, 'BARREL', {_contents = {{id = 1}}})                  -- a full barrel does not count
+    F.item(W, 'BARREL', {})
+  end}
+  W.run(1)
+  T.eq(W.K.census.i.barrels_empty, 1)
+  local b
+  for _, a in ipairs(W.find_acts('workorder')) do if a.args[1].tag == 'dfllm:barrel' then b = a.args[1] end end
+  T.ok(b, 'barrel order')
+  T.eq({b.job, b.material_category, b.amount_total}, {'MakeBarrel', {'wood'}, 3})
   T.eq(F.bad_runs(W), {})
 end)
 

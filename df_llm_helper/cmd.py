@@ -423,6 +423,39 @@ def emit_bp(save_dir: Path, tpl: str, params: dict, label: str, bp_id: str, site
     return doc
 
 
+def repair_doc(save_dir: Path, tpl: str, proj: str, keys: str, bp_id: str) -> dict:
+    """Live L1b (a tantrum destroyed the fortcore well): a new project that re-applies only the build cells of
+    project `proj` whose quickfort key is in `keys` (comma-separated, e.g. 'l' for the well). quickfort places
+    what is missing; buildingplan waits for the materials (no orders); no manifest fragment, no params."""
+    src = files.read_json(Path(save_dir) / "bp" / f"{proj}.json")
+    if not isinstance(src, dict) or src.get("tpl") != tpl:
+        raise BpError(f"repair: bp/{proj}.json is no {tpl} project of this save")
+    want = {k.strip() for k in str(keys or "").split(",") if k.strip()}
+    if not want:
+        raise BpError("repair needs keys=<quickfort keys>, e.g. keys=l for a well")
+    stages = []
+    for st in src.get("stages") or []:
+        if st.get("mode") != "build":
+            continue
+        chunks = []
+        for ch in st.get("chunks") or []:
+            cells = [c for c in ch["cells"] if _KEY.match(c[3]).group(0) in want]
+            if cells:
+                chunks.append({"pos": ch["pos"], "cells": cells})
+        if chunks:
+            stages.append({"label": st["label"], "mode": "build", "orders": 0, "defense": st.get("defense", 0),
+                           "chunks": chunks})
+    if not stages:
+        raise BpError(f"repair: no build cell with key(s) {sorted(want)} in bp/{proj}.json")
+    doc = {"v": 2, "id": bp_id, "tpl": tpl, "site": "repair", "class": src.get("class", "infra"), "params": {},
+           "anchor": src["anchor"], "rot": src.get("rot", 0), "stages": stages, "manifest": {"v": 2},
+           "materials": {}}
+    errs = schema.validate("bp", doc)
+    if errs:
+        raise BpError("repair blueprint invalid: " + "; ".join(errs[:3]))
+    return doc
+
+
 def write_bp(save_dir: Path, doc: dict) -> dict | None:
     """bp/<id>.json, then bp/.placed-<tpl>.json (anchor/rot for a later site 'same').
     Returns the previous .placed document, so a refused placement can be rolled back (unplace)."""
@@ -499,7 +532,11 @@ def send(save_dir: Path, verb: str, args: dict, by: str = "cli", wait_s: float =
     ts = int(time.time() * 1000)
     cmd_id = cmd_id or files.new_cmd_id(ts)
     prev = None
-    if verb == "bp.place":
+    repair = verb == "bp.place" and isinstance(args.get("repair"), str)
+    if repair:                                 # no .placed-<tpl> record: 'same' keeps the template's own site
+        doc = repair_doc(save_dir, args["tpl"], args["repair"], args.get("keys"), cmd_id)
+        files.write_json_atomic(Path(save_dir) / "bp" / f"{cmd_id}.json", doc)
+    elif verb == "bp.place":
         doc = emit_bp(save_dir, args["tpl"], place_params(args), args["site"], cmd_id, write=False, snap=snap)
         prev = write_bp(save_dir, doc)
     try:

@@ -182,6 +182,32 @@ def test_place_workshops_skips_types_the_fort_has(save, monkeypatch):
     assert calls["rank"][-1] == ("c201", "workshops", {"skip": ""})
 
 
+def test_bp_place_repair_reapplies_only_the_named_build_cells(save, monkeypatch):
+    """Live L1b: a tantrum destroyed the fortcore well. bp.place repair=<proj> keys=l re-applies only that cell
+    of the project's build stage (no orders, no manifest, no .placed record)."""
+    for p in cmd.bp_files(save):
+        p.unlink()
+    src = {"v": 2, "id": "f1", "tpl": "fortcore", "site": "S1", "class": "infra", "params": {"stage": 1},
+           "anchor": [10, 10, 100], "rot": 0, "materials": {}, "manifest": {"v": 2, "workshops": []},
+           "stages": [{"label": "s1.dig", "mode": "dig", "orders": 0, "defense": 0,
+                       "chunks": [{"pos": [10, 10, 100], "cells": [[0, 0, 0, "d(3x1)"]]}]},
+                      {"label": "s1.build", "mode": "build", "orders": 1, "defense": 0,
+                       "chunks": [{"pos": [10, 10, 100], "cells": [[0, 0, 0, "b"], [1, 0, 0, "l"], [2, 0, 0, "d"]]}]}]}
+    files.write_json_atomic(save / "bp" / "f1.json", src)
+    files.write_json_atomic(save / "bp" / ".placed-fortcore.json", {"anchor": [10, 10, 100], "rot": 0, "bp": "f1"})
+    cid, reply = cmd.send(save, "bp.place", {"tpl": "fortcore", "site": "repair", "repair": "f1", "keys": "l"},
+                          wait_s=0, cmd_id="r1")
+    doc = json.loads((save / "bp" / "r1.json").read_text("utf-8"))
+    assert [st["label"] for st in doc["stages"]] == ["s1.build"] and doc["stages"][0]["orders"] == 0
+    assert doc["stages"][0]["chunks"][0]["cells"] == [[1, 0, 0, "l"]] and doc["manifest"] == {"v": 2}
+    assert json.loads((save / "bp" / ".placed-fortcore.json").read_text("utf-8"))["bp"] == "f1"
+    assert inbox_docs(save)[0]["args"]["repair"] == "f1"
+    with pytest.raises(cmd.BpError, match="no build cell"):
+        cmd.repair_doc(save, "fortcore", "f1", "wc", "r2")
+    with pytest.raises(cmd.BpError, match="no fortcore project"):
+        cmd.repair_doc(save, "fortcore", "nope", "l", "r3")
+
+
 def test_place_real_bp_param_mismatch_reranks(save):
     pytest.importorskip("df_llm_helper.bp.sites")
     for p in cmd.bp_files(save):
