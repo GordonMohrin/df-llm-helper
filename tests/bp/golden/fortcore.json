@@ -151,6 +151,14 @@
       95
      ],
      "type": "Kitchen"
+    },
+    {
+     "pos": [
+      85,
+      117,
+      95
+     ],
+     "type": "Mechanics"
     }
    ],
    "zones": {
@@ -297,7 +305,7 @@
    "door": 4,
    "trade_depot": 1,
    "well": 1,
-   "workshop": 5
+   "workshop": 6
   },
   "params": {
    "beds": 8,
@@ -1137,6 +1145,12 @@
         "wz(3x3)"
        ],
        [
+        27,
+        36,
+        0,
+        "wt(3x3)"
+       ],
+       [
         11,
         0,
         3,
@@ -1769,6 +1783,14 @@
       95
      ],
      "type": "Kitchen"
+    },
+    {
+     "pos": [
+      85,
+      117,
+      95
+     ],
+     "type": "Mechanics"
     }
    ],
    "zones": {
@@ -2807,6 +2829,14 @@
       95
      ],
      "type": "Kitchen"
+    },
+    {
+     "pos": [
+      85,
+      117,
+      95
+     ],
+     "type": "Mechanics"
     }
    ],
    "zones": {

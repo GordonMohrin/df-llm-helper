@@ -33,7 +33,8 @@ LEVERS = {"O1": [(-4, 36, ZE), (-4, 37, ZE)], "B1": [(-4, 39, ZE), (-4, 40, ZE)]
 FP = {"O1": (-1, 7, 1, 7), "B1": (-1, 34, 1, 34), "B2": (-1, 43, 1, 43)}
 ROLE = {"O1": "outer", "B1": "inner", "B2": "core"}
 WORKSHOPS = [("wc", "Carpenters", 6, 42), ("wm", "Masons", 10, 42), ("wr", "Craftsdwarfs", 14, 42),
-             ("wl", "Still", 6, 46), ("wz", "Kitchen", 10, 46)]
+             ("wl", "Still", 6, 46), ("wz", "Kitchen", 10, 46),
+             ("wt", "Mechanics", 14, 46)]   # live L1: the well needs a mechanism; nothing else makes one in stage 1
 DOORS = ((-4, 45), (4, 45), (0, 41), (6, 37))         # core hub -> dorm, workshops, stores; stores -> refuse
 CORE = (-13, 34, 19, 48)                              # core level rect (u0, v0, u1, v1): Z4 and Kern+
 
