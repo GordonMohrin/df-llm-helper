@@ -33,7 +33,11 @@ M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
             -- deaths are recorded by care (DEATH, DEATHS_3PLUS wakes); the notice alone must not halt the fort
             death = {'has been found dead'},
             -- live L1b: a tantrum popup halted the fort; care samples stress, the dwarves deal with it
-            stress = {'is throwing a tantrum'}}   -- live L1: "<name>, Ghostly Bowyer has been put to rest."   -- live L1: "The Misty Company, a farmers guild, has been established."
+            stress = {'is throwing a tantrum'},
+            -- live L1b: "<name> has claimed a Stoneworker's Workshop." halted the fort mid-mood; care tracks
+            -- moods (MOOD_START/NEED/END) and frees the materials
+            mood = {'has claimed a', 'is taken by a', 'withdraws from society', 'has begun a mysterious construction',
+                    'has created'}}   -- live L1: "<name>, Ghostly Bowyer has been put to rest."   -- live L1: "The Misty Company, a farmers guild, has been established."
 M.ASK_AFTER_MS = 600000            -- foreign pause older than this -> DECISION_NEEDED
 M.REASSERT_MS = 60000              -- re-check the live timestream fps at most this often
 M.RETRY_MS = 30000                 -- back-off after a failed timestream write

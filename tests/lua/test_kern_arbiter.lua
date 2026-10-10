@@ -278,13 +278,16 @@ T.test('popups (live L0): a popup halts the game with pause_state false; migrant
   popups:insert('#', {text = 'Atir Adilthabum, Herbalist is throwing a tantrum!'})   -- live L1b
   H.run(W, 6, {paused = false})
   T.eq(#popups, 0, 'a tantrum notice does not halt the fort')
+  popups:insert('#', {text = "Atir Kemsoroltar has claimed a Stoneworker's Workshop."})   -- live L1b
+  H.run(W, 6, {paused = false})
+  T.eq(#popups, 0, 'mood notices do not halt the fort')
   popups:insert('#', {text = 'A vile force of darkness has arrived!'})
   H.run(W, 6, {paused = false})
   T.eq(#popups, 1, 'unknown popups stay for Gordon')
   kern.K().flush(); H.frame(W, 0)
   T.eq(H.state(W).owners.pause, 'popup', 'a popup without pause_state still owns the pause')
   popups:erase(0)
-  H.run(W, 3, {paused = false})
+  H.run(W, 6, {paused = false})
   kern.K().flush(); H.frame(W, 0)
   T.eq(H.state(W).owners.pause, nil)
   kern.stop()

@@ -136,7 +136,7 @@ T.test('moods: needs from the claimed workshop only (never job_items), MOOD_NEED
   T.eq(#need, 2, 'bars not repeated; workshop once')
   T.eq({need[2].d.unit, need[2].d.need, need[2].d.skill}, {2, 'workshop', 'WOODCRAFT'})
   local dn = W.find_events('DECISION_NEEDED')               -- live L1: a mood without a shop fails within days
-  T.eq({#dn, dn[1].d.id}, {1, 'mood_workshop'})
+  T.eq({#dn, dn[1].d.id, dn[2].d.id}, {2, 'mood_material', 'mood_workshop'}, 'live L1b: a missing material wakes too')
   local wreq = 0
   for _, e in ipairs(W.find_events('PROJECT_REQUEST')) do if e.d.tpl == 'workshops' then wreq = wreq + 1 end end
   T.eq(wreq, 1, 'the moodable workshops are requested (follow places them)')

@@ -528,6 +528,12 @@ local function phase_needs(K, c, r, p)
       rec.needs[need] = 1
       K.emit('MOOD_NEED', 'B', string.format('mood unit %s (%s) needs %s: none available', m.sid, m.ws, need),
              {unit = math.tointeger(tonumber(m.sid)), kind = rec.kind, need = need, ws = m.ws})
+      -- live L1b: a Secretive mason mood found no boulder (soil embark, rock orders took every one); only a
+      -- stone dig placed by hand saved it. A missing mood material wakes the LLM like a missing workshop.
+      K.emit('DECISION_NEEDED', 'A', string.format('strange mood: unit %s (%s) needs %s, none available', m.sid,
+                                                   m.ws, need),
+             {id = 'mood_material', q = string.format('unit %s needs %s for %s now: dig stone (rooms), trade, butcher?',
+                                                      m.sid, need, m.ws)})
     end
   end
   return true
