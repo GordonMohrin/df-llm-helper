@@ -685,7 +685,7 @@ end
 -- adult citizens; a soldier, a member of an earlier tool detail or a unit that left the fort is removed at
 -- once. New members: no noble (militia posts excepted), no moody or insane dwarf, no sole holder of a key
 -- labor, nobody from another tool detail; the best skill joins first. Shrinking waits shrink_days and drops
--- those it would not pick first, then the lowest skill.
+-- the lowest skill first (among equals those it would not pick).
 local DIG_JOBS = {Dig = true, CarveUpwardStaircase = true, CarveDownwardStaircase = true,
                   CarveUpDownStaircase = true, CarveRamp = true, DigChannel = true}
 local MILITIA = {MILITIA_CAPTAIN = true, MILITIA_COMMANDER = true}
@@ -837,11 +837,11 @@ local function tools(K, c, p, inv, engine)
       elseif #cur > target then
         ps.low = ps.low or now
         if now - ps.low >= (tc.shrink_days or 3) * DAY then
-          table.sort(cur, function(a, b)               -- the ones it would pick first stay
+          table.sort(cur, function(a, b)               -- the best skill stays (live L1b: shrinking by
+            local sa, sb = skill(a), skill(b)          -- eligibility first dropped the fort's only trained
+            if sa ~= sb then return sa > sb end        -- miner, the bookkeeper)
             local oa, ob = soft_ok(a), soft_ok(b)
             if oa ~= ob then return oa end
-            local sa, sb = skill(a), skill(b)
-            if sa ~= sb then return sa > sb end
             return a.id < b.id
           end)
           while #cur > target do

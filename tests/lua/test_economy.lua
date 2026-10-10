@@ -453,6 +453,18 @@ T.test('tool details: woodcutters by log stock, hunters only in a famine, one to
   T.eq(#members(ctl3, 'Hunters'), 1, 'famine: hunters, capped by the one usable crossbow')
 end)
 
+T.test('tool details: shrinking keeps the best skill, also a noble member (live L1b: the bookkeeper miner)', function()
+  local W, ctl = tool_world{cit = 22, miners = {2, 5, 7}, backlog = 400, setup = function(W)
+    dfhack.units.getNoblePositions = function(u) return u._m.noble and {{position = {code = 'BOOKKEEPER'}}} or nil end
+  end}
+  W.unit(5)._m.noble = true                     -- skill 10, the best miner
+  days(W, 1)
+  T.eq(members(ctl, 'Miners'), {2, 5, 7})
+  ctl.backlog = 0
+  days(W, 5)
+  T.eq(members(ctl, 'Miners'), {5, 7}, 'the unskilled one leaves, the skilled noble stays')
+end)
+
 T.test('tool details: soldiers removed at once, nobles and moody dwarves never picked, modern mode left alone', function()
   local W, ctl = tool_world{cit = 12, miners = {5, 6}, setup = function(W)
     dfhack.units.getNoblePositions = function(u) return u._m.noble and {{position = {code = 'MANAGER'}}} or nil end

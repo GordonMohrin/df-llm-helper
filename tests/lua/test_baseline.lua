@@ -291,10 +291,20 @@ T.test('melt pile: pending until a named pile exists, then registered by number'
   local W = world()
   drain(W)
   T.ok(not F.has(F.runs(W), 'logistics add melt -s 3'))
-  F.building(W, 'STOCKPILE', {name = 'Goblinite', stockpile_number = 3})
+  local pile = F.building(W, 'STOCKPILE', {name = 'Goblinite', stockpile_number = 3})
+  W.clear()
+  W.run(33600, {skip = 100})
+  T.ok(F.has(F.runs(W), 'logistics clear -s 3'), 'no smelter: a melt mark would only lock the item (live L1b)')
+  T.ok(not F.has(F.runs(W), 'logistics add melt -s 3'))
+  F.building(W, 'FURNACE_ANY', {type = df.furnace_type.Smelter, getBuildStage = function() return 1 end,
+                                getMaxBuildStage = function() return 1 end})
   W.clear()
   W.run(33600, {skip = 100})
   T.ok(F.has(F.runs(W), 'logistics add melt -s 3'))
+  -- live L1b: the melt pile refuses tools (picks, battle axes, crossbows); -s takes the building id
+  T.ok(F.has(F.runs(W), 'stockpiles import -m disable cat_weapons -f pick,battle axe,crossbow -s ' .. pile.id),
+       table.concat(F.runs(W), ' | '))
+  T.eq(F.bad_runs(W), {})
   local p = W.K.persist.get('m.baseline')
   T.eq(p.pending, {'idle_crafting', 'trade_piles'})
 end)

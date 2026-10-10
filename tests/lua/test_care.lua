@@ -71,6 +71,24 @@ T.test('config/baseline.json mirrors care.DEFAULTS', function()
   T.eq(F.read_json('config/baseline.json').care, fresh('care').DEFAULTS)
 end)
 
+T.test('tools are never melted: picks, battle axes and crossbows lose a melt mark (live L1b)', function()
+  local W = world{setup = function(W)
+    W.subdefs[1] = {id = 'ITEM_WEAPON_PICK'}
+    W.subdefs[2] = {id = 'ITEM_WEAPON_AXE_BATTLE'}
+    W.subdefs[3] = {id = 'ITEM_WEAPON_SPEAR'}
+    local function weapon(sub, melt)
+      local it = F.item(W, 'WEAPON', {subtype = sub, flags = {melt = melt}})
+      it.getSubtype = function() return sub end
+      return it
+    end
+    W.pick, W.axe, W.spear, W.pick2 = weapon(1, true), weapon(2, true), weapon(3, true), weapon(1, false)
+  end}
+  day(W, 1)
+  local m = acts(W, 'item_flag', 'melt')
+  table.sort(m, function(a, b) return a[1] < b[1] end)
+  T.eq(m, {{W.pick.id, 'melt', false}, {W.axe.id, 'melt', false}}, 'the spear (goblinite) stays marked')
+end)
+
 T.test('stress category and naked sampler', function()
   local W = world{cit = 5, setup = function(W)
     W.unit(1)._m.stress, W.unit(2)._m.stress = 0, 1

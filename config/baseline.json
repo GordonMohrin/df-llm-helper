@@ -19,7 +19,7 @@
   "seedwatch": {"target": 12, "always": []},
   "ban_cooking": ["booze", "honey", "milk", "oil", "tallow"],
   "burial": ["-c"],
-  "melt_piles": ["dfllm-melt", "melt", "goblinite"], "trade_piles": ["dfllm-trade"],
+  "melt_piles": ["dfllm-melt", "melt", "goblinite"], "melt_keep": ["pick", "battle axe", "crossbow"], "trade_piles": ["dfllm-trade"],
   "idle_crafting": {"workshop": "Craftsdwarfs"},
   "retries": 3
  },

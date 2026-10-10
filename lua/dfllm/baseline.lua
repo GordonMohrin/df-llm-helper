@@ -45,6 +45,7 @@ M.DEFAULTS = {
   ban_cooking = {'booze', 'honey', 'milk', 'oil', 'tallow'},
   burial = {'-c'},
   melt_piles = {'dfllm-melt', 'melt', 'goblinite'},
+  melt_keep = {'pick', 'battle axe', 'crossbow'},   -- weapon names a melt pile refuses (tools, hunting)
   trade_piles = {'dfllm-trade'},
   idle_crafting = {workshop = 'Craftsdwarfs'},
   retries = 3,
@@ -205,11 +206,50 @@ local function seeds(K, c)
   return ok, #crops
 end
 
+-- building ids of the named piles (stockpiles import -s takes the building id; live L1b)
+local function named_pile_ids(names)
+  local want, ids = {}, {}
+  for _, n in ipairs(names or {}) do want[n:lower()] = true end
+  pcall(function()
+    for _, sp in ipairs(df.global.world.buildings.other.STOCKPILE) do
+      if want[dfhack.df2utf(sp.name or ''):lower()] then ids[#ids + 1] = sp.id end
+    end
+  end)
+  table.sort(ids)
+  return ids
+end
+
+-- live L1b: the melt pile (fortcore 'pd', automelt) took the spare picks and battle axes and marked them
+-- for melting, so no second miner and no woodcutter had a tool for a year. The pile refuses the tool
+-- weapons (stockpiles filter on the item names; checked live: 'pick' disables ITEM_WEAPON_PICK only).
+local function smelter()
+  local found = false
+  pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.FURNACE_ANY) do
+      local n = df.furnace_type[b.type]
+      if (n == 'Smelter' or n == 'MagmaSmelter') and b:getBuildStage() >= b:getMaxBuildStage() then found = true end
+    end
+  end)
+  return found
+end
+
 local function melt(K, c)
   local nums = named_piles(c.melt_piles)
   if #nums == 0 then return nil, 'no melt pile yet' end
   local ok = true
+  -- a melt mark without a smelter only locks the item (live L1b: the spare picks); the pile is monitored
+  -- once a smelter stands (fortcore's quickfort automelt=true registers it at once: undone here)
+  if not smelter() then
+    for _, n in ipairs(nums) do ok = K.act.run('logistics', 'clear', '-s', fmt(n)) and ok end
+    return nil, 'no smelter yet'
+  end
   for _, n in ipairs(nums) do ok = K.act.run('logistics', 'add', 'melt', '-s', fmt(n)) and ok end
+  if c.melt_keep and #c.melt_keep > 0 then
+    for _, id in ipairs(named_pile_ids(c.melt_piles)) do
+      ok = K.act.run('stockpiles', 'import', '-m', 'disable', 'cat_weapons', '-f', table.concat(c.melt_keep, ','),
+                     '-s', fmt(id)) and ok
+    end
+  end
   return ok, #nums
 end
 

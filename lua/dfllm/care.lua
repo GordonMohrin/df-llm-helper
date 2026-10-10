@@ -13,7 +13,8 @@
 --     the cage is marked for dumping so it leaves the trap tile.
 -- Reads: citizens and captives by census id, dead fort members by event / corpse unit id (CONTRACTS §1.4),
 -- items.other / buildings.other vectors (sliced), burrow membership, site locations.
--- Writes only through K.act (item_flag, zone_assign, run).
+-- Writes only through K.act (item_flag, zone_assign, run). Since live L1b care also unmarks tools (picks,
+-- battle axes, crossbows) marked for melting.
 local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
 
@@ -532,8 +533,28 @@ local function phase_needs(K, c, r, p)
   return true
 end
 
+---------------------------------------------------------------- tools are never melted (live L1b)
+-- The dfllm-melt pile (automelt) took the spare picks and battle axes and marked them for melting: two of
+-- three miners and every woodcutter had no tool for a year. fortcore's melt pile now excludes them; a tool
+-- marked for melting anyway (an older pile, a player's pile) is unmarked like the item sheet's toggle.
+M.TOOL_WEAPONS = {ITEM_WEAPON_PICK = true, ITEM_WEAPON_AXE_BATTLE = true, ITEM_WEAPON_CROSSBOW = true}
+local tool_def = {}
+local function tool_item(K, c, r, it)
+  if not it.flags.melt then return end
+  local s = it:getSubtype()
+  if tool_def[s] == nil then
+    local def = dfhack.items.getSubtypeDef(df.item_type.WEAPON, s)
+    tool_def[s] = def ~= nil and M.TOOL_WEAPONS[def.id] == true
+  end
+  if tool_def[s] and K.act.item_flag(it.id, 'melt', false) then r.tools = (r.tools or 0) + 1 end
+end
+
+local function phase_tools(K, c, r, p)
+  return scan(r, function() return df.global.world.items.other.WEAPON end, function(it) tool_item(K, c, r, it) end)
+end
+
 ---------------------------------------------------------------- run, finish
-local PHASES = {phase_units, phase_corpses, phase_zones, phase_captives, phase_barrels, phase_needs}
+local PHASES = {phase_units, phase_corpses, phase_zones, phase_captives, phase_barrels, phase_needs, phase_tools}
 
 local function new_run(K, c, p)
   local cu = K.census.u
