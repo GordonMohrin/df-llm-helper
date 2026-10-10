@@ -16,10 +16,12 @@ M.KEEP_OVERLAY = 'notify'          -- headless overlay profile keeps widgets who
 -- kind -> {plain text markers}: dismissed + unpaused. Live L0 (DF 53.16): an announcement popup
 -- (world.status.popups) halts the game while pause_state stays false; the only one seen so far is
 -- "Some migrants have arrived." (it froze the fort for minutes until it was clicked away), then
--- "A caravan from <civ> has arrived. ..." + "The merchants need a trade depot ...". Informational
--- popups only; threats (sieges, beasts) stay for Gordon (DECISION_NEEDED after 10 min).
+-- "A caravan from <civ> has arrived. ...", "The merchants need a trade depot ..." and "The merchants
+-- from <civ> will be leaving soon.". Informational popups only; threats (sieges, beasts) stay for
+-- Gordon (DECISION_NEEDED after 10 min).
 M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
-            caravan = {'A caravan from', 'merchants need a trade depot', 'merchants have arrived'}}
+            caravan = {'A caravan from', 'merchants need a trade depot', 'merchants have arrived',
+                       'The merchants from'}}
 M.ASK_AFTER_MS = 600000            -- foreign pause older than this -> DECISION_NEEDED
 M.REASSERT_MS = 60000              -- re-check the live timestream fps at most this often
 M.RETRY_MS = 30000                 -- back-off after a failed timestream write
