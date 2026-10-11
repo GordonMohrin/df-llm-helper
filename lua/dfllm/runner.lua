@@ -442,7 +442,8 @@ local function lost(K, P, d, R, ci, t)
   local why = M.cancel_reported(bb, M.CFG.breach_r)
   R.rl = obj(R.rl)
   local sk = tostring(ci)
-  if (why == 'damp' or why == 'unknown') and M.CFG.damp_dig then
+  -- light aquifer (damp_dig): DF often cancels damp stone without a report the log search finds (live L6)
+  if (why == nil or why == 'damp' or why == 'unknown') and M.CFG.damp_dig then
     if (R.rl[sk] or 0) < M.CFG.damp_redig and qf_room() then
       R.rl[sk] = (R.rl[sk] or 0) + 1
       qf(K, {mode = 'dig', data = chunk_data(ch), pos = ch.pos, priority = P.prio})

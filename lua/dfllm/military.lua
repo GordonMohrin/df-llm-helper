@@ -59,6 +59,7 @@ M.TOOL_DETAILS = {Miners = true, Woodcutters = true, Hunters = true, Fisherdwarv
 M.KEY_LABORS = {'MASON', 'CARPENTER', 'BREWER', 'PLANT', 'COOK', 'MECHANIC', 'DIAGNOSE', 'SMELT',
                 'FORGE_WEAPON', 'FORGE_ARMOR'}
 M.SQUAD_POSITIONS = {MILITIA_CAPTAIN = true, MILITIA_COMMANDER = true}   -- nobles that may still serve
+M.TOOLS_MIN = 3
 M.WEAPON_SKILLS = {'AXE', 'SWORD', 'MACE', 'HAMMER', 'SPEAR', 'PIKE', 'WHIP', 'DAGGER', 'CROSSBOW', 'BOW'}
 M.CV_SKILLS = {'SHIELD', 'ARMOR', 'DODGING'}
 M.METALS = {['INORGANIC:IRON'] = true, ['INORGANIC:STEEL'] = true}
@@ -365,6 +366,10 @@ function M.targets(K)
   if adults >= M.R2_ADULTS then n = math.max(n, M.R2_MIN) end
   local act = active(K)
   n = math.min(n, M.SIZE * #act)
+  -- live L6: the soldiers took the fort's only two (battle) axes for a year, so nobody cut wood and every
+  -- build stalled. Tools first: no soldiers while the fort has fewer than TOOLS_MIN axes or picks in all
+  local ci = K.census.i
+  if type(ci) == 'table' and ((ci.w_axe or 0) < M.TOOLS_MIN or (ci.w_pick or 0) < M.TOOLS_MIN) then n = 0 end
   local per = {}
   local melee, xbow = {}, nil
   for _, s in ipairs(act) do per[s.key] = 0; if s.kind == 'melee' then melee[#melee + 1] = s.key else xbow = s.key end end
