@@ -154,10 +154,27 @@ end
 -- live L6 (reclaimed Castlerisen): cavern giant bats killed 5 of 7 dwarves in a few days with threat at 0;
 -- isDanger is false for them. A visible wild LARGE_PREDATOR (caste raw flag, shown in the creature
 -- description) is a hostile candidate too; tame ones are dropped below like every own unit.
+-- live L6 (Paddletribes): a giant olm in a sealed deep cavern (z94) flapped the fort between PEACE and ALERT
+-- (idle 86%); a wild predator counts only on the citizens' walkable area (the map's own connectivity)
+local fort_group, fort_group_t = nil, -1
+local function citizens_group()
+  local t = df.global.cur_year_tick
+  if fort_group_t ~= t then
+    fort_group_t, fort_group = t, nil
+    for _, c in ipairs(dfhack.units.getCitizens(true)) do
+      local g = dfhack.maps.getWalkableGroup(c.pos)
+      if g and g ~= 0 then fort_group = g; break end
+    end
+  end
+  return fort_group
+end
+
 local function predator(u)
   local ok, yes = pcall(function()
     local r = df.creature_raw.find(u.race)
-    return r ~= nil and r.caste[u.caste].flags.LARGE_PREDATOR == true
+    if not (r ~= nil and r.caste[u.caste].flags.LARGE_PREDATOR == true) then return false end
+    local g = citizens_group()
+    return g == nil or dfhack.maps.getWalkableGroup(u.pos) == g
   end)
   return ok and yes == true
 end
