@@ -400,6 +400,9 @@ T.test('flow: caravan short of time and offended caravans', function()
   W.run(300, {skip = 9})
   T.eq(F.events(W, 'failed')[1].d.why, 'time')
   T.eq(count(U.calls, 'open'), 0)
+  local why
+  for _, l in ipairs(W.logs) do if l.msg:find('trade: time out in', 1, true) then why = l end end
+  T.ok(why and why.msg:find('150 time left', 1, true), 'the time-out says where the visit stood (live L3)')
   local W2, _, d2, c2, U2 = setup{}
   c2.flags.seized = true
   W2.frame(1)

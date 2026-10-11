@@ -894,6 +894,16 @@ local function need_estimate(K, c)
   return ok and need or false
 end
 
+-- live L3: four caravans failed with 'time' and kern.log held no trace (phase changes log at debug); a
+-- 'time' failure now logs where the visit stood
+local function time_out(K, c, d, now)
+  local f, v = rt.f or {}, visit(rt.ent)
+  K.log('warn', 'trade: time out in %s: %d time left, at depot %d ticks, trader %s, goods %s, broker req %s anyone %s',
+        tostring(rt.phase), c.tr or -1, (v and v.at >= 0) and (now - v.at) or -1,
+        tostring(d and trader_at(d) or false), tostring(f.g_val), tostring(f.req), tostring(f.anyone))
+  return finish(K, false, 'time')
+end
+
 local function step_wait(K, cars, now)
   local f, c = rt.f, car_of(cars, rt.ent)
   local v = visit(rt.ent)
@@ -922,7 +932,7 @@ local function step_wait(K, cars, now)
     end
   end
   if c.state ~= 'AtDepot' then return end
-  if c.tr < M.CFG.OPEN_MIN then return finish(K, false, 'time') end
+  if c.tr < M.CFG.OPEN_MIN then return time_out(K, c, d, now) end
   if not trader_at(d) then return end
   -- our goods in the depot: settled when the need is covered or nothing came for GOODS_STILL;
   -- time pressure ends the wait
@@ -946,7 +956,7 @@ local function waiting(K, ms) return K.now().ms - (rt.f.click_ms or -1e9) < ms e
 local function step_open(K, cars)
   local f, c = rt.f, car_of(cars, rt.ent)
   if not c or c.state ~= 'AtDepot' then return finish(K, false, 'gone') end
-  if c.tr < M.CFG.OPEN_MIN then return finish(K, false, 'time') end
+  if c.tr < M.CFG.OPEN_MIN then return time_out(K, c, nil, K.now().tick) end
   if waiting(K, M.CFG.CLICK_MS) then return end
   local ui, fl = trade_ui(), focus_list()
   if f.opened and ui.open and on_trade(fl) then
