@@ -116,7 +116,10 @@ M.DEFAULTS = {
                       -- live L3: 9 of 10 strange moods failed with 0 bone, shell and leather in the fort; one
                       -- hunter in PEACE from mood_from_phase while one of them is short (two for an open need)
                       {name = 'Hunters', skill = 'CROSSBOW', ranged = {'CROSSBOW', 'BOW'}, famine = 2, mood = 1,
-                       need = 2, ammo_min = 1, mood_keys = {'bone', 'shell', 'leather'}}}},
+                       need = 2, ammo_min = 1, mood_keys = {'bone', 'shell', 'leather'}},
+                      -- live L5: one fisher per `per` citizens (at most `max`) while food is below food.want_days
+                      -- and a fishing zone exists (zones are the runner's or the LLM's); outside PEACE/RECOVERY none
+                      {name = 'Fisherdwarves', skill = 'FISH', fish = true, per = 15, max = 3}}},
   -- live L3: the hunter caught nothing for a year; no visible game is no unit census economy may read, so a
   -- hunt without a new hide, bone, leather or shell for trial_days pauses for backoff_days
   hunt = {trial_days = 10, backoff_days = 20},
@@ -137,6 +140,19 @@ M.DEFAULTS = {
   },
   fish = {tag = 'dfllm:fish', min = 5, max = 30, ws = {'workshop:Fishery'},
           spec = {job = 'PrepareRawFish', frequency = 'OneTime'}},
+  -- live L5 (Castlerisen y295: pop 41 -> 53 on the same 80 farm tiles, food 105 -> 15 days in a year): food follows
+  -- the population. DF gives about `yield` crops per farm tile and season; a citizen uses about `per_dwarf` plants
+  -- a season (about 2 eaten, 1 brewed into 5 drinks), so the fort wants cit * per_dwarf / yield farm tiles. Below
+  -- want_days of food, or when the food stock fell over trend_days, and with fewer tiles than that and no farms
+  -- project pending: PROJECT_REQUEST farms (plots of plot_tiles, at most plots_max; follow places it), at most
+  -- every request_days. Below pre_days a weekly class-A pre-alarm (DECISION_NEEDED food_low) before the famine.
+  -- autofarm thresholds of the food crops: cit * crops_per_dwarf within [crops_min (or autofarm's default),
+  -- crops_max] in steps of crops_step (autofarm's default 50 stopped planting with 40 helmets for 53 dwarves).
+  -- Cooking: meals_per_dwarf prepared meals per citizen (meals keep; raw fruit and meat rot), the dfllm:food
+  -- order's job cap grows with the citizens (one job per cit_per_job).
+  food = {yield = 1, per_dwarf = 3, plot_tiles = 35, plots_max = 4, want_days = 90, trend_days = 14,
+          request_days = 14, pre_days = 30, crops_per_dwarf = 4, crops_min = 50, crops_max = 400, crops_step = 10,
+          status_days = 7, meals_per_dwarf = 2, cit_per_job = 2},
   supply = {
     {tag = 'dfllm:drink', key = 'drink_d', per_job = 5, max_jobs = 30,
      spec = {job = 'CustomReaction', reaction = 'BREW_DRINK_FROM_PLANT', frequency = 'OneTime',
@@ -282,8 +298,20 @@ local GEAR_CAT = {ARMOR = 'body', HELM = 'head', PANTS = 'pants', GLOVES = 'glov
 local ARMORLEVEL = {ARMOR = true, HELM = true, PANTS = true}
 
 local mcache, tcache, bolt_sub, wdef, orec, adef = {}, {}, {}, {}, {}, {}
+-- an item's material: the mat_type/mat_index fields, else the virtual getActualMaterial(Index) (live L5: prepared
+-- fish, item_fishst, has no mat_type field; the census dropped every one as "unreadable", so no fish was food)
+local function mat_fields(it) return it.mat_type, it.mat_index end
+local function mat_actual(it) return it:getActualMaterial(), it:getActualMaterialIndex() end
+local function item_mat(it)                     -- no closure per item: the census reads thousands a day
+  local ok, t, i = pcall(mat_fields, it)
+  if ok and t ~= nil then return t, i end
+  local ok2, t2, i2 = pcall(mat_actual, it)
+  if ok2 then return t2, i2 end
+  return -1, -1
+end
+
 local function mat_flags(it)                    -- material flags, cached per census (Lua API.txt:808)
-  local t, i = it.mat_type, it.mat_index
+  local t, i = item_mat(it)
   local row = mcache[t]
   if not row then row = {}; mcache[t] = row end
   local f = row[i]
@@ -421,6 +449,12 @@ local function classify(it, a, cat)
         if mf and mf.EDIBLE_COOKED then a.cookable = a.cookable + n end
         return
       end
+      -- live L5: raw food a cook may not use (the kitchen ban of `kitchen`: plump helmets, Gordon's rule)
+      if a.nocook and cat == 'PLANT' then
+        local tok = mat_token(item_mat(it))
+        local plant = tok and tok:match('^PLANT:([^:]+):')
+        if plant and a.nocook[plant] then a.food_nocook = a.food_nocook + n end
+      end
     end
     a.food = a.food + n
     if cat == 'FOOD' then a.meals = a.meals + n; a.kinds[subtype(it) or -1] = true end
@@ -516,11 +550,15 @@ local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'ge
               'drink_forb', 'food_forb', 'cookable', 'barrels', 'barrels_empty', 'bins', 'bins_empty', 'rock', 'ore',
               'flux', 'hides', 'thread', 'thread_plant', 'thread_silk', 'thread_yarn', 'bolts_free', 'w_pick', 'w_axe',
               'w_xbow', 'w_bow', 'g_body', 'g_head', 'g_pants', 'g_gloves', 'g_shoes', 'g_shield', 'g_weapon', 'g_xbow',
-              'g_quiver', 'g_metal', 'fish_raw'}
+              'g_quiver', 'g_metal', 'fish_raw', 'food_nocook'}
 local function new_acc(c)
   local fs = {}
   for _, k in ipairs(c.food_cats or {}) do fs[k] = true end
-  local a = {kinds = {}, food_set = fs, bars_by = {}, ores = {}, seeds = {}}
+  local nocook = {}
+  for _, e in ipairs(c.kitchen or {}) do
+    if e.what == 'Cook' and e.item == 'PLANT' and type(e.plant) == 'string' then nocook[e.plant] = true end
+  end
+  local a = {kinds = {}, food_set = fs, bars_by = {}, ores = {}, seeds = {}, nocook = nocook}
   for _, k in ipairs(ZERO) do a[k] = 0 end
   return a
 end
@@ -824,7 +862,21 @@ local function plan_fish(K, c, r)
   local f = c.fish
   local raw = r.inv.fish_raw or 0
   if type(f) ~= 'table' or raw < (f.min or 5) or open(r, f.tag) or not ws_any(r.f, f.ws) then return end
-  add(r, {tag = f.tag, spec = f.spec, n = math.min(raw, f.max or 30), why = 'fish_raw'})
+  -- live L5: a bigger fort lands more fish; one order holds up to one fish per citizen (at least f.max)
+  add(r, {tag = f.tag, spec = f.spec, n = math.min(raw, math.max(f.max or 30, r.cit or 0)), why = 'fish_raw'})
+end
+
+-- cooking keeps food (live L5: gathered fruit and butchered meat rot; meals keep): meals_per_dwarf prepared meals
+-- per citizen, and the job cap of the food order grows with the fort
+local function meal_jobs(c, r, e)
+  local fc = c.food
+  if e.key ~= 'food_d' or type(fc) ~= 'table' then return 0, e.max_jobs or 20 end
+  local cit, inv = r.cit or 0, r.inv
+  local want = cit * (fc.meals_per_dwarf or 0) - (inv.meals or 0)
+  -- what a cook may use: raw-edible food that is no meal and not on the cook ban (plump helmets), cook-only items
+  local ingredients = (inv.food or 0) - (inv.meals or 0) - (inv.food_nocook or 0) + (inv.cookable or 0)
+  local jobs = (want > 0 and ingredients >= 10) and (math.min(want, ingredients) + e.per_job - 1) // e.per_job or 0
+  return jobs, math.max(e.max_jobs or 20, (cit + (fc.cit_per_job or 2) - 1) // math.max(1, fc.cit_per_job or 2))
 end
 
 local function plan_supply(K, c, r)
@@ -840,7 +892,10 @@ local function plan_supply(K, c, r)
         local tgt, hv = math.tointeger(e.min) or math.tointeger(sup.mood_stock) or 10, r.inv[e.key] or 0
         if hv < tgt then jobs = (tgt - hv + e.per_job - 1) // e.per_job end
       end
-      add(r, {tag = e.tag, spec = e.spec, n = math.min(jobs, e.max_jobs or 20), why = e.key})
+      local mj, cap = meal_jobs(c, r, e)
+      local why = e.key
+      if mj > jobs then jobs, why = mj, 'meals' end
+      add(r, {tag = e.tag, spec = e.spec, n = math.min(jobs, cap), why = why})
     end
   end
 end
@@ -947,6 +1002,35 @@ local function hunt_want(K, c, r)
   if r.now < (r.p.hunt_off or 0) then return 0, 'no game' end
   if not phase_ok(K, c.mood_from_phase or 'P1') then return 0, 'phase' end
   return spec.mood or 0, 'mood stock'
+end
+
+-- a fishing zone exists (the zones screen; zones are the runner's or the LLM's, economy only reads them)
+local function fishing_zone()
+  local zt = df.civzone_type and df.civzone_type.FishingArea
+  if zt == nil then return false end
+  local ok, yes = pcall(function()
+    for _, z in ipairs(df.global.world.buildings.other.ANY_ZONE) do if z.type == zt then return true end end
+    return false
+  end)
+  return ok and yes == true
+end
+
+-- fishers wanted (live L5): one per spec.per citizens, at most spec.max, while food is below food.want_days or in
+-- a famine, only with a fishing zone, only in PEACE (in RECOVERY only in a famine): fishers stand at the water
+-- outside the walls, like hunters, and tools() takes them off at once in any other mode
+local function fish_want(K, c, r)
+  local spec
+  for _, d in ipairs((c.tools or {}).details or {}) do if d.fish then spec = d end end
+  if not spec then return 0, 'none' end
+  st.fishzone = fishing_zone()
+  local mode = K.mode()
+  if not HUNT_MODES[mode] or (mode ~= 'PEACE' and not r.p.famine) then return 0, 'mode' end
+  if not st.fishzone then return 0, 'no zone' end
+  local fc = c.food or {}
+  local d = (r.days or {}).food_d or 9999
+  if not r.p.famine and d >= (fc.want_days or 90) then return 0, 'stock' end
+  local per = math.max(1, spec.per or 15)
+  return clamp(((r.cit or 0) + per - 1) // per, 1, spec.max or 3), r.p.famine and 'famine' or 'food'
 end
 
 local function plan_leather(K, c, r)
@@ -1417,10 +1501,10 @@ local function cancel(K, ev)
   end
 end
 
--- leaving PEACE while hunters are out: the next run (tool details) within rush_ticks takes them off the detail,
--- not up to a day later (drills check "nobody outside" at T+1,200)
+-- leaving PEACE while hunters (or fishers) are out: the next run (tool details) within rush_ticks takes them off
+-- the detail, not up to a day later (drills check "nobody outside" at T+1,200)
 M.on.MODE = function(K, ev)
-  if type(ev) ~= 'table' or ev.to == 'PEACE' or (st.hunters or 0) == 0 then return end
+  if type(ev) ~= 'table' or ev.to == 'PEACE' or ((st.hunters or 0) == 0 and (st.fishers or 0) == 0) then return end
   st.rush = true
   local rt = M.conf(K).rush_ticks or 100
   if (M.every.ticks or EVERY) > rt then M.every = {ticks = rt} end
@@ -1649,6 +1733,8 @@ local function tool_target(K, spec, cit, inv, r)
     end
     st.no_ammo = false
     return n, free
+  elseif spec.fish then
+    return r and r.fish or 0, r and r.days and r.days.food_d or 0
   end
   return 0, 0
 end
@@ -1770,7 +1856,8 @@ local function tools(K, c, p, inv, engine, r)
       elseif #cur > tgt then
         ps.low = ps.low or now
         -- hunters outside the walls while the fort leaves PEACE: off the detail now (siege reflex, drills)
-        local at_once = spec.ranged ~= nil and r ~= nil and r.hunt_why == 'mode'
+        local at_once = r ~= nil and ((spec.ranged ~= nil and r.hunt_why == 'mode') or
+                                      (spec.fish ~= nil and r.fish_why == 'mode'))
         if at_once or now - ps.low >= (tc.shrink_days or 3) * DAY then
           table.sort(cur, function(a, b)               -- the best skill stays (live L1b: shrinking by
             local sa, sb = skill(a), skill(b)          -- eligibility first dropped the fort's only trained
@@ -1794,6 +1881,8 @@ local function tools(K, c, p, inv, engine, r)
       if spec.ranged then
         st.hunters = #cur                          -- on.MODE: leaving PEACE with hunters out rushes a run
         if r and r.day then hunt_book(K, c, r, #cur) end
+      elseif spec.fish then
+        st.fishers = #cur                          -- the same for fishers at the water (live L5)
       end
     end
   end
@@ -1829,6 +1918,93 @@ local function famine(K, c, p, days, inv, r)
                                              ((inv.fish_raw or 0) > 0 and not (r and r.f and r.f['workshop:Fishery']))
                                                and ': build a fishery' or '', dd):sub(1, 200)})
   end
+end
+
+---------------------------------------------------------------- food follows the population (live L5)
+-- Castlerisen y294-y295: migrants took the fort from 41 to 53 citizens on the same 80 farm tiles, autofarm's
+-- threshold 50 stopped the helmets at 40, nothing fished; food fell from 105 to 15 days and the fort was paused.
+-- built farm plot tiles (buildings.other.FARM_PLOT, surface and underground alike)
+local function farm_tiles()
+  local n = 0
+  pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.FARM_PLOT) do
+      if built(b) then n = n + math.max(0, ((b.x2 or 0) - (b.x1 or 0) + 1) * ((b.y2 or 0) - (b.y1 or 0) + 1)) end
+    end
+  end)
+  return n
+end
+
+-- the farm tiles cit citizens want: cit * per_dwarf plants a season at `yield` crops per tile and season
+function M.farm_need(cit, fc)
+  fc = type(fc) == 'table' and fc or M.DEFAULTS.food
+  local y = math.max(1, math.tointeger(fc.yield) or 1)
+  return ((math.tointeger(cit) or 0) * (math.tointeger(fc.per_dwarf) or 3) + y - 1) // y
+end
+
+-- daily: the food trend over trend_days, the farm tiles wanted, a farms request (follow places it) while food is
+-- below want_days or falling, the fort has fewer tiles than it wants and no farms project is pending
+local function food_plan(K, c, r)
+  local fc = c.food
+  if type(fc) ~= 'table' then return end
+  local p, inv = r.p, r.inv
+  if type(p.fhist) ~= 'table' then p.fhist = {} end
+  local h = p.fhist
+  h[#h + 1] = math.tointeger(inv.food or 0) or 0
+  local span = math.max(1, math.tointeger(fc.trend_days) or 14)
+  while #h > span + 1 do table.remove(h, 1) end
+  local falling = #h > span and h[#h] < h[1]
+  local tiles, need = farm_tiles(), M.farm_need(r.cit, fc)
+  local fd = (r.days or {}).food_d or 9999
+  st.food = {tiles = tiles, need = need, falling = falling, fd = fd}
+  if tiles >= need or not (fd < (fc.want_days or 90) or falling) then return end
+  local okp, pend = K.call('runner', 'pending', 'farms')
+  if okp and (math.tointeger(pend) or 0) > 0 then return end
+  if p.farm_req and r.now - (math.tointeger(p.farm_req) or 0) < (fc.request_days or 14) * DAY then return end
+  local pt = math.max(1, math.tointeger(fc.plot_tiles) or 35)
+  local plots = clamp((need - tiles + pt - 1) // pt, 1, fc.plots_max or 4)
+  p.farm_req = r.now
+  K.log('info', 'farms: %d of %d tiles for %d citizens, food %d days%s: request %d plots', tiles, need, r.cit, fd,
+        falling and ' and falling' or '', plots)
+  K.emit('PROJECT_REQUEST', 'B', string.format('farms x%d: %d of %d farm tiles for %d citizens, food %d days%s',
+                                               plots, tiles, need, r.cit, fd, falling and ' (falling)' or ''),
+         {tpl = 'farms', n = plots, why = 'food'})
+end
+
+-- the famine pre-alarm: below pre_days (and not yet a famine) a weekly class-A wake with what the fort has
+local function food_pre(K, c, p, days, inv)
+  local fc = c.food
+  local fd = days.food_d
+  local pre, lim = type(fc) == 'table' and (fc.pre_days or 0) or 0, c.famine_days or 10
+  if fd >= pre then
+    if p.food_pre then p.food_pre = nil; K.log('info', 'food pre-alarm over: %d food days', fd) end
+    return
+  end
+  if fd < lim then return end                       -- the famine wake (famine_days) speaks now
+  local now = K.now().tick
+  if type(p.food_pre) ~= 'table' then
+    p.food_pre = {since = now, woke = 0}
+    K.log('warn', 'food pre-alarm: %d food days (< %d)', fd, pre)
+  end
+  if p.food_pre.woke ~= 0 and now - p.food_pre.woke < 7 * DAY then return end
+  p.food_pre.woke = now
+  local f = st.food or {}
+  K.emit('DECISION_NEEDED', 'A', string.format('food low: %d food days (pre-alarm, famine below %d)', fd, lim),
+         {id = 'food_low', q = string.format('food %d d: farms %d/%d tiles%s, fishing zone %s, %d raw fish, %d cookable: ' ..
+                                             'farms, gather/fishing zones, butcher, trade?', fd, f.tiles or 0,
+                                             f.need or 0, f.falling and ' (falling)' or '', st.fishzone and 'yes' or 'no',
+                                             inv.fish_raw or 0, inv.cookable or 0):sub(1, 200)})
+end
+
+-- autofarm status: one "SPELT limit 50 current 32" line per crop autofarm knows, and "Default: 50"
+function M.parse_autofarm(out)
+  local crops, default = {}, nil
+  for line in tostring(out or ''):gmatch('[^\r\n]+') do
+    local id, lim = line:match('^%s*([A-Z][A-Z0-9_]*) limit (%d+)')
+    if id then crops[#crops + 1] = {id = id, limit = math.tointeger(tonumber(lim))} end
+    local d = line:match('[Dd]efault[^0-9\n]*([0-9]+)')
+    if d then default = math.tointeger(tonumber(d)) end
+  end
+  return crops, default
 end
 
 ---------------------------------------------------------------- the daily run: a task list over frames
@@ -1868,10 +2044,12 @@ end
 
 function T.kitchen(K, c, r) pcall(kitchen, K, c, r.days.food_d) end
 function T.appoint(K, c, r) M.appoint_vacant(K) end
+function T.food(K, c, r) if r.day then food_plan(K, c, r) end end
 function T.watch(K, c, r)
   validation_watch(K, r.p)
   alarm_check(K, c, r.p, r.days)
   famine(K, c, r.p, r.days, r.inv, r)
+  food_pre(K, c, r.p, r.days, r.inv)
 end
 
 function T.cmdq(K, c, r)
@@ -1908,6 +2086,7 @@ function T.plan(K, c, r)
   r.gear = gear_pre(K, c, r, 0)
   r.targets.leather = target(K, c, r, 'leather') + (phase_ok(K, c.leather.from_phase) and r.gear.leather or 0)
   r.hunt, r.hunt_why = hunt_want(K, c, r)
+  r.fish, r.fish_why = fish_want(K, c, r)
   r.gear = gear_pre(K, c, r, r.hunt)
   -- priority: needs (moods) first, then drink and food, then soldiers, then stock
   local urgent = {leather = need_n(r.p, 'leather', r.now) > 0, cloth = need_n(r.p, 'cloth', r.now) +
@@ -2021,6 +2200,41 @@ function T.farm(K, c, r)
   end
 end
 
+-- the food crops' autofarm thresholds follow the citizens (live L5: autofarm's default 50 stopped the plump helmets
+-- at 40 in stock for 53 dwarves). The crops are the ones `autofarm status` lists (it knows which the fort can farm),
+-- minus the fiber crops (T.farm, which runs after it and reuses the default read here); status is read once a boot
+-- and again after status_days (live L5: re-reading on every change of the seed kinds read it 13 times in 62 days).
+function T.crops(K, c, r)
+  local fc = c.food
+  if type(fc) ~= 'table' or not r.day then return true end
+  local cs = st.crops
+  if type(cs) ~= 'table' or r.now - cs.read >= (fc.status_days or 7) * DAY then
+    r.cmds = r.cmds + 1
+    local ok, out = K.act.run('autofarm', 'status')
+    local list, default = M.parse_autofarm(ok and out or '')
+    st.crops = {read = r.now, list = list}
+    if st.farm_default == nil then st.farm_default = default or false end
+    return false                                   -- the threshold in the next frame (one command per frame)
+  end
+  local fiber = {}
+  for _, id in ipairs((c.cloth or {}).fiber or {}) do fiber[id] = true end
+  local crops = {}
+  for _, e in ipairs(cs.list) do if not fiber[e.id] then crops[#crops + 1] = e.id end end
+  table.sort(crops)
+  if #crops == 0 then return true end
+  local lo = math.max(fc.crops_min or 50, st.farm_default or 0)
+  local step = math.max(1, fc.crops_step or 10)
+  local val = (r.cit or 0) * (fc.crops_per_dwarf or 4)
+  val = math.max(lo, math.min(val - val % step, math.max(lo, fc.crops_max or 400)))
+  local sig = fmt(val) .. ':' .. table.concat(crops, ',')
+  if r.p.crops == sig then return true end
+  r.cmds = r.cmds + 1
+  if K.act.run('autofarm', 'threshold', fmt(val), table.unpack(crops)) then
+    r.p.crops = sig
+    K.log('info', 'autofarm threshold %d for the food crops %s (%d citizens)', val, table.concat(crops, ' '), r.cit or 0)
+  end
+end
+
 -- staged library imports (DESIGN Ã‚Â§5.5) plus plan.orders / season orders; each library once
 function T.imports(K, c, r)
   local p = r.p
@@ -2113,8 +2327,8 @@ function T.finish(K, c, r)
   K.persist.touch('m.economy')
 end
 
-local FULL = {'days', 'kitchen', 'appoint', 'watch', 'cmdq', 'engine', 'labor_fix', 'scan', 'plan', 'tools', 'orders',
-              'wood', 'chop', 'farm', 'imports', 'piles', 'status', 'idle', 'finish'}
+local FULL = {'days', 'kitchen', 'appoint', 'food', 'watch', 'cmdq', 'engine', 'labor_fix', 'scan', 'plan', 'tools',
+              'orders', 'wood', 'chop', 'crops', 'farm', 'imports', 'piles', 'status', 'idle', 'finish'}
 local RUSH = {'scan', 'plan', 'tools', 'orders', 'wood', 'chop', 'farm', 'finish'}
 M.TASKS = {full = FULL, rush = RUSH}
 

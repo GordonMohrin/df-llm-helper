@@ -6,6 +6,8 @@ not wake; the follower acts on two of them without the LLM:
   SNAPSHOT_READY purpose=audit -> inspect manifest -> bp.topo.audit(snap, manifest) -> inbox `audit`
   PROJECT_REQUEST tpl=tombs    -> snapshot purpose=sites -> best free site (cmd.place) -> bp.place
   PROJECT_REQUEST tpl=workshops -> the same (care asks when a strange mood finds no workshop)
+  PROJECT_REQUEST tpl=farms why=food -> the same with p.plots = n (1-4) at prio 1 (economy asks when the farm
+                                  tiles fall short of the citizens and food is low or falling; live L5)
   PLAN_EXHAUSTED phase P0/P1   -> the phase's first proj deliverable without a project (plans/year1.json),
                                   placed the same way (S1, or 'same' for a later fortcore stage): the fort
                                   never idles while it waits for an LLM (live L0/L1: a year idled, a dwarf
@@ -39,7 +41,7 @@ SUPERVISE_FRESH_S = 3600                       # alerts logged longer ago than t
 HB_STALE_S = 300
 AUTO_TIMEOUT_S = 60
 TOMBS_COOLDOWN_S = 600
-PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock")   # automatic placements (one job each)
+PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "farms")   # automatic placements (one job each)
 AUTO_REQUESTS = ("tombs", "workshops")            # PROJECT_REQUEST templates follow places itself
 AUTO_PHASES = ("P0", "P1")                    # PLAN_EXHAUSTED auto-start only for the basic infrastructure
 PRUNE_EVERY_S = 60
@@ -270,6 +272,10 @@ class Follower:
                 # Possessed mood before it failed within 40 days. A bedrooms dig at prio 1 gives boulders.
                 n = d.get("n") if isinstance(d.get("n"), int) and not isinstance(d.get("n"), bool) else 4
                 self._request_place("mood_rock", "bedrooms", {"n": max(1, min(n, 6))}, "S1", now, prio=1)
+            elif t == "PROJECT_REQUEST" and d.get("tpl") == "farms" and d.get("why") == "food":
+                # live L5: pop 41 -> 53 on the same 80 farm tiles, food 105 -> 15 days; economy sizes the plots
+                n = d.get("n") if isinstance(d.get("n"), int) and not isinstance(d.get("n"), bool) else 2
+                self._request_place("farms", "farms", {"plots": max(1, min(n, 4))}, "S1", now, prio=1)
             elif t == "PROJECT_REQUEST" and d.get("tpl") in AUTO_REQUESTS:
                 self._request_place(d["tpl"], d["tpl"], {}, "S1", now)   # live L1: a strange mood needs a shop
             elif t == "PLAN_EXHAUSTED" and d.get("phase") in AUTO_PHASES:

@@ -169,7 +169,8 @@ from P1; never cancel a mood job.
 **Labor:** labormanager monitor; economy staffs the Miners (dig backlog, 2-4), Woodcutters (logs) and
 Hunters (famine; 1 for a short bone/shell/leather mood stock) details itself; you never change work details.
 **Dead:** one 1x1 tomb per coffin, free tombs ≥ open corpses + 6; autoslab, burial, preserve-tombs.
-**Food/drink:** drink ≥ 170 days, food ≥ 60, ≥ 5 meal kinds; plump helmets are brewed, never cooked.
+**Food/drink:** drink ≥ 170 days, food ≥ 60, ≥ 5 meal kinds; plump helmets are brewed, never cooked. Farms,
+autofarm thresholds, fishers and meals follow the citizens (economy; `food_low` wakes below 30 days).
 **Happiness:** dining hall → own bedrooms (≥ 500) → general temple (≥ 2,000 on petition) → tavern →
 library. 0 naked. Stress KPI: share with category ≤ 1.
 **Beauty:** only `used` rooms, only in PEACE with R1 green; artifacts and masterworks on pedestals.

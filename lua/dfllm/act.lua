@@ -11,8 +11,9 @@ A.ORDER_LIBS = {['library/basic'] = true, ['library/furnace'] = true, ['library/
 local QF_MODES = {dig = true, build = true, place = true, zone = true, burrow = true}
 local QF_COMMANDS = {run = true, orders = true, undo = true}
 local ITEM_FLAGS = {forbid = true, dump = true, melt = true}
--- builtin work details whose membership act.work_detail may change (each holds one tool labor)
-A.TOOL_DETAILS = {Miners = true, Woodcutters = true, Hunters = true}
+-- builtin work details whose membership act.work_detail may change (each holds one tool labor; live L5: the
+-- fishers too, economy staffs them while food is short and a fishing zone exists)
+A.TOOL_DETAILS = {Miners = true, Woodcutters = true, Hunters = true, Fisherdwarves = true}
 -- one-time furniture orders act.order_material may re-enter in wood (carpenter's variants of the mason jobs)
 A.WOOD_JOBS = {ConstructDoor = true, ConstructCabinet = true, ConstructChest = true, ConstructCoffin = true,
                ConstructTable = true, ConstructThrone = true, ConstructArmorStand = true, ConstructWeaponRack = true,

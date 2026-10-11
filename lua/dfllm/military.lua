@@ -54,8 +54,8 @@ M.UNIFORM = {
 }
 
 -- recruit filter (read-only)
-M.TOOL_LABORS = {'MINE', 'CUTWOOD', 'HUNT'}
-M.TOOL_DETAILS = {Miners = true, Woodcutters = true, Hunters = true}
+M.TOOL_LABORS = {'MINE', 'CUTWOOD', 'HUNT', 'FISH'}            -- live L5: economy staffs Fisherdwarves too
+M.TOOL_DETAILS = {Miners = true, Woodcutters = true, Hunters = true, Fisherdwarves = true}
 M.KEY_LABORS = {'MASON', 'CARPENTER', 'BREWER', 'PLANT', 'COOK', 'MECHANIC', 'DIAGNOSE', 'SMELT',
                 'FORGE_WEAPON', 'FORGE_ARMOR'}
 M.SQUAD_POSITIONS = {MILITIA_CAPTAIN = true, MILITIA_COMMANDER = true}   -- nobles that may still serve

@@ -51,7 +51,8 @@
                          "tiles_per": 40},
                         {"name": "Woodcutters", "skill": "WOODCUTTING", "melee": ["AXE"], "wood": [60, 150], "n": [2, 1, 0]},
                         {"name": "Hunters", "skill": "CROSSBOW", "ranged": ["CROSSBOW", "BOW"], "famine": 2, "mood": 1,
-                         "need": 2, "ammo_min": 1, "mood_keys": ["bone", "shell", "leather"]}]},
+                         "need": 2, "ammo_min": 1, "mood_keys": ["bone", "shell", "leather"]},
+                        {"name": "Fisherdwarves", "skill": "FISH", "fish": true, "per": 15, "max": 3}]},
   "hunt": {"trial_days": 10, "backoff_days": 20},
   "stages": [
    {"lib": "library/basic", "any": ["migrants", "cit>=10"]},
@@ -70,6 +71,9 @@
   },
   "fish": {"tag": "dfllm:fish", "min": 5, "max": 30, "ws": ["workshop:Fishery"],
            "spec": {"job": "PrepareRawFish", "frequency": "OneTime"}},
+  "food": {"yield": 1, "per_dwarf": 3, "plot_tiles": 35, "plots_max": 4, "want_days": 90, "trend_days": 14,
+           "request_days": 14, "pre_days": 30, "crops_per_dwarf": 4, "crops_min": 50, "crops_max": 400,
+           "crops_step": 10, "status_days": 7, "meals_per_dwarf": 2, "cit_per_job": 2},
   "supply": [
    {"tag": "dfllm:drink", "key": "drink_d", "per_job": 5, "max_jobs": 30,
     "spec": {"job": "CustomReaction", "reaction": "BREW_DRINK_FROM_PLANT", "frequency": "OneTime",

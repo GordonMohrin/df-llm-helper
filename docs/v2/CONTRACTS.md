@@ -219,7 +219,7 @@ Every function returns `ok, res_or_err`, never raises, writes one line to `comma
 | `order_suspend(order_id, on)` | int, bool | suspend button | economy |
 | `kitchen_exclude(item_type, subtype, mat_type, mat_index, what)` | `what='Cook'|'Brew'` | kitchen screen (`dfhack.kitchen.addExclusion`, :2658) | economy |
 | `appoint(code, unit_id)` → `ok, assignment_id` | position code (`MANAGER`, `BOOKKEEPER`, `BROKER`), int | nobles screen: choose a citizen for a vacant fort position (assignment histfig + the figure's position link; adult living citizen; position offered, `flags.ACTIVE`) | economy |
-| `work_detail(name, unit_id, on)` → `ok, 'added'|'already'|'removed'|'not a member'` | `Miners`, `Woodcutters` or `Hunters` (builtin tool details only), int, bool | work details screen: add an adult citizen to the detail (sorted `assigned_units`, the detail's labors switched on) or remove a unit (a unit that left the fort is only taken off the list; a labor is switched off only when no other detail of the unit, or an everybody-does-this detail, grants it; as DFHack's autofish.lua does) (live L1b) | economy |
+| `work_detail(name, unit_id, on)` → `ok, 'added'|'already'|'removed'|'not a member'` | `Miners`, `Woodcutters`, `Hunters` or `Fisherdwarves` (builtin tool details only; Fisherdwarves since live L5), int, bool | work details screen: add an adult citizen to the detail (sorted `assigned_units`, the detail's labors switched on) or remove a unit (a unit that left the fort is only taken off the list; a labor is switched off only when no other detail of the unit, or an everybody-does-this detail, grants it; as DFHack's autofish.lua does) (live L1b) | economy |
 | `order_material(order_id, 'wood')` → `ok, 'wood'` | int, `'wood'` | work orders screen: cancel an open one-time rock furniture order (door, cabinet, chest, coffin, table, throne, armor stand, weapon rack, hatch cover, grate, floodgate) and enter it again in wood for the amount left; only the material changes (live L3: quickfort `orders` always picks rock; soil embark with 8 boulders and 82 logs) | economy |
 | `item_flag(item_id, flag, on)` | `flag='forbid'|'dump'|'melt'` | item flag toggles | care |
 | `zone_assign(zone_building_id, unit_id)` | ints | assign a caged unit to a pit/pond zone | care |
@@ -637,7 +637,7 @@ The fort-specific geometry, written by templates (bp `manifest` fragments) and m
 | POPCAP | B | readiness | **cap**, why (str) |
 | AUDIT | B | readiness | ok (flag), fails (str[]), min_traps |
 | PROJECT_DONE | B | runner | **proj** (str), tpl (str) |
-| PROJECT_REQUEST | B | any | **tpl** (str), n, why (str) — follow auto-places only `tombs` (top site); others go to the digest |
+| PROJECT_REQUEST | B | any | **tpl** (str), n, why (str) — follow auto-places `tombs`, `workshops`, `bedrooms` why=mood_rock (prio 1) and `farms` why=food (p.plots = n, 1-4, prio 1; economy, live L5) at the top site; others go to the digest |
 | PHASE | B | runner | from (str), to (str) |
 | PAUSE | B | arbiter | **on** (flag), by (str), ttl |
 | DEATH | B | care | unit, citizen (flag), cause (str) |

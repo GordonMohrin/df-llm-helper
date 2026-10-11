@@ -357,6 +357,34 @@ def test_follow_mood_rock_places_a_prio1_bedrooms_dig(save, monkeypatch):
     assert calls["rank"] == [(sid, "bedrooms", {"n": 4})]
 
 
+def test_follow_farms_for_food_places_prio1_farms_with_plots(save, monkeypatch):
+    """live L5: economy's PROJECT_REQUEST farms why=food (farm tiles short of the citizens, food low or falling) is
+    placed by follow at once, with the plots economy sized (1-4) and prio 1; a farms request without why=food is
+    left to the LLM."""
+    calls = install_fake_bp(monkeypatch)
+    c = Clock()
+    f, out = F(c)
+    f.poll()
+    append_events(save, [ev(8813, "PROJECT_REQUEST", "farms", {"tpl": "farms", "n": 2}),
+                         ev(8814, "PROJECT_REQUEST", "farms x9", {"tpl": "farms", "n": 9, "why": "food"})])
+    f.poll()
+    (snap_cmd,) = inbox_docs(save)
+    assert snap_cmd["verb"] == "snapshot"
+    for p in (save / "inbox").glob("*.json"):
+        p.unlink()
+    sid = snap_cmd["id"]
+    snap = json.loads((save / "snap" / "c201.json").read_text("utf-8"))
+    snap["id"] = sid
+    files.write_json_atomic(save / "snap" / f"{sid}.json", snap)
+    append_events(save, [ev(8815, "SNAPSHOT_READY", "", {"id": sid, "path": f"snap/{sid}.json", "purpose": "sites"})])
+    f.poll()
+    (place,) = inbox_docs(save)
+    assert place["verb"] == "bp.place"
+    assert place["args"] == {"tpl": "farms", "site": "S1", "p": {"plots": 4}, "prio": 1}, "n clamped to 4"
+    assert calls["rank"] == [(sid, "farms", {"plots": 4})]
+    assert out == []                                  # class B: no wake line
+
+
 def test_follow_plan_exhausted_p0_autostarts_first_deliverable(save, monkeypatch):
     """Live L0/L1: with no plan the fort idled a year and a dwarf starved. PLAN_EXHAUSTED in P0/P1 places the
     phase's first proj deliverable without a project at once (no LLM); the wake still goes out."""
