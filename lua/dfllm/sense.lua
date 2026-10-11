@@ -162,7 +162,7 @@ local function citizens_group()
   if fort_group_t ~= t then
     fort_group_t, fort_group = t, nil
     for _, c in ipairs(dfhack.units.getCitizens(true)) do
-      local g = dfhack.maps.getWalkableGroup(c.pos)
+      local g = dfhack.maps.isValidTilePos(c.pos) and dfhack.maps.getWalkableGroup(c.pos)
       if g and g ~= 0 then fort_group = g; break end
     end
   end
@@ -173,6 +173,8 @@ local function predator(u)
   local ok, yes = pcall(function()
     local r = df.creature_raw.find(u.race)
     if not (r ~= nil and r.caste[u.caste].flags.LARGE_PREDATOR == true) then return false end
+    -- off-map units (pos -30000) crashed DF 53 in getWalkableGroup (live L6): validate first
+    if not dfhack.maps.isValidTilePos(u.pos) then return false end
     local g = citizens_group()
     return g == nil or dfhack.maps.getWalkableGroup(u.pos) == g
   end)
