@@ -135,6 +135,8 @@ M.DEFAULTS = {
     ['library/rockstock'] = {job = 'ConstructArmorStand', mat = 'INORGANIC'},
     ['library/glassstock'] = {job = 'ConstructArmorStand', mat = 'GLASS_GREEN'},
   },
+  fish = {tag = 'dfllm:fish', min = 5, max = 30, ws = {'workshop:Fishery'},
+          spec = {job = 'PrepareRawFish', frequency = 'OneTime'}},
   supply = {
     {tag = 'dfllm:drink', key = 'drink_d', per_job = 5, max_jobs = 30,
      spec = {job = 'CustomReaction', reaction = 'BREW_DRINK_FROM_PLANT', frequency = 'OneTime',
@@ -269,7 +271,7 @@ local function pstate(K)
 end
 
 ---------------------------------------------------------------- item census (sliced, items.other)
-local CATS = {'DRINK', 'FOOD', 'MEAT', 'FISH', 'CHEESE', 'EGG', 'PLANT', 'PLANT_GROWTH', 'CLOTH', 'SKIN_TANNED',
+local CATS = {'DRINK', 'FOOD', 'MEAT', 'FISH', 'FISH_RAW', 'CHEESE', 'EGG', 'PLANT', 'PLANT_GROWTH', 'CLOTH', 'SKIN_TANNED',
               'CORPSEPIECE', 'SMALLGEM', 'ROUGH', 'BAR', 'AMMO', 'WOOD', 'BARREL', 'BIN', 'BOULDER', 'THREAD',
               'SEEDS', 'WEAPON', 'ARMOR', 'HELM', 'PANTS', 'GLOVES', 'SHOES', 'SHIELD', 'QUIVER'}
 local SKIP = {'trader', 'garbage_collect', 'removed', 'dump', 'hostile', 'in_building', 'construction', 'rotten'}
@@ -423,6 +425,7 @@ local function classify(it, a, cat)
     a.food = a.food + n
     if cat == 'FOOD' then a.meals = a.meals + n; a.kinds[subtype(it) or -1] = true end
   elseif cat == 'CLOTH' then a.cloth = a.cloth + n
+  elseif cat == 'FISH_RAW' then a.fish_raw = a.fish_raw + n   -- live L4: 199 raw fish, no fishery, famine
   elseif cat == 'SKIN_TANNED' then a.leather = a.leather + n
   elseif cat == 'CORPSEPIECE' then
     -- a dead citizen's remains are nobody's material (deteriorate.lua is_usable_corpse_piece; care's reserve
@@ -513,7 +516,7 @@ local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'ge
               'drink_forb', 'food_forb', 'cookable', 'barrels', 'barrels_empty', 'bins', 'bins_empty', 'rock', 'ore',
               'flux', 'hides', 'thread', 'thread_plant', 'thread_silk', 'thread_yarn', 'bolts_free', 'w_pick', 'w_axe',
               'w_xbow', 'w_bow', 'g_body', 'g_head', 'g_pants', 'g_gloves', 'g_shoes', 'g_shield', 'g_weapon', 'g_xbow',
-              'g_quiver', 'g_metal'}
+              'g_quiver', 'g_metal', 'fish_raw'}
 local function new_acc(c)
   local fs = {}
   for _, k in ipairs(c.food_cats or {}) do fs[k] = true end
@@ -814,7 +817,18 @@ local function wood_spec(c, r, base)
 end
 
 -- drink and food (days targets) or a minimum stock (generic supply entries)
+-- live L4 (Castlerisen y294, famine at 9 food days): 199 raw fish lay in the stockpiles, uncleaned, because the
+-- fort had no fishery. Raw fish are food once a fisherdwarf prepares them: with a fishery, one PrepareRawFish
+-- order for what lies there (the famine wake names the missing fishery otherwise).
+local function plan_fish(K, c, r)
+  local f = c.fish
+  local raw = r.inv.fish_raw or 0
+  if type(f) ~= 'table' or raw < (f.min or 5) or open(r, f.tag) or not ws_any(r.f, f.ws) then return end
+  add(r, {tag = f.tag, spec = f.spec, n = math.min(raw, f.max or 30), why = 'fish_raw'})
+end
+
 local function plan_supply(K, c, r)
+  plan_fish(K, c, r)
   local sup = K.plan.supply or {}
   for _, e in ipairs(c.supply or {}) do
     if phase_ok(K, e.from_phase) and not open(r, e.tag) then
@@ -1810,8 +1824,10 @@ local function famine(K, c, p, days, inv, r)
   if now - (p.famine.woke or 0) >= 7 * DAY then
     p.famine.woke = now
     K.emit('DECISION_NEEDED', 'A', string.format('famine: %d food days, %d drink days', fd, dd),
-           {id = 'famine', q = string.format('food %d d (%d eatable, %d cookable), drink %d d: gather, farm, cook, trade?',
-                                             fd, inv.food or 0, inv.cookable or 0, dd)})
+           {id = 'famine', q = string.format('food %d d (%d eatable, %d cookable, %d raw fish%s), drink %d d: gather, farm, cook, trade?',
+                                             fd, inv.food or 0, inv.cookable or 0, inv.fish_raw or 0,
+                                             ((inv.fish_raw or 0) > 0 and not (r and r.f and r.f['workshop:Fishery']))
+                                               and ': build a fishery' or '', dd):sub(1, 200)})
   end
 end
 

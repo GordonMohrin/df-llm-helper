@@ -96,6 +96,29 @@ T.test('famine: below famine_days -> hunting and fishing allowed once, DECISION_
   T.eq(famines(), 2)
 end)
 
+T.test('raw fish (live L4): with a fishery one PrepareRawFish order; without, the famine wake names it', function()
+  local function run(fishery)
+    local W = world{setup = function(W)
+      for _ = 1, 12 do F.item(W, 'FISH_RAW', {}) end
+      if fishery then F.workshop(W, 'Fishery') end
+    end}
+    settle(W)
+    days(W, 1)
+    local o
+    for _, a in ipairs(W.find_acts('workorder')) do if a.args[1].tag == 'dfllm:fish' then o = a.args[1] end end
+    return W, o
+  end
+  local W, o = run(true)
+  T.eq(W.K.census.i.fish_raw, 12)
+  T.ok(o, 'prepare order')
+  T.eq({o.job, o.amount_total}, {'PrepareRawFish', 12})
+  local W2, o2 = run(false)
+  T.eq(o2, nil)
+  local q
+  for _, e in ipairs(W2.find_events('DECISION_NEEDED')) do if e.d.id == 'famine' then q = e.d.q end end
+  T.ok(q and q:find('12 raw fish: build a fishery', 1, true), tostring(q))
+end)
+
 T.test('census is sliced over frames (per_slice items)', function()
   local cfg = F.cfg()
   cfg.economy.per_slice = 3

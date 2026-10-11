@@ -68,6 +68,8 @@
    "library/rockstock": {"job": "ConstructArmorStand", "mat": "INORGANIC"},
    "library/glassstock": {"job": "ConstructArmorStand", "mat": "GLASS_GREEN"}
   },
+  "fish": {"tag": "dfllm:fish", "min": 5, "max": 30, "ws": ["workshop:Fishery"],
+           "spec": {"job": "PrepareRawFish", "frequency": "OneTime"}},
   "supply": [
    {"tag": "dfllm:drink", "key": "drink_d", "per_job": 5, "max_jobs": 30,
     "spec": {"job": "CustomReaction", "reaction": "BREW_DRINK_FROM_PLANT", "frequency": "OneTime",
