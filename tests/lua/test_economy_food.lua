@@ -148,6 +148,54 @@ T.test('famine pre-alarm: below 30 food days one class-A DECISION_NEEDED food_lo
   T.eq(decisions(W3, 'food_low'), 0, '78 food days')
 end)
 
+T.test('live L6: food low or famine -> surplus animals marked for slaughter (one breeding pair per race kept)', function()
+  local function A(id, race, female, adult, extra)
+    local a = {id = id, race = race, female = female, adult = adult ~= false, pet = false, slaughter = false, war = false}
+    for k, v in pairs(extra or {}) do a[k] = v end
+    return a
+  end
+  local herd = {A(30, 1, true), A(31, 1, true), A(32, 1, false), A(33, 1, false), A(34, 1, true, false),
+                A(40, 2, true, true, {pet = true}), A(41, 2, false), A(42, 2, false),
+                A(50, 3, false, true, {war = true}), A(51, 3, true, true, {slaughter = true})}
+  local E = fresh('economy')
+  T.eq(E.slaughter_pick(herd, {keep_f = 1, keep_m = 1, max = 10}), {31, 33, 34, 42},
+       'per race 1 adult female + 1 adult male stay; pets, war animals, already marked untouched')
+  T.eq(E.slaughter_pick(herd, {keep_f = 1, keep_m = 1, max = 3}), {31, 33}, 'max counts the marked ones too')
+  local marks = {}
+  local W = world{cit = 53, setup = function(W)
+    F.item(W, 'FOOD', {stack_size = 26, subtype = 1})               -- about 17 food days: the pre-alarm
+    F.workshop(W, 'Butchers')
+    W.set_census('a', {tick = 0, n = #herd, list = herd})
+    W.act_result('animal_slaughter', function(id, on) marks[#marks + 1] = id; return true, 'marked' end)
+  end}
+  settle(W)
+  days(W, 1)
+  T.eq(decisions(W, 'food_low'), 1)
+  T.eq(marks, {31, 33, 34, 42})
+  local logged = false
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find('4 surplus animals marked for slaughter', 1, true) then logged = true end end
+  T.ok(logged, 'logged')
+  days(W, 3)
+  T.eq(#marks, 4, 'once a week')
+  -- no butcher's shop: nothing is marked; plenty of food: nothing either
+  local m2 = {}
+  local W2 = world{cit = 53, setup = function(W)
+    F.item(W, 'FOOD', {stack_size = 26, subtype = 1})
+    W.set_census('a', {tick = 0, n = #herd, list = herd})
+    W.act_result('animal_slaughter', function(id) m2[#m2 + 1] = id; return true end)
+  end}
+  settle(W2); days(W2, 2)
+  T.eq(m2, {}, 'no butcher: no marks')
+  local W3 = world{cit = 53, setup = function(W)
+    F.item(W, 'FOOD', {stack_size = 500, subtype = 1})
+    F.workshop(W, 'Butchers')
+    W.set_census('a', {tick = 0, n = #herd, list = herd})
+    W.act_result('animal_slaughter', function(id) m2[#m2 + 1] = id; return true end)
+  end}
+  settle(W3); days(W3, 2)
+  T.eq(m2, {}, 'food plenty: no marks')
+end)
+
 local STATUS = 'Autofarm is Active.\nSPELT limit 50 current 32\nMUSHROOM_HELMET_PLUMP limit 50 current 40\n' ..
                'GRASS_TAIL_PIG limit 50 current 0\nDefault: 50\n'
 

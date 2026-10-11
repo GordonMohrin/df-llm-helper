@@ -162,6 +162,21 @@ T.test('checklist: light aquifer and deep soil warn, evil rejects', function()
   for _, id in ipairs({'evil', 'trees', 'water', 'popup'}) do T.ok(has(r.fails, id), id) end
 end)
 
+T.test('checklist (live L6): deep soil warns stone (no stone layer up top), worse wording with a light aquifer', function()
+  local function item(r, id) for _, it in ipairs(r.items) do if it.id == id then return it end end end
+  local r = eval('site_aquifer_popup', {dark_fortresses_seen = far_df})   -- very deep soil + light aquifer
+  T.ok(has(r.warns, 'stone'))
+  T.ok(item(r, 'stone').why:find('below the aquifer', 1, true), item(r, 'stone').why)
+  r = eval('site_good_panel', {dark_fortresses_seen = far_df})            -- little soil
+  T.eq(item(r, 'stone').res, 'pass'); T.ok(not has(r.warns, 'stone'))
+  local rec = P.parse(fixture('site_good_panel'))
+  rec.soil, rec.aquifer = 'deep', 'none'
+  r = C.evaluate(rec, {dark_fortresses_seen = far_df}, {world = {8, 30}, size = {4, 4}})
+  T.eq(item(r, 'stone').res, 'warn'); T.ok(item(r, 'stone').why:find('boulders scarce', 1, true))
+  rec.soil = nil
+  T.eq(item(C.evaluate(rec, {dark_fortresses_seen = far_df}, {world = {8, 30}, size = {4, 4}}), 'stone').res, 'skip')
+end)
+
 T.test('checklist: distances, size, heavy aquifer, unreadable panel', function()
   local rec = P.parse(fixture('site_good_panel'))
   local r = C.evaluate(rec, RULES, {world = {25, 11}, size = {4, 4}})

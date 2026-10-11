@@ -15,6 +15,8 @@
  "aquifer_ok": ["none"], "aquifer_warn": ["light"],
  "soil_ok": ["little", "some"],
  "soil_warn": ["deep", "very_deep", "extremely_deep", "shallow_sand", "shallow_clay", "none"],
+ "stone_note": "live L6 (Laborkings: light aquifer, soil down to z125): deep soil means no stone layer in the upper levels; the fort had no boulders for a year. The 'stone' criterion warns for these soil depths.",
+ "stone_warn_soil": ["deep", "very_deep", "extremely_deep"],
  "sizes": [[3, 3], [4, 4]],
  "fail_popups": ["heavy_aquifer", "salt_water", "evil", "savage", "necro", "early_invasion", "no_stone", "cannot"],
  "warn_popups": ["light_aquifer", "dead_civ", "narrow", "smallest", "large", "very_large", "largest", "hard",

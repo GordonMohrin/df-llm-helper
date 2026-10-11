@@ -379,17 +379,27 @@ class Follower:
             # live L1b: a `workshops` deliverable starts the workshops template (cmd.place skips the types
             # the fort already has or has planned)
             tpl, stage = (dv.get("tpl"), dv.get("stage")) if dv.get("k") == "proj" else ("workshops", None)
+            wparams: dict = {}
             if dv.get("k") == "workshops":
-                from .cmd import _moodable, workshops_missing
-                mood = set(_moodable())
-                types = [t for t in dv.get("types") or [] if t == "moodable" or t in mood]
-                if not types or not workshops_missing(self.dir, types):
+                from .cmd import _extra_shops, _moodable, workshops_missing
+                mood, extra = set(_moodable()), set(_extra_shops())
+                types = [t for t in dv.get("types") or [] if t == "moodable" or t in mood or t in extra]
+                miss = workshops_missing(self.dir, types) if types else []
+                if not miss:
                     continue                   # the template builds none of the missing types (or none is)
+                # live L6: the non-moodable shops (P0: still, butcher) come through `add`; a phase that asks for
+                # no moodable shop gets none of them (skip all)
+                add = [t for t in miss if t in extra]
+                if add:
+                    wparams["add"] = ",".join(add)
+                if not any(t in mood for t in miss):
+                    wparams["skip"] = ",".join(_moodable())
             staged = isinstance(stage, int) and not isinstance(stage, bool)
-            if (stage is None and tpl in done_tpls) or (staged and any(
+            if (stage is None and tpl in done_tpls and dv.get("k") != "workshops") or (staged and any(
                     t == tpl and isinstance(s, int) and s >= stage for t, s in done)):
                 continue                       # built, running, or a later stage of it exists
-            params = {"stage": stage} if staged else {}
+            # (workshops: the fort manifest counts built and planned shops, so a missing type is never queued twice)
+            params = {"stage": stage} if staged else wparams
             site = "same" if staged and stage >= 2 else "S1"
             files.log_cli(self.dir, "follow", "auto:starter", {"tpl": tpl, "p": params, "site": site},
                           f"PLAN_EXHAUSTED in {d.get('phase')}: placing {tpl}")

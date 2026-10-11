@@ -781,6 +781,53 @@ T.test('keepers stay quiet while a bedrooms project is active', function()
   T.eq(#W.find_events('PROJECT_REQUEST'), 0)
 end)
 
+T.test('live L6: food < 30 days (not in winter) -> one temporary gather zone near the fort, removed above 120', function()
+  local function world(tag, ytick)
+    local W = fresh{tag = tag, ytick = ytick, persist = {manifest = {v = 2, depot = {100, 100, 60}}}}
+    W.fd = 20
+    W.load{name = 'economy', every = {ticks = 1200}, state = function() return {stock = {food_d = W.fd}} end}
+    for x = 80, 120 do for y = 80, 120 do W.map[x .. ',' .. y .. ',62'] = {c = '.', dig = ''} end end   -- surface
+    for x = 95, 105 do for y = 95, 105 do W.map[x .. ',' .. y .. ',63'] = {c = '.', dig = ''} end end  -- a hilltop
+    W.state()
+    return W
+  end
+  local function zones(W)
+    local r = {}
+    for _, a in ipairs(W.find_acts('quickfort')) do
+      local p = a.args[1]
+      if p.mode == 'zone' then r[#r + 1] = {p.data[0][0][0], p.pos[1], p.pos[2], p.pos[3]} end
+    end
+    return r
+  end
+  local W = world('gath1', 0)
+  H.runs(W, 1)
+  T.eq(zones(W), {{'g{name=dfllm-gather}(28x28)', 86, 86, 62}}, 'one level (the hilltop has < 1/3 of the open tiles)')
+  T.ok(logged(W, 'warn', 'gather zone 28x28'), 'logged')
+  H.runs(W, 12)
+  T.eq(#zones(W), 1, 'drawn once')
+  T.eq(#W.find_acts('zone_remove'), 0)
+  W.fd = 150
+  W.state()
+  H.runs(W, 7)
+  local rm = W.find_acts('zone_remove')
+  T.eq(#rm, 1)
+  T.eq(rm[1].args[1], 'dfllm-gather', 'the zones screen remove, our zone only')
+  T.eq(W.K.persist.get('m.runner').gather, nil)
+  W.fd = 20
+  W.state()
+  H.runs(W, 7)
+  T.eq(#zones(W), 2, 'food short again: drawn again')
+  -- winter: no zone; two strong levels share the 800-tile cap
+  local W2 = world('gath2', 3 * 100800 + 10)
+  H.runs(W2, 2)
+  T.eq(zones(W2), {}, 'winter: nothing to gather')
+  local W3 = world('gath3', 100800)
+  for x = 80, 120 do for y = 80, 120 do W3.map[x .. ',' .. y .. ',63'] = {c = 'T', dig = ''} end end
+  H.runs(W3, 1)
+  T.eq(zones(W3), {{'g{name=dfllm-gather}(20x20)', 90, 90, 63}, {'g{name=dfllm-gather}(20x20)', 90, 90, 62}},
+       'two levels of 20x20 = 800 tiles')
+end)
+
 T.test('merge_manifest: maps per key, id/pos lists per entry, plain lists appended once', function()
   local m = {v = 2, bridges = {O1 = {role = 'outer', fp = {1, 1, 1, 3, 1, 1}, levers = {{5, 5, 1}}}},
              rooms = {{id = 'a', tpl = 'dining', use = 'used', bbox = {0, 0, 0, 1, 1, 0}, tier = 1}},
@@ -883,7 +930,7 @@ T.test('golden fortcore stage 1: every chunk applied once, probes per slice boun
   local P = H.proj(W, 'fc1')
   T.eq(P.done, 1, 'fortcore stage 1 finished: ' .. tostring(P.blocked) .. ' stage ' .. P.stage)
   T.eq(W.K.manifest().burrows['Kern+'].role, 'kern')
-  T.eq(#W.K.manifest().workshops, 6, 'carpenter, mason, craftsdwarf, still, kitchen, mechanics (live L1)')
+  T.eq(#W.K.manifest().workshops, 7, 'carpenter, mason, craftsdwarf, still, kitchen, mechanics (live L1), butcher (live L6)')
 end)
 
 T.done()

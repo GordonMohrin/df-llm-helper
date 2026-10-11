@@ -9,6 +9,7 @@
 -- so the own check uses include_insane; such units are only counted in census.h.crazed.
 -- WP5 extensions (additive): census.u.insane_ids (insane citizens, for the gate footprint check),
 -- census.h.crazed, census.h.list[i].dc (distance to the nearest citizen outside Kern+, -1 none).
+-- live L6: K.census.a = the fort's visible tame animals (economy's famine slaughter), with the unit count.
 local geom = require('dfllm.util.geom')
 
 -- every 9 ticks = every frame at full timestream (<= 9-tick skips), so scan periods are not
@@ -18,7 +19,8 @@ local M = {name = 'sense', every = {ticks = 9}, critical = true}
 M.SLICE_WORK = 600     -- hostile-scan work per slice: ~600 ordinary units or ~60 hostiles ('more' for the rest)
 M.LIST_MAX = 40        -- census.h.list: nearest hostiles
 M.OUT_MAX = 20         -- census.u.outside_ids
-M.COUNT_EVERY = 1000   -- ticks between visible-unit counts (perf.csv `units`)
+M.COUNT_EVERY = 1000   -- ticks between visible-unit counts (perf.csv `units`) and the animal census (census.a)
+M.ANIMAL_MAX = 120     -- census.a.list bound
 local CIT_FAST = {SIEGE = true, BREACH = true, DRILL = true}
 
 local st                -- module state, reset by init
@@ -130,19 +132,34 @@ local function hscan_begin(K, now, armed)
   st.hs = {i = 0, seen = {}, list = {}, keys = {}, vis = 0, inv = 0, great = 0, undead = 0, inside = 0, crazed = 0,
            near_o1 = -1, near_cit = -1, near_bridge = {}, caged = {}, units = 0, tick = now.tick,
            armed = armed and 1 or 0, geo = g, out_pos = st.out_pos or {},
-           count = now.tick - (st.count_tick or -M.COUNT_EVERY) >= M.COUNT_EVERY}
+           count = now.tick - (st.count_tick or -M.COUNT_EVERY) >= M.COUNT_EVERY, animals = {}}
   for _, b in ipairs(g.bridges) do st.hs.near_bridge[b.name] = -1 end
   st.h_tick = now.tick
 end
 
 local function minpos(cur, d) if cur < 0 or d < cur then return d end return cur end
 
+-- live L6: the fort's tame animals (census.a, refreshed with the unit count every COUNT_EVERY ticks): economy
+-- marks surplus ones for slaughter in a famine. Visible, tame, fort-controlled, alive, no citizen.
+local function animal(hs, u, U)
+  if #hs.animals >= M.ANIMAL_MAX or not U.isTame(u) or U.isCitizen(u, true) or U.isDead(u) then return end
+  if not U.isFortControlled(u) then return end
+  local f2 = u.flags2
+  hs.animals[#hs.animals + 1] = {
+    id = u.id, race = u.race or -1, female = u.sex == 0, adult = U.isAdult(u),
+    pet = (U.isPet ~= nil and U.isPet(u)) == true, slaughter = (f2 and f2.slaughter) == true,
+    war = ((U.isWar ~= nil and U.isWar(u)) or (U.isHunter ~= nil and U.isHunter(u))) == true}
+end
+
 -- per unit: 2 predicate calls for ordinary units; the full check only for hostile candidates
 local function consider(hs, u)
   local U = dfhack.units
   local undead = U.isUndead(u)
   if not (undead or U.isDanger(u)) then
-    if hs.count and U.isVisible(u) and not U.isHidden(u) then hs.units = hs.units + 1 end
+    if hs.count and U.isVisible(u) and not U.isHidden(u) then
+      hs.units = hs.units + 1
+      animal(hs, u, U)
+    end
     return 1
   end
   local id = u.id
@@ -234,7 +251,10 @@ local function hscan_finish(K)
   for i = 1, math.min(#hs.keys, M.LIST_MAX) do list[i] = hs.list[hs.keys[i] % 16777216] end
   table.sort(hs.caged)
   st.caged = hs.caged
-  if hs.count then st.units, st.count_tick = hs.units, hs.tick end
+  if hs.count then
+    st.units, st.count_tick = hs.units, hs.tick
+    K.census.a = {tick = hs.tick, n = #hs.animals, list = hs.animals}
+  end
   K.census.h = {tick = hs.tick, vis = hs.vis, inv = hs.inv, great = hs.great, undead = hs.undead, inside = hs.inside,
                 near_o1 = hs.near_o1, near_cit = hs.near_cit, near_bridge = hs.near_bridge, list = list,
                 armed = hs.armed, crazed = hs.crazed}

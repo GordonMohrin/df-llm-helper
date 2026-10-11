@@ -358,7 +358,8 @@ local function active(K)
   return r
 end
 
--- soldiers wanted in total and per squad key
+-- soldiers wanted in total and per squad key; third value: why the total is 0 on purpose ('tools': fewer than
+-- TOOLS_MIN axes or picks, 'phase': a known phase before P2), else nil. Existing soldiers are released then.
 function M.targets(K)
   local cu = K.census.u
   local adults, cit = type(cu) == 'table' and cu.adults or 0, type(cu) == 'table' and cu.cit or 0
@@ -366,14 +367,20 @@ function M.targets(K)
   if adults >= M.R2_ADULTS then n = math.max(n, M.R2_MIN) end
   local act = active(K)
   n = math.min(n, M.SIZE * #act)
+  local zero
+  local ph = phase_no(K)
+  if ph and ph < 2 then zero = 'phase' end
   -- live L6: the soldiers took the fort's only two (battle) axes for a year, so nobody cut wood and every
   -- build stalled. Tools first: no soldiers while the fort has fewer than TOOLS_MIN axes or picks in all
   local ci = K.census.i
-  if type(ci) == 'table' and ((ci.w_axe or 0) < M.TOOLS_MIN or (ci.w_pick or 0) < M.TOOLS_MIN) then n = 0 end
+  if type(ci) == 'table' and ((ci.w_axe or 0) < M.TOOLS_MIN or (ci.w_pick or 0) < M.TOOLS_MIN) then
+    n, zero = 0, zero or 'tools'
+  end
   local per = {}
   local melee, xbow = {}, nil
   for _, s in ipairs(act) do per[s.key] = 0; if s.kind == 'melee' then melee[#melee + 1] = s.key else xbow = s.key end end
-  if #act == 0 then return 0, per end
+  if #act == 0 then return 0, per, zero end
+  if n == 0 then return 0, per, zero end
   local nx = 0
   if xbow then                                    -- live L2: every wanted squad gets at least its leader
     if #melee == 0 then nx = n
@@ -485,6 +492,10 @@ local function ensure_squad(K, spec, recruits)
     K.log('info', 'military: adopted squad %s (id %d)', k, s.id)
     return s
   end
+  -- live L6: right after adopt the runner has not published a phase yet; a squad made then drafted the miners'
+  -- and woodcutters' tools before the phase gate (P2) and the tools-first rule could say no. Adopting a squad
+  -- that exists is fine; creating one waits for a known phase.
+  if phase_no(K) == nil then return nil end
   if waiting_for_leader() or not retry_ok(K, 'create' .. k) or #recruits() == 0 then return nil end
   local leader = table.remove(recruits(), 1)
   local ok, id = K.act.squad_create(k, {assignment_id = free_assignment(), leader = leader, kind = spec.kind})
@@ -514,6 +525,7 @@ local CAT_ITEMS = {body = 'ARMOR', head = 'HELM', pants = 'PANTS', gloves = 'GLO
 local function free_item(it)
   local f = it.flags
   if f.forbid or f.owned or f.in_building or f.trader or f.garbage_collect or f.removed or f.melt or f.dump then return false end
+  if f.foreign then return false end              -- live L6: merchant leftovers are nobody's gear
   if f.in_inventory then
     local u = dfhack.items.getHolderUnit(it)
     if u and (u.military.squad_id or -1) < 0 then return false end
@@ -547,13 +559,175 @@ local function with_mats(spec, mats)
   local c = {}
   for key, v in pairs(spec) do c[key] = v end
   c.items = {}
-  for i, it in ipairs(spec.items) do
-    local x = {}
-    for key, v in pairs(it) do x[key] = v end
-    x.mat = mats[it.cat] or 'any'
-    c.items[i] = x
+  for _, it in ipairs(spec.items) do
+    if not (spec.no_weapon and it.cat == 'weapon') then
+      local x = {}
+      for key, v in pairs(it) do x[key] = v end
+      x.mat = mats[it.cat] or 'any'
+      c.items[#c.items + 1] = x
+    end
   end
+  c.no_weapon = nil
   return c
+end
+
+---------------------------------------------------------------- weapons: the civilians' tools stay (live L6)
+-- Laborkings: 'individual choice, melee' handed the fort's only battle axes and picks to the soldiers (a battle
+-- axe is the woodcutter's tool, a pick the miner's). While the soldiers wanted could drain them (fewer than
+-- AXE_KEEP + melee soldiers axes or PICK_KEEP + melee soldiers picks in the fort, census.i w_axe/w_pick), melee
+-- positions get explicit weapon subtypes instead: other melee weapons in stock first, then only the axes and picks
+-- beyond AXE_KEEP and PICK_KEEP; a position left without one gets none until the stock grows.
+M.AXE_KEEP, M.PICK_KEEP = 1, 2
+
+-- {k = 'pick'|'axe'|'ranged'|'melee', token} of a weapon subtype (economy's weapon_kind: by the raws' skills)
+local function weapon_kind(sub)
+  sub = int(sub)
+  if not sub or sub < 0 then return nil end
+  local c = rt.wk[sub]
+  if c == nil then
+    c = false
+    local d = try(function() return dfhack.items.getSubtypeDef(df.item_type.WEAPON, sub) end)
+    if d then
+      local js, k = df.job_skill, 'melee'
+      if (int(d.skill_ranged) or -1) >= 0 then k = 'ranged'
+      elseif d.skill_melee == js.MINING then k = 'pick'
+      elseif d.skill_melee == js.AXE then k = 'axe' end
+      c = {k = k, token = d.id}
+    end
+    rt.wk[sub] = c
+  end
+  return c or nil
+end
+
+-- weapon spec subtypes of a position (-1 = individual choice)
+local function weapon_specs(p)
+  local r = {}
+  try(function()
+    for _, sp in ipairs(p.equipment.uniform.weapon) do r[#r + 1] = int(sp.item_subtype) or -1 end
+  end)
+  return r
+end
+
+-- nil while the melee soldiers wanted cannot drain the tools, else the axes and picks soldiers may hold
+local function weapon_guard(K, per)
+  local ci = K.census.i
+  if type(ci) ~= 'table' then return nil end
+  local melee = 0
+  for _, sp in ipairs(M.SQUADS) do if sp.kind == 'melee' then melee = melee + (per[sp.key] or 0) end end
+  if melee == 0 then return nil end
+  local axes, picks = int(ci.w_axe) or 0, int(ci.w_pick) or 0
+  if axes - M.AXE_KEEP >= melee and picks - M.PICK_KEEP >= melee then return nil end
+  return {axe = math.max(0, axes - M.AXE_KEEP), pick = math.max(0, picks - M.PICK_KEEP)}
+end
+M.weapon_guard = weapon_guard
+
+-- up to n weapon tokens for bare melee positions: free melee weapons that are no tools (minus the explicit specs
+-- that already claim them), then the spare axes, then the spare picks
+local function weapon_plan(g, n)
+  local stock, tool_tok = {}, {}
+  try(function()
+    for _, it in ipairs(df.global.world.items.other.WEAPON) do
+      local w = free_item(it) and weapon_kind(it:getSubtype())
+      if w then
+        if w.k == 'melee' then stock[w.token] = (stock[w.token] or 0) + 1
+        elseif w.k == 'axe' or w.k == 'pick' then tool_tok[w.k] = tool_tok[w.k] or w.token end
+      end
+    end
+  end)
+  local tools = {axe = g.axe, pick = g.pick}
+  for _, sp in ipairs(M.SQUADS) do
+    local e = st.sq[sp.key]
+    local s = e and squad(e.id)
+    if s then
+      try(function()
+        for _, p in ipairs(s.positions) do
+          for _, sub in ipairs(weapon_specs(p)) do
+            local w = weapon_kind(sub)
+            if w and w.k == 'melee' and stock[w.token] then stock[w.token] = stock[w.token] - 1
+            elseif w and tools[w.k] then tools[w.k] = tools[w.k] - 1; tool_tok[w.k] = tool_tok[w.k] or w.token end
+          end
+        end
+      end)
+    end
+  end
+  local toks = {}
+  for t in pairs(stock) do toks[#toks + 1] = t end
+  table.sort(toks)
+  local r = {}
+  for _ = 1, n do
+    local best
+    for _, t in ipairs(toks) do if stock[t] > 0 and (best == nil or stock[t] > stock[best]) then best = t end end
+    if best then stock[best] = stock[best] - 1
+    elseif tools.axe > 0 and tool_tok.axe then best, tools.axe = tool_tok.axe, tools.axe - 1
+    elseif tools.pick > 0 and tool_tok.pick then best, tools.pick = tool_tok.pick, tools.pick - 1
+    else break end
+    r[#r + 1] = best
+  end
+  return r
+end
+
+-- e.nw: positions dfllm left without a weapon spec while guarded (persisted; a UI uniform without a weapon is
+-- never touched while the tools are safe)
+local function nw_set(e, pos, on)
+  local r, has = {}, false
+  for _, p in ipairs(e.nw or {}) do
+    if p == pos then has = true; if on then r[#r + 1] = p end else r[#r + 1] = p end
+  end
+  if on and not has then r[#r + 1] = pos; table.sort(r) end
+  if has ~= (on == true) then e.nw, dirty = #r > 0 and r or nil, true end
+end
+local function nw_has(e, pos)
+  for _, p in ipairs(e.nw or {}) do if p == pos then return true end end
+  return false
+end
+
+-- melee positions get a weapon spec: while guarded every occupied position without one or with an individual-choice
+-- spec gets an explicit subtype (weapon_plan); while the tools are safe the positions dfllm left without one get
+-- individual choice again
+local function ensure_weapons(K, k, s)
+  local e = st.sq[k]
+  if not e or e.kind == 'xbow' or not retry_ok(K, 'wpn' .. k) then return end
+  local g = rt.wguard
+  local need = {}
+  for _, m in ipairs(members(s)) do
+    local ws = weapon_specs(m.p)
+    local bad = #ws == 0 and (g ~= nil or nw_has(e, m.pos))
+    if g and not bad then for _, sub in ipairs(ws) do if sub < 0 then bad = true end end end
+    if bad then need[#need + 1] = m.pos end
+  end
+  if #need == 0 then cleared('wpn' .. k); return end
+  table.sort(need)
+  if not g then
+    if K.act.squad_uniform(s.id, {mode = 'replace', positions = need,
+                                  items = {{cat = 'weapon', type = 'WEAPON', choice = 'melee', mat = 'any'}}}) then
+      for _, p in ipairs(need) do nw_set(e, p, false) end
+    end
+    backoff(K, 'wpn' .. k)
+    return
+  end
+  local plan = weapon_plan(g, #need)
+  local by, order = {}, {}
+  for i, tok in ipairs(plan) do
+    if not by[tok] then by[tok] = {}; order[#order + 1] = tok end
+    table.insert(by[tok], need[i])
+  end
+  for _, tok in ipairs(order) do
+    if K.act.squad_uniform(s.id, {mode = 'replace', positions = by[tok],
+                                  items = {{cat = 'weapon', type = 'WEAPON', subtype = tok, mat = 'any'}}}) then
+      for _, p in ipairs(by[tok]) do nw_set(e, p, false) end
+    end
+  end
+  if #plan < #need then
+    local left = {}
+    for i = #plan + 1, #need do left[#left + 1] = need[i]; nw_set(e, need[i], true) end
+    K.act.squad_unequip(s.id, left, {'weapon'})       -- an individual-choice spec would take the tools
+  end
+  if #plan < #need and not rt.no_wpn[k] then
+    rt.no_wpn[k] = true
+    K.log('warn', 'military: squad %s: %d positions without a weapon (no spare weapon; %d axes and %d picks stay '
+          .. 'with the civilians)', k, #need - #plan, M.AXE_KEEP, M.PICK_KEEP)
+  end
+  backoff(K, 'wpn' .. k)
 end
 
 -- every occupied position needs uniform specs (checked each upkeep). The first uniform goes to the
@@ -566,9 +740,23 @@ local function ensure_uniform(K, k, s, want)
   if uni == 1 then cleared('uni' .. k)
   elseif retry_ok(K, 'uni' .. k) then
     rt.mats[k] = rt.mats[k] or best_mats(math.max(1, want or 1))
-    local spec = with_mats(M.UNIFORM[e.kind] or M.UNIFORM.melee, rt.mats[k])
+    local base = M.UNIFORM[e.kind] or M.UNIFORM.melee
+    local guarded = rt.wguard ~= nil and e.kind ~= 'xbow'
+    if guarded then                                   -- ensure_weapons picks the weapons (live L6)
+      local b = {}
+      for key, v in pairs(base) do b[key] = v end
+      b.no_weapon, base = true, b
+    end
+    local spec = with_mats(base, rt.mats[k])
     if any then spec.positions = bare end
-    if K.act.squad_uniform(s.id, spec) then uni = 1 end
+    if K.act.squad_uniform(s.id, spec) then
+      uni = 1
+      if guarded then
+        for _, m in ipairs(members(s)) do
+          if not any or nw_has({nw = bare}, m.pos) then nw_set(e, m.pos, true) end
+        end
+      end
+    end
     backoff(K, 'uni' .. k)                            -- re-checked next upkeep either way
   end
   if e.uni ~= uni then e.uni, dirty = uni, true end
@@ -624,6 +812,31 @@ local function fill(K, k, s, want, recruits)
     end
     if worst then K.act.squad_remove(s.id, worst.unit.id) end
   end
+end
+
+-- live L6 (Laborkings: no own axes, the soldiers held the only battle axes and picks): when the targets drop to 0
+-- on purpose (tools first, a phase before P2) every soldier leaves, after the squad's uniform specs and assigned
+-- items are released (act.squad_unequip, the squads screen's equip > remove), so the tools go back to the
+-- civilians. PEACE only; the leader (position 0) leaves last.
+local function release(K, why)
+  local n = 0
+  for _, sp in ipairs(M.SQUADS) do
+    local e = st.sq[sp.key]
+    local s = e and squad(e.id)
+    local mem = s and members(s) or {}
+    if #mem > 0 then
+      K.act.squad_unequip(s.id)
+      table.sort(mem, function(a, b) return a.pos > b.pos end)
+      for _, m in ipairs(mem) do if K.act.squad_remove(s.id, m.unit.id) then n = n + 1 end end
+      if e.uni ~= 0 or e.nw then e.uni, e.nw, dirty = 0, nil, true end
+      rt.mats[sp.key], rt.order[sp.key] = nil, nil
+    end
+  end
+  if n > 0 then
+    rt.kpi = nil
+    K.log('warn', 'military: %d soldiers released (%s): uniforms cleared, the tools go back to the civilians', n, why)
+  end
+  return n
 end
 
 ---------------------------------------------------------------- postures and orders
@@ -861,11 +1074,16 @@ function M.init(K)
   for _, sp in ipairs(M.SQUADS) do
     local e = type(p.sq) == 'table' and p.sq[sp.key]
     if type(e) == 'table' and int(e.id) then
+      local nw
+      if type(e.nw) == 'table' then
+        for _, p in ipairs(e.nw) do if int(p) then nw = nw or {}; nw[#nw + 1] = int(p) end end
+      end
       st.sq[sp.key] = {id = int(e.id), kind = sp.kind, uni = int(e.uni) == 1 and 1 or 0,
-                       auto = int(e.auto) == 1 and 1 or nil}
+                       auto = int(e.auto) == 1 and 1 or nil, nw = nw}
     end
   end
-  rt = {retry = {}, order = {}, station = {}, kpi = nil, kpi_tick = 0, create_fails = 0, mats = {}}
+  rt = {retry = {}, order = {}, station = {}, kpi = nil, kpi_tick = 0, create_fails = 0, mats = {}, wk = {},
+        no_wpn = {}}
   dirty = false
   M.every = {ticks = K.mode() == 'PEACE' and M.SLOW or M.FAST}
 end
@@ -881,7 +1099,9 @@ function M.step(K, budget, ctx)
     K.act.run('uniform-unstick', '--all', '--drop', '--free')
     st.unstick, dirty = now, true
   end
-  local _, per = M.targets(K)
+  local _, per, zero = M.targets(K)
+  if zero and mode == 'PEACE' then release(K, zero) end
+  rt.wguard = weapon_guard(K, per)
   local list
   local function recruits() list = list or M.recruits(K); return list end   -- only when needed
   for _, sp in ipairs(M.SQUADS) do
@@ -892,6 +1112,7 @@ function M.step(K, budget, ctx)
       if s then
         if want > 0 and not leader_set(s) then seat_leader(K, sp.key, s, recruits) end   -- addToSquad needs one
         ensure_uniform(K, sp.key, s, want)
+        ensure_weapons(K, sp.key, s)
         fill(K, sp.key, s, want, recruits)
       end
     end

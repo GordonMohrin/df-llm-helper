@@ -11,6 +11,9 @@ C.DEFAULT = {
   trees_ok = {'heavily_forested', 'woodland'}, trees_warn = {'sparse'},
   aquifer_ok = {'none'}, aquifer_warn = {'light'},
   soil_ok = {'little', 'some'}, soil_warn = {'deep', 'very_deep', 'extremely_deep', 'shallow_sand', 'shallow_clay', 'none'},
+  -- live L6 (Laborkings: light aquifer, soil down to z125, no boulders for a year): soil this deep means no stone
+  -- layer in the upper levels; with a light aquifer the first stone lies below the water
+  stone_warn_soil = {'deep', 'very_deep', 'extremely_deep'},
   sizes = {{3, 3}, {4, 4}},
   fail_popups = {'heavy_aquifer', 'salt_water', 'evil', 'savage', 'necro', 'early_invasion', 'no_stone', 'cannot'},
   warn_popups = {'light_aquifer', 'dead_civ', 'narrow', 'smallest', 'large', 'very_large', 'largest', 'hard',
@@ -115,6 +118,13 @@ function C.evaluate(rec, rules, ctx)
     else put('ore', 'warn', 'no iron') end
   end
   tiered('soil', rec.soil, rules.soil_ok, rules.soil_warn)
+  -- stone near the surface (live L6): deep soil = no stone layer in the upper levels (boulders, blocks, mechanisms)
+  if rec.soil == nil then put('stone', 'skip', 'soil not shown')
+  elseif set(rules.stone_warn_soil)[rec.soil] then
+    local aq = rec.aquifer == 'light' or rec.aquifer == 'varied'
+    put('stone', 'warn', rec.soil .. ' soil: no stone layer in the upper levels' ..
+        (aq and ', the first stone lies below the aquifer (Laborkings: no boulders)' or ' (boulders scarce)'))
+  else put('stone', 'pass', 'stone near the surface (' .. rec.soil .. ' soil)') end
   if rec.ice then put('temperature', 'fail', 'ice')
   else tiered('temperature', rec.temperature, rules.temperature_ok, rules.temperature_warn) end
   if ctx.size then

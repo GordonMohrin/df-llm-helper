@@ -69,6 +69,7 @@
    "library/rockstock": {"job": "ConstructArmorStand", "mat": "INORGANIC"},
    "library/glassstock": {"job": "ConstructArmorStand", "mat": "GLASS_GREEN"}
   },
+  "slaughter": {"keep_f": 1, "keep_m": 1, "max": 10, "every_days": 7, "ws": ["workshop:Butchers"]},
   "fish": {"tag": "dfllm:fish", "min": 5, "max": 30, "ws": ["workshop:Fishery"],
            "spec": {"job": "PrepareRawFish", "frequency": "OneTime"}},
   "food": {"yield": 1, "per_dwarf": 3, "plot_tiles": 35, "plots_max": 4, "want_days": 90, "trend_days": 14,
@@ -87,7 +88,7 @@
               "fuel": 0},
   "wood": {"chop_min": 60, "chop_max": 150, "margin": 20, "band": 90, "cap": 400, "step": 10},
   "barrels": {"tag": "dfllm:barrel", "min_empty": 4, "drink_pct": 150, "cit_pct": 50, "min_total": 8, "max_total": 30,
-              "nofloor_days": 30, "max_jobs": 4, "ws": ["workshop:Carpenters"],
+              "grow_total": 80, "nofloor_days": 30, "max_jobs": 4, "ws": ["workshop:Carpenters"],
               "spec": {"job": "MakeBarrel", "material_category": ["wood"]}},
   "bins": {"tag": "dfllm:bin", "min_empty": 1, "cit_pct": 25, "min_total": 4, "max_total": 20, "max_jobs": 2,
            "ws": ["workshop:Carpenters"], "spec": {"job": "ConstructBin", "material_category": ["wood"]}},

@@ -224,7 +224,12 @@ T.test('barrels: no runaway (live L1b: 34 barrels) - only while brewing is due, 
   T.eq(run(110, 0, 8), 0, 'cap reached: none although none is empty')
   -- below the drink target (113 days) the cap is max_total: barrels full of food must not stall the stills
   T.eq(run(60, 0, 8), 4, 'drink short: cap 30')
-  T.eq(run(60, 0, 30), 0, 'max_total holds even then')
+  -- live L6 (Laborkings): 30 barrels, all full, drink short: max_total stopped the stills; the cap grows
+  T.eq(run(60, 0, 30), 4, 'all 30 full, drink short: 4 more (cap grows past max_total)')
+  T.eq(run(60, 2, 28), 2, 'two empty: two more')
+  T.eq(run(60, 0, 78), 2, 'grow_total 80 holds')
+  T.eq(run(60, 0, 80), 0)
+  T.eq(run(110, 0, 30), 0, 'drink above the target: cit/2 cap, no growth')
 end)
 
 T.test('a refused supply order is retried after 3 days, not daily', function()
@@ -609,6 +614,16 @@ T.test('tool details: miners follow the dig backlog (min 2, max 4 from pop 20), 
   T.eq(#members(ctl3, 'Miners'), 4, 'shrinking waits shrink_days')
   days(W3, 2)
   T.eq(members(ctl3, 'Miners'), {5, 7}, 'back to the minimum, the best skills stay')
+end)
+
+T.test('live L6: foreign weapons and gear (merchant leftovers) are no tools: w_axe and w_pick skip them', function()
+  local W = tool_world{cit = 12, miners = {5}, setup = function(W)
+    for _ = 1, 4 do F.item(W, 'WEAPON', {subtype = 2, flags = {foreign = true}}) end   -- battle axes, foreign
+    F.item(W, 'WEAPON', {subtype = 1, flags = {foreign = true}})
+  end}
+  days(W, 1)
+  local i = W.K.census.i
+  T.eq({i.w_pick, i.w_axe}, {3, 2}, 'only the 3 picks and 2 axes of the fort')
 end)
 
 T.test('tool details: woodcutters by log stock, hunters only in a famine, one tool detail per dwarf', function()

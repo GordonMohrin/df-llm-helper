@@ -162,6 +162,7 @@ and the run goes on; the final `status.json` lists them under `warnings`.
 | flux | "Flux stone layer" | missing warn |
 | ore | a line of metal names, if DF shows one | iron pass, bronze only / no iron warn, not shown skip |
 | soil | "Little soil"/"Some soil" … "Extremely deep soil" | little/some pass, deeper or none warn |
+| stone | the soil depth | deep, very deep or extremely deep soil warn: no stone layer in the upper levels, with a light aquifer the first stone lies below the water (live L6, Laborkings: no boulders for a year); skip when soil is not shown |
 | temperature | "Temperature:", "Ice" | Temperate pass, Warm/Cold warn, else fail |
 | size | rectangle | 3x3 or 4x4 pass (DF default is 4x4; size is not changed by these steps) |
 | popup | other warning sentences | `fail_popups` fail, `warn_popups` warn |

@@ -15,9 +15,15 @@ local function names(acts, i)
   for _, a in ipairs(acts) do r[#r + 1] = a.args[i or 1] end
   return r
 end
+-- live L6: military creates squads only once the runner published a phase; the fake runner stands at P5 unless
+-- the test brings its own (extra) or none (opts.phase = false)
 local function boot(opts, extra)
   local W = X.world(opts)
-  X.load(W, {'military'}, extra, (opts and opts.wp5) or {'sense'})
+  local mods, own = {}, false
+  for _, m in ipairs(extra or {}) do mods[#mods + 1] = m; if m.name == 'runner' then own = true end end
+  if not own and not (opts and opts.phase == false) then mods[#mods + 1] = X.runner((opts and opts.phase) or 'P5') end
+  X.load(W, {'military'}, mods, (opts and opts.wp5) or {'sense'})
+  W.state()                     -- the view carries the phase before military's first upkeep
   return W
 end
 -- adults = n citizens; returns the world after the first upkeep (military runs on its first frame)
@@ -168,7 +174,7 @@ T.test('adopts a squad named A from the UI and keeps its uniform', function()
   local s = X.new_squad(W, 'a')
   X.seat(W, s, 0, 5)
   s.positions[0].equipment.uniform.body:insert('#', {item_type = 'ARMOR', item = -1, assigned = kmock_vec{}})
-  X.load(W, {'military'}, nil, {'sense'})
+  X.load(W, {'military'}, {X.runner('P5')}, {'sense'}); W.state()
   W.run(9, {skip = 9})
   T.eq(names(X.acts(W, 'squad_create')), {'B', 'C'})
   for _, a in ipairs(X.acts(W, 'squad_uniform')) do T.ok(a.args[1] ~= s.id, 'adopted uniform kept') end
@@ -178,7 +184,7 @@ end)
 
 T.test('S2: squad creation fails -> backoff, one DECISION_NEEDED, adopts squads made in the UI later', function()
   local W = X.world{n = 50, create_mode = 'fail'}
-  X.load(W, {'military'}, nil, {'sense'})
+  X.load(W, {'military'}, {X.runner('P5')}, {'sense'}); W.state()
   W.run(9, {skip = 9})
   T.eq(#X.acts(W, 'squad_create'), 3, 'A, B, C tried once')
   W.run(1200, {skip = 9})
@@ -201,7 +207,7 @@ end)
 
 T.test('uniform not implemented yet [S2]: retried with backoff until act accepts it', function()
   local W = X.world{n = 50, uniform_mode = 'fail'}
-  X.load(W, {'military'}, nil, {'sense'})
+  X.load(W, {'military'}, {X.runner('P5')}, {'sense'}); W.state()
   W.run(9, {skip = 9})
   T.eq(#X.acts(W, 'squad_uniform'), 3)
   T.eq(json.decode(W.persist_raw['dfllm.m.military']).sq.A.uni, 0)
@@ -215,7 +221,7 @@ end)
 
 T.test('a created squad without a leader: not filled, no more creations, the UI action is named', function()
   local W = X.world{n = 50, create_mode = 'noleader', leader_mode = 'fail'}
-  X.load(W, {'military'}, nil, {'sense'})
+  X.load(W, {'military'}, {X.runner('P5')}, {'sense'}); W.state()
   W.run(9, {skip = 9})
   T.eq(names(X.acts(W, 'squad_create')), {'A'}, 'B and C wait until A has a leader')
   T.eq(#X.acts(W, 'squad_leader'), 1, 'the leader was tried once (the squads screen)')
@@ -238,7 +244,7 @@ end)
 
 T.test('a UI squad A with a leader replaces the empty leaderless squad A dfllm created', function()
   local W = X.world{n = 50, create_mode = 'noleader', leader_mode = 'fail'}
-  X.load(W, {'military'}, nil, {'sense'})
+  X.load(W, {'military'}, {X.runner('P5')}, {'sense'}); W.state()
   W.run(9, {skip = 9})
   local auto = X.squad_of(W, 'A')
   local ui = X.new_squad(W, 'A')                   -- made in the squad screen, leader seated
@@ -317,7 +323,7 @@ end)
 
 T.test('no Ready routine: READY_STATION keeps Constant training (never Off duty)', function()
   local W = X.world{n = 50, routines = {'Off duty', 'Constant training'}}
-  X.load(W, {'military'}, nil, {'sense'})
+  X.load(W, {'military'}, {X.runner('P5')}, {'sense'}); W.state()
   W.run(9, {skip = 9})
   X.call(W, 'military', 'posture', 'READY_STATION')
   T.eq(X.squad_of(W, 'A').cur_routine_idx, 1)
@@ -332,7 +338,7 @@ T.test('kill: only visible hostiles in a killbox, not on a stair or shaft, order
   units[#units + 1] = X.S.inv(203, 52, 29, Z)      -- K1, shaft tile
   units[#units + 1] = X.S.inv(204, 51, 5, Z)       -- outside every killbox
   local W = X.world{units = units}
-  X.load(W, {'military'}, {X.snapshot({['52,29,10'] = '_'})}, {'sense'})
+  X.load(W, {'military'}, {X.snapshot({['52,29,10'] = '_'}), X.runner('P5')}, {'sense'}); W.state()
   W.K.set_mode('SIEGE', 'test')
   W.run(30, {skip = 9})
   local ok, n = X.call(W, 'military', 'kill', {201, 202, 203, 204, 999})
@@ -356,7 +362,7 @@ T.test('squad.sortie needs approval, runs only in combat modes, kills in a killb
   local units = X.citizens(50)
   units[#units + 1] = X.S.inv(201, 50, 27, Z)
   local W = X.world{units = units}
-  X.load(W, {'military'}, {X.snapshot()}, {'sense'})
+  X.load(W, {'military'}, {X.snapshot(), X.runner('P5')}, {'sense'}); W.state()
   W.run(9, {skip = 9})
   T.eq(W.inbox('squad.sortie', {squad = 'A', target = 'K1', approve = true}).ok, false, 'PEACE')
   W.K.set_mode('SIEGE', 'test')
@@ -410,7 +416,7 @@ T.test('worn %: an occupied position without uniform specs counts as missing; th
   local W = X.world{n = 50}
   local s = X.new_squad(W, 'A')
   X.seat(W, s, 0, 5)
-  X.load(W, {'military'}, nil, {'sense'})
+  X.load(W, {'military'}, {X.runner('P5')}, {'sense'}); W.state()
   local M = mil()
   X.set_uniform(s, {positions = {0}, items = M.UNIFORM.melee.items})    -- chosen in the UI, leader only
   local ui_spec = s.positions[0].equipment.uniform.body[0]
@@ -447,7 +453,7 @@ T.test('combat value per soldier, metal % (iron/steel body armor), soldiers on s
   local units = {}
   for i = 1, 50 do units[i] = X.cit(i, {skills = {AXE = (i % 3) * 2, SHIELD = 2, ARMOR = 1, DODGING = 3, CROSSBOW = 1}}) end
   local W = X.world{units = units}
-  X.load(W, {'military'}, nil, {'sense'})
+  X.load(W, {'military'}, {X.runner('P5')}, {'sense'}); W.state()
   W.run(9, {skip = 9})
   T.eq(kpi(W).cv, 10, 'the 8 best fighters: axe 4 + shield 2 + armor 1 + dodging 3')
   local A = X.squad_of(W, 'A')
@@ -487,7 +493,7 @@ T.test('live L2: a leaderless squad (made before S2) gets the best recruit as le
   local W = X.world{n = 50}
   local s = X.new_squad(W, 'A')                     -- squad A from adopt time, nobody seated
   W.persist_raw['dfllm.m.military'] = json.encode({v = 2, sq = {A = {id = s.id, uni = 0, auto = 1}}})
-  X.load(W, {'military'}, nil, {'sense'})
+  X.load(W, {'military'}, {X.runner('P5')}, {'sense'}); W.state()
   W.run(9, {skip = 9})
   local lead = X.acts(W, 'squad_leader')
   T.eq(lead[1].args[1], s.id, 'squad A first')
@@ -534,13 +540,153 @@ T.test('live L2: a squad that lost its leader promotes its best member (squads s
   X.seat(W, s, 1, 4)
   X.seat(W, s, 2, 5)                                -- the better fighter
   W.persist_raw['dfllm.m.military'] = json.encode({v = 2, sq = {A = {id = s.id, uni = 0}}})
-  X.load(W, {'military'}, nil, {'sense'})
+  X.load(W, {'military'}, {X.runner('P5')}, {'sense'}); W.state()
   W.run(9, {skip = 9})
   local rm = X.acts(W, 'squad_remove')
   T.eq(#rm, 1)
   T.eq(rm[1].args[2], 5, 'the member with the best combat value')
   T.eq(W.hfs[s.positions[0].occupant].unit_id, 5, 'promoted into position 0')
   T.eq(#W.find_events('DECISION_NEEDED'), 0)
+end)
+
+---------------------------------------------------------------- live L6 (Laborkings): tools first
+local function logged(W, pat)
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find(pat, 1, true) then return true end end
+  return false
+end
+local function soldiers(W)
+  local n = 0
+  for _, k in ipairs({'A', 'B', 'C'}) do local s = X.squad_of(W, k); if s then n = n + X.members(s) end end
+  return n
+end
+
+T.test('live L6: no squad is created while the phase is unknown (right after adopt); a UI squad is still adopted', function()
+  local W = setup(50, {phase = false})
+  T.eq(#X.acts(W, 'squad_create'), 0, 'no phase in the view yet')
+  local s = X.new_squad(W, 'A')
+  X.seat(W, s, 0, 7)
+  W.run(3600, {skip = 9})
+  T.eq(#X.acts(W, 'squad_create'), 0)
+  T.eq(mil().squads(W.K).A, s.id, 'the existing squad is adopted')
+  T.ok(X.members(s) > 1, 'and filled')
+end)
+
+T.test('live L6: targets 0 by the tools rule release every soldier, uniforms first (squad equipment screen)', function()
+  local W = setup(50)
+  T.eq(soldiers(W), 8)
+  local M = mil()
+  W.set_census('i', {tick = 0, w_axe = 2, w_pick = 5})
+  local n, _, why = M.targets(W.K)
+  T.eq({n, why}, {0, 'tools'})
+  W.run(3600, {skip = 9})
+  T.eq(soldiers(W), 0, 'everybody left, the leaders too')
+  local un = X.acts(W, 'squad_unequip')
+  T.eq(#un, 3, 'one per squad with members')
+  local first_remove = nil
+  for i, a in ipairs(W.acts) do if a.fn == 'squad_remove' and not first_remove then first_remove = i end end
+  local first_un = nil
+  for i, a in ipairs(W.acts) do if a.fn == 'squad_unequip' and not first_un then first_un = i end end
+  T.ok(first_un < first_remove, 'the uniform is released before the soldier leaves')
+  for _, k in ipairs({'A', 'B', 'C'}) do T.ok(not X.has_uniform(X.squad_of(W, k)), 'no uniform spec left in ' .. k) end
+  T.ok(logged(W, 'soldiers released (tools)'), 'logged')
+  local adds = #X.acts(W, 'squad_add')
+  W.run(3600 * 2, {skip = 9})
+  T.eq(#X.acts(W, 'squad_add'), adds, 'no new soldiers while the tools are short')
+  T.eq(#X.acts(W, 'squad_unequip'), 3, 'nothing more to release')
+  W.set_census('i', {tick = 0, w_axe = 20, w_pick = 20})
+  W.run(3600, {skip = 9})
+  T.eq(soldiers(W), 8, 'enough tools: the squads fill again')
+end)
+
+T.test('live L6: a known phase before P2 releases the soldiers; outside PEACE nobody is released', function()
+  local W = setup(50)
+  T.eq(soldiers(W), 8)
+  W.K.set_mode('ALERT', 'test')
+  W.set_census('i', {tick = 0, w_axe = 1, w_pick = 1})
+  W.run(600, {skip = 9})
+  T.eq(#X.acts(W, 'squad_remove'), 0, 'ALERT: the soldiers stay')
+  W.K.set_mode('PEACE', 'test')
+  W.set_census('i', {tick = 0, w_axe = 20, w_pick = 20})
+  W.mods.runner.M.phase = 'P1'
+  W.state()
+  local _, _, why = mil().targets(W.K)
+  T.eq(why, 'phase')
+  W.run(3600, {skip = 9})
+  T.eq(soldiers(W), 0)
+  T.ok(logged(W, 'soldiers released (phase)'))
+end)
+
+T.test('live L6: melee uniforms keep 1 axe and 2 picks for civilians (explicit weapons, foreign items excluded)', function()
+  local W = boot{n = 70}
+  for _ = 1, 2 do X.weapon(W, 'ITEM_WEAPON_SPEAR') end
+  X.weapon(W, 'ITEM_WEAPON_SPEAR', {foreign = true})            -- a merchant's leftover
+  X.weapon(W, 'ITEM_WEAPON_SWORD_SHORT')
+  for _ = 1, 3 do X.weapon(W, 'ITEM_WEAPON_AXE_BATTLE') end
+  for _ = 1, 3 do X.weapon(W, 'ITEM_WEAPON_PICK') end
+  W.set_census('i', {tick = 0, w_axe = 3, w_pick = 3})
+  W.run(9, {skip = 9})
+  W.run(3600, {skip = 9})                            -- the second upkeep equips the members the first one drafted
+  local n, per = mil().targets(W.K)
+  T.eq({n, per.A, per.B}, {14, 5, 5})
+  T.ok(mil().weapon_guard(W.K, per) ~= nil, '3 axes / 3 picks for 10 melee soldiers: guarded')
+  local got, none = {}, 0
+  for _, k in ipairs({'A', 'B'}) do
+    local s = X.squad_of(W, k)
+    for _, p in ipairs(s.positions) do
+      if p.occupant >= 0 then
+        local w = p.equipment.uniform.weapon
+        if #w == 0 then none = none + 1 else
+          T.eq(#w, 1)
+          T.ok(w[0].subtype ~= nil, 'no individual choice while guarded')
+          got[w[0].subtype] = (got[w[0].subtype] or 0) + 1
+        end
+        T.ok(#p.equipment.uniform.body == 1, 'the armor kit is set')
+      end
+    end
+  end
+  T.eq(got, {ITEM_WEAPON_SPEAR = 2, ITEM_WEAPON_SWORD_SHORT = 1, ITEM_WEAPON_AXE_BATTLE = 2, ITEM_WEAPON_PICK = 1},
+       'other weapons first, then 3 - 1 axes and 3 - 2 picks')
+  T.eq(none, 4)
+  T.ok(logged(W, 'positions without a weapon'), 'logged')
+  local C = X.squad_of(W, 'C')
+  T.eq(C.positions[0].equipment.uniform.weapon[0].subtype, 'ITEM_WEAPON_CROSSBOW', 'crossbows unchanged')
+  -- the tools are plentiful again: the weaponless positions get individual choice; explicit ones stay
+  W.set_census('i', {tick = 0, w_axe = 20, w_pick = 20})
+  W.run(3600, {skip = 9})
+  T.eq(mil().weapon_guard(W.K, per), nil)
+  local choice = 0
+  for _, k in ipairs({'A', 'B'}) do
+    for _, p in ipairs(X.squad_of(W, k).positions) do
+      if p.occupant >= 0 then
+        T.eq(#p.equipment.uniform.weapon, 1, 'every melee position has a weapon spec')
+        if p.equipment.uniform.weapon[0].subtype == nil then choice = choice + 1 end
+      end
+    end
+  end
+  T.eq(choice, 4)
+end)
+
+T.test('live L6: guarded, an individual-choice weapon spec is replaced (or dropped when nothing is spare)', function()
+  local W = setup(50)                                  -- census.i unknown: individual choice
+  local A = X.squad_of(W, 'A')
+  T.eq(A.positions[0].equipment.uniform.weapon[0].subtype, nil)
+  X.weapon(W, 'ITEM_WEAPON_MACE')
+  for _ = 1, 3 do X.weapon(W, 'ITEM_WEAPON_AXE_BATTLE') end
+  W.set_census('i', {tick = 0, w_axe = 3, w_pick = 3})
+  W.run(3600, {skip = 9})
+  local got, none = {}, 0
+  for _, k in ipairs({'A', 'B'}) do
+    for _, p in ipairs(X.squad_of(W, k).positions) do
+      if p.occupant >= 0 then
+        local w = p.equipment.uniform.weapon
+        if #w == 0 then none = none + 1 else got[w[0].subtype or 'choice'] = (got[w[0].subtype or 'choice'] or 0) + 1 end
+      end
+    end
+  end
+  T.eq(got, {ITEM_WEAPON_MACE = 1, ITEM_WEAPON_AXE_BATTLE = 2}, 'no pick token in stock: picks stay put')
+  T.eq(none, 3)
+  T.ok(#X.acts(W, 'squad_unequip', function(a) return a.args[3] and a.args[3][1] == 'weapon' end) >= 1,
+       'the choice specs without a spare weapon are removed (weapon category only)')
 end)
 
 T.done()

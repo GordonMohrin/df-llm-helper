@@ -95,7 +95,7 @@ T.test('military.kill({}) withdraws a running kill order (siege.withdraw, WP5)',
   local units = X.citizens(50)
   units[#units + 1] = X.S.inv(201, 50, 27, Z)
   local W = X.world{units = units}
-  X.load(W, {'military'}, {X.snapshot()}, {'sense'})
+  X.load(W, {'military'}, {X.snapshot(), X.runner('P5')}, {'sense'})
   W.K.set_mode('SIEGE', 'test')
   W.run(30, {skip = 9})
   local _, ok, n = W.K.call('military', 'kill', {201})

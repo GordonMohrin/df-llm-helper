@@ -794,6 +794,100 @@ local function impls(state)
     return true, n
   end
 
+  -- squads screen > equip > remove uniform / unassign (live L6, Laborkings: soldiers held the fort's only battle
+  -- axes and picks for a year): per position (0-based `positions`, default all) every uniform spec is deleted,
+  -- the position's assigned items are released (equipment.assigned_items, the quiver/backpack/flask slots; the
+  -- same records uniform-unstick.lua remove_item_from_position clears), then the equipment update. The items
+  -- go back to the fort's free stock, so civilians take the picks and axes again. Returns ok, items released.
+  -- `cats` (uniform categories) limits it to those specs and their assigned items (military: a weapon spec that
+  -- could take the civilians' tools).
+  local POS_ITEMS = {'quiver', 'backpack', 'flask'}
+  function I.squad_unequip(squad_id, positions, cats)
+    local sq = df.squad.find(int(squad_id) or -1)
+    if not sq or sq.entity_id ~= df.global.plotinfo.group_id then return false, 'no fort squad ' .. tostring(squad_id) end
+    local only
+    if positions ~= nil then
+      if type(positions) ~= 'table' then return false, 'positions must be a list' end
+      only = {}
+      for _, i in ipairs(positions) do only[i] = true end
+    end
+    local which = UNIFORM_CAT
+    if cats ~= nil then
+      if type(cats) ~= 'table' or #cats == 0 then return false, 'cats must be a list of uniform categories' end
+      which = {}
+      for _, c in ipairs(cats) do
+        if not UNIFORM_CAT[c] then return false, 'bad uniform category ' .. tostring(c) end
+        which[c] = true
+      end
+    end
+    local n = 0
+    for i, p in ipairs(sq.positions) do
+      if not only or only[i] then
+        local eq = p.equipment
+        local ai = eq.assigned_items
+        for c in pairs(which) do
+          for _, sp in ipairs(eq.uniform[c]) do
+            for _, id in ipairs(sp.assigned) do
+              n = n + 1
+              if cats then
+                for j = #ai - 1, 0, -1 do if ai[j] == id then ai:erase(j) end end
+              end
+            end
+          end
+          clear_specs(eq.uniform[c])
+        end
+        if not cats then
+          for j = #ai - 1, 0, -1 do ai:erase(j) end
+          for _, k in ipairs(POS_ITEMS) do
+            pcall(function() if eq[k] ~= -1 then eq[k] = -1; n = n + 1 end end)
+          end
+        end
+      end
+    end
+    equipment_update(sq)
+    return true, n
+  end
+
+  -- animal sheet > "slaughter" toggle (live L6: a famine with idle grazers; DFHack zone.lua
+  -- AnimalActionsWidget:set_slaughter_flag: flags2.slaughter, and marking clears the gelding and adoption marks
+  -- as the vanilla sheet does). Only a tame, fort-controlled animal that is nobody's pet; a butcher's shop
+  -- takes the job. Returns ok, 'marked'|'already'|'cleared'.
+  function I.animal_slaughter(unit_id, on)
+    local u = df.unit.find(int(unit_id) or -1)
+    if not u then return false, 'no unit ' .. tostring(unit_id) end
+    local U = dfhack.units
+    if U.isDead(u) or U.isCitizen(u, true) then return false, 'not a living animal' end
+    if not U.isTame(u) or not U.isFortControlled(u) then return false, 'not a tame fort animal' end
+    if U.isPet and U.isPet(u) then return false, 'a pet' end
+    if on then
+      if u.flags2.slaughter then return true, 'already' end
+      u.flags3.marked_for_gelding = false
+      u.flags3.available_for_adoption = false
+      u.flags2.slaughter = true
+      return true, 'marked'
+    end
+    u.flags2.slaughter = false
+    return true, 'cleared'
+  end
+
+  -- zones screen > select zone > remove (live L6: the runner's temporary gather zone): every activity zone
+  -- named `name` (dfllm-* only) is removed with dfhack.buildings.deconstruct, as quickfort's zone undo does
+  -- (internal/quickfort/zone.lua do_undo) but only for these zones, never for others on the same tiles.
+  -- Returns ok, zones removed.
+  function I.zone_remove(name)
+    if type(name) ~= 'string' or not name:match('^dfllm%-[%w_%-]+$') then return false, 'zone name must be dfllm-*' end
+    local list = {}
+    for _, z in ipairs(df.global.world.buildings.other.ACTIVITY_ZONE) do
+      if dfhack.df2utf(z.name or '') == name then list[#list + 1] = z end
+    end
+    local sel = dfhack.gui and dfhack.gui.getSelectedCivZone and dfhack.gui.getSelectedCivZone(true) or nil
+    local n = 0
+    for _, z in ipairs(list) do
+      if z ~= sel and dfhack.buildings.deconstruct(z) then n = n + 1 end
+    end
+    return true, n
+  end
+
   -- lever.lua:4 leverPullJob(lever, priority) returns nothing: the new job is found on lever.jobs
   local own_jobs = state.own_jobs
   local function is_lever(b)

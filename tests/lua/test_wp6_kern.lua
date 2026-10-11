@@ -22,6 +22,7 @@ local function boot(tag, setup)
     mods[#mods + 1] = require('dfllm.' .. n)
   end
   mods[#mods + 1] = X.economy()
+  mods[#mods + 1] = X.runner('P5')             -- live L6: squads are created only once a phase is known
   local ok, msg = H.boot(W, {repo = REPO, modules = mods})
   assert(ok, msg)
   return W, H.kern().K()

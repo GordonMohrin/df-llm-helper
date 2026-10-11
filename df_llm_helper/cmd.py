@@ -341,6 +341,14 @@ def _moodable() -> list[str]:
         return []
 
 
+def _extra_shops() -> list[str]:
+    """Non-moodable shops the workshops template builds through `add` (live L6: Still, Kitchen, Butchers)."""
+    try:
+        return list(load_bp("rooms").EXTRA_TYPES)
+    except (BpUnavailable, AttributeError):
+        return []
+
+
 def workshops_missing(save_dir: Path, types: list | None = None) -> list[str]:
     """Moodable workshop types (or `types`, 'moodable' expanded) that no workshop of the fort manifest has,
     built or planned (fort_manifest merges every bp/*.json)."""
@@ -366,6 +374,14 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
         have = [n for n in _moodable() if n not in miss]
         if have:
             params["skip"] = ",".join(have)
+    if tpl == "workshops" and params.get("add"):          # live L6: never a second still or butcher's shop
+        want = [t.strip() for t in str(params["add"]).split(",") if t.strip()]
+        miss = set(workshops_missing(save_dir, want))
+        keep = [t for t in want if t in miss or t not in _extra_shops()]   # unknown names: emit reports them
+        if keep:
+            params["add"] = ",".join(keep)
+        else:
+            params.pop("add")
     occ = occ if occ is not None else occupancy(save_dir, skip={bp_id})
     if label == SAME:
         s = same or files.read_json(_placed(save_dir, tpl))

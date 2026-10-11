@@ -15,8 +15,9 @@
 --   wood    autochop target = floor + wood ordered + margin (never below baseline's 150/60); every wood order
 --           of economy carries an AtLeast WOOD > floor condition, so the reserve stays in the fort;
 --   barrels MakeBarrel only while drink days < 150 % of the plan's target, fewer than 4 empty barrels and
---           the barrel total below clamp(cit / 2, 8, 30) (30 while drink is below the target; below 30 drink days
---           the barrels may take economy's own wood floor); bins alike (no drink gate);
+--           the barrel total below clamp(cit / 2, 8, 30) (30 while drink is below the target, and up to 80 while
+--           fewer than 4 are empty then, live L6; below 30 drink days the barrels may take economy's own wood
+--           floor); bins alike (no drink gate);
 --   leather hunters (1, 2 while a need is open) while leather, bone or shell is short, from P1, in PEACE and
 --           only with bolts; 10 days without a new hide/bone/leather/shell -> 20 days off (no visible game);
 --           leaving PEACE takes them off the detail at once (MODE rushes the next run); famine hunters only in
@@ -138,6 +139,8 @@ M.DEFAULTS = {
     ['library/rockstock'] = {job = 'ConstructArmorStand', mat = 'INORGANIC'},
     ['library/glassstock'] = {job = 'ConstructArmorStand', mat = 'GLASS_GREEN'},
   },
+  -- live L6: famine / food_low slaughter of surplus tame animals (T.slaughter)
+  slaughter = {keep_f = 1, keep_m = 1, max = 10, every_days = 7, ws = {'workshop:Butchers'}},
   fish = {tag = 'dfllm:fish', min = 5, max = 30, ws = {'workshop:Fishery'},
           spec = {job = 'PrepareRawFish', frequency = 'OneTime'}},
   -- live L5 (Castlerisen y295: pop 41 -> 53 on the same 80 farm tiles, food 105 -> 15 days in a year): food follows
@@ -169,8 +172,9 @@ M.DEFAULTS = {
   wood = {chop_min = 60, chop_max = 150, margin = 20, band = 90, cap = 400, step = 10},
   -- live L1b: brewing stalled without empty barrels; then dfllm:barrel made 34 barrels (logs 183 -> 66). Below the
   -- drink target the cap is max_total, below nofloor_days of drink barrels may use the wood floor
+  -- live L6: while drink is short and fewer than min_empty barrels are empty, the cap grows up to grow_total
   barrels = {tag = 'dfllm:barrel', min_empty = 4, drink_pct = 150, cit_pct = 50, min_total = 8, max_total = 30,
-             nofloor_days = 30, max_jobs = 4, ws = {'workshop:Carpenters'},
+             grow_total = 80, nofloor_days = 30, max_jobs = 4, ws = {'workshop:Carpenters'},
              spec = {job = 'MakeBarrel', material_category = {'wood'}}},
   bins = {tag = 'dfllm:bin', min_empty = 1, cit_pct = 25, min_total = 4, max_total = 20, max_jobs = 2,
           ws = {'workshop:Carpenters'}, spec = {job = 'ConstructBin', material_category = {'wood'}}},
@@ -521,6 +525,8 @@ local function classify(it, a, cat)
     local tok = mat_token(it.mat_type, it.mat_index)
     local plant = tok and tok:match('^PLANT:([^:]+):')
     if plant then a.seeds[plant] = (a.seeds[plant] or 0) + n end
+  elseif (cat == 'WEAPON' or GEAR_CAT[cat]) and f.foreign then
+    return               -- live L6: a merchant's leftover (flags.foreign) is no tool or gear of the fort
   elseif cat == 'WEAPON' then
     local k = weapon_kind(it)
     if k == 'pick' then a.w_pick = a.w_pick + 1
@@ -916,7 +922,18 @@ local function plan_containers(K, c, r, which)
     short, dry = d < tgt, d < (b.nofloor_days or 30)
   end
   local cap = short and (b.max_total or 30) or clamp(r.cit * (b.cit_pct or 50) // 100, b.min_total or 0, b.max_total or 30)
-  local want = math.min((b.min_empty or 0) - (inv[which .. '_empty'] or 0), cap - (inv[which] or 0))
+  local empty_miss = (b.min_empty or 0) - (inv[which .. '_empty'] or 0)
+  -- live L6 (Laborkings): 30 barrels, all full of food and drink, drink below the target: max_total stopped the
+  -- stills. While drink is short and the empty barrels are missing, the cap grows past max_total (up to grow_total)
+  if short and empty_miss > 0 and b.grow_total then
+    local grown = math.min(b.grow_total, (inv[which] or 0) + empty_miss)
+    if grown > cap then
+      cap = grown
+      if r.day then K.log('info', 'drink %d days, %d of %d barrels full: barrel cap %d', r.days.drink_d or 0,
+                          (inv[which] or 0) - (inv[which .. '_empty'] or 0), inv[which] or 0, cap) end
+    end
+  end
+  local want = math.min(empty_miss, cap - (inv[which] or 0))
   -- dry: other open wood orders hold no claim on the logs either (the first job takes them)
   local wood = dry and math.max(0, (inv.wood or 0) - (r.planned.wood or 0)) or left(c, r, 'wood')
   local n = math.min(want, wood, b.max_jobs or 4)
@@ -2080,6 +2097,59 @@ function T.scan(K, c, r)
   care_hooks(K, r)
 end
 
+-- live L6 (Laborkings: a famine beside idle grazers): while the famine or the food_low pre-alarm runs, surplus tame
+-- animals are marked for slaughter (act.animal_slaughter, the animal sheet's toggle) once per `every_days`: per
+-- race `keep_f` adult females and `keep_m` adult males stay for breeding; pets, war and hunting animals and
+-- animals already marked are left alone; at most `max` a time, only with a butcher's shop, in PEACE/RECOVERY.
+-- One mark per call (one DF command per slice).
+function M.slaughter_pick(list, sc)
+  local keep = {}
+  local cand = {}
+  local sorted = {}
+  for _, a in ipairs(type(list) == 'table' and list or {}) do
+    if type(a) == 'table' and math.tointeger(a.id) then sorted[#sorted + 1] = a end
+  end
+  table.sort(sorted, function(x, y) return x.id < y.id end)
+  local marked = 0
+  for _, a in ipairs(sorted) do
+    if not a.pet and not a.war then
+      if a.slaughter then marked = marked + 1
+      else
+        local race = tostring(a.race)
+        local k = keep[race] or {f = 0, m = 0}
+        keep[race] = k
+        if a.adult and a.female and k.f < (sc.keep_f or 1) then k.f = k.f + 1
+        elseif a.adult and not a.female and k.m < (sc.keep_m or 1) then k.m = k.m + 1
+        else cand[#cand + 1] = a.id end
+      end
+    end
+  end
+  local r = {}
+  for i = 1, math.min(#cand, math.max(0, (sc.max or 10) - marked)) do r[i] = cand[i] end
+  return r
+end
+
+function T.slaughter(K, c, r)
+  local sc, p = c.slaughter, r.p
+  if type(sc) ~= 'table' or not (p.famine or p.food_pre) or not HUNT_MODES[K.mode()] then return true end
+  if not r.sl then
+    if p.slaughter_t and r.now - (math.tointeger(p.slaughter_t) or 0) < (sc.every_days or 7) * DAY then return true end
+    if not ws_any(r.f, sc.ws) then return true end
+    local ca = K.census.a
+    r.sl, r.sl_n = M.slaughter_pick(type(ca) == 'table' and ca.list, sc), 0
+    p.slaughter_t = r.now
+    if #r.sl == 0 then return true end
+  end
+  local id = table.remove(r.sl, 1)
+  if not id then return true end
+  r.cmds = r.cmds + 1
+  if K.act.animal_slaughter(id, true) then r.sl_n = r.sl_n + 1 end
+  if #r.sl > 0 then return false end
+  K.log('warn', 'food %d days (%s): %d surplus animals marked for slaughter', (r.days or {}).food_d or 0,
+        p.famine and 'famine' or 'food low', r.sl_n)
+  return true
+end
+
 function T.plan(K, c, r)
   r.cands, r.planned, r.targets, r.route = {}, {}, {}, {}
   for _, key in ipairs({'bone', 'shell'}) do r.targets[key] = target(K, c, r, key) end
@@ -2327,7 +2397,7 @@ function T.finish(K, c, r)
   K.persist.touch('m.economy')
 end
 
-local FULL = {'days', 'kitchen', 'appoint', 'food', 'watch', 'cmdq', 'engine', 'labor_fix', 'scan', 'plan', 'tools',
+local FULL = {'days', 'kitchen', 'appoint', 'food', 'watch', 'cmdq', 'engine', 'labor_fix', 'scan', 'slaughter', 'plan', 'tools',
               'orders', 'wood', 'chop', 'crops', 'farm', 'imports', 'piles', 'status', 'idle', 'finish'}
 local RUSH = {'scan', 'plan', 'tools', 'orders', 'wood', 'chop', 'farm', 'finish'}
 M.TASKS = {full = FULL, rush = RUSH}

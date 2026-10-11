@@ -459,6 +459,30 @@ def test_follow_plan_exhausted_p1_starts_the_workshops_deliverable(save, monkeyp
     assert f.jobs["starter"]["tpl"] == "office"
 
 
+def test_follow_plan_exhausted_p0_adds_the_missing_butcher(save, monkeypatch):
+    """Live L6: year-1 P0 wants a still and a butcher's shop (fortcore stage 1 builds both). An older fortcore
+    without the butcher gets one through the workshops template's `add`, with every moodable shop skipped."""
+    install_fake_bp(monkeypatch)
+    for p in (save / "bp").glob("*.json"):
+        p.unlink()
+    files.write_json_atomic(save / "bp" / "c900.json", {"v": 2, "tpl": "fortcore", "params": {"stage": 1}, "manifest": {
+        "v": 2, "workshops": [{"type": t, "pos": [i, 0, 0]} for i, t in enumerate(["Carpenters", "Still"])]}})
+    files.write_json_atomic(save / "bp" / "c901.json", {"v": 2, "tpl": "farms", "params": {}})
+    st = files.read_state(save)
+    monkeypatch.setattr(files, "read_state", lambda d: dict(st or {}, proj=[]))
+    c = Clock()
+    f, out = F(c)
+    f.poll()
+    append_events(save, [ev(8813, "PLAN_EXHAUSTED", "plan exhausted in P0", {"phase": "P0", "year": 281})])
+    f.poll()
+    (snap_cmd,) = inbox_docs(save)
+    assert snap_cmd["verb"] == "snapshot" and f.jobs["starter"]["tpl"] == "workshops"
+    from df_llm_helper.bp.rooms import MOODABLE_TYPES
+    assert f.jobs["starter"]["params"] == {"add": "Butchers", "skip": ",".join(MOODABLE_TYPES)}
+    from df_llm_helper.cmd import workshops_missing
+    assert workshops_missing(save, ["Still", "Butchers"]) == ["Butchers"]
+
+
 def test_follow_plan_exhausted_outside_auto_phases_only_wakes(save, monkeypatch):
     install_fake_bp(monkeypatch)
     c = Clock()

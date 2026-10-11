@@ -1,4 +1,4 @@
-workshops {'skip': '', 'burrow': 'Kern+'} anchor [70, 70, 100] rot 0
+workshops {'skip': '', 'add': '', 'burrow': 'Kern+'} anchor [70, 70, 100] rot 0
   infra: dig(9), build(13), burrow(9)
   materials: {'door': 1, 'workshop': 12}
 z100  (x 57..83, y 69..80)

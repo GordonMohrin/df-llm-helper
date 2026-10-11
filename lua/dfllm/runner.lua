@@ -1136,11 +1136,89 @@ local function request(K, tpl, n, why)
   K.emit('PROJECT_REQUEST', 'B', string.format('%s x%d: %s', tpl, n, why), {tpl = tpl, n = n, why = why})
 end
 
+---------------------------------------------------------------- temporary gather zone (live L6)
+-- Laborkings (and Castlerisen L5, where 36 zones over 19,151 tiles were drawn by hand): below gather_below food days
+-- in spring, summer or autumn one Gather/Pick Fruit zone (quickfort zone 'g', named dfllm-gather) of at most
+-- gather_cap tiles is drawn around the fort's surface entrance (the fortcore anchor, else the depot + 2 z), on the
+-- one or two levels around it with the most revealed open or tree tiles; above gather_off food days it is removed
+-- again (act.zone_remove, the zones screen's remove). Never whole-map designations.
+M.CFG.gather_below, M.CFG.gather_off, M.CFG.gather_cap, M.CFG.gather_side = 30, 120, 800, 28
+M.CFG.gather_dz, M.CFG.gather_step = {0, 1, -1, 2}, 3
+local GATHER = 'dfllm-gather'
+local OPEN = {['.'] = true, T = true}
+
+local function fort_center(K)
+  for _, P in ipairs(S.pd.list) do
+    if P.tpl == 'fortcore' then
+      local d = doc(K, P.id) or read_bp(K, P.id)
+      local a = type(d) == 'table' and d.anchor
+      if type(a) == 'table' and int(a[1]) and int(a[2]) and int(a[3]) then return {int(a[1]), int(a[2]), int(a[3])} end
+    end
+  end
+  local dp = K.manifest().depot
+  if type(dp) == 'table' and int(dp[1]) and int(dp[2]) and int(dp[3]) then return {int(dp[1]), int(dp[2]), int(dp[3]) + 2} end
+end
+
+local function gather_zone(K)
+  local st = K.view().stock
+  local fd = type(st) == 'table' and int(st.food_d) or nil
+  if not fd then return end
+  local g = S.rt.gather
+  if type(g) == 'table' then
+    if fd > M.CFG.gather_off then
+      local ok, n = K.act.zone_remove(GATHER)
+      S.rt.gather = nil
+      dirty()
+      K.log('info', 'gather zone removed (food %d days, %s zones)', fd, ok and tostring(n) or 'failed')
+    end
+    return
+  end
+  if fd >= M.CFG.gather_below or (K.now().season or 0) >= 3 then return end
+  local c = S.rt.gc or fort_center(K)
+  if not c then return end
+  S.rt.gc = c
+  local half, step = M.CFG.gather_side // 2, M.CFG.gather_step
+  local lv = {}
+  for _, dz in ipairs(M.CFG.gather_dz) do
+    local z, n = c[3] + dz, 0
+    for x = c[1] - half, c[1] + half, step do
+      for y = c[2] - half, c[2] + half, step do
+        local ok, v = K.call('snapshot', 'tile', x, y, z)
+        S.slice.probes = S.slice.probes + 1
+        if ok and type(v) == 'table' and OPEN[v.c] then n = n + 1 end
+      end
+    end
+    lv[#lv + 1] = {z = z, n = n}
+  end
+  table.sort(lv, function(a, b) if a.n ~= b.n then return a.n > b.n end return a.z > b.z end)
+  if lv[1].n == 0 then
+    S.rt.gather = {z = {}, t = now(K)}   -- nothing open is revealed there: no retry until food recovers
+    dirty()
+    K.log('warn', 'gather zone: no revealed open tile around %d,%d,%d', c[1], c[2], c[3])
+    return
+  end
+  local levels = {lv[1].z}
+  if lv[2] and lv[2].n * 3 >= lv[1].n then levels[2] = lv[2].z end
+  local side = math.min(M.CFG.gather_side, math.floor(math.sqrt(M.CFG.gather_cap / #levels)))
+  local x0, y0 = c[1] - side // 2, c[2] - side // 2
+  if not on_map(x0, y0, levels[1]) then x0, y0 = math.max(1, x0), math.max(1, y0) end
+  local cell = string.format('g{name=%s}(%dx%d)', GATHER, side, side)
+  local made = {}
+  for _, z in ipairs(levels) do
+    if qf(K, {mode = 'zone', data = {[0] = {[0] = {[0] = cell}}}, pos = {x0, y0, z}}) then made[#made + 1] = z end
+  end
+  S.rt.gather = {z = made, x = x0, y = y0, side = side, t = now(K)}
+  dirty()
+  K.log('warn', 'food %d days: gather zone %dx%d at %d,%d on z %s (%d tiles)', fd, side, side, x0, y0,
+        table.concat(made, ','), side * side * #made)
+end
+
 local function keepers(K)
   local t = now(K)
   if K.mode() ~= 'PEACE' or (S.rt.kt and t - S.rt.kt < M.CFG.keep_every) then return end
   S.rt.kt = t
   dirty()
+  gather_zone(K)
   local u = K.census.u
   if type(u) == 'table' and math.type(u.adults) == 'integer' and keeper_on(K, 'bedrooms') then
     local free, owned = zones('ZONE_BEDROOM')

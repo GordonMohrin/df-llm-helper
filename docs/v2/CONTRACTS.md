@@ -207,6 +207,7 @@ Every function returns `ok, res_or_err`, never raises, writes one line to `comma
 | `squad_routine(squad_id, routine_name)` | string, resolved by name [S2] | routine dropdown (`cur_routine_idx`) | military |
 | `squad_order(squad_id, order)` | `{kind='station', pos}` \| `{kind='kill', units={ids}}` \| `{kind='train'}` \| `{kind='clear'}` | squad orders | military |
 | `squad_uniform(squad_id, spec)` → `ok, positions` | `{mode='replace'|'over', items={{cat, type, subtype?, mat='metal'|'leather'|'any', choice?}}, positions?, ammo?}` (live L2) | squads screen > assign uniform: one `squad_uniform_spec` per item and position (material class Armor/Leather/none, indiv choice), flags replace_clothing/exact_matches, squad ammo spec; equipment update | military |
+| `squad_unequip(squad_id, positions?, cats?)` → `ok, items` | int, 0-based positions (default all), uniform categories (default all) (live L6) | squads screen > equip > remove: the positions' uniform specs (of `cats`) are deleted and their assigned items released (`equipment.assigned_items`; without `cats` also the quiver/backpack/flask slots, as uniform-unstick.lua remove_item_from_position), equipment update; military calls it before it releases soldiers (targets 0 by the tools rule or a phase before P2) and for an individual-choice weapon spec that could take the civilians' last axe or picks | military |
 | `pull(lever_building_id)` → `ok, job_id` | int | `reqscript('lever').leverPullJob(lever, true)` (lever.lua:4, priority) | gate |
 | `cancel_own_lever_job(job_id)` | int, only ids returned by `pull` this session | cancel the queued pull | gate |
 | `link_lever(lever_id, target_id)` → `ok, job_id|'linked'` | ints (live L2, [S3]) | lever sheet "link up": one `LinkBuildingToTrigger` job on the lever (building holder ref = lever, trigger target ref = target) with two mechanisms attached (roles LinkToTrigger/LinkToTarget), chosen like the screen: free, reachable (walk groups), nearest; refused while a link job is pending or either building is unbuilt | gate |
@@ -221,6 +222,8 @@ Every function returns `ok, res_or_err`, never raises, writes one line to `comma
 | `appoint(code, unit_id)` → `ok, assignment_id` | position code (`MANAGER`, `BOOKKEEPER`, `BROKER`), int | nobles screen: choose a citizen for a vacant fort position (assignment histfig + the figure's position link; adult living citizen; position offered, `flags.ACTIVE`) | economy |
 | `work_detail(name, unit_id, on)` → `ok, 'added'|'already'|'removed'|'not a member'` | `Miners`, `Woodcutters`, `Hunters` or `Fisherdwarves` (builtin tool details only; Fisherdwarves since live L5), int, bool | work details screen: add an adult citizen to the detail (sorted `assigned_units`, the detail's labors switched on) or remove a unit (a unit that left the fort is only taken off the list; a labor is switched off only when no other detail of the unit, or an everybody-does-this detail, grants it; as DFHack's autofish.lua does) (live L1b) | economy |
 | `order_material(order_id, 'wood')` → `ok, 'wood'` | int, `'wood'` | work orders screen: cancel an open one-time rock furniture order (door, cabinet, chest, coffin, table, throne, armor stand, weapon rack, hatch cover, grate, floodgate) and enter it again in wood for the amount left; only the material changes (live L3: quickfort `orders` always picks rock; soil embark with 8 boulders and 82 logs) | economy |
+| `animal_slaughter(unit_id, on)` → `ok, 'marked'|'already'|'cleared'` | int, bool (live L6) | animal sheet "slaughter" toggle (`flags2.slaughter`; marking clears the gelding and adoption marks, DFHack zone.lua AnimalActionsWidget); tame fort-controlled non-citizens only, never a pet; economy's famine/food_low slaughter of surplus animals | economy |
+| `zone_remove(name)` → `ok, n` | `dfllm-*` zone name (live L6) | zones screen > remove: every activity zone of that name is deconstructed (`dfhack.buildings.deconstruct`, as quickfort's zone undo does, but only these zones); the runner's temporary gather zone | runner |
 | `item_flag(item_id, flag, on)` | `flag='forbid'|'dump'|'melt'` | item flag toggles | care |
 | `zone_assign(zone_building_id, unit_id)` | ints | assign a caged unit to a pit/pond zone | care |
 | `trade(op, args)` | `op='request_broker'|'broker_job'|'open'|'mark'|'offer'|'close'` [WP9 audit; `broker_job` live L4] | depot and trade screen; `broker_job {depot, assign?}` posts the TradeAtDepot job the broker request stands for (DF 53 never posted it from the toggle: 'time' failures L1-L3), one per depot; `assign` gives a job nobody took to the broker only while he has no job | trade |
@@ -261,7 +264,10 @@ All counts are integers; lists are bounded. Readers must handle a missing subtab
 | `armed` | 1 while an INVASION (or a threat report) armed the fast scan (2,400 ticks), else 0 |
 
 ### 6.3 `K.census.i` (economy; items; every 1,200 ticks, sliced over `items.other` vectors)
-`tick, drink, food, meals, meal_kinds, cloth, leather, bone, shell, gems, bars, bolts, wood` (units, i.e. stack sizes summed, excluding forbidden items and items in caravans).
+`tick, drink, food, meals, meal_kinds, cloth, leather, bone, shell, gems, bars, bolts, wood` (units, i.e. stack sizes summed, excluding forbidden items and items in caravans). Weapons and gear (`w_pick`, `w_axe`, `w_xbow`, `w_bow`, `g_*`) also exclude foreign items (`flags.foreign`, merchant leftovers; live L6).
+
+### 6.4 `K.census.a` (sense; the fort's tame animals; with the unit count, every 1,000 ticks; live L6)
+`{tick, n, list = [{id, race, female, adult, pet, slaughter, war}]}` (≤ 120): visible, tame, fort-controlled, living non-citizens (`isTame ∧ isFortControlled ∧ ¬isCitizen(u, true)`); `war` = war or hunting animal. economy marks surplus ones for slaughter (`act.animal_slaughter`) while the famine or the food_low pre-alarm runs: per race one adult female and one adult male stay; pets, war animals and marked ones are left alone; only with a butcher's shop, weekly, ≤ 10.
 
 ---
 
@@ -733,7 +739,7 @@ There is no arbitrary Lua.
 | `W.run(ticks, {skip=9})` | frames of `skip` ticks (number or array cycled, last frame partial) until `ticks` passed; `W.run(n, {paused=true})` = n frames, ms only |
 | `W.event(name, ev)` | queue an eventful event for the next frame: `('INVASION', {id})`, `('REPORT', {type, text, pos})`, `('UNIT_DEATH', {unit})` |
 | `W.inbox(verb, args, {id=, by=})` | route a verb exactly like kern (`VERB_BY`, modes, approval, kern verbs `plan.reload` from `W.plan_file`, `inspect` and `module.enable`); `by` defaults to `'test'`; returns the reply `{id, ok, msg, verb, tick, data}` |
-| `W.set_census(part, tbl)` | set `K.census.u|h|i` directly (tests without sense/economy) |
+| `W.set_census(part, tbl)` | set `K.census.u|h|i|a` directly (tests without sense/economy) |
 | `W.add_unit(spec)`, `W.unit(id)`, `W.move(id, x, y, z)`, `W.kill(id)` | edit the fake world (change other flags via `W.unit(id)._m`) |
 | `W.burrow(name, bbox)`, `W.add_building(spec)`, `W.tiles['x,y,z'] = {des=, occ=, tt=}`, `W.map_size` | burrows (`dfhack.burrows`), buildings (`df.building.find`), tiles (`dfhack.maps.getTileFlags/getTileType`) |
 | `W.set_mode(m)`, `W.set_plan(plan)`, `W.plan_file`, `W.unload()` | force a mode; replace `K.plan`; the plan.json `plan.reload` reads; run `on.UNLOAD` |
@@ -801,7 +807,7 @@ Each item names the WP that must adapt its code; WP0 changed the contract, `cont
 Generated by `python -m df_llm_helper.schema --write-appendix docs/v2/CONTRACTS.md`; `tests/test_schema.py` fails if this block is stale. The digest covers every schema and registry in `schema.py`, so any contract change shows up here.
 
 <!-- BEGIN GENERATED SCHEMAS -->
-Contract digest: `c03cd90d17fee9ac4d583c62d5b991b3b7ea6e25d66a7b1cf8e1f02fcae8a685`
+Contract digest: `ad7499c36dc8ff0afce0ab3117c3169cdd29d20b761f122e8c776a210830fff7`
 
 DESIGN §6 formats and the inbox verb args. Other kinds: `python -m df_llm_helper.schema --json-schema <kind>` with kind in heartbeat, phases, bp, restore, lock, allowlist, persist.marker, persist.projects, persist.plan, persist.phase, persist.mode, persist.drill, persist.kern. Per-type event `d` (§12) and per-verb `args` are checked by `validate()`; the envelopes leave them open. Compact JSON, keys sorted.
 

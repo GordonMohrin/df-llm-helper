@@ -15,6 +15,11 @@ X.CATS = {'body', 'head', 'pants', 'gloves', 'shoes', 'shield', 'weapon'}
 X.CAT_TYPE = {body = 'ARMOR', head = 'HELM', pants = 'PANTS', gloves = 'GLOVES', shoes = 'SHOES', shield = 'SHIELD',
               weapon = 'WEAPON'}
 X.ROUTINES = {'Off duty', 'Staggered training', 'Constant training', 'Ready'}
+-- weapon raws (itemdefs.weapons; skills as df.job_skill names, resolved in install): index = subtype
+X.WEAPONS = {{'ITEM_WEAPON_AXE_BATTLE', 'AXE'}, {'ITEM_WEAPON_PICK', 'MINING'}, {'ITEM_WEAPON_SPEAR', 'SPEAR'},
+             {'ITEM_WEAPON_SWORD_SHORT', 'SWORD'}, {'ITEM_WEAPON_MACE', 'MACE'}, {'ITEM_WEAPON_CROSSBOW', 'HAMMER', 'CROSSBOW'}}
+X.WIDX = {}
+for i, w in ipairs(X.WEAPONS) do X.WIDX[w[1]] = i - 1 end
 
 ---------------------------------------------------------------- units
 -- a citizen inside Kern+ (S.KERN): i-th of a grid; extra = spec overrides
@@ -81,9 +86,10 @@ function X.set_uniform(s, spec)
   if spec.positions then only = {}; for _, i in ipairs(spec.positions) do only[i] = true end end
   for i, p in ipairs(s.positions) do
     if not only or only[i] then
-      for _, c in ipairs(X.CATS) do p.equipment.uniform[c] = vec{} end
+      for _, it in ipairs(spec.items or {}) do p.equipment.uniform[it.cat] = vec{} end   -- only the named categories
       for _, it in ipairs(spec.items or {}) do
-        p.equipment.uniform[it.cat]:insert('#', {item_type = it.type, subtype = it.subtype, item = -1, assigned = vec{}})
+        p.equipment.uniform[it.cat]:insert('#', {item_type = it.type, subtype = it.subtype, item = -1, assigned = vec{},
+                                                 item_subtype = X.WIDX[it.subtype] or -1})
       end
     end
   end
@@ -94,6 +100,15 @@ function X.item(W, typ, mat)
   local it = {id = W.item_seq, _type = typ, _mat = mat or 'INORGANIC:COPPER'}
   it.getType = function(self) return df.item_type[self._type] end
   W.items_by_id[it.id] = it
+  return it
+end
+
+-- a weapon in world.items.other.WEAPON: token from X.WEAPONS, flags (e.g. {foreign = true})
+function X.weapon(W, token, flags)
+  local it = X.item(W, 'WEAPON')
+  it._sub, it.flags = X.WIDX[token], flags or {}
+  it.getSubtype = function(self) return self._sub end
+  df.global.world.items.other.WEAPON:insert('#', it)
   return it
 end
 
@@ -214,6 +229,12 @@ function X.install(W, opts)
     if u._m.noble then return {{position = {code = u._m.noble}}} end
   end
   dfhack.matinfo = {decode = function(it) return it and {getToken = function() return it._mat end} end}
+  dfhack.items = dfhack.items or {}
+  dfhack.items.getSubtypeDef = function(t, sub)
+    local w = t == df.item_type.WEAPON and X.WEAPONS[(sub or -9) + 1]
+    if not w then return nil end
+    return {id = w[1], skill_melee = df.job_skill[w[2]], skill_ranged = w[3] and df.job_skill[w[3]] or -1}
+  end
   dfhack.military.getSquadName = function(id) local s = W.squads[id]; return s and s.alias or ('Squad ' .. id) end
   for _, u in ipairs(g.world.units.active) do X.decorate(W, u) end
   -- act fakes (the real act.lua implements these with dfhack.military, CONTRACTS §5)
@@ -264,6 +285,20 @@ function X.install(W, opts)
       s.orders:insert('#', {kind = order.kind, pos = order.pos, units = order.units})
     end
     return true, order.kind
+  end)
+  -- squads screen > equip > remove (act.squad_unequip): specs (of `cats`) and assigned items of the positions go
+  W.act_result('squad_unequip', function(sid, positions, cats)
+    local s = W.squads[sid]
+    if not s then return false, 'no fort squad' end
+    local only
+    if positions then only = {}; for _, i in ipairs(positions) do only[i] = true end end
+    for i, p in ipairs(s.positions) do
+      if not only or only[i] then
+        for _, c in ipairs(cats or X.CATS) do p.equipment.uniform[c] = vec{} end
+        if not cats then p.equipment.assigned_items = vec{} end
+      end
+    end
+    return true, 0
   end)
   W.act_result('squad_uniform', function(sid, spec)
     if W.uniform_mode == 'fail' then return false, 'squad_uniform not implemented until spike S2' end
@@ -368,6 +403,7 @@ function X.load(W, wp6, extra, wp5)
     W.load(require('dfllm.' .. n))
   end
   for _, m in ipairs(extra or {}) do W.load(m) end
+  W.state()          -- live L6: the view carries a fake runner's phase before military's first upkeep
   return W
 end
 

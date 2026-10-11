@@ -882,7 +882,7 @@ function M.new(opts)
     return r
   end
   function W.set_census(part, tbl)
-    assert(part == 'u' or part == 'h' or part == 'i', 'k_mock: census part must be u, h or i')
+    assert(part == 'u' or part == 'h' or part == 'i' or part == 'a', 'k_mock: census part must be u, h, i or a')
     K.census[part] = tbl
   end
   function W.set_mode(m) W.mode, W.mode_since = m, now.tick end

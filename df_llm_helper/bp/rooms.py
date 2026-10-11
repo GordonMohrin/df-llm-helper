@@ -19,6 +19,10 @@ MOODABLE = [("wc", "Carpenters"), ("wm", "Masons"), ("wr", "Craftsdwarfs"), ("wj
             ("wf", "MetalsmithsForge"), ("wb", "Bowyers"), ("wk", "Clothiers"), ("we", "Leatherworks"),
             ("wn", "Tanners"), ("wo", "Loom"), ("eg", "GlassFurnace"), ("wt", "Mechanics")]
 MOODABLE_TYPES = [n for _, n in MOODABLE]
+# non-moodable shops a phase may ask for (`workshops` deliverable; live L6: year-1 P0 wants a still and a butcher's
+# shop, fortcore stage 1 builds both; `add` lets an older fort get the missing ones)
+EXTRA = [("wl", "Still"), ("wz", "Kitchen"), ("wu", "Butchers")]
+EXTRA_TYPES = [n for _, n in EXTRA]
 
 COMMON = {"burrow": ("Kern+", None, None)}
 PARAMS = {
@@ -28,7 +32,7 @@ PARAMS = {
     "hospital": {"beds": (4, 1, 10)},
     "temple": {"size": (7, 5, 11), "tier": (2000, 0, 100000)},
     "tavern": {"seats": (12, 4, 40)},
-    "workshops": {"skip": ("", None, None)},
+    "workshops": {"skip": ("", None, None), "add": ("", None, None)},
     "farms": {"plots": (2, 1, 4)},
     "furnaces": {"wood": (1, 0, 2)},
     "office": {"role": ("manager", None, None)},
@@ -170,12 +174,17 @@ def temple(p: dict) -> Plan:
 
 
 def workshops(p: dict) -> Plan:
-    """All 12 moodable workshop types (DESIGN §5.9), minus `skip` (comma-separated df type names)."""
+    """All 12 moodable workshop types (DESIGN §5.9), minus `skip` (comma-separated df type names), plus the
+    non-moodable `add` types (EXTRA_TYPES: Still, Kitchen, Butchers)."""
     skip = {s.strip() for s in p["skip"].split(",") if s.strip()}
     bad = skip - set(MOODABLE_TYPES)
     if bad:
         raise ValueError(f"workshops: unknown skip types {sorted(bad)}; known: {MOODABLE_TYPES}")
-    todo = [(k, n) for k, n in MOODABLE if n not in skip]
+    add = {s.strip() for s in p.get("add", "").split(",") if s.strip()}
+    bad = add - set(EXTRA_TYPES)
+    if bad:
+        raise ValueError(f"workshops: unknown add types {sorted(bad)}; known: {EXTRA_TYPES}")
+    todo = [(k, n) for k, n in MOODABLE if n not in skip] + [(k, n) for k, n in EXTRA if n in add]
     if not todo:
         raise ValueError("workshops: nothing left to build")
     P = Plan("workshops", "infra")

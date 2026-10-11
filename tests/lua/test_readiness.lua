@@ -40,7 +40,7 @@ local function world(opts)
   for k, v in pairs(opts.decisions or {}) do W.K.cfg.decisions[k] = v end
   if opts.plan then W.set_plan(opts.plan) end
   local snap = X.snapshot()
-  local runner = X.runner(nil)
+  local runner = X.runner('P5')            -- live L6: military creates squads only in a known phase
   function runner.emit(K, etype, d) return K.emit(etype, nil, etype, d) end
   W.econ, W.snap, W.runner = X.economy(opts.stock), snap, runner
   X.load(W, {'military', 'readiness'}, {W.econ, snap, runner}, {'sense', 'gate'})

@@ -534,6 +534,90 @@ T.test('squad_uniform [S2, live L2]: uniform specs per position and category, ma
   T.eq((env.api.squad_uniform(424242, spec)), false)
 end)
 
+T.test('squad_unequip (live L6): squad equipment screen remove - specs, assigned items, quiver; weapon only', function()
+  local W = H.world{tag = 'uneq', units = {{id = 5, citizen = true, pos = {1, 1, 1}}, {id = 6, citizen = true, pos = {1, 1, 1}},
+                                           {id = 7, citizen = true, pos = {1, 1, 1}}}}
+  local _, squads = mil_world(W)
+  df.item_type = {ARMOR = 0, HELM = 1, SHIELD = 2, WEAPON = 3, AMMO = 4}
+  df.global.world.raws = {itemdefs = {weapons = kmock.vec{{id = 'ITEM_WEAPON_AXE_BATTLE', subtype = 0}}}}
+  local deleted = 0
+  df.squad_uniform_spec = {new = function() return {indiv_choice = {}, assigned = kmock.vec{},
+                                                     delete = function() deleted = deleted + 1 end} end}
+  local env = mk()
+  env.who_v = 'military'
+  local _, sid = env.api.squad_create('A', {})
+  for _, p in ipairs(squads[sid].positions) do
+    p.equipment.assigned_items, p.equipment.quiver, p.equipment.backpack, p.equipment.flask = kmock.vec{}, -1, -1, -1
+  end
+  T.eq({env.api.squad_uniform(sid, {mode = 'replace', items = {{cat = 'body', type = 'ARMOR'},
+                                                                {cat = 'weapon', type = 'WEAPON', subtype = 'ITEM_WEAPON_AXE_BATTLE'}}})},
+       {true, 10})
+  local p0, p1 = squads[sid].positions[0], squads[sid].positions[1]
+  for _, p in ipairs({p0, p1}) do
+    p.equipment.uniform.body[0].assigned:insert('#', 500)
+    p.equipment.uniform.weapon[0].assigned:insert('#', 501)
+    p.equipment.assigned_items:insert('#', 500); p.equipment.assigned_items:insert('#', 501)
+  end
+  p0.equipment.quiver = 502
+  env.who_v = 'economy'
+  T.eq({env.api.squad_unequip(sid)}, {false, 'not owner'})
+  env.who_v = 'military'
+  T.eq({env.api.squad_unequip(sid, {1}, {'weapon'})}, {true, 1}, 'the battle axe only')
+  T.eq({#p1.equipment.uniform.weapon, #p1.equipment.uniform.body, #p1.equipment.assigned_items,
+        p1.equipment.assigned_items[0]}, {0, 1, 1, 500})
+  T.eq(#p0.equipment.uniform.weapon, 1, 'other positions untouched')
+  T.eq({env.api.squad_unequip(sid, nil, {'tail'})}, {false, 'bad uniform category tail'})
+  T.eq({env.api.squad_unequip(sid)}, {true, 4}, 'body + axe of position 0, the quiver, body of position 1')
+  for _, p in ipairs(squads[sid].positions) do
+    T.eq({#p.equipment.uniform.body, #p.equipment.uniform.weapon, #p.equipment.assigned_items, p.equipment.quiver},
+         {0, 0, 0, -1})
+  end
+  T.eq(squads[sid].ammo.update.weapon, true, 'equipment update')
+  T.eq((env.api.squad_unequip(4242)), false)
+end)
+
+T.test('animal_slaughter (live L6): the animal sheet toggle for tame fort animals, never pets or citizens', function()
+  local W = H.world{tag = 'slau', units = {{id = 5, citizen = true}, {id = 20, tame = true, animal = true},
+                                           {id = 21, tame = true, animal = true}, {id = 22, animal = true},
+                                           {id = 23, tame = true, animal = true, dead = true}}}
+  for _, id in ipairs({5, 20, 21, 22, 23}) do
+    W.unit(id).flags2 = {slaughter = false}
+    W.unit(id).flags3 = {marked_for_gelding = true, available_for_adoption = false}
+  end
+  dfhack.units.isPet = function(u) return u.id == 21 end
+  local env = mk()
+  env.who_v = 'military'
+  T.eq({env.api.animal_slaughter(20, true)}, {false, 'not owner'})
+  env.who_v = 'economy'
+  T.eq({env.api.animal_slaughter(20, true)}, {true, 'marked'})
+  T.eq({W.unit(20).flags2.slaughter, W.unit(20).flags3.marked_for_gelding}, {true, false}, 'one mark at a time')
+  T.eq({env.api.animal_slaughter(20, true)}, {true, 'already'})
+  T.eq({env.api.animal_slaughter(21, true)}, {false, 'a pet'})
+  T.eq({env.api.animal_slaughter(22, true)}, {false, 'not a tame fort animal'})
+  T.eq({env.api.animal_slaughter(5, true)}, {false, 'not a living animal'})
+  T.eq({env.api.animal_slaughter(23, true)}, {false, 'not a living animal'})
+  T.eq({env.api.animal_slaughter(99, true)}, {false, 'no unit 99'})
+  T.eq({env.api.animal_slaughter(20, false)}, {true, 'cleared'})
+  T.eq(W.unit(20).flags2.slaughter, false)
+end)
+
+T.test('zone_remove (live L6): only the zones of that dfllm-* name are deconstructed', function()
+  local W = H.world{tag = 'zrm'}
+  local gone = {}
+  local zones = df.global.world.buildings.other.ACTIVITY_ZONE
+  for i, n in ipairs({'dfllm-gather', 'Kern farm', 'dfllm-gather', ''}) do zones:insert('#', {id = 900 + i, name = n}) end
+  dfhack.buildings = dfhack.buildings or {}
+  dfhack.buildings.deconstruct = function(z) gone[#gone + 1] = z.id; return true end
+  local env = mk()
+  env.who_v = 'economy'
+  T.eq({env.api.zone_remove('dfllm-gather')}, {false, 'not owner'})
+  env.who_v = 'runner'
+  T.eq({env.api.zone_remove('Kern farm')}, {false, 'zone name must be dfllm-*'})
+  T.eq({env.api.zone_remove('dfllm-gather')}, {true, 2})
+  T.eq(gone, {901, 903})
+  T.eq({env.api.zone_remove('dfllm-none')}, {true, 0})
+end)
+
 T.test('link_lever [S3, live L2]: one LinkBuildingToTrigger job with two free reachable mechanisms', function()
   local W = H.world{tag = 'link'}
   local vec = kmock.vec
