@@ -1,11 +1,113 @@
 # df-llm-helper v2: status after the integration check
 
-Date 2026-10-11. Branch `v2`. §0 is the live slot L2 (defense: levers, squads, fortcore 2-3, drill), §0c the
-live slot L1b (labor, moods, P1), §0b the live slot L1 (economy and building), §0a the live slot L0 (first v2
-code in Dwarf Fortress); §1-§9 are the offline integration state they started from (pytest, luahost on
-`hack/lua53.dll`, k_mock).
+Date 2026-10-11. Branch `v2`. §0 is the live slot L3 (soak, 2 game years unattended), §0d the live slot L2
+(defense: levers, squads, fortcore 2-3, drill), §0c the live slot L1b (labor, moods, P1), §0b the live slot L1
+(economy and building), §0a the live slot L0 (first v2 code in Dwarf Fortress); §1-§9 are the offline
+integration state they started from (pytest, luahost on `hack/lua53.dll`, k_mock).
 
-## 0. Live slot L2 (2026-10-11 01:50 - 03:15)
+## 0. Live slot L3: soak (2026-10-11 02:55 - 03:45)
+**Fort at hand-over:** Castlerisen, y291 spring d79, pop 30 (15 adults, 3 soldiers), PEACE, phase **P4**, readiness
+**R1** (audit ok), about 400-480 ticks/s, unpaused, no popup, DF on desktop 1 (runtime `region2/`; DF wrote
+`autosave 1` at the y290 and y291 rollovers).
+- Drink 406 days, food 122 days, stress 10 %, nobody thirsty or hungry; idle 41-75 % (logs 9, boulders 8: the y290
+  bedrooms and an 8-coffin tombs project wait for furniture).
+- Plan y291 applied (no new rooms, target P5, beauty none). `follow` and my sampler ran in this session's
+  background and stop with it; live.lock released.
+
+**Soak: y289 spring d9 → y291 spring d16 (2 game years + 7 days) in 42 min real time**: 817,404 ticks in 2,532 s
+(323 game ticks per real second on average, including 7 kernel reloads for fixes, popups and the false BREACH).
+I acted only on class-A lines (year reviews y289, y290 and y291 through `plan propose/check/apply`;
+PROJECT_BLOCKED, BREACH, DECISION_NEEDED berserk and thirst) and on product bugs. For diagnosis I read the game
+read-only through DFHack (hunger timers, manager orders, unbuilt buildings, tomb zones, death incidents).
+
+**Deaths: 6 citizens in L3, five of them children.** Causes from the death incidents:
+1. Momuz Cagithuzol (child 7, unit 19972), y289 spring d17: **thirst**. He was stark raving mad since his Fey
+   mood failed in L2 (pending at the L2 hand-over).
+2. Unib Eralkütük (child 3, 20048), y289 summer d21: **thirst**. Her Fey mood (y289 spring d7) failed at d49;
+   care saw no missing material (no MOOD_NEED).
+3. Sodel Stagshilfikod (child 7, 19946), y289 autumn ~d69: **struck down by the militia commander** after he went
+   berserk; his Secretive mood (y289 summer d24) failed at d69. Nothing recorded the death (berserk dwarves leave
+   the own group), his corpse was not buried, and **his ghost held the fort in BREACH for 40 days** (fix 4).
+4. Libash Rakustidos (recruit 46, 19851), y289 autumn d70: **bled to death** in the same episode (no killer
+   recorded: the berserk child or his ghost).
+5. Nil Zursulsazir (child 1, 20055), y290 spring d14: **thirst** after a failed Possessed mood (y289 winter
+   d31-77). She is now a ghost of the fort (own group, not hostile) and waits for a coffin.
+6. Nomal Fikodtenshed (toddler 1.4, 20067), y290 summer d49: **thirst** with 450+ drink days and no mood. Most
+   likely hurt in the berserk episode and bedridden; the fort has no well water for patients (not confirmed).
+- Moods in L3: 4 started, **1 succeeded** (Secretive, unit 19853, y290 spring), 3 failed. Three of the four moody
+  dwarves were children (1, 3 and 7 years). Every failed mood ended in a death.
+
+**Found live and fixed (all tested; 5 commits)**
+1. **Rock furniture never came.** quickfort `orders` orders doors, cabinets, coffers, coffins, tables and chairs in
+   rock. With 8 boulders, 43 such buildings had waited up to two years (bedrooms, furnaces, tombs, temple, tavern)
+   while 82 logs lay around. New `act.order_material` (work orders screen: cancel and re-enter in wood) and economy
+   `wood_orders`: below 20 boulders, open one-time orders of these jobs turn wood while the logs beyond 30, minus
+   the wood already ordered, cover them. **Live: 21 orders converted; bedrooms, furnaces (stalled since y287), two
+   tombs, the temple and the tavern were finished, and the phase went P3 → P4 at y289 autumn d22.** Logs 82 → 9.
+2. **The hunger alarm flapped the brake** (47 brake switches before L3; 2-3 "hungry" citizens with 150 food days).
+   50,000 is DF's plain "hungry"; the alarm is at 65,000 now (10,000 before "starving"). No hunger brake since.
+3. **A berserk popup halted the fort** ("Sodel Stagshilfikod, Dwarven Child has gone berserk!"). The arbiter now
+   dismisses it and wakes the LLM (DECISION_NEEDED `berserk`, class A); while halted, nothing in v2 reacted.
+4. **A berserker's ghost counted as a hostile inside Kern+.** ALERT → BREACH in one step, civ alert on Tiefe+ for
+   40 days, idle 91 %, **21 citizens thirsty** in the refuge, GATE_FAIL x3 (`no_worker`: no civilian may leave
+   Tiefe+ to pull a lever). sense now treats every ghost of the fort's civilization as own (`civ_id`); the FSM went
+   RECOVERY → PEACE at once. care counts a berserker as a fort member through its histfig link (MEMBER or
+   FORMER_MEMBER) to the site government, so its death is recorded, its corpse buried and its ghost counted.
+   The ghost was put to rest.
+5. **Duplicate tomb zones again (L2 item 5).** DFHack's `burial` zones every coffin with empty `relations`, and a
+   coffin built after its zone has none; a second tombs project zoned over the same coffins as well. DF gave the
+   dead those "free" zones on occupied coffins, and five citizens lay unburied. The runner's zone stage now leaves
+   out one-owner zone cells (tomb, bedroom, office) whose tiles already lie in a zone of that type, and care runs
+   `burial -c` only when no zoned coffin lacks its relation. **By hand (UI-equivalent, zone sheet "remove"):** I
+   removed the 5 second zones; 19946, 19851 and 20067 were buried within a season.
+6. **Mood stock:** economy keeps 1 hunter in PEACE from P1 while bone, shell or leather is below the mood stock
+   (the fort has 0 of each). Live: a hunter joined; still 0 bone and leather at hand-over (no spare crossbow).
+7. **Trade:** a 'time' failure now logs the phase, time left, ticks at the depot, trader present, goods value and
+   broker toggles (the 4th caravan failed with 'time' in y289 autumn, and kern.log had no trace).
+
+**KPIs measured (L3, DESIGN §14)**
+| KPI | Value | Threshold |
+|---|---|---|
+| ticks/s PEACE | median 437 over 75 perf rows; **449 without** the 19 rows paused by popups or my 7 reloads (p10 388); doctor's last 10 min: 459 | ≥ 450 |
+| ticks/s BREACH / RECOVERY | 352 (4 rows) / 208 (1 row), a false breach from the ghost; no real raid or siege and no drill in L3 | ≥ 100 |
+| kernel ms/s | median 18, p90 29 (PEACE p90 23; 6 of 75 PEACE rows over 25), max 41 (BREACH and reload boots); `repeat` 20, `kern` 9, sense 3.3 | ≤ 25 |
+| frame gaps > 3 s | 3, all yearly autosaves (y289, y290, y291 rollovers) | 0 outside autosaves |
+| autosave freeze | 6.3 s each (6,297 / 6,297 / 6,313 ms) | ≤ 15 s |
+| dfhack-run spawns/h by the product | **0** (follow, status, brief, cmd and plan only read and write files); mine: about 25 in 50 min (7 reloads, read-only diagnostics, the tomb repair) | 0 |
+| LLM tokens | this engineer session: about 0.47 M in 47 min (≈ 0.6 M/h, including the code fixes) | ≤ 3 M/h |
+| wakes | 2 wake lines in 50 min; the hourly limit (6 L2 wakes) held the BREACH line back 25 min | ≤ 6/h |
+| idle % | median 33 (0-100); 91 in the BREACH, 75 at hand-over (no logs, no boulders) | — |
+| starving postings | 504 all slot (stale Gather Plants postings from L1) | 0 |
+| stress (category ≤ 1) | median 9 % (0-13 %) | ≤ 10 % |
+| naked | 7-9 of 29-33 citizens (~24 %); cloth 4 | ≤ 5 % |
+| ghosts | 1 most of the slot (19946 until buried, then 20055) | 0 |
+| corpses older than 3 days | 2-5 | 0 |
+| drink / food days | drink 297-927 (median 574), food 121-390 (median 220) | ≥ 170 / ≥ 60 |
+| deaths | **6** (4 thirst, 3 of them after failed moods; 1 struck down while berserk; 1 bled) | 0 from tooling |
+| moods | 4 started, 1 succeeded, 3 failed (children aged 1, 3 and 7) | 0 failed |
+| readiness | R1 all slot (audit ok, traps 3); R2 fails on drill, soldiers < 8, cv < 12, traps < 30 | — |
+| pop / cap | 30 → 30 (29-33, 15 adults), cap 55 (gate 55) | ≤ cap + 3 |
+| buildings completed | 6 projects: bedrooms x12, furnaces, tombs x2, temple, tavern; phase P3 → P4 | — |
+
+**Open for L4 / Gordon (most urgent first)**
+1. **Moods still kill.** 3 of 4 failed in L3 (10 of 13 since L1), and every failed mood ends in a death (thirst or
+   berserk). care sees only the claimed workshop's classes; the fort has 0 bone, shell, leather and bars and 4
+   cloth. Children (1-7 years) took 3 of the 4 moods. Gordon may want to allow reading the mood's requirement list.
+2. **BREACH cannot pull levers.** With the civ alert on Tiefe+, no civilian may walk to the levers in Kern+
+   (GATE_FAIL `no_worker` for O1, B1 and B2). In a real breach B2, the core seal, would never rise. The S3 fallback
+   is needed (a lever-puller burrow in the alert list, or levers inside Tiefe+).
+3. **No water for patients.** The hospital and refuge wells are dry (`water NO`); a bedridden dwarf dies of thirst
+   (L2 death 5, probably L3 death 6). The brook is about 90 tiles away.
+4. **Wood.** The wood fallback used 70 logs; 9 are left and 2 woodcutters work. An 8-coffin tombs project (the
+   ghost 20055 and two unburied children wait for it) and 6 bedrooms are stalled on furniture; idle 75 %.
+5. **Trade.** A 4th 'time' failure (y289 autumn). P4 needs one traded visit, so the phases stay at P4. The next
+   visit's kern.log line shows where it stands.
+6. **Wake gate.** A burst of class-A events (BREACH, GATE_FAIL, thirst 21) waited 25 min behind the hourly limit,
+   which the L2 session's wakes had used up. Safety lines may deserve their own slot.
+7. Naked 24 % (cloth 4); 504 stale starving postings; PROJECT_BLOCKED `stalled` for furniture waits (16 queued);
+   stale tomb assignments on z117 (zones assigned to dwarves buried in other coffins).
+
+## 0d. Live slot L2 (2026-10-11 01:50 - 03:15)
 **Fort at hand-over:** Castlerisen, y288 autumn d69, pop 29 (11 adults, 18 children and babies), PEACE, phase
 **P3**, readiness **R1** (audit ok), about 450-480 ticks/s, unpaused, DF on desktop 1.
 - Runtime folder `dfllm-runtime/region2/`; DF wrote `autosave 1` (y287) and `autosave 2` (y288) during the slot.
@@ -612,12 +714,13 @@ python -m pytest -q -o addopts="" tests/test_schema.py tests/test_luahost.py tes
   tests/test_embark.py tests/test_kern_files.py tests/test_runner.py tests/test_siege_files.py tests/test_trade_files.py \
   tests/test_wp6_files.py tests/test_wp8_files.py tests/test_snapshot_files.py tests/test_integration_v2.py
   -> 1087 passed, 0 failed (48 s; after L0: 1087 passed, 61 s; after L1: 1145 passed, 61 s;
-  after L1b: 1149 passed, 63 s; after L2: 1151 passed, 63 s)
+  after L1b: 1149 passed, 63 s; after L2: 1151 passed, 63 s; after L3: 1151 passed, 64 s)
 for f in tests/lua/test_*.lua: python tools/luahost.py --path tests/lua $f   -> 26 suites, 426 passed, 0 failed
                                                                                (after L0: 430 passed, 0 failed;
                                                                                 after L1: 442 passed, 0 failed;
                                                                                 after L1b: 455 passed, 0 failed;
-                                                                                after L2: 463 passed, 0 failed)
+                                                                                after L2: 463 passed, 0 failed;
+                                                                                after L3: 470 passed, 0 failed)
 python -m df_llm_helper lint lua/dfllm        -> 0 finding(s)
 python -m df_llm_helper.lint --config         -> config ok
 ```
