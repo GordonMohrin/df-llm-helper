@@ -151,11 +151,22 @@ local function animal(hs, u, U)
     war = ((U.isWar ~= nil and U.isWar(u)) or (U.isHunter ~= nil and U.isHunter(u))) == true}
 end
 
+-- live L6 (reclaimed Castlerisen): cavern giant bats killed 5 of 7 dwarves in a few days with threat at 0;
+-- isDanger is false for them. A visible wild LARGE_PREDATOR (caste raw flag, shown in the creature
+-- description) is a hostile candidate too; tame ones are dropped below like every own unit.
+local function predator(u)
+  local ok, yes = pcall(function()
+    local r = df.creature_raw.find(u.race)
+    return r ~= nil and r.caste[u.caste].flags.LARGE_PREDATOR == true
+  end)
+  return ok and yes == true
+end
+
 -- per unit: 2 predicate calls for ordinary units; the full check only for hostile candidates
 local function consider(hs, u)
   local U = dfhack.units
   local undead = U.isUndead(u)
-  if not (undead or U.isDanger(u)) then
+  if not (undead or U.isDanger(u) or (not U.isTame(u) and predator(u))) then
     if hs.count and U.isVisible(u) and not U.isHidden(u) then
       hs.units = hs.units + 1
       animal(hs, u, U)
