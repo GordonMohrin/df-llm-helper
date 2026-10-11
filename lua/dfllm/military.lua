@@ -33,7 +33,13 @@ M.STATION_R = 3             -- a soldier within 3 tiles (same z) of the station 
 M.RETRY, M.RETRY_MAX = 1200, 33600
 M.NOTIFY_AFTER = 2          -- failed squad creations before DECISION_NEEDED (once per boot)
 -- routine names (CONTRACTS §5 squad_routine resolves by name); first exact, then substring
-M.ROUTINES = {train = {'constant training', 'constant'}, ready = {'ready', 'ready'}}
+M.ROUTINES = {train = {'constant training', 'constant'}, ready = {'ready', 'ready'}, off = {'off duty', 'off duty'}}
+-- Gordon 11.10.2026: elite squads train nine months and are free for three; militia squads (citizens who keep
+-- their jobs) train only those three months. Months are 0-based (28 days = 33600 ticks); the free months of
+-- the elite are the training months of the militia, so somebody always trains. Only in the TRAIN posture
+-- in PEACE; every alert posture overrides this.
+M.FREE_MONTHS = {[9] = true, [10] = true, [11] = true}
+M.MILITIA = {B = true}                       -- squad keys that are militia; the others are elite
 M.ROUTINE_FALLBACK = {ready = 'train'}   -- no Ready routine: keep training (never Off duty)
 
 -- uniform specs for act.squad_uniform [S2: act maps them to squad_uniform_spec / an entity template]
@@ -862,6 +868,15 @@ local function posp(p)
   return geom.pos(x, y, z)
 end
 
+-- is this squad on its free months right now? (see M.FREE_MONTHS)
+local function off_season(K, k)
+  if st.posture ~= 'TRAIN' or K.mode() ~= 'PEACE' then return false end
+  local month = (try(function() return df.global.cur_year_tick end) or 0) // 33600
+  local free = M.FREE_MONTHS[month] == true
+  if M.MILITIA[k] then return not free end   -- militia: on duty only in the elite's free months
+  return free
+end
+
 -- bring one squad to the posture; force = re-issue even if it looks applied. Returns ok.
 local function apply_squad(K, k, force)
   local e = st.sq[k]
@@ -871,6 +886,8 @@ local function apply_squad(K, k, force)
   local stations = type(man.stations) == 'table' and man.stations or {}
   local which, pos = station_of(st.posture, e.kind, k == first_melee_key(), stations)
   pos = posp(pos)
+  local off = not pos and off_season(K, k)
+  if off then which = 'off' end
   local ok = true
   local idx, name = resolve_routine(which)
   if not idx and M.ROUTINE_FALLBACK[which] then idx, name = resolve_routine(M.ROUTINE_FALLBACK[which]) end
@@ -880,13 +897,13 @@ local function apply_squad(K, k, force)
   elseif force or routine_idx(s) ~= idx then
     ok = K.act.squad_routine(s.id, name) and ok
   end
-  local sig = pos and string.format('station:%d,%d,%d', pos.x, pos.y, pos.z) or 'train'
+  local sig = pos and string.format('station:%d,%d,%d', pos.x, pos.y, pos.z) or (off and 'off' or 'train')
   local cur = rt.order[k]
   local held = cur and (cur:sub(1, 5) == 'kill:' or cur:sub(1, 7) == 'sortie:') and order_count(s) > 0
   if held and not force then return ok end           -- a kill order or an approved sortie runs
   local drift = (pos and order_count(s) == 0) or (not pos and order_count(s) > 0)
   if force or cur ~= sig or drift then
-    local r = K.act.squad_order(s.id, pos and {kind = 'station', pos = pos} or {kind = 'train'})
+    local r = K.act.squad_order(s.id, pos and {kind = 'station', pos = pos} or {kind = off and 'clear' or 'train'})
     if r then rt.order[k] = sig else ok = false end
   end
   rt.station[k] = pos

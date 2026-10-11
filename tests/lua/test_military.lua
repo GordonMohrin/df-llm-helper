@@ -132,13 +132,14 @@ T.test('setup: squads A/B/C created with a leader, uniforms, Constant training b
   T.eq(unis[1].args[2].items[6], {cat = 'shield', type = 'SHIELD', mat = 'any'}, 'no armor in stock: any material')
   T.eq(unis[3].args[2].items[6].subtype, 'ITEM_WEAPON_CROSSBOW')
   T.ok(unis[3].args[2].quiver and unis[3].args[2].ammo.subtype == 'ITEM_AMMO_BOLTS')
-  T.eq(names(X.acts(W, 'squad_routine'), 2), {'Constant training', 'Constant training', 'Constant training'})
+  -- month 0 of the fake clock: A and C (elite) train; B (militia) is off duty, which a new squad already is
+  T.eq(names(X.acts(W, 'squad_routine'), 2), {'Constant training', 'Constant training'})
   T.eq(X.members(X.squad_of(W, 'A')), 3)
   T.eq(X.members(X.squad_of(W, 'B')), 3)
   T.eq(X.members(X.squad_of(W, 'C')), 2)
   for _, a in ipairs(W.acts) do
     T.ok(a.fn:match('^squad_') or a.fn == 'popcap' or a.fn == 'pull', 'unexpected act ' .. a.fn)
-    if a.fn == 'squad_routine' then T.ok(a.args[2] ~= 'Off duty', 'never Off duty') end
+    if a.fn == 'squad_routine' then T.ok(a.args[2] ~= 'Off duty' or a.args[1] == X.squad_of(W, 'B').id, 'only the militia is off') end
   end
   T.eq(kpi(W).soldiers, 8)
   T.eq(kpi(W).squads, 3)
@@ -319,6 +320,28 @@ T.test('posture is idempotent; upkeep repairs drift (lost order, routine changed
   W.run(700, {skip = 9})                      -- upkeep every 600 outside PEACE
   T.eq(A.cur_routine_idx, 3)
   T.eq(orders(A), 'station@51,44,10')
+end)
+
+T.test('seasons (Gordon 11.10.): the elite is free in months 9-11 and the militia trains only then', function()
+  df.global.cur_year_tick = 10 * 33600
+  local W = setup(50)
+  df.global.cur_year_tick = 10 * 33600
+  local M = mil()
+  M.posture(W.K, 'TRAIN', true)
+  local last = {}
+  for _, a in ipairs(X.acts(W, 'squad_routine')) do last[a.args[1]] = a.args[2] end
+  T.eq(last[X.squad_of(W, 'A').id], 'Off duty', 'elite A free in month 10')
+  T.eq(last[X.squad_of(W, 'B').id], 'Constant training', 'militia B trains in month 10')
+  T.eq(last[X.squad_of(W, 'C').id], 'Off duty', 'elite C free in month 10')
+  df.global.cur_year_tick = 2 * 33600
+  M.posture(W.K, 'TRAIN', true)
+  last = {}
+  for _, a in ipairs(X.acts(W, 'squad_routine')) do last[a.args[1]] = a.args[2] end
+  T.eq(last[X.squad_of(W, 'A').id], 'Constant training', 'elite A trains again in month 2')
+  M.posture(W.K, 'READY_STATION', true)
+  last = {}
+  for _, a in ipairs(X.acts(W, 'squad_routine')) do last[a.args[1]] = a.args[2] end
+  T.ok(last[X.squad_of(W, 'B').id] ~= 'Off duty', 'an alert posture overrides the seasons')
 end)
 
 T.test('no Ready routine: READY_STATION keeps Constant training (never Off duty)', function()

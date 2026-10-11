@@ -103,7 +103,8 @@ def test_commands_log_owners_and_orders(run):
     assert {fn for fn, _ in mil} <= {"squad_add", "squad_routine", "squad_order", "run"}, "adopted: no create"
     assert len([1 for fn, _ in mil if fn == "squad_add"]) == 5, "3 leaders from the UI + 5 recruits = 8"
     routines = {json.loads(a)[1] for fn, a in mil if fn == "squad_routine"}
-    assert routines == {"Constant training", "Ready"}, "never Off duty"
+    # Gordon 11.10.: off duty only in PEACE for the seasons (elite free months 9-11, militia off the rest of the year)
+    assert routines <= {"Constant training", "Ready", "Off duty"} and {"Constant training", "Ready"} <= routines
     kills = [json.loads(a) for fn, a in mil if fn == "squad_order" and '"kill"' in a]
     assert kills and all(k[1]["units"] == [201, 202, 203, 204, 205, 206] for k in kills)
     assert {k[0] for k in kills} == {303}, "kill orders only to the crossbow squad C"
