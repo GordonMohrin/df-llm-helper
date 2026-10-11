@@ -357,7 +357,8 @@ local function look_unit(K, c, r, p, u)
   end
   if not dfhack.units.isBaby(u) and not has_shirt(u) then a.naked = a.naked + 1 end
   local kind = df.mood_type[u.mood]
-  if kind and M.STRANGE[kind] then mood_seen(K, c, r, p, u, kind) end
+  -- live L6: a dead moody citizen kept u.mood and woke the LLM five times after his death
+  if kind and M.STRANGE[kind] and not dfhack.units.isDead(u) then mood_seen(K, c, r, p, u, kind) end
 end
 
 local function phase_units(K, c, r, p)
