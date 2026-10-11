@@ -38,7 +38,7 @@ end
 local housed = 0
 for id in pairs(adult_ids) do if bed_owner[id] then housed = housed + 1 end end
 put('housed', housed); put('tombs', tombs); put('tombs_free', tombs_free)
-for _, n in ipairs({'Temple', 'Tavern', 'Hospital', 'Dining', 'Office', 'Library'}) do put('zone_' .. n, byname[n] or 0) end
+for _, n in ipairs({'Temple', 'Tavern', 'Hospital', 'Dining', 'Office', 'Library', 'Festhalle', 'Kaserne'}) do put('zone_' .. n, byname[n] or 0) end
 
 -- nobles: office / bedroom / dining of the people whose position asks for it
 local function noble(role, tag)
