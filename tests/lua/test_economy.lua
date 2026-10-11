@@ -273,7 +273,7 @@ T.test('staged imports: migrants, mason, smelter, fuel, forge; each once, then s
   F.building(W, 'FURNACE_ANY', {type = df.furnace_type.Smelter})
   days(W, 1)
   T.eq(count_acts(W, 'orders_import', 'library/rockstock'), 0, 'no free stone yet')
-  for _ = 1, 10 do F.item(W, 'BOULDER', {mat_type = 0, mat_index = 1}) end
+  for _ = 1, 60 do F.item(W, 'BOULDER', {mat_type = 0, mat_index = 1}) end
   days(W, 1)
   T.eq(count_acts(W, 'orders_import', 'library/rockstock'), 1)
   T.eq(count_acts(W, 'orders_import', 'library/furnace'), 1)
