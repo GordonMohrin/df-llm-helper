@@ -77,6 +77,13 @@ for _, b in ipairs(df.global.world.buildings.other.FARM_PLOT) do
 end
 put('farm_plots', plots); put('farm_cropped', cropped)
 
+-- body armor in the fort (own, not a trader's): an emergency kit for every dwarf needs one each
+local armor = 0
+for _, it in ipairs(df.global.world.items.other.ARMOR) do
+  if not it.flags.trader and not it.flags.foreign and not it.flags.garbage_collect then armor = armor + 1 end
+end
+put('armor_pieces', armor)
+
 -- wounded
 local hurt = 0
 for _, u in ipairs(cit) do                      -- needs care now (scars of old wounds do not count)
