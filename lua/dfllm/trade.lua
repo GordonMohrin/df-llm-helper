@@ -153,6 +153,7 @@ end
 function L.match(tk, info)
   if not tk.types[info.type] then return false end
   if tk.word and not L.has_word(info.desc, tk.word) then return false end
+  if tk.types.WEAPON and L.has_word(info.desc, 'training') then return false end   -- wooden training axes cannot chop
   if tk.sub then
     if mat_part(info.mat, tk.sub) then return true end
     if tk.mat then return false end
