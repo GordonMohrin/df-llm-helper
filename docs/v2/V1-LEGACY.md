@@ -23,9 +23,8 @@ git worktree add ../df-llm-helper-v1 v1-final       # the whole v1 tree beside t
 | `docs/MANUAL.md`, `INTEGRATION.md`, `OVERVIEW.md`, `SPEC.md`, `AGENT-PROMPT.md`, `PLANNERS.md`, `LINT-FINDINGS.md`, `docs/manual-v3`, `docs/specs-v2`, `docs/specs-v3`, `COMPANION.md` | v1 documentation |
 | `config.yaml.example`, `tools/luacheck_min.py` | v1 config template and the v1 Lua structure check |
 
-**Still on `v2`:** the v1 embark scratch copies in `tools/embark/` (`clickonly.lua`, `clickpx2.lua`, `findclick*.lua`,
-`hold.lua`, `probe.sh`, `scan2.sh`, `screen.lua`, identical to `v1-final`). Nothing in v2 uses them; removing them is
-open (`tools/embark/README.md` §8).
+The v1 embark scratch copies in `tools/embark/` (`clickonly.lua`, `clickpx2.lua`, `findclick*.lua`, `hold.lua`,
+`probe.sh`, `scan2.sh`, `screen.lua`) are removed as well (kept in `v1-final`).
 
 `BUG-nnn` and `FEATURE-nnn` cited in v2 docs and code comments refer to `Bugs/` and `Features/` in `v1-final`,
 for example `git show v1-final:Bugs/BUG-427-lever-list-bridge-state-always-raised.md`.

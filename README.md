@@ -7,20 +7,17 @@ An in-game kernel for Dwarf Fortress + DFHack that defends and supplies the fort
 You need Dwarf Fortress 53.x from Steam with DFHack, Git, Python 3.11+ and an LLM agent that runs shell commands on the same Windows PC. Close DF, start the agent (best inside the cloned folder, so the fair-play hook in `.claude/settings.json` applies) and paste:
 
 ```text
-Play Dwarf Fortress for me with df-llm-helper v2. DF 53.x (Steam) and DFHack are installed on this PC.
-1. git clone -b v2 https://github.com/GordonMohrin/df-llm-helper (skip if you already run inside it); work there,
-   read RULES.md and obey it. Tell me if this session did not start in that folder: the fair-play hook runs only there.
-2. Find my DF folder (it has hack/dfhack-run.exe, called dfhack-run below); set DFLLM_DF to it in every shell.
-3. DF closed: python tools/migrate_v2.py (dry run), then python tools/migrate_v2.py --apply; python -m df_llm_helper lint.
-4. Ask me to start DF through DFHack in Steam; then dfhack-run dfllm selftest --mock must report 0 fail.
-5. Ask me which fort to play: I load one or embark (tools/embark/README.md can help). In it: dfhack-run dfllm adopt,
-   then dfhack-run dfllm selftest full. Never adopt a fort I did not give you.
-6. Run python -m df_llm_helper follow as your event watcher (Claude Code: Monitor), keep it running; ask me to unpause.
-7. Make the year plan now (RULES.md §4-§5: plan propose, check, apply) and again at every YEAR_REVIEW wake line.
-8. React to each wake line as RULES.md §5 and §7 say. Fair play only; never pause or unpause; report to me briefly.
+Play Dwarf Fortress for me with df-llm-helper. DF 53.x (Steam) + DFHack are installed on this Windows PC.
+1. git clone https://github.com/GordonMohrin/df-llm-helper, work in that folder, read RULES.md and follow it.
+2. Find my DF folder (it has hack/dfhack-run.exe) and set DFLLM_DF to it. With DF closed run
+   python tools/migrate_v2.py (dry run), then python tools/migrate_v2.py --apply.
+3. Ask me to start DF through DFHack and to load or embark a fort. In it run dfllm adopt, then dfllm selftest full
+   (via dfhack-run).
+4. Keep python -m df_llm_helper follow running as your watcher. Make the year plan (plan propose, check, apply)
+   and react to its wake lines as RULES.md says. Fair play only; report briefly; ask me only for real decisions.
 ```
 
-Step-by-step notes and troubleshooting: [docs/v2/QUICKSTART.md](docs/v2/QUICKSTART.md). v2 lives on branch `v2` until it merges to `main`.
+Step-by-step notes and troubleshooting: [docs/v2/QUICKSTART.md](docs/v2/QUICKSTART.md).
 
 ## What it does
 
@@ -79,7 +76,7 @@ Sources: `docs/v2/ASIS-ANALYSIS.md` (v1) and the KPI tables in `docs/v2/STATUS.m
 
 ## Manual install
 
-1. `git clone -b v2 https://github.com/GordonMohrin/df-llm-helper && cd df-llm-helper`
+1. `git clone https://github.com/GordonMohrin/df-llm-helper && cd df-llm-helper`
 2. Set `DFLLM_DF` to your DF folder (the one with `Dwarf Fortress.exe` and `hack/dfhack-run.exe`). Without it the tools fall back to the author's Steam path. `python -m df_llm_helper` and `tools/migrate_v2.py` also take `--df <folder>` (for `df_llm_helper` before the command name: `python -m df_llm_helper --df <folder> status`); `tools/embark/embark.py` and `tools/luahost.py` read only `DFLLM_DF`.
 3. Close DF, then run `python tools/migrate_v2.py` (dry run: prints every step) and `python tools/migrate_v2.py --apply`:
    - `dfhack-config/script-paths.txt` gets `+<clone>\lua` (DF reads it only at startup);

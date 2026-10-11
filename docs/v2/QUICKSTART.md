@@ -9,24 +9,21 @@ what to do when a step fails. Background: `README.md`; the agent's rules: `RULES
 - Git, Python 3.11+ (standard library only), Git Bash for the hook.
 - An LLM agent that runs shell commands on the same PC. Built for Claude Code; any agent works that can keep
   one process (`follow`) running and read its output lines.
-- Best: clone first (`git clone -b v2 https://github.com/GordonMohrin/df-llm-helper`) and start Claude Code
+- Best: clone first (`git clone https://github.com/GordonMohrin/df-llm-helper`) and start Claude Code
   inside that folder. Only then does its fair-play hook (`.claude/settings.json`) check every shell command.
 
 ## The prompt
 Close DF, then paste this into the agent:
 
 ```text
-Play Dwarf Fortress for me with df-llm-helper v2. DF 53.x (Steam) and DFHack are installed on this PC.
-1. git clone -b v2 https://github.com/GordonMohrin/df-llm-helper (skip if you already run inside it); work there,
-   read RULES.md and obey it. Tell me if this session did not start in that folder: the fair-play hook runs only there.
-2. Find my DF folder (it has hack/dfhack-run.exe, called dfhack-run below); set DFLLM_DF to it in every shell.
-3. DF closed: python tools/migrate_v2.py (dry run), then python tools/migrate_v2.py --apply; python -m df_llm_helper lint.
-4. Ask me to start DF through DFHack in Steam; then dfhack-run dfllm selftest --mock must report 0 fail.
-5. Ask me which fort to play: I load one or embark (tools/embark/README.md can help). In it: dfhack-run dfllm adopt,
-   then dfhack-run dfllm selftest full. Never adopt a fort I did not give you.
-6. Run python -m df_llm_helper follow as your event watcher (Claude Code: Monitor), keep it running; ask me to unpause.
-7. Make the year plan now (RULES.md §4-§5: plan propose, check, apply) and again at every YEAR_REVIEW wake line.
-8. React to each wake line as RULES.md §5 and §7 say. Fair play only; never pause or unpause; report to me briefly.
+Play Dwarf Fortress for me with df-llm-helper. DF 53.x (Steam) + DFHack are installed on this Windows PC.
+1. git clone https://github.com/GordonMohrin/df-llm-helper, work in that folder, read RULES.md and follow it.
+2. Find my DF folder (it has hack/dfhack-run.exe) and set DFLLM_DF to it. With DF closed run
+   python tools/migrate_v2.py (dry run), then python tools/migrate_v2.py --apply.
+3. Ask me to start DF through DFHack and to load or embark a fort. In it run dfllm adopt, then dfllm selftest full
+   (via dfhack-run).
+4. Keep python -m df_llm_helper follow running as your watcher. Make the year plan (plan propose, check, apply)
+   and react to its wake lines as RULES.md says. Fair play only; report briefly; ask me only for real decisions.
 ```
 
 ## What each step should print
@@ -35,15 +32,15 @@ Play Dwarf Fortress for me with df-llm-helper v2. DF 53.x (Steam) and DFHack are
 | Step | Command | Good result |
 |---|---|---|
 | 2 | `ls "<DF>/hack/dfhack-run.exe"` | the file exists |
-| 3 | `python tools/migrate_v2.py` | a numbered step list; `script-paths` and `onmapload-init` are `todo` on a fresh install, the rest `done` or `n/a` |
-| 3 | `python tools/migrate_v2.py --apply` | `-> ok` for both; `summary: ... applied` |
-| 3 | `python -m df_llm_helper lint` | `0 finding(s)` |
-| 4 | `dfhack-run dfllm selftest --mock` | `dfllm selftest: 1 pass, 0 fail` |
-| 5 | `dfhack-run dfllm adopt` | `dfllm: ...` with no error; then `dfhack-run dfllm status` lists 17 modules, none `DISABLED` |
-| 5 | `dfhack-run dfllm selftest full` | `0 fail` |
-| 6 | `python -m df_llm_helper status` | `<save> y<year> <season> d<day> PEACE ... P0 ...` and a `kern ... ms/s` line |
-| 6 | `python -m df_llm_helper follow` | nothing for a while: it prints only class-A events, at most 6 lines per hour, e.g. `WAKE y281 spr d12 PEACE \| PLAN_EXHAUSTED: ... \| next: ...` |
-| 7 | `python -m df_llm_helper plan propose y1.json`, edit, `plan check y1.json`, `plan apply y1.json` | `check`: `plan OK: ...`; `apply`: `plan.json y<year> + <n> bp ...; ok <id> plan.reload: ...` (the kernel's reply) |
+| 2 | `python tools/migrate_v2.py` | a numbered step list; `script-paths` and `onmapload-init` are `todo` on a fresh install, the rest `done` or `n/a` |
+| 2 | `python tools/migrate_v2.py --apply` | `-> ok` for both; `summary: ... applied` |
+| 2 (optional) | `python -m df_llm_helper lint` | `0 finding(s)` |
+| 3 (optional) | `dfhack-run dfllm selftest --mock` | `dfllm selftest: 1 pass, 0 fail` |
+| 3 | `dfhack-run dfllm adopt` | `dfllm: ...` with no error; then `dfhack-run dfllm status` lists 17 modules, none `DISABLED` |
+| 3 | `dfhack-run dfllm selftest full` | `0 fail` |
+| 4 | `python -m df_llm_helper status` | `<save> y<year> <season> d<day> PEACE ... P0 ...` and a `kern ... ms/s` line |
+| 4 | `python -m df_llm_helper follow` | nothing for a while: it prints only class-A events, at most 6 lines per hour, e.g. `WAKE y281 spr d12 PEACE \| PLAN_EXHAUSTED: ... \| next: ...` |
+| 4 | `python -m df_llm_helper plan propose y1.json`, edit, `plan check y1.json`, `plan apply y1.json` | `check`: `plan OK: ...`; `apply`: `plan.json y<year> + <n> bp ...; ok <id> plan.reload: ...` (the kernel's reply) |
 
 Keep plan drafts outside `<DF>/dfllm-runtime/`: the hook refuses file edits there (only `dfllm` commands and the
 kernel write that folder). Without a file argument, `plan propose` writes `<save>/plan.draft.json`, which can be

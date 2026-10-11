@@ -215,7 +215,4 @@ Never write skills, picks or points directly.
 | `scan2.sh`, `scan3.sh` | `embark.py scan` / spec mode `scan` |
 | `kandidaten_eisen.py` (world-data pickles) | dropped: not vanilla-screen information |
 | Run 6 direct skill writes | dropped: clicks or the fallbacks in §6 |
-The v1 copies still in this folder (`clickonly.lua`, `clickpx2.lua`, `findclick*.lua`, `hold.lua`,
-`probe.sh`, `scan2.sh`, `screen.lua`) are superseded: nothing in v2 loads them and the steps above
-never need them. Do not run them: they call `dfhack-run lua -f` outside `embark.py`, which RULES §1
-rule 2 does not allow. Identical copies are in tag `v1-final`; removing them here is still open.
+The v1 scratch copies listed above were removed from this folder; they remain in tag `v1-final`.
