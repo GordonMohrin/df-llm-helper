@@ -2,7 +2,8 @@
 -- writer of the civ alert and its burrow list (via act -> gui/civ-alert, civ-alert.lua:27-50).
 -- Inputs are visibility only (threat.assess over K.census.h); a raised bridge cuts the walk
 -- groups, so path existence is never used to leave a siege.
---   T0 (detecting step): mode SIEGE, civ alert on (Kern+), posture READY_STATION, SIEGE_START.
+--   T0 (detecting step): mode SIEGE, civ alert on (Kern+), posture READY_STATION, SIEGE_START. The alert
+--     burrow list is the mode's burrow plus the lever rooms gate allows in the mode (gate.rooms, live L3).
 --   T0..T0+450: O1/B1 up as soon as nobody (soldiers excluded) is outside, or at T+450, or when a
 --     visible hostile is <= 10 tiles from that bridge (gate keeps the single-pending invariant).
 --   T0+900: an outer/inner bridge not up -> BREACH in-game (alert Tiefe+, B2 up, B2_HOLD).
@@ -270,6 +271,19 @@ local function burrow_exists(name)
   return not ok or b ~= nil                -- unknown: let act decide
 end
 
+-- the alert burrow list: the mode's burrow first, then the lever rooms gate allows in this mode (live L3: in
+-- BREACH the civ alert held everybody in Tiefe+ and no civilian could reach a lever, GATE_FAIL no_worker x3).
+-- In BREACH gate.rooms is the B2 landing room only while B2 has no linked lever inside Tiefe+ (the fallback for
+-- a fort without one); with one, the list is Tiefe+ alone and nobody is drawn toward a seal that may be down
+local function alert_list(K, burrow)
+  local l = {burrow}
+  local ok, rooms = K.call('gate', 'rooms', K.mode())
+  for _, n in ipairs(ok and type(rooms) == 'table' and rooms or {}) do
+    if n ~= burrow then l[#l + 1] = n end
+  end
+  return l
+end
+
 local function set_alert(K, on, burrow, g, now)
   local cur = alert_idx()
   if not on then
@@ -279,11 +293,16 @@ local function set_alert(K, on, burrow, g, now)
   -- live L1b: BREACH before fortcore stage 3 asked for Tiefe+ every RETRY (one ACT_FAIL each time); a refuge
   -- that does not exist yet means Kern+ at once
   if burrow ~= g.kern and not burrow_exists(burrow) then burrow = g.kern end
-  if mem.burrow ~= burrow and now >= (mem.alert_retry or now) then
-    if K.act.alert_burrows({burrow}) then mem.burrow = burrow
-    else                                   -- e.g. no Tiefe+ yet: Kern+ beats no alert
+  local list = alert_list(K, burrow)
+  local sig = table.concat(list, '|')
+  if mem.asig ~= sig and now >= (mem.alert_retry or now) then
+    if K.act.alert_burrows(list) then mem.burrow, mem.asig = burrow, sig
+    else                                   -- the burrow alone, else (e.g. no Tiefe+ yet) Kern+ beats no alert
       mem.alert_retry = now + M.RETRY
-      if burrow ~= g.kern and mem.burrow ~= g.kern and K.act.alert_burrows({g.kern}) then mem.burrow = g.kern end
+      if #list > 1 and K.act.alert_burrows({burrow}) then mem.burrow, mem.asig = burrow, burrow
+      elseif burrow ~= g.kern and mem.burrow ~= g.kern and K.act.alert_burrows({g.kern}) then
+        mem.burrow, mem.asig = g.kern, g.kern
+      end
     end
   end
   if mem.burrow and cur == 0 and now >= (mem.civ_retry or now) then

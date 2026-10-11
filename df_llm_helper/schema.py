@@ -51,6 +51,7 @@ MODULES = [
     ("readiness", "WP6", False, {"ticks": 33600}), ("arbiter", "WP1", True, {"ms": 500}),
     ("runner", "WP7", False, {"ticks": 600}), ("snapshot", "WP7", False, {"ticks": 100}),
     ("economy", "WP8", False, {"ticks": 1200}), ("care", "WP8", False, {"ticks": 1200}),
+    ("water", "WP8", False, {"ticks": 1200}),
     ("trade", "WP9", False, {"ticks": 100}), ("baseline", "WP8", False, {"ticks": 33600}),
     ("perf", "WP1", False, {"ms": 1000}), ("selftest", "WP1", False, {"ms": 60000}),
 ]
@@ -67,11 +68,12 @@ ACT = {
     "squad_create": ["military"], "squad_leader": ["military"], "squad_add": ["military"],
     "squad_remove": ["military"],
     "squad_routine": ["military"], "squad_order": ["military"], "squad_uniform": ["military"],
-    "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "popcap": ["readiness"],
+    "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
+    "popcap": ["readiness"],
     "quickfort": ["runner"],
-    "orders_import": ["economy"], "orders": ["economy"], "workorder": ["economy"],
+    "orders_import": ["economy"], "orders": ["economy"], "workorder": ["economy", "water"],
     "order_suspend": ["economy"], "kitchen_exclude": ["economy"], "appoint": ["economy"],
-    "work_detail": ["economy"], "order_material": ["economy"], "item_flag": ["care"],
+    "work_detail": ["economy"], "order_material": ["economy"], "item_flag": ["care", "water"],
     "zone_assign": ["care"], "trade": ["trade"],
     "run": ["baseline", "economy", "care", "military", "trade", "arbiter", "selftest", "runner"],
 }

@@ -782,6 +782,33 @@ local function impls(state)
     return true, id
   end
 
+  -- burrows screen > units (live L3, gate's lever pullers): the burrow's unit list becomes exactly `ids`,
+  -- living citizens only; dfhack.burrows.setAssignedUnit (Lua API.txt:2424) is the screen's per-unit toggle
+  -- (hack/lua/plugins/sort/unitselector.lua:122). Units no longer found stay listed (fix/dead-units --burrow).
+  function I.burrow_units(name, ids)
+    if type(name) ~= 'string' or type(ids) ~= 'table' then return false, 'need a burrow name and unit ids' end
+    local b = dfhack.burrows.findByName(name)
+    if not b then return false, 'no burrow ' .. name end
+    local want, units = {}, {}
+    for _, id in ipairs(ids) do
+      local u = math.type(id) == 'integer' and df.unit.find(id) or nil
+      if not (u and dfhack.units.isCitizen(u) and not dfhack.units.isDead(u)) then
+        return false, 'not a living citizen: ' .. tostring(id)
+      end
+      if not want[id] then want[id], units[#units + 1] = true, u end
+    end
+    local drop = {}
+    for _, id in ipairs(b.units) do if not want[id] then drop[#drop + 1] = id end end
+    for _, id in ipairs(drop) do
+      local u = df.unit.find(id)
+      if u then dfhack.burrows.setAssignedUnit(b, u, false) end
+    end
+    for _, u in ipairs(units) do
+      if not dfhack.burrows.isAssignedUnit(b, u) then dfhack.burrows.setAssignedUnit(b, u, true) end
+    end
+    return true, #units
+  end
+
   -- the only job removal in v2 (DESIGN §5.9): our own queued pull (Lua API.txt:1336)
   function I.cancel_own_lever_job(job_id)
     local lever_id = own_jobs[job_id]

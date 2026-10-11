@@ -1,9 +1,29 @@
--- care (WP8): strange moods, burial and corpses, captives, hospital water, the forbidden-barrel guard,
--- the stress sampler and the naked check (DESIGN §4 RECOVERY clean-up, §5.6, §5.9-§5.11).
---   * moods: never touches the mood job (act has no job removal). It reads only what the vanilla UI
---     shows: the claimed workshop's type (its material classes, M.WS_MATS) and the moody dwarf's skill
---     sheet. It never reads job.job_items (that is what the armok tool showmood prints, DESIGN §11.4).
---     It unforbids / un-dumps items of those classes and emits MOOD_NEED when none exist (or no workshop);
+-- care (WP8): strange moods, the mood-material reserve, burial and corpses, captives, hospital water, the
+-- forbidden-barrel guard, the stress sampler and the naked check (DESIGN §4 RECOVERY clean-up, §5.6, §5.9-§5.11).
+--   * moods: never touches the mood job (act has no job removal). Live L3: 10 of 13 moods failed (all fatal)
+--     while care guessed the needs from the claimed workshop's classes. Gordon's decision (orchestrator
+--     2026-10-11, v1 precedent): care reads the item requirements of the strange-mood job (job.job_items of
+--     a StrangeMood* job only, what a player learns from the claimed workshop, the job and the dwarf's
+--     searching; dfllm.reserve parses them). For each filter still short of items it resolves concrete
+--     items the dwarf can use (revealed tile, reachable: the optional snapshot walk-group hook M.REACH_FN,
+--     asked fresh per item because DF renumbers walk groups; without it only Kern+ counts), unforbids /
+--     un-dumps / releases them from the
+--     reserve, and starts what it can itself (autobutcher policy run for bone, shell, leather; a bedrooms
+--     PROJECT_REQUEST for a stone dig). MOOD_NEED (B) carries the concrete list; still unresolved after
+--     2 game days (or with no acquisition path) it wakes the LLM (DECISION_NEEDED mood_material). Production
+--     orders, hunters and trade wants belong to economy and trade: they read care.mood_wants (hook).
+--     Without readable filters the claimed workshop's classes (M.WS_MATS) are the fallback; children's
+--     moods take the same path;
+--   * mood reserve (config "reserve", dfllm.reserve): from P1 care keeps stored mood stock forbidden (boulders
+--     20, logs 20, bone 10, shell 2, leather 10, cloth 10, thread 10, gems 5, bars 5 with a smelter), taken
+--     from stockpiles inside Kern+ and their bins (a `dfllm-reserve` pile first), so no order or building
+--     consumes it; sized from economy's census of free stock, topped up only after a census newer than care's
+--     last write (the census skips forbidden items); critical
+--     supply comes first (logs for missing barrels and coffins, boulders for coffins, no wood held in the supply
+--     alarm), and a class an active mood needs is released, never topped up. Hooks (live L4, proposed for
+--     CONTRACTS §7): care.reserved and care.mood_wants are pulled by economy (and trade); care pushes the
+--     floor economy's own consumers keep through economy.reserve (optional, feature-detected), so rock orders
+--     leave the last 20 boulders alone;
 --   * every item flag write needs a revealed tile (snapshot.tile) and, outside PEACE / late RECOVERY,
 --     a Kern+ tile (no Kern+ yet: no writes outside clean-up time);
 --   * burial: free tombs >= open corpses + margin, else PROJECT_REQUEST tombs (follow places them);
@@ -17,9 +37,21 @@
 -- battle axes, crossbows) marked for melting.
 local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
+local R = require('dfllm.reserve')     -- library (not a kernel module): mood filters, matcher, reserve sizes
 
 local M = {name = 'care', every = {ticks = 1200}, on = {}}
 local DAY = C.TICKS.DAY
+-- Optional walk-group hook, proposed for CONTRACTS §7 (live L4): snapshot.reach(a, b) -> bool, i.e.
+-- dfhack.maps.canWalkBetween asked at call time (care may not read tiles itself, CONTRACTS §1.4). Feature-
+-- detected: while snapshot has no such function, only an item inside Kern+ counts as reachable (v1 counted
+-- revealed cavern logs and bones behind a closed shaft as mood stock, and those moods failed). A hook that
+-- faults is not asked again this boot (each fault counts against snapshot, three back it off).
+M.REACH_FN = 'reach'
+-- economy publishes K.census.i at the end of its sliced census, which skips forbidden items: until a census
+-- newer than care's last reserve write of a class has come, census + held counts the newly held items twice
+-- (the reserve would take the critical part too, then release it: flapping). A class is topped up again only
+-- once the census tick is at least this far past that write (one economy period).
+local CENSUS_LAG = 1200
 
 -- mirror of config/baseline.json "care" (tests/lua/test_care.lua checks they agree)
 M.DEFAULTS = {
@@ -75,6 +107,12 @@ local function pstate(K)
   end
   if type(p.stress) ~= 'table' then p.stress = {since = K.now().tick, top = {}} end
   p.stress.counts = json.object(type(p.stress.counts) == 'table' and p.stress.counts or {})
+  -- mood reserve: item ids care holds forbidden, per class; acquisition timestamps (autobutcher, dig request)
+  if type(p.reserve) ~= 'table' then p.reserve = {} end
+  local held = type(p.reserve.held) == 'table' and p.reserve.held or {}
+  for k, v in pairs(held) do if type(v) ~= 'table' then held[k] = nil end end
+  p.reserve.held = json.object(held)
+  p.acq = json.object(type(p.acq) == 'table' and p.acq or {})
   return p
 end
 
@@ -230,43 +268,83 @@ local function best_skill(u)
   return best
 end
 
+local function is_child(u)
+  local ok, yes = pcall(function() return dfhack.units.isChild(u) or dfhack.units.isBaby(u) end)
+  return ok and yes == true
+end
+
+local function unit_pos(u)
+  local ok, x, y, z = pcall(function() return u.pos.x, u.pos.y, u.pos.z end)
+  if ok and math.type(x) == 'integer' then return {x = x, y = y, z = z} end
+end
+
+-- the needs of one mood: from the mood job's filters (reserve.job_needs), else the claimed workshop's
+-- classes as one any-of need (M.WS_MATS, the pre-L4 fallback); nil when nothing is missing
+local function mood_needs(job, ws)
+  local list = R.job_needs(job)
+  if list then
+    local out = {}
+    for _, nd in ipairs(list) do out[#out + 1] = {alts = {nd}, n = nd.n, nd = nd} end
+    return out, 'job'
+  end
+  local mats = M.mood_mats(job, ws)
+  if not mats then return nil end
+  local alts = {}
+  for _, m in ipairs(mats) do
+    local nd = R.legacy_need(m)
+    if nd then alts[#alts + 1] = nd end
+  end
+  if #alts == 0 then return nil end
+  return {{alts = alts, n = 1, legacy = table.concat(mats, '/')}}, 'workshop'
+end
+
 local function mood_seen(K, c, r, p, u, kind)
   local sid, now = fmt(u.id), K.now().tick
+  local child = is_child(u)
   local rec = p.moods[sid]
   if not rec then
     rec = {kind = kind, since = now, nojob = -1, ws = 0, needs = json.object{}}
     p.moods[sid] = rec
-    K.emit('MOOD_START', 'B', string.format('strange mood (%s) unit %d', kind, u.id), {unit = u.id, kind = kind})
+    K.emit('MOOD_START', 'B', string.format('strange mood (%s) unit %d%s', kind, u.id, child and ' (child)' or ''),
+           {unit = u.id, kind = kind, child = child and 1 or 0})
   end
   r.moody[sid] = true
   local job = u.job and u.job.current_job
-  if not job then
+  local ws = job and M.mood_workshop(job)
+  if not ws and (not job or R.is_mood_job(job)) then   -- no workshop claimed yet (a mood job without a holder too)
     if rec.nojob < 0 then rec.nojob = now end
     if rec.ws == 0 and now - rec.nojob >= c.mood_nojob_ticks then
       rec.ws = 1
+      -- live L3: three of four moods struck children (1-7 years) who have no skills to hint the workshop
       local skill = best_skill(u)
+      if skill == '' then skill = child and 'none (child): any moodable shop' or 'none' end
       K.emit('MOOD_NEED', 'B', string.format('mood unit %d has no workshop (best skill %s)', u.id, skill),
              {unit = u.id, kind = kind, need = 'workshop', skill = skill})
       -- live L1: two fey moods failed for want of a workshop; the moody dwarves went insane and one died
       -- of thirst. A failed mood is lost within days: wake the LLM and ask for the moodable workshops.
       K.emit('DECISION_NEEDED', 'A', string.format('strange mood: unit %d has no workshop (best skill %s)', u.id, skill),
              {id = 'mood_workshop', q = string.format('unit %d needs a workshop for %s now (workshops template or one shop)',
-                                                     u.id, skill)})
+                                                     u.id, skill):sub(1, 200)})
       local okp, pend = K.call('runner', 'pending', 'workshops')
       if not (okp and type(pend) == 'number' and pend > 0) then
         K.emit('PROJECT_REQUEST', 'B', string.format('workshops for a strange mood (unit %d, %s)', u.id, skill),
                {tpl = 'workshops', n = 1, why = 'mood'})
       end
     end
-    return
+    if not job then return end                           -- a mood job already lists its materials: prepare them
+  else
+    rec.nojob = -1
   end
-  rec.nojob = -1
-  local ws = M.mood_workshop(job)
-  local mats = M.mood_mats(job, ws)
-  if not mats then return end
-  r.mood_list[#r.mood_list + 1] = {sid = sid, ws = ws, mats = mats}
-  for _, m in ipairs(mats) do
-    if not r.need_set[m] then r.need_set[m] = true; r.need_cats[#r.need_cats + 1] = m end
+  local needs, via = mood_needs(job, ws)
+  if not needs then return end
+  local jid = -1
+  pcall(function() jid = job.id end)
+  -- only plain values outlive this frame: the job and its job_items are looked up again per frame (refresh_moods)
+  local m = {sid = sid, uid = u.id, job_id = jid, ws = ws or '', kind = kind, needs = needs, via = via, child = child,
+             upos = unit_pos(u)}
+  r.mood_list[#r.mood_list + 1] = m
+  for _, nd in ipairs(needs) do
+    for _, alt in ipairs(nd.alts) do if alt.cls then r.mood_cls[alt.cls] = true end end
   end
 end
 
@@ -313,6 +391,7 @@ end
 local function corpse_item(K, c, r, p, it)
   local f = it.flags
   if f.in_building or f.removed or f.garbage_collect then return end    -- interred or gone
+  if r.res_ids[it.id] then return end           -- a reserve bone or shell: no corpse to dump
   local uid = it.unit_id
   if math.type(uid) ~= 'integer' or uid < 0 then return end
   local x, y, z = item_pos(it)
@@ -508,53 +587,428 @@ local function phase_barrels(K, c, r, p)
   return scan(r, function() return df.global.world.items.other.BARREL end, function(it) barrel(K, c, r, it) end)
 end
 
----------------------------------------------------------------- mood materials
-local BUSY = {'in_building', 'in_job', 'trader', 'removed', 'garbage_collect', 'construction', 'hostile'}
-local function need_item(K, c, r, cat, it)
-  if cat == 'bone' or cat == 'shell' then
-    local cf = it.corpse_flags
-    if not cf or cf.unbutchered or not cf[cat] then return end
-  elseif cat == 'bars' and it.mat_type ~= 0 then return          -- metal bars only (coal is fuel)
+---------------------------------------------------------------- mood materials (live L4: the mood job's filters)
+local function trunc(s, n)                      -- cut at a UTF-8 boundary
+  s = tostring(s or '')
+  if #s <= n then return s end
+  local cut = n
+  while cut > 0 and (s:byte(cut + 1) or 0) & 0xC0 == 0x80 do cut = cut - 1 end
+  return s:sub(1, cut)
+end
+
+local function int(v) return math.tointeger(tonumber(v)) end
+
+-- a fort member's remains (a dead citizen's bones, a severed limb) belong in a tomb, never in a mood or the
+-- reserve (cached per run)
+local function own_remains(r, it)
+  local uid = it.unit_id
+  if math.type(uid) ~= 'integer' or uid < 0 then return false end
+  if r.member[uid] == nil then r.member[uid] = r.dead[uid] == true or M.own_member(uid) end
+  return r.member[uid]
+end
+
+-- a tile the fort knows of: hidden -> false; no tile reader loaded -> true (nothing to ask, as before)
+local function known_tile(K, x, y, z)
+  if not x then return false end
+  local ok, t = K.call('snapshot', 'tile', x, y, z)
+  if not ok then return true end
+  return type(t) == 'table'
+end
+
+-- can the moody dwarf (at from) reach the item? The walk-group hook (M.REACH_FN) when snapshot has it, asked
+-- per item when it is used (DF renumbers walk groups as the map changes, so nothing is cached across frames);
+-- without it, or without the unit's position, only an item inside Kern+ (no Kern+ yet: at clean-up time)
+-- counts. A hook that faults is dropped for this boot.
+local function reachable(K, r, from, x, y, z)
+  if from and not r.no_reach and not st.reach_bad then
+    local ok, yes = K.call('snapshot', M.REACH_FN, from, {x = x, y = y, z = z})
+    if ok then return yes ~= false end
+    local why = tostring(yes)
+    if why ~= 'no module' and why ~= 'disabled' and not why:find('^no function') then
+      st.reach_bad = true
+      K.log('warn', 'snapshot.%s failed (%s): Kern+ stands in for it this boot', M.REACH_FN, why)
+    end
+    r.no_reach = true
   end
+  return inside(r, x, y, z)
+end
+
+local function release_held(r, p, id)
+  if not r.res_ids[id] then return end
+  r.res_ids[id] = nil
+  for cls, ids in pairs(p.reserve.held) do
+    for i = #ids, 1, -1 do
+      if ids[i] == id then
+        table.remove(ids, i)
+        st.wrote = st.wrote or {}
+        st.wrote[cls] = r.now                   -- the census still counts it as forbidden
+      end
+    end
+  end
+end
+
+-- one item against one need: usable as it lies (counted for this need only), or forbidden / dumped / held by
+-- the reserve and freed (inside Kern+ or at clean-up time, revealed, reachable). A free item the dwarf may
+-- not reach (outside Kern+ without the walk-group hook) is not counted: nd.far tells MOOD_NEED about it.
+local function need_item(K, c, r, p, t, it)
+  local nd, alt = t.nd, t.alt
+  if nd.avail >= nd.n or r.claimed[it.id] or R.busy(it) or R.carried(it) or not R.match(alt, it) then return end
+  if alt.part and own_remains(r, it) then return end
   local f = it.flags
-  for _, k in ipairs(BUSY) do if f[k] then return end end
-  if not f.forbid and not f.dump then r.avail = r.avail + 1; return end
   local x, y, z = item_pos(it)
-  if r.fixes >= c.unforbid_per_need or not inside(r, x, y, z) or not revealed(K, x, y, z) then return end
+  if not x then return end
+  if not f.forbid and not f.dump then
+    if known_tile(K, x, y, z) then
+      if reachable(K, r, t.m.upos, x, y, z) then
+        r.claimed[it.id], nd.avail = true, nd.avail + 1
+      else
+        nd.far = nd.far + 1
+      end
+    end
+    return
+  end
+  if nd.fixes >= math.max(c.unforbid_per_need, nd.n) or not inside(r, x, y, z) or not revealed(K, x, y, z)
+     or not reachable(K, r, t.m.upos, x, y, z) then return end
   local ok = true
   if f.forbid then ok = K.act.item_flag(it.id, 'forbid', false) and ok end
   if f.dump then ok = K.act.item_flag(it.id, 'dump', false) and ok end
-  if ok then r.fixes, r.avail = r.fixes + 1, r.avail + 1 end
+  if ok then
+    nd.fixes, nd.avail = nd.fixes + 1, nd.avail + 1
+    r.claimed[it.id] = true
+    release_held(r, p, it.id)
+  end
 end
 
--- one class at a time, stopping at the first usable item; then MOOD_NEED for every mood whose classes
--- all came up empty (once per mood and class set)
-local function phase_needs(K, c, r, p)
-  while r.nci <= #r.need_cats do
-    local cat = r.need_cats[r.nci]
-    if r.idx == 0 then r.avail, r.fixes = 0, 0 end
-    local vname = M.MAT_VEC[cat]
-    local done = scan(r, function() return df.global.world.items.other[vname] end,
-                      function(it) need_item(K, c, r, cat, it) end, function() return r.avail > 0 end)
-    if not done then return false end
-    r.cat_avail[cat] = r.avail
-    r.nci, r.idx = r.nci + 1, 0
-  end
+-- DF frees a mood job (and its job_items) when the artifact is done or the mood fails. A sliced run spans
+-- frames, so the job_item pointers reserve.match hands DFHack's veto are looked up again at every frame from
+-- the unit; a mood whose job is gone or changed drops out of this run (the next run sees the new state)
+local function refresh_moods(r)
   for _, m in ipairs(r.mood_list) do
-    local any = false
-    for _, cat in ipairs(m.mats) do if (r.cat_avail[cat] or 0) > 0 then any = true end end
-    local rec = p.moods[m.sid]
-    local need = table.concat(m.mats, '/')
-    if not any and rec and rec.needs[need] == nil then
-      rec.needs[need] = 1
-      K.emit('MOOD_NEED', 'B', string.format('mood unit %s (%s) needs %s: none available', m.sid, m.ws, need),
-             {unit = math.tointeger(tonumber(m.sid)), kind = rec.kind, need = need, ws = m.ws})
-      -- live L1b: a Secretive mason mood found no boulder (soil embark, rock orders took every one); only a
-      -- stone dig placed by hand saved it. A missing mood material wakes the LLM like a missing workshop.
-      K.emit('DECISION_NEEDED', 'A', string.format('strange mood: unit %s (%s) needs %s, none available', m.sid,
-                                                   m.ws, need),
-             {id = 'mood_material', q = string.format('unit %s needs %s for %s now: dig stone (rooms), trade, butcher?',
-                                                      m.sid, need, m.ws)})
+    if m.via == 'job' and not m.gone then
+      local ok, elems = pcall(function()
+        local u = df.unit.find(m.uid)
+        local j = u and u.job.current_job
+        if j and j.id == m.job_id and R.is_mood_job(j) then return j.job_items.elements end
+      end)
+      for _, nd in ipairs(m.needs) do
+        local okj, ji = false, nil
+        if ok and elems then okj, ji = pcall(function() return elems[nd.nd.idx] end) end
+        nd.nd.ji = okj and ji or nil
+      end
+      if not (ok and elems) then m.gone = true end
+    end
+  end
+end
+
+local CORPSE_CLS = {bone = true, shell = true, leather = true}
+
+-- what care starts itself: the autobutcher policy run (bone, shell, leather from animals over the targets;
+-- pets are never butchered) and a stone dig through the runner (PROJECT_REQUEST bedrooms, as tombs). Hunters,
+-- production orders and purchases are economy's and trade's (care.mood_wants).
+local function acquire(K, r, p, classes)
+  local now, rc = K.now().tick, r.rc
+  for _, cls in ipairs(classes) do
+    if CORPSE_CLS[cls] and not r.butchered and now - (p.acq.butcher or -1e12) >= rc.butcher_every then
+      r.butchered, p.acq.butcher = true, now
+      if K.act.run('autobutcher', 'now') then K.log('info', 'mood needs %s: autobutcher now', cls) end
+    elseif cls == 'boulders' and not r.dug and now - (p.acq.dig or -1e12) >= 3 * DAY then
+      r.dug = true
+      local okp, pend = K.call('runner', 'pending', 'bedrooms')
+      if not (okp and type(pend) == 'number' and pend > 0) then
+        p.acq.dig = now
+        K.emit('PROJECT_REQUEST', 'B', 'bedrooms: a stone dig for a strange mood (boulders)',
+               {tpl = 'bedrooms', n = 4, why = 'mood_rock'})
+      end
+    end
+  end
+end
+
+-- after the scan: per mood the needs still short; MOOD_NEED (B) with the concrete list whenever it changes,
+-- the acquisitions, and DECISION_NEEDED (A) once unresolved for wake_ticks (at once without any path),
+-- again every rewake_ticks
+local function mood_report(K, c, r, p)
+  local rc, now = r.rc, K.now().tick
+  local wants = {}
+  for _, m in ipairs(r.mood_list) do
+    local rec = not m.gone and p.moods[m.sid]
+    if rec then
+      local labels, classes, primary, seen, nopath, far = {}, {}, {}, {}, false, 0
+      for _, nd in ipairs(m.needs) do               -- wants: the hook entries (care.mood_wants)
+        if nd.avail < nd.n then
+          local short = nd.n - nd.avail
+          far = far + (nd.far or 0)
+          labels[#labels + 1] = nd.legacy or R.label(nd.nd, short)
+          local path = false
+          for _, alt in ipairs(nd.alts) do
+            local cls = alt.cls or 'other'
+            if R.ACQ[cls] then path = true end
+            if not seen[cls] then seen[cls] = true; classes[#classes + 1] = cls end
+          end
+          nopath = nopath or not path
+          local a = nd.alts[1]                      -- an any-of need (workshop classes): its primary material
+          primary[#primary + 1] = a.cls or 'other'
+          if #wants < 20 then
+            wants[#wants + 1] = {unit = int(m.sid), cls = a.cls or 'other', n = short, label = labels[#labels],
+                                 acq = table.concat(R.ACQ[a.cls or ''] or {}, ','), buy = R.token(a) or ''}
+          end
+        end
+      end
+      if #labels == 0 then
+        if rec.unres then K.log('info', 'mood unit %s: every material is available now', m.sid) end
+        rec.unres = nil
+      else
+        local sig = trunc(table.concat(labels, ', '), 200)
+        local u = rec.unres
+        if type(u) ~= 'table' then u = {since = now, sig = ''}; rec.unres = u end
+        local acq = {}
+        for _, cls in ipairs(classes) do acq[#acq + 1] = cls .. ':' .. table.concat(R.ACQ[cls] or {'none'}, '+') end
+        if sig ~= u.sig then
+          u.sig = sig
+          -- d stays under kern's 1,024 bytes (a larger d is replaced by {"trunc":1}, the unit id lost):
+          -- need 200 + acq 200 + list 300 + the small keys
+          local list, bytes = {}, 0
+          for i = 1, math.min(8, #labels) do
+            bytes = bytes + #labels[i] + 3
+            if bytes > 300 then break end
+            list[i] = labels[i]
+          end
+          K.emit('MOOD_NEED', 'B', string.format('mood unit %s (%s, %s%s) needs %s', m.sid, rec.kind,
+                                                 m.ws ~= '' and m.ws or '?', m.child and ', child' or '', sig),
+                 {unit = int(m.sid), kind = rec.kind, need = sig, ws = m.ws, via = m.via, child = m.child and 1 or 0,
+                  list = list, acq = trunc(table.concat(acq, ' '), 200), far = far})
+        end
+        acquire(K, r, p, primary)
+        local age = now - (u.since or now)
+        if (nopath or age >= rc.wake_ticks) and (u.woke == nil or now - u.woke >= rc.rewake_ticks) then
+          u.woke = now
+          local hints = {}
+          if far > 0 then hints[1] = string.format('%d outside Kern+: haul in or open the way', far) end
+          for _, cls in ipairs(classes) do hints[#hints + 1] = R.HINT[cls] or R.HINT.other end
+          -- live L1b-L3: a missing mood material ended in a failed mood and a death 9 times; care has freed
+          -- what exists and started what it can, the rest needs the LLM (dig, trade, plan)
+          K.emit('DECISION_NEEDED', 'A', trunc(string.format('strange mood: unit %s (%s%s) still needs %s', m.sid,
+                                                             rec.kind, m.child and ', child' or '', sig), 200),
+                 {id = 'mood_material', q = trunc(string.format('unit %s needs %s for %d d: %s', m.sid, sig,
+                                                               age // DAY, table.concat(hints, '; ')), 200)})
+        end
+      end
+    end
+  end
+  r.wants = wants
+end
+
+-- one task per (mood need, alternative, items vector); a task stops at the need's count
+local function phase_needs(K, c, r, p)
+  if not r.nq then
+    r.nq, r.nqi = {}, 1
+    for _, m in ipairs(r.mood_list) do
+      for _, nd in ipairs(m.needs) do
+        nd.avail, nd.fixes, nd.far = 0, 0, 0
+        for _, alt in ipairs(nd.alts) do
+          for _, v in ipairs(alt.vecs or {}) do r.nq[#r.nq + 1] = {m = m, nd = nd, alt = alt, vec = v} end
+        end
+      end
+    end
+  end
+  refresh_moods(r)                               -- every frame: no job_item pointer from an earlier frame
+  while r.nqi <= #r.nq do
+    local t = r.nq[r.nqi]
+    if t.nd.avail < t.nd.n and not t.m.gone then
+      local done = scan(r, function() return df.global.world.items.other[t.vec] end,
+                        function(it) need_item(K, c, r, p, t, it) end, function() return t.nd.avail >= t.nd.n end)
+      if not done then return false end
+    end
+    r.nqi, r.idx = r.nqi + 1, 0
+  end
+  mood_report(K, c, r, p)
+  return true
+end
+
+---------------------------------------------------------------- the mood reserve (live L4)
+-- Live L3: 0 bone, shell, leather, bars, 4 cloth, 8 boulders, 9 logs; rock orders and mechanisms had eaten
+-- every boulder before two mason moods. From reserve.from_phase care keeps stored mood stock forbidden (the
+-- item sheet's forbid toggle, as a player keeps a mood stash) so no order or building takes it: items in
+-- stockpiles inside Kern+ (the `dfllm-reserve` pile first; never the trade or melt piles), ids in persist.
+-- reserve.hold sizes it (critical supply first). A class an active mood needs is never topped up, and
+-- need_item frees held items the mood can use.
+local function has_smelter()
+  local ok, yes = pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.FURNACE_ANY) do
+      local n = df.furnace_type[b.type]
+      if (n == 'Smelter' or n == 'MagmaSmelter') and built(b) then return true end
+    end
+    return false
+  end)
+  return ok and yes == true
+end
+
+-- the stockpile ids to search (a pile can be removed between frames: ids, looked up again per frame)
+local function reserve_piles(K, rc)
+  local skip = {}
+  local bc = type(K.cfg.baseline) == 'table' and type(K.cfg.baseline.baseline) == 'table' and K.cfg.baseline.baseline or {}
+  for _, k in ipairs({'trade_piles', 'melt_piles'}) do
+    for _, n in ipairs(type(bc[k]) == 'table' and bc[k] or {}) do skip[tostring(n):lower()] = true end
+  end
+  local want = tostring(rc.pile or ''):lower()
+  local first, rest = {}, {}
+  for _, sp in ipairs(vec(function() return df.global.world.buildings.other.STOCKPILE end)) do
+    local name = ''
+    pcall(function() name = dfhack.df2utf(sp.name):lower() end)
+    if want ~= '' and name == want then first[#first + 1] = sp.id
+    elseif not skip[name] then rest[#rest + 1] = sp.id end
+  end
+  for _, id in ipairs(rest) do first[#first + 1] = id end
+  return first
+end
+
+-- the item ids of one stockpile: what lies on its tiles (Lua API.txt:2512) and what its bins, bags and chests
+-- hold (Lua API.txt:2043; getStockpileContents lists a non-empty bin, not its contents). Ids, not pointers: the
+-- pile is worked through over several frames.
+local function pile_ids(id)
+  local out = {}
+  local sp = df.building.find(id)
+  if not sp then return out end
+  local ok, items = pcall(dfhack.buildings.getStockpileContents, sp)
+  if not ok or type(items) ~= 'table' then return out end
+  for _, it in ipairs(items) do
+    out[#out + 1] = it.id
+    if R.is_container(it) then
+      local okc, inner = pcall(dfhack.items.getContainedItems, it)
+      for _, ci in ipairs(okc and type(inner) == 'table' and inner or {}) do out[#out + 1] = ci.id end
+    end
+  end
+  return out
+end
+
+-- the fort's free stock of a class plus what the reserve holds (economy's census skips forbidden items);
+-- nil = unknown (then nothing new is held). Boulders: economy's free boulders (`rock`) minus ores and flux,
+-- which the reserve never holds; census.boulders is the whole BOULDER vector (built-in, economic and cavern
+-- stone too) and would let the reserve take the coffins' stone. Thread: economy's collected thread (`thread`,
+-- no webs); the THREAD vector counts cavern webs and would let it take the loom's thread.
+local CENSUS_KEY = {logs = 'wood', bone = 'bone', shell = 'shell', leather = 'leather', cloth = 'cloth', gems = 'gems',
+                    bars = 'bars', thread = 'thread'}
+local function class_total(inv, cls, nheld)
+  if cls == 'boulders' then
+    local rock = math.tointeger(inv.rock)
+    if not rock then return nil end
+    return math.max(0, rock - (math.tointeger(inv.ore) or 0) - (math.tointeger(inv.flux) or 0)) + nheld
+  end
+  local n = math.tointeger(inv[CENSUS_KEY[cls] or ''])
+  return n and n + nheld or nil
+end
+
+-- held items that are still ours (forbidden, the class, not consumed); sizes; releases beyond the hold
+local function reserve_begin(K, c, r, p)
+  local rc, inv, held = r.rc, K.census.i, p.reserve.held
+  local rs = {pi = 1, ii = 0, def = {}, acts = 0, want = 0, tot = {}, found = {}}
+  for _, cls in ipairs(R.CLASSES) do
+    local keep = {}
+    for _, id in ipairs(type(held[cls]) == 'table' and held[cls] or {}) do
+      local it = math.type(id) == 'integer' and df.item.find(id)
+      local f = it and it.flags
+      if f and f.forbid and not (f.removed or f.garbage_collect or f.in_building or f.construction)
+         and R.item_class(it) == cls then
+        keep[#keep + 1] = id
+      else
+        r.res_ids[id] = nil
+      end
+    end
+    held[cls] = keep
+  end
+  if type(inv) ~= 'table' then return rs end            -- no item census yet: hold what is held
+  local okp, alarm = K.call('economy', 'alarm')
+  local f = {phase = (K.view() or {}).phase, smelter = has_smelter(), alarm = okp == true and alarm ~= nil,
+             barrels_empty = math.tointeger(inv.barrels_empty) or 0,
+             coffins_missing = math.max(0, count(r.open) - (r.tombs_free or 0))}
+  if type(f.phase) ~= 'string' then return rs end      -- no phase yet (first frames after a boot): unchanged
+  local cloth = class_total(inv, 'cloth', #held.cloth)
+  f.cloth_short = cloth and math.max(0, (math.tointeger((rc.targets or {}).cloth) or 0) - cloth) or 0
+  local itick = math.tointeger(inv.tick) or -1
+  st.wrote = st.wrote or {}
+  for _, cls in ipairs(R.CLASSES) do
+    local ids = held[cls]
+    f.total = class_total(inv, cls, #ids)
+    local hold = f.total and R.hold(rc, cls, f) or #ids
+    -- census older than the last write of this class: census + held may count new holds twice, so no top-up
+    -- and no higher floor until a fresh census (a release or a lower floor on the old numbers only frees more)
+    local stale = st.wrote[cls] ~= nil and itick < st.wrote[cls] + CENSUS_LAG
+    -- the floor economy keeps: the hold (critical supply stays spendable); what the reserve could not take
+    -- into the stash yet (unstockpiled boulders) is floor - held for economy
+    local pushed = (st.pushed or {})[cls]
+    r.res_floor[cls] = (stale and pushed) and math.min(hold, pushed) or hold
+    if stale or r.mood_cls[cls] then hold = math.min(hold, #ids) end   -- or a mood takes from this class now
+    r.res_hold[cls] = hold
+    rs.tot[cls] = f.total
+    while #ids > hold and rs.acts < rc.per_run do                 -- release beyond the hold, newest first
+      local id = ids[#ids]
+      local it = df.item.find(id)
+      if it then                                 -- the item flag rule above: revealed, Kern+ or clean-up time
+        local x, y, z = item_pos(it)
+        if not ((r.clean_ok or inside(r, x, y, z)) and revealed(K, x, y, z))
+           or not K.act.item_flag(id, 'forbid', false) then break end
+        st.wrote[cls] = r.now
+      end
+      table.remove(ids)
+      r.res_ids[id] = nil
+      rs.acts = rs.acts + 1
+    end
+    -- a class a full pass found nothing for is skipped until its stock changes or a week passed (no daily scan
+    -- of every pile for thread that lies in cavern webs; hauling into a pile does not change the stock)
+    local dry = (st.dry or {})[cls]
+    local skip = dry and dry[1] == rs.tot[cls] and K.now().tick - dry[2] < 7 * DAY
+    if r.clean_ok and hold > #ids and not skip then
+      rs.def[cls] = hold - #ids
+      rs.want = rs.want + rs.def[cls]
+    end
+  end
+  if rs.want > 0 then rs.piles = reserve_piles(K, rc) end
+  return rs
+end
+
+local function reserve_item(K, r, p, rs, it)
+  local cls = R.item_class(it)
+  if not cls or (rs.def[cls] or 0) <= 0 then return end
+  local f = it.flags
+  if f.forbid or f.dump or f.melt or r.claimed[it.id] or R.busy(it) or R.carried(it) then return end
+  if cls == 'boulders' and R.economic(it) then return end           -- ores and flux stay the smelter's
+  if (cls == 'bone' or cls == 'shell') and own_remains(r, it) then return end
+  local x, y, z = item_pos(it)
+  if not inside(r, x, y, z) or not revealed(K, x, y, z) then return end
+  if K.act.item_flag(it.id, 'forbid', true) then
+    local ids = p.reserve.held[cls]
+    ids[#ids + 1] = it.id
+    r.res_ids[it.id] = true
+    rs.def[cls], rs.want, rs.acts = rs.def[cls] - 1, rs.want - 1, rs.acts + 1
+    rs.found[cls] = true
+    st.wrote[cls] = r.now
+  end
+end
+
+-- the piles one after the other (their item ids listed once per pile), sliced by items
+local function phase_reserve(K, c, r, p)
+  if not r.rs then r.rs = reserve_begin(K, c, r, p) end
+  local rs = r.rs
+  while rs.piles and rs.pi <= #rs.piles and rs.want > 0 and rs.acts < r.rc.per_run do
+    if not rs.list then rs.list, rs.ii = pile_ids(rs.piles[rs.pi]), 0 end
+    local list = rs.list
+    while r.left > 0 and rs.ii < #list and rs.want > 0 and rs.acts < r.rc.per_run do
+      rs.ii, r.left = rs.ii + 1, r.left - 1
+      local it = df.item.find(list[rs.ii])
+      if it then
+        local okr, err = pcall(reserve_item, K, r, p, rs, it)
+        if not okr then r.errs, r.err = r.errs + 1, r.err or tostring(err) end
+      end
+    end
+    if rs.ii < #list then
+      if r.left <= 0 then return false end              -- slice budget used up: on with this pile next frame
+      break                                             -- enough (or per_run writes) for this run
+    end
+    rs.pi, rs.list = rs.pi + 1, nil
+  end
+  if rs.piles and rs.pi > #rs.piles then                -- a full pass: remember the classes it found nothing for
+    st.dry = st.dry or {}
+    for cls, d in pairs(rs.def) do
+      if d > 0 and not rs.found[cls] then st.dry[cls] = {rs.tot[cls], K.now().tick} else st.dry[cls] = nil end
     end
   end
   return true
@@ -581,7 +1035,9 @@ local function phase_tools(K, c, r, p)
 end
 
 ---------------------------------------------------------------- run, finish
-local PHASES = {phase_units, phase_corpses, phase_zones, phase_captives, phase_barrels, phase_needs, phase_tools}
+-- needs after corpses and zones (citizen remains, coffins), the reserve after the needs (moods first)
+local PHASES = {phase_units, phase_corpses, phase_zones, phase_captives, phase_barrels, phase_needs, phase_reserve,
+                phase_tools}
 
 local function new_run(K, c, p)
   local cu = K.census.u
@@ -589,13 +1045,46 @@ local function new_run(K, c, p)
   for _, id in ipairs(type(cu) == 'table' and cu.ids or {}) do ids[#ids + 1] = id end
   local dead = {}
   for _, id in ipairs(p.dead) do dead[id] = true end
+  local res_ids = {}
+  for _, list in pairs(p.reserve.held) do
+    for _, id in ipairs(list) do res_ids[id] = true end
+  end
   local mode, now = K.mode(), K.now().tick
   return {ph = 1, idx = 0, left = 0, ids = ids, have_units = type(cu) == 'table' and type(cu.ids) == 'table',
-          acc = {n = 0, stressed = 0, naked = 0, thoughts = {}}, moody = {}, need_set = {}, need_cats = {}, nci = 1,
-          mood_list = {}, cat_avail = {},
-          dead = dead, open = {}, acts = 0, fixed = 0, avail = 0, fixes = 0, errs = 0,
+          acc = {n = 0, stressed = 0, naked = 0, thoughts = {}}, moody = {}, mood_list = {}, mood_cls = {},
+          claimed = {}, member = {}, res_ids = res_ids, res_hold = {}, res_floor = {}, rc = R.conf(K.cfg.baseline),
+          dead = dead, open = {}, acts = 0, fixed = 0, errs = 0, now = now,
           clean_ok = mode == 'PEACE' or (mode == 'RECOVERY' and now - K.mode_since() >= DAY),
           boxes = approach_boxes(K.manifest()), kern = kern_burrow(K)}
+end
+
+-- Optional push hook into economy (live L4, economy's hook API; not in CONTRACTS §7 yet, feature-detected):
+-- economy.reserve(key, n, 'care') sets the standing floor economy's own consumers keep. economy keeps
+-- max(0, floor - care.reserved) free items on top of the forbidden ones, so rock and wood orders leave alone
+-- what the reserve cannot hold yet (unstockpiled boulders: "stop rock orders consuming the last 20").
+-- floor = reserve.hold (target, at most the stock minus critical supply; 0 before P1 and for wood in the
+-- alarm), so the critical part stays spendable. Sent on change and once after every boot; after a failure
+-- other than a missing module or function it is not called again this boot (K.call counts the fault against
+-- economy).
+M.ECON_RESERVE = 'reserve'
+local function push_floors(K, r)
+  if st.econ_bad or next(r.res_floor) == nil then return end
+  st.pushed = st.pushed or {}
+  for _, cls in ipairs(R.CLASSES) do
+    local n = r.res_floor[cls]
+    if n and n ~= st.pushed[cls] then
+      local ok, why = K.call('economy', M.ECON_RESERVE, cls, n, 'care')
+      if not ok then
+        why = tostring(why)
+        if why ~= 'no module' and why ~= 'disabled' and not why:find('^no function') then
+          st.econ_bad = true
+          K.log('warn', 'economy.%s failed (%s): not called again this boot', M.ECON_RESERVE, why)
+        end
+        return
+      end
+      st.pushed[cls] = n
+    end
+  end
 end
 
 local function top5(counts)
@@ -642,6 +1131,20 @@ local function finish(K, c, r, p)
     K.log('info', 'top stressors this week: %s', table.concat(parts, ' '))
   end
   if r.errs > 0 then K.log('warn', 'care: %d unreadable items (%s)', r.errs, tostring(r.err)) end
+  -- the reserve and the mood wants for the hooks (care.reserved, care.mood_wants); kern.log on change
+  local held, parts = {}, {}
+  for _, cls in ipairs(R.CLASSES) do
+    held[cls] = #(p.reserve.held[cls] or {})
+    if r.res_hold[cls] then parts[#parts + 1] = string.format('%s %d/%d', cls, held[cls], r.res_hold[cls]) end
+  end
+  st.held = held
+  st.wants = r.wants or {}
+  push_floors(K, r)
+  local line = table.concat(parts, ' ')
+  if line ~= '' and line ~= st.res_line then
+    st.res_line = line
+    K.log('info', 'mood reserve held/hold: %s', line)
+  end
   local prev = st.out or {}
   local a = r.acc
   st.out = {stressed_pct = r.have_units and (a.n > 0 and a.stressed * 100 // a.n or 0) or (prev.stressed_pct or 0),
@@ -659,9 +1162,10 @@ end
 function M.step(K, budget, ctx)
   local c = M.conf(K)
   local p = pstate(K)
-  if not (ctx and ctx.cont) or not st.run then st.run = new_run(K, c, p) end
+  if not (ctx and ctx.cont) or not st.run then st.run = new_run(K, c, p)
+  else st.run.kern = kern_burrow(K) end        -- no burrow pointer from an earlier frame (it may be gone)
   local r = st.run
-  r.left = c.items_per_slice
+  r.left, r.now = c.items_per_slice, K.now().tick
   while r.ph <= #PHASES do
     if not PHASES[r.ph](K, c, r, p) then return 'more' end
     r.ph, r.idx = r.ph + 1, 0
@@ -710,6 +1214,33 @@ function M.state(K)
   return {care = {stressed_pct = math.max(0, math.min(100, o.stressed_pct)), naked = o.naked, ghosts = o.ghosts,
                   corpses_old = o.corpses_old, tombs_free = o.tombs_free, moods = o.moods},
           stock = {hosp_water = o.hosp_water}}
+end
+
+local function deep(t)
+  if type(t) ~= 'table' then return t end
+  local r = {}
+  for k, v in pairs(t) do r[k] = deep(v) end
+  return setmetatable(r, getmetatable(t))
+end
+
+-- Pull hook for economy (live L4; proposed for CONTRACTS §7): items the mood reserve holds forbidden now,
+-- {boulders, logs, bone, shell, leather, cloth, thread, gems, bars} (ints, a fresh table; economy maps the
+-- class names to its keys). The item census skips forbidden items (`rock`, `thread` and the other keys; only
+-- census.boulders is the whole BOULDER vector), so economy counts census + held as the mood stock; care sizes
+-- the boulder and thread reserve from `rock` and `thread` and holds no new ones while they are missing.
+function M.reserved(K)
+  local out = {}
+  for _, cls in ipairs(R.CLASSES) do out[cls] = (st.held or {})[cls] or 0 end
+  return out
+end
+
+-- Pull hook for economy and trade (live L4; proposed for CONTRACTS §7): what open moods still miss after care
+-- freed what exists, as a list (<= 20) of {cls, n, unit, label, acq, buy}. economy turns each into a short-term
+-- need of its key (hunters, TAN_A_HIDE, WeaveCloth, SmeltOre, charcoal, autochop); acq = the paths of
+-- reserve.ACQ ('butcher', 'hunt', 'chop', 'dig', 'order:<job>', 'buy'); buy = a trade.lua token ('bar:iron',
+-- 'cloth', 'leather', 'gem') or '' for trade to put before plan.trade.want while a caravan is here.
+function M.mood_wants(K)
+  return deep(st.wants or {})
 end
 
 return M

@@ -1,10 +1,10 @@
-fortcore {'stage': 3, 'depth': 3, 'refuge': 3, 'beds': 8} anchor [70, 70, 100] rot 0
+fortcore {'stage': 3, 'depth': 3, 'refuge': 3, 'beds': 8, 'retrofit': 0} anchor [70, 70, 100] rot 0
   infra: s1.dig(91), s1.build(20), s1.place(7), s1.zone(3), s1.burrow(24)
   materials: {'bed': 8, 'door': 4, 'trade_depot': 1, 'well': 1, 'workshop': 6}
-  defense: s2.dig(30), s2.build(16), s2.zone(1)
+  defense: s2.dig(30), s2.build(16), s2.zone(1), s2.burrow(1)
   materials: {'armor_stand': 2, 'chest': 2, 'drawbridge': 1, 'fortification': 7, 'lever': 2, 'mechanism': 6, 'weapon_rack': 2}
-  defense: s3.dig(11), s3.build(15), s3.place(1), s3.zone(2), s3.burrow(2)
-  materials: {'bed': 8, 'drawbridge': 2, 'lever': 4, 'mechanism': 12, 'well': 1}
+  defense: s3.dig(11), s3.build(15), s3.place(1), s3.zone(2), s3.burrow(3), s3.lever(3)
+  materials: {'bed': 8, 'drawbridge': 2, 'lever': 7, 'mechanism': 21, 'well': 1}
 z100  (x 56..90, y 69..119)
 ...................................
 .............vvv...................
@@ -466,9 +466,9 @@ z92  (x 56..90, y 69..119)
 ###################################
 ###################################
 ##########.........################
-##########..lv.....################
-##########.........################
-##########....<....################
+##########..lv....L################
+##########........L################
+##########....<...L################
 ##########.........################
 ##########.........################
 ##########bbbbbbbb.################

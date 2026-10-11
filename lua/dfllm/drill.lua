@@ -2,16 +2,30 @@
 -- DRILL makes siege sound the civ alert (Kern+), send the squads to READY_STATION and raise the
 -- outer and inner bridges with real lever pulls (gate's single-pending invariant). At T+1,200 the
 -- drill records its KPIs, then PEACE lowers the bridges again with the same invariant.
--- Pass: every outer/inner bridge up by T+900, worn >= 90 %, nobody outside Kern+ at T+1,200,
--- 0 double toggles. Results go to persist `drill` (≤5), DRILL_RESULT (B) and, on exactly the 2nd
+-- Pass: every outer/inner bridge up by T+900, worn >= 90 %, nobody outside Kern+ at T+1,200, 0 double toggles
+-- (DESIGN §11 R2, §14). Results go to persist `drill` (≤5), DRILL_RESULT (B) and, on exactly the 2nd
 -- consecutive failure, DRILL_FAIL (A, CONTRACTS §12); readiness reads them (R2).
+-- Outside (live L2/L3: 4, 2 and 3 citizens, bucket carriers from the brook 90 tiles away and surface workers):
+-- DRILL_RESULT also reports how many of them were `walking` home (closer to the entry than at T+1,100 or T0, or
+-- waiting at a raised outer/inner bridge), a diagnostic only: every one of them still counts, because in a real
+-- siege a citizen locked out by O1 at T+450, or a bucket carrier on its way back from the brook, stands outside
+-- with the attackers (and R2 raises the pop cap on a passed drill). DRILL_RESULT also carries the outer
+-- bridge's raise time (goal T+600), the lever-job take time and the lever pullers (gate.kpi).
 -- Starts: inbox `drill`, drill.start(why), or automatically in PEACE without merchants: yearly,
 -- every season while the plan wants R2 growth, after a siege, and after a failed drill: a month,
 -- doubling per further failure up to a season, and never while the failure is structural (no Kern+,
 -- or too few uniform specs to reach 90 %) until that input changes.
+local geom = require('dfllm.util.geom')
+
 local M = {name = 'drill', every = {ticks = 600}, verbs = {}, on = {}}
 
 M.MEASURE = 1200         -- KPIs at T+1,200
+M.HOME_WINDOW = 100      -- outside citizens sampled at T+1,100: who got closer to the entry since then ...
+M.HOME_STEP = 2          -- ... by at least 2 tiles is walking home (a dwarf walks about 10 tiles in 100 ticks)
+M.HOME_PROGRESS = 10     -- ... as is one 10 tiles closer than at T0 (headed home, stopped where the raised gate
+                         -- cut the path)
+M.GATE_NEAR = 3          -- within 3 tiles of a raised outer/inner bridge = waiting at the gate the doctrine closed
+M.OUTER_GOAL = 600       -- outer bridge up by T+600 (live L3 goal with lever pullers; pass rule stays T+900)
 M.RAISE_MAX = 900        -- bridges up by T+900
 M.WORN_MIN = 90
 M.FAST, M.SLOW = 25, 600
@@ -27,7 +41,7 @@ local R1_CAP = 55
 
 local st      -- persisted m.drill: {v, t0, why, try, siege}
 local rec     -- persisted `drill`: {v, streak_fail, last = [...]}
-local rt      -- runtime: boot tick, ending flag
+local rt      -- runtime: boot tick, ending flag, home0/home (outside citizens' entry distance at T0 / T+1,100)
 
 local function int(v) return type(v) == 'number' and math.tointeger(v) or nil end
 local function cut(s, n) s = tostring(s or ''); return #s > n and s:sub(1, n) or s end
@@ -70,6 +84,66 @@ local function last_pass()
   return t
 end
 
+---------------------------------------------------------------- walking home (live L3)
+-- the point citizens walk to: the inner bridge's footprint centre (the way into Kern+), else the outer one
+local function entry(man)
+  local b
+  for _, name in ipairs(gate_bridges(man)) do
+    local x = man.bridges[name]
+    if x.role == 'inner' then b = x; break end
+    b = b or x
+  end
+  if b then return {x = (b.fp[1] + b.fp[4]) // 2, y = (b.fp[2] + b.fp[5]) // 2, z = b.fp[3]} end
+end
+
+local function pos_of(id)
+  local u = df.unit.find(id)
+  if not u then return nil end
+  local ok, x, y, z = pcall(dfhack.units.getPosition, u)
+  if ok and x then return {x = x, y = y, z = z} end
+end
+
+local function bbox_dist(p, b)
+  return math.max(b[1] - p.x, p.x - b[4], b[2] - p.y, p.y - b[5], b[3] - p.z, p.z - b[6], 0)
+end
+
+-- distance to the entry of every listed outside citizen (census.u.outside_ids, at most 20)
+local function home_sample(K)
+  local cu, e, r = K.census.u, entry(K.manifest()), {}
+  if not e or type(cu) ~= 'table' then return r end
+  for _, id in ipairs(type(cu.outside_ids) == 'table' and cu.outside_ids or {}) do
+    local p = pos_of(id)
+    if p then r[id] = geom.dist(p, e) end
+  end
+  return r
+end
+
+-- outside citizens who are walking home now: 2 tiles closer to the entry than at T+1,100, 10 tiles closer than at
+-- T0, or waiting within 3 tiles of a raised outer/inner bridge. A citizen beyond the listed 20 counts as not walking.
+local function walking_home(K, cu)
+  local man = K.manifest()
+  local e = entry(man)
+  if not e then return 0 end
+  local gates = {}
+  for _, name in ipairs(gate_bridges(man)) do
+    local ok, s = K.call('gate', 'state', name)
+    if ok and s == 'up' then gates[#gates + 1] = man.bridges[name].fp end
+  end
+  local n = 0
+  for _, id in ipairs(type(cu.outside_ids) == 'table' and cu.outside_ids or {}) do
+    local p = pos_of(id)
+    if p then
+      local d, d0, d1 = geom.dist(p, e), rt.home0 and rt.home0[id], rt.home and rt.home[id]
+      local walking = (d1 ~= nil and d <= d1 - M.HOME_STEP) or (d0 ~= nil and d <= d0 - M.HOME_PROGRESS)
+      for _, fp in ipairs(gates) do
+        if bbox_dist(p, fp) <= M.GATE_NEAR then walking = true end
+      end
+      if walking then n = n + 1 end
+    end
+  end
+  return n
+end
+
 ---------------------------------------------------------------- start / measure / end
 -- public (CONTRACTS §7): PEACE only, no merchants on the map, one drill at a time
 function M.start(K, why)
@@ -78,7 +152,8 @@ function M.start(K, why)
   if M.merchants(K) then return false, 'merchants on the map' end
   local now = K.now().tick
   K.call('gate', 'reset_kpi')                     -- raise ticks and double toggles count from T0
-  st.t0, st.why, st.try = now, cut(why or 'drill', 40), now
+  st.t0, st.why, st.try, rt.home = now, cut(why or 'drill', 40), now, nil
+  rt.home0 = home_sample(K)                       -- who is outside at T0, and how far from the entry
   save(K)
   local ok, err = K.set_mode('DRILL', 'drill: ' .. st.why)
   if not ok then
@@ -118,30 +193,50 @@ local function measure(K, now)
   if worn < M.WORN_MIN then fails[#fails + 1] = 'worn<' .. M.WORN_MIN end
   local cu = K.census.u
   local outside = type(cu) == 'table' and int(cu.outside) or -1
+  local walking = outside > 0 and walking_home(K, cu) or 0      -- reported only (see the header)
   if outside < 0 then fails[#fails + 1] = 'no_kern'
   elseif outside > 0 then fails[#fails + 1] = 'outside:' .. outside end
   local dbl = int(kpi.double_toggles) or 0
   if dbl > 0 then fails[#fails + 1] = 'dbl:' .. dbl end
+  -- reported only: the outer bridge's raise time (-1 not up), the slowest lever-job take, pullers assigned
+  local man, outer, take, pullers = K.manifest(), nil, -1, 0
+  local takes = type(kpi.take_ticks) == 'table' and kpi.take_ticks or {}
+  for _, name in ipairs(names) do
+    if man.bridges[name].role == 'outer' then
+      local ok, s = K.call('gate', 'state', name)
+      local t = (ok and s == 'up') and (int(raise[name]) or 0) or -1    -- no raise recorded: up before T0
+      if outer == nil then outer = t
+      elseif outer >= 0 then outer = t < 0 and -1 or math.max(outer, t) end
+    end
+    local tk = int(takes[name])
+    if tk and tk > take then take = tk end
+  end
+  for _, n in pairs(type(kpi.pullers) == 'table' and kpi.pullers or {}) do pullers = pullers + (int(n) or 0) end
   return {tick = now, pass = #fails == 0 and 1 or 0, raised = raised, worn = math.max(0, math.min(100, worn)),
-          outside = math.max(0, outside), dbl = dbl, fails = fails}
+          outside = math.max(0, outside), dbl = dbl, fails = fails,
+          extra = {walking = walking, outer = outer or -1, take = take, pullers = pullers}}
 end
 
 local function finish(K, now)
   local r = measure(K, now)
+  local x = r.extra
+  r.extra = nil                                   -- persist `drill` keeps the CONTRACTS §10 fields only
   local last = rec.last
   last[#last + 1] = r
   while #last > M.KEEP do table.remove(last, 1) end
   rec.streak_fail = r.pass == 1 and 0 or rec.streak_fail + 1
   K.persist.set('drill', rec)
   local fl = table.concat(r.fails, ', ')
-  K.emit('DRILL_RESULT', 'B', string.format('drill %s: raised %d, worn %d%%, outside %d, dbl %d%s',
-         r.pass == 1 and 'passed' or 'failed', r.raised, r.worn, r.outside, r.dbl, fl ~= '' and (' (' .. fl .. ')') or ''),
-         {pass = r.pass, raised = r.raised, worn = r.worn, outside = r.outside, dbl = r.dbl})
+  K.emit('DRILL_RESULT', 'B', string.format('drill %s: raised %d, outer %d (goal %d), worn %d%%, outside %d (%d walking home), dbl %d%s',
+         r.pass == 1 and 'passed' or 'failed', r.raised, x.outer, M.OUTER_GOAL, r.worn, r.outside, x.walking, r.dbl,
+         fl ~= '' and (' (' .. fl .. ')') or ''),
+         {pass = r.pass, raised = r.raised, worn = r.worn, outside = r.outside, dbl = r.dbl,
+          walking = x.walking, outer = x.outer, take = x.take, pullers = x.pullers})
   if r.pass == 0 and rec.streak_fail == 2 then
     K.emit('DRILL_FAIL', 'A', string.format('drill failed %d times in a row: %s', rec.streak_fail, fl),
            {streak = rec.streak_fail, fails = r.fails})
   end
-  st.t0 = nil
+  st.t0, rt.home, rt.home0 = nil, nil, nil
   save(K)
   rt.ending = true
   K.set_mode('PEACE', 'drill done')               -- gate lowers the bridges, siege ends the alert
@@ -152,7 +247,7 @@ end
 
 local function abort(K, why)
   K.log('info', 'drill: aborted (%s)', why)
-  st.t0, st.try = nil, K.now().tick
+  st.t0, st.try, rt.home, rt.home0 = nil, K.now().tick, nil, nil
   save(K)
   M.every = {ticks = M.SLOW}
 end
@@ -240,7 +335,8 @@ function M.step(K, budget, ctx)
   local mode = K.mode()
   if st.t0 then
     if mode ~= 'DRILL' then abort(K, 'mode ' .. mode); return end
-    if now - st.t0 >= M.MEASURE then finish(K, now) end
+    if now - st.t0 >= M.MEASURE then finish(K, now)
+    elseif not rt.home and now - st.t0 >= M.MEASURE - M.HOME_WINDOW then rt.home = home_sample(K) end
     return
   end
   if mode == 'DRILL' then                         -- a drill without its record (lost persist): end it

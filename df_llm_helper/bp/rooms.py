@@ -1,6 +1,7 @@
 """Room templates (DESIGN §5.6, §5.9, §5.10, §5.2): dining, bedrooms, tombs, hospital, temple, tavern,
 workshops, farms; since live L1 also furnaces (smelter + wood furnace), office (a noble's office with a
-chair) and captives (pit zone over a 1-tile drop, manifest `pit`).
+chair) and captives (pit zone over a 1-tile drop, manifest `pit`); since live L3 the `cistern` (a well over
+real water: well room, cistern, optional pipe from a revealed brook or river; see `cistern`).
 
 Local frame (rot 0): the anchor (0,0,0) is an *existing* walkable tile (a corridor of the core); the room
 is dug south of it. (0,1) is the doorway (door or open corridor start), the interior starts at v=2.
@@ -32,6 +33,9 @@ PARAMS = {
     "furnaces": {"wood": (1, 0, 2)},
     "office": {"role": ("manager", None, None)},
     "captives": {},
+    # path "" = a dry cistern filled by buckets (pond zone); else the pipe waypoints (see cistern_layout)
+    "cistern": {"path": ("", None, None), "rise": (1, 1, 40), "side": ("S", None, None),
+                "water": ("bed", None, None), "level": ("core", None, None)},
 }
 # quickfort `assigned_unit=` roles (preserve-rooms noble codes) an office may be reserved for
 OFFICE_ROLES = ("manager", "bookkeeper", "broker", "expedition_leader", "mayor", "chief_medical_dwarf")
@@ -242,9 +246,214 @@ def captives(p: dict) -> Plan:
     return P
 
 
+# ---------------------------------------------------------------- cistern (live L3: patients died of thirst)
+# Local frame like every room: anchor (0,0,0) = an existing walkable tile, doorway (0,1), well room u -1..1,
+# v 2..4 at w=0, the 3x3 cistern right below it (w=-1) with the well over a channel at (0,3). A stair (-1,4)
+# (down stair in the room, up stair in the cistern) is the way down and back up. Review: the first version had
+# only the channel ramps under the well (and pond) hole. A DF ramp leads up only onto the floor above an
+# adjacent wall, and a dug-out cistern leaves those ramps without such a wall, so the miner who dug the last
+# cistern tile was shut in; the well building then closed its hole for good, and the floodgate, the
+# fortification and the lever link below could never be built. The stair keeps everything below (the cistern,
+# and the pipe while it is dry) reachable: nobody is shut in, builders and the lever linker get there. The
+# dry cistern keeps a pond hole (1,3) with a pond zone: bucket carriers fill it.
+# With a `path` the cistern is fed from a revealed brook or river through a pipe at w=-1:
+#   cistern -(0,5)- diagonal -(1,6)- ... pipe ... -floodgate- -fortification- shaft (B) -breach (G)- water (W)
+# * the diagonal step (0,5)->(1,6) is the pressure breaker: DF moves no pressure diagonally, so water downstream
+#   is never pressurized and cannot rise above the cistern level w=-1; this is the overflow: whatever the
+#   cistern cannot hold stays in the pipe and the shaft at the brook's own level. Second line: pressure lifts
+#   water at most one level below its source, so with the water not above the well room (sites.plan_cistern's
+#   default `safe`) the room stays dry even without the breaker;
+# * the floodgate stands on the pipe tile right before the fortification (review: a floodgate at the cistern
+#   end left a pipe segment sealed at both ends; whoever hauled a boulder in it when the second seal was built
+#   drowned at the breach). DF installs floodgates closed (item-descriptions.lua FLOODGATE); the lever in the
+#   well room opens it once linked on the lever sheet. Closed, it stops the inflow at the intake: only the
+#   shaft outside the fortification ever holds water before the lever is pulled. The pull floods the dry pipe
+#   under pressure within moments, so nobody may be in the pipe then (the pull is a deliberate act: look first);
+# * a constructed fortification on the last pipe tile passes water but no creature (the intake is open to the
+#   surface: without it the pipe is a tunnel from the bank into the fort). It is built (stage `build`) before
+#   the floodgate (stage `gate`): its only access is through the floodgate tile;
+# * the shaft is dug top-down from the bank (damp-dig markers `md`, it is 2 tiles from the water), the breach
+#   (a damp-dig channel on the bank tile G between shaft and water) is the last stage, after floodgate and
+#   fortification are built; with water='bed' (a brook: water at w_top-1 under the walkable brook top) the
+#   channel tile itself stays dry, so the runner's water probe does not stop the project;
+# * a 'w' Water Source zone on the water tile is the first stage: caregivers fill buckets there for patients
+#   at once, long before the pipe is done (the bucket-delivery fallback of lua/dfllm/water.lua).
+# dug() (what emit adds to Z4) is only the doorway, the well room and the cistern: the pipe and the intake lie
+# outside the fort, and a Z4 box over the brook bank would read as an attacker reaching the core (topo.audit).
+CISTERN_ROOM = (-1, 2, 1, 4)          # well room (w=0) and cistern (w=-1)
+CISTERN_WELL, CISTERN_POND, CISTERN_LEVER, CISTERN_STAIR = (0, 3), (1, 3), (-1, 2), (-1, 4)
+CISTERN_SPILL, CISTERN_START = (0, 5), (1, 6)     # the breaker: diagonal from the spill tile to the pipe start
+SIDES = {"N": (0, -1), "E": (1, 0), "S": (0, 1), "W": (-1, 0)}
+WATER_KINDS = ("bed", "bank")         # bed: water one level below the bank (brook); bank: water at bank level
+LEVELS = ("core", "refuge")
+
+
+def parse_path(text: str) -> list[tuple[int, int]]:
+    """'u,v;u,v;...' -> waypoints."""
+    out = []
+    for part in str(text or "").split(";"):
+        part = part.strip()
+        if not part:
+            continue
+        a, sep, b = part.partition(",")
+        try:
+            if not sep:
+                raise ValueError
+            out.append((int(a), int(b)))
+        except ValueError:
+            raise ValueError(f"cistern.path: bad waypoint {part!r} (want 'u,v;u,v;...')") from None
+    return out
+
+
+def format_path(pts) -> str:
+    return ";".join(f"{u},{v}" for u, v in pts)
+
+
+def _expand(pts) -> list[tuple[int, int]]:
+    out = [pts[0]]
+    for (ua, va), (ub, vb) in zip(pts, pts[1:]):
+        if (ua != ub) == (va != vb):
+            raise ValueError(f"cistern.path: segment {ua},{va}->{ub},{vb} is not orthogonal (or has length 0)")
+        du, dv = (ub > ua) - (ub < ua), (vb > va) - (vb < va)
+        u, v = ua, va
+        while (u, v) != (ub, vb):
+            u, v = u + du, v + dv
+            out.append((u, v))
+    return out
+
+
+def _cheb(a, b) -> int:
+    return max(abs(a[0] - b[0]), abs(a[1] - b[1]))
+
+
+def _straight_runs(tiles) -> list[tuple[tuple[int, int], tuple[int, int]]]:
+    """An orthogonal tile chain as (first, last) of its straight runs, no tile in two runs."""
+    runs: list[list] = []
+    for t in tiles:
+        if runs:
+            a, b = runs[-1]
+            if a == b and _cheb(b, t) == 1:
+                runs[-1][1] = t
+                continue
+            if a != b and (t[0] - b[0], t[1] - b[1]) == ((b[0] > a[0]) - (b[0] < a[0]),
+                                                         (b[1] > a[1]) - (b[1] < a[1])):
+                runs[-1][1] = t
+                continue
+        runs.append([t, t])
+    return [(a, b) for a, b in runs]
+
+
+def cistern_layout(p: dict) -> dict:
+    """Local geometry of a cistern (validated). Keys: intake (bool), room, well, stair (down stair in the room
+    over the up stair in the cistern: the way down), pond (dry only), lever (intake only), cistern (tiles at
+    w=-1), pipe (ordered tiles at w=-1 from the spill tile to the barrier), gate (floodgate, the pipe tile
+    before the barrier), barrier, shaft (B), w_top, side, breach (G, at w_top), water (W tiles that get the
+    water-source zone)."""
+    for k, ok in (("side", SIDES), ("water", WATER_KINDS), ("level", LEVELS)):
+        if p[k] not in ok:
+            raise ValueError(f"cistern.{k}: {p[k]!r} not one of {list(ok)}")
+    u0, v0, u1, v1 = CISTERN_ROOM
+    cist = [(u, v) for v in range(v0, v1 + 1) for u in range(u0, u1 + 1)]
+    L = {"intake": False, "room": CISTERN_ROOM, "well": CISTERN_WELL, "stair": CISTERN_STAIR, "cistern": cist,
+         "pond": CISTERN_POND, "lever": None, "pipe": [], "gate": None, "barrier": None, "shaft": None,
+         "w_top": None, "side": None, "breach": None, "water": []}
+    pts = parse_path(p["path"])
+    if not pts:
+        return L
+    if pts[0] != CISTERN_START:
+        raise ValueError(f"cistern.path must start at {CISTERN_START[0]},{CISTERN_START[1]} (after the breaker)")
+    tiles = _expand(pts)
+    if len(tiles) < 3:
+        raise ValueError("cistern.path: needs at least 3 tiles (floodgate, fortification, shaft)")
+    if len(set(tiles)) != len(tiles):
+        raise ValueError("cistern.path crosses itself")
+    seq = [CISTERN_SPILL] + tiles
+    for i, a in enumerate(seq):
+        for b in seq[i + 3:]:               # i+2 is the diagonal across a bend: the pipe's own corner
+            if _cheb(a, b) < 2:
+                raise ValueError(f"cistern.path: {a} and {b} touch (a leak around the floodgate/breaker)")
+        if i > 0 and any(_cheb(a, c) < 2 for c in cist):
+            raise ValueError(f"cistern.path: {a} touches the cistern (only the spill tile may)")
+    corners = {(CISTERN_START[0], CISTERN_SPILL[1]), (CISTERN_SPILL[0], CISTERN_START[1])}
+    if corners & set(tiles):
+        raise ValueError("cistern.path: a corner of the breaker step is pipe (the step must stay diagonal)")
+    du, dv = SIDES[p["side"]]
+    B = tiles[-1]
+    G, W = (B[0] + du, B[1] + dv), (B[0] + 2 * du, B[1] + 2 * dv)
+    if any(_cheb(G, t) < 2 for t in seq[:-1]) or any(_cheb(W, t) < 2 for t in seq):
+        raise ValueError(f"cistern.side {p['side']}: the breach {G} or the water {W} touches the pipe")
+    wt = -1 + p["rise"]
+    if wt >= 0 and any(_cheb(B, c) < 3 or _cheb(G, c) < 3 for c in cist):
+        raise ValueError("cistern: the intake shaft rises next to the well room")
+    ww = [(W[0], W[1], wt - 1), (W[0], W[1], wt)] if p["water"] == "bed" else [(W[0], W[1], wt)]
+    L.update(intake=True, pond=None, lever=CISTERN_LEVER, pipe=[CISTERN_SPILL] + tiles[:-1], gate=tiles[-3],
+             barrier=tiles[-2], shaft=B, w_top=wt, side=(du, dv), breach=(G[0], G[1], wt), water=ww)
+    return L
+
+
+class CisternPlan(Plan):
+    """dug() = the tiles that join the civilian core (doorway, well room, cistern; emit adds them to Z4). The
+    pipe and the intake shaft are checked per tile by sites.footprint/intake_tiles."""
+
+    def __init__(self, layout: dict):
+        super().__init__("cistern", "infra")
+        self.layout = layout
+
+    def dug(self) -> dict[int, set[tuple[int, int]]]:
+        u0, v0, u1, v1 = self.layout["room"]
+        return {w: {(u, v) for u, v in t if u0 <= u <= u1 and v0 - 1 <= v <= v1}
+                for w, t in Plan.dug(self).items() if w in (0, -1)}
+
+
+def cistern(p: dict) -> Plan:
+    """Well room over a 3x3 cistern with a stair down; with `path` fed from a brook/river (breaker, floodgate,
+    fortification). Stages: water (zone), dig, build, gate (floodgate), shaft, breach, burrow."""
+    L = cistern_layout(p)
+    P = CisternPlan(L)
+    if L["intake"]:
+        z = P.stage("water", "zone")                     # first: buckets for patients long before the pipe
+        for u, v, w in L["water"]:
+            z.ent(u, v, u, v, w, "w", "name=dfllm-water")
+    box = _box(P, 3, 3)
+    u0, v0, u1, v1 = box
+    d = P.stage("dig", "dig")
+    d.rect(u0, v0, u1, v1, -1)                           # the cistern below the well room
+    d.stair(*CISTERN_STAIR, -1, 0)                       # the way down and back up (no ramp: see above)
+    d.tile(*CISTERN_WELL, 0, "h")                        # well hole
+    b = P.stage("build", "build", orders=1)
+    b.tile(*CISTERN_WELL, 0, "l")
+    if not L["intake"]:
+        d.tile(*CISTERN_POND, 0, "h")                    # pond hole: bucket carriers fill the cistern
+    else:
+        for u, v in L["pipe"]:
+            d.tile(u, v, -1, "d")
+        b.tile(*CISTERN_LEVER, 0, "Tl")
+        b.tile(*L["barrier"], -1, "CF")                  # fortification: water passes, creatures do not
+        P.stage("gate", "build", orders=1).tile(*L["gate"], -1, "x")    # floodgate, installed closed, after it
+        s = P.stage("shaft", "dig")
+        bu, bv = L["shaft"]
+        for w in range(-1, L["w_top"] + 1):
+            s.tile(bu, bv, w, "mdu" if w == -1 else "mdj" if w == L["w_top"] else "mdi")
+        # review: the burrow plugin grows every '+' burrow over each dug tile beside it, so the pipe and the shaft
+        # bottom (outside the fortification) joined Kern+/Tiefe+. A wild animal at the shaft bottom then counts
+        # as a hostile inside Kern+ (sense: BREACH, civ alert; live L3 a false BREACH held the fort 40 days), and
+        # civilians kept in the burrow during an alert wander down the dry pipe the lever pull floods. Both
+        # leave every burrow as soon as the shaft is dug ('e' without a name: all burrows).
+        e = P.stage("unburrow", "burrow")
+        for (ua, va), (ub, vb) in _straight_runs(L["pipe"][1:] + [L["shaft"]]):
+            e.ent(min(ua, ub), min(va, vb), max(ua, ub), max(va, vb), -1, "e")
+        for w in range(0, L["w_top"] + 1):
+            e.ent(bu, bv, bu, bv, w, "e")
+        P.stage("breach", "dig").tile(*L["breach"], "mdh")
+    if not L["intake"]:
+        P.stage("zone", "zone").ent(*CISTERN_POND, *CISTERN_POND, 0, "p", "pond=true")
+    _finish(P, p, box)
+    return P
+
+
 BUILD = {"dining": dining, "bedrooms": bedrooms, "tombs": tombs, "hospital": hospital, "temple": temple,
          "tavern": tavern, "workshops": workshops, "farms": farms, "furnaces": furnaces, "office": office,
-         "captives": captives}
+         "captives": captives, "cistern": cistern}
 
 
 def plot_rects(p: dict) -> list[tuple[int, int, int, int, int]]:

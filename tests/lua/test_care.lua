@@ -105,7 +105,7 @@ T.test('stress category and naked sampler', function()
   T.eq(W.bad_vectors, {}, 'only real buildings_other / items_other vectors')
 end)
 
-T.test('moods: needs from the claimed workshop only (never job_items), MOOD_NEED, MOOD_END', function()
+T.test('moods without readable filters: the claimed workshop classes, MOOD_NEED, A after 2 days, MOOD_END', function()
   local W = world{setup = function(W)
     W.unit(1).mood = df.mood_type.Fey                            -- Jeweler's: rough gems or cut gems
     W.unit(1).job.current_job._holder = F.workshop(W, 'Jewelers')
@@ -120,23 +120,31 @@ T.test('moods: needs from the claimed workshop only (never job_items), MOOD_NEED
     F.item(W, 'ROUGH', {id = 1, flags = {forbid = true}, _pos = {10, 10, 5}})
     F.item(W, 'ROUGH', {id = 2, flags = {forbid = true}, _pos = {11, 10, 5}})   -- one is enough
     F.item(W, 'SMALLGEM', {id = 3, flags = {forbid = true}, _pos = {100, 100, 5}})   -- outside Kern+
-    F.item(W, 'SMALLGEM', {id = 4, flags = {dump = true}, _pos = {12, 10, 5}})
+    F.item(W, 'SMALLGEM', {id = 4, flags = {dump = true}, _pos = {12, 10, 5}})       -- any-of: rough served it
     F.item(W, 'BAR', {id = 5, mat_type = 7, _pos = {10, 10, 5}})
     F.item(W, 'BOULDER', {id = 6, flags = {forbid = true}, _pos = {10, 10, 5}})   -- unit 4 is served
   end}
   W.run(1)
   T.eq(#W.find_events('MOOD_START'), 4)
-  T.eq(sorted(acts(W, 'item_flag')), {{1, 'forbid', false}, {4, 'dump', false}})
+  T.eq(sorted(acts(W, 'item_flag')), {{1, 'forbid', false}}, 'one item of any workshop class serves the mood')
   local need = W.find_events('MOOD_NEED')
   T.eq(#need, 1)
-  T.eq({need[1].d.unit, need[1].d.need, need[1].d.kind, need[1].d.ws}, {3, 'bars', 'Fell', 'MetalsmithsForge'})
+  T.eq({need[1].d.unit, need[1].d.need, need[1].d.kind, need[1].d.ws, need[1].d.via}, {3, 'bars', 'Fell',
+       'MetalsmithsForge', 'workshop'})
+  T.eq(W.find_events('DECISION_NEEDED'), {}, 'not yet: smelting or trade may still bring bars')
   day(W)
   T.eq(#W.find_events('MOOD_START'), 4, 'not repeated')
   need = W.find_events('MOOD_NEED')
   T.eq(#need, 2, 'bars not repeated; workshop once')
   T.eq({need[2].d.unit, need[2].d.need, need[2].d.skill}, {2, 'workshop', 'WOODCRAFT'})
   local dn = W.find_events('DECISION_NEEDED')               -- live L1: a mood without a shop fails within days
-  T.eq({#dn, dn[1].d.id, dn[2].d.id}, {2, 'mood_material', 'mood_workshop'}, 'live L1b: a missing material wakes too')
+  T.eq({#dn, dn[1].d.id}, {1, 'mood_workshop'})
+  day(W)
+  dn = W.find_events('DECISION_NEEDED')                     -- live L4: unresolved for 2 game days -> class A
+  T.eq({#dn, dn[2].d.id}, {2, 'mood_material'})
+  T.ok(dn[2].d.q:find('bars', 1, true) and #dn[2].d.q <= 200, dn[2].d.q)
+  day(W)
+  T.eq(#W.find_events('DECISION_NEEDED'), 2, 'not daily: again after rewake_ticks')
   local wreq = 0
   for _, e in ipairs(W.find_events('PROJECT_REQUEST')) do if e.d.tpl == 'workshops' then wreq = wreq + 1 end end
   T.eq(wreq, 1, 'the moodable workshops are requested (follow places them)')
@@ -148,7 +156,7 @@ T.test('moods: needs from the claimed workshop only (never job_items), MOOD_NEED
   table.sort(fin, function(a, b) return a.d.unit < b.d.unit end)
   T.eq({fin[1].d.unit, fin[1].d.ok, fin[2].d.unit, fin[2].d.ok}, {1, 1, 2, 0})
   T.eq(W.state().care.moods, 2)
-  T.eq(W.job_items_reads, nil, 'job_items never read (showmood is armok)')
+  T.eq(W.job_items_reads, nil, 'job_items are read only from a StrangeMood job')
   for _, a in ipairs(W.acts) do
     T.ok(a.fn == 'item_flag' or a.fn == 'run' or a.fn == 'zone_assign', 'unexpected act ' .. a.fn)
   end

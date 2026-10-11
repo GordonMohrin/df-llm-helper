@@ -224,6 +224,18 @@ function M.tile(K, x, y, z)
   return {c = c, dig = dig, bld = bld}
 end
 
+-- walk-group query (iter2, care's mood reach): may a walker standing at a reach b? Both are revealed
+-- positions {x, y, z} the caller already knows (the moody dwarf, an item on a revealed tile). It is DF's own
+-- job-feasibility test (dfhack.maps.canWalkBetween, Lua API.txt; the same question act.link_lever asks for
+-- mechanisms). Unknown (bad args, a fault) answers true, so a caller never under-counts on an error.
+function M.reach(K, a, b)
+  if type(a) ~= 'table' or type(b) ~= 'table' then return true end
+  local ax, ay, az, bx, by, bz = int(a.x), int(a.y), int(a.z), int(b.x), int(b.y), int(b.z)
+  if not (ax and ay and az and bx and by and bz) then return true end
+  local ok, yes = pcall(dfhack.maps.canWalkBetween, xyz2pos(ax, ay, az), xyz2pos(bx, by, bz))
+  return not ok or yes == true
+end
+
 ---------------------------------------------------------------- export
 local function map_size()
   local ok, x, y, z = pcall(dfhack.maps.getTileSize)        -- dfhack.lua:742

@@ -1,0 +1,217 @@
+[
+ {
+  "anchor": [
+   70,
+   70,
+   100
+  ],
+  "class": "infra",
+  "manifest": {
+   "rooms": [
+    {
+     "bbox": [
+      69,
+      72,
+      100,
+      71,
+      74,
+      100
+     ],
+     "id": "cistern70_70_100r0",
+     "tier": 0,
+     "tpl": "cistern",
+     "use": "utility"
+    }
+   ],
+   "v": 2,
+   "zones": {
+    "Z4": [
+     [
+      69,
+      71,
+      99,
+      71,
+      74,
+      100
+     ]
+    ]
+   }
+  },
+  "materials": {
+   "door": 1,
+   "well": 1
+  },
+  "params": {
+   "burrow": "Kern+",
+   "level": "core",
+   "path": "",
+   "rise": 1,
+   "side": "S",
+   "water": "bed"
+  },
+  "rot": 0,
+  "site": "S1",
+  "stages": [
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        1,
+        0,
+        "d(3x1)"
+       ],
+       [
+        0,
+        2,
+        0,
+        "d(3x1)"
+       ],
+       [
+        0,
+        3,
+        0,
+        "u"
+       ],
+       [
+        1,
+        3,
+        0,
+        "d(2x1)"
+       ],
+       [
+        1,
+        0,
+        1,
+        "d"
+       ],
+       [
+        0,
+        1,
+        1,
+        "d(3x1)"
+       ],
+       [
+        0,
+        2,
+        1,
+        "d"
+       ],
+       [
+        1,
+        2,
+        1,
+        "h(2x1)"
+       ],
+       [
+        0,
+        3,
+        1,
+        "j"
+       ],
+       [
+        1,
+        3,
+        1,
+        "d(2x1)"
+       ]
+      ],
+      "pos": [
+       69,
+       71,
+       99
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "d"
+       ],
+       [
+        0,
+        2,
+        0,
+        "l"
+       ]
+      ],
+      "pos": [
+       70,
+       71,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "build",
+    "mode": "build",
+    "orders": 1
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "p{pond=true}(1x1)"
+       ]
+      ],
+      "pos": [
+       71,
+       73,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "zone",
+    "mode": "zone",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        1,
+        0,
+        0,
+        "a{name=Kern+ create=true}(1x1)"
+       ],
+       [
+        0,
+        1,
+        0,
+        "a{name=Kern+ create=true}(3x3)"
+       ]
+      ],
+      "pos": [
+       69,
+       71,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "burrow",
+    "mode": "burrow",
+    "orders": 0
+   }
+  ],
+  "tpl": "cistern",
+  "v": 2
+ }
+]

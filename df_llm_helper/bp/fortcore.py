@@ -16,18 +16,27 @@ walls are natural rock and every area is roofed (the bailey's walls/overhang req
 Each doctrine stage is its own project (params.stage 1..4) so the gate gets B1 when stage 2 is done
 (CONTRACTS §9.8: split defense geometry). Manifest fragments are cumulative (the §11 merge is idempotent).
 Stage 1 digs the future trap-hall route as the entrance tunnel, so no shortcut ever has to be walled off.
-Stage 4 arms it (41 traps: 28 weapon, 13 stone-fall). Live L2: with the traps inside stages 2-3, buildingplan
-gave the scarce mechanisms to the traps and none to the six levers, and the traps' weapons need metal the fort
-did not have, so the bridges never reached the manifest; bridges, levers and links now come first and the
-traps are a project of their own. Farm plots (DESIGN §5.2 stage 1) are a separate `farms` room project: a farm
-plot needs soil or mud, which the core level usually is not.
+Stage 4 arms it with 41 stone-fall traps. Live L2: with the traps inside stages 2-3, buildingplan gave the
+scarce mechanisms to the traps and none to the six levers, so the bridges never reached the manifest; bridges,
+levers and links now come first and the traps are a project of their own. Live L2/L3: a weapon trap takes any
+free weapon (buildingplan's ANY_WEAPON filter: a spare pick, battle axe or crossbow sat in the traps) and
+quickfort orders 'iron battle axe' for it (28 MakeWeapon orders a fort without bars never runs); a stone-fall
+trap needs only a mechanism (rock), so stage 4 builds no weapon traps. Farm plots (DESIGN §5.2 stage 1) are a
+separate `farms` room project: a farm plot needs soil or mud, which the core level usually is not.
+
+Lever rooms (live L3, the S3 fallback): `dfllm-levers` (stage 2, the Z3 strip with the O1 and B1 levers) and
+`dfllm-levers-b2` (stage 3, the Z4 landing strip with the B2 levers) are small burrows; gate assigns lever
+pullers to them in SIEGE/DRILL/BREACH and siege keeps them in the civ-alert list. Every bridge also gets a
+lever inside the refuge (Tiefe+, stage 3, built after the main levers): in BREACH the civ alert holds everybody
+in Tiefe+, and with the levers only in Kern+ no civilian could raise B2 (GATE_FAIL no_worker x3 in L3).
 """
 from __future__ import annotations
 
 from .primitives import Plan
 
 STAGES = 4
-PARAMS = {"stage": (1, 1, STAGES), "depth": (3, 2, 12), "refuge": (3, 3, 8), "beds": (8, 4, 16)}
+PARAMS = {"stage": (1, 1, STAGES), "depth": (3, 2, 12), "refuge": (3, 3, 8), "beds": (8, 4, 16),
+          "retrofit": (0, 0, 2)}     # 1: only the lever rooms up to `stage`; 2: + the refuge levers (_lever_retrofit)
 CLASS = {1: "infra", 2: "defense", 3: "defense", 4: "defense"}
 ZE, ZG = -2, -1
 # trap hall waypoints at ze (1 wide, 45 tiles, 8 bends; parallel runs keep one rock row between them)
@@ -76,14 +85,17 @@ def levels(p: dict) -> tuple[int, int]:
 def build(p: dict) -> Plan:
     stage = p["stage"]
     zc, zr = levels(p)
+    if p.get("retrofit"):
+        return _lever_retrofit(stage, zc, zr, p["retrofit"])
     plan = Plan("fortcore", CLASS[stage])
     full = Plan("fortcore", CLASS[stage])      # all stages; we keep only the requested one
     _stage1(full, p, zc, zr)
     _stage2(full)
     _stage3(full, zr)
     _stage4(full)
+    _lever_rooms(full, zr)
     plan.stages = [s for s in full.stages if s.label.startswith(f"s{stage}.")]
-    plan.manifest = _manifest(stage, zc, zr)
+    plan.manifest = _lever_manifest(_manifest(stage, zc, zr), stage, zr)
     plan.rooms = [r for r in full.rooms if r["stage"] <= stage]
     plan.workshops = full.workshops
     return plan
@@ -188,12 +200,12 @@ def _stage3(P: Plan, zr: int) -> None:
 
 
 def _stage4(P: Plan) -> None:
-    """Arm the trap hall: every third tile a weapon trap (the first 14), the rest alternate weapon/stone-fall."""
+    """Arm the trap hall: a stone-fall trap on every trap tile (41). No weapon traps: buildingplan fills a weapon
+    trap with any free weapon (picks, battle axes, crossbows; live L2) and quickfort's orders for them are iron
+    battle axes; the stage's only orders are mechanisms (rock)."""
     b = P.stage("s4.build", "build", orders=1, defense=1)
-    for u, v in _trap_tiles(2):
-        b.tile(u, v, ZE, "Tw")
-    for i, (u, v) in enumerate(_trap_tiles(3)):
-        b.tile(u, v, ZE, "Tw" if i % 2 == 0 else "Ts")
+    for u, v in _trap_tiles(2) + _trap_tiles(3):
+        b.tile(u, v, ZE, "Ts")
 
 
 def _trap_tiles(stage: int) -> list[tuple[int, int]]:
@@ -227,3 +239,70 @@ def _manifest(stage: int, zc: int, zr: int) -> dict:
         m["bridges"] = {n: {"role": ROLE[n], "fp": [FP[n][0], FP[n][1], ZE, FP[n][2], FP[n][3], ZE],
                             "levers": [list(x) for x in LEVERS[n]]} for n in sorted(bridges)}
     return m
+
+
+# ---------------------------------------------------------------- lever rooms and refuge levers (live L3)
+# Lever rooms: name -> (stage, (u0, v0, u1, v1)) at ze. gate assigns lever pullers (the burrow screen's unit
+# assignment) to the rooms whose bridges the mode raises and pulls a lever in a room with a puller present
+# first; siege keeps the rooms in the civ-alert list (in BREACH only the rooms behind the core seal B2).
+LEVER_ROOMS = {"dfllm-levers": (2, (-4, 35, -3, 41)),        # Z3 strip west of the gate road: O1 + B1 levers
+               "dfllm-levers-b2": (3, (-2, 44, -1, 46))}     # Z4 landing strip west of the civ stair: B2 levers
+# one more lever per bridge on the refuge level (zr), inside Tiefe+, east of the civilian stair: BREACH holds
+# every civilian in Tiefe+ (live L3: GATE_FAIL no_worker for O1, B1 and B2). Their own build stage, the last of
+# stage 3, so buildingplan gives the first mechanisms to the main levers (live L2); the runner merges the stage-3
+# manifest (O1, B2) when the project is done, i.e. after these three levers (one mechanism each; their links,
+# two mechanisms each, are gate's later jobs).
+REFUGE_LEVERS = {"B2": (4, 43), "O1": (4, 44), "B1": (4, 45)}
+
+
+def refuge_levers(zr: int) -> dict[str, tuple[int, int, int]]:
+    return {n: (u, v, zr) for n, (u, v) in REFUGE_LEVERS.items()}
+
+
+def _lever_rooms(P: Plan, zr: int) -> None:
+    for name, (stage, (u0, v0, u1, v1)) in LEVER_ROOMS.items():
+        P.stage(f"s{stage}.burrow", "burrow").ent(u0, v0, u1, v1, ZE, "a", f"name={name} create=true")
+    lv = P.stage("s3.lever", "build", orders=1, defense=1)
+    for u, v, w in refuge_levers(zr).values():
+        lv.tile(u, v, w, "Tl")
+
+
+def _lever_manifest(m: dict, stage: int, zr: int) -> dict:
+    for name, (st, _) in LEVER_ROOMS.items():
+        if stage >= st:
+            m["burrows"][name] = {"role": "other"}
+    if stage >= 3:
+        for n, p in refuge_levers(zr).items():
+            m["bridges"][n]["levers"].append(list(p))
+        ps = sorted(refuge_levers(zr).values())
+        m["zones"]["Z4"].append([min(p[0] for p in ps), min(p[1] for p in ps), zr,
+                                 max(p[0] for p in ps), max(p[1] for p in ps), zr])    # levers lie in Z4 (audit)
+    return m
+
+
+def _lever_retrofit(stage: int, zc: int, zr: int, kind: int) -> Plan:
+    """For a fort whose stages up to `stage` are done and were placed before live L3 (Castlerisen); the runner
+    records the project as fortcore stage `stage` reached. Re-placing whole stages would re-apply their zone
+    stages (barracks, refuge dormitory, pond).
+    `retrofit=1` (stage 2 or 3): only the lever rooms of the stages up to `stage`, a burrow-only project that is
+    done in one runner pass; its manifest fragment is just the rooms (`burrows`), so it never replaces a bridge's
+    lever list whatever order the projects finish in. Place it first: gate sees the rooms (pullers, the B2 room as
+    the BREACH fallback) at once instead of after three mechanisms.
+    `retrofit=2` (stage 3): the rooms again (idempotent) plus the refuge levers; its fragment is the stage's full
+    one with the refuge levers (the §11 merge is idempotent), merged when the levers are built."""
+    if stage not in (2, 3) or (kind == 2 and stage != 3):
+        # stage 4 would mark the trap stage as reached (runner history: params.stage, labels)
+        raise ValueError("fortcore retrofit: 1 = lever rooms (stage 2 or 3), 2 = rooms + refuge levers (stage 3)")
+    plan = Plan("fortcore", CLASS[stage])
+    k = plan.stage(f"s{stage}.lrooms", "burrow")
+    for name, (st, (u0, v0, u1, v1)) in LEVER_ROOMS.items():
+        if st <= stage:
+            k.ent(u0, v0, u1, v1, ZE, "a", f"name={name} create=true")
+    if kind == 1:
+        plan.manifest = {"v": 2, "burrows": {n: {"role": "other"} for n, (st, _) in LEVER_ROOMS.items() if st <= stage}}
+        return plan
+    lv = plan.stage("s3.lever", "build", orders=1, defense=1)
+    for u, v, w in refuge_levers(zr).values():
+        lv.tile(u, v, w, "Tl")
+    plan.manifest = _lever_manifest(_manifest(stage, zc, zr), stage, zr)
+    return plan

@@ -7,6 +7,9 @@
 -- Our own job without a worker for 200 ticks is cancelled (act.cancel_own_lever_job, the UI
 -- cancel) and the next pull goes to the backup lever.
 -- Pulls go through act.pull -> reqscript('lever').leverPullJob (lever.lua:4, never deduplicates).
+-- Lever rooms (live L3, the S3 fallback): manifest burrows named 'dfllm-levers*' hold levers; in SIEGE/DRILL/
+-- BREACH gate assigns lever pullers to them (act.burrow_units, the burrow screen) and pulls a lever with a
+-- puller present first; siege lists the allowed rooms in the civ alert (gate.rooms).
 local geom = require('dfllm.util.geom')
 
 local M = {name = 'gate', every = {ticks = 600}, critical = true, verbs = {}}
@@ -32,7 +35,11 @@ local pub     -- precomputed state part {bridges = {...}}
 local dirty
 local PULL    -- df.job_type.PullLever
 
-local function new_kpi(t0) return {dbl = 0, t0 = t0, raise = {}, pulls = 0, cancels = 0, links = 0, fails = {}} end
+-- take = ticks from our queued pull to the first worker seen, per bridge (last pull); pp = pulls a lever puller
+-- took; pa = puller assignments (live L3: O1's job was taken 156-243 ticks late)
+local function new_kpi(t0)
+  return {dbl = 0, t0 = t0, raise = {}, pulls = 0, cancels = 0, links = 0, fails = {}, take = {}, pp = 0, pa = 0}
+end
 
 local function flush(K)
   if dirty then K.persist.set('m.gate', st); dirty = false end
@@ -41,7 +48,7 @@ end
 local function runtime(name)
   local r = rt[name]
   if not r then
-    r = {levers = {}, linked = {}, bad = {}, nw = 0}
+    r = {levers = {}, linked = {}, bad = {}, nw = 0, pos = {}}
     rt[name] = r
   end
   return r
@@ -170,15 +177,16 @@ local function resolve(r, spec, now, urgent)
   r.sig, r.resolved = sig, now
   local b = (same and cached) or find_bridge(spec.fp) or cached
   r.bid = b and b.id or nil
-  r.levers, r.linked = {}, {}
-  local function add(lv, t)
+  r.levers, r.linked, r.pos = {}, {}, {}
+  local function add(lv, t, p)
     if #r.levers >= 4 or r.linked[lv.id] ~= nil then return end
     r.levers[#r.levers + 1] = lv.id
     r.linked[lv.id] = (t == nil) or (r.bid ~= nil and t[r.bid] == true)  -- unreadable link: usable
+    r.pos[lv.id] = p
   end
   for _, p in ipairs(spec.levers or {}) do
     local lv = find_at(p)
-    if lv and is_lever(lv) then add(lv, targets(lv)) end
+    if lv and is_lever(lv) then add(lv, targets(lv), p) end
   end
   -- stale manifest positions: levers linked to this bridge (one vector scan per RESOLVE_RETRY at most)
   if r.bid and not any_linked(r) and now - (r.scan_tick or -M.RESOLVE_RETRY) >= M.RESOLVE_RETRY then
@@ -186,7 +194,7 @@ local function resolve(r, spec, now, urgent)
     for _, lv in ipairs(df.global.world.buildings.other.TRAP) do      -- lever.lua:103
       if is_lever(lv) then
         local t = targets(lv)
-        if t and t[r.bid] then add(lv, t) end
+        if t and t[r.bid] then add(lv, t, {lv.x1, lv.y1, lv.z}) end
       end
     end
   end
@@ -211,13 +219,340 @@ local function linked_now(r, lid)
   return t == nil or (r.bid ~= nil and t[r.bid] == true)
 end
 
+---------------------------------------------------------------- lever rooms and pullers (live L3, S3 fallback)
+-- A lever room is a small manifest burrow named 'dfllm-levers*' (fortcore: the Z3 strip with the O1/B1 levers,
+-- the Z4 landing strip with the B2 levers). Live L3 drills: O1's pull was taken 156-243 ticks after queueing
+-- (the nearest idle dwarf walked up from the core), O1 rose at T+917/945/1,076. In SIEGE/DRILL/BREACH gate
+-- assigns M.PULLERS adult civilians (no soldiers, children, insane or moody dwarves; inside Kern+/Tiefe+ and
+-- nearest first) to every room whose bridges the mode raises (outer/inner in SIEGE/DRILL, core in BREACH):
+-- act.burrow_units, the burrow screen's unit list. They stay next to the levers, and pick() takes a lever in a
+-- room with a puller present first. A puller who is not in his room after PULLER_ARRIVE ticks, or who died,
+-- went insane, was drafted or fell into a mood is replaced (and not chosen again in this episode). A puller who
+-- gets thirsty or hungry is let go (the rooms hold no drink or food, and a burrow-held dwarf does not walk out to
+-- drink: live L3, 21 thirsty citizens in the alert burrow) and may serve again after a drink and a meal. Other
+-- modes release them. BREACH allows only rooms behind the core seal (a core lever, no outer/inner lever), and only
+-- while one of their bridges has no linked lever inside the refuge: siege puts the allowed rooms into the civ alert
+-- (gate.rooms); an attacker-side room, or the B2 landing while B2 may still be down, would draw fleeing civilians
+-- out of Tiefe+ toward the attackers. fortcore gives every bridge a lever inside Tiefe+; once it is linked the
+-- BREACH pulls go there. Without act.burrow_units nobody is assigned; the rooms still order the levers and stay
+-- in the alert list.
+M.ROOM_PREFIX = 'dfllm-levers'
+M.PULLERS = 2
+M.PULLER_ARRIVE = 600
+M.PULLER_RETRY = 600       -- a refused assignment is tried again after this
+M.PULLER_FILL = 100        -- a room that found too few candidates looks again after this (a census scan each time)
+M.PULLER_THIRST = 20000    -- counters2 thirst_timer / hunger_timer at which a puller is let go (economy's supply
+M.PULLER_HUNGER = 40000    -- alarm reads the same counters; DF shows 'thirsty' at 25,000 and 'hungry' at 50,000)
+M.ROOM_EVERY = 100         -- ticks between re-reading which manifest levers lie in which room
+local PULL_ROLES = {SIEGE = {outer = true, inner = true}, DRILL = {outer = true, inner = true}, BREACH = {core = true}}
+local PT = {x = 0, y = 0, z = 0}      -- scratch coord for burrow tile reads
+local pl                              -- runtime: {rooms = {<room> = {ids, at, skip, retry}}, warned}
+local rooms_c                         -- cached room list {tick, list}
+
+local function burrow(name)
+  if type(name) ~= 'string' then return nil end
+  local ok, b = pcall(dfhack.burrows.findByName, name)      -- Lua API.txt:2412
+  return ok and b or nil
+end
+
+local function on_tile(b, x, y, z)
+  if not b or x == nil then return false end
+  PT.x, PT.y, PT.z = x, y, z
+  local ok, r = pcall(dfhack.burrows.isAssignedTile, b, PT)   -- :2436
+  return ok and r == true
+end
+
+local function unit_pos(u)
+  if not u then return nil end
+  local ok, x, y, z = pcall(dfhack.units.getPosition, u)
+  if ok then return x, y, z end
+end
+
+-- the manifest's Kern+ and refuge burrow names (as siege/sense: role kern/refuge, refuge.burrow wins)
+local function core_burrows(man)
+  local kern, refuge
+  local names = {}
+  for name in pairs(type(man.burrows) == 'table' and man.burrows or {}) do names[#names + 1] = name end
+  table.sort(names)
+  for _, name in ipairs(names) do
+    local role = type(man.burrows[name]) == 'table' and man.burrows[name].role
+    if role == 'kern' and (kern == nil or name == 'Kern+') then kern = name end
+    if role == 'refuge' and (refuge == nil or name == 'Tiefe+') then refuge = name end
+  end
+  if type(man.refuge) == 'table' and type(man.refuge.burrow) == 'string' then refuge = man.refuge.burrow end
+  return kern or 'Kern+', refuge or 'Tiefe+'
+end
+
+-- existing rooms that hold manifest levers: {name, roles = {outer|inner|core}, bridges = {<b>}, c = lever centre}
+local function room_list(K, now)
+  if rooms_c and now >= rooms_c.tick and now - rooms_c.tick < M.ROOM_EVERY then return rooms_c.list end
+  local man = K.manifest()
+  local names, list = {}, {}
+  for name in pairs(type(man.burrows) == 'table' and man.burrows or {}) do
+    if type(name) == 'string' and name:sub(1, #M.ROOM_PREFIX) == M.ROOM_PREFIX then names[#names + 1] = name end
+  end
+  table.sort(names)
+  for _, name in ipairs(names) do
+    local b = burrow(name)
+    if b then
+      local rm, n, sx, sy, sz = {name = name, roles = {}, bridges = {}}, 0, 0, 0, 0
+      for _, bn in ipairs(bridge_names(man)) do
+        local spec = man.bridges[bn]
+        for _, p in ipairs(spec.levers or {}) do
+          if type(p) == 'table' and on_tile(b, p[1], p[2], p[3]) then
+            rm.bridges[bn], rm.roles[tostring(spec.role)] = true, true
+            n, sx, sy, sz = n + 1, sx + p[1], sy + p[2], sz + p[3]
+          end
+        end
+      end
+      if n > 0 then
+        rm.c = {x = sx // n, y = sy // n, z = sz // n}
+        list[#list + 1] = rm
+      end
+    end
+  end
+  rooms_c = {tick = now, list = list}
+  return list
+end
+
+-- every bridge of the room has a linked lever on a tile of the refuge burrow (gate's resolved levers)
+local function refuge_covers(K, rm)
+  local _, rn = core_burrows(K.manifest())
+  local rb = burrow(rn)
+  if not rb then return false end
+  for bn in pairs(rm.bridges) do
+    local r, ok = rt[bn], false
+    for _, lid in ipairs(r and r.levers or {}) do
+      local p = r.pos[lid]
+      if r.linked[lid] and type(p) == 'table' and on_tile(rb, p[1], p[2], p[3]) then ok = true; break end
+    end
+    if not ok then return false end
+  end
+  return true
+end
+
+-- BREACH: rooms behind the core seal only, and only while the refuge lacks a linked lever of their bridges (the
+-- B2 landing lies next to B2, which may still be down while attackers are inside Kern+)
+local function allowed(K, rm, mode)
+  if mode ~= 'BREACH' then return true end
+  return rm.roles.core == true and not rm.roles.outer and not rm.roles.inner and not refuge_covers(K, rm)
+end
+
+local function duty(K, rm, mode)
+  local want = PULL_ROLES[mode]
+  if not want or not allowed(K, rm, mode) then return false end
+  for role in pairs(rm.roles) do if want[role] then return true end end
+  return false
+end
+
+local function room_state(name)
+  local p = pl.rooms[name]
+  if not p then
+    p = {ids = {}, at = {}, skip = {}}
+    pl.rooms[name] = p
+  end
+  return p
+end
+
+-- assigned pullers of a room standing on its tiles now
+local function present(rm)
+  local p = pl.rooms[rm.name]
+  if not p or #p.ids == 0 then return 0 end
+  local b, n = burrow(rm.name), 0
+  for _, id in ipairs(p.ids) do
+    if on_tile(b, unit_pos(df.unit.find(id))) then n = n + 1 end
+  end
+  return n
+end
+
+local function puller_room(id)
+  for name, p in pairs(pl.rooms) do
+    for _, x in ipairs(p.ids) do if x == id then return name end end
+  end
+end
+
+local function counter(u, k)
+  local ok, v = pcall(function() return u.counters2[k] end)
+  return ok and type(v) == 'number' and v or 0
+end
+
+-- why a citizen cannot be (or stay) a lever puller: 'gone' = dead, insane (isCitizen is sane only), no citizen,
+-- child, soldier or in a strange mood (df.mood_type None = -1); 'needs' = thirsty or hungry; nil = fit
+local function unfit(u)
+  if not u then return 'gone' end
+  local U = dfhack.units
+  local ok, r = pcall(function()
+    if U.isDead(u) or not U.isCitizen(u) or not U.isAdult(u) then return 'gone' end
+    if u.military.squad_id >= 0 then return 'gone' end
+    local m = u.mood
+    if type(m) == 'number' and m >= 0 then return 'gone' end
+    return false
+  end)
+  if not ok then return 'gone' end
+  if r then return r end
+  if counter(u, 'thirst_timer') >= M.PULLER_THIRST or counter(u, 'hunger_timer') >= M.PULLER_HUNGER then
+    return 'needs'
+  end
+  return nil
+end
+
+-- the burrow's unit list as DF holds it (after a load our runtime is empty); nil if unreadable
+local function live_units(name)
+  local b = burrow(name)
+  if not b then return nil end
+  local ok, ids = pcall(function()
+    local r = {}
+    for _, id in ipairs(b.units) do r[#r + 1] = id end
+    return r
+  end)
+  return ok and ids or nil
+end
+
+local function same_set(a, b)
+  if #a ~= #b then return false end
+  local s = {}
+  for _, x in ipairs(a) do s[x] = true end
+  for _, x in ipairs(b) do if not s[x] then return false end end
+  return true
+end
+
+-- nearest eligible citizens inside Kern+/Tiefe+ (z counts double: stairs), outside ones only as a last resort
+local function fill(K, rm, want, p, taken, now, home)
+  local cu = K.census.u
+  if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then return end
+  local c, cand = rm.c, {}
+  for _, id in ipairs(cu.ids) do
+    if not taken[id] and not p.skip[id] then
+      local u = df.unit.find(id)
+      if unfit(u) == nil then
+        local x, y, z = unit_pos(u)
+        if x then
+          local d = math.max(math.abs(x - c.x), math.abs(y - c.y)) + 2 * math.abs(z - c.z)
+          if not (on_tile(home.kern, x, y, z) or on_tile(home.refuge, x, y, z)) then d = d + 1000 end
+          cand[#cand + 1] = {id = id, d = d}
+        end
+      end
+    end
+  end
+  table.sort(cand, function(a, b) if a.d ~= b.d then return a.d < b.d end return a.id < b.id end)
+  for _, e in ipairs(cand) do
+    if #want >= M.PULLERS then break end
+    want[#want + 1] = e.id
+    taken[e.id], p.at[e.id] = rm.name, now
+  end
+end
+
+-- level-triggered: every room's unit list = the pullers the mode wants (none outside SIEGE/DRILL/BREACH)
+local function pullers_step(K, now)
+  local set = rawget(K.act, 'burrow_units')   -- [S3]: act + contract.ACT entry pending (live engineer)
+  local mode = K.mode()
+  if not set then
+    if PULL_ROLES[mode] and not pl.warned and #room_list(K, now) > 0 then
+      pl.warned = true
+      K.log('warn', 'gate: act.burrow_units missing, the lever rooms get no pullers')
+    end
+    return
+  end
+  local rooms = room_list(K, now)
+  if #rooms == 0 then return end
+  local kn, rn = core_burrows(K.manifest())
+  local home = {kern = burrow(kn), refuge = burrow(rn)}
+  local taken = {}
+  for _, rm in ipairs(rooms) do
+    local p = pl.rooms[rm.name]
+    if not p then                                 -- first look after a load: adopt what DF holds
+      p = room_state(rm.name)
+      p.ids = live_units(rm.name) or {}
+      for _, id in ipairs(p.ids) do p.at[id] = now end
+    end
+    for _, id in ipairs(p.ids) do taken[id] = rm.name end
+  end
+  for _, rm in ipairs(rooms) do
+    local p = pl.rooms[rm.name]
+    local want, why_of = {}, {}
+    if duty(K, rm, mode) then
+      local b = burrow(rm.name)
+      for _, id in ipairs(p.ids) do
+        local u = df.unit.find(id)
+        local why = unfit(u)
+        if not why and not on_tile(b, unit_pos(u)) and now - (p.at[id] or now) >= M.PULLER_ARRIVE then why = 'away' end
+        if why then
+          if why ~= 'needs' then p.skip[id] = true end   -- thirsty/hungry: may serve again after a drink and a meal
+          taken[id], why_of[id] = nil, why
+        else
+          want[#want + 1] = id
+        end
+      end
+      if #want < M.PULLERS and now >= (p.fill_at or now) then
+        fill(K, rm, want, p, taken, now, home)
+        p.fill_at = #want < M.PULLERS and now + M.PULLER_FILL or nil   -- too few candidates: no scan per step
+      end
+    elseif next(p.skip) or next(p.at) or p.fill_at then
+      p.skip, p.at, p.fill_at = {}, {}, nil       -- the next episode starts afresh
+    end
+    if not same_set(want, p.ids) and now >= (p.retry or now) then
+      local ok = set(rm.name, want)
+      if ok then
+        local had, keep, new, gone = {}, {}, 0, {}
+        for _, id in ipairs(p.ids) do had[id] = true end
+        for _, id in ipairs(want) do keep[id] = true; if not had[id] then new = new + 1 end end
+        for _, id in ipairs(p.ids) do
+          if not keep[id] then
+            if taken[id] == rm.name then taken[id] = nil end
+            if why_of[id] then gone[#gone + 1] = id .. ':' .. why_of[id] end
+          end
+        end
+        if new > 0 then st.kpi.pa, dirty = (st.kpi.pa or 0) + new, true end
+        K.log('info', 'gate: lever pullers %s = {%s} (%s)%s', rm.name, table.concat(want, ','), mode,
+              #gone > 0 and (', let go ' .. table.concat(gone, ',')) or '')
+        p.ids, p.retry = want, nil
+      else
+        p.retry = now + M.PULLER_RETRY
+      end
+    end
+  end
+end
+
+-- lever order for a pull: 0 = in an allowed room with a puller present, 1 = on a tile of the burrow the civ alert
+-- holds the civilians in (BREACH: the refuge if it exists, else Kern+, as siege), 2 = in another allowed room,
+-- 3 = the rest; manifest order inside a class (live L3: in BREACH the levers in Kern+ had no worker, GATE_FAIL
+-- no_worker x3). In BREACH a linked refuge lever thus comes before the B2 landing.
+local function order(K, r, cand, now)
+  local mode = K.mode()
+  local kn, rn = core_burrows(K.manifest())
+  local home = mode == 'BREACH' and burrow(rn) or nil
+  home = home or burrow(kn)
+  local rooms, pres = {}, {}
+  for _, rm in ipairs(room_list(K, now)) do
+    if allowed(K, rm, mode) then rooms[#rooms + 1] = {rm = rm, b = burrow(rm.name)} end
+  end
+  local function class(lid)
+    local p = r.pos[lid]
+    if type(p) ~= 'table' then return 3 end
+    local room
+    for _, e in ipairs(rooms) do
+      if on_tile(e.b, p[1], p[2], p[3]) then room = e.rm; break end
+    end
+    if room then
+      if pres[room.name] == nil then pres[room.name] = present(room) end
+      if pres[room.name] > 0 then return 0 end
+    end
+    if on_tile(home, p[1], p[2], p[3]) then return 1 end
+    return room and 2 or 3
+  end
+  local cls, idx = {}, {}
+  for i, lid in ipairs(cand) do cls[lid], idx[lid] = class(lid), i end
+  table.sort(cand, function(a, b) if cls[a] ~= cls[b] then return cls[a] < cls[b] end return idx[a] < idx[b] end)
+end
+
 -- linked lever to pull next: first one that has not failed in this epoch, rotating after failures;
 -- the link is re-checked right before the pull (a lever may have been unlinked or removed)
-local function pick(r)
+local function pick(K, r, now)
   local cand = {}
   for _, lid in ipairs(r.levers) do if r.linked[lid] then cand[#cand + 1] = lid end end
   local n = #cand
   if n == 0 then return nil end
+  if n > 1 then order(K, r, cand, now) end
   local start
   for i, lid in ipairs(cand) do if not r.bad[lid] then start = i; break end end
   if not start then
@@ -254,6 +589,21 @@ local function down_guard(K, name)
   local d = type(h) == 'table' and type(h.near_bridge) == 'table' and h.near_bridge[name]
   if d and d >= 0 and d <= M.DOWN_GUARD then return 'down refused: hostile within ' .. M.DOWN_GUARD .. ' tiles' end
   return nil
+end
+
+-- our pull left the queue and the bridge moved: how long the job waited for its worker (live L3 KPI)
+local function note_take(K, name, job, now)
+  local t = (job.taken or now) - job.queued
+  local by = job.wid and puller_room(job.wid)
+  st.kpi.take[name] = t
+  if by then st.kpi.pp = (st.kpi.pp or 0) + 1 end
+  dirty = true
+  K.log('info', 'gate: %s pull taken %d ticks after queueing%s', name, t, by and (' by a puller of ' .. by) or '')
+end
+
+local function unit_id(w)
+  local ok, id = pcall(function() return w.id end)
+  return ok and math.type(id) == 'integer' and id or nil
 end
 
 ---------------------------------------------------------------- desired state
@@ -306,9 +656,12 @@ local function control(K, name, spec, now)
     local lv = df.building.find(r.job.lever)
     local j = lv and job_on(lv, r.job.id)
     if not j then                                     -- done, or dropped by DF
-      if s == r.job.before then r.bad[r.job.lever] = true end
+      if s == r.job.before then r.bad[r.job.lever] = true
+      else note_take(K, name, r.job, now) end
       r.job, r.settle = nil, now + M.SETTLE
     else
+      local w0 = worker(j)
+      if w0 and not r.job.taken then r.job.taken, r.job.wid = now, unit_id(w0) end
       local dir = r.job.before == 'up' and 'down' or 'up'
       -- stale: the want changed, lowering became unsafe, or the bridge moved without us (our
       -- pull would now toggle it back)
@@ -316,7 +669,7 @@ local function control(K, name, spec, now)
                     or s ~= r.job.before
       -- a citizen stepped onto the footprint before our lowering pull was done: cancel it
       if not stale and dir == 'down' and citizens_on(K, name, spec.fp) ~= 0 then stale = 'blocked' end
-      local has_worker = worker(j) ~= nil
+      local has_worker = w0 ~= nil
       if not stale then
         if has_worker then r.job.nw = nil
         else
@@ -361,7 +714,7 @@ local function control(K, name, spec, now)
     K.log('warn', 'gate: raising %s with a citizen on it after %d ticks', name, now - r.block_since)
   end
   r.block_since, r.block_ev = nil, nil
-  local lid = pick(r)
+  local lid = pick(K, r, now)
   if not lid then r.stuck, r.resolved = 'no_lever', nil; return s end
   r.last_lever = lid
   local ok, job = K.act.pull(lid)
@@ -472,13 +825,15 @@ function M.init(K)
     if type(p.kpi) == 'table' then
       local function int(v) return type(v) == 'number' and math.tointeger(v) or nil end
       local k = new_kpi(int(p.kpi.t0) or now)
-      for _, f in ipairs({'dbl', 'pulls', 'cancels', 'links'}) do k[f] = int(p.kpi[f]) or 0 end
+      for _, f in ipairs({'dbl', 'pulls', 'cancels', 'links', 'pp', 'pa'}) do k[f] = int(p.kpi[f]) or 0 end
       for n, v in pairs(type(p.kpi.raise) == 'table' and p.kpi.raise or {}) do k.raise[n] = int(v) end
+      for n, v in pairs(type(p.kpi.take) == 'table' and p.kpi.take or {}) do k.take[n] = int(v) end
       for _, f in ipairs(type(p.kpi.fails) == 'table' and p.kpi.fails or {}) do k.fails[#k.fails + 1] = f end
       st.kpi = k
     end
   end
   rt, pub, dirty, PULL = {}, nil, false, nil
+  pl, rooms_c = {rooms = {}}, nil
   M.every = {ticks = FAST_MODES[K.mode()] and M.FAST or M.SLOW}
 end
 
@@ -492,6 +847,7 @@ function M.step(K, budget, ctx)
   for name in pairs(gone) do
     if not valid_spec((man.bridges or {})[name]) then rt[name], st.br[name], dirty = nil, nil, true end
   end
+  pullers_step(K, now)
   for _, name in ipairs(bridge_names(man)) do
     ensure_default(K, name, now)
     states[name] = control(K, name, man.bridges[name], now)
@@ -541,11 +897,35 @@ function M.state(K, bridge)
 end
 
 function M.kpi(K)
-  local raise, fails = {}, {}
+  local raise, fails, take, pullers = {}, {}, {}, {}
   for n, v in pairs(st.kpi.raise) do raise[n] = v end
   for i, f in ipairs(st.kpi.fails) do fails[i] = f end
+  for n, v in pairs(st.kpi.take) do take[n] = v end
+  for n, p in pairs(pl.rooms) do pullers[n] = #p.ids end
   return {double_toggles = st.kpi.dbl, last_raise_ticks = raise, pulls = st.kpi.pulls,
-          cancels = st.kpi.cancels, links = st.kpi.links or 0, fails = fails, since = st.kpi.t0}
+          cancels = st.kpi.cancels, links = st.kpi.links or 0, fails = fails, since = st.kpi.t0,
+          take_ticks = take, puller_pulls = st.kpi.pp or 0, puller_assigns = st.kpi.pa or 0, pullers = pullers}
+end
+
+-- public (WP5 extension, live L3): the lever rooms allowed in `mode` (default: now) that exist, sorted; siege
+-- adds them to the civ-alert burrow list (BREACH: only the rooms behind the core seal whose bridges have no
+-- linked lever inside the refuge yet)
+function M.rooms(K, mode)
+  mode = mode or K.mode()
+  local r = {}
+  for _, rm in ipairs(room_list(K, K.now().tick)) do
+    if allowed(K, rm, mode) then r[#r + 1] = rm.name end
+  end
+  return r
+end
+
+-- public (WP5 extension, live L3): assigned pullers standing in an allowed room that holds a lever of `bridge`
+function M.pullers(K, bridge)
+  local mode, n = K.mode(), 0
+  for _, rm in ipairs(room_list(K, K.now().tick)) do
+    if rm.bridges[bridge] and allowed(K, rm, mode) then n = n + present(rm) end
+  end
+  return n
 end
 
 function M.reset_kpi(K)
@@ -558,6 +938,7 @@ M.on = {
   MODE = function(K, ev)
     local now = ev.tick or K.now().tick
     local man = K.manifest()
+    pullers_step(K, now)                         -- T0: pullers walk to the levers; PEACE etc. release them
     for _, name in ipairs(bridge_names(man)) do
       local r = runtime(name)
       resolve(r, man.bridges[name], now)

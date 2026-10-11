@@ -63,6 +63,23 @@ T.test('tile(): legend classes, hidden is nil, designations, buildings', functio
   T.eq(t(3, 1).c, '_')
 end)
 
+T.test('reach(): walk groups through canWalkBetween; bad args and faults answer true', function()
+  local W = world()
+  local saved = dfhack.maps.canWalkBetween
+  local asked = {}
+  dfhack.maps.canWalkBetween = function(a, b) asked[#asked + 1] = {a.x, b.x}; return b.x ~= 9 end
+  local function r(a, b) local ok, v = W.K.call('snapshot', 'reach', a, b); T.ok(ok); return v end
+  T.eq(r({x = 1, y = 1, z = Z}, {x = 2, y = 1, z = Z}), true)
+  T.eq(r({x = 1, y = 1, z = Z}, {x = 9, y = 1, z = Z}), false, 'other walk group')
+  T.eq(asked, {{1, 2}, {1, 9}})
+  T.eq(r(nil, {x = 9, y = 1, z = Z}), true, 'no position: unknown')
+  T.eq(r({x = 1.5, y = 1, z = Z}, {x = 9, y = 1, z = Z}), true, 'not integer: unknown')
+  dfhack.maps.canWalkBetween = function() error('boom') end
+  T.eq(r({x = 1, y = 1, z = Z}, {x = 9, y = 1, z = Z}), true, 'a fault inside is no snapshot fault')
+  T.eq(#W.find_events('KERN_FAULT'), 0)
+  dfhack.maps.canWalkBetween = saved
+end)
+
 T.test('tile(): a wall with a designation job (DF cleared designation.dig) reads dig=job', function()
   local W = world()
   -- live L1: DF posts a Dig job and clears designation.dig while the miner works the wall

@@ -25,7 +25,9 @@ local function world(opts)
   return W, E
 end
 
-local function days(W, n) for _ = 1, n do W.run(1200, {skip = 100}) end end
+-- live L4: the daily run is a task list over frames (one DF command per frame); settle finishes a started run
+local function settle(W) for _ = 1, 40 do W.run(1) end end
+local function days(W, n) for _ = 1, n do W.run(1200, {skip = 100}); settle(W) end end
 local function count_acts(W, fn, arg1)
   local n = 0
   for _, a in ipairs(W.find_acts(fn)) do if arg1 == nil or a.args[1] == arg1 then n = n + 1 end end
@@ -124,7 +126,7 @@ end)
 
 T.test('STOCK_LOW on change only; supply order sized from the deficit, never duplicated', function()
   local W = world{setup = function(W) for _ = 1, 10 do F.item(W, 'DRINK', {stack_size = 5}) end end}
-  W.run(1)
+  settle(W)
   local s = W.state()
   T.eq(s.stock.drink_d, 94)                       -- 50 drinks / (10 dwarves * 0.053)
   local low = W.find_events('STOCK_LOW')
@@ -149,22 +151,62 @@ T.test('STOCK_LOW on change only; supply order sized from the deficit, never dup
 end)
 
 T.test('empty barrels: below 4 a MakeBarrel order (live L1b: brewing stalled without one)', function()
-  local W = world{barrels = 0, setup = function(W)
-    F.item(W, 'BARREL', {_contents = {{id = 1}}})                  -- a full barrel does not count
-    F.item(W, 'BARREL', {})
-  end}
-  W.run(1)
+  local function run(drinks, logs)
+    local W = world{barrels = 0, setup = function(W)
+      F.item(W, 'BARREL', {_contents = {{id = 1}}})                  -- a full barrel does not count
+      F.item(W, 'BARREL', {})
+      F.item(W, 'DRINK', {stack_size = drinks})
+      F.workshop(W, 'Carpenters')
+      for _ = 1, logs do F.item(W, 'WOOD', {}) end
+    end}
+    settle(W)
+    local b
+    for _, a in ipairs(W.find_acts('workorder')) do if a.args[1].tag == 'dfllm:barrel' then b = a.args[1] end end
+    return W, b
+  end
+  local W, b = run(60, 30)                                         -- 113 drink days: below the target
   T.eq(W.K.census.i.barrels_empty, 1)
-  local b
-  for _, a in ipairs(W.find_acts('workorder')) do if a.args[1].tag == 'dfllm:barrel' then b = a.args[1] end end
   T.ok(b, 'barrel order')
   T.eq({b.job, b.material_category, b.amount_total}, {'MakeBarrel', {'wood'}, 3})
+  T.eq(b.item_conditions, {{condition = 'AtLeast', value = 21, item_type = 'WOOD'}}, 'the 20-log floor stays')
   T.eq(F.bad_runs(W), {})
+  local _, b2 = run(60, 12)
+  T.eq(b2, nil, '12 logs, 113 drink days: the wood floor holds')
+  -- 18 drink days (< nofloor_days 30): the stills come before economy's own wood floor
+  local W3, b3 = run(10, 12)
+  T.ok(b3, 'barrels from the floor logs')
+  T.eq({b3.amount_total, b3.item_conditions}, {3, {{condition = 'AtLeast', value = 1, item_type = 'WOOD'}}})
+  local warned = false
+  for _, l in ipairs(W3.logs) do if tostring(l.msg):find('may use the wood floor', 1, true) then warned = true end end
+  T.ok(warned, 'logged')
+end)
+
+T.test('barrels: no runaway (live L1b: 34 barrels) - only while brewing is due, capped per citizen', function()
+  local function run(drinks, barrels, full)
+    local W = world{barrels = 0, setup = function(W)
+      for _ = 1, barrels do F.item(W, 'BARREL', {}) end
+      for _ = 1, full do F.item(W, 'BARREL', {_contents = {{id = 1}}}) end
+      F.item(W, 'DRINK', {stack_size = drinks})
+      F.item(W, 'FOOD', {stack_size = 500, subtype = 1})
+      F.workshop(W, 'Carpenters')
+      for _ = 1, 200 do F.item(W, 'WOOD', {}) end
+    end}
+    settle(W)
+    for _, a in ipairs(W.find_acts('workorder')) do if a.args[1].tag == 'dfllm:barrel' then return a.args[1].amount_total end end
+    return 0
+  end
+  T.eq(run(10, 0, 0), 4, 'no empty barrel, drink low: 4')
+  T.eq(run(1000, 0, 0), 0, 'drink 1886 days (>= 150 % of 170): brewing is not due, no barrels')
+  T.eq(run(110, 1, 6), 1, 'drink 207 days, 10 citizens: cap 8 barrels, 7 exist: one more')
+  T.eq(run(110, 0, 8), 0, 'cap reached: none although none is empty')
+  -- below the drink target (113 days) the cap is max_total: barrels full of food must not stall the stills
+  T.eq(run(60, 0, 8), 4, 'drink short: cap 30')
+  T.eq(run(60, 0, 30), 0, 'max_total holds even then')
 end)
 
 T.test('a refused supply order is retried after 3 days, not daily', function()
   local W = world{setup = function(W) W.act_result('workorder', function() return false, 'bad json' end) end}
-  W.run(1)
+  settle(W)
   local n1 = count_acts(W, 'workorder')
   T.eq(n1, 2, 'drink and food')
   days(W, 2)
@@ -175,7 +217,7 @@ end)
 
 T.test('stock recovers then drops again: a second STOCK_LOW', function()
   local W = world{setup = function(W) for _ = 1, 10 do F.item(W, 'DRINK', {stack_size = 5}) end end}
-  W.run(1)
+  settle(W)
   local v = df.global.world.items.other.DRINK
   for i = 0, #v - 1 do v[i].stack_size = 200 end                -- 2,000 drinks: recovered
   days(W, 1)
@@ -192,7 +234,7 @@ T.test('staged imports: migrants, mason, smelter, fuel, forge; each once, then s
   days(W, 1)
   T.eq(count_acts(W, 'orders_import'), 0)
   W.event('REPORT', {type = 'MIGRANT_ARRIVAL', text = 'Some migrants have arrived.'})
-  W.run(1)
+  settle(W)
   W.set_census('u', F.census_u({1, 2, 3, 4, 5, 6, 7, 11, 12, 13}))
   days(W, 1)
   T.eq(W.find_events('MIGRANTS')[1].d.n, 3)
@@ -285,7 +327,7 @@ end)
 
 T.test('cancel loop: CANCEL_LOOP once per job and day, suspend attempt, one recheck', function()
   local W = world{setup = function(W) F.order(W, {job_type = 0, _name = 'Brew drink', amount_left = 5}) end}
-  W.run(1)
+  settle(W)
   for _ = 1, 7 do
     W.event('REPORT', {type = 'CANCEL_JOB', text = 'Urist McBrew, Brewer cancels Brew Drink: Needs empty barrel.'})
   end
@@ -296,6 +338,7 @@ T.test('cancel loop: CANCEL_LOOP once per job and day, suspend attempt, one rech
   T.eq(count_acts(W, 'order_suspend'), 1)
   local rech = count_acts(W, 'orders', 'recheck')
   W.run(1200, {skip = 100})                     -- next day: counting starts over
+  settle(W)
   for _ = 1, 5 do W.event('REPORT', {type = 'CANCEL_JOB', text = 'X cancels Brew Drink: Needs empty barrel.'}) end
   W.run(1)
   T.eq(#W.find_events('CANCEL_LOOP'), 2)
@@ -316,8 +359,39 @@ T.test('labormanager status: starving postings parsed', function()
       return true, ''
     end)
   end}
-  W.run(1)
+  settle(W)
   T.eq(W.state().labor.starving, 3)
+end)
+
+T.test('labormanager: a stale backlog is no starvation KPI (live L2/L3: 504 old Gather Plants postings)', function()
+  local E = fresh('economy')
+  T.eq({E.parse_status('labor monitor: 504 starving postings (> 1200 ticks), oldest Gather Plants at 295072 ticks')},
+       {504, 295072, 'Gather Plants'})
+  T.eq({E.parse_status('job board: 12 postings resolved, avg wait 30 ticks, longest 90 ticks; 2 starving (> 1200 ticks, oldest 1500 ticks)')},
+       {2, 1500})
+  T.eq({E.parse_status('starving=4 oldest=7 (1300 ticks)')}, {4, 1300})
+  T.eq({E.parse_status('labor monitor: 0 starving postings (> 1200 ticks)')}, {0})
+  local out = 'labor monitor: 504 starving postings (> 1200 ticks), oldest Gather Plants at 295072 ticks'
+  local got = {}
+  local W = world{setup = function(W)
+    W.load({name = 'baseline', every = {ticks = 33600}, labor_day = function(K, n) got[#got + 1] = n end})
+    W.act_result('run', function(cmd, a1)
+      if cmd == 'labormanager' and a1 == 'status' then return true, out end
+      return true, ''
+    end)
+  end}
+  days(W, 3)
+  T.eq(W.state().labor.starving, 504, 'three days to learn the floor')
+  days(W, 1)
+  T.eq(W.state().labor.starving, 0, 'the 504 old postings are a stale floor')
+  out = 'labor monitor: 520 starving postings (> 1200 ticks), oldest Gather Plants at 300000 ticks'
+  days(W, 1)
+  T.eq(W.state().labor.starving, 16, 'new starving postings above the floor still count')
+  out = 'labor monitor: 7 starving postings (> 1200 ticks), oldest Brew drink at 1800 ticks'
+  days(W, 1)
+  T.eq(W.state().labor.starving, 7, 'nothing stale any more: all count')
+  T.eq(got[#got], 7, 'baseline gets the KPI count')
+  T.ok(W.persist_raw['dfllm.m.economy']:find('"stale":[]', 1, true))
 end)
 
 T.test('supply alarm: >= 2 thirsty citizens or drink < 10 days -> alarm(), DECISION_NEEDED thirst weekly', function()
@@ -463,6 +537,8 @@ local function tool_world(opts)
     W.subdefs[1] = {id = 'ITEM_WEAPON_PICK', skill_melee = df.job_skill.MINING, skill_ranged = -1}
     W.subdefs[2] = {id = 'ITEM_WEAPON_AXE_BATTLE', skill_melee = df.job_skill.AXE, skill_ranged = -1}
     W.subdefs[3] = {id = 'ITEM_WEAPON_CROSSBOW', skill_melee = -1, skill_ranged = df.job_skill.CROSSBOW}
+    W.subdefs[4] = {id = 'ITEM_AMMO_BOLTS'}
+    if (opts.bolts or 25) > 0 then F.item(W, 'AMMO', {subtype = 4, stack_size = opts.bolts or 25}) end   -- hunters' ammo
     for _ = 1, opts.picks or 3 do F.item(W, 'WEAPON', {subtype = 1}) end
     F.item(W, 'WEAPON', {subtype = 1, flags = {forbid = true}})
     for _ = 1, opts.axes or 2 do F.item(W, 'WEAPON', {subtype = 2}) end
@@ -578,7 +654,7 @@ end)
 T.test('D-03 rule: idle > 40 % for 3 days -> one useful backlog item, never filler digging', function()
   local W = world{cit = 4, setup = function(W) for _ = 1, 40 do F.item(W, 'BOULDER', {}) end end}
   W.unit(1).job.current_job, W.unit(2).job.current_job = nil, nil
-  W.run(1)
+  settle(W)
   T.eq(W.state().labor.idle, 50)
   local idle_orders = function()
     local n = 0
@@ -602,7 +678,7 @@ T.test('D-03 variants: off, immediate, only in PEACE, combine when nothing else'
   for _, a in ipairs(W.find_acts('workorder')) do T.ok(not a.args[1].tag:find('idle', 1, true)) end
   local W2 = world{cit = 2, decisions = {['D-03'] = 'immediate'}, setup = setup}
   W2.unit(1).job.current_job = nil
-  W2.run(1)
+  settle(W2)
   local last = W2.find_acts('workorder')
   T.eq(last[#last].args[1].tag, 'dfllm:idle_blocks')
   local W3 = world{cit = 2, decisions = {['D-03'] = 'immediate'}, mode = 'ALERT', setup = setup}
@@ -611,7 +687,7 @@ T.test('D-03 variants: off, immediate, only in PEACE, combine when nothing else'
   for _, a in ipairs(W3.find_acts('workorder')) do T.ok(not a.args[1].tag:find('idle', 1, true)) end
   local W4 = world{cit = 2, decisions = {['D-03'] = 'immediate'}}   -- no boulders: combine
   W4.unit(1).job.current_job = nil
-  W4.run(1)
+  settle(W4)
   T.ok(F.has(F.runs(W4), 'combine all -q'))
   T.eq(F.bad_runs(W4), {})
 end)

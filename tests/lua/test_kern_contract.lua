@@ -111,7 +111,7 @@ T.test('R2 slow calls decay and demoted modules are promoted after 10 quiet minu
   kern.stop()
 end)
 
-T.test('dfllm adopt on an unmarked save: marker, year1 phases, all 16 real modules, status, selftest', function()
+T.test('dfllm adopt on an unmarked save: marker, year1 phases, all 17 real modules, status, selftest', function()
   local REPO = debug.getinfo(1, 'S').source:sub(2):gsub('\\', '/'):gsub('/tests/lua/[^/]+$', '')
   local S = require('siege_world')
   local W = H.world{tag = 'adopt', marker = false, units = S.fort_units()}
@@ -128,14 +128,14 @@ T.test('dfllm adopt on an unmarked save: marker, year1 phases, all 16 real modul
   chunk('status')
   chunk('selftest', 'quick')
   print = saved_print
-  T.ok(out[1]:find('^dfllm: booted region1 %(16 modules'), out[1])
+  T.ok(out[1]:find('^dfllm: booted region1 %(17 modules'), out[1])
   local marker = json.decode(W.persist_raw['dfllm'])
   T.eq({marker.v, marker.boots, marker.acceptance}, {2, 1, 0})
   local plan = json.decode(W.persist_raw['dfllm.plan'])
   T.eq(plan.phases.phases[1].id, 'P0')
   local text = table.concat(out, '\n')
   T.ok(text:find('kernel %d+ ms/s'), text)
-  T.ok(not text:find('DISABLED'), text)
+  T.ok(not text:find('DISABLED'), text .. '\n' .. H.read(W.sd .. '/kern.log'))
   T.ok(text:find('dfllm selftest: %d+ pass'), text)
   T.eq(C.check_state(kern.K().view()), {})          -- the composed doc (a decoded file drops nulls)
   T.eq(#H.find(H.events(W), 'KERN_FAULT'), 0)

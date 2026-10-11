@@ -36,7 +36,7 @@ def test_snapshot_export_is_contract_valid():
     snap = w.snapshot(sid="c200", purpose="audit", tick=1333056)
     assert S.validate("snapshot", snap) == []
     assert snap["bridges"] == {"B1": "down", "B2": "down", "O1": "down"}
-    assert len(snap["traps"]) == 41 and {t[3] for t in snap["traps"]} == {"W", "S"}
+    assert len(snap["traps"]) == 41 and {t[3] for t in snap["traps"]} == {"S"}      # live L3: no weapon traps
     back = World.from_snapshot(snap)
     assert back.snapshot(sid="c200", purpose="audit", tick=1333056)["rows"] == snap["rows"]
 

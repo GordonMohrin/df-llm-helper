@@ -100,12 +100,13 @@ def test_fortcore_stage_projects():
     assert S.validate("manifest", m) == []
     assert m == merge_manifest(m, docs[2]["manifest"])        # cumulative fragments merge idempotently
     roles = {n: (b["role"], len(b["levers"])) for n, b in m["bridges"].items()}
-    assert roles == {"O1": ("outer", 2), "B1": ("inner", 2), "B2": ("core", 2)}
+    assert roles == {"O1": ("outer", 3), "B1": ("inner", 3), "B2": ("core", 3)}     # live L3: + 1 in Tiefe+
     o1 = m["bridges"]["O1"]["fp"]
     assert o1[3] - o1[0] + 1 == 3 and o1[2] == o1[5]
     civ, mil = m["stairs"]["civ"][0], m["stairs"]["mil"][0]
     assert civ[:2] != mil[:2] and civ[2] == m["refuge"]["anchor"][2]
-    assert set(m["burrows"]) == {"Kern+", "Tiefe+"} and m["killboxes"][0]["id"] == "K1"
+    assert set(m["burrows"]) == {"Kern+", "Tiefe+", "dfllm-levers", "dfllm-levers-b2"}
+    assert m["killboxes"][0]["id"] == "K1"
     z2 = sum((b[3] - b[0] + 1) * (b[4] - b[1] + 1) for b in m["zones"]["Z2"])
     assert z2 == len(fortcore.hall_tiles()) == 45
     assert {w["type"] for w in m["workshops"]} == {"Carpenters", "Masons", "Craftsdwarfs", "Still", "Kitchen", "Mechanics"}
@@ -123,10 +124,12 @@ def test_fortcore_traps():
     mats = [d["materials"] for d in all_docs("fortcore")]
     armed = sum(m.get("weapon_trap", 0) + m.get("stonefall_trap", 0) for m in mats)
     assert armed >= 30 and not any("cage_trap" in m for m in mats)
-    assert armed == 41 and mats[3]["weapon_trap"] == 28 and mats[3]["stonefall_trap"] == 13
+    # live L2/L3: no weapon traps (buildingplan put a pick and a battle axe into them, quickfort ordered iron
+    # battle axes); stage 4 needs only mechanisms
+    assert armed == 41 and mats[3] == {"stonefall_trap": 41, "mechanism": 41}
     # live L2: the bridges, levers and links of stages 2-3 never wait behind a trap (mechanisms, weapons)
     assert not any("weapon_trap" in m or "stonefall_trap" in m for m in mats[:3])
-    assert mats[1]["mechanism"] == 2 + 2 * 2 and mats[2]["mechanism"] == 4 + 4 * 2
+    assert mats[1]["mechanism"] == 2 + 2 * 2 and mats[2]["mechanism"] == 7 + 7 * 2    # 4 main + 3 refuge levers
 
 
 def test_moodable_workshops_complete():
@@ -164,7 +167,7 @@ def test_rooms_touch_the_anchor_row_only_through_the_doorway(tpl):
 
 def test_list_templates():
     names = [t["tpl"] for t in bp.list_templates()]
-    assert names == TPLS and len(names) == 12             # + furnaces, office, captives (live L1)
+    assert names == TPLS and len(names) == 13             # + furnaces, office, captives (live L1), cistern (L3)
     assert all(t["about"] for t in bp.list_templates())
 
 

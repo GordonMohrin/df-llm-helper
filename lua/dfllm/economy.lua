@@ -1,9 +1,56 @@
--- economy (WP8): item census K.census.i (CONTRACTS §6.3), stock days with a 7-day moving average,
+-- economy (WP8): item census K.census.i (CONTRACTS Ã‚Â§6.3), stock days with a 7-day moving average,
 -- staged orders-library imports, dfllm-tagged supply orders, the PLUMP_HELMET kitchen exclusion,
--- the cancel-loop detector, labormanager starvation KPI and the idle rule D-03 (DESIGN §5.5, §5.9, §5.11).
--- Reads: items.other vectors (sliced), buildings.other vectors, manager orders, citizens by census id.
--- Writes only through K.act (orders_import, orders, workorder, order_suspend, kitchen_exclude, appoint,
--- work_detail, run). Since live L1b economy is the sole writer of the builtin tool work details.
+-- the cancel-loop detector, labormanager starvation KPI and the idle rule D-03 (DESIGN Ã‚Â§5.5, Ã‚Â§5.9, Ã‚Â§5.11),
+-- and since live L4 the supply chains and the soldiers' gear (below).
+-- Reads: items.other vectors (sliced), buildings.other vectors, manager orders, citizens by census id,
+-- the material raws of items the fort holds (ore, flux, seeds), military.targets/kpi, care's naked count
+-- (K.view) and care's reserve hooks. Writes only through K.act (orders_import, orders, workorder, order_suspend,
+-- kitchen_exclude, appoint, work_detail, order_material, run). Since live L1b economy is the sole writer of the
+-- builtin tool work details; since L4 it also owns autochop's target after boot (baseline sets 150/60 at boot,
+-- economy raises it with the wood ordered) and the autofarm thresholds of the fiber crops.
+--
+-- Supply chains (live L3: 10 of 13 strange moods failed, all fatal, with 0 bone, shell, leather and bars and 4
+-- cloth; worn 15 % without any armor; 24 % naked; dfllm:barrel made 34 barrels in L1b). Work orders, work
+-- details and the autochop/autofarm settings only (UI-equivalent); nothing is created, moved or read hidden:
+--   wood    autochop target = floor + wood ordered + margin (never below baseline's 150/60); every wood order
+--           of economy carries an AtLeast WOOD > floor condition, so the reserve stays in the fort;
+--   barrels MakeBarrel only while drink days < 150 % of the plan's target, fewer than 4 empty barrels and
+--           the barrel total below clamp(cit / 2, 8, 30) (30 while drink is below the target; below 30 drink days
+--           the barrels may take economy's own wood floor); bins alike (no drink gate);
+--   leather hunters (1, 2 while a need is open) while leather, bone or shell is short, from P1, in PEACE and
+--           only with bolts; 10 days without a new hide/bone/leather/shell -> 20 days off (no visible game);
+--           leaving PEACE takes them off the detail at once (MODE rushes the next run); famine hunters only in
+--           PEACE and RECOVERY; a dead citizen's remains are no bone/shell/hide stock;
+--           raw hides waiting 2 days -> TAN_A_HIDE (DF 53 tans automatically, this only adds jobs);
+--   cloth   target = max(mood stock, needs, care's naked x 3 in free cloth): WeaveCloth per thread kind,
+--           ProcessPlants for thread, autofarm thresholds up for the fiber crops the fort has seeds of;
+--   metal   SmeltOre per ore kind, BRONZE_MAKING (ores) / BRONZE_MAKING2 (bars), MakeCharcoal sized by the
+--           smelt and forge jobs; no ore: PROJECT_REQUEST explore (seasonal) and DECISION_NEEDED metal
+--           (yearly), since economy may not designate digs (an exploration dig is a runner/LLM action);
+--   gear    every wanted squad position (military.targets): body, head, pants, gloves, shoes, plus shield and
+--           weapon (melee) or crossbow, quiver and bolts (squad C); crossbows and bolts for the hunters too.
+--           Metal by preference (steel, iron, bronze, bismuth bronze, copper), else leather, else wood or
+--           bone. The inputs of worn % (wanted, at hand, ordered, route per slot) are logged when they change
+--           and kept in persist m.economy.gear. At hand, body/head/pants count only true armor ([ARMORLEVEL]
+--           >= 1), never a dropped cloak, hood or trousers.
+-- At most `orders_per_day` new orders a day, one DF command per frame (`slice_cmds`; live L3: the 20 ms daily
+-- step got economy demoted x8, so the daily run is a task list over several frames).
+--
+-- Hook API (K.call('economy', fn, ...); care's moods are the first user):
+--   need(key, n, who[, days]) -> ok, route   a short-term need: the key's target becomes >= n at once (orders,
+--       hunters, tanning, weaving, smelting, charcoal, autochop), the key's floor too (economy's own consumers
+--       keep n), for `days` (default need_days, 1..112); n = 0 clears it. A new or larger need makes the next
+--       run come within rush_ticks. ok = false when economy has no production route (rock: a stone dig;
+--       gems: mining/trade; bars without ore: exploration/trade); the need still counts as a floor.
+--   reserve(key, n, who) -> ok, floor   a standing floor of key that economy's consumers (wood furniture,
+--       charcoal, barrels, bins, gear, bolts, idle blocks and crafts) never go below; the floor is the max of
+--       config `reserve`, every holder and every open need; n = 0 drops the holder.
+--   supply() -> {key = {have, held, want, floor, route}}   read-only status (brief, tests)
+--   keys: wood, rock, bone, shell, leather, cloth, thread, bars, gems, fuel, hides (care's class names
+--   logs, boulders, rough, glass are accepted as aliases).
+-- Pull hooks economy reads when care has them (live L4, care.lua/reserve.lua): care.reserved() -> {class = n}
+-- items care holds forbidden as the mood reserve (counted as stock; the floor economy keeps on top of them is
+-- max(0, floor - held)), care.mood_wants() -> what open moods still miss ({{cls, n}} or {class = n}): a need.
 local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
 
@@ -11,12 +58,15 @@ local M = {name = 'economy', every = {ticks = 1200}, on = {},
            reports = {MIGRANT_ARRIVAL = true, MIGRANT_ARRIVAL_NAMED = true, D_MIGRANTS_ARRIVAL = true,
                       CANCEL_JOB = true}}
 local DAY = C.TICKS.DAY
+local EVERY = 1200
 local COAL = 7                       -- df.builtin_mats.COAL: charcoal and coke bars (fuel)
 
 -- mirror of config/baseline.json "economy" (tests/lua/test_economy.lua checks they agree)
 M.DEFAULTS = {
   per_slice = 200,
-  seed_milli = {drink = 53, food = 24},          -- Run 6 rates per dwarf and day, x1000 (DESIGN §5.11)
+  -- live L3: one daily step of ~20 ms (two labormanager commands, workorders, imports) demoted economy x8
+  slice_cmds = 1, orders_per_day = 6, rush_ticks = 100, need_days = 30,
+  seed_milli = {drink = 53, food = 24},          -- Run 6 rates per dwarf and day, x1000 (DESIGN Ã‚Â§5.11)
   spike_x = 3,
   food_cats = {'FOOD', 'MEAT', 'FISH', 'CHEESE', 'EGG', 'PLANT', 'PLANT_GROWTH'},
   mood_keys = {'cloth', 'leather', 'bone', 'shell', 'gems', 'bars'},
@@ -34,8 +84,8 @@ M.DEFAULTS = {
   alarm = {thirst = 40000, hunger = 65000, units = 2, days = 10},
   -- live L3: quickfort `orders` makes every door, cabinet, coffer, coffin, table and chair a rock order; on this soil
   -- embark 43 such buildings waited two years (8 boulders, 82 logs). Below `boulders_below` free boulders, open
-  -- one-time rock orders of these jobs are re-entered in wood while logs beyond `wood_min` (minus the wood
-  -- already ordered for them) cover their amount; at most `per_day` orders a day
+  -- one-time rock orders of these jobs are re-entered in wood while logs beyond max(`wood_min`, the wood floor),
+  -- minus the wood already ordered, cover their amount; at most `per_day` orders a day
   wood_orders = {boulders_below = 20, wood_min = 30, per_day = 8,
                  jobs = {'ConstructDoor', 'ConstructCabinet', 'ConstructChest', 'ConstructCoffin', 'ConstructTable',
                          'ConstructThrone', 'ConstructArmorStand', 'ConstructWeaponRack', 'ConstructHatchCover',
@@ -48,10 +98,15 @@ M.DEFAULTS = {
            supply = {'BREWER', 'PLANT', 'COOK', 'HERBALIST', 'PROCESS_PLANT', 'MILLER', 'BUTCHER', 'CARPENTER',
                      'MASON', 'FEED_WATER_CIVILIANS', 'RECOVER_WOUNDED', 'MINE', 'CUTWOOD', 'HUNT', 'FISH'},
            builtin = {'MINE', 'CUTWOOD', 'HUNT', 'FISH'}},
+  -- live L2/L3: labormanager monitor counted 504 Gather Plants postings from L1 (oldest 295,072 ticks) every day.
+  -- While the oldest posting is older than stale_age, the smallest count of the earlier days (>= min_days
+  -- samples, the last `keep`) is a stale floor: the KPI counts only the postings above it
+  starving = {stale_age = 12000, min_days = 3, keep = 7},
   -- builtin tool details (live L1b): in labormanager's monitor mode nobody staffs them (L1: one miner for
   -- the whole fort), so economy is their sole writer whenever the engine is not modern. Miners follow the
   -- dig backlog (runner + designation jobs), woodcutters the log stock against autochop's band (wood:
-  -- {below -> n[1], below -> n[2], else n[3]}), hunters only a famine; each capped by its tools.
+  -- {below -> n[1], below -> n[2], else n[3]}; the band follows economy's autochop target), hunters the
+  -- leather/bone/shell need or a famine; each capped by its tools (hunters also need bolts).
   tools = {shrink_days = 3,
            key_labors = {'MASON', 'CARPENTER', 'BREWER', 'PLANT', 'COOK', 'MECHANIC', 'DIAGNOSE', 'SMELT',
                          'FORGE_WEAPON', 'FORGE_ARMOR'},
@@ -59,9 +114,12 @@ M.DEFAULTS = {
                        tiles_per = 40},
                       {name = 'Woodcutters', skill = 'WOODCUTTING', melee = {'AXE'}, wood = {60, 150}, n = {2, 1, 0}},
                       -- live L3: 9 of 10 strange moods failed with 0 bone, shell and leather in the fort; one
-                      -- hunter in PEACE from mood_from_phase while one of them is below the mood stock
+                      -- hunter in PEACE from mood_from_phase while one of them is short (two for an open need)
                       {name = 'Hunters', skill = 'CROSSBOW', ranged = {'CROSSBOW', 'BOW'}, famine = 2, mood = 1,
-                       mood_keys = {'bone', 'shell', 'leather'}}}},
+                       need = 2, ammo_min = 1, mood_keys = {'bone', 'shell', 'leather'}}}},
+  -- live L3: the hunter caught nothing for a year; no visible game is no unit census economy may read, so a
+  -- hunt without a new hide, bone, leather or shell for trial_days pauses for backoff_days
+  hunt = {trial_days = 10, backoff_days = 20},
   stages = {
     {lib = 'library/basic', any = {'migrants', 'cit>=10'}},
     {lib = 'library/rockstock', any = {'workshop:Masons'}},
@@ -85,14 +143,64 @@ M.DEFAULTS = {
     {tag = 'dfllm:food', key = 'food_d', per_job = 4, max_jobs = 20,
      spec = {job = 'PrepareMeal', meal_ingredients = 2, frequency = 'OneTime',
              item_conditions = {{condition = 'AtLeast', flags = {'unrotten', 'cookable'}, value = 10}}}},
-    -- live L1b: 0 empty barrels, every brew order inactive ("needs empty food storage item") at 46 drink
-    -- days; the DF 53 job is MakeBarrel (workorder refuses ConstructBarrel)
-    {tag = 'dfllm:barrel', key = 'barrels_empty', min = 4, per_job = 1, max_jobs = 6,
-     spec = {job = 'MakeBarrel', material_category = {'wood'}, frequency = 'OneTime'}},
-    {tag = 'dfllm:cloth', key = 'cloth', per_job = 1, max_jobs = 10, from_phase = 'P1',
-     spec = {job = 'WeaveCloth', material_category = {'plant'}, frequency = 'OneTime',
-             item_conditions = {{condition = 'AtLeast', flags = {'collected', 'plant'}, item_type = 'THREAD', value = 1}}}},
   },
+  -- live L4: floors economy's own consumers keep (wood: the furniture fallback took 70 of 82 logs in L3); care's
+  -- forbidden mood reserve counts against them (economy keeps max(0, floor - held) of the free items)
+  reserve = {wood = 20, rock = 0, bone = 0, shell = 0, leather = 0, cloth = 0, thread = 0, bars = 0, gems = 0,
+             fuel = 0},
+  wood = {chop_min = 60, chop_max = 150, margin = 20, band = 90, cap = 400, step = 10},
+  -- live L1b: brewing stalled without empty barrels; then dfllm:barrel made 34 barrels (logs 183 -> 66). Below the
+  -- drink target the cap is max_total, below nofloor_days of drink barrels may use the wood floor
+  barrels = {tag = 'dfllm:barrel', min_empty = 4, drink_pct = 150, cit_pct = 50, min_total = 8, max_total = 30,
+             nofloor_days = 30, max_jobs = 4, ws = {'workshop:Carpenters'},
+             spec = {job = 'MakeBarrel', material_category = {'wood'}}},
+  bins = {tag = 'dfllm:bin', min_empty = 1, cit_pct = 25, min_total = 4, max_total = 20, max_jobs = 2,
+          ws = {'workshop:Carpenters'}, spec = {job = 'ConstructBin', material_category = {'wood'}}},
+  leather = {from_phase = 'P1', tag = 'dfllm:tan', after_days = 2, max_jobs = 10, ws = {'workshop:Tanners'},
+             spec = {job = 'CustomReaction', reaction = 'TAN_A_HIDE',
+                     item_conditions = {{condition = 'AtLeast', value = 1, flags = {'unrotten'},
+                                         reaction_product = 'TAN_MAT'}}}},
+  cloth = {from_phase = 'P1', per_naked = 3, max_jobs = 10, loom = {'workshop:Loom'},
+           weave = {{kind = 'plant', tag = 'dfllm:cloth'}, {kind = 'silk', tag = 'dfllm:cloth_silk'},
+                    {kind = 'yarn', tag = 'dfllm:cloth_yarn'}},
+           thread = {tag = 'dfllm:thread', ws = {'workshop:Farmers'},
+                     spec = {job = 'ProcessPlants',
+                             item_conditions = {{condition = 'AtLeast', value = 1, flags = {'unrotten', 'processable'},
+                                                 item_type = 'PLANT'}}}},
+           -- autofarm thresholds of the fiber crops: fiber_on while cloth is short (at least autofarm's default),
+           -- then back to autofarm's default (status); fiber_off only when status names no default
+           fiber = {'GRASS_TAIL_PIG', 'REED_ROPE', 'FLAX', 'HEMP', 'JUTE', 'KENAF', 'RAMIE', 'COTTON'},
+           fiber_on = 100, fiber_off = 50},
+  metal = {from_phase = 'P2', max_jobs = 10, ores_per_day = 2, smelter = {'furnace:Smelter', 'furnace:MagmaSmelter'},
+           charcoal = {tag = 'dfllm:charcoal', buffer = 4, cap = 40, ws = {'furnace:WoodFurnace'}},
+           bronze = {tag = 'dfllm:bronze', ore = 'BRONZE_MAKING', bars = 'BRONZE_MAKING2', max_jobs = 5},
+           explore = {tpl = 'explore', request_every = 100800, decide_every = 403200},
+           -- economy owns stockpile settings (DESIGN Ã‚Â§3): a pile named so (template or UI) takes metal ore only
+           ore_pile = {names = {'dfllm-ore'}, import = 'metalore'}},
+  -- live L2/L3: worn 15 %; the uniform slots per position (military.UNIFORM) and the job per material
+  gear = {metals = {'STEEL', 'IRON', 'BRONZE', 'BISMUTH_BRONZE', 'COPPER'}, max_jobs = 5,
+          forge = {'workshop:MetalsmithsForge', 'workshop:MagmaForge'}, leatherworks = {'workshop:Leatherworks'},
+          bolts_xbow = 100, bolts_hunter = 25, bolts_max = 300,
+          items = {
+            {cat = 'body', who = 'all', metal = {job = 'MakeArmor', sub = 'ITEM_ARMOR_BREASTPLATE', bars = 3},
+             leather = {job = 'MakeArmor', sub = 'ITEM_ARMOR_LEATHER', n = 1}},
+            {cat = 'head', who = 'all', metal = {job = 'MakeHelm', sub = 'ITEM_HELM_HELM', bars = 1},
+             leather = {job = 'MakeHelm', sub = 'ITEM_HELM_HELM', n = 1}},
+            {cat = 'pants', who = 'all', metal = {job = 'MakePants', sub = 'ITEM_PANTS_GREAVES', bars = 2},
+             leather = {job = 'MakePants', sub = 'ITEM_PANTS_LEGGINGS', n = 1}},
+            {cat = 'gloves', who = 'all', per = 2, out = 2, metal = {job = 'MakeGloves', sub = 'ITEM_GLOVES_GAUNTLETS', bars = 1},
+             leather = {job = 'MakeGloves', sub = 'ITEM_GLOVES_GLOVES', n = 1}},
+            {cat = 'shoes', who = 'all', per = 2, out = 2, metal = {job = 'MakeShoes', sub = 'ITEM_SHOES_BOOTS', bars = 1},
+             leather = {job = 'MakeShoes', sub = 'ITEM_SHOES_BOOTS', n = 1}},
+            {cat = 'shield', who = 'melee', metal = {job = 'MakeShield', sub = 'ITEM_SHIELD_SHIELD', bars = 2},
+             wood = {job = 'MakeShield', sub = 'ITEM_SHIELD_SHIELD', ws = {'workshop:Carpenters'}}},
+            {cat = 'weapon', who = 'melee', metal = {job = 'MakeWeapon', sub = 'ITEM_WEAPON_SPEAR', bars = 1}},
+            {cat = 'xbow', who = 'ranged', wood = {job = 'MakeWeapon', sub = 'ITEM_WEAPON_CROSSBOW', ws = {'workshop:Bowyers'}}},
+            {cat = 'quiver', who = 'xbow', leather = {job = 'MakeQuiver', n = 1}},
+            {cat = 'bolts', who = 'bolts', out = 25,
+             wood = {job = 'MakeAmmo', sub = 'ITEM_AMMO_BOLTS', ws = {'workshop:Craftsdwarfs', 'workshop:Bowyers'}},
+             bone = {job = 'MakeAmmo', sub = 'ITEM_AMMO_BOLTS', ws = {'workshop:Craftsdwarfs'}}},
+          }},
   idle = {
     pct = 40, days = 3, boulders_min = 30, blocks_cap = 200, crafts_cap = 60, combine_every = 3600,
     craft_cats = {'FIGURINE', 'AMULET', 'RING', 'EARRING', 'BRACELET', 'SCEPTER', 'CROWN', 'TOTEM'},
@@ -116,6 +224,10 @@ local function copy(t)
   return setmetatable(r, getmetatable(t))
 end
 
+local function int(v) return math.tointeger(type(v) == 'string' and tonumber(v) or v) end
+local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
+local function fmt(n) return string.format('%d', math.tointeger(n) or 0) end
+
 function M.conf(K)
   local c = type(K.cfg.baseline) == 'table' and K.cfg.baseline.economy
   if type(c) ~= 'table' then return M.DEFAULTS end
@@ -127,8 +239,14 @@ end
 
 local function decision(K, id) return tostring((K.cfg.decisions or {})[id] or C.DECISIONS[id] or '') end
 
+local function phase_ok(K, from)
+  if from == nil then return true end
+  local ph = (K.view() or {}).phase
+  return type(ph) == 'string' and ph >= from
+end
+
 -- persist m.economy; maps are re-tagged as objects (a decoded empty map is an array, json.lua:104)
-local MAPS = {'imported', 'orders', 'low', 'tools'}
+local MAPS = {'imported', 'orders', 'low', 'tools', 'meta', 'needs', 'reserves', 'explore'}
 local function pstate(K)
   local p = K.persist.get('m.economy')
   if type(p) ~= 'table' then
@@ -136,18 +254,28 @@ local function pstate(K)
     K.persist.set('m.economy', p)
   end
   for _, k in ipairs(MAPS) do p[k] = json.object(type(p[k]) == 'table' and p[k] or {}) end
+  for _, k in ipairs({'needs', 'reserves'}) do
+    for key, v in pairs(p[k]) do p[k][key] = type(v) == 'table' and json.object(v) or nil end
+  end
   if type(p.hist) ~= 'table' then p.hist = {} end
   p.hist.drink, p.hist.food = p.hist.drink or {}, p.hist.food or {}
   p.prev = json.object(type(p.prev) == 'table' and p.prev or {})
+  if type(p.stale) ~= 'table' then p.stale = {} end
   return p
 end
 
 ---------------------------------------------------------------- item census (sliced, items.other)
 local CATS = {'DRINK', 'FOOD', 'MEAT', 'FISH', 'CHEESE', 'EGG', 'PLANT', 'PLANT_GROWTH', 'CLOTH', 'SKIN_TANNED',
-              'CORPSEPIECE', 'SMALLGEM', 'ROUGH', 'BAR', 'AMMO', 'WOOD', 'BARREL'}
+              'CORPSEPIECE', 'SMALLGEM', 'ROUGH', 'BAR', 'AMMO', 'WOOD', 'BARREL', 'BIN', 'BOULDER', 'THREAD',
+              'SEEDS', 'WEAPON', 'ARMOR', 'HELM', 'PANTS', 'GLOVES', 'SHOES', 'SHIELD', 'QUIVER'}
 local SKIP = {'trader', 'garbage_collect', 'removed', 'dump', 'hostile', 'in_building', 'construction', 'rotten'}
+local GEAR_CAT = {ARMOR = 'body', HELM = 'head', PANTS = 'pants', GLOVES = 'gloves', SHOES = 'shoes',
+                  SHIELD = 'shield', QUIVER = 'quiver'}
+-- body, head and pants count only true armor (raws [ARMORLEVEL] >= 1: breastplate, mail shirt, leather armor, helm,
+-- greaves, leggings): a dropped leather cloak, robe, hood or trousers is clothing, not a soldier's slot
+local ARMORLEVEL = {ARMOR = true, HELM = true, PANTS = true}
 
-local mcache, bolt_sub = {}, {}
+local mcache, tcache, bolt_sub, wdef, orec, adef = {}, {}, {}, {}, {}, {}
 local function mat_flags(it)                    -- material flags, cached per census (Lua API.txt:808)
   local t, i = it.mat_type, it.mat_index
   local row = mcache[t]
@@ -159,6 +287,42 @@ local function mat_flags(it)                    -- material flags, cached per ce
     row[i] = f
   end
   return f or nil
+end
+
+local function mat_token(t, i)                  -- 'INORGANIC:IRON', 'PLANT:GRASS_TAIL_PIG:SEED'
+  local row = tcache[t]
+  if not row then row = {}; tcache[t] = row end
+  local s = row[i]
+  if s == nil then
+    local ok, tok = pcall(function()
+      local mi = dfhack.matinfo.decode(t, i)
+      return mi and mi:getToken()
+    end)
+    s = ok and type(tok) == 'string' and tok or false
+    row[i] = s
+  end
+  return s or nil
+end
+
+-- an inorganic boulder material: ore (token, metal tokens) and flux; raws only (the item is in the fort)
+local function ore_of(idx)
+  local r = orec[idx]
+  if r then return r end
+  r = {}
+  pcall(function()
+    local mi = dfhack.matinfo.decode(0, idx)
+    local inorg = mi and mi.inorganic
+    if not inorg then return end
+    r.token = mi:getToken()
+    local v = inorg.metal_ore.mat_index                       -- quickfort/stockflow.lua:149
+    if v and #v > 0 then
+      r.metals = {}
+      for _, m in ipairs(v) do r.metals[#r.metals + 1] = mat_token(0, m) or '' end
+    end
+    for _, rc in ipairs(mi.material.reaction_class) do if rc.value == 'FLUX' then r.flux = true end end
+  end)
+  orec[idx] = r
+  return r
 end
 
 local function subtype(it)                      -- item:getSubtype() (virtual on every item), else the field
@@ -174,6 +338,59 @@ local function is_bolt(it)                      -- items.getSubtypeDef (Lua API.
     bolt_sub[s] = def ~= nil and def.id == 'ITEM_AMMO_BOLTS'
   end
   return bolt_sub[s]
+end
+
+-- itemdef armorlevel (raws [ARMORLEVEL], 0 when absent); an unknown def counts (never hide a real piece)
+local function is_armor(it, cat)
+  if not ARMORLEVEL[cat] then return true end
+  local s = subtype(it) or -1
+  local row = adef[cat]
+  if not row then row = {}; adef[cat] = row end
+  local v = row[s]
+  if v == nil then
+    local ok, lvl = pcall(function()
+      local def = dfhack.items.getSubtypeDef(df.item_type[cat], s)
+      if def == nil then return nil end
+      return def.armorlevel
+    end)
+    v = not ok or lvl == nil or (math.tointeger(lvl) or 0) >= 1
+    row[s] = v
+  end
+  return v
+end
+
+-- pick, axe, xbow, bow, melee (any other melee weapon) or other; crossbows carry a melee skill too
+local function weapon_kind(it)
+  local s = subtype(it)
+  local k = wdef[s]
+  if k == nil then
+    local def = dfhack.items.getSubtypeDef(df.item_type.WEAPON, s)
+    local js = df.job_skill
+    k = 'other'
+    if def then
+      if def.skill_ranged == js.CROSSBOW then k = 'xbow'
+      elseif def.skill_ranged == js.BOW then k = 'bow'
+      elseif def.skill_melee == js.MINING then k = 'pick'
+      elseif def.skill_melee == js.AXE then k = 'axe'
+      elseif (def.skill_ranged or -1) < 0 then k = 'melee' end
+    end
+    wdef[s] = k
+  end
+  return k
+end
+
+local function holder(it)                       -- the unit carrying the item, or nil (Lua API.txt items.getHolderUnit)
+  if not it.flags.in_inventory then return nil end
+  local gh = dfhack.items.getHolderUnit
+  return gh and gh(it) or nil
+end
+
+-- gear a soldier may wear: free (not owned, melting or carried by a civilian) or carried by a soldier
+local function gear_ok(it)
+  local f = it.flags
+  if f.owned or f.melt then return false end
+  local u = holder(it)
+  return u == nil or (u.military.squad_id or -1) >= 0
 end
 
 local function classify(it, a, cat)
@@ -204,26 +421,101 @@ local function classify(it, a, cat)
   elseif cat == 'CLOTH' then a.cloth = a.cloth + n
   elseif cat == 'SKIN_TANNED' then a.leather = a.leather + n
   elseif cat == 'CORPSEPIECE' then
-    local cf = it.corpse_flags
+    -- a dead citizen's remains are nobody's material (deteriorate.lua is_usable_corpse_piece; care's reserve
+    -- skips them too): L1-L3 left 16 dead, and their bones must not read as the moods' bone stock
+    local cf = not f.dead_dwarf and it.corpse_flags
     if cf and not cf.unbutchered then
-      if cf.bone then a.bone = a.bone + n elseif cf.shell then a.shell = a.shell + n end
+      if cf.bone then a.bone = a.bone + n elseif cf.shell then a.shell = a.shell + n
+      elseif cf.leather then a.hides = a.hides + n end      -- a raw hide (deteriorate.lua usable_types)
     end
   elseif cat == 'SMALLGEM' or cat == 'ROUGH' then a.gems = a.gems + n
   elseif cat == 'BAR' then
-    if it.mat_type == 0 then a.bars = a.bars + n elseif it.mat_type == COAL then a.fuel = a.fuel + n end
-  elseif cat == 'AMMO' then if is_bolt(it) then a.bolts = a.bolts + n end
+    if it.mat_type == 0 then
+      a.bars = a.bars + n
+      local tok = mat_token(0, it.mat_index)
+      if tok then a.bars_by[tok] = (a.bars_by[tok] or 0) + n end
+    elseif it.mat_type == COAL then a.fuel = a.fuel + n end
+  elseif cat == 'AMMO' then
+    if is_bolt(it) then
+      a.bolts = a.bolts + n
+      -- bolts a hunter can take: not in a soldier's hands or quiver (a hunter without ammo fights in melee)
+      local u = holder(it)
+      if not u then
+        local okc, cont = pcall(dfhack.items.getContainer, it)
+        u = okc and cont and holder(cont) or nil
+      end
+      if not (u and (u.military.squad_id or -1) >= 0) then a.bolts_free = a.bolts_free + n end
+    end
   elseif cat == 'WOOD' then a.wood = a.wood + n
-  elseif cat == 'BARREL' then             -- live L1b: brewing stalled for want of an empty barrel
-    if #dfhack.items.getContainedItems(it) == 0 then a.barrels_empty = a.barrels_empty + 1 end
+  elseif cat == 'BARREL' or cat == 'BIN' then  -- live L1b: brewing stalled for want of an empty barrel
+    local empty = #dfhack.items.getContainedItems(it) == 0
+    if cat == 'BARREL' then
+      a.barrels = a.barrels + 1
+      if empty then a.barrels_empty = a.barrels_empty + 1 end
+    else
+      a.bins = a.bins + 1
+      if empty then a.bins_empty = a.bins_empty + 1 end
+    end
+  elseif cat == 'BOULDER' then
+    a.rock = a.rock + n
+    if it.mat_type == 0 then
+      local r = ore_of(it.mat_index)
+      if r.metals and r.token then
+        a.ore = a.ore + n
+        local o = a.ores[r.token]
+        if not o then o = {n = 0, metals = r.metals}; a.ores[r.token] = o end
+        o.n = o.n + n
+      end
+      if r.flux then a.flux = a.flux + n end
+    end
+  elseif cat == 'THREAD' then
+    if not f.spider_web then
+      local mf = mat_flags(it)
+      a.thread = a.thread + n
+      if mf and mf.SILK then a.thread_silk = a.thread_silk + n
+      elseif mf and mf.YARN then a.thread_yarn = a.thread_yarn + n
+      else a.thread_plant = a.thread_plant + n end
+    end
+  elseif cat == 'SEEDS' then
+    local tok = mat_token(it.mat_type, it.mat_index)
+    local plant = tok and tok:match('^PLANT:([^:]+):')
+    if plant then a.seeds[plant] = (a.seeds[plant] or 0) + n end
+  elseif cat == 'WEAPON' then
+    local k = weapon_kind(it)
+    if k == 'pick' then a.w_pick = a.w_pick + 1
+    elseif k == 'axe' then a.w_axe = a.w_axe + 1
+    elseif k == 'xbow' or k == 'bow' then
+      local u = holder(it)
+      if not (u and (u.military.squad_id or -1) >= 0) then a['w_' .. k] = a['w_' .. k] + 1 end   -- for hunters
+      if k == 'xbow' and not (f.owned or f.melt) then a.g_xbow = a.g_xbow + 1 end   -- soldiers' and hunters'
+    elseif k == 'melee' and gear_ok(it) then
+      local mf = mat_flags(it)
+      if mf and mf.IS_METAL then a.g_weapon = a.g_weapon + 1 end
+    end
+  elseif GEAR_CAT[cat] then
+    local g = GEAR_CAT[cat]
+    if gear_ok(it) and is_armor(it, cat) then
+      if g == 'shield' or g == 'quiver' then a['g_' .. g] = a['g_' .. g] + 1
+      else
+        local mf = mat_flags(it)
+        if mf and mf.IS_METAL then a['g_' .. g] = a['g_' .. g] + 1; a.g_metal = a.g_metal + 1
+        elseif mf and mf.LEATHER then a['g_' .. g] = a['g_' .. g] + 1 end
+      end
+    end
   end
 end
 
+local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'gems', 'bars', 'bolts', 'wood', 'fuel',
+              'drink_forb', 'food_forb', 'cookable', 'barrels', 'barrels_empty', 'bins', 'bins_empty', 'rock', 'ore',
+              'flux', 'hides', 'thread', 'thread_plant', 'thread_silk', 'thread_yarn', 'bolts_free', 'w_pick', 'w_axe',
+              'w_xbow', 'w_bow', 'g_body', 'g_head', 'g_pants', 'g_gloves', 'g_shoes', 'g_shield', 'g_weapon', 'g_xbow',
+              'g_quiver', 'g_metal'}
 local function new_acc(c)
   local fs = {}
   for _, k in ipairs(c.food_cats or {}) do fs[k] = true end
-  return {drink = 0, food = 0, meals = 0, cloth = 0, leather = 0, bone = 0, shell = 0, gems = 0, bars = 0,
-          bolts = 0, wood = 0, fuel = 0, drink_forb = 0, food_forb = 0, cookable = 0, barrels_empty = 0, kinds = {},
-          food_set = fs}
+  local a = {kinds = {}, food_set = fs, bars_by = {}, ores = {}, seeds = {}}
+  for _, k in ipairs(ZERO) do a[k] = 0 end
+  return a
 end
 
 -- one slice: at most per_slice items; true when every category is done
@@ -258,12 +550,14 @@ local function publish(K, c, a)
   for _ in pairs(a.kinds) do kinds = kinds + 1 end
   local crafts = 0
   for _, cat in ipairs(c.idle.craft_cats or {}) do crafts = crafts + vlen(cat) end
-  -- §6.3 fields plus WP8 extras (fuel, *_forb, boulders, blocks, crafts); replaced wholesale
-  K.census.i = {tick = K.now().tick, drink = a.drink, food = a.food, meals = a.meals, meal_kinds = kinds,
-                cloth = a.cloth, leather = a.leather, bone = a.bone, shell = a.shell, gems = a.gems,
-                bars = a.bars, bolts = a.bolts, wood = a.wood, fuel = a.fuel, drink_forb = a.drink_forb,
-                food_forb = a.food_forb, cookable = a.cookable, boulders = vlen('BOULDER'), blocks = vlen('BLOCKS'),
-                crafts = crafts, barrels_empty = a.barrels_empty}
+  -- Ã‚Â§6.3 fields plus WP8 extras (fuel, *_forb, blocks, crafts, the chain stocks and the gear at hand: g_<slot> =
+  -- metal or leather pieces free or carried by soldiers); replaced wholesale. `boulders` stays the whole BOULDER
+  -- vector (care's mood reserve sizes its held boulders from it); `rock` = free boulders (not forbidden, not
+  -- built in), what economy may spend
+  local i = {tick = K.now().tick, meal_kinds = kinds, boulders = vlen('BOULDER'), blocks = vlen('BLOCKS'), crafts = crafts}
+  for _, k in ipairs(ZERO) do i[k] = a[k] end
+  K.census.i = i
+  st.bars_by, st.ores, st.seeds = a.bars_by, a.ores, a.seeds
 end
 
 ---------------------------------------------------------------- stock days (7-day moving average)
@@ -349,82 +643,587 @@ function M.stage_ready(stage, f, cit)
   return false
 end
 
--- staged library imports (DESIGN §5.5) plus plan.orders / season orders; each library once
-local function imports(K, c, p)
-  local want, seen = {}, {}
-  local function add(lib) if not p.imported[lib] and not seen[lib] then seen[lib] = true; want[#want + 1] = lib end end
-  local f = facts(K, p)
-  for _, s in ipairs(c.stages or {}) do if M.stage_ready(s, f, p.cit) then add(s.lib) end end
-  for _, lib in ipairs((K.plan.orders or {}).import or {}) do add(lib) end
-  local season = type(K.plan.seasons) == 'table' and K.plan.seasons[K.now().season + 1]
-  for _, lib in ipairs(season and season.orders and season.orders.import or {}) do add(lib) end
-  local n, own = 0, {}
-  for _, id in pairs(p.orders) do own[id] = true end
-  for _, lib in ipairs(want) do
-    if has_signature((c.signatures or {})[lib], own) then
-      p.imported[lib] = K.now().tick
-      K.log('info', 'orders %s already present: not imported again', lib)
-    elseif K.act.orders_import(lib) then
-      p.imported[lib] = K.now().tick
-      n = n + 1
-    end
-  end
-  if n > 0 then K.act.orders('sort'); K.act.orders('recheck') end
-  return n
+local function ws_any(f, list)
+  for _, w in ipairs(list or {}) do if f[w] then return true end end
+  return false
 end
 
--- dfllm-tagged supply orders (act strips the tag; ids are kept in persist to avoid duplicates)
-local function supply(K, c, p, days, inv)
-  local sup = K.plan.supply or {}
-  local phase = (K.view() or {}).phase
-  for _, e in ipairs(c.supply or {}) do
-    if not e.from_phase or (type(phase) == 'string' and phase >= e.from_phase) then
-      local jobs = 0
-      if days[e.key] then
-        local target, d = math.tointeger(sup[e.key]) or 0, days[e.key]
-        if d < target then
-          local units = (target - d) * (st.rate[e.key] or 0) // 1000
-          jobs = (units + e.per_job - 1) // e.per_job
+-- open orders: our tags still live (amount left), the inputs they still hold (meta.uses x left) and the wood
+-- any other open order still needs (material category wood, MakeCharcoal)
+local function scan_orders(p)
+  local own = {}
+  for tag, id in pairs(p.orders) do own[id] = tag end
+  local s = {live = {}, used = {}}
+  for _, o in ipairs(orders_all()) do
+    local left = o.amount_left or 0
+    if left > 0 then
+      local tag = own[o.id]
+      if tag then
+        s.live[tag] = left
+        local meta = p.meta[tag]
+        for key, per in pairs(type(meta) == 'table' and type(meta.uses) == 'table' and meta.uses or {}) do
+          s.used[key] = (s.used[key] or 0) + left * (math.tointeger(per) or 0)
         end
       else
-        local target, have = math.tointeger(e.min) or math.tointeger(sup.mood_stock) or 10, inv[e.key] or 0
-        if have < target then jobs = (target - have + e.per_job - 1) // e.per_job end
+        local mc = o.material_category
+        if (mc and mc.wood) or df.job_type[o.job_type] == 'MakeCharcoal' then s.used.wood = (s.used.wood or 0) + left end
       end
-      jobs = math.min(jobs, e.max_jobs or 20)
-      local now = K.now().tick
-      if jobs > 0 and not live(p.orders[e.tag]) and now >= (st.backoff[e.tag] or 0) then
-        local spec = copy(e.spec)
-        spec.tag, spec.amount_total = e.tag, jobs
-        local ok, id = K.act.workorder(spec)
-        if ok then p.orders[e.tag] = id else st.backoff[e.tag] = now + 3 * DAY end   -- retry in 3 days
+    end
+  end
+  for tag in pairs(p.meta) do if not s.live[tag] then p.meta[tag] = nil end end
+  return s
+end
+
+---------------------------------------------------------------- needs, reserves, floors (hook API)
+local KEYS = {wood = true, rock = true, bone = true, shell = true, leather = true, cloth = true, thread = true,
+              bars = true, gems = true, fuel = true, hides = true}
+local ALIAS = {logs = 'wood', log = 'wood', boulders = 'rock', boulder = 'rock', stone = 'rock', rough = 'gems',
+               glass = 'gems', gem = 'gems', bar = 'bars', skin = 'hides'}
+M.KEYS = KEYS
+local function key_of(k)
+  k = tostring(k or ''):lower()
+  return ALIAS[k] or k
+end
+
+-- the largest open need of key (expired records are dropped)
+local function need_n(p, key, now)
+  local best, m = 0, p.needs[key]
+  for who, rec in pairs(type(m) == 'table' and m or {}) do
+    if type(rec) == 'table' and (math.tointeger(rec.untl) or 0) >= now then best = math.max(best, math.tointeger(rec.n) or 0)
+    else m[who] = nil end
+  end
+  return best
+end
+
+local function holder_floor(p, key)
+  local best = 0
+  for _, n in pairs(type(p.reserves[key]) == 'table' and p.reserves[key] or {}) do best = math.max(best, math.tointeger(n) or 0) end
+  return best
+end
+
+-- the stock economy's own consumers keep of key (free items): max(config, holders, open needs) minus what care
+-- already holds forbidden
+local function floor_of(c, p, r, key)
+  local f = math.max(math.tointeger((c.reserve or {})[key]) or 0, holder_floor(p, key), need_n(p, key, r.now))
+  return math.max(0, f - (r.held[key] or 0))
+end
+
+local function stock_of(r, key)
+  local kind, tok = key:match('^([a-z]+):(.+)$')
+  if kind == 'bars' then return st.bars_by[tok] or 0 end
+  if kind == 'ore' then return st.ores[tok] and st.ores[tok].n or 0 end
+  return r.inv[key] or 0
+end
+
+-- what economy may still spend of key in this run: stock - floor - open orders - planned this run
+local function left(c, r, key)
+  local fl = key:find('[_:]') and 0 or floor_of(c, r.p, r, key)
+  return math.max(0, stock_of(r, key) - fl - (r.s.used[key] or 0) - (r.planned[key] or 0))
+end
+
+-- stock incl. care's forbidden reserve (what a mood can be given)
+local function have(r, key) return (r.inv[key] or 0) + (r.held[key] or 0) end
+
+local function mood_target(K, c, key)
+  if not phase_ok(K, c.mood_from_phase or 'P1') then return 0 end
+  for _, k in ipairs(c.mood_keys or {}) do
+    if k == key then return math.tointeger((K.plan.supply or {}).mood_stock) or 10 end
+  end
+  return 0
+end
+
+local function target(K, c, r, key) return math.max(mood_target(K, c, key), need_n(r.p, key, r.now)) end
+
+local function count_of(v)
+  if math.type(v) == 'integer' then return v end
+  if type(v) == 'number' then return math.tointeger(v) end
+  if type(v) == 'table' then return math.tointeger(v.n) or #v end
+end
+
+-- a care hook; one that faults (a different signature) is not called again this boot: K.call counts the fault
+-- against care, and a daily call would back care off every 10 minutes
+local function care_hook(K, fn)
+  st.hookbad = st.hookbad or {}
+  if st.hookbad[fn] then return nil end
+  local ok, v = K.call('care', fn)
+  if ok then return v end
+  local why = tostring(v)
+  if why ~= 'no module' and why ~= 'disabled' and not why:find('^no function') then
+    st.hookbad[fn] = true
+    K.log('warn', 'care.%s failed (%s): not called again this boot', fn, why)
+  end
+end
+
+-- care's pull hooks (live L4): reserved() -> {class = n}, mood_wants() -> {{cls, n}} | {class = n}
+local function care_hooks(K, r)
+  r.held = {}
+  local res = care_hook(K, 'reserved')
+  if type(res) == 'table' then
+    for k, v in pairs(res) do
+      local key, n = key_of(k), count_of(v)
+      if KEYS[key] and n and n > 0 then r.held[key] = (r.held[key] or 0) + n end
+    end
+  end
+  local wants = {}
+  local w = care_hook(K, 'mood_wants')
+  if type(w) == 'table' then
+    for k, v in pairs(w) do
+      local key, n
+      if type(k) == 'number' and type(v) == 'table' then key, n = key_of(v.cls or v.class or v.key), count_of(v.n or 1)
+      else key, n = key_of(k), count_of(v) end
+      if KEYS[key] and n and n > 0 then wants[key] = (wants[key] or 0) + n end
+    end
+  end
+  for key in pairs(KEYS) do
+    local m = r.p.needs[key]
+    if wants[key] then
+      if type(m) ~= 'table' then m = json.object{}; r.p.needs[key] = m end
+      local prev = m.care
+      m.care = {n = wants[key], untl = r.now + 2 * DAY}
+      if not prev or (prev.n or 0) < wants[key] then K.log('info', 'need %s %d (care: mood)', key, wants[key]) end
+    elseif type(m) == 'table' then m.care = nil end
+  end
+end
+
+---------------------------------------------------------------- candidates (planned work orders)
+local function add(r, cd)
+  if cd.n <= 0 then return false end
+  r.cands[#r.cands + 1] = cd
+  for key, per in pairs(cd.uses or {}) do r.planned[key] = (r.planned[key] or 0) + per * cd.n end
+  return true
+end
+
+local function open(r, tag) return r.s.live[tag] ~= nil end
+
+local function cond(n, itype, extra)
+  local x = {condition = 'AtLeast', value = math.max(1, n)}
+  if itype then x.item_type = itype end
+  for k, v in pairs(extra or {}) do x[k] = v end
+  return x
+end
+
+local function wood_spec(c, r, base)
+  local s = copy(base)
+  s.material_category = s.material_category or {'wood'}
+  s.item_conditions = {cond(floor_of(c, r.p, r, 'wood') + 1, 'WOOD')}
+  return s
+end
+
+-- drink and food (days targets) or a minimum stock (generic supply entries)
+local function plan_supply(K, c, r)
+  local sup = K.plan.supply or {}
+  for _, e in ipairs(c.supply or {}) do
+    if phase_ok(K, e.from_phase) and not open(r, e.tag) then
+      local jobs = 0
+      if r.days[e.key] then
+        local tgt, d = math.tointeger(sup[e.key]) or 0, r.days[e.key]
+        if d < tgt then jobs = ((tgt - d) * (st.rate[e.key] or 0) // 1000 + e.per_job - 1) // e.per_job end
+      else
+        local tgt, hv = math.tointeger(e.min) or math.tointeger(sup.mood_stock) or 10, r.inv[e.key] or 0
+        if hv < tgt then jobs = (tgt - hv + e.per_job - 1) // e.per_job end
+      end
+      add(r, {tag = e.tag, spec = e.spec, n = math.min(jobs, e.max_jobs or 20), why = e.key})
+    end
+  end
+end
+
+-- barrels only while brewing is due, bins always; both capped by a total per citizen (live L1b runaway). Drink is
+-- survival: below the drink target the barrel cap is max_total (food stockpiles fill barrels too, and a full set
+-- of barrels must not stall the stills), and below nofloor_days of drink the barrels may take the logs of
+-- economy's own wood floor (care's forbidden mood logs stay untouched either way)
+local function plan_containers(K, c, r, which)
+  local b = c[which]
+  if type(b) ~= 'table' or open(r, b.tag) or not ws_any(r.f, b.ws) then return end
+  local inv = r.inv
+  local short, dry = false, false
+  if which == 'barrels' then
+    local tgt = math.tointeger((K.plan.supply or {}).drink_d) or 170
+    local d = r.days.drink_d or 0
+    if d * 100 >= tgt * (b.drink_pct or 150) then return end
+    short, dry = d < tgt, d < (b.nofloor_days or 30)
+  end
+  local cap = short and (b.max_total or 30) or clamp(r.cit * (b.cit_pct or 50) // 100, b.min_total or 0, b.max_total or 30)
+  local want = math.min((b.min_empty or 0) - (inv[which .. '_empty'] or 0), cap - (inv[which] or 0))
+  -- dry: other open wood orders hold no claim on the logs either (the first job takes them)
+  local wood = dry and math.max(0, (inv.wood or 0) - (r.planned.wood or 0)) or left(c, r, 'wood')
+  local n = math.min(want, wood, b.max_jobs or 4)
+  local spec = wood_spec(c, r, b.spec)
+  if dry then spec.item_conditions = {cond(1, 'WOOD')} end
+  if add(r, {tag = b.tag, spec = spec, n = n, uses = {wood = 1}, why = which}) and dry then
+    K.log('warn', 'drink %d days: barrels x%d may use the wood floor (%d logs)', r.days.drink_d or 0, n, inv.wood or 0)
+  end
+end
+
+-- the soldiers' slots (military.targets) and the hunters' crossbows and bolts; `hunt` = hunters wanted
+local function gear_pre(K, c, r, hunt)
+  local g = c.gear
+  local melee, xb = 0, 0
+  local ok, _, per = K.call('military', 'targets')
+  if ok and type(per) == 'table' then
+    for key, v in pairs(per) do
+      local n = math.tointeger(v) or 0
+      if key == 'C' then xb = xb + n else melee = melee + n end
+    end
+  end
+  local who = {all = melee + xb, melee = melee, xbow = xb, ranged = xb + hunt}
+  local res = {n = melee + xb, melee = melee, xbow = xb, hunt = hunt, cats = {}, leather = 0, metal_jobs = 0}
+  -- metal pieces the bars at hand could make (any preferred metal), shared by the slots in order
+  local bars = 0
+  for _, m in ipairs(g.metals or {}) do bars = bars + (st.bars_by['INORGANIC:' .. m] or 0) end
+  local forge = ws_any(r.f, g.forge)
+  for _, it in ipairs(g.items or {}) do
+    local want, sw                                   -- sw: the soldiers' part (worn % inputs)
+    if it.cat == 'bolts' then
+      want = math.min(g.bolts_max or 300, xb * (g.bolts_xbow or 100) + hunt * (g.bolts_hunter or 25))
+      sw = math.min(want, xb * (g.bolts_xbow or 100))
+    else
+      want = (who[it.who or 'all'] or 0) * (it.per or 1)
+      sw = it.who == 'ranged' and xb * (it.per or 1) or want
+    end
+    local hv = (it.cat == 'bolts' and r.inv.bolts or r.inv['g_' .. it.cat]) or 0
+    local tag = 'dfllm:gear_' .. it.cat
+    local opened = (r.s.live[tag] or 0) * (it.out or 1)
+    local miss = math.max(0, want - hv - opened)
+    local rec = {want = want, sw = sw, have = hv, open = opened, miss = miss, route = miss > 0 and 'none' or 'ok'}
+    res.cats[it.cat] = rec
+    if miss > 0 then
+      local jobs = (miss + (it.out or 1) - 1) // (it.out or 1)
+      local mj = 0
+      if it.metal and forge then
+        mj = math.min(jobs, bars // it.metal.bars)
+        bars = bars - mj * it.metal.bars
+        res.metal_jobs = res.metal_jobs + jobs     -- forge jobs this slot wants (charcoal sizing)
+      end
+      if it.leather and jobs > mj then res.leather = res.leather + (jobs - mj) * (it.leather.n or 1) end
+      if it.metal and not it.leather and not it.wood and mj < jobs then res.metal_short = true end
+    end
+  end
+  return res
+end
+
+local function hunters_spec(c)
+  for _, d in ipairs((c.tools or {}).details or {}) do if d.name == 'Hunters' then return d end end
+end
+
+-- hunters wanted: famine (PEACE or RECOVERY only), else (PEACE, from mood_from_phase or an open need, not paused
+-- for want of game) one while leather, bone or shell is short of its target, `need` while one of them has an open
+-- need. Hunters roam outside the walls: in ALERT, SIEGE, BREACH or a DRILL ("nobody outside at T+1,200") they are
+-- wanted nowhere, and tools() takes them off the detail at once (reason 'mode'), not after shrink_days.
+local HUNT_MODES = {PEACE = true, RECOVERY = true}
+local function hunt_want(K, c, r)
+  local spec = hunters_spec(c)
+  if not spec then return 0, 'none' end
+  local mode = K.mode()
+  if not HUNT_MODES[mode] then return 0, 'mode' end
+  if r.p.famine then return spec.famine or 0, 'famine' end
+  if mode ~= 'PEACE' then return 0, 'mode' end
+  local short, needed = false, false
+  for _, key in ipairs(spec.mood_keys or {}) do
+    local tgt = r.targets[key] or target(K, c, r, key)
+    if have(r, key) < tgt then short = true end
+    if need_n(r.p, key, r.now) > have(r, key) then needed = true end
+  end
+  if not short then return 0, 'stock' end
+  -- an open mood need still unmet hunts through the "no game" pause (a failed mood ends in a death)
+  if needed then return spec.need or spec.mood or 1, 'need' end
+  if r.now < (r.p.hunt_off or 0) then return 0, 'no game' end
+  if not phase_ok(K, c.mood_from_phase or 'P1') then return 0, 'phase' end
+  return spec.mood or 0, 'mood stock'
+end
+
+local function plan_leather(K, c, r)
+  local L = c.leather
+  local want = target(K, c, r, 'leather') + (phase_ok(K, L.from_phase) and r.gear.leather or 0)
+  r.targets.leather = want
+  if have(r, 'leather') >= want or open(r, L.tag) then return end
+  if (r.inv.hides or 0) > 0 and (r.p.hides_days or 0) >= (L.after_days or 2) and ws_any(r.f, L.ws) then
+    local n = math.min(left(c, r, 'hides'), want - have(r, 'leather'), L.max_jobs or 10)
+    if add(r, {tag = L.tag, spec = L.spec, n = n, uses = {hides = 1}, why = 'leather'}) then r.route.leather = 'tan' end
+  end
+end
+
+local function plan_cloth(K, c, r)
+  local Cc = c.cloth
+  local naked = 0
+  if phase_ok(K, Cc.from_phase) then
+    local care = (K.view() or {}).care
+    naked = (type(care) == 'table' and math.tointeger(care.naked) or 0) * (Cc.per_naked or 3)
+  end
+  -- the naked need free cloth (the tailor cannot take care's forbidden mood cloth): want covers both
+  local want = math.max(target(K, c, r, 'cloth'), naked + (r.held.cloth or 0))
+  r.targets.cloth = want
+  local deficit = want - have(r, 'cloth')
+  r.fiber_on = deficit > 0
+  if deficit <= 0 then return end
+  if ws_any(r.f, Cc.loom) then
+    for _, w in ipairs(Cc.weave or {}) do
+      if deficit <= 0 then break end
+      if not open(r, w.tag) then
+        local key = 'thread_' .. w.kind
+        local n = math.min(deficit, left(c, r, key), left(c, r, 'thread'), Cc.max_jobs or 10)
+        local spec = {job = 'WeaveCloth', material_category = {w.kind},
+                      item_conditions = {cond(1, 'THREAD', {flags = {'collected', w.kind}})}}
+        if add(r, {tag = w.tag, spec = spec, n = n, uses = {[key] = 1, thread = 1}, why = 'cloth'}) then
+          deficit = deficit - n
+          r.route.cloth = 'weave'
+        end
+      else deficit = deficit - (r.s.live[w.tag] or 0) end
+    end
+  end
+  local th = Cc.thread
+  local spare = left(c, r, 'thread')               -- thread no weave order of this run takes
+  if deficit > spare and th and not open(r, th.tag) and ws_any(r.f, th.ws) then
+    if add(r, {tag = th.tag, spec = th.spec, n = math.min(deficit - spare, Cc.max_jobs or 10), why = 'thread'}) then
+      r.route.cloth = (r.route.cloth or '') == '' and 'thread' or r.route.cloth .. '+thread'
+    end
+  end
+end
+
+local function fuel_cond(r)
+  if r.f['workshop:MagmaForge'] or r.f['furnace:MagmaSmelter'] then return nil end
+  return cond(1, 'BAR', {material = 'COAL'})
+end
+
+-- ores, alloys and charcoal while metal is wanted (bars below target or slots that take metal)
+local function plan_metal(K, c, r)
+  local Mt = c.metal
+  local bars_want = target(K, c, r, 'bars')
+  r.targets.bars = bars_want
+  local wanted = have(r, 'bars') < bars_want or r.gear.metal_jobs > 0
+  if not wanted then return end
+  if not phase_ok(K, Mt.from_phase) and need_n(r.p, 'bars', r.now) == 0 and r.gear.metal_jobs == 0 then return end
+  local magma = r.f['furnace:MagmaSmelter'] == true
+  local fuel = function() return magma and 99 or left(c, r, 'fuel') end
+  local fc = fuel_cond(r)
+  local ores = {}
+  for tok, o in pairs(st.ores) do ores[#ores + 1] = {tok = tok, n = o.n, metals = o.metals} end
+  table.sort(ores, function(a, b) if a.n ~= b.n then return a.n > b.n end return a.tok < b.tok end)
+  local function bearing(o, metal)
+    for _, m in ipairs(o.metals or {}) do if m == 'INORGANIC:' .. metal then return true end end
+    return false
+  end
+  local smelt_jobs = 0
+  if ws_any(r.f, Mt.smelter) then
+    -- bronze from ores (1 tin + 1 copper ore -> 8 bars, reaction_smelter.txt), then single ores, then bars
+    local B = Mt.bronze
+    local tin, cop = 0, 0
+    for _, o in ipairs(ores) do
+      if bearing(o, 'TIN') then tin = tin + left(c, r, 'ore:' .. o.tok) end
+      if bearing(o, 'COPPER') then cop = cop + left(c, r, 'ore:' .. o.tok) end
+    end
+    if B and tin > 0 and cop > 0 and not open(r, B.tag) then
+      local n = math.min(tin, cop, fuel(), B.max_jobs or 5)
+      local spec = {job = 'CustomReaction', reaction = B.ore,
+                    item_conditions = {cond(1, 'BOULDER', {bearing = 'TIN'}), cond(1, 'BOULDER', {bearing = 'COPPER'}), fc}}
+      if add(r, {tag = B.tag, spec = spec, n = n, uses = {fuel = magma and 0 or 1}, why = 'bronze'}) then
+        smelt_jobs = smelt_jobs + n
+        local t, k = n, n
+        for _, o in ipairs(ores) do      -- the ore the reaction takes: planned from the largest kinds
+          local key = 'ore:' .. o.tok
+          if t > 0 and bearing(o, 'TIN') then local x = math.min(t, left(c, r, key)); r.planned[key] = (r.planned[key] or 0) + x; t = t - x end
+          if k > 0 and bearing(o, 'COPPER') then local x = math.min(k, left(c, r, key)); r.planned[key] = (r.planned[key] or 0) + x; k = k - x end
+        end
+        r.route.bars = 'bronze'
+      end
+    end
+    -- every ore while the mood stock lacks bars; for the soldiers only ores of a gear metal (or tin for bronze)
+    local useful = {TIN = true}
+    for _, m in ipairs(c.gear.metals or {}) do useful[m] = true end
+    local any_bar = have(r, 'bars') < bars_want
+    local function wanted_ore(o)
+      if any_bar then return true end
+      for _, m in ipairs(o.metals or {}) do if useful[m:match('([^:]+)$') or m] then return true end end
+      return false
+    end
+    local kinds = 0
+    for _, o in ipairs(ores) do
+      if kinds >= (Mt.ores_per_day or 2) then break end
+      local tag = 'dfllm:smelt_' .. (o.tok:match('([^:]+)$') or o.tok)
+      local key = 'ore:' .. o.tok
+      if not open(r, tag) and left(c, r, key) > 0 and wanted_ore(o) then
+        local n = math.min(left(c, r, key), fuel(), Mt.max_jobs or 10)
+        local spec = {job = 'SmeltOre', material = o.tok, item_conditions = {cond(1, 'BOULDER', {material = o.tok}), fc}}
+        if add(r, {tag = tag, spec = spec, n = n, uses = {[key] = 1, fuel = magma and 0 or 1}, why = 'smelt'}) then
+          smelt_jobs, kinds = smelt_jobs + n, kinds + 1
+          r.route.bars = (r.route.bars and r.route.bars .. '+' or '') .. 'smelt'
+        end
+      end
+    end
+    local tinb, copb = left(c, r, 'bars:INORGANIC:TIN'), left(c, r, 'bars:INORGANIC:COPPER')
+    if B and r.gear.metal_jobs > 0 and tinb > 0 and copb > 0 and not open(r, B.tag) then
+      local n = math.min(tinb, copb, fuel(), B.max_jobs or 5)
+      local spec = {job = 'CustomReaction', reaction = B.bars,
+                    item_conditions = {cond(1, 'BAR', {material = 'INORGANIC:TIN'}), cond(1, 'BAR', {material = 'INORGANIC:COPPER'}), fc}}
+      add(r, {tag = B.tag, spec = spec, n = n, uses = {['bars:INORGANIC:TIN'] = 1, ['bars:INORGANIC:COPPER'] = 1,
+                                                        fuel = magma and 0 or 1}, why = 'bronze'})
+    end
+  end
+  -- charcoal for the smelting and forging there is material for
+  local ch = Mt.charcoal
+  local material = (r.inv.ore or 0) + (r.inv.bars or 0) > 0
+  if ch and material and not magma and not open(r, ch.tag) and ws_any(r.f, ch.ws) then
+    -- fuel for: the ore still to smelt, the forge jobs the bars (and ore, ~4 bars each) could feed, the fuel
+    -- the open orders hold, plus a buffer
+    local jobs = math.max(smelt_jobs, math.min(r.inv.ore or 0, Mt.max_jobs or 10)) +
+                 math.min(r.gear.metal_jobs, (r.inv.bars or 0) + (r.inv.ore or 0) * 4)
+    local want = math.min(ch.cap or 40, jobs + (r.s.used.fuel or 0) + (ch.buffer or 4))
+    local n = math.min(want - (r.inv.fuel or 0), left(c, r, 'wood'), Mt.max_jobs or 10)
+    add(r, {tag = ch.tag, spec = wood_spec(c, r, {job = 'MakeCharcoal', material_category = {}}), n = n,
+            uses = {wood = 1}, why = 'fuel'})
+  end
+  -- no ore and no usable bars: exploration (a dig is not economy's to designate) and the LLM once a year
+  local ex = Mt.explore
+  if ex and (r.inv.ore or 0) == 0 and (r.gear.metal_short or have(r, 'bars') < bars_want) and
+     left(c, r, 'bars') == 0 and phase_ok(K, Mt.from_phase) then
+    r.route.bars = 'explore'
+    local e = r.p.explore
+    if r.now - (math.tointeger(e.req) or -1e12) >= (ex.request_every or 100800) then
+      e.req = r.now
+      K.emit('PROJECT_REQUEST', 'B', 'exploration dig for ore (no ore, no bars: soldiers and moods need metal)',
+             {tpl = ex.tpl or 'explore', n = 1, why = 'ore'})
+    end
+    if r.now - (math.tointeger(e.dec) or -1e12) >= (ex.decide_every or 403200) then
+      e.dec = r.now
+      K.emit('DECISION_NEEDED', 'A', string.format('metal: no ore, %d bars; %d forge jobs and %d bars for moods wanted',
+                                                   r.inv.bars or 0, r.gear.metal_jobs, bars_want),
+             {id = 'metal', q = 'no ore or bars: exploration dig into revealed stone (digexp pattern), or trade.want bar:iron/bar:copper?'})
+    end
+  end
+end
+
+local function plan_gear(K, c, r)
+  local g = c.gear
+  local forge, lw = ws_any(r.f, g.forge), ws_any(r.f, g.leatherworks)
+  local magma = r.f['workshop:MagmaForge'] == true
+  local fc = fuel_cond(r)
+  for _, it in ipairs(g.items or {}) do
+    local rec = r.gear.cats[it.cat]
+    local tag = 'dfllm:gear_' .. it.cat
+    if rec and rec.miss > 0 then
+      if open(r, tag) then rec.route = 'ordered'
+      else
+        local jobs = (rec.miss + (it.out or 1) - 1) // (it.out or 1)
+        local maxj = g.max_jobs or 5
+        local why = {}
+        local function base(x)
+          return {job = x.job, item_subtype = x.sub}
+        end
+        if it.metal then
+          if not forge then why[#why + 1] = 'forge' end
+          for _, m in ipairs(forge and g.metals or {}) do
+            local tok, b = 'INORGANIC:' .. m, it.metal.bars
+            local n = math.min(jobs, left(c, r, 'bars:' .. tok) // b, left(c, r, 'bars') // b,
+                               magma and maxj or left(c, r, 'fuel'), maxj)
+            if n > 0 then
+              local spec = base(it.metal)
+              spec.material = tok
+              spec.item_conditions = {cond(b + floor_of(c, r.p, r, 'bars'), 'BAR', {material = tok}), fc}
+              add(r, {tag = tag, spec = spec, n = n, out = it.out or 1, cat = it.cat, why = 'gear',
+                      uses = {['bars:' .. tok] = b, bars = b, fuel = magma and 0 or 1}})
+              rec.route = 'metal:' .. m
+              break
+            end
+          end
+          if rec.route == 'none' then why[#why + 1] = (left(c, r, 'bars') == 0 and 'bars' or 'fuel') end
+        end
+        if rec.route == 'none' and it.leather then
+          local ln = it.leather.n or 1
+          local n = lw and math.min(jobs, left(c, r, 'leather') // ln, maxj) or 0
+          if n > 0 then
+            local spec = base(it.leather)
+            spec.material_category = {'leather'}
+            spec.item_conditions = {cond(ln + floor_of(c, r.p, r, 'leather'), 'SKIN_TANNED')}
+            add(r, {tag = tag, spec = spec, n = n, out = it.out or 1, cat = it.cat, uses = {leather = ln}, why = 'gear'})
+            rec.route = 'leather'
+          else why[#why + 1] = lw and 'leather' or 'leatherworks' end
+        end
+        if rec.route == 'none' and it.wood then
+          local n = ws_any(r.f, it.wood.ws) and math.min(jobs, left(c, r, 'wood'), maxj) or 0
+          if n > 0 then
+            add(r, {tag = tag, spec = wood_spec(c, r, base(it.wood)), n = n, out = it.out or 1, cat = it.cat,
+                    uses = {wood = 1}, why = 'gear'})
+            rec.route = 'wood'
+          else why[#why + 1] = 'wood' end
+        end
+        if rec.route == 'none' and it.bone then
+          local n = ws_any(r.f, it.bone.ws) and math.min(jobs, left(c, r, 'bone'), maxj) or 0
+          if n > 0 then
+            local spec = base(it.bone)
+            spec.material_category = {'bone'}
+            spec.item_conditions = {cond(floor_of(c, r.p, r, 'bone') + 1, nil, {flags = {'unrotten', 'bone', 'body_part'}})}
+            add(r, {tag = tag, spec = spec, n = n, out = it.out or 1, cat = it.cat, uses = {bone = 1}, why = 'gear'})
+            rec.route = 'bone'
+          end
+        end
+        if rec.route == 'none' then rec.route = 'no ' .. table.concat(why, '/') end
       end
     end
   end
 end
 
--- rock furniture orders into wood while boulders are scarce (live L3, see DEFAULTS.wood_orders)
-local function wood_orders(K, c, inv)
+-- the inputs of worn % (DESIGN Ã‚Â§5.3): wanted / at hand / ordered per slot and the route, logged on change
+local function gear_report(K, c, r)
+  local gr = r.gear
+  local parts, want, hv = {}, 0, 0
+  local cats = json.object{}
+  for _, it in ipairs(c.gear.items or {}) do
+    local x = gr.cats[it.cat]
+    if x and x.want > 0 then
+      parts[#parts + 1] = string.format('%s %d/%d%s %s', it.cat, x.have, x.want, x.open > 0 and ('+' .. x.open) or '', x.route)
+      cats[it.cat] = {want = x.want, have = x.have, open = x.open, route = x.route}
+      if it.cat ~= 'bolts' then want, hv = want + x.sw, hv + math.min(x.sw, x.have) end
+    end
+  end
+  local ok, kpi = K.call('military', 'kpi')
+  local worn = ok and type(kpi) == 'table' and (math.tointeger(kpi.worn) or 0) or -1
+  r.p.gear = json.object{soldiers = gr.n, melee = gr.melee, xbow = gr.xbow, hunters = gr.hunt, worn = worn,
+                         slots = ok and type(kpi) == 'table' and math.tointeger(kpi.slots) or -1,
+                         pieces = hv, wanted = want, metal = r.inv.g_metal or 0, cats = cats}
+  local line = string.format('gear: %d soldiers (%d melee, %d xbow) + %d hunters, worn %d%%, pieces %d/%d; %s',
+                             gr.n, gr.melee, gr.xbow, gr.hunt, worn, hv, want, table.concat(parts, ', '))
+  if #parts > 0 and line ~= st.gear_line then K.log('info', '%s', line) end
+  st.gear_line = line
+  if want > 0 or r.p.low.gear == 1 then
+    local low = hv < want
+    if low and r.p.low.gear ~= 1 then
+      r.p.low.gear = 1
+      K.emit('STOCK_LOW', 'B', string.format('gear %d < %d (worn %d%%)', hv, want, worn),
+             {key = 'gear', n = hv, min = want, worn = worn})
+    elseif not low then r.p.low.gear = nil end
+  end
+end
+
+---------------------------------------------------------------- rock furniture in wood (live L3)
+-- free boulders a mason may take: ores and flux are economic stone (DF's default stone use settings keep them
+-- from furniture and blocks; care's reserve counts the same way), minus the rock floor
+local function stone_free(c, r)
+  local inv = r.inv
+  local n = (inv.rock or 0) - (inv.ore or 0) - (inv.flux or 0)
+  return math.max(0, n - floor_of(c, r.p, r, 'rock'))
+end
+
+local function wood_orders(K, c, r)
   local w = c.wood_orders
-  if type(w) ~= 'table' or (inv.boulders or 0) >= (w.boulders_below or 20) then return 0 end
+  local rock = stone_free(c, r)
+  if type(w) ~= 'table' or rock >= (w.boulders_below or 20) then return 0 end
   local jobs = {}
   for _, j in ipairs(w.jobs or {}) do jobs[j] = true end
   local one = df.workquota_frequency_type.OneTime
   local function open_of(o)
     return jobs[df.job_type[o.job_type] or ''] and o.frequency == one and (o.amount_left or 0) > 0
   end
-  local budget = (inv.wood or 0) - (w.wood_min or 30)
-  for _, o in ipairs(orders_all()) do
-    if open_of(o) and o.material_category.wood then budget = budget - o.amount_left end
-  end
+  local keep = math.max(w.wood_min or 30, floor_of(c, r.p, r, 'wood'))
+  local budget = (r.inv.wood or 0) - keep - (r.s.used.wood or 0) - (r.planned.wood or 0)
   local n = 0
   for _, o in ipairs(orders_all()) do
     if n >= (w.per_day or 8) or budget <= 0 then break end
     if open_of(o) and o.mat_type == 0 and o.amount_left <= budget then
-      local left = o.amount_left
+      local amount = o.amount_left
       if K.act.order_material(o.id, 'wood') then
-        n, budget = n + 1, budget - left
-        K.log('info', 'order %d %s x%d: rock -> wood (%d boulders, %d logs)', o.id, df.job_type[o.job_type], left,
-              inv.boulders or 0, inv.wood or 0)
+        n, budget = n + 1, budget - amount
+        r.planned.wood = (r.planned.wood or 0) + amount
+        K.log('info', 'order %d %s x%d: rock -> wood (%d boulders, %d logs)', o.id, df.job_type[o.job_type], amount,
+              r.inv.rock or 0, r.inv.wood or 0)
       end
     end
   end
@@ -444,11 +1243,45 @@ local function kitchen(K, c, food_d)
 end
 
 ---------------------------------------------------------------- labor
--- labormanager status / monitor lines: "... N starving (> 1200 ticks ...)", "N starving postings (> ..."
-function M.parse_starving(out)
+-- labormanager status lines (autolabor.plug.dll 53.16-r2): modern "job board: N postings resolved, avg wait A
+-- ticks, longest L ticks; S starving (> 1200 ticks, oldest O ticks)", monitor "labor monitor: S starving
+-- postings (> 1200 ticks), oldest <job> at O ticks", dump "starving=S oldest=J (O ticks)"
+function M.parse_status(out)
   local s = tostring(out or '')
   local n = s:match('([0-9]+) starving') or s:match('starving=([0-9]+)')
-  return n and math.tointeger(tonumber(n)) or nil
+  if not n then return nil end
+  local after = s:match('oldest(.*)$') or ''
+  local age = after:match('([0-9]+) ticks')
+  local job = after:match('^ ([^0-9][^\n]-) at [0-9]+')
+  return math.tointeger(tonumber(n)), age and math.tointeger(tonumber(age)) or nil, job
+end
+
+function M.parse_starving(out)
+  local n = M.parse_status(out)
+  return n
+end
+
+-- the stale floor (live L2/L3: 504 Gather Plants postings from L1, oldest 295,072 ticks, every day)
+local function stale_filter(K, c, p, n, age, job)
+  local s = c.starving or M.DEFAULTS.starving
+  local hist, floor = p.stale, 0
+  if age and age >= (s.stale_age or 12000) then
+    if #hist >= (s.min_days or 3) then
+      floor = hist[1]
+      for _, v in ipairs(hist) do floor = math.min(floor, v) end
+    end
+    hist[#hist + 1] = n
+    while #hist > (s.keep or 7) do table.remove(hist, 1) end
+  else
+    p.stale = {}
+  end
+  floor = math.min(floor, n)
+  if floor ~= st.stale then
+    K.log('info', 'labor: %d of %d starving postings are stale (oldest %s, %s ticks)', floor, n, tostring(job or '?'),
+          age and fmt(age) or '?')
+  end
+  st.stale, st.oldest = floor, age
+  return n - floor
 end
 
 local function idle_pct(K)
@@ -469,13 +1302,13 @@ local function idle_pct(K)
 end
 
 -- the useful backlog (D-03): never filler digging
-local function backlog_pick(K, c, p, inv)
+local function backlog_pick(K, c, p, inv, rock)
   local ic = c.idle
   for _, b in ipairs(ic.backlog or {}) do
     if b.id == 'blocks' then
-      if (inv.boulders or 0) >= ic.boulders_min and (inv.blocks or 0) < ic.blocks_cap and not live(p.orders[b.tag]) then return b end
+      if rock >= ic.boulders_min and (inv.blocks or 0) < ic.blocks_cap and not live(p.orders[b.tag]) then return b end
     elseif b.id == 'crafts' then
-      if (inv.crafts or 0) < ic.crafts_cap and (inv.boulders or 0) >= 10 and not live(p.orders[b.tag]) then return b end
+      if (inv.crafts or 0) < ic.crafts_cap and rock >= 10 and not live(p.orders[b.tag]) then return b end
     elseif b.id == 'combine' then
       if p.last_combine == nil or K.now().tick - p.last_combine >= ic.combine_every then return b end
     end
@@ -495,21 +1328,23 @@ local function backlog_act(K, b, p)
   return ok
 end
 
-local function idle_rule(K, c, p, inv)
+-- true when it acted (a command)
+local function idle_rule(K, c, p, inv, rock)
   local rule = decision(K, 'D-03')
-  if st.idle == nil then return end
+  if st.idle == nil then return false end
   if st.idle > c.idle.pct then p.idle_days = (p.idle_days or 0) + 1 else p.idle_days = 0 end
   local need = rule == 'immediate' and 1 or c.idle.days
-  if rule == 'off' or p.idle_days < need or K.mode() ~= 'PEACE' then return end
-  local b = backlog_pick(K, c, p, inv)
+  if rule == 'off' or p.idle_days < need or K.mode() ~= 'PEACE' then return false end
+  local b = backlog_pick(K, c, p, inv, rock)
   if not b then
     K.log('info', 'idle %d%% for %d days, useful backlog empty: no action', st.idle, p.idle_days)
-    return
+    return false
   end
   if backlog_act(K, b, p) then
     K.log('info', 'idle %d%% for %d days: backlog %s', st.idle, p.idle_days, b.id)
     p.idle_days = 0
   end
+  return true
 end
 
 ---------------------------------------------------------------- events
@@ -559,6 +1394,15 @@ local function cancel(K, ev)
     st.rechecked = day
     K.act.orders('recheck')
   end
+end
+
+-- leaving PEACE while hunters are out: the next run (tool details) within rush_ticks takes them off the detail,
+-- not up to a day later (drills check "nobody outside" at T+1,200)
+M.on.MODE = function(K, ev)
+  if type(ev) ~= 'table' or ev.to == 'PEACE' or (st.hunters or 0) == 0 then return end
+  st.rush = true
+  local rt = M.conf(K).rush_ticks or 100
+  if (M.every.ticks or EVERY) > rt then M.every = {ticks = rt} end
 end
 
 M.on.REPORT = function(K, ev)
@@ -620,7 +1464,7 @@ function M.appoint_vacant(K)
         end
       end
       if best then
-        local aok, res = K.act.appoint(pos.code, best.id)
+        local aok = K.act.appoint(pos.code, best.id)
         if aok then
           held[best.hist_figure_id] = true
           n = n + 1
@@ -654,7 +1498,7 @@ local function validation_watch(K, p)
 end
 
 ---------------------------------------------------------------- supply alarm, starved labors (live L1)
--- citizens over the thirst / hunger timers (looked up by id from the census, CONTRACTS §1.4)
+-- citizens over the thirst / hunger timers (looked up by id from the census, CONTRACTS Ã‚Â§1.4)
 local function needs(K, a)
   local cu = K.census.u
   local thirsty, hungry = 0, 0
@@ -739,6 +1583,7 @@ end
 local DIG_JOBS = {Dig = true, CarveUpwardStaircase = true, CarveDownwardStaircase = true,
                   CarveUpDownStaircase = true, CarveRamp = true, DigChannel = true}
 local MILITIA = {MILITIA_CAPTAIN = true, MILITIA_COMMANDER = true}
+local TOOL_KEY = {MINING = 'w_pick', AXE = 'w_axe', CROSSBOW = 'w_xbow', BOW = 'w_bow'}
 
 -- designation jobs waiting in the job list (also digging nobody planned through the runner)
 local function dig_jobs()
@@ -754,29 +1599,15 @@ local function dig_jobs()
   return n
 end
 
--- weapons usable as the detail's tool (picks, axes, bows): item defs by skill, not forbidden or foreign
-local function tool_count(spec)
-  local want_m, want_r = {}, {}
-  for _, s in ipairs(spec.melee or {}) do if df.job_skill[s] then want_m[df.job_skill[s]] = true end end
-  for _, s in ipairs(spec.ranged or {}) do if df.job_skill[s] then want_r[df.job_skill[s]] = true end end
-  local n, defs = 0, {}
-  for _, it in ipairs(df.global.world.items.other.WEAPON) do
-    local f = it.flags
-    if not (f.forbid or f.trader or f.garbage_collect or f.removed or f.hostile) then
-      local s = subtype(it)
-      local d = defs[s]
-      if d == nil then
-        local def = dfhack.items.getSubtypeDef(df.item_type.WEAPON, s)
-        d = def ~= nil and (want_m[def.skill_melee] == true or want_r[def.skill_ranged] == true)
-        defs[s] = d
-      end
-      if d then n = n + 1 end
-    end
-  end
+-- weapons usable as the detail's tool (picks, axes, crossbows and bows not carried by soldiers), from the census
+local function tool_count(spec, inv)
+  local n = 0
+  for _, s in ipairs(spec.melee or {}) do n = n + (inv[TOOL_KEY[s] or ''] or 0) end
+  for _, s in ipairs(spec.ranged or {}) do n = n + (inv[TOOL_KEY[s] or ''] or 0) end
   return n
 end
 
-local function tool_target(K, spec, cit, inv, p)
+local function tool_target(K, spec, cit, inv, r)
   if spec.tiles_per then
     local ok, rb = K.call('runner', 'dig_backlog')
     local backlog = math.max(ok and math.tointeger(rb) or 0, dig_jobs())
@@ -785,17 +1616,18 @@ local function tool_target(K, spec, cit, inv, p)
     return math.max(spec.min, math.min(cap, want)), backlog
   elseif spec.wood then
     local w = inv.wood or 0
-    return (w < spec.wood[1] and spec.n[1]) or (w < spec.wood[2] and spec.n[2]) or spec.n[3], w
-  end
-  if p.famine then return spec.famine or 0, 1 end
-  if spec.mood and K.mode() == 'PEACE' then
-    local phase = (K.view() or {}).phase
-    local goal = math.tointeger((K.plan.supply or {}).mood_stock) or 10
-    if type(phase) == 'string' and phase >= (M.conf(K).mood_from_phase or 'P3') then
-      for _, key in ipairs(spec.mood_keys or {}) do
-        if (inv[key] or 0) < goal then return spec.mood, inv[key] or 0 end
-      end
+    local band = st.chop or spec.wood                -- economy's autochop band (live L4)
+    return (w < band[1] and spec.n[1]) or (w < band[2] and spec.n[2]) or spec.n[3], w
+  elseif spec.ranged then
+    local n = r and r.hunt or 0
+    local free = inv.bolts_free or inv.bolts or 0          -- not the soldiers' bolts
+    if n > 0 and free < (spec.ammo_min or 1) then
+      if st.no_ammo ~= true then K.log('info', 'hunters wanted (%s) but no free bolts: none sent', tostring(r.hunt_why)) end
+      st.no_ammo = true
+      return 0, 0
     end
+    st.no_ammo = false
+    return n, free
   end
   return 0, 0
 end
@@ -815,14 +1647,34 @@ local function labor_on(u, l)
   return ok and v == true
 end
 
-local function tools(K, c, p, inv, engine)
+-- live L3/L4: hunting without a new hide, bone, leather or shell for trial_days pauses for backoff_days
+local function hunt_book(K, c, r, hunters)
+  local p, h = r.p, c.hunt or M.DEFAULTS.hunt
+  if hunters == 0 or r.p.famine then p.hunt = nil; return end
+  local inv = r.inv
+  local score = (inv.bone or 0) + (inv.hides or 0) + (inv.leather or 0) + (inv.shell or 0)
+  if type(p.hunt) ~= 'table' or score > (math.tointeger(p.hunt.score) or 0) then
+    p.hunt = {since = r.now, score = score}
+    return
+  end
+  p.hunt.score = score
+  if r.now - (math.tointeger(p.hunt.since) or r.now) >= (h.trial_days or 10) * DAY then
+    p.hunt_off, p.hunt = r.now + (h.backoff_days or 20) * DAY, nil
+    K.log('info', 'hunting: nothing caught for %d days (no game in sight?): hunters off for %d days',
+          h.trial_days or 10, h.backoff_days or 20)
+  end
+end
+
+local function tools(K, c, p, inv, engine, r)
   local tc = c.tools
   local cu = K.census.u
   if type(tc) ~= 'table' or engine == nil or engine == 'modern' then return 0 end
   if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then return 0 end
   local wds = {}
-  for _, w in ipairs(df.global.plotinfo.labor_info.work_details) do wds[dfhack.df2utf(w.name)] = w end
-  local cit, adults, count, holder = {}, {}, {}, {}
+  local li = df.global.plotinfo.labor_info
+  if not li then return 0 end
+  for _, w in ipairs(li.work_details) do wds[dfhack.df2utf(w.name)] = w end
+  local cit, adults, count, holder_of = {}, {}, {}, {}
   for _, id in ipairs(cu.ids) do
     local u = df.unit.find(id)
     if u and not dfhack.units.isDead(u) then
@@ -830,13 +1682,13 @@ local function tools(K, c, p, inv, engine)
       if dfhack.units.isAdult(u) then
         adults[#adults + 1] = u
         for _, l in ipairs(tc.key_labors or {}) do
-          if labor_on(u, l) then count[l] = (count[l] or 0) + 1; holder[l] = id end
+          if labor_on(u, l) then count[l] = (count[l] or 0) + 1; holder_of[l] = id end
         end
       end
     end
   end
   local sole = {}
-  for l, n in pairs(count) do if n == 1 then sole[holder[l]] = true end end
+  for l, n in pairs(count) do if n == 1 then sole[holder_of[l]] = true end end
   local member = {}                          -- unit id -> name of its first tool detail
   for _, spec in ipairs(tc.details or {}) do
     local wd = wds[spec.name]
@@ -847,23 +1699,23 @@ local function tools(K, c, p, inv, engine)
   end
   p.tools = json.object(type(p.tools) == 'table' and p.tools or {})
   local now, changes, taken = K.now().tick, 0, {}
-  local function set(spec, id, on, why, target)
+  local function set(spec, id, on, why, tgt)
     local ok = K.act.work_detail(spec.name, id, on)
     if ok then
       changes = changes + 1
       local u = df.unit.find(id)
       local who = u and dfhack.df2utf(dfhack.units.getReadableName(u)) or ('unit ' .. id)
       K.emit('WORK_DETAIL', 'B', string.format('%s %s %s (%s, target %d)', spec.name, on and '+' or '-', who, why,
-                                               target), {detail = spec.name, unit = id, on = on and 1 or 0, n = target,
-                                                         why = why})
+                                               tgt), {detail = spec.name, unit = id, on = on and 1 or 0, n = tgt,
+                                                      why = why})
     end
     return ok
   end
   for _, spec in ipairs(tc.details or {}) do
     local wd = wds[spec.name]
     if wd then
-      local target, basis = tool_target(K, spec, #cu.ids, inv, p)
-      if target > 0 and (spec.melee or spec.ranged) then target = math.min(target, tool_count(spec)) end
+      local tgt, basis = tool_target(K, spec, #cu.ids, inv, r)
+      if tgt > 0 and (spec.melee or spec.ranged) then tgt = math.min(tgt, tool_count(spec, inv)) end
       local sid = df.job_skill[spec.skill]
       local function skill(u) return sid and dfhack.units.getNominalSkill(u, sid, true) or 0 end
       local keep = {}
@@ -872,11 +1724,11 @@ local function tools(K, c, p, inv, engine)
       for _, id in ipairs(keep) do
         local u = cit[id]
         if not u or not dfhack.units.isAdult(u) or u.military.squad_id >= 0 or taken[id] then
-          set(spec, id, false, taken[id] and ('in ' .. taken[id]) or 'not eligible', target)
+          set(spec, id, false, taken[id] and ('in ' .. taken[id]) or 'not eligible', tgt)
         else cur[#cur + 1] = u end
       end
       local ps = p.tools[spec.name] or {}
-      if #cur < target then
+      if #cur < tgt then
         ps.low = nil
         local cand = {}
         for _, u in ipairs(adults) do
@@ -888,15 +1740,17 @@ local function tools(K, c, p, inv, engine)
           return a.id < b.id
         end)
         for _, u in ipairs(cand) do
-          if #cur >= target then break end
-          if set(spec, u.id, true, string.format('basis %d', basis), target) then
+          if #cur >= tgt then break end
+          if set(spec, u.id, true, string.format('basis %d', basis), tgt) then
             cur[#cur + 1] = u
             member[u.id] = spec.name
           end
         end
-      elseif #cur > target then
+      elseif #cur > tgt then
         ps.low = ps.low or now
-        if now - ps.low >= (tc.shrink_days or 3) * DAY then
+        -- hunters outside the walls while the fort leaves PEACE: off the detail now (siege reflex, drills)
+        local at_once = spec.ranged ~= nil and r ~= nil and r.hunt_why == 'mode'
+        if at_once or now - ps.low >= (tc.shrink_days or 3) * DAY then
           table.sort(cur, function(a, b)               -- the best skill stays (live L1b: shrinking by
             local sa, sb = skill(a), skill(b)          -- eligibility first dropped the fort's only trained
             if sa ~= sb then return sa > sb end        -- miner, the bookkeeper)
@@ -904,9 +1758,10 @@ local function tools(K, c, p, inv, engine)
             if oa ~= ob then return oa end
             return a.id < b.id
           end)
-          while #cur > target do
+          local why = at_once and ('mode ' .. tostring(K.mode())) or string.format('basis %d', basis)
+          while #cur > tgt do
             local u = table.remove(cur)
-            if not set(spec, u.id, false, string.format('basis %d', basis), target) then cur[#cur + 1] = u; break end
+            if not set(spec, u.id, false, why, tgt) then cur[#cur + 1] = u; break end
           end
           ps.low = nil
         end
@@ -915,18 +1770,22 @@ local function tools(K, c, p, inv, engine)
       end
       p.tools[spec.name] = json.object(ps)
       for _, u in ipairs(cur) do taken[u.id] = spec.name end
+      if spec.ranged then
+        st.hunters = #cur                          -- on.MODE: leaving PEACE with hunters out rushes a run
+        if r and r.day then hunt_book(K, c, r, #cur) end
+      end
     end
   end
   return changes
 end
 
--- CONTRACTS §7: the supply alarm, or nil (arbiter brakes tempo while it is set)
+-- CONTRACTS Ã‚Â§7: the supply alarm, or nil (arbiter brakes tempo while it is set)
 function M.alarm(K) return st.alarm end
 
 ---------------------------------------------------------------- famine (live L1: a dwarf starved unnoticed)
 -- Below famine_days of eatable food: let labormanager staff hunters and fishers (modern mode forbids both
 -- by default) and wake the LLM once per famine week (gathering zones, farms, trade are its tools).
-local function famine(K, c, p, days, inv)
+local function famine(K, c, p, days, inv, r)
   local fd, dd = days.food_d, days.drink_d
   local lim = c.famine_days or 10
   if fd >= lim then
@@ -936,8 +1795,8 @@ local function famine(K, c, p, days, inv)
   local now = K.now().tick
   if not p.famine then
     p.famine = {since = now, woke = 0}
-    K.act.run('labormanager', 'allow-hunting')
-    K.act.run('labormanager', 'allow-fishing')
+    r.cmdq[#r.cmdq + 1] = {'labormanager', 'allow-hunting'}
+    r.cmdq[#r.cmdq + 1] = {'labormanager', 'allow-fishing'}
     K.log('warn', 'famine: %d food days (%d eatable, %d cookable), hunting and fishing allowed', fd, inv.food or 0,
           inv.cookable or 0)
   end
@@ -949,18 +1808,19 @@ local function famine(K, c, p, days, inv)
   end
 end
 
----------------------------------------------------------------- the daily run
-local function daily(K, c)
-  local p = pstate(K)
-  local now, inv = K.now(), K.census.i
+---------------------------------------------------------------- the daily run: a task list over frames
+-- Each task does at most one DF command per call (r.cmds counts them; the planner and the tool details count as
+-- one too) and returns false to be called again; a frame runs tasks until slice_cmds of them ran. A rush run
+-- (a new need) skips the day bookkeeping (stock-day samples, idle days, labor KPI).
+local T = {}
+
+function T.days(K, c, r)
+  local p, inv, now = r.p, r.inv, K.now()
   local cu = K.census.u
-  local cit = (cu and math.tointeger(cu.cit)) or ((p.cit or 0) > 0 and p.cit) or 7
-  p.cit = cit
-  -- days of stock
   st.rate = {}
   local days = {}
   for key, stock in pairs({drink = inv.drink, food = inv.food}) do
-    local base = (c.seed_milli[key] or 0) * cit
+    local base = (c.seed_milli[key] or 0) * r.cit
     push(p.hist[key], M.sample(p.prev[key], stock, base, c.spike_x or 3))
     p.prev[key] = stock
     local sum = 0
@@ -968,13 +1828,12 @@ local function daily(K, c)
     st.rate[key .. '_d'] = sum // #p.hist[key]
     days[key .. '_d'] = M.days(stock, p.hist[key])
   end
+  r.days, st.days = days, days
   local sup = K.plan.supply or {}
   stock_low(K, p, 'drink_d', days.drink_d, math.tointeger(sup.drink_d) or 170, true)
   stock_low(K, p, 'food_d', days.food_d, math.tointeger(sup.food_d) or 60, true)
-  local phase = (K.view() or {}).phase
-  if type(phase) == 'string' and phase >= (c.mood_from_phase or 'P3') then
-    for _, key in ipairs(c.mood_keys or {}) do stock_low(K, p, key, inv[key] or 0, math.tointeger(sup.mood_stock) or 10) end
-  end
+  -- the mood keys' STOCK_LOW waits for T.plan: care's forbidden reserve (r.held) is known after T.scan
+  p.hides_days = (inv.hides or 0) > 0 and (p.hides_days or 0) + 1 or 0
   -- migrants (report seen; count the new citizens once the census caught up)
   if st.mig and now.tick - st.mig.tick >= 100 then
     local n = 0
@@ -982,36 +1841,372 @@ local function daily(K, c)
     K.emit('MIGRANTS', 'B', string.format('%d migrants', n), {n = n})
     p.migrants, st.mig = 1, nil
   end
-  pcall(kitchen, K, c, days.food_d)
-  M.appoint_vacant(K)
-  validation_watch(K, p)
-  alarm_check(K, c, p, days)
-  famine(K, c, p, days, inv)
-  -- the engine decides who owns the builtin tool details: modern labormanager, otherwise economy (L1b)
-  local okm, mode_out = K.act.run('labormanager', 'mode')
-  local engine = okm and (tostring(mode_out):lower():find('modern', 1, true) and 'modern' or 'other') or nil
-  pcall(labor_fix, K, c, p, engine)
-  local okt, nt = pcall(tools, K, c, p, inv, engine)
+end
+
+function T.kitchen(K, c, r) pcall(kitchen, K, c, r.days.food_d) end
+function T.appoint(K, c, r) M.appoint_vacant(K) end
+function T.watch(K, c, r)
+  validation_watch(K, r.p)
+  alarm_check(K, c, r.p, r.days)
+  famine(K, c, r.p, r.days, r.inv, r)
+end
+
+function T.cmdq(K, c, r)
+  local q = table.remove(r.cmdq, 1)
+  if not q then return true end
+  K.act.run(table.unpack(q))
+  r.cmds = r.cmds + 1
+  return #r.cmdq == 0
+end
+
+-- the engine decides who owns the builtin tool details: modern labormanager, otherwise economy (L1b)
+function T.engine(K, c, r)
+  local okm, out = K.act.run('labormanager', 'mode')
+  r.cmds = r.cmds + 1
+  st.engine = okm and (tostring(out):lower():find('modern', 1, true) and 'modern' or 'other') or nil
+end
+
+function T.labor_fix(K, c, r)
+  if st.engine ~= 'modern' then return true end
+  r.cmds = r.cmds + 1
+  local ok, err = pcall(labor_fix, K, c, r.p, st.engine)
+  if not ok then K.log('warn', 'labor fix: %s', tostring(err)) end
+end
+
+function T.scan(K, c, r)
+  r.s = scan_orders(r.p)
+  r.f = facts(K, r.p)
+  care_hooks(K, r)
+end
+
+function T.plan(K, c, r)
+  r.cands, r.planned, r.targets, r.route = {}, {}, {}, {}
+  for _, key in ipairs({'bone', 'shell'}) do r.targets[key] = target(K, c, r, key) end
+  r.gear = gear_pre(K, c, r, 0)
+  r.targets.leather = target(K, c, r, 'leather') + (phase_ok(K, c.leather.from_phase) and r.gear.leather or 0)
+  r.hunt, r.hunt_why = hunt_want(K, c, r)
+  r.gear = gear_pre(K, c, r, r.hunt)
+  -- priority: needs (moods) first, then drink and food, then soldiers, then stock
+  local urgent = {leather = need_n(r.p, 'leather', r.now) > 0, cloth = need_n(r.p, 'cloth', r.now) +
+                  need_n(r.p, 'thread', r.now) > 0, bars = need_n(r.p, 'bars', r.now) > 0}
+  local list = {{1.5, plan_supply}, {2, function() plan_containers(K, c, r, 'barrels') end},
+                {urgent.leather and 1 or 4, plan_leather}, {urgent.cloth and 1 or 3.5, plan_cloth},
+                {urgent.bars and 1 or 3, plan_metal}, {3.2, plan_gear},
+                {5, function() plan_containers(K, c, r, 'bins') end}}
+  table.sort(list, function(a, b) return a[1] < b[1] end)
+  for _, e in ipairs(list) do e[2](K, c, r) end
+  if r.day then
+    -- mood stock incl. care's forbidden reserve (held items are not in the census: forbidden)
+    if phase_ok(K, c.mood_from_phase or 'P1') then
+      local ms = math.tointeger((K.plan.supply or {}).mood_stock) or 10
+      for _, key in ipairs(c.mood_keys or {}) do stock_low(K, r.p, key, have(r, key), ms) end
+    end
+    gear_report(K, c, r)
+  end
+  st.sup = {targets = r.targets, route = r.route, held = r.held}
+  r.cmds = r.cmds + 1                              -- a slice of its own (planning + military kpi)
+end
+
+function T.tools(K, c, r)
+  local okt, nt = pcall(tools, K, c, r.p, r.inv, st.engine, r)
   if not okt then K.log('warn', 'tool details: %s', tostring(nt)) end
-  supply(K, c, p, days, inv)
-  local okw, nw = pcall(wood_orders, K, c, inv)
+  r.cmds = r.cmds + 1                              -- a slice of its own (every citizen's skills and labors)
+end
+
+function T.orders(K, c, r)
+  r.oi, r.made = r.oi or 1, r.made or 0
+  local now = r.now
+  while r.oi <= #r.cands do
+    if r.made >= (c.orders_per_day or 6) then return true end
+    local cd = r.cands[r.oi]
+    r.oi = r.oi + 1
+    if not live(r.p.orders[cd.tag]) and now >= (st.backoff[cd.tag] or 0) then
+      local spec = copy(cd.spec)
+      local conds = {}
+      for _, x in ipairs(spec.item_conditions or {}) do conds[#conds + 1] = x end   -- drop nil holes (fuel)
+      spec.item_conditions = #conds > 0 and conds or nil
+      if spec.material_category and #spec.material_category == 0 then spec.material_category = nil end
+      spec.tag, spec.amount_total, spec.frequency = cd.tag, cd.n, spec.frequency or 'OneTime'
+      local ok, id = K.act.workorder(spec)
+      r.cmds, r.made = r.cmds + 1, r.made + 1
+      if ok then
+        r.p.orders[cd.tag] = id
+        local uses = json.object{}
+        for k, v in pairs(cd.uses or {}) do if v > 0 then uses[k] = v end end
+        r.p.meta[cd.tag] = {uses = uses, out = cd.out or 1}
+        K.log('info', 'order %s x%d (%s)', cd.tag, cd.n, cd.why or '')
+      else
+        st.backoff[cd.tag] = now + 3 * DAY                 -- retry in 3 days
+      end
+      return r.oi > #r.cands
+    end
+  end
+  return true
+end
+
+function T.wood(K, c, r)
+  local okw, nw = pcall(wood_orders, K, c, r)
   if not okw then K.log('warn', 'wood orders: %s', tostring(nw)) end
-  imports(K, c, p)
-  -- labor KPIs; PEACE days feed baseline's labormanager A/B test
+end
+
+-- autochop target: the free logs economy keeps plus the wood still ordered plus a margin (live L3: logs 82 -> 9
+-- while the furniture fallback ran); applied when it moved by `step` or more
+function T.chop(K, c, r)
+  local w = c.wood or M.DEFAULTS.wood
+  local need = floor_of(c, r.p, r, 'wood') + (r.s.used.wood or 0) + (r.planned.wood or 0) + (w.margin or 20)
+  local mn = clamp(need, w.chop_min or 60, (w.cap or 400) - (w.band or 90))
+  local mx = clamp(math.max(w.chop_max or 150, mn + (w.band or 90)), mn + 1, w.cap or 400)
+  st.chop = {mn, mx}
+  local base = ((K.cfg.baseline or {}).baseline or {}).autochop or {}
+  local cur = st.chop_applied or {math.tointeger(base.min) or (w.chop_min or 60), math.tointeger(base.max) or (w.chop_max or 150)}
+  if math.abs(mn - cur[1]) < (w.step or 10) and math.abs(mx - cur[2]) < (w.step or 10) then return true end
+  r.cmds = r.cmds + 1
+  if K.act.run('autochop', 'target', fmt(mx), fmt(mn)) then
+    st.chop_applied = {mn, mx}
+    K.log('info', 'autochop target %d %d (floor %d, wood ordered %d)', mx, mn, floor_of(c, r.p, r, 'wood'),
+          (r.s.used.wood or 0) + (r.planned.wood or 0))
+  end
+end
+
+-- fiber crops the fort has seeds of: autofarm threshold up while cloth is short (thread comes from them), back to
+-- autofarm's own default threshold after. The default is read once a boot from `autofarm status` ("Default: N";
+-- autofarm.plug.dll); fiber_on is never below it (a "raise" to less than the default would plant fewer fibers),
+-- fiber_off stands in when status names none
+function T.farm(K, c, r)
+  local Cc = c.cloth
+  if type(Cc) ~= 'table' then return true end
+  local crops = {}
+  for _, id in ipairs(Cc.fiber or {}) do if (st.seeds[id] or 0) > 0 then crops[#crops + 1] = id end end
+  if #crops == 0 then return true end
+  if not r.fiber_on and r.p.farm == nil then return true end   -- never raised: autofarm's own thresholds stay
+  if st.farm_default == nil then
+    r.cmds = r.cmds + 1
+    local ok, out = K.act.run('autofarm', 'status')
+    local d = ok and tostring(out or ''):match('[Dd]efault[^0-9\n]*([0-9]+)')
+    st.farm_default = d and math.tointeger(tonumber(d)) or false
+    return false                                   -- the threshold in the next frame (one command per frame)
+  end
+  local base = st.farm_default or Cc.fiber_off or 50
+  local val = r.fiber_on and math.max(Cc.fiber_on or 100, base) or base
+  local sig = fmt(val) .. ':' .. table.concat(crops, ',')
+  if r.p.farm == sig then return true end
+  r.cmds = r.cmds + 1
+  if K.act.run('autofarm', 'threshold', fmt(val), table.unpack(crops)) then
+    r.p.farm = sig
+    K.log('info', 'autofarm threshold %d for %s (cloth %d, target %d)', val, table.concat(crops, ' '), have(r, 'cloth'),
+          r.targets.cloth or 0)
+  end
+end
+
+-- staged library imports (DESIGN Ã‚Â§5.5) plus plan.orders / season orders; each library once
+function T.imports(K, c, r)
+  local p = r.p
+  if not r.imp then
+    local want, seen = {}, {}
+    local function addlib(lib) if not p.imported[lib] and not seen[lib] then seen[lib] = true; want[#want + 1] = lib end end
+    for _, s in ipairs(c.stages or {}) do if M.stage_ready(s, r.f, p.cit) then addlib(s.lib) end end
+    for _, lib in ipairs((K.plan.orders or {}).import or {}) do addlib(lib) end
+    local season = type(K.plan.seasons) == 'table' and K.plan.seasons[K.now().season + 1]
+    for _, lib in ipairs(season and season.orders and season.orders.import or {}) do addlib(lib) end
+    local own = {}
+    for _, id in pairs(p.orders) do own[id] = true end
+    local q = {}
+    for _, lib in ipairs(want) do
+      if has_signature((c.signatures or {})[lib], own) then
+        p.imported[lib] = K.now().tick
+        K.log('info', 'orders %s already present: not imported again', lib)
+      else q[#q + 1] = lib end
+    end
+    r.imp = {q = q, n = 0, post = {}}
+  end
+  local imp = r.imp
+  local lib = table.remove(imp.q, 1)
+  if lib then
+    r.cmds = r.cmds + 1
+    if K.act.orders_import(lib) then
+      p.imported[lib] = K.now().tick
+      imp.n = imp.n + 1
+      if imp.n == 1 then imp.post = {'sort', 'recheck'} end
+    end
+    return false
+  end
+  local sub = table.remove(imp.post, 1)
+  if sub then
+    r.cmds = r.cmds + 1
+    K.act.orders(sub)
+    return #imp.post == 0
+  end
+  return true
+end
+
+-- an ore pile next to the smelter (`stockpiles import metalore`, the stockpile settings screen), once per boot and
+-- pile, while a smelter stands
+function T.piles(K, c, r)
+  local op = (c.metal or {}).ore_pile
+  if type(op) ~= 'table' or not ws_any(r.f, (c.metal or {}).smelter) then return true end
+  if not r.pile_ids then
+    local want = {}
+    for _, n in ipairs(op.names or {}) do want[n:lower()] = true end
+    r.pile_ids = {}
+    pcall(function()
+      for _, sp in ipairs(df.global.world.buildings.other.STOCKPILE) do
+        if want[dfhack.df2utf(sp.name or ''):lower()] and not (st.piles or {})[sp.id] then r.pile_ids[#r.pile_ids + 1] = sp.id end
+      end
+    end)
+  end
+  local id = table.remove(r.pile_ids, 1)
+  if not id then return true end
+  r.cmds = r.cmds + 1
+  st.piles = st.piles or {}
+  if K.act.run('stockpiles', 'import', op.import or 'metalore', '-s', fmt(id)) then
+    st.piles[id] = true
+    K.log('info', 'stockpile %d: %s settings (ore for the smelter)', id, op.import or 'metalore')
+  end
+  return #r.pile_ids == 0
+end
+
+-- labor KPIs; PEACE days feed baseline's labormanager A/B test
+function T.status(K, c, r)
   local ok, out = K.act.run('labormanager', 'status')
-  local starving = ok and M.parse_starving(out) or nil
-  st.starving = starving or 0
-  if starving and K.mode() == 'PEACE' and K.enabled('baseline') then K.call('baseline', 'labor_day', starving) end
+  r.cmds = r.cmds + 1
+  local n, age, job = M.parse_status(ok and out or nil)
+  local fresh = n and stale_filter(K, c, r.p, n, age, job) or nil
+  st.starving = fresh or 0
+  if fresh and K.mode() == 'PEACE' and K.enabled('baseline') then K.call('baseline', 'labor_day', fresh) end
+end
+
+function T.idle(K, c, r)
   st.idle = idle_pct(K)
-  idle_rule(K, c, p, inv)
-  st.out = {drink_d = days.drink_d, food_d = days.food_d, meals = inv.meal_kinds,
-            starving = st.starving, idle = st.idle or 0}
+  local rock = stone_free(c, r)
+  if idle_rule(K, c, r.p, r.inv, rock) then r.cmds = r.cmds + 1 end
+end
+
+function T.finish(K, c, r)
+  if r.day then
+    r.p.last_day = r.start
+    st.out = {drink_d = r.days.drink_d, food_d = r.days.food_d, meals = r.inv.meal_kinds,
+              starving = st.starving or 0, idle = st.idle or 0}
+  end
   K.persist.touch('m.economy')
+end
+
+local FULL = {'days', 'kitchen', 'appoint', 'watch', 'cmdq', 'engine', 'labor_fix', 'scan', 'plan', 'tools', 'orders',
+              'wood', 'chop', 'farm', 'imports', 'piles', 'status', 'idle', 'finish'}
+local RUSH = {'scan', 'plan', 'tools', 'orders', 'wood', 'chop', 'farm', 'finish'}
+M.TASKS = {full = FULL, rush = RUSH}
+
+local function new_run(K, c, start)
+  local p = pstate(K)
+  local cu = K.census.u
+  local cit = (cu and math.tointeger(cu.cit)) or ((p.cit or 0) > 0 and p.cit) or 7
+  p.cit = cit
+  local rush = st.rush
+  st.rush = false
+  local day = not rush or p.last_day == nil or start - p.last_day >= DAY
+  return {p = p, inv = K.census.i, cit = cit, now = start, start = start, day = day, tasks = day and FULL or RUSH,
+          i = 1, cmds = 0, cmdq = {}, days = st.days or {drink_d = 9999, food_d = 9999}, held = {},
+          s = {live = {}, used = {}}, f = {}, cands = {}, planned = {}, targets = {}, route = {}, hunt = 0}
+end
+
+local function run_slice(K, c)
+  local r = st.run
+  r.cmds = 0
+  local guard = 0
+  while r.i <= #r.tasks do
+    local name = r.tasks[r.i]
+    local okc, done = pcall(T[name], K, c, r)
+    if not okc then
+      K.log('warn', 'economy task %s: %s', name, tostring(done))
+      st.task_errs = (st.task_errs or 0) + 1
+      done = true
+    end
+    if done ~= false then r.i = r.i + 1 end
+    guard = guard + 1
+    if r.cmds >= (c.slice_cmds or 1) or guard >= 40 then break end
+  end
+  return r.i > #r.tasks
+end
+
+---------------------------------------------------------------- hook API (CONTRACTS Ã‚Â§7 proposal, live L4)
+local function route_of(key, inv, f)
+  inv, f = inv or {}, f or {}
+  if key == 'wood' then return true, 'chop'
+  elseif key == 'rock' then return false, 'no route: stone dig (runner/LLM)'
+  elseif key == 'bone' or key == 'shell' then return true, 'hunt'
+  elseif key == 'hides' then return true, 'hunt'
+  elseif key == 'leather' then return true, (inv.hides or 0) > 0 and 'tan' or 'hunt+tan'
+  elseif key == 'cloth' then return true, (inv.thread or 0) > 0 and 'weave' or 'thread+weave'
+  elseif key == 'thread' then return true, 'process plants'
+  elseif key == 'fuel' then return true, 'charcoal'
+  elseif key == 'bars' then
+    if (inv.ore or 0) > 0 then return true, 'smelt' end
+    return false, 'no ore: exploration dig or trade'
+  end
+  return false, 'no route: mining/trade'
+end
+
+function M.need(K, key, n, who, days)
+  key = key_of(key)
+  if not KEYS[key] then return false, 'unknown key ' .. tostring(key) end
+  local c = M.conf(K)
+  n, who = math.tointeger(n) or 0, tostring(who or 'any'):sub(1, 40)
+  local p = pstate(K)
+  local m = p.needs[key]
+  if type(m) ~= 'table' then m = json.object{}; p.needs[key] = m end
+  local prev = m[who]
+  if n <= 0 then
+    m[who] = nil
+    K.persist.touch('m.economy')
+    return true, 'cleared'
+  end
+  local d = clamp(math.tointeger(days) or c.need_days or 30, 1, 112)
+  m[who] = {n = n, untl = K.now().tick + d * DAY}
+  K.persist.touch('m.economy')
+  if type(prev) ~= 'table' or (math.tointeger(prev.n) or 0) < n then
+    st.rush = true
+    local rt = c.rush_ticks or 100
+    if (M.every.ticks or EVERY) > rt then M.every = {ticks = rt} end
+    K.log('info', 'need %s %d (%s, %d days)', key, n, who, d)
+  end
+  return route_of(key, K.census.i, st.f)
+end
+
+function M.reserve(K, key, n, who)
+  key = key_of(key)
+  if not KEYS[key] then return false, 'unknown key ' .. tostring(key) end
+  n, who = math.tointeger(n) or 0, tostring(who or 'any'):sub(1, 40)
+  local p = pstate(K)
+  local m = p.reserves[key]
+  if type(m) ~= 'table' then m = json.object{}; p.reserves[key] = m end
+  m[who] = n > 0 and n or nil
+  K.persist.touch('m.economy')
+  local c = M.conf(K)
+  return true, math.max(math.tointeger((c.reserve or {})[key]) or 0, holder_floor(p, key), need_n(p, key, K.now().tick))
+end
+
+function M.supply(K)
+  local p = pstate(K)
+  local c = M.conf(K)
+  local inv = K.census.i or {}
+  local sup = st.sup or {targets = {}, route = {}, held = {}}
+  local now = K.now().tick
+  local out = {}
+  for key in pairs(KEYS) do
+    local held = sup.held[key] or 0
+    local fl = math.max(math.tointeger((c.reserve or {})[key]) or 0, holder_floor(p, key), need_n(p, key, now))
+    local _, route = route_of(key, inv, st.f)
+    out[key] = {have = (inv[key] or 0) + held, held = held, floor = fl, route = sup.route[key] or route,
+                want = sup.targets[key] or math.max(need_n(p, key, now), 0)}
+  end
+  return out
 end
 
 ---------------------------------------------------------------- module
 function M.init(K)
-  st = {census = nil, rate = {}, cancels = {}, looped = {}, backoff = {}}
+  st = {census = nil, run = nil, rate = {}, cancels = {}, looped = {}, backoff = {}, bars_by = {}, ores = {},
+        seeds = {}, f = {}}
+  orec, wdef, adef = {}, {}, {}
+  M.every = {ticks = EVERY}
   pstate(K)
   local ok, err = pcall(kitchen, K, M.conf(K), nil)
   if not ok then K.log('warn', 'kitchen exclusion: %s', tostring(err)) end
@@ -1019,16 +2214,22 @@ end
 
 function M.step(K, budget, ctx)
   local c = M.conf(K)
-  if not (ctx and ctx.cont) or not st.census then
-    st.census = {acc = new_acc(c), ci = 1, idx = 0, errs = 0}
-    mcache, bolt_sub = {}, {}
+  if not (ctx and ctx.cont) or not (st.census or st.run) then
+    st.census, st.run = {acc = new_acc(c), ci = 1, idx = 0, errs = 0, start = K.now().tick}, nil
+    mcache, tcache, bolt_sub = {}, {}, {}
+    if (M.every.ticks or EVERY) ~= EVERY then M.every = {ticks = EVERY} end   -- the rush run is this one
   end
-  if not census_slice(c) then return 'more' end
-  local cs = st.census
-  st.census = nil
-  if cs.errs > 0 then K.log('warn', 'census: %d unreadable items (%s)', cs.errs, cs.err) end
-  publish(K, c, cs.acc)
-  daily(K, c)
+  if st.census then
+    if not census_slice(c) then return 'more' end
+    local cs = st.census
+    st.census = nil
+    if cs.errs > 0 then K.log('warn', 'census: %d unreadable items (%s)', cs.errs, cs.err) end
+    publish(K, c, cs.acc)
+    st.run = new_run(K, c, cs.start)
+  end
+  if not run_slice(K, c) then return 'more' end
+  st.f = st.run.f
+  st.run = nil
 end
 
 -- WP8-internal (baseline, right after its seedwatch task): re-add a cook exclusion seedwatch dropped
@@ -1038,7 +2239,7 @@ function M.kitchen_check(K)
   return ok
 end
 
--- CONTRACTS §7: orders library already imported
+-- CONTRACTS Ã‚Â§7: orders library already imported
 function M.imported(K, lib)
   local p = K.persist.get('m.economy')
   return type(p) == 'table' and type(p.imported) == 'table' and p.imported[lib] ~= nil
