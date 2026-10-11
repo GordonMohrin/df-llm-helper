@@ -116,6 +116,29 @@ T.test('at most 3 projects are worked at once; the rest are queued by prio', fun
   T.eq(row(W, 'p5')[4], '')
 end)
 
+T.test('bboxes: running projects, and a finished cistern stays in (its pipe leaves the audit box, live L4)', function()
+  local W = fresh{tag = 'bboxes'}
+  local r1 = H.place(W, 'b1', H.dig_doc(1, {tpl = 'bedrooms', params = {}, class = 'living', label = 'dig'}))
+  T.ok(r1.ok, r1.msg)
+  local r2 = H.place(W, 'c1', H.dig_doc(1, {tpl = 'cistern', params = {}, class = 'infra', label = 'dig', x = 40}))
+  T.ok(r2.ok, r2.msg)
+  H.settle(W)
+  T.eq(#select(2, W.K.call('runner', 'bboxes')), 2)
+  W.frame(1); H.settle(W)
+  H.runs(W, 1)
+  H.dig(W)
+  H.runs(W, 4)
+  T.eq(H.proj(W, 'b1').done, 1)
+  T.eq(H.proj(W, 'c1').done, 1)
+  local boxes = select(2, W.K.call('runner', 'bboxes'))
+  T.eq(#boxes, 1, 'the finished bedrooms drop out, the cistern does not')
+  T.ok(boxes[1][1] <= 40 and boxes[1][4] >= 44, 'the cistern box')
+  local rt = W.K.persist.get('m.runner')
+  for k in pairs(rt.keep) do rt.keep[k] = nil end           -- finished before L4: rebuilt from its bp file
+  local again = select(2, W.K.call('runner', 'bboxes'))
+  T.eq(again, boxes)
+end)
+
 T.test('dig_backlog: tiles left in the running dig stages (economy sizes the Miners detail from it)', function()
   local W = fresh{tag = 'backlog'}
   H.place(W, 'b1', H.dig_doc(2))                         -- 2 chunks x 5 tiles of rock

@@ -25,7 +25,8 @@ M.KEEP_OVERLAY = 'notify'          -- headless overlay profile keeps widgets who
 -- from <civ> will be leaving soon.". Informational popups only; threats (sieges, beasts) stay for
 -- Gordon (DECISION_NEEDED after 10 min).
 M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
-            caravan = {'A caravan from', 'merchants need a trade depot', 'merchants have arrived',
+            -- live L4: "A human caravan from Muboomon has arrived.  Overall trade sentiments are cautious." halted the fort
+            caravan = {'caravan from', 'merchants need a trade depot', 'merchants have arrived',
                        'The merchants from'},
             diplomacy = {'diplomat could not complete a meeting', 'diplomat has arrived', 'liaison has arrived'},
             guild = {'has been established'},

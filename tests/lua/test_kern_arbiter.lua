@@ -275,6 +275,9 @@ T.test('popups (live L0): a popup halts the game with pause_state false; migrant
   popups:insert('#', {text = 'Merchants have arrived and are unloading their goods.'})   -- live L1b
   H.run(W, 6, {paused = false})
   T.eq(#popups, 0, 'matched without regard to case')
+  popups:insert('#', {text = 'A human caravan from Muboomon has arrived.  Overall trade sentiments are cautious.'})
+  H.run(W, 6, {paused = false})
+  T.eq(#popups, 0, 'a human caravan notice does not halt the fort (live L4)')
   popups:insert('#', {text = 'Atir Adilthabum, Herbalist is throwing a tantrum!'})   -- live L1b
   H.run(W, 6, {paused = false})
   T.eq(#popups, 0, 'a tantrum notice does not halt the fort')

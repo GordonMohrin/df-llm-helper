@@ -39,7 +39,7 @@ SUPERVISE_FRESH_S = 3600                       # alerts logged longer ago than t
 HB_STALE_S = 300
 AUTO_TIMEOUT_S = 60
 TOMBS_COOLDOWN_S = 600
-PLACE_KEYS = ("tombs", "workshops", "starter")   # automatic placements (one job each)
+PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock")   # automatic placements (one job each)
 AUTO_REQUESTS = ("tombs", "workshops")            # PROJECT_REQUEST templates follow places itself
 AUTO_PHASES = ("P0", "P1")                    # PLAN_EXHAUSTED auto-start only for the basic infrastructure
 PRUNE_EVERY_S = 60
@@ -265,6 +265,11 @@ class Follower:
                 self._on_snapshot(d, now)
             elif t == "PROJECT_REQUEST" and d.get("tpl") == "tombs":
                 self._request_tombs(d, now)
+            elif t == "PROJECT_REQUEST" and d.get("tpl") == "bedrooms" and d.get("why") == "mood_rock":
+                # live L4: a strange mood waited for a boulder while nobody placed care's stone dig; the
+                # Possessed mood before it failed within 40 days. A bedrooms dig at prio 1 gives boulders.
+                n = d.get("n") if isinstance(d.get("n"), int) and not isinstance(d.get("n"), bool) else 4
+                self._request_place("mood_rock", "bedrooms", {"n": max(1, min(n, 6))}, "S1", now, prio=1)
             elif t == "PROJECT_REQUEST" and d.get("tpl") in AUTO_REQUESTS:
                 self._request_place(d["tpl"], d["tpl"], {}, "S1", now)   # live L1: a strange mood needs a shop
             elif t == "PLAN_EXHAUSTED" and d.get("phase") in AUTO_PHASES:
@@ -341,7 +346,7 @@ class Follower:
         params = {"n": d["n"]} if isinstance(d.get("n"), int) and not isinstance(d.get("n"), bool) else {}
         self._request_place("tombs", "tombs", params, "S1", now)
 
-    def _request_place(self, key: str, tpl: str, params: dict, site: str, now: float) -> None:
+    def _request_place(self, key: str, tpl: str, params: dict, site: str, now: float, prio: int | None = None) -> None:
         job = self.jobs.get(key)
         if job and now - job.get("since", 0) < (AUTO_TIMEOUT_S if not job.get("placed") else TOMBS_COOLDOWN_S):
             return
@@ -350,6 +355,8 @@ class Follower:
         except Exception as e:                 # noqa: BLE001
             return self._fail(f"{tpl} snapshot", e, now)
         self.jobs[key] = {"snap": cid, "since": now, "params": params, "tpl": tpl, "site": site}
+        if prio is not None:
+            self.jobs[key]["prio"] = prio
 
     def _request_starter(self, d: dict, now: float) -> None:
         """PLAN_EXHAUSTED in an auto phase: place the phase's first proj deliverable that has no project yet."""
@@ -469,6 +476,8 @@ class Follower:
             args = {"tpl": tpl, "site": job.get("site") or "S1"}   # S1 = best free site on this snapshot
             if job.get("params"):
                 args["p"] = job["params"]
+            if isinstance(job.get("prio"), int):
+                args["prio"] = job["prio"]
             prev = files.read_json(_placed(self.dir, tpl))
             cid = self._send("bp.place", args, tpl, now, snap=snap)
         except Exception as e:                 # noqa: BLE001 - WP3 bugs included: one AUTO_FAIL, job dropped

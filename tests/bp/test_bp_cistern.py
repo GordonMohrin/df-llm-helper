@@ -234,6 +234,21 @@ def test_cistern_keeps_the_fort_sealed_and_the_refuge_separate(planned):
     assert res["refuge_sep"] and not res["bypass"]
 
 
+def test_no_room_opens_from_the_basin(planned):
+    """live L4: follow placed three tombs whose anchors lay in the refuge cistern's basin (emit adds the dug box,
+    basin included, to Z4); filled, the basin floods them. The basin and the well room are never public."""
+    land, docs, snap, man, plan = planned
+    doc = bp.emit("cistern", plan["params"], plan["site"])
+    w = bp.as_built([sites._plain(d) for d in docs + [doc]], base=land)
+    m = merge_manifest(w.manifest, {})
+    (room,) = [r for r in m["rooms"] if r["tpl"] == "cistern"]
+    x0, y0, z0, x1, y1, z1 = room["bbox"]
+    wet = {(x, y, z) for x in range(x0 - 1, x1 + 2) for y in range(y0 - 1, y1 + 2) for z in (z0 - 1, z0)}
+    sites_ = bp.rank(w.snapshot(purpose="sites"), "tombs", manifest=m, n=12)
+    assert sites_
+    assert all(tuple(s["anchor"]) not in wet for s in sites_), [s["anchor"] for s in sites_]
+
+
 def _without(doc, key):
     d = copy.deepcopy(doc)
     for st in d["stages"]:

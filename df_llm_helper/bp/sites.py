@@ -218,10 +218,23 @@ def _private(r: dict) -> bool:
     return r["tpl"] in NO_THROUGH
 
 
+def _private_boxes(m: dict) -> list[list[int]]:
+    """Private room boxes; a cistern's well room counts with the basin under it and one tile around (live L4:
+    follow placed three tombs whose anchors lay in the refuge cistern's basin, which emit had added to Z4)."""
+    out = []
+    for r in m.get("rooms", []):
+        b = r["bbox"]
+        if r["tpl"] == "cistern":
+            out.append([b[0] - 1, b[1] - 1, b[2] - 1, b[3] + 1, b[4] + 1, b[5]])
+        elif _private(r):
+            out.append(b)
+    return out
+
+
 def _public(g: Graph, m: dict) -> bytearray:
     """Z4 tiles a new room may open from: reachable from Z4 outside private rooms without crossing a door."""
     z4 = g.mask(m["zones"]["Z4"])
-    private = g.mask([r["bbox"] for r in m.get("rooms", []) if _private(r)])
+    private = g.mask(_private_boxes(m))
     doors = bytearray(c == "+" for c in g.t)
     src = [i for i in range(g.N) if z4[i] and g.walk[i] and not private[i] and not doors[i]]
     seen, _ = g.bfs(src, blocked=doors, climb=False)

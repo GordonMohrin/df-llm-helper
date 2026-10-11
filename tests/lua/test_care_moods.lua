@@ -53,7 +53,8 @@ T.test('mood filters: concrete items per filter, forbidden ones freed, MOOD_NEED
     W.kill(2)
   end}
   W.run(1)
-  T.eq(CW.flags(W), {{12, 'forbid', false}, {34, 'forbid', false}}, 'the second iron bar and the third bone')
+  -- live L4: the third bone stays forbidden while the silk cloth before it is missing (filter order)
+  T.eq(CW.flags(W), {{12, 'forbid', false}}, 'the second iron bar; not the third bone yet')
   local need = W.find_events('MOOD_NEED')
   T.eq(#need, 1)
   T.eq({need[1].d.unit, need[1].d.need, need[1].d.via, need[1].d.ws, need[1].d.child}, {1, 'cloth(silk) x1', 'job',
@@ -110,6 +111,28 @@ T.test('a child\'s mood: held reserve boulders are freed; economic stone and hid
   T.eq(W.find_events('MOOD_NEED'), {})
   T.eq(CW.held(W), {boulders = {40, 42}}, 'the freed boulder left the reserve')
   df.global.plotinfo.economic_stone = nil
+end)
+
+T.test('live L4: a held boulder for a later filter stays held while an earlier filter (bone) is missing', function()
+  local persist = {['m.care'] = {v = 2, dead = {}, deaths = {}, petitions = {}, reserve = {held = {boulders = {41}}}}}
+  local W = CW.world{persist = persist, setup = function(W)
+    moody(W, 3, 'Possessed', {
+      filter(nil, {quantity = 2, flags2 = {bone = true, body_part = true}}),   -- 2 bones: none on the map
+      filter('BOULDER', {mat_type = 0}),
+    })
+    F.item(W, 'BOULDER', {id = 41, mat_index = 6, flags = {forbid = true}, _pos = {10, 11, 5}})
+  end}
+  W.run(1)
+  T.eq(CW.flags(W), {}, 'not freed while the bones are missing')
+  local need = W.find_events('MOOD_NEED')
+  T.eq(need[#need].d.list, {'bone x2'}, 'the held boulder counts as there')
+  CW.day(W)
+  T.eq(CW.flags(W), {}, 'still held a day later')
+  T.eq(CW.held(W), {boulders = {41}})
+  F.item(W, 'CORPSEPIECE', {id = 30, unit_id = 700, corpse_flags = {bone = true}, _pos = {11, 10, 5}})
+  F.item(W, 'CORPSEPIECE', {id = 31, unit_id = 701, corpse_flags = {bone = true}, _pos = {11, 10, 5}})
+  CW.day(W)
+  T.eq(CW.flags(W), {{41, 'forbid', false}}, 'freed once the bones are there')
 end)
 
 T.test('a child without a workshop: the hint says any moodable shop', function()

@@ -335,6 +335,26 @@ T.test('flow: no broker -> "Anyone can Trade"; broker busy for 2 days -> anyone 
   T.eq(d2.trade_flags.anyone_can_trade, false) -- restored
 end)
 
+T.test('flow (live L4): no TradeAtDepot job -> act posts it; nobody takes it -> the idle broker; then trade', function()
+  local W, _, d, c, U = setup{}
+  W.frame(1)
+  to_depot(W, d, c, {no_trader = true, ticks = 250})
+  T.eq(U.broker_jobs, nil, 'DF gets JOB_WAIT ticks to post the job itself')
+  W.run(200, {skip = 9})
+  T.eq(U.broker_jobs, {'post'})
+  T.eq(#d.jobs, 1)
+  W.run(500, {skip = 9})
+  T.eq(U.broker_jobs, {'post'}, 'the posted job waits WORKER_WAIT for a taker')
+  W.run(200, {skip = 9})
+  T.eq(U.broker_jobs, {'post', 'assign'}, 'busy broker: refused, nothing cancelled')
+  T.eq(count(U.calls, 'open'), 0)
+  U.broker_free = true
+  W.run(700, {skip = 9})
+  T.eq(U.broker_jobs, {'post', 'assign', 'assign'})
+  T.ok(F.until_(W, function() return traded(W) end, 2000), 'traded once the broker is in the depot')
+  T.eq(#d.jobs, 1, 'never a second job')
+end)
+
 T.test('flow: a trader outside the depot does not open the screen', function()
   local W, _, d, c, U = setup{}
   W.frame(1)

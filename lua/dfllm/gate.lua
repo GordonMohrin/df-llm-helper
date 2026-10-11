@@ -17,6 +17,12 @@ local M = {name = 'gate', every = {ticks = 600}, critical = true, verbs = {}}
 M.FAST, M.SLOW = 25, 600   -- cadence: FAST in SIEGE/BREACH/DRILL or while a bridge has work
 M.NO_WORKER = 200          -- ticks our queued pull may wait without a worker
 M.BLOCK_WAIT = 300         -- ticks to wait for citizens to leave the footprint before a forced raise
+-- live L4: a drill raised B1 15 ticks after the footprint had cleared; the militia commander, carrying her
+-- baby, stepped back on while the bridge moved (108 ticks) and both died (death cause DRAWBRIDGE). A bridge
+-- moves ~100 ticks after its pull, so a non-forced pull (any lowering; a raise outside SIEGE/BREACH) also
+-- waits for this many tiles around the footprint to be clear, and a pending one is cancelled when a citizen
+-- comes that close.
+M.MARGIN = 3
 M.SETTLE = 50              -- ticks after a pull job left the queue before another may be queued
 M.DEADLINE = 900           -- default: an 'up' not reached by then -> GATE_FAIL (A)
 M.DOWN_GUARD = 30          -- 'down' refused while a visible hostile is this close to the bridge
@@ -567,6 +573,8 @@ local function pick(K, r, now)
   return nil
 end
 
+local function grown(fp, m) return {fp[1] - m, fp[2] - m, fp[3], fp[4] + m, fp[5] + m, fp[6]} end
+
 -- citizens (sane or not, CONTRACTS §1.4: by census id) on the footprint now; -1 = unknown (no census)
 local function citizens_on(K, name, fp)
   local cu = K.census.u
@@ -669,6 +677,9 @@ local function control(K, name, spec, now)
                     or s ~= r.job.before
       -- a citizen stepped onto the footprint before our lowering pull was done: cancel it
       if not stale and dir == 'down' and citizens_on(K, name, spec.fp) ~= 0 then stale = 'blocked' end
+      -- live L4: a citizen near the footprint cancels a pending non-forced pull too (M.MARGIN)
+      if not stale and not (dir == 'up' and FORCE_MODES[K.mode()])
+         and citizens_on(K, name, grown(spec.fp, M.MARGIN)) > 0 then stale = 'blocked' end
       local has_worker = w0 ~= nil
       if not stale then
         if has_worker then r.job.nw = nil
@@ -701,13 +712,15 @@ local function control(K, name, spec, now)
   -- (4) footprint: raising flings, lowering crushes. 'down' waits without limit (also when the
   -- census is unknown); 'up' is forced after BLOCK_WAIT only in SIEGE/BREACH.
   local on = citizens_on(K, name, spec.fp)
-  if on > 0 or (w == 'down' and on < 0) then
+  local forced = w == 'up' and FORCE_MODES[K.mode()]
+  local near = forced and 0 or citizens_on(K, name, grown(spec.fp, M.MARGIN))
+  if on > 0 or near > 0 or (w == 'down' and on < 0) then
     r.block_since = r.block_since or now
     if not r.block_ev then
       r.block_ev = true
       K.emit('GATE', 'C', name .. ' ' .. w .. ' waits: citizen on the footprint', {bridge = name, state = 'blocked'})
     end
-    if not (w == 'up' and FORCE_MODES[K.mode()] and now - r.block_since >= M.BLOCK_WAIT) then
+    if not (forced and now - r.block_since >= M.BLOCK_WAIT) then
       r.stuck = 'blocked'
       return s
     end

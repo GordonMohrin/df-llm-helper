@@ -261,10 +261,17 @@ def footprint(doc: dict) -> set[tuple[int, int, int]]:
     return cells
 
 
+# live L4: follow placed three tombs (one coffin each) whose anchor lay in the refuge cistern's basin (the
+# anchor exemption below); filled, the basin would flood them. Water templates' tiles never serve as a corridor.
+WET_TPLS = ("cistern",)
+
+
 class Occupancy:
     """Tiles of placed projects. A new project may neither share a tile with another project nor touch one
     (same z, 8-neighbourhood: one rock tile stays between them), except next to its own anchor, where a
-    room opens from an existing corridor (bp/rooms.py: the anchor is a walkable tile, (0,1) the doorway)."""
+    room opens from an existing corridor (bp/rooms.py: the anchor is a walkable tile, (0,1) the doorway).
+    A WET_TPLS project (cistern basin, pipe) is no corridor: its tiles clash next to the anchor too, and
+    an anchor on one of them clashes."""
 
     def __init__(self):
         self.owner: dict[tuple[int, int, int], tuple[str, str]] = {}      # tile -> (bp id, tpl)
@@ -278,13 +285,16 @@ class Occupancy:
         """Ids of the projects this document would overlap or touch (ignore_tpl: its own earlier stages)."""
         ax, ay, az = doc["anchor"]
         hit: set[str] = set()
+        a = self.owner.get((ax, ay, az))
+        if a and a[1] in WET_TPLS and a[1] != ignore_tpl:
+            hit.add(a[0])
         for x, y, z in (footprint(doc) if cells is None else cells):
             near_anchor = z == az and abs(x - ax) <= 1 and abs(y - ay) <= 1
             for dx in (-1, 0, 1):
                 for dy in (-1, 0, 1):
-                    if (dx or dy) and near_anchor:
-                        continue
                     o = self.owner.get((x + dx, y + dy, z))
+                    if (dx or dy) and near_anchor and not (o and o[1] in WET_TPLS):
+                        continue
                     if o and o[1] != ignore_tpl:
                         hit.add(o[0])
         return sorted(hit)

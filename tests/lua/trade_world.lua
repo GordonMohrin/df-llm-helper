@@ -348,6 +348,24 @@ function F.ui(W, d, c, opts)
     if a.anyone ~= nil then d.trade_flags.anyone_can_trade = a.anyone end
     return true, old
   end
+  -- live L4: the depot's TradeAtDepot job posted by act (DF 53 never posted it from the toggle)
+  -- a posted job has no worker; U.broker_free lets 'assign' put the broker (unit 901) into the depot
+  function ops.broker_job(a)
+    U.broker_jobs = U.broker_jobs or {}
+    U.broker_jobs[#U.broker_jobs + 1] = a.assign and 'assign' or 'post'
+    local job
+    for _, j in ipairs(d.jobs) do if j.job_type == df.job_type.TradeAtDepot then job = j end end
+    if not a.assign then
+      if job then return true, 'exists' end
+      d.jobs:insert('#', {id = 4500, job_type = df.job_type.TradeAtDepot})
+      return true, 'posted'
+    end
+    if not job then return false, 'no job' end
+    if job._worker then return true, 'taken' end
+    if not U.broker_free then return false, 'broker busy' end
+    job._worker = W.add_unit{id = 901, citizen = true, pos = {d.x1 + 1, d.y1 + 1, d.z}}
+    return true, 'assigned'
+  end
   function ops.open(a)
     if t.open then return true, 'open' end
     if U.screen == 'sheet' then

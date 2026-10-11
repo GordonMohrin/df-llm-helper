@@ -116,6 +116,42 @@ T.test('request_broker: sets the depot toggles, returns the old ones', function(
   T.eq(#E.inputs, 0)
 end)
 
+T.test('broker_job (live L4): one TradeAtDepot job on the depot; an idle broker takes a job nobody took', function()
+  local E = env()
+  local linked, workers = {}, {}
+  df.job_type = df.job_type or {}
+  df.job_type.TradeAtDepot = 'TradeAtDepot'
+  df.job = {new = function() return {general_refs = kmock.vec{}} end}
+  df.general_ref_building_holderst = {new = function() return {} end}
+  local broker = {id = 7, mood = -1, job = {current_job = {id = 1}}}
+  dfhack.units = dfhack.units or {}
+  local su = {getUnitByNobleRole = dfhack.units.getUnitByNobleRole, isDead = dfhack.units.isDead,
+              isCitizen = dfhack.units.isCitizen}
+  dfhack.units.getUnitByNobleRole = function(role) return role == 'broker' and broker or nil end
+  dfhack.units.isDead = function() return false end
+  dfhack.units.isCitizen = function() return true end
+  local sj = dfhack.job
+  dfhack.job = {linkIntoWorld = function(j, new) linked[#linked + 1] = {j, new} end,
+                getWorker = function(j) return workers[j] end,
+                addWorker = function(j, u) workers[j] = u; return true end}
+  E.d.jobs = kmock.vec{}
+  T.eq({E.I.trade('broker_job', {depot = 99})}, {false, 'no trade depot 99'})
+  T.eq({E.I.trade('broker_job', {depot = 50})}, {true, 'posted'})
+  T.eq(#E.d.jobs, 1)
+  local j = E.d.jobs[0]
+  T.eq({j.job_type, j.pos, j.general_refs[0].building_id}, {'TradeAtDepot', {x = 22, y = 22, z = 10}, 50})
+  T.eq({#linked, linked[1][2]}, {1, true})
+  T.eq({E.I.trade('broker_job', {depot = 50})}, {true, 'exists'}, 'never a second job')
+  T.eq({E.I.trade('broker_job', {depot = 50, assign = true})}, {false, 'broker busy'}, 'his own job is never cancelled')
+  broker.job.current_job = nil
+  T.eq({E.I.trade('broker_job', {depot = 50, assign = true})}, {true, 'assigned'})
+  T.eq(workers[j], broker)
+  T.eq({E.I.trade('broker_job', {depot = 50, assign = true})}, {true, 'taken'})
+  T.eq(#E.d.jobs, 1)
+  for k, v in pairs(su) do dfhack.units[k] = v end
+  dfhack.job = sj
+end)
+
 T.test('open: map -> depot sheet like clicking the depot', function()
   local E = env()
   T.eq({E.I.trade('open', {depot = 50})}, {true, 'sheet'})

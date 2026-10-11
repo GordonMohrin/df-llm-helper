@@ -669,6 +669,18 @@ local function need_item(K, c, r, p, t, it)
   end
   if nd.fixes >= math.max(c.unforbid_per_need, nd.n) or not inside(r, x, y, z) or not revealed(K, x, y, z)
      or not reachable(K, r, t.m.upos, x, y, z) then return end
+  -- live L4: a Possessed mood (bone x2, then a block and a boulder) found no bone; care freed one held boulder
+  -- per run for its third filter and coffins, the depot and the cistern took each one before the dwarf (who
+  -- gathers in filter order) came to it: 9 boulders gone, and the mood then lacked a boulder too. A held or
+  -- dumped item is freed only once every earlier filter of the same mood is covered; until then it counts
+  -- as there (held for the mood), so MOOD_NEED lists only what is really missing.
+  for _, prev in ipairs(t.m.needs) do
+    if prev == nd then break end
+    if (prev.avail or 0) < prev.n then
+      r.claimed[it.id], nd.avail = true, nd.avail + 1
+      return
+    end
+  end
   local ok = true
   if f.forbid then ok = K.act.item_flag(it.id, 'forbid', false) and ok end
   if f.dump then ok = K.act.item_flag(it.id, 'dump', false) and ok end

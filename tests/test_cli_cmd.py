@@ -411,3 +411,13 @@ def test_retire_keeps_the_same_anchor_of_earlier_stages(tmp_path):
     assert files.read_json(bpd / ".placed-fortcore.json") == {"anchor": [106, 54, 124], "rot": 0, "from": "S1", "bp": "p1"}
     assert C.retire(tmp_path, "p1")
     assert not (bpd / ".placed-fortcore.json").exists()
+
+def test_occupancy_cistern_is_no_corridor():
+    """live L4: three tombs opened from the refuge cistern's basin (anchor exemption); wet tiles always clash."""
+    occ = cmd.Occupancy()
+    occ.add(_doc("cis", [0, 0, 5], [[0, 0, 0, "d(3x3)"]], tpl="cistern"))           # basin x 0..2, y 0..2
+    assert occ.clash(_doc("t1", [1, 1, 5], [[3, 0, 0, "d"], [4, 0, 0, "d"]])) == ["cis"]   # anchor in the basin
+    assert occ.clash(_doc("t2", [4, 1, 5], [[-1, 1, 0, "d"]])) == ["cis"]   # (3,2) touches the basin by the anchor
+    assert occ.clash(_doc("t3", [6, 1, 5], [[1, 0, 0, "d"]])) == []                  # rock in between
+    occ.add(_doc("corr", [0, 5, 5], [[0, 0, 0, "d(10x1)"]], tpl="fortcore"))
+    assert occ.clash(_doc("t4", [7, 5, 5], [[0, 1, 0, "d"]])) == []                  # a dry corridor still works

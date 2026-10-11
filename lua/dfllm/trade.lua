@@ -51,6 +51,9 @@ M.CFG = {
   GOODS_EVERY = 300,    -- ticks between depot goods sums
   DEPOT_ITEMS = 600,    -- depot items summed at most per check
   BROKER_WAIT = 2400,   -- ticks at the depot without a trader before "Anyone can Trade"
+  JOB_WAIT = 300,       -- ticks at the depot without a TradeAtDepot job before act posts it (live L4)
+  WORKER_WAIT = 600,    -- ticks a posted job may wait for a taker before it goes to an idle broker
+  JOB_RETRY = 600,      -- ticks between two broker_job calls of one kind
   UNLOAD_WAIT = 600, UNLOAD_MAX = 10,
   RETRY_WAIT = 1200, MAX_TRIES = 2,
   STUCK_APPROACH = 4800,-- ticks Approaching without reaching the depot -> fix/stuck-merchants
@@ -390,7 +393,7 @@ local function trader_at(d)
     for _, j in ipairs(d.jobs) do
       if j.job_type == jt then
         local w = dfhack.job.getWorker(j)                     -- Lua API.txt:1360
-        return w ~= nil and in_depot(w.pos, d)
+        if w ~= nil and in_depot(w.pos, d) then return true end
       end
     end
     return false
@@ -904,6 +907,38 @@ local function time_out(K, c, d, now)
   return finish(K, false, 'time')
 end
 
+-- live L4: with "Broker requested" and "Anyone can Trade" set, DF 53 posted no TradeAtDepot job in 27,500
+-- ticks at the depot (Castlerisen y291; the 'time' failures of L1-L3), so nobody ever came to trade. After
+-- JOB_WAIT ticks at the depot without the job, act posts it as the request stands for (act.trade
+-- broker_job); a posted job nobody took within WORKER_WAIT goes to the broker once he has no job.
+local function trade_job(d)
+  local ok, j, w = pcall(function()
+    for _, x in ipairs(d.jobs) do
+      if x.job_type == df.job_type.TradeAtDepot then return x, dfhack.job.getWorker(x) end
+    end
+  end)
+  if ok then return j, w end
+end
+
+local function broker_job(K, d, f, now, at_for)
+  local j, w = trade_job(d)
+  if w then return end                                   -- the trader is on the way
+  if not j then
+    if at_for < M.CFG.JOB_WAIT or now - (f.job_tick or -1e9) < M.CFG.JOB_RETRY then return end
+    f.job_tick, f.job_posted = now, now
+    local ok, res = act_trade(K, 'broker_job', {depot = d.id})
+    K.log('info', 'trade: no TradeAtDepot job %d ticks after the caravan reached the depot: %s', at_for,
+          tostring(res))
+    return
+  end
+  f.job_posted = f.job_posted or now
+  if now - (f.job_posted or now) >= M.CFG.WORKER_WAIT and now - (f.assign_tick or -1e9) >= M.CFG.JOB_RETRY then
+    f.assign_tick = now
+    local ok, res = act_trade(K, 'broker_job', {depot = d.id, assign = true})
+    K.log('info', 'trade: TradeAtDepot job without a worker: %s', tostring(res))
+  end
+end
+
 local function step_wait(K, cars, now)
   local f, c = rt.f, car_of(cars, rt.ent)
   local v = visit(rt.ent)
@@ -933,7 +968,7 @@ local function step_wait(K, cars, now)
   end
   if c.state ~= 'AtDepot' then return end
   if c.tr < M.CFG.OPEN_MIN then return time_out(K, c, d, now) end
-  if not trader_at(d) then return end
+  if not trader_at(d) then return broker_job(K, d, f, now, at_for) end
   -- our goods in the depot: settled when the need is covered or nothing came for GOODS_STILL;
   -- time pressure ends the wait
   if not f.g_tick or now - f.g_tick >= M.CFG.GOODS_EVERY then

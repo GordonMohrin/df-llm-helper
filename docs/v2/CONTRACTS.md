@@ -223,7 +223,7 @@ Every function returns `ok, res_or_err`, never raises, writes one line to `comma
 | `order_material(order_id, 'wood')` → `ok, 'wood'` | int, `'wood'` | work orders screen: cancel an open one-time rock furniture order (door, cabinet, chest, coffin, table, throne, armor stand, weapon rack, hatch cover, grate, floodgate) and enter it again in wood for the amount left; only the material changes (live L3: quickfort `orders` always picks rock; soil embark with 8 boulders and 82 logs) | economy |
 | `item_flag(item_id, flag, on)` | `flag='forbid'|'dump'|'melt'` | item flag toggles | care |
 | `zone_assign(zone_building_id, unit_id)` | ints | assign a caged unit to a pit/pond zone | care |
-| `trade(op, args)` | `op='request_broker'|'open'|'mark'|'offer'|'close'` [WP9 audit] | depot and trade screen | trade |
+| `trade(op, args)` | `op='request_broker'|'broker_job'|'open'|'mark'|'offer'|'close'` [WP9 audit; `broker_job` live L4] | depot and trade screen; `broker_job {depot, assign?}` posts the TradeAtDepot job the broker request stands for (DF 53 never posted it from the toggle: 'time' failures L1-L3), one per depot; `assign` gives a job nobody took to the broker only while he has no job | trade |
 | `run(cmd, ...)` → `ok, output` | command + string args | `dfhack.run_command_silent` after the allowlist check (§9.14); `'r'` entries are read-only queries | see `contract.ACT.run` |
 
 Not in act on purpose: labor writes other than the builtin tool details (labormanager owns every other labor and detail; live L1b gave economy the Miners/Woodcutters/Hunters memberships, see DESIGN §3), unit/skill/position writes, job removal (except our own lever job), item creation, tile edits.

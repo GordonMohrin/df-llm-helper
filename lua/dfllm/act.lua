@@ -221,6 +221,41 @@ function A.install_trade(I, gui, int)
     return true, old
   end
 
+  -- live L4: DF 53 never posted the depot's TradeAtDepot job from the request toggle alone (Castlerisen
+  -- y291: "Broker requested" and "Anyone can Trade" set for 27,500 ticks with the caravan at the depot, no
+  -- job, no trade; v1 Run 6 saw the same and traded only once the job existed). This posts the job the
+  -- request stands for: one TradeAtDepot job on the depot (building holder ref, like every workshop job),
+  -- linked into the world for DF's own job picker. a.assign: a posted job nobody took is given to the
+  -- broker, only while he has no job (nothing of his is cancelled; never anyone else). Refused while a
+  -- TradeAtDepot job is on the depot already (one per depot), and never removes a job.
+  function TR.broker_job(a)
+    local d = tr_depot(a.depot)
+    if not d then return false, 'no trade depot ' .. tostring(a.depot) end
+    local jt = df.job_type.TradeAtDepot
+    local job
+    for _, j in ipairs(d.jobs) do if j.job_type == jt then job = j; break end end
+    if job then
+      if not a.assign then return true, 'exists' end
+      if dfhack.job.getWorker(job) then return true, 'taken' end
+      local u = dfhack.units.getUnitByNobleRole('broker')                -- Lua API.txt:1688
+      if not u or dfhack.units.isDead(u) or not dfhack.units.isCitizen(u) or u.mood >= 0 then
+        return false, 'no broker to assign'
+      end
+      if u.job.current_job then return false, 'broker busy' end
+      if not dfhack.job.addWorker(job, u) then return false, 'addWorker refused' end   -- Lua API.txt:1366
+      return true, 'assigned'
+    end
+    job = df.job:new()
+    job.job_type = jt
+    job.pos = xyz2pos(d.centerx, d.centery, d.z)
+    local ref = df.general_ref_building_holderst:new()
+    ref.building_id = d.id
+    job.general_refs:insert('#', ref)
+    d.jobs:insert('#', job)
+    dfhack.job.linkIntoWorld(job, true)                                 -- Lua API.txt:1338
+    return true, 'posted'
+  end
+
   -- map -> depot sheet (like clicking the depot, v1 handel.lua:676-681); sheet -> click the Trade
   -- label the caller found at {x, y}, verified here first
   function TR.open(a)

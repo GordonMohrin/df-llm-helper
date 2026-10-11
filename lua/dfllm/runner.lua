@@ -758,7 +758,13 @@ local function stage_done(K, P, d, st, R)
   dirty()
 end
 
+-- live L4: a finished cistern's pipe (108 tiles to the brook) left the audit box; the audit read the cut-off
+-- pipe as a way in (bypass, R1 -> R0). A cistern's box is kept after it is done (m.runner keep): the pipe ends
+-- at its closed floodgate and fortification, which the audit then sees.
+local KEEP_BOX = {cistern = true}
+
 local function finish(K, P, d)
+  if KEEP_BOX[P.tpl] then S.rt.keep[P.id] = project_bbox(P.id, d) end
   local man = K.manifest()
   M.merge_manifest(man, d.manifest)
   K.persist.set('manifest', man)
@@ -1211,7 +1217,8 @@ function M.init(K)
   S.pd = pd
   local rt = K.persist.get('m.runner')
   if type(rt) ~= 'table' then rt = {} end
-  rt.v, rt.p, rt.hist, rt.planned, rt.req = 2, obj(rt.p), obj(rt.hist), obj(rt.planned), obj(rt.req)
+  rt.v, rt.p, rt.hist, rt.planned, rt.req, rt.keep = 2, obj(rt.p), obj(rt.hist), obj(rt.planned), obj(rt.req),
+    obj(rt.keep)
   if type(rt.exh) ~= 'string' then rt.exh = '' end
   K.persist.set('m.runner', rt)
   S.rt = rt
@@ -1262,8 +1269,12 @@ function M.bboxes(K)
     if P.done ~= 1 then
       local d = doc(K, P.id)
       if d then r[#r + 1] = project_bbox(P.id, d) end
+    elseif KEEP_BOX[P.tpl] and not S.rt.keep[P.id] then   -- finished before the box was kept: its bp file
+      local d = read_bp(K, P.id)
+      if d and not check_doc(d, P.tpl) then S.rt.keep[P.id] = project_bbox(P.id, d); forget(P.id); dirty() end
     end
   end
+  for _, b in pairs(S.rt.keep) do r[#r + 1] = b end
   return r
 end
 

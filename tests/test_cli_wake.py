@@ -331,6 +331,32 @@ def test_follow_tombs_autoplace(save, monkeypatch):
     assert out == []
 
 
+def test_follow_mood_rock_places_a_prio1_bedrooms_dig(save, monkeypatch):
+    """live L4: care's PROJECT_REQUEST bedrooms why=mood_rock (a mood waits for a boulder) is placed by follow at
+    once with prio 1; a plain bedrooms request is not."""
+    calls = install_fake_bp(monkeypatch)
+    c = Clock()
+    f, out = F(c)
+    f.poll()
+    append_events(save, [ev(8813, "PROJECT_REQUEST", "bedrooms", {"tpl": "bedrooms", "n": 4}),
+                         ev(8814, "PROJECT_REQUEST", "bedrooms", {"tpl": "bedrooms", "n": 4, "why": "mood_rock"})])
+    f.poll()
+    (snap_cmd,) = inbox_docs(save)
+    assert snap_cmd["verb"] == "snapshot"
+    for p in (save / "inbox").glob("*.json"):
+        p.unlink()
+    sid = snap_cmd["id"]
+    snap = json.loads((save / "snap" / "c201.json").read_text("utf-8"))
+    snap["id"] = sid
+    files.write_json_atomic(save / "snap" / f"{sid}.json", snap)
+    append_events(save, [ev(8815, "SNAPSHOT_READY", "", {"id": sid, "path": f"snap/{sid}.json", "purpose": "sites"})])
+    f.poll()
+    (place,) = inbox_docs(save)
+    assert place["verb"] == "bp.place"
+    assert place["args"] == {"tpl": "bedrooms", "site": "S1", "p": {"n": 4}, "prio": 1}
+    assert calls["rank"] == [(sid, "bedrooms", {"n": 4})]
+
+
 def test_follow_plan_exhausted_p0_autostarts_first_deliverable(save, monkeypatch):
     """Live L0/L1: with no plan the fort idled a year and a dwarf starved. PLAN_EXHAUSTED in P0/P1 places the
     phase's first proj deliverable without a project at once (no LLM); the wake still goes out."""
