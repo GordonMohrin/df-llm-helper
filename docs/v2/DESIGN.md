@@ -193,6 +193,7 @@ Gameplay modules run on `cur_year_tick` deltas, which stay correct under timestr
 - One 1x1 tomb zone per coffin, with free tombs ≥ open corpses + 6; otherwise care requests a `tombs` project.
 - autoslab, burial, preserve-tombs.
 - KPIs: 0 ghosts, 0 corpses older than 3 days.
+- No second tomb zone on a coffin (live L3): the runner leaves out one-owner zone cells (tomb, bedroom, office) whose tiles already lie in a zone of that type, and care runs `burial -c` only when no zoned coffin lacks its `relations` link (burial.lua zones every coffin with empty relations; four coffins got a second zone, DF gave the dead those "free" zones on occupied coffins).
 - A berserk citizen leaves the own group (live L3): care still counts it as a fort member through its histfig link (MEMBER or FORMER_MEMBER) to the site government, so its death is recorded and its corpse buried, and sense never counts a ghost of the fort's civilization as a hostile (a berserker's ghost held the fort in BREACH: civilians in Tiefe+, no lever pulled, 21 thirsty).
 
 **5.11 Food and drink.**

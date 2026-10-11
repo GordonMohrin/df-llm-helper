@@ -566,6 +566,29 @@ T.test('build: a stage placed again over its own buildings tracks them instead o
   dfhack.buildings = nil
 end)
 
+T.test('zone: one-owner zone cells already zoned (tomb over a tombed coffin) are left out (live L3)', function()
+  local W = fresh{tag = 'zdup'}
+  local czt, bld = df.civzone_type, dfhack.buildings
+  df.civzone_type = {Tomb = 9, Bedroom = 2, Office = 3, [9] = 'Tomb', [2] = 'Bedroom', [3] = 'Office'}
+  local zoned = {['10,10,100'] = {{type = 9}}, ['12,10,100'] = {{type = 2}}}
+  dfhack.buildings = {findCivzonesAt = function(pos) return zoned[pos.x .. ',' .. pos.y .. ',' .. pos.z] or {} end}
+  local d = build_doc({})
+  d.stages = {{label = 'zone', mode = 'zone', orders = 0, defense = 0,
+               chunks = {{pos = {10, 10, 100}, cells = {{0, 0, 0, 'T'}, {2, 0, 0, 'T'}, {4, 0, 0, 'm(2x2)'}}},
+                         {pos = {10, 10, 100}, cells = {{0, 0, 0, 'T'}}}}}}
+  H.place(W, 'tz', d)
+  H.runs(W, 2)
+  local calls = H.qf_calls(W, 'zone')
+  T.eq(#calls, 1, 'the all-duplicate second chunk makes no call')
+  local keys = {}
+  H.cells(calls[1], function(x, y, z, key) keys[#keys + 1] = x .. ':' .. key end)
+  table.sort(keys)
+  T.eq(keys, {'12:T', '14:m'}, 'a tomb over a bedroom zone and the meeting area stay; the tombed coffin is skipped')
+  T.eq(H.proj(W, 'tz').done, 1)
+  T.ok(logged(W, 'info', 'cells already zoned, left out'))
+  dfhack.buildings, df.civzone_type = bld, czt
+end)
+
 T.test('bp.cancel: plain removal, and undo walks the applied stages backwards', function()
   local W = fresh{tag = 'cancel'}
   H.place(W, 'a', H.doc{x = 10})

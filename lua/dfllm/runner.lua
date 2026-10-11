@@ -582,8 +582,45 @@ local function pre_occupied(K, ch, R)
   return n
 end
 
+-- live L2/L3: a second tombs project on the same coffins (and care's `burial -c` racing the zone stage) stacked
+-- tomb zones on coffins that already had one; DF assigned the dead to the new, "free" zones of occupied coffins
+-- and five citizens lay unburied (one ghost held the fort in BREACH). A one-owner zone cell (tomb, bedroom,
+-- office) is left out where every tile already lies in a zone of that type, as nobody draws a second one.
+M.ZONE_ONE = {T = 'Tomb', b = 'Bedroom', o = 'Office'}
+local function zoned_cells(ch)
+  local find = dfhack.buildings and dfhack.buildings.findCivzonesAt              -- Lua API.txt:2488
+  if not find or not df.civzone_type then return ch, 0 end
+  local keep, skip = {}, 0
+  for _, cell in ipairs(ch.cells) do
+    local tl = {}
+    cell_tiles(ch, cell, tl)
+    local want = M.ZONE_ONE[tl[1] and tl[1][4] or '']
+    local dup = want ~= nil and #tl > 0
+    if dup then
+      local ty = df.civzone_type[want]
+      for _, t in ipairs(tl) do
+        local ok, zs = pcall(find, {x = t[1], y = t[2], z = t[3]})
+        local hit = false
+        for _, zn in ipairs(ok and zs or {}) do if zn.type == ty then hit = true end end
+        if not hit then dup = false; break end
+      end
+    end
+    if dup then skip = skip + 1 else keep[#keep + 1] = cell end
+  end
+  if skip == 0 then return ch, 0 end
+  return {pos = ch.pos, cells = keep}, skip
+end
+
 local function apply(K, P, st, R)
   local ch = st.chunks[P.chunk + 1]
+  if st.mode == 'zone' then
+    local skip
+    ch, skip = zoned_cells(ch)
+    if skip > 0 then
+      K.log('info', '%s %s chunk %d: %d cells already zoned, left out', P.id, st.label, P.chunk, skip)
+      if #ch.cells == 0 then P.chunk = P.chunk + 1; R.last = now(K); dirty(); return true end
+    end
+  end
   local p = {mode = st.mode, data = chunk_data(ch), pos = ch.pos}
   if st.mode == 'dig' then p.priority = P.prio end
   local pre = st.mode == 'build' and pre_occupied(K, ch, R) or 0

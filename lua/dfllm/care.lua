@@ -396,13 +396,23 @@ local function phase_zones(K, c, r, p)
     if zn.assigned_unit_id == -1 and active then free = free + 1 end
   end
   r.tombs_free = free
-  local unzoned, tomb = 0, df.civzone_type and df.civzone_type.Tomb
+  local unzoned, tomb, unlinked = 0, df.civzone_type and df.civzone_type.Tomb, 0
   for _, cof in ipairs(vec(function() return other.COFFIN end)) do
     local zoned = not built(cof)               -- a planned coffin cannot be zoned yet
     for _, zn in ipairs(cof.relations or {}) do if zn.type == tomb then zoned = true end end   -- entomb.lua:66
-    if not zoned then unzoned = unzoned + 1 end
+    if not zoned then
+      -- live L3: burial.lua zones every coffin with empty `relations`, and a coffin built after its tomb zone
+      -- has none: four coffins got a second tomb zone, DF gave the dead those "free" zones on occupied coffins
+      -- and five citizens lay unburied. A coffin inside a tomb zone counts as zoned, and burial runs only
+      -- when no such coffin would get a second zone.
+      local ok, zs = pcall(dfhack.buildings.findCivzonesAt, {x = cof.x1, y = cof.y1, z = cof.z})   -- :2488
+      local inside = false
+      for _, zn in ipairs(ok and zs or {}) do if zn.type == tomb then inside = true end end
+      if inside then unlinked = unlinked + 1 else unzoned = unzoned + 1 end
+    end
   end
-  if unzoned > 0 then K.act.run('burial', '-c') end            -- tools/burial.txt: citizens-only tombs
+  r.coffins_unlinked = unlinked
+  if unzoned > 0 and unlinked == 0 then K.act.run('burial', '-c') end   -- tools/burial.txt: citizens-only tombs
   local hw = 0
   for _, zn in ipairs(vec(hospital_zones)) do
     for _, w in ipairs(vec(function() return other.WELL end)) do

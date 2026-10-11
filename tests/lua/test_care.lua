@@ -454,6 +454,16 @@ T.test('burial -c for unzoned built coffins only', function()
   W2.run(1)
   T.ok(F.has(F.runs(W2), 'burial -c'))
   T.eq(F.bad_runs(W2), {})
+  -- live L3: a coffin built after its tomb zone has no relations; burial.lua would give it a second zone
+  local W3 = world{setup = function(W)
+    local c3 = F.building(W, 'COFFIN', {x1 = 4, y1 = 5, z = 6})
+    c3.relations = kmock.vec{}
+    local c4 = F.building(W, 'COFFIN', {x1 = 8, y1 = 5, z = 6})
+    c4.relations = kmock.vec{}
+    W.civzones_at['4,5,6'] = {{type = df.civzone_type.Tomb}}
+  end}
+  W3.run(1)
+  T.ok(not F.has(F.runs(W3), 'burial -c'), 'no burial while a zoned coffin lacks its relation')
 end)
 
 T.test('petitions: PETITION once per agreement', function()
