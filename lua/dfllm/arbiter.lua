@@ -30,8 +30,8 @@ M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
                        'The merchants from'},
             diplomacy = {'diplomat could not complete a meeting', 'diplomat has arrived', 'liaison has arrived'},
             guild = {'has been established'},
-            -- live L6: the embark intro "A Dwarven Outpost: You have arrived ... Strike the earth!" held a new fort
-            arrival = {'You have arrived', 'Strike the earth'},
+            -- the embark intro ("... Strike the earth!") is never dismissed here: erasing it left Perplexrooms
+            -- (live L6) a fort where nobody ever took a job; tools/embark clicks its Okay (S.intro)
             -- live L6: "A raccoon has stolen a (steel battle axe)!" halted the fort (vermin thief; nothing to decide)
             theft = {'has stolen'},
             -- live L6: cavern/pit discovery notices halted the fort; the runner already reacts to FEATURE_DISCOVERY

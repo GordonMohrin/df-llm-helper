@@ -461,10 +461,10 @@ T.test('steps: build covers every mode; unknown mode raises', function()
   local ids = {}
   for _, st in ipairs(e) do
     ids[#ids + 1] = st.id
-    T.ok(st.live == 'run4-6' or st.live == 'untested' or st.live == 'L0', st.id)
+    T.ok(st.live == 'run4-6' or st.live == 'untested' or st.live == 'L0' or st.live == 'L6', st.id)
   end
   T.eq({ids[1], ids[2], ids[3], ids[4], ids[5]}, {'world.goto', 'local.place', 'site.read', 'site.gate', 'site.confirm'})
-  T.eq(ids[#ids], 'prep.embark')
+  T.eq({ids[#ids - 1], ids[#ids]}, {'prep.embark', 'fort.intro'}, 'the intro popup is clicked last (live L6)')
   -- default embark (and scan with tiles=true): 16 hovered tiles before the final placement
   e = S.build({id = 'e', mode = 'embark', site = {1, 2}}, CFG, LOADOUT)
   T.eq({e[2].id, e[3].id, e[33].id, e[34].id, e[35].id, e[36].id},

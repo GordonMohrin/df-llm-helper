@@ -625,6 +625,19 @@ function S.embark(allow_unspent)
     done = function(v) return kind_in(v, 'fort'), 'waiting for the map' end}
 end
 
+-- live L6 (Perplexrooms): the kernel erased the intro popup ("... Strike the earth!") from the popup
+-- vector and no dwarf ever took a job; Okay clicked like a player starts the fort (Castlerisen,
+-- Paddletribes). So the embark run ends by clicking it, before `dfllm adopt`.
+function S.intro()
+  return {id = 'fort.intro', live = 'L6', timeout_ms = 120000, tries = 3, optional = true,
+    wait = function(v) return kind_in(v, 'fort') end,
+    act = function(ui, v, ctx, w, mem)
+      if not v:has('Strike the earth') then return 'done', 'no intro popup' end
+      return press_once(ui, v, mem, 'Okay', {exact = true})
+    end,
+    done = function(v) return not v:has('Strike the earth'), 'intro popup open' end}
+end
+
 ---------------------------------------------------------------- run specs
 -- spec = {v=2, id, mode='newgame'|'scan'|'embark'|'prep', world='Zilirr', cands={{wx,wy,lx,ly}},
 --         site={wx,wy,lx,ly}, waive={criterion ids}, play_now=bool, allow_unspent=bool}
@@ -653,7 +666,7 @@ end
 
 local function prep_steps(out, spec, cfg, loadout)
   out[#out + 1] = S.prepare(spec.play_now)
-  if spec.play_now then return end
+  if spec.play_now then out[#out + 1] = S.intro(); return end
   for i, role in ipairs(loadout.roles) do out[#out + 1] = S.skills(i, role, cfg) end
   out[#out + 1] = S.tab('items', 'prep_items', cfg)
   for _, it in ipairs(loadout.items) do out[#out + 1] = S.buy(it, 'prep_items', cfg) end
@@ -662,6 +675,7 @@ local function prep_steps(out, spec, cfg, loadout)
   out[#out + 1] = S.tab('items', 'prep_items', cfg)
   for _, n in ipairs(loadout.rest) do out[#out + 1] = S.buy({name = n, add = 999, rest = true}, 'prep_items', cfg) end
   out[#out + 1] = S.embark(spec.allow_unspent)
+  out[#out + 1] = S.intro()
 end
 
 function S.build(spec, cfg, loadout)
