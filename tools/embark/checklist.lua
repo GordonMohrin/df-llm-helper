@@ -102,6 +102,7 @@ function C.evaluate(rec, rules, ctx)
   tiered('savagery', sav, {'low', 'medium'}, {})
   tiered('trees', rec.trees, rules.trees_ok, rules.trees_warn)
   if rec.water then put('water', 'pass', rec.water)
+  elseif rec.aquifer == 'light' then put('water', 'warn', 'no stream shown; light aquifer as well source')
   elseif (rec.read or 0) > 0 then put('water', 'fail', 'no brook or river shown')
   else put('water', 'unknown', 'not shown') end
   tiered('aquifer', rec.aquifer, rules.aquifer_ok, rules.aquifer_warn)

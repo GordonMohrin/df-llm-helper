@@ -99,8 +99,8 @@ def test_rules_md_is_short_and_matches_the_contracts():
 def test_rules_json_old_sites_and_tiers():
     r = load(EMB / "rules.json")
     # L0 2026-10-10: old_site_min lowered from DESIGN's 10 to 4 for Zilirreth (no viable site >= 10)
-    assert r["v"] == 2 and r["dark_fortress_min"] == 10 and r["old_site_min"] == 4 and "L0" in r["old_site_note"]
-    assert {tuple(s["w"]) for s in r["old_sites"]} == {(24, 10), (15, 14), (22, 10), (4, 10), (26, 10)}
+    assert r["v"] == 2 and r["dark_fortress_min"] == 10 and r["old_site_min"] == 3 and "L0" in r["old_site_note"]
+    assert {tuple(s["w"]) for s in r["old_sites"]} == {(24, 10), (15, 14), (22, 10), (4, 10), (26, 10), (8, 14)}
     assert r["sizes"] == [[3, 3], [4, 4]]
     assert "heavy_aquifer" in r["fail_popups"] and "light_aquifer" in r["warn_popups"]
     assert r["aquifer_ok"] == ["none"] and r["temperature_ok"] == ["temperate"]

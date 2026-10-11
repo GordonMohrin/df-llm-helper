@@ -1105,7 +1105,7 @@ function M.boot(opts)
   flush_persist(st)
   flush_files(st)
   require('repeat-util').scheduleEvery(M.KEY, 1, 'frames', M._tick)
-  return true, string.format('booted %s (%d modules, mode %s)', save, #st.entries, st.mode)
+  return true, string.format('booted %s (%d modules, mode %s)', M.runtime_key(marker, save), #st.entries, st.mode)
 end
 
 function M.adopt(opts)
@@ -1114,7 +1114,12 @@ function M.adopt(opts)
   if not ok then return false, save end
   if read_marker() then return M.boot(opts) end
   local tick = abs_now()
-  local marker = {v = 2, adopted = tick, save = clean(save, 120), fort = clean(fort_name(), 120),
+  -- runtime key = world save folder + site id: a second fort in the same world (region2) must not reuse
+  -- the first fort's runtime folder (plan.json, bp/, events of the abandoned fort; live 2026-10-11)
+  local okp, sid = pcall(function() return df.global.plotinfo.site_id end)
+  local site_id = okp and math.tointeger(sid) or 0
+  local key = clean(save, 100) .. '-site' .. site_id
+  local marker = {v = 2, adopted = tick, save = key, fort = clean(fort_name(), 120),
                   acceptance = opts.acceptance and 1 or 0, baseline = 0, boots = 0}
   dfhack.persistent.saveSiteDataString('dfllm', json.encode(marker))
   local phases = fio.read_json((opts.repo or '.') .. '/plans/year1.json')
