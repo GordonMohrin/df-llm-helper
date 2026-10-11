@@ -1,2 +1,2 @@
-"""df-llm-helper – helper program for LLM control of Dwarf Fortress (see SPEC.md)."""
-__version__ = "0.1.0"
+"""df-llm-helper v2 – files-only helper for an LLM that plans a Dwarf Fortress fort (see docs/v2/DESIGN.md)."""
+__version__ = "2.0.0"

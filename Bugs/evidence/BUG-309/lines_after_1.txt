@@ -1,3 +1,0 @@
-$ wc -l tmp_bug/chronik.md
-51 lines in tmp_bug/chronik.md
-[exit 0]

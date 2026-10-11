@@ -1,6 +1,0 @@
-# Camera profile 'events' (spec v3-10): only reports (moods, caravan, masterworks, finds, alarms), no ambient
-# following of working dwarves (schau mode 'events').
-name: events
-extends: ambient
-description: "only reports: moods, caravan, masterworks, finds"
-mode: events

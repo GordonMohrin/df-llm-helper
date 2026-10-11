@@ -287,10 +287,10 @@ df_llm_helper/bp/{primitives,fortcore,rooms,validate,emit,render,topo,sites}.py
 plans/year1.json  config/{baseline.json,allowlist.json,decisions.yaml}  tools/{luahost.py,migrate_v2.py,embark/,win/vdesk_move.ps1}
 tests/ (pytest; tests/lua/*.lua via luahost; fixtures/v2 recorded from the new fort)  .claude/settings.json (PreToolUse → dfllm lint --cmd)
 ```
-**Removed from `v2`** (kept in `v1-final`):
-- `df_llm_helper/*` except `lint`, `fairplay` (rules), `stalllog`, `clock` and `planners/blueprint.py` (which becomes `bp/validate.py`);
-- `dfpilot/`, `Bugs/`, `Features/`, `fixtures/`, `scenarios/`, `runtime/`, `lua/claude`, `lua/pilot_*.lua`;
-- `docs/manual-v3`, `specs-v2`, `specs-v3`.
+**Removed from `v2`** (kept in `v1-final`; done 2026-10-11, list in [V1-LEGACY.md](V1-LEGACY.md)):
+- `df_llm_helper/*` except `lint`, `fairplay` (rules) and `planners/blueprint.py` (which became `bp/validate.py`); `stalllog` and `clock` went too, because no v2 module imports them;
+- `dfpilot/`, `Bugs/`, `Features/`, `fixtures/` (except `fixtures/v2`), `scenarios/`, `runtime/`, `lua/claude`, `lua/pilot_*.lua`, `data/`, `examples/`, `blueprints/`, `config.yaml(.example)`, `COMPANION.md`, `tools/luacheck_min.py` and the v1 tests;
+- `docs/manual-v3`, `specs-v2`, `specs-v3` and the v1 docs (MANUAL, INTEGRATION, OVERVIEW, SPEC, AGENT-PROMPT, PLANNERS, LINT-FINDINGS).
 
 **Repo B** (`dwarf-fortress`):
 - Tag `run6-final`.

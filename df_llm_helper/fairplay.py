@@ -8,8 +8,7 @@
     owned_match(tokens) -> (entry, owner) | None  # commands that only a dedicated act function may run
 
 Normative: docs/v2/CONTRACTS.md §9.14 (allowlist), §9.16 (decisions), docs/v2/DECISIONS.md.
-v1 names (ExceptionRegistry, check_command, ...) are forwarded to df_llm_helper._v1.fairplay until
-the v1 code is removed from branch v2.
+The v1 exception register (ExceptionRegistry, check_command, ...) is retired; it lives in tag v1-final.
 """
 from __future__ import annotations
 
@@ -245,14 +244,3 @@ def armok_problems(armok_cmds: set[str], al: dict | None = None) -> list[str]:
     that are not listed in armok_exceptions."""
     al = al or allowlist()
     return sorted(c for c in al["commands"] if c in armok_cmds and c not in al["armok_exceptions"])
-
-
-def __getattr__(name: str):
-    """v1 compatibility: names of the archived v1 module (ExceptionRegistry, check_command, ...)."""
-    if name.startswith("__"):
-        raise AttributeError(name)
-    from ._v1 import fairplay as _v1
-    try:
-        return getattr(_v1, name)
-    except AttributeError:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None

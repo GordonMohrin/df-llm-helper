@@ -1,4 +1,0 @@
-{
-	"error": "Squad nil unknown",
-	"ok": false
-}

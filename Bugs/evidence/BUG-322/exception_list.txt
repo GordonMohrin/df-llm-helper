@@ -1,2 +1,0 @@
-$ python -m df_llm_helper --mock fixtures/run5 exception list
-[exit 0]

@@ -1,3 +1,0 @@
-$ python -m df_llm_helper --mock fixtures/run5 kb get nonexistent
-unknown ID (python -m df_llm_helper kb search ...)
-[exit 2]

@@ -264,9 +264,7 @@ def test_armok_cross_check_offline():
     assert F.armok_problems({"autochop"}) == ["autochop"]        # the check itself works
 
 
-def test_v1_names_are_forwarded():
-    from df_llm_helper.fairplay import ExceptionRegistry, FairPlayError, check_command  # noqa: F401
-    from df_llm_helper._v1 import fairplay as v1
-    assert ExceptionRegistry is v1.ExceptionRegistry
-    with pytest.raises(AttributeError):
-        F.no_such_name  # noqa: B018
+def test_v1_register_is_gone():
+    """The v1 exception register lives in tag v1-final only; nothing forwards its names any more."""
+    for name in ("ExceptionRegistry", "FairPlayError", "check_command", "no_such_name"):
+        assert not hasattr(F, name), name

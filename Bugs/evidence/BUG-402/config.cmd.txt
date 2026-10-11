@@ -1,2 +1,0 @@
-dfhack-run.exe claude/config
-exit=0 time=0.62s

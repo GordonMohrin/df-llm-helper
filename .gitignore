@@ -3,11 +3,6 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
-config.yaml
-data/state.db*
-data/exceptions.local.jsonl
-data/kb/journal.jsonl
-runtime/
 *.egg-info/
 build/
 dist/

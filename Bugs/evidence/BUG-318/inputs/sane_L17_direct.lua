@@ -1,1 +1,0 @@
-blk.tiletype = 5

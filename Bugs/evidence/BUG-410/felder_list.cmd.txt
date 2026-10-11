@@ -1,2 +1,0 @@
-dfhack-run.exe claude/felder list
-exit=0 time=0.07s

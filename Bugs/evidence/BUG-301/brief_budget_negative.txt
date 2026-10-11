@@ -1,3 +1,0 @@
-$ python -m df_llm_helper --mock fixtures/run5 brief bau --budget -5
-Error: Scope 'bau': the mandatory parts alone exceed the budget -5 (shorten the mission)
-[exit 2]

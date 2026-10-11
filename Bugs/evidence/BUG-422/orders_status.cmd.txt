@@ -1,2 +1,0 @@
-dfhack-run.exe claude/orders status
-exit=0 time=0.11s

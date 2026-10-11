@@ -1,4 +1,5 @@
 # Byte-exact fixtures (CRLF and non-UTF-8 bytes are part of the test data)
 *.jsonl text eol=lf
 *.csv text eol=lf
-fixtures/v3/settings/** -text
+# the fixture runtime is what the kernel writes: LF bytes, never converted
+tests/fixtures/v2/runtime/** -text

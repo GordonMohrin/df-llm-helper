@@ -1,4 +1,0 @@
-paths:
-  tools: tmp_bug/tools
-  scopes: tmp_bug/scopes
-  state_db: tmp_bug/state.db

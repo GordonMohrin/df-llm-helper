@@ -1,3 +1,0 @@
-$ ls tmp_bug/tools
-[]
-[exit 0]

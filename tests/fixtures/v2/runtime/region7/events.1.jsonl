@@ -1,0 +1,9 @@
+{"cls":"C","d":{"season":3,"year":2},"msg":"winter y2","n":8651,"tick":1169600,"type":"SEASON"}
+{"cls":"B","d":{"n":7},"msg":"7 migrants arrived","n":8652,"tick":1173600,"type":"MIGRANTS"}
+{"cls":"C","d":{"pct":80,"proj":"fortcore","stage":"s1.build"},"msg":"fortcore s1.build 80%","n":8653,"tick":1177600,"type":"PROJECT_STAGE"}
+{"cls":"B","d":{"days":41,"key":"drink_d","min":170},"msg":"drink 41 days < 170","n":8654,"tick":1181600,"type":"STOCK_LOW"}
+{"cls":"B","d":{"kind":"fey","need":"","ok":1,"unit":1201},"msg":"Urist McCarver: fey mood (Craftsdwarfs)","n":8655,"tick":1185600,"type":"MOOD_START"}
+{"cls":"B","d":{"kind":"fey","need":"","ok":1,"unit":1201},"msg":"Urist McCarver: artifact made","n":8656,"tick":1189600,"type":"MOOD_END"}
+{"cls":"B","d":{"proj":"fortcore","tpl":"fortcore"},"msg":"fortcore stage 1 done","n":8657,"tick":1193600,"type":"PROJECT_DONE"}
+{"cls":"B","d":{"from":"P1","to":"P2"},"msg":"P1 -> P2","n":8658,"tick":1197600,"type":"PHASE"}
+{"cls":"A","d":{"year":2},"msg":"year 2 ended: review the plan","n":8659,"tick":1201600,"type":"YEAR_REVIEW"}

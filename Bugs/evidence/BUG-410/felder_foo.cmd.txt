@@ -1,2 +1,0 @@
-dfhack-run.exe claude/felder foo
-exit=0 time=0.14s

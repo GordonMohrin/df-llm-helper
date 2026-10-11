@@ -1,3 +1,0 @@
-$ ls tmp_bug/tools      # escape.md was written OUTSIDE tools/out/berichte
-['escape.md', 'out']
-[exit 0]

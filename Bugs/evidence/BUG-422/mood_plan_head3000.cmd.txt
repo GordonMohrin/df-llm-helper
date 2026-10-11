@@ -1,3 +1,0 @@
-dfhack-run.exe claude/mood plan
-exit=0 time=1.28s
-(only the first 3000 bytes are kept; full answer is 145,218 bytes)

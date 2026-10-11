@@ -1,0 +1,113 @@
+{"cls":"C","d":{"season":0,"year":3},"msg":"spring y3","n":8701,"tick":1209600,"type":"SEASON"}
+{"cls":"C","d":{"boots":4,"save":"region7","v":2},"msg":"boot region7 (boots 4)","n":8702,"tick":1210200,"type":"BOOT"}
+{"cls":"C","d":{"pct":7,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 7%","n":8703,"tick":1211613,"type":"PROJECT_STAGE"}
+{"cls":"B","d":{"from":"P2","to":"P3"},"msg":"P2 -> P3","n":8704,"tick":1212000,"type":"PHASE"}
+{"cls":"C","d":{"pct":14,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 14%","n":8705,"tick":1213293,"type":"PROJECT_STAGE"}
+{"cls":"B","d":{"civ":"Ostuk Udib","phase":"arrive","ratio":0},"msg":"dwarven caravan arrived","n":8706,"tick":1214600,"type":"CARAVAN"}
+{"cls":"C","d":{"pct":21,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 21%","n":8707,"tick":1214973,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":28,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 28%","n":8708,"tick":1216653,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":35,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 35%","n":8709,"tick":1218333,"type":"PROJECT_STAGE"}
+{"cls":"B","d":{"civ":"Ostuk Udib","phase":"traded","ratio":172},"msg":"traded ratio 1.72","n":8710,"tick":1218600,"type":"CARAVAN"}
+{"cls":"C","d":{"pct":42,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 42%","n":8711,"tick":1220013,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":49,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 49%","n":8712,"tick":1221693,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":56,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 56%","n":8713,"tick":1223373,"type":"PROJECT_STAGE"}
+{"cls":"B","d":{"n":11},"msg":"11 migrants arrived","n":8714,"tick":1224600,"type":"MIGRANTS"}
+{"cls":"C","d":{"pct":63,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 63%","n":8715,"tick":1225053,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":70,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 70%","n":8716,"tick":1226733,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":77,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 77%","n":8717,"tick":1228413,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":100,"proj":"y3s0b0","stage":"s1.dig"},"msg":"y3s0b0 s1.dig 100%","n":8718,"tick":1229600,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":84,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 84%","n":8719,"tick":1230093,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":91,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 91%","n":8720,"tick":1231773,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":98,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 98%","n":8721,"tick":1233453,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":5,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 5%","n":8722,"tick":1235133,"type":"PROJECT_STAGE"}
+{"cls":"B","d":{"vis":2},"msg":"2 visible hostiles","n":8723,"tick":1235600,"type":"ALERT_START"}
+{"cls":"C","d":{"from":"PEACE","to":"ALERT","why":"2 visible"},"msg":"PEACE -> ALERT","n":8724,"tick":1235600,"type":"MODE"}
+{"cls":"C","d":{"pct":12,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 12%","n":8725,"tick":1236813,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":19,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 19%","n":8726,"tick":1238493,"type":"PROJECT_STAGE"}
+{"cls":"B","d":{"vis":0},"msg":"quiet 1200 ticks","n":8727,"tick":1238600,"type":"ALERT_END"}
+{"cls":"C","d":{"from":"ALERT","to":"PEACE","why":"quiet"},"msg":"ALERT -> PEACE","n":8728,"tick":1238600,"type":"MODE"}
+{"cls":"C","d":{"pct":26,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 26%","n":8729,"tick":1240173,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":33,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 33%","n":8730,"tick":1241853,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":40,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 40%","n":8731,"tick":1243533,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":47,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 47%","n":8732,"tick":1245213,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":54,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 54%","n":8733,"tick":1246893,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":61,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 61%","n":8734,"tick":1248573,"type":"PROJECT_STAGE"}
+{"cls":"B","d":{"id":31},"msg":"invasion armed","n":8735,"tick":1249600,"type":"INVASION"}
+{"cls":"B","d":{"great":0,"inv":41,"vis":41,"why":"invaders"},"msg":"41 visible invaders","n":8736,"tick":1249620,"type":"SIEGE_START"}
+{"cls":"C","d":{"from":"PEACE","to":"SIEGE","why":"41 invaders"},"msg":"PEACE -> SIEGE","n":8737,"tick":1249620,"type":"MODE"}
+{"cls":"C","d":{"bridge":"O1","job":88123,"lever":3021},"msg":"O1 pull queued","n":8738,"tick":1249800,"type":"LEVER"}
+{"cls":"C","d":{"bridge":"O1","state":"up"},"msg":"O1 up","n":8739,"tick":1250100,"type":"GATE"}
+{"cls":"C","d":{"captures":0,"deaths":0,"on_station":8,"vis":41,"worn":93},"msg":"41 vis, worn 93%, 8 on station","n":8740,"tick":1250220,"type":"SIEGE_STATUS"}
+{"cls":"C","d":{"pct":68,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 68%","n":8741,"tick":1250253,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":75,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 75%","n":8742,"tick":1251933,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":82,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 82%","n":8743,"tick":1253613,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":89,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 89%","n":8744,"tick":1255293,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":96,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 96%","n":8745,"tick":1256973,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":3,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 3%","n":8746,"tick":1258653,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":10,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 10%","n":8747,"tick":1260333,"type":"PROJECT_STAGE"}
+{"cls":"B","d":{"race":"GOBLIN","unit":5512},"msg":"goblin caught in a cage trap","n":8748,"tick":1261600,"type":"CAPTURE"}
+{"cls":"C","d":{"pct":17,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 17%","n":8749,"tick":1262013,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":24,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 24%","n":8750,"tick":1263693,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":31,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 31%","n":8751,"tick":1265373,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":38,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 38%","n":8752,"tick":1267053,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":45,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 45%","n":8753,"tick":1268733,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":52,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 52%","n":8754,"tick":1270413,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":59,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 59%","n":8755,"tick":1272093,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":66,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 66%","n":8756,"tick":1273773,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":73,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 73%","n":8757,"tick":1275453,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":80,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 80%","n":8758,"tick":1277133,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":87,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 87%","n":8759,"tick":1278813,"type":"PROJECT_STAGE"}
+{"cls":"B","d":{"cause":"combat","citizen":1,"unit":1388},"msg":"Kib Ustuth died (struck down)","n":8760,"tick":1279600,"type":"DEATH"}
+{"cls":"C","d":{"pct":94,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 94%","n":8761,"tick":1280493,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":1,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 1%","n":8762,"tick":1282173,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":8,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 8%","n":8763,"tick":1283853,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":15,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 15%","n":8764,"tick":1285533,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":22,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 22%","n":8765,"tick":1287213,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":29,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 29%","n":8766,"tick":1288893,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"from":"SIEGE","to":"RECOVERY","why":"0 visible 2400t"},"msg":"SIEGE -> RECOVERY","n":8767,"tick":1289600,"type":"MODE"}
+{"cls":"C","d":{"pct":36,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 36%","n":8768,"tick":1290573,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":43,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 43%","n":8769,"tick":1292253,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":50,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 50%","n":8770,"tick":1293933,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":57,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 57%","n":8771,"tick":1295613,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":64,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 64%","n":8772,"tick":1297293,"type":"PROJECT_STAGE"}
+{"cls":"A","d":{"captures":1,"hostiles":41,"killed":23,"lost":1,"sealed_ticks":48000},"msg":"41 hostiles, 23 killed, 1 lost, sealed 40.0 d","n":8773,"tick":1298000,"type":"SIEGE_END"}
+{"cls":"C","d":{"from":"RECOVERY","to":"PEACE","why":"quiet 8400"},"msg":"RECOVERY -> PEACE","n":8774,"tick":1298000,"type":"MODE"}
+{"cls":"C","d":{"pct":71,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 71%","n":8775,"tick":1298973,"type":"PROJECT_STAGE"}
+{"cls":"B","d":{"n":6,"tpl":"tombs","why":"free<need"},"msg":"tombs: 2 free < 7 needed","n":8776,"tick":1299600,"type":"PROJECT_REQUEST"}
+{"cls":"C","d":{"id":"c201","path":"snap/c201.json","purpose":"sites"},"msg":"snapshot c201 (sites)","n":8777,"tick":1300200,"type":"SNAPSHOT_READY"}
+{"cls":"C","d":{"id":"c19a3f2b1c4e7","ok":1,"verb":"bp.place"},"msg":"bp.place ok","n":8778,"tick":1300600,"type":"CMD"}
+{"cls":"C","d":{"pct":78,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 78%","n":8779,"tick":1300653,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":85,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 85%","n":8780,"tick":1302333,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":92,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 92%","n":8781,"tick":1304013,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":99,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 99%","n":8782,"tick":1305693,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":6,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 6%","n":8783,"tick":1307373,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":13,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 13%","n":8784,"tick":1309053,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"season":1,"year":3},"msg":"summer y3","n":8785,"tick":1310400,"type":"SEASON"}
+{"cls":"B","d":{"factor":2,"module":"runner","ms":7},"msg":"runner 7 ms x3, factor 2","n":8786,"tick":1310600,"type":"KERNEL_SLOW"}
+{"cls":"C","d":{"pct":20,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 20%","n":8787,"tick":1310733,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":27,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 27%","n":8788,"tick":1312413,"type":"PROJECT_STAGE"}
+{"cls":"B","d":{"days":150,"key":"drink_d","min":170},"msg":"drink 150 days < 170","n":8789,"tick":1313600,"type":"STOCK_LOW"}
+{"cls":"C","d":{"pct":34,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 34%","n":8790,"tick":1314093,"type":"PROJECT_STAGE"}
+{"cls":"B","d":{"kind":"secretive","need":"bars","ok":1,"unit":1422},"msg":"Zon Atir: secretive mood (Forge)","n":8791,"tick":1315600,"type":"MOOD_START"}
+{"cls":"B","d":{"kind":"secretive","need":"bar:iron","ok":0,"unit":1422},"msg":"Zon Atir needs iron bars","n":8792,"tick":1315650,"type":"MOOD_NEED"}
+{"cls":"C","d":{"pct":41,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 41%","n":8793,"tick":1315773,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":48,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 48%","n":8794,"tick":1317453,"type":"PROJECT_STAGE"}
+{"cls":"A","d":{"id":"D-07","q":"set visitor_cap 30 (speed)?"},"msg":"D-07: visitor cap 30?","n":8795,"tick":1317600,"type":"DECISION_NEEDED"}
+{"cls":"C","d":{"pct":55,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 55%","n":8796,"tick":1319133,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"id":"c19a40011aa2","ok":0,"verb":"lever"},"msg":"lever failed","n":8797,"tick":1319600,"type":"CMD"}
+{"cls":"C","d":{"pct":62,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 62%","n":8798,"tick":1320813,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"id":"c200","path":"snap/c200.json","purpose":"audit"},"msg":"snapshot c200 (audit)","n":8799,"tick":1321600,"type":"SNAPSHOT_READY"}
+{"cls":"B","d":{"fails":["traps<30"],"min_traps":22,"ok":0},"msg":"audit fail: traps<30","n":8800,"tick":1322200,"type":"AUDIT"}
+{"cls":"C","d":{"pct":69,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 69%","n":8801,"tick":1322493,"type":"PROJECT_STAGE"}
+{"cls":"B","d":{"fail":["traps<30"],"from":1,"to":1},"msg":"R1 kept: traps<30","n":8802,"tick":1322600,"type":"READY_CHANGE"}
+{"cls":"C","d":{"pct":76,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 76%","n":8803,"tick":1324173,"type":"PROJECT_STAGE"}
+{"cls":"A","d":{"proj":"y3s0b1","stage":"s1.build","ticks":2400,"tpl":"workshops","why":"no_material"},"msg":"y3s0b1 s1.build blocked 2 days: no_material","n":8804,"tick":1324600,"type":"PROJECT_BLOCKED"}
+{"cls":"C","d":{"pct":83,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 83%","n":8805,"tick":1325853,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":90,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 90%","n":8806,"tick":1327533,"type":"PROJECT_STAGE"}
+{"cls":"B","d":{"err":"bad item type","fn":"workorder","module":"economy"},"msg":"act.workorder: bad item type","n":8807,"tick":1327600,"type":"ACT_FAIL"}
+{"cls":"C","d":{"pct":97,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 97%","n":8808,"tick":1329213,"type":"PROJECT_STAGE"}
+{"cls":"B","d":{"kind":"temple"},"msg":"temple petition (Armok)","n":8809,"tick":1330600,"type":"PETITION"}
+{"cls":"C","d":{"pct":4,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 4%","n":8810,"tick":1330893,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":11,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 11%","n":8811,"tick":1332573,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":64,"proj":"fortcore","stage":"s2.build"},"msg":"fortcore s2.build 64%","n":8812,"tick":1332600,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"id":"c9a1","path":"snap/

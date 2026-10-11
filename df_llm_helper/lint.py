@@ -13,7 +13,7 @@ reads, no --instant, no teleport, no writes to hidden, skills, body, pos, timers
 commands. Aliases are followed: `local W = df.global.world` (W.units = world.units), `S.x = df.global`.
 The shell policy fails closed: any dfhack-run word outside a mention-only command (echo, grep, git, ...)
 is a call, also behind wrappers, variables, aliases, $( ), backticks, heredocs and -c/-e code strings.
-v1 names (RULES, lint_paths, gate_command, ...) are forwarded to df_llm_helper._v1.lint.
+The v1 linter (RULES, lint_paths, gate_command, ...) is gone from branch v2; it lives in tag v1-final.
 """
 from __future__ import annotations
 
@@ -1526,17 +1526,6 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{f['file']}:{f['line']}: {f['rule']} {f['msg']}")
         print(f"{len(found)} finding(s)")
     return 1 if found else 0
-
-
-def __getattr__(name: str):
-    """v1 compatibility: names of the archived v1 linter (RULES, lint_paths, gate_command, ...)."""
-    if name.startswith("__"):
-        raise AttributeError(name)
-    from ._v1 import lint as _v1
-    try:
-        return getattr(_v1, name)
-    except AttributeError:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
 
 
 if __name__ == "__main__":

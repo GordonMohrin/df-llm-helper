@@ -1,3 +1,0 @@
-$ python -m df_llm_helper --config tmp_bug/cfg.yaml --mock fixtures/run5 lint tmp_bug/lint/u16.lua
-0 findings (0 errors)
-[exit 0]

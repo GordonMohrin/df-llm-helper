@@ -418,11 +418,11 @@ def test_v1_snippets_are_rejected(origin, src, want):
     assert want <= got, (origin, rules(src))
 
 
-@pytest.mark.skipif(not (ROOT / "lua" / "claude").is_dir(), reason="v1 scripts already removed")
-def test_v1_tree_is_full_of_findings():
-    found = L.lua([ROOT / "lua" / "claude", ROOT / "lua" / "pilot_caravan.lua"])
-    assert len(found) > 100
-    assert any(f["file"].endswith("pilot_caravan.lua") and f["line"] == 21 and f["rule"] == "df-write" for f in found)
+def test_no_v1_scripts_on_the_df_script_path():
+    """repo A's lua/ is on DF's script path: only dfllm may live there (v1 claude/* and pilot_* are in tag v1-final)."""
+    lua = ROOT / "lua"
+    assert sorted(p.name for p in lua.iterdir()) == ["dfllm", "dfllm.lua"]
+    assert L.lua([lua]) == []
 
 
 # ---------------------------------------------------------------- paths, exemptions, io
@@ -455,9 +455,9 @@ def test_cli_exit_codes(tmp_path, capsys):
     assert L.main(["--cmd", "git status"]) == 0
 
 
-def test_v1_names_are_forwarded():
-    from df_llm_helper.lint import RULES, gate_command, lint_paths, lint_source  # noqa: F401
-    from df_llm_helper._v1 import lint as v1
-    assert RULES is v1.RULES and lint_source is v1.lint_source
-    with pytest.raises(AttributeError):
-        L.no_such_name  # noqa: B018
+def test_v1_linter_is_gone():
+    """The v1 linter lives in tag v1-final only; nothing forwards its names any more."""
+    for name in ("RULES", "gate_command", "lint_paths", "lint_source", "no_such_name"):
+        assert not hasattr(L, name), name
+    with pytest.raises(ImportError):
+        import df_llm_helper._v1  # noqa: F401

@@ -1,3 +1,0 @@
-$ python -m df_llm_helper --config tmp_bug/cfg.yaml --replay-file tmp_bug/rep.jsonl dashboard --offline --out tmp_bug/d.html
-tmp_bug\d.html (1 KB, newly written)
-[exit 0]

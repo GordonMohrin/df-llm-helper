@@ -933,12 +933,12 @@ for f in tests/lua/test_*.lua: python tools/luahost.py --path tests/lua $f   -> 
 python -m df_llm_helper lint lua/dfllm        -> 0 finding(s)
 python -m df_llm_helper.lint --config         -> config ok
 ```
-**The whole tree** (`pytest tests --continue-on-collection-errors`) also runs the v1 tests:
-- 91 v1 tests fail and 11 v1 modules do not collect;
-- the cause is that the v1 CLI, wake and brief modules have been replaced by v2;
-- no v2 test fails;
-- `tests/test_lint_bus.py` (v1 lint over `lua/`) passes;
-- these v1 tests go away with the v1 removal (W3).
+**v1 cleanup (2026-10-11, W3):** the v1 code, tests, fixtures and docs left branch `v2` (they stay in tag
+`v1-final`; list in [V1-LEGACY.md](V1-LEGACY.md)). `tests/` now holds only the v2 set, so the plain
+`python -m pytest tests` runs exactly the file list above (no `--continue-on-collection-errors`): **1237 passed,
+0 skipped, 78 s**; Lua 33 suites / 573 passed; `lint lua/dfllm` and `lint lua` 0 findings; config ok. The fixture
+runtime `tests/fixtures/v2/runtime` is now tracked (the v1 `.gitignore` rule `runtime/` had hidden it, so a fresh
+clone could not run the CLI tests; `make_runtime.py` reproduces it byte for byte).
 
 ## 6. Known gaps, by impact
 **Needed for year-1 acceptance (A1):**
@@ -970,7 +970,7 @@ python -m df_llm_helper.lint --config         -> config ok
    the manifest grows past that, at roughly 40 room projects. Proposal: kern writes `<save>/manifest.json`.
 10. **`tempo.lower` cannot slow below the vanilla FPS cap.** timestream ignores targets below the actual
     FPS (tools/timestream.txt:43). The live prefs have FPS_CAP 500, so tempo.lower is close to a no-op.
-11. **v1 scripts stay on the DF script path.** After migration, `lua/claude/*` and `lua/pilot_*.lua`
+11. *Fixed 2026-10-11 (v1 cleanup): `lua/` holds only `dfllm.lua` and `lua/dfllm/`; `tests/test_lint.py` checks it.* **v1 scripts stay on the DF script path.** After migration, `lua/claude/*` and `lua/pilot_*.lua`
     are reachable through repo A's `lua/`. The hook blocks `claude/*` for the LLM. Remove them in W3.
 12. **Small missing act functions:**
     - `order_suspend` (unsupported; economy uses `orders recheck`);
