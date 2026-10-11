@@ -34,6 +34,10 @@ M.CFG = {
   orders_cells = 8,      -- cells per quickfort 'orders' call (S6: one 19-cell call took 60 ms; KPI: any call
                          -- <= 50 ms; about 8 ms fixed plus 1-2 ms per cell), one call per slice
   breach_r = 3, cavern_r = 10, undo_now = 2,
+  -- live L6 (Laborkings: a light aquifer under most of the map, damp from z128 down): a human digs through a
+  -- light aquifer - damp stone is designated again and shallow seepage (<= seep_max/7) is no stop. Deep
+  -- water, caverns, magma and warm stone still stop the project.
+  damp_dig = false, damp_redig = 6, seep_max = 3,   -- per fort: persist m.runner.damp_dig (light aquifer site)
 }
 local MODES = {dig = true, build = true, place = true, zone = true, burrow = true}
 local CLASSES = {defense = true, infra = true, living = true, beauty = true}
@@ -388,6 +392,11 @@ local function probe(K, t, seen)
     if MINE[key] and on_map(t[1], t[2], t[3]) and not on_edge(t[1], t[2], t[3]) then return 'pend', nil, true, true end
     return 'skip'
   end
+  if HAZARD[v.c] == 'water' and M.CFG.damp_dig then
+    local okf, fl = pcall(dfhack.maps.getTileFlags, t[1], t[2], t[3])
+    local depth = okf and fl and fl.flow_size or 7
+    if depth <= M.CFG.seep_max and not (okf and fl and fl.liquid_type) then return 'done' end
+  end
   if HAZARD[v.c] then return 'breach', HAZARD[v.c] end
   if v.dig ~= nil and v.dig ~= '' then return 'pend', nil, true end
   if MINE[key] then
@@ -432,9 +441,20 @@ local function lost(K, P, d, R, ci, t)
   local ch = d.stages[P.stage + 1].chunks[ci]
   local bb = stage_tiles(P.id, d, P.stage).bbox
   local why = M.cancel_reported(bb, M.CFG.breach_r)
-  if why then return breach(K, P, why == 'unknown' and 'damp' or why, {t[1], t[2], t[3]}, 'cancel') end
   R.rl = obj(R.rl)
   local sk = tostring(ci)
+  if (why == 'damp' or why == 'unknown') and M.CFG.damp_dig then
+    if (R.rl[sk] or 0) < M.CFG.damp_redig and qf_room() then
+      R.rl[sk] = (R.rl[sk] or 0) + 1
+      qf(K, {mode = 'dig', data = chunk_data(ch), pos = ch.pos, priority = P.prio})
+      K.log('warn', '%s chunk %d: damp stone at %d,%d,%d designated again (light aquifer, %d/%d)', P.id, ci - 1,
+            t[1], t[2], t[3], R.rl[sk], M.CFG.damp_redig)
+      dirty()
+      return
+    end
+    why = 'damp'
+  end
+  if why then return breach(K, P, why == 'unknown' and 'damp' or why, {t[1], t[2], t[3]}, 'cancel') end
   if (R.rl[sk] or 0) >= 1 or not qf_room() then
     if (R.rl[sk] or 0) >= 1 then
       K.log('error', '%s %s chunk %d: designation at %d,%d,%d lost twice without a damp report: blocked', P.id,
@@ -1217,6 +1237,7 @@ function M.init(K)
   S.pd = pd
   local rt = K.persist.get('m.runner')
   if type(rt) ~= 'table' then rt = {} end
+  M.CFG.damp_dig = rt.damp_dig == true
   rt.v, rt.p, rt.hist, rt.planned, rt.req, rt.keep = 2, obj(rt.p), obj(rt.hist), obj(rt.planned), obj(rt.req),
     obj(rt.keep)
   if type(rt.exh) ~= 'string' then rt.exh = '' end
@@ -1317,6 +1338,7 @@ M.on = {
     local pos = p and {int(p.x or p[1]), int(p.y or p[2]), int(p.z or p[3])}
     if pos and not (pos[1] and pos[2] and pos[3]) then pos = nil end
     if not pos and ev.type == 'CAVE_COLLAPSE' then return end
+    if why == 'damp' and M.CFG.damp_dig then return end   -- light aquifer: lost() designates damp stone again
     local r = (why == 'damp' or why == 'warm') and M.CFG.breach_r or M.CFG.cavern_r
     S.slice = {qf = 0, probes = 0, qf_max = M.CFG.undo_now}
     for _, P in ipairs(S.pd.list) do

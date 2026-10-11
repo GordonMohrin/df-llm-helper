@@ -30,6 +30,8 @@ M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
                        'The merchants from'},
             diplomacy = {'diplomat could not complete a meeting', 'diplomat has arrived', 'liaison has arrived'},
             guild = {'has been established'},
+            -- live L6: the embark intro "A Dwarven Outpost: You have arrived ... Strike the earth!" held a new fort
+            arrival = {'You have arrived', 'Strike the earth'},
             ghost = {'has been put to rest'},
             -- deaths are recorded by care (DEATH, DEATHS_3PLUS wakes); the notice alone must not halt the fort
             -- live L2: "<name> has bled to death." halted the fort after a berserk citizen was killed
