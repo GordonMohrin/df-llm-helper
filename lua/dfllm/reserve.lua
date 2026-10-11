@@ -14,7 +14,7 @@ local R = {}
 -- mirror of config/baseline.json "reserve" (tests/lua/test_reserve.lua checks they agree)
 R.DEFAULTS = {
   from_phase = 'P1',               -- the moodable workshops are a P1 deliverable; before it the fort builds stage 1
-  share = {boulders = 0.25, logs = 0.25}, share_min = 2,   -- bulk classes: at most this share of the stock
+  share = {boulders = 0.25, logs = 0.25}, share_min = 5,   -- bulk classes: at most this share of the stock
   targets = {boulders = 20, logs = 20, bone = 10, shell = 2, leather = 10, cloth = 10, thread = 10, gems = 5,
              bars = 5},
   smelter = {'bars'},              -- classes held only while the fort has a built smelter

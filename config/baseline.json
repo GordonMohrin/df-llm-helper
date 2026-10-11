@@ -165,7 +165,7 @@
  },
  "reserve": {
   "from_phase": "P1",
-  "share": {"boulders": 0.25, "logs": 0.25}, "share_min": 2,
+  "share": {"boulders": 0.25, "logs": 0.25}, "share_min": 5,
   "targets": {"boulders": 20, "logs": 20, "bone": 10, "shell": 2, "leather": 10, "cloth": 10, "thread": 10,
               "gems": 5, "bars": 5},
   "smelter": ["bars"],

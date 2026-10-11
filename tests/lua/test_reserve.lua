@@ -49,7 +49,7 @@ T.test('hold: phase, smelter, critical supply first, never more than the fort ha
   T.eq(h('logs', {alarm = true}), 0, 'supply alarm: drink and food first')
   T.eq(h('logs', {total = 36, barrels_empty = 1}), 9, 'a quarter of 36 logs (barrels need 3 of the rest)')
   T.eq(h('logs', {total = 9, barrels_empty = 1, coffins_missing = 6}), 0, 'barrels and coffins first')
-  T.eq(h('boulders', {total = 8, coffins_missing = 3}), 2, 'a quarter of the boulders, at least share_min')
+  T.eq(h('boulders', {total = 8, coffins_missing = 3}), 5, 'at least share_min (a mood takes up to 3-5)')
   T.eq(h('boulders', {total = 29}), 7, 'live L6: 20 of 29 boulders held starved the masons')
   T.eq(h('boulders', {total = 2, coffins_missing = 3}), 0)
   T.eq(h('cloth', {phase = 'P4', total = 30}), 10)
