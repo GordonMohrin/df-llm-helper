@@ -16,6 +16,7 @@ local M = {name = 'arbiter', every = {ms = 500}, critical = true, on = {}, verbs
 
 M.MODE_FPS = {PEACE = 500, ALERT = 250, SIEGE = -1, BREACH = -1, RECOVERY = 250, DRILL = -1}
 M.BRAKE_FPS = 150                  -- tempo and FPS cap while the supply brake holds
+M.P0_SAFE_DAYS = 60                -- P0 brakes only while drink or food is below this
 M.PROFILE = {gfps = 30, autosave = 'YEARLY', overlays = false, visitor_cap = 30}
 M.KEEP_OVERLAY = 'notify'          -- headless overlay profile keeps widgets whose name contains this
 -- kind -> {plain text markers}: dismissed + unpaused. Live L0 (DF 53.16): an announcement popup
@@ -258,7 +259,13 @@ end
 function M.brake_why(K)
   if (M.MODE_FPS[K.mode()] or 250) <= 0 then return nil end
   local v = K.view()
-  if type(v) == 'table' and v.phase == 'P0' then return 'P0' end
+  -- live L6 (Paddletribes): P0 held 150 ticks/s for a season with 143 drink and 632 food days; P0 brakes
+  -- only until drink and food each reach P0_SAFE_DAYS (unknown stock keeps the brake)
+  if type(v) == 'table' and v.phase == 'P0' then
+    local s = type(v.stock) == 'table' and v.stock or {}
+    local d, f = tonumber(s.drink_d), tonumber(s.food_d)
+    if not (d and f and d >= M.P0_SAFE_DAYS and f >= M.P0_SAFE_DAYS) then return 'P0' end
+  end
   local ok, why = K.call('economy', 'alarm')
   if ok and type(why) == 'string' and why ~= '' then return why end
 end
