@@ -393,9 +393,8 @@ local function probe(K, t, seen)
     return 'skip'
   end
   if HAZARD[v.c] == 'water' and M.CFG.damp_dig then
-    local okf, fl = pcall(dfhack.maps.getTileFlags, t[1], t[2], t[3])
-    local depth = okf and fl and fl.flow_size or 7
-    if depth <= M.CFG.seep_max and not (okf and fl and fl.liquid_type) then return 'done' end
+    local depth = int(v.flow) or 7
+    if depth <= M.CFG.seep_max and not v.magma then return 'done' end
   end
   if HAZARD[v.c] then return 'breach', HAZARD[v.c] end
   if v.dig ~= nil and v.dig ~= '' then return 'pend', nil, true end

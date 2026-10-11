@@ -221,7 +221,8 @@ function M.tile(K, x, y, z)
   local c, bld = classify(x, y, z, des, oc, live_traps.idx, nil)
   local dig = designation(des, oc)
   if dig == '' and designation_jobs(now)[string.format('%d,%d,%d', x, y, z)] then dig = 'job' end
-  return {c = c, dig = dig, bld = bld}
+  -- flow: liquid depth 0..7 of this revealed tile, magma: true for magma (runner: light-aquifer seepage)
+  return {c = c, dig = dig, bld = bld, flow = des.flow_size or 0, magma = des.liquid_type == true}
 end
 
 -- walk-group query (iter2, care's mood reach): may a walker standing at a reach b? Both are revealed
