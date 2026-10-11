@@ -361,6 +361,11 @@ local function ore_of(idx)
       for _, m in ipairs(v) do r.metals[#r.metals + 1] = mat_token(0, m) or '' end
     end
     for _, rc in ipairs(mi.material.reaction_class) do if rc.value == 'FLUX' then r.flux = true end end
+    -- live L6: masons cancel rock furniture for "non-economic hard stone"; economic stone (DF's stone use
+    -- setting) and soft stone (chalk: no ITEMS_HARD) are no furniture stone
+    local es = df.global.plotinfo.economic_stone
+    if es and es[idx] ~= nil and es[idx] ~= 0 and es[idx] ~= false then r.econ = true end
+    if mi.material.flags.ITEMS_HARD ~= true then r.soft = true end
   end)
   orec[idx] = r
   return r
@@ -515,6 +520,7 @@ local function classify(it, a, cat)
         o.n = o.n + n
       end
       if r.flux then a.flux = a.flux + n end
+      if r.econ or r.soft then a.rock_bad = (a.rock_bad or 0) + n end
     end
   elseif cat == 'THREAD' then
     if not f.spider_web then
@@ -558,7 +564,7 @@ local function classify(it, a, cat)
 end
 
 local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'gems', 'bars', 'bolts', 'wood', 'fuel',
-              'drink_forb', 'food_forb', 'cookable', 'barrels', 'barrels_empty', 'bins', 'bins_empty', 'rock', 'ore',
+              'drink_forb', 'food_forb', 'cookable', 'barrels', 'barrels_empty', 'bins', 'bins_empty', 'rock', 'ore', 'rock_bad',
               'flux', 'hides', 'thread', 'thread_plant', 'thread_silk', 'thread_yarn', 'bolts_free', 'w_pick', 'w_axe',
               'w_xbow', 'w_bow', 'g_body', 'g_head', 'g_pants', 'g_gloves', 'g_shoes', 'g_shield', 'g_weapon', 'g_xbow',
               'g_quiver', 'g_metal', 'fish_raw', 'food_nocook'}
@@ -670,7 +676,7 @@ end
 local function facts(K, p)
   local i = K.census.i or {}
   local f = {migrants = p.migrants == 1, fuel = (i.fuel or 0) > 0, ore = (i.ore or 0) > 0,
-             stone = (i.rock or 0) - (i.ore or 0) - (i.flux or 0) >= 10}
+             stone = (i.rock or 0) - math.max((i.ore or 0) + (i.flux or 0), i.rock_bad or 0) >= 10}
   pcall(function()
     for _, b in ipairs(df.global.world.buildings.other.WORKSHOP_ANY) do
       local n = df.workshop_type[b.type]
@@ -1324,7 +1330,7 @@ end
 -- from furniture and blocks; care's reserve counts the same way), minus the rock floor
 local function stone_free(c, r)
   local inv = r.inv
-  local n = (inv.rock or 0) - (inv.ore or 0) - (inv.flux or 0)
+  local n = (inv.rock or 0) - math.max((inv.ore or 0) + (inv.flux or 0), inv.rock_bad or 0)
   return math.max(0, n - floor_of(c, r.p, r, 'rock'))
 end
 

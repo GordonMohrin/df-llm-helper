@@ -14,6 +14,7 @@ local R = {}
 -- mirror of config/baseline.json "reserve" (tests/lua/test_reserve.lua checks they agree)
 R.DEFAULTS = {
   from_phase = 'P1',               -- the moodable workshops are a P1 deliverable; before it the fort builds stage 1
+  share = {boulders = 0.25, logs = 0.25}, share_min = 2,   -- bulk classes: at most this share of the stock
   targets = {boulders = 20, logs = 20, bone = 10, shell = 2, leather = 10, cloth = 10, thread = 10, gems = 5,
              bars = 5},
   smelter = {'bars'},              -- classes held only while the fort has a built smelter
@@ -316,7 +317,12 @@ function R.hold(c, cls, f)
   elseif cls == 'thread' then
     crit = f.cloth_short or 0
   end
-  return math.max(0, math.min(tgt, (f.total or 0) - crit))
+  -- live L6 (Paddletribes): 20 of 29 boulders and 20 of 30 logs held forbidden starved masons and carpenters
+  -- (42 suspended furniture builds). Bulk classes hold at most a share of the stock (at least share_min)
+  local avail = (f.total or 0) - crit
+  local sh = (c.share or {})[cls]
+  if sh then avail = math.min(avail, math.max(c.share_min or 2, math.floor((f.total or 0) * sh))) end
+  return math.max(0, math.min(tgt, avail))
 end
 
 -- trade token for a need (trade.lua L.KINDS), or nil

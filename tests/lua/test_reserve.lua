@@ -47,9 +47,10 @@ T.test('hold: phase, smelter, critical supply first, never more than the fort ha
   T.eq(h('bars', {smelter = true}), 5)
   T.eq(h('bone', {total = 3}), 3, 'what the fort has')
   T.eq(h('logs', {alarm = true}), 0, 'supply alarm: drink and food first')
-  T.eq(h('logs', {total = 9, barrels_empty = 1}), 6, 'logs for 3 missing barrels stay free')
-  T.eq(h('logs', {total = 9, barrels_empty = 1, coffins_missing = 2}), 4, 'and for 2 missing coffins')
-  T.eq(h('boulders', {total = 8, coffins_missing = 3}), 5, 'coffins before the boulder reserve')
+  T.eq(h('logs', {total = 36, barrels_empty = 1}), 9, 'a quarter of 36 logs (barrels need 3 of the rest)')
+  T.eq(h('logs', {total = 9, barrels_empty = 1, coffins_missing = 6}), 0, 'barrels and coffins first')
+  T.eq(h('boulders', {total = 8, coffins_missing = 3}), 2, 'a quarter of the boulders, at least share_min')
+  T.eq(h('boulders', {total = 29}), 7, 'live L6: 20 of 29 boulders held starved the masons')
   T.eq(h('boulders', {total = 2, coffins_missing = 3}), 0)
   T.eq(h('cloth', {phase = 'P4', total = 30}), 10)
   T.eq(h('thread', {total = 12, cloth_short = 7}), 5, 'thread for the missing cloth stays free for the loom')
@@ -224,7 +225,7 @@ local function count_held(W)
 end
 
 T.test('reserve: fills from stockpiles inside Kern+ (dfllm-reserve first), 20 writes a run, the right items only', function()
-  local W, Cm, S = fort{economy = true}
+  local W, Cm, S = fort{economy = true, reserve = {share = {}}}   -- fill mechanics: no stock share cap
   W.run(1)
   T.eq(count_held(W), 20, 'per_run')
   local first = {}
@@ -253,7 +254,7 @@ T.test('reserve: fills from stockpiles inside Kern+ (dfllm-reserve first), 20 wr
 end)
 
 T.test('reserve: the floor push follows the alarm; a faulting economy hook is not called again this boot', function()
-  local W = fort{economy = true, alarm = false}
+  local W = fort{economy = true, alarm = false, reserve = {share = {}}}
   W.run(1)
   T.eq(W.floors.logs, 20)
   W.alarm = 'thirst 2'

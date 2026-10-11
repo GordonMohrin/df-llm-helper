@@ -55,6 +55,7 @@ function CW.world(opts)
   local persist = opts.persist or {}
   if opts.manifest ~= false then persist.manifest = persist.manifest or opts.manifest or CW.MANIFEST end
   local cfg = F.cfg()
+  cfg.reserve.share = {}           -- the fake forts are small: the stock share cap (live L6) is tested on its own
   for k, v in pairs(opts.reserve or {}) do cfg.reserve[k] = v end
   local W = F.world{cfg = {baseline = cfg}, units = units, mode = opts.mode, persist = persist, strict = opts.strict}
   for i = 1, n do
