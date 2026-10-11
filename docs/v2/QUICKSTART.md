@@ -43,7 +43,7 @@ Play Dwarf Fortress for me with df-llm-helper v2. DF 53.x (Steam) and DFHack are
 | 5 | `dfhack-run dfllm selftest full` | `0 fail` |
 | 6 | `python -m df_llm_helper status` | `<save> y<year> <season> d<day> PEACE ... P0 ...` and a `kern ... ms/s` line |
 | 6 | `python -m df_llm_helper follow` | nothing for a while: it prints only class-A events, at most 6 lines per hour, e.g. `WAKE y281 spr d12 PEACE \| PLAN_EXHAUSTED: ... \| next: ...` |
-| 7 | `python -m df_llm_helper plan propose y1.json`, edit, `plan check y1.json`, `plan apply y1.json` | `plan OK`, then the kernel's reply to `plan.reload` |
+| 7 | `python -m df_llm_helper plan propose y1.json`, edit, `plan check y1.json`, `plan apply y1.json` | `check`: `plan OK: ...`; `apply`: `plan.json y<year> + <n> bp ...; ok <id> plan.reload: ...` (the kernel's reply) |
 
 Keep plan drafts outside `<DF>/dfllm-runtime/`: the hook refuses file edits there (only `dfllm` commands and the
 kernel write that folder). Without a file argument, `plan propose` writes `<save>/plan.draft.json`, which can be

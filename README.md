@@ -80,7 +80,7 @@ Sources: `docs/v2/ASIS-ANALYSIS.md` (v1) and the KPI tables in `docs/v2/STATUS.m
 ## Manual install
 
 1. `git clone -b v2 https://github.com/GordonMohrin/df-llm-helper && cd df-llm-helper`
-2. Set `DFLLM_DF` to your DF folder (the one with `Dwarf Fortress.exe` and `hack/dfhack-run.exe`). Without it the tools fall back to the author's Steam path. Every Python command also takes `--df <folder>`.
+2. Set `DFLLM_DF` to your DF folder (the one with `Dwarf Fortress.exe` and `hack/dfhack-run.exe`). Without it the tools fall back to the author's Steam path. `python -m df_llm_helper` and `tools/migrate_v2.py` also take `--df <folder>` (for `df_llm_helper` before the command name: `python -m df_llm_helper --df <folder> status`); `tools/embark/embark.py` and `tools/luahost.py` read only `DFLLM_DF`.
 3. Close DF, then run `python tools/migrate_v2.py` (dry run: prints every step) and `python tools/migrate_v2.py --apply`:
    - `dfhack-config/script-paths.txt` gets `+<clone>\lua` (DF reads it only at startup);
    - `dfhack-config/init/onMapLoad.init` then runs only `dfllm boot`; the old file is copied to `<DF>/_archive-v1/migrate_v2/` first, so copy any lines of your own back by hand;
@@ -96,7 +96,7 @@ What `adopt` changes for that save: timestream by mode (500 in peace, off in a s
 
 ## Commands
 
-Python, run from the clone: `python -m df_llm_helper <command>` (the docs write it as `dfllm`). It never calls DF: it reads the kernel's files under `<DF>/dfllm-runtime/` and writes the inbox there. Global flags: `--df`, `--runtime`, `--save`.
+Python, run from the clone: `python -m df_llm_helper <command>` (the docs write it as `dfllm`). It never calls DF: it reads the kernel's files under `<DF>/dfllm-runtime/` and writes the inbox there. Global flags, given before the command: `--df`, `--runtime`, `--save`. `<command> --help` lists the rest.
 
 | Command | What it does |
 |---|---|
@@ -106,7 +106,7 @@ Python, run from the clone: `python -m df_llm_helper <command>` (the docs write 
 | `events [--cls A] [--since N] [--type T]` | Read the event log |
 | `plan propose\|check\|apply [file]` | Year plan: draft from the phases and the state, validate (schema, fair play, cap), send |
 | `cmd <verb> [json or k=v]` | Send one inbox verb from the closed set (RULES.md §6) |
-| `bp list \| preview <tpl> \| sites <tpl> [--fresh]` | Templates, an ASCII preview, the top free sites |
+| `bp list \| preview <tpl> \| sites <tpl> [--fresh]` | Templates, an ASCII preview, the top free sites (`list` and `preview` also work before `adopt`) |
 | `doctor` | ticks/s, kernel ms per module, frame gaps, stalls |
 | `supervise --once [--dry-run]` | Liveness, save backups, restart rules (the restart is not live-tested) |
 | `lint [paths] \| --cmd STR \| --hook` | Fair-play lint for Lua files and shell commands; the hook entry |
@@ -157,13 +157,13 @@ Timestream (a DFHack plugin) speeds up the calendar in peace; that is decision D
 ## Development
 
 ```
-python -m pytest -q                               # all Python tests (L5: 1237 passed; gate: docs/v2/STATUS.md §5)
-python tools/luahost.py --tests tests/lua         # Lua suites on DFHack's hack/lua53.dll (L5: 33 suites, 573 passed)
+python -m pytest -q                               # all Python tests (1241 passed, 0 skipped; gate: docs/v2/STATUS.md §5)
+python tools/luahost.py --tests tests/lua         # Lua suites on DFHack's hack/lua53.dll (33 suites, 573 passed)
 python -m df_llm_helper lint                      # fair-play lint of lua/dfllm: 0 finding(s)
 python -m df_llm_helper.lint --config             # config files: config ok
 ```
 
-`tools/luahost.py` loads DFHack's own `hack/lua53.dll` through ctypes (set `DFLLM_LUA53` to its path), so the kernel's pure-Lua logic runs offline against `lua/dfllm/util/k_mock.lua`. Design and contracts: `docs/v2/DESIGN.md`, `docs/v2/CONTRACTS.md`, `docs/v2/DOCTRINE.md`, `docs/v2/DECISIONS.md`; the LLM's rules: `RULES.md`.
+`tools/luahost.py` loads DFHack's own `hack/lua53.dll` through ctypes (from `DFLLM_LUA53`, else `<DFLLM_DF>/hack/lua53.dll`), so the kernel's pure-Lua logic runs offline against `lua/dfllm/util/k_mock.lua`; DF itself need not run. Without the DLL the Lua-backed pytest cases are skipped, not failed: check the skip count. Design and contracts: `docs/v2/DESIGN.md`, `docs/v2/CONTRACTS.md`, `docs/v2/DOCTRINE.md`, `docs/v2/DECISIONS.md`; the LLM's rules: `RULES.md`.
 
 ```
 RULES.md          the LLM's always-read rules (<= 300 lines)
@@ -171,8 +171,9 @@ lua/dfllm.lua     in-game entry; lua/dfllm/ kernel, 17 modules, util/ (json, con
 df_llm_helper/    Python CLI (stdlib) and bp/ (templates, emitter, path audit, site ranking)
 plans/ config/    year-1 phases; allowlist, baseline, decisions
 tools/            migrate_v2.py, embark/, luahost.py, win/
-tests/            pytest, tests/lua (luahost), tests/bp; fixtures/v2 recorded runtime files
-docs/v2/          design, contracts, doctrine, decisions, status, quickstart
+tests/            pytest, tests/lua (luahost), tests/bp; tests/fixtures/v2 recorded runtime files
+fixtures/v2/      decisions.yaml test vectors shared by the Lua and Python readers
+docs/v2/          design, contracts, doctrine, decisions, status, quickstart, v1 legacy
 ```
 
 ## License

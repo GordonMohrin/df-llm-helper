@@ -762,7 +762,7 @@ There is no arbitrary Lua.
 | WP8 | lua/dfllm/{baseline,economy,care}.lua, config/baseline.json |
 | WP9 | lua/dfllm/trade.lua |
 | WP10 | df_llm_helper/supervise.py, tools/migrate_v2.py, tools/win/vdesk_move.ps1 |
-| WP11 | tools/embark/*, plans/year1.json, RULES.md, docs/v2/MIGRATION.md |
+| WP11 | tools/embark/*, plans/year1.json, RULES.md, docs/v2/MIGRATION.md (written as QUICKSTART.md + V1-LEGACY.md) |
 
 Each WP may add its own `tests/lua/test_<module>.lua` and `tests/test_<module>.py`.
 

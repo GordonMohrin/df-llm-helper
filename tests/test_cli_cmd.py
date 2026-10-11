@@ -336,6 +336,22 @@ def test_bp_sites_fresh(save, monkeypatch, capsys):
     assert f"on snapshot {k.seen[0]['id']}" in capsys.readouterr().out
 
 
+def test_bp_list_and_preview_need_no_fort(tmp_path, capsys):
+    """Before adopt there is no runtime folder: templates can still be listed and previewed (real bp package)."""
+    try:
+        argv = ["--runtime", str(tmp_path / "dfllm-runtime")]
+        assert main([*argv, "bp", "list"]) == 0
+        assert "fortcore:" in capsys.readouterr().out
+        assert main([*argv, "bp", "preview", "dining", "seats=4"]) == 0
+        assert "materials" in capsys.readouterr().out
+        assert main([*argv, "bp", "preview", "dining", "--site", "S1"]) == 2       # a site needs the fort
+        assert main([*argv, "bp", "sites", "dining"]) == 2
+        assert "no save" in capsys.readouterr().out
+        assert not (tmp_path / "dfllm-runtime").exists()                             # nothing written
+    finally:
+        reset_paths()
+
+
 def test_bp_without_package(save, monkeypatch, capsys):
     for m in ("emit", "sites", "render"):
         monkeypatch.setitem(sys.modules, f"df_llm_helper.bp.{m}", None)
@@ -359,6 +375,15 @@ def test_supervise_delegates_to_main(save, monkeypatch):
     monkeypatch.setitem(sys.modules, "df_llm_helper.supervise", fake)
     assert run(save, "supervise", "--once", "--dry-run") == 0
     assert seen == [["--once", "--dry-run"]]
+
+
+def test_supervise_help_lists_its_own_flags(save, capsys):
+    """`dfllm supervise --help` is supervise.main's help (README: supervise --once [--dry-run])."""
+    with pytest.raises(SystemExit) as e:
+        run(save, "supervise", "--help")
+    assert e.value.code == 0
+    out = capsys.readouterr().out
+    assert "--dry-run" in out and "--once" in out and "--reset" in out
 
 
 def test_supervise_once_fallback(save, monkeypatch, capsys):

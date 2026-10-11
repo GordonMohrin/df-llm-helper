@@ -1497,6 +1497,9 @@ def cmd(text: str, dev: bool | None = None, cwd: str | None = None, shell: bool 
 # ================================================================ CLI
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] in (["-h"], ["--help"]):
+        print(__doc__)
+        return 0
     if "--cmd" in argv:
         k = argv.index("--cmd")
         if k + 1 >= len(argv):
@@ -1529,4 +1532,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    if hasattr(sys.stdout, "reconfigure"):          # findings and the doc carry non-ASCII (§, …) on a cp1252 console
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.exit(main())

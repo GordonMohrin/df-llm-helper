@@ -453,6 +453,9 @@ def test_cli_exit_codes(tmp_path, capsys):
     assert L.main(["--config"]) == 0
     assert L.main(["--cmd", "fastdwarf 1"]) == 1
     assert L.main(["--cmd", "git status"]) == 0
+    capsys.readouterr()
+    assert L.main(["--help"]) == 0 and "--config" in capsys.readouterr().out     # help is not an error
+    assert L.main(["--bogus"]) == 2                                               # an unknown flag still is
 
 
 def test_v1_linter_is_gone():

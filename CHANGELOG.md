@@ -16,6 +16,9 @@
   `data/`, `Bugs/`, `Features/`, `scenarios/`, `examples/`, the v1 docs and `config.yaml.example`. They stay in tag
   `v1-final`; docs/v2/V1-LEGACY.md lists them. `lint` and `fairplay` no longer forward v1 names. `pytest tests` is the
   plain v2 gate (1237 passed); the fixture runtime `tests/fixtures/v2/runtime` is tracked now.
+- **Fresh-user check** (2026-10-11, docs/v2/STATUS.md §5): `tools/luahost.py` finds `lua53.dll` via `DFLLM_DF` too and
+  prints suite/test totals; `dfllm supervise --help` passes through to supervise (`--dry-run`); `bp list|preview` work
+  before `adopt`; `df_llm_helper.lint --help` exits 0; README/QUICKSTART/DESIGN/embark README corrected. 1241 passed.
 - Everything below this entry is **v1** history; its code is in tag `v1-final`.
 
 ## Guard deadman: extra liveness signals (2026-10-08)

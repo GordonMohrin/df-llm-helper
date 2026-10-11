@@ -8,14 +8,15 @@ Python process) and a CPU-time hook aborts runaway scripts.
     python tools/luahost.py [--timeout S] [--path DIR]... file.lua [args...]
     python tools/luahost.py --tests tests/lua          # run all test_*.lua
 
-Env: DFLLM_LUA53 = path to lua53.dll (default: the Steam DF install below).
-Native helpers for tests (global table ``luahost``): listdir, isdir, isfile,
+Env: DFLLM_LUA53 = path to lua53.dll, else <DFLLM_DF>/hack/lua53.dll, else the author's Steam
+DF install below. Native helpers for tests (global table ``luahost``): listdir, isdir, isfile,
 mkdir_recursive, mtime, now_ms.
 """
 from __future__ import annotations
 
 import ctypes
 import os
+import re
 import struct
 import sys
 import time
@@ -25,10 +26,15 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 DEFAULT_DLL = Path(r"E:\Program Files (x86)\Steam\steamapps\common\Dwarf Fortress\hack\lua53.dll")
 TIMEOUT_EXIT = 124
+SUMMARY = re.compile(r"^# passed (\d+), failed (\d+)\s*$", re.M)     # testlib T.done()
 
 
 def dll_path() -> Path:
-    return Path(os.environ.get("DFLLM_LUA53") or DEFAULT_DLL)
+    if os.environ.get("DFLLM_LUA53"):
+        return Path(os.environ["DFLLM_LUA53"])
+    if os.environ.get("DFLLM_DF"):                       # the DF folder the rest of the tools use
+        return Path(os.environ["DFLLM_DF"]) / "hack" / "lua53.dll"
+    return DEFAULT_DLL
 
 
 def pe_exports(path: Path) -> list[str]:
@@ -296,11 +302,15 @@ def run_file(path: str | Path, args: list[str] | tuple = (), *, timeout: float =
 
 
 def run_tests(test_dir: str | Path, timeout: float = 60.0) -> int:
-    """Run every test_*.lua in test_dir (with test_dir on package.path). Returns failures."""
+    """Run every test_*.lua in test_dir (with test_dir on package.path). Returns failed suites.
+    The last line sums the suites and testlib's `# passed N, failed M` lines."""
     test_dir = Path(test_dir)
-    failures = 0
+    suites, failures, passed, failed = 0, 0, 0, 0
     for f in sorted(test_dir.glob("test_*.lua")):
         r = run_file(f, timeout=timeout, paths=[test_dir])
+        suites += 1
+        for p, n in SUMMARY.findall(r.out):
+            passed, failed = passed + int(p), failed + int(n)
         status = "ok" if r.ok else f"FAIL({r.code})"
         print(f"{status:9} {f.name}")
         if not r.ok:
@@ -308,6 +318,7 @@ def run_tests(test_dir: str | Path, timeout: float = 60.0) -> int:
             sys.stdout.write(r.out)
             if r.err:
                 print(r.err)
+    print(f"{suites} suites ({failures} failed): {passed} passed, {failed} failed")
     return failures
 
 

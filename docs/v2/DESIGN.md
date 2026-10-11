@@ -279,13 +279,15 @@ The verb set is closed: `plan.reload, bp.place, bp.cancel, drill, snapshot, audi
 ## 9. Repository layout and migration
 **Repo A** (`dfpilot-public`, GordonMohrin/df-llm-helper) is the single source. Work happens on branch `v2` after tag `v1-final`, and `v2` merges to main only after A3 passes. Commits are authored by Gordon with Co-Authored-By and always pushed.
 ```
-RULES.md (≤300 lines)  README.md  docs/v2/{DESIGN,CONTRACTS,DECISIONS,MIGRATION}.md
+RULES.md (≤300 lines)  README.md  docs/v2/{DESIGN,CONTRACTS,DECISIONS,DOCTRINE,QUICKSTART,STATUS,V1-LEGACY,ASIS-ANALYSIS}.md
 lua/dfllm.lua   lua/dfllm/{kern,io,act,sense,snapshot,persist,arbiter,perf,threat,gate,siege,military,readiness,drill,
-                runner,baseline,economy,care,trade,selftest}.lua  lua/dfllm/util/{json,geom,k_mock}.lua
+                runner,baseline,economy,care,water,reserve,trade,selftest}.lua  lua/dfllm/util/{json,contract,geom,k_mock}.lua
 df_llm_helper/{__main__,cli,paths,files,schema,wake,brief,plan,cmd,doctor,events,supervise,fairplay,lint,hook}.py
 df_llm_helper/bp/{primitives,fortcore,rooms,validate,emit,render,topo,sites}.py
-plans/year1.json  config/{baseline.json,allowlist.json,decisions.yaml}  tools/{luahost.py,migrate_v2.py,embark/,win/vdesk_move.ps1}
-tests/ (pytest; tests/lua/*.lua via luahost; fixtures/v2 recorded from the new fort)  .claude/settings.json (PreToolUse → dfllm lint --cmd)
+plans/year1.json  config/{baseline.json,allowlist.json,decisions.yaml}
+tools/{luahost.py,migrate_v2.py,embark/,win/{vdesk_move,start_df_desktop1}.ps1}
+tests/ (pytest; tests/lua/*.lua via luahost; tests/fixtures/v2 recorded from the new fort)  fixtures/v2 (decision vectors)
+.claude/settings.json (PreToolUse → dfllm lint --hook)
 ```
 **Removed from `v2`** (kept in `v1-final`; done 2026-10-11, list in [V1-LEGACY.md](V1-LEGACY.md)):
 - `df_llm_helper/*` except `lint`, `fairplay` (rules) and `planners/blueprint.py` (which became `bp/validate.py`); `stalllog` and `clock` went too, because no v2 module imports them;
@@ -339,7 +341,7 @@ Wave 0 freezes the contracts. Waves 1 and 2 code in parallel against mock-K and 
 | **WP8** (W2) | Baseline, economy, care | lua/dfllm/{baseline,economy,care}.lua, config/baseline.json | `baseline.apply()` idempotent; stock days, staged imports, cancel-loop detector, labormanager parse; care: moods, tombs, corpses, captives → pit, hospital water, barrel guard, stress and naked sampler | 700 Lua | WP1 | luahost fixtures; S5; live L1 | Baseline active after adopt; supply KPIs in state; 0 mood jobs removed |
 | **WP9** (W3) | Trade port | lua/dfllm/trade.lua | CARAVAN_ARRIVAL → broker job → trade screen; `plan.trade`; O1 window through `gate.want` | 600 Lua | WP1, WP5 | goodflag audit; luahost ratio math; live when a caravan comes | 1 caravan traded with ratio ≥1.5 and no LLM |
 | **WP10** (W1 offline / W3 live) | Supervisor, restart, backup, migration | df_llm_helper/supervise.py, tools/migrate_v2.py, tools/win/vdesk_move.ps1 | Liveness = heartbeat age; DEGRADED rule; restart only in PEACE after an autosave; backup copy after an autosave; migrate is idempotent and reversible | 400 Py | WP2 | Fake clocks, dry-run migrate; S9 live | One supervised restart onto desktop 1 with no focus steal |
-| **WP11** (W1 embark / W3 docs) | Embark, year-1 plan, RULES.md, repo cleanup | tools/embark/* (port), plans/year1.json, RULES.md, docs/v2/MIGRATION.md, repo B CLAUDE.md | Embark checklist (§5.1) from the vanilla screen; phases P0-P7 as data | 400 mixed | WP0 (plan schema) | Site checklist against vanilla finder output | Fort embarked per §5.1; RULES.md ≤300 lines; v1 code removed in `v2`; repo B tagged and cleaned |
+| **WP11** (W1 embark / W3 docs) | Embark, year-1 plan, RULES.md, repo cleanup | tools/embark/* (port), plans/year1.json, RULES.md, docs/v2/MIGRATION.md (written as QUICKSTART.md + V1-LEGACY.md), repo B CLAUDE.md | Embark checklist (§5.1) from the vanilla screen; phases P0-P7 as data | 400 mixed | WP0 (plan schema) | Site checklist against vanilla finder output | Fort embarked per §5.1; RULES.md ≤300 lines; v1 code removed in `v2`; repo B tagged and cleaned |
 
 **Waves:** **W0** WP0 (1 agent, about 2 h) → **W1** WP1, WP2, WP3, WP4 + WP11 embark port + WP10 offline, in parallel → **W2** WP5, WP6, WP7, WP8, in parallel → **W3** WP9, WP10 live, WP11 docs and cleanup, then acceptance.
 

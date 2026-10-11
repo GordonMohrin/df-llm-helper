@@ -27,6 +27,29 @@ def test_lua_suite(lua_file):
     assert "# passed" in r.out
 
 
+def test_dll_path_order(monkeypatch, tmp_path):
+    """DFLLM_LUA53 wins, then the DF folder from DFLLM_DF (README quick start sets only that), then the default."""
+    monkeypatch.delenv("DFLLM_LUA53", raising=False)
+    monkeypatch.delenv("DFLLM_DF", raising=False)
+    assert luahost.dll_path() == luahost.DEFAULT_DLL
+    monkeypatch.setenv("DFLLM_DF", str(tmp_path / "DF"))
+    assert luahost.dll_path() == tmp_path / "DF" / "hack" / "lua53.dll"
+    monkeypatch.setenv("DFLLM_LUA53", str(tmp_path / "x" / "lua53.dll"))
+    assert luahost.dll_path() == tmp_path / "x" / "lua53.dll"
+
+
+def test_run_tests_prints_the_totals(tmp_path, capsys):
+    (tmp_path / "testlib.lua").write_text((LUA_TESTS / "testlib.lua").read_text(encoding="utf-8"), encoding="utf-8")
+    (tmp_path / "test_a.lua").write_text("local T = require('testlib')\nT.test('a', function() end)\n"
+                                         "T.test('b', function() end)\nT.done()\n", encoding="utf-8")
+    (tmp_path / "test_b.lua").write_text("local T = require('testlib')\nT.test('c', function() error('no') end)\n"
+                                         "T.done()\n", encoding="utf-8")
+    assert luahost.run_tests(tmp_path, timeout=10) == 1
+    out = capsys.readouterr().out
+    assert "ok        test_a.lua" in out and "FAIL(1)   test_b.lua" in out
+    assert out.rstrip().splitlines()[-1] == "2 suites (1 failed): 2 passed, 1 failed"
+
+
 def test_exports_are_mangled_and_mapped():
     names = luahost.pe_exports(luahost.dll_path())
     assert any(n.startswith("?lua_pcallk@@") for n in names)

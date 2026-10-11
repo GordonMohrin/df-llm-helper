@@ -34,10 +34,11 @@ Picks a site by the DESIGN §5.1 checklist and embarks with every embark point s
 what the vanilla embark screens show and only clicks a player could make. Runs before
 `dfllm adopt`, so no kernel exists yet; this folder has its own small Lua runtime.
 
-**Status: offline-tested only.** 32 Lua tests run the steps and `embark.lua` itself against a fake
-DF (`fixtures/fake_df.lua`, fake `dfhack`/`df`/`gui` globals; it also models a placing rectangle that
-follows the mouse and slow map preparation / fort loading). Nothing here has run in the v2 form in
-game. Each step below is marked
+**Status:** `newgame`, `scan` and `embark … --play-now` ran live in v2 form at slot L0 (findings
+above); Prepare carefully does not work yet. Offline, 35 Lua tests (`tests/lua/test_embark*.lua`) run
+the steps and `embark.lua` itself against a fake DF (`fixtures/fake_df.lua`, fake `dfhack`/`df`/`gui`
+globals; it also models a placing rectangle that follows the mouse and slow map preparation / fort
+loading). Each step below is marked
 - **run4-6**: the same UI pattern worked live with the v1 scratch scripts (Runs 4-6), or
 - **untested**: new in v2, never tried live (mostly "Prepare carefully").
 
@@ -214,5 +215,7 @@ Never write skills, picks or points directly.
 | `scan2.sh`, `scan3.sh` | `embark.py scan` / spec mode `scan` |
 | `kandidaten_eisen.py` (world-data pickles) | dropped: not vanilla-screen information |
 | Run 6 direct skill writes | dropped: clicks or the fallbacks in §6 |
-The v1 copies in this folder (`clickonly.lua`, `clickpx2.lua`, `findclick*.lua`, `hold.lua`,
-`probe.sh`, `scan2.sh`, `screen.lua`) are superseded and go with the v1 cleanup (WP11, wave 3).
+The v1 copies still in this folder (`clickonly.lua`, `clickpx2.lua`, `findclick*.lua`, `hold.lua`,
+`probe.sh`, `scan2.sh`, `screen.lua`) are superseded: nothing in v2 loads them and the steps above
+never need them. Do not run them: they call `dfhack-run lua -f` outside `embark.py`, which RULES §1
+rule 2 does not allow. Identical copies are in tag `v1-final`; removing them here is still open.

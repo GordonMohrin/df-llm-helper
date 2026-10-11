@@ -33,7 +33,8 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--fresh", action="store_true", help="sites: request a new snapshot first and wait for it")
     p.add_argument("--timeout", type=float, default=60.0)
     doctor.add_parser(sub)
-    p = sub.add_parser("supervise", help="liveness, backup, restart (WP10; other flags pass through)")
+    p = sub.add_parser("supervise", help="liveness, backup, restart (WP10; other flags pass through)",
+                       add_help=False)             # -h/--help pass through too: supervise.main lists --dry-run etc.
     p.add_argument("--once", action="store_true")
     p = sub.add_parser("lint", help="fair-play lint of Lua files or a command line (WP4); hook entry")
     p.add_argument("paths", nargs="*")
@@ -111,7 +112,8 @@ def _wait_snapshot(save_dir: Path, cid: str, timeout: float) -> dict | None:
     return None
 
 
-def run_bp(args, save_dir: Path) -> int:
+def run_bp(args, save_dir: Path | None) -> int:
+    """save_dir None (no fort yet): only `list` and `preview` without --site get here."""
     from . import files
     from .cmd import BpError, BpUnavailable, fmt_params, free_sites, parse_kv, send
     try:
@@ -225,6 +227,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         save_dir = paths.save_dir()
     except paths.NoSave as e:
+        if c == "bp" and (args.action == "list" or (args.action == "preview" and not args.site)):
+            return run_bp(args, None)                  # the templates need no fort (e.g. before adopt)
         print(f"dfllm: {e}")
         return 2
     if c == "status":

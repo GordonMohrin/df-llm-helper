@@ -940,6 +940,18 @@ python -m df_llm_helper.lint --config         -> config ok
 runtime `tests/fixtures/v2/runtime` is now tracked (the v1 `.gitignore` rule `runtime/` had hidden it, so a fresh
 clone could not run the CLI tests; `make_runtime.py` reproduces it byte for byte).
 
+**Fresh-user check (2026-10-11, offline, DF not touched):** README quick start, QUICKSTART and RULES walked as a new
+user. Every command and flag of the prompt and README exists (`--help` of the CLI, all subcommands, migrate_v2,
+embark.py, luahost; migrate dry run on an empty fake DF folder: 2 `todo`, 3 `n/a`; the CLI on a copy of the fixture
+runtime; `selftest --mock` logic on luahost: 1 pass, 0 fail); the hook as `.claude/settings.json` runs it allows all
+prompt commands and blocks inline lua; all links in README/QUICKSTART/RULES resolve; a local clone of `v2` passes the
+gate. Fixed: luahost also finds `lua53.dll` through `DFLLM_DF` (before, a user with DF elsewhere silently skipped
+114 Lua-backed pytest cases) and prints totals; `dfllm supervise --help` shows supervise's own flags (`--dry-run`);
+`bp list`/`bp preview` work before adopt; `python -m df_llm_helper.lint --help` exits 0; docs (`--df` goes before
+the command, embark README status, DESIGN §9 layout without the never-written MIGRATION.md). Open: the v1 embark
+scratch copies in `tools/embark/` (V1-LEGACY.md). Gate after it: **1241 passed, 0 skipped**; Lua 33 suites / 573
+passed; `lint lua/dfllm` and `lint lua` 0 findings; config ok.
+
 ## 6. Known gaps, by impact
 **Needed for year-1 acceptance (A1):**
 1. *Fixed in L2: `act.link_lever`, gate links built levers (6 of 6 live).* **Lever linking.** No act function exists. Templates build levers, but nothing links them, so:
