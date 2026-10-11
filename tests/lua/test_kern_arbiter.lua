@@ -6,6 +6,7 @@ local kmock = require('dfllm.util.k_mock')
 local json = require('dfllm.util.json')
 local kern = require('dfllm.kern')
 local arbiter = require('dfllm.arbiter')
+arbiter.PROFILE.overlays = true   -- these tests cover the headless overlay profile (live default since L6: overlays stay, Gordon watches)
 
 local function ts_cmds(W)
   local r = {}

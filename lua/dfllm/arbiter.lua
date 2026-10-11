@@ -16,7 +16,7 @@ local M = {name = 'arbiter', every = {ms = 500}, critical = true, on = {}, verbs
 
 M.MODE_FPS = {PEACE = 500, ALERT = 250, SIEGE = -1, BREACH = -1, RECOVERY = 250, DRILL = -1}
 M.BRAKE_FPS = 150                  -- tempo and FPS cap while the supply brake holds
-M.PROFILE = {gfps = 30, autosave = 'YEARLY', overlays = true, visitor_cap = 30}
+M.PROFILE = {gfps = 30, autosave = 'YEARLY', overlays = false, visitor_cap = 30}
 M.KEEP_OVERLAY = 'notify'          -- headless overlay profile keeps widgets whose name contains this
 -- kind -> {plain text markers}: dismissed + unpaused. Live L0 (DF 53.16): an announcement popup
 -- (world.status.popups) halts the game while pause_state stays false; the only one seen so far is
@@ -32,6 +32,8 @@ M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
             guild = {'has been established'},
             -- live L6: the embark intro "A Dwarven Outpost: You have arrived ... Strike the earth!" held a new fort
             arrival = {'You have arrived', 'Strike the earth'},
+            -- live L6: "A raccoon has stolen a (steel battle axe)!" halted the fort (vermin thief; nothing to decide)
+            theft = {'has stolen'},
             ghost = {'has been put to rest'},
             -- deaths are recorded by care (DEATH, DEATHS_3PLUS wakes); the notice alone must not halt the fort
             -- live L2: "<name> has bled to death." halted the fort after a berserk citizen was killed
