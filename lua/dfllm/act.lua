@@ -512,6 +512,12 @@ local function impls(state)
     if type(kind) ~= 'string' or not kind:match('^[a-z_]+$') then return false, 'bad popup kind' end
     local popups = df.global.world.status.popups
     if #popups == 0 then return false, 'no popup' end
+    -- live L6 (Perplexrooms): erasing the embark intro ("Strike the earth!") from the vector left a fort
+    -- where nobody ever took a job (DF's Tasks list stayed empty; Castlerisen, where Okay was clicked,
+    -- worked at once). Confirm it the way a player does; erase only if the key did nothing.
+    local n = #popups
+    pcall(function() require('gui').simulateInput(dfhack.gui.getDFViewscreen(true), 'SELECT') end)
+    if #popups < n then return true, kind end
     popups:erase(0)
     return true, kind
   end
