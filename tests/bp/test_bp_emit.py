@@ -168,7 +168,7 @@ def test_rooms_touch_the_anchor_row_only_through_the_doorway(tpl):
 
 def test_list_templates():
     names = [t["tpl"] for t in bp.list_templates()]
-    assert names == TPLS and len(names) == 13             # + furnaces, office, captives (live L1), cistern (L3)
+    assert names == TPLS and len(names) == 16     # + furnaces, office, captives (L1), cistern (L3), hall, guildhall, barracks (L6)
     assert all(t["about"] for t in bp.list_templates())
 
 

@@ -1,0 +1,27 @@
+hall {'seats': 16, 'tier': 5000, 'burrow': 'Kern+'} anchor [70, 70, 100] rot 0
+  living: dig(18), build(39), zone(1), burrow(7)
+  materials: {'chair': 17, 'chest': 2, 'door': 1, 'table': 19}
+z100  (x 63..77, y 69..89)
+###############
+#######.#######
+#######+#######
+#.............#
+#.c.c.....c.c.#
+#.t.t.....t.t.#
+#.............#
+#.c.c.....c.c.#
+#.t.t.....t.t.#
+#.............#
+#.c.c.....c.c.#
+#.t.t.....t.t.#
+#.............#
+#.c.c.....c.c.#
+#.t.t.....t.t.#
+#.............#
+#.............#
+#.............#
+#.....ttt.....#
+#h.....c.....h#
+###############
+legend: # rock  S smoothed  C wall  F fortification  . floor  _ open  < > X stairs  r/v ramp  + door  = bridge  H raised  ^ trap  ? hidden
+overlay: b bed  f cabinet  h chest  t table  c chair  n coffin  l well  k weapon rack  a armor stand  L lever  R traction bench  A altar  D depot  p farm plot  W workshop

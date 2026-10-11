@@ -37,15 +37,21 @@ PARAMS = {
     "furnaces": {"wood": (1, 0, 2)},
     "office": {"role": ("manager", None, None)},
     "captives": {},
+    # Gordon 11.10.2026: stately rooms, guild halls, trained soldiers. tier = the room value the kernel aims at
+    "hall": {"seats": (16, 8, 48), "tier": (5000, 0, 1000000)},
+    "guildhall": {"profession": ("MINER", None, None), "tier": (3000, 0, 1000000)},
+    "barracks": {"racks": (6, 2, 12), "tier": (1000, 0, 1000000)},
     # path "" = a dry cistern filled by buckets (pond zone); else the pipe waypoints (see cistern_layout)
     "cistern": {"path": ("", None, None), "rise": (1, 1, 40), "side": ("S", None, None),
                 "water": ("bed", None, None), "level": ("core", None, None)},
 }
 # quickfort `assigned_unit=` roles (preserve-rooms noble codes) an office may be reserved for
 OFFICE_ROLES = ("manager", "bookkeeper", "broker", "expedition_leader", "mayor", "chief_medical_dwarf")
-USE = {"dining": "used", "bedrooms": "used", "tombs": "used", "temple": "used"}
+USE = {"dining": "used", "bedrooms": "used", "tombs": "used", "temple": "used", "hall": "used",
+       "guildhall": "used", "barracks": "used"}
 # rooms nobody should walk through: sites.rank opens no new room from their tiles behind a door
-NO_THROUGH = frozenset({"bedrooms", "tombs", "hospital", "temple", "office", "captives"})
+NO_THROUGH = frozenset({"bedrooms", "tombs", "hospital", "temple", "office", "captives", "hall", "guildhall",
+                        "barracks"})
 
 
 def _box(P: Plan, W: int, H: int, door: bool = True):
@@ -240,6 +246,58 @@ def office(p: dict) -> Plan:
     box = _box(P, 3, 3)
     P.stage("build", "build", orders=1).tile(0, box[1] + 1, 0, "c")
     _finish(P, p, box, "o", f"assigned_unit={role} name=Office")
+    return P
+
+
+def hall(p: dict) -> Plan:
+    """Festhalle for feasts and occasions: a 13-wide hall with a centre aisle, banquet tables on both sides and
+    a dais with a throne seat at the far end (meeting-area zone `Festhalle`)."""
+    P = Plan("hall", "living")
+    rows = -(-p["seats"] // 4)                      # 4 seats per row: two tables on each side of the aisle
+    box = _box(P, 13, 3 * rows + 5)
+    u0, v0, u1, v1 = box
+    b = P.stage("build", "build", orders=1)
+    for k in range(rows):
+        for u in (-5, -3, 3, 5):
+            b.tile(u, v0 + 1 + 3 * k, 0, "c").tile(u, v0 + 2 + 3 * k, 0, "t")
+    b.tile(0, v1, 0, "c").tile(-1, v1 - 1, 0, "t").tile(0, v1 - 1, 0, "t").tile(1, v1 - 1, 0, "t")   # the dais
+    b.tile(u0, v1, 0, "h").tile(u1, v1, 0, "h")                                                      # chests
+    _finish(P, p, box, "m", "name=Festhalle allow=residents", "", p["tier"])
+    return P
+
+
+def guildhall(p: dict) -> Plan:
+    """Guildhall for one profession (quickfort `location=guildhall profession=...`): a 7x7 hall with two tables,
+    chairs and two chests; the guild keeps its members and rewards their work."""
+    prof = str(p["profession"]).upper()
+    if not prof.replace("_", "").isalpha():
+        raise ValueError(f"guildhall: bad profession {prof!r}")
+    P = Plan("guildhall", "living")
+    box = _box(P, 7, 7)
+    u0, v0, u1, v1 = box
+    b = P.stage("build", "build", orders=1)
+    for u in (-2, 2):
+        b.tile(u, v0 + 1, 0, "c").tile(u, v0 + 2, 0, "t").tile(u, v0 + 4, 0, "c").tile(u, v0 + 5, 0, "t")
+    b.tile(u0, v1, 0, "h").tile(u1, v1, 0, "h")
+    _finish(P, p, box, "m", f"location=guildhall profession={prof}", "", p["tier"])
+    return P
+
+
+def barracks(p: dict) -> Plan:
+    """Kaserne with a training floor: a 9x9 room, weapon racks and armor stands along the walls, beds for the
+    watch; soldiers spar here (barracks zone `Kaserne`)."""
+    P = Plan("barracks", "defense")
+    box = _box(P, 9, 9)
+    u0, v0, u1, v1 = box
+    b = P.stage("build", "build", orders=1)
+    n = p["racks"]
+    for i in range(n):
+        v = v0 + 1 + i // 2 * 2                         # one rack and one armor stand per wall side and row
+        b.tile(u0 if i % 2 == 0 else u1, v, 0, "r")
+        b.tile(u0 + 1 if i % 2 == 0 else u1 - 1, v, 0, "a")
+    for u in (-2, 0, 2):
+        b.tile(u, v1, 0, "b")
+    _finish(P, p, box, "B", "name=Kaserne", "", p["tier"])
     return P
 
 
@@ -462,7 +520,7 @@ def cistern(p: dict) -> Plan:
 
 BUILD = {"dining": dining, "bedrooms": bedrooms, "tombs": tombs, "hospital": hospital, "temple": temple,
          "tavern": tavern, "workshops": workshops, "farms": farms, "furnaces": furnaces, "office": office,
-         "captives": captives, "cistern": cistern}
+         "captives": captives, "cistern": cistern, "hall": hall, "guildhall": guildhall, "barracks": barracks}
 
 
 def plot_rects(p: dict) -> list[tuple[int, int, int, int, int]]:
