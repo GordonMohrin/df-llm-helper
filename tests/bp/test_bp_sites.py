@@ -77,7 +77,7 @@ def test_levels_below_the_snapshot_are_unknown_but_never_below_z0():
 
 def test_fortcore_footprint_covers_all_stages():
     rects = footprint("fortcore", bp.check_params("fortcore", {}))
-    assert (-4, 0, 6, 39) in rects[-1]                              # w=-1: entrance tunnel + stage-2 gallery
+    assert (-2, 0, 6, 39) in rects[-1]                              # w=-1: entrance tunnel + military stair top
     assert min(rects) == -2 - 3 - 3 - 1                             # stage-3 refuge sump
     assert (-3, 42, -1, 44) in rects[-6]                            # the core well's sump beside the stair
 

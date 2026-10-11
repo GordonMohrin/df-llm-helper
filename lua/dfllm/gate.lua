@@ -32,7 +32,7 @@ local pub     -- precomputed state part {bridges = {...}}
 local dirty
 local PULL    -- df.job_type.PullLever
 
-local function new_kpi(t0) return {dbl = 0, t0 = t0, raise = {}, pulls = 0, cancels = 0, fails = {}} end
+local function new_kpi(t0) return {dbl = 0, t0 = t0, raise = {}, pulls = 0, cancels = 0, links = 0, fails = {}} end
 
 local function flush(K)
   if dirty then K.persist.set('m.gate', st); dirty = false end
@@ -375,6 +375,46 @@ local function control(K, name, spec, now)
   return s
 end
 
+---------------------------------------------------------------- linking (S3, live L2)
+-- A manifest lever that is built but not linked to its built bridge gets one link job (act.link_lever = the
+-- lever sheet's "link up" with two mechanisms). One pending link job per lever; a refused attempt (usually
+-- no free mechanism) is retried after LINK_RETRY, and the bridge's other levers wait for that retry too
+-- (they would need the same mechanisms). Not in SIEGE/BREACH/DRILL: a mechanic must not walk out then.
+M.LINK_RETRY = 1200
+local LINK_MODES = {PEACE = true, ALERT = true, RECOVERY = true}
+local LINK
+
+local function built(b)
+  local ok, r = pcall(function() return b:getBuildStage() >= b:getMaxBuildStage() end)
+  return ok and r == true
+end
+
+local function link_pending(lv)
+  LINK = LINK or (df.job_type and df.job_type.LinkBuildingToTrigger)
+  for _, j in ipairs(lv.jobs) do if j.job_type == LINK then return j end end
+end
+
+local function links(K, name, spec, r, now)
+  if not LINK_MODES[K.mode()] or now < (r.link_at or 0) then return end
+  local b = r.bid and df.building.find(r.bid)
+  if not b or not built(b) then return end
+  for _, p in ipairs(spec.levers or {}) do
+    local lv = find_at(p)
+    if lv and is_lever(lv) and built(lv) and not link_pending(lv) then
+      local t = targets(lv)
+      if t and not t[b.id] then
+        local ok, res = K.act.link_lever(lv.id, b.id)
+        if not ok then r.link_at = now + M.LINK_RETRY; return end
+        if math.type(res) == 'integer' then
+          st.kpi.links, dirty = (st.kpi.links or 0) + 1, true
+          K.emit('LEVER', 'C', 'link ' .. name, {bridge = name, lever = lv.id, job = res})
+        end
+        r.resolved = nil                          -- re-read the links on the next pass
+      end
+    end
+  end
+end
+
 local function check_fail(K, name, now, mode)
   local br = st.br[name]
   if not (br and br.want == 'up' and not br.failed and br.deadline and now >= br.deadline) then return end
@@ -426,7 +466,7 @@ function M.init(K)
     if type(p.kpi) == 'table' then
       local function int(v) return type(v) == 'number' and math.tointeger(v) or nil end
       local k = new_kpi(int(p.kpi.t0) or now)
-      for _, f in ipairs({'dbl', 'pulls', 'cancels'}) do k[f] = int(p.kpi[f]) or 0 end
+      for _, f in ipairs({'dbl', 'pulls', 'cancels', 'links'}) do k[f] = int(p.kpi[f]) or 0 end
       for n, v in pairs(type(p.kpi.raise) == 'table' and p.kpi.raise or {}) do k.raise[n] = int(v) end
       for _, f in ipairs(type(p.kpi.fails) == 'table' and p.kpi.fails or {}) do k.fails[#k.fails + 1] = f end
       st.kpi = k
@@ -450,6 +490,7 @@ function M.step(K, budget, ctx)
     ensure_default(K, name, now)
     states[name] = control(K, name, man.bridges[name], now)
     check_fail(K, name, now)
+    links(K, name, man.bridges[name], runtime(name), now)
   end
   pub = next(states) and {bridges = states} or {}
   update_every(K)
@@ -498,7 +539,7 @@ function M.kpi(K)
   for n, v in pairs(st.kpi.raise) do raise[n] = v end
   for i, f in ipairs(st.kpi.fails) do fails[i] = f end
   return {double_toggles = st.kpi.dbl, last_raise_ticks = raise, pulls = st.kpi.pulls,
-          cancels = st.kpi.cancels, fails = fails, since = st.kpi.t0}
+          cancels = st.kpi.cancels, links = st.kpi.links or 0, fails = fails, since = st.kpi.t0}
 end
 
 function M.reset_kpi(K)

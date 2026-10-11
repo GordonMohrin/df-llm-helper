@@ -281,6 +281,13 @@ T.test('popups (live L0): a popup halts the game with pause_state false; migrant
   popups:insert('#', {text = "Atir Kemsoroltar has claimed a Stoneworker's Workshop."})   -- live L1b
   H.run(W, 6, {paused = false})
   T.eq(#popups, 0, 'mood notices do not halt the fort')
+  popups:insert('#', {text = 'Meng Iddodok, Stoneworker has bled to death.'})   -- live L2
+  H.run(W, 6, {paused = false})
+  T.eq(#popups, 0, 'death notices do not halt the fort (care records deaths)')
+  popups:insert('#', {text = 'Meng Iddodok, Stoneworker has gone berserk!'})    -- live L2: a threat
+  H.run(W, 6, {paused = false})
+  T.eq(#popups, 1, 'a berserk notice stays for Gordon')
+  popups:erase(0)
   popups:insert('#', {text = 'A vile force of darkness has arrived!'})
   H.run(W, 6, {paused = false})
   T.eq(#popups, 1, 'unknown popups stay for Gordon')

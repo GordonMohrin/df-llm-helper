@@ -557,10 +557,36 @@ end
 ---------------------------------------------------------------- applying stages
 local function is_construction(b) return b:getType() == df.building_type.Construction end
 
+-- live L2: a stage placed again over buildings it already has (fortcore stages 2-3 re-placed without their
+-- traps) finds those tiles occupied, and quickfort counts them as unsuitable (building.lua:517-559), which
+-- read as lost buildings (build_lost). Before a build chunk, the tiles that already hold a building or a
+-- finished construction are counted (returned) and their buildings tracked like ours (an unbuilt one keeps
+-- the stage pending).
+local OCCUPIED = {C = true, F = true, ['='] = true, H = true, B = true, ['^'] = true, ['+'] = true}
+local function pre_occupied(K, ch, R)
+  local tiles, n, seen = {}, 0, {}
+  for _, cell in ipairs(ch.cells) do cell_tiles(ch, cell, tiles) end
+  for _, id in ipairs(R.b) do seen[id] = true end
+  local find = dfhack.buildings and dfhack.buildings.findAtTile             -- Lua API.txt:2484
+  for _, t in ipairs(tiles) do
+    local ok, b = false, nil
+    if find then ok, b = pcall(find, t[1], t[2], t[3]) end
+    if ok and b then
+      n = n + 1
+      if not seen[b.id] and not is_construction(b) then seen[b.id] = true; R.b[#R.b + 1] = b.id end
+    else
+      local okt, tile = K.call('snapshot', 'tile', t[1], t[2], t[3])
+      if okt and type(tile) == 'table' and OCCUPIED[tile.c] then n = n + 1 end
+    end
+  end
+  return n
+end
+
 local function apply(K, P, st, R)
   local ch = st.chunks[P.chunk + 1]
   local p = {mode = st.mode, data = chunk_data(ch), pos = ch.pos}
   if st.mode == 'dig' then p.priority = P.prio end
+  local pre = st.mode == 'build' and pre_occupied(K, ch, R) or 0
   -- quickfort allocates the ids of the buildings it places (build.lua:1259 constructBuilding)
   local n0 = st.mode == 'build' and df.global.building_next_id or nil
   local ok, stats = qf(K, p)
@@ -594,7 +620,7 @@ local function apply(K, P, st, R)
         end
       end
       if R.ra == 1 then R.uns = math.max(0, R.uns - (n1 - n0))
-      else R.uns = R.uns + (int(stats.build_unsuitable) or 0) + bad end
+      else R.uns = R.uns + math.max(0, (int(stats.build_unsuitable) or 0) - pre) + bad end
     end
   end
   P.chunk = P.chunk + 1
@@ -626,21 +652,36 @@ end
 -- which apply_blueprint alone never does: quickfort.lua:43-56, command.lua:183). Returns true when the
 -- stage's orders are complete, 'more' after a slice, false = failed (retried next run; after fail_max
 -- failures the rest of the stage is built without orders).
+-- live L2: a cell whose tile already holds a building or a finished construction (a stage placed again) gets
+-- no manager order (three placements of fortcore stages 2-3 had ordered 93 mechanisms)
+local function occupied_cell(K, c)
+  local find = dfhack.buildings and dfhack.buildings.findAtTile
+  if find then
+    local ok, b = pcall(find, c[1], c[2], c[3])
+    if ok and b then return true end
+  end
+  local okt, tile = K.call('snapshot', 'tile', c[1], c[2], c[3])
+  return okt and type(tile) == 'table' and OCCUPIED[tile.c] == true
+end
+
 local function orders(K, P, st, R)
   local cells = order_cells(st)
   local i0 = math.max(1, int(R.oc) or 1)
   local i1 = math.min(#cells, i0 + M.CFG.orders_cells - 1)
-  local data = {}
+  local data, n = {}, 0
   for i = i0, i1 do
     local c = cells[i]
-    local gz = data[c[3]] or {}
-    data[c[3]] = gz
-    local row = gz[c[2]] or {}
-    gz[c[2]] = row
-    row[c[1]] = c[4]
+    if not occupied_cell(K, c) then
+      local gz = data[c[3]] or {}
+      data[c[3]] = gz
+      local row = gz[c[2]] or {}
+      gz[c[2]] = row
+      row[c[1]] = c[4]
+      n = n + 1
+    end
   end
   local ok, res = true, {}
-  if i0 <= i1 then ok, res = qf(K, {mode = st.mode, data = data, pos = {0, 0, 0}, command = 'orders'}) end
+  if n > 0 then ok, res = qf(K, {mode = st.mode, data = data, pos = {0, 0, 0}, command = 'orders'}) end
   if not ok then
     R.of = (R.of or 0) + 1
     dirty()

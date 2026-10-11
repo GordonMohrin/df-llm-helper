@@ -17,7 +17,7 @@ from .primitives import BRIDGE_KEYS, Plan, Xform, transform_manifest
 
 MAX_W = 40
 # name -> (build(params) -> Plan, {param: (default, lo, hi)}, one-line description)
-TEMPLATES = {"fortcore": (fortcore.build, fortcore.PARAMS, "doctrine fortress core, stages 1-3 (DESIGN §5.2)"),
+TEMPLATES = {"fortcore": (fortcore.build, fortcore.PARAMS, "doctrine fortress core, stages 1-4 (DESIGN §5.2; 4 = traps)"),
              **{n: (f, {**rooms.PARAMS[n], **rooms.COMMON}, (f.__doc__ or n).strip().split("\n")[0])
                 for n, f in rooms.BUILD.items()}}
 _BURROW_RE = r"^[A-Za-z0-9_+-]{0,20}$"
@@ -108,10 +108,10 @@ def dug_bbox(plan: Plan) -> tuple[int, int, int, int, int, int]:
 
 
 def emit_all(tpl: str, params: dict | None = None, site=None) -> list[dict]:
-    """fortcore: the stage projects 1..params.stage (default all 3) in order, same site; else [emit(...)]."""
+    """fortcore: the stage projects 1..params.stage (default all 4) in order, same site; else [emit(...)]."""
     if tpl != "fortcore":
         return [emit(tpl, params, site)]
-    last = (params or {}).get("stage", 3)
+    last = (params or {}).get("stage", fortcore.STAGES)
     return [emit(tpl, {**(params or {}), "stage": s}, site) for s in range(1, int(last) + 1)]
 
 

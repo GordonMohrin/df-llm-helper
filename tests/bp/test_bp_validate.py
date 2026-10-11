@@ -94,7 +94,8 @@ def test_refuge_on_attack_path():
 
 def test_refuge_depth_and_well():
     docs = copy.deepcopy(fort_docs())
-    docs[2]["manifest"]["refuge"]["anchor"] = list(L(2, 45, -2 - 3))     # on the core level
+    for d in docs[2:]:                                                    # stages 3 and 4 carry the refuge
+        d["manifest"]["refuge"]["anchor"] = list(L(2, 45, -2 - 3))       # on the core level
     assert any("not >= 3 below" in f.msg for f in check_world(docs) if f.code == "refuge")
     docs = copy.deepcopy(fort_docs())
     for st in docs[2]["stages"]:
@@ -121,12 +122,12 @@ def test_trap_hall_shape():
 def test_gallery_exposed_and_unroofed():
     docs = fort_docs()
     w = bp.as_built(docs)
-    w.set(*L(4, 29, -1), ".")                 # a fortification tile turned into floor
+    w.set(*L(4, 29, -2), ".")                 # a fortification tile turned into floor (gallery at ze, live L2)
     snap = w.snapshot()
     res = bp.audit(snap, w.manifest)
     assert any(x.startswith("gallery: reachable") for x in res["fails"])
-    w.set(*L(4, 29, -1), "F")
-    w.set(*L(5, 29, 0), "_")                  # hole in the gallery roof
+    w.set(*L(4, 29, -2), "F")
+    w.set(*L(5, 29, -1), "_")                 # hole in the gallery roof
     assert "gallery: not roofed" in bp.audit(w.snapshot(), w.manifest)["fails"]
 
 

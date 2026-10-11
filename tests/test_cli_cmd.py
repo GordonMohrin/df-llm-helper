@@ -394,3 +394,20 @@ def test_lint_delegation(save, monkeypatch, capsys):
     hook.main = lambda: 2
     monkeypatch.setitem(sys.modules, "df_llm_helper.hook", hook)
     assert run(save, "lint", "--hook") == 2
+
+
+def test_retire_keeps_the_same_anchor_of_earlier_stages(tmp_path):
+    """live L2: cancelling fortcore stage 3 must not lose site 'same' (stage 1 is still on file)."""
+    from df_llm_helper import cmd as C
+    bpd = tmp_path / "bp"
+    bpd.mkdir()
+    s1 = {"v": 2, "id": "p1", "tpl": "fortcore", "site": "S1", "anchor": [106, 54, 124], "rot": 0}
+    s3 = {"v": 2, "id": "p3", "tpl": "fortcore", "site": "same", "anchor": [106, 54, 124], "rot": 0}
+    files.write_json_atomic(bpd / "p1.json", s1)
+    files.write_json_atomic(bpd / "p3.json", s3)
+    files.write_json_atomic(bpd / ".placed-fortcore.json", {"anchor": [106, 54, 124], "rot": 0, "from": "same", "bp": "p3"})
+    assert C.retire(tmp_path, "p3")
+    assert (bpd / ".cancelled" / "p3.json").is_file()
+    assert files.read_json(bpd / ".placed-fortcore.json") == {"anchor": [106, 54, 124], "rot": 0, "from": "S1", "bp": "p1"}
+    assert C.retire(tmp_path, "p1")
+    assert not (bpd / ".placed-fortcore.json").exists()

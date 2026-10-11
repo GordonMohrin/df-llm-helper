@@ -21,7 +21,7 @@ from df_llm_helper import files, hook, lint, schema
 ROOT = Path(__file__).resolve().parent.parent
 LUA = ROOT / "lua" / "dfllm"
 KERN_VERBS = {"plan.reload", "inspect", "module.enable"}
-S2_STUBS = {"squad_leader", "squad_uniform", "order_suspend"}   # need live spikes (STATUS.md)
+S2_STUBS = {"order_suspend"}   # unsupported in DF 53 (squad_leader, squad_uniform, link_lever: live L2)
 
 
 def lua_modules() -> dict[str, str]:

@@ -5,24 +5,30 @@ from the north (v < 0), the fort extends south. Levels: w=0 surface, w=-1 galler
 (ze), core zc = ze - depth, refuge zr = zc - refuge (>= 3 below the core).
 
 Attack path at ze: ramps -> tunnel -> O1 (3x1 drawbridge) -> Z1 bailey with depot -> Z2 trap hall (1 wide,
-45 tiles, 8 bends) -> K1 killing field 7x7 (roofed by the surface; open air at w=-1 above it) -> B1 (3x1) ->
-Z3 gatehouse/barracks (levers of O1 and B1, military stair up to the gallery) -> B2 (3x1) -> Z4 landing with
-the civilian stair (levers of B2) -> core level zc -> refuge zr. The gallery runs at w=-1 along the field
-behind constructed fortifications and is reachable only through the military stair in Z3. Everything is
-underground, so walls are natural rock and every area is roofed (the bailey's walls/overhang requirement).
+45 tiles, 8 bends) -> K1 killing field 7x7 (roofed) -> B1 (3x1) -> Z3 gatehouse/barracks (levers of O1 and B1,
+military stair alcove) -> B2 (3x1) -> Z4 landing with the civilian stair (levers of B2) -> core level zc ->
+refuge zr. The gallery runs at ze along the east side of the field behind constructed fortifications and is
+reachable only through a corridor from the military stair alcove in Z3. Live L2: it used to sit at w=-1 above
+the field, but that level is reached only by digging upward through the military stair, and DF never digs a
+hidden tile above an up stair (the gallery stayed solid rock for three years). Everything is underground, so
+walls are natural rock and every area is roofed (the bailey's walls/overhang requirement).
 
-Each doctrine stage is its own project (params.stage 1..3) so the gate gets B1 when stage 2 is done
+Each doctrine stage is its own project (params.stage 1..4) so the gate gets B1 when stage 2 is done
 (CONTRACTS §9.8: split defense geometry). Manifest fragments are cumulative (the §11 merge is idempotent).
-Stage 1 digs the future trap-hall route as the entrance tunnel, so no shortcut ever has to be walled off;
-stage 2 arms it (14 weapon traps) and stage 3 completes it (41 traps). Farm plots (DESIGN §5.2 stage 1) are a
-separate `farms` room project: a farm plot needs soil or mud, which the core level usually is not.
+Stage 1 digs the future trap-hall route as the entrance tunnel, so no shortcut ever has to be walled off.
+Stage 4 arms it (41 traps: 28 weapon, 13 stone-fall). Live L2: with the traps inside stages 2-3, buildingplan
+gave the scarce mechanisms to the traps and none to the six levers, and the traps' weapons need metal the fort
+did not have, so the bridges never reached the manifest; bridges, levers and links now come first and the
+traps are a project of their own. Farm plots (DESIGN §5.2 stage 1) are a separate `farms` room project: a farm
+plot needs soil or mud, which the core level usually is not.
 """
 from __future__ import annotations
 
 from .primitives import Plan
 
-PARAMS = {"stage": (1, 1, 3), "depth": (3, 2, 12), "refuge": (3, 3, 8), "beds": (8, 4, 16)}
-CLASS = {1: "infra", 2: "defense", 3: "defense"}
+STAGES = 4
+PARAMS = {"stage": (1, 1, STAGES), "depth": (3, 2, 12), "refuge": (3, 3, 8), "beds": (8, 4, 16)}
+CLASS = {1: "infra", 2: "defense", 3: "defense", 4: "defense"}
 ZE, ZG = -2, -1
 # trap hall waypoints at ze (1 wide, 45 tiles, 8 bends; parallel runs keep one rock row between them)
 HALL = [(0, 17), (0, 18), (6, 18), (6, 20), (-6, 20), (-6, 22), (6, 22), (6, 24), (0, 24), (0, 25)]
@@ -75,6 +81,7 @@ def build(p: dict) -> Plan:
     _stage1(full, p, zc, zr)
     _stage2(full)
     _stage3(full, zr)
+    _stage4(full)
     plan.stages = [s for s in full.stages if s.label.startswith(f"s{stage}.")]
     plan.manifest = _manifest(stage, zc, zr)
     plan.rooms = [r for r in full.rooms if r["stage"] <= stage]
@@ -147,17 +154,14 @@ def _stage2(P: Plan) -> None:
         d.tile(u, v0 - 1, ZE, "s")                                            # smooth north wall
     for u in (-3, -2, 2, 3):
         d.tile(u, v1 + 1, ZE, "s")                                            # smooth south wall
-    d.rect(u0 - 1, v0, u0 - 1, v1, ZE, "s").rect(u1 + 1, v0, u1 + 1, v1, ZE, "s")
-    d.rect(u0, v0, u1 + 2, v1, ZG)                                            # air area, F line, gallery
-    d.rect(5, v1 + 1, 5, MIL[1] - 1, ZG)                                      # gallery corridor
-    P.stage("s2.chan", "dig", defense=1).rect(u0, v0, u1, v1, ZG, "h")       # open the air above K1
+    d.rect(u0 - 1, v0, u0 - 1, v1, ZE, "s")                                   # smooth west wall
+    d.rect(u1 + 1, v0, u1 + 2, v1, ZE)                                        # F line + gallery (same level)
+    d.rect(5, v1 + 1, 5, MIL[1] - 1, ZE)                                      # gallery corridor to the alcove
     b = P.stage("s2.build", "build", orders=1, defense=1)
     b.ent(*FP["B1"], ZE, "g", dir="N")
     for u, v, w in LEVERS["B1"]:
         b.tile(u, v, w, "Tl")
-    b.rect(u1 + 1, v0, u1 + 1, v1, ZG, "CF")                                  # fortifications toward K1
-    for u, v in _trap_tiles(2):
-        b.tile(u, v, ZE, "Tw")
+    b.rect(u1 + 1, v0, u1 + 1, v1, ZE, "CF")                                  # fortifications toward K1
     for key, u, v in (("r", 4, 35), ("r", 4, 36), ("a", 4, 40), ("a", 4, 41), ("h", -3, 41), ("h", 3, 41)):
         b.tile(u, v, ZE, key)
     P.stage("s2.zone", "zone").ent(-4, 35, 4, 41, ZE, "B")
@@ -172,8 +176,6 @@ def _stage3(P: Plan, zr: int) -> None:
     for n in ("O1", "B2"):
         for u, v, w in LEVERS[n]:
             b.tile(u, v, w, "Tl")
-    for i, (u, v) in enumerate(_trap_tiles(3)):
-        b.tile(u, v, ZE, "Tw" if i % 2 == 0 else "Ts")
     for u in range(-4, 4):
         b.tile(u, 48, zr, "b")
     b.tile(-2, 43, zr, "l")
@@ -183,6 +185,15 @@ def _stage3(P: Plan, zr: int) -> None:
     P.stage("s3.burrow", "burrow").ent(-4, 42, 4, 48, zr, "a", "name=Tiefe+ create=true")
     P.room("refuge", "fortcore", "utility", (-4, 42, zr, 4, 48, zr))
     P.rooms[-1]["stage"] = 3
+
+
+def _stage4(P: Plan) -> None:
+    """Arm the trap hall: every third tile a weapon trap (the first 14), the rest alternate weapon/stone-fall."""
+    b = P.stage("s4.build", "build", orders=1, defense=1)
+    for u, v in _trap_tiles(2):
+        b.tile(u, v, ZE, "Tw")
+    for i, (u, v) in enumerate(_trap_tiles(3)):
+        b.tile(u, v, ZE, "Tw" if i % 2 == 0 else "Ts")
 
 
 def _trap_tiles(stage: int) -> list[tuple[int, int]]:
@@ -205,7 +216,7 @@ def _manifest(stage: int, zc: int, zr: int) -> dict:
     bridges = []
     if stage >= 2:
         bridges.append("B1")
-        m["stations"] = {"melee": [0, 36, ZE], "gallery": [5, 29, ZG]}
+        m["stations"] = {"melee": [0, 36, ZE], "gallery": [5, 29, ZE]}
         m["killboxes"] = [{"id": "K1", "bbox": [u0, v0, ZE, u1, v1, ZE]}]
     if stage >= 3:
         bridges += ["O1", "B2"]

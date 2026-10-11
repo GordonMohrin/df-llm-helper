@@ -200,14 +200,15 @@ Every function returns `ok, res_or_err`, never raises, writes one line to `comma
 | `dismiss_popup(kind)` | whitelisted kind string | close the popup | arbiter |
 | `civ_alert(on)` | bool | gui/civ-alert `sound_alarm()`/`clear_alarm()` (civ-alert.lua:27,36) | siege |
 | `alert_burrows(names)` | array of burrow names | set the civ-alert burrow list to exactly these (civ-alert.lua:40,45) | siege |
-| `squad_create(name, opts)` → `ok, squad_id` | `opts = {assignment_id=?}` [S2] | create squad (`dfhack.military.makeSquad`, Lua API.txt:1973) + nickname. The new squad's leader slot is **vacant**. | military |
-| `squad_leader(squad_id, unit_id)` → `ok` | ints [S2] | squad screen: choose the leader, i.e. appoint the citizen to the position assignment the squad belongs to (vanilla creates or reuses that militia captain/commander assignment), which fills position 0. The only way to staff a new squad: `addToSquad` cannot set position 0 and fails while the leader slot is vacant (Lua API.txt:1989-1993). | military |
+| `squad_create(name, opts)` → `ok, squad_id` | `opts = {assignment_id?, leader?}` (live L2) | squads screen "create squad": `dfhack.military.makeSquad` (Lua API.txt:1973) on a vacant MILITIA_COMMANDER/CAPTAIN assignment, else on a new MILITIA_CAPTAIN assignment (the screen adds one per squad), + nickname; with `leader` the leader is seated at once (`squad_leader`) | military |
+| `squad_leader(squad_id, unit_id)` → `ok, assignment_id` | ints (live L2) | squad screen: choose the leader = appoint the citizen to `squad.leader_assignment` (assignment histfig + position link + `assignments_by_type`, as `appoint`), fill position 0, `unit.military.squad_id/squad_position`, equipment update. The officer holds a POSITION link, no SQUAD link (DFHack Military.cpp removeFromSquad). The only way to staff a new squad: `addToSquad` cannot set position 0 and fails while the leader slot is vacant (Lua API.txt:1989-1993). | military |
 | `squad_add(squad_id, unit_id)` / `squad_remove(squad_id, unit_id)` | ints | `addToSquad(unit, squad, -1)` (positions ≥ 1 only; call `squad_leader` first) / `removeFromSquad` (:1985-1993) | military |
 | `squad_routine(squad_id, routine_name)` | string, resolved by name [S2] | routine dropdown (`cur_routine_idx`) | military |
 | `squad_order(squad_id, order)` | `{kind='station', pos}` \| `{kind='kill', units={ids}}` \| `{kind='train'}` \| `{kind='clear'}` | squad orders | military |
-| `squad_uniform(squad_id, spec)` | `{mode='replace', items={...}}` [S2] | uniform screen | military |
+| `squad_uniform(squad_id, spec)` → `ok, positions` | `{mode='replace'|'over', items={{cat, type, subtype?, mat='metal'|'leather'|'any', choice?}}, positions?, ammo?}` (live L2) | squads screen > assign uniform: one `squad_uniform_spec` per item and position (material class Armor/Leather/none, indiv choice), flags replace_clothing/exact_matches, squad ammo spec; equipment update | military |
 | `pull(lever_building_id)` → `ok, job_id` | int | `reqscript('lever').leverPullJob(lever, true)` (lever.lua:4, priority) | gate |
 | `cancel_own_lever_job(job_id)` | int, only ids returned by `pull` this session | cancel the queued pull | gate |
+| `link_lever(lever_id, target_id)` → `ok, job_id|'linked'` | ints (live L2, [S3]) | lever sheet "link up": one `LinkBuildingToTrigger` job on the lever (building holder ref = lever, trigger target ref = target) with two mechanisms attached (roles LinkToTrigger/LinkToTarget), chosen like the screen: free, reachable (walk groups), nearest; refused while a link job is pending or either building is unbuilt | gate |
 | `popcap(n)` | int | `pop-control set max-pop N` | readiness |
 | `quickfort(p)` → `ok, stats` | `{mode, data, pos, command='run'|'orders'|'undo', priority?, marker?, dry_run?}` | `reqscript('quickfort').apply_blueprint(p)` (quickfort.txt:156) | runner |
 | `orders_import(lib)` | `'library/basic'` … | `orders import <lib>` | economy |
@@ -779,6 +780,7 @@ Each item names the WP that must adapt its code; WP0 changed the contract, `cont
 | R6 | `by` is a label; `unpause` releases only the inbox hold; `audit` only from follow/test with a snapshot of this boot; hook/lint trust rules | §9.5, §13 | **WP1** kern checks `VERB_BY`, arbiter `unpause`; **WP6** readiness records `EV:SNAPSHOT_READY` ids (purpose audit) and refuses others; **WP4** hook/lint rules incl. Write/Edit; **WP2** `cmd` must not offer `audit`/`--by follow` to the LLM path (follow writes audits itself) |
 | R7 | bp caps 1,000 cells / 24 KB (`schema.validate('bp')`); `bp.<id>` written once; at most one bp decode per frame | §8, §9.8, §10 | **WP3** emitters stay under the caps; **WP7** runner reads ≤ 1 bp per frame (today `plan_loads = 4`); **WP2** gets the caps through `schema.validate` |
 | R8 | No permanent disable: backoff (critical 30 s, others 10 min, doubling), auto re-enable, `module.enable` verb, `KERN_FAULT.d.backoff_s` | §3.3.5, §12, §13 | **WP1** kern fault/backoff + `module.enable` handler |
+| L2 | `act.link_lever` (gate links built, unlinked manifest levers in PEACE/ALERT/RECOVERY; LEVER event `link`); `squad_create` makes a captain assignment, `squad_leader` and `squad_uniform` implemented; fortcore traps are stage 4 (bridges and levers first) | §5, §9.8 | done in live slot L2 (act, gate, military, bp, plans) |
 | L1b | economy owns the builtin tool details (`act.work_detail`, event WORK_DETAIL, `runner.dig_backlog`); the `workshops` deliverable also counts built workshops; `plan.reload {phases:true}`; the runner slices the stage `orders` call (`orders_cells`) | §5, §7, §9.9, §12, §13 | done in live slot L1b (economy, act, runner, kern, lint) |
 
 ---
@@ -787,7 +789,7 @@ Each item names the WP that must adapt its code; WP0 changed the contract, `cont
 Generated by `python -m df_llm_helper.schema --write-appendix docs/v2/CONTRACTS.md`; `tests/test_schema.py` fails if this block is stale. The digest covers every schema and registry in `schema.py`, so any contract change shows up here.
 
 <!-- BEGIN GENERATED SCHEMAS -->
-Contract digest: `c2a9313e5e0704a3dc74b7673b5d25632d9ba7afca06ccf92221aef0b4925801`
+Contract digest: `eb8237ab39aff62494ca1b3661f194bf92e8b0ffc61b0ce1e2df33ccb0c8a60b`
 
 DESIGN §6 formats and the inbox verb args. Other kinds: `python -m df_llm_helper.schema --json-schema <kind>` with kind in heartbeat, phases, bp, restore, lock, allowlist, persist.marker, persist.projects, persist.plan, persist.phase, persist.mode, persist.drill, persist.kern. Per-type event `d` (§12) and per-verb `args` are checked by `validate()`; the envelopes leave them open. Compact JSON, keys sorted.
 

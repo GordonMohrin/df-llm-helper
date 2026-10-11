@@ -722,7 +722,10 @@ class _Lint:
                 self.add(line, "unit-iter")
         if q in TILE_FNS or (v == "map" and q.endswith("world.map")) or q.startswith("df.map_block"):
             self.flags.add("tile_read")
-            if self.role not in ("sense", "snapshot"):
+            # live L2: the lever link screen offers only mechanisms the mechanic can reach (it warns
+            # need_accessible_mechanism); act.link_lever asks the walk groups the same question
+            reach = q == "dfhack.maps.canWalkBetween" and self.role == "act" and self.in_func("free_mechanisms")
+            if self.role not in ("sense", "snapshot") and not reach:
                 self.add(line, "tile-read")
         if self.in_loop() and ((v == "all" and (q.endswith("items.all") or q.endswith("buildings.all")))
                                or q in ("df.item.get_vector", "df.building.get_vector")):

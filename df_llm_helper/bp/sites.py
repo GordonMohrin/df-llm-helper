@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collections import deque
 
+from . import fortcore
 from .emit import TEMPLATES, check_params
 from .primitives import rot_uv
 from .rooms import NO_THROUGH, plot_rects
@@ -72,7 +73,8 @@ def footprint(tpl: str, p: dict) -> dict[int, list[tuple[int, int, int, int]]]:
     """Local check rects per w: the dug-tile bbox grown by the wall ring (rooms: not toward the anchor row);
     a channel also opens the tile below (sump or ramp)."""
     build = TEMPLATES[tpl][0]
-    plans = [build({**p, "stage": s}) for s in (1, 2, 3)] if tpl == "fortcore" else [build(p)]  # whole fort
+    stages = range(1, fortcore.STAGES + 1)
+    plans = [build({**p, "stage": s}) for s in stages] if tpl == "fortcore" else [build(p)]  # whole fort
     dug: dict[int, set] = {}
     for plan in plans:
         for w, tiles in plan.dug().items():

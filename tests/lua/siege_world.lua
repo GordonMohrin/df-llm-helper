@@ -202,8 +202,9 @@ function S.sim(W)
     local cfg = W.lever_cfg[lv.id] or W.lever_default
     for i = #lv.jobs - 1, 0, -1 do
       local j = lv.jobs[i]
-      if not j._worker and cfg.worker ~= nil and now - j._q >= cfg.worker then j._worker, j._w = {id = 9999}, now end
-      if j._worker and now - (j._w or j._q) >= (cfg.pull or 40) then
+      if j.job_type ~= df.job_type.PullLever then j = nil end           -- link jobs are not pulls
+      if j and not j._worker and cfg.worker ~= nil and now - j._q >= cfg.worker then j._worker, j._w = {id = 9999}, now end
+      if j and j._worker and now - (j._w or j._q) >= (cfg.pull or 40) then
         lv.jobs:erase(i)
         S.move_bridge(W, lv.bridge, now)
       end

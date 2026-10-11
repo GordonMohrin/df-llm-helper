@@ -865,4 +865,60 @@ T.test('reload mid-siege with raised bridges unseen by findAtTile: found by exte
   T.eq(W2.state().bridges, {O1 = 'up', B1 = 'up', B2 = 'down'})
 end)
 
+-- live L2 [S3]: built levers at the manifest positions that are not linked yet get one link job each
+T.test('gate links built unlinked manifest levers once each; a refusal waits a day; not in a siege', function()
+  local kv = require('dfllm.util.k_mock').vec
+  local W = S.world{units = units()}
+  df.job_type.LinkBuildingToTrigger = 146
+  local function built(b, on)
+    b.getBuildStage = function() return on and 1 or 0 end
+    b.getMaxBuildStage = function() return 1 end
+  end
+  for _, lv in ipairs(W.levers) do lv.linked_mechanisms = kv{}; built(lv, lv.bridge ~= 'B2' or lv.id % 2 == 0) end
+  for name, b in pairs(W.bridges) do built(b, name ~= 'O1') end            -- O1 not built yet
+  local mode, calls = 'fail', {}
+  W.act_result('link_lever', function(lid, bid)
+    calls[#calls + 1] = {lid, bid}
+    if mode == 'fail' then return false, 'needs 2 free reachable mechanisms, 0 found' end
+    local lv = W.buildings[lid]
+    lv.jobs:insert('#', {id = 9000 + #calls, job_type = df.job_type.LinkBuildingToTrigger})
+    return true, 9000 + #calls
+  end)
+  S.load(W)
+  S.run(W, 700)
+  T.eq(#calls, 2, 'one refused try per built bridge (B1, B2); its other levers wait for the retry')
+  S.run(W, 400)
+  T.eq(#calls, 2, 'no retry within a day')
+  mode = 'ok'
+  S.run(W, 1300)
+  local B1, B2 = W.bridges.B1.id, W.bridges.B2.id
+  local by = {}
+  for _, c in ipairs(calls) do by[c[2]] = (by[c[2]] or 0) + 1 end
+  T.eq({by[B1], by[B2], by[W.bridges.O1.id]}, {3, 2, nil}, 'B1: 2 levers (+1 refused), B2: its 1 built lever; O1 not built')
+  local n = #calls
+  S.run(W, 2400)
+  T.eq(#calls, n, 'a pending link job is never doubled')
+  T.eq(#W.find_events('LEVER'), 3)
+  -- the mechanic finished: the levers are linked now; nothing more to do
+  for _, lv in ipairs(W.levers) do
+    lv.jobs = kv{}
+    local target = W.bridges[lv.bridge]
+    lv.linked_mechanisms = kv{{_ref = {getBuilding = function() return target end}}}
+  end
+  S.run(W, 1300)
+  T.eq(#calls, n)
+  -- a new unlinked lever during a drill waits for PEACE
+  local lv
+  for _, x in ipairs(W.levers) do if x.bridge == 'B1' then lv = x end end
+  lv.linked_mechanisms = kv{}
+  W.set_mode('SIEGE')
+  S.run(W, 600)
+  T.ok(W.K.mode() == 'SIEGE' or W.K.mode() == 'BREACH', W.K.mode())
+  T.eq(#calls, n, 'no link job in SIEGE/BREACH (a mechanic must not walk out)')
+  W.set_mode('PEACE')
+  S.run(W, 1300)
+  T.eq(#calls, n + 1)
+  T.eq(S.kpi(W).links, 4)
+end)
+
 T.done()

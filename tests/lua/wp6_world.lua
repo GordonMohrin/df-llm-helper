@@ -183,6 +183,7 @@ function X.install(W, opts)
   W.squads, W.hfs, W.items_by_id = {}, {}, W.items_by_id or {}
   W.squad_seq, W.item_seq = 300, 9000
   W.create_mode, W.uniform_mode = opts.create_mode or 'ok', opts.uniform_mode or 'ok'
+  W.leader_mode = opts.leader_mode or 'ok'
   g.plotinfo.group_id = X.GROUP
   g.world.squads = {all = vec{}}
   df.squad = {find = function(id) return W.squads[id] end}
@@ -221,6 +222,16 @@ function X.install(W, opts)
     local s = X.new_squad(W, name)
     if o and o.leader and W.create_mode ~= 'noleader' then X.seat(W, s, 0, o.leader) end
     return true, s.id
+  end)
+  -- the squads screen's "choose leader" (act.squad_leader [S2, live L2]); W.leader_mode = 'fail' refuses
+  W.act_result('squad_leader', function(sid, uid)
+    if W.leader_mode == 'fail' then return false, 'leader refused' end
+    local s = W.squads[sid]
+    if not s then return false, 'no fort squad' end
+    if s.positions[0].occupant >= 0 then return false, 'leader already seated' end
+    if W.unit(uid).military.squad_id >= 0 then return false, 'unit is in a squad' end
+    X.seat(W, s, 0, uid)
+    return true, 10
   end)
   W.act_result('squad_add', function(sid, uid)
     local s = W.squads[sid]

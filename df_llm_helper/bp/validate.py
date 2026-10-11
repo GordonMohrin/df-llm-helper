@@ -184,7 +184,7 @@ def _trap_hall(world: World, man: dict) -> list[Finding]:
 
 def check_world(docs, final: bool | None = None) -> list[Finding]:
     """Doctrine checks on the as-built result of `docs` (applied in order). `final` (default: the last
-    document is fortcore stage 3) also requires O1, B2, refuge, Tiefe+ and the refuge well."""
+    document is fortcore stage 3 or 4) also requires O1, B2, refuge, Tiefe+ and the refuge well."""
     docs = [docs] if isinstance(docs, dict) else list(docs)
     world = as_built(docs)
     out = [Finding("build_tile", e) for e in world.errors]
@@ -194,7 +194,7 @@ def check_world(docs, final: bool | None = None) -> list[Finding]:
     if not any(d["tpl"] == "fortcore" for d in docs):
         return out
     last = docs[-1]
-    final = final if final is not None else (last["tpl"] == "fortcore" and last["params"]["stage"] == 3)
+    final = final if final is not None else (last["tpl"] == "fortcore" and last["params"]["stage"] >= 3)
     res = topo.audit(snap, man)
     if res["bypass"]:
         out += _bypass_kind(snap, man)

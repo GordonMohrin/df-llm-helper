@@ -369,36 +369,193 @@ T.test('arbiter actions: settings return old values, timestream old fps, overlay
   env.api.set_paused(false)
 end)
 
-T.test('military actions [S2]: create needs an assignment, add/remove, routine by name, orders', function()
-  local W = H.world{tag = 'mil', units = {{id = 5, citizen = true, pos = {1, 1, 1}}}}
+-- fort entity of the live L2 fort: MILITIA_COMMANDER (4, MILITARY_STRATEGY), MILITIA_CAPTAIN (5),
+-- CAPTAIN_OF_THE_GUARD (7, a law squad); assignment 11 = the commander's
+local function mil_world(W)
+  local vec = kmock.vec
+  local asg11 = {id = 11, position_id = 4, histfig = -1, histfig2 = -1, squad_id = -1, position_vector_idx = -1}
+  local ent = {id = 321,
+               positions = {own = vec{{id = 4, code = 'MILITIA_COMMANDER', squad_size = 10, flags = {ACTIVE = true},
+                                       responsibilities = {MILITARY_STRATEGY = true}},
+                                      {id = 5, code = 'MILITIA_CAPTAIN', squad_size = 10, flags = {ACTIVE = false},
+                                       responsibilities = {}},
+                                      {id = 7, code = 'CAPTAIN_OF_THE_GUARD', squad_size = 10, flags = {ACTIVE = false},
+                                       responsibilities = {}}},
+                            assignments = vec{{id = 9, position_id = 7, histfig = -1, squad_id = -1}, asg11},
+                            next_assignment_id = 12},
+               assignments_by_type = {MILITARY_STRATEGY = vec{}}}
+  df.global.plotinfo.main = {fortress_entity = ent}
+  df.global.plotinfo.group_id = 321
+  df.global.plotinfo.equipment = {update = {}}
+  df.global.world.entities = {all = vec{{id = 1}, ent}}
+  df.entity_position_assignment = {new = function() return {flags = {}} end}
+  df.histfig_entity_link_positionst = 'positionst'
+  local hfs = {}
+  df.historical_figure = {find = function(id) return hfs[id] end}
   local squads = {}
-  dfhack.military.makeSquad = function(aid) local s = {id = 40 + aid, orders = kmock.vec{}, cur_routine_idx = 0}; squads[s.id] = s; return s end
+  df.squad = {find = function(id) return squads[id] end}
+  dfhack.military.makeSquad = function(aid)
+    for _, a in ipairs(ent.positions.assignments) do
+      if a.id == aid and a.squad_id == -1 then
+        local s = {id = 80 + aid, entity_id = 321, leader_assignment = aid, orders = vec{}, cur_routine_idx = 0,
+                   positions = vec{}, ammo = {ammunition = vec{}, update = {}}, name = {}}
+        for _ = 0, 9 do
+          local u = {}
+          for _, c in ipairs({'body', 'head', 'pants', 'gloves', 'shoes', 'shield', 'weapon'}) do u[c] = vec{} end
+          s.positions:insert('#', {occupant = -1, equipment = {uniform = u, flags = {}}})
+        end
+        a.squad_id, squads[s.id] = s.id, s
+        return s
+      end
+    end
+  end
+  for _, id in ipairs({5, 6, 7}) do
+    hfs[100 + id] = {id = 100 + id, entity_links = vec{}}
+    W.unit(id).hist_figure_id = 100 + id
+  end
+  return ent, squads, hfs, asg11
+end
+
+T.test('military actions [S2, live L2]: squads screen create + leader, captain assignments, add/remove, routine, orders', function()
+  local W = H.world{tag = 'mil', units = {{id = 5, citizen = true, pos = {1, 1, 1}}, {id = 6, citizen = true, pos = {1, 1, 1}},
+                                          {id = 7, citizen = true, pos = {1, 1, 1}}}}
+  local ent, squads, hfs, asg11 = mil_world(W)
   dfhack.military.addToSquad = function(uid, sid, pos) W.unit(uid).military.squad_id = sid; return true end
   dfhack.military.removeFromSquad = function(uid) W.unit(uid).military.squad_id = -1; return true end
-  df.squad = {find = function(id) return squads[id] end}
   df.squad_order_movest = {new = function() return {pos = {}, kind = 'move', delete = function() end} end}
   df.squad_order_kill_listst = {new = function() return {units = kmock.vec{}, kind = 'kill', delete = function() end} end}
   df.global.plotinfo.alerts.routines = kmock.vec{{name = 'Off duty'}, {name = 'Staggered training'},
                                                   {name = 'Constant training'}, {name = 'Ready'}}
   local env = mk()
   env.who_v = 'military'
-  T.eq({env.api.squad_create('A', {})}, {false, 'assignment_id required [S2]'})
-  local ok, sid = env.api.squad_create('A', {assignment_id = 2})
-  T.eq({ok, sid, squads[42].alias}, {true, 42, 'A'})
-  T.eq({env.api.squad_add(42, 5)}, {true, 42})
-  T.eq({env.api.squad_routine(42, 'constant training')}, {true, 2})
-  T.eq(squads[42].cur_routine_idx, 2)
-  T.eq((env.api.squad_routine(42, 'Off-duty-ish')), false)
-  T.eq((env.api.squad_order(42, {kind = 'station', pos = {10, 11, 12}})), true)
-  T.eq({squads[42].orders[0].kind, squads[42].orders[0].pos.z}, {'move', 12})
-  T.eq((env.api.squad_order(42, {kind = 'kill', units = {77, 78}})), true)
-  T.eq({#squads[42].orders, squads[42].orders[0].kind, #squads[42].orders[0].units}, {1, 'kill', 2}, 'new order replaces')
-  T.eq((env.api.squad_order(42, {kind = 'train'})), true)
-  T.eq(#squads[42].orders, 0)
-  T.eq((env.api.squad_order(42, {kind = 'sortie'})), false)
-  T.eq({env.api.squad_remove(42, 5)}, {true, nil})
-  T.eq((env.api.squad_remove(42, 5)), false)
-  T.eq((env.api.squad_uniform(42, {mode = 'replace'})), false, 'pending S2')
+  -- the first squad takes the vacant commander assignment (never the guard captain's), leader seated
+  local ok, sid = env.api.squad_create('A', {leader = 5})
+  T.eq({ok, sid, squads[91].alias}, {true, 91, 'A'})
+  T.eq(asg11.squad_id, 91)
+  T.eq({asg11.histfig, asg11.histfig2, asg11.position_vector_idx}, {105, 105, 0})
+  T.eq(squads[91].positions[0].occupant, 105)
+  T.eq({W.unit(5).military.squad_id, W.unit(5).military.squad_position}, {91, 0})
+  local l = hfs[105].entity_links[0]
+  T.eq({l.new, l.entity_id, l.entity_vector_idx, l.assignment_id, l.assignment_vector_idx}, {'positionst', 321, 1, 11, 1})
+  T.eq(ent.assignments_by_type.MILITARY_STRATEGY[0].id, 11, 'the commander holds MILITARY_STRATEGY')
+  T.eq(squads[91].ammo.update.weapon and df.global.plotinfo.equipment.update.armor, true, 'equipment update')
+  -- the next squad gets a new militia captain assignment (the screen adds one per squad)
+  ok, sid = env.api.squad_create('B', {})
+  T.eq({ok, sid}, {true, 92})
+  local a12 = ent.positions.assignments[2]
+  T.eq({a12.id, a12.position_id, a12.squad_id, a12.histfig, ent.positions.next_assignment_id}, {12, 5, 92, -1, 13})
+  T.eq(squads[92].positions[0].occupant, -1, 'no leader given')
+  T.eq({env.api.squad_leader(92, 5)}, {false, 'unit is in a squad'})
+  T.eq({env.api.squad_leader(92, 6)}, {true, 12})
+  T.eq({env.api.squad_leader(92, 6)}, {true, 'already'})
+  T.eq({env.api.squad_leader(92, 7)}, {false, 'leader already seated'})
+  T.eq((env.api.squad_leader(99, 7)), false, 'no squad')
+  T.eq(#ent.assignments_by_type.MILITARY_STRATEGY, 1, 'captains have no duty')
+  T.eq({env.api.squad_create('X', {assignment_id = 11})}, {false, 'makeSquad failed'}, 'one squad per assignment')
+  -- members, routine by name, orders
+  T.eq({env.api.squad_add(92, 7)}, {true, 92})
+  T.eq({env.api.squad_routine(92, 'constant training')}, {true, 2})
+  T.eq(squads[92].cur_routine_idx, 2)
+  T.eq((env.api.squad_routine(92, 'Off-duty-ish')), false)
+  T.eq((env.api.squad_order(92, {kind = 'station', pos = {10, 11, 12}})), true)
+  T.eq({squads[92].orders[0].kind, squads[92].orders[0].pos.z}, {'move', 12})
+  T.eq((env.api.squad_order(92, {kind = 'kill', units = {77, 78}})), true)
+  T.eq({#squads[92].orders, squads[92].orders[0].kind, #squads[92].orders[0].units}, {1, 'kill', 2}, 'new order replaces')
+  T.eq((env.api.squad_order(92, {kind = 'train'})), true)
+  T.eq(#squads[92].orders, 0)
+  T.eq((env.api.squad_order(92, {kind = 'sortie'})), false)
+  T.eq({env.api.squad_remove(92, 7)}, {true, nil})
+  T.eq((env.api.squad_remove(92, 7)), false)
+end)
+
+T.test('squad_uniform [S2, live L2]: uniform specs per position and category, material class, ammo', function()
+  local W = H.world{tag = 'uni', units = {{id = 5, citizen = true, pos = {1, 1, 1}}, {id = 6, citizen = true, pos = {1, 1, 1}},
+                                          {id = 7, citizen = true, pos = {1, 1, 1}}}}
+  local _, squads = mil_world(W)
+  df.item_type = {ARMOR = 0, HELM = 1, SHIELD = 2, WEAPON = 3, AMMO = 4}
+  df.entity_material_category = {Leather = 1, Armor = 16}
+  df.global.world.raws = {itemdefs = {weapons = kmock.vec{{id = 'ITEM_WEAPON_AXE', subtype = 0},
+                                                         {id = 'ITEM_WEAPON_CROSSBOW', subtype = 6}},
+                                      ammo = kmock.vec{{id = 'ITEM_AMMO_BOLTS', subtype = 0}}}}
+  local deleted = 0
+  df.squad_uniform_spec = {new = function() return {indiv_choice = {}, delete = function() deleted = deleted + 1 end} end}
+  df.squad_ammo_spec = {new = function() return {flags = {}} end}
+  local env = mk()
+  env.who_v = 'military'
+  local _, sid = env.api.squad_create('C', {})
+  local spec = {mode = 'replace', positions = {0, 1},
+                items = {{cat = 'body', type = 'ARMOR', mat = 'metal'}, {cat = 'head', type = 'HELM', mat = 'leather'},
+                         {cat = 'weapon', type = 'WEAPON', subtype = 'ITEM_WEAPON_CROSSBOW', mat = 'any'}},
+                ammo = {type = 'AMMO', subtype = 'ITEM_AMMO_BOLTS', n = 100}}
+  T.eq({env.api.squad_uniform(sid, spec)}, {true, 2})
+  local p0, p2 = squads[sid].positions[0], squads[sid].positions[2]
+  local b, h, w = p0.equipment.uniform.body[0], p0.equipment.uniform.head[0], p0.equipment.uniform.weapon[0]
+  T.eq({b.item, b.item_type, b.item_subtype, b.material_class, b.mattype, b.matindex}, {-1, 0, -1, 16, -1, -1})
+  T.eq(h.material_class, 1)
+  T.eq({w.item_type, w.item_subtype, w.material_class}, {3, 6, -1})
+  T.eq({p0.equipment.flags.replace_clothing, p0.equipment.flags.exact_matches}, {true, true})
+  T.eq(#p2.equipment.uniform.body, 0, 'only the named positions')
+  local a = squads[sid].ammo.ammunition[0]
+  T.eq({a.item_type, a.item_subtype, a.amount, a.flags.use_combat, a.flags.use_training}, {4, 0, 100, true, true})
+  T.eq({env.api.squad_uniform(sid, spec)}, {true, 2})
+  T.eq({#p0.equipment.uniform.body, deleted, #squads[sid].ammo.ammunition}, {1, 6, 1}, 'replaced, ammo once')
+  T.eq((env.api.squad_uniform(sid, {items = {{cat = 'tail', type = 'ARMOR'}}})), false)
+  T.eq((env.api.squad_uniform(sid, {items = {{cat = 'weapon', type = 'WEAPON', subtype = 'ITEM_WEAPON_NOPE'}}})), false)
+  T.eq((env.api.squad_uniform(424242, spec)), false)
+end)
+
+T.test('link_lever [S3, live L2]: one LinkBuildingToTrigger job with two free reachable mechanisms', function()
+  local W = H.world{tag = 'link'}
+  local vec = kmock.vec
+  df.building_trapst = {is_instance = function(_, b) return b._trap == true end}
+  df.trap_type = {Lever = 1}
+  df.job_type = {PullLever = 68, LinkBuildingToTrigger = 146}
+  df.job_role_type = {LinkToTrigger = 3, LinkToTarget = 4}
+  df.general_ref_type = {BUILDING_HOLDER = 1, BUILDING_TRIGGERTARGET = 2}
+  local function bld(id, extra)
+    local b = W.add_building{id = id}
+    b.jobs, b.linked_mechanisms, b.stage = vec{}, vec{}, 1
+    b.getBuildStage = function(self) return self.stage end
+    b.getMaxBuildStage = function() return 1 end
+    for k, v in pairs(extra or {}) do b[k] = v end
+    return b
+  end
+  local lever = bld(55, {_trap = true, trap_type = 1, centerx = 10, centery = 10, z = 5})
+  bld(60)
+  local function mech(id, x, flags)
+    local f = {}
+    for k, v in pairs(flags or {}) do f[k] = v end
+    return {id = id, _x = x, flags = f}
+  end
+  df.global.world.items.other.TRAPPARTS = vec{mech(1, 30), mech(2, 12), mech(3, 11, {forbid = true}),
+                                               mech(4, 13, {in_building = true}), mech(5, 99)}
+  local attached, refs, linked = {}, {}, 0
+  dfhack.items = {getPosition = function(it) return it._x, 10, 5 end, getHolderUnit = function() return nil end,
+                  getGeneralRef = function(m, t) return m._ref end}
+  dfhack.maps = {canWalkBetween = function(a, b) return a.x ~= 99 end}
+  df.job = {new = function() return {id = 777, general_refs = vec{}, delete = function() end} end}
+  dfhack.job = {attachJobItem = function(j, it, role) attached[#attached + 1] = {it.id, role}; return true end,
+                addGeneralRef = function(j, t, id) refs[#refs + 1] = {t, id} end,
+                linkIntoWorld = function() linked = linked + 1 end, checkBuildingsNow = function() end}
+  local env = mk()
+  env.who_v = 'military'
+  T.eq({env.api.link_lever(55, 60)}, {false, 'not owner'})
+  env.who_v = 'gate'
+  lever.stage = 0
+  T.eq({env.api.link_lever(55, 60)}, {false, 'lever not built'})
+  lever.stage = 1
+  T.eq({env.api.link_lever(60, 55)}, {false, 'not a lever'})
+  T.eq({env.api.link_lever(55, 60)}, {true, 777})
+  T.eq(attached, {{2, 3}, {1, 4}}, 'nearest free reachable mechanisms; forbidden, built-in and unreachable ones skipped')
+  T.eq(refs, {{1, 55}, {2, 60}})
+  T.eq({#lever.jobs, lever.jobs[0].job_type, lever.jobs[0].pos.x, linked}, {1, 146, 10, 1})
+  T.eq({env.api.link_lever(55, 60)}, {false, 'a link job is pending on this lever'})
+  lever.jobs = vec{}
+  lever.linked_mechanisms:insert('#', {_ref = {building_id = 60}})
+  T.eq({env.api.link_lever(55, 60)}, {true, 'linked'})
+  bld(56, {_trap = true, trap_type = 1, centerx = 10, centery = 10, z = 5})
+  df.global.world.items.other.TRAPPARTS = vec{mech(9, 12)}
+  T.eq({env.api.link_lever(56, 60)}, {false, 'needs 2 free reachable mechanisms, 1 found'})
 end)
 
 T.test('through the kernel: act lines in commands.log with the module, ACT_FAIL once per 1,200 ticks', function()

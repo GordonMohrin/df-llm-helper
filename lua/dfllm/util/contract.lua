@@ -107,7 +107,7 @@ C.ACT = {
   civ_alert = {'siege'}, alert_burrows = {'siege'},
   squad_create = {'military'}, squad_leader = {'military'}, squad_add = {'military'}, squad_remove = {'military'},
   squad_routine = {'military'}, squad_order = {'military'}, squad_uniform = {'military'},
-  pull = {'gate'}, cancel_own_lever_job = {'gate'},
+  pull = {'gate'}, cancel_own_lever_job = {'gate'}, link_lever = {'gate'},
   popcap = {'readiness'},
   quickfort = {'runner'},
   orders_import = {'economy'}, orders = {'economy'}, workorder = {'economy'},

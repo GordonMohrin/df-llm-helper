@@ -538,6 +538,34 @@ T.test('build: too many unsuitable tiles block the project with build_lost', fun
   T.eq(#H.qf_calls(W, 'build', 'run'), 2)
 end)
 
+T.test('build: a stage placed again over its own buildings tracks them instead of build_lost (live L2)', function()
+  local W = fresh{tag = 'replace'}
+  H.floor(W, 10, 10, 100, 20, 10)
+  dfhack.buildings = {findAtTile = function(x, y, z)
+    local id = W.bld_at[x .. ',' .. y .. ',' .. z]
+    return id and W.buildings[id] or nil
+  end}
+  H.place(W, 'h', build_doc({{0, 0, 0, 'b'}, {2, 0, 0, 'b'}}))
+  H.settle(W); W.frame(1); H.settle(W)
+  T.eq(df.global.building_next_id, 3)
+  H.build(W)
+  W.buildings[2]._st = 0                           -- the second bed is still a plan
+  local n_orders = #W.orders
+  H.place(W, 'h2', build_doc({{0, 0, 0, 'b'}, {2, 0, 0, 'b'}, {4, 0, 0, 'b'}}))
+  H.runs(W, 1); H.settle(W); W.frame(1); H.settle(W)
+  T.eq(df.global.building_next_id, 4, 'only the missing bed is placed')
+  local cells = 0
+  for i = n_orders + 1, #W.orders do H.cells(W.orders[i], function() cells = cells + 1 end) end
+  T.eq(cells, 1, 'manager orders only for the cell without a building')
+  H.runs(W, 2)
+  T.eq(H.proj(W, 'h2').blocked, '', 'not build_lost')
+  T.eq(H.proj(W, 'h2').done, 0, 'the planned bed keeps the stage pending')
+  H.build(W)
+  H.runs(W, 2)
+  T.eq(H.proj(W, 'h2').done, 1)
+  dfhack.buildings = nil
+end)
+
 T.test('bp.cancel: plain removal, and undo walks the applied stages backwards', function()
   local W = fresh{tag = 'cancel'}
   H.place(W, 'a', H.doc{x = 10})

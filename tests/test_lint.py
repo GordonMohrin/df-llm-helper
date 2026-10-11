@@ -293,6 +293,14 @@ def test_remove_job_only_inside_cancel_own_lever_job(style):
     assert "remove-job" in rule_set(style, MOD)
 
 
+def test_reachability_only_for_the_lever_link_mechanisms():
+    src = "local function free_mechanisms(at) return dfhack.maps.canWalkBetween(at, at) end"
+    assert rules(src, "lua/dfllm/act.lua") == []
+    assert "tile-read" in rule_set(src, MOD)
+    other = "local function pull(at) return dfhack.maps.canWalkBetween(at, at) end"
+    assert "tile-read" in rule_set(other, "lua/dfllm/act.lua")
+
+
 @pytest.mark.parametrize("src,rule", [
     ("dfhack.items.createItem(u, 1, -1, 0, 0)", "create"),
     ("local w = df.item_weaponst:new()", "create"),

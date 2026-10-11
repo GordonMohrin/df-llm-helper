@@ -54,9 +54,9 @@ def parse_kv(tokens: list[str]) -> dict:
 
 
 # ---------------------------------------------------------------- blueprints (WP3, lazy)
-SAME = "same"        # site label: reuse the anchor/rot of this template's last placement (fortcore stages 2-3)
+SAME = "same"        # site label: reuse the anchor/rot of this template's last placement (fortcore stages 2-4)
 RANK_N = 12          # candidates ranked per template; label S<k> = the k-th one that is free of other projects
-STAGE_MAX = 8        # a staged template (params.stage) reserves its later stages up to here (fortcore: 3)
+STAGE_MAX = 8        # a staged template (params.stage) reserves its later stages up to here (fortcore: 4)
 _LABEL = re.compile(r"S([1-9]\d?)")
 _EXT = re.compile(r"\((-?\d+)x(-?\d+)\)\s*$")     # quickfort extent suffix, e.g. d(5x1), b{...}(3x3)
 _KEY = re.compile(r"[^{(:/]*")
@@ -502,8 +502,21 @@ def retire(save_dir: Path, proj: str) -> bool:
     if isinstance(tpl, str):
         pl = files.read_json(_placed(save_dir, tpl))
         if isinstance(pl, dict) and pl.get("bp") == proj:
+            # live L2: cancelling fortcore stage 3 dropped the record, and stages 2-3 could not be placed at the
+            # stage-1 anchor again; fall back to the newest other placement of this template that is still on file
+            prev = None
+            for f in bp_files(save_dir):
+                d = files.read_json(f)
+                if isinstance(d, dict) and d.get("tpl") == tpl and d.get("site") != "repair"                         and isinstance(d.get("anchor"), list):
+                    if prev is None or f.stat().st_mtime >= prev[0]:
+                        prev = (f.stat().st_mtime, d)
             try:
-                _placed(save_dir, tpl).unlink()
+                if prev:
+                    d = prev[1]
+                    files.write_json_atomic(_placed(save_dir, tpl), {"anchor": d["anchor"], "rot": d.get("rot", 0),
+                                                                     "from": d.get("site", ""), "bp": d.get("id", "")})
+                else:
+                    _placed(save_dir, tpl).unlink()
             except OSError:
                 pass
     return True

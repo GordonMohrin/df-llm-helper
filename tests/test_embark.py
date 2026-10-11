@@ -48,7 +48,7 @@ def test_year1_deliverables_are_meaningful():
     assert {"baseline", "proj", "squads", "drill", "workshops", "orders", "trade", "ready", "metal",
             "bolts", "stock"} <= kinds
     stages = [d.get("stage") for p in doc["phases"] for d in p["deliver"] if d.get("tpl") == "fortcore"]
-    assert stages == [1, 2, 3]
+    assert stages == [1, 2, 3, 4]                                            # 4 = the trap hall (live L2)
     for p in doc["phases"]:
         for d in p["deliver"]:
             if d["k"] == "stock":

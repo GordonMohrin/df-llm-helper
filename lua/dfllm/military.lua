@@ -7,8 +7,9 @@
 --   STATION_B1     like TRAIN, the first melee squad stationed at manifest.stations.melee (inside B1)
 --   READY_STATION  routine 'Ready'; melee at stations.melee, crossbows at stations.gallery
 --   B2_HOLD        routine 'Ready'; every squad holds stations.b2 (the core choke)
--- A squad dfllm creates may come without a leader (act cannot seat one yet [S2]): it is kept for a
--- UI appointment, no further squads are created meanwhile, and a led UI squad of the same name wins.
+-- Squads are created with a leader (act.squad_create + act.squad_leader, the squads screen [S2, live L2]); a
+-- squad left without one (seating refused) gets the next recruit as leader with backoff, no further squads
+-- are created meanwhile, Gordon is told once (DECISION_NEEDED squads), and a led UI squad of the same name wins.
 -- KPIs: worn % = filled uniform specs / uniform slots (worn, never "assigned"; a position without
 -- specs counts its whole kit as missing), combat value per soldier = best weapon + shield + armor +
 -- dodging skill levels, metal % = soldiers in iron/steel body armor.
@@ -64,6 +65,7 @@ M.METALS = {['INORGANIC:IRON'] = true, ['INORGANIC:STEEL'] = true}
 local UNIFORM_CATS = {'body', 'head', 'pants', 'gloves', 'shoes', 'shield', 'weapon'}
 local WORN_ROLES = {'Worn', 'Weapon', 'Strapped'}
 
+local seat_leader   -- defined after the squad helpers
 local st      -- persisted m.military: {v, sq = {A = {id, uni, kind, auto}}, posture, pt, unstick}
 local rt      -- runtime: retry ticks, applied orders, kpi cache, notified flags
 local dirty
@@ -327,9 +329,15 @@ function M.share(K, cit)
   return math.tointeger(p) or 15
 end
 
+-- the phase the squads are staffed for: the current phase, or the plan's phase_target when the LLM's
+-- approved plan aims higher (live L2: a fort behind its schedule, P2 in year 6, is staffed for the target)
 local function phase_no(K)
   local ph = K.view().phase
-  return type(ph) == 'string' and tonumber(ph:match('^P(%d)$')) or nil
+  local n = type(ph) == 'string' and tonumber(ph:match('^P(%d)$')) or nil
+  local tg = type(K.plan) == 'table' and K.plan.phase_target
+  local t = type(tg) == 'string' and tonumber(tg:match('^P(%d)$')) or nil
+  if n and t and t > n then return t end
+  return n
 end
 
 -- wanted squad keys in order: phases P2-P4 only squad A, from P5 all (DESIGN §5.12); none before P2
@@ -362,9 +370,9 @@ function M.targets(K)
   for _, s in ipairs(act) do per[s.key] = 0; if s.kind == 'melee' then melee[#melee + 1] = s.key else xbow = s.key end end
   if #act == 0 then return 0, per end
   local nx = 0
-  if xbow then
+  if xbow then                                    -- live L2: every wanted squad gets at least its leader
     if #melee == 0 then nx = n
-    elseif n >= 4 then nx = math.max(2, (n * M.XBOW_SHARE + 50) // 100) end
+    elseif n >= #act then nx = math.max(n >= 4 and 2 or 1, (n * M.XBOW_SHARE + 50) // 100) end
     nx = math.min(nx, M.SIZE)
     per[xbow] = nx
   end
@@ -429,7 +437,7 @@ local function stuck(K)
     parts[#parts + 1] = 'create squads named ' .. table.concat(make, ', ') .. ' with a leader (squads screen)'
   end
   if #parts == 0 then parts[1] = 'check the squads screen' end
-  local q = table.concat(parts, '; ') .. '. dfllm then fills, equips and trains them (it cannot seat leaders [S2])'
+  local q = table.concat(parts, '; ') .. '. dfllm then fills, equips and trains them (seating a leader failed here)'
   local msg = 'squads [S2]: ' .. parts[1]
   K.emit('DECISION_NEEDED', 'A', #msg > 200 and msg:sub(1, 200) or msg, {id = 'squads', q = q})
 end
@@ -493,26 +501,105 @@ local function ensure_squad(K, spec, recruits)
   return s
 end
 
+-- material per uniform category, "best available" (live L2: the fort held no armor at all, so metal-only
+-- specs would stay empty and worn would read 0): metal when the fort has enough free metal items of that
+-- type for the squad's target, else leather when enough leather ones, else any material. Free = not
+-- forbidden, owned, in a building, with a trader or held by someone outside the military.
+local CAT_ITEMS = {body = 'ARMOR', head = 'HELM', pants = 'PANTS', gloves = 'GLOVES', shoes = 'SHOES', shield = 'SHIELD'}
+local function free_item(it)
+  local f = it.flags
+  if f.forbid or f.owned or f.in_building or f.trader or f.garbage_collect or f.removed or f.melt or f.dump then return false end
+  if f.in_inventory then
+    local u = dfhack.items.getHolderUnit(it)
+    if u and (u.military.squad_id or -1) < 0 then return false end
+  end
+  return true
+end
+function M.stock_mats(cat)
+  local n = {metal = 0, leather = 0, any = 0}
+  try(function()
+    for _, it in ipairs(df.global.world.items.other[CAT_ITEMS[cat]]) do
+      if free_item(it) then
+        n.any = n.any + 1
+        local mi = dfhack.matinfo.decode(it)
+        local fl = mi and mi.material and mi.material.flags
+        if fl and fl.IS_METAL then n.metal = n.metal + 1 elseif fl and fl.LEATHER then n.leather = n.leather + 1 end
+      end
+    end
+  end)
+  return n
+end
+local function best_mats(need)
+  local r = {}
+  for cat in pairs(CAT_ITEMS) do
+    local n = M.stock_mats(cat)
+    local per = (cat == 'gloves' or cat == 'shoes') and 2 or 1      -- worn in pairs
+    r[cat] = (n.metal >= need * per and 'metal') or (n.leather >= need * per and 'leather') or 'any'
+  end
+  return r
+end
+local function with_mats(spec, mats)
+  local c = {}
+  for key, v in pairs(spec) do c[key] = v end
+  c.items = {}
+  for i, it in ipairs(spec.items) do
+    local x = {}
+    for key, v in pairs(it) do x[key] = v end
+    x.mat = mats[it.cat] or 'any'
+    c.items[i] = x
+  end
+  return c
+end
+
 -- every occupied position needs uniform specs (checked each upkeep). The first uniform goes to the
 -- whole squad; later only to the bare positions (spec.positions, 0-based), so a uniform chosen in the
 -- UI is kept. e.uni = 1 while no occupied position is bare.
-local function ensure_uniform(K, k, s)
+local function ensure_uniform(K, k, s, want)
   local e = st.sq[k]
   local bare, any = bare_positions(s)
   local uni = #bare == 0 and 1 or 0
   if uni == 1 then cleared('uni' .. k)
   elseif retry_ok(K, 'uni' .. k) then
-    local spec = M.UNIFORM[e.kind] or M.UNIFORM.melee
-    if any then
-      local c = {}
-      for key, v in pairs(spec) do c[key] = v end
-      c.positions = bare
-      spec = c
-    end
+    rt.mats[k] = rt.mats[k] or best_mats(math.max(1, want or 1))
+    local spec = with_mats(M.UNIFORM[e.kind] or M.UNIFORM.melee, rt.mats[k])
+    if any then spec.positions = bare end
     if K.act.squad_uniform(s.id, spec) then uni = 1 end
     backoff(K, 'uni' .. k)                            -- re-checked next upkeep either way
   end
   if e.uni ~= uni then e.uni, dirty = uni, true end
+end
+
+-- the squads screen's "choose leader" for a squad without one (act.squad_leader [S2, live L2]): the best
+-- recruit takes the squad's commander/captain assignment and position 0. A refusal backs off and names
+-- the UI action once (stuck).
+function seat_leader(K, k, s, recruits)
+  if not retry_ok(K, 'lead' .. k) then return end
+  -- live L2: the commander was carried to bed after a ghost's beating, DF vacated his position, and the
+  -- squad kept two soldiers but no leader (no recruit left). A member is promoted first: the squads
+  -- screen lets you choose a member as the new leader (here: off the roster, then into position 0).
+  local best
+  for _, m in ipairs(members(s)) do
+    if m.pos ~= 0 and (best == nil or M.cv(m.unit) > M.cv(best.unit)) then best = m end
+  end
+  local uid, from_squad = best and best.unit.id, best ~= nil
+  if not uid then uid = recruits()[1] end
+  if not uid then stuck(K); return end
+  local ok, err
+  if from_squad then
+    ok, err = K.act.squad_remove(s.id, uid)
+    if ok then ok, err = K.act.squad_leader(s.id, uid) end
+  else
+    ok, err = K.act.squad_leader(s.id, uid)
+  end
+  if ok and leader_set(s) then
+    if not from_squad then table.remove(recruits(), 1) end
+    cleared('lead' .. k)
+    K.log('info', 'military: squad %s (id %d) led by unit %d%s', k, s.id, uid, from_squad and ' (promoted)' or '')
+    return
+  end
+  K.log('warn', 'military: squad %s: leader %d not seated: %s', k, uid, tostring(err))
+  backoff(K, 'lead' .. k)
+  stuck(K)
 end
 
 local function fill(K, k, s, want, recruits)
@@ -773,7 +860,7 @@ function M.init(K)
                        auto = int(e.auto) == 1 and 1 or nil}
     end
   end
-  rt = {retry = {}, order = {}, station = {}, kpi = nil, kpi_tick = 0, create_fails = 0}
+  rt = {retry = {}, order = {}, station = {}, kpi = nil, kpi_tick = 0, create_fails = 0, mats = {}}
   dirty = false
   M.every = {ticks = K.mode() == 'PEACE' and M.SLOW or M.FAST}
 end
@@ -798,8 +885,8 @@ function M.step(K, budget, ctx)
     if want > 0 or e then
       local s = ensure_squad(K, sp, recruits)
       if s then
-        ensure_uniform(K, sp.key, s)
-        if want > 0 and not leader_set(s) then stuck(K) end      -- addToSquad needs a leader
+        if want > 0 and not leader_set(s) then seat_leader(K, sp.key, s, recruits) end   -- addToSquad needs one
+        ensure_uniform(K, sp.key, s, want)
         fill(K, sp.key, s, want, recruits)
       end
     end

@@ -31,7 +31,10 @@ M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
             guild = {'has been established'},
             ghost = {'has been put to rest'},
             -- deaths are recorded by care (DEATH, DEATHS_3PLUS wakes); the notice alone must not halt the fort
-            death = {'has been found dead'},
+            -- live L2: "<name> has bled to death." halted the fort after a berserk citizen was killed
+            death = {'has been found dead', 'has bled to death', 'has been struck down', 'has died of thirst',
+                     'has starved to death', 'has drowned', 'has suffocated', 'has died after', 'has been crushed',
+                     'has been killed', 'has died from'},
             -- live L1b: a tantrum popup halted the fort; care samples stress, the dwarves deal with it
             stress = {'is throwing a tantrum'},
             -- live L1b: "<name> has claimed a Stoneworker's Workshop." halted the fort mid-mood; care tracks

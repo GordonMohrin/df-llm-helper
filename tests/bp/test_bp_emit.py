@@ -67,7 +67,7 @@ def test_params_are_checked():
     for tpl, p in [("bedrooms", {"n": 0}), ("bedrooms", {"n": "4"}), ("bedrooms", {"rooms": 4}),
                    ("dining", {"tavern": 1}), ("bedrooms", {"n": True}), ("tombs", {"burrow": "a b"}),
                    ("workshops", {"skip": "Forge"}), ("workshops", {"skip": ",".join(bp.MOODABLE_TYPES)}),
-                   ("fortcore", {"stage": 4}), ("nope", {})]:
+                   ("fortcore", {"stage": 5}), ("nope", {})]:
         with pytest.raises(ValueError):
             bp.emit(tpl, p, SITE)
     for site in ({"anchor": [1, 2]}, {"anchor": [1, 2, 3], "rot": 4}, "S1", {"anchor": [-1, 0, 0]}):
@@ -89,11 +89,11 @@ def test_site_forms_and_design_inbox_example():
 
 def test_fortcore_stage_projects():
     docs = all_docs("fortcore")
-    assert [d["class"] for d in docs] == ["infra", "defense", "defense"]
-    assert [d["params"]["stage"] for d in docs] == [1, 2, 3]
+    assert [d["class"] for d in docs] == ["infra", "defense", "defense", "defense"]
+    assert [d["params"]["stage"] for d in docs] == [1, 2, 3, 4]
     assert {s["label"].split(".")[0] for s in docs[0]["stages"]} == {"s1"}
     br = [sorted(d["manifest"].get("bridges", {})) for d in docs]
-    assert br == [[], ["B1"], ["B1", "B2", "O1"]]
+    assert br == [[], ["B1"], ["B1", "B2", "O1"], ["B1", "B2", "O1"]]
     m = docs[0]["manifest"]
     for d in docs[1:]:
         m = merge_manifest(m, d["manifest"])
@@ -123,7 +123,10 @@ def test_fortcore_traps():
     mats = [d["materials"] for d in all_docs("fortcore")]
     armed = sum(m.get("weapon_trap", 0) + m.get("stonefall_trap", 0) for m in mats)
     assert armed >= 30 and not any("cage_trap" in m for m in mats)
-    assert mats[1]["weapon_trap"] == 14 and armed == 41
+    assert armed == 41 and mats[3]["weapon_trap"] == 28 and mats[3]["stonefall_trap"] == 13
+    # live L2: the bridges, levers and links of stages 2-3 never wait behind a trap (mechanisms, weapons)
+    assert not any("weapon_trap" in m or "stonefall_trap" in m for m in mats[:3])
+    assert mats[1]["mechanism"] == 2 + 2 * 2 and mats[2]["mechanism"] == 4 + 4 * 2
 
 
 def test_moodable_workshops_complete():

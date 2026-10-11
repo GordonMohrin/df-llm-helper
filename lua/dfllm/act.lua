@@ -485,24 +485,128 @@ local function impls(state)
     return true, #want_l
   end
 
-  -- military module (Lua API.txt:1973-1993) [S2]
+  ---------------------------------------------------------------- positions (nobles and squads screens)
+  local function fort_entity() return df.global.plotinfo.main.fortress_entity end
+  local function own_position(ent, pred)
+    for i, p in ipairs(ent.positions.own) do if pred(p) then return p, i end end
+  end
+  local function assignment_by_id(ent, id)
+    for i, a in ipairs(ent.positions.assignments) do if a.id == id then return a, i end end
+  end
+  local function entity_index(ent)            -- index of the entity in world.entities.all (the links carry it)
+    for i, e in ipairs(df.global.world.entities.all) do if e.id == ent.id then return i end end
+    return ent.id
+  end
+
+  -- the two records the nobles screen (and the squads screen's "choose leader") writes when a citizen takes
+  -- a vacant position: the assignment names the citizen's historical figure, and the figure gets a position
+  -- link to the fortress entity (live L1: the expedition leader's records; make-monarch.lua for the civ).
+  -- DF finds the holder of a duty through entity.assignments_by_type[responsibility] (live L1: without it the
+  -- manager never validated an order). position_vector_idx = the position's index in positions.own (read
+  -- live L2 on every filled assignment).
+  local function seat_figure(ent, pos, pidx, asg, aidx, hf)
+    asg.histfig, asg.histfig2 = hf.id, hf.id
+    asg.position_vector_idx = pidx
+    hf.entity_links:insert('#', {new = df.histfig_entity_link_positionst, entity_id = ent.id, link_strength = 100,
+                                 entity_vector_idx = entity_index(ent), assignment_id = asg.id,
+                                 assignment_vector_idx = aidx, start_year = df.global.cur_year})
+    for r, on in pairs(pos.responsibilities) do
+      if on then
+        local v, has = ent.assignments_by_type[r], false
+        for _, x in ipairs(v) do if x.id == asg.id then has = true; break end end
+        if not has then v:insert('#', asg) end
+      end
+    end
+  end
+
+  -- what DFHack's addToSquad sets after a membership change (Military.cpp: squad.ammo.update and
+  -- plotinfo.equipment.update): the equipment pass re-assigns uniforms
+  local EQUIP_UPDATE = {'weapon', 'armor', 'shoes', 'shield', 'helm', 'gloves', 'ammo', 'pants', 'backpack', 'quiver',
+                        'flask'}
+  local function equipment_update(sq)
+    for _, f in ipairs(EQUIP_UPDATE) do
+      pcall(function() sq.ammo.update[f] = true end)
+      pcall(function() df.global.plotinfo.equipment.update[f] = true end)
+    end
+  end
+
+  -- militia positions only (CAPTAIN_OF_THE_GUARD also has a squad size: that is the law squad)
+  local SQUAD_CODES = {MILITIA_COMMANDER = true, MILITIA_CAPTAIN = true}
+
+  -- squads screen "create squad": the vacant leader assignment the new squad belongs to. A vacant militia
+  -- commander/captain assignment without a squad first (the commander leads the first squad); otherwise a
+  -- new militia captain assignment, which the screen adds for every further squad (live L2: the fort had
+  -- one commander assignment, already holding squad A).
+  local function squad_assignment(ent)
+    local codes = {}
+    for _, p in ipairs(ent.positions.own) do if SQUAD_CODES[p.code] then codes[p.id] = true end end
+    for _, a in ipairs(ent.positions.assignments) do
+      if codes[a.position_id] and a.squad_id == -1 and a.histfig == -1 then return a end
+    end
+    local cap = own_position(ent, function(p) return p.code == 'MILITIA_CAPTAIN' end)
+    if not cap then return nil end
+    local a = df.entity_position_assignment:new()
+    a.id = ent.positions.next_assignment_id
+    ent.positions.next_assignment_id = a.id + 1
+    a.histfig, a.histfig2, a.position_id, a.position_vector_idx, a.squad_id = -1, -1, cap.id, -1, -1
+    a.assigned_army_controller_id = -1
+    a.flags[0] = true                       -- set on every assignment of an offered position (read live L2)
+    ent.positions.assignments:insert('#', a)
+    return a
+  end
+
+  -- military module (Lua API.txt:1973-1993, DFHack library/modules/Military.cpp) [S2, live L2]
+  -- opts = {assignment_id?, leader?}: without an assignment the squads screen's one is used (above); with a
+  -- leader the new squad's position 0 is filled at once (squad_leader). A squad whose leader could not be
+  -- seated is still created (ok, id): the caller sees the vacant slot.
   function I.squad_create(name, opts)
-    local aid = int((opts or {}).assignment_id)
-    if not aid then return false, 'assignment_id required [S2]' end
-    local sq = dfhack.military.makeSquad(aid)
+    opts = type(opts) == 'table' and opts or {}
+    local ent = fort_entity()
+    if not ent then return false, 'no fortress entity' end
+    local aid, asg = int(opts.assignment_id), nil
+    if aid then asg = assignment_by_id(ent, aid) else asg = squad_assignment(ent) end
+    if not asg then return false, 'no militia assignment for a new squad' end
+    local sq = dfhack.military.makeSquad(asg.id)
     if not sq then return false, 'makeSquad failed' end
     if type(name) == 'string' and name ~= '' then
       local cp = dfhack.utf2df(name)
       sq.alias = cp
       pcall(function() sq.name.nickname = cp end)   -- "consider setting squad.name.nickname" (Lua API.txt:1973)
     end
+    if int(opts.leader) then I.squad_leader(sq.id, opts.leader) end
     return true, sq.id
   end
 
-  -- CONTRACTS §5 R4: appoint the leader through the squad's position assignment (the squads screen).
-  -- The UI path is unverified until spike S2; military asks Gordon (DECISION_NEEDED) meanwhile.
+  -- CONTRACTS §5 R4: the squads screen's "choose leader" = appoint the citizen to the position assignment
+  -- the squad belongs to (squad.leader_assignment). It fills position 0, which addToSquad refuses
+  -- (Military.cpp:453). The officer has a POSITION link, no SQUAD link (removeFromSquad position 0 calls
+  -- remove_officer_entity_link, Military.cpp:345-412).
   function I.squad_leader(squad_id, unit_id)
-    return false, 'squad_leader not implemented until spike S2 (appoint the leader in the squads screen)'
+    local sq = df.squad.find(int(squad_id) or -1)
+    if not sq or sq.entity_id ~= df.global.plotinfo.group_id then return false, 'no fort squad ' .. tostring(squad_id) end
+    if #sq.positions == 0 then return false, 'squad has no positions' end
+    local p0 = sq.positions[0]
+    local u = df.unit.find(int(unit_id) or -1)
+    if not u then return false, 'no unit ' .. tostring(unit_id) end
+    if not dfhack.units.isCitizen(u) or not dfhack.units.isAdult(u) or dfhack.units.isDead(u) then
+      return false, 'not an adult living citizen'
+    end
+    local hf = df.historical_figure.find(u.hist_figure_id)
+    if not hf then return false, 'no historical figure' end
+    if p0.occupant == hf.id then return true, 'already' end
+    if p0.occupant ~= -1 then return false, 'leader already seated' end
+    if u.military.squad_id ~= -1 then return false, 'unit is in a squad' end
+    local ent = fort_entity()
+    local asg, aidx = assignment_by_id(ent, sq.leader_assignment)
+    if not asg or asg.squad_id ~= sq.id then return false, 'squad has no leader assignment' end
+    if asg.histfig ~= -1 then return false, 'leader assignment held by figure ' .. tostring(asg.histfig) end
+    local pos, pidx = own_position(ent, function(p) return p.id == asg.position_id end)
+    if not pos then return false, 'no position ' .. tostring(asg.position_id) end
+    seat_figure(ent, pos, pidx, asg, aidx, hf)
+    p0.occupant = hf.id
+    u.military.squad_id, u.military.squad_position = sq.id, 0
+    equipment_update(sq)
+    return true, asg.id
   end
 
   function I.squad_add(squad_id, unit_id)
@@ -567,8 +671,87 @@ local function impls(state)
     return true, kind
   end
 
+  -- squads screen > equip > assign uniform [S2, live L2]: per position and category, the squad_uniform_spec
+  -- records the screen creates from a uniform template (entity.uniforms: item type, subtype, material class,
+  -- indiv choice; flags replace_clothing/exact_matches), then the equipment update. spec = {mode='replace'|
+  -- 'over', items = {{cat, type, subtype?, mat = 'metal'|'leather'|'any', choice = 'melee'|'ranged'|'any'}},
+  -- positions = {0-based}? (default all), ammo = {type, subtype, n}?}. Only the categories named in items
+  -- are replaced on those positions. mat: 'metal' = material class Armor (the "metal armor" templates),
+  -- 'leather' = Leather, 'any' = no class.
+  local UNIFORM_CAT = {body = true, head = true, pants = true, gloves = true, shoes = true, shield = true, weapon = true}
+  local MAT_CLASS = {metal = 'Armor', leather = 'Leather'}
+  local ITEMDEFS = {WEAPON = 'weapons', AMMO = 'ammo', ARMOR = 'armor', HELM = 'helms', PANTS = 'pants',
+                    GLOVES = 'gloves', SHOES = 'shoes', SHIELD = 'shields'}
+  local function subtype_of(typ, token)
+    if token == nil or token == -1 then return -1 end
+    if math.type(token) == 'integer' then return token end
+    local list = df.global.world.raws.itemdefs[ITEMDEFS[typ] or '']
+    for i, d in ipairs(list or {}) do if d.id == token then return d.subtype or i end end
+    return nil
+  end
+  local function clear_specs(vec)
+    for i = #vec - 1, 0, -1 do
+      local sp = vec[i]
+      vec:erase(i)
+      pcall(function() sp:delete() end)
+    end
+  end
   function I.squad_uniform(squad_id, spec)
-    return false, 'squad_uniform not implemented until spike S2'
+    local sq = df.squad.find(int(squad_id) or -1)
+    if not sq or sq.entity_id ~= df.global.plotinfo.group_id then return false, 'no fort squad ' .. tostring(squad_id) end
+    if type(spec) ~= 'table' or type(spec.items) ~= 'table' or #spec.items == 0 then return false, 'spec.items required' end
+    local recs, cats = {}, {}
+    for _, it in ipairs(spec.items) do
+      if not UNIFORM_CAT[it.cat] then return false, 'bad uniform category ' .. tostring(it.cat) end
+      local t = df.item_type[it.type]
+      if type(t) ~= 'number' then return false, 'bad item type ' .. tostring(it.type) end
+      local st = subtype_of(it.type, it.subtype)
+      if not st then return false, 'unknown subtype ' .. tostring(it.subtype) end
+      local mc = -1
+      if MAT_CLASS[it.mat] then mc = df.entity_material_category[MAT_CLASS[it.mat]] end
+      recs[#recs + 1] = {cat = it.cat, t = t, st = st, mc = mc, choice = it.choice}
+      cats[it.cat] = true
+    end
+    local only
+    if type(spec.positions) == 'table' then
+      only = {}
+      for _, i in ipairs(spec.positions) do only[i] = true end
+    end
+    local n = 0
+    for i, p in ipairs(sq.positions) do
+      if not only or only[i] then
+        local u = p.equipment.uniform
+        for c in pairs(cats) do clear_specs(u[c]) end
+        for _, r in ipairs(recs) do
+          local sp = df.squad_uniform_spec:new()
+          sp.item, sp.item_type, sp.item_subtype = -1, r.t, r.st
+          sp.material_class, sp.mattype, sp.matindex, sp.color = r.mc, -1, -1, -1
+          sp.indiv_choice.any = r.choice == 'any'
+          sp.indiv_choice.melee = r.choice == 'melee'
+          sp.indiv_choice.ranged = r.choice == 'ranged'
+          u[r.cat]:insert('#', sp)
+        end
+        p.equipment.flags.replace_clothing = spec.mode ~= 'over'
+        p.equipment.flags.exact_matches = true            -- as every vanilla template (read live L2)
+        n = n + 1
+      end
+    end
+    if type(spec.ammo) == 'table' then                     -- squads screen > ammunition
+      local at = df.item_type[spec.ammo.type or 'AMMO']
+      local ast = subtype_of(spec.ammo.type or 'AMMO', spec.ammo.subtype)
+      if type(at) ~= 'number' or not ast then return false, 'bad ammo spec' end
+      local have = false
+      for _, a in ipairs(sq.ammo.ammunition) do if a.item_type == at and a.item_subtype == ast then have = true end end
+      if not have then
+        local a = df.squad_ammo_spec:new()
+        a.item_type, a.item_subtype, a.material_class, a.mattype, a.matindex = at, ast, -1, -1, -1
+        a.amount = int(spec.ammo.n) or 100
+        a.flags.use_combat, a.flags.use_training = true, true
+        sq.ammo.ammunition:insert('#', a)
+      end
+    end
+    equipment_update(sq)
+    return true, n
   end
 
   -- lever.lua:4 leverPullJob(lever, priority) returns nothing: the new job is found on lever.jobs
@@ -609,6 +792,72 @@ local function impls(state)
     return true
   end
 
+  -- lever sheet > "link up" > target building > mechanisms [S3, live L2]: the UI queues one
+  -- LinkBuildingToTrigger job on the lever with two chosen mechanisms (view_sheets.linking_lever_mech_lever_id
+  -- and _target_id), a building holder ref (the lever) and a trigger target ref (the target). A mechanic
+  -- fetches both, puts one into each building, and the lever's linked_mechanisms then holds the target's
+  -- mechanism (its BUILDING_HOLDER ref = the target; lever.lua:24-27, gui/mechanisms.lua:40-54). The
+  -- mechanisms are chosen as the screen offers them: free (not forbidden, not in a job or building, not
+  -- held by a unit), reachable from the lever, nearest first. Returns ok, job id | 'linked'.
+  local MECH_FLAGS = {'forbid', 'in_job', 'in_building', 'trader', 'garbage_collect', 'removed', 'dump', 'melt',
+                      'hostile', 'owned', 'construction', 'encased', 'spider_web', 'on_fire', 'rotten'}
+  local function link_jobs(b)
+    local r = {}
+    for _, j in ipairs(b.jobs) do if j.job_type == df.job_type.LinkBuildingToTrigger then r[#r + 1] = j end end
+    return r
+  end
+  local function linked_to(lever, target_id)
+    for _, m in ipairs(lever.linked_mechanisms) do
+      local ref = dfhack.items.getGeneralRef(m, df.general_ref_type.BUILDING_HOLDER)
+      if ref and ref.building_id == target_id then return true end
+    end
+    return false
+  end
+  local function free_mechanisms(at, n)
+    local cand = {}
+    for _, it in ipairs(df.global.world.items.other.TRAPPARTS) do
+      local f, ok = it.flags, true
+      for _, k in ipairs(MECH_FLAGS) do if f[k] then ok = false; break end end
+      if ok and f.in_inventory and dfhack.items.getHolderUnit(it) then ok = false end
+      if ok then
+        local x, y, z = dfhack.items.getPosition(it)
+        if x and dfhack.maps.canWalkBetween(xyz2pos(x, y, z), at) then
+          cand[#cand + 1] = {it = it, d = math.max(math.abs(x - at.x), math.abs(y - at.y), math.abs(z - at.z))}
+        end
+      end
+    end
+    table.sort(cand, function(a, b) if a.d ~= b.d then return a.d < b.d end return a.it.id < b.it.id end)
+    local r = {}
+    for i = 1, math.min(n, #cand) do r[i] = cand[i].it end
+    return r, #cand
+  end
+  function I.link_lever(lever_id, target_id)
+    local lever, target = df.building.find(int(lever_id) or -1), df.building.find(int(target_id) or -1)
+    if not lever or not is_lever(lever) then return false, 'not a lever' end
+    if not target or target.id == lever.id then return false, 'no target building' end
+    if lever:getBuildStage() < lever:getMaxBuildStage() then return false, 'lever not built' end
+    if target:getBuildStage() < target:getMaxBuildStage() then return false, 'target not built' end
+    if linked_to(lever, target.id) then return true, 'linked' end
+    if #link_jobs(lever) > 0 then return false, 'a link job is pending on this lever' end
+    local at = xyz2pos(lever.centerx, lever.centery, lever.z)
+    local mech, n = free_mechanisms(at, 2)
+    if #mech < 2 then return false, string.format('needs 2 free reachable mechanisms, %d found', n) end
+    local job = df.job:new()
+    job.job_type = df.job_type.LinkBuildingToTrigger
+    job.pos = at
+    if not dfhack.job.attachJobItem(job, mech[1], df.job_role_type.LinkToTrigger, -1, -1)
+       or not dfhack.job.attachJobItem(job, mech[2], df.job_role_type.LinkToTarget, -1, -1) then
+      job:delete()
+      return false, 'attachJobItem failed'
+    end
+    dfhack.job.addGeneralRef(job, df.general_ref_type.BUILDING_HOLDER, lever.id)
+    dfhack.job.addGeneralRef(job, df.general_ref_type.BUILDING_TRIGGERTARGET, target.id)
+    lever.jobs:insert('#', job)
+    dfhack.job.linkIntoWorld(job, true)
+    dfhack.job.checkBuildingsNow()
+    return true, job.id
+  end
+
   -- nobles screen (info > administrators > choose a candidate for a vacant fort position). The screen's
   -- result is two records: the assignment names the citizen's historical figure (histfig, histfig2), and
   -- the figure gets a position link to the fortress entity (the same records as the expedition leader's,
@@ -616,7 +865,7 @@ local function impls(state)
   -- citizen, alive; the position must be offered (flags.ACTIVE: population and market requirements met).
   function I.appoint(code, unit_id)
     if type(code) ~= 'string' or not code:match('^[A-Z_]+$') then return false, 'bad position code' end
-    local ent = df.global.plotinfo.main.fortress_entity
+    local ent = fort_entity()
     if not ent then return false, 'no fortress entity' end
     local u = df.unit.find(int(unit_id) or -1)
     if not u then return false, 'no unit ' .. tostring(unit_id) end
@@ -625,8 +874,7 @@ local function impls(state)
     end
     local hf = df.historical_figure.find(u.hist_figure_id)
     if not hf then return false, 'no historical figure' end
-    local pos
-    for _, p in ipairs(ent.positions.own) do if p.code == code then pos = p; break end end
+    local pos, pidx = own_position(ent, function(p) return p.code == code end)
     if not pos then return false, 'no position ' .. code end
     if not pos.flags.ACTIVE then return false, code .. ' is not offered yet' end
     local asg, idx
@@ -637,22 +885,7 @@ local function impls(state)
       end
     end
     if not asg then return false, code .. ' has no vacant assignment' end
-    local evi = ent.id                     -- index of the entity in world.entities.all (the leader's link has it)
-    for i, e in ipairs(df.global.world.entities.all) do if e.id == ent.id then evi = i; break end end
-    asg.histfig, asg.histfig2 = hf.id, hf.id
-    hf.entity_links:insert('#', {new = df.histfig_entity_link_positionst, entity_id = ent.id, link_strength = 100,
-                                 entity_vector_idx = evi, assignment_id = asg.id, assignment_vector_idx = idx,
-                                 start_year = df.global.cur_year})
-    -- DF finds the holder of a duty through entity.assignments_by_type[responsibility] (filled assignments
-    -- only; the expedition leader's three duties are listed there). Without it the manager never validates
-    -- an order (live L1: 0 of 48 after a month).
-    for r, on in pairs(pos.responsibilities) do
-      if on then
-        local v, has = ent.assignments_by_type[r], false
-        for _, x in ipairs(v) do if x.id == asg.id then has = true; break end end
-        if not has then v:insert('#', asg) end
-      end
-    end
+    seat_figure(ent, pos, pidx, asg, idx, hf)
     return true, asg.id
   end
 

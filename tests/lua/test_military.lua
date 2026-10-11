@@ -57,7 +57,8 @@ T.test('targets: ceil(share x adults), >= 8 from 40 adults, crossbows ~30 %, mel
     local n, per = M.targets(K)
     return {n, per.A, per.B, per.C}
   end
-  T.eq(t(20), {3, 2, 1, 0}, '< 4 soldiers: no crossbow squad yet')
+  T.eq(t(20), {3, 1, 1, 1}, 'live L2: every wanted squad gets at least its leader')
+  T.eq(t(13), {2, 1, 1, 0}, 'fewer soldiers than squads: melee first')
   T.eq(t(30), {5, 2, 1, 2})
   T.eq(t(39), {6, 2, 2, 2})
   T.eq(t(40), {8, 3, 3, 2}, 'R2 floor of 8 from 40 adults')
@@ -122,7 +123,7 @@ T.test('setup: squads A/B/C created with a leader, uniforms, Constant training b
   local unis = X.acts(W, 'squad_uniform')
   T.eq(#unis, 3)
   T.eq(unis[1].args[2].mode, 'replace')
-  T.eq(unis[1].args[2].items[6], {cat = 'shield', type = 'SHIELD'})
+  T.eq(unis[1].args[2].items[6], {cat = 'shield', type = 'SHIELD', mat = 'any'}, 'no armor in stock: any material')
   T.eq(unis[3].args[2].items[6].subtype, 'ITEM_WEAPON_CROSSBOW')
   T.ok(unis[3].args[2].quiver and unis[3].args[2].ammo.subtype == 'ITEM_AMMO_BOLTS')
   T.eq(names(X.acts(W, 'squad_routine'), 2), {'Constant training', 'Constant training', 'Constant training'})
@@ -213,10 +214,11 @@ T.test('uniform not implemented yet [S2]: retried with backoff until act accepts
 end)
 
 T.test('a created squad without a leader: not filled, no more creations, the UI action is named', function()
-  local W = X.world{n = 50, create_mode = 'noleader'}
+  local W = X.world{n = 50, create_mode = 'noleader', leader_mode = 'fail'}
   X.load(W, {'military'}, nil, {'sense'})
   W.run(9, {skip = 9})
   T.eq(names(X.acts(W, 'squad_create')), {'A'}, 'B and C wait until A has a leader')
+  T.eq(#X.acts(W, 'squad_leader'), 1, 'the leader was tried once (the squads screen)')
   T.eq(#X.acts(W, 'squad_add'), 0)
   W.run(3600 * 2, {skip = 9})
   T.eq(#X.acts(W, 'squad_create'), 1)
@@ -235,7 +237,7 @@ T.test('a created squad without a leader: not filled, no more creations, the UI 
 end)
 
 T.test('a UI squad A with a leader replaces the empty leaderless squad A dfllm created', function()
-  local W = X.world{n = 50, create_mode = 'noleader'}
+  local W = X.world{n = 50, create_mode = 'noleader', leader_mode = 'fail'}
   X.load(W, {'military'}, nil, {'sense'})
   W.run(9, {skip = 9})
   local auto = X.squad_of(W, 'A')
@@ -258,7 +260,7 @@ T.test('fewer adults: extra soldiers are released one per upkeep in PEACE, never
   T.eq({X.members(A), X.members(B), X.members(Cq)}, {7, 7, 6}, '20 % of 100: 7 + 7 + 6')
   local leaders = {}
   for _, s in ipairs({A, B, Cq}) do leaders[W.hfs[s.positions[0].occupant].unit_id] = true end
-  -- 80 civilians die: 20 adults -> 3 soldiers wanted (A 2, B 1, C 0)
+  -- 80 civilians die: 20 adults -> 3 soldiers wanted (A 1, B 1, C 1: every squad keeps its leader)
   local n = 0
   for _, u in ipairs(df.global.world.units.active) do
     if u.military.squad_id < 0 and n < 80 then W.kill(u.id); n = n + 1 end
@@ -266,7 +268,7 @@ T.test('fewer adults: extra soldiers are released one per upkeep in PEACE, never
   W.run(3600, {skip = 9})
   T.eq(#X.acts(W, 'squad_remove'), 3, 'one per squad and upkeep')
   W.run(3600 * 4, {skip = 9})
-  T.eq({X.members(A), X.members(B), X.members(Cq)}, {4, 3, 2}, 'down to target + 2')
+  T.eq({X.members(A), X.members(B), X.members(Cq)}, {3, 3, 3}, 'down to target + 2')
   for _, r in ipairs(X.acts(W, 'squad_remove')) do T.ok(not leaders[r.args[2]], 'never a leader') end
   W.K.set_mode('ALERT', 'test')
   local before = #X.acts(W, 'squad_remove')
@@ -425,7 +427,10 @@ T.test('worn %: an occupied position without uniform specs counts as missing; th
   local u = X.acts(W, 'squad_uniform')
   T.eq(#u, 1)
   T.eq(u[1].args[2].positions, {1, 2, 3, 4, 5}, 'only the bare occupied positions')
-  T.eq(u[1].args[2].items, M.UNIFORM.melee.items)
+  T.eq(#u[1].args[2].items, #M.UNIFORM.melee.items)
+  for i, it in ipairs(u[1].args[2].items) do
+    T.eq({it.cat, it.type, it.mat}, {M.UNIFORM.melee.items[i].cat, M.UNIFORM.melee.items[i].type, 'any'})
+  end
   T.ok(s.positions[0].equipment.uniform.body[0] == ui_spec, 'the UI uniform of the leader is kept')
   T.eq(M.UNIFORM.melee.positions, nil, 'the template is not modified')
   T.eq(X.members(s), 8)
@@ -476,6 +481,66 @@ T.test('uniform-unstick monthly in PEACE with soldiers only (allowlisted args)',
   W.K.set_mode('SIEGE', 'test')
   W.run(33600 * 2, {skip = 9})
   T.eq(#X.acts(W, 'run'), n, 'not outside PEACE')
+end)
+
+T.test('live L2: a leaderless squad (made before S2) gets the best recruit as leader, then B and C follow', function()
+  local W = X.world{n = 50}
+  local s = X.new_squad(W, 'A')                     -- squad A from adopt time, nobody seated
+  W.persist_raw['dfllm.m.military'] = json.encode({v = 2, sq = {A = {id = s.id, uni = 0, auto = 1}}})
+  X.load(W, {'military'}, nil, {'sense'})
+  W.run(9, {skip = 9})
+  local lead = X.acts(W, 'squad_leader')
+  T.eq(lead[1].args[1], s.id, 'squad A first')
+  T.ok(s.positions[0].occupant >= 0, 'position 0 filled')
+  T.eq(X.members(s), 3, 'then filled')
+  T.eq(#W.find_events('DECISION_NEEDED'), 0, 'no question for Gordon')
+  T.eq(names(X.acts(W, 'squad_create')), {'B', 'C'})
+end)
+
+T.test('live L2: the plan phase_target staffs the squads ahead of a late phase', function()
+  local W = boot({n = 20}, {X.runner('P2')})
+  local M, K = mil(), W.K
+  W.state()
+  W.set_census('u', {tick = 0, cit = 20, adults = 20, ids = {}})
+  local n, p = M.targets(K)
+  T.eq({n, p.A, p.B, p.C}, {3, 3, nil, nil}, 'P2: squad A only')
+  W.set_plan{v = 2, year = 3, phase_target = 'P5', seasons = {{build = {}}, {build = {}}, {build = {}}, {build = {}}},
+             policy = {option = 'A', pop_ceiling = 55, beauty = 'none'}, military = {pct = 15, squads = {melee = 2, xbow = 1}, cv_min = 12}}
+  n, p = M.targets(K)
+  T.eq({n, p.A, p.B, p.C}, {3, 1, 1, 1}, 'target P5: A, B and C, each with its leader')
+end)
+
+T.test('live L2: uniform material is the best the fort has (metal, else leather, else any)', function()
+  local W = boot{n = 50}
+  local M = mil()
+  local stock = {body = {metal = 9, leather = 0, any = 9}, head = {metal = 0, leather = 3, any = 3},
+                 gloves = {metal = 0, leather = 5, any = 5}}
+  local real = M.stock_mats
+  M.stock_mats = function(cat) return stock[cat] or {metal = 0, leather = 0, any = 0} end
+  W.run(9, {skip = 9})
+  M.stock_mats = real
+  local u = X.acts(W, 'squad_uniform')[1].args[2]          -- squad A: 3 soldiers wanted of 50 adults x 15 %
+  local mat = {}
+  for _, it in ipairs(u.items) do mat[it.cat] = it.mat end
+  T.eq(mat, {body = 'metal', head = 'leather', pants = 'any', gloves = 'any', shoes = 'any', shield = 'any',
+             weapon = 'any'}, 'gloves and shoes are needed in pairs')
+end)
+
+T.test('live L2: a squad that lost its leader promotes its best member (squads screen: choose a member)', function()
+  local units = X.citizens(50)
+  units[5] = X.cit(5, {skills = {AXE = 4}})
+  local W = X.world{units = units}
+  local s = X.new_squad(W, 'A')
+  X.seat(W, s, 1, 4)
+  X.seat(W, s, 2, 5)                                -- the better fighter
+  W.persist_raw['dfllm.m.military'] = json.encode({v = 2, sq = {A = {id = s.id, uni = 0}}})
+  X.load(W, {'military'}, nil, {'sense'})
+  W.run(9, {skip = 9})
+  local rm = X.acts(W, 'squad_remove')
+  T.eq(#rm, 1)
+  T.eq(rm[1].args[2], 5, 'the member with the best combat value')
+  T.eq(W.hfs[s.positions[0].occupant].unit_id, 5, 'promoted into position 0')
+  T.eq(#W.find_events('DECISION_NEEDED'), 0)
 end)
 
 T.done()

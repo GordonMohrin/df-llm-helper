@@ -33,7 +33,7 @@ def fort_docs(rot=0, anchor=None, params=None):
     return bp.emit_all("fortcore", params or {}, {"id": "S1", "anchor": anchor or FORTS[rot], "rot": rot})
 
 
-def fort_world(rot=0, stages=3, big=False):
+def fort_world(rot=0, stages=4, big=False):
     """Built fortcore; `big` = on the 100x100x12 terrain (else a tight rock base)."""
     docs = fort_docs(rot)[:stages]
     return bp.as_built(docs, base=terrain().snapshot() if big else None), docs
