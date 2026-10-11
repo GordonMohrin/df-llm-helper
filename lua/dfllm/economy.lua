@@ -111,7 +111,7 @@ M.DEFAULTS = {
   tools = {shrink_days = 3,
            key_labors = {'MASON', 'CARPENTER', 'BREWER', 'PLANT', 'COOK', 'MECHANIC', 'DIAGNOSE', 'SMELT',
                          'FORGE_WEAPON', 'FORGE_ARMOR'},
-           details = {{name = 'Miners', skill = 'MINING', melee = {'MINING'}, min = 2, max = 4, max_pop = 20,
+           details = {{name = 'Miners', skill = 'MINING', melee = {'MINING'}, min = 2, max = 6, max_pop = 20,
                        tiles_per = 40},
                       {name = 'Woodcutters', skill = 'WOODCUTTING', melee = {'AXE'}, wood = {60, 150}, n = {2, 1, 0}},
                       -- live L3: 9 of 10 strange moods failed with 0 bone, shell and leather in the fort; one

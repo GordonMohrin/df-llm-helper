@@ -611,7 +611,7 @@ local function members(ctl, name)
   return r
 end
 
-T.test('tool details: miners follow the dig backlog (min 2, max 4 from pop 20), capped by picks; best skill first', function()
+T.test('tool details: miners follow the dig backlog (min 2, max 6 from pop 20), capped by picks; best skill first', function()
   local W, ctl = tool_world{cit = 12, miners = {5}}
   days(W, 1)
   T.eq(members(ctl, 'Miners'), {5, 7}, 'min 2: the skilled miner stays, the next best joins')
@@ -623,13 +623,13 @@ T.test('tool details: miners follow the dig backlog (min 2, max 4 from pop 20), 
   T.eq(#members(ctl, 'Miners'), 2, 'below pop 20 the cap is the minimum')
   local W2, ctl2 = tool_world{cit = 22, miners = {5}, backlog = 400, picks = 3}
   days(W2, 1)
-  T.eq(#members(ctl2, 'Miners'), 3, 'pop 22, 10 tiles per... 400/40 = 10 > max 4, but only 3 usable picks')
+  T.eq(#members(ctl2, 'Miners'), 3, 'pop 22, 400/40 = 10 > max 6, but only 3 usable picks')
   local W3, ctl3 = tool_world{cit = 22, miners = {5}, backlog = 400, picks = 6}
   days(W3, 1)
-  T.eq(#members(ctl3, 'Miners'), 4, 'max 4')
+  T.eq(#members(ctl3, 'Miners'), 6, 'max 6')
   ctl3.backlog = 0
   days(W3, 2)
-  T.eq(#members(ctl3, 'Miners'), 4, 'shrinking waits shrink_days')
+  T.eq(#members(ctl3, 'Miners'), 6, 'shrinking waits shrink_days')
   days(W3, 2)
   T.eq(members(ctl3, 'Miners'), {5, 7}, 'back to the minimum, the best skills stay')
 end)
