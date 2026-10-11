@@ -1,10 +1,143 @@
 # df-llm-helper v2: status after the integration check
 
-Date 2026-10-11. Branch `v2`. §0 is the live slot L1b (labor, moods, P1), §0b the live slot L1 (economy and
-building), §0a the live slot L0 (first v2 code in Dwarf Fortress); §1-§9 are the offline integration state they
-started from (pytest, luahost on `hack/lua53.dll`, k_mock).
+Date 2026-10-11. Branch `v2`. §0 is the live slot L2 (defense: levers, squads, fortcore 2-3, drill), §0c the
+live slot L1b (labor, moods, P1), §0b the live slot L1 (economy and building), §0a the live slot L0 (first v2
+code in Dwarf Fortress); §1-§9 are the offline integration state they started from (pytest, luahost on
+`hack/lua53.dll`, k_mock).
 
-## 0. Live slot L1b (2026-10-11 00:46 - 01:45)
+## 0. Live slot L2 (2026-10-11 01:50 - 03:15)
+**Fort at hand-over:** Castlerisen, y288 autumn d69, pop 29 (11 adults, 18 children and babies), PEACE, phase
+**P3**, readiness **R1** (audit ok), about 450-480 ticks/s, unpaused, DF on desktop 1.
+- Runtime folder `dfllm-runtime/region2/`; DF wrote `autosave 1` (y287) and `autosave 2` (y288) during the slot.
+- Drink 518 days, food 365 days, stress 6 %, nobody hungry; two FillPond bucket carriers run thirsty (26-30k)
+  on the long trips to the brook.
+- Bridges O1, B1, B2 built, **each with 2 linked levers**, all down. Kern+ and Tiefe+ exist.
+- Squads A (commander + 1), B (captain), C (crossbow captain): 4 soldiers, Constant training, worn 15 %.
+- Projects running: bedrooms x12 (z119, waits for furniture), furnaces, tombs x4 (all waiting for materials).
+- `follow` ran in this session's background for the automatic audits; it stops with the session.
+
+**Deaths: 7 citizens in L2.** None from the defense work; the chain was failed moods, a ghost and no
+water for the bedridden:
+1. Meng Iddodók (stoneworker, unit 19664), y286 spring d54: the Secretive mason mood from L1b failed
+   ("went insane") and he went berserk; citizens and a stray dog killed him (bled to death). My door lock came
+   too late; the berserk popup halted the fort, I dismissed it.
+2. Inod Vutoklir (toddler, 20040), y287 spring d23: a Possessed mood failed, berserk, struck down by citizens.
+3. Zas Numurdim (farmer, 19662), y287 summer d34: **battered by Meng Iddodók's ghost** (bled to death). His corpse
+   and four others lay in the refuse pile: duplicate tomb zones on the same coffins (two tombs projects at the
+   same site) stopped every burial since y284. I removed the 9 duplicates and reassigned the tombs; the
+   corpses were buried and both ghosts (Meng, Ilral from L1) were put to rest within a season.
+4. Bomrek Amostar (farmer, 19660), y287 summer d82: Possessed mason mood, "needs rock: none available"
+   (DECISION_NEEDED), melancholy, dehydrated. My prio-1 stone dig (bedrooms x12, z119) came too late.
+5. Meng Thîdascog (militia commander, 19850), y287 winter d36: beaten by the same ghost, then **dehydrated**,
+   probably bedridden: the fort has no well water (sump 2/7, `hosp_water` 0), so patients get no water.
+6. Ast Rashgurrovod (fisherdwarf, 19663), y288 spring d70: Secretive mason mood; I freed a boulder for it (the
+   surface carpenter's workshop deconstructed, mechanism jobs had eaten every boulder); the mood took it and
+   still failed (some other material), berserk, killed by citizens.
+7. Libash Gebkosoth (expedition leader, 19665), y288 autumn d24: Possessed bowyer mood (the fort had 4 logs),
+   stark raving mad, died of thirst. care sent no MOOD_NEED (the job held a bone, see open items).
+- **Pending at hand-over:** Momuz Cagithuzol (child, 19972) took a Fey mood (Craftsdwarf's workshop) at y288
+  autumn, went stark raving mad at y288 winter d43; raving dwarves stop drinking, so he will most likely die.
+- Moods in L2: 7, **6 failed** (one Fey mood succeeded, unit 20044); care emitted MOOD_NEED for 2 of the 6.
+
+**S3, levers (implemented and live)**
+- `act.link_lever(lever, target)` = the lever sheet's "link up": one `LinkBuildingToTrigger` job on the lever
+  with two attached mechanisms (roles LinkToTrigger/LinkToTarget), a building holder ref (lever) and a trigger
+  target ref (target); the mechanisms are free, reachable (walk groups, as the screen's
+  need_accessible_mechanism warning) and nearest first. Refused while a link job is pending or a building is
+  unbuilt. Lint allows `canWalkBetween` only in that choice.
+- gate links every built, unlinked manifest lever in PEACE/ALERT/RECOVERY (LEVER `link` event), one pending
+  link job per lever; a refusal backs off 1, 2, 4, 8 days (before the backoff: 194 refusals in a stoneless year).
+- **Live: 6 link jobs, all 6 levers linked** (B1, B2, O1, 2 each); the mechanics finished each within days once
+  2 mechanisms existed. Mechanisms came from stone digs and from 4 deconstructed hall traps.
+- Pulls: real `PullLever` jobs, the single-pending invariant held, **0 double toggles** in 3 drills.
+  Latency from the queued pull to a raised bridge: a dwarf takes the job after 156-243 ticks, the bridge moves
+  91-108 ticks; an unworked pull is cancelled after 200 ticks (`cancel_own_lever_job`, live 2x) and the backup
+  lever is pulled. Lowering after the drill: about 225 + 100 ticks.
+
+**S2, squads and uniforms (implemented and live)**
+- `act.squad_create` = the squads screen's "create squad": the vacant commander assignment first, else a new
+  MILITIA_CAPTAIN assignment (`next_assignment_id`), then `makeSquad`; with `leader` it seats the leader at once.
+- `act.squad_leader` = "choose leader": the citizen takes `squad.leader_assignment` (histfig, position link,
+  `assignments_by_type`, `position_vector_idx`), position 0, `unit.military`, equipment update (the officer holds
+  a POSITION link, no SQUAD link, as DFHack's Military.cpp). DF shows them as militia commander/captain.
+- `act.squad_uniform` writes one `squad_uniform_spec` per item and position (material class Armor/Leather/none,
+  indiv choice melee/ranged), replace_clothing, exact_matches, and the crossbow squad's bolt ammo spec.
+- military: squads follow max(phase, plan `phase_target`) (applied plan y287 with target P5: A, B and C); every
+  wanted squad keeps a leader; a leaderless squad gets one, a member promoted first (live: the commander died,
+  DF vacated the post, Libash Rakustidos was promoted); uniform material per category = best available.
+- **Live:** squad A (id 81, leaderless since adopt) got a leader; B (82) and C (83) were created with captain
+  assignments 12 and 13. Routine Constant training resolved by name. Uniform specs 7 per melee position, 6 per
+  crossbow position; **worn 15 %**: only 3 wooden shields and 1 crossbow could be assigned. The fort has no free
+  armor, helm, pants, gloves or shoes (every one is worn clothing), no metal bars and no leather.
+- Soldiers are never in a tool detail and hold no MINE/CUTWOOD labor (checked live; labormanager monitor).
+
+**Fortcore stages 2-3 (built live through the runner)**
+- Stage 3 done: O1, B2, levers, refuge level z116 with beds and well, Tiefe+ burrow. Stage 2 done: killing field
+  K1, gallery, B1, barracks zone. Manifest has bridges, stations, killbox K1, refuge, Kern+ and Tiefe+.
+- **R1 green** (y288 spring d72): audit ok, min traps 5 (3 after I freed the battle axe and a pick from two traps).
+- Template changes:
+  - the **41 traps are stage 4** (P6): with traps inside stages 2-3, buildingplan gave 7 mechanisms to traps and
+    none to the six levers, and 28 trap weapons need metal (28 MakeWeapon orders that can never run). I
+    removed the 34 unbuilt traps and re-placed stages 2-3 without them;
+  - the **gallery is on the field level** behind constructed fortifications: z+1 is only reachable by digging
+    upward through the military stair, and DF never dug the hidden tile above the up stair (3 years);
+  - re-placed stages over existing buildings: tiles already holding a building are tracked (unbuilt = pending),
+    not counted as lost (build_lost), and get no manager orders (three placements had ordered 93 mechanisms;
+    I removed the 22 duplicate orders);
+  - `cmd` retire keeps site `same` (cancelling stage 3 dropped the stage-1 anchor record).
+- Audit fixes: built traps are Dynamic tiles and read as walls (no attack path); a dig in progress ran past the
+  audit box and read as a bypass (R1 → R0); readiness now adds running project boxes (`runner.bboxes()`).
+
+**Drills (DESIGN §14 KPIs)**
+| Drill | Pull at | B1 up | O1 up | dbl | worn | outside T+1,200 | result |
+|---|---|---|---|---|---|---|---|
+| 1 | T+620 | T+876 | T+917 | 0 | 15 % | 4 | fail: slow O1, worn, outside |
+| 2 | T+540 | T+891 | T+945 (backup lever after 200 unworked ticks) | 0 | 15 % | 2 | fail: slow O1, worn, outside |
+| 3 | T+464 | T+801 | T+1,076 (first job lost its worker, backup) | 0 | 15 % | 3 | fail: slow O1, worn, outside |
+- The timer pull moved from T+600 to **T+450** (siege `RAISE_BY`), DESIGN §4 updated. DRILL ran at 414 ticks/s.
+- **The drill cannot pass in this fort yet:** worn 15 % (needs armor production or trade) and O1's lever job is
+  slow to be taken (see open items). Citizens outside at T+1,200 were surface workers and bucket carriers.
+- DRILL_FAIL (A) fired on the 2nd consecutive failure as designed.
+
+**Other fixes (all tested)**
+- arbiter: death notices ("has bled to death", "has been struck down", …), succession notices and failed-mood
+  notices no longer halt the fort; "has gone berserk" still stays for Gordon (it halted the fort 3 times).
+- labor.starving 504 is no parse error: labormanager reports 504 stale Gather Plants postings (oldest 295,072
+  ticks, the L1 gather flood).
+
+**KPIs measured (L2)**
+| KPI | Value |
+|---|---|
+| ticks/s | PEACE median 453 (83 perf rows; p10 150 from popups and reloads); DRILL 414 |
+| kernel ms/s | median 18, p90 25, max 41 (reload boots) |
+| frame gaps > 3 s | 2 (the two yearly autosaves, max 6.3 s) |
+| lever pull → raised | 256-297 ticks (take 156-243, motion 91-108); cancelled unworked pulls 2 |
+| double toggles | 0 in 3 drills |
+| links | 6 of 6 levers linked; 194 refused attempts before the backoff |
+| squads | 3 (A, B, C), 4 soldiers, leaders seated by act; worn 15 % |
+| readiness | R0 → R1 (y288 spring), held at hand-over |
+| deaths | **7** (5 after failed moods incl. 3 berserk, 1 ghost kill, 1 bedridden without water); 1 raving child pending |
+| moods | 7 started, 1 succeeded, 6 failed |
+| game time | y286 spring d54 → y288 autumn d69 |
+
+**Open for L3 / Gordon (most urgent first)**
+1. **Moods kill this fort** (6 of 7 failed in L2). care sees only the workshop's classes, never the job's
+   item list (fair-play choice, DESIGN §11), so a mood that needs a second material fails silently. The fort
+   has no stone reserve (rock orders and mechanisms take every boulder), 4 logs, no leather, no bars. Proposal:
+   a reserve of 5 boulders and 20 logs that supply orders may not consume, and a stone-dig request on MOOD_NEED
+   rock. Gordon may want to allow reading the mood's requirement list.
+2. **No water for patients:** the well sump holds 2/7, the hospital and refuge wells are dry, bucket brigades
+   walk ~90 tiles to the brook. A bedridden dwarf dies of thirst (death 5).
+3. **Berserk dwarves:** the popup halts the fort; nothing in v2 reacts (a kill order is allowed only in kill
+   boxes, and DRILL/PEACE allow no sortie). A berserk citizen's corpse must be buried at once (ghost).
+4. **Drill:** worn needs armor (no free armor in the fort; trade failed a third time, "time"). O1's lever job is
+   taken late or loses its worker; proposal: the S3 fallback, a lever-puller burrow next to the levers.
+5. Burial: two tombs projects on the same site made duplicate zones; occupancy must keep tombs of cancelled
+   projects (or the runner must not place zones over zones).
+6. Trap weapons take tools (a battle axe and a pick sat in traps); stage 4 should exclude picks and axes.
+7. Trade failed 3 times with "time" (L4 spike); the caravan left each time.
+
+## 0c. Live slot L1b (2026-10-11 00:46 - 01:45)
 **Fort at hand-over:** Castlerisen, y286 spring d34, pop 25 (15 adults, 10 children and babies), PEACE, phase **P1**.
 - Runtime folder `dfllm-runtime/region2/`; the kernel booted `autosave 2`; DF wrote `autosave 3` at the y286 rollover.
 - About 400-550 ticks/s (timestream 500, no brake since P0 was delivered); DF on desktop 1.
@@ -479,11 +612,12 @@ python -m pytest -q -o addopts="" tests/test_schema.py tests/test_luahost.py tes
   tests/test_embark.py tests/test_kern_files.py tests/test_runner.py tests/test_siege_files.py tests/test_trade_files.py \
   tests/test_wp6_files.py tests/test_wp8_files.py tests/test_snapshot_files.py tests/test_integration_v2.py
   -> 1087 passed, 0 failed (48 s; after L0: 1087 passed, 61 s; after L1: 1145 passed, 61 s;
-  after L1b: 1149 passed, 63 s)
+  after L1b: 1149 passed, 63 s; after L2: 1151 passed, 63 s)
 for f in tests/lua/test_*.lua: python tools/luahost.py --path tests/lua $f   -> 26 suites, 426 passed, 0 failed
                                                                                (after L0: 430 passed, 0 failed;
                                                                                 after L1: 442 passed, 0 failed;
-                                                                                after L1b: 455 passed, 0 failed)
+                                                                                after L1b: 455 passed, 0 failed;
+                                                                                after L2: 463 passed, 0 failed)
 python -m df_llm_helper lint lua/dfllm        -> 0 finding(s)
 python -m df_llm_helper.lint --config         -> config ok
 ```
@@ -496,16 +630,16 @@ python -m df_llm_helper.lint --config         -> config ok
 
 ## 6. Known gaps, by impact
 **Needed for year-1 acceptance (A1):**
-1. **Lever linking.** No act function exists. Templates build levers, but nothing links them, so:
+1. *Fixed in L2: `act.link_lever`, gate links built levers (6 of 6 live).* **Lever linking.** No act function exists. Templates build levers, but nothing links them, so:
    - gate pulls only linked levers, giving GATE_FAIL `no_lever` and then BREACH;
    - R1 needs 2 linked levers per bridge.
 
    Until `act.link_lever` (the UI link job with 2 mechanisms, [S3]) exists, Gordon links every lever in
    the UI after each fortcore stage. **This is safety-critical.**
-2. **Squads.** `act.squad_create` needs a vacant position assignment, and `squad_leader` is a stub.
+2. *Fixed in L2: squads A/B/C created and led through act (captain assignments, `squad_leader`).* **Squads.** `act.squad_create` needs a vacant position assignment, and `squad_leader` is a stub.
    Military asks Gordon (DECISION_NEEDED `squads`) to create squads A/B/C with a leader; it then
    adopts and fills them. Needs [S2].
-3. **Uniforms.** `act.squad_uniform` is a stub, so worn = 0 %. The drill then fails (`no_uniform`),
+3. *Fixed in L2: `act.squad_uniform` writes the specs; worn is now limited by the armor the fort has (15 % live).* **Uniforms.** `act.squad_uniform` is a stub, so worn = 0 %. The drill then fails (`no_uniform`),
    which blocks P5 (drill 1, R1 needs a drill for R2) and R2. Needs [S2]; meanwhile Gordon assigns
    uniforms in the UI.
 4. **Trade pile.** *Fixed in L1: fortcore stage 1 places `dfllm-trade` (autotrade).* No template builds one. Gordon names a stockpile next to the depot `dfllm-trade`,

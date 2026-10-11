@@ -146,8 +146,9 @@ Only Gordon changes these. Never store a "consent" for anything on the §1 block
 **Site and start** (§4). Year 1 follows `plans/year1.json` (§11).
 **Geometry (fortcore).** Outside → O1 3-wide drawbridge with 2 levers inside → walled bailey with
 depot and 2-tile overhang → trap hall (1 wide, ≥ 40 tiles, ≥ 3 bends, weapon traps ≤ 10
-components, stone-fall filler, no cage traps on the main path) → 7x7 killing field under a roofed
-crossbow gallery at z+1 → B1 inner bridge → gatehouse and barracks + military stair → B2 core seal
+components, stone-fall filler, no cage traps on the main path) → 7x7 killing field beside a roofed
+crossbow gallery behind fortifications (same level, reached only from Z3) → B1 inner bridge →
+gatehouse and barracks + military stair → B2 core seal
 → civilian core (own stair, farms, workshops, stockpiles, well, hospital with own water, tombs,
 dining, bedrooms). Refuge Tiefe+ ≥ 3 z below the core with its own well, food and beds.
 **Barriers** are only raised bridges and walls; doors count for nothing. Smooth outer natural
@@ -184,11 +185,11 @@ plus the `dfllm-melt` automelt pile).
 |---|---|
 | P0 | baseline; probe stair (damp → stop); fortcore stage 1; farms (own template, soil sites) |
 | P1 | dining, office (manager: chair + office zone), all 12 moodable workshops (`workshops`) + still + kitchen, mood stock goals |
-| P2 | trap hall, B1, barracks (fortcore stage 2), captive pit (`captives`), squad A |
+| P2 | killing field, gallery, B1, barracks (fortcore stage 2), captive pit (`captives`), squad A |
 | P3 | smelter + wood furnace (`furnaces`), hospital, orders basic + rockstock |
 | P4 | 1 caravan traded, bedrooms, tombs, tavern, temple |
 | P5 | fortcore stage 3, squads B and C, drill 1 passed, R1, drink ≥ 170 d, food ≥ 60 d |
-| P6 ★ (Y2) | military orders, metal ≥ 80 %, ≥ 300 bolts, R2 cap raise |
+| P6 ★ (Y2) | military orders, trap hall armed (fortcore stage 4), metal ≥ 80 %, ≥ 300 bolts, R2 cap raise |
 | P7 ★ | beauty in used rooms; R3 only with D-01 = B |
 ★ = entered only when your plan's `phase_target` reaches it.
 
