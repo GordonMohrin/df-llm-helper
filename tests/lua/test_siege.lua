@@ -217,25 +217,25 @@ add{name = 'a visible undead without the report is only an ALERT',
   units = function() return units({id = 300, pos = {120, 100, Z}, undead = true}) end,
   run = 300, modes = {'PEACE>ALERT'}}
 
-add{name = 'citizens outside Kern+ delay the raise until T+600; bridges still up by T+900',
+add{name = 'citizens outside Kern+ delay the raise until T+450 (live L2 pull latency); bridges up by T+900',
   units = function() return units(S.cit(6, 100, 100), S.army(6, 150, 150)) end,
   run = 1500, modes = {'PEACE>SIEGE'},
   check = function(W)
     local t0 = S.mode_tick(W, 'PEACE>SIEGE')
     T.eq(cens(W).u.outside, 1)
-    between(S.pulls(W, 'O1')[1].tick - t0, 600, 640, 'O1 raise')
-    between(S.pulls(W, 'B1')[1].tick - t0, 600, 640, 'B1 raise')
+    between(S.pulls(W, 'O1')[1].tick - t0, 450, 490, 'O1 raise')
+    between(S.pulls(W, 'B1')[1].tick - t0, 450, 490, 'B1 raise')
     T.ok(S.flips(W, 'O1')[1].tick < t0 + 900)
     T.eq(#evs(W, 'BREACH'), 0)
   end}
 
-add{name = 'a hostile within 10 tiles of B1 raises B1 at once; O1 still waits for T+600',
+add{name = 'a hostile within 10 tiles of B1 raises B1 at once; O1 still waits for T+450',
   units = function() return units(S.cit(6, 100, 100), S.army(6, 51, 32)) end,
   run = 1500, modes = {'PEACE>SIEGE'},
   check = function(W)
     local t0 = S.mode_tick(W, 'PEACE>SIEGE')
     between(S.pulls(W, 'B1')[1].tick - t0, 0, 30, 'B1 raise')
-    between(S.pulls(W, 'O1')[1].tick - t0, 600, 640, 'O1 raise')
+    between(S.pulls(W, 'O1')[1].tick - t0, 450, 490, 'O1 raise')
   end}
 
 add{name = 'a soldier on the B1 footprint delays its raise by 300 ticks in a SIEGE',
@@ -823,7 +823,7 @@ T.test('T0 raise uses a census from the detecting step: a citizen who left < 100
     local t0 = S.mode_tick(W, 'PEACE>SIEGE')
     T.ok(t0 ~= nil, 'siege at offset ' .. off)
     for _, b in ipairs({'O1', 'B1'}) do
-      between(S.pulls(W, b)[1].tick - t0, 600, 640, b .. ' raise at offset ' .. off)
+      between(S.pulls(W, b)[1].tick - t0, 450, 490, b .. ' raise at offset ' .. off)
     end
   end
 end)
@@ -889,12 +889,16 @@ T.test('gate links built unlinked manifest levers once each; a refusal waits a d
   T.eq(#calls, 2, 'one refused try per built bridge (B1, B2); its other levers wait for the retry')
   S.run(W, 400)
   T.eq(#calls, 2, 'no retry within a day')
+  S.run(W, 1200)
+  T.eq(#calls, 4, 'retried after a day')
+  S.run(W, 1200)
+  T.eq(#calls, 4, 'the next wait is two days')
   mode = 'ok'
   S.run(W, 1300)
   local B1, B2 = W.bridges.B1.id, W.bridges.B2.id
   local by = {}
   for _, c in ipairs(calls) do by[c[2]] = (by[c[2]] or 0) + 1 end
-  T.eq({by[B1], by[B2], by[W.bridges.O1.id]}, {3, 2, nil}, 'B1: 2 levers (+1 refused), B2: its 1 built lever; O1 not built')
+  T.eq({by[B1], by[B2], by[W.bridges.O1.id]}, {4, 3, nil}, 'B1: 2 levers (+2 refused), B2: its 1 built lever; O1 not built')
   local n = #calls
   S.run(W, 2400)
   T.eq(#calls, n, 'a pending link job is never doubled')

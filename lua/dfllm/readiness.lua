@@ -170,6 +170,17 @@ local function request_audit(K, force)
   local man = K.manifest()
   local bbox = M.audit_bbox(man)
   if not bbox then return end                                 -- nothing built yet
+  -- live L2: a bedrooms dig still in progress ran past the box edge; the audit took the cut-off corridor
+  -- for a way in (bypass) and readiness fell R1 -> R0. Running projects are inside the box too.
+  local okb, boxes = K.call('runner', 'bboxes')
+  for _, b in ipairs(okb and type(boxes) == 'table' and boxes or {}) do
+    if type(b) == 'table' and #b == 6 then
+      local P = M.PAD
+      bbox = {math.min(bbox[1], math.max(0, b[1] - P[1])), math.min(bbox[2], math.max(0, b[2] - P[2])),
+              math.min(bbox[3], math.max(0, b[3] - P[3])), math.max(bbox[4], b[4] + P[1]),
+              math.max(bbox[5], b[5] + P[2]), math.max(bbox[6], b[6] + P[3])}
+    end
+  end
   st.audit_req, st.audit_due, dirty = now, 0, true
   local ok, ok2, id = K.call('snapshot', 'export', {purpose = 'audit', bbox = bbox})
   if ok and ok2 then st.audit_snap = tostring(id)

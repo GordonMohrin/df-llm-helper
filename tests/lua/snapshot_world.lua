@@ -3,7 +3,7 @@
 --   local SW = require('snapshot_world'); SW.install(W); SW.draw(W, z, {'#..', '#.+'}, x0, y0)
 -- map chars: # rough wall, S smooth wall, C constructed wall, F fortification, T tree, . floor,
 -- s soil floor, _ open space, X up/down stair, r ramp, ? hidden floor, w water 2/7, ~ water 6/7,
--- % magma, + door (Dynamic), = bridge (Dynamic), ^ weapon trap (Passable), B statue (Impassable),
+-- % magma, + door (Dynamic), = bridge (Dynamic), ^ weapon trap (Dynamic), B statue (Impassable),
 -- d floor with a pending dig designation, m smoothing designation; a space = no tile (off the map).
 local kmock = require('dfllm.util.k_mock')
 
@@ -98,11 +98,12 @@ function SW.draw(W, z, rows, x0, y0)
             {__index = function(_, k) error('no field ' .. tostring(k) .. ' in building_bridgest.gate_flags') end})})
         end
         if ch == '^' then
-          occ.building = O.Passable
+          occ.building = O.Dynamic                    -- live L2: built traps are Dynamic tiles, not Passable
           local tr = bld(W, 'trap', x, y, z, {trap_type = df.trap_type.WeaponTrap, ready_timeout = 0,
                                               contained_items = kmock.vec{{item = {_k = 'mech'}}, {item = {_k = 'weapon'}},
                                                                           {item = {_k = 'trapcomp'}}}})
           df.global.world.buildings.other.TRAP:insert('#', tr)
+          W.dyn[key] = tr
         end
         if ch == 'B' then occ.building = O.Impassable end
         W.tiles[key] = {des = des, occ = occ, tt = tt}

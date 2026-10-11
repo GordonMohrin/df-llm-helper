@@ -378,9 +378,10 @@ end
 ---------------------------------------------------------------- linking (S3, live L2)
 -- A manifest lever that is built but not linked to its built bridge gets one link job (act.link_lever = the
 -- lever sheet's "link up" with two mechanisms). One pending link job per lever; a refused attempt (usually
--- no free mechanism) is retried after LINK_RETRY, and the bridge's other levers wait for that retry too
+-- no free mechanism) is retried after LINK_RETRY, doubling per refusal up to LINK_RETRY_MAX (live L2: a fort
+-- without stone refused every day, 50 ACT_FAIL), and the bridge's other levers wait for that retry too
 -- (they would need the same mechanisms). Not in SIEGE/BREACH/DRILL: a mechanic must not walk out then.
-M.LINK_RETRY = 1200
+M.LINK_RETRY, M.LINK_RETRY_MAX = 1200, 9600
 local LINK_MODES = {PEACE = true, ALERT = true, RECOVERY = true}
 local LINK
 
@@ -404,7 +405,12 @@ local function links(K, name, spec, r, now)
       local t = targets(lv)
       if t and not t[b.id] then
         local ok, res = K.act.link_lever(lv.id, b.id)
-        if not ok then r.link_at = now + M.LINK_RETRY; return end
+        if not ok then
+          r.link_wait = math.min(M.LINK_RETRY_MAX, r.link_wait and r.link_wait * 2 or M.LINK_RETRY)
+          r.link_at = now + r.link_wait
+          return
+        end
+        r.link_wait = nil
         if math.type(res) == 'integer' then
           st.kpi.links, dirty = (st.kpi.links or 0) + 1, true
           K.emit('LEVER', 'C', 'link ' .. name, {bridge = name, lever = lv.id, job = res})

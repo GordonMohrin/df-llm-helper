@@ -304,6 +304,11 @@ T.test('audit snapshots: manifest bbox, monthly, after defense stages (1 day gap
   W.K.set_mode('RECOVERY', 'test')
   day(W)
   T.eq(#W.snap.exports, 5, 'requested once the fort is quiet')
+  -- live L2: a project still digging past the manifest box widens the box (no cut-off corridor = bypass)
+  function W.runner.bboxes(K) return {{60, 70, 5, 66, 95, 5}} end
+  X.call(W, 'runner', 'emit', 'PROJECT_STAGE', {proj = 'p2', stage = 's2.build', pct = 50, defense = 1})
+  day(W, 2)
+  T.eq(W.snap.exports[#W.snap.exports].opts.bbox, {40, 2, 3, 78, 103, 12})
 end)
 
 T.test('audit verb rejects bad args; ready state is schema-shaped', function()

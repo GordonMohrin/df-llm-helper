@@ -1218,6 +1218,18 @@ end
 
 function M.state(K) return {phase = S.phase, proj = S.rows} end
 
+-- public (live L2): bboxes of the projects not done yet (readiness puts them into the audit snapshot)
+function M.bboxes(K)
+  local r = {}
+  for _, P in ipairs(S.pd.list) do
+    if P.done ~= 1 then
+      local d = doc(K, P.id)
+      if d then r[#r + 1] = project_bbox(P.id, d) end
+    end
+  end
+  return r
+end
+
 -- WP8 (economy, live L1b): tiles still to dig in the dig stage every running project is in (its tile count
 -- minus the progress last measured); economy sizes the Miners detail from it
 function M.dig_backlog(K)

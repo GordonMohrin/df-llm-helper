@@ -40,7 +40,9 @@ M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
             -- live L1b: "<name> has claimed a Stoneworker's Workshop." halted the fort mid-mood; care tracks
             -- moods (MOOD_START/NEED/END) and frees the materials
             mood = {'has claimed a', 'is taken by a', 'withdraws from society', 'has begun a mysterious construction',
-                    'has created'}}   -- live L1: "<name>, Ghostly Bowyer has been put to rest."   -- live L1: "The Misty Company, a farmers guild, has been established."
+                    'has created', 'has been possessed', 'has gone stark raving mad', 'has gone melancholy'},
+            -- live L2: "<name> has assumed the position of expedition leader of <civ>." halted the fort
+            noble = {'has assumed the position', 'has been elected', 'has become a militia'}}   -- live L1: "<name>, Ghostly Bowyer has been put to rest."   -- live L1: "The Misty Company, a farmers guild, has been established."
 M.ASK_AFTER_MS = 600000            -- foreign pause older than this -> DECISION_NEEDED
 M.REASSERT_MS = 60000              -- re-check the live timestream fps at most this often
 M.RETRY_MS = 30000                 -- back-off after a failed timestream write

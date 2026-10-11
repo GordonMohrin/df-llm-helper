@@ -283,6 +283,7 @@ Only these are public across WPs; anything else is module-internal. "Returns" ar
 | `economy.alarm()` | `why` or `nil` | supply alarm (thirst/hunger of >= 2 citizens, drink or food < 10 days); arbiter brakes tempo while set (live L1) |
 | `runner.dig_backlog()` | `int` | tiles still to dig in the dig stage of every running project (tile count minus the last measured progress); economy sizes the Miners detail from it (live L1b) |
 | `runner.pending(tpl)` | `int` | projects of `tpl` not done yet (care waits for them before asking again) |
+| `runner.bboxes()` | `[bbox]` | bboxes of the projects not done yet; readiness widens the audit snapshot with them (live L2: a dig in progress ran past the box edge and read as a bypass) |
 | `trade.done()` | `int` | caravans traded this fort |
 
 Mode-driven duties (no call needed): arbiter applies tempo per mode in `on.MODE`; siege applies civ alert, alert burrows and posture; gate recomputes desired bridges; runner freezes; readiness freezes growth outside PEACE.

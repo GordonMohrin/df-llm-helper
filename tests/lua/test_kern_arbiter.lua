@@ -284,6 +284,12 @@ T.test('popups (live L0): a popup halts the game with pause_state false; migrant
   popups:insert('#', {text = 'Meng Iddodok, Stoneworker has bled to death.'})   -- live L2
   H.run(W, 6, {paused = false})
   T.eq(#popups, 0, 'death notices do not halt the fort (care records deaths)')
+  popups:insert('#', {text = 'Atir Wallgulf has assumed the position of expedition leader of The Turquoise Whips.'})
+  H.run(W, 6, {paused = false})
+  T.eq(#popups, 0, 'succession notices do not halt the fort (live L2)')
+  popups:insert('#', {text = 'Libash Gebkosoth, Herbalist has gone stark raving mad!'})
+  H.run(W, 6, {paused = false})
+  T.eq(#popups, 0, 'a failed mood notice does not halt the fort (care reports MOOD_END)')
   popups:insert('#', {text = 'Meng Iddodok, Stoneworker has gone berserk!'})    -- live L2: a threat
   H.run(W, 6, {paused = false})
   T.eq(#popups, 1, 'a berserk notice stays for Gordon')

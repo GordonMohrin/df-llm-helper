@@ -3,7 +3,7 @@
 -- Inputs are visibility only (threat.assess over K.census.h); a raised bridge cuts the walk
 -- groups, so path existence is never used to leave a siege.
 --   T0 (detecting step): mode SIEGE, civ alert on (Kern+), posture READY_STATION, SIEGE_START.
---   T0..T0+600: O1/B1 up as soon as nobody (soldiers excluded) is outside, or at T+600, or when a
+--   T0..T0+450: O1/B1 up as soon as nobody (soldiers excluded) is outside, or at T+450, or when a
 --     visible hostile is <= 10 tiles from that bridge (gate keeps the single-pending invariant).
 --   T0+900: an outer/inner bridge not up -> BREACH in-game (alert Tiefe+, B2 up, B2_HOLD).
 --   RECOVERY after 2,400 quiet ticks; on quiet time +1,200 B2 then B1 down and alert off,
@@ -18,7 +18,11 @@ local geom = require('dfllm.util.geom')
 local M = {name = 'siege', every = {ticks = 1}, critical = true}
 M.PERIOD, M.PERIOD_ARMED = 25, 10
 
-M.RAISE_BY, M.BREACH_AT, M.NEAR_RAISE = 600, 900, 10
+-- RAISE_BY: live L2 drills measured 256-297 ticks from the queued pull to a raised bridge (a dwarf takes the
+-- job after 156-243 ticks, the bridge moves 91-108); drill 1 pulled at T+600 and raised O1 at T+917. In drill
+-- 2 (pull at T+540) nobody took O1's job for 200 ticks, gate cancelled it and pulled the backup lever, and O1
+-- was up at T+945. The timer pull therefore goes out at T+450 (worst case seen: about T+855).
+M.RAISE_BY, M.BREACH_AT, M.NEAR_RAISE = 450, 900, 10
 M.QUIET, M.ALERT_QUIET = 2400, 1200
 M.REC_INNER, M.REC_OUTER, M.REC_PEACE = 1200, 2400, 8400
 M.ALERT_CIV_ON, M.ALERT_CIV_OFF, M.ALERT_CIV_HOLD, M.ALERT_O1 = 30, 40, 600, 30

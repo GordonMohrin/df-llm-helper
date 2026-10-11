@@ -100,6 +100,12 @@ local function dynamic_char(x, y, z)
     return (gf and flag(gf, 'closed')) and 'B' or '.', t
   end
   if t == 'GrateFloor' or t == 'BarsFloor' then return '.', t end
+  -- live L2: built traps are Dynamic tiles (not Passable), so the trap hall read as walls ('B') and the
+  -- audit found no attack path; traps are walked over (levers and other trap types stay 'B')
+  if t == 'Trap' then
+    local kind = TRAP_CH[df.trap_type[flag(b, 'trap_type') or -1] or '']
+    if kind then return '^', t end
+  end
   return 'B', t
 end
 
