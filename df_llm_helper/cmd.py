@@ -376,6 +376,14 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
         if hit:
             raise BpError(f"{tpl}@same {doc['anchor']} overlaps project(s) {', '.join(hit[:4])}")
         return doc
+    ma = re.fullmatch(r"A(\d+)_(\d+)_(\d+)(?:_([0-3]))?", str(label))
+    if ma:      # live L6: an explicit anchor picked by the LLM (the ranking excludes uneven high ground)
+        x, y, z = (int(ma.group(i)) for i in (1, 2, 3))
+        doc = emit_at(tpl, params, {"id": "S0", "anchor": [x, y, z], "rot": int(ma.group(4) or 0)}, label, bp_id)
+        hit = occ.clash(doc)
+        if hit:
+            raise BpError(f"{tpl}{label} overlaps project(s) {', '.join(hit[:4])}")
+        return doc
     m = _LABEL.fullmatch(str(label))
     if not m:
         raise BpError(f"site {label!r}: use S1..S{RANK_N} (S1 = best free site of `dfllm bp sites {tpl}`) or '{SAME}'")

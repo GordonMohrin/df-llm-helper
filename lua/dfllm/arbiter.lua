@@ -34,6 +34,8 @@ M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
             arrival = {'You have arrived', 'Strike the earth'},
             -- live L6: "A raccoon has stolen a (steel battle axe)!" halted the fort (vermin thief; nothing to decide)
             theft = {'has stolen'},
+            -- live L6: cavern/pit discovery notices halted the fort; the runner already reacts to FEATURE_DISCOVERY
+            discovery = {'You have discovered'},
             ghost = {'has been put to rest'},
             -- deaths are recorded by care (DEATH, DEATHS_3PLUS wakes); the notice alone must not halt the fort
             -- live L2: "<name> has bled to death." halted the fort after a berserk citizen was killed
