@@ -144,7 +144,7 @@ M.DEFAULTS = {
     ['library/glassstock'] = {job = 'ConstructArmorStand', mat = 'GLASS_GREEN'},
   },
   -- live L6: famine / food_low slaughter of surplus tame animals (T.slaughter)
-  slaughter = {keep_f = 1, keep_m = 1, max = 10, every_days = 7, ws = {'workshop:Butchers'}},
+  slaughter = {keep_f = 1, keep_m = 1, max = 10, every_days = 7, mood_days = 3, ws = {'workshop:Butchers'}},
   fish = {tag = 'dfllm:fish', min = 5, max = 30, ws = {'workshop:Fishery'},
           spec = {job = 'PrepareRawFish', frequency = 'OneTime'}},
   -- live L5 (Castlerisen y295: pop 41 -> 53 on the same 80 farm tiles, food 105 -> 15 days in a year): food follows
@@ -2143,15 +2143,32 @@ function M.slaughter_pick(list, sc)
   return r
 end
 
+-- live L6 (Paddletribes): two strange moods waited for a bone with tame surplus animals at hand and failed or
+-- needed a manual slaughter. An open mood need for bone or leather with none of it in stock marks ONE surplus
+-- animal (same keep rules), at most every `mood_days`.
+local function mood_animal_need(r)
+  local needs = r.p.needs or {}
+  for _, key in ipairs({'bone', 'leather'}) do
+    local m = needs[key]
+    if type(m) == 'table' and type(m.care) == 'table' and (m.care.n or 0) > 0 and have(r, key) <= 0 then return key end
+  end
+end
+
 function T.slaughter(K, c, r)
   local sc, p = c.slaughter, r.p
-  if type(sc) ~= 'table' or not (p.famine or p.food_pre) or not HUNT_MODES[K.mode()] then return true end
+  if type(sc) ~= 'table' or not HUNT_MODES[K.mode()] then return true end
+  local mood = not (p.famine or p.food_pre) and mood_animal_need(r)
+  if not (p.famine or p.food_pre or mood) then return true end
   if not r.sl then
-    if p.slaughter_t and r.now - (math.tointeger(p.slaughter_t) or 0) < (sc.every_days or 7) * DAY then return true end
+    local t_key, every = mood and 'slaughter_mood_t' or 'slaughter_t', mood and (sc.mood_days or 3) or (sc.every_days or 7)
+    if p[t_key] and r.now - (math.tointeger(p[t_key]) or 0) < every * DAY then return true end
     if not ws_any(r.f, sc.ws) then return true end
     local ca = K.census.a
-    r.sl, r.sl_n = M.slaughter_pick(type(ca) == 'table' and ca.list, sc), 0
-    p.slaughter_t = r.now
+    local pick_sc = sc
+    if mood then pick_sc = {keep_f = sc.keep_f, keep_m = sc.keep_m, max = 1} end
+    r.sl, r.sl_n = M.slaughter_pick(type(ca) == 'table' and ca.list, pick_sc), 0
+    p[t_key] = r.now
+    if mood and #r.sl > 0 then K.log('warn', 'mood needs %s: animal %d marked for slaughter', mood, r.sl[1]) end
     if #r.sl == 0 then return true end
   end
   local id = table.remove(r.sl, 1)
