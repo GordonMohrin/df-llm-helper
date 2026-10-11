@@ -1,19 +1,23 @@
 # RULES: df-llm-helper v2 (the only always-read doc)
 
-DRAFT (WP11, wave 1). Binding sources behind it: `docs/v2/DESIGN.md` (why), `docs/v2/CONTRACTS.md`
+Binding sources behind it: `docs/v2/DESIGN.md` (why), `docs/v2/CONTRACTS.md`
 (exact formats), `docs/v2/DOCTRINE.md` (gameplay). Do not read those on a wake; read them only to
 change the system. Never read ERFAHRUNGEN.md, transcripts or v1 docs as working memory.
+**The player** is the human you play for (in the author's runs: Gordon). Setup and the start prompt:
+`docs/v2/QUICKSTART.md`.
 
 ## 0. What runs where
 - **In game:** the kernel `lua/dfllm` (one frame dispatcher plus modules). It defends the fort,
   runs the approved plan and writes files under `<DF>/dfllm-runtime/<save>/`. Every reaction
   needed within one game day happens in game, without you.
-- **Python** `python -m df_llm_helper <cmd>` (alias `dfllm`) only reads those files and writes
-  the inbox. It never calls DF in steady state.
+- **Python** `python -m df_llm_helper <cmd>` (written `dfllm` below; run it from the repo, with
+  `DFLLM_DF` set to the DF folder or `--df <DF>`) only reads those files and writes the inbox. It
+  never calls DF in steady state. `dfhack-run` means `<DF>/hack/dfhack-run.exe`.
 - **You (orchestrator):** the main Claude Code session, at most 60k context. You run `Monitor` on
   `dfllm follow` and spawn one fresh Sonnet subagent per wake line (Opus only for the year-1 plan
-  and postmortems). You are a yearly planner and an exception handler, never a tactical controller:
-  a game month passes in about 75 s.
+  and postmortems); another agent keeps `follow` running in the background and handles each line
+  in a short, fresh context. You are a yearly planner and an exception handler, never a tactical
+  controller: a game month passes in about 75 s.
 
 ## 1. Hard rules
 1. **Fair play.** Only UI-equivalent actions. Never: createitem, dig-now, build-now, reveal,
@@ -29,14 +33,17 @@ change the system. Never read ERFAHRUNGEN.md, transcripts or v1 docs as working 
 4. **Never load an older save** (no save-scumming). Never kill DF yourself; the supervisor restarts
    only in PEACE right after an autosave.
 5. **Opt-in per save.** The kernel acts only on saves with the `dfllm` marker (`dfllm adopt`).
-   Gordon's own forts (e.g. Inchcraft) stay untouched: never adopt them.
+   Adopt only a fort the player gave you for this; the player's own forts stay untouched (Gordon:
+   never Inchcraft).
 6. **Growth is earned.** Never raise the pop cap, start beauty or wealth projects, or open caverns
    outside the readiness gate (§8). Approve ★ phases only when the gate is green.
-7. **No new tooling in play.** If something is missing, write a short note for Gordon; code changes
-   go through the repo (tests, lint, commit as Gordon with Co-Authored-By, push).
+7. **No new tooling in play.** If something is missing, write a short note for the player; code
+   changes go through the repo (tests, lint, commit and push by the repo's rules), never into the
+   running game.
 
-## 2. Talking to Gordon
-- German, informal ("du"), short and honest: what happened, what you did, what is open.
+## 2. Talking to the player
+- In the player's language (Gordon: German, informal "du"), short and honest: what happened, what
+  you did, what is open.
 - Chat only. Never send push notifications.
 - Decide small things yourself; ask only for big risks and for the D-decisions (§7).
 
@@ -50,17 +57,18 @@ dfllm events --cls A [--since N]
 dfllm plan propose|check|apply
 dfllm cmd <verb> '<json args>'
 dfllm bp list | bp preview <tpl> | bp sites <tpl>
-dfllm supervise --once       # Windows task DF-Aufsicht runs this every minute
+dfllm supervise --once --dry-run   # liveness report (the restarting task is optional, not live-tested)
 ```
 In game (via `dfhack-run`): `dfllm boot|adopt|stop|status|selftest|restore`. `onMapLoad.init`
-runs only `dfllm boot`; without the marker it does nothing.
+runs only `dfllm boot` (`tools/migrate_v2.py --apply` sets it up); without the marker it does nothing.
 
 **Session start:** `dfllm doctor`, then `dfllm status`, then start `Monitor` on `dfllm follow`.
-Do nothing else until a wake line arrives.
+Do nothing else until a wake line arrives (right after a fresh adopt: §4 step 5 first).
 
 ## 4. New fort (embark, once)
-Procedure and fair-play limits: `tools/embark/README.md`. In short:
-1. Title → new game in the existing world: `python tools/embark/embark.py newgame`.
+Simplest: the player embarks (or loads a fort) by hand and tells you; go on with step 4. The embark
+helper is experimental; procedure and fair-play limits: `tools/embark/README.md`. In short:
+1. Title → new game in the existing world: `python tools/embark/embark.py newgame --world <name>`.
 2. Shortlist world tiles from the vanilla world map (not world data), then
    `embark.py scan WX,WY[,LX,LY] …`: it places the rectangle, reads the warning popup and the
    embark panel and ranks the sites against the DESIGN §5.1 checklist (Dark Fortress and old forts
@@ -68,10 +76,14 @@ Procedure and fair-play limits: `tools/embark/README.md`. In short:
    with the probe protocol), flux/ore if shown, shallow soil, temperate, 3x3 or 4x4).
 3. `embark.py embark WX,WY[,LX,LY]` refuses a rejected site and any criterion the panel did not
    show, unless that one id is named with `--waive ID` after checking it by eye (no blanket
-   waiver). It spends every embark point: 3 picks, 2 axes, anvil,
-   bars, wood, plump helmet and surface seeds, 1-2 breeding pairs; skills 2 miners,
-   mason/engraver, carpenter, brewer/grower, mechanic, cook/doctor.
+   waiver). Prepare carefully cannot be driven yet (live L0): pass `--play-now` (DF's default
+   seven) or ask the player to spend the points by hand: 3 picks, 2 axes, anvil, bars, wood, plump
+   helmet and surface seeds, 1-2 breeding pairs; skills 2 miners, mason/engraver, carpenter,
+   brewer/grower, mechanic, cook/doctor.
 4. In the fort: `dfhack-run dfllm adopt`. This sets the marker, loads `plans/year1.json` and boots.
+   Then `dfhack-run dfllm selftest full` (0 fail) and `dfhack-run dfllm status` (no `DISABLED`).
+5. Start `follow` (§3) and ask the player to unpause (DF loads paused; you never unpause). Then
+   the year-1 plan at once (§5 year review): without a plan the fort idles and starves (live L0).
 
 ## 5. Wake protocol
 - `dfllm follow` prints one wake line (≤ 150 tokens) per class-A event, rate-limited: ≤ 1 per type
@@ -82,7 +94,8 @@ Procedure and fair-play limits: `tools/embark/README.md`. In short:
 - **Exception:** `dfllm events --cls A --since N`, then at most one `dfllm cmd`.
 - **Year review** (YEAR_REVIEW, about every 13-15 min real time): `plan propose`, edit a few fields
   (phase_target, seasons[].build, military, supply, trade), `plan check`, `plan apply`. One review
-  approves 4 season plans.
+  approves 4 season plans. To edit, propose into a file outside `dfllm-runtime/` (the hook blocks
+  edits there): `plan propose y.json`, edit, `plan check y.json`, `plan apply y.json`.
 - **New building:** `bp sites <tpl>`, pick S1-S3, `dfllm cmd bp.place '{"tpl":…,"site":"S1"}'`.
   ≤ 5 turns per building.
 - **Without you** the kernel keeps safety and supply running and finishes the approved plan; it
@@ -99,7 +112,7 @@ Procedure and fair-play limits: `tools/embark/README.md`. In short:
 | `audit` | `bp.topo.audit` result | sent by `follow`, not by you |
 | `popcap.lower` | `{cap}` | lowers only |
 | `tempo.lower` | `{fps, ttl_s}` | lowers only, never above the mode value |
-| `pause` / `unpause` | `{ttl_s ≤ 600, why?}` / `{}` | rarely; `unpause` releases only an inbox pause. A pause by Gordon, by DF (save loaded paused) or by a popup is released in DF, by Gordon |
+| `pause` / `unpause` | `{ttl_s ≤ 600, why?}` / `{}` | rarely; `unpause` releases only an inbox pause. A pause by the player, by DF (save loaded paused) or by a popup is released in DF, by the player |
 | `trade.want` | `{want?, sell?}` | tokens like `bar:iron`, `anvil`, `cloth` |
 | `squad.sortie` | `{squad, target, approve:true}` | ALERT/SIEGE/BREACH/RECOVERY; rare, `approve:true` is a deliberate, logged decision; target = kill box id or position |
 | `lever` | `{bridge, want}` | PEACE only |
@@ -112,12 +125,12 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | Event | First move |
 |---|---|
 | SIEGE_END | read the summary; if losses > 10 % of citizens, write a postmortem note and lower `pop_ceiling` in the next plan |
-| GATE_FAIL / BREACH | the fort already sealed itself (BREACH: Tiefe+ alert, B2 up, melee at B2). Do not lower bridges. Check `status` again after 600 ticks; tell Gordon |
+| GATE_FAIL / BREACH | the fort already sealed itself (BREACH: Tiefe+ alert, B2 up, melee at B2). Do not lower bridges. Check `status` again after 600 ticks; tell the player |
 | DEATHS_3PLUS | read the brief: cause (combat, thirst, mood, cave-in); fix the cause in the plan |
 | DRILL_FAIL (2nd in a row) | read `ready.fail`; fix gear, squads or geometry; never raise the cap |
 | KERN_FAULT | a module is backed off (`d.backoff_s`; the kernel re-enables it afterwards); note module and error for the repo; do not hot-patch; `module.enable` only after the fix |
 | PERF_DEGRADED | `dfllm doctor`; the supervisor restarts DF only in PEACE after an autosave |
-| DECISION_NEEDED | ask Gordon the question once; the default applies until he answers |
+| DECISION_NEEDED | ask the player the question once; the default applies until they answer |
 | PLAN_EXHAUSTED | year review now (`plan propose`) |
 | PROJECT_BLOCKED | `bp preview`, then `bp.cancel` and place at another site, or fix the material |
 | YEAR_REVIEW | §5 year review |
@@ -133,14 +146,14 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 - **R3 ≥ 80:** only with D-01 = B and ≥ 20 % of soldiers in iron or steel.
 - Readiness red: max-pop freezes at the current population and beauty pauses.
 
-## 9. Decisions (Gordon's answers in `config/decisions.yaml`; defaults until he answers)
+## 9. Decisions (the player's answers in `config/decisions.yaml`; defaults until they answer)
 D-01 cap option A (≤ 75) | D-02 difficulty unchanged | D-03 idle rule (> 40 % for 3 days, useful
 backlog only) | D-04 work-now off | D-05 agitation-rebalance off | D-06 tailor confiscate and
 cleanowned off | D-07 visitor cap, weather, baby caps unchanged | D-08 caravan `flags1.left` edit
 dropped (use `fix/stuck-merchants`) | D-09 never cook plump helmets, not even in a famine |
 D-10 emigration, deteriorate off | D-11 timestream accepted | D-12 army 15 % at pop ≤ 55, 20 %
 from 60 | D-13 no automatic beauty pause (wealth is logged).
-Only Gordon changes these. Never store a "consent" for anything on the §1 blocklist.
+Only the player changes these. Never store a "consent" for anything on the §1 blocklist.
 
 ## 10. Doctrine in 30 lines
 **Site and start** (§4). Year 1 follows `plans/year1.json` (§11).
@@ -197,13 +210,13 @@ plus the `dfllm-melt` automelt pile).
 ## 12. Token budget
 ≤ 3 M input tokens and ≤ 30k output tokens per real hour (alarm at 5 M). ≤ 6 wakes per hour.
 Brief ≤ 1.5k, status ≤ 300, wake line ≤ 150. If a wake needs more than 5 tool calls, stop, write
-one line for Gordon and wait for the next wake.
+one line for the player and wait for the next wake.
 
 ## 13. When something looks wrong
-- `dfllm status` stale or no heartbeat for 120 s: the supervisor handles it; check
-  `dfllm supervise --once` output, do not restart DF by hand.
+- `dfllm status` stale or no heartbeat for 120 s: read `dfllm supervise --once --dry-run` and tell
+  the player (a scheduled supervisor, if set up, handles it); do not restart DF by hand.
 - A command was refused: read the outbox `msg`; fix the args; never retry with a different verb to
   get around a refusal.
 - The fort is in SIEGE/BREACH: do nothing tactical. Read `status` every few minutes; act after
   SIEGE_END.
-- Unsure whether something is fair: it is not. Ask Gordon.
+- Unsure whether something is fair: it is not. Ask the player.
