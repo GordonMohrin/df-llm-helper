@@ -424,6 +424,7 @@ function F.ui(W, d, c, opts)
     U.render()
     return true, 1
   end
+  function ops.bring(a) U.brought = a; return true, 0 end
   W.act_result('trade', function(op, a)
     U.calls[#U.calls + 1] = op
     return ops[op](a or {})

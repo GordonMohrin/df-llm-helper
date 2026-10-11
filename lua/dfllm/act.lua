@@ -373,6 +373,29 @@ function A.install_trade(I, gui, int)
     return true, n
   end
 
+  -- live L6 (Laborkings y307): only 2 of 32 crafts reached the depot because no autotrade pile held
+  -- them; the trade sold 33 value. Like the depot's "Move goods to/from depot" screen: mark up to a.max
+  -- free items of the given item types (a.types = {'AMULET', ...}) for the haulers.
+  local BRING_SKIP = {'foreign', 'forbid', 'in_job', 'in_building', 'trader', 'owned', 'artifact', 'garbage_collect',
+                      'removed', 'dump', 'melt', 'construction', 'in_inventory'}
+  function TR.bring(a)
+    local d = tr_depot(a.depot)
+    if not d then return false, 'no trade depot ' .. tostring(a.depot) end
+    if not dfhack.items.markForTrade then return false, 'markForTrade not implemented' end
+    local n, max = 0, tonumber(a.max) or 60
+    for _, tn in ipairs(type(a.types) == 'table' and a.types or {}) do
+      local t = df.item_type[tn]
+      local list = t and df.global.world.items.other[tn]
+      for _, it in ipairs(list or {}) do
+        if n >= max then break end
+        local skip = false
+        for _, fl in ipairs(BRING_SKIP) do if it.flags[fl] then skip = true; break end end
+        if not skip and it.flags.on_ground and dfhack.items.markForTrade(it, d) then n = n + 1 end
+      end
+    end
+    return true, n
+  end
+
   function I.trade(op, args)
     local f = TR[op]
     if not f then return false, 'unknown trade op ' .. tostring(op) end

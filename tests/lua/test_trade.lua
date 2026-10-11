@@ -524,12 +524,13 @@ T.test('selection: animal ethics keep animal products back', function()
 end)
 
 T.test('selection: plan.trade.sell and want restrict the trade', function()
-  local W, _, d, c = setup{plan = {v = 2, year = 3, phase_target = 'P4', seasons = {{build = {}}, {build = {}}, {build = {}}, {build = {}}},
+  local W, _, d, c, U = setup{plan = {v = 2, year = 3, phase_target = 'P4', seasons = {{build = {}}, {build = {}}, {build = {}}, {build = {}}},
     policy = {option = 'A', pop_ceiling = 55, beauty = 'used_rooms'}, trade = {want = {'cloth'}, sell = {'ring'}}},
     ours = {{type = 'FIGURINE', value = 900}, {type = 'RING', value = 120}, {type = 'RING', value = 110}}}
   W.frame(1)
   to_depot(W, d, c)
   F.until_(W, function() return first_mark(W) ~= nil end, 600)
+  T.eq(U.brought and U.brought.types, {'RING'}, 'only the sale types are sent to the depot')
   local m = first_mark(W)
   T.eq(m.buy, {'CLOTH:60'})
   T.ok(#m.sell > 0)

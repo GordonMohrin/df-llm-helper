@@ -952,6 +952,20 @@ local function step_wait(K, cars, now)
     if not f.no_depot then f.no_depot = true; K.log('warn', 'trade: caravan %s but no built trade depot', civ_name(c.ent)) end
     return
   end
+  -- the sale goods go to the depot (once per visit), whatever stockpile holds them
+  if not f.brought then
+    f.brought = true
+    local _, sell = wants(K)
+    local types, seen = {}, {}
+    for _, tk in ipairs(sell) do
+      for tn in pairs(tk.types) do if not seen[tn] then seen[tn] = true; types[#types + 1] = tn end end
+    end
+    table.sort(types)
+    if #types > 0 then
+      local ok, n = act_trade(K, 'bring', {depot = d.id, types = types, max = M.CFG.ITEMS})
+      K.log('info', 'trade: %s sale items sent to the depot', ok and tostring(n) or ('no (' .. tostring(n) .. ')'))
+    end
+  end
   -- depot sheet toggles "Broker requested at depot" / "Anyone can Trade"
   local at_for = v.at >= 0 and now - v.at or 0
   local anyone = not has_broker() or at_for >= M.CFG.BROKER_WAIT
