@@ -17,6 +17,10 @@
 --     Forbidden buckets on revealed Kern+ tiles are unforbidden (item_flag; not in BREACH, and without a Kern+
 --     burrow only in PEACE), and a missing rest is ordered (workorder dfllm:bucket, MakeBucket in wood, one
 --     live order at a time). Items are kept as ids between frames and looked up again before a write;
+--   * pond loop (live L6, Paddletribes): a Pond zone beside a WET well makes the carriers take the water from that
+--     very well (the nearest source) and pour it into the pond hole over the same sump, again and again. A Pond
+--     zone within `pond_near` tiles of a wet well is removed (act.pond_remove) unless a wet Water Source zone
+--     is the real supply; at most `pond_per_run` a run;
 --   * cisterns (manifest rooms tpl `cistern`): revealed water on the well room floor (2 tiles, or 1 tile in
 --     two runs in a row) means the pipe is flooding the room: DECISION_NEEDED cistern_flood (A), close the
 --     floodgate with the room's lever.
@@ -37,7 +41,7 @@ local DAY = C.TICKS.DAY
 -- over the alarm, at once when a patient crosses it, else weekly (care's mood re-wake); hospital_water starts
 -- with the dry episode and repeats weekly, and not in a run that already sent patient_thirst.
 M.DEFAULTS = {
-  thirst_alarm = 40000, thirst_watch = 25000, near = 30, shaft = 12,
+  thirst_alarm = 40000, thirst_watch = 25000, near = 30, shaft = 12, pond_near = 3, pond_per_run = 2,
   buckets_min = 2, bucket_per_patient = 1, buckets_max = 8, unforbid_per_run = 4,
   alarm_every = 7 * DAY, hosp_every = 7 * DAY, request_every = 28 * DAY, flood_every = 2 * DAY, flood_tiles = 2,
   units_per_slice = 40, items_per_slice = 200, zone_tiles = 25, order_backoff = 3 * DAY,
@@ -193,7 +197,11 @@ local function phase_sites(K, c, r)
     seen[zn.id] = true
   end
   local any = vec(function() return other.ANY_ZONE end)
+  local pondt = df.civzone_type and df.civzone_type.Pond
   for _, zn in ipairs(any) do
+    if pondt and zn.type == pondt then
+      r.ponds[#r.ponds + 1] = {id = zn.id, x1 = zn.x1, y1 = zn.y1, x2 = zn.x2, y2 = zn.y2, z = zn.z}
+    end
     if locs[zn.location_id] then
       r.hosp[#r.hosp + 1] = {id = zn.id, x1 = zn.x1, y1 = zn.y1, x2 = zn.x2, y2 = zn.y2, z = zn.z,
                              want = desired_buckets(locs[zn.location_id])}
@@ -310,8 +318,33 @@ local function supply_buckets(K, c, r, p, want)
   return fixed, ordered, missing
 end
 
+-- pond zones beside a wet well (see the header): the carriers would pour the well's own water back into it
+local function pond_loops(K, c, r)
+  if #r.ponds == 0 or not M.can('pond_remove') then return 0 end
+  for _, s in ipairs(r.sources) do
+    if s.kind == 'zone' and s.wet then return 0 end            -- a real supply exists: the pond is no loop
+  end
+  local n = 0
+  for _, pd in ipairs(r.ponds) do
+    if n >= c.pond_per_run then break end
+    for _, s in ipairs(r.sources) do
+      if s.kind == 'well' and s.wet and dist_box(s.x, s.y, s.z, {x1 = pd.x1, y1 = pd.y1, x2 = pd.x2, y2 = pd.y2,
+                                                                 z = pd.z}) <= c.pond_near then
+        if K.act.pond_remove(pd.id) then
+          n = n + 1
+          K.log('warn', 'water: pond zone %d removed: the wet well %d beside it was its water source (a loop)',
+                pd.id, s.id)
+        end
+        break
+      end
+    end
+  end
+  return n
+end
+
 local function finish(K, c, r, p)
   local now = K.now().tick
+  pond_loops(K, c, r)
   local hosp_ok, best_h = #r.hosp > 0, nil
   for _, h in ipairs(r.hosp) do
     local ok, b = served(K, c, r, h)
@@ -444,7 +477,7 @@ local function new_run(K)
   local ids = {}
   for _, id in ipairs(type(cu) == 'table' and cu.ids or {}) do ids[#ids + 1] = id end
   return {ph = 1, idx = 0, ids = ids, patients = {}, sources = {}, hosp = {}, buckets = 0, free = 0, full = 0,
-          forbidden = {}}
+          forbidden = {}, ponds = {}}
 end
 
 function M.init(K)

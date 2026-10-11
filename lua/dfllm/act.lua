@@ -913,6 +913,22 @@ local function impls(state)
     return true, n
   end
 
+  -- live L6 (Paddletribes): removes ONE Pond zone by id (as the player deletes the zone on its sheet); water
+  -- uses it for ponds that only recycle the water of the well beside them. Never touches other zones.
+  function I.pond_remove(id)
+    id = math.tointeger(id)
+    if not id then return false, 'bad zone id' end
+    local pondt = df.civzone_type.Pond
+    for _, z in ipairs(df.global.world.buildings.other.ACTIVITY_ZONE) do
+      if z.id == id then
+        if z.type ~= pondt then return false, 'not a pond zone' end
+        if dfhack.buildings.deconstruct(z) then return true, 1 end
+        return false, 'deconstruct refused'
+      end
+    end
+    return false, 'no such zone'
+  end
+
   -- live L6 (reclaimed Paddletribes): the office zone had no owner, so the manager validated no order
   -- (117 of 118 waiting, the stills idle, drink 0). Assigns an unowned Office zone to the manager, as the
   -- zone sheet's "Assign" does (dfhack.buildings.setOwner). Never takes an office someone owns.

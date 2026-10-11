@@ -319,6 +319,34 @@ T.test('cistern flood: water on the well room floor wakes the LLM every 2 days; 
   T.ok(needed(W2, 'cistern_flood')[1].msg:find('2 wet tiles', 1, true))
 end)
 
+T.test('pond loop (live L6): a Pond zone beside a wet well is removed; a real Water Source zone keeps it', function()
+  local function run(with_source)
+    local removed = {}
+    local W, M = world{tiles = {['20,12,4'] = '_', ['20,12,3'] = '~', ['31,12,4'] = '~'},
+                       setup = function(W)
+                         df.civzone_type.Pond = 11
+                         df.civzone_type[11] = 'Pond'
+                         well(W, 20, 12, 5)
+                         F.building(W, 'ANY_ZONE', {id = 80, type = df.civzone_type.Pond, x1 = 21, y1 = 12, x2 = 21,
+                                                    y2 = 12, z = 5})
+                         F.building(W, 'ANY_ZONE', {id = 81, type = df.civzone_type.Pond, x1 = 70, y1 = 70, x2 = 70,
+                                                    y2 = 70, z = 5})
+                         if with_source then
+                           F.building(W, 'ZONE_WATER_SOURCE', {id = 82, type = df.civzone_type.WaterSource, x1 = 30,
+                                                               y1 = 12, x2 = 31, y2 = 12, z = 5,
+                                                               spec_sub_flag = {active = true}})
+                         end
+                         W.act_result('pond_remove', function(id) removed[#removed + 1] = id; return true, 1 end)
+                       end}
+    local C2 = require('dfllm.util.contract')
+    C2.ACT.pond_remove = {'water'}
+    day(W)
+    return removed
+  end
+  T.eq(run(false), {80}, 'only the pond beside the wet well; the far one stays')
+  T.eq(run(true), {}, 'a wet Water Source zone is the real supply: no loop')
+end)
+
 T.test('state: nothing published until the contract has a water key; the census is sliced', function()
   local W, M = world{cit = 90}
   W.run(100, {skip = 100})
