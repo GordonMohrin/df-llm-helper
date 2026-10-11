@@ -336,6 +336,36 @@ T.test('economy work_detail: builtin tool details only, sorted membership, labor
   T.eq({env.api.work_detail('Woodcutters', 7, false)}, {true, 'not a member'})
 end)
 
+T.test('economy order_material: an open one-time rock furniture order is re-entered in wood (live L3)', function()
+  local W = H.world{tag = 'om'}
+  df.job_type = {ConstructDoor = 19, ConstructBed = 20, [19] = 'ConstructDoor', [20] = 'ConstructBed'}
+  df.workquota_frequency_type = {OneTime = 0, Daily = 1}
+  local mo = df.global.world.manager_orders
+  local function order(id, jt, freq, mt, left)
+    local o = {id = id, job_type = jt, frequency = freq, mat_type = mt, mat_index = -1, amount_left = left,
+               material_category = {}}
+    mo.all:insert('#', o)
+    return o
+  end
+  local door = order(314, 19, 0, 0, 7)
+  local daily = order(62, 19, 1, 0, 1)
+  local bed = order(35, 20, 0, -1, 1)
+  local done = order(319, 19, 0, 0, 0)
+  local env = mk()
+  env.who_v = 'runner'
+  T.eq({env.api.order_material(314, 'wood')}, {false, 'not owner'})
+  env.who_v = 'economy'
+  T.eq({env.api.order_material(314, 'rock')}, {false, 'material must be wood'})
+  T.eq({env.api.order_material(999, 'wood')}, {false, 'no order 999'})
+  T.eq({env.api.order_material(62, 'wood')}, {false, 'repeating order'}, 'library orders keep their material')
+  T.eq({env.api.order_material(35, 'wood')}, {false, 'no wood variant for this job'})
+  T.eq({env.api.order_material(319, 'wood')}, {false, 'not an open rock order'})
+  T.eq({env.api.order_material(314, 'wood')}, {true, 'wood'})
+  T.eq({door.mat_type, door.mat_index, door.material_category.wood, door.amount_left}, {-1, -1, true, 7})
+  T.eq({env.api.order_material(314, 'wood')}, {false, 'not an open rock order'}, 'once only')
+  T.eq({daily.mat_type, bed.material_category.wood, done.mat_type}, {0, nil, 0})
+end)
+
 T.test('arbiter actions: settings return old values, timestream old fps, overlays, popups, pause', function()
   local W = H.world{tag = 'arb'}
   local env = mk()

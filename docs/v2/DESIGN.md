@@ -71,7 +71,7 @@ Claude Code orchestrator (≤60k ctx, Monitor on `dfllm follow`) → fresh Sonne
 
 | Actuator | Sole writer | Desired value from | External input |
 |---|---|---|---|
-| pause | arbiter | Never pauses. Unpauses only pauses caused by a whitelisted popup, which it dismisses. | inbox `pause` (TTL ≤600 s)/`unpause`. A pause by Gordon is honoured; a D event after 10 min. |
+| pause | arbiter | Never pauses. Unpauses only pauses caused by a whitelisted popup, which it dismisses (live L3: a berserk notice too, with DECISION_NEEDED `berserk`; halted, nothing in v2 reacted and the fort stood still). | inbox `pause` (TTL ≤600 s)/`unpause`. A pause by Gordon is honoured; a D event after 10 min. |
 | timestream fps, `enabler.gfps` | arbiter | mode table | inbox `tempo` (lower only, TTL) |
 | civ alert + alert burrow list | siege | mode (Kern+ or Tiefe+) | — |
 | squad routine/orders/stations | military | posture set by siege/drill | `squad.sortie` only with approval |
@@ -162,6 +162,8 @@ Gameplay modules run on `cur_year_tick` deltas, which stay correct under timestr
 - **KPI:** starving postings = 0, parsed from `labormanager status` once per game day.
 - **Idle (D-03):** act only if idle >40 % for 3 game days **and** the useful backlog is not empty. The backlog holds boulders→blocks (capped), walls and overhangs, smoothing of *used* rooms, capped trade crafts, and `combine`. Never filler digging.
 - **Cancel-loop detector:** an order cancelled ≥5 times per day is suspended and reported (Run 4).
+- **Wood for rock furniture (live L3):** quickfort `orders` always orders doors, cabinets, coffers, coffins, tables and chairs in rock. Below 20 boulders economy re-enters open one-time orders of these jobs in wood (`act.order_material`, the work orders screen's cancel + re-enter) while logs beyond 30, minus the wood already ordered for them, cover the amount (Castlerisen: 43 buildings waited two years with 8 boulders and 82 logs).
+- **Supply alarm thresholds:** thirst 40,000 and hunger 65,000 ticks, 10,000 before DF's "dehydrated" (50,000) and "starving" (75,000); DF's plain "thirsty"/"hungry" made the brake flap (live L1b, L3).
 
 **5.6 Happiness.**
 - **Order:** dining hall with tables and chairs → own bedrooms (free ≥ adults + 4, value ≥500) → general temple (≥2,000 when a sect petitions) → tavern (keeper, mugs) → library.

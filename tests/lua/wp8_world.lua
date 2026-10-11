@@ -60,7 +60,10 @@ function F.install(W)
   et.NONE, et[-1] = -1, 'NONE'
   df.item_type = et
   df.job_type = enum_from({'CustomReaction', 'MakeCharcoal', 'SmeltOre', 'MakeQuiver', 'ConstructArmorStand',
-                           'PrepareMeal', 'WeaveCloth', 'ConstructBlocks', 'MakeCrafts', 'StrangeMoodCrafter'}, 0)
+                           'PrepareMeal', 'WeaveCloth', 'ConstructBlocks', 'MakeCrafts', 'StrangeMoodCrafter',
+                           'ConstructDoor', 'ConstructCabinet', 'ConstructChest', 'ConstructCoffin', 'ConstructTable',
+                           'ConstructThrone', 'ConstructBed'}, 0)
+  df.workquota_frequency_type = enum_from({'OneTime', 'Daily', 'Monthly', 'Seasonally', 'Yearly'}, 0)
   df.workshop_type = enum_from({'Carpenters', 'Farmers', 'Masons', 'Craftsdwarfs', 'Jewelers', 'MetalsmithsForge',
                                 'MagmaForge', 'Bowyers', 'Mechanics', 'Siege', 'Butchers', 'Leatherworks', 'Tanners',
                                 'Clothiers', 'Fishery', 'Still', 'Loom'}, 0)

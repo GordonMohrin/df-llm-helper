@@ -42,7 +42,12 @@ M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
             mood = {'has claimed a', 'is taken by a', 'withdraws from society', 'has begun a mysterious construction',
                     'has created', 'has been possessed', 'has gone stark raving mad', 'has gone melancholy'},
             -- live L2: "<name> has assumed the position of expedition leader of <civ>." halted the fort
-            noble = {'has assumed the position', 'has been elected', 'has become a militia'}}   -- live L1: "<name>, Ghostly Bowyer has been put to rest."   -- live L1: "The Misty Company, a farmers guild, has been established."
+            noble = {'has assumed the position', 'has been elected', 'has become a militia'},
+            -- live L2/L3: "<name> has gone berserk!" halted the fort (3 times in L2, then again in L3 for a child
+            -- whose Secretive mood failed). Nothing in v2 reacts while the game is halted, so an unattended fort
+            -- stood still; the citizens and soldiers deal with a berserker as after a click on OK. The notice is
+            -- dismissed and wakes the LLM (DECISION_NEEDED berserk) so Gordon hears of it.
+            berserk = {'has gone berserk'}}   -- live L1: "<name>, Ghostly Bowyer has been put to rest."   -- live L1: "The Misty Company, a farmers guild, has been established."
 M.ASK_AFTER_MS = 600000            -- foreign pause older than this -> DECISION_NEEDED
 M.REASSERT_MS = 60000              -- re-check the live timestream fps at most this often
 M.RETRY_MS = 30000                 -- back-off after a failed timestream write
@@ -310,9 +315,9 @@ end
 local function popup_kind()
   local ok, text = pcall(function() return dfhack.df2utf(df.global.world.status.popups[0].text) end)
   if not ok or type(text) ~= 'string' then return nil end
-  text = text:lower()                     -- live L1b: "Merchants have arrived and ..." starts upper case
+  local low = text:lower()                -- live L1b: "Merchants have arrived and ..." starts upper case
   for kind, marks in pairs(M.POPUPS) do
-    for _, m in ipairs(marks) do if text:find(m:lower(), 1, true) then return kind end end
+    for _, m in ipairs(marks) do if low:find(m:lower(), 1, true) then return kind, text end end
   end
 end
 
@@ -347,8 +352,15 @@ local function track_pause(K)
   if not observe(K) then return end
   -- a whitelisted popup is also cleared once an expired inbox hold is all that is left
   if st.pause_by == 'popup' or (st.pause_by == 'inbox' and not st.hold and popup_count() > 0) then
-    local kind = popup_kind()
-    if kind and K.act.dismiss_popup(kind) and popup_count() == 0 then K.act.set_paused(false) end
+    local kind, text = popup_kind()
+    if kind and K.act.dismiss_popup(kind) then
+      if kind == 'berserk' then
+        K.emit('DECISION_NEEDED', 'A', 'berserk: ' .. text:sub(1, 120),
+               {id = 'berserk', q = text:sub(1, 120) .. ' The fort runs on; citizens and soldiers deal with it. ' ..
+                                    'Bury the body at once (ghost risk).'})
+      end
+      if popup_count() == 0 then K.act.set_paused(false) end
+    end
   end
   if st.pause_by ~= 'inbox' and not st.asked and now.ms - st.pause_since >= M.ASK_AFTER_MS then
     st.asked = true

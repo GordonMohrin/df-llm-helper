@@ -13,6 +13,10 @@ local QF_COMMANDS = {run = true, orders = true, undo = true}
 local ITEM_FLAGS = {forbid = true, dump = true, melt = true}
 -- builtin work details whose membership act.work_detail may change (each holds one tool labor)
 A.TOOL_DETAILS = {Miners = true, Woodcutters = true, Hunters = true}
+-- one-time furniture orders act.order_material may re-enter in wood (carpenter's variants of the mason jobs)
+A.WOOD_JOBS = {ConstructDoor = true, ConstructCabinet = true, ConstructChest = true, ConstructCoffin = true,
+               ConstructTable = true, ConstructThrone = true, ConstructArmorStand = true, ConstructWeaponRack = true,
+               ConstructHatchCover = true, ConstructGrate = true, ConstructFloodgate = true}
 
 -- Used when config/allowlist.json (WP4) is missing: read-only status queries only.
 A.BUILTIN_ALLOWLIST = {v = 2, builtin = true, blocked = {}, armok_exceptions = {}, commands = {
@@ -1056,6 +1060,27 @@ local function impls(state)
       end
     end
     return true, 'removed'
+  end
+
+  -- work orders screen: cancel a one-time rock furniture order and enter it again in wood for the amount left
+  -- (live L3: quickfort's `orders` always picks rock; on this soil embark 43 doors, cabinets, coffers,
+  -- coffins, tables and chairs waited for two years with 8 boulders and 82 logs in the fort). Only the
+  -- material changes; job type, amount and conditions stay, like the re-entered order.
+  function I.order_material(order_id, material)
+    if material ~= 'wood' then return false, 'material must be wood' end
+    local id = int(order_id)
+    if not id then return false, 'order id required' end
+    local o
+    for _, x in ipairs(df.global.world.manager_orders.all) do
+      if x.id == id then o = x; break end
+    end
+    if not o then return false, 'no order ' .. tostring(order_id) end
+    if not A.WOOD_JOBS[df.job_type[o.job_type] or ''] then return false, 'no wood variant for this job' end
+    if o.frequency ~= df.workquota_frequency_type.OneTime then return false, 'repeating order' end
+    if o.mat_type ~= 0 or o.amount_left <= 0 then return false, 'not an open rock order' end
+    o.mat_type, o.mat_index = -1, -1
+    o.material_category.wood = true
+    return true, 'wood'
   end
 
   A.install_trade(I, gui_proxy(), int)

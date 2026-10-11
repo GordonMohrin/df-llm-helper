@@ -28,8 +28,18 @@ M.DEFAULTS = {
   -- supply alarm (live L1: two dwarves died of hunger and thirst): >= units citizens over the thirst or
   -- hunger timer, or drink/food below `days`, holds arbiter's brake and wakes the LLM (weekly)
   -- live L1b: 25000 is DF's plain "thirsty" (dwarves at work reach it daily: the brake flapped and woke the
-  -- LLM weekly with 135 drink days); 40000 leaves 10000 ticks to dehydration (50000), 35000 to death
-  alarm = {thirst = 40000, hunger = 50000, units = 2, days = 10},
+  -- LLM weekly with 135 drink days); 40000 leaves 10000 ticks to dehydration (50000), 35000 to death.
+  -- live L3: 50000 is DF's plain "hungry" (dwarves eat only then): 2-3 hungry citizens with 150 food days held
+  -- the brake on and off all season (47 brake switches); 65000 leaves 10000 ticks to "starving" (75000)
+  alarm = {thirst = 40000, hunger = 65000, units = 2, days = 10},
+  -- live L3: quickfort `orders` makes every door, cabinet, coffer, coffin, table and chair a rock order; on this soil
+  -- embark 43 such buildings waited two years (8 boulders, 82 logs). Below `boulders_below` free boulders, open
+  -- one-time rock orders of these jobs are re-entered in wood while logs beyond `wood_min` (minus the wood
+  -- already ordered for them) cover their amount; at most `per_day` orders a day
+  wood_orders = {boulders_below = 20, wood_min = 30, per_day = 8,
+                 jobs = {'ConstructDoor', 'ConstructCabinet', 'ConstructChest', 'ConstructCoffin', 'ConstructTable',
+                         'ConstructThrone', 'ConstructArmorStand', 'ConstructWeaponRack', 'ConstructHatchCover',
+                         'ConstructGrate', 'ConstructFloodgate'}},
   -- supply labors labormanager (modern) starved for >= cycles (LABOR_STARVED): a tool labor with a builtin
   -- detail (Miners, Woodcutters, Hunters, Fisherdwarves) left unmanaged becomes managed, so it staffs the
   -- detail; any other starved one makes baseline fall back to monitor mode (live L1: BREWER starved 243
@@ -387,6 +397,35 @@ local function supply(K, c, p, days, inv)
       end
     end
   end
+end
+
+-- rock furniture orders into wood while boulders are scarce (live L3, see DEFAULTS.wood_orders)
+local function wood_orders(K, c, inv)
+  local w = c.wood_orders
+  if type(w) ~= 'table' or (inv.boulders or 0) >= (w.boulders_below or 20) then return 0 end
+  local jobs = {}
+  for _, j in ipairs(w.jobs or {}) do jobs[j] = true end
+  local one = df.workquota_frequency_type.OneTime
+  local function open_of(o)
+    return jobs[df.job_type[o.job_type] or ''] and o.frequency == one and (o.amount_left or 0) > 0
+  end
+  local budget = (inv.wood or 0) - (w.wood_min or 30)
+  for _, o in ipairs(orders_all()) do
+    if open_of(o) and o.material_category.wood then budget = budget - o.amount_left end
+  end
+  local n = 0
+  for _, o in ipairs(orders_all()) do
+    if n >= (w.per_day or 8) or budget <= 0 then break end
+    if open_of(o) and o.mat_type == 0 and o.amount_left <= budget then
+      local left = o.amount_left
+      if K.act.order_material(o.id, 'wood') then
+        n, budget = n + 1, budget - left
+        K.log('info', 'order %d %s x%d: rock -> wood (%d boulders, %d logs)', o.id, df.job_type[o.job_type], left,
+              inv.boulders or 0, inv.wood or 0)
+      end
+    end
+  end
+  return n
 end
 
 -- Gordon's rule: plump helmets are never cooked (D-09 'yes' lifts it only during a famine)
@@ -942,6 +981,8 @@ local function daily(K, c)
   local okt, nt = pcall(tools, K, c, p, inv, engine)
   if not okt then K.log('warn', 'tool details: %s', tostring(nt)) end
   supply(K, c, p, days, inv)
+  local okw, nw = pcall(wood_orders, K, c, inv)
+  if not okw then K.log('warn', 'wood orders: %s', tostring(nw)) end
   imports(K, c, p)
   -- labor KPIs; PEACE days feed baseline's labormanager A/B test
   local ok, out = K.act.run('labormanager', 'status')

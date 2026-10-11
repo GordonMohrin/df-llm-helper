@@ -71,7 +71,7 @@ ACT = {
     "quickfort": ["runner"],
     "orders_import": ["economy"], "orders": ["economy"], "workorder": ["economy"],
     "order_suspend": ["economy"], "kitchen_exclude": ["economy"], "appoint": ["economy"],
-    "work_detail": ["economy"], "item_flag": ["care"],
+    "work_detail": ["economy"], "order_material": ["economy"], "item_flag": ["care"],
     "zone_assign": ["care"], "trade": ["trade"],
     "run": ["baseline", "economy", "care", "military", "trade", "arbiter", "selftest", "runner"],
 }

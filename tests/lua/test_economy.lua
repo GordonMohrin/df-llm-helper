@@ -342,6 +342,63 @@ T.test('supply alarm: >= 2 thirsty citizens or drink < 10 days -> alarm(), DECIS
   T.eq(thirst(), 2)
 end)
 
+T.test('supply alarm: plain "hungry" (50000-64999) is no alarm, >= 2 near starving (65000) is (live L3)', function()
+  local W = world{setup = function(W)
+    F.item(W, 'DRINK', {stack_size = 400})
+    F.item(W, 'FOOD', {stack_size = 400, subtype = 1})
+  end}
+  W.unit(1).counters2 = {thirst_timer = 0, hunger_timer = 52000}
+  W.unit(2).counters2 = {thirst_timer = 0, hunger_timer = 64000}
+  W.unit(3).counters2 = {thirst_timer = 0, hunger_timer = 50000}
+  days(W, 1)
+  T.eq(select(2, W.K.call('economy', 'alarm')), nil, 'DF eats at "hungry": no brake for it')
+  W.unit(1).counters2.hunger_timer = 66000
+  W.unit(2).counters2.hunger_timer = 70000
+  days(W, 1)
+  T.eq(select(2, W.K.call('economy', 'alarm')), 'hunger 2')
+end)
+
+T.test('wood orders: rock furniture orders turn wood while boulders are scarce and logs cover them (live L3)', function()
+  local function run(boulders, logs, extra)
+    local orders = {}
+    local W = world{setup = function(W)
+      for _ = 1, boulders do F.item(W, 'BOULDER', {}) end
+      for _ = 1, logs do F.item(W, 'WOOD', {}) end
+      local jt, one, daily = df.job_type, df.workquota_frequency_type.OneTime, df.workquota_frequency_type.Daily
+      local function o(job, freq, mt, left, wood)
+        orders[#orders + 1] = F.order(W, {job_type = jt[job], frequency = freq, mat_type = mt, mat_index = -1,
+                                          amount_left = left, amount_total = left,
+                                          material_category = {wood = wood or nil}, status = {}})
+      end
+      o('ConstructDoor', one, 0, 7)           -- 1
+      o('ConstructCabinet', one, 0, 8)        -- 2
+      o('ConstructDoor', daily, 0, 1)         -- 3 rockstock (repeating): stays
+      o('ConstructBed', one, -1, 2, true)     -- 4 beds are wood anyway
+      o('ConstructCoffin', one, 0, 0)         -- 5 finished
+      o('ConstructThrone', one, 0, 40)        -- 6 more than the logs cover
+      for _, e in ipairs(extra or {}) do o(e[1], one, e[2], e[3], e[4]) end
+    end}
+    W.act_result('order_material', function(id, mat)
+      for _, x in ipairs(orders) do
+        if x.id == id then x.mat_type, x.mat_index, x.material_category.wood = -1, -1, true end
+      end
+      return true, mat
+    end)
+    days(W, 1)
+    local ids = {}
+    for _, a in ipairs(W.find_acts('order_material')) do ids[#ids + 1] = a.args[1] end
+    return ids, orders
+  end
+  local ids, o = run(8, 82)
+  T.eq(ids, {o[1].id, o[2].id}, 'door and cabinet; the repeating, bed, finished and 40-chair orders stay')
+  ids = run(25, 82)
+  T.eq(#ids, 0, 'enough boulders: rock stays')
+  ids = run(8, 40)
+  T.eq(#ids, 1, '10 spare logs cover the 7 doors, not the cabinets as well')
+  ids = run(8, 82, {{'ConstructTable', -1, 50, true}})
+  T.eq(#ids, 0, 'logs already promised to wood orders')
+end)
+
 T.test('starved supply labors: tool labors -> managed, others -> monitor fallback, LABOR_STARVED, modern only', function()
   local E = fresh('economy')
   local list = table.concat({'MINE: unmanaged (starved 1384 cycles)', 'HAUL_STONE: managed',
