@@ -58,7 +58,10 @@ M.DEFAULTS = {
            details = {{name = 'Miners', skill = 'MINING', melee = {'MINING'}, min = 2, max = 4, max_pop = 20,
                        tiles_per = 40},
                       {name = 'Woodcutters', skill = 'WOODCUTTING', melee = {'AXE'}, wood = {60, 150}, n = {2, 1, 0}},
-                      {name = 'Hunters', skill = 'CROSSBOW', ranged = {'CROSSBOW', 'BOW'}, famine = 2}}},
+                      -- live L3: 9 of 10 strange moods failed with 0 bone, shell and leather in the fort; one
+                      -- hunter in PEACE from mood_from_phase while one of them is below the mood stock
+                      {name = 'Hunters', skill = 'CROSSBOW', ranged = {'CROSSBOW', 'BOW'}, famine = 2, mood = 1,
+                       mood_keys = {'bone', 'shell', 'leather'}}}},
   stages = {
     {lib = 'library/basic', any = {'migrants', 'cit>=10'}},
     {lib = 'library/rockstock', any = {'workshop:Masons'}},
@@ -784,7 +787,17 @@ local function tool_target(K, spec, cit, inv, p)
     local w = inv.wood or 0
     return (w < spec.wood[1] and spec.n[1]) or (w < spec.wood[2] and spec.n[2]) or spec.n[3], w
   end
-  return p.famine and spec.famine or 0, p.famine and 1 or 0
+  if p.famine then return spec.famine or 0, 1 end
+  if spec.mood and K.mode() == 'PEACE' then
+    local phase = (K.view() or {}).phase
+    local goal = math.tointeger((K.plan.supply or {}).mood_stock) or 10
+    if type(phase) == 'string' and phase >= (M.conf(K).mood_from_phase or 'P3') then
+      for _, key in ipairs(spec.mood_keys or {}) do
+        if (inv[key] or 0) < goal then return spec.mood, inv[key] or 0 end
+      end
+    end
+  end
+  return 0, 0
 end
 
 local function noble(u)

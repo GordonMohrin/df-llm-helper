@@ -48,7 +48,8 @@
             "details": [{"name": "Miners", "skill": "MINING", "melee": ["MINING"], "min": 2, "max": 4, "max_pop": 20,
                          "tiles_per": 40},
                         {"name": "Woodcutters", "skill": "WOODCUTTING", "melee": ["AXE"], "wood": [60, 150], "n": [2, 1, 0]},
-                        {"name": "Hunters", "skill": "CROSSBOW", "ranged": ["CROSSBOW", "BOW"], "famine": 2}]},
+                        {"name": "Hunters", "skill": "CROSSBOW", "ranged": ["CROSSBOW", "BOW"], "famine": 2, "mood": 1,
+                         "mood_keys": ["bone", "shell", "leather"]}]},
   "stages": [
    {"lib": "library/basic", "any": ["migrants", "cit>=10"]},
    {"lib": "library/rockstock", "any": ["workshop:Masons"]},

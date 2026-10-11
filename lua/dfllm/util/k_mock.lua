@@ -317,7 +317,7 @@ function M.new(opts)
     m.id, m.pos, m.x, m.y, m.z = id, nil, p[1] or p.x, p[2] or p.y, p[3] or p.z
     local u = {id = id, pos = view(m, {x = 'x', y = 'y', z = 'z'}),
                flags1 = view(m, {caged = 'caged', inactive = 'offmap'}), flags2 = view(m, {killed = 'dead'}),
-               military = {squad_id = m.squad or -1, squad_position = -1},
+               military = {squad_id = m.squad or -1, squad_position = -1}, civ_id = m.civ_id or -1,
                inventory = vec{}, status = {}, _m = m}
     units_by_id[id] = u
     G.world.units.active:insert('#', u)

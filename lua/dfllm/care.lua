@@ -114,11 +114,22 @@ end
 -- (full-heal.lua:238-240), while getCitizens() and so K.census.u.ids drop them at once (Lua API.txt:1466).
 -- Insane citizens are covered too. isOwnGroup :1480, isAnimal :1626.
 -- dead_only: also isDead (:1492), so a living dwarf's severed limb is not taken for a death
+-- live L3: a berserk citizen leaves the own group (isOwnGroup false, histfig link FORMER_MEMBER of the site
+-- government). Its death went unrecorded, its corpse was dumped as a stranger's, and its ghost held the fort
+-- in BREACH; a (former) member link to plotinfo.group_id keeps it ours (the unit sheet shows that link)
+local function group_member(u)
+  local hf = df.historical_figure.find(u.hist_figure_id)
+  local gid = df.global.plotinfo.group_id
+  if not hf or gid == nil or gid < 0 then return false end
+  for _, l in ipairs(hf.entity_links) do if l.entity_id == gid then return true end end
+  return false
+end
+
 function M.own_member(id, dead_only)
   local ok, yes = pcall(function()
     local u = df.unit.find(id)
-    return u ~= nil and dfhack.units.isOwnGroup(u) and not dfhack.units.isAnimal(u)
-           and (not dead_only or dfhack.units.isDead(u))
+    if u == nil or dfhack.units.isAnimal(u) or (dead_only and not dfhack.units.isDead(u)) then return false end
+    return dfhack.units.isOwnGroup(u) or group_member(u)
   end)
   return ok and yes == true
 end

@@ -448,7 +448,8 @@ local function tool_world(opts)
     ctl.wds = {Miners = wd('Miners', 1, opts.miners), Woodcutters = wd('Woodcutters', 2, opts.cutters),
                Hunters = wd('Hunters', 3, opts.hunters)}
     df.global.plotinfo.labor_info = {work_details = kmock.vec{ctl.wds.Miners, ctl.wds.Woodcutters, ctl.wds.Hunters}}
-    W.load({name = 'runner', every = {ticks = 600}, dig_backlog = function() return ctl.backlog or backlog end})
+    W.load({name = 'runner', every = {ticks = 600}, dig_backlog = function() return ctl.backlog or backlog end,
+            state = function() return {phase = ctl.phase or opts.phase} end})
     W.act_result('run', function(cmd, a1)
       if cmd == 'labormanager' and a1 == 'mode' then return true, ctl.mode or mode end
       return true, ''
@@ -523,6 +524,28 @@ T.test('tool details: woodcutters by log stock, hunters only in a famine, one to
   local W3, ctl3 = tool_world{cit = 12, miners = {5, 7}, food = 0}
   days(W3, 1)
   T.eq(#members(ctl3, 'Hunters'), 1, 'famine: hunters, capped by the one usable crossbow')
+end)
+
+T.test('tool details: one hunter for the mood stock (bone, shell, leather) from P1, in PEACE only (live L3)', function()
+  local W, ctl = tool_world{cit = 12, miners = {5, 7}, phase = 'P3'}
+  days(W, 2)
+  T.eq(#members(ctl, 'Hunters'), 1, 'no bone, shell or leather: one hunter')
+  local W2, ctl2 = tool_world{cit = 12, miners = {5, 7}, phase = 'P0'}
+  days(W2, 2)
+  T.eq(members(ctl2, 'Hunters'), {}, 'before mood_from_phase: none')
+  local W3, ctl3 = tool_world{cit = 12, miners = {5, 7}, phase = 'P3', setup = function(W)
+    for _ = 1, 10 do
+      F.item(W, 'CORPSEPIECE', {corpse_flags = {bone = true}})
+      F.item(W, 'CORPSEPIECE', {corpse_flags = {shell = true}})
+      F.item(W, 'SKIN_TANNED', {})
+    end
+  end}
+  days(W3, 2)
+  T.eq(members(ctl3, 'Hunters'), {}, 'mood stock full: none')
+  local W4, ctl4 = tool_world{cit = 12, miners = {5, 7}, phase = 'P3'}
+  W4.set_mode('ALERT')
+  days(W4, 2)
+  T.eq(members(ctl4, 'Hunters'), {}, 'not outside PEACE')
 end)
 
 T.test('tool details: shrinking keeps the best skill, also a noble member (live L1b: the bookkeeper miner)', function()

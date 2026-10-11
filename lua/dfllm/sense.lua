@@ -161,7 +161,13 @@ local function consider(hs, u)
     if U.isTame(u) or U.isFortControlled(u) then return 7 end
     -- live L1b: the ghost of a dead citizen (isUndead, isOwnGroup) walked into Kern+ and held the fort in
     -- BREACH for days; an own ghost is care's job (slab, burial), not the siege reflex's
-    if U.isGhost and U.isGhost(u) and U.isOwnGroup and U.isOwnGroup(u) then return 7 end
+    -- live L3: a berserk child's ghost is no longer isOwnGroup (berserk dwarves leave the group); as a ghost of
+    -- the fort's civilization it is still an own ghost. Counted as a hostile inside Kern+ it held the fort in
+    -- BREACH: every civilian sat in Tiefe+, nobody pulled a lever, buried the body or fetched a drink
+    if U.isGhost and U.isGhost(u) and ((U.isOwnGroup and U.isOwnGroup(u))
+                                       or (u.civ_id ~= -1 and u.civ_id == df.global.plotinfo.civ_id)) then
+      return 7
+    end
   end
   local x, y, z = U.getPosition(u)
   if not x then return 7 end

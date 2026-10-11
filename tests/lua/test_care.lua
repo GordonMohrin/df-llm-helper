@@ -203,6 +203,24 @@ T.test('deaths: census already dropped the dead citizen; insane members count; a
   T.eq(W.K.persist.get('m.care').dead, {3, 20})
 end)
 
+T.test('deaths: a berserker (left the own group, FORMER_MEMBER of the site government) is ours (live L3)', function()
+  local W = world{cit = 2, units = {{id = 30}, {id = 31}}}
+  W.unit(30).hist_figure_id = 300
+  W.unit(31).hist_figure_id = 310
+  local hfs = {[300] = {entity_links = {{entity_id = 77}}}, [310] = {entity_links = {{entity_id = 5}}}}
+  df.historical_figure = {find = function(id) return hfs[id] end}
+  df.global.plotinfo.group_id = 77
+  W.run(1)
+  W.kill(30); W.event('UNIT_DEATH', {unit = 30})
+  W.kill(31); W.event('UNIT_DEATH', {unit = 31})
+  F.item(W, 'ANY_CORPSE', {unit_id = 30, flags = {forbid = true}, _pos = {5, 5, 5}})
+  W.run(1)
+  local d = W.find_events('DEATH')
+  T.eq({#d, d[1].d.unit}, {1, 30}, 'the berserker; a dwarf of another group is not')
+  T.eq(W.K.persist.get('m.care').dead, {30})
+  df.historical_figure, df.global.plotinfo.group_id = nil, nil
+end)
+
 T.test('a corpse scan before UNIT_DEATH does not swallow the DEATH event', function()
   local W = world{}
   W.kill(2)

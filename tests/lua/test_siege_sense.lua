@@ -73,6 +73,21 @@ T.test('census.h: the ghost of a dead citizen is no hostile (live L1b: it held t
   T.eq(h.list[1].id, 402)
 end)
 
+T.test("census.h: a berserker's ghost (no longer own group) of the fort civ is no hostile (live L3: BREACH)", function()
+  local W = world{
+    S.cit(1, 60, 70),
+    {id = 19946, pos = {61, 70, Z}, undead = true, ghost = true, civ_id = 7},   -- berserk child, then a ghost
+    {id = 402, pos = {51, 30, Z}, undead = true, ghost = true, civ_id = 9},     -- another civ's ghost still is
+    {id = 403, pos = {52, 30, Z}, undead = true, civ_id = 7},                   -- an undead (not a ghost) still is
+  }
+  df.global.plotinfo.civ_id = 7
+  W.run(10)
+  local h = W.K.census.h
+  T.eq({h.vis, h.undead, h.inside}, {2, 2, 0})
+  T.eq({h.list[1].id, h.list[2].id}, {402, 403})
+  df.global.plotinfo.civ_id = nil
+end)
+
 T.test('census.h.list keeps the 40 nearest; kinds great/undead/inv/danger', function()
   local units = {S.cit(1, 60, 70)}
   for i = 1, 50 do units[#units + 1] = S.inv(200 + i, 100 + i, 10) end

@@ -167,7 +167,7 @@ postings, not idle %. Idle > 40 % for 3 days → useful backlog only, never fill
 **Moods:** all 12 moodable workshop types in P1; stock ≥ 10 cloth, leather, bone, shell, gems, bars
 from P1; never cancel a mood job.
 **Labor:** labormanager monitor; economy staffs the Miners (dig backlog, 2-4), Woodcutters (logs) and
-Hunters (famine only) details itself; you never change work details.
+Hunters (famine; 1 for a short bone/shell/leather mood stock) details itself; you never change work details.
 **Dead:** one 1x1 tomb per coffin, free tombs ≥ open corpses + 6; autoslab, burial, preserve-tombs.
 **Food/drink:** drink ≥ 170 days, food ≥ 60, ≥ 5 meal kinds; plump helmets are brewed, never cooked.
 **Happiness:** dining hall → own bedrooms (≥ 500) → general temple (≥ 2,000 on petition) → tavern →
