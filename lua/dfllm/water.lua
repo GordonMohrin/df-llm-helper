@@ -428,7 +428,7 @@ local function finish(K, c, r, p)
   local prev = st.out or {}
   if prev.hosp_ok ~= out.hosp_ok or prev.refuge_ok ~= out.refuge_ok or prev.patients ~= out.patients
      or fixed > 0 or ordered > 0 then
-    K.log('info', 'water: %d patients (max thirst %d), hospital %s, refuge %s, %d/%d wells wet, buckets %d free of %d '
+    K.log('info', 'water: %d patients (max thirst %d), hospital %s, refuge %s, %d wet sources (%d wells), buckets %d free of %d '
           .. '(want %d, unforbid %d, ordered %d)', out.patients, tmax, hosp_ok and 'ok' or 'dry',
           refuge_ok and 'ok' or 'dry', wet, wells, out.buckets_free, r.buckets, want, fixed, ordered)
   end

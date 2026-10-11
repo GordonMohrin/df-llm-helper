@@ -362,7 +362,7 @@ function F.ui(W, d, c, opts)
     end
     if not job then return false, 'no job' end
     if job._worker then return true, 'taken' end
-    if not U.broker_free then return false, 'broker busy' end
+    if not U.broker_free then return true, 'broker busy' end
     job._worker = W.add_unit{id = 901, citizen = true, pos = {d.x1 + 1, d.y1 + 1, d.z}}
     return true, 'assigned'
   end

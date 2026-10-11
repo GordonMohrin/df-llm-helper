@@ -142,7 +142,7 @@ T.test('broker_job (live L4): one TradeAtDepot job on the depot; an idle broker 
   T.eq({j.job_type, j.pos, j.general_refs[0].building_id}, {'TradeAtDepot', {x = 22, y = 22, z = 10}, 50})
   T.eq({#linked, linked[1][2]}, {1, true})
   T.eq({E.I.trade('broker_job', {depot = 50})}, {true, 'exists'}, 'never a second job')
-  T.eq({E.I.trade('broker_job', {depot = 50, assign = true})}, {false, 'broker busy'}, 'his own job is never cancelled')
+  T.eq({E.I.trade('broker_job', {depot = 50, assign = true})}, {true, 'broker busy'}, 'his own job is never cancelled')
   broker.job.current_job = nil
   T.eq({E.I.trade('broker_job', {depot = 50, assign = true})}, {true, 'assigned'})
   T.eq(workers[j], broker)

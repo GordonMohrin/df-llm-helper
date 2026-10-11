@@ -241,7 +241,7 @@ function A.install_trade(I, gui, int)
       if not u or dfhack.units.isDead(u) or not dfhack.units.isCitizen(u) or u.mood >= 0 then
         return false, 'no broker to assign'
       end
-      if u.job.current_job then return false, 'broker busy' end
+      if u.job.current_job then return true, 'broker busy' end   -- a no-op, not a failure (no ACT_FAIL)
       if not dfhack.job.addWorker(job, u) then return false, 'addWorker refused' end   -- Lua API.txt:1366
       return true, 'assigned'
     end

@@ -1,11 +1,123 @@
 # df-llm-helper v2: status after the integration check
 
-Date 2026-10-11. Branch `v2`. §0 is the live slot L3 (soak, 2 game years unattended), §0d the live slot L2
+Date 2026-10-11. Branch `v2`. §0 is the live slot L4 (iter2: integration of the four offline packages, trade, drills,
+a 1-year soak), §0e the live slot L3 (soak, 2 game years unattended), §0d the live slot L2
 (defense: levers, squads, fortcore 2-3, drill), §0c the live slot L1b (labor, moods, P1), §0b the live slot L1
 (economy and building), §0a the live slot L0 (first v2 code in Dwarf Fortress); §1-§9 are the offline
 integration state they started from (pytest, luahost on `hack/lua53.dll`, k_mock).
 
-## 0. Live slot L3: soak (2026-10-11 02:55 - 03:45)
+## 0. Live slot L4 (iter2): integration, live checks, trade, drills, soak (2026-10-11 05:23 - 07:10)
+**Fort at hand-over:** Castlerisen, y295 spring d8, pop 53 (35 adults, 6 soldiers), PEACE, phase **P5** (P4 -> P5 at
+y292 autumn after the first traded caravan), readiness **R1** (audit ok, traps 3), about 390-420 ticks/s, unpaused, DF on
+desktop 1 (runtime `region2/`). Plan y295 applied (target P5, beauty none, trade wants bars first). Drink 526 days, food
+105 days, stress 9 %, naked 9, ghosts 2, worn 38 %. `follow`, my KPI sampler and a read-only caravan probe ran in this
+session's background and stop with it.
+
+**Integration (commit 9a02ed6, the four offline packages):** water joined `contract.MODULES` (17 modules) and the ACT
+owners of `item_flag`/`workorder`; `act.burrow_units` (gate's lever pullers) applied from the gates package's patch; new
+`snapshot.reach(a, b)` (walk groups, care's mood reach); water's hospital lookup guarded (the adopt test booted it
+DISABLED); CONTRACTS §3.4/§5/§7 rows and the regenerated schema appendix; kernel tests updated for 17 modules.
+`dfllm reload` booted all 17 modules; the fortcore `retrofit=1` lever rooms were placed and done in one runner pass.
+
+**Deaths: 3 citizens in L4 (0 in the 1-year soak).** Causes from the death incidents:
+1. Nish Unôlrakust (weaponsmith 45, unit 20068), y291 winter: **a Possessed mood at the metalsmith's forge needed bars
+   x2** (read from the mood job). The fort has no ore and 0 metal bars; the only reachable metal were three tools (a pick,
+   two battle axes); 36 iron weapons and 31 iron shields lie on unreachable cavern levels (z98-106). The mood failed after
+   about 40 days; melancholy; **dehydrated** within days.
+2. Bomrek Bidokûrith (militia commander, 19917) and 3. her baby Obok Mosuskol (20084), y292 autumn: **death cause
+   DRAWBRIDGE**. An automatic drill raised B1 15 ticks after its footprint had cleared ("B1 up waits: citizen on the
+   footprint", then the pull); she stepped back on while the bridge moved (108 ticks). **Tooling death, fixed** (gate
+   footprint margin, below). Both are ghosts now (no corpse; memorial slabs need stone).
+- Moods: 2 started (both Possessed, adults), **1 succeeded**, 1 failed (above). The successful one (unit 20085: bone x2, a
+  block, a boulder) was saved by hand: care had freed 9 held boulders, one per run, while the bone was missing, and other
+  jobs took each one (fixed below); I marked the adult donkey for slaughter and dug 3 andesite walls next to the dwarf.
+
+**Found live and fixed (all tested; commits 171bb3b, 9f3e819, 59e934b and the hand-over commit)**
+1. **Trade 'time' failures (L1-L3): DF 53 posts no TradeAtDepot job from the depot toggles.** The read-only caravan probe
+   showed "Broker requested" and "Anyone can Trade" set for 27,500 ticks with the caravan at the depot, `d.jobs` empty and
+   the broker at ordinary jobs (v1 Run 6 saw the same). `act.trade broker_job` posts the job the request stands for (one
+   per depot, building holder ref, `linkIntoWorld`); a posted job nobody takes within 600 ticks goes to the broker once he
+   has no job (his own job is never cancelled). **Live: 3 of 6 visits traded** (Catten ratio 1.65 -> P5, Muboomon 2.12,
+   Catten 1.70); the others failed on 'ratio' (nothing to sell) and 'unloading' (human caravan). No metal bars were on
+   offer or affordable. The first visit's unhappy outpost liaison ("could not complete a meeting") destroyed the depot; it
+   was rebuilt through `bp.place tpl=fortcore site=repair keys=D`.
+2. **Bridge footprint margin (the drawbridge deaths):** a non-forced pull (any lowering, a raise outside SIEGE/BREACH) waits
+   until no citizen stands on the footprint or 1 tile around it, and a pending pull is cancelled when one comes that close.
+   A 3-tile margin first held B1 down for whole drills (fortcore's melee station stands 2 tiles from B1).
+3. **Mood filter order (care):** a held reserve item is freed for a mood only once every earlier filter of that mood is
+   covered (the dwarf gathers in filter order); until then it counts as there, so MOOD_NEED lists only what is missing.
+   follow now places care's `PROJECT_REQUEST bedrooms why=mood_rock` at once with prio 1.
+4. **Cistern and room siting:** follow placed three tombs whose anchors lay in the refuge cistern's basin (emit adds the
+   cistern's dug box to Z4). Room siting treats a cistern's well room, the basin below and one tile around as private, and
+   cistern tiles never count as a corridor next to an anchor (`cmd.Occupancy`). The finished cistern's pipe left the audit
+   box and read as a bypass (R1 -> R0 for about 20 days); `runner.bboxes()` keeps a finished cistern's box (from its bp file
+   for projects finished earlier). The audit snapshot grew from 49,049 to 125,400 tiles.
+5. **Famine with 199 raw fish:** food fell to 5 days (pop 50) while uncleaned fish lay in the stockpiles; the fort had no
+   fishery and the census did not see FISH_RAW. economy counts `fish_raw`, orders PrepareRawFish at a fishery, and the
+   famine wake says "N raw fish: build a fishery". By hand: a fishery (quickfort `wh`, workshop hall z119) and a prepare
+   order; food went from 5 to 50 days within a season, 105 at hand-over.
+6. Smaller: "A human caravan from ... has arrived" no longer halts the fort; `combine all -q` (16-28 ms, economy demoted x8)
+   runs weekly instead of every 3 days; the idle backlog makes wooden crafts for trade when stone is short and logs >= 60;
+   a busy broker is no ACT_FAIL; water's summary says "N wet sources (M wells)" (it printed "5/4 wells wet").
+
+**Package live checks**
+- moods+reserves: job filters read live ("bars x2 (inorganic)", "bone x2, boulders x1 (inorganic)"); `mood reserve
+  held/hold` lines; economy `need bone 2 (care: mood)`; the census has rock/ore/flux/thread (thread 27 without cavern
+  webs), bolts_free 290 <= bolts 305. Defect found: the held-boulder drain (fixed, 3.).
+- water: loaded; 0 patients all slot (max thirst 0, no patient_thirst wake); 14-22 buckets. The **cistern** (refuge level
+  z116, a 108-tile pipe at z115 to the brook bed) was dug and built through all 8 stages: floodgate 15010 closed, the
+  fortification and shaft hold brook water at the intake. **It is dry: lever 14994 is not linked**, and `cistern-check`
+  reports water leaks: the two tombs at (99,92..94) and (100..102,96) and the pocket (104..105,92..94) open into the basin
+  at z115. I removed both tomb zones and their doors; the walls at (100,93), (101,95) and (104,93) are not built (open
+  items). care's `hosp_water` still reads 0 while water.lua counts the 2/7 sumps as wet.
+- economy: hunters leave at once for drills (WORK_DETAIL 'mode'), gear lines per slot, autochop target, DECISION_NEEDED
+  metal x4 (no ore), famine x2. Worn 15 % -> 38 % (g_body 4, g_head 3).
+- gates: the lever-puller rooms are live; **take 40-104 ticks** for the drill pulls (L2: 156-243).
+
+**Drills (9 automatic, all failed)**
+| Drills | worn | B1 / O1 up (ticks after T) | outside | dbl | why |
+|---|---|---|---|---|---|
+| y292 autumn (old code) | 16 % | 649 / 649 | 5 | 0 | worn, outside; **2 deaths** (B1 raise) |
+| y292-y293, 4 drills (3-tile margin from y293) | 23 % | B1 never; O1 637-1025 | 0-1 | 0 | up:B1, worn, slow O1 |
+| y293 winter - y294 winter, 4 drills (1-tile margin) | 23-38 % | B1 1087-1192 or never; O1 871-1192 | 0-3 | 0 | worn, slow O1, outside |
+- **Not passable yet:** worn 38 % (needs 90: no bars, little leather; +23 points in 3 game years, so years at this rate
+  unless a caravan sells armor or bars). O1 rises after T+870: the pull waits for citizens outside and for the footprint margin.
+
+**KPIs measured (L4 soak: one game year, y293 winter -> y294 winter d56, no code reload inside; whole slot in brackets)**
+| KPI | Value | Threshold |
+|---|---|---|
+| ticks/s PEACE | median 398, p10 166 incl. pauses; doctor, last 10 min: 393 (slot median 409) | ≥ 450 |
+| kernel ms/s | median 22, p90 28, max 50; 9 of 35 PEACE rows over 25; doctor: repeat 19.1, kern 8.7, sense 3.3, snapshot 2.2, economy 1.8 | ≤ 25 |
+| frame gaps > 3 s | 1, the yearly autosave (slot 3) | 0 outside autosaves |
+| deaths | **0** (slot **3**: 1 failed mood -> dehydrated; 2 killed by B1 in a drill) | 0 from tooling |
+| moods | 0 (slot: 2 started, 1 succeeded, 1 failed) | 0 failed |
+| naked | median 9 of 50 (18 %) (slot 22 %) | ≤ 5 % |
+| patient thirst | 0 patients all slot | 0 |
+| drink / food days | drink median 328 (min 237); food median 45 (**min 5**, famine y294 summer) (slot food median 108) | ≥ 170 / ≥ 60 |
+| stress (category ≤ 1) | median 7 % | ≤ 10 % |
+| idle % | median 65 | — |
+| trade | 1 of 2 visits traded (slot 3 of 6) | P4: 1 |
+| readiness | R1 (slot: R0 for about 20 days from the cistern audit box) | — |
+| pop / cap | 41 -> 53, cap 55 | ≤ cap + 3 |
+| dfhack-run spawns by the product | 0; mine: read-only probes, 6 reloads and the hand repairs listed above | 0 |
+
+**Open for L5 / Gordon (most urgent first)**
+1. **Metal.** No ore, 0 metal bars, and no bars bought in three traded visits. Every Possessed or forge mood that wants
+   bars fails (one death this slot). Options: exploration mining (no template; DECISION_NEEDED metal x4), or buying bars
+   first (plan y295 wants bars first). The cavern metal (z98-106) is unreachable.
+2. **Cistern: wall off the basin before anyone links the lever.** Constructed walls at (100,93,115), (101,95,115) and
+   (104,93,115); then a fresh snapshot over the pipe and `python -m df_llm_helper.bp.sites cistern-check --save region2`
+   (exit 0); then link lever 14994 to floodgate 15010 and pull it once. The auto-mode classifier refused one of my
+   read-only probes right after I removed the two tomb zones and queued their doors for removal, so I left the walls to you.
+3. **The drill cannot pass** (worn 38 %, O1 later than T+900). It runs automatically and raises bridges while soldiers walk
+   to their stations; the margin rule keeps it safe but slower.
+4. **Kernel cost** is above budget at p90 (28 ms/s): the bigger audit snapshot (125,400 tiles) and economy's daily slices.
+5. **Ghosts 2** (no corpses): memorial slabs need stone. The bedrooms dig placed for boulders (c1a12935628374c101) is
+   stalled at build 40 %.
+6. Sell goods: only crafts are sold (one visit failed on 'ratio'); wooden crafts now come from the idle backlog.
+7. care's `hosp_water` (0) and water.lua (hospital ok on 2/7 sumps) disagree; one of them is wrong about the hospital well.
+
+## 0e. Live slot L3: soak (2026-10-11 02:55 - 03:45)
 **Fort at hand-over:** Castlerisen, y291 spring d79, pop 30 (15 adults, 3 soldiers), PEACE, phase **P4**, readiness
 **R1** (audit ok), about 400-480 ticks/s, unpaused, no popup, DF on desktop 1 (runtime `region2/`; DF wrote
 `autosave 1` at the y290 and y291 rollovers).
@@ -712,15 +824,18 @@ python -m pytest -q -o addopts="" tests/test_schema.py tests/test_luahost.py tes
   tests/test_cli_lua_roundtrip.py tests/test_cli_plan.py tests/test_cli_status.py tests/test_cli_wake.py tests/bp \
   tests/test_lint.py tests/test_hook.py tests/test_fairplay.py tests/test_supervise.py tests/test_migrate_v2.py \
   tests/test_embark.py tests/test_kern_files.py tests/test_runner.py tests/test_siege_files.py tests/test_trade_files.py \
-  tests/test_wp6_files.py tests/test_wp8_files.py tests/test_snapshot_files.py tests/test_integration_v2.py
+  tests/test_wp6_files.py tests/test_wp8_files.py tests/test_snapshot_files.py tests/test_integration_v2.py \
+  tests/test_economy_specs.py
   -> 1087 passed, 0 failed (48 s; after L0: 1087 passed, 61 s; after L1: 1145 passed, 61 s;
-  after L1b: 1149 passed, 63 s; after L2: 1151 passed, 63 s; after L3: 1151 passed, 64 s)
+  after L1b: 1149 passed, 63 s; after L2: 1151 passed, 63 s; after L3: 1151 passed, 64 s;
+  after L4 (iter2, with test_economy_specs.py): 1235 passed, 79 s)
 for f in tests/lua/test_*.lua: python tools/luahost.py --path tests/lua $f   -> 26 suites, 426 passed, 0 failed
                                                                                (after L0: 430 passed, 0 failed;
                                                                                 after L1: 442 passed, 0 failed;
                                                                                 after L1b: 455 passed, 0 failed;
                                                                                 after L2: 463 passed, 0 failed;
-                                                                                after L3: 470 passed, 0 failed)
+                                                                                after L3: 470 passed, 0 failed;
+                                                                                after L4: 32 suites, 562 passed)
 python -m df_llm_helper lint lua/dfllm        -> 0 finding(s)
 python -m df_llm_helper.lint --config         -> config ok
 ```
