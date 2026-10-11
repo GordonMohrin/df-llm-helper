@@ -202,13 +202,17 @@ M.DEFAULTS = {
              bone = {job = 'MakeAmmo', sub = 'ITEM_AMMO_BOLTS', ws = {'workshop:Craftsdwarfs'}}},
           }},
   idle = {
-    pct = 40, days = 3, boulders_min = 30, blocks_cap = 200, crafts_cap = 60, combine_every = 3600,
+    -- live L4: `combine all -q` took 16-28 ms and demoted economy x8 every few days: weekly now. Without stone
+    -- the fort had nothing to sell (the dwarven caravan failed on 'ratio'): wooden crafts once logs pass wood_min
+    pct = 40, days = 3, boulders_min = 30, blocks_cap = 200, crafts_cap = 60, combine_every = 8400, wood_min = 60,
     craft_cats = {'FIGURINE', 'AMULET', 'RING', 'EARRING', 'BRACELET', 'SCEPTER', 'CROWN', 'TOTEM'},
     backlog = {
       {id = 'blocks', tag = 'dfllm:idle_blocks', amount = 10,
        spec = {job = 'ConstructBlocks', material = 'INORGANIC', frequency = 'OneTime'}},
       {id = 'crafts', tag = 'dfllm:idle_crafts', amount = 5,
        spec = {job = 'MakeCrafts', material = 'INORGANIC', frequency = 'OneTime'}},
+      {id = 'wood_crafts', tag = 'dfllm:idle_wcrafts', amount = 5,
+       spec = {job = 'MakeCrafts', material_category = {'wood'}, frequency = 'OneTime'}},
       {id = 'combine'},
     },
   },
@@ -1309,6 +1313,9 @@ local function backlog_pick(K, c, p, inv, rock)
       if rock >= ic.boulders_min and (inv.blocks or 0) < ic.blocks_cap and not live(p.orders[b.tag]) then return b end
     elseif b.id == 'crafts' then
       if (inv.crafts or 0) < ic.crafts_cap and rock >= 10 and not live(p.orders[b.tag]) then return b end
+    elseif b.id == 'wood_crafts' then
+      if (inv.crafts or 0) < ic.crafts_cap and rock < 10 and (inv.wood or 0) >= (ic.wood_min or 60)
+         and not live(p.orders[b.tag]) then return b end
     elseif b.id == 'combine' then
       if p.last_combine == nil or K.now().tick - p.last_combine >= ic.combine_every then return b end
     end

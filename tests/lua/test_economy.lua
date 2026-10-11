@@ -692,6 +692,25 @@ T.test('D-03 variants: off, immediate, only in PEACE, combine when nothing else'
   T.eq(F.bad_runs(W4), {})
 end)
 
+T.test('D-03 (live L4): no stone but logs past wood_min -> wooden crafts for trade', function()
+  local W = world{cit = 2, decisions = {['D-03'] = 'immediate'}, setup = function(W)
+    for _ = 1, 70 do F.item(W, 'WOOD', {}) end
+  end}
+  W.unit(1).job.current_job = nil
+  settle(W)
+  local wc
+  for _, a in ipairs(W.find_acts('workorder')) do if a.args[1].tag == 'dfllm:idle_wcrafts' then wc = a.args[1] end end
+  T.ok(wc, 'wooden crafts ordered')
+  T.eq({wc.job, wc.material_category, wc.amount_total}, {'MakeCrafts', {'wood'}, 5})
+  local W2 = world{cit = 2, decisions = {['D-03'] = 'immediate'}, setup = function(W)
+    for _ = 1, 30 do F.item(W, 'WOOD', {}) end
+  end}
+  W2.unit(1).job.current_job = nil
+  settle(W2)
+  for _, a in ipairs(W2.find_acts('workorder')) do T.ok(a.args[1].tag ~= 'dfllm:idle_wcrafts', 'below wood_min') end
+  T.ok(F.has(F.runs(W2), 'combine all -q'))
+end)
+
 T.test('state and persist: owned keys only, maps survive a save/load round trip', function()
   local W = world{cit = 7}
   W.event('REPORT', {type = 'MIGRANT_ARRIVAL', text = 'migrants'})

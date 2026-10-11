@@ -268,6 +268,33 @@ add{name = 'DRILL: a soldier on the footprint blocks the raise until he steps of
     T.eq(W.drill.kpi.fails, {'B1:blocked'})
   end}
 
+add{name = 'DRILL (live L4): a soldier next to the B1 footprint holds the raise; two tiles away he does not',
+  units = function()
+    local r = S.fort_units()
+    r[5].pos = {51, 41, Z}                                       -- adjacent to the footprint (y 40)
+    return r
+  end,
+  at = {{100, function(W) W.K.call('drill', 'start') end}, {900, function(W) W.move(5, 51, 42, Z) end}},
+  run = 2000, modes = {'PEACE>DRILL', 'DRILL>PEACE'},
+  check = function(W)
+    local b1 = S.pulls(W, 'B1')
+    between(rel(W, b1[1].tick), 900, 930, 'B1 pull once he stands two tiles off')
+    T.eq(#evs(W, 'GATE_FAIL') + #evs(W, 'BREACH'), 0)
+  end}
+
+add{name = 'DRILL (live L4): a pending raise is cancelled when a citizen steps next to the footprint',
+  lever_cfg = {[21] = {worker = 150}, [22] = {worker = 150}},
+  at = {{100, function(W) W.K.call('drill', 'start') end}, {120, function(W) W.move(1, 51, 41, Z) end},
+        {700, function(W) W.move(1, 60, 70, Z) end}},
+  run = 2000, modes = {'PEACE>DRILL', 'DRILL>PEACE'},
+  check = function(W)
+    local c = S.acts(W, 'cancel_own_lever_job')
+    T.ok(#c >= 1, 'the queued B1 raise was cancelled')
+    local b1 = S.pulls(W, 'B1')
+    T.ok(#b1 >= 2 and rel(W, b1[#b1 - 1].tick) >= 700 or rel(W, b1[#b1].tick) >= 700, 'raised again after he left')
+    T.eq(#S.flips(W, 'B1') >= 1, true)
+  end}
+
 add{name = 'no worker on O1: cancel after 200 ticks, backup lever, BREACH and GATE_FAIL at T+900',
   lever_cfg = {[11] = {}, [12] = {}},
   units = function() return units(S.army(6, 150, 150)) end,

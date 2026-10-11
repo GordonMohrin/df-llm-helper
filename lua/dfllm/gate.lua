@@ -21,8 +21,9 @@ M.BLOCK_WAIT = 300         -- ticks to wait for citizens to leave the footprint 
 -- baby, stepped back on while the bridge moved (108 ticks) and both died (death cause DRAWBRIDGE). A bridge
 -- moves ~100 ticks after its pull, so a non-forced pull (any lowering; a raise outside SIEGE/BREACH) also
 -- waits for this many tiles around the footprint to be clear, and a pending one is cancelled when a citizen
--- comes that close.
-M.MARGIN = 3
+-- comes that close. One tile: the commander had just stepped off; fortcore's melee station stands 2 tiles from B1
+-- and its soldiers would hold B1 down for a whole drill with a wider margin.
+M.MARGIN = 1
 M.SETTLE = 50              -- ticks after a pull job left the queue before another may be queued
 M.DEADLINE = 900           -- default: an 'up' not reached by then -> GATE_FAIL (A)
 M.DOWN_GUARD = 30          -- 'down' refused while a visible hostile is this close to the bridge

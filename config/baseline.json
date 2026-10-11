@@ -127,13 +127,15 @@
              "bone": {"job": "MakeAmmo", "sub": "ITEM_AMMO_BOLTS", "ws": ["workshop:Craftsdwarfs"]}}
            ]},
   "idle": {
-   "pct": 40, "days": 3, "boulders_min": 30, "blocks_cap": 200, "crafts_cap": 60, "combine_every": 3600,
+   "pct": 40, "days": 3, "boulders_min": 30, "blocks_cap": 200, "crafts_cap": 60, "combine_every": 8400, "wood_min": 60,
    "craft_cats": ["FIGURINE", "AMULET", "RING", "EARRING", "BRACELET", "SCEPTER", "CROWN", "TOTEM"],
    "backlog": [
     {"id": "blocks", "tag": "dfllm:idle_blocks", "amount": 10,
      "spec": {"job": "ConstructBlocks", "material": "INORGANIC", "frequency": "OneTime"}},
     {"id": "crafts", "tag": "dfllm:idle_crafts", "amount": 5,
      "spec": {"job": "MakeCrafts", "material": "INORGANIC", "frequency": "OneTime"}},
+    {"id": "wood_crafts", "tag": "dfllm:idle_wcrafts", "amount": 5,
+     "spec": {"job": "MakeCrafts", "material_category": ["wood"], "frequency": "OneTime"}},
     {"id": "combine"}
    ]
   },
