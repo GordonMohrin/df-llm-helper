@@ -1621,10 +1621,16 @@ local function validation_watch(K, p)
     for _, o in ipairs(orders_all()) do t = t + 1; if o.status.validated then v = v + 1 end end
     return t, v
   end)
-  if not ok or total == 0 or valid > 0 then p.unval = nil; return end
+  -- live L6: one hand-validated order kept the watch quiet while 117 of 118 waited; below 10% validated counts
+  if not ok or total == 0 or valid * 10 >= total then p.unval = nil; return end
   local vac = select(2, pcall(positions))
   if type(vac) ~= 'table' or vac.MANAGER then p.unval = nil; return end   -- no manager yet: appoint first
   local now = K.now().tick
+  if K.act.manager_office and (p.unval == nil or now - (p.unval.office or -DAY) >= DAY) then
+    local okc, res = K.act.manager_office()
+    if p.unval then p.unval.office = now end
+    if okc and res == 'assigned' then K.log('warn', 'manager had no office: free Office zone assigned') end
+  end
   p.unval = p.unval or {since = now, woke = 0}
   if now - p.unval.since >= 3 * DAY and now - (p.unval.woke or 0) >= 7 * DAY then
     p.unval.woke = now

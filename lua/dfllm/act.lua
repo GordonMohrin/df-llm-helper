@@ -913,6 +913,24 @@ local function impls(state)
     return true, n
   end
 
+  -- live L6 (reclaimed Paddletribes): the office zone had no owner, so the manager validated no order
+  -- (117 of 118 waiting, the stills idle, drink 0). Assigns an unowned Office zone to the manager, as the
+  -- zone sheet's "Assign" does (dfhack.buildings.setOwner). Never takes an office someone owns.
+  function I.manager_office()
+    local m = dfhack.units.getUnitByNobleRole('manager')
+    if not m or dfhack.units.isDead(m) then return false, 'no manager' end
+    local free
+    for _, z in ipairs(df.global.world.buildings.other.ACTIVITY_ZONE) do
+      if z.type == df.civzone_type.Office then
+        if z.assigned_unit_id == m.id then return true, 'has office' end
+        if z.assigned_unit_id == -1 and not free then free = z end
+      end
+    end
+    if not free then return false, 'no free office zone' end
+    if not dfhack.buildings.setOwner(free, m) then return false, 'setOwner refused' end
+    return true, 'assigned'
+  end
+
   -- lever.lua:4 leverPullJob(lever, priority) returns nothing: the new job is found on lever.jobs
   local own_jobs = state.own_jobs
   local function is_lever(b)
