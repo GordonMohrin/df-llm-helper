@@ -616,10 +616,10 @@ T.test('live L6: a known phase before P2 releases the soldiers; outside PEACE no
   T.ok(logged(W, 'soldiers released (phase)'))
 end)
 
-T.test('live L6: melee uniforms keep 1 axe and 2 picks for civilians (explicit weapons, foreign items excluded)', function()
+T.test('live L6: melee uniforms keep 1 axe and 2 picks for civilians (explicit weapons, merchant goods excluded)', function()
   local W = boot{n = 70}
   for _ = 1, 2 do X.weapon(W, 'ITEM_WEAPON_SPEAR') end
-  X.weapon(W, 'ITEM_WEAPON_SPEAR', {foreign = true})            -- a merchant's leftover
+  X.weapon(W, 'ITEM_WEAPON_SPEAR', {trader = true})             -- merchant goods
   X.weapon(W, 'ITEM_WEAPON_SWORD_SHORT')
   for _ = 1, 3 do X.weapon(W, 'ITEM_WEAPON_AXE_BATTLE') end
   for _ = 1, 3 do X.weapon(W, 'ITEM_WEAPON_PICK') end

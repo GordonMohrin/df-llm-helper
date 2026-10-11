@@ -528,8 +528,10 @@ local function classify(it, a, cat)
     local tok = mat_token(it.mat_type, it.mat_index)
     local plant = tok and tok:match('^PLANT:([^:]+):')
     if plant then a.seeds[plant] = (a.seeds[plant] or 0) + n end
-  elseif (cat == 'WEAPON' or GEAR_CAT[cat]) and f.foreign then
-    return               -- live L6: a merchant's leftover (flags.foreign) is no tool or gear of the fort
+  elseif (cat == 'WEAPON' or GEAR_CAT[cat]) and f.trader then
+    -- live L6: merchant goods are no tool or gear of the fort. Not flags.foreign: DF 53 sets it on the
+    -- embark wagon's own picks and axes too (Perplexrooms: 0 tools counted, every miner released)
+    return
   elseif cat == 'WEAPON' then
     local k = weapon_kind(it)
     if k == 'pick' then a.w_pick = a.w_pick + 1

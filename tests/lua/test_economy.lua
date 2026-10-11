@@ -634,14 +634,15 @@ T.test('tool details: miners follow the dig backlog (min 2, max 4 from pop 20), 
   T.eq(members(ctl3, 'Miners'), {5, 7}, 'back to the minimum, the best skills stay')
 end)
 
-T.test('live L6: foreign weapons and gear (merchant leftovers) are no tools: w_axe and w_pick skip them', function()
+T.test('live L6: merchant goods are no tools; foreign embark tools are (DF 53 flags the wagon foreign)', function()
   local W = tool_world{cit = 12, miners = {5}, setup = function(W)
-    for _ = 1, 4 do F.item(W, 'WEAPON', {subtype = 2, flags = {foreign = true}}) end   -- battle axes, foreign
-    F.item(W, 'WEAPON', {subtype = 1, flags = {foreign = true}})
+    for _ = 1, 4 do F.item(W, 'WEAPON', {subtype = 2, flags = {trader = true}}) end   -- battle axes, merchant's
+    F.item(W, 'WEAPON', {subtype = 1, flags = {trader = true}})
+    F.item(W, 'WEAPON', {subtype = 1, flags = {foreign = true}})                     -- embark pick
   end}
   days(W, 1)
   local i = W.K.census.i
-  T.eq({i.w_pick, i.w_axe}, {3, 2}, 'only the 3 picks and 2 axes of the fort')
+  T.eq({i.w_pick, i.w_axe}, {4, 2}, 'the 3 picks and 2 axes of the fort plus the foreign embark pick')
 end)
 
 T.test('tool details: woodcutters by log stock, hunters only in a famine, one tool detail per dwarf', function()

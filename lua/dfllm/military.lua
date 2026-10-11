@@ -525,7 +525,6 @@ local CAT_ITEMS = {body = 'ARMOR', head = 'HELM', pants = 'PANTS', gloves = 'GLO
 local function free_item(it)
   local f = it.flags
   if f.forbid or f.owned or f.in_building or f.trader or f.garbage_collect or f.removed or f.melt or f.dump then return false end
-  if f.foreign then return false end              -- live L6: merchant leftovers are nobody's gear
   if f.in_inventory then
     local u = dfhack.items.getHolderUnit(it)
     if u and (u.military.squad_id or -1) < 0 then return false end
