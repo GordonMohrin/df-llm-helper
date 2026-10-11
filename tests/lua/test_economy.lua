@@ -272,10 +272,28 @@ T.test('staged imports: migrants, mason, smelter, fuel, forge; each once, then s
   F.building(W, 'WORKSHOP_ANY', {type = df.workshop_type.Masons})
   F.building(W, 'FURNACE_ANY', {type = df.furnace_type.Smelter})
   days(W, 1)
+  T.eq(count_acts(W, 'orders_import', 'library/rockstock'), 0, 'no free stone yet')
+  for _ = 1, 10 do F.item(W, 'BOULDER', {mat_type = 0, mat_index = 1}) end
+  days(W, 1)
   T.eq(count_acts(W, 'orders_import', 'library/rockstock'), 1)
   T.eq(count_acts(W, 'orders_import', 'library/furnace'), 1)
   T.eq(count_acts(W, 'orders_import', 'library/smelting'), 0, 'no fuel yet')
   F.item(W, 'BAR', {mat_type = 7})
+  days(W, 2)
+  T.eq(count_acts(W, 'orders_import', 'library/smelting'), 0, 'no ore yet')
+  F.mat(W, 0, 60, {token = 'INORGANIC:HEMATITE', flags = {}})
+  local decode = dfhack.matinfo.decode
+  dfhack.matinfo.decode = function(t, i)                 -- 60 is an iron ore (metal_ore -> 51)
+    if type(t) == 'table' then t, i = t.mat_type, t.mat_index end
+    local m = decode(t, i)
+    if m and t == 0 and i == 60 then
+      local kmock = require('dfllm.util.k_mock')
+      m.inorganic = {metal_ore = {mat_index = kmock.vec{51}}}
+      m.material.reaction_class = kmock.vec{}
+    end
+    return m
+  end
+  F.item(W, 'BOULDER', {mat_type = 0, mat_index = 60})
   F.building(W, 'WORKSHOP_ANY', {type = df.workshop_type.MetalsmithsForge})
   days(W, 3)
   T.eq(count_acts(W, 'orders_import', 'library/smelting'), 1)

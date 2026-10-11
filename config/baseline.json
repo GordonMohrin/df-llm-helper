@@ -56,9 +56,9 @@
   "hunt": {"trial_days": 10, "backoff_days": 20},
   "stages": [
    {"lib": "library/basic", "any": ["migrants", "cit>=10"]},
-   {"lib": "library/rockstock", "any": ["workshop:Masons"]},
+   {"lib": "library/rockstock", "all": ["workshop:Masons", "stone"]},
    {"lib": "library/furnace", "any": ["furnace:Smelter", "furnace:WoodFurnace"]},
-   {"lib": "library/smelting", "all": ["furnace:Smelter", "fuel"]},
+   {"lib": "library/smelting", "all": ["furnace:Smelter", "fuel", "ore"]},
    {"lib": "library/military", "all": ["workshop:MetalsmithsForge"]}
   ],
   "signatures": {

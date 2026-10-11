@@ -126,9 +126,12 @@ M.DEFAULTS = {
   hunt = {trial_days = 10, backoff_days = 20},
   stages = {
     {lib = 'library/basic', any = {'migrants', 'cit>=10'}},
-    {lib = 'library/rockstock', any = {'workshop:Masons'}},
+    -- live L6 (Laborkings): with only flux boulders (chalk) rockstock and smelting queued 98 orders that
+    -- could never start and cancelled all year ("Needs non-economic hard stone boulders"); each now waits
+    -- for its input: `stone` = 10 free non-ore, non-flux boulders, `ore` = any ore boulder
+    {lib = 'library/rockstock', all = {'workshop:Masons', 'stone'}},
     {lib = 'library/furnace', any = {'furnace:Smelter', 'furnace:WoodFurnace'}},
-    {lib = 'library/smelting', all = {'furnace:Smelter', 'fuel'}},
+    {lib = 'library/smelting', all = {'furnace:Smelter', 'fuel', 'ore'}},
     {lib = 'library/military', all = {'workshop:MetalsmithsForge'}},
   },
   signatures = {   -- an order only that library creates (hack/data/orders/*.json): already imported
@@ -663,7 +666,9 @@ local function built(b)
 end
 
 local function facts(K, p)
-  local f = {migrants = p.migrants == 1, fuel = ((K.census.i or {}).fuel or 0) > 0}
+  local i = K.census.i or {}
+  local f = {migrants = p.migrants == 1, fuel = (i.fuel or 0) > 0, ore = (i.ore or 0) > 0,
+             stone = (i.rock or 0) - (i.ore or 0) - (i.flux or 0) >= 10}
   pcall(function()
     for _, b in ipairs(df.global.world.buildings.other.WORKSHOP_ANY) do
       local n = df.workshop_type[b.type]
