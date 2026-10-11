@@ -37,6 +37,10 @@ M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
             -- live L6: cavern/pit discovery notices halted the fort; the runner already reacts to FEATURE_DISCOVERY
             discovery = {'You have discovered'},
             ghost = {'has been put to rest'},
+            -- live L6 (reclaimed Castlerisen): "An ambush! Drive them out!" for cavern giant bats came every
+            -- few seconds and held the fort; Gordon 11.10.: never stop playing for a question. The fight goes
+            -- on either way; threat reacts to visible hostiles, the popup only froze the clock
+            ambush = {'An ambush!'},
             -- deaths are recorded by care (DEATH, DEATHS_3PLUS wakes); the notice alone must not halt the fort
             -- live L2: "<name> has bled to death." halted the fort after a berserk citizen was killed
             death = {'has been found dead', 'has bled to death', 'has been struck down', 'has died of thirst',
