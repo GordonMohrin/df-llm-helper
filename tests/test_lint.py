@@ -421,7 +421,7 @@ def test_v1_snippets_are_rejected(origin, src, want):
 def test_no_v1_scripts_on_the_df_script_path():
     """repo A's lua/ is on DF's script path: only dfllm may live there (v1 claude/* and pilot_* are in tag v1-final)."""
     lua = ROOT / "lua"
-    assert sorted(p.name for p in lua.iterdir()) == ["dfllm", "dfllm.lua"]
+    assert sorted(p.name for p in lua.iterdir()) == ["dfllm", "dfllm-hud.lua", "dfllm.lua"]   # the HUD overlay is read only
     assert L.lua([lua]) == []
 
 

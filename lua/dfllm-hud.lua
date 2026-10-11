@@ -15,11 +15,27 @@ end
 
 local stat = {total = 0, busy = 0, need = 0, free = 0}
 
+-- citizens by id from the kernel's census (the kernel owns unit iteration); package.path gets lua/ once
+local function census_ids()
+  local me = dfhack.findScript('dfllm-hud')
+  if me then
+    local entry = me:gsub('[/\\]dfllm%-hud%.lua$', '') .. '/?.lua'
+    if not package.path:find(entry, 1, true) then package.path = entry .. ';' .. package.path end
+  end
+  local ok, kern = pcall(require, 'dfllm.kern')
+  local K = ok and kern.K and kern.K() or nil
+  local cu = K and K.census and K.census.u
+  return type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or nil
+end
+
 local function measure()
+  local ids = census_ids()
+  if not ids then stat.total, stat.busy, stat.need, stat.free = 0, 0, 0, 0; return end
   local total, busy, need, free = 0, 0, 0, 0
   local ok = pcall(function()
-    for _, u in ipairs(dfhack.units.getCitizens(true)) do
-      if dfhack.units.isAdult(u) and not dfhack.units.isDead(u) then
+    for _, id in ipairs(ids) do
+      local u = df.unit.find(id)
+      if u and dfhack.units.isAdult(u) and not dfhack.units.isDead(u) then
         total = total + 1
         local j = u.job.current_job
         if not j then free = free + 1
