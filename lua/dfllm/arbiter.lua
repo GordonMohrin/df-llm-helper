@@ -362,7 +362,10 @@ local function track_pause(K)
   end
   if not observe(K) then return end
   -- a whitelisted popup is also cleared once an expired inbox hold is all that is left
-  if st.pause_by == 'popup' or (st.pause_by == 'inbox' and not st.hold and popup_count() > 0) then
+  -- live L6 (Perplexrooms): adopt paused the fort, the arrival popup came on top and was then held as
+  -- Gordon's pause; with pause_state off, only the popup holds the clock, so a whitelisted one goes too
+  local popup_only = popup_count() > 0 and df.global.pause_state ~= true and not st.hold
+  if st.pause_by == 'popup' or popup_only or (st.pause_by == 'inbox' and not st.hold and popup_count() > 0) then
     local kind, text = popup_kind()
     if kind and K.act.dismiss_popup(kind) then
       if kind == 'berserk' then
