@@ -1,12 +1,105 @@
 # df-llm-helper v2: status after the integration check
 
-Date 2026-10-11. Branch `v2`. §0 is the live slot L4 (iter2: integration of the four offline packages, trade, drills,
-a 1-year soak), §0e the live slot L3 (soak, 2 game years unattended), §0d the live slot L2
+Date 2026-10-11. Branch `v2`. §0 is the live slot L5 (food crisis: food follows the population), §0f the live slot
+L4 (iter2: integration of the four offline packages, trade, drills, a 1-year soak), §0e the live slot L3 (soak, 2 game years unattended), §0d the live slot L2
 (defense: levers, squads, fortcore 2-3, drill), §0c the live slot L1b (labor, moods, P1), §0b the live slot L1
 (economy and building), §0a the live slot L0 (first v2 code in Dwarf Fortress); §1-§9 are the offline
 integration state they started from (pytest, luahost on `hack/lua53.dll`, k_mock).
 
-## 0. Live slot L4 (iter2): integration, live checks, trade, drills, soak (2026-10-11 05:23 - 07:10)
+## 0. Live slot L5: food crisis, food follows the population (2026-10-11 06:54 - 07:30)
+**Fort at hand-over:** Castlerisen, y295 winter d57, pop 54 (34 adults, 6 soldiers), PEACE, phase P5, readiness R1
+(audit ok, traps 3), **PAUSED for Gordon** (`pause_state` true; after the last kernel reload the owner reads `df`:
+Gordon unpauses in DF). Food 270 days (edible stock about 620: 278 meals, 199 plump helmets, berries, fruit), drink
+327 days, stress 7 %, naked 9, ghosts 2. Kernel reloaded with the final code (17 modules). live.lock released;
+my sampler, watcher and `follow` stopped.
+
+**Start:** the orchestrator had paused the fort at y295 summer d30 with **15 food days** (105 at the L4 hand-over;
+pop 41 -> 53, cap 55). What I found (read-only probes):
+- **80 farm tiles for 53 citizens:** one surface plot 5x2 (blueberry/spelt) and two underground 5x7 plump-helmet
+  plots. autofarm sets only the current season's crop (normal), but its **default threshold 50 stopped the helmets
+  at 40 in stock**. 41 edible units in the fort (40 plump helmets, 1 meal); the 881 plant growths were leaves.
+- **Nobody fished:** no fishing zone, FISH labor 0 (the Fisherdwarves detail held one departed unit), the fishery
+  idle. Hunting was off ("no game"; a donkey, a llama and ravens visible).
+- 65 tallow lay under `ban-cooking tallow`; spelt and millet need a quern (none); one lone cow and a mule (no
+  pets, no mates); the two food piles held 21 tiles; summer fruit hung on about 170 trees within 40 tiles.
+
+**Live, by hand (UI-equivalent; quickfort zone/place and the screens' fields through `dfhack-run lua -f` dev
+scripts, all listed here):**
+1. **Gather zones** (zones screen, Gather/Pick Fruit with trees, shrubs and fallen fruit): 36 zones on the revealed
+   outdoor tiles of 76..136 x 62..122, z122-128 (19,151 tiles). Fruit and berries came in within days.
+2. **Fishing zones** on the brook (25..38 x 126..139, z116-117, 219 tiles) and 3 adult civilians into
+   Fisherdwarves; economy later took one out (he was a miner) and two because food was above 90 days.
+3. **Slaughter** of the cow and the mule (animals screen): 47 meat in 6 days.
+4. **autofarm** threshold 300 for plump helmets, 100 for the surface berries (economy owns these now, below).
+5. **Kitchen:** cooking allowed for the 5 tallow kinds in the fort (never plump helmets, Gordon's rule): 64 meals
+   in 6 days. baseline's `ban-cooking tallow` banned them again at the next boot.
+6. **Food pile** 6x6 with barrels in the core (95,97,119): meals had rotted outside the surface kitchen.
+7. **More farms** through the product route: `bp.place farms S1 p.plots=4 prio 1` (`--by llm`; 140 tiles at z121
+   west of the old plots). The dig started slowly (PROJECT_BLOCKED 'stalled' wakes x3) and stands at **25 % dig**
+   at hand-over: the 4 plots are not built yet.
+- **Food 15 -> 63 days in 6 game days -> 294 days by summer d55** (fruit, meat, tallow meals, berries); 300 at
+  autumn d43. I paused there to write the product code.
+
+**Death: 1 citizen in L5.** Atír Adilthabum "Wallgulf" (miner, 55, unit 19661), y295 autumn d43, **THIRST**
+(death incident). Bedridden without a wound (needs healthcare, waiting for diagnosis); thirst 40,000 at autumn
+d14 rising to 75,000; care's `patient_thirst` DECISION_NEEDED fired 5 times ("water and buckets present
+(caregivers?)"); GiveWater jobs were posted, he got no water. I saw him at 55,000 during the run and trusted the
+GiveWater job; I should have acted then. It is the open L2/L3 item "no water for patients" (the hospital reads
+`water NO`, the cistern is dry), not a food death and not tooling, but it happened on my watch.
+
+**Product (offline gate green):** food follows the population (DESIGN §5.11, CONTRACTS §5/§12, RULES §10).
+1. **Farm tiles per citizen:** economy wants `cit x per_dwarf / yield` farm tiles (3 plants per citizen and
+   season, 1 crop per tile and season: 159 for 53) and emits `PROJECT_REQUEST farms why=food n=plots` (35-tile
+   plots, at most 4) while food is below 90 days **or** the food stock fell over 14 days, the fort has fewer tiles
+   than it wants, no farms project is pending (`runner.pending`) and the last request is 14 days old. `follow`
+   places it at once at S1 with `p.plots` and prio 1 (like mood_rock).
+2. **autofarm thresholds of the food crops** = `cit x 4` in steps of 10 between autofarm's default and 400 (the
+   crops `autofarm status` lists, minus the fiber crops the cloth chain owns; status read once a boot and weekly).
+   Live: "autofarm threshold 210 for the food crops BERRIES_FISHER ... MUSHROOM_HELMET_PLUMP SPELT WEED_RAT
+   (53 citizens)".
+3. **Fishers:** `Fisherdwarves` is a builtin tool detail for `act.work_detail` and economy: one fisher per 15
+   citizens (max 3) while food is below 90 days (or a famine) and a fishing zone exists; PEACE only (RECOVERY in a
+   famine), off at once in any other mode (they stand at the brook, like hunters); military never recruits them.
+4. **Cooking and fishery proportional:** the `dfllm:food` meal order keeps 2 meals per citizen from cookable stock
+   that is not on the cook ban (census `food_nocook` = plump helmets); its job cap grows with the fort (one job per
+   2 citizens, at least 20); one PrepareRawFish order holds up to one fish per citizen (at least 30).
+5. **Famine pre-alarm (class A):** below 30 food days (and not yet a famine) a weekly `DECISION_NEEDED food_low`
+   with farm tiles have/want, falling, fishing zone, raw fish and cookable stock; the famine wake stays below 10.
+6. **Found live: prepared fish was never food.** `item_fishst` has no `mat_type` field; the census dropped every
+   prepared fish as "unreadable" (kern.log warnings since L4's fishery). The census now reads
+   `getActualMaterial(Index)` when the fields are missing.
+- Tests: new `tests/lua/test_economy_food.lua` (11 cases: tile math, request/pending/cap/14-day cadence, falling
+  trend, pre-alarm, thresholds, fishers incl. mode, cooking incl. the helmet ban, fish census, fishery size) and a
+  follow test for the farms auto-place; gate: **pytest 1237 passed, Lua 33 suites / 573 passed, lint 0, config ok**.
+
+**Verification season** (kernel reloaded with the product code at autumn d43, unpaused, watched until winter d43;
+the pause came at winter d57 because my gate run outlasted the watcher):
+| KPI | Value | Threshold |
+|---|---|---|
+| deaths | **0** in the season (slot: 1, thirst, before the reload) | 0 |
+| food days | 302 (aut d49) -> 431 -> 252 -> 347 -> 303 -> 192 -> 207 -> 400 -> 407 (win d43) -> 270 (win d57); the edible stock stayed at about 620-650 units through winter (no gathering); slot 15 -> 270 | >= 60, trend positive |
+| drink days | 309-575 | >= 170 |
+| farms | 80 tiles built, 140 in the farms project (dig 25 %); no new request (food above 90 days, farms pending) | 159 wanted |
+| autofarm | thresholds 200 -> 210 (52 -> 53 citizens); winter crops set on both underground plots | — |
+| ticks/s PEACE | median 440 (9 rows); slot 429 (19 rows) | >= 450 |
+| kernel ms/s | 39-74 while running (snapshot about 19, economy 9-18; three audit exports and two reload boots in 10 rows); doctor's 10-min average 17 | <= 25 |
+| frame gaps > 3 s | 0 | 0 |
+| pop | 53 -> 54 (a birth), cap 55 | <= cap + 3 |
+| other | 1 drill (failed as before: worn 38 %, slow O1), 1 traded caravan (Catten, ratio 1.77), stress 7 %, naked 9 | — |
+| dfhack-run spawns | product 0; mine about 25 (read-only probes, the hand measures above, 3 reloads, pause/unpause) | 0 |
+
+**Open for Gordon / next slot (most urgent first)**
+1. **Water for patients** (it killed again): a bedridden dwarf gets no water while the hospital reads `water NO`.
+   The cistern fix from L4 item 2 (walls at (100,93,115), (101,95,115), (104,93,115), cistern-check, link lever
+   14994) is still open; care's `patient_thirst` wake needs a first move that works (RULES §7).
+2. **The farms project** (c1a12957d13feae401, 4 plots at z121, dig 25 %) must finish; until then the fort lives on
+   gathered fruit (summer/autumn) and 70 underground tiles. If it stalls again, check the dig for hidden tiles.
+3. Kernel cost above budget while running (L4 item 4): snapshot exports of the 125,400-tile audit box dominate.
+4. Gather and fishing zones are by hand: templates (or runner zones) would let economy ask for them like farms.
+5. A quern for spelt and millet (82 + 84 in stock) needs a quern stone (mason; boulders are short).
+6. Metal, drills, ghosts as in L4 (§0f).
+
+## 0f. Live slot L4 (iter2): integration, live checks, trade, drills, soak (2026-10-11 05:23 - 07:10)
 **Fort at hand-over:** Castlerisen, y295 spring d8, pop 53 (35 adults, 6 soldiers), PEACE, phase **P5** (P4 -> P5 at
 y292 autumn after the first traded caravan), readiness **R1** (audit ok, traps 3), about 390-420 ticks/s, unpaused, DF on
 desktop 1 (runtime `region2/`). Plan y295 applied (target P5, beauty none, trade wants bars first). Drink 526 days, food
@@ -828,14 +921,15 @@ python -m pytest -q -o addopts="" tests/test_schema.py tests/test_luahost.py tes
   tests/test_economy_specs.py
   -> 1087 passed, 0 failed (48 s; after L0: 1087 passed, 61 s; after L1: 1145 passed, 61 s;
   after L1b: 1149 passed, 63 s; after L2: 1151 passed, 63 s; after L3: 1151 passed, 64 s;
-  after L4 (iter2, with test_economy_specs.py): 1235 passed, 79 s)
+  after L4 (iter2, with test_economy_specs.py): 1235 passed, 79 s; after L5: 1237 passed, 79 s)
 for f in tests/lua/test_*.lua: python tools/luahost.py --path tests/lua $f   -> 26 suites, 426 passed, 0 failed
                                                                                (after L0: 430 passed, 0 failed;
                                                                                 after L1: 442 passed, 0 failed;
                                                                                 after L1b: 455 passed, 0 failed;
                                                                                 after L2: 463 passed, 0 failed;
                                                                                 after L3: 470 passed, 0 failed;
-                                                                                after L4: 32 suites, 562 passed)
+                                                                                after L4: 32 suites, 562 passed;
+                                                                                after L5: 33 suites, 573 passed)
 python -m df_llm_helper lint lua/dfllm        -> 0 finding(s)
 python -m df_llm_helper.lint --config         -> config ok
 ```
