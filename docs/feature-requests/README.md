@@ -19,6 +19,8 @@ play, so a gap becomes a note here, not a script in the running game).
 | FR-11 | Early-warning dashboard | Population fell 55 -> 46 -> 0 over a year; a trend line "pop, food, drink, stress, corpses" per season |
 | FR-12 | Rebuild-lost-buildings helper | Traps 31 -> 0 and bridges lost; no verb to re-place a list of lost buildings |
 
+| FR-13 | Plan check before the fort manifest exists | `plan check` rejects every plan with room templates (farms, cistern, ...) until fortcore is placed; even the default draft is rejected on a fresh fort. Workaround: place fortcore with `bp.place`, then propose/check/apply |
+
 ## Details
 **FR-01 Order sanity check.** `dfllm cmd orders.check`: for each manager order, verify the workshop type exists
 and is built, the material exists on the reachable walkable group, and a worker with the labor exists; report
@@ -41,3 +43,5 @@ reason, and a "relax old_sites" rule when the old fort is ruined.
 **FR-10 Pruner.** Kernel drops manager orders that cancelled more than N times for "Needs ..." reasons.
 **FR-11 Trend dashboard.** Season-by-season table in `dfllm brief`.
 **FR-12 Rebuild helper.** Keep a manifest of placed buildings; `bp.restore` re-places the missing ones.
+
+**FR-13 Plan check without manifest.** Accept room templates after a fortcore stage in the same plan (dry-run the manifest), or have `plan propose` emit a first plan with fortcore only and a note to re-propose after placement.
