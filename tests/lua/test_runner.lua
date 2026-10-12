@@ -131,8 +131,10 @@ T.test('bboxes: running projects, and a finished cistern stays in (its pipe leav
   T.eq(H.proj(W, 'b1').done, 1)
   T.eq(H.proj(W, 'c1').done, 1)
   local boxes = select(2, W.K.call('runner', 'bboxes'))
-  T.eq(#boxes, 1, 'the finished bedrooms drop out, the cistern does not')
-  T.ok(boxes[1][1] <= 40 and boxes[1][4] >= 44, 'the cistern box')
+  T.eq(#boxes, 2, 'the finished bedrooms and the cistern stay (live L7: a bedrooms block at the box edge read as a bypass)')
+  local wide = false
+  for _, b in ipairs(boxes) do if b[1] <= 40 and b[4] >= 44 then wide = true end end
+  T.ok(wide, 'the cistern box')
   local rt = W.K.persist.get('m.runner')
   for k in pairs(rt.keep) do rt.keep[k] = nil end           -- finished before L4: rebuilt from its bp file
   local again = select(2, W.K.call('runner', 'bboxes'))

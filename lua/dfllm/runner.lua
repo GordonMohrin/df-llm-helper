@@ -781,7 +781,11 @@ end
 -- live L4: a finished cistern's pipe (108 tiles to the brook) left the audit box; the audit read the cut-off
 -- pipe as a way in (bypass, R1 -> R0). A cistern's box is kept after it is done (m.runner keep): the pipe ends
 -- at its closed floodgate and fortification, which the audit then sees.
-local KEEP_BOX = {cistern = true}
+-- live L7: a finished bedrooms block at the audit box edge read as a way in (bypass, readiness R0 for a year):
+-- every finished room project stays inside the audit box, not only the cistern
+local KEEP_BOX = {cistern = true, bedrooms = true, tombs = true, hall = true, guildhall = true, barracks = true,
+                  temple = true, tavern = true, dining = true, hospital = true, office = true, workshops = true,
+                  farms = true, furnaces = true, captives = true}
 
 local function finish(K, P, d)
   if KEEP_BOX[P.tpl] then S.rt.keep[P.id] = project_bbox(P.id, d) end
