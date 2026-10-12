@@ -237,6 +237,32 @@ function M.reach(K, a, b)
   return not ok or yes == true
 end
 
+-- far(K, x, y, z): does a revealed tile lie on another walkable group than the citizens stand on? Food or drink
+-- there feeds nobody (live L7: 117 of 137 fruit in cut-off caves, 101 "food days", 35 of 42 starving). The
+-- citizens' group is read once per tick; unknown answers false so nothing is under-counted on a fault.
+local home_grp
+function M.far(K, x, y, z)
+  x, y, z = int(x), int(y), int(z)
+  if not (x and y and z) then return false end
+  local now = K.now().tick
+  if not home_grp or home_grp.tick ~= now then
+    local g = false
+    local ok = pcall(function()
+      for _, c in ipairs(dfhack.units.getCitizens(true)) do
+        local cg = dfhack.maps.isValidTilePos(c.pos) and dfhack.maps.getWalkableGroup(c.pos)
+        if cg and cg ~= 0 then g = cg; break end
+      end
+    end)
+    home_grp = {tick = now, g = ok and g or false}
+  end
+  if not home_grp.g then return false end
+  local ok, grp = pcall(function()
+    local pos = xyz2pos(x, y, z)
+    return dfhack.maps.isValidTilePos(pos) and dfhack.maps.getWalkableGroup(pos) or 0
+  end)
+  return ok and grp ~= 0 and grp ~= home_grp.g
+end
+
 ---------------------------------------------------------------- export
 local function map_size()
   local ok, x, y, z = pcall(dfhack.maps.getTileSize)        -- dfhack.lua:742

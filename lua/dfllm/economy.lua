@@ -451,6 +451,12 @@ local function classify(it, a, cat)
       return
     end
   elseif f.forbid then return end
+  -- live L7 (Paddletribes): 117 of 137 "edible" fruit lay in cut-off caves; the fort read 101 food days while 35 of
+  -- 42 dwarves starved. Food and drink on another walkable group than the citizens' feed nobody.
+  if (cat == 'DRINK' or a.food_set[cat]) and not f.in_inventory and a.far and a.far(it) then
+    a.unreach = (a.unreach or 0) + n
+    return
+  end
   if cat == 'DRINK' then a.drink = a.drink + n
   elseif a.food_set[cat] then
     -- food = what a dwarf can eat now: meals and raw-edible items. Cook-only items (egg yolks, raw fish,
@@ -2562,6 +2568,12 @@ function M.step(K, budget, ctx)
   local c = M.conf(K)
   if not (ctx and ctx.cont) or not (st.census or st.run) then
     st.census, st.run = {acc = new_acc(c), ci = 1, idx = 0, errs = 0, start = K.now().tick}, nil
+    st.census.acc.far = function(it)
+      local x, y, z = dfhack.items.getPosition(it)
+      if not x then return false end
+      local ok, far = K.call('snapshot', 'far', x, y, z)
+      return ok == true and far == true
+    end
     mcache, tcache, bolt_sub = {}, {}, {}
     if (M.every.ticks or EVERY) ~= EVERY then M.every = {ticks = EVERY} end   -- the rush run is this one
   end
