@@ -218,6 +218,20 @@ local function consider(hs, u)
   end
   local x, y, z = U.getPosition(u)
   if not x then return 7 end
+  -- live L7 (Paddletribes): demons in the underworld (z1-5, a walkable group of their own) were visible from the
+  -- map's edge and kept the fort in ALERT (idle 78 %, O1 up). A non-invader on another walkable group that cannot
+  -- fly cannot reach anyone: not a hostile (the cavern olm rule above, for every kind)
+  if not inv then
+    local okg, other = pcall(function()
+      local cg = citizens_group()
+      if not cg or not dfhack.maps.isValidTilePos(u.pos) then return false end
+      local g = dfhack.maps.getWalkableGroup(u.pos)
+      if g == 0 or g == cg then return false end
+      local r = df.creature_raw.find(u.race)
+      return not (r ~= nil and r.caste[u.caste].flags.FLIER == true)
+    end)
+    if okg and other then return 7 end
+  end
   local great = U.isGreatDanger(u)      -- megabeasts, titans, forgotten beasts, demons (Lua API.txt:1672)
   hs.vis = hs.vis + 1
   if great then hs.great = hs.great + 1 end
