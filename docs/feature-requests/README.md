@@ -26,6 +26,8 @@ play, so a gap becomes a note here, not a script in the running game).
 
 | FR-16 | Plant-gatherer / hunter assignment and suspended-construction release | Gatherers detail stays empty (famine at 5 days with 12 idle); all 13 construction jobs suspended by suspendmanager; I had to use Lua workarounds (outside the door) |
 
+| FR-17 | Fill every season slot of every farm plot | autofarm left 2 of 4 season slots empty on 10 underground plots; plots idle half the year, food swung 4-44 days; I filled the slots with Lua |
+
 ## Details
 **FR-01 Order sanity check.** `dfllm cmd orders.check`: for each manager order, verify the workshop type exists
 and is built, the material exists on the reachable walkable group, and a worker with the labor exists; report
@@ -55,3 +57,5 @@ reason, and a "relax old_sites" rule when the old fort is ruined.
 **FR-15 Duplicate guard.** `bp.place` refuses a template that the active plan already places on the same site, and `plan apply` skips a build entry whose project already exists.
 
 **FR-16 Work detail + unsuspend verbs.** `economy` assigns Plant gatherers, Fisherdwarves and Hunters when food < 20 days and idle > 30 %; add a verb `jobs.release` for suspended ConstructBuilding jobs with a reason report, and stop baseline from forcing suspendmanager on.
+
+**FR-17 Farm season slots.** The economy module should set a crop for all four seasons per plot (underground plots grow all year), preferring a crop already in stock as seed; add a census line 'farm plots with empty slots'.
