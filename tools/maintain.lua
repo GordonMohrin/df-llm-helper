@@ -53,3 +53,12 @@ for _, role in ipairs({'mayor', 'manager', 'bookkeeper'}) do
   end
 end
 end
+
+-- 4. every farm plot grows something: a plot without a crop in a season stays empty (live L7: 4 of 13 plots had none)
+do
+  local set = 0
+  for _, b in ipairs(df.global.world.buildings.other.FARM_PLOT) do
+    for s = 0, 3 do if b.plant_id[s] < 0 then b.plant_id[s] = 181; set = set + 1 end end   -- 181 = prickle berry here
+  end
+  if set > 0 then print('farm crop slots set', set) end
+end
