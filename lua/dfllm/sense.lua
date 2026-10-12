@@ -156,17 +156,20 @@ end
 -- description) is a hostile candidate too; tame ones are dropped below like every own unit.
 -- live L6 (Paddletribes): a giant olm in a sealed deep cavern (z94) flapped the fort between PEACE and ALERT
 -- (idle 86%); a wild predator counts only on the citizens' walkable area (the map's own connectivity)
-local fort_group, fort_group_t = nil, -1
+local fort_group, fort_group_t, fort_minz = nil, -1, nil
 local function citizens_group()
   local t = df.global.cur_year_tick
   if fort_group_t ~= t then
-    fort_group_t, fort_group = t, nil
+    fort_group_t, fort_group, fort_minz = t, nil, nil
     for _, c in ipairs(dfhack.units.getCitizens(true)) do
       local g = dfhack.maps.isValidTilePos(c.pos) and dfhack.maps.getWalkableGroup(c.pos)
-      if g and g ~= 0 then fort_group = g; break end
+      if g and g ~= 0 then
+        fort_group = fort_group or g
+        fort_minz = math.min(fort_minz or c.pos.z, c.pos.z)
+      end
     end
   end
-  return fort_group
+  return fort_group, fort_minz
 end
 
 local function predator(u)
@@ -223,9 +226,11 @@ local function consider(hs, u)
   -- fly cannot reach anyone: not a hostile (the cavern olm rule above, for every kind)
   if not inv then
     local okg, other = pcall(function()
-      local cg = citizens_group()
+      local cg, minz = citizens_group()
       if not cg or not dfhack.maps.isValidTilePos(u.pos) then return false end
       local g = dfhack.maps.getWalkableGroup(u.pos)
+      -- live L7: underworld demons stand on group 0 (no walkable tile), 80+ levels below every citizen
+      if g == 0 and minz and u.pos.z < minz - 40 then return true end
       if g == 0 or g == cg then return false end
       local r = df.creature_raw.find(u.race)
       return not (r ~= nil and r.caste[u.caste].flags.FLIER == true)
