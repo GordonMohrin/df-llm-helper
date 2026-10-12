@@ -56,7 +56,7 @@ M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
             mood = {'has claimed a', 'is taken by a', 'withdraws from society', 'has begun a mysterious construction',
                     'has created', 'has been possessed', 'has gone stark raving mad', 'has gone melancholy'},
             -- live L2: "<name> has assumed the position of expedition leader of <civ>." halted the fort
-            noble = {'has assumed the position', 'has been elected', 'has become a militia'},
+            noble = {'has assumed the position', 'has been elected', 'has become a militia', 'has been appointed to the position'},
             -- live L2/L3: "<name> has gone berserk!" halted the fort (3 times in L2, then again in L3 for a child
             -- whose Secretive mood failed). Nothing in v2 reacts while the game is halted, so an unattended fort
             -- stood still; the citizens and soldiers deal with a berserker as after a click on OK. The notice is
