@@ -48,7 +48,9 @@ M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
                      'has starved to death', 'has drowned', 'has suffocated', 'has died after', 'has been crushed',
                      'has been killed', 'has died from',
                      -- live L7 (Paddletribes): "<name>, Ghostly Tanner has been murdered by <name>!" froze the fort
-                     'has been murdered', 'has been slain', 'has been executed'},
+                     'has been murdered', 'has been slain', 'has been executed',
+                     -- live L7: "<name>, Thresher has been found, starved to death." (comma form) halted the fort
+                     'starved to death', 'died of thirst', 'has been found, '},
             -- live L1b: a tantrum popup halted the fort; care samples stress, the dwarves deal with it
             stress = {'is throwing a tantrum'},
             -- live L1b: "<name> has claimed a Stoneworker's Workshop." halted the fort mid-mood; care tracks
