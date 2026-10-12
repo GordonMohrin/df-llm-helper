@@ -43,6 +43,8 @@ def main(n):
     out = subprocess.run([RUN, "lua", "-f", f.name], capture_output=True, text=True, timeout=120).stdout
     os.unlink(f.name)
     pts = [tuple(map(int, ln.split())) for ln in out.splitlines() if len(ln.split()) == 3]
+    if os.environ.get('QUARRY_SHOW'):
+        print(pts)
     by_z = collections.defaultdict(list)
     for p in pts:
         by_z[p[2]].append(p)
