@@ -21,6 +21,9 @@ play, so a gap becomes a note here, not a script in the running game).
 
 | FR-13 | Plan check before the fort manifest exists | `plan check` rejects every plan with room templates (farms, cistern, ...) until fortcore is placed; even the default draft is rejected on a fresh fort. Workaround: place fortcore with `bp.place`, then propose/check/apply |
 
+| FR-14 | Aquifer pass-through / drain template | Fortcore stops at the first damp tile (breach:damp) and never resumes; Gordon's rule is to dig through and smooth quickly, or dig ~10 levels deeper and excavate a large drying chamber. No verb or template does either; 3 fort starts stalled at damp stone with no boulders, no still, no office |
+| FR-15 | Duplicate fortcore guard | The applied default plan also places fortcore stage 1; placing it by hand creates two projects on the same site |
+
 ## Details
 **FR-01 Order sanity check.** `dfllm cmd orders.check`: for each manager order, verify the workshop type exists
 and is built, the material exists on the reachable walkable group, and a worker with the labor exists; report
@@ -45,3 +48,6 @@ reason, and a "relax old_sites" rule when the old fort is ruined.
 **FR-12 Rebuild helper.** Keep a manifest of placed buildings; `bp.restore` re-places the missing ones.
 
 **FR-13 Plan check without manifest.** Accept room templates after a fortcore stage in the same plan (dry-run the manifest), or have `plan propose` emit a first plan with fortcore only and a note to re-propose after placement.
+
+**FR-14 Aquifer pass-through.** New template `aqshaft`: a sealed 1-wide shaft through damp layers (dig down, smooth walls at once, optional channel chamber 10 levels below). `fortcore` should accept `aquifer=pass|above|drain` and resume after the shaft is sealed.
+**FR-15 Duplicate guard.** `bp.place` refuses a template that the active plan already places on the same site, and `plan apply` skips a build entry whose project already exists.
