@@ -62,3 +62,12 @@ do
   end
   if set > 0 then print('farm crop slots set', set) end
 end
+
+-- 5. orders the manager never validated do nothing (live L7: 26 meals, coffins, gem cuts sat unvalidated for years)
+do
+  local v = 0
+  for _, o in ipairs(df.global.world.manager_orders.all) do
+    if o.amount_left > 0 and not o.status.validated then o.status.validated = true; v = v + 1 end
+  end
+  if v > 0 then print('orders validated', v) end
+end
