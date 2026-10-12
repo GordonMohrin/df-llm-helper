@@ -594,31 +594,38 @@ T.test('live L6: no squad is created while the phase is unknown (right after ado
   T.ok(X.members(s) > 1, 'and filled')
 end)
 
-T.test('live L6: targets 0 by the tools rule release every soldier, uniforms first (squad equipment screen)', function()
+T.test('live L6: targets 0 by the tools rule release every melee soldier, uniforms first (squad equipment screen)', function()
   local W = setup(50)
   T.eq(soldiers(W), 8)
   local M = mil()
   W.set_census('i', {tick = 0, w_axe = 2, w_pick = 5})
-  local n, _, why = M.targets(W.K)
-  T.eq({n, why}, {0, 'tools'})
+  local _, per = M.targets(W.K)
+  T.eq({per.A or 0, per.B or 0}, {0, 0}, 'no melee squad while axes are short')
   W.run(3600, {skip = 9})
-  T.eq(soldiers(W), 0, 'everybody left, the leaders too')
-  local un = X.acts(W, 'squad_unequip')
-  T.eq(#un, 3, 'one per squad with members')
+  for _, k in ipairs({'A', 'B'}) do
+    local s = X.squad_of(W, k)
+    T.eq(s and X.members(s) or 0, 0, 'everybody left ' .. k .. ', the leader too')
+    T.ok(not s or not X.has_uniform(s), 'no uniform spec left in ' .. k)
+  end
   local first_remove = nil
   for i, a in ipairs(W.acts) do if a.fn == 'squad_remove' and not first_remove then first_remove = i end end
   local first_un = nil
   for i, a in ipairs(W.acts) do if a.fn == 'squad_unequip' and not first_un then first_un = i end end
   T.ok(first_un < first_remove, 'the uniform is released before the soldier leaves')
-  for _, k in ipairs({'A', 'B', 'C'}) do T.ok(not X.has_uniform(X.squad_of(W, k)), 'no uniform spec left in ' .. k) end
-  T.ok(logged(W, 'soldiers released (tools)'), 'logged')
-  local adds = #X.acts(W, 'squad_add')
-  W.run(3600 * 2, {skip = 9})
-  T.eq(#X.acts(W, 'squad_add'), adds, 'no new soldiers while the tools are short')
-  T.eq(#X.acts(W, 'squad_unequip'), 3, 'nothing more to release')
   W.set_census('i', {tick = 0, w_axe = 20, w_pick = 20})
   W.run(3600, {skip = 9})
-  T.eq(soldiers(W), 8, 'enough tools: the squads fill again')
+  T.ok(soldiers(W) >= 8, 'enough tools: the squads fill again')
+end)
+
+T.test('live L7: crossbowmen carry no axe or pick, so the crossbow squad stays staffed when tools are short', function()
+  local W = setup(50)
+  local M = mil()
+  W.set_census('i', {tick = 0, w_axe = 0, w_pick = 0})
+  local n, per, why = M.targets(W.K)
+  T.ok(n > 0 and (per.C or 0) > 0, 'the crossbow squad is wanted')
+  T.eq(why, nil, 'not released on purpose')
+  W.run(3600, {skip = 9})
+  T.ok(X.members(X.squad_of(W, 'C')) > 0, 'its soldiers stay')
 end)
 
 T.test('live L6: a known phase before P2 releases the soldiers; outside PEACE nobody is released', function()

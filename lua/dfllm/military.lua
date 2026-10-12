@@ -372,21 +372,27 @@ function M.targets(K)
   local n = (adults * M.share(K, cit) + 99) // 100
   if adults >= M.R2_ADULTS then n = math.max(n, M.R2_MIN) end
   local act = active(K)
-  n = math.min(n, M.SIZE * #act)
-  local zero
+  local zero, short
   local ph = phase_no(K)
   if ph and ph < 2 then zero = 'phase' end
   -- live L6: the soldiers took the fort's only two (battle) axes for a year, so nobody cut wood and every
-  -- build stalled. Tools first: no soldiers while the fort has fewer than TOOLS_MIN axes or picks in all
+  -- build stalled. Tools first: no melee soldiers while the fort has fewer than TOOLS_MIN axes or picks in
+  -- all. Live L7 (Paddletribes, no metal for years): crossbowmen carry no axe or pick, so the crossbow
+  -- squad stays staffed (the fort had 14 crossbows and 1100 bolts and no soldiers at all)
   local ci = K.census.i
   if type(ci) == 'table' and ((ci.w_axe or 0) < M.TOOLS_MIN or (ci.w_pick or 0) < M.TOOLS_MIN) then
-    n, zero = 0, zero or 'tools'
+    local only = {}
+    for _, s in ipairs(act) do if s.kind == 'xbow' then only[#only + 1] = s end end
+    act = only
+    if #act == 0 then n, zero = 0, zero or 'tools' end
+    short = true
   end
+  n = math.min(n, M.SIZE * #act)
   local per = {}
   local melee, xbow = {}, nil
   for _, s in ipairs(act) do per[s.key] = 0; if s.kind == 'melee' then melee[#melee + 1] = s.key else xbow = s.key end end
-  if #act == 0 then return 0, per, zero end
-  if n == 0 then return 0, per, zero end
+  if #act == 0 then return 0, per, zero, short end
+  if n == 0 then return 0, per, zero, short end
   local nx = 0
   if xbow then                                    -- live L2: every wanted squad gets at least its leader
     if #melee == 0 then nx = n
@@ -401,7 +407,7 @@ function M.targets(K)
     left = left - share
   end
   if xbow and left > 0 then per[xbow] = math.min(M.SIZE, per[xbow] + left) end   -- melee squads full
-  return n, per
+  return n, per, nil, short
 end
 
 ---------------------------------------------------------------- squads: adopt, create, uniform, fill
@@ -823,10 +829,10 @@ end
 -- on purpose (tools first, a phase before P2) every soldier leaves, after the squad's uniform specs and assigned
 -- items are released (act.squad_unequip, the squads screen's equip > remove), so the tools go back to the
 -- civilians. PEACE only; the leader (position 0) leaves last.
-local function release(K, why)
+local function release(K, why, kind)
   local n = 0
   for _, sp in ipairs(M.SQUADS) do
-    local e = st.sq[sp.key]
+    local e = (kind == nil or sp.kind == kind) and st.sq[sp.key]
     local s = e and squad(e.id)
     local mem = s and members(s) or {}
     if #mem > 0 then
@@ -1115,8 +1121,9 @@ function M.step(K, budget, ctx)
     K.act.run('uniform-unstick', '--all', '--drop', '--free')
     st.unstick, dirty = now, true
   end
-  local _, per, zero = M.targets(K)
-  if zero and mode == 'PEACE' then release(K, zero) end
+  local _, per, zero, short = M.targets(K)
+  if zero and mode == 'PEACE' then release(K, zero)
+  elseif short and mode == 'PEACE' then release(K, 'tools', 'melee') end
   rt.wguard = weapon_guard(K, per)
   local list
   local function recruits() list = list or M.recruits(K); return list end   -- only when needed
