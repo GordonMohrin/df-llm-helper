@@ -229,8 +229,8 @@ local function consider(hs, u)
       local cg, minz = citizens_group()
       if not cg or not dfhack.maps.isValidTilePos(u.pos) then return false end
       local g = dfhack.maps.getWalkableGroup(u.pos)
-      -- live L7: underworld demons stand on group 0 (no walkable tile), 80+ levels below every citizen
-      if g == 0 and minz and u.pos.z < minz - 40 then return true end
+      -- live L7: underworld demons stand 80+ levels below every citizen
+      if minz and u.pos.z < minz - 40 then return true end
       if g == 0 or g == cg then return false end
       local r = df.creature_raw.find(u.race)
       return not (r ~= nil and r.caste[u.caste].flags.FLIER == true)
