@@ -91,5 +91,19 @@ for _, u in ipairs(cit) do                      -- needs care now (scars of old 
 end
 put('wounded', hurt)
 
+-- burial: loose dwarf corpses and tomb zones that refuse citizens (live L7: every tomb had no_citizens, nobody was buried for years)
+local dw = cit[1] and cit[1].race
+local loose = 0
+for _, it in ipairs(df.global.world.items.other.CORPSE) do
+  if it.race == dw and not it.flags.removed and not it.flags.in_building then loose = loose + 1 end
+end
+local closed, openfree = 0, 0
+for _, z in ipairs(df.global.world.buildings.other.ACTIVITY_ZONE) do
+  if z.type == zt.Tomb and z.assigned_unit_id < 0 then
+    if z.zone_settings.tomb.flags.no_citizens then closed = closed + 1 else openfree = openfree + 1 end
+  end
+end
+put('loose_corpses', loose); put('tombs_closed', closed); put('tombs_open_free', openfree)
+
 put('year', df.global.cur_year)
 print(table.concat(out, '\n'))
