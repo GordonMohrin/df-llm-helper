@@ -46,7 +46,9 @@ M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
             -- live L2: "<name> has bled to death." halted the fort after a berserk citizen was killed
             death = {'has been found dead', 'has bled to death', 'has been struck down', 'has died of thirst',
                      'has starved to death', 'has drowned', 'has suffocated', 'has died after', 'has been crushed',
-                     'has been killed', 'has died from'},
+                     'has been killed', 'has died from',
+                     -- live L7 (Paddletribes): "<name>, Ghostly Tanner has been murdered by <name>!" froze the fort
+                     'has been murdered', 'has been slain', 'has been executed'},
             -- live L1b: a tantrum popup halted the fort; care samples stress, the dwarves deal with it
             stress = {'is throwing a tantrum'},
             -- live L1b: "<name> has claimed a Stoneworker's Workshop." halted the fort mid-mood; care tracks
