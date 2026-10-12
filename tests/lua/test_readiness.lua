@@ -283,7 +283,7 @@ T.test('audit snapshots: manifest bbox, monthly, after defense stages (1 day gap
   local W = world()
   day(W)
   T.eq(#W.snap.exports, 1)
-  T.eq(W.snap.exports[1].opts, {purpose = 'audit', bbox = {40, 2, 3, 78, 78, 12}})
+  T.eq(W.snap.exports[1].opts, {purpose = 'audit', bbox = {40, 0, 3, 78, 86, 12}})
   day(W, 27)
   T.eq(#W.snap.exports, 1, 'monthly')
   day(W, 2)
@@ -308,7 +308,7 @@ T.test('audit snapshots: manifest bbox, monthly, after defense stages (1 day gap
   function W.runner.bboxes(K) return {{60, 70, 5, 66, 95, 5}} end
   X.call(W, 'runner', 'emit', 'PROJECT_STAGE', {proj = 'p2', stage = 's2.build', pct = 50, defense = 1})
   day(W, 2)
-  T.eq(W.snap.exports[#W.snap.exports].opts.bbox, {40, 2, 3, 78, 103, 12})
+  T.eq(W.snap.exports[#W.snap.exports].opts.bbox, {40, 0, 3, 78, 111, 12})
 end)
 
 T.test('audit verb rejects bad args; ready state is schema-shaped', function()

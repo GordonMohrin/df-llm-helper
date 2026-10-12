@@ -23,7 +23,7 @@ M.AUDIT_GAP = 1200       -- at most one audit request per day
 M.LEVERS_EVERY = 33600
 M.MIN_LEVERS, M.TRAPS, M.METAL, M.R2_SOLDIERS = 2, 30, 20, 8
 M.STOCK_HYST = 90        -- % of a stock minimum that keeps R2 once reached (no flapping)
-M.PAD = {8, 8, 1}        -- audit bbox margin around the manifest geometry
+M.PAD = {8, 16, 1}       -- audit bbox margin around the manifest geometry (live L7: a bedrooms block 8 tiles past the geometry ended on the box edge and read as a way in)
 local QUIET_MODES = {PEACE = true, ALERT = true, RECOVERY = true}   -- audit snapshots allowed
 
 local st      -- persisted m.readiness
