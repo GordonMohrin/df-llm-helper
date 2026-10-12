@@ -28,6 +28,8 @@ play, so a gap becomes a note here, not a script in the running game).
 
 | FR-17 | Fill every season slot of every farm plot | autofarm left 2 of 4 season slots empty on 10 underground plots; plots idle half the year, food swung 4-44 days; I filled the slots with Lua |
 
+| FR-18 | Show the caravan's goods before setting wants | Four caravans (ratios 1.7-2.2) delivered drink/wood but never metal; wants are set blind. A `trade.offer` read verb lists what the civ brings, so wants and sell lists can be chosen |
+
 ## Details
 **FR-01 Order sanity check.** `dfllm cmd orders.check`: for each manager order, verify the workshop type exists
 and is built, the material exists on the reachable walkable group, and a worker with the labor exists; report
@@ -59,3 +61,5 @@ reason, and a "relax old_sites" rule when the old fort is ruined.
 **FR-16 Work detail + unsuspend verbs.** `economy` assigns Plant gatherers, Fisherdwarves and Hunters when food < 20 days and idle > 30 %; add a verb `jobs.release` for suspended ConstructBuilding jobs with a reason report, and stop baseline from forcing suspendmanager on.
 
 **FR-17 Farm season slots.** The economy module should set a crop for all four seasons per plot (underground plots grow all year), preferring a crop already in stock as seed; add a census line 'farm plots with empty slots'.
+
+**FR-18 Caravan offer.** `inspect what=trade` lists the merchants' goods (types, counts, prices) once the depot is open, `trade.want` can then name items that exist; report unmet wants per caravan.
