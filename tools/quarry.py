@@ -22,6 +22,14 @@ local g=dfhack.maps.getWalkableGroup(xyz2pos(dfhack.units.getPosition(cit)))
 local function info(p) local ok,tt=pcall(dfhack.maps.getTileType,p) if not ok or not tt then return nil end local a=df.tiletype.attrs[tt] return df.tiletype_shape[a.shape], df.tiletype_material[a.material], df.tiletype_special[a.special] end
 local zones={} for _,z in ipairs(df.global.world.buildings.other.ACTIVITY_ZONE) do zones[#zones+1]=z end
 local function inzone(p) for _,z in ipairs(zones) do if p.z==z.z and p.x>=z.x1-2 and p.x<=z.x2+2 and p.y>=z.y1-2 and p.y<=z.y2+2 then return true end end return false end
+-- live L7: mining the wall next to a bridge or trap brought the building down (bridges B1, B2, O1 and 24 traps
+-- vanished): nothing within 3 tiles (same level and one above or below) may be a building
+local function near_building(p)
+  for dz=-1,1 do for dx=-3,3 do for dy=-3,3 do
+    if dfhack.buildings.findAtTile(xyz2pos(p.x+dx,p.y+dy,p.z+dz)) then return true end
+  end end end
+  return false
+end
 local n=0
 for _,b in ipairs(df.global.world.map.map_blocks) do
  for x=0,15 do for y=0,15 do
@@ -33,7 +41,7 @@ for _,b in ipairs(df.global.world.map.map_blocks) do
     for _,dd in ipairs({{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}}) do
      local q=xyz2pos(p.x+dd[1],p.y+dd[2],p.z+dd[3]) local qs=info(q)
      if qs and qs~='WALL' then open=open+1 if dfhack.maps.getWalkableGroup(q)==g then reach=true end end end
-    if open==1 and reach and not dfhack.buildings.findAtTile(p) then print(p.x,p.y,p.z) n=n+1 end end end end end end
+    if open==1 and reach and not near_building(p) then print(p.x,p.y,p.z) n=n+1 end end end end end end
 """
 
 
