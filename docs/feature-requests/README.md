@@ -30,6 +30,9 @@ play, so a gap becomes a note here, not a script in the running game).
 
 | FR-18 | Show the caravan's goods before setting wants | Four caravans (ratios 1.7-2.2) delivered drink/wood but never metal; wants are set blind. A `trade.offer` read verb lists what the civ brings, so wants and sell lists can be chosen |
 
+| FR-19 | Weck-Meldungen fuer einzelne Hungernde/Durstige und Buerger ausserhalb der Fort-Zone | zwei Zwerge verhungerten in Hoehlen, nur 'starving N' in der Statuszeile |
+| FR-20 | Handelsfenster nutzen | Karawane scheiterte 'time' und 'nothing_listed'; Verkaufsliste vor Ankunft, Depot frei, Handel sofort beim Eintreffen |
+
 ## Details
 **FR-01 Order sanity check.** `dfllm cmd orders.check`: for each manager order, verify the workshop type exists
 and is built, the material exists on the reachable walkable group, and a worker with the labor exists; report
