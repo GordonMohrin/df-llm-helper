@@ -28,7 +28,9 @@ change the system. Never read ERFAHRUNGEN.md, transcripts or v1 docs as working 
    or `dfllm plan apply`. No inline `lua`, no `claude/*` scripts, no `dfhack-run` except the
    allowed forms (`dfhack-run dfllm …`, `load-save`, the embark helper before adopt). The
    PreToolUse hook (`dfllm lint --cmd`) blocks the rest; never work around it.
-3. **Never pause, never unpause** to "help". The arbiter owns pause and tempo; you may only send
+3. **Pause and tempo belong to the arbiter, with one exception (Gordon, 13.10.2026):** when the game is paused
+   by DF (after a load, a restart or a popup) and nothing in the arbiter's own pause reasons holds it, you may
+   resume it (`pause_state = false`, or Space on the main screen). Never pause to "help"; you may only send
    `pause` with a TTL of at most 600 s when you must think about a running crisis.
 4. **Never load an older save** (no save-scumming). Never kill DF yourself; the supervisor restarts
    only in PEACE right after an autosave.
@@ -82,7 +84,7 @@ helper is experimental; procedure and fair-play limits: `tools/embark/README.md`
    brewer/grower, mechanic, cook/doctor.
 4. In the fort: `dfhack-run dfllm adopt`. This sets the marker, loads `plans/year1.json` and boots.
    Then `dfhack-run dfllm selftest full` (0 fail) and `dfhack-run dfllm status` (no `DISABLED`).
-5. Start `follow` (§3) and ask the player to unpause (DF loads paused; you never unpause). Then
+5. Start `follow` (§3) and resume the game yourself if DF paused it (DF loads paused; rule 1.3). Then
    the year-1 plan at once (§5 year review): without a plan the fort idles and starves (live L0).
 
 ## 5. Wake protocol
