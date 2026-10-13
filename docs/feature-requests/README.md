@@ -33,6 +33,8 @@ play, so a gap becomes a note here, not a script in the running game).
 | FR-19 | Weck-Meldungen fuer einzelne Hungernde/Durstige und Buerger ausserhalb der Fort-Zone | zwei Zwerge verhungerten in Hoehlen, nur 'starving N' in der Statuszeile |
 | FR-20 | Handelsfenster nutzen | Karawane scheiterte 'time' und 'nothing_listed'; Verkaufsliste vor Ankunft, Depot frei, Handel sofort beim Eintreffen |
 
+| FR-21 | Stockpiles without fortcore | The fort ran 10 years with 0 stockpiles because fortcore never finished; items lay scattered. A `stockpiles` template that needs no manifest, placed by default before pop 10 |
+
 ## Details
 **FR-01 Order sanity check.** `dfllm cmd orders.check`: for each manager order, verify the workshop type exists
 and is built, the material exists on the reachable walkable group, and a worker with the labor exists; report
