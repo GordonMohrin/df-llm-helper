@@ -428,3 +428,13 @@ do
     print('kern_burrow_tiles_added=' .. n)
   end
 end
+
+-- Run 9 (14.10.2026): the manager died in a goblin raid; without a manager no new work order is ever validated (BREW_DRINK, slabs, coffins
+-- stayed 'valid false'). Validate pending orders ourselves until a new manager is appointed.
+do
+  local n = 0
+  for _, o in ipairs(df.global.world.manager_orders.all) do
+    if not o.status.validated and o.amount_left > 0 then o.status.validated = true; n = n + 1 end
+  end
+  print('orders_validated=' .. n)
+end
