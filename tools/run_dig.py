@@ -13,6 +13,7 @@ DIGSTATE = os.path.join(os.path.dirname(rw.JOURNAL), ".dig_state.json")
 
 
 def main():
+    last = None
     while True:
         try:
             st = json.load(open(DIGSTATE, encoding="utf-8"))
@@ -21,8 +22,10 @@ def main():
         msg = rw.dig_program(st)
         json.dump(st, open(DIGSTATE, "w", encoding="utf-8"))
         left = sum(1 for e in st.get("dig", {}).values() if not e.get("done"))
-        print(f"{time.strftime('%H:%M:%S')} {msg} | offen: {left}")
-        sys.stdout.flush()
+        if left != last:  # quiet: only report when the number of open plans changes
+            print(f"{time.strftime('%H:%M:%S')} {msg} | offen: {left}")
+            sys.stdout.flush()
+            last = left
         if not left:
             print("Grabprogramm abgeschlossen")
             return
