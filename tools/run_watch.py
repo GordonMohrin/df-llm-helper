@@ -98,6 +98,8 @@ def dig_program(st):
         e["zero"] = e["zero"] + 1 if n == 0 else 0
         if e["zero"] >= 2:
             e["done"] = True
+            for t in j.get("then", []):  # follow-up builds (beds, walls, doors) once the rooms are open
+                run([RUN, "quickfort", "run", t["bp"], "-n", t["name"], "-c", t["cursor"]], 60)
         else:
             active += 1
             designated += n
