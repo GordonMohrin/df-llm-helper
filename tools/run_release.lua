@@ -390,3 +390,20 @@ do
   end
   print('popups_dismissed=' .. n)
 end
+
+-- A loose dwarf corpse is only hauled to its coffin once its death incident is 'discovered' (a dwarf must find the body); bodies in
+-- quiet rooms stayed unburied for days. Mark the incidents of loose dwarf corpses as discovered (what DFHack's entomb script does).
+do
+  local n = 0
+  for _, i in ipairs(df.global.world.items.other.CORPSE) do
+    local r = df.creature_raw.find(i.race)
+    if r and r.creature_id == 'DWARF' then
+      local u = df.unit.find(i.unit_id)
+      if u and u.counters.death_id >= 0 then
+        local ic = df.incident.find(u.counters.death_id)
+        if ic and not ic.flags.discovered then ic.flags.discovered = true; n = n + 1 end
+      end
+    end
+  end
+  print('incidents_discovered=' .. n)
+end
