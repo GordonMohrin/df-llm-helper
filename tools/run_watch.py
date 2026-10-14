@@ -23,6 +23,7 @@ DF = os.environ.get("DFLLM_DF", r"E:\Program Files (x86)\Steam\steamapps\common\
 RUN = os.path.join(DF, "hack", "dfhack-run.exe")
 JOURNAL = os.environ.get("RUN_JOURNAL", r"C:\Users\admin\claude gordons projects\dwarf-fortress\runs\run-9-neues-fort\JOURNAL.md")
 STATE = os.path.join(os.path.dirname(JOURNAL), ".watch_state.json")
+DIGPROG = os.path.join(os.path.dirname(JOURNAL), "dig_program.json")
 CLI = [sys.executable, "-m", "df_llm_helper"]
 REPO = os.path.dirname(HERE)
 
@@ -74,6 +75,48 @@ def status():
     s["soldiers"] = int(ms.group(2)) if ms else None
     s["paused"] = "paused" in txt.split("\n")[0]
     return s
+
+
+def dig_program(st):
+    """Hidden tiles cannot be designated: re-apply each dig blueprint every round until it designates nothing
+    twice in a row (rooms open up row by row). Returns a short summary."""
+    try:
+        jobs = json.load(open(DIGPROG, encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return ""
+    prog = st.setdefault("dig", {})
+    active = 0
+    designated = 0
+    for j in jobs:
+        key = j["name"] + "@" + j["cursor"]
+        if prog.get(key, {}).get("done"):
+            continue
+        out = run([RUN, "quickfort", "run", j["bp"], "-n", j["name"], "-c", j["cursor"]], 60)
+        mm = re.search(r"Tiles designated for digging: (\d+)", out)
+        n = int(mm.group(1)) if mm else 0
+        e = prog.setdefault(key, {"zero": 0})
+        e["zero"] = e["zero"] + 1 if n == 0 else 0
+        if e["zero"] >= 2:
+            e["done"] = True
+        else:
+            active += 1
+            designated += n
+    return f"Grabprogramm: {active} aktiv, {designated} Felder neu markiert"
+
+
+def shortcuts(mode):
+    """Policy for the four shortcut bridges of the trap corridor: lowered in PEACE (short way for the dwarves),
+    raised in every other mode (attackers must walk the whole serpentine). Pulls levers with DFHack's lever script."""
+    out = run([RUN, "lever", "list"], 30)
+    pulled = 0
+    pat = re.compile(r"lever #(\d+) @\[[^\]]*\]\W{1,14}linked to (raised|lowered) Bridge")
+    for m_ in pat.finditer(out):
+        lid, state = m_.group(1), m_.group(2)
+        want = "lowered" if mode == "PEACE" else "raised"
+        if state != want:
+            run([RUN, "lever", "pull", "--id", lid], 30)
+            pulled += 1
+    return f"Abkuerzungsbruecken: {pulled} Hebel gezogen (Soll {'unten' if mode == 'PEACE' else 'hoch'})" if pulled else ""
 
 
 def census():
@@ -185,6 +228,7 @@ def report(full=True, journal=False):
     G = goals(m, s, c)
     rows = evaluate(G)
     st = load_state()
+    digmsg = dig_program(st)
     flips = []
     prev = st.get("ok", {})
     for gid, text, ok, detail, hint in rows:
@@ -209,6 +253,12 @@ def report(full=True, journal=False):
             print(f"  [{'x' if ok else ' '}] {text}: {detail}")
     for gid, ok in flips:
         print(f"  >> {'ERREICHT' if ok else 'ROT'}: {gid}")
+    if digmsg:
+        print("  " + digmsg)
+    if s.get("mode"):
+        sc = shortcuts(s["mode"])
+        if sc:
+            print("  " + sc)
     if focus:
         esc = "  ** STILLSTAND seit %d Runden -> Ursache suchen, nicht wiederholen **" % st["focus_rounds"] if st["focus_rounds"] >= 3 else ""
         print(f"FOKUS: {focus[1]} ({focus[3]})\n  naechster Schritt: {focus[4]}{esc}")
