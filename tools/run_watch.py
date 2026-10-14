@@ -208,8 +208,8 @@ def goals(m, s, c):
               lambda: (m.get("equipped_adults", 0) >= max(adults, 1), f"{m.get('equipped_adults', 0)} / {adults} ausgerüstet, im Trupp {m.get('squad_adults', 0)}"),
               "Waffen/Rüstung bestellen (Handel/Schmiede/Leder), Uniform zuweisen, Trupp für alle (Training 3 Monate/Jahr)"))
     G.append(("training", "Training läuft (jeder Trupp mit Mitgliedern auf Trainings-Routine)",
-              lambda: (m.get("squads_with_members", 0) >= 1 and m.get("squads_training", 0) >= m.get("squads_with_members", 0),
-                       f"{m.get('squads_training', 0)} von {m.get('squads_with_members', 0)} Trupps im Training, Soldaten {s.get('soldiers')}, Kampfwert {s.get('cv')}, Zustand {s.get('worn')} %"),
+              lambda: (m.get("squads_with_members", 0) >= 1 and (m.get("squads_training", 0) >= 1 or (isinstance(m.get("tick"), int) and m["tick"] // 33600 in (9, 10, 11))),
+                       f"{m.get('squads_training', 0)} von {m.get('squads_with_members', 0)} Trupps im Training (Elite frei in Monat 10-12), Soldaten {s.get('soldiers')}, Kampfwert {s.get('cv')}, Zustand {s.get('worn')} %"),
               "Trupp-Zeitplan: Elite durchgehend Training (außer 3 Monate), alle anderen >= 3 Monate/Jahr; Ziele/Dummies"))
     G.append(("rooms", "Speisesaal-Zone + 4 Orte (Taverne, Tempel, Hospital, Bibliothek)",
               lambda: (m.get("b.Z_DiningHall", 0) >= 1 and m.get("b.Z_MeetingHall", 0) >= 4,

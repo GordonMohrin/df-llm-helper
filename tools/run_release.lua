@@ -275,3 +275,22 @@ do
   end
   print('intruders=' .. #targets .. ' kill_orders_set=' .. set .. ' kill_orders_cleared=' .. cleared)
 end
+
+-- Leather/bone/meat only come from animals (no metal, no leather in stock): keep 3 adults in the 'Hunters' work detail (crossbows 21,
+-- bolts 100+ are in stock). Idle <= 30 % and the equipment goal both need hides.
+do
+  local det
+  for _, w in ipairs(df.global.plotinfo.labor_info.work_details) do if w.name == 'Hunters' then det = w end end
+  if det then
+    local have, added = #det.assigned_units, 0
+    for _, u in ipairs(dfhack.units.getCitizens(true)) do
+      if have + added >= 3 then break end
+      if dfhack.units.isAdult(u) and u.military.squad_id < 0 then
+        local member = false
+        for _, id in ipairs(det.assigned_units) do if id == u.id then member = true end end
+        if not member then det.assigned_units:insert('#', u.id); u.status.labors[df.unit_labor.HUNT] = true; added = added + 1 end
+      end
+    end
+    print('hunters=' .. (have + added) .. ' (added ' .. added .. ')')
+  end
+end
