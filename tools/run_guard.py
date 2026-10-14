@@ -12,6 +12,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DF = os.environ.get("DFLLM_DF", r"E:\Program Files (x86)\Steam\steamapps\common\Dwarf Fortress")
 RUN = os.path.join(DF, "hack", "dfhack-run.exe")
 QUIET = int(os.environ.get("GUARD_QUIET", "90"))
+LOWER = os.environ.get("GUARD_LOWER", "0") == "1"   # 14.10. 23:41: the bridges stay UP after a siege (an army walked in over the lowered ones)
 
 
 def run(args, timeout=30):
@@ -21,6 +22,9 @@ def run(args, timeout=30):
 def bridge_states():
     out = run(["lua", "local t={} for _,b in ipairs(df.global.world.buildings.other.BRIDGE) do t[#t+1]=b.id..':'..(b.gate_flags.raised and 'R' or 'L') end print(table.concat(t,' '))"])
     return dict((int(a), c) for a, c in (x.split(":") for x in out.split()))
+
+
+_last_pull = {}
 
 
 def pull_to(want_raised):
@@ -33,8 +37,9 @@ def pull_to(want_raised):
         st = states.get(int(bid))
         if st is None:
             continue
-        if (st == "R") != want_raised:
+        if (st == "R") != want_raised and time.time() - _last_pull.get(lid, 0) > 60:
             run(["lever", "pull", "--id", lid])
+            _last_pull[lid] = time.time()
             n += 1
     return n
 
@@ -42,6 +47,8 @@ def pull_to(want_raised):
 def main():
     quiet_since = time.time()
     last_alarm = ""
+    last_peace_pull = 0.0
+    last_threat_print = 0.0
     while True:
         try:
             line = run(["lua", "-f", os.path.join(HERE, "run_guard.lua")], 30).strip()
@@ -54,13 +61,20 @@ def main():
             if threat:
                 if lowered > 0:
                     n = pull_to(True)
-                    print(f"{time.strftime('%H:%M:%S')} !! GUARD INVADERS {line} -> {n} levers pulled (bridges up)")
-                    sys.stdout.flush()
+                    if time.time() - last_threat_print > 30:   # the lever jobs stay queued until a dwarf walks there: do not spam
+                        print(f"{time.strftime('%H:%M:%S')} !! GUARD INVADERS {line} -> {n} levers pulled (bridges up)")
+                        sys.stdout.flush()
+                        last_threat_print = time.time()
                 elif line != last_alarm and ins >= 1:
                     print(f"{time.strftime('%H:%M:%S')} !! GUARD INVADERS INSIDE {line}")
                     sys.stdout.flush()
                 last_alarm = line
-            elif vis == 0 and raised > 0 and time.time() - quiet_since > QUIET:
+            elif not LOWER and vis == 0 and lowered > 0 and time.time() - last_peace_pull > 120:
+                n = pull_to(True)
+                last_peace_pull = time.time()
+                print(f"{time.strftime('%H:%M:%S')} GUARD peace: bridges kept up -> {n} levers pulled")
+                sys.stdout.flush()
+            elif LOWER and vis == 0 and raised > 0 and time.time() - quiet_since > QUIET:
                 n = pull_to(False)
                 print(f"{time.strftime('%H:%M:%S')} GUARD quiet {QUIET}s -> {n} levers pulled (bridges down)")
                 sys.stdout.flush()
