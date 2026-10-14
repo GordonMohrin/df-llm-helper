@@ -407,3 +407,24 @@ do
   end
   print('incidents_discovered=' .. n)
 end
+
+-- Run 9 (14.10.2026): the civ-alert burrow 'Kern+' had 4 tiles; every goblin wave locked all citizens into it without drink and a child and
+-- a leatherworker died of thirst. Keep it as the whole interior (z108-z116, walkable group of the citizens) so food, drink, beds and the
+-- crypt stay inside the alert area; the surface and the trap corridor (z117/118) stay outside.
+do
+  local b = dfhack.burrows.findByName('Kern+')
+  if b and #b.block_x < 60 then
+    local main = dfhack.maps.getWalkableGroup(xyz2pos(55, 62, 110))
+    local n = 0
+    for z = 108, 116 do
+      for x = 20, 125 do
+        for y = 20, 125 do
+          local pos = xyz2pos(x, y, z)
+          local f = dfhack.maps.getTileFlags(pos)
+          if f and not f.hidden and dfhack.maps.getWalkableGroup(pos) == main then dfhack.burrows.setAssignedTile(b, pos, true); n = n + 1 end
+        end
+      end
+    end
+    print('kern_burrow_tiles_added=' .. n)
+  end
+end
