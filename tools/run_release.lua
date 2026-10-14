@@ -50,3 +50,13 @@ for _, b in ipairs(df.global.world.buildings.other.FARM_PLOT) do
   end
 end
 print('farm_slots_filled=' .. filled)
+
+-- Workaround FR-23: tomb zones placed by quickfort are closed to citizens (no_citizens); open unassigned ones so the dead can be buried.
+local opened = 0
+for _, b in ipairs(df.global.world.buildings.all) do
+  if b:getType() == df.building_type.Civzone and b.type == df.civzone_type.Tomb and b.assigned_unit_id == -1 then
+    local f = b.zone_settings.tomb.flags
+    if f.no_citizens then f.no_citizens = false; opened = opened + 1 end
+  end
+end
+print('tomb_zones_opened=' .. opened)
