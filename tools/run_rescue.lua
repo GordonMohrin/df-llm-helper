@@ -9,7 +9,7 @@ for _, u in ipairs(dfhack.units.getCitizens(true)) do
     h.flags.should_not_move = false
     h.flags.rq_diagnosis = false
     local j = u.job.current_job
-    if j and df.job_type[j.job_type] == 'Rest' then pcall(function() dfhack.job.removeJob(j) end) end
+    -- (no dfhack.job.removeJob: DF crashed on unit 24510 after job removal, 14.10. 17:47)
     freed = freed + 1
   end
 end

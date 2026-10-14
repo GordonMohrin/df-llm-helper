@@ -21,8 +21,10 @@ def main():
     d = json.load(open(path))
     d["seasons"] = [{"build": []} for _ in d.get("seasons", [])] or [{"build": []}] * 4
     d.setdefault("supply", {})["mood_stock"] = 20
-    d["trade"] = {"sell": ["crafts"], "want": ["seeds", "bar:iron", "bar:copper", "bar:bronze", "wood", "bone", "meal", "meat",
-                                              "cheese", "drink", "pick", "axe", "anvil", "cloth", "leather", "thread"]}
+    # J353: 1300 silk cloth and 8000 thread sit in the stores; buy metal, leather, bone, seeds, tools, wood; sell crafts, cloth, thread
+    d["trade"] = {"sell": ["crafts", "cloth", "thread"], "want": ["bar:iron", "bar:copper", "bar:bronze", "leather", "bone", "seeds",
+                                                                   "pick", "axe", "anvil", "wood", "meat"]}
+    # military pct stays at the default (15): pct 35 made the kernel staff three squads and DF crashed twice within minutes (J353, 14.10.)
     json.dump(d, open(path, "w"), indent=1)
     out = run(["plan", "check", path])
     print(out.strip().splitlines()[-1] if out.strip() else "check: no output")
