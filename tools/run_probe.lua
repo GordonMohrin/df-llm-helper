@@ -116,11 +116,13 @@ out('paused', tostring(df.global.pause_state))
 do
   local n, races = 0, {}
   for _, u in ipairs(df.global.world.units.active) do
-    if dfhack.units.isActive(u) and dfhack.units.isAlive(u) and not dfhack.units.isCitizen(u) and not dfhack.units.isTame(u)
-       and (dfhack.units.isWildlife(u) or dfhack.units.isInvader(u)) and not dfhack.units.isGhost(u) then
+    if dfhack.units.isActive(u) and dfhack.units.isAlive(u) and not dfhack.units.isGhost(u)
+       and ((not dfhack.units.isCitizen(u) and not dfhack.units.isTame(u) and (dfhack.units.isWildlife(u) or dfhack.units.isInvader(u)))
+            or (dfhack.units.isCitizen(u) and u.mood == df.mood_type.Berserk)) then
       local p = xyz2pos(dfhack.units.getPosition(u))
       local fl = dfhack.maps.getTileFlags(p)
-      if fl and not fl.hidden and main > 0 and dfhack.maps.getWalkableGroup(p) == main then
+      local inside = p.z <= 117 and p.x >= 20 and p.x <= 110 and p.y >= 35 and p.y <= 125
+      if fl and not fl.hidden and main > 0 and dfhack.maps.getWalkableGroup(p) == main and (inside or dfhack.units.isCitizen(u)) then
         n = n + 1
         local r = df.creature_raw.find(u.race)
         local id = r and r.creature_id or '?'
@@ -151,4 +153,23 @@ do
     end
   end
   out('equipped_adults', eq); out('squad_adults', sq)
+end
+
+-- squads on a training routine (names from the entity routines; 'Off duty' = none)
+do
+  local rt = df.global.plotinfo.alerts.routines
+  local train_sq, mem_sq = 0, 0
+  for _, sq in ipairs(df.global.world.squads.all) do
+    if sq.entity_id == df.global.plotinfo.group_id then
+      local n = 0
+      for _, p in ipairs(sq.positions) do if p.occupant >= 0 then n = n + 1 end end
+      local r = rt[sq.cur_routine_idx]
+      local name = r and r.name or ''
+      if n > 0 then
+        mem_sq = mem_sq + 1
+        if name:lower():find('training') then train_sq = train_sq + 1 end
+      end
+    end
+  end
+  out('squads_with_members', mem_sq); out('squads_training', train_sq)
 end

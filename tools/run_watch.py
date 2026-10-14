@@ -101,6 +101,14 @@ def dig_program(st):
         n = int(mm.group(1)) if mm else 0
         e = prog.setdefault(key, {"zero": 0})
         e["zero"] = e["zero"] + 1 if n == 0 else 0
+        if j.get("until"):   # long corridors: a quiet round only means "waiting for the miners"; done when the last tile is open
+            ux, uy, uz = (int(v) for v in j["until"].split(","))
+            chk = run([RUN, "lua", f"local f=dfhack.maps.getTileFlags({ux},{uy},{uz}); local t=dfhack.maps.getTileType({ux},{uy},{uz}); "
+                       f"print((f and not f.hidden and df.tiletype.attrs[t].shape~=df.tiletype_shape.WALL) and 'OPEN' or 'CLOSED')"], 30)
+            if "OPEN" in chk:
+                e["zero"] = 2
+            else:
+                e["zero"] = 0
         if e["zero"] >= 2:
             e["done"] = True
             for t in j.get("then", []):  # follow-up builds (beds, walls, doors) once the rooms are open
@@ -199,8 +207,9 @@ def goals(m, s, c):
     G.append(("equip", "Jeder Erwachsene ausgerüstet (Waffe + Rüstung)",
               lambda: (m.get("equipped_adults", 0) >= max(adults, 1), f"{m.get('equipped_adults', 0)} / {adults} ausgerüstet, im Trupp {m.get('squad_adults', 0)}"),
               "Waffen/Rüstung bestellen (Handel/Schmiede/Leder), Uniform zuweisen, Trupp für alle (Training 3 Monate/Jahr)"))
-    G.append(("training", "Training läuft (Drill nicht 'never', Elite trainiert durchgehend)",
-              lambda: (s.get("drill") not in (None, "never") and (s.get("soldiers") or 0) >= 1, f"Drill {s.get('drill')}, Soldaten {s.get('soldiers')}, Kampfwert {s.get('cv')}, Zustand {s.get('worn')} %"),
+    G.append(("training", "Training läuft (jeder Trupp mit Mitgliedern auf Trainings-Routine)",
+              lambda: (m.get("squads_with_members", 0) >= 1 and m.get("squads_training", 0) >= m.get("squads_with_members", 0),
+                       f"{m.get('squads_training', 0)} von {m.get('squads_with_members', 0)} Trupps im Training, Soldaten {s.get('soldiers')}, Kampfwert {s.get('cv')}, Zustand {s.get('worn')} %"),
               "Trupp-Zeitplan: Elite durchgehend Training (außer 3 Monate), alle anderen >= 3 Monate/Jahr; Ziele/Dummies"))
     G.append(("rooms", "Speisesaal-Zone + 4 Orte (Taverne, Tempel, Hospital, Bibliothek)",
               lambda: (m.get("b.Z_DiningHall", 0) >= 1 and m.get("b.Z_MeetingHall", 0) >= 4,
