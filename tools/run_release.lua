@@ -640,3 +640,24 @@ do
   end
   print('doctors=' .. (have + added) .. ' (added ' .. added .. ')')
 end
+
+-- FR-50 (14.10.2026): after the 5th siege every barrel with drink (1392 units) was forbidden; the kernel counted "drink 0 d"
+-- (drink_forb 1392) while the colony had 20 months of beer. Unforbid barrels, bins, bags and drink items every round
+-- (the mood reserve forbids only the mood materials, never containers).
+do
+  local n = 0
+  local o = df.global.world.items.other
+  for _, vec in ipairs({o.BARREL, o.BIN, o.BAG, o.DRINK, o.FOOD}) do
+    for _, i in ipairs(vec) do
+      if i.flags.forbid and not i.flags.in_inventory then i.flags.forbid = false; n = n + 1 end
+    end
+  end
+  -- the containers of the drink are TOOL items here (the kernel census reads cont.flags.forbid): unforbid whatever holds drink or food
+  for _, vec in ipairs({o.DRINK, o.FOOD}) do
+    for _, i in ipairs(vec) do
+      local c = dfhack.items.getContainer(i)
+      if c and c.flags.forbid then c.flags.forbid = false; n = n + 1 end
+    end
+  end
+  print('containers_food_drink_unforbidden=' .. n)
+end
