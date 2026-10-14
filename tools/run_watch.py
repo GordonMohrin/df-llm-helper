@@ -106,7 +106,7 @@ def dig_program(st):
     return f"Grabprogramm: {active} aktiv, {designated} Felder neu markiert"
 
 
-def shortcuts(mode):
+def shortcuts(mode, st):
     """Policy for the four shortcut bridges of the trap corridor: lowered in PEACE (short way for the dwarves),
     raised in every other mode (attackers must walk the whole serpentine). Pulls levers with DFHack's lever script."""
     out = run([RUN, "lever", "list"], 30)
@@ -115,8 +115,11 @@ def shortcuts(mode):
     for m_ in pat.finditer(out):
         lid, state = m_.group(1), m_.group(2)
         want = "lowered" if mode == "PEACE" else "raised"
-        if state != want:
+        last = st.setdefault("pulls", {}).get(lid, -99)
+        now = st.get("round", 0)
+        if state != want and now - last >= 5:  # a pull job takes a while; a second pull would toggle it back
             run([RUN, "lever", "pull", "--id", lid], 30)
+            st["pulls"][lid] = now
             pulled += 1
     return f"Abkuerzungsbruecken: {pulled} Hebel gezogen (Soll {'unten' if mode == 'PEACE' else 'hoch'})" if pulled else ""
 
@@ -177,7 +180,7 @@ def goals(m, s, c):
               lambda: ((s.get("soldiers") or 0) * 100 >= 15 * max(adults, 1), f"{s.get('soldiers')} Soldaten / {adults} Erwachsene, Armbrüste {m.get('crossbows')}"),
               "Bowyer + Armbrüste aus Holz, Trupp aufstellen, Training"))
     G.append(("rooms", "Speisesaal-Zone + 4 Orte (Taverne, Tempel, Hospital, Bibliothek)",
-              lambda: (m.get("b.Z_DiningHall", 0) >= 1 and m.get("b.Z_MeetingHall", 0) >= 5,
+              lambda: (m.get("b.Z_DiningHall", 0) >= 1 and m.get("b.Z_MeetingHall", 0) >= 4,
                        f"Speisesaal-Zonen {m.get('b.Z_DiningHall', 0)}, Meeting-Zonen {m.get('b.Z_MeetingHall', 0)} (Soll 5 inkl. Büro-Halle)"),
               "Zonen mit location=tavern/temple/hospital/library per quickfort #zone, dann Möbel"))
     G.append(("growth", "Bevölkerung wächst (>= 30)", lambda: ((s["pop"] or 0) >= 30, f"{s['pop']} (Cap {s['cap']})"),
@@ -230,6 +233,7 @@ def report(full=True, journal=False):
     G = goals(m, s, c)
     rows = evaluate(G)
     st = load_state()
+    st["round"] = st.get("round", 0) + 1
     digmsg = dig_program(st)
     flips = []
     prev = st.get("ok", {})
@@ -258,7 +262,7 @@ def report(full=True, journal=False):
     if digmsg:
         print("  " + digmsg)
     if s.get("mode"):
-        sc = shortcuts(s["mode"])
+        sc = shortcuts(s["mode"], st)
         if sc:
             print("  " + sc)
     if focus:
