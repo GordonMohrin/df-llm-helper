@@ -600,3 +600,20 @@ do
   end
   print('entombed_tasked=' .. n)
 end
+
+-- FR-46 (14.10.2026, Gordon: "search for metal, make armor"): invaders' gear (steel/bronze/iron armor, shields, weapons, bolts) lay
+-- forbidden on the surface after the sieges and stayed unusable. Unforbid every metal weapon/armor/ammo/shield item that nobody holds;
+-- the military module then counts it as free metal and equips the squads with it (uniform 'best available').
+do
+  local o = df.global.world.items.other
+  local n = 0
+  for _, vec in ipairs({o.WEAPON, o.ARMOR, o.HELM, o.SHOES, o.PANTS, o.GLOVES, o.SHIELD, o.AMMO, o.TRAPCOMP, o.BAR}) do
+    for _, i in ipairs(vec) do
+      if i.flags.forbid and not i.flags.in_inventory then
+        local m = dfhack.matinfo.decode(i)
+        if m and m.type == 0 and m.inorganic and m.inorganic.material.flags.IS_METAL then i.flags.forbid = false; n = n + 1 end
+      end
+    end
+  end
+  print('loot_metal_unforbidden=' .. n)
+end
