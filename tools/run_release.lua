@@ -244,6 +244,31 @@ do
       if fl and not fl.hidden and main > 0 and dfhack.maps.getWalkableGroup(p) == main and (inside or dfhack.units.isCitizen(u)) then targets[#targets + 1] = u.id end
     end
   end
+  -- no intruder: the squad hunts harmless grazers on the open map for hides, bone and meat (leather/bone feed the strange moods;
+  -- a failed mood costs a citizen). Never while a large predator is visible; at most 2 targets at a time.
+  local hunting = false
+  if #targets == 0 then
+    local predator = false
+    local grazers = {}
+    for _, u in ipairs(df.global.world.units.active) do
+      if dfhack.units.isActive(u) and dfhack.units.isAlive(u) and not dfhack.units.isCitizen(u) and not dfhack.units.isTame(u) and dfhack.units.isWildlife(u) then
+        local r = df.creature_raw.find(u.race)
+        local c = r and r.caste[u.caste]
+        local p = xyz2pos(dfhack.units.getPosition(u))
+        local fl = dfhack.maps.getTileFlags(p)
+        if c and fl and not fl.hidden then
+          if c.flags.LARGE_PREDATOR then predator = true
+          elseif c.flags.GRAZER and not c.flags.MEGABEAST and main > 0 and dfhack.maps.getWalkableGroup(p) == main
+                 and p.x >= 10 and p.x <= 150 and p.y >= 10 and p.y <= 150 then grazers[#grazers + 1] = u.id end
+        end
+      end
+    end
+    if not predator and #grazers > 0 then
+      table.sort(grazers)
+      for i = 1, math.min(2, #grazers) do targets[#targets + 1] = grazers[i] end
+      hunting = true
+    end
+  end
   table.sort(targets)
   local want = table.concat(targets, ',')
   local set, cleared = 0, 0
@@ -273,7 +298,7 @@ do
       end
     end
   end
-  print('intruders=' .. #targets .. ' kill_orders_set=' .. set .. ' kill_orders_cleared=' .. cleared)
+  print('intruders=' .. (hunting and 0 or #targets) .. ' hunt_targets=' .. (hunting and #targets or 0) .. ' kill_orders_set=' .. set .. ' kill_orders_cleared=' .. cleared)
 end
 
 -- Leather/bone/meat only come from animals (no metal, no leather in stock): keep 3 adults in the 'Hunters' work detail (crossbows 21,
