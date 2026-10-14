@@ -617,3 +617,22 @@ do
   end
   print('loot_metal_unforbidden=' .. n)
 end
+
+-- FR-48 (14.10.2026): after the sieges all three doctors were dead (DIAGNOSE/SURGERY/BONE_SETTING on 0 dwarves) and 7 patients waited
+-- for a diagnosis. Keep >= 4 living non-military adults on the doctor labors.
+do
+  local labs = {df.unit_labor.DIAGNOSE, df.unit_labor.SURGERY, df.unit_labor.BONE_SETTING}
+  local have = 0
+  for _, u in ipairs(dfhack.units.getCitizens(true)) do
+    if dfhack.units.isAdult(u) and u.status.labors[df.unit_labor.DIAGNOSE] then have = have + 1 end
+  end
+  local added = 0
+  for _, u in ipairs(dfhack.units.getCitizens(true)) do
+    if have + added >= 4 then break end
+    if dfhack.units.isAdult(u) and u.military.squad_id < 0 and not u.status.labors[df.unit_labor.DIAGNOSE] then
+      for _, l in ipairs(labs) do u.status.labors[l] = true end
+      added = added + 1
+    end
+  end
+  print('doctors=' .. (have + added) .. ' (added ' .. added .. ')')
+end
