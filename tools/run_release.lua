@@ -15,11 +15,16 @@ print('construct_jobs=' .. n)
 -- Workaround FR-16b: the kernel keeps only 2-4 miners; with a big visible dig backlog make sure >= 6 adults mine
 -- (idle non-military adults, with a pick available is up to the game's own job assignment).
 local backlog = 0
-for z = 108, 117 do
-  for y = 20, 110 do for x = 20, 110 do
-    local d = dfhack.maps.getTileFlags(x, y, z)
-    if d and not d.hidden and d.dig ~= 0 then backlog = backlog + 1 end
-  end end
+do
+  local l = df.global.world.jobs.list.next
+  while l do
+    local j = l.item
+    if j then
+      local t = df.job_type[j.job_type] or ''
+      if t:find('^Dig') or t:find('^Carve') then backlog = backlog + 1 end
+    end
+    l = l.next
+  end
 end
 print('dig_backlog=' .. backlog)
 if backlog > 50 then
