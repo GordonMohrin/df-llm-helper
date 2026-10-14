@@ -32,7 +32,7 @@ for _, i in ipairs(df.global.world.items.other.CORPSE) do
     end
   end
 end
-if n + disc > 0 or freed >= 6 then print('rescue released=' .. freed .. ' popups=' .. n .. ' discovered=' .. disc) end
+if n + disc > 0 then print('rescue released=' .. freed .. ' popups=' .. n .. ' discovered=' .. disc) end
 
 -- Shaft-head doors: forbidden while invaders are on the map (goblins open doors and would bypass the trap corridor through the shaft),
 -- allowed again when none is left. Lesson: feedback_df_tueren_forbid_lenken.
@@ -130,5 +130,5 @@ do
       end
     end
   end
-  print('intruders=' .. (hunting and 0 or #targets) .. ' hunt_targets=' .. (hunting and #targets or 0) .. ' kill_orders_set=' .. set .. ' kill_orders_cleared=' .. cleared)
+  if set > 0 or cleared > 0 then print('intruders=' .. (hunting and 0 or #targets) .. ' hunt_targets=' .. (hunting and #targets or 0) .. ' kill_orders_set=' .. set .. ' kill_orders_cleared=' .. cleared) end
 end
