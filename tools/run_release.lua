@@ -481,3 +481,18 @@ do
   end
   print('plants_marked=' .. marked)
 end
+
+-- Run 9 (14.10.2026): 'SawDeadBody' was the top memory of the colony (1153 entries, stress 52 %); animal and goblin corpses lay around the
+-- halls for years. Mark every non-dwarf corpse in the fort levels for dumping (the dump zone is a far tunnel end; dwarf corpses go to coffins).
+do
+  local n = 0
+  for _, i in ipairs(df.global.world.items.other.CORPSE) do
+    local r = df.creature_raw.find(i.race)
+    if r and r.creature_id ~= 'DWARF' and not i.flags.dump and not i.flags.forbid then
+      local p = xyz2pos(dfhack.items.getPosition(i))
+      local fl = dfhack.maps.getTileFlags(p)
+      if fl and not fl.hidden and p.z >= 104 and p.z <= 118 then i.flags.dump = true; n = n + 1 end
+    end
+  end
+  print('corpses_marked_dump=' .. n)
+end
