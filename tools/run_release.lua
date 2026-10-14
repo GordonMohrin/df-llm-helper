@@ -27,14 +27,14 @@ do
   end
 end
 print('dig_backlog=' .. backlog)
-if backlog > 50 then
+if backlog > 0 then
   local det
   for _, w in ipairs(df.global.plotinfo.labor_info.work_details) do if w.name == 'Miners' then det = w end end
   if det then
     local have = #det.assigned_units
     local added = 0
     for _, u in ipairs(dfhack.units.getCitizens(true)) do
-      if have + added >= math.min(14, 6 + backlog // 150) then break end
+      if have + added >= math.min(14, 4 + backlog // 150) then break end
       if dfhack.units.isAdult(u) and u.military.squad_id < 0 and not u.status.labors[df.unit_labor.MINE] then
         det.assigned_units:insert('#', u.id); u.status.labors[df.unit_labor.MINE] = true; added = added + 1
       end
@@ -257,7 +257,7 @@ do
         local p = xyz2pos(dfhack.units.getPosition(u))
         local fl = dfhack.maps.getTileFlags(p)
         if c and fl and not fl.hidden then
-          if c.flags.LARGE_PREDATOR then predator = true
+          if c.flags.LARGE_PREDATOR then if math.abs(p.x - 60) <= 70 and math.abs(p.y - 62) <= 70 then predator = true end
           elseif c.flags.GRAZER and not c.flags.MEGABEAST and main > 0 and dfhack.maps.getWalkableGroup(p) == main
                  and p.x >= 10 and p.x <= 150 and p.y >= 10 and p.y <= 150 then grazers[#grazers + 1] = u.id end
         end
@@ -316,7 +316,7 @@ do
         if c and c.flags.LARGE_PREDATOR then
           local p = xyz2pos(dfhack.units.getPosition(u))
           local fl = dfhack.maps.getTileFlags(p)
-          if fl and not fl.hidden then danger = danger + 1 end
+          if fl and not fl.hidden and math.abs(p.x - 60) <= 70 and math.abs(p.y - 62) <= 70 then danger = danger + 1 end
         end
       end
     end
