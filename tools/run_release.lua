@@ -65,3 +65,35 @@ for _, b in ipairs(df.global.world.buildings.all) do
   end
 end
 print('tomb_zones_opened=' .. opened)
+
+-- Workaround FR-24: brewing eats the plump helmets the dwarves need as food. While food < 30 days and drink > 60 days,
+-- take the brew-from-plant orders off the manager list (the kernel re-adds them once food has recovered).
+local fd, dd = tonumber(({...})[1]), tonumber(({...})[2])
+local removed = 0
+if fd and dd and fd < 30 and dd > 60 then
+  local all = df.global.world.manager_orders.all
+  for i = #all - 1, 0, -1 do
+    local r = all[i].reaction_name or ''
+    if r:find('BREW_DRINK_FROM_PLANT') then all:erase(i); removed = removed + 1 end
+  end
+end
+print('brew_orders_removed=' .. removed)
+
+-- Workaround FR-25: the 'Planters' work detail is empty (mode 1 = members only); without it the PlantSeeds jobs of the new farm
+-- plots stay unclaimed (79 pending jobs, food 1 day). Keep >= 14 adults in it.
+do
+  local det
+  for _, w in ipairs(df.global.plotinfo.labor_info.work_details) do if w.name == 'Planters' then det = w end end
+  if det then
+    local have, added = #det.assigned_units, 0
+    for _, u in ipairs(dfhack.units.getCitizens(true)) do
+      if have + added >= 14 then break end
+      if dfhack.units.isAdult(u) and u.military.squad_id < 0 then
+        local member = false
+        for _, id in ipairs(det.assigned_units) do if id == u.id then member = true end end
+        if not member then det.assigned_units:insert('#', u.id); u.status.labors[df.unit_labor.PLANT] = true; added = added + 1 end
+      end
+    end
+    print('planters=' .. (have + added) .. ' (added ' .. added .. ')')
+  end
+end

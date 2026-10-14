@@ -224,11 +224,14 @@ def report(full=True, journal=False):
         return None
     m = probe()
     c = census()
-    rel = run([RUN, "lua", "-f", os.path.join(HERE, "run_release.lua")], 60)
+    rel = run([RUN, "lua", "-f", os.path.join(HERE, "run_release.lua"), str(s.get("food_d") or ""), str(s.get("drink_d") or "")], 90)
     mrel = re.search(r"released=(\d+)", rel)
     mcj = re.search(r"construct_jobs=(\d+)", rel)
     m["released"] = int(mrel.group(1)) if mrel else 0
     m["construct_jobs"] = int(mcj.group(1)) if mcj else 0
+    mbo = re.search(r"brew_orders_removed=(\d+)", rel)
+    if mbo and int(mbo.group(1)):
+        print(f"  Brauaufträge entfernt: {mbo.group(1)} (Essen {s.get('food_d')} d < 30, Trinken {s.get('drink_d')} d)")
     if "year" not in m:
         m = probe()  # one retry: DFHack was busy
         if "year" not in m:
