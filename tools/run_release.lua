@@ -581,3 +581,19 @@ do
     print('trade_depot_redesignated=0')
   end
 end
+
+-- FR-45 (14.10.2026): zone + coffin assignment alone left skeletons of dead dwarves lying around for game months (the game never
+-- tasked PlaceItemInTomb). DFHack's `entomb --unit <id> --haul-now` assigns a tomb, flags every body part for burial and
+-- creates the hauling jobs (no teleport). Run it once for each unburied dwarf body that has no job yet.
+do
+  local seen, n = {}, 0
+  for _, i in ipairs(df.global.world.items.other.CORPSE) do
+    local r = df.creature_raw.find(i.race)
+    if r and r.creature_id == 'DWARF' and not i.flags.in_building and not i.flags.in_job and not seen[i.unit_id] then
+      seen[i.unit_id] = true
+      local ok = pcall(dfhack.run_command, 'entomb', '--unit', tostring(i.unit_id), '--haul-now')
+      if ok then n = n + 1 end
+    end
+  end
+  print('entombed_tasked=' .. n)
+end

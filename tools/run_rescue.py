@@ -1,5 +1,6 @@
 """Fast rescue loop: run_rescue.lua every 10 s. Prints only when it did something. python -u tools/run_rescue.py"""
 import os
+import re
 import subprocess
 import sys
 import time
@@ -15,8 +16,11 @@ def main():
         try:
             r = subprocess.run([RUN, "lua", "-f", os.path.join(HERE, "run_rescue.lua")], capture_output=True, text=True, timeout=60)
             out = r.stdout.strip()
-            if out and out != last:   # the game re-flags the same patients every tick: report only changes
-                print(time.strftime("%H:%M:%S"), out.replace("\n", " | "))
+            line = out.replace("\n", " | ")
+            # grazer hunts and patient releases alone are routine: print only popups, intruders and shaft-door events
+            quiet = bool(re.fullmatch(r"(rescue released=\d+ popups=0 discovered=\d+( \| )?)?(intruders=0 hunt_targets=\d+ kill_orders_set=\d+ kill_orders_cleared=\d+)?", line))
+            if out and out != last and not quiet:   # the game re-flags the same patients every tick: report only changes
+                print(time.strftime("%H:%M:%S"), line)
                 sys.stdout.flush()
             last = out
             # the game also stops with pause_state=true after threat announcements; the kernel reports it as 'pause:popup'
