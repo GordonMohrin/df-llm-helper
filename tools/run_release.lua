@@ -459,3 +459,21 @@ do
     print('squads_off_duty_to_ready=' .. changed)
   end
 end
+
+-- Food top-up (Run 9): re-mark reachable, visible, edible wild plants for gathering every round (they regrow; the gatherers are idle
+-- anyway). Fruit/leaf plants only; fibre plants (pig tail) are marked too for cloth.
+do
+  local edible = {GRASS_WHEAT_CAVE = 1, MUSHROOM_HELMET_PLUMP = 1, POD_SWEET = 1, BUSH_QUARRY = 1, MUSHROOM_CUP_DIMPLE = 1, GRASS_TAIL_PIG = 1}
+  local ref = xyz2pos(55, 62, 110)
+  local marked = 0
+  for _, p in ipairs(df.global.world.plants.all) do
+    local raw = df.plant_raw.find(p.material)
+    if raw and edible[raw.id] and p.pos.z >= 108 then
+      local fl = dfhack.maps.getTileFlags(p.pos)
+      if fl and not fl.hidden and dfhack.maps.canWalkBetween(ref, p.pos) and not dfhack.designations.isPlantMarked(p) then
+        if dfhack.designations.markPlant(p) then marked = marked + 1 end
+      end
+    end
+  end
+  print('plants_marked=' .. marked)
+end
