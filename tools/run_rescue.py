@@ -19,6 +19,12 @@ def main():
                 print(time.strftime("%H:%M:%S"), out.replace("\n", " | "))
                 sys.stdout.flush()
             last = out
+            # the game also stops with pause_state=true after threat announcements; the kernel reports it as 'pause:popup'
+            st = subprocess.run([sys.executable, "-m", "df_llm_helper", "status"], capture_output=True, text=True, timeout=60,
+                                cwd=os.path.dirname(HERE)).stdout
+            if st.splitlines() and "pause:popup" in st.splitlines()[0]:
+                subprocess.run([RUN, "lua", "if #df.global.world.status.popups == 0 then df.global.pause_state = false end"],
+                               capture_output=True, text=True, timeout=30)
         except Exception as e:  # noqa: BLE001
             print("rescue error", e)
             sys.stdout.flush()
