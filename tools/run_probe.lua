@@ -111,3 +111,44 @@ out('plots_unreach', punr); out('plots', pn)
 -- game clock
 out('year', df.global.cur_year); out('tick', df.global.cur_year_tick)
 out('paused', tostring(df.global.pause_state))
+
+-- uninvited wild creatures on the citizens' walkable group (giant rats etc.): visible tiles only, no names (Lua crash lesson)
+do
+  local n, races = 0, {}
+  for _, u in ipairs(df.global.world.units.active) do
+    if dfhack.units.isActive(u) and dfhack.units.isAlive(u) and not dfhack.units.isCitizen(u) and not dfhack.units.isTame(u)
+       and (dfhack.units.isWildlife(u) or dfhack.units.isInvader(u)) and not dfhack.units.isGhost(u) then
+      local p = xyz2pos(dfhack.units.getPosition(u))
+      local fl = dfhack.maps.getTileFlags(p)
+      if fl and not fl.hidden and main > 0 and dfhack.maps.getWalkableGroup(p) == main then
+        n = n + 1
+        local r = df.creature_raw.find(u.race)
+        local id = r and r.creature_id or '?'
+        races[id] = (races[id] or 0) + 1
+      end
+    end
+  end
+  local list = {}
+  for k, v in pairs(races) do list[#list + 1] = k .. 'x' .. v end
+  table.sort(list)
+  out('intruders', n); out('intruder_races', table.concat(list, ','))
+end
+
+-- equipment: adults with a wielded weapon AND at least one worn armor piece (Gordon rule 5: every adult equipped)
+do
+  local eq, sq = 0, 0
+  for _, u in ipairs(cit) do
+    if dfhack.units.isAdult(u) and dfhack.units.isAlive(u) then
+      local w, a = false, false
+      for _, inv in ipairs(u.inventory) do
+        local t = inv.item:getType()
+        if inv.mode == 1 and t == df.item_type.WEAPON then w = true end
+        if inv.mode == 2 and (t == df.item_type.ARMOR or t == df.item_type.HELM or t == df.item_type.PANTS
+           or t == df.item_type.SHOES or t == df.item_type.GLOVES) then a = true end
+      end
+      if w and a then eq = eq + 1 end
+      if u.military.squad_id >= 0 then sq = sq + 1 end
+    end
+  end
+  out('equipped_adults', eq); out('squad_adults', sq)
+end

@@ -27,6 +27,7 @@ DIGPROG = os.path.join(os.path.dirname(JOURNAL), "dig_program.json")
 CLI = [sys.executable, "-m", "df_llm_helper"]
 REPO = os.path.dirname(HERE)
 
+SURVIVAL = ("connect", "seeds", "intruders", "thirst/hunger", "drink", "food", "water", "dead")
 MOODABLE = ["W_Carpenters", "W_Masons", "W_Craftsdwarfs", "W_Mechanics", "W_Jewelers", "W_Leatherworks", "W_Clothiers",
             "W_Bowyers", "W_Still", "W_Kitchen", "W_MetalsmithsForge", "W_Loom"]
 
@@ -74,6 +75,10 @@ def status():
     s["adults"] = int(ms.group(1)) if ms else None
     s["soldiers"] = int(ms.group(2)) if ms else None
     s["paused"] = "paused" in txt.split("\n")[0]
+    md = re.search(r"drill (\S+)", txt)
+    s["drill"] = md.group(1) if md else None
+    s["worn"] = g(r"worn (\d+)%")
+    s["cv"] = g(r"cv (\d+)")
     return s
 
 
@@ -153,6 +158,9 @@ def goals(m, s, c):
               "Wandring/Zugbrücke (raised)/Treppe ohne Gegenstück prüfen: getWalkableGroup an Schacht, Eingang, Brücken vergleichen"))
     G.append(("seeds", "Saat nicht verboten (Säcke/Töpfe)", lambda: (m.get("seeds_forbidden", 0) == 0, f"{m.get('seeds_forbidden')} Samen verboten"),
               "forbid der Säcke mit Samen aufheben (sonst 'Needs ... spawn' und kein Pflanzen)"))
+    G.append(("intruders", "Keine fremden Wildtiere/Feinde im Fort (Laufbereich der Bürger)",
+              lambda: (m.get("intruders", 0) == 0, f"{m.get('intruders', 0)} ({m.get('intruder_races', '-') or '-'})"),
+              "Kill-Auftrag an den Trupp (run_release setzt ihn), Fallen/Brücken prüfen, Eingang schließen"))
     G.append(("thirst/hunger", "Niemand verdurstet/verhungert (Hunger < 65000, Durst < 40000)",
               lambda: (m.get("max_hunger", 0) < 65000 and m.get("max_thirst", 0) < 40000,
                        f"Hunger max {m.get('max_hunger')}, Durst max {m.get('max_thirst')}"),
@@ -188,6 +196,12 @@ def goals(m, s, c):
     G.append(("military", "Soldaten >= 15 % der Erwachsenen, Armbrüste/Bolzen",
               lambda: ((s.get("soldiers") or 0) * 100 >= 15 * max(adults, 1), f"{s.get('soldiers')} Soldaten / {adults} Erwachsene, Armbrüste {m.get('crossbows')}"),
               "Bowyer + Armbrüste aus Holz, Trupp aufstellen, Training"))
+    G.append(("equip", "Jeder Erwachsene ausgerüstet (Waffe + Rüstung)",
+              lambda: (m.get("equipped_adults", 0) >= max(adults, 1), f"{m.get('equipped_adults', 0)} / {adults} ausgerüstet, im Trupp {m.get('squad_adults', 0)}"),
+              "Waffen/Rüstung bestellen (Handel/Schmiede/Leder), Uniform zuweisen, Trupp für alle (Training 3 Monate/Jahr)"))
+    G.append(("training", "Training läuft (Drill nicht 'never', Elite trainiert durchgehend)",
+              lambda: (s.get("drill") not in (None, "never") and (s.get("soldiers") or 0) >= 1, f"Drill {s.get('drill')}, Soldaten {s.get('soldiers')}, Kampfwert {s.get('cv')}, Zustand {s.get('worn')} %"),
+              "Trupp-Zeitplan: Elite durchgehend Training (außer 3 Monate), alle anderen >= 3 Monate/Jahr; Ziele/Dummies"))
     G.append(("rooms", "Speisesaal-Zone + 4 Orte (Taverne, Tempel, Hospital, Bibliothek)",
               lambda: (m.get("b.Z_DiningHall", 0) >= 1 and m.get("b.Z_MeetingHall", 0) >= 4,
                        f"Speisesaal-Zonen {m.get('b.Z_DiningHall', 0)}, Meeting-Zonen {m.get('b.Z_MeetingHall', 0)} (Soll 5 inkl. Büro-Halle)"),
@@ -260,13 +274,15 @@ def report(full=True, journal=False):
     for r_ in rows:
         if r_[2]:
             parked.pop(r_[0], None)          # met again: forget the parking
+    for sid in SURVIVAL:
+        parked.pop(sid, None)                # survival goals are never parked
     focus = next((r for r in rows if not r[2] and r[0] not in parked), None)
     fid = focus[0] if focus else None
     if st.get("focus") == fid:
         st["focus_rounds"] = st.get("focus_rounds", 0) + 1
     else:
         st["focus"], st["focus_rounds"] = fid, 1
-    if focus and st["focus_rounds"] >= 8:    # no progress for 8 rounds: park it, work on the next goal, retry later
+    if focus and st["focus_rounds"] >= 8 and focus[0] not in SURVIVAL:    # no progress for 8 rounds: park it, work on the next goal, retry later
         parked[fid] = st.get("round", 0)
         print(f"  >> ZURUECKGESTELLT nach 8 Runden ohne Fortschritt: {focus[1]} ({focus[3]}) - Ursache notieren (FR), naechstes Ziel")
         st["focus"], st["focus_rounds"] = None, 0
@@ -281,6 +297,9 @@ def report(full=True, journal=False):
           f"Essen {s['food_d']}d Trinken {s['drink_d']}d | Stress {s['stress']}% Leerlauf {s['idle']}% | Ziele {met}/{len(rows)}"
           f"{' | PAUSIERT' if s.get('paused') else ''}"
           f" | Bau-Auftraege {m.get('construct_jobs')} (freigegeben {m.get('released')})")
+    for gid, text, ok, detail, hint in rows:   # alarms independent of the focus (Gordon 14.10.: ghosts went unnoticed)
+        if not ok and gid in SURVIVAL:
+            print(f"  !! ALARM {text}: {detail}")
     if full or flips:
         for gid, text, ok, detail, hint in rows:
             print(f"  [{'x' if ok else ' '}] {text}: {detail}")
