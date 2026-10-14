@@ -18,18 +18,16 @@ def main():
     last_print = 0.0
     while True:
         try:
-            st = subprocess.run([sys.executable, "-m", "df_llm_helper", "status"], capture_output=True, text=True, timeout=60,
-                                cwd=os.path.dirname(HERE)).stdout
-            m = re.search(r"idle (\d+)%", st)
-            idle = int(m.group(1)) if m else -1
+            diag = subprocess.run([RUN, "lua", "-f", os.path.join(HERE, "run_idle.lua")], capture_output=True, text=True,
+                                  timeout=60).stdout.strip()
+            m = re.search(r"civ_idle=(\d+)%", diag)
+            idle = int(m.group(1)) if m else -1   # civilians only: soldiers on a training routine have no job but are not idle
             if idle > LIMIT:
                 high += 1
             else:
                 high = 0
             if high >= 2 and time.time() - last_print > 180:
-                diag = subprocess.run([RUN, "lua", "-f", os.path.join(HERE, "run_idle.lua")], capture_output=True, text=True,
-                                      timeout=60).stdout.strip()
-                print(f"{time.strftime('%H:%M:%S')} IDLE {idle}% > {LIMIT}% | {diag}")
+                print(f"{time.strftime('%H:%M:%S')} IDLE civilians {idle}% > {LIMIT}% | {diag}")
                 sys.stdout.flush()
                 last_print = time.time()
         except Exception as e:  # noqa: BLE001

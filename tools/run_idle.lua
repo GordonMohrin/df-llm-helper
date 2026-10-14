@@ -41,4 +41,10 @@ for k, v in pairs(why) do wt[#wt + 1] = {k, v} end
 table.sort(wt, function(x, y) return x[2] > y[2] end)
 local ct = {}
 for i = 1, math.min(3, #wt) do ct[#ct + 1] = wt[i][1]:sub(1, 40) .. 'x' .. wt[i][2] end
-print(string.format('adults=%d jobless=%d soldiers=%d claimed=%d unclaimed_top=[%s] cancels=[%s]', adults, none, mil, claimed, table.concat(top, ' '), table.concat(ct, '; ')))
+local civ = adults - mil
+local civ_none = 0
+for _, u in ipairs(cit) do
+  if dfhack.units.isAdult(u) and u.military.squad_id < 0 and not u.job.current_job then civ_none = civ_none + 1 end
+end
+local civ_idle = civ > 0 and (civ_none * 100 // civ) or 0
+print(string.format('civ_idle=%d%% adults=%d jobless=%d soldiers=%d claimed=%d unclaimed_top=[%s] cancels=[%s]', civ_idle, adults, none, mil, claimed, table.concat(top, ' '), table.concat(ct, '; ')))
