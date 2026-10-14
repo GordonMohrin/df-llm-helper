@@ -28,11 +28,7 @@ for _, p in ipairs(pairs_to_link) do
   local bridge = bld_at(p.bx, p.by, df.building_type.Bridge)
   if not lever or not bridge then print('missing', p.lx, p.ly); goto continue end
   do
-    local already = false
-    for _, t in ipairs(lever.linked_mechanisms) do end
-    for _, ref in ipairs(lever.general_refs) do
-      if ref:getType() == df.general_ref_type.BUILDING_TRIGGERTARGET and ref.building_id == bridge.id then already = true end
-    end
+    local already = #lever.linked_mechanisms > 0  -- (iterating general_refs of levers crashed DF, 14.10.)
     local pending = false
     for _, j in ipairs(lever.jobs) do if j.job_type == df.job_type.LinkBuildingToTrigger then pending = true end end
     if already then print('linked already', p.lx, p.ly)
