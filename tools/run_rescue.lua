@@ -32,4 +32,4 @@ for _, i in ipairs(df.global.world.items.other.CORPSE) do
     end
   end
 end
-if freed + n + disc > 0 then print('rescue released=' .. freed .. ' popups=' .. n .. ' discovered=' .. disc) end
+if n + disc > 0 or freed >= 6 then print('rescue released=' .. freed .. ' popups=' .. n .. ' discovered=' .. disc) end

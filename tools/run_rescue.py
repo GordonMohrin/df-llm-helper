@@ -10,13 +10,15 @@ RUN = os.path.join(DF, "hack", "dfhack-run.exe")
 
 
 def main():
+    last = None
     while True:
         try:
             r = subprocess.run([RUN, "lua", "-f", os.path.join(HERE, "run_rescue.lua")], capture_output=True, text=True, timeout=60)
             out = r.stdout.strip()
-            if out:
+            if out and out != last:   # the game re-flags the same patients every tick: report only changes
                 print(time.strftime("%H:%M:%S"), out.replace("\n", " | "))
                 sys.stdout.flush()
+            last = out
         except Exception as e:  # noqa: BLE001
             print("rescue error", e)
             sys.stdout.flush()

@@ -70,7 +70,7 @@ print('tomb_zones_opened=' .. opened)
 -- take the brew-from-plant orders off the manager list (the kernel re-adds them once food has recovered).
 local fd, dd = tonumber(({...})[1]), tonumber(({...})[2])
 local removed = 0
-if fd and dd and fd < 30 and dd > 60 then
+if fd and dd and ((fd < 60 and dd > 60) or dd > 200) then   -- 14.10.: brewing ate 100 food days in minutes (drink 159 -> 317)
   local all = df.global.world.manager_orders.all
   for i = #all - 1, 0, -1 do
     local r = all[i].reaction_name or ''
