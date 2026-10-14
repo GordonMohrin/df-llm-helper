@@ -140,7 +140,8 @@ def goals(m, s, c):
 
     mood_have = [w for w in MOODABLE if b(w) or m.get("b.F_" + w[2:], 0)]
     mood_missing = [w[2:] for w in MOODABLE if w not in mood_have]
-    buf = {k: c.get(k, 0) for k in ("boulders", "blocks", "wood", "gems", "cloth", "leather", "thread")}
+    buf = {k: c.get(k, 0) for k in ("boulders", "blocks", "wood", "gems")}
+    trade_low = [f"{k} {c.get(k, 0)}" for k in ("cloth", "leather", "thread") if c.get(k, 0) < 20]
     buf_low = [f"{k} {v}" for k, v in buf.items() if v < 20]
     adults = s.get("adults") or m.get("adults", 0)
     G = []
@@ -183,6 +184,9 @@ def goals(m, s, c):
               lambda: (m.get("b.Z_DiningHall", 0) >= 1 and m.get("b.Z_MeetingHall", 0) >= 4,
                        f"Speisesaal-Zonen {m.get('b.Z_DiningHall', 0)}, Meeting-Zonen {m.get('b.Z_MeetingHall', 0)} (Soll 5 inkl. Büro-Halle)"),
               "Zonen mit location=tavern/temple/hospital/library per quickfort #zone, dann Möbel"))
+    G.append(("tradegoods", "Handelsgüter >= 20 (Stoff, Leder, Faden: nur per Handel/Tiere)",
+              lambda: (not trade_low, "niedrig: " + (", ".join(trade_low) or "-")),
+              "Karawane: Wünsche cloth/leather/thread; Webstuhl/Spinnen; Haustiere schlachten"))
     G.append(("growth", "Bevölkerung wächst (>= 30)", lambda: ((s["pop"] or 0) >= 30, f"{s['pop']} (Cap {s['cap']})"),
               "Cap anheben nach Fundament; Essen/Wohnraum"))
     return G

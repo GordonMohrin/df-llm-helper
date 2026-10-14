@@ -37,3 +37,16 @@ if backlog > 50 then
     print('miners=' .. (have + added) .. ' (added ' .. added .. ')')
   end
 end
+
+-- Workaround FR-17: fill empty season slots of underground farm plots with the crop of the first non-empty slot.
+local filled = 0
+for _, b in ipairs(df.global.world.buildings.other.FARM_PLOT) do
+  if b.z < 118 then
+    local crop = -1
+    for i = 0, 3 do if b.plant_id[i] ~= -1 then crop = b.plant_id[i]; break end end
+    if crop ~= -1 then
+      for i = 0, 3 do if b.plant_id[i] == -1 then b.plant_id[i] = crop; filled = filled + 1 end end
+    end
+  end
+end
+print('farm_slots_filled=' .. filled)
