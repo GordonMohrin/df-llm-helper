@@ -145,6 +145,14 @@ def goals(m, s, c):
     buf_low = [f"{k} {v}" for k, v in buf.items() if v < 20]
     adults = s.get("adults") or m.get("adults", 0)
     G = []
+    G.append(("connect", "Alle Bürger, Essen, Saat und Farmen im selben Laufbereich",
+              lambda: (m.get("cit_groups", 1) <= 1 and m.get("food_unreach", 0) == 0 and m.get("seeds_unreach", 0) == 0
+                       and m.get("plots_unreach", 0) == 0,
+                       f"Bürger-Gruppen {m.get('cit_groups')}, Essen unerreichbar {m.get('food_unreach')}, "
+                       f"Saat unerreichbar {m.get('seeds_unreach')}, Felder unerreichbar {m.get('plots_unreach')}/{m.get('plots')}"),
+              "Wandring/Zugbrücke (raised)/Treppe ohne Gegenstück prüfen: getWalkableGroup an Schacht, Eingang, Brücken vergleichen"))
+    G.append(("seeds", "Saat nicht verboten (Säcke/Töpfe)", lambda: (m.get("seeds_forbidden", 0) == 0, f"{m.get('seeds_forbidden')} Samen verboten"),
+              "forbid der Säcke mit Samen aufheben (sonst 'Needs ... spawn' und kein Pflanzen)"))
     G.append(("thirst/hunger", "Niemand verdurstet/verhungert (Hunger < 65000, Durst < 40000)",
               lambda: (m.get("max_hunger", 0) < 65000 and m.get("max_thirst", 0) < 40000,
                        f"Hunger max {m.get('max_hunger')}, Durst max {m.get('max_thirst')}"),

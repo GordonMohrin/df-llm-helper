@@ -97,3 +97,18 @@ do
     print('planters=' .. (have + added) .. ' (added ' .. added .. ')')
   end
 end
+
+-- Run 9 lesson (14.10.2026): seed bags that came with a caravan were flagged forbidden; PlantSeeds jobs vanished and the
+-- cancellation read 'Needs plump helmet spawn'. Unforbid every seed item and every container holding seeds, each round.
+do
+  local seen, n = {}, 0
+  for _, i in ipairs(df.global.world.items.other.SEEDS) do
+    if i.flags.forbid then i.flags.forbid = false; n = n + 1 end
+    local c = dfhack.items.getContainer(i)
+    while c do
+      if not seen[c.id] then seen[c.id] = true; if c.flags.forbid then c.flags.forbid = false; n = n + 1 end end
+      c = dfhack.items.getContainer(c)
+    end
+  end
+  print('seed_forbid_cleared=' .. n)
+end

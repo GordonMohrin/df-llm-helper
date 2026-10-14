@@ -61,6 +61,53 @@ for z = 110, 116 do
 end
 out('wet_tiles', w)
 
+-- connectivity (run 9 lesson, 14.10.2026: a wall ring sealed the shaft head, food and farms were unreachable for
+-- half the colony, and forbidden seed bags stopped all planting). Walkable groups, flags only, no hidden tiles.
+local gcount, main, mainn = {}, 0, 0
+for _, u in ipairs(cit) do
+  if dfhack.units.isAlive(u) then
+    local g = dfhack.maps.getWalkableGroup(xyz2pos(dfhack.units.getPosition(u)))
+    gcount[g] = (gcount[g] or 0) + 1
+  end
+end
+local ngroups = 0
+for g, n in pairs(gcount) do
+  if g > 0 then ngroups = ngroups + 1 end
+  if g > 0 and n > mainn then main, mainn = g, n end
+end
+out('cit_groups', ngroups)
+out('cit_in_main_group', mainn)
+local function unreach(vec, skip_forbidden)
+  local n = 0
+  for _, i in ipairs(vec) do
+    if not (skip_forbidden and i.flags.forbid) then
+      local p = xyz2pos(dfhack.items.getPosition(i))
+      if p.x and dfhack.maps.getWalkableGroup(p) ~= main then n = n + 1 end
+    end
+  end
+  return n
+end
+local o = df.global.world.items.other
+out('food_unreach', unreach(o.PLANT, true) + unreach(o.PLANT_GROWTH, true) + unreach(o.MEAT, true) + unreach(o.FOOD, true) + unreach(o.FISH, true) + unreach(o.CHEESE, true))
+local sforb, sun = 0, 0
+for _, i in ipairs(o.SEEDS) do
+  local forb = i.flags.forbid
+  local c = dfhack.items.getContainer(i)
+  while c do
+    if c.flags.forbid then forb = true end
+    c = dfhack.items.getContainer(c)
+  end
+  if forb then sforb = sforb + i.stack_size end
+end
+out('seeds_forbidden', sforb)
+out('seeds_unreach', unreach(o.SEEDS, false))
+local punr, pn = 0, 0
+for _, b in ipairs(df.global.world.buildings.other.FARM_PLOT) do
+  pn = pn + 1
+  if dfhack.maps.getWalkableGroup(xyz2pos(b.x1, b.y1, b.z)) ~= main then punr = punr + 1 end
+end
+out('plots_unreach', punr); out('plots', pn)
+
 -- game clock
 out('year', df.global.cur_year); out('tick', df.global.cur_year_tick)
 out('paused', tostring(df.global.pause_state))

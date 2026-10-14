@@ -68,3 +68,11 @@ reason, and a "relax old_sites" rule when the old fort is ruined.
 **FR-17 Farm season slots.** The economy module should set a crop for all four seasons per plot (underground plots grow all year), preferring a crop already in stock as seed; add a census line 'farm plots with empty slots'.
 
 **FR-18 Caravan offer.** `inspect what=trade` lists the merchants' goods (types, counts, prices) once the depot is open, `trade.want` can then name items that exist; report unmet wants per caravan.
+
+**FR-22 Reachability audit.** `inspect what=reach`: walkable groups of citizens, food, seeds, farm plots, wells, depot and exit; flags any item class whose group differs from the main citizen group, and any STAIR_UP/STAIR_DOWN without a counterpart. Run it before and after any construction that could close a path (walls, doors, bridges). Run 9 lost 43 of 56 citizens to a self-built wall ring plus an entrance stair without a counterpart (see memory feedback_df_abriegelung_connectivity).
+
+**FR-23 Forbidden seed bags.** The census should report seeds that are unusable (forbidden item or forbidden container) separately from usable seeds; `economy` unforbids seed containers. Symptom was `Needs plump helmet spawn` cancel spam and zero PlantSeeds jobs.
+
+**FR-24 Lever vs bridge truth.** `inspect what=defense` prints each bridge's `gate_flags.raised` and the walkable result through it, next to the lever's linked state; the lever list alone mislead us.
+
+**FR-25 Starvation handler.** At food_days 0 and hungry citizens, mark every reachable visible edible plant for gathering (`dfhack.designations.markPlant`), set Gatherer and Planter details, unforbid food, and report who cannot reach food.
