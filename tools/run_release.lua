@@ -232,6 +232,10 @@ do
     end
   end
   for g, n in pairs(gcount) do if g > 0 and n > mainn then main, mainn = g, n end end
+  local siege_n = 0
+  for _, u in ipairs(df.global.world.units.active) do
+    if dfhack.units.isActive(u) and dfhack.units.isAlive(u) and dfhack.units.isInvader(u) and not dfhack.units.isGhost(u) then siege_n = siege_n + 1 end
+  end
   local targets = {}
   for _, u in ipairs(df.global.world.units.active) do
     if dfhack.units.isActive(u) and dfhack.units.isAlive(u) and not dfhack.units.isGhost(u)
@@ -240,7 +244,7 @@ do
       local p = xyz2pos(dfhack.units.getPosition(u))
       local fl = dfhack.maps.getTileFlags(p)
       -- inside the fort only (z <= 117 under the surface, or a berserk citizen anywhere): far wildlife on the open map is not our business
-      local inside = p.z <= 117 and p.x >= 20 and p.x <= 110 and p.y >= 35 and p.y <= 125
+      local inside = p.z <= (siege_n >= 4 and 116 or 117) and p.x >= 20 and p.x <= 110 and p.y >= 35 and p.y <= 125   -- during an organised siege the trap corridor (z117) is the traps' job
       if fl and not fl.hidden and main > 0 and dfhack.maps.getWalkableGroup(p) == main and (inside or dfhack.units.isCitizen(u)) then targets[#targets + 1] = u.id end
     end
   end
