@@ -131,10 +131,10 @@ def goals(m, s, c):
     G.append(("military", "Soldaten >= 15 % der Erwachsenen, Armbrüste/Bolzen",
               lambda: ((s.get("soldiers") or 0) * 100 >= 15 * max(adults, 1), f"{s.get('soldiers')} Soldaten / {adults} Erwachsene, Armbrüste {m.get('crossbows')}"),
               "Bowyer + Armbrüste aus Holz, Trupp aufstellen, Training"))
-    G.append(("rooms", "Speisesaal, Taverne, Tempel, Hospital, Bibliothek mit Zonen",
-              lambda: (all(m.get("b.Z_" + z, 0) >= 1 for z in ("Dining", "Tavern", "Temple", "Hospital")) or False,
-                       f"Zonen: " + ", ".join(f"{z} {m.get('b.Z_' + z, 0)}" for z in ("Dining", "Tavern", "Temple", "Hospital", "Library"))),
-              "Zonen setzen und Räume möblieren (nach Betten/Tischen)"))
+    G.append(("rooms", "Speisesaal-Zone + 4 Orte (Taverne, Tempel, Hospital, Bibliothek)",
+              lambda: (m.get("b.Z_DiningHall", 0) >= 1 and m.get("b.Z_MeetingHall", 0) >= 5,
+                       f"Speisesaal-Zonen {m.get('b.Z_DiningHall', 0)}, Meeting-Zonen {m.get('b.Z_MeetingHall', 0)} (Soll 5 inkl. Büro-Halle)"),
+              "Zonen mit location=tavern/temple/hospital/library per quickfort #zone, dann Möbel"))
     G.append(("growth", "Bevölkerung wächst (>= 30)", lambda: ((s["pop"] or 0) >= 30, f"{s['pop']} (Cap {s['cap']})"),
               "Cap anheben nach Fundament; Essen/Wohnraum"))
     return G
@@ -177,6 +177,11 @@ def report(full=True, journal=False):
     mcj = re.search(r"construct_jobs=(\d+)", rel)
     m["released"] = int(mrel.group(1)) if mrel else 0
     m["construct_jobs"] = int(mcj.group(1)) if mcj else 0
+    if "year" not in m:
+        m = probe()  # one retry: DFHack was busy
+        if "year" not in m:
+            print("Probe leer (DFHack beschäftigt) - Runde übersprungen")
+            return None
     G = goals(m, s, c)
     rows = evaluate(G)
     st = load_state()
