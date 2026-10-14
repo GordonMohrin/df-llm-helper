@@ -333,7 +333,10 @@ do
         end
       end
     end
-    if not predator and #grazers > 0 then
+    -- 14.10.2026: HUNT_GRAZERS off. The squads walked 100+ tiles west to camels (x 8-38, y 97-145, z118) and were cut down there by the
+    -- arriving armies (race426: 5 dead in one siege). Only an intruder inside the fort moves the squads out of their training.
+    local HUNT_GRAZERS = false
+    if HUNT_GRAZERS and not predator and #grazers > 0 then
       table.sort(grazers)
       for i = 1, math.min(2, #grazers) do targets[#targets + 1] = grazers[i] end
       hunting = true
