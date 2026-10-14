@@ -24,9 +24,9 @@ def main():
     # J353: 1300 silk cloth and 8000 thread sit in the stores; buy metal, leather, bone, seeds, tools, wood; sell crafts, cloth, thread
     d["trade"] = {"sell": ["crafts", "cloth", "thread"], "want": ["bar:iron", "bar:copper", "bar:bronze", "leather", "bone", "seeds",
                                                                    "pick", "axe", "anvil", "wood", "meat"]}
-    # Gordon rule 5 (every adult trains >= 3 months a year): 35 % of the adults in squads. The DF crashes of 14.10. blamed on this value
+    # Gordon rule 5 (every adult trains >= 3 months a year): 50 % of the adults in squads (21 citizens died in the 14.10. siege with 10 soldiers; training is also work). The DF crashes of 14.10. blamed on this value
     # were caused by manager orders without item_subtype (FR-39), not by the military plan.
-    d.setdefault("military", {}).update({"pct": 35})
+    d.setdefault("military", {}).update({"pct": 50})
     json.dump(d, open(path, "w"), indent=1)
     out = run(["plan", "check", path])
     print(out.strip().splitlines()[-1] if out.strip() else "check: no output")

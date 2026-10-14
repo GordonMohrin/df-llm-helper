@@ -12,6 +12,21 @@ end
 print('released=' .. r)
 print('construct_jobs=' .. n)
 
+-- Workaround FR-40 (14.10.2026): work details keep the ids of DEAD citizens, so "have >= N" thought the detail was full while
+-- nobody alive was in it (Planters: 14 ids, all dead -> 119 PlantSeeds + 23 HarvestPlants unclaimed, 33 of 42 adults jobless).
+-- Drop every id that is not a living citizen before any detail is counted.
+do
+  local alive = {}
+  for _, u in ipairs(dfhack.units.getCitizens(true)) do alive[u.id] = true end
+  local purged = 0
+  for _, w in ipairs(df.global.plotinfo.labor_info.work_details) do
+    for i = #w.assigned_units - 1, 0, -1 do
+      if not alive[w.assigned_units[i]] then w.assigned_units:erase(i); purged = purged + 1 end
+    end
+  end
+  print('work_detail_dead_ids_purged=' .. purged)
+end
+
 -- Workaround FR-16b: the kernel keeps only 2-4 miners; with a big visible dig backlog make sure >= 6 adults mine
 -- (idle non-military adults, with a pick available is up to the game's own job assignment).
 local backlog = 0
@@ -120,6 +135,21 @@ do
   local corpse_unit_at, unit_unburied = {}, {}
   local coffin_at = {}
   for _, b in ipairs(df.global.world.buildings.other.COFFIN) do coffin_at[b.x1 .. ',' .. b.y1 .. ',' .. b.z] = true end
+  -- FR-42: coffins that stand inside a Bedroom zone never get an InterringBody job (6 coffins at z108, the bodies lay on the
+  -- surface for hours): they do not count as usable tombs.
+  local bedrooms = {}
+  for _, b in ipairs(df.global.world.buildings.all) do
+    if b:getType() == df.building_type.Civzone and b.type == df.civzone_type.Bedroom then bedrooms[#bedrooms + 1] = b end
+  end
+  local function in_bedroom(x, y, z)
+    for _, r in ipairs(bedrooms) do
+      if r.z == z and x >= r.x1 and x <= r.x2 and y >= r.y1 and y <= r.y2 then return true end
+    end
+    return false
+  end
+  for _, b in ipairs(df.global.world.buildings.other.COFFIN) do
+    if in_bedroom(b.x1, b.y1, b.z) then coffin_at[b.x1 .. ',' .. b.y1 .. ',' .. b.z] = nil end
+  end
   for _, i in ipairs(df.global.world.items.other.CORPSE) do
     local p = xyz2pos(dfhack.items.getPosition(i))
     local k = p.x .. ',' .. p.y .. ',' .. p.z
@@ -164,6 +194,42 @@ do
   end
   local coffin_at = {}
   for _, b in ipairs(df.global.world.buildings.other.COFFIN) do coffin_at[b.x1 .. ',' .. b.y1 .. ',' .. b.z] = true end
+  -- FR-42: coffins that stand inside a Bedroom zone never get an InterringBody job (6 coffins at z108, the bodies lay on the
+  -- surface for hours): they do not count as usable tombs.
+  local bedrooms = {}
+  for _, b in ipairs(df.global.world.buildings.all) do
+    if b:getType() == df.building_type.Civzone and b.type == df.civzone_type.Bedroom then bedrooms[#bedrooms + 1] = b end
+  end
+  local function in_bedroom(x, y, z)
+    for _, r in ipairs(bedrooms) do
+      if r.z == z and x >= r.x1 and x <= r.x2 and y >= r.y1 and y <= r.y2 then return true end
+    end
+    return false
+  end
+  for _, b in ipairs(df.global.world.buildings.other.COFFIN) do
+    if in_bedroom(b.x1, b.y1, b.z) then coffin_at[b.x1 .. ',' .. b.y1 .. ',' .. b.z] = nil end
+  end
+  -- FR-41: a tomb zone assigned to a dead unit whose body is nowhere (lost, destroyed) keeps an empty coffin blocked for ever;
+  -- free it so the next unburied corpse can use the coffin (14.10.: 7 empty coffins, 20 unburied dwarves, "free coffins left: 0").
+  do
+    local has_corpse = {}
+    for _, i in ipairs(df.global.world.items.other.CORPSE) do has_corpse[i.unit_id] = true end
+    local freed_stale = 0
+    for _, z in ipairs(df.global.world.buildings.other.ZONE_TOMB) do
+      local id = z.assigned_unit_id
+      if id >= 0 and not has_corpse[id] then
+        local u = df.unit.find(id)
+        if not u or not dfhack.units.isAlive(u) then
+          local k = z.x1 .. ',' .. z.y1 .. ',' .. z.z
+          if not occ[k] then   -- empty coffin tile only
+            if u then for idx = #u.owned_buildings - 1, 0, -1 do if u.owned_buildings[idx] == z then u.owned_buildings:erase(idx) end end end
+            z.assigned_unit_id = -1; z.zone_settings.tomb.flags.no_citizens = false; freed_stale = freed_stale + 1
+          end
+        end
+      end
+    end
+    print('tomb_zones_stale_freed=' .. freed_stale)
+  end
   local zones_at, zones_of = {}, {}
   for _, z in ipairs(df.global.world.buildings.other.ZONE_TOMB) do
     local k = z.x1 .. ',' .. z.y1 .. ',' .. z.z
@@ -199,7 +265,7 @@ do
   for _, b in ipairs(df.global.world.buildings.other.COFFIN) do
     local k = b.x1 .. ',' .. b.y1 .. ',' .. b.z
     local zs = zones_at[k]
-    if zs and not occ[k] then
+    if zs and not occ[k] and not in_bedroom(b.x1, b.y1, b.z) then
       local free = true
       for _, z in ipairs(zs) do if z.assigned_unit_id >= 0 then free = false end end
       if free then cands[#cands + 1] = zs end
