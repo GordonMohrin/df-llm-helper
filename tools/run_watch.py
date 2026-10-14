@@ -261,7 +261,7 @@ def report(full=True, journal=False):
         print(f"  >> {'ERREICHT' if ok else 'ROT'}: {gid}")
     if digmsg:
         print("  " + digmsg)
-    if s.get("mode"):
+    if s.get("mode") and os.environ.get("RUN_SHORTCUTS") == "1":  # off: lever list status is not reliable (Gordon 14.10.)
         sc = shortcuts(s["mode"], st)
         if sc:
             print("  " + sc)
