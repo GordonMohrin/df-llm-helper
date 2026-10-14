@@ -312,3 +312,21 @@ do
     end
   end
 end
+
+-- Run 9 (14.10.2026): the kernel's civ-alert confines every citizen to the 4-tile 'Kern+' burrow whenever ANY hostile is visible;
+-- four dingoes on the surface froze the whole colony (idle 95 %, levers and jobs unreachable). Keep the civ-alert only while a real
+-- threat (invader or danger) is visible; wildlife outside is the hunters' and squad's business.
+do
+  local a = df.global.plotinfo.alerts
+  if a.civ_alert_idx ~= 0 then
+    local real = 0
+    for _, u in ipairs(df.global.world.units.active) do
+      if dfhack.units.isActive(u) and dfhack.units.isAlive(u) and not dfhack.units.isCitizen(u) and not dfhack.units.isTame(u)
+         and not dfhack.units.isGhost(u) and (dfhack.units.isInvader(u) or dfhack.units.isDanger(u)) then
+        local fl = dfhack.maps.getTileFlags(xyz2pos(dfhack.units.getPosition(u)))
+        if fl and not fl.hidden then real = real + 1 end
+      end
+    end
+    if real == 0 then a.civ_alert_idx = 0; print('civ_alert_released=1') else print('civ_alert_kept real_threats=' .. real) end
+  end
+end
