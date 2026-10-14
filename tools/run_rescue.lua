@@ -33,3 +33,20 @@ for _, i in ipairs(df.global.world.items.other.CORPSE) do
   end
 end
 if n + disc > 0 or freed >= 6 then print('rescue released=' .. freed .. ' popups=' .. n .. ' discovered=' .. disc) end
+
+-- Shaft-head doors: forbidden while invaders are on the map (goblins open doors and would bypass the trap corridor through the shaft),
+-- allowed again when none is left. Lesson: feedback_df_tueren_forbid_lenken.
+do
+  local inv = 0
+  for _, u in ipairs(df.global.world.units.active) do
+    if dfhack.units.isActive(u) and dfhack.units.isAlive(u) and dfhack.units.isInvader(u) and not dfhack.units.isGhost(u) then inv = inv + 1 end
+  end
+  local want = inv >= 2
+  for _, p in ipairs({{54, 62, 118}, {56, 62, 118}}) do
+    local b = dfhack.buildings.findAtTile(xyz2pos(p[1], p[2], p[3]))
+    if b and b:getType() == df.building_type.Door and b.door_flags.forbidden ~= want then
+      b.door_flags.forbidden = want
+      print('shaft door ' .. p[1] .. ' forbidden=' .. tostring(want) .. ' invaders=' .. inv)
+    end
+  end
+end
