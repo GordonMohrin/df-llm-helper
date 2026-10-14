@@ -590,12 +590,16 @@ end
 -- creates the hauling jobs (no teleport). Run it once for each unburied dwarf body that has no job yet.
 do
   local seen, n = {}, 0
-  for _, i in ipairs(df.global.world.items.other.CORPSE) do
-    local r = df.creature_raw.find(i.race)
-    if r and r.creature_id == 'DWARF' and not i.flags.in_building and not i.flags.in_job and not seen[i.unit_id] then
-      seen[i.unit_id] = true
-      local ok = pcall(dfhack.run_command, 'entomb', '--unit', tostring(i.unit_id), '--haul-now')
-      if ok then n = n + 1 end
+  -- bodies and loose body parts (teeth, hands, bones): the kernel counts both as lying-around corpses
+  for _, vec in ipairs({df.global.world.items.other.CORPSE, df.global.world.items.other.CORPSEPIECE}) do
+    for _, i in ipairs(vec) do
+      local r = df.creature_raw.find(i.race)
+      if r and r.creature_id == 'DWARF' and not i.flags.in_building and not i.flags.in_inventory and not i.flags.in_job
+         and not seen[i.unit_id] and n < 8 then
+        seen[i.unit_id] = true
+        local ok = pcall(dfhack.run_command, 'entomb', '--unit', tostring(i.unit_id), '--haul-now')
+        if ok then n = n + 1 end
+      end
     end
   end
   print('entombed_tasked=' .. n)
