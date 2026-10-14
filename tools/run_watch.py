@@ -245,12 +245,24 @@ def report(full=True, journal=False):
         if gid in prev and prev[gid] != ok:
             flips.append((gid, ok))
     st["ok"] = {r[0]: r[2] for r in rows}
-    focus = next((r for r in rows if not r[2]), None)
+    parked = st.setdefault("parked", {})
+    for r_ in rows:
+        if r_[2]:
+            parked.pop(r_[0], None)          # met again: forget the parking
+    focus = next((r for r in rows if not r[2] and r[0] not in parked), None)
     fid = focus[0] if focus else None
     if st.get("focus") == fid:
         st["focus_rounds"] = st.get("focus_rounds", 0) + 1
     else:
         st["focus"], st["focus_rounds"] = fid, 1
+    if focus and st["focus_rounds"] >= 8:    # no progress for 8 rounds: park it, work on the next goal, retry later
+        parked[fid] = st.get("round", 0)
+        print(f"  >> ZURUECKGESTELLT nach 8 Runden ohne Fortschritt: {focus[1]} ({focus[3]}) - Ursache notieren (FR), naechstes Ziel")
+        st["focus"], st["focus_rounds"] = None, 0
+        focus = next((r for r in rows if not r[2] and r[0] not in parked), None)
+    for gid_, since in list(parked.items()):
+        if st.get("round", 0) - since >= 30:  # retry after 30 rounds
+            parked.pop(gid_, None)
     met = sum(1 for r in rows if r[2])
     year, tick = m.get("year"), m.get("tick", 0)
     season = ["Fruehling", "Sommer", "Herbst", "Winter"][min(3, int(tick) // 100800)] if isinstance(tick, int) else "?"
