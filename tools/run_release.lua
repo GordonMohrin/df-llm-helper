@@ -438,3 +438,24 @@ do
   end
   print('orders_validated=' .. n)
 end
+
+-- Run 9 (14.10.2026): in the elite's free months the kernel puts the only squad on 'Off duty' and its uniforms drop (4/40 equipped);
+-- goblin kidnappers arrived exactly then. Never leave a squad with members on 'Off duty': use 'Ready' (keeps the uniform, keeps them fed
+-- and able to answer an alert).
+do
+  local rt = df.global.plotinfo.alerts.routines
+  local ready
+  for i = 0, #rt - 1 do if rt[i].name:lower():find('ready') then ready = i end end
+  if ready then
+    local changed = 0
+    for _, sq in ipairs(df.global.world.squads.all) do
+      if sq.entity_id == df.global.plotinfo.group_id then
+        local m = 0
+        for _, p in ipairs(sq.positions) do if p.occupant >= 0 then m = m + 1 end end
+        local cur = rt[sq.cur_routine_idx]
+        if m > 0 and cur and cur.name:lower():find('off duty') then sq.cur_routine_idx = ready; changed = changed + 1 end
+      end
+    end
+    print('squads_off_duty_to_ready=' .. changed)
+  end
+end

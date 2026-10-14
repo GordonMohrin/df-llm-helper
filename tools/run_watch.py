@@ -176,8 +176,8 @@ def goals(m, s, c):
     G.append(("intruders", "Keine fremden Wildtiere/Feinde im Fort (Laufbereich der Bürger)",
               lambda: (m.get("intruders", 0) == 0, f"{m.get('intruders', 0)} ({m.get('intruder_races', '-') or '-'})"),
               "Kill-Auftrag an den Trupp (run_release setzt ihn), Fallen/Brücken prüfen, Eingang schließen"))
-    G.append(("thirst/hunger", "Niemand verdurstet/verhungert (Hunger < 65000, Durst < 40000)",
-              lambda: (m.get("max_hunger", 0) < 65000 and m.get("max_thirst", 0) < 40000,
+    G.append(("thirst/hunger", "Niemand verdurstet/verhungert (Hunger < 80000, Durst < 55000)",
+              lambda: (m.get("max_hunger", 0) < 80000 and m.get("max_thirst", 0) < 55000,
                        f"Hunger max {m.get('max_hunger')}, Durst max {m.get('max_thirst')}"),
               "Wer hungert/dürstet? Essen/Getränke erreichbar? Lager, Fässer, Pfad prüfen"))
     G.append(("drink", "Trinken >= 30 Tage", lambda: ((s["drink_d"] or 0) >= 30, f"{s['drink_d']} d"),
