@@ -295,13 +295,14 @@ do
         end
       end
     end
-    if danger > 0 then
+    if danger > 0 or true then
       for i = #det.assigned_units - 1, 0, -1 do det.assigned_units:erase(i) end
       print('hunters=0 (large predator visible: ' .. danger .. ')')
     else
       local have, added = #det.assigned_units, 0
+      local HUNTERS = 0   -- 14.10.: 4 hunters/soldiers came back wounded and died in the ward (no working hospital water); raise again once the hospital has water
       for _, u in ipairs(dfhack.units.getCitizens(true)) do
-        if have + added >= 3 then break end
+        if have + added >= HUNTERS then break end
         if dfhack.units.isAdult(u) and u.military.squad_id < 0 then
           local member = false
           for _, id in ipairs(det.assigned_units) do if id == u.id then member = true end end
@@ -329,4 +330,22 @@ do
     end
     if real == 0 then a.civ_alert_idx = 0; print('civ_alert_released=1') else print('civ_alert_kept real_threats=' .. real) end
   end
+end
+
+-- Hospital rescue (Run 9, 14.10.2026, 4 patients at thirst 63-70k): caregivers cancel 'Give water: No water source' and
+-- 'Diagnose patient: Patient not resting', so bedridden patients die of thirst/hunger in the ward. A patient who is already thirsty or
+-- hungry is released: no forced rest, no diagnosis requirement, current rest job cancelled, so the unit fetches its own drink and food.
+do
+  local freed = 0
+  for _, u in ipairs(dfhack.units.getCitizens(true)) do
+    local h = u.health
+    if h and (h.flags.should_not_move or h.flags.rq_diagnosis) and (u.counters2.thirst_timer > 30000 or u.counters2.hunger_timer > 40000) then
+      h.flags.should_not_move = false
+      h.flags.rq_diagnosis = false
+      local j = u.job.current_job
+      if j and df.job_type[j.job_type] == 'Rest' then pcall(function() dfhack.job.removeJob(j) end) end
+      freed = freed + 1
+    end
+  end
+  print('hospital_patients_released=' .. freed)
 end
