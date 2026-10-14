@@ -121,20 +121,27 @@ def dig_program(st):
 
 def shortcuts(mode, st):
     """Policy for the four shortcut bridges of the trap corridor: lowered in PEACE (short way for the dwarves),
-    raised in every other mode (attackers must walk the whole serpentine). Pulls levers with DFHack's lever script."""
+    raised in every other mode (attackers must walk the whole serpentine). The truth is the bridge's own
+    `gate_flags.raised` (the lever list text is not reliable, Gordon 14.10.); levers are pulled with DFHack's lever script
+    and a bridge is never pulled twice within 5 rounds (a pull job takes a while and a second pull would toggle it back)."""
+    lua = ("for _,b in ipairs(df.global.world.buildings.other.BRIDGE) do "
+           "print('bridge '..b.id..' raised='..(b.gate_flags.raised and 1 or 0)) end")
+    real = {m_.group(1): m_.group(2) == "1" for m_ in re.finditer(r"bridge (\d+) raised=(\d)", run([RUN, "lua", lua], 30))}
     out = run([RUN, "lever", "list"], 30)
+    pat = re.compile(r"lever #(\d+) @\[[^\]]*\]\W{1,14}linked to (?:raised|lowered) Bridge #(\d+)")
+    want_raised = mode != "PEACE"
     pulled = 0
-    pat = re.compile(r"lever #(\d+) @\[[^\]]*\]\W{1,14}linked to (raised|lowered) Bridge")
     for m_ in pat.finditer(out):
-        lid, state = m_.group(1), m_.group(2)
-        want = "lowered" if mode == "PEACE" else "raised"
+        lid, bid = m_.group(1), m_.group(2)
+        if bid not in real or real[bid] == want_raised:
+            continue
         last = st.setdefault("pulls", {}).get(lid, -99)
         now = st.get("round", 0)
-        if state != want and now - last >= 5:  # a pull job takes a while; a second pull would toggle it back
+        if now - last >= 5:
             run([RUN, "lever", "pull", "--id", lid], 30)
             st["pulls"][lid] = now
             pulled += 1
-    return f"Abkuerzungsbruecken: {pulled} Hebel gezogen (Soll {'unten' if mode == 'PEACE' else 'hoch'})" if pulled else ""
+    return f"Abkuerzungsbruecken: {pulled} Hebel gezogen (Soll {'hoch' if want_raised else 'unten'})" if pulled else ""
 
 
 def census():
@@ -316,7 +323,7 @@ def report(full=True, journal=False):
         print(f"  >> {'ERREICHT' if ok else 'ROT'}: {gid}")
     if digmsg:
         print("  " + digmsg)
-    if s.get("mode") and os.environ.get("RUN_SHORTCUTS") == "1":  # off: lever list status is not reliable (Gordon 14.10.)
+    if s.get("mode") and os.environ.get("RUN_SHORTCUTS", "1") == "1":  # real gate_flags.raised decides, not the lever list text
         sc = shortcuts(s["mode"], st)
         if sc:
             print("  " + sc)

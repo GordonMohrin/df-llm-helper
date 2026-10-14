@@ -282,15 +282,33 @@ do
   local det
   for _, w in ipairs(df.global.plotinfo.labor_info.work_details) do if w.name == 'Hunters' then det = w end end
   if det then
-    local have, added = #det.assigned_units, 0
-    for _, u in ipairs(dfhack.units.getCitizens(true)) do
-      if have + added >= 3 then break end
-      if dfhack.units.isAdult(u) and u.military.squad_id < 0 then
-        local member = false
-        for _, id in ipairs(det.assigned_units) do if id == u.id then member = true end end
-        if not member then det.assigned_units:insert('#', u.id); u.status.labors[df.unit_labor.HUNT] = true; added = added + 1 end
+    -- a visible large predator (andrewsarchus, bears, ...) near the fort: nobody hunts outside until it is gone
+    local danger = 0
+    for _, u in ipairs(df.global.world.units.active) do
+      if dfhack.units.isActive(u) and dfhack.units.isAlive(u) and not dfhack.units.isCitizen(u) and not dfhack.units.isTame(u) and dfhack.units.isWildlife(u) then
+        local r = df.creature_raw.find(u.race)
+        local c = r and r.caste[u.caste]
+        if c and c.flags.LARGE_PREDATOR then
+          local p = xyz2pos(dfhack.units.getPosition(u))
+          local fl = dfhack.maps.getTileFlags(p)
+          if fl and not fl.hidden then danger = danger + 1 end
+        end
       end
     end
-    print('hunters=' .. (have + added) .. ' (added ' .. added .. ')')
+    if danger > 0 then
+      for i = #det.assigned_units - 1, 0, -1 do det.assigned_units:erase(i) end
+      print('hunters=0 (large predator visible: ' .. danger .. ')')
+    else
+      local have, added = #det.assigned_units, 0
+      for _, u in ipairs(dfhack.units.getCitizens(true)) do
+        if have + added >= 3 then break end
+        if dfhack.units.isAdult(u) and u.military.squad_id < 0 then
+          local member = false
+          for _, id in ipairs(det.assigned_units) do if id == u.id then member = true end end
+          if not member then det.assigned_units:insert('#', u.id); u.status.labors[df.unit_labor.HUNT] = true; added = added + 1 end
+        end
+      end
+      print('hunters=' .. (have + added) .. ' (added ' .. added .. ')')
+    end
   end
 end
