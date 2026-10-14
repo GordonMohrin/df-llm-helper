@@ -565,3 +565,19 @@ do
   end
   print('corpses_marked_dump=' .. n)
 end
+
+-- FR-43 (14.10.2026): the siege destroyed the trade depot and two caravans (Catten, Muboomon) came and left within one minute of
+-- real time (timestream), so nothing was traded. Keep a depot standing: if no TradeDepot building exists (built or planned),
+-- designate the 5x5 depot at the surface entrance again (quickfort dfllm/depot5.csv).
+do
+  local have = false
+  for _, b in ipairs(df.global.world.buildings.all) do
+    if b:getType() == df.building_type.TradeDepot then have = true end
+  end
+  if not have then
+    local ok, err = pcall(dfhack.run_command, 'quickfort', 'run', 'dfllm/depot5.csv', '-n', 'depot', '-c', '67,42,118')
+    print('trade_depot_redesignated=' .. tostring(ok))
+  else
+    print('trade_depot_redesignated=0')
+  end
+end

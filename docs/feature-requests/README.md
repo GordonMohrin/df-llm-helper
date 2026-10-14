@@ -112,3 +112,5 @@ reason, and a "relax old_sites" rule when the old fort is ruined.
 **FR-41 Stale tomb zones.** A tomb zone whose assigned unit is dead without a body keeps its empty coffin blocked for ever, and 20 unburied corpses sat next to 7 "taken" empty coffins. `tombs.repair` must free zones of bodiless dead and assign the next unburied corpse.
 
 **FR-42 Coffins inside bedroom zones.** Coffins placed inside a Bedroom zone never get an InterringBody job (four bodies lay outside for hours). `bp.place tombs` / the tomb auditor must reject or flag coffin tiles that overlap a Bedroom zone.
+
+**FR-43 Trade depot must survive.** The goblin siege destroyed the surface depot; two caravans (Catten, Muboomon) arrived and left within a minute of real time (timestream) without any trade, so the metal/pick/axe wants were never served. The kernel should hold a `depot` project: rebuild when missing, and raise a class A event when a caravan arrives while no depot stands. tools/run_release.lua re-designates dfllm/depot5.csv at (67,42,118) every round now.
