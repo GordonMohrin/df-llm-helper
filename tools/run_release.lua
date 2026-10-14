@@ -29,7 +29,7 @@ if backlog > 50 then
     local have = #det.assigned_units
     local added = 0
     for _, u in ipairs(dfhack.units.getCitizens(true)) do
-      if have + added >= 6 then break end
+      if have + added >= math.min(14, 6 + backlog // 150) then break end
       if dfhack.units.isAdult(u) and u.military.squad_id < 0 and not u.status.labors[df.unit_labor.MINE] then
         det.assigned_units:insert('#', u.id); u.status.labors[df.unit_labor.MINE] = true; added = added + 1
       end

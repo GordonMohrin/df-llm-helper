@@ -238,7 +238,7 @@ def report(full=True, journal=False):
     rows = evaluate(G)
     st = load_state()
     st["round"] = st.get("round", 0) + 1
-    digmsg = dig_program(st)
+    digmsg = "" if os.environ.get("RUN_DIGLOOP") == "1" else dig_program(st)
     flips = []
     prev = st.get("ok", {})
     for gid, text, ok, detail, hint in rows:
