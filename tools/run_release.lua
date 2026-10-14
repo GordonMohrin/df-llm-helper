@@ -374,3 +374,19 @@ do
   end
   print('hospital_patients_released=' .. freed)
 end
+
+-- Run 9 (14.10.2026): "Snatcher! Protect the children!" popup froze the game for minutes while two kidnappers walked the fort: the
+-- arbiter only dismisses harmless popups and pause_state stays false. A popup is a normal player prompt: log its text, then dismiss it
+-- (never the embark intro).
+do
+  local p = df.global.world.status.popups
+  local n = 0
+  while #p > 0 do
+    local text = dfhack.df2utf(p[0].text or '')
+    if text:find('Strike the earth') then break end
+    print('popup_dismissed=' .. text:sub(1, 120))
+    p:erase(0); n = n + 1
+    if n >= 10 then break end
+  end
+  print('popups_dismissed=' .. n)
+end
