@@ -277,6 +277,7 @@ def report(full=True, journal=False):
     # yearly quicksave (spring, once per game year)
     if isinstance(year, int) and st.get("saved_year") != year and isinstance(tick, int) and tick < 100800 and not s.get("paused"):
         run([RUN, "quicksave"], 90)
+        run([sys.executable, os.path.join(HERE, "run_plan.py")], 180)  # YEAR_REVIEW: apply the standing plan
         st["saved_year"] = year
         print(f"  Quicksave Jahr {year} ausgefuehrt")
     if journal and isinstance(year, int) and st.get("journal_key") != f"{year}{season}":
