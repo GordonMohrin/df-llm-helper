@@ -14,7 +14,13 @@
 -- specs counts its whole kit as missing), combat value per soldier = best weapon + shield + armor +
 -- dodging skill levels, metal % = soldiers in iron/steel body armor.
 -- Reads: squads (world.squads.all, df.squad.find), soldiers and citizens by id only (CONTRACTS §1.4),
--- work details, routines, entity positions. Writes only through K.act.squad_* and K.act.run.
+-- work details, routines, entity positions. Writes only through K.act.squad_* and K.act.run, and since Run 9
+-- (FR-46) K.act.item_flag: after a siege the invaders' metal gear lay forbidden (DF's standing order forbids
+-- the items of the dead: 22 steel/bronze/iron pieces on the surface, 29 inside) while worn read 0 %. In PEACE,
+-- and in RECOVERY with no hostile in sight, forbidden metal weapons, armor, shields and ammo nobody holds are
+-- unforbidden on revealed tiles the citizens can reach (snapshot.tile / snapshot.far), at most LOOT.per_run a
+-- run; the fort's weapon and armor stockpiles (the armory) take them and the uniforms pick them. mil.free (state,
+-- status) counts the free metal gear per category.
 local geom = require('dfllm.util.geom')
 local C = require('dfllm.util.contract')
 
@@ -70,6 +76,9 @@ M.WEAPON_SKILLS = {'AXE', 'SWORD', 'MACE', 'HAMMER', 'SPEAR', 'PIKE', 'WHIP', 'D
 M.CV_SKILLS = {'SHIELD', 'ARMOR', 'DODGING'}
 M.METALS = {['INORGANIC:IRON'] = true, ['INORGANIC:STEEL'] = true}
 local UNIFORM_CATS = {'body', 'head', 'pants', 'gloves', 'shoes', 'shield', 'weapon'}
+-- FR-46: item vectors of the gear categories (mil.free keys) and the loot unforbid budget per run
+M.LOOT = {per_run = 40, cats = {{'WEAPON', 'weapon'}, {'ARMOR', 'body'}, {'HELM', 'head'}, {'PANTS', 'pants'},
+                                {'GLOVES', 'gloves'}, {'SHOES', 'shoes'}, {'SHIELD', 'shield'}, {'AMMO', 'ammo'}}}
 local WORN_ROLES = {'Worn', 'Weapon', 'Strapped'}
 
 local seat_leader   -- defined after the squad helpers
@@ -1038,6 +1047,60 @@ M.verbs['squad.sortie'] = function(K, args, cmd)
   return true, 'sortie ' .. k .. ': ' .. what
 end
 
+---------------------------------------------------------------- loot and free metal gear (FR-46)
+local LOOT_SKIP = {'trader', 'in_building', 'garbage_collect', 'removed', 'owned', 'in_job', 'construction', 'hostile'}
+local function is_metal(it)
+  local mi = dfhack.matinfo.decode(it)
+  local fl = mi and mi.material and mi.material.flags
+  return fl and fl.IS_METAL == true or false
+end
+
+-- a revealed tile on the citizens' walk group (no snapshot module: revealed and reachable are unknown -> yes)
+local function reachable_tile(K, x, y, z)
+  local okt, t = K.call('snapshot', 'tile', x, y, z)
+  if okt and type(t) ~= 'table' then return false end
+  local okf, far = K.call('snapshot', 'far', x, y, z)
+  return not (okf and far == true)
+end
+
+-- one pass over the gear vectors: free metal per category; forbidden loot unforbidden when `loot`
+local function loot_pass(K, loot)
+  local free, n = {}, 0
+  for _, e in ipairs(M.LOOT.cats) do
+    free[e[2]] = 0
+    local vec = try(function() return df.global.world.items.other[e[1]] end)
+    for _, it in ipairs(vec or {}) do
+      local ok = pcall(function()
+        local f = it.flags
+        if f.forbid then
+          if not loot or n >= M.LOOT.per_run or f.in_inventory then return end
+          for _, k in ipairs(LOOT_SKIP) do if f[k] then return end end
+          if not is_metal(it) then return end
+          local x, y, z = dfhack.items.getPosition(it)
+          if x and reachable_tile(K, x, y, z) and K.act.item_flag(it.id, 'forbid', false) then
+            n = n + 1
+            free[e[2]] = free[e[2]] + (e[2] == 'ammo' and math.max(1, it.stack_size or 1) or 1)
+          end
+        elseif free_item(it) and is_metal(it) then
+          free[e[2]] = free[e[2]] + (e[2] == 'ammo' and math.max(1, it.stack_size or 1) or 1)
+        end
+      end)
+      if not ok then rt.loot_err = (rt.loot_err or 0) + 1 end
+    end
+  end
+  return free, n
+end
+
+local function loot(K)
+  local mode = K.mode()
+  local h = K.census.h
+  local quiet = type(h) == 'table' and (int(h.vis) or 0) == 0
+  local go = mode == 'PEACE' or (mode == 'RECOVERY' and quiet)
+  local free, n = loot_pass(K, go)
+  rt.free = free
+  if n > 0 then K.log('info', 'loot: %d forbidden metal weapons, armor and ammo unforbidden for the armory', n) end
+end
+
 ---------------------------------------------------------------- KPIs
 local function compute(K)
   local k = {squads = 0, soldiers = 0, worn = 0, cv = 0, metal_pct = 0, on_station = 0}
@@ -1143,14 +1206,22 @@ function M.step(K, budget, ctx)
   if st.posture == nil then st.posture, st.pt, dirty = 'TRAIN', now, true end
   for _, sp in ipairs(M.SQUADS) do apply_squad(K, sp.key, false) end   -- drift only
   rt.kpi, rt.kpi_tick = compute(K), now
+  local okl, err = pcall(loot, K)
+  if not okl then K.log('warn', 'loot: %s', tostring(err)) end
   save(K)
 end
 
 function M.state(K)
   local k = rt and rt.kpi
   if not k then return {} end
-  return {mil = {squads = k.squads, soldiers = k.soldiers, worn = k.worn, cv = k.cv,
-                 metal_pct = k.metal_pct, on_station = k.on_station}}
+  local mil = {squads = k.squads, soldiers = k.soldiers, worn = k.worn, cv = k.cv, metal_pct = k.metal_pct,
+               on_station = k.on_station}
+  if rt.free then                                    -- FR-46: free metal gear per category (only the ones held)
+    local free = {}
+    for cat, n in pairs(rt.free) do if n > 0 then free[cat] = n end end
+    if next(free) then mil.free = free end
+  end
+  return {mil = mil}
 end
 
 M.on.MODE = function(K, ev)

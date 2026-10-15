@@ -299,6 +299,7 @@ Only these are public across WPs; anything else is module-internal. "Returns" ar
 | `runner.pending(tpl)` | `int` | projects of `tpl` not done yet (care waits for them before asking again) |
 | `runner.bboxes()` | `[bbox]` | bboxes of the projects not done yet; readiness widens the audit snapshot with them (live L2: a dig in progress ran past the box edge and read as a bypass) |
 | `trade.done()` | `int` | caravans traded this fort |
+| `runner.depot_keep(why)` | `ok, proj id | 'standing' | reason` | FR-43: in PEACE/RECOVERY, no TRADE_DEPOT building at all -> a one-stage `depot` project (5x5 `D(5x5)`, prio 2) at manifest.depot, else at the last depot the runner saw; one at a time. The runner calls it every run in PEACE/RECOVERY, trade when a caravan finds no depot |
 | `gate.rooms(mode)` | `[burrow name]` | the lever-puller rooms (`dfllm-levers*` manifest burrows) siege adds to the alert list in that mode; in BREACH only a room whose bridge has no linked lever inside the refuge (iter2) |
 | `gate.pullers(bridge)` | `[unit id]` | citizens assigned to that bridge's lever room (iter2) |
 | `snapshot.reach(a, b)` | `bool` | walk groups (`dfhack.maps.canWalkBetween`) between two known positions `{x,y,z}`; bad args or a fault answer `true` (iter2; care's mood reach) |
@@ -375,7 +376,7 @@ One JSON line, rewritten in place: `{v:2, wall:int, frame:int, tick:int, paused:
 | `k` | `{ms_s, gap_max_ms, slow:[module], faults, disabled?:[module], ms_max?}` | kern | kernel ms per real second (10 s window), max frame gap (ms), demoted modules, fault count |
 | `owners` | `{pause: null|'inbox'|'gordon'|'popup'|'df', tempo: 'mode'|'inbox'|'brake'}` | arbiter | who holds pause/tempo; `brake` = the supply brake (P0 or `economy.alarm()`) |
 | `ev` | int | kern | last event number written |
-| `mil?` | `{squads, soldiers, worn, cv, metal_pct, on_station}` | military | |
+| `mil?` | `{squads, soldiers, worn, cv, metal_pct, on_station, free?}` | military | `free` = `{weapon?, body?, head?, pants?, gloves?, shoes?, shield?, ammo?}` free metal gear per category (ammo in units, loot included; categories without any are left out) (FR-46) |
 | `trade?` | `{caravan:flag, ratio:int, done:int}` | trade | ratio ×100 (150 = 1.5) |
 
 Module `state(K)` returns partial docs; kern deep-merges them (two levels) into the document. Leaf owners are `contract.STATE_OWNERS`; a module returning a key it does not own is a contract bug (k_mock raises). A published object is complete (all its required keys); write `json.null` for null (a nil field is simply absent, e.g. `owners.pause`) and `json.object{}` for an empty object (`bridges` with no bridge), because a plain empty table encodes as `[]`.
@@ -630,6 +631,7 @@ The fort-specific geometry, written by templates (bp `manifest` fragments) and m
 | PLAN_EXHAUSTED | A | runner | phase (str), year |
 | PROJECT_BLOCKED | A | runner | **proj** (str), tpl (str), stage (str), why (str), ticks — after > 2 days blocked |
 | YEAR_REVIEW | A | kern | year |
+| DEPOT_MISSING | A | trade | civ (str), planned (flag: a depot is being built), proj (str: the depot project runner.depot_keep queued) — a caravan on the map and no built trade depot, once per visit (FR-43) |
 | ORDER_BAD | A | economy | **order**, **job** (str), dropped (flag) — a make-item order without item_subtype (DF 53.16 crash, FR-39); economy removes it at once (`order_guard.drop`) |
 | SIEGE_START | B | siege | vis, inv, great, why (str) |
 | ALERT_START / ALERT_END | B | siege | vis |
@@ -657,6 +659,7 @@ The fort-specific geometry, written by templates (bp `manifest` fragments) and m
 | DEATH | B | care | unit, citizen (flag), cause (str) |
 | ACT_FAIL | B | kern | **fn** (str), err (str), module (str) |
 | ORDER_STUCK | B | economy | **order**, **job** (str), **why** (str), n, days, dropped (flag) — an order that cannot run for `orders.stuck_days` (workshop, input on the citizens' walk group, worker; FR-01), or removed after `orders.needs_drop` "Needs ..." cancels (FR-10) |
+| TRADE_LEDGER | B | trade | civ (str), ok (flag), ratio, sold, sold_v, bought, bought_v (units and values), unmet (str[] `token:why`, why = none / value / part / the failure reason) — one per finished visit; the last 3 stay in persist `m.trade.ledger` and `inspect what=trade` (FR-32) |
 | JOBS_SUSPENDED | B | economy | suspended, released, kept, planned, why (str) — suspended ConstructBuilding jobs: resumed, kept by suspendmanager, waiting for buildingplan (FR-16) |
 | SIEGE_STATUS | C | siege | vis, worn, on_station, deaths, captures |
 | SEASON | C | kern | year, season |
