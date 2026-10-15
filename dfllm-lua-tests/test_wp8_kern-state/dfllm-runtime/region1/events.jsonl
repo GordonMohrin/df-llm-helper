@@ -1,0 +1,9 @@
+{"cls":"C","d":{"boots":1,"save":"region1","v":2},"msg":"boot region1 #1","n":1,"tick":1209600,"type":"BOOT"}
+{"cls":"B","d":{"days":47,"key":"drink_d","min":170},"msg":"drink_d 47 < 170","n":2,"tick":1209609,"type":"STOCK_LOW"}
+{"cls":"B","d":{"days":0,"key":"food_d","min":60},"msg":"food_d 0 < 60","n":3,"tick":1209609,"type":"STOCK_LOW"}
+{"cls":"B","d":{"n":1,"tpl":"farms","why":"food"},"msg":"farms x1: 0 of 24 farm tiles for 8 citizens, food 0 days","n":4,"tick":1209609,"type":"PROJECT_REQUEST"}
+{"cls":"B","d":{"err":"/home/user/df-llm-helper/lua/dfllm/act.lua:936: attempt to call a nil value (field 'getUnitByNobleRole')","fn":"manager_office","module":"economy"},"msg":"act.manager_office failed for economy: /home/user/df-llm-helper/lua/dfllm/act.lua:936: attempt to call a nil value (field 'getUnitByNobleRole')","n":5,"tick":1209609,"type":"ACT_FAIL"}
+{"cls":"A","d":{"id":"famine","q":"food 0 d (0 eatable, 0 cookable, 0 raw fish), drink 47 d: gather, farm, cook, trade?"},"msg":"famine: 0 food days, 47 drink days","n":6,"tick":1209609,"type":"DECISION_NEEDED"}
+{"cls":"B","d":{"err":"no order created:","fn":"workorder","module":"economy"},"msg":"act.workorder failed for economy: no order created:","n":7,"tick":1209654,"type":"ACT_FAIL"}
+{"cls":"B","d":{"err":"/home/user/df-llm-helper/lua/dfllm/act.lua:936: attempt to call a nil value (field 'getUnitByNobleRole')","fn":"manager_office","module":"economy"},"msg":"act.manager_office failed for economy: /home/user/df-llm-helper/lua/dfllm/act.lua:936: attempt to call a nil value (field 'getUnitByNobleRole')","n":8,"tick":1210815,"type":"ACT_FAIL"}
+{"cls":"C","d":{},"msg":"test","n":9,"tick":1210900,"type":"UNLOAD"}

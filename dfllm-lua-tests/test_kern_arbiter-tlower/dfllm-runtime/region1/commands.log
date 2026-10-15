@@ -1,0 +1,17 @@
+1792053007	1209600	arbiter	act.setting	["gfps",30]	ok
+1792053007	1209600	arbiter	act.setting	["autosave","YEARLY"]	ok
+1792053007	1209600	arbiter	act.overlay	[["hotkeys.menu","unsuspend.overlay"],false]	ok
+1792053007	1209600	arbiter	act.timestream	[500]	ok
+1792053007	1209601	arbiter	act.timestream	[300]	ok
+1792053007	1209601	inbox:t1:test	verb:tempo.lower	{"fps":300,"ttl_s":3}	ok
+1792053007	1209631	arbiter	act.timestream	[500]	ok
+1792053007	1209641	inbox:t2:test	verb:tempo.lower	{"fps":900,"ttl_s":60}	ok
+1792053007	1209644	arbiter	act.timestream	[-1]	ok
+1792053007	1209646	inbox:t3:test	verb:tempo.lower	{"fps":100,"ttl_s":60}	ok
+1792053007	1209651	inbox:t4:test	verb:tempo.lower	{"fps":5,"ttl_s":60}	ERR need fps 10..1000 and ttl_s 1..3600
+1792053007	1209656	arbiter	act.setting	["gfps",250]	ok
+1792053007	1209656	arbiter	act.setting	["fps_cap",250]	ok
+1792053007	1209656	arbiter	act.setting	["autosave","SEASONAL"]	ok
+1792053007	1209656	arbiter	act.setting	["population_cap",75]	ok
+1792053007	1209656	arbiter	act.timestream	[250]	ok
+1792053007	1209656	arbiter	act.overlay	[["hotkeys.menu","unsuspend.overlay"],true]	ok

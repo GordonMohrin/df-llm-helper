@@ -1,0 +1,6 @@
+1792053025	1209600	warn	kern	config/allowlist.json missing or invalid: using the built-in read-only allowlist
+1792053025	1209600	warn	kern	armok cross-check unavailable: /home/user/df-llm-helper/lua/dfllm/kern.lua:936: module 'helpdb' not found:
+1792053025	1209601	info	gate	hello 5
+1792053025	1209626	info	gate	hello 5
+1792053025	1209651	info	gate	hello 5
+1792053025	1209676	info	gate	hello 5

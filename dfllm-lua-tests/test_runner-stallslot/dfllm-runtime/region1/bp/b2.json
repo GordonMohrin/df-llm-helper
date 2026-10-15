@@ -1,0 +1,1 @@
+{"anchor":[20,10,100],"class":"living","id":"b2","manifest":{"v":2},"materials":[],"params":[],"rot":0,"site":"S1","stages":[{"chunks":[{"cells":[[0,0,0,"b"]],"pos":[20,10,100]}],"defense":0,"label":"build","mode":"build","orders":1}],"tpl":"hospital","v":2}

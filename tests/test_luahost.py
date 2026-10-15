@@ -10,7 +10,8 @@ LUA_TESTS = ROOT / "tests" / "lua"
 sys.path.insert(0, str(ROOT / "tools"))
 import luahost  # noqa: E402
 
-pytestmark = pytest.mark.skipif(not luahost.available(), reason=f"lua53.dll not found ({luahost.dll_path()})")
+pytestmark = pytest.mark.skipif(not luahost.available(),
+                                reason=f"neither lua53.dll ({luahost.dll_path()}) nor a lua5.3 interpreter found")
 
 
 def run_src(tmp_path, src, *args, timeout=10.0, name="t.lua"):
@@ -50,6 +51,7 @@ def test_run_tests_prints_the_totals(tmp_path, capsys):
     assert out.rstrip().splitlines()[-1] == "2 suites (1 failed): 2 passed, 1 failed"
 
 
+@pytest.mark.skipif(not luahost.dll_path().is_file(), reason="lua53.dll not found (interpreter fallback in use)")
 def test_exports_are_mangled_and_mapped():
     names = luahost.pe_exports(luahost.dll_path())
     assert any(n.startswith("?lua_pcallk@@") for n in names)
@@ -139,3 +141,17 @@ print(json.encode(json.decode(s)))
         assert r.ok, r.err
         back = json.loads(r.out)
         assert back == {**src, "num": [1, -2, 4, 1000]}  # Lua writes integers only
+
+
+def test_interpreter_fallback_runs_the_same_chunk(tmp_path, monkeypatch):
+    """Without lua53.dll the chunk runs in a lua5.3 interpreter with the same captured output, exit code and helpers."""
+    if not luahost.lua_binary():
+        pytest.skip("no lua5.3 interpreter")
+    monkeypatch.setattr(luahost, "_dll_ok", lambda: False)
+    r = run_src(tmp_path, "print('a', 1) io.write('b') assert(luahost.isdir(arg[1])) os.exit(3)", str(tmp_path))
+    assert (r.code, r.out) == (3, "a\t1\nb")
+    r = run_src(tmp_path, "error('boom')")
+    assert r.code == 1 and "boom" in r.err and "traceback" in r.err
+    r = run_src(tmp_path, "while true do end", timeout=1)
+    assert r.code == luahost.TIMEOUT_EXIT
+

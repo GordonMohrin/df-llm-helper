@@ -1,0 +1,5 @@
+{"cls":"C","d":{"boots":1,"save":"region1","v":2},"msg":"boot region1 #1","n":1,"tick":1209600,"type":"BOOT"}
+{"cls":"A","d":{"backoff_s":30,"err":"/home/user/df-llm-helper/tests/lua/test_kern_contract.lua:33: x","module":"sense","n":3},"msg":"sense backed off 30 s after 3 faults","n":2,"tick":1209603,"type":"KERN_FAULT"}
+{"cls":"C","d":{"id":"me1","ok":1,"verb":"module.enable"},"msg":"module.enable ok","n":3,"tick":1209604,"type":"CMD"}
+{"cls":"C","d":{"id":"me2","ok":0,"verb":"module.enable"},"msg":"module.enable failed","n":4,"tick":1209609,"type":"CMD"}
+{"cls":"C","d":{},"msg":"stop","n":5,"tick":1209610,"type":"UNLOAD"}

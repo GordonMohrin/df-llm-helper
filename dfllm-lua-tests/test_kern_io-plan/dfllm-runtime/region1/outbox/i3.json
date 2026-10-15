@@ -1,0 +1,1 @@
+{"data":{"loaded":1209633,"phases":null,"plan":{"phase_target":"P1","policy":{"beauty":"none","option":"A","pop_ceiling":55},"seasons":[{"build":[{"site":"S1","tpl":"dining"},{"site":"S2","tpl":"tombs"}]},{"build":[]},{"build":[]},{"build":[]}],"v":2,"year":3},"v":2},"id":"i3","msg":"plan","ok":true,"tick":1209633,"verb":"inspect"}

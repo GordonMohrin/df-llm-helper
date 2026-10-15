@@ -1,0 +1,9 @@
+{"cls":"C","d":{"boots":1,"save":"region1","v":2},"msg":"boot region1 #1","n":1,"tick":1209600,"type":"BOOT"}
+{"cls":"C","d":{"id":"j1","ok":0,"verb":"?"},"msg":"? failed","n":2,"tick":1209606,"type":"CMD"}
+{"cls":"C","d":{"id":"n1","ok":1,"verb":"lever"},"msg":"lever ok","n":3,"tick":1209611,"type":"CMD"}
+{"cls":"C","d":{"id":"n2","ok":1,"verb":"lever"},"msg":"lever ok","n":4,"tick":1209611,"type":"CMD"}
+{"cls":"C","d":{"id":"n3","ok":1,"verb":"lever"},"msg":"lever ok","n":5,"tick":1209611,"type":"CMD"}
+{"cls":"C","d":{"id":"n4","ok":1,"verb":"lever"},"msg":"lever ok","n":6,"tick":1209611,"type":"CMD"}
+{"cls":"C","d":{"id":"n5","ok":1,"verb":"lever"},"msg":"lever ok","n":7,"tick":1209612,"type":"CMD"}
+{"cls":"C","d":{"id":"n6","ok":1,"verb":"lever"},"msg":"lever ok","n":8,"tick":1209612,"type":"CMD"}
+{"cls":"C","d":{},"msg":"stop","n":9,"tick":1209612,"type":"UNLOAD"}

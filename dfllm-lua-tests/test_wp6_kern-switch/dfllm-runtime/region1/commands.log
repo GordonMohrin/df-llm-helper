@@ -1,0 +1,15 @@
+1792053052	1209609	military	act.squad_create	["A",{"assignment_id":10,"kind":"melee","leader":1}]	ok
+1792053052	1209609	military	act.squad_leader	[301,1]	ERR squad has no leader assignment
+1792053052	1209609	military	act.squad_routine	[301,"Constant training"]	ok
+1792053052	1209609	military	act.squad_order	[301,{"kind":"train"}]	ok
+1792053052	1209609	readiness	act.popcap	[55]	ok
+1792053052	1213211	military	act.squad_add	[302,1]	ok
+1792053052	1213211	military	act.squad_add	[302,2]	ok
+1792053052	1213211	military	act.squad_create	["B",{"kind":"melee","leader":3}]	ERR /home/user/df-llm-helper/lua/dfllm/act.lua:613: attempt to index a nil value (field 'entity_position_assignment')
+1792053052	1213211	military	act.squad_create	["C",{"kind":"xbow","leader":4}]	ERR /home/user/df-llm-helper/lua/dfllm/act.lua:613: attempt to index a nil value (field 'entity_position_assignment')
+1792053052	1213211	military	act.squad_routine	[302,"Constant training"]	ok
+1792053053	1216811	military	act.run	["uniform-unstick","--all","--drop","--free"]	ok
+1792053053	1216811	military	act.squad_create	["B",{"kind":"melee","leader":3}]	ERR /home/user/df-llm-helper/lua/dfllm/act.lua:613: attempt to index a nil value (field 'entity_position_assignment')
+1792053053	1216811	military	act.squad_create	["C",{"kind":"xbow","leader":4}]	ERR /home/user/df-llm-helper/lua/dfllm/act.lua:613: attempt to index a nil value (field 'entity_position_assignment')
+1792053053	1220411	military	act.squad_create	["B",{"kind":"melee","leader":3}]	ERR /home/user/df-llm-helper/lua/dfllm/act.lua:613: attempt to index a nil value (field 'entity_position_assignment')
+1792053053	1220411	military	act.squad_create	["C",{"kind":"xbow","leader":4}]	ERR /home/user/df-llm-helper/lua/dfllm/act.lua:613: attempt to index a nil value (field 'entity_position_assignment')

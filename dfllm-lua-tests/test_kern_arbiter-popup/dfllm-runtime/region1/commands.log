@@ -1,0 +1,12 @@
+1792053012	1209600	arbiter	act.setting	["gfps",30]	ok
+1792053012	1209600	arbiter	act.setting	["autosave","YEARLY"]	ok
+1792053012	1209600	arbiter	act.overlay	[["hotkeys.menu","unsuspend.overlay"],false]	ok
+1792053012	1209600	arbiter	act.timestream	[500]	ok
+1792053012	1209600	arbiter	act.dismiss_popup	["tutorial"]	ok
+1792053012	1209600	arbiter	act.set_paused	[false]	ok
+1792053012	1209600	arbiter	act.setting	["gfps",250]	ok
+1792053012	1209600	arbiter	act.setting	["fps_cap",250]	ok
+1792053012	1209600	arbiter	act.setting	["autosave","SEASONAL"]	ok
+1792053012	1209600	arbiter	act.setting	["population_cap",75]	ok
+1792053012	1209600	arbiter	act.timestream	[250]	ok
+1792053012	1209600	arbiter	act.overlay	[["hotkeys.menu","unsuspend.overlay"],true]	ok

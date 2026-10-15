@@ -1,0 +1,5 @@
+{"cls":"C","d":{"boots":1,"save":"region1","v":2},"msg":"boot region1 #1","n":1,"tick":1209600,"type":"BOOT"}
+{"cls":"C","d":{"from":"PEACE","to":"SIEGE","why":"army"},"msg":"PEACE>SIEGE army","n":2,"tick":1209601,"type":"MODE"}
+{"cls":"C","d":{},"msg":"stop","n":3,"tick":1209601,"type":"UNLOAD"}
+{"cls":"C","d":{"boots":2,"save":"region1","v":2},"msg":"boot region1 #2","n":4,"tick":1209601,"type":"BOOT"}
+{"cls":"C","d":{},"msg":"stop","n":5,"tick":1209601,"type":"UNLOAD"}

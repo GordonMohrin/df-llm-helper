@@ -1,0 +1,12 @@
+1792053053	1209609	military	act.squad_add	[301,1]	ok
+1792053053	1209609	military	act.squad_add	[301,2]	ok
+1792053053	1209609	military	act.squad_add	[302,3]	ok
+1792053053	1209609	military	act.squad_add	[302,4]	ok
+1792053053	1209609	military	act.squad_add	[303,5]	ok
+1792053053	1209609	military	act.squad_routine	[301,"Constant training"]	ok
+1792053053	1209609	military	act.squad_order	[301,{"kind":"train"}]	ok
+1792053053	1209609	military	act.squad_order	[302,{"kind":"clear"}]	ok
+1792053053	1209609	military	act.squad_routine	[303,"Constant training"]	ok
+1792053053	1209609	military	act.squad_order	[303,{"kind":"train"}]	ok
+1792053053	1209609	readiness	act.popcap	[55]	ok
+1792053053	1213211	military	act.run	["uniform-unstick","--all","--drop","--free"]	ok

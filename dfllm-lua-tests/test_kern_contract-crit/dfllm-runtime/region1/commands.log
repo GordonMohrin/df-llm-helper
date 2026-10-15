@@ -1,0 +1,2 @@
+1792053016	1209604	inbox:me1:cli	verb:module.enable	{"module":"sense"}	ok
+1792053016	1209609	inbox:me2:cli	verb:module.enable	{"module":"nosuch"}	ERR no module nosuch

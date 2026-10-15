@@ -1,0 +1,7 @@
+{"cls":"C","d":{"boots":1,"save":"region1","v":2},"msg":"boot region1 #1","n":1,"tick":1209600,"type":"BOOT"}
+{"cls":"C","d":{"id":"t1","ok":1,"verb":"tempo.lower"},"msg":"tempo.lower ok","n":2,"tick":1209601,"type":"CMD"}
+{"cls":"C","d":{"id":"t2","ok":1,"verb":"tempo.lower"},"msg":"tempo.lower ok","n":3,"tick":1209641,"type":"CMD"}
+{"cls":"C","d":{"from":"PEACE","to":"SIEGE","why":"x"},"msg":"PEACE>SIEGE x","n":4,"tick":1209644,"type":"MODE"}
+{"cls":"C","d":{"id":"t3","ok":1,"verb":"tempo.lower"},"msg":"tempo.lower ok","n":5,"tick":1209646,"type":"CMD"}
+{"cls":"C","d":{"id":"t4","ok":0,"verb":"tempo.lower"},"msg":"tempo.lower failed","n":6,"tick":1209651,"type":"CMD"}
+{"cls":"C","d":{},"msg":"stop","n":7,"tick":1209656,"type":"UNLOAD"}

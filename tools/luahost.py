@@ -11,14 +11,20 @@ Python process) and a CPU-time hook aborts runaway scripts.
 Env: DFLLM_LUA53 = path to lua53.dll, else <DFLLM_DF>/hack/lua53.dll, else the author's Steam
 DF install below. Native helpers for tests (global table ``luahost``): listdir, isdir, isfile,
 mkdir_recursive, mtime, now_ms.
+
+Without lua53.dll (Linux, CI) the same chunk runs in a Lua 5.3 interpreter (``DFLLM_LUA_BIN`` or ``lua5.3`` on PATH)
+as a subprocess; the helpers are then plain Lua over POSIX tools (ls, test, mkdir -p, stat, /proc/uptime).
 """
 from __future__ import annotations
 
 import ctypes
 import os
 import re
+import shutil
 import struct
+import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -141,12 +147,24 @@ def get_lua() -> Lua:
     return _lua
 
 
-def available() -> bool:
+def _dll_ok() -> bool:
     try:
         get_lua()
         return True
     except (OSError, RuntimeError, ValueError):
         return False
+
+
+def lua_binary() -> str | None:
+    """A Lua 5.3 interpreter for hosts without lua53.dll: DFLLM_LUA_BIN, else lua5.3 on PATH."""
+    b = os.environ.get("DFLLM_LUA_BIN")
+    if b:
+        return b if (os.path.isfile(b) or shutil.which(b)) else None
+    return shutil.which("lua5.3")
+
+
+def available() -> bool:
+    return _dll_ok() or lua_binary() is not None
 
 
 @dataclass
@@ -267,9 +285,75 @@ def lua_path_prefix(extra: list[str | Path] | None = None) -> str:
     return "".join(f"{d.as_posix()}/?.lua;{d.as_posix()}/?/init.lua;" for d in dirs)
 
 
+# pure-Lua 'luahost' helpers for the interpreter fallback (same results as the C callbacks in _natives)
+_NATIVES_LUA = r"""
+local function q(s) return "'" .. (tostring(s):gsub("'", "'\\''")) .. "'" end
+local function sh(cmd) local r = os.execute(cmd) return r == true or r == 0 end
+luahost = {}
+function luahost.listdir(p)
+  local t = {}
+  if type(p) ~= 'string' or not sh('test -d ' .. q(p)) then return t end
+  local f = io.popen('ls -1A ' .. q(p) .. ' 2>/dev/null')
+  if f then for l in f:lines() do t[#t + 1] = l end f:close() end
+  table.sort(t)
+  return t
+end
+function luahost.isdir(p) return type(p) == 'string' and sh('test -d ' .. q(p)) end
+function luahost.isfile(p) return type(p) == 'string' and sh('test -f ' .. q(p)) end
+function luahost.mkdir_recursive(p) return type(p) == 'string' and sh('mkdir -p ' .. q(p)) end
+function luahost.mtime(p)
+  if type(p) ~= 'string' then return -1 end
+  local f = io.popen('stat -c %Y ' .. q(p) .. ' 2>/dev/null')
+  local v = f and f:read('n')
+  if f then f:close() end
+  return math.tointeger(v) or -1
+end
+function luahost.now_ms()
+  local f = io.open('/proc/uptime')
+  local v = f and f:read('n')
+  if f then f:close() end
+  return math.floor((v or os.clock()) * 1000)
+end
+"""
+
+_runner_file: Path | None = None
+
+
+def _runner() -> Path:
+    """The interpreter-side bootstrap: helpers + _BOOT; prints the captured output and exits with its code."""
+    global _runner_file
+    if _runner_file is None or not _runner_file.is_file():
+        assert "]==]" not in _BOOT
+        src = (_NATIVES_LUA + "local real_out, real_err, real_exit = io.stdout, io.stderr, os.exit\n"
+               + "local boot = assert(load([==[" + _BOOT + "]==], '=luahost', 't'))\n"
+               + "local code, out, err = boot(table.unpack(arg, 1, #arg))\n"
+               + "real_out:write(out or '') real_err:write(err or '') real_out:flush() real_err:flush()\n"
+               + "real_exit(math.tointeger(code) or 1, true)\n")
+        fd, name = tempfile.mkstemp(prefix="luahost_", suffix=".lua")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(src)
+        _runner_file = Path(name)
+    return _runner_file
+
+
+def _run_binary(binary: str, path: str | Path, args, timeout: float, paths) -> Result:
+    script = Path(path).resolve().as_posix()
+    argv = [binary, str(_runner()), script, str(timeout), lua_path_prefix(paths)] + [str(a) for a in args]
+    try:
+        p = subprocess.run(argv, capture_output=True, timeout=(timeout + 15) if timeout > 0 else None)
+    except subprocess.TimeoutExpired:
+        return Result(TIMEOUT_EXIT, "", f"luahost: timeout after {timeout} s")
+    return Result(p.returncode, p.stdout.decode("utf-8", "replace"), p.stderr.decode("utf-8", "replace"))
+
+
 def run_file(path: str | Path, args: list[str] | tuple = (), *, timeout: float = 30.0,
              paths: list[str | Path] | None = None) -> Result:
     """Run one Lua file in a fresh state. package.path = paths + <repo>/lua."""
+    if not _dll_ok():
+        binary = lua_binary()
+        if binary is None:
+            get_lua()                                    # raises the lua53.dll error
+        return _run_binary(binary, path, args, timeout, paths)
     lua = get_lua()
     L = lua.luaL_newstate()
     if not L:

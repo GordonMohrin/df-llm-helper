@@ -1,0 +1,9 @@
+{"cls":"B","d":{"by":"df","on":1},"msg":"paused by df","n":1,"tick":1209600,"type":"PAUSE"}
+{"cls":"C","d":{"boots":1,"save":"region1","v":2},"msg":"boot region1 #1","n":2,"tick":1209600,"type":"BOOT"}
+{"cls":"C","d":{"id":"u1","ok":0,"verb":"unpause"},"msg":"unpause failed","n":3,"tick":1209600,"type":"CMD"}
+{"cls":"B","d":{"by":"df","on":0},"msg":"unpaused, was df","n":4,"tick":1209624,"type":"PAUSE"}
+{"cls":"B","d":{"by":"inbox","on":1,"ttl":60},"msg":"paused by inbox","n":5,"tick":1209656,"type":"PAUSE"}
+{"cls":"C","d":{"id":"p1","ok":1,"verb":"pause"},"msg":"pause ok","n":6,"tick":1209656,"type":"CMD"}
+{"cls":"B","d":{"by":"inbox","on":0},"msg":"unpaused, was inbox","n":7,"tick":1209656,"type":"PAUSE"}
+{"cls":"C","d":{"id":"u2","ok":1,"verb":"unpause"},"msg":"unpause ok","n":8,"tick":1209656,"type":"CMD"}
+{"cls":"C","d":{},"msg":"stop","n":9,"tick":1209656,"type":"UNLOAD"}

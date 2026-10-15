@@ -1,0 +1,4 @@
+{"cls":"C","d":{"boots":1,"save":"region1","v":2},"msg":"boot region1 #1","n":1,"tick":1209600,"type":"BOOT"}
+{"cls":"A","d":{"err":"slow","module":"sense","n":3},"msg":"sense slow (9 ms)","n":2,"tick":1209621,"type":"KERN_FAULT"}
+{"cls":"B","d":{"factor":2,"module":"economy","ms":7},"msg":"economy demoted x2","n":3,"tick":1209621,"type":"KERNEL_SLOW"}
+{"cls":"C","d":{},"msg":"stop","n":4,"tick":1209680,"type":"UNLOAD"}

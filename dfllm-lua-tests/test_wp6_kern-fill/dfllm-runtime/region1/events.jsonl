@@ -1,0 +1,3 @@
+{"cls":"C","d":{"boots":1,"save":"region1","v":2},"msg":"boot region1 #1","n":1,"tick":1209600,"type":"BOOT"}
+{"cls":"B","d":{"cap":55,"why":"R0"},"msg":"max-pop 55 (R0)","n":2,"tick":1209609,"type":"POPCAP"}
+{"cls":"C","d":{},"msg":"test","n":3,"tick":1213320,"type":"UNLOAD"}

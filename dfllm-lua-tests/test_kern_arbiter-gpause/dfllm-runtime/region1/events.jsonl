@@ -1,0 +1,7 @@
+{"cls":"C","d":{"boots":1,"save":"region1","v":2},"msg":"boot region1 #1","n":1,"tick":1209600,"type":"BOOT"}
+{"cls":"B","d":{"by":"gordon","on":1},"msg":"paused by gordon","n":2,"tick":1209603,"type":"PAUSE"}
+{"cls":"A","d":{"id":"pause","q":"paused by gordon; Gordon unpauses in DF (the inbox cannot release it)"},"msg":"game paused by gordon for 10 min","n":3,"tick":1209603,"type":"DECISION_NEEDED"}
+{"cls":"C","d":{"id":"u1","ok":0,"verb":"unpause"},"msg":"unpause failed","n":4,"tick":1209603,"type":"CMD"}
+{"cls":"C","d":{"id":"u2","ok":0,"verb":"unpause"},"msg":"unpause failed","n":5,"tick":1209603,"type":"CMD"}
+{"cls":"B","d":{"by":"gordon","on":0},"msg":"unpaused, was gordon","n":6,"tick":1209604,"type":"PAUSE"}
+{"cls":"C","d":{},"msg":"stop","n":7,"tick":1209606,"type":"UNLOAD"}

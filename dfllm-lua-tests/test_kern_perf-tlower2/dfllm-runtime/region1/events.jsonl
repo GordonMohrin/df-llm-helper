@@ -1,0 +1,4 @@
+{"cls":"C","d":{"boots":1,"save":"region1","v":2},"msg":"boot region1 #1","n":1,"tick":1209600,"type":"BOOT"}
+{"cls":"C","d":{"id":"tl","ok":1,"verb":"tempo.lower"},"msg":"tempo.lower ok","n":2,"tick":1209650,"type":"CMD"}
+{"cls":"A","d":{"base":100,"pct":46,"tps":46,"why":"tps"},"msg":"PEACE ticks/s 46 = 46% of baseline 100 (target 100)","n":3,"tick":1215770,"type":"PERF_DEGRADED"}
+{"cls":"C","d":{},"msg":"stop","n":4,"tick":1216640,"type":"UNLOAD"}

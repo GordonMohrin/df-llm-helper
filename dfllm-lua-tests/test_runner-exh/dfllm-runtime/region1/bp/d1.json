@@ -1,0 +1,1 @@
+{"anchor":[10,10,100],"class":"living","id":"d1","manifest":{"v":2},"materials":[],"params":[],"rot":0,"site":"S1","stages":[{"chunks":[{"cells":[[0,0,0,"d(5x1)"]],"pos":[10,10,100]}],"defense":0,"label":"s1.dig","mode":"dig","orders":0}],"tpl":"dining","v":2}

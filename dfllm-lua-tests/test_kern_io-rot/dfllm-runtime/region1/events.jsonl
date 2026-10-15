@@ -1,0 +1,4 @@
+{"cls":"C","d":{"pct":5,"proj":"p1","stage":"s1"},"msg":"stage","n":11,"tick":1209610,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":5,"proj":"p1","stage":"s1"},"msg":"stage","n":12,"tick":1209611,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{"pct":5,"proj":"p1","stage":"s1"},"msg":"stage","n":13,"tick":1209612,"type":"PROJECT_STAGE"}
+{"cls":"C","d":{},"msg":"stop","n":14,"tick":1209612,"type":"UNLOAD"}

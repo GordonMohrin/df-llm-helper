@@ -1,0 +1,4 @@
+1792053025	1209601	inbox:e1:test	verb:lever	{"bridge":"X","want":"up"}	ERR handler error
+1792053025	1209601	inbox:e2:test	verb:lever	{"bridge":"X","want":"up"}	ERR handler error
+1792053025	1209601	inbox:e3:test	verb:lever	{"bridge":"X","want":"up"}	ERR handler error
+1792053025	1209665	inbox:e4:test	verb:lever	{"bridge":"O1","want":"up"}	ERR module disabled

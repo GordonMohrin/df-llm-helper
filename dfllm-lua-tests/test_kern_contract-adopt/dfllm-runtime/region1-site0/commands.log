@@ -1,0 +1,64 @@
+1792053023	1209600	arbiter	act.setting	["gfps",30]	ok
+1792053023	1209600	arbiter	act.setting	["autosave","YEARLY"]	ok
+1792053023	1209600	arbiter	act.timestream	[500]	ok
+1792053023	1209609	readiness	act.popcap	[55]	ok
+1792053023	1209609	economy	act.manager_office	[]	ERR /home/user/df-llm-helper/lua/dfllm/act.lua:936: attempt to call a nil value (field 'getUnitByNobleRole')
+1792053023	1209609	economy	act.run	["labormanager","allow-hunting"]	ok
+1792053023	1209609	water	act.workorder	[{"amount_total":2,"frequency":"OneTime","job":"MakeBucket","material_category":["wood"],"tag":"dfllm:bucket"}]	ERR no order created: 
+1792053023	1209609	baseline	act.run	["control-panel","enable","suspendmanager"]	ok
+1792053023	1209609	baseline	act.run	["control-panel","enable","autochop"]	ok
+1792053023	1209609	baseline	act.run	["control-panel","enable","autobutcher"]	ok
+1792053023	1209609	baseline	act.run	["control-panel","enable","autonestbox"]	ok
+1792053023	1209618	economy	act.run	["labormanager","allow-fishing"]	ok
+1792053023	1209618	baseline	act.run	["control-panel","enable","nestboxes"]	ok
+1792053023	1209618	baseline	act.run	["control-panel","enable","autoslab"]	ok
+1792053023	1209618	baseline	act.run	["control-panel","enable","preserve-tombs"]	ok
+1792053023	1209618	baseline	act.run	["control-panel","enable","tailor"]	ok
+1792053023	1209627	economy	act.run	["labormanager","mode"]	ok
+1792053023	1209627	baseline	act.run	["control-panel","enable","seedwatch"]	ok
+1792053023	1209627	baseline	act.run	["control-panel","enable","prioritize"]	ok
+1792053023	1209627	baseline	act.run	["control-panel","enable","pop-control"]	ok
+1792053023	1209627	baseline	act.run	["control-panel","enable","fix/dead-units"]	ok
+1792053023	1209636	baseline	act.run	["control-panel","enable","fix/empty-wheelbarrows"]	ok
+1792053023	1209636	baseline	act.run	["control-panel","enable","combine"]	ok
+1792053023	1209636	baseline	act.run	["control-panel","enable","timestream"]	ok
+1792053023	1209636	baseline	act.run	["enable","buildingplan"]	ok
+1792053023	1209645	baseline	act.run	["enable","logistics"]	ok
+1792053023	1209645	baseline	act.run	["enable","preserve-rooms"]	ok
+1792053023	1209645	baseline	act.run	["enable","burrow"]	ok
+1792053023	1209645	baseline	act.run	["enable","autofarm"]	ok
+1792053023	1209654	economy	act.workorder	[{"amount_total":9,"frequency":"OneTime","item_conditions":[{"condition":"AtLeast","flags":["unrotten"],"item_type":"PLANT","reaction_product":"DRINK_MAT","value":2},{"condition":"AtLeast","flags":["empty","food_storage"],"value":1}],"job":"CustomReaction","reaction":"BREW_DRINK_FROM_PLANT","tag"...	ERR no order created: 
+1792053023	1209654	baseline	act.run	["prioritize","-aq","defaults"]	ok
+1792053023	1209654	baseline	act.run	["prioritize","-aq","-n","BREW_DRINK_FROM_PLANT,BREW_DRINK_FROM_PLANT_GROWTH","CustomReaction"]	ok
+1792053023	1209654	baseline	act.run	["prioritize","-aq","PrepareMeal"]	ok
+1792053023	1209654	baseline	act.run	["autochop","target","150","60"]	ok
+1792053023	1209663	economy	act.workorder	[{"amount_total":2,"frequency":"OneTime","item_conditions":[{"condition":"AtLeast","flags":["unrotten","cookable"],"value":10}],"job":"PrepareMeal","meal_ingredients":2,"tag":"dfllm:food"}]	ERR no order created: 
+1792053023	1209663	baseline	act.run	["autobutcher","target","2","1","2","1","all"]	ok
+1792053023	1209663	baseline	act.run	["autobutcher","target","0","0","1","1","CAT"]	ok
+1792053023	1209663	baseline	act.run	["tailor","materials","silk","cloth","yarn"]	ok
+1792053023	1209663	baseline	act.run	["tailor","confiscate","false"]	ok
+1792053023	1209672	economy	act.run	["autofarm","status"]	ok
+1792053023	1209672	baseline	act.run	["pop-control","set","wave-size","8"]	ok
+1792053023	1209672	baseline	act.run	["labormanager","mode"]	ok
+1792053023	1209672	baseline	act.run	["autolabor","mode","monitor"]	ok
+1792053023	1209672	baseline	act.run	["enable","autolabor"]	ok
+1792053023	1209672	baseline	act.run	["labormanager","mode"]	ok
+1792053023	1209672	baseline	act.run	["seedwatch","clear"]	ok
+1792053023	1209672	baseline	act.run	["seedwatch","MUSHROOM_HELMET_PLUMP","0"]	ok
+1792053023	1209672	baseline	act.run	["ban-cooking","booze","honey","milk","oil","tallow"]	ok
+1792053023	1209681	economy	act.run	["labormanager","status"]	ok
+1792053023	1209681	baseline	act.run	["burial","-c"]	ok
+1792053023	1209897	arbiter	act.setting	["fps_cap",150]	ok
+1792053023	1209897	arbiter	act.timestream	[150]	ok
+1792053023	1210815	economy	act.manager_office	[]	ERR /home/user/df-llm-helper/lua/dfllm/act.lua:936: attempt to call a nil value (field 'getUnitByNobleRole')
+1792053023	1210815	economy	act.run	["labormanager","mode"]	ok
+1792053023	1210842	economy	act.run	["labormanager","status"]	ok
+1792053023	1212021	economy	act.manager_office	[]	ERR /home/user/df-llm-helper/lua/dfllm/act.lua:936: attempt to call a nil value (field 'getUnitByNobleRole')
+1792053023	1212021	economy	act.run	["labormanager","mode"]	ok
+1792053023	1212048	economy	act.run	["labormanager","status"]	ok
+1792053023	1212057	economy	act.run	["combine","all","-q"]	ok
+1792053023	1212300	arbiter	act.setting	["gfps",250]	ok
+1792053023	1212300	arbiter	act.setting	["fps_cap",250]	ok
+1792053023	1212300	arbiter	act.setting	["autosave","SEASONAL"]	ok
+1792053023	1212300	arbiter	act.setting	["population_cap",75]	ok
+1792053023	1212300	arbiter	act.timestream	[250]	ok

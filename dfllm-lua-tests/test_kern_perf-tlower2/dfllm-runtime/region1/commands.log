@@ -1,0 +1,10 @@
+1792053039	1209600	arbiter	act.setting	["gfps",30]	ok
+1792053039	1209600	arbiter	act.setting	["autosave","YEARLY"]	ok
+1792053039	1209600	arbiter	act.timestream	[500]	ok
+1792053039	1209650	arbiter	act.timestream	[100]	ok
+1792053039	1209650	inbox:tl:test	verb:tempo.lower	{"fps":100,"ttl_s":600}	ok
+1792053040	1216640	arbiter	act.setting	["gfps",250]	ok
+1792053040	1216640	arbiter	act.setting	["fps_cap",250]	ok
+1792053040	1216640	arbiter	act.setting	["autosave","SEASONAL"]	ok
+1792053040	1216640	arbiter	act.setting	["population_cap",75]	ok
+1792053040	1216640	arbiter	act.timestream	[250]	ok

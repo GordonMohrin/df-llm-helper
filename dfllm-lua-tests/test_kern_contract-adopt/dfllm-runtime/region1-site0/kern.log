@@ -1,0 +1,33 @@
+1792053023	1209600	warn	kern	armok cross-check unavailable: /home/user/df-llm-helper/lua/dfllm/kern.lua:936: module 'helpdb' not found:
+1792053023	1209600	info	arbiter	population cap original 75 from memory (no prefs file; may be pop-control's)
+1792053023	1209600	warn	economy	kitchen exclusion: /home/user/df-llm-helper/lua/dfllm/economy.lua:1376: attempt to index a nil value (field 'matinfo')
+1792053023	1209609	info	economy	farms: 0 of 15 tiles for 5 citizens, food 0 days: request 1 plots
+1792053023	1209609	warn	economy	supply alarm drink 0 d
+1792053023	1209609	warn	economy	famine: 0 food days (0 eatable, 0 cookable), hunting and fishing allowed
+1792053023	1209609	warn	care	care unit 1: /home/user/df-llm-helper/lua/dfllm/care.lua:228: attempt to index a nil value (field 'item_type')
+1792053023	1209609	warn	care	care unit 2: /home/user/df-llm-helper/lua/dfllm/care.lua:228: attempt to index a nil value (field 'item_type')
+1792053023	1209609	warn	care	care unit 3: /home/user/df-llm-helper/lua/dfllm/care.lua:228: attempt to index a nil value (field 'item_type')
+1792053023	1209609	warn	care	care unit 4: /home/user/df-llm-helper/lua/dfllm/care.lua:228: attempt to index a nil value (field 'item_type')
+1792053023	1209609	warn	care	care unit 5: /home/user/df-llm-helper/lua/dfllm/care.lua:228: attempt to index a nil value (field 'item_type')
+1792053023	1209609	info	water	water: 0 patients (max thirst 0), hospital dry, refuge dry, 0 wet sources (0 wells), buckets 0 free of 0 (want 2, unforbid 0, ordered 0)
+1792053023	1209636	info	economy	gear: 1 soldiers (0 melee, 1 xbow) + 2 hunters, worn 0%, pieces 0/9; body 0/1 no forge/bars/leatherworks, head 0/1 no forge/bars/leatherworks, pants 0/1 no forge/bars/leatherworks, gloves 0/2 no forge/bars/leatherworks, shoes 0/2 no forge/bars/leatherworks, xbow 0/3 no wood, quiver 0/1 no leatherworks, bolts 0/150 no wood
+1792053023	1209672	warn	economy	wood orders: /home/user/df-llm-helper/lua/dfllm/economy.lua:1350: attempt to index a nil value (field 'workquota_frequency_type')
+1792053023	1209672	warn	economy	kitchen exclusion: /home/user/df-llm-helper/lua/dfllm/economy.lua:1376: attempt to index a nil value (field 'matinfo')
+1792053023	1209681	info	baseline	baseline applied: 36 tasks, failed [], pending [idle_crafting melt trade_piles]
+1792053023	1209897	info	arbiter	supply brake on: drink 0 d
+1792053023	1210761	info	arbiter	supply brake on: P0
+1792053023	1210815	warn	care	care unit 1: /home/user/df-llm-helper/lua/dfllm/care.lua:228: attempt to index a nil value (field 'item_type')
+1792053023	1210815	warn	care	care unit 2: /home/user/df-llm-helper/lua/dfllm/care.lua:228: attempt to index a nil value (field 'item_type')
+1792053023	1210815	warn	care	care unit 3: /home/user/df-llm-helper/lua/dfllm/care.lua:228: attempt to index a nil value (field 'item_type')
+1792053023	1210815	warn	care	care unit 4: /home/user/df-llm-helper/lua/dfllm/care.lua:228: attempt to index a nil value (field 'item_type')
+1792053023	1210815	warn	care	care unit 5: /home/user/df-llm-helper/lua/dfllm/care.lua:228: attempt to index a nil value (field 'item_type')
+1792053023	1210815	info	care	mood reserve held/hold: boulders 0/0 logs 0/0 bone 0/0 shell 0/0 leather 0/0 cloth 0/0 thread 0/0 gems 0/0 bars 0/0
+1792053023	1210824	info	economy	gear: 0 soldiers (0 melee, 0 xbow) + 2 hunters, worn 0%, pieces 0/0; xbow 0/2 no wood, bolts 0/50 no wood
+1792053023	1210842	warn	economy	wood orders: /home/user/df-llm-helper/lua/dfllm/economy.lua:1350: attempt to index a nil value (field 'workquota_frequency_type')
+1792053023	1212021	warn	care	care unit 1: /home/user/df-llm-helper/lua/dfllm/care.lua:228: attempt to index a nil value (field 'item_type')
+1792053023	1212021	warn	care	care unit 2: /home/user/df-llm-helper/lua/dfllm/care.lua:228: attempt to index a nil value (field 'item_type')
+1792053023	1212021	warn	care	care unit 3: /home/user/df-llm-helper/lua/dfllm/care.lua:228: attempt to index a nil value (field 'item_type')
+1792053023	1212021	warn	care	care unit 4: /home/user/df-llm-helper/lua/dfllm/care.lua:228: attempt to index a nil value (field 'item_type')
+1792053023	1212021	warn	care	care unit 5: /home/user/df-llm-helper/lua/dfllm/care.lua:228: attempt to index a nil value (field 'item_type')
+1792053023	1212048	warn	economy	wood orders: /home/user/df-llm-helper/lua/dfllm/economy.lua:1350: attempt to index a nil value (field 'workquota_frequency_type')
+1792053023	1212057	info	economy	idle 100% for 3 days: backlog combine

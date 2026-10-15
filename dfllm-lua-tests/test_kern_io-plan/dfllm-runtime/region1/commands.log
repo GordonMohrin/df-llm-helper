@@ -1,0 +1,8 @@
+1792053025	1209601	inbox:p0:test	verb:plan.reload	{}	ERR plan.json: missing
+1792053025	1209633	inbox:p1:test	verb:plan.reload	{}	ok
+1792053025	1209633	inbox:i1:test	verb:inspect	{"what":"modules"}	ok
+1792053025	1209633	inbox:i2:test	verb:inspect	{"what":"mode"}	ok
+1792053025	1209633	inbox:i3:test	verb:inspect	{"key":"plan","what":"persist"}	ok
+1792053025	1209634	inbox:i4:test	verb:inspect	{"what":"nope"}	ERR bad what
+1792053025	1209697	inbox:p2:test	verb:plan.reload	{"phases":true}	ERR plans/year1.json: missing
+1792053025	1209729	inbox:p3:test	verb:plan.reload	{"phases":true}	ok

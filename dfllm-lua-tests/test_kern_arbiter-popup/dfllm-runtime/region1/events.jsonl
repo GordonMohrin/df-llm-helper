@@ -1,0 +1,5 @@
+{"cls":"C","d":{"boots":1,"save":"region1","v":2},"msg":"boot region1 #1","n":1,"tick":1209600,"type":"BOOT"}
+{"cls":"B","d":{"by":"popup","on":1},"msg":"paused by popup","n":2,"tick":1209600,"type":"PAUSE"}
+{"cls":"B","d":{"by":"popup","on":0},"msg":"unpaused, was popup","n":3,"tick":1209600,"type":"PAUSE"}
+{"cls":"B","d":{"by":"popup","on":1},"msg":"paused by popup","n":4,"tick":1209600,"type":"PAUSE"}
+{"cls":"C","d":{},"msg":"stop","n":5,"tick":1209600,"type":"UNLOAD"}

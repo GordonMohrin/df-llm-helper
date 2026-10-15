@@ -1,0 +1,4 @@
+{"cls":"C","d":{"boots":1,"save":"region1","v":2},"msg":"boot region1 #1","n":1,"tick":1612795,"type":"BOOT"}
+{"cls":"A","d":{"year":3},"msg":"year 3 done","n":2,"tick":1612804,"type":"YEAR_REVIEW"}
+{"cls":"C","d":{"season":0,"year":4},"msg":"season 0","n":3,"tick":1612804,"type":"SEASON"}
+{"cls":"C","d":{},"msg":"stop","n":4,"tick":1612805,"type":"UNLOAD"}
