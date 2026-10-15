@@ -155,7 +155,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | PLAN_EXHAUSTED | year review now (`plan propose`) |
 | PROJECT_BLOCKED | `bp preview`, then `bp.cancel` and place at another site, or fix the material |
 | YEAR_REVIEW | §5 year review |
-| GHOSTS | `inspect` `what=tombs` (causes per body); `tombs.repair`; `no_coffin` → `bp.place tombs`; `no_body` → a memorial slab |
+| GHOSTS | `inspect` `what=tombs` (causes per body); `tombs.repair`; `no_coffin` → the kernel provisions coffins (`inspect tombs` `prov`: want/short/stock/order/proj); `bp.place tombs` only when `prov` reports no space and no project; `no_body` → a memorial slab |
 | HOSPITAL_DRY | follow the recipe in the line (`inspect` `what=water_sources`: a bank to zone or a dig); until water is accepted, a dry hospital zone is worse than none |
 | MOOD_RISK | supply the missing class now (dig, trade, butcher); a mood job is never cancelled |
 | ORDER_BAD | a make-item order without `item_subtype` (DF crash) was removed; never queue such orders, use `order.add` with `item_subtype` |
