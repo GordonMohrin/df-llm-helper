@@ -75,10 +75,12 @@ helper is experimental; procedure and fair-play limits: `tools/embark/README.md`
    `embark.py scan WX,WY[,LX,LY] …`: it places the rectangle, reads the warning popup and the
    embark panel and ranks the sites against the DESIGN §5.1 checklist (Dark Fortress and old forts
    ≥ 10 world tiles, not evil, savagery low/medium, trees, flowing water, aquifer none (light only
-   with the probe protocol), flux/ore if shown, shallow soil, temperate, 3x3 or 4x4).
+   with the probe protocol), a metal ore listed and a hard stone layer within reach (no deep soil),
+   flux if shown, temperate, 3x3 or 4x4).
 3. `embark.py embark WX,WY[,LX,LY]` refuses a rejected site and any criterion the panel did not
    show, unless that one id is named with `--waive ID` after checking it by eye (no blanket
-   waiver). Prepare carefully cannot be driven yet (live L0): pass `--play-now` (DF's default
+   waiver); a failed criterion only with `--accept ID --reason "…"` (logged, ask the player
+   first). Prepare carefully cannot be driven yet (live L0): pass `--play-now` (DF's default
    seven) or ask the player to spend the points by hand: 3 picks, 2 axes, anvil, bars, wood, plump
    helmet and surface seeds, 1-2 breeding pairs; skills 2 miners, mason/engraver, carpenter,
    brewer/grower, mechanic, cook/doctor.

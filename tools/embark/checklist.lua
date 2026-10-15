@@ -11,9 +11,10 @@ C.DEFAULT = {
   trees_ok = {'heavily_forested', 'woodland'}, trees_warn = {'sparse'},
   aquifer_ok = {'none'}, aquifer_warn = {'light'},
   soil_ok = {'little', 'some'}, soil_warn = {'deep', 'very_deep', 'extremely_deep', 'shallow_sand', 'shallow_clay', 'none'},
-  -- live L6 (Laborkings: light aquifer, soil down to z125, no boulders for a year): soil this deep means no stone
-  -- layer in the upper levels; with a light aquifer the first stone lies below the water
-  stone_warn_soil = {'deep', 'very_deep', 'extremely_deep'},
+  -- live L6 (Laborkings: light aquifer, soil down to z125, no boulders for a year) and the Run 9 postmortem
+  -- (lesson 1: embark only where metal and a hard stone layer are within reach): soil this deep means no stone
+  -- layer in the upper levels, so the site is refused unless `stone` is accepted with a reason
+  stone_fail_soil = {'deep', 'very_deep', 'extremely_deep'},
   sizes = {{3, 3}, {4, 4}},
   fail_popups = {'heavy_aquifer', 'salt_water', 'evil', 'savage', 'necro', 'early_invasion', 'no_stone', 'cannot'},
   warn_popups = {'light_aquifer', 'dead_civ', 'narrow', 'smallest', 'large', 'very_large', 'largest', 'hard',
@@ -28,9 +29,17 @@ end
 
 -- criteria that can be 'unknown' and may be waived one by one at the embark gate
 -- (steps.gate, embark.py --waive; tests/test_embark.py keeps embark.py's list equal)
-C.WAIVABLE = {'old_sites', 'dark_fortress', 'evil', 'savagery', 'trees', 'water', 'aquifer', 'soil',
-  'temperature', 'size'}
+C.WAIVABLE = {'old_sites', 'dark_fortress', 'evil', 'savagery', 'trees', 'water', 'aquifer', 'soil', 'stone',
+  'ore', 'temperature', 'size'}
 C.WAIVABLE_SET = set(C.WAIVABLE)
+-- FR-08: criteria a player may accept although they FAILED (a known trade-off: an old fort nearby, scarce trees,
+-- no metal ore), one by one and with a logged reason (steps.gate, embark.py --accept ID --reason TEXT). Never the
+-- unreadable panel or a failing warning popup (heavy aquifer, evil, savage, necromancer, early invasion).
+C.ACCEPTABLE = {'old_sites', 'dark_fortress', 'evil', 'savagery', 'trees', 'water', 'aquifer', 'soil', 'stone',
+  'ore', 'temperature', 'size'}
+C.ACCEPTABLE_SET = set(C.ACCEPTABLE)
+-- warning popups judged by their own criterion, not by 'popup' ("difficult to obtain stone" is the stone rule)
+C.POPUP_OWNER = {no_stone = 'stone'}
 
 local function cheb(a, b) return math.max(math.abs(a[1] - b[1]), math.abs(a[2] - b[2])) end
 
@@ -110,21 +119,30 @@ function C.evaluate(rec, rules, ctx)
   else put('water', 'unknown', 'not shown') end
   tiered('aquifer', rec.aquifer, rules.aquifer_ok, rules.aquifer_warn)
   put('flux', rec.flux and 'pass' or 'warn', rec.flux and 'flux stone layer' or 'no flux shown')
-  if not rec.metals then put('ore', 'skip', 'not shown')
+  -- Run 9 postmortem lesson 1: a metal ore within reach is required; the panel lists the site's metals
+  if (rec.read or 0) == 0 then put('ore', 'unknown', 'panel not read')
+  elseif not rec.metals then put('ore', 'fail', 'no metal ore shown')
   else
     local m = set(rec.metals)
     if m.iron then put('ore', 'pass', 'iron')
-    elseif m.copper and m.tin then put('ore', 'warn', 'bronze only')
-    else put('ore', 'warn', 'no iron') end
+    elseif m.copper and m.tin then put('ore', 'warn', 'bronze only (' .. table.concat(rec.metals, ', ') .. ')')
+    else put('ore', 'warn', 'no iron (' .. table.concat(rec.metals, ', ') .. ')') end
   end
   tiered('soil', rec.soil, rules.soil_ok, rules.soil_warn)
-  -- stone near the surface (live L6): deep soil = no stone layer in the upper levels (boulders, blocks, mechanisms)
-  if rec.soil == nil then put('stone', 'skip', 'soil not shown')
-  elseif set(rules.stone_warn_soil)[rec.soil] then
+  -- a hard stone layer within reach (live L6, Run 9 lesson 1): deep soil = no stone layer in the upper levels
+  -- (boulders, blocks, mechanisms); the best tile of the rectangle counts (stone_soil, steps.merge_tiles)
+  local soil = rec.stone_soil or rec.soil
+  local layers = rec.layers and #rec.layers > 0 and table.concat(rec.layers, ', ') or nil
+  if pop.no_stone then put('stone', 'fail', 'popup: difficult to obtain stone')
+  elseif soil ~= nil and set(rules.stone_fail_soil or rules.stone_warn_soil)[soil] then
     local aq = rec.aquifer == 'light' or rec.aquifer == 'varied'
-    put('stone', 'warn', rec.soil .. ' soil: no stone layer in the upper levels' ..
+    put('stone', 'fail', soil .. ' soil: no stone layer in the upper levels' ..
         (aq and ', the first stone lies below the aquifer (Laborkings: no boulders)' or ' (boulders scarce)'))
-  else put('stone', 'pass', 'stone near the surface (' .. rec.soil .. ' soil)') end
+  elseif soil ~= nil then
+    put('stone', 'pass', 'stone near the surface (' .. (soil == 'none' and 'no' or soil) .. ' soil' ..
+        (layers and (', ' .. layers) or '') .. ')')
+  elseif layers then put('stone', 'pass', 'stone layers ' .. layers)
+  else put('stone', 'unknown', 'soil depth not shown') end
   if rec.ice then put('temperature', 'fail', 'ice')
   else tiered('temperature', rec.temperature, rules.temperature_ok, rules.temperature_warn) end
   if ctx.size then
@@ -136,7 +154,8 @@ function C.evaluate(rec, rules, ctx)
   else put('size', 'unknown', 'rectangle unknown') end
   local fp, wp = set(rules.fail_popups), set(rules.warn_popups)
   for _, w in ipairs(rec.warnings or {}) do
-    if fp[w] then put('popup', 'fail', w) elseif wp[w] then put('popup', 'warn', w) end
+    if C.POPUP_OWNER[w] then -- judged by its own criterion above
+    elseif fp[w] then put('popup', 'fail', w) elseif wp[w] then put('popup', 'warn', w) end
   end
 
   out.items = items

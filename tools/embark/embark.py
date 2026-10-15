@@ -3,7 +3,8 @@
     python tools/embark/embark.py state | check | screen [NAME] | status | stop
     python tools/embark/embark.py newgame [--world Zilirr]
     python tools/embark/embark.py scan WX,WY[,LX,LY] ...
-    python tools/embark/embark.py embark WX,WY[,LX,LY] [--waive ID ...] [--play-now] [--allow-unspent]
+    python tools/embark/embark.py embark WX,WY[,LX,LY] [--waive ID ...] [--accept ID ... --reason TEXT]
+                                        [--play-now] [--allow-unspent]
     python tools/embark/embark.py prep [--play-now] [--allow-unspent]
 
 A run costs ONE dfhack-run call (`embark.lua run <spec>`); afterwards only
@@ -24,8 +25,13 @@ LUA = HERE / "embark.lua"
 DEFAULT_DF = Path(r"E:\Program Files (x86)\Steam\steamapps\common\Dwarf Fortress")
 ORDER = {"ok": 0, "review": 1, "reject": 2}
 # criteria that may be 'unknown' and waived one by one (= checklist.lua C.WAIVABLE)
-WAIVABLE = ("old_sites", "dark_fortress", "evil", "savagery", "trees", "water", "aquifer", "soil",
+WAIVABLE = ("old_sites", "dark_fortress", "evil", "savagery", "trees", "water", "aquifer", "soil", "stone", "ore",
             "temperature", "size")
+# FR-08: criteria that may be accepted although they FAILED, one by one, with a logged reason
+# (= checklist.lua C.ACCEPTABLE; never the unreadable panel or a failing warning popup)
+ACCEPTABLE = ("old_sites", "dark_fortress", "evil", "savagery", "trees", "water", "aquifer", "soil", "stone", "ore",
+              "temperature", "size")
+ACCEPT_LOG = "accept.log"
 
 
 def df_dir() -> Path:
@@ -56,7 +62,7 @@ def parse_site(text: str) -> list[int]:
 
 
 def make_spec(mode: str, *, run_id: str | None = None, world: str | None = None, cands=None, site=None,
-              waive=(), play_now: bool = False, allow_unspent: bool = False,
+              waive=(), accept=(), reason: str | None = None, play_now: bool = False, allow_unspent: bool = False,
               tiles: bool | None = None, now: float | None = None) -> dict:
     spec = {"v": 2, "id": run_id or f"{mode}{int(now if now is not None else time.time())}", "mode": mode}
     if mode == "newgame":
@@ -73,6 +79,14 @@ def make_spec(mode: str, *, run_id: str | None = None, world: str | None = None,
             raise ValueError(f"cannot waive {bad}; known: {list(WAIVABLE)}")
         spec["site"] = list(site)
         spec["waive"] = sorted(set(waive))
+        bad = sorted(set(accept) - set(ACCEPTABLE))
+        if bad:
+            raise ValueError(f"cannot accept {bad}; known: {list(ACCEPTABLE)}")
+        why = " ".join(str(reason or "").split())
+        if accept and len(why) < 3:
+            raise ValueError("--accept needs --reason (why this trade-off is acceptable; it is logged)")
+        if accept:
+            spec["accept"] = [{"id": a, "why": why[:200]} for a in sorted(set(accept))]
         if tiles is False:
             spec["tiles"] = False       # default: all 16 tiles are read before the gate
     elif mode != "prep":
@@ -80,6 +94,20 @@ def make_spec(mode: str, *, run_id: str | None = None, world: str | None = None,
     if mode in ("embark", "prep"):
         spec.update(play_now=play_now, allow_unspent=allow_unspent)
     return spec
+
+
+def log_accept(spec: dict, out: Path, now: float | None = None) -> Path | None:
+    """FR-08: every accepted failed criterion is logged with its reason (<DF>/dfllm-runtime/embark/accept.log)."""
+    if not spec.get("accept"):
+        return None
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / ACCEPT_LOG
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now if now is not None else time.time()))
+    site = ",".join(str(x) for x in spec.get("site") or [])
+    with path.open("a", encoding="utf-8") as f:
+        for a in spec["accept"]:
+            f.write(f"{stamp}\t{spec['id']}\t{site}\t{a['id']}\t{a['why']}\n")
+    return path
 
 
 def write_spec(spec: dict, out: Path) -> Path:
@@ -156,6 +184,10 @@ def main(argv: list[str] | None = None) -> int:
             sp.add_argument("--waive", action="append", default=[], choices=WAIVABLE, metavar="ID",
                             help="accept this one criterion although the panel did not show it (checked by eye); "
                                  "repeatable; " + ", ".join(WAIVABLE))
+            sp.add_argument("--accept", action="append", default=[], choices=ACCEPTABLE, metavar="ID",
+                            help="FR-08: embark although this criterion FAILED (a known trade-off); repeatable, "
+                                 "needs --reason; logged to dfllm-runtime/embark/accept.log; " + ", ".join(ACCEPTABLE))
+            sp.add_argument("--reason", help="why the accepted criteria are acceptable (logged with the run)")
             sp.add_argument("--no-tiles", action="store_true", help="read only the hovered tile's panel")
         sp.add_argument("--play-now", action="store_true", help="fallback: DF defaults, skip Prepare carefully")
         sp.add_argument("--allow-unspent", action="store_true")
@@ -170,10 +202,16 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "screen":
         print(call(["screen"] + ([a.name] if a.name else [])).rstrip())
         return 0
-    spec = make_spec(a.cmd, world=getattr(a, "world", None), cands=getattr(a, "sites", None),
-                     site=getattr(a, "site", None), waive=getattr(a, "waive", ()),
-                     play_now=getattr(a, "play_now", False), allow_unspent=getattr(a, "allow_unspent", False),
-                     tiles=(True if getattr(a, "tiles", False) else False if getattr(a, "no_tiles", False) else None))
+    try:
+        spec = make_spec(a.cmd, world=getattr(a, "world", None), cands=getattr(a, "sites", None),
+                         site=getattr(a, "site", None), waive=getattr(a, "waive", ()),
+                         accept=getattr(a, "accept", ()), reason=getattr(a, "reason", None),
+                         play_now=getattr(a, "play_now", False), allow_unspent=getattr(a, "allow_unspent", False),
+                         tiles=(True if getattr(a, "tiles", False) else False if getattr(a, "no_tiles", False)
+                                else None))
+    except ValueError as e:
+        ap.error(str(e))
+    log_accept(spec, out)
     path = write_spec(spec, out)
     print(call(["run", path.as_posix()]).strip())
     if a.no_wait:

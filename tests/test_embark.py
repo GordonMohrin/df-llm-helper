@@ -218,6 +218,31 @@ def test_waivable_ids_match_checklist_lua():
     text = (EMB / "checklist.lua").read_text(encoding="utf-8")
     body = re.search(r"C\.WAIVABLE = \{(.*?)\}", text, re.S).group(1)
     assert tuple(re.findall(r"'([a-z_]+)'", body)) == drv.WAIVABLE
+    body = re.search(r"C\.ACCEPTABLE = \{(.*?)\}", text, re.S).group(1)
+    assert tuple(re.findall(r"'([a-z_]+)'", body)) == drv.ACCEPTABLE
+    assert "panel" not in drv.ACCEPTABLE and "popup" not in drv.ACCEPTABLE
+    assert {"ore", "stone"} <= set(drv.ACCEPTABLE)
+
+
+def test_rules_json_requires_metal_and_stone():
+    """Run 9 postmortem lesson 1: deep soil fails the stone rule (rules.json), a missing metal fails ore."""
+    r = load(EMB / "rules.json")
+    assert r["stone_fail_soil"] == ["deep", "very_deep", "extremely_deep"] and "stone_warn_soil" not in r
+    assert "lesson 1" in r["stone_note"] and "--accept" in r["stone_note"]
+
+
+def test_make_spec_accept_needs_a_reason(tmp_path):
+    e = drv.make_spec("embark", site=[7, 23], accept=["ore", "ore"], reason="  bars by   trade ", now=3)
+    assert e["accept"] == [{"id": "ore", "why": "bars by trade"}]
+    assert "accept" not in drv.make_spec("embark", site=[7, 23], now=3)
+    for bad in ({"accept": ["ore"]}, {"accept": ["ore"], "reason": " x "}, {"accept": ["panel"], "reason": "why not"}):
+        with pytest.raises(ValueError):
+            drv.make_spec("embark", site=[7, 23], **bad)
+    log = drv.log_accept(e, tmp_path, now=0)
+    assert log == tmp_path / "accept.log"
+    line = log.read_text(encoding="utf-8").splitlines()[0].split("\t")
+    assert line[1:] == ["embark3", "7,23", "ore", "bars by trade"]
+    assert drv.log_accept(drv.make_spec("embark", site=[7, 23], now=3), tmp_path) is None
 
 
 def test_main_embark_passes_named_waivers_only(tmp_path, monkeypatch):
@@ -227,10 +252,17 @@ def test_main_embark_passes_named_waivers_only(tmp_path, monkeypatch):
     assert drv.main(["embark", "7,23,6,6", "--waive", "dark_fortress", "--no-wait"]) == 0
     spec = json.loads(Path(calls[0][1]).read_text(encoding="utf-8"))
     assert spec["mode"] == "embark" and spec["site"] == [7, 23, 6, 6] and spec["waive"] == ["dark_fortress"]
-    for bad in (["--accept-review"], ["--waive", "all"]):
+    for bad in (["--accept-review"], ["--waive", "all"], ["--accept", "ore"],
+                ["--accept", "panel", "--reason", "x y z"]):
         with pytest.raises(SystemExit):
             drv.main(["embark", "7,23", "--no-wait", *bad])
     assert len(calls) == 1
+    assert drv.main(["embark", "7,23", "--accept", "ore", "--accept", "stone", "--reason", "known trade-off",
+                     "--no-wait"]) == 0
+    spec = json.loads(Path(calls[1][1]).read_text(encoding="utf-8"))
+    assert spec["accept"] == [{"id": "ore", "why": "known trade-off"}, {"id": "stone", "why": "known trade-off"}]
+    log = (tmp_path / "dfllm-runtime" / "embark" / "accept.log").read_text(encoding="utf-8").splitlines()
+    assert [x.split("\t")[3] for x in log] == ["ore", "stone"]
 
 
 def test_main_scan_makes_one_dfhack_call(tmp_path, monkeypatch):

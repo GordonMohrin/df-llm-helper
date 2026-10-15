@@ -40,6 +40,13 @@ P.FINDER = {{'match found!', 'match'}, {'partial match.', 'partial'}, {'no match
 P.METALS = {iron = 1, copper = 1, tin = 1, silver = 1, gold = 1, zinc = 1, lead = 1, nickel = 1,
   bismuth = 1, platinum = 1, aluminum = 1}
 P.RACES = {dwarves = 1, humans = 1, elves = 1, goblins = 1, kobolds = 1}
+-- stone layer names (DF 53.16 inorganic stone layers; Run 9 postmortem lesson 1: embark only where a hard stone
+-- layer is within reach, read from the embark screen's layer list). A cell that lists only these names (and
+-- optionally "layer"/"layers") is a layer line; soils (clay, sand, loam, silt, peat) are not stone.
+P.STONES = {granite = 1, diorite = 1, gabbro = 1, basalt = 1, andesite = 1, dacite = 1, rhyolite = 1, obsidian = 1,
+  quartzite = 1, slate = 1, phyllite = 1, schist = 1, gneiss = 1, marble = 1, sandstone = 1, siltstone = 1,
+  mudstone = 1, shale = 1, claystone = 1, limestone = 1, dolomite = 1, chalk = 1, chert = 1, conglomerate = 1,
+  ['rock salt'] = 1}
 -- Neighbors travel phrases -> rank (higher = farther); calibrate against tiles at L0
 P.TRAVEL = {{'inaccessible', 99}, {'your location', 0}, {'here', 0}, {'a short trip', 1}, {'a short walk', 1}, {"half day's travel", 2},
   {"1/2 day's travel", 2}, {"nearly a day's travel", 3}, {"more than a day's travel", 5},
@@ -63,6 +70,24 @@ local function metal_list(t)
   return #found > 0 and found or nil
 end
 
+local function stone_list(t)
+  local s = t:gsub('%f[a-z]layers?%f[^a-z]', ' ')
+  local found = {}
+  for part in s:gmatch('[^,]+') do
+    local name = V.trim(part)
+    if name ~= '' then
+      if P.STONES[name] then found[#found + 1] = name
+      else
+        for w in name:gmatch('[a-z]+') do
+          if not P.STONES[w] then return nil end
+          found[#found + 1] = w
+        end
+      end
+    end
+  end
+  return #found > 0 and found or nil
+end
+
 -- view -> record. rec.read = number of recognised panel facts (0 = panel not visible).
 function P.parse(view)
   local rec = {read = 0, warnings = {}, rivers = {}, neighbors = {}}
@@ -80,6 +105,10 @@ function P.parse(view)
     elseif t:sub(1, 10) == 'neighbors:' then rec.neighbors_shown = true  -- section header (exe 53.16)
     elseif P.SURR[t] and not rec.surroundings then rec.surroundings = t  -- unlabelled fallback
     elseif metal_list(t) then rec.metals = metal_list(t)
+    elseif stone_list(t) then
+      rec.layers = rec.layers or {}
+      for _, n in ipairs(stone_list(t)) do rec.layers[#rec.layers + 1] = n end
+      rec.read = rec.read + 1
     else
       for _, l in ipairs(P.LABELS) do
         if t:sub(1, #l[1]) == l[1] then
