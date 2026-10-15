@@ -36,3 +36,8 @@ Focus was `dwarfmode/Default` the whole time. kern.log: `trade: no TradeAtDepot 
 The game ran at 90 ticks/s (`tempo.lower` by me), the trade module was demoted for its cost. Suspect: the trade state machine uses real-time phase limits (`PHASE_MS`) while a demoted module runs
 only every few frames, so the UI phase times out at low tempo / under demotion. A first caravan with the same module at 400+ ticks/s had traded (Muboomon, ratio 1.65, 18:25).
 Muboomon on 19:00 brought one human and a yak without goods (`nothing_listed`, not a bug).
+
+## Side effect: hauling for a caravan without goods (19:55)
+For the empty Muboomon caravans (one human, one yak, `nothing_listed`) the trade module still sent 100 sale items to the depot: 99 `BringItemToDepot` jobs stayed open for the whole visit
+(`inspect workload`: unclaimed `BringItemToDepot 99-174`, `PlantSeeds 94`, 21 of 34 adults without a job at the instant of the sample but walking between hauling jobs). Food fell from 584 to 173 days in the same period.
+Fix proposal: send sale items only after the merchants' goods are listed (`goods_items > 0`), and queue them behind farming/food jobs (priority) or in batches.
