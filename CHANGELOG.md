@@ -125,6 +125,11 @@ Offline (k_mock + pytest), live-untested. Details and statuses: docs/feature-req
 - **FR-08 embark:** the gate requires a metal ore (iron passes; bronze only or other metals warn) and a stone layer
   (fails on the 'no stone' popup or deep soil), both read from the embark panel's layer lines.
   `--accept <criterion> --reason "..."` lets a failed criterion pass and logs it to `accept.log`.
+- **Run 9 live findings (FR-59/60/63, seal part of FR-62; 017411c, offline, live-untested):** stored drink, food and
+  seeds (barrels, bins, bags) count for reach, the refuge audit and CUTOFF; a flagged stair is read again before it is
+  reported (cause: a scan days old); without a manifest, the walls, doors, gates and bridges of an opening found sealed
+  become perimeter pieces, and the new verb `perimeter.record` records the citizens' boundary; seal's work is capped
+  per real second (`seal.CFG.rate`), and the item census, map edge, scan and PEACE entrance search skip unchanged inputs.
 
 ## Rename (2026-10-15): df-llm-helper -> dfpilot
 - Project renamed back to **dfpilot**; Python package `df_llm_helper` -> `dfpilot` (`python -m dfpilot ...`), the
