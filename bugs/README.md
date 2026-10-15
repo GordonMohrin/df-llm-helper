@@ -31,8 +31,8 @@ Related: FR-xx, BUG-xx
 | [BUG-008](BUG-008-ghosts-event-repeats.md) | fixed in b01bec4, 7006350 (offline, live-untested) | low | GHOSTS and NO_DEPOT repeat every few game days and drown the stream | lua/dfllm/care.lua |
 | [BUG-009](BUG-009-construction-jobs-resuspended.md) | fixed in 9b9dcdc, 7006350 (offline, live-untested) | high | construction jobs are suspended again within 5 s of every resume, new buildings are never built | lua/dfllm/economy.lua:2999 |
 | [BUG-010](BUG-010-legacy-autolabor-enabled.md) | fixed in 1d9b6a9 (offline, live-untested) | high | `autolabor` runs in legacy mode after map load, the engine that crashed DF in Run 9 | lua/dfllm/baseline.lua:158 |
-| [BUG-011](BUG-011-civ-alert-flips-on-then-off.md) | open | high | the arrival lockdown switches the civil alert on, the siege module switches it off 12 ticks later | lua/dfllm/reflex.lua, siege.lua |
-| [BUG-012](BUG-012-entrance-door-not-recognised.md) | open | high | the arrival lockdown forbids 0 doors ("0 entrances") although the fort has an entrance door | lua/dfllm/reflex.lua, seal.lua |
+| [BUG-011](BUG-011-civ-alert-flips-on-then-off.md) | fixed in 4e2b43c (offline, live-untested) | high | the arrival lockdown switches the civil alert on, the siege module switches it off 12 ticks later | lua/dfllm/reflex.lua, siege.lua |
+| [BUG-012](BUG-012-entrance-door-not-recognised.md) | fixed in 4e2b43c (offline, live-untested) | high | the arrival lockdown forbids 0 doors ("0 entrances") although the fort has an entrance door | lua/dfllm/reflex.lua, seal.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

@@ -1,5 +1,14 @@
 # CHANGELOG dfpilot
 
+## Arrival lockdown: civ alert and entrance doors, BUG-011/BUG-012 (2026-10-15; commit 4e2b43c, offline, live-untested)
+- **BUG-011:** siege's step and `hold_alert` share one decision (seal picks the burrow) and nothing writes
+  `civ_alert(false)` while a lockdown holds the alert; when every burrow fails, a lockdown keeps `Innen+` (painted at
+  once if missing); ARRIVAL/LOCKDOWN say what holds (`alert: Innen+ (REFUGE_FAIL Kern+, lockdown fallback)`,
+  `alert: none (...)`), whole parts kept within 200 bytes. **BUG-012:** seal's entrance BFS lists each opening's doors
+  (on it, first on its route toward the citizens, within 3 steps inside; revealed tiles), `seal.entrance_doors` feeds
+  the reflex, the text names openings without a door (`partial lockdown: ... has no door`), the undo opens exactly the
+  doors it forbade. Test `tests/lua/test_lockdown.lua`. Live check in `bugs/BUG-011`, `bugs/BUG-012`.
+
 ## Live-test bugs BUG-003/004/005/008/009/010 (2026-10-15; commits b01bec4, 7006350, 9b9dcdc, 1d9b6a9; offline, live-untested)
 - **BUG-009/004/005 (nothing got built, every caravan lost):** economy's daily FR-16 pass unforbids forbidden items on
   the footprints of suspended constructions (new `snapshot.items_at`, revealed tiles; mood reserve, corpses, dead
