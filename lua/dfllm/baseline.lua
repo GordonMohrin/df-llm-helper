@@ -13,6 +13,9 @@
 -- labormanager (DESIGN §5.5): monitor mode first; after `ab_days` PEACE days an A/B test runs modern
 -- (+ balance, unmanaged labors) for as many PEACE days and keeps the mode with fewer starving days
 -- (economy reports the daily KPI through labor_day). The chosen mode is persisted and re-applied on load.
+-- BUG-010: autolabor found enabled in legacy mode (the Run 9 crash engine) is set to monitor in the boot step
+-- (init, before the queue: never demoted), again by the first task of every full apply and on economy's daily
+-- engine read; AUTOLABOR_LEGACY (A).
 -- Tasks run in slices (per_slice per frame). The module switches to an ms cadence while tasks are
 -- pending, so the baseline lands even though DF loads saves paused (CONTRACTS §3.2: `every` is re-read).
 local C = require('dfllm.util.contract')
@@ -135,12 +138,19 @@ end
 
 ---------------------------------------------------------------- composite tasks
 local LM_MODES = {'modern', 'monitor', 'legacy'}
--- 'labormanager mode' prints the active engine ("Mode: modern (labormanager)", autolabor.plug.dll strings)
-local function lm_confirms(out, mode)
+-- the engine a status text names: 'labormanager mode' prints "Mode: modern (labormanager)", `autolabor` "Current
+-- state: 1, mode: legacy." (autolabor.plug.dll strings). The "mode: X" field first (BUG-010: a text that mentions
+-- the other modes too read as one of them), else the first mode word; nil when none is printed
+local function engine(out)
   local s = tostring(out or ''):lower()
-  if s:find(mode, 1, true) then return true end
-  for _, m in ipairs(LM_MODES) do if s:find(m, 1, true) then return false end end
-  return true                                   -- nothing recognisable printed: trust the exit status
+  local m = s:match('mode:%s*(%a+)')
+  for _, x in ipairs(LM_MODES) do if m == x then return m end end
+  for _, x in ipairs(LM_MODES) do if s:find(x, 1, true) then return x end end
+end
+
+local function lm_confirms(out, mode)
+  local e = engine(out)
+  return e == nil or e == mode                  -- nothing recognisable printed: trust the exit status
 end
 
 -- the mode to apply: the persisted choice (A/B state), else the configured start mode
@@ -148,11 +158,6 @@ local function lm_want(c)
   local m = st.lm
   for _, x in ipairs(LM_MODES) do if m == x then return m end end
   return c.labormanager.mode
-end
-
-local function engine(out)
-  local s = tostring(out or ''):lower()
-  for _, m in ipairs(LM_MODES) do if s:find(m, 1, true) then return m end end
 end
 
 -- The engine is chosen with `autolabor mode <m>` and started with `enable autolabor` (the plugin is
@@ -189,6 +194,50 @@ local function labor(K, c)
   end
   st.lm = mode
   return true, mode
+end
+
+---------------------------------------------------------------- BUG-010: the legacy autolabor engine
+-- Run 9: `autolabor` came back enabled in legacy mode with the fort load ("Current state: 1, mode: legacy"; the
+-- player had disabled it by hand), and the crash logs of 14.10. (10:41, 10:47) have their top frames in
+-- autolabor_plug. The guard reads the engine (`autolabor status`, else `labormanager mode`); enabled in legacy mode
+-- -> `autolabor mode monitor` at once (allowlisted) and AUTOLABOR_LEGACY (A). It runs in init (a boot step, before
+-- the baseline queue: never demoted, also after every load), as the first task of every full apply, and when
+-- economy's daily engine read names legacy. An unfixed engine is announced again at most every LEGACY_WALL_S.
+M.LEGACY_WALL_S = 600
+function M.parse_engine(out)
+  local state = tostring(out or ''):lower():match('current state:%s*(%d)')
+  local on
+  if state ~= nil then on = state ~= '0' end
+  return engine(out), on
+end
+
+-- public (K.call, economy's daily `labormanager mode` read): the engine its output names, and whether it is on
+function M.engine_of(K, out) return M.parse_engine(out) end
+
+function M.legacy_guard(K, why)
+  local ok, out = K.act.run('autolabor', 'status')
+  local mode, on = M.parse_engine(ok and out or '')
+  if mode == nil then
+    ok, out = K.act.run('labormanager', 'mode')
+    mode = M.parse_engine(ok and out or '')
+  end
+  if mode ~= 'legacy' or on == false then return false, mode or 'unknown' end
+  local set = K.act.run('autolabor', 'mode', 'monitor') == true
+  local _, out2 = K.act.run('autolabor', 'status')
+  local after = M.parse_engine(out2) or 'unknown'
+  local fixed = set and after ~= 'legacy'
+  local w = K.now().wall or 0
+  K.log(fixed and 'warn' or 'error', 'autolabor was enabled in legacy mode (%s): %s', tostring(why),
+        fixed and 'set to monitor' or ('autolabor mode monitor failed, still ' .. after))
+  if fixed ~= st.legacy_fixed or st.legacy_w == nil or w - st.legacy_w >= M.LEGACY_WALL_S then
+    st.legacy_fixed, st.legacy_w = fixed, w
+    K.emit('AUTOLABOR_LEGACY', 'A', string.format('autolabor ran in legacy mode (the engine of the Run 9 crashes, found '
+                                                  .. 'at %s): %s', tostring(why), fixed and 'set to monitor'
+                                                  or ('autolabor mode monitor failed, still ' .. after)):sub(1, 200),
+           {why = tostring(why):sub(1, 40), fixed = fixed and 1 or 0, after = after})
+  end
+  if st.lm and st.lm ~= 'monitor' then st.lm_due = true; M.every = M.APPLY_EVERY end   -- the chosen engine again
+  return true, fixed and 'monitor' or 'failed'
 end
 
 -- tools/seedwatch.txt: enabling watches every type at 30, so clear first, unwatch the cook-excluded
@@ -285,6 +334,7 @@ function M.plan(K, c)
     local a = table.pack(...)
     add(id, function() return K.act.run(table.unpack(a, 1, a.n)) end)
   end
+  add('legacy_guard', function() M.legacy_guard(K, 'apply'); return true end)   -- BUG-010: before anything else
   for _, name in ipairs(c.control_panel or {}) do cmd('cp:' .. name, 'control-panel', 'enable', name) end
   if c.timestream and decision(K, 'D-11') == 'accepted' then
     cmd('cp:timestream', 'control-panel', 'enable', 'timestream')
@@ -426,6 +476,9 @@ function M.init(K)
   else
     st.ab, st.lm = new_ab(), nil                -- no A/B record: start over from the configured mode
   end
+  -- BUG-010: the legacy autolabor engine is switched off in the boot step itself, before the (demotable) queue
+  local okg, err = pcall(M.legacy_guard, K, 'boot')
+  if not okg then K.log('warn', 'autolabor legacy guard: %s', tostring(err)) end
   M.apply(K)                                    -- on adopt and on every load
 end
 

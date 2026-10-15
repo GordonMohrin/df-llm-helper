@@ -84,9 +84,12 @@ end)
 
 T.test('apply is sliced: at most per_slice tasks per frame, also while paused', function()
   local W, B = world()
+  local n0 = #W.find_acts('run')
+  T.eq(n0, 2, 'the boot step reads the autolabor engine (BUG-010): autolabor status, labormanager mode')
   W.run(1, {paused = true})
-  local n1 = #W.find_acts('run')
-  T.ok(n1 > 0 and n1 <= 4, 'first slice ran ' .. n1 .. ' commands')
+  local n1 = #W.find_acts('run') - n0
+  T.ok(n1 > 0 and n1 <= 5, 'first slice ran ' .. n1 .. ' commands (4 tasks, the engine guard reads twice)')
+  n1 = n1 + n0
   W.run(1, {paused = true})
   T.ok(#W.find_acts('run') > n1)
   drain(W)
@@ -118,7 +121,83 @@ T.test('apply() re-queues the same full baseline', function()
   T.ok(ok and ok2 and n > 30)
   T.eq(B.every, B.APPLY_EVERY)
   drain(W)
+  T.eq({first[1], first[2]}, {'autolabor status', 'labormanager mode'}, 'the boot step (BUG-010)')
+  table.remove(first, 1)
+  table.remove(first, 1)
   T.eq(F.runs(W), first)
+end)
+
+---------------------------------------------------------------- BUG-010: the legacy autolabor engine
+local function legacy_world(opts)
+  opts = opts or {}
+  local state = {mode = opts.mode or 'legacy', on = opts.on ~= false, refuse = opts.refuse}
+  local W, B = world{persist = opts.persist, setup = function(W)
+    W.act_result('run', function(cmd, a1, a2)
+      if cmd == 'autolabor' and a1 == 'status' then
+        return true, string.format('Automatically assigns labors to dwarves by writing the labor matrix directly '
+                                   .. '(legacy mode). Use mode monitor or mode modern.\nCurrent state: %d, mode: %s.',
+                                   state.on and 1 or 0, state.mode)
+      end
+      if cmd == 'autolabor' and a1 == 'mode' and a2 then
+        if state.refuse then return false, 'nope' end
+        state.mode = a2
+      end
+      if cmd == 'labormanager' and a1 == 'mode' and a2 == nil then return true, 'Mode: ' .. state.mode end
+      return true, ''
+    end)
+  end}
+  return W, B, state
+end
+
+T.test('BUG-010: autolabor enabled in legacy mode is set to monitor in the boot step, before the queue; class A', function()
+  local W, B, state = legacy_world()
+  local r = F.runs(W)
+  T.eq({r[1], r[2], r[3]}, {'autolabor status', 'autolabor mode monitor', 'autolabor status'}, 'in init, no frame yet')
+  T.eq(state.mode, 'monitor')
+  local ev = W.find_events('AUTOLABOR_LEGACY')
+  T.eq(#ev, 1)
+  T.eq({ev[1].cls, ev[1].d.fixed, ev[1].d.after, ev[1].d.why}, {'A', 1, 'monitor', 'boot'})
+  T.ok(ev[1].msg:find('set to monitor', 1, true), ev[1].msg)
+  drain(W)
+  T.eq(#W.find_events('AUTOLABOR_LEGACY'), 1, 'the apply check finds monitor')
+  T.eq(F.bad_runs(W), {})
+end)
+
+T.test('BUG-010: a disabled legacy plugin is left alone; a refused switch says so (not again within 10 min)', function()
+  local W, B, state = legacy_world{on = false}
+  T.eq(W.find_events('AUTOLABOR_LEGACY'), {})
+  T.eq(state.mode, 'legacy')
+  local W2, B2, state2 = legacy_world{refuse = true}
+  local ev = W2.find_events('AUTOLABOR_LEGACY')
+  T.eq({#ev, ev[1].d.fixed, ev[1].d.after}, {1, 0, 'legacy'})
+  T.ok(ev[1].msg:find('failed', 1, true), ev[1].msg)
+  drain(W2)
+  T.eq(#W2.find_events('AUTOLABOR_LEGACY'), 1, 'the apply check: the same state, not again within 10 min')
+  W2.ms = W2.ms + 600000
+  W2.run(1, {paused = true})
+  W2.K.call('baseline', 'legacy_guard', 'test')
+  T.eq(#W2.find_events('AUTOLABOR_LEGACY'), 2)
+end)
+
+T.test('BUG-010: legacy switched on later (a player, a plugin) is caught by economy\'s daily engine read', function()
+  local W, B, state = legacy_world{mode = 'monitor'}
+  drain(W)
+  T.eq(W.find_events('AUTOLABOR_LEGACY'), {})
+  state.mode = 'legacy'
+  W.load(fresh('economy'))
+  W.run(1300, {skip = 100})
+  for _ = 1, 80 do W.run(1) end
+  T.eq(#W.find_events('AUTOLABOR_LEGACY'), 1)
+  T.eq(state.mode, 'monitor')
+  T.eq(W.find_events('AUTOLABOR_LEGACY')[1].d.why, 'economy daily')
+end)
+
+T.test('BUG-010: parse_engine reads the mode field, not a mode named in the help text', function()
+  local B = fresh('baseline')
+  T.eq({B.parse_engine('Current state: 1, mode: legacy. Use mode monitor or mode modern.')}, {'legacy', true})
+  T.eq({B.parse_engine('Current state: 0, mode: legacy.')}, {'legacy', false})
+  T.eq({B.parse_engine('Mode: modern (labormanager)')}, {'modern', nil})
+  T.eq({B.parse_engine('')}, {nil, nil})
 end)
 
 T.test('readiness loaded: max-pop is left to readiness, wave size stays', function()

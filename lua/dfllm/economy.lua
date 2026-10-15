@@ -2661,6 +2661,9 @@ function T.engine(K, c, r)
   local okm, out = K.act.run('labormanager', 'mode')
   r.cmds = r.cmds + 1
   st.engine = okm and (tostring(out):lower():find('modern', 1, true) and 'modern' or 'other') or nil
+  -- BUG-010: the daily read names the legacy engine (the Run 9 crash engine): baseline's guard switches it off
+  local okp, eng = K.call('baseline', 'engine_of', okm and out or '')
+  if okp and eng == 'legacy' then K.call('baseline', 'legacy_guard', 'economy daily') end
 end
 
 function T.labor_fix(K, c, r)
