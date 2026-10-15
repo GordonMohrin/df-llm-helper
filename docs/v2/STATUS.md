@@ -980,7 +980,7 @@ passed; `lint lua/dfllm` and `lint lua` 0 findings; config ok.
 8. *Fixed in L1: follow wakes SUPERVISE.* **Supervisor alerts reach only `supervise.json`.** There is no wake line (WP10).
 9. *Fixed in L1: `<save>/manifest.json`.* **The `inspect manifest` reply is capped at 8 KB.** follow's automatic audit stops (AUTO_FAIL) once
    the manifest grows past that, at roughly 40 room projects. Proposal: kern writes `<save>/manifest.json`.
-10. **`tempo.lower` cannot slow below the vanilla FPS cap.** timestream ignores targets below the actual
+10. *Fixed 2026-10-15 (FR-51 clock governor, offline): the arbiter drives the vanilla FPS cap by mode (SIEGE/BREACH/DRILL 30, ALERT 100), by the reflex lockdown, and `tempo.lower` lowers it too.* **`tempo.lower` cannot slow below the vanilla FPS cap.** timestream ignores targets below the actual
     FPS (tools/timestream.txt:43). The live prefs have FPS_CAP 500, so tempo.lower is close to a no-op.
 11. *Fixed 2026-10-11 (v1 cleanup): `lua/` holds only `dfllm.lua` and `lua/dfllm/`; `tests/test_lint.py` checks it.* **v1 scripts stay on the DF script path.** After migration, `lua/claude/*` and `lua/pilot_*.lua`
     are reachable through repo A's `lua/`. The hook blocks `claude/*` for the LLM. Remove them in W3.

@@ -25,6 +25,31 @@ Gordon answers each decision once. The answer goes into `config/decisions.yaml` 
 | D-11 | timestream | `accepted`, `rejected` | `accepted` | arbiter, baseline | rejected: arbiter never calls `act.timestream` (game runs at FPS_CAP), baseline does not enable timestream |
 | D-12 | Army share | `<low>/<high>` in % | `15/20` | military, readiness | low share applies at pop ≤55, high share from 60 |
 | D-13 | Automatic beauty pause at high wealth | `no`, `yes` | `no` | runner | yes: beauty projects pause above a wealth threshold (to be defined); without it, wealth is only logged with every threat event |
+| D-14 | `peace_gates`: state of the gate bridges in PEACE (FR-49/55) | `down`, `up` | `down` | gate, siege | up: in PEACE the manifest outer/inner bridges stay up, and so do the lever-linked bridges a lockdown raised; they open only for a window (a caravan on the map, migrants arriving, an inbox `lever` down for that bridge), each while no hostile is visible, and close 600 ticks after it; RECOVERY lowers only the core seal |
+
+### D-14 peace_gates: why the default is `down`
+Run 9 (14.10.2026) lost 39 of 48 citizens to an army that walked in over four lowered bridges, and FR-49/55 ask for
+gates that are closed in PEACE. The default stays `down` (the PEACE row of the DESIGN §3 mode table, "unchanged" like
+every other default here) because closed gates break things the fort lives on, while the danger they guard against
+is now covered at the arrival announcement:
+- **Caravans.** Merchants enter at the map edge and need a wagon path to the depot. DF decides whether wagons come
+  from the depot's accessibility when the caravan enters the map; trade.lua's O1 window opens only after that (it
+  reacts to the caravan on the map), and a pull takes 256-400 ticks until a dwarf has walked to the lever (live L2).
+  With `up`, wagons may stay home and a caravan may never reach a depot behind a raised bridge ("time" failures,
+  FR-20/43). `down` keeps caravan access exactly as it works today.
+- **Migrants** walk from the edge to the fort and would wait outside an `up` gate, unprotected, until the migrant
+  window opens it.
+- **The fort's own work outside:** woodcutters (autochop, wood >= 14), gatherers, hunters, fishers and the depot
+  haulers all use the same entrance; fortcore has one (O1).
+- **What `down` relies on (FR-49/51/52):** an arrival popup or report, INVASION or the first armed hostile in sight
+  raises every lever-linked bridge (no manifest needed), forbids the entrance doors and holds the clock at 30 ticks/s
+  in the same step, before the army reaches the entrance. At 30 ticks/s a 256-400 tick pull is 9-13 s of real time;
+  `status` shows the measured `lever_latency_s`. An ambush that is seen before it is announced still gets the
+  sighting reflex.
+
+Choose `up` for a fort whose wagon path and outdoor work do not run through the gates, or when `lever_latency_s`
+stays above the time an army needs from the map edge to the gate. On a fort without a manifest only the bridges a
+lockdown raised are held up; the kernel does not know which of them a caravan needs.
 
 ## What is never a decision
 These stay blocked whatever the file says (allowlist `blocked`, lint, hook): `digv`/`digvx`/`digl`, `digtype --hidden`, `fastdwarf`, `caravan extend|happy`, `autodump`, `locate-ore`, `prospect`, `showmood`, `reveal`, `createitem`, `dig-now`, `build-now`, `fix/retrieve-units`, `teleport`, `lever --instant` (the lever script is used only through `act.pull`, which queues a pull job), every other armok-tagged tool, inline `lua` and the v1 `claude/*` scripts. Reads of hidden tiles, `water_table` or aquifer flags are lint errors.

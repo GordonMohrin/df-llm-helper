@@ -37,6 +37,7 @@ CHOICES: dict[str, list[str] | str] = {
     "D-11": ["accepted", "rejected"],
     "D-12": r"^\d{1,2}/\d{1,2}$",
     "D-13": ["no", "yes"],
+    "D-14": ["down", "up"],                     # peace_gates: PEACE state of the gate bridges (FR-55)
 }
 
 _DECISION_LINE = re.compile(r"^(D-\d\d)\s*:\s*([^#]*?)\s*(#.*)?$")   # CONTRACTS §9.16
@@ -75,7 +76,7 @@ def decision_errors(path: str | Path | None = None) -> list[str]:
 
 
 def load_decisions(path: str | Path | None = None) -> dict[str, str]:
-    """All 13 decisions; missing or invalid values fall back to the default (off/unchanged)."""
+    """All decisions (D-01 .. D-14); missing or invalid values fall back to the default (off/unchanged)."""
     raw = schema.parse_decisions(_read(Path(path or DECISIONS_PATH)))
     return {did: (raw[did] if did in raw and _valid(did, raw[did]) else dflt)
             for did, dflt in schema.DECISIONS.items()}
@@ -111,6 +112,56 @@ class _Decisions:
 
 
 decisions = _Decisions()
+
+
+# ---------------------------------------------------------------- reflex knobs (CONTRACTS §9.18, FR-51/52/53)
+REFLEX_PATH = REPO / "config" / "reflex.json"
+REFLEX_ACTIONS = ("clock", "gates", "doors", "alert")
+
+
+def reflex_errors(path: str | Path | None = None) -> list[str]:
+    """Problems of config/reflex.json; the kernel falls back to its built-in default for each bad key (fail-open),
+    so these are warnings for `python -m dfpilot.lint --config`. A missing file is fine (all defaults)."""
+    p = Path(path or REFLEX_PATH)
+    if not p.exists():
+        return []
+    name = "config/reflex.json"
+    try:
+        doc = json.loads(_read(p))
+    except ValueError as e:
+        return [f"{name}: not JSON ({e})"]
+    if not isinstance(doc, dict) or doc.get("v") != 2:
+        return [f"{name}: needs an object with v: 2"]
+    errs = []
+
+    def is_int(v, lo, hi):
+        return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
+    for k in doc:
+        if k not in ("v", "about", "clock", "hold_quiet_days", "ack_timeout_s", "defaults"):
+            errs.append(f"{name}: unknown key {k!r}")
+    clock = doc.get("clock", {})
+    if not isinstance(clock, dict):
+        errs.append(f"{name}: clock must be an object")
+    else:
+        for k, v in clock.items():
+            if k not in ("siege_cap", "alert_cap"):
+                errs.append(f"{name}: clock.{k}: unknown key")
+            elif not is_int(v, 10, 1000):
+                errs.append(f"{name}: clock.{k}: int 10..1000 expected, got {v!r}")
+    if "hold_quiet_days" in doc and not is_int(doc["hold_quiet_days"], 0, 30):
+        errs.append(f"{name}: hold_quiet_days: int 0..30 expected")
+    if "ack_timeout_s" in doc and not is_int(doc["ack_timeout_s"], 5, 3600):
+        errs.append(f"{name}: ack_timeout_s: int 5..3600 expected")
+    dflt = doc.get("defaults", {})
+    if not isinstance(dflt, dict):
+        errs.append(f"{name}: defaults must be an object")
+    else:
+        for t, acts in dflt.items():
+            if t not in schema.INTERRUPTS:
+                errs.append(f"{name}: defaults.{t}: not an interrupt type ({', '.join(schema.INTERRUPTS)})")
+            elif not isinstance(acts, list) or any(a not in REFLEX_ACTIONS for a in acts):
+                errs.append(f"{name}: defaults.{t}: a list of {', '.join(REFLEX_ACTIONS)} expected")
+    return errs
 
 
 # ---------------------------------------------------------------- allowlist (CONTRACTS §9.14)

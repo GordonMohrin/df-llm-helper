@@ -292,6 +292,7 @@ def test_contract_lua_matches_schema(lua_dump):
     assert d["act"] == S.ACT
     assert [tuple(m) for m in d["modules"]] == S.MODULES
     assert d["persist"] == {k: list(v) for k, v in S.PERSIST.items()}
+    assert d["interrupts"] == sorted(S.INTERRUPTS)
 
 
 @needs_lua

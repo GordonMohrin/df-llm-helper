@@ -39,8 +39,10 @@ def test_status_fixture(save, capsys):
     out = capsys.readouterr().out
     assert est_tokens(out) <= brief.STATUS_TOKENS
     for frag in ("region7 y3 sum d19 PEACE(29d) P3 462t/s run", "R1 fail:traps<30", "drink 150d!", "water ok",
-                 "bridges B1 down B2 down O1 down", "BLOCKED:no_material", "slow:runner", "last A #8804"):
+                 "bridges B1 down B2 down O1 down", "BLOCKED:no_material", "slow:runner", "last A #8804",
+                 "clock: free (cap 500, timestream 500)", "lever_latency_s 11 (297 t)"):
         assert frag in out, frag
+    assert out.startswith("DEFCON 5 | region7"), out.splitlines()[0]     # FR-53: line 1 starts with DEFCON
 
 
 def test_status_no_state(save, capsys):
@@ -135,9 +137,9 @@ def test_brief_budget_with_huge_history(save):
         evs.append(ev(8813 + i, t, f"event {i} " + "ü" * 120, d, tick=3 * 403200 + 123000 + i))
     append_events(save, evs)
     text = brief.brief_text(save)
-    assert est_tokens(text) <= brief.BRIEF_TOKENS and text.startswith("# brief region7")
+    assert est_tokens(text) <= brief.BRIEF_TOKENS and text.startswith("# brief DEFCON 5 | region7")
     small = brief.brief_text(save, budget=200)
-    assert est_tokens(small) <= 200 and small.startswith("# brief region7")
+    assert est_tokens(small) <= 200 and small.startswith("# brief DEFCON 5 | region7")
 
 
 def test_brief_no_plan(save):
@@ -149,7 +151,7 @@ def test_brief_no_plan(save):
 def test_events_cli(save, capsys):
     assert run(save, "events", "--cls", "A") == 0
     lines = capsys.readouterr().out.strip().splitlines()
-    assert [ln.split()[0] for ln in lines] == ["#8659", "#8773", "#8795", "#8804"]
+    assert [ln.split()[0] for ln in lines] == ["#8659", "#8735", "#8736", "#8773", "#8795", "#8804"]
     assert run(save, "events", "--since", "8800", "--type", "CMD,ACT_FAIL", "--json") == 0
     docs = [json.loads(x) for x in capsys.readouterr().out.strip().splitlines()]
     assert [d["type"] for d in docs] == ["ACT_FAIL"] and all(schema.validate("event", d) == [] for d in docs)
@@ -190,3 +192,54 @@ def test_main_without_save(tmp_path, capsys):
         assert "no save" in capsys.readouterr().out
     finally:
         reset_paths()
+
+
+# ---------------------------------------------------------------- FR-51/53/55/58: clock, lockdown, interrupts
+def test_status_shows_the_clock_clamp_defcon_lever_latency_and_eta(save):
+    st = json.loads((save / "state.b.json").read_text("utf-8"))
+    st["mode"] = "SIEGE"
+    st["clock"] = {"cap": 30, "orig": 500, "ts": -1, "held": 1, "why": "siege"}
+    st["owners"]["tempo"] = "clock"
+    st["alarm"] = {"defcon": 2, "unacked": 1, "last": 8830, "ack": 8820, "lock": 1, "why": "arrival:siege", "eta": 420}
+    st["lever"] = {"lat_s": -1, "lat_t": -1, "pend": 2, "wait_s": 45}
+    st["t"]["tps"] = 30
+    assert schema.validate("state", st) == []
+    (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
+    out = brief.status_text(save)
+    line1 = out.splitlines()[0]
+    assert line1.startswith("DEFCON 2 | region7") and "SIEGE" in line1
+    for frag in ("clock: held 30 t/s, reason siege", "lockdown arrival:siege",
+                 "1 interrupts unacked (last #8830, acked #8820): dfllm ack", "eta ~420 t (~14 s)",
+                 "lever_latency_s -, 2 pulls pending 45 s"):
+        assert frag in out, frag
+    assert est_tokens(out) <= brief.STATUS_TOKENS
+
+
+def test_status_clock_lowered_by_the_mode_alone(save):
+    st = json.loads((save / "state.b.json").read_text("utf-8"))
+    st["mode"] = "ALERT"
+    st["clock"] = {"cap": 100, "orig": 500, "ts": -1, "held": 0, "why": "alert"}
+    (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
+    assert "clock: held 100 t/s, reason alert" in brief.status_text(save)
+
+
+def test_status_without_the_reflex_module_says_defcon_unknown(save):
+    st = json.loads((save / "state.b.json").read_text("utf-8"))
+    for k in ("alarm", "clock", "lever"):
+        del st[k]
+    (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
+    out = brief.status_text(save)
+    assert out.startswith("DEFCON ? | region7") and "clock:" not in out
+
+
+def test_state_rejects_bad_alarm_clock_lever():
+    st = json.loads((make_runtime.__globals__["RUNTIME"] / "region7" / "state.b.json").read_text("utf-8"))
+    for key, bad, needle in (("alarm", {"defcon": 0, "unacked": 0, "last": 0, "ack": 0, "lock": 0, "why": ""}, "0 < 1"),
+                             ("clock", {"cap": 30, "orig": 500, "ts": -2, "held": 0, "why": ""}, "-2 < -1"),
+                             ("lever", {"lat_s": -1, "lat_t": -1, "pend": -1, "wait_s": 0}, "-1 < 0"),
+                             ("owners", {"pause": None, "tempo": "turbo"}, "not in")):
+        d = dict(st, **{key: bad})
+        errs = schema.validate("state", d)
+        assert any(needle in e for e in errs), (key, errs)
+        pruned, _ = schema.prune_state(d)
+        assert pruned is not None and key not in pruned

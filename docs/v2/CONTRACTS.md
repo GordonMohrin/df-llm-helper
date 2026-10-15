@@ -131,7 +131,8 @@ return M
 | sense | WP5 | yes | 10 ticks (internally 10/25/50 hostile scan, 100 citizens) | fills `K.census.u`, `K.census.h` |
 | threat | WP5 | yes | 25 | arming on INVASION/reports, `threat` state |
 | siege | WP5 | yes | 25 | mode FSM, civ alert, posture, SIEGE_* events |
-| gate | WP5 | yes | 25 in SIEGE/BREACH/DRILL, else 600 | bridges, single pending pull |
+| gate | WP5 | yes | 25 in SIEGE/BREACH/DRILL, else 600 | bridges, single pending pull; lockdown of every lever-linked bridge, peace gates (D-14), lever latency (FR-49/55) |
+| reflex | WP5 | yes | 10 | arrival lockdown and interrupt channel (FR-36/49/51/52/53/58): §7, §9.18, §12 |
 | military | WP6 | | 3,600 | squads, uniforms, posture, KPIs |
 | drill | WP6 | | 600 | drill runs and results |
 | readiness | WP6 | | 33,600 + on audit/stage | levels R0-R3, pop cap |
@@ -170,7 +171,7 @@ Kernel files that are not modules: `kern.lua, io.lua, persist.lua, act.lua` (WP1
 | `K.act` | table | the act API (§5). The calling module is implicit (kern knows who runs). |
 | `K.persist` | `.get(key) -> table|nil`, `.set(key, value)`, `.touch(key)` | Site data (§10). `get` returns the cached decoded table; mutate it and call `touch(key)`, or `set` a new table (`nil` deletes). kern writes dirty keys at most every 10 s, on mode change and before unload. Keys are contract names (`'manifest'`, `'m.runner'`, `'bp.c123'`), not DFHack keys. |
 | `K.plan` | table | Active plan (§9.7) with defaults filled; never nil (defaults when no plan). Replaced on `plan.reload`, so read `K.plan` each time. `K.plan.phases` holds the phase list (§9.9). |
-| `K.cfg` | table | `{decisions={['D-01']='A',...}, allowlist=<§9.14>, baseline=<config/baseline.json>, paths={df, runtime, save, repo}, save=<folder>, dev=bool, acceptance=bool}` |
+| `K.cfg` | table | `{decisions={['D-01']='A',...}, allowlist=<§9.14>, baseline=<config/baseline.json>, reflex=<config/reflex.json §9.18, {v=2} when missing>, paths={df, runtime, save, repo}, save=<folder>, dev=bool, acceptance=bool}` |
 | `K.log` | `(level, fmt, ...)` | level `'debug'|'info'|'warn'|'error'`; to `kern.log`; `error` also `dfhack.printerr`. |
 | `K.call` | `(module, fn, ...) -> ok, ...` | Calls `M[fn](K, ...)` of another module in pcall. Faults count against the callee. Returns `true` followed by the callee's return values, or `false, 'no module'|'disabled'|'no function <fn>'|err`. |
 | `K.view()` | `-> doc` | the last composed state document (§9.3) as a Lua table; how modules read other modules' published KPIs |
@@ -196,7 +197,7 @@ Every function returns `ok, res_or_err`, never raises, writes one line to `comma
 |---|---|---|---|
 | `set_paused(on)` | bool | pause button (`df.global.pause_state`) | arbiter |
 | `timestream(fps)` | int, −1 = off | `timestream set fps N` | arbiter |
-| `setting(name, value)` → `ok, old` | `gfps` int, `fps_cap` int (vanilla FPS cap; supply brake), `autosave` enum name [S8], `visitor_cap` int, `population_cap` int (restore only), `weather` bool (D-07) | vanilla Settings screen | arbiter |
+| `setting(name, value)` → `ok, old` | `gfps` int, `fps_cap` int (vanilla FPS cap; the clock governor: mode caps, the reflex clamp, supply brake, `tempo.lower`), `autosave` enum name [S8], `visitor_cap` int, `population_cap` int (restore only), `weather` bool (D-07) | vanilla Settings screen | arbiter |
 | `overlay(name, on)` → `ok, old` | string, bool | `overlay enable/disable <name>` | arbiter |
 | `dismiss_popup(kind)` | whitelisted kind string | close the popup | arbiter |
 | `civ_alert(on)` | bool | gui/civ-alert `sound_alarm()`/`clear_alarm()` (civ-alert.lua:27,36) | siege |
@@ -209,6 +210,7 @@ Every function returns `ok, res_or_err`, never raises, writes one line to `comma
 | `squad_uniform(squad_id, spec)` → `ok, positions` | `{mode='replace'|'over', items={{cat, type, subtype?, mat='metal'|'leather'|'any', choice?}}, positions?, ammo?}` (live L2) | squads screen > assign uniform: one `squad_uniform_spec` per item and position (material class Armor/Leather/none, indiv choice), flags replace_clothing/exact_matches, squad ammo spec; equipment update | military |
 | `squad_unequip(squad_id, positions?, cats?)` → `ok, items` | int, 0-based positions (default all), uniform categories (default all) (live L6) | squads screen > equip > remove: the positions' uniform specs (of `cats`) are deleted and their assigned items released (`equipment.assigned_items`; without `cats` also the quiver/backpack/flask slots, as uniform-unstick.lua remove_item_from_position), equipment update; military calls it before it releases soldiers (targets 0 by the tools rule or a phase before P2) and for an individual-choice weapon spec that could take the civilians' last axe or picks | military |
 | `pull(lever_building_id)` → `ok, job_id` | int | `reqscript('lever').leverPullJob(lever, true)` (lever.lua:4, priority) | gate |
+| `door_forbid(building_id, on)` → `ok, old` | int, bool (FR-49/52) | door sheet forbid ("locked") toggle: `door_flags.forbidden`; doors only; `old` lets the caller undo only its own change | reflex |
 | `cancel_own_lever_job(job_id)` | int, only ids returned by `pull` this session | cancel the queued pull | gate |
 | `link_lever(lever_id, target_id)` → `ok, job_id|'linked'` | ints (live L2, [S3]) | lever sheet "link up": one `LinkBuildingToTrigger` job on the lever (building holder ref = lever, trigger target ref = target) with two mechanisms attached (roles LinkToTrigger/LinkToTarget), chosen like the screen: free, reachable (walk groups), nearest; refused while a link job is pending or either building is unbuilt | gate |
 | `burrow_units(name, unit_ids)` → `ok, n` | burrow name, array of ints (live L3, [S3] fallback) | burrows screen > units: the burrow's unit list becomes exactly these living citizens (`dfhack.burrows.setAssignedUnit`, Lua API.txt:2424; the screen's per-unit toggle, sort/unitselector.lua:122); gate's lever pullers in the `dfllm-levers*` rooms | gate |
@@ -300,6 +302,14 @@ Only these are public across WPs; anything else is module-internal. "Returns" ar
 | `gate.rooms(mode)` | `[burrow name]` | the lever-puller rooms (`dfllm-levers*` manifest burrows) siege adds to the alert list in that mode; in BREACH only a room whose bridge has no linked lever inside the refuge (iter2) |
 | `gate.pullers(bridge)` | `[unit id]` | citizens assigned to that bridge's lever room (iter2) |
 | `snapshot.reach(a, b)` | `bool` | walk groups (`dfhack.maps.canWalkBetween`) between two known positions `{x,y,z}`; bad args or a fault answer `true` (iter2; care's mood reach) |
+| `snapshot.outside_near(pts, r)` | `[1|0|-1]` | per position `{x,y,z}`: 1 when a revealed tile within `r` (0-3, Chebyshev xy, same z) is open sky (`designation.outside`), 0 none, −1 bad position; hidden tiles never count (FR-49/52: entrance doors, roofed tiles) |
+| `reflex.holding(what?)` | `why` or `nil` | why a lockdown holds `what` (`clock`, `gates`, `doors`, `alert`; nil = any). The arbiter, gate and siege ask it on every pass (level-triggered) |
+| `reflex.announce(kind, text, src)` | `ok, summary` | arbiter hands over a threat popup (`siege`, `ambush`, `snatcher`, `beast`) or `no_depot`; the reflexes are issued before it returns (FR-36) |
+| `arbiter.hold()` | `cap, why` | apply the clock now (the reflex changed its lockdown); the FPS cap driven and why it is lowered (`''` free) |
+| `gate.lockdown()` | `{want, up, pend, names}` | run the gate pass now with a fresh lever scan; bridges wanted up, already up, pulls pending |
+| `gate.sealed()` | `bool` | every gate bridge (manifest outer/inner, else the unmanaged ones in hand) is up; siege's `sealed_ticks` without fortcore |
+| `gate.points()` | `[{x,y,z}]` | entrance points for the arrival ETA: manifest outer bridge centres, else the unmanaged bridges |
+| `siege.hold_alert()` | `'on <burrow>'|'off'|'pending <burrow>'|'no burrow <name>'` | apply the civ alert now (the reflex changed its lockdown) |
 | `economy.need(key, n, who, days?)` | `ok, route` | a short-term need of a supply key (wood, rock, bone, shell, leather, cloth, thread, bars, gems, fuel, hides): target and floor >= n for `days`; `ok=false` = no production route; n = 0 clears (iter2) |
 | `economy.reserve(key, n, who)` | `ok, floor` | a standing floor economy's own consumers never go below; floor = max of config, holders and needs; n = 0 drops the holder (iter2; care pushes the mood reserve) |
 | `economy.supply()` | `{key = {have, held, want, floor, route}}` | read-only (iter2) |
@@ -308,7 +318,7 @@ Only these are public across WPs; anything else is module-internal. "Returns" ar
 | `snapshot.liquids(x0, y0, x1, y1, z, min?)` | `[{x, y, flow}]` or `nil, err` | revealed non-magma water tiles of one level rect with depth ≥ `min` (default 1); ≤ 4,096 tiles read, ≤ 512 returned per call; hidden tiles never (FR-47, water's scan) |
 | `care.inspect(what, key?)` / `water.inspect(what, key?)` | `ok, msg, data` | kern's `inspect` routes `what=tombs` to care and `what=water_sources` to water (FR-27, FR-47); data ≤ 8 KB |
 
-Mode-driven duties (no call needed): arbiter applies tempo per mode in `on.MODE`; siege applies civ alert, alert burrows and posture; gate recomputes desired bridges; runner freezes; readiness freezes growth outside PEACE.
+Mode-driven duties (no call needed): arbiter applies tempo and the FPS cap per mode in `on.MODE`; siege applies civ alert, alert burrows and posture; gate recomputes desired bridges; runner freezes; readiness freezes growth outside PEACE.
 
 ---
 
@@ -328,6 +338,7 @@ Mode-driven duties (no call needed): arbiter applies tempo per mode in `on.MODE`
 | `<save>/plan.json` | Python (`plan apply`) | §9.7; kern reads on `plan.reload` |
 | `<save>/bp/<id>.json` | Python | §9.8 blueprint project files; the runner reads one on `bp.place`, and plan builds when their season is due, **at most one bp file per frame**, and copies it into persist once |
 | `<save>/snap/<id>.json` | kern (snapshot) | §9.10; Python prunes old ones |
+| `<save>/alarm.txt` | reflex | FR-53 interrupt channel, rewritten in place in the step an interrupt is emitted and on every ack or DEFCON change: line 1 `DEFCON <n> | mode <MODE> | unacked <k>[ (oldest <s> s)] | last <n> | ack <n> | lockdown <why (acts)|off>[ | eta ~<t> t]`, then one line per recent interrupt (≤ 20, oldest first) `n \t wall \t tick \t TYPE \t acked|unacked|default \t msg`; read by `dfllm wait`, `dfllm ack` and Monitors |
 | `<save>/manifest.json` | kern | §11 fort manifest, rewritten in place at boot and whenever persist `manifest` is flushed (live L1); Python reads it instead of `inspect manifest` (no 8 KB limit) |
 | `<save>/perf.csv` | kern (perf) | §9.11 |
 | `<save>/commands.log`, `kern.log` | kern | §9.12; rotated at 1 MB to `.1` |
@@ -371,10 +382,13 @@ One JSON line, rewritten in place: `{v:2, wall:int, frame:int, tick:int, paused:
 | `proj` | `[[id:str, stage:str, pct:0-100, blocked:str]]` ≤ 8 | runner | `blocked` = `""` or a reason code |
 | `bridges` | `{<bridge>: 'up'|'down'|'moving'|'unknown'}` | gate | |
 | `k` | `{ms_s, gap_max_ms, slow:[module], faults, disabled?:[module], ms_max?}` | kern | kernel ms per real second (10 s window), max frame gap (ms), demoted modules, fault count |
-| `owners` | `{pause: null|'inbox'|'gordon'|'popup'|'df', tempo: 'mode'|'inbox'|'brake'}` | arbiter | who holds pause/tempo; `brake` = the supply brake (P0 or `economy.alarm()`) |
+| `owners` | `{pause: null|'inbox'|'gordon'|'popup'|'df', tempo: 'mode'|'inbox'|'brake'|'clock'}` | arbiter | who holds pause/tempo; `brake` = the supply brake (P0 or `economy.alarm()`); `clock` = the reflex clamp (FR-51) |
 | `ev` | int | kern | last event number written |
 | `mil?` | `{squads, soldiers, worn, cv, metal_pct, on_station}` | military | |
 | `trade?` | `{caravan:flag, ratio:int, done:int}` | trade | ratio ×100 (150 = 1.5) |
+| `clock?` | `{cap:int, orig:int, ts:int −1..1000, held:flag, why:str ≤24}` | arbiter | FR-51: vanilla FPS cap driven now and the captured original; desired timestream fps (−1 off); `held` = the reflex clamp; `why` = what lowers the cap (`siege`, `alert`, `brake`, `inbox`, the clamp's why; `''` free) |
+| `alarm?` | `{defcon:1-5, unacked:int, last:int, ack:int, lock:flag, why:str ≤24, eta?:int}` | reflex | FR-53: DEFCON 1 (BREACH, hostile inside, unacked INTRUDER) .. 5 (PEACE, nothing open); unacked interrupts; newest interrupt n; acked n; lockdown held and why; FR-58 ticks to first contact (−1 unknown) |
+| `lever?` | `{lat_s:int, lat_t:int, pend:int, wait_s:int}` | gate | FR-55: last lever latency (our queued pull → bridge in the wanted state) in real s and ticks (−1 never); own pulls pending and the oldest one's wait (s) |
 
 Module `state(K)` returns partial docs; kern deep-merges them (two levels) into the document. Leaf owners are `contract.STATE_OWNERS`; a module returning a key it does not own is a contract bug (k_mock raises). A published object is complete (all its required keys); write `json.null` for null (a nil field is simply absent, e.g. `owners.pause`) and `json.object{}` for an empty object (`bridges` with no bridge), because a plain empty table encodes as `[]`.
 
@@ -522,7 +536,7 @@ wall,tick,mode,tps,pop,units,items,ms_s,gap_max_ms,gaps3,mods
 Tab-separated text lines. `commands.log`: `wall \t tick \t origin \t what \t args_json \t result` where `origin` = module name or `inbox:<id>:<by>`, `what` = `act.<fn>` or `verb:<verb>`, `result` = `ok` or `ERR <msg>`. `kern.log`: `wall \t tick \t level \t module \t msg`. Only kern writes these; Python logs to its own `cli.log`.
 
 ### 9.13 `restore.json` (kind `restore`)
-`{v:2, save:str, wall:int, active:flag, orig:{gfps?:int, autosave?:str, visitor_cap?:int, population_cap?:int, timestream_fps?:int, weather?:bool, fps_cap?:int, overlays?:{<name>:bool}}}` (`fps_cap` = the vanilla FPS cap, `enabler.fps`, which the supply brake lowers). Written by arbiter **before** its first change at boot (`active:1`), set `active:0` after the restore at unload. At the next boot of *any* save, `active:1` means a crash: restore first. Mirrored in persist `restore`.
+`{v:2, save:str, wall:int, active:flag, orig:{gfps?:int, autosave?:str, visitor_cap?:int, population_cap?:int, timestream_fps?:int, weather?:bool, fps_cap?:int, overlays?:{<name>:bool}}}` (`fps_cap` = the vanilla FPS cap, `enabler.fps`, which the clock governor lowers: mode caps, the reflex clamp, the supply brake, `tempo.lower`; the arbiter only ever lowers it, so the crash heal restores any live cap below `orig.fps_cap`). Written by arbiter **before** its first change at boot (`active:1`), set `active:0` after the restore at unload. At the next boot of *any* save, `active:1` means a crash: restore first. Mirrored in persist `restore`.
 <!-- ex:restore -->
 ```json
 {"v":2,"save":"region3","wall":1791676800,"active":1,"orig":{"gfps":250,"autosave":"SEASONAL","visitor_cap":300,"population_cap":75,"timestream_fps":-1,"overlays":{"hotkeys.menu":true}}}
@@ -552,10 +566,13 @@ Flat lines `D-NN: value  # comment`; values are bare words or integers, no nesti
 4. match `^(D-[0-9][0-9])[ \t]*:[ \t]*([^#]*?)[ \t]*(#.*)?$` (ASCII digits only);
 5. skip lines that do not match or whose value is empty; a later line for the same id wins.
 
-So an indented `  D-07: visitor30` counts, a commented `#   D-07: …` does not. Shared vectors (BOM, indentation, tabs, CRLF, empty value, inline `#`, duplicates, junk): `fixtures/v2/decisions_vectors.json`, run against both readers by `tests/test_schema.py`. Missing ids take the defaults of `contract.DECISIONS` (DESIGN §15): D-01 `A`, D-02 `unchanged`, D-03 `rule`, D-04 `off`, D-05 `off`, D-06 `off`, D-07 `unchanged`, D-08 `dropped`, D-09 `no`, D-10 `off`, D-11 `accepted`, D-12 `15/20`, D-13 `no`.
+So an indented `  D-07: visitor30` counts, a commented `#   D-07: …` does not. Shared vectors (BOM, indentation, tabs, CRLF, empty value, inline `#`, duplicates, junk): `fixtures/v2/decisions_vectors.json`, run against both readers by `tests/test_schema.py`. Missing ids take the defaults of `contract.DECISIONS` (DESIGN §15): D-01 `A`, D-02 `unchanged`, D-03 `rule`, D-04 `off`, D-05 `off`, D-06 `off`, D-07 `unchanged`, D-08 `dropped`, D-09 `no`, D-10 `off`, D-11 `accepted`, D-12 `15/20`, D-13 `no`, D-14 `down` (peace_gates, FR-55).
 
 ### 9.17 `config/baseline.json` (WP8)
 A JSON object read by kern into `K.cfg.baseline`; its keys are WP8-internal (`v:2` required).
+
+### 9.18 `config/reflex.json` (FR-51/52/53)
+A JSON object read by kern into `K.cfg.reflex` (`{v:2}` when missing or invalid; every bad key falls back to its built-in default, fail-open; `python -m dfpilot.lint --config` reports bad keys): `{v:2, about?:str, clock?:{siege_cap?:int 10-1000 (30), alert_cap?:int 10-1000 (100)}, hold_quiet_days?:int 0-30 (2), ack_timeout_s?:int 5-3600 (60), defaults?:{<interrupt type>:[action]}}`. Actions: `clock` (timestream off, FPS cap at `siege_cap`), `gates` (every linked drawbridge up), `doors` (entrance doors forbidden), `alert` (civ alert on Kern+, once the gates are up, after 450 ticks at the latest, at once when no gate is pending or a hostile is ≤ 30 tiles from a citizen outside Kern+: the alert keeps civilians away from levers outside its burrow, live L3). `defaults.ARRIVAL` is also the set issued at once on an arrival; the other entries apply when that interrupt stands unacked for `ack_timeout_s` (defaults: INTRUDER all four, PREDATOR clock+alert, DEATHS_3PLUS clock, NO_DEPOT none).
 
 ---
 
@@ -631,9 +648,15 @@ The fort-specific geometry, written by templates (bp `manifest` fragments) and m
 | GHOSTS | A | care | ghosts, corpses, old, units (int[]), causes (str[] `unit:cause+cause`) — FR-04/26: a citizen ghost exists or a citizen body lies unburied longer than `corpse_old`; again when the set grows, else weekly |
 | HOSPITAL_DRY | A | water | **why** (str), patients, zone, near, recipe (str) — FR-31/34: a hospital location (or a pending hospital project with no accepted water at all) without a well over water or a Water Source zone on water ≥ 4/7 within `near` tiles; at the start of the dry episode, then weekly with patients, else monthly |
 | MOOD_RISK | A | care | **unit**, **why** (str: missing, thirst, hunger), kind (str), missing (str[] classes), thirst, hunger — FR-44: a strange mood starts without its materials, or the moody dwarf passes the thirst/hunger line (every 2 days); the mood job is never cancelled |
-| SIEGE_START | B | siege | vis, inv, great, why (str) |
+| SIEGE_START | A | siege | vis, inv, great, why (str) — class A since Run 9: it wakes at once |
+| INVASION | A | threat | id — class A since Run 9 |
+| ARRIVAL | A | any (reflex; arbiter as fallback) | **kind** (str: siege, ambush, snatcher, beast, invasion, invader), src (str: popup, report, invasion, sighting), text (str), raised, doors, alert (str), clock, out, eta — an arrival and the lockdown issued for it (interrupt) |
+| INTRUDER | A | reflex | n, id, pos (int[3]), k (str) — a visible invader, undead or great danger on the citizens' walkable group (interrupt) |
+| PREDATOR | A | reflex | n, id, pos (int[3]) — a visible wild danger on a roofed tile of that group (interrupt) |
+| NO_DEPOT | A | reflex | text (str) — merchants need a trade depot (interrupt) |
+| LOCKDOWN | A | reflex | **why** (str: ack_timeout), n, type (str), raised, doors, alert (str), clock — the kernel applied an interrupt's lockdown default itself |
 | ALERT_START / ALERT_END | B | siege | vis |
-| INVASION | B | threat | id |
+| LOCKDOWN_END | B | reflex | why (str), ticks, doors — threat 0 for `hold_quiet_days`: doors opened, clock and alert back to the mode |
 | MOOD_START / MOOD_NEED / MOOD_END | B | care | unit, kind (str), need (str), ok (flag) |
 | CARAVAN | B | trade | phase (str: arrive, traded, left), ratio, civ (str) |
 | MIGRANTS | B | economy | n |
@@ -669,6 +692,8 @@ The fort-specific geometry, written by templates (bp `manifest` fragments) and m
 
 Class semantics (DESIGN §6): **A** wakes the LLM (follow rate limits apply), **B** goes into the digest/brief, **C** is log only (follow still reads `SNAPSHOT_READY` to run the audit).
 
+**Interrupts** (FR-53, `contract.INTERRUPTS` / `schema.INTERRUPTS`): ARRIVAL, INTRUDER, PREDATOR, DEATHS_3PLUS, NO_DEPOT. The reflex module writes each to `<save>/alarm.txt` in the step it is emitted; `dfllm wait --until-interrupt` returns on it; `ack` acknowledges it. Unacked for `ack_timeout_s` (real seconds, §9.18), the kernel applies the type's default and emits LOCKDOWN. `follow` wakes at once (no merge wait, no hourly limit, one per type per 60 s) on BREACH, SIEGE_START, INVASION, LOCKDOWN and every interrupt.
+
 ---
 
 ## 13. Inbox verbs (closed set)
@@ -683,7 +708,7 @@ Python (`dfllm cmd`, `plan apply`, follow) validates every inbox document with `
 | `snapshot` | snapshot | any | `{bbox?:bbox, purpose?:'audit'|'sites'|'debug'}` (snap id = cmd id) | `{id}` |
 | `audit` | readiness | any; **by `follow`/`test` only** (`VERB_BY`) | `{snap:id, ok:bool, fails:[str], min_traps:int, bypass:bool, refuge_sep:bool, civ_sep:bool, caverns:bool}` = `bp.topo.audit` result. readiness accepts it only if `snap` names a snapshot that **this boot** exported with purpose `audit` (it records `EV:SNAPSHOT_READY`) and that no earlier `audit` used; otherwise `ok:false, msg:'unknown snap'` | `{lvl}` |
 | `popcap.lower` | readiness | any | `{cap:int 0-250}` (lowers the ceiling only) | `{cap}` |
-| `tempo.lower` | arbiter | any | `{fps:int 10-1000, ttl_s:int 1-3600}` (never above the mode value) | |
+| `tempo.lower` | arbiter | any | `{fps:int 10-1000, ttl_s:int 1-3600}` (never above the mode value; lowers the vanilla FPS cap too, FR-51) | |
 | `pause` | arbiter | any | `{ttl_s:int 1-600, why?:str}` | |
 | `unpause` | arbiter | any | `{}`: releases **only the inbox hold** (`owners.pause == 'inbox'`). A pause owned by `gordon`, `df` or `popup` is never released through the inbox, whatever `by` says; Gordon unpauses in the game | |
 | `trade.want` | trade | any | `{want?:[token], sell?:[token]}` | |
@@ -693,6 +718,7 @@ Python (`dfllm cmd`, `plan apply`, follow) validates every inbox document with `
 | `selftest` | selftest | any | `{suite?:'quick'|'full'}` | `{pass, fail}` |
 | `module.enable` | kern | any | `{module:str}` (module name, §1.1) | `{module}`; re-enables a backed-off module now and resets its backoff doubling (§3.3.5); `ok:false` for an unknown module |
 | `tombs.repair` | care | any | `{}` (FR-27): the next care run repairs the tombs in any mode (also with `tomb_repair` off) and gives every unburied citizen body a fresh `entomb` try | `{queued}` |
+| `ack` | reflex | any | `{n?:int ≥ 0}` (default: the newest interrupt) | `{n, open, defcon}`; the operator saw the interrupts up to `n`; their ack-timeout default no longer applies (FR-53) |
 
 There is no arbitrary Lua.
 
@@ -731,6 +757,7 @@ There is no arbitrary Lua.
 | `lint` (WP4) | `lua(paths) -> [{file, line, rule, msg}]`, `cmd(text) -> (allowed: bool, reason: str)` (includes the §13 trust rules) |
 | `fairplay` (WP4) | `get_decision(id) -> str` (reads `config/decisions.yaml`, defaults from `schema.DECISIONS`) |
 | `supervise` (WP10) | `once(now=None) -> dict` (liveness from heartbeat mtime > 120 s, DEGRADED rule, restart only in PEACE right after an autosave) |
+| `alarm` (FR-53) | `read_alarm(save_dir) -> dict|None` (`<save>/alarm.txt`), `wait_interrupt(save_dir, since=None, timeout=15) -> (items, alarm)`; CLI `dfllm wait --until-interrupt [--timeout S] [--since N]` (exit 0 interrupt, 1 timeout), `dfllm ack [--n N]` |
 
 ---
 
@@ -741,7 +768,7 @@ There is no arbitrary Lua.
 
 | Call | Effect |
 |---|---|
-| `kmock.new{year=3, ytick=0, ms=0, ms_per_frame=16, mode='PEACE', units={...}, persist={<contract key>=table}, plan=, phases=, cfg={decisions=, allowlist=, baseline=}, census={u=,h=,i=}, marker=true, strict=true, globals=true}` | `strict=true` raises on any contract violation or module error (with the module name), including any state-schema error; `strict=false` drops invalid optional state keys like kern and logs it; `marker=false` starts without the site marker |
+| `kmock.new{year=3, ytick=0, ms=0, ms_per_frame=16, mode='PEACE', units={...}, persist={<contract key>=table}, plan=, phases=, cfg={decisions=, allowlist=, baseline=}, census={u=,h=,i=}, marker=true, strict=true, globals=true}` (`cfg` also takes `reflex=`, §9.18) | `strict=true` raises on any contract violation or module error (with the module name), including any state-schema error; `strict=false` drops invalid optional state keys like kern and logs it; `marker=false` starts without the site marker |
 | unit spec | `{id, pos={x,y,z}, citizen, resident, insane, adult=true, baby, visible=true, hidden, caged, invader, danger, great, megabeast, fb, titan, demon, undead, dead, offmap, tame, merchant, visitor, animal, squad=-1, stress=3, race, name}`; `dfhack.units.*` predicates read the spec; `u.pos`, `u.flags1.caged/inactive`, `u.flags2.killed` are read-only views of it. `insane` (a berserk or raving citizen): `isCitizen(u)`/`isResident(u)` false but true with `include_insane`, `isSane` false, `isCrazed` and `isDanger` true; `getCitizens(exclude_residents, include_insane)` follows Lua API.txt:1696 |
 | `W.load(M)` | register a module (its name must be in contract.MODULES or start with `test_`), call `init(K)`; dispatch order = contract order |
 | `W.frame(dt, paused)` | one frame of `dt` ticks (default 1): calendar (SEASON/YEAR_REVIEW), queued eventful events, events emitted last frame (`EV:`), due modules, state compose (every 2 s of mock ms or after `K.flush`) |
@@ -793,6 +820,7 @@ Each WP may add its own `tests/lua/test_<module>.lua` and `tests/test_<module>.p
 9. (review round 1) DESIGN §4 "three faults in 10 min disable that module" becomes a backoff with automatic re-enable and the `module.enable` verb; critical modules are retried after 30 s.
 10. (review round 1) `by:'gordon'` grants nothing in the inbox (DESIGN §3 "A pause by Gordon is honoured" holds: the inbox cannot release it); `audit` is accepted only from `follow` with a snapshot this boot exported.
 11. (review round 1) Blueprint documents are capped at 1,000 cells and 24 KB; `bp.<id>` is persisted once and never re-encoded.
+12. (Run 9, FR-51) DESIGN §3/§16 keep FPS_CAP 250 in SIEGE ("no slow motion"). With the live prefs at 500 that let DF run ~400 ticks/s while 39 of 48 citizens died in 76 s of real time, so SIEGE/BREACH/DRILL now cap the vanilla FPS at `siege_cap` (30) and ALERT at `alert_cap` (100), and a reflex lockdown holds the siege cap from the arrival announcement on (§9.18). DESIGN §14's "SIEGE/DRILL ≥100 ticks/s" KPI becomes "≥ siege_cap".
 
 ## 19. Changes after the freeze (review round 1, 2026-10-10)
 Each item names the WP that must adapt its code; WP0 changed the contract, `contract.lua`, `schema.py` and k_mock.
@@ -808,6 +836,7 @@ Each item names the WP that must adapt its code; WP0 changed the contract, `cont
 | R7 | bp caps 1,000 cells / 24 KB (`schema.validate('bp')`); `bp.<id>` written once; at most one bp decode per frame | §8, §9.8, §10 | **WP3** emitters stay under the caps; **WP7** runner reads ≤ 1 bp per frame (today `plan_loads = 4`); **WP2** gets the caps through `schema.validate` |
 | R8 | No permanent disable: backoff (critical 30 s, others 10 min, doubling), auto re-enable, `module.enable` verb, `KERN_FAULT.d.backoff_s` | §3.3.5, §12, §13 | **WP1** kern fault/backoff + `module.enable` handler |
 | L2 | `act.link_lever` (gate links built, unlinked manifest levers in PEACE/ALERT/RECOVERY; LEVER event `link`); `squad_create` makes a captain assignment, `squad_leader` and `squad_uniform` implemented; fortcore traps are stage 4 (bridges and levers first) | §5, §9.8 | done in live slot L2 (act, gate, military, bp, plans) |
+| FR51-55 | Run 9 alarm-to-action: SIEGE_START/INVASION class A; module `reflex` (arrival lockdown, interrupt channel, `<save>/alarm.txt`, verb `ack`); `act.door_forbid`; state `clock`/`alarm`/`lever`, `owners.tempo` `clock`; events ARRIVAL/INTRUDER/PREDATOR/NO_DEPOT/LOCKDOWN (A), LOCKDOWN_END (B); `contract.INTERRUPTS`; D-14 peace_gates; `config/reflex.json` | §3.4, §4, §5, §7, §8, §9.3, §9.13, §9.16, §9.18, §12, §13, §15, §18 | done (offline; live-untested) |
 | L1b | economy owns the builtin tool details (`act.work_detail`, event WORK_DETAIL, `runner.dig_backlog`); the `workshops` deliverable also counts built workshops; `plan.reload {phases:true}`; the runner slices the stage `orders` call (`orders_cells`) | §5, §7, §9.9, §12, §13 | done in live slot L1b (economy, act, runner, kern, lint) |
 
 ---
@@ -816,13 +845,13 @@ Each item names the WP that must adapt its code; WP0 changed the contract, `cont
 Generated by `python -m dfpilot.schema --write-appendix docs/v2/CONTRACTS.md`; `tests/test_schema.py` fails if this block is stale. The digest covers every schema and registry in `schema.py`, so any contract change shows up here.
 
 <!-- BEGIN GENERATED SCHEMAS -->
-Contract digest: `05f214a4f12b8fdfa567dc8d8010516c7bf3481687df8b3c0ceb47680692af5e`
+Contract digest: `2a1991505edcc30a5a4fa782682192c872913c92f79715aec3c748991c823753`
 
 DESIGN §6 formats and the inbox verb args. Other kinds: `python -m dfpilot.schema --json-schema <kind>` with kind in heartbeat, phases, bp, restore, lock, allowlist, persist.marker, persist.projects, persist.plan, persist.phase, persist.mode, persist.drill, persist.kern. Per-type event `d` (§12) and per-verb `args` are checked by `validate()`; the envelopes leave them open. Compact JSON, keys sorted.
 
 **state**
 ```json
-{"$defs":{"id":{"pattern":"^[A-Za-z0-9_-]{1,40}$","type":"string"},"mode":{"enum":["PEACE","ALERT","SIEGE","BREACH","RECOVERY","DRILL"],"type":"string"},"module":{"pattern":"^[a-z][a-z_]{1,15}$","type":"string"},"phase":{"pattern":"^P[0-7]$","type":"string"}},"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"bridges":{"additionalProperties":{"enum":["up","down","moving","unknown"],"type":"string"},"propertyNames":{"pattern":"^[A-Z][A-Za-z0-9]{0,7}$"},"type":"object"},"care":{"additionalProperties":false,"properties":{"corpses_old":{"minimum":0,"type":"integer"},"ghosts":{"minimum":0,"type":"integer"},"moods":{"minimum":0,"type":"integer"},"naked":{"minimum":0,"type":"integer"},"stressed_pct":{"maximum":100,"minimum":0,"type":"integer"},"tombs_free":{"minimum":0,"type":"integer"}},"required":["stressed_pct","naked","ghosts","corpses_old","tombs_free","moods"],"type":"object"},"ev":{"minimum":0,"type":"integer"},"k":{"additionalProperties":false,"properties":{"disabled":{"items":{"$ref":"#/$defs/module"},"type":"array"},"faults":{"minimum":0,"type":"integer"},"gap_max_ms":{"minimum":0,"type":"integer"},"ms_max":{"minimum":0,"type":"integer"},"ms_s":{"minimum":0,"type":"integer"},"slow":{"items":{"$ref":"#/$defs/module"},"type":"array"}},"required":["ms_s","gap_max_ms","slow","faults"],"type":"object"},"labor":{"additionalProperties":false,"properties":{"idle":{"maximum":100,"minimum":0,"type":"integer"},"starving":{"minimum":0,"type":"integer"}},"required":["starving","idle"],"type":"object"},"mil":{"additionalProperties":false,"properties":{"cv":{"minimum":0,"type":"integer"},"metal_pct":{"maximum":100,"minimum":0,"type":"integer"},"on_station":{"minimum":0,"type":"integer"},"soldiers":{"minimum":0,"type":"integer"},"squads":{"minimum":0,"type":"integer"},"worn":{"maximum":100,"minimum":0,"type":"integer"}},"required":["squads","soldiers","worn","cv","metal_pct","on_station"],"type":"object"},"mode":{"$ref":"#/$defs/mode"},"owners":{"additionalProperties":false,"properties":{"pause":{"anyOf":[{"type":"null"},{"enum":["inbox","gordon","popup","df"],"type":"string"}]},"tempo":{"enum":["mode","inbox","brake"],"type":"string"}},"required":["pause","tempo"],"type":"object"},"phase":{"$ref":"#/$defs/phase"},"pop":{"additionalProperties":false,"properties":{"adults":{"minimum":0,"type":"integer"},"cap":{"minimum":0,"type":"integer"},"cit":{"minimum":0,"type":"integer"},"gate_cap":{"minimum":0,"type":"integer"},"soldiers":{"minimum":0,"type":"integer"}},"type":"object"},"proj":{"items":{"items":false,"maxItems":4,"minItems":4,"prefixItems":[{"$ref":"#/$defs/id"},{"maxLength":24,"type":"string"},{"maximum":100,"minimum":0,"type":"integer"},{"maxLength":40,"type":"string"}],"type":"array"},"maxItems":8,"type":"array"},"ready":{"additionalProperties":false,"properties":{"audit":{"additionalProperties":false,"properties":{"age":{"minimum":-1,"type":"integer"},"min_traps":{"minimum":0,"type":"integer"},"ok":{"maximum":1,"minimum":0,"type":"integer"}},"required":["ok","age","min_traps"],"type":"object"},"cv":{"minimum":0,"type":"integer"},"drill_age":{"minimum":-1,"type":"integer"},"fail":{"items":{"maxLength":24,"type":"string"},"maxItems":8,"type":"array"},"lvl":{"maximum":3,"minimum":0,"type":"integer"},"worn":{"maximum":100,"minimum":0,"type":"integer"}},"required":["lvl","worn","cv","drill_age","audit","fail"],"type":"object"},"save":{"maxLength":120,"type":"string"},"seq":{"minimum":0,"type":"integer"},"stock":{"additionalProperties":false,"properties":{"drink_d":{"minimum":0,"type":"integer"},"food_d":{"minimum":0,"type":"integer"},"hosp_water":{"maximum":1,"minimum":0,"type":"integer"},"meals":{"minimum":0,"type":"integer"}},"type":"object"},"t":{"additionalProperties":false,"properties":{"abs":{"minimum":0,"type":"integer"},"frame":{"minimum":0,"type":"integer"},"paused":{"type":"boolean"},"season":{"maximum":3,"minimum":0,"type":"integer"},"tick":{"maximum":403199,"minimum":0,"type":"integer"},"tps":{"minimum":0,"type":"integer"},"wall":{"minimum":0,"type":"integer"},"y":{"minimum":0,"type":"integer"}},"required":["y","tick","season","tps","paused"],"type":"object"},"threat":{"additionalProperties":false,"properties":{"armed":{"maximum":1,"minimum":0,"type":"integer"},"vis":{"minimum":0,"type":"integer"}},"required":["vis","armed"],"type":"object"},"trade":{"additionalProperties":false,"properties":{"caravan":{"maximum":1,"minimum":0,"type":"integer"},"done":{"minimum":0,"type":"integer"},"ratio":{"minimum":0,"type":"integer"}},"required":["caravan","ratio","done"],"type":"object"},"v":{"const":2}},"required":["v","seq","t","mode","k","ev"],"title":"state","type":"object"}
+{"$defs":{"id":{"pattern":"^[A-Za-z0-9_-]{1,40}$","type":"string"},"mode":{"enum":["PEACE","ALERT","SIEGE","BREACH","RECOVERY","DRILL"],"type":"string"},"module":{"pattern":"^[a-z][a-z_]{1,15}$","type":"string"},"phase":{"pattern":"^P[0-7]$","type":"string"}},"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"alarm":{"additionalProperties":false,"properties":{"ack":{"minimum":0,"type":"integer"},"defcon":{"maximum":5,"minimum":1,"type":"integer"},"eta":{"minimum":-1,"type":"integer"},"last":{"minimum":0,"type":"integer"},"lock":{"maximum":1,"minimum":0,"type":"integer"},"unacked":{"minimum":0,"type":"integer"},"why":{"maxLength":24,"type":"string"}},"required":["defcon","unacked","last","ack","lock","why"],"type":"object"},"bridges":{"additionalProperties":{"enum":["up","down","moving","unknown"],"type":"string"},"propertyNames":{"pattern":"^[A-Z][A-Za-z0-9]{0,7}$"},"type":"object"},"care":{"additionalProperties":false,"properties":{"corpses_old":{"minimum":0,"type":"integer"},"ghosts":{"minimum":0,"type":"integer"},"moods":{"minimum":0,"type":"integer"},"naked":{"minimum":0,"type":"integer"},"stressed_pct":{"maximum":100,"minimum":0,"type":"integer"},"tombs_free":{"minimum":0,"type":"integer"}},"required":["stressed_pct","naked","ghosts","corpses_old","tombs_free","moods"],"type":"object"},"clock":{"additionalProperties":false,"properties":{"cap":{"minimum":0,"type":"integer"},"held":{"maximum":1,"minimum":0,"type":"integer"},"orig":{"minimum":0,"type":"integer"},"ts":{"maximum":1000,"minimum":-1,"type":"integer"},"why":{"maxLength":24,"type":"string"}},"required":["cap","orig","ts","held","why"],"type":"object"},"ev":{"minimum":0,"type":"integer"},"k":{"additionalProperties":false,"properties":{"disabled":{"items":{"$ref":"#/$defs/module"},"type":"array"},"faults":{"minimum":0,"type":"integer"},"gap_max_ms":{"minimum":0,"type":"integer"},"ms_max":{"minimum":0,"type":"integer"},"ms_s":{"minimum":0,"type":"integer"},"slow":{"items":{"$ref":"#/$defs/module"},"type":"array"}},"required":["ms_s","gap_max_ms","slow","faults"],"type":"object"},"labor":{"additionalProperties":false,"properties":{"idle":{"maximum":100,"minimum":0,"type":"integer"},"starving":{"minimum":0,"type":"integer"}},"required":["starving","idle"],"type":"object"},"lever":{"additionalProperties":false,"properties":{"lat_s":{"minimum":-1,"type":"integer"},"lat_t":{"minimum":-1,"type":"integer"},"pend":{"minimum":0,"type":"integer"},"wait_s":{"minimum":0,"type":"integer"}},"required":["lat_s","lat_t","pend","wait_s"],"type":"object"},"mil":{"additionalProperties":false,"properties":{"cv":{"minimum":0,"type":"integer"},"metal_pct":{"maximum":100,"minimum":0,"type":"integer"},"on_station":{"minimum":0,"type":"integer"},"soldiers":{"minimum":0,"type":"integer"},"squads":{"minimum":0,"type":"integer"},"worn":{"maximum":100,"minimum":0,"type":"integer"}},"required":["squads","soldiers","worn","cv","metal_pct","on_station"],"type":"object"},"mode":{"$ref":"#/$defs/mode"},"owners":{"additionalProperties":false,"properties":{"pause":{"anyOf":[{"type":"null"},{"enum":["inbox","gordon","popup","df"],"type":"string"}]},"tempo":{"enum":["mode","inbox","brake","clock"],"type":"string"}},"required":["pause","tempo"],"type":"object"},"phase":{"$ref":"#/$defs/phase"},"pop":{"additionalProperties":false,"properties":{"adults":{"minimum":0,"type":"integer"},"cap":{"minimum":0,"type":"integer"},"cit":{"minimum":0,"type":"integer"},"gate_cap":{"minimum":0,"type":"integer"},"soldiers":{"minimum":0,"type":"integer"}},"type":"object"},"proj":{"items":{"items":false,"maxItems":4,"minItems":4,"prefixItems":[{"$ref":"#/$defs/id"},{"maxLength":24,"type":"string"},{"maximum":100,"minimum":0,"type":"integer"},{"maxLength":40,"type":"string"}],"type":"array"},"maxItems":8,"type":"array"},"ready":{"additionalProperties":false,"properties":{"audit":{"additionalProperties":false,"properties":{"age":{"minimum":-1,"type":"integer"},"min_traps":{"minimum":0,"type":"integer"},"ok":{"maximum":1,"minimum":0,"type":"integer"}},"required":["ok","age","min_traps"],"type":"object"},"cv":{"minimum":0,"type":"integer"},"drill_age":{"minimum":-1,"type":"integer"},"fail":{"items":{"maxLength":24,"type":"string"},"maxItems":8,"type":"array"},"lvl":{"maximum":3,"minimum":0,"type":"integer"},"worn":{"maximum":100,"minimum":0,"type":"integer"}},"required":["lvl","worn","cv","drill_age","audit","fail"],"type":"object"},"save":{"maxLength":120,"type":"string"},"seq":{"minimum":0,"type":"integer"},"stock":{"additionalProperties":false,"properties":{"drink_d":{"minimum":0,"type":"integer"},"food_d":{"minimum":0,"type":"integer"},"hosp_water":{"maximum":1,"minimum":0,"type":"integer"},"meals":{"minimum":0,"type":"integer"}},"type":"object"},"t":{"additionalProperties":false,"properties":{"abs":{"minimum":0,"type":"integer"},"frame":{"minimum":0,"type":"integer"},"paused":{"type":"boolean"},"season":{"maximum":3,"minimum":0,"type":"integer"},"tick":{"maximum":403199,"minimum":0,"type":"integer"},"tps":{"minimum":0,"type":"integer"},"wall":{"minimum":0,"type":"integer"},"y":{"minimum":0,"type":"integer"}},"required":["y","tick","season","tps","paused"],"type":"object"},"threat":{"additionalProperties":false,"properties":{"armed":{"maximum":1,"minimum":0,"type":"integer"},"vis":{"minimum":0,"type":"integer"}},"required":["vis","armed"],"type":"object"},"trade":{"additionalProperties":false,"properties":{"caravan":{"maximum":1,"minimum":0,"type":"integer"},"done":{"minimum":0,"type":"integer"},"ratio":{"minimum":0,"type":"integer"}},"required":["caravan","ratio","done"],"type":"object"},"v":{"const":2}},"required":["v","seq","t","mode","k","ev"],"title":"state","type":"object"}
 ```
 
 **event**
@@ -832,7 +861,7 @@ DESIGN §6 formats and the inbox verb args. Other kinds: `python -m dfpilot.sche
 
 **inbox**
 ```json
-{"$defs":{"id":{"pattern":"^[A-Za-z0-9_-]{1,40}$","type":"string"}},"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"args":{"additionalProperties":{},"type":"object"},"by":{"enum":["llm","gordon","cli","follow","supervise","test"],"type":"string"},"id":{"$ref":"#/$defs/id"},"ts":{"minimum":0,"type":"integer"},"verb":{"enum":["plan.reload","bp.place","bp.cancel","drill","snapshot","audit","popcap.lower","tempo.lower","pause","unpause","trade.want","squad.sortie","lever","inspect","selftest","module.enable","tombs.repair"],"type":"string"}},"required":["id","verb","args","by"],"title":"inbox","type":"object"}
+{"$defs":{"id":{"pattern":"^[A-Za-z0-9_-]{1,40}$","type":"string"}},"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"args":{"additionalProperties":{},"type":"object"},"by":{"enum":["llm","gordon","cli","follow","supervise","test"],"type":"string"},"id":{"$ref":"#/$defs/id"},"ts":{"minimum":0,"type":"integer"},"verb":{"enum":["plan.reload","bp.place","bp.cancel","drill","snapshot","audit","popcap.lower","tempo.lower","pause","unpause","trade.want","squad.sortie","lever","inspect","selftest","module.enable","tombs.repair","ack"],"type":"string"}},"required":["id","verb","args","by"],"title":"inbox","type":"object"}
 ```
 
 **outbox**
@@ -938,5 +967,10 @@ DESIGN §6 formats and the inbox verb args. Other kinds: `python -m dfpilot.sche
 **inbox.args.tombs.repair**
 ```json
 {"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"title":"inbox.args.tombs.repair","type":"object"}
+```
+
+**inbox.args.ack**
+```json
+{"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"n":{"minimum":0,"type":"integer"}},"title":"inbox.args.ack","type":"object"}
 ```
 <!-- END GENERATED SCHEMAS -->

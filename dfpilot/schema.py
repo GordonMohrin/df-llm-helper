@@ -47,6 +47,7 @@ BY = ["llm", "gordon", "cli", "follow", "supervise", "test"]
 MODULES = [
     ("sense", "WP5", True, {"ticks": 10}), ("threat", "WP5", True, {"ticks": 25}),
     ("siege", "WP5", True, {"ticks": 25}), ("gate", "WP5", True, {"ticks": 25}),
+    ("reflex", "WP5", True, {"ticks": 10}),
     ("military", "WP6", False, {"ticks": 3600}), ("drill", "WP6", False, {"ticks": 600}),
     ("readiness", "WP6", False, {"ticks": 33600}), ("arbiter", "WP1", True, {"ms": 500}),
     ("runner", "WP7", False, {"ticks": 600}), ("snapshot", "WP7", False, {"ticks": 100}),
@@ -59,7 +60,7 @@ MODULES = [
 DECISIONS = {
     "D-01": "A", "D-02": "unchanged", "D-03": "rule", "D-04": "off", "D-05": "off", "D-06": "off",
     "D-07": "unchanged", "D-08": "dropped", "D-09": "no", "D-10": "off", "D-11": "accepted",
-    "D-12": "15/20", "D-13": "no",
+    "D-12": "15/20", "D-13": "no", "D-14": "down",
 }
 
 ACT = {
@@ -70,6 +71,7 @@ ACT = {
     "squad_routine": ["military"], "squad_order": ["military"], "squad_uniform": ["military"],
     "squad_unequip": ["military"], "animal_slaughter": ["economy"], "zone_remove": ["runner"], "manager_office": ["economy"], "pond_remove": ["water"],
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
+    "door_forbid": ["reflex"],
     "popcap": ["readiness"],
     "quickfort": ["runner"],
     "orders_import": ["economy"], "orders": ["economy"], "workorder": ["economy", "water"],
@@ -88,6 +90,7 @@ STATE_OWNERS = {
     "stock.drink_d": "economy", "stock.food_d": "economy", "stock.meals": "economy",
     "stock.hosp_water": "care", "care.*": "care", "labor.*": "economy",
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
+    "clock.*": "arbiter", "alarm.*": "reflex", "lever.*": "gate",
 }
 
 # kernel fault and slowness rules (CONTRACTS §3.3.5-3.3.6), mirrors contract.KERN
@@ -411,10 +414,18 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa")),
     "HOSPITAL_DRY": ("A", "water", _d("why:s", "patients:i zone:i near:i recipe:s")),
     "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i")),
-    "SIEGE_START": ("B", "siege", _d(opt="vis:i inv:i great:i why:s")),
+    # class A since Run 9 (an army walked in while these were digest-only): they wake at once
+    "SIEGE_START": ("A", "siege", _d(opt="vis:i inv:i great:i why:s")),
+    "INVASION": ("A", "threat", _d(opt="id:i")),
+    # reflex (FR-36/49/51-53): arrival announcements, interrupts (INTERRUPTS) and the lockdown it applied
+    "ARRIVAL": ("A", "any", _d("kind:s", "src:s text:s raised:i doors:i alert:s clock:i out:i eta:i")),
+    "INTRUDER": ("A", "reflex", _d(opt="n:i id:i pos:p k:s")),
+    "PREDATOR": ("A", "reflex", _d(opt="n:i id:i pos:p")),
+    "NO_DEPOT": ("A", "reflex", _d(opt="text:s")),
+    "LOCKDOWN": ("A", "reflex", _d("why:s", "n:i type:s raised:i doors:i alert:s clock:i")),
     "ALERT_START": ("B", "siege", _d(opt="vis:i")),
     "ALERT_END": ("B", "siege", _d(opt="vis:i")),
-    "INVASION": ("B", "threat", _d(opt="id:i")),
+    "LOCKDOWN_END": ("B", "reflex", _d(opt="why:s ticks:i doors:i")),
     "MOOD_START": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
     "MOOD_NEED": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
     "MOOD_END": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
@@ -451,6 +462,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "UNLOAD": ("C", "kern", _d()),
 }
 
+# FR-53 interrupt types: a class-A subset written to <save>/alarm.txt at once; `dfllm wait --until-interrupt` returns
+# on them and `dfllm ack` acknowledges them (unacked for reflex ack_timeout_s -> the kernel's lockdown default)
+INTERRUPTS = ["ARRIVAL", "INTRUDER", "PREDATOR", "DEATHS_3PLUS", "NO_DEPOT"]
+
 EVENT = Obj(req={"n": NAT, "tick": TICK, "type": Str(TYPE_RE), "cls": Str(enum=["A", "B", "C"]),
                  "msg": Str(maxbytes=200), "d": OPEN})
 
@@ -478,6 +493,7 @@ VERB_ARGS: dict[str, Obj] = {
     "selftest": Obj(opt={"suite": Str(enum=["quick", "full"])}),
     "module.enable": Obj(req={"module": MODULE}),
     "tombs.repair": Obj(),
+    "ack": Obj(opt={"n": NAT}),
 }
 # verb -> (handler module, allowed modes or None, needs approve)
 VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
@@ -491,6 +507,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "lever": ("gate", ["PEACE"], False), "inspect": ("kern", None, False),
     "selftest": ("selftest", None, False), "module.enable": ("kern", None, False),
     "tombs.repair": ("care", None, False),
+    "ack": ("reflex", None, False),
 }
 # verbs accepted only from these `by` origins (CONTRACTS §9.5; `by` is a label, the hook is the guard)
 VERB_BY: dict[str, list[str]] = {"audit": ["follow", "test"]}
@@ -522,10 +539,17 @@ STATE = Obj(
          "proj": Arr(Tup([ID, Str(maxbytes=24), PCT, Str(maxbytes=40)]), hi=8),
          "bridges": Obj(extra=Str(enum=BRIDGE_STATES), keys=BRIDGE_RE),
          "owners": Obj(req={"pause": AnyOf(Null(), Str(enum=["inbox", "gordon", "popup", "df"])),
-                            "tempo": Str(enum=["mode", "inbox", "brake"])}),
+                            "tempo": Str(enum=["mode", "inbox", "brake", "clock"])}),
          "mil": Obj(req={"squads": NAT, "soldiers": NAT, "worn": PCT, "cv": NAT, "metal_pct": PCT,
                          "on_station": NAT}),
-         "trade": Obj(req={"caravan": FLAG, "ratio": NAT, "done": NAT})})
+         "trade": Obj(req={"caravan": FLAG, "ratio": NAT, "done": NAT}),
+         # FR-51 clock governor (arbiter): the vanilla FPS cap it drives, the captured original, timestream fps
+         "clock": Obj(req={"cap": NAT, "orig": NAT, "ts": Int(-1, 1000), "held": FLAG, "why": Str(maxbytes=24)}),
+         # FR-53 interrupt channel (reflex): DEFCON 1 (worst) .. 5, unacked interrupts, last/acked event n
+         "alarm": Obj(req={"defcon": Int(1, 5), "unacked": NAT, "last": NAT, "ack": NAT, "lock": FLAG,
+                           "why": Str(maxbytes=24)}, opt={"eta": Int(-1)}),
+         # FR-55 lever latency (gate): last pull -> wanted state, in s and ticks (-1 never); pending own pulls
+         "lever": Obj(req={"lat_s": Int(-1), "lat_t": Int(-1), "pend": NAT, "wait_s": NAT})})
 
 HEARTBEAT = Obj(req={"v": Const(V), "wall": NAT, "frame": NAT, "tick": TICK, "paused": Bool(), "mode": MODE,
                      "seq": NAT})
@@ -799,7 +823,7 @@ def digest() -> str:
             "events": {k: [c, b, v.js({})] for k, (c, b, v) in EVENTS.items()},
             "verbs": VERBS, "verb_by": VERB_BY, "kern": KERN, "bp_max": [BP_MAX_CELLS, BP_MAX_BYTES], "act": ACT, "modules": MODULES, "modes": MODES, "transitions": TRANSITIONS,
             "decisions": DECISIONS, "legend": SNAP_LEGEND, "state_owners": STATE_OWNERS, "persist": PERSIST,
-            "postures": POSTURES, "mode_setters": MODE_SETTERS}
+            "postures": POSTURES, "mode_setters": MODE_SETTERS, "interrupts": INTERRUPTS}
     return hashlib.sha256(json.dumps(blob, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 

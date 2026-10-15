@@ -14,7 +14,7 @@ from . import paths
 
 
 def _parser() -> argparse.ArgumentParser:
-    from . import brief, cmd, doctor, events, plan, wake
+    from . import alarm, brief, cmd, doctor, events, plan, wake
     ap = argparse.ArgumentParser(prog="dfllm", description="dfpilot v2 (files only, 0 DF calls)")
     ap.add_argument("--runtime", help="runtime root (default <DF>/dfllm-runtime or $DFLLM_RUNTIME)")
     ap.add_argument("--save", help="save folder (default: ACTIVE, else the newest)")
@@ -25,6 +25,7 @@ def _parser() -> argparse.ArgumentParser:
     events.add_parser(sub)
     plan.add_parser(sub)
     cmd.add_parser(sub)
+    alarm.add_parsers(sub)
     p = sub.add_parser("bp", help="blueprints: list | preview <tpl> | sites <tpl>")
     p.add_argument("action", choices=["list", "preview", "sites"])
     p.add_argument("tpl", nargs="?")
@@ -246,6 +247,12 @@ def main(argv: list[str] | None = None) -> int:
     if c == "cmd":
         from .cmd import run
         return run(args, save_dir)
+    if c == "wait":
+        from .alarm import run_wait
+        return run_wait(args, save_dir)
+    if c == "ack":
+        from .alarm import run_ack
+        return run_ack(args, save_dir)
     if c == "doctor":
         from .doctor import run
         return run(args, save_dir)

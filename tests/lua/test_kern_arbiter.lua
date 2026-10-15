@@ -103,14 +103,16 @@ T.test('tempo follows the mode in the same call (on.MODE), writes only on change
   H.run(W, 300)                          -- ~5 s: no re-writes
   T.eq(ts_cmds(W), {'500'})
   K.set_mode('ALERT', 'test')
-  T.eq(W.ts_fps, 250)
+  -- FR-51: ALERT caps the vanilla FPS at 100; timestream 250 would skip ticks past that cap, so it is off
+  T.eq({W.ts_fps, math.floor(df.global.enabler.fps)}, {-1, 100})
   K.set_mode('SIEGE', 'test')
-  T.eq(W.ts_fps, -1)
+  T.eq({W.ts_fps, math.floor(df.global.enabler.fps)}, {-1, 30})
   H.run(W, 300)
-  T.eq(ts_cmds(W), {'500', '250', '-1'})
+  T.eq(ts_cmds(W), {'500', '-1'})
   K.set_mode('RECOVERY', 'test')
+  T.eq(math.floor(df.global.enabler.fps), 250, 'RECOVERY: the captured original cap')
   K.set_mode('PEACE', 'test')
-  T.eq(ts_cmds(W), {'500', '250', '-1', '250', '500'})
+  T.eq(ts_cmds(W), {'500', '-1', '250', '500'})
   W.ts_fps = 100                         -- someone else changed it: re-asserted within 60 s
   H.run(W, 4000, {ms = 20})
   T.eq(W.ts_fps, 500)
@@ -135,7 +137,7 @@ T.test('tempo.lower: lowers below the mode value for its TTL, never above, owner
   local K = boot(W)
   H.inbox(W, 't1', 'tempo.lower', {fps = 300, ttl_s = 3})
   H.run(W, 2)
-  T.eq(H.outbox(W, 't1').msg, 'tempo 300 for 3 s')
+  T.eq(H.outbox(W, 't1').msg, 'tempo 300 for 3 s (FPS cap 250)')
   T.eq(W.ts_fps, 300)
   K.flush(); H.frame(W, 1)
   T.eq(H.state(W).owners, {pause = nil, tempo = 'inbox'})
@@ -150,6 +152,10 @@ T.test('tempo.lower: lowers below the mode value for its TTL, never above, owner
   H.run(W, 6)
   T.eq(W.ts_fps, -1)
   T.ok(H.outbox(W, 't3').msg:find('off in SIEGE'))
+  T.eq(math.floor(df.global.enabler.fps), 30, 'the siege cap stays below the inbox value')
+  H.inbox(W, 't3b', 'tempo.lower', {fps = 20, ttl_s = 60})
+  H.run(W, 6)
+  T.eq(math.floor(df.global.enabler.fps), 20, 'STATUS §6 gap 10: tempo.lower lowers the FPS cap too')
   H.inbox(W, 't4', 'tempo.lower', {fps = 5, ttl_s = 60})
   H.run(W, 6)
   T.eq(H.outbox(W, 't4').ok, false)
@@ -253,7 +259,7 @@ T.test('popups: whitelisted kinds are dismissed and unpaused, others stay (owner
   H.run(W, 6, {paused = true})
   T.eq(#popups, 0)
   T.eq(df.global.pause_state, false)
-  popups:insert('#', {text = 'A vile force of darkness has arrived!'})
+  popups:insert('#', {text = 'The dwarves have found something unusual.'})
   df.global.pause_state = true
   H.run(W, 6, {paused = true})
   T.eq({#popups, df.global.pause_state}, {1, true})
@@ -301,7 +307,7 @@ T.test('popups (live L0): a popup halts the game with pause_state false; migrant
   for _, e in ipairs(H.events(W)) do if e.type == 'DECISION_NEEDED' and e.d.id == 'berserk' then woke[#woke + 1] = e end end
   T.eq(#woke, 1, 'it wakes the LLM instead')
   T.eq(woke[1].cls, 'A')
-  popups:insert('#', {text = 'A vile force of darkness has arrived!'})
+  popups:insert('#', {text = 'The dwarves have found something unusual.'})
   H.run(W, 6, {paused = false})
   T.eq(#popups, 1, 'unknown popups stay for Gordon')
   kern.K().flush(); H.frame(W, 0)
@@ -423,6 +429,54 @@ T.test('supply brake: economy.alarm or phase P0 hold tempo and FPS cap at BRAKE_
   T.eq(arbiter.brake_why(W.K), nil)
 end)
 
+T.test('FR-51 clock governor: mode caps, the reflex clamp, config override, restore on unload', function()
+  local dir = H.tmpdir('kmockclock')
+  local W = kmock.new{dfpath = dir, cfg = {reflex = {v = 2, clock = {siege_cap = 20, alert_cap = 5000}}}}
+  luahost.mkdir_recursive(dir .. '/dfllm-runtime')
+  package.loaded['plugins.timestream'] = {timestream_getFps = function() return W.timestream_fps end}
+  package.loaded['plugins.overlay'] = nil
+  local why
+  local reflex = {name = 'reflex', every = {ticks = 10}}
+  function reflex.holding(K, what) return why end
+  W.load(reflex)
+  W.load(arbiter)
+  W.settings.fps_cap = nil
+  local function capv() return W.settings.fps_cap end
+  T.eq(capv(), nil, 'PEACE: no cap write')
+  T.eq(W.state().clock, {cap = 250, orig = 250, ts = 500, held = 0, why = ''})
+  W.K.set_mode('ALERT', 'test')
+  T.eq({capv(), W.timestream_fps}, {100, -1}, 'alert_cap out of range (5000): the default 100')
+  W.K.set_mode('SIEGE', 'test')
+  T.eq(capv(), 20, 'config/reflex.json clock.siege_cap')
+  T.eq(W.state().clock, {cap = 20, orig = 250, ts = -1, held = 0, why = 'siege'})
+  W.K.set_mode('RECOVERY', 'test')
+  T.eq({capv(), W.timestream_fps}, {250, 250})
+  why = 'arrival:siege'                         -- the lockdown holds: same step through arbiter.hold
+  local ok, c, w = W.K.call('arbiter', 'hold')
+  T.eq({ok, c, w}, {true, 20, 'arrival:siege'})
+  T.eq({capv(), W.timestream_fps}, {20, -1})
+  T.eq(W.state().owners.tempo, 'clock')
+  T.eq(W.state().clock.held, 1)
+  why = nil
+  W.run(40, {paused = true})
+  T.eq({capv(), W.timestream_fps, W.state().owners.tempo}, {250, 250, 'mode'})
+  why = 'unacked:DEATHS_3PLUS'
+  W.run(40, {paused = true})
+  W.unload()
+  local r = H.json(dir .. '/dfllm-runtime/restore.json')
+  T.eq({r.active, r.orig.fps_cap}, {0, 250})
+  T.eq(capv(), 250, 'the original cap is back after unload')
+end)
+
+T.test('FR-51 crash heal: a lowered FPS cap (any value below the original) is restored', function()
+  local W = H.world{tag = 'healcap'}
+  luahost.mkdir_recursive(W.rt)
+  H.write(W.rt .. '/restore.json', json.encode({v = 2, save = 'region1', wall = 1, active = 1, orig = {fps_cap = 250}}))
+  df.global.enabler.fps = 30                    -- the siege cap was in force when the kernel died
+  T.ok(kern.restore{modules = {arbiter}})
+  T.eq(math.floor(df.global.enabler.fps), 250)
+end)
+
 T.test('arbiter on the reference k_mock K (strict contract checks)', function()
   local dir = H.tmpdir('kmockarb')
   local W = kmock.new{dfpath = dir}
@@ -442,8 +496,11 @@ T.test('arbiter on the reference k_mock K (strict contract checks)', function()
   T.eq(W.state().owners, {pause = 'inbox', tempo = 'mode'})
   W.run(100, {paused = true})
   T.eq(df.global.pause_state, false)
+  T.eq(W.find_acts('setting')[3].args, {'fps_cap', 30, n = 2}, 'FR-51: SIEGE caps the vanilla FPS')
   W.unload()
-  T.eq(W.find_acts('setting')[3].args[1], 'gfps', 'restore on UNLOAD')
+  local restored = {}
+  for i = 4, #W.find_acts('setting') do local a = W.find_acts('setting')[i].args; restored[a[1]] = a[2] end
+  T.eq({restored.gfps, restored.fps_cap}, {250, 250}, 'restore on UNLOAD')
   T.eq(H.json(dir .. '/dfllm-runtime/restore.json').active, 0)
 end)
 

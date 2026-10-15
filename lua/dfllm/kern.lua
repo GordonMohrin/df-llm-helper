@@ -952,8 +952,11 @@ local function load_cfg(st, repo, marker)
   end
   local base = fio.read_json(repo .. '/config/baseline.json')
   if type(base) ~= 'table' or base.v ~= 2 then base = {v = 2} end
+  -- reflex and clock knobs (FR-51/52/53); a missing or invalid file means the built-in defaults (fail-open)
+  local rfx = fio.read_json(repo .. '/config/reflex.json')
+  if type(rfx) ~= 'table' or rfx.v ~= 2 then rfx = {v = 2} end
   local p = st.paths
-  return {decisions = decisions, allowlist = al, baseline = base,
+  return {decisions = decisions, allowlist = al, baseline = base, reflex = rfx,
           paths = {df = p.df, runtime = p.runtime, save = p.save, repo = repo},
           save = st.save_name, dev = os.getenv('DFLLM_DEV') == '1', acceptance = (marker or {}).acceptance == 1}
 end
@@ -990,7 +993,7 @@ end
 -- also heal per-save values when restore.json names this save.
 local function heal_only(st, repo, marked)
   local p = st.paths
-  st.cfg = {decisions = copy(C.DECISIONS), allowlist = copy(actlib.BUILTIN_ALLOWLIST), baseline = {v = 2},
+  st.cfg = {decisions = copy(C.DECISIONS), allowlist = copy(actlib.BUILTIN_ALLOWLIST), baseline = {v = 2}, reflex = {v = 2},
             paths = {df = p.df, runtime = p.runtime, repo = repo}, save = st.save_name, dev = false, acceptance = false}
   st.K.cfg = st.cfg
   if not fio.exists(p.runtime .. '/restore.json') then return false end

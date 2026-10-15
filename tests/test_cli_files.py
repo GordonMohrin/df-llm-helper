@@ -130,7 +130,9 @@ def test_tail_events_filters_and_rotation(save):
     assert len(ns) == len(set(ns)) == 9 + 112
     assert [e["n"] for e in files.tail_events(save, 8810)] == [8811, 8812]
     a = files.tail_events(save, 0, cls="A")
-    assert [e["type"] for e in a] == ["YEAR_REVIEW", "SIEGE_END", "DECISION_NEEDED", "PROJECT_BLOCKED"]
+    # INVASION and SIEGE_START are class A since Run 9 (they wake at once)
+    assert [e["type"] for e in a] == ["YEAR_REVIEW", "INVASION", "SIEGE_START", "SIEGE_END", "DECISION_NEEDED",
+                                      "PROJECT_BLOCKED"]
     assert [e["type"] for e in files.tail_events(save, 0, limit=1, cls="A")] == ["PROJECT_BLOCKED"]
     assert {e["type"] for e in files.tail_events(save, 0, types={"CMD"})} == {"CMD"}
     assert files.last_event_n(save) == 8812
@@ -143,7 +145,7 @@ def test_tail_events_min_tick_stops_scan(save):
     assert [e["n"] for e in files.iter_events_rev(save, 8809)] == [8812, 8811, 8810]
     assert files.tail_events(save, 0, limit=0, min_tick=10 ** 9) == []
     # the scan stops at the first older event (newest first), even if an older file holds newer ticks
-    assert [e["n"] for e in files.tail_events(save, 0, cls="A", min_tick=y3)] == [8773, 8795, 8804]
+    assert [e["n"] for e in files.tail_events(save, 0, cls="A", min_tick=y3)] == [8735, 8736, 8773, 8795, 8804]
 
 
 def test_prune_outbox(save):

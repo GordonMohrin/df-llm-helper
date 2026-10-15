@@ -29,6 +29,7 @@ C.MODULES = {
   {name = 'threat',    wp = 'WP5', critical = true, every = {ticks = 25}},
   {name = 'siege',     wp = 'WP5', critical = true, every = {ticks = 25}},
   {name = 'gate',      wp = 'WP5', critical = true, every = {ticks = 25}},
+  {name = 'reflex',    wp = 'WP5', critical = true, every = {ticks = 10}},
   {name = 'military',  wp = 'WP6', every = {ticks = 3600}},
   {name = 'drill',     wp = 'WP6', every = {ticks = 600}},
   {name = 'readiness', wp = 'WP6', every = {ticks = 33600}},
@@ -55,9 +56,15 @@ C.EVENTS = {
   YEAR_REVIEW = {cls = 'A', by = 'kern'},
   -- FR-04/26 ghosts and unburied citizens, FR-34 a hospital without accepted water, FR-44 a strange mood at risk
   GHOSTS = {cls = 'A', by = 'care'}, HOSPITAL_DRY = {cls = 'A', by = 'water'}, MOOD_RISK = {cls = 'A', by = 'care'},
+  -- A since Run 9 (an army walked in while these were digest-only): wake at once
+  SIEGE_START = {cls = 'A', by = 'siege'}, INVASION = {cls = 'A', by = 'threat'},
+  -- A, reflex (FR-36/49/51-53): arrival announcements and the interrupt channel (C.INTERRUPTS)
+  ARRIVAL = {cls = 'A', by = 'any'}, INTRUDER = {cls = 'A', by = 'reflex'},
+  PREDATOR = {cls = 'A', by = 'reflex'}, NO_DEPOT = {cls = 'A', by = 'reflex'},
+  LOCKDOWN = {cls = 'A', by = 'reflex'},
   -- B: digest
-  SIEGE_START = {cls = 'B', by = 'siege'}, ALERT_START = {cls = 'B', by = 'siege'},
-  ALERT_END = {cls = 'B', by = 'siege'}, INVASION = {cls = 'B', by = 'threat'},
+  ALERT_START = {cls = 'B', by = 'siege'}, ALERT_END = {cls = 'B', by = 'siege'},
+  LOCKDOWN_END = {cls = 'B', by = 'reflex'},
   MOOD_START = {cls = 'B', by = 'care'}, MOOD_NEED = {cls = 'B', by = 'care'},
   MOOD_END = {cls = 'B', by = 'care'}, CARAVAN = {cls = 'B', by = 'trade'},
   MIGRANTS = {cls = 'B', by = 'economy'}, PETITION = {cls = 'B', by = 'care'},
@@ -77,6 +84,10 @@ C.EVENTS = {
   SNAPSHOT_READY = {cls = 'C', by = 'snapshot'}, CMD = {cls = 'C', by = 'kern'},
   BOOT = {cls = 'C', by = 'kern'}, UNLOAD = {cls = 'C', by = 'kern'},
 }
+
+-- Interrupt types (FR-53): a class-A subset that goes to <save>/alarm.txt at once and waits for the
+-- operator's `ack`; unacked for reflex ack_timeout_s, the kernel applies the type's lockdown default itself.
+C.INTERRUPTS = {ARRIVAL = true, INTRUDER = true, PREDATOR = true, DEATHS_3PLUS = true, NO_DEPOT = true}
 
 -- Inbox verbs (§13). mod = handler ('kern' = kernel itself); modes = allowed modes (nil = any);
 -- approve = args.approve must be true.
@@ -99,6 +110,7 @@ C.VERBS = {
   ['selftest']     = {mod = 'selftest'},
   ['module.enable'] = {mod = 'kern'},
   ['tombs.repair'] = {mod = 'care'},
+  ['ack']          = {mod = 'reflex'},
 }
 -- Verbs accepted only from these `by` origins (§9.5). `by` is a label, not authentication: the
 -- hook (WP4) keeps the LLM from writing these origins; this check is the second line.
@@ -113,6 +125,7 @@ C.ACT = {
   squad_routine = {'military'}, squad_order = {'military'}, squad_uniform = {'military'},
   squad_unequip = {'military'}, animal_slaughter = {'economy'}, zone_remove = {'runner'}, manager_office = {'economy'}, pond_remove = {'water'},
   pull = {'gate'}, cancel_own_lever_job = {'gate'}, link_lever = {'gate'}, burrow_units = {'gate'},
+  door_forbid = {'reflex'},
   popcap = {'readiness'},
   quickfort = {'runner'},
   orders_import = {'economy'}, orders = {'economy'}, workorder = {'economy', 'water'},
@@ -135,6 +148,7 @@ C.STATE_OWNERS = {
   ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['labor.*'] = 'economy',
   ['threat.*'] = 'threat', ['bridges'] = 'gate', ['owners.*'] = 'arbiter',
   ['mil.*'] = 'military', ['trade.*'] = 'trade',
+  ['clock.*'] = 'arbiter', ['alarm.*'] = 'reflex', ['lever.*'] = 'gate',
 }
 
 -- Persistent site-data keys (§10). Stored as dfhack.persistent site strings encoded with util/json.
@@ -160,7 +174,7 @@ end
 C.DECISIONS = {
   ['D-01'] = 'A', ['D-02'] = 'unchanged', ['D-03'] = 'rule', ['D-04'] = 'off', ['D-05'] = 'off',
   ['D-06'] = 'off', ['D-07'] = 'unchanged', ['D-08'] = 'dropped', ['D-09'] = 'no', ['D-10'] = 'off',
-  ['D-11'] = 'accepted', ['D-12'] = '15/20', ['D-13'] = 'no',
+  ['D-11'] = 'accepted', ['D-12'] = '15/20', ['D-13'] = 'no', ['D-14'] = 'down',
 }
 
 -- decisions.yaml reader (§9.16), the one Lua implementation (kern uses it; schema.parse_decisions is
@@ -241,9 +255,12 @@ C.STATE_SPEC = obj({
   proj = arr({t = 'tup', items = {str(nil, nil, 'id'), str(24), PCT, str(40)}}, 0, 8),
   bridges = obj(nil, nil, str(nil, {'up', 'down', 'moving', 'unknown'}), 'bridge'),
   owners = obj({pause = {t = 'any', of = {{t = 'null'}, str(nil, {'inbox', 'gordon', 'popup', 'df'})}},
-                tempo = str(nil, {'mode', 'inbox', 'brake'})}),
+                tempo = str(nil, {'mode', 'inbox', 'brake', 'clock'})}),
   mil = obj({squads = NAT, soldiers = NAT, worn = PCT, cv = NAT, metal_pct = PCT, on_station = NAT}),
   trade = obj({caravan = FLAG, ratio = NAT, done = NAT}),
+  clock = obj({cap = NAT, orig = NAT, ts = int(-1, 1000), held = FLAG, why = str(24)}),
+  alarm = obj({defcon = int(1, 5), unacked = NAT, last = NAT, ack = NAT, lock = FLAG, why = str(24)}, {eta = int(-1)}),
+  lever = obj({lat_s = int(-1), lat_t = int(-1), pend = NAT, wait_s = NAT}),
 })
 
 -- string formats (§1.1); explicit byte ranges, so LC_CTYPE cannot change them

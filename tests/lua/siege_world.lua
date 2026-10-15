@@ -153,7 +153,8 @@ function S.world(opts)
   local persist = opts.persist or {}
   if persist.manifest == nil and opts.manifest ~= false then persist.manifest = opts.manifest or S.manifest() end
   local W = kmock.new{units = opts.units, mode = opts.mode, persist = persist, strict = opts.strict ~= false,
-                      year = opts.year or 3, ytick = opts.ytick or 1000, ms_per_frame = opts.ms_per_frame or 16}
+                      year = opts.year or 3, ytick = opts.ytick or 1000, ms_per_frame = opts.ms_per_frame or 16,
+                      dfpath = opts.dfpath, cfg = opts.cfg}
   return S.install(W, opts)
 end
 

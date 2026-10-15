@@ -12,6 +12,11 @@
 -- Non-invader hostiles count only within reach of the fort (threat.lua), the same rule for entry,
 -- re-entry and quiet. Kill orders are withdrawn when no target is left in a kill box. Losses are
 -- checked against every citizen seen in the episode (the census drops the dead before UNIT_DEATH).
+-- Run 9 / FR-49/52: SIEGE_START is class A (wakes at once). While the reflex module holds a lockdown with the alert
+-- action (an arrival announcement, INVASION, the first armed hostile in sight), the civ alert is wanted in every mode,
+-- PEACE included; reflex kicks it in the same step (siege.hold_alert). With peace_gates (D-14) up, RECOVERY lowers
+-- only the core seal (outer/inner stay up). Without manifest outer/inner bridges sealed_ticks counts the time
+-- gate.sealed() holds (the unmanaged bridges a lockdown raised), so a fort without fortcore reports its seal too.
 local geom = require('dfllm.util.geom')
 
 -- every frame, but a full step only on a fresh hostile census or every PERIOD ticks, so the
@@ -119,7 +124,7 @@ local function go(K, to, why, a, bridge)
   if not K.set_mode(to, why) then return false end
   local vis = a and a.vis or 0
   if to == 'SIEGE' then
-    K.emit('SIEGE_START', 'B', string.format('siege (%s): %d visible, %d invaders', why, vis, a and a.inv or 0),
+    K.emit('SIEGE_START', 'A', string.format('siege (%s): %d visible, %d invaders', why, vis, a and a.inv or 0),
            {vis = vis, inv = a and a.inv or 0, great = a and a.great or 0, why = why})
     wealth(K, 'siege')
   elseif to == 'ALERT' then
@@ -239,7 +244,14 @@ local function anchor_dist(K, g)
   return best
 end
 
+-- the reflex lockdown wants the civ alert (FR-52), level-triggered
+local function alert_held(K)
+  local ok, why = K.call('reflex', 'holding', 'alert')
+  return ok and type(why) == 'string' and why ~= ''
+end
+
 local function alert_wanted(K, a, g, now)
+  if alert_held(K) then return true end
   local mode = K.mode()
   if mode == 'SIEGE' or mode == 'DRILL' or mode == 'BREACH' then return true end
   if mode == 'RECOVERY' then return not st.b1low end
@@ -343,10 +355,12 @@ local function raise(K, g, now)
   end
 end
 
--- RECOVERY: +1,200 quiet: B2 (core) down, then B1 (inner); +2,400: O1 (outer)
+-- RECOVERY: +1,200 quiet: B2 (core) down, then B1 (inner); +2,400: O1 (outer). peace_gates (D-14) up: the outer
+-- and inner gates stay up (PEACE keeps them up anyway); only the core seal comes down.
 local function lower(K, g)
   local q = st.rq
   local low = false
+  local keep = tostring(K.cfg.decisions and K.cfg.decisions['D-14'] or 'down') == 'up'
   if q >= M.REC_INNER then
     local cores = true
     for _, b in ipairs(g.core) do
@@ -354,14 +368,14 @@ local function lower(K, g)
       if gate_state(K, b) ~= 'down' then cores = false end
     end
     low = cores
-    if cores then
+    if cores and not keep then
       for _, b in ipairs(g.inner) do
         want(K, b, 'down', 'recovery')
         if gate_state(K, b) ~= 'down' then low = false end
       end
     end
   end
-  if q >= M.REC_OUTER then
+  if q >= M.REC_OUTER and not keep then
     for _, b in ipairs(g.outer) do want(K, b, 'down', 'recovery') end
   end
   if low ~= st.b1low then st.b1low, dirty = low, true end
@@ -475,7 +489,11 @@ local function track(K, g, now, dt)
     end
   end
   local b = g.inner[1] or g.outer[1]
-  if b and dt > 0 and gate_state(K, b) == 'up' then ep.sealed = ep.sealed + dt end
+  if b and dt > 0 and gate_state(K, b) == 'up' then ep.sealed = ep.sealed + dt
+  elseif not b and dt > 0 then           -- no fortcore gate: the bridges a lockdown raised (gate.sealed, FR-49)
+    local ok, sealed = K.call('gate', 'sealed')
+    if ok and sealed == true then ep.sealed = ep.sealed + dt end
+  end
   dirty = true
 end
 
@@ -487,6 +505,26 @@ local function status(K, a, now)
   local ok, k = K.call('military', 'kpi')
   if ok and type(k) == 'table' then d.worn, d.on_station = int(k.worn), int(k.on_station) end
   K.emit('SIEGE_STATUS', 'C', string.format('%s: %d visible, %d lost', K.mode(), d.vis, ep.lost), d)
+end
+
+-- public (FR-52): the reflex module started or ended a lockdown; apply the civ alert now (same step). Returns what
+-- holds: 'on <burrow>', 'off', or 'no burrow <name>' (the alert needs a burrow, gui/civ-alert)
+function M.hold_alert(K)
+  local now = K.now().tick
+  local g = geometry(K)
+  local on = alert_wanted(K, assess(K), g, now)
+  local burrow = K.mode() == 'BREACH' and g.refuge or g.kern
+  if not on then
+    set_alert(K, false, burrow, g, now)
+    save(K)
+    return 'off'
+  end
+  if not burrow_exists(burrow) and not burrow_exists(g.kern) then return 'no burrow ' .. g.kern end
+  set_alert(K, true, burrow, g, now)
+  save(K)
+  local idx = alert_idx()
+  if idx ~= nil and idx ~= 0 then return 'on ' .. tostring(mem.burrow or burrow) end
+  return 'pending ' .. burrow
 end
 
 ---------------------------------------------------------------- module

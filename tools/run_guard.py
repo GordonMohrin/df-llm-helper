@@ -1,4 +1,9 @@
-"""Siege/intruder reflex every 5 s (Gordon 14.10.2026: "the dragon simply walked in, why did you not notice and stop it?").
+"""Superseded by kernel reflex (lua/dfllm/reflex.lua + gate.lockdown, FR-49/51/52, 2026-10-15): the kernel raises every
+lever-linked bridge on the arrival announcement / INVASION / first armed hostile in sight, in the same step, holds the
+clock at 30 ticks/s and keeps or lowers the bridges per D-14 peace_gates. Kept for reference only; do not run it next
+to the kernel (two writers on the levers).
+
+Siege/intruder reflex every 5 s (Gordon 14.10.2026: "the dragon simply walked in, why did you not notice and stop it?").
 - >= 3 armed invaders in sight (or any inside the fort): raise the trap-corridor bridges at once (levers) and print a loud alarm line.
 - no invader in sight for QUIET s: lower them again (traffic, trade). python -u tools/run_guard.py
 The bridge state is read from gate_flags.raised (the lever text is not reliable); levers are pulled with DFHack's `lever pull`."""

@@ -39,11 +39,11 @@ def test_burst_merged_into_one_wake():
     g = wake.WakeGate()
     g.add(A(1, "GATE_FAIL", d={"bridge": "B1"}), 0)
     assert g.flush(5) is None                                  # still merging (quiet < 10 s)
-    g.add(A(2, "BREACH", d={"why": "gate_fail"}), 6)
-    g.add(A(3, "DEATHS_3PLUS"), 12)
+    g.add(A(2, "KERN_FAULT", d={"module": "runner"}), 6)
+    g.add(A(3, "PERF_DEGRADED"), 12)
     assert g.blocked(20) == "merging"
     b = g.flush(23)                                            # 11 s quiet
-    assert set(b) == {"GATE_FAIL", "BREACH", "DEATHS_3PLUS"} and g.pending == {}
+    assert set(b) == {"GATE_FAIL", "KERN_FAULT", "PERF_DEGRADED"} and g.pending == {}
 
 
 def test_continuous_burst_capped_at_60s():
@@ -79,7 +79,7 @@ def test_other_type_wakes_during_cooldown_and_takes_held_along():
 
 def test_hourly_limit_six_and_nothing_lost():
     g = wake.WakeGate()
-    types_ = sorted(wake.WAKE_TYPES)
+    types_ = sorted(wake.WAKE_TYPES - wake.URGENT)            # URGENT types bypass the limit (test below)
     total, wakes, t = 0, [], 0.0
     for i in range(40):                                        # one new A type every 90 s for 1 h
         g.add(A(i, types_[i % len(types_)]), t)
@@ -794,3 +794,49 @@ def test_follow_places_requested_workshops(save, monkeypatch):
     f.poll()
     (snap_cmd,) = inbox_docs(save)
     assert snap_cmd["verb"] == "snapshot" and f.jobs["workshops"]["tpl"] == "workshops"
+
+
+# ---------------------------------------------------------------- urgent (Run 9, FR-53)
+def test_siege_start_and_invasion_are_class_a_and_first_after_breach():
+    assert schema.EVENTS["SIEGE_START"][0] == "A" and schema.EVENTS["INVASION"][0] == "A"
+    assert {"SIEGE_START", "INVASION"} <= wake.WAKE_TYPES
+    assert wake.PRIO[:3] == ["BREACH", "SIEGE_START", "INVASION"]
+    assert set(schema.INTERRUPTS) <= wake.URGENT and set(schema.INTERRUPTS) <= set(wake.PRIO)
+    assert all(schema.EVENTS[t][0] == "A" for t in schema.INTERRUPTS)
+    line = wake.wake_line({"GATE_FAIL": {"c": 1, "n0": 5, "e": A(5, "GATE_FAIL", d={"bridge": "O1"})},
+                           "INVASION": {"c": 1, "n0": 4, "e": A(4, "INVASION", "invasion 31 armed", {"id": 31})},
+                           "SIEGE_START": {"c": 1, "n0": 6, "e": A(6, "SIEGE_START", "41 visible")}}, None)
+    assert line.index("SIEGE_START") < line.index("INVASION") < line.index("GATE_FAIL")
+    assert "next: dfllm status (the kernel already locked down)" in line
+
+
+def test_urgent_wakes_at_once_without_merge_wait_or_hourly_limit():
+    g = wake.WakeGate()
+    for i in range(6):                                         # the hour's budget is used up
+        g.add(A(i, "PERF_DEGRADED" if i % 2 else "KERN_FAULT", d={"module": "m"}), i * 400.0)
+        assert g.flush(i * 400.0 + 11)
+    g.add(A(10, "GATE_FAIL", d={"bridge": "O1"}), 2500)
+    assert g.blocked(2520) == "hourly limit"
+    g.add(A(11, "SIEGE_START", "41 visible"), 2521)
+    b = g.flush(2521)                                          # same second: no 10 s merge wait, no hourly limit
+    assert set(b) == {"GATE_FAIL", "SIEGE_START"}
+    g.add(A(12, "SIEGE_START", "again"), 2530)
+    g.add(A(13, "INVASION", "invasion 2"), 2531)
+    b = g.flush(2531)                                          # another urgent type: at once
+    assert set(b) == {"SIEGE_START", "INVASION"}
+    g.add(A(14, "INVASION", "invasion 3"), 2540)
+    assert g.blocked(2545) is not None                         # the same urgent type within 60 s: held, not lost
+    b = g.flush(2592)                                          # 61 s after its last wake: at once
+    assert set(b) == {"INVASION"} and b["INVASION"]["n0"] == 14
+
+
+def test_follow_wakes_on_siege_start_in_the_same_poll(save):
+    clock = Clock()
+    out = []
+    f = wake.Follower(out=out.append, clock=clock, auto=False)
+    f.poll()
+    append_events(save, [ev(9001, "SIEGE_START", "siege (invaders): 41 visible, 41 invaders",
+                            {"vis": 41, "inv": 41, "great": 0, "why": "invaders"})])
+    clock.t += 1
+    f.poll()
+    assert len(out) == 1 and "SIEGE_START" in out[0]

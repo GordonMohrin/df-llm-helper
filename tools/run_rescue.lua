@@ -1,3 +1,5 @@
+-- Partly superseded by kernel reflex (lua/dfllm/reflex.lua; FR-36/49/52, 2026-10-15): threat popups and the shaft-door
+-- forbid are kernel reflexes now; patient release, death incidents and intruder kill orders are not.
 -- Fast rescue pass (every ~10 s real time; the game runs at 300-500 ticks/s, so the 3-minute watcher round is too slow for thirst):
 --  * citizens flagged for health care who are thirsty/hungry get released (no forced rest, no diagnosis) so they drink and eat themselves
 --  * threat popups are logged and dismissed (the game halts on them while pause_state stays false)
