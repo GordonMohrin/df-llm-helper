@@ -29,6 +29,8 @@ Related: FR-xx, BUG-xx
 | [BUG-006](BUG-006-reach-stair-false-positive.md) | open | low | `reach` reports a down stair without counterpart although the shaft below is all stairs | lua/dfllm/seal.lua |
 | [BUG-007](BUG-007-kernel-cost-over-budget.md) | open | medium | kernel cost 82-90 ms/s vs limit 25, `repeat` bucket unattributed, budget self-test always fails | kern / perf |
 | [BUG-008](BUG-008-ghosts-event-repeats.md) | open | low | GHOSTS and NO_DEPOT repeat every few game days and drown the stream | lua/dfllm/care.lua |
+| [BUG-009](BUG-009-construction-jobs-resuspended.md) | open | high | construction jobs are suspended again within 5 s of every resume, new buildings are never built | lua/dfllm/economy.lua:2999 |
+| [BUG-010](BUG-010-legacy-autolabor-enabled.md) | open | high | `autolabor` runs in legacy mode after map load, the engine that crashed DF in Run 9 | lua/dfllm/baseline.lua:158 |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

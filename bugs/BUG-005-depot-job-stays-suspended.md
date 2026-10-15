@@ -26,4 +26,4 @@ read the cancel reason.
 Log the last cancellation reason of the job (announcement text for "Construct Building"), count resumes per job, and after
 N repeats place the depot elsewhere (inside the entrance, off the army route) or raise a class A event with the reason.
 
-Related: FR-43, BUG-004
+Related: FR-43, BUG-004, BUG-009 (the same re-suspension hits every construction job, reproduced with workshops placed by hand)
