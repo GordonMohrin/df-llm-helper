@@ -1,5 +1,8 @@
 # Feature requests (tools I missed while playing)
 
+> Bugs (wrong results of existing code) live in `bugs/` (one file per bug, index `bugs/README.md`); this file keeps wishes and missing features. FR-59, FR-62 and FR-63 below are written up as BUG-001, BUG-007 and BUG-006 too.
+
+
 Each entry: what was missing, what it cost, what the tool should do. Written during the Paddletribes run
 (site 94, fallen spring y382). Keep adding to this list whenever play hits a gap (RULES §1.7: no new tooling in
 play, so a gap becomes a note here, not a script in the running game).

@@ -38,7 +38,7 @@ DF restarted (`tools/win/start_df_desktop1.ps1`), loaded **autosave 1** (Udosodd
 t/s, bridges up (`lever_latency_s`), door lockdown, LOCKDOWN_END, SEAL_LEAK/PERIMETER_BROKEN after a siege, HOSPITAL_DRY,
 MOOD_RISK, embark panel.
 
-**Problems found (FR-59..FR-63 in docs/feature-requests/README.md):**
+**Problems found (written up one file per bug in `bugs/`, index `bugs/README.md`; FR-59..FR-63 in docs/feature-requests/README.md):**
 1. **FR-59** `seal.lua` SKIP contains `in_inventory`, so every drink/food/seed unit stored in a barrel or bag is ignored:
    `inspect reach` shows `drink/food/seeds groups: []`, the refuge audit says `drink 0<7, food 0<7` for Kern+ and Innen+
    although Lua shows 1362 drink units, all inside Kern+, none forbidden; CUTOFF for food/drink can never fire.
