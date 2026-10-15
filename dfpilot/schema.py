@@ -403,12 +403,15 @@ def _d(req: str = "", opt: str = "") -> Obj:
     return Obj(req=parse(req), opt=parse(opt), extra=AnyV())
 
 
+# FR-64 death clusters: cause (a death category or `mixed`), deaths, units, `unit:cause` tokens, deaths in the window
+_CLUSTER = _d("cause:s n:i", "units:ia causes:sa total:i days:i patients:i pos:p job:s hint:s stock:i")
+
 # type -> (cls, by, d spec)
 EVENTS: dict[str, tuple[str, str, Obj]] = {
     "SIEGE_END": ("A", "siege", _d(opt="hostiles:i killed:i lost:i captures:i sealed_ticks:i")),
     "GATE_FAIL": ("A", "gate", _d("bridge:s", "want:s why:s")),
     "BREACH": ("A", "siege", _d("why:s", "bridge:s")),
-    "DEATHS_3PLUS": ("A", "care", _d(opt="n:i ids:ia")),
+    "DEATHS_3PLUS": ("A", "care", _d(opt="n:i ids:ia causes:sa")),
     "DRILL_FAIL": ("A", "drill", _d(opt="streak:i fails:sa")),
     "KERN_FAULT": ("A", "kern", _d("module:s", "err:s n:i backoff_s:i")),
     "PERF_DEGRADED": ("A", "perf", _d(opt="tps:i base:i pct:i why:s")),
@@ -435,6 +438,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "SEAL_LEAK": ("A", "seal", _d("routes:i", "pos:p bld:s state:s why:s")),
     "REFUGE_FAIL": ("A", "seal", _d("burrow:s", "fallback:s why:s tiles:i inside:i mode:s")),
     "AUTOLABOR_LEGACY": ("A", "baseline", _d("fixed:f", "why:s after:s")),
+    # FR-64: >= 2 citizens died of dehydration or starvation within a month (the class-A twin of DEATH_CLUSTER)
+    "DEATHS_PREVENTABLE": ("A", "care", _CLUSTER),
     "ALERT_START": ("B", "siege", _d(opt="vis:i")),
     "ALERT_END": ("B", "siege", _d(opt="vis:i")),
     "LOCKDOWN_END": ("B", "reflex", _d(opt="why:s ticks:i doors:i")),
@@ -460,7 +465,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "PROJECT_REQUEST": ("B", "any", _d("tpl:s", "n:i why:s")),
     "PHASE": ("B", "runner", _d(opt="from:s to:s")),
     "PAUSE": ("B", "arbiter", _d("on:f", "by:s ttl:i")),
-    "DEATH": ("B", "care", _d(opt="unit:i citizen:f cause:s")),
+    "DEATH": ("B", "care", _d(opt="unit:i citizen:f cause:s src:s why:s found:f dtype:s by:s killer:i mood:s "
+                                  "thirst:i hunger:i patient:f pos:p job:s revised:f")),
+    "DEATH_CLUSTER": ("B", "care", _CLUSTER),
     "ACT_FAIL": ("B", "kern", _d("fn:s", "err:s module:s")),
     "ORDER_STUCK": ("B", "economy", _d("order:i job:s why:s", "n:i days:i dropped:f")),
     "JOBS_SUSPENDED": ("B", "economy", _d(opt="suspended:i released:i kept:i planned:i why:s resuspended:i "
@@ -570,7 +577,9 @@ STATE = Obj(
                           "tombs_free": NAT, "moods": NAT},
                      # FR-61 coffin provisioner: wanted free coffins, missing slots, coffin items, open orders, project
                      opt={"coffins": Obj(req={"want": NAT, "short": NAT, "stock": NAT, "order": NAT,
-                                              "proj": Str(maxbytes=40)})}),
+                                              "proj": Str(maxbytes=40)}),
+                          # FR-64: citizen deaths of the last season (100,800 ticks) by cause
+                          "died": Obj(extra=NAT)}),
          "labor": Obj(req={"starving": NAT, "idle": PCT}),
          "orders": Obj(req={"n": NAT, "bad": NAT, "stuck": NAT}),
          "threat": Obj(req={"vis": NAT, "armed": FLAG}),

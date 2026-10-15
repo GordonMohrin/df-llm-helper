@@ -10,6 +10,19 @@
   **BUG-014:** the autolabor guard reads the switch back with `autolabor mode` and takes "not enabled in legacy mode"
   as not legacy; a working switch is one kern.log line, only a failed one is AUTOLABOR_LEGACY (A).
 
+## Death causes and death clusters, FR-64 (2026-10-15; commit 31a32cc, offline, live-untested)
+- **DEATH says why:** new library `dfllm.deaths` (care): the death incident (`counters.death_id` -> `df.incident`
+  `death_cause`, `criminal`), the unit sheet's `counters.death_cause`, the announcement naming the unit
+  (`world.status.reports`, continuation lines joined), the thirst/hunger timers; a strange mood first. Categories
+  dehydrated, starved, killed (race + unit), drowned, suffocated, bled, mood, old_age, crushed, burned, infection,
+  unknown; `citizen 25889 died: dehydrated (incident THIRST; thirst 18879; patient)`. A death still "missing" in the
+  unit list gets its cause once found (a second DEATH, `revised`). DEATHS_3PLUS names the causes.
+- **DEATH_CLUSTER (B)** for >= 2 deaths of one cause or >= 3 of any within 28 days, **DEATHS_PREVENTABLE (A)** as well for
+  dehydration/starvation with the stock days and the next step (`inspect reach`, refuge, hospital water); repeats only
+  for a new death (util/cadence). `status`: `deaths (season) dehydrated 2, mood 1` (state `care.died`); `brief`: the
+  season's dead per cause. Live check: after a death `dfllm events --type DEATH` shows a cause other than `unknown`
+  for a found body, and `dtype` matches the unit list's death reason.
+
 ## Arrival lockdown: civ alert and entrance doors, BUG-011/BUG-012 (2026-10-15; commits 4e2b43c, 0faebcc, offline, live-untested)
 - **BUG-011:** siege's step and `hold_alert` share one decision (seal picks the burrow) and nothing writes
   `civ_alert(false)` while a lockdown holds the alert; when every burrow fails, a lockdown keeps `Innen+` (painted at

@@ -79,7 +79,16 @@ function F.install(W)
                                          'DUNGEON', 'UNDERWORLD_SPIRE', 'INN_TAVERN', 'LIBRARY',
                                          'COUNTING_HOUSE', 'GUILDHALL', 'TOWER', 'HOSPITAL'}, 0)
   df.unit_thought_type = enum_from({'SawDeadBody', 'NoShirt', 'Thirsty', 'AteNoTable', 'Rain'}, 0)
-  df.death_type = enum_from({'OLD_AGE', 'HUNGER', 'THIRST', 'SHOT', 'BLEED'}, 0)
+  -- df.death_type in DF 53.16 order (FR-64 maps every name to a death category)
+  local dt = enum_from({'OLD_AGE', 'HUNGER', 'THIRST', 'SHOT', 'BLEED', 'DROWN', 'SUFFOCATE', 'STRUCK_DOWN', 'SCUTTLE',
+                        'COLLISION', 'MAGMA', 'MAGMA_MIST', 'DRAGONFIRE', 'FIRE', 'SCALD', 'CAVEIN', 'DRAWBRIDGE',
+                        'FALLING_ROCKS', 'CHASM', 'CAGE', 'MURDER', 'TRAP', 'VANISH', 'QUIT', 'ABANDON', 'HEAT', 'COLD',
+                        'SPIKE', 'ENCASE_LAVA', 'ENCASE_MAGMA', 'ENCASE_ICE', 'BEHEAD', 'CRUCIFY', 'BURY_ALIVE',
+                        'DROWN_ALT', 'BURN_ALIVE', 'FEED_TO_BEASTS', 'HACK_TO_PIECES', 'LEAVE_OUT_IN_AIR', 'BOIL',
+                        'MELT', 'CONDENSE', 'SOLIDIFY', 'INFECTION', 'MEMORIALIZE', 'SCARE', 'DARKNESS', 'COLLAPSE',
+                        'DRAIN_BLOOD', 'SLAUGHTER', 'VEHICLE', 'FALLING_OBJECT'}, 0)
+  dt.NONE, dt[-1] = -1, 'NONE'
+  df.death_type = dt
   df.job_skill = enum_from({'MINING', 'BONECARVE', 'WOODCRAFT', 'CARPENTRY', 'MASONRY', 'STONECRAFT', 'CUTGEM',
                             'ENCRUSTGEM', 'FORGE_WEAPON', 'FORGE_ARMOR', 'FORGE_FURNITURE', 'METALCRAFT',
                             'GLASSMAKER', 'LEATHERWORK', 'TANNER', 'CLOTHESMAKING', 'WEAVING', 'BOWYER',

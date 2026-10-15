@@ -68,6 +68,8 @@ C.EVENTS = {
   SEAL_LEAK = {cls = 'A', by = 'seal'}, REFUGE_FAIL = {cls = 'A', by = 'seal'},
   -- BUG-010: autolabor found enabled in legacy mode (the Run 9 crash engine); baseline set it to monitor
   AUTOLABOR_LEGACY = {cls = 'A', by = 'baseline'},
+  -- FR-64: >= 2 citizens died of dehydration or starvation within a month (the A twin of DEATH_CLUSTER)
+  DEATHS_PREVENTABLE = {cls = 'A', by = 'care'},
   -- B: digest
   ALERT_START = {cls = 'B', by = 'siege'}, ALERT_END = {cls = 'B', by = 'siege'},
   LOCKDOWN_END = {cls = 'B', by = 'reflex'},
@@ -83,6 +85,7 @@ C.EVENTS = {
   PROJECT_DONE = {cls = 'B', by = 'runner'}, PROJECT_REQUEST = {cls = 'B', by = 'any'},
   PHASE = {cls = 'B', by = 'runner'}, PAUSE = {cls = 'B', by = 'arbiter'},
   DEATH = {cls = 'B', by = 'care'}, ACT_FAIL = {cls = 'B', by = 'kern'},
+  DEATH_CLUSTER = {cls = 'B', by = 'care'},      -- FR-64: deaths of one cause (or 3 of any) within a month
   ORDER_STUCK = {cls = 'B', by = 'economy'}, JOBS_SUSPENDED = {cls = 'B', by = 'economy'},
   TRADE_LEDGER = {cls = 'B', by = 'trade'},
   SEAL = {cls = 'B', by = 'seal'}, REACH = {cls = 'B', by = 'seal'},
@@ -265,7 +268,8 @@ C.STATE_SPEC = obj({
                audit = obj({ok = FLAG, age = int(-1), min_traps = NAT}), fail = arr(str(24), 0, 8)}),
   stock = obj(nil, {drink_d = NAT, food_d = NAT, meals = NAT, hosp_water = FLAG}),
   care = obj({stressed_pct = PCT, naked = NAT, ghosts = NAT, corpses_old = NAT, tombs_free = NAT, moods = NAT},
-             {coffins = obj({want = NAT, short = NAT, stock = NAT, order = NAT, proj = str(40)})}),
+             {coffins = obj({want = NAT, short = NAT, stock = NAT, order = NAT, proj = str(40)}),
+              died = obj(nil, nil, NAT)}),
   labor = obj({starving = NAT, idle = PCT}),
   orders = obj({n = NAT, bad = NAT, stuck = NAT}),
   threat = obj({vis = NAT, armed = FLAG}),

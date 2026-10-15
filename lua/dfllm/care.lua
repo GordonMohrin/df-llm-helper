@@ -62,6 +62,15 @@
 --     cancels a mood job. DF's UI has no cancel for a
 --     strange-mood job (the claimed workshop cannot be removed either), act has no job removal (DESIGN
 --     §5.9), and a removed job crashed DF in Run 9; the loud event asks for the material instead;
+--   * deaths (FR-64, Run 9: every DEATH said `(NONE)` while two of three deaths in 15 minutes were dehydration):
+--     DEATH (B) per citizen with its cause (dfllm.deaths: the death incident, the unit sheet, the announcement
+--     naming the unit, the thirst/hunger timers; a strange mood first) and the evidence. A death the unit list
+--     still shows as "missing" waits for its cause: every run asks again for death_recheck ticks and sends a
+--     second DEATH (`revised`) once it is found. DEATH_CLUSTER (B) when >= death_same citizens died of one cause
+--     or >= death_any of any cause within death_window (a game month); DEATHS_PREVENTABLE (A) as well when the
+--     cause is dehydration or starvation, with the next step (drink/food forbidden or unreachable: inspect reach,
+--     refuge; patients: hospital water). Repeats only for news (a new death in the cluster), after max(death_every
+--     game ticks, wake_wall_s) (util/cadence). The state's care.died counts the last season by cause;
 --   * captives: melt-safe (a cage holding a captive is never left marked for melting), then after a
 --     deadline in PEACE/late RECOVERY assigned to the manifest pit (zone_assign) or, without a pit,
 --     the cage is marked for dumping so it leaves the trap tile.
@@ -77,6 +86,7 @@ local C = require('dfllm.util.contract')
 local R = require('dfllm.reserve')     -- library (not a kernel module): mood filters, matcher, reserve sizes
 local OL = require('dfllm.orderlib')   -- library: an order's material class (the coffin provisioner)
 local CAD = require('dfllm.util.cadence')   -- BUG-008: when a standing class-A condition is announced again
+local DT = require('dfllm.deaths')          -- library (FR-64): the cause of a citizen's death, death clusters
 
 local M = {name = 'care', every = {ticks = 1200}, on = {}, verbs = {}}
 local DAY = C.TICKS.DAY
@@ -103,6 +113,8 @@ M.DEFAULTS = {
   mood_risk_every = 2400, wake_wall_s = 600,
   coffins = true, coffin_reserve = 10, coffin_batch = 30, coffin_scan_r = 16, coffin_min_side = 4,
   coffin_entrance_r = 10, coffin_retry = 3600, coffin_wood_keep = 20, coffin_wake = 2400, coffin_prio = 3,
+  death_window = 33600, death_same = 2, death_any = 3, death_every = 1200, death_recheck = 100800,
+  death_thirst = 50000, death_hunger = 75000, death_reports = 400,
 }
 -- the doctor labors (act.medic switches the same three) and the hospital posts (df.occupation_type names)
 M.MEDIC = {'DIAGNOSE', 'SURGERY', 'BONE_SETTING'}
@@ -171,6 +183,11 @@ local function pstate(K)
   p.reserve.held = json.object(held)
   p.acq = json.object(type(p.acq) == 'table' and p.acq or {})
   p.cof = json.object(type(p.cof) == 'table' and p.cof or {})     -- the coffin provisioner (FR-61)
+  -- FR-64: citizen deaths {t, u, c, pend?, by?, pat?, x?, y?, z?, job?} (oldest first), ended moods by unit id
+  -- {t, kind, ok, alive}, the cluster announcements by cause ('any' for the mixed one; util/cadence records)
+  if type(p.died) ~= 'table' then p.died = {} end
+  p.mend = json.object(type(p.mend) == 'table' and p.mend or {})
+  p.clus = json.object(type(p.clus) == 'table' and p.clus or {})
   return p
 end
 
@@ -460,6 +477,8 @@ local function phase_units(K, c, r, p)
       if not (alive and M.STRANGE[mood]) then
         local ok = (alive and not M.FAILED[mood]) and 1 or 0
         p.moods[sid] = nil
+        -- FR-64: a death after a failed mood (insane) or during the mood is a mood death (dfllm.deaths)
+        p.mend[sid] = {t = K.now().tick, kind = rec.kind, ok = ok, alive = alive and 1 or 0}
         K.emit('MOOD_END', 'B', string.format('mood (%s) unit %s %s', rec.kind, sid, ok == 1 and 'done' or 'failed'),
                {unit = math.tointeger(tonumber(sid)), kind = rec.kind, ok = ok})
       end
@@ -2428,6 +2447,194 @@ local function ghost_alarm(K, c, r, p, ghost_ids, old_ids, open, now)
          {ghosts = #ghost_ids, corpses = open, old = #old_ids, units = units, causes = causes})
 end
 
+---------------------------------------------------------------- deaths (FR-64)
+-- care's own record of the unit's strange mood: in a mood now (an open record, or one that ended with the unit
+-- dead), or insane after a failed mood (MOOD_END failed while alive)
+local function mood_of(p, id)
+  local sid = fmt(id)
+  local rec = p.moods[sid]
+  if rec then return {kind = rec.kind, state = 'strange'} end
+  local e = p.mend[sid]
+  if type(e) == 'table' and type(e.kind) == 'string' then
+    if e.alive == 0 then return {kind = e.kind, state = 'strange'} end
+    if e.ok == 0 then return {kind = e.kind, state = 'failed'} end
+  end
+end
+
+-- the cause of one citizen's death (dfllm.deaths.classify); `since` = the death tick (a report up to half a day
+-- older counts: eventful delivers UNIT_DEATH up to 100 ticks late); groups = the announcement log, read once
+local function classify(K, c, p, id, since, groups)
+  local u = df.unit.find(id)
+  if not u then return {cause = 'unknown', src = 'none', why = {'unit gone'}, found = true} end
+  local ok, res = pcall(DT.classify, u, {mood = mood_of(p, id), since = since and since - DAY // 2, groups = groups,
+                                         reports = c.death_reports, thirst = c.death_thirst, hunger = c.death_hunger})
+  if ok and type(res) == 'table' then return res end
+  K.log('warn', 'care: death cause of %d unreadable: %s', id, tostring(res))
+  return {cause = 'unknown', src = 'none', why = {'unreadable'}, found = true}
+end
+
+local function death_d(id, res, revised)
+  local d = {unit = id, citizen = 1, cause = res.cause, src = res.src, found = res.found and 1 or 0,
+             why = trunc(table.concat(res.why, '; '), 160)}
+  if res.dtype then d.dtype = res.dtype end
+  if res.by then d.by = trunc(res.by, 40) end
+  if res.killer then d.killer = res.killer end
+  if res.mood then d.mood = res.mood end
+  if res.thirst then d.thirst = res.thirst end
+  if res.hunger then d.hunger = res.hunger end
+  if res.patient then d.patient = 1 end
+  if res.pos then d.pos = res.pos end
+  if res.job then d.job = res.job end
+  if revised then d.revised = 1 end
+  return d
+end
+
+-- one record of p.died: cause, pending (not found yet), killer, patient, position, last job
+local function died_set(e, res)
+  e.c = res.cause
+  e.pend = (not res.found) and 1 or nil
+  e.by = res.by and trunc(res.by, 40) or nil
+  e.pat = res.patient and 1 or nil
+  if res.pos then e.x, e.y, e.z = res.pos[1], res.pos[2], res.pos[3] end
+  e.job = res.job
+end
+
+-- deaths are kept for max(a season, death_window, death_recheck), at most 40; ended moods for a year
+local function died_prune(c, p, now)
+  local keep = math.max(C.TICKS.SEASON, c.death_window, c.death_recheck)
+  local out = {}
+  for _, e in ipairs(p.died) do
+    if type(e) == 'table' and math.tointeger(e.t) and math.tointeger(e.u) and now - e.t <= keep then
+      out[#out + 1] = e
+    end
+  end
+  while #out > 40 do table.remove(out, 1) end
+  p.died = out
+  for sid, e in pairs(p.mend) do
+    if type(e) ~= 'table' or not math.tointeger(e.t) or now - e.t > C.TICKS.YEAR then p.mend[sid] = nil end
+  end
+end
+
+local function died_tally(p, now)
+  local t = {}
+  for _, e in ipairs(p.died) do
+    if now - e.t < C.TICKS.SEASON then
+      local k = e.pend == 1 and 'unknown' or tostring(e.c or 'unknown')
+      t[k] = (t[k] or 0) + 1
+    end
+  end
+  return t
+end
+
+-- the next step of a cluster (the line and d.hint) and the stock days it quotes (state stock, economy)
+local function death_hint(K, cause, pats)
+  local stock = (K.view() or {}).stock or {}
+  if cause == 'dehydrated' or cause == 'starved' then
+    local key = cause == 'dehydrated' and 'drink' or 'food'
+    local days = math.tointeger(stock[key .. '_d'])
+    local h = (days and string.format('%s %d d: ', key, days) or (key .. ': '))
+              .. 'forbidden or unreachable? inspect reach, inspect refuge'
+    if cause == 'dehydrated' then
+      h = h .. (pats > 0 and '; patients: hospital water (inspect water_sources)' or ', hospital water')
+    elseif pats > 0 then
+      h = h .. '; patients: fed by caregivers?'
+    end
+    return h, days
+  elseif cause == 'mood' then
+    return 'stock the mood materials before the next mood (MOOD_RISK); a mood job is never cancelled'
+  end
+end
+
+local function cluster_announce(K, c, cause, list, win)
+  local ids, idl, cs, pats = {}, {}, {}, 0
+  for _, e in ipairs(list) do
+    if #ids < 10 then
+      ids[#ids + 1] = e.u
+      idl[#idl + 1] = fmt(e.u)
+      cs[#cs + 1] = trunc(string.format('%d:%s%s', e.u, e.pend == 1 and 'unknown' or tostring(e.c),
+                                        e.by and (' by ' .. e.by) or ''), 60)
+    end
+    if e.pat == 1 then pats = pats + 1 end
+  end
+  local days = c.death_window // DAY
+  local head
+  if cause == 'mixed' then
+    head = string.format('%d citizens died within %d d: %s', #list, days, (DT.tally(list)))
+  else
+    head = string.format('%d citizens %s within %d d', #list, DT.TEXT[cause] or ('died: ' .. cause), days)
+    if #win > #list then head = head .. string.format(' (%d deaths in all)', #win) end
+  end
+  local hint, stock = death_hint(K, cause, pats)
+  local msg = head .. (hint and ('; ' .. hint) or '') .. '; units ' .. table.concat(idl, ', ')
+              .. (pats > 0 and string.format(' (%d patient%s)', pats, pats > 1 and 's' or '') or '')
+  local last = list[#list]
+  local d = {cause = cause, n = #list, units = ids, causes = cs, total = #win, days = days, patients = pats}
+  if math.tointeger(last.x) then d.pos = {last.x, last.y, last.z} end
+  if type(last.job) == 'string' then d.job = last.job end
+  if hint then d.hint = trunc(hint, 200) end
+  if stock then d.stock = stock end
+  K.emit('DEATH_CLUSTER', 'B', trunc(msg, 200), d)
+  if DT.PREVENTABLE[cause] then K.emit('DEATHS_PREVENTABLE', 'A', trunc(msg, 200), d) end
+end
+
+-- DEATH_CLUSTER (B; DEATHS_PREVENTABLE (A) too for dehydration and starvation): >= death_same deaths of one cause
+-- or >= death_any of any cause within death_window. BUG-008 / util/cadence: the first announcement at once, a repeat
+-- only when a new death joined the cluster, after max(death_every game ticks, wake_wall_s); a same-cause line names
+-- the total, so the mixed line is left out when one went out (or waits) for the same deaths
+local function cluster_scan(K, c, p)
+  local T = K.now()
+  local win, groups = DT.window(p.died, T.tick, c.death_window, c.death_same)
+  local o = {ticks = c.death_every, wall_s = c.wake_wall_s}
+  local sent, live = false, {}
+  for _, g in ipairs(groups) do
+    live[g.cause] = true
+    local ids = {}
+    for i, e in ipairs(g.list) do ids[i] = e.u end
+    if CAD.due(p.clus[g.cause], T, ids, {g.cause}, o) then
+      p.clus[g.cause] = CAD.mark(T, ids, {g.cause})
+      cluster_announce(K, c, g.cause, g.list, win)
+      sent = true
+    end
+  end
+  for key, rec in pairs(p.clus) do
+    if key ~= 'any' and not live[key] then p.clus[key] = CAD.quiet(rec) end
+  end
+  if #win < c.death_any then p.clus.any = CAD.quiet(p.clus.any); return end
+  local ids, toks, seen = {}, {}, {}
+  for i, e in ipairs(win) do
+    ids[i] = e.u
+    local k = e.pend == 1 and 'unknown' or tostring(e.c)
+    if not seen[k] then seen[k] = true; toks[#toks + 1] = k end
+  end
+  table.sort(toks)
+  if sent then
+    p.clus.any = CAD.mark(T, ids, toks)
+  elseif not (#groups == 1 and #groups[1].list == #win) and CAD.due(p.clus.any, T, ids, toks, o) then
+    p.clus.any = CAD.mark(T, ids, toks)
+    cluster_announce(K, c, 'mixed', win, win)
+  end
+end
+
+-- deaths still "missing": ask again (the announcement log read once); found -> a second DEATH (revised = 1)
+local function death_recheck(K, c, p)
+  local now, groups = K.now().tick, nil
+  for _, e in ipairs(p.died) do
+    if e.pend == 1 then
+      if now - e.t > c.death_recheck then
+        e.pend = nil
+        K.log('info', 'death of citizen %s: not found after %d days, cause unknown', fmt(e.u), c.death_recheck // DAY)
+      else
+        groups = groups or DT.report_groups(c.death_reports)
+        local res = classify(K, c, p, e.u, e.t, groups)
+        if res.found then
+          died_set(e, res)
+          K.emit('DEATH', 'B', DT.text(e.u, res, true), death_d(e.u, res, true))
+        end
+      end
+    end
+  end
+end
+
 local function finish(K, c, r, p)
   local now = K.now().tick
   -- open citizen corpses: first seen -> age
@@ -2502,6 +2709,11 @@ local function finish(K, c, r, p)
   st.out = {stressed_pct = r.have_units and (a.n > 0 and a.stressed * 100 // a.n or 0) or (prev.stressed_pct or 0),
             naked = r.have_units and a.naked or (prev.naked or 0), ghosts = ghosts, corpses_old = old,
             tombs_free = r.tombs_free or 0, moods = count(p.moods), hosp_water = r.hosp_water or 0}
+  -- FR-64: deaths still missing, a cluster that grew while its cadence held it back, the season's tally
+  death_recheck(K, c, p)
+  died_prune(c, p, now)
+  cluster_scan(K, c, p)
+  st.died = died_tally(p, now)
   K.persist.touch('m.care')
 end
 
@@ -2527,8 +2739,8 @@ function M.step(K, budget, ctx)
   finish(K, c, r, p)
 end
 
--- citizen deaths: DEATH (B) each, DEATHS_3PLUS (A) at 3 within a day
--- classified from the dead unit itself: the census (getCitizens) may already have dropped it, and
+-- citizen deaths: DEATH (B) each with its cause (FR-64), DEATHS_3PLUS (A) at 3 within a day, then the clusters
+-- membership from the dead unit itself: the census (getCitizens) may already have dropped it, and
 -- insane citizens were never in it
 M.on.UNIT_DEATH = function(K, ev)
   local id, cu = ev.unit, K.census.u
@@ -2544,19 +2756,32 @@ M.on.UNIT_DEATH = function(K, ev)
   p.announced[#p.announced + 1] = id
   while #p.announced > 200 do table.remove(p.announced, 1) end
   remember_dead(p, id)              -- a corpse scan may have tracked it already
-  local cause = 'unknown'
-  pcall(function() cause = df.death_type[df.unit.find(id).counters.death_cause] or cause end)  -- deathcause.lua:38
-  K.emit('DEATH', 'B', string.format('citizen %d died (%s)', id, cause), {unit = id, citizen = 1, cause = cause})
+  local c = M.conf(K)
+  local res = classify(K, c, p, id, now)
+  local rec = {t = now, u = id}
+  died_set(rec, res)
+  p.died[#p.died + 1] = rec
+  died_prune(c, p, now)
+  K.emit('DEATH', 'B', DT.text(id, res, false), death_d(id, res, false))
   local recent = {}
   for _, d in ipairs(p.deaths) do if now - d[1] < DAY then recent[#recent + 1] = d end end
   recent[#recent + 1] = {now, id}
   p.deaths = recent
   if #recent >= 3 and (p.last_3plus == nil or now - p.last_3plus >= DAY) then
     p.last_3plus = now
-    local ids = {}
-    for _, d in ipairs(recent) do ids[#ids + 1] = d[2] end
-    K.emit('DEATHS_3PLUS', 'A', string.format('%d citizens died within a day', #recent), {n = #recent, ids = ids})
+    local ids, cs, list, by = {}, {}, {}, {}
+    for _, e in ipairs(p.died) do by[e.u] = e end
+    for _, d in ipairs(recent) do
+      local e = by[d[2]] or {c = 'unknown'}
+      ids[#ids + 1] = d[2]
+      list[#list + 1] = e
+      cs[#cs + 1] = string.format('%d:%s', d[2], e.pend == 1 and 'unknown' or tostring(e.c))
+    end
+    K.emit('DEATHS_3PLUS', 'A', trunc(string.format('%d citizens died within a day: %s', #recent,
+                                                   (DT.tally(list))), 200), {n = #recent, ids = ids, causes = cs})
   end
+  cluster_scan(K, c, p)
+  st.died = died_tally(p, now)
   K.persist.touch('m.care')
 end
 
@@ -2658,6 +2883,11 @@ function M.state(K)
   local v = st.cof
   if v and v.active == 1 then                 -- FR-61: the coffin provisioner
     care.coffins = {want = v.want, short = v.short, stock = v.stock, order = v.order, proj = trunc(v.proj, 40)}
+  end
+  if st.died and next(st.died) then          -- FR-64: citizen deaths of the last season by cause
+    local died = json.object{}
+    for k, n in pairs(st.died) do died[k] = n end
+    care.died = died
   end
   return {care = care, stock = {hosp_water = o.hosp_water}}
 end
