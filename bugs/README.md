@@ -40,6 +40,7 @@ Related: FR-xx, BUG-xx
 | [BUG-017](BUG-017-mood-risk-false-missing.md) | open | low | MOOD_RISK reports missing materials although the mood dwarf already holds every item | lua/dfllm/care.lua |
 | [BUG-018](BUG-018-refuge-audit-ignores-entrances.md) | open | high | the refuge audit passes a burrow that contains the entrances and main halls (50 -> 1 in the first real siege) | lua/dfllm/seal.lua, siege.lua |
 | [BUG-019](BUG-019-breach-refuge-refused-for-supplies.md) | open | high | during a breach the only reachable emergency burrow is refused for missing supplies | lua/dfllm/seal.lua, siege.lua |
+| [BUG-020](BUG-020-embark-rectangle-ignores-injected-mouse.md) | open | medium | `embark.py scan` cannot place the rectangle: it ignores the held/injected mouse | tools/embark |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
