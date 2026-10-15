@@ -3,7 +3,8 @@
 -- Inputs are visibility only (threat.assess over K.census.h); a raised bridge cuts the walk
 -- groups, so path existence is never used to leave a siege.
 --   T0 (detecting step): mode SIEGE, civ alert on (Kern+), posture READY_STATION, SIEGE_START. The alert
---     burrow list is the mode's burrow plus the lever rooms gate allows in the mode (gate.rooms, live L3).
+--     burrow list is the mode's burrow plus the lever rooms gate allows in the mode (gate.rooms, live L3), and
+--     while a pull is pending on levers outside both, seal's lever burrow with the lever tiles (BUG-013).
 --   T0..T0+450: O1/B1 up as soon as nobody (soldiers excluded) is outside, or at T+450, or when a
 --     visible hostile is <= 10 tiles from that bridge (gate keeps the single-pending invariant).
 --   T0+900: an outer/inner bridge not up -> BREACH in-game (alert Tiefe+, B2 up, B2_HOLD).
@@ -289,9 +290,12 @@ end
 -- BREACH the civ alert held everybody in Tiefe+ and no civilian could reach a lever, GATE_FAIL no_worker x3).
 -- In BREACH gate.rooms is the B2 landing room only while B2 has no linked lever inside Tiefe+ (the fallback for
 -- a fort without one); with one, the list is Tiefe+ alone and nobody is drawn toward a seal that may be down
+-- BUG-013: gate adds seal's lever burrow ('Hebel+', the linked lever tiles) while a pull is pending on a bridge whose
+-- levers all lie outside `burrow` and the rooms (Run 9 forced arrival: the alert held everybody in Kern+, the four
+-- gate levers lay outside, their pulls stayed unclaimed); once the pulls are done it leaves the list again
 local function alert_list(K, burrow)
   local l = {burrow}
-  local ok, rooms = K.call('gate', 'rooms', K.mode())
+  local ok, rooms = K.call('gate', 'rooms', K.mode(), burrow)
   for _, n in ipairs(ok and type(rooms) == 'table' and rooms or {}) do
     if n ~= burrow then l[#l + 1] = n end
   end
@@ -313,12 +317,12 @@ local function set_alert(K, on, burrow, g, now, held)
   local list = alert_list(K, burrow)
   local sig = table.concat(list, '|')
   if mem.asig ~= sig and now >= (mem.alert_retry or now) then
-    if K.act.alert_burrows(list) then mem.burrow, mem.asig = burrow, sig
+    if K.act.alert_burrows(list) then mem.burrow, mem.asig, mem.alist = burrow, sig, list
     else                                   -- the burrow alone, else (e.g. no Tiefe+ yet) Kern+ beats no alert
       mem.alert_retry = now + M.RETRY
-      if #list > 1 and K.act.alert_burrows({burrow}) then mem.burrow, mem.asig = burrow, burrow
+      if #list > 1 and K.act.alert_burrows({burrow}) then mem.burrow, mem.asig, mem.alist = burrow, burrow, {burrow}
       elseif burrow ~= g.kern and mem.burrow ~= g.kern and K.act.alert_burrows({g.kern}) then
-        mem.burrow, mem.asig = g.kern, g.kern
+        mem.burrow, mem.asig, mem.alist = g.kern, g.kern, {g.kern}
       end
     end
   end
@@ -564,6 +568,16 @@ function M.hold_alert(K)
   local idx = alert_idx()
   if idx ~= nil and idx ~= 0 then return say('%s (%s)', tostring(mem.burrow or burrow), note) end
   return 'pending ' .. tostring(burrow)
+end
+
+-- public (BUG-013, gate): the burrows the sounding civ alert holds the civilians in (the list siege set last); {} while
+-- it is silent. gate counts a pull whose levers all lie outside them as blocked
+function M.alert_names(K)
+  local idx = alert_idx()
+  if idx == nil or idx == 0 or type(mem.alist) ~= 'table' then return {} end
+  local r = {}
+  for i, n in ipairs(mem.alist) do r[i] = n end
+  return r
 end
 
 ---------------------------------------------------------------- module

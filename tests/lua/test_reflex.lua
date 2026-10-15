@@ -24,7 +24,8 @@ local function setup(opts)
   local dir = H.tmpdir(opts.tag or 'r')
   luahost.mkdir_recursive(dir .. '/dfllm-runtime/mock')
   local W = S.world{manifest = opts.manifest, units = opts.units or S.fort_units(), dfpath = dir, cfg = opts.cfg,
-                    ms_per_frame = opts.ms_per_frame, tiefe = opts.tiefe, kern = opts.kern, mode = opts.mode}
+                    ms_per_frame = opts.ms_per_frame, tiefe = opts.tiefe, kern = opts.kern, mode = opts.mode,
+                    persist = opts.persist}
   W.dir = dir
   df.building_type.Door = 23
   df.global.world.status.popups = kmock.vec{}
@@ -90,7 +91,8 @@ T.test('fort without a manifest: the arrival popup locks down at once (gates, do
   T.eq(#arr, 1)
   T.eq({arr[1].cls, arr[1].d.kind, arr[1].d.src}, {'A', 'siege', 'popup'})
   T.ok(arr[1].d.text:find('vile force', 1, true), arr[1].d.text)
-  T.ok(arr[1].msg:find('gates 3 wanted up', 1, true), arr[1].msg)
+  T.ok(arr[1].msg:find('gates: 0 of 3 up, 3 pulls pending', 1, true), arr[1].msg)
+  T.eq({arr[1].d.raised, arr[1].d.up, arr[1].d.left, arr[1].d.blocked}, {3, 0, 3, 0})
   T.eq(#df.global.world.status.popups, 0, 'FR-36: dismissed after the reflexes')
   -- gates: every lever-linked bridge (O1, B1, B2 buildings exist, no manifest): one pull each, no double pull
   T.eq(#S.pulls(W), 3)
@@ -330,16 +332,29 @@ T.test('alert without a Kern+ burrow: the lockdown reports it instead of failing
   T.ok(#S.acts(W, 'alert_burrows') <= 1, 'one try per RETRY window, no ACT_FAIL spam')
 end)
 
-T.test('the deferred alert sounds at once when a hostile is near a citizen outside, or after ALERT_AFTER', function()
+T.test('BUG-013: the deferred alert waits for the pulls up to its deadline (900 ticks before a lever latency was ' ..
+       'measured, else 2x it, 450..1500), and not at all for a hostile near a citizen outside', function()
   local units = S.fort_units()
   units[#units + 1] = S.cit(9, 45, 9)                -- a woodcutter outside Kern+
   local W = setup{tag = 'alertnear', manifest = false, units = units}
   W.lever_default = {}                               -- nobody takes the pulls: the gates never rise
   W.event('INVASION', {id = 3})
   S.run(W, 60)
+  local t0 = events(W, 'ARRIVAL')[1].tick
+  T.ok(events(W, 'ARRIVAL')[1].msg:find('alert: after the gates (<= 900 ticks)', 1, true), events(W, 'ARRIVAL')[1].msg)
   T.eq(df.global.plotinfo.alerts.civ_alert_idx, 0)
-  S.run(W, 450)
-  T.eq(df.global.plotinfo.alerts.civ_alert_idx, 1, 'ALERT_AFTER: the alert does not wait for ever')
+  S.run(W, 800)
+  T.eq(df.global.plotinfo.alerts.civ_alert_idx, 0, 'T+860: the pulls are still pending')
+  S.run(W, 100)
+  T.eq(df.global.plotinfo.alerts.civ_alert_idx, 1, 'the deadline: the alert does not wait for ever')
+  local on = S.acts(W, 'civ_alert', function(a) return a.args[1] == true end)[1]
+  T.ok(on.tick - t0 >= 900 and on.tick - t0 <= 920, 'T+' .. (on.tick - t0))
+  local said
+  for _, l in ipairs(W.logs) do
+    local want = 'civ alert: Kern+ (deadline 900 ticks, 3 pulls left); gates: 0 of 3 up, 3 pulls pending'
+    if l.msg:find(want, 1, true) then said = true end
+  end
+  T.ok(said, 'kern.log names the deadline and the pulls left')
   local W2 = setup{tag = 'alertnear2', manifest = false, units = units}
   W2.lever_default = {}
   W2.event('INVASION', {id = 4})
@@ -347,6 +362,18 @@ T.test('the deferred alert sounds at once when a hostile is near a citizen outsi
   W2.add_unit(S.inv(310, 46, 12))
   S.run(W2, 60)
   T.eq(df.global.plotinfo.alerts.civ_alert_idx, 1, 'a hostile 3 tiles from the woodcutter: at once')
+  -- a lever latency measured before: 2 x 300 ticks
+  local W3 = setup{tag = 'alertlat', manifest = false, units = units,
+                   persist = {['m.gate'] = {v = 2, br = {}, kpi = {}, lat = {s = 10, t = 300}}}}
+  W3.lever_default = {}
+  W3.event('INVASION', {id = 5})
+  S.run(W3, 60)
+  local a3 = events(W3, 'ARRIVAL')[1]
+  T.ok(a3.msg:find('alert: after the gates (<= 600 ticks)', 1, true), a3.msg)
+  S.run(W3, 500)
+  T.eq(df.global.plotinfo.alerts.civ_alert_idx, 0)
+  S.run(W3, 100)
+  T.eq(df.global.plotinfo.alerts.civ_alert_idx, 1, '2 x the measured latency')
 end)
 
 T.test('a reload mid-lockdown keeps it (persisted hold, doors, interrupts)', function()

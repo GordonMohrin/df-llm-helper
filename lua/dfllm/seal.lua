@@ -35,7 +35,9 @@
 --             interior burrow (CFG.interior, painted from revealed walkable inside tiles of the citizens' group),
 --             else no confinement at all; REFUGE_FAIL (A) says so. BUG-011: while a reflex lockdown holds the alert
 --             (hold), the interior burrow is kept even when it fails on supplies (it holds whatever the fort has
---             inside; the lockdown keeps citizens off the surface), and a missing one is painted at once
+--             inside; the lockdown keeps citizens off the surface), and a missing one is painted at once. BUG-013:
+--             the lever burrow (CFG.levers) with the tiles of gate's linked levers, listed in the alert while a pull
+--             is pending (lever_burrow)
 -- Cost (FR-62): work runs in coroutines; a work unit is about one DF read (tile flags, walk group, tiletype, burrow
 -- test, the fields of one item). A token bucket refilled in real time caps the units per second (CFG.rate, or
 -- CFG.rate_urgent while an urgent job runs: a lever pull, a siege, a CUTOFF re-check, perimeter.record, the first
@@ -87,6 +89,10 @@ M.CFG = {
   min_tiles = 20, drink_per_cit = 1, food_per_cit = 1, bed_pct = 25,   -- FR-37 burrow audit (per citizen)
   interior = 'Innen+',        -- the whole-interior burrow, painted when Kern+ fails its audit
   paint_chunk = 400, interior_max = 20000, repaint = 7 * DAY,
+  levers = 'Hebel+',          -- BUG-013: the lever tiles gate's pulls need inside the civ alert (lever_burrow)
+  lever_check = 100,          -- ticks its tiles are trusted before they are read again (the player may erase them)
+  lever_retry = 600,          -- ticks before a refused paint is tried again
+  levers_max = 64,
   perim_max = 1500, requeue_cool = 7 * DAY,
 }
 local CFG = M.CFG
@@ -1988,6 +1994,49 @@ function M.alert_burrow(K, mode, default, hold)
     end
   end
   return pick, note, brief
+end
+
+-- public (BUG-013, gate): the lever burrow CFG.levers ('Hebel+'; burrows screen: add burrow, paint) holds `tiles`
+-- ({{x,y,z}}: every linked lever of the bridges gate holds). gate hands it to siege's alert list while a pull is
+-- pending on a lever outside the alert burrow: a confined civilian takes only jobs inside his burrows, but walks
+-- outside them to get there. A missing tile (a new lever, the burrow deleted or erased by the player) is painted at
+-- once; the tiles are trusted for CFG.lever_check ticks, a refused paint is tried again after CFG.lever_retry. Tiles
+-- are never removed (the paint act only adds; a stale lever tile is listed only while a pull is pending). Returns the
+-- name, or nil and why.
+function M.lever_burrow(K, tiles)
+  local list, parts = {}, {}
+  for _, p in ipairs(type(tiles) == 'table' and tiles or {}) do
+    if #list >= CFG.levers_max then break end
+    local x, y, z
+    if type(p) == 'table' then x, y, z = int(p[1]), int(p[2]), int(p[3]) end
+    if x and y and z then
+      list[#list + 1] = {x, y, z}
+      parts[#parts + 1] = kstr(x, y, z)
+    end
+  end
+  if #list == 0 then return nil, 'no lever' end
+  local sig, t = table.concat(parts, ';'), now_t(K)
+  local c, b = mem.lev, burrow(CFG.levers)
+  if c and c.sig == sig and t >= c.t then
+    if c.fail and t - c.t < CFG.lever_retry then return nil, c.fail end
+    if b and not c.fail and t - c.t < CFG.lever_check then return CFG.levers end
+  end
+  local miss = {}
+  for _, p in ipairs(list) do
+    if not (b and in_burrow(b, p[1], p[2], p[3])) then miss[#miss + 1] = p end
+  end
+  if #miss > 0 then
+    local ok, r = K.act.burrow_tiles(CFG.levers, miss, true)
+    if not ok then
+      mem.lev = {sig = sig, t = t, fail = tostring(r)}
+      K.log('warn', 'seal: painting %s failed: %s', CFG.levers, tostring(r))
+      return nil, tostring(r)
+    end
+    mem.bsize[CFG.levers] = nil
+    K.log('info', 'seal: %s painted with %d lever tiles (%d linked levers)', CFG.levers, int(r) or #miss, #list)
+  end
+  mem.lev = {sig = sig, t = t}
+  return CFG.levers
 end
 
 -- public (BUG-012, reflex): the doors of the last entrance check: {tick (of its BFS), sealed 0|1, routes,

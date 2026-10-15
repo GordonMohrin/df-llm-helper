@@ -204,7 +204,8 @@ off, FPS cap 30, civ alert on Kern+, squads Ready at their stations, bridges up 
 is outside, BREACH fallback at T+900. RECOVERY only on 0 visible invaders for 2,400 ticks; bridges
 are lowered stepwise. **Arrival lockdown** (no manifest needed): an arrival popup or report, INVASION
 or the first armed hostile in sight raises every lever-linked bridge, forbids the entrance doors,
-holds the clock and, once the gates are up (≤ 450 ticks), sounds the alert; until threat 0 for 2 days.
+holds the clock and, once its lever pulls are done (≤ 2x the lever latency, 450-1500 ticks), sounds the alert, listing
+the lever tiles (`Hebel+`) while pulls are pending; until threat 0 for 2 days.
 **Military:** squads A, B melee, C crossbows, ≤ 10 each; Constant training, never Off duty;
 Replace clothing + full metal + shield; KPI is worn %, never "assigned". Kill orders only inside
 manifest kill boxes, never into shafts or stairs. No civilian reserve squads.

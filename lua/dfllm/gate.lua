@@ -20,6 +20,17 @@
 -- they open only for a window: a caravan on the map (trade state, or its arrival report), migrants arriving, an
 -- inbox `lever` down (that bridge), each while no hostile is visible, and close WIN_CLOSE ticks after the reason ends.
 -- Lever latency (FR-55): ticks and real seconds from our queued pull to the bridge in the wanted state (state lever).
+-- Levers inside the civ alert (BUG-013, Run 9 forced arrival on 677bc3e: the alert held every civilian in Kern+, the
+-- four gate levers lay outside it, their PullLever jobs stayed unclaimed for minutes and 1-3 of 4 bridges rose). How
+-- DF treats a burrow-restricted unit (its own burrows, or every civilian's restriction to the alert's burrows while
+-- the civ alert sounds): it takes only jobs whose site lies inside one of those burrows (and uses only items there);
+-- its path is not restricted, it walks over tiles outside every burrow to reach a job site or another of its burrows.
+-- A PullLever job's site is the lever's tile, where the puller stands (a 1x1 building). So a burrow holding just the
+-- lever tiles is enough: seal paints its lever burrow (seal.CFG.levers, 'Hebel+') with every linked lever of the
+-- bridges gate holds, and rooms() hands it to siege for the alert list while a pull is pending on a bridge none of
+-- whose linked levers lies in the alert's main burrow or a lever room; once the pulls are done it leaves the list and
+-- the alert draws the puller back. Not in BREACH (the lever-room rule below: attacker-side levers). pulls() tells the
+-- reflex what its deferred alert waits for and which pulls the alert blocks (levers outside every alert burrow).
 local geom = require('dfllm.util.geom')
 
 local M = {name = 'gate', every = {ticks = 600}, critical = true, verbs = {},
@@ -54,7 +65,7 @@ local FAST_MODES = {SIEGE = true, BREACH = true, DRILL = true}
 local FORCE_MODES = {SIEGE = true, BREACH = true}       -- may RAISE with a citizen on it after 300 ticks
 local LOCK_MODES = {SIEGE = true, BREACH = true}        -- raise the unmanaged bridges even without the reflex module
 local GATE_ROLES = {outer = true, inner = true}         -- the bridges a lockdown and the peace gates hold up
-local FAIL_WHY = {blocked = 'blocked', no_lever = 'no_lever', no_worker = 'no_worker'}
+local FAIL_WHY = {blocked = 'blocked', no_lever = 'no_lever', no_worker = 'no_worker', outside = 'outside_alert'}
 
 local st      -- persisted m.gate: {v, br = {<b> = {want, why, since, deadline, failed}}, kpi = {...},
               --   ex = {X<id> = {bid, raised}} (unmanaged bridges in hand), lat = {s, t}, win = tick, winb = {<b> = tick}}
@@ -553,6 +564,81 @@ local function pullers_step(K, now)
   end
 end
 
+---------------------------------------------------------------- levers inside the civ alert (BUG-013, see the head)
+M.LEVER_TILES = 64         -- linked lever tiles handed to seal's lever burrow at most
+local lb_name              -- runtime: the lever burrow's name as seal answered it last
+
+-- the burrows the civ alert confines the civilians to now (siege's list) and their names; nil while it is silent
+local function alert_burrows(K)
+  local ok, names = K.call('siege', 'alert_names')
+  if not (ok and type(names) == 'table' and #names > 0) then return nil end
+  local bs = {}
+  for _, n in ipairs(names) do bs[#bs + 1] = burrow(n) end
+  return bs, names
+end
+
+-- a linked lever of the bridge lies on a tile of one of the burrows `bs`
+local function lever_in(r, bs)
+  for _, lid in ipairs(r and r.levers or {}) do
+    local p = r.pos[lid]
+    if r.linked[lid] and type(p) == 'table' then
+      for _, b in ipairs(bs) do if on_tile(b, p[1], p[2], p[3]) then return true end end
+    end
+  end
+  return false
+end
+
+-- the bridge still needs a pull: its wanted state is not reached and it has a linked lever; a bridge waiting for a
+-- citizen to leave its footprint (the alert calls him in), for the down guard or without a lever needs none now
+local NO_PULL = {no_lever = true, blocked = true, guard = true}
+local function needs_pull(name)
+  local br, r = st.br[name], rt[name]
+  if not (br and br.want and r) or r.last == br.want or NO_PULL[r.stuck] then return false end
+  return any_linked(r)
+end
+
+-- every linked lever tile of the bridges gate holds (manifest ones and the unmanaged ones in hand), sorted
+local function lever_tiles()
+  local seen, list = {}, {}
+  for _, r in pairs(rt) do
+    for _, lid in ipairs(r.levers) do
+      local p = r.pos[lid]
+      if r.linked[lid] and type(p) == 'table' and p[1] and p[2] and p[3] then
+        local k = p[1] .. ',' .. p[2] .. ',' .. p[3]
+        if not seen[k] then seen[k], list[#list + 1] = true, {p[1], p[2], p[3]} end
+      end
+    end
+  end
+  table.sort(list, function(a, b)
+    if a[3] ~= b[3] then return a[3] < b[3] end
+    if a[2] ~= b[2] then return a[2] < b[2] end
+    return a[1] < b[1]
+  end)
+  while #list > M.LEVER_TILES do list[#list] = nil end
+  return list
+end
+
+-- the lever burrow for siege's alert list in `mode`, or nil: only while a pull is pending on a bridge none of whose
+-- linked levers lies on `main` (the alert's burrow) or one of `rooms`; seal paints the lever tiles (kept current: a
+-- new linked lever is added on the next ask) and answers its name. Never in BREACH.
+local function lever_room(K, mode, main, rooms)
+  if mode == 'BREACH' then return nil end
+  local bs = {}
+  for _, n in ipairs(rooms) do bs[#bs + 1] = burrow(n) end
+  local mb = burrow(main)
+  if mb then bs[#bs + 1] = mb end
+  local need = false
+  for name, r in pairs(rt) do
+    if needs_pull(name) and not lever_in(r, bs) then need = true; break end
+  end
+  if not need then return nil end
+  local ok, n = K.call('seal', 'lever_burrow', lever_tiles())
+  if ok and type(n) == 'string' and n ~= '' then
+    lb_name = n
+    return n
+  end
+end
+
 -- lever order for a pull: 0 = in an allowed room with a puller present, 1 = on a tile of the burrow the civ alert
 -- holds the civilians in (BREACH: the refuge if it exists, else Kern+, as siege), 2 = in another allowed room,
 -- 3 = the rest; manifest order inside a class (live L3: in BREACH the levers in Kern+ had no worker, GATE_FAIL
@@ -675,7 +761,7 @@ local function set_want(name, w, why, deadline, now)
   st.br[name] = {want = w, why = tostring(why or ''):sub(1, 40), since = now,
                  deadline = w == 'up' and (deadline or now + M.DEADLINE) or nil, failed = false}
   local r = runtime(name)
-  r.bad, r.nw, r.block_since, r.lat0 = {}, 0, nil, nil
+  r.bad, r.nw, r.block_since, r.lat0, r.nw_out = {}, 0, nil, nil, nil
   dirty = true
   return true
 end
@@ -752,7 +838,11 @@ local function control(K, name, spec, now)
       end
       local ok = K.act.cancel_own_lever_job(r.job.id)       -- UI: cancel the queued pull
       st.kpi.cancels, dirty = st.kpi.cancels + 1, true
-      if stale == 'no_worker' then r.bad[r.job.lever] = true; r.nw = r.nw + 1 end
+      if stale == 'no_worker' then
+        r.bad[r.job.lever] = true; r.nw = r.nw + 1
+        local bs = alert_burrows(K)                     -- BUG-013: was the alert keeping everybody away from it?
+        r.nw_out = bs ~= nil and not lever_in(r, bs)
+      end
       r.job = nil
       if not ok then r.settle = now + M.SETTLE; return s end -- it may be completing right now
     end
@@ -853,12 +943,21 @@ local function check_fail(K, name, now, mode)
   if r.last == 'up' then return end
   br.failed, dirty = true, true
   local why = FAIL_WHY[r.stuck] or (r.nw > 0 and 'no_worker') or 'timeout'
+  if why == 'no_worker' then                          -- BUG-013: nobody may take it while the alert sounds
+    local out = r.nw_out                              -- seen at a no-worker cancel; else now, in a step only (a
+    if out == nil and mode == nil then                -- mode change has just moved the alert to another burrow)
+      local bs = alert_burrows(K)
+      out = bs ~= nil and not lever_in(r, bs)
+    end
+    if out then why = FAIL_WHY.outside end
+  end
   local f = st.kpi.fails
   if #f < 8 then f[#f + 1] = name .. ':' .. why end
   if (mode or K.mode()) == 'DRILL' then return end    -- a drill reports through drill.kpi, not A events
   if r.fail_tick and now - r.fail_tick < M.FAIL_REPEAT then return end
   r.fail_tick = now
-  K.emit('GATE_FAIL', 'A', string.format('%s not up after %d ticks (%s)', name, now - br.since, why),
+  K.emit('GATE_FAIL', 'A', string.format('%s not up after %d ticks (%s)', name, now - br.since,
+         why == FAIL_WHY.outside and 'no worker: its levers lie outside the alert burrow' or why),
          {bridge = name, want = 'up', why = why})
 end
 
@@ -1055,7 +1154,7 @@ function M.init(K)
     end
   end
   rt, rt_ex, pub, dirty, PULL = {}, nil, nil, false, nil
-  pl, rooms_c = {rooms = {}}, nil
+  pl, rooms_c, lb_name = {rooms = {}}, nil, nil
   M.every = {ticks = FAST_MODES[K.mode()] and M.FAST or M.SLOW}
 end
 
@@ -1122,25 +1221,46 @@ function M.want(K, bridge, want, why, deadline)
   return true, (changed and 'wanted ' or 'still ') .. bridge .. ' ' .. want
 end
 
+-- public (BUG-013, reflex): what the lockdown's deferred civ alert waits for, from the last pass: want (bridges wanted
+-- up), up, left (wanted up, not up, a pull to do: queued or next), out (of left: no linked lever inside the burrows
+-- the sounding civ alert holds the civilians in, so nobody may take the pull), foot (waiting for a citizen to leave
+-- the footprint), nolever (no linked lever), lat_t (last lever latency in ticks, -1 never measured), lb (the lever
+-- burrow while the sounding alert lists it)
+function M.pulls(K)
+  local res = {want = 0, up = 0, left = 0, out = 0, foot = 0, nolever = 0, lat_t = st.lat and st.lat.t or -1}
+  local bs, names = alert_burrows(K)
+  for name, s in pairs(pub and pub.bridges or {}) do
+    local br, r = st.br[name], rt[name]
+    if br and br.want == 'up' then
+      res.want = res.want + 1
+      if s == 'up' then res.up = res.up + 1
+      elseif needs_pull(name) then
+        res.left = res.left + 1
+        if bs and not lever_in(r, bs) then res.out = res.out + 1 end
+      elseif r and r.stuck == 'blocked' then res.foot = res.foot + 1
+      else res.nolever = res.nolever + 1 end
+    end
+  end
+  for _, n in ipairs(names or {}) do if n == lb_name then res.lb = n end end
+  return res
+end
+
 -- public (FR-49/52): the reflex module started or ended a lockdown (it answers reflex.holding('gates')); run the gate
--- pass now (same step) with a fresh scan for unmanaged bridges. Returns {want, up, pend, names}: the bridges wanted
--- up and how many already are; pend = pulls pending now.
+-- pass now (same step) with a fresh scan for unmanaged bridges. Returns {want, up, pend, names} and pulls()' fields
+-- (left, out, foot, nolever, lat_t, lb): the bridges wanted up and how many already are; pend = our pulls queued now.
 function M.lockdown(K)
   local now = K.now().tick
   local man = K.manifest()
   for _, name in ipairs(bridge_names(man)) do resolve(runtime(name), man.bridges[name], now) end
   local states = pass(K, true)
-  local info = {want = 0, up = 0, pend = 0, names = {}}
+  local info = M.pulls(K)
+  info.pend, info.names = 0, {}
   local names = {}
   for name in pairs(states) do names[#names + 1] = name end
   table.sort(names)
   for _, name in ipairs(names) do
     local br = st.br[name]
-    if br and br.want == 'up' then
-      info.want = info.want + 1
-      info.names[#info.names + 1] = name
-      if states[name] == 'up' then info.up = info.up + 1 end
-    end
+    if br and br.want == 'up' then info.names[#info.names + 1] = name end
     if (rt[name] or {}).job then info.pend = info.pend + 1 end
   end
   return info
@@ -1204,13 +1324,16 @@ end
 
 -- public (WP5 extension, live L3): the lever rooms allowed in `mode` (default: now) that exist, sorted; siege
 -- adds them to the civ-alert burrow list (BREACH: only the rooms behind the core seal whose bridges have no
--- linked lever inside the refuge yet)
-function M.rooms(K, mode)
+-- linked lever inside the refuge yet). BUG-013: then seal's lever burrow while a pull is pending on a bridge whose
+-- linked levers all lie outside `main` (the alert's burrow) and those rooms (not in BREACH)
+function M.rooms(K, mode, main)
   mode = mode or K.mode()
   local r = {}
   for _, rm in ipairs(room_list(K, K.now().tick)) do
     if allowed(K, rm, mode) then r[#r + 1] = rm.name end
   end
+  local lb = lever_room(K, mode, main, r)
+  if lb then r[#r + 1] = lb end
   return r
 end
 
