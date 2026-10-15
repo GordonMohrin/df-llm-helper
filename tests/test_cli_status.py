@@ -202,6 +202,7 @@ def test_follow_off_in_status_and_doctor(save, capsys):
     out = capsys.readouterr().out
     assert "follow: OFF (last heartbeat 3h ago)" in out
     assert any("follow: OFF" in b for b in doctor.diagnose(save)[1])
+    assert "follow: OFF (last heartbeat 3h ago)" in brief.brief_text(save)
     (save / files.FOLLOW_HB).unlink()
     assert "follow: OFF (no heartbeat yet" in brief.status_text(save)
 

@@ -285,6 +285,9 @@ def sec_failures(ctx: Ctx) -> list[str]:
 def brief_text(save_dir: Path, budget: int = BRIEF_TOKENS) -> str:
     ctx = Ctx(save_dir)
     head = [f"# brief {line_head(ctx)}"]
+    off = files.follow_off(save_dir)               # FR-29
+    if off:
+        head.append(off)
     if ctx.state is None:
         head.append(_no_state(ctx))
     else:

@@ -629,10 +629,10 @@ local function classify(it, a, cat)
     local k = weapon_kind(it)
     if k == 'pick' then
       a.w_pick = a.w_pick + 1
-      if not f.in_inventory then a.w_pick_free = a.w_pick_free + 1 end   -- FR-40: nobody carries it
+      if not holder(it) then a.w_pick_free = a.w_pick_free + 1 end   -- FR-40: nobody carries it (a bin may)
     elseif k == 'axe' then
       a.w_axe = a.w_axe + 1
-      if not f.in_inventory then a.w_axe_free = a.w_axe_free + 1 end
+      if not holder(it) then a.w_axe_free = a.w_axe_free + 1 end
     elseif k == 'xbow' or k == 'bow' then
       local u = holder(it)
       if not (u and (u.military.squad_id or -1) >= 0) then a['w_' .. k] = a['w_' .. k] + 1 end   -- for hunters
@@ -3514,32 +3514,46 @@ local function top(map, n)
   return r
 end
 
--- inspect what=orders (FR-01/FR-39): every open manager order with its blockers, cancels and stuck days
+-- inspect what=orders (FR-01/FR-39): open manager orders with their blockers, cancels and stuck days; the unsafe,
+-- stuck and cancelling ones first, as many as fit the 8 KB reply (`more` = the ones left out)
+local INSPECT_BYTES = 7000
 M.inspect.orders = function(K, args)
   local p = pstate(K)
-  local list, n = {}, 0
+  local all, n = {}, 0
+  local now = K.now().tick
   for _, o in ipairs(orders_all()) do
     if (o.amount_left or 0) > 0 then
       n = n + 1
-      if #list < 60 then
+      if #all < 200 then
         local key = tostring(o.id)
         local okn, job = pcall(job_name, o)
+        local okv, valid = pcall(function() return o.status.validated == true end)
         local e = {id = o.id, job = okn and tostring(job) or '?', name = order_name(o):sub(1, 40), left = o.amount_left,
-                   valid = (pcall(function() return o.status.validated end) and o.status.validated) and 1 or 0}
-        if okn and OL.unsafe(job, o.item_subtype) then e.unsafe = 1 end
+                   valid = okv and valid and 1 or 0}
+        local rank = 3
+        if okn and OL.unsafe(job, o.item_subtype) then e.unsafe, rank = 1, 0 end
         local rec = p.ostuck[key]
         if type(rec) == 'table' then
-          e.why, e.days = rec.why, (K.now().tick - (math.tointeger(rec.since) or K.now().tick)) // DAY
+          e.why, e.days = rec.why, (now - (math.tointeger(rec.since) or now)) // DAY
+          rank = math.min(rank, 1)
         end
         local cr = p.ocancel[key]
-        if type(cr) == 'table' then e.cancels, e.cancel_why = cr.n, cr.why end
-        list[#list + 1] = e
+        if type(cr) == 'table' then e.cancels, e.cancel_why, rank = cr.n, cr.why, math.min(rank, 2) end
+        all[#all + 1] = {rank, e}
       end
     end
   end
+  table.sort(all, function(a, b) if a[1] ~= b[1] then return a[1] < b[1] end return a[2].id < b[2].id end)
+  local list, bytes = {}, 0
+  for _, x in ipairs(all) do
+    local ok, enc = pcall(json.encode, x[2])
+    bytes = bytes + (ok and #enc or 200) + 1
+    if bytes > INSPECT_BYTES then break end
+    list[#list + 1] = x[2]
+  end
   local od = st.orders or {}
   return true, string.format('%d open orders, %d stuck, %d unsafe', n, od.stuck or 0, od.bad or 0),
-         {n = n, stuck = od.stuck or 0, bad = od.bad or 0, list = list}
+         {n = n, stuck = od.stuck or 0, bad = od.bad or 0, list = json.array(list), more = n - #list}
 end
 
 -- inspect what=workload (FR-40): adults without a job, unclaimed jobs by type, top cancel reasons, free tools,

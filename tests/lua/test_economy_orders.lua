@@ -211,6 +211,12 @@ T.test('FR-01: the check is sliced (50 orders a frame); at most report_per_day O
   T.eq(#W.find_events('ORDER_STUCK'), 3, 'report_per_day')
   days(W, 1)
   T.eq(#W.find_events('ORDER_STUCK'), 6)
+  for _ = 1, 60 do F.order(W, {job_type = df.job_type.PrepareMeal, amount_left = 1, _name = string.rep('x', 40)}) end
+  local r = W.inbox('inspect', {what = 'orders'})
+  T.ok(#require('dfllm.util.json').encode(r.data) <= 8192, 'within the 8 KB reply')
+  T.eq(#r.data.list + r.data.more, r.data.n)
+  T.ok(r.data.more > 0)
+  T.ok(r.data.list[1].why ~= nil, 'stuck orders first')
 end)
 
 T.test('FR-01: unreachable input counts as missing (snapshot.far)', function()

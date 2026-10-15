@@ -1415,8 +1415,17 @@ M.inspect.trade = function(K, args)
   end
   local msg = d and at and string.format('%d merchant goods at the depot (%d kinds)', n, #goods)
               or (d and (#cars > 0 and 'caravan not at the depot yet' or 'no caravan') or 'no built trade depot')
-  return true, msg, {caravans = json.array(list), depot = d and d.id or -1, goods = json.array(goods), goods_items = n,
-                     want = srcs(want), sell = srcs(sell), ledger = json.array(st.ledger or {}), done = st.done}
+  local ledger = {}
+  for i, e in ipairs(st.ledger or {}) do ledger[i] = e end
+  local data = {caravans = json.array(list), depot = d and d.id or -1, goods = json.array(goods), goods_items = n,
+                want = srcs(want), sell = srcs(sell), ledger = json.array(ledger), done = st.done}
+  -- the reply stays within 8 KB: older ledger entries go first, then the cheapest goods kinds
+  while true do
+    local ok, enc = pcall(json.encode, data)
+    if not ok or #enc <= 7500 then break end
+    if #ledger > 1 then table.remove(ledger) elseif #goods > 0 then table.remove(goods) else break end
+  end
+  return true, msg, data
 end
 
 M.on = {

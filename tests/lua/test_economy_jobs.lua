@@ -170,7 +170,8 @@ T.test('FR-40: ids of dead or departed citizens leave every work detail; workloa
     W.subdefs[1] = {id = 'ITEM_WEAPON_PICK', skill_melee = df.job_skill.MINING, skill_ranged = -1}
     W.subdefs[2] = {id = 'ITEM_WEAPON_AXE_BATTLE', skill_melee = df.job_skill.AXE, skill_ranged = -1}
     F.item(W, 'WEAPON', {subtype = 1})
-    F.item(W, 'WEAPON', {subtype = 1, flags = {in_inventory = true}})
+    dfhack.items.getHolderUnit = function(it) return it._carrier end
+    F.item(W, 'WEAPON', {subtype = 1, flags = {in_inventory = true}, _carrier = W.unit(2)})   -- a miner's pick
     F.item(W, 'WEAPON', {subtype = 2})
   end}
   days(W, 1)
