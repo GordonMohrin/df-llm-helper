@@ -6,10 +6,10 @@
     main(argv)                                  # python -m dfpilot.lint [PATH ...] | --cmd STR | --config
 
 Roles (CONTRACTS §1.4): only dfllm/act.lua writes df.* / DF vectors and calls mutating APIs or commands;
-only dfllm/sense.lua and dfllm/snapshot.lua iterate units or read tiles; only selftest.lua's M.exec loads
-code. dfllm/util/k_mock.lua and tests/** are exempt (test doubles). Rules that hold everywhere, act.lua
-included: no item/unit creation, no removeJob outside act.cancel_own_lever_job, no hidden-tile or aquifer
-reads, no --instant, no teleport, no writes to hidden, skills, body, pos, timers or labors, no blocked
+only dfllm/sense.lua and dfllm/snapshot.lua iterate units or read tiles (dfllm/seal.lua reads tiles too); only
+selftest.lua's M.exec loads code. dfllm/util/k_mock.lua and tests/** are exempt (test doubles). Rules that hold
+everywhere, act.lua included: no item/unit creation, no removeJob outside act.cancel_own_lever_job, no hidden-tile
+or aquifer reads, no --instant, no teleport, no writes to hidden, skills, body, pos, timers or labors, no blocked
 commands. Aliases are followed: `local W = df.global.world` (W.units = world.units), `S.x = df.global`.
 The shell policy fails closed: any dfhack-run word outside a mention-only command (echo, grep, git, ...)
 is a call, also behind wrappers, variables, aliases, $( ), backticks, heredocs and -c/-e code strings.
@@ -153,7 +153,7 @@ LUA_RULES = {
     "command": "running commands or simulating input outside act.lua (use K.act.run)",
     "script": "reqscript/script_environment outside act.lua",
     "unit-iter": "unit iteration outside sense.lua/snapshot.lua (use K.census or df.unit.find(id))",
-    "tile-read": "tile/map read outside sense.lua/snapshot.lua (use K.call('snapshot','tile',...))",
+    "tile-read": "tile/map read outside sense.lua/snapshot.lua/seal.lua (use K.call('snapshot','tile',...))",
     "create": "item/unit creation (armok)",
     "remove-job": "removeJob outside act.cancel_own_lever_job",
     "hidden-write": "writing a hidden flag (reveals tiles/units)",
@@ -171,7 +171,7 @@ LUA_RULES = {
     "not-allowlisted": "act.run command or arguments not in config/allowlist.json",
     "owned-actuator": "act.run of a command that has a dedicated, owner-checked act function",
     "dynamic-code": "load/loadstring/dofile/loadfile outside selftest.lua's M.exec (bypasses every rule)",
-    "visibility": "sense/snapshot reads units or tiles without the visibility/revealed check",
+    "visibility": "sense/snapshot/seal reads units or tiles without the visibility/revealed check",
     "perf-loop": "items.all/buildings.all/reqscript/require inside a loop",
     "parse": "Lua syntax error (file not checked)",
     "io": "file missing or unreadable",
@@ -243,7 +243,7 @@ def _kind_of(parts: list[str]) -> str:
 
 def _role(name: str) -> str:
     p = Path(str(name).replace("\\", "/"))
-    return p.stem if p.parent.name == "dfllm" and p.stem in ("act", "sense", "snapshot", "selftest") else ""
+    return p.stem if p.parent.name == "dfllm" and p.stem in ("act", "sense", "snapshot", "seal", "selftest") else ""
 
 
 def _exempt(path: Path) -> bool:
@@ -725,7 +725,8 @@ class _Lint:
             # live L2: the lever link screen offers only mechanisms the mechanic can reach (it warns
             # need_accessible_mechanism); act.link_lever asks the walk groups the same question
             reach = q == "dfhack.maps.canWalkBetween" and self.role == "act" and self.in_func("free_mechanisms")
-            if self.role not in ("sense", "snapshot") and not reach:
+            # FR-22/54: seal reads revealed tiles and walk groups for the reach/seal audits (units only by census id)
+            if self.role not in ("sense", "snapshot", "seal") and not reach:
                 self.add(line, "tile-read")
         if self.in_loop() and ((v == "all" and (q.endswith("items.all") or q.endswith("buildings.all")))
                                or q in ("df.item.get_vector", "df.building.get_vector")):
@@ -816,8 +817,8 @@ class _Lint:
                 self.on_str(i)
         if self.role == "sense" and "unit_iter" in self.flags and not {"isVisible", "isHidden"} <= self.flags:
             self.add(1, "visibility", "sense.lua iterates units but never calls both isVisible and isHidden")
-        if self.role == "snapshot" and "tile_read" in self.flags and "hidden" not in self.flags:
-            self.add(1, "visibility", "snapshot.lua reads tiles but never checks designation.hidden")
+        if self.role in ("snapshot", "seal") and "tile_read" in self.flags and "hidden" not in self.flags:
+            self.add(1, "visibility", f"{self.role}.lua reads tiles but never checks designation.hidden")
         return sorted((ln, r, m) for (ln, r), m in self.found.items())
 
 

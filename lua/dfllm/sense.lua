@@ -134,6 +134,8 @@ local function hscan_begin(K, now, armed)
            armed = armed and 1 or 0, geo = g, out_pos = st.out_pos or {},
            count = now.tick - (st.count_tick or -M.COUNT_EVERY) >= M.COUNT_EVERY, animals = {}}
   for _, b in ipairs(g.bridges) do st.hs.near_bridge[b.name] = -1 end
+  local oke, ent, r = K.call('seal', 'entrances')                  -- FR-33: where a wild predator matters
+  if oke and type(ent) == 'table' and #ent > 0 then st.hs.ent, st.hs.ent_r = ent, math.tointeger(r) or 25 end
   st.h_tick = now.tick
 end
 
@@ -172,14 +174,29 @@ local function citizens_group()
   return fort_group, fort_minz
 end
 
-local function predator(u)
+-- FR-33 (Run 9: four dingoes on the open surface held the fort in ALERT for 22 days): outside the fort a wild
+-- predator counts only within hs.ent_r tiles of an entrance (seal.entrances); inside (a roofed tile) always
+local function near_entrance(u, hs)
+  local ent = hs and hs.ent
+  if not ent then return true end                     -- no entrance known: every predator on the group counts
+  local des = dfhack.maps.getTileFlags(u.pos)
+  if des and not des.hidden and not des.outside then return true end
+  local x, y, z = u.pos.x, u.pos.y, u.pos.z
+  for _, p in ipairs(ent) do
+    if math.max(math.abs(x - p[1]), math.abs(y - p[2]), math.abs(z - p[3])) <= hs.ent_r then return true end
+  end
+  return false
+end
+
+local function predator(u, hs)
   local ok, yes = pcall(function()
     local r = df.creature_raw.find(u.race)
     if not (r ~= nil and r.caste[u.caste].flags.LARGE_PREDATOR == true) then return false end
     -- off-map units (pos -30000) crashed DF 53 in getWalkableGroup (live L6): validate first
     if not dfhack.maps.isValidTilePos(u.pos) then return false end
     local g = citizens_group()
-    return g == nil or dfhack.maps.getWalkableGroup(u.pos) == g
+    if not (g == nil or dfhack.maps.getWalkableGroup(u.pos) == g) then return false end
+    return near_entrance(u, hs)
   end)
   return ok and yes == true
 end
@@ -188,7 +205,7 @@ end
 local function consider(hs, u)
   local U = dfhack.units
   local undead = U.isUndead(u)
-  if not (undead or U.isDanger(u) or (not U.isTame(u) and predator(u))) then
+  if not (undead or U.isDanger(u) or (not U.isTame(u) and predator(u, hs))) then
     if hs.count and U.isVisible(u) and not U.isHidden(u) then
       hs.units = hs.units + 1
       animal(hs, u, U)

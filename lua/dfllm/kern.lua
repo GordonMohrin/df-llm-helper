@@ -494,7 +494,8 @@ local function window(st)
   return {ms_s = (ms + secs // 2) // secs, tps = math.max(0, tps), gap = gap, fmax = fmax}
 end
 
-local SHRINK = {'proj', 'mil', 'trade', 'care', 'labor', 'stock', 'ready', 'bridges', 'threat', 'pop', 'phase'}
+local SHRINK = {'proj', 'alert', 'mil', 'trade', 'care', 'labor', 'stock', 'ready', 'bridges', 'threat', 'pop',
+                'phase'}
 
 local function compose(st)
   st.seq = st.seq + 1
@@ -658,7 +659,19 @@ local function kern_verb(st, verb, args, cmd)
   end
   -- inspect
   local what = args.what
-  if not INSPECT[what] then return false, 'bad what' end
+  if not INSPECT[what] then
+    -- module views (M.inspect[what]; seal: reach, entrances, defense, perimeter, refuge)
+    for _, e in ipairs(st.entries) do
+      local h = type(e.M.inspect) == 'table' and type(what) == 'string' and e.M.inspect[what]
+      if type(h) == 'function' then
+        if e.disabled then return false, e.name .. ' disabled' end
+        local r = table.pack(st.call_in(e, 'inspect ' .. what, h, args))
+        if not r[1] then return false, 'handler error' end
+        return r[2], r[3], r[4]
+      end
+    end
+    return false, 'bad what'
+  end
   if what == 'state' then return true, 'state', compose(st)
   elseif what == 'mode' then return true, st.mode, {mode = st.mode, since = st.mode_since}
   elseif what == 'census' then return true, 'census', K.census

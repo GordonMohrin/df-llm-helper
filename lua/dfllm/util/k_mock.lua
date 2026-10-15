@@ -824,6 +824,15 @@ function M.new(opts)
         table.sort(r)
         return true, 'persist', r
       elseif what == 'perf' then return true, 'perf', json.object{} end
+      for _, e in ipairs(W.entries) do            -- module views (M.inspect[what]), like kern
+        local h = type(e.M.inspect) == 'table' and type(what) == 'string' and e.M.inspect[what]
+        if type(h) == 'function' then
+          if e.disabled then return false, e.name .. ' disabled' end
+          local r = packn(call_in(e, 'inspect ' .. what, h, args))
+          if not r[1] then return false, 'handler error' end
+          return r[2], r[3], r[4]
+        end
+      end
       return false, 'bad what'
     end,
     ['module.enable'] = function(args)

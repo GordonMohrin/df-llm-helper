@@ -149,6 +149,8 @@ def line_def(ctx: Ctx) -> str:
         out.append(f"threat {th['vis']} vis" + (" ARMED" if th["armed"] else ""))
     if s.get("bridges"):
         out.append("bridges " + " ".join(f"{b} {v}" for b, v in sorted(s["bridges"].items())))
+    if s.get("alert"):
+        out.append(line_alert(s["alert"]))
     m = s.get("mil")
     if m:
         out.append(f"mil {m['squads']}sq {m['soldiers']}sol worn {m['worn']}% cv {m['cv']} metal {m['metal_pct']}%"
@@ -157,6 +159,15 @@ def line_def(ctx: Ctx) -> str:
     if tr and tr["caravan"]:
         out.append("CARAVAN on map")
     return _join(out)
+
+
+def line_alert(al: dict) -> str:
+    """FR-33/37: the civ-alert burrow (seal's audited choice), its size and the citizens inside it."""
+    b = al["burrow"] or "no confinement (whole fort)"
+    txt = f"alert {b}" + (f" {al['tiles']}t {al['inside']} in" if al["burrow"] else "")
+    if not al["ok"]:
+        txt += f" ({al['want']} refused" + (f": {al['why']}" if al.get("why") else "") + ")"
+    return txt
 
 
 def line_proj(ctx: Ctx, n: int = 3) -> str:

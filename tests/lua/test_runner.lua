@@ -935,4 +935,44 @@ T.test('golden fortcore stage 1: every chunk applied once, probes per slice boun
   T.eq(#W.K.manifest().workshops, 7, 'carpenter, mason, craftsdwarf, still, kitchen, mechanics (live L1), butcher (live L6)')
 end)
 
+T.test('FR-22: every build chunk tells seal its cells before quickfort runs (the reach baseline and blame)', function()
+  local W = fresh{tag = 'closing'}
+  local calls = {}
+  W.load{name = 'seal', every = {ticks = 100000}, closing = function(K, proj, tpl, class, ch)
+    calls[#calls + 1] = {proj, tpl, class, ch.pos, #ch.cells, #W.qf}
+    return 1
+  end}
+  H.place(W, 'c1', H.doc{class = 'defense'})
+  H.settle(W); W.frame(1); H.settle(W)
+  H.dig(W)
+  H.runs(W, 2)
+  T.eq(#calls, 1, 'one build chunk')
+  T.eq({calls[1][1], calls[1][2], calls[1][3], calls[1][4], calls[1][5]}, {'c1', 'bedrooms', 'defense', {10, 10, 100}, 3})
+  local runs = 0
+  for i = 1, calls[1][6] do if W.qf[i].mode == 'build' and W.qf[i].command ~= 'orders' then runs = runs + 1 end end
+  T.eq(runs, 0, 'before the build run')
+end)
+
+T.test('FR-56: runner.repair queues a defense project of the lost cells (min-corner chunks, no orders)', function()
+  local W = fresh{tag = 'repair'}
+  H.floor(W, 40, 40, 100, 45, 45)
+  local okc, ok, id = W.K.call('runner', 'repair', {{44, 41, 100, 'Cw'}, {40, 40, 100, 'd'}, {42, 45, 100, 'gw(3x1)'}},
+                               'perimeter after the siege')
+  T.ok(okc and ok)
+  T.ok(type(id) == 'string' and id:match('^rp%d+$'), tostring(id))
+  local d = W.K.persist.get('bp.' .. id)
+  T.eq({d.tpl, d.class, d.site, #d.stages, d.stages[1].mode, d.stages[1].orders, d.stages[1].defense},
+       {'repair', 'defense', 'repair', 1, 'build', 0, 1})
+  T.eq(d.stages[1].chunks, {{pos = {40, 40, 100}, cells = {{0, 0, 0, 'd'}, {4, 1, 0, 'Cw'}, {2, 5, 0, 'gw(3x1)'}}}})
+  T.eq({H.proj(W, id).tpl, H.proj(W, id).prio}, {'repair', 2})
+  H.runs(W, 1)
+  local runs = H.qf_calls(W, 'build', 'run')
+  T.eq(#runs, 1)
+  T.eq(runs[1].pos, {40, 40, 100})
+  local _, ok2, again = W.K.call('runner', 'repair', {{44, 41, 100, 'Cw'}}, 'x')
+  T.ok(ok2 and again ~= id, 'a second repair gets its own id')
+  T.eq({W.K.call('runner', 'repair', {}, 'x')}, {true, false, 'need 1-500 cells'})
+  T.eq({W.K.call('runner', 'repair', {{1, 2, 'x', 'Cw'}}, 'x')}, {true, false, 'bad cell 1'})
+end)
+
 T.done()

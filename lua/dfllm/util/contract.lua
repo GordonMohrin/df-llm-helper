@@ -35,6 +35,7 @@ C.MODULES = {
   {name = 'arbiter',   wp = 'WP1', critical = true, every = {ms = 500}},
   {name = 'runner',    wp = 'WP7', every = {ticks = 600}},
   {name = 'snapshot',  wp = 'WP7', every = {ticks = 100}},
+  {name = 'seal',      wp = 'WP7', every = {ticks = 50}},
   {name = 'economy',   wp = 'WP8', every = {ticks = 1200}},
   {name = 'care',      wp = 'WP8', every = {ticks = 1200}},
   {name = 'water',     wp = 'WP8', every = {ticks = 1200}},
@@ -53,6 +54,8 @@ C.EVENTS = {
   PERF_DEGRADED = {cls = 'A', by = 'perf'}, DECISION_NEEDED = {cls = 'A', by = 'any'},
   PLAN_EXHAUSTED = {cls = 'A', by = 'runner'}, PROJECT_BLOCKED = {cls = 'A', by = 'runner'},
   YEAR_REVIEW = {cls = 'A', by = 'kern'},
+  CUTOFF = {cls = 'A', by = 'seal'}, PERIMETER_BROKEN = {cls = 'A', by = 'seal'},
+  SEAL_LEAK = {cls = 'A', by = 'seal'}, REFUGE_FAIL = {cls = 'A', by = 'seal'},
   -- B: digest
   SIEGE_START = {cls = 'B', by = 'siege'}, ALERT_START = {cls = 'B', by = 'siege'},
   ALERT_END = {cls = 'B', by = 'siege'}, INVASION = {cls = 'B', by = 'threat'},
@@ -68,6 +71,7 @@ C.EVENTS = {
   PROJECT_DONE = {cls = 'B', by = 'runner'}, PROJECT_REQUEST = {cls = 'B', by = 'any'},
   PHASE = {cls = 'B', by = 'runner'}, PAUSE = {cls = 'B', by = 'arbiter'},
   DEATH = {cls = 'B', by = 'care'}, ACT_FAIL = {cls = 'B', by = 'kern'},
+  SEAL = {cls = 'B', by = 'seal'}, REACH = {cls = 'B', by = 'seal'},
   -- C: log only
   SIEGE_STATUS = {cls = 'C', by = 'siege'}, SEASON = {cls = 'C', by = 'kern'},
   PROJECT_STAGE = {cls = 'C', by = 'runner'}, MODE = {cls = 'C', by = 'kern'},
@@ -110,6 +114,7 @@ C.ACT = {
   squad_routine = {'military'}, squad_order = {'military'}, squad_uniform = {'military'},
   squad_unequip = {'military'}, animal_slaughter = {'economy'}, zone_remove = {'runner'}, manager_office = {'economy'}, pond_remove = {'water'},
   pull = {'gate'}, cancel_own_lever_job = {'gate'}, link_lever = {'gate'}, burrow_units = {'gate'},
+  burrow_tiles = {'seal'},
   popcap = {'readiness'},
   quickfort = {'runner'},
   orders_import = {'economy'}, orders = {'economy'}, workorder = {'economy', 'water'},
@@ -130,7 +135,7 @@ C.STATE_OWNERS = {
   ['stock.drink_d'] = 'economy', ['stock.food_d'] = 'economy', ['stock.meals'] = 'economy',
   ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['labor.*'] = 'economy',
   ['threat.*'] = 'threat', ['bridges'] = 'gate', ['owners.*'] = 'arbiter',
-  ['mil.*'] = 'military', ['trade.*'] = 'trade',
+  ['mil.*'] = 'military', ['trade.*'] = 'trade', ['alert.*'] = 'seal',
 }
 
 -- Persistent site-data keys (§10). Stored as dfhack.persistent site strings encoded with util/json.
@@ -240,6 +245,7 @@ C.STATE_SPEC = obj({
                 tempo = str(nil, {'mode', 'inbox', 'brake'})}),
   mil = obj({squads = NAT, soldiers = NAT, worn = PCT, cv = NAT, metal_pct = PCT, on_station = NAT}),
   trade = obj({caravan = FLAG, ratio = NAT, done = NAT}),
+  alert = obj({want = str(24), burrow = str(24), tiles = NAT, inside = NAT, ok = FLAG}, {why = str(40)}),
 })
 
 -- string formats (§1.1); explicit byte ranges, so LC_CTYPE cannot change them

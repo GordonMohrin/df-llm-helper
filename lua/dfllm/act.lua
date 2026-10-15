@@ -121,6 +121,8 @@ local function describe(fn, args, ms)
     end
     a = {{mode = p.mode, command = p.command or 'run', pos = p.pos, cells = n, ms = ms,
           dry = p.dry_run == true and 1 or nil}}
+  elseif fn == 'burrow_tiles' and type(a[2]) == 'table' then
+    a = {a[1], {tiles = #a[2], first = a[2][1]}, a[3]}
   end
   local ok, s = pcall(json.encode, json.array(a))
   if not ok then s = '"?"' end
@@ -996,6 +998,40 @@ local function impls(state)
       if not dfhack.burrows.isAssignedUnit(b, u) then dfhack.burrows.setAssignedUnit(b, u, true) end
     end
     return true, #units
+  end
+
+  -- burrows screen > add burrow / paint (FR-33, seal's whole-interior alert burrow): the tiles {{x,y,z},...} are
+  -- added to the burrow (dfhack.burrows.setAssignedTile, Lua API.txt:2436; the screen's paint brush). With `create`
+  -- a missing burrow is made the way the screen's "add burrow" does (v1 Run 4 created 'Zuflucht' the same way).
+  -- Returns the number of tiles newly added.
+  function I.burrow_tiles(name, tiles, create)
+    if type(name) ~= 'string' or not name:match('^[%w%+%-_ ]+$') or #name > 40 then return false, 'bad burrow name' end
+    if type(tiles) ~= 'table' or #tiles > 2000 then return false, 'need at most 2000 tiles' end
+    local b = dfhack.burrows.findByName(name)
+    if not b then
+      if not create then return false, 'no burrow ' .. name end
+      local list = df.global.plotinfo.burrows
+      b = df.burrow:new()
+      b.id = list.next_id
+      list.next_id = b.id + 1
+      b.name = name
+      b.symbol_index, b.texture_r, b.texture_g, b.texture_b = 5, 60, 160, 255
+      b.texture_br, b.texture_bg, b.texture_bb = 195, 95, 0
+      list.list:insert('#', b)
+    end
+    local n = 0
+    for _, p in ipairs(tiles) do
+      local x, y, z = xyz(p)
+      x, y, z = int(x), int(y), int(z)
+      if x and y and z then
+        local pos = xyz2pos(x, y, z)
+        if not dfhack.burrows.isAssignedTile(b, pos) then
+          dfhack.burrows.setAssignedTile(b, pos, true)
+          n = n + 1
+        end
+      end
+    end
+    return true, n
   end
 
   -- the only job removal in v2 (DESIGN §5.9): our own queued pull (Lua API.txt:1336)

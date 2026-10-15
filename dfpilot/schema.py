@@ -50,6 +50,7 @@ MODULES = [
     ("military", "WP6", False, {"ticks": 3600}), ("drill", "WP6", False, {"ticks": 600}),
     ("readiness", "WP6", False, {"ticks": 33600}), ("arbiter", "WP1", True, {"ms": 500}),
     ("runner", "WP7", False, {"ticks": 600}), ("snapshot", "WP7", False, {"ticks": 100}),
+    ("seal", "WP7", False, {"ticks": 50}),
     ("economy", "WP8", False, {"ticks": 1200}), ("care", "WP8", False, {"ticks": 1200}),
     ("water", "WP8", False, {"ticks": 1200}),
     ("trade", "WP9", False, {"ticks": 100}), ("baseline", "WP8", False, {"ticks": 33600}),
@@ -70,6 +71,7 @@ ACT = {
     "squad_routine": ["military"], "squad_order": ["military"], "squad_uniform": ["military"],
     "squad_unequip": ["military"], "animal_slaughter": ["economy"], "zone_remove": ["runner"], "manager_office": ["economy"], "pond_remove": ["water"],
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
+    "burrow_tiles": ["seal"],
     "popcap": ["readiness"],
     "quickfort": ["runner"],
     "orders_import": ["economy"], "orders": ["economy"], "workorder": ["economy", "water"],
@@ -87,6 +89,7 @@ STATE_OWNERS = {
     "stock.drink_d": "economy", "stock.food_d": "economy", "stock.meals": "economy",
     "stock.hosp_water": "care", "care.*": "care", "labor.*": "economy",
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
+    "alert.*": "seal",
 }
 
 # kernel fault and slowness rules (CONTRACTS §3.3.5-3.3.6), mirrors contract.KERN
@@ -407,6 +410,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
     "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i")),
     "YEAR_REVIEW": ("A", "kern", _d(opt="year:i")),
+    "CUTOFF": ("A", "seal", _d("cls:s n:i", "pos:p why:s grp:i main:i")),
+    "PERIMETER_BROKEN": ("A", "seal", _d("n:i", "pos:p kinds:sa requeued:i why:s")),
+    "SEAL_LEAK": ("A", "seal", _d("routes:i", "pos:p bld:s state:s why:s")),
+    "REFUGE_FAIL": ("A", "seal", _d("burrow:s", "fallback:s why:s tiles:i inside:i mode:s")),
     "SIEGE_START": ("B", "siege", _d(opt="vis:i inv:i great:i why:s")),
     "ALERT_START": ("B", "siege", _d(opt="vis:i")),
     "ALERT_END": ("B", "siege", _d(opt="vis:i")),
@@ -435,6 +442,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "PAUSE": ("B", "arbiter", _d("on:f", "by:s ttl:i")),
     "DEATH": ("B", "care", _d(opt="unit:i citizen:f cause:s")),
     "ACT_FAIL": ("B", "kern", _d("fn:s", "err:s module:s")),
+    "SEAL": ("B", "seal", _d(opt="routes:i pos:p why:s sealed:f")),
+    "REACH": ("B", "seal", _d(opt="flags:sa cut:i stairs:i")),
     "SIEGE_STATUS": ("C", "siege", _d(opt="vis:i worn:i on_station:i deaths:i captures:i")),
     "SEASON": ("C", "kern", _d(opt="year:i season:i")),
     "PROJECT_STAGE": ("C", "runner", _d("proj:s", "stage:s pct:i")),
@@ -469,7 +478,8 @@ VERB_ARGS: dict[str, Obj] = {
                              "approve": Const(True)}),
     "lever": Obj(req={"bridge": BRIDGE, "want": Str(enum=["up", "down"])}),
     "inspect": Obj(req={"what": Str(enum=["state", "modules", "census", "manifest", "projects", "persist",
-                                          "perf", "mode", "plan"])}, opt={"key": Str(maxbytes=80)}),
+                                          "perf", "mode", "plan", "reach", "entrances", "defense", "perimeter",
+                                          "refuge"])}, opt={"key": Str(maxbytes=80)}),
     "selftest": Obj(opt={"suite": Str(enum=["quick", "full"])}),
     "module.enable": Obj(req={"module": MODULE}),
 }
@@ -518,7 +528,9 @@ STATE = Obj(
                             "tempo": Str(enum=["mode", "inbox", "brake"])}),
          "mil": Obj(req={"squads": NAT, "soldiers": NAT, "worn": PCT, "cv": NAT, "metal_pct": PCT,
                          "on_station": NAT}),
-         "trade": Obj(req={"caravan": FLAG, "ratio": NAT, "done": NAT})})
+         "trade": Obj(req={"caravan": FLAG, "ratio": NAT, "done": NAT}),
+         "alert": Obj(req={"want": Str(maxbytes=24), "burrow": Str(maxbytes=24), "tiles": NAT, "inside": NAT,
+                           "ok": FLAG}, opt={"why": Str(maxbytes=40)})})
 
 HEARTBEAT = Obj(req={"v": Const(V), "wall": NAT, "frame": NAT, "tick": TICK, "paused": Bool(), "mode": MODE,
                      "seq": NAT})
