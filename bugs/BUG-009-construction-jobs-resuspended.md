@@ -2,7 +2,7 @@
 Status: open (cause found 2026-10-15: forbidden items lying on the building footprint, see Cause)
 Severity: high (workshops, a bed, the trade depot and the coffins stay unbuilt; 16 of 17 civilians idle; every caravan lost; FR-16 "resume" has no effect)
 Found: 2026-10-15, Run 9 save autosave 1 (y363-367), dfpilot main 3edc277, live test by Claude
-Module: `lua/dfllm/economy.lua:2999` (FR-16 daily resume); the cause that re-suspends is not yet known
+Module: `lua/dfllm/economy.lua:2999` (FR-16 daily resume); the cause is items blocking the site (below)
 
 ## Reproduction
 Placed with quickfort: a Masons workshop (42,59,109), a Still (42,62,109); already in the save: Trade Depot (69,44,118), Bed (57,73,110).
@@ -30,10 +30,6 @@ A forced `dfhack.job.addWorker` without unforbidding did nothing: the worker was
 
 ## Not the cause
 suspendmanager (disabled, same result); items forbidden (blocks: 250 free); labors; reachability (`canWalkBetween` true).
-
-## Suspects
-buildingplan keeps the jobs of planned buildings suspended; DF re-suspends a job when a builder fails to path; a burrow or work-detail
-restriction on the builders; the kernel itself (acts on construction jobs from `economy`).
 
 ## Fix proposal
 In the daily FR-16 pass, for every suspended ConstructBuilding job scan the building footprint (x1..x2, y1..y2, z) for items on the ground:
