@@ -75,11 +75,26 @@ DF restarted (`tools/win/start_df_desktop1.ps1`), loaded **autosave 1** (Udosodd
   unforbidden (BUG-009); the depot site had 41 forbidden items.
 - `autolabor` was found enabled in legacy mode after the load (BUG-010).
 
-**Not yet seen live (waiting for a real event, no cheats used):** ARRIVAL/INVASION popup text recognition, clock clamp 30/100
-t/s, bridges up (`lever_latency_s`), door lockdown, LOCKDOWN_END, SEAL_LEAK/PERIMETER_BROKEN after a siege, HOSPITAL_DRY,
-MOOD_RISK, embark panel.
+**Forced scenarios (Gordon, 2026-10-15 14:50: "erzwing eine Belagerung, der Spielstand ist egal, das gilt auch fuer andere Testszenarios"):**
+`modtools/create-unit` is broken in 53.16 (`world.arena_spawn` is gone) and `force` only knows timed events (Caravan, Migrants, ...), so no real
+invaders could be spawned. The arrival text was injected as a popup instead; that is exactly what the kernel's recogniser reads:
+```
+dfhack-run lua "dfhack.gui.showPopupAnnouncement('A vile force of darkness has arrived!  The army is commanded by the goblin Test Commander. ...', COLOR_LIGHTRED)"
+```
+Timeline (2 s probe, `scratchpad/siege_probe.py`; run 2 started with all four drawbridges lowered by hand):
+- t+0 s popup injected; t+2 s `DEFCON 2`, `ARRIVAL #10727 siege (popup)` in alarm.txt, `clock: held 30 t/s, reason arrival:siege`, `lockdown arrival:siege` (FR-51/52 recognition + clamp confirmed).
+- `arbiter act.dismiss_popup ["siege"]` closes the popup in the same tick.
+- Bridges: 0 -> 2 up after 6 s, 3 after 12 s, 4 after 16 s (`lever_latency_s 14` in `status`, 801 ticks). Gate events `GATE X160xx moving/up` (FR-54 confirmed;
+  the latency is dominated by the dwarves walking to the four levers).
+- `SEAL LEAK` events for the three real openings with `routes=3 sealed=0` (FR-37 confirmed), `SEAL ... open route ... to the map edge without a roofed tile`.
+- After `dfllm ack`: `LOCKDOWN_END lockdown over (arrival:siege): threat 0 for 2 days; 0 doors opened`, clock free again (cap 500), DEFCON 5, the kernel lowered
+  the four bridges again (`GATE ... down`). Without ack the clamp holds (30 t/s, the unacked interrupt keeps the lockdown).
+- Problems: the lockdown forbade **0 doors** although the fort has 62 (BUG-012, "0 entrances"); `act.civ_alert true` is followed 12 ticks later by `act.civ_alert false`
+  and `civ_alert=0` in every probe sample (BUG-011, with BUG-001 behind the refuge refusal). So bridges and clock work, door lockdown and civil alert do not.
 
-**Problems found (one file per bug in `bugs/`, BUG-001..BUG-010, index `bugs/README.md`; FR-59..FR-63 in docs/feature-requests/README.md):**
+**Not yet seen live:** an enemy inside the fort (needs a way to spawn units), PERIMETER_BROKEN after a siege (BUG-002), HOSPITAL_DRY, MOOD_RISK, embark panel.
+
+**Problems found (one file per bug in `bugs/`, BUG-001..BUG-012, index `bugs/README.md`; FR-59..FR-63 in docs/feature-requests/README.md):**
 1. **FR-59** `seal.lua` SKIP contains `in_inventory`, so every drink/food/seed unit stored in a barrel or bag is ignored:
    `inspect reach` shows `drink/food/seeds groups: []`, the refuge audit says `drink 0<7, food 0<7` for Kern+ and Innen+
    although Lua shows 1362 drink units, all inside Kern+, none forbidden; CUTOFF for food/drink can never fire.
