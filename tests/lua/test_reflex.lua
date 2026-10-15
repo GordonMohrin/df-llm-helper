@@ -259,6 +259,50 @@ T.test('NO_DEPOT: the merchants-need-a-depot report and popup are an interrupt, 
   T.eq({W.state().alarm.lock, #S.pulls(W)}, {0, 0})
 end)
 
+T.test('BUG-008: one NO_DEPOT per caravan visit; a new caravan is told, the same one never again', function()
+  local W = setup{tag = 'nodepot2', manifest = false}
+  df.caravan_state = {T_trade_state = {[0] = 'None', [1] = 'Approaching', [2] = 'AtDepot', [3] = 'Leaving'}}
+  df.global.plotinfo.caravans = kmock.vec{{entity = 77, trade_state = 1}}
+  local function need() W.event('REPORT', {type = 'MERCHANTS_NEED_DEPOT', text = 'The merchants need a trade depot.'}) end
+  need()
+  S.run(W, 30)
+  T.eq(#events(W, 'NO_DEPOT'), 1)
+  for _ = 1, 4 do                                  -- DF repeats the notice while the merchants wait (days apart)
+    S.run(W, 3000)
+    W.ms = W.ms + 700000
+    need()
+  end
+  S.run(W, 30)
+  T.eq(#events(W, 'NO_DEPOT'), 1, 'the same visit: never again')
+  df.global.plotinfo.caravans:insert('#', {entity = 88, trade_state = 1})
+  need()
+  S.run(W, 30)
+  T.eq(#events(W, 'NO_DEPOT'), 2, 'a second caravan on the map')
+  df.global.plotinfo.caravans = kmock.vec{}         -- both left
+  S.run(W, 200)
+  df.global.plotinfo.caravans = kmock.vec{{entity = 77, trade_state = 1}}
+  need()
+  S.run(W, 30)
+  T.eq(#events(W, 'NO_DEPOT'), 3, 'the next visit of the first civ')
+  T.eq(W.K.persist.get('m.reflex').depot.ents, {['77'] = 1})
+  df.global.plotinfo.caravans, df.caravan_state = nil, nil
+end)
+
+T.test('BUG-008: without a readable caravan NO_DEPOT repeats only after max(7 game days, 10 min)', function()
+  local W = setup{tag = 'nodepot3', manifest = false}
+  local function need() W.event('REPORT', {type = 'MERCHANTS_NEED_DEPOT', text = 'The merchants need a trade depot.'}) end
+  need()
+  S.run(W, 30)
+  S.run(W, 9000)
+  need()
+  S.run(W, 30)
+  T.eq(#events(W, 'NO_DEPOT'), 1, '7 game days but seconds of wall clock')
+  W.ms = W.ms + 600000
+  need()
+  S.run(W, 30)
+  T.eq(#events(W, 'NO_DEPOT'), 2)
+end)
+
 T.test('fail-open: without the reflex module the arbiter holds the clock on a threat popup and says so', function()
   local W = setup{tag = 'noreflex', manifest = false, reflex = false}
   popup(W, 'Snatcher! Protect the children!')
