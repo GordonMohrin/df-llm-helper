@@ -182,6 +182,7 @@
   "mood_thirst": 30000,
   "mood_hunger": 50000,
   "mood_risk_every": 2400,
+  "wake_wall_s": 600,
   "coffins": true,
   "coffin_reserve": 10,
   "coffin_batch": 30,

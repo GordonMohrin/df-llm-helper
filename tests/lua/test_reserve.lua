@@ -484,6 +484,35 @@ T.test('reserve: a held bone near the approach is no corpse to dump', function()
   df.global.plotinfo.economic_stone = nil
 end)
 
+-- a building not built yet (a planned construction) over a level rect, in the IN_PLAY vector
+local function site(W, x1, y1, x2, y2, z)
+  return F.building(W, 'IN_PLAY', {x1 = x1, y1 = y1, x2 = x2, y2 = y2, z = z,
+                                   getBuildStage = function() return 0 end, getMaxBuildStage = function() return 1 end})
+end
+
+T.test('BUG-009: the reserve never forbids an item on a building site', function()
+  local W = fort{economy = true, reserve = {share = {}, per_run = 100}, setup = function(W) site(W, 9, 9, 11, 11, 5) end}
+  CW.day(W, 2)
+  T.eq(CW.flags(W, 'forbid'), {}, 'every pile item lies on the planned building: none held')
+  T.eq(CW.held(W), {})
+  df.global.plotinfo.economic_stone = nil
+end)
+
+T.test('BUG-009: a held item on a building site (a building placed over the reserve pile) is let go', function()
+  local persist = {['m.care'] = {v = 2, dead = {}, deaths = {}, petitions = {}, reserve = {held = {logs = {8801, 8802}}}}}
+  local W, Cm = CW.world{phase = 'P1', persist = persist, census_i = {wood = 40}, setup = function(W)
+    F.item(W, 'WOOD', {id = 8801, flags = {forbid = true}, _pos = {40, 40, 5}})
+    F.item(W, 'WOOD', {id = 8802, flags = {forbid = true}, _pos = {44, 40, 5}})
+    site(W, 39, 39, 41, 41, 5)
+    F.building(W, 'IN_PLAY', {x1 = 43, y1 = 39, x2 = 45, y2 = 41, z = 5})       -- built: no site
+  end}
+  W.run(1)
+  T.eq(CW.flags(W, 'forbid'), {{8801, 'forbid', false}})
+  T.eq(CW.held(W).logs, {8802})
+  local h = Cm.held_ids(W.K)
+  T.eq({h[8801], h[8802]}, {nil, true}, 'economy reads the holds through care.held_ids')
+end)
+
 T.test('hooks through K.call: economy reads care.reserved and care.mood_wants', function()
   local seen = {}
   local W = fort{reserve = {per_run = 100}, setup = function(W)

@@ -51,7 +51,7 @@ local function entombs(W)
 end
 
 ---------------------------------------------------------------- GHOSTS (FR-04/26)
-T.test('GHOSTS (A) as soon as a citizen ghost exists, with the cause; again when the set grows, else weekly', function()
+T.test('GHOSTS (A) as soon as a citizen ghost exists; BUG-008: again only for news, after max(7 days, 10 min)', function()
   local W = world{cit = 6}
   dead(W, 2, true)                                            -- no body anywhere: a memorial slab is the way
   W.run(2)
@@ -61,17 +61,40 @@ T.test('GHOSTS (A) as soon as a citizen ghost exists, with the cause; again when
   T.eq({g[1].d.ghosts, g[1].d.old, g[1].d.units, g[1].d.causes}, {1, 0, {2}, {'2:no_body'}})
   T.ok(g[1].msg:find('slab for no_body', 1, true) and g[1].msg:find('inspect tombs', 1, true), g[1].msg)
   CW.day(W)
-  T.eq(#W.find_events('GHOSTS'), 1, 'the same set: not again within a week')
+  T.eq(#W.find_events('GHOSTS'), 1, 'the same set: not again')
   dead(W, 3, true)
   corpse(W, 3)
+  CW.day(W, 8)
+  T.eq(#W.find_events('GHOSTS'), 1, 'a new ghost after 8 game days but 2 wall seconds: waits for the wall clock')
+  W.ms = W.ms + 600000                                        -- 10 real minutes later (timestream speed)
   CW.day(W)
   g = W.find_events('GHOSTS')
-  T.eq(#g, 2, 'a new ghost: at once')
+  T.eq(#g, 2, 'the set grew and both clocks passed')
   T.eq({g[2].d.ghosts, g[2].d.corpses, g[2].d.units}, {2, 1, {2, 3}})
   T.eq(g[2].d.causes[2], '3:no_coffin')
-  CW.day(W, 7)
-  T.eq(#W.find_events('GHOSTS'), 3, 'weekly while it stands')
+  CW.day(W, 8)
+  W.ms = W.ms + 600000
+  CW.day(W)
+  T.eq(#W.find_events('GHOSTS'), 2, 'an unchanged set is never repeated (Run 9: x9..x31 of the same text)')
   T.ok(#json.encode(g[2].d) < 1024)
+end)
+
+T.test('BUG-008: a new episode after the set emptied waits for the cadence of the last announcement', function()
+  local W = world{cit = 6}
+  dead(W, 2, true)
+  W.run(2)
+  T.eq(#W.find_events('GHOSTS'), 1)
+  W.unit(2)._m.ghost = false                                  -- laid to rest (a slab)
+  CW.day(W)
+  dead(W, 4, true)
+  CW.day(W)
+  T.eq(#W.find_events('GHOSTS'), 1, 'within the cadence')
+  CW.day(W, 7)
+  W.ms = W.ms + 600000
+  CW.day(W)
+  local g = W.find_events('GHOSTS')
+  T.eq(#g, 2)
+  T.eq(g[2].d.units, {4})
 end)
 
 T.test('GHOSTS for a citizen body unburied longer than corpse_old (3 days), no ghost needed', function()
@@ -292,6 +315,51 @@ T.test('inspect what=tombs: before the first run, then the lists; <= 8 KB with 2
   T.eq(bad.ok, false)
 end)
 
+---------------------------------------------------------------- BUG-003: inspect tombs after burials
+T.test('BUG-003: a body with remains in a coffin is buried; inspect keeps the acts of the entomb run', function()
+  local cof
+  local W = world{cit = 6, setup = function(W)
+    cof = CW.tomb(W, 30, 10, 5)                                 -- a free usable tomb
+    W.kill(3)
+  end}
+  W.event('UNIT_DEATH', {unit = 3})
+  local body = corpse(W, 3, {5, 5, 5})
+  local part = corpse(W, 3, {6, 5, 5})                          -- a severed part of the same body
+  W.run(2)
+  T.eq(entombs(W), {'entomb --unit 3 --haul-now'})
+  CW.day(W)                                                     -- the next run has nothing to do
+  local d, msg = inspect(W)
+  T.eq(d.acts.entombed, 0, 'this run')
+  T.eq({d.last.assigned, d.last.entombed}, {1, 1}, 'the acts of the entomb run stay visible')
+  T.ok(msg:find('entomb 1', 1, true), msg)
+  T.eq(d.unburied_n, 1)
+  body.flags.in_building, body._holder = true, cof              -- the burial job laid the corpse in the coffin
+  CW.day(W)
+  d, msg = inspect(W)
+  T.eq({d.unburied_n, d.buried_loose}, {0, 1}, 'the loose part keeps nobody unburied')
+  T.ok(msg:find('0 unburied', 1, true), msg)
+  T.eq(part.flags.forbid, nil)
+end)
+
+T.test('BUG-003: inspect rebuilds an index older than one care period (read-only)', function()
+  local W, Cm = world{cit = 6, setup = function(W) CW.tomb(W, 30, 10, 5, {unit = 3}) end}
+  local body
+  W.run(2)
+  local d = inspect(W)
+  T.eq({d.unburied_n, d.fresh}, {0, nil})
+  Cm.every = {ticks = 10 ^ 7}                                   -- care stops running (demoted, faulting, ...)
+  W.kill(3)
+  body = corpse(W, 3, {5, 5, 5})
+  W.run(1300, {skip = 100})
+  local acts = #W.acts
+  d = inspect(W)
+  T.eq({d.unburied_n, d.fresh}, {1, 1}, 'rebuilt: the new body is listed')
+  T.eq(#W.acts, acts, 'the rebuild writes nothing')
+  body.flags.in_building, body._holder = true, W.buildings[1]
+  d = inspect(W)
+  T.eq(d.unburied_n, 0, 'buried in the coffin')
+end)
+
 ---------------------------------------------------------------- doctors and hospital posts (FR-48)
 local function medic_world(extra)
   return world{cit = 10, setup = function(W)
@@ -378,7 +446,7 @@ T.test('FR-44: a mood that starts without its materials raises MOOD_RISK (A) wit
   T.eq(#W.find_events('MOOD_RISK'), 1, 'the start check runs once per mood')
 end)
 
-T.test('FR-44: a moody dwarf past the thirst or hunger line: MOOD_RISK every 2 days, the job is never touched', function()
+T.test('FR-44: a moody dwarf past the thirst or hunger line: MOOD_RISK at once, again only for the other cause after max(2 days, 10 min)', function()
   local W = CW.world{setup = function(W)
     local u = W.unit(1)
     u.mood = df.mood_type.Possessed
@@ -394,14 +462,18 @@ T.test('FR-44: a moody dwarf past the thirst or hunger line: MOOD_RISK every 2 d
   T.eq(#r, 2)
   T.eq({r[2].d.why, r[2].d.thirst, r[2].d.missing}, {'thirst', 31000, {'bone'}})
   T.ok(r[2].msg:find('cannot be cancelled', 1, true) and r[2].msg:find('missing bone', 1, true), r[2].msg)
+  CW.day(W, 3)
+  W.ms = W.ms + 600000
   CW.day(W)
-  T.eq(#W.find_events('MOOD_RISK'), 2)
-  CW.day(W)
-  T.eq(#W.find_events('MOOD_RISK'), 3, 'every mood_risk_every')
+  T.eq(#W.find_events('MOOD_RISK'), 2, 'the same cause: no repeat (BUG-008)')
   W.unit(1).counters2 = {thirst_timer = 1000, hunger_timer = 52000}
   CW.day(W)
   r = W.find_events('MOOD_RISK')
+  T.eq(#r, 3, 'another cause and both clocks passed')
   T.eq(r[#r].d.why, 'hunger')
+  W.unit(1).counters2 = {thirst_timer = 32000, hunger_timer = 1000}
+  CW.day(W, 3)
+  T.eq(#W.find_events('MOOD_RISK'), 3, 'back to thirst within 10 wall minutes: waits')
   for _, a in ipairs(W.acts) do
     T.ok(a.fn == 'item_flag' or a.fn == 'run', 'unexpected act ' .. a.fn)
   end
