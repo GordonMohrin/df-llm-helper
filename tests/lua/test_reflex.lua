@@ -99,10 +99,9 @@ T.test('fort without a manifest: the arrival popup locks down at once (gates, do
   T.eq({W.doors.entrance.door_flags.forbidden, W.doors.inner.door_flags.forbidden, W.doors.own.door_flags.forbidden},
        {true, false, true})
   T.eq(#S.acts(W, 'door_forbid'), 1)
-  -- alert and clock
-  T.eq(df.global.plotinfo.alerts.civ_alert_idx, 1)
-  T.eq(W.alert_burrows, {'Kern+'})
+  -- clock at once; the civ alert waits for the gates (live L3: it keeps civilians away from the levers)
   T.eq({cap(W), W.timestream_fps}, {30, -1})
+  T.ok(arr[1].msg:find('alert after the gates', 1, true), arr[1].msg)
   local st = W.state()
   T.eq({st.alarm.defcon, st.alarm.lock, st.alarm.unacked, st.alarm.why}, {2, 1, 1, 'arrival:siege'})
   T.eq({st.clock.cap, st.clock.held, st.clock.ts, st.owners.tempo}, {30, 1, -1, 'clock'})
@@ -113,6 +112,12 @@ T.test('fort without a manifest: the arrival popup locks down at once (gates, do
   -- the bridges rise; lever latency is measured from the queued pull to the raised bridge
   S.run(W, 300)
   T.eq({S.bstate(W, 'O1'), S.bstate(W, 'B1'), S.bstate(W, 'B2')}, {'up', 'up', 'up'})
+  T.eq(df.global.plotinfo.alerts.civ_alert_idx, 1, 'alert on once the gates are up')
+  T.eq(W.alert_burrows, {'Kern+'})
+  local on = S.acts(W, 'civ_alert', function(a) return a.args[1] == true end)[1]
+  local last_up = 0
+  for _, f in ipairs(W.flips) do if f.to == 'up' and f.tick > last_up then last_up = f.tick end end
+  T.ok(on and on.tick >= last_up and on.tick > arr[1].tick, 'the alert came after the gates were pulled')
   st = W.state()
   T.eq({st.bridges.X1, st.bridges.X2, st.bridges.X3}, {'up', 'up', 'up'})
   T.ok(st.lever.lat_t >= 70 and st.lever.lat_t <= 140, tostring(st.lever.lat_t))
@@ -273,8 +278,31 @@ T.test('alert without a Kern+ burrow: the lockdown reports it instead of failing
   dfhack.burrows.findByName = function() return nil end
   W.event('INVASION', {id = 2})
   S.run(W, 30)
-  T.ok(events(W, 'ARRIVAL')[1].msg:find('alert no burrow Kern+', 1, true), events(W, 'ARRIVAL')[1].msg)
   T.eq(#S.pulls(W), 3, 'the other reflexes still run')
+  S.run(W, 300)
+  local said
+  for _, l in ipairs(W.logs) do if l.msg:find('civ alert no burrow Kern+ (gates up)', 1, true) then said = true end end
+  T.ok(said, 'kern.log names the missing burrow')
+  T.ok(#S.acts(W, 'alert_burrows') <= 1, 'one try per RETRY window, no ACT_FAIL spam')
+end)
+
+T.test('the deferred alert sounds at once when a hostile is near a citizen outside, or after ALERT_AFTER', function()
+  local units = S.fort_units()
+  units[#units + 1] = S.cit(9, 45, 9)                -- a woodcutter outside Kern+
+  local W = setup{tag = 'alertnear', manifest = false, units = units}
+  W.lever_default = {}                               -- nobody takes the pulls: the gates never rise
+  W.event('INVASION', {id = 3})
+  S.run(W, 60)
+  T.eq(df.global.plotinfo.alerts.civ_alert_idx, 0)
+  S.run(W, 450)
+  T.eq(df.global.plotinfo.alerts.civ_alert_idx, 1, 'ALERT_AFTER: the alert does not wait for ever')
+  local W2 = setup{tag = 'alertnear2', manifest = false, units = units}
+  W2.lever_default = {}
+  W2.event('INVASION', {id = 4})
+  S.run(W2, 60)
+  W2.add_unit(S.inv(310, 46, 12))
+  S.run(W2, 60)
+  T.eq(df.global.plotinfo.alerts.civ_alert_idx, 1, 'a hostile 3 tiles from the woodcutter: at once')
 end)
 
 T.test('a reload mid-lockdown keeps it (persisted hold, doors, interrupts)', function()

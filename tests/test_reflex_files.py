@@ -51,7 +51,8 @@ def test_every_event_validates_and_the_alarm_types_are_there(run):
     arr = by["ARRIVAL"][0]
     assert arr["cls"] == "A" and arr["d"]["kind"] == "siege" and arr["d"]["src"] == "popup"
     assert arr["d"]["raised"] == 3 and arr["d"]["doors"] == 1 and arr["d"]["clock"] == 30
-    assert arr["d"]["alert"] == "on Kern+"
+    assert arr["d"]["alert"].startswith("after the gates")               # live L3: it would block the pullers
+    assert "reflex: civ alert on Kern+ (gates up)" in (sd(run) / "kern.log").read_text(encoding="utf-8")
     assert by["SIEGE_START"][0]["cls"] == "A"
     lock = by["LOCKDOWN"][0]
     assert lock["d"]["why"] == "ack_timeout" and lock["d"]["type"] == "DEATHS_3PLUS"

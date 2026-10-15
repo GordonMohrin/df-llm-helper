@@ -13,7 +13,9 @@
 --          the manifest, so a fort without fortcore is covered (same single-pending-pull invariant)
 --   doors  the fort's entrance doors (a built door on or next to a revealed open-sky tile) are forbidden through
 --          act.door_forbid (the door sheet's forbid toggle); doors the player had forbidden are left alone
---   alert  siege sounds the civ alert on Kern+ (it asks M.holding)
+--   alert  siege sounds the civ alert on Kern+ (it asks M.holding) once the gates are up, ALERT_AFTER ticks after the
+--          trigger, or at once when no gate is pending or a hostile is near a citizen outside Kern+ or inside: the
+--          alert keeps civilians inside its burrow, and live L3 lost every lever pull to it (GATE_FAIL no_worker)
 -- then ARRIVAL (A) carries the text and what was done. A popup is dismissed by the arbiter only after this returned
 -- (FR-36). The lockdown holds until threat is 0 (no visible invader, great danger in reach or hostile inside, the
 -- threat scan not armed, ARM ticks after the last trigger) for hold_quiet_days game days; then the doors it forbade
@@ -49,6 +51,8 @@ M.DOOR_MAX = 400           -- doors looked at per scan
 M.REARM = 1200             -- INTRUDER/PREDATOR again only after this many ticks without one
 M.ETA_TILE = 6             -- ticks per tile for the ETA (dwarves and goblins walk ~9, fast beasts less)
 M.FRESH = 200              -- census.h older than this is unknown (never quiet, no sighting)
+M.ALERT_AFTER = 450        -- the civ alert waits at most this long for the gates (siege's RAISE_BY timer)
+M.ALERT_NEAR = 30          -- ... and not at all for a hostile this close to a citizen outside Kern+
 -- popup / report text -> kind (lower case plain markers)
 M.TEXT = {{'vile force of darkness', 'siege'}, {'an ambush', 'ambush'}, {'snatcher', 'snatcher'},
           {'has come', 'beast'}, {'need a trade depot', 'no_depot'}}
@@ -165,6 +169,7 @@ local function holding(K, what)
   local h = st and st.hold
   if not h then return nil end
   if what and not h.acts[what] then return nil end
+  if what == 'alert' and not h.alert_on then return nil end   -- deferred until the gates are up (ALERT_AFTER)
   return h.why
 end
 
@@ -193,6 +198,7 @@ local function issue(K, acts, now)
     local ok, info = K.call('gate', 'lockdown')
     if ok and type(info) == 'table' then
       d.raised = int(info.want) or 0
+      rt.gates_up = d.raised > 0 and (int(info.up) or 0) >= d.raised
       parts[#parts + 1] = string.format('gates %d wanted up (%d up, %d pulls pending)%s', d.raised, int(info.up) or 0,
                                         int(info.pend) or 0, #(info.names or {}) > 0 and (' ' .. table.concat(info.names, ',')) or '')
     else
@@ -205,8 +211,19 @@ local function issue(K, acts, now)
     d.doors = #st.doors
   end
   if want.alert then
-    local ok, r = K.call('siege', 'hold_alert')
-    d.alert = ok and tostring(r) or 'no siege module'
+    local h = st.hold
+    -- no gate pending (none wanted, or all up already), or a hostile already near a citizen: at once
+    local gates_done = not want.gates or (d.raised or 0) == 0 or rt.gates_up == true
+    local hc = K.census.h
+    local near = type(hc) == 'table' and (((hc.near_cit or -1) >= 0 and hc.near_cit <= M.ALERT_NEAR) or (hc.inside or 0) > 0)
+    if h and not h.alert_on and (gates_done or near) then h.alert_on, dirty = true, true end
+    if not h or h.alert_on then
+      local ok, r = K.call('siege', 'hold_alert')
+      d.alert = ok and tostring(r) or 'no siege module'
+    else
+      h.alert_at = h.alert_at or now + M.ALERT_AFTER
+      d.alert = string.format('after the gates (<= %d ticks)', math.max(0, h.alert_at - now))
+    end
     parts[#parts + 1] = 'alert ' .. d.alert
   end
   local cu = K.census.u
@@ -424,6 +441,20 @@ local function eta(K, h, now)
   rt.eta = best >= 0 and best * M.ETA_TILE or -1
 end
 
+-- the deferred civ alert of a lockdown: on once the gates are up, after ALERT_AFTER, or when a hostile comes near
+local function alert_step(K, h, now)
+  local hd = st.hold
+  if not (hd and hd.acts.alert and not hd.alert_on) then return end
+  local near = type(h) == 'table' and (((h.near_cit or -1) >= 0 and h.near_cit <= M.ALERT_NEAR) or (h.inside or 0) > 0)
+  local ok, sealed = K.call('gate', 'sealed')
+  local why = (ok and sealed == true and 'gates up') or (near and 'hostile near') or
+              (now >= (hd.alert_at or now) and 'timer') or nil
+  if not why then return end
+  hd.alert_on, dirty = true, true
+  local okc, r = K.call('siege', 'hold_alert')
+  K.log('info', 'reflex: civ alert %s (%s)', okc and tostring(r) or 'no siege module', why)
+end
+
 -- the quiet clock: no visible invader, great danger in reach or hostile inside, threat not armed, ARM after the
 -- last trigger; hold_quiet_days of it end the lockdown
 local function quiet_step(K, h, now)
@@ -487,7 +518,8 @@ function M.init(K)
     end
     local h = p.hold
     if type(h) == 'table' and type(h.why) == 'string' then
-      st.hold = {why = h.why, kinds = {}, acts = {}, since = int(h.since) or 0, last = int(h.last) or 0, qs = nil}
+      st.hold = {why = h.why, kinds = {}, acts = {}, since = int(h.since) or 0, last = int(h.last) or 0, qs = nil,
+                 alert_on = h.alert_on == true, alert_at = int(h.alert_at)}
       for k, v in pairs(type(h.kinds) == 'table' and h.kinds or {}) do if v == true then st.hold.kinds[k] = true end end
       for k, v in pairs(type(h.acts) == 'table' and h.acts or {}) do if v == true then st.hold.acts[k] = true end end
     end
@@ -506,6 +538,7 @@ function M.step(K, budget, ctx)
     eta(K, h, now)
   end
   if not rt.doors or now - rt.doors.tick >= M.DOOR_EVERY or now < rt.doors.tick then entrance_doors(K, now) end
+  alert_step(K, h, now)
   quiet_step(K, h, now)
   ack_step(K, now)
   alarm_write(K)
