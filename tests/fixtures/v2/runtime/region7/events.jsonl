@@ -32,8 +32,8 @@
 {"cls":"C","d":{"pct":47,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 47%","n":8732,"tick":1245213,"type":"PROJECT_STAGE"}
 {"cls":"C","d":{"pct":54,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 54%","n":8733,"tick":1246893,"type":"PROJECT_STAGE"}
 {"cls":"C","d":{"pct":61,"proj":"y3s1b0","stage":"s1.dig"},"msg":"y3s1b0 s1.dig 61%","n":8734,"tick":1248573,"type":"PROJECT_STAGE"}
-{"cls":"B","d":{"id":31},"msg":"invasion armed","n":8735,"tick":1249600,"type":"INVASION"}
-{"cls":"B","d":{"great":0,"inv":41,"vis":41,"why":"invaders"},"msg":"41 visible invaders","n":8736,"tick":1249620,"type":"SIEGE_START"}
+{"cls":"A","d":{"id":31},"msg":"invasion armed","n":8735,"tick":1249600,"type":"INVASION"}
+{"cls":"A","d":{"great":0,"inv":41,"vis":41,"why":"invaders"},"msg":"41 visible invaders","n":8736,"tick":1249620,"type":"SIEGE_START"}
 {"cls":"C","d":{"from":"PEACE","to":"SIEGE","why":"41 invaders"},"msg":"PEACE -> SIEGE","n":8737,"tick":1249620,"type":"MODE"}
 {"cls":"C","d":{"bridge":"O1","job":88123,"lever":3021},"msg":"O1 pull queued","n":8738,"tick":1249800,"type":"LEVER"}
 {"cls":"C","d":{"bridge":"O1","state":"up"},"msg":"O1 up","n":8739,"tick":1250100,"type":"GATE"}

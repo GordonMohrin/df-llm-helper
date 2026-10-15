@@ -166,7 +166,7 @@ M.on = {
     local id = int(ev.id) or -1
     if not seen_inv[id] then
       seen_inv[id] = true
-      K.emit('INVASION', 'B', 'invasion ' .. string.format('%d', id) .. ' armed the threat scan', {id = id})
+      K.emit('INVASION', 'A', 'invasion ' .. string.format('%d', id) .. ' armed the threat scan', {id = id})
     end
   end,
   REPORT = function(K, ev)

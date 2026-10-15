@@ -89,11 +89,11 @@ Claude Code orchestrator (≤60k ctx, Monitor on `dfllm follow`) → fresh Sonne
 | Mode | Entered when | timestream | civ alert | squads | Bridges O1 / B1 / B2 | Projects | Growth |
 |---|---|---|---|---|---|---|---|
 | PEACE | default; RECOVERY + 8,400 quiet ticks | fps 500 (700 after A2 if stable) | off | Constant training | down / down / down | all, per readiness | per gate |
-| ALERT | 1-5 visible hostiles, no great danger | 250 | on if a hostile is ≤30 tiles from a citizen outside Kern+ | squad A stationed inside B1 | O1 up if a hostile is ≤30 tiles from O1 | defense + infrastructure | frozen |
-| SIEGE | ≥6 visible invaders; or INVASION armed + ≥1 visible invader; or a visible great danger, megabeast, FB or titan; or UNDEAD_ATTACK/NIGHT_ATTACK report + visible undead | −1 (off), FPS_CAP 250 | on (Kern+) | all Ready; melee inside B1, crossbows in gallery | up by T+600 / up by T+600 / down | defense repairs inside only | frozen |
+| ALERT | 1-5 visible hostiles, no great danger | 250; FPS cap 100 (Run 9, FR-51: timestream off under the cap) | on if a hostile is ≤30 tiles from a citizen outside Kern+ | squad A stationed inside B1 | O1 up if a hostile is ≤30 tiles from O1 | defense + infrastructure | frozen |
+| SIEGE | ≥6 visible invaders; or INVASION armed + ≥1 visible invader; or a visible great danger, megabeast, FB or titan; or UNDEAD_ATTACK/NIGHT_ATTACK report + visible undead | −1 (off), FPS cap 30 (Run 9, FR-51; was 250) | on (Kern+) | all Ready; melee inside B1, crossbows in gallery | up by T+600 / up by T+600 / down | defense repairs inside only | frozen |
 | BREACH | a bridge not up at T+900, or a visible hostile inside Kern+ | off | on (Tiefe+) | melee hold the B2 choke | up / up / up | none | frozen |
 | RECOVERY | 0 visible invaders map-wide ∧ 0 visible dangers within 40 tiles of O1, for 2,400 ticks | 250 | on until B1 is lowered | training; squad A stays inside B1 | lowered stepwise (§4) | cleanup | frozen until re-drill |
-| DRILL | inbox `drill`, or yearly in PEACE with no merchants on the map | off | on | as SIEGE | as SIEGE, then lowered | frozen | — |
+| DRILL | inbox `drill`, or yearly in PEACE with no merchants on the map | off, FPS cap 30 | on | as SIEGE | as SIEGE, then lowered | frozen | — |
 
 ## 4. Control loops, cadences, siege reflex
 Gameplay modules run on `cur_year_tick` deltas, which stay correct under timestream's skips of up to 9 ticks. I/O runs on `getTickCount` and also works while paused.
@@ -117,7 +117,8 @@ Gameplay modules run on `cur_year_tick` deltas, which stay correct under timestr
 | LLM | year review (403,200 ticks ≈ 13-15 min) + class-A events | ≤6 wakes/h | — |
 
 **Siege reflex.** T0 is the detecting step. Latency is ≤25 ticks once INVASION is armed and ≤50 ticks otherwise. onInvasion alone only *arms* the scan, because the army may still be hidden.
-- **T0, same step:** mode SIEGE; timestream `set fps -1` with FPS_CAP left at 250 (no slow motion); civ alert on with `Kern+` (the whole sealed interior, so the economy keeps running); `military.posture(READY_STATION)` sends melee to `manifest.stations.melee` inside B1 and crossbows to `manifest.stations.gallery`; runner frozen; SIEGE_START (B) and a state flush.
+- **Before T0 (Run 9, FR-49/51/52, CONTRACTS §9.18):** the arrival announcement (popup or report), INVASION or the first armed hostile in sight starts the reflex lockdown: every lever-linked bridge up (no manifest needed), entrance doors forbidden, civ alert, timestream off and FPS cap 30, until threat 0 for 2 days; interrupts go to `<save>/alarm.txt` and wake at once.
+- **T0, same step:** mode SIEGE; timestream `set fps -1` with the FPS cap at the siege cap 30 (CONTRACTS §18.12; was "left at 250, no slow motion"); civ alert on with `Kern+` (the whole sealed interior, so the economy keeps running); `military.posture(READY_STATION)` sends melee to `manifest.stations.melee` inside B1 and crossbows to `manifest.stations.gallery`; runner frozen; SIEGE_START (B) and a state flush.
 - **T0 to T0+450, every 25 ticks:** `gate.want(O1,B1,'up')` fires as soon as citizens outside Kern+ (soldiers excluded) = 0, or T ≥ 450, or a visible hostile is ≤10 tiles from the bridge (live L2: a pull takes 256-297 ticks from queue to raised, a cancelled unworked pull plus the backup lever about 400, so pulls at T+600/T+540 missed T+900).
 - **Gate invariant (fixes the double toggle).** A pull is queued only if (1) desired ≠ current (`gate_flags.closed`), (2) the bridge is not `closing`/`opening`, (3) **no PullLever job is pending on any lever of that bridge**, and (4) no citizen stands on the bridge footprint (wait ≤300 ticks; hostiles on it do not block). If the queued job has no worker after 200 ticks, `act.cancel_own_lever_job` cancels it (UI: cancel the queued pull) and the pull goes to the backup lever. There is only ever one pending pull.
 - **T0+900:** a bridge not raised → GATE_FAIL (A) and **BREACH in-game**: alert burrow switches to `Tiefe+` (deep refuge), B2 (core seal) goes up, melee holds `manifest.stations.b2`.
@@ -230,8 +231,8 @@ Gameplay modules run on `cur_year_tick` deltas, which stay correct under timestr
 ```
 **events.jsonl** (append-only, rotated at 5 MB; emitted on change only):
 `{"n":8812,"tick":1234500,"type":"SIEGE_END","cls":"A","msg":"149 hostiles, 31 killed, 0 lost, sealed 6.1 d","d":{}}`
-- **A** wakes the LLM: SIEGE_END, GATE_FAIL, BREACH, DEATHS_3PLUS/day, DRILL_FAIL×2, KERN_FAULT, PERF_DEGRADED, DECISION_NEEDED, PLAN_EXHAUSTED, PROJECT_BLOCKED>2 days, YEAR_REVIEW.
-- **B** goes into the digest: SIEGE_START, ALERT_*, MOOD_*, CARAVAN, MIGRANTS, PETITION, STOCK_LOW, CANCEL_LOOP, CAPTURE, BREACH_STOP, KERNEL_SLOW, WEALTH.
+- **A** wakes the LLM: SIEGE_END, GATE_FAIL, BREACH, DEATHS_3PLUS/day, DRILL_FAIL×2, KERN_FAULT, PERF_DEGRADED, DECISION_NEEDED, PLAN_EXHAUSTED, PROJECT_BLOCKED>2 days, YEAR_REVIEW; since Run 9 also SIEGE_START, INVASION and the reflex events ARRIVAL, INTRUDER, PREDATOR, NO_DEPOT, LOCKDOWN (CONTRACTS §12; interrupts wake at once).
+- **B** goes into the digest: ALERT_*, MOOD_*, CARAVAN, MIGRANTS, PETITION, STOCK_LOW, CANCEL_LOOP, CAPTURE, BREACH_STOP, KERNEL_SLOW, WEALTH.
 - **C** is log only: SIEGE_STATUS, SEASON, PROJECT_STAGE.
 
 **inbox/`<ts>-<id>.json`:** `{"id":"c123","verb":"bp.place","args":{"tpl":"bedrooms","site":"S2","n":20},"by":"llm"}`. The reply goes to **outbox/`<id>.json`** as `{"id":"c123","ok":true,"msg":"queued P7"}`.
@@ -272,7 +273,8 @@ The verb set is closed: `plan.reload, bp.place, bp.cancel, drill, snapshot, audi
 - **Year review:** `plan propose`, edit a few fields, then `plan check` and `apply`. This approves 4 season plans at once, which is how Gordon's "plan per season" fits into one review: a season is only 3.4 min real time.
 - **Exception:** read `events --cls A`, then issue one `cmd`.
 - **New building:** `bp sites`, pick, `bp.place`: ≤5 turns, <0.3 M tokens (v1: 42 M).
-- **Rate limit** (in `follow`): ≤1 wake per type per 5 min, bursts merged within 60 s, ≤6 wakes per hour. Notifications go to chat only, never push.
+- **Rate limit** (in `follow`): ≤1 wake per type per 5 min, bursts merged within 60 s, ≤6 wakes per hour; BREACH, SIEGE_START, INVASION, LOCKDOWN and the interrupts wake at once (≤1 per type per 60 s). Notifications go to chat only, never push.
+- **Client guidance (Run 9, FR-53):** never run a tool call longer than ~20 s while the game runs at timestream speed (the 23:13 dragons came in during a 4-minute call); use `dfllm wait --until-interrupt --timeout 15`, background tasks and Monitors (re-arm after 30 min); keep routine lines out of the alarm stream (`alarm.txt` holds interrupts only); `dfllm ack` each interrupt, or the kernel applies its lockdown default after `ack_timeout_s`.
 - **Budget:** ≤3 M input tokens per real hour (alarm at 5 M; v1 74 M) and ≤30k output tokens per hour.
 - **Without an LLM** the kernel keeps running safety and supply and finishes the approved plan. It never starts ★ items.
 
@@ -429,6 +431,6 @@ Wave 0 freezes the contracts. Waves 1 and 2 code in parallel against mock-K and 
 | 20k-tile BFS slices against a 2 ms budget (doctrine) | BFS runs in Python on sliced snapshots |
 | Scope too large (doctrine) | about 4.4k Lua + 3.8k Py (incl. 0.7k tests) + 0.4k mixed, near native's size; MVP cut (WP9 deferrable); no legacy wrapping, no hot reload |
 | Auto-unpauser (native) | unpauses only popup-caused pauses; honours manual pauses |
-| FPS cap 100 in SIEGE (native) | timestream off, FPS_CAP 250 |
+| FPS cap 100 in SIEGE (native) | timestream off, FPS_CAP 250 (superseded after Run 9 by FR-51: siege cap 30, CONTRACTS §18.12) |
 | No site rule (doctrine, native) | §5.1 site checklist |
 | Unsupported wealth pause (kernel) | D-13, logging only |

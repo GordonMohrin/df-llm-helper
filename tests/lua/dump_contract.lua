@@ -27,6 +27,7 @@ for k, e in pairs(C.PERSIST) do out.persist[k] = {e.key, e.owner} end
 out.verb_by = {}
 for v, set in pairs(C.VERB_BY) do out.verb_by[v] = sorted_keys(set) end
 out.kern = C.KERN
+out.interrupts = sorted_keys(C.INTERRUPTS)
 
 -- state spec as JSON (req/opt always objects, so empty ones do not encode as [])
 local function norm(s)

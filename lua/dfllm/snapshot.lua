@@ -263,6 +263,32 @@ function M.far(K, x, y, z)
   return ok and grp ~= 0 and grp ~= home_grp.g
 end
 
+-- outside_near(K, pts, r): open-sky test for the reflex module (FR-49/52: the fort's entrance doors, a predator on a
+-- roofed tile). pts = array of {x, y, z}; per point 1 when a revealed tile within r (Chebyshev xy, same z; r 0 = the
+-- tile itself) is under the open sky (designation.outside), 0 when none is, -1 for a bad point. Hidden tiles never
+-- count (fair play), so an unexplored edge reads 0. One call per batch.
+function M.outside_near(K, pts, r)
+  r = math.max(0, math.min(int(r) or 1, 3))
+  local out = {}
+  for i, p in ipairs(type(pts) == 'table' and pts or {}) do
+    local x, y, z
+    if type(p) == 'table' then x, y, z = int(p.x or p[1]), int(p.y or p[2]), int(p.z or p[3]) end
+    local res = -1
+    if x and y and z then
+      res = 0
+      for dy = -r, r do
+        for dx = -r, r do
+          local des = dfhack.maps.getTileFlags(x + dx, y + dy, z)
+          if des and not des.hidden and des.outside then res = 1; break end
+        end
+        if res == 1 then break end
+      end
+    end
+    out[i] = res
+  end
+  return out
+end
+
 ---------------------------------------------------------------- export
 local function map_size()
   local ok, x, y, z = pcall(dfhack.maps.getTileSize)        -- dfhack.lua:742

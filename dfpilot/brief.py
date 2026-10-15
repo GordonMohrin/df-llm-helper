@@ -9,10 +9,10 @@ from .events import YEAR, clip, est_tokens, fmt_age, fmt_d, fmt_event, fmt_tick,
 STATUS_TOKENS, BRIEF_TOKENS = 300, 1500
 SUPPLY_MIN = {"drink_d": 170, "food_d": 60}
 # B digest order (most useful first); unlisted B types follow alphabetically
-DIGEST_ORDER = ["SIEGE_START", "ALERT_START", "ALERT_END", "STOCK_LOW", "MOOD_NEED", "MOOD_START", "MOOD_END",
+DIGEST_ORDER = ["ALERT_START", "ALERT_END", "LOCKDOWN_END", "STOCK_LOW", "MOOD_NEED", "MOOD_START", "MOOD_END",
                 "CANCEL_LOOP", "BREACH_STOP", "PROJECT_REQUEST", "DEATH", "CAPTURE", "CARAVAN", "MIGRANTS",
                 "PETITION", "READY_CHANGE", "POPCAP", "AUDIT", "DRILL_RESULT", "PHASE", "PROJECT_DONE",
-                "KERNEL_SLOW", "ACT_FAIL", "INVASION", "WEALTH", "PAUSE"]
+                "KERNEL_SLOW", "ACT_FAIL", "WEALTH", "PAUSE"]
 
 
 LIMITS = {"A": 50, "B": 500, "CMD": 50}   # newest events kept per section (all DECISION_NEEDED of the year)
@@ -102,9 +102,37 @@ def line_head(ctx: Ctx) -> str:
     df = "" if ctx.active else " (not ACTIVE)"
     own = s.get("owners") or {}
     hold = (f" pause:{own['pause']}" if own.get("pause") else "") + (" tempo:inbox" if own.get("tempo") == "inbox" else "")
-    return (f"{ctx.save}{df} {fmt_tick(ctx.now_tick())} {mode}" + (f"({_ago(ctx, since)})" if since else "")
+    al = s.get("alarm")
+    defcon = f"DEFCON {al['defcon']}" if al else "DEFCON ?"     # FR-53: first on line 1
+    return (f"{defcon} | {ctx.save}{df} {fmt_tick(ctx.now_tick())} {mode}" + (f"({_ago(ctx, since)})" if since else "")
             + (f" {s['phase']}" if "phase" in s else "") + f" {t.get('tps', '?')}t/s {run}{hold}"
             + f" hb {fmt_age(ctx.hb_age)}")
+
+
+def line_alarm(ctx: Ctx) -> str:
+    """FR-51/53/55/58: the clock governor, the lockdown, unacked interrupts, lever latency and the arrival ETA."""
+    s, out = ctx.s, []
+    c = s.get("clock")
+    if c:
+        if c["held"] or (c["orig"] and c["cap"] < c["orig"]):
+            out.append(f"clock: held {c['cap']} t/s, reason {c['why'] or '?'}")
+        else:
+            out.append(f"clock: free (cap {c['cap'] or '?'}" + (f", timestream {c['ts']}" if c["ts"] > 0 else "") + ")")
+    al = s.get("alarm")
+    if al:
+        if al["lock"]:
+            out.append(f"lockdown {al['why']}")
+        if al["unacked"]:
+            out.append(f"{al['unacked']} interrupts unacked (last #{al['last']}, acked #{al['ack']}): dfllm ack")
+        eta = al.get("eta", -1)
+        if eta >= 0:
+            tps = (s.get("t") or {}).get("tps") or 0
+            out.append(f"eta ~{eta} t" + (f" (~{round(eta / tps)} s)" if tps > 0 else "") + " to the nearest entrance")
+    lv = s.get("lever")
+    if lv:
+        out.append("lever_latency_s " + (f"{lv['lat_s']} ({lv['lat_t']} t)" if lv["lat_t"] >= 0 else "-")
+                   + (f", {lv['pend']} pulls pending {lv['wait_s']} s" if lv["pend"] else ""))
+    return _join(out)
 
 
 def line_pop(ctx: Ctx) -> str:
@@ -197,7 +225,7 @@ def status_text(save_dir: Path) -> str:
     if ctx.state is None:
         lines.append(_no_state(ctx))
     else:
-        lines += [line_pop(ctx), line_supply(ctx), line_def(ctx), line_proj(ctx), line_kern(ctx)]
+        lines += [line_alarm(ctx), line_pop(ctx), line_supply(ctx), line_def(ctx), line_proj(ctx), line_kern(ctx)]
     return fit([[x for x in lines if x]], STATUS_TOKENS)
 
 
@@ -281,7 +309,8 @@ def brief_text(save_dir: Path, budget: int = BRIEF_TOKENS) -> str:
     if ctx.state is None:
         head.append(_no_state(ctx))
     else:
-        head += [x for x in (line_pop(ctx), line_supply(ctx), line_def(ctx), line_proj(ctx, 8), line_kern(ctx)) if x]
+        head += [x for x in (line_alarm(ctx), line_pop(ctx), line_supply(ctx), line_def(ctx), line_proj(ctx, 8),
+                             line_kern(ctx)) if x]
     sections = [head]
     for title, lines in (("## plan", sec_plan(ctx)), ("## decisions open (ask Gordon)", sec_decisions(ctx)),
                          ("## class A, newest first", sec_class_a(ctx)), ("## failed commands", sec_failures(ctx)),

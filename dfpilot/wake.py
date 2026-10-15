@@ -30,9 +30,18 @@ from .events import clip, est_tokens, fmt_tick
 WAKE_TOKENS = 150
 WAKE_TYPES = {t for t, (c, _, _) in schema.EVENTS.items() if c == "A"}
 SYNTH = {"HB_STALE", "AUTO_FAIL", "SUPERVISE"}   # follower's own wake reasons (not kern events)
-PRIO = ["BREACH", "GATE_FAIL", "DEATHS_3PLUS", "KERN_FAULT", "HB_STALE", "SUPERVISE", "SIEGE_END", "DRILL_FAIL",
+# Run 9: an army walked in while SIEGE_START/INVASION waited in the digest; they and the interrupts come right
+# after BREACH and wake at once (URGENT: no merge wait, no hourly limit, one per type per URGENT_REPEAT_S)
+PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", "LOCKDOWN", "GATE_FAIL",
+        "DEATHS_3PLUS", "NO_DEPOT", "KERN_FAULT", "HB_STALE", "SUPERVISE", "SIEGE_END", "DRILL_FAIL",
         "PERF_DEGRADED", "DECISION_NEEDED", "PROJECT_BLOCKED", "PLAN_EXHAUSTED", "YEAR_REVIEW", "AUTO_FAIL"]
+URGENT = {"BREACH", "SIEGE_START", "INVASION", "LOCKDOWN"} | set(schema.INTERRUPTS)
+URGENT_REPEAT_S = 60
+_IRQ_NEXT = "dfllm ack; dfllm status (the kernel already locked down)"
 NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propose",
+        "SIEGE_START": "dfllm status (the kernel already locked down)", "INVASION": _IRQ_NEXT, "ARRIVAL": _IRQ_NEXT,
+        "INTRUDER": _IRQ_NEXT, "PREDATOR": _IRQ_NEXT, "LOCKDOWN": _IRQ_NEXT, "DEATHS_3PLUS": "dfllm ack; dfllm brief",
+        "NO_DEPOT": "dfllm ack; place a trade depot (bp.place)",
         "DECISION_NEEDED": "ask Gordon in chat, then config/decisions.yaml", "KERN_FAULT": "dfllm doctor",
         "PERF_DEGRADED": "dfllm doctor", "HB_STALE": "dfllm doctor", "AUTO_FAIL": "dfllm doctor",
         "SUPERVISE": "dfllm supervise --once --dry-run"}
@@ -69,9 +78,12 @@ class WakeGate:
         self.last = now
 
     def blocked(self, now: float) -> str | None:
-        """Why the pending burst cannot wake now (None = it can)."""
+        """Why the pending burst cannot wake now (None = it can). An URGENT type wakes at once (no merge wait, no
+        hourly limit) unless the same type woke within URGENT_REPEAT_S; it takes the rest of the burst along."""
         if not self.pending:
             return "empty"
+        if any(t in URGENT and now - self.type_last.get(t, -1e18) >= URGENT_REPEAT_S for t in self.pending):
+            return None
         if now - self.last < self.quiet_s and now - self.first < self.merge_s:
             return "merging"
         self.wakes = [w for w in self.wakes if now - w < 3600]

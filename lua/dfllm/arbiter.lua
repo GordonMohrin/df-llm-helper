@@ -9,12 +9,22 @@
 --     cap is captured in restore.json and put back when the brake ends and on unload.
 --   * runtime profile at boot (originals to restore.json first), restored on unload; a restore.json
 --     left active by a crash is healed first (also on unmarked saves, called by kern), see M.heal.
+--   * clock governor (FR-51, Run 9: 39 of 48 citizens died within 76 s at ~400 ticks/s while timestream was "off"
+--     in SIEGE, because the vanilla FPS cap stayed at the prefs' 500): the FPS cap also follows the mode
+--     (SIEGE/BREACH/DRILL the siege cap, default 30; ALERT the alert cap, default 100; PEACE/RECOVERY the captured
+--     original), and while the reflex module holds a lockdown (an arrival announcement, INVASION or the first armed
+--     hostile in sight, until threat 0 for N game days) timestream goes off and the cap holds at the siege cap.
+--     Timestream never runs above the cap it is meant to slow (it cannot slow below DF's frame rate): a timestream
+--     target above the cap is switched off. Same restore.json mechanism as the supply brake. Knobs: config/reflex.json
+--     `clock` (K.cfg.reflex). tempo.lower lowers the cap too (STATUS §6 gap 10).
 local json = require('dfllm.util.json')
 local fio = require('dfllm.io')
 
 local M = {name = 'arbiter', every = {ms = 500}, critical = true, on = {}, verbs = {}}
 
 M.MODE_FPS = {PEACE = 500, ALERT = 250, SIEGE = -1, BREACH = -1, RECOVERY = 250, DRILL = -1}
+M.CLOCK = {siege_cap = 30, alert_cap = 100}   -- FR-51 defaults; config/reflex.json `clock` overrides them
+M.MODE_CAP = {SIEGE = 'siege_cap', BREACH = 'siege_cap', DRILL = 'siege_cap', ALERT = 'alert_cap'}
 M.BRAKE_FPS = 150                  -- tempo and FPS cap while the supply brake holds
 M.P0_SAFE_DAYS = 60                -- P0 brakes only while drink or food is below this
 M.PROFILE = {gfps = 30, autosave = 'YEARLY', overlays = false, visitor_cap = 30}
@@ -23,8 +33,7 @@ M.KEEP_OVERLAY = 'notify'          -- headless overlay profile keeps widgets who
 -- (world.status.popups) halts the game while pause_state stays false; the only one seen so far is
 -- "Some migrants have arrived." (it froze the fort for minutes until it was clicked away), then
 -- "A caravan from <civ> has arrived. ...", "The merchants need a trade depot ..." and "The merchants
--- from <civ> will be leaving soon.". Informational popups only; threats (sieges, beasts) stay for
--- Gordon (DECISION_NEEDED after 10 min).
+-- from <civ> will be leaving soon.". Informational popups only; threat popups are M.THREAT_POPUPS (FR-36).
 M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
             -- live L4: "A human caravan from Muboomon has arrived.  Overall trade sentiments are cautious." halted the fort
             caravan = {'caravan from', 'merchants need a trade depot', 'merchants have arrived',
@@ -38,10 +47,6 @@ M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
             -- live L6: cavern/pit discovery notices halted the fort; the runner already reacts to FEATURE_DISCOVERY
             discovery = {'You have discovered'},
             ghost = {'has been put to rest'},
-            -- live L6 (reclaimed Castlerisen): "An ambush! Drive them out!" for cavern giant bats came every
-            -- few seconds and held the fort; Gordon 11.10.: never stop playing for a question. The fight goes
-            -- on either way; threat reacts to visible hostiles, the popup only froze the clock
-            ambush = {'An ambush!'},
             -- deaths are recorded by care (DEATH, DEATHS_3PLUS wakes); the notice alone must not halt the fort
             -- live L2: "<name> has bled to death." halted the fort after a berserk citizen was killed
             death = {'has been found dead', 'has bled to death', 'has been struck down', 'has died of thirst',
@@ -64,6 +69,16 @@ M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
             -- stood still; the citizens and soldiers deal with a berserker as after a click on OK. The notice is
             -- dismissed and wakes the LLM (DECISION_NEEDED berserk) so Gordon hears of it.
             berserk = {'has gone berserk'}}   -- live L1: "<name>, Ghostly Bowyer has been put to rest."   -- live L1: "The Misty Company, a farmers guild, has been established."
+-- FR-36 threat popups (Run 9: "Snatcher! Protect the children!" froze the game for minutes; "A vile force of darkness
+-- has arrived!" stood while the army walked in). The reflex module issues the arrival reflexes (gates up, entrance doors
+-- forbidden, civ alert, clock held) and emits ARRIVAL (A) with the text; only then is the popup dismissed and the game
+-- resumed. live L6 (reclaimed Castlerisen): "An ambush! Drive them out!" for cavern bats came every few seconds;
+-- Gordon 11.10.: never stop playing for a question, so they are dismissed too, after the reflex. Without the reflex
+-- module the arbiter holds the clock itself for FALLBACK_TICKS and emits ARRIVAL (fail-open).
+M.THREAT_POPUPS = {siege = {'vile force of darkness'}, ambush = {'an ambush'}, snatcher = {'snatcher'},
+                   beast = {'has come'}}
+M.DEPOT_POPUP = 'need a trade depot'   -- a caravan popup that is also the NO_DEPOT interrupt (FR-43/53)
+M.FALLBACK_TICKS = 4800
 M.ASK_AFTER_MS = 600000            -- foreign pause older than this -> DECISION_NEEDED
 M.REASSERT_MS = 60000              -- re-check the live timestream fps at most this often
 M.RETRY_MS = 30000                 -- back-off after a failed timestream write
@@ -174,7 +189,11 @@ function M.heal(K, opts)
   for _, k in ipairs({'gfps', 'fps_cap', 'autosave', 'visitor_cap', 'weather'}) do
     if orig[k] ~= nil then
       local ok, live = pcall(LIVE[k])
-      if ok and live == profile_value(k) then
+      -- the arbiter only ever lowers the FPS cap (brake, mode caps, clamp, tempo.lower): a live cap below the
+      -- original is ours; after a process crash DF has reloaded the prefs value and there is nothing to undo
+      local ours = ok and (live == profile_value(k) or (k == 'fps_cap' and math.type(live) == 'integer'
+                                                         and math.type(orig[k]) == 'integer' and live < orig[k]))
+      if ours then
         K.act.setting(k, orig[k]); done[#done + 1] = k
       else skipped[#skipped + 1] = k end
     end
@@ -274,38 +293,84 @@ function M.brake_why(K)
   if ok and type(why) == 'string' and why ~= '' then return why end
 end
 
-local function desired(K)
-  local base = M.MODE_FPS[K.mode()] or 250
-  local t = st.tempo
-  if t and K.now().ms >= t.until_ms then st.tempo, t = nil, nil end
-  local fps, by = base, 'mode'
-  if st.brake and base > M.BRAKE_FPS then fps, by = M.BRAKE_FPS, 'brake' end
-  if t and fps > 0 and t.fps < fps then fps, by = t.fps, 'inbox' end
-  return fps, by
+-- clock knobs: M.CLOCK, overridden by config/reflex.json `clock` (ints 10..1000)
+local function clock_cfg(K)
+  local c = {siege_cap = M.CLOCK.siege_cap, alert_cap = M.CLOCK.alert_cap}
+  local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.clock) == 'table' and K.cfg.reflex.clock or {}
+  for k in pairs(c) do
+    local v = int(r[k])
+    if v and v >= 10 and v <= 1000 then c[k] = v end
+  end
+  return c
+end
+M.clock_cfg = clock_cfg
+
+-- the reflex lockdown (FR-51/52): why it holds the clock, or nil; level-triggered (asked on every apply)
+local function clamp_why(K)
+  local ok, why = K.call('reflex', 'holding', 'clock')
+  if ok and type(why) == 'string' and why ~= '' then return why end
+  local fb = st.fb                     -- fail-open: a threat popup while the reflex module was unavailable
+  if fb and K.now().tick < fb.until_tick and K.now().tick >= fb.since then return fb.why end
 end
 
--- the FPS cap follows the brake: BRAKE_FPS while it holds, the captured original otherwise
-local function apply_cap(K)
+-- desired timestream fps and its owner, plus the FPS cap to drive (nil = the original) and why
+local function desired(K)
+  local mode = K.mode()
+  local base = M.MODE_FPS[mode] or 250
+  local t = st.tempo
+  if t and K.now().ms >= t.until_ms then st.tempo, t = nil, nil end
+  local cc = clock_cfg(K)
+  local cap, cwhy
+  if M.MODE_CAP[mode] then cap, cwhy = cc[M.MODE_CAP[mode]], mode:lower() end
+  local clamp = st.clamp
+  local fps, by = base, 'mode'
+  if clamp then
+    fps, by = -1, 'clock'
+    if not cap or cc.siege_cap < cap then cap, cwhy = cc.siege_cap, clamp end
+  end
+  if st.brake and fps > M.BRAKE_FPS then
+    fps, by = M.BRAKE_FPS, 'brake'
+    if not cap or M.BRAKE_FPS < cap then cap, cwhy = M.BRAKE_FPS, 'brake' end
+  end
+  if t and fps > 0 and t.fps < fps then fps, by = t.fps, 'inbox' end
+  -- tempo.lower: timestream alone never slows below DF's frame rate, so the cap follows it (STATUS §6 gap 10)
+  if t and (not cap or t.fps < cap) then cap, cwhy = t.fps, 'inbox' end
+  -- a timestream target above the cap would only skip ticks past it: off, the cap governs (ALERT 250 vs cap 100)
+  if fps > 0 and cap and fps > cap then fps = -1 end
+  return fps, by, cap, cwhy
+end
+
+-- the vanilla FPS cap follows desired(): the lowest of mode cap, clamp, brake and inbox tempo, never above the
+-- captured original, which comes back as soon as nothing lowers it
+local function apply_cap(K, cap)
   local orig = st.orig and st.orig.fps_cap
   if not orig then return end
-  local want = st.brake and math.min(orig, M.BRAKE_FPS) or orig
+  local want = cap and math.min(orig, cap) or orig
   if st.cap == want then return end
   local ok = K.act.setting('fps_cap', want)
   if ok then st.cap = want end
 end
 
 -- idempotent: write timestream only when the desired value changed (or the live value drifted);
--- nothing at all unless Gordon's D-11 (timestream) is 'accepted' (the default)
+-- timestream only when Gordon's D-11 is 'accepted' (the default). The FPS cap (a vanilla setting) follows the
+-- mode and the reflex clamp either way; the supply brake only where timestream runs.
 function M.apply(K)
-  if not ts_accepted(K) then return false end
   local now = K.now()
-  local why = M.brake_why(K)
+  local acc = ts_accepted(K)
+  local why = acc and M.brake_why(K) or nil
   if why ~= st.brake then
     K.log('info', 'supply brake %s', why and ('on: ' .. why) or 'off')
     st.brake = why
   end
-  apply_cap(K)
-  local fps, by = desired(K)
+  local clamp = clamp_why(K)
+  if clamp ~= st.clamp then
+    K.log('info', 'clock clamp %s', clamp and ('on: ' .. clamp) or 'off')
+    st.clamp = clamp
+  end
+  local fps, by, cap, cwhy = desired(K)
+  apply_cap(K, cap)
+  st.cap_why, st.ts_want = cwhy, fps
+  if not acc then st.tempo_by = 'mode'; return false end
   st.tempo_by = by
   if st.applied == fps then
     if now.ms - (st.checked_ms or 0) < M.REASSERT_MS then return true end
@@ -325,7 +390,17 @@ end
 -- nil, 'off' when D-11 leaves timestream alone
 function M.target(K)
   if not ts_accepted(K) then return nil, 'off' end
-  return desired(K)
+  local fps, by = desired(K)
+  return fps, by
+end
+
+-- public (FR-51, K.call): the reflex module changed its lockdown; apply the clock now (same step), not at the
+-- next 500 ms cadence. Returns the FPS cap now driven (0 = no cap captured) and why it is lowered ('' = free).
+function M.hold(K)
+  M.apply(K)
+  local orig = st.orig and st.orig.fps_cap or 0
+  local cap = st.cap or orig
+  return cap, (cap < orig or st.clamp) and (st.cap_why or st.clamp or '') or ''
 end
 
 ---------------------------------------------------------------- pause
@@ -334,13 +409,38 @@ local function popup_count()
   return ok and n or 0
 end
 
+-- kind, text, threat: threat = true for M.THREAT_POPUPS (checked first)
 local function popup_kind()
   local ok, text = pcall(function() return dfhack.df2utf(df.global.world.status.popups[0].text) end)
   if not ok or type(text) ~= 'string' then return nil end
   local low = text:lower()                -- live L1b: "Merchants have arrived and ..." starts upper case
-  for kind, marks in pairs(M.POPUPS) do
-    for _, m in ipairs(marks) do if low:find(m:lower(), 1, true) then return kind, text end end
+  for kind, marks in pairs(M.THREAT_POPUPS) do
+    for _, m in ipairs(marks) do if low:find(m:lower(), 1, true) then return kind, text, true end end
   end
+  for kind, marks in pairs(M.POPUPS) do
+    for _, m in ipairs(marks) do if low:find(m:lower(), 1, true) then return kind, text, false end end
+  end
+end
+
+-- FR-36: hand a threat (or depot) popup to the reflex module once per popup, before anything dismisses it. Without
+-- the module: the clock is held here and ARRIVAL emitted (fail-open). Runs whoever holds the pause: the reflexes
+-- that need no ticks (doors, alert, clock) take effect at once.
+local function announce(K, kind, text, threat)
+  local key = kind .. '|' .. text
+  if st.announced == key then return end
+  st.announced = key
+  local rkind = threat and kind or 'no_depot'
+  local ok, done, summary = K.call('reflex', 'announce', rkind, text, 'popup')
+  if ok and done then
+    K.log('info', 'popup %s handed to the reflex: %s', kind, tostring(summary))
+    return
+  end
+  if not threat then return end
+  local now = K.now().tick
+  st.fb = {why = 'popup:' .. kind, since = now, until_tick = now + M.FALLBACK_TICKS}
+  M.apply(K)
+  K.emit('ARRIVAL', 'A', string.format('%s (popup, reflex module unavailable) "%s" -> clock %d t/s', kind,
+         text:sub(1, 80), st.cap or 0), {kind = kind, src = 'popup', text = text:sub(1, 200), clock = st.cap or 0})
 end
 
 local function pause_event(K, on, by, ttl)
@@ -370,6 +470,11 @@ local function track_pause(K)
   if st.hold and now.ms >= st.hold.until_ms then
     st.hold = nil
     if df.global.pause_state == true and st.pause_by == 'inbox' then K.act.set_paused(false) end
+  end
+  if popup_count() == 0 then st.announced = nil
+  else
+    local kind, text, threat = popup_kind()
+    if kind and (threat or text:lower():find(M.DEPOT_POPUP, 1, true)) then announce(K, kind, text, threat) end
   end
   if not observe(K) then return end
   -- a whitelisted popup is also cleared once an expired inbox hold is all that is left
@@ -422,7 +527,12 @@ function M.on.UNLOAD(K)
 end
 
 function M.state(K)
-  return {owners = {pause = st.pause_by or json.null, tempo = st.tempo_by or 'mode'}}
+  local orig = st.orig and st.orig.fps_cap or 0
+  local cap = st.cap or orig
+  local lowered = cap < orig or st.clamp ~= nil
+  return {owners = {pause = st.pause_by or json.null, tempo = st.tempo_by or 'mode'},
+          clock = {cap = cap, orig = orig, ts = st.ts_want or -1, held = st.clamp and 1 or 0,
+                   why = lowered and tostring(st.cap_why or st.clamp or ''):sub(1, 24) or ''}}
 end
 
 M.verbs['tempo.lower'] = function(K, args, cmd)
@@ -433,8 +543,11 @@ M.verbs['tempo.lower'] = function(K, args, cmd)
   st.tempo = {fps = fps, until_ms = K.now().ms + ttl * 1000}
   M.apply(K)
   local base = M.MODE_FPS[K.mode()] or 250
-  if base < 0 then return true, 'timestream is off in ' .. K.mode() .. '; nothing to lower' end
-  return true, string.format('tempo %d for %d s', math.min(fps, base), ttl)
+  -- the FPS cap follows (STATUS §6 gap 10): timestream alone never slowed DF below its frame rate
+  if base < 0 or st.clamp then
+    return true, string.format('timestream is off in %s; FPS cap %d for %d s', K.mode(), st.cap or fps, ttl)
+  end
+  return true, string.format('tempo %d for %d s (FPS cap %d)', math.min(fps, base), ttl, st.cap or fps)
 end
 
 M.verbs.pause = function(K, args, cmd)

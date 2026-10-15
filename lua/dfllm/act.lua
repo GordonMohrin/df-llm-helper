@@ -971,6 +971,21 @@ local function impls(state)
     return true, id
   end
 
+  -- door sheet > forbid ("locked"; FR-49/52 lockdown): the door's passage toggle (building_doorst door_flags.forbidden,
+  -- the flag the sheet's forbid button sets). Doors only; returns the old value so the caller can undo its own change.
+  function I.door_forbid(building_id, on)
+    local b = df.building.find(building_id)
+    if not b then return false, 'no building ' .. tostring(building_id) end
+    local okt, is_door = pcall(function()
+      if df.building_type and b.getType then return b:getType() == df.building_type.Door end
+      return b.door_flags ~= nil
+    end)
+    if not (okt and is_door) then return false, 'not a door' end
+    local old = b.door_flags.forbidden == true
+    b.door_flags.forbidden = on and true or false
+    return true, old
+  end
+
   -- burrows screen > units (live L3, gate's lever pullers): the burrow's unit list becomes exactly `ids`,
   -- living citizens only; dfhack.burrows.setAssignedUnit (Lua API.txt:2424) is the screen's per-unit toggle
   -- (hack/lua/plugins/sort/unitselector.lua:122). Units no longer found stay listed (fix/dead-units --burrow).

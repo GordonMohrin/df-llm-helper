@@ -18,3 +18,4 @@ D-10: off  # default: emigration and deteriorate stay disabled
 D-11: accepted  # default: timestream may change the game speed per mode
 D-12: 15/20  # default: army 15 % of adults at pop <=55, 20 % from 60
 D-13: no  # default: no automatic beauty pause at high wealth (wealth is logged)
+D-14: down  # default: peace_gates; bridges stay down in PEACE (caravan wagons, migrants and woodcutters need the way); arrival reflex raises them

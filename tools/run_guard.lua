@@ -1,3 +1,4 @@
+-- Superseded by kernel reflex (lua/dfllm/reflex.lua, gate.lockdown; FR-49/52, 2026-10-15). Kept for reference only.
 -- 5 s guard probe (Gordon 14.10.2026: "the dragon simply walked in - why did you not notice at once?").
 -- Prints one line: invaders on the surface near the fort, invaders inside (z <= 117), bridges raised/lowered. Read-only.
 local out_inv, ins, near, races = 0, 0, 0, {}

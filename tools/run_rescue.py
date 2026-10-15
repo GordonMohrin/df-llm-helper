@@ -1,4 +1,8 @@
-"""Fast rescue loop: run_rescue.lua every 10 s. Prints only when it did something. python -u tools/run_rescue.py"""
+"""Partly superseded by kernel reflex (2026-10-15): threat popups are handed to lua/dfllm/reflex.lua and dismissed by
+the arbiter after the reflexes (FR-36), and the entrance doors are forbidden by the arrival lockdown (FR-49/52). The
+patient release, death-incident and intruder kill-order parts of run_rescue.lua are not covered by the kernel yet.
+
+Fast rescue loop: run_rescue.lua every 10 s. Prints only when it did something. python -u tools/run_rescue.py"""
 import os
 import re
 import subprocess

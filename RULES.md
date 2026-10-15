@@ -52,10 +52,12 @@ change the system. Never read ERFAHRUNGEN.md, transcripts or v1 docs as working 
 ## 3. Run v2
 ```
 dfllm doctor                 # ticks/s, kernel ms per module, frame gaps, stalls
-dfllm status                 # <= 300 tokens: mode, phase, pop/cap, readiness, alarms
+dfllm status                 # <= 300 tokens: DEFCON, mode, clock, lockdown, pop/cap, readiness, alarms
 dfllm brief                  # <= 1.5k tokens: digest for a decision
 dfllm follow                 # Monitor target: one wake line per event that needs you
 dfllm events --cls A [--since N]
+dfllm wait --until-interrupt [--timeout 15]   # returns at once on an unacked interrupt; keep calls short
+dfllm ack [--n N]            # you saw the interrupts up to N (else the kernel applies their lockdown default)
 dfllm plan propose|check|apply
 dfllm cmd <verb> '<json args>'
 dfllm bp list | bp preview <tpl> | bp sites <tpl>
@@ -94,6 +96,13 @@ helper is experimental; procedure and fair-play limits: `tools/embark/README.md`
   make at most 5 tool calls and returns at most 100 tokens: what it saw, the one command it sent,
   what to watch next.
 - **Exception:** `dfllm events --cls A --since N`, then at most one `dfllm cmd`.
+- **Interrupts** (ARRIVAL, INTRUDER, PREDATOR, DEATHS_3PLUS, NO_DEPOT; also BREACH, SIEGE_START,
+  INVASION, LOCKDOWN) wake at once, past the merge wait and the hourly limit, and stand in
+  `<save>/alarm.txt`. The kernel already acted (gates up, entrance doors forbidden, civ alert, clock
+  30 t/s): read `status`, then `dfllm ack`. Unacked for 60 s, the kernel applies the lockdown default
+  itself (LOCKDOWN). Never run a tool call longer than ~20 s while the game runs: use
+  `dfllm wait --until-interrupt` with a short `--timeout`, background tasks and Monitors (re-arm a
+  Monitor after 30 min).
 - **Year review** (YEAR_REVIEW, about every 13-15 min real time): `plan propose`, edit a few fields
   (phase_target, seasons[].build, military, supply, trade), `plan check`, `plan apply`. One review
   approves 4 season plans. To edit, propose into a file outside `dfllm-runtime/` (the hook blocks
@@ -121,11 +130,16 @@ helper is experimental; procedure and fair-play limits: `tools/embark/README.md`
 | `inspect` | `{what, key?}` | read-only, ≤ 8 KB |
 | `selftest` | `{suite?}` | quick or full |
 | `module.enable` | `{module}` | re-enable a module the kernel backed off (KERN_FAULT) before its backoff ends, only once the cause is fixed |
+| `ack` | `{n?}` | interrupts seen up to n (default all); `dfllm ack` sends it |
 There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` prints it.
 
 ## 7. Class-A events and the first move
 | Event | First move |
 |---|---|
+| SIEGE_START / INVASION / ARRIVAL | the kernel locked down (gates up, doors forbidden, alert, clock 30 t/s) before contact. `dfllm ack`, read `status` (`clock`, `lever_latency_s`, eta); do nothing tactical; tell the player |
+| INTRUDER / PREDATOR | a hostile can walk to the citizens (gate open or a leak) / a wild danger inside. `dfllm ack`; read `status` and the brief; tell the player |
+| LOCKDOWN | an interrupt stood unacked and the kernel applied its default. `dfllm ack`; read `status` |
+| NO_DEPOT | `dfllm ack`; place a trade depot (`bp sites`, `bp.place`) |
 | SIEGE_END | read the summary; if losses > 10 % of citizens, write a postmortem note and lower `pop_ceiling` in the next plan |
 | GATE_FAIL / BREACH | the fort already sealed itself (BREACH: Tiefe+ alert, B2 up, melee at B2). Do not lower bridges. Check `status` again after 600 ticks; tell the player |
 | DEATHS_3PLUS | read the brief: cause (combat, thirst, mood, cave-in); fix the cause in the plan |
@@ -154,7 +168,8 @@ backlog only) | D-04 work-now off | D-05 agitation-rebalance off | D-06 tailor c
 cleanowned off | D-07 visitor cap, weather, baby caps unchanged | D-08 caravan `flags1.left` edit
 dropped (use `fix/stuck-merchants`) | D-09 never cook plump helmets, not even in a famine |
 D-10 emigration, deteriorate off | D-11 timestream accepted | D-12 army 15 % at pop ≤ 55, 20 %
-from 60 | D-13 no automatic beauty pause (wealth is logged).
+from 60 | D-13 no automatic beauty pause (wealth is logged) | D-14 peace_gates down (bridges down in
+PEACE; the arrival reflex raises them; `up` keeps them up outside caravan/migrant windows).
 Only the player changes these. Never store a "consent" for anything on the §1 blocklist.
 
 ## 10. Doctrine in 30 lines
@@ -169,9 +184,11 @@ dining, bedrooms). Refuge Tiefe+ ≥ 3 z below the core with its own well, food 
 **Barriers** are only raised bridges and walls; doors count for nothing. Smooth outer natural
 walls. No shortcut bridges. Metrics use the real state of every bridge and door.
 **Siege reflex (in game, you only read it):** visible invaders → SIEGE in the same step, timestream
-off, civ alert on Kern+, squads Ready at their stations, bridges up by T+600 when nobody is outside,
-BREACH fallback at T+900. RECOVERY only on 0 visible invaders for 2,400 ticks; bridges are lowered
-stepwise.
+off, FPS cap 30, civ alert on Kern+, squads Ready at their stations, bridges up by T+600 when nobody
+is outside, BREACH fallback at T+900. RECOVERY only on 0 visible invaders for 2,400 ticks; bridges
+are lowered stepwise. **Arrival lockdown** (no manifest needed): an arrival popup or report, INVASION
+or the first armed hostile in sight raises every lever-linked bridge, forbids the entrance doors,
+sounds the alert and holds the clock until threat 0 for 2 days.
 **Military:** squads A, B melee, C crossbows, ≤ 10 each; Constant training, never Off duty;
 Replace clothing + full metal + shield; KPI is worn %, never "assigned". Kill orders only inside
 manifest kill boxes, never into shafts or stairs. No civilian reserve squads.
@@ -194,7 +211,8 @@ re-designate); every breach of water or caverns through a 2-wall airlock; cavern
 **Trade:** depot in the bailey, O1 down only while no hostile is visible; ratio ≥ 1.5. Goods come
 from stockpiles named `dfllm-trade` (logistics autotrade; fortcore stage 1 builds one next to the depot,
 plus the `dfllm-melt` automelt pile).
-**Speed:** PEACE timestream 500, SIEGE/DRILL off; no Lua quicksaves; DF autosave yearly.
+**Speed:** PEACE timestream 500; ALERT FPS cap 100; SIEGE/BREACH/DRILL and any lockdown timestream off,
+FPS cap 30; no Lua quicksaves; DF autosave yearly.
 
 ## 11. Phases (`plans/year1.json`; the runner advances when all deliverables pass)
 | Phase | Deliverables |

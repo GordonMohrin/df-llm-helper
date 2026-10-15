@@ -10,9 +10,21 @@
 -- Lever rooms (live L3, the S3 fallback): manifest burrows named 'dfllm-levers*' hold levers; in SIEGE/DRILL/
 -- BREACH gate assigns lever pullers to them (act.burrow_units, the burrow screen) and pulls a lever with a
 -- puller present first; siege lists the allowed rooms in the civ alert (gate.rooms).
+-- Lockdown (FR-49/52, Run 9: an army walked in over four lowered drawbridges the kernel did not know): while the
+-- reflex module holds a lockdown (reflex.holding('gates')), every manifest outer/inner bridge is wanted up and so is
+-- every lever-linked drawbridge OUTSIDE the manifest ('X<building id>', found from the levers' links): no manifest
+-- needed (fail-open), the same single-pending-pull invariant, footprint and GATE_FAIL rules. SIEGE/BREACH raise those
+-- unmanaged bridges too, with or without the reflex module. 'down' is refused while the lockdown holds. Afterwards
+-- an unmanaged bridge the lockdown raised is lowered again in PEACE (peace_gates D-14 = down) or kept up (D-14 = up).
+-- Peace gates (FR-55, D-14 = up): in PEACE the manifest outer/inner bridges (and kept unmanaged ones) stay up;
+-- they open only for a window: a caravan on the map (trade state, or its arrival report), migrants arriving, an
+-- inbox `lever` down (that bridge), each while no hostile is visible, and close WIN_CLOSE ticks after the reason ends.
+-- Lever latency (FR-55): ticks and real seconds from our queued pull to the bridge in the wanted state (state lever).
 local geom = require('dfllm.util.geom')
 
-local M = {name = 'gate', every = {ticks = 600}, critical = true, verbs = {}}
+local M = {name = 'gate', every = {ticks = 600}, critical = true, verbs = {},
+           reports = {MIGRANT_ARRIVAL = true, MIGRANT_ARRIVAL_NAMED = true, D_MIGRANTS_ARRIVAL = true,
+                      CARAVAN_ARRIVAL = true, FIRST_CARAVAN_ARRIVAL = true}}
 
 M.FAST, M.SLOW = 25, 600   -- cadence: FAST in SIEGE/BREACH/DRILL or while a bridge has work
 M.NO_WORKER = 200          -- ticks our queued pull may wait without a worker
@@ -31,13 +43,23 @@ M.RESOLVE = 6000           -- ticks between re-resolving a complete bridge (find
 M.RESOLVE_RETRY = 100      -- incomplete (no bridge or no linked lever): retry this often ...
 M.RESOLVE_URGENT = 20      -- ... and this often while the bridge is not in its wanted state
 M.FAIL_REPEAT = 1200       -- the same bridge's GATE_FAIL at most once per day
+M.EXTRA_EVERY = 1200       -- ticks between scans for lever-linked bridges outside the manifest
+M.EXTRA_MAX = 16           -- at most this many of them are handled
+M.WIN_CLOSE = 600          -- D-14 up: a window closes this many ticks after its last reason
+M.WIN_MIGRANTS = 2400      -- ... a migrant arrival report keeps it open this long
+M.WIN_CARAVAN = 4800       -- ... a caravan arrival report (trade's state keeps it open while a caravan is here)
+M.WIN_LEVER = 2400         -- ... an inbox `lever` down keeps that bridge open this long
 
 local FAST_MODES = {SIEGE = true, BREACH = true, DRILL = true}
 local FORCE_MODES = {SIEGE = true, BREACH = true}       -- may RAISE with a citizen on it after 300 ticks
+local LOCK_MODES = {SIEGE = true, BREACH = true}        -- raise the unmanaged bridges even without the reflex module
+local GATE_ROLES = {outer = true, inner = true}         -- the bridges a lockdown and the peace gates hold up
 local FAIL_WHY = {blocked = 'blocked', no_lever = 'no_lever', no_worker = 'no_worker'}
 
-local st      -- persisted m.gate: {v, br = {<b> = {want, why, since, deadline, failed}}, kpi = {...}}
+local st      -- persisted m.gate: {v, br = {<b> = {want, why, since, deadline, failed}}, kpi = {...},
+              --   ex = {X<id> = {bid, raised}} (unmanaged bridges in hand), lat = {s, t}, win = tick, winb = {<b> = tick}}
 local rt      -- runtime per bridge: building ids, own job, settle, block, rotation
+local rt_ex   -- runtime: cached unmanaged bridge list {tick, list = {{name, bid, spec}}}
 local pub     -- precomputed state part {bridges = {...}}
 local dirty
 local PULL    -- df.job_type.PullLever
@@ -70,6 +92,17 @@ local function bridge_names(man)
   for name, spec in pairs(man.bridges or {}) do if valid_spec(spec) then r[#r + 1] = name end end
   table.sort(r)
   return r
+end
+
+-- why the reflex lockdown wants every linked bridge up now (FR-49/52), or nil (level-triggered: asked each pass)
+local function lock_why(K)
+  local ok, why = K.call('reflex', 'holding', 'gates')
+  if ok and type(why) == 'string' and why ~= '' then return why end
+end
+
+-- peace_gates (D-14): 'up' keeps the gates up in PEACE (FR-55), 'down' (default) is the PEACE mode table
+local function peace_up(K)
+  return tostring(K.cfg.decisions and K.cfg.decisions['D-14'] or 'down') == 'up'
 end
 
 ---------------------------------------------------------------- DF reads (buildings, jobs)
@@ -591,11 +624,27 @@ local function citizens_on(K, name, fp)
   return n
 end
 
+-- min Chebyshev distance of a listed visible hostile to a footprint (unmanaged bridges: sense only measures the
+-- manifest ones); -1 none
+local function list_dist(h, f)
+  local best = -1
+  for _, e in ipairs(type(h) == 'table' and h.list or {}) do
+    local dx = e.x < f[1] and f[1] - e.x or (e.x > f[4] and e.x - f[4] or 0)
+    local dy = e.y < f[2] and f[2] - e.y or (e.y > f[5] and e.y - f[5] or 0)
+    local dz = e.z < f[3] and f[3] - e.z or (e.z > f[6] and e.z - f[6] or 0)
+    local d = math.max(dx, dy, dz)
+    if best < 0 or d < best then best = d end
+  end
+  return best
+end
+
 local function down_guard(K, name)
   local m = K.mode()
   if FAST_MODES[m] then return 'down refused in ' .. m end
+  if lock_why(K) then return 'down refused: lockdown' end
   local h = K.census.h
   local d = type(h) == 'table' and type(h.near_bridge) == 'table' and h.near_bridge[name]
+  if d == nil and rt[name] and rt[name].fp then d = list_dist(h, rt[name].fp) end
   if d and d >= 0 and d <= M.DOWN_GUARD then return 'down refused: hostile within ' .. M.DOWN_GUARD .. ' tiles' end
   return nil
 end
@@ -626,7 +675,7 @@ local function set_want(name, w, why, deadline, now)
   st.br[name] = {want = w, why = tostring(why or ''):sub(1, 40), since = now,
                  deadline = w == 'up' and (deadline or now + M.DEADLINE) or nil, failed = false}
   local r = runtime(name)
-  r.bad, r.nw, r.block_since = {}, 0, nil
+  r.bad, r.nw, r.block_since, r.lat0 = {}, 0, nil, nil
   dirty = true
   return true
 end
@@ -646,6 +695,14 @@ local function observe(K, name, r, s, now)
   if s == 'up' and r.settled ~= nil and r.settled ~= 'up' then
     st.kpi.raise[name] = now - st.kpi.t0
     dirty = true
+  end
+  -- FR-55 lever latency: our queued pull -> the bridge in the state it was pulled for
+  local l0 = r.lat0
+  if l0 and s == l0.want then
+    local ms = K.now().ms - l0.ms
+    st.lat = {s = (ms + 500) // 1000, t = now - l0.tick}
+    r.lat0, dirty = nil, true
+    K.log('info', 'gate: %s %s %d ticks (%d s) after the pull was queued', name, s, st.lat.t, st.lat.s)
   end
   if br and s == br.want then r.bad = {} end
   r.settled, r.settled_at = s, now
@@ -736,7 +793,8 @@ local function control(K, name, spec, now)
     r.bad[lid], r.stuck, r.resolved = true, 'no_lever', nil
     return s
   end
-  r.job = {id = job, lever = lid, queued = now, before = s}
+  r.job = {id = job, lever = lid, queued = now, before = s, qms = K.now().ms}
+  if not (r.lat0 and r.lat0.want == w) then r.lat0 = {tick = now, ms = K.now().ms, want = w} end
   st.kpi.pulls, dirty = st.kpi.pulls + 1, true
   K.emit('LEVER', 'C', 'pull ' .. name .. ' ' .. w, {bridge = name, lever = lid, job = job})
   return s
@@ -816,12 +874,147 @@ local function update_every(K)
   if M.every.ticks ~= want then M.every = {ticks = want} end
 end
 
--- mode default for a bridge without a want: PEACE down, BREACH up
+---------------------------------------------------------------- lockdown, peace gates, unmanaged bridges
+-- D-14 up: is a PEACE window open (a caravan, migrants), or this bridge's own `lever` window? Never while a hostile
+-- is visible or the census is stale. Closes WIN_CLOSE ticks after its last reason.
+local function window_open(K, name, now)
+  local h = K.census.h
+  if not (type(h) == 'table' and (h.vis or 0) == 0 and now - (h.tick or -1e9) <= 200) then return false end
+  if now < ((st.winb or {})[name] or -1) then return true end
+  local v = K.view()
+  local tr = type(v) == 'table' and v.trade
+  if (type(tr) == 'table' and tr.caravan == 1) or now < (st.win or -1) then st.win_last = now; return true end
+  return st.win_last ~= nil and now >= st.win_last and now - st.win_last < M.WIN_CLOSE
+end
+
+-- the PEACE want of a gate bridge (manifest outer/inner, or an unmanaged one kept up): lockdown up; D-14 up: up
+-- unless a window is open; D-14 down: down (the mode table)
+local function peace_want(K, name, role, now)
+  if not GATE_ROLES[role] and role ~= 'extra' then return 'down', 'peace' end
+  if lock_why(K) then return 'up', 'lockdown' end
+  if peace_up(K) then
+    if window_open(K, name, now) then return 'down', 'window' end
+    return 'up', 'peace_gates'
+  end
+  return 'down', 'peace'
+end
+
+-- mode default for a bridge without a want: PEACE per peace_want, BREACH up
 local function ensure_default(K, name, now)
   if st.br[name] ~= nil then return end
   local m = K.mode()
-  if m == 'PEACE' then set_want(name, 'down', 'peace', nil, now)
+  local spec = (K.manifest().bridges or {})[name]
+  if m == 'PEACE' then
+    local w, why = peace_want(K, name, type(spec) == 'table' and spec.role, now)
+    set_want(name, w, why, nil, now)
   elseif m == 'BREACH' then set_want(name, 'up', 'breach', nil, now) end
+end
+
+-- lockdown and PEACE gates for the manifest bridges (level-triggered): a lockdown wants outer/inner up in every
+-- mode; in PEACE D-14 up keeps them up outside a window, and a bridge the lockdown held goes back to its PEACE want
+local function manifest_pass(K, man, now)
+  local lock, mode = lock_why(K), K.mode()
+  for _, name in ipairs(bridge_names(man)) do
+    local role, br = man.bridges[name].role, st.br[name]
+    local w, why
+    if lock and GATE_ROLES[role] then w, why = 'up', 'lockdown'
+    elseif mode == 'PEACE' and GATE_ROLES[role] and (peace_up(K) or (br and br.why == 'lockdown')) then
+      w, why = peace_want(K, name, role, now)
+    end
+    if w and not (br and br.want == w) then set_want(name, w, why, nil, now) end
+  end
+end
+
+local function is_extra(name) return st.ex[name] ~= nil end
+
+-- lever-linked drawbridges outside the manifest, found from the levers (buildings.other.TRAP, lever.lua:103); cached
+-- for EXTRA_EVERY ticks. A bridge a manifest bridge already resolved to is not unmanaged.
+local function discover(K, now, force)
+  if not force and rt_ex and now >= rt_ex.tick and now - rt_ex.tick < M.EXTRA_EVERY then return rt_ex.list end
+  local managed = {}
+  for name, r in pairs(rt) do if r.bid and not is_extra(name) and not r.fp then managed[r.bid] = true end end
+  local found, order = {}, {}
+  local ok = pcall(function()
+    for _, lv in ipairs(df.global.world.buildings.other.TRAP) do
+      if is_lever(lv) then
+        for bid in pairs(targets(lv) or {}) do
+          local e = found[bid]
+          if not e and not managed[bid] then
+            local b = df.building.find(bid)
+            if b and is_bridge(b) then
+              e = {bid = bid, b = b, levers = {}}
+              found[bid], order[#order + 1] = e, bid
+            end
+          end
+          if e and #e.levers < 4 then e.levers[#e.levers + 1] = {lv.x1, lv.y1, lv.z} end
+        end
+      end
+    end
+  end)
+  if not ok then K.log('warn', 'gate: lever scan failed') end
+  table.sort(order)
+  local list = {}
+  for i = 1, math.min(#order, M.EXTRA_MAX) do
+    local e = found[order[i]]
+    local b = e.b
+    list[#list + 1] = {name = string.format('X%d', e.bid % 10000000), bid = e.bid,
+                       spec = {role = 'extra', fp = {b.x1, b.y1, b.z, b.x2, b.y2, b.z}, levers = e.levers}}
+  end
+  rt_ex = {tick = now, list = list}
+  return list
+end
+
+local function forget(name)
+  st.ex[name], st.br[name], rt[name], dirty = nil, nil, nil, true
+end
+
+-- unmanaged bridges: up while the lockdown holds (or in SIEGE/BREACH); afterwards, in PEACE, the ones the lockdown
+-- raised go down again (D-14 down) or stay up outside the windows (D-14 up); a lowered one is forgotten
+local function extras_pass(K, now, force)
+  local mode = K.mode()
+  local hold = lock_why(K) or (LOCK_MODES[mode] and mode:lower()) or nil
+  if not hold and next(st.ex) == nil then return {} end
+  local list = discover(K, now, force)
+  local states, seen = {}, {}
+  local keep = peace_up(K)
+  for _, e in ipairs(list) do
+    local name, x = e.name, st.ex[e.name]
+    seen[name] = true
+    local r = runtime(name)
+    r.fp = e.spec.fp
+    if hold then
+      if not x then
+        resolve(r, e.spec, now, true)
+        x = {bid = e.bid, raised = read(r) ~= 'up' and 1 or 0}
+        st.ex[name], dirty = x, true
+        K.log('info', 'gate: unmanaged bridge %s (lever-linked) in hand for %s, %s', name, hold, read(r))
+      end
+      local br = st.br[name]
+      if not (br and br.want == 'up') then set_want(name, 'up', 'lockdown', nil, now) end
+    elseif x and mode == 'PEACE' then
+      -- only a bridge the lockdown raised is ours afterwards; one that was already up stays the player's
+      local w, why
+      if x.raised ~= 1 then w = nil
+      elseif keep then w, why = peace_want(K, name, 'extra', now)
+      else w, why = 'down', 'unlock' end
+      local br = st.br[name]
+      if not w then forget(name); x = nil
+      elseif not (br and br.want == w) then set_want(name, w, why, nil, now) end
+    end
+    if x then
+      states[name] = control(K, name, e.spec, now)
+      check_fail(K, name, now)
+      local br = st.br[name]
+      if not hold and not keep and br and br.want == 'down' and states[name] == 'down' then
+        forget(name)
+        states[name] = nil
+      end
+    end
+  end
+  if rt_ex.tick == now then                 -- just rescanned: destroyed or unlinked since, nothing left to pull
+    for name in pairs(st.ex) do if not seen[name] then forget(name) end end
+  end
+  return states
 end
 
 ---------------------------------------------------------------- module
@@ -846,32 +1039,68 @@ function M.init(K)
       st.kpi = k
     end
   end
-  rt, pub, dirty, PULL = {}, nil, false, nil
+  st.ex, st.winb = {}, {}
+  if type(p) == 'table' then
+    local function int(v) return type(v) == 'number' and math.tointeger(v) or nil end
+    for name, x in pairs(type(p.ex) == 'table' and p.ex or {}) do
+      if type(name) == 'string' and type(x) == 'table' and int(x.bid) then
+        st.ex[name] = {bid = int(x.bid), raised = int(x.raised) == 1 and 1 or 0}
+        -- its want came back with st.br (the name is not in the manifest, so it is kept)
+      end
+    end
+    if type(p.lat) == 'table' and int(p.lat.s) and int(p.lat.t) then st.lat = {s = int(p.lat.s), t = int(p.lat.t)} end
+    st.win = int(p.win)
+    for name, t in pairs(type(p.winb) == 'table' and p.winb or {}) do
+      if type(name) == 'string' and int(t) then st.winb[name] = int(t) end
+    end
+  end
+  rt, rt_ex, pub, dirty, PULL = {}, nil, nil, false, nil
   pl, rooms_c = {rooms = {}}, nil
   M.every = {ticks = FAST_MODES[K.mode()] and M.FAST or M.SLOW}
 end
 
-function M.step(K, budget, ctx)
+-- FR-55 lever state: last measured latency (-1 never), our pending pulls and how long the oldest one waits
+local function lever_state(K)
+  local ms, pend, wait = K.now().ms, 0, 0
+  for _, r in pairs(rt) do
+    if r.job then
+      pend = pend + 1
+      local w = (ms - (r.job.qms or ms)) // 1000
+      if w > wait then wait = w end
+    end
+  end
+  local lat = st.lat or {}
+  return {lat_s = lat.s or -1, lat_t = lat.t or -1, pend = pend, wait_s = math.max(0, wait)}
+end
+
+local function pass(K, force)
   local now = K.now().tick
   local man = K.manifest()
   local states = {}
-  local gone = {}                                -- forget bridges the manifest no longer lists
+  local gone = {}                                -- forget bridges the manifest no longer lists (not the unmanaged)
   for name in pairs(rt) do gone[name] = true end
   for name in pairs(st.br) do gone[name] = true end
   for name in pairs(gone) do
-    if not valid_spec((man.bridges or {})[name]) then rt[name], st.br[name], dirty = nil, nil, true end
+    if not valid_spec((man.bridges or {})[name]) and not is_extra(name) and not (rt[name] and rt[name].fp) then
+      rt[name], st.br[name], dirty = nil, nil, true
+    end
   end
   pullers_step(K, now)
+  manifest_pass(K, man, now)
   for _, name in ipairs(bridge_names(man)) do
     ensure_default(K, name, now)
     states[name] = control(K, name, man.bridges[name], now)
     check_fail(K, name, now)
     links(K, name, man.bridges[name], runtime(name), now)
   end
-  pub = next(states) and {bridges = states} or {}
+  for name, s in pairs(extras_pass(K, now, force)) do states[name] = s end
+  pub = next(states) and {bridges = states, lever = lever_state(K)} or {}
   update_every(K)
   flush(K)
+  return states
 end
+
+function M.step(K, budget, ctx) pass(K, false) end
 
 -- public (CONTRACTS §7): request a bridge state. 'up' is always honoured; 'down' is refused in
 -- SIEGE/BREACH/DRILL and while a visible hostile is within 30 tiles. deadline (abs tick, optional,
@@ -891,6 +1120,58 @@ function M.want(K, bridge, want, why, deadline)
   update_every(K)
   flush(K)
   return true, (changed and 'wanted ' or 'still ') .. bridge .. ' ' .. want
+end
+
+-- public (FR-49/52): the reflex module started or ended a lockdown (it answers reflex.holding('gates')); run the gate
+-- pass now (same step) with a fresh scan for unmanaged bridges. Returns {want, up, pend, names}: the bridges wanted
+-- up and how many already are; pend = pulls pending now.
+function M.lockdown(K)
+  local now = K.now().tick
+  local man = K.manifest()
+  for _, name in ipairs(bridge_names(man)) do resolve(runtime(name), man.bridges[name], now) end
+  local states = pass(K, true)
+  local info = {want = 0, up = 0, pend = 0, names = {}}
+  local names = {}
+  for name in pairs(states) do names[#names + 1] = name end
+  table.sort(names)
+  for _, name in ipairs(names) do
+    local br = st.br[name]
+    if br and br.want == 'up' then
+      info.want = info.want + 1
+      info.names[#info.names + 1] = name
+      if states[name] == 'up' then info.up = info.up + 1 end
+    end
+    if (rt[name] or {}).job then info.pend = info.pend + 1 end
+  end
+  return info
+end
+
+-- public (FR-49): the fort is sealed by its bridges: >= 1 gate bridge (manifest outer/inner, else the unmanaged ones
+-- in hand) and every one of them up. siege counts sealed_ticks with it when the manifest has no outer/inner bridge.
+function M.sealed(K)
+  local b = pub and pub.bridges or {}
+  local man = K.manifest()
+  local list = {}
+  for _, name in ipairs(bridge_names(man)) do
+    if GATE_ROLES[man.bridges[name].role] then list[#list + 1] = name end
+  end
+  if #list == 0 then for name in pairs(st.ex) do list[#list + 1] = name end end
+  if #list == 0 then return false end
+  for _, name in ipairs(list) do if b[name] ~= 'up' then return false end end
+  return true
+end
+
+-- public (FR-58): entrance points for an arrival ETA: centres of the manifest outer bridges, else of the unmanaged
+-- bridges in hand (or found)
+function M.points(K)
+  local man, r = K.manifest(), {}
+  for _, name in ipairs(bridge_names(man)) do
+    if man.bridges[name].role == 'outer' then r[#r + 1] = geom.bbox_center(man.bridges[name].fp) end
+  end
+  if #r == 0 and rt_ex then
+    for _, e in ipairs(rt_ex.list) do r[#r + 1] = geom.bbox_center(e.spec.fp) end
+  end
+  return r
 end
 
 -- module state part (no bridge) or public gate.state(bridge) -> state, pending job id
@@ -949,6 +1230,15 @@ function M.reset_kpi(K)
 end
 
 M.on = {
+  -- D-14 up: migrants and caravans open the PEACE window (trade's state keeps it open while a caravan is here)
+  REPORT = function(K, ev)
+    local now = K.now().tick
+    local add = (ev.type == 'CARAVAN_ARRIVAL' or ev.type == 'FIRST_CARAVAN_ARRIVAL') and M.WIN_CARAVAN or M.WIN_MIGRANTS
+    if peace_up(K) and now + add > (st.win or -1) then
+      st.win, dirty = now + add, true
+      K.log('info', 'gate: peace gates open for %s (%d ticks)', ev.type, add)
+    end
+  end,
   MODE = function(K, ev)
     local now = ev.tick or K.now().tick
     local man = K.manifest()
@@ -960,7 +1250,8 @@ M.on = {
       check_fail(K, name, now, ev.from) -- settle the old epoch first (SIEGE->BREACH at T+900 = its deadline)
       local br = st.br[name]
       if ev.to == 'PEACE' then
-        set_want(name, 'down', 'peace', nil, now)
+        local w, why = peace_want(K, name, man.bridges[name].role, now)
+        set_want(name, w, why, nil, now)
       elseif ev.to == 'BREACH' then
         if br and br.want == 'up' and br.since < now then
           br.since, br.deadline, br.failed, dirty = now, now + M.DEADLINE, false, true
@@ -984,6 +1275,9 @@ M.on = {
 M.verbs.lever = function(K, args, cmd)
   local b, w = args.bridge, args.want
   if type(b) ~= 'string' or (w ~= 'up' and w ~= 'down') then return false, 'need bridge and want up|down' end
+  if w == 'down' and peace_up(K) then    -- D-14 up: the operator's planned opening is a window for this bridge
+    st.winb[b], dirty = K.now().tick + M.WIN_LEVER, true
+  end
   local ok, msg = M.want(K, b, w, 'lever:' .. tostring(cmd and cmd.by or '?'))
   if not ok then return false, msg end
   local r = runtime(b)

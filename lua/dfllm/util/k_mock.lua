@@ -530,7 +530,7 @@ function M.new(opts)
   for k, v in pairs(cfg.decisions or {}) do decisions[k] = v end
   K.cfg = {decisions = decisions,
            allowlist = cfg.allowlist or {v = 2, commands = {}, blocked = {}, armok_exceptions = {}},
-           baseline = cfg.baseline or {v = 2},
+           baseline = cfg.baseline or {v = 2}, reflex = cfg.reflex or {v = 2},
            paths = {df = W.dfpath, runtime = W.dfpath .. '/dfllm-runtime', save = W.dfpath .. '/dfllm-runtime/' .. W.save,
                     repo = cfg.repo or '.'},
            save = W.save, dev = cfg.dev == true, acceptance = cfg.acceptance == true}
