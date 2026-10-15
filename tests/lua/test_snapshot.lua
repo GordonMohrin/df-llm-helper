@@ -63,6 +63,32 @@ T.test('tile(): legend classes, hidden is nil, designations, buildings', functio
   T.eq(t(3, 1).c, '_')
 end)
 
+T.test('items_at() (BUG-009): the loose items on the revealed tiles of a footprint, from the map blocks', function()
+  local W, S = world()
+  W.items_by_id = {}
+  local function item(id, x, y, on_ground) W.items_by_id[id] = {id = id, flags = {on_ground = on_ground ~= false},
+                                                                pos = {x = x, y = y, z = Z}} end
+  item(11, 5, 1)                      -- on the footprint
+  item(12, 1, 2)                      -- a hidden tile
+  item(13, 6, 2, false)               -- in a building or a container
+  item(14, 20, 1)                     -- outside the rect (another block)
+  W.tiles['20,1,' .. Z] = {des = {hidden = false}, occ = {}}
+  item(15, 3, 3)
+  local blocks = {['0,0'] = {items = kmock.vec{15, 11, 12, 13}}, ['1,0'] = {items = kmock.vec{14}}}
+  dfhack.maps.getTileBlock = function(x, y, z) return z == Z and blocks[(x // 16) .. ',' .. (y // 16)] or nil end
+  local function at(...) local _, r, e = W.K.call('snapshot', 'items_at', ...); return r, e end
+  T.eq(at(0, 0, 9, 3, Z), {{11, 5, 1}, {15, 3, 3}})
+  T.eq(at(0, 0, 25, 3, Z), {{11, 5, 1}, {14, 20, 1}, {15, 3, 3}}, 'two blocks')
+  T.eq(at(4, 1, 4, 1, Z), {}, 'nothing there')
+  T.eq(at(0, 0, 9, 3, Z + 1), {}, 'another level')
+  local r, e = at(0, 0, 99, 99, Z)
+  T.eq({r, e}, {nil, 'rect too large'})
+  S.CFG.items_max = 1
+  T.eq(#at(0, 0, 25, 3, Z), 1, 'capped')
+  S.CFG.items_max = 200
+  dfhack.maps.getTileBlock = nil
+end)
+
 T.test('reach(): walk groups through canWalkBetween; bad args and faults answer true', function()
   local W = world()
   local saved = dfhack.maps.canWalkBetween

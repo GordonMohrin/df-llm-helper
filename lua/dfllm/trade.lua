@@ -39,7 +39,8 @@
 --     the merchant goods unloaded there (the depot's goods list: type, material, units, value, the want token
 --     that names them), so trade.want can ask for what is actually there;
 --   * depot keeper: a caravan on the map with no built depot raises DEPOT_MISSING (A) once per visit and asks
---     the runner to queue a depot project (runner.depot_keep; the runner also keeps it in PEACE/RECOVERY).
+--     the runner to queue a depot project (runner.depot_keep; the runner also keeps it in PEACE/RECOVERY). A planned
+--     depot is "being built" only while it progresses; else the message says why not (BUG-005, economy.build_info).
 local json = require('dfllm.util.json')
 
 local M = {name = 'trade', every = {ticks = 100}, verbs = {}, inspect = {},
@@ -461,6 +462,41 @@ local function find_depot(K)
 end
 
 local function in_depot(p, d) return p.z == d.z and p.x >= d.x1 and p.x <= d.x2 and p.y >= d.y1 and p.y <= d.y2 end
+
+-- BUG-005 (Run 9: DEPOT_MISSING said "one is being built" for a depot whose job DF suspended again every day): a
+-- planned depot counts as being built only while it progresses: its construction job runs (not suspended) with a
+-- builder, or its build stage is past 0. Else the reason: economy's daily jobs pass (economy.build_info), else the
+-- job's state. Returns nil without a planned depot, else {pos, stage, max, going, why}
+local function depot_progress(K)
+  local out
+  pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.TRADE_DEPOT) do
+      if not built(b) then
+        local e = {pos = {int(b.centerx), int(b.centery), int(b.z)}, stage = 0, max = 0, susp = false, worker = false}
+        pcall(function() e.stage, e.max = int(b:getBuildStage()), int(b:getMaxBuildStage()) end)
+        pcall(function()
+          for _, j in ipairs(b.jobs) do
+            if j.flags.suspend then e.susp = true end
+            local okw, w = pcall(dfhack.job.getWorker, j)
+            if okw and w then e.worker = true end
+          end
+        end)
+        e.going = e.stage > 0 or (e.worker and not e.susp)
+        if not e.going then
+          local okc, info = K.call('economy', 'build_info', b.id)
+          local why = okc and type(info) == 'table' and info.why or nil
+          if okc and type(info) == 'table' and (info.fails or 0) > 0 then
+            why = string.format('%s, %d resumes failed', tostring(why or 'suspended'), info.fails)
+          end
+          e.why = tostring(why or (e.susp and 'its job is suspended' or 'no builder took its job')):sub(1, 90)
+        end
+        out = e
+        return
+      end
+    end
+  end)
+  return out
+end
 
 -- the game's TradeAtDepot job on the depot: true when its worker stands inside the depot
 local function trader_at(d)
@@ -898,12 +934,21 @@ local function track_visits(K, cars, now)
       v.nodepot, dirty = 1, true
       local okc, okd, res = K.call('runner', 'depot_keep', 'caravan')
       local proj = okc and okd and type(res) == 'string' and res or ''
-      local planned = 0
-      pcall(function() if #df.global.world.buildings.other.TRADE_DEPOT > 0 then planned = 1 end end)
+      local dp = depot_progress(K)
+      local tail
+      if dp and dp.going then
+        tail = string.format(' (one is being built at %d,%d,%d: stage %d/%d)', dp.pos[1] or -1, dp.pos[2] or -1,
+                             dp.pos[3] or -1, dp.stage, dp.max)
+      elseif dp then
+        tail = string.format(' (the planned one at %d,%d,%d does not progress: %s)', dp.pos[1] or -1, dp.pos[2] or -1,
+                             dp.pos[3] or -1, dp.why)
+      else
+        tail = proj ~= '' and (': ' .. proj) or ': no known depot site'
+      end
+      local d = {civ = civ_name(c.ent), planned = dp and dp.going and 1 or 0, proj = proj:sub(1, 40)}
+      if dp and not dp.going then d.stalled, d.why = 1, dp.why end
       K.emit('DEPOT_MISSING', 'A', string.format('caravan from %s on the map and no trade depot stands%s', civ_name(c.ent),
-                                                 planned == 1 and ' (one is being built)' or
-                                                 (proj ~= '' and (': ' .. proj) or ': no known depot site')),
-             {civ = civ_name(c.ent), planned = planned, proj = proj:sub(1, 40)})
+                                                 tail):sub(1, 200), d)
     end
     if c.state == 'Stuck' then
       if v.stuck_since < 0 then v.stuck_since, dirty = now, true end

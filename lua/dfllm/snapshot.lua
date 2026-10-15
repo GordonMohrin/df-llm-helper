@@ -19,6 +19,8 @@ M.CFG = {
   marks_max = 500,
   trap_ttl = 1200,                -- ticks between trap index refreshes for tile()
   liquid_tiles = 4096,            -- tiles one liquids() call may read (FR-47)
+  items_tiles = 400,              -- tiles one items_at() call may cover (BUG-009: a building footprint)
+  items_max = 200,                -- items one items_at() call returns
 }
 local PURPOSES = {audit = true, sites = true, debug = true}
 local ID_OK = '^[A-Za-z0-9_%-]+$'
@@ -248,6 +250,37 @@ function M.liquids(K, x0, y0, x1, y1, z, min)
       end
     end
   end
+  return out
+end
+
+-- items lying on the revealed tiles of a level rect (BUG-009, Run 9: forbidden items on the footprint of a planned
+-- building make the builder cancel "Item blocking site", and nobody hauls a forbidden item away): {{id, x, y}} of
+-- the items on the ground there (not in a building, a container or a unit's hands), read from the map blocks' item
+-- lists; at most M.CFG.items_tiles tiles per call and M.CFG.items_max items returned. Hidden tiles are skipped.
+function M.items_at(K, x0, y0, x1, y1, z)
+  x0, y0, x1, y1, z = int(x0), int(y0), int(x1), int(y1), int(z)
+  local out = {}
+  if not (x0 and y0 and x1 and y1 and z) or x1 < x0 or y1 < y0 then return out end
+  if (x1 - x0 + 1) * (y1 - y0 + 1) > M.CFG.items_tiles then return nil, 'rect too large' end
+  local getTileFlags, seen = dfhack.maps.getTileFlags, {}
+  for by = y0 // 16, y1 // 16 do
+    for bx = x0 // 16, x1 // 16 do
+      local blk = dfhack.maps.getTileBlock(math.max(x0, bx * 16), math.max(y0, by * 16), z)
+      for _, id in ipairs(blk and blk.items or {}) do
+        local it = not seen[id] and df.item.find(id)
+        seen[id] = true
+        local p = it and it.flags.on_ground and it.pos
+        if p and p.z == z and p.x >= x0 and p.x <= x1 and p.y >= y0 and p.y <= y1 then
+          local des = getTileFlags(p.x, p.y, p.z)
+          if des and not des.hidden then
+            out[#out + 1] = {id, p.x, p.y}
+            if #out >= M.CFG.items_max then return out end
+          end
+        end
+      end
+    end
+  end
+  table.sort(out, function(a, b) return a[1] < b[1] end)
   return out
 end
 
