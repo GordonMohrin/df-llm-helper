@@ -181,7 +181,17 @@
   "posts_per_run": 4,
   "mood_thirst": 30000,
   "mood_hunger": 50000,
-  "mood_risk_every": 2400
+  "mood_risk_every": 2400,
+  "coffins": true,
+  "coffin_reserve": 10,
+  "coffin_batch": 30,
+  "coffin_scan_r": 16,
+  "coffin_min_side": 4,
+  "coffin_entrance_r": 10,
+  "coffin_retry": 3600,
+  "coffin_wood_keep": 20,
+  "coffin_wake": 2400,
+  "coffin_prio": 3
  },
  "reserve": {
   "from_phase": "P1",

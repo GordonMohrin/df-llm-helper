@@ -614,6 +614,75 @@ T.test('zone: one-owner zone cells already zoned (tomb over a tombed coffin) are
   dfhack.buildings, df.civzone_type = bld, czt
 end)
 
+-- FR-27: a tombs document whose zone stage has 1x1 tomb cells at x = 10, 12, 14 and a 2x1 one at 16..17 (z 100)
+local function tomb_doc()
+  return {v = 2, tpl = 'tombs', site = 'S1', class = 'living', params = {n = 4}, anchor = {10, 10, 100}, rot = 0,
+          stages = {{label = 'build', mode = 'build', orders = 0, defense = 0,
+                     chunks = {{pos = {10, 10, 100}, cells = {{0, 0, 0, 'n'}, {2, 0, 0, 'n'}, {4, 0, 0, 'n'}}}}},
+                    {label = 'zone', mode = 'zone', orders = 0, defense = 0,
+                     chunks = {{pos = {10, 10, 100}, cells = {{0, 0, 0, 'T(1x1)'}, {2, 0, 0, 'T(1x1)'}, {4, 0, 0, 'T(1x1)'},
+                                                             {6, 0, 0, 'T(2x1)'}}}}}},
+          manifest = {v = 2}, materials = {}}
+end
+
+T.test('FR-27: bp.place cuts tomb cells over a tile that has a tomb zone, refuses a document with no other', function()
+  local W = fresh{tag = 'tdup'}
+  local czt, bld = df.civzone_type, dfhack.buildings
+  df.civzone_type = {Tomb = 9, Bedroom = 2, [9] = 'Tomb', [2] = 'Bedroom'}
+  local zoned = {['10,10,100'] = {{type = 9}}, ['17,10,100'] = {{type = 9}}, ['12,10,100'] = {{type = 2}}}
+  dfhack.buildings = {findCivzonesAt = function(pos) return zoned[pos.x .. ',' .. pos.y .. ',' .. pos.z] or {} end}
+  local r = H.place(W, 't1', tomb_doc())
+  T.ok(r.ok and r.msg:find('2 of 4 tomb cells left out', 1, true) and r.msg:find('10,10,100', 1, true), r.msg)
+  local z = W.K.persist.get('bp.t1').stages[2].chunks[1].cells
+  T.eq(z, {{2, 0, 0, 'T(1x1)'}, {4, 0, 0, 'T(1x1)'}}, 'a tomb over a bedroom zone stays; one tile of the 2x1 is zoned')
+  T.eq(#W.K.persist.get('bp.t1').stages[1].chunks[1].cells, 3, 'the coffins stay')
+  T.ok(logged(W, 'info', 'tomb cells already zoned, left out'))
+  for _, k in ipairs({'12,10,100', '14,10,100', '16,10,100'}) do zoned[k] = {{type = 9}} end
+  r = H.place(W, 't2', tomb_doc())
+  T.ok(not r.ok and r.msg:find('refused: a tomb zone already stands on all 4 tomb cells', 1, true), r.msg)
+  T.eq(H.proj(W, 't2'), nil)
+  -- apply time: a tomb cell is left out as soon as any of its tiles has a tomb zone
+  T.ok(W.inbox('bp.cancel', {proj = 't1'}).ok)
+  for k in pairs(zoned) do zoned[k] = nil end
+  H.place(W, 't3', tomb_doc())
+  zoned['17,10,100'] = {{type = 9}}
+  H.floor(W, 10, 10, 100, 17, 10)
+  H.runs(W, 1)
+  H.build(W)
+  H.runs(W, 3)
+  local keys = {}
+  for _, c in ipairs(H.qf_calls(W, 'zone')) do H.cells(c, function(x, y, zz, key) keys[#keys + 1] = x .. ':' .. key end) end
+  table.sort(keys)
+  T.eq(keys, {'10:T', '12:T', '14:T'}, 'the 2x1 tomb over a zoned tile is not drawn')
+  dfhack.buildings, df.civzone_type = bld, czt
+end)
+
+T.test('FR-61: runner.coffins queues a tombs project: coffins (no orders), then 1x1 tomb zones; bad input refused', function()
+  local W = fresh{tag = 'coffins'}
+  H.floor(W, 40, 40, 100, 50, 50)
+  local okc, ok, id = W.K.call('runner', 'coffins', {{44, 41, 100}, {40, 40, 100}, {42, 41, 100}}, 'care: 3 short', 3)
+  T.ok(okc and ok, tostring(id))
+  T.ok(type(id) == 'string' and id:match('^cof%d+$'), tostring(id))
+  local d = W.K.persist.get('bp.' .. id)
+  T.eq({d.tpl, d.class, d.site, #d.stages, d.stages[1].mode, d.stages[1].orders, d.stages[2].mode, d.params.n},
+       {'tombs', 'living', 'care', 2, 'build', 0, 'zone', 3})
+  T.eq(d.stages[1].chunks, {{pos = {40, 40, 100}, cells = {{0, 0, 0, 'n'}, {2, 1, 0, 'n'}, {4, 1, 0, 'n'}}}})
+  T.eq(d.stages[2].chunks, {{pos = {40, 40, 100}, cells = {{0, 0, 0, 'T(1x1)'}, {2, 1, 0, 'T(1x1)'},
+                                                         {4, 1, 0, 'T(1x1)'}}}})
+  T.eq({H.proj(W, id).tpl, H.proj(W, id).prio}, {'tombs', 3})
+  T.eq({W.K.call('runner', 'pending', 'tombs')}, {true, 1})
+  H.runs(W, 1)
+  T.eq(#H.qf_calls(W, 'build', 'orders'), 0, 'care orders the coffins in a usable material')
+  T.eq(#H.qf_calls(W, 'build', 'run'), 1)
+  local many = {}
+  for i = 1, 61 do many[i] = {i, 1, 100} end
+  T.eq({W.K.call('runner', 'coffins', many, 'x')}, {true, false, 'need 1-60 tiles'})
+  T.eq({W.K.call('runner', 'coffins', nil, 'x')}, {true, false, 'need 1-60 tiles'})
+  T.eq({W.K.call('runner', 'coffins', {{1, 2, 'x'}}, 'x')}, {true, false, 'bad tile 1'})
+  T.eq({W.K.call('runner', 'coffins', {{1, 2, 3}, {1, 2, 3}}, 'x')}, {true, false, 'tile 2 twice'})
+  T.eq({W.K.call('runner', 'coffins', {{1, 2, 3}}, 'x', 9)}, {true, false, 'prio must be 1..7'})
+end)
+
 T.test('bp.cancel: plain removal, and undo walks the applied stages backwards', function()
   local W = fresh{tag = 'cancel'}
   H.place(W, 'a', H.doc{x = 10})

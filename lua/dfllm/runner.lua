@@ -606,29 +606,72 @@ end
 -- tomb zones on coffins that already had one; DF assigned the dead to the new, "free" zones of occupied coffins
 -- and five citizens lay unburied (one ghost held the fort in BREACH). A one-owner zone cell (tomb, bedroom,
 -- office) is left out where every tile already lies in a zone of that type, as nobody draws a second one.
+-- FR-27 (Run 9: up to 3 tomb zones stacked on one coffin): a tomb cell is left out as soon as ANY of its tiles
+-- lies in a tomb zone; bp.place refuses such cells before the project is queued.
 M.ZONE_ONE = {T = 'Tomb', b = 'Bedroom', o = 'Office'}
-local function zoned_cells(ch)
+-- dup, first zoned tile: a tomb cell with any tile in a tomb zone, a bedroom/office cell with every tile zoned
+local function zone_dup(tl)
   local find = dfhack.buildings and dfhack.buildings.findCivzonesAt              -- Lua API.txt:2488
-  if not find or not df.civzone_type then return ch, 0 end
+  local want = M.ZONE_ONE[tl[1] and tl[1][4] or '']
+  if not find or not df.civzone_type or want == nil then return false end
+  local ty = df.civzone_type[want]
+  local first, all = nil, true
+  for _, t in ipairs(tl) do
+    local ok, zs = pcall(find, {x = t[1], y = t[2], z = t[3]})
+    local hit = false
+    for _, zn in ipairs(ok and type(zs) == 'table' and zs or {}) do if zn.type == ty then hit = true end end
+    if hit then first = first or t else all = false end
+    if want ~= 'Tomb' and not all then return false end
+  end
+  if want == 'Tomb' then return first ~= nil, first end
+  return all, tl[1]
+end
+
+local function zoned_cells(ch)
+  if not (dfhack.buildings and dfhack.buildings.findCivzonesAt) or not df.civzone_type then return ch, 0 end
   local keep, skip = {}, 0
   for _, cell in ipairs(ch.cells) do
     local tl = {}
     cell_tiles(ch, cell, tl)
-    local want = M.ZONE_ONE[tl[1] and tl[1][4] or '']
-    local dup = want ~= nil and #tl > 0
-    if dup then
-      local ty = df.civzone_type[want]
-      for _, t in ipairs(tl) do
-        local ok, zs = pcall(find, {x = t[1], y = t[2], z = t[3]})
-        local hit = false
-        for _, zn in ipairs(ok and zs or {}) do if zn.type == ty then hit = true end end
-        if not hit then dup = false; break end
-      end
-    end
-    if dup then skip = skip + 1 else keep[#keep + 1] = cell end
+    if zone_dup(tl) then skip = skip + 1 else keep[#keep + 1] = cell end
   end
   if skip == 0 then return ch, 0 end
   return {pos = ch.pos, cells = keep}, skip
+end
+
+-- FR-27 (bp.place, before a project is queued): the tomb cells ('T') of its zone stages that have a tile in a tomb
+-- zone are cut from the document d (chunks and stages left empty go too). Returns cut, total tomb cells, the first
+-- zoned tile {x, y, z}; bp.place refuses the document when every tomb cell was cut.
+local function tomb_dups(d)
+  local cut, total, first = 0, 0, nil
+  if not (dfhack.buildings and dfhack.buildings.findCivzonesAt) or not df.civzone_type then return 0, 0 end
+  local stages = {}
+  for _, st in ipairs(d.stages) do
+    local chunks = {}
+    for _, ch in ipairs(st.mode == 'zone' and st.chunks or {}) do
+      local cells = {}
+      for _, cell in ipairs(ch.cells) do
+        local tl = {}
+        cell_tiles(ch, cell, tl)
+        local dup, at = false, nil
+        if tl[1] and tl[1][4] == 'T' then
+          total = total + 1
+          dup, at = zone_dup(tl)
+        end
+        if dup then cut, first = cut + 1, first or at else cells[#cells + 1] = cell end
+      end
+      if #cells > 0 then chunks[#chunks + 1] = {pos = ch.pos, cells = cells} end
+    end
+    if st.mode ~= 'zone' then stages[#stages + 1] = st
+    elseif #chunks > 0 then
+      local copy_st = {}
+      for k, v in pairs(st) do copy_st[k] = v end
+      copy_st.chunks = chunks
+      stages[#stages + 1] = copy_st
+    end
+  end
+  if cut > 0 and cut < total then d.stages = stages end
+  return cut, total, first
 end
 
 local function apply(K, P, st, R)
@@ -1453,6 +1496,34 @@ function M.dig_backlog(K)
   return n
 end
 
+-- absolute cells {{x, y, z, text}, ...} sorted by z, y, x, in chunks of <= 40 whose pos is the chunk's min corner
+-- (offsets stay >= 0)
+local function sort_cells(list)
+  table.sort(list, function(a, b)
+    if a[3] ~= b[3] then return a[3] < b[3] end
+    if a[2] ~= b[2] then return a[2] < b[2] end
+    return a[1] < b[1]
+  end)
+end
+local function abs_chunks(list)
+  local chunks = {}
+  for i = 1, #list, 40 do
+    local part = {table.unpack(list, i, math.min(#list, i + 39))}
+    local x0, y0, z0 = part[1][1], part[1][2], part[1][3]
+    for _, c in ipairs(part) do x0, y0, z0 = math.min(x0, c[1]), math.min(y0, c[2]), math.min(z0, c[3]) end
+    local ch = {pos = {x0, y0, z0}, cells = {}}
+    for _, c in ipairs(part) do ch.cells[#ch.cells + 1] = {c[1] - x0, c[2] - y0, c[3] - z0, c[4]} end
+    chunks[#chunks + 1] = ch
+  end
+  return chunks
+end
+local function new_id(K, prefix)
+  local t = now(K)
+  local id, n = string.format('%s%d', prefix, t), 0
+  while find(id) do n = n + 1; id = string.format('%s%d-%d', prefix, t, n) end
+  return id
+end
+
 -- FR-56 (seal): a defense project that builds lost perimeter pieces again. cells = {{x, y, z, text}, ...} absolute
 -- quickfort build cells (Cw, d, gw(3x1) ...); like cmd.py's repair_doc, buildingplan waits for the materials (no
 -- orders) and there is no manifest fragment. Returns ok, project id.
@@ -1464,30 +1535,54 @@ function M.repair(K, cells, why)
     if not (x and y and z) or type(c[4]) ~= 'string' or #c[4] < 1 or #c[4] > 64 then return false, 'bad cell ' .. i end
     list[#list + 1] = {x, y, z, c[4]}
   end
-  table.sort(list, function(a, b)
-    if a[3] ~= b[3] then return a[3] < b[3] end
-    if a[2] ~= b[2] then return a[2] < b[2] end
-    return a[1] < b[1]
-  end)
-  local chunks = {}
-  for i = 1, #list, 40 do                     -- chunk pos = the chunk's min corner: offsets stay >= 0
-    local part = {table.unpack(list, i, math.min(#list, i + 39))}
-    local x0, y0, z0 = part[1][1], part[1][2], part[1][3]
-    for _, c in ipairs(part) do x0, y0, z0 = math.min(x0, c[1]), math.min(y0, c[2]), math.min(z0, c[3]) end
-    local ch = {pos = {x0, y0, z0}, cells = {}}
-    for _, c in ipairs(part) do ch.cells[#ch.cells + 1] = {c[1] - x0, c[2] - y0, c[3] - z0, c[4]} end
-    chunks[#chunks + 1] = ch
-  end
-  local t = now(K)
-  local id, n = string.format('rp%d', t), 0
-  while find(id) do n = n + 1; id = string.format('rp%d-%d', t, n) end
+  sort_cells(list)
+  local id = new_id(K, 'rp')
   local d = {v = 2, tpl = 'repair', site = 'repair', class = 'defense', params = obj{}, rot = 0,
              anchor = {list[1][1], list[1][2], list[1][3]}, manifest = {v = 2}, materials = obj{},
-             stages = {{label = 's1.build', mode = 'build', orders = 0, defense = 1, chunks = chunks}}}
+             stages = {{label = 's1.build', mode = 'build', orders = 0, defense = 1, chunks = abs_chunks(list)}}}
   local ok, err = register(K, id, d, 2, 'repair')
   if not ok then return false, err end
   save(K)
   K.log('info', 'repair %s queued: %d cells (%s)', id, #list, tostring(why or ''))
+  return true, id
+end
+
+-- FR-61 (care's coffin provisioner; Run 9: 25 unburied, 0 free coffins, nothing built new ones): a `tombs` project
+-- in dug space that already stands. tiles = {{x, y, z}, ...} (1-60 coffin tiles, care picked them: free revealed
+-- floor of the citizens' walk group, outside every zone, roofed, away from the entrances). Stage 1 builds a coffin
+-- on each ('n', no quickfort orders: care queues ConstructCoffin in a material the fort can use and buildingplan
+-- waits for the coffins), stage 2 draws one 1x1 tomb zone per coffin ('T(1x1)'; zoned_cells leaves out a tile
+-- that has one, care's `burial -c` zones each coffin as soon as it is built). Returns ok, project id.
+M.CFG.coffins_max = 60
+function M.coffins(K, tiles, why, prio)
+  if type(tiles) ~= 'table' or #tiles == 0 or #tiles > M.CFG.coffins_max then
+    return false, string.format('need 1-%d tiles', M.CFG.coffins_max)
+  end
+  local build, zone, seen = {}, {}, {}
+  for i, t in ipairs(tiles) do
+    local x, y, z
+    if type(t) == 'table' then x, y, z = int(t[1] or t.x), int(t[2] or t.y), int(t[3] or t.z) end
+    if not (x and y and z) or not on_map(x, y, z) then return false, 'bad tile ' .. i end
+    local k = x .. ',' .. y .. ',' .. z
+    if seen[k] then return false, 'tile ' .. i .. ' twice' end
+    seen[k] = true
+    build[#build + 1] = {x, y, z, 'n'}
+    zone[#zone + 1] = {x, y, z, 'T(1x1)'}
+  end
+  sort_cells(build)
+  sort_cells(zone)
+  local p = int(prio) or 3
+  if p < 1 or p > 7 then return false, 'prio must be 1..7' end
+  local id = new_id(K, 'cof')
+  local d = {v = 2, tpl = 'tombs', site = 'care', class = 'living', params = obj{n = #build}, rot = 0,
+             anchor = {build[1][1], build[1][2], build[1][3]}, manifest = {v = 2}, materials = obj{coffin = #build},
+             stages = {{label = 'tombs.build', mode = 'build', orders = 0, defense = 0, chunks = abs_chunks(build)},
+                       {label = 'tombs.zone', mode = 'zone', orders = 0, defense = 0, chunks = abs_chunks(zone)}}}
+  local ok, err = register(K, id, d, p, 'tombs')
+  if not ok then return false, err end
+  save(K)
+  K.log('info', 'coffins %s queued: %d coffins with tomb zones at %d,%d,%d (%s)', id, #build, build[1][1], build[1][2],
+        build[1][3], trunc(why, 80))
   return true, id
 end
 
@@ -1544,10 +1639,24 @@ M.verbs = {
     if not prio or prio < 1 or prio > 7 then return false, 'prio must be 1..7' end
     local d, err = read_bp(K, id)
     if not d then return false, 'bp/' .. id .. '.json: ' .. err end
+    local bad = check_doc(d, args.tpl)
+    if bad then return false, bad end
+    -- FR-27: never a second tomb zone on a tile (Run 9: up to 3 stacked on one coffin)
+    local cut, total, at = tomb_dups(d)
+    if total > 0 and cut == total then
+      return false, string.format('refused: a tomb zone already stands on all %d tomb cells (first at %d,%d,%d); '
+                                  .. 'place the tombs elsewhere (FR-27)', total, at[1], at[2], at[3])
+    end
     local ok, e = register(K, id, d, prio, args.tpl)
     if not ok then return false, e end
     save(K)
-    return true, string.format('queued %s (%s, %d stages)', id, d.tpl, #d.stages), {proj = id}
+    local msg = string.format('queued %s (%s, %d stages)', id, d.tpl, #d.stages)
+    if cut > 0 then
+      msg = msg .. string.format('; %d of %d tomb cells left out: a tomb zone stands there (first %d,%d,%d)', cut,
+                                 total, at[1], at[2], at[3])
+      K.log('info', '%s: %d of %d tomb cells already zoned, left out (FR-27)', id, cut, total)
+    end
+    return true, msg, {proj = id}
   end,
   ['bp.cancel'] = function(K, args)
     local P = type(args.proj) == 'string' and find(args.proj)
