@@ -1,3 +1,5 @@
+-- Superseded by kernel economy (FR-16, commit 8f14867): T.jobs resumes suspended ConstructBuilding jobs nobody keeps
+-- suspended (act.job_resume) and reports the rest by reason; verb jobs.release {all?, preventblocking?}.
 -- Workaround FR-16: resume suspended ConstructBuilding jobs (buildingplan/suspendmanager keep pausing them).
 local l = df.global.world.jobs.list.next
 local r, n = 0, 0
@@ -12,6 +14,8 @@ end
 print('released=' .. r)
 print('construct_jobs=' .. n)
 
+-- Superseded by kernel economy (FR-40, commit 8f14867): act.work_detail_prune drops the ids of dead or departed citizens
+-- from every work detail daily.
 -- Workaround FR-40 (14.10.2026): work details keep the ids of DEAD citizens, so "have >= N" thought the detail was full while
 -- nobody alive was in it (Planters: 14 ids, all dead -> 119 PlantSeeds + 23 HarvestPlants unclaimed, 33 of 42 adults jobless).
 -- Drop every id that is not a living citizen before any detail is counted.
@@ -58,6 +62,8 @@ if backlog > 0 then
   end
 end
 
+-- Superseded by kernel economy (FR-17, commit 8f14867): T.farmslots fills every empty season slot of every built plot
+-- (act.farm_crop) with a crop that grows then and there; surface plots too, usable seeds first.
 -- Workaround FR-17: fill empty season slots of underground farm plots with the crop of the first non-empty slot.
 local filled = 0
 for _, b in ipairs(df.global.world.buildings.other.FARM_PLOT) do
@@ -94,6 +100,9 @@ if fd and dd and ((fd < 60 and dd > 60) or dd > 200) then   -- 14.10.: brewing a
 end
 print('brew_orders_removed=' .. removed)
 
+-- Superseded by kernel economy (FR-25 + FR-40, commit 8f14867): in a starvation T.starve adds planters and plant gatherers
+-- (act.work_detail); act.work_detail_prune keeps dead ids from making the detail look full. The kernel adds them only
+-- in a starvation, not 14 planters all year.
 -- Workaround FR-25: the 'Planters' work detail is empty (mode 1 = members only); without it the PlantSeeds jobs of the new farm
 -- plots stay unclaimed (79 pending jobs, food 1 day). Keep >= 14 adults in it.
 do
@@ -113,6 +122,8 @@ do
   end
 end
 
+-- Superseded by kernel economy (FR-23, commit 8f14867): the census counts seeds in a forbidden item or container as
+-- seeds_forb, T.forbid unforbids the seeds and their bags on revealed, reachable tiles in PEACE/RECOVERY.
 -- Run 9 lesson (14.10.2026): seed bags that came with a caravan were flagged forbidden; PlantSeeds jobs vanished and the
 -- cancellation read 'Needs plump helmet spawn'. Unforbid every seed item and every container holding seeds, each round.
 do
@@ -533,6 +544,8 @@ do
   end
 end
 
+-- Superseded by kernel economy (FR-25, commit 8f14867): T.starve marks reachable, revealed, edible shrubs for gathering
+-- (act.plant_gather) while food is at starve.days with hungry citizens, not every round.
 -- Food top-up (Run 9): re-mark reachable, visible, edible wild plants for gathering every round (they regrow; the gatherers are idle
 -- anyway). Fruit/leaf plants only; fibre plants (pig tail) are marked too for cloth.
 do
@@ -569,6 +582,8 @@ do
   print('corpses_marked_dump=' .. n)
 end
 
+-- Superseded by kernel runner + trade (FR-43, commit 9839c64): runner.depot_keep queues a `depot` project at manifest.depot
+-- (or the last depot seen) whenever none exists in PEACE/RECOVERY; a caravan without a depot raises DEPOT_MISSING (A).
 -- FR-43 (14.10.2026): the siege destroyed the trade depot and two caravans (Catten, Muboomon) came and left within one minute of
 -- real time (timestream), so nothing was traded. Keep a depot standing: if no TradeDepot building exists (built or planned),
 -- designate the 5x5 depot at the surface entrance again (quickfort dfllm/depot5.csv).
@@ -605,6 +620,9 @@ do
   print('entombed_tasked=' .. n)
 end
 
+-- Superseded by kernel military (FR-46, commit 9839c64): forbidden metal weapons, armor, shields and ammo on revealed,
+-- reachable tiles are unforbidden in PEACE/RECOVERY; bars (care's mood reserve) and trap parts are left alone; state
+-- mil.free lists free metal gear per category.
 -- FR-46 (14.10.2026, Gordon: "search for metal, make armor"): invaders' gear (steel/bronze/iron armor, shields, weapons, bolts) lay
 -- forbidden on the surface after the sieges and stayed unusable. Unforbid every metal weapon/armor/ammo/shield item that nobody holds;
 -- the military module then counts it as free metal and equips the squads with it (uniform 'best available').
@@ -641,6 +659,8 @@ do
   print('doctors=' .. (have + added) .. ' (added ' .. added .. ')')
 end
 
+-- Superseded by kernel economy (FR-50, commit 8f14867): the census counts drink/food/seeds in a forbidden container of any
+-- item type as forbidden and T.forbid unforbids those containers (food items themselves only in a starvation, FR-25).
 -- FR-50 (14.10.2026): after the 5th siege every barrel with drink (1392 units) was forbidden; the kernel counted "drink 0 d"
 -- (drink_forb 1392) while the colony had 20 months of beer. Unforbid barrels, bins, bags and drink items every round
 -- (the mood reserve forbids only the mood materials, never containers).

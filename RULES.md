@@ -219,6 +219,7 @@ Brief ≤ 1.5k, status ≤ 300, wake line ≤ 150. If a wake needs more than 5 t
 one line for the player and wait for the next wake.
 
 ## 13. When something looks wrong
+- `dfllm status` says `follow: OFF`: start `Monitor` on `dfllm follow` again; silence from a dead follow is not "all is well".
 - `dfllm status` stale or no heartbeat for 120 s: read `dfllm supervise --once --dry-run` and tell
   the player (a scheduled supervisor, if set up, handles it); do not restart DF by hand.
 - A command was refused: read the outbox `msg`; fix the args; never retry with a different verb to

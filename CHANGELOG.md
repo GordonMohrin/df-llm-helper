@@ -1,5 +1,36 @@
 # CHANGELOG dfpilot
 
+## Feature requests: orders, jobs, food, trade, loot, follow watchdog (2026-10-15, branch fr-econ)
+Offline (k_mock + pytest), live-untested. Details and statuses: docs/feature-requests/README.md.
+- **FR-39 crash guard:** `act.workorder`, the new inbox verb `order.add` and `schema.validate_args` refuse
+  MakeArmor/Pants/Shoes/Gloves/Helm/Weapon/Ammo/Shield (and TrapComponent/Tool/Toy) orders without
+  `item_subtype` (DF 53.16 crashes when a dwarf takes such a job); economy removes existing ones every run
+  (`act.order_remove`, ORDER_BAD class A); state `orders.bad`, `status` UNSAFE, `doctor` problem.
+- **FR-01/FR-10 order sanity and pruner:** daily check of every open order (built workshop, input on the citizens'
+  walkable group, a worker with the labor; `lua/dfllm/orderlib.lua`), ORDER_STUCK (B) after 3 days, orders with
+  10 "Needs ..." cancels in 7 days removed (supply orders kept); `inspect what=orders`; state `orders.n/stuck`.
+- **FR-16/FR-40:** suspended ConstructBuilding jobs nobody keeps suspended are resumed (`act.job_resume`), the rest
+  reported by reason (JOBS_SUSPENDED); verb `jobs.release {all?, preventblocking?}`, preventblocking a persisted
+  fort decision (baseline never sets it); `act.work_detail_prune` drops dead citizens' ids from every work detail;
+  `inspect what=workload` (idle adults, unclaimed jobs by type, top cancel reasons, free picks/axes).
+- **FR-17:** every empty season slot of every built farm plot gets a crop (`act.farm_crop`), underground all year.
+- **FR-23/FR-50:** drink, food and seeds in a forbidden container of any item type count as forbidden
+  (`seeds_ok`/`seeds_forb`); containers, seeds and seed bags are unforbidden on revealed, reachable tiles.
+- **FR-25 starvation handler:** gather designations on reachable visible edible shrubs (`act.plant_gather`),
+  planters and plant gatherers, forbidden food unforbidden, DECISION_NEEDED starvation naming who is cut off.
+- **FR-46:** military unforbids the invaders' forbidden metal gear for the armory; state `mil.free`, `status`
+  prints free metal by category.
+- **FR-43:** `runner.depot_keep` holds a `depot` project (5x5 at manifest.depot or the last depot seen);
+  DEPOT_MISSING (class A) when a caravan finds no depot.
+- **FR-32/FR-18:** TRADE_LEDGER (B) per visit (sold, bought, unmet wants and why), persist `m.trade.ledger`;
+  `inspect what=trade` lists the merchant goods at the open depot with their want tokens.
+- **FR-29:** `dfllm follow` beats into `<save>/.follow.hb`; `status` prints `follow: OFF (last heartbeat ...)`,
+  `doctor` warns.
+- Kernel: an `inspect` target kern does not answer goes to the module with `M.inspect[what]`; `item_flag` now also
+  for economy and military. Contracts (CONTRACTS §5-§13, appendix), RULES and DESIGN updated; the replaced blocks
+  of `tools/run_release.lua` carry "superseded by kernel" notes. Changed kernel files: act, kern, economy,
+  military, trade, runner, util/contract and the new library dfllm.orderlib (`dfhack-run dfllm reload` loads them).
+
 ## Rename (2026-10-15): df-llm-helper -> dfpilot
 - Project renamed back to **dfpilot**; Python package `df_llm_helper` -> `dfpilot` (`python -m dfpilot ...`), the
   PreToolUse hook runs `python -m dfpilot.hook`.
