@@ -33,8 +33,9 @@ SYNTH = {"HB_STALE", "AUTO_FAIL", "SUPERVISE"}   # follower's own wake reasons (
 # Run 9: an army walked in while SIEGE_START/INVASION waited in the digest; they and the interrupts come right
 # after BREACH and wake at once (URGENT: no merge wait, no hourly limit, one per type per URGENT_REPEAT_S)
 PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", "LOCKDOWN", "GATE_FAIL",
-        "DEATHS_3PLUS", "NO_DEPOT", "KERN_FAULT", "HB_STALE", "SUPERVISE", "SIEGE_END", "DRILL_FAIL",
-        "PERF_DEGRADED", "DECISION_NEEDED", "PROJECT_BLOCKED", "PLAN_EXHAUSTED", "YEAR_REVIEW", "AUTO_FAIL"]
+        "DEATHS_3PLUS", "NO_DEPOT", "DEATHS_PREVENTABLE", "KERN_FAULT", "HB_STALE", "SUPERVISE", "SIEGE_END",
+        "DRILL_FAIL", "PERF_DEGRADED", "DECISION_NEEDED", "PROJECT_BLOCKED", "PLAN_EXHAUSTED", "YEAR_REVIEW",
+        "AUTO_FAIL"]
 URGENT = {"BREACH", "SIEGE_START", "INVASION", "LOCKDOWN"} | set(schema.INTERRUPTS)
 URGENT_REPEAT_S = 60
 _IRQ_NEXT = "dfllm ack; dfllm status (the kernel already locked down)"
@@ -47,7 +48,9 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
         "SUPERVISE": "dfllm supervise --once --dry-run",
         "GHOSTS": "dfllm cmd inspect '{\"what\":\"tombs\"}', then tombs.repair",
         "HOSPITAL_DRY": "dfllm cmd inspect '{\"what\":\"water_sources\"}'",
-        "MOOD_RISK": "dfllm brief; supply the missing class (never cancel the mood)"}
+        "MOOD_RISK": "dfllm brief; supply the missing class (never cancel the mood)",
+        # FR-64: >= 2 citizens dehydrated or starved within a month: access, not supply, as a rule
+        "DEATHS_PREVENTABLE": "dfllm cmd inspect '{\"what\":\"reach\"}', then refuge; patients: water_sources"}
 SUPERVISE_EVERY_S = 15                         # supervise.json read cadence
 SUPERVISE_FRESH_S = 3600                       # alerts logged longer ago than this never wake
 HB_STALE_S = 300

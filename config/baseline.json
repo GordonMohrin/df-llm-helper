@@ -194,7 +194,15 @@
   "coffin_retry": 3600,
   "coffin_wood_keep": 20,
   "coffin_wake": 2400,
-  "coffin_prio": 3
+  "coffin_prio": 3,
+  "death_window": 33600,
+  "death_same": 2,
+  "death_any": 3,
+  "death_every": 1200,
+  "death_recheck": 100800,
+  "death_thirst": 50000,
+  "death_hunger": 75000,
+  "death_reports": 400
  },
  "reserve": {
   "from_phase": "P1",

@@ -4,18 +4,19 @@ from __future__ import annotations
 from pathlib import Path
 
 from . import files, paths, schema
-from .events import YEAR, clip, est_tokens, fmt_age, fmt_d, fmt_event, fmt_tick, fmt_ticks
+from .events import SEASON, YEAR, clip, est_tokens, fmt_age, fmt_d, fmt_event, fmt_tick, fmt_ticks
 
 STATUS_TOKENS, BRIEF_TOKENS = 300, 1500
 SUPPLY_MIN = {"drink_d": 170, "food_d": 60}
 # B digest order (most useful first); unlisted B types follow alphabetically
 DIGEST_ORDER = ["ALERT_START", "ALERT_END", "LOCKDOWN_END", "STOCK_LOW", "MOOD_NEED", "MOOD_START", "MOOD_END",
-                "CANCEL_LOOP", "BREACH_STOP", "PROJECT_REQUEST", "DEATH", "CAPTURE", "CARAVAN", "MIGRANTS",
-                "PETITION", "READY_CHANGE", "POPCAP", "AUDIT", "DRILL_RESULT", "PHASE", "PROJECT_DONE",
+                "CANCEL_LOOP", "BREACH_STOP", "PROJECT_REQUEST", "DEATH_CLUSTER", "DEATH", "CAPTURE", "CARAVAN",
+                "MIGRANTS", "PETITION", "READY_CHANGE", "POPCAP", "AUDIT", "DRILL_RESULT", "PHASE", "PROJECT_DONE",
                 "KERNEL_SLOW", "ACT_FAIL", "WEALTH", "PAUSE"]
 
 
 LIMITS = {"A": 50, "B": 500, "CMD": 50}   # newest events kept per section (all DECISION_NEEDED of the year)
+NO_D = {"DEATH", "DEATH_CLUSTER"}       # digest types whose msg already says everything (FR-64: cause, evidence)
 
 
 def _d(e: dict) -> dict:
@@ -167,6 +168,10 @@ def line_supply(ctx: Ctx) -> str:
     if c:
         out.append(f"stress {c['stressed_pct']}% naked {c['naked']} ghosts {c['ghosts']} corpses {c['corpses_old']}"
                    f" tombs {c['tombs_free']} moods {c['moods']}")
+        died = c.get("died")
+        if died:                               # FR-64: citizen deaths of the last season by cause
+            out.append("deaths (season) " + ", ".join(f"{k} {n}" for k, n in sorted(died.items(),
+                                                                                   key=lambda kv: (-kv[1], kv[0]))))
         cf = c.get("coffins")
         if cf and (cf["want"] > c["tombs_free"] or cf["order"] or cf["proj"]):
             # FR-61 coffin provisioner: free tombs wanted, slots missing, coffin items, open orders, project
@@ -315,8 +320,30 @@ def sec_digest(ctx: Ctx) -> list[str]:
         last = evs[-1]
         d = fmt_d(_d(last), 3)
         out.append(f"{t} x{len(evs)} last {fmt_tick(last.get('tick'))}: {last.get('msg', '')}"
-                   + (f" [{d}]" if d and d not in str(last.get("msg", "")) else ""))
+                   + (f" [{d}]" if d and t not in NO_D and d not in str(last.get("msg", "")) else ""))
     return out
+
+
+def sec_deaths(ctx: Ctx) -> list[str]:
+    """FR-64: the citizens who died in the last season, by cause (the newest DEATH per unit: a death found later
+    revises the first one), with the killer, a patient and a death not found yet."""
+    now = ctx.now_tick()
+    if not isinstance(now, int):
+        return []
+    last: dict[int, dict] = {}
+    for e in ctx.b:
+        t, d = e.get("tick"), _d(e)
+        if e.get("type") == "DEATH" and isinstance(t, int) and now - t < SEASON and isinstance(d.get("unit"), int):
+            last[d["unit"]] = d
+    by: dict[str, list[str]] = {}
+    for u, d in sorted(last.items()):
+        tag = (str(u) + (f" by {d['by']}" if d.get("by") else "") + (" patient" if d.get("patient") else "")
+               + (" missing" if d.get("found") == 0 else ""))
+        by.setdefault(str(d.get("cause") or "unknown"), []).append(tag)
+    if not by:
+        return []
+    groups = sorted(by.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+    return [" | ".join(f"{c} {len(v)}: {', '.join(v)}" for c, v in groups)]
 
 
 def sec_failures(ctx: Ctx) -> list[str]:
@@ -342,7 +369,8 @@ def brief_text(save_dir: Path, budget: int = BRIEF_TOKENS) -> str:
                              line_kern(ctx)) if x]
     sections = [head]
     for title, lines in (("## plan", sec_plan(ctx)), ("## decisions open (ask Gordon)", sec_decisions(ctx)),
-                         ("## class A, newest first", sec_class_a(ctx)), ("## failed commands", sec_failures(ctx)),
+                         ("## class A, newest first", sec_class_a(ctx)),
+                         ("## deaths (last season)", sec_deaths(ctx)), ("## failed commands", sec_failures(ctx)),
                          ("## digest B (last year)", sec_digest(ctx))):
         if lines:
             sections.append([title] + lines)

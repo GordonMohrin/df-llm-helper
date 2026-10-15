@@ -183,7 +183,8 @@ T.test('deaths: DEATH per citizen, DEATHS_3PLUS once per day, others ignored', f
   W.event('UNIT_DEATH', {unit = 1}); W.event('UNIT_DEATH', {unit = 2})
   W.run(1)
   T.eq(#W.find_events('DEATH'), 2)
-  T.eq(W.find_events('DEATH')[1].d.cause, 'HUNGER')
+  local d1 = W.find_events('DEATH')[1].d
+  T.eq({d1.cause, d1.dtype, d1.src}, {'starved', 'HUNGER', 'unit'}, 'FR-64: the category, the unit sheet\'s type')
   T.eq(#W.find_events('DEATHS_3PLUS'), 0)
   W.event('UNIT_DEATH', {unit = 3}); W.event('UNIT_DEATH', {unit = 3}); W.event('UNIT_DEATH', {unit = 4})
   W.run(1)
@@ -191,6 +192,8 @@ T.test('deaths: DEATH per citizen, DEATHS_3PLUS once per day, others ignored', f
   T.eq(#a, 1)
   T.eq(a[1].cls, 'A')
   T.eq(a[1].d.ids, {1, 2, 3}, 'emitted at the third death')
+  T.eq(a[1].d.causes, {'1:starved', '2:starved', '3:starved'})
+  T.ok(a[1].msg:find('within a day: starved 3', 1, true), a[1].msg)
   T.eq(#W.find_events('DEATH'), 4, 'unit 3 once')
 end)
 
