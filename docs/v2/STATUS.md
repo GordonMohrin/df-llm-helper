@@ -6,6 +6,51 @@ L4 (iter2: integration of the four offline packages, trade, drills, a 1-year soa
 (economy and building), §0a the live slot L0 (first v2 code in Dwarf Fortress); §1-§9 are the offline
 integration state they started from (pytest, luahost on `hack/lua53.dll`, k_mock).
 
+## 0h. Live test of the Run 9 feature requests on the Run 9 save (2026-10-15, Claude as player; Gordon: "state is irrelevant")
+Setup: `git pull` to 3edc277 (main), backup of region2 + autosave 1-3 in `C:\Users\admin\Documents\df-backups\run9-20261015`,
+DF restarted (`tools/win/start_df_desktop1.ps1`), loaded **autosave 1** (Udosoddom, y363 spring d9, 6 citizens, 25 unburied,
+3 ghosts; the live fort was already extinct, y364 pop 0). The kernel booted from the repo Lua on map load (script path),
+`follow` restarted (writes `.follow.hb`); the old `tools/run_*` workarounds were **not** running. Raw outputs below.
+
+**Works (live):**
+- Kernel up, `status` line 1 `DEFCON 5 | region2-site96 ...`, `clock: free (cap 500, timestream 500)` (first read after
+  load: `clock: held 150 t/s, reason brake`), `follow: OFF (no heartbeat yet: start dfllm follow)` before `follow` was started
+  and gone afterwards.
+- `selftest full`: 8 pass, 1 fail (`budget`, see FR-62). `kern.log`: 0 x "armok commands removed" (entomb is not removed).
+- FR-39 guard: `cmd order.add {"job":"MakeArmor","amount":1,"material_category":["cloth"]}` ->
+  `refused (not sent): $.args: MakeArmor needs item_subtype (ITEM_...): DF 53.16 crashes without one (FR-39)`;
+  with `"item_subtype":"ITEM_ARMOR_SHIRT"` -> `ok ... order.add: order 613 MakeArmor x1 {"order":613}`.
+- `inspect what=orders`: `182 open orders, 132 stuck, 0 unsafe`, a reason per order (`no Still`, `no Loom`, `no leather`).
+- `inspect what=tombs`: `243 coffins, 0 free, 25 unburied, 3 ghosts, 0 burial jobs`, causes per body (`no_coffin 22, zone_shared 3`),
+  ghosts `[[24786,"no_body"],[24965,"no_body"],[24995,"no_coffin"]]`; event GHOSTS (A) with the causes and a next step.
+- `inspect what=defense`: all four bridges `up/bypass` (the serpentine can be bypassed; matches what the player found by hand).
+- `inspect what=entrances`: `LEAK at 55,62,117 (stair_updown no door); 3 independent routes` with the three real openings
+  (shaft head 55,62,118; the north ramp room 61,55,117; the east stair 75,70,118), path length 77 from edge (0,4,118).
+- `inspect what=water_sources`: first call `scan queued`, second call lists the existing well 17363 (53,62,115) as accepted
+  and two Water Source zones (depth 0, not accepted); 0 reachable bodies >= 4/7.
+- Interrupt channel: a caravan without a depot produced `NO_DEPOT` (class I) in `alarm.txt`, `follow` woke with
+  `NO_DEPOT ... DEPOT_MISSING: caravan from Muboomon on the map and no trade depot stands (one is being built)`,
+  `dfllm ack` -> `acked up to #8413 (0 interrupts open, DEFCON 5)`. The depot keeper had a depot at (67,42,118) under construction.
+- `status` shows `free metal ammo 93 body 1 gloves 4 head 3 pants 1 shield 8 shoes 6 weapon 21` (loot is counted).
+- The refuge audit refuses a bad burrow and falls back: `alert no confinement (whole fort) (Kern+ refused: ...)`.
+
+**Not yet seen live (waiting for a real event, no cheats used):** ARRIVAL/INVASION popup text recognition, clock clamp 30/100
+t/s, bridges up (`lever_latency_s`), door lockdown, LOCKDOWN_END, SEAL_LEAK/PERIMETER_BROKEN after a siege, HOSPITAL_DRY,
+MOOD_RISK, embark panel.
+
+**Problems found (FR-59..FR-63 in docs/feature-requests/README.md):**
+1. **FR-59** `seal.lua` SKIP contains `in_inventory`, so every drink/food/seed unit stored in a barrel or bag is ignored:
+   `inspect reach` shows `drink/food/seeds groups: []`, the refuge audit says `drink 0<7, food 0<7` for Kern+ and Innen+
+   although Lua shows 1362 drink units, all inside Kern+, none forbidden; CUTOFF for food/drink can never fire.
+2. **FR-60** `inspect what=perimeter` -> `0 perimeter pieces` on a fort without a manifest, so PERIMETER_BROKEN cannot fire
+   (the Run 9 shaft-head wall was destroyed and nobody noticed).
+3. **FR-61** nothing provisions coffins: `no_coffin 22` with 0 free; tombs.repair frees and assigns but never creates coffins or zones.
+4. **FR-62** kernel cost: `kernel 82-90 ms/s avg (limit 25)`, modules `repeat 69-70 seal 37 sense 16 economy 12-14 kern 11`,
+   PEACE median 430-435 ticks/s (< 450) with 402 units / 18.7k items; `KERNEL_SLOW ... demoted x8` repeats; `selftest quick failed: budget`
+   every ~4 min in kern.log since 14.10. The `repeat` bucket is not explained.
+5. **FR-63** `inspect reach` flags `stairs: 3 without counterpart (down stair at 30,66,109)` although z108..z80 of that column are
+   all stairs (tile read by Lua): stale snapshot or UPDOWN not accepted as counterpart.
+
 ## 0g. Offline: Run 9 feature requests in the kernel (2026-10-15, live-untested)
 Four packages from `docs/feature-requests/README.md` (each FR paragraph carries its status line), merged to main; gate:
 pytest green, Lua 43 suites / 694 passed (now also on Linux: `tools/luahost.py` falls back to a `lua5.3` interpreter),
