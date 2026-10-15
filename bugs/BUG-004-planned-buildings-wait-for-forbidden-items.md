@@ -25,4 +25,4 @@ In the same daily pass: for each "buildingplan: waiting for materials" building,
 class on reachable tiles of the fort (not the mood reserve's holds, which care marks) and unforbid them; if none exist, say
 which class is missing (`inspect what=workload`).
 
-Related: FR-16, FR-61, BUG-005
+Related: FR-16, FR-61, BUG-005, BUG-009 (forbidden items on the footprint, the second blocker)

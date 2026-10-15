@@ -17,7 +17,10 @@ Lua on the depot job: `flags suspend,noise,quality`, `items 3` (three BLOCKS at 
 site reachable from inside (`canWalkBetween` true). `suspendmanager: enabled but not suspending blocking jobs`. The job is
 resumed each day (the "2 resumed" are the depot and a bed) and found suspended again the next day; nobody builds it.
 
-## Cause (suspected)
+## Cause (confirmed, see BUG-009)
+41 forbidden items (BLOCKS, CLOTH ...) lie on the depot footprint; after unforbidding them the depot job got a worker within 10 s. The text below was the first guess.
+
+## Earlier guess
 Something re-suspends the job after the resume (DF itself suspends construction jobs whose builder was interrupted by a
 hostile or by "cannot reach"; the surface site at the shaft head is where armies and wild animals pass). The kernel does not
 read the cancel reason.

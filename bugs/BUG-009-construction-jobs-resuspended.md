@@ -1,5 +1,5 @@
 # BUG-009 construction jobs are suspended again within 5 s of every resume, new buildings are never built
-Status: open
+Status: open (cause found 2026-10-15: forbidden items lying on the building footprint, see Cause)
 Severity: high (workshops, a bed, the trade depot and the coffins stay unbuilt; 16 of 17 civilians idle; every caravan lost; FR-16 "resume" has no effect)
 Found: 2026-10-15, Run 9 save autosave 1 (y363-367), dfpilot main 3edc277, live test by Claude
 Module: `lua/dfllm/economy.lua:2999` (FR-16 daily resume); the cause that re-suspends is not yet known
@@ -19,6 +19,15 @@ Kernel side: `JOBS_SUSPENDED construction jobs: 11 suspended, 2 resumed ... (eve
 `25 suspended, 4 released, 21 planned (buildingplan: waiting for materials x21)`. `inspect what=workload`: `16 of 17 adults without a job`.
 All adults have BUILD_CONSTRUCTION and MASON enabled (34 of 35, Lua), no alert burrow confinement (`alert no confinement`).
 
+## Cause (confirmed live)
+Forbidden items lie on the footprint of the planned buildings. The builder cancels with "Item blocking site" (visible in the cancel list of
+`inspect what=workload` and in the announcements) and DF suspends the job again; forbidden items are never hauled away, so it never ends.
+Measured on the four stuck sites: Still (42,62,109) 3 forbidden items (TOOL, 2 SLAB), Masons (42,59,109) 3 forbidden TOOLs, Trade Depot
+(69,44,118) **41** forbidden items (BLOCKS, CLOTH ...), Bed (57,73,110) 1 forbidden PANTS.
+Test: unforbid the 48 items on those footprints and clear the suspend flags -> within 10 s the depot, the bed and both workshops had
+workers; after 40 s both workshops were at stage 2/3 (`watchjobs`: `susp=false worker=true`).
+A forced `dfhack.job.addWorker` without unforbidding did nothing: the worker was dropped within 6 s.
+
 ## Not the cause
 suspendmanager (disabled, same result); items forbidden (blocks: 250 free); labors; reachability (`canWalkBetween` true).
 
@@ -27,7 +36,9 @@ buildingplan keeps the jobs of planned buildings suspended; DF re-suspends a job
 restriction on the builders; the kernel itself (acts on construction jobs from `economy`).
 
 ## Fix proposal
-Find who sets the flag (a one-shot hook on `job.flags.suspend` writes, or read the job's `cancel` history), log it in JOBS_SUSPENDED
-(`why: re-suspended by X`), and do not report "resumed N" when the flag is back on the next frame.
+In the daily FR-16 pass, for every suspended ConstructBuilding job scan the building footprint (x1..x2, y1..y2, z) for items on the ground:
+unforbid forbidden ones (they are the usual blockers; mood-reserve holds are marked by care and skipped), and name the rest (corpses, other
+items) in JOBS_SUSPENDED (`why: item blocking site: N forbidden, M other`). Do not report "resumed N" when the flag returns the next frame.
+Also: whoever forbade 41 items on the depot site (looks like loot and cloth of a siege, forbidden by the kernel's own pass or by DF for the dead).
 
 Related: BUG-004, BUG-005, FR-16
