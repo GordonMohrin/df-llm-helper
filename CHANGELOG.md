@@ -1,6 +1,6 @@
 # CHANGELOG dfpilot
 
-## Arrival lockdown: civ alert and entrance doors, BUG-011/BUG-012 (2026-10-15; commit 4e2b43c, offline, live-untested)
+## Arrival lockdown: civ alert and entrance doors, BUG-011/BUG-012 (2026-10-15; commits 4e2b43c, 0faebcc, offline, live-untested)
 - **BUG-011:** siege's step and `hold_alert` share one decision (seal picks the burrow) and nothing writes
   `civ_alert(false)` while a lockdown holds the alert; when every burrow fails, a lockdown keeps `Innen+` (painted at
   once if missing); ARRIVAL/LOCKDOWN say what holds (`alert: Innen+ (REFUGE_FAIL Kern+, lockdown fallback)`,
@@ -8,6 +8,12 @@
   (on it, first on its route toward the citizens, within 3 steps inside; revealed tiles), `seal.entrance_doors` feeds
   the reflex, the text names openings without a door (`partial lockdown: ... has no door`), the undo opens exactly the
   doors it forbade. Test `tests/lua/test_lockdown.lua`. Live check in `bugs/BUG-011`, `bugs/BUG-012`.
+- **Follow-up (0faebcc):** nobody is locked out with the army: an entrance door is forbidden only once no citizen is on
+  its outside side (`seal.door_outside`: open sky of its walk group, the porch of its opening, the doorway), at once
+  with a visible hostile within 15 tiles, at the latest 450 ticks after the lockdown wanted the doors; texts and
+  `status` say `doors 0 forbidden, 1 waiting for 2 citizens outside` (state `alarm.doors/dwait/dout`). seal diffs the
+  perimeter after every episode (ALERT, siege, reflex lockdown) once the fort is quiet again, so a wall lost in a
+  small ambush is re-queued and PERIMETER_BROKEN fires.
 
 ## Live-test bugs BUG-003/004/005/008/009/010 (2026-10-15; commits b01bec4, 7006350, 9b9dcdc, 1d9b6a9; offline, live-untested)
 - **BUG-009/004/005 (nothing got built, every caravan lost):** economy's daily FR-16 pass unforbids forbidden items on
