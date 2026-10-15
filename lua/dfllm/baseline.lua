@@ -15,7 +15,7 @@
 -- (economy reports the daily KPI through labor_day). The chosen mode is persisted and re-applied on load.
 -- BUG-010: autolabor found enabled in legacy mode (the Run 9 crash engine) is set to monitor in the boot step
 -- (init, before the queue: never demoted), again by the first task of every full apply and on economy's daily
--- engine read; AUTOLABOR_LEGACY (A).
+-- engine read; AUTOLABOR_LEGACY (A) only when the switch fails (BUG-014).
 -- Tasks run in slices (per_slice per frame). The module switches to an ms cadence while tasks are
 -- pending, so the baseline lands even though DF loads saves paused (CONTRACTS §3.2: `every` is re-read).
 local C = require('dfllm.util.contract')
@@ -200,12 +200,20 @@ end
 -- Run 9: `autolabor` came back enabled in legacy mode with the fort load ("Current state: 1, mode: legacy"; the
 -- player had disabled it by hand), and the crash logs of 14.10. (10:41, 10:47) have their top frames in
 -- autolabor_plug. The guard reads the engine (`autolabor status`, else `labormanager mode`); enabled in legacy mode
--- -> `autolabor mode monitor` at once (allowlisted) and AUTOLABOR_LEGACY (A). It runs in init (a boot step, before
--- the baseline queue: never demoted, also after every load), as the first task of every full apply, and when
--- economy's daily engine read names legacy. An unfixed engine is announced again at most every LEGACY_WALL_S.
+-- -> `autolabor mode monitor` at once (allowlisted), AUTOLABOR_LEGACY (A) when that fails. It runs in init (a boot
+-- step, before the baseline queue: never demoted, also after every load), as the first task of every full apply,
+-- and when economy's daily engine read names legacy. An unfixed engine is announced again at most every LEGACY_WALL_S.
+-- BUG-014 (Run 9, 677bc3e: "mode monitor failed, still legacy" right after a switch that worked): in every other mode
+-- `autolabor status` answers "Error: The plugin is not enabled in legacy mode." (the legacy engine is not running),
+-- and its word "legacy" read as the legacy engine. That answer means not legacy; the switch is verified with
+-- `autolabor mode` ("Mode: monitor (starvation warnings)"), the status only when the mode prints no engine. A switch
+-- that worked is one kern.log line; only a failed one is AUTOLABOR_LEGACY (A, fixed=0).
 M.LEGACY_WALL_S = 600
+M.NOT_LEGACY = 'not enabled in legacy mode'
 function M.parse_engine(out)
-  local state = tostring(out or ''):lower():match('current state:%s*(%d)')
+  local s = tostring(out or ''):lower()
+  if s:find(M.NOT_LEGACY, 1, true) then return nil, false end
+  local state = s:match('current state:%s*(%d)')
   local on
   if state ~= nil then on = state ~= '0' end
   return engine(out), on
@@ -214,27 +222,42 @@ end
 -- public (K.call, economy's daily `labormanager mode` read): the engine its output names, and whether it is on
 function M.engine_of(K, out) return M.parse_engine(out) end
 
+-- the part of an act.run answer to parse: the output; of a failed command only the "not enabled in legacy mode" text
+local function answer(ok, out)
+  if ok then return out end
+  local s = tostring(out or '')
+  return s:lower():find(M.NOT_LEGACY, 1, true) and s or ''
+end
+
+-- the engine after the switch: `autolabor mode`, else `autolabor status` ("not enabled in legacy mode": not legacy)
+local function engine_after(K)
+  local mode = M.parse_engine(answer(K.act.run('autolabor', 'mode')))
+  if mode then return mode end
+  local m2, on2 = M.parse_engine(answer(K.act.run('autolabor', 'status')))
+  return m2 or (on2 == false and 'not legacy') or 'unknown'
+end
+
 function M.legacy_guard(K, why)
-  local ok, out = K.act.run('autolabor', 'status')
-  local mode, on = M.parse_engine(ok and out or '')
-  if mode == nil then
-    ok, out = K.act.run('labormanager', 'mode')
-    mode = M.parse_engine(ok and out or '')
-  end
+  local mode, on = M.parse_engine(answer(K.act.run('autolabor', 'status')))
+  if mode == nil and on == nil then mode = M.parse_engine(answer(K.act.run('labormanager', 'mode'))) end
   if mode ~= 'legacy' or on == false then return false, mode or 'unknown' end
   local set = K.act.run('autolabor', 'mode', 'monitor') == true
-  local _, out2 = K.act.run('autolabor', 'status')
-  local after = M.parse_engine(out2) or 'unknown'
+  local after = engine_after(K)
   local fixed = set and after ~= 'legacy'
   local w = K.now().wall or 0
-  K.log(fixed and 'warn' or 'error', 'autolabor was enabled in legacy mode (%s): %s', tostring(why),
-        fixed and 'set to monitor' or ('autolabor mode monitor failed, still ' .. after))
-  if fixed ~= st.legacy_fixed or st.legacy_w == nil or w - st.legacy_w >= M.LEGACY_WALL_S then
-    st.legacy_fixed, st.legacy_w = fixed, w
-    K.emit('AUTOLABOR_LEGACY', 'A', string.format('autolabor ran in legacy mode (the engine of the Run 9 crashes, found '
-                                                  .. 'at %s): %s', tostring(why), fixed and 'set to monitor'
-                                                  or ('autolabor mode monitor failed, still ' .. after)):sub(1, 200),
-           {why = tostring(why):sub(1, 40), fixed = fixed and 1 or 0, after = after})
+  if fixed then
+    K.log('warn', 'autolabor was enabled in legacy mode (%s): set to monitor (read back: %s)', tostring(why), after)
+    st.legacy_fixed, st.legacy_w = true, w
+  else
+    K.log('error', 'autolabor was enabled in legacy mode (%s): autolabor mode monitor failed, still %s', tostring(why),
+          after)
+    if st.legacy_fixed ~= false or st.legacy_w == nil or w - st.legacy_w >= M.LEGACY_WALL_S then
+      st.legacy_fixed, st.legacy_w = false, w
+      K.emit('AUTOLABOR_LEGACY', 'A', string.format('autolabor ran in legacy mode (the engine of the Run 9 crashes, '
+                                                    .. 'found at %s): autolabor mode monitor failed, still %s',
+                                                    tostring(why), after):sub(1, 200),
+             {why = tostring(why):sub(1, 40), fixed = 0, after = after})
+    end
   end
   if st.lm and st.lm ~= 'monitor' then st.lm_due = true; M.every = M.APPLY_EVERY end   -- the chosen engine again
   return true, fixed and 'monitor' or 'failed'

@@ -128,15 +128,26 @@ T.test('apply() re-queues the same full baseline', function()
 end)
 
 ---------------------------------------------------------------- BUG-010: the legacy autolabor engine
+-- the plugin as DF 53.16 answers it (Run 9 live, BUG-014): `autolabor status` reports the legacy engine only; in every
+-- other mode it answers "Error: The plugin is not enabled in legacy mode." (opts.status_ok: with exit status ok, else
+-- failed); `autolabor mode` prints "Mode: monitor (starvation warnings)" (opts.mode_silent: nothing)
+local MODE_TEXT = {monitor = 'Mode: monitor (starvation warnings)', modern = 'Mode: modern (labormanager)',
+                   legacy = 'Mode: legacy (autolabor)'}
 local function legacy_world(opts)
   opts = opts or {}
   local state = {mode = opts.mode or 'legacy', on = opts.on ~= false, refuse = opts.refuse}
   local W, B = world{persist = opts.persist, setup = function(W)
     W.act_result('run', function(cmd, a1, a2)
       if cmd == 'autolabor' and a1 == 'status' then
+        if state.mode ~= 'legacy' then
+          return opts.status_ok == true, 'Error: The plugin is not enabled in legacy mode.'
+        end
         return true, string.format('Automatically assigns labors to dwarves by writing the labor matrix directly '
                                    .. '(legacy mode). Use mode monitor or mode modern.\nCurrent state: %d, mode: %s.',
                                    state.on and 1 or 0, state.mode)
+      end
+      if cmd == 'autolabor' and a1 == 'mode' and a2 == nil then
+        return true, opts.mode_silent and '' or MODE_TEXT[state.mode]
       end
       if cmd == 'autolabor' and a1 == 'mode' and a2 then
         if state.refuse then return false, 'nope' end
@@ -149,18 +160,42 @@ local function legacy_world(opts)
   return W, B, state
 end
 
-T.test('BUG-010: autolabor enabled in legacy mode is set to monitor in the boot step, before the queue; class A', function()
+local function logged(W, pat)
+  local n = 0
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find(pat, 1, true) then n = n + 1 end end
+  return n
+end
+
+T.test('BUG-010/014: autolabor enabled in legacy mode is set to monitor in the boot step, before the queue; ' ..
+       'verified with autolabor mode; one log line, no class A event', function()
   local W, B, state = legacy_world()
   local r = F.runs(W)
-  T.eq({r[1], r[2], r[3]}, {'autolabor status', 'autolabor mode monitor', 'autolabor status'}, 'in init, no frame yet')
+  T.eq({r[1], r[2], r[3]}, {'autolabor status', 'autolabor mode monitor', 'autolabor mode'}, 'in init, no frame yet')
   T.eq(state.mode, 'monitor')
-  local ev = W.find_events('AUTOLABOR_LEGACY')
-  T.eq(#ev, 1)
-  T.eq({ev[1].cls, ev[1].d.fixed, ev[1].d.after, ev[1].d.why}, {'A', 1, 'monitor', 'boot'})
-  T.ok(ev[1].msg:find('set to monitor', 1, true), ev[1].msg)
+  T.eq(W.find_events('AUTOLABOR_LEGACY'), {}, 'the switch worked: no interrupt for the operator')
+  T.eq(logged(W, 'autolabor was enabled in legacy mode (boot): set to monitor (read back: monitor)'), 1)
   drain(W)
-  T.eq(#W.find_events('AUTOLABOR_LEGACY'), 1, 'the apply check finds monitor')
-  T.eq(F.bad_runs(W), {})
+  T.eq(W.find_events('AUTOLABOR_LEGACY'), {}, 'the apply check: "not enabled in legacy mode" is not legacy')
+  T.eq(logged(W, 'set to monitor'), 1, 'one line')
+  T.eq(F.bad_runs(W), {}, 'autolabor mode (the verify read) is allowlisted')
+end)
+
+T.test('BUG-014: the Run 9 answers ("not enabled in legacy mode" with a failed exit status, "Mode: monitor ' ..
+       '(starvation warnings)") read as fixed; without a mode line the status answer decides', function()
+  for _, o in ipairs({{}, {status_ok = true}, {mode_silent = true}, {mode_silent = true, status_ok = true}}) do
+    local tag = (o.status_ok and 'status ok' or 'status failed') .. (o.mode_silent and ', mode silent' or '')
+    local W, B, state = legacy_world(o)
+    T.eq(state.mode, 'monitor', tag)
+    T.eq(W.find_events('AUTOLABOR_LEGACY'), {}, tag)
+    local want = o.mode_silent and 'not legacy' or 'monitor'
+    T.eq(logged(W, '(boot): set to monitor (read back: ' .. want .. ')'), 1, tag)
+    local ok, ok2, what = W.K.call('baseline', 'legacy_guard', 'test')
+    T.eq({ok, ok2}, {true, false}, tag .. ': the next check sees no legacy engine and switches nothing')
+    local n = 0
+    for _, s in ipairs(F.runs(W)) do if s == 'autolabor mode monitor' then n = n + 1 end end
+    T.eq(n, 1, tag .. ': switched once')
+    T.eq(logged(W, 'monitor failed'), 0, tag)
+  end
 end)
 
 T.test('BUG-010: a disabled legacy plugin is left alone; a refused switch says so (not again within 10 min)', function()
@@ -169,7 +204,7 @@ T.test('BUG-010: a disabled legacy plugin is left alone; a refused switch says s
   T.eq(state.mode, 'legacy')
   local W2, B2, state2 = legacy_world{refuse = true}
   local ev = W2.find_events('AUTOLABOR_LEGACY')
-  T.eq({#ev, ev[1].d.fixed, ev[1].d.after}, {1, 0, 'legacy'})
+  T.eq({#ev, ev[1].cls, ev[1].d.fixed, ev[1].d.after}, {1, 'A', 0, 'legacy'})
   T.ok(ev[1].msg:find('failed', 1, true), ev[1].msg)
   drain(W2)
   T.eq(#W2.find_events('AUTOLABOR_LEGACY'), 1, 'the apply check: the same state, not again within 10 min')
@@ -187,9 +222,9 @@ T.test('BUG-010: legacy switched on later (a player, a plugin) is caught by econ
   W.load(fresh('economy'))
   W.run(1300, {skip = 100})
   for _ = 1, 80 do W.run(1) end
-  T.eq(#W.find_events('AUTOLABOR_LEGACY'), 1)
   T.eq(state.mode, 'monitor')
-  T.eq(W.find_events('AUTOLABOR_LEGACY')[1].d.why, 'economy daily')
+  T.eq(W.find_events('AUTOLABOR_LEGACY'), {}, 'fixed: a log line, no event (BUG-014)')
+  T.eq(logged(W, '(economy daily): set to monitor (read back: monitor)'), 1)
 end)
 
 T.test('BUG-010: parse_engine reads the mode field, not a mode named in the help text', function()
@@ -198,6 +233,8 @@ T.test('BUG-010: parse_engine reads the mode field, not a mode named in the help
   T.eq({B.parse_engine('Current state: 0, mode: legacy.')}, {'legacy', false})
   T.eq({B.parse_engine('Mode: modern (labormanager)')}, {'modern', nil})
   T.eq({B.parse_engine('')}, {nil, nil})
+  T.eq({B.parse_engine('Error: The plugin is not enabled in legacy mode.')}, {nil, false}, 'BUG-014: not legacy')
+  T.eq({B.parse_engine('Mode: monitor (starvation warnings)')}, {'monitor', nil})
 end)
 
 T.test('readiness loaded: max-pop is left to readiness, wave size stays', function()

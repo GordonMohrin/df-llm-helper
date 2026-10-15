@@ -164,7 +164,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | CUTOFF | citizens lost the walk group of their food, drink or beds; the msg names the tile. `inspect reach`; a project still building there: `bp.cancel {proj, undo:true}`; a built wall or raised bridge: tell the player at once (no deconstruct verb) |
 | SEAL_LEAK | the gates are up and a route remains: `inspect entrances` names the leak (tile, door/bridge state); tell the player; place a wall there (`bp.place`), never lower the bridges |
 | PERIMETER_BROKEN | the kernel re-queued the lost walls/doors (`rp…` project); `inspect perimeter` after a day; tell the player about pieces it could not re-queue (bridges) |
-| AUTOLABOR_LEGACY | autolabor ran in legacy mode (the engine of the Run 9 crashes); `fixed=1`: the kernel set it to monitor, tell the player; `fixed=0`: the switch failed, tell the player at once (disable autolabor by hand) |
+| AUTOLABOR_LEGACY | autolabor ran in legacy mode (the engine of the Run 9 crashes) and the kernel could not set it to monitor (`fixed=0`; a switch that worked is only a kern.log line): tell the player at once (disable autolabor by hand) |
 | REFUGE_FAIL | the civ alert left a burrow without drink, food or beds for the fort's interior (`Innen+`) or no confinement; `inspect refuge`; fix the refuge (stockpile, beds, well) in the next plan |
 
 ## 8. Readiness gate (only readiness raises max-pop)

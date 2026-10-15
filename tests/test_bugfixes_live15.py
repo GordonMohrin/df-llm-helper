@@ -50,6 +50,7 @@ def test_guard_commands_are_allowlisted_and_legacy_is_not():
     assert fairplay.check_run("autolabor", ["status"], al)[0]
     assert fairplay.check_run("autolabor", ["mode", "monitor"], al)[0]
     assert fairplay.check_run("labormanager", ["mode"], al)[0]
+    assert fairplay.check_run("autolabor", ["mode"], al)[0], "BUG-014: the switch is verified with `autolabor mode`"
     assert not fairplay.check_run("autolabor", ["mode", "legacy"], al)[0]
 
 
