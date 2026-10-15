@@ -164,6 +164,11 @@ def line_supply(ctx: Ctx) -> str:
     if c:
         out.append(f"stress {c['stressed_pct']}% naked {c['naked']} ghosts {c['ghosts']} corpses {c['corpses_old']}"
                    f" tombs {c['tombs_free']} moods {c['moods']}")
+        cf = c.get("coffins")
+        if cf and (cf["want"] > c["tombs_free"] or cf["order"] or cf["proj"]):
+            # FR-61 coffin provisioner: free tombs wanted, slots missing, coffin items, open orders, project
+            out.append(f"coffins want {cf['want']} short {cf['short']} stock {cf['stock']} order {cf['order']}"
+                       + (f" proj {cf['proj']}" if cf["proj"] else ""))
     lb = s.get("labor")
     if lb:
         out.append(f"idle {lb['idle']}% starving {lb['starving']}")

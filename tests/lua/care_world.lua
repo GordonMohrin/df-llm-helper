@@ -45,7 +45,8 @@ end
 -- opts: cit, units, persist, mode, phase, census_i (table or false), alarm (string|false: loads economy),
 --       economy (true: loads economy; its reserve(key, n, who) records W.floors), economy_reserve (a replacement),
 --       reach (function(a, b) -> bool, loads it on snapshot), pending ({tpl = n}), kern (false: none),
---       reserve (config overrides), setup(W)
+--       reserve (config overrides), setup(W); FR-61: tile (function(x, y, z) -> snapshot.tile result, default open
+--       floor), snap ({name = function(K, ...)}: more snapshot functions), runner (true: the real runner module)
 function CW.world(opts)
   opts = opts or {}
   local n = opts.cit or 4
@@ -80,8 +81,10 @@ function CW.world(opts)
   if opts.setup then opts.setup(W) end
   local snap = {name = 'snapshot', every = {ticks = 100}, tile = function(K, x, y, z)
     if W.hidden[x .. ',' .. y .. ',' .. z] then return nil end
+    if opts.tile then return opts.tile(x, y, z) end
     return {c = '.', dig = '', bld = ''}
   end}
+  for k, f in pairs(opts.snap or {}) do snap[k] = f end
   if opts.reach then
     snap.reach = function(K, a, b)
       W.reach_calls = (W.reach_calls or 0) + 1
@@ -89,7 +92,9 @@ function CW.world(opts)
     end
   end
   W.load(snap)
-  if opts.phase or opts.pending then
+  if opts.runner then
+    W.load(CW.fresh('runner'))
+  elseif opts.phase or opts.pending then
     W.load({name = 'runner', every = {ticks = 600},
             state = function() return {phase = W.phase or opts.phase} end,
             pending = function(K, tpl) return (opts.pending or {})[tpl] or 0 end})

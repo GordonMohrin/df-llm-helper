@@ -60,7 +60,8 @@ def test_state_slots_validate_and_carry_wp8_keys(run):
     best = max(docs, key=lambda d: d["seq"])
     assert set(best["stock"]) == {"drink_d", "food_d", "meals", "hosp_water"}
     assert set(best["labor"]) == {"starving", "idle"}
-    assert set(best["care"]) == {"stressed_pct", "naked", "ghosts", "corpses_old", "tombs_free", "moods"}
+    assert set(best["care"]) - {"coffins"} == {"stressed_pct", "naked", "ghosts", "corpses_old", "tombs_free", "moods"}
+    assert set(best["care"].get("coffins", {})) <= {"want", "short", "stock", "order", "proj"}   # FR-61, optional
     assert len(json.dumps(best, separators=(",", ":"))) <= 4096
 
 

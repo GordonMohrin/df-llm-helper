@@ -26,9 +26,14 @@
 --     leave the last 20 boulders alone;
 --   * every item flag write needs a revealed tile (snapshot.tile) and, outside PEACE / late RECOVERY,
 --     a Kern+ tile (no Kern+ yet: no writes outside clean-up time);
---   * burial: free tombs >= open corpses + margin, else PROJECT_REQUEST tombs (follow places them);
+--   * burial: free tombs >= open corpses + margin, else PROJECT_REQUEST tombs (follow places them; with the coffin
+--     provisioner below and a runner that has runner.coffins, the provisioner owns that request);
 --     `burial -c` zones unzoned coffins. A free tomb is a usable one (FR-27/42): a built, empty coffin under
 --     exactly one active, unassigned tomb zone, outside every Bedroom zone and every other zone;
+--   * coffin provisioner (FR-61, Run 9: 25 unburied, 0 free coffins, soft stone): free usable coffins >= unburied
+--     citizen bodies + coffin_reserve. Rows of coffins with 1x1 tomb zones in a free hall or dug area
+--     (runner.coffins), ConstructCoffin in a material the fort can use (act.workorder), PROJECT_REQUEST /
+--     DECISION_NEEDED naming the missing dig space or material; see the section below;
 --   * tombs (FR-04/26/27/41/42/45, Run 9: 22 dead unburied for months, 10 ghosts): the tomb phase indexes
 --     coffins, tomb zones, bedrooms and piles, gives every unburied citizen body its causes (no_coffin,
 --     no_zone, coffin_taken, zone_shared, bedroom, zone_owner, unflagged, unreachable, in_stockpile,
@@ -60,11 +65,13 @@
 -- items.other / buildings.other vectors (sliced), burrow membership, site locations and occupations, a dead
 -- citizen's death incident (discovered or not, as the unit list shows "missing") and corpse_parts, the job
 -- list (PlaceItemInTomb count).
--- Writes only through K.act (item_flag, zone_assign, tomb_zone, medic, hospital_post, run). Since live L1b care
--- also unmarks tools (picks, battle axes, crossbows) marked for melting.
+-- Writes only through K.act (item_flag, zone_assign, tomb_zone, medic, hospital_post, workorder, run) and runner's
+-- project queue (runner.coffins). Since live L1b care also unmarks tools (picks, battle axes, crossbows) marked for
+-- melting.
 local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
 local R = require('dfllm.reserve')     -- library (not a kernel module): mood filters, matcher, reserve sizes
+local OL = require('dfllm.orderlib')   -- library: an order's material class (the coffin provisioner)
 
 local M = {name = 'care', every = {ticks = 1200}, on = {}, verbs = {}}
 local DAY = C.TICKS.DAY
@@ -89,6 +96,8 @@ M.DEFAULTS = {
   tomb_repair = true, tomb_acts_per_run = 20, entomb_per_run = 8, entomb_retry = 2400, entomb_tries = 3,
   ghost_every = 8400, doctors = 4, posts_per_run = 4, mood_thirst = 30000, mood_hunger = 50000,
   mood_risk_every = 2400,
+  coffins = true, coffin_reserve = 10, coffin_batch = 30, coffin_scan_r = 16, coffin_min_side = 4,
+  coffin_entrance_r = 10, coffin_retry = 3600, coffin_wood_keep = 20, coffin_wake = 2400, coffin_prio = 3,
 }
 -- the doctor labors (act.medic switches the same three) and the hospital posts (df.occupation_type names)
 M.MEDIC = {'DIAGNOSE', 'SURGERY', 'BONE_SETTING'}
@@ -156,6 +165,7 @@ local function pstate(K)
   for k, v in pairs(held) do if type(v) ~= 'table' then held[k] = nil end end
   p.reserve.held = json.object(held)
   p.acq = json.object(type(p.acq) == 'table' and p.acq or {})
+  p.cof = json.object(type(p.cof) == 'table' and p.cof or {})     -- the coffin provisioner (FR-61)
   return p
 end
 
@@ -976,6 +986,8 @@ local function tomb_report(src)
   return out
 end
 
+local coffin_census    -- forward: the coffin provisioner (FR-61) counts on the repaired index
+
 local function phase_tombs_run(K, c, r, p)
   local now = K.now().tick
   local T = tomb_index(K, r)
@@ -996,6 +1008,8 @@ local function phase_tombs_run(K, c, r, p)
           acts.removed, acts.freed, acts.opened, acts.assigned, acts.entombed, acts.failed, r.burial_jobs)
   end
   st.force_repair = nil
+  local okc, q = pcall(coffin_census, K, c, r, T)
+  if okc then r.cof, r.cof_T = q, T else K.log('warn', 'care coffins: %s', tostring(q)) end
 end
 
 local function phase_tombs(K, c, r, p)
@@ -1005,6 +1019,559 @@ local function phase_tombs(K, c, r, p)
     K.log('warn', 'care tombs: %s', r.tomb_err)
   end
   return true
+end
+
+---------------------------------------------------------------- coffin provisioner (FR-61, Run 9)
+-- Run 9 (live test 2026-10-15): 25 citizen bodies unburied, `inspect tombs` 243 coffins, 0 free, no_coffin 22. GHOSTS
+-- fired and tombs.repair assigned what existed, but nothing built coffins or tomb zones, and the soft sedimentary
+-- stone of that map (mudstone, shale, claystone) made no coffin; Runs 8 and 9 were lost to unburied dead and ghosts.
+-- want = unburied citizen bodies without a usable tomb of their own + coffin_reserve usable free coffins, once the
+-- core (Z4) exists or a citizen lies unburied (config coffins = false: off):
+--   * slots = free usable coffins + planned (unbuilt) coffins + built empty coffins without a zone (`burial -c`
+--     zones them); short = want - slots. In PEACE, with no tombs project pending and coffin_retry after the last
+--     search that found nothing or the last placement, care looks for space around up to three seeds (the crypt, the core Z4, the citizens),
+--     seed level first, then one down and one up, coffin_scan_r tiles each way: revealed floor (snapshot.tile '.')
+--     without a designation, building, zone or stockpile, roofed (snapshot.outside_near), farther than
+--     coffin_entrance_r from the entrances (seal.entrances, the manifest approach). In free rectangles of at least
+--     coffin_min_side x coffin_min_side it lays rows of coffins with an aisle every third line inside a free ring of
+--     one tile (every coffin touches an aisle or the ring; ways through the hall stay open): the smallest rectangle
+--     that holds the rest nearest the seed first, at most 4 rectangles and coffin_batch coffins, each on the
+--     citizens' walk group (snapshot.far). runner.coffins queues them as a `tombs` project (coffins, then 1x1 tomb
+--     zones). Space for fewer than short: PROJECT_REQUEST tombs why=no_space for the rest (follow digs a tombs
+--     room) and, still unresolved coffin_wake ticks later with no tombs project pending, DECISION_NEEDED
+--     coffin_space naming the dig space wanted;
+--   * planned coffins wait for coffin items (buildingplan). ConstructCoffin is ordered (act.workorder, one-time, tag
+--     dfllm:coffin) for the items still missing: the planned coffins that bring the free tombs up to want, minus
+--     the free coffin items and the open coffin orders that can run (orderlib's material class, that material at
+--     hand and its workshop standing). Material: non-economic hard stone (economy's census: free boulders minus
+--     ores, flux, economic and soft stone; masons refuse soft stone such as chalk, mudstone, shale or claystone for
+--     furniture) with a mason's workshop, else wood beyond coffin_wood_keep logs with a carpenter's workshop;
+--     neither: DECISION_NEEDED coffin_material after coffin_wake, naming stone, logs and workshops;
+--   * not in SIEGE/BREACH. State care.coffins and `inspect what=tombs` (prov) show want, short, stock, orders and
+--     the pending project.
+local SEEDS_MAX, RECTS_MAX, PROBE_COST = 3, 4, 2
+
+local function key3(x, y, z) return (z * 4096 + y) * 4096 + x end
+
+local function workshops_built()
+  local f = {}
+  pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.WORKSHOP_ANY) do
+      local n = df.workshop_type[b.type]
+      if n and built(b) then f[n] = true end
+    end
+  end)
+  return f
+end
+
+-- coffin items not built in, forbidden, dumped or a merchant's (one being hauled covers a planned coffin too)
+local function coffin_stock()
+  local n = 0
+  for _, it in ipairs(vec(function() return df.global.world.items.other.COFFIN end)) do
+    local ok, free = pcall(function()
+      local f = it.flags
+      return not (f.in_building or f.forbid or f.dump or f.trader or f.removed or f.garbage_collect
+                  or f.construction or f.hostile)
+    end)
+    if ok and free then n = n + 1 end
+  end
+  return n
+end
+
+-- furniture stone at hand: economy's free boulders minus ores and flux, economic and soft stone (rock_bad)
+local function hard_stone(inv)
+  local rock = num(inv.rock) or 0
+  return math.max(0, rock - math.max((num(inv.ore) or 0) + (num(inv.flux) or 0), num(inv.rock_bad) or 0))
+end
+
+-- open ConstructCoffin orders: amount left in orders that can run now (and of those the rock and wood ones, whose
+-- boulders and logs are spoken for), and in orders that cannot
+local function coffin_orders(q)
+  local good, stuck, by = 0, 0, {rock = 0, wood = 0}
+  local jt = df.job_type and df.job_type.ConstructCoffin
+  if jt == nil then return 0, 0, by end
+  local rock, wood = q.stone > 0 and q.masons, q.wood > 0 and q.carp
+  for _, o in ipairs(vec(function() return df.global.world.manager_orders.all end)) do
+    local ok, left, can, mc = pcall(function()
+      if o.job_type ~= jt then return 0, false end
+      local n = num(o.amount_left) or 0
+      local m = OL.mat_class(o)
+      if m == 'rock' then return n, rock, m end
+      if m == 'wood' then return n, wood, m end
+      if m == 'any' then return n, rock or wood, m end
+      return n, true, m                              -- metal or glass: their shops and stock are economy's
+    end)
+    if ok and left > 0 then
+      if can then good = good + left else stuck = stuck + left end
+      if can and by[mc] then by[mc] = by[mc] + left end
+    end
+  end
+  return good, stuck, by
+end
+
+coffin_census = function(K, c, r, T)
+  -- the unburied citizen bodies without a usable tomb of their own (an assigned one waits for its hauler)
+  local bodies, open = 0, 0
+  for uid in pairs(r.bodies) do
+    bodies = bodies + 1
+    if not good_zone(T, uid) then open = open + 1 end
+  end
+  local q = {bodies = bodies, open = open, want = open + (num(c.coffin_reserve) or 0), free = r.tombs_free or 0,
+             planned = 0, idle = 0, core = (K.manifest().zones or {}).Z4 ~= nil}
+  for _, e in ipairs(T.coffins) do
+    if not e.bed and e.other == 0 and e.occ == nil then
+      local zn = 0
+      for _, z in ipairs(e.zones) do if not z.drop then zn = zn + 1 end end
+      if not e.built then q.planned = q.planned + 1
+      elseif zn == 0 then q.idle = q.idle + 1 end
+    end
+  end
+  q.slots = q.free + q.planned + q.idle
+  q.short = math.max(0, q.want - q.slots)
+  local inv = K.census.i
+  q.census = type(inv) == 'table'
+  local ws = workshops_built()
+  q.masons, q.carp = ws.Masons == true, ws.Carpenters == true
+  q.stone = q.census and hard_stone(inv) or 0
+  q.wood = q.census and (num(inv.wood) or 0) or 0
+  q.stock = coffin_stock()
+  q.order, q.stuck, q.order_by = coffin_orders(q)
+  -- coffin items still to make: the planned coffins that bring the free tombs up to want
+  q.items = math.max(0, math.min(q.want - q.free - q.idle, q.planned))
+  q.make = math.max(0, q.items - q.stock - q.order)
+  return q
+end
+
+-- up to three seeds: the crypt (the level most coffins or tomb zones are on, their centre), the core (the first Z4
+-- box), the citizens (the level most of them stand on, their centre)
+local function coffin_seeds(K, r, T)
+  local seeds, seen = {}, {}
+  local function add(x, y, z, why)
+    if not (x and y and z) then return end
+    local k = string.format('%d,%d,%d', x // 8, y // 8, z)
+    if seen[k] or #seeds >= SEEDS_MAX then return end
+    seen[k] = true
+    seeds[#seeds + 1] = {x = x, y = y, z = z, why = why}
+  end
+  local function centre(pts, why)
+    local lv, best = {}, nil
+    for _, q in ipairs(pts) do
+      local l = lv[q[3]]
+      if not l then l = {n = 0, x = 0, y = 0, z = q[3]}; lv[q[3]] = l end
+      l.n, l.x, l.y = l.n + 1, l.x + q[1], l.y + q[2]
+      if not best or l.n > best.n or (l.n == best.n and l.z > best.z) then best = l end
+    end
+    if best then add(best.x // best.n, best.y // best.n, best.z, why) end
+  end
+  local pts = {}
+  for _, e in ipairs(T.coffins) do pts[#pts + 1] = {e.x, e.y, e.z} end
+  if #pts == 0 then
+    for _, z in ipairs(T.zones) do if z.rc then pts[#pts + 1] = {z.rc.x1, z.rc.y1, z.rc.z} end end
+  end
+  centre(pts, 'crypt')
+  local z4 = (K.manifest().zones or {}).Z4
+  for _, b in ipairs(type(z4) == 'table' and z4 or {}) do
+    local x0, y0, z0, x1, y1, z1 = num(b[1]), num(b[2]), num(b[3]), num(b[4]), num(b[5]), num(b[6])
+    if x0 and y0 and z0 and x1 and y1 and z1 then add((x0 + x1) // 2, (y0 + y1) // 2, (z0 + z1) // 2, 'core'); break end
+  end
+  pts = {}
+  local cu = K.census.u
+  for i, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
+    if i > 40 then break end
+    local pos = unit_pos(df.unit.find(id))
+    if pos then pts[#pts + 1] = {pos.x, pos.y, pos.z} end
+  end
+  centre(pts, 'citizens')
+  return seeds
+end
+
+-- tiles of a level box taken by a building (furniture, workshops, planned constructions), a zone or a stockpile,
+-- or by an earlier pick of this search
+local function occ_index(bb, taken)
+  local occ = {}
+  for k in pairs(taken) do occ[k] = true end
+  local other = df.global.world.buildings.other
+  for _, name in ipairs({'IN_PLAY', 'ANY_ZONE', 'STOCKPILE'}) do
+    for _, b in ipairs(vec(function() return other[name] end)) do
+      local rc = rect_of(b)
+      if rc and rc.z >= bb[3] and rc.z <= bb[6] and rc.x2 >= bb[1] and rc.x1 <= bb[4] and rc.y2 >= bb[2]
+         and rc.y1 <= bb[5] then
+        for y = math.max(rc.y1, bb[2]), math.min(rc.y2, bb[5]) do
+          for x = math.max(rc.x1, bb[1]), math.min(rc.x2, bb[4]) do occ[key3(x, y, rc.z)] = true end
+        end
+      end
+    end
+  end
+  return occ
+end
+
+local function entrance_list(K)
+  local ok, list = K.call('seal', 'entrances')
+  local out = {}
+  for _, e in ipairs(ok and type(list) == 'table' and list or {}) do
+    local x, y, z = num(type(e) == 'table' and e[1]), num(type(e) == 'table' and e[2]), num(type(e) == 'table' and e[3])
+    if x and y and z then out[#out + 1] = {x, y, z} end
+  end
+  return out
+end
+
+local function near_entrance(cs, x, y, z)
+  local d = cs.er
+  for _, e in ipairs(cs.ents) do
+    if math.abs(z - e[3]) <= 1 and math.abs(x - e[1]) <= d and math.abs(y - e[2]) <= d then return true end
+  end
+  return M.near_approach(cs.boxes, x, y, z, d)
+end
+
+-- coffins in a row of n inner tiles (an aisle every third tile: 0 coffin, 1 aisle, 2 coffin, 3 coffin, 4 aisle ...)
+local function rowcap(n) return n > 0 and n - (n + 1) // 3 or 0 end
+-- coffins in a w x h rectangle whose outer ring stays free, in its better orientation: 'x' = aisles are columns
+function M.coffin_capacity(w, h)
+  local a, b = rowcap(w - 2) * (h - 2), rowcap(h - 2) * (w - 2)
+  if a >= b then return a, 'x' end
+  return b, 'y'
+end
+
+-- the maximal free rectangles (both sides >= minside) of a scanned level
+local function free_rects(L, minside)
+  local out, seen, hts = {}, {}, {}
+  for i = 0, L.w - 1 do hts[i] = 0 end
+  for j = 0, L.h - 1 do
+    for i = 0, L.w - 1 do hts[i] = L.g[j * L.w + i] and hts[i] + 1 or 0 end
+    for i = 0, L.w - 1 do
+      local hh = hts[i]
+      if hh >= minside then
+        local a, b = i, i
+        while a > 0 and hts[a - 1] >= hh do a = a - 1 end
+        while b < L.w - 1 and hts[b + 1] >= hh do b = b + 1 end
+        local k = a .. ',' .. b .. ',' .. j .. ',' .. hh
+        if b - a + 1 >= minside and not seen[k] then
+          seen[k] = true
+          out[#out + 1] = {x0 = L.x0 + a, x1 = L.x0 + b, y0 = L.y0 + j - hh + 1, y1 = L.y0 + j, z = L.z}
+        end
+      end
+    end
+  end
+  return out
+end
+
+-- the smallest part of a free rectangle that holds `need` coffins (all of it when it holds fewer), in the corner
+-- nearest the seed: {x0, y0, x1, y1, z, cap, o, area, d}
+local function fit(rc, need, seed, minside)
+  local W, H = rc.x1 - rc.x0 + 1, rc.y1 - rc.y0 + 1
+  local cap, o = M.coffin_capacity(W, H)
+  if cap <= 0 then return nil end
+  local w, h = W, H
+  if cap > need then
+    local best
+    local function try(iw, ih, ori)
+      if iw > W - 2 or ih > H - 2 then return end
+      local cand = {(iw + 2) * (ih + 2), math.abs(iw - ih), iw + 2, ih + 2, ori}
+      if not best or cand[1] < best[1] or (cand[1] == best[1] and cand[2] < best[2]) then best = cand end
+    end
+    for n = math.max(1, minside - 2), math.max(W, H) - 2 do
+      local per = rowcap(n)
+      if per > 0 then
+        local m = math.max(minside - 2, -(-need // per))
+        try(n, m, 'x')                                   -- rows of `per` coffins along x
+        try(m, n, 'y')                                   -- columns of `per` coffins along y
+      end
+    end
+    if best then
+      w, h, o = best[3], best[4], best[5]
+      cap = o == 'x' and rowcap(w - 2) * (h - 2) or rowcap(h - 2) * (w - 2)
+    end
+  end
+  local x0 = math.abs(2 * rc.x0 + w - 1 - 2 * seed.x) <= math.abs(2 * rc.x1 - w + 1 - 2 * seed.x) and rc.x0
+             or rc.x1 - w + 1
+  local y0 = math.abs(2 * rc.y0 + h - 1 - 2 * seed.y) <= math.abs(2 * rc.y1 - h + 1 - 2 * seed.y) and rc.y0
+             or rc.y1 - h + 1
+  local d = math.abs(2 * x0 + w - 1 - 2 * seed.x) + math.abs(2 * y0 + h - 1 - 2 * seed.y)   -- doubled, xy + z
+            + 8 * math.abs(rc.z - seed.z)
+  return {x0 = x0, y0 = y0, x1 = x0 + w - 1, y1 = y0 + h - 1, z = rc.z, cap = cap, o = o, area = w * h, d = d}
+end
+
+-- a rectangle that holds everything beats one that does not; then the smaller (whole) or the larger (part), nearer
+local function better(a, b, need)
+  if not b then return true end
+  local fa, fb = a.cap >= need, b.cap >= need
+  if fa ~= fb then return fa end
+  if fa and a.area ~= b.area then return a.area < b.area end
+  if not fa and a.cap ~= b.cap then return a.cap > b.cap end
+  if a.d ~= b.d then return a.d < b.d end
+  if a.y0 ~= b.y0 then return a.y0 < b.y0 end
+  return a.x0 < b.x0
+end
+
+local function overlaps(a, b) return a.x0 <= b.x1 and b.x0 <= a.x1 and a.y0 <= b.y1 and b.y0 <= a.y1 end
+
+-- the coffin tiles of a fitted rectangle (inner tiles off the aisles), at most n; the whole rectangle (its free ring
+-- included) is taken for the rest of the search
+local function take(cs, f, n)
+  local k = 0
+  for y = f.y0 + 1, f.y1 - 1 do
+    for x = f.x0 + 1, f.x1 - 1 do
+      local i = f.o == 'x' and (x - f.x0 - 1) or (y - f.y0 - 1)
+      if i % 3 ~= 1 and k < n then
+        cs.tiles[#cs.tiles + 1] = {x, y, f.z}
+        k = k + 1
+      end
+    end
+  end
+  for y = f.y0, f.y1 do for x = f.x0, f.x1 do cs.taken[key3(x, y, f.z)] = true end end
+  return k
+end
+
+local function pick_level(K, c, cs, L)
+  local rects = free_rects(L, c.coffin_min_side)
+  while cs.need > 0 and #cs.picks < RECTS_MAX do
+    local best
+    for _, rc in ipairs(rects) do
+      if not rc.gone then
+        local f = fit(rc, cs.need, cs.seed, c.coffin_min_side)
+        if f and better(f, best, cs.need) then best = f end
+      end
+    end
+    if not best then return end
+    for _, rc in ipairs(rects) do if overlaps(rc, best) then rc.gone = true end end
+    local okf, far = K.call('snapshot', 'far', best.x0, best.y0, best.z)    -- a ring tile; unknown counts as near
+    if okf and far == true then
+      cs.far = cs.far + 1
+    else
+      local n = take(cs, best, cs.need)
+      cs.need = cs.need - n
+      cs.picks[#cs.picks + 1] = {best.x0, best.y0, best.z, best.x1 - best.x0 + 1, best.y1 - best.y0 + 1, n}
+    end
+  end
+end
+
+local function search_begin(K, c, r, T, need)
+  local cs = {need = need, want = need, picks = {}, tiles = {}, taken = {}, queue = {}, qi = 1, ents = entrance_list(K),
+              boxes = r.boxes, er = c.coffin_entrance_r, probes = 0, far = 0, seeds = {}}
+  for _, sd in ipairs(coffin_seeds(K, r, T)) do
+    cs.seeds[#cs.seeds + 1] = string.format('%s %d,%d,%d', sd.why, sd.x, sd.y, sd.z)
+    for _, dz in ipairs({0, -1, 1}) do cs.queue[#cs.queue + 1] = {seed = sd, z = sd.z + dz} end
+  end
+  return cs
+end
+
+-- the levels in turn, row by row (PROBE_COST slice units per tile read), each searched once it is complete; true
+-- when the search is over (enough space, no level left, or no tile reader)
+local function search_step(K, c, r, cs)
+  local R = c.coffin_scan_r
+  while cs.qi <= #cs.queue and cs.need > 0 and #cs.picks < RECTS_MAX do
+    local L = cs.level
+    if not L then
+      local q = cs.queue[cs.qi]
+      L = {x0 = q.seed.x - R, y0 = q.seed.y - R, w = 2 * R + 1, h = 2 * R + 1, z = q.z, g = {}, j = 0}
+      L.occ = occ_index({L.x0, L.y0, L.z, L.x0 + L.w - 1, L.y0 + L.h - 1, L.z}, cs.taken)
+      cs.level, cs.seed = L, q.seed
+      r.left = r.left - 20
+    end
+    while L.j < L.h do
+      if r.left <= 0 then return false end
+      local y, row = L.y0 + L.j, {}
+      for i = 0, L.w - 1 do
+        local x = L.x0 + i
+        if not L.occ[key3(x, y, L.z)] and not near_entrance(cs, x, y, L.z) then
+          local ok, t = K.call('snapshot', 'tile', x, y, L.z)
+          cs.probes = cs.probes + 1
+          r.left = r.left - PROBE_COST
+          if not ok then cs.err, cs.qi = 'no tile reader', #cs.queue + 1; return true end
+          if type(t) == 'table' and t.c == '.' and (t.dig or '') == '' and (t.bld or '') == '' then row[#row + 1] = i end
+        end
+      end
+      if #row > 0 and not cs.nosky then                 -- roofed floor only (one open-sky query per row)
+        local pts = {}
+        for k, i in ipairs(row) do pts[k] = {L.x0 + i, y, L.z} end
+        local ok, res = K.call('snapshot', 'outside_near', pts, 0)
+        if ok and type(res) == 'table' then
+          for k = 1, #row do if res[k] ~= 0 then row[k] = false end end
+        else
+          cs.nosky = true
+          K.log('warn', 'coffins: no open-sky test (snapshot.outside_near: %s); surface floor is not told apart',
+                tostring(res))
+        end
+      end
+      for _, i in ipairs(row) do if i then L.g[L.j * L.w + i] = true end end
+      L.j = L.j + 1
+    end
+    pick_level(K, c, cs, L)
+    cs.level, cs.qi = nil, cs.qi + 1
+  end
+  return true
+end
+
+local function tomb_request(K, c, p, n, why, msg)
+  local now = K.now().tick
+  if p.tomb_req ~= nil and now - p.tomb_req < c.tomb_request_every then return false end
+  p.tomb_req = now
+  K.emit('PROJECT_REQUEST', 'B', trunc(msg, 200), {tpl = 'tombs', n = math.max(1, math.min(60, n)), why = why})
+  return true
+end
+
+-- the search's result: a runner project for the coffins found, PROJECT_REQUEST tombs (no_space) for the rest
+local function coffin_place(K, c, r, p, q, cs)
+  local now = K.now().tick
+  local pc = p.cof
+  pc.searched, pc.found = now, #cs.tiles
+  if #cs.tiles > 0 then
+    local why = string.format('%d unburied + %d reserve, %d free, %d planned', q.open, c.coffin_reserve, q.free,
+                              q.planned + q.idle)
+    local ok, okr, id = K.call('runner', 'coffins', cs.tiles, why, c.coffin_prio)
+    if ok and okr then
+      pc.proj, pc.placed, pc.n = id, now, #cs.tiles
+      cs.new = #cs.tiles
+      local at = cs.picks[1]
+      pc.site = string.format('%dx%d at %d,%d,%d', at[4], at[5], at[1], at[2], at[3])
+      K.log('info', 'coffins: %d placed (%s) in %d free rectangle(s), first %s; %d tiles read', #cs.tiles, tostring(id),
+            #cs.picks, pc.site, cs.probes)
+    else
+      cs.need, cs.err = cs.want, 'runner refused: ' .. tostring(ok and id or okr)
+      K.log('warn', 'coffins: runner.coffins refused %d coffins: %s', #cs.tiles, tostring(ok and id or okr))
+    end
+  end
+  if cs.need > 0 then
+    pc.retry, pc.nospace = now + c.coffin_retry, now
+    local where = #cs.seeds > 0 and table.concat(cs.seeds, '; ') or 'no seed (no coffins, core or citizens)'
+    local side = c.coffin_min_side
+    local msg = string.format('tombs: no free dug space for %d coffins (>= %dx%d roofed floor outside zones, reachable, '
+                              .. '%d+ tiles from the entrances) near %s: dig a tombs room', cs.need, side, side,
+                              c.coffin_entrance_r, where)
+    if cs.err then msg = string.format('tombs: %d coffins not placed (%s): place a tombs room', cs.need, cs.err) end
+    tomb_request(K, c, p, cs.need, 'no_space', msg)
+    K.log('warn', 'coffins: space for %d of %d coffins near %s (%d tiles read, %d rectangles off the walk group)',
+          #cs.tiles, cs.want, where, cs.probes, cs.far)
+  else
+    pc.nospace = nil
+  end
+end
+
+-- ConstructCoffin orders for the coffin items still missing, hard stone first, then wood
+local function coffin_order(K, c, r, p, q, cs)
+  q.missing = 0
+  local mode = K.mode()
+  if mode == 'SIEGE' or mode == 'BREACH' or not q.census then return end
+  local can = false
+  for _, o in ipairs(C.ACT.workorder or {}) do if o == 'care' then can = true end end
+  if not can then return end
+  local items = math.max(0, math.min(q.want - q.free - q.idle, q.planned + (cs and cs.new or 0)))
+  local make = math.min(c.coffin_batch, math.max(0, items - q.stock - q.order))
+  q.items, q.make = items, make
+  if make <= 0 then return end
+  -- the boulders and logs the open coffin orders will take are spoken for
+  local rock = q.masons and math.max(0, math.min(make, q.stone - q.order_by.rock)) or 0
+  local wood = q.carp and math.max(0, math.min(make - rock, q.wood - c.coffin_wood_keep - q.order_by.wood)) or 0
+  q.missing = make - rock - wood
+  local now = K.now().tick
+  if now < (num(p.cof.oretry) or 0) then return end
+  local mats = {}
+  local function order(n, spec, mat)
+    if n <= 0 then return end
+    spec.job, spec.amount_total, spec.frequency, spec.tag = 'ConstructCoffin', n, 'OneTime', 'dfllm:coffin'
+    local ok, id = K.act.workorder(spec)
+    if ok then
+      q.order, q.ordered = q.order + n, (q.ordered or 0) + n
+      mats[#mats + 1] = mat
+      K.log('info', 'coffins: order %s ConstructCoffin x%d in %s (stone %d, logs %d, %d coffins in stock)', tostring(id),
+            n, mat, q.stone, q.wood, q.stock)
+    else
+      p.cof.oretry = now + DAY
+    end
+  end
+  order(rock, {material = 'INORGANIC'}, 'rock')
+  order(wood, {material_category = {'wood'}}, 'wood')
+  if #mats > 0 then p.cof.mat = table.concat(mats, '+') end
+end
+
+-- DECISION_NEEDED (A) once no space (no tombs project pending) or no material stood for coffin_wake, then weekly
+local function coffin_alarm(K, c, r, p, q)
+  local now, pc = K.now().tick, p.cof
+  if q.short <= 0 or q.pend > 0 then pc.nospace = nil end
+  local why, ask
+  if pc.nospace ~= nil then
+    why = 'space'
+    ask = string.format('coffins: %d short, no free dug floor (%dx%d+, roofed, outside zones, reachable, %d+ tiles '
+                        .. 'from the entrances) near the crypt, core or citizens: dig a tombs room (bp sites tombs, '
+                        .. 'bp.place tombs n=%d)', q.short, c.coffin_min_side, c.coffin_min_side, c.coffin_entrance_r,
+                        math.min(60, q.short))
+  elseif (q.missing or 0) > 0 then
+    why = 'material'
+    ask = string.format('coffins: %d to make, no material: hard stone %d (soft and economic stone are refused), logs %d '
+                        .. '(keep %d), masons %s, carpenters %s: dig hard stone, chop wood, build the shop or buy coffins',
+                        q.missing, q.stone, q.wood, c.coffin_wood_keep, q.masons and 'yes' or 'no',
+                        q.carp and 'yes' or 'no')
+  end
+  q.why = why or ''
+  if not why then pc.since, pc.why = nil, nil; return end
+  if pc.why ~= why then pc.since, pc.why = now, why end
+  if now - (num(pc.since) or now) >= c.coffin_wake and (pc.woke == nil or now - (num(pc.woke) or 0) >= c.ghost_every) then
+    pc.woke = now
+    K.emit('DECISION_NEEDED', 'A', trunc(ask, 200), {id = 'coffin_' .. why, q = trunc(ask, 200), short = q.short,
+                                                     make = q.missing or 0})
+  end
+end
+
+local function phase_coffins_run(K, c, r, p)
+  local q = r.cof
+  if not q then return true end
+  if not q.checked then
+    q.checked = true
+    local okp, pend = K.call('runner', 'pending', 'tombs')
+    q.pend = okp and type(pend) == 'number' and pend or 0
+    if q.pend == 0 then p.cof.proj = nil end
+    -- runner.coffins is there (it refuses the empty call): care owns the tombs request then
+    local hook = K.call('runner', 'coffins')
+    q.active = c.coffins ~= false and (q.core or q.bodies > 0)
+    q.own = q.active and hook == true
+    r.cof_own = q.own
+    -- no second search within coffin_retry of a failed search or of the last placement (a project that ended
+    -- without coffins standing is no reason to place the same rows again at once)
+    local now = K.now().tick
+    if q.own and q.short > 0 and q.free < q.want and K.mode() == 'PEACE' and q.pend == 0
+       and now >= (num(p.cof.retry) or 0) and now - (num(p.cof.placed) or -c.coffin_retry) >= c.coffin_retry then
+      r.cs = search_begin(K, c, r, r.cof_T, math.min(q.short, c.coffin_batch, 60))
+    end
+  end
+  if not q.active then return true end
+  if r.cs and not r.cs.done then
+    if not search_step(K, c, r, r.cs) then return false end
+    r.cs.done = true
+    coffin_place(K, c, r, p, q, r.cs)
+  end
+  if not q.ordered_run then
+    q.ordered_run = true
+    coffin_order(K, c, r, p, q, r.cs)
+    coffin_alarm(K, c, r, p, q)
+  end
+  return true
+end
+
+-- the provisioner as status, state and inspect show it (plain values)
+local function coffin_view(K, q, p, cs)
+  local pc = p.cof
+  local v = {active = q.active and 1 or 0, own = q.own and 1 or 0, want = q.want, bodies = q.bodies, open = q.open,
+             free = q.free,
+             planned = q.planned, idle = q.idle, slots = q.slots, short = q.short, stock = q.stock, order = q.order,
+             stuck = q.stuck, items = q.items, make = q.make, missing = q.missing or 0, stone = q.stone,
+             wood = q.wood, masons = q.masons and 1 or 0, carpenters = q.carp and 1 or 0, pend = q.pend or 0,
+             proj = pc.proj or '', pct = -1, site = pc.site or '', mat = pc.mat or '', why = q.why or '',
+             searched = num(pc.searched) or -1, found = num(pc.found) or 0, retry = num(pc.retry) or -1}
+  for _, row in ipairs(type(K.view().proj) == 'table' and K.view().proj or {}) do
+    if type(row) == 'table' and row[1] == v.proj then v.pct, v.stage = num(row[3]) or -1, tostring(row[2]) end
+  end
+  if cs then v.probes, v.seeds = cs.probes, cs.seeds end
+  return v
+end
+
+local function phase_coffins(K, c, r, p)
+  local ok, res = pcall(phase_coffins_run, K, c, r, p)
+  if not ok then
+    r.cs = nil
+    K.log('warn', 'care coffins: %s', tostring(res))
+    return true
+  end
+  return res
 end
 
 ---------------------------------------------------------------- doctors and hospital posts (FR-48, Run 9)
@@ -1545,7 +2112,7 @@ local function reserve_begin(K, c, r, p)
   local okp, alarm = K.call('economy', 'alarm')
   local f = {phase = (K.view() or {}).phase, smelter = has_smelter(), alarm = okp == true and alarm ~= nil,
              barrels_empty = math.tointeger(inv.barrels_empty) or 0,
-             coffins_missing = math.max(0, count(r.open) - (r.tombs_free or 0))}
+             coffins_missing = math.max(0, count(r.open) - (r.tombs_free or 0), r.cof and r.cof.make or 0)}
   if type(f.phase) ~= 'string' then return rs end      -- no phase yet (first frames after a boot): unchanged
   local cloth = class_total(inv, 'cloth', #held.cloth)
   f.cloth_short = cloth and math.max(0, (math.tointeger((rc.targets or {}).cloth) or 0) - cloth) or 0
@@ -1663,8 +2230,9 @@ end
 ---------------------------------------------------------------- run, finish
 -- needs after corpses and zones (citizen remains, coffins), the reserve after the needs (moods first)
 -- tombs after corpses and zones (bodies, interments), doctors after the units (moods, patients)
+-- coffins last: its space search reads tiles over several frames and must not hold up the moods
 local PHASES = {phase_units, phase_doctors, phase_corpses, phase_zones, phase_tombs, phase_captives, phase_barrels,
-                phase_needs, phase_reserve, phase_tools}
+                phase_needs, phase_reserve, phase_tools, phase_coffins}
 
 local function new_run(K, c, p)
   local cu = K.census.u
@@ -1806,16 +2374,20 @@ local function finish(K, c, r, p)
     st.tombs = r.tomb_src
   end
   st.doctors = r.doctors or st.doctors
-  -- tombs: free >= open corpses + margin; ask only once the core exists or somebody is unburied
+  -- tombs: free >= open corpses + margin; ask only once the core exists or somebody is unburied. The coffin
+  -- provisioner (FR-61) owns the request when runner.coffins is there: it places coffins itself and asks for a dug
+  -- tombs room only when no free space is found
   local need = open + c.tomb_margin - r.tombs_free
   local core = (K.manifest().zones or {}).Z4 ~= nil
   local okp, pend = K.call('runner', 'pending', 'tombs')
   local queued = okp and type(pend) == 'number' and pend > 0      -- live L1: a tombs project every 3 days
-  if need > 0 and not queued and (core or open > 0) and (p.tomb_req == nil or now - p.tomb_req >= c.tomb_request_every) then
+  if need > 0 and not queued and not r.cof_own and (core or open > 0)
+     and (p.tomb_req == nil or now - p.tomb_req >= c.tomb_request_every) then
     p.tomb_req = now
     K.emit('PROJECT_REQUEST', 'B', string.format('tombs: %d free < %d corpses + %d', r.tombs_free, open, c.tomb_margin),
            {tpl = 'tombs', n = need, why = 'tombs_free'})
   end
+  if r.cof then st.cof = coffin_view(K, r.cof, p, r.cs) end
   -- weekly top stressors (persisted for the brief; see contract notes)
   for k, n in pairs(r.acc.thoughts) do p.stress.counts[k] = (p.stress.counts[k] or 0) + n end
   if now - (p.stress.since or now) >= c.stress_week then
@@ -1909,8 +2481,19 @@ function M.inspect(K, what, key)
   if what ~= 'tombs' then return false, 'care answers what=tombs only' end
   if not st.tombs then return true, 'tombs: no care run finished yet', {tick = K.now().tick} end
   local d = tomb_report(st.tombs)
-  return true, string.format('tombs: %d coffins, %d free, %d unburied, %d ghosts, %d burial jobs', d.coffins, d.free,
-                             d.unburied_n, #d.ghosts, d.jobs), d
+  local msg = string.format('tombs: %d coffins, %d free, %d unburied, %d ghosts, %d burial jobs', d.coffins, d.free,
+                            d.unburied_n, #d.ghosts, d.jobs)
+  local v = st.cof
+  if v then                                   -- FR-61: the coffin provisioner
+    local prov = {}
+    for k, x in pairs(v) do prov[k] = x end
+    d.prov = prov
+    msg = msg .. string.format('; coffins want %d, short %d, stock %d, on order %d%s%s%s', v.want, v.short, v.stock,
+                               v.order, v.proj ~= '' and (', project ' .. v.proj) or '',
+                               v.proj ~= '' and v.pct >= 0 and string.format(' %d%%', v.pct) or '',
+                               v.why ~= '' and (', no ' .. v.why) or '')
+  end
+  return true, msg, d
 end
 
 -- verb tombs.repair {} (FR-27): the next care run repairs the tombs in any mode, also with tomb_repair off,
@@ -1935,9 +2518,13 @@ end
 function M.state(K)
   local o = st.out
   if not o then return {} end
-  return {care = {stressed_pct = math.max(0, math.min(100, o.stressed_pct)), naked = o.naked, ghosts = o.ghosts,
-                  corpses_old = o.corpses_old, tombs_free = o.tombs_free, moods = o.moods},
-          stock = {hosp_water = o.hosp_water}}
+  local care = {stressed_pct = math.max(0, math.min(100, o.stressed_pct)), naked = o.naked, ghosts = o.ghosts,
+                corpses_old = o.corpses_old, tombs_free = o.tombs_free, moods = o.moods}
+  local v = st.cof
+  if v and v.active == 1 then                 -- FR-61: the coffin provisioner
+    care.coffins = {want = v.want, short = v.short, stock = v.stock, order = v.order, proj = trunc(v.proj, 40)}
+  end
+  return {care = care, stock = {hosp_water = o.hosp_water}}
 end
 
 local function deep(t)
