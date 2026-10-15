@@ -29,3 +29,10 @@ Related: FR-trade, BUG-008 (event repeats)
 
 ## Confirmation (18:25)
 After the sheet was closed (focus `dwarfmode/Default`) the next caravan traded at once: `#12056 CARAVAN traded with Muboomon, ratio 1.65`. So the open unit sheet was the only blocker.
+
+## Second failure without an open sheet (19:00-19:15, Catten caravan)
+Focus was `dwarfmode/Default` the whole time. kern.log: `trade: no TradeAtDepot job 555 ticks after the caravan reached the depot: posted`, `trade: 100 sale items sent to the depot` (twice),
+`kern trade demoted x4 (42 ms; ...)`, then `trade ledger Catten: ... unmet bar:iron:ui_timeout, ...` and `CARAVAN trade with Catten failed: ui_timeout` (#12270), ratio 0.
+The game ran at 90 ticks/s (`tempo.lower` by me), the trade module was demoted for its cost. Suspect: the trade state machine uses real-time phase limits (`PHASE_MS`) while a demoted module runs
+only every few frames, so the UI phase times out at low tempo / under demotion. A first caravan with the same module at 400+ ticks/s had traded (Muboomon, ratio 1.65, 18:25).
+Muboomon on 19:00 brought one human and a yak without goods (`nothing_listed`, not a bug).
