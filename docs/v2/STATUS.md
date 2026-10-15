@@ -112,9 +112,20 @@ Timeline (2 s probe, `scratchpad/siege_probe.py`; run 2 started with all four dr
 6. *Forced arrival again with a recorded door:* `doors 1 forbidden (1 entr...`, probe `doors_forbidden=1/63`, `civ_alert=1` for the whole lockdown (no flip-flop), `LOCKDOWN_END ... 1 doors opened`.
    But only 1-3 of the 4 bridges go up: the civil alert confines everybody to Kern+ and the levers lie outside (BUG-013).
 
+**Retest 2 after BUG-011..014 / FR-64 (main 95fe16d, 17:00-17:16; the test fort had died out meanwhile (0 citizens, y374), so DF was restarted and a copy of autosave 3 (`test-siege-1524`, y372, 44 citizens) was loaded; answers to the dev checklist 1-8):**
+1. ARRIVAL text: `clock 30 t/s, alert: after the gates (<= 1500 ticks), doors 1 forbidden, partial lockdown: stair_updown 55,62,117 has no door, gates: 0 of 4 up, 4 pulls pending` - confirmed.
+2. `civ_alert true` only after the last `GATE ... up`: last GATE up tick 150011885, `siege act.civ_alert [true]` tick 150011889 - confirmed.
+3. All four bridges up within 701 ticks (about 6 s real time), alert after that - confirmed.
+4. Hebel+ path (pull jobs held suspended with a Lua loop, citizen outside): at trigger + 1500 ticks `seal act.burrow_tiles ["Hebel+",...4 tiles]`, `siege act.alert_burrows [["Kern+","Hebel+"]]`, `act.civ_alert [true]`; after the release all four bridges rose under `civ_alert=1`; afterwards `act.alert_burrows [["Kern+"]]` - confirmed.
+5. Doors: door 74,70,117 (id 16970) is recognised; with a citizen outside the text says `doors 0 forbidden, 1 waiting for 1 citizen outside`, the forbid came 230 ticks after the alert. **But the flag falls back to false within one frame** (probe 0/62 throughout, `LOCKDOWN_END 0 doors opened`): BUG-015 (three other doors keep the flag).
+6. LOCKDOWN_END: `act.civ_alert [false]` first, then the four `act.pull` for the bridges down, in the same tick - confirmed. (In the first run the interrupt stayed unacked: the kernel's default applied after 60 s and the lockdown ended by itself after 2 quiet days.)
+7. Reload in legacy mode: commands.log `autolabor status / mode monitor / mode / status`, kern.log `... set to monitor (read back: monitor)`, no new AUTOLABOR_LEGACY - confirmed.
+8. Deaths: `found dead: mood (... incident THIRST; thirst 75003 ...)` with `src=mood`, `died: unknown (not found yet, missing in the unit list)` then revised to `unknown (incident SCARE)`; `status` shows `deaths (season) unknown 1` - works; SCARE is not mapped to a cause.
+Also seen: `GATE_FAIL ... no_worker` x4 and `lever_latency_s 117 (2401 t)` are artefacts of the held pull jobs.
+
 **Not yet seen live:** an enemy inside the fort (needs a way to spawn units), PERIMETER_BROKEN after a siege (BUG-002), HOSPITAL_DRY, MOOD_RISK, embark panel.
 
-**Problems found (one file per bug in `bugs/`, BUG-001..BUG-014, index `bugs/README.md`; FR-59..FR-63 in docs/feature-requests/README.md):**
+**Problems found (one file per bug in `bugs/`, BUG-001..BUG-015, index `bugs/README.md`; FR-59..FR-63 in docs/feature-requests/README.md):**
 1. **FR-59** `seal.lua` SKIP contains `in_inventory`, so every drink/food/seed unit stored in a barrel or bag is ignored:
    `inspect reach` shows `drink/food/seeds groups: []`, the refuge audit says `drink 0<7, food 0<7` for Kern+ and Innen+
    although Lua shows 1362 drink units, all inside Kern+, none forbidden; CUTOFF for food/drink can never fire.

@@ -1,5 +1,5 @@
 # BUG-014 AUTOLABOR_LEGACY says "mode monitor failed, still legacy" although the mode was switched
-Status: fixed in 413f614 (offline, live-untested)
+Status: fixed in 413f614 (offline, live-untested). Live 2026-10-15 17:15 (95fe16d): CONFIRMED
 Severity: low (the fix works, the report is wrong and raises a class A interrupt for nothing)
 Found: 2026-10-15 15:05, Run 9 save autosave 1 (y371), dfpilot main 677bc3e, `dfllm reload`
 Module: `lua/dfllm/baseline.lua` (autolabor guard, BUG-010 fix)
@@ -55,3 +55,8 @@ not-legacy text) and switches nothing (the labor task's own `labormanager mode`,
 autolabor` follow as before); kern.log `autolabor was enabled in legacy mode (boot): set to monitor (read back: monitor)`;
 `dfllm events --cls A` has no new AUTOLABOR_LEGACY; `dfhack-run autolabor mode` prints `Mode: monitor`. On a save where
 autolabor is already in monitor mode: no switch at all (only the status read).
+
+## Live check 95fe16d (17:15)
+`dfhack-run autolabor mode legacy` (`Mode: legacy (autolabor)`), then `dfllm reload`: commands.log `baseline act.run ["autolabor","status"]`, `["autolabor","mode","monitor"]`, `["autolabor","mode"]`, `["autolabor","status"]` (all ok),
+kern.log `warn baseline autolabor was enabled in legacy mode (boot): set to monitor (read back: monitor)`, `autolabor mode` -> `Mode: monitor (starvation warnings)`, no new AUTOLABOR_LEGACY event
+(the newest is still #10881 from before the fix).

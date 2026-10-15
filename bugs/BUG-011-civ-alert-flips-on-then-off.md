@@ -1,5 +1,5 @@
 # BUG-011 the arrival lockdown switches the civil alert on, the siege module switches it off a second later
-Status: fixed in 4e2b43c (offline, live-untested)
+Status: fixed in 4e2b43c (offline, live-untested). Live 2026-10-15 17:06 (95fe16d): CONFIRMED - one `siege act.civ_alert [true]`, never switched off until LOCKDOWN_END; fallback text works
 Severity: high (the lockdown reports "alert on Kern+" but no citizen is ever confined; combined with BUG-001 the alert never works)
 Found: 2026-10-15 14:50, Run 9 save autosave 1 (y370), dfpilot main 3edc277, forced test (popup injected with `dfhack.gui.showPopupAnnouncement`)
 Module: `lua/dfllm/reflex.lua` (arrival lockdown, `act.civ_alert`) vs `lua/dfllm/siege.lua` / `seal.lua` (alert burrow audit)
@@ -69,3 +69,7 @@ the text names. After `dfllm ack` and 2 quiet days: LOCKDOWN_END, then one `[fal
 
 ## Retest 677bc3e (15:02-15:15)
 With the BUG-001 fix the refuge audit passes (Kern+ drink 1031, food 912) and `civ_alert` stays 1 for the whole lockdown (probe 170 s), no flip-flop in commands.log. The flip-flop was therefore caused by BUG-001. New problem behind it: BUG-013 (lever pulls blocked by the alert).
+
+## Live check 95fe16d (17:06-17:16, test fort y372)
+Two runs: `act.alert_burrows [["Kern+"]]` + `act.civ_alert [true]` once each, `civ_alert=1` in every probe sample until `LOCKDOWN_END`
+(`siege act.civ_alert [false]` at tick 150019169, the only `false`). No flip-flop.

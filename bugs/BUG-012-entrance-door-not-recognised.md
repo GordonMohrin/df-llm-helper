@@ -1,5 +1,5 @@
 # BUG-012 the arrival lockdown forbids 0 doors: "0 entrances", although the fort has a door at its entrance
-Status: fixed in 4e2b43c, 0faebcc (offline, live-untested)
+Status: fixed in 4e2b43c, 0faebcc (offline, live-untested). Live 2026-10-15 17:06 (95fe16d): PARTLY - the door 74,70,117 (id 16970) is recognised and commanded, `waiting for 1 citizen outside` works, but the flag does not stick (BUG-015)
 Severity: high (the door lockdown never happens on a fort without a manifest; invaders are not steered away from the entrance)
 Found: 2026-10-15 14:50, Run 9 save autosave 1 (y370), dfpilot main 3edc277, forced arrival popup (see BUG-011)
 Module: `lua/dfllm/reflex.lua` (entrance doors), `lua/dfllm/seal.lua` (`entrances`)
@@ -92,3 +92,10 @@ stands), comes back as PERIMETER_BROKEN with a `rp...` repair project when it is
 
 ## Retest 677bc3e (15:12)
 After building a Door at the north opening (61,55,117) and `perimeter.record`, the arrival lockdown says `doors 1 forbidden (1 entr...`, probe `doors_forbidden=1/63`, `LOCKDOWN_END ... 1 doors opened`. So the reflex works on the recorded perimeter piece. Still open: the fort's other two openings (shaft head 55,62,117 stair_updown, east stair 75,70,117) have no door and the existing Door at (74,70,117) is not recognised as the east entrance door (`inspect entrances`: `state no door`).
+
+## Live check 95fe16d (17:06-17:16, test fort y372)
+Run 1 (everybody inside): ARRIVAL `doors 1 forbidden, partial lockdown: stair_updown 55,62,117 has no door`, commands.log `reflex act.door_forbid [16970,true]` at the trigger tick.
+Run 2 (citizen 20104 teleported to 76,70,118 outside): ARRIVAL `doors 0 forbidden, 1 waiting for 1 citizen outside, partial lockdown: stair_updown 55,62,117, shrub 61,55,117 have no door`;
+the forbid came 1730 ticks after the trigger, 230 ticks after the alert began (`act.door_forbid [16970,true]` at tick 150114169; the rule is at the latest 450 ticks after the alert calls the citizens in).
+The existing Door 74,70,117 is now taken from the entrance route. But `door_flags.forbidden` of building 16970 falls back to false within one frame
+(probe `doors_forbidden=0/62` throughout, `LOCKDOWN_END ... 0 doors opened`): see BUG-015.

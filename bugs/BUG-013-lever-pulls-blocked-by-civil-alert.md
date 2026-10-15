@@ -1,5 +1,5 @@
 # BUG-013 the civil alert confines everybody to Kern+, the lever pulls for the bridges are never done, only 1-3 of 4 bridges go up
-Status: fixed in 055c92f (offline, live-untested)
+Status: fixed in 055c92f (offline, live-untested). Live 2026-10-15 17:06-17:16 (95fe16d): CONFIRMED incl. the Hebel+ path
 Severity: high (the siege reflex "gates up" half-fails exactly when the alert works; worse than before BUG-011 was fixed, when the alert flipped off and the pulls got done)
 Found: 2026-10-15 15:02-15:15, Run 9 save autosave 1 (y371), dfpilot main 677bc3e (kernel reloaded), forced arrival popup (see BUG-011)
 Module: `lua/dfllm/reflex.lua` (gates up + `act.civ_alert`), alert burrow choice in `lua/dfllm/siege.lua` / `seal.lua`
@@ -100,3 +100,12 @@ seconds and all four bridges rise with `civ_alert=1`; afterwards `act.alert_burr
 whether an idle confined civilian wanders onto the lever tiles while `Hebel+` is listed (harmless, but tells us how DF
 spreads idle dwarves over the alert's burrows), and whether the puller walks back into Kern+ afterwards. After `dfllm
 ack` and 2 quiet days: LOCKDOWN_END, `[false]` before the four lowering `act.pull` lines, all bridges down.
+
+## Live check 95fe16d (17:06-17:16, test fort y372, all four bridges down, popup injected)
+Run 1 (normal): ARRIVAL `alert: after the gates (<= 1500 ticks), ... gates: 0 of 4 up, 4 pulls pending`. `LEVER pull X16032..35 up` at the trigger tick 150011184, GATE up at
+150011735 / 760 / 860 / 885 (all four within 701 ticks, about 6 s real time); `siege act.alert_burrows [["Kern+"]]` + `act.civ_alert [true]` at tick 150011889, 4 ticks after the last `GATE ... up`.
+LOCKDOWN_END at tick 150019169: `siege act.civ_alert [false]` first, then in the same tick the four `gate act.pull` (bridges down).
+Run 2 (pull jobs held suspended by a Lua loop for 1700 ticks, a citizen outside): the gate re-queued the pulls every ~225 ticks (my loop suspended each); at tick 150113939 (= trigger + 1500, the maximum deadline):
+`seal act.burrow_tiles ["Hebel+",{"first":[57,61,117],"tiles":4},true] ok`, `siege act.alert_burrows [["Kern+","Hebel+"]] ok`, `siege act.civ_alert [true] ok`.
+After my loop released the jobs, all four bridges rose under `civ_alert=1` (probe: bridges_up 1 -> 3 -> 4 within 12 s, civ_alert 1 throughout), and at tick 150114852 `act.alert_burrows [["Kern+"]]` (Hebel+ dropped).
+So confined citizens do take the PullLever jobs with Hebel+ in the alert list. My loop also produced 4 x GATE_FAIL `no_worker` (A) and `lever_latency_s 117 (2401 t)`; both are artefacts of the test.

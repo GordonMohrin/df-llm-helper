@@ -35,6 +35,7 @@ Related: FR-xx, BUG-xx
 | [BUG-012](BUG-012-entrance-door-not-recognised.md) | fixed in 4e2b43c, 0faebcc (offline, live-untested) | high | the arrival lockdown forbids 0 doors ("0 entrances") although the fort has an entrance door | lua/dfllm/reflex.lua, seal.lua |
 | [BUG-013](BUG-013-lever-pulls-blocked-by-civil-alert.md) | fixed in 055c92f (offline, live-untested) | high | the civil alert confines everybody to Kern+, lever pulls for the bridges are never done (1-3 of 4 bridges up) | lua/dfllm/reflex.lua, gate.lua, siege.lua, seal.lua |
 | [BUG-014](BUG-014-autolabor-legacy-false-failure.md) | fixed in 413f614 (offline, live-untested) | low | AUTOLABOR_LEGACY says "mode monitor failed, still legacy" although the mode was switched | lua/dfllm/baseline.lua |
+| [BUG-015](BUG-015-door-forbid-flag-reset-in-one-frame.md) | open | high | the entrance door 74,70,117 cannot be kept forbidden (flag reset within one frame), the lockdown still reports it | lua/dfllm/act.lua, reflex.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
