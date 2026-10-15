@@ -38,6 +38,7 @@
 -- result after a load) and CFG.work caps one frame; an urgent job pre-empts a background one, which resumes later.
 -- The map edge keeps one tile per walkable run, the stairs and interior come from a flood over the citizens' groups
 -- (not a box over hidden rock), burrow sizes are cached and a periodic audit with unchanged inputs is skipped.
+local CAD = require('dfllm.util.cadence')   -- BUG-008: a standing class-A condition is announced again only with news
 local M = {name = 'seal', every = {ticks = 50}, verbs = {}, on = {}, inspect = {}}
 
 local DAY = 1200
@@ -78,7 +79,7 @@ M.CFG = {
   min_tiles = 20, drink_per_cit = 1, food_per_cit = 1, bed_pct = 25,   -- FR-37 burrow audit (per citizen)
   interior = 'Innen+',        -- the whole-interior burrow, painted when Kern+ fails its audit
   paint_chunk = 400, interior_max = 20000, repaint = 7 * DAY,
-  perim_max = 1500, requeue_cool = 7 * DAY, fail_every = DAY,
+  perim_max = 1500, requeue_cool = 7 * DAY,
 }
 local CFG = M.CFG
 
@@ -1634,14 +1635,23 @@ local function job_seal(K, why)
   mem.seal = res
   local pos = res.first and res.first.pos or nil
   if not res.sealed and expect then
-    K.emit('SEAL_LEAK', 'A', trunc(res.msg, 200), {routes = res.routes, pos = pos, bld = res.first and res.first.bld,
-           state = res.first and res.first.state, why = trunc(why, 40)})
+    -- BUG-008: the same leak is announced once per episode; a new leak tile or state is news and goes out at once
+    -- (a new way in during a siege must not wait for the cadence). A sealed check ends the episode.
+    local ids = {pos and table.concat(pos, ',') or '?'}
+    local toks = {tostring(res.first and res.first.state or ''), tostring(res.first and res.first.bld or '')}
+    local now = K.now()
+    if CAD.due(st.leak_rec, now, ids, toks, {ticks = 0, wall_s = 0}) then
+      st.leak_rec, dirty = CAD.mark(now, ids, toks), true
+      K.emit('SEAL_LEAK', 'A', trunc(res.msg, 200), {routes = res.routes, pos = pos, bld = res.first and res.first.bld,
+             state = res.first and res.first.state, why = trunc(why, 40)})
+    end
   elseif why ~= 'inspect' and (not (why == 'periodic' or res.reused) or not prev or prev.sealed ~= res.sealed
                                or prev.routes ~= res.routes) then
     K.emit('SEAL', 'B', trunc(res.msg, 200), {routes = res.routes, pos = pos, why = trunc(why, 40),
            sealed = res.sealed and 1 or 0})
   end
   st.seal = {t = t0, sealed = res.sealed and 1 or 0, routes = res.routes}
+  if res.sealed then st.leak_rec = nil end
   dirty = true
 end
 
@@ -1803,9 +1813,11 @@ function M.alert_burrow(K, mode, default)
   end
   local pick, want, why = choose(K, mode, default)
   if pick ~= want and why then
-    local sig = want .. '>' .. tostring(pick)
-    if mem.fail_sig ~= sig or t - (mem.fail_t or -CFG.fail_every) >= CFG.fail_every then
-      mem.fail_sig, mem.fail_t = sig, t
+    -- BUG-008: once per episode, again only when the refused burrow, the fallback or the reason changed, and then
+    -- not before max(1 game day, 60 s wall clock) (util/cadence; the unconditional daily repeat was 3 s at timestream)
+    local ids, toks, now = {want .. '>' .. tostring(pick)}, {trunc(why, 60)}, K.now()
+    if CAD.due(st.refuge_rec, now, ids, toks, {ticks = DAY, wall_s = 60}) then
+      st.refuge_rec, dirty = CAD.mark(now, ids, toks), true
       local au = mem.audit and mem.audit.burrows or {}
       local a = pick and au[pick]
       K.emit('REFUGE_FAIL', 'A', trunc(string.format('alert burrow %s refused (%s): %s', want, why,
@@ -1814,6 +1826,7 @@ function M.alert_burrow(K, mode, default)
               inside = a and a.inside or 0, mode = mode})
     end
   end
+  if pick == want and st.refuge_rec then st.refuge_rec, dirty = nil, true end   -- the episode ended
   publish(K)
   save(K)
   return pick

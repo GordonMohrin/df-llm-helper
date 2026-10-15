@@ -1,5 +1,5 @@
 # BUG-004 planned buildings wait for forbidden items for ever, JOBS_SUSPENDED repeats the same line
-Status: open
+Status: fixed in 9b9dcdc (offline, live-untested)
 Severity: high (nine coffins, a bed and the trade depot could not be built for 30+ real minutes while 20+ citizens had no work)
 Found: 2026-10-15, Run 9 save autosave 1, dfpilot main 3edc277
 Module: `lua/dfllm/economy.lua:2999` (FR-16 job release, `JOBS_SUSPENDED`); items side: nothing unforbids construction materials
@@ -26,3 +26,11 @@ class on reachable tiles of the fort (not the mood reserve's holds, which care m
 which class is missing (`inspect what=workload`).
 
 Related: FR-16, FR-61, BUG-005, BUG-009 (forbidden items on the footprint, the second blocker)
+
+## Fix (9b9dcdc, offline)
+economy's daily jobs pass (task `jmat`): per planned building the job_items without an attached item (what the
+building sheet waits for); forbidden loose items of that class on revealed tiles of the citizens' walk group are
+unforbidden, as many as missing (care's mood-reserve holds, corpses and dead dwarves' items skipped). None in reach:
+JOBS_SUSPENDED and `inspect workload` (`construction.missing`) name the class (`coffin x1`). JOBS_SUSPENDED is emitted
+only when its numbers change (no daily repeat of the same line). Live check: forbidden coffin items near planned
+coffins are unforbidden within a game day and the coffins get built.

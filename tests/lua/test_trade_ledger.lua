@@ -133,6 +133,39 @@ T.test('FR-43: a caravan without a built depot raises DEPOT_MISSING (A) once and
   T.eq(#W.find_events('DEPOT_MISSING'), 1, 'once per visit')
 end)
 
+T.test('BUG-005: DEPOT_MISSING says "being built" only while the planned depot progresses, else why not', function()
+  local function planned(W, stage, susp, worker)
+    local job = {flags = {suspend = susp}, _worker = worker}
+    local b = {id = 444, centerx = 69, centery = 44, z = 118, jobs = kmock.vec{job},
+               getBuildStage = function() return stage end, getMaxBuildStage = function() return 3 end}
+    df.global.world.buildings.other.TRADE_DEPOT = kmock.vec{b}
+    dfhack.job.getWorker = function(j) return j._worker end
+  end
+  local function run(stage, susp, worker, info)
+    local W = F.world{}
+    F.caravan(W, {state = 'Approaching', tr = 1500, goods = std_goods(W)})
+    planned(W, stage, susp, worker)
+    W.load({name = 'runner', every = {ticks = 600}, depot_keep = function() return true, 'standing' end})
+    if info then W.load({name = 'economy', every = {ticks = 1200}, build_info = function(K, id) return info[id] end}) end
+    W.load(fresh('trade'))
+    W.run(300, {skip = 9})
+    local ev = W.find_events('DEPOT_MISSING')
+    T.eq(#ev, 1)
+    return ev[1]
+  end
+  local e = run(0, true, nil, {[444] = {fails = 4, resumes = 5, why = 'item blocking site: 41 forbidden, 0 other'}})
+  T.ok(e.msg:find('does not progress: item blocking site: 41 forbidden, 0 other, 4 resumes failed', 1, true), e.msg)
+  T.eq({e.d.planned, e.d.stalled}, {0, 1})
+  e = run(0, true)
+  T.ok(e.msg:find('does not progress: its job is suspended', 1, true), e.msg)
+  e = run(0, false, nil)
+  T.ok(e.msg:find('no builder took its job', 1, true), e.msg)
+  e = run(1, false, {id = 5})
+  T.ok(e.msg:find('(one is being built at 69,44,118: stage 1/3)', 1, true), e.msg)
+  T.eq({e.d.planned, e.d.stalled}, {1, nil})
+  df.global.world.buildings.other.TRADE_DEPOT = kmock.vec{}
+end)
+
 ---------------------------------------------------------------- the runner's depot keeper
 local H = require('runner_world')
 local runner = require('dfllm.runner')

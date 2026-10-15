@@ -202,6 +202,12 @@ T.test('after a lever pull: sealed -> SEAL (B); a bypass door with O1 up -> SEAL
   T.eq(#l, 1)
   T.eq({l[1].d.pos, l[1].d.bld, l[1].d.state, l[1].d.routes, l[1].d.why}, {{30, 30, G}, 'Door', 'closed', 1, 'lever'})
   T.ok(l[1].msg:find('LEAK at 30,30,9 (Door closed)', 1, true), l[1].msg)
+  -- BUG-008: the same leak is not announced again on the next checks (it was every lever pull and every audit)
+  for _ = 1, 3 do
+    W.K.call('gate', 'fire', 'up')
+    W.run(200, {skip = 9})
+  end
+  T.eq(#evs(W, 'SEAL_LEAK'), 1, 'same leak, same state: once per episode')
 end)
 
 T.test('entrances: two openings are two independent routes; the doors on them are learned as perimeter', function()
@@ -313,6 +319,11 @@ T.test('refuge: Kern+ without drink is refused; the interior burrow Innen+ is pa
   T.eq({f[1].cls, f[1].d.burrow, f[1].d.fallback, f[1].d.mode}, {'A', 'Kern+', 'Innen+', 'ALERT'})
   W.K.call('seal', 'alert_burrow', 'ALERT', 'Kern+')
   T.eq(#evs(W, 'REFUGE_FAIL'), 1, 'once per change and day')
+  -- BUG-008: an unchanged refusal is not repeated after a game day (3 s at timestream speed) nor after 10 min
+  W.run(1300, {skip = 9})
+  W.ms = W.ms + 700 * 1000
+  W.K.call('seal', 'alert_burrow', 'ALERT', 'Kern+')
+  T.eq(#evs(W, 'REFUGE_FAIL'), 1, 'unchanged condition: never repeated')
   local st = W.state().alert
   T.eq({st.want, st.burrow, st.tiles, st.inside, st.ok}, {'Kern+', 'Innen+', 101, 5, 0})
 end)

@@ -64,7 +64,10 @@
 --   * suspended ConstructBuilding jobs (daily): the ones nobody keeps suspended (suspendmanager's
 --     preventblocking, buildingplan's planned buildings) are resumed (act.job_resume), the rest reported by
 --     reason (JOBS_SUSPENDED, inspect workload); suspendmanager's preventblocking is the fort's decision (verb
---     jobs.release preventblocking=..., persisted), never forced by baseline;
+--     jobs.release preventblocking=..., persisted), never forced by baseline. BUG-009/004/005 (Run 9 live test):
+--     forbidden items on a building's footprint (revealed tiles) and forbidden loose items of the class a planned
+--     building waits for are unforbidden first; a resume is verified a frame later and counted per job; repeated
+--     failures raise DECISION_NEEDED build_blocked and move a stuck trade depot inside the entrance (see T.jobs);
 --   * work details keep no ids of dead or departed citizens (act.work_detail_prune), so "detail full" is true;
 --   * farm plots: every empty season slot gets a crop that grows then and there (underground crops all year),
 --     a crop with usable seeds first (act.farm_crop, the plot sheet);
@@ -77,6 +80,7 @@
 local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
 local OL = require('dfllm.orderlib')
+local CAD = require('dfllm.util.cadence')   -- BUG-008: when a standing class-A condition is announced again
 
 local M = {name = 'economy', every = {ticks = 1200}, on = {}, verbs = {}, inspect = {}, MASK_CHECK = 300,
            reports = {MIGRANT_ARRIVAL = true, MIGRANT_ARRIVAL_NAMED = true, D_MIGRANTS_ARRIVAL = true,
@@ -274,7 +278,13 @@ M.DEFAULTS = {
   orders = {stuck_days = 3, needs_drop = 10, backoff_days = 10, report_per_day = 3},
   -- FR-16: resumed per day; a job kept suspended held_days asks for the preventblocking decision;
   -- preventblocking 'keep' leaves suspendmanager's own setting until jobs.release decides
-  jobs = {release_per_day = 20, held_days = 3, preventblocking = 'keep'},
+  -- BUG-009/004/005: footprints scanned and items unforbidden per day, items read per missing class, failed resumes
+  -- before DECISION_NEEDED build_blocked and before a trade depot moves (at most every move_days); the depot site
+  -- search: move_r tiles around an entrance on its level and move_dz below, at least move_gap from every entrance,
+  -- move_probes tile reads a frame
+  jobs = {release_per_day = 20, held_days = 3, preventblocking = 'keep', sites_per_day = 40, unforbid_per_day = 60,
+          mat_scan = 2000, fail_alarm = 3, depot_move_after = 5, move_days = 28, move_r = 12, move_dz = 2,
+          move_gap = 3, move_probes = 150},
   -- FR-17 farm season slots filled per day; FR-23/FR-50/FR-25 unforbids per day (containers, seeds, food)
   farms = {per_day = 16},
   forbid = {per_day = 30},
@@ -317,7 +327,7 @@ end
 
 -- persist m.economy; maps are re-tagged as objects (a decoded empty map is an array, json.lua:104)
 local MAPS = {'imported', 'orders', 'low', 'tools', 'meta', 'needs', 'reserves', 'explore', 'ostuck', 'ocancel',
-              'badseen'}
+              'badseen', 'jres'}
 local function pstate(K)
   local p = K.persist.get('m.economy')
   if type(p) ~= 'table' then
@@ -1682,6 +1692,13 @@ local function cancel(K, ev)
   local wk = tostring(why or '?'):sub(1, 60)
   if st.why[wk] == nil and (st.why_n or 0) < 40 then st.why[wk], st.why_n = 0, (st.why_n or 0) + 1 end
   if st.why[wk] then st.why[wk] = st.why[wk] + 1 end
+  -- BUG-005: the cancel reasons of constructions by position (the daily jobs pass names the one of a stuck building)
+  local pos = ev.pos
+  if type(pos) == 'table' and int(pos.x) and job:lower():sub(1, 9) == 'construct' then
+    st.bcancel = st.bcancel or {}
+    st.bcancel[#st.bcancel + 1] = {x = int(pos.x), y = int(pos.y), z = int(pos.z), why = wk}
+    while #st.bcancel > 40 do table.remove(st.bcancel, 1) end
+  end
   local key = job:lower()
   st.cancels[key] = (st.cancels[key] or 0) + 1
   local n = st.cancels[key]
@@ -2343,11 +2360,53 @@ local function first_fn(m, names)
   end
 end
 
+-- the footprint, building type and attached items of a construction job's building (plain values)
+local function building_info(rec, j, b)
+  local ok, id = pcall(function() return b.id end)
+  rec.bld = ok and int(id) or nil
+  local okr, x1, y1, x2, y2, z = pcall(function() return b.x1, b.y1, b.x2, b.y2, b.z end)
+  if okr and int(x1) and int(y1) and int(z) then
+    rec.rect = {x1 = int(x1), y1 = int(y1), x2 = int(x2) or int(x1), y2 = int(y2) or int(y1), z = int(z)}
+  end
+  local okt, tn = pcall(function() return df.building_type[b:getType()] end)
+  rec.kind = okt and type(tn) == 'string' and tn or 'building'
+  local oks, sg = pcall(function() return b:getBuildStage() end)
+  rec.stage = oks and int(sg) or nil
+end
+
+-- BUG-004: what a planned building still waits for: its job_items without an attached item (the building sheet's
+-- "waiting for"): {{t = item type, mt, mi, n = items missing, bm = any building material}}. Quantities in dimension
+-- units (bars x150, cloth x10000) count as one item.
+local function job_missing(j)
+  local out = {}
+  pcall(function()
+    local elems = j.job_items.elements
+    local att = {}
+    for _, ref in ipairs(j.items) do
+      local idx = int(ref.job_item_idx)
+      if idx then att[idx] = (att[idx] or 0) + 1 end
+    end
+    for i, ji in ipairs(elems) do                -- DF vectors iterate from 0, as job_item_idx counts
+      local q = int(ji.quantity) or 1
+      if q > 100 then q = 1 end
+      local miss = q - (att[i] or 0)
+      if miss > 0 and #out < 8 then
+        local okb, bm = pcall(function() return ji.flags2.building_material == true end)
+        out[#out + 1] = {t = int(ji.item_type) or -1, mt = int(ji.mat_type) or -1, mi = int(ji.mat_index) or -1,
+                         n = math.min(miss, 50), bm = okb and bm or false}
+      end
+    end
+  end)
+  return out
+end
+
 -- suspended ConstructBuilding jobs: {id, why, kept = suspendmanager keeps it suspended (preventblocking, water,
--- a designation in the way), planned = buildingplan waits for its materials}. The plugins' own read API answers
--- (feature-detected); without it a job counts as neither [live-untested: 53.16 function names].
+-- a designation in the way), planned = buildingplan waits for its materials, bld, kind = building type, rect =
+-- footprint {x1, y1, x2, y2, z}, items = attached items, need = job_missing (planned ones)}, and the set of every
+-- ConstructBuilding job id. The plugins' own read API answers (feature-detected); without it a job counts as neither
+-- [live-untested: 53.16 function names].
 function M.suspended_jobs(max)
-  local list = {}
+  local list, all = {}, {}
   local sm, bp = plugin('suspendmanager'), plugin('buildingplan')
   local kept_f = first_fn(sm, {'isKeptSuspended', 'suspendmanager_isKeptSuspended'})
   local desc_f = first_fn(sm, {'suspensionDescription', 'suspendmanager_suspensionDescription', 'getSuspendReason'})
@@ -2355,31 +2414,38 @@ function M.suspended_jobs(max)
   pcall(function()
     local cb = df.job_type.ConstructBuilding
     local link, i = df.global.world.jobs.list.next, 0
-    while link and i < 50000 and #list < (max or 400) do
+    while link and i < 50000 do
       local j = link.item
-      if j and j.job_type == cb and j.flags.suspend then
-        local rec = {id = j.id, why = 'suspended'}
-        local okb, b = pcall(dfhack.job.getHolder, j)
-        if plan_f and okb and b then
-          local okp, v = pcall(plan_f, b)
-          if okp and v then rec.planned, rec.why = true, 'buildingplan: waiting for materials' end
-        end
-        if not rec.planned and kept_f then
-          local okk, v = pcall(kept_f, j)
-          if okk and v then
-            rec.kept = true
-            local okd, d = false, nil
-            if desc_f then okd, d = pcall(desc_f, j) end
-            d = okd and type(d) == 'string' and d ~= '' and dfhack.df2utf(d) or 'kept suspended'
-            rec.why = ('suspendmanager: ' .. d):sub(1, 60)
+      if j and j.job_type == cb then
+        all[j.id] = true
+        if j.flags.suspend and #list < (max or 400) then
+          local rec = {id = j.id, why = 'suspended'}
+          local okb, b = pcall(dfhack.job.getHolder, j)
+          if okb and b then building_info(rec, j, b) end
+          if plan_f and okb and b then
+            local okp, v = pcall(plan_f, b)
+            if okp and v then rec.planned, rec.why = true, 'buildingplan: waiting for materials' end
           end
+          if not rec.planned and kept_f then
+            local okk, v = pcall(kept_f, j)
+            if okk and v then
+              rec.kept = true
+              local okd, d = false, nil
+              if desc_f then okd, d = pcall(desc_f, j) end
+              d = okd and type(d) == 'string' and d ~= '' and dfhack.df2utf(d) or 'kept suspended'
+              rec.why = ('suspendmanager: ' .. d):sub(1, 60)
+            end
+          end
+          local oki, n = pcall(function() return #j.items end)
+          rec.items = oki and int(n) or 0
+          if rec.planned then rec.need = job_missing(j) end
+          list[#list + 1] = rec
         end
-        list[#list + 1] = rec
       end
       link, i = link.next, i + 1
     end
   end)
-  return list
+  return list, all
 end
 
 -- the preventblocking decision: the verb's persisted choice, else the config default ('keep' = none)
@@ -2623,6 +2689,9 @@ function T.engine(K, c, r)
   local okm, out = K.act.run('labormanager', 'mode')
   r.cmds = r.cmds + 1
   st.engine = okm and (tostring(out):lower():find('modern', 1, true) and 'modern' or 'other') or nil
+  -- BUG-010: the daily read names the legacy engine (the Run 9 crash engine): baseline's guard switches it off
+  local okp, eng = K.call('baseline', 'engine_of', okm and out or '')
+  if okp and eng == 'legacy' then K.call('baseline', 'legacy_guard', 'economy daily') end
 end
 
 function T.labor_fix(K, c, r)
@@ -3024,43 +3093,550 @@ function T.ocheck(K, c, r)
   return true
 end
 
--- FR-16 (daily, PEACE/RECOVERY): resume suspended construction jobs nobody keeps suspended; report the rest
+-- FR-16 (daily): suspended ConstructBuilding jobs. BUG-009/004/005 (Run 9 live test: 25 construction jobs suspended
+-- for 30+ real minutes, every caravan lost; "resumed 2" every day while DF suspended them again within 5 s): the
+-- builder cancels "Item blocking site" when a forbidden item lies on the footprint (nobody hauls a forbidden item
+-- away), and buildingplan waits for materials that lie forbidden. Steps over frames:
+--   jobs     the list (M.suspended_jobs) and the per-job records p.jres: a job resumed earlier and found suspended
+--            again counts a resume that did not hold (live: DF suspended them again ~2,000 ticks after a resume, so
+--            a job seen unsuspended at one pass proves nothing); a build stage that advanced resets the count;
+--            records of jobs that are gone (built, removed) drop out
+--   jsite    per job with a footprint, one a frame (PEACE/RECOVERY): the items on its revealed tiles
+--            (snapshot.items_at). Forbidden ones are unforbidden; skipped: the job's own materials, merchant goods,
+--            care's mood-reserve holds (care lets go of one on a site itself), corpses and dead dwarves' items
+--            (burial's); everything else is counted as other
+--   jmat     per planned building: its job_items without an item; forbidden loose items of that class on revealed
+--            tiles of the citizens' walk group are unforbidden (as many as missing), else the class is missing
+--   jfree    the unforbids, one item_flag a frame (jobs.unforbid_per_day)
+--   jresume  act.job_resume of the jobs nobody keeps suspended (PEACE/RECOVERY)
+--   jcheck   a frame later: a job suspended again is no resume but a failed one; JOBS_SUSPENDED (B) when the
+--            numbers change, with the reason (`item blocking site: N forbidden, M other`); jobs.fail_alarm failed
+--            resumes -> DECISION_NEEDED build_blocked (A, util/cadence); a trade depot after depot_move_after:
+--            a new site (jmove)
+--   jmove    the depot site search (sliced), then runner.depot_move
+local CORPSE_T = {CORPSE = true, CORPSEPIECE = true}
+local MAT_BUSY = {'in_job', 'in_building', 'trader', 'removed', 'garbage_collect', 'construction', 'hostile',
+                  'in_inventory', 'dump', 'melt', 'owned', 'artifact', 'encased', 'spider_web', 'dead_dwarf'}
+local function tname(it)
+  local ok, t = pcall(function() return df.item_type[it:getType()] end)
+  return ok and t or nil
+end
+
+local function held_set(K, jb)
+  if not jb.held then
+    local ok, h = K.call('care', 'held_ids')
+    jb.held = ok and type(h) == 'table' and h or {}
+  end
+  return jb.held
+end
+
+local function queue_free(jb, id, why)
+  if jb.queued[id] then return end
+  jb.queued[id] = true
+  jb.frees[#jb.frees + 1] = {id = id, why = why}
+end
+
+-- the items on one footprint: counted and queued (no write here)
+local function site_items(K, jb, j, items)
+  local s = {forb = 0, other = 0, corpse = 0, held = 0}
+  local held = held_set(K, jb)
+  for _, e in ipairs(items) do
+    local it = df.item.find(int(e[1]) or -1)
+    local f = it and it.flags
+    if f and not (f.in_job or f.in_building or f.trader or f.removed or f.garbage_collect or f.construction) then
+      if CORPSE_T[tname(it) or ''] or f.dead_dwarf then s.corpse = s.corpse + 1
+      elseif held[it.id] then s.held = s.held + 1
+      elseif f.forbid then
+        s.forb = s.forb + 1
+        queue_free(jb, it.id, 'site')
+      else s.other = s.other + 1 end
+    end
+  end
+  j.site = s
+  jb.forb, jb.other = jb.forb + s.forb, jb.other + s.other + s.corpse + s.held
+  jb.corpse, jb.held_n = jb.corpse + s.corpse, jb.held_n + s.held
+end
+
+-- the reason of one job in words (JOBS_SUSPENDED, build_blocked, inspect workload, trade's DEPOT_MISSING)
+local function job_why(j)
+  local s = j.site
+  if s and s.forb + s.other + s.corpse + s.held > 0 then
+    local more = {}
+    if s.corpse > 0 then more[#more + 1] = s.corpse .. ' corpse' end
+    if s.held > 0 then more[#more + 1] = s.held .. ' mood reserve' end
+    return string.format('item blocking site: %d forbidden, %d other%s%s', s.forb, s.other + s.corpse + s.held,
+                         #more > 0 and (' (' .. table.concat(more, ', ') .. ')') or '',
+                         j.cancel and ('; cancelled: ' .. j.cancel) or '')
+  end
+  if j.planned and j.mat and j.mat ~= '' then return 'waiting for ' .. j.mat end
+  if j.cancel then return 'cancelled: ' .. j.cancel end
+  return j.why
+end
+
+-- the latest CANCEL_JOB report of a construction within one tile of the footprint (st.bcancel, newest last)
+local function cancel_at(rc)
+  if not rc then return nil end
+  for i = #(st.bcancel or {}), 1, -1 do
+    local e = st.bcancel[i]
+    if e.z == rc.z and e.x >= rc.x1 - 1 and e.x <= rc.x2 + 1 and e.y >= rc.y1 - 1 and e.y <= rc.y2 + 1 then
+      return e.why
+    end
+  end
+end
+
 function T.jobs(K, c, r)
   local jc = c.jobs or M.DEFAULTS.jobs
   local p = r.p
-  local list = M.suspended_jobs(400)
-  local ids, cnt, kept, planned = {}, {}, 0, 0
+  local list, all = M.suspended_jobs(400)
+  local jb = {list = list, i = 0, frees = {}, queued = {}, kept = 0, planned = 0, forb = 0, other = 0,
+              corpse = 0, held_n = 0, freed = 0, freed_by = {}, sites = 0, mats = {}, mq = nil, mi = 0,
+              writes = HUNT_MODES[K.mode()] == true, tried = {}}
+  r.jb = jb
+  for key in pairs(p.jres) do
+    local id = int(key)
+    if not (id and all[id]) then p.jres[key] = nil end               -- built, removed or cancelled
+  end
   for _, j in ipairs(list) do
-    cnt[j.why] = (cnt[j.why] or 0) + 1
-    if j.planned then planned = planned + 1
-    elseif j.kept then kept = kept + 1
-    elseif #ids < (jc.release_per_day or 20) then ids[#ids + 1] = j.id end
+    local rec = p.jres[tostring(j.id)]
+    if type(rec) == 'table' then
+      if j.stage and int(rec.st) and j.stage > int(rec.st) then rec.n = 0 end   -- the building advanced
+      if rec.pend == 1 then rec.n, rec.pend = (int(rec.n) or 0) + 1, 0 end    -- resumed earlier, suspended again
+    end
+    j.cancel = cancel_at(j.rect)
+    if j.planned then jb.planned = jb.planned + 1 elseif j.kept then jb.kept = jb.kept + 1 end
   end
-  local released = 0
-  if #ids > 0 and HUNT_MODES[K.mode()] then
-    r.cmds = r.cmds + 1
-    local ok, nr = K.act.job_resume(ids)
-    released = ok and (math.tointeger(nr) or 0) or 0
+  K.persist.touch('m.economy')
+  return true
+end
+
+function T.jsite(K, c, r)
+  local jb, jc = r.jb, c.jobs or M.DEFAULTS.jobs
+  if not jb or not jb.writes then return true end
+  while jb.i < #jb.list do
+    jb.i = jb.i + 1
+    local j, rc = jb.list[jb.i], jb.list[jb.i].rect
+    if rc and jb.sites < (jc.sites_per_day or 40) then
+      jb.sites = jb.sites + 1
+      local ok, items = K.call('snapshot', 'items_at', rc.x1, rc.y1, rc.x2, rc.y2, rc.z)
+      if ok and type(items) == 'table' then site_items(K, jb, j, items) end
+      r.cmds = r.cmds + 1                                             -- one footprint a frame
+      if jb.i < #jb.list then return false end
+    end
   end
-  local why = why_line(cnt, 3)
-  local sig = string.format('%d/%d/%d', #list, kept, planned)
-  if released > 0 or (sig ~= st.jobs_sig and #list > 0) then
-    K.emit('JOBS_SUSPENDED', 'B', string.format('construction jobs: %d suspended, %d resumed, %d kept, %d planned (%s)',
-                                                #list, released, kept, planned, why):sub(1, 200),
-           {suspended = #list, released = released, kept = kept, planned = planned, why = why:sub(1, 200)})
+  return true
+end
+
+-- one class a planned building waits for: the items.other vectors and a label
+local BM_VECS = {'BOULDER', 'BLOCKS', 'WOOD', 'BAR'}
+local function need_class(nd)
+  if nd.t >= 0 then
+    local n = df.item_type[nd.t]
+    if type(n) == 'string' then return {n}, n:lower() end
+  elseif nd.bm then return BM_VECS, 'building material' end
+end
+
+-- one usable loose item of a class: {free = not forbidden, take = forbidden and fit to unforbid}
+local function mat_item(K, jb, it, nd)
+  local f = it.flags
+  for _, k in ipairs(MAT_BUSY) do if f[k] then return nil end end
+  if nd.mt >= 0 and (it.mat_type ~= nd.mt or (nd.mi >= 0 and it.mat_index ~= nd.mi)) then return nil end
+  if CORPSE_T[tname(it) or ''] then return nil end
+  if not f.forbid then return 'free' end
+  if held_set(K, jb)[it.id] or jb.queued[it.id] then return nil end
+  local x, y, z = dfhack.items.getPosition(it)
+  if not x or not known_tile(K, x, y, z) or far(K, x, y, z) then return nil end
+  return 'take'
+end
+
+function T.jmat(K, c, r)
+  local jb, jc = r.jb, c.jobs or M.DEFAULTS.jobs
+  if not jb then return true end
+  if not jb.mq then                                   -- the classes the planned buildings wait for, summed
+    jb.mq = {}
+    local by = {}
+    for _, j in ipairs(jb.list) do
+      local labels = {}
+      for _, nd in ipairs(j.need or {}) do
+        local vecs, label = need_class(nd)
+        label = label or 'item'
+        labels[#labels + 1] = string.format('%s x%d', label, nd.n)
+        if vecs then
+          local key = string.format('%s:%d:%d', label, nd.mt, nd.mi)
+          local q = by[key]
+          if not q then
+            q = {key = key, label = label, vecs = vecs, mt = nd.mt, mi = nd.mi, n = 0, free = 0, forb = 0, jobs = {}}
+            by[key] = q
+            jb.mq[#jb.mq + 1] = q
+          end
+          q.n = q.n + nd.n
+          q.jobs[#q.jobs + 1] = j
+        end
+      end
+      j.mat = table.concat(labels, ', ')
+    end
+    table.sort(jb.mq, function(a, b) return a.key < b.key end)
+  end
+  jb.mi = jb.mi + 1
+  local q = jb.mq[jb.mi]
+  if not q then return true end
+  local budget, take = jc.mat_scan or 2000, 0
+  for _, vn in ipairs(q.vecs) do
+    local okv, v = pcall(function() return df.global.world.items.other[vn] end)
+    for _, it in ipairs(okv and v or {}) do
+      if budget <= 0 then break end
+      budget = budget - 1
+      local ok, kind = pcall(mat_item, K, jb, it, q)
+      if ok and kind == 'free' then q.free = q.free + 1
+      elseif ok and kind == 'take' then
+        q.forb = q.forb + 1
+        if jb.writes and take < q.n then
+          take = take + 1
+          queue_free(jb, it.id, 'material')
+        end
+      end
+    end
+  end
+  local tail = q.forb > 0 and string.format(' (%d forbidden%s)', q.forb, jb.writes and ', unforbidding' or '')
+               or (q.free > 0 and string.format(' (%d free)', q.free) or ' (none in reach: missing)')
+  for _, j in ipairs(q.jobs) do j.mat = (j.mat or '') .. tail end
+  if q.forb == 0 and q.free == 0 then jb.mats[#jb.mats + 1] = string.format('%s x%d', q.label, q.n) end
+  r.cmds = r.cmds + 1                                 -- one class a frame
+  return jb.mi >= #jb.mq
+end
+
+function T.jfree(K, c, r)
+  local jb, jc = r.jb, c.jobs or M.DEFAULTS.jobs
+  if not jb or not jb.writes then return true end
+  local lim = jc.unforbid_per_day or 60
+  while #jb.frees > 0 and jb.freed < lim do
+    local e = table.remove(jb.frees, 1)
+    local it = df.item.find(e.id)
+    if it and it.flags.forbid then
+      r.cmds = r.cmds + 1
+      if K.act.item_flag(e.id, 'forbid', false) then
+        jb.freed = jb.freed + 1
+        jb.freed_by[e.why] = (jb.freed_by[e.why] or 0) + 1
+      end
+      return #jb.frees == 0 or jb.freed >= lim
+    end
+  end
+  return true
+end
+
+function T.jresume(K, c, r)
+  local jb, jc = r.jb, c.jobs or M.DEFAULTS.jobs
+  if not jb then return true end
+  for _, j in ipairs(jb.list) do
+    if not j.planned and not j.kept and #jb.tried < (jc.release_per_day or 20) then jb.tried[#jb.tried + 1] = j.id end
+  end
+  if #jb.tried > 0 and jb.writes then
+    r.cmds = r.cmds + 1                               -- jcheck reads the flags in the next frame
+    local ok, n = K.act.job_resume(jb.tried)
+    jb.sent = ok and (int(n) or 0) or 0
+  else
+    jb.tried = {}
+  end
+  return true
+end
+
+-- the flags of these construction jobs now: {[id] = true} for the suspended ones
+local function suspended_now(ids)
+  local want, out = {}, {}
+  for _, id in ipairs(ids) do want[id] = true end
+  if next(want) == nil then return out end
+  pcall(function()
+    local link, i = df.global.world.jobs.list.next, 0
+    while link and i < 50000 do
+      local j = link.item
+      if j and want[j.id] and j.flags.suspend then out[j.id] = true end
+      link, i = link.next, i + 1
+    end
+  end)
+  return out
+end
+
+-- a trade depot that keeps failing (BUG-005): a new site, at most every move_days, PEACE only, and only without a
+-- fortcore manifest depot (the bailey is the design there: the operator decides)
+local function depot_move_due(K, jc, p, j, rec)
+  if j.kind ~= 'TradeDepot' or (int(rec.n) or 0) < (jc.depot_move_after or 5) or K.mode() ~= 'PEACE' then return false end
+  if type(K.manifest().depot) == 'table' then return false end
+  local t = int(p.depot_moved)
+  return t == nil or K.now().tick - t >= (jc.move_days or 28) * DAY
+end
+
+function T.jcheck(K, c, r)
+  local jb, jc, p = r.jb, c.jobs or M.DEFAULTS.jobs, r.p
+  if not jb then return true end
+  local now = K.now().tick
+  local again = suspended_now(jb.tried)
+  local resumed, failed = 0, 0
+  local tried = {}
+  for _, id in ipairs(jb.tried) do tried[id] = true end
+  st.jinfo = {}
+  local blocked, toks, why_cnt = {}, {}, {}
+  for _, j in ipairs(jb.list) do
+    local key = tostring(j.id)
+    local rec = p.jres[key]
+    if type(rec) ~= 'table' then rec = {n = 0, r = 0, t = now}; p.jres[key] = rec end
+    rec.k, rec.b, rec.st = j.kind or 'building', j.bld or -1, j.stage
+    if j.rect then rec.x, rec.y, rec.z = j.rect.x1, j.rect.y1, j.rect.z end
+    if tried[j.id] then
+      rec.r = (int(rec.r) or 0) + 1
+      if again[j.id] then rec.n, failed = (int(rec.n) or 0) + 1, failed + 1   -- suspended again within a frame
+      else rec.pend, resumed = 1, resumed + 1 end
+    end
+    local why = job_why(j)
+    rec.why = why:sub(1, 80)
+    local kind = j.planned and 'buildingplan: waiting for materials' or (j.site and (j.site.forb + j.site.other +
+                 j.site.corpse + j.site.held) > 0 and 'item blocking site') or (j.cancel and 'cancelled: ' .. j.cancel)
+                 or j.why
+    why_cnt[kind:sub(1, 60)] = (why_cnt[kind:sub(1, 60)] or 0) + 1
+    if j.bld then st.jinfo[j.bld] = {fails = int(rec.n) or 0, resumes = int(rec.r) or 0, why = rec.why, kind = rec.k} end
+    if (int(rec.n) or 0) >= (jc.fail_alarm or 3) then
+      blocked[#blocked + 1] = {j = j, rec = rec}
+      local tk = why:match('^([%a ]+)') or why
+      toks[#toks + 1] = (tk:gsub('%s+$', ''))
+      if not jb.move and depot_move_due(K, jc, p, j, rec) then jb.move = {j = j, rec = rec} end
+    end
+  end
+  K.persist.touch('m.economy')
+  -- JOBS_SUSPENDED (B): when the numbers or the reasons change, never the same line every day
+  local why = why_line(why_cnt, 3)
+  local extra = ''
+  if jb.forb + jb.other > 0 then
+    extra = string.format('; on the sites %d forbidden (%d unforbidden), %d other', jb.forb, jb.freed_by.site or 0,
+                          jb.other)
+  end
+  if (jb.freed_by.material or 0) > 0 then extra = extra .. string.format('; %d materials unforbidden', jb.freed_by.material) end
+  if #jb.mats > 0 then extra = extra .. '; missing ' .. table.concat(jb.mats, ', ') end
+  local sig = string.format('%d/%d/%d/%d/%d/%d/%s', #jb.list, resumed, failed, jb.kept, jb.planned, #blocked, why .. extra)
+  if sig ~= st.jobs_sig and (#jb.list > 0 or resumed > 0) then
+    K.emit('JOBS_SUSPENDED', 'B', string.format('construction jobs: %d suspended, %d resumed, %d suspended again, %d kept, '
+                                                .. '%d planned (%s)%s', #jb.list, resumed, failed, jb.kept, jb.planned,
+                                                why, extra):sub(1, 200),
+           {suspended = #jb.list, released = resumed, resuspended = failed, kept = jb.kept, planned = jb.planned,
+            why = why:sub(1, 200), forbidden = jb.forb, other = jb.other, unforbidden = jb.freed,
+            missing = table.concat(jb.mats, ', '):sub(1, 200), blocked = #blocked})
   end
   st.jobs_sig = sig
-  st.jobs = {suspended = #list, released = released, kept = kept, planned = planned, why = cnt}
-  -- jobs suspendmanager keeps suspended for held_days: preventblocking is the fort's decision (weekly ask)
-  if kept > 0 then p.held = p.held or r.now else p.held = nil end
-  local held = p.held and (r.now - p.held) // DAY or 0
-  if p.held and held >= (jc.held_days or 3) and pb_choice(c, p) ~= 'off' and r.now - (p.held_woke or -1e12) >= 7 * DAY then
-    p.held_woke = r.now
-    K.emit('DECISION_NEEDED', 'A', string.format('%d construction jobs kept suspended by suspendmanager for %d days',
-                                                 kept, held),
-           {id = 'preventblocking', q = string.format('%d jobs kept suspended (%s): jobs.release {"preventblocking":false} ' ..
-                                                      'lets them build, or remove what blocks them?', kept, why):sub(1, 200)})
+  local list = {}
+  for i = 1, math.min(8, #blocked) do
+    local b = blocked[i]
+    list[i] = {job = b.j.id, kind = b.rec.k, pos = b.j.rect and {b.j.rect.x1, b.j.rect.y1, b.j.rect.z} or nil,
+               fails = int(b.rec.n) or 0, why = b.rec.why}
   end
+  st.jobs = {suspended = #jb.list, released = resumed, resuspended = failed, kept = jb.kept, planned = jb.planned,
+             why = why_cnt, forbidden = jb.forb, other = jb.other, unforbidden = jb.freed, missing = jb.mats,
+             blocked = list}
+  -- DECISION_NEEDED build_blocked (A): jobs whose resumes did not hold fail_alarm times, with the reason; again only
+  -- for another job or reason, not before max(7 game days, 10 min wall clock) (BUG-008 rule)
+  if #blocked > 0 then
+    local ids = {}
+    for i, b in ipairs(blocked) do ids[i] = b.j.id end
+    table.sort(toks)
+    local T0 = K.now()
+    if CAD.due(p.jblk, T0, ids, toks) then
+      p.jblk = CAD.mark(T0, ids, toks)
+      local b = blocked[1]
+      local at = b.j.rect and string.format(' at %d,%d,%d', b.j.rect.x1, b.j.rect.y1, b.j.rect.z) or ''
+      local q = string.format('%d construction job(s) suspended again after %d+ resumes: %s%s (%s)%s; inspect workload, '
+                              .. 'remove the blocker or bp.cancel and place it elsewhere', #blocked, jc.fail_alarm or 3,
+                              b.rec.k, at, b.rec.why, #blocked > 1 and string.format(' and %d more', #blocked - 1) or '')
+      K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), {id = 'build_blocked', q = q:sub(1, 200), n = #blocked, jobs = ids})
+    end
+  else
+    p.jblk = CAD.quiet(p.jblk)
+  end
+  -- jobs suspendmanager keeps suspended for held_days: preventblocking is the fort's decision; asked once, again
+  -- only when more jobs are kept, not before max(7 game days, 10 min wall clock) (BUG-008 rule)
+  if jb.kept > 0 then p.held = p.held or r.now else p.held = nil end
+  local held = p.held and (r.now - p.held) // DAY or 0
+  local kept_ids = {}
+  for _, j in ipairs(jb.list) do if j.kept then kept_ids[#kept_ids + 1] = j.id end end
+  local T1 = K.now()
+  local last = p.held_woke and {t = p.held_woke, w = p.held_woke_w, ids = p.held_ids or {}, toks = {}} or nil
+  if p.held and held >= (jc.held_days or 3) and pb_choice(c, p) ~= 'off' and CAD.due(last, T1, kept_ids, {}) then
+    p.held_woke, p.held_woke_w, p.held_ids = r.now, T1.wall, kept_ids
+    K.emit('DECISION_NEEDED', 'A', string.format('%d construction jobs kept suspended by suspendmanager for %d days',
+                                                 jb.kept, held),
+           {id = 'preventblocking', q = string.format('%d jobs kept suspended (%s): jobs.release {"preventblocking":false} ' ..
+                                                      'lets them build, or remove what blocks them?', jb.kept, why):sub(1, 200)})
+  end
+  return true
+end
+
+-- BUG-005 (Run 9: the depot site at the shaft head, where armies and wild animals pass, never got built and four
+-- caravans left without trade): after depot_move_after failed resumes the depot moves inside the entrance, off the
+-- army route. The new 5x5 footprint lies inside a free ring (7x7 of revealed roofed floor without designation or
+-- building), at least move_gap tiles from every entrance and from the manifest's approach (outer bridges, Z1/Z2,
+-- kill boxes, edge), on the citizens' walk group and reachable from its entrance, with no item on it. Searched: up
+-- to two entrances (seal.entrances), move_r tiles around each on its level and move_dz levels below, move_probes
+-- tile reads a frame; the fit nearest to its entrance wins, then runner.depot_move removes the stuck depot and
+-- queues the new one.
+local function approach_of(m)
+  local boxes = {}
+  for _, b in pairs(type(m.bridges) == 'table' and m.bridges or {}) do
+    if type(b) == 'table' and b.role == 'outer' and type(b.fp) == 'table' then boxes[#boxes + 1] = b.fp end
+  end
+  for _, k in ipairs({'Z1', 'Z2'}) do
+    for _, bb in ipairs((type(m.zones) == 'table' and m.zones[k]) or {}) do boxes[#boxes + 1] = bb end
+  end
+  for _, kb in ipairs(type(m.killboxes) == 'table' and m.killboxes or {}) do
+    if type(kb) == 'table' and type(kb.bbox) == 'table' then boxes[#boxes + 1] = kb.bbox end
+  end
+  for _, e in ipairs(type(m.edge) == 'table' and m.edge or {}) do
+    if type(e) == 'table' and int(e[1]) then boxes[#boxes + 1] = {e[1], e[2], e[3], e[1], e[2], e[3]} end
+  end
+  return boxes
+end
+
+-- the 5x5 footprint centred on (cx, cy) keeps gap tiles from every entrance and approach box (one z either way)
+local function off_route(mv, cx, cy, z, gap)
+  for _, e in ipairs(mv.all) do
+    if math.abs(e[3] - z) <= 1 and math.max(math.abs(e[1] - cx), math.abs(e[2] - cy)) - 2 < gap then return false end
+  end
+  for _, b in ipairs(mv.boxes) do
+    local x0, y0, z0, x1, y1, z1 = int(b[1]), int(b[2]), int(b[3]), int(b[4]), int(b[5]), int(b[6])
+    if x0 and y0 and z0 and x1 and y1 and z1 and z >= z0 - 1 and z <= z1 + 1 and cx + 2 >= x0 - gap
+       and cx - 2 <= x1 + gap and cy + 2 >= y0 - gap and cy - 2 <= y1 + gap then return false end
+  end
+  return true
+end
+
+-- the 7x7 free squares of a scanned level as candidates {x, y, z, d, e}
+local function level_sites(mv, L, gap)
+  local ok = function(i, j) return i >= 0 and j >= 0 and i < L.w and j < L.h and L.g[j * L.w + i] == true end
+  for j = 3, L.h - 4 do
+    for i = 3, L.w - 4 do
+      local fit = true
+      for dj = -3, 3 do
+        for di = -3, 3 do if not ok(i + di, j + dj) then fit = false; break end end
+        if not fit then break end
+      end
+      local cx, cy = L.x0 + i, L.y0 + j
+      if fit and off_route(mv, cx, cy, L.z, gap) then
+        mv.cands[#mv.cands + 1] = {cx, cy, L.z, d = math.max(math.abs(cx - L.e[1]), math.abs(cy - L.e[2]))
+                                   + 8 * math.abs(L.z - L.e[3]), e = L.e}
+      end
+    end
+  end
+end
+
+local function move_done(K, jc, r)
+  local jb, p = r.jb, r.p
+  local mv, mvj = jb.mv or {}, jb.move
+  local now = K.now().tick
+  p.depot_try = now
+  table.sort(mv.cands or {}, function(a, b)
+    if a.d ~= b.d then return a.d < b.d end
+    if a[3] ~= b[3] then return a[3] > b[3] end
+    if a[2] ~= b[2] then return a[2] < b[2] end
+    return a[1] < b[1]
+  end)
+  local pick
+  for i, cnd in ipairs(mv.cands or {}) do
+    if i > 6 then break end
+    local okf, isfar = K.call('snapshot', 'far', cnd[1], cnd[2], cnd[3])
+    local okr, reach = K.call('snapshot', 'reach', {x = cnd.e[1], y = cnd.e[2], z = cnd.e[3]},
+                              {x = cnd[1], y = cnd[2], z = cnd[3]})
+    local oki, items = K.call('snapshot', 'items_at', cnd[1] - 2, cnd[2] - 2, cnd[1] + 2, cnd[2] + 2, cnd[3])
+    if not (okf and isfar == true) and not (okr and reach == false) and not (oki and type(items) == 'table' and #items > 0) then
+      pick = cnd
+      break
+    end
+  end
+  local rc = mvj.j.rect
+  local from = rc and string.format('%d,%d,%d', rc.x1 + 2, rc.y1 + 2, rc.z) or '?'
+  if not pick then
+    local why = mv.fail or string.format('no free 7x7 roofed floor within %d tiles of %d entrance(s)', jc.move_r or 12,
+                                         #(mv.ents or {}))
+    st.depot_move = {from = from, ok = 0, why = why}
+    K.log('warn', 'trade depot at %s stuck after %d failed resumes (%s): no new site: %s', from, int(mvj.rec.n) or 0,
+          mvj.rec.why or '?', why)
+    return true
+  end
+  local okc, ok, res = K.call('runner', 'depot_move', {pick[1], pick[2], pick[3]},
+                              string.format('stuck after %d failed resumes: %s', int(mvj.rec.n) or 0, mvj.rec.why or '?'),
+                              rc and {rc.x1, rc.y1, rc.z} or nil)
+  if okc and ok then
+    p.depot_moved = now
+    st.depot_move = {from = from, to = string.format('%d,%d,%d', pick[1], pick[2], pick[3]), ok = 1,
+                     proj = tostring(res)}
+    K.log('warn', 'trade depot moved from %s to %d,%d,%d (%s): %s', from, pick[1], pick[2], pick[3], tostring(res),
+          mvj.rec.why or '?')
+  else
+    st.depot_move = {from = from, ok = 0, why = tostring(okc and res or ok)}
+    K.log('warn', 'trade depot move from %s failed: %s', from, tostring(okc and res or ok))
+  end
+  return true
+end
+
+function T.jmove(K, c, r)
+  local jb, jc, p = r.jb, c.jobs or M.DEFAULTS.jobs, r.p
+  if not jb or not jb.move then return true end
+  if not jb.mv then
+    if int(p.depot_try) and K.now().tick - int(p.depot_try) < 7 * DAY then return true end   -- a search found nothing lately
+    local okc, ents = K.call('seal', 'entrances')
+    local mv = {ents = {}, all = {}, q = {}, qi = 1, cands = {}, boxes = approach_of(K.manifest())}
+    for _, e in ipairs(okc and type(ents) == 'table' and ents or {}) do
+      local x, y, z = int(type(e) == 'table' and e[1]), int(type(e) == 'table' and e[2]), int(type(e) == 'table' and e[3])
+      if x and y and z then
+        mv.all[#mv.all + 1] = {x, y, z}
+        if #mv.ents < 2 then mv.ents[#mv.ents + 1] = {x, y, z} end
+      end
+    end
+    for _, e in ipairs(mv.ents) do
+      for dz = 0, -(jc.move_dz or 2), -1 do mv.q[#mv.q + 1] = {e = e, z = e[3] + dz} end
+    end
+    if #mv.ents == 0 then mv.fail = 'no entrance known (seal.entrances)' end
+    jb.mv = mv
+  end
+  local mv = jb.mv
+  local L = mv.L
+  if not L then
+    local q = mv.q[mv.qi]
+    if not q then return move_done(K, jc, r) end
+    local R = jc.move_r or 12
+    L = {x0 = q.e[1] - R, y0 = q.e[2] - R, w = 2 * R + 1, h = 2 * R + 1, z = q.z, e = q.e, g = {}, j = 0}
+    mv.L = L
+  end
+  local probes = jc.move_probes or 150
+  while L.j < L.h and probes > 0 do
+    local y, row = L.y0 + L.j, {}
+    for i = 0, L.w - 1 do
+      local ok, t = K.call('snapshot', 'tile', L.x0 + i, y, L.z)
+      if not ok then
+        mv.fail, mv.qi, mv.L = 'no tile reader', #mv.q + 1, nil
+        r.cmds = r.cmds + 1
+        return false
+      end
+      if type(t) == 'table' and t.c == '.' and (t.dig or '') == '' and (t.bld or '') == '' then row[#row + 1] = i end
+    end
+    probes = probes - L.w
+    if #row > 0 then                                  -- roofed floor only (one open-sky query per row)
+      local pts = {}
+      for k, i in ipairs(row) do pts[k] = {L.x0 + i, y, L.z} end
+      local ok, res = K.call('snapshot', 'outside_near', pts, 0)
+      for k = 1, #row do
+        if not (ok and type(res) == 'table' and res[k] == 0) then row[k] = false end
+      end
+    end
+    for _, i in ipairs(row) do if i then L.g[L.j * L.w + i] = true end end
+    L.j = L.j + 1
+  end
+  r.cmds = r.cmds + 1                                 -- move_probes tile reads a frame
+  if L.j < L.h then return false end
+  level_sites(mv, L, jc.move_gap or 3)
+  mv.L, mv.qi = nil, mv.qi + 1
+  return false
+end
+
+-- public (K.call, trade's DEPOT_MISSING): the last daily pass on the construction job of building bld_id:
+-- {fails = resumes that did not hold, resumes, why, kind} or nil when it was not suspended then
+function M.build_info(K, bld_id)
+  local e = (st.jinfo or {})[int(bld_id) or -1]
+  if not e then return nil end
+  return {fails = e.fails, resumes = e.resumes, why = e.why, kind = e.kind}
 end
 
 -- the fort's preventblocking decision applied once per boot (suspendmanager set preventblocking ...)
@@ -3274,7 +3850,8 @@ function T.finish(K, c, r)
 end
 
 local FULL = {'guard', 'days', 'kitchen', 'appoint', 'food', 'watch', 'cmdq', 'engine', 'labor_fix', 'scan', 'ocheck',
-              'slaughter', 'plan', 'prune', 'tools', 'starve', 'forbid', 'jobs', 'pb', 'orders', 'wood', 'chop', 'crops',
+              'slaughter', 'plan', 'prune', 'tools', 'starve', 'forbid', 'jobs', 'jsite', 'jmat', 'jfree', 'jresume',
+              'jcheck', 'jmove', 'pb', 'orders', 'wood', 'chop', 'crops',
               'farm', 'farmslots', 'imports', 'piles', 'status', 'idle', 'finish'}
 local RUSH = {'guard', 'scan', 'plan', 'tools', 'orders', 'wood', 'chop', 'farm', 'finish'}
 M.TASKS = {full = FULL, rush = RUSH}
@@ -3528,8 +4105,9 @@ M.verbs['jobs.release'] = function(K, args, cmd)
     local ok, res = K.act.job_resume(ids)
     n = ok and (math.tointeger(res) or 0) or 0
   end
-  msg[#msg + 1] = string.format('resumed %d of %d suspended construction jobs (kept %d, planned %d)', n, #list, kept,
-                                planned)
+  msg[#msg + 1] = string.format('resumed %d of %d suspended construction jobs (kept %d, planned %d; unverified: the '
+                                .. 'daily pass unforbids items on the sites and checks the resumes a frame later)', n,
+                                #list, kept, planned)
   if args.all == true and pb_choice(M.conf(K), p) ~= 'off' and n > 0 then
     msg[#msg + 1] = 'suspendmanager may suspend blocking ones again (preventblocking on)'
   end
@@ -3630,8 +4208,11 @@ M.inspect.workload = function(K, args)
   local inv = K.census.i or {}
   local names = {}
   for i = 1, math.min(10, #idle) do names[i] = {id = idle[i], name = unit_name(idle[i]):sub(1, 40)} end
-  local jobs = st.jobs and {suspended = st.jobs.suspended, released = st.jobs.released, kept = st.jobs.kept,
-                            planned = st.jobs.planned, why = top(st.jobs.why, 5)} or json.object{}
+  local sj = st.jobs
+  local jobs = sj and {suspended = sj.suspended, released = sj.released, kept = sj.kept, planned = sj.planned,
+                       why = top(sj.why, 5), resuspended = sj.resuspended or 0, forbidden = sj.forbidden or 0,
+                       other = sj.other or 0, unforbidden = sj.unforbidden or 0, missing = json.array(sj.missing or {}),
+                       blocked = json.array(sj.blocked or {}), depot_move = st.depot_move} or json.object{}
   local sv = st.starve
   local data = {adults = adults, idle = #idle, idle_units = names, jobs = total, suspended = sus,
                 unclaimed = unclaimed, cancels = top(why, 8),

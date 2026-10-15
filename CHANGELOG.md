@@ -1,5 +1,23 @@
 # CHANGELOG dfpilot
 
+## Live-test bugs BUG-003/004/005/008/009/010 (2026-10-15; commits b01bec4, 7006350, 9b9dcdc, 1d9b6a9; offline, live-untested)
+- **BUG-009/004/005 (nothing got built, every caravan lost):** economy's daily FR-16 pass unforbids forbidden items on
+  the footprints of suspended constructions (new `snapshot.items_at`, revealed tiles; mood reserve, corpses, dead
+  dwarves' items skipped) and forbidden loose items of the class a planned building waits for, verifies each resume a
+  frame later, counts failed resumes per job, raises DECISION_NEEDED `build_blocked` after 3 and moves a stuck trade
+  depot inside the entrance after 5 (`runner.depot_move`, PEACE, no fortcore depot). JOBS_SUSPENDED names the reason and
+  repeats only on change; DEPOT_MISSING says "being built" only while the depot progresses. care's mood reserve never
+  forbids on a building site.
+- **BUG-003:** a body with remains in a coffin is buried; `inspect tombs` shows the acts of the last acting run (`last`)
+  and rebuilds a stale index (`fresh`).
+- **BUG-008:** new `util/cadence.lua`: standing class-A events repeat only for news and after max(game cadence, 10 min
+  wall clock) (GHOSTS, MOOD_RISK, HOSPITAL_DRY, coffin and build decisions); NO_DEPOT once per caravan visit. Open for the
+  seal work: SEAL_LEAK and REFUGE_FAIL (seal.lua) still repeat on game time.
+- **BUG-010:** baseline switches an enabled legacy autolabor to monitor in its boot step (init), on every full apply
+  and on economy's daily engine read; AUTOLABOR_LEGACY (A, new event).
+- Live check: the four stuck sites of the Run 9 save get built; DEPOT_MISSING text; `inspect tombs` `last`; one GHOSTS
+  per news; `autolabor` mode monitor after a load. Details per bug in `bugs/`.
+
 ## Coffin provisioner (2026-10-15, FR-61; commit fcc1f8a, offline, live-untested)
 - care keeps free usable coffins >= unburied citizen bodies without a usable tomb + `care.coffin_reserve` (10): rows of
   coffins with aisles inside a free ring in dug space that stands (crypt, core, citizens; roofed, no zone, walk group,

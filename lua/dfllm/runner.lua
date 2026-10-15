@@ -1282,6 +1282,15 @@ local function depot_seen()
   return have, c
 end
 
+-- the one-stage depot project around a centre pos
+local function depot_doc(pos)
+  local at = {pos[1] - 2, pos[2] - 2, pos[3]}
+  return {v = 2, tpl = 'depot', site = 'S1', class = 'infra', params = json.object{}, anchor = at, rot = 0,
+          stages = {{label = 'depot.build', mode = 'build', orders = 0, defense = 0,
+                     chunks = {{pos = at, cells = {{0, 0, 0, 'D(5x5)'}}}}}},
+          manifest = {v = 2, depot = {pos[1], pos[2], pos[3]}}, materials = json.object{trade_depot = 1}}
+end
+
 function M.depot_keep(K, why)
   if not DEPOT_MODES[K.mode()] then return false, 'not in ' .. K.mode() end
   local have, c = depot_seen()
@@ -1299,17 +1308,45 @@ function M.depot_keep(K, why)
   if not pos then return false, 'no known depot site' end
   local n = (int(S.rt.depot_n) or 0) + 1
   local id = string.format('depot%d', n)
-  local at = {pos[1] - 2, pos[2] - 2, pos[3]}
-  local d = {v = 2, tpl = 'depot', site = 'S1', class = 'infra', params = json.object{}, anchor = at, rot = 0,
-             stages = {{label = 'depot.build', mode = 'build', orders = 0, defense = 0,
-                        chunks = {{pos = at, cells = {{0, 0, 0, 'D(5x5)'}}}}}},
-             manifest = {v = 2, depot = {pos[1], pos[2], pos[3]}}, materials = json.object{trade_depot = 1}}
-  local ok, err = register(K, id, d, M.CFG.depot_prio, 'depot')
+  local ok, err = register(K, id, depot_doc(pos), M.CFG.depot_prio, 'depot')
   if not ok then return false, err end
   S.rt.depot_n = n
   dirty()
   save(K)
   K.log('warn', 'trade depot missing (%s): project %s at %d,%d,%d', tostring(why or 'keeper'), id, pos[1], pos[2], pos[3])
+  return true, id
+end
+
+-- BUG-005 (Run 9: the depot at the shaft head stayed a construction site and four caravans left): economy's daily
+-- jobs pass calls this after depot_move_after resumes of the depot job that did not hold, with a new centre `at`
+-- inside the entrance, off the army route (economy picked it: revealed roofed floor, reachable, no items). A depot
+-- project still open is cancelled with undo; else the planned depot at `old` = {x1, y1, z} is undone by quickfort
+-- like the building sheet's cancel. Then a depot project is queued at `at`. Returns ok, project id | reason.
+function M.depot_move(K, at, why, old)
+  if not DEPOT_MODES[K.mode()] then return false, 'not in ' .. K.mode() end
+  local x, y, z
+  if type(at) == 'table' then x, y, z = int(at[1]), int(at[2]), int(at[3]) end
+  if not (x and y and z) or not on_map(x - 2, y - 2, z) or not on_map(x + 2, y + 2, z) then return false, 'bad site' end
+  local cancelled = 0
+  for _, P in ipairs(S.pd.list) do
+    if P.tpl == 'depot' and P.done ~= 1 and P.blocked ~= 'cancel' then
+      cancel(K, P, true)
+      cancelled = cancelled + 1
+    end
+  end
+  if cancelled == 0 and type(old) == 'table' and int(old[1]) and int(old[2]) and int(old[3]) then
+    K.act.quickfort({mode = 'build', data = {[0] = {[0] = {[0] = 'D(5x5)'}}}, pos = {int(old[1]), int(old[2]), int(old[3])},
+                     command = 'undo'})
+  end
+  local n = (int(S.rt.depot_n) or 0) + 1
+  local id = string.format('depot%d', n)
+  local ok, err = register(K, id, depot_doc({x, y, z}), M.CFG.depot_prio, 'depot')
+  if not ok then return false, err end
+  S.rt.depot_n, S.rt.depot = n, {x, y, z}
+  dirty()
+  rows(K)
+  save(K)
+  K.log('warn', 'trade depot moved (%s): project %s at %d,%d,%d', trunc(why, 120), id, x, y, z)
   return true, id
 end
 

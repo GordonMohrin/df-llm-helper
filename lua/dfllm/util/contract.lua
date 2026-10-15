@@ -66,6 +66,8 @@ C.EVENTS = {
   ORDER_BAD = {cls = 'A', by = 'economy'}, DEPOT_MISSING = {cls = 'A', by = 'trade'},
   CUTOFF = {cls = 'A', by = 'seal'}, PERIMETER_BROKEN = {cls = 'A', by = 'seal'},
   SEAL_LEAK = {cls = 'A', by = 'seal'}, REFUGE_FAIL = {cls = 'A', by = 'seal'},
+  -- BUG-010: autolabor found enabled in legacy mode (the Run 9 crash engine); baseline set it to monitor
+  AUTOLABOR_LEGACY = {cls = 'A', by = 'baseline'},
   -- B: digest
   ALERT_START = {cls = 'B', by = 'siege'}, ALERT_END = {cls = 'B', by = 'siege'},
   LOCKDOWN_END = {cls = 'B', by = 'reflex'},

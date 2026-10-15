@@ -24,7 +24,7 @@
 --
 -- Interrupt channel (FR-53). INTERRUPTS (contract): ARRIVAL; INTRUDER (a visible invader, undead or great danger on
 -- the citizens' walkable group); PREDATOR (a visible wild danger on a roofed tile of that group); DEATHS_3PLUS (care);
--- NO_DEPOT (merchants need a trade depot). Each goes to <save>/alarm.txt at once (a DEFCON line, then the last
+-- NO_DEPOT (merchants need a trade depot; once per caravan visit, BUG-008). Each goes to <save>/alarm.txt at once (a DEFCON line, then the last
 -- interrupts), `dfllm wait --until-interrupt` returns on it, and verb `ack` records the operator's ack. An interrupt
 -- still unacked after ack_timeout_s (real seconds, measured on K.now().ms, which also runs while paused) gets its type's lockdown default (config/reflex.json `defaults`)
 -- from the kernel itself, and LOCKDOWN (A) says so. state alarm = {defcon 1 (worst) .. 5, unacked, last, ack, lock,
@@ -32,6 +32,7 @@
 -- Reads: census (K.census.h/u), building vectors (doors, via gate the levers), snapshot.far/outside_near for tiles.
 local fio = require('dfllm.io')
 local geom = require('dfllm.util.geom')
+local CAD = require('dfllm.util.cadence')   -- BUG-008: NO_DEPOT without a readable caravan
 
 local M = {name = 'reflex', every = {ticks = 10}, critical = true, verbs = {},
            reports = {AMBUSH_AMBUSHER = true, AMBUSH_SNATCHER = true, BEAST_AMBUSH = true, MEGABEAST_ARRIVAL = true,
@@ -347,15 +348,60 @@ end
 
 ---------------------------------------------------------------- triggers
 -- an arrival: lockdown (cfg defaults.ARRIVAL) and ARRIVAL (A, an interrupt) once per kind and lockdown
+-- the caravans on the map (plotinfo.caravans with a trade state other than None), as entity id strings
+local function caravans_here()
+  local r = {}
+  pcall(function()
+    for _, c in ipairs(df.global.plotinfo.caravans) do
+      local okn, s = pcall(function() return df.caravan_state.T_trade_state[c.trade_state] end)
+      if not (okn and s == 'None') then r[#r + 1] = tostring(c.entity) end
+    end
+  end)
+  return r
+end
+
+-- BUG-008 (Run 9: NO_DEPOT came again every few game days while the merchants waited, a few seconds apart at
+-- timestream speed): one NO_DEPOT per caravan visit. st.depot = {ents = {<entity> = 1} of the visits already told,
+-- rec = the cadence record}; a visit is forgotten once its caravan left the map. Without a readable caravan the
+-- announcement counts as one visit of 'unknown', repeated only after max(7 game days, 10 min wall clock).
+local function no_depot(K, text)
+  local dep = st.depot or {ents = {}}
+  st.depot = dep
+  local cars = caravans_here()
+  local here, new = {}, false
+  for _, e in ipairs(cars) do
+    here[e] = true
+    if not dep.ents[e] then new = true end
+  end
+  local T = K.now()
+  if #cars == 0 then
+    if not CAD.elapsed(dep.rec, T) then return 'no depot reported' end
+    here.unknown, new = true, true
+  end
+  if not new then return 'no depot reported' end
+  for e in pairs(here) do dep.ents[e] = 1 end
+  rt.dep_chk = T.tick
+  dep.rec, dirty = CAD.mark(T, {}, {}), true
+  interrupt(K, 'NO_DEPOT', 'caravan without a trade depot: ' .. tostring(text):sub(1, 140), {text = tostring(text):sub(1, 200)})
+  return 'no depot reported'
+end
+
+-- a visit is forgotten once its caravan left the map (checked every DEPOT_EVERY ticks while one is remembered)
+M.DEPOT_EVERY = 100
+local function depot_visits(K, now)
+  local dep = st.depot
+  if not dep or next(dep.ents) == nil or now - (rt.dep_chk or -M.DEPOT_EVERY) < M.DEPOT_EVERY then return end
+  rt.dep_chk = now
+  local here = {}
+  for _, e in ipairs(caravans_here()) do here[e] = true end
+  for e in pairs(dep.ents) do
+    if e ~= 'unknown' and not here[e] then dep.ents[e], dirty = nil, true end
+  end
+end
+
 local function arrival(K, kind, src, text)
   local now = K.now().tick
-  if kind == 'no_depot' then
-    if now - (rt.depot_t or -M.REARM) >= M.REARM then
-      rt.depot_t = now
-      interrupt(K, 'NO_DEPOT', 'caravan without a trade depot: ' .. tostring(text):sub(1, 140), {text = tostring(text):sub(1, 200)})
-    end
-    return 'no depot reported'
-  end
+  if kind == 'no_depot' then return no_depot(K, text) end
   local new = not (st.hold and st.hold.kinds[kind])
   local summary, d = engage(K, kind, 'arrival:' .. kind, cfg(K).defaults.ARRIVAL, now)
   if new then
@@ -516,6 +562,11 @@ function M.init(K)
                                ms = int(r.ms) or K.now().ms, msg = tostring(r.msg or ''), done = int(r.done) == 1 and 1 or 0}
       end
     end
+    local dp = p.depot
+    if type(dp) == 'table' and type(dp.ents) == 'table' then
+      st.depot = {ents = {}, rec = type(dp.rec) == 'table' and {t = int(dp.rec.t), w = int(dp.rec.w)} or nil}
+      for e, v in pairs(dp.ents) do if v == 1 then st.depot.ents[tostring(e)] = 1 end end
+    end
     local h = p.hold
     if type(h) == 'table' and type(h.why) == 'string' then
       st.hold = {why = h.why, kinds = {}, acts = {}, since = int(h.since) or 0, last = int(h.last) or 0, qs = nil,
@@ -541,6 +592,7 @@ function M.step(K, budget, ctx)
   alert_step(K, h, now)
   quiet_step(K, h, now)
   ack_step(K, now)
+  depot_visits(K, now)
   alarm_write(K)
   save(K)
 end

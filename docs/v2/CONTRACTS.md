@@ -665,7 +665,7 @@ The fort-specific geometry, written by templates (bp `manifest` fragments) and m
 | PLAN_EXHAUSTED | A | runner | phase (str), year |
 | PROJECT_BLOCKED | A | runner | **proj** (str), tpl (str), stage (str), why (str), ticks — after > 2 days blocked |
 | YEAR_REVIEW | A | kern | year |
-| GHOSTS | A | care | ghosts, corpses, old, units (int[]), causes (str[] `unit:cause+cause`) — FR-04/26: a citizen ghost exists or a citizen body lies unburied longer than `corpse_old`; again when the set grows, else weekly |
+| GHOSTS | A | care | ghosts, corpses, old, units (int[]), causes (str[] `unit:cause+cause`) — FR-04/26: a citizen ghost exists or a citizen body lies unburied longer than `corpse_old`; again only when the set grew or a new cause appeared, not before max(7 game days, 10 min wall clock) (BUG-008) |
 | HOSPITAL_DRY | A | water | **why** (str), patients, zone, near, recipe (str) — FR-31/34: a hospital location (or a pending hospital project with no accepted water at all) without a well over water or a Water Source zone on water ≥ 4/7 within `near` tiles; at the start of the dry episode, then weekly with patients, else monthly |
 | MOOD_RISK | A | care | **unit**, **why** (str: missing, thirst, hunger), kind (str), missing (str[] classes), thirst, hunger — FR-44: a strange mood starts without its materials, or the moody dwarf passes the thirst/hunger line (every 2 days); the mood job is never cancelled |
 | SIEGE_START | A | siege | vis, inv, great, why (str) — class A since Run 9: it wakes at once |
@@ -673,13 +673,14 @@ The fort-specific geometry, written by templates (bp `manifest` fragments) and m
 | ARRIVAL | A | any (reflex; arbiter as fallback) | **kind** (str: siege, ambush, snatcher, beast, invasion, invader), src (str: popup, report, invasion, sighting), text (str), raised, doors, alert (str), clock, out, eta — an arrival and the lockdown issued for it (interrupt) |
 | INTRUDER | A | reflex | n, id, pos (int[3]), k (str) — a visible invader, undead or great danger on the citizens' walkable group (interrupt) |
 | PREDATOR | A | reflex | n, id, pos (int[3]) — a visible wild danger on a roofed tile of that group (interrupt) |
-| NO_DEPOT | A | reflex | text (str) — merchants need a trade depot (interrupt) |
+| NO_DEPOT | A | reflex | text (str) — merchants need a trade depot (interrupt); once per caravan visit (BUG-008) |
 | LOCKDOWN | A | reflex | **why** (str: ack_timeout), n, type (str), raised, doors, alert (str), clock — the kernel applied an interrupt's lockdown default itself |
-| DEPOT_MISSING | A | trade | civ (str), planned (flag: a depot is being built), proj (str: the depot project runner.depot_keep queued) — a caravan on the map and no built trade depot, once per visit (FR-43) |
+| DEPOT_MISSING | A | trade | civ (str), planned (flag: a planned depot progresses: job running with a builder or stage > 0), stalled (flag), why (str: why the planned one does not progress), proj (str: the depot project runner.depot_keep queued) — a caravan on the map and no built trade depot, once per visit (FR-43, BUG-005) |
 | ORDER_BAD | A | economy | **order**, **job** (str), dropped (flag) — a make-item order without item_subtype (DF 53.16 crash, FR-39); economy removes it at once (`order_guard.drop`) |
 | CUTOFF | A | seal | **cls** (str: food, drink, bed), **n** (citizens), pos (int[3], the tile that did it), why (str: wall, door, bridge, … or unknown), grp, main — more citizens than before stand on a walk group without that class (FR-22); a raised bridge outside PEACE (the gate raises it on purpose) is a SEAL instead |
 | SEAL_LEAK | A | seal | **routes**, pos (int[3], first leak), bld (str), state (str: locked, open, down …), why (str: lever, siege, construction, periodic) — the outer/inner bridges are up and a route from the map edge to the citizens remains (FR-54) |
 | PERIMETER_BROKEN | A | seal | **n**, pos (int[3]), kinds (str[]), requeued, why (str) — perimeter pieces lost after a siege; walls/doors re-queued as a `repair` project (FR-56) |
+| AUTOLABOR_LEGACY | A | baseline | **fixed** (flag: set to monitor), why (str: boot, apply, economy daily), after (str: the engine read back) — autolabor found enabled in legacy mode, the engine of the Run 9 crashes (BUG-010) |
 | REFUGE_FAIL | A | seal | **burrow** (str, refused), fallback (str, `""` = no confinement), why (str), tiles, inside, mode (str) — the civ alert refused a burrow without drink/food/beds for the population (FR-37/57) |
 | ALERT_START / ALERT_END | B | siege | vis |
 | LOCKDOWN_END | B | reflex | why (str), ticks, doors — threat 0 for `hold_quiet_days`: doors opened, clock and alert back to the mode |
@@ -707,7 +708,7 @@ The fort-specific geometry, written by templates (bp `manifest` fragments) and m
 | ACT_FAIL | B | kern | **fn** (str), err (str), module (str) |
 | ORDER_STUCK | B | economy | **order**, **job** (str), **why** (str), n, days, dropped (flag) — an order that cannot run for `orders.stuck_days` (workshop, input on the citizens' walk group, worker; FR-01), or removed after `orders.needs_drop` "Needs ..." cancels (FR-10) |
 | TRADE_LEDGER | B | trade | civ (str), ok (flag), ratio, sold, sold_v, bought, bought_v (units and values), unmet (str[] `token:why`, why = none / value / part / the failure reason) — one per finished visit; the last 3 stay in persist `m.trade.ledger` and `inspect what=trade` (FR-32) |
-| JOBS_SUSPENDED | B | economy | suspended, released, kept, planned, why (str) — suspended ConstructBuilding jobs: resumed, kept by suspendmanager, waiting for buildingplan (FR-16) |
+| JOBS_SUSPENDED | B | economy | suspended, released (resumes that held a frame), resuspended, kept, planned, why (str), forbidden, other (items on the footprints), unforbidden, missing (str: classes none of in reach), blocked — suspended ConstructBuilding jobs: resumed, kept by suspendmanager, waiting for buildingplan (FR-16, BUG-009/004); emitted when the numbers change |
 | SEAL | B | seal | routes, pos (int[3]), why (str), sealed (flag) — an entrance check ("seal verified: no route" or the leak); also citizens shut out by a raised bridge outside PEACE |
 | REACH | B | seal | flags (str[]), cut, stairs — the reach audit's flags changed (classes off the main citizen group, stairs without counterpart) |
 | SIEGE_STATUS | C | siege | vis, worn, on_station, deaths, captures |
@@ -880,7 +881,7 @@ Each item names the WP that must adapt its code; WP0 changed the contract, `cont
 Generated by `python -m dfpilot.schema --write-appendix docs/v2/CONTRACTS.md`; `tests/test_schema.py` fails if this block is stale. The digest covers every schema and registry in `schema.py`, so any contract change shows up here.
 
 <!-- BEGIN GENERATED SCHEMAS -->
-Contract digest: `9ccfb282a9dabad95f9a312b8633504c1aa5b07b5a5d5de5c43f1d17307ee3fd`
+Contract digest: `6f3095176f07c37c280507dc23386a88d273998922158016bef2cea412629560`
 
 DESIGN §6 formats and the inbox verb args. Other kinds: `python -m dfpilot.schema --json-schema <kind>` with kind in heartbeat, phases, bp, restore, lock, allowlist, persist.marker, persist.projects, persist.plan, persist.phase, persist.mode, persist.drill, persist.kern. Per-type event `d` (§12) and per-verb `args` are checked by `validate()`; the envelopes leave them open. Compact JSON, keys sorted.
 

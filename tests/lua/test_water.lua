@@ -102,6 +102,9 @@ T.test('a bedridden patient over 30k thirst without water: patient_thirst (A) wi
   day(W, 5)                                                    -- review: no longer every 3 days, but weekly
   T.eq(#needed(W, 'patient_thirst'), 1)
   day(W, 2)
+  T.eq(#needed(W, 'patient_thirst'), 1, 'BUG-008: a game week is 21 s at timestream speed: the wall clock waits too')
+  W.ms = W.ms + 600000
+  day(W)
   T.eq(#needed(W, 'patient_thirst'), 2)
   T.eq(#W.find_events('HOSPITAL_DRY'), 0)
   T.eq(#W.find_events('PROJECT_REQUEST'), 1)                   -- monthly
@@ -129,7 +132,7 @@ T.test('one patient_thirst line for all patients; a patient crossing the alarm w
   T.eq(#needed(W, 'patient_thirst'), 3)
 end)
 
-T.test('hospital gate (FR-31/34): HOSPITAL_DRY when the dry episode starts, weekly with patients, else monthly', function()
+T.test('hospital gate (FR-31/34): HOSPITAL_DRY when the dry episode starts; BUG-008: again only for news, after max(a week, 10 min)', function()
   local W, M = world{patients = {{id = 2, thirst = 1000, care = true}},
                      setup = function(W) F.hospital(W, {10, 10, 14, 14, 5}) end}
   day(W)
@@ -139,15 +142,22 @@ T.test('hospital gate (FR-31/34): HOSPITAL_DRY when the dry episode starts, week
   T.eq({hd[1].d.patients, hd[1].d.near}, {1, 30})
   T.ok(hd[1].d.recipe:find('delete the hospital zone', 1, true), hd[1].d.recipe)
   T.ok(#hd[1].msg <= 200 and #hd[1].d.recipe <= 200)
-  day(W, 6)
-  T.eq(#W.find_events('HOSPITAL_DRY'), 1)
+  day(W, 7)
+  W.ms = W.ms + 600000
   day(W)
-  T.eq(#W.find_events('HOSPITAL_DRY'), 2, 'weekly while somebody is a patient')
-  W.unit(2).health = nil                                       -- healed: the gate stays, monthly now
-  day(W, 14)
-  T.eq(#W.find_events('HOSPITAL_DRY'), 2)
-  day(W, 14)
-  T.eq(#W.find_events('HOSPITAL_DRY'), 3, 'a hospital without water is reported without patients too')
+  T.eq(#W.find_events('HOSPITAL_DRY'), 1, 'the same patient and causes: no repeat')
+  W.unit(3).health = {flags = {needs_healthcare = true}}       -- a new patient
+  day(W)
+  T.eq(#W.find_events('HOSPITAL_DRY'), 2, 'a new patient, both clocks passed')
+  W.unit(3).health = {flags = {needs_healthcare = false}}
+  W.unit(4).health = {flags = {needs_healthcare = true}}       -- another new patient within the week
+  day(W, 3)
+  T.eq(#W.find_events('HOSPITAL_DRY'), 2, 'within the cadence: waits')
+  W.unit(2).health, W.unit(4).health = nil, nil                -- healed: the gate stays
+  day(W, 28)
+  W.ms = W.ms + 600000
+  day(W)
+  T.eq(#W.find_events('HOSPITAL_DRY'), 2, 'fewer patients is no news')
   T.eq(#needed(W, 'patient_thirst'), 0)
   T.eq(#needed(W, 'hospital_water'), 0, 'the DECISION_NEEDED of the old gate is gone')
 end)

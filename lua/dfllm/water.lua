@@ -15,8 +15,9 @@
 --     tiles of its zone; the refuge when a wet well stands on a Tiefe+ tile;
 --   * hospital gate (FR-31/34): a hospital location (or a pending `hospital` project) without an accepted
 --     source wakes the LLM (HOSPITAL_DRY, A) with a one-line recipe from the water-source scan, when the
---     dry episode starts, then weekly while somebody is a patient, else monthly; the run that already sent
---     patient_thirst sends none. A `cistern` is asked monthly (PROJECT_REQUEST, B; bp sites cistern);
+--     dry episode starts, then only when a patient joined or a new cause appeared, not before max(a week with
+--     patients, else a month, 10 min wall clock) (BUG-008); the run that already sent patient_thirst sends
+--     none. A `cistern` is asked monthly (PROJECT_REQUEST, B; bp sites cistern);
 --   * water sources scan (FR-47, `inspect what=water_sources`): revealed water of depth >= deep around the
 --     hospitals (else the citizens), `near` tiles wide and ws_dz levels up and down, through snapshot.liquids
 --     (sliced, after the run's decisions); per water body its level, size, depth, an accepted zone or well
@@ -43,6 +44,7 @@
 -- module also runs before that contract change, reporting what it would do in the events instead).
 local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
+local CAD = require('dfllm.util.cadence')   -- BUG-008: when a standing class-A condition is announced again
 
 local M = {name = 'water', every = {ticks = 1200}, on = {}}
 local DAY = C.TICKS.DAY
@@ -57,7 +59,7 @@ M.DEFAULTS = {
   buckets_min = 2, bucket_per_patient = 1, buckets_max = 8, unforbid_per_run = 4,
   alarm_every = 7 * DAY, hosp_every = 7 * DAY, request_every = 28 * DAY, flood_every = 2 * DAY, flood_tiles = 2,
   units_per_slice = 40, items_per_slice = 200, zone_tiles = 25, order_backoff = 3 * DAY,
-  deep = 4, zone_below = false, gate_every = 28 * DAY,
+  deep = 4, zone_below = false, gate_every = 28 * DAY, wake_wall_s = 600,
   ws_dz = 3, ws_tiles = 1500, ws_every = 7 * DAY, ws_bodies = 12, ws_dig = 8, ws_reach = 6, ws_reads = 400,
 }
 M.BUCKET_ORDER = {job = 'MakeBucket', material_category = {'wood'}, frequency = 'OneTime'}
@@ -698,8 +700,12 @@ local function finish(K, c, r, p)
     if not keep then p.alarm[sid] = nil end
   end
   local woke = false
-  if #over > 0 and (fresh or now - (p.alarm_t or -c.alarm_every) >= c.alarm_every) then
-    p.alarm_t, woke = now, true
+  -- BUG-008: the weekly reminder also waits wake_wall_s wall seconds (a game week is 21 s at timestream speed); a
+  -- patient crossing the alarm still wakes at once
+  local T = K.now()
+  if #over > 0 and (fresh or CAD.elapsed({t = p.alarm_t or -c.alarm_every, w = p.alarm_w}, T, c.alarm_every,
+                                         c.wake_wall_s)) then
+    p.alarm_t, p.alarm_w, woke = now, T.wall, true
     table.sort(over, function(a, b) return a.thirst > b.thirst end)
     local ids = {}
     for i = 1, math.min(8, #over) do ids[i] = over[i].id end
@@ -713,8 +719,9 @@ local function finish(K, c, r, p)
                                     #carers > 0 and table.concat(carers, ',') or 'none', r.free + fixed, r.buckets), 200)})
   end
   -- hospital gate (FR-31/34): a hospital location, or a hospital project while no accepted water exists at all,
-  -- without an accepted source wakes the LLM when the dry episode starts, then weekly with patients, else
-  -- monthly (not in a run that sent patient_thirst); a cistern is asked monthly either way
+  -- without an accepted source wakes the LLM when the dry episode starts (not in a run that sent patient_thirst);
+  -- a cistern is asked monthly either way. BUG-008: within an episode again only when a patient joined or a new
+  -- cause appeared, and not before max(hosp_every with patients, else gate_every, wake_wall_s wall seconds)
   local okh, hpend = K.call('runner', 'pending', 'hospital')
   local planned = #r.hosp == 0 and okh and type(hpend) == 'number' and hpend > 0
   local gate = dry or (planned and wet == 0)
@@ -723,10 +730,15 @@ local function finish(K, c, r, p)
     local every = #r.patients > 0 and c.hosp_every or c.gate_every
     local start = p.hosp == nil
     p.hosp = p.hosp or now
+    local pids, toks = {}, {}
+    for i, pt in ipairs(r.patients) do pids[i] = pt.id end
+    for i, cs in ipairs(cause) do toks[i] = (cs:gsub('%d+', 'N')) end      -- a distance is no new cause
+    if planned then toks[#toks + 1] = 'planned' end
+    local last = p.hosp_t and {t = p.hosp_t, w = p.hosp_w, ids = p.hosp_ids or {}, toks = p.hosp_toks or {}} or nil
     if woke then
-      p.hosp_t = now                                       -- patient_thirst already carries cause and recipe
-    elseif start or now - (p.hosp_t or p.hosp) >= every then
-      p.hosp_t = now
+      p.hosp_t, p.hosp_w, p.hosp_ids, p.hosp_toks = now, T.wall, pids, toks   -- patient_thirst carried cause and recipe
+    elseif start or CAD.due(last, T, pids, toks, {ticks = every, wall_s = c.wake_wall_s}) then
+      p.hosp_t, p.hosp_w, p.hosp_ids, p.hosp_toks = now, T.wall, pids, toks
       local h = r.hosp[1]
       local a = {planned = planned, patients = #r.patients, zone = h and h.id or -1,
                  why = planned and 'no accepted water on the map' or why}
@@ -743,7 +755,7 @@ local function finish(K, c, r, p)
              {tpl = 'cistern', n = 1, why = 'hospital_water'})
     end
   else
-    p.hosp, p.hosp_t = nil, nil
+    p.hosp, p.hosp_t, p.hosp_w, p.hosp_ids, p.hosp_toks = nil, nil, nil, nil, nil   -- a new dry episode wakes at once
   end
   -- a cistern that floods its well room (the breaker failed or something was dug into the pipe). One wet tile
   -- in one run is no flood: a bucket poured into a dry cistern's pond hole shows water there for a moment

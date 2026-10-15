@@ -1,5 +1,5 @@
 # BUG-009 construction jobs are suspended again within 5 s of every resume, new buildings are never built
-Status: open (cause found 2026-10-15: forbidden items lying on the building footprint, see Cause)
+Status: fixed in 9b9dcdc, 7006350 (offline, live-untested)
 Severity: high (workshops, a bed, the trade depot and the coffins stay unbuilt; 16 of 17 civilians idle; every caravan lost; FR-16 "resume" has no effect)
 Found: 2026-10-15, Run 9 save autosave 1 (y363-367), dfpilot main 3edc277, live test by Claude
 Module: `lua/dfllm/economy.lua:2999` (FR-16 daily resume); the cause is items blocking the site (below)
@@ -38,3 +38,22 @@ items) in JOBS_SUSPENDED (`why: item blocking site: N forbidden, M other`). Do n
 Also: whoever forbade 41 items on the depot site (looks like loot and cloth of a siege, forbidden by the kernel's own pass or by DF for the dead).
 
 Related: BUG-004, BUG-005, FR-16
+
+## Fix (9b9dcdc, 7006350, offline)
+- New `snapshot.items_at(x0, y0, x1, y1, z)`: the loose items on the revealed tiles of a footprint (map block item
+  lists; hidden tiles skipped).
+- economy's daily FR-16 pass (tasks jobs, jsite, jmat, jfree, jresume, jcheck, jmove): for every suspended
+  ConstructBuilding job (PEACE/RECOVERY) the footprint is scanned; forbidden items are unforbidden (`act.item_flag`,
+  60 a day); care's mood-reserve holds (`care.held_ids`), corpses and dead dwarves' items (burial's), merchant goods
+  and the job's own materials are skipped; the rest counts as other. JOBS_SUSPENDED names the reason
+  (`item blocking site x2 ...; on the sites 41 forbidden (41 unforbidden), 2 other`). A resume is verified a frame
+  later: a job suspended again counts as `resuspended`, not `resumed`.
+- care's mood reserve never forbids an item on the footprint of a building not built yet and lets go of one it holds
+  there.
+- Who forbade the 41 items on the depot site: not the kernel. Its only `forbid=true` write is care's mood reserve,
+  which takes items only from stockpiles inside Kern+ and only of its classes (boulders, logs, bone, shell, leather,
+  cloth, thread, gems, bars), never BLOCKS; military's loot pass and economy only unforbid. Blocks and cloth on the
+  razed surface depot fit the depot's own blocks and the dead invaders' gear, which DF's standing orders (forbid the
+  items of the dead) leave forbidden.
+- Live check: on the Run 9 save the four stuck sites (42,62,109), (42,59,109), (69,44,118), (57,73,110) lose their
+  forbidden items within a game day and get workers; JOBS_SUSPENDED shows `suspended again` 0.
