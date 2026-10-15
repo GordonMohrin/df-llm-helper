@@ -120,6 +120,7 @@ C.VERBS = {
   ['ack']          = {mod = 'reflex'},
   ['order.add']    = {mod = 'economy'},
   ['jobs.release'] = {mod = 'economy'},
+  ['perimeter.record'] = {mod = 'seal'},
 }
 -- Verbs accepted only from these `by` origins (§9.5). `by` is a label, not authentication: the
 -- hook (WP4) keeps the LLM from writing these origins; this check is the second line.

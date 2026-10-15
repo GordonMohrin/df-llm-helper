@@ -1,45 +1,78 @@
--- seal (FR-22/24/33/37/54/56/57): reachability, the seal against the map edge, the perimeter and the civ-alert
--- refuge, from walk groups and revealed tiles only. Fair play (CONTRACTS §1.4): a tile is read only after
+-- seal (FR-22/24/33/37/54/56/57, FR-59/60/62/63): reachability, the seal against the map edge, the perimeter and the
+-- civ-alert refuge, from walk groups and revealed tiles only. Fair play (CONTRACTS §1.4): a tile is read only after
 -- `designation.hidden` was checked; walk groups (dfhack.maps.getWalkableGroup, DF's own job-feasibility cache)
 -- are read for revealed tiles only; units only by census id. Group ids change over time, so every check
 -- compares against the groups the citizens stand on now, never a stored id.
 --   reach     (FR-22) walkable groups of citizens, food, drink, seeds, beds, farm plots, wells, depot and the map
 --             edge; every class off the main citizen group is flagged, so is every STAIR_UP/STAIR_DOWN without its
---             counterpart. CUTOFF (A) when citizens lose the group of their food, drink or beds, with the tile that
---             did it. Runs periodically, before a closing construction is queued (runner.apply -> seal.closing) and
---             after every change of constructions, doors, hatches and bridges (a cheap re-check of the known
---             positions first, the full audit only when it looks worse)
+--             counterpart (FR-63: each flagged stair is read again before it is reported). CUTOFF (A) when citizens
+--             lose the group of their food, drink or beds, with the tile that did it. Runs periodically, before a
+--             closing construction is queued (runner.apply -> seal.closing) and after every change of constructions,
+--             doors, hatches and bridges (a cheap re-check of the known positions first, the full audit only when it
+--             looks worse)
+--   items     (FR-59/62) the item census behind reach and refuge: drink, food and seeds per tile, once per stack unit,
+--             stored ones (barrels, bins, bags, pots) included; carried or worn ones (a unit holds the item or its
+--             container) and those in a forbidden container are not. It runs on its own cadence and is skipped while
+--             the item vectors keep their sizes, so an audit reads stock tiles, never the items
 --   seal      (FR-54) walk groups of the map-edge tiles against the citizens' groups ("seal verified: no route");
---             otherwise a sliced BFS from the citizens over revealed walkable tiles to the first map-edge tile: the
---             first leak (tile, building, door/bridge state) and the openings of the interior (independent
---             routes). After every siege and lever pull; SEAL_LEAK (A) when the gates are up and a route remains
---   perimeter (FR-56) walls, doors, gates and killbox tiles of defense projects, of the manifest and of the
---             inside/outside boundary (learned by the BFS in PEACE), persisted in m.seal; after a siege they are
---             compared with the map, lost pieces re-queued (runner.repair) and PERIMETER_BROKEN (A) raised
+--             otherwise a sliced search from the citizens over revealed walkable tiles (a BFS over the interior, an
+--             A* outside to the nearest map-edge tile): the first leak (tile, building, door/bridge state) and the
+--             openings of the interior (independent routes). After every siege and lever pull; SEAL_LEAK (A) when
+--             the gates are up and a route remains. In PEACE the gates stand open (D-14): the search runs there only
+--             when its answer can change
+--   perimeter (FR-56/60) walls, doors, gates and killbox tiles of defense projects, of the manifest and of the
+--             inside/outside boundary (learned by the BFS in PEACE), plus (FR-60, forts without a manifest) every
+--             wall, door, gate or bridge around an opening the entrance check finds sealed, and on the verb
+--             perimeter.record the closers on the boundary of the citizens' group; persisted in m.seal. After a
+--             siege they are compared with the map, lost pieces re-queued (runner.repair) and PERIMETER_BROKEN (A)
+--             raised; a piece already gone in PEACE or when a siege begins is retired, never rebuilt
 --   defense   (FR-24) every bridge's real gate_flags, the walk groups on its sides and its levers' links
 --   refuge    (FR-33/37/57) burrow audits (tiles, citizens inside, drink, food, beds) and alert_burrow(mode): the
 --             civ-alert burrow siege uses. Kern+ normally, the refuge (Tiefe+) in BREACH and until CFG.back_days
 --             quiet days, never a burrow without drink, food and beds for the population: the fallback is the
 --             interior burrow (CFG.interior, painted from revealed walkable inside tiles of the citizens' group),
 --             else no confinement at all; REFUGE_FAIL (A) says so
--- Work runs in coroutines, CFG.work units per frame; the BFS is bounded (CFG.bfs_max).
+-- Cost (FR-62): work runs in coroutines; a work unit is about one DF read (tile flags, walk group, tiletype, burrow
+-- test, the fields of one item). A token bucket refilled in real time caps the units per second (CFG.rate, or
+-- CFG.rate_urgent while an urgent job runs: a lever pull, a siege, a CUTOFF re-check, perimeter.record, the first
+-- result after a load) and CFG.work caps one frame; an urgent job pre-empts a background one, which resumes later.
+-- The map edge keeps one tile per walkable run, the stairs and interior come from a flood over the citizens' groups
+-- (not a box over hidden rock), burrow sizes are cached and a periodic audit with unchanged inputs is skipped.
 local M = {name = 'seal', every = {ticks = 50}, verbs = {}, on = {}, inspect = {}}
 
 local DAY = 1200
 M.CFG = {
-  work = 800,                 -- work units per frame (a tile, item or building read costs 1-4)
+  -- FR-62 (live Run 9: 37 ms/s with 800 units per frame and no cap per second on a 5-citizen fort, 402 units, 18.7k
+  -- items): a work unit is about one DF read, roughly 0.3-0.8 us live. Background jobs get at most CFG.rate units a
+  -- second (about 2-5 ms/s at the peak, less than half of that on average on a fort that size: test_seal_run9.lua);
+  -- urgent ones CFG.rate_urgent until they are done
+  work = 800,                 -- most work units in one frame
+  rate = 6000,                -- work units per real second for background jobs ...
+  rate_urgent = 24000,        -- ... and while an urgent job runs
+  min_slice = 200,            -- a background job waits for the next regular step when the bucket holds less
   audit_every = 3 * DAY,      -- full reach + refuge audit in PEACE ...
   audit_alert = DAY,          -- ... and in the other modes
+  audit_max_age = 9 * DAY,    -- a periodic audit whose inputs did not change is skipped up to this age
+  items_every = 7 * DAY,      -- item census in PEACE ...
+  items_alert = DAY,          -- ... and in the other modes
+  items_stale = 21 * DAY,     -- a periodic census with unchanged item vector sizes is skipped up to this age
+  pos_max = 4000,             -- stock tiles one census keeps (in ITEM_CATS order: drink first)
+  reps_per = 4, reps_max = 48,   -- quick re-check tiles: the biggest stacks per class and walk group
   quick_every = 100,          -- fingerprint poll (constructions, doors, hatches, bridges)
   quick_min = 300,            -- ticks between two re-checks it triggers
-  seal_every = 7 * DAY,       -- periodic entrance check
-  edges_every = 7 * DAY,      -- map-edge tile list
-  scan_every = 3 * DAY,       -- stairs and interior tiles
+  seal_every = 7 * DAY,       -- periodic entrance check (walk groups) ...
+  bfs_every = 28 * DAY,       -- ... and its BFS in PEACE while the open gates leak by design and nothing changed
+  edges_every = 28 * DAY,     -- map-edge scan
+  edge_run = 64,              -- one edge tile per walkable run along the border, and one more per this many tiles
+  scan_every = 14 * DAY,      -- flood over the citizens' groups: stairs without counterpart, interior tiles
+  scan_min = 3 * DAY,         -- a scan a finished project asks for waits at least this long after the last one
+  bsize_stale = 7 * DAY,      -- a burrow's tile count is kept this long while its block count is unchanged
   lever_delay = 40,           -- ticks after a bridge moved before the entrance check (walk groups settle)
   bfs_max = 60000,            -- tiles the entrance BFS may visit
   blame_max = 4000,           -- tiles the CUTOFF blame search may visit
-  edges_max = 8000, reps_max = 300, entries_max = 400, routes_max = 8, pend_max = 2000,
-  scan_margin = {12, 12, 3}, scan_max = 250000,
+  scan_max = 60000,           -- tiles the scan flood may visit
+  edges_max = 8000, edges_keep = 2000, entries_max = 400, routes_max = 8, pend_max = 2000, stairs_max = 40,
+  rec_r = 1,                  -- FR-60: closers this far around a sealed opening's inside and outside tile
   pred_near = 25,             -- FR-33: a wild large predator counts only this close to an entrance (sense)
   back_days = 3,              -- FR-57: the refuge stays the confinement until this many days without a hostile
   min_tiles = 20, drink_per_cit = 1, food_per_cit = 1, bed_pct = 25,   -- FR-37 burrow audit (per citizen)
@@ -51,8 +84,14 @@ local CFG = M.CFG
 
 local ITEM_CATS = {'DRINK', 'FOOD', 'MEAT', 'FISH', 'CHEESE', 'EGG', 'PLANT', 'PLANT_GROWTH', 'SEEDS'}
 local ITEM_CLS = {DRINK = 'drink', SEEDS = 'seeds'}                    -- everything else: food
-local SKIP = {'forbid', 'trader', 'removed', 'garbage_collect', 'in_inventory', 'construction', 'dump', 'hostile',
-              'in_building', 'rotten'}
+local STOCK = {'drink', 'food', 'seeds'}                                -- census counts per tile, in this order
+local CI = {drink = 1, food = 2, seeds = 3}
+-- FR-59: the item itself. No 'in_inventory': every drink in a barrel carries it; carried items are found by holder
+local SKIP = {'forbid', 'trader', 'removed', 'garbage_collect', 'construction', 'dump', 'hostile', 'in_building',
+              'rotten'}
+-- a container up the chain (barrel, bin, bag, pot): a forbidden one holds nobody's drink (FR-50); part of a building
+-- (a placed chest) is fine
+local CSKIP = {'forbid', 'trader', 'removed', 'garbage_collect', 'construction', 'dump', 'hostile', 'rotten'}
 local BLD_CATS = {{'BED', 'bed'}, {'FARM_PLOT', 'farm'}, {'WELL', 'well'}, {'TRADE_DEPOT', 'depot'}}
 local CLASSES = {'food', 'drink', 'seeds', 'bed', 'farm', 'well', 'depot', 'exit'}
 local VITAL = {'food', 'drink', 'bed'}
@@ -62,11 +101,15 @@ local CLOSERS = {Cw = 'wall', CW = 'wall', CF = 'fort', d = 'door', H = 'hatch',
 local QF_OF = {wall = 'Cw', fort = 'CF', door = 'd', hatch = 'H', floodgate = 'x', grate = 'W', bars = 'B'}
 local BKIND = {Door = 'door', Hatch = 'hatch', Bridge = 'bridge', Floodgate = 'floodgate', GrateWall = 'grate',
                BarsVertical = 'bars', Statue = 'statue'}
+-- FR-60: what a perimeter piece can be (every closer but a statue)
+local REC = {wall = true, fort = true, door = true, hatch = true, floodgate = true, grate = true, bars = true,
+             bridge = true}
 local GATED = {ALERT = true, SIEGE = true, BREACH = true, DRILL = true, RECOVERY = true}   -- gate raises on purpose
 
 local st      -- persisted m.seal
 local mem     -- runtime: caches, results, jobs
 local dirty
+local due     -- due(name, tick, why, arg): schedule a job (scheduling section)
 
 local function int(v) return type(v) == 'number' and math.tointeger(v) or nil end
 local function now_t(K) return K.now().tick end
@@ -136,6 +179,7 @@ end
 
 local UP = {STAIR_UP = true, STAIR_UPDOWN = true}
 local DOWN = {STAIR_DOWN = true, STAIR_UPDOWN = true}
+local STAIR_KIND = {STAIR_UP = 'up stair', STAIR_DOWN = 'down stair', STAIR_UPDOWN = 'up/down stair'}
 
 ---------------------------------------------------------------- buildings
 local function bld_at(x, y, z)
@@ -228,23 +272,95 @@ local function group_counts(cits)
   return by, main
 end
 
----------------------------------------------------------------- items
+---------------------------------------------------------------- items (FR-59)
 local function item_pos(it)
-  local a, b, c = dfhack.items.getPosition(it)                    -- Lua API.txt:2055
+  local a, b, c = dfhack.items.getPosition(it)                    -- Lua API.txt:2055 (a container's for stored items)
   if type(a) == 'table' then return a.x, a.y, a.z end
   return a, b, c
 end
+local function flagged(f, list)
+  for _, k in ipairs(list) do if f[k] then return true end end
+  return false
+end
+-- stock a citizen can use: not skipped itself, not carried or worn (in_inventory with a unit holder), and every
+-- container up the chain usable and not carried either (as economy's FR-50 rule: a forbidden barrel, bin or bag, or
+-- the one around it, holds nobody's drink, food or seeds). Returns ok and the containers read (work units)
 local function usable_(it)
-  local f = it.flags
-  for _, k in ipairs(SKIP) do if f[k] then return false end end
-  local cont = dfhack.items.getContainer(it)                      -- a forbidden barrel holds nobody's drink
-  return not (cont and cont.flags.forbid)
+  if flagged(it.flags, SKIP) then return false, 0 end
+  local cur, n = it, 0
+  while n < 4 do
+    if not cur.flags.in_inventory then return true, n end          -- on the ground: a stockpile, a floor
+    local hu = dfhack.items.getHolderUnit                          -- Lua API.txt items.getHolderUnit
+    if hu and hu(cur) then return false, n end                     -- carried or worn: nobody else's
+    local cont = dfhack.items.getContainer(cur)                    -- Lua API.txt:2035
+    if not cont then
+      local hb = dfhack.items.getHolderBuilding
+      return hb == nil or hb(cur) ~= nil, n                        -- stored in a building, not held by a unit
+    end
+    if flagged(cont.flags, CSKIP) then return false, n end
+    cur, n = cont, n + 1
+  end
+  return false, n
 end
 local function usable(it)
-  local ok, v = pcall(usable_, it)
-  return ok and v == true
+  local ok, v, n = pcall(usable_, it)
+  if ok then return v == true, n or 0 end
+  return false, 0
 end
 local function stack(it) return int(it.stack_size) or 1 end
+
+local function items_sig()
+  local p = {}
+  for i, cat in ipairs(ITEM_CATS) do p[i] = vlen(vec('items', cat)) end
+  return table.concat(p, ',')
+end
+
+-- FR-59/62: drink, food and seeds per tile (stored ones included), once per stack unit. An audit reads these tiles
+-- (walk group, burrows) instead of the items. A periodic census whose item vectors kept their sizes is skipped up
+-- to CFG.items_stale (nothing to read). `inline`: the audit's first census, it schedules no audit itself.
+local function job_items(K, why, inline)
+  local t0 = now_t(K)
+  local sig = items_sig()
+  spend(#ITEM_CATS)
+  local I = mem.items
+  if I and why == 'periodic' and I.sig == sig and t0 - I.tick < CFG.items_stale then
+    I.seen = t0
+    mem.stats.items_skip = (mem.stats.items_skip or 0) + 1
+    return
+  end
+  local at, keys, tot, drop, nread = {}, {}, {0, 0, 0}, {0, 0, 0}, 0
+  for _, cat in ipairs(ITEM_CATS) do
+    local ci = CI[ITEM_CLS[cat] or 'food']
+    local i = 0
+    while true do
+      local v = vec('items', cat)                       -- re-read after every yield
+      if not v or i >= #v then break end
+      local it = v[i]
+      i = i + 1
+      local cost = 2
+      if it then
+        local ok, nc = usable(it)
+        cost = cost + 2 * nc
+        if ok then
+          local x, y, z = item_pos(it)
+          cost = cost + 1
+          if x and x >= 0 then
+            local n = stack(it)
+            local k = key3(x, y, z)
+            local c = at[k]
+            if not c and #keys < CFG.pos_max then c = {0, 0, 0}; at[k] = c; keys[#keys + 1] = k end
+            if c then c[ci], tot[ci] = c[ci] + n, tot[ci] + n
+            else drop[ci] = drop[ci] + n end
+          end
+        end
+      end
+      nread = nread + 1
+      spend(cost)
+    end
+  end
+  mem.items = {tick = t0, seen = t0, sig = sig, at = at, keys = keys, tot = tot, drop = drop, n = nread}
+  if not inline then due('audit', t0, 'items') end
+end
 
 ---------------------------------------------------------------- burrows
 local function burrow(name)
@@ -266,24 +382,35 @@ local function burrow_names(K)
   return kern or 'Kern+', refuge or 'Tiefe+'
 end
 
--- tiles of a burrow (burrows screen count): blocks x 256 tiles, sliced
-local function burrow_size(name)
+local function block_list(name)
   local b = burrow(name)
-  if not b then return 0 end
+  if not b then return nil end
   local ok, blocks = pcall(dfhack.burrows.listBlocks, b)
-  if not ok or type(blocks) ~= 'table' then return 0 end
+  return ok and type(blocks) == 'table' and blocks or nil
+end
+
+-- tiles of a burrow (burrows screen count): blocks x 256 tiles, sliced. FR-62: kept while the block count is
+-- unchanged, up to CFG.bsize_stale (seal's own painting forgets it)
+local function burrow_size(name, t)
+  local blocks = block_list(name)
+  spend(1)
+  if not blocks then return 0 end
+  local c = mem.bsize[name]
+  if c and c.nb == #blocks and t - c.t < CFG.bsize_stale then return c.n end
   local n = 0
   for i = 1, #blocks do
-    b = burrow(name)                                              -- never keep a DF pointer across frames
+    local b = burrow(name)                                         -- never keep a DF pointer across frames
     local blk = b and blocks[i]
     if not blk then break end
+    spend(1)
     for x = 0, 15 do
       for y = 0, 15 do
         if dfhack.burrows.isAssignedBlockTile(b, blk, x, y) then n = n + 1 end
       end
+      spend(16)
     end
-    spend(96)
   end
+  mem.bsize[name] = {nb = #blocks, n = n, t = t}
   return n
 end
 
@@ -294,12 +421,13 @@ local function in_burrow(b, x, y, z)
 end
 
 ---------------------------------------------------------------- scheduling
-local ORDER = {'audit', 'quick', 'seal', 'perim', 'edges', 'scan', 'paint'}
+-- priority among urgent jobs, then among background ones
+local ORDER = {'perim', 'seal', 'quick', 'audit', 'items', 'scan', 'paint', 'edges'}
 
 -- one pending run per job: the earliest tick and the strongest reason (an event beats 'periodic'/'retire', a
 -- post-siege diff beats everything), so no request is lost
 local WEAK = {periodic = true, retire = true, boot = true}
-local function due(name, tick, why, arg)
+due = function(name, tick, why, arg)
   why = why or ''
   local d = mem.due[name]
   if not d then mem.due[name] = {tick = tick, why = why, arg = arg}; return end
@@ -349,18 +477,24 @@ local function burrow_audit(K, ncit, a)
   return a
 end
 
--- one pass over citizens, food/drink/seeds items, beds, farm plots, wells, depots and the edge tiles: walk groups
--- per class (reach) and per-burrow counts (refuge). Pure until the end: the caller commits the result.
-local function audit_pass(K)
-  local t0 = now_t(K)
-  local cits = citizens(K)
-  local cg, main = group_counts(cits)
-  local R = {tick = t0, main = main, cit = {n = #cits, by = cg}, cls = {}, reps = {}}
-  for _, c in ipairs(CLASSES) do R.cls[c] = {n = 0, by = {}, at = {}} end
+local function audit_names(K)
   local kern, refuge = burrow_names(K)
   local names = {kern}
   if refuge ~= kern then names[#names + 1] = refuge end
   if CFG.interior ~= kern and CFG.interior ~= refuge then names[#names + 1] = CFG.interior end
+  return names, kern, refuge
+end
+
+-- one pass over citizens, the census's stock tiles, beds, farm plots, wells, depots and the edge tiles: walk groups
+-- per class (reach) and per-burrow counts (refuge). Pure until the end: the caller commits the result.
+local function audit_pass(K)
+  local t0 = now_t(K)
+  local cits = citizens(K)
+  spend(3 * #cits)
+  local cg, main = group_counts(cits)
+  local R = {tick = t0, main = main, cit = {n = #cits, by = cg}, cls = {}, reps = {}}
+  for _, c in ipairs(CLASSES) do R.cls[c] = {n = 0, by = {}, at = {}} end
+  local names, kern, refuge = audit_names(K)
   local B = {}
   for _, n in ipairs(names) do
     B[n] = {exists = burrow(n) ~= nil, tiles = 0, inside = 0, drink = 0, food = 0, beds = 0, wells = 0}
@@ -371,75 +505,81 @@ local function audit_pass(K)
       for _, c in ipairs(cits) do if in_burrow(b, c.x, c.y, c.z) then B[n].inside = B[n].inside + 1 end end
     end
   end
-  spend(#cits)
-  local gcache = {}                                    -- position -> group (barrels hold many drinks)
-  local function pgroup(x, y, z)
-    local k = key3(x, y, z)
-    local g = gcache[k]
-    if g == nil then g = grp(x, y, z) or false; gcache[k] = g end
-    return g
+  spend(#cits * #names)
+  -- the quick re-check tiles: the biggest stacks per class and walk group
+  local best = {food = {}, drink = {}, bed = {}}
+  local function rep(cls, g, n, x, y, z)
+    local per = best[cls]
+    if not per then return end
+    local l = per[g]
+    if not l then l = {}; per[g] = l end
+    if #l < CFG.reps_per then l[#l + 1] = {n, x, y, z}; return end
+    local lo = 1
+    for j = 2, #l do if l[j][1] < l[lo][1] then lo = j end end
+    if n > l[lo][1] then l[lo] = {n, x, y, z} end
   end
-  local reps = {food = {}, drink = {}, bed = {}}
-  local seen_rep = {food = {}, drink = {}, bed = {}}
-  local function rep(cls, k, x, y, z)
-    local r = reps[cls]
-    if r and not seen_rep[cls][k] and #r < CFG.reps_max then seen_rep[cls][k] = true; r[#r + 1] = {x, y, z} end
+  local function burrows_at(x, y, z)
+    local r = {}
+    for _, bn in ipairs(names) do
+      local b = B[bn].exists and burrow(bn)
+      r[bn] = b and in_burrow(b, x, y, z) or false
+    end
+    return r
   end
-  for _, cat in ipairs(ITEM_CATS) do
-    local cls = ITEM_CLS[cat] or 'food'
-    local i = 0
-    while true do
-      local v = vec('items', cat)                       -- re-read after every yield
-      if not v or i >= #v then break end
-      local it = v[i]
-      i = i + 1
-      if it and usable(it) then
-        local x, y, z = item_pos(it)
-        if x and x >= 0 then
-          local g = pgroup(x, y, z)
-          if g and g ~= 0 then
-            local n = stack(it)
-            local C = R.cls[cls]
-            C.n = C.n + n
-            add(C.by, g, n)
-            if not C.at[g] then C.at[g] = {x, y, z} end
-            rep(cls, key3(x, y, z), x, y, z)
-            if cls ~= 'seeds' then
-              for _, bn in ipairs(names) do
-                if B[bn].exists then
-                  local b = burrow(bn)
-                  if b and in_burrow(b, x, y, z) then B[bn][cls] = B[bn][cls] + n end
-                end
-              end
-            end
+  -- FR-59/62: stock per tile from the census (stored drink, food and seeds included); one group read per tile
+  if not mem.items then job_items(K, 'audit', true) end
+  local I = mem.items
+  R.items = {tick = I.tick, n = I.n, tiles = #I.keys, drop = {drink = I.drop[1], food = I.drop[2], seeds = I.drop[3]}}
+  for _, k in ipairs(I.keys) do
+    local c = I.at[k]
+    local x, y, z = dec3(k)
+    local g = grp(x, y, z)
+    local cost = 2
+    if g and g ~= 0 then
+      local inb
+      for ci, cls in ipairs(STOCK) do
+        local n = c[ci]
+        if n > 0 then
+          local C = R.cls[cls]
+          C.n = C.n + n
+          add(C.by, g, n)
+          if not C.at[g] then C.at[g] = {x, y, z} end
+          rep(cls, g, n, x, y, z)
+          if cls ~= 'seeds' then
+            if not inb then inb = burrows_at(x, y, z); cost = cost + 2 * #names end
+            for _, bn in ipairs(names) do if inb[bn] then B[bn][cls] = B[bn][cls] + n end end
           end
         end
       end
-      spend(4)
     end
+    spend(cost)
   end
   for _, e in ipairs(BLD_CATS) do
-    local v = vec('buildings', e[1])
-    for i = 0, vlen(v) - 1 do
+    local i = 0
+    while true do
+      local v = vec('buildings', e[1])                -- re-read after every yield
+      if not v or i >= #v then break end
       local b = v[i]
+      i = i + 1
+      local cost = 2
       if b and built(b) then
         local g, x, y, z = bgroup(b)
+        cost = cost + 2
         if g then
           local C = R.cls[e[2]]
           C.n = C.n + 1
           add(C.by, g, 1)
           if not C.at[g] then C.at[g] = {x, y, z} end
-          rep(e[2], key3(x, y, z), x, y, z)
+          rep(e[2], g, 1, x, y, z)
           if e[2] == 'bed' or e[2] == 'well' then
             local fld = e[2] == 'bed' and 'beds' or 'wells'
-            for _, bn in ipairs(names) do
-              local bb = B[bn].exists and burrow(bn)
-              if bb and in_burrow(bb, b.centerx, b.centery, b.z) then B[bn][fld] = B[bn][fld] + 1 end
-            end
+            local inb = burrows_at(b.centerx, b.centery, b.z)
+            cost = cost + 2 * #names
+            for _, bn in ipairs(names) do if inb[bn] then B[bn][fld] = B[bn][fld] + 1 end end
           end
         end
       end
-      spend(2)
+      spend(cost)
     end
   end
   R.edge_known = mem.edges ~= nil
@@ -452,13 +592,21 @@ local function audit_pass(K)
       add(C.by, g, 1)
       if not C.at[g] then C.at[g] = {x, y, z} end
     end
-    spend(1)
+    spend(2)
   end
   for _, n in ipairs(names) do
-    if B[n].exists then B[n].tiles = burrow_size(n) end
+    if B[n].exists then B[n].tiles = burrow_size(n, t0) end
     burrow_audit(K, #cits, B[n])
   end
-  R.reps = reps
+  for cls, per in pairs(best) do
+    local out = {}
+    for _, g in ipairs(sorted_keys(per)) do
+      for _, r in ipairs(per[g]) do
+        if #out < CFG.reps_max then out[#out + 1] = {r[2], r[3], r[4]} end
+      end
+    end
+    R.reps[cls] = out
+  end
   R.burrows, R.names = B, {kern = kern, refuge = refuge, interior = CFG.interior}
   return R, cits
 end
@@ -476,7 +624,57 @@ local function cut_of(cg, by_cls, totals)
   return cut
 end
 
-local function reach_flags(R)
+---------------------------------------------------------------- stairs without counterpart (FR-63)
+-- a STAIR_UP needs a STAIR_DOWN or STAIR_UPDOWN above, a STAIR_DOWN a STAIR_UP or STAIR_UPDOWN below; an up/down stair
+-- is flagged only when neither way works. Revealed tiles only: a hidden counterpart is 'unrevealed', never read.
+-- Returns kind, why, or nil when the tile is no stair or has its counterpart.
+local function stair_dead(x, y, z, sh)
+  if not sh then
+    if not rev(x, y, z) then return nil end
+    local s = shape(x, y, z)
+    sh = s and s.shape
+  end
+  if not (sh and STAIR_KIND[sh]) then return nil end
+  local up_bad, down_bad
+  if UP[sh] then
+    local a = rev(x, y, z + 1) and shape(x, y, z + 1)
+    if not a then up_bad = 'above unrevealed' elseif not DOWN[a.shape] then up_bad = 'no stair above' end
+  end
+  if DOWN[sh] then
+    local c = rev(x, y, z - 1) and shape(x, y, z - 1)
+    if not c then down_bad = 'below unrevealed' elseif not UP[c.shape] then down_bad = 'no stair below' end
+  end
+  local why
+  if sh == 'STAIR_UP' then why = up_bad
+  elseif sh == 'STAIR_DOWN' then why = down_bad
+  elseif up_bad and down_bad then why = up_bad .. ', ' .. down_bad end
+  if why then return STAIR_KIND[sh], why end
+end
+
+-- live Run 9: 'down stair at 30,66,109' was flagged from a scan days old while z108..80 below it had been dug to
+-- stairs since. Every flagged stair is read again (the tile and its counterpart) before it is reported; the fixed
+-- ones are dropped from the scan result.
+local function live_stairs()
+  local S = mem.scan
+  if not S or #S.stairs == 0 then return {} end
+  local keep = {}
+  for _, s in ipairs(S.stairs) do
+    local kind, why = stair_dead(s[1], s[2], s[3])
+    if kind then keep[#keep + 1] = {s[1], s[2], s[3], kind, why, grp(s[1], s[2], s[3]) or 0} end
+    spend(6)
+  end
+  S.stairs = keep
+  return keep
+end
+
+local function stairs_flag(dead)
+  local s = dead[1]
+  if not s then return nil end
+  return string.format('stairs: %d without counterpart (%s at %d,%d,%d)', #dead, s[4], s[1], s[2], s[3])
+end
+
+-- the class flags of an audit, then the stairs flag read now
+local function reach_flags(R, dead)
   local f = {}
   local main = R.main
   local off = R.cit.n - (main and R.cit.by[main] or 0)
@@ -492,17 +690,15 @@ local function reach_flags(R)
       f[#f + 1] = string.format('%s: %d of %d off-group', cls, C.n - on, C.n)
     end
   end
-  local dead = mem.scan and mem.scan.stairs or {}
-  if #dead > 0 then
-    local s = dead[1]
-    f[#f + 1] = string.format('stairs: %d without counterpart (%s at %d,%d,%d)', #dead, s[4], s[1], s[2], s[3])
-  end
+  local sf = stairs_flag(dead)
+  if sf then f[#f + 1] = sf end
   return f
 end
 
 ---------------------------------------------------------------- CUTOFF blame
--- a closing tile: constructed wall/fortification, or a door/hatch/bridge/floodgate/grate/bars/statue building
-local function closer_kind(x, y, z)
+-- a closing tile: constructed wall/fortification, or a door/hatch/bridge/floodgate/grate/bars/statue building;
+-- the kind and the building
+local function closer_at(x, y, z)
   local des, occ = rev(x, y, z)
   if not des then return nil end
   local s = shape(x, y, z)
@@ -510,8 +706,9 @@ local function closer_kind(x, y, z)
     return s.shape == 'WALL' and 'wall' or 'fort'
   end
   local b = bld_on(x, y, z, occ)
-  if b then return BKIND[btype(b) or ''] end
+  if b then return BKIND[btype(b) or ''], b end
 end
+local function closer_kind(x, y, z) return (closer_at(x, y, z)) end
 
 -- groups around a tile (8 on the level, the tiles above and below)
 local function around(x, y, z, out)
@@ -553,16 +750,19 @@ local function ring_separates(fp, gc, has)
 end
 
 -- neighbours a walker may step to from (x,y,z) (DF moves: 8 on the level, stairs, up a ramp), as keys; the caller
--- filters them by walk group, so an over-approximation never connects two groups (down a ramp: see bfs)
-local function steps(x, y, z, out)
+-- filters them by walk group, so an over-approximation never connects two groups (down a ramp: see bfs). `sh` = the
+-- tile's shape when the caller read it already.
+local function steps(x, y, z, out, sh)
   local n = 0
   for dy = -1, 1 do
     for dx = -1, 1 do
       if dx ~= 0 or dy ~= 0 then n = n + 1; out[n] = key3(x + dx, y + dy, z) end
     end
   end
-  local s = shape(x, y, z)
-  local sh = s and s.shape
+  if sh == nil then
+    local s = shape(x, y, z)
+    sh = s and s.shape
+  end
   if sh and UP[sh] then
     local a = rev(x, y, z + 1) and shape(x, y, z + 1)
     if a and DOWN[a.shape] then n = n + 1; out[n] = key3(x, y, z + 1) end
@@ -584,7 +784,7 @@ end
 -- the open top of a ramp one level down (a walker steps down the ramp from here)
 local function ramp_top(k)
   local x, y, z = dec3(k)
-  if not rev(x, y, z) then return false end
+  if z < 1 or not rev(x, y, z) then return false end
   local s = shape(x, y, z)
   return s ~= nil and s.shape == 'RAMP_TOP'
 end
@@ -595,18 +795,21 @@ local function blame(K, gc, has, cut_pos)
     local x, y, z = dec3(k)
     local p = mem.done_info[k] or {}
     if separates(x, y, z, gc, has) then return {x, y, z, p.kind or closer_kind(x, y, z) or '?', p.proj} end
-    spend(4)
+    spend(20)
   end
-  local bv = vec('buildings', 'BRIDGE')
-  for i = 0, vlen(bv) - 1 do
+  local i = 0
+  while true do
+    local bv = vec('buildings', 'BRIDGE')                 -- re-read after every yield
+    if not bv or i >= #bv then break end
     local b = bv[i]
+    i = i + 1
     if b then
       local _, s = bstate(b)
       if s == 'up' and ring_separates({b.x1, b.y1, b.z, b.x2, b.y2, b.z}, gc, has) then
         return {b.centerx, b.centery, b.z, 'bridge', nil, bridge = true}
       end
     end
-    spend(4)
+    spend(8)
   end
   -- bounded walk over the cut group: the first closer next to it that touches a group with the class
   if cut_pos then
@@ -617,8 +820,8 @@ local function blame(K, gc, has, cut_pos)
       local x, y, z = dec3(q[head])
       head = head + 1
       local n = steps(x, y, z, nb)
-      for i = 1, n do
-        local k = nb[i]
+      for j = 1, n do
+        local k = nb[j]
         if not seen[k] then
           seen[k] = true
           local nx, ny, nz = dec3(k)
@@ -631,10 +834,10 @@ local function blame(K, gc, has, cut_pos)
           end
         end
       end
-      spend(4)
+      spend(12)
     end
   end
-  for _, s in ipairs(mem.scan and mem.scan.stairs or {}) do
+  for _, s in ipairs(live_stairs()) do
     if s[6] == gc then return {s[1], s[2], s[3], s[4] .. ' without counterpart'} end
   end
 end
@@ -645,7 +848,8 @@ local function commit_audit(K, R, cits)
   for _, cls in ipairs(VITAL) do totals[cls] = R.cls[cls].n; by_cls[cls] = R.cls[cls].by end
   local cut = cut_of(R.cit.by, by_cls, totals)
   R.cut = cut
-  R.flags = reach_flags(R)
+  local dead = live_stairs()
+  R.flags = reach_flags(R, dead)
   -- CUTOFF: more citizens than before lost the group of a vital class
   local inc
   for _, cls in ipairs(VITAL) do
@@ -685,8 +889,7 @@ local function commit_audit(K, R, cits)
                local f = {}
                for i = 1, math.min(#R.flags, 8) do f[i] = trunc(R.flags[i], 60) end
                return f
-             end)(), cut = cut.food + cut.drink + cut.bed,
-              stairs = #(mem.scan and mem.scan.stairs or {})})
+             end)(), cut = cut.food + cut.drink + cut.bed, stairs = #dead})
     end
   end
   mem.reach = R
@@ -701,9 +904,33 @@ local function commit_audit(K, R, cits)
   end
 end
 
-local function job_audit(K)
+-- FR-62: what the audit reads: constructions, doors, bridges (the watcher's fingerprint), the item census, the map
+-- edge, the citizens' walk groups and the burrows' blocks; equal inputs give an equal audit
+local function audit_sig(K, cits)
+  local cg = group_counts(cits)
+  local p = {mem.fp or '-', mem.items and mem.items.tick or -1, mem.edges and mem.edges.tick or -1, K.mode()}
+  for _, g in ipairs(sorted_keys(cg)) do p[#p + 1] = g .. ':' .. cg[g] end
+  for _, n in ipairs((audit_names(K))) do
+    local bl = block_list(n)
+    p[#p + 1] = bl and #bl or -1
+  end
+  return table.concat(p, '|')
+end
+
+local function job_audit(K, why)
+  local t = now_t(K)
+  if why == 'periodic' and mem.reach and mem.audit_sig and t - mem.reach.tick < CFG.audit_max_age then
+    local cits = citizens(K)
+    spend(3 * #cits + 8)
+    if audit_sig(K, cits) == mem.audit_sig then
+      mem.last_audit = t
+      mem.stats.audit_skip = (mem.stats.audit_skip or 0) + 1
+      return
+    end
+  end
   local R, cits = audit_pass(K)
   commit_audit(K, R, cits)
+  mem.audit_sig = audit_sig(K, cits)
   mem.last_audit = now_t(K)
 end
 
@@ -712,6 +939,7 @@ local function job_quick(K)
   local R = mem.reach
   if not R then due('audit', now_t(K), 'quick'); return end
   local cits = citizens(K)
+  spend(3 * #cits)
   local cg = group_counts(cits)
   local by_cls, totals = {}, {}
   for _, cls in ipairs(VITAL) do
@@ -719,7 +947,7 @@ local function job_quick(K)
     for _, p in ipairs(R.reps[cls] or {}) do
       local g = grp(p[1], p[2], p[3])
       if g and g ~= 0 then by_cls[cls][g] = true end
-      spend(1)
+      spend(2)
     end
   end
   local cut = cut_of(cg, by_cls, totals)
@@ -729,21 +957,55 @@ local function job_quick(K)
 end
 
 ---------------------------------------------------------------- map edge (FR-54 sources)
+-- FR-62: dfhack.maps.isTileVisible answers "revealed?" without flag objects; it is trusted only when it agrees with
+-- designation.hidden on the tiles citizens stand on, else every edge tile is read with getTileFlags
+local function vis_fn(K)
+  if mem.visf ~= nil then return mem.visf end
+  local f = dfhack.maps.isTileVisible
+  if type(f) ~= 'function' then mem.visf = false; return false end
+  local n = 0
+  for _, c in ipairs(citizens(K)) do
+    local ok, v = pcall(f, c.x, c.y, c.z)
+    if not (ok and v == true) then mem.visf = false; return false end
+    n = n + 1
+    if n >= 4 then break end
+  end
+  if n == 0 then return false end                    -- no citizen to check against: not this time
+  mem.visf = f
+  return f
+end
+
+-- the border as one loop per level: a run of walkable revealed tiles along it is one walk group (neighbours on the
+-- border row join), so one tile per run, plus one per CFG.edge_run tiles of a long run, stands for it
 local function job_edges(K)
   local X, Y, Z = map_size()
+  local vf = vis_fn(K)
   local list = {}
-  local function try(x, y, z)
-    if #list < CFG.edges_max then
-      local g = grp(x, y, z)
-      if g and g ~= 0 then list[#list + 1] = key3(x, y, z) end
-    end
-    spend(1)
-  end
   for z = Z - 1, 0, -1 do
-    for x = 0, X - 1 do try(x, 0, z); try(x, Y - 1, z) end
-    for y = 1, Y - 2 do try(0, y, z); try(X - 1, y, z) end
+    local prev, run = nil, 0
+    local function try(x, y)
+      local g
+      if not vf or vf(x, y, z) then g = grp(x, y, z); spend(2) end
+      spend(1)
+      if g and g ~= 0 then
+        if g ~= prev or run >= CFG.edge_run then
+          if #list < CFG.edges_max then list[#list + 1] = key3(x, y, z) end
+          run = 0
+        end
+        run = run + 1
+        prev = g
+      else prev = nil end
+    end
+    for x = 0, X - 1 do try(x, 0) end
+    for y = 1, Y - 1 do try(X - 1, y) end
+    for x = X - 2, 0, -1 do try(x, Y - 1) end
+    for y = Y - 2, 1, -1 do try(0, y) end
   end
-  mem.edges = {tick = now_t(K), list = list}
+  local t = now_t(K)
+  mem.edges = {tick = t, list = list}
+  mem.due.edges = nil                                   -- a run queued meanwhile (boot) has nothing left to do
+  st.edges = #list <= CFG.edges_keep and {t = t, k = list} or nil   -- known again right after a load
+  dirty = true
 end
 
 ---------------------------------------------------------------- perimeter manifest (FR-56)
@@ -769,6 +1031,17 @@ local function perim_count()
   return n
 end
 
+-- one closer as a perimeter piece: a bridge by its anchor and footprint (its other tiles are the same piece)
+local function record_piece(x, y, z, kind, b, src, t)
+  local key, piece = kstr(x, y, z), {k = kind, src = src}
+  if kind == 'bridge' then
+    if not b then return false end
+    key = kstr(b.x1, b.y1, b.z)
+    piece.fp = {b.x1, b.y1, b.z, b.x2, b.y2, b.z}
+  end
+  return perim_add(key, piece, t)
+end
+
 -- manifest bridges and killbox floors (the template geometry)
 local function perim_manifest(K, t)
   local man = K.manifest()
@@ -788,6 +1061,7 @@ local function perim_manifest(K, t)
           for x = bb[1], bb[4] do
             local g = grp(x, y, z)
             if g and g ~= 0 then perim_add(kstr(x, y, z), {k = 'killbox', id = kb.id, src = 'manifest'}, t) end
+            spend(2)
           end
         end
       end
@@ -823,7 +1097,7 @@ local function job_perim(K, why)
   for _, k in ipairs(sorted_keys(st.perim)) do
     local p = st.perim[k]
     if p and piece_state(k, p) == 'gone' then gone[#gone + 1] = k end
-    spend(3)
+    spend(4)
   end
   mem.perim_diff = {tick = t, why = why, gone = gone}
   if why ~= 'post' then
@@ -928,21 +1202,55 @@ local function routes_of(entries)
   return reps
 end
 
--- BFS from the citizens of group G over revealed tiles of G: inside tiles always expand, outside tiles until the
--- first map-edge tile is found. Entries = inside tiles next to outside tiles of G. `learned` = blocked tiles next
--- to the visited ones (perimeter candidates).
-local function bfs(K, G, sources, X, Y)
+-- the entrance search from `sources` ({x,y,z}) over revealed tiles of walk group G, in two phases.
+-- 1. A BFS over the inside tiles (all of them): entries = inside tiles next to outside tiles of G (the openings);
+--    the outside tiles next to them (and outside sources) form the frontier. `learned` = blocked tiles next to the
+--    visited ones (perimeter candidates).
+-- 2. `trace`: an A* from the frontier over the tiles of G to the nearest map-edge tile (heuristic: the distance to
+--    the nearest map edge, never more than the steps left), so the route outside is walked, not the whole surface
+--    (FR-62: the old BFS flooded the outside until it met the edge)
+local function heap_push(h, f, k)
+  local n = #h.k + 1
+  h.k[n], h.f[n] = k, f
+  while n > 1 do
+    local p = n // 2
+    if h.f[p] <= h.f[n] then break end
+    h.k[p], h.k[n], h.f[p], h.f[n] = h.k[n], h.k[p], h.f[n], h.f[p]
+    n = p
+  end
+end
+local function heap_pop(h)
+  local n = #h.k
+  if n == 0 then return nil end
+  local k = h.k[1]
+  h.k[1], h.f[1] = h.k[n], h.f[n]
+  h.k[n], h.f[n] = nil, nil
+  n = n - 1
+  local i = 1
+  while true do
+    local l, r, m = 2 * i, 2 * i + 1, i
+    if l <= n and h.f[l] < h.f[m] then m = l end
+    if r <= n and h.f[r] < h.f[m] then m = r end
+    if m == i then break end
+    h.k[m], h.k[i], h.f[m], h.f[i] = h.k[i], h.k[m], h.f[i], h.f[m]
+    i = m
+  end
+  return k
+end
+
+local function bfs(K, G, sources, X, Y, trace)
   local par, outs, depth, rtop = {}, {}, {}, {}
-  local q, head = {}, 1
+  local q, head, visited = {}, 1, 0
   local edge_k, partial = nil, false
-  local entries, ent_seen, learned = {}, {}, {}
+  local entries, ent_seen, learned, front = {}, {}, {}, {}
   local function eval(k)                     -- 1 outside, 0 inside, false = hidden or another walk group
     local o = outs[k]
     if o ~= nil then return o end
     local x, y, z = dec3(k)
     local des = rev(x, y, z)
-    if not des then outs[k] = false; return false end
+    if not des then outs[k] = false; spend(1); return false end
     P.x, P.y, P.z = x, y, z
+    spend(2)
     if (dfhack.maps.getWalkableGroup(P) or 0) ~= G then
       outs[k] = false
       learned[#learned + 1] = k
@@ -959,171 +1267,378 @@ local function bfs(K, G, sources, X, Y)
     local ox, oy, oz = dec3(ok_)
     entries[#entries + 1] = {x = x, y = y, z = z, ox = ox, oy = oy, oz = oz, d = d}
   end
-  for _, c in ipairs(sources) do
-    local k = key3(c.x, c.y, c.z)
-    if par[k] == nil and eval(k) ~= false then par[k], depth[k] = -1, 0; q[#q + 1] = k end
+  local function on_edge(k)
+    local x, y = dec3(k)
+    return x == 0 or y == 0 or x == X - 1 or y == Y - 1
   end
+  -- the walkable neighbours of k (DF moves, down a ramp included): calls f(nk, o) for each
   local nb = {}
-  local function link(k, nk, ins, expand)
-    local o = eval(nk)
-    if o == false then return false end
-    if ins and o == 1 then entry(k, nk, depth[k]) end
-    if not ins and o == 0 then entry(nk, k, depth[k] + 1) end
-    if expand and par[nk] == nil then
-      par[nk], depth[nk] = k, depth[k] + 1
-      q[#q + 1] = nk
-    end
-    return true
-  end
-  while head <= #q do
-    if head > CFG.bfs_max then partial = true; break end
-    local k = q[head]
-    head = head + 1
+  local function each(k, sh, f)
     local x, y, z = dec3(k)
-    local ins = outs[k] == 0
-    if not edge_k and (x == 0 or y == 0 or x == X - 1 or y == Y - 1) then edge_k = k end
-    local expand = ins or not edge_k
-    local n = steps(x, y, z, nb)
+    local n = steps(x, y, z, nb, sh)
     for i = 1, n do
       local nk = nb[i]
-      if not link(k, nk, ins, expand) and i <= 8 then
+      local o = eval(nk)
+      if o ~= false then f(nk, o)
+      elseif i <= 8 then
         -- down a ramp: a blocked neighbour that is the open top of a ramp one level down
-        if rtop[nk] == nil then rtop[nk] = ramp_top(nk) end
-        if rtop[nk] then link(k, nk - 16777216, ins, expand) end
+        if rtop[nk] == nil then rtop[nk] = ramp_top(nk); spend(2) end
+        if rtop[nk] then
+          local dk = nk - 16777216
+          local od = eval(dk)
+          if od ~= false then f(dk, od) end
+        end
       end
     end
-    spend(4)
+    spend(2)
   end
-  return {par = par, outs = outs, edge = edge_k, entries = entries, partial = partial, visited = head - 1,
+  for _, c in ipairs(sources) do
+    local k = key3(c[1], c[2], c[3])
+    local o = par[k] == nil and eval(k)
+    if o == 0 then par[k], depth[k] = -1, 0; q[#q + 1] = k
+    elseif o == 1 then par[k], depth[k] = -1, 0; front[#front + 1] = k end
+  end
+  -- phase 1: the interior; an outside source looks at its neighbours too (the inside behind an opening)
+  for _, k in ipairs(front) do
+    each(k, nil, function(nk, o)
+      if o == 0 then
+        entry(nk, k, 1)
+        if par[nk] == nil then par[nk], depth[nk] = k, 1; q[#q + 1] = nk end
+      end
+    end)
+  end
+  local cur
+  local function inside_step(nk, o)
+    if o == 1 then
+      entry(cur, nk, depth[cur])
+      if par[nk] == nil then par[nk], depth[nk] = cur, depth[cur] + 1; front[#front + 1] = nk end
+    elseif par[nk] == nil then
+      par[nk], depth[nk] = cur, depth[cur] + 1
+      q[#q + 1] = nk
+    end
+  end
+  while head <= #q do
+    if visited >= CFG.bfs_max then partial = true; break end
+    cur = q[head]
+    head, visited = head + 1, visited + 1
+    if not edge_k and on_edge(cur) then edge_k = cur end
+    each(cur, nil, inside_step)
+  end
+  -- phase 2: the route to the map edge
+  if trace and not edge_k and not partial then
+    local h, g, done, fixed = {k = {}, f = {}}, {}, {}, {}
+    local function hcost(k)
+      local x, y = dec3(k)
+      return math.min(x, y, X - 1 - x, Y - 1 - y)
+    end
+    for k in pairs(par) do fixed[k] = true end         -- phase 1 tiles keep their parents (no cycles)
+    for _, k in ipairs(front) do
+      g[k] = depth[k]
+      heap_push(h, depth[k] + hcost(k), k)
+    end
+    while true do
+      local k = heap_pop(h)
+      if not k then break end
+      if not done[k] then
+        done[k] = true
+        if on_edge(k) then edge_k = k; break end
+        if visited >= CFG.bfs_max then partial = true; break end
+        visited = visited + 1
+        each(k, nil, function(nk)
+          local gn = g[k] + 1
+          if not done[nk] and not fixed[nk] and (g[nk] == nil or gn < g[nk]) then
+            g[nk], par[nk] = gn, k
+            heap_push(h, gn + hcost(nk), nk)
+          end
+        end)
+      end
+    end
+  end
+  return {par = par, outs = outs, edge = edge_k, entries = entries, partial = partial, visited = visited,
           learned = learned}
 end
 
--- learn the perimeter from a BFS in PEACE: closers next to an inside tile that border an outside tile, and the
--- doors/hatches on the openings
-local function learn_perimeter(K, B, reps)
+-- BFS and scan sources on the groups `on` (nil = any): the citizens, plus (`inner`) beds and stock tiles of the last
+-- audit, so an untraced BFS or the scan finds the interior while every citizen works outside
+local function sources_on(cits, on, inner)
+  local src, seen = {}, {}
+  local function push(x, y, z)
+    local k = key3(x, y, z)
+    if not seen[k] then seen[k] = true; src[#src + 1] = {x, y, z} end
+  end
+  for _, c in ipairs(cits) do if not on or on[c.g] then push(c.x, c.y, c.z) end end
+  if inner then
+    for _, cls in ipairs({'bed', 'drink', 'food'}) do
+      for _, p in ipairs(mem.reach and mem.reach.reps[cls] or {}) do push(p[1], p[2], p[3]) end
+    end
+  end
+  return src
+end
+
+-- a closer tile next to a tile of the citizens' groups `cg` (8 on the level, above, below)
+local function borders(x, y, z, cg)
+  for dy = -1, 1 do
+    for dx = -1, 1 do
+      if dx ~= 0 or dy ~= 0 then
+        local g = grp(x + dx, y + dy, z)
+        if g and cg[g] then return true end
+      end
+    end
+  end
+  for _, dz in ipairs({-1, 1}) do
+    local g = grp(x, y, z + dz)
+    if g and cg[g] then return true end
+  end
+  return false
+end
+
+-- learn the perimeter from a BFS: closers next to an inside tile that border an outside tile or a walk group that
+-- reaches the map edge (E), and the doors, hatches and bridges on the openings
+local function learn_perimeter(K, B, reps, E, G)
   local t = now_t(K)
   local added = 0
   for _, k in ipairs(B.learned) do
     local x, y, z = dec3(k)
-    local kind = closer_kind(x, y, z)
-    if kind and kind ~= 'bridge' then
+    local kind, b = closer_at(x, y, z)
+    spend(2)
+    if kind and REC[kind] then
       local inner, outer = false, false
       for dy = -1, 1 do
         for dx = -1, 1 do
-          local o = B.outs[key3(x + dx, y + dy, z)]
-          if o == 0 then inner = true elseif o == 1 then outer = true
-          elseif o == nil and (dx ~= 0 or dy ~= 0) then
-            local des = rev(x + dx, y + dy, z)
-            if des and des.outside then outer = true end
+          if dx ~= 0 or dy ~= 0 then
+            local o = B.outs[key3(x + dx, y + dy, z)]
+            if o == 0 then inner = true
+            elseif o == 1 then outer = true
+            else
+              local des = rev(x + dx, y + dy, z)
+              if des and des.outside then outer = true
+              elseif des then
+                local g = grp(x + dx, y + dy, z)
+                if g and g ~= 0 and g ~= G and E[g] then outer = true end
+              end
+              spend(2)
+            end
           end
         end
       end
-      if inner and outer and perim_add(kstr(x, y, z), {k = kind, src = 'seal'}, t) then added = added + 1 end
+      if inner and outer and record_piece(x, y, z, kind, b, 'seal', t) then added = added + 1 end
     end
-    spend(2)
   end
   for _, r in ipairs(reps) do
     local des, occ = rev(r.x, r.y, r.z)
     local b = des and bld_on(r.x, r.y, r.z, occ)
     local kind = b and BKIND[btype(b) or '']
-    if kind and kind ~= 'bridge' and perim_add(kstr(r.x, r.y, r.z), {k = kind, src = 'seal'}, t) then
-      added = added + 1
-    end
+    if kind and REC[kind] and record_piece(r.x, r.y, r.z, kind, b, 'seal', t) then added = added + 1 end
+    spend(2)
   end
   if added > 0 then K.log('info', 'seal: %d perimeter pieces learned', added) end
+  return added
 end
 
+---------------------------------------------------------------- openings (FR-60)
+-- a known opening {x,y,z, ox,oy,oz} (inside tile, outside tile) still joins the inside to the outside of group G
+local function opening_open(o, G)
+  local gi = grp(o[1], o[2], o[3])
+  return gi ~= nil and gi ~= 0 and gi == G and grp(o[4], o[5], o[6]) == G
+end
+
+-- every wall, door, gate or bridge around a sealed opening's inside and outside tile (one level up and down for
+-- stairs and ramps) that borders the citizens' groups
+local function record_opening(o, cg, t)
+  local r, n, seen = CFG.rec_r, 0, {}
+  for _, c in ipairs({{o[1], o[2], o[3]}, {o[4], o[5], o[6]}}) do
+    for z = c[3] - 1, c[3] + 1 do
+      for y = c[2] - r, c[2] + r do
+        for x = c[1] - r, c[1] + r do
+          local k = kstr(x, y, z)
+          if not seen[k] then
+            seen[k] = true
+            local kind, b = closer_at(x, y, z)
+            spend(2)
+            if kind and REC[kind] then
+              spend(20)
+              if borders(x, y, z, cg) and record_piece(x, y, z, kind, b, 'entrance', t) then n = n + 1 end
+            end
+          end
+        end
+      end
+    end
+  end
+  return n
+end
+
+-- the openings the last complete BFS found are persisted; one gone from a later complete BFS (or every one, once the
+-- fort is sealed) was sealed: its walls, doors, gates and bridges become perimeter pieces (FR-60, no manifest needed)
+local function track_openings(K, res, B, cg)
+  local t = now_t(K)
+  local prev = st.open or {}
+  local closed = {}
+  if res.sealed then
+    closed = prev
+    if #prev > 0 then st.open, dirty = {}, true end
+  elseif B and not B.partial and #B.entries < CFG.entries_max then
+    for _, o in ipairs(prev) do
+      local still = false
+      for _, e in ipairs(B.entries) do
+        if math.abs(e.x - o[1]) <= 1 and math.abs(e.y - o[2]) <= 1 and math.abs(e.z - o[3]) <= 1 then
+          still = true
+          break
+        end
+      end
+      if not still then closed[#closed + 1] = o end
+    end
+    local cur = {}
+    for i, r in ipairs(res.openings) do
+      if i > CFG.routes_max then break end
+      cur[i] = {r.pos[1], r.pos[2], r.pos[3], r.out[1], r.out[2], r.out[3]}
+    end
+    st.open, dirty = cur, true
+  end
+  local added = 0
+  for _, o in ipairs(closed) do added = added + record_opening(o, cg, t) end
+  if #closed > 0 then
+    res.closed = #closed
+    K.log('info', 'seal: %d opening%s sealed, %d perimeter pieces recorded', #closed, #closed == 1 and '' or 's', added)
+  end
+  return added
+end
+
+-- the BFS runs when its answer can change; in PEACE the open gates (D-14) leak by design, so a periodic or a
+-- construction check there re-uses the last answer unless a known opening closed or CFG.bfs_every passed
+local BFS_WHY = {inspect = true, record = true, lever = true, siege = true}
+
 local function job_seal(K, why)
+  why = why or ''
   local t0 = now_t(K)
+  local rec = mem.rec_req                        -- cleared at the end (a dropped run keeps the request)
   if not mem.edges then job_edges(K) end
   local X, Y = map_size()
   local cits = citizens(K)
-  local res = {tick = t0, why = why or '', sealed = false, routes = 0, openings = {}}
-  if #cits == 0 then res.msg = 'no citizen on a revealed walkable tile'; mem.seal = res; return end
-  local cg = group_counts(cits)
+  spend(3 * #cits)
+  local res = {tick = t0, why = why, sealed = false, routes = 0, openings = {}}
+  if #cits == 0 then
+    res.msg = 'no citizen on a revealed walkable tile'
+    mem.seal = res
+    if rec then
+      mem.rec = {tick = t0, added = 0, n = mem.perim_n or 0, msg = res.msg}
+      if mem.rec_req == rec then mem.rec_req = nil end
+    end
+    return
+  end
+  local cg, main = group_counts(cits)
   local E = {}
   for _, k in ipairs(mem.edges.list) do
     local x, y, z = dec3(k)
     local g = grp(x, y, z)
     if g and g ~= 0 and not E[g] then E[g] = k end
-    spend(1)
+    spend(2)
   end
   local leak = {}
   for _, g in ipairs(sorted_keys(cg)) do if E[g] then leak[#leak + 1] = g end end
   local mode = K.mode()
   local expect = bridges_expect_sealed(K)
+  local prev = mem.seal
+  local B, added = nil, 0
   if #leak == 0 then
     res.sealed, res.msg = true, 'seal verified: no route'
   else
     local G = leak[1]
     for _, g in ipairs(leak) do if cg[g] > cg[G] then G = g end end
-    local src = {}
-    for _, c in ipairs(cits) do if c.g == G then src[#src + 1] = c end end
-    local B = bfs(K, G, src, X, Y)
-    local reps = routes_of(B.entries)
-    res.routes, res.partial, res.visited = #reps, B.partial, B.visited
-    for i = 1, math.min(#reps, CFG.routes_max) do
-      local r = reps[i]
-      local bt, bs = describe_tile(r.x, r.y, r.z)
-      local ot, os_ = describe_tile(r.ox, r.oy, r.oz)
-      res.openings[i] = {pos = {r.x, r.y, r.z}, out = {r.ox, r.oy, r.oz}, n = r.n, d = r.d,
-                         bld = bt, state = bs, out_bld = ot, out_state = os_}
-    end
-    -- the first leak: walking back from the first map-edge tile, the first inside tile is where the route
-    -- enters the fort; buildings on the route are listed with their state
-    if B.edge then
-      local path, k = {}, B.edge
-      while k and k ~= -1 and #path < 5000 do path[#path + 1] = k; k = B.par[k] end
-      local first, via = nil, {}
-      for _, pk in ipairs(path) do
-        local x, y, z = dec3(pk)
-        if not first and B.outs[pk] == 0 then first = {x, y, z} end
-        local des, occ = rev(x, y, z)
-        local b = des and bld_on(x, y, z, occ)
-        if b and #via < 4 then
-          local bt, bs = bstate(b)
-          via[#via + 1] = string.format('%s %s at %d,%d,%d', bt, bs, x, y, z)
-        end
+    local need = expect or mode ~= 'PEACE' or rec or BFS_WHY[why] or not (prev and prev.bfs) or prev.sealed
+                 or t0 - prev.bfs >= CFG.bfs_every
+    if not need then
+      for _, o in ipairs(st.open or {}) do         -- a known opening closed (walled up, a bridge raised)
+        spend(4)
+        if not opening_open(o, G) then need = true; break end
       end
-      local ex, ey, ez = dec3(B.edge)
-      res.edge = {ex, ey, ez}
-      res.len = #path - 1
-      res.via = via
-      if first then
-        local bt, bs = describe_tile(first[1], first[2], first[3])
-        res.first = {pos = first, bld = bt, state = bs}
-        -- a perimeter piece that should stand next to the leak
-        for dy = -1, 1 do
-          for dx = -1, 1 do
-            local pk = kstr(first[1] + dx, first[2] + dy, first[3])
-            local p = st.perim[pk]
-            if p and piece_state(pk, p) == 'gone' then res.first.missing = p.k .. ' ' .. pk end
+    end
+    if not need then
+      -- FR-62: the gates stand open in PEACE, the fort leaks by design and no known opening changed: the last BFS
+      -- answer stands
+      for k, v in pairs(prev) do res[k] = v end
+      res.tick, res.why, res.reused, res.closed = t0, why, true, nil
+      mem.stats.bfs_skip = (mem.stats.bfs_skip or 0) + 1
+    else
+      local src = sources_on(cits, {[G] = true}, true)
+      B = bfs(K, G, src, X, Y, true)
+      mem.stats.bfs = (mem.stats.bfs or 0) + 1
+      res.bfs = t0
+      local reps = routes_of(B.entries)
+      res.routes, res.partial, res.visited = #reps, B.partial, B.visited
+      for i = 1, math.min(#reps, CFG.routes_max) do
+        local r = reps[i]
+        local bt, bs = describe_tile(r.x, r.y, r.z)
+        local ot, os_ = describe_tile(r.ox, r.oy, r.oz)
+        res.openings[i] = {pos = {r.x, r.y, r.z}, out = {r.ox, r.oy, r.oz}, n = r.n, d = r.d,
+                           bld = bt, state = bs, out_bld = ot, out_state = os_}
+      end
+      -- the first leak: walking back from the first map-edge tile, the first inside tile is where the route
+      -- enters the fort; buildings on the route are listed with their state
+      if B.edge then
+        local path, k = {}, B.edge
+        while k and k ~= -1 and #path < 5000 do path[#path + 1] = k; k = B.par[k] end
+        local first, via = nil, {}
+        for _, pk in ipairs(path) do
+          local x, y, z = dec3(pk)
+          if not first and B.outs[pk] == 0 then first = {x, y, z} end
+          local des, occ = rev(x, y, z)
+          local b = des and bld_on(x, y, z, occ)
+          if b and #via < 4 then
+            local bt, bs = bstate(b)
+            via[#via + 1] = string.format('%s %s at %d,%d,%d', bt, bs, x, y, z)
           end
         end
-        res.msg = string.format('LEAK at %d,%d,%d (%s %s)%s', first[1], first[2], first[3], tostring(bt), tostring(bs),
-                                res.first.missing and (', ' .. res.first.missing .. ' missing') or '')
+        local ex, ey, ez = dec3(B.edge)
+        res.edge = {ex, ey, ez}
+        res.len = #path - 1
+        res.via = via
+        if first then
+          local bt, bs = describe_tile(first[1], first[2], first[3])
+          res.first = {pos = first, bld = bt, state = bs}
+          -- a perimeter piece that should stand next to the leak
+          for dy = -1, 1 do
+            for dx = -1, 1 do
+              local pk = kstr(first[1] + dx, first[2] + dy, first[3])
+              local p = st.perim[pk]
+              if p and piece_state(pk, p) == 'gone' then res.first.missing = p.k .. ' ' .. pk end
+            end
+          end
+          res.msg = string.format('LEAK at %d,%d,%d (%s %s)%s', first[1], first[2], first[3], tostring(bt),
+                                  tostring(bs), res.first.missing and (', ' .. res.first.missing .. ' missing') or '')
+        else
+          res.first = {pos = {src[1][1], src[1][2], src[1][3]}, open = true}
+          res.msg = string.format('LEAK: open route from %d,%d,%d to the map edge without a roofed tile',
+                                  src[1][1], src[1][2], src[1][3])
+        end
       else
-        res.first = {pos = {src[1].x, src[1].y, src[1].z}, open = true}
-        res.msg = string.format('LEAK: open route from %d,%d,%d to the map edge without a roofed tile',
-                                src[1].x, src[1].y, src[1].z)
+        res.msg = string.format('LEAK: group %d reaches the map edge, route not traced (%s)', G,
+                                B.partial and 'search limit' or 'unrevealed or climbing')
       end
-    else
-      res.msg = string.format('LEAK: group %d reaches the map edge, route not traced (%s)', G,
-                              B.partial and 'search limit' or 'unrevealed or climbing')
+      res.msg = res.msg .. string.format('; %d independent route%s', res.routes, res.routes == 1 and '' or 's')
+      if mode == 'PEACE' or rec then added = added + learn_perimeter(K, B, reps, E, G) end
     end
-    res.msg = res.msg .. string.format('; %d independent route%s', res.routes, res.routes == 1 and '' or 's')
-    if mode == 'PEACE' then learn_perimeter(K, B, reps) end
+  end
+  added = added + track_openings(K, res, B, cg)
+  if rec then
+    -- perimeter.record on a sealed fort: the boundary of the citizens' main group (closers between it and the
+    -- outside or a walk group that reaches the map edge)
+    if res.sealed and main then
+      local Bm = bfs(K, main, sources_on(cits, {[main] = true}, true), X, Y, false)
+      added = added + learn_perimeter(K, Bm, {}, E, main)
+    end
+    mem.rec = {tick = t0, added = added, n = mem.perim_n or 0, sealed = res.sealed and 1 or 0}
+    K.log('info', 'seal: perimeter.record: %d pieces added, %d in all', added, mem.perim_n or 0)
+    if mem.rec_req == rec then mem.rec_req = nil end
   end
   res.expect = expect
-  local prev = mem.seal
   mem.seal = res
   local pos = res.first and res.first.pos or nil
   if not res.sealed and expect then
     K.emit('SEAL_LEAK', 'A', trunc(res.msg, 200), {routes = res.routes, pos = pos, bld = res.first and res.first.bld,
-           state = res.first and res.first.state, why = trunc(why or '', 40)})
-  elseif why ~= 'inspect' and (why ~= 'periodic' or not prev or prev.sealed ~= res.sealed
+           state = res.first and res.first.state, why = trunc(why, 40)})
+  elseif why ~= 'inspect' and (not (why == 'periodic' or res.reused) or not prev or prev.sealed ~= res.sealed
                                or prev.routes ~= res.routes) then
-    K.emit('SEAL', 'B', trunc(res.msg, 200), {routes = res.routes, pos = pos, why = trunc(why or '', 40),
+    K.emit('SEAL', 'B', trunc(res.msg, 200), {routes = res.routes, pos = pos, why = trunc(why, 40),
            sealed = res.sealed and 1 or 0})
   end
   st.seal = {t = t0, sealed = res.sealed and 1 or 0, routes = res.routes}
@@ -1131,35 +1646,6 @@ local function job_seal(K, why)
 end
 
 ---------------------------------------------------------------- scan: stairs without counterpart, interior tiles
-local function box_of(K, cits)
-  local bb
-  local function grow(x, y, z)
-    if not bb then bb = {x, y, z, x, y, z}
-    else
-      bb[1], bb[2], bb[3] = math.min(bb[1], x), math.min(bb[2], y), math.min(bb[3], z)
-      bb[4], bb[5], bb[6] = math.max(bb[4], x), math.max(bb[5], y), math.max(bb[6], z)
-    end
-  end
-  for _, c in ipairs(cits) do grow(c.x, c.y, c.z) end
-  local v = vec('buildings', 'BED')
-  for i = 0, vlen(v) - 1 do local b = v[i]; if b then grow(b.centerx, b.centery, b.z) end end
-  for _, r in ipairs(mem.seal and mem.seal.openings or {}) do grow(r.pos[1], r.pos[2], r.pos[3]) end
-  local man = K.manifest()
-  for _, kind in ipairs({'civ', 'mil'}) do
-    local s = type(man.stairs) == 'table' and man.stairs[kind]
-    for _, c in ipairs(type(s) == 'table' and s or {}) do grow(c[1], c[2], c[3]); grow(c[1], c[2], c[4]) end
-  end
-  if not bb then return nil end
-  local X, Y, Z = map_size()
-  local m = CFG.scan_margin
-  local b = {math.max(0, bb[1] - m[1]), math.max(0, bb[2] - m[2]), math.max(0, bb[3] - m[3]),
-             math.min(X - 1, bb[4] + m[1]), math.min(Y - 1, bb[5] + m[2]), math.min(Z - 1, bb[6] + m[3])}
-  while (b[4] - b[1] + 1) * (b[5] - b[2] + 1) * (b[6] - b[3] + 1) > CFG.scan_max and b[6] > b[3] do
-    b[3], b[6] = b[3] + 1, b[6] - 1                       -- too big: fewer levels around the middle
-  end
-  return b
-end
-
 -- tiles the interior burrow must not hold: the attack path (manifest Z1/Z2) and the kill boxes
 local function excluded(K)
   local man, ex = K.manifest(), {}
@@ -1174,60 +1660,74 @@ local function excluded(K)
   return ex
 end
 
+local function in_any(ex, x, y, z)
+  for _, e in ipairs(ex) do
+    if x >= e[1] and x <= e[4] and y >= e[2] and y <= e[5] and z >= e[3] and z <= e[6] then return true end
+  end
+  return false
+end
+
+-- FR-62/63: a flood over the citizens' walk groups (their inside tiles and the outside tiles next to them) finds the
+-- stairs without counterpart and the interior tiles, instead of a box scan that read mostly hidden rock
 local function job_scan(K, paint)
   local cits = citizens(K)
-  local _, main = group_counts(cits)
-  local b = box_of(K, cits)
-  local res = {tick = now_t(K), stairs = {}, box = b}
-  if not b then mem.scan = res; return end
+  spend(3 * #cits)
+  local cg, main = group_counts(cits)
+  local res = {tick = now_t(K), stairs = {}, n = 0}
   local ex = paint and excluded(K) or {}
   local inner = paint and main and {} or nil
-  for z = b[3], b[6] do
-    for y = b[2], b[5] do
-      for x = b[1], b[4] do
-        local des = rev(x, y, z)
-        if des then
-          local s = shape(x, y, z)
-          local sh = s and s.shape
-          if sh and (UP[sh] or DOWN[sh]) and #res.stairs < 40 then
-            local up_bad, down_bad
-            if UP[sh] then
-              local a = rev(x, y, z + 1) and shape(x, y, z + 1)
-              if not a then up_bad = 'above unrevealed' elseif not DOWN[a.shape] then up_bad = 'no stair above' end
-            end
-            if DOWN[sh] then
-              local c = rev(x, y, z - 1) and shape(x, y, z - 1)
-              if not c then down_bad = 'below unrevealed' elseif not UP[c.shape] then down_bad = 'no stair below' end
-            end
-            local why
-            if sh == 'STAIR_UP' then why = up_bad
-            elseif sh == 'STAIR_DOWN' then why = down_bad
-            elseif up_bad and down_bad then why = up_bad .. ', ' .. down_bad end
-            if why then
-              local kind = ({STAIR_UP = 'up stair', STAIR_DOWN = 'down stair', STAIR_UPDOWN = 'up/down stair'})[sh]
-              res.stairs[#res.stairs + 1] = {x, y, z, kind, why, grp(x, y, z) or 0}
-            end
+  local gk, out = {}, {}              -- key -> walk group (false: hidden, unwalkable or no citizens' group), outside
+  local q, head = {}, 1
+  local function eval(k)
+    local g = gk[k]
+    if g ~= nil then return g end
+    local x, y, z = dec3(k)
+    local des = rev(x, y, z)
+    if not des then gk[k] = false; spend(1); return false end
+    P.x, P.y, P.z = x, y, z
+    g = dfhack.maps.getWalkableGroup(P) or 0
+    spend(2)
+    if not cg[g] then gk[k] = false; return false end
+    gk[k], out[k] = g, des.outside == true
+    return g
+  end
+  for _, p in ipairs(sources_on(cits, nil, true)) do
+    local k = key3(p[1], p[2], p[3])
+    if gk[k] == nil and eval(k) then q[#q + 1] = k end
+  end
+  local nb, rtop = {}, {}
+  while head <= #q do
+    if head > CFG.scan_max then res.partial = true; break end
+    local k = q[head]
+    head = head + 1
+    local x, y, z = dec3(k)
+    local s = shape(x, y, z)
+    local sh = s and s.shape
+    spend(1)
+    if sh and STAIR_KIND[sh] and #res.stairs < CFG.stairs_max then
+      local kind, why = stair_dead(x, y, z, sh)
+      spend(4)
+      if kind then res.stairs[#res.stairs + 1] = {x, y, z, kind, why, gk[k]} end
+    end
+    if not out[k] then                -- inside tiles expand; the outside ones next to them are only looked at
+      if inner and gk[k] == main and #inner < CFG.interior_max and not in_any(ex, x, y, z) then
+        inner[#inner + 1] = {x, y, z}
+      end
+      local n = steps(x, y, z, nb, sh or false)
+      for i = 1, n do
+        local nk = nb[i]
+        if gk[nk] == nil then
+          if eval(nk) then q[#q + 1] = nk
+          elseif i <= 8 then
+            if rtop[nk] == nil then rtop[nk] = ramp_top(nk); spend(2) end
+            local dk = nk - 16777216
+            if rtop[nk] and gk[dk] == nil and eval(dk) then q[#q + 1] = dk end
           end
-          if inner and not des.outside and #inner < CFG.interior_max then
-            P.x, P.y, P.z = x, y, z
-            if dfhack.maps.getWalkableGroup(P) == main then
-              local skip = false
-              for _, e in ipairs(ex) do
-                if x >= e[1] and x <= e[4] and y >= e[2] and y <= e[5] and z >= e[3] and z <= e[6] then
-                  skip = true
-                  break
-                end
-              end
-              if not skip then inner[#inner + 1] = {x, y, z} end
-            end
-          end
-          spend(2)
-        else
-          spend(1)
         end
       end
     end
   end
+  res.n = head - 1
   mem.scan = res
   if inner and #inner > 0 then mem.paint_list = inner; due('paint', now_t(K), 'interior') end
 end
@@ -1248,6 +1748,7 @@ local function job_paint(K)
     spend(CFG.work)                                          -- one chunk per frame
   end
   st.painted, dirty = now_t(K), true
+  mem.bsize[CFG.interior] = nil
   K.log('info', 'seal: %s painted with %d of %d interior tiles', CFG.interior, n, #list)
   due('audit', now_t(K), 'painted')
 end
@@ -1465,10 +1966,11 @@ end
 
 ---------------------------------------------------------------- jobs
 local JOBS = {
-  audit = function(K) job_audit(K) end,
+  audit = function(K, d) job_audit(K, d.why) end,
   quick = function(K) job_quick(K) end,
   seal = function(K, d) job_seal(K, d.why) end,
   perim = function(K, d) job_perim(K, d.why) end,
+  items = function(K, d) job_items(K, d.why) end,
   edges = function(K) job_edges(K) end,
   scan = function(K, d) job_scan(K, d.arg == true) end,
   paint = function(K) job_paint(K) end,
@@ -1476,50 +1978,107 @@ local JOBS = {
 
 local function schedule_periodic(K, t)
   local mode = K.mode()
-  local every = mode == 'PEACE' and CFG.audit_every or CFG.audit_alert
-  if t - (mem.last_audit or -every) >= every then due('audit', t, 'periodic') end
-  if t - (mem.seal and mem.seal.tick or -CFG.seal_every) >= CFG.seal_every then due('seal', t, 'periodic') end
-  if t - (mem.edges and mem.edges.tick or -CFG.edges_every) >= CFG.edges_every then due('edges', t, 'periodic') end
-  if t - (mem.scan and mem.scan.tick or -CFG.scan_every) >= CFG.scan_every then due('scan', t, 'periodic') end
-  if mode == 'PEACE' and t - (mem.retire_t or -CFG.seal_every) >= CFG.seal_every then
+  local peace = mode == 'PEACE'
+  local function per(name, last, every, why)
+    if not mem.run[name] and t - (last or -every) >= every then due(name, t, why or 'periodic') end
+  end
+  per('audit', mem.last_audit, peace and CFG.audit_every or CFG.audit_alert)
+  if mem.items then per('items', mem.items.seen, peace and CFG.items_every or CFG.items_alert) end
+  per('seal', mem.seal and mem.seal.tick, CFG.seal_every)
+  per('edges', mem.edges and mem.edges.tick, CFG.edges_every)
+  per('scan', mem.scan and mem.scan.tick, CFG.scan_every)
+  if peace and t - (mem.retire_t or -CFG.seal_every) >= CFG.seal_every then
     mem.retire_t = t
     due('perim', t, 'retire')
   end
 end
 
-local function next_job(t)
-  for _, name in ipairs(ORDER) do
-    local d = mem.due[name]
-    if d and d.tick <= t then mem.due[name] = nil; return name, d end
+-- urgent jobs run at CFG.rate_urgent and before every background job: a lever pull, a siege, a construction outside
+-- PEACE, perimeter.record, a CUTOFF re-check, a mode change, the first result after a load
+local URGENT_SEAL = {lever = true, siege = true, record = true, inspect = true}
+local function urgent(K, name, d)
+  if name == 'quick' then return true end
+  if (name == 'edges' and not mem.edges) or (name == 'audit' and not mem.reach) or (name == 'scan' and not mem.scan)
+     or (name == 'seal' and not mem.seal) then return true end
+  local why = d and d.why or ''
+  if name == 'seal' then return URGENT_SEAL[why] == true or (why == 'construction' and K.mode() ~= 'PEACE') end
+  if name == 'perim' then return why == 'pre' or why == 'post' end
+  if name == 'audit' then
+    return why:find('^quick') ~= nil or why:find('^mode') ~= nil or why:find('^before') ~= nil
   end
+  return false
+end
+
+-- the job to run now: a running (parked) or due one, urgent ones first, then by ORDER. An urgent request replaces a
+-- background run of the same job (its answer is stale: a lever moved, a CUTOFF re-check asks); jobs commit only at
+-- their end, so a dropped run leaves nothing half done.
+local function pick(K, t)
+  local bg, bgd
+  for _, name in ipairs(ORDER) do
+    local r = mem.run[name]
+    local dd = mem.due[name]
+    if dd and dd.tick > t then dd = nil end
+    if r and dd and not urgent(K, name, r.d) and urgent(K, name, dd) then
+      mem.run[name] = nil
+      mem.stats.dropped = (mem.stats.dropped or 0) + 1
+      r = nil
+    end
+    local d = r and r.d or dd
+    if d then
+      if urgent(K, name, d) then return name, d, true end
+      if not bg then bg, bgd = name, d end
+    end
+  end
+  return bg, bgd, false
+end
+
+-- FR-62: the work bucket, refilled in real time (K.now().ms), at most CFG.work units; a slice overrun is a debt
+local function refill(K, u)
+  local ms = K.now().ms or 0
+  local last = mem.bucket_ms or ms
+  mem.bucket_ms = ms
+  local dt = math.max(0, math.min(ms - last, 1000))
+  mem.bucket = math.min(CFG.work, (mem.bucket or CFG.work) + (u and CFG.rate_urgent or CFG.rate) * dt / 1000)
 end
 
 local function run_jobs(K, t)
-  mem.left = CFG.work
+  local name, d, u = pick(K, t)
+  if not name then return nil end
+  refill(K, u)
+  if mem.bucket < (u and 1 or CFG.min_slice) then return u and 'more' or nil end
+  mem.left = mem.bucket
   while mem.left > 0 do
-    if not mem.co then
-      local name, d = next_job(t)
-      if not name then return end
-      mem.co_name = name
-      mem.co = coroutine.create(function() JOBS[name](K, d) end)
+    local nu
+    name, d, nu = pick(K, t)
+    if not name or (u and not nu) then break end  -- an urgent slice is not spent on background work
+    local r = mem.run[name]
+    if not r then
+      mem.due[name] = nil
+      local dd = d
+      r = {d = dd, co = coroutine.create(function() JOBS[name](K, dd) end)}
+      mem.run[name] = r
+      mem.stats[name] = (mem.stats[name] or 0) + 1
     end
-    local ok, err = coroutine.resume(mem.co)
+    local ok, err = coroutine.resume(r.co)
     if not ok then
-      local name = mem.co_name
-      mem.co, mem.co_name = nil, nil
+      mem.run[name] = nil
       error('seal job ' .. tostring(name) .. ': ' .. tostring(err), 0)
     end
-    if coroutine.status(mem.co) == 'dead' then mem.co, mem.co_name = nil, nil
-    else return 'more' end
+    if coroutine.status(r.co) == 'dead' then mem.run[name] = nil
+    else break end                                -- out of work units for this frame
   end
-  return mem.co and 'more' or nil
+  mem.bucket = mem.left
+  name, d, u = pick(K, t)
+  if not name then return nil end
+  if u or mem.bucket >= CFG.min_slice then return 'more' end
+  return nil
 end
 
 ---------------------------------------------------------------- module
 function M.init(K)
   local p = K.persist.get('m.seal')
   p = type(p) == 'table' and p or {}
-  st = {v = 2, perim = {}, cut = {}, req = {}, hostile = int(p.hostile), painted = int(p.painted),
+  st = {v = 2, perim = {}, cut = {}, req = {}, open = {}, hostile = int(p.hostile), painted = int(p.painted),
         flag_sig = type(p.flag_sig) == 'string' and p.flag_sig or nil}
   for k, piece in pairs(type(p.perim) == 'table' and p.perim or {}) do
     if type(k) == 'string' and type(piece) == 'table' and type(piece.k) == 'string' then st.perim[k] = piece end
@@ -1528,11 +2087,26 @@ function M.init(K)
   for k, v in pairs(type(p.req) == 'table' and p.req or {}) do if int(v) then st.req[k] = int(v) end end
   if type(p.swap) == 'table' and int(p.swap.since) then st.swap = {since = int(p.swap.since)} end
   if type(p.seal) == 'table' then st.seal = p.seal end
-  mem = {tt = {}, due = {}, pend = {}, npend = 0, fresh = {}, done_info = {}, left = 0}
+  for _, o in ipairs(type(p.open) == 'table' and p.open or {}) do
+    if type(o) == 'table' and #o == 6 and #st.open < CFG.routes_max then
+      local ok = true
+      for i = 1, 6 do if not int(o[i]) then ok = false end end
+      if ok then st.open[#st.open + 1] = {o[1], o[2], o[3], o[4], o[5], o[6]} end
+    end
+  end
+  mem = {tt = {}, due = {}, run = {}, pend = {}, npend = 0, fresh = {}, done_info = {}, left = 0, bsize = {},
+         stats = {}}
+  local e = p.edges
+  if type(e) == 'table' and int(e.t) and type(e.k) == 'table' then
+    local list = {}
+    for _, k in ipairs(e.k) do if int(k) and #list < CFG.edges_max then list[#list + 1] = int(k) end end
+    mem.edges = {tick = int(e.t), list = list}
+    st.edges = {t = int(e.t), k = list}
+  end
   perim_count()
   dirty = true
   local t = now_t(K)
-  due('edges', t, 'boot')
+  if not mem.edges then due('edges', t, 'boot') end
   due('audit', t, 'boot')
   publish(K)
   save(K)
@@ -1545,7 +2119,7 @@ function M.step(K, budget, ctx)
     schedule_periodic(K, t)
   end
   local r = run_jobs(K, t)
-  if not mem.co then publish(K) end
+  if not next(mem.run) then publish(K) end
   save(K)
   return r
 end
@@ -1555,7 +2129,10 @@ function M.state(K) return mem and mem.pub and {alert = mem.pub} or {} end
 M.on.MODE = function(K, ev)
   local t = ev.tick or now_t(K)
   local to, from = ev.to, ev.from
-  if to ~= 'PEACE' and from == 'PEACE' then due('audit', t, 'mode ' .. to) end   -- a fresh refuge audit
+  if to ~= 'PEACE' and from == 'PEACE' then
+    due('audit', t, 'mode ' .. to)                      -- a fresh refuge audit ...
+    if mem.items then due('items', t, 'mode') end       -- ... and stock counts behind it
+  end
   if (to == 'SIEGE' or to == 'BREACH') and from ~= 'SIEGE' and from ~= 'BREACH' and from ~= 'RECOVERY' then
     due('perim', t, 'pre')
   end
@@ -1580,8 +2157,22 @@ M.on['EV:PROJECT_STAGE'] = function(K, ev)
   local d = type(ev.d) == 'table' and ev.d or {}
   if d.defense == 1 then due('seal', now_t(K), 'construction') end
 end
-M.on['EV:PROJECT_DONE'] = function(K) due('scan', now_t(K), 'project') end
+M.on['EV:PROJECT_DONE'] = function(K)
+  local t = now_t(K)
+  due('scan', math.max(t, (mem.scan and mem.scan.tick or -CFG.scan_min) + CFG.scan_min), 'project')
+end
 M.on.UNLOAD = function(K) save(K) end
+
+-- verb perimeter.record {} (FR-60): the next entrance check (urgent) records the perimeter: the pieces around every
+-- known opening that is sealed now and, on a sealed fort, the closers on the boundary of the citizens' main group
+M.verbs['perimeter.record'] = function(K, args, cmd)
+  mem.rec_n = (mem.rec_n or 0) + 1
+  mem.rec_req = mem.rec_n                         -- a request number: a run that started before it keeps it
+  due('seal', now_t(K), 'record')
+  local n, no = mem.perim_n or 0, #(st.open or {})
+  return true, string.format('queued: the next entrance check records the perimeter (%d pieces, %d known openings); '
+                             .. 'inspect perimeter shows the result', n, no), {queued = 1, n = n, open = no}
+end
 
 ---------------------------------------------------------------- inspect (kern routes inspect what=<name> here)
 local function pairs_of(t, n)
@@ -1602,10 +2193,20 @@ local function sync(fn, ...)
   if not ok then error(err, 0) end
 end
 
+-- `key:'refresh'`: the item census and the audit again, now (FR-59: what the stockpiles hold this minute)
+local function refresh_audit(K)
+  if mem.run.audit then return end
+  if not mem.run.items then sync(job_items, K, 'inspect', true) end
+  sync(job_audit, K, 'inspect')
+end
+
 M.inspect.reach = function(K, args)
   local t = now_t(K)
-  if not mem.reach or (args.key == 'refresh' and mem.co_name ~= 'audit') then sync(job_audit, K) end
+  if not mem.reach then
+    if not mem.run.audit then sync(job_audit, K, 'inspect') end
+  elseif args.key == 'refresh' then refresh_audit(K) end
   local R = mem.reach
+  if not R then return true, 'reach: the first audit is running', {tick = t} end
   local cls = {}
   for _, c in ipairs(CLASSES) do
     local C = R.cls[c]
@@ -1614,25 +2215,39 @@ M.inspect.reach = function(K, args)
     for g, p in pairs(C.at) do if g ~= R.main and not at then at = {g, p[1], p[2], p[3]} end end
     cls[c] = {n = C.n, main = on, off = C.n - on, groups = pairs_of(C.by), off_at = at}
   end
+  -- FR-63: the stairs read now, not from the scan
+  local dead
+  sync(function() dead = live_stairs() end)
+  local flags = {}
+  for _, f in ipairs(R.flags) do if f:sub(1, 7) ~= 'stairs:' then flags[#flags + 1] = f end end
+  local sf = stairs_flag(dead)
+  if sf then flags[#flags + 1] = sf end
   local stairs = {}
-  for i, s in ipairs(mem.scan and mem.scan.stairs or {}) do
+  for i, s in ipairs(dead) do
     if i > 12 then break end
     stairs[i] = {s[1], s[2], s[3], s[4], s[5]}
   end
+  local runs, busy = {}, {}
+  for k, v in pairs(mem.stats) do runs[k] = v end
+  for _, name in ipairs(ORDER) do if mem.run[name] then busy[#busy + 1] = name end end
   return true, string.format('reach %s (age %d): %s', R.main and ('main group ' .. R.main) or 'no citizens',
-         t - R.tick, #R.flags > 0 and R.flags[1] or 'every class on the citizens\' group'),
+         t - R.tick, #flags > 0 and flags[1] or 'every class on the citizens\' group'),
          {tick = R.tick, main = R.main or 0, cit = {n = R.cit.n, groups = pairs_of(R.cit.by)}, classes = cls,
-          cut = R.cut, flags = R.flags, stairs = stairs, blame = R.blame}
+          cut = R.cut, flags = flags, stairs = stairs, blame = R.blame, items = R.items,
+          scan = mem.scan and {tick = mem.scan.tick, n = mem.scan.n, partial = mem.scan.partial and 1 or 0} or nil,
+          edges = mem.edges and {tick = mem.edges.tick, n = #mem.edges.list} or nil, runs = runs, busy = busy}
 end
 
 M.inspect.entrances = function(K, args)
   if not mem.seal or args.key == 'refresh' then
-    if mem.co_name ~= 'seal' then sync(job_seal, K, 'inspect') end
+    if not mem.run.seal then sync(job_seal, K, 'inspect') end
   end
   local s = mem.seal
+  if not s then return true, 'entrances: the first check is running', {} end
   return true, s.msg or '?', {tick = s.tick, why = s.why, sealed = s.sealed, routes = s.routes, first = s.first,
                               openings = s.openings, edge = s.edge, len = s.len, via = s.via, partial = s.partial,
-                              expect_sealed = s.expect}
+                              expect_sealed = s.expect, bfs = s.bfs, reused = s.reused and 1 or 0,
+                              closed = s.closed}
 end
 
 M.inspect.defense = function(K)
@@ -1745,16 +2360,19 @@ M.inspect.perimeter = function(K, args)
     if #list < 60 then list[#list + 1] = {k, p.k, p.src or ''} end
   end
   local d = mem.perim_diff
-  return true, string.format('%d perimeter pieces', mem.perim_n or 0),
-         {n = mem.perim_n or 0, by = by, pieces = list,
+  local queued = mem.rec_req ~= nil
+  return true, string.format('%d perimeter pieces%s', mem.perim_n or 0, queued and ' (recording queued)' or ''),
+         {n = mem.perim_n or 0, by = by, pieces = list, open = #(st.open or {}), rec = mem.rec,
+          queued = queued and 1 or 0,
           diff = d and {tick = d.tick, why = d.why, gone = {table.unpack(d.gone, 1, math.min(#d.gone, 40))}} or nil}
 end
 
 M.inspect.refuge = function(K, args)
-  if not mem.audit or args.key == 'refresh' then
-    if mem.co_name ~= 'audit' then sync(job_audit, K) end
-  end
+  if not mem.audit then
+    if not mem.run.audit then sync(job_audit, K, 'inspect') end
+  elseif args.key == 'refresh' then refresh_audit(K) end
   local au = mem.audit
+  if not au then return true, 'refuge: the first audit is running', {} end
   local b = {}
   for name, a in pairs(au.burrows) do
     b[name] = {exists = a.exists and 1 or 0, tiles = a.tiles, inside = a.inside, drink = a.drink, food = a.food,
