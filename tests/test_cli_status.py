@@ -221,7 +221,8 @@ def test_status_shows_the_clock_clamp_defcon_lever_latency_and_eta(save):
     st["mode"] = "SIEGE"
     st["clock"] = {"cap": 30, "orig": 500, "ts": -1, "held": 1, "why": "siege"}
     st["owners"]["tempo"] = "clock"
-    st["alarm"] = {"defcon": 2, "unacked": 1, "last": 8830, "ack": 8820, "lock": 1, "why": "arrival:siege", "eta": 420}
+    st["alarm"] = {"defcon": 2, "unacked": 1, "last": 8830, "ack": 8820, "lock": 1, "why": "arrival:siege", "eta": 420,
+                   "doors": 1, "dwait": 1, "dout": 2}
     st["lever"] = {"lat_s": -1, "lat_t": -1, "pend": 2, "wait_s": 45}
     st["t"]["tps"] = 30
     assert schema.validate("state", st) == []
@@ -230,6 +231,7 @@ def test_status_shows_the_clock_clamp_defcon_lever_latency_and_eta(save):
     line1 = out.splitlines()[0]
     assert line1.startswith("DEFCON 2 | region7") and "SIEGE" in line1
     for frag in ("clock: held 30 t/s, reason siege", "lockdown arrival:siege",
+                 "doors 1 forbidden, 1 waiting for 2 citizens outside",
                  "1 interrupts unacked (last #8830, acked #8820): dfllm ack", "eta ~420 t (~14 s)",
                  "lever_latency_s -, 2 pulls pending 45 s"):
         assert frag in out, frag

@@ -282,6 +282,54 @@ T.test('perimeter: a piece already gone when a siege begins is retired, never re
   T.eq(W.runner.cells, {})
 end)
 
+T.test('perimeter after an ambush: a wall lost in ALERT or in a lockdown that never became a siege is re-queued + ' ..
+       'PERIMETER_BROKEN once it is quiet again; one gone before the episode is retired', function()
+  -- ALERT (a small ambush): no SIEGE, no RECOVERY, no SIEGE_END
+  local W = gatehouse()
+  W.run(300, {skip = 9})
+  W.K.call('seal', 'closing', 'fc2', 'fortcore', 'defense', {pos = {40, 26, G}, cells = {{0, 0, 0, 'Cw'}}})
+  SW.build_wall(W, 40, 26, G)
+  W.run(300, {skip = 9})
+  W.K.set_mode('ALERT', 'test')
+  W.run(200, {skip = 9})
+  SW.draw(W, G, {'.'}, 40, 26)                -- broken by the ambushers
+  SW.regroup(W)
+  W.run(200, {skip = 9})
+  T.eq(#evs(W, 'PERIMETER_BROKEN'), 0, 'not while the episode runs')
+  W.K.set_mode('PEACE', 'test')
+  W.run(200, {skip = 9})
+  local ev = evs(W, 'PERIMETER_BROKEN')
+  T.eq(#ev, 1)
+  T.eq({ev[1].d.pos, ev[1].d.kinds, ev[1].d.requeued, ev[1].d.why}, {{40, 26, G}, {'wall'}, 1, 'post'})
+  T.eq(W.runner.cells, {{{40, 26, G, 'Cw'}}})
+  -- a reflex lockdown in PEACE (an arrival; the army never came into sight): the same at LOCKDOWN_END
+  local W2 = gatehouse()
+  W2.lock = nil
+  W2.load(SW.fake('reflex', {holding = function() return W2.lock end}))
+  W2.run(300, {skip = 9})
+  for _, x in ipairs({40, 20}) do
+    W2.K.call('seal', 'closing', 'fc2', 'fortcore', 'defense', {pos = {x, 22, G}, cells = {{0, 0, 0, 'Cw'}}})
+    SW.build_wall(W2, x, 22, G)
+  end
+  W2.run(300, {skip = 9})
+  SW.draw(W2, G, {'.'}, 20, 22)               -- the player removed this one in peace: retired when the lockdown begins
+  SW.regroup(W2)
+  W2.lock = 'arrival:siege'
+  W2.run(200, {skip = 9})
+  SW.draw(W2, G, {'.'}, 40, 22)               -- lost during the lockdown
+  SW.regroup(W2)
+  W2.run(200, {skip = 9})
+  T.eq(#evs(W2, 'PERIMETER_BROKEN'), 0)
+  W2.lock = nil                                -- LOCKDOWN_END
+  W2.run(200, {skip = 9})
+  ev = evs(W2, 'PERIMETER_BROKEN')
+  T.eq(#ev, 1)
+  T.eq({ev[1].d.pos, ev[1].d.n, ev[1].d.requeued}, {{40, 22, G}, 1, 1})
+  T.eq(W2.runner.cells, {{{40, 22, G, 'Cw'}}}, 'the wall the player removed is never rebuilt')
+  W2.run(1200, {skip = 9})
+  T.eq(#evs(W2, 'PERIMETER_BROKEN'), 1, 'once')
+end)
+
 ---------------------------------------------------------------- refuge and alert burrow (FR-33/37/57)
 -- Kern+ = 4 tiles in room A without supplies; Tiefe+ = room B with drink, food and beds
 local function refuge_fort(opts)

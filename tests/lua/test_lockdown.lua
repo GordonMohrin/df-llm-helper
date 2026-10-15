@@ -38,6 +38,7 @@ local function fort(opts)
   for _, c in ipairs({{1, 5, 8}, {2, 6, 9}, {3, 7, 10}, {4, 8, 11}}) do
     W.add_unit{id = c[1], pos = {c[2], c[3], Z}, citizen = true, adult = true}
   end
+  for _, u in ipairs(opts.units or {}) do W.add_unit(u) end
   W.burrow('Kern+', {2, 4, Z, 12, 16, Z})
   W.act_result('alert_burrows', function(names)
     for _, n in ipairs(names) do if not dfhack.burrows.findByName(n) then return false, 'no burrow ' .. n end end
@@ -185,6 +186,60 @@ T.test('BUG-012: the door one tile behind the stair opening is forbidden, the sh
   local opened = {}
   for _, a in ipairs(W.find_acts('door_forbid')) do if a.args[2] == false then opened[#opened + 1] = a.args[1] end end
   T.eq(opened, {W.stair_door.id})
+end)
+
+-- the follow-up of BUG-012 (citizens shut out): a woodcutter on the field at 24,9 when the arrival comes
+local function woodcutter() return {id = 9, pos = {24, 9, Z + 1}, citizen = true, adult = true} end
+
+T.test('BUG-012 safety: the door waits while a citizen is outside it, and is forbidden once he came in', function()
+  local W = fort{units = {woodcutter()}}
+  local ok, per, n = W.K.call('seal', 'door_outside', {W.stair_door.id})
+  T.eq({ok, per[W.stair_door.id], n}, {true, 1, 1}, 'the woodcutter is on the open sky of the door\'s walk group')
+  W.event('INVASION', {id = 4})
+  W.run(30, {skip = 9})
+  W.inbox('ack', {})
+  local arr = evs(W, 'ARRIVAL')[1]
+  T.ok(arr.msg:find('doors 0 forbidden, 1 waiting for 1 citizen outside, partial lockdown: stair_updown 30,13,5', 1,
+       true), arr.msg)
+  T.eq(W.stair_door.door_flags.forbidden, false, 'not locked out')
+  local a = W.state().alarm
+  T.eq({a.doors, a.dwait, a.dout}, {0, 1, 1}, 'status: 1 door waiting for 1 citizen outside')
+  T.eq({idx(), W.alert_burrows}, {1, {'Innen+'}}, 'the civ alert calls him in meanwhile')
+  W.move(9, 20, 10, Z)                         -- on the stair: inside, but still on the porch outside the door
+  W.run(100, {skip = 9})
+  T.eq(W.stair_door.door_flags.forbidden, false, 'the porch is still outside the door')
+  W.move(9, 9, 12, Z)                          -- in the hall, behind the door
+  W.run(40, {skip = 9})
+  T.eq(W.stair_door.door_flags.forbidden, true, 'forbidden once nobody is left outside')
+  local t = W.find_acts('door_forbid')[1].tick
+  T.ok(t - arr.tick < 450, 'before the deadline: ' .. (t - arr.tick))
+  a = W.state().alarm
+  T.eq({a.doors, a.dwait, a.dout}, {1, nil, nil})
+end)
+
+T.test('BUG-012 safety: a hostile near the door forbids it at once; a citizen who stays out does not hold it past ' ..
+       'ALERT_AFTER', function()
+  -- a goblin at 24,13 on the field, 5 tiles from the door, comes into sight: the first armed hostile in sight starts
+  -- the lockdown
+  local W = fort{units = {woodcutter(), S.inv(300, 24, 13, Z + 1, {hidden = true})}}
+  W.unit(300)._m.hidden = false
+  W.run(60, {skip = 9})
+  local arr = evs(W, 'ARRIVAL')
+  T.eq({#arr, arr[1] and arr[1].d.kind}, {1, 'invader'})
+  T.eq(W.stair_door.door_flags.forbidden, true, 'a hostile within 15 tiles: at once, the woodcutter notwithstanding')
+  T.ok(arr[1].msg:find('doors 1 forbidden', 1, true), arr[1].msg)
+  -- the woodcutter alone, nobody near: the deadline
+  local W2 = fort{units = {woodcutter()}}
+  W2.event('INVASION', {id = 5})
+  W2.run(30, {skip = 9})
+  W2.inbox('ack', {})
+  local t0 = evs(W2, 'ARRIVAL')[1].tick
+  W2.run(300, {skip = 9})
+  T.eq(W2.stair_door.door_flags.forbidden, false, 'still waiting for him')
+  W2.run(200, {skip = 9})
+  T.eq(W2.stair_door.door_flags.forbidden, true, 'ALERT_AFTER after the trigger')
+  local t = W2.find_acts('door_forbid')[1].tick
+  T.ok(t - t0 >= 450 and t - t0 <= 480, tostring(t - t0))
 end)
 
 T.test('BUG-012: a ramp opening with a door two tiles behind it on the level below; a bridge on a route is a gate; ' ..

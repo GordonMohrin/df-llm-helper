@@ -278,7 +278,8 @@ C.STATE_SPEC = obj({
                               shield = NAT, ammo = NAT})}),
   trade = obj({caravan = FLAG, ratio = NAT, done = NAT}),
   clock = obj({cap = NAT, orig = NAT, ts = int(-1, 1000), held = FLAG, why = str(24)}),
-  alarm = obj({defcon = int(1, 5), unacked = NAT, last = NAT, ack = NAT, lock = FLAG, why = str(24)}, {eta = int(-1)}),
+  alarm = obj({defcon = int(1, 5), unacked = NAT, last = NAT, ack = NAT, lock = FLAG, why = str(24)},
+              {eta = int(-1), doors = NAT, dwait = NAT, dout = NAT}),
   lever = obj({lat_s = int(-1), lat_t = int(-1), pend = NAT, wait_s = NAT}),
   alert = obj({want = str(24), burrow = str(24), tiles = NAT, inside = NAT, ok = FLAG}, {why = str(40)}),
 })

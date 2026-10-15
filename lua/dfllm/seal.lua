@@ -24,9 +24,10 @@
 --   perimeter (FR-56/60) walls, doors, gates and killbox tiles of defense projects, of the manifest and of the
 --             inside/outside boundary (learned by the BFS in PEACE), plus (FR-60, forts without a manifest) every
 --             wall, door, gate or bridge around an opening the entrance check finds sealed, and on the verb
---             perimeter.record the closers on the boundary of the citizens' group; persisted in m.seal. After a
---             siege they are compared with the map, lost pieces re-queued (runner.repair) and PERIMETER_BROKEN (A)
---             raised; a piece already gone in PEACE or when a siege begins is retired, never rebuilt
+--             perimeter.record the closers on the boundary of the citizens' group; persisted in m.seal. After an
+--             episode (a siege, an ALERT, a reflex lockdown: see `episode`) they are compared with the map, lost pieces
+--             re-queued (runner.repair) and PERIMETER_BROKEN (A) raised; a piece already gone in PEACE or when an
+--             episode begins is retired, never rebuilt
 --   defense   (FR-24) every bridge's real gate_flags, the walk groups on its sides and its levers' links
 --   refuge    (FR-33/37/57) burrow audits (tiles, citizens inside, drink, food, beds) and alert_burrow(mode): the
 --             civ-alert burrow siege uses. Kern+ normally, the refuge (Tiefe+) in BREACH and until CFG.back_days
@@ -1383,19 +1384,23 @@ end
 -- a door on an entry's inside or outside tile, the first door on the BFS route from each entry toward the citizens
 -- (B.par, at most CFG.door_route tiles, inside tiles only) and every door within CFG.door_near steps of an entry over
 -- inside tiles of G; that walk stops at a door, so it finds the door one or two tiles behind a stair or ramp
--- opening (Run 9: the east stair at 75,70,117 and its door at 74,70,117) and not the rooms beyond it. Revealed
--- tiles only. Returns {{id, x, y, z}} (at most CFG.doors_per) and whether a bridge stands on the opening or on that
--- route before any door (the gates close it: no "partial lockdown" for it).
+-- opening (Run 9: the east stair at 75,70,117 and its door at 74,70,117) and not the rooms beyond it. When the
+-- opening has a door, the walk goes on past CFG.door_near (still stopping at doors, CFG.door_walk tiles at most): the
+-- tiles it reached are the porch, the inside between the opening and its doors, where a citizen is still outside them
+-- (the lockdown waits for him before it forbids them). Revealed tiles only. Returns {{id, x, y, z}} (at most
+-- CFG.doors_per), whether a bridge stands on the opening or on that route before any door (the gates close it: no
+-- "partial lockdown" for it), and the porch {key = true} (nil without doors).
 local function opening_doors(B, G, r)
   local found, list, inside_c, nb, gated = {}, {}, {}, {}, false
-  local function take(k, route)            -- a door: listed, true; a bridge: true on the route (it closes it)
+  -- a door: listed (if `keep`), true; a bridge: true on the route (it closes it)
+  local function take(k, route, keep)
     local b, t, x, y, z = door_at(k)
     if not b then return false end
     if t == 'Bridge' then
       if route then gated = true end
       return route == true
     end
-    if not found[b.id] and #list < CFG.doors_per then
+    if keep ~= false and not found[b.id] and #list < CFG.doors_per then
       found[b.id] = true
       list[#list + 1] = {b.id, x, y, z}
     end
@@ -1430,23 +1435,32 @@ local function opening_doors(B, G, r)
     end
     if d[ik] == nil then d[ik] = 0; q[#q + 1] = ik end
   end
-  -- the doors near the opening: one walk from all its entries, at most CFG.door_walk tiles
-  local head = 1
+  -- the doors near the opening and its porch: one walk from all its entries (breadth first), at most CFG.door_walk
+  -- tiles; past CFG.door_near steps only for an opening that has a door
+  local porch, rim, head = {}, {}, 1
+  local function expand(ck)
+    local x, y, z = dec3(ck)
+    local cnt = steps(x, y, z, nb)
+    for i = 1, cnt do
+      local nk = nb[i]
+      if d[nk] == nil and not inside(nk) and i <= 8 and ramp_top(nk) then nk = nk - 16777216 end   -- down a ramp
+      if d[nk] == nil and inside(nk) then d[nk] = d[ck] + 1; q[#q + 1] = nk end
+    end
+    spend(2)
+  end
   while head <= #q and head <= CFG.door_walk do
     local ck = q[head]
     head = head + 1
-    if not take(ck) and d[ck] < CFG.door_near then
-      local x, y, z = dec3(ck)
-      local cnt = steps(x, y, z, nb)
-      for i = 1, cnt do
-        local nk = nb[i]
-        if d[nk] == nil and not inside(nk) and i <= 8 and ramp_top(nk) then nk = nk - 16777216 end   -- down a ramp
-        if d[nk] == nil and inside(nk) then d[nk] = d[ck] + 1; q[#q + 1] = nk end
-      end
-      spend(2)
+    if not take(ck, nil, d[ck] <= CFG.door_near) then        -- a door ends the walk there
+      porch[ck] = true
+      if d[ck] == CFG.door_near then rim[#rim + 1] = ck else expand(ck) end
+    end
+    if head > #q and #rim > 0 then                            -- the near doors are known: the porch beyond them
+      if #list > 0 then for _, rk in ipairs(rim) do expand(rk) end end
+      rim = {}
     end
   end
-  return list, gated
+  return list, gated, #list > 0 and porch or nil
 end
 
 -- BFS and scan sources on the groups `on` (nil = any): the citizens, plus (`inner`) beds and stock tiles of the last
@@ -1656,20 +1670,28 @@ local function job_seal(K, why)
       res.bfs = t0
       local reps = routes_of(B.entries)
       res.routes, res.partial, res.visited = #reps, B.partial, B.visited
-      local all, dseen = {}, {}
+      local all, dseen, door_ops, porches = {}, {}, {}, {}
       for i = 1, math.min(#reps, CFG.routes_max) do
         local r = reps[i]
         local bt, bs = describe_tile(r.x, r.y, r.z)
         local ot, os_ = describe_tile(r.ox, r.oy, r.oz)
-        local doors, gated = opening_doors(B, G, r)          -- BUG-012: {{id, x, y, z}}, a bridge on it
+        local doors, gated, porch = opening_doors(B, G, r)   -- BUG-012: {{id, x, y, z}}, a bridge on it, porch
         res.openings[i] = {pos = {r.x, r.y, r.z}, out = {r.ox, r.oy, r.oz}, n = r.n, d = r.d,
                            bld = bt, state = bs, out_bld = ot, out_state = os_, doors = doors,
                            gate = (gated or bt == 'Bridge' or ot == 'Bridge') and 1 or 0}
         for _, dr in ipairs(doors) do
           if not dseen[dr[1]] and #all < CFG.doors_max then dseen[dr[1]] = true; all[#all + 1] = dr end
+          local ops = door_ops[dr[1]] or {}
+          ops[i], door_ops[dr[1]] = true, ops
+        end
+        for k in pairs(porch or {}) do
+          local ops = porches[k] or {}
+          ops[i], porches[k] = true, ops
         end
       end
       res.doors = all
+      -- runtime only (mem.seal is never persisted, inspect leaves them out): who stands outside which door
+      res.door_ops, res.porch = door_ops, porches
       -- the first leak: walking back from the first map-edge tile, the first inside tile is where the route
       -- enters the fort; buildings on the route are listed with their state
       if B.edge then
@@ -1989,6 +2011,50 @@ function M.entrance_doors(K, refresh)
   return x
 end
 
+-- public (reflex, the lockdown's doors): the citizens (soldiers excluded, as for the gates) on the outside side of
+-- each door in `ids`: on a revealed open-sky tile of the door's walk group, on the porch of an opening the door closes
+-- (the last entrance check), or in the doorway. A door is forbidden only once nobody is left there, so nobody is
+-- locked out with the army. Returns {[id] = n} and the number of distinct citizens counted; citizens by census id.
+function M.door_outside(K, ids)
+  local s = mem.seal
+  local cu = K.census.u
+  local sold = {}
+  for _, id in ipairs(type(cu) == 'table' and type(cu.soldier_ids) == 'table' and cu.soldier_ids or {}) do
+    sold[id] = true
+  end
+  local cits = {}
+  for _, c in ipairs(citizens(K)) do
+    if not sold[c.id] then
+      local des = rev(c.x, c.y, c.z)
+      local k = key3(c.x, c.y, c.z)
+      cits[#cits + 1] = {id = c.id, g = c.g, k = k, out = des and des.outside == true,
+                         porch = s and s.porch and s.porch[k]}
+    end
+  end
+  local per, who, n = {}, {}, 0
+  for _, id in ipairs(type(ids) == 'table' and ids or {}) do
+    local c = 0
+    local b = int(id) and df.building.find(id)
+    if b then
+      local x, y, z = b.centerx or b.x1, b.centery or b.y1, b.z
+      local dk, dg = key3(x, y, z), grp(x, y, z)
+      local ops = s and s.door_ops and s.door_ops[id]
+      for _, cz in ipairs(cits) do
+        local hit = cz.k == dk or (cz.out and dg ~= nil and dg ~= 0 and cz.g == dg)
+        if not hit and ops and cz.porch then
+          for oi in pairs(cz.porch) do if ops[oi] then hit = true; break end end
+        end
+        if hit then
+          c = c + 1
+          if not who[cz.id] then who[cz.id], n = true, n + 1 end
+        end
+      end
+    end
+    per[id] = c
+  end
+  return per, n
+end
+
 -- public (FR-33, sense): entrances a wild large predator must be near to count; nil when none is known
 function M.entrances(K)
   local list = {}
@@ -2157,7 +2223,7 @@ local function schedule_periodic(K, t)
   per('seal', mem.seal and mem.seal.tick, CFG.seal_every)
   per('edges', mem.edges and mem.edges.tick, CFG.edges_every)
   per('scan', mem.scan and mem.scan.tick, CFG.scan_every)
-  if peace and t - (mem.retire_t or -CFG.seal_every) >= CFG.seal_every then
+  if peace and not st.pep and t - (mem.retire_t or -CFG.seal_every) >= CFG.seal_every then
     mem.retire_t = t
     due('perim', t, 'retire')
   end
@@ -2251,7 +2317,7 @@ function M.init(K)
   local p = K.persist.get('m.seal')
   p = type(p) == 'table' and p or {}
   st = {v = 2, perim = {}, cut = {}, req = {}, open = {}, hostile = int(p.hostile), painted = int(p.painted),
-        flag_sig = type(p.flag_sig) == 'string' and p.flag_sig or nil}
+        flag_sig = type(p.flag_sig) == 'string' and p.flag_sig or nil, pep = int(p.pep)}
   for k, piece in pairs(type(p.perim) == 'table' and p.perim or {}) do
     if type(k) == 'string' and type(piece) == 'table' and type(piece.k) == 'string' then st.perim[k] = piece end
   end
@@ -2284,11 +2350,36 @@ function M.init(K)
   save(K)
 end
 
+-- perimeter episodes (FR-56/60): one opens when the fort leaves quiet (ALERT, SIEGE, BREACH, RECOVERY, or a reflex
+-- lockdown in any mode) with the 'pre' pass (pieces already gone are retired, never rebuilt) and closes when it is
+-- quiet again (PEACE without a lockdown) with the after-siege 'post' diff: lost pieces re-queued, PERIMETER_BROKEN.
+-- Before, only SIEGE/BREACH opened one and only RECOVERY/SIEGE_END diffed, so a small ambush (ALERT, or a lockdown
+-- that never became a siege) left a destroyed wall unnoticed, and a PEACE retire pass dropped it for good.
+-- Level-triggered (step and every mode change), so a missed event or a reload cannot leave one open.
+local EPISODE = {ALERT = true, SIEGE = true, BREACH = true, RECOVERY = true}
+local function episode(K, t)
+  local busy = EPISODE[K.mode()] == true
+  if not busy then
+    local ok, why = K.call('reflex', 'holding')
+    busy = ok and type(why) == 'string' and why ~= ''
+  end
+  if busy and not st.pep then
+    st.pep, dirty = t, true
+    due('perim', t, 'pre')
+  elseif not busy and st.pep then
+    st.pep, dirty = nil, true
+    due('perim', t + CFG.lever_delay, 'post')
+    due('seal', t + CFG.lever_delay, 'siege')
+    K.log('info', 'seal: quiet again: perimeter diff after the episode')
+  end
+end
+
 function M.step(K, budget, ctx)
   local t = now_t(K)
   if not (ctx and ctx.cont) then
     watch(K, t)
     schedule_periodic(K, t)
+    episode(K, t)
   end
   local r = run_jobs(K, t)
   if not next(mem.run) then publish(K) end
@@ -2305,9 +2396,7 @@ M.on.MODE = function(K, ev)
     due('audit', t, 'mode ' .. to)                      -- a fresh refuge audit ...
     if mem.items then due('items', t, 'mode') end       -- ... and stock counts behind it
   end
-  if (to == 'SIEGE' or to == 'BREACH') and from ~= 'SIEGE' and from ~= 'BREACH' and from ~= 'RECOVERY' then
-    due('perim', t, 'pre')
-  end
+  episode(K, t)                                         -- 'pre' when an episode opens, 'post' when it closes
   if to == 'RECOVERY' then
     due('perim', t + CFG.lever_delay, 'post')
     due('seal', t + CFG.lever_delay, 'siege')

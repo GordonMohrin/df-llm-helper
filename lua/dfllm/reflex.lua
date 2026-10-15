@@ -16,7 +16,9 @@
 --          the east stair) the doors seal's entrance check finds on each opening's route toward the citizens and a few
 --          steps inside it (seal.entrance_doors; a fresh check is asked for, its doors are added when it lands). Doors
 --          the player had forbidden, or opened again during the lockdown, are left alone; the openings without a door
---          are named ("partial lockdown: ... has no door")
+--          are named ("partial lockdown: ... has no door"). A door waits while a citizen is on its outside side
+--          (seal.door_outside; the civ alert calls him in), at most ALERT_AFTER ticks, not at all with a visible
+--          hostile within DOOR_NEAR of it: nobody is locked out with the army ("1 waiting for 2 citizens outside")
 --   alert  siege sounds the civ alert (it asks M.holding) once the gates are up, ALERT_AFTER ticks after the
 --          trigger, or at once when no gate is pending or a hostile is near a citizen outside Kern+ or inside: the
 --          alert keeps civilians inside its burrow, and live L3 lost every lever pull to it (GATE_FAIL no_worker).
@@ -153,14 +155,44 @@ local function seal_doors(K, refresh)
 end
 
 M.OPEN_SHOWN = 2           -- openings without a door named in the text (the rest counted)
+M.DOOR_NEAR = 15           -- a visible hostile this close to a waiting door forbids it at once
+M.DOOR_POLL = 20           -- ticks between two looks at the doors still waiting for citizens outside
+
+-- citizens on the outside side of each door (seal.door_outside: open sky of its walk group, the porch of its opening,
+-- the doorway); without seal, sense's citizens outside Kern+ hold every door. Returns {[id] = n}, distinct n.
+local function door_outside(K, list)
+  local ids = {}
+  for _, d in ipairs(list) do ids[#ids + 1] = d.id end
+  local ok, per, n = K.call('seal', 'door_outside', ids)
+  if ok and type(per) == 'table' then return per, int(n) or 0 end
+  local cu = K.census.u
+  local o = type(cu) == 'table' and int(cu.outside) or 0
+  local r = {}
+  if o and o > 0 then for _, id in ipairs(ids) do r[id] = o end else o = 0 end
+  return r, o
+end
+
+-- a visible hostile within DOOR_NEAR of p (a fresh census only)
+local function hostile_near(K, p, now)
+  local h = K.census.h
+  if type(h) ~= 'table' or now - (h.tick or -1e9) > M.FRESH then return false end
+  for _, e in ipairs(h.list or {}) do
+    if geom.dist(e, {x = p[1], y = p[2], z = p[3]}) <= M.DOOR_NEAR then return true end
+  end
+  return false
+end
 
 -- forbid the entrance doors not forbidden yet: the open-sky scan and seal's entrance doors. A door forbidden by
 -- us stays ours (never forbidden twice, never again once the player opened it); a door the player forbade is left
--- alone and never opened. Returns the text part and the number newly forbidden.
+-- alone and never opened. Safety (citizens shut out): a door waits while a citizen is on its outside side (the civ
+-- alert calls them in meanwhile) and is forbidden once nobody is left there, at once with a visible hostile within
+-- DOOR_NEAR of it, and in any case ALERT_AFTER ticks after the lockdown first wanted the doors. Returns the text part
+-- and the number newly forbidden; rt.wait = the doors still waiting, rt.wait_out = the citizens they wait for.
 local function forbid_doors(K, now, refresh)
   local near = entrance_doors(K, now, refresh)
   local sd, sstate = seal_doors(K, refresh)
   rt.seal_tick = sd and sd.tick or nil
+  rt.wait, rt.wait_out, rt.wait_t = {}, 0, now
   if near == nil and sd == nil then
     return sstate == 'pending' and 'doors: no tile test, entrance check pending' or 'doors: no tile test', 0
   end
@@ -171,22 +203,36 @@ local function forbid_doors(K, now, refresh)
     end
   end
   rt.door_pts = cand
-  local mine, n, already = {}, 0, 0
+  local h = st.hold
+  if h and not h.doors_at then h.doors_at, dirty = now, true end
+  local late = not h or now - (h.doors_at or now) >= M.ALERT_AFTER
+  local mine, n, already, todo = {}, 0, 0, {}
   for _, id in ipairs(st.doors) do mine[id] = true end
   for _, d in ipairs(cand) do
     if not mine[d.id] then
       local b = df.building.find(d.id)
       local f = b and b.door_flags and b.door_flags.forbidden
-      if b and not f then
-        if K.act.door_forbid(d.id, true) then
-          n, mine[d.id] = n + 1, true
-          st.doors[#st.doors + 1] = d.id
-          dirty = true
-        end
+      if b and not f then todo[#todo + 1] = d
       elseif b and f then already = already + 1 end
     end
   end
+  local out, nout = {}, 0
+  if #todo > 0 and not late then out, nout = door_outside(K, todo) end
+  local wait = {}
+  for _, d in ipairs(todo) do
+    if late or (out[d.id] or 0) == 0 or hostile_near(K, d.pos, now) then
+      if K.act.door_forbid(d.id, true) then
+        n, mine[d.id] = n + 1, true
+        st.doors[#st.doors + 1] = d.id
+        dirty = true
+      end
+    else wait[#wait + 1] = d.id end
+  end
+  rt.wait, rt.wait_out = wait, #wait > 0 and nout or 0
   local s = string.format('doors %d forbidden', #st.doors)
+  if #wait > 0 then
+    s = s .. string.format(', %d waiting for %d citizen%s outside', #wait, rt.wait_out, rt.wait_out == 1 and '' or 's')
+  end
   if already > 0 then s = s .. ' (' .. already .. ' were already)' end
   if sd and #sd.open > 0 then
     local l = {}
@@ -211,7 +257,7 @@ local function open_doors(K)
     end
   end
   st.doors, dirty = {}, true
-  rt.seal_tick, rt.door_pts = nil, nil
+  rt.seal_tick, rt.door_pts, rt.wait, rt.wait_out = nil, nil, nil, nil
   return n
 end
 
@@ -579,13 +625,16 @@ end
 
 -- BUG-012: while a lockdown holds the doors, a new answer of seal's entrance check (the fresh check the lockdown
 -- asked for, a lever pull, a construction) may name doors not forbidden yet; they are forbidden at once
+-- and the doors still waiting for citizens outside are looked at every DOOR_POLL ticks
 local function door_step(K, now)
   local hd = st.hold
   if not (hd and hd.acts.doors) then return end
   local x = seal_doors(K, false)
-  if not x or x.tick == rt.seal_tick then return end
+  local news = x and x.tick ~= rt.seal_tick
+  local poll = rt.wait and #rt.wait > 0 and (now - (rt.wait_t or now) >= M.DOOR_POLL or now < (rt.wait_t or now))
+  if not (news or poll or (rt.wait == nil and hd.doors_at)) then return end
   local s, n = forbid_doors(K, now, false)
-  if n > 0 then K.log('info', 'reflex: %d more entrance doors forbidden after the entrance check: %s', n, s) end
+  if n > 0 then K.log('info', 'reflex: %d more entrance doors forbidden: %s', n, s) end
 end
 
 -- the quiet clock: no visible invader, great danger in reach or hostile inside, threat not armed, ARM after the
@@ -657,7 +706,7 @@ function M.init(K)
     local h = p.hold
     if type(h) == 'table' and type(h.why) == 'string' then
       st.hold = {why = h.why, kinds = {}, acts = {}, since = int(h.since) or 0, last = int(h.last) or 0, qs = nil,
-                 alert_on = h.alert_on == true, alert_at = int(h.alert_at)}
+                 alert_on = h.alert_on == true, alert_at = int(h.alert_at), doors_at = int(h.doors_at)}
       for k, v in pairs(type(h.kinds) == 'table' and h.kinds or {}) do if v == true then st.hold.kinds[k] = true end end
       for k, v in pairs(type(h.acts) == 'table' and h.acts or {}) do if v == true then st.hold.acts[k] = true end end
     end
@@ -719,6 +768,10 @@ function M.state(K)
   local a = {defcon = rt.defcon or defcon(K), unacked = open, last = st.irq[#st.irq] and st.irq[#st.irq].n or 0,
              ack = st.ack.n or 0, lock = st.hold and 1 or 0, why = st.hold and st.hold.why:sub(1, 24) or ''}
   if rt.eta then a.eta = rt.eta end
+  if st.hold and st.hold.acts.doors then           -- the lockdown's doors: forbidden, waiting, citizens outside
+    a.doors = #st.doors
+    if rt.wait and #rt.wait > 0 then a.dwait, a.dout = #rt.wait, rt.wait_out or 0 end
+  end
   return {alarm = a}
 end
 

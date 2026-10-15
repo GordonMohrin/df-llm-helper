@@ -122,6 +122,9 @@ def line_alarm(ctx: Ctx) -> str:
     if al:
         if al["lock"]:
             out.append(f"lockdown {al['why']}")
+            if "doors" in al:                  # BUG-012: doors forbidden, and those waiting for citizens outside
+                out.append(f"doors {al['doors']} forbidden" + (f", {al['dwait']} waiting for {al.get('dout', 0)}"
+                                                               f" citizens outside" if al.get("dwait") else ""))
         if al["unacked"]:
             out.append(f"{al['unacked']} interrupts unacked (last #{al['last']}, acked #{al['ack']}): dfllm ack")
         eta = al.get("eta", -1)
