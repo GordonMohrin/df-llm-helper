@@ -617,6 +617,8 @@ end
 
 local INSPECT = {state = true, modules = true, census = true, manifest = true, projects = true, persist = true,
                  perf = true, mode = true, plan = true}
+-- inspect topics a module answers itself: M.inspect(K, what, key) -> ok, msg, data (FR-27 tombs, FR-47 water)
+local INSPECT_BY = {tombs = 'care', water_sources = 'water'}
 
 local function kern_verb(st, verb, args, cmd)
   local K = st.K
@@ -658,6 +660,12 @@ local function kern_verb(st, verb, args, cmd)
   end
   -- inspect
   local what = args.what
+  local by = type(what) == 'string' and INSPECT_BY[what]
+  if by then
+    local okc, ok, msg, data = K.call(by, 'inspect', what, args.key)
+    if not okc then return false, by .. ': ' .. tostring(ok) end
+    return ok == true, tostring(msg or what), data
+  end
   if not INSPECT[what] then return false, 'bad what' end
   if what == 'state' then return true, 'state', compose(st)
   elseif what == 'mode' then return true, st.mode, {mode = st.mode, since = st.mode_since}

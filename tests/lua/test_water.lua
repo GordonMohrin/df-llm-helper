@@ -75,12 +75,13 @@ local function well(W, x, y, z) return F.building(W, 'WELL', {x1 = x, y1 = y, x2
 T.test('config/baseline.json may tune water; the defaults stand without it', function()
   local W, M = world()
   local c = M.conf(W.K)
-  T.eq(c.thirst_alarm, 40000)
+  T.eq(c.thirst_alarm, 30000)                                 -- FR-34: hospital patients over 30,000 wake
+  T.eq(c.deep, 4)
   T.eq(c.near, 30)
   T.ok(c.buckets_min >= 2)
 end)
 
-T.test('a bedridden patient over 40k thirst without water: patient_thirst (A) with the cause, cistern requested', function()
+T.test('a bedridden patient over 30k thirst without water: patient_thirst (A) with cause and recipe, cistern requested', function()
   local W, M = world{patients = {{id = 2, thirst = 45000, rest = true, pos = {12, 12, 5}}},
                      setup = function(W) F.hospital(W, {10, 10, 14, 14, 5}) end}
   day(W)
@@ -90,8 +91,9 @@ T.test('a bedridden patient over 40k thirst without water: patient_thirst (A) wi
   T.eq(pt[1].d.unit, 2)
   T.eq(pt[1].d.units, {2})
   T.ok(pt[1].msg:find('no wet', 1, true), pt[1].msg)
+  T.ok(pt[1].d.q:find('delete the hospital zone', 1, true), pt[1].d.q)  -- FR-34 recipe
   T.ok(#pt[1].d.q <= 200 and #pt[1].msg <= 200)
-  T.eq(#needed(W, 'hospital_water'), 0)                       -- patient_thirst already names the dry hospital
+  T.eq(#W.find_events('HOSPITAL_DRY'), 0)                     -- patient_thirst already names the dry hospital
   local req = W.find_events('PROJECT_REQUEST')
   T.eq(#req, 1)
   T.eq(req[1].d.tpl, 'cistern')
@@ -101,13 +103,13 @@ T.test('a bedridden patient over 40k thirst without water: patient_thirst (A) wi
   T.eq(#needed(W, 'patient_thirst'), 1)
   day(W, 2)
   T.eq(#needed(W, 'patient_thirst'), 2)
-  T.eq(#needed(W, 'hospital_water'), 0)
+  T.eq(#W.find_events('HOSPITAL_DRY'), 0)
   T.eq(#W.find_events('PROJECT_REQUEST'), 1)                   -- monthly
 end)
 
 T.test('one patient_thirst line for all patients; a patient crossing the alarm wakes at once', function()
   local W, M = world{patients = {{id = 2, thirst = 45000, rest = true}, {id = 3, thirst = 52000, care = true},
-                                 {id = 4, thirst = 30000, care = true}},
+                                 {id = 4, thirst = 29000, care = true}},
                      setup = function(W) F.hospital(W, {10, 10, 14, 14, 5}) end}
   day(W)
   local pt = needed(W, 'patient_thirst')
@@ -115,33 +117,60 @@ T.test('one patient_thirst line for all patients; a patient crossing the alarm w
   T.eq({pt[1].d.unit, pt[1].d.n, pt[1].d.units}, {3, 2, {3, 2}})   -- the thirstiest first
   day(W)
   T.eq(#needed(W, 'patient_thirst'), 1)
-  W.unit(4).counters2.thirst_timer = 41000                    -- unit 4 crosses the alarm
+  W.unit(4).counters2.thirst_timer = 31000                    -- unit 4 crosses the alarm
   day(W)
   pt = needed(W, 'patient_thirst')
   T.eq(#pt, 2)
   T.eq(pt[2].d.n, 3)
   W.unit(2).counters2.thirst_timer = 1000                     -- unit 2 got water: its episode ends
   day(W)
-  W.unit(2).counters2.thirst_timer = 42000                    -- and starts again: at once
+  W.unit(2).counters2.thirst_timer = 32000                    -- and starts again: at once
   day(W)
   T.eq(#needed(W, 'patient_thirst'), 3)
 end)
 
-T.test('hospital_water for patients below the alarm: when the dry episode starts, then weekly', function()
+T.test('hospital gate (FR-31/34): HOSPITAL_DRY when the dry episode starts, weekly with patients, else monthly', function()
   local W, M = world{patients = {{id = 2, thirst = 1000, care = true}},
                      setup = function(W) F.hospital(W, {10, 10, 14, 14, 5}) end}
   day(W)
-  T.eq(#needed(W, 'hospital_water'), 1)
+  local hd = W.find_events('HOSPITAL_DRY')
+  T.eq(#hd, 1)
+  T.eq(hd[1].cls, 'A')
+  T.eq({hd[1].d.patients, hd[1].d.near}, {1, 30})
+  T.ok(hd[1].d.recipe:find('delete the hospital zone', 1, true), hd[1].d.recipe)
+  T.ok(#hd[1].msg <= 200 and #hd[1].d.recipe <= 200)
   day(W, 6)
-  T.eq(#needed(W, 'hospital_water'), 1)
+  T.eq(#W.find_events('HOSPITAL_DRY'), 1)
   day(W)
-  T.eq(#needed(W, 'hospital_water'), 2)
-  W.unit(2).health = nil                                       -- healed: the episode ends
-  day(W)
-  W.unit(2).health = {flags = {needs_healthcare = true}}       -- hurt again: at once
-  day(W)
-  T.eq(#needed(W, 'hospital_water'), 3)
+  T.eq(#W.find_events('HOSPITAL_DRY'), 2, 'weekly while somebody is a patient')
+  W.unit(2).health = nil                                       -- healed: the gate stays, monthly now
+  day(W, 14)
+  T.eq(#W.find_events('HOSPITAL_DRY'), 2)
+  day(W, 14)
+  T.eq(#W.find_events('HOSPITAL_DRY'), 3, 'a hospital without water is reported without patients too')
   T.eq(#needed(W, 'patient_thirst'), 0)
+  T.eq(#needed(W, 'hospital_water'), 0, 'the DECISION_NEEDED of the old gate is gone')
+end)
+
+T.test('hospital gate: water ends the episode, a dry hospital again wakes at once; a planned hospital without water', function()
+  local W, M = world{tiles = {['20,12,4'] = '_', ['20,12,3'] = '~'},
+                     setup = function(W) F.hospital(W, {10, 10, 14, 14, 5}) end}
+  day(W)
+  T.eq(#W.find_events('HOSPITAL_DRY'), 1)
+  well(W, 20, 12, 5)
+  day(W)
+  T.eq(M.kpi(W.K).gate, 0)
+  W.cmap['20,12,3'] = '.'                                      -- the sump ran dry
+  day(W)
+  T.eq(#W.find_events('HOSPITAL_DRY'), 2)
+  local W2 = world{setup = function(W)
+    W.load({name = 'runner', every = {ticks = 600}, pending = function(K, tpl) return tpl == 'hospital' and 1 or 0 end})
+  end}
+  day(W2)
+  local hd = W2.find_events('HOSPITAL_DRY')
+  T.eq(#hd, 1)
+  T.ok(hd[1].msg:find('planned hospital', 1, true), hd[1].msg)
+  T.eq(hd[1].d.zone, -1)
 end)
 
 T.test('needs_healthcare marks a patient too; a thirsty dwarf at work is no patient', function()
@@ -152,21 +181,29 @@ T.test('needs_healthcare marks a patient too; a thirsty dwarf at work is no pati
   T.eq(#needed(W, 'patient_thirst'), 0)                       -- 30k is below the alarm, unit 3 is no patient
 end)
 
-T.test('a wet well near the hospital serves it: no hospital_water, the cause names the caregivers', function()
+T.test('a wet well near the hospital serves it: no gate alarm; patient_thirst lists caregivers and buckets', function()
   local W, M = world{patients = {{id = 2, thirst = 41000, care = true}},
                      tiles = {['20,12,4'] = '_', ['20,12,3'] = '~'},
-                     setup = function(W) F.hospital(W, {10, 10, 14, 14, 5}); well(W, 20, 12, 5) end}
+                     setup = function(W)
+                       F.hospital(W, {10, 10, 14, 14, 5}); well(W, 20, 12, 5)
+                       df.unit_labor = {FEED_WATER_CIVILIANS = 40}
+                       for _, id in ipairs({1, 3, 4}) do W.unit(id).status = {labors = {[40] = id ~= 4}} end
+                     end}
   F.item(W, 'BUCKET', {_pos = {20, 13, 5}})
   F.item(W, 'BUCKET', {_pos = {20, 14, 5}})
   F.item(W, 'BUCKET', {_pos = {20, 15, 5}})
   day(W)
   local k = M.kpi(W.K)
   T.eq({k.hosp_ok, k.wells, k.wet, k.buckets_free}, {1, 1, 1, 3})
-  T.eq(#needed(W, 'hospital_water'), 0)
+  T.eq(#W.find_events('HOSPITAL_DRY'), 0)
   local pt = needed(W, 'patient_thirst')
   T.eq(#pt, 1)
-  T.ok(pt[1].msg:find('water and buckets present', 1, true), pt[1].msg)
+  T.ok(pt[1].msg:find('water, buckets and caregivers present', 1, true), pt[1].msg)
+  T.eq({pt[1].d.carers, pt[1].d.n_carers, pt[1].d.buckets, pt[1].d.buckets_all}, {{1, 3}, 2, 3, 3})
+  T.ok(pt[1].d.q:find('carers 2 (FEED_WATER_CIVILIANS: 1,3)', 1, true), pt[1].d.q)
+  T.eq(M.kpi(W.K).carers, 2)
   T.eq(#W.find_events('PROJECT_REQUEST'), 0)
+  df.unit_labor = nil
 end)
 
 T.test('a dry sump, a hidden shaft or a well 40 tiles away do not serve the hospital', function()
@@ -179,23 +216,39 @@ T.test('a dry sump, a hidden shaft or a well 40 tiles away do not serve the hosp
   day(W)
   local k = M.kpi(W.K)
   T.eq({k.hosp_ok, k.wells, k.wet}, {0, 3, 1})
-  T.eq(#needed(W, 'hospital_water'), 1)
+  T.eq(#W.find_events('HOSPITAL_DRY'), 1)
 end)
 
-T.test('an active Water Source zone over a brook bed (water one level below) serves the hospital', function()
-  local W, M = world{patients = {{id = 2, thirst = 1000, care = true}},
-                     tiles = {['31,12,4'] = '~'},
-                     setup = function(W)
-                       F.hospital(W, {10, 10, 14, 14, 5})
-                       F.building(W, 'ZONE_WATER_SOURCE', {id = 70, type = df.civzone_type.WaterSource, x1 = 30,
-                                                           y1 = 12, x2 = 31, y2 = 12, z = 5,
-                                                           spec_sub_flag = {active = true}})
-                       F.building(W, 'ANY_ZONE', {id = 71, type = df.civzone_type.WaterSource, x1 = 90, y1 = 90,
-                                                  x2 = 90, y2 = 90, z = 5, spec_sub_flag = {active = false}})
-                     end}
-  day(W)
-  T.eq(M.kpi(W.K).hosp_ok, 1)
-  T.eq(M.kpi(W.K).wet, 1)
+T.test('FR-33a: a Water Source zone counts only on water >= 4/7 on its own level (zone_below for a brook bed)', function()
+  local function run(tiles, below)
+    local W, M = world{patients = {{id = 2, thirst = 1000, care = true}}, tiles = tiles,
+                       setup = function(W)
+                         F.hospital(W, {10, 10, 14, 14, 5})
+                         F.building(W, 'ZONE_WATER_SOURCE', {id = 70, type = df.civzone_type.WaterSource, x1 = 30,
+                                                             y1 = 12, x2 = 31, y2 = 12, z = 5,
+                                                             spec_sub_flag = {active = true}})
+                         F.building(W, 'ANY_ZONE', {id = 71, type = df.civzone_type.WaterSource, x1 = 90, y1 = 90,
+                                                    x2 = 90, y2 = 90, z = 5, spec_sub_flag = {active = false}})
+                       end}
+    if below then
+      local cfg = F.cfg()
+      cfg.water = {zone_below = true}
+      W.K.cfg.baseline = cfg
+    end
+    day(W)
+    return M.kpi(W.K).hosp_ok, M.kpi(W.K).wet
+  end
+  T.eq({run({['31,12,5'] = '~'})}, {1, 1}, 'deep water on the zone level')
+  T.eq({run({['31,12,5'] = 'w'})}, {0, 0}, '1/7 seepage: the game cancels GiveWater "No water source"')
+  T.eq({run({['31,12,4'] = '~'})}, {0, 0}, 'water one level below: not by default')
+  T.eq({run({['31,12,4'] = '~'}, true)}, {1, 1}, 'zone_below accepts a brook bed')
+end)
+
+T.test('deep_tile reads the depth from snapshot.tile, magma never counts', function()
+  local M = fresh()
+  local c = {deep = 4}
+  T.eq({M.deep_tile({c = 'w', flow = 3}, c), M.deep_tile({c = '~', flow = 4}, c), M.deep_tile({c = '~', flow = 7, magma = true}, c),
+        M.deep_tile({c = '~'}, c), M.deep_tile({c = 'w'}, c), M.deep_tile(nil, c)}, {false, true, false, true, false, false})
 end)
 
 T.test('buckets: unforbid inside Kern+ first, then one live dfllm:bucket order for the rest', function()
@@ -322,7 +375,7 @@ end)
 T.test('pond loop (live L6): a Pond zone beside a wet well is removed; a real Water Source zone keeps it', function()
   local function run(with_source)
     local removed = {}
-    local W, M = world{tiles = {['20,12,4'] = '_', ['20,12,3'] = '~', ['31,12,4'] = '~'},
+    local W, M = world{tiles = {['20,12,4'] = '_', ['20,12,3'] = '~', ['31,12,5'] = '~'},
                        setup = function(W)
                          df.civzone_type.Pond = 11
                          df.civzone_type[11] = 'Pond'

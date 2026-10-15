@@ -71,6 +71,7 @@ for _, b in ipairs(df.global.world.buildings.other.FARM_PLOT) do
 end
 print('farm_slots_filled=' .. filled)
 
+-- Superseded by kernel care (tomb phase, act.tomb_zone 'open': free usable tomb zones are opened to citizens).
 -- Workaround FR-23: tomb zones placed by quickfort are closed to citizens (no_citizens); open unassigned ones so the dead can be buried.
 local opened = 0
 for _, b in ipairs(df.global.world.buildings.all) do
@@ -128,6 +129,7 @@ do
   print('seed_forbid_cleared=' .. n)
 end
 
+-- Superseded by kernel care (FR-27 tomb phase: one zone per coffin tile, 1x1 zones without a coffin removed; inspect what=tombs).
 -- Run 9 lesson (14.10.2026): repeated quickfort/kernel placements left up to 3 overlapping tomb zones on one coffin tile,
 -- each assigned to a different dead citizen, plus zones on tiles without any coffin: nobody was hauled to a coffin.
 -- Keep ONE zone per coffin tile (prefer the one whose dead unit is still unburied), remove the others and zones without a coffin.
@@ -182,6 +184,8 @@ do
   print('tomb_zones_removed=' .. removed)
 end
 
+-- Superseded by kernel care (FR-27/41/42 tomb phase: stale and bad zones freed, bedroom coffins skipped, unburied dead
+-- reassigned to free coffins; GHOSTS (A) names the cause per body; verb tombs.repair).
 -- Run 9 lesson (14.10.2026): dead citizens stay unburied (ghosts, stress) when their assigned tomb zone has no coffin
 -- (overlapping zones on one tile, zone planned but coffin never built) or the coffin holds someone else. Re-assign such
 -- dead units to a free coffin whose single tomb zone is unassigned. Idempotent; touches only unburied dwarf corpses.
@@ -430,6 +434,8 @@ do
   end
 end
 
+-- Superseded in part by kernel water (FR-31/33a/34: patient_thirst (A) at 30,000 with the recipe, HOSPITAL_DRY (A) for a
+-- hospital without accepted water). The kernel never edits health flags; this block remains a manual workaround.
 -- Hospital rescue (Run 9, 14.10.2026, 4 patients at thirst 63-70k): caregivers cancel 'Give water: No water source' and
 -- 'Diagnose patient: Patient not resting', so bedridden patients die of thirst/hunger in the ward. A patient who is already thirsty or
 -- hungry is released: no forced rest, no diagnosis requirement, current rest job cancelled, so the unit fetches its own drink and food.
@@ -464,6 +470,7 @@ do
   print('popups_dismissed=' .. n)
 end
 
+-- Superseded by kernel care (FR-45: entomb marks the death discovered; the cause 'undiscovered' is reported, never written).
 -- A loose dwarf corpse is only hauled to its coffin once its death incident is 'discovered' (a dwarf must find the body); bodies in
 -- quiet rooms stayed unburied for days. Mark the incidents of loose dwarf corpses as discovered (what DFHack's entomb script does).
 do
@@ -585,6 +592,8 @@ do
   end
 end
 
+-- Superseded by kernel care (FR-45 tomb phase: `entomb --unit <id> --haul-now` per unburied body with a usable zone, checked
+-- against the PlaceItemInTomb job count and retried; cause 'no_job').
 -- FR-45 (14.10.2026): zone + coffin assignment alone left skeletons of dead dwarves lying around for game months (the game never
 -- tasked PlaceItemInTomb). DFHack's `entomb --unit <id> --haul-now` assigns a tomb, flags every body part for burial and
 -- creates the hauling jobs (no teleport). Run it once for each unburied dwarf body that has no job yet.
@@ -622,6 +631,8 @@ do
   print('loot_metal_unforbidden=' .. n)
 end
 
+-- Superseded by kernel care (FR-48: >= 4 civilian doctors through act.medic, dead or vacant hospital posts filled through
+-- act.hospital_post).
 -- FR-48 (14.10.2026): after the sieges all three doctors were dead (DIAGNOSE/SURGERY/BONE_SETTING on 0 dwarves) and 7 patients waited
 -- for a diagnosis. Keep >= 4 living non-military adults on the doctor labors.
 do

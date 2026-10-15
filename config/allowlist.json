@@ -19,6 +19,7 @@
   "enable": {"rw": "w", "args": ["autobutcher", "autochop", "autofarm", "autolabor", "autonestbox", "autoslab", "autotraining", "buildingplan", "burrow",
    "idle-crafting", "logistics", "nestboxes", "pop-control", "preserve-rooms", "preserve-tombs",
    "prioritize", "seedwatch", "suspendmanager", "tailor"]},
+  "entomb": {"rw": "w", "args": ["--unit * --haul-now"]},
   "fix/dead-units": {"rw": "w", "args": ["", "-q", "--active", "--active -q", "--burrow", "--burrow -q"]},
   "fix/empty-wheelbarrows": {"rw": "w", "args": ["", "-q", "-d", "--dry-run"]},
   "fix/stuck-merchants": {"rw": "w", "args": ["", "-n", "--dry-run"]},

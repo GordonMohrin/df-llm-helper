@@ -118,7 +118,8 @@ helper is experimental; procedure and fair-play limits: `tools/embark/README.md`
 | `trade.want` | `{want?, sell?}` | tokens like `bar:iron`, `anvil`, `cloth` |
 | `squad.sortie` | `{squad, target, approve:true}` | ALERT/SIEGE/BREACH/RECOVERY; rare, `approve:true` is a deliberate, logged decision; target = kill box id or position |
 | `lever` | `{bridge, want}` | PEACE only |
-| `inspect` | `{what, key?}` | read-only, ≤ 8 KB |
+| `inspect` | `{what, key?}` | read-only, ≤ 8 KB (`what=tombs`, `what=water_sources` too) |
+| `tombs.repair` | `{}` | GHOSTS: the next care run repairs the tombs (any mode) and retries entomb |
 | `selftest` | `{suite?}` | quick or full |
 | `module.enable` | `{module}` | re-enable a module the kernel backed off (KERN_FAULT) before its backoff ends, only once the cause is fixed |
 There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` prints it.
@@ -136,6 +137,9 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | PLAN_EXHAUSTED | year review now (`plan propose`) |
 | PROJECT_BLOCKED | `bp preview`, then `bp.cancel` and place at another site, or fix the material |
 | YEAR_REVIEW | §5 year review |
+| GHOSTS | `inspect` `what=tombs` (causes per body); `tombs.repair`; `no_coffin` → `bp.place tombs`; `no_body` → a memorial slab |
+| HOSPITAL_DRY | follow the recipe in the line (`inspect` `what=water_sources`: a bank to zone or a dig); until water is accepted, a dry hospital zone is worse than none |
+| MOOD_RISK | supply the missing class now (dig, trade, butcher); a mood job is never cancelled |
 
 ## 8. Readiness gate (only readiness raises max-pop)
 - **R0:** cap 55 (pop-control `max-pop 55`, `wave-size 8`).

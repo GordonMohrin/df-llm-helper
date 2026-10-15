@@ -242,15 +242,18 @@ T.test('a corpse scan before UNIT_DEATH does not swallow the DEATH event', funct
 end)
 
 T.test('tombs: PROJECT_REQUEST when free < open corpses + 6, rate-limited; corpses_old, ghosts', function()
+  local CW = require('care_world')
   local W = world{setup = function(W)
-    F.building(W, 'ZONE_TOMB', {assigned_unit_id = -1, spec_sub_flag = {active = true}})
-    F.building(W, 'ZONE_TOMB', {assigned_unit_id = 7, spec_sub_flag = {active = true}})
-    F.building(W, 'ZONE_TOMB', {assigned_unit_id = -1, spec_sub_flag = {active = false}})
+    CW.tomb(W, 30, 10, 5)                                      -- usable: a built coffin under one open zone
+    CW.tomb(W, 31, 10, 5, {unit = 2})                          -- a living citizen's tomb
+    CW.tomb(W, 32, 10, 5, {active = false})
+    CW.tomb(W, 33, 10, 5, {coffin = false})                    -- FR-27: a zone without a coffin is no tomb
+    F.building(W, 'ZONE_TOMB', {assigned_unit_id = -1, spec_sub_flag = {active = true}})   -- no position
+    CW.tomb_acts(W)
+    W.load({name = 'runner', every = {ticks = 600}, pending = function(K, tpl) return tpl == 'tombs' and 1 or 0 end})
   end}
   W.run(1)
-  local req = W.find_events('PROJECT_REQUEST')
-  T.eq(#req, 1, 'core exists: keep 6 spare tombs')
-  T.eq({req[1].d.tpl, req[1].d.n}, {'tombs', 5})
+  T.eq(W.state().care.tombs_free, 1)
   W.event('UNIT_DEATH', {unit = 3})
   W.run(1)
   W.kill(3)
@@ -259,14 +262,33 @@ T.test('tombs: PROJECT_REQUEST when free < open corpses + 6, rate-limited; corps
   F.item(W, 'ANY_CORPSE', {unit_id = 3, flags = {in_building = true}, _pos = {5, 5, 5}})
   day(W)
   local s = W.state()
-  T.eq({s.care.tombs_free, s.care.corpses_old, s.care.ghosts}, {1, 0, 1})
+  T.eq({s.care.tombs_free, s.care.corpses_old, s.care.ghosts}, {0, 0, 1}, 'the free tomb went to unit 3')
+  T.eq(CW.tacts(W, 'assign'), {{'assign', 2, 3}})          -- zone 2 over coffin 1
   T.eq(acts(W, 'item_flag'), {{5001, 'forbid', false}}, 'citizen corpse unforbidden for burial, never dumped')
+  T.eq(W.find_events('PROJECT_REQUEST'), {}, 'a tombs project is pending')
+end)
+
+T.test('tombs: PROJECT_REQUEST when usable free tombs < open corpses + 6, rate-limited', function()
+  local CW = require('care_world')
+  local W = world{setup = function(W)
+    CW.tomb(W, 30, 10, 5)
+    CW.tomb(W, 31, 10, 5, {unit = 2})
+    CW.tomb_acts(W)
+  end}
+  W.run(1)
+  local req = W.find_events('PROJECT_REQUEST')
+  T.eq(#req, 1, 'core exists: keep 6 spare tombs')
+  T.eq({req[1].d.tpl, req[1].d.n}, {'tombs', 5})
+  W.kill(3)
+  W.event('UNIT_DEATH', {unit = 3})
+  F.item(W, 'ANY_CORPSE', {unit_id = 3, _pos = {5, 5, 5}})
+  day(W)
   T.eq(#W.find_events('PROJECT_REQUEST'), 1, 'rate-limited')
   day(W, 2)
   req = W.find_events('PROJECT_REQUEST')
   T.eq(#req, 2)
-  T.eq(req[2].d.n, 6)
-  day(W, 1)
+  T.eq(req[2].d.n, 7, '1 open corpse + 6, the free tomb is assigned to it')
+  day(W)
   T.eq(W.state().care.corpses_old, 1)
 end)
 

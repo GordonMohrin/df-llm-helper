@@ -1,17 +1,28 @@
 -- water (live L3): water for the bedridden. In L2 and L3 bedridden dwarves died of thirst: the hospital and
 -- refuge wells stood over dry sumps, the only water was a brook 90 tiles away, and nothing told anybody.
+-- Runs 7-9 (FR-31/33a/34/47): patients died of thirst in wards next to full drink stores, because a Water
+-- Source zone on 1/7 seepage does not count for the game: GiveWater was cancelled "No water source".
 --   * patients: citizens (census ids) who need health care (unit sheet "needs health care", the
 --     injured notification) or lie resting in bed; their thirst timer is watched. A patient over
---     thirst_alarm (40,000, 10,000 before DF's "dehydrated") wakes the LLM (DECISION_NEEDED patient_thirst, A)
---     with the cause (no wet well or Water Source zone near the hospital, no free bucket): one line for all
---     such patients, at once when one crosses the alarm, else weekly;
---   * water sources, as the zone sheet and the well show them: wells with revealed water below the well
---     (snapshot.tile down the shaft), Water Source zones (civzone WaterSource, active) with revealed water on
---     or under a zone tile. A hospital is served when a wet source lies within `near` tiles of its zone;
---     the refuge when a wet well stands on a Tiefe+ tile. A hospital without water while somebody is a
---     patient wakes the LLM (hospital_water, A; when the dry episode starts, then weekly) and asks for a
---     `cistern` monthly (PROJECT_REQUEST, B; bp sites cistern, the brook plan: python -m
---     dfpilot.bp.sites cistern);
+--     thirst_alarm (30,000, FR-34) wakes the LLM (DECISION_NEEDED patient_thirst, A) with the cause and a
+--     one-line recipe (dry hospital: delete the hospital zone or carry water), the caregivers (citizens with
+--     FEED_WATER_CIVILIANS) and the buckets: one line for all such patients, at once when one crosses the
+--     alarm, else weekly;
+--   * water sources, the game's own condition (FR-33a/34): a built well with revealed water down its shaft,
+--     or an active Water Source zone with a revealed water tile of depth >= deep (4/7) on the zone's own
+--     level (zone_below: also the level below; off, a brook top is unconfirmed live). Shallow water and the
+--     mere presence of water tiles do not count. A hospital is served when such a source lies within `near`
+--     tiles of its zone; the refuge when a wet well stands on a Tiefe+ tile;
+--   * hospital gate (FR-31/34): a hospital location (or a pending `hospital` project) without an accepted
+--     source wakes the LLM (HOSPITAL_DRY, A) with a one-line recipe from the water-source scan, when the
+--     dry episode starts, then weekly while somebody is a patient, else monthly; the run that already sent
+--     patient_thirst sends none. A `cistern` is asked monthly (PROJECT_REQUEST, B; bp sites cistern);
+--   * water sources scan (FR-47, `inspect what=water_sources`): revealed water of depth >= deep around the
+--     hospitals (else the citizens), `near` tiles wide and ws_dz levels up and down, through snapshot.liquids
+--     (sliced, after the run's decisions); per water body its level, size, depth, an accepted zone or well
+--     over it, a standable bank reachable from the citizens (snapshot.reach), else the shortest dig through
+--     revealed natural wall on that level to such a bank. Run on request, and weekly while the hospital
+--     gate is dry. Hidden tiles are never read;
 --   * buckets (bucket-delivery fallback: caregivers carry water from any well or Water Source zone in a free
 --     bucket): want = max(the hospital's desired buckets, buckets_min) + 1 per patient (<= buckets_max).
 --     Forbidden buckets on revealed Kern+ tiles are unforbidden (item_flag; not in BREACH, and without a Kern+
@@ -24,7 +35,7 @@
 --   * cisterns (manifest rooms tpl `cistern`): revealed water on the well room floor (2 tiles, or 1 tile in
 --     two runs in a row) means the pipe is flooding the room: DECISION_NEEDED cistern_flood (A), close the
 --     floodgate with the room's lever.
--- Fair play: reads citizens by census id (thirst, health flags, current job, position), buildings.other
+-- Fair play: reads citizens by census id (thirst, health flags, current job, position, labors), buildings.other
 -- vectors (WELL, ZONE_WATER_SOURCE or ANY_ZONE), items.other.BUCKET (flags, position, whether a bucket still
 -- holds water: such a bucket is no free bucket), manager orders, site locations, burrow
 -- membership; tiles only through snapshot.tile (revealed only). Never edits units, jobs or zones.
@@ -38,18 +49,22 @@ local DAY = C.TICKS.DAY
 
 -- Wake cadence (review): one patient_thirst line per patient every 3 game days came about every 8 s at 450
 -- ticks/s and buried every other DECISION_NEEDED of a wake under water lines. Now one line covers all patients
--- over the alarm, at once when a patient crosses it, else weekly (care's mood re-wake); hospital_water starts
--- with the dry episode and repeats weekly, and not in a run that already sent patient_thirst.
+-- over the alarm, at once when a patient crosses it, else weekly (care's mood re-wake); HOSPITAL_DRY starts
+-- with the dry episode and repeats weekly with patients (monthly without), never in a run that sent
+-- patient_thirst.
 M.DEFAULTS = {
-  thirst_alarm = 40000, thirst_watch = 25000, near = 30, shaft = 12, pond_near = 3, pond_per_run = 2,
+  thirst_alarm = 30000, thirst_watch = 25000, near = 30, shaft = 12, pond_near = 3, pond_per_run = 2,
   buckets_min = 2, bucket_per_patient = 1, buckets_max = 8, unforbid_per_run = 4,
   alarm_every = 7 * DAY, hosp_every = 7 * DAY, request_every = 28 * DAY, flood_every = 2 * DAY, flood_tiles = 2,
   units_per_slice = 40, items_per_slice = 200, zone_tiles = 25, order_backoff = 3 * DAY,
+  deep = 4, zone_below = false, gate_every = 28 * DAY,
+  ws_dz = 3, ws_tiles = 1500, ws_every = 7 * DAY, ws_bodies = 12, ws_dig = 8, ws_reach = 6, ws_reads = 400,
 }
 M.BUCKET_ORDER = {job = 'MakeBucket', material_category = {'wood'}, frequency = 'OneTime'}
 local BUSY = {'in_job', 'trader', 'removed', 'garbage_collect', 'construction', 'in_building', 'hostile'}
 
 local st = {}
+local has_liquids, emit_gate             -- the hospital gate and the water sources scan (below)
 
 local function fmt(n) return string.format('%d', math.tointeger(n) or -1) end
 local function trunc(s, n) return #s > n and s:sub(1, n) or s end
@@ -102,15 +117,24 @@ function M.well_wet(K, x, y, z, depth)
   return false
 end
 
+-- water the game accepts in a Water Source zone (FR-33a/34): a revealed tile of depth >= deep, never magma.
+-- snapshot.tile gives the depth (flow); a reader without it marks depth 4..7 as '~' and 1..3 as 'w'
+function M.deep_tile(t, c)
+  if type(t) ~= 'table' or t.magma == true then return false end
+  local f = math.tointeger(t.flow)
+  if f ~= nil then return f >= c.deep end
+  return t.c == '~'
+end
+
+-- a zone tile of deep water on the zone's own level (zone_below: or on the level below, e.g. a brook bed)
 local function zone_wet(K, c, zn)
   local n = 0
   for y = zn.y1, zn.y2 do
     for x = zn.x1, zn.x2 do
       n = n + 1
       if n > c.zone_tiles then return false end
-      for dz = 0, 1 do                                       -- a brook bed under the walkable brook top
-        local t = tile(K, x, y, zn.z - dz)
-        if t and wet_char(t.c) then return true end
+      for dz = 0, c.zone_below == true and 1 or 0 do
+        if M.deep_tile(tile(K, x, y, zn.z - dz), c) then return true end
       end
     end
   end
@@ -164,6 +188,15 @@ local function patient(u)
   return ok and yes == true
 end
 
+-- a caregiver who carries water to the bedridden: an adult with the FEED_WATER_CIVILIANS labor (labors screen)
+local function carer(u)
+  local ok, yes = pcall(function()
+    return not dfhack.units.isDead(u) and dfhack.units.isAdult(u)
+           and u.status.labors[df.unit_labor.FEED_WATER_CIVILIANS] == true
+  end)
+  return ok and yes == true
+end
+
 local function phase_units(K, c, r)
   local n = 0
   while r.idx < #r.ids and n < c.units_per_slice do
@@ -175,6 +208,12 @@ local function phase_units(K, c, r)
       pcall(function() th = math.tointeger(u.counters2.thirst_timer) or 0 end)
       local x, y, z = dfhack.units.getPosition(u)
       r.patients[#r.patients + 1] = {id = id, thirst = th, x = x, y = y, z = z}
+    elseif u then
+      if carer(u) then r.carers[#r.carers + 1] = id end
+      if #r.home < 60 then
+        local x, y, z = dfhack.units.getPosition(u)
+        if x then r.home[#r.home + 1] = {x = x, y = y, z = z} end
+      end
     end
   end
   return r.idx >= #r.ids
@@ -342,6 +381,264 @@ local function pond_loops(K, c, r)
   return n
 end
 
+---------------------------------------------------------------- water sources (FR-47)
+-- Run 9: the aquifer probe pool (6-7/7) was walled in, the shaft below got a 1/7 trickle, and nobody knew where
+-- deep water could be reached. The scan reads revealed water of depth >= deep through snapshot.liquids (hidden
+-- tiles never), groups it into bodies per level and looks for a standable bank the citizens reach, else the
+-- shortest dig through revealed natural wall on that level. Plain values only; sliced over frames.
+local STAND = {['.'] = true, r = true, ['<'] = true, ['>'] = true, X = true, w = true, ['^'] = true}
+local DIGGABLE = {['#'] = true, S = true}                 -- natural wall (smoothed too); constructions stay
+local N8 = {{-1, -1}, {0, -1}, {1, -1}, {-1, 0}, {1, 0}, {-1, 1}, {0, 1}, {1, 1}}
+
+local function k3(x, y, z) return string.format('%d,%d,%d', x, y, z) end
+
+local function median(list, f)
+  local v = {}
+  for _, e in ipairs(list) do v[#v + 1] = e[f] end
+  table.sort(v)
+  return v[(#v + 1) // 2]
+end
+
+has_liquids = function(K)
+  local ok = K.call('snapshot', 'liquids', 0, 0, -1, -1, 0, 1)
+  return ok == true
+end
+
+emit_gate = function(K, c, a)
+  local fix = M.recipe(c)
+  K.emit('HOSPITAL_DRY', 'A', trunc(string.format('%s without accepted water, %d patient(s): %s',
+                                                  a.planned and 'planned hospital' or 'hospital', a.patients, fix), 200),
+         {why = trunc(a.why, 200), patients = a.patients, zone = a.zone, near = c.near, recipe = trunc(fix, 200)})
+end
+
+-- the one-line recipe of the hospital gate from the last scan: zone a reachable bank, else the shortest dig,
+-- else a cistern; deleting the hospital zone lets the patients fetch their own drink meanwhile
+function M.recipe(c)
+  local ws = st.ws
+  local tail = '; until then delete the hospital zone'
+  if not ws then
+    return string.format('a well over water or a Water Source zone on water >= %d/7 within %d tiles (inspect '
+                         .. 'water_sources)%s', c.deep, c.near, tail)
+  end
+  local best
+  for _, b in ipairs(ws.bodies or {}) do
+    if b.d <= c.near and (b.bank or b.dig) then
+      if not best or (b.bank and not best.bank) or ((b.bank ~= nil) == (best.bank ~= nil) and b.d < best.d) then
+        best = b
+      end
+    end
+  end
+  if best and best.bank then
+    return string.format('zone the water at %d,%d,%d (%d/7) as Water Source, bank %d,%d,%d is reachable, or a well '
+                         .. 'over it%s', best.at[1], best.at[2], best.at[3], best.max, best.bank[1], best.bank[2],
+                         best.bank[3], tail)
+  elseif best then
+    local d = best.dig
+    return string.format('dig %d wall tile(s) from %d,%d,%d to %d,%d,%d to bare the water at %d,%d,%d, then zone '
+                         .. 'it%s', d.n, d.from[1], d.from[2], d.from[3], d.to[1], d.to[2], d.to[3], best.at[1],
+                         best.at[2], best.at[3], tail)
+  end
+  return string.format('no reachable water >= %d/7 within %d tiles: a cistern (bp sites cistern)%s', c.deep, c.near,
+                       tail)
+end
+
+local function new_scan(K, c, r)
+  local boxes, ref = {}, nil
+  for i = 1, math.min(2, #r.hosp) do
+    local h = r.hosp[i]
+    boxes[#boxes + 1] = {math.max(0, h.x1 - c.near), math.max(0, h.y1 - c.near), math.max(0, h.z - c.ws_dz),
+                         h.x2 + c.near, h.y2 + c.near, h.z + c.ws_dz}
+  end
+  if r.hosp[1] then
+    local h = r.hosp[1]
+    ref = {x1 = h.x1, y1 = h.y1, x2 = h.x2, y2 = h.y2, z = h.z}
+  elseif #r.home > 0 then
+    local mx, my, mz = median(r.home, 'x'), median(r.home, 'y'), median(r.home, 'z')
+    boxes[1] = {math.max(0, mx - c.near), math.max(0, my - c.near), math.max(0, mz - c.ws_dz), mx + c.near,
+                my + c.near, mz + c.ws_dz}
+    ref = {x1 = mx, y1 = my, x2 = mx, y2 = my, z = mz}
+  else
+    return nil
+  end
+  local from, fd                                     -- walk origin: the citizen nearest the reference
+  for _, h in ipairs(r.home) do
+    local d = dist_box(h.x, h.y, h.z, ref)
+    if not fd or d < fd then from, fd = h, d end
+  end
+  return {boxes = boxes, bi = 1, tiles = {}, n = 0, ref = ref, from = from, stage = 'read', sources = r.sources,
+          bk = 0, out = {}}
+end
+
+-- one slice of reading: rows of the current level of the current box through snapshot.liquids
+local function scan_read(K, c, sc)
+  local budget = c.ws_tiles
+  while budget > 0 do
+    local b = sc.boxes[sc.bi]
+    if not b then return true end
+    sc.z, sc.y = sc.z or b[3], sc.y or b[2]
+    if sc.z > b[6] then
+      sc.bi, sc.z, sc.y = sc.bi + 1, nil, nil
+    else
+      local w = b[4] - b[1] + 1
+      local rows = math.max(1, math.min(b[5] - sc.y + 1, budget // w, 4096 // w))
+      local ok, list, err = K.call('snapshot', 'liquids', b[1], sc.y, b[4], sc.y + rows - 1, sc.z, c.deep)
+      if not ok or type(list) ~= 'table' then
+        sc.err = 'snapshot.liquids: ' .. tostring(ok and err or list)
+        return true
+      end
+      for _, t in ipairs(list) do
+        local key = k3(t[1], t[2], sc.z)
+        if not sc.tiles[key] and sc.n < 4000 then sc.tiles[key], sc.n = {t[1], t[2], sc.z, t[3]}, sc.n + 1 end
+      end
+      budget = budget - w * rows
+      sc.y = sc.y + rows
+      if sc.y > b[5] then sc.y, sc.z = b[2], sc.z + 1 end
+    end
+  end
+  return false
+end
+
+-- deep tiles -> bodies (8-connected on one level), nearest to the reference first, at most ws_bodies
+local function scan_group(c, sc)
+  local keys, seen, bodies = {}, {}, {}
+  for k in pairs(sc.tiles) do keys[#keys + 1] = k end
+  table.sort(keys)
+  for _, k in ipairs(keys) do
+    if not seen[k] then
+      seen[k] = true
+      local t0 = sc.tiles[k]
+      local body, stack = {z = t0[3], tiles = {}, max = 0, d = math.huge}, {t0}
+      while #stack > 0 do
+        local t = table.remove(stack)
+        body.tiles[#body.tiles + 1] = t
+        if t[4] > body.max then body.max = t[4] end
+        local d = dist_box(t[1], t[2], t[3], sc.ref)
+        if d < body.d then body.d = d end
+        for _, o in ipairs(N8) do
+          local nk = k3(t[1] + o[1], t[2] + o[2], t[3])
+          if sc.tiles[nk] and not seen[nk] then seen[nk] = true; stack[#stack + 1] = sc.tiles[nk] end
+        end
+      end
+      table.sort(body.tiles, function(a, b) return a[2] < b[2] or (a[2] == b[2] and a[1] < b[1]) end)
+      body.at = {body.tiles[1][1], body.tiles[1][2], body.z}
+      bodies[#bodies + 1] = body
+    end
+  end
+  table.sort(bodies, function(a, b)
+    if a.d ~= b.d then return a.d < b.d end
+    if #a.tiles ~= #b.tiles then return #a.tiles > #b.tiles end
+    return a.z > b.z
+  end)
+  while #bodies > c.ws_bodies do table.remove(bodies) end
+  sc.list = bodies
+end
+
+-- one body: the accepted zone or well over it, a reachable bank, else the shortest dig to one
+local function scan_body(K, c, sc, body)
+  local z, deepset = body.z, sc.tiles
+  local res = {z = z, n = #body.tiles, max = body.max, at = body.at, d = body.d, zone = -1, well = -1, reach = 0}
+  for _, s in ipairs(sc.sources or {}) do
+    for _, t in ipairs(body.tiles) do
+      if s.kind == 'zone' and s.wet and s.box and (s.box.z == z or (c.zone_below == true and s.box.z == z + 1))
+         and t[1] >= s.box.x1 and t[1] <= s.box.x2 and t[2] >= s.box.y1 and t[2] <= s.box.y2 then res.zone = s.id end
+      if s.kind == 'well' and s.wet and s.z > z and s.x == t[1] and s.y == t[2] then res.well = s.id end
+    end
+  end
+  local checks = 0
+  local function reachable(x, y)
+    if not sc.from then return true end
+    if checks >= c.ws_reach then return nil end
+    checks = checks + 1
+    local ok, yes = K.call('snapshot', 'reach', sc.from, {x = x, y = y, z = z})
+    return not ok or yes ~= false
+  end
+  -- at most ws_reads tile reads per body (one body a frame): a big lake must not make the module slow
+  local reads = 0
+  local function read(x, y)
+    if reads >= c.ws_reads then res.partial = 1; return nil end
+    reads = reads + 1
+    return tile(K, x, y, z)
+  end
+  local seen, walls = {}, {}
+  for _, t in ipairs(body.tiles) do
+    if reads >= c.ws_reads then res.partial = 1; break end
+    for _, o in ipairs(N8) do
+      local x, y = t[1] + o[1], t[2] + o[2]
+      local key = k3(x, y, z)
+      if not deepset[key] and not seen[key] then
+        seen[key] = true
+        local tt = read(x, y)
+        if tt and STAND[tt.c] and not M.deep_tile(tt, c) then
+          local yes = reachable(x, y)
+          if yes then res.bank, res.reach = {x, y, z}, 1; return res end
+          if yes == nil then return res end
+        elseif tt and DIGGABLE[tt.c] then
+          walls[#walls + 1] = {x, y, key, x, y}
+        end
+      end
+    end
+  end
+  -- no reachable bank: breadth first through revealed natural wall (each wall dug counts one), up to ws_dig
+  local qi, depth = 1, {}
+  for _, w in ipairs(walls) do depth[w[3]] = 1 end
+  while qi <= #walls do
+    local w = walls[qi]
+    qi = qi + 1
+    local dw = depth[w[3]]
+    for _, o in ipairs(N8) do
+      local x, y = w[1] + o[1], w[2] + o[2]
+      local key = k3(x, y, z)
+      if not deepset[key] and not seen[key] then
+        seen[key] = true
+        local tt = read(x, y)
+        if tt and STAND[tt.c] and not M.deep_tile(tt, c) then
+          local yes = reachable(x, y)
+          if yes then
+            res.dig = {n = dw, from = {x, y, z}, to = {w[4], w[5], z}}
+            return res
+          end
+          if yes == nil then return res end
+        elseif tt and DIGGABLE[tt.c] and dw < c.ws_dig then
+          depth[key] = dw + 1
+          walls[#walls + 1] = {x, y, key, w[4], w[5]}
+        end
+      end
+    end
+  end
+  return res
+end
+
+local function scan_done(K, c, sc)
+  local levels, byz = {}, {}
+  for _, t in pairs(sc.tiles) do byz[t[3]] = (byz[t[3]] or 0) + 1 end
+  for z, n in pairs(byz) do levels[#levels + 1] = {z, n} end
+  table.sort(levels, function(a, b) return a[1] > b[1] end)
+  st.ws = {tick = K.now().tick, deep = c.deep, boxes = sc.boxes, tiles = sc.n, levels = levels, bodies = sc.out,
+           err = sc.err}
+  local reach = 0
+  for _, b in ipairs(sc.out) do if b.bank or b.dig then reach = reach + 1 end end
+  K.log('info', 'water sources: %d tiles >= %d/7 in %d bodies, %d with a bank or a dig%s', sc.n, c.deep, #sc.out, reach,
+        sc.err and (' (' .. sc.err .. ')') or '')
+end
+
+-- one frame of the scan: true while more remains
+local function scan_step(K, c)
+  local sc = st.scan
+  if sc.stage == 'read' then
+    if not scan_read(K, c, sc) then return true end
+    if sc.err then scan_done(K, c, sc); return false end
+    scan_group(c, sc)
+    sc.stage = 'bodies'
+    if #sc.list > 0 then return true end
+  end
+  sc.bk = sc.bk + 1
+  local body = sc.list[sc.bk]
+  if body then sc.out[#sc.out + 1] = scan_body(K, c, sc, body) end
+  if sc.bk < #sc.list then return true end
+  scan_done(K, c, sc)
+  return false
+end
+
 local function finish(K, c, r, p)
   local now = K.now().tick
   pond_loops(K, c, r)
@@ -368,15 +665,22 @@ local function finish(K, c, r, p)
   local fixed, ordered, missing = supply_buckets(K, c, r, p, want)
   -- patients over the alarm: one class-A line for all of them, with the cause (cadence: M.DEFAULTS)
   local thirsty, tmax = 0, 0
+  local dry = not hosp_ok and #r.hosp > 0
   local cause = {}
   if #r.hosp == 0 then cause[#cause + 1] = 'no hospital zone' end
-  if not hosp_ok and #r.hosp > 0 then
-    cause[#cause + 1] = best_h and string.format('nearest wet source %d tiles from the hospital', best_h.d)
-                        or 'no wet well or Water Source zone'
+  if dry then
+    cause[#cause + 1] = best_h and string.format('nearest accepted water %d tiles from the hospital', best_h.d)
+                        or 'no wet well or deep (>= ' .. c.deep .. '/7) Water Source zone'
   end
-  if wet == 0 then cause[#cause + 1] = 'no wet source at all' end
+  if wet == 0 then cause[#cause + 1] = 'no accepted water at all' end
   if r.free + fixed == 0 then cause[#cause + 1] = 'no free bucket' end
-  local why = #cause > 0 and table.concat(cause, ', ') or 'water and buckets present (caregivers? labor FEED_WATER_CIVILIANS)'
+  if #r.carers == 0 then cause[#cause + 1] = 'no caregiver with FEED_WATER_CIVILIANS' end
+  local why = #cause > 0 and table.concat(cause, ', ') or 'water, buckets and caregivers present'
+  -- FR-34: the one-line recipe (Run 9: deleting the hospital zone made the survivor stand up, drink and eat)
+  local recipe = dry and 'delete the hospital zone (patients fetch their own drink) or carry water'
+                 or 'check the GiveWater jobs: caregivers, buckets, the way to the water'
+  local carers = {}
+  for i = 1, math.min(8, #r.carers) do carers[i] = r.carers[i] end
   -- p.alarm: patients over the alarm in this episode (id -> tick they crossed it)
   local over, fresh = {}, false
   for _, pt in ipairs(r.patients) do
@@ -400,35 +704,46 @@ local function finish(K, c, r, p)
     local ids = {}
     for i = 1, math.min(8, #over) do ids[i] = over[i].id end
     local top = over[1]
-    K.emit('DECISION_NEEDED', 'A', trunc(string.format('%d patient(s) over thirst %d, unit %d at %d: %s', #over,
-                                                       c.thirst_alarm, top.id, top.thirst, why), 200),
-           {id = 'patient_thirst', unit = top.id, thirst = top.thirst, units = ids, n = #over,
-            q = trunc(string.format('bedridden units %s thirsty (%s): water near the hospital (cistern, Water '
-                                    .. 'Source zone), buckets %d free', table.concat(ids, ','), why,
-                                    r.free + fixed), 200)})
+    K.emit('DECISION_NEEDED', 'A', trunc(string.format('%d patient(s) over thirst %d, unit %d at %d: %s; %s', #over,
+                                                       c.thirst_alarm, top.id, top.thirst, why, recipe), 200),
+           {id = 'patient_thirst', unit = top.id, thirst = top.thirst, units = ids, n = #over, carers = carers,
+            n_carers = #r.carers, buckets = r.free + fixed, buckets_all = r.buckets,
+            q = trunc(string.format('units %s thirsty (%s): %s; carers %d (FEED_WATER_CIVILIANS: %s), buckets %d free '
+                                    .. 'of %d', table.concat(ids, ','), why, recipe, #r.carers,
+                                    #carers > 0 and table.concat(carers, ',') or 'none', r.free + fixed, r.buckets), 200)})
   end
-  -- a hospital without water: wake while somebody needs it (episode start, then weekly), ask for a cistern
-  -- monthly either way
-  if not hosp_ok and #r.hosp > 0 then
-    if #r.patients == 0 then
-      p.hosp = nil                                         -- the episode ends with the last patient
-    elseif woke then
-      p.hosp = p.hosp or now                               -- patient_thirst already carries the cause
-    elseif now - (p.hosp or -c.hosp_every) >= c.hosp_every then
-      p.hosp = now
-      K.emit('DECISION_NEEDED', 'A', trunc(string.format('hospital without water: %s, %d patients', why,
-                                                         #r.patients), 200),
-             {id = 'hospital_water', q = 'place a cistern (python -m dfpilot.bp.sites cistern) or a Water '
-                                         .. 'Source zone on revealed water near the hospital'})
+  -- hospital gate (FR-31/34): a hospital location, or a hospital project while no accepted water exists at all,
+  -- without an accepted source wakes the LLM when the dry episode starts, then weekly with patients, else
+  -- monthly (not in a run that sent patient_thirst); a cistern is asked monthly either way
+  local okh, hpend = K.call('runner', 'pending', 'hospital')
+  local planned = #r.hosp == 0 and okh and type(hpend) == 'number' and hpend > 0
+  local gate = dry or (planned and wet == 0)
+  if gate then
+    if (not st.ws or now - st.ws.tick >= c.ws_every) and not st.scan then st.ws_want = true end
+    local every = #r.patients > 0 and c.hosp_every or c.gate_every
+    local start = p.hosp == nil
+    p.hosp = p.hosp or now
+    if woke then
+      p.hosp_t = now                                       -- patient_thirst already carries cause and recipe
+    elseif start or now - (p.hosp_t or p.hosp) >= every then
+      p.hosp_t = now
+      local h = r.hosp[1]
+      local a = {planned = planned, patients = #r.patients, zone = h and h.id or -1,
+                 why = planned and 'no accepted water on the map' or why}
+      if not st.ws and has_liquids(K) then
+        st.gate_pending, st.ws_want = a, true             -- the first one waits for the scan's recipe (a few frames)
+      else
+        emit_gate(K, c, a)
+      end
     end
     local okp, pend = K.call('runner', 'pending', 'cistern')
     if not (okp and type(pend) == 'number' and pend > 0) and now - (p.req or -c.request_every) >= c.request_every then
       p.req = now
-      K.emit('PROJECT_REQUEST', 'B', 'cistern: the hospital has no water within ' .. c.near .. ' tiles',
+      K.emit('PROJECT_REQUEST', 'B', 'cistern: the hospital has no accepted water within ' .. c.near .. ' tiles',
              {tpl = 'cistern', n = 1, why = 'hospital_water'})
     end
   else
-    p.hosp = nil
+    p.hosp, p.hosp_t = nil, nil
   end
   -- a cistern that floods its well room (the breaker failed or something was dug into the pipe). One wet tile
   -- in one run is no flood: a bucket poured into a dry cistern's pond hole shows water there for a moment
@@ -457,7 +772,7 @@ local function finish(K, c, r, p)
   local out = {patients = #r.patients, thirsty = thirsty, thirst_max = tmax, wells = wells, wet = wet,
                hosp_ok = hosp_ok and 1 or 0, refuge_ok = refuge_ok and 1 or 0, buckets = r.buckets,
                buckets_free = r.free + fixed, buckets_full = r.full, buckets_want = want, unforbid = fixed,
-               ordered = ordered, missing = math.max(0, missing)}
+               ordered = ordered, missing = math.max(0, missing), carers = #r.carers, gate = gate and 1 or 0}
   local prev = st.out or {}
   if prev.hosp_ok ~= out.hosp_ok or prev.refuge_ok ~= out.refuge_ok or prev.patients ~= out.patients
      or fixed > 0 or ordered > 0 then
@@ -466,6 +781,7 @@ local function finish(K, c, r, p)
           refuge_ok and 'ok' or 'dry', wet, wells, out.buckets_free, r.buckets, want, fixed, ordered)
   end
   st.out = out
+  st.src = r.sources
   K.persist.touch('m.water')
 end
 
@@ -477,7 +793,7 @@ local function new_run(K)
   local ids = {}
   for _, id in ipairs(type(cu) == 'table' and cu.ids or {}) do ids[#ids + 1] = id end
   return {ph = 1, idx = 0, ids = ids, patients = {}, sources = {}, hosp = {}, buckets = 0, free = 0, full = 0,
-          forbidden = {}, ponds = {}}
+          forbidden = {}, ponds = {}, carers = {}, home = {}}
 end
 
 function M.init(K)
@@ -485,17 +801,70 @@ function M.init(K)
   pstate(K)
 end
 
+-- the run (patients, sources, buckets, decisions), then a requested water sources scan in the following frames;
+-- a scan that outlasts the cadence lets the next run go first
 function M.step(K, budget, ctx)
   local c = M.conf(K)
   local p = pstate(K)
-  if not (ctx and ctx.cont) or not st.run then st.run = new_run(K) end
-  local r = st.run
-  while r.ph <= #PHASES do
-    if not PHASES[r.ph](K, c, r) then return 'more' end
-    r.ph, r.idx = r.ph + 1, 0
+  local now = K.now().tick
+  if not (ctx and ctx.cont) or (not st.run and not st.scan) then
+    st.run, st.run_t = new_run(K), now
+  elseif not st.run and now - (st.run_t or now) >= M.every.ticks then
+    st.run, st.run_t = new_run(K), now
   end
-  st.run = nil
-  finish(K, c, r, p)
+  local r = st.run
+  if r then
+    while r.ph <= #PHASES do
+      if not PHASES[r.ph](K, c, r) then return 'more' end
+      r.ph, r.idx = r.ph + 1, 0
+    end
+    st.run = nil
+    finish(K, c, r, p)
+    if st.ws_want and not st.scan then
+      st.ws_want = nil
+      st.scan = new_scan(K, c, r)
+    end
+  elseif st.scan then
+    local ok, more = pcall(scan_step, K, c)
+    if not ok then
+      K.log('warn', 'water sources scan: %s', tostring(more))
+      st.ws = st.ws or {tick = now, deep = c.deep, boxes = {}, tiles = 0, levels = {}, bodies = {}, err = 'scan failed'}
+    end
+    if not (ok and more) then st.scan = nil end
+  end
+  if st.gate_pending and not st.scan then                 -- the gate alarm that waited for the scan
+    emit_gate(K, c, st.gate_pending)
+    st.gate_pending = nil
+  end
+  if st.scan then return 'more' end
+end
+
+-- inspect what=water_sources (kern routes it here; FR-47): the last scan (bodies of water >= deep per level with
+-- an accepted zone or well, a reachable bank or the shortest dig), the sources of the last run; a scan older than
+-- ws_every (or none) is queued for the next water run
+function M.inspect(K, what, key)
+  if what ~= 'water_sources' then return false, 'water answers what=water_sources only' end
+  local c = M.conf(K)
+  local now = K.now().tick
+  if (not st.ws or now - st.ws.tick >= c.ws_every) and not st.scan then st.ws_want = true end
+  local srcs = {}
+  for _, s in ipairs(st.src or {}) do
+    if #srcs < 30 then srcs[#srcs + 1] = {s.kind, s.id, s.x, s.y, s.z, s.wet and 1 or 0} end
+  end
+  local queued = (st.ws_want or st.scan) and 1 or 0
+  if not st.ws then
+    return true, 'water_sources: scan queued for the next water run',
+           {tick = now, queued = queued, deep = c.deep, sources = srcs}
+  end
+  local w = st.ws
+  local reach = 0
+  for _, b in ipairs(w.bodies) do if b.bank or b.dig then reach = reach + 1 end end
+  return true, string.format('water_sources: %d bodies >= %d/7, %d with a bank or a dig, %d sources', #w.bodies, w.deep,
+                             reach, #srcs),
+         {tick = w.tick, age = now - w.tick, queued = queued, deep = w.deep, boxes = w.boxes, tiles = w.tiles,
+          levels = w.levels, bodies = w.bodies, sources = srcs, err = w.err,
+          note = 'sources [kind, id, x, y, z, accepted]; bank: stand there and fill or zone the water; dig: opening '
+                 .. 'the last wall floods the dug tiles (dig from above or behind a floodgate)'}
 end
 
 -- last summary (brief, tests): patients, thirst, wells, hospital/refuge water, buckets

@@ -35,7 +35,10 @@ PRIO = ["BREACH", "GATE_FAIL", "DEATHS_3PLUS", "KERN_FAULT", "HB_STALE", "SUPERV
 NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propose",
         "DECISION_NEEDED": "ask Gordon in chat, then config/decisions.yaml", "KERN_FAULT": "dfllm doctor",
         "PERF_DEGRADED": "dfllm doctor", "HB_STALE": "dfllm doctor", "AUTO_FAIL": "dfllm doctor",
-        "SUPERVISE": "dfllm supervise --once --dry-run"}
+        "SUPERVISE": "dfllm supervise --once --dry-run",
+        "GHOSTS": "dfllm cmd inspect '{\"what\":\"tombs\"}', then tombs.repair",
+        "HOSPITAL_DRY": "dfllm cmd inspect '{\"what\":\"water_sources\"}'",
+        "MOOD_RISK": "dfllm brief; supply the missing class (never cancel the mood)"}
 SUPERVISE_EVERY_S = 15                         # supervise.json read cadence
 SUPERVISE_FRESH_S = 3600                       # alerts logged longer ago than this never wake
 HB_STALE_S = 300

@@ -27,19 +27,46 @@
 --   * every item flag write needs a revealed tile (snapshot.tile) and, outside PEACE / late RECOVERY,
 --     a Kern+ tile (no Kern+ yet: no writes outside clean-up time);
 --   * burial: free tombs >= open corpses + margin, else PROJECT_REQUEST tombs (follow places them);
---     `burial -c` zones unzoned coffins;
+--     `burial -c` zones unzoned coffins. A free tomb is a usable one (FR-27/42): a built, empty coffin under
+--     exactly one active, unassigned tomb zone, outside every Bedroom zone and every other zone;
+--   * tombs (FR-04/26/27/41/42/45, Run 9: 22 dead unburied for months, 10 ghosts): the tomb phase indexes
+--     coffins, tomb zones, bedrooms and piles, gives every unburied citizen body its causes (no_coffin,
+--     no_zone, coffin_taken, zone_shared, bedroom, zone_owner, unflagged, unreachable, in_stockpile,
+--     undiscovered, no_job) and, unless config tomb_repair is false (or the verb tombs.repair asks), repairs
+--     outside SIEGE/BREACH: one zone per coffin tile (stacked 1x1 zones removed), 1x1 zones without a
+--     coffin removed (not while a tombs project is pending), zones of bodiless or elsewhere-buried dead
+--     freed, zones of unburied dead on a bad coffin (none, taken, shared, in a bedroom) freed, closed free
+--     zones opened, and every unburied dead without a usable zone assigned a free one (act.tomb_zone, the
+--     zone sheet). Then FR-45: `entomb --unit <id> --haul-now` (DFHack; the burial assignment plus the
+--     hauling jobs, as the UI's assign does) for each unburied body with a usable zone and no job, on a
+--     revealed tile inside Kern+ (or at clean-up time), at most 3 tries a 2 days; a body still without a job
+--     a day later is `no_job`. PlaceItemInTomb jobs are counted. GHOSTS (A) as soon as a citizen ghost
+--     exists or a citizen body lies unburied longer than corpse_old, with the causes; again when the set
+--     grows, else weekly. `inspect what=tombs` returns the last analysis;
+--   * doctors (FR-48, Run 9: all doctors dead, 7 patients waiting for a diagnosis): at least `doctors`
+--     living adult civilians with DIAGNOSE, SURGERY and BONE_SETTING (act.medic, the labors screen; partial
+--     doctors, then medical skill; never soldiers, moody dwarves or patients), and every hospital post (doctor,
+--     diagnostician, surgeon, bone doctor) that is vacant or held by a dead unit filled with a doctor
+--     (act.hospital_post, the location sheet);
+--   * mood survival (FR-44): when the needs of a strange mood are first known and any is missing, MOOD_RISK
+--     (A) with the missing classes; when the moody dwarf's thirst or hunger passes mood_thirst/mood_hunger,
+--     MOOD_RISK (A) every 2 days. Decision: care never cancels a mood job. DF's UI has no cancel for a
+--     strange-mood job (the claimed workshop cannot be removed either), act has no job removal (DESIGN
+--     §5.9), and a removed job crashed DF in Run 9; the loud event asks for the material instead;
 --   * captives: melt-safe (a cage holding a captive is never left marked for melting), then after a
 --     deadline in PEACE/late RECOVERY assigned to the manifest pit (zone_assign) or, without a pit,
 --     the cage is marked for dumping so it leaves the trap tile.
 -- Reads: citizens and captives by census id, dead fort members by event / corpse unit id (CONTRACTS §1.4),
--- items.other / buildings.other vectors (sliced), burrow membership, site locations.
--- Writes only through K.act (item_flag, zone_assign, run). Since live L1b care also unmarks tools (picks,
--- battle axes, crossbows) marked for melting.
+-- items.other / buildings.other vectors (sliced), burrow membership, site locations and occupations, a dead
+-- citizen's death incident (discovered or not, as the unit list shows "missing") and corpse_parts, the job
+-- list (PlaceItemInTomb count).
+-- Writes only through K.act (item_flag, zone_assign, tomb_zone, medic, hospital_post, run). Since live L1b care
+-- also unmarks tools (picks, battle axes, crossbows) marked for melting.
 local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
 local R = require('dfllm.reserve')     -- library (not a kernel module): mood filters, matcher, reserve sizes
 
-local M = {name = 'care', every = {ticks = 1200}, on = {}}
+local M = {name = 'care', every = {ticks = 1200}, on = {}, verbs = {}}
 local DAY = C.TICKS.DAY
 -- Optional walk-group hook, proposed for CONTRACTS §7 (live L4): snapshot.reach(a, b) -> bool, i.e.
 -- dfhack.maps.canWalkBetween asked at call time (care may not read tiles itself, CONTRACTS §1.4). Feature-
@@ -59,7 +86,14 @@ M.DEFAULTS = {
   corpse_old = 3600, approach_r = 15, captive_deadline = 600, captive_dump = true,
   unforbid_per_need = 5, corpse_acts_per_run = 30, barrels_per_run = 20, mood_nojob_ticks = 1200,
   stress_week = 8400,
+  tomb_repair = true, tomb_acts_per_run = 20, entomb_per_run = 8, entomb_retry = 2400, entomb_tries = 3,
+  ghost_every = 8400, doctors = 4, posts_per_run = 4, mood_thirst = 30000, mood_hunger = 50000,
+  mood_risk_every = 2400,
 }
+-- the doctor labors (act.medic switches the same three) and the hospital posts (df.occupation_type names)
+M.MEDIC = {'DIAGNOSE', 'SURGERY', 'BONE_SETTING'}
+M.MEDIC_SKILLS = {'DIAGNOSE', 'SURGERY', 'SET_BONE'}
+M.POSTS = {DOCTOR = true, DIAGNOSTICIAN = true, SURGEON = true, BONE_DOCTOR = true}
 M.STRANGE = {Fey = true, Secretive = true, Possessed = true, Macabre = true, Fell = true}
 M.FAILED = {Melancholy = true, Raving = true, Berserk = true}
 -- material classes per claimed workshop (workshop_type / furnace_type name): a primary material of the
@@ -81,6 +115,13 @@ local UNIT_COST = 4                  -- slice budget units per citizen looked at
 local st = {}
 
 local function fmt(n) return string.format('%d', math.tointeger(n) or -1) end
+local function trunc(s, n)                      -- cut at a UTF-8 boundary
+  s = tostring(s or '')
+  if #s <= n then return s end
+  local cut = n
+  while cut > 0 and (s:byte(cut + 1) or 0) & 0xC0 == 0x80 do cut = cut - 1 end
+  return s:sub(1, cut)
+end
 
 function M.conf(K)
   local c = type(K.cfg.baseline) == 'table' and K.cfg.baseline.care
@@ -98,7 +139,9 @@ local function pstate(K)
     p = {v = 2, dead = {}, deaths = {}, petitions = {}}
     K.persist.set('m.care', p)
   end
-  for _, k in ipairs({'moods', 'captives', 'corpses'}) do p[k] = json.object(type(p[k]) == 'table' and p[k] or {}) end
+  for _, k in ipairs({'moods', 'captives', 'corpses', 'burial'}) do
+    p[k] = json.object(type(p[k]) == 'table' and p[k] or {})
+  end
   for _, rec in pairs(p.moods) do rec.needs = json.object(type(rec.needs) == 'table' and rec.needs or {}) end
   p.dead, p.deaths, p.petitions = p.dead or {}, p.deaths or {}, p.petitions or {}
   if type(p.announced) ~= 'table' then          -- saves before the field: every tracked death was announced
@@ -309,6 +352,24 @@ local function mood_seen(K, c, r, p, u, kind)
            {unit = u.id, kind = kind, child = child and 1 or 0})
   end
   r.moody[sid] = true
+  -- FR-44 (Run 9: a Possessed dwarf without materials reached thirst 75,001 and died): a moody dwarf neither
+  -- drinks nor eats while the mood job runs, and care never cancels the job (header). Past mood_thirst or
+  -- mood_hunger a loud MOOD_RISK (A) asks for the missing material, every mood_risk_every ticks
+  local th, hu = 0, 0
+  pcall(function() th = math.tointeger(u.counters2.thirst_timer) or 0 end)
+  pcall(function() hu = math.tointeger(u.counters2.hunger_timer) or 0 end)
+  local risk = (th >= c.mood_thirst and 'thirst') or (hu >= c.mood_hunger and 'hunger') or nil
+  if risk and (rec.risk == nil or rec.risk_why ~= risk or now - rec.risk >= c.mood_risk_every) then
+    rec.risk, rec.risk_why = now, risk
+    local miss = type(rec.missing) == 'table' and rec.missing or {}
+    K.emit('MOOD_RISK', 'A', trunc(string.format('mood unit %d (%s%s) %s %d, dies at 75000: %s; a mood job cannot be '
+                                                 .. 'cancelled, supply it', u.id, kind, child and ', child' or '', risk,
+                                                 risk == 'thirst' and th or hu,
+                                                 #miss > 0 and ('missing ' .. table.concat(miss, ',')) or 'nothing missing'), 200),
+           {unit = u.id, why = risk, kind = kind, missing = miss, thirst = th, hunger = hu})
+  elseif not risk then
+    rec.risk, rec.risk_why = nil, nil
+  end
   local job = u.job and u.job.current_job
   local ws = job and M.mood_workshop(job)
   if not ws and (not job or R.is_mood_job(job)) then   -- no workshop claimed yet (a mood job without a holder too)
@@ -389,11 +450,35 @@ local function phase_units(K, c, r, p)
 end
 
 ---------------------------------------------------------------- corpses
+-- the remains of one dead citizen that lie unburied (FR-26 causes, FR-45 burial jobs): item count, a few
+-- ids, whether any is in a job (being hauled), whether any lacks DF's dead_dwarf flag, the first position
+local function note_body(r, uid, it, x, y, z)
+  local b = r.bodies[uid]
+  if not b then
+    b = {n = 0, job = false, ids = {}, unflagged = false}
+    r.bodies[uid] = b
+  end
+  b.n = b.n + 1
+  local f = it.flags
+  if f.in_job then b.job = true end
+  local okd, dd = pcall(function() return f.dead_dwarf end)
+  if okd and dd == false then b.unflagged = true end
+  if not b.pos and x then b.pos = {x = x, y = y, z = z} end
+  if #b.ids < 4 then b.ids[#b.ids + 1] = it.id end
+end
+
 local function corpse_item(K, c, r, p, it)
   local f = it.flags
-  if f.in_building or f.removed or f.garbage_collect then return end    -- interred or gone
-  if r.res_ids[it.id] then return end           -- a reserve bone or shell: no corpse to dump
+  if f.removed or f.garbage_collect then return end                    -- gone
   local uid = it.unit_id
+  if f.in_building then                       -- interred (or held by another building): who lies where
+    if math.type(uid) == 'integer' and uid >= 0 then
+      local okh, h = pcall(dfhack.items.getHolderBuilding, it)        -- Lua API.txt:2047
+      if okh and h then r.interred[h.id], r.held_by[uid] = uid, h.id end
+    end
+    return
+  end
+  if r.res_ids[it.id] then return end           -- a reserve bone or shell: no corpse to dump
   if math.type(uid) ~= 'integer' or uid < 0 then return end
   local x, y, z = item_pos(it)
   if r.dead[uid] == nil then                  -- a death we did not see: the corpse's unit decides
@@ -402,6 +487,7 @@ local function corpse_item(K, c, r, p, it)
   end
   if r.dead[uid] then                         -- a citizen: free it for burial, never dump it (ghosts)
     r.open[fmt(uid)] = true
+    note_body(r, uid, it, x, y, z)
     if (f.forbid or f.dump) and r.acts < c.corpse_acts_per_run and (r.clean_ok or inside(r, x, y, z))
        and revealed(K, x, y, z) then
       local ok = true
@@ -469,13 +555,6 @@ end
 
 local function phase_zones(K, c, r, p)
   local other = df.global.world.buildings.other
-  local free = 0
-  for _, zn in ipairs(vec(function() return other.ZONE_TOMB end)) do
-    local active = true
-    pcall(function() active = zn.spec_sub_flag.active end)   -- entomb.lua:56
-    if zn.assigned_unit_id == -1 and active then free = free + 1 end
-  end
-  r.tombs_free = free
   local unzoned, tomb, unlinked = 0, df.civzone_type and df.civzone_type.Tomb, 0
   for _, cof in ipairs(vec(function() return other.COFFIN end)) do
     local zoned = not built(cof)               -- a planned coffin cannot be zoned yet
@@ -518,6 +597,537 @@ local function phase_zones(K, c, r, p)
     end
   end
   while #p.petitions > 50 do table.remove(p.petitions, 1) end
+  return true
+end
+
+---------------------------------------------------------------- tombs (FR-04/26/27/41/42/45, Run 9)
+-- Run 9: quickfort and bp.place stacked up to 3 tomb zones on one coffin (each assigned to another dead
+-- citizen), zones sat on tiles without a coffin, zones of bodiless dead kept empty coffins blocked, coffins in
+-- Bedroom zones never got a burial job, and assigning a zone alone made no PlaceItemInTomb job: 22 dead lay
+-- unburied for months and 10 became ghosts. The index is rebuilt each run from the vectors; plain values only.
+local function num(v) return math.tointeger(tonumber(v)) end
+
+local function rect_of(b)
+  local ok, rc = pcall(function()
+    local x1, y1, z = num(b.x1), num(b.y1), num(b.z)
+    if not (x1 and y1 and z) then return nil end
+    return {x1 = x1, y1 = y1, x2 = num(b.x2) or x1, y2 = num(b.y2) or y1, z = z}
+  end)
+  return ok and rc or nil
+end
+
+local function covers(rc, x, y, z)
+  return rc ~= nil and x ~= nil and rc.z == z and x >= rc.x1 and x <= rc.x2 and y >= rc.y1 and y <= rc.y2
+end
+
+local function unit_dead(id)
+  local ok, dead = pcall(function()
+    local u = df.unit.find(id)
+    return u == nil or dfhack.units.isDead(u)
+  end)
+  return ok and dead == true
+end
+
+-- coffins (with the zones over them, the body inside, bedroom and other zones on the tile), tomb zones,
+-- bedrooms and stockpiles
+local function tomb_index(K, r)
+  local other = df.global.world.buildings.other
+  local ct = df.civzone_type or {}
+  local T = {coffins = {}, cof_by_id = {}, zones = {}, by_unit = {}, beds = {}, piles = {}}
+  for _, b in ipairs(vec(function() return other.ZONE_BEDROOM end)) do T.beds[#T.beds + 1] = rect_of(b) end
+  for _, b in ipairs(vec(function() return other.STOCKPILE end)) do T.piles[#T.piles + 1] = rect_of(b) end
+  for _, cof in ipairs(vec(function() return other.COFFIN end)) do
+    local rc = rect_of(cof)
+    if rc then
+      local x, y, z = rc.x1, rc.y1, rc.z
+      local e = {id = cof.id, x = x, y = y, z = z, built = built(cof), zones = {}, occ = r.interred[cof.id],
+                 other = 0, bed = false}
+      for _, bd in ipairs(T.beds) do if covers(bd, x, y, z) then e.bed = true end end
+      local ok, zs = pcall(dfhack.buildings.findCivzonesAt, {x = x, y = y, z = z})   -- Lua API.txt:2488
+      for _, zn in ipairs(ok and type(zs) == 'table' and zs or {}) do
+        local t = zn.type
+        if ct.Bedroom ~= nil and t == ct.Bedroom then e.bed = true elseif t ~= ct.Tomb then e.other = e.other + 1 end
+      end
+      T.coffins[#T.coffins + 1] = e
+      T.cof_by_id[cof.id] = e
+    end
+  end
+  for _, zn in ipairs(vec(function() return other.ZONE_TOMB end)) do
+    local rc = rect_of(zn)
+    local active, closed = true, false
+    pcall(function() active = zn.spec_sub_flag.active end)                            -- entomb.lua:56
+    pcall(function() closed = zn.zone_settings.tomb.flags.no_citizens == true end)
+    local t = {id = zn.id, rc = rc, unit = num(zn.assigned_unit_id) or -1, active = active ~= false, closed = closed,
+               coffins = {}, small = rc ~= nil and rc.x1 == rc.x2 and rc.y1 == rc.y2}
+    if rc then
+      for _, e in ipairs(T.coffins) do
+        if covers(rc, e.x, e.y, e.z) then
+          t.coffins[#t.coffins + 1] = e
+          e.zones[#e.zones + 1] = t
+        end
+      end
+    end
+    T.zones[#T.zones + 1] = t
+  end
+  return T
+end
+
+local function index_units(T)
+  T.by_unit = {}
+  for _, z in ipairs(T.zones) do
+    if not z.drop and z.unit >= 0 then
+      local l = T.by_unit[z.unit] or {}
+      l[#l + 1] = z
+      T.by_unit[z.unit] = l
+    end
+  end
+end
+
+-- a coffin uid can be buried in (uid nil: anybody): built, empty (or already holding uid), exactly one standing
+-- tomb zone over it, no Bedroom (FR-42) and no other zone on its tile
+local function usable(e, uid)
+  if not e.built or e.bed or e.other > 0 then return false end
+  if e.occ ~= nil and e.occ ~= uid then return false end
+  local n = 0
+  for _, z in ipairs(e.zones) do if not z.drop then n = n + 1 end end
+  return n == 1
+end
+
+-- the zone uid is buried through: assigned to uid, active, over a usable coffin
+local function good_zone(T, uid)
+  for _, z in ipairs(T.by_unit[uid] or {}) do
+    if not z.drop and z.active then
+      for _, e in ipairs(z.coffins) do if usable(e, uid) then return z, e end end
+    end
+  end
+end
+
+local function free_zones(T)
+  local out = {}
+  for _, z in ipairs(T.zones) do
+    if not z.drop and z.active and z.unit < 0 then
+      for _, e in ipairs(z.coffins) do
+        if usable(e, nil) then out[#out + 1] = z; break end
+      end
+    end
+  end
+  table.sort(out, function(a, b) return a.id < b.id end)
+  return out
+end
+
+local function reach_ok(K, a, b)
+  if not (a and b) then return true end
+  local ok, yes = K.call('snapshot', 'reach', a, b)
+  return not ok or yes ~= false
+end
+
+-- the death incident is not discovered yet (the unit list says "missing"; nobody hauls the body)
+local function undiscovered(uid)
+  local ok, yes = pcall(function()
+    local id = df.unit.find(uid).counters.death_id
+    if id == nil or id < 0 then return false end
+    local ic = df.incident.find(id)
+    return ic ~= nil and ic.flags.discovered == false
+  end)
+  return ok and yes == true
+end
+
+-- the zone's owner owns these remains in DF's eyes: one of the items is in unit.corpse_parts (unreadable: yes)
+local function owns(uid, ids)
+  local ok, yes = pcall(function()
+    local parts = df.unit.find(uid).corpse_parts
+    for _, pid in ipairs(parts) do
+      for _, id in ipairs(ids) do if pid == id then return true end end
+    end
+    return false
+  end)
+  return not ok or yes == true
+end
+
+local function in_pile(T, pos)
+  if not pos then return false end
+  for _, rc in ipairs(T.piles) do if covers(rc, pos.x, pos.y, pos.z) then return true end end
+  return false
+end
+
+-- why one unburied citizen still lies around (before this run's repair)
+local function body_causes(K, c, r, p, T, uid, now, nfree)
+  local b, out = r.bodies[uid], {}
+  local function add(s) out[#out + 1] = s end
+  local mine = T.by_unit[uid] or {}
+  if #mine == 0 then
+    add(nfree > 0 and 'no_zone' or 'no_coffin')
+  else
+    local z = mine[1]
+    local e = z.coffins[1]
+    if not e or not e.built then add('no_coffin')
+    else
+      if e.occ ~= nil and e.occ ~= uid then add('coffin_taken') end
+      if #e.zones > 1 or e.other > 0 then add('zone_shared') end
+      if e.bed then add('bedroom') end
+      if b.pos and not reach_ok(K, b.pos, {x = e.x, y = e.y, z = e.z}) then add('unreachable') end
+    end
+    if not z.active then add('zone_off') end
+    if not owns(uid, b.ids) then add('zone_owner') end
+  end
+  if b.unflagged then add('unflagged') end
+  if in_pile(T, b.pos) then add('in_stockpile') end
+  if undiscovered(uid) then add('undiscovered') end
+  local rec = p.burial[fmt(uid)]
+  if rec and now - (num(rec.t) or now) >= c.entomb_retry and not b.job then add('no_job') end
+  return out
+end
+
+-- PlaceItemInTomb jobs on the job list (-1: unknown)
+local function burial_jobs()
+  local ok, n = pcall(function()
+    local jt = df.job_type.PlaceItemInTomb
+    if jt == nil then return -1 end
+    local link, k, c = df.global.world.jobs.list.next, 0, 0
+    while link and k < 50000 do
+      local j = link.item
+      if j and j.job_type == jt then c = c + 1 end
+      link, k = link.next, k + 1
+    end
+    return c
+  end)
+  return ok and n or -1
+end
+
+-- the repair plan (marks on the index) and its acts; returns the act counts
+local function tomb_repair(K, c, r, p, T, now)
+  local acts = {removed = 0, freed = 0, opened = 0, assigned = 0, entombed = 0, failed = 0}
+  local mode = K.mode()
+  local force = st.force_repair == true
+  local zone_ok = force or (c.tomb_repair ~= false and mode ~= 'SIEGE' and mode ~= 'BREACH')
+  if not zone_ok then return acts, false end
+  local okp, pend = K.call('runner', 'pending', 'tombs')
+  local pending = okp and type(pend) == 'number' and pend > 0
+  -- one zone per coffin tile (1x1 zones; a player's larger zone is left alone): keep the zone of the body inside,
+  -- else of an unburied body, else an unassigned one
+  for _, e in ipairs(T.coffins) do
+    local small = {}
+    for _, z in ipairs(e.zones) do if z.small then small[#small + 1] = z end end
+    if #small > 1 then
+      local keep
+      for _, z in ipairs(small) do if e.occ ~= nil and z.unit == e.occ then keep = z end end
+      for _, z in ipairs(small) do if not keep and z.unit >= 0 and r.bodies[z.unit] then keep = z end end
+      for _, z in ipairs(small) do if not keep and z.unit < 0 then keep = z end end
+      keep = keep or small[1]
+      for _, z in ipairs(small) do                 -- a living citizen's reserved tomb is never removed
+        if z ~= keep and (z.unit < 0 or unit_dead(z.unit)) then z.drop = 'stacked' end
+      end
+    end
+  end
+  -- 1x1 zones without any coffin (built or planned), unless a tombs project is still being built
+  for _, z in ipairs(T.zones) do
+    if z.small and #z.coffins == 0 and not pending and not z.drop then
+      local u = z.unit
+      local b = u >= 0 and r.bodies[u]
+      local here = b and b.pos and covers(z.rc, b.pos.x, b.pos.y, b.pos.z)
+      if (u < 0 or unit_dead(u)) and not here then z.drop = 'empty' end
+    end
+  end
+  -- zones held by the dead: buried elsewhere or without any remains (FR-41) are freed; the zone of an unburied
+  -- body over a coffin that cannot take it (none, taken, shared, in a bedroom) is freed for a usable one
+  for _, z in ipairs(T.zones) do
+    local u = z.unit
+    if not z.drop and u >= 0 and unit_dead(u) then
+      local inside_here = false
+      for _, e in ipairs(z.coffins) do if e.occ == u then inside_here = true end end
+      if not inside_here then
+        if r.held_by[u] and T.cof_by_id[r.held_by[u]] then z.free = 'elsewhere'
+        elseif not r.bodies[u] then z.free = 'stale'
+        else
+          local ok = false
+          for _, e in ipairs(z.coffins) do if usable(e, u) then ok = true end end
+          if not ok then z.free = 'bad' end
+        end
+      end
+    end
+  end
+  -- the plan's free zones go to the unburied dead without a usable zone (lowest unit id first)
+  local free = {}
+  for _, z in ipairs(T.zones) do
+    if not z.drop and z.active and (z.unit < 0 or z.free) then
+      for _, e in ipairs(z.coffins) do
+        if usable(e, nil) then free[#free + 1] = z; break end
+      end
+    end
+  end
+  table.sort(free, function(a, b) return a.id < b.id end)
+  local need = {}
+  for uid in pairs(r.bodies) do
+    local z = good_zone(T, uid)
+    if not z or z.free then need[#need + 1] = uid end
+  end
+  table.sort(need)
+  for _, uid in ipairs(need) do
+    local z = table.remove(free, 1)
+    if not z then break end
+    z.assign = uid
+  end
+  -- acts: removals, frees, assignments, then the remaining free zones opened to citizens
+  local budget = c.tomb_acts_per_run
+  st.bad_zone = st.bad_zone or {}
+  local function act(op, z, uid)
+    if budget <= 0 or (st.bad_zone[z.id] or 0) >= 3 then return false end
+    budget = budget - 1
+    local ok = K.act.tomb_zone(op, z.id, uid)
+    if not ok then
+      st.bad_zone[z.id] = (st.bad_zone[z.id] or 0) + 1
+      acts.failed = acts.failed + 1
+    end
+    return ok
+  end
+  for _, z in ipairs(T.zones) do
+    if z.drop then
+      if act('remove', z) then acts.removed, z.gone = acts.removed + 1, true end
+    end
+  end
+  for _, z in ipairs(T.zones) do
+    if z.free and not z.drop and act('free', z) then acts.freed, z.unit, z.closed = acts.freed + 1, -1, false end
+  end
+  for _, z in ipairs(T.zones) do
+    if z.assign and not z.drop and z.unit < 0 and act('assign', z, z.assign) then
+      acts.assigned, z.unit = acts.assigned + 1, z.assign
+    end
+  end
+  for _, z in ipairs(free) do
+    if z.closed and z.unit < 0 and act('open', z) then acts.opened, z.closed = acts.opened + 1, false end
+  end
+  -- the index now shows what stands: a failed removal keeps its zone
+  for _, z in ipairs(T.zones) do z.drop = z.gone end
+  index_units(T)
+  return acts, true
+end
+
+-- FR-45: entomb (DFHack) for each unburied body with a usable zone and no job; ids, never pointers
+local function entomb_bodies(K, c, r, p, T, now, acts)
+  local ids = {}
+  for uid in pairs(r.bodies) do ids[#ids + 1] = uid end
+  table.sort(ids)
+  local retry = st.force_repair == true
+  local n = 0
+  for _, uid in ipairs(ids) do
+    if n >= c.entomb_per_run then break end
+    local b = r.bodies[uid]
+    if not b.job and b.pos and good_zone(T, uid) then
+      local x, y, z = b.pos.x, b.pos.y, b.pos.z
+      if (r.clean_ok or inside(r, x, y, z)) and revealed(K, x, y, z) then
+        local sid = fmt(uid)
+        local rec = p.burial[sid]
+        local tries = rec and num(rec.n) or 0
+        if rec == nil or retry or (now - (num(rec.t) or 0) >= c.entomb_retry and tries < c.entomb_tries) then
+          local ok = K.act.run('entomb', '--unit', sid, '--haul-now')
+          p.burial[sid] = {t = now, n = tries + 1}
+          n = n + 1
+          if ok then acts.entombed = acts.entombed + 1 end
+        end
+      end
+    end
+  end
+  for sid in pairs(p.burial) do
+    if not r.bodies[num(sid) or -1] then p.burial[sid] = nil end   -- buried or gone
+  end
+end
+
+local LEGEND = 'coffins: p pos, b built, occ body inside, bed in a Bedroom zone, oz other zones, z [zone, unit, open]; '
+               .. 'causes: no_coffin no_zone coffin_taken zone_shared bedroom zone_owner unflagged unreachable '
+               .. 'in_stockpile undiscovered no_job zone_off'
+
+-- the inspect what=tombs document, built from the last run's plain index on request
+local function tomb_report(src)
+  local T, r, causes, acts, now, repaired, jobs = src.T, src, src.causes, src.acts, src.now, src.repaired, src.jobs
+  local ghosts = src.ghosts or {}
+  local list = {}
+  for _, e in ipairs(T.coffins) do
+    local zs = {}
+    for _, z in ipairs(e.zones) do if not z.drop then zs[#zs + 1] = {z.id, z.unit, z.closed and 0 or 1} end end
+    list[#list + 1] = {p = {e.x, e.y, e.z}, id = e.id, b = e.built and 1 or 0, occ = e.occ or -1,
+                       bed = e.bed and 1 or 0, oz = e.other, z = zs}
+  end
+  local loose = {}
+  for _, z in ipairs(T.zones) do
+    if not z.drop and #z.coffins == 0 and #loose < 20 then
+      loose[#loose + 1] = {z.id, z.rc and z.rc.x1 or -1, z.rc and z.rc.y1 or -1, z.rc and z.rc.z or -1, z.unit}
+    end
+  end
+  local unb = {}
+  for uid, cs in pairs(causes) do
+    local b = r.bodies[uid]
+    local gz = good_zone(T, uid)
+    unb[#unb + 1] = {u = uid, p = b.pos and {b.pos.x, b.pos.y, b.pos.z} or {}, n = b.n, job = b.job and 1 or 0,
+                     zone = gz and gz.id or -1, why = table.concat(cs, '+')}
+  end
+  table.sort(unb, function(a, b) return a.u < b.u end)
+  local unb_n = #unb
+  while #unb > 30 do table.remove(unb) end
+  local out = {tick = now, coffins = #T.coffins, zones = #T.zones, free = #free_zones(T), jobs = jobs,
+               repaired = repaired and 1 or 0, acts = acts, list = list, loose = loose, unburied = unb,
+               ghosts = ghosts, unburied_n = unb_n, legend = LEGEND}
+  -- the inspect reply is <= 8 KB: drop coffins from the end until the document fits (the counts stay)
+  local size = #json.encode(out)
+  while #list > 0 and size > 7200 do
+    for _ = 1, math.min(#list, (size - 7200) // 60 + 1) do table.remove(list) end
+    size = #json.encode(out)
+  end
+  out.listed = #list
+  return out
+end
+
+local function phase_tombs_run(K, c, r, p)
+  local now = K.now().tick
+  local T = tomb_index(K, r)
+  index_units(T)
+  local nfree = #free_zones(T)
+  local causes = {}
+  for uid in pairs(r.bodies) do causes[uid] = body_causes(K, c, r, p, T, uid, now, nfree) end
+  r.causes = causes
+  local acts, repaired = tomb_repair(K, c, r, p, T, now)
+  if repaired then entomb_bodies(K, c, r, p, T, now, acts) end
+  r.burial_jobs = burial_jobs()
+  r.tombs_free = #free_zones(T)
+  r.tomb_src = {T = T, bodies = r.bodies, causes = causes, acts = acts, now = now, repaired = repaired,
+                jobs = r.burial_jobs}
+  local moved = acts.removed + acts.freed + acts.opened + acts.assigned + acts.entombed
+  if moved > 0 or acts.failed > 0 then
+    K.log('info', 'tombs: removed %d, freed %d, opened %d, assigned %d, entomb %d, failed %d; %d burial jobs',
+          acts.removed, acts.freed, acts.opened, acts.assigned, acts.entombed, acts.failed, r.burial_jobs)
+  end
+  st.force_repair = nil
+end
+
+local function phase_tombs(K, c, r, p)
+  local ok, err = pcall(phase_tombs_run, K, c, r, p)
+  if not ok then
+    r.tomb_err = tostring(err)
+    K.log('warn', 'care tombs: %s', r.tomb_err)
+  end
+  return true
+end
+
+---------------------------------------------------------------- doctors and hospital posts (FR-48, Run 9)
+-- how many doctor labors a citizen has on; nil when the labors cannot be read (then care leaves the unit alone)
+local function medic_labors(u)
+  local ok, n = pcall(function()
+    local k = 0
+    for _, name in ipairs(M.MEDIC) do
+      local l = df.unit_labor[name]
+      if l == nil then error('no labor ' .. name) end
+      local v = u.status.labors[l]
+      if v == true then k = k + 1 elseif v ~= false then error('labors unreadable') end
+    end
+    return k
+  end)
+  return ok and n or nil
+end
+
+local function med_skill(u)
+  local s = 0
+  for _, name in ipairs(M.MEDIC_SKILLS) do
+    local ok, lv = pcall(function() return dfhack.units.getNominalSkill(u, df.job_skill[name]) end)
+    if ok and type(lv) == 'number' then s = s + lv end
+  end
+  return s
+end
+
+-- a citizen who may take up medicine now: adult, alive, no soldier, not in a mood, not a patient
+local function may_doctor(u)
+  local ok, yes = pcall(function()
+    if dfhack.units.isDead(u) or not dfhack.units.isAdult(u) then return false end
+    if (u.military.squad_id or -1) >= 0 then return false end
+    local mood = df.mood_type[u.mood]
+    if mood and M.STRANGE[mood] then return false end
+    if u.health and u.health.flags.needs_healthcare then return false end
+    return true
+  end)
+  return ok and yes == true
+end
+
+local function hospital_posts()
+  local locs, posts, holders = {}, {}, {}
+  pcall(function()
+    local site = dfhack.world.getCurrentSite()                                   -- Lua API.txt:2205
+    for _, l in ipairs(site and site.buildings or {}) do
+      if l:getType() == df.abstract_building_type.HOSPITAL then locs[l.id] = true end
+    end
+  end)
+  pcall(function()
+    for _, o in ipairs(df.global.world.occupations.all) do
+      local uid = num(o.unit_id) or -1
+      local dead = uid < 0 or unit_dead(uid)
+      if not dead then holders[uid] = true end
+      if locs[o.location_id] and M.POSTS[df.occupation_type[o.type] or ''] and dead then
+        posts[#posts + 1] = {id = o.id, type = df.occupation_type[o.type], held = uid}
+      end
+    end
+  end)
+  table.sort(posts, function(a, b) return a.id < b.id end)
+  return posts, holders
+end
+
+local function phase_doctors_run(K, c, r, p)
+  local want = num(c.doctors) or 0
+  if want <= 0 or not r.have_units then return end
+  local docs, cands = {}, {}
+  for _, id in ipairs(r.ids) do
+    local u = df.unit.find(id)
+    -- soldiers do not count: they train, march and die first (Run 9: every doctor dead after the sieges)
+    local n = u and not dfhack.units.isDead(u) and dfhack.units.isAdult(u) and (u.military.squad_id or -1) < 0
+              and medic_labors(u)
+    if n then
+      if n == #M.MEDIC then docs[#docs + 1] = {id = id, sk = med_skill(u)}
+      elseif may_doctor(u) then cands[#cands + 1] = {id = id, n = n, sk = med_skill(u)} end
+    end
+  end
+  table.sort(cands, function(a, b)
+    if a.n ~= b.n then return a.n > b.n end
+    if a.sk ~= b.sk then return a.sk > b.sk end
+    return a.id < b.id
+  end)
+  local added = {}
+  for _, cd in ipairs(cands) do
+    if #docs >= want then break end
+    local ok = K.act.medic(cd.id, true)
+    if ok then
+      docs[#docs + 1] = {id = cd.id, sk = cd.sk}
+      added[#added + 1] = fmt(cd.id)
+    end
+  end
+  if #added > 0 then
+    K.log('info', 'doctors: %d of %d; DIAGNOSE, SURGERY, BONE_SETTING for unit %s', #docs, want, table.concat(added, ','))
+  elseif #docs < want and K.now().tick - (p.doc_warn or -1e12) >= 7 * DAY then
+    p.doc_warn = K.now().tick
+    K.log('warn', 'doctors: only %d of %d and no free adult to train', #docs, want)
+  end
+  -- hospital posts held by nobody or by the dead: a (civilian) doctor without another post, best skill first
+  local posts, holders = hospital_posts()
+  table.sort(docs, function(a, b) if a.sk ~= b.sk then return a.sk > b.sk end return a.id < b.id end)
+  local filled = 0
+  for _, post in ipairs(posts) do
+    if filled >= c.posts_per_run then break end
+    for _, d in ipairs(docs) do
+      if not holders[d.id] then
+        local ok = K.act.hospital_post(post.id, d.id)
+        if ok then
+          holders[d.id], filled = true, filled + 1
+          K.log('info', 'hospital post %s (%d) filled with unit %d%s', post.type, post.id, d.id,
+                post.held >= 0 and string.format(' (holder %d dead)', post.held) or '')
+        end
+        break
+      end
+    end
+  end
+  r.doctors = {have = #docs, want = want, added = #added, posts = #posts, filled = filled}
+end
+
+local function phase_doctors(K, c, r, p)
+  local ok, err = pcall(phase_doctors_run, K, c, r, p)
+  if not ok then
+    r.doc_err = tostring(err)
+    K.log('warn', 'care doctors: %s', r.doc_err)
+  end
   return true
 end
 
@@ -589,13 +1199,6 @@ local function phase_barrels(K, c, r, p)
 end
 
 ---------------------------------------------------------------- mood materials (live L4: the mood job's filters)
-local function trunc(s, n)                      -- cut at a UTF-8 boundary
-  s = tostring(s or '')
-  if #s <= n then return s end
-  local cut = n
-  while cut > 0 and (s:byte(cut + 1) or 0) & 0xC0 == 0x80 do cut = cut - 1 end
-  return s:sub(1, cut)
-end
 
 local function int(v) return math.tointeger(tonumber(v)) end
 
@@ -768,9 +1371,19 @@ local function mood_report(K, c, r, p)
       end
       if #labels == 0 then
         if rec.unres then K.log('info', 'mood unit %s: every material is available now', m.sid) end
-        rec.unres = nil
+        rec.unres, rec.missing, rec.checked = nil, {}, rec.checked or now
       else
         local sig = trunc(table.concat(labels, ', '), 200)
+        local miss = {}
+        for i = 1, math.min(8, #classes) do miss[i] = classes[i] end
+        rec.missing = miss
+        -- FR-44: the full requirement list against the stock the moment the needs are known
+        if not rec.checked then
+          rec.checked = now
+          K.emit('MOOD_RISK', 'A', trunc(string.format('strange mood unit %s (%s%s) starts without %s', m.sid, rec.kind,
+                                                       m.child and ', child' or '', sig), 200),
+                 {unit = int(m.sid), why = 'missing', kind = rec.kind, missing = miss})
+        end
         local u = rec.unres
         if type(u) ~= 'table' then u = {since = now, sig = ''}; rec.unres = u end
         local acq = {}
@@ -1049,8 +1662,9 @@ end
 
 ---------------------------------------------------------------- run, finish
 -- needs after corpses and zones (citizen remains, coffins), the reserve after the needs (moods first)
-local PHASES = {phase_units, phase_corpses, phase_zones, phase_captives, phase_barrels, phase_needs, phase_reserve,
-                phase_tools}
+-- tombs after corpses and zones (bodies, interments), doctors after the units (moods, patients)
+local PHASES = {phase_units, phase_doctors, phase_corpses, phase_zones, phase_tombs, phase_captives, phase_barrels,
+                phase_needs, phase_reserve, phase_tools}
 
 local function new_run(K, c, p)
   local cu = K.census.u
@@ -1066,7 +1680,8 @@ local function new_run(K, c, p)
   return {ph = 1, idx = 0, left = 0, ids = ids, have_units = type(cu) == 'table' and type(cu.ids) == 'table',
           acc = {n = 0, stressed = 0, naked = 0, thoughts = {}}, moody = {}, mood_list = {}, mood_cls = {},
           claimed = {}, member = {}, res_ids = res_ids, res_hold = {}, res_floor = {}, rc = R.conf(K.cfg.baseline),
-          dead = dead, open = {}, acts = 0, fixed = 0, errs = 0, now = now,
+          dead = dead, open = {}, acts = 0, fixed = 0, errs = 0, now = now, tombs_free = 0,
+          bodies = {}, interred = {}, held_by = {},
           clean_ok = mode == 'PEACE' or (mode == 'RECOVERY' and now - K.mode_since() >= DAY),
           boxes = approach_boxes(K.manifest()), kern = kern_burrow(K)}
 end
@@ -1109,21 +1724,88 @@ local function top5(counts)
   return r
 end
 
+-- FR-04/26 (Gordon 14.10.2026: "I see ghosts flying around, which tool should have told you?"): class A as soon
+-- as a citizen ghost exists or a citizen body lies unburied longer than corpse_old, with the cause per unit;
+-- again at once when the set grows, else every ghost_every while it stands
+local function cause_of(r, id)
+  local cs = r.causes and r.causes[id]
+  if cs then
+    if #cs > 0 then return table.concat(cs, '+') end
+    return (r.bodies[id] and r.bodies[id].job) and 'hauling' or 'waiting'
+  end
+  if r.held_by[id] then return 'buried' end
+  return 'no_body'
+end
+
+local function ghost_alarm(K, c, r, p, ghost_ids, old_ids, open, now)
+  local all, dup = {}, {}
+  for _, list in ipairs({ghost_ids, old_ids}) do
+    for _, id in ipairs(list) do
+      if not dup[id] then dup[id] = true; all[#all + 1] = id end
+    end
+  end
+  if #all == 0 then p.ghost = nil; return end
+  local g = type(p.ghost) == 'table' and p.ghost or {}
+  local seen, grew = {}, false
+  for _, id in ipairs(type(g.ids) == 'table' and g.ids or {}) do seen[id] = true end
+  for _, id in ipairs(all) do if not seen[id] then grew = true end end
+  if not grew and now - (num(g.t) or -1e12) < c.ghost_every then
+    p.ghost = {t = g.t, ids = all}                                    -- a shrinking set wakes nobody
+    return
+  end
+  p.ghost = {t = now, ids = all}
+  local units, causes, tally, order = {}, {}, {}, {}
+  for i, id in ipairs(all) do
+    local why = cause_of(r, id)
+    if i <= 8 then
+      units[i] = id
+      causes[i] = trunc(string.format('%d:%s', id, why), 60)
+    end
+    for tok in why:gmatch('[^+]+') do
+      if not tally[tok] then order[#order + 1] = tok end
+      tally[tok] = (tally[tok] or 0) + 1
+    end
+  end
+  table.sort(order, function(a, b) return tally[a] > tally[b] or (tally[a] == tally[b] and a < b) end)
+  local parts = {}
+  for i = 1, math.min(4, #order) do parts[i] = order[i] .. ' ' .. tally[order[i]] end
+  local hint = tally.no_body and '; slab for no_body' or ''
+  K.emit('GHOSTS', 'A', trunc(string.format('%d ghost(s), %d citizen(s) unburied > %d d: %s%s; inspect tombs, tombs.repair',
+                                           #ghost_ids, #old_ids, c.corpse_old // DAY, table.concat(parts, ', '), hint), 200),
+         {ghosts = #ghost_ids, corpses = open, old = #old_ids, units = units, causes = causes})
+end
+
 local function finish(K, c, r, p)
   local now = K.now().tick
   -- open citizen corpses: first seen -> age
   for sid in pairs(p.corpses) do if not r.open[sid] then p.corpses[sid] = nil end end
-  local open, old = 0, 0
+  local open, old, old_ids = 0, 0, {}
   for sid in pairs(r.open) do
     p.corpses[sid] = p.corpses[sid] or now
     open = open + 1
-    if now - p.corpses[sid] >= c.corpse_old then old = old + 1 end
+    if now - p.corpses[sid] >= c.corpse_old then
+      old = old + 1
+      old_ids[#old_ids + 1] = math.tointeger(tonumber(sid))
+    end
   end
-  local ghosts = 0
+  table.sort(old_ids)
+  local ghosts, ghost_ids = 0, {}
   for _, id in ipairs(p.dead) do
     local u = df.unit.find(id)
-    if u and dfhack.units.isGhost(u) then ghosts = ghosts + 1 end      -- Lua API.txt:1508
+    if u and dfhack.units.isGhost(u) then                               -- Lua API.txt:1508
+      ghosts = ghosts + 1
+      ghost_ids[#ghost_ids + 1] = id
+    end
   end
+  table.sort(ghost_ids)
+  ghost_alarm(K, c, r, p, ghost_ids, old_ids, open, now)
+  if r.tomb_src then
+    local gl = {}
+    for i = 1, math.min(20, #ghost_ids) do gl[i] = {ghost_ids[i], cause_of(r, ghost_ids[i])} end
+    r.tomb_src.ghosts = gl
+    st.tombs = r.tomb_src
+  end
+  st.doctors = r.doctors or st.doctors
   -- tombs: free >= open corpses + margin; ask only once the core exists or somebody is unburied
   local need = open + c.tomb_margin - r.tombs_free
   local core = (K.manifest().zones or {}).Z4 ~= nil
@@ -1219,6 +1901,35 @@ M.on.UNIT_DEATH = function(K, ev)
     K.emit('DEATHS_3PLUS', 'A', string.format('%d citizens died within a day', #recent), {n = #recent, ids = ids})
   end
   K.persist.touch('m.care')
+end
+
+-- inspect what=tombs (kern routes it here; FR-27): the last run's coffins and tomb zones, the unburied citizens
+-- with their causes, ghosts, free usable tombs, PlaceItemInTomb jobs and the repair acts; <= 8 KB
+function M.inspect(K, what, key)
+  if what ~= 'tombs' then return false, 'care answers what=tombs only' end
+  if not st.tombs then return true, 'tombs: no care run finished yet', {tick = K.now().tick} end
+  local d = tomb_report(st.tombs)
+  return true, string.format('tombs: %d coffins, %d free, %d unburied, %d ghosts, %d burial jobs', d.coffins, d.free,
+                             d.unburied_n, #d.ghosts, d.jobs), d
+end
+
+-- verb tombs.repair {} (FR-27): the next care run repairs the tombs in any mode, also with tomb_repair off,
+-- and gives every unburied citizen body a fresh entomb try (the 3-try limit starts again)
+M.verbs['tombs.repair'] = function(K, args, cmd)
+  st.force_repair = true
+  local p = pstate(K)
+  p.burial = json.object{}
+  K.persist.touch('m.care')
+  return true, 'queued: the next care run repairs the tombs and retries entomb for every unburied citizen', {queued = 1}
+end
+
+-- last summary (tests, doctors for the brief): the state values plus the doctor count of the last run
+function M.kpi(K)
+  local o = st.out
+  if not o then return nil end
+  local r = {doctors = st.doctors}
+  for k, v in pairs(o) do r[k] = v end
+  return r
 end
 
 function M.state(K)

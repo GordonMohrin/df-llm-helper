@@ -161,7 +161,18 @@
   "corpse_acts_per_run": 30,
   "barrels_per_run": 20,
   "mood_nojob_ticks": 1200,
-  "stress_week": 8400
+  "stress_week": 8400,
+  "tomb_repair": true,
+  "tomb_acts_per_run": 20,
+  "entomb_per_run": 8,
+  "entomb_retry": 2400,
+  "entomb_tries": 3,
+  "ghost_every": 8400,
+  "doctors": 4,
+  "posts_per_run": 4,
+  "mood_thirst": 30000,
+  "mood_hunger": 50000,
+  "mood_risk_every": 2400
  },
  "reserve": {
   "from_phase": "P1",

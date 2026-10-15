@@ -808,6 +808,12 @@ function M.new(opts)
     end,
     inspect = function(args)
       local what = args.what
+      local by = ({tombs = 'care', water_sources = 'water'})[what]    -- module topics, as kern routes them
+      if by then
+        local okc, ok, msg, data = K.call(by, 'inspect', what, args.key)
+        if not okc then return false, by .. ': ' .. tostring(ok) end
+        return ok == true, tostring(msg or what), data
+      end
       if what == 'state' then return true, 'state', compose()
       elseif what == 'mode' then return true, W.mode, {mode = W.mode, since = W.mode_since}
       elseif what == 'census' then return true, 'census', K.census

@@ -139,8 +139,8 @@ return M
 | runner | WP7 | | 600 | projects, phases, manifest |
 | snapshot | WP7 | | 100 (slices while exporting) | snapshot export, tile queries |
 | economy | WP8 | | 1,200 | orders, stock days, labor, `K.census.i` |
-| care | WP8 | | 1,200 | moods, burial, captives, stress, hospital water |
-| water | WP8 | | 1,200 | patients' thirst, hospital/refuge wells and Water Source zones, buckets, cistern flood alarm (iter2; acts item_flag, workorder) |
+| care | WP8 | | 1,200 | moods, burial, tomb repair and entomb, ghosts, doctors and hospital posts, captives, stress, hospital water |
+| water | WP8 | | 1,200 | patients' thirst, hospital/refuge wells and Water Source zones (accepted: water ≥ 4/7), hospital gate, water sources scan, buckets, cistern flood alarm (iter2; acts item_flag, workorder) |
 | trade | WP9 | | 100 | caravan port |
 | baseline | WP8 | | 33,600 (+ init) | native baseline idempotent |
 | perf | WP1 | | 1,000 ms | perf.csv, frame-gap meter, PERF_DEGRADED |
@@ -226,10 +226,13 @@ Every function returns `ok, res_or_err`, never raises, writes one line to `comma
 | `zone_remove(name)` → `ok, n` | `dfllm-*` zone name (live L6) | zones screen > remove: every activity zone of that name is deconstructed (`dfhack.buildings.deconstruct`, as quickfort's zone undo does, but only these zones); the runner's temporary gather zone | runner |
 | `item_flag(item_id, flag, on)` | `flag='forbid'|'dump'|'melt'` | item flag toggles | care |
 | `zone_assign(zone_building_id, unit_id)` | ints | assign a caged unit to a pit/pond zone | care |
+| `tomb_zone(op, zone_id, unit_id?)` → `ok, 'removed'|'freed'|'opened'|'assigned'|'already'` | `op='remove'|'free'|'open'|'assign'`, ints (FR-27/41/42) | tomb zone sheet: remove the zone (owner link dropped first, then `dfhack.buildings.deconstruct`), unassign it (and allow citizens), allow citizens, or assign it to a dead citizen (`dfhack.buildings.setOwner`, as entomb.lua does); tomb zones only | care |
+| `medic(unit_id, on)` → `ok, 'enabled'|'disabled'|'already'` | int, bool (FR-48) | labors screen: DIAGNOSE, SURGERY and BONE_SETTING of one adult living citizen on or off | care |
+| `hospital_post(occupation_id, unit_id)` → `ok, 'filled'|'already'` | ints (FR-48) | location sheet > occupations: a hospital post (doctor, diagnostician, surgeon, bone doctor) that is vacant or held by a dead unit gets a living adult citizen (a dead holder is unlinked first); a living holder is never replaced | care |
 | `trade(op, args)` | `op='request_broker'|'broker_job'|'open'|'mark'|'offer'|'close'` [WP9 audit; `broker_job` live L4] | depot and trade screen; `broker_job {depot, assign?}` posts the TradeAtDepot job the broker request stands for (DF 53 never posted it from the toggle: 'time' failures L1-L3), one per depot; `assign` gives a job nobody took to the broker only while he has no job | trade |
 | `run(cmd, ...)` → `ok, output` | command + string args | `dfhack.run_command_silent` after the allowlist check (§9.14); `'r'` entries are read-only queries | see `contract.ACT.run` |
 
-Not in act on purpose: labor writes other than the builtin tool details (labormanager owns every other labor and detail; live L1b gave economy the Miners/Woodcutters/Hunters memberships, see DESIGN §3), unit/skill/position writes, job removal (except our own lever job), item creation, tile edits.
+Not in act on purpose: labor writes other than the builtin tool details and the doctor labors (labormanager owns every other labor and detail; live L1b gave economy the Miners/Woodcutters/Hunters memberships, see DESIGN §3; FR-48 gave care DIAGNOSE/SURGERY/BONE_SETTING through `medic`), unit/skill/position writes, job removal (except our own lever job), item creation, tile edits.
 
 ---
 
@@ -302,6 +305,8 @@ Only these are public across WPs; anything else is module-internal. "Returns" ar
 | `economy.supply()` | `{key = {have, held, want, floor, route}}` | read-only (iter2) |
 | `care.reserved()` | `{class = n}` | items care holds forbidden as the mood-material reserve (iter2) |
 | `care.mood_wants()` | `[{cls, n, unit, label, acq, buy}]` | what open strange moods still miss, read from the mood job's `job_items` (orchestrator decision iter2); economy turns it into needs |
+| `snapshot.liquids(x0, y0, x1, y1, z, min?)` | `[{x, y, flow}]` or `nil, err` | revealed non-magma water tiles of one level rect with depth ≥ `min` (default 1); ≤ 4,096 tiles read, ≤ 512 returned per call; hidden tiles never (FR-47, water's scan) |
+| `care.inspect(what, key?)` / `water.inspect(what, key?)` | `ok, msg, data` | kern's `inspect` routes `what=tombs` to care and `what=water_sources` to water (FR-27, FR-47); data ≤ 8 KB |
 
 Mode-driven duties (no call needed): arbiter applies tempo per mode in `on.MODE`; siege applies civ alert, alert burrows and posture; gate recomputes desired bridges; runner freezes; readiness freezes growth outside PEACE.
 
@@ -623,6 +628,9 @@ The fort-specific geometry, written by templates (bp `manifest` fragments) and m
 | PLAN_EXHAUSTED | A | runner | phase (str), year |
 | PROJECT_BLOCKED | A | runner | **proj** (str), tpl (str), stage (str), why (str), ticks — after > 2 days blocked |
 | YEAR_REVIEW | A | kern | year |
+| GHOSTS | A | care | ghosts, corpses, old, units (int[]), causes (str[] `unit:cause+cause`) — FR-04/26: a citizen ghost exists or a citizen body lies unburied longer than `corpse_old`; again when the set grows, else weekly |
+| HOSPITAL_DRY | A | water | **why** (str), patients, zone, near, recipe (str) — FR-31/34: a hospital location (or a pending hospital project with no accepted water at all) without a well over water or a Water Source zone on water ≥ 4/7 within `near` tiles; at the start of the dry episode, then weekly with patients, else monthly |
+| MOOD_RISK | A | care | **unit**, **why** (str: missing, thirst, hunger), kind (str), missing (str[] classes), thirst, hunger — FR-44: a strange mood starts without its materials, or the moody dwarf passes the thirst/hunger line (every 2 days); the mood job is never cancelled |
 | SIEGE_START | B | siege | vis, inv, great, why (str) |
 | ALERT_START / ALERT_END | B | siege | vis |
 | INVASION | B | threat | id |
@@ -681,9 +689,10 @@ Python (`dfllm cmd`, `plan apply`, follow) validates every inbox document with `
 | `trade.want` | trade | any | `{want?:[token], sell?:[token]}` | |
 | `squad.sortie` | military | ALERT, SIEGE, BREACH, RECOVERY | `{squad:'A'|'B'|'C', target:str (killbox id) or pos, approve:true}` | |
 | `lever` | gate | PEACE | `{bridge, want:'up'|'down'}` | `{job?}` |
-| `inspect` | kern | any | `{what:'state'|'modules'|'census'|'manifest'|'projects'|'persist'|'perf'|'mode'|'plan', key?:str}` | ≤ 8 KB |
+| `inspect` | kern | any | `{what:'state'|'modules'|'census'|'manifest'|'projects'|'persist'|'perf'|'mode'|'plan'|'tombs'|'water_sources', key?:str}`; `tombs` and `water_sources` are answered by care and water (§7) | ≤ 8 KB |
 | `selftest` | selftest | any | `{suite?:'quick'|'full'}` | `{pass, fail}` |
 | `module.enable` | kern | any | `{module:str}` (module name, §1.1) | `{module}`; re-enables a backed-off module now and resets its backoff doubling (§3.3.5); `ok:false` for an unknown module |
+| `tombs.repair` | care | any | `{}` (FR-27): the next care run repairs the tombs in any mode (also with `tomb_repair` off) and gives every unburied citizen body a fresh `entomb` try | `{queued}` |
 
 There is no arbitrary Lua.
 
@@ -807,7 +816,7 @@ Each item names the WP that must adapt its code; WP0 changed the contract, `cont
 Generated by `python -m dfpilot.schema --write-appendix docs/v2/CONTRACTS.md`; `tests/test_schema.py` fails if this block is stale. The digest covers every schema and registry in `schema.py`, so any contract change shows up here.
 
 <!-- BEGIN GENERATED SCHEMAS -->
-Contract digest: `c397584174411beb4edbe64950b97f5c4964a84860ecaaf40c9ca827f9710f4d`
+Contract digest: `05f214a4f12b8fdfa567dc8d8010516c7bf3481687df8b3c0ceb47680692af5e`
 
 DESIGN §6 formats and the inbox verb args. Other kinds: `python -m dfpilot.schema --json-schema <kind>` with kind in heartbeat, phases, bp, restore, lock, allowlist, persist.marker, persist.projects, persist.plan, persist.phase, persist.mode, persist.drill, persist.kern. Per-type event `d` (§12) and per-verb `args` are checked by `validate()`; the envelopes leave them open. Compact JSON, keys sorted.
 
@@ -823,7 +832,7 @@ DESIGN §6 formats and the inbox verb args. Other kinds: `python -m dfpilot.sche
 
 **inbox**
 ```json
-{"$defs":{"id":{"pattern":"^[A-Za-z0-9_-]{1,40}$","type":"string"}},"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"args":{"additionalProperties":{},"type":"object"},"by":{"enum":["llm","gordon","cli","follow","supervise","test"],"type":"string"},"id":{"$ref":"#/$defs/id"},"ts":{"minimum":0,"type":"integer"},"verb":{"enum":["plan.reload","bp.place","bp.cancel","drill","snapshot","audit","popcap.lower","tempo.lower","pause","unpause","trade.want","squad.sortie","lever","inspect","selftest","module.enable"],"type":"string"}},"required":["id","verb","args","by"],"title":"inbox","type":"object"}
+{"$defs":{"id":{"pattern":"^[A-Za-z0-9_-]{1,40}$","type":"string"}},"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"args":{"additionalProperties":{},"type":"object"},"by":{"enum":["llm","gordon","cli","follow","supervise","test"],"type":"string"},"id":{"$ref":"#/$defs/id"},"ts":{"minimum":0,"type":"integer"},"verb":{"enum":["plan.reload","bp.place","bp.cancel","drill","snapshot","audit","popcap.lower","tempo.lower","pause","unpause","trade.want","squad.sortie","lever","inspect","selftest","module.enable","tombs.repair"],"type":"string"}},"required":["id","verb","args","by"],"title":"inbox","type":"object"}
 ```
 
 **outbox**
@@ -913,7 +922,7 @@ DESIGN §6 formats and the inbox verb args. Other kinds: `python -m dfpilot.sche
 
 **inbox.args.inspect**
 ```json
-{"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"key":{"maxLength":80,"type":"string"},"what":{"enum":["state","modules","census","manifest","projects","persist","perf","mode","plan"],"type":"string"}},"required":["what"],"title":"inbox.args.inspect","type":"object"}
+{"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"key":{"maxLength":80,"type":"string"},"what":{"enum":["state","modules","census","manifest","projects","persist","perf","mode","plan","tombs","water_sources"],"type":"string"}},"required":["what"],"title":"inbox.args.inspect","type":"object"}
 ```
 
 **inbox.args.selftest**
@@ -924,5 +933,10 @@ DESIGN §6 formats and the inbox verb args. Other kinds: `python -m dfpilot.sche
 **inbox.args.module.enable**
 ```json
 {"$defs":{"module":{"pattern":"^[a-z][a-z_]{1,15}$","type":"string"}},"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"module":{"$ref":"#/$defs/module"}},"required":["module"],"title":"inbox.args.module.enable","type":"object"}
+```
+
+**inbox.args.tombs.repair**
+```json
+{"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"title":"inbox.args.tombs.repair","type":"object"}
 ```
 <!-- END GENERATED SCHEMAS -->

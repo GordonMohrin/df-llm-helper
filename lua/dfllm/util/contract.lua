@@ -53,6 +53,8 @@ C.EVENTS = {
   PERF_DEGRADED = {cls = 'A', by = 'perf'}, DECISION_NEEDED = {cls = 'A', by = 'any'},
   PLAN_EXHAUSTED = {cls = 'A', by = 'runner'}, PROJECT_BLOCKED = {cls = 'A', by = 'runner'},
   YEAR_REVIEW = {cls = 'A', by = 'kern'},
+  -- FR-04/26 ghosts and unburied citizens, FR-34 a hospital without accepted water, FR-44 a strange mood at risk
+  GHOSTS = {cls = 'A', by = 'care'}, HOSPITAL_DRY = {cls = 'A', by = 'water'}, MOOD_RISK = {cls = 'A', by = 'care'},
   -- B: digest
   SIEGE_START = {cls = 'B', by = 'siege'}, ALERT_START = {cls = 'B', by = 'siege'},
   ALERT_END = {cls = 'B', by = 'siege'}, INVASION = {cls = 'B', by = 'threat'},
@@ -96,6 +98,7 @@ C.VERBS = {
   ['inspect']      = {mod = 'kern'},
   ['selftest']     = {mod = 'selftest'},
   ['module.enable'] = {mod = 'kern'},
+  ['tombs.repair'] = {mod = 'care'},
 }
 -- Verbs accepted only from these `by` origins (§9.5). `by` is a label, not authentication: the
 -- hook (WP4) keeps the LLM from writing these origins; this check is the second line.
@@ -116,6 +119,7 @@ C.ACT = {
   order_suspend = {'economy'}, kitchen_exclude = {'economy'}, appoint = {'economy'}, work_detail = {'economy'},
   order_material = {'economy'},
   item_flag = {'care', 'water'}, zone_assign = {'care'},
+  tomb_zone = {'care'}, medic = {'care'}, hospital_post = {'care'},
   trade = {'trade'},
   run = {'baseline', 'economy', 'care', 'military', 'trade', 'arbiter', 'selftest', 'runner'},
 }

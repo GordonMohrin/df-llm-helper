@@ -14,6 +14,9 @@ local ITEM_FLAGS = {forbid = true, dump = true, melt = true}
 -- builtin work details whose membership act.work_detail may change (each holds one tool labor; live L5: the
 -- fishers too, economy staffs them while food is short and a fishing zone exists)
 A.TOOL_DETAILS = {Miners = true, Woodcutters = true, Hunters = true, Fisherdwarves = true}
+-- the doctor labors act.medic switches and the hospital posts act.hospital_post fills (FR-48)
+A.MEDIC_LABORS = {'DIAGNOSE', 'SURGERY', 'BONE_SETTING'}
+A.HOSPITAL_POSTS = {DOCTOR = true, DIAGNOSTICIAN = true, SURGEON = true, BONE_DOCTOR = true}
 -- one-time furniture orders act.order_material may re-enter in wood (carpenter's variants of the mason jobs)
 A.WOOD_JOBS = {ConstructDoor = true, ConstructCabinet = true, ConstructChest = true, ConstructCoffin = true,
                ConstructTable = true, ConstructThrone = true, ConstructArmorStand = true, ConstructWeaponRack = true,
@@ -1227,6 +1230,104 @@ local function impls(state)
     end
     vec:insert(pos, unit_id)
     return true
+  end
+
+  -- tomb zone sheet (FR-27/41/42, Run 9: stacked zones on one coffin, zones without a coffin, zones held by
+  -- bodiless dead): op 'remove' (zones screen > remove: the owner link is dropped first, then the zone is
+  -- deconstructed like quickfort's zone undo), 'free' (unassign; open to citizens), 'open' (the sheet's "allow
+  -- citizens" toggle) or 'assign' (the sheet's assign button for a dead citizen; dfhack.buildings.setOwner as
+  -- entomb.lua does). Tomb zones only. Returns ok, 'removed'|'freed'|'opened'|'assigned'|'already'.
+  local function tomb_zone_of(id)
+    local z = df.building.find(int(id) or -1)
+    if not z then return nil, 'no zone ' .. tostring(id) end
+    local okc, civ = pcall(function() return df.building_civzonest:is_instance(z) end)
+    if okc and not civ then return nil, 'not a zone' end
+    local okt, tomb = pcall(function() return z.type == df.civzone_type.Tomb end)
+    if not (okt and tomb) then return nil, 'not a tomb zone' end
+    return z
+  end
+  function I.tomb_zone(op, zone_id, unit_id)
+    local z, why = tomb_zone_of(zone_id)
+    if not z then return false, why end
+    local owner = int(z.assigned_unit_id) or -1
+    if op == 'remove' then
+      if owner >= 0 and not dfhack.buildings.setOwner(z, nil) then return false, 'setOwner refused' end
+      if dfhack.buildings.deconstruct(z) then return true, 'removed' end
+      return false, 'deconstruct refused'
+    elseif op == 'free' or op == 'open' then
+      if op == 'free' and owner >= 0 and not dfhack.buildings.setOwner(z, nil) then return false, 'setOwner refused' end
+      local f = z.zone_settings.tomb.flags
+      local was = f.no_citizens
+      f.no_citizens = false
+      if op == 'free' then return true, 'freed' end
+      return true, was and 'opened' or 'already'
+    elseif op == 'assign' then
+      local u = df.unit.find(int(unit_id) or -1)
+      if not u or not dfhack.units.isDead(u) then return false, 'not a dead unit' end
+      if owner == u.id then return true, 'already' end
+      if owner >= 0 then return false, 'zone held by unit ' .. string.format('%d', owner) end
+      if not dfhack.buildings.setOwner(z, u) then return false, 'setOwner refused' end
+      return true, 'assigned'
+    end
+    return false, 'op must be remove, free, open or assign'
+  end
+
+  -- labors screen (FR-48, Run 9: all three doctors dead, DIAGNOSE/SURGERY/BONE_SETTING on nobody, 7 patients
+  -- waiting for a diagnosis): the doctor labors of one citizen on or off. Adult living citizens only.
+  function I.medic(unit_id, on)
+    local u = df.unit.find(int(unit_id) or -1)
+    if not u then return false, 'no unit ' .. tostring(unit_id) end
+    if on and (not dfhack.units.isCitizen(u) or not dfhack.units.isAdult(u) or dfhack.units.isDead(u)) then
+      return false, 'not an adult living citizen'
+    end
+    local n = 0
+    for _, name in ipairs(A.MEDIC_LABORS) do
+      local l = df.unit_labor[name]
+      if l == nil then return false, 'no labor ' .. name end
+      if (u.status.labors[l] == true) ~= (on == true) then
+        u.status.labors[l] = on and true or false
+        n = n + 1
+      end
+    end
+    return true, n == 0 and 'already' or (on and 'enabled' or 'disabled')
+  end
+
+  -- location sheet > occupations (FR-48; v1 FEATURE-004 live note: with no hospital post filled the game posts
+  -- no care jobs, and a post keeps pointing at its dead holder): fill one hospital post with a living adult
+  -- citizen; a dead holder is unlinked first. A post held by a living citizen is never taken.
+  local function site_hospital(loc_id)
+    local site = dfhack.world.getCurrentSite()
+    for _, l in ipairs(site and site.buildings or {}) do
+      if l.id == loc_id then return l:getType() == df.abstract_building_type.HOSPITAL end
+    end
+    return false
+  end
+  function I.hospital_post(occ_id, unit_id)
+    local id = int(occ_id)
+    local occ
+    for _, o in ipairs(df.global.world.occupations.all) do
+      if o.id == id then occ = o; break end
+    end
+    if not occ then return false, 'no occupation ' .. tostring(occ_id) end
+    if not A.HOSPITAL_POSTS[df.occupation_type[occ.type] or ''] or not site_hospital(occ.location_id) then
+      return false, 'not a hospital post'
+    end
+    local u = df.unit.find(int(unit_id) or -1)
+    if not u or not dfhack.units.isCitizen(u) or not dfhack.units.isAdult(u) or dfhack.units.isDead(u) then
+      return false, 'not an adult living citizen'
+    end
+    local old = occ.unit_id >= 0 and df.unit.find(occ.unit_id) or nil
+    if old and old.id == u.id then return true, 'already' end
+    if old and not dfhack.units.isDead(old) then return false, 'post held by a living unit' end
+    if old then
+      for i = #old.occupations - 1, 0, -1 do
+        if old.occupations[i].id == occ.id then old.occupations:erase(i) end
+      end
+    end
+    occ.unit_id = u.id
+    occ.histfig_id = u.hist_figure_id
+    u.occupations:insert('#', occ)
+    return true, 'filled'
   end
 
   -- work details screen (labor > work details): add a citizen to, or remove one from, a builtin tool

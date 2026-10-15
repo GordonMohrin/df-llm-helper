@@ -18,6 +18,7 @@ M.CFG = {
   sites = {w = 96, h = 96, below = 8, above = 3},   -- default box without a manifest
   marks_max = 500,
   trap_ttl = 1200,                -- ticks between trap index refreshes for tile()
+  liquid_tiles = 4096,            -- tiles one liquids() call may read (FR-47)
 }
 local PURPOSES = {audit = true, sites = true, debug = true}
 local ID_OK = '^[A-Za-z0-9_%-]+$'
@@ -223,6 +224,31 @@ function M.tile(K, x, y, z)
   if dig == '' and designation_jobs(now)[string.format('%d,%d,%d', x, y, z)] then dig = 'job' end
   -- flow: liquid depth 0..7 of this revealed tile, magma: true for magma (runner: light-aquifer seepage)
   return {c = c, dig = dig, bld = bld, flow = des.flow_size or 0, magma = des.liquid_type == true}
+end
+
+-- water tiles of one level rect (FR-47, water's water_sources scan): {{x, y, flow}} of revealed, non-magma
+-- tiles with flow >= min (default 1), at most M.CFG.liquid_tiles tiles read and 512 returned per call (the
+-- caller slices the box). Hidden tiles are skipped: no water_table, no unrevealed water.
+function M.liquids(K, x0, y0, x1, y1, z, min)
+  x0, y0, x1, y1, z, min = int(x0), int(y0), int(x1), int(y1), int(z), int(min) or 1
+  local out = {}
+  if not (x0 and y0 and x1 and y1 and z) or x1 < x0 or y1 < y0 then return out end
+  if (x1 - x0 + 1) * (y1 - y0 + 1) > M.CFG.liquid_tiles then return nil, 'rect too large' end
+  local getTileFlags = dfhack.maps.getTileFlags
+  for y = y0, y1 do
+    for x = x0, x1 do
+      local des = getTileFlags(x, y, z)
+      if des and not des.hidden then
+        local f = int(des.flow_size) or 0
+        local lt = des.liquid_type
+        if f >= min and not (lt == true or (lt ~= false and lt ~= nil and lt ~= 0)) then
+          out[#out + 1] = {x, y, f}
+          if #out >= 512 then return out end
+        end
+      end
+    end
+  end
+  return out
 end
 
 -- walk-group query (iter2, care's mood reach): may a walker standing at a reach b? Both are revealed

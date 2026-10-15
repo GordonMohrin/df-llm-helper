@@ -135,6 +135,58 @@ function CW.flags(W, flag)
   return r
 end
 
+-- FR-27/45 tombs: a coffin with a 1x1 tomb zone over it. opts: unit (assigned, default -1), active (default
+-- true), closed (no_citizens), built (default true), zone (false: no zone), coffin (false: a zone without coffin)
+function CW.tomb(W, x, y, z, opts)
+  opts = opts or {}
+  local cof
+  if opts.coffin ~= false then
+    cof = F.building(W, 'COFFIN', {x1 = x, y1 = y, x2 = x, y2 = y, z = z})
+    cof.relations = kmock.vec{{type = df.civzone_type.Tomb}}     -- (a vector after the copy: k_mock copies specs)
+    if opts.built == false then
+      cof.getBuildStage = function() return 0 end
+      cof.getMaxBuildStage = function() return 1 end
+    end
+  end
+  local zn
+  if opts.zone ~= false then
+    zn = F.building(W, 'ZONE_TOMB', {x1 = x, y1 = y, x2 = x, y2 = y, z = z, type = df.civzone_type.Tomb,
+                                     assigned_unit_id = opts.unit or -1, spec_sub_flag = {active = opts.active ~= false},
+                                     zone_settings = {tomb = {flags = {no_citizens = opts.closed == true}}}})
+  end
+  return cof, zn
+end
+
+-- act.tomb_zone on the fake zones (what the real act does to them): remove, free, open, assign
+function CW.tomb_acts(W)
+  W.act_result('tomb_zone', function(op, id, uid)
+    local zn = W.buildings[id]
+    if not zn then return false, 'no zone' end
+    if op == 'remove' then
+      local v = df.global.world.buildings.other.ZONE_TOMB
+      for i = #v - 1, 0, -1 do if v[i] == zn then v:erase(i) end end
+      W.buildings[id] = nil
+      return true, 'removed'
+    elseif op == 'free' then zn.assigned_unit_id = -1; zn.zone_settings.tomb.flags.no_citizens = false; return true, 'freed'
+    elseif op == 'open' then zn.zone_settings.tomb.flags.no_citizens = false; return true, 'opened'
+    elseif op == 'assign' then
+      if zn.assigned_unit_id >= 0 then return false, 'held' end
+      zn.assigned_unit_id = uid
+      return true, 'assigned'
+    end
+    return false, 'bad op'
+  end)
+end
+
+-- tomb_zone acts as {op, zone, unit}
+function CW.tacts(W, op)
+  local r = {}
+  for _, a in ipairs(W.find_acts('tomb_zone')) do
+    if op == nil or a.args[1] == op then r[#r + 1] = {a.args[1], a.args[2], a.args[3]} end
+  end
+  return r
+end
+
 function CW.held(W)
   local p = W.K.persist.get('m.care')
   local r = {}

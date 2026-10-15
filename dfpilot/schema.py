@@ -75,7 +75,8 @@ ACT = {
     "orders_import": ["economy"], "orders": ["economy"], "workorder": ["economy", "water"],
     "order_suspend": ["economy"], "kitchen_exclude": ["economy"], "appoint": ["economy"],
     "work_detail": ["economy"], "order_material": ["economy"], "item_flag": ["care", "water"],
-    "zone_assign": ["care"], "trade": ["trade"],
+    "zone_assign": ["care"], "tomb_zone": ["care"], "medic": ["care"], "hospital_post": ["care"],
+    "trade": ["trade"],
     "run": ["baseline", "economy", "care", "military", "trade", "arbiter", "selftest", "runner"],
 }
 
@@ -407,6 +408,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
     "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i")),
     "YEAR_REVIEW": ("A", "kern", _d(opt="year:i")),
+    "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa")),
+    "HOSPITAL_DRY": ("A", "water", _d("why:s", "patients:i zone:i near:i recipe:s")),
+    "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i")),
     "SIEGE_START": ("B", "siege", _d(opt="vis:i inv:i great:i why:s")),
     "ALERT_START": ("B", "siege", _d(opt="vis:i")),
     "ALERT_END": ("B", "siege", _d(opt="vis:i")),
@@ -469,9 +473,11 @@ VERB_ARGS: dict[str, Obj] = {
                              "approve": Const(True)}),
     "lever": Obj(req={"bridge": BRIDGE, "want": Str(enum=["up", "down"])}),
     "inspect": Obj(req={"what": Str(enum=["state", "modules", "census", "manifest", "projects", "persist",
-                                          "perf", "mode", "plan"])}, opt={"key": Str(maxbytes=80)}),
+                                          "perf", "mode", "plan", "tombs", "water_sources"])},
+                   opt={"key": Str(maxbytes=80)}),
     "selftest": Obj(opt={"suite": Str(enum=["quick", "full"])}),
     "module.enable": Obj(req={"module": MODULE}),
+    "tombs.repair": Obj(),
 }
 # verb -> (handler module, allowed modes or None, needs approve)
 VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
@@ -484,6 +490,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "squad.sortie": ("military", ["ALERT", "SIEGE", "BREACH", "RECOVERY"], True),
     "lever": ("gate", ["PEACE"], False), "inspect": ("kern", None, False),
     "selftest": ("selftest", None, False), "module.enable": ("kern", None, False),
+    "tombs.repair": ("care", None, False),
 }
 # verbs accepted only from these `by` origins (CONTRACTS §9.5; `by` is a label, the hook is the guard)
 VERB_BY: dict[str, list[str]] = {"audit": ["follow", "test"]}
