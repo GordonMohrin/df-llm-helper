@@ -1,5 +1,49 @@
 # CHANGELOG dfpilot
 
+## Burial, ghosts, hospital water, doctors, moods (2026-10-15, Run 9 FRs; offline, live-untested)
+Runs 7-9 were lost largely to unburied dead and ghosts and to patients dying of thirst next to full drink stores.
+- **Tombs (FR-04/26/27/41/42/45, care):** a tomb phase each care run indexes coffins, tomb zones, Bedroom zones and
+  piles. Outside SIEGE/BREACH (config `care.tomb_repair`, default on; verb `tombs.repair` forces one run in any mode)
+  it keeps one zone per coffin tile (stacked 1x1 zones removed; the zone of the body inside or of an unburied body
+  kept; a living citizen's reserved tomb never), removes 1x1 zones without a coffin (not while a tombs project is
+  pending), frees zones of bodiless or elsewhere-buried dead and of unburied dead over an unusable coffin (none,
+  taken, shared, inside a Bedroom zone), opens free zones to citizens and assigns every unburied citizen without a
+  usable zone a free one (new act `tomb_zone`, the zone sheet). Then DFHack `entomb --unit <id> --haul-now`
+  (allowlisted in that form only) per unburied body with a usable zone and no job, inside Kern+ or at clean-up
+  time; PlaceItemInTomb jobs are counted, a body still without a job after 2 days is `no_job` (3 tries, then
+  `tombs.repair`). A free tomb now means a usable one (built empty coffin, one active zone, no other zone).
+- **GHOSTS (A):** as soon as a citizen ghost exists or a citizen body lies unburied longer than 3 days
+  (`corpse_old`), with the causes per body (no_coffin, no_zone, coffin_taken, zone_shared, bedroom, zone_owner,
+  unflagged, unreachable, in_stockpile, undiscovered, no_job; no_body for a ghost without remains); again when the
+  set grows, else weekly. `inspect what=tombs` (care) lists coffins, zones, unburied bodies, ghosts and repair acts.
+- **Doctors (FR-48, care):** at least `care.doctors` (4) living adult civilians with DIAGNOSE/SURGERY/BONE_SETTING
+  (new act `medic`; partial doctors first, then medical skill; never soldiers, moody dwarves, children or patients);
+  hospital posts that are vacant or held by the dead are filled with doctors without another post (new act
+  `hospital_post`).
+- **Hospital water truth (FR-31/33a/34/47, water):** accepted water is a built well with water down its shaft or an
+  active Water Source zone with water >= 4/7 on its own level (`water.zone_below` for a brook bed, off); 1/7 seepage no
+  longer counts. HOSPITAL_DRY (A) replaces DECISION_NEEDED `hospital_water`: a hospital location (or a pending
+  hospital project with no accepted water anywhere) without an accepted source within 30 tiles, at the start of the
+  dry episode, then weekly with patients, else monthly, with a one-line recipe. `patient_thirst` now fires at 30,000
+  (was 40,000) with the recipe ("delete the hospital zone or carry water"), the caregivers with
+  FEED_WATER_CIVILIANS and the buckets. `inspect what=water_sources` (water) scans revealed water >= 4/7 around the
+  hospital (else the citizens), 30 tiles wide and 3 levels up and down, through the new `snapshot.liquids`, and
+  lists per water body an accepted zone or well, a bank the citizens reach, else the shortest dig through revealed
+  natural wall; the first HOSPITAL_DRY waits for that scan (a few frames).
+- **Moods (FR-44, care):** MOOD_RISK (A) when a strange mood's needs are first known and any is missing (the
+  classes), and when the moody dwarf passes thirst 30,000 or hunger 50,000 (every 2 days). Decision: the mood job is
+  never cancelled; DF's UI has no cancel for it, act has no job removal, and a removed job crashed DF in Run 9.
+- **Contract:** events GHOSTS (care), HOSPITAL_DRY (water), MOOD_RISK (care), all class A; verb `tombs.repair`;
+  `inspect what=tombs|water_sources` routed by kern (and k_mock) to `care.inspect` / `water.inspect`; acts
+  `tomb_zone`, `medic`, `hospital_post` (care); `snapshot.liquids`; lint lets only `act.medic` and
+  `act.work_detail` write labors. `follow` names a next step for the three new events; RULES §6/§7 list them.
+- **tools/run_release.lua:** the blocks these replace carry a "superseded by kernel" note (kept, not deleted).
+- **Tests:** tests/lua/test_care_fr.lua, test_water_fr.lua, care_fr_scenario.lua (real kernel), tests/test_care_fr_files.py.
+- **Live checks:** `entomb --unit <id> --haul-now` keeps an assigned tomb and posts PlaceItemInTomb jobs; `entomb` is
+  not armok-tagged (kern.log would say "armok commands removed"); setOwner on a dead unit's tomb zone; a Water Source
+  zone on a brook top (zone_below); hospital posts and `unit.occupations`; labormanager in monitor mode keeps the
+  doctor labors.
+
 ## Rename (2026-10-15): df-llm-helper -> dfpilot
 - Project renamed back to **dfpilot**; Python package `df_llm_helper` -> `dfpilot` (`python -m dfpilot ...`), the
   PreToolUse hook runs `python -m dfpilot.hook`.
