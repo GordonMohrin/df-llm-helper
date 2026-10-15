@@ -24,3 +24,6 @@ Take the doors from the BFS route of `inspect what=entrances` (first door buildi
 only from the manifest; list openings without a door in the LOCKDOWN text.
 
 Related: BUG-011, FR-52, FR-54
+
+## Retest 677bc3e (15:12)
+After building a Door at the north opening (61,55,117) and `perimeter.record`, the arrival lockdown says `doors 1 forbidden (1 entr...`, probe `doors_forbidden=1/63`, `LOCKDOWN_END ... 1 doors opened`. So the reflex works on the recorded perimeter piece. Still open: the fort's other two openings (shaft head 55,62,117 stair_updown, east stair 75,70,117) have no door and the existing Door at (74,70,117) is not recognised as the east entrance door (`inspect entrances`: `state no door`).

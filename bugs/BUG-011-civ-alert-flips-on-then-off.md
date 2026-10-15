@@ -28,3 +28,6 @@ One owner for the civil alert state during a lockdown: reflex asks, siege/seal d
 holds; when no burrow passes, say `alert: none (REFUGE_FAIL)` in the LOCKDOWN text. Fix BUG-001 first.
 
 Related: BUG-001, FR-37, FR-57, FR-52
+
+## Retest 677bc3e (15:02-15:15)
+With the BUG-001 fix the refuge audit passes (Kern+ drink 1031, food 912) and `civ_alert` stays 1 for the whole lockdown (probe 170 s), no flip-flop in commands.log. The flip-flop was therefore caused by BUG-001. New problem behind it: BUG-013 (lever pulls blocked by the alert).

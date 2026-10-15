@@ -1,5 +1,5 @@
 # BUG-002 `perimeter` has no pieces on a fort without a manifest, PERIMETER_BROKEN cannot fire
-Status: fixed in 017411c (FR-60, offline, live-untested)
+Status: fixed in 017411c (FR-60, offline, live-untested). Live (677bc3e): PARTLY. `perimeter.record` records the pieces that lie on the entrance routes (a door built at 61,55,117 -> 1 piece, state closed); with no door/wall on any route it stays 0 pieces / 3 open. A deconstructed door is retired silently (no false alarm); PERIMETER_BROKEN for a smashed door not tested.
 Severity: high (a destroyed perimeter wall goes unnoticed; Run 9 lost the shaft-head wall in a siege and the fort stayed open for two more sieges)
 Found: 2026-10-15, Run 9 save autosave 1, dfpilot main 3edc277
 Module: `lua/dfllm/seal.lua` (perimeter index and diff, FR-56)

@@ -33,6 +33,8 @@ Related: FR-xx, BUG-xx
 | [BUG-010](BUG-010-legacy-autolabor-enabled.md) | fixed in 1d9b6a9 (offline, live-untested) | high | `autolabor` runs in legacy mode after map load, the engine that crashed DF in Run 9 | lua/dfllm/baseline.lua:158 |
 | [BUG-011](BUG-011-civ-alert-flips-on-then-off.md) | open | high | the arrival lockdown switches the civil alert on, the siege module switches it off 12 ticks later | lua/dfllm/reflex.lua, siege.lua |
 | [BUG-012](BUG-012-entrance-door-not-recognised.md) | open | high | the arrival lockdown forbids 0 doors ("0 entrances") although the fort has an entrance door | lua/dfllm/reflex.lua, seal.lua |
+| [BUG-013](BUG-013-lever-pulls-blocked-by-civil-alert.md) | open | high | the civil alert confines everybody to Kern+, lever pulls for the bridges are never done (1-3 of 4 bridges up) | lua/dfllm/reflex.lua |
+| [BUG-014](BUG-014-autolabor-legacy-false-failure.md) | open | low | AUTOLABOR_LEGACY says "mode monitor failed, still legacy" although the mode was switched | lua/dfllm/baseline.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
