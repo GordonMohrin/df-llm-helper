@@ -2,7 +2,7 @@
 
 ## Run 9 alarm-to-action (2026-10-15): wake at once, clock governor, arrival lockdown, interrupt channel
 Run 9 (14.10.2026): an army with two cave dragons walked in over lowered drawbridges; 39 of 48 citizens died within
-76 s of real time at ~400 ticks/s. Offline (k_mock, luahost, pytest); live-untested.
+76 s of real time at ~400 ticks/s. Commit 22ccd1c; offline (k_mock, luahost, pytest), live-untested. FR status: docs/feature-requests/README.md.
 - **Wake at once:** `SIEGE_START` and `INVASION` are class A. `follow` puts them right after BREACH and wakes at once
   (no merge wait, no hourly limit, one per type per 60 s) on BREACH, SIEGE_START, INVASION, LOCKDOWN and every
   interrupt.
