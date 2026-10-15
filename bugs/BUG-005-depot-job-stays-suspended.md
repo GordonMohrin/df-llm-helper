@@ -1,5 +1,5 @@
 # BUG-005 the trade depot construction job is resumed every day and stays suspended, DEPOT_MISSING says "being built" for ever
-Status: open
+Status: fixed in 9b9dcdc (offline, live-untested)
 Severity: high (every caravan is lost: Catten and Muboomon came at least four times in this session and left without trading)
 Found: 2026-10-15, Run 9 save autosave 1, dfpilot main 3edc277
 Module: `lua/dfllm/economy.lua` (depot keeper, FR-43; job release FR-16)
@@ -30,3 +30,18 @@ Log the last cancellation reason of the job (announcement text for "Construct Bu
 N repeats place the depot elsewhere (inside the entrance, off the army route) or raise a class A event with the reason.
 
 Related: FR-43, BUG-004, BUG-009 (the same re-suspension hits every construction job, reproduced with workshops placed by hand)
+
+## Fix (9b9dcdc, offline; the main cause is BUG-009)
+- The depot's footprint is cleared like every other site (BUG-009).
+- Resumes are counted per job (`p.jres`: resumes, resumes that did not hold, the cancel reason from CANCEL_JOB
+  reports at the site). After `jobs.fail_alarm` (3) failed resumes DECISION_NEEDED `build_blocked` (A) names the job,
+  its position and the reason (repeat rule of BUG-008).
+- After `jobs.depot_move_after` (5) failed resumes, in PEACE and without a fortcore manifest depot, the depot moves
+  inside the entrance, off the army route: a 5x5 inside a 7x7 of revealed roofed floor within 12 tiles of an entrance
+  (seal.entrances, its level and 2 below), at least 3 tiles from every entrance and the manifest approach, reachable,
+  no items on it; `runner.depot_move` cancels the stuck depot (project undo, else quickfort undo of the planned
+  building) and queues the new one. At most every 28 days; `inspect workload` `construction.depot_move`.
+- DEPOT_MISSING says "being built" only while the planned depot progresses (job running with a builder, or stage > 0);
+  else "the planned one at x,y,z does not progress: <reason>, N resumes failed" (`stalled: 1`, `why`).
+- Live check: a caravan without a built depot: DEPOT_MISSING text; the depot site cleared and built; on a blocked site
+  the move after 5 failed days.

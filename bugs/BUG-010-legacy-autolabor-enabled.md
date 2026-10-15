@@ -1,5 +1,5 @@
 # BUG-010 `autolabor` runs in legacy mode after map load, the engine that crashed DF in Run 9
-Status: open
+Status: fixed in 1d9b6a9 (offline, live-untested)
 Severity: high (risk of a DF crash; the two crash logs of 14.10. 10:41 and 10:47 name autolabor_plug)
 Found: 2026-10-15, Run 9 save autosave 1, dfpilot main 3edc277
 Module: `lua/dfllm/baseline.lua:158-165` (engine choice), `config/allowlist.json:7` (only `mode monitor|modern` allowed)
@@ -24,3 +24,11 @@ At boot and after every load: if `autolabor` is enabled and the mode is `legacy`
 anything else, and do it outside the demotable baseline module; raise a class A event when the legacy engine is found running.
 
 Related: BUG-007, FR-16
+
+## Fix (1d9b6a9, offline)
+`baseline.legacy_guard` reads the engine (`autolabor status`, else `labormanager mode`; the "mode: X" field first) and,
+enabled in legacy mode, runs `autolabor mode monitor` (allowlisted) and raises AUTOLABOR_LEGACY (A, new; `fixed`,
+`after`). It runs in baseline's init, a boot step before the demotable queue (so also after every load), as the first
+task of every full apply, and when economy's daily `labormanager mode` read names legacy. kern.lua is unchanged.
+Live check: load a save with autolabor legacy enabled: `dfhack-run autolabor` says mode monitor right after the boot,
+`commands.log` has `autolabor mode monitor` from baseline, `events` AUTOLABOR_LEGACY fixed=1.

@@ -1,5 +1,5 @@
 # BUG-003 `inspect tombs` shows stale numbers after burials succeeded
-Status: open
+Status: fixed in 7006350 (offline, live-untested)
 Severity: medium (the operator thinks nothing happens and starts hand work)
 Found: 2026-10-15, Run 9 save autosave 1, dfpilot main 3edc277
 Module: `lua/dfllm/care.lua` (tomb phase index, `acts`, `inspect tombs`)
@@ -28,3 +28,13 @@ Publish the acts of the run that ran `entomb` (count the ok result), rebuild the
 frame batch, and count a body as buried when its item is `in_building` of a coffin.
 
 Related: FR-45, FR-41, FR-26
+
+## Fix (7006350, offline)
+- A dead citizen with remains inside a coffin (`in_building`, holder in the COFFIN vector) counts as buried; loose parts of
+  the same body elsewhere no longer keep it unburied (`buried_loose` in the inspect data).
+- The tomb index is published by the run that acted (end of the tomb phase, not the end of the care run), and
+  `inspect tombs` carries `last` = the acts of the last run that changed anything (tick, assigned, entombed, freed, ...),
+  also in the message (`last acts tick N: assigned 3, entomb 3, ...`).
+- An index older than one care period (1,200 ticks) is rebuilt for the inspect, read-only (`fresh: 1`, `run_tick`).
+- Live check: after `entomb` ran, `inspect tombs` shows `last.entombed > 0`; a body in a coffin leaves `unburied`;
+  `fresh: 1` while care lags (doctor shows care slow).
