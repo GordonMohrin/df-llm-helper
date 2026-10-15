@@ -137,7 +137,7 @@ def test_decision_d14_peace_gates(tmp_path):
     p.write_text("D-14: open\n", encoding="utf-8")
     assert fairplay.decision_errors(p) and fairplay.get_decision("D-14", p) == "down"
     shipped = fairplay.parse_decision_lines((fairplay.REPO / "config" / "decisions.yaml").read_text(encoding="utf-8"))
-    assert shipped["D-14"][0] == "down" and shipped["D-14"][1].startswith("default")
+    assert shipped["D-14"][0] == "down" and shipped["D-14"][1].startswith("answered 2026-10-15 by Gordon")
 
 
 def test_reflex_config_validation(tmp_path):

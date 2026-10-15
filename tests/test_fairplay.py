@@ -16,10 +16,10 @@ import luahost  # noqa: E402
 
 
 # ---------------------------------------------------------------- decisions
-def test_decisions_file_holds_the_design_defaults_all_open():
+def test_decisions_file_holds_the_design_defaults_and_gordons_answers():
     assert F.load_decisions() == S.DECISIONS
     assert S.parse_decisions(F.DECISIONS_PATH.read_text(encoding="utf-8")) == S.DECISIONS
-    assert F.pending() == list(S.DECISIONS)                      # nothing answered yet
+    assert F.pending() == [d for d in S.DECISIONS if d != "D-14"]   # D-14 answered by Gordon 2026-10-15 (= default)
     assert F.decision_errors() == []
     assert F.get_decision("D-12") == "15/20" and F.decisions.get("D-01") == "A"
     assert F.decisions.all() == S.DECISIONS
