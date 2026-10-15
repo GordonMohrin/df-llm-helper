@@ -1,5 +1,5 @@
 # BUG-016 two caravans were lost because a unit sheet stayed open in the game window: trade waits for ever on `ui_busy`
-Status: open
+Status: fixed (hauling + silent loss) in the commit after 733020b, live 2026-10-15 20:05 reloaded; the demotion/low-tempo timeout suspicion is open
 Severity: medium (every trade of the year is lost silently; 100 sale items are hauled to the depot again every 12 s meanwhile)
 Found: 2026-10-15 17:20-17:50, test fort (copy of autosave 3, y373), dfpilot main 95fe16d, Claude playing
 Module: `lua/dfllm/trade.lua:897-914` (`ui_busy`), `trade.lua:1210` (PHASE_MS), arbiter popup handling
@@ -41,3 +41,13 @@ Muboomon on 19:00 brought one human and a yak without goods (`nothing_listed`, n
 For the empty Muboomon caravans (one human, one yak, `nothing_listed`) the trade module still sent 100 sale items to the depot: 99 `BringItemToDepot` jobs stayed open for the whole visit
 (`inspect workload`: unclaimed `BringItemToDepot 99-174`, `PlantSeeds 94`, 21 of 34 adults without a job at the instant of the sample but walking between hauling jobs). Food fell from 584 to 173 days in the same period.
 Fix proposal: send sale items only after the merchants' goods are listed (`goods_items > 0`), and queue them behind farming/food jobs (priority) or in batches.
+
+## Fix (Claude, 2026-10-15 20:00, `lua/dfllm/trade.lua`, tests in `tests/lua/test_trade.lua`)
+- **Sale items once per visit.** `step_wait` sends the batch only while `v.brought` (the persisted visit record, new key in `VISIT_KEYS`) is 0. A retry rebuilds `rt.f`
+  and used to lose the old flag, so every retry marked another 100 items (25 repeats, 99 open `BringItemToDepot` jobs). Test: `BUG-016: a retry does not haul the sale items again`.
+- **No goods, no hauling.** New `merchant_goods(d, c)` = `#caravan.goods` plus the trader-flagged items in the depot. Nothing is sent while it is 0; after `NOGOODS_WAIT` (1200 ticks at the depot) the visit ends
+  `nothing_listed` and a log line says so. Test: `BUG-016: a caravan without goods ends nothing_listed and no sale item is hauled`. The batch size is its own constant `BRING_MAX` (was the reused `ITEMS`).
+- **Blocked visits are no longer silent.** On `ui_busy` the module emits one `CARAVAN` event per visit with `phase=blocked`, `why=ui_busy` and the focus string
+  (`trade with X blocked: a player screen is open (dwarfmode/ViewSheets/UNIT/Overview); close it`), persisted as `v.blocked`. The module still never touches a player screen.
+- Not changed: the low-tempo `ui_timeout` suspicion (second failure) is unverified.
+

@@ -1,5 +1,12 @@
 # CHANGELOG dfpilot
 
+## Trade: sale goods once per visit, none for empty caravans, blocked visits are reported, BUG-016 (2026-10-15)
+- **Sale items are marked for the depot once per visit** (`v.brought` in the visit record) instead of once per attempt: each `ui_busy`/`ui_timeout` retry
+  used to mark another 100 items, which kept ~100 `BringItemToDepot` jobs open and starved planting.
+- **A caravan without goods** (`#caravan.goods` and the depot's trader items both 0 for `NOGOODS_WAIT` = 1200 ticks) ends the visit `nothing_listed` and no hauler is sent.
+- **`CARAVAN` event `phase=blocked`** (once per visit, with the focus string) when a player screen keeps the trade from starting; the screen itself is still never touched.
+- Tests: three new cases in `tests/lua/test_trade.lua` (retry, empty caravan, blocked event); `trade_world` counts `bring` calls.
+
 ## Lever pulls under the civ alert, BUG-013/BUG-014 (2026-10-15; commits 055c92f, 413f614, offline, live-untested)
 - **BUG-013:** while a pull is pending on levers outside the alert's burrow, the alert lists seal's lever burrow
   `Hebel+` (the linked lever tiles; a confined civilian takes only jobs inside its burrows but walks outside them), not

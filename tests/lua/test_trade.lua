@@ -276,6 +276,33 @@ T.test('flow: a merchant who never agrees -> one retry, then failed, toggles res
   T.eq(U.offers, offers)                       -- no third attempt this visit
 end)
 
+T.test('BUG-016: a retry does not haul the sale items again (once per visit)', function()
+  local W, M, d, c, U = setup{ui = {accept = 50}, plan = {v = 2, year = 3, phase_target = 'P4',
+    seasons = {{build = {}}, {build = {}}, {build = {}}, {build = {}}},
+    policy = {option = 'A', pop_ceiling = 55, beauty = 'used_rooms'}, trade = {want = {'bar:iron', 'anvil', 'cloth'}, sell = {'crafts'}}}}
+  W.frame(1)
+  to_depot(W, d, c)
+  T.ok(F.until_(W, function() return #F.events(W, 'retry') > 0 end, 1500), 'retry')
+  T.eq(U.brought_n, 1, 'sent once before the first attempt')
+  W.run(1300, {skip = 9})                      -- RETRY_WAIT
+  T.ok(F.until_(W, function() return #F.events(W, 'failed') > 0 end, 2000), 'failed')
+  T.eq(U.brought_n, 1, 'the retry did not send another batch')
+end)
+
+T.test('BUG-016: a caravan without goods ends nothing_listed and no sale item is hauled', function()
+  local W, M, d, c, U = setup{goods = {}, plan = {v = 2, year = 3, phase_target = 'P4',
+    seasons = {{build = {}}, {build = {}}, {build = {}}, {build = {}}},
+    policy = {option = 'A', pop_ceiling = 55, beauty = 'used_rooms'}, trade = {want = {'bar:iron'}, sell = {'crafts'}}}}
+  W.frame(1)
+  to_depot(W, d, c, {ticks = 400})
+  T.eq(U.brought, nil, 'nothing sent while the merchants may still unload')
+  W.run(1400, {skip = 9})                      -- NOGOODS_WAIT
+  T.ok(F.until_(W, function() return #F.events(W, 'failed') > 0 end, 600), 'failed')
+  T.eq(F.events(W, 'failed')[1].d.why, 'nothing_listed')
+  T.eq(U.brought, nil, 'no hauler was sent for a caravan without goods')
+  T.eq(traded(W), false)
+end)
+
 T.test('flow: merchants still unloading -> close, wait, reopen', function()
   local W, M, d, c, U = setup{ui = {unloading = 1}}
   W.frame(1)
@@ -374,7 +401,11 @@ T.test('flow: the player has a screen open -> never touched, no try used', funct
     for _, l in ipairs(W.logs) do if l.msg:find('player screen is open', 1, true) then return true end end
   end
   T.ok(F.until_(W, busy_logged, 1500), 'busy logged')
-  T.eq(#F.events(W, 'retry'), 0)               -- logged only, no CARAVAN event spam
+  T.eq(#F.events(W, 'retry'), 0)               -- logged only, no CARAVAN retry spam
+  T.eq(#F.events(W, 'blocked'), 1, 'BUG-016: one CARAVAN blocked event per visit')
+  T.eq(F.events(W, 'blocked')[1].d.focus, 'dwarfmode/Stocks/Default')
+  W.run(900, {skip = 9})
+  T.eq(#F.events(W, 'blocked'), 1, 'not repeated')
   T.eq(count(U.calls, 'open'), 0)
   T.eq(json.decode(W.persist_raw['dfllm.m.trade']).visits['7'].tries, 0)
   W.focus = {'dwarfmode/Default'}

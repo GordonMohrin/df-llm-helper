@@ -66,6 +66,8 @@ M.CFG = {
   WORKER_WAIT = 600,    -- ticks a posted job may wait for a taker before it goes to an idle broker
   JOB_RETRY = 600,      -- ticks between two broker_job calls of one kind
   UNLOAD_WAIT = 600, UNLOAD_MAX = 10,
+  NOGOODS_WAIT = 1200,  -- ticks at the depot without any merchant goods (caravan.goods and the depot's trader items): the visit ends, nothing is hauled
+  BRING_MAX = 100,      -- sale items marked for the depot per visit (BUG-016; was the reused ITEMS)
   RETRY_WAIT = 1200, MAX_TRIES = 2,
   STUCK_APPROACH = 4800,-- ticks Approaching without reaching the depot -> fix/stuck-merchants
   STUCK_STATE = 1200,   -- ticks in trade_state Stuck -> fix/stuck-merchants
@@ -400,7 +402,7 @@ end
 
 ---------------------------------------------------------------- DF reads (read-only)
 local st      -- persisted m.trade: {v, done, ratio, visits={<entity>={first, at, tries, traded, stuck, set,
-              --   orig_r, orig_a, retry, ratio, stuck_since}}, ov={want, sell, loaded}|nil}
+              --   orig_r, orig_a, retry, ratio, stuck_since, nodepot, brought, blocked}}, ov={want, sell, loaded}|nil}
 local rt      -- runtime: {phase, ent, f (flow of the current visit), job (sliced reader), civ, o1}
 local pub     -- precomputed state part
 local dirty
@@ -543,6 +545,20 @@ local function depot_goods(d, mer)
     end
   end)
   return n, v
+end
+
+-- BUG-016: merchant goods of the visit: the caravan's own goods list and the trader-flagged items already unloaded
+-- in the depot; 0 = the merchants brought nothing to sell (live: one human and a yak, `nothing_listed`)
+local function merchant_goods(d, c)
+  local n = 0
+  pcall(function() n = #c.ref.goods end)
+  pcall(function()
+    local list = d.contained_items
+    for i = 0, math.min(#list, M.CFG.DEPOT_ITEMS) - 1 do
+      if list[i].item.flags.trader then n = n + 1 end
+    end
+  end)
+  return n
 end
 
 -- KILL_ANIMAL / KILL_PLANT ethics of the caravan civ (common.lua:303-331)
@@ -898,7 +914,16 @@ local function finish(K, ok, why, ratio)
   local missing = f and f.missing
   local retry = v and RETRYABLE[why] and v.tries < M.CFG.MAX_TRIES and not missing
   if missing then K.log('warn', 'trade: act.trade is not implemented; this caravan is left to the player') end
-  if why == 'ui_busy' then K.log('info', 'trade: a player screen is open; trying again later')
+  if why == 'ui_busy' then
+    K.log('info', 'trade: a player screen is open; trying again later')
+    -- BUG-016: the visit used to be lost silently to a forgotten unit sheet; say which screen blocks, once per visit
+    if v and (v.blocked or 0) == 0 then
+      v.blocked, dirty = 1, true
+      local fc = 'unknown'
+      pcall(function() fc = table.concat(dfhack.gui.getCurFocus(true), '|') end)
+      caravan_ev(K, 'blocked', ent, {why = why, focus = fc},
+                 'trade with ' .. civ_name(ent) .. ' blocked: a player screen is open (' .. fc .. '); close it')
+    end
   else
     caravan_ev(K, retry and 'retry' or 'failed', ent, {why = why},
                'trade with ' .. civ_name(ent) .. (retry and ' retries: ' or ' failed: ') .. tostring(why))
@@ -1120,22 +1145,28 @@ local function step_wait(K, cars, now)
     if not f.no_depot then f.no_depot = true; K.log('warn', 'trade: caravan %s but no built trade depot', civ_name(c.ent)) end
     return
   end
-  -- the sale goods go to the depot (once per visit), whatever stockpile holds them
-  if not f.brought then
-    f.brought = true
-    local _, sell = wants(K)
-    local types, seen = {}, {}
-    for _, tk in ipairs(sell) do
-      for tn in pairs(tk.types) do if not seen[tn] then seen[tn] = true; types[#types + 1] = tn end end
-    end
-    table.sort(types)
-    if #types > 0 then
-      local ok, n = act_trade(K, 'bring', {depot = d.id, types = types, max = M.CFG.ITEMS})
-      K.log('info', 'trade: %s sale items sent to the depot', ok and tostring(n) or ('no (' .. tostring(n) .. ')'))
+  -- BUG-016: the sale goods go to the depot once per VISIT (the flag lives in the visit record, a retry rebuilds
+  -- rt.f) and only when the merchants brought something: a caravan without goods ends the visit before a hauler walks
+  local at_for = v.at >= 0 and now - v.at or 0
+  if not f.brought and (v.brought or 0) == 0 then
+    if merchant_goods(d, c) > 0 then
+      f.brought, v.brought, dirty = true, 1, true
+      local _, sell = wants(K)
+      local types, seen = {}, {}
+      for _, tk in ipairs(sell) do
+        for tn in pairs(tk.types) do if not seen[tn] then seen[tn] = true; types[#types + 1] = tn end end
+      end
+      table.sort(types)
+      if #types > 0 then
+        local ok, n = act_trade(K, 'bring', {depot = d.id, types = types, max = M.CFG.BRING_MAX})
+        K.log('info', 'trade: %s sale items sent to the depot', ok and tostring(n) or ('no (' .. tostring(n) .. ')'))
+      end
+    elseif at_for >= M.CFG.NOGOODS_WAIT then
+      K.log('info', 'trade: the merchants of %s brought nothing to sell; no sale items are hauled', civ_name(rt.ent))
+      return finish(K, false, 'nothing_listed')
     end
   end
   -- depot sheet toggles "Broker requested at depot" / "Anyone can Trade"
-  local at_for = v.at >= 0 and now - v.at or 0
   local anyone = not has_broker() or at_for >= M.CFG.BROKER_WAIT
   if not f.req or (anyone and not f.anyone) then
     local ok, old = act_trade(K, 'request_broker', {depot = d.id, requested = true, anyone = anyone or nil})
@@ -1358,7 +1389,7 @@ end
 
 ---------------------------------------------------------------- module
 local VISIT_KEYS = {'first', 'at', 'tries', 'traded', 'stuck', 'set', 'orig_r', 'orig_a', 'retry', 'ratio',
-                    'stuck_since', 'nodepot'}
+                    'stuck_since', 'nodepot', 'brought', 'blocked'}
 local NEG_DEFAULT = {at = true, retry = true, stuck_since = true}
 
 function M.init(K)
