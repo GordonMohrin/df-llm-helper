@@ -27,6 +27,14 @@ Gordon answers each decision once. The answer goes into `config/decisions.yaml` 
 | D-13 | Automatic beauty pause at high wealth | `no`, `yes` | `no` | runner | yes: beauty projects pause above a wealth threshold (to be defined); without it, wealth is only logged with every threat event |
 | D-14 | `peace_gates`: state of the gate bridges in PEACE (FR-49/55) | `down`, `up` | `down` | gate, siege | up: in PEACE the manifest outer/inner bridges stay up, and so do the lever-linked bridges a lockdown raised; they open only for a window (a caravan on the map, migrants arriving, an inbox `lever` down for that bridge), each while no hostile is visible, and close 600 ticks after it; RECOVERY lowers only the core seal |
 
+### Answered by Gordon (2026-10-15, chat)
+- **D-14 `down`:** "Brücken im Frieden sollen natürlich unten sein, damit die Zwerge die ganze Zeit diese Shortcuts
+  runterlaufen können." The shortcut bridges over the trap corridor stay down in PEACE; the arrival reflex raises them.
+- **Reflex triggers (`config/reflex.json`):** a lone thief or a repeated "An ambush!" popup triggering a full lockdown
+  is wanted ("einzelne Diebe machst du richtig").
+- **Hospital water (`water.zone_below`):** a Water Source zone above water one level down (a brook bed) stays not
+  counted until a live test shows that the game accepts it.
+
 ### D-14 peace_gates: why the default is `down`
 Run 9 (14.10.2026) lost 39 of 48 citizens to an army that walked in over four lowered bridges, and FR-49/55 ask for
 gates that are closed in PEACE. The default stays `down` (the PEACE row of the DESIGN §3 mode table, "unchanged" like
