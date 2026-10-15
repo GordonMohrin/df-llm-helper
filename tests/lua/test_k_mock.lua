@@ -312,7 +312,7 @@ end)
 
 T.test('demotion via simulated cost', function()
   local W = kmock.new{}
-  local m = W.load(counter('economy', {ticks = 10}))
+  local m = W.load(counter('economy', {ticks = 10}, {share = 1000}))   -- not paced: demotion only
   W.cost.economy = 7
   W.run(40)
   T.eq(#W.find_events('KERNEL_SLOW'), 1)

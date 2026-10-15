@@ -1,5 +1,5 @@
-"""FR-22/24/33/37/54/56/57: the files the real kernel writes with seal.lua validate against dfpilot.schema, and
-Python shows them (status line, inspect replies).
+"""FR-22/24/33/37/54/56/57, FR-59/60: the files the real kernel writes with seal.lua validate against dfpilot.schema,
+and Python shows them (status line, inspect replies, the verb perimeter.record).
 
 tests/lua/seal_scenario.lua boots lua/dfllm/kern.lua (real act.lua: burrows screen paint) on the seal_world map
 and drives REFUGE_FAIL + the interior burrow, SEAL/SEAL_LEAK after a lever pull, PERIMETER_BROKEN after a siege,
@@ -51,6 +51,9 @@ def test_contract_names():
     for what in ("reach", "entrances", "defense", "perimeter", "refuge"):
         assert schema.validate_args("inspect", {"what": what}) == []
     assert schema.validate_args("inspect", {"what": "nope"}) != []
+    assert schema.VERBS["perimeter.record"] == ("seal", None, False)          # FR-60
+    assert schema.validate_args("perimeter.record", {}) == []
+    assert schema.validate_args("perimeter.record", {"all": True}) != []
     assert schema.validate("event", {"n": 1, "tick": 5, "type": "CUTOFF", "cls": "A", "msg": "x",
                                      "d": {"cls": "food", "n": 3, "pos": [1, 2, 3], "why": "wall"}}) == []
 
@@ -90,6 +93,7 @@ def test_class_a_events(run):
 def test_inspect_replies(run):
     r = reply(run, "i1")
     assert r["ok"] and r["data"]["cut"] == {"food": 0, "drink": 0, "bed": 0} and r["data"]["flags"] == []
+    assert r["data"]["classes"]["drink"]["n"] == 30          # FR-59: 10 on the floor + 20 in a barrel
     r = reply(run, "i2")
     assert r["ok"] and r["msg"].startswith("LEAK at 20,25,9 (Bridge down)") and r["data"]["routes"] == 1
     r = reply(run, "i3")
@@ -121,3 +125,15 @@ def test_status_prints_the_alert_burrow(run):
     assert st["alert"]["want"] == "Kern+" and st["alert"]["burrow"] == "Innen+" and st["alert"]["ok"] == 0
     out = brief.status_text(run)
     assert f"alert Innen+ {st['alert']['tiles']}t" in out and "(Kern+ refused: Kern+:" in out
+
+
+@needs_lua
+def test_perimeter_record_verb(run):
+    """FR-60: perimeter.record goes through the inbox (seal's verb), the next entrance check serves it and
+    inspect perimeter shows the result."""
+    r = reply(run, "i8")
+    assert r["ok"] and r["verb"] == "perimeter.record" and r["data"]["queued"] == 1
+    p = reply(run, "i9")
+    assert p["ok"] and p["data"]["queued"] == 0
+    rec = p["data"]["rec"]
+    assert rec["n"] == p["data"]["n"] and rec["added"] >= 0

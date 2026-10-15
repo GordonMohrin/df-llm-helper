@@ -94,6 +94,8 @@ local M = {
   every = {ticks = 25},                  -- or {ms = 500}; may be reassigned at runtime (read each frame)
   critical = true,                       -- optional: never demoted (sense, threat, siege, gate, arbiter)
   reports = {CARAVAN_ARRIVAL = true},    -- optional REPORT filter (df.announcement_type names)
+  share = 3,                             -- optional: pacing share in ms per real second (§3.3.8)
+  scale = true,                          -- optional: stretch the cadence with the fort-size load (§3.3.8)
 }
 function M.init(K) end                   -- once per boot, after persist/plan/cfg are loaded
 function M.step(K, budget_ms, ctx) end   -- return 'more' to get another slice next frame
@@ -104,7 +106,7 @@ function M.state(K) return {bridges = {...}} end   -- partial state doc, see §9
 function M.want(K, bridge, want, why) end          -- public API: first arg is always K
 return M
 ```
-- `ctx = {dt = <ticks since this module's previous step start; 0 on the first run and on continuation slices>, dt_ms = <same in ms>, cont = <true on a 'more' continuation>, slice = <n-th slice of this run, 1-based>}`.
+- `ctx = {dt = <ticks since this module's previous step start; 0 on the first run and on continuation slices>, dt_ms = <same in ms>, cont = <true on a 'more' continuation>, slice = <n-th slice of this run, 1-based>, load = <fort-size load factor >= 1, §3.3.8>}`.
 - `budget_ms` is advisory (2 for normal, 1 for critical modules). Slice by work units (≤2,000 tiles, ≤200 items, ≤50 units per slice), not by measuring time.
 - `state(K)` must be O(1)-cheap (return precomputed values) and only contain keys the module owns (§9.3).
 
@@ -122,8 +124,9 @@ return M
 6. **Demotion.** Per-call cost is measured with the **cost clock** (§1.2, `os.clock()`), never with `getTickCount`. A step, handler or verb call above 5 ms is a *slow call*. **3 slow calls within 10 min** (real time; older ones expire):
    - non-critical module: `factor *= 2` (max 8), `KERNEL_SLOW` (B), the count restarts;
    - critical module: cadence kept, `KERN_FAULT` (A, `err:'slow'`) at most once per 10 min per module.
-   - **promotion:** a demoted module without a slow call for 10 min gets `factor //= 2` (logged; `k.slow` lists only modules with factor > 1).
-7. Budget: total kernel time ≤ 25 ms per real second, summed from cost-clock measurements over a 10 s window, cross-checked with `dfhack.internal.getPerfCounters()` (script-manager.lua:293).
+   - **promotion:** a demoted module gets `factor //= 2` after 10 min of quiet *running* time (frames in which it could run: ticks advancing, or any frame for an ms module) with at least 3 quiet steps (logged; `k.slow` lists only modules with factor > 1). **Hysteresis (FR-62):** a demotion within 1 h of a promotion doubles the quiet time the next promotion needs (at most 16x); `KERNEL_SLOW` is emitted once per module per 6 h, later demotions are only logged.
+7. Budget: total kernel time ≤ 25 ms per real second, summed from cost-clock measurements over a 10 s window, cross-checked with `dfhack.internal.getPerfCounters()` (script-manager.lua:293). The selftest `budget` check (FR-62) uses the last minute and the budget for the fort size, `25 + 6 * (units / 150 - 1)` ms/s (at least 25, at most 40; critical modules scan every unit), and names the top cost owners when it fails.
+8. **Pacing and load (FR-62, `util/sched.lua`, shared with k_mock).** Every call's cost is booked to its module (a module's own persist keys too); kern's own housekeeping is booked as `k.state`, `k.io`, `k.persist`, `k.inbox`, `k.events`, the rest as `kern`. A non-critical module spends at most its `share` (ms per real second; default 2, seal 4, economy 3, runner 4, snapshot 6, trade 3) on average: while its debt exceeds one second of share, its due runs and `'more'` slices wait. In PEACE the shares of the modules that had to wait in the last 10 s are scaled down together when they exceed what the 25 ms/s budget leaves after the unpaced cost (at least 4 ms/s; a share keeps at least half); outside PEACE shares are 4x and unscaled. `K.load()` = `{units, items, f}` with `f = max(1, units / 150, items / 6000)`; the cadence of economy and care (or a module with `scale = true`) is multiplied by `min(f, 3)`. Critical modules are never paced or stretched.
 
 ### 3.4 Modules, owners, cadences
 | Module | WP | critical | default `every` | Purpose |
@@ -179,6 +182,7 @@ Kernel files that are not modules: `kern.lua, io.lua, persist.lua, act.lua` (WP1
 | `K.manifest()` | `-> table` | `K.persist.get('manifest')` or an empty manifest skeleton (never nil) |
 | `K.flush()` | | compose and write state at the end of this frame |
 | `K.enabled(module)` | `-> bool` | module loaded and not backed off (§3.3.5) |
+| `K.load()` | `-> {units, items, f}` | fort size (§3.3.8): visible units (sense's count, −1 unknown), `#world.items.all`, load factor `f` ≥ 1; refreshed every 5 s |
 
 ### 4.1 Event delivery to modules
 - kern registers eventful (`require('plugins.eventful')`, frequency INVASION 10, REPORT 10, UNIT_DEATH 100) on `SC_MAP_LOADED`. Callbacks only enqueue. Queued items are delivered at the start of the next frame:
@@ -542,7 +546,7 @@ Written by Python from `bp.emit` (WP3) **before** the inbox `bp.place` (file id 
 
 ### 9.11 `perf.csv`
 Header (first line of a new file) and one row per 30 s, integers only:
-`wall,tick,mode,tps,pop,units,items,ms_s,gap_max_ms,gaps3,mods` where `ms_s` = kernel ms per second, `gaps3` = frame gaps > 3 s in the window, `mods` = `name=ms;name=ms` (ms summed over the 30 s window, no commas inside).
+`wall,tick,mode,tps,pop,units,items,ms_s,gap_max_ms,gaps3,mods` where `ms_s` = kernel ms per second, `gaps3` = frame gaps > 3 s in the window, `mods` = `name=ms;name=ms` (ms summed over the 30 s window, no commas inside). Names are the cost owners of §3.3.8 (modules, `k.*`, `kern`); `repeat` is DFHack's own counter for the whole `dfllm` repeat-util callback (unpaused frames, `getTickCount` clock), the same time as `ms_s` measured again: a cross-check, not an owner (FR-62).
 ```
 wall,tick,mode,tps,pop,units,items,ms_s,gap_max_ms,gaps3,mods
 1791676800,1333056,PEACE,462,52,180,9120,11,420,0,sense=41;siege=9;runner=120
@@ -748,6 +752,7 @@ Python (`dfllm cmd`, `plan apply`, follow) validates every inbox document with `
 | `ack` | reflex | any | `{n?:int ≥ 0}` (default: the newest interrupt) | `{n, open, defcon}`; the operator saw the interrupts up to `n`; their ack-timeout default no longer applies (FR-53) |
 | `order.add` | economy | any | `{job:str, amount:1-999, item_subtype?:'ITEM_…', material?:str, material_category?:[str], reaction?:str, frequency?:'OneTime'|'Daily'|'Monthly'|'Seasonally'|'Yearly'}`; a make-item job without `item_subtype` is refused (FR-39; `schema.validate_args` refuses it before sending) | `{order}` |
 | `jobs.release` | economy | any (resumes refused in SIEGE/BREACH/DRILL) | `{all?:bool, preventblocking?:bool}`: resumes suspended ConstructBuilding jobs nobody keeps (all = also the ones suspendmanager keeps; buildingplan's never); `preventblocking` sets suspendmanager's option, a persisted fort decision economy applies again after every load (FR-16) | `{resumed, suspended, kept, planned, why}` |
+| `perimeter.record` | seal | any | `{}` (FR-60): the next entrance check (urgent) records the perimeter: every wall, door, gate or bridge around a known opening that is sealed now and, on a sealed fort, the closers on the boundary of the citizens' group (forts without a fortcore manifest); `inspect perimeter` shows the pieces and `rec` | `{queued, n, open}` |
 
 There is no arbitrary Lua.
 
@@ -875,7 +880,7 @@ Each item names the WP that must adapt its code; WP0 changed the contract, `cont
 Generated by `python -m dfpilot.schema --write-appendix docs/v2/CONTRACTS.md`; `tests/test_schema.py` fails if this block is stale. The digest covers every schema and registry in `schema.py`, so any contract change shows up here.
 
 <!-- BEGIN GENERATED SCHEMAS -->
-Contract digest: `5cb8c506c816140237bdafecb9b168225eb4d11c7321d3bcb230f00ba75a408f`
+Contract digest: `9ccfb282a9dabad95f9a312b8633504c1aa5b07b5a5d5de5c43f1d17307ee3fd`
 
 DESIGN §6 formats and the inbox verb args. Other kinds: `python -m dfpilot.schema --json-schema <kind>` with kind in heartbeat, phases, bp, restore, lock, allowlist, persist.marker, persist.projects, persist.plan, persist.phase, persist.mode, persist.drill, persist.kern. Per-type event `d` (§12) and per-verb `args` are checked by `validate()`; the envelopes leave them open. Compact JSON, keys sorted.
 
@@ -891,7 +896,7 @@ DESIGN §6 formats and the inbox verb args. Other kinds: `python -m dfpilot.sche
 
 **inbox**
 ```json
-{"$defs":{"id":{"pattern":"^[A-Za-z0-9_-]{1,40}$","type":"string"}},"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"args":{"additionalProperties":{},"type":"object"},"by":{"enum":["llm","gordon","cli","follow","supervise","test"],"type":"string"},"id":{"$ref":"#/$defs/id"},"ts":{"minimum":0,"type":"integer"},"verb":{"enum":["plan.reload","bp.place","bp.cancel","drill","snapshot","audit","popcap.lower","tempo.lower","pause","unpause","trade.want","squad.sortie","lever","inspect","selftest","module.enable","tombs.repair","ack","order.add","jobs.release"],"type":"string"}},"required":["id","verb","args","by"],"title":"inbox","type":"object"}
+{"$defs":{"id":{"pattern":"^[A-Za-z0-9_-]{1,40}$","type":"string"}},"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"args":{"additionalProperties":{},"type":"object"},"by":{"enum":["llm","gordon","cli","follow","supervise","test"],"type":"string"},"id":{"$ref":"#/$defs/id"},"ts":{"minimum":0,"type":"integer"},"verb":{"enum":["plan.reload","bp.place","bp.cancel","drill","snapshot","audit","popcap.lower","tempo.lower","pause","unpause","trade.want","squad.sortie","lever","inspect","selftest","module.enable","tombs.repair","ack","order.add","jobs.release","perimeter.record"],"type":"string"}},"required":["id","verb","args","by"],"title":"inbox","type":"object"}
 ```
 
 **outbox**
@@ -1012,5 +1017,10 @@ DESIGN §6 formats and the inbox verb args. Other kinds: `python -m dfpilot.sche
 **inbox.args.jobs.release**
 ```json
 {"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"all":{"type":"boolean"},"preventblocking":{"type":"boolean"}},"title":"inbox.args.jobs.release","type":"object"}
+```
+
+**inbox.args.perimeter.record**
+```json
+{"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"title":"inbox.args.perimeter.record","type":"object"}
 ```
 <!-- END GENERATED SCHEMAS -->

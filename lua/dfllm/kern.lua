@@ -2,8 +2,14 @@
 -- One repeat-util frame callback dispatches every module; eventful callbacks only enqueue;
 -- all files are written from here (state a/b, events, heartbeat, outbox, logs). Boot is a no-op
 -- without the site marker, except healing a crashed restore.json (runtime settings, any save).
+-- Cost owners (FR-62): every module call is booked to its module; the kernel's own housekeeping to
+-- k.state (state a/b), k.io (event/log files, heartbeat), k.persist (site data; a module's own keys are
+-- booked to it), k.inbox (inbox without the verb handlers), k.events (eventful queue without the
+-- handlers); the remainder is `kern` (the dispatcher). Pacing, demotion hysteresis and the fort-size
+-- load live in util/sched.lua (shared with k_mock).
 local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
+local sched = require('dfllm.util.sched')
 local fio = require('dfllm.io')
 local persistlib = require('dfllm.persist')
 local actlib = require('dfllm.act')
@@ -13,12 +19,15 @@ M.KEY = 'dfllm'
 M.BY = {llm = true, gordon = true, cli = true, follow = true, supervise = true, test = true}
 M.CAD = {state_ms = 2000, events_ms = 1000, inbox_ms = 500, heartbeat_ms = 5000, persist_ms = 10000,
          inbox_per_frame = 4, slow_ms = 5, fault_window_ms = 600000, eventq_max = 2000, gap_ms = 3000,
-         evbuf_max = 5000, logbuf_max = 2000}   -- lines kept while a file cannot be written
+         evbuf_max = 5000, logbuf_max = 2000,   -- lines kept while a file cannot be written
+         load_ms = 5000,                        -- fort-size load refresh (units from sense, #items.all)
+         persist_big_bytes = 8192, persist_big_ms = 60000}   -- big site-data keys: written at most every 60 s
 local CAD = M.CAD
 local KN = C.KERN               -- fault backoff and slowness numbers (CONTRACTS §3.3.5-3.3.6)
 local SEASON = C.TICKS.SEASON
 local LEVELS = {debug = true, info = true, warn = true, error = true}
 local NO_CHARGE = {init = true, heal = true, ['on.UNLOAD'] = true}
+local NO_EVERY = {}   -- stands in for an `every` that is not a table: such a module never runs (§3.2)
 
 -- cost clock (CONTRACTS §1.2): os.clock() in ms (1 ms steps on lua53.dll, profiler.lua:190);
 -- getTickCount moves in 15.6 ms steps and is used only for cadences. Tests may set M.cost_clock.
@@ -117,7 +126,8 @@ local function build(o)
               last_persist_ms = 0, inbox_pending = {}, inbox_retry = {}, inbox_stuck = {}, once = {},
               buckets = {}, p = {ms = 0, frames = 0, gap_max = 0, gaps3 = 0, unpaused_ms = 0, mods = {}},
               dropped = 0, report_any = false, report_types = {}, ev_listen = {}, kern_faults = 0,
-              rot_warned = {}, io_warned = {}}
+              rot_warned = {}, io_warned = {}, cum = {}, cum_ms = 0, load = sched.load(-1, 0),
+              pool = sched.pool(), frame_paced = 0}
   st.now = {tick = abs_now(), ytick = df.global.cur_year_tick, year = df.global.cur_year,
             season = df.global.cur_year_tick // SEASON, ms = dfhack.getTickCount(), wall = os.time(),
             paused = df.global.pause_state == true, frame = 0}
@@ -203,36 +213,33 @@ local function build(o)
   end
 
   -- slow calls (> 5 ms on the cost clock) decay after 10 min; 3 of them demote a non-critical module
-  -- (factor x2, KERNEL_SLOW) or raise KERN_FAULT 'slow' for a critical one (at most once per 10 min);
-  -- 10 min without a slow call halves the factor again (CONTRACTS §3.3.6)
+  -- (factor x2) or raise KERN_FAULT 'slow' for a critical one (at most once per 10 min). KERNEL_SLOW is
+  -- emitted once per module per 6 h, later demotions are only logged; promotion needs quiet running
+  -- time (frame loop, sched.quiet) that doubles after each flip (CONTRACTS §3.3.6, FR-62)
   local function charge(e, where, ms)
     if NO_CHARGE[where] then return end
-    local t = dfhack.getTickCount()
-    if e.factor > 1 and t - (e.last_slow or t) >= KN.promote_ms then
-      e.factor, e.last_slow = e.factor // 2, t
-      log_as('kern', 'info', e.name .. ' promoted to x' .. e.factor)
-      st.flush_req = true
-    end
-    if ms <= KN.slow_ms then return end
-    e.last_slow = t
-    local keep = {}
-    for _, s in ipairs(e.slow_ms) do if t - s < KN.slow_window_ms then keep[#keep + 1] = s end end
-    keep[#keep + 1] = t
-    e.slow_ms = keep
-    if #keep < KN.slow_n then return end
-    e.slow_ms = {}
+    local act, report = sched.slow(e, ms, dfhack.getTickCount(), where)
+    if not act then return end
     local msr = round(ms)
-    if e.critical then
-      if not e.slow_fault or t - e.slow_fault >= KN.slow_window_ms then
-        e.slow_fault = t
-        emit_as('kern', 'KERN_FAULT', 'A', e.name .. ' slow (' .. msr .. ' ms)', {module = e.name, err = 'slow', n = KN.slow_n})
-      end
-    elseif e.factor < KN.max_factor then
-      e.factor = e.factor * 2
-      emit_as('kern', 'KERNEL_SLOW', 'B', e.name .. ' demoted x' .. e.factor, {module = e.name, ms = msr, factor = e.factor})
-      st.flush_req = true
+    if act == 'fault' then
+      emit_as('kern', 'KERN_FAULT', 'A', e.name .. ' slow (' .. msr .. ' ms)', {module = e.name, err = 'slow', n = KN.slow_n})
+      return
     end
+    if report then
+      emit_as('kern', 'KERNEL_SLOW', 'B', e.name .. ' demoted x' .. e.factor, {module = e.name, ms = msr, factor = e.factor})
+    else
+      log_as('kern', 'info', string.format('%s demoted x%d (%d ms; already reported; promotion after %d quiet min)',
+                                           e.name, e.factor, msr, sched.quiet_need(e) // 60000))
+    end
+    st.flush_req = true
   end
+
+  -- cost per owner: the perf window (perf.csv) and the cumulative totals (selftest's 1-min budget check)
+  local function book(name, ms)
+    st.p.mods[name] = (st.p.mods[name] or 0) + ms
+    st.cum[name] = (st.cum[name] or 0) + ms
+  end
+  st.book = book
 
   local child_ms = 0
   local function call_in(e, where, f, ...)
@@ -244,7 +251,9 @@ local function build(o)
     local self_ms = dt - child_ms
     st.current, child_ms = prev, saved + dt
     e.ms_total = e.ms_total + self_ms
-    st.p.mods[e.name] = (st.p.mods[e.name] or 0) + self_ms
+    book(e.name, self_ms)
+    sched.spend(e, self_ms)
+    if not e.critical then st.frame_paced = st.frame_paced + self_ms end
     if self_ms > st.frame_top_ms then st.frame_top_ms, st.frame_top = self_ms, e.name end
     if not r[1] then fault(e, where, r[2]); return false, r[2] end
     charge(e, where, self_ms)
@@ -252,6 +261,34 @@ local function build(o)
   end
   st.call_in = call_in
   st.frame_top_ms, st.frame_top = 0, nil
+
+  -- kernel housekeeping booked as its own owner (k.state, k.io, ...); module calls inside it stay with
+  -- the modules (child time). Errors propagate to the frame's xpcall as before.
+  local function kern_in(part, f, ...)
+    local saved = child_ms
+    child_ms = 0
+    local t0 = cost_ms()
+    local ok, err = pcall(f, ...)
+    local dt = cost_ms() - t0
+    book(part, dt - child_ms)
+    child_ms = saved + dt
+    if not ok then error(err, 0) end
+  end
+  st.kern_in = kern_in
+
+  -- a site-data write is booked to the key's owner module (m.<module>, manifest/projects/bp.* runner, ...):
+  -- a module that dirties a big record pays for its encoding; kern's own keys stay in k.persist
+  local function charge_key(key, ms)
+    local spec = C.PERSIST[key]
+    local owner = spec and spec.owner or key:match('^m%.(.+)$') or (key:match('^bp%.') and 'runner')
+    local e = owner and st.mods[owner]
+    if not e then return end
+    book(e.name, ms)
+    e.ms_total = e.ms_total + ms
+    sched.spend(e, ms)
+    if not e.critical then st.frame_paced = st.frame_paced + ms end
+    child_ms = child_ms + ms
+  end
 
   ------------------------------------------------------------ persist, act
   -- <save>/manifest.json mirrors the persisted fort manifest for Python (follow's audit, bp sites): no
@@ -264,7 +301,9 @@ local function build(o)
   st.write_manifest = write_manifest
   local papi, pstore = persistlib.new{who = function() return st.current end, violation = violation,
                                       log = function(level, msg) log_as('kern', level, msg) end,
-                                      on_flush = function(key, v) if key == 'manifest' then write_manifest(v) end end}
+                                      on_flush = function(key, v) if key == 'manifest' then write_manifest(v) end end,
+                                      clock = cost_ms, charge = charge_key, now_ms = function() return st.now.ms end,
+                                      big = {bytes = CAD.persist_big_bytes, ms = CAD.persist_big_ms}}
   st.pstore = pstore
   local function as_kern(f, ...)
     local prev = st.current
@@ -320,6 +359,8 @@ local function build(o)
   function K.manifest() return papi.get('manifest') or {v = 2} end
   function K.flush() st.flush_req = true end
   function K.enabled(name) local e = st.mods[name]; return e ~= nil and not e.disabled end
+  -- fort size (FR-62): {units = visible units (sense; -1 unknown), items = #world.items.all, f = load factor >= 1}
+  function K.load() local l = st.load; return {units = l.units, items = l.items, f = l.f} end
 
   function K.set_mode(m, why)
     if st.in_mode_cb then return false, 'reentrant' end
@@ -377,8 +418,9 @@ local function register(st, mod, idx)
   if st.mods[name] then return st.mods[name] end
   local c = mod.critical
   if c == nil and MODULE_INDEX[name] then c = MODULE_INDEX[name].critical end
-  local e = {name = name, M = mod, order = idx, factor = 1, slow_ms = {}, critical = c == true,
-             fault_ms = {}, ms_total = 0, cont = false, slice = 0}
+  local e = sched.init{name = name, M = mod, order = idx, factor = 1, slow_ms = {}, critical = c == true,
+                       fault_ms = {}, ms_total = 0, cont = false, slice = 0}
+  e.stretch = sched.stretch(e, st.load)
   st.mods[name] = e
   st.entries[#st.entries + 1] = e
   return e
@@ -467,13 +509,18 @@ local function flush_files(st, force)
   st.last_ev_flush_ms = st.now.ms
 end
 
--- per-second buckets over the last 10 s (frame ms, frame-to-frame gaps, ticks)
+-- per-second buckets over the last 10 s (frame ms, frame-to-frame gaps, ticks); b.paced = the part spent by
+-- non-critical (paced) modules. A new second sets the PEACE pool from the unpaced cost (critical modules,
+-- kernel housekeeping) of the seconds before (FR-62)
 local function bucket(st)
   local now = st.now
   local sec = now.ms // 1000
   local b = st.buckets[#st.buckets]
   if not b or b.sec ~= sec then
-    b = {sec = sec, ms = 0, gap = 0, fmax = 0, tick = now.tick, at = now.ms}
+    local n, unpaced = 0, 0
+    for _, x in ipairs(st.buckets) do n, unpaced = n + 1, unpaced + x.ms - x.paced end
+    if n > 0 then sched.pool_update(st.pool, unpaced / n, st.entries, now.ms) end
+    b = {sec = sec, ms = 0, paced = 0, gap = 0, fmax = 0, tick = now.tick, at = now.ms}
     st.buckets[#st.buckets + 1] = b
     if #st.buckets > 10 then table.remove(st.buckets, 1) end
   end
@@ -588,9 +635,10 @@ local function heartbeat(st)
                                                         paused = now.paused, mode = st.mode, seq = st.seq}) .. '\n')
 end
 
-local function flush_persist(st)
+-- all: every dirty key now (mode change, fault back-off, boot, stop); otherwise big keys wait CAD.persist_big_ms
+local function flush_persist(st, all)
   st.persist_rec()
-  st.pstore.flush()
+  st.pstore.flush(all)
   st.last_persist_ms, st.persist_now = st.now.ms, false
 end
 
@@ -692,9 +740,13 @@ local function kern_verb(st, verb, args, cmd)
     for _, e in ipairs(st.entries) do
       r[#r + 1] = {name = e.name, disabled = e.disabled or false, factor = e.factor, ms = round(e.ms_total),
                    faults = #e.fault_ms, every = e.M.every,
-                   backoff_s = e.disabled_until and math.max(0, (e.disabled_until - st.now.ms) // 1000) or nil}
+                   backoff_s = e.disabled_until and math.max(0, (e.disabled_until - st.now.ms) // 1000) or nil,
+                   -- FR-62: pacing share (ms/s), current debt, frames it waited, cadence stretch (%), demotion flips
+                   share = not e.critical and round(e.share) or nil, debt = not e.critical and round(e.debt) or nil,
+                   paced = e.paced_n > 0 and e.paced_n or nil, stretch_pct = round((e.stretch or 1) * 100),
+                   flips = e.flips > 0 and e.flips or nil, demotions = e.demotions}
     end
-    return true, 'modules', {modules = r}
+    return true, 'modules', {modules = r, load = M.load_info(st), budget = sched.budget(st.load)}
   elseif what == 'persist' then
     if type(args.key) == 'string' then
       if not C.persist_key(args.key) then return false, 'unknown persist key' end
@@ -703,7 +755,9 @@ local function kern_verb(st, verb, args, cmd)
     return true, 'persist', {keys = st.pstore.keys()}
   elseif what == 'perf' then
     local w = window(st)
-    local d = {ms_s = w.ms_s, tps = w.tps, gap_max_ms = w.gap, ms_max = w.fmax, dropped = st.dropped}
+    local d = {ms_s = w.ms_s, tps = w.tps, gap_max_ms = w.gap, ms_max = w.fmax, dropped = st.dropped,
+               load = M.load_info(st), budget = sched.budget(st.load), pool_ms_s = round(st.pool.rate),
+               pool_pct = round(st.pool.g * 100)}
     if st.mods.perf and not st.mods.perf.disabled then
       local ok, ok2, stats = K.call('perf', 'stats')
       if ok and type(stats) == 'table' then d.perf = stats end
@@ -817,11 +871,62 @@ end
 local function run_step(st, e, cont)
   local now = st.now
   local ctx = {dt = e.last_tick and (now.tick - e.last_tick) or 0, dt_ms = e.last_ms and (now.ms - e.last_ms) or 0,
-               cont = cont, slice = cont and (e.slice + 1) or 1}
+               cont = cont, slice = cont and (e.slice + 1) or 1, load = st.load.f}
   if cont then ctx.dt, ctx.dt_ms = 0, 0 else e.last_tick, e.last_ms = now.tick, now.ms end
   e.slice = ctx.slice
   local ok, r = st.call_in(e, 'step', e.M.step, e.critical and 1 or 2, ctx)
   e.cont = ok and r == 'more' and not e.disabled
+end
+
+-- eventful queue, then events emitted in the previous frame (EV:<TYPE>); both queues are swapped
+-- before delivery, so anything emitted now arrives next frame (no allocation when empty)
+local function deliver_queues(st, eq, q)
+  local now = st.now
+  for _, item in ipairs(q) do
+    local name, ev = item[1], item[2]
+    if name == 'REPORT' then
+      local okr, rev = pcall(report_event, st, ev.id)
+      if not okr then st.log_as('kern', 'warn', 'report ' .. tostring(ev.id) .. ': ' .. first_line(rev)) end
+      ev = okr and rev or nil
+    end
+    if ev then
+      ev.tick = now.tick
+      for _, e in ipairs(st.entries) do if not e.disabled then deliver(st, e, name, ev) end end
+    end
+  end
+  for _, rec in ipairs(eq) do
+    if st.ev_listen[rec.type] then
+      local name = 'EV:' .. rec.type
+      for _, e in ipairs(st.entries) do if not e.disabled then deliver(st, e, name, rec) end end
+    end
+  end
+end
+
+-- fort-size load (FR-62): visible units from sense's census, the item vector's length (no iteration);
+-- the cadence stretch of the scaled modules follows it
+local function refresh_load(st)
+  local cu = st.K.census and st.K.census.u
+  local okn, items = pcall(function() return #df.global.world.items.all end)
+  local l = sched.load(cu and cu.units or -1, okn and items or 0)
+  st.load, st.load_at = l, st.now.ms
+  for _, e in ipairs(st.entries) do
+    local s = sched.stretch(e, l)
+    if s ~= e.stretch then
+      if math.abs(s - e.stretch) >= 0.5 or s == 1 then
+        st.log_as('kern', 'info', string.format('%s cadence x%.1f for the fort size (%d units, %d items)',
+                                                e.name, s, l.units, l.items))
+      end
+      e.stretch = s
+    end
+  end
+end
+
+local function note_paced(st, e)
+  e.paced_n = e.paced_n + 1
+  if e.paced_n == 1 then
+    st.log_as('kern', 'info', string.format('%s paced: over its share of %s ms/s (debt %d ms); runs and slices wait',
+                                            e.name, tostring(e.share), round(e.debt)))
+  end
 end
 
 local function frame(st)
@@ -836,8 +941,11 @@ local function frame(st)
   now.ms, now.wall, now.paused, now.frame = t0, os.time(), g.pause_state == true, st.frame_n
   st.frame_start = t0
   local b = bucket(st)
+  st.frame_paced = 0
+  local dt_frame = 0
   if prev_start then   -- frame-to-frame gap; blame our own previous frame if it took most of it
     local gap = t0 - prev_start
+    dt_frame = gap
     if gap > b.gap then b.gap = gap end
     if gap > st.p.gap_max then st.p.gap_max = gap end
     if gap >= CAD.gap_ms then
@@ -856,6 +964,7 @@ local function frame(st)
   for _, e in ipairs(st.entries) do       -- backoff over: re-enable (CONTRACTS §3.3.5)
     if e.disabled and e.disabled_until and t0 >= e.disabled_until then enable(st, e, 'backoff over') end
   end
+  if not st.load_at or t0 - st.load_at >= CAD.load_ms then refresh_load(st) end
   st.current = 'kern'
   if ticking and (now.year ~= st.cal_year or now.season ~= st.cal_season) then
     if now.year ~= st.cal_year then
@@ -865,61 +974,58 @@ local function frame(st)
     st.cal_year, st.cal_season = now.year, now.season
   end
   st.current = nil
-  -- eventful queue, then events emitted in the previous frame (EV:<TYPE>); both queues are swapped
-  -- before delivery, so anything emitted now arrives next frame (no allocation when empty)
   local eq, q = st.evq, st.eventq
-  local neq = #eq
+  local neq, nq = #eq, #q
   if neq > 0 then st.evq = {} end
-  if #q > 0 then
-    st.eventq = {}
-    for _, item in ipairs(q) do
-      local name, ev = item[1], item[2]
-      if name == 'REPORT' then
-        local okr, rev = pcall(report_event, st, ev.id)
-        if not okr then st.log_as('kern', 'warn', 'report ' .. tostring(ev.id) .. ': ' .. first_line(rev)) end
-        ev = okr and rev or nil
-      end
-      if ev then
-        ev.tick = now.tick
-        for _, e in ipairs(st.entries) do if not e.disabled then deliver(st, e, name, ev) end end
-      end
-    end
-  end
-  if neq > 0 then
-    for _, rec in ipairs(eq) do
-      if st.ev_listen[rec.type] then
-        local name = 'EV:' .. rec.type
-        for _, e in ipairs(st.entries) do if not e.disabled then deliver(st, e, name, rec) end end
-      end
-    end
-  end
-  -- due modules in contract order (§3.3)
+  if nq > 0 then st.eventq = {} end
+  if neq > 0 or nq > 0 then st.kern_in('k.events', deliver_queues, st, eq, q) end
+  -- due modules in contract order (§3.3); non-critical ones over their share wait (pacing, §3.3.8: in PEACE
+  -- also on the pool, elsewhere with larger shares); a demoted module earns its promotion in frames in which
+  -- it could run (§3.3.6)
+  local peace = st.mode == 'PEACE'
+  local pool, mult = peace and st.pool or nil, peace and 1 or sched.PACE.alert_mult
   for _, e in ipairs(st.entries) do
     if not e.disabled and e.M.step then
-      if e.cont then run_step(st, e, true)
-      else
-        local ev = e.M.every
-        local due
-        if type(ev) ~= 'table' then due = false
-        elseif ev.ticks then due = ticking and (e.last_tick == nil or now.tick - e.last_tick >= ev.ticks * e.factor)
-        else due = e.last_ms == nil or now.ms - e.last_ms >= (ev.ms or 1000) * e.factor end
-        if due then run_step(st, e, false) end
+      local ev = e.M.every
+      if type(ev) ~= 'table' then ev = NO_EVERY end
+      local ms_mod = ev.ms ~= nil
+      if e.factor > 1 and (ticking or ms_mod) and sched.quiet(e, dt_frame, t0) then
+        st.log_as('kern', 'info', e.name .. ' promoted to x' .. e.factor)
+        st.flush_req = true
+      end
+      local cont, due = e.cont, e.cont
+      if not cont and ev ~= NO_EVERY then   -- sched.due, inlined: this loop runs every frame
+        local per = e.factor * e.stretch
+        if not ms_mod then due = ticking and (e.last_tick == nil or now.tick - e.last_tick >= ev.ticks * per)
+        else due = e.last_ms == nil or now.ms - e.last_ms >= ev.ms * per end
+      end
+      if due then
+        if not e.critical and sched.paced(e, t0, pool, mult) then note_paced(st, e)
+        else run_step(st, e, cont) end
       end
     end
   end
-  if st.marked then poll_inbox(st) end
-  -- housekeeping (real-time cadences)
-  if st.flush_req or st.last_state_ms == nil or now.ms - st.last_state_ms >= CAD.state_ms then compose(st) end
-  if st.marked and (st.last_hb_ms == nil or now.ms - st.last_hb_ms >= CAD.heartbeat_ms) then heartbeat(st) end
-  if st.persist_now or (st.marked and now.ms - st.last_persist_ms >= CAD.persist_ms and st.pstore.dirty()) then
-    flush_persist(st)
+  if st.marked and (#st.inbox_pending > 0 or st.last_inbox_ms == nil or now.ms - st.last_inbox_ms >= CAD.inbox_ms) then
+    st.kern_in('k.inbox', poll_inbox, st)
   end
-  if st.flush_events_now or now.ms - st.last_ev_flush_ms >= CAD.events_ms then flush_files(st) end
+  -- housekeeping (real-time cadences)
+  if st.flush_req or st.last_state_ms == nil or now.ms - st.last_state_ms >= CAD.state_ms then
+    st.kern_in('k.state', compose, st)
+  end
+  if st.marked and (st.last_hb_ms == nil or now.ms - st.last_hb_ms >= CAD.heartbeat_ms) then
+    st.kern_in('k.io', heartbeat, st)
+  end
+  if st.persist_now or (st.marked and now.ms - st.last_persist_ms >= CAD.persist_ms and st.pstore.dirty()) then
+    st.kern_in('k.persist', flush_persist, st, st.persist_now)
+  end
+  if st.flush_events_now or now.ms - st.last_ev_flush_ms >= CAD.events_ms then st.kern_in('k.io', flush_files, st) end
   local cost = cost_ms() - c0
   st.frame_cost, st.prev_top = cost, st.frame_top
   b.ms = b.ms + cost
+  b.paced = b.paced + math.min(cost, st.frame_paced)
   if cost > b.fmax then b.fmax = cost end
   st.p.ms, st.p.frames = st.p.ms + cost, st.p.frames + 1
+  st.cum_ms = st.cum_ms + cost
 end
 
 function M._tick()
@@ -1127,7 +1233,7 @@ function M.boot(opts)
   st.current = nil
   compose(st)
   heartbeat(st)
-  flush_persist(st)
+  flush_persist(st, true)
   flush_files(st)
   require('repeat-util').scheduleEvery(M.KEY, 1, 'frames', M._tick)
   return true, string.format('booted %s (%d modules, mode %s)', M.runtime_key(marker, save), #st.entries, st.mode)
@@ -1165,7 +1271,7 @@ function M.stop(why)
   st.current = 'kern'
   st.emit_as('kern', 'UNLOAD', 'C', why, nil)
   st.current = nil
-  pcall(flush_persist, st)
+  pcall(flush_persist, st, true)
   pcall(compose, st)
   pcall(heartbeat, st)
   pcall(flush_files, st)
@@ -1204,6 +1310,24 @@ function M.perf_take()
   return p
 end
 
+-- cumulative cost since boot (selftest's 1-min budget check): ms = every frame, mods = per owner
+-- (modules and the k.* parts), at = getTickCount of the current frame
+function M.costs()
+  if not S then return nil end
+  local mods = {}
+  for k, v in pairs(S.cum) do mods[k] = v end
+  return {ms = S.cum_ms, at = S.now.ms, mods = mods}
+end
+
+-- fort-size load {units, items, f} and the kernel budget (ms per real second) that fits it (FR-62)
+function M.load() return S and S.K.load() or nil end
+function M.budget() return S and sched.budget(S.load) or sched.budget(nil) end
+function M.load_info(st)
+  st = st or S
+  if not st then return nil end
+  return {units = st.load.units, items = st.load.items, f_pct = round(st.load.f * 100)}
+end
+
 function M.status()
   local st = S
   if not st then return nil end
@@ -1211,11 +1335,11 @@ function M.status()
   local mods = {}
   for _, e in ipairs(st.entries) do
     mods[#mods + 1] = {name = e.name, disabled = e.disabled or false, factor = e.factor, ms = round(e.ms_total),
-                       faults = #e.fault_ms}
+                       faults = #e.fault_ms, paced = e.paced_n, share = not e.critical and e.share or nil}
   end
   return {save = st.save_name, mode = st.mode, seq = st.seq, ev = st.ev_n, frame = st.frame_n, boots = st.boots,
           ms_s = round(w.ms_s), tps = round(w.tps), gap_max_ms = round(w.gap), modules = mods, runtime = st.paths.save,
-          kern_faults = st.kern_faults, dropped = st.dropped}
+          kern_faults = st.kern_faults, dropped = st.dropped, load = M.load_info(st), budget = sched.budget(st.load)}
 end
 
 return M

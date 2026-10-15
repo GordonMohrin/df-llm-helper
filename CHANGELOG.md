@@ -9,6 +9,14 @@
   tomb zone on a tile. Live check: `inspect tombs` on the Run 9 save (want/short/order, the project's tiles in a free
   hall), the ConstructCoffin order's material, the coffins built and zoned, `status` coffins line.
 
+## Kernel cost on a big fort (2026-10-15, FR-62; offline, live-untested)
+- Commit 501b08d: `repeat` in perf.csv is DFHack's timing of the whole kernel callback (a cross-check, no longer a
+  doctor module); cost owners `k.state/k.io/k.persist/k.inbox/k.events/kern`, persist booked to the key's module, big
+  keys written at most every 60 s; pacing by ms share with a PEACE pool (`util/sched.lua`, also in k_mock), economy
+  and care cadence x load (≤ 3); demotion hysteresis, KERNEL_SLOW once per module per 6 h; selftest `budget` over the
+  last minute against the fort-size budget (35 ms/s for 402 units), naming the top owners; cheaper sense and economy
+  per-unit/per-item paths; luahost runs get their own TEMP (the test_kern_perf flakes). Run 9 model: 84 -> 24.5 ms/s.
+
 ## Run 9 alarm-to-action (2026-10-15): wake at once, clock governor, arrival lockdown, interrupt channel
 Run 9 (14.10.2026): an army with two cave dragons walked in over lowered drawbridges; 39 of 48 citizens died within
 76 s of real time at ~400 ticks/s. Commit 22ccd1c, the deferred civ alert in the commit after 2058a1d; offline (k_mock,
@@ -134,6 +142,11 @@ Offline (k_mock + pytest), live-untested. Details and statuses: docs/feature-req
 - **FR-08 embark:** the gate requires a metal ore (iron passes; bronze only or other metals warn) and a stone layer
   (fails on the 'no stone' popup or deep soil), both read from the embark panel's layer lines.
   `--accept <criterion> --reason "..."` lets a failed criterion pass and logs it to `accept.log`.
+- **Run 9 live findings (FR-59/60/63, seal part of FR-62; 017411c, offline, live-untested):** stored drink, food and
+  seeds (barrels, bins, bags) count for reach, the refuge audit and CUTOFF; a flagged stair is read again before it is
+  reported (cause: a scan days old); without a manifest, the walls, doors, gates and bridges of an opening found sealed
+  become perimeter pieces, and the new verb `perimeter.record` records the citizens' boundary; seal's work is capped
+  per real second (`seal.CFG.rate`), and the item census, map edge, scan and PEACE entrance search skip unchanged inputs.
 
 ## Rename (2026-10-15): df-llm-helper -> dfpilot
 - Project renamed back to **dfpilot**; Python package `df_llm_helper` -> `dfpilot` (`python -m dfpilot ...`), the
