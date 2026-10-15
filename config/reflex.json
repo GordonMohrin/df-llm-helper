@@ -1,5 +1,5 @@
 {"v": 2,
- "about": "FR-49/51/52/53 reflex and clock knobs (docs/v2/CONTRACTS.md §9.18). The kernel reads this file at boot (K.cfg.reflex); a missing or invalid file or key means the built-in defaults shown here. Actions: clock (timestream off, FPS cap at clock.siege_cap), gates (every linked drawbridge up), doors (entrance doors forbidden), alert (civ alert on Kern+).",
+ "about": "FR-49/51/52/53 reflex and clock knobs (docs/v2/CONTRACTS.md §9.18). The kernel reads this file at boot (K.cfg.reflex); a missing or invalid file or key means the built-in defaults shown here. Actions: clock (timestream off, FPS cap at clock.siege_cap), gates (every linked drawbridge up), doors (entrance doors forbidden: next to open sky and on seal's entrance routes), alert (civ alert; seal picks the burrow: Kern+, else Innen+, kept for the lockdown).",
  "clock": {"siege_cap": 30, "alert_cap": 100},
  "hold_quiet_days": 2,
  "ack_timeout_s": 60,

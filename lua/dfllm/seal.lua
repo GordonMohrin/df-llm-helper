@@ -19,7 +19,8 @@
 --             A* outside to the nearest map-edge tile): the first leak (tile, building, door/bridge state) and the
 --             openings of the interior (independent routes). After every siege and lever pull; SEAL_LEAK (A) when
 --             the gates are up and a route remains. In PEACE the gates stand open (D-14): the search runs there only
---             when its answer can change
+--             when its answer can change. BUG-012: the doors of each opening (a door on it, the first door on its
+--             route toward the citizens, the doors a few steps inside it) for the reflex lockdown (entrance_doors)
 --   perimeter (FR-56/60) walls, doors, gates and killbox tiles of defense projects, of the manifest and of the
 --             inside/outside boundary (learned by the BFS in PEACE), plus (FR-60, forts without a manifest) every
 --             wall, door, gate or bridge around an opening the entrance check finds sealed, and on the verb
@@ -31,7 +32,9 @@
 --             civ-alert burrow siege uses. Kern+ normally, the refuge (Tiefe+) in BREACH and until CFG.back_days
 --             quiet days, never a burrow without drink, food and beds for the population: the fallback is the
 --             interior burrow (CFG.interior, painted from revealed walkable inside tiles of the citizens' group),
---             else no confinement at all; REFUGE_FAIL (A) says so
+--             else no confinement at all; REFUGE_FAIL (A) says so. BUG-011: while a reflex lockdown holds the alert
+--             (hold), the interior burrow is kept even when it fails on supplies (it holds whatever the fort has
+--             inside; the lockdown keeps citizens off the surface), and a missing one is painted at once
 -- Cost (FR-62): work runs in coroutines; a work unit is about one DF read (tile flags, walk group, tiletype, burrow
 -- test, the fields of one item). A token bucket refilled in real time caps the units per second (CFG.rate, or
 -- CFG.rate_urgent while an urgent job runs: a lever pull, a siege, a CUTOFF re-check, perimeter.record, the first
@@ -73,6 +76,10 @@ M.CFG = {
   blame_max = 4000,           -- tiles the CUTOFF blame search may visit
   scan_max = 60000,           -- tiles the scan flood may visit
   edges_max = 8000, edges_keep = 2000, entries_max = 400, routes_max = 8, pend_max = 2000, stairs_max = 40,
+  -- BUG-012 (Run 9: the door one tile behind the east stair was no "entrance door"): per opening, its first
+  -- door_members entries are searched: the first door on the BFS route toward the citizens within door_route tiles,
+  -- and every door within door_near steps over inside tiles (the walk stops at a door), door_walk tiles at most
+  door_route = 12, door_near = 3, door_walk = 200, door_members = 8, doors_per = 6, doors_max = 32,
   rec_r = 1,                  -- FR-60: closers this far around a sealed opening's inside and outside tile
   pred_near = 25,             -- FR-33: a wild large predator counts only this close to an entrance (sense)
   back_days = 3,              -- FR-57: the refuge stays the confinement until this many days without a hostile
@@ -474,6 +481,7 @@ local function burrow_audit(K, ncit, a)
     if a.beds < need.beds then why[#why + 1] = string.format('beds %d<%d', a.beds, need.beds) end
   end
   a.ok = #why == 0
+  a.room = a.exists and a.tiles >= need.tiles            -- BUG-011: big enough to be kept for a lockdown
   a.why = table.concat(why, ', ')
   return a
 end
@@ -1188,11 +1196,12 @@ local function routes_of(entries)
     local r = find(i)
     local e = entries[i]
     if not at[r] then
-      reps[#reps + 1] = {x = e.x, y = e.y, z = e.z, ox = e.ox, oy = e.oy, oz = e.oz, d = e.d, n = 1}
+      reps[#reps + 1] = {x = e.x, y = e.y, z = e.z, ox = e.ox, oy = e.oy, oz = e.oz, d = e.d, n = 1, m = {e}}
       at[r] = #reps
     else
       local c = reps[at[r]]
       c.n = c.n + 1
+      if #c.m < CFG.door_members then c.m[#c.m + 1] = e end      -- BUG-012: the entries the door search starts from
       if e.d < c.d then c.x, c.y, c.z, c.ox, c.oy, c.oz, c.d = e.x, e.y, e.z, e.ox, e.oy, e.oz, e.d end
     end
   end
@@ -1359,6 +1368,87 @@ local function bfs(K, G, sources, X, Y, trace)
           learned = learned}
 end
 
+---------------------------------------------------------------- entrance doors (BUG-012)
+-- a built door or bridge on a revealed tile: the building, its type and its tile, else nil
+local function door_at(k)
+  local x, y, z = dec3(k)
+  local des, occ = rev(x, y, z)
+  spend(2)
+  local b = des and bld_on(x, y, z, occ)
+  local t = b and btype(b)
+  if (t == 'Door' or t == 'Bridge') and built(b) then return b, t, x, y, z end
+end
+
+-- the doors that close one opening (a routes_of rep with its member entries r.m), from the BFS B over walk group G:
+-- a door on an entry's inside or outside tile, the first door on the BFS route from each entry toward the citizens
+-- (B.par, at most CFG.door_route tiles, inside tiles only) and every door within CFG.door_near steps of an entry over
+-- inside tiles of G; that walk stops at a door, so it finds the door one or two tiles behind a stair or ramp
+-- opening (Run 9: the east stair at 75,70,117 and its door at 74,70,117) and not the rooms beyond it. Revealed
+-- tiles only. Returns {{id, x, y, z}} (at most CFG.doors_per) and whether a bridge stands on the opening or on that
+-- route before any door (the gates close it: no "partial lockdown" for it).
+local function opening_doors(B, G, r)
+  local found, list, inside_c, nb, gated = {}, {}, {}, {}, false
+  local function take(k, route)            -- a door: listed, true; a bridge: true on the route (it closes it)
+    local b, t, x, y, z = door_at(k)
+    if not b then return false end
+    if t == 'Bridge' then
+      if route then gated = true end
+      return route == true
+    end
+    if not found[b.id] and #list < CFG.doors_per then
+      found[b.id] = true
+      list[#list + 1] = {b.id, x, y, z}
+    end
+    return true
+  end
+  local function inside(k)                  -- a revealed inside tile of G (the BFS's own answer when it has one)
+    local o = B.outs[k]
+    if o == nil then
+      o = inside_c[k]
+      if o == nil then
+        local x, y, z = dec3(k)
+        local des = rev(x, y, z)
+        spend(2)
+        if des and not des.outside then
+          P.x, P.y, P.z = x, y, z
+          o = (dfhack.maps.getWalkableGroup(P) or 0) == G and 0 or false
+        else o = false end
+        inside_c[k] = o
+      end
+    end
+    return o == 0
+  end
+  local d, q = {}, {}
+  for _, e in ipairs(r.m or {}) do
+    local ik = key3(e.x, e.y, e.z)
+    take(key3(e.ox, e.oy, e.oz), true)
+    -- the route inward (the BFS tree leads from every entry to the nearest citizen or stock tile)
+    local k, n = ik, 0
+    while k and k ~= -1 and n <= CFG.door_route and inside(k) do
+      if take(k, true) then break end
+      k, n = B.par[k], n + 1
+    end
+    if d[ik] == nil then d[ik] = 0; q[#q + 1] = ik end
+  end
+  -- the doors near the opening: one walk from all its entries, at most CFG.door_walk tiles
+  local head = 1
+  while head <= #q and head <= CFG.door_walk do
+    local ck = q[head]
+    head = head + 1
+    if not take(ck) and d[ck] < CFG.door_near then
+      local x, y, z = dec3(ck)
+      local cnt = steps(x, y, z, nb)
+      for i = 1, cnt do
+        local nk = nb[i]
+        if d[nk] == nil and not inside(nk) and i <= 8 and ramp_top(nk) then nk = nk - 16777216 end   -- down a ramp
+        if d[nk] == nil and inside(nk) then d[nk] = d[ck] + 1; q[#q + 1] = nk end
+      end
+      spend(2)
+    end
+  end
+  return list, gated
+end
+
 -- BFS and scan sources on the groups `on` (nil = any): the citizens, plus (`inner`) beds and stock tiles of the last
 -- audit, so an untraced BFS or the scan finds the interior while every citizen works outside
 local function sources_on(cits, on, inner)
@@ -1506,7 +1596,7 @@ end
 
 -- the BFS runs when its answer can change; in PEACE the open gates (D-14) leak by design, so a periodic or a
 -- construction check there re-uses the last answer unless a known opening closed or CFG.bfs_every passed
-local BFS_WHY = {inspect = true, record = true, lever = true, siege = true}
+local BFS_WHY = {inspect = true, record = true, lever = true, siege = true, lockdown = true}
 
 local function job_seal(K, why)
   why = why or ''
@@ -1566,13 +1656,20 @@ local function job_seal(K, why)
       res.bfs = t0
       local reps = routes_of(B.entries)
       res.routes, res.partial, res.visited = #reps, B.partial, B.visited
+      local all, dseen = {}, {}
       for i = 1, math.min(#reps, CFG.routes_max) do
         local r = reps[i]
         local bt, bs = describe_tile(r.x, r.y, r.z)
         local ot, os_ = describe_tile(r.ox, r.oy, r.oz)
+        local doors, gated = opening_doors(B, G, r)          -- BUG-012: {{id, x, y, z}}, a bridge on it
         res.openings[i] = {pos = {r.x, r.y, r.z}, out = {r.ox, r.oy, r.oz}, n = r.n, d = r.d,
-                           bld = bt, state = bs, out_bld = ot, out_state = os_}
+                           bld = bt, state = bs, out_bld = ot, out_state = os_, doors = doors,
+                           gate = (gated or bt == 'Bridge' or ot == 'Bridge') and 1 or 0}
+        for _, dr in ipairs(doors) do
+          if not dseen[dr[1]] and #all < CFG.doors_max then dseen[dr[1]] = true; all[#all + 1] = dr end
+        end
       end
+      res.doors = all
       -- the first leak: walking back from the first map-edge tile, the first inside tile is where the route
       -- enters the fort; buildings on the route are listed with their state
       if B.edge then
@@ -1679,7 +1776,7 @@ end
 
 -- FR-62/63: a flood over the citizens' walk groups (their inside tiles and the outside tiles next to them) finds the
 -- stairs without counterpart and the interior tiles, instead of a box scan that read mostly hidden rock
-local function job_scan(K, paint)
+local function job_scan(K, paint, why)
   local cits = citizens(K)
   spend(3 * #cits)
   local cg, main = group_counts(cits)
@@ -1739,11 +1836,14 @@ local function job_scan(K, paint)
   end
   res.n = head - 1
   mem.scan = res
-  if inner and #inner > 0 then mem.paint_list = inner; due('paint', now_t(K), 'interior') end
+  if inner and #inner > 0 then
+    mem.paint_list = inner
+    due('paint', now_t(K), why == 'lockdown' and why or 'interior')
+  end
 end
 
 -- FR-33: the whole-interior burrow (burrows screen: add burrow, paint tiles), in chunks
-local function job_paint(K)
+local function job_paint(K, why)
   local list = mem.paint_list
   mem.paint_list = nil
   if not list or #list == 0 then return end
@@ -1760,14 +1860,19 @@ local function job_paint(K)
   st.painted, dirty = now_t(K), true
   mem.bsize[CFG.interior] = nil
   K.log('info', 'seal: %s painted with %d of %d interior tiles', CFG.interior, n, #list)
-  due('audit', now_t(K), 'painted')
+  due('audit', now_t(K), why == 'lockdown' and 'painted lockdown' or 'painted')
 end
 
 ---------------------------------------------------------------- the alert burrow (FR-33/37/57)
 -- the civ-alert burrow for `mode`: want = default (siege: Kern+, or the refuge in BREACH); after a BREACH the
 -- refuge is held until CFG.back_days without a visible hostile; a burrow that fails its audit is refused for Kern+,
--- then the interior burrow; nil = no confinement. Returns choice, want, why (the refusal) without side effects.
-local function choose(K, mode, want)
+-- then the interior burrow; nil = no confinement. `hold` (BUG-011, a reflex lockdown holds the alert): when every
+-- burrow failed, the interior burrow is kept if it exists and is big enough, whatever it lacks: it holds every
+-- stock, bed and well inside the fort, so confining to it takes nothing from the citizens but the surface, which is
+-- what the lockdown is for (no confinement would let them walk out to meet the army; any other burrow may lie
+-- outside or hold less). Returns choice, want, why (the first refusal), forced (the kept interior's own failure)
+-- without side effects.
+local function choose(K, mode, want, hold)
   local kern, refuge = burrow_names(K)
   want = want or (mode == 'BREACH' and refuge or kern)
   if st.swap and want == kern and mode ~= 'PEACE' and quiet(K) < CFG.back_days * DAY then want = refuge end
@@ -1782,12 +1887,17 @@ local function choose(K, mode, want)
     if a and a.exists and a.ok then return name, want, why end
     if a and a.exists and not why then why = name .. ': ' .. a.why end
   end
+  local ia = au[CFG.interior]
+  if hold and ia and ia.exists and ia.room then return CFG.interior, want, why, ia.why end
   return nil, want, why
 end
 
+local HOLD_FRESH = 100     -- ticks a lockdown's alert_burrow(..., hold) stands for publish (siege asks every <= 25)
+local function held(K) return mem.hold_t ~= nil and now_t(K) - mem.hold_t <= HOLD_FRESH end
+
 local function publish(K)
   local mode = K.mode()
-  local pick, want, why = choose(K, mode == 'PEACE' and 'ALERT' or mode, nil)
+  local pick, want, why = choose(K, mode == 'PEACE' and 'ALERT' or mode, nil, held(K))
   local au = mem.audit and mem.audit.burrows or {}
   local a = pick and au[pick]
   mem.pub = {want = trunc(want, 24), burrow = trunc(pick or '', 24), tiles = a and a.tiles or 0,
@@ -1795,12 +1905,18 @@ local function publish(K)
              why = trunc(why or '', 40)}
 end
 
--- public (CONTRACTS §7, siege): the burrow the civ alert confines to in `mode`; nil = no confinement
-function M.alert_burrow(K, mode, default)
+-- public (CONTRACTS §7, siege): the burrow the civ alert confines to in `mode`; nil = no confinement. `hold`: a reflex
+-- lockdown holds the alert (BUG-011, choose); a missing or too small interior burrow is painted at once then. The
+-- second and third values say why the pick is not `default` (nil when it is), in full ('REFUGE_FAIL <burrow>: <why>
+-- [; <interior> kept for the lockdown although <why> | <interior> missing, paint queued]') and short ('REFUGE_FAIL
+-- <burrow>[, lockdown fallback | , <interior> missing]').
+function M.alert_burrow(K, mode, default, hold)
   mode = mode or K.mode()
+  hold = hold == true
   local kern, refuge = burrow_names(K)
   if default ~= kern then default = (mode == 'BREACH' or default ~= nil) and refuge or kern end
   local t = now_t(K)
+  if hold then mem.hold_t = t end
   if mode == 'BREACH' then
     local au = mem.audit and mem.audit.burrows
     local r = au and au[refuge]
@@ -1811,25 +1927,66 @@ function M.alert_burrow(K, mode, default)
     st.swap, dirty = nil, true
     K.log('info', 'seal: refuge released, confinement back to %s', kern)
   end
-  local pick, want, why = choose(K, mode, default)
+  local pick, want, why, forced = choose(K, mode, default, hold)
+  -- BUG-011: a lockdown without a usable interior burrow paints one now (at most once a day; scan, paint and the
+  -- audit after it run as urgent jobs), so the next ask confines instead of leaving the whole fort open
+  local au = mem.audit and mem.audit.burrows
+  local ia = au and au[CFG.interior]
+  local tail
+  if forced then tail = string.format('; %s kept for the lockdown although %s', CFG.interior, forced)
+  elseif hold and not pick and au and not (ia and ia.room) then
+    if not (mem.lock_paint and t - mem.lock_paint < DAY and t >= mem.lock_paint) then
+      mem.lock_paint = t
+      due('scan', t, 'lockdown', true)
+    end
+    tail = '; ' .. CFG.interior .. ((ia and ia.exists) and (': ' .. ia.why) or ' missing') .. ', paint queued'
+  end
   if pick ~= want and why then
     -- BUG-008: once per episode, again only when the refused burrow, the fallback or the reason changed, and then
     -- not before max(1 game day, 60 s wall clock) (util/cadence; the unconditional daily repeat was 3 s at timestream)
-    local ids, toks, now = {want .. '>' .. tostring(pick)}, {trunc(why, 60)}, K.now()
+    local ids, toks, now = {want .. '>' .. tostring(pick)}, {trunc(why, 60), forced and 'forced' or ''}, K.now()
     if CAD.due(st.refuge_rec, now, ids, toks, {ticks = DAY, wall_s = 60}) then
       st.refuge_rec, dirty = CAD.mark(now, ids, toks), true
-      local au = mem.audit and mem.audit.burrows or {}
-      local a = pick and au[pick]
-      K.emit('REFUGE_FAIL', 'A', trunc(string.format('alert burrow %s refused (%s): %s', want, why,
-             pick and ('confining to ' .. pick) or 'no confinement, the whole fort'), 200),
-             {burrow = want, fallback = pick or '', why = trunc(why, 120), tiles = a and a.tiles or 0,
+      local a = pick and (au or {})[pick]
+      K.emit('REFUGE_FAIL', 'A', trunc(string.format('alert burrow %s refused (%s): %s%s', want, why,
+             pick and ('confining to ' .. pick) or 'no confinement, the whole fort', tail or ''), 200),
+             {burrow = want, fallback = pick or '', why = trunc(why .. (tail or ''), 120), tiles = a and a.tiles or 0,
               inside = a and a.inside or 0, mode = mode})
     end
   end
   if pick == want and st.refuge_rec then st.refuge_rec, dirty = nil, true end   -- the episode ended
   publish(K)
   save(K)
-  return pick
+  local note, brief
+  if pick ~= want then
+    note = trunc((why and ('REFUGE_FAIL ' .. why) or (want .. ' missing')) .. (tail or ''), 160)
+    brief = (why and ('REFUGE_FAIL ' .. want) or (want .. ' missing')) .. (forced and ', lockdown fallback' or '')
+    if tail and not forced then
+      brief = brief .. ', ' .. CFG.interior .. ((ia and ia.exists) and ' too small' or ' missing')
+    end
+  end
+  return pick, note, brief
+end
+
+-- public (BUG-012, reflex): the doors of the last entrance check: {tick (of its BFS), sealed 0|1, routes,
+-- doors = {{id, pos}}, open = {{pos, kind}} (openings with neither a door nor a bridge on them or their route)}; nil
+-- before the first check. `refresh`: the reflex starts a lockdown, so an urgent check with a fresh BFS is queued (the
+-- PEACE answer may be up to CFG.bfs_every old) and the caller polls again for its doors
+function M.entrance_doors(K, refresh)
+  if refresh then due('seal', now_t(K), 'lockdown') end
+  local s = mem.seal
+  if not s then return nil end
+  local c = mem.door_x
+  if c and c.src == s then return c.x end
+  local x = {tick = s.bfs or s.tick, sealed = s.sealed and 1 or 0, routes = s.routes or 0, doors = {}, open = {}}
+  for _, d in ipairs(s.doors or {}) do x.doors[#x.doors + 1] = {id = d[1], pos = {d[2], d[3], d[4]}} end
+  for _, o in ipairs(s.openings or {}) do
+    if #(o.doors or {}) == 0 and o.gate ~= 1 then
+      x.open[#x.open + 1] = {pos = {o.pos[1], o.pos[2], o.pos[3]}, kind = tostring(o.bld)}
+    end
+  end
+  mem.door_x = {src = s, x = x}
+  return x
 end
 
 -- public (FR-33, sense): entrances a wild large predator must be near to count; nil when none is known
@@ -1985,8 +2142,8 @@ local JOBS = {
   perim = function(K, d) job_perim(K, d.why) end,
   items = function(K, d) job_items(K, d.why) end,
   edges = function(K) job_edges(K) end,
-  scan = function(K, d) job_scan(K, d.arg == true) end,
-  paint = function(K) job_paint(K) end,
+  scan = function(K, d) job_scan(K, d.arg == true, d.why) end,
+  paint = function(K, d) job_paint(K, d.why) end,
 }
 
 local function schedule_periodic(K, t)
@@ -2008,12 +2165,14 @@ end
 
 -- urgent jobs run at CFG.rate_urgent and before every background job: a lever pull, a siege, a construction outside
 -- PEACE, perimeter.record, a CUTOFF re-check, a mode change, the first result after a load
-local URGENT_SEAL = {lever = true, siege = true, record = true, inspect = true}
+local URGENT_SEAL = {lever = true, siege = true, record = true, inspect = true, lockdown = true}
 local function urgent(K, name, d)
   if name == 'quick' then return true end
   if (name == 'edges' and not mem.edges) or (name == 'audit' and not mem.reach) or (name == 'scan' and not mem.scan)
      or (name == 'seal' and not mem.seal) then return true end
   local why = d and d.why or ''
+  -- BUG-011: a lockdown without its interior burrow: the scan, the paint and the audit after it
+  if (name == 'scan' or name == 'paint' or name == 'audit') and why:find('lockdown', 1, true) then return true end
   if name == 'seal' then return URGENT_SEAL[why] == true or (why == 'construction' and K.mode() ~= 'PEACE') end
   if name == 'perim' then return why == 'pre' or why == 'post' end
   if name == 'audit' then
@@ -2257,10 +2416,16 @@ M.inspect.entrances = function(K, args)
   end
   local s = mem.seal
   if not s then return true, 'entrances: the first check is running', {} end
-  return true, s.msg or '?', {tick = s.tick, why = s.why, sealed = s.sealed, routes = s.routes, first = s.first,
-                              openings = s.openings, edge = s.edge, len = s.len, via = s.via, partial = s.partial,
-                              expect_sealed = s.expect, bfs = s.bfs, reused = s.reused and 1 or 0,
-                              closed = s.closed}
+  local msg = s.msg or '?'
+  if not s.sealed then                                 -- BUG-012: what a lockdown can lock
+    local x = M.entrance_doors(K)
+    msg = string.format('%s; %d entrance door%s, %d opening%s without one', msg, #x.doors, #x.doors == 1 and '' or 's',
+                        #x.open, #x.open == 1 and '' or 's')
+  end
+  return true, msg, {tick = s.tick, why = s.why, sealed = s.sealed, routes = s.routes, first = s.first,
+                     openings = s.openings, edge = s.edge, len = s.len, via = s.via, partial = s.partial,
+                     expect_sealed = s.expect, bfs = s.bfs, reused = s.reused and 1 or 0, closed = s.closed,
+                     doors = s.doors}
 end
 
 M.inspect.defense = function(K)
@@ -2396,6 +2561,8 @@ M.inspect.refuge = function(K, args)
     local pick, want = choose(K, m, nil)
     choice[m] = {want = want, burrow = pick or ''}
   end
+  local lp, lw = choose(K, K.mode() == 'BREACH' and 'BREACH' or 'ALERT', nil, true)   -- BUG-011: a reflex lockdown
+  choice.LOCKDOWN = {want = lw, burrow = lp or ''}
   publish(K)
   local p = mem.pub
   return true, string.format('alert %s: %s, %d tiles, %d/%d inside%s', K.mode(),

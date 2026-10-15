@@ -11,12 +11,18 @@
 --   clock  the arbiter switches timestream off and holds the vanilla FPS cap at the siege cap (it asks M.holding)
 --   gates  gate wants every linked drawbridge up: manifest outer/inner bridges and every lever-linked bridge outside
 --          the manifest, so a fort without fortcore is covered (same single-pending-pull invariant)
---   doors  the fort's entrance doors (a built door on or next to a revealed open-sky tile) are forbidden through
---          act.door_forbid (the door sheet's forbid toggle); doors the player had forbidden are left alone
---   alert  siege sounds the civ alert on Kern+ (it asks M.holding) once the gates are up, ALERT_AFTER ticks after the
+--   doors  the fort's entrance doors are forbidden through act.door_forbid (the door sheet's forbid toggle): a built
+--          door on or next to a revealed open-sky tile, and (BUG-012, Run 9: "0 entrances" with a door one tile behind
+--          the east stair) the doors seal's entrance check finds on each opening's route toward the citizens and a few
+--          steps inside it (seal.entrance_doors; a fresh check is asked for, its doors are added when it lands). Doors
+--          the player had forbidden, or opened again during the lockdown, are left alone; the openings without a door
+--          are named ("partial lockdown: ... has no door")
+--   alert  siege sounds the civ alert (it asks M.holding) once the gates are up, ALERT_AFTER ticks after the
 --          trigger, or at once when no gate is pending or a hostile is near a citizen outside Kern+ or inside: the
---          alert keeps civilians inside its burrow, and live L3 lost every lever pull to it (GATE_FAIL no_worker)
--- then ARRIVAL (A) carries the text and what was done. A popup is dismissed by the arbiter only after this returned
+--          alert keeps civilians inside its burrow, and live L3 lost every lever pull to it (GATE_FAIL no_worker).
+--          siege owns the alert state and seal picks the burrow (Kern+, else the interior Innen+); the text says what
+--          really holds ("alert: Innen+ (REFUGE_FAIL ...)", "alert: none (...)"), never what was asked (BUG-011)
+-- then ARRIVAL (A) carries what was done and the text. A popup is dismissed by the arbiter only after this returned
 -- (FR-36). The lockdown holds until threat is 0 (no visible invader, great danger in reach or hostile inside, the
 -- threat scan not armed, ARM ticks after the last trigger) for hold_quiet_days game days; then the doors it forbade
 -- open again, clock and alert follow the mode, and gate lowers the bridges it raised (peace_gates D-14 down) or
@@ -136,23 +142,66 @@ local function entrance_doors(K, now, force)
   return scan_doors(K, now)
 end
 
-local function forbid_doors(K, now)
-  local list = entrance_doors(K, now, true)
-  if list == nil then return 'doors: no tile test' end
-  local mine, n, already = {}, 0, 0
-  for _, id in ipairs(st.doors) do mine[id] = true end
-  for _, d in ipairs(list) do
-    local b = df.building.find(d.id)
-    local f = b and b.door_flags and b.door_flags.forbidden
-    if b and not f then
-      local ok = K.act.door_forbid(d.id, true)
-      if ok then n = n + 1; st.doors[#st.doors + 1] = d.id; dirty = true end
-    elseif b and f and not mine[d.id] then already = already + 1 end
-  end
-  return string.format('doors %d forbidden (%d entrances%s)', #st.doors, #list,
-                       already > 0 and (', ' .. already .. ' were already') or '')
+-- BUG-012: seal's entrance check (doors on the routes from the openings toward the citizens, openings without a
+-- door); `refresh` asks it for a fresh check. Returns the export, or nil and 'pending' (no check yet) | 'none' (no
+-- seal module)
+local function seal_doors(K, refresh)
+  local ok, x = K.call('seal', 'entrance_doors', refresh == true)
+  if not ok then return nil, 'none' end
+  if type(x) ~= 'table' then return nil, 'pending' end
+  return x
 end
 
+M.OPEN_SHOWN = 2           -- openings without a door named in the text (the rest counted)
+
+-- forbid the entrance doors not forbidden yet: the open-sky scan and seal's entrance doors. A door forbidden by
+-- us stays ours (never forbidden twice, never again once the player opened it); a door the player forbade is left
+-- alone and never opened. Returns the text part and the number newly forbidden.
+local function forbid_doors(K, now, refresh)
+  local near = entrance_doors(K, now, refresh)
+  local sd, sstate = seal_doors(K, refresh)
+  rt.seal_tick = sd and sd.tick or nil
+  if near == nil and sd == nil then
+    return sstate == 'pending' and 'doors: no tile test, entrance check pending' or 'doors: no tile test', 0
+  end
+  local cand, seen = {}, {}
+  for _, l in ipairs({near or {}, sd and sd.doors or {}}) do
+    for _, d in ipairs(l) do
+      if int(d.id) and not seen[d.id] then seen[d.id] = true; cand[#cand + 1] = d end
+    end
+  end
+  rt.door_pts = cand
+  local mine, n, already = {}, 0, 0
+  for _, id in ipairs(st.doors) do mine[id] = true end
+  for _, d in ipairs(cand) do
+    if not mine[d.id] then
+      local b = df.building.find(d.id)
+      local f = b and b.door_flags and b.door_flags.forbidden
+      if b and not f then
+        if K.act.door_forbid(d.id, true) then
+          n, mine[d.id] = n + 1, true
+          st.doors[#st.doors + 1] = d.id
+          dirty = true
+        end
+      elseif b and f then already = already + 1 end
+    end
+  end
+  local s = string.format('doors %d forbidden', #st.doors)
+  if already > 0 then s = s .. ' (' .. already .. ' were already)' end
+  if sd and #sd.open > 0 then
+    local l = {}
+    for i, o in ipairs(sd.open) do
+      if i > M.OPEN_SHOWN then break end
+      l[#l + 1] = string.format('%s %d,%d,%d', o.kind, o.pos[1], o.pos[2], o.pos[3])
+    end
+    local more = #sd.open - #l
+    s = s .. string.format(', partial lockdown: %s%s %s no door', table.concat(l, ', '),
+                           more > 0 and (' +' .. more) or '', #sd.open == 1 and 'has' or 'have')
+  elseif not sd and sstate == 'pending' then s = s .. ', entrance check pending' end
+  return s, n
+end
+
+-- undo after quiet: exactly the doors this lockdown forbade (st.doors), the ones still forbidden
 local function open_doors(K)
   local n = 0
   for _, id in ipairs(st.doors) do
@@ -162,6 +211,7 @@ local function open_doors(K)
     end
   end
   st.doors, dirty = {}, true
+  rt.seal_tick, rt.door_pts = nil, nil
   return n
 end
 
@@ -185,30 +235,46 @@ local function sorted(set)
   return r
 end
 
--- issue `acts` (idempotent); returns a summary and the d fields for the event
+M.ALERT_TEXT = 90         -- bytes of the alert's answer in the text (the whole of it is d.alert)
+M.MSG_MAX = 200           -- an event text is cut there (kern), and so is alarm.txt's copy
+
+-- prefix .. parts (', ' between) .. tail within MSG_MAX: a part that does not fit is left out whole (its numbers are
+-- in d), the tail (the announcement) is cut; Run 9's ARRIVAL lost its alert and doors to the cut
+local function compose(prefix, parts, tail)
+  local s, first = prefix, true
+  for _, p in ipairs(parts) do
+    local add = (first and '' or ', ') .. p
+    if #s + #add <= M.MSG_MAX then s, first = s .. add, false end
+  end
+  if tail and #s < M.MSG_MAX then s = s .. tail:sub(1, M.MSG_MAX - #s) end
+  return s
+end
+
+-- issue `acts` (idempotent); returns the parts of the text, in the order they matter (clock, alert, doors, gates,
+-- citizens outside, bridge names), and the d fields for the event
 local function issue(K, acts, now)
-  local parts, d = {}, {}
+  local part, d = {}, {}
   local want = {}
   for _, a in ipairs(acts) do want[a] = true end
   if want.clock then
     local ok, cap = K.call('arbiter', 'hold')
     d.clock = ok and int(cap) or 0
-    parts[#parts + 1] = ok and string.format('clock %d t/s', d.clock) or 'clock: no arbiter'
+    part.clock = ok and string.format('clock %d t/s', d.clock) or 'clock: no arbiter'
   end
   if want.gates then
     local ok, info = K.call('gate', 'lockdown')
     if ok and type(info) == 'table' then
       d.raised = int(info.want) or 0
       rt.gates_up = d.raised > 0 and (int(info.up) or 0) >= d.raised
-      parts[#parts + 1] = string.format('gates %d wanted up (%d up, %d pulls pending)%s', d.raised, int(info.up) or 0,
-                                        int(info.pend) or 0, #(info.names or {}) > 0 and (' ' .. table.concat(info.names, ',')) or '')
+      part.gates = string.format('gates %d wanted up (%d up)', d.raised, int(info.up) or 0)
+      if #(info.names or {}) > 0 then part.names = table.concat(info.names, ',') end
     else
       d.raised = 0
-      parts[#parts + 1] = 'gates: no gate module'
+      part.gates = 'gates: no gate module'
     end
   end
   if want.doors then
-    parts[#parts + 1] = forbid_doors(K, now)
+    part.doors = forbid_doors(K, now, true)
     d.doors = #st.doors
   end
   if want.alert then
@@ -219,24 +285,31 @@ local function issue(K, acts, now)
     local near = type(hc) == 'table' and (((hc.near_cit or -1) >= 0 and hc.near_cit <= M.ALERT_NEAR) or (hc.inside or 0) > 0)
     if h and not h.alert_on and (gates_done or near) then h.alert_on, dirty = true, true end
     if not h or h.alert_on then
-      local ok, r = K.call('siege', 'hold_alert')
-      d.alert = ok and tostring(r) or 'no siege module'
+      -- BUG-011: siege's answer is what holds now (the burrow it sounded, or none and why), never the request
+      local ok, r, short = K.call('siege', 'hold_alert')
+      d.alert = ok and tostring(r):sub(1, 200) or 'none (no siege module)'
+      if ok and type(short) == 'string' then part.alert = short end
     else
       h.alert_at = h.alert_at or now + M.ALERT_AFTER
       d.alert = string.format('after the gates (<= %d ticks)', math.max(0, h.alert_at - now))
     end
-    parts[#parts + 1] = 'alert ' .. d.alert
+    local a = part.alert or d.alert
+    part.alert = 'alert: ' .. (#a > M.ALERT_TEXT and (a:sub(1, M.ALERT_TEXT - 3) .. '...') or a)
   end
   local cu = K.census.u
   local out = type(cu) == 'table' and int(cu.outside) or nil
   if out and out > 0 then
     d.out = out
-    parts[#parts + 1] = out .. ' citizens outside Kern+'
+    part.out = out .. ' citizens outside Kern+'
   end
-  return table.concat(parts, ', '), d
+  local parts = {}
+  for _, k in ipairs({'clock', 'alert', 'doors', 'gates', 'out', 'names'}) do
+    if part[k] then parts[#parts + 1] = part[k] end
+  end
+  return parts, d
 end
 
--- start or extend the lockdown with `acts`; returns the summary of what is in place
+-- start or extend the lockdown with `acts`; returns the parts of the text of what is in place, and d
 local function engage(K, kind, why, acts, now)
   local h = st.hold
   if not h then
@@ -249,9 +322,9 @@ local function engage(K, kind, why, acts, now)
   h.kinds[kind] = true
   for _, a in ipairs(acts) do h.acts[a] = true end
   dirty = true
-  local summary, d = issue(K, sorted(h.acts), now)
+  local parts, d = issue(K, sorted(h.acts), now)
   save(K)
-  return summary, d
+  return parts, d
 end
 
 local function release(K, now)
@@ -403,14 +476,15 @@ local function arrival(K, kind, src, text)
   local now = K.now().tick
   if kind == 'no_depot' then return no_depot(K, text) end
   local new = not (st.hold and st.hold.kinds[kind])
-  local summary, d = engage(K, kind, 'arrival:' .. kind, cfg(K).defaults.ARRIVAL, now)
+  local parts, d = engage(K, kind, 'arrival:' .. kind, cfg(K).defaults.ARRIVAL, now)
   if new then
     d.kind, d.src, d.text = kind, src, tostring(text or ''):sub(1, 200)
     if rt.eta and rt.eta >= 0 then d.eta = rt.eta end
-    local quoted = text and text ~= '' and (' "' .. tostring(text):sub(1, 70) .. '"') or ''
-    interrupt(K, 'ARRIVAL', string.format('%s (%s)%s -> %s', kind, src, quoted, summary), d)
+    -- what was done first, the announcement last (the text is cut at 200 bytes; d.text keeps it)
+    local quoted = text and text ~= '' and ('; "' .. tostring(text):sub(1, 70) .. '"') or ''
+    interrupt(K, 'ARRIVAL', compose(string.format('%s (%s) -> ', kind, src), parts, quoted), d)
   end
-  return summary
+  return table.concat(parts, ', ')
 end
 
 -- public (K.call, arbiter FR-36): a threat or depot popup; the reflexes are issued before this returns, and the
@@ -472,7 +546,9 @@ local function eta(K, h, now)
   local pts = {}
   local okg, gp = K.call('gate', 'points')
   for _, p in ipairs(okg and type(gp) == 'table' and gp or {}) do pts[#pts + 1] = p end
-  for _, d in ipairs(rt.doors and rt.doors.list or {}) do pts[#pts + 1] = {x = d.pos[1], y = d.pos[2], z = d.pos[3]} end
+  for _, d in ipairs(rt.door_pts or rt.doors and rt.doors.list or {}) do
+    pts[#pts + 1] = {x = d.pos[1], y = d.pos[2], z = d.pos[3]}
+  end
   local best = -1
   if #pts > 0 then
     for _, e in ipairs(h.list or {}) do
@@ -498,7 +574,18 @@ local function alert_step(K, h, now)
   if not why then return end
   hd.alert_on, dirty = true, true
   local okc, r = K.call('siege', 'hold_alert')
-  K.log('info', 'reflex: civ alert %s (%s)', okc and tostring(r) or 'no siege module', why)
+  K.log('info', 'reflex: civ alert: %s (%s)', okc and tostring(r) or 'none (no siege module)', why)
+end
+
+-- BUG-012: while a lockdown holds the doors, a new answer of seal's entrance check (the fresh check the lockdown
+-- asked for, a lever pull, a construction) may name doors not forbidden yet; they are forbidden at once
+local function door_step(K, now)
+  local hd = st.hold
+  if not (hd and hd.acts.doors) then return end
+  local x = seal_doors(K, false)
+  if not x or x.tick == rt.seal_tick then return end
+  local s, n = forbid_doors(K, now, false)
+  if n > 0 then K.log('info', 'reflex: %d more entrance doors forbidden after the entrance check: %s', n, s) end
 end
 
 -- the quiet clock: no visible invader, great danger in reach or hostile inside, threat not armed, ARM after the
@@ -537,10 +624,10 @@ local function ack_step(K, now)
       if #acts == 0 then
         K.log('info', 'reflex: interrupt #%d %s unacked for %d s; no default action', r.n, r.type, age)
       else
-        local summary, d = engage(K, 'unacked', 'unacked:' .. r.type, acts, now)
+        local parts, d = engage(K, 'unacked', 'unacked:' .. r.type, acts, now)
         d.why, d.n, d.type = 'ack_timeout', r.n, r.type
-        K.emit('LOCKDOWN', 'A', string.format('interrupt #%d %s unacked for %d s: kernel applied its default: %s',
-               r.n, r.type, age, summary), d)
+        K.emit('LOCKDOWN', 'A', compose(string.format('interrupt #%d %s unacked for %d s: kernel applied its default: ',
+               r.n, r.type, age), parts), d)
       end
       alarm_write(K, true)
     end
@@ -590,6 +677,7 @@ function M.step(K, budget, ctx)
   end
   if not rt.doors or now - rt.doors.tick >= M.DOOR_EVERY or now < rt.doors.tick then entrance_doors(K, now) end
   alert_step(K, h, now)
+  door_step(K, now)
   quiet_step(K, h, now)
   ack_step(K, now)
   depot_visits(K, now)

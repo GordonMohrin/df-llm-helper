@@ -101,7 +101,7 @@ T.test('fort without a manifest: the arrival popup locks down at once (gates, do
   T.eq(#S.acts(W, 'door_forbid'), 1)
   -- clock at once; the civ alert waits for the gates (live L3: it keeps civilians away from the levers)
   T.eq({cap(W), W.timestream_fps}, {30, -1})
-  T.ok(arr[1].msg:find('alert after the gates', 1, true), arr[1].msg)
+  T.ok(arr[1].msg:find('alert: after the gates', 1, true), arr[1].msg)
   local st = W.state()
   T.eq({st.alarm.defcon, st.alarm.lock, st.alarm.unacked, st.alarm.why}, {2, 1, 1, 'arrival:siege'})
   T.eq({st.clock.cap, st.clock.held, st.clock.ts, st.owners.tempo}, {30, 1, -1, 'clock'})
@@ -325,7 +325,7 @@ T.test('alert without a Kern+ burrow: the lockdown reports it instead of failing
   T.eq(#S.pulls(W), 3, 'the other reflexes still run')
   S.run(W, 300)
   local said
-  for _, l in ipairs(W.logs) do if l.msg:find('civ alert no burrow Kern+ (gates up)', 1, true) then said = true end end
+  for _, l in ipairs(W.logs) do if l.msg:find('civ alert: none (no burrow Kern+) (gates up)', 1, true) then said = true end end
   T.ok(said, 'kern.log names the missing burrow')
   T.ok(#S.acts(W, 'alert_burrows') <= 1, 'one try per RETRY window, no ACT_FAIL spam')
 end)
