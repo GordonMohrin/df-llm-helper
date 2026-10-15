@@ -77,10 +77,12 @@ helper is experimental; procedure and fair-play limits: `tools/embark/README.md`
    `embark.py scan WX,WY[,LX,LY] …`: it places the rectangle, reads the warning popup and the
    embark panel and ranks the sites against the DESIGN §5.1 checklist (Dark Fortress and old forts
    ≥ 10 world tiles, not evil, savagery low/medium, trees, flowing water, aquifer none (light only
-   with the probe protocol), flux/ore if shown, shallow soil, temperate, 3x3 or 4x4).
+   with the probe protocol), a metal ore listed and a hard stone layer within reach (no deep soil),
+   flux if shown, temperate, 3x3 or 4x4).
 3. `embark.py embark WX,WY[,LX,LY]` refuses a rejected site and any criterion the panel did not
    show, unless that one id is named with `--waive ID` after checking it by eye (no blanket
-   waiver). Prepare carefully cannot be driven yet (live L0): pass `--play-now` (DF's default
+   waiver); a failed criterion only with `--accept ID --reason "…"` (logged, ask the player
+   first). Prepare carefully cannot be driven yet (live L0): pass `--play-now` (DF's default
    seven) or ask the player to spend the points by hand: 3 picks, 2 axes, anvil, bars, wood, plump
    helmet and surface seeds, 1-2 breeding pairs; skills 2 miners, mason/engraver, carpenter,
    brewer/grower, mechanic, cook/doctor.
@@ -127,7 +129,7 @@ helper is experimental; procedure and fair-play limits: `tools/embark/README.md`
 | `trade.want` | `{want?, sell?}` | tokens like `bar:iron`, `anvil`, `cloth` |
 | `squad.sortie` | `{squad, target, approve:true}` | ALERT/SIEGE/BREACH/RECOVERY; rare, `approve:true` is a deliberate, logged decision; target = kill box id or position |
 | `lever` | `{bridge, want}` | PEACE only |
-| `inspect` | `{what, key?}` | read-only, ≤ 8 KB; `what=tombs`, `water_sources`, `what=orders` (blocked orders), `workload` (idle adults, unclaimed jobs, cancel reasons, free picks/axes), `trade` (merchant goods at the depot, last trades) |
+| `inspect` | `{what, key?}` | read-only, ≤ 8 KB; `what=reach`, `entrances`, `defense`, `perimeter`, `refuge` (seal), `what=tombs`, `water_sources`, `what=orders` (blocked orders), `workload` (idle adults, unclaimed jobs, cancel reasons, free picks/axes), `trade` (merchant goods at the depot, last trades) |
 | `tombs.repair` | `{}` | GHOSTS: the next care run repairs the tombs (any mode) and retries entomb |
 | `order.add` | `{job, amount, item_subtype?, material?, material_category?, reaction?, frequency?}` | one manager order; make-item jobs need `item_subtype` (`ITEM_…`), else DF 53.16 crashes (refused) |
 | `jobs.release` | `{all?, preventblocking?}` | resume suspended constructions; `preventblocking` is a lasting fort decision |
@@ -158,6 +160,10 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | MOOD_RISK | supply the missing class now (dig, trade, butcher); a mood job is never cancelled |
 | ORDER_BAD | a make-item order without `item_subtype` (DF crash) was removed; never queue such orders, use `order.add` with `item_subtype` |
 | DEPOT_MISSING | a caravan came and no depot stands; the kernel queued a `depot` project: check `status`/`proj`, keep O1 down for builders in PEACE |
+| CUTOFF | citizens lost the walk group of their food, drink or beds; the msg names the tile. `inspect reach`; a project still building there: `bp.cancel {proj, undo:true}`; a built wall or raised bridge: tell the player at once (no deconstruct verb) |
+| SEAL_LEAK | the gates are up and a route remains: `inspect entrances` names the leak (tile, door/bridge state); tell the player; place a wall there (`bp.place`), never lower the bridges |
+| PERIMETER_BROKEN | the kernel re-queued the lost walls/doors (`rp…` project); `inspect perimeter` after a day; tell the player about pieces it could not re-queue (bridges) |
+| REFUGE_FAIL | the civ alert left a burrow without drink, food or beds for the fort's interior (`Innen+`) or no confinement; `inspect refuge`; fix the refuge (stockpile, beds, well) in the next plan |
 
 ## 8. Readiness gate (only readiness raises max-pop)
 - **R0:** cap 55 (pop-control `max-pop 55`, `wave-size 8`).

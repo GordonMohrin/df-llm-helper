@@ -494,7 +494,8 @@ local function window(st)
   return {ms_s = (ms + secs // 2) // secs, tps = math.max(0, tps), gap = gap, fmax = fmax}
 end
 
-local SHRINK = {'proj', 'mil', 'trade', 'care', 'labor', 'stock', 'ready', 'bridges', 'threat', 'pop', 'phase'}
+local SHRINK = {'proj', 'alert', 'mil', 'trade', 'care', 'labor', 'stock', 'ready', 'bridges', 'threat', 'pop',
+                'phase'}
 
 local function compose(st)
   st.seq = st.seq + 1

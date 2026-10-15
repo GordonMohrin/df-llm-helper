@@ -8,7 +8,8 @@ local V = require('embark.view')
 local F = {}
 
 local GOOD = {'Temperate Broadleaf Forest', '', 'Temperature: Temperate', 'Trees: Woodland',
-  'Other Vegetation: Moderate', 'Surroundings: Calm', '', 'Brook: Yes', '', 'Little soil', 'Flux stone layer'}
+  'Other Vegetation: Moderate', 'Surroundings: Calm', '', 'Brook: Yes', '', 'Little soil', 'Flux stone layer',
+  'Iron Copper'}
 F.GOOD = GOOD
 -- a Neighbors section without near goblins (appended to a site's panel when listed)
 F.NEIGHBORS_FAR = {'', 'Neighbors:', 'Humans', "Nearest site: 3 days' travel", 'Goblins',

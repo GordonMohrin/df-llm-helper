@@ -129,7 +129,7 @@ Gameplay modules run on `cur_year_tick` deltas, which stay correct under timestr
 
 ## 5. Doctrine encoded
 **5.1 Site and embark** (checklist read from the vanilla embark screen and finder only; port of `tools/embark`):
-- **Site:** ≥10 world tiles from any goblin Dark Fortress and from the 5 old fort sites. Evil neutral or good, savagery low or medium. Trees and flowing water. Aquifer none (light only with the probe protocol; heavy rejects the site). Flux plus ore if shown. Shallow soil. Temperate. Embark 3x3 or 4x4.
+- **Site:** ≥10 world tiles from any goblin Dark Fortress and from the 5 old fort sites. Evil neutral or good, savagery low or medium. Trees and flowing water. Aquifer none (light only with the probe protocol; heavy rejects the site). A metal ore listed and a hard stone layer within reach, read from the panel's layer lines (Run 9 postmortem lesson 1: no metal ore or deep soil rejects the site; a failed criterion passes only with a logged `--accept ID --reason`, FR-08). Flux if shown. Temperate. Embark 3x3 or 4x4.
 - **Spend all points:** 3 picks, 2 axes, an anvil, bars, wood, plump helmet and surface seeds, 1-2 breeding pairs.
 - **Starting skills:** 2 miners, mason/engraver, carpenter, brewer/grower, mechanic, cook/doctor.
 

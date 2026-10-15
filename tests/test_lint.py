@@ -354,6 +354,17 @@ def test_sense_and_snapshot_may_read_but_must_filter():
     assert rule_set("df.global.pause_state = true", "lua/dfllm/sense.lua") == {"df-write"}   # read-only role
 
 
+def test_seal_reads_revealed_tiles_but_no_units():
+    """FR-22/54: seal reads tiles and walk groups (revealed only); units only by census id, writes only via act."""
+    ok = ("local d = dfhack.maps.getTileFlags(1, 2, 3)\n"
+          "if d and not d.hidden then local g = dfhack.maps.getWalkableGroup({x = 1, y = 2, z = 3}) end")
+    assert rules(ok, "lua/dfllm/seal.lua") == []
+    assert rules("local g = dfhack.maps.getWalkableGroup(p)", "lua/dfllm/seal.lua") == [(1, "visibility")]
+    assert rule_set("local c = dfhack.units.getCitizens()", "lua/dfllm/seal.lua") == {"unit-iter"}
+    assert rule_set("dfhack.burrows.setAssignedTile(b, p, true)", "lua/dfllm/seal.lua") == {"mutating-api"}
+    assert rule_set("local g = dfhack.maps.getWalkableGroup(p)", MOD) == {"tile-read"}       # other modules
+
+
 def test_perf_only_inside_loops():
     assert rules("local n = #df.global.world.items.all\nlocal q = require('dfllm.util.json')") == []
     assert rule_set("for i = 1, 2 do local it = df.global.world.items.all[i] end") == {"perf-loop"}

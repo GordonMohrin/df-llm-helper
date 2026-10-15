@@ -51,6 +51,7 @@ MODULES = [
     ("military", "WP6", False, {"ticks": 3600}), ("drill", "WP6", False, {"ticks": 600}),
     ("readiness", "WP6", False, {"ticks": 33600}), ("arbiter", "WP1", True, {"ms": 500}),
     ("runner", "WP7", False, {"ticks": 600}), ("snapshot", "WP7", False, {"ticks": 100}),
+    ("seal", "WP7", False, {"ticks": 50}),
     ("economy", "WP8", False, {"ticks": 1200}), ("care", "WP8", False, {"ticks": 1200}),
     ("water", "WP8", False, {"ticks": 1200}),
     ("trade", "WP9", False, {"ticks": 100}), ("baseline", "WP8", False, {"ticks": 33600}),
@@ -72,6 +73,7 @@ ACT = {
     "squad_unequip": ["military"], "animal_slaughter": ["economy"], "zone_remove": ["runner"], "manager_office": ["economy"], "pond_remove": ["water"],
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
     "door_forbid": ["reflex"],
+    "burrow_tiles": ["seal"],
     "popcap": ["readiness"],
     "quickfort": ["runner"],
     "orders_import": ["economy"], "orders": ["economy"], "workorder": ["economy", "water"],
@@ -93,6 +95,7 @@ STATE_OWNERS = {
     "stock.hosp_water": "care", "care.*": "care", "labor.*": "economy", "orders.*": "economy",
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
     "clock.*": "arbiter", "alarm.*": "reflex", "lever.*": "gate",
+    "alert.*": "seal",
 }
 
 # kernel fault and slowness rules (CONTRACTS §3.3.5-3.3.6), mirrors contract.KERN
@@ -427,6 +430,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "LOCKDOWN": ("A", "reflex", _d("why:s", "n:i type:s raised:i doors:i alert:s clock:i")),
     "ORDER_BAD": ("A", "economy", _d("order:i job:s", "dropped:f")),
     "DEPOT_MISSING": ("A", "trade", _d(opt="civ:s planned:f proj:s")),
+    "CUTOFF": ("A", "seal", _d("cls:s n:i", "pos:p why:s grp:i main:i")),
+    "PERIMETER_BROKEN": ("A", "seal", _d("n:i", "pos:p kinds:sa requeued:i why:s")),
+    "SEAL_LEAK": ("A", "seal", _d("routes:i", "pos:p bld:s state:s why:s")),
+    "REFUGE_FAIL": ("A", "seal", _d("burrow:s", "fallback:s why:s tiles:i inside:i mode:s")),
     "ALERT_START": ("B", "siege", _d(opt="vis:i")),
     "ALERT_END": ("B", "siege", _d(opt="vis:i")),
     "LOCKDOWN_END": ("B", "reflex", _d(opt="why:s ticks:i doors:i")),
@@ -457,6 +464,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "ORDER_STUCK": ("B", "economy", _d("order:i job:s why:s", "n:i days:i dropped:f")),
     "JOBS_SUSPENDED": ("B", "economy", _d(opt="suspended:i released:i kept:i planned:i why:s")),
     "TRADE_LEDGER": ("B", "trade", _d(opt="civ:s ok:f ratio:i sold:i sold_v:i bought:i bought_v:i unmet:sa")),
+    "SEAL": ("B", "seal", _d(opt="routes:i pos:p why:s sealed:f")),
+    "REACH": ("B", "seal", _d(opt="flags:sa cut:i stairs:i")),
     "SIEGE_STATUS": ("C", "siege", _d(opt="vis:i worn:i on_station:i deaths:i captures:i")),
     "SEASON": ("C", "kern", _d(opt="year:i season:i")),
     "PROJECT_STAGE": ("C", "runner", _d("proj:s", "stage:s pct:i")),
@@ -499,7 +508,7 @@ VERB_ARGS: dict[str, Obj] = {
     "lever": Obj(req={"bridge": BRIDGE, "want": Str(enum=["up", "down"])}),
     "inspect": Obj(req={"what": Str(enum=["state", "modules", "census", "manifest", "projects", "persist",
                                           "perf", "mode", "plan", "tombs", "water_sources", "orders", "workload",
-                                          "trade"])},
+                                          "trade", "reach", "entrances", "defense", "perimeter", "refuge"])},
                    opt={"key": Str(maxbytes=80)}),
     "selftest": Obj(opt={"suite": Str(enum=["quick", "full"])}),
     "module.enable": Obj(req={"module": MODULE}),
@@ -573,7 +582,9 @@ STATE = Obj(
          "alarm": Obj(req={"defcon": Int(1, 5), "unacked": NAT, "last": NAT, "ack": NAT, "lock": FLAG,
                            "why": Str(maxbytes=24)}, opt={"eta": Int(-1)}),
          # FR-55 lever latency (gate): last pull -> wanted state, in s and ticks (-1 never); pending own pulls
-         "lever": Obj(req={"lat_s": Int(-1), "lat_t": Int(-1), "pend": NAT, "wait_s": NAT})})
+         "lever": Obj(req={"lat_s": Int(-1), "lat_t": Int(-1), "pend": NAT, "wait_s": NAT}),
+         "alert": Obj(req={"want": Str(maxbytes=24), "burrow": Str(maxbytes=24), "tiles": NAT, "inside": NAT,
+                           "ok": FLAG}, opt={"why": Str(maxbytes=40)})})
 
 HEARTBEAT = Obj(req={"v": Const(V), "wall": NAT, "frame": NAT, "tick": TICK, "paused": Bool(), "mode": MODE,
                      "seq": NAT})

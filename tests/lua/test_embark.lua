@@ -152,9 +152,10 @@ T.test('checklist: good site is ok only with dark-fortress evidence', function()
   T.eq(r.verdict, 'ok'); T.eq(r.score, 100); T.eq(r.warns, {})
 end)
 
-T.test('checklist: light aquifer and deep soil warn, evil rejects', function()
+T.test('checklist: light aquifer warns; very deep soil (no stone) and no metal reject; evil rejects', function()
   local r = eval('site_aquifer_popup', {dark_fortresses_seen = far_df})
-  T.eq(r.verdict, 'ok')
+  T.eq(r.verdict, 'reject')
+  T.eq(r.fails, {'ore', 'stone'})
   T.ok(has(r.warns, 'aquifer') and has(r.warns, 'soil') and has(r.warns, 'trees') and has(r.warns, 'popup'))
   T.ok(r.score < 60)
   r = eval('site_evil_popup', {dark_fortresses_seen = far_df})
@@ -162,19 +163,54 @@ T.test('checklist: light aquifer and deep soil warn, evil rejects', function()
   for _, id in ipairs({'evil', 'trees', 'water', 'popup'}) do T.ok(has(r.fails, id), id) end
 end)
 
-T.test('checklist (live L6): deep soil warns stone (no stone layer up top), worse wording with a light aquifer', function()
-  local function item(r, id) for _, it in ipairs(r.items) do if it.id == id then return it end end end
+local function item(r, id) for _, it in ipairs(r.items) do if it.id == id then return it end end end
+local function ev_rec(rec) return C.evaluate(rec, {dark_fortresses_seen = far_df}, {world = {8, 30}, size = {4, 4}}) end
+
+T.test('checklist (live L6, Run 9 lesson 1): no hard stone layer within reach rejects (deep soil, popup)', function()
   local r = eval('site_aquifer_popup', {dark_fortresses_seen = far_df})   -- very deep soil + light aquifer
-  T.ok(has(r.warns, 'stone'))
+  T.ok(has(r.fails, 'stone'))
   T.ok(item(r, 'stone').why:find('below the aquifer', 1, true), item(r, 'stone').why)
   r = eval('site_good_panel', {dark_fortresses_seen = far_df})            -- little soil
-  T.eq(item(r, 'stone').res, 'pass'); T.ok(not has(r.warns, 'stone'))
+  T.eq(item(r, 'stone').res, 'pass'); T.ok(not has(r.fails, 'stone'))
   local rec = P.parse(fixture('site_good_panel'))
   rec.soil, rec.aquifer = 'deep', 'none'
-  r = C.evaluate(rec, {dark_fortresses_seen = far_df}, {world = {8, 30}, size = {4, 4}})
-  T.eq(item(r, 'stone').res, 'warn'); T.ok(item(r, 'stone').why:find('boulders scarce', 1, true))
-  rec.soil = nil
-  T.eq(item(C.evaluate(rec, {dark_fortresses_seen = far_df}, {world = {8, 30}, size = {4, 4}}), 'stone').res, 'skip')
+  r = ev_rec(rec)
+  T.eq(item(r, 'stone').res, 'fail'); T.ok(item(r, 'stone').why:find('boulders scarce', 1, true))
+  T.eq(r.verdict, 'reject')
+  rec.stone_soil = 'little'                                               -- another hovered tile: little soil
+  T.eq(item(ev_rec(rec), 'stone').res, 'pass')
+  rec.stone_soil, rec.soil = nil, nil
+  T.eq(item(ev_rec(rec), 'stone').res, 'unknown', 'soil depth not shown')
+  rec.layers = {'granite'}
+  T.eq({item(ev_rec(rec), 'stone').res, item(ev_rec(rec), 'stone').why}, {'pass', 'stone layers granite'})
+  rec.soil, rec.warnings = 'little', {'no_stone'}
+  r = ev_rec(rec)
+  T.eq({item(r, 'stone').res, item(r, 'stone').why}, {'fail', 'popup: difficult to obtain stone'})
+  T.ok(not has(r.fails, 'popup'), 'the no-stone popup is the stone rule, not a blanket popup fail')
+end)
+
+T.test('checklist (Run 9 lesson 1): a metal ore must be listed; iron passes, other metals warn', function()
+  local rec = P.parse(fixture('site_good_panel'))
+  T.eq(item(ev_rec(rec), 'ore').res, 'pass')
+  rec.metals = {'copper', 'tin'}
+  T.eq({item(ev_rec(rec), 'ore').res, item(ev_rec(rec), 'ore').why}, {'warn', 'bronze only (copper, tin)'})
+  rec.metals = {'gold'}
+  T.eq({item(ev_rec(rec), 'ore').res, item(ev_rec(rec), 'ore').why}, {'warn', 'no iron (gold)'})
+  rec.metals = nil
+  local r = ev_rec(rec)
+  T.eq({item(r, 'ore').res, item(r, 'ore').why, r.verdict}, {'fail', 'no metal ore shown', 'reject'})
+  T.eq(item(C.evaluate(P.parse(fixture('title')), RULES, {}), 'ore').res, 'unknown', 'panel not read')
+  for _, id in ipairs({'ore', 'stone'}) do T.ok(C.ACCEPTABLE_SET[id] and C.WAIVABLE_SET[id], id) end
+  T.ok(not C.ACCEPTABLE_SET.panel and not C.ACCEPTABLE_SET.popup, 'never the panel or a failing popup')
+end)
+
+T.test('panel: stone layer lines (the embark screen\'s layer list) are read as layers, soils are not', function()
+  local pad = string.rep(' ', 40)
+  local v = V.from_lines({pad .. 'Little soil', pad .. 'Granite, Limestone layers', pad .. 'Rock salt', pad .. 'Clay'},
+                         {focus = {'choose_start_site'}})
+  local r = P.parse(v)
+  T.eq(r.layers, {'granite', 'limestone', 'rock salt'})
+  T.eq(r.soil, 'little')
 end)
 
 T.test('checklist: distances, size, heavy aquifer, unreadable panel', function()
@@ -265,6 +301,9 @@ T.test('steps: merge_tiles keeps the best water/trees/metals and the worst evil/
   T.eq(m.water, 'brook'); T.eq(m.trees, 'heavily_forested'); T.eq(m.metals, {'iron'}); T.eq(m.flux, true)
   T.eq(m.evil, 'evil'); T.eq(m.savagery, 'high'); T.eq(m.aquifer, 'light')
   T.eq(m.neighbors[1].race, 'goblins'); T.eq(m.tiles, {n = 2, water = 1, wood = 1})
+  local deep = P.parse(fixture('site_aquifer_popup'))                      -- very deep soil on the hovered tile
+  local d = S.merge_tiles(deep, {{rivers = {}, soil = 'some', layers = {'granite'}}, {rivers = {}, soil = 'deep'}})
+  T.eq({d.soil, d.stone_soil, d.layers}, {'very_deep', 'some', {'granite'}}, 'stone: the shallowest tile counts')
   T.eq(S.merge_tiles(rec, nil), rec)
 end)
 
@@ -365,7 +404,7 @@ T.test('runner: the gate needs every unknown criterion waived by name', function
   T.eq(ctx.warnings, {'site.gate: waived dark_fortress'})
   -- unknown evil and savagery (no Surroundings line) are refused although dark_fortress is waived
   D = F.new({screen = 'world', sites = {['8,30'] = {panel = {'Temperature: Temperate', 'Trees: Woodland',
-    'Brook: Yes', 'Little soil'}}}})
+    'Brook: Yes', 'Little soil', 'Iron'}}}})
   run = start(D, {v = 2, id = 'e7', mode = 'embark', site = {8, 30}, waive = {'dark_fortress'}})
   T.eq(run.state, 'failed'); T.ok(run.msg:find('not waived: evil,savagery', 1, true), run.msg)
   D = F.new({screen = 'world'})
@@ -373,6 +412,28 @@ T.test('runner: the gate needs every unknown criterion waived by name', function
   T.eq(run.state, 'failed'); T.ok(run.msg:find('cannot waive all', 1, true), run.msg)
   T.raises(function() S.build({id = 'x', mode = 'embark', site = {1, 2}, accept_review = true}, CFG, LOADOUT) end,
     'accept_review was removed')
+end)
+
+T.test('runner (FR-08): a failed criterion passes the gate only when accepted by name with a reason', function()
+  local nometal = {['8,30'] = {neighbors = F.NEIGHBORS_FAR, panel = {'Temperate Broadleaf Forest', '',
+    'Temperature: Temperate', 'Trees: Woodland', 'Other Vegetation: Moderate', 'Surroundings: Calm', '', 'Brook: Yes',
+    '', 'Little soil', 'Flux stone layer'}}}
+  local D = F.new({screen = 'world', sites = nometal})
+  local run = start(D, {v = 2, id = 'a1', mode = 'embark', site = {8, 30}})
+  T.eq(run.state, 'failed'); T.ok(run.msg:find('site rejected (fails: ore)', 1, true), run.msg)
+  T.eq(D.pressed.Confirm, nil)
+  D = F.new({screen = 'world', sites = nometal})
+  run = start(D, {v = 2, id = 'a2', mode = 'embark', site = {8, 30}, accept = {{id = 'ore'}}})
+  T.eq(run.state, 'failed'); T.ok(run.msg:find('accepting ore needs a reason', 1, true), run.msg)
+  D = F.new({screen = 'world', sites = nometal})
+  run = start(D, {v = 2, id = 'a3', mode = 'embark', site = {8, 30}, accept = {{id = 'panel', why = 'x x x'}}})
+  T.eq(run.state, 'failed'); T.ok(run.msg:find('cannot accept panel', 1, true), run.msg)
+  D = F.new({screen = 'world', sites = nometal})
+  local ctx
+  run, _, ctx = start(D, {v = 2, id = 'a4', mode = 'embark', site = {8, 30}, play_now = true,
+                          accept = {{id = 'ore', why = 'bars by trade, iron from the second caravan'}}})
+  T.eq(run.state, 'done', run.msg); T.eq(D.screen, 'fort')
+  T.eq(ctx.warnings, {'site.gate: accepted ore (bars by trade, iron from the second caravan)'})
 end)
 
 T.test('runner: a read that is not of the placed target fails (rectangle follows the mouse)', function()

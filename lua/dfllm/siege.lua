@@ -450,7 +450,14 @@ local function apply(K, a, g, now)
       for _, b in ipairs(g.outer) do want(K, b, 'up', 'alert') end
     end
   elseif mode == 'RECOVERY' then lower(K, g) end
-  set_alert(K, alert_wanted(K, a, g, now), mode == 'BREACH' and g.refuge or g.kern, g, now)
+  -- FR-33/37/57: seal audits the burrow (drink, food, beds for the population; the refuge after a BREACH until
+  -- quiet) and may choose another one or none (nil: no confinement); without seal the mode's burrow as before
+  local on, burrow = alert_wanted(K, a, g, now), mode == 'BREACH' and g.refuge or g.kern
+  if on then
+    local okb, pick = K.call('seal', 'alert_burrow', mode, burrow)
+    if okb then burrow, on = pick, pick ~= nil end
+  end
+  set_alert(K, on, burrow, g, now)
   set_posture(K, POSTURE[mode], now)
   if mode == 'SIEGE' or mode == 'BREACH' then kills(K, g, POSTURE[mode], now) end
 end

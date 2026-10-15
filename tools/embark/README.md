@@ -110,6 +110,7 @@ python tools/embark/embark.py newgame [--world Zilirr]     # title -> world map
 python tools/embark/embark.py scan 26,10 18,9,6,6 7,23     # read and rank sites, embark nowhere
 python tools/embark/embark.py embark 7,23,6,6              # read -> gate -> confirm -> prepare -> Embark!
 python tools/embark/embark.py embark 7,23,6,6 --waive dark_fortress   # one criterion checked by eye
+python tools/embark/embark.py embark 7,23,6,6 --accept ore --reason "copper/tin listed, iron by trade"   # FR-08
 python tools/embark/embark.py state | check | screen NAME | status | stop
 ```
 `WX,WY` is the world tile, optional `LX,LY` (0-15) the local tile of the rectangle's top-left
@@ -118,7 +119,21 @@ fort: `dfhack-run dfllm adopt`.
 
 Raw form: `dfhack-run lua -f <repo>/tools/embark/embark.lua run <spec.json>` with
 `{"v":2,"id":"s1","mode":"scan","cands":[[26,10],[18,9,6,6]]}`. Embark options: `waive` (list of
-criterion ids), `play_now`, `allow_unspent`. The old blanket `accept_review` is refused.
+criterion ids), `accept` (list of `{id, why}`), `play_now`, `allow_unspent`. The old blanket `accept_review` is
+refused.
+
+**Metal and stone (Run 9 postmortem, lesson 1).** A site must list a metal ore (`ore`: no metal line = fail; iron
+passes, copper/tin or other metals warn) and have a hard stone layer within reach (`stone`: fails for deep, very deep
+or extremely deep soil and for the popup "difficult to obtain stone"; the shallowest soil of the 16 hovered tiles
+counts; stone layer names on the panel are listed as evidence). Both come from the embark panel's layer lines only:
+no prospect, no world data, no hidden tiles.
+
+**Waiver for failed criteria (FR-08).** `--waive ID` covers a criterion the panel did not show (`unknown`).
+`--accept ID --reason TEXT` lets the gate pass one criterion that FAILED (a known trade-off: an old fort's ruins
+nearby, scarce trees, no iron), one id at a time, never `panel` or a failing warning popup (heavy aquifer, evil,
+savage, necromancer, early invasion). The reason is required; `embark.py` appends one line per accepted id to
+`<DF>/dfllm-runtime/embark/accept.log` (time, run id, site, id, reason) and the gate writes
+`site.gate: accepted ID (reason)` into the run's warnings.
 
 ## 4. Procedure
 | Step | UI action | Done when | Live |
@@ -132,7 +147,7 @@ criterion ids), `play_now`, `allow_unspent`. The old blanket `accept_review` is 
 | local.place | click the "Embark" button; camera; click the local map | `embark_pos_min` = target; else learn k = rect - camera and retry | run4-6 |
 | site.read | ONE capture with the Confirm popup open: popup sentences, panel, Neighbors section and the rectangle; fail unless the rectangle is still the target; evaluate §5.1; save `capture/<id>-site-<tag>.txt` | read | run4-6 (probe.sh) |
 | site.abort (scan only) | click the popup's Abort (the one next to Confirm; the bottom-bar Abort leaves the embark) | popup gone | run4-6 |
-| site.gate (embark only) | refuse any fail; refuse any unknown criterion not named in `waive` | verdict | untested |
+| site.gate (embark only) | refuse any fail not named in `accept` (with a reason); refuse any unknown criterion not named in `waive`/`accept` | verdict | untested |
 | site.confirm | rectangle still the target, then click "Confirm" once and wait | "Prepare carefully" screen (≤ 3 min) | run4-6 |
 | prep.choice | click "Prepare for the journey carefully" (or "Play now!") once and wait | Dwarves tab (or the fort, ≤ 10 min) | run4-6 |
 | prep.skills.N | click dwarf row N (fallback `selected_u`), click skill rows until the role is done or picks are 0 | levels read back | untested |

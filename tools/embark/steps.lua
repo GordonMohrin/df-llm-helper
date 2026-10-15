@@ -277,11 +277,16 @@ local TREE_RANK = {none = 0, scarce = 1, sparse = 2, woodland = 3, heavily_fores
 local EVIL_RANK = {good = 0, neutral = 1, evil = 2}
 local SAV_RANK = {low = 0, medium = 1, high = 2}
 local AQ_RANK = {none = 0, light = 1, varied = 2, heavy = 3}
+-- soil depth, shallowest first: the stone criterion takes the best tile (a fort is dug where stone is near)
+local SOIL_RANK = {none = 0, little = 1, shallow_sand = 2, shallow_clay = 2, some = 3, deep = 4, very_deep = 5,
+  extremely_deep = 6}
 local function merge_tiles(rec, tiles)
   if not tiles or #tiles == 0 then return rec end
-  local seen_r, seen_m = {}, {}
+  local seen_r, seen_m, seen_l = {}, {}, {}
   for _, r in ipairs(rec.rivers or {}) do seen_r[r] = true end
   for _, m in ipairs(rec.metals or {}) do seen_m[m] = true end
+  for _, l in ipairs(rec.layers or {}) do seen_l[l] = true end
+  rec.stone_soil = rec.soil
   local near = {}
   for _, n in ipairs(rec.neighbors or {}) do near[n.race] = n end
   local nw, nt = 0, 0
@@ -295,6 +300,10 @@ local function merge_tiles(rec, tiles)
     for _, m in ipairs(t.metals or {}) do
       if not seen_m[m] then seen_m[m] = true; rec.metals = rec.metals or {}; rec.metals[#rec.metals + 1] = m end
     end
+    for _, l in ipairs(t.layers or {}) do
+      if not seen_l[l] then seen_l[l] = true; rec.layers = rec.layers or {}; rec.layers[#rec.layers + 1] = l end
+    end
+    if (SOIL_RANK[t.soil] or 99) < (SOIL_RANK[rec.stone_soil] or 99) then rec.stone_soil = t.soil end
     if t.flux then rec.flux = true end
     if (EVIL_RANK[t.evil] or -1) > (EVIL_RANK[rec.evil] or -1) then rec.evil = t.evil end
     if (SAV_RANK[t.savagery] or -1) > (SAV_RANK[rec.savagery] or -1) then rec.savagery = t.savagery end
@@ -456,29 +465,49 @@ function S.abort_popup()
 end
 
 -- Refuse to embark unless every criterion passed or warned. A criterion the panel did not show
--- ('unknown') passes only if it is named in `waive` (embark.py --waive ID, checked by eye);
--- there is no blanket waiver. Used waivers go into the run warnings.
-function S.gate(waive)
-  local named = {}
+-- ('unknown') passes only if it is named in `waive` (embark.py --waive ID, checked by eye); a criterion that
+-- FAILED passes only if it is named in `accept` with a reason (FR-08, embark.py --accept ID --reason TEXT: a
+-- known trade-off such as no metal ore); there is no blanket waiver. Used waivers and acceptances (with their
+-- reason) go into the run warnings.
+function S.gate(waive, accept)
+  local named, took, why = {}, {}, {}
   for _, id in ipairs(waive or {}) do named[id] = true end
+  for _, a in ipairs(accept or {}) do
+    local id = type(a) == 'table' and a.id or a
+    took[id], why[id] = true, type(a) == 'table' and a.why or nil
+  end
   return {id = 'site.gate', live = 'untested',
     act = function(ui, v, ctx)
       for id in pairs(named) do
         if not checklist.WAIVABLE_SET[id] then return 'fail', 'cannot waive ' .. tostring(id) end
       end
+      for id in pairs(took) do
+        if not checklist.ACCEPTABLE_SET[id] then return 'fail', 'cannot accept ' .. tostring(id) end
+        if type(why[id]) ~= 'string' or #why[id]:gsub('^[ \t]+', '') < 3 then
+          return 'fail', 'accepting ' .. id .. ' needs a reason'
+        end
+      end
       local r = ctx.last
       if not r then return 'fail', 'no site read' end
-      if #r.fails > 0 then return 'fail', 'site rejected (fails: ' .. table.concat(r.fails, ',') .. ')' end
+      local refused, accepted = {}, {}
+      for _, id in ipairs(r.fails) do
+        if took[id] then accepted[#accepted + 1] = id else refused[#refused + 1] = id end
+      end
+      if #refused > 0 then return 'fail', 'site rejected (fails: ' .. table.concat(refused, ',') .. ')' end
       local open, used = {}, {}
       for _, id in ipairs(r.unknown) do
-        if named[id] then used[#used + 1] = id else open[#open + 1] = id end
+        if named[id] or took[id] then used[#used + 1] = id else open[#open + 1] = id end
       end
       if #open > 0 then return 'fail', 'unknown and not waived: ' .. table.concat(open, ',') end
-      if #used > 0 then
-        ctx.warnings = ctx.warnings or {}
-        ctx.warnings[#ctx.warnings + 1] = 'site.gate: waived ' .. table.concat(used, ',')
+      ctx.warnings = ctx.warnings or {}
+      if #used > 0 then ctx.warnings[#ctx.warnings + 1] = 'site.gate: waived ' .. table.concat(used, ',') end
+      for _, id in ipairs(accepted) do
+        ctx.warnings[#ctx.warnings + 1] = 'site.gate: accepted ' .. id .. ' (' .. why[id] .. ')'
       end
-      return 'done', r.verdict .. (#used > 0 and (', waived ' .. table.concat(used, ',')) or '')
+      local notes = {}
+      if #used > 0 then notes[#notes + 1] = 'waived ' .. table.concat(used, ',') end
+      if #accepted > 0 then notes[#notes + 1] = 'accepted ' .. table.concat(accepted, ',') end
+      return 'done', r.verdict .. (#notes > 0 and (', ' .. table.concat(notes, ', ')) or '')
     end}
 end
 
@@ -640,7 +669,7 @@ end
 
 ---------------------------------------------------------------- run specs
 -- spec = {v=2, id, mode='newgame'|'scan'|'embark'|'prep', world='Zilirr', cands={{wx,wy,lx,ly}},
---         site={wx,wy,lx,ly}, waive={criterion ids}, play_now=bool, allow_unspent=bool}
+--         site={wx,wy,lx,ly}, waive={criterion ids}, accept={{id, why}}, play_now=bool, allow_unspent=bool}
 local function place_and_read(out, c, cfg, tag, tiles)
   local ex = 16 * c[1] + (c[3] or cfg.default_local[1])
   local ey = 16 * c[2] + (c[4] or cfg.default_local[2])
@@ -691,7 +720,7 @@ function S.build(spec, cfg, loadout)
   elseif spec.mode == 'embark' then
     -- read, gate and confirm the same placed rectangle; the popup stays open in between
     local ex, ey = place_and_read(out, spec.site, cfg, spec.id, spec.tiles ~= false)
-    out[#out + 1] = S.gate(spec.waive)
+    out[#out + 1] = S.gate(spec.waive, spec.accept)
     out[#out + 1] = S.confirm(ex, ey)
     prep_steps(out, spec, cfg, loadout)
   elseif spec.mode == 'prep' then

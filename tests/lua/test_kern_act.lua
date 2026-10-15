@@ -601,6 +601,33 @@ T.test('animal_slaughter (live L6): the animal sheet toggle for tame fort animal
   T.eq(W.unit(20).flags2.slaughter, false)
 end)
 
+T.test('burrow_tiles (FR-33): burrows screen add + paint; seal only; new tiles counted; log line summarised', function()
+  H.world{tag = 'btiles'}
+  local bl = df.global.plotinfo.burrows
+  bl.list, bl.next_id = kmock.vec{}, 7
+  df.burrow = {new = function() return {} end}
+  local set = {}
+  local function k(b, p) return b.id .. ':' .. p.x .. ',' .. p.y .. ',' .. p.z end
+  dfhack.burrows.findByName = function(n) for _, b in ipairs(bl.list) do if b.name == n then return b end end end
+  dfhack.burrows.isAssignedTile = function(b, p) return set[k(b, p)] == true end
+  dfhack.burrows.setAssignedTile = function(b, p, on) set[k(b, p)] = on; return true end
+  local env = mk()
+  env.who_v = 'siege'
+  T.eq({env.api.burrow_tiles('Innen+', {{1, 2, 3}}, true)}, {false, 'not owner'})
+  env.who_v = 'seal'
+  T.eq({env.api.burrow_tiles('Innen+', {{1, 2, 3}})}, {false, 'no burrow Innen+'})
+  T.eq({env.api.burrow_tiles('Innen+', {{1, 2, 3}, {1, 2, 3}, {4, 5, 6}}, true)}, {true, 2})
+  T.eq({#bl.list, bl.list[0].id, bl.list[0].name, bl.next_id}, {1, 7, 'Innen+', 8})
+  T.eq({env.api.burrow_tiles('Innen+', {{x = 4, y = 5, z = 6}, {7, 8, 9}})}, {true, 1})
+  T.eq(#bl.list, 1, 'no second burrow')
+  T.eq({env.api.burrow_tiles('Innen+;x', {})}, {false, 'bad burrow name'})
+  local many = {}
+  for i = 1, 2001 do many[i] = {i, 0, 0} end
+  T.eq({env.api.burrow_tiles('Innen+', many)}, {false, 'need at most 2000 tiles'})
+  local line = env.lines[3]
+  T.eq({line[2], line[3]}, {'act.burrow_tiles', '["Innen+",{"first":[1,2,3],"tiles":3},true]'})
+end)
+
 T.test('zone_remove (live L6): only the zones of that dfllm-* name are deconstructed', function()
   local W = H.world{tag = 'zrm'}
   local gone = {}

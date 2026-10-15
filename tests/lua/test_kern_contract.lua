@@ -111,7 +111,7 @@ T.test('R2 slow calls decay and demoted modules are promoted after 10 quiet minu
   kern.stop()
 end)
 
-T.test('dfllm adopt on an unmarked save: marker, year1 phases, all 18 real modules, status, selftest', function()
+T.test('dfllm adopt on an unmarked save: marker, year1 phases, all 19 real modules, status, selftest', function()
   local REPO = debug.getinfo(1, 'S').source:sub(2):gsub('\\', '/'):gsub('/tests/lua/[^/]+$', '')
   local S = require('siege_world')
   local W = H.world{tag = 'adopt', marker = false, units = S.fort_units()}
@@ -128,7 +128,7 @@ T.test('dfllm adopt on an unmarked save: marker, year1 phases, all 18 real modul
   chunk('status')
   chunk('selftest', 'quick')
   print = saved_print
-  T.ok(out[1]:find('^dfllm: booted region1%-site%d+ %(18 modules'), out[1])
+  T.ok(out[1]:find('^dfllm: booted region1%-site%d+ %(19 modules'), out[1])
   local marker = json.decode(W.persist_raw['dfllm'])
   T.eq({marker.v, marker.boots, marker.acceptance}, {2, 1, 0})
   local plan = json.decode(W.persist_raw['dfllm.plan'])

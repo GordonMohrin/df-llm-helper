@@ -644,6 +644,8 @@ local function apply(K, P, st, R)
   local p = {mode = st.mode, data = chunk_data(ch), pos = ch.pos}
   if st.mode == 'dig' then p.priority = P.prio end
   local pre = st.mode == 'build' and pre_occupied(K, ch, R) or 0
+  -- FR-22: seal remembers the closing cells (walls, doors, bridges) and takes a reach baseline before they are queued
+  if st.mode == 'build' then K.call('seal', 'closing', P.id, P.tpl, P.class, ch) end
   -- quickfort allocates the ids of the buildings it places (build.lua:1259 constructBuilding)
   local n0 = st.mode == 'build' and df.global.building_next_id or nil
   local ok, stats = qf(K, p)
@@ -1449,6 +1451,44 @@ function M.dig_backlog(K)
     end
   end
   return n
+end
+
+-- FR-56 (seal): a defense project that builds lost perimeter pieces again. cells = {{x, y, z, text}, ...} absolute
+-- quickfort build cells (Cw, d, gw(3x1) ...); like cmd.py's repair_doc, buildingplan waits for the materials (no
+-- orders) and there is no manifest fragment. Returns ok, project id.
+function M.repair(K, cells, why)
+  if type(cells) ~= 'table' or #cells == 0 or #cells > 500 then return false, 'need 1-500 cells' end
+  local list = {}
+  for i, c in ipairs(cells) do
+    local x, y, z = int(type(c) == 'table' and c[1]), int(type(c) == 'table' and c[2]), int(type(c) == 'table' and c[3])
+    if not (x and y and z) or type(c[4]) ~= 'string' or #c[4] < 1 or #c[4] > 64 then return false, 'bad cell ' .. i end
+    list[#list + 1] = {x, y, z, c[4]}
+  end
+  table.sort(list, function(a, b)
+    if a[3] ~= b[3] then return a[3] < b[3] end
+    if a[2] ~= b[2] then return a[2] < b[2] end
+    return a[1] < b[1]
+  end)
+  local chunks = {}
+  for i = 1, #list, 40 do                     -- chunk pos = the chunk's min corner: offsets stay >= 0
+    local part = {table.unpack(list, i, math.min(#list, i + 39))}
+    local x0, y0, z0 = part[1][1], part[1][2], part[1][3]
+    for _, c in ipairs(part) do x0, y0, z0 = math.min(x0, c[1]), math.min(y0, c[2]), math.min(z0, c[3]) end
+    local ch = {pos = {x0, y0, z0}, cells = {}}
+    for _, c in ipairs(part) do ch.cells[#ch.cells + 1] = {c[1] - x0, c[2] - y0, c[3] - z0, c[4]} end
+    chunks[#chunks + 1] = ch
+  end
+  local t = now(K)
+  local id, n = string.format('rp%d', t), 0
+  while find(id) do n = n + 1; id = string.format('rp%d-%d', t, n) end
+  local d = {v = 2, tpl = 'repair', site = 'repair', class = 'defense', params = obj{}, rot = 0,
+             anchor = {list[1][1], list[1][2], list[1][3]}, manifest = {v = 2}, materials = obj{},
+             stages = {{label = 's1.build', mode = 'build', orders = 0, defense = 1, chunks = chunks}}}
+  local ok, err = register(K, id, d, 2, 'repair')
+  if not ok then return false, err end
+  save(K)
+  K.log('info', 'repair %s queued: %d cells (%s)', id, #list, tostring(why or ''))
+  return true, id
 end
 
 -- WP7/WP8 (care): projects of a template that are not done yet (capacity requests wait for them)

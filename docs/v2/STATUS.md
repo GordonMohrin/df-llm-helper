@@ -6,6 +6,25 @@ L4 (iter2: integration of the four offline packages, trade, drills, a 1-year soa
 (economy and building), §0a the live slot L0 (first v2 code in Dwarf Fortress); §1-§9 are the offline
 integration state they started from (pytest, luahost on `hack/lua53.dll`, k_mock).
 
+## 0g. Offline: Run 9 feature requests in the kernel (2026-10-15, live-untested)
+Four packages from `docs/feature-requests/README.md` (each FR paragraph carries its status line), merged to main; gate:
+pytest green, Lua 43 suites / 694 passed (now also on Linux: `tools/luahost.py` falls back to a `lua5.3` interpreter),
+lint 0, config ok. The kernel now has **19 modules** (new: `reflex`, `seal`).
+- **Siege latency** (FR-36/49/51/52/53/55/58): SIEGE_START/INVASION class A; FPS cap follows the mode (SIEGE 30,
+  ALERT 100); module `reflex` raises linked gates, forbids entrance doors, holds the clock and sounds the alert on the
+  arrival announcement (fail-open without a manifest); interrupt channel `<save>/alarm.txt`, `dfllm wait
+  --until-interrupt`, `dfllm ack`, DEFCON in `status`; decision D-14 `peace_gates` (default `down`).
+- **Care and water** (FR-04/26/27/31/33a/34/41/42/44/45/47/48): GHOSTS, tomb repair, `entomb --haul-now`, 4 doctors,
+  hospital water as the game accepts it (HOSPITAL_DRY), MOOD_RISK.
+- **Economy** (FR-01/10/16/17/18/23/25/29/32/39/40/43/46/50): the FR-39 crash guard (`order.add`, ORDER_BAD), order
+  sanity, jobs/work details, farm slots, seeds, starvation, forbidden containers, loot, depot keeper, trade ledger,
+  follow heartbeat.
+- **Reach and refuge** (FR-22/24/33/37/54/56/57, FR-08): module `seal` (CUTOFF, SEAL_LEAK, PERIMETER_BROKEN,
+  REFUGE_FAIL; `inspect what=reach|entrances|defense|perimeter|refuge`), alert burrow audit with fallback `Innen+`,
+  embark rule metal + hard stone with `--accept`.
+Live checks per package: CHANGELOG.md (2026-10-15 entries). The workarounds in `tools/run_*` are marked superseded,
+not deleted.
+
 ## 0. Live slot L5: food crisis, food follows the population (2026-10-11 06:54 - 07:30)
 **Fort at hand-over:** Castlerisen, y295 winter d57, pop 54 (34 adults, 6 soldiers), PEACE, phase P5, readiness R1
 (audit ok, traps 3), **PAUSED for Gordon** (`pause_state` true; after the last kernel reload the owner reads `df`:

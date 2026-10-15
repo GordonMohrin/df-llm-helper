@@ -64,8 +64,8 @@ T.test('real loader: contract order, missing and broken modules skipped and logg
   local names = {}
   for _, m in ipairs(kern.status().modules) do names[#names + 1] = m.name end
   T.eq(names, {'sense', 'threat', 'siege', 'gate', 'reflex', 'military', 'drill', 'readiness', 'arbiter', 'snapshot',
-               'water', 'baseline', 'perf', 'selftest'})
-  T.eq(seen, {'sense', 'threat', 'siege', 'gate', 'reflex', 'military', 'drill', 'readiness', 'snapshot', 'water',
+               'seal', 'water', 'baseline', 'perf', 'selftest'})
+  T.eq(seen, {'sense', 'threat', 'siege', 'gate', 'reflex', 'military', 'drill', 'readiness', 'snapshot', 'seal', 'water',
               'baseline'})
   kern.stop()
   local log = H.read(W.sd .. '/kern.log')

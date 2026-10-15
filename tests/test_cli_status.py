@@ -63,12 +63,33 @@ def test_status_holds_and_caravan(save):
     assert "paused pause:gordon tempo:inbox" in out and "CARAVAN on map" in out
 
 
+def test_status_alert_burrow(save):
+    """FR-33/37: status prints the alert burrow, its size and the citizens inside; a refusal says why."""
+    st = json.loads((save / "state.b.json").read_text("utf-8"))
+    st["alert"] = {"want": "Kern+", "burrow": "Kern+", "tiles": 812, "inside": 30, "ok": 1, "why": ""}
+    assert schema.validate("state", st) == []
+    (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
+    assert "alert Kern+ 812t 30 in" in brief.status_text(save)
+    st["alert"] = {"want": "Kern+", "burrow": "Innen+", "tiles": 5800, "inside": 31, "ok": 0,
+                   "why": "Kern+: 4 tiles<33, drink 0<33"}
+    assert schema.validate("state", st) == []
+    (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
+    out = brief.status_text(save)
+    assert "alert Innen+ 5800t 31 in (Kern+ refused: Kern+: 4 tiles<33, drink 0<33)" in out
+    st["alert"] = {"want": "Tiefe+", "burrow": "", "tiles": 0, "inside": 0, "ok": 0}
+    (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
+    assert "alert no confinement (whole fort) (Tiefe+ refused)" in brief.status_text(save)
+    st["alert"]["extra"] = 1
+    assert schema.validate("state", st) != []
+
+
 def test_status_worst_case_budget(save):
     st = json.loads((save / "state.b.json").read_text("utf-8"))
     st["seq"] = 999
     st["ready"]["fail"] = ["x" * 24] * 8
     st["proj"] = [["p" * 40, "s" * 24, 99, "b" * 40]] * 8
     st["k"].update(slow=["economy", "runner", "care", "snapshot"], disabled=["trade", "baseline"])
+    st["alert"] = {"want": "w" * 24, "burrow": "b" * 24, "tiles": 99999, "inside": 250, "ok": 0, "why": "y" * 40}
     assert schema.validate("state", st) == []
     (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
     assert est_tokens(brief.status_text(save)) <= brief.STATUS_TOKENS
