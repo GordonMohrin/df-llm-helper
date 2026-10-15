@@ -1,1 +1,0 @@
-{"anchor":[10,10,100],"class":"living","id":"tz","manifest":{"v":2},"materials":[],"params":[],"rot":0,"site":"S1","stages":[{"chunks":[{"cells":[[0,0,0,"T"],[2,0,0,"T"],[4,0,0,"m(2x2)"]],"pos":[10,10,100]},{"cells":[[0,0,0,"T"]],"pos":[10,10,100]}],"defense":0,"label":"zone","mode":"zone","orders":0}],"tpl":"hospital","v":2}

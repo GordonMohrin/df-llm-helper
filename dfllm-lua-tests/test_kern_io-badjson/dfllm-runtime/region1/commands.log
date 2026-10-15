@@ -1,7 +1,0 @@
-1792053025	1209606	inbox:j1:?	verb:?	{}	ERR bad json
-1792053025	1209611	inbox:n1:test	verb:lever	{"bridge":"O1","want":"up"}	ok
-1792053025	1209611	inbox:n2:test	verb:lever	{"bridge":"O1","want":"up"}	ok
-1792053025	1209611	inbox:n3:test	verb:lever	{"bridge":"O1","want":"up"}	ok
-1792053025	1209611	inbox:n4:test	verb:lever	{"bridge":"O1","want":"up"}	ok
-1792053025	1209612	inbox:n5:test	verb:lever	{"bridge":"O1","want":"up"}	ok
-1792053025	1209612	inbox:n6:test	verb:lever	{"bridge":"O1","want":"up"}	ok

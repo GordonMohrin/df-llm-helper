@@ -1,6 +1,0 @@
-1792053053	1209600	warn	kern	armok cross-check unavailable: /home/user/df-llm-helper/lua/dfllm/kern.lua:936: module 'helpdb' not found:
-1792053053	1209600	info	baseline	baseline applied: 37 tasks, failed [], pending [idle_crafting melt trade_piles]
-1792053053	1209609	info	economy	farms: 0 of 24 tiles for 8 citizens, food 0 days: request 1 plots
-1792053053	1209609	warn	economy	supply alarm food 0 d
-1792053053	1209609	warn	economy	famine: 0 food days (0 eatable, 0 cookable), hunting and fishing allowed
-1792053053	1209636	info	economy	gear: 0 soldiers (0 melee, 0 xbow) + 2 hunters, worn -1%, pieces 0/0; xbow 0/2 no wood, bolts 0/50 no wood

@@ -1,1 +1,0 @@
-{"anchor":[10,10,100],"class":"infra","id":"fc","manifest":{"v":2},"materials":[],"params":[],"rot":0,"site":"S1","stages":[{"chunks":[{"cells":[[0,0,0,"d(5x1)"]],"pos":[10,10,100]}],"defense":0,"label":"s1.dig","mode":"dig","orders":0},{"chunks":[{"cells":[[0,0,0,"d(5x1)"]],"pos":[10,20,100]}],"defense":1,"label":"s2.dig","mode":"dig","orders":0}],"tpl":"fortcore","v":2}

@@ -6,3 +6,6 @@ htmlcov/
 *.egg-info/
 build/
 dist/
+
+# scratch output of the Lua tests when TEMP is unset
+dfllm-lua-tests/

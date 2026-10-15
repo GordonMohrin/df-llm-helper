@@ -1,4 +1,0 @@
-{"cls":"C","d":{"boots":1,"save":"region1","v":2},"msg":"boot region1 #1","n":1,"tick":1209600,"type":"BOOT"}
-{"cls":"C","d":{"id":"d1","ok":1,"verb":"lever"},"msg":"lever ok","n":2,"tick":1209601,"type":"CMD"}
-{"cls":"C","d":{"id":"d1","ok":1,"verb":"lever"},"msg":"lever ok","n":3,"tick":1209665,"type":"CMD"}
-{"cls":"C","d":{},"msg":"stop","n":4,"tick":1209680,"type":"UNLOAD"}

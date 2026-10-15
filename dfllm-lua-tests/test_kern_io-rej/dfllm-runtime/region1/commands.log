@@ -1,7 +1,0 @@
-1792053024	1209601	inbox:m1:test	verb:lever	{"bridge":"O1","want":"up"}	ERR lever not allowed in SIEGE
-1792053024	1209601	inbox:a1:test	verb:squad.sortie	{"squad":"A","target":"K1"}	ERR approval required
-1792053024	1209601	inbox:u1:test	verb:rm-rf	{}	ERR unknown verb
-1792053024	1209601	inbox:x1:test	verb:lever	{}	ERR id does not match file name
-1792053024	1209602	inbox:t1:test	verb:trade.want	{"want":["anvil"]}	ERR no module trade
-1792053024	1209602	inbox:b1:nobody	verb:lever	{}	ERR bad by
-1792053024	1209602	inbox:r1:test	verb:drill	{}	ERR args must be an object

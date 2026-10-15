@@ -1,5 +1,0 @@
-1792053053	1209600	warn	kern	armok cross-check unavailable: /home/user/df-llm-helper/lua/dfllm/kern.lua:936: module 'helpdb' not found:
-1792053053	1209609	info	military	military: adopted squad A (id 301)
-1792053053	1209609	info	military	military: adopted squad B (id 302)
-1792053053	1209609	info	military	military: adopted squad C (id 303)
-1792053053	1209609	warn	readiness	readiness: audit snapshot not exported: no module

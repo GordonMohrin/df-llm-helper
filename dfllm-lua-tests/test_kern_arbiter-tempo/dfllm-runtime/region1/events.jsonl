@@ -1,6 +1,0 @@
-{"cls":"C","d":{"boots":1,"save":"region1","v":2},"msg":"boot region1 #1","n":1,"tick":1209600,"type":"BOOT"}
-{"cls":"C","d":{"from":"PEACE","to":"ALERT","why":"test"},"msg":"PEACE>ALERT test","n":2,"tick":1209900,"type":"MODE"}
-{"cls":"C","d":{"from":"ALERT","to":"SIEGE","why":"test"},"msg":"ALERT>SIEGE test","n":3,"tick":1209900,"type":"MODE"}
-{"cls":"C","d":{"from":"SIEGE","to":"RECOVERY","why":"test"},"msg":"SIEGE>RECOVERY test","n":4,"tick":1210200,"type":"MODE"}
-{"cls":"C","d":{"from":"RECOVERY","to":"PEACE","why":"test"},"msg":"RECOVERY>PEACE test","n":5,"tick":1210200,"type":"MODE"}
-{"cls":"C","d":{},"msg":"stop","n":6,"tick":1214200,"type":"UNLOAD"}

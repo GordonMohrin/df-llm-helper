@@ -1,9 +1,0 @@
-{"cls":"C","d":{"boots":1,"save":"region1","v":2},"msg":"boot region1 #1","n":1,"tick":1209600,"type":"BOOT"}
-{"cls":"B","d":{"by":"popup","on":1},"msg":"paused by popup","n":2,"tick":1209601,"type":"PAUSE"}
-{"cls":"B","d":{"by":"popup","on":0},"msg":"unpaused, was popup","n":3,"tick":1209606,"type":"PAUSE"}
-{"cls":"B","d":{"by":"popup","on":1},"msg":"paused by popup","n":4,"tick":1209611,"type":"PAUSE"}
-{"cls":"B","d":{"by":"popup","on":0},"msg":"unpaused, was popup","n":5,"tick":1209636,"type":"PAUSE"}
-{"cls":"B","d":{"by":"popup","on":1},"msg":"paused by popup","n":6,"tick":1209641,"type":"PAUSE"}
-{"cls":"A","d":{"id":"berserk","q":"Sodel Stagshilfikod, Dwarven Child has gone berserk! The fort runs on; citizens and soldiers deal with it. Bury the body at once (ghost risk)."},"msg":"berserk: Sodel Stagshilfikod, Dwarven Child has gone berserk!","n":7,"tick":1209651,"type":"DECISION_NEEDED"}
-{"cls":"B","d":{"by":"popup","on":0},"msg":"unpaused, was popup","n":8,"tick":1209665,"type":"PAUSE"}
-{"cls":"C","d":{},"msg":"stop","n":9,"tick":1209666,"type":"UNLOAD"}

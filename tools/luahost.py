@@ -340,7 +340,10 @@ def _run_binary(binary: str, path: str | Path, args, timeout: float, paths) -> R
     script = Path(path).resolve().as_posix()
     argv = [binary, str(_runner()), script, str(timeout), lua_path_prefix(paths)] + [str(a) for a in args]
     try:
-        p = subprocess.run(argv, capture_output=True, timeout=(timeout + 15) if timeout > 0 else None)
+        env = dict(os.environ)
+        if not (env.get("TEMP") or env.get("TMP")):         # the Lua tests write below $TEMP (else into the cwd)
+            env["TEMP"] = tempfile.gettempdir()
+        p = subprocess.run(argv, capture_output=True, timeout=(timeout + 15) if timeout > 0 else None, env=env)
     except subprocess.TimeoutExpired:
         return Result(TIMEOUT_EXIT, "", f"luahost: timeout after {timeout} s")
     return Result(p.returncode, p.stdout.decode("utf-8", "replace"), p.stderr.decode("utf-8", "replace"))

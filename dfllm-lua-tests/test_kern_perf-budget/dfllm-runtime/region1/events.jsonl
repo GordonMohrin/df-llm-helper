@@ -1,3 +1,0 @@
-{"cls":"C","d":{"boots":1,"save":"region1","v":2},"msg":"boot region1 #1","n":1,"tick":1209600,"type":"BOOT"}
-{"cls":"C","d":{"season":1,"year":3},"msg":"season 1","n":2,"tick":1310400,"type":"SEASON"}
-{"cls":"C","d":{},"msg":"stop","n":3,"tick":1389600,"type":"UNLOAD"}

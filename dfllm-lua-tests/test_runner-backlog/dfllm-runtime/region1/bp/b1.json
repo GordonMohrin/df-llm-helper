@@ -1,1 +1,0 @@
-{"anchor":[10,10,100],"class":"infra","id":"b1","manifest":{"v":2},"materials":[],"params":{"stage":1},"rot":0,"site":"S1","stages":[{"chunks":[{"cells":[[0,0,0,"d(5x1)"]],"pos":[10,10,100]},{"cells":[[0,0,0,"d(5x1)"]],"pos":[10,11,100]}],"defense":0,"label":"s1.dig","mode":"dig","orders":0}],"tpl":"fortcore","v":2}

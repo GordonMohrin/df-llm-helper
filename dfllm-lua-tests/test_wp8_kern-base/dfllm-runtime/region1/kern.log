@@ -1,2 +1,0 @@
-1792053053	1209600	warn	kern	armok cross-check unavailable: /home/user/df-llm-helper/lua/dfllm/kern.lua:936: module 'helpdb' not found:
-1792053053	1209600	info	baseline	baseline applied: 37 tasks, failed [], pending [idle_crafting melt trade_piles]

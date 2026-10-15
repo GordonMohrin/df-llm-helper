@@ -1,3 +1,0 @@
-1792053016	1209601	inbox:a1:llm	verb:audit	{"bypass":false,"caverns":true,"civ_sep":true,"fails":[],"min_traps":0,"ok":true,"refuge_sep":true,"snap":"c1"}	ERR audit not accepted from llm
-1792053016	1209601	inbox:a2:gordon	verb:audit	{"bypass":false,"caverns":true,"civ_sep":true,"fails":[],"min_traps":0,"ok":true,"refuge_sep":true,"snap":"c1"}	ERR audit not accepted from gordon
-1792053016	1209601	inbox:a3:follow	verb:audit	{"bypass":false,"caverns":true,"civ_sep":true,"fails":[],"min_traps":0,"ok":true,"refuge_sep":true,"snap":"c1"}	ok

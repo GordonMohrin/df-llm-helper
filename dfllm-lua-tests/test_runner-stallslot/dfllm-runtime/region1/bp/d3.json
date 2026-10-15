@@ -1,1 +1,0 @@
-{"anchor":[100,30,100],"class":"living","id":"d3","manifest":{"v":2},"materials":[],"params":{"stage":1},"rot":0,"site":"S1","stages":[{"chunks":[{"cells":[[0,0,0,"d(5x1)"]],"pos":[100,30,100]},{"cells":[[0,0,0,"d(5x1)"]],"pos":[100,31,100]}],"defense":0,"label":"s1.dig","mode":"dig","orders":0}],"tpl":"tombs","v":2}

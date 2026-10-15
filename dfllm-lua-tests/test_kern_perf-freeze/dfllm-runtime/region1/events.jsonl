@@ -1,3 +1,0 @@
-{"cls":"C","d":{"boots":1,"save":"region1","v":2},"msg":"boot region1 #1","n":1,"tick":1209600,"type":"BOOT"}
-{"cls":"A","d":{"why":"freeze"},"msg":"frame freeze 25000 ms","n":2,"tick":1209611,"type":"PERF_DEGRADED"}
-{"cls":"C","d":{},"msg":"stop","n":3,"tick":1209681,"type":"UNLOAD"}

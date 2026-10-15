@@ -1,4 +1,0 @@
-1792053012	1209600	warn	kern	config/allowlist.json missing or invalid: using the built-in read-only allowlist
-1792053012	1209600	warn	kern	armok cross-check unavailable: /home/user/df-llm-helper/lua/dfllm/kern.lua:936: module 'helpdb' not found:
-1792053012	1209600	warn	arbiter	restore.json still active (save region1, booting region1): restored timestream_fps; left gfps,population_cap
-1792053012	1209600	info	arbiter	population cap original 66 from restore.json of the crashed session

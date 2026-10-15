@@ -1,4 +1,0 @@
-{"cls":"C","d":{"boots":1,"save":"region1","v":2},"msg":"boot region1 #1","n":1,"tick":1209600,"type":"BOOT"}
-{"cls":"B","d":{"err":"cap must be 0..250","fn":"popcap","module":"readiness"},"msg":"act.popcap failed for readiness: cap must be 0..250","n":2,"tick":1209601,"type":"ACT_FAIL"}
-{"cls":"B","d":{"err":"cap must be 0..250","fn":"popcap","module":"readiness"},"msg":"act.popcap failed for readiness: cap must be 0..250","n":3,"tick":1210801,"type":"ACT_FAIL"}
-{"cls":"C","d":{},"msg":"stop","n":4,"tick":1210900,"type":"UNLOAD"}

@@ -1,5 +1,0 @@
-{"cls":"C","d":{"boots":1,"save":"region1","v":2},"msg":"boot region1 #1","n":1,"tick":1209600,"type":"BOOT"}
-{"cls":"C","d":{"id":"a1","ok":0,"verb":"audit"},"msg":"audit failed","n":2,"tick":1209601,"type":"CMD"}
-{"cls":"C","d":{"id":"a2","ok":0,"verb":"audit"},"msg":"audit failed","n":3,"tick":1209601,"type":"CMD"}
-{"cls":"C","d":{"id":"a3","ok":1,"verb":"audit"},"msg":"audit ok","n":4,"tick":1209601,"type":"CMD"}
-{"cls":"C","d":{},"msg":"stop","n":5,"tick":1209640,"type":"UNLOAD"}

@@ -1,4 +1,0 @@
-1792053052	1209600	warn	kern	armok cross-check unavailable: /home/user/df-llm-helper/lua/dfllm/kern.lua:936: module 'helpdb' not found:
-1792053052	1209609	warn	military	military: created squad A (id 301) without a leader [S2]
-1792053052	1209609	warn	military	military: squad A: leader 1 not seated: squad has no leader assignment
-1792053052	1209609	warn	readiness	readiness: audit snapshot not exported: no module

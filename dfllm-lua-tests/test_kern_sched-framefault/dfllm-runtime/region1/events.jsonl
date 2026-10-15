@@ -1,3 +1,0 @@
-{"cls":"C","d":{"boots":1,"save":"region1","v":2},"msg":"boot region1 #1","n":1,"tick":1209600,"type":"BOOT"}
-{"cls":"A","d":{"err":"/home/user/df-llm-helper/lua/dfllm/util/contract.lua:10: attempt to perform arithmetic on a nil value (local 'ytick')","module":"kern"},"msg":"kernel frame error","n":2,"tick":1209600,"type":"KERN_FAULT"}
-{"cls":"C","d":{},"msg":"stop","n":3,"tick":1209601,"type":"UNLOAD"}

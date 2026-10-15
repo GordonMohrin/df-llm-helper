@@ -1,4 +1,0 @@
-{"cls":"C","d":{"boots":1,"save":"region1","v":2},"msg":"boot region1 #1","n":1,"tick":1209600,"type":"BOOT"}
-{"cls":"A","d":{"backoff_s":600,"err":"/home/user/df-llm-helper/tests/lua/test_kern_contract.lua:11: boom","module":"test_bad","n":3},"msg":"test_bad backed off 600 s after 3 faults","n":2,"tick":1209603,"type":"KERN_FAULT"}
-{"cls":"A","d":{"backoff_s":1200,"err":"/home/user/df-llm-helper/tests/lua/test_kern_contract.lua:11: boom","module":"test_bad","n":3},"msg":"test_bad backed off 1200 s after 3 faults","n":3,"tick":1210205,"type":"KERN_FAULT"}
-{"cls":"C","d":{},"msg":"stop","n":4,"tick":1210213,"type":"UNLOAD"}
