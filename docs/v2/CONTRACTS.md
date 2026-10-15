@@ -630,7 +630,7 @@ The fort-specific geometry, written by templates (bp `manifest` fragments) and m
 | PLAN_EXHAUSTED | A | runner | phase (str), year |
 | PROJECT_BLOCKED | A | runner | **proj** (str), tpl (str), stage (str), why (str), ticks — after > 2 days blocked |
 | YEAR_REVIEW | A | kern | year |
-| CUTOFF | A | seal | **cls** (str: food, drink, bed), **n** (citizens), pos (int[3], the tile that did it), why (str: wall, door, bridge, … or unknown), grp, main — more citizens than before stand on a walk group without that class (FR-22); a raised bridge in SIEGE/BREACH/DRILL is a SEAL instead |
+| CUTOFF | A | seal | **cls** (str: food, drink, bed), **n** (citizens), pos (int[3], the tile that did it), why (str: wall, door, bridge, … or unknown), grp, main — more citizens than before stand on a walk group without that class (FR-22); a raised bridge outside PEACE (the gate raises it on purpose) is a SEAL instead |
 | SEAL_LEAK | A | seal | **routes**, pos (int[3], first leak), bld (str), state (str: locked, open, down …), why (str: lever, siege, construction, periodic) — the outer/inner bridges are up and a route from the map edge to the citizens remains (FR-54) |
 | PERIMETER_BROKEN | A | seal | **n**, pos (int[3]), kinds (str[]), requeued, why (str) — perimeter pieces lost after a siege; walls/doors re-queued as a `repair` project (FR-56) |
 | REFUGE_FAIL | A | seal | **burrow** (str, refused), fallback (str, `""` = no confinement), why (str), tiles, inside, mode (str) — the civ alert refused a burrow without drink/food/beds for the population (FR-37/57) |
@@ -659,7 +659,7 @@ The fort-specific geometry, written by templates (bp `manifest` fragments) and m
 | PAUSE | B | arbiter | **on** (flag), by (str), ttl |
 | DEATH | B | care | unit, citizen (flag), cause (str) |
 | ACT_FAIL | B | kern | **fn** (str), err (str), module (str) |
-| SEAL | B | seal | routes, pos (int[3]), why (str), sealed (flag) — an entrance check ("seal verified: no route" or the leak); also citizens shut out by a raised bridge in SIEGE/BREACH/DRILL |
+| SEAL | B | seal | routes, pos (int[3]), why (str), sealed (flag) — an entrance check ("seal verified: no route" or the leak); also citizens shut out by a raised bridge outside PEACE |
 | REACH | B | seal | flags (str[]), cut, stairs — the reach audit's flags changed (classes off the main citizen group, stairs without counterpart) |
 | SIEGE_STATUS | C | siege | vis, worn, on_station, deaths, captures |
 | SEASON | C | kern | year, season |

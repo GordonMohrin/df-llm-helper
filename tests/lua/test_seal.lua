@@ -95,8 +95,8 @@ T.test('CUTOFF: a hand-built wall (no runner) is found by the bounded walk over 
   T.eq({ev[1].d.pos, ev[1].d.why}, {{9, 5, Z}, 'wall'})
 end)
 
-T.test('a raised bridge: CUTOFF in PEACE, a SEAL (B) "shut out" in SIEGE', function()
-  for _, mode in ipairs({'PEACE', 'SIEGE'}) do
+T.test('a raised bridge: CUTOFF in PEACE, a SEAL (B) "shut out" in the modes that raise it (ALERT, SIEGE)', function()
+  for _, mode in ipairs({'PEACE', 'SIEGE', 'ALERT'}) do
     local W = fort{draw = function(W) SW.draw(W, Z, {'='}, 10, 5) end}
     W.set_mode(mode)
     W.run(300, {skip = 9})

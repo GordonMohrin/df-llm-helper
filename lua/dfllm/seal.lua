@@ -62,7 +62,7 @@ local CLOSERS = {Cw = 'wall', CW = 'wall', CF = 'fort', d = 'door', H = 'hatch',
 local QF_OF = {wall = 'Cw', fort = 'CF', door = 'd', hatch = 'H', floodgate = 'x', grate = 'W', bars = 'B'}
 local BKIND = {Door = 'door', Hatch = 'hatch', Bridge = 'bridge', Floodgate = 'floodgate', GrateWall = 'grate',
                BarsVertical = 'bars', Statue = 'statue'}
-local GATED = {SIEGE = true, BREACH = true, DRILL = true}
+local GATED = {ALERT = true, SIEGE = true, BREACH = true, DRILL = true, RECOVERY = true}   -- gate raises on purpose
 
 local st      -- persisted m.seal
 local mem     -- runtime: caches, results, jobs
@@ -855,7 +855,8 @@ local function job_perim(K, why)
   local queued, proj = 0, nil
   if #cells > 0 then
     local ok, r1, r2 = K.call('runner', 'repair', cells, 'perimeter after the siege')
-    if ok and r1 then queued, proj = #cells, r2 else K.log('warn', 'seal: repair not queued: %s', tostring(r2 or r1)) end
+    if ok and r1 then queued, proj = #cells, r2
+    else K.log('warn', 'seal: repair not queued: %s', tostring(r2 or r1)) end
   end
   dirty = true
   local x, y, z = fresh[1]:match('^(-?%d+),(-?%d+),(-?%d+)$')
@@ -911,14 +912,19 @@ local function routes_of(entries)
   for i = 1, #entries do
     local r = find(i)
     local e = entries[i]
-    if not at[r] then reps[#reps + 1] = {x = e.x, y = e.y, z = e.z, ox = e.ox, oy = e.oy, oz = e.oz, d = e.d, n = 1}; at[r] = #reps
+    if not at[r] then
+      reps[#reps + 1] = {x = e.x, y = e.y, z = e.z, ox = e.ox, oy = e.oy, oz = e.oz, d = e.d, n = 1}
+      at[r] = #reps
     else
       local c = reps[at[r]]
       c.n = c.n + 1
       if e.d < c.d then c.x, c.y, c.z, c.ox, c.oy, c.oz, c.d = e.x, e.y, e.z, e.ox, e.oy, e.oz, e.d end
     end
   end
-  table.sort(reps, function(a, b) if a.d ~= b.d then return a.d < b.d end; return key3(a.x, a.y, a.z) < key3(b.x, b.y, b.z) end)
+  table.sort(reps, function(a, b)
+    if a.d ~= b.d then return a.d < b.d end
+    return key3(a.x, a.y, a.z) < key3(b.x, b.y, b.z)
+  end)
   return reps
 end
 
@@ -1020,7 +1026,9 @@ local function learn_perimeter(K, B, reps)
     local des, occ = rev(r.x, r.y, r.z)
     local b = des and bld_on(r.x, r.y, r.z, occ)
     local kind = b and BKIND[btype(b) or '']
-    if kind and kind ~= 'bridge' and perim_add(kstr(r.x, r.y, r.z), {k = kind, src = 'seal'}, t) then added = added + 1 end
+    if kind and kind ~= 'bridge' and perim_add(kstr(r.x, r.y, r.z), {k = kind, src = 'seal'}, t) then
+      added = added + 1
+    end
   end
   if added > 0 then K.log('info', 'seal: %d perimeter pieces learned', added) end
 end
@@ -1113,7 +1121,8 @@ local function job_seal(K, why)
   if not res.sealed and expect then
     K.emit('SEAL_LEAK', 'A', trunc(res.msg, 200), {routes = res.routes, pos = pos, bld = res.first and res.first.bld,
            state = res.first and res.first.state, why = trunc(why or '', 40)})
-  elseif why ~= 'inspect' and (why ~= 'periodic' or not prev or prev.sealed ~= res.sealed or prev.routes ~= res.routes) then
+  elseif why ~= 'inspect' and (why ~= 'periodic' or not prev or prev.sealed ~= res.sealed
+                               or prev.routes ~= res.routes) then
     K.emit('SEAL', 'B', trunc(res.msg, 200), {routes = res.routes, pos = pos, why = trunc(why or '', 40),
            sealed = res.sealed and 1 or 0})
   end
@@ -1204,7 +1213,10 @@ local function job_scan(K, paint)
             if dfhack.maps.getWalkableGroup(P) == main then
               local skip = false
               for _, e in ipairs(ex) do
-                if x >= e[1] and x <= e[4] and y >= e[2] and y <= e[5] and z >= e[3] and z <= e[6] then skip = true; break end
+                if x >= e[1] and x <= e[4] and y >= e[2] and y <= e[5] and z >= e[3] and z <= e[6] then
+                  skip = true
+                  break
+                end
               end
               if not skip then inner[#inner + 1] = {x, y, z} end
             end
@@ -1361,7 +1373,9 @@ function M.closing(K, proj, tpl, class, ch)
       end
     end
   end
-  if n > 0 and (not mem.reach or t - mem.reach.tick > CFG.quick_min) then due('audit', t, 'before ' .. tostring(proj)) end
+  if n > 0 and (not mem.reach or t - mem.reach.tick > CFG.quick_min) then
+    due('audit', t, 'before ' .. tostring(proj))
+  end
   return n
 end
 
@@ -1689,10 +1703,14 @@ M.inspect.defense = function(K)
       if name then
         for _, p in ipairs(man.bridges[name].levers or {}) do
           local found = false
-          for _, l in ipairs(lv) do if l.pos[1] == p[1] and l.pos[2] == p[2] and l.pos[3] == p[3] then found = true end end
+          for _, l in ipairs(lv) do
+            if l.pos[1] == p[1] and l.pos[2] == p[2] and l.pos[3] == p[3] then found = true end
+          end
           if not found then
             local here
-            for _, l in ipairs(levers) do if l.pos[1] == p[1] and l.pos[2] == p[2] and l.pos[3] == p[3] then here = l end end
+            for _, l in ipairs(levers) do
+              if l.pos[1] == p[1] and l.pos[2] == p[2] and l.pos[3] == p[3] then here = l end
+            end
             lv[#lv + 1] = {id = here and here.id or -1, pos = {p[1], p[2], p[3]}, linked = 0,
                            why = here and 'not linked to this bridge' or 'no lever built'}
           end
@@ -1749,9 +1767,11 @@ M.inspect.refuge = function(K, args)
   end
   publish(K)
   local p = mem.pub
-  return true, string.format('alert %s: %s, %d tiles, %d/%d inside%s', K.mode(), p.burrow ~= '' and p.burrow or 'no confinement',
+  return true, string.format('alert %s: %s, %d tiles, %d/%d inside%s', K.mode(),
+                             p.burrow ~= '' and p.burrow or 'no confinement',
          p.tiles, p.inside, au.cit, p.why ~= '' and (' (' .. p.why .. ')') or ''),
-         {tick = au.tick, cit = au.cit, burrows = b, choice = choice, swap = st.swap, quiet = quiet(K) == math.huge and -1 or quiet(K)}
+         {tick = au.tick, cit = au.cit, burrows = b, choice = choice, swap = st.swap,
+          quiet = quiet(K) == math.huge and -1 or quiet(K)}
 end
 
 return M
