@@ -1,15 +1,20 @@
 -- K.persist: contract keys (CONTRACTS §10) over dfhack.persistent site data (Lua API.txt:750-762).
 -- get() returns the cached decoded table; set()/touch() mark keys dirty; kern calls flush()
 -- at most every 10 s, on mode change and before unload. Site data lives in memory until DF saves.
+-- FR-62: a key whose last encoding was at least env.big.bytes long is written at most every env.big.ms
+-- (unless flush(true)); env.charge(key, ms) receives each write's cost on env.clock (kern books it to
+-- the key's owner).
 local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
 
 local P = {}
 local MISSING = setmetatable({}, {__name = 'persist.missing'})
 
--- env = {who = fn() -> module name or nil, violation = fn(msg), log = fn(level, msg)}
+-- env = {who = fn() -> module name or nil, violation = fn(msg), log = fn(level, msg),
+--        optional: on_flush(key, v), clock() -> ms, charge(key, ms), now_ms() -> ms, big = {bytes, ms}}
 function P.new(env)
   local cache, dirty = {}, {}
+  local size, written = {}, {}     -- last encoded length and write time per key (big keys wait)
   local store = {}
   local api = {}
 
@@ -59,20 +64,37 @@ function P.new(env)
     if cache[key] ~= nil and cache[key] ~= MISSING then dirty[key] = true end
   end
 
-  -- write dirty keys; returns the number written
-  function store.flush()
+  local function due(key, all, now)
+    if all or not env.big or not now then return true end
+    local sz = size[key]
+    return sz == nil or sz < env.big.bytes or written[key] == nil or now - written[key] >= env.big.ms
+  end
+
+  -- write dirty keys (all = every one, else big keys only every env.big.ms); returns the number written
+  function store.flush(all)
     local n = 0
+    local now = env.now_ms and env.now_ms()
+    local clock = env.clock
     for key in pairs(dirty) do
-      local dk, v = C.persist_key(key), cache[key]
-      dirty[key] = nil
-      local ok, err = pcall(function()
-        if v == MISSING then dfhack.persistent.deleteSiteData(dk)
-        else dfhack.persistent.saveSiteDataString(dk, json.encode(v)) end
-      end)
-      if ok then
-        n = n + 1
-        if env.on_flush and v ~= MISSING then pcall(env.on_flush, key, v) end
-      else env.log('error', 'persist flush ' .. key .. ': ' .. tostring(err)) end
+      if due(key, all, now) then
+        local t0 = clock and clock()
+        local dk, v = C.persist_key(key), cache[key]
+        dirty[key] = nil
+        local ok, err = pcall(function()
+          if v == MISSING then dfhack.persistent.deleteSiteData(dk); size[key] = nil
+          else
+            local enc = json.encode(v)
+            dfhack.persistent.saveSiteDataString(dk, enc)
+            size[key] = #enc
+          end
+        end)
+        written[key] = now
+        if ok then
+          n = n + 1
+          if env.on_flush and v ~= MISSING then pcall(env.on_flush, key, v) end
+        else env.log('error', 'persist flush ' .. key .. ': ' .. tostring(err)) end
+        if t0 and env.charge then pcall(env.charge, key, clock() - t0) end
+      end
     end
     return n
   end

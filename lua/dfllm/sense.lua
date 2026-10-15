@@ -10,6 +10,9 @@
 -- WP5 extensions (additive): census.u.insane_ids (insane citizens, for the gate footprint check),
 -- census.h.crazed, census.h.list[i].dc (distance to the nearest citizen outside Kern+, -1 none).
 -- live L6: K.census.a = the fort's visible tame animals (economy's famine slaughter), with the unit count.
+-- FR-62 (Run 9: 402 units, 16 ms/s): the hostile scan touches every unit 10x per second, so the per-unit path
+-- is kept short: inactive units (dead, gone) cost one call, the LARGE_PREDATOR raw flag is cached per
+-- race/caste, and the entrance list (seal) is only fetched when a predator candidate needs it.
 local geom = require('dfllm.util.geom')
 
 -- every 9 ticks = every frame at full timestream (<= 9-tick skips), so scan periods are not
@@ -134,9 +137,17 @@ local function hscan_begin(K, now, armed)
            armed = armed and 1 or 0, geo = g, out_pos = st.out_pos or {},
            count = now.tick - (st.count_tick or -M.COUNT_EVERY) >= M.COUNT_EVERY, animals = {}}
   for _, b in ipairs(g.bridges) do st.hs.near_bridge[b.name] = -1 end
-  local oke, ent, r = K.call('seal', 'entrances')                  -- FR-33: where a wild predator matters
-  if oke and type(ent) == 'table' and #ent > 0 then st.hs.ent, st.hs.ent_r = ent, math.tointeger(r) or 25 end
+  st.hs.K = K                                   -- FR-33 entrances: fetched on the first predator candidate
   st.h_tick = now.tick
+end
+
+-- FR-33: where a wild predator matters (seal.entrances), once per scan and only when a candidate needs it
+local function entrances(hs)
+  if hs.ent_done then return hs.ent end
+  hs.ent_done = true
+  local oke, ent, r = hs.K.call('seal', 'entrances')
+  if oke and type(ent) == 'table' and #ent > 0 then hs.ent, hs.ent_r = ent, math.tointeger(r) or 25 end
+  return hs.ent
 end
 
 local function minpos(cur, d) if cur < 0 or d < cur then return d end return cur end
@@ -177,7 +188,7 @@ end
 -- FR-33 (Run 9: four dingoes on the open surface held the fort in ALERT for 22 days): outside the fort a wild
 -- predator counts only within hs.ent_r tiles of an entrance (seal.entrances); inside (a roofed tile) always
 local function near_entrance(u, hs)
-  local ent = hs and hs.ent
+  local ent = hs and entrances(hs)
   if not ent then return true end                     -- no entrance known: every predator on the group counts
   local des = dfhack.maps.getTileFlags(u.pos)
   if des and not des.hidden and not des.outside then return true end
@@ -188,10 +199,29 @@ local function near_entrance(u, hs)
   return false
 end
 
+-- the caste raw flag, cached per race and caste for the session (raws do not change while a map is loaded)
+local pred_raw = {}
+local function raw_predator(race, caste)
+  local r = df.creature_raw.find(race)
+  return r ~= nil and r.caste[caste].flags.LARGE_PREDATOR == true
+end
+local function large_predator(u)
+  local race, caste = u.race, u.caste
+  if race == nil then return false end
+  local row = pred_raw[race]
+  if row == nil then row = {}; pred_raw[race] = row end
+  local v = row[caste or -1]
+  if v == nil then
+    local ok, yes = pcall(raw_predator, race, caste)
+    v = ok and yes == true
+    row[caste or -1] = v
+  end
+  return v
+end
+
 local function predator(u, hs)
+  if not large_predator(u) then return false end
   local ok, yes = pcall(function()
-    local r = df.creature_raw.find(u.race)
-    if not (r ~= nil and r.caste[u.caste].flags.LARGE_PREDATOR == true) then return false end
     -- off-map units (pos -30000) crashed DF 53 in getWalkableGroup (live L6): validate first
     if not dfhack.maps.isValidTilePos(u.pos) then return false end
     local g = citizens_group()
@@ -201,9 +231,15 @@ local function predator(u, hs)
   return ok and yes == true
 end
 
--- per unit: 2 predicate calls for ordinary units; the full check only for hostile candidates
+-- per unit: 1 call for an inactive (dead, gone) unit, 3-4 for ordinary ones; the full check only for
+-- hostile candidates. An inactive unit is never a hostile (the candidate path drops it too), it only counts
+-- as visible in the unit count.
 local function consider(hs, u)
   local U = dfhack.units
+  if not U.isActive(u) then
+    if hs.count and U.isVisible(u) and not U.isHidden(u) then hs.units = hs.units + 1 end
+    return 1
+  end
   local undead = U.isUndead(u)
   if not (undead or U.isDanger(u) or (not U.isTame(u) and predator(u, hs))) then
     if hs.count and U.isVisible(u) and not U.isHidden(u) then
@@ -215,7 +251,7 @@ local function consider(hs, u)
   local id = u.id
   if hs.seen[id] then return 1 end                     -- the vector may shift between slices
   hs.seen[id] = true
-  if not U.isActive(u) or not U.isVisible(u) or U.isHidden(u) then return 4 end
+  if not U.isVisible(u) or U.isHidden(u) then return 4 end      -- active: checked first in consider
   hs.units = hs.units + 1
   if u.flags1.caged then hs.caged[#hs.caged + 1] = id; return 5 end
   local inv = U.isInvader(u)
@@ -329,6 +365,7 @@ end
 ---------------------------------------------------------------- module
 function M.init(K)
   st = {cit_due = true, pub = nil}
+  pred_raw = {}                                  -- another save may bring other raws
 end
 
 -- 45 (not 50) in PEACE: with 9-tick timestream frames a scan lands every 45 ticks, inside the

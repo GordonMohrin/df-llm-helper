@@ -1,7 +1,12 @@
 -- perf (WP1, 1,000 ms): perf.csv every 30 s (CONTRACTS §9.11), frame-gap freezes and the DEGRADED
 -- rule of DESIGN §10: rolling 10-min ticks/s < 60 % of the post-load baseline of the same mode and
 -- target fps, or a frame gap (autosave freeze) > 20 s. Kernel timings come from kern.perf_take()
--- (window sums) plus DFHack's own repeat counter (dfhack.internal.getPerfCounters, script-manager.lua:293).
+-- (window sums per cost owner: modules, the kernel parts k.state/k.io/k.persist/k.inbox/k.events and
+-- the remainder `kern`) plus DFHack's own repeat counter (dfhack.internal.getPerfCounters,
+-- script-manager.lua:293). FR-62: `repeat` in the mods field is that counter for our one repeat-util
+-- callback (repeat-util.lua: recordRepeatRuntime around the whole kernel frame), i.e. the same time as
+-- the row's ms_s measured again by DFHack: only unpaused frames (PerfCounters::incCounter) and on the
+-- coarse getTickCount clock. It is a cross-check of the total, never a module of its own.
 -- Row tps = ticks per *unpaused* second (pauses are not slowness; 0 when < MIN_UNPAUSED_MS ran).
 -- Rows more than MAX_PAUSED_PCT paused, or whose target fps changed (inbox tempo.lower), are not
 -- used for the DEGRADED rule.
@@ -36,6 +41,7 @@ local function vec_len(f)
   return ok and math.tointeger(n) or 0
 end
 
+-- ms DFHack booked to the 'dfllm' repeat-util callback since it started (unpaused frames only)
 local function repeat_ms()
   local ok, ms = pcall(function()
     local per_repeat = select(6, dfhack.internal.getPerfCounters())

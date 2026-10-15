@@ -14,9 +14,11 @@ mkdir_recursive, mtime, now_ms.
 
 Without lua53.dll (Linux, CI) the same chunk runs in a Lua 5.3 interpreter (``DFLLM_LUA_BIN`` or ``lua5.3`` on PATH)
 as a subprocess; the helpers are then plain Lua over POSIX tools (ls, test, mkdir -p, stat, /proc/uptime).
+Every run gets its own empty $TEMP/$TMP (removed afterwards), so concurrent runs never share test folders.
 """
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import os
 import re
@@ -336,27 +338,49 @@ def _runner() -> Path:
     return _runner_file
 
 
-def _run_binary(binary: str, path: str | Path, args, timeout: float, paths) -> Result:
+def _run_binary(binary: str, path: str | Path, args, timeout: float, paths, tmp: str) -> Result:
     script = Path(path).resolve().as_posix()
     argv = [binary, str(_runner()), script, str(timeout), lua_path_prefix(paths)] + [str(a) for a in args]
     try:
-        env = dict(os.environ)
-        if not (env.get("TEMP") or env.get("TMP")):         # the Lua tests write below $TEMP (else into the cwd)
-            env["TEMP"] = tempfile.gettempdir()
+        env = dict(os.environ, TEMP=tmp, TMP=tmp)          # the Lua tests write below $TEMP (_run_temp)
         p = subprocess.run(argv, capture_output=True, timeout=(timeout + 15) if timeout > 0 else None, env=env)
     except subprocess.TimeoutExpired:
         return Result(TIMEOUT_EXIT, "", f"luahost: timeout after {timeout} s")
     return Result(p.returncode, p.stdout.decode("utf-8", "replace"), p.stderr.decode("utf-8", "replace"))
 
 
+@contextlib.contextmanager
+def _run_temp():
+    """A fresh $TEMP/$TMP per run, removed afterwards. The Lua tests keep fixed folder names below $TEMP
+    (tests/lua/kern_world.lua H.tmpdir); concurrent runs (several worktrees, CI) shared them and corrupted each
+    other's files (FR-62: test_kern_perf failed 1-3 cases under parallel runs)."""
+    tmp = tempfile.mkdtemp(prefix="luahost-")
+    old = {k: os.environ.get(k) for k in ("TEMP", "TMP")}
+    os.environ["TEMP"] = os.environ["TMP"] = tmp              # in-process lua53.dll reads the CRT environment
+    try:
+        yield tmp
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def run_file(path: str | Path, args: list[str] | tuple = (), *, timeout: float = 30.0,
              paths: list[str | Path] | None = None) -> Result:
-    """Run one Lua file in a fresh state. package.path = paths + <repo>/lua."""
-    if not _dll_ok():
-        binary = lua_binary()
-        if binary is None:
-            get_lua()                                    # raises the lua53.dll error
-        return _run_binary(binary, path, args, timeout, paths)
+    """Run one Lua file in a fresh state with its own $TEMP. package.path = paths + <repo>/lua."""
+    with _run_temp() as tmp:
+        if not _dll_ok():
+            binary = lua_binary()
+            if binary is None:
+                get_lua()                                # raises the lua53.dll error
+            return _run_binary(binary, path, args, timeout, paths, tmp)
+        return _run_dll(path, args, timeout, paths)
+
+
+def _run_dll(path: str | Path, args, timeout: float, paths) -> Result:
     lua = get_lua()
     L = lua.luaL_newstate()
     if not L:

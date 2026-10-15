@@ -20,9 +20,11 @@ T.test('budget: kernel overhead with 5 dummy modules at 250 frames/s stays far b
                 dummy('test_e', 1200), arbiter, perf, selftest}
   H.boot(W, {modules = mods})
   local frames = 20000                    -- 80 s of game at 250 frames/s, 9 ticks per frame
-  local t0 = luahost.now_ms()
+  -- CPU time of this process (os.clock on POSIX; wall time on the in-process lua53.dll): other processes'
+  -- load (parallel test runs) does not count against the kernel
+  local t0 = os.clock()
   for _ = 1, frames do H.frame(W, 9) end
-  local real = luahost.now_ms() - t0
+  local real = math.floor((os.clock() - t0) * 1000 + 0.5)
   local per_frame = real / frames
   local ms_per_s = per_frame * 250
   print(string.format('# kernel: %.4f ms/frame -> %.2f ms per real second at 250 frames/s (%d frames in %d ms)',
@@ -38,6 +40,7 @@ end)
 T.test('perf.csv: header + one row per 30 s with tps, ms_s and the per-module field', function()
   local W = H.world{tag = 'csv', ms_per_frame = 20}
   local m = dummy('test_c', 10)
+  m.share = 1000                                             -- not paced (pacing: test_kern_load.lua)
   m.step = function(K) m.n = m.n + 1; W.ms = W.ms + 1 end    -- 1 ms per call
   H.boot(W, {modules = {m, perf}})
   H.run(W, 1600 * 9, {skip = 9})          -- 1,600 frames = 32 s
