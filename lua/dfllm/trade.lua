@@ -30,9 +30,19 @@
 -- item flags.in_building writes (logistics marks the goods), pause holds and quicksaves (arbiter
 -- owns pause; DESIGN §2), flags1.left (D-08).
 -- [live-untested] every UI step (OPEN..RESULT), act.trade itself, time_remaining thresholds.
+-- Run 9 (FR-18, FR-32, FR-43):
+--   * ledger: every finished visit logs what was sold and bought (item type, units, value) and each want that
+--     stayed unmet with the reason (none = the merchants had none, value = our goods could not pay for it,
+--     part = only some, or the visit's failure reason), as TRADE_LEDGER (B) and the last LEDGER_KEEP visits
+--     in persist m.trade.ledger;
+--   * inspect what=trade: caravans, wants and sell list, the ledger and, once a caravan stands at the depot,
+--     the merchant goods unloaded there (the depot's goods list: type, material, units, value, the want token
+--     that names them), so trade.want can ask for what is actually there;
+--   * depot keeper: a caravan on the map with no built depot raises DEPOT_MISSING (A) once per visit and asks
+--     the runner to queue a depot project (runner.depot_keep; the runner also keeps it in PEACE/RECOVERY).
 local json = require('dfllm.util.json')
 
-local M = {name = 'trade', every = {ticks = 100}, verbs = {},
+local M = {name = 'trade', every = {ticks = 100}, verbs = {}, inspect = {},
            reports = {CARAVAN_ARRIVAL = true, FIRST_CARAVAN_ARRIVAL = true, MERCHANTS_LEAVING_SOON = true,
                       MERCHANTS_NEED_DEPOT = true}}
 
@@ -71,6 +81,8 @@ M.CFG = {
   SHEET_W = 110, SHEET_H = 40,  -- right-anchored depot sheet region; whole screen if not found there
   ITEMS = 100,          -- trade list entries read per frame (CONTRACTS §3.2: <= 200 items)
   IDLE_TICKS = 100, UI_MS = 50,
+  LEDGER_KEEP = 3,      -- visits kept in persist m.trade.ledger (FR-32)
+  GOODS_LIST = 30,      -- merchant goods kinds listed by inspect what=trade (FR-18; the reply stays <= 8 KB)
 }
 M.DEFAULT_WANT = {'bar:iron', 'anvil', 'cloth'}   -- same default as `dfllm plan propose`
 
@@ -240,6 +252,69 @@ function L.plan(buys, sells, f)
   for _, s in ipairs(sell) do r.sell[#r.sell + 1] = s.i end
   table.sort(r.buy); table.sort(r.sell)
   return r
+end
+
+-- FR-32: what a trade plan sells and buys and which wants stay unmet. want = token list (L.tokens), buys
+-- {i, k, value, stack, t}, sells {i, value, stack, t}, plan {buy={i}, sell={i}} (nil: nothing marked).
+-- Returns {sold={{t, n, v}}, bought={{src, t, n, v}}, sold_n, sold_v, bought_n, bought_v, unmet={{src, why}}}
+-- with why: none (the merchants had none), value (nothing of it fit the value our goods could pay), part.
+function L.ledger(want, buys, sells, plan)
+  local pb, ps = {}, {}
+  for _, i in ipairs(plan and plan.buy or {}) do pb[i] = true end
+  for _, i in ipairs(plan and plan.sell or {}) do ps[i] = true end
+  local r = {sold = {}, bought = {}, sold_n = 0, sold_v = 0, bought_n = 0, bought_v = 0, unmet = {}}
+  local sold, bought, had, got = {}, {}, {}, {}
+  for _, s in ipairs(sells or {}) do
+    if ps[s.i] then
+      local t = s.t or '?'
+      local e = sold[t]
+      if not e then e = {t, 0, 0}; sold[t] = e; r.sold[#r.sold + 1] = e end
+      local n = math.max(1, int(s.stack))
+      e[2], e[3] = e[2] + n, e[3] + int(s.value)
+      r.sold_n, r.sold_v = r.sold_n + n, r.sold_v + int(s.value)
+    end
+  end
+  for _, b in ipairs(buys or {}) do
+    local n = math.max(1, int(b.stack))
+    had[b.k] = (had[b.k] or 0) + n
+    if pb[b.i] then
+      got[b.k] = (got[b.k] or 0) + n
+      local src = want[b.k] and want[b.k].src or '?'
+      local key = src .. '|' .. tostring(b.t)
+      local e = bought[key]
+      if not e then e = {src, b.t or '?', 0, 0}; bought[key] = e; r.bought[#r.bought + 1] = e end
+      e[3], e[4] = e[3] + n, e[4] + int(b.value)
+      r.bought_n, r.bought_v = r.bought_n + n, r.bought_v + int(b.value)
+    end
+  end
+  for k, tk in ipairs(want or {}) do
+    local h, g = had[k] or 0, got[k] or 0
+    if h == 0 then r.unmet[#r.unmet + 1] = {tk.src, 'none'}
+    elseif g == 0 then r.unmet[#r.unmet + 1] = {tk.src, 'value'}
+    elseif g < math.min(tk.cap or 10, h) then r.unmet[#r.unmet + 1] = {tk.src, 'part'} end
+  end
+  return r
+end
+
+-- FR-18: the want token that names a merchant good (type, material token, description), or nil
+local TYPE_TOKEN = {BAR = 'bar', ANVIL = 'anvil', CLOTH = 'cloth', THREAD = 'thread', SKIN_TANNED = 'leather',
+                    WOOD = 'wood', BLOCKS = 'block', SMALLGEM = 'gem', ROUGH = 'rough', BOULDER = 'stone',
+                    SEEDS = 'seeds', PLANT = 'plant', MEAT = 'meat', FISH = 'fish', CHEESE = 'cheese', EGG = 'egg',
+                    FOOD = 'meal', DRINK = 'drink', AMMO = 'ammo', WEAPON = 'weapon', ARMOR = 'armor', HELM = 'helm',
+                    SHIELD = 'shield', GLOVES = 'gloves', SHOES = 'shoes', PANTS = 'pants'}
+function L.token_for(t, mat, desc)
+  local base = TYPE_TOKEN[t]
+  if t == 'BAR' then
+    local m = tostring(mat or ''):match('^[Ii][Nn][Oo][Rr][Gg][Aa][Nn][Ii][Cc]:([A-Za-z_]+)$')
+    return m and ('bar:' .. m:lower()) or 'bar'
+  end
+  if t == 'WEAPON' then
+    for _, w in ipairs({'crossbow', 'pick', 'axe'}) do if L.has_word(desc, w) then return w end end
+  end
+  if t == 'AMMO' and L.has_word(desc, 'bolt') then return 'bolts' end
+  if base then return base end
+  local low = tostring(t or ''):lower()
+  return low:match('^[a-z_]+$') and low or nil
 end
 
 -- plain substring search over screen rows {[y]=string}; case-insensitive when ci
@@ -655,7 +730,9 @@ local function lists_slice(j, ui, mer)
       local info = item_info(ui.good[0][i], mer, false, false)
       if not info.container and not info.artifact then
         local k = L.first_match(j.want, info)
-        if k then j.buys[#j.buys + 1] = {i = i, k = k, value = info.value, stack = info.stack, cap = j.want[k].cap} end
+        if k then
+          j.buys[#j.buys + 1] = {i = i, k = k, value = info.value, stack = info.stack, cap = j.want[k].cap, t = info.type}
+        end
       end
     end
   end
@@ -667,7 +744,7 @@ local function lists_slice(j, ui, mer)
       local info = item_info(ui.good[1][i], mer, j.ea, j.ew)
       if not (info.container or info.artifact or info.forbid or info.owned or info.banned or info.unethical)
          and info.value >= M.CFG.SELL_MIN and (#j.sell == 0 or L.first_match(j.sell, info)) then
-        j.sells[#j.sells + 1] = {i = i, value = info.value}
+        j.sells[#j.sells + 1] = {i = i, value = info.value, stack = info.stack, t = info.type}
       end
     end
   end
@@ -735,6 +812,37 @@ end
 local RETRYABLE = {ui_timeout = true, open = true, no_button = true, talker = true, refused = true,
                    changed = true, weight = true, unloading = true, ratio = true, ui_busy = true}
 
+-- FR-32: one ledger entry per finished visit (TRADE_LEDGER, persist m.trade.ledger, kern.log)
+local function ledger(K, ent, ok, why, ratio)
+  local f = rt.f or {}
+  local cand = f.cand
+  local want = cand and cand.want or wants(K)
+  local lg = L.ledger(want, cand and cand.buys, cand and cand.sells, ok and f.plan or nil)
+  if not ok then        -- a failed visit (nothing bought): a want the merchants had (or nobody looked) fails for `why`
+    for _, u in ipairs(lg.unmet) do if u[2] ~= 'none' or not cand then u[2] = tostring(why) end end
+  end
+  local function head(list, n) local r = {} for i = 1, math.min(n, #list) do r[i] = list[i] end return r end
+  local e = {tick = K.now().tick, civ = civ_name(ent), ok = ok and 1 or 0, ratio = int(ratio), why = ok and '' or tostring(why),
+             sold = head(lg.sold, 8), bought = head(lg.bought, 8), unmet = head(lg.unmet, 10),
+             sold_v = lg.sold_v, bought_v = lg.bought_v}
+  st.ledger = type(st.ledger) == 'table' and st.ledger or {}
+  table.insert(st.ledger, 1, e)
+  while #st.ledger > M.CFG.LEDGER_KEEP do table.remove(st.ledger) end
+  dirty = true
+  local um = {}
+  for _, u in ipairs(e.unmet) do um[#um + 1] = u[1] .. ':' .. u[2] end
+  local sold, bought = {}, {}
+  for _, x in ipairs(e.sold) do sold[#sold + 1] = string.format('%s x%d (%d)', x[1], x[2], x[3]) end
+  for _, x in ipairs(e.bought) do bought[#bought + 1] = string.format('%s x%d (%d)', x[1], x[3], x[4]) end
+  K.log('info', 'trade ledger %s: sold %s; bought %s; unmet %s', e.civ, table.concat(sold, ', '),
+        table.concat(bought, ', '), table.concat(um, ', '))
+  K.emit('TRADE_LEDGER', 'B', string.format('%s %s: sold %d (%d), bought %d (%d)%s', e.civ, ok and 'traded' or ('failed ' .. tostring(why)),
+                                            lg.sold_n, lg.sold_v, lg.bought_n, lg.bought_v,
+                                            #um > 0 and ('; unmet ' .. table.concat(um, ' ')) or ''):sub(1, 200),
+         {civ = e.civ, ok = e.ok, ratio = e.ratio, sold = lg.sold_n, sold_v = lg.sold_v, bought = lg.bought_n,
+          bought_v = lg.bought_v, unmet = um})
+end
+
 local function finish(K, ok, why, ratio)
   local ent, f = rt.ent, rt.f
   local v = visit(ent)
@@ -747,6 +855,7 @@ local function finish(K, ok, why, ratio)
     restore_toggles(K, v)
     caravan_ev(K, 'traded', ent, {ratio = ratio},
                string.format('traded with %s, ratio %d.%02d', civ_name(ent), ratio // 100, ratio % 100))
+    ledger(K, ent, true, 'traded', ratio)
     return set_phase(K, 'LEAVE', 'traded')
   end
   if v and why ~= 'ui_busy' then v.tries, dirty = v.tries + 1, true end   -- the player's screen costs no try
@@ -766,6 +875,7 @@ local function finish(K, ok, why, ratio)
     return set_phase(K, 'WAIT', why)
   end
   restore_toggles(K, v)
+  if why ~= 'ui_busy' then ledger(K, ent, false, why, 0) end
   set_phase(K, 'LEAVE', why)
 end
 
@@ -777,11 +887,24 @@ local function track_visits(K, cars, now)
     local v = st.visits[key]
     if not v then
       v = {first = now, at = -1, tries = 0, traded = 0, stuck = 0, set = 0, orig_r = 0, orig_a = 0, retry = -1,
-           ratio = 0, stuck_since = -1}
+           ratio = 0, stuck_since = -1, nodepot = 0}
       st.visits[key], dirty = v, true
       caravan_ev(K, 'arrive', c.ent, nil, 'caravan from ' .. civ_name(c.ent) .. ' ' .. c.state)
     end
     if c.state == 'AtDepot' and v.at < 0 then v.at, dirty = now, true end
+    -- FR-43 (Run 9: two caravans came and left within a minute after a siege had razed the depot): no built
+    -- depot while a caravan is here -> DEPOT_MISSING (A) once per visit, and the runner queues a depot project
+    if v.nodepot == 0 and c.state ~= 'Leaving' and not find_depot(K) then
+      v.nodepot, dirty = 1, true
+      local okc, okd, res = K.call('runner', 'depot_keep', 'caravan')
+      local proj = okc and okd and type(res) == 'string' and res or ''
+      local planned = 0
+      pcall(function() if #df.global.world.buildings.other.TRADE_DEPOT > 0 then planned = 1 end end)
+      K.emit('DEPOT_MISSING', 'A', string.format('caravan from %s on the map and no trade depot stands%s', civ_name(c.ent),
+                                                 planned == 1 and ' (one is being built)' or
+                                                 (proj ~= '' and (': ' .. proj) or ': no known depot site')),
+             {civ = civ_name(c.ent), planned = planned, proj = proj:sub(1, 40)})
+    end
     if c.state == 'Stuck' then
       if v.stuck_since < 0 then v.stuck_since, dirty = now, true end
     elseif v.stuck_since >= 0 then v.stuck_since, dirty = -1, true end
@@ -1103,7 +1226,7 @@ local function step_mark(K, cars)
   rt.job = nil
   if #j.buys == 0 then return finish(K, false, 'nothing_wanted') end
   if #j.sells == 0 then return finish(K, false, 'nothing_to_sell') end
-  f.cand = {buys = j.buys, sells = j.sells}
+  f.cand = {buys = j.buys, sells = j.sells, want = j.want}
   return mark(K)
 end
 
@@ -1190,7 +1313,7 @@ end
 
 ---------------------------------------------------------------- module
 local VISIT_KEYS = {'first', 'at', 'tries', 'traded', 'stuck', 'set', 'orig_r', 'orig_a', 'retry', 'ratio',
-                    'stuck_since'}
+                    'stuck_since', 'nodepot'}
 local NEG_DEFAULT = {at = true, retry = true, stuck_since = true}
 
 function M.init(K)
@@ -1206,6 +1329,7 @@ function M.init(K)
       end
     end
     if type(p.ov) == 'table' then st.ov = {want = p.ov.want, sell = p.ov.sell, loaded = int(p.ov.loaded)} end
+    if type(p.ledger) == 'table' then st.ledger = p.ledger end
   end
   rt = {phase = 'IDLE', civ = {}, o1 = {}}
   pub, dirty = nil, false
@@ -1252,6 +1376,57 @@ function M.state(K) return pub or {} end
 
 -- public (CONTRACTS §7): caravans traded this fort
 function M.done(K) return st and st.done or 0 end
+
+-- inspect what=trade (FR-18, FR-32): caravans, wants, sell list, the last ledger entries and, while a caravan
+-- stands at the depot, the merchant goods unloaded there (what the depot's goods list shows), grouped by item
+-- type and material with the want token that names them
+M.inspect.trade = function(K, args)
+  local cars = read_caravans()
+  local list, at = {}, nil
+  for _, c in ipairs(cars) do
+    list[#list + 1] = {civ = civ_name(c.ent), state = c.state, time_left = int(c.tr)}
+    if c.state == 'AtDepot' and not at then at = c end
+  end
+  local want, sell = wants(K)
+  local function srcs(l) local r = {} for _, t in ipairs(l) do r[#r + 1] = t.src end return json.array(r) end
+  local d = find_depot(K)
+  local goods, n = {}, 0
+  if d and at then
+    local agg, order = {}, {}
+    pcall(function()
+      local items = d.contained_items
+      for i = 0, math.min(#items, M.CFG.DEPOT_ITEMS) - 1 do
+        local it = items[i].item
+        if it and it.flags.trader then
+          local info = item_info(it, at.ref, false, false)
+          local key = info.type .. '|' .. tostring(info.mat)
+          local e = agg[key]
+          if not e then
+            e = {type = info.type, mat = info.mat, n = 0, value = 0, token = L.token_for(info.type, info.mat, info.desc)}
+            agg[key], order[#order + 1] = e, e
+          end
+          e.n, e.value = e.n + math.max(1, int(info.stack)), e.value + int(info.value)
+          n = n + 1
+        end
+      end
+    end)
+    table.sort(order, function(a, b) if a.value ~= b.value then return a.value > b.value end return a.type < b.type end)
+    for i = 1, math.min(M.CFG.GOODS_LIST, #order) do goods[i] = order[i] end
+  end
+  local msg = d and at and string.format('%d merchant goods at the depot (%d kinds)', n, #goods)
+              or (d and (#cars > 0 and 'caravan not at the depot yet' or 'no caravan') or 'no built trade depot')
+  local ledger = {}
+  for i, e in ipairs(st.ledger or {}) do ledger[i] = e end
+  local data = {caravans = json.array(list), depot = d and d.id or -1, goods = json.array(goods), goods_items = n,
+                want = srcs(want), sell = srcs(sell), ledger = json.array(ledger), done = st.done}
+  -- the reply stays within 8 KB: older ledger entries go first, then the cheapest goods kinds
+  while true do
+    local ok, enc = pcall(json.encode, data)
+    if not ok or #enc <= 7500 then break end
+    if #ledger > 1 then table.remove(ledger) elseif #goods > 0 then table.remove(goods) else break end
+  end
+  return true, msg, data
+end
 
 M.on = {
   REPORT = function(K, ev)

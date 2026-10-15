@@ -371,7 +371,7 @@ T.test('labor KPI: PEACE days with a parsed starving count feed baseline.labor_d
   T.eq(got, {}, 'no parse, no sample')
 end)
 
-T.test('cancel loop: CANCEL_LOOP once per job and day, suspend attempt, one recheck', function()
+T.test('cancel loop: CANCEL_LOOP once per job and day, one recheck (no suspend: DF 53 orders have none)', function()
   local W = world{setup = function(W) F.order(W, {job_type = 0, _name = 'Brew drink', amount_left = 5}) end}
   settle(W)
   for _ = 1, 7 do
@@ -381,7 +381,7 @@ T.test('cancel loop: CANCEL_LOOP once per job and day, suspend attempt, one rech
   local ev = W.find_events('CANCEL_LOOP')
   T.eq(#ev, 1)
   T.eq({ev[1].d.job, ev[1].d.n, ev[1].d.order}, {'Brew Drink', 5, 1})
-  T.eq(count_acts(W, 'order_suspend'), 1)
+  T.eq(count_acts(W, 'order_suspend'), 0)
   local rech = count_acts(W, 'orders', 'recheck')
   W.run(1200, {skip = 100})                     -- next day: counting starts over
   settle(W)

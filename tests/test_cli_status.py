@@ -243,3 +243,59 @@ def test_state_rejects_bad_alarm_clock_lever():
         assert any(needle in e for e in errs), (key, errs)
         pruned, _ = schema.prune_state(d)
         assert pruned is not None and key not in pruned
+
+
+# ---------------------------------------------------------------- FR-29, FR-39, FR-01, FR-46
+def test_follow_off_in_status_and_doctor(save, capsys):
+    """FR-29: a follow that does not beat is said loudly in status and is a doctor problem while DF runs."""
+    assert files.follow_off(save) is None
+    old = time.time() - 3 * 3600
+    os.utime(save / files.FOLLOW_HB, (old, old))
+    assert run(save, "status") == 0
+    out = capsys.readouterr().out
+    assert "follow: OFF (last heartbeat 3h ago)" in out
+    assert any("follow: OFF" in b for b in doctor.diagnose(save)[1])
+    assert "follow: OFF (last heartbeat 3h ago)" in brief.brief_text(save)
+    (save / files.FOLLOW_HB).unlink()
+    assert "follow: OFF (no heartbeat yet" in brief.status_text(save)
+
+
+def test_follow_off_not_a_problem_without_df(save):
+    (save / files.FOLLOW_HB).unlink()
+    (save.parent / "ACTIVE").unlink()
+    lines, bad = doctor.diagnose(save)
+    assert not any("follow" in b for b in bad)
+    assert any("follow: OFF" in x and "DF not running" in x for x in lines)
+
+
+def test_follow_writes_its_heartbeat(save):
+    from dfpilot import wake
+    (save / files.FOLLOW_HB).unlink()
+    t = [1000.0]
+    f = wake.Follower(save=save.name, out=lambda line: None, clock=lambda: t[0])
+    f.poll()
+    doc, age = files.read_follow_hb(save)
+    assert doc["v"] == 2 and doc["wall"] == 1000 and age is not None and age < 5
+    mt = (save / files.FOLLOW_HB).stat().st_mtime
+    t[0] += 3
+    f.poll()
+    assert (save / files.FOLLOW_HB).stat().st_mtime == mt, "beats every 10 s, not every poll"
+    t[0] += 10
+    f.poll()
+    assert files.read_json(save / files.FOLLOW_HB)["wall"] == 1013
+
+
+def test_status_orders_and_free_metal(save):
+    """FR-01/FR-39 orders line, FR-46 free metal by category; doctor flags orders without item_subtype."""
+    st = json.loads((save / "state.b.json").read_text("utf-8"))
+    st["orders"] = {"n": 42, "bad": 1, "stuck": 3}
+    st["mil"]["free"] = {"weapon": 4, "body": 2, "shield": 0}
+    assert schema.validate("state", st) == []
+    (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
+    out = brief.status_text(save)
+    assert "orders 42 stuck 3 UNSAFE 1" in out
+    assert "free metal body 2 weapon 4" in out
+    assert any("item_subtype" in b for b in doctor.diagnose(save)[1])
+    st["orders"]["bad"] = 0
+    (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
+    assert not any("item_subtype" in b for b in doctor.diagnose(save)[1])

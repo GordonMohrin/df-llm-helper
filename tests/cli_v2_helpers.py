@@ -27,6 +27,7 @@ def make_runtime(tmp_path: Path) -> Path:
     d = rt / SAVE
     now = time.time()
     os.utime(d / "heartbeat", (now, now))
+    files.write_follow_hb(d, {"v": 2, "wall": int(now), "last_n": 0})      # FR-29: follow is running
     return d
 
 

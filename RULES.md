@@ -127,8 +127,10 @@ helper is experimental; procedure and fair-play limits: `tools/embark/README.md`
 | `trade.want` | `{want?, sell?}` | tokens like `bar:iron`, `anvil`, `cloth` |
 | `squad.sortie` | `{squad, target, approve:true}` | ALERT/SIEGE/BREACH/RECOVERY; rare, `approve:true` is a deliberate, logged decision; target = kill box id or position |
 | `lever` | `{bridge, want}` | PEACE only |
-| `inspect` | `{what, key?}` | read-only, ≤ 8 KB (`what=tombs`, `what=water_sources` too) |
+| `inspect` | `{what, key?}` | read-only, ≤ 8 KB; `what=tombs`, `water_sources`, `what=orders` (blocked orders), `workload` (idle adults, unclaimed jobs, cancel reasons, free picks/axes), `trade` (merchant goods at the depot, last trades) |
 | `tombs.repair` | `{}` | GHOSTS: the next care run repairs the tombs (any mode) and retries entomb |
+| `order.add` | `{job, amount, item_subtype?, material?, material_category?, reaction?, frequency?}` | one manager order; make-item jobs need `item_subtype` (`ITEM_…`), else DF 53.16 crashes (refused) |
+| `jobs.release` | `{all?, preventblocking?}` | resume suspended constructions; `preventblocking` is a lasting fort decision |
 | `selftest` | `{suite?}` | quick or full |
 | `module.enable` | `{module}` | re-enable a module the kernel backed off (KERN_FAULT) before its backoff ends, only once the cause is fixed |
 | `ack` | `{n?}` | interrupts seen up to n (default all); `dfllm ack` sends it |
@@ -154,6 +156,8 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | GHOSTS | `inspect` `what=tombs` (causes per body); `tombs.repair`; `no_coffin` → `bp.place tombs`; `no_body` → a memorial slab |
 | HOSPITAL_DRY | follow the recipe in the line (`inspect` `what=water_sources`: a bank to zone or a dig); until water is accepted, a dry hospital zone is worse than none |
 | MOOD_RISK | supply the missing class now (dig, trade, butcher); a mood job is never cancelled |
+| ORDER_BAD | a make-item order without `item_subtype` (DF crash) was removed; never queue such orders, use `order.add` with `item_subtype` |
+| DEPOT_MISSING | a caravan came and no depot stands; the kernel queued a `depot` project: check `status`/`proj`, keep O1 down for builders in PEACE |
 
 ## 8. Readiness gate (only readiness raises max-pop)
 - **R0:** cap 55 (pop-control `max-pop 55`, `wave-size 8`).
@@ -237,6 +241,7 @@ Brief ≤ 1.5k, status ≤ 300, wake line ≤ 150. If a wake needs more than 5 t
 one line for the player and wait for the next wake.
 
 ## 13. When something looks wrong
+- `dfllm status` says `follow: OFF`: start `Monitor` on `dfllm follow` again; silence from a dead follow is not "all is well".
 - `dfllm status` stale or no heartbeat for 120 s: read `dfllm supervise --once --dry-run` and tell
   the player (a scheduled supervisor, if set up, handles it); do not restart DF by hand.
 - A command was refused: read the outbox `msg`; fix the args; never retry with a different verb to

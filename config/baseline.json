@@ -146,7 +146,16 @@
     {"id": "combine"}
    ]
   },
-  "cancel_loop": 5
+  "cancel_loop": 5,
+  "order_guard": {"drop": true, "per_run": 4},
+  "orders": {"stuck_days": 3, "needs_drop": 10, "backoff_days": 10, "report_per_day": 3},
+  "jobs": {"release_per_day": 20, "held_days": 3, "preventblocking": "keep"},
+  "farms": {"per_day": 16},
+  "forbid": {"per_day": 30},
+  "starve": {"days": 0, "hunger": 50000, "plants_max": 200, "plants_per_slice": 400, "report_days": 2, "gatherers": 4,
+             "planters": 4, "plants": ["GRASS_WHEAT_CAVE", "MUSHROOM_HELMET_PLUMP", "POD_SWEET", "BUSH_QUARRY",
+                                       "MUSHROOM_CUP_DIMPLE"],
+             "details": {"planters": ["Planters"], "gatherers": ["Plant gatherers", "Gatherers", "Herbalists"]}}
  },
  "care": {
   "units_per_slice": 50,

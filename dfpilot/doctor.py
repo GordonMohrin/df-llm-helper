@@ -95,6 +95,13 @@ def diagnose(save_dir: Path) -> tuple[list[str], list[str]]:
             bad.append(f"{s['gaps3']} frame gap(s) > 3 s in {s['span_s'] // 60} min (autosave?)")
     else:
         out.append("perf.csv: no rows")
+    off = files.follow_off(d)
+    if off:                                    # FR-29: a silent follow is not "all is well"
+        (bad if active == d.name else out).append(off + ("" if active == d.name else " (DF not running this save)"))
+    od = (state or {}).get("orders")
+    if od and od.get("bad"):                   # FR-39: DF 53.16 crashes on make-item orders without a subtype
+        bad.append(f"{od['bad']} manager order(s) of MakeArmor/Pants/Shoes/Gloves/Helm/Weapon/Ammo/Shield type without "
+                   f"item_subtype: DF crashes when a dwarf takes the job (dfllm cmd inspect what=orders)")
     if state:
         k = state["k"]
         out.append(f"state: tps {state['t']['tps']} ms/s {k['ms_s']} gap {k['gap_max_ms']} ms faults {k['faults']}"
@@ -102,7 +109,7 @@ def diagnose(save_dir: Path) -> tuple[list[str], list[str]]:
                    + (f" ms_max {k['ms_max']}" if "ms_max" in k else ""))
         if k.get("disabled"):
             bad.append(f"disabled modules: {','.join(k['disabled'])}")
-    evs = files.tail_events(d, 0, limit=300, types={"KERNEL_SLOW", "KERN_FAULT", "PERF_DEGRADED", "ACT_FAIL"})
+    evs = files.tail_events(d, 0, limit=300, types={"KERNEL_SLOW", "KERN_FAULT", "PERF_DEGRADED", "ACT_FAIL", "ORDER_BAD"})
     for e in evs[-6:]:
         out.append(f"  #{e['n']} {e['type']}: {e.get('msg', '')}")
     stuck = [n for n, a in files.pending_inbox(d) if a > INBOX_STUCK_S]

@@ -1217,6 +1217,57 @@ local function gather_zone(K)
         table.concat(made, ','), side * side * #made)
 end
 
+---------------------------------------------------------------- depot keeper (FR-43)
+-- Run 9: a goblin siege razed the surface depot and two caravans came and left within a minute without trade.
+-- In PEACE and RECOVERY (and when trade reports a caravan without a depot) a missing trade depot -- no
+-- TRADE_DEPOT building at all, built or planned -- is queued again as a one-stage `depot` project: a 5x5 depot
+-- (quickfort build 'D(5x5)', materials by buildingplan) centred on manifest.depot, else on the last depot the
+-- runner saw standing (m.runner.depot). One project at a time; returns ok, project id | reason.
+M.CFG.depot_prio = 2
+local DEPOT_MODES = {PEACE = true, RECOVERY = true}
+
+local function depot_seen()
+  local have, c = false, nil
+  pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.TRADE_DEPOT) do
+      have = true
+      if int(b.centerx) and int(b.centery) and int(b.z) then c = {int(b.centerx), int(b.centery), int(b.z)}; break end
+    end
+  end)
+  return have, c
+end
+
+function M.depot_keep(K, why)
+  if not DEPOT_MODES[K.mode()] then return false, 'not in ' .. K.mode() end
+  local have, c = depot_seen()
+  if have then
+    local d = S.rt.depot
+    if c and (type(d) ~= 'table' or d[1] ~= c[1] or d[2] ~= c[2] or d[3] ~= c[3]) then S.rt.depot = c; dirty(); save(K) end
+    return true, 'standing'
+  end
+  for _, P in ipairs(S.pd.list) do
+    if P.tpl == 'depot' and P.done ~= 1 then return true, P.id end
+  end
+  local m = K.manifest().depot
+  local pos = type(m) == 'table' and int(m[1]) and int(m[2]) and int(m[3]) and {int(m[1]), int(m[2]), int(m[3])}
+              or (type(S.rt.depot) == 'table' and int(S.rt.depot[1]) and S.rt.depot) or nil
+  if not pos then return false, 'no known depot site' end
+  local n = (int(S.rt.depot_n) or 0) + 1
+  local id = string.format('depot%d', n)
+  local at = {pos[1] - 2, pos[2] - 2, pos[3]}
+  local d = {v = 2, tpl = 'depot', site = 'S1', class = 'infra', params = json.object{}, anchor = at, rot = 0,
+             stages = {{label = 'depot.build', mode = 'build', orders = 0, defense = 0,
+                        chunks = {{pos = at, cells = {{0, 0, 0, 'D(5x5)'}}}}}},
+             manifest = {v = 2, depot = {pos[1], pos[2], pos[3]}}, materials = json.object{trade_depot = 1}}
+  local ok, err = register(K, id, d, M.CFG.depot_prio, 'depot')
+  if not ok then return false, err end
+  S.rt.depot_n = n
+  dirty()
+  save(K)
+  K.log('warn', 'trade depot missing (%s): project %s at %d,%d,%d', tostring(why or 'keeper'), id, pos[1], pos[2], pos[3])
+  return true, id
+end
+
 local function keepers(K)
   local t = now(K)
   if K.mode() ~= 'PEACE' or (S.rt.kt and t - S.rt.kt < M.CFG.keep_every) then return end
@@ -1269,6 +1320,7 @@ local function end_run(K)
   end
   phases(K)
   if K.mode() == 'PEACE' then exhausted(K) end
+  if DEPOT_MODES[K.mode()] then M.depot_keep(K, 'keeper') end
   keepers(K)
   prune(M.CFG.done_keep)
   rows(K)

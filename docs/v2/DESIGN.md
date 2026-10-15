@@ -78,10 +78,10 @@ Claude Code orchestrator (≤60k ctx, Monitor on `dfllm follow`) → fresh Sonne
 | levers/bridges | gate | f(mode, drill, trade window), single pending job | `lever` verb (PEACE only) |
 | pop cap | readiness → `pop-control set max-pop` | readiness level ∧ plan ceiling | inbox can only lower it |
 | designations, buildings, zones, burrows, locations | runner (care asks the runner for tomb zones) | project queue | plan.json |
-| manager orders | economy (library imports, `quickfort orders`, `dfllm:`-tagged supply orders) | phase + stock days | plan.orders |
-| work details/labors | **labormanager**, except the builtin tool details Miners/Woodcutters/Hunters: **economy** (`act.work_detail`) whenever labormanager is not in modern mode (live L1b: in monitor mode nobody staffed them, one miner for the fort) | miners from the dig backlog (min 2, up to 4 from pop 20), woodcutters from logs vs autochop's band, hunters only in a famine; each capped by picks/axes/bows; no soldier, noble, moody dwarf or sole key-labor holder is picked | military only *reads* membership to filter recruits |
+| manager orders | economy (library imports, `quickfort orders`, `dfllm:`-tagged supply orders; removes make-item orders without item_subtype, which crash DF 53.16, and orders that keep cancelling for "Needs ...": FR-39, FR-10) | phase + stock days | plan.orders, inbox `order.add` |
+| work details/labors | **labormanager**, except the builtin tool details Miners/Woodcutters/Hunters: **economy** (`act.work_detail`) whenever labormanager is not in modern mode (live L1b: in monitor mode nobody staffed them, one miner for the fort) | miners from the dig backlog (min 2, up to 4 from pop 20), woodcutters from logs vs autochop's band, hunters only in a famine; each capped by picks/axes/bows; no soldier, noble, moody dwarf or sole key-labor holder is picked; in a starvation economy also adds planters and plant gatherers (FR-25), and it drops the ids of dead citizens from every detail (FR-40) | military only *reads* membership to filter recruits |
 | kitchen, seedwatch, stockpile settings | economy | baseline | — |
-| forbid/dump/melt flags on items | care (corpses, captives, mood materials) | care rules | — |
+| forbid/dump/melt flags on items | care (corpses, captives, mood materials); economy unforbids forbidden drink/food/seed containers and seeds, food in a starvation (FR-23/25/50); military the invaders' metal gear (FR-46) | care rules; revealed, reachable tiles in PEACE/RECOVERY | — |
 | runtime settings (autosave, visitor cap, gfps, overlays) | arbiter at boot; restored on unload | profile + decisions | — |
 
 **Mode table** (owned by the siege FSM, applied by the arbiter). "Visible" means `isVisible ∧ ¬isHidden ∧ not caged`.

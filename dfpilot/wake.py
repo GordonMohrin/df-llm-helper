@@ -51,6 +51,7 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
 SUPERVISE_EVERY_S = 15                         # supervise.json read cadence
 SUPERVISE_FRESH_S = 3600                       # alerts logged longer ago than this never wake
 HB_STALE_S = 300
+FOLLOW_HB_EVERY_S = 10                         # FR-29: follow's own heartbeat (<save>/.follow.hb)
 AUTO_TIMEOUT_S = 60
 TOMBS_COOLDOWN_S = 600
 PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "farms")   # automatic placements (one job each)
@@ -167,6 +168,7 @@ class Follower:
         self._pruned = 0.0
         self.sup_seen: dict | None = None      # supervise alert key -> last 'said' wall seen
         self._sup_read = 0.0
+        self._beat = -1e18
 
     @staticmethod
     def _print(line: str) -> None:
@@ -254,6 +256,7 @@ class Follower:
         printed: list[str] = []
         for e in self.tail.poll():
             self._on_event(e, now)
+        self._heartbeat(now)
         self._check_heartbeat(now)
         self._check_supervise(now)
         if self.auto:
@@ -301,6 +304,16 @@ class Follower:
     def _synth(self, etype: str, msg: str, now: float) -> None:
         self.gate.add({"n": None, "type": etype, "cls": "A", "msg": msg[:200], "d": {}}, now)
         files.log_cli(self.dir, "follow", etype, {}, msg)
+
+    def _heartbeat(self, now: float) -> None:
+        """FR-29: `status` and `doctor` read <save>/.follow.hb to tell a quiet follow from a dead one."""
+        if now - self._beat < FOLLOW_HB_EVERY_S or self.dir is None:
+            return
+        self._beat = now
+        try:
+            files.write_follow_hb(self.dir, {"v": 2, "wall": int(now), "last_n": self.tail.last_n if self.tail else 0})
+        except OSError as e:
+            sys.stderr.write(f"follow: cannot write heartbeat: {e}\n")
 
     def _check_heartbeat(self, now: float) -> None:
         if paths.active_save() != self.dir.name:

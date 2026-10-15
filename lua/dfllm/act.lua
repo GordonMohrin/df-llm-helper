@@ -3,6 +3,7 @@
 -- on failure. Callers are checked against contract.ACT. [S#] marks behaviour a live spike must confirm.
 local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
+local OL = require('dfllm.orderlib')
 
 local A = {}
 
@@ -12,8 +13,10 @@ local QF_MODES = {dig = true, build = true, place = true, zone = true, burrow = 
 local QF_COMMANDS = {run = true, orders = true, undo = true}
 local ITEM_FLAGS = {forbid = true, dump = true, melt = true}
 -- builtin work details whose membership act.work_detail may change (each holds one tool labor; live L5: the
--- fishers too, economy staffs them while food is short and a fishing zone exists)
-A.TOOL_DETAILS = {Miners = true, Woodcutters = true, Hunters = true, Fisherdwarves = true}
+-- fishers too, economy staffs them while food is short and a fishing zone exists; FR-25: the planters and the
+-- plant gatherers in a starvation, by the names DF 53 may give the gathering detail [live-untested])
+A.TOOL_DETAILS = {Miners = true, Woodcutters = true, Hunters = true, Fisherdwarves = true, Planters = true,
+                  ['Plant gatherers'] = true, Gatherers = true, Herbalists = true}
 -- the doctor labors act.medic switches and the hospital posts act.hospital_post fills (FR-48)
 A.MEDIC_LABORS = {'DIAGNOSE', 'SURGERY', 'BONE_SETTING'}
 A.HOSPITAL_POSTS = {DOCTOR = true, DIAGNOSTICIAN = true, SURGEON = true, BONE_DOCTOR = true}
@@ -1182,10 +1185,15 @@ local function impls(state)
     return cmd_run('orders', sub)
   end
 
-  -- workorder <json> (tools/workorder.txt); the new order is the one at manager_order_next_id
+  -- workorder <json> (tools/workorder.txt); the new order is the one at manager_order_next_id.
+  -- FR-39: an item-definition job (MakeArmor/Pants/Shoes/Gloves/Helm/Weapon/Ammo/Shield, ...) without an
+  -- item_subtype is refused: DF 53.16 crashes when a dwarf takes such a job (four crashes on 14.10.2026)
   function I.workorder(spec)
     if type(spec) ~= 'table' then return false, 'spec must be a table' end
     if type(spec.tag) ~= 'string' or spec.tag:sub(1, 6) ~= 'dfllm:' then return false, 'spec.tag must start with dfllm:' end
+    if OL.unsafe(spec.job, spec.item_subtype) then
+      return false, tostring(spec.job) .. ' needs item_subtype (ITEM_...): DF 53.16 crashes without one (FR-39)'
+    end
     local body = {}
     for k, v in pairs(spec) do if k ~= 'tag' then body[k] = v end end
     local mo = df.global.world.manager_orders
@@ -1201,6 +1209,90 @@ local function impls(state)
 
   function I.order_suspend(order_id, on)
     return false, 'manager orders have no verified suspend flag in DF 53 [S5]'
+  end
+
+  -- work orders screen > remove (FR-10, FR-39): the order leaves the manager's list, as the screen's cancel
+  -- button removes it (DFHack `orders clear` deletes the same records); jobs it already made keep running.
+  -- Returns ok, 'removed'.
+  function I.order_remove(order_id)
+    local id = int(order_id)
+    if not id then return false, 'order id required' end
+    local all = df.global.world.manager_orders.all
+    for i = #all - 1, 0, -1 do
+      local o = all[i]
+      if o.id == id then
+        all:erase(i)
+        pcall(function() o:delete() end)
+        return true, 'removed'
+      end
+    end
+    return false, 'no order ' .. tostring(order_id)
+  end
+
+  -- building / job sheet > "Resume" (FR-16): the suspended ConstructBuilding jobs with these ids get the
+  -- vanilla suspend toggle cleared; any other job is left alone (no job is created or removed). Returns ok, n.
+  function I.job_resume(ids)
+    if type(ids) ~= 'table' then return false, 'job ids required' end
+    local want, n = {}, 0
+    for i, id in ipairs(ids) do
+      if i > 200 then break end
+      if int(id) then want[int(id)] = true end
+    end
+    local cb = df.job_type.ConstructBuilding
+    local link, guard = df.global.world.jobs.list.next, 0
+    while link and guard < 50000 do
+      local j = link.item
+      if j and want[j.id] and j.job_type == cb and j.flags.suspend then
+        j.flags.suspend = false
+        n = n + 1
+      end
+      link, guard = link.next, guard + 1
+    end
+    return true, n
+  end
+
+  -- farm plot sheet > crop per season (FR-17): plant_id[season] of a farm plot, as the player picks the crop;
+  -- -1 = none. Returns ok, plant index.
+  function I.farm_crop(bld_id, season, plant)
+    local b = df.building.find(int(bld_id) or -1)
+    if not b then return false, 'no building ' .. tostring(bld_id) end
+    local okf, isf = pcall(function() return b:getType() == df.building_type.FarmPlot end)
+    if not (okf and isf) then return false, 'not a farm plot' end
+    season, plant = int(season), int(plant)
+    if not season or season < 0 or season > 3 then return false, 'season must be 0..3' end
+    if not plant or plant < -1 then return false, 'bad plant index' end
+    if plant >= 0 and not df.global.world.raws.plants.all[plant] then return false, 'no plant ' .. tostring(plant) end
+    b.plant_id[season] = plant
+    return true, plant
+  end
+
+  -- designations > gather plants (FR-25): the shrubs at these positions get the player's gather designation
+  -- (dfhack.designations.markPlant; trees are never marked here). The caller passes revealed, reachable
+  -- positions only (snapshot). positions = {{x,y,z}} (<= 200). Returns ok, marked.
+  function I.plant_gather(positions)
+    if type(positions) ~= 'table' then return false, 'positions required' end
+    local want, n = {}, 0
+    for i, p in ipairs(positions) do
+      if i > 200 then break end
+      local x, y, z = xyz(p)
+      x, y, z = int(x), int(y), int(z)
+      if x and y and z then want[string.format('%d,%d,%d', x, y, z)] = true; n = n + 1 end
+    end
+    if n == 0 then return true, 0 end
+    local des = dfhack.designations
+    local marked = 0
+    for _, vn in ipairs({'shrub_dry', 'shrub_wet'}) do
+      local okv, vec = pcall(function() return df.global.world.plants[vn] end)
+      for _, pl in ipairs(okv and vec or {}) do
+        local p = pl.pos
+        local k = string.format('%d,%d,%d', p.x, p.y, p.z)
+        if want[k] then
+          want[k] = nil
+          if not des.isPlantMarked(pl) and des.markPlant(pl) then marked = marked + 1 end
+        end
+      end
+    end
+    return true, marked
   end
 
   -- kitchen screen (Lua API.txt:2650-2660); idempotent
@@ -1392,6 +1484,31 @@ local function impls(state)
       end
     end
     return true, 'removed'
+  end
+
+  -- work details screen (FR-40): the screen lists living citizens only; ids of units that died or left the
+  -- fort stay in assigned_units and made a detail of 14 dead planters look full (119 PlantSeeds jobs unclaimed).
+  -- Every id that is not in `living` (the census) and is no living citizen is taken off the list, as
+  -- act.work_detail does for one unit and fix/dead-units for burrows; no labor of a living unit changes.
+  function I.work_detail_prune(living)
+    if type(living) ~= 'table' then return false, 'living citizen ids required' end
+    local keep = {}
+    for _, id in ipairs(living) do if int(id) then keep[int(id)] = true end end
+    local n = 0
+    for _, w in ipairs(df.global.plotinfo.labor_info.work_details) do
+      local vec = w.assigned_units
+      for i = #vec - 1, 0, -1 do
+        local id = vec[i]
+        if not keep[id] then
+          local u = df.unit.find(id)
+          if not u or dfhack.units.isDead(u) or not dfhack.units.isCitizen(u, true) then
+            vec:erase(i)
+            n = n + 1
+          end
+        end
+      end
+    end
+    return true, n
   end
 
   -- work orders screen: cancel a one-time rock furniture order and enter it again in wood for the amount left
