@@ -34,11 +34,23 @@ DF restarted (`tools/win/start_df_desktop1.ps1`), loaded **autosave 1** (Udosodd
 - `status` shows `free metal ammo 93 body 1 gloves 4 head 3 pants 1 shield 8 shoes 6 weapon 21` (loot is counted).
 - The refuge audit refuses a bad burrow and falls back: `alert no confinement (whole fort) (Kern+ refused: ...)`.
 
+**More live results (same session, later):**
+- ALERT clamp: a giant bat inside the fort -> `MODE PEACE>ALERT hostile`, `ALERT_START`, `PREDATOR` (class I, `1 wild dangers inside the fort (25971 at 83,41,106)`),
+  `status`: `clock: held 100 t/s, reason alert` and real ticks/s 99-139 (FR-51 ALERT cap confirmed).
+- Unacked interrupt fail-safe: 60 s later `LOCKDOWN interrupt #9762 PREDATOR unacked for 60 s: kernel applied its default: clock 30 t/s, alert on Kern+,
+  2 citizens outside Kern+`; `status`: `clock: held 30 t/s, reason unacked:PREDATOR | lockdown unacked:PREDATOR`; after `dfllm ack` and 2 quiet game days
+  `clock: free (cap 500, timestream 500)`, `lockdown off`, DEFCON 5 (FR-53 ack timeout and LOCKDOWN_END confirmed).
+- Burials (FR-45/41/42): after the loose coffins were unforbidden and built, the kernel assigned zones and ran `entomb --unit <id> --haul-now`
+  (`commands.log`: `care act.run ["entomb","--unit","24631","--haul-now"] ok`); 8 bodies lay in the 8 new coffins ~3 min later, no armok removal.
+- Building sites: Masons and Still stayed 0/3 for 25 minutes and were built within 60 s after the forbidden items on their footprints were
+  unforbidden (BUG-009); the depot site had 41 forbidden items.
+- `autolabor` was found enabled in legacy mode after the load (BUG-010).
+
 **Not yet seen live (waiting for a real event, no cheats used):** ARRIVAL/INVASION popup text recognition, clock clamp 30/100
 t/s, bridges up (`lever_latency_s`), door lockdown, LOCKDOWN_END, SEAL_LEAK/PERIMETER_BROKEN after a siege, HOSPITAL_DRY,
 MOOD_RISK, embark panel.
 
-**Problems found (written up one file per bug in `bugs/`, index `bugs/README.md`; FR-59..FR-63 in docs/feature-requests/README.md):**
+**Problems found (one file per bug in `bugs/`, BUG-001..BUG-010, index `bugs/README.md`; FR-59..FR-63 in docs/feature-requests/README.md):**
 1. **FR-59** `seal.lua` SKIP contains `in_inventory`, so every drink/food/seed unit stored in a barrel or bag is ignored:
    `inspect reach` shows `drink/food/seeds groups: []`, the refuge audit says `drink 0<7, food 0<7` for Kern+ and Innen+
    although Lua shows 1362 drink units, all inside Kern+, none forbidden; CUTOFF for food/drink can never fire.
