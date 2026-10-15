@@ -37,6 +37,7 @@ Related: FR-xx, BUG-xx
 | [BUG-014](BUG-014-autolabor-legacy-false-failure.md) | fixed in 413f614 (offline, live-untested) | low | AUTOLABOR_LEGACY says "mode monitor failed, still legacy" although the mode was switched | lua/dfllm/baseline.lua |
 | [BUG-015](BUG-015-door-forbid-flag-reset-in-one-frame.md) | open | high | the entrance door 74,70,117 cannot be kept forbidden (flag reset within one frame), the lockdown still reports it | lua/dfllm/act.lua, reflex.lua |
 | [BUG-016](BUG-016-trade-blocked-by-open-unit-sheet.md) | open | medium | two caravans lost: trade waits for ever on `ui_busy` while a unit sheet stays open | lua/dfllm/trade.lua |
+| [BUG-017](BUG-017-mood-risk-false-missing.md) | open | low | MOOD_RISK reports missing materials although the mood dwarf already holds every item | lua/dfllm/care.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

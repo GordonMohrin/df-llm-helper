@@ -26,3 +26,6 @@ A sheet that has been open for minutes while a caravan is waiting is not a "play
 3. Raise a class A `TRADE_FAILED` with the reason when a caravan leaves with ratio 0, not only a class B `CARAVAN ... failed`.
 
 Related: FR-trade, BUG-008 (event repeats)
+
+## Confirmation (18:25)
+After the sheet was closed (focus `dwarfmode/Default`) the next caravan traded at once: `#12056 CARAVAN traded with Muboomon, ratio 1.65`. So the open unit sheet was the only blocker.
