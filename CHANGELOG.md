@@ -1,5 +1,15 @@
 # CHANGELOG dfpilot
 
+## Lever pulls under the civ alert, BUG-013/BUG-014 (2026-10-15; commits 055c92f, 413f614, offline, live-untested)
+- **BUG-013:** while a pull is pending on levers outside the alert's burrow, the alert lists seal's lever burrow
+  `Hebel+` (the linked lever tiles; a confined civilian takes only jobs inside its burrows but walks outside them), not
+  in BREACH; the lockdown's alert waits for the pulls (`gate.pulls`), at most 2x the last lever latency (450-1500 ticks,
+  900 unmeasured), at once only with a hostile near a citizen; a door waits 450 ticks after the alert called the
+  citizens in; texts `gates: 2 of 4 up, 2 pulls blocked (levers outside the alert burrow)`, GATE_FAIL `outside_alert`;
+  LOCKDOWN_END turns the alert off before the lowering pulls. Test `tests/lua/test_lockdown_gates.lua`.
+  **BUG-014:** the autolabor guard reads the switch back with `autolabor mode` and takes "not enabled in legacy mode"
+  as not legacy; a working switch is one kern.log line, only a failed one is AUTOLABOR_LEGACY (A).
+
 ## Arrival lockdown: civ alert and entrance doors, BUG-011/BUG-012 (2026-10-15; commits 4e2b43c, 0faebcc, offline, live-untested)
 - **BUG-011:** siege's step and `hold_alert` share one decision (seal picks the burrow) and nothing writes
   `civ_alert(false)` while a lockdown holds the alert; when every burrow fails, a lockdown keeps `Innen+` (painted at
