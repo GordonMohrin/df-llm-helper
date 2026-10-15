@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
-from df_llm_helper import schema  # noqa: E402
+from dfpilot import schema  # noqa: E402
 
 RT = ROOT / "tests" / "fixtures" / "v2" / "runtime"
 SAVE = RT / "region7"
@@ -172,8 +172,8 @@ w(SAVE / "plan.json", dump(plan))
 
 # blueprint files of the applied plan, emitted by WP3's bp.emit (what `plan apply` wrote)
 import importlib  # noqa: E402
-bpe = importlib.import_module("df_llm_helper.bp.emit")
-from df_llm_helper.cmd import Occupancy  # noqa: E402
+bpe = importlib.import_module("dfpilot.bp.emit")
+from dfpilot.cmd import Occupancy  # noqa: E402
 occ = Occupancy()                          # applied projects never share or touch tiles (cmd.place)
 for bid, site, anchor in (("y3s0b0", "S1", [45, 47, 120]), ("y3s0b1", "S2", [66, 47, 120]),
                           ("y3s1b0", "S1", [52, 60, 120]), ("y3s2b0", "S1", [70, 56, 120])):

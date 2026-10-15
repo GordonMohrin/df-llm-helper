@@ -1,6 +1,6 @@
-# df-llm-helper v2: contracts (frozen at wave 0)
+# dfpilot v2: contracts (frozen at wave 0)
 
-Status: **FROZEN 2026-10-10** (WP0), **amended 2026-10-10 after review round 1** (§19 lists what changed and which WP must follow). Every WP implements against this file, `lua/dfllm/util/contract.lua` (the same tables as Lua data) and `df_llm_helper/schema.py` (validators). If a contract is wrong or missing, implement the closest compliant thing and report the change you need to the orchestrator; only the orchestrator edits this file. A change here must change `contract.lua` and `schema.py` in the same commit; `tests/test_schema.py` fails when they disagree or when the appendix is stale.
+Status: **FROZEN 2026-10-10** (WP0), **amended 2026-10-10 after review round 1** (§19 lists what changed and which WP must follow). Every WP implements against this file, `lua/dfllm/util/contract.lua` (the same tables as Lua data) and `dfpilot/schema.py` (validators). If a contract is wrong or missing, implement the closest compliant thing and report the change you need to the orchestrator; only the orchestrator edits this file. A change here must change `contract.lua` and `schema.py` in the same commit; `tests/test_schema.py` fails when they disagree or when the appendix is stale.
 
 DESIGN.md is the *why*; this file is the *what*. Where they differ, this file wins (deviations are listed in §18).
 
@@ -332,7 +332,7 @@ Mode-driven duties (no call needed): arbiter applies tempo per mode in `on.MODE`
 ---
 
 ## 9. File formats
-Field notation: `int`, `str`, `bool`, `flag` (int 0/1), `pos` (`[x,y,z]`), `bbox` (§1.3), `?` = optional. Objects are **closed** (unknown keys are errors) unless marked *open*. The machine-readable JSON Schemas are in Appendix A; `df_llm_helper.schema.validate(kind, doc)` is the reference validator.
+Field notation: `int`, `str`, `bool`, `flag` (int 0/1), `pos` (`[x,y,z]`), `bbox` (§1.3), `?` = optional. Objects are **closed** (unknown keys are errors) unless marked *open*. The machine-readable JSON Schemas are in Appendix A; `dfpilot.schema.validate(kind, doc)` is the reference validator.
 
 ### 9.1 `ACTIVE`
 Text, one line, the save folder name, UTF-8, no trailing spaces.
@@ -713,7 +713,7 @@ There is no arbitrary Lua.
 ## 15. Python interfaces (stdlib only)
 | Module (WP) | Interface |
 |---|---|
-| `schema` (WP0) | `validate(kind, doc) -> list[str]`, `check(kind, doc) -> doc` (raises `SchemaError`), `validate_args(verb, args) -> list[str]`, `prune_state(doc) -> (doc|None, errors)` (§9.3 reader rule), `json_schema(kind) -> dict`, `parse_decisions(text) -> dict`, `decision(id, decisions=None) -> str`, `inbox_name(id, ts_ms) -> str`, `INBOX_NAME_RE`, `KINDS`, constants `MODES, EVENTS, VERBS, VERB_BY, ACT, MODULES, DECISIONS, KERN, BP_MAX_CELLS, BP_MAX_BYTES, SNAP_LEGEND, ORDER_LIBS, ID_RE`; CLI `python -m df_llm_helper.schema validate <kind> <file>` (`.jsonl`: every line), `--json-schema <kind>`, `--appendix`, `--write-appendix docs/v2/CONTRACTS.md` |
+| `schema` (WP0) | `validate(kind, doc) -> list[str]`, `check(kind, doc) -> doc` (raises `SchemaError`), `validate_args(verb, args) -> list[str]`, `prune_state(doc) -> (doc|None, errors)` (§9.3 reader rule), `json_schema(kind) -> dict`, `parse_decisions(text) -> dict`, `decision(id, decisions=None) -> str`, `inbox_name(id, ts_ms) -> str`, `INBOX_NAME_RE`, `KINDS`, constants `MODES, EVENTS, VERBS, VERB_BY, ACT, MODULES, DECISIONS, KERN, BP_MAX_CELLS, BP_MAX_BYTES, SNAP_LEGEND, ORDER_LIBS, ID_RE`; CLI `python -m dfpilot.schema validate <kind> <file>` (`.jsonl`: every line), `--json-schema <kind>`, `--appendix`, `--write-appendix docs/v2/CONTRACTS.md` |
 | `paths` (WP2) | `df_dir()`, `runtime_root()`, `active_save() -> str|None`, `save_dir(save=None) -> Path` |
 | `files` (WP2) | `read_state(save_dir) -> dict|None` (both slots through `schema.prune_state`, best remaining `seq`, one retry), `tail_events(save_dir, since_n) -> list[dict]` (handles rotation), `write_inbox(save_dir, verb, args, by) -> id`, `read_outbox(save_dir, id, timeout_s) -> dict|None` |
 | `bp.emit` (WP3) | `emit(tpl, params, site) -> dict` = a §9.8 document without `id` (caller sets it) |
@@ -757,17 +757,17 @@ There is no arbitrary Lua.
 ## 17. Ownership of files (W1/W2)
 | WP | Files |
 |---|---|
-| WP0 | docs/v2/CONTRACTS.md, df_llm_helper/schema.py, df_llm_helper/bp/__init__.py (empty skeleton, WP3 may extend), lua/dfllm/util/{json,contract,k_mock}.lua, tools/luahost.py, tests/lua/{testlib,test_json,test_k_mock,dump_contract,contract_probe}.lua, tests/test_luahost.py, tests/test_schema.py, fixtures/v2/decisions_vectors.json; skeleton dirs config/, plans/, tests/bp/, fixtures/v2/ |
+| WP0 | docs/v2/CONTRACTS.md, dfpilot/schema.py, dfpilot/bp/__init__.py (empty skeleton, WP3 may extend), lua/dfllm/util/{json,contract,k_mock}.lua, tools/luahost.py, tests/lua/{testlib,test_json,test_k_mock,dump_contract,contract_probe}.lua, tests/test_luahost.py, tests/test_schema.py, fixtures/v2/decisions_vectors.json; skeleton dirs config/, plans/, tests/bp/, fixtures/v2/ |
 | WP1 | lua/dfllm.lua, lua/dfllm/{kern,io,persist,arbiter,act,perf,selftest}.lua, lua/dfllm/util/geom.lua |
-| WP2 | df_llm_helper/{__main__,cli,paths,files,wake,brief,plan,cmd,doctor,events}.py |
-| WP3 | df_llm_helper/bp/*.py, tests/bp/ |
-| WP4 | df_llm_helper/{fairplay,lint,hook}.py, config/{allowlist.json,decisions.yaml}, docs/v2/DECISIONS.md, .claude/settings.json |
+| WP2 | dfpilot/{__main__,cli,paths,files,wake,brief,plan,cmd,doctor,events}.py |
+| WP3 | dfpilot/bp/*.py, tests/bp/ |
+| WP4 | dfpilot/{fairplay,lint,hook}.py, config/{allowlist.json,decisions.yaml}, docs/v2/DECISIONS.md, .claude/settings.json |
 | WP5 | lua/dfllm/{sense,threat,gate,siege}.lua, tests/lua/test_siege.lua |
 | WP6 | lua/dfllm/{military,readiness,drill}.lua |
 | WP7 | lua/dfllm/{runner,snapshot}.lua |
 | WP8 | lua/dfllm/{baseline,economy,care}.lua, config/baseline.json |
 | WP9 | lua/dfllm/trade.lua |
-| WP10 | df_llm_helper/supervise.py, tools/migrate_v2.py, tools/win/vdesk_move.ps1 |
+| WP10 | dfpilot/supervise.py, tools/migrate_v2.py, tools/win/vdesk_move.ps1 |
 | WP11 | tools/embark/*, plans/year1.json, RULES.md, docs/v2/MIGRATION.md (written as QUICKSTART.md + V1-LEGACY.md) |
 
 Each WP may add its own `tests/lua/test_<module>.lua` and `tests/test_<module>.py`.
@@ -804,12 +804,12 @@ Each item names the WP that must adapt its code; WP0 changed the contract, `cont
 ---
 
 ## Appendix A. JSON Schemas (generated)
-Generated by `python -m df_llm_helper.schema --write-appendix docs/v2/CONTRACTS.md`; `tests/test_schema.py` fails if this block is stale. The digest covers every schema and registry in `schema.py`, so any contract change shows up here.
+Generated by `python -m dfpilot.schema --write-appendix docs/v2/CONTRACTS.md`; `tests/test_schema.py` fails if this block is stale. The digest covers every schema and registry in `schema.py`, so any contract change shows up here.
 
 <!-- BEGIN GENERATED SCHEMAS -->
 Contract digest: `c397584174411beb4edbe64950b97f5c4964a84860ecaaf40c9ca827f9710f4d`
 
-DESIGN §6 formats and the inbox verb args. Other kinds: `python -m df_llm_helper.schema --json-schema <kind>` with kind in heartbeat, phases, bp, restore, lock, allowlist, persist.marker, persist.projects, persist.plan, persist.phase, persist.mode, persist.drill, persist.kern. Per-type event `d` (§12) and per-verb `args` are checked by `validate()`; the envelopes leave them open. Compact JSON, keys sorted.
+DESIGN §6 formats and the inbox verb args. Other kinds: `python -m dfpilot.schema --json-schema <kind>` with kind in heartbeat, phases, bp, restore, lock, allowlist, persist.marker, persist.projects, persist.plan, persist.phase, persist.mode, persist.drill, persist.kern. Per-type event `d` (§12) and per-verb `args` are checked by `validate()`; the envelopes leave them open. Compact JSON, keys sorted.
 
 **state**
 ```json

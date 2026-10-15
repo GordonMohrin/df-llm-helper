@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from df_llm_helper import bp
+from dfpilot import bp
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))

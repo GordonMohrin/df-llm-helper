@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from df_llm_helper import supervise as sv
+from dfpilot import supervise as sv
 
 T0 = 1_791_600_000.0
 YEAR = sv.YEAR

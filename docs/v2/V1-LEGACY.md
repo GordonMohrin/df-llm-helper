@@ -7,13 +7,13 @@ because repo A's `lua/` is on DF's script path (DESIGN §9, STATUS §6.11).
 ```
 git show v1-final:docs/MANUAL.md                    # read one v1 file
 git ls-tree -r --name-only v1-final -- Bugs/        # list a v1 folder
-git worktree add ../df-llm-helper-v1 v1-final       # the whole v1 tree beside this one
+git worktree add ../dfpilot-v1 v1-final       # the whole v1 tree beside this one
 ```
 
 ## Removed from `v2`
 | Path (as in `v1-final`) | What it was |
 |---|---|
-| `df_llm_helper/*.py` except the v2 modules, `df_llm_helper/_v1/`, `features/`, `planners/` | v1 Python helper: dfhack-run client, digest, autopilot, guard, waechter, runbooks, kb, bus, journal, dashboard, siege/caravan/care pilots, store, clock, stalllog, toolsfs. `planners/blueprint.py` lives on as `bp/validate.py`; `lint` and `fairplay` keep only their v2 code (the v1 forwarding is gone) |
+| `dfpilot/*.py` except the v2 modules, `dfpilot/_v1/`, `features/`, `planners/` | v1 Python helper: dfhack-run client, digest, autopilot, guard, waechter, runbooks, kb, bus, journal, dashboard, siege/caravan/care pilots, store, clock, stalllog, toolsfs. `planners/blueprint.py` lives on as `bp/validate.py`; `lint` and `fairplay` keep only their v2 code (the v1 forwarding is gone) |
 | `lua/claude/`, `lua/pilot_*.lua` | v1 DFHack scripts (`claude/*`) and the pilot companions |
 | `tests/test_*.py` of v1, `tests/conftest.py`, `helpers.py`, `make_fixtures.py`, `kb_queries.yaml`, `lint_cases/`, `blueprints_bad/`, `lua_mock/` | v1 tests and their fixtures |
 | `fixtures/{bugs,run5,run5_live,subagents,v3,wake}` | recorded v1 (Run 5) responses; `fixtures/v2` stays |

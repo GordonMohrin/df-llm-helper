@@ -6,7 +6,7 @@ import time
 import pytest
 from cli_v2_helpers import FIX, RUNTIME, SAVE, append_events, ev, make_runtime, reset_paths
 
-from df_llm_helper import files, paths, schema
+from dfpilot import files, paths, schema
 
 
 @pytest.fixture

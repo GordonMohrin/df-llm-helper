@@ -7,8 +7,8 @@ import types
 import pytest
 from cli_v2_helpers import FakeKern, inbox_docs, install_fake_bp, make_runtime, reset_paths
 
-from df_llm_helper import cmd, files, schema
-from df_llm_helper.cli import main, render_ascii
+from dfpilot import cmd, files, schema
+from dfpilot.cli import main, render_ascii
 
 
 @pytest.fixture
@@ -209,7 +209,7 @@ def test_bp_place_repair_reapplies_only_the_named_build_cells(save, monkeypatch)
 
 
 def test_place_real_bp_param_mismatch_reranks(save):
-    pytest.importorskip("df_llm_helper.bp.sites")
+    pytest.importorskip("dfpilot.bp.sites")
     for p in cmd.bp_files(save):
         p.unlink()
     sites, _ = cmd.rank_sites(save, "bedrooms", {"n": 2})
@@ -226,7 +226,7 @@ def test_fort_manifest_and_rank_kwargs(save, monkeypatch):
     def rank(snap, tpl, params=None, manifest=None, n=3):
         seen.append(manifest)
         return [{"id": "S1", "anchor": [40, 32, 120], "rot": 0, "score": 1, "why": ""}]
-    monkeypatch.setattr(sys.modules["df_llm_helper.bp.sites"], "rank", rank)
+    monkeypatch.setattr(sys.modules["dfpilot.bp.sites"], "rank", rank)
     m = cmd.fort_manifest(save)
     assert m["zones"]["Z4"][0] == [41, 45, 120, 78, 45, 120]               # the cached kern manifest
     assert {r["tpl"] for r in m["rooms"]} >= {"bedrooms", "hospital", "tavern"}   # + every bp fragment
@@ -248,7 +248,7 @@ def test_inspect_manifest_reply_is_cached(save):
 
 
 def test_footprint_reserves_later_stages(save):
-    em = pytest.importorskip("df_llm_helper.bp.emit")
+    em = pytest.importorskip("dfpilot.bp.emit")
     s1 = dict(em.emit("fortcore", {"stage": 1}, {"id": "S1", "anchor": [60, 30, 130], "rot": 0}), id="f1")
     s2 = em.emit("fortcore", {"stage": 2}, {"id": "S1", "anchor": [60, 30, 130], "rot": 0})
     fp = cmd.footprint(s1)
@@ -288,9 +288,9 @@ def test_bp_list_preview_sites(save, monkeypatch, capsys):
 def test_bp_list_format_and_render_preview(save, monkeypatch, capsys):
     install_fake_bp(monkeypatch, templates=("fortcore", "tombs"))
     seen = []
-    render = types.ModuleType("df_llm_helper.bp.render")
+    render = types.ModuleType("dfpilot.bp.render")
     render.preview = lambda tpl, params, site: seen.append((tpl, params, site)) or f"PREVIEW {tpl}"
-    monkeypatch.setitem(sys.modules, "df_llm_helper.bp.render", render)
+    monkeypatch.setitem(sys.modules, "dfpilot.bp.render", render)
     assert run(save, "bp", "list") == 0
     assert capsys.readouterr().out.splitlines() == ["fortcore: fortcore template | stage=1",
                                                     "tombs: tombs template | n=10"]
@@ -304,7 +304,7 @@ def test_emit_value_error_is_refused(save, monkeypatch, capsys):
 
     def bad(tpl, params, site):
         raise ValueError("bedrooms: unknown params ['color']")
-    monkeypatch.setattr(sys.modules["df_llm_helper.bp.emit"], "emit", bad)
+    monkeypatch.setattr(sys.modules["dfpilot.bp.emit"], "emit", bad)
     assert run(save, "cmd", "bp.place", "tpl=bedrooms", "site=S1", "color=red") == cmd.EXIT_BAD
     assert "unknown params ['color']" in capsys.readouterr().out
     assert not (save / "inbox").exists() or inbox_docs(save) == []
@@ -327,7 +327,7 @@ def test_bp_sites_fresh(save, monkeypatch, capsys):
     def reply(doc):
         snap = json.loads((save / "snap" / "c201.json").read_text("utf-8"))
         snap["id"] = doc["id"]
-        from df_llm_helper import files
+        from dfpilot import files
         files.write_json_atomic(save / "snap" / f"{doc['id']}.json", snap)
         return True, "exporting", {"id": doc["id"]}
     with FakeKern(save, reply) as k:
@@ -354,7 +354,7 @@ def test_bp_list_and_preview_need_no_fort(tmp_path, capsys):
 
 def test_bp_without_package(save, monkeypatch, capsys):
     for m in ("emit", "sites", "render"):
-        monkeypatch.setitem(sys.modules, f"df_llm_helper.bp.{m}", None)
+        monkeypatch.setitem(sys.modules, f"dfpilot.bp.{m}", None)
     assert run(save, "bp", "list") == 1
     assert "bp.emit not available" in capsys.readouterr().out
     assert run(save, "bp", "sites") == 2
@@ -370,9 +370,9 @@ def test_render_ascii_layers():
 # ---------------------------------------------------------------- delegations
 def test_supervise_delegates_to_main(save, monkeypatch):
     seen = []
-    fake = types.ModuleType("df_llm_helper.supervise")
+    fake = types.ModuleType("dfpilot.supervise")
     fake.main = lambda argv: seen.append(argv) or 0
-    monkeypatch.setitem(sys.modules, "df_llm_helper.supervise", fake)
+    monkeypatch.setitem(sys.modules, "dfpilot.supervise", fake)
     assert run(save, "supervise", "--once", "--dry-run") == 0
     assert seen == [["--once", "--dry-run"]]
 
@@ -387,9 +387,9 @@ def test_supervise_help_lists_its_own_flags(save, capsys):
 
 
 def test_supervise_once_fallback(save, monkeypatch, capsys):
-    fake = types.ModuleType("df_llm_helper.supervise")
+    fake = types.ModuleType("dfpilot.supervise")
     fake.once = lambda now=None: {"alive": True}
-    monkeypatch.setitem(sys.modules, "df_llm_helper.supervise", fake)
+    monkeypatch.setitem(sys.modules, "dfpilot.supervise", fake)
     assert run(save, "supervise", "--once") == 0
     assert json.loads(capsys.readouterr().out) == {"alive": True}
 
@@ -400,30 +400,30 @@ def test_unknown_flags_rejected_for_other_commands(save):
 
 
 def test_lint_delegation(save, monkeypatch, capsys):
-    fake = types.ModuleType("df_llm_helper.lint")
+    fake = types.ModuleType("dfpilot.lint")
     fake.cmd = lambda text: (False, "fastdwarf is blocked") if "fastdwarf" in text else (True, "")
     fake.lua = lambda ps: [{"file": "a.lua", "line": 3, "rule": "F1", "msg": "df. write outside act"}] if ps else []
-    monkeypatch.setitem(sys.modules, "df_llm_helper.lint", fake)
+    monkeypatch.setitem(sys.modules, "dfpilot.lint", fake)
     assert run(save, "lint", "--cmd", "dfhack-run fastdwarf 1") == 2
     assert "blocked: fastdwarf is blocked" in capsys.readouterr().out
     assert run(save, "lint", "--cmd", "dfhack-run dfllm status") == 0
     assert run(save, "lint", "x.lua") == 1
     assert "a.lua:3: F1" in capsys.readouterr().out
-    monkeypatch.setitem(sys.modules, "df_llm_helper.lint", None)
+    monkeypatch.setitem(sys.modules, "dfpilot.lint", None)
     assert run(save, "lint", "--cmd", "x") == 2
     seen = []
     fake.main = lambda argv: seen.append(argv) or 1
-    monkeypatch.setitem(sys.modules, "df_llm_helper.lint", fake)
+    monkeypatch.setitem(sys.modules, "dfpilot.lint", fake)
     assert run(save, "lint", "--cmd", "dfhack-run reveal") == 1 and seen == [["--cmd", "dfhack-run reveal"]]
-    hook = types.ModuleType("df_llm_helper.hook")
+    hook = types.ModuleType("dfpilot.hook")
     hook.main = lambda: 2
-    monkeypatch.setitem(sys.modules, "df_llm_helper.hook", hook)
+    monkeypatch.setitem(sys.modules, "dfpilot.hook", hook)
     assert run(save, "lint", "--hook") == 2
 
 
 def test_retire_keeps_the_same_anchor_of_earlier_stages(tmp_path):
     """live L2: cancelling fortcore stage 3 must not lose site 'same' (stage 1 is still on file)."""
-    from df_llm_helper import cmd as C
+    from dfpilot import cmd as C
     bpd = tmp_path / "bp"
     bpd.mkdir()
     s1 = {"v": 2, "id": "p1", "tpl": "fortcore", "site": "S1", "anchor": [106, 54, 124], "rot": 0}

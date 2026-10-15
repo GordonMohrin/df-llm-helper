@@ -4,8 +4,8 @@ import json
 import os
 from pathlib import Path
 
-from df_llm_helper import bp
-from df_llm_helper.bp.render import World
+from dfpilot import bp
+from dfpilot.bp.render import World
 
 GOLDEN = Path(__file__).resolve().parent / "golden"
 REGEN = os.environ.get("DFLLM_REGEN_GOLDEN") == "1"

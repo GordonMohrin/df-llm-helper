@@ -1,7 +1,7 @@
 -- Scenario for tests/test_siege_files.py: the REAL kernel (kern.lua + act.lua) with sense, threat,
 -- siege and gate on k_mock's fake DF (tests/lua/siege_world.lua) through ALERT, an INVASION, SIEGE,
 -- a gate failure (BREACH), RECOVERY, PEACE, a DRILL and lever verbs. Python then validates every
--- file it wrote with df_llm_helper.schema.
+-- file it wrote with dfpilot.schema.
 --   python tools/luahost.py --path tests/lua tests/lua/siege_scenario.lua <outdir>
 local H = require('kern_world')
 local S = require('siege_world')

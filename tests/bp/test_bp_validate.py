@@ -4,9 +4,9 @@ import copy
 
 import pytest
 
-from df_llm_helper import bp
-from df_llm_helper.bp.render import cell_rects
-from df_llm_helper.bp.validate import check_world
+from dfpilot import bp
+from dfpilot.bp.render import cell_rects
+from dfpilot.bp.validate import check_world
 
 from bp_fixtures import FORT, SITE, L, dig, fort_docs, mutation, shortcut
 

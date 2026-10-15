@@ -3,7 +3,7 @@
     lua(paths) -> [{file, line, rule, msg}]     # token based: comments and strings never match code rules
     lua_source(src, name) -> same, for one source text (role from the name: dfllm/act.lua, ...)
     cmd(text) -> (allowed, reason)              # shell text (hook) or one DFHack command line
-    main(argv)                                  # python -m df_llm_helper.lint [PATH ...] | --cmd STR | --config
+    main(argv)                                  # python -m dfpilot.lint [PATH ...] | --cmd STR | --config
 
 Roles (CONTRACTS §1.4): only dfllm/act.lua writes df.* / DF vectors and calls mutating APIs or commands;
 only dfllm/sense.lua and dfllm/snapshot.lua iterate units or read tiles; only selftest.lua's M.exec loads
@@ -1223,14 +1223,15 @@ def _head(g: _Seg, env: _Env | None) -> tuple[int, bool]:
 
 
 def _lint_cli(words: list[str]) -> bool:
-    """`dfllm lint ...` / `python -m df_llm_helper[.lint] lint ...` only judges its arguments."""
+    """`dfllm lint ...` / `python -m dfpilot[.lint] lint ...` only judges its arguments."""
     w = [x.lower() for x in words[:6]]
     if w[:2] == ["dfllm", "lint"]:
         return True
     if not w or _base(w[0]) not in ("python", "python3", "py", "pythonw") or "-m" not in w:
         return False
     rest = w[w.index("-m") + 1:]
-    return rest[:1] == ["df_llm_helper.lint"] or rest[:2] == ["df_llm_helper", "lint"]
+    return rest[:1] in (["dfpilot.lint"], ["df_llm_helper.lint"]) or rest[:2] in (["dfpilot", "lint"],
+                                                                              ["df_llm_helper", "lint"])
 
 
 def _judge_text(text: str, env: _Env, depth: int, out: list, al: dict, in_sub: bool = False) -> None:
@@ -1366,7 +1367,7 @@ def dfhack_line(toks: list[str], dev: bool = False, cwd: str | None = None, al: 
     o = fairplay.owned_match([head] + toks[1:])
     if o:
         return False, (f"{o[0]}: owned by {o[1]} in the kernel (DESIGN §3); ask through an inbox verb "
-                       "('python -m df_llm_helper cmd ...'), also with DFLLM_DEV=1")
+                       "('python -m dfpilot cmd ...'), also with DFLLM_DEV=1")
     ok, why = fairplay.check_run(head, toks[1:], al)
     if not ok:
         return False, why
@@ -1374,7 +1375,7 @@ def dfhack_line(toks: list[str], dev: bool = False, cwd: str | None = None, al: 
         return True, f"read-only: {head}"
     if dev:
         return True, f"dev write (DFLLM_DEV=1): {head}"
-    return False, (f"{head}: game writes go through the kernel (act.run, 'python -m df_llm_helper cmd ...'); "
+    return False, (f"{head}: game writes go through the kernel (act.run, 'python -m dfpilot cmd ...'); "
                    "DFLLM_DEV=1 allows allowlisted dev commands")
 
 
@@ -1384,17 +1385,19 @@ def dfhack_line(toks: list[str], dev: bool = False, cwd: str | None = None, al: 
 TRUST_BY = frozenset({"llm", "cli"})
 _RUNTIME = re.compile(r"dfllm-runtime[\\/]", re.I)
 _PY = ("python", "python3", "py", "pythonw")
+# the package and its old name df_llm_helper (2026-10-02 .. 10-15; a forwarding package keeps running setups working)
+_PKG_MODS = ("dfpilot", "dfpilot.cli", "dfpilot.__main__", "df_llm_helper", "df_llm_helper.cli", "df_llm_helper.__main__")
 
 
 def _dfllm_cmd_rest(words: list[str]) -> list[str] | None:
-    """Words after `cmd` of `dfllm [opts] cmd ...` / `python -m df_llm_helper [opts] cmd ...`, else None."""
+    """Words after `cmd` of `dfllm [opts] cmd ...` / `python -m dfpilot [opts] cmd ...`, else None."""
     lw = [w.lower() for w in words]
     i = None
     if lw and _base(lw[0]) == "dfllm":
         i = 1
     elif lw and _base(lw[0]) in _PY and "-m" in lw[:3]:
         j = lw.index("-m")
-        if j + 1 < len(lw) and lw[j + 1] in ("df_llm_helper", "df_llm_helper.cli", "df_llm_helper.__main__"):
+        if j + 1 < len(lw) and lw[j + 1] in _PKG_MODS:
             i = j + 2
     if i is None:
         return None
@@ -1417,7 +1420,7 @@ def _trust_segs(segs: list, depth: int = 0) -> str | None:
             continue
         if depth < _MAX_DEPTH:                              # bash -c "...", python -c "...": nested code
             for t, quoted in g.toks:
-                if quoted and ("dfllm" in t or "df_llm_helper" in t) and " " in t:
+                if quoted and ("dfllm" in t or "dfpilot" in t or "df_llm_helper" in t) and " " in t:
                     why = _trust_segs(_lex(t)[0], depth + 1)
                     if why:
                         return why

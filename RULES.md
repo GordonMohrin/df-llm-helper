@@ -1,4 +1,4 @@
-# RULES: df-llm-helper v2 (the only always-read doc)
+# RULES: dfpilot v2 (the only always-read doc)
 
 Binding sources behind it: `docs/v2/DESIGN.md` (why), `docs/v2/CONTRACTS.md`
 (exact formats), `docs/v2/DOCTRINE.md` (gameplay). Do not read those on a wake; read them only to
@@ -10,7 +10,7 @@ change the system. Never read ERFAHRUNGEN.md, transcripts or v1 docs as working 
 - **In game:** the kernel `lua/dfllm` (one frame dispatcher plus modules). It defends the fort,
   runs the approved plan and writes files under `<DF>/dfllm-runtime/<save>/`. Every reaction
   needed within one game day happens in game, without you.
-- **Python** `python -m df_llm_helper <cmd>` (written `dfllm` below; run it from the repo, with
+- **Python** `python -m dfpilot <cmd>` (written `dfllm` below; run it from the repo, with
   `DFLLM_DF` set to the DF folder or `--df <DF>`) only reads those files and writes the inbox. It
   never calls DF in steady state. `dfhack-run` means `<DF>/hack/dfhack-run.exe`.
 - **You (orchestrator):** the main Claude Code session, at most 60k context. You run `Monitor` on

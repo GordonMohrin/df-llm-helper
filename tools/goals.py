@@ -5,7 +5,7 @@
     python tools/goals.py --json     the raw numbers
 
 Read only. The numbers come from tools/goals_probe.lua (counts, no names, no hidden tiles) and from
-`python -m df_llm_helper status`. Edit GOALS to add or change a goal: (id, tier, text, check, hint), check(m)
+`python -m dfpilot status`. Edit GOALS to add or change a goal: (id, tier, text, check, hint), check(m)
 returns (done, detail). Tier 1 = survive, 2 = comfort, 3 = industry, 4 = defence, 5 = growth and prestige.
 """
 import json
@@ -33,7 +33,7 @@ def probe():
 
 
 def status():
-    r = subprocess.run([sys.executable, "-m", "df_llm_helper", "status"], capture_output=True, text=True,
+    r = subprocess.run([sys.executable, "-m", "dfpilot", "status"], capture_output=True, text=True,
                        timeout=60, cwd=os.path.dirname(HERE))
     t = r.stdout
     s = {"raw": t}
@@ -61,7 +61,7 @@ def status():
 
 
 def caravans_traded(years=2):
-    r = subprocess.run([sys.executable, "-m", "df_llm_helper", "events", "--since", "0"], capture_output=True, text=True,
+    r = subprocess.run([sys.executable, "-m", "dfpilot", "events", "--since", "0"], capture_output=True, text=True,
                        timeout=60, cwd=os.path.dirname(HERE))
     return sum(1 for ln in r.stdout.splitlines() if " CARAVAN traded with" in ln)
 

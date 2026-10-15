@@ -1,4 +1,4 @@
-"""WP5: the files the real kernel writes with sense/threat/siege/gate validate against df_llm_helper.schema.
+"""WP5: the files the real kernel writes with sense/threat/siege/gate validate against dfpilot.schema.
 
 tests/lua/siege_scenario.lua boots lua/dfllm/kern.lua (real act.lua: lever script, removeJob, civ-alert)
 on k_mock's fake DF with the WP5 modules and drives ALERT, INVASION, SIEGE, BREACH, RECOVERY, PEACE,
@@ -15,7 +15,7 @@ LUA_TESTS = ROOT / "tests" / "lua"
 sys.path.insert(0, str(ROOT / "tools"))
 import luahost  # noqa: E402
 
-from df_llm_helper import schema  # noqa: E402
+from dfpilot import schema  # noqa: E402
 
 pytestmark = pytest.mark.skipif(not luahost.available(), reason="lua53.dll not found")
 

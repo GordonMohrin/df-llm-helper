@@ -2,10 +2,10 @@
 stage 4 without weapon traps (they took picks, axes and crossbows; quickfort ordered iron battle axes)."""
 import pytest
 
-from df_llm_helper import bp, schema as S
-from df_llm_helper.bp import fortcore
-from df_llm_helper.bp.emit import cell_key
-from df_llm_helper.bp.primitives import merge_manifest, parse_cell
+from dfpilot import bp, schema as S
+from dfpilot.bp import fortcore
+from dfpilot.bp.emit import cell_key
+from dfpilot.bp.primitives import merge_manifest, parse_cell
 
 from bp_fixtures import SITE
 

@@ -32,17 +32,17 @@ LOG_MAX = 1_000_000
 
 
 def _lint():
-    """df_llm_helper.lint, imported late so that an import error fails closed instead of crashing."""
+    """dfpilot.lint, imported late so that an import error fails closed instead of crashing."""
     if __package__ in (None, ""):                         # also runnable as a plain script path
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    return importlib.import_module("df_llm_helper.lint")
+    return importlib.import_module("dfpilot.lint")
 
 
 def _log_path() -> Path | None:
     p = os.environ.get("DFLLM_HOOK_LOG")
     if p:
         return Path(p)
-    from df_llm_helper import paths
+    from dfpilot import paths
     root = paths.runtime_root()
     return root / "hook.log" if root.parent.is_dir() else None
 

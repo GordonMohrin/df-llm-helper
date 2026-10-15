@@ -1,11 +1,11 @@
-"""WP4: v2 Lua fair-play lint (df_llm_helper.lint.lua / lua_source / tokenize)."""
+"""WP4: v2 Lua fair-play lint (dfpilot.lint.lua / lua_source / tokenize)."""
 import glob
 import textwrap
 from pathlib import Path
 
 import pytest
 
-from df_llm_helper import lint as L
+from dfpilot import lint as L
 
 ROOT = Path(__file__).resolve().parent.parent
 HACK = Path(r"E:\Program Files (x86)\Steam\steamapps\common\Dwarf Fortress\hack")
@@ -463,4 +463,4 @@ def test_v1_linter_is_gone():
     for name in ("RULES", "gate_command", "lint_paths", "lint_source", "no_such_name"):
         assert not hasattr(L, name), name
     with pytest.raises(ImportError):
-        import df_llm_helper._v1  # noqa: F401
+        import dfpilot._v1  # noqa: F401

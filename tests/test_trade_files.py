@@ -17,7 +17,7 @@ LUA_TESTS = ROOT / "tests" / "lua"
 sys.path.insert(0, str(ROOT / "tools"))
 import luahost  # noqa: E402
 
-from df_llm_helper import lint, schema  # noqa: E402
+from dfpilot import lint, schema  # noqa: E402
 
 needs_lua = pytest.mark.skipif(not luahost.available(), reason="lua53.dll not found")
 
@@ -75,7 +75,7 @@ def test_trade_lua_never_writes_or_reads_units():
 
 
 def test_commands_used_are_allowlisted():
-    from df_llm_helper import fairplay
+    from dfpilot import fairplay
     for cmd, args in (("logistics", ["now"]), ("fix/stuck-merchants", [])):
         ok, why = fairplay.check_run(cmd, args)
         assert ok, (cmd, why)

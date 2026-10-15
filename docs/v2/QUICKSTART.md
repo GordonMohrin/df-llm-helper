@@ -1,6 +1,6 @@
 # Quick start: let your LLM agent play
 
-df-llm-helper v2 runs a kernel inside DFHack that defends and supplies the fort; your agent plans the year and
+dfpilot v2 runs a kernel inside DFHack that defends and supplies the fort; your agent plans the year and
 answers the few events that need judgement. This page has the prompt to paste, what each step should print, and
 what to do when a step fails. Background: `README.md`; the agent's rules: `RULES.md`.
 
@@ -16,13 +16,13 @@ what to do when a step fails. Background: `README.md`; the agent's rules: `RULES
 Close DF, then paste this into the agent:
 
 ```text
-Play Dwarf Fortress for me with df-llm-helper. DF 53.x (Steam) + DFHack are installed on this Windows PC.
+Play Dwarf Fortress for me with dfpilot. DF 53.x (Steam) + DFHack are installed on this Windows PC.
 1. git clone https://github.com/GordonMohrin/df-llm-helper, work in that folder, read RULES.md and follow it.
 2. Find my DF folder (it has hack/dfhack-run.exe) and set DFLLM_DF to it. With DF closed run
    python tools/migrate_v2.py (dry run), then python tools/migrate_v2.py --apply.
 3. Ask me to start DF through DFHack and to load or embark a fort. In it run dfllm adopt, then dfllm selftest full
    (via dfhack-run).
-4. Keep python -m df_llm_helper follow running as your watcher. Make the year plan (plan propose, check, apply)
+4. Keep python -m dfpilot follow running as your watcher. Make the year plan (plan propose, check, apply)
    and react to its wake lines as RULES.md says. Fair play only; report briefly; ask me only for real decisions.
 ```
 
@@ -34,13 +34,13 @@ Play Dwarf Fortress for me with df-llm-helper. DF 53.x (Steam) + DFHack are inst
 | 2 | `ls "<DF>/hack/dfhack-run.exe"` | the file exists |
 | 2 | `python tools/migrate_v2.py` | a numbered step list; `script-paths` and `onmapload-init` are `todo` on a fresh install, the rest `done` or `n/a` |
 | 2 | `python tools/migrate_v2.py --apply` | `-> ok` for both; `summary: ... applied` |
-| 2 (optional) | `python -m df_llm_helper lint` | `0 finding(s)` |
+| 2 (optional) | `python -m dfpilot lint` | `0 finding(s)` |
 | 3 (optional) | `dfhack-run dfllm selftest --mock` | `dfllm selftest: 1 pass, 0 fail` |
 | 3 | `dfhack-run dfllm adopt` | `dfllm: ...` with no error; then `dfhack-run dfllm status` lists 17 modules, none `DISABLED` |
 | 3 | `dfhack-run dfllm selftest full` | `0 fail` |
-| 4 | `python -m df_llm_helper status` | `<save> y<year> <season> d<day> PEACE ... P0 ...` and a `kern ... ms/s` line |
-| 4 | `python -m df_llm_helper follow` | nothing for a while: it prints only class-A events, at most 6 lines per hour, e.g. `WAKE y281 spr d12 PEACE \| PLAN_EXHAUSTED: ... \| next: ...` |
-| 4 | `python -m df_llm_helper plan propose y1.json`, edit, `plan check y1.json`, `plan apply y1.json` | `check`: `plan OK: ...`; `apply`: `plan.json y<year> + <n> bp ...; ok <id> plan.reload: ...` (the kernel's reply) |
+| 4 | `python -m dfpilot status` | `<save> y<year> <season> d<day> PEACE ... P0 ...` and a `kern ... ms/s` line |
+| 4 | `python -m dfpilot follow` | nothing for a while: it prints only class-A events, at most 6 lines per hour, e.g. `WAKE y281 spr d12 PEACE \| PLAN_EXHAUSTED: ... \| next: ...` |
+| 4 | `python -m dfpilot plan propose y1.json`, edit, `plan check y1.json`, `plan apply y1.json` | `check`: `plan OK: ...`; `apply`: `plan.json y<year> + <n> bp ...; ok <id> plan.reload: ...` (the kernel's reply) |
 
 Keep plan drafts outside `<DF>/dfllm-runtime/`: the hook refuses file edits there (only `dfllm` commands and the
 kernel write that folder). Without a file argument, `plan propose` writes `<save>/plan.draft.json`, which can be
@@ -76,7 +76,7 @@ before anything else works. DF must be fully started (title screen or a loaded f
 
 **Python commands find no save or the wrong folder** (`dfllm: ...` no save). `DFLLM_DF` is not set in that shell, so
 the tools look in the author's Steam path. Set it, or pass `--df "<DF>"` before the command
-(`python -m df_llm_helper --df "<DF>" status`). The runtime folder is `<DF>/dfllm-runtime/<save>/`; it appears after
+(`python -m dfpilot --df "<DF>" status`). The runtime folder is `<DF>/dfllm-runtime/<save>/`; it appears after
 `adopt`.
 
 **`adopt` or `boot` reports an error, or `status` shows a module `DISABLED`.** Read
@@ -87,10 +87,10 @@ note (RULES.md §7 KERN_FAULT) instead of patching the game.
 yourself. After 10 minutes paused the agent gets a `DECISION_NEEDED pause` wake line to remind you.
 
 **The hook blocks a command.** It prints the reason (for example `inline lua is not allowed`). The agent must use a
-`dfllm` command or `python -m df_llm_helper cmd <verb>` instead and never work around the hook. If nothing is ever
+`dfllm` command or `python -m dfpilot cmd <verb>` instead and never work around the hook. If nothing is ever
 blocked, check that the agent session started inside the clone (`.claude/settings.json`).
 
-**`follow` prints nothing for a long time.** Normal in peace. `python -m df_llm_helper status` and `doctor` show the
+**`follow` prints nothing for a long time.** Normal in peace. `python -m dfpilot status` and `doctor` show the
 fort and the speed at any time. A `heartbeat` older than 120 s in `status` means the kernel is not running: check
 that DF runs, the fort is loaded, then `dfhack-run dfllm status`.
 

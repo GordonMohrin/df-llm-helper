@@ -1,11 +1,11 @@
-# df-llm-helper v2: decisions for Gordon
+# dfpilot v2: decisions for Gordon
 
 Gordon answers each decision once. The answer goes into `config/decisions.yaml` and stays there. Until he answers, the default applies, and the default is always "off" or "unchanged" (DESIGN §11.6, §15). The old exception register is retired: there are no cheat consents, and nothing in this file can allow an armok tool.
 
 ## How it works
 - **File:** `config/decisions.yaml`, one line per decision: `D-NN: value  # comment` (CONTRACTS §9.16). Only bare words or integers, no nesting, no quotes. The Python reader (`schema.parse_decisions`, `fairplay.get_decision`) and the kernel's Lua reader use the same line regex.
 - **Answered or not:** a comment that starts with `default` marks an open decision. `fairplay.pending()` lists the open ones. A module that needs an open answer emits `DECISION_NEEDED` (class A) with the id; the LLM passes the question to Gordon in chat.
-- **Only Gordon writes the file.** The LLM never edits it, not even to record an answer Gordon gave in chat; Gordon edits it himself or tells the orchestrator to write his exact words. An invalid value falls back to the default, and `python -m df_llm_helper.lint --config` reports it.
+- **Only Gordon writes the file.** The LLM never edits it, not even to record an answer Gordon gave in chat; Gordon edits it himself or tells the orchestrator to write his exact words. An invalid value falls back to the default, and `python -m dfpilot.lint --config` reports it.
 - **Allowlist coupling:** some answers only take effect when `config/allowlist.json` also gains a command. The allowlist ships at the defaults, so a forgotten allowlist change fails safe (act.run refuses the command).
 
 ## Decisions

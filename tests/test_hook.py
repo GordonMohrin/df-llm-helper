@@ -1,4 +1,4 @@
-"""WP4: shell-boundary policy (lint.cmd) and the Claude Code PreToolUse hook (df_llm_helper.hook)."""
+"""WP4: shell-boundary policy (lint.cmd) and the Claude Code PreToolUse hook (dfpilot.hook)."""
 import io
 import json
 import os
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from df_llm_helper import hook, lint
+from dfpilot import hook, lint
 
 ROOT = Path(__file__).resolve().parent.parent
 DFRUN = r'"E:\Program Files (x86)\Steam\steamapps\common\Dwarf Fortress\dfhack-run.exe"'
@@ -109,7 +109,7 @@ ALLOWED = [
     'grep -rn "dfhack-run fastdwarf" docs/',
     "echo 'dfhack-run reveal'",
     'git commit -m "dfhack-run lua x is now blocked"',
-    "python -m df_llm_helper cmd drill '{}'",
+    "python -m dfpilot cmd drill '{}'",
     "dfllm status",
     "python -m pytest tests/test_hook.py -q",
     "source .venv/bin/activate",
@@ -128,9 +128,9 @@ ALLOWED = [
     "git commit -m \"$(cat <<'EOF'\nhook: block `dfhack-run reveal` (it's armok); \"fastdwarf\" too\n\n"
     "Co-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\"",
     "git commit -m @'\nhook: dfhack-run reveal is blocked, don't use it\n'@",
-    "python -m df_llm_helper follow",
+    "python -m dfpilot follow",
     "ls dfhack-run-logs/ && cat dfhack-runner.txt",
-    'python -m df_llm_helper lint --cmd "dfhack-run reveal"',  # the linter only judges its argument
+    'python -m dfpilot lint --cmd "dfhack-run reveal"',  # the linter only judges its argument
     "n=$(grep -c dfhack-run log.txt)",
     "while true; do dfhack-run dfllm status; sleep 5; done",
     'c="dfhack-run dfllm status"; $c',
@@ -194,7 +194,7 @@ def test_bare_dfhack_lines_for_the_cli():
     """`dfllm lint --cmd STR` judges a bare DFHack line; ordinary shell words stay allowed."""
     for text in ("lever pull --instant", "claude/x", "fastdwarf 1", "lua print(1)", "reveal"):
         assert not lint.cmd(text)[0], text
-    for text in ("git status", "ls -la", "source x", "dfllm status", "python -m df_llm_helper status"):
+    for text in ("git status", "ls -la", "source x", "dfllm status", "python -m dfpilot status"):
         assert lint.cmd(text)[0], text
     assert lint.cmd("fastdwarf 1", shell=True)[0]                # in a shell this runs nothing in DF
 
@@ -225,7 +225,7 @@ def test_decide(tmp_path, monkeypatch):
     # every tool that runs tool_input.command (DESIGN §8: Monitor on `dfllm follow`)
     assert hook.decide(payload("dfhack-run reveal", "Monitor"), env={})[0] == 2
     assert hook.decide(payload("dfhack-run reveal", "mcp__terminal__run_in_terminal"), env={})[0] == 2
-    assert hook.decide(payload("python -m df_llm_helper follow", "Monitor"), env={}) == (0, "")
+    assert hook.decide(payload("python -m dfpilot follow", "Monitor"), env={}) == (0, "")
     assert hook.decide(payload("dfhack-run reveal", "SomeFutureTool"), env={})[0] == 2
     lines = [json.loads(x) for x in log.read_text(encoding="utf-8").splitlines()]
     assert [e["ok"] for e in lines] == [False, False, True, True, False, False, False]  # 'ls' is not logged
@@ -265,12 +265,12 @@ def test_log_never_raises(tmp_path, monkeypatch):
 def test_import_error_fails_closed(monkeypatch):
     """A broken lint/fairplay/schema import (another WP's bug) must not open the door."""
     monkeypatch.setenv("DFLLM_HOOK_LOG", os.devnull)
-    monkeypatch.setitem(sys.modules, "df_llm_helper.lint", None)  # the next import raises ImportError
+    monkeypatch.setitem(sys.modules, "dfpilot.lint", None)  # the next import raises ImportError
     assert hook.main(io.StringIO(json.dumps(payload("dfhack-run dfllm status")))) == 2
     assert hook.main(io.StringIO(json.dumps(payload("git status")))) == 0
 
 
-@pytest.mark.parametrize("argv", [["-m", "df_llm_helper.hook"], [str(ROOT / "df_llm_helper" / "hook.py")]])
+@pytest.mark.parametrize("argv", [["-m", "dfpilot.hook"], [str(ROOT / "dfpilot" / "hook.py")]])
 def test_hook_process(argv, tmp_path):
     """Raw UTF-8 bytes on stdin, as Claude Code sends them (U+201D and U+2501 contain bytes that
     cp1252 cannot decode)."""
@@ -292,8 +292,8 @@ def test_hook_process(argv, tmp_path):
 
 def test_hook_process_fails_closed_when_lint_cannot_be_imported(tmp_path):
     env = dict(os.environ, DFLLM_HOOK_LOG=str(tmp_path / "h.log"), DFLLM_DEV="0")
-    code = ("import runpy, sys; sys.modules['df_llm_helper.lint'] = None; "
-            "runpy.run_module('df_llm_helper.hook', run_name='__main__')")
+    code = ("import runpy, sys; sys.modules['dfpilot.lint'] = None; "
+            "runpy.run_module('dfpilot.hook', run_name='__main__')")
     for cmd, want in (("dfhack-run dfllm status", 2), ("git status", 0)):
         r = subprocess.run([sys.executable, "-c", code], input=json.dumps(payload(cmd)).encode("utf-8"),
                            capture_output=True, cwd=ROOT, env=env, timeout=60)
@@ -309,5 +309,5 @@ def test_project_settings_register_the_hook():
         assert re.fullmatch(entries[0]["matcher"], tool), tool
     assert set(hook.TOOLS) >= {"Bash", "PowerShell", "Monitor", "mcp__terminal__run_in_terminal"}
     h = entries[0]["hooks"][0]
-    assert h["type"] == "command" and "python -m df_llm_helper.hook" in h["command"]
+    assert h["type"] == "command" and "python -m dfpilot.hook" in h["command"]
     assert "CLAUDE_PROJECT_DIR" in h["command"]

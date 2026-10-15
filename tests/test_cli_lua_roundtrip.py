@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from df_llm_helper import files
+from dfpilot import files
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))

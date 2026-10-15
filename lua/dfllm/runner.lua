@@ -46,7 +46,7 @@ local WALL = {['#'] = true, S = true}
 local HAZARD = {w = 'water', ['~'] = 'water', ['%'] = 'warm'}
 local REPORT_WHY = {DIG_CANCEL_DAMP = 'damp', DIG_CANCEL_WARM = 'warm', FEATURE_DISCOVERY = 'cavern',
                     CAVE_COLLAPSE = 'cavern'}
--- the 12 moodable workshop types (df_llm_helper/bp/rooms.py MOODABLE_TYPES, DESIGN §5.9)
+-- the 12 moodable workshop types (dfpilot/bp/rooms.py MOODABLE_TYPES, DESIGN §5.9)
 M.MOODABLE = {'Carpenters', 'Masons', 'Craftsdwarfs', 'Jewelers', 'MetalsmithsForge', 'Bowyers',
               'Clothiers', 'Leatherworks', 'Tanners', 'Loom', 'GlassFurnace', 'Mechanics'}
 -- deliverable kind -> module that makes it measurable; an absent module skips the deliverable

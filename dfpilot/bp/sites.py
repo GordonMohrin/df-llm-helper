@@ -25,7 +25,7 @@ water W behind G (`water=bed`: one level below the bank, a brook; `bank`: at ban
 tile rock or unknown with a rock ring (no revealed open tile within 1), nothing open or wet right above a pipe
 tile (a pressurized pipe must not rise into anything). `level=refuge` puts the well room on the refuge level
 (anchors in the fortcore refuge room). `plan_cistern` routes such a pipe on a snapshot (`python -m
-df_llm_helper.bp.sites cistern --save <folder>` prints the params and the bp.place command).
+dfpilot.bp.sites cistern --save <folder>` prints the params and the bp.place command).
 """
 from __future__ import annotations
 
@@ -819,15 +819,15 @@ def cistern_findings(docs, base=None, live: bool = False) -> list:
 
 # ---------------------------------------------------------------- CLI
 def main(argv=None) -> int:
-    """python -m df_llm_helper.bp.sites cistern [--save NAME | --snap FILE --manifest FILE] [--level refuge]
+    """python -m dfpilot.bp.sites cistern [--save NAME | --snap FILE --manifest FILE] [--level refuge]
     [--near x,y,z --radius N] [--burrow NAME]: route a cistern pipe, check it, print the bp.place command.
-    python -m df_llm_helper.bp.sites cistern-check [--save NAME] [--snap FILE] [--bp ID]: the live water rules
+    python -m dfpilot.bp.sites cistern-check [--save NAME] [--snap FILE] [--bp ID]: the live water rules
     on the dug and built cistern before the lever is pulled (exit 1 = do not pull).
     Read only: it reads snapshots, the manifest and bp/*.json and writes nothing."""
     import argparse
     import json
     from pathlib import Path
-    ap = argparse.ArgumentParser(prog="python -m df_llm_helper.bp.sites")
+    ap = argparse.ArgumentParser(prog="python -m dfpilot.bp.sites")
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("cistern", help="route a pipe from a well room to revealed water and print the plan")
     c.add_argument("--save", help="runtime save folder (default: ACTIVE); newest 'sites' snapshot + fort manifest")
@@ -891,7 +891,7 @@ def main(argv=None) -> int:
     arg = json.dumps({"tpl": "cistern", "site": label, "p": plan["params"]}, separators=(",", ":"))
     print(f"dfllm cmd bp.place '{arg}'")
     print("after the gate stage: link the well room's lever to the floodgate (lever sheet); after the breach: "
-          "python -m df_llm_helper.bp.sites cistern-check on a fresh snapshot over the pipe, make sure nobody is "
+          "python -m dfpilot.bp.sites cistern-check on a fresh snapshot over the pipe, make sure nobody is "
           "in the dry pipe, then pull the lever once (the pipe floods under pressure)")
     return 0 if not [f for f in found if f.level == "error"] else 1
 

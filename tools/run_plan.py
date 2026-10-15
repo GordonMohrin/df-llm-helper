@@ -8,7 +8,7 @@ import sys
 import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CLI = [sys.executable, "-m", "df_llm_helper"]
+CLI = [sys.executable, "-m", "dfpilot"]
 
 
 def run(args):

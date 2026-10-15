@@ -6,8 +6,8 @@
     prune_state(doc) -> (doc | None, errs) # reader rule: drop invalid optional top-level keys
     json_schema(kind) -> dict             # JSON Schema (draft 2020-12) of the envelope
 
-CLI: python -m df_llm_helper.schema validate <kind> <file>   (events.jsonl: every line)
-     python -m df_llm_helper.schema --appendix | --json-schema <kind> | --write-appendix docs/v2/CONTRACTS.md
+CLI: python -m dfpilot.schema validate <kind> <file>   (events.jsonl: every line)
+     python -m dfpilot.schema --appendix | --json-schema <kind> | --write-appendix docs/v2/CONTRACTS.md
 The constants mirror lua/dfllm/util/contract.lua (tests/test_schema.py checks both agree).
 """
 from __future__ import annotations
@@ -800,7 +800,7 @@ def appendix() -> str:
     """Markdown block for CONTRACTS.md Appendix A (deterministic)."""
     parts = [f"Contract digest: `{digest()}`",
              "",
-             "DESIGN §6 formats and the inbox verb args. Other kinds: `python -m df_llm_helper.schema "
+             "DESIGN §6 formats and the inbox verb args. Other kinds: `python -m dfpilot.schema "
              f"--json-schema <kind>` with kind in {', '.join(k for k in KINDS if k not in APPENDIX_KINDS)}. "
              "Per-type event `d` (§12) and per-verb `args` are checked by `validate()`; the envelopes leave "
              "them open. Compact JSON, keys sorted."]

@@ -7,7 +7,7 @@
           {
             "type": "command",
             "shell": "bash",
-            "command": "cd \"${CLAUDE_PROJECT_DIR:-.}\" && python -m df_llm_helper.hook",
+            "command": "cd \"${CLAUDE_PROJECT_DIR:-.}\" && python -m dfpilot.hook",
             "timeout": 15
           }
         ]

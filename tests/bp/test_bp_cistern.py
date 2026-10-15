@@ -6,10 +6,10 @@ import json
 
 import pytest
 
-from df_llm_helper import bp, schema as S
-from df_llm_helper.bp import rooms, sites, topo
-from df_llm_helper.bp.primitives import Xform, merge_manifest, parse_cell
-from df_llm_helper.bp.render import World, cell_rects
+from dfpilot import bp, schema as S
+from dfpilot.bp import rooms, sites, topo
+from dfpilot.bp.primitives import Xform, merge_manifest, parse_cell
+from dfpilot.bp.render import World, cell_rects
 
 from bp_fixtures import SITE, fort_docs, terrain
 
@@ -342,7 +342,7 @@ def test_river_at_bank_level_uses_the_bank_kind():
 
 # ---------------------------------------------------------------- CLI (read only)
 def _save(tmp_path, monkeypatch, snap, man):
-    from df_llm_helper import files
+    from dfpilot import files
     monkeypatch.setenv("DFLLM_RUNTIME", str(tmp_path))
     sd = tmp_path / "s1"
     (sd / "snap").mkdir(parents=True)
@@ -353,7 +353,7 @@ def _save(tmp_path, monkeypatch, snap, man):
 
 def test_cli_prints_the_label_cmd_place_resolves_to_the_planned_site(planned, tmp_path, monkeypatch, capsys):
     """Review: cmd.place reads S<k> as the k-th ranked site that is free of other projects."""
-    from df_llm_helper import cmd as dcmd, files
+    from dfpilot import cmd as dcmd, files
     land, docs, snap, man, plan = planned
     assert not S.validate("snapshot", snap) and not S.validate("manifest", man)
     sd = _save(tmp_path, monkeypatch, snap, man)
@@ -386,7 +386,7 @@ def _live(land, docs, doc):
 def test_live_check_before_the_lever_pull(planned, tmp_path, monkeypatch, capsys):
     """Digging reveals every tile around the pipe: a tunnel the planner could not see is a leak the lever pull
     would flood. cistern-check runs the water rules on the map as it is."""
-    from df_llm_helper import files
+    from dfpilot import files
     land, docs, snap, man, plan = planned
     doc = bp.emit("cistern", plan["params"], plan["site"])
     w, L, X = _live(land, docs, doc)

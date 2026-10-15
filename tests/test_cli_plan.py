@@ -5,7 +5,7 @@ import json
 import pytest
 from cli_v2_helpers import FIX, FakeKern, inbox_docs, install_fake_bp, make_runtime, reset_paths
 
-from df_llm_helper import files, plan, schema
+from dfpilot import files, plan, schema
 
 
 @pytest.fixture
@@ -229,8 +229,8 @@ def _y4(doc, *seasons):
 
 def test_apply_real_bp_never_shares_cells(save, base):
     """Review blocker: dining@S1, tombs@S1, tavern@S1, temple@S1 all ranked S1 = [59,45,120] on c201."""
-    pytest.importorskip("df_llm_helper.bp.sites")
-    from df_llm_helper import cmd
+    pytest.importorskip("dfpilot.bp.sites")
+    from dfpilot import cmd
     for p in cmd.bp_files(save):                     # a fresh fort: the fixture's y3 files lie off the corridor
         p.unlink()
     doc = _y4(base[0], [{"tpl": "dining", "site": "S1"}, {"tpl": "tombs", "site": "S1"}],
@@ -275,7 +275,7 @@ def test_apply_rejects_when_no_free_site(save, base, monkeypatch):
 
 def test_apply_avoids_existing_projects(save, base, monkeypatch):
     install_fake_bp(monkeypatch)
-    from df_llm_helper import cmd
+    from dfpilot import cmd
     cmd.write_bp(save, dict(cmd.emit_at("tombs", {}, {"id": "S1", "anchor": [45, 32, 120], "rot": 0}, "S1", "c77")))
     errs, _ = plan.apply(save, _y4(base[0], [{"tpl": "dining", "site": "S1"}]), wait_s=0)
     assert errs == [] and json.loads((save / "bp" / "y4s0b0.json").read_text("utf-8"))["anchor"] == [50, 32, 120]
@@ -297,7 +297,7 @@ def test_apply_refuses_bad_plan_and_writes_nothing(save, base, monkeypatch):
 def test_apply_without_bp_package(save, base, monkeypatch):
     import sys
     for m in ("emit", "sites"):
-        monkeypatch.setitem(sys.modules, f"df_llm_helper.bp.{m}", None)
+        monkeypatch.setitem(sys.modules, f"dfpilot.bp.{m}", None)
     doc, _ = base
     doc["year"] = 4
     errs, _ = plan.apply(save, doc, wait_s=0)
@@ -308,7 +308,7 @@ def test_apply_without_bp_package(save, base, monkeypatch):
 
 
 def test_plan_cli_propose_check_apply(save, monkeypatch, capsys):
-    from df_llm_helper.cli import main
+    from dfpilot.cli import main
     install_fake_bp(monkeypatch)
     rt = str(save.parent)
     assert main(["--runtime", rt, "plan", "propose", "--phases", str(FIX / "phases.json")]) == 0

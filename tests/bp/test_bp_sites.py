@@ -3,12 +3,12 @@ import json
 
 import pytest
 
-from df_llm_helper import bp, schema as S
-from df_llm_helper.bp import render
-from df_llm_helper.bp.primitives import Xform, merge_manifest
-from df_llm_helper.bp.render import World
-from df_llm_helper.bp.sites import footprint
-from df_llm_helper.bp.validate import _rooms
+from dfpilot import bp, schema as S
+from dfpilot.bp import render
+from dfpilot.bp.primitives import Xform, merge_manifest
+from dfpilot.bp.render import World
+from dfpilot.bp.sites import footprint
+from dfpilot.bp.validate import _rooms
 
 from bp_fixtures import fort_world, terrain
 

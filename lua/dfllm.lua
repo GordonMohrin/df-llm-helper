@@ -1,4 +1,4 @@
--- dfllm: df-llm-helper v2 kernel entry (DESIGN §7, CONTRACTS §3.1, §3.5).
+-- dfllm: dfpilot v2 kernel entry (DESIGN §7, CONTRACTS §3.1, §3.5).
 --   dfllm boot                      start the kernel (onMapLoad.init); a no-op on saves without the marker
 --   dfllm adopt [--acceptance]      mark this fort as dfllm-managed (once), load plans/year1.json, boot
 --   dfllm stop                      unload the kernel (restores runtime settings)

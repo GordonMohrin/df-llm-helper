@@ -11,7 +11,7 @@ import time
 import types
 from pathlib import Path
 
-from df_llm_helper import files, paths
+from dfpilot import files, paths
 
 ROOT = Path(__file__).resolve().parent.parent
 FIX = ROOT / "tests" / "fixtures" / "v2"
@@ -45,7 +45,7 @@ def append_events(save_dir: Path, evs: list[dict], partial: str = "") -> None:
 
 
 def ev(n: int, typ: str, msg: str = "", d: dict | None = None, tick: int = 3 * 403200 + 124000) -> dict:
-    from df_llm_helper import schema
+    from dfpilot import schema
     return {"n": n, "tick": tick, "type": typ, "cls": schema.EVENTS[typ][0], "msg": msg, "d": d or {}}
 
 
@@ -104,13 +104,13 @@ def install_fake_bp(monkeypatch, audit_result=None, audit_exc=None, sites=None, 
                                                                                               "temple", "fortcore",
                                                                                               "dining", "hospital",
                                                                                               "tavern", "workshops")):
-    """Fake df_llm_helper.bp.{emit,sites,topo,render} in sys.modules; returns a dict of recorded calls."""
+    """Fake dfpilot.bp.{emit,sites,topo,render} in sys.modules; returns a dict of recorded calls."""
     try:                                       # import the real package first, so its __init__ never sees fakes
-        importlib.import_module("df_llm_helper.bp")
+        importlib.import_module("dfpilot.bp")
     except Exception:                          # noqa: BLE001 - WP3 missing or broken: the fakes stand alone
         pass
     calls: dict[str, list] = {"emit": [], "rank": [], "audit": []}
-    emit = types.ModuleType("df_llm_helper.bp.emit")
+    emit = types.ModuleType("dfpilot.bp.emit")
 
     def _emit(tpl, params, site):
         calls["emit"].append((tpl, params, site))
@@ -118,7 +118,7 @@ def install_fake_bp(monkeypatch, audit_result=None, audit_exc=None, sites=None, 
     emit.emit = _emit
     emit.list_templates = lambda: [{"tpl": t, "params": {"stage": 1} if t == "fortcore" else {"n": 10},
                                     "about": f"{t} template"} for t in sorted(templates)]
-    st = types.ModuleType("df_llm_helper.bp.sites")
+    st = types.ModuleType("dfpilot.bp.sites")
 
     def _rank(snap, tpl, params=None, n=3):
         """Sites 5 tiles apart on one row (the fake emit digs 3 tiles from the anchor: no clash)."""
@@ -129,7 +129,7 @@ def install_fake_bp(monkeypatch, audit_result=None, audit_exc=None, sites=None, 
             {"id": f"S{i}", "anchor": [40 + 5 * i, 32, 120], "rot": 0, "score": 100 - i, "why": f"site {i}"}
             for i in range(1, n + 1)]
     st.rank = _rank
-    topo = types.ModuleType("df_llm_helper.bp.topo")
+    topo = types.ModuleType("dfpilot.bp.topo")
 
     def _audit(snap, manifest):
         calls["audit"].append((snap["id"], manifest))
@@ -138,7 +138,7 @@ def install_fake_bp(monkeypatch, audit_result=None, audit_exc=None, sites=None, 
         return audit_result or {"ok": False, "fails": ["traps<30"], "min_traps": 22, "bypass": False,
                                 "refuge_sep": True, "civ_sep": True, "caverns": True}
     topo.audit = _audit
-    render = types.ModuleType("df_llm_helper.bp.render")    # no preview(): the CLI fallback renderer is used
+    render = types.ModuleType("dfpilot.bp.render")    # no preview(): the CLI fallback renderer is used
     for name, mod in (("emit", emit), ("sites", st), ("topo", topo), ("render", render)):
-        monkeypatch.setitem(sys.modules, f"df_llm_helper.bp.{name}", mod)
+        monkeypatch.setitem(sys.modules, f"dfpilot.bp.{name}", mod)
     return calls

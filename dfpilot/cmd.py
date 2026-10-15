@@ -64,7 +64,7 @@ _KEY = re.compile(r"[^{(:/]*")
 
 def load_bp(part: str):
     try:
-        return importlib.import_module(f"df_llm_helper.bp.{part}")
+        return importlib.import_module(f"dfpilot.bp.{part}")
     except Exception as e:                     # noqa: BLE001 - a broken WP3 import must not kill follow/cmd
         raise BpUnavailable(f"bp.{part} not available ({type(e).__name__}: {e})") from e
 

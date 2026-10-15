@@ -3,10 +3,10 @@ import time
 
 import pytest
 
-from df_llm_helper import bp, schema as S
-from df_llm_helper.bp.topo import Graph
+from dfpilot import bp, schema as S
+from dfpilot.bp.topo import Graph
 
-from df_llm_helper.bp.render import World
+from dfpilot.bp.render import World
 
 from bp_fixtures import L, fort_world, set_tiles, shortcut, tiny
 

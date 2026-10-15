@@ -1,4 +1,13 @@
-# CHANGELOG df-llm-helper
+# CHANGELOG dfpilot
+
+## Rename (2026-10-15): df-llm-helper -> dfpilot
+- Project renamed back to **dfpilot**; Python package `df_llm_helper` -> `dfpilot` (`python -m dfpilot ...`), the
+  PreToolUse hook runs `python -m dfpilot.hook`.
+- `df_llm_helper/` stays as a forwarding package (its module path is `dfpilot/`), so running setups and hooks that call
+  `python -m df_llm_helper ...` keep working; the fair-play hook accepts both names.
+- Unchanged on purpose: the in-game kernel `lua/dfllm`, the shorthand `dfllm` for the CLI, `<DF>/dfllm-runtime/`, the
+  save marker and the `dfllm/` blueprints (renaming them would orphan adopted saves). The GitHub URL stays
+  `GordonMohrin/df-llm-helper` until the repository itself is renamed (GitHub then redirects the old URL).
 
 ## v2 (branch `v2`, 2026-10-10 to 2026-10-11)
 - **New design** (docs/v2/DESIGN.md, CONTRACTS.md, DECISIONS.md, DOCTRINE.md): an in-game kernel `lua/dfllm` (17 modules:

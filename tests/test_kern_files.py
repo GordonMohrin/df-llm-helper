@@ -1,4 +1,4 @@
-"""WP1: every file the real Lua kernel writes validates against df_llm_helper.schema (CONTRACTS §8-§10).
+"""WP1: every file the real Lua kernel writes validates against dfpilot.schema (CONTRACTS §8-§10).
 
 tests/lua/kern_scenario.lua boots lua/dfllm/kern.lua on k_mock's fake DF globals, runs modes, inbox
 commands, faults and demotions into a temp DF folder, stops, and dumps the persistent site data.
@@ -14,7 +14,7 @@ LUA_TESTS = ROOT / "tests" / "lua"
 sys.path.insert(0, str(ROOT / "tools"))
 import luahost  # noqa: E402
 
-from df_llm_helper import schema  # noqa: E402
+from dfpilot import schema  # noqa: E402
 
 pytestmark = pytest.mark.skipif(not luahost.available(), reason="lua53.dll not found")
 

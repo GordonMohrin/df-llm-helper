@@ -56,7 +56,7 @@ end
 
 HudOverlay = defclass(HudOverlay, overlay.OverlayWidget)
 HudOverlay.ATTRS {
-  desc = 'Shows how busy the dwarves are, permanently (df-llm-helper).',
+  desc = 'Shows how busy the dwarves are, permanently (dfpilot).',
   default_pos = {x = -36, y = 3},
   default_enabled = true,
   viewscreens = 'dwarfmode',

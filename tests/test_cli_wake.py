@@ -7,8 +7,8 @@ import time
 import pytest
 from cli_v2_helpers import append_events, ev, inbox_docs, install_fake_bp, make_runtime, reset_paths
 
-from df_llm_helper import files, schema, wake
-from df_llm_helper.events import est_tokens
+from dfpilot import files, schema, wake
+from dfpilot.events import est_tokens
 
 TOMBS_COOLDOWN = wake.TOMBS_COOLDOWN_S + 1
 
@@ -443,8 +443,8 @@ def test_follow_plan_exhausted_p1_starts_the_workshops_deliverable(save, monkeyp
     f.poll()
     (snap_cmd,) = inbox_docs(save)
     assert snap_cmd["verb"] == "snapshot" and f.jobs["starter"]["tpl"] == "workshops"
-    from df_llm_helper.bp.rooms import MOODABLE_TYPES
-    from df_llm_helper.cmd import workshops_missing
+    from dfpilot.bp.rooms import MOODABLE_TYPES
+    from dfpilot.cmd import workshops_missing
     assert workshops_missing(save, ["moodable", "Still"])[:2] == MOODABLE_TYPES[:2]
     files.write_json_atomic(save / "bp" / "c902.json", {"v": 2, "tpl": "fortcore", "params": {"stage": 1}, "manifest": {
         "v": 2, "workshops": [{"type": t, "pos": [i, 0, 0]} for i, t in enumerate(MOODABLE_TYPES)]}})
@@ -477,9 +477,9 @@ def test_follow_plan_exhausted_p0_adds_the_missing_butcher(save, monkeypatch):
     f.poll()
     (snap_cmd,) = inbox_docs(save)
     assert snap_cmd["verb"] == "snapshot" and f.jobs["starter"]["tpl"] == "workshops"
-    from df_llm_helper.bp.rooms import MOODABLE_TYPES
+    from dfpilot.bp.rooms import MOODABLE_TYPES
     assert f.jobs["starter"]["params"] == {"add": "Butchers", "skip": ",".join(MOODABLE_TYPES)}
-    from df_llm_helper.cmd import workshops_missing
+    from dfpilot.cmd import workshops_missing
     assert workshops_missing(save, ["Still", "Butchers"]) == ["Butchers"]
 
 
@@ -498,7 +498,7 @@ def test_follow_plan_exhausted_outside_auto_phases_only_wakes(save, monkeypatch)
 
 def test_follow_tombs_without_bp_wakes_auto_fail(save, monkeypatch):
     import sys
-    monkeypatch.setitem(sys.modules, "df_llm_helper.bp.sites", None)     # import fails like a missing WP3
+    monkeypatch.setitem(sys.modules, "dfpilot.bp.sites", None)     # import fails like a missing WP3
     c = Clock()
     f, out = F(c)
     f.poll()
@@ -650,7 +650,7 @@ def test_follow_survives_wp3_bug_and_restart(save, monkeypatch):
 
     def bad_rank(snap, tpl, params=None, n=3):
         raise IndexError("list index out of range")
-    monkeypatch.setattr(sys.modules["df_llm_helper.bp.sites"], "rank", bad_rank)
+    monkeypatch.setattr(sys.modules["dfpilot.bp.sites"], "rank", bad_rank)
     c = Clock()
     f, out = F(c)
     f.poll()
@@ -712,7 +712,7 @@ def test_audit_args_clipped():
 
 
 def test_follow_cli_once(save, capsys):
-    from df_llm_helper.cli import main
+    from dfpilot.cli import main
     rt = str(save.parent)
     assert main(["--runtime", rt, "follow", "--once"]) == 0
     assert capsys.readouterr().out == ""

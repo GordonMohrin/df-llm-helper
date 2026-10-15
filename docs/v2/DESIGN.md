@@ -1,4 +1,4 @@
-# df-llm-helper v2: final design
+# dfpilot v2: final design
 
 Date 2026-10-10. This design starts from the **native** proposal, which had the highest average judge score (6.8; kernel 6.7, doctrine 6.3). It grafts in kernel's scheduling and instrumentation and doctrine's fort geometry, BREACH protocol, write allowlist and mock-K tests, and it removes every fatal flaw the judges found (§16).
 
@@ -61,7 +61,7 @@ DF 53.16 + DFHack (virtual desktop 1, muted, never focused)
    IO      <DF>/dfllm-runtime/<save>/ state.a|b.json · events.jsonl · heartbeat · inbox/ → outbox/ · snap/ · perf.csv
    PERSIST dfhack.persistent site data 'dfllm' = marker + manifest + projects + drill + mode   (in the save)
           ▲ files only (0 DF calls)                                 ▲ dfllm cmd → inbox (closed verbs)
-Python df_llm_helper (stdlib): follow/wake · status/brief · plan · bp (templates, topo audit, sites) · doctor · lint/hook
+Python dfpilot (stdlib): follow/wake · status/brief · plan · bp (templates, topo audit, sites) · doctor · lint/hook
 Windows task DF-Aufsicht → `dfllm supervise --once` (liveness, backup, restart; never pauses/unpauses)
 Claude Code orchestrator (≤60k ctx, Monitor on `dfllm follow`) → fresh Sonnet subagent per wake/year review
 ```
@@ -251,7 +251,7 @@ The verb set is closed: `plan.reload, bp.place, bp.cancel, drill, snapshot, audi
 
 ## 7. CLI
 - **In-game:** `dfllm boot|adopt|stop|status|selftest [--mock]|restore`. `adopt` is run once on the new fort and sets the marker. `onMapLoad.init` runs only `dfllm boot`.
-- **Python** (`python -m df_llm_helper`, alias `dfllm`):
+- **Python** (`python -m dfpilot`, alias `dfllm`):
 
 | Command | Purpose |
 |---|---|
@@ -277,20 +277,20 @@ The verb set is closed: `plan.reload, bp.place, bp.cancel, drill, snapshot, audi
 - **Without an LLM** the kernel keeps running safety and supply and finishes the approved plan. It never starts ★ items.
 
 ## 9. Repository layout and migration
-**Repo A** (`dfpilot-public`, GordonMohrin/df-llm-helper) is the single source. Work happens on branch `v2` after tag `v1-final`, and `v2` merges to main only after A3 passes. Commits are authored by Gordon with Co-Authored-By and always pushed.
+**Repo A** (`dfpilot-public`, GordonMohrin/dfpilot) is the single source. Work happens on branch `v2` after tag `v1-final`, and `v2` merges to main only after A3 passes. Commits are authored by Gordon with Co-Authored-By and always pushed.
 ```
 RULES.md (≤300 lines)  README.md  docs/v2/{DESIGN,CONTRACTS,DECISIONS,DOCTRINE,QUICKSTART,STATUS,V1-LEGACY,ASIS-ANALYSIS}.md
 lua/dfllm.lua   lua/dfllm/{kern,io,act,sense,snapshot,persist,arbiter,perf,threat,gate,siege,military,readiness,drill,
                 runner,baseline,economy,care,water,reserve,trade,selftest}.lua  lua/dfllm/util/{json,contract,geom,k_mock}.lua
-df_llm_helper/{__main__,cli,paths,files,schema,wake,brief,plan,cmd,doctor,events,supervise,fairplay,lint,hook}.py
-df_llm_helper/bp/{primitives,fortcore,rooms,validate,emit,render,topo,sites}.py
+dfpilot/{__main__,cli,paths,files,schema,wake,brief,plan,cmd,doctor,events,supervise,fairplay,lint,hook}.py
+dfpilot/bp/{primitives,fortcore,rooms,validate,emit,render,topo,sites}.py
 plans/year1.json  config/{baseline.json,allowlist.json,decisions.yaml}
 tools/{luahost.py,migrate_v2.py,embark/,win/{vdesk_move,start_df_desktop1}.ps1}
 tests/ (pytest; tests/lua/*.lua via luahost; tests/fixtures/v2 recorded from the new fort)  fixtures/v2 (decision vectors)
 .claude/settings.json (PreToolUse → dfllm lint --hook)
 ```
 **Removed from `v2`** (kept in `v1-final`; done 2026-10-11, list in [V1-LEGACY.md](V1-LEGACY.md)):
-- `df_llm_helper/*` except `lint`, `fairplay` (rules) and `planners/blueprint.py` (which became `bp/validate.py`); `stalllog` and `clock` went too, because no v2 module imports them;
+- `dfpilot/*` except `lint`, `fairplay` (rules) and `planners/blueprint.py` (which became `bp/validate.py`); `stalllog` and `clock` went too, because no v2 module imports them;
 - `dfpilot/`, `Bugs/`, `Features/`, `fixtures/` (except `fixtures/v2`), `scenarios/`, `runtime/`, `lua/claude`, `lua/pilot_*.lua`, `data/`, `examples/`, `blueprints/`, `config.yaml(.example)`, `COMPANION.md`, `tools/luacheck_min.py` and the v1 tests;
 - `docs/manual-v3`, `specs-v2`, `specs-v3` and the v1 docs (MANUAL, INTEGRATION, OVERVIEW, SPEC, AGENT-PROMPT, PLANNERS, LINT-FINDINGS).
 
@@ -304,7 +304,7 @@ tests/ (pytest; tests/lua/*.lua via luahost; tests/fixtures/v2 recorded from the
 2. In `script-paths.txt`, replace the repo B lua path with `+…\dfpilot-public\lua`.
 3. `onMapLoad.init` = `dfllm boot`.
 4. Move `hack/scripts/claude` → `<DF>/_archive-v1/`; move the automelt, channel-safely and confirm DLLs → `hack/plugins/_disabled/`; move `df-llm-helper-runtime/` → `_archive-v1/`.
-5. Repoint DF-Aufsicht to `pythonw -m df_llm_helper supervise --once`.
+5. Repoint DF-Aufsicht to `pythonw -m dfpilot supervise --once`.
 6. Embark, then `dfllm adopt`.
 
 Prefs files are **not** edited.
@@ -330,17 +330,17 @@ Wave 0 freezes the contracts. Waves 1 and 2 code in parallel against mock-K and 
 
 | WP | Goal | Files | Interface contract | Size | Deps | Tests | Done when |
 |---|---|---|---|---|---|---|---|
-| **WP0** (W0) | Freeze contracts; Lua testable offline | docs/v2/CONTRACTS.md, df_llm_helper/schema.py, lua/dfllm/util/{json,k_mock}.lua, tools/luahost.py, tests/lua/test_json.lua | Module `{name, every={ticks=N} or {ms=N}, init(K), step(K,budget_ms), on={EV=fn}, state(K)}`; K = `now() emit(type,cls,msg,d) census mode act persist plan cfg log`; JSON schemas for state, event, inbox, outbox, plan, manifest, snapshot | 300 Lua + 300 Py | — | luahost runs Lua tests on lua53.dll; JSON round-trip (ints, umlauts, comma locale) | Tests green; schemas validate the §6 examples; CONTRACTS frozen (changes go through the orchestrator) |
+| **WP0** (W0) | Freeze contracts; Lua testable offline | docs/v2/CONTRACTS.md, dfpilot/schema.py, lua/dfllm/util/{json,k_mock}.lua, tools/luahost.py, tests/lua/test_json.lua | Module `{name, every={ticks=N} or {ms=N}, init(K), step(K,budget_ms), on={EV=fn}, state(K)}`; K = `now() emit(type,cls,msg,d) census mode act persist plan cfg log`; JSON schemas for state, event, inbox, outbox, plan, manifest, snapshot | 300 Lua + 300 Py | — | luahost runs Lua tests on lua53.dll; JSON round-trip (ints, umlauts, comma locale) | Tests green; schemas validate the §6 examples; CONTRACTS frozen (changes go through the orchestrator) |
 | **WP1** (W1) | Kernel: dispatcher, IO, persist, opt-in, arbiter, act core, perf | lua/dfllm.lua, lua/dfllm/{kern,io,persist,arbiter,act,perf,selftest}.lua | Implements K; a/b state, events, outbox; boot is a no-op without the marker; arbiter.apply(mode) idempotent; restore on unload; pcall per module | 800 Lua | WP0 | luahost: tick deltas with 9-tick skips, demotion, fault isolation, a/b writer. In-game: S1, S4, S8 | ≤25 ms/s with 5 dummy modules; heartbeat while paused; 0 dfhack-run in steady state; Inchcraft-style unmarked save untouched |
-| **WP2** (W1) | Python CLI, follow and wake | df_llm_helper/{__main__,cli,paths,files,wake,brief,plan,cmd,doctor,events}.py | `files.read_state()` (best seq, retry); wake classes and limits; `plan check` = schema + validators + fair play + `pop_ceiling ≤ R-level cap` | 800 Py + 300 tests | WP0 | Torn-read fixtures, rate limits, brief ≤1.5k tokens, plan rejections | All §7 commands work on the fixture runtime; follow lines ≤150 tokens |
-| **WP3** (W1) | Templates, validators, emitter, topo audit, site finder | df_llm_helper/bp/*.py (port planners/blueprint.py), tests/bp/, golden JSON | `emit(tpl,params,site) → {stages:[{label,mode,data,chunks≤40}], manifest, materials}`; `topo.audit(snap,manifest) → {ok, fails, min_traps, bypass, refuge_sep, civ_sep, caverns}`; `sites.rank(snap,tpl) → top 3` | 1,200 Py + 400 tests | WP0 | Flood-fill closure, diagonals, 2 stairs, shortcut bridge, trap-hall-removed BFS, golden data | fortcore stages 1-3 + 7 room templates (dining, bedrooms, tombs, hospital, temple, tavern, workshops) valid; audit ≤2 s on 100×100×12 |
-| **WP4** (W1) | Fair play: lint, allowlist, hook, decisions | df_llm_helper/{fairplay,lint,hook}.py, config/{allowlist.json,decisions.yaml}, docs/v2/DECISIONS.md, .claude/settings.json | `lint.lua(paths)`, `lint.cmd(str)`; `decisions.get(id)` with defaults | 400 Py | WP0 | Positive and negative cases, including v1 snippets | 0 findings on lua/dfllm; hook blocks `lever pull --instant`, `claude/x`, fastdwarf |
+| **WP2** (W1) | Python CLI, follow and wake | dfpilot/{__main__,cli,paths,files,wake,brief,plan,cmd,doctor,events}.py | `files.read_state()` (best seq, retry); wake classes and limits; `plan check` = schema + validators + fair play + `pop_ceiling ≤ R-level cap` | 800 Py + 300 tests | WP0 | Torn-read fixtures, rate limits, brief ≤1.5k tokens, plan rejections | All §7 commands work on the fixture runtime; follow lines ≤150 tokens |
+| **WP3** (W1) | Templates, validators, emitter, topo audit, site finder | dfpilot/bp/*.py (port planners/blueprint.py), tests/bp/, golden JSON | `emit(tpl,params,site) → {stages:[{label,mode,data,chunks≤40}], manifest, materials}`; `topo.audit(snap,manifest) → {ok, fails, min_traps, bypass, refuge_sep, civ_sep, caverns}`; `sites.rank(snap,tpl) → top 3` | 1,200 Py + 400 tests | WP0 | Flood-fill closure, diagonals, 2 stairs, shortcut bridge, trap-hall-removed BFS, golden data | fortcore stages 1-3 + 7 room templates (dining, bedrooms, tombs, hospital, temple, tavern, workshops) valid; audit ≤2 s on 100×100×12 |
+| **WP4** (W1) | Fair play: lint, allowlist, hook, decisions | dfpilot/{fairplay,lint,hook}.py, config/{allowlist.json,decisions.yaml}, docs/v2/DECISIONS.md, .claude/settings.json | `lint.lua(paths)`, `lint.cmd(str)`; `decisions.get(id)` with defaults | 400 Py | WP0 | Positive and negative cases, including v1 snippets | 0 findings on lua/dfllm; hook blocks `lever pull --instant`, `claude/x`, fastdwarf |
 | **WP5** (W2) | Threat, gate, siege FSM, BREACH, RECOVERY, captives | lua/dfllm/{sense,threat,gate,siege}.lua, tests/lua/test_siege.lua | `sense.census` (cit, adults, outside_kern, hostiles_vis[]); `gate.want(bridge, 'up' or 'down', why)` with the single-pending invariant; modes and events per §3/§4 | 800 Lua | WP1 | luahost table-driven scenarios: no flapping, raised bridge ≠ RECOVERY, no double toggle, BREACH at T+900. Live drill L3 | 20/20 synthetic scenarios pass; drill KPIs of §14 met |
 | **WP6** (W2) | Military, readiness, drill | lua/dfllm/{military,readiness,drill}.lua | `military.posture(P)`, P ∈ TRAIN, STATION_B1, READY_STATION, B2_HOLD; worn % and combat value; read-only recruit filter; `readiness.level` → `act.popcap`; `drill.run()` | 700 Lua | WP1, WP5, WP3 (audit) | luahost worn % on fixtures; S2 live | 3 squads; routine resolved by name; worn ≥90 %; cap changes only through pop-control |
 | **WP7** (W2) | Project runner + capacity keepers | lua/dfllm/runner.lua | Project `{id,tpl,site,stage,chunk,pct,blocked}`; dig → build → place → zone/burrow → finish; `command='orders'` once per stage; BREACH_STOP; deregister at 100 % | 500 Lua | WP1, WP3 | luahost with fake quickfort; S6; live L2 | fortcore stage 1 built on the new fort with only the site picked by the LLM |
 | **WP8** (W2) | Baseline, economy, care | lua/dfllm/{baseline,economy,care}.lua, config/baseline.json | `baseline.apply()` idempotent; stock days, staged imports, cancel-loop detector, labormanager parse; care: moods, tombs, corpses, captives → pit, hospital water, barrel guard, stress and naked sampler | 700 Lua | WP1 | luahost fixtures; S5; live L1 | Baseline active after adopt; supply KPIs in state; 0 mood jobs removed |
 | **WP9** (W3) | Trade port | lua/dfllm/trade.lua | CARAVAN_ARRIVAL → broker job → trade screen; `plan.trade`; O1 window through `gate.want` | 600 Lua | WP1, WP5 | goodflag audit; luahost ratio math; live when a caravan comes | 1 caravan traded with ratio ≥1.5 and no LLM |
-| **WP10** (W1 offline / W3 live) | Supervisor, restart, backup, migration | df_llm_helper/supervise.py, tools/migrate_v2.py, tools/win/vdesk_move.ps1 | Liveness = heartbeat age; DEGRADED rule; restart only in PEACE after an autosave; backup copy after an autosave; migrate is idempotent and reversible | 400 Py | WP2 | Fake clocks, dry-run migrate; S9 live | One supervised restart onto desktop 1 with no focus steal |
+| **WP10** (W1 offline / W3 live) | Supervisor, restart, backup, migration | dfpilot/supervise.py, tools/migrate_v2.py, tools/win/vdesk_move.ps1 | Liveness = heartbeat age; DEGRADED rule; restart only in PEACE after an autosave; backup copy after an autosave; migrate is idempotent and reversible | 400 Py | WP2 | Fake clocks, dry-run migrate; S9 live | One supervised restart onto desktop 1 with no focus steal |
 | **WP11** (W1 embark / W3 docs) | Embark, year-1 plan, RULES.md, repo cleanup | tools/embark/* (port), plans/year1.json, RULES.md, docs/v2/MIGRATION.md (written as QUICKSTART.md + V1-LEGACY.md), repo B CLAUDE.md | Embark checklist (§5.1) from the vanilla screen; phases P0-P7 as data | 400 mixed | WP0 (plan schema) | Site checklist against vanilla finder output | Fort embarked per §5.1; RULES.md ≤300 lines; v1 code removed in `v2`; repo B tagged and cleaned |
 
 **Waves:** **W0** WP0 (1 agent, about 2 h) → **W1** WP1, WP2, WP3, WP4 + WP11 embark port + WP10 offline, in parallel → **W2** WP5, WP6, WP7, WP8, in parallel → **W3** WP9, WP10 live, WP11 docs and cleanup, then acceptance.

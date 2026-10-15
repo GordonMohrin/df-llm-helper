@@ -1,6 +1,6 @@
 """Blueprint templates, validators, emitter, topo audit and site finder (WP3; CONTRACTS §9.8, §9.10, §15).
 
-    from df_llm_helper import bp
+    from dfpilot import bp
     sites = bp.rank(snap, "bedrooms", {"n": 20}, manifest) # top 3 on revealed tiles (rooms need the manifest)
     doc = bp.emit("bedrooms", {"n": 20}, sites[0])        # §9.8 document without id
     bp.validate(doc)                                      # [] when the template passes the doctrine checks

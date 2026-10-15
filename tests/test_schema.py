@@ -1,4 +1,4 @@
-"""df_llm_helper.schema: DESIGN §6 / CONTRACTS examples, negative cases, contract.lua agreement."""
+"""dfpilot.schema: DESIGN §6 / CONTRACTS examples, negative cases, contract.lua agreement."""
 import copy
 import json
 import re
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from df_llm_helper import schema as S
+from dfpilot import schema as S
 
 ROOT = Path(__file__).resolve().parent.parent
 CONTRACTS = ROOT / "docs" / "v2" / "CONTRACTS.md"
@@ -63,7 +63,7 @@ def test_appendix_is_current():
     text = CONTRACTS.read_text(encoding="utf-8")
     m = re.search(r"<!-- BEGIN GENERATED SCHEMAS -->\n(.*)<!-- END GENERATED SCHEMAS -->", text, re.S)
     assert m, "appendix markers missing"
-    assert m.group(1) == S.appendix(), "run: python -m df_llm_helper.schema --appendix and paste into CONTRACTS.md"
+    assert m.group(1) == S.appendix(), "run: python -m dfpilot.schema --appendix and paste into CONTRACTS.md"
 
 
 def test_json_schema_for_every_kind():
@@ -262,7 +262,7 @@ def test_check_raises():
 def test_cli_validate(tmp_path):
     f = tmp_path / "events.jsonl"
     f.write_text(DESIGN_EVENT + "\n" + DESIGN_EVENT.replace('"cls":"A"', '"cls":"C"') + "\n", encoding="utf-8")
-    r = subprocess.run([sys.executable, "-m", "df_llm_helper.schema", "validate", "event", str(f)],
+    r = subprocess.run([sys.executable, "-m", "dfpilot.schema", "validate", "event", str(f)],
                        capture_output=True, text=True, cwd=ROOT)
     assert r.returncode == 1
     assert "2 document(s), 1 error(s)" in r.stdout

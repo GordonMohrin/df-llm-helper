@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from df_llm_helper import fairplay as F
-from df_llm_helper import schema as S
+from dfpilot import fairplay as F
+from dfpilot import schema as S
 
 ROOT = Path(__file__).resolve().parent.parent
 TOOLS_DOCS = Path(r"E:\Program Files (x86)\Steam\steamapps\common\Dwarf Fortress\hack\docs\docs\tools")

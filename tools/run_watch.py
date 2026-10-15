@@ -5,7 +5,7 @@
                                           when nothing changed, the full table when a goal flipped or every 5th round)
     python tools/run_watch.py --journal  also append a season row to the run journal
 
-Read only: `python -m df_llm_helper` (status, census) and tools/run_probe.lua (counts, visible tiles only).
+Read only: `python -m dfpilot` (status, census) and tools/run_probe.lua (counts, visible tiles only).
 The goals are the ones Gordon set (runs/ZIELE-GORDON.md, runs/ZIELE-PRIORITAETEN.md). GOALS is ordered by
 priority; the FOCUS is the first goal that is not met. If the focus has not changed for 3 rounds the report says
 ESCALATE: stop repeating the same step, find the cause (job diagnosis, material, labour, path).
@@ -24,7 +24,7 @@ RUN = os.path.join(DF, "hack", "dfhack-run.exe")
 JOURNAL = os.environ.get("RUN_JOURNAL", r"C:\Users\admin\claude gordons projects\dwarf-fortress\runs\run-9-neues-fort\JOURNAL.md")
 STATE = os.path.join(os.path.dirname(JOURNAL), ".watch_state.json")
 DIGPROG = os.path.join(os.path.dirname(JOURNAL), "dig_program.json")
-CLI = [sys.executable, "-m", "df_llm_helper"]
+CLI = [sys.executable, "-m", "dfpilot"]
 REPO = os.path.dirname(HERE)
 
 SURVIVAL = ("connect", "seeds", "intruders", "thirst/hunger", "drink", "food", "water", "dead")

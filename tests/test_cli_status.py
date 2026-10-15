@@ -6,9 +6,9 @@ import time
 import pytest
 from cli_v2_helpers import append_events, ev, make_runtime, reset_paths
 
-from df_llm_helper import brief, doctor, files, schema
-from df_llm_helper.cli import main
-from df_llm_helper.events import clip, est_tokens, fmt_tick, fmt_ticks
+from dfpilot import brief, doctor, files, schema
+from dfpilot.cli import main
+from dfpilot.events import clip, est_tokens, fmt_tick, fmt_ticks
 
 
 @pytest.fixture

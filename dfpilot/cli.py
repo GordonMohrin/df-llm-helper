@@ -1,4 +1,4 @@
-"""`python -m df_llm_helper` (alias dfllm), DESIGN §7. Reads runtime files only; never calls DF.
+"""`python -m dfpilot` (alias dfllm), DESIGN §7. Reads runtime files only; never calls DF.
 
 bp (WP3), lint/hook (WP4) and supervise (WP10) are imported lazily, so they are optional.
 """
@@ -15,7 +15,7 @@ from . import paths
 
 def _parser() -> argparse.ArgumentParser:
     from . import brief, cmd, doctor, events, plan, wake
-    ap = argparse.ArgumentParser(prog="dfllm", description="df-llm-helper v2 (files only, 0 DF calls)")
+    ap = argparse.ArgumentParser(prog="dfllm", description="dfpilot v2 (files only, 0 DF calls)")
     ap.add_argument("--runtime", help="runtime root (default <DF>/dfllm-runtime or $DFLLM_RUNTIME)")
     ap.add_argument("--save", help="save folder (default: ACTIVE, else the newest)")
     ap.add_argument("--df", help="DF folder (default $DFLLM_DF or the Steam path)")
@@ -156,7 +156,7 @@ def run_bp(args, save_dir: Path | None) -> int:
 def run_supervise(args) -> int:
     from . import files
     try:
-        sup = importlib.import_module("df_llm_helper.supervise")
+        sup = importlib.import_module("dfpilot.supervise")
     except ImportError as e:
         print(f"supervise not available ({e})")
         return 2
@@ -171,12 +171,12 @@ def run_supervise(args) -> int:
 
 def run_lint(args) -> int:
     try:
-        lint = importlib.import_module("df_llm_helper.lint")
+        lint = importlib.import_module("dfpilot.lint")
     except ImportError as e:
         print(f"lint not available ({e})")
         return 2
     if args.hook:
-        hook = importlib.import_module("df_llm_helper.hook")
+        hook = importlib.import_module("dfpilot.hook")
         f = getattr(hook, "main", None) or getattr(hook, "run", None)
         if not callable(f):
             print("hook.main not available")

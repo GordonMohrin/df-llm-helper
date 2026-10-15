@@ -1,4 +1,4 @@
--- Frozen v2 contract data (WP0). docs/v2/CONTRACTS.md is normative; df_llm_helper/schema.py
+-- Frozen v2 contract data (WP0). docs/v2/CONTRACTS.md is normative; dfpilot/schema.py
 -- mirrors these tables and tests/test_schema.py checks that both agree. Pure Lua, no DFHack.
 local json = require('dfllm.util.json')
 local C = {}

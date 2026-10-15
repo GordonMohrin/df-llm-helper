@@ -11,7 +11,7 @@ LUA_TESTS = ROOT / "tests" / "lua"
 sys.path.insert(0, str(ROOT / "tools"))
 import luahost  # noqa: E402
 
-from df_llm_helper import files, lint, schema  # noqa: E402
+from dfpilot import files, lint, schema  # noqa: E402
 
 needs_lua = pytest.mark.skipif(not luahost.available(), reason="lua53.dll not found")
 
@@ -61,7 +61,7 @@ def test_snapshot_verb_replies(run):
 
 @needs_lua
 def test_topo_audit_runs_on_the_exported_snapshot(run):
-    from df_llm_helper.bp import topo
+    from dfpilot.bp import topo
     snap = files.latest_snapshot(run, "audit")
     man = {"v": 2, "bridges": {"O1": {"role": "outer", "fp": [4, 2, 10, 6, 2, 10], "levers": [[8, 5, 10], [9, 5, 10]]}},
            "zones": {"Z3": [[2, 5, 10, 9, 7, 10]]}, "edge": [[5, 0, 10]]}

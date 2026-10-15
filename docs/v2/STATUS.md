@@ -1,4 +1,4 @@
-# df-llm-helper v2: status after the integration check
+# dfpilot v2: status after the integration check
 
 Date 2026-10-11. Branch `v2`. §0 is the live slot L5 (food crisis: food follows the population), §0f the live slot
 L4 (iter2: integration of the four offline packages, trade, drills, a 1-year soak), §0e the live slot L3 (soak, 2 game years unattended), §0d the live slot L2
@@ -199,7 +199,7 @@ DISABLED); CONTRACTS §3.4/§5/§7 rows and the regenerated schema appendix; ker
    bars fails (one death this slot). Options: exploration mining (no template; DECISION_NEEDED metal x4), or buying bars
    first (plan y295 wants bars first). The cavern metal (z98-106) is unreachable.
 2. **Cistern: wall off the basin before anyone links the lever.** Constructed walls at (100,93,115), (101,95,115) and
-   (104,93,115); then a fresh snapshot over the pipe and `python -m df_llm_helper.bp.sites cistern-check --save region2`
+   (104,93,115); then a fresh snapshot over the pipe and `python -m dfpilot.bp.sites cistern-check --save region2`
    (exit 0); then link lever 14994 to floodgate 15010 and pull it once. The auto-mode classifier refused one of my
    read-only probes right after I removed the two tomb zones and queued their doors for removal, so I left the walls to you.
 3. **The drill cannot pass** (worn 38 %, O1 later than T+900). It runs automatically and raises bridges while soldiers walk
@@ -825,7 +825,7 @@ window 1716x1000. **The save folder is now `autosave 1`** (see L0-6): runtime `d
 | WP0 | CONTRACTS.md, schema.py, util/{json,contract,k_mock}.lua, tools/luahost.py | frozen + review round 1 (§19) |
 | WP1 | dfllm.lua, kern, io, persist, act, arbiter, perf, selftest, util/geom | kernel; integration: R1/R2/R5/R6/R8 adopted here (§4) |
 | WP2 | __main__, cli, paths, files, wake, brief, plan, cmd, doctor, events | all §7 commands work on the fixture runtime |
-| WP3 | df_llm_helper/bp/* | fortcore (3 stage projects) + 8 room templates incl. farms; topo audit; site ranking |
+| WP3 | dfpilot/bp/* | fortcore (3 stage projects) + 8 room templates incl. farms; topo audit; site ranking |
 | WP4 | fairplay, lint, hook, config/allowlist.json, decisions.yaml, DECISIONS.md, .claude/settings.json | lint 0 findings; hook covers shell and file tools |
 | WP5 | sense, threat, gate, siege | siege reflex, BREACH, RECOVERY on fakes |
 | WP6 | military, readiness, drill | squads adopted by name (A/B/C), worn %, R0-R3, drills |
@@ -930,8 +930,8 @@ for f in tests/lua/test_*.lua: python tools/luahost.py --path tests/lua $f   -> 
                                                                                 after L3: 470 passed, 0 failed;
                                                                                 after L4: 32 suites, 562 passed;
                                                                                 after L5: 33 suites, 573 passed)
-python -m df_llm_helper lint lua/dfllm        -> 0 finding(s)
-python -m df_llm_helper.lint --config         -> config ok
+python -m dfpilot lint lua/dfllm        -> 0 finding(s)
+python -m dfpilot.lint --config         -> config ok
 ```
 **v1 cleanup (2026-10-11, W3):** the v1 code, tests, fixtures and docs left branch `v2` (they stay in tag
 `v1-final`; list in [V1-LEGACY.md](V1-LEGACY.md)). `tests/` now holds only the v2 set, so the plain
@@ -947,7 +947,7 @@ runtime; `selftest --mock` logic on luahost: 1 pass, 0 fail); the hook as `.clau
 prompt commands and blocks inline lua; all links in README/QUICKSTART/RULES resolve; a local clone of `v2` passes the
 gate. Fixed: luahost also finds `lua53.dll` through `DFLLM_DF` (before, a user with DF elsewhere silently skipped
 114 Lua-backed pytest cases) and prints totals; `dfllm supervise --help` shows supervise's own flags (`--dry-run`);
-`bp list`/`bp preview` work before adopt; `python -m df_llm_helper.lint --help` exits 0; docs (`--df` goes before
+`bp list`/`bp preview` work before adopt; `python -m dfpilot.lint --help` exits 0; docs (`--df` goes before
 the command, embark README status, DESIGN §9 layout without the never-written MIGRATION.md). Open: the v1 embark
 scratch copies in `tools/embark/` (V1-LEGACY.md). Gate after it: **1241 passed, 0 skipped**; Lua 33 suites / 573
 passed; `lint lua/dfllm` and `lint lua` 0 findings; config ok.
@@ -1128,7 +1128,7 @@ Run from `C:\Users\admin\claude gordons projects\dfpilot-public` on branch `v2`.
    - Undo with `--revert`.
 3. **Prefs check (read only).** AppData `prefs/d_init.txt` has `[EMBARK_WARNING_ALWAYS:YES]`.
 4. **Live lock.**
-   `python -c "import time;from df_llm_helper import files,paths;files.write_json_atomic(paths.runtime_root()/'live.lock',{'holder':'L0','purpose':'bring-up','expires':int(time.time())+1800})"`
+   `python -c "import time;from dfpilot import files,paths;files.write_json_atomic(paths.runtime_root()/'live.lock',{'holder':'L0','purpose':'bring-up','expires':int(time.time())+1800})"`
 5. **Start DF on desktop 1** without stealing focus:
    `powershell -NoProfile -ExecutionPolicy Bypass -File tools\win\start_df_desktop1.ps1`
 6. **New fort** (title screen, same world):
@@ -1147,27 +1147,27 @@ Run from `C:\Users\admin\claude gordons projects\dfpilot-public` on branch `v2`.
    ```
 8. **Python side.**
    ```
-   python -m df_llm_helper doctor
-   python -m df_llm_helper status
+   python -m dfpilot doctor
+   python -m dfpilot status
    ```
    Gordon unpauses in DF: a pause by DF or by Gordon is never released through the inbox.
 9. **Year-1 plan.**
    ```
-   python -m df_llm_helper bp sites fortcore --fresh
-   python -m df_llm_helper plan propose
+   python -m dfpilot bp sites fortcore --fresh
+   python -m dfpilot plan propose
    ```
    Edit `<save>/plan.draft.json`, then:
    ```
-   python -m df_llm_helper plan check
-   python -m df_llm_helper plan apply
+   python -m dfpilot plan check
+   python -m dfpilot plan apply
    ```
 10. **Orchestrator.** Start Claude Code with the project directory `dfpilot-public`, so the PreToolUse
-    hook applies. Run `Monitor` on `python -m df_llm_helper follow`, with one subagent per wake line
+    hook applies. Run `Monitor` on `python -m dfpilot follow`, with one subagent per wake line
     (RULES.md §5).
 11. **Manual steps until the spikes land** (§6.1-6.4):
     - link levers after each fortcore stage (2 per bridge);
     - create squads A/B/C with leaders when DECISION_NEEDED `squads` arrives;
     - assign uniforms;
     - name a stockpile next to the depot `dfllm-trade`.
-12. **Supervisor.** Use `python -m df_llm_helper supervise --once --dry-run` to inspect. The scheduled
+12. **Supervisor.** Use `python -m dfpilot supervise --once --dry-run` to inspect. The scheduled
     task stays disabled until S9.

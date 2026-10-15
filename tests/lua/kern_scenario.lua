@@ -1,5 +1,5 @@
 -- Scenario for tests/test_kern_files.py: drive the real kernel into <outdir> (the fake DF folder) and
--- dump the persistent site data, so Python can validate every file with df_llm_helper.schema.
+-- dump the persistent site data, so Python can validate every file with dfpilot.schema.
 --   python tools/luahost.py --path tests/lua tests/lua/kern_scenario.lua <outdir>
 local H = require('kern_world')
 local json = require('dfllm.util.json')

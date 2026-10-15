@@ -1,4 +1,4 @@
-"""Migrate the DF install from v1 to df-llm-helper v2 (DESIGN §9). Idempotent, dry run by default, reversible.
+"""Migrate the DF install from v1 to dfpilot v2 (DESIGN §9). Idempotent, dry run by default, reversible.
 
   python tools/migrate_v2.py             print every step and what --apply would do (changes nothing)
   python tools/migrate_v2.py --apply     do the open steps (refused while Dwarf Fortress runs; --force overrides)
@@ -8,7 +8,7 @@ Steps, in order: stop the v1 processes (waechter, runde.py --follow, repo B supe
 scheduled task DF-Aufsicht; dfhack-config/script-paths.txt: the repo B lua line becomes +<repo A>\\lua;
 dfhack-config/init/onMapLoad.init runs only `dfllm boot`; move hack/scripts/claude and df-llm-helper-runtime to
 <DF>/_archive-v1/. Opt-in: --plugins moves the automelt, channel-safely and confirm DLLs to hack/plugins/_disabled/
-(DESIGN §9 step 4); --repoint-task points DF-Aufsicht at `pythonw -m df_llm_helper supervise --once` (the task stays
+(DESIGN §9 step 4); --repoint-task points DF-Aufsicht at `pythonw -m dfpilot supervise --once` (the task stays
 disabled until the live slot S9). Nothing is deleted; edited files are copied to _archive-v1/migrate_v2/ first.
 Prefs files are not touched. Stdlib only.
 """
@@ -31,15 +31,15 @@ REPO_A = Path(__file__).resolve().parent.parent
 TASK = "DF-Aufsicht"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 V1_PROCS = [re.compile(p, re.I) for p in (
-    r"-m\s+(df_llm_helper|dfpilot)\s+waechter\b",      # python -m df_llm_helper waechter --loop (and the old dfpilot)
+    r"-m\s+(dfpilot|dfpilot)\s+waechter\b",      # python -m dfpilot waechter --loop (and the old dfpilot)
     r"runde\.py\b.*--follow",                          # repo B tools/aufsicht/runde.py --follow
     r"aufsicht[\\/]+supervisor\.py",                   # repo B supervisor (--loop runs)
     r"unpause-guard\.ps1")]                            # the v1 PowerShell guard
-ONMAPLOAD_TEXT = ("# df-llm-helper v2 (tools/migrate_v2.py; undo with --revert).\n"
+ONMAPLOAD_TEXT = ("# dfpilot v2 (tools/migrate_v2.py; undo with --revert).\n"
                   "# Only the v2 kernel boots on map load; it does nothing on saves without the dfllm marker.\n"
                   "dfllm boot\n")
 PLUGINS = ("automelt", "channel-safely", "confirm")
-SUPERVISE_ARGS = "-m df_llm_helper supervise --once"
+SUPERVISE_ARGS = "-m dfpilot supervise --once"
 
 
 # ---------------------------------------------------------------- Windows side (tests use a fake)
@@ -473,7 +473,7 @@ def revert(c: Ctx) -> int:
 
 
 def main(argv: list[str] | None = None, ctx: Ctx | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="migrate_v2", description="Migrate the DF install from v1 to df-llm-helper v2: "
+    ap = argparse.ArgumentParser(prog="migrate_v2", description="Migrate the DF install from v1 to dfpilot v2: "
                                  "dry run by default, idempotent, reversible with --revert.")
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--apply", action="store_true", help="change the install (default: dry run)")

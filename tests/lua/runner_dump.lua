@@ -1,5 +1,5 @@
 -- Runs a runner scenario on k_mock and prints {snaps = [{kind, doc}], events = [...]} as JSON, so that
--- tests/test_runner.py can validate everything the runner writes against df_llm_helper.schema.
+-- tests/test_runner.py can validate everything the runner writes against dfpilot.schema.
 -- arg[1] = repo root (for plans/year1.json and tests/bp/golden/fortcore.json)
 local H = require('runner_world')
 local json = require('dfllm.util.json')

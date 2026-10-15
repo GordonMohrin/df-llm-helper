@@ -24,7 +24,7 @@
 - CLAUDE.md says to commit as Claude and push only on Gordon's word. Memory says the author is Gordon with Co-Authored-By, and always push. Memory wins.
 
 ## C. Spot-checks (read against the files)
-1. TRUE: df_llm_helper/config.py:35 has `"transport": {"batch": False ...}` with the comment "only after a live test".
+1. TRUE: dfpilot/config.py:35 has `"transport": {"batch": False ...}` with the comment "only after a live test".
 2. TRUE: supervisor.py:247-256 deletes any pause.hold older than HOLD_MAX_S and runs `claude/advance run`. The only exception is handel_aktiv; there is no siege_aktiv check. Step 4 (line 261) does check civ_alarm and feinde_nah, but step 3 does not.
 3. TRUE: config.lua:257-305 has ALERT_RANGE=4 and FORT_BOX=FORT_X±ALERT_RANGE (a 9x9 column), NORMAL_FPS 100, TIMESTREAM_FPS 200, TIMESTREAM_CALM_S 8 and TIMESTREAM=true.
 4. TRUE: grep finds "eventful" 0 times in lua/claude, although the eventful plugin is installed.
@@ -41,7 +41,7 @@
 ## D. State of the system (consolidated)
 ARCHITECTURE AS-IS
 - In-game: DF 53.16 with DFHack, repo B lua/ first in script-paths. onMapLoad starts tempo plus wachen: 39 repeat-util jobs (22.5k lines) and aufsicht every 30 s, which restarts 35 of them. No eventful hooks, no native automation, the orders library is unused.
-- External: the df_llm_helper waechter (2 s loop, about 3 dfhack-run spawns per pass, its own guard, deadman and tempo governor). supervisor.py runs as a Windows task every minute (restarts, hold deletion plus advance run, deadman, backups). runde.py --follow runs under a Monitor, plus a 15-min goal tick. The .ps1 scripts are referenced only by docs.
+- External: the dfpilot waechter (2 s loop, about 3 dfhack-run spawns per pass, its own guard, deadman and tempo governor). supervisor.py runs as a Windows task every minute (restarts, hold deletion plus advance run, deadman, backups). runde.py --follow runs under a Monitor, plus a 15-min goal tick. The .ps1 scripts are referenced only by docs.
 - LLM: one Opus orchestrator with about 0.5 M context per turn, plus Sonnet and Opus subagents. The helper's check/digest/wake path has not run since 10-07; in Run 6 only the waechter ran.
 - State is split: 2 flag folders, state.db, ereignisse.jsonl, per-job JSON (some invalid because of decimal commas), 3 Lua copies, 2 Python packages, contradictory docs. Fair play is checked only on the helper path; about 36k direct dfhack-run calls bypass it.
 

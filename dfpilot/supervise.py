@@ -1,6 +1,6 @@
 """dfllm supervise (DESIGN §10, CONTRACTS §15): liveness, DEGRADED, backup, restart.
 
-`once()` is one pass; the Windows task DF-Aufsicht runs `pythonw -m df_llm_helper supervise --once` every 60 s.
+`once()` is one pass; the Windows task DF-Aufsicht runs `pythonw -m dfpilot supervise --once` every 60 s.
 Steady state makes 0 DF calls: it reads ACTIVE, heartbeat, perf.csv, events.jsonl and the DF save folder.
   liveness  DF process + <runtime>/ACTIVE + heartbeat mtime; older than 120 s = stale (reported, never killed).
   backup    every new save of a dfllm fort is copied once to <backups>/ (last 3 + one per day, <= 1 GB).

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from df_llm_helper import files, hook, lint, schema
+from dfpilot import files, hook, lint, schema
 
 ROOT = Path(__file__).resolve().parent.parent
 LUA = ROOT / "lua" / "dfllm"
@@ -103,15 +103,15 @@ def test_read_state_drops_only_invalid_optional_keys(tmp_path):
 
 # ---------------------------------------------------------------- trust rules (CONTRACTS §13, R6)
 @pytest.mark.parametrize("text,ok", [
-    ("python -m df_llm_helper cmd lever bridge=O1 want=up --by llm", True),
-    ("python -m df_llm_helper cmd lever bridge=O1 want=up", True),
-    ("python -m df_llm_helper cmd unpause --by gordon", False),
+    ("python -m dfpilot cmd lever bridge=O1 want=up --by llm", True),
+    ("python -m dfpilot cmd lever bridge=O1 want=up", True),
+    ("python -m dfpilot cmd unpause --by gordon", False),
     ("dfllm --save region1 cmd drill --by=follow", False),
-    ("python -m df_llm_helper cmd audit snap=c1", False),
+    ("python -m dfpilot cmd audit snap=c1", False),
     ("bash -c \"dfllm cmd pause ttl_s=60 --by supervise\"", False),
     ("echo '{\"id\":\"a\",\"verb\":\"unpause\",\"args\":{},\"by\":\"gordon\"}' > 'E:/DF/dfllm-runtime/r1/inbox/1-a.json'", False),
     ("git commit -m \"refuse dfllm cmd --by follow\"", True),
-    ("grep -rn -- '--by follow' df_llm_helper", True),
+    ("grep -rn -- '--by follow' dfpilot", True),
 ])
 def test_trust_rules(text, ok):
     assert lint.cmd(text, shell=True)[0] is ok
@@ -140,7 +140,7 @@ def test_cmd_cli_refuses_foreign_origins_and_audit(tmp_path):
     save = tmp_path / "rt" / "region1"
     (save / "inbox").mkdir(parents=True)
     (tmp_path / "rt" / "ACTIVE").write_text("region1", encoding="utf-8")
-    base = [sys.executable, "-m", "df_llm_helper", "--runtime", str(tmp_path / "rt")]
+    base = [sys.executable, "-m", "dfpilot", "--runtime", str(tmp_path / "rt")]
     r = subprocess.run(base + ["cmd", "drill", "--by", "follow", "--wait", "0"], capture_output=True, cwd=ROOT,
                        timeout=60)
     assert r.returncode == 2 and b"invalid choice" in r.stderr

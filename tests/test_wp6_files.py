@@ -16,7 +16,7 @@ LUA_TESTS = ROOT / "tests" / "lua"
 sys.path.insert(0, str(ROOT / "tools"))
 import luahost  # noqa: E402
 
-from df_llm_helper import schema  # noqa: E402
+from dfpilot import schema  # noqa: E402
 
 pytestmark = pytest.mark.skipif(not luahost.available(), reason="lua53.dll not found")
 

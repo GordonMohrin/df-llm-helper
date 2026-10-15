@@ -1,8 +1,8 @@
 """WP3 render: as-built simulation, snapshot export, ASCII previews (golden text)."""
 import pytest
 
-from df_llm_helper import bp, schema as S
-from df_llm_helper.bp.render import World, ascii, cell_rects
+from dfpilot import bp, schema as S
+from dfpilot.bp.render import World, ascii, cell_rects
 
 from bp_fixtures import SITE, golden, tiny
 

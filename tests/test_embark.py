@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from df_llm_helper import bp, schema
+from dfpilot import bp, schema
 
 ROOT = Path(__file__).resolve().parent.parent
 EMB = ROOT / "tools" / "embark"

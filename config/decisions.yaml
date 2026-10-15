@@ -4,7 +4,7 @@
 # Only Gordon edits this file. A comment that starts with "default" marks an unanswered decision; the
 # default (off or unchanged) applies until he answers. To answer, change the value and the comment:
 #   D-07: visitor30  # answered 2026-10-12 by Gordon
-# An invalid value falls back to the default (python -m df_llm_helper.lint --config reports it).
+# An invalid value falls back to the default (python -m dfpilot.lint --config reports it).
 D-01: A  # default: Option A, pop cap at most 75 (B: grow to 80+ after R3)
 D-02: unchanged  # default: difficulty settings (invasion cap, siege frequency) untouched
 D-03: rule  # default: act only if idle >40 % for 3 game days and the useful backlog is not empty

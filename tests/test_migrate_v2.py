@@ -1,6 +1,7 @@
 """WP10 tools/migrate_v2.py on a fake DF tree in tmp (never the real install) with a fake process/task layer."""
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -13,7 +14,7 @@ import migrate_v2 as mg  # noqa: E402
 class FakeSys:
     def __init__(self):
         self.running = False
-        self.procs = [{"pid": 101, "cmd": r'"C:\Python314\python.exe" -m df_llm_helper waechter --loop'},
+        self.procs = [{"pid": 101, "cmd": r'"C:\Python314\python.exe" -m dfpilot waechter --loop'},
                       {"pid": 102, "cmd": r"python C:\x\dwarf-fortress\tools\aufsicht\runde.py --follow --since 5"},
                       {"pid": 103, "cmd": r"python -m pytest tests"}]
         self.state = "Ready"
@@ -201,7 +202,8 @@ def test_script_paths_rewrite_rules(X):
     a, b = f"+{X.repo_a / 'lua'}", str(X.repo_b / "lua")
     assert sp.new_text(X, f"# c\n+{b}\n") == f"# c\n{a}\n"
     assert sp.new_text(X, f"{a}\n+{b}\n") == f"{a}\n"                         # both -> one repo A line
-    assert sp.new_text(X, f"-\"{b.upper()}\\\"\n") == f"{a}\n"                # quotes, case, trailing slash
+    if os.name == "nt":                                                         # case-insensitive paths: Windows only
+        assert sp.new_text(X, f"-\"{b.upper()}\\\"\n") == f"{a}\n"            # quotes, case, trailing slash
     assert sp.new_text(X, "+C:\\other\\lua\n") == f"+C:\\other\\lua\n{a}\n"   # other paths stay
     assert sp.new_text(X, f"{a}\n") == f"{a}\n"
     assert sp.new_text(X, "") == f"{a}\n"

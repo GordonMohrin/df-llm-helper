@@ -1,4 +1,4 @@
-# df-llm-helper
+# dfpilot
 
 An in-game kernel for Dwarf Fortress + DFHack that defends and supplies the fort by itself, so an LLM agent (Claude Code or similar) only plans the year and handles exceptions.
 
@@ -7,13 +7,13 @@ An in-game kernel for Dwarf Fortress + DFHack that defends and supplies the fort
 You need Dwarf Fortress 53.x from Steam with DFHack, Git, Python 3.11+ and an LLM agent that runs shell commands on the same Windows PC. Close DF, start the agent (best inside the cloned folder, so the fair-play hook in `.claude/settings.json` applies) and paste:
 
 ```text
-Play Dwarf Fortress for me with df-llm-helper. DF 53.x (Steam) + DFHack are installed on this Windows PC.
+Play Dwarf Fortress for me with dfpilot. DF 53.x (Steam) + DFHack are installed on this Windows PC.
 1. git clone https://github.com/GordonMohrin/df-llm-helper, work in that folder, read RULES.md and follow it.
 2. Find my DF folder (it has hack/dfhack-run.exe) and set DFLLM_DF to it. With DF closed run
    python tools/migrate_v2.py (dry run), then python tools/migrate_v2.py --apply.
 3. Ask me to start DF through DFHack and to load or embark a fort. In it run dfllm adopt, then dfllm selftest full
    (via dfhack-run).
-4. Keep python -m df_llm_helper follow running as your watcher. Make the year plan (plan propose, check, apply)
+4. Keep python -m dfpilot follow running as your watcher. Make the year plan (plan propose, check, apply)
    and react to its wake lines as RULES.md says. Fair play only; report briefly; ask me only for real decisions.
 ```
 
@@ -34,7 +34,7 @@ Dwarf Fortress 53.x + DFHack
      IO      <DF>/dfllm-runtime/<save>/  state.a|b.json, events.jsonl, inbox/ -> outbox/, snap/, perf.csv
                  │ files only (0 DF calls)                       ▲ inbox: closed verb set
                  ▼                                               │
-Python df_llm_helper (stdlib): follow · status · brief · plan · cmd · bp (templates, path audit, sites) · doctor · lint
+Python dfpilot (stdlib): follow · status · brief · plan · cmd · bp (templates, path audit, sites) · doctor · lint
                  │ one wake line (<= 150 tokens) per class-A event  ▲ year plan, one command per wake
                  ▼                                               │
 LLM agent (Claude Code, ...): year planner and exception handler, never a tactical controller
@@ -76,24 +76,24 @@ Sources: `docs/v2/ASIS-ANALYSIS.md` (v1) and the KPI tables in `docs/v2/STATUS.m
 
 ## Manual install
 
-1. `git clone https://github.com/GordonMohrin/df-llm-helper && cd df-llm-helper`
-2. Set `DFLLM_DF` to your DF folder (the one with `Dwarf Fortress.exe` and `hack/dfhack-run.exe`). Without it the tools fall back to the author's Steam path. `python -m df_llm_helper` and `tools/migrate_v2.py` also take `--df <folder>` (for `df_llm_helper` before the command name: `python -m df_llm_helper --df <folder> status`); `tools/embark/embark.py` and `tools/luahost.py` read only `DFLLM_DF`.
+1. `git clone https://github.com/GordonMohrin/df-llm-helper dfpilot && cd dfpilot`
+2. Set `DFLLM_DF` to your DF folder (the one with `Dwarf Fortress.exe` and `hack/dfhack-run.exe`). Without it the tools fall back to the author's Steam path. `python -m dfpilot` and `tools/migrate_v2.py` also take `--df <folder>` (for `dfpilot` before the command name: `python -m dfpilot --df <folder> status`); `tools/embark/embark.py` and `tools/luahost.py` read only `DFLLM_DF`.
 3. Close DF, then run `python tools/migrate_v2.py` (dry run: prints every step) and `python tools/migrate_v2.py --apply`:
    - `dfhack-config/script-paths.txt` gets `+<clone>\lua` (DF reads it only at startup);
    - `dfhack-config/init/onMapLoad.init` then runs only `dfllm boot`; the old file is copied to `<DF>/_archive-v1/migrate_v2/` first, so copy any lines of your own back by hand;
    - v1 leftovers (old scripts, runtime folder, scheduled task) are moved or disabled if found; nothing is deleted, prefs files are not touched;
    - `python tools/migrate_v2.py --revert` undoes it.
-4. Offline check: `python -m df_llm_helper lint` prints `0 finding(s)`.
+4. Offline check: `python -m dfpilot lint` prints `0 finding(s)`.
 5. Start DF through DFHack. `"<DF>/hack/dfhack-run.exe" dfllm selftest --mock` reports `0 fail`.
 6. Load or embark a fort, then once: `dfhack-run dfllm adopt`. This writes the `dfllm` marker into the save, loads the phases of `plans/year1.json` and boots the 17 modules. Check `dfhack-run dfllm status` (no module `DISABLED`) and `dfhack-run dfllm selftest full`.
-7. `python -m df_llm_helper doctor` and `python -m df_llm_helper status`. Unpause DF yourself: the kernel never releases a pause by you or by DF (a loaded save starts paused).
-8. Keep `python -m df_llm_helper follow` running (a terminal, or the agent's Monitor) and make the year plan: `plan propose <file>`, edit, `plan check <file>`, `plan apply <file>`.
+7. `python -m dfpilot doctor` and `python -m dfpilot status`. Unpause DF yourself: the kernel never releases a pause by you or by DF (a loaded save starts paused).
+8. Keep `python -m dfpilot follow` running (a terminal, or the agent's Monitor) and make the year plan: `plan propose <file>`, edit, `plan check <file>`, `plan apply <file>`.
 
 What `adopt` changes for that save: timestream by mode (500 in peace, off in a siege), graphics fps 30, yearly autosave, the pop-control cap, most DFHack overlays off. The originals go to `restore.json` and come back on unload or with `dfllm stop`. Saves without the marker are never touched.
 
 ## Commands
 
-Python, run from the clone: `python -m df_llm_helper <command>` (the docs write it as `dfllm`). It never calls DF: it reads the kernel's files under `<DF>/dfllm-runtime/` and writes the inbox there. Global flags, given before the command: `--df`, `--runtime`, `--save`. `<command> --help` lists the rest.
+Python, run from the clone: `python -m dfpilot <command>` (the docs write it as `dfllm`). It never calls DF: it reads the kernel's files under `<DF>/dfllm-runtime/` and writes the inbox there. Global flags, given before the command: `--df`, `--runtime`, `--save`. `<command> --help` lists the rest.
 
 | Command | What it does |
 |---|---|
@@ -156,8 +156,8 @@ Timestream (a DFHack plugin) speeds up the calendar in peace; that is decision D
 ```
 python -m pytest -q                               # all Python tests (1241 passed, 0 skipped; gate: docs/v2/STATUS.md §5)
 python tools/luahost.py --tests tests/lua         # Lua suites on DFHack's hack/lua53.dll (33 suites, 573 passed)
-python -m df_llm_helper lint                      # fair-play lint of lua/dfllm: 0 finding(s)
-python -m df_llm_helper.lint --config             # config files: config ok
+python -m dfpilot lint                      # fair-play lint of lua/dfllm: 0 finding(s)
+python -m dfpilot.lint --config             # config files: config ok
 ```
 
 `tools/luahost.py` loads DFHack's own `hack/lua53.dll` through ctypes (from `DFLLM_LUA53`, else `<DFLLM_DF>/hack/lua53.dll`), so the kernel's pure-Lua logic runs offline against `lua/dfllm/util/k_mock.lua`; DF itself need not run. Without the DLL the Lua-backed pytest cases are skipped, not failed: check the skip count. Design and contracts: `docs/v2/DESIGN.md`, `docs/v2/CONTRACTS.md`, `docs/v2/DOCTRINE.md`, `docs/v2/DECISIONS.md`; the LLM's rules: `RULES.md`.
@@ -165,7 +165,7 @@ python -m df_llm_helper.lint --config             # config files: config ok
 ```
 RULES.md          the LLM's always-read rules (<= 300 lines)
 lua/dfllm.lua     in-game entry; lua/dfllm/ kernel, 17 modules, util/ (json, contract, k_mock)
-df_llm_helper/    Python CLI (stdlib) and bp/ (templates, emitter, path audit, site ranking)
+dfpilot/    Python CLI (stdlib) and bp/ (templates, emitter, path audit, site ranking)
 plans/ config/    year-1 phases; allowlist, baseline, decisions
 tools/            migrate_v2.py, embark/, luahost.py, win/
 tests/            pytest, tests/lua (luahost), tests/bp; tests/fixtures/v2 recorded runtime files

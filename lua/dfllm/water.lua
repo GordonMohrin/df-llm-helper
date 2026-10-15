@@ -11,7 +11,7 @@
 --     the refuge when a wet well stands on a Tiefe+ tile. A hospital without water while somebody is a
 --     patient wakes the LLM (hospital_water, A; when the dry episode starts, then weekly) and asks for a
 --     `cistern` monthly (PROJECT_REQUEST, B; bp sites cistern, the brook plan: python -m
---     df_llm_helper.bp.sites cistern);
+--     dfpilot.bp.sites cistern);
 --   * buckets (bucket-delivery fallback: caregivers carry water from any well or Water Source zone in a free
 --     bucket): want = max(the hospital's desired buckets, buckets_min) + 1 per patient (<= buckets_max).
 --     Forbidden buckets on revealed Kern+ tiles are unforbidden (item_flag; not in BREACH, and without a Kern+
@@ -418,7 +418,7 @@ local function finish(K, c, r, p)
       p.hosp = now
       K.emit('DECISION_NEEDED', 'A', trunc(string.format('hospital without water: %s, %d patients', why,
                                                          #r.patients), 200),
-             {id = 'hospital_water', q = 'place a cistern (python -m df_llm_helper.bp.sites cistern) or a Water '
+             {id = 'hospital_water', q = 'place a cistern (python -m dfpilot.bp.sites cistern) or a Water '
                                          .. 'Source zone on revealed water near the hospital'})
     end
     local okp, pend = K.call('runner', 'pending', 'cistern')
