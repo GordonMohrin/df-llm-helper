@@ -2953,37 +2953,47 @@ function T.guard(K, c, r)
   return #r.bad == 0
 end
 
--- FR-01 (daily): orders that cannot run (workshop, input on the citizens' walk group, worker) for stuck_days
+-- FR-01 (daily): orders that cannot run (workshop, input on the citizens' walk group, worker) for stuck_days;
+-- sliced: ORDER_SLICE orders per frame
+local ORDER_SLICE = 50
 function T.ocheck(K, c, r)
   local oc = c.orders or M.DEFAULTS.orders
   local p = r.p
-  local ctx = order_ctx(K, c, r)
-  local seen, n, stuck, told = {}, 0, 0, 0
-  for _, o in ipairs(orders_all()) do
-    if (o.amount_left or 0) > 0 then
-      n = n + 1
-      local why, job = M.order_reasons(o, ctx)
-      if why then
-        local key = tostring(o.id)
-        seen[key] = true
-        local rec = p.ostuck[key]
-        if type(rec) ~= 'table' then rec = {since = r.now}; p.ostuck[key] = rec end
-        rec.why, rec.job = why:sub(1, 80), tostring(job):sub(1, 40)
-        local days = (r.now - (math.tointeger(rec.since) or r.now)) // DAY
-        if days >= (oc.stuck_days or 3) then
-          stuck = stuck + 1
-          if rec.told ~= 1 and told < (oc.report_per_day or 3) then
-            rec.told, told = 1, told + 1
-            K.emit('ORDER_STUCK', 'B', string.format('order %d %s cannot run for %d days: %s', o.id, rec.job, days, rec.why),
-                   {order = o.id, job = rec.job, why = rec.why, days = days, dropped = 0})
-          end
+  local oq = r.oq
+  if not oq then
+    local ids = {}
+    for _, o in ipairs(orders_all()) do if (o.amount_left or 0) > 0 then ids[#ids + 1] = o.id end end
+    oq = {ids = ids, i = 1, ctx = order_ctx(K, c, r), seen = {}, stuck = 0, told = 0}
+    r.oq = oq
+  end
+  local last = math.min(#oq.ids, oq.i + ORDER_SLICE - 1)
+  for k = oq.i, last do
+    local o = order_by_id(oq.ids[k])
+    local why, job
+    if o and (o.amount_left or 0) > 0 then why, job = M.order_reasons(o, oq.ctx) end
+    if why then
+      local key = tostring(o.id)
+      oq.seen[key] = true
+      local rec = p.ostuck[key]
+      if type(rec) ~= 'table' then rec = {since = r.now}; p.ostuck[key] = rec end
+      rec.why, rec.job = why:sub(1, 80), tostring(job):sub(1, 40)
+      local days = (r.now - (math.tointeger(rec.since) or r.now)) // DAY
+      if days >= (oc.stuck_days or 3) then
+        oq.stuck = oq.stuck + 1
+        if rec.told ~= 1 and oq.told < (oc.report_per_day or 3) then
+          rec.told, oq.told = 1, oq.told + 1
+          K.emit('ORDER_STUCK', 'B', string.format('order %d %s cannot run for %d days: %s', o.id, rec.job, days, rec.why),
+                 {order = o.id, job = rec.job, why = rec.why, days = days, dropped = 0})
         end
       end
     end
   end
-  for key in pairs(p.ostuck) do if not seen[key] then p.ostuck[key] = nil end end
-  st.orders = {n = n, bad = st.bad or 0, stuck = stuck}
-  r.cmds = r.cmds + 1                            -- a slice of its own (every order, labor holders)
+  oq.i = last + 1
+  r.cmds = r.cmds + 1                            -- a slice of its own (orders, labor holders)
+  if oq.i <= #oq.ids then return false end
+  for key in pairs(p.ostuck) do if not oq.seen[key] then p.ostuck[key] = nil end end
+  st.orders = {n = #oq.ids, bad = st.bad or 0, stuck = oq.stuck}
+  return true
 end
 
 -- FR-16 (daily, PEACE/RECOVERY): resume suspended construction jobs nobody keeps suspended; report the rest

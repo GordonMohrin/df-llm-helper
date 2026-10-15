@@ -199,6 +199,20 @@ T.test('FR-01: an order without its workshop, input or worker is reported after 
   T.eq(#W.find_events('ORDER_STUCK'), 1, 'reported once')
 end)
 
+T.test('FR-01: the check is sliced (50 orders a frame); at most report_per_day ORDER_STUCK a day', function()
+  local W = world{setup = function(W)
+    for _ = 1, 55 do
+      F.order(W, {job_type = df.job_type.PrepareMeal, amount_left = 1, material_category = {}, mat_type = -1})
+    end                                                                          -- no kitchen anywhere
+  end}
+  days(W, 4)
+  T.eq(W.state().orders.n, 55)
+  T.eq(W.state().orders.stuck, 55)
+  T.eq(#W.find_events('ORDER_STUCK'), 3, 'report_per_day')
+  days(W, 1)
+  T.eq(#W.find_events('ORDER_STUCK'), 6)
+end)
+
 T.test('FR-01: unreachable input counts as missing (snapshot.far)', function()
   local W = world{setup = function(W)
     W.load({name = 'snapshot', every = {ticks = 100}, far = function(K, x, y, z) return x == 99 end,

@@ -77,7 +77,7 @@ M.CV_SKILLS = {'SHIELD', 'ARMOR', 'DODGING'}
 M.METALS = {['INORGANIC:IRON'] = true, ['INORGANIC:STEEL'] = true}
 local UNIFORM_CATS = {'body', 'head', 'pants', 'gloves', 'shoes', 'shield', 'weapon'}
 -- FR-46: item vectors of the gear categories (mil.free keys) and the loot unforbid budget per run
-M.LOOT = {per_run = 40, cats = {{'WEAPON', 'weapon'}, {'ARMOR', 'body'}, {'HELM', 'head'}, {'PANTS', 'pants'},
+M.LOOT = {per_run = 40, every = 3600, cats = {{'WEAPON', 'weapon'}, {'ARMOR', 'body'}, {'HELM', 'head'}, {'PANTS', 'pants'},
                                 {'GLOVES', 'gloves'}, {'SHOES', 'shoes'}, {'SHIELD', 'shield'}, {'AMMO', 'ammo'}}}
 local WORN_ROLES = {'Worn', 'Weapon', 'Strapped'}
 
@@ -1063,6 +1063,23 @@ local function reachable_tile(K, x, y, z)
   return not (okf and far == true)
 end
 
+-- one gear item: counted as free metal (returns 1 or the ammo units), or unforbidden as loot when `loot`
+-- and the budget allows (returns the units and true)
+local function loot_item(K, it, cat, loot, budget)
+  local f = it.flags
+  local units = cat == 'ammo' and math.max(1, math.tointeger(it.stack_size) or 1) or 1
+  if not f.forbid then
+    if free_item(it) and is_metal(it) then return units end
+    return 0
+  end
+  if not loot or budget <= 0 or f.in_inventory then return 0 end
+  for _, k in ipairs(LOOT_SKIP) do if f[k] then return 0 end end
+  if not is_metal(it) then return 0 end
+  local x, y, z = dfhack.items.getPosition(it)
+  if x and reachable_tile(K, x, y, z) and K.act.item_flag(it.id, 'forbid', false) then return units, true end
+  return 0
+end
+
 -- one pass over the gear vectors: free metal per category; forbidden loot unforbidden when `loot`
 local function loot_pass(K, loot)
   local free, n = {}, 0
@@ -1070,28 +1087,20 @@ local function loot_pass(K, loot)
     free[e[2]] = 0
     local vec = try(function() return df.global.world.items.other[e[1]] end)
     for _, it in ipairs(vec or {}) do
-      local ok = pcall(function()
-        local f = it.flags
-        if f.forbid then
-          if not loot or n >= M.LOOT.per_run or f.in_inventory then return end
-          for _, k in ipairs(LOOT_SKIP) do if f[k] then return end end
-          if not is_metal(it) then return end
-          local x, y, z = dfhack.items.getPosition(it)
-          if x and reachable_tile(K, x, y, z) and K.act.item_flag(it.id, 'forbid', false) then
-            n = n + 1
-            free[e[2]] = free[e[2]] + (e[2] == 'ammo' and math.max(1, it.stack_size or 1) or 1)
-          end
-        elseif free_item(it) and is_metal(it) then
-          free[e[2]] = free[e[2]] + (e[2] == 'ammo' and math.max(1, it.stack_size or 1) or 1)
-        end
-      end)
-      if not ok then rt.loot_err = (rt.loot_err or 0) + 1 end
+      local ok, units, took = pcall(loot_item, K, it, e[2], loot, M.LOOT.per_run - n)
+      if ok then
+        free[e[2]] = free[e[2]] + units
+        if took then n = n + 1 end
+      else rt.loot_err = (rt.loot_err or 0) + 1 end
     end
   end
   return free, n
 end
 
 local function loot(K)
+  local now = now_tick(K)
+  if rt.loot_t and now - rt.loot_t < M.LOOT.every then return end     -- every LOOT.every ticks in any mode
+  rt.loot_t = now
   local mode = K.mode()
   local h = K.census.h
   local quiet = type(h) == 'table' and (int(h.vis) or 0) == 0
