@@ -133,6 +133,7 @@ helper is experimental; procedure and fair-play limits: `tools/embark/README.md`
 | `tombs.repair` | `{}` | GHOSTS: the next care run repairs the tombs (any mode) and retries entomb |
 | `order.add` | `{job, amount, item_subtype?, material?, material_category?, reaction?, frequency?}` | one manager order; make-item jobs need `item_subtype` (`ITEM_…`), else DF 53.16 crashes (refused) |
 | `jobs.release` | `{all?, preventblocking?}` | resume suspended constructions; `preventblocking` is a lasting fort decision |
+| `perimeter.record` | `{}` | no fortcore manifest: record the walls, doors and gates that seal the fort now, so PERIMETER_BROKEN can diff them after a siege |
 | `selftest` | `{suite?}` | quick or full |
 | `module.enable` | `{module}` | re-enable a module the kernel backed off (KERN_FAULT) before its backoff ends, only once the cause is fixed |
 | `ack` | `{n?}` | interrupts seen up to n (default all); `dfllm ack` sends it |

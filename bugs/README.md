@@ -21,12 +21,12 @@ Related: FR-xx, BUG-xx
 
 | ID | Status | Severity | Title | Module |
 |----|--------|----------|-------|--------|
-| [BUG-001](BUG-001-seal-ignores-stored-items.md) | open | high | `seal` ignores drink, food and seeds stored in barrels, so every burrow audit fails | lua/dfllm/seal.lua:54 |
-| [BUG-002](BUG-002-perimeter-empty-without-manifest.md) | open | high | `perimeter` has no pieces on a fort without a manifest, PERIMETER_BROKEN cannot fire | lua/dfllm/seal.lua |
+| [BUG-001](BUG-001-seal-ignores-stored-items.md) | fixed in 017411c | high | `seal` ignores drink, food and seeds stored in barrels, so every burrow audit fails | lua/dfllm/seal.lua:54 |
+| [BUG-002](BUG-002-perimeter-empty-without-manifest.md) | fixed in 017411c | high | `perimeter` has no pieces on a fort without a manifest, PERIMETER_BROKEN cannot fire | lua/dfllm/seal.lua |
 | [BUG-003](BUG-003-tombs-inspect-stale.md) | open | medium | `inspect tombs` shows stale numbers (unburied, free, entombed) after burials succeeded | lua/dfllm/care.lua |
 | [BUG-004](BUG-004-planned-buildings-wait-for-forbidden-items.md) | open | high | planned buildings wait for forbidden items for ever, JOBS_SUSPENDED repeats the same line | lua/dfllm/economy.lua:2999 |
 | [BUG-005](BUG-005-depot-job-stays-suspended.md) | open | high | the trade depot construction job is resumed every day and stays suspended, DEPOT_MISSING says "being built" for ever | lua/dfllm/economy.lua |
-| [BUG-006](BUG-006-reach-stair-false-positive.md) | open | low | `reach` reports a down stair without counterpart although the shaft below is all stairs | lua/dfllm/seal.lua |
+| [BUG-006](BUG-006-reach-stair-false-positive.md) | fixed in 017411c | low | `reach` reports a down stair without counterpart although the shaft below is all stairs | lua/dfllm/seal.lua |
 | [BUG-007](BUG-007-kernel-cost-over-budget.md) | open | medium | kernel cost 82-90 ms/s vs limit 25, `repeat` bucket unattributed, budget self-test always fails | kern / perf |
 | [BUG-008](BUG-008-ghosts-event-repeats.md) | open | low | GHOSTS and NO_DEPOT repeat every few game days and drown the stream | lua/dfllm/care.lua |
 | [BUG-009](BUG-009-construction-jobs-resuspended.md) | open | high | construction jobs are suspended again within 5 s of every resume, new buildings are never built | lua/dfllm/economy.lua:2999 |

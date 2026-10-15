@@ -523,6 +523,7 @@ VERB_ARGS: dict[str, Obj] = {
                                     if a["job"] in SUBTYPE_JOBS and "item_subtype" not in a else None),
                          "item-definition jobs need item_subtype (FR-39)"),
     "jobs.release": Obj(opt={"all": Bool(), "preventblocking": Bool()}),
+    "perimeter.record": Obj(),
 }
 # verb -> (handler module, allowed modes or None, needs approve)
 VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
@@ -538,6 +539,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "tombs.repair": ("care", None, False),
     "ack": ("reflex", None, False),
     "order.add": ("economy", None, False), "jobs.release": ("economy", None, False),
+    "perimeter.record": ("seal", None, False),
 }
 # verbs accepted only from these `by` origins (CONTRACTS §9.5; `by` is a label, the hook is the guard)
 VERB_BY: dict[str, list[str]] = {"audit": ["follow", "test"]}

@@ -1,5 +1,5 @@
 # BUG-002 `perimeter` has no pieces on a fort without a manifest, PERIMETER_BROKEN cannot fire
-Status: open
+Status: fixed in 017411c (FR-60, offline, live-untested)
 Severity: high (a destroyed perimeter wall goes unnoticed; Run 9 lost the shaft-head wall in a siege and the fort stayed open for two more sieges)
 Found: 2026-10-15, Run 9 save autosave 1, dfpilot main 3edc277
 Module: `lua/dfllm/seal.lua` (perimeter index and diff, FR-56)

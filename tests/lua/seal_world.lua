@@ -42,11 +42,26 @@ function SW.install(W, opts)
     if t and t.des.hidden then W.hidden_wg = W.hidden_wg + 1 end
     return W.wg[key(p.x, p.y, p.z)] or 0
   end
+  -- items: a stored item has flags.in_inventory and _cont (its barrel, bin or bag), a carried one _unit; the position
+  -- of a stored item is its outermost container's (DFHack items.getPosition)
   dfhack.items = {
-    getPosition = function(it) local p = it._pos; if p then return p[1], p[2], p[3] end end,
+    getPosition = function(it)
+      while it._cont do it = it._cont end
+      local p = it._pos
+      if p then return p[1], p[2], p[3] end
+    end,
     getContainer = function(it) return it._cont end,
+    getHolderUnit = function(it) return it._unit end,
+    getHolderBuilding = function(it) return it._bld end,
     getGeneralRef = function(m) return m._ref end,
   }
+  -- revealed? (no flag objects); W.vis_calls counts them
+  W.vis_calls = 0
+  dfhack.maps.isTileVisible = function(x, y, z)
+    W.vis_calls = W.vis_calls + 1
+    local t = W.tiles[key(x, y, z)]
+    return t ~= nil and not t.des.hidden
+  end
   -- burrows: a bbox (k_mock W.burrow) and/or a painted tile set
   local function assigned(b, p)
     if not b then return false end
@@ -287,6 +302,22 @@ function SW.item(W, cat, x, y, z, n, flags)
   W.iseq = (W.iseq or 0) + 1
   local it = {id = W.iseq, flags = flags or {}, stack_size = n or 1, _pos = {x, y, z}}
   df.global.world.items.other[cat]:insert('#', it)
+  return it
+end
+
+-- a container (BARREL, BIN, BOX for bags) at x,y,z, or held by `holder` (a container item or {unit = u})
+function SW.container(W, cat, x, y, z, flags, holder)
+  local c = SW.item(W, cat, x, y, z, 1, flags)
+  c.flags.container = true
+  if holder then SW.store(c, holder) end
+  return c
+end
+
+-- put item `it` into container `c` (flags.in_inventory, general_ref CONTAINED_IN_ITEM), or into a unit's
+-- inventory with `c = {unit = u}` (UNIT_HOLDER)
+function SW.store(it, c)
+  it.flags.in_inventory = true
+  if c.unit then it._unit, it._cont = c.unit, nil else it._cont, it._unit = c, nil end
   return it
 end
 

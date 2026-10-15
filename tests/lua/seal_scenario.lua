@@ -1,7 +1,7 @@
 -- Scenario for tests/test_seal_files.py: the real kernel (real act.lua) with seal.lua on the seal_world map, a
 -- gate stand-in (bridge state, GATE events), a siege stand-in (mode changes, the alert burrow question) and a
 -- runner stand-in (repair). It drives REFUGE_FAIL + the interior burrow, SEAL/SEAL_LEAK, CUTOFF,
--- PERIMETER_BROKEN and the five inspect views into a temp DF folder.
+-- PERIMETER_BROKEN, the five inspect views and the verb perimeter.record into a temp DF folder.
 --   python tools/luahost.py --path tests/lua tests/lua/seal_scenario.lua <outdir>
 local H = require('kern_world')
 local SW = require('seal_world')
@@ -23,6 +23,7 @@ SW.regroup(W)
 SW.citizens(W, {{1, 30, 25, G}, {2, 36, 27, G}, {3, 37, 27, G}})
 SW.item(W, 'DRINK', 38, 28, G, 10)
 SW.item(W, 'PLANT', 38, 27, G, 10)
+SW.store(SW.item(W, 'DRINK', 37, 28, G, 20), SW.container(W, 'BARREL', 37, 28, G))     -- FR-59: stored drink counts
 W.burrow('Kern+', {29, 24, G, 30, 25, G})                          -- 4 tiles, nothing inside: refused
 local state = 'down'
 local gate = {name = 'gate', every = {ticks = 600}}
@@ -76,6 +77,9 @@ H.run(W, 900, {skip = 9})
 H.inbox(W, 'i5', 'inspect', {what = 'perimeter'}, 'cli')
 H.inbox(W, 'i6', 'inspect', {what = 'reach', key = 'refresh'}, 'cli')
 H.inbox(W, 'i7', 'inspect', {what = 'nope'}, 'cli')
+H.inbox(W, 'i8', 'perimeter.record', {}, 'cli')  -- FR-60: record the perimeter now
 H.run(W, 300, {skip = 9})                        -- the inbox is listed every 500 ms (real time)
+H.inbox(W, 'i9', 'inspect', {what = 'perimeter'}, 'cli')
+H.run(W, 300, {skip = 9})
 kern.stop('scenario end')
 print('scenario done')

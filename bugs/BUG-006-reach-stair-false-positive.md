@@ -1,5 +1,5 @@
 # BUG-006 `reach` reports a down stair without counterpart although the shaft below is all stairs
-Status: open
+Status: fixed in 017411c (FR-63, offline, live-untested)
 Severity: low (a wrong flag in a report, no action taken)
 Found: 2026-10-15, Run 9 save autosave 1, dfpilot main 3edc277
 Module: `lua/dfllm/seal.lua` (stairs check in the reach audit)
