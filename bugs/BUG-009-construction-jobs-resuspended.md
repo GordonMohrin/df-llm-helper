@@ -1,5 +1,5 @@
 # BUG-009 construction jobs are suspended again within 5 s of every resume, new buildings are never built
-Status: fixed in 9b9dcdc, 7006350 (offline, live-untested)
+Status: fixed in 9b9dcdc, 7006350 (offline, live-untested). Live (677bc3e): CONFIRMED (see BUG-004).
 Severity: high (workshops, a bed, the trade depot and the coffins stay unbuilt; 16 of 17 civilians idle; every caravan lost; FR-16 "resume" has no effect)
 Found: 2026-10-15, Run 9 save autosave 1 (y363-367), dfpilot main 3edc277, live test by Claude
 Module: `lua/dfllm/economy.lua:2999` (FR-16 daily resume); the cause is items blocking the site (below)

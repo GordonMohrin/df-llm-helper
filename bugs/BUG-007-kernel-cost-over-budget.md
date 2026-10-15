@@ -1,5 +1,5 @@
 # BUG-007 kernel cost 82-90 ms/s vs limit 25, `repeat` bucket unattributed, budget self-test always fails
-Status: fixed in 501b08d (FR-62, offline, live-untested)
+Status: fixed in 501b08d (FR-62, offline, live-untested). Live (677bc3e): CONFIRMED. `doctor`: kernel 28 ms/s avg, 45 max (limit 40 for 550 units), seal 2.4, economy 1.2; `selftest full` 9 pass 0 fail; `repeat` shown only as a cross-check line.
 Severity: medium (PEACE ticks/s median 430-435 instead of 450+, KERNEL_SLOW demotions flip-flop, `selftest` reports a failure that never clears)
 Found: 2026-10-15, Run 9 save autosave 1 (402 units, 18.7k items, 5-25 citizens), dfpilot main 3edc277
 Module: perf / kern (budget), modules seal, sense, economy

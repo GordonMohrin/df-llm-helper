@@ -66,3 +66,6 @@ kern.log `reflex: civ alert: Kern+ (gates up)` (BUG-001 fixed: Kern+ passes) or 
 commands.log: one `siege act.civ_alert [true] ok` and no `[false]` until after LOCKDOWN_END; the 2 s probe reads
 `civ_alert=1` in every sample while `status` shows the lockdown, and `plotinfo.alerts.list[1].burrows` holds the burrow
 the text names. After `dfllm ack` and 2 quiet days: LOCKDOWN_END, then one `[false]`, civ_alert 0.
+
+## Retest 677bc3e (15:02-15:15)
+With the BUG-001 fix the refuge audit passes (Kern+ drink 1031, food 912) and `civ_alert` stays 1 for the whole lockdown (probe 170 s), no flip-flop in commands.log. The flip-flop was therefore caused by BUG-001. New problem behind it: BUG-013 (lever pulls blocked by the alert).

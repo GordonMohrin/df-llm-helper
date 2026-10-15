@@ -1,5 +1,5 @@
 # BUG-006 `reach` reports a down stair without counterpart although the shaft below is all stairs
-Status: fixed in 017411c (FR-63, offline, live-untested)
+Status: fixed in 017411c (FR-63, offline, live-untested). Live (677bc3e): NOT CONFIRMED. `inspect reach` still reports `stairs: 3 without counterpart (down stair at 30,66,109)` with `age 128265` ticks: the reach snapshot is stale, the stairs are not re-read.
 Severity: low (a wrong flag in a report, no action taken)
 Found: 2026-10-15, Run 9 save autosave 1, dfpilot main 3edc277
 Module: `lua/dfllm/seal.lua` (stairs check in the reach audit)

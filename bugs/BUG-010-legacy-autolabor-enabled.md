@@ -1,5 +1,5 @@
 # BUG-010 `autolabor` runs in legacy mode after map load, the engine that crashed DF in Run 9
-Status: fixed in 1d9b6a9 (offline, live-untested)
+Status: fixed in 1d9b6a9 (offline, live-untested). Live (677bc3e): CONFIRMED that `autolabor mode` prints `Mode: monitor`; the event AUTOLABOR_LEGACY wrongly says `mode monitor failed, still legacy` (BUG-014).
 Severity: high (risk of a DF crash; the two crash logs of 14.10. 10:41 and 10:47 name autolabor_plug)
 Found: 2026-10-15, Run 9 save autosave 1, dfpilot main 3edc277
 Module: `lua/dfllm/baseline.lua:158-165` (engine choice), `config/allowlist.json:7` (only `mode monitor|modern` allowed)

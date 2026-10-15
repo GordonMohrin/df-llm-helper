@@ -1,5 +1,5 @@
 # BUG-001 `seal` ignores drink, food and seeds stored in barrels, so every burrow audit fails
-Status: fixed in 017411c (FR-59, offline, live-untested)
+Status: fixed in 017411c (FR-59, offline, live-untested). Live 2026-10-15 15:20 (677bc3e): CONFIRMED. `inspect reach` drink 1115 units, refuge Kern+ drink 1031 food 912 ok, the alert stays on, no new REFUGE_FAIL.
 Severity: high (the alert burrow audit refuses every burrow, so a siege confines nobody; CUTOFF for food, drink and seeds can never fire)
 Found: 2026-10-15, Run 9 save autosave 1 (Udosoddom, y363), dfpilot main 3edc277, live test by Claude
 Module: `lua/dfllm/seal.lua:54` (`SKIP` contains `in_inventory`), used by `usable_` (line ~236) in the item pass of the reach audit (line ~395)

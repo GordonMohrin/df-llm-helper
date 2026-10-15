@@ -1,5 +1,5 @@
 # BUG-004 planned buildings wait for forbidden items for ever, JOBS_SUSPENDED repeats the same line
-Status: fixed in 9b9dcdc (offline, live-untested)
+Status: fixed in 9b9dcdc (offline, live-untested). Live (677bc3e): CONFIRMED for the four sites: Masons (42,59,109) 3/3, Bed (57,73,110) 1/1, depot 3/3; the planned Still (42,62,109) is gone (no Still in the fort). 27 new Coffin jobs stay suspended without worker while 28 coffin orders run (waiting for coffin items).
 Severity: high (nine coffins, a bed and the trade depot could not be built for 30+ real minutes while 20+ citizens had no work)
 Found: 2026-10-15, Run 9 save autosave 1, dfpilot main 3edc277
 Module: `lua/dfllm/economy.lua:2999` (FR-16 job release, `JOBS_SUSPENDED`); items side: nothing unforbids construction materials

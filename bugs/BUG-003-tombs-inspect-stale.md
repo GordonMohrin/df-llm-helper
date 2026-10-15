@@ -1,5 +1,5 @@
 # BUG-003 `inspect tombs` shows stale numbers after burials succeeded
-Status: fixed in 7006350 (offline, live-untested)
+Status: fixed in 7006350 (offline, live-untested). Live (677bc3e): CONFIRMED. `inspect tombs` reports `last.entombed 1`, 311 coffins, 8 free, 49 unburied, numbers move with the burials.
 Severity: medium (the operator thinks nothing happens and starts hand work)
 Found: 2026-10-15, Run 9 save autosave 1, dfpilot main 3edc277
 Module: `lua/dfllm/care.lua` (tomb phase index, `acts`, `inspect tombs`)

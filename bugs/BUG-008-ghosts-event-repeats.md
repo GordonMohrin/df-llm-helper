@@ -1,5 +1,5 @@
 # BUG-008 GHOSTS and NO_DEPOT repeat every few game days and drown the stream
-Status: fixed in b01bec4, 7006350 (offline, live-untested)
+Status: fixed in b01bec4, 7006350 (offline, live-untested). Live (677bc3e): PARTLY. GHOSTS fired once in 20 real minutes (#11060); long-term cadence (days) not observed.
 Severity: low (noise, but it hides new events; at timestream speed a game week is a few seconds)
 Found: 2026-10-15, Run 9 save autosave 1, dfpilot main 3edc277
 Module: `lua/dfllm/care.lua` (GHOSTS cadence), trade (NO_DEPOT / DEPOT_MISSING)

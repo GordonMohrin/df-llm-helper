@@ -89,3 +89,6 @@ only when they are up or at 450 ticks: watch whether he walks in before the door
 Perimeter: after the lockdown (and after any ALERT episode), kern.log `seal: quiet again: perimeter diff after the
 episode`; on the Run 9 save the destroyed shaft-head wall, once recorded (`dfllm cmd perimeter.record '{}'` while it
 stands), comes back as PERIMETER_BROKEN with a `rp...` repair project when it is lost during an ambush.
+
+## Retest 677bc3e (15:12)
+After building a Door at the north opening (61,55,117) and `perimeter.record`, the arrival lockdown says `doors 1 forbidden (1 entr...`, probe `doors_forbidden=1/63`, `LOCKDOWN_END ... 1 doors opened`. So the reflex works on the recorded perimeter piece. Still open: the fort's other two openings (shaft head 55,62,117 stair_updown, east stair 75,70,117) have no door and the existing Door at (74,70,117) is not recognised as the east entrance door (`inspect entrances`: `state no door`).

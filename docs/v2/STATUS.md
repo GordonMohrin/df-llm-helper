@@ -92,9 +92,29 @@ Timeline (2 s probe, `scratchpad/siege_probe.py`; run 2 started with all four dr
 - Problems: the lockdown forbade **0 doors** although the fort has 62 (BUG-012, "0 entrances"); `act.civ_alert true` is followed 12 ticks later by `act.civ_alert false`
   and `civ_alert=0` in every probe sample (BUG-011, with BUG-001 behind the refuge refusal). So bridges and clock work, door lockdown and civil alert do not.
 
+**Retest after the fixes (main 677bc3e, `git pull` + `dfllm reload` + `follow`, 15:00-15:25; answers to the dev checklist):**
+1. *Building sites:* Masons (42,59,109) 3/3, Bed (57,73,110) 1/1, trade depot 3/3 (kernel moved it to 67,42,118); the planned Still (42,62,109) is gone
+   (no Still in the fort, nobody reported it). 27 new Coffin jobs stay suspended without a worker: `buildingplan: waiting for materials`, `missing coffin x27`
+   (28 coffin orders, 1 carpenter, 1 mason, wood 46, `prov.pct 5`). `resuspended 0` in `inspect workload`. BUG-004/005/009 confirmed for the old sites.
+2. *autolabor:* `dfhack-run autolabor mode` -> `Mode: monitor`, `commands.log`: `baseline act.run ["autolabor","mode","monitor"] ok`. But the event
+   AUTOLABOR_LEGACY (A) says `mode monitor failed, still legacy` (BUG-014). Side effect worth a look: `inspect workload` -> `18 of 23 adults without a job`, unclaimed
+   `DiagnosePatient 5, FellTree 5, EngraveSlab 1`; work details Woodcutters/Miners/Hunters are mode 3 (only selected) with 2 units each.
+3. *doctor (15 min PEACE):* kernel **28 ms/s avg**, 45 max (limit 40 for 550 units; before: 82-90), seal 2.4, sense 5.8, kern 5.0, reflex 3.8, economy 1.2; `repeat` is
+   only the cross-check line; `selftest full`: 9 pass, 0 fail (budget passes). BUG-007 confirmed.
+4. *Stock and perimeter:* `inspect reach` drink 1115 (BUG-001 confirmed); refuge audit: `Kern+ ... drink 1031, food 912, ok 1` and the civil alert stays on (the earlier
+   REFUGE_FAIL is gone). `inspect reach` still prints `stairs: 3 without counterpart (down stair at 30,66,109)` with `age 128265` ticks (BUG-006 not confirmed: stale snapshot).
+   `perimeter.record` -> `queued ... (0 pieces, 3 known openings)` then 0 pieces (no door/wall on the routes); after a Door was built at the north opening (61,55,117)
+   it records 1 piece (`["61,55,117","door","seal"]`); deconstructing it retires the piece silently (no PERIMETER_BROKEN, which is right for a player action; a smashed
+   door was not tested).
+5. *Coffins (FR-61):* the kernel placed 30 coffins + tomb zones twice (`runner cof149637943 ... 30 coffins at 55,54,109`, `cof149688489 ... 30 at 52,50,109`);
+   `inspect tombs` `prov`: `stage tombs.build, planned 27, order 28, items 27, stock 0, carpenters 1, masons 1, wood 46, stone 1, mat "", pct 5`. 311 coffins, ghosts 35 -> 0 -> 21.
+   Works, but the second batch was placed while 27 of the first were still unbuilt waiting for items (`1 planned` in the text; the count missed them).
+6. *Forced arrival again with a recorded door:* `doors 1 forbidden (1 entr...`, probe `doors_forbidden=1/63`, `civ_alert=1` for the whole lockdown (no flip-flop), `LOCKDOWN_END ... 1 doors opened`.
+   But only 1-3 of the 4 bridges go up: the civil alert confines everybody to Kern+ and the levers lie outside (BUG-013).
+
 **Not yet seen live:** an enemy inside the fort (needs a way to spawn units), PERIMETER_BROKEN after a siege (BUG-002), HOSPITAL_DRY, MOOD_RISK, embark panel.
 
-**Problems found (one file per bug in `bugs/`, BUG-001..BUG-012, index `bugs/README.md`; FR-59..FR-63 in docs/feature-requests/README.md):**
+**Problems found (one file per bug in `bugs/`, BUG-001..BUG-014, index `bugs/README.md`; FR-59..FR-63 in docs/feature-requests/README.md):**
 1. **FR-59** `seal.lua` SKIP contains `in_inventory`, so every drink/food/seed unit stored in a barrel or bag is ignored:
    `inspect reach` shows `drink/food/seeds groups: []`, the refuge audit says `drink 0<7, food 0<7` for Kern+ and Innen+
    although Lua shows 1362 drink units, all inside Kern+, none forbidden; CUTOFF for food/drink can never fire.

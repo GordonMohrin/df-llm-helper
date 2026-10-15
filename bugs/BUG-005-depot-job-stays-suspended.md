@@ -1,5 +1,5 @@
 # BUG-005 the trade depot construction job is resumed every day and stays suspended, DEPOT_MISSING says "being built" for ever
-Status: fixed in 9b9dcdc (offline, live-untested)
+Status: fixed in 9b9dcdc (offline, live-untested). Live (677bc3e): CONFIRMED. Trade depot stands (67,42,118) 3/3; no DEPOT_MISSING since the reload.
 Severity: high (every caravan is lost: Catten and Muboomon came at least four times in this session and left without trading)
 Found: 2026-10-15, Run 9 save autosave 1, dfpilot main 3edc277
 Module: `lua/dfllm/economy.lua` (depot keeper, FR-43; job release FR-16)
