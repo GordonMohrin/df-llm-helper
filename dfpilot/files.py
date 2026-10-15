@@ -120,6 +120,38 @@ def read_heartbeat(save_dir: Path, now: float | None = None) -> tuple[dict | Non
     return doc, max(0.0, (time.time() if now is None else now) - mt)
 
 
+# FR-29: `dfllm follow` beats into <save>/.follow.hb (Python-private, like .follow.json); silence from follow
+# must never look like "all is well" when it is simply not running
+FOLLOW_HB = ".follow.hb"
+FOLLOW_STALE_S = 60
+
+
+def write_follow_hb(save_dir: Path, doc: dict) -> None:
+    write_json_atomic(Path(save_dir) / FOLLOW_HB, doc)
+
+
+def read_follow_hb(save_dir: Path, now: float | None = None) -> tuple[dict | None, float | None]:
+    """(doc or None, age in s from the file mtime, None if follow never beat for this save)."""
+    p = Path(save_dir) / FOLLOW_HB
+    try:
+        mt = p.stat().st_mtime
+    except OSError:
+        return None, None
+    doc = read_json(p, retry=False)
+    return (doc if isinstance(doc, dict) else None), max(0.0, (time.time() if now is None else now) - mt)
+
+
+def follow_off(save_dir: Path, now: float | None = None) -> str | None:
+    """'follow: OFF (last heartbeat 3h ago)' when follow is not beating for this save, else None."""
+    from .events import fmt_age
+    _, age = read_follow_hb(save_dir, now)
+    if age is None:
+        return "follow: OFF (no heartbeat yet: start dfllm follow)"
+    if age > FOLLOW_STALE_S:
+        return f"follow: OFF (last heartbeat {fmt_age(age)} ago)"
+    return None
+
+
 # ---------------------------------------------------------------- events
 def _rev_lines(path: Path) -> Iterator[bytes]:
     """Complete lines of a file, last first; an unterminated last line is skipped."""

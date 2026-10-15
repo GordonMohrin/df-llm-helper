@@ -658,7 +658,20 @@ local function kern_verb(st, verb, args, cmd)
   end
   -- inspect
   local what = args.what
-  if not INSPECT[what] then return false, 'bad what' end
+  if not INSPECT[what] then
+    -- a module answers its own `what` (M.inspect[what](K, args) -> ok, msg, data; FR-01/18/40: orders,
+    -- workload from economy, trade from trade)
+    for _, e in ipairs(st.entries) do
+      local f = type(e.M.inspect) == 'table' and e.M.inspect[what]
+      if type(what) == 'string' and type(f) == 'function' then
+        if e.disabled then return false, 'module disabled' end
+        local r = table.pack(st.call_in(e, 'inspect ' .. what, f, args))
+        if not r[1] then return false, 'handler error' end
+        return r[2], r[3], r[4]
+      end
+    end
+    return false, 'bad what'
+  end
   if what == 'state' then return true, 'state', compose(st)
   elseif what == 'mode' then return true, st.mode, {mode = st.mode, since = st.mode_since}
   elseif what == 'census' then return true, 'census', K.census

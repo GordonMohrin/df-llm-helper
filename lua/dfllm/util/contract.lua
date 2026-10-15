@@ -53,6 +53,7 @@ C.EVENTS = {
   PERF_DEGRADED = {cls = 'A', by = 'perf'}, DECISION_NEEDED = {cls = 'A', by = 'any'},
   PLAN_EXHAUSTED = {cls = 'A', by = 'runner'}, PROJECT_BLOCKED = {cls = 'A', by = 'runner'},
   YEAR_REVIEW = {cls = 'A', by = 'kern'},
+  ORDER_BAD = {cls = 'A', by = 'economy'}, DEPOT_MISSING = {cls = 'A', by = 'trade'},
   -- B: digest
   SIEGE_START = {cls = 'B', by = 'siege'}, ALERT_START = {cls = 'B', by = 'siege'},
   ALERT_END = {cls = 'B', by = 'siege'}, INVASION = {cls = 'B', by = 'threat'},
@@ -68,6 +69,8 @@ C.EVENTS = {
   PROJECT_DONE = {cls = 'B', by = 'runner'}, PROJECT_REQUEST = {cls = 'B', by = 'any'},
   PHASE = {cls = 'B', by = 'runner'}, PAUSE = {cls = 'B', by = 'arbiter'},
   DEATH = {cls = 'B', by = 'care'}, ACT_FAIL = {cls = 'B', by = 'kern'},
+  ORDER_STUCK = {cls = 'B', by = 'economy'}, JOBS_SUSPENDED = {cls = 'B', by = 'economy'},
+  TRADE_LEDGER = {cls = 'B', by = 'trade'},
   -- C: log only
   SIEGE_STATUS = {cls = 'C', by = 'siege'}, SEASON = {cls = 'C', by = 'kern'},
   PROJECT_STAGE = {cls = 'C', by = 'runner'}, MODE = {cls = 'C', by = 'kern'},
@@ -96,6 +99,8 @@ C.VERBS = {
   ['inspect']      = {mod = 'kern'},
   ['selftest']     = {mod = 'selftest'},
   ['module.enable'] = {mod = 'kern'},
+  ['order.add']    = {mod = 'economy'},
+  ['jobs.release'] = {mod = 'economy'},
 }
 -- Verbs accepted only from these `by` origins (§9.5). `by` is a label, not authentication: the
 -- hook (WP4) keeps the LLM from writing these origins; this check is the second line.
@@ -114,8 +119,9 @@ C.ACT = {
   quickfort = {'runner'},
   orders_import = {'economy'}, orders = {'economy'}, workorder = {'economy', 'water'},
   order_suspend = {'economy'}, kitchen_exclude = {'economy'}, appoint = {'economy'}, work_detail = {'economy'},
-  order_material = {'economy'},
-  item_flag = {'care', 'water'}, zone_assign = {'care'},
+  order_material = {'economy'}, order_remove = {'economy'}, job_resume = {'economy'}, farm_crop = {'economy'},
+  plant_gather = {'economy'}, work_detail_prune = {'economy'},
+  item_flag = {'care', 'water', 'economy', 'military'}, zone_assign = {'care'},
   trade = {'trade'},
   run = {'baseline', 'economy', 'care', 'military', 'trade', 'arbiter', 'selftest', 'runner'},
 }
@@ -128,7 +134,7 @@ C.STATE_OWNERS = {
   ['pop.cit'] = 'sense', ['pop.adults'] = 'sense', ['pop.soldiers'] = 'sense',
   ['pop.cap'] = 'readiness', ['pop.gate_cap'] = 'readiness', ['ready.*'] = 'readiness',
   ['stock.drink_d'] = 'economy', ['stock.food_d'] = 'economy', ['stock.meals'] = 'economy',
-  ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['labor.*'] = 'economy',
+  ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['labor.*'] = 'economy', ['orders.*'] = 'economy',
   ['threat.*'] = 'threat', ['bridges'] = 'gate', ['owners.*'] = 'arbiter',
   ['mil.*'] = 'military', ['trade.*'] = 'trade',
 }
@@ -233,12 +239,15 @@ C.STATE_SPEC = obj({
   stock = obj(nil, {drink_d = NAT, food_d = NAT, meals = NAT, hosp_water = FLAG}),
   care = obj({stressed_pct = PCT, naked = NAT, ghosts = NAT, corpses_old = NAT, tombs_free = NAT, moods = NAT}),
   labor = obj({starving = NAT, idle = PCT}),
+  orders = obj({n = NAT, bad = NAT, stuck = NAT}),
   threat = obj({vis = NAT, armed = FLAG}),
   proj = arr({t = 'tup', items = {str(nil, nil, 'id'), str(24), PCT, str(40)}}, 0, 8),
   bridges = obj(nil, nil, str(nil, {'up', 'down', 'moving', 'unknown'}), 'bridge'),
   owners = obj({pause = {t = 'any', of = {{t = 'null'}, str(nil, {'inbox', 'gordon', 'popup', 'df'})}},
                 tempo = str(nil, {'mode', 'inbox', 'brake'})}),
-  mil = obj({squads = NAT, soldiers = NAT, worn = PCT, cv = NAT, metal_pct = PCT, on_station = NAT}),
+  mil = obj({squads = NAT, soldiers = NAT, worn = PCT, cv = NAT, metal_pct = PCT, on_station = NAT},
+            {free = obj(nil, {weapon = NAT, body = NAT, head = NAT, pants = NAT, gloves = NAT, shoes = NAT,
+                              shield = NAT, ammo = NAT})}),
   trade = obj({caravan = FLAG, ratio = NAT, done = NAT}),
 })
 

@@ -74,7 +74,9 @@ ACT = {
     "quickfort": ["runner"],
     "orders_import": ["economy"], "orders": ["economy"], "workorder": ["economy", "water"],
     "order_suspend": ["economy"], "kitchen_exclude": ["economy"], "appoint": ["economy"],
-    "work_detail": ["economy"], "order_material": ["economy"], "item_flag": ["care", "water"],
+    "work_detail": ["economy"], "order_material": ["economy"], "order_remove": ["economy"],
+    "job_resume": ["economy"], "farm_crop": ["economy"], "plant_gather": ["economy"], "work_detail_prune": ["economy"],
+    "item_flag": ["care", "water", "economy", "military"],
     "zone_assign": ["care"], "trade": ["trade"],
     "run": ["baseline", "economy", "care", "military", "trade", "arbiter", "selftest", "runner"],
 }
@@ -85,7 +87,7 @@ STATE_OWNERS = {
     "pop.cit": "sense", "pop.adults": "sense", "pop.soldiers": "sense",
     "pop.cap": "readiness", "pop.gate_cap": "readiness", "ready.*": "readiness",
     "stock.drink_d": "economy", "stock.food_d": "economy", "stock.meals": "economy",
-    "stock.hosp_water": "care", "care.*": "care", "labor.*": "economy",
+    "stock.hosp_water": "care", "care.*": "care", "labor.*": "economy", "orders.*": "economy",
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
 }
 
@@ -407,6 +409,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
     "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i")),
     "YEAR_REVIEW": ("A", "kern", _d(opt="year:i")),
+    "ORDER_BAD": ("A", "economy", _d("order:i job:s", "dropped:f")),
+    "DEPOT_MISSING": ("A", "trade", _d(opt="civ:s planned:f proj:s")),
     "SIEGE_START": ("B", "siege", _d(opt="vis:i inv:i great:i why:s")),
     "ALERT_START": ("B", "siege", _d(opt="vis:i")),
     "ALERT_END": ("B", "siege", _d(opt="vis:i")),
@@ -435,6 +439,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "PAUSE": ("B", "arbiter", _d("on:f", "by:s ttl:i")),
     "DEATH": ("B", "care", _d(opt="unit:i citizen:f cause:s")),
     "ACT_FAIL": ("B", "kern", _d("fn:s", "err:s module:s")),
+    "ORDER_STUCK": ("B", "economy", _d("order:i job:s why:s", "n:i days:i dropped:f")),
+    "JOBS_SUSPENDED": ("B", "economy", _d(opt="suspended:i released:i kept:i planned:i why:s")),
+    "TRADE_LEDGER": ("B", "trade", _d(opt="civ:s ok:f ratio:i sold:i sold_v:i bought:i bought_v:i unmet:sa")),
     "SIEGE_STATUS": ("C", "siege", _d(opt="vis:i worn:i on_station:i deaths:i captures:i")),
     "SEASON": ("C", "kern", _d(opt="year:i season:i")),
     "PROJECT_STAGE": ("C", "runner", _d("proj:s", "stage:s pct:i")),
@@ -451,6 +458,9 @@ EVENT = Obj(req={"n": NAT, "tick": TICK, "type": Str(TYPE_RE), "cls": Str(enum=[
                  "msg": Str(maxbytes=200), "d": OPEN})
 
 # ---------------------------------------------------------------- verbs
+# FR-39: make-item jobs whose manager order must name the item def (lua/dfllm/orderlib.lua O.SUBTYPE_JOBS)
+SUBTYPE_JOBS = frozenset({"MakeArmor", "MakePants", "MakeShoes", "MakeGloves", "MakeHelm", "MakeWeapon", "MakeAmmo",
+                          "MakeShield", "MakeTrapComponent", "MakeTool", "MakeToy"})
 VERB_ARGS: dict[str, Obj] = {
     "plan.reload": Obj(opt={"phases": Bool()}),
     "bp.place": Obj(req={"tpl": TPL, "site": Str(ID_RE)},
@@ -469,9 +479,19 @@ VERB_ARGS: dict[str, Obj] = {
                              "approve": Const(True)}),
     "lever": Obj(req={"bridge": BRIDGE, "want": Str(enum=["up", "down"])}),
     "inspect": Obj(req={"what": Str(enum=["state", "modules", "census", "manifest", "projects", "persist",
-                                          "perf", "mode", "plan"])}, opt={"key": Str(maxbytes=80)}),
+                                          "perf", "mode", "plan", "orders", "workload", "trade"])},
+                   opt={"key": Str(maxbytes=80)}),
     "selftest": Obj(opt={"suite": Str(enum=["quick", "full"])}),
     "module.enable": Obj(req={"module": MODULE}),
+    "order.add": Checked(Obj(req={"job": Str(r"^[A-Za-z]{2,40}$"), "amount": Int(1, 999)},
+                             opt={"item_subtype": Str(r"^ITEM_[A-Z0-9_]{1,60}$"), "material": Str(r"^[A-Z0-9_:]{1,80}$"),
+                                  "material_category": Arr(Str(r"^[a-z0-9_]{1,20}$"), lo=1, hi=8),
+                                  "reaction": Str(r"^[A-Z0-9_]{1,60}$"),
+                                  "frequency": Str(enum=["OneTime", "Daily", "Monthly", "Seasonally", "Yearly"])}),
+                         lambda a: (f"{a['job']} needs item_subtype (ITEM_...): DF 53.16 crashes without one (FR-39)"
+                                    if a["job"] in SUBTYPE_JOBS and "item_subtype" not in a else None),
+                         "item-definition jobs need item_subtype (FR-39)"),
+    "jobs.release": Obj(opt={"all": Bool(), "preventblocking": Bool()}),
 }
 # verb -> (handler module, allowed modes or None, needs approve)
 VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
@@ -484,6 +504,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "squad.sortie": ("military", ["ALERT", "SIEGE", "BREACH", "RECOVERY"], True),
     "lever": ("gate", ["PEACE"], False), "inspect": ("kern", None, False),
     "selftest": ("selftest", None, False), "module.enable": ("kern", None, False),
+    "order.add": ("economy", None, False), "jobs.release": ("economy", None, False),
 }
 # verbs accepted only from these `by` origins (CONTRACTS §9.5; `by` is a label, the hook is the guard)
 VERB_BY: dict[str, list[str]] = {"audit": ["follow", "test"]}
@@ -511,13 +532,16 @@ STATE = Obj(
          "care": Obj(req={"stressed_pct": PCT, "naked": NAT, "ghosts": NAT, "corpses_old": NAT,
                           "tombs_free": NAT, "moods": NAT}),
          "labor": Obj(req={"starving": NAT, "idle": PCT}),
+         "orders": Obj(req={"n": NAT, "bad": NAT, "stuck": NAT}),
          "threat": Obj(req={"vis": NAT, "armed": FLAG}),
          "proj": Arr(Tup([ID, Str(maxbytes=24), PCT, Str(maxbytes=40)]), hi=8),
          "bridges": Obj(extra=Str(enum=BRIDGE_STATES), keys=BRIDGE_RE),
          "owners": Obj(req={"pause": AnyOf(Null(), Str(enum=["inbox", "gordon", "popup", "df"])),
                             "tempo": Str(enum=["mode", "inbox", "brake"])}),
          "mil": Obj(req={"squads": NAT, "soldiers": NAT, "worn": PCT, "cv": NAT, "metal_pct": PCT,
-                         "on_station": NAT}),
+                         "on_station": NAT},
+                    opt={"free": Obj(opt={k: NAT for k in ("weapon", "body", "head", "pants", "gloves", "shoes",
+                                                           "shield", "ammo")})}),
          "trade": Obj(req={"caravan": FLAG, "ratio": NAT, "done": NAT})})
 
 HEARTBEAT = Obj(req={"v": Const(V), "wall": NAT, "frame": NAT, "tick": TICK, "paused": Bool(), "mode": MODE,

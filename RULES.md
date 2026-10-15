@@ -118,7 +118,9 @@ helper is experimental; procedure and fair-play limits: `tools/embark/README.md`
 | `trade.want` | `{want?, sell?}` | tokens like `bar:iron`, `anvil`, `cloth` |
 | `squad.sortie` | `{squad, target, approve:true}` | ALERT/SIEGE/BREACH/RECOVERY; rare, `approve:true` is a deliberate, logged decision; target = kill box id or position |
 | `lever` | `{bridge, want}` | PEACE only |
-| `inspect` | `{what, key?}` | read-only, ≤ 8 KB |
+| `inspect` | `{what, key?}` | read-only, ≤ 8 KB; `what=orders` (blocked orders), `workload` (idle adults, unclaimed jobs, cancel reasons, free picks/axes), `trade` (merchant goods at the depot, last trades) |
+| `order.add` | `{job, amount, item_subtype?, material?, material_category?, reaction?, frequency?}` | one manager order; make-item jobs need `item_subtype` (`ITEM_…`), else DF 53.16 crashes (refused) |
+| `jobs.release` | `{all?, preventblocking?}` | resume suspended constructions; `preventblocking` is a lasting fort decision |
 | `selftest` | `{suite?}` | quick or full |
 | `module.enable` | `{module}` | re-enable a module the kernel backed off (KERN_FAULT) before its backoff ends, only once the cause is fixed |
 There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` prints it.
@@ -136,6 +138,8 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | PLAN_EXHAUSTED | year review now (`plan propose`) |
 | PROJECT_BLOCKED | `bp preview`, then `bp.cancel` and place at another site, or fix the material |
 | YEAR_REVIEW | §5 year review |
+| ORDER_BAD | a make-item order without `item_subtype` (DF crash) was removed; never queue such orders, use `order.add` with `item_subtype` |
+| DEPOT_MISSING | a caravan came and no depot stands; the kernel queued a `depot` project: check `status`/`proj`, keep O1 down for builders in PEACE |
 
 ## 8. Readiness gate (only readiness raises max-pop)
 - **R0:** cap 55 (pop-control `max-pop 55`, `wave-size 8`).

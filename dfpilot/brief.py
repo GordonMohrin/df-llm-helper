@@ -139,6 +139,10 @@ def line_supply(ctx: Ctx) -> str:
     lb = s.get("labor")
     if lb:
         out.append(f"idle {lb['idle']}% starving {lb['starving']}")
+    od = s.get("orders")
+    if od:                                     # FR-01/FR-39: orders that cannot run, crash-class orders
+        out.append(f"orders {od['n']}" + (f" stuck {od['stuck']}" if od["stuck"] else "")
+                   + (f" UNSAFE {od['bad']} (no item_subtype: DF crash)" if od["bad"] else ""))
     return _join(out)
 
 
@@ -153,6 +157,9 @@ def line_def(ctx: Ctx) -> str:
     if m:
         out.append(f"mil {m['squads']}sq {m['soldiers']}sol worn {m['worn']}% cv {m['cv']} metal {m['metal_pct']}%"
                    f" station {m['on_station']}")
+        free = {k: v for k, v in (m.get("free") or {}).items() if v}
+        if free:                               # FR-46: free metal gear by category (loot included)
+            out.append("free metal " + " ".join(f"{k} {v}" for k, v in sorted(free.items())))
     tr = s.get("trade")
     if tr and tr["caravan"]:
         out.append("CARAVAN on map")
@@ -193,7 +200,7 @@ def _no_state(ctx: Ctx) -> str:
 # ---------------------------------------------------------------- status
 def status_text(save_dir: Path) -> str:
     ctx = Ctx(save_dir, full=False)
-    lines = [line_head(ctx)]
+    lines = [line_head(ctx), files.follow_off(save_dir)]        # FR-29: say loudly when follow is not running
     if ctx.state is None:
         lines.append(_no_state(ctx))
     else:
