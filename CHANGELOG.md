@@ -1,5 +1,28 @@
 # CHANGELOG dfpilot
 
+## Reach, seal, perimeter and refuge audits; embark metal/stone rule (2026-10-15)
+- New kernel module `lua/dfllm/seal.lua` (WP7, after snapshot; revealed tiles only, citizens from the census). It checks
+  the Run 9 failures without a full-map BFS: walk groups give the verdict, a bounded BFS from the citizens gives the
+  first leak and the number of independent routes.
+- **FR-22/54:** `inspect what=reach` reports the walk groups of citizens, food, drink, seeds, farm plots, wells, beds,
+  the depot and the map exit, plus stairs without a counterpart. A class outside the citizens' group raises `CUTOFF`
+  (A), naming the closing tile (a fresh wall/door/bridge, then a bounded walk). Closing cells from `runner` (build
+  stages) and every construction or door/bridge change trigger a re-check. A bridge the gate raised outside PEACE is
+  `SEAL`, not `CUTOFF`. `inspect what=entrances` gives the first leak (tile, building, wall/door state) and the routes.
+  It runs after each siege and 40 ticks after each lever pull: `SEAL_LEAK` (A) or `SEAL` (B).
+- **FR-56:** perimeter manifest of walls, fortifications, doors, hatches, floodgates, grates, bars and killbox tiles,
+  learned in PEACE. Pieces already gone at siege start are retired; after the siege the diff re-queues the destroyed
+  pieces (`runner.repair`, class defense) and raises `PERIMETER_BROKEN` (A). `inspect what=perimeter`.
+- **FR-24:** `inspect what=defense` shows each bridge's real gate_flags, walking through it and each lever's link.
+- **FR-33/37/57:** large predators count for the civ alert only within 25 tiles of an entrance (or inside).
+  `seal.alert_burrow` (called by siege) checks the burrow for drink, food and beds. If they are short, it falls back to
+  Kern+ (from the refuge), then to the interior burrow `Innen+` (painted by `act.burrow_tiles`), then to no
+  confinement, and raises `REFUGE_FAIL` (A). In BREACH it uses the refuge only if its audit passes; it returns to
+  Kern+ after 3 days without a visible hostile. `status` prints `alert <burrow> <n>t <m> in`. `inspect what=refuge`.
+- **FR-08 embark:** the gate requires a metal ore (iron passes; bronze only or other metals warn) and a stone layer
+  (fails on the 'no stone' popup or deep soil), both read from the embark panel's layer lines.
+  `--accept <criterion> --reason "..."` lets a failed criterion pass and logs it to `accept.log`.
+
 ## Rename (2026-10-15): df-llm-helper -> dfpilot
 - Project renamed back to **dfpilot**; Python package `df_llm_helper` -> `dfpilot` (`python -m dfpilot ...`), the
   PreToolUse hook runs `python -m dfpilot.hook`.
