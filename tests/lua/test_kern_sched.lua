@@ -95,7 +95,7 @@ end)
 
 T.test('demotion: non-critical slow 3x -> period doubled + KERNEL_SLOW; critical -> KERN_FAULT', function()
   local W = H.world{tag = 'slow'}
-  local eco = H.counter('economy', {ticks = 10})
+  local eco = H.counter('economy', {ticks = 10}, {share = 1000})   -- not paced: this test is about demotion
   local base_step = eco.step
   eco.step = function(K, b, ctx) base_step(K, b, ctx); W.ms = W.ms + 7 end
   local sense = {name = 'sense', every = {ticks = 10}, n = 0}

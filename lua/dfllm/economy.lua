@@ -78,7 +78,7 @@ local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
 local OL = require('dfllm.orderlib')
 
-local M = {name = 'economy', every = {ticks = 1200}, on = {}, verbs = {}, inspect = {},
+local M = {name = 'economy', every = {ticks = 1200}, on = {}, verbs = {}, inspect = {}, MASK_CHECK = 300,
            reports = {MIGRANT_ARRIVAL = true, MIGRANT_ARRIVAL_NAMED = true, D_MIGRANTS_ARRIVAL = true,
                       CANCEL_JOB = true}}
 local DAY = C.TICKS.DAY
@@ -340,6 +340,26 @@ local CATS = {'DRINK', 'FOOD', 'MEAT', 'FISH', 'FISH_RAW', 'CHEESE', 'EGG', 'PLA
               'CORPSEPIECE', 'SMALLGEM', 'ROUGH', 'BAR', 'AMMO', 'WOOD', 'BARREL', 'BIN', 'BOULDER', 'THREAD',
               'SEEDS', 'WEAPON', 'ARMOR', 'HELM', 'PANTS', 'GLOVES', 'SHOES', 'SHIELD', 'QUIVER'}
 local SKIP = {'trader', 'garbage_collect', 'removed', 'dump', 'hostile', 'in_building', 'construction', 'rotten'}
+-- FR-62 (Run 9: 18.7k items, economy 12-14 ms/s): one read of the flag word (bitfield `whole`) against the mask of
+-- the SKIP bits instead of eight bitfield reads per item. The first M.MASK_CHECK items of a boot are cross-checked
+-- against the flag reads; any disagreement (or no df.item_flags/`whole`, as in the fakes) means per-flag reads.
+local skip_mask, mask_check, mask_bad = nil, 0, nil
+local function make_skip_mask()
+  local ok, m = pcall(function()
+    local m = 0
+    for _, k in ipairs(SKIP) do
+      local bit = df.item_flags[k]
+      if math.type(bit) ~= 'integer' or bit < 0 or bit > 31 then return nil end
+      m = m | (1 << bit)
+    end
+    return m
+  end)
+  return ok and m or nil
+end
+local function skipped(f)
+  for _, k in ipairs(SKIP) do if f[k] then return true end end
+  return false
+end
 local GEAR_CAT = {ARMOR = 'body', HELM = 'head', PANTS = 'pants', GLOVES = 'gloves', SHOES = 'shoes',
                   SHIELD = 'shield', QUIVER = 'quiver'}
 -- body, head and pants count only true armor (raws [ARMORLEVEL] >= 1: breastplate, mail shirt, leather armor, helm,
@@ -502,7 +522,15 @@ end
 
 local function classify(it, a, cat)
   local f = it.flags
-  for _, k in ipairs(SKIP) do if f[k] then return end end
+  local w = skip_mask and f.whole
+  if math.type(w) == 'integer' then
+    local skip = w & skip_mask ~= 0
+    if mask_check > 0 then
+      mask_check = mask_check - 1
+      if skip ~= skipped(f) then skip_mask, mask_bad, skip = nil, true, skipped(f) end
+    end
+    if skip then return end
+  elseif skipped(f) then return end
   local n = math.tointeger(it.stack_size) or 1
   if cat == 'DRINK' or cat == 'SEEDS' or a.food_set[cat] then
     -- FR-50 (Run 9: 1392 drinks in forbidden TOOL pots read as "0 days"): a forbidden container of any item type
@@ -3363,6 +3391,7 @@ function M.init(K)
         seeds = {}, f = {}}
   orec, wdef, adef = {}, {}, {}
   rcache, pinfo, pidx, ecache, plugins = {}, {}, nil, {}, {}
+  skip_mask, mask_check, mask_bad = make_skip_mask(), M.MASK_CHECK, nil
   M.every = {ticks = EVERY}
   pstate(K)
   local ok, err = pcall(kitchen, K, M.conf(K), nil)
@@ -3387,6 +3416,10 @@ function M.step(K, budget, ctx)
     local cs = st.census
     st.census = nil
     if cs.errs > 0 then K.log('warn', 'census: %d unreadable items (%s)', cs.errs, cs.err) end
+    if mask_bad then
+      mask_bad = false
+      K.log('warn', 'census: the item flag mask disagreed with the flag reads; reading flags one by one')
+    end
     publish(K, c, cs.acc)
     st.run = new_run(K, c, cs.start)
   end

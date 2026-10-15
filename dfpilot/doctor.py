@@ -12,6 +12,17 @@ WINDOW_S = 600
 TPS_MIN = {"PEACE": 450, "SIEGE": 100, "DRILL": 100}     # §14 (PEACE at pop <= 55)
 KERN_MS_S, HB_MAX_S, INBOX_STUCK_S = 25, 120, 10
 EVENTS_WARN_B = 5 << 20
+# kernel budget for the fort size, mirrors lua/dfllm/util/sched.lua (S.LOAD.units, S.BUDGET; FR-62): 25 ms/s on the
+# reference fort (150 units), +6 per 150 units above it (critical modules scan every unit), at most 40
+LOAD_UNITS, BUDGET_PER_UNIT, BUDGET_MAX = 150, 6, 40
+# perf.csv mods keys that are not cost owners: DFHack's counter for the whole frame callback (a cross-check)
+NOT_OWNERS = ("repeat",)
+
+
+def budget_for(units: int) -> int:
+    """Kernel ms per real second that fits a fort with this many visible units (sched.budget)."""
+    fu = max(1.0, (units or 0) / LOAD_UNITS)
+    return min(BUDGET_MAX, int(KERN_MS_S + BUDGET_PER_UNIT * (fu - 1) + 0.5))
 
 
 def read_perf(save_dir: Path, window_s: int = WINDOW_S) -> list[dict]:
@@ -49,14 +60,18 @@ def perf_summary(rows: list[dict]) -> dict:
     for r in rows:
         by_mode.setdefault(r["mode"], []).append(r["tps"])
     mods: dict[str, int] = {}
+    cross: dict[str, int] = {}
     for r in rows:
         for k, v in r["mods"].items():
-            mods[k] = mods.get(k, 0) + v
+            d = cross if k in NOT_OWNERS else mods
+            d[k] = d.get(k, 0) + v
     return {"rows": len(rows), "span_s": span, "last": rows[-1],
             "tps": {m: (int(statistics.median(v)), min(v), max(v)) for m, v in by_mode.items()},
             "ms_s_avg": round(sum(r["ms_s"] for r in rows) / len(rows)), "ms_s_max": max(r["ms_s"] for r in rows),
             "gap_max": max(r["gap_max_ms"] for r in rows), "gaps3": sum(r["gaps3"] for r in rows),
-            "mods": sorted(((k, v / span) for k, v in mods.items()), key=lambda x: -x[1])}
+            "mods": sorted(((k, v / span) for k, v in mods.items()), key=lambda x: -x[1]),
+            "repeat": cross["repeat"] / span if "repeat" in cross else None,
+            "budget": budget_for(rows[-1]["units"])}
 
 
 def diagnose(save_dir: Path) -> tuple[list[str], list[str]]:
@@ -79,18 +94,28 @@ def diagnose(save_dir: Path) -> tuple[list[str], list[str]]:
         tps = " ".join(f"{m} {med} ({lo}-{hi})" for m, (med, lo, hi) in sorted(s["tps"].items()))
         out.append(f"ticks/s median by mode over {s['span_s'] // 60} min: {tps}; last {s['last']['tps']} "
                    f"pop {s['last']['pop']} units {s['last']['units']} items {s['last']['items']}")
-        out.append(f"kernel {s['ms_s_avg']} ms/s avg, {s['ms_s_max']} max (limit {KERN_MS_S}); "
+        units = s["last"]["units"]
+        out.append(f"kernel {s['ms_s_avg']} ms/s avg, {s['ms_s_max']} max (limit {s['budget']}"
+                   + (f" for {units} units" if s["budget"] != KERN_MS_S else "") + "); "
                    f"max frame gap {s['gap_max']} ms; gaps > 3 s: {s['gaps3']}")
+        top = " ".join(f"{k} {v:.1f}" for k, v in s["mods"][:8])
         if s["mods"]:
-            out.append("modules ms/s: " + " ".join(f"{k} {v:.1f}" for k, v in s["mods"][:8]))
+            out.append("modules ms/s: " + top)
+        if s["repeat"] is not None:            # FR-62: the same frame time, timed again by DFHack
+            out.append(f"DFHack repeat counter {s['repeat']:.1f} ms/s: the whole dfllm frame callback (unpaused frames, "
+                       f"getTickCount clock), a cross-check of the kernel total, not a module")
         for m, (med, _, _) in s["tps"].items():
             if m in TPS_MIN and med < TPS_MIN[m] and not (m == "PEACE" and s["last"]["pop"] > 55):
                 if m == "PEACE" and tempo_by in ("brake", "inbox"):
                     out.append(f"{m} median {med} ticks/s: tempo held by {tempo_by} (supply brake or tempo.lower)")
                 else:
-                    bad.append(f"{m} median {med} ticks/s < {TPS_MIN[m]}")
-        if s["ms_s_avg"] > KERN_MS_S:
-            bad.append(f"kernel {s['ms_s_avg']} ms/s > {KERN_MS_S}")
+                    bad.append(f"{m} median {med} ticks/s < {TPS_MIN[m]}"
+                               + (f" (kernel {s['ms_s_avg'] / 10:.1f} % of real time, {units} units, "
+                                  f"{s['last']['items']} items)" if m == "PEACE" else ""))
+        if s["ms_s_avg"] > s["budget"]:
+            owners = ", ".join(f"{k} {v:.0f}" for k, v in s["mods"][:3])
+            bad.append(f"kernel {s['ms_s_avg']} ms/s > {s['budget']}" + (f" ({units} units)" if s["budget"] != KERN_MS_S else "")
+                       + (f": top {owners}" if owners else ""))
         if s["gaps3"]:
             bad.append(f"{s['gaps3']} frame gap(s) > 3 s in {s['span_s'] // 60} min (autosave?)")
     else:

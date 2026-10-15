@@ -5,6 +5,7 @@
 --   W.load(require('dfllm.gate')); W.run(600, {skip = 9}); W.find_acts('pull')
 local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
+local sched = require('dfllm.util.sched')   -- demotion hysteresis, pacing, fort-size load (shared with kern)
 
 local M = {}
 local YEAR, SEASON = C.TICKS.YEAR, C.TICKS.SEASON
@@ -584,6 +585,15 @@ function M.new(opts)
   end
   function K.enabled(name) local e = W.mods[name]; return e ~= nil and not e.disabled end
   function K.manifest() return K.persist.get('manifest') or {v = 2} end
+  -- fort size (FR-62): f = 1 unless a test sets W.set_load(units, items); never derived from the fake
+  -- vectors, so module tests that fill items.all keep their cadences
+  W.fort_load = sched.load(-1, 0)
+  function K.load() local l = W.fort_load; return {units = l.units, items = l.items, f = l.f} end
+  function W.set_load(units, items)
+    W.fort_load = sched.load(units, items)
+    for _, e in ipairs(W.entries) do e.stretch = sched.stretch(e, W.fort_load) end
+    return W.fort_load
+  end
   function K.flush() flush_req = true end
 
   -- state composition
@@ -652,8 +662,9 @@ function M.new(opts)
     end
     local critical = mod.critical
     if critical == nil and idx then critical = C.MODULES[idx].critical end
-    local e = {name = mod.name, M = mod, order = idx or (100 + #W.entries), factor = 1, slow_ms = {},
-               critical = critical == true}
+    local e = sched.init{name = mod.name, M = mod, order = idx or (100 + #W.entries), factor = 1, slow_ms = {},
+                         critical = critical == true}
+    e.stretch = sched.stretch(e, W.fort_load)
     W.mods[mod.name] = e
     W.entries[#W.entries + 1] = e
     table.sort(W.entries, function(a, b) return a.order < b.order end)
@@ -661,36 +672,27 @@ function M.new(opts)
     return mod
   end
 
-  -- W.cost[name] = simulated os.clock() ms per step (§3.3.6): 3 slow calls within 10 min demote a
-  -- module (critical: KERN_FAULT at most once per 10 min); 10 min without one halves the factor.
+  -- W.cost[name] = simulated os.clock() ms per step (§3.3.6-3.3.8, util/sched.lua): 3 slow calls within
+  -- 10 min demote a module (critical: KERN_FAULT at most once per 10 min; KERNEL_SLOW once per module per
+  -- 6 h); quiet running time promotes it again; the cost also counts against the module's pacing share.
   local function charge(e, where)
-    local c, t = W.cost[e.name], W.ms
-    if e.factor > 1 and t - (e.last_slow or t) >= KN.promote_ms then
-      e.factor, e.last_slow = e.factor // 2, t
-      W.logs[#W.logs + 1] = {level = 'info', module = 'kern', msg = e.name .. ' promoted to x' .. e.factor}
-    end
-    if not c or c <= KN.slow_ms then return end
-    e.last_slow = t
-    local keep = {}
-    for _, s in ipairs(e.slow_ms) do if t - s < KN.slow_window_ms then keep[#keep + 1] = s end end
-    keep[#keep + 1] = t
-    e.slow_ms = keep
-    if #keep < KN.slow_n then return end
-    e.slow_ms = {}
-    if e.critical then
-      if not e.slow_fault or t - e.slow_fault >= KN.slow_window_ms then
-        e.slow_fault = t
-        emit_as('kern', 'KERN_FAULT', 'A', e.name .. ' slow (' .. c .. ' ms)', {module = e.name, err = 'slow', n = KN.slow_n})
+    local c = W.cost[e.name] or 0
+    sched.spend(e, c)
+    local act, report = sched.slow(e, c, W.ms, where)
+    if act == 'fault' then
+      emit_as('kern', 'KERN_FAULT', 'A', e.name .. ' slow (' .. c .. ' ms)', {module = e.name, err = 'slow', n = KN.slow_n})
+    elseif act == 'demote' then
+      if report then
+        emit_as('kern', 'KERNEL_SLOW', 'B', e.name .. ' demoted x' .. e.factor, {module = e.name, ms = c, factor = e.factor})
+      else
+        W.logs[#W.logs + 1] = {level = 'info', module = 'kern', msg = e.name .. ' demoted x' .. e.factor .. ' (already reported)'}
       end
-    elseif e.factor < KN.max_factor then
-      e.factor = e.factor * 2
-      emit_as('kern', 'KERNEL_SLOW', 'B', e.name .. ' demoted x' .. e.factor, {module = e.name, ms = c, factor = e.factor})
     end
   end
 
   local function run_step(e, cont)
     local ctx = {dt = e.last_tick and (now.tick - e.last_tick) or 0, dt_ms = e.last_ms and (now.ms - e.last_ms) or 0,
-                 cont = cont, slice = cont and (e.slice + 1) or 1}
+                 cont = cont, slice = cont and (e.slice + 1) or 1, load = W.fort_load.f}
     if not cont then e.last_tick, e.last_ms = now.tick, now.ms else ctx.dt, ctx.dt_ms = 0, 0 end
     e.slice = ctx.slice
     local ok, r = call_in(e, 'step', e.M.step, e.critical and 1 or 2, ctx)
@@ -754,16 +756,17 @@ function M.new(opts)
     for _, ev in ipairs(eq) do
       for _, e in ipairs(W.entries) do if not e.disabled then deliver(e, 'EV:' .. ev.type, ev) end end
     end
-    -- due modules in contract order
+    -- due modules in contract order; pacing and promotion as in kern (util/sched.lua)
     for _, e in ipairs(W.entries) do
       if not e.disabled and e.M.step then
-        if e.cont then run_step(e, true)
-        else
-          local ev = e.M.every or {}
-          local due
-          if ev.ticks then due = ticking and (e.last_tick == nil or now.tick - e.last_tick >= ev.ticks * e.factor)
-          else due = e.last_ms == nil or now.ms - e.last_ms >= ev.ms * e.factor end
-          if due then run_step(e, false) end
+        local ev = e.M.every or {}
+        if e.factor > 1 and (ticking or ev.ms) and sched.quiet(e, W.ms_per_frame, W.ms) then
+          W.logs[#W.logs + 1] = {level = 'info', module = 'kern', msg = e.name .. ' promoted to x' .. e.factor}
+        end
+        if e.cont or sched.due(e, now, ticking) then
+          -- shares only (x alert_mult outside PEACE); the PEACE pool needs kern's measured frame cost
+          if sched.paced(e, W.ms, nil, W.mode == 'PEACE' and 1 or sched.PACE.alert_mult) then e.paced_n = e.paced_n + 1
+          else run_step(e, e.cont) end
         end
       end
     end

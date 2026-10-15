@@ -6,6 +6,35 @@ L4 (iter2: integration of the four offline packages, trade, drills, a 1-year soa
 (economy and building), §0a the live slot L0 (first v2 code in Dwarf Fortress); §1-§9 are the offline
 integration state they started from (pytest, luahost on `hack/lua53.dll`, k_mock).
 
+## 0i. Offline: FR-62 kernel cost on a big fort (2026-10-15, live-untested)
+- **`repeat` was not a module:** it is DFHack's counter for our one repeat-util callback (`repeat-util.lua`:
+  `recordRepeatRuntime` around the whole kernel frame), i.e. the row total measured again, on unpaused frames only
+  and on the 15.6 ms `getTickCount` clock (69 of the 82-90 ms/s). doctor summed it as a module; now it prints it as a
+  cross-check line. Nothing in it was registered twice (`scheduleEvery` cancels by key on every boot/reload).
+- **Owners:** the kernel's own cost is split into `k.state`, `k.io`, `k.persist`, `k.inbox`, `k.events` and `kern`
+  (dispatcher); a module's persist keys are booked to the module. Big keys (≥ 8 KB encoded, e.g. seal's perimeter) are
+  written at most every 60 s (mode change, stop: at once).
+- **Pacing and fort size (`lua/dfllm/util/sched.lua`, shared with k_mock):** non-critical modules spend at most their
+  share (ms/s; seal 4, economy 3, default 2), their runs and `'more'` slices wait when over it; in PEACE the waiting
+  modules' shares are scaled together to what the 25 ms/s budget leaves after sense, reflex and the kernel's
+  housekeeping. economy and care stretch their cadence by the load factor (`max(units/150, items/6000)`, ≤ 3x).
+  sense: inactive units cost one call, LARGE_PREDATOR raws cached per race/caste, seal's entrance list only when a
+  predator candidate needs it (about -40 % in the mock). economy: one flag-word read per item instead of eight
+  (cross-checked against the per-flag reads on the first 300 items of a boot).
+- **Flip-flop:** promotion needs quiet *running* time (a paused game does not count) that doubles after each flip;
+  KERNEL_SLOW once per module per 6 h, later demotions only in kern.log.
+- **selftest `budget`:** last minute against `25 + 6 * (units/150 - 1)` ms/s (35 for 402 units, at most 40); a
+  failure names the top owners and is logged again every 10 min while it lasts.
+- **Model (tests/lua/test_kern_load.lua, 402 units, 18.7k items, stand-ins calibrated to §0h):** old scheduling
+  84 ms/s; new scheduling with the old sense/housekeeping costs 33 ms/s (seal 2, economy 1.5); with the sense and
+  housekeeping savings measured in `tests/lua/load_bench.lua` 24.5 ms/s. These are estimates for DF, not measurements.
+- **Check live with `dfllm doctor` (≥ 10 min PEACE after a load):** the `modules ms/s` line has no `repeat` and names
+  `k.*` parts; the `DFHack repeat counter` line is ≤ the kernel total; `kernel N ms/s avg (limit 35 for 402 units)`
+  with N ≤ 25 hoped, ≤ 35 required; seal ≤ ~4, economy ≤ ~3; at most one `KERNEL_SLOW` per module in the event list;
+  PEACE median ticks/s vs 450 (gap = DF's own load if the kernel is ≤ 25). In kern.log: `<module> paced: ...` once,
+  `economy cadence x3.0 for the fort size`, no `selftest quick failed: budget` every few minutes. `dfllm cmd inspect
+  '{"what":"perf"}'` shows `load`, `budget`, `pool_ms_s`, `pool_pct`; `what=modules` shows share, debt, paced, flips.
+
 ## 0h. Live test of the Run 9 feature requests on the Run 9 save (2026-10-15, Claude as player; Gordon: "state is irrelevant")
 Setup: `git pull` to 3edc277 (main), backup of region2 + autosave 1-3 in `C:\Users\admin\Documents\df-backups\run9-20261015`,
 DF restarted (`tools/win/start_df_desktop1.ps1`), loaded **autosave 1** (Udosoddom, y363 spring d9, 6 citizens, 25 unburied,
