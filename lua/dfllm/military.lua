@@ -629,9 +629,17 @@ local function weapon_specs(p)
 end
 
 -- BUG-023 (Run 10): the tools the builtin tool details need stay with them: one pick per Miners member, one axe
--- per Woodcutters member (economy sizes them by the free tools), AXE_KEEP / PICK_KEEP as the floor. Read-only.
-local function tool_keep()
+-- per Woodcutters member, at least economy's demand before its tool cap (economy caps the members by the free
+-- unreserved tools, so counting members alone let the soldiers' reservations shrink the details), AXE_KEEP /
+-- PICK_KEEP as the floor. Read-only.
+local function tool_keep(K)
   local keep = {pick = M.PICK_KEEP, axe = M.AXE_KEEP}
+  local ok, want = false, nil
+  if K and K.call then ok, want = K.call('economy', 'tool_want') end
+  if ok and type(want) == 'table' then
+    keep.pick = math.max(keep.pick, int(want.pick) or 0)
+    keep.axe = math.max(keep.axe, int(want.axe) or 0)
+  end
   try(function()
     for _, wd in ipairs(df.global.plotinfo.labor_info.work_details) do
       local name, n = dfhack.df2utf(wd.name), #wd.assigned_units
@@ -650,7 +658,7 @@ local function weapon_guard(K, per)
   for _, sp in ipairs(M.SQUADS) do if sp.kind == 'melee' then melee = melee + (per[sp.key] or 0) end end
   if melee == 0 then return nil end
   local axes, picks = int(ci.w_axe) or 0, int(ci.w_pick) or 0
-  local keep = tool_keep()
+  local keep = tool_keep(K)
   if axes - keep.axe >= melee and picks - keep.pick >= melee then return nil end
   return {axe = math.max(0, axes - keep.axe), pick = math.max(0, picks - keep.pick), keep = keep}
 end
@@ -676,8 +684,49 @@ local function tool_excess(g)
       end)
     end
   end
-  local ex = {pick = math.max(0, claim.pick - g.pick), axe = math.max(0, claim.axe - g.axe)}
+  local ex = {pick = claim.pick, axe = math.max(0, claim.axe - g.axe)}   -- no pick spec at all (v1 E18)
   return (ex.pick > 0 or ex.axe > 0) and ex or nil
+end
+
+-- BUG-023 (Run 10: 6 of 9 picks stayed in items_assigned after their specs were given up, the miners got none): a pick
+-- or axe nobody carries that DF keeps reserved for a fort squad position without a weapon spec of that kind (explicit,
+-- or individual choice while the tools are safe) is unassigned (act.squad_release, the squads screen's unassign).
+local function release_tools(K)
+  local ok, ids = pcall(function()
+    local refs = {}
+    local gid = df.global.plotinfo.group_id
+    for _, s in ipairs(df.global.world.squads.all) do
+      if s.entity_id == gid then
+        for _, p in ipairs(s.positions) do
+          local r = {kinds = {}, choice = false}
+          for _, sub in ipairs(weapon_specs(p)) do
+            local w = weapon_kind(sub)
+            if w then r.kinds[w.k] = true elseif sub < 0 then r.choice = true end
+          end
+          local function mark(id) refs[id] = refs[id] or {}; local l = refs[id]; l[#l + 1] = r end
+          for _, id in ipairs(p.equipment.assigned_items) do mark(id) end
+          for _, wsp in ipairs(p.equipment.uniform.weapon) do for _, id in ipairs(wsp.assigned) do mark(id) end end
+        end
+      end
+    end
+    local out = {}
+    for _, id in ipairs(df.global.plotinfo.equipment.items_assigned.WEAPON) do
+      local it = df.item.find(id)
+      local w = it and weapon_kind(it:getSubtype())
+      if w and (w.k == 'pick' or w.k == 'axe') and not dfhack.items.getHolderUnit(it) then
+        local keep = false
+        for _, r in ipairs(refs[id] or {}) do if r.kinds[w.k] or (r.choice and rt.wguard == nil) then keep = true end end
+        if not keep then out[#out + 1] = id end
+      end
+    end
+    return out
+  end)
+  if not ok or type(ids) ~= 'table' or #ids == 0 then return end
+  local okr, n = K.act.squad_release(ids)
+  if okr then
+    K.log('info', 'military: %d of %d reserved picks/axes nobody carries unassigned (no weapon spec of that kind; '
+          .. 'the miners and woodcutters need them)', int(n) or 0, #ids)
+  end
 end
 
 local function holds_kind(u, k)              -- the soldier carries a weapon of that kind (a pick, an axe)
@@ -731,8 +780,7 @@ local function weapon_plan(g, n)
     for _, t in ipairs(toks) do if stock[t] > 0 and (best == nil or stock[t] > stock[best]) then best = t end end
     if best then stock[best] = stock[best] - 1
     elseif tools.axe > 0 and tool_tok.axe then best, tools.axe = tool_tok.axe, tools.axe - 1
-    elseif tools.pick > 0 and tool_tok.pick then best, tools.pick = tool_tok.pick, tools.pick - 1
-    else break end
+    else break end                     -- BUG-023 (v1 E18): never a pick spec, it reserves the miners' picks
     r[#r + 1] = best
   end
   return r
@@ -1285,6 +1333,7 @@ function M.step(K, budget, ctx)
   end
   if st.posture == nil then st.posture, st.pt, dirty = 'TRAIN', now, true end
   for _, sp in ipairs(M.SQUADS) do apply_squad(K, sp.key, false) end   -- drift only
+  release_tools(K)                                                     -- BUG-023: after the specs settled
   rt.kpi, rt.kpi_tick = compute(K), now
   local okl, err = pcall(loot, K)
   if not okl then K.log('warn', 'loot: %s', tostring(err)) end

@@ -70,7 +70,7 @@ ACT = {
     "squad_create": ["military"], "squad_leader": ["military"], "squad_add": ["military"],
     "squad_remove": ["military"],
     "squad_routine": ["military"], "squad_order": ["military"], "squad_uniform": ["military"],
-    "squad_unequip": ["military"], "animal_slaughter": ["economy"], "zone_remove": ["runner"], "manager_office": ["economy"], "pond_remove": ["water"],
+    "squad_unequip": ["military"], "squad_release": ["military"], "animal_slaughter": ["economy"], "zone_remove": ["runner"], "manager_office": ["economy"], "pond_remove": ["water"],
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
     "door_forbid": ["reflex"],
     "burrow_tiles": ["seal"],

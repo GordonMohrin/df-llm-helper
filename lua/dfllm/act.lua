@@ -933,6 +933,40 @@ local function impls(state)
     return true, n
   end
 
+  -- squads screen > equip > unassign an item (BUG-023, Run 10: 6 of 9 picks stayed in items_assigned after their specs
+  -- were given up, so the miners never got one): each listed item that nobody carries leaves every fort position's
+  -- assigned_items and spec lists; one that no position lists any more goes back to items_unassigned. Equipment update
+  -- of the squads touched. Returns ok, released.
+  function I.squad_release(item_ids)
+    if type(item_ids) ~= 'table' then return false, 'item ids required' end
+    local ids, n = {}, 0
+    for _, id in ipairs(item_ids) do
+      local it = df.item.find(int(id) or -1)
+      if it and not dfhack.items.getHolderUnit(it) then ids[it.id] = true end
+    end
+    local list = {}
+    for _, sq in ipairs(df.global.world.squads.all) do
+      if sq.entity_id == df.global.plotinfo.group_id then
+        local touched = false
+        for _, p in ipairs(sq.positions) do
+          local ai = p.equipment.assigned_items
+          for j = #ai - 1, 0, -1 do if ids[ai[j]] then ai:erase(j); touched = true end end
+          for c in pairs(UNIFORM_CAT) do
+            for _, sp in ipairs(p.equipment.uniform[c] or {}) do
+              local v = sp.assigned
+              for j = #(v or {}) - 1, 0, -1 do if ids[v[j]] then v:erase(j); touched = true end end
+            end
+          end
+        end
+        if touched then equipment_update(sq) end
+      end
+    end
+    for id in pairs(ids) do list[#list + 1] = id end
+    table.sort(list)
+    n = release_items(list)
+    return true, n
+  end
+
   -- animal sheet > "slaughter" toggle (live L6: a famine with idle grazers; DFHack zone.lua
   -- AnimalActionsWidget:set_slaughter_flag: flags2.slaughter, and marking clears the gelding and adoption marks
   -- as the vanilla sheet does). Only a tame, fort-controlled animal that is nobody's pet; a butcher's shop

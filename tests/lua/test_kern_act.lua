@@ -618,6 +618,14 @@ T.test('BUG-023: a removed or replaced weapon spec gives its unheld item back to
   -- remove the weapon specs of positions 1 and 2: 502 goes back, 503 stays assigned (a soldier carries it)
   T.eq((env.api.squad_unequip(sid, {1, 2}, {'weapon'})), true)
   T.eq({ids(eq.items_assigned.WEAPON), ids(eq.items_unassigned.WEAPON)}, {{503, 600}, {400, 501, 502, 700}})
+  -- squads screen > unassign (act.squad_release): 600 sits in a position's list without a spec; 503 is carried
+  sq.positions[3].equipment.assigned_items:insert('#', 600)
+  items[600] = {id = 600, getType = function() return 3 end}
+  T.eq({env.api.squad_release({600, 503})}, {true, 1})
+  T.eq({#sq.positions[3].equipment.assigned_items, ids(eq.items_assigned.WEAPON), ids(eq.items_unassigned.WEAPON)},
+       {0, {503}, {400, 501, 502, 600, 700}})
+  env.who_v = 'economy'
+  T.eq({env.api.squad_release({600})}, {false, 'not owner'})
   df.item.find, dfhack.items.getHolderUnit = find0, holder0
 end)
 

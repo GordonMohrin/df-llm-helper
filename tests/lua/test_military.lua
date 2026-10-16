@@ -674,9 +674,9 @@ T.test('live L6: melee uniforms keep 1 axe and 2 picks for civilians (explicit w
       end
     end
   end
-  T.eq(got, {ITEM_WEAPON_SPEAR = 2, ITEM_WEAPON_SWORD_SHORT = 1, ITEM_WEAPON_AXE_BATTLE = 2, ITEM_WEAPON_PICK = 1},
-       'other weapons first, then 3 - 1 axes and 3 - 2 picks')
-  T.eq(none, 4)
+  T.eq(got, {ITEM_WEAPON_SPEAR = 2, ITEM_WEAPON_SWORD_SHORT = 1, ITEM_WEAPON_AXE_BATTLE = 2},
+       'other weapons first, then 3 - 1 axes; never a pick (BUG-023, v1 E18: a pick spec reserves the miners\' picks)')
+  T.eq(none, 5)
   T.ok(logged(W, 'positions without a weapon'), 'logged')
   local C = X.squad_of(W, 'C')
   T.eq(C.positions[0].equipment.uniform.weapon[0].subtype, 'ITEM_WEAPON_CROSSBOW', 'crossbows unchanged')
@@ -693,7 +693,7 @@ T.test('live L6: melee uniforms keep 1 axe and 2 picks for civilians (explicit w
       end
     end
   end
-  T.eq(choice, 4)
+  T.eq(choice, 5)
 end)
 
 -- BUG-023 (Run 10): the tool details' members, not the fixed 1 axe / 2 picks, are what the soldiers leave to the civilians
@@ -750,6 +750,32 @@ T.test('BUG-023: pick specs beyond the spare picks are given up (their reservati
   T.eq(picks, 0, '3 picks for 6 miners: no soldier keeps a pick spec')
   T.ok(mace >= 1 and none >= 1, string.format('mace %d, none %d', mace, none))
   T.ok(logged(W, 'give up their pick/axe spec'), 'logged')
+end)
+
+T.test('BUG-023: picks and axes reserved for positions without a spec of that kind are unassigned (act.squad_release)', function()
+  local W = setup(50, {work_details = tool_details(6, 1)})
+  local A = X.squad_of(W, 'A')
+  X.set_uniform(A, {positions = {0}, items = {{cat = 'weapon', type = 'WEAPON', subtype = 'ITEM_WEAPON_SPEAR'}}})
+  X.set_uniform(A, {positions = {1}, items = {{cat = 'weapon', type = 'WEAPON', subtype = 'ITEM_WEAPON_AXE_BATTLE'}}})
+  local pick1, pick2 = X.weapon(W, 'ITEM_WEAPON_PICK'), X.weapon(W, 'ITEM_WEAPON_PICK')
+  local axe = X.weapon(W, 'ITEM_WEAPON_AXE_BATTLE')
+  local held = X.weapon(W, 'ITEM_WEAPON_PICK')
+  local find0 = df.item.find
+  df.item.find = function(id) return W.items_by_id[id] or (find0 and find0(id)) end
+  dfhack.items.getHolderUnit = function(it) return it == held and W.unit(1) or nil end
+  A.positions[0].equipment.assigned_items:insert('#', pick1.id)        -- a spear position holding a pick reservation
+  A.positions[1].equipment.assigned_items:insert('#', axe.id)          -- an axe position: justified
+  df.global.plotinfo.equipment = {items_assigned = {WEAPON = kmock_vec{pick1.id, pick2.id, axe.id, held.id}},
+                                  items_unassigned = {WEAPON = kmock_vec{}}}
+  W.set_census('i', {tick = 0, w_axe = 20, w_pick = 20})
+  local got
+  W.act_result('squad_release', function(ids) got = ids; return true, #ids end)
+  W.run(3600, {skip = 9})
+  T.ok(got, 'squad_release called')
+  table.sort(got)
+  T.eq(got, {pick1.id, pick2.id}, 'the pick behind a spear spec and the stranded one; not the axe spec, not the held pick')
+  T.ok(logged(W, 'reserved picks/axes nobody carries unassigned'), 'logged')
+  df.item.find = find0
 end)
 
 T.test('live L6: guarded, an individual-choice weapon spec is replaced (or dropped when nothing is spare)', function()

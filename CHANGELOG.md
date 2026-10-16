@@ -1,5 +1,12 @@
 # CHANGELOG dfpilot
 
+## Tool reservations swept, no pick specs for soldiers, BUG-023 (2026-10-16; offline, live-untested)
+- Live Run 10 y421 after bbf75a4: `pick_res 6` of 9 picks, Woodcutters emptied. Reservations sat in the positions' `assigned_items`;
+  economy's tool cap and military's member-based keep fed each other.
+- military: never an explicit pick spec for a soldier; keeps at least `economy.tool_want()` (the demand before the cap); every upkeep
+  unassigns picks/axes nobody carries that are reserved for positions without a weapon spec of that kind (new `act.squad_release`).
+- Live check: kern.log `military: N of M reserved picks/axes nobody carries unassigned`, `inspect what=workload` `pick_res`/`axe_res` 0.
+
 ## Soldiers no longer reserve the civilians' picks and axes, BUG-023 (2026-10-16; offline, live-untested)
 - Live Run 10: `3 free picks, 3 reserved by squad uniforms` while 2 of 6 miners held none; DF never hands a reserved tool out as a
   work tool. military's weapon guard now keeps one pick per Miners member and one axe per Woodcutters member (was a fixed 2/1) and

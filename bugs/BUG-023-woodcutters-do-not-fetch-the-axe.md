@@ -101,3 +101,22 @@ a fixed `PICK_KEEP` 2 (axes beyond `AXE_KEEP` 1), whatever the tool details need
 Tests: `tests/lua/test_military.lua` (two BUG-023 cases), `tests/lua/test_kern_act.lua` (release); all fail on the old code.
 Live check: kern.log `give up their pick/axe spec`; `inspect workload` `tools` shows `pick_res`/`axe_res` falling to 0; with the
 equipment update requests the miners/woodcutters should carry a tool within a game day.
+
+## Third live check (Run 10 y421 spring, bbf75a4) and the release sweep
+kern.log said `squad A: 3 positions give up their pick/axe spec`, `squad B: 1 ...`, but 15 game days later only 3 of 6 miners
+held a pick; `inspect workload` tools: pick 9, pick_free 6, **pick_res 6**, axe 9, axe_free 6, axe_res 5; 8 of 9 picks were in
+`plotinfo.equipment.items_assigned.WEAPON`. Woodcutters had 0 members. Causes:
+1. The reservations sat in the positions' `assigned_items` (not, or not only, in the given-up spec's `assigned`), so the
+   release of the replaced/removed spec found nothing to release, and older stranded reservations were never touched.
+2. A feedback loop: economy caps a tool detail at the free UNRESERVED tools + the tools its members hold, and military kept
+   only one tool per current member; the more the soldiers reserved, the smaller the details, the more spare tools the
+   soldiers got (Woodcutters 0, so `keep.axe` fell to the floor 1).
+3. The weapon guard still handed out picks beyond the miners' count (9 - 6 = 3).
+Fix: military never gives a soldier an explicit pick spec (v1 E18: "keine Pick-Uniformvorgabe"); explicit pick specs are always
+given up while guarded; the tools kept are at least economy's demand before its tool cap (`economy.tool_want()`); every upkeep a
+sweep unassigns each pick/axe nobody carries that is reserved for a fort squad position without a weapon spec of that kind
+(new `act.squad_release`, the squads screen's unassign: off the positions' lists, back to `items_unassigned`).
+Tests: `tests/lua/test_military.lua` (`BUG-023: picks and axes reserved for positions without a spec of that kind ...`, the L6
+guard test without picks), `tests/lua/test_kern_act.lua` (squad_release).
+Live check: kern.log `military: N of M reserved picks/axes nobody carries unassigned`; `inspect what=workload` `pick_res`/`axe_res`
+-> 0 (or only axes behind explicit axe specs); Woodcutters refilled by economy; members carry their tools within a game day.

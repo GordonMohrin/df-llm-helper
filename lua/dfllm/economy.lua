@@ -2387,6 +2387,10 @@ local function tools(K, c, p, inv, engine, r)
       end
       -- the tools the members can use: free (no holder, not reserved by a squad uniform) plus the ones they hold
       local has = {}                             -- members that hold the detail's tool (they stay first)
+      if spec.tool then                         -- BUG-023: the demand before the tool cap (military keeps these tools)
+        st.want = st.want or {}
+        st.want[spec.tool] = math.max(tgt, #cur)
+      end
       if tgt > 0 and spec.tool then
         local held = 0
         for _, u in ipairs(cur) do if holds_tool(u, spec.tool) then held, has[u.id] = held + 1, true end end
@@ -2505,6 +2509,9 @@ end
 
 -- CONTRACTS Ã‚Â§7: the supply alarm, or nil (arbiter brakes tempo while it is set)
 function M.alarm(K) return st.alarm end
+-- BUG-023: the tool details' demand before the tool cap, {pick = n, axe = n} (nil before the first tools pass);
+-- military keeps that many picks and axes out of the soldiers' weapon specs
+function M.tool_want(K) return st.want end
 
 ---------------------------------------------------------------- famine (live L1: a dwarf starved unnoticed)
 -- Below famine_days of eatable food: let labormanager staff hunters and fishers (modern mode forbids both
