@@ -17,6 +17,9 @@
 -- FR-65 siege readiness gate: while R0 fails in PEACE, SIEGE_UNREADY (A) names the blockers, the ways in without a
 -- door or bridge (seal.entrance_doors) and the trap count of the last audit; first at once (2 days after a load),
 -- then again after a game month and 30 real minutes, or 10 when it got worse (util/cadence).
+-- Run 10 (the bypass finding stood for months, the 41 traps stayed unused): the last audit's first attacker-route
+-- finding (`bypass: wall x,y,z floor -> X`, `refuge: on the attack path, wall ...`) stands in SIEGE_UNREADY with its
+-- fix (`seal at=audit` builds the named wall) and in the state (ready.route) for status and `dfllm plan check`.
 local geom = require('dfllm.util.geom')
 local CAD = require('dfllm.util.cadence')
 
@@ -216,6 +219,17 @@ local function entrances(K)
   return math.max(0, int(x.routes) or 0), #open, ents
 end
 
+-- the last audit's first attacker-route finding (bp.topo.audit: a bypass of the trap hall, a refuge on the attack
+-- path), nil without one
+M.ROUTES = {'^bypass:', '^refuge: on the attack path'}
+local function route_of(a)
+  for _, f in ipairs(type(a) == 'table' and type(a.fails) == 'table' and a.fails or {}) do
+    for _, pat in ipairs(M.ROUTES) do
+      if type(f) == 'string' and f:find(pat) then return f end
+    end
+  end
+end
+
 ---------------------------------------------------------------- levels
 local function audit_fails(K, now)
   local a = st.audit
@@ -285,6 +299,8 @@ local function evaluate(K, why)
   rt.routes, rt.open, rt.ents = entrances(K)                       -- FR-65
   local okd, hold = K.call('drill', 'hold')
   rt.dhold = okd and type(hold) == 'string' and cut(hold, 24) or nil
+  local route = route_of(st.audit)
+  rt.route = route and cut(route, 60) or nil
   if lvl ~= st.lvl then
     local from = st.lvl or 0
     st.lvl, dirty = lvl, true
@@ -336,7 +352,14 @@ local function apply_cap(K)
 end
 
 ---------------------------------------------------------------- FR-65 siege readiness gate
-local function unready_msg(fails, routes, open, ents, traps)
+-- the fix a route finding names: a wall on the tile it gives (the seal template builds it: at=audit)
+local function route_fix(route)
+  if not route then return nil end
+  if route:find('wall %-?%d+,%-?%d+,%-?%d+ ') then return route .. ' (fix: seal at=audit)' end
+  return route .. ' (no wall tile: inspect entrances)'
+end
+
+local function unready_msg(fails, routes, open, ents, traps, route)
   local ent
   if routes < 0 then ent = 'entrances not checked yet'
   elseif open == 0 then ent = string.format('%d way%s in, all with a door or bridge', routes, routes == 1 and '' or 's')
@@ -346,8 +369,14 @@ local function unready_msg(fails, routes, open, ents, traps)
     ent = string.format('%d of %d ways in without door or bridge: %s%s', open, routes, table.concat(shown, ', '),
                         open > #shown and ', ...' or '')
   end
-  return cut(string.format('siege unready (R0: %s); %s; traps %s', #fails > 0 and table.concat(fails, ', ') or '?',
-                           ent, traps >= 0 and tostring(traps) or '? (no audit)'), 200)
+  local head = string.format('siege unready (R0: %s); ', #fails > 0 and table.concat(fails, ', ') or '?')
+  local fix = route_fix(route)
+  if fix then head = head .. fix .. '; ' end
+  local tail = '; traps ' .. (traps >= 0 and tostring(traps) or '? (no audit)')
+  if #head + #ent + #tail > 200 and open > 0 then              -- the list stands in d.ents: keep the traps visible
+    ent = string.format('%d of %d ways in without door or bridge', open, routes)
+  end
+  return cut(head .. ent .. tail, 200)
 end
 
 -- while R0 fails in PEACE: SIEGE_UNREADY (A) at once, then after a game month and UNREADY_WALL_S (UNREADY_NEWS_S when
@@ -371,7 +400,7 @@ local function unready(K)
     afails[i] = cut(a.fails[i], 60)
   end
   local routes, open = rt.routes or -1, rt.open or -1
-  K.emit('SIEGE_UNREADY', 'A', unready_msg(fails, routes, open, ents, traps),
+  K.emit('SIEGE_UNREADY', 'A', unready_msg(fails, routes, open, ents, traps, rt.route),
          {fails = fails, afails = afails, routes = routes, open = open, ents = ents, traps = traps,
           age = a and math.max(0, now.tick - a.tick) or -1})
   st.unready, dirty = CAD.mark(now, ents, fails), true
@@ -487,6 +516,7 @@ function M.state(K)
     r.ents = e
   end
   if rt.dhold then r.dhold = rt.dhold end                     -- why no automatic drill starts (drill.hold)
+  if rt.route then r.route = rt.route end                     -- the bypass / refuge route the last audit names
   return {ready = r, pop = {cap = M.cap(K), gate_cap = rt.gate_cap or M.CAPS[0]}}
 end
 

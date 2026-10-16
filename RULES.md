@@ -163,7 +163,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | DEATHS_3PLUS | the line names the causes; the brief lists the season's deaths by cause; fix the cause in the plan |
 | DEATHS_PREVENTABLE | ≥ 2 citizens dehydrated or starved within a month (stock days, units, patients in the line): `inspect` `what=reach` (forbidden or cut-off drink/food), `what=refuge`; patients → `what=water_sources` (hospital water); tell the player; fix access in the plan |
 | DRILL_FAIL (2nd in a row) | read `ready.fail`; fix gear, squads or geometry; never raise the cap |
-| SIEGE_UNREADY | readiness is R0 in PEACE (monthly while it fails): the line names the blockers (§8), the ways in without door or bridge and the traps. `inspect` `what=entrances`; close each open way in with `dfllm cmd bp.place tpl=seal site=S1 at=last` (door on a floor, wall on the ramp top, hatch on a stair; one `seal:piece` line each in cli.log), put the missing fortcore pieces into the plan; then `dfllm audit`; tell the player |
+| SIEGE_UNREADY | readiness is R0 in PEACE (monthly while it fails): the line names the blockers (§8), the audit's bypass / refuge route with its fix, the ways in without door or bridge and the traps. A route with `(fix: seal at=audit)`: follow already placed that seal (PEACE, not with `--no-auto`: then `dfllm cmd bp.place tpl=seal site=S1 at=audit`); `(no wall tile: ...)`: `inspect` `what=entrances` and tell the player. `inspect` `what=entrances`; close each open way in with `dfllm cmd bp.place tpl=seal site=S1 at=last` (door on a floor, wall on the ramp top, hatch on a stair; one `seal:piece` line each in cli.log), put the missing fortcore pieces into the plan; then `dfllm audit`; tell the player |
 | KERN_FAULT | a module is backed off (`d.backoff_s`; the kernel re-enables it afterwards); note module and error for the repo; do not hot-patch; `module.enable` only after the fix |
 | PERF_DEGRADED | `dfllm doctor`; the supervisor restarts DF only in PEACE after an autosave |
 | DECISION_NEEDED | ask the player the question once; the default applies until they answer. `build_blocked`: `inspect` `what=workload` (`construction.blocked`: kind, pos, fails, why); the kernel already unforbade the items on the site; corpses wait for burial; else `bp.cancel` and place it elsewhere |
@@ -180,7 +180,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | PERIMETER_BROKEN | the kernel re-queued the lost walls/doors (`rp…` project); `inspect perimeter` after a day; tell the player about pieces it could not re-queue (bridges) |
 | AUTOLABOR_LEGACY | autolabor ran in legacy mode (the engine of the Run 9 crashes) and the kernel could not set it to monitor (`fixed=0`; a switch that worked is only a kern.log line): tell the player at once (disable autolabor by hand) |
 | TOOL_BLOCKED | Miners/Woodcutters members hold no pick/axe while their jobs wait (`inspect workload`: `blocked`, `tools`); `reserved` → squad uniforms hold the tools (military weapons); otherwise tell the player: toggling the detail in the work details screen may make DF hand the tools out (untested); `tools.equip_update` is on since Gordon's yes (16.10.2026; members should fetch a tool within a game day, else tell the player); moving a tool into a hand stays forbidden (fair play) |
-| REFUGE_FAIL | the civ alert refused a burrow: an entrance reaches it without a door/hatch/bridge (`open to N entrances x,y,z ...`) or a hostile stands in it (BUG-018), or it lacks drink/food (beds only rank: `beds 18<23 (25% of 90 citizens)`); the fallback is `Innen+`, the refuge or the dead end `Tiefe+` without counts (BREACH level, 7 days), or none (`flee`: alert off, citizens flee on their own). `inspect refuge` (`open`, `hint`); tell the player; close the named entrances (door or wall) and stock the refuge in the next plan |
+| REFUGE_FAIL | the civ alert refused a burrow: an entrance reaches it without a door/hatch/bridge (`open to N entrances x,y,z ...`) or a hostile stands in it (BUG-018), or it lacks drink/food (beds only rank: `beds 18<23 (25% of 90 citizens)`); the fallback is `Innen+`, the refuge or the dead end `Tiefe+` without counts (BREACH level, 7 days), or none (`flee`: alert off, citizens flee on their own). `inspect refuge` (`open`, `hint`); tell the player; close the named entrances (door or wall) and stock the refuge in the next plan (beds: `refuge_beds`, §8 refuge gate) |
 
 ## 8. Readiness gate (only readiness raises max-pop)
 - **R0:** cap 55 (pop-control `max-pop 55`, `wave-size 8`).
@@ -201,6 +201,13 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 - Audit `fails` name the fix (table DESIGN §5.4): `bypass: wall x,y,z floor -> X` / `refuge: on the attack path,
   wall x,y,z floor` = a constructed wall on that tile closes the route (`ramp`: on its top; `(+more)`: other routes
   remain): `dfllm cmd bp.place tpl=seal site=S1 at=audit`, then `dfllm audit`. Doors never fix an audit route.
+- **Bypass gate (Run 10):** while the last audit names such a wall that no seal project builds, readiness stays R0 (`status`: `audit route: ...`), follow
+  places `seal at=audit` itself in PEACE (not with `--no-auto`) and `dfllm plan check` refuses (ERROR) raising phase_target or adding builds unless a new
+  build due now is `{"tpl":"seal","site":"S1","p":{"at":"audit"}}` (`plan propose` drafts it first). No wall tile, or its seal pending: a warning.
+- **Refuge gate (Run 10):** `plan check` refuses phase_target P3+ while the refuge (Tiefe+, state `alert.ref`, `inspect what=refuge`) is missing, reached by
+  an opening without a door (`sep` 0) or has beds < ceil(citizens x `refuge.bed_pct` %) (config/reflex.json, 25), unless new builds or projects under way
+  fix it: `{"tpl":"fortcore","site":"same","p":{"stage":3}}` (no refuge), a seal (`p.at` last: doors), `{"tpl":"refuge_beds","site":"S1","p":{"n":N}}`
+  (N <= 30 per room) for the missing beds. `plan propose` drafts them first, after the audit's seal.
   `traps N` with a bypass is counted as if its walls stood; `traps 0` beside an armed hall without a bypass = a
   way into the hall's trap-free end: `dfllm audit` names the tile where the route enters the hall.
 
@@ -272,7 +279,7 @@ FPS cap 30; no Lua quicksaves; DF autosave yearly.
 | P2 | killing field, gallery, B1, barracks (fortcore stage 2), captive pit (`captives`), squad A |
 | P3 | smelter + wood furnace (`furnaces`), hospital, orders basic + rockstock |
 | P4 | 1 caravan traded, bedrooms, tombs, tavern, temple |
-| P5 | fortcore stage 3, squads B and C, drill 1 passed, R1, drink ≥ 170 d, food ≥ 60 d |
+| P5 | fortcore stage 3, squads B and C, drill 1 passed, R1, drink ≥ 170 d, food ≥ 60 d (since Run 10 the refuge of stage 3 comes before any phase_target P3+: §8 refuge gate) |
 | P6 ★ (Y2) | military orders, trap hall armed (fortcore stage 4), metal ≥ 80 %, ≥ 300 bolts, R2 cap raise |
 | P7 ★ | beauty in used rooms; R3 only with D-01 = B |
 ★ = entered only when your plan's `phase_target` reaches it.

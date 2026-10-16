@@ -618,8 +618,10 @@ STATE = Obj(
          "ready": Obj(req={"lvl": Int(0, 3), "worn": PCT, "cv": NAT, "drill_age": Int(-1),
                            "audit": Obj(req={"ok": FLAG, "age": Int(-1), "min_traps": NAT}),
                            "fail": Arr(Str(maxbytes=24), hi=8)},
-                      # FR-65: ways in without door or bridge (-1 unknown), the first of them, why no auto drill
-                      opt={"open": Int(-1), "ents": Arr(Str(maxbytes=24), hi=3), "dhold": Str(maxbytes=24)}),
+                      # FR-65: ways in without door or bridge (-1 unknown), the first of them, why no auto drill;
+                      # route: the last audit's first attacker-route finding (bypass / refuge on the attack path)
+                      opt={"open": Int(-1), "ents": Arr(Str(maxbytes=24), hi=3), "dhold": Str(maxbytes=24),
+                           "route": Str(maxbytes=60)}),
          "stock": Obj(opt={"drink_d": NAT, "food_d": NAT, "meals": NAT, "hosp_water": FLAG}),
          "care": Obj(req={"stressed_pct": PCT, "naked": NAT, "ghosts": NAT, "corpses_old": NAT,
                           "tombs_free": NAT, "moods": NAT},
@@ -649,7 +651,11 @@ STATE = Obj(
          # FR-55 lever latency (gate): last pull -> wanted state, in s and ticks (-1 never); pending own pulls
          "lever": Obj(req={"lat_s": Int(-1), "lat_t": Int(-1), "pend": NAT, "wait_s": NAT}),
          "alert": Obj(req={"want": Str(maxbytes=24), "burrow": Str(maxbytes=24), "tiles": NAT, "inside": NAT,
-                           "ok": FLAG}, opt={"why": Str(maxbytes=40), "core_d": NAT, "core_f": NAT}),
+                           "ok": FLAG}, opt={"why": Str(maxbytes=40), "core_d": NAT, "core_f": NAT,
+                                             # Run 10: the refuge burrow (Tiefe+): exists, separated (1, 0 an
+                                             # opening reaches it, -1 not known yet), beds, beds wanted (bed_pct)
+                                             "ref": Obj(req={"ex": FLAG, "sep": Int(-1, 1), "beds": NAT,
+                                                             "need": NAT})}),
          # intake waves (siege, Gordon 2026-10-16): phase, waves so far, the last refusal, the sortie (squad phase)
          "wave": Obj(req={"ph": Str(maxbytes=8), "n": NAT}, opt={"why": Str(maxbytes=40), "so": Str(maxbytes=24)})})
 

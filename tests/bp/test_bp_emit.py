@@ -12,6 +12,7 @@ from bp_fixtures import SITE, golden
 
 TPLS = sorted(bp.TEMPLATES)
 ROOMS = sorted(rooms.BUILD)                  # room templates (fortcore and the attached defense add-ons excluded)
+CORE_ROOMS = sorted(set(rooms.BUILD) - rooms.REFUGE_LEVEL)   # refuge_beds stays out of Z4 (test_bp_refuge_beds)
 
 
 def all_docs(tpl, rot=0, params=None):
@@ -168,7 +169,7 @@ def test_rooms_touch_the_anchor_row_only_through_the_doorway(tpl):
 
 def test_list_templates():
     names = [t["tpl"] for t in bp.list_templates()]
-    assert names == TPLS and len(names) == 19     # + furnaces, office, captives (L1), cistern (L3), hall, guildhall, barracks (L6), gallery_o1, seal, stockroom (Run 10)
+    assert names == TPLS and len(names) == 20     # + furnaces, office, captives (L1), cistern (L3), hall, guildhall, barracks (L6), gallery_o1, seal, stockroom, refuge_beds (Run 10)
     assert all(t["about"] for t in bp.list_templates())
 
 
@@ -185,7 +186,7 @@ def test_fortcore_builds_no_farm_plots():
     assert cells.count("p(5x7)") == 3
 
 
-@pytest.mark.parametrize("tpl", ROOMS)
+@pytest.mark.parametrize("tpl", CORE_ROOMS)
 def test_rooms_join_z4(tpl):
     """Every room adds its dug bbox to Z4, so later rooms can open from it (sites.rank anchors in Z4)."""
     d = bp.emit(tpl, {}, SITE)

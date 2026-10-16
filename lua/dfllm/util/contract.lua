@@ -290,7 +290,8 @@ C.STATE_SPEC = obj({
   pop = obj(nil, {cit = NAT, adults = NAT, soldiers = NAT, cap = NAT, gate_cap = NAT}),
   ready = obj({lvl = int(0, 3), worn = PCT, cv = NAT, drill_age = int(-1),
                audit = obj({ok = FLAG, age = int(-1), min_traps = NAT}), fail = arr(str(24), 0, 8)},
-              {open = int(-1), ents = arr(str(24), 0, 3), dhold = str(24)}),   -- FR-65
+              {open = int(-1), ents = arr(str(24), 0, 3), dhold = str(24),     -- FR-65
+               route = str(60)}),          -- the last audit's first attacker-route finding (bypass, refuge)
   stock = obj(nil, {drink_d = NAT, food_d = NAT, meals = NAT, hosp_water = FLAG}),
   care = obj({stressed_pct = PCT, naked = NAT, ghosts = NAT, corpses_old = NAT, tombs_free = NAT, moods = NAT},
              {coffins = obj({want = NAT, short = NAT, stock = NAT, order = NAT, proj = str(40)}),
@@ -311,7 +312,9 @@ C.STATE_SPEC = obj({
               {eta = int(-1), doors = NAT, dwait = NAT, dout = NAT, dref = NAT}),
   lever = obj({lat_s = int(-1), lat_t = int(-1), pend = NAT, wait_s = NAT}),
   alert = obj({want = str(24), burrow = str(24), tiles = NAT, inside = NAT, ok = FLAG},
-              {why = str(40), core_d = NAT, core_f = NAT}),         -- BUG-028: drink/food days inside the core
+              {why = str(40), core_d = NAT, core_f = NAT,           -- BUG-028: drink/food days inside the core
+               -- Run 10: the refuge burrow: exists, separated (1, 0 open, -1 unknown), beds, beds wanted (bed_pct)
+               ref = obj({ex = FLAG, sep = int(-1, 1), beds = NAT, need = NAT})}),
   -- intake waves (siege, Gordon 2026-10-16): phase, wave count, the last refusal, the sortie squad and phase
   wave = obj({ph = str(8), n = NAT}, {why = str(40), so = str(24)}),
 })

@@ -1,5 +1,69 @@
 # CHANGELOG dfpilot
 
+## No P3+ without a separated refuge with beds; template `refuge_beds` (2026-10-16; offline, live-untested)
+- **Why (Run 10, post-mortem root cause 5):** Tiefe+ was never usable (beds 8 < 27, open to the entrance 95,127,123,
+  58 steps), Kern+ lay on the attack path, at pop 110 there was no safe room; no template could add beds to the refuge
+  (every room stays off the refuge level).
+- **Kernel (seal):** state `alert.ref` = `{ex, sep, beds, need}`: the refuge burrow exists, is separated (1; 0 an
+  opening reaches it without door/hatch/bridge; -1 not known yet), its beds, and the beds wanted (ceil(citizens x
+  `refuge.bed_pct` %), config/reflex.json, default 25).
+- **`dfllm plan check`:** ERROR for phase_target P3+ while the refuge is missing, open or short of beds, unless the
+  plan's new builds (or projects under way) fix it: no refuge -> `{"tpl":"fortcore","site":"same","p":{"stage":3}}`;
+  an opening -> a seal (`{"tpl":"seal","site":"S1","p":{"at":"last"}}`); beds short -> `{"tpl":"refuge_beds",
+  "site":"S1","p":{"n":N}}` (the `n` add up to the shortfall). Separation unknown, or a state without `alert.ref`,
+  warns. **`dfllm plan propose`** drafts these first (right after the audit's seal).
+- **Template `refuge_beds`** (`dfpilot/bp/rooms.py`, params `n` 2-30, `burrow` Tiefe+): a dormitory dug from a floor
+  tile of the fortcore refuge room into the rock (the footprint and its wall ring rock or unknown: no new way in), a
+  door, beds beside a centre aisle, a dormitory zone, in the refuge burrow; never in Z4, private. `bp sites
+  refuge_beds` lists the refuge-room anchors.
+- Contracts: state `alert.ref` (schema, contract.lua, CONTRACTS appendix and §9.3 row). RULES §7 REFUGE_FAIL, §8 refuge
+  gate, §11 P5 note; DESIGN §5.4 refuge gate; README template list.
+- Tests: `tests/bp/test_bp_refuge_beds.py` (new: sited in the refuge, audit ok and refuge separate after it is built,
+  rejected beside an open tile, layout, needs the refuge), `tests/test_cli_plan.py` (gate, projects under way,
+  propose), `tests/lua/test_seal_refuge.lua` (alert.ref); generic room tests keep refuge_beds out of the core checks.
+- **How to use:** year review as usual: `dfllm plan propose` puts the refuge pieces first; `dfllm plan check` says what
+  is missing. By hand: `dfllm bp sites refuge_beds`, `dfllm cmd bp.place '{"tpl":"refuge_beds","site":"S1",
+  "p":{"n":20}}'`.
+- **Live check:** after `git pull` and `dfhack-run dfllm reload`, `dfllm cmd inspect '{"what":"refuge"}'` (Tiefe+ `beds`,
+  `sep`, `need.beds`) and the state's `alert.ref` agree; in a fort like Run 10 (Tiefe+ 8 beds, 110 citizens)
+  `dfllm plan check` on a P4+ plan says `refuge: Tiefe+ has 8 beds < 28 ...` and `dfllm plan propose` drafts
+  `refuge_beds` n=20 (plus the seal at=last while Tiefe+ is open); once built, `inspect refuge` shows the beds in
+  Tiefe+ and `dfllm audit` stays without `refuge:` and `bypass` findings.
+
+## The audit's bypass is walled before the fort grows: `seal at=audit` by follow, plan propose and plan check (2026-10-16; offline, live-untested)
+- **Why (Run 10, post-mortem root cause 1):** `bypass: edge->Z3/Z4 avoids the trap hall (reaches 139,128,117)` stood
+  in the audit for months, the plans raised the phase anyway and the 41 traps stayed unused. The findings now name
+  the wall (`bypass: wall x,y,z floor -> X`), but building it still waited for someone to read it.
+- **Readiness (kernel):** R0 as before; new state `ready.route` = the last audit's first route finding (bypass or
+  refuge on the attack path, <= 60 chars); SIEGE_UNREADY names it with `(fix: seal at=audit)` (or `(no wall tile:
+  inspect entrances)`), the ways-in list is shortened when the line would cut the trap count. `dfllm status` line 2:
+  `audit route: bypass: wall ... | next: wall it: dfllm cmd bp.place tpl=seal site=S1 at=audit (or a plan build seal
+  p.at=audit)`; the SIEGE_UNREADY wake line's `next:` is the seal command when its `afails` name a wall.
+- **Automatic path (follow, auto mode):** on each AUDIT event in PEACE, the walls the newest audit names and no seal
+  project builds yet are placed as `bp.place {"tpl":"seal","site":"S1","p":{"at":"audit"}}` (the follower's
+  placement job, like tombs; `auto:seal` in cli.log, one `seal:piece` line per wall). Not with `--no-auto` (no
+  automatic placements there), not in ALERT/SIEGE (the next monthly audit asks again).
+- **`dfllm plan propose`** drafts that seal as the first new build (the current season; seasons[0] of next year's
+  plan). **`dfllm plan check`**: ERROR when the plan raises phase_target above the current phase or adds builds while
+  such a wall stands in no seal project, unless a new build due now is a seal with `at=audit` / `at=all` / the tiles;
+  a seal in a later season is refused (`move the seal ...`). A route without a wall tile, or one a pending seal
+  builds, is a warning.
+- **`cmd.audit_routes`** (shared): routes, walls, `open` walls, `pending` {wall: seal project}; a seal done before an
+  audit that still names its tile counts as gone. `seal at=audit` leaves pending walls out (never two seals per tile).
+- Contracts: state `ready.route` (schema, contract.lua, CONTRACTS appendix). RULES §7 SIEGE_UNREADY row, §8 bypass
+  gate; DESIGN §5.4.
+- Tests: `tests/test_cli_plan.py` (gate, pending/done/no-wall, state fallback, propose, apply with the real seal),
+  `tests/test_cli_wake.py` (follow places the seal once, PEACE only, not with --no-auto; wake hint),
+  `tests/test_cli_status.py`, `tests/lua/test_readiness.lua`.
+- **How to use:** nothing for the normal loop: keep `dfllm follow` (without `--no-auto`) running and the seal is placed
+  after the next audit. By hand: `dfllm cmd bp.place tpl=seal site=S1 at=audit`. In a plan: `{"tpl":"seal","site":"S1",
+  "p":{"at":"audit"}}` as the first build of the current season (`dfllm plan propose` writes it).
+- **Live check:** after `git pull` and `dfhack-run dfllm reload`, `dfllm audit`; with a bypass `dfllm status` line 2
+  shows `audit route: bypass: wall x,y,z ... | next: wall it ...`; within a few seconds follow logs `auto:seal` and
+  `seal:piece` in `<save>/cli.log` and `dfllm events --type CMD` shows the bp.place; `dfllm plan propose` puts no second
+  seal in (the pending one covers the tile) and `dfllm plan check` warns `seal project ... builds the wall`. Once the
+  wall stands, `dfllm audit` shows no `bypass` (or the next route) and readiness can reach R1.
+
 ## PREDATOR only near the citizens (2026-10-16; offline, live-untested)
 - Live Run 10 y421: four lockdowns in ten game days (clock 30 t/s, civilians confined) for animals at the map edge 60-120 tiles
   from the fort, because any roofed tile of the citizens' walkable group counted as "inside".

@@ -431,6 +431,75 @@ def last_audit_walls(save_dir: Path) -> list[str]:
     return []
 
 
+ROUTE_FAILS = ("bypass:", "refuge: on the attack path")    # bp.topo.audit's attacker-route findings (Run 10)
+SEAL_AUDIT = {"tpl": "seal", "site": "S1", "p": {"at": "audit"}}   # the plan build / bp.place args that wall them
+
+
+def _wall_pos(wall: str) -> tuple[int, int, int] | None:
+    """'x,y,z kind wall' (audit_routes) -> (x, y, z)."""
+    mt = re.match(r"(-?\d+),(-?\d+),(-?\d+) ", wall)
+    return (int(mt.group(1)), int(mt.group(2)), int(mt.group(3))) if mt else None
+
+
+def seal_projects(save_dir: Path) -> dict[tuple[int, int, int], str]:
+    """{opening tile: seal project id} over every seal project in <save>/bp (cancelled ones are moved out)."""
+    out: dict = {}
+    dmod = None
+    for p in bp_files(save_dir):
+        doc = files.read_json(p)
+        if not (isinstance(doc, dict) and doc.get("tpl") == "seal" and isinstance(doc.get("params"), dict)):
+            continue
+        try:
+            dmod = dmod or load_bp("defense")
+            ops = dmod.parse_openings(str(doc["params"].get("at", "")))
+        except (BpUnavailable, ValueError):
+            continue
+        for o in ops:
+            out.setdefault(tuple(o["pos"]), p.stem)
+    return out
+
+
+def audit_routes(save_dir: Path, state: dict | None = None) -> dict:
+    """The newest audit's attacker routes (Run 10: `bypass: wall x,y,z floor -> X` stood for months and the trap hall
+    stayed unused): {found (an audit event was read), tick, routes (the bypass / refuge-on-the-attack-path findings),
+    walls ('x,y,z kind wall', bp.topo.choke), open (the walls no seal project builds: none names the tile, or the one
+    that does finished before this audit and the audit still names it), pending {wall: seal project id}}.
+    Source: the newest AUDIT event (or SIEGE_UNREADY `afails`, if newer); without either, the state's ready.route."""
+    audit, done = None, {}
+    for e in files.iter_events_rev(save_dir):
+        t = e.get("type")
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        tick = e.get("tick") if isinstance(e.get("tick"), int) else 0
+        if t == "PROJECT_DONE" and isinstance(d.get("proj"), str):
+            done.setdefault(d["proj"], tick)                   # newest first: the first one seen is the last
+        elif audit is None and t in ("AUDIT", "SIEGE_UNREADY"):
+            fails = d.get("fails") if t == "AUDIT" else d.get("afails")
+            if isinstance(fails, list):
+                age = d.get("age") if t == "SIEGE_UNREADY" and isinstance(d.get("age"), int) else 0
+                audit = (tick - max(0, age), [str(f) for f in fails])
+    found = audit is not None
+    if audit is None:
+        r = (state or {}).get("ready") or {}
+        audit = (0, [r["route"]] if isinstance(r.get("route"), str) else [])
+    tick, fails = audit
+    routes = [f for f in fails if f.startswith(ROUTE_FAILS)]
+    walls: list[str] = []
+    for f in routes:
+        for mt in AUDIT_WALL.finditer(f):
+            w = f"{mt.group(1)},{mt.group(2)},{mt.group(3)} {mt.group(4)} wall"
+            if w not in walls:
+                walls.append(w)
+    seals = seal_projects(save_dir) if walls else {}
+    pending, open_ = {}, []
+    for w in walls:
+        pid = seals.get(_wall_pos(w))
+        if pid is not None and (pid not in done or done[pid] > tick):
+            pending[w] = pid
+        else:
+            open_.append(w)
+    return {"found": found, "tick": tick, "routes": routes, "walls": walls, "open": open_, "pending": pending}
+
+
 def seal_openings(save_dir: Path, at, snap: dict | None = None) -> tuple[str, list[str]]:
     """The seal template's `at` with every kind filled: at = '' / 'last' / 'entrances' -> the open ways in of the
     last entrance check; 'audit' -> the walls the newest audit names (bypass, refuge on the attack path); 'all' ->
@@ -440,8 +509,8 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None) -> tuple[str, li
     dmod = load_bp("defense")
     text = str(at if at is not None else "").strip()
     key = text.lower()
-    parts = (last_entrances(save_dir) if key in SEAL_LAST + ("all",) else []) + \
-        (last_audit_walls(save_dir) if key in ("audit", "all") else [])
+    routes = audit_routes(save_dir) if key in ("audit", "all") else None
+    parts = (last_entrances(save_dir) if key in SEAL_LAST + ("all",) else []) + (routes["open"] if routes else [])
     raw = ";".join(parts) if key in SEAL_LAST + ("audit", "all") else text
     try:
         ops = dmod.parse_openings(raw) if raw else []
@@ -465,6 +534,9 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None) -> tuple[str, li
                          "stair_up/stair_down/stair_updown)")
             continue
         keep.append(dict(o, kind=kind))
+    if routes and routes["pending"]:                       # a seal project builds them already: never twice
+        notes.append("left out (a seal project builds them): " + ", ".join(
+            f"{w.rsplit(' ', 2)[0]} ({pid})" for w, pid in routes["pending"].items()))
     if not keep:
         why = "; ".join(notes) or ("the last entrance check names no open way in" if key in SEAL_LAST
                                    else "the last audit names no wall" if key == "audit" else "no opening named")

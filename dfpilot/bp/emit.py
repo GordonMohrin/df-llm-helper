@@ -18,7 +18,8 @@ from .primitives import BRIDGE_KEYS, Plan, Xform, transform_manifest
 MAX_W = 40
 # name -> (build(params) -> Plan, {param: (default, lo, hi)}, one-line description)
 TEMPLATES = {"fortcore": (fortcore.build, fortcore.PARAMS, "doctrine fortress core, stages 1-4 (DESIGN §5.2; 4 = traps)"),
-             **{n: (f, {**rooms.PARAMS[n], **rooms.COMMON}, (f.__doc__ or n).strip().split("\n")[0])
+             **{n: (f, {**rooms.PARAMS[n], **{k: v for k, v in rooms.COMMON.items() if k not in rooms.PARAMS[n]}},
+                    (f.__doc__ or n).strip().split("\n")[0])
                 for n, f in rooms.BUILD.items()},
              **{n: (f, dict(defense.PARAMS.get(n, {})), (f.__doc__ or n).strip().split("\n")[0])
                 for n, f in defense.BUILD.items()}}
@@ -94,7 +95,8 @@ def emit(tpl: str, params: dict | None = None, site=None) -> dict:
     if min(lo) < 0:
         raise ValueError(f"{tpl}: site {anchor} rot {rot} puts tiles outside the map (min x,y,z = {lo})")
     man = transform_manifest(plan.manifest, X)
-    if tpl in rooms.BUILD:              # the room joins the civilian core: later rooms may open from it
+    # the room joins the civilian core: later rooms may open from it (a refuge-level room stays out of Z4)
+    if tpl in rooms.BUILD and tpl not in rooms.REFUGE_LEVEL:
         man.setdefault("zones", {}).setdefault("Z4", []).append(X.bbox(dug_bbox(plan)))
     prefix = f"{tpl[:8]}{anchor[0]}_{anchor[1]}_{anchor[2]}r{rot}"      # two rooms may share an anchor
     if plan.rooms:
