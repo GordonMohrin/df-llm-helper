@@ -1,5 +1,5 @@
 # BUG-030 Destroyed bridges stay in the kernel; no plan B against building destroyers; stations in the kill field
-Status: fixed (offline, live-untested): BRIDGE_DESTROYED, a destroyed bridge is an open way, the deep defense SIEGE_DEEP (2026-10-16)
+Status: fixed in 486b5ce (offline, live-untested): BRIDGE_DESTROYED, a destroyed bridge is an open way, the deep defense SIEGE_DEEP (2026-10-16)
 Severity: critical (Run 10 fell: pop 108 -> 0 in about 30 game days)
 Found: 2026-10-16, Run 10 fort Erushthak Handlelock (region2-site97), y421 spring siege of 58 goblins and 6 trolls, kernel
 main 94b9eed, the orchestrator playing (`docs/v2/POSTMORTEM-run10-siege-y421.md`)
