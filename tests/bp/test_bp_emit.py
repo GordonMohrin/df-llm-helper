@@ -111,7 +111,7 @@ def test_fortcore_stage_projects():
     z2 = sum((b[3] - b[0] + 1) * (b[4] - b[1] + 1) for b in m["zones"]["Z2"])
     assert z2 == len(fortcore.hall_tiles()) == 45
     assert {w["type"] for w in m["workshops"]} == {"Carpenters", "Masons", "Craftsdwarfs", "Still", "Kitchen", "Mechanics",
-                                                        "Butchers"}
+                                                        "Butchers", "Fishery"}
 
 
 @pytest.mark.parametrize("depth,refuge", [(2, 3), (3, 3), (6, 5)])

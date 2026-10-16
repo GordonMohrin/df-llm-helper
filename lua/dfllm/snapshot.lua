@@ -56,7 +56,7 @@ local TRAP_CH = {WeaponTrap = 'W', StoneFallTrap = 'S', CageTrap = 'C', Pressure
 local function tt_info(tt)
   local r = tt_cache[tt]
   if r then return r end
-  r = {c = '?', soil = false, plant = false}
+  r = {c = '?', soil = false, plant = false, ice = false}
   pcall(function()
     local a = df.tiletype.attrs[tt]
     local shape = df.tiletype_shape[a.shape]
@@ -68,6 +68,7 @@ local function tt_info(tt)
       elseif df.tiletype_special[a.special] == 'SMOOTH' then c = 'S' end
     end
     r.c, r.soil, r.plant = c, SOIL_MAT[mat] == true and SOIL_SHAPE[shape] == true, PLANT_SHAPE[shape] or false
+    r.ice = mat == 'FROZEN_LIQUID'               -- Run 11: frozen water (winter ice) is no water to fish or fill from
   end)
   tt_cache[tt] = r
   return r
@@ -222,7 +223,7 @@ end
 
 ---------------------------------------------------------------- public tile query (§7)
 -- nil (hidden or invalid) or {c = legend char, dig = pending designation or '', bld = building type
--- (Door, Bridge, Trap, Well, ...), 'passable'/'impassable' (other buildings) or '', flow, magma, cav}
+-- (Door, Bridge, Trap, Well, ...), 'passable'/'impassable' (other buildings) or '', flow, magma, cav, ice}
 function M.tile(K, x, y, z)
   x, y, z = int(x), int(y), int(z)
   if not (x and y and z) then return nil end
@@ -236,32 +237,39 @@ function M.tile(K, x, y, z)
   local dig = designation(des, oc)
   if dig == '' and designation_jobs(now)[string.format('%d,%d,%d', x, y, z)] then dig = 'job' end
   -- flow: liquid depth 0..7 of this revealed tile, magma: true for magma (runner: light-aquifer seepage); cav: the
-  -- revealed tile belongs to a cavern (designation.feature_global, the export's cavern mark; runner: Run 11 cavern lake)
+  -- revealed tile belongs to a cavern (designation.feature_global, the export's cavern mark; runner: Run 11 cavern lake);
+  -- ice: frozen water (tiletype material FROZEN_LIQUID; Run 11, economy's fishing zone)
   return {c = c, dig = dig, bld = bld, flow = des.flow_size or 0, magma = des.liquid_type == true,
-          cav = des.feature_global == true}
+          cav = des.feature_global == true, ice = tt_info(dfhack.maps.getTileType(x, y, z)).ice == true}
 end
 
 -- water tiles of one level rect (FR-47, water's water_sources scan): {{x, y, flow, cavern}} of revealed, non-magma
 -- tiles with flow >= min (default 1), at most M.CFG.liquid_tiles tiles read and 512 returned per call (the
 -- caller slices the box). Hidden tiles are skipped: no water_table, no unrevealed water. cavern = 1 on a revealed
 -- cavern tile (designation.feature_global, the export's cavern mark; BUG-031: cavern water is never a hospital's
--- source), else 0
-function M.liquids(K, x0, y0, x1, y1, z, min)
+-- source), else 0. Run 11 (economy's fishing zone): a frozen tile (tiletype material FROZEN_LIQUID, the ice the tile
+-- sheet shows) is no water and is left out; with `ice` true every revealed ice tile of the rect is listed too, with
+-- a fifth field 1 (0 on water) and its flow as read
+function M.liquids(K, x0, y0, x1, y1, z, min, ice)
   x0, y0, x1, y1, z, min = int(x0), int(y0), int(x1), int(y1), int(z), int(min) or 1
   local out = {}
   if not (x0 and y0 and x1 and y1 and z) or x1 < x0 or y1 < y0 then return out end
   if (x1 - x0 + 1) * (y1 - y0 + 1) > M.CFG.liquid_tiles then return nil, 'rect too large' end
-  local getTileFlags = dfhack.maps.getTileFlags
+  local getTileFlags, getTileType = dfhack.maps.getTileFlags, dfhack.maps.getTileType
+  ice = ice == true
   for y = y0, y1 do
     for x = x0, x1 do
       local des = getTileFlags(x, y, z)
       if des and not des.hidden then
         local f = int(des.flow_size) or 0
         local lt = des.liquid_type
-        if f >= min and not (lt == true or (lt ~= false and lt ~= nil and lt ~= 0)) then
-          out[#out + 1] = {x, y, f, des.feature_global == true and 1 or 0}
-          if #out >= 512 then return out end
+        local tt = (ice or f >= min) and getTileType and getTileType(x, y, z) or nil
+        if tt ~= nil and tt_info(tt).ice == true then
+          if ice then out[#out + 1] = {x, y, f, des.feature_global == true and 1 or 0, 1} end
+        elseif f >= min and not (lt == true or (lt ~= false and lt ~= nil and lt ~= 0)) then
+          out[#out + 1] = {x, y, f, des.feature_global == true and 1 or 0, ice and 0 or nil}
         end
+        if #out >= 512 then return out end
       end
     end
   end

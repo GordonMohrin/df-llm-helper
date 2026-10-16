@@ -78,6 +78,8 @@
   "slaughter": {"keep_f": 1, "keep_m": 1, "max": 10, "every_days": 7, "mood_days": 3, "ws": ["workshop:Butchers"]},
   "fish": {"tag": "dfllm:fish", "min": 5, "max": 30, "ws": ["workshop:Fishery"],
            "spec": {"job": "PrepareRawFish", "frequency": "OneTime"}},
+  "fishing": {"r": 48, "levels": 6, "tiles": 1500, "min_flow": 2, "side": 3, "scan_days": 7, "reads": 200, "checks": 160,
+              "max_water": 3000},
   "food": {"yield": 1, "per_dwarf": 3, "plot_tiles": 35, "plots_max": 4, "want_days": 90, "trend_days": 14,
            "request_days": 14, "pre_days": 30, "crops_per_dwarf": 4, "crops_min": 50, "crops_max": 400,
            "crops_step": 10, "status_days": 7, "meals_per_dwarf": 2, "cit_per_job": 2},

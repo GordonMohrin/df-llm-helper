@@ -20,8 +20,9 @@ MOODABLE = [("wc", "Carpenters"), ("wm", "Masons"), ("wr", "Craftsdwarfs"), ("wj
             ("wn", "Tanners"), ("wo", "Loom"), ("eg", "GlassFurnace"), ("wt", "Mechanics")]
 MOODABLE_TYPES = [n for _, n in MOODABLE]
 # non-moodable shops a phase may ask for (`workshops` deliverable; live L6: year-1 P0 wants a still and a butcher's
-# shop, fortcore stage 1 builds both; `add` lets an older fort get the missing ones)
-EXTRA = [("wl", "Still"), ("wz", "Kitchen"), ("wu", "Butchers")]
+# shop, fortcore stage 1 builds both; `add` lets an older fort get the missing ones). Run 11: raw fish lay uncleaned
+# with no fishery (food fell to 5 days); economy asks `workshops why=fishery`, follow adds only the fishery
+EXTRA = [("wl", "Still"), ("wz", "Kitchen"), ("wu", "Butchers"), ("wh", "Fishery")]
 EXTRA_TYPES = [n for _, n in EXTRA]
 
 COMMON = {"burrow": ("Kern+", None, None)}
@@ -188,7 +189,7 @@ def temple(p: dict) -> Plan:
 
 def workshops(p: dict) -> Plan:
     """All 12 moodable workshop types (DESIGN §5.9), minus `skip` (comma-separated df type names), plus the
-    non-moodable `add` types (EXTRA_TYPES: Still, Kitchen, Butchers)."""
+    non-moodable `add` types (EXTRA_TYPES: Still, Kitchen, Butchers, Fishery)."""
     skip = {s.strip() for s in p["skip"].split(",") if s.strip()}
     bad = skip - set(MOODABLE_TYPES)
     if bad:

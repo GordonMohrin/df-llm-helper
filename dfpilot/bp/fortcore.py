@@ -50,7 +50,8 @@ ROLE = {"O1": "outer", "B1": "inner", "B2": "core"}
 WORKSHOPS = [("wc", "Carpenters", 6, 42), ("wm", "Masons", 10, 42), ("wr", "Craftsdwarfs", 14, 42),
              ("wl", "Still", 6, 46), ("wz", "Kitchen", 10, 46),
              ("wt", "Mechanics", 14, 46),   # live L1: the well needs a mechanism; nothing else makes one in stage 1
-             ("wu", "Butchers", 17, 42)]    # live L6: a famine beside grazers and no butcher's shop (year-1 P0)
+             ("wu", "Butchers", 17, 42),    # live L6: a famine beside grazers and no butcher's shop (year-1 P0)
+             ("wh", "Fishery", 17, 46)]     # Run 11: 883-4532 raw fish and no fishery, food fell to 5 days
 DOORS = ((-4, 45), (4, 45), (0, 41), (6, 37))         # core hub -> dorm, workshops, stores; stores -> refuse
 CORE = (-13, 34, 19, 48)                              # core level rect (u0, v0, u1, v1): Z4 and Kern+
 

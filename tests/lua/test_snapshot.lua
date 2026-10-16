@@ -70,6 +70,23 @@ T.test('tile() cav (Run 11): a revealed cavern tile (designation.feature_global)
   T.eq({t(2).c, t(2).flow}, {'~', 6})
 end)
 
+T.test('Run 11: liquids() leaves ice out (tile ice = true); with ice it lists the frozen tiles apart; cavern flag', function()
+  local W = world{rows = {'#~w~?~c'}}
+  df.tiletype.attrs[40] = {shape = df.tiletype_shape.WALL, material = df.tiletype_material.FROZEN_LIQUID,
+                           special = df.tiletype_special.NONE}
+  W.tiles['3,0,' .. Z].tt = 40                       -- frozen, its depth still read 6 (DF may keep it)
+  W.tiles['0,0,' .. Z].tt = 40                       -- ice, no depth
+  W.tiles['6,0,' .. Z].des.flow_size = 7             -- cavern water
+  local _, l = W.K.call('snapshot', 'liquids', 0, 0, 6, 0, Z, 1)
+  T.eq(l, {{1, 0, 6, 0}, {2, 0, 2, 0}, {5, 0, 6, 0}, {6, 0, 7, 1}}, 'no ice, no hidden tile; cavern water flagged')
+  local _, l2 = W.K.call('snapshot', 'liquids', 0, 0, 6, 0, Z, 4, true)
+  T.eq(l2, {{0, 0, 0, 0, 1}, {1, 0, 6, 0, 0}, {3, 0, 6, 0, 1}, {5, 0, 6, 0, 0}, {6, 0, 7, 1, 0}},
+       'ice tiles with a fifth field 1 (water 0), min holds for water')
+  local _, t3 = W.K.call('snapshot', 'tile', 3, 0, Z)
+  local _, t1 = W.K.call('snapshot', 'tile', 1, 0, Z)
+  T.eq({t3.c, t3.ice, t1.ice}, {'#', true, false})
+end)
+
 T.test('items_at() (BUG-009): the loose items on the revealed tiles of a footprint, from the map blocks', function()
   local W, S = world()
   W.items_by_id = {}
