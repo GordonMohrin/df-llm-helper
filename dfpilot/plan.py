@@ -15,14 +15,16 @@ import re
 from pathlib import Path
 
 from . import files, paths, schema
-from .cmd import (SAME, BpError, BpUnavailable, bp_files, fmt_reply, occupancy, place, send, sites_snapshot,
-                  template_info, template_names, write_bp)
+from .cmd import (SAME, BpError, BpUnavailable, bp_files, fmt_reply, fort_manifest, occupancy, place, send,
+                  sites_snapshot, template_info, template_names, write_bp)
 
 R_CAPS = {0: 55, 1: 55, 2: 75, 3: 250}    # DESIGN §5.4; R3 (>= 80) only with D-01 = B
 OPTION_A_MAX = 75
 SUPPLY_MIN = {"drink_d": 170, "food_d": 60, "mood_stock": 10}
 BUILDS_PER_SEASON = 3                     # runner runs <= 3 projects at once
 CORE_DAYS = 90                            # BUG-028: drink/food days wanted inside Kern+ and the refuge (seal.CFG.sup_days)
+O1_PHASE = "P5"                           # plans/year1.json: fortcore stage 3 builds the outer bridge O1
+GALLERY = "gallery_o1"                    # bp/defense.py: the outward crossbow gallery over the O1 approach (Run 10)
 # DESIGN §11.4 always-blocked commands and banned terms (CONTRACTS §1.4); config/allowlist.json adds more
 BANNED = ["digv", "digvx", "digtype", "fastdwarf", "caravan extend", "caravan happy", "autodump", "locate-ore",
           "prospect", "showmood", "reveal", "createitem", "dig-now", "build-now", "fix/retrieve-units",
@@ -97,9 +99,41 @@ def stable_ids(doc: dict, prev: dict | None) -> list[str]:
     return errs
 
 
+def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
+    """What check() needs beyond state, read from the save folder: o1 (the fortcore manifest has an outer bridge, or
+    fortcore stage >= 3 is applied), gallery (a gallery_o1 project or manifest room exists)."""
+    applied = applied_builds(save_dir, state)
+    try:
+        man = fort_manifest(save_dir)
+    except BpUnavailable:
+        man = files.read_manifest(save_dir) or {}
+    bridges = man.get("bridges") if isinstance(man.get("bridges"), dict) else {}
+    rooms = man.get("rooms") if isinstance(man.get("rooms"), list) else []
+    return {"o1": any(isinstance(b, dict) and b.get("role") == "outer" for b in bridges.values())
+            or any(t == "fortcore" and (st or 0) >= 3 for t, st in applied),
+            "gallery": any(isinstance(r, dict) and r.get("tpl") == GALLERY for r in rooms)
+            or any(t == GALLERY for t, _ in applied)}
+
+
+def _outer_gallery(doc: dict, s: dict, fort: dict) -> str | None:
+    """Run 10: O1 up in a siege, the army waited outside for weeks and nothing could hit it. From the O1 phase on, a
+    fort with (or building) a fortcore O1 and no outward gallery gets a warning."""
+    builds = [b for se in doc["seasons"] for b in se["build"]]
+    o1 = bool(fort.get("o1")) or "O1" in (s.get("bridges") or {}) or any(
+        b["tpl"] == "fortcore" and (_stage_of(b.get("p")) or 0) >= 3 for b in builds)
+    if not o1 or max(doc["phase_target"], s.get("phase") or "P0") < O1_PHASE:
+        return None
+    if fort.get("gallery") or any(b["tpl"] == GALLERY for b in builds):
+        return None
+    return (f"no outward gallery over O1: a waiting army cannot be shot; add tpl {GALLERY} to a season "
+            "(site S1, once fortcore stage 2 is dug)")
+
+
 def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str] | None = None,
-          banned: list[str] | None = None, prev: dict | None = None) -> tuple[list[str], list[str]]:
-    """(errors, warnings). Errors block apply. prev = the applied plan.json (build-id stability)."""
+          banned: list[str] | None = None, prev: dict | None = None,
+          fort: dict | None = None) -> tuple[list[str], list[str]]:
+    """(errors, warnings). Errors block apply. prev = the applied plan.json (build-id stability); fort = fort_facts
+    of the save folder (the CLI passes it; without it only state and the plan itself are looked at)."""
     errs = schema.validate("plan", doc)
     if errs:
         return errs, []
@@ -141,6 +175,9 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
         if isinstance(v, int) and v < CORE_DAYS:
             warn.append(f"{cls} inside Kern+/the refuge lasts {v} d < {CORE_DAYS}: build {fix} inside the core "
                         "(a siege cuts the rest off)")
+    gw = _outer_gallery(doc, s, fort or {})
+    if gw:
+        warn.append(gw)
     if pol["beauty"] == "used_rooms" and lvl < 1:
         warn.append("beauty used_rooms waits for R1 (runner gates it)")
     seen_libs: set[str] = set()
@@ -314,7 +351,8 @@ def apply(save_dir: Path, doc: dict, by: str = "llm", wait_s: float = 5.0, dry_r
     """(errors, message). Writes the new bp files, then plan.json, then inbox plan.reload.
     Builds kept from the applied same-year plan are not emitted again (their projects exist)."""
     prev = applied_plan(save_dir)
-    errs, _ = check(doc, files.read_state(save_dir), tpls=templates(), prev=prev)
+    state = files.read_state(save_dir)
+    errs, _ = check(doc, state, tpls=templates(), prev=prev, fort=fort_facts(save_dir, state))
     if errs:
         return errs, "not applied"
     try:
@@ -360,7 +398,7 @@ def run(args, save_dir: Path) -> int:
         doc = propose(state, phases, prev, applied=applied_builds(save_dir, state))
         files.write_json_atomic(path, doc)
         print(f"draft {path}: {_summary(doc)}")
-        errs, warn = check(doc, state, tpls=templates(), prev=prev)
+        errs, warn = check(doc, state, tpls=templates(), prev=prev, fort=fort_facts(save_dir, state))
         _print_check(errs, warn)
         print("edit the draft, then: dfllm plan check; dfllm plan apply" + ("" if phases else
               " (no valid plans/year1.json: builds empty)"))
@@ -370,7 +408,8 @@ def run(args, save_dir: Path) -> int:
         print(f"cannot read {path}")
         return 2
     if args.action == "check":
-        errs, warn = check(doc, files.read_state(save_dir), tpls=templates(), prev=prev)
+        state = files.read_state(save_dir)
+        errs, warn = check(doc, state, tpls=templates(), prev=prev, fort=fort_facts(save_dir, state))
         lines: list[str] = []
         if not errs:
             try:

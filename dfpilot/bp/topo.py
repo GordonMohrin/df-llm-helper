@@ -233,6 +233,58 @@ def sources(g: Graph, manifest: dict) -> list[int]:
     return sorted(src)
 
 
+APPROACH_R = 6          # an outward gallery must face attacker tiles within this many tiles of the outer bridge
+
+
+def _outward_galleries(g: Graph, m: dict, src, Z: dict, kill) -> list[str]:
+    """Fails of the manifest rooms of template `gallery_o1`: not dug, reachable from the edge without passing Z3
+    (a new way in: a doorway, a dug fortification tile, a ramp), unroofed, or no fortification beside a gallery
+    tile that also touches an attacker tile within APPROACH_R of the outer bridge (the gallery shoots at nothing)."""
+    rooms = [r for r in m.get("rooms", []) if r.get("tpl") == "gallery_o1"]
+    if not rooms:
+        return []
+    out: list[str] = []
+    outer = [b["fp"] for b in m.get("bridges", {}).values() if b.get("role") == "outer"]
+    seen_out = None
+    for r in rooms:
+        b = r["bbox"]
+        pts = [(x, y, z) for z in range(b[2], b[5] + 1) for y in range(b[1], b[4] + 1) for x in range(b[0], b[3] + 1)]
+        tiles = [p for p in pts if g.node(g.idx(p))]
+        if not tiles:
+            out.append(_msg("gallery_o1: not dug at %d,%d,%d" % tuple(b[:3])))
+            continue
+        _, h = g.bfs(src, blocked=Z["Z3"], stop=g.mask_pts(tiles))
+        if h is not None:
+            out.append(_msg("gallery_o1: reachable without passing Z3 (%d,%d,%d)" % g.pos(h)))
+        if any((a := g.idx((p[0], p[1], p[2] + 1))) is not None and g.t[a] == "_" for p in tiles):
+            out.append("gallery_o1: not roofed")
+        if not outer:
+            continue
+        if seen_out is None:              # the attackers' side: everything reachable outside the fort's zones
+            fps = g.mask([bb["fp"] for bb in m.get("bridges", {}).values()])
+            seen_out, _ = g.bfs(src, blocked=_or(Z["Z1"], Z["Z2"], Z["Z3"], Z["Z4"], kill, fps))
+        if not any(_faces(g, p, seen_out, outer) for p in tiles):
+            out.append("gallery_o1: no fortification faces the O1 approach")
+    return out
+
+
+def _faces(g: Graph, p, seen_out, outer) -> bool:
+    """A fortification beside gallery tile p with an attacker tile beside it within APPROACH_R of an outer bridge."""
+    x, y, z = p
+    for dx, dy in N8:
+        f = g.idx((x + dx, y + dy, z))
+        if f is None or g.t[f] != "F":
+            continue
+        for ex, ey in N8:
+            q = (x + dx + ex, y + dy + ey, z)
+            qi = g.idx(q)
+            if qi is not None and seen_out[qi] and any(
+                    fp[2] == z and max(fp[0] - q[0], q[0] - fp[3], fp[1] - q[1], q[1] - fp[4]) <= APPROACH_R
+                    for fp in outer):
+                return True
+    return False
+
+
 def audit(snap: dict, manifest: dict | None, graph: Graph | None = None) -> dict:
     """{ok, fails, min_traps, bypass, refuge_sep, civ_sep, caverns} (= the `audit` verb args minus `snap`)."""
     g = graph or Graph(snap)
@@ -334,6 +386,9 @@ def audit(snap: dict, manifest: dict | None, graph: Graph | None = None) -> dict
             above = g.idx((gal[0], gal[1], gal[2] + 1))
             if above is not None and g.t[above] == "_":
                 fails.append("gallery: not roofed")
+    # 6b. outward galleries (bp/defense.gallery_o1, Run 10): reached only through Z3, roofed, and a fortification
+    # between the gallery and the tiles in front of the outer bridge, where a waiting army stands
+    fails += _outward_galleries(g, m, src, Z, kill)
     # 7. bridges: levers inside, footprint present
     inner = _or(Z["Z3"], Z["Z4"])
     for n, b in sorted(m.get("bridges", {}).items()):

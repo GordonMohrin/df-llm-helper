@@ -266,6 +266,14 @@ def footprint(doc: dict) -> set[tuple[int, int, int]]:
 WET_TPLS = ("cistern",)
 
 
+def attached_to(tpl: str) -> str | None:
+    """The template `tpl` is built against (bp.emit.ATTACHED: gallery_o1 -> fortcore), else None."""
+    try:
+        return getattr(load_bp("emit"), "ATTACHED", {}).get(tpl)
+    except BpUnavailable:
+        return None
+
+
 class Occupancy:
     """Tiles of placed projects. A new project may neither share a tile with another project nor touch one
     (same z, 8-neighbourhood: one rock tile stays between them), except next to its own anchor, where a
@@ -281,12 +289,18 @@ class Occupancy:
         for c in (footprint(doc) if cells is None else cells):
             self.owner.setdefault(c, tag)
 
-    def clash(self, doc: dict, cells: set | None = None, ignore_tpl: str | None = None) -> list[str]:
-        """Ids of the projects this document would overlap or touch (ignore_tpl: its own earlier stages)."""
+    def clash(self, doc: dict, cells: set | None = None, ignore_tpl=None) -> list[str]:
+        """Ids of the projects this document would overlap or touch (ignore_tpl: a template name or several whose
+        projects do not count: its own earlier stages; for an attached template (bp.emit.ATTACHED, e.g. gallery_o1
+        against the fortcore tunnel) the template it is built against)."""
         ax, ay, az = doc["anchor"]
         hit: set[str] = set()
+        skip = {ignore_tpl} if isinstance(ignore_tpl, str) else set(ignore_tpl or ())
+        att = attached_to(str(doc.get("tpl")))
+        if att:
+            skip.add(att)
         a = self.owner.get((ax, ay, az))
-        if a and a[1] in WET_TPLS and a[1] != ignore_tpl:
+        if a and a[1] in WET_TPLS and a[1] not in skip:
             hit.add(a[0])
         for x, y, z in (footprint(doc) if cells is None else cells):
             near_anchor = z == az and abs(x - ax) <= 1 and abs(y - ay) <= 1
@@ -295,7 +309,7 @@ class Occupancy:
                     o = self.owner.get((x + dx, y + dy, z))
                     if (dx or dy) and near_anchor and not (o and o[1] in WET_TPLS):
                         continue
-                    if o and o[1] != ignore_tpl:
+                    if o and o[1] not in skip:
                         hit.add(o[0])
         return sorted(hit)
 

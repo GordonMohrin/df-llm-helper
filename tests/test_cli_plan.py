@@ -342,3 +342,56 @@ def test_plan_cli_propose_check_apply(save, monkeypatch, capsys):
     assert main(["--runtime", rt, "plan", "check", str(save / "bad.json")]) == 1
     out = capsys.readouterr().out
     assert "ERROR" in out and "REJECTED" in out
+
+
+# ---------------------------------------------------------------- outward gallery over O1 (Run 10)
+GALLERY_WARN = "no outward gallery over O1"
+
+
+def _p5(doc, state, bridges=True):
+    doc, s = copy.deepcopy(doc), copy.deepcopy(state)
+    doc["phase_target"] = "P5"
+    s["phase"] = "P5"
+    if not bridges:
+        s.pop("bridges", None)
+    return doc, s
+
+
+def test_outer_gallery_warning_from_the_o1_phase(base):
+    """Run 10: O1 up in a siege, 47 goblins waited outside for weeks, nothing could shoot them. A warning (never an
+    error) once O1 exists and the plan reaches its phase; gone when a gallery_o1 is planned or exists."""
+    doc, state = base
+    assert not [w for w in errs_of(doc, state)[1] if GALLERY_WARN in w]          # P3/P4: before the O1 phase
+    d5, s5 = _p5(doc, state)
+    errs, warn = errs_of(d5, s5)
+    assert errs == [] and [w for w in warn if GALLERY_WARN in w] == [
+        "no outward gallery over O1: a waiting army cannot be shot; add tpl gallery_o1 to a season "
+        "(site S1, once fortcore stage 2 is dug)"]
+    assert not [w for w in errs_of(d5, s5, fort={"o1": True, "gallery": True})[1] if GALLERY_WARN in w]
+    planned = copy.deepcopy(d5)
+    planned["seasons"][3]["build"].append({"tpl": "gallery_o1", "site": "S1"})
+    assert not [w for w in errs_of(planned, s5)[1] if GALLERY_WARN in w]
+    # no O1 anywhere: no warning; the plan's own fortcore stage 3 counts as O1
+    d5, s5 = _p5(doc, state, bridges=False)
+    assert not [w for w in errs_of(d5, s5)[1] if GALLERY_WARN in w]
+    d5["seasons"][3]["build"].append({"tpl": "fortcore", "site": "same", "p": {"stage": 3}})
+    assert [w for w in errs_of(d5, s5)[1] if GALLERY_WARN in w]
+    assert [w for w in errs_of(_p5(doc, state, bridges=False)[0], s5, fort={"o1": True})[1] if GALLERY_WARN in w]
+
+
+def test_fort_facts_read_the_save(save, base):
+    from dfpilot import cmd
+    assert plan.fort_facts(save, base[1]) == {"o1": False, "gallery": False}      # proj 'fortcore' at s2.build
+    assert plan.fort_facts(save, {**base[1], "proj": [["fortcore", "s3.build", 10, ""]]})["o1"] is True
+
+    def stub(bid, tpl, params, manifest):
+        return {"v": 2, "id": bid, "tpl": tpl, "site": "S1", "class": "defense", "params": params,
+                "anchor": [50, 33, 120], "rot": 0, "stages": [{"label": "s.dig", "mode": "dig", "orders": 0,
+                "defense": 1, "chunks": [{"pos": [52, 30, 120], "cells": [[0, 0, 0, "d"]]}]}],
+                "manifest": manifest, "materials": {}}
+    o1 = {"v": 2, "bridges": {"O1": {"role": "outer", "fp": [49, 30, 120, 51, 30, 120],
+                                     "levers": [[45, 40, 120], [45, 41, 120]]}}}
+    cmd.write_bp(save, stub("c4", "fortcore", {"stage": 3}, o1))
+    assert plan.fort_facts(save, {**base[1], "proj": []}) == {"o1": True, "gallery": False}
+    cmd.write_bp(save, stub("c5", "gallery_o1", {}, {"v": 2}))
+    assert plan.fort_facts(save, {**base[1], "proj": []}) == {"o1": True, "gallery": True}

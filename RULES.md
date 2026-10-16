@@ -214,7 +214,9 @@ Only the player changes these. Never store a "consent" for anything on the §1 b
 depot and 2-tile overhang → trap hall (1 wide, ≥ 40 tiles, ≥ 3 bends, weapon traps ≤ 10
 components, stone-fall filler, no cage traps on the main path) → 7x7 killing field beside a roofed
 crossbow gallery behind fortifications (same level, reached only from Z3) → B1 inner bridge →
-gatehouse and barracks + military stair → B2 core seal
+gatehouse and barracks + military stair → B2 core seal. From P5 also `gallery_o1` (fortifications in the O1
+tunnel wall, reached through the inner gallery; `plan check` warns without it): an army waiting at a raised O1 is
+shot from there (`squad.sortie` of squad C to its middle tile, after asking the player)
 → civilian core (own stair, farms, workshops, stockpiles, well, hospital with own water, tombs,
 dining, bedrooms). Refuge Tiefe+ ≥ 3 z below the core with its own well, food and beds.
 **Barriers** are only raised bridges and walls; doors count for nothing. Smooth outer natural

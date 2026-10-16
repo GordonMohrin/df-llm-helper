@@ -32,7 +32,7 @@ from __future__ import annotations
 import heapq
 from collections import deque
 
-from . import fortcore, rooms, topo
+from . import defense, fortcore, rooms, topo
 from .emit import TEMPLATES, check_params
 from .primitives import Xform, rot_uv
 from .rooms import NO_THROUGH, plot_rects
@@ -164,6 +164,8 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     """Top `n` sites, best first: [{id:'S1'.., anchor:[x,y,z], rot, score:int, why:str}].
     Room templates need `manifest` (the fort manifest, `inspect manifest`) with zones.Z4."""
     p = check_params(tpl, params)
+    if tpl in defense.BUILD:
+        return _defense(snap, tpl, p, manifest)[:n]
     if tpl != "fortcore" and not ((manifest or {}).get("zones") or {}).get("Z4"):
         raise ValueError(f"{tpl}: room sites need the fort manifest with zones.Z4 (inspect manifest)")
     marks = [tuple(q) for k in MARKS for q in snap.get("marks", {}).get(k, [])]
@@ -185,6 +187,23 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
                 break
     return [{"id": f"S{i + 1}", "anchor": c["anchor"], "rot": c["rot"], "score": c["score"], "why": c["why"]}
             for i, c in enumerate(out)]
+
+
+def _defense(snap: dict, tpl: str, p: dict, manifest: dict | None) -> list[dict]:
+    """gallery_o1: the one site the fortcore manifest fixes (defense.frame), if the revealed tiles allow it; raises
+    ValueError with the reason otherwise (one possible site: the reason is more use than an empty ranking)."""
+    anchor, rot = defense.frame(manifest)
+    X = Xform(anchor, rot)
+    why = defense.site_problem(_At(snap), X)
+    marks = {tuple(q) for k in MARKS for q in snap.get("marks", {}).get(k, [])}
+    dug = [X.pos(u, v, 0) for u, v in defense.FLINE + defense.inside_tiles()]
+    if not why and marks & set(dug):
+        why = "a damp, warm, cavern or water mark on the corridor"
+    if why:
+        raise ValueError(f"{tpl} at {anchor} rot{rot}: {why}")
+    hid = sum(_At(snap)(*t) == "?" for t in dug)
+    return [{"id": "S1", "anchor": anchor, "rot": rot, "score": 1000 - hid // 10,
+             "why": f"rot{rot}, the O1 frame of the fortcore manifest, {hid} unknown tiles"}]
 
 
 def _stair_steps(g: Graph) -> dict[int, int]:

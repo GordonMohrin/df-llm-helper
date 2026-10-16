@@ -12,14 +12,17 @@ from __future__ import annotations
 
 import re
 
-from . import fortcore, rooms
+from . import defense, fortcore, rooms
 from .primitives import BRIDGE_KEYS, Plan, Xform, transform_manifest
 
 MAX_W = 40
 # name -> (build(params) -> Plan, {param: (default, lo, hi)}, one-line description)
 TEMPLATES = {"fortcore": (fortcore.build, fortcore.PARAMS, "doctrine fortress core, stages 1-4 (DESIGN §5.2; 4 = traps)"),
              **{n: (f, {**rooms.PARAMS[n], **rooms.COMMON}, (f.__doc__ or n).strip().split("\n")[0])
-                for n, f in rooms.BUILD.items()}}
+                for n, f in rooms.BUILD.items()},
+             **{n: (f, dict(defense.PARAMS.get(n, {})), (f.__doc__ or n).strip().split("\n")[0])
+                for n, f in defense.BUILD.items()}}
+ATTACHED = dict(defense.ATTACHED)     # tpl -> the template whose tiles it is built against (cmd occupancy)
 _BURROW_RE = r"^[A-Za-z0-9_+-]{0,20}$"
 
 # build keys -> materials list names (quickfort build.lua:760-1000)

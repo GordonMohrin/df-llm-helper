@@ -27,6 +27,7 @@ ZONE_KEYS = set("mbhnpwjfsoDBadtTgc")          # quickfort zone.lua / user guide
 PLACE_CHARS = set("afunyrswebhlzSgpdc")
 BURROW_KEYS = {"a", "e"}
 EXTENT_MODES = {"place", "zone", "burrow"}     # every cell must carry an explicit extent
+OPEN_ROOMS = ("bedrooms", "gallery_o1")        # manifest rooms without the closure check (see _rooms)
 
 
 @dataclass(frozen=True)
@@ -107,8 +108,9 @@ def _flood(world: World, start, bbox, diag: bool) -> bool:
 
 def _rooms(world: World, man: dict) -> list[Finding]:
     """Closure of every manifest room; a bedrooms block (one manifest room with an open corridor) is checked
-    per bedroom zone instead."""
-    boxes = [(r["id"], r["bbox"]) for r in man.get("rooms", []) if r["tpl"] != "bedrooms"]
+    per bedroom zone instead. An outward gallery (`gallery_o1`) is open to its corridor by design; topo.audit
+    checks it (reached only through Z3, roofed, facing the O1 approach)."""
+    boxes = [(r["id"], r["bbox"]) for r in man.get("rooms", []) if r["tpl"] not in OPEN_ROOMS]
     boxes += [(f"bedroom {x0},{y0},{z}", [x0, y0, z, x1, y1, z])
               for x0, y0, x1, y1, z in marks_of(world, "zone", "b")]
     out = []

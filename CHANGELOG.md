@@ -1,5 +1,27 @@
 # CHANGELOG dfpilot
 
+## Outward crossbow gallery `gallery_o1` over the O1 approach (2026-10-16; offline, live-untested)
+- **Why (Run 10):** in the siege O1 stayed up and 47 goblins waited in front of it for weeks; nothing could reach or
+  shoot them (the inner gallery covers only the killing field). Gordon chose mechanism 3: a ranged option without opening.
+- **Template `gallery_o1`** (`dfpilot/bp/defense.py`, DESIGN §5.2): constructed fortifications in the east wall of the
+  tunnel in front of O1, a roofed 3-tile gallery behind them, reached only through a corridor from the inner gallery
+  (Z3 side). Stages: F line dug from the tunnel, fortifications built, then strip and corridor dug from inside and
+  taken out of every burrow, so the fort is never open. `bp sites gallery_o1` derives the one site from the manifest
+  (O1 frame: inner gallery station + bailey, O1 when listed) and says why when it cannot (tunnel or inner gallery not
+  dug, rock open). Occupancy ignores the fortcore tiles it is built against (`bp.emit.ATTACHED`).
+- **Audit/validator:** manifest room `gallery_o1`; `topo.audit` fails `gallery_o1: reachable without passing Z3`,
+  `not roofed`, `no fortification faces the O1 approach`, `not dug` (the bypass check catches a dug-out or door F line too).
+- **`dfllm plan check`:** warning (not an error) from P5 on when the fort has or builds a fortcore O1 and no
+  `gallery_o1` is planned, applied or in the manifest: `no outward gallery over O1: a waiting army cannot be shot; add
+  tpl gallery_o1 to a season (site S1, once fortcore stage 2 is dug)`.
+- Tests: `tests/bp/test_bp_gallery.py` (new), `tests/test_cli_plan.py`; room-only tests now list `rooms.BUILD`.
+- **How to use:** `dfllm bp sites gallery_o1`, then `dfllm cmd bp.place '{"tpl":"gallery_o1","site":"S1"}'` (or a plan
+  build `{"tpl":"gallery_o1","site":"S1"}`). In a SIEGE with the army waiting at O1: `dfllm cmd squad.sortie
+  '{"squad":"C","target":[x,y,z],"approve":true}'` with the strip's middle tile (after asking the player).
+- **Live check:** in the Run 10 fort `dfllm bp sites gallery_o1` lists S1 at the O1 footprint centre; after the project
+  is done `dfllm audit` shows no `gallery_o1:` fail, `inspect what=manifest` has the room, and a crossbow squad sent
+  there by sortie shoots into the tunnel while O1 stays up.
+
 ## Stranded behind our own gates: rescue, BREACH -> SIEGE, raise hold, SUPPLY_OUTSIDE, BUG-028 (2026-10-16; offline, live-untested)
 - **Rescue (a):** citizens and soldiers with thirst or hunger > 30,000 on a walk group without drink/food get the inner
   and core bridges on the way to the stock lowered (never O1) once the outer gates are up, the outside is verified
