@@ -17,3 +17,10 @@ Silk thread is woven into cloth (Clothiers get their cloth), or the kernel says 
 Read the job_item the game uses for "Weave thread into silk" from a real order job and compare with the thread items' flags (`collected`? spun vs. gathered); add a `CLOTHING` stock line to `status` and an A event when naked citizens > 20 for a game month; trade for cloth/leather or hunt for hides as fallback.
 
 Related: BUG-016 (mood materials), BUG-023 (equipment not fetched)
+
+## Cause found (Gordon's hint, 2026-10-16)
+"collected silk thread" means thread from webs that were COLLECTED. All 8657 THREAD items in the fort are loose spider webs (`flags: on_ground, spider_web`) lying in the deep spider cavern (example 12,28,z37, 80 levels under the fort at z109-124),
+not in the fort and not collected. The extra job `CollectWebs` (Collect Silk) only exists for webs a dwarf can reach and nobody collected any, so the Loom has no input. The 6502 "reachable" count only meant "has a walkable group id", not "near the fort".
+Plant fiber is no way out here: no pig tail, flax, hemp or rope reed seeds (seed stock: grape, pear, cherry, prickle berry, parsnip, plum, cranberry, plump helmet, turnip). Catten brings nothing. Stress stays 0 % with 84 naked citizens, so it is low priority; leather from slaughtered or hunted animals is the remaining way.
+Fix proposal for dfpilot: `inspect what=reach`/economy should count thread by `spider_web` and distance (and say `no collected thread`), and offer a CollectWebs project only when a web lies within reach of the fort.
+
