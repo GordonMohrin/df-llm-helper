@@ -1,5 +1,5 @@
 # BUG-020 `embark.py scan` cannot place the rectangle: it stays where DF put it, the mouse injector has no effect
-Status: open
+Status: mitigated (fix proposal 1: fails early and clearly; the root cause is open)
 Severity: medium (a new fort cannot be started without Gordon's hand; scan/embark are the only fair-play path)
 Found: 2026-10-15 20:40, DF 53.16 restarted on virtual desktop 1, window resized to client 1716x1000 (the calibration), dfpilot main 95fe16d + local trade fix
 Module: `tools/embark/embark.lua` (`W.inject`, `Inj`), `tools/embark/steps.lua` (`S.place`)
@@ -22,3 +22,20 @@ The rectangle follows the held/injected mouse as in the L0 capture (README: "rec
 2. Find what changed since L0: DF restarted with `start_df_desktop1.ps1` and resized with MoveWindow after the first attempts; try the L0 state (window never moved after start) and a real OS mouse move over the window (SetCursorPos) to see whether DF only updates on SDL motion events.
 
 Related: `tools/embark/README.md` (Live L0 findings), `docs/v2/POSTMORTEM-run9-test-siege-2026-10-15.md`
+
+## Fix (Claude, 2026-10-16): proposal 1 only, the root cause stays open
+- `tools/embark/steps.lua` `S.place` (`done`): a miss is confirmed when the same rectangle is seen twice for the same held pixel (as
+  before, the real OS cursor can win single frames). Each confirmed miss is kept for the step with the tile it should have produced
+  (`camera + floor((pixel - centre) / 16)`, i.e. `rect_min - k`). When a second confirmed miss should have landed on another tile (another
+  held pixel, or another camera in the cursor-pixel path) but shows the same rectangle, the step fails at once:
+  `local.place: rectangle does not follow the mouse: held <x1>,<y1> and <x2>,<y2>, rectangle stays at 224,132` (the cameras are added when
+  they differ). k is learnt only from the first confirmed miss, never from the identical second one, so the hold no longer runs out of the
+  window. A rectangle that does follow is unchanged (learn k once, hit the target).
+- `tools/embark/README.md` notes the failure.
+- Test: `tests/lua/test_embark.lua` `BUG-020`: the fake DF with a rectangle that never follows the mouse (`follow = false`, fixed at
+  224,132) fails `local.place` with that message within a few tries; on the old code it ran into
+  `not done after 12 tries: rectangle at 224,132 (holding -4913,23127)`, the live symptom.
+- Still open (proposal 2): why the rectangle stopped following after the restart with `start_df_desktop1.ps1` and the MoveWindow resize;
+  try the L0 state (window never moved after start) and a real OS mouse move over the window (SetCursorPos).
+- Live check: `embark.py scan 12,6` in the broken state must stop after a few tries with `rectangle does not follow the mouse` naming
+  two pixels; in the L0 state it must still place the rectangle.

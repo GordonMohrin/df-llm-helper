@@ -62,7 +62,8 @@ T.test('mood filters: concrete items per filter, forbidden ones freed, MOOD_NEED
   T.eq(need[1].d.list, {'cloth(silk) x1'})
   T.eq(F.runs(W), {}, 'cloth needs no butcher')
   local w = Cm.mood_wants(W.K)
-  T.eq(w, {{unit = 1, cls = 'cloth', n = 1, label = 'cloth(silk) x1', acq = 'order:WeaveCloth,buy', buy = 'cloth'}})
+  -- BUG-017 (Run 10 y418): the filter names the kind, so trade is asked for silk cloth
+  T.eq(w, {{unit = 1, cls = 'cloth', n = 1, label = 'cloth(silk) x1', acq = 'order:WeaveCloth,buy', buy = 'cloth:silk'}})
   w[1].n = 99
   T.eq(Cm.mood_wants(W.K)[1].n, 1, 'a fresh copy each call')
   T.ok(#json.encode(w) < 1024)
@@ -315,6 +316,134 @@ T.test('long need lists stay within the event limits', function()
   W2.run(1)
   local d = W2.find_events('MOOD_NEED')[1].d
   T.ok(d.unit == 1 and #d.list >= 1 and #d.list < 8 and #json.encode(d) <= 1024, #json.encode(d))
+end)
+
+-- BUG-017 (test fort y374: "MOOD_RISK ... starts without bars x1 (inorganic), cloth(silk) x1, bone x1, logs x1", then
+-- "thirst 40197 ... missing bars,cloth,bone,logs" while the job of unit 26325 held all its items; 4 moods died with
+-- leather in their list and 0 tanned leather in the fort)
+T.test('BUG-017: the dwarf attached every item since the last report: the thirst MOOD_RISK says nothing missing',
+       function()
+  local W = CW.world{setup = function(W)
+    local u = moody(W, 1, 'Fey', {
+      filter('BAR', {mat_type = 0, quantity = 150}),
+      filter('CLOTH', {quantity = 10000, flags2 = {silk = true}}),
+      filter(nil, {quantity = 1, flags2 = {bone = true, body_part = true}}),
+      filter('WOOD'),
+    })
+    u.counters2 = {thirst_timer = 10000, hunger_timer = 0}
+  end}
+  W.run(1)
+  local r = W.find_events('MOOD_RISK')
+  T.eq({#r, r[1].d.missing}, {1, {'bars', 'cloth', 'bone', 'logs'}})
+  -- he collects all four (a caravan brought them, a log was cut) and his thirst passes the line before care's next run
+  local job = W.unit(1).job.current_job
+  for i, cat in ipairs({'BAR', 'CLOTH', 'CORPSEPIECE', 'WOOD'}) do
+    local it = F.item(W, cat, {id = 70 + i, flags = {in_job = true}, _pos = {9, 9, 5}})
+    job.items:insert('#', {job_item_idx = i - 1, item = it})
+  end
+  W.unit(1).counters2.thirst_timer = 40197
+  CW.day(W)
+  r = W.find_events('MOOD_RISK')
+  T.eq(#r, 2)
+  T.eq({r[2].d.why, r[2].d.thirst, r[2].d.missing}, {'thirst', 40197, {}})
+  T.ok(r[2].msg:find('nothing missing', 1, true) and not r[2].msg:find('supply it', 1, true), r[2].msg)
+  T.eq(W.K.persist.get('m.care').moods['1'].missing, {})
+end)
+
+T.test('BUG-017: items attached without a filter index still cover the filters they fit', function()
+  local W = CW.world{setup = function(W)
+    F.mat(W, 0, 9, {token = 'INORGANIC:IRON'})
+    F.mat(W, 60, 1, {token = 'CREATURE:SPIDER_CAVE:SILK', flags = {SILK = true}})
+    local att = {}
+    local function held(cat, spec)
+      spec.flags, spec._pos = {in_job = true}, {9, 9, 5}
+      att[#att + 1] = {job_item_idx = -1, item = F.item(W, cat, spec)}
+    end
+    held('BAR', {id = 81, mat_type = 0, mat_index = 9})
+    held('CLOTH', {id = 82, mat_type = 60, mat_index = 1})
+    held('CORPSEPIECE', {id = 83, unit_id = 700, corpse_flags = {bone = true}})
+    held('BOULDER', {id = 84})
+    moody(W, 1, 'Fey', {
+      filter('BOULDER', {mat_type = 0, quantity = 2}),              -- 1 of 2 attached: one boulder short
+      filter('BAR', {mat_type = 0, quantity = 150}),
+      filter('CLOTH', {quantity = 10000, flags2 = {silk = true}}),
+      filter(nil, {quantity = 1, flags2 = {bone = true, body_part = true}}),
+    }, att)
+  end}
+  W.run(1)
+  local r = W.find_events('MOOD_RISK')
+  T.eq(#r, 1)
+  T.eq(r[1].d.missing, {'boulders'})
+  T.ok(r[1].msg:find('starts without boulders x1;', 1, true), r[1].msg)
+  T.eq(W.find_events('MOOD_NEED')[1].d.list, {'boulders x1'})
+end)
+
+T.test('BUG-017: an item the dwarf attaches while the run scans the stock is not reported missing', function()
+  local job, far
+  local W = CW.world{reach = function(a, b)
+    if job and #job.items == 0 then                                 -- meanwhile he picked up the far bar
+      far.flags.in_job = true
+      job.items:insert('#', {job_item_idx = 0, item = far})
+    end
+    return false
+  end, setup = function(W)
+    F.mat(W, 0, 9, {token = 'INORGANIC:IRON'})
+    job = moody(W, 1, 'Fell', {filter('BAR', {mat_type = 0, quantity = 150})}).job.current_job
+    far = bar(W, 50, 9, {}, {20, 10, 5})                            -- free, not reachable from the unit
+  end}
+  W.run(1)
+  T.eq(#job.items, 1, 'attached during the scan')
+  T.eq(W.find_events('MOOD_RISK'), {})
+  T.eq(W.find_events('MOOD_NEED'), {})
+end)
+
+T.test('BUG-017: a class without any item in the fort is named: leather: no source in the fort', function()
+  local W = CW.world{setup = function(W)
+    moody(W, 1, 'Macabre', {
+      filter('SKIN_TANNED'),
+      filter(nil, {quantity = 1, flags2 = {bone = true, body_part = true}}),
+    })
+    -- a bone exists (forbidden, outside Kern+): a source, not usable now
+    F.item(W, 'CORPSEPIECE', {id = 30, unit_id = 700, corpse_flags = {bone = true}, flags = {forbid = true},
+                              _pos = {100, 100, 5}})
+    W.unit(1).counters2 = {thirst_timer = 10000, hunger_timer = 0}
+  end}
+  W.run(1)
+  local r = W.find_events('MOOD_RISK')
+  T.eq(#r, 1)
+  T.eq({r[1].d.missing, r[1].d.nosrc}, {{'leather', 'bone'}, {'leather'}})
+  T.ok(r[1].msg:find('starts without leather x1, bone x1; leather: no source in the fort', 1, true), r[1].msg)
+  local n = W.find_events('MOOD_NEED')[1]
+  T.ok(n.msg:find('; leather: no source in the fort', 1, true), n.msg)
+  T.eq(n.d.nosrc, {'leather'})
+  W.unit(1).counters2.thirst_timer = 31000
+  CW.day(W)
+  r = W.find_events('MOOD_RISK')
+  T.ok(r[2] and r[2].msg:find('missing leather,bone (leather: no source in the fort); a mood job', 1, true),
+       r[2] and r[2].msg)
+  CW.day(W, 2)
+  local dn = W.find_events('DECISION_NEEDED')
+  T.ok(dn[1] and dn[1].d.q:find('leather: no source in the fort', 1, true), dn[1] and dn[1].d.q)
+end)
+
+T.test('BUG-017 (Run 10 y418): a plant-cloth mood next to wool cloth: the kind is named with its stock, trade is ' ..
+       'asked for cloth:plant', function()
+  local W, Cm = CW.world{setup = function(W)
+    F.mat(W, 50, 1, {token = 'PLANT:FLAX:THREAD', flags = {THREAD_PLANT = true}})
+    F.mat(W, 52, 3, {token = 'CREATURE:SHEEP:HAIR', flags = {YARN = true}})
+    moody(W, 1, 'Fey', {filter('CLOTH', {quantity = 10000, flags2 = {plant = true}}),
+                        filter('THREAD', {quantity = 15000, flags2 = {yarn = true}})})
+    for i = 1, 7 do F.item(W, 'CLOTH', {id = 40 + i, mat_type = 52, mat_index = 3, _pos = {10, 10, 5}}) end   -- wool
+    F.item(W, 'THREAD', {id = 60, mat_type = 52, mat_index = 3, flags = {forbid = true}, _pos = {100, 100, 5}})
+  end}
+  W.run(1)
+  local r = W.find_events('MOOD_RISK')
+  T.eq(#r, 1)
+  T.ok(r[1].msg:find('starts without cloth(plant) x1, thread(yarn) x1; cloth(plant) 0 in stock; thread(yarn) 1 in ' ..
+       'stock', 1, true), r[1].msg)
+  T.eq({r[1].d.missing, r[1].d.nosrc}, {{'cloth', 'thread'}, {'cloth(plant)'}})
+  local w = Cm.mood_wants(W.K)
+  T.eq({w[1].cls, w[1].buy, w[2].cls, w[2].buy}, {'cloth', 'cloth:plant', 'thread', 'thread:yarn'})
 end)
 
 T.done()

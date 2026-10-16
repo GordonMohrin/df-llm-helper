@@ -72,6 +72,8 @@ C.EVENTS = {
   DEATHS_PREVENTABLE = {cls = 'A', by = 'care'},
   -- FR-65: readiness R0 in PEACE (blockers, ways in without door or bridge, traps); monthly while it fails
   SIEGE_UNREADY = {cls = 'A', by = 'readiness'},
+  -- BUG-015: an entrance door the lockdown forbade lost its forbidden flag before the next pass (refused)
+  LOCKDOWN_PARTIAL = {cls = 'A', by = 'reflex'},
   -- B: digest
   ALERT_START = {cls = 'B', by = 'siege'}, ALERT_END = {cls = 'B', by = 'siege'},
   LOCKDOWN_END = {cls = 'B', by = 'reflex'},
@@ -286,7 +288,7 @@ C.STATE_SPEC = obj({
   trade = obj({caravan = FLAG, ratio = NAT, done = NAT}),
   clock = obj({cap = NAT, orig = NAT, ts = int(-1, 1000), held = FLAG, why = str(24)}),
   alarm = obj({defcon = int(1, 5), unacked = NAT, last = NAT, ack = NAT, lock = FLAG, why = str(24)},
-              {eta = int(-1), doors = NAT, dwait = NAT, dout = NAT}),
+              {eta = int(-1), doors = NAT, dwait = NAT, dout = NAT, dref = NAT}),
   lever = obj({lat_s = int(-1), lat_t = int(-1), pend = NAT, wait_s = NAT}),
   alert = obj({want = str(24), burrow = str(24), tiles = NAT, inside = NAT, ok = FLAG}, {why = str(40)}),
 })

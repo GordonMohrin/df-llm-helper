@@ -36,6 +36,26 @@
   never`. The kernel part (SIEGE_UNREADY, `ready.open/ents/dhold`, `drill never (auto: …)`) comes with the next load of the
   save; then within 2 game days at R0 in PEACE a `SIEGE_UNREADY` wake whose ways in match `python -m dfpilot cmd inspect
   '{"what":"entrances"}'` (`python -m dfpilot events --type SIEGE_UNREADY`).
+## Lockdown doors read back, mood needs from the attached items, build_lost retried, embark fails early, BUG-015/017/022/020 (2026-10-16; offline, live-untested)
+- **BUG-015:** reflex reads every door it forbade back on the next pass; a door whose flag fell back leaves the count and the undo, is
+  named `partial lockdown: door 16970 (74,70,117) refused (flag reset)` and announced once per lockdown by the new class-A event
+  `LOCKDOWN_PARTIAL` (with the units and items on its tile), and is tried once more (forbidden + closed, `act.door_forbid` `close`)
+  when its tile changed, at the latest 1,200 ticks later. LOCKDOWN_END counts only doors really held (`, 1 refused (flag reset)`);
+  state `alarm.dref`; new `snapshot.units_at`. Tests in `tests/lua/test_lockdown.lua`, `tests/lua/test_kern_act.lua`.
+- **BUG-017:** MOOD_RISK and MOOD_NEED list only mood filters still without an attached item: care reads the mood job again at
+  report time, the thirst/hunger MOOD_RISK drops classes the dwarf collected since the last run (`nothing missing`), and
+  `reserve.job_needs` matches attached items without a filter index to the filter they fit. A class with no item in the fort is
+  named (`leather: no source in the fort`, d `nosrc`). Cloth and thread kinds (Run 10 y418): `care.mood_wants` `buy` =
+  `cloth:plant|silk|yarn` (`thread:*`) for a kinded filter, MOOD_RISK names the kind's stock (`cloth(plant) 0 in stock`), and the
+  mood reserve splits its cloth/thread hold over the kinds in stock (line `cloth 10/10 (plant 2, silk 5, yarn 7 in stock)`).
+  Tests in `tests/lua/test_care_moods.lua`, `tests/lua/test_reserve.lua`.
+- **BUG-022:** a dig stage keeps the hidden tiles it completed without (m.runner `skip`, per chunk); a `build_lost` project runs again
+  from its dig stage once those tiles are revealed or more missing cells stand on open floor (checked daily, at the latest a season
+  later, 8 retries). PROJECT_BLOCKED follows the cadence rule (once per project, stage and cause; the budget spent once more) and names
+  the missing pieces (`missing B1, lever B1 x3, trap`, d `missing`, `retry`). Tests in `tests/lua/test_runner.lua`.
+- **BUG-020 (mitigated):** `embark.py scan` stops early with `local.place: rectangle does not follow the mouse: held A and B,
+  rectangle stays at X` when two confirmed misses for different held pixels show the same rectangle, instead of learning a k from
+  them and running the hold out of the window; the cause stays open. Test in `tests/lua/test_embark.lua`.
 
 ## Trade: retry before the caravan leaves, diagnostics, ledger for lost visits, BUG-026 (2026-10-16)
 - A retry after `ui_timeout` etc. waits at most `time left - 400` ticks (min 100) instead of a fixed 1200, so it still runs before the caravan leaves.

@@ -417,11 +417,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "PERF_DEGRADED": ("A", "perf", _d(opt="tps:i base:i pct:i why:s")),
     "DECISION_NEEDED": ("A", "any", _d("id:s", "q:s")),
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
-    "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i")),
+    "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i missing:sa retry:i")),
     "YEAR_REVIEW": ("A", "kern", _d(opt="year:i")),
     "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa")),
     "HOSPITAL_DRY": ("A", "water", _d("why:s", "patients:i zone:i near:i recipe:s")),
-    "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i")),
+    "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i nosrc:sa")),
     # class A since Run 9 (an army walked in while these were digest-only): they wake at once
     "SIEGE_START": ("A", "siege", _d(opt="vis:i inv:i great:i why:s")),
     "INVASION": ("A", "threat", _d(opt="id:i")),
@@ -442,9 +442,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "DEATHS_PREVENTABLE": ("A", "care", _CLUSTER),
     # FR-65: readiness R0 in PEACE: R1 blockers, the audit's own fails, ways in (seal), those without door or bridge
     "SIEGE_UNREADY": ("A", "readiness", _d(opt="fails:sa afails:sa routes:i open:i ents:sa traps:i age:i")),
+    # BUG-015: an entrance door the lockdown forbade lost its forbidden flag before the next pass (refused)
+    "LOCKDOWN_PARTIAL": ("A", "reflex", _d("doors:i", "refused:ia pos:p retry:f items:i units:i")),
     "ALERT_START": ("B", "siege", _d(opt="vis:i")),
     "ALERT_END": ("B", "siege", _d(opt="vis:i")),
-    "LOCKDOWN_END": ("B", "reflex", _d(opt="why:s ticks:i doors:i")),
+    "LOCKDOWN_END": ("B", "reflex", _d(opt="why:s ticks:i doors:i refused:i")),
     "MOOD_START": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
     "MOOD_NEED": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
     "MOOD_END": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
@@ -600,7 +602,8 @@ STATE = Obj(
          "clock": Obj(req={"cap": NAT, "orig": NAT, "ts": Int(-1, 1000), "held": FLAG, "why": Str(maxbytes=24)}),
          # FR-53 interrupt channel (reflex): DEFCON 1 (worst) .. 5, unacked interrupts, last/acked event n
          "alarm": Obj(req={"defcon": Int(1, 5), "unacked": NAT, "last": NAT, "ack": NAT, "lock": FLAG,
-                           "why": Str(maxbytes=24)}, opt={"eta": Int(-1), "doors": NAT, "dwait": NAT, "dout": NAT}),
+                           "why": Str(maxbytes=24)}, opt={"eta": Int(-1), "doors": NAT, "dwait": NAT, "dout": NAT,
+                                                       "dref": NAT}),
          # FR-55 lever latency (gate): last pull -> wanted state, in s and ticks (-1 never); pending own pulls
          "lever": Obj(req={"lat_s": Int(-1), "lat_t": Int(-1), "pend": NAT, "wait_s": NAT}),
          "alert": Obj(req={"want": Str(maxbytes=24), "burrow": Str(maxbytes=24), "tiles": NAT, "inside": NAT,

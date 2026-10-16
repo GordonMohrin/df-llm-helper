@@ -147,6 +147,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | SIEGE_START / INVASION / ARRIVAL | the kernel locked down (gates up, doors forbidden, alert, clock 30 t/s) before contact. `dfllm ack`, read `status` (`clock`, `lever_latency_s`, eta); do nothing tactical; tell the player |
 | INTRUDER / PREDATOR | a hostile can walk to the citizens (gate open or a leak) / a wild danger inside. `dfllm ack`; read `status` and the brief; tell the player |
 | LOCKDOWN | an interrupt stood unacked and the kernel applied its default. `dfllm ack`; read `status` |
+| LOCKDOWN_PARTIAL | an entrance door does not hold its forbidden flag (named with what lies on its tile); the kernel tries it once more itself. Read `status` (`doors`, refused); tell the player; a wall or a second door for that opening (`bp.place`) |
 | NO_DEPOT | `dfllm ack`; place a trade depot (`bp sites`, `bp.place`) |
 | SIEGE_END | read the summary; if losses > 10 % of citizens, write a postmortem note and lower `pop_ceiling` in the next plan |
 | GATE_FAIL / BREACH | the fort already sealed itself (BREACH: Tiefe+ alert, B2 up, melee at B2). Do not lower bridges. Check `status` again after 600 ticks; tell the player |
@@ -158,7 +159,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | PERF_DEGRADED | `dfllm doctor`; the supervisor restarts DF only in PEACE after an autosave |
 | DECISION_NEEDED | ask the player the question once; the default applies until they answer. `build_blocked`: `inspect` `what=workload` (`construction.blocked`: kind, pos, fails, why); the kernel already unforbade the items on the site; corpses wait for burial; else `bp.cancel` and place it elsewhere |
 | PLAN_EXHAUSTED | year review now (`plan propose`) |
-| PROJECT_BLOCKED | `bp preview`, then `bp.cancel` and place at another site, or fix the material |
+| PROJECT_BLOCKED | `bp preview`, then `bp.cancel` and place at another site, or fix the material; `build_lost` names the missing pieces (`B1`, traps) and the kernel retries the stage itself (`retry n/8`): wait for it unless the line says the retries are spent |
 | YEAR_REVIEW | §5 year review |
 | GHOSTS | `inspect` `what=tombs` (causes per body); `tombs.repair`; `no_coffin` → the kernel provisions coffins (`inspect tombs` `prov`: want/short/stock/order/proj); `bp.place tombs` only when `prov` reports no space and no project; `no_body` → a memorial slab |
 | HOSPITAL_DRY | follow the recipe in the line (`inspect` `what=water_sources`: a bank to zone or a dig); until water is accepted, a dry hospital zone is worse than none |

@@ -83,7 +83,38 @@ T.test('job_needs: quantities (bars x150, cloth x10000), attached items, classes
   T.eq(R.job_needs({job_type = df.job_type.StrangeMoodCrafter, items = kmock.vec{{job_item_idx = 0}},
                     job_items = {elements = kmock.vec{ji('WOOD')}}}), {}, 'everything brought')
   T.eq(R.token(needs[1]), 'bar:iron')
-  T.eq({R.token(needs[2]), R.token(needs[3]), R.token(needs[5])}, {'cloth', nil, 'gem'})
+  T.eq({R.token(needs[2]), R.token(needs[3]), R.token(needs[5]), R.token(needs[7])}, {'cloth:silk', nil, 'gem', 'cloth'},
+       'BUG-017: a cloth filter that names its kind asks trade for that kind; plain cloth when any kind fits')
+end)
+
+T.test('BUG-017: job_needs matches attached items without a filter index; kinds, kinded tokens, the hold split',
+       function()
+  local W = bare()
+  local R = lib()
+  F.mat(W, 52, 3, {token = 'CREATURE:SHEEP:HAIR', flags = {YARN = true}})
+  local iron = F.item(W, 'BAR', {mat_type = 0, mat_index = 9})
+  local flax = F.item(W, 'CLOTH', {mat_type = 50, mat_index = 1})
+  local job = {job_type = df.job_type.StrangeMoodCrafter,
+               items = kmock.vec{{job_item_idx = -1, item = iron}, {job_item_idx = 7, item = flax}},
+               job_items = {elements = kmock.vec{
+                 ji('BAR', {mat_type = 0, mat_index = 9, quantity = 300}),       -- 2 bars, 1 attached without an index
+                 ji('CLOTH', {quantity = 10000, flags2 = {plant = true}}),       -- covered by the flax (index 7: no filter)
+                 ji('CLOTH', {quantity = 10000, flags2 = {yarn = true}}),
+               }}}
+  local got = {}
+  for _, nd in ipairs(R.job_needs(job)) do got[#got + 1] = {nd.idx, nd.n, nd.label, R.token(nd)} end
+  T.eq(got, {{0, 1, 'bars x1 (iron)', 'bar:iron'}, {2, 1, 'cloth(yarn) x1', 'cloth:yarn'}})
+  local cache = {}
+  local silk = F.item(W, 'CLOTH', {mat_type = 51, mat_index = 2})
+  local wool = F.item(W, 'THREAD', {mat_type = 52, mat_index = 3})
+  local odd = F.item(W, 'CLOTH', {mat_type = 7, mat_index = 7})                -- no readable material
+  T.eq({R.kind(flax, cache), R.kind(silk, cache), R.kind(wool, cache), R.kind(odd, cache), R.kind(iron, cache)},
+       {'plant', 'silk', 'yarn', nil, nil})
+  T.eq(cache['50:1'], 'plant')
+  T.eq(R.split(7, {plant = 0, silk = 0, yarn = 7}), {plant = 0, silk = 0, yarn = 7}, 'only wool: wool takes all')
+  T.eq(R.split(10, {plant = 2, silk = 993, yarn = 7}), {plant = 2, silk = 4, yarn = 4})
+  T.eq(R.split(3, {plant = 5, silk = 5, yarn = 5}), {plant = 1, silk = 1, yarn = 1})
+  T.eq(R.split(0, {plant = 5}), {plant = 0, silk = 0, yarn = 0})
 end)
 
 T.test('match: type, material, metal bars, gems vs raw glass, corpse parts, cloth kind, DFHack veto', function()
@@ -379,6 +410,32 @@ T.test('reserve: a mood takes from it; the class is not topped up while the mood
   CW.day(W, 2)                                       -- the census after the mood's release comes first
   T.ok(#CW.held(W).cloth >= 3, 'mood over: topped up')
   df.global.plotinfo.economic_stone = nil
+end)
+
+T.test('BUG-017 (Run 10 y418): the cloth reserve counts its kinds: every kind in stock keeps a stash, the line ' ..
+       'names the stock per kind', function()
+  local S = {}
+  local W = CW.world{phase = 'P1', reserve = {per_run = 100, share = {}}, census_i = {cloth = 14}, setup = function(W)
+    F.mat(W, 50, 1, {token = 'PLANT:FLAX:THREAD', flags = {THREAD_PLANT = true}})
+    F.mat(W, 51, 2, {token = 'CREATURE:SPIDER_CAVE_GIANT:SILK', flags = {SILK = true}})
+    F.mat(W, 52, 3, {token = 'CREATURE:SHEEP:HAIR', flags = {YARN = true}})
+    S.wool = stock(W, 7, 'CLOTH', {mat_type = 52, mat_index = 3})                -- first in the pile
+    S.flax = stock(W, 2, 'CLOTH', {mat_type = 50, mat_index = 1})
+    S.silk = stock(W, 5, 'CLOTH', {mat_type = 51, mat_index = 2})
+    CW.pile(W, '', join(S.wool, S.flax, S.silk))
+  end}
+  W.run(1)
+  local held, by = CW.held(W).cloth, {}
+  T.eq(#held, 10, 'the class hold: target 10')
+  local kind = {}
+  for _, it in ipairs(S.wool) do kind[it.id] = 'yarn' end
+  for _, it in ipairs(S.flax) do kind[it.id] = 'plant' end
+  for _, it in ipairs(S.silk) do kind[it.id] = 'silk' end
+  for _, id in ipairs(held) do by[kind[id]] = (by[kind[id]] or 0) + 1 end
+  T.eq(by, {plant = 2, silk = 4, yarn = 4}, 'not 7 wool first: the plant cloth is held too')
+  local line
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find('mood reserve held/hold', 1, true) then line = l.msg end end
+  T.ok(line and line:find('cloth 10/10 (plant 2, silk 5, yarn 7 in stock)', 1, true), line)
 end)
 
 T.test('reserve: held items that left (consumed, unforbidden by a player, built in) drop off the list', function()

@@ -628,6 +628,28 @@ T.test('burrow_tiles (FR-33): burrows screen add + paint; seal only; new tiles c
   T.eq({line[2], line[3]}, {'act.burrow_tiles', '["Innen+",{"first":[1,2,3],"tiles":3},true]'})
 end)
 
+T.test('door_forbid (FR-49/52, BUG-015): the door sheet lock; `close` also closes it; doors only; reflex only', function()
+  local W = H.world{tag = 'dforbid'}
+  df.building_type = df.building_type or {}
+  df.building_type.Door = 23
+  local d = W.add_building{id = 16970, door_flags = {forbidden = false, closed = false}}
+  d.getType = function() return df.building_type.Door end
+  local w = W.add_building{id = 16971}
+  w.getType = function() return 99 end
+  local env = mk()
+  env.who_v = 'gate'
+  T.eq({env.api.door_forbid(16970, true)}, {false, 'not owner'})
+  env.who_v = 'reflex'
+  T.eq({env.api.door_forbid(16971, true)}, {false, 'not a door'})
+  T.eq({env.api.door_forbid(16970, true)}, {true, false})
+  T.eq({d.door_flags.forbidden, d.door_flags.closed}, {true, false}, 'the plain lock leaves closed alone')
+  T.eq({env.api.door_forbid(16970, false)}, {true, true})
+  T.eq({env.api.door_forbid(16970, true, true)}, {true, false})
+  T.eq({d.door_flags.forbidden, d.door_flags.closed}, {true, true}, 'the BUG-015 retry closes it too')
+  T.eq({env.api.door_forbid(16970, false, true)}, {true, true})
+  T.eq({d.door_flags.forbidden, d.door_flags.closed}, {false, true}, 'close only with on')
+end)
+
 T.test('zone_remove (live L6): only the zones of that dfllm-* name are deconstructed', function()
   local W = H.world{tag = 'zrm'}
   local gone = {}

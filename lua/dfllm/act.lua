@@ -981,7 +981,9 @@ local function impls(state)
 
   -- door sheet > forbid ("locked"; FR-49/52 lockdown): the door's passage toggle (building_doorst door_flags.forbidden,
   -- the flag the sheet's forbid button sets). Doors only; returns the old value so the caller can undo its own change.
-  function I.door_forbid(building_id, on)
+  -- BUG-015: `close` (with on) also sets door_flags.closed, the state a locked door takes once its doorway is clear;
+  -- reflex asks for it only on the retry of a door whose flag fell back, with nobody standing in the doorway.
+  function I.door_forbid(building_id, on, close)
     local b = df.building.find(building_id)
     if not b then return false, 'no building ' .. tostring(building_id) end
     local okt, is_door = pcall(function()
@@ -991,6 +993,7 @@ local function impls(state)
     if not (okt and is_door) then return false, 'not a door' end
     local old = b.door_flags.forbidden == true
     b.door_flags.forbidden = on and true or false
+    if on and close == true then pcall(function() b.door_flags.closed = true end) end
     return true, old
   end
 

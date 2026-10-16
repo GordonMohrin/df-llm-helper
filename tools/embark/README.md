@@ -23,6 +23,10 @@ Proven live: `newgame`, `scan` (about 12 s per site, about 20 s with `--tiles`) 
 - **Captures:** `fixtures/live/*.txt` (tests use them).
 - **Window size:** returning to the title once left DF at 1522x1000 with a broken local map (garbage
   rectangle); resizing the window back to 1716x1000 fixed it.
+- **BUG-020 (2026-10-15, DF restarted and its window moved):** the rectangle stayed at one place
+  whatever pixel was held. `local.place` now fails early with `rectangle does not follow the mouse:
+  held A and B, rectangle stays at X` once two confirmed misses that should land on different tiles
+  show the same rectangle (it no longer learns a k from them); the cause is still open.
 - **Prepare carefully:** skill and dwarf rows ignore simulated clicks with or without focus, with the
   injector and with raw `enabler.mouse_lbut` flags; keys do nothing there except Esc (menu). Buttons
   (Embark!, Go back, menu items) work. Fallback used: Esc → Return to title → `newgame` → `embark …
@@ -144,7 +148,7 @@ savage, necromancer, early invasion). The reason is required; `embark.py` append
 | title.load | wait (up to 10 min) | world map or "Skip tutorial" | run4-6 |
 | title.tutorial / title.okay | click "Skip tutorial", then "Okay" (optional) | popups gone | run4-6 |
 | world.goto | right-click until zoomed out; camera to the tile; click the map | `region_pos` = tile; else learn the offset and retry | run4-6 |
-| local.place | click the "Embark" button; camera; click the local map | `embark_pos_min` = target; else learn k = rect - camera and retry | run4-6 |
+| local.place | click the "Embark" button; camera; click the local map | `embark_pos_min` = target; else learn k = rect - camera and retry; the same rectangle for two different holds fails (`rectangle does not follow the mouse`, BUG-020) | run4-6 |
 | site.read | ONE capture with the Confirm popup open: popup sentences, panel, Neighbors section and the rectangle; fail unless the rectangle is still the target; evaluate §5.1; save `capture/<id>-site-<tag>.txt` | read | run4-6 (probe.sh) |
 | site.abort (scan only) | click the popup's Abort (the one next to Confirm; the bottom-bar Abort leaves the embark) | popup gone | run4-6 |
 | site.gate (embark only) | refuse any fail not named in `accept` (with a reason); refuse any unknown criterion not named in `waive`/`accept` | verdict | untested |
