@@ -121,3 +121,8 @@ def test_place_and_log_one_line_per_piece(save):
     assert len(lines) == 2
     assert lines[0].endswith("3,1,0 ramp: wall at 3,1,1 (the ramp top)") and lines[1].endswith(
         "4,2,0 floor: door at 4,2,0")
+
+
+def test_bp_sites_resolves_at_last(save):
+    sites, snap_id, n = cmd.free_sites(save, "seal", {})
+    assert snap_id == "c1" and n == 1 and sites[0]["anchor"] == [3, 1, 0] and "door at 4,2,0" in sites[0]["why"]

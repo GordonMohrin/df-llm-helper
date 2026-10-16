@@ -556,6 +556,8 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
 def free_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict | None = None,
                n: int = 3) -> tuple[list[dict], str, int]:
     """(the first n free sites relabelled S1.., snapshot id, ranked count): what `bp.place site=S<k>` resolves."""
+    if tpl == "seal":                                      # as place(): at=last etc. become explicit openings
+        params = {**(params or {}), "at": seal_openings(save_dir, (params or {}).get("at"), snap)[0]}
     sites, snap_id = rank_sites(save_dir, tpl, params, snap) if snap else ranking(save_dir, tpl, params)
     occ = occupancy(save_dir)
     out = []
