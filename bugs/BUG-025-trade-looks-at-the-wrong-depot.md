@@ -1,5 +1,5 @@
 # BUG-025 trade looks at the manifest depot while the merchants unload at another one: "nothing_listed" for a caravan that has goods
-Status: fixed (offline, tests/lua/test_trade_ledger.lua), live reload pending the next caravan
+Status: fixed and confirmed live (2026-10-16, Catten y415: depot 17590 chosen, 135 goods listed, traded ratio 1.68)
 Severity: medium (a whole caravan visit is lost; the kernel reports "no goods" although the merchants carry some)
 Found: 2026-10-16, Run 10 fort Erushthak Handlelock (region2-site97, y414), Catten's caravan, Claude playing
 Module: `lua/dfllm/trade.lua` `find_depot` (used by `step_wait`, `inspect what=trade`, the depot keeper)
@@ -22,8 +22,11 @@ The depot the merchants actually use wins: the built depot with the most trader-
 `trader_items(b)` counts trader-flagged `contained_items` (<= `DEPOT_ITEMS`); `find_depot` returns the depot with the most, else the manifest depot, else the first built one.
 Test `BUG-025` (two depots, goods in the second): fails on the old code (depot 50), passes now (51); with no trader goods the first built depot (50) is kept.
 
+## Confirmation (y415 autumn)
+`inspect what=trade` named depot 17590 with 135 merchant goods (30 kinds); `CARAVAN traded with Catten, ratio 1.68` (sold 27 totems + goblet 1480, bought 20 cloth, 1 anvil, 2 thread, 652). The kernel kept `nothing_listed` only for the y414 visit.
+
 ## Not solved
 Both depots report `accessible=false` (no wagon path from the map edge?). If the merchants walk in but the wagons cannot, the goods are still unloaded at the depot edge; only DF's own path check decides.
-Whether the broker could trade at 17590 is untested; the next caravan shows it (`inspect what=trade` now names the depot).
+The broker traded at 17590 although `accessible=false`, so that flag is no reliable wagon-path test.
 
 Related: BUG-016 (the same visit logic), FR-43 (depot keeper)
