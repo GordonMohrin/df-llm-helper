@@ -1,5 +1,21 @@
 # CHANGELOG dfpilot
 
+## Trade: cloth kinds, mood wants, a second trade per visit, wanted goods in inspect (Run 10 y418, 2026-10-16; offline, live-untested)
+- **Cloth and thread kinds:** `cloth:plant`, `cloth:silk`, `cloth:yarn` (and `thread:…`) match by material flag THREAD_PLANT, SILK, YARN;
+  plain `cloth`/`thread` stays "any"; other cloth/thread subs are refused (`dfpilot/schema.py` TOKEN, the `trade.want` verb).
+  `inspect what=trade` names cloth goods with their kind (`cloth:plant`).
+- **care.mood_wants:** the entries' `buy` tokens (e.g. `cloth:plant` from the mood agent's reserve) go before `plan.trade.want`, capped at the
+  units the moods miss; trade buys only the matching kind.
+- **Verb `trade.retry {civ?, want?, sell?}`** (PEACE): a second trade in the same visit while the caravan stands at the depot with
+  `time_remaining` >= 300 (3,000 ticks); resets the visit and optionally the wants (as `trade.want`). Replaces the live `debug.getupvalue` hack.
+- **`inspect what=trade` `wanted_matches`:** every merchant good that matches a want token whatever its value, in a depot or still carried by
+  the merchants and pack animals (from the item vectors of the wanted types), per token, type and material; at most 40 kinds,
+  `wanted_more` counts the rest, the reply stays within 8 KB; `carried_items`.
+- Tests: five cases in `tests/lua/test_trade.lua` and the schema cases in `tests/test_schema.py`, all failing on the previous commit.
+- Live check: `inspect what=trade` shows `wanted_matches` with `carried` > 0 while goods are still on the animals; `trade.want '{"want":
+  ["cloth:plant"]}'` then buys only plant cloth (ledger `bought cloth:plant`); after a trade with time left, `dfllm cmd trade.retry
+  '{"want":[...]}'` answers `trade with <civ> restarts` and a second `CARAVAN traded` follows.
+
 ## Trade gets the kernel's priority during a caravan visit, BUG-026 root cause; review of BUG-025/026 (2026-10-16; offline, live-untested)
 - **Kernel boost** (`util/sched.lua`, `kern.lua`, `k_mock.lua`, CONTRACTS §3.3.9/§4): `K.boost(why, busy)`, `K.unboost()`, `K.busy()`. A boosted
   module (only `trade`) is not demoted, is paced at 20 ms/s outside the PEACE pool, and starts and ends without an old debt; 30 s TTL.

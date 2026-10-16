@@ -382,7 +382,17 @@ MODE = named("mode", Str(enum=MODES))
 PHASE = named("phase", Str(PHASE_RE))
 POS = named("pos", Tup([INT, INT, INT]))
 SCALAR = named("scalar", AnyOf(INT, Str(maxbytes=200), Bool()))
-TOKEN = named("token", Str(TOKEN_RE))
+# cloth/thread kinds (Run 10 y418): cloth:plant|silk|yarn and thread:plant|silk|yarn only; plain cloth/thread = any
+FIBRE_SUBS = ("plant", "silk", "yarn")
+
+
+def _fibre_sub(s):
+    kind, _, sub = s.partition(":")
+    return (f"{kind}:{sub}: the {kind} kinds are {', '.join(kind + ':' + x for x in FIBRE_SUBS)} (plain {kind} = any)"
+            if kind in ("cloth", "thread") and sub and sub not in FIBRE_SUBS else None)
+
+
+TOKEN = named("token", Checked(Str(TOKEN_RE), _fibre_sub, "kind[:sub]; cloth/thread subs plant, silk, yarn"))
 
 
 def _bbox_order(b):
@@ -514,6 +524,7 @@ VERB_ARGS: dict[str, Obj] = {
     "pause": Obj(req={"ttl_s": Int(1, 600)}, opt={"why": Str(maxbytes=200)}),
     "unpause": Obj(),
     "trade.want": Obj(opt={"want": Arr(TOKEN, hi=40), "sell": Arr(TOKEN, hi=40)}),
+    "trade.retry": Obj(opt={"civ": Str(maxbytes=40), "want": Arr(TOKEN, hi=40), "sell": Arr(TOKEN, hi=40)}),
     "squad.sortie": Obj(req={"squad": Str(enum=["A", "B", "C"]), "target": AnyOf(ID, POS),
                              "approve": Const(True)}),
     "lever": Obj(req={"bridge": BRIDGE, "want": Str(enum=["up", "down"])}),
@@ -543,7 +554,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "snapshot": ("snapshot", None, False), "audit": ("readiness", None, False),
     "popcap.lower": ("readiness", None, False), "tempo.lower": ("arbiter", None, False),
     "pause": ("arbiter", None, False), "unpause": ("arbiter", None, False),
-    "trade.want": ("trade", None, False),
+    "trade.want": ("trade", None, False), "trade.retry": ("trade", ["PEACE"], False),
     "squad.sortie": ("military", ["ALERT", "SIEGE", "BREACH", "RECOVERY"], True),
     "lever": ("gate", ["PEACE"], False), "inspect": ("kern", None, False),
     "selftest": ("selftest", None, False), "module.enable": ("kern", None, False),

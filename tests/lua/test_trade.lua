@@ -187,7 +187,8 @@ local function setup(o)
   o = o or {}
   local W = F.world{plan = o.plan, persist = o.persist, mode = o.mode}
   local d = F.depot(W, {})
-  local c = F.caravan(W, {state = 'Approaching', tr = o.tr or 1500, goods = o.goods or std_goods(W), wood = o.wood})
+  local goods = type(o.goods) == 'function' and o.goods(W) or o.goods or std_goods(W)
+  local c = F.caravan(W, {state = 'Approaching', tr = o.tr or 1500, goods = goods, wood = o.wood})
   F.goods(W, d, o.ours or std_ours())
   if not o.no_broker then W.broker = W.add_unit{id = 901, citizen = true, pos = {0, 0, 0}} end
   local U = (not o.no_ui) and F.ui(W, d, c, o.ui) or nil
@@ -794,6 +795,125 @@ T.test('cadence: ticks while waiting, real-time while the screen is open', funct
   T.eq(M.every, {ms = 50})
   F.until_(W, function() return traded(W) end, 600)
   T.eq(M.every, {ticks = 100})
+end)
+
+---------------------------------------------------------------- Run 10 y418: cloth kinds, mood wants, trade.retry
+local function plan_want(want, sell)
+  return {v = 2, year = 3, phase_target = 'P4', seasons = {{build = {}}, {build = {}}, {build = {}}, {build = {}}},
+          policy = {option = 'A', pop_ceiling = 55, beauty = 'used_rooms'}, trade = {want = want, sell = sell or {}}}
+end
+local function cloth_goods(W)
+  return {F.item(W, {type = 'CLOTH', mat = 'CREATURE:SHEEP:WOOL', desc = 'sheep wool cloth', value = 30, stack = 3}),
+          F.item(W, {type = 'CLOTH', mat = 'PLANT:REED_ROPE:THREAD', desc = 'rope reed cloth', value = 12, stack = 5}),
+          F.item(W, {type = 'CLOTH', mat = 'CREATURE:SPIDER_CAVE_GIANT:SILK', desc = 'giant cave spider silk cloth',
+                     value = 60})}
+end
+local function bought(c)
+  local r = {}
+  for _, it in ipairs(c._items) do if not it.flags.trader then r[#r + 1] = it._desc end end
+  table.sort(r)
+  return r
+end
+
+T.test('Run 10 y418: cloth:plant / silk / yarn and thread:* by material flag; plain cloth = any; other subs refused', function()
+  local plant = L.token('cloth:plant')
+  T.eq({plant.flag, L.token('thread:silk').flag, L.token('cloth:yarn').flag}, {'THREAD_PLANT', 'SILK', 'YARN'})
+  T.eq({L.token('cloth:wool'), L.token('thread:pig_tail')}, {nil, nil}, 'only plant, silk, yarn')
+  T.eq({L.valid('cloth:plant'), L.valid('cloth:wool'), L.valid('bar:iron'), L.valid('cloth')}, {true, false, true, true})
+  local reed = {type = 'CLOTH', mat = 'plant:reed_rope:thread', desc = 'rope reed cloth', mf = {THREAD_PLANT = true}}
+  local wool = {type = 'CLOTH', mat = 'creature:sheep:wool', desc = 'sheep wool cloth', mf = {YARN = true}}
+  T.ok(L.match(plant, reed) and not L.match(plant, wool))
+  T.ok(L.match(L.token('cloth:yarn'), wool) and not L.match(L.token('cloth:silk'), wool))
+  T.ok(L.match(L.token('cloth'), reed) and L.match(L.token('cloth'), wool), 'plain cloth = any')
+  T.ok(not L.match(L.token('thread:plant'), reed), 'cloth is not thread')
+  -- no flags read: the material token decides
+  T.ok(L.match(L.token('cloth:yarn'), {type = 'CLOTH', mat = 'creature:alpaca:wool', desc = 'alpaca wool cloth'}))
+  T.eq(L.token_for('CLOTH', 'plant:reed_rope:thread', 'rope reed cloth'), 'cloth:plant')
+  T.eq(L.token_for('THREAD', 'creature:spider_cave_giant:silk', 'silk thread'), 'thread:silk')
+end)
+
+T.test('Run 10 y418: cloth:yarn buys only wool; the trade.want verb refuses other cloth subs', function()
+  local W, M, d, c, U = setup{goods = cloth_goods, plan = plan_want({'cloth:yarn'})}
+  W.frame(1)
+  to_depot(W, d, c)
+  T.ok(F.until_(W, function() return traded(W) end, 1500), 'traded')
+  T.eq(bought(c), {'sheep wool cloth'})
+  local r = W.inbox('trade.want', {want = {'cloth:wool'}})
+  T.eq(r.ok, false)
+  T.ok(r.msg:find('plant, silk, yarn', 1, true), r.msg)
+end)
+
+T.test('Run 10 y418: care.mood_wants buy tokens (cloth:plant) go before the plan wants, capped at the units missing', function()
+  local W, M, d, c, U = setup{goods = cloth_goods, plan = plan_want({'bar:iron'}), before_load = function(W)
+    local care = {name = 'care', every = {ticks = 1200}}
+    function care.mood_wants(K) return {{cls = 'cloth', n = 2, unit = 31, label = 'cloth(plant) x2', acq = 'buy',
+                                         buy = 'cloth:plant'}} end
+    W.load(care)
+  end}
+  W.frame(1)
+  local q = W.inbox('trade.want', {})
+  T.eq(q.data.want, {'cloth:plant', 'bar:iron'}, 'the mood token first')
+  to_depot(W, d, c)
+  T.ok(F.until_(W, function() return traded(W) end, 1500), 'traded')
+  T.eq(bought(c), {'rope reed cloth'}, 'only the plant cloth, not wool or silk')
+end)
+
+T.test('Run 10 y418: trade.retry opens a second trade in the same visit with new wants; refused when it cannot', function()
+  local W, M, d, c, U = setup{goods = cloth_goods, plan = plan_want({'cloth:silk'})}
+  W.frame(1)
+  T.eq(W.inbox('trade.retry', {}).msg, 'no caravan at the depot')
+  to_depot(W, d, c)
+  T.ok(F.until_(W, function() return traded(W) end, 1500), 'first trade')
+  T.eq(U.trades, 1)
+  W.run(300, {skip = 9})
+  T.eq(U.trades, 1, 'v.traded = 1: no second trade by itself')
+  c.time_remaining = 299
+  T.ok(W.inbox('trade.retry', {}).msg:find('leaves too soon', 1, true))
+  c.time_remaining = 1500
+  T.eq(W.inbox('trade.retry', {civ = 'Somebody'}).ok, false)
+  T.eq(W.inbox('trade.retry', {want = {'cloth:wool'}}).ok, false)
+  local r = W.inbox('trade.retry', {want = {'cloth:plant'}})
+  T.eq(r.ok, true, r.msg)
+  T.eq({r.data.civ, r.data.left, r.data.want}, {'The Merchant Guild', 15000, {'cloth:plant'}})
+  T.ok(F.until_(W, function() return W.K.busy() ~= nil end, 1500), 'a trade screen phase again')
+  T.eq(W.inbox('trade.retry', {}).ok, false, 'refused while the trade screen is open')
+  T.ok(F.until_(W, function() return #F.events(W, 'traded') == 2 end, 1500), 'second trade')
+  T.eq(U.trades, 2)
+  T.eq(bought(c), {'giant cave spider silk cloth', 'rope reed cloth'})
+  T.eq(#W.find_events('TRADE_LEDGER'), 2, 'one ledger entry per trade')
+  W.K.set_mode('ALERT', 'test')
+  T.eq(W.inbox('trade.retry', {}).ok, false, 'PEACE only')
+end)
+
+T.test('Run 10 y418: inspect what=trade wanted_matches lists every wanted merchant good, carried ones too, clipped', function()
+  local W, M, d, c, U = setup{goods = cloth_goods, plan = plan_want({'cloth:plant', 'bar:iron'})}
+  local other = df.global.world.items.other
+  -- the merchants unloaded the silk and wool; 40 rope reed cloths are still on them (in_inventory)
+  F.set_state(c, 'AtDepot')
+  for _, it in ipairs(c._items) do
+    if it._desc ~= 'rope reed cloth' then it.flags.in_building = true; d.contained_items:insert('#', {item = it})
+    else it.flags.in_inventory, it._stack = true, 40 end
+    other.CLOTH:insert('#', it)
+  end
+  local ours = F.item(W, {type = 'CLOTH', mat = 'PLANT:FLAX:THREAD', desc = 'flax cloth', value = 20})
+  other.CLOTH:insert('#', ours)                                    -- our own cloth: not a merchant good
+  local r = W.inbox('inspect', {what = 'trade'})
+  T.eq(r.ok, true, r.msg)
+  T.eq(#r.data.wanted_matches, 1)
+  local m = r.data.wanted_matches[1]
+  T.eq({m.token, m.type, m.mat, m.depot, m.carried}, {'cloth:plant', 'CLOTH', 'plant:reed_rope:thread', 0, 40})
+  T.eq({r.data.carried_items, r.data.wanted_more}, {1, 0})
+  -- 60 plant cloth kinds: 40 listed, the rest counted; the reply stays within 8 KB
+  for i = 1, 60 do
+    local it = F.item(W, {type = 'CLOTH', mat = 'PLANT:FIBRE_PLANT_' .. string.char(64 + i % 26 + 1) .. string.char(65 + i // 26)
+                                              .. ':THREAD', desc = 'fibre cloth', value = 3, flags = {trader = true, in_inventory = true}})
+    other.CLOTH:insert('#', it)
+  end
+  r = W.inbox('inspect', {what = 'trade'})
+  T.eq(r.ok, true, r.msg)
+  T.ok(#r.data.wanted_matches <= M.CFG.WANTED_LIST, #r.data.wanted_matches)
+  T.eq(#r.data.wanted_matches + r.data.wanted_more, 61)
+  T.ok(#json.encode(r.data) <= 8192, 'reply ' .. #json.encode(r.data) .. ' bytes')
 end)
 
 T.test('screen reads: <= READS tiles per frame, only the rows a phase needs', function()

@@ -52,6 +52,12 @@
 --     at most RUN_MS per run, so a module that waited (paced, a long frame) does not time out a phase it could not work
 --     on; CARAVAN retry/failed events carry ph, ph_ms (real), ph_act (own clock), ph_runs and left (ticks);
 --   * caravan.time_remaining counts 10-tick units (TR_TICKS): the retry wait and `left` are converted to ticks.
+-- Run 10 y418 (Muboomon: 3 wool cloths bought while 40 rope reed cloths were on the pack animals and a mood needed plant
+-- cloth; a second trade needed a live hack):
+--   * cloth:plant|silk|yarn and thread:* match by material flag (THREAD_PLANT, SILK, YARN); plain cloth/thread = any;
+--   * care.mood_wants' buy tokens go before plan.trade.want, capped at the units the moods miss;
+--   * verb trade.retry {civ?, want?, sell?}: a new trade in the same visit (caravan AtDepot, time_remaining >= START_MIN);
+--   * inspect what=trade wanted_matches: every merchant good matching a want token, any value, in a depot or still carried.
 local json = require('dfllm.util.json')
 
 local M = {name = 'trade', every = {ticks = 100}, verbs = {}, inspect = {},
@@ -105,6 +111,8 @@ M.CFG = {
   IDLE_TICKS = 100, UI_MS = 50,
   LEDGER_KEEP = 3,      -- visits kept in persist m.trade.ledger (FR-32)
   GOODS_LIST = 30,      -- merchant goods kinds listed by inspect what=trade (FR-18; the reply stays <= 8 KB)
+  WANTED_LIST = 40,     -- kinds in inspect what=trade wanted_matches (every value; clipped with a count)
+  WANTED_SCAN = 20000,  -- items of the wanted types read at most by inspect what=trade (wanted_matches)
 }
 M.DEFAULT_WANT = {'bar:iron', 'anvil', 'cloth'}   -- same default as `dfllm plan propose`
 
@@ -119,7 +127,8 @@ local function int(v) return math.type(v) == 'integer' and v or (type(v) == 'num
 -- token kinds (plan.trade tokens `kind[:sub]`, schema TOKEN); t = df.item_type names, word = required
 -- description word, mat = sub must match the material token (bar:iron must not match pig iron)
 L.KINDS = {
-  bar = {t = {'BAR'}, mat = true}, anvil = {t = {'ANVIL'}}, cloth = {t = {'CLOTH'}}, thread = {t = {'THREAD'}},
+  bar = {t = {'BAR'}, mat = true}, anvil = {t = {'ANVIL'}}, cloth = {t = {'CLOTH'}, fibre = true},
+  thread = {t = {'THREAD'}, fibre = true},
   leather = {t = {'SKIN_TANNED'}}, wood = {t = {'WOOD'}}, log = {t = {'WOOD'}}, logs = {t = {'WOOD'}},
   block = {t = {'BLOCKS'}}, blocks = {t = {'BLOCKS'}}, gem = {t = {'SMALLGEM'}}, gems = {t = {'SMALLGEM'}},
   rough = {t = {'ROUGH'}}, stone = {t = {'BOULDER'}}, boulder = {t = {'BOULDER'}}, seeds = {t = {'SEEDS'}},
@@ -139,7 +148,28 @@ L.CAPS = {default = 10, anvil = 1, bar = 20, cloth = 20, thread = 20, leather = 
           drink = 40, booze = 40, ammo = 100, bolt = 100, bolts = 100, gem = 10, gems = 10, weapon = 3, armor = 3,
           helm = 3, shield = 3, gloves = 6, shoes = 6, pants = 3, crossbow = 3, pick = 2, axe = 2}
 
--- token -> {kind, sub, types={NAME=true}, word, mat, cap} or nil; known(NAME) says whether a raw
+-- fibre kinds of cloth and thread (Run 10 y418: `cloth` bought 3 wool cloths while the merchants carried 40 rope reed
+-- cloths and a strange mood needed plant cloth): cloth:plant / thread:plant = material flag THREAD_PLANT, :silk = SILK,
+-- :yarn = YARN; plain cloth / thread = any; other subs are not tokens
+L.FIBRE = {plant = 'THREAD_PLANT', silk = 'SILK', yarn = 'YARN'}
+
+-- the fibre kind of an item info: from its material flags (info.mf, item_info), else from the material token
+function L.fibre_of(info)
+  local mf = info.mf
+  if type(mf) == 'table' then
+    for sub, flag in pairs(L.FIBRE) do if mf[flag] then return sub end end
+    return nil
+  end
+  local mat = tostring(info.mat or '')
+  if mat:match('^plant:') then return 'plant' end
+  for part in mat:gmatch('[^:]+') do
+    if part == 'silk' then return 'silk' end
+    if part == 'wool' or part == 'yarn' or part == 'hair' then return 'yarn' end
+  end
+  return nil
+end
+
+-- token -> {kind, sub, types={NAME=true}, word, mat, flag, cap} or nil; known(NAME) says whether a raw
 -- df.item_type name exists (fallback kind, e.g. 'splint')
 function L.token(s, known)
   if type(s) ~= 'string' then return nil end
@@ -152,10 +182,23 @@ function L.token(s, known)
     if not (known and known(up)) then return nil end
     spec = {t = {up}}
   end
+  local flag
+  if spec.fibre and sub then
+    flag = L.FIBRE[sub]
+    if not flag then return nil end
+  end
   local types = {}
   for _, n in ipairs(spec.t) do types[n] = true end
-  return {kind = kind, sub = sub, types = types, word = spec.word, mat = spec.mat == true,
+  return {kind = kind, sub = sub, types = types, word = spec.word, mat = spec.mat == true, flag = flag,
           cap = L.CAPS[kind] or L.CAPS.default, src = s}
+end
+
+-- a valid want/sell token string (the schema's TOKEN, checked in Python too): kind[:sub], fibre subs only for cloth/thread
+function L.valid(s)
+  if type(s) ~= 'string' then return false end
+  local kind, sub = s:match('^([a-z_]+):([a-z_]+)$')
+  if not kind then return s:match('^[a-z_]+$') ~= nil end
+  return not (L.KINDS[kind] and L.KINDS[kind].fibre) or L.FIBRE[sub] ~= nil
 end
 
 function L.tokens(list, known)
@@ -188,6 +231,7 @@ function L.match(tk, info)
   if not tk.types[info.type] then return false end
   if tk.word and not L.has_word(info.desc, tk.word) then return false end
   if tk.types.WEAPON and L.has_word(info.desc, 'training') then return false end   -- wooden training axes cannot chop
+  if tk.flag then return L.fibre_of(info) == tk.sub end
   if tk.sub then
     if mat_part(info.mat, tk.sub) then return true end
     if tk.mat then return false end
@@ -324,8 +368,12 @@ local TYPE_TOKEN = {BAR = 'bar', ANVIL = 'anvil', CLOTH = 'cloth', THREAD = 'thr
                     SEEDS = 'seeds', PLANT = 'plant', MEAT = 'meat', FISH = 'fish', CHEESE = 'cheese', EGG = 'egg',
                     FOOD = 'meal', DRINK = 'drink', AMMO = 'ammo', WEAPON = 'weapon', ARMOR = 'armor', HELM = 'helm',
                     SHIELD = 'shield', GLOVES = 'gloves', SHOES = 'shoes', PANTS = 'pants'}
-function L.token_for(t, mat, desc)
+function L.token_for(t, mat, desc, mf)
   local base = TYPE_TOKEN[t]
+  if t == 'CLOTH' or t == 'THREAD' then
+    local f = L.fibre_of({mat = mat, mf = mf})
+    return f and (base .. ':' .. f) or base
+  end
   if t == 'BAR' then
     local m = tostring(mat or ''):match('^[Ii][Nn][Oo][Rr][Gg][Aa][Nn][Ii][Cc]:([A-Za-z_]+)$')
     return m and ('bar:' .. m:lower()) or 'bar'
@@ -714,6 +762,12 @@ local function item_info(it, mer, ea, ew)
   if okd and type(d) == 'string' then info.desc = dfhack.df2utf(d):lower() end
   local okc, n = pcall(function() return #dfhack.items.getContainedItems(it) end)
   info.container = okc and n > 0
+  if info.type == 'CLOTH' or info.type == 'THREAD' then    -- fibre kind (cloth:plant / silk / yarn)
+    pcall(function()
+      local fl = dfhack.matinfo.decode(it:getMaterial(), it:getMaterialIndex()).material.flags
+      info.mf = {THREAD_PLANT = fl.THREAD_PLANT == true, SILK = fl.SILK == true, YARN = fl.YARN == true}
+    end)
+  end
   local f = it.flags
   info.artifact, info.forbid, info.owned = f.artifact == true, f.forbid == true, f.owned == true
   local okb, free = pcall(dfhack.items.checkMandates, it)                -- Lua API.txt:2107
@@ -803,6 +857,26 @@ local function scan_slice(j)
   return j.i > #j.segs
 end
 
+-- care.mood_wants (CONTRACTS §7; Run 10 y418: a strange mood needed plant cloth): each entry's buy token (e.g.
+-- cloth:plant) goes before the plan's wants, capped at the units the moods miss (summed per token); a plan token with
+-- the same text is dropped and lifts that cap to the kind's default
+local function mood_tokens(K, known)
+  local ok, list = K.call('care', 'mood_wants')
+  local r, by = {}, {}
+  if not ok or type(list) ~= 'table' then return r, by end
+  for _, e in ipairs(list) do
+    local tk = type(e) == 'table' and type(e.buy) == 'string' and e.buy ~= '' and L.token(e.buy, known)
+    if tk then
+      local n = math.max(1, int(e.n))
+      local have = by[tk.src]
+      if have then have.need = have.need + n
+      else tk.need, tk.mood = n, true; by[tk.src] = tk; r[#r + 1] = tk end
+    end
+  end
+  for _, tk in ipairs(r) do tk.cap = math.min(tk.cap, tk.need) end
+  return r, by
+end
+
 local function wants(K)
   local p = (K.plan or {}).trade or {}
   local w, s = p.want, p.sell
@@ -814,7 +888,12 @@ local function wants(K)
   if ov then w, s = ov.want or w, ov.sell or s end
   if type(w) ~= 'table' or #w == 0 then w = M.DEFAULT_WANT end
   local known = function(n) return df.item_type ~= nil and df.item_type[n] ~= nil end
-  return L.tokens(w, known), L.tokens(s, known)
+  local want, by = mood_tokens(K, known)
+  for _, tk in ipairs(L.tokens(w, known)) do
+    local m = by[tk.src]
+    if m then m.cap = tk.cap else want[#want + 1] = tk end
+  end
+  return want, L.tokens(s, known)
 end
 
 local function lists_job(K, ui, mer)
@@ -1605,6 +1684,39 @@ function M.done(K) return st and st.done or 0 end
 -- inspect what=trade (FR-18, FR-32): caravans, wants, sell list, the last ledger entries and, while a caravan
 -- stands at the depot, the merchant goods unloaded there (what the depot's goods list shows), grouped by item
 -- type and material with the want token that names them
+-- Run 10 y418 (40 rope reed cloths still on the merchants and pack animals, not in the depot): every merchant good
+-- (flags.trader) of the item types the want tokens name, from the item vectors of those types (no unit reads): where =
+-- 'depot' (in a building), 'carried' (in a merchant's or pack animal's inventory, flags.in_inventory) or 'other'.
+-- fn(item, where); at most WANTED_SCAN items read -> scanned, capped
+local function wanted_goods(want, fn)
+  local types, seen = {}, {}
+  for _, tk in ipairs(want) do
+    for tn in pairs(tk.types) do if not seen[tn] then seen[tn] = true; types[#types + 1] = tn end end
+  end
+  table.sort(types)
+  local scanned, capped = 0, false
+  for _, tn in ipairs(types) do
+    pcall(function()
+      for _, it in ipairs(df.global.world.items.other[tn]) do
+        if scanned >= M.CFG.WANTED_SCAN then capped = true; return end
+        scanned = scanned + 1
+        local f = it.flags
+        if f.trader then
+          local where = 'other'
+          if f.in_building then where = 'depot'
+          elseif f.in_inventory then                 -- on a merchant or pack animal, or in a container
+            where = 'carried'
+            local okc, box = pcall(dfhack.items.getContainer, it)
+            if okc and box and box.flags.in_building then where = 'depot' end     -- a bin in the depot
+          end
+          fn(it, where)
+        end
+      end
+    end)
+  end
+  return scanned, capped
+end
+
 M.inspect.trade = function(K, args)
   local cars = read_caravans()
   local list, at = {}, nil
@@ -1629,7 +1741,8 @@ M.inspect.trade = function(K, args)
           local key = info.type .. '|' .. tostring(info.mat)
           local e = agg[key]
           if not e then
-            e = {type = info.type, mat = info.mat, n = 0, value = 0, token = L.token_for(info.type, info.mat, info.desc)}
+            e = {type = info.type, mat = info.mat, n = 0, value = 0,
+                 token = L.token_for(info.type, info.mat, info.desc, info.mf)}
             agg[key], order[#order + 1] = e, e
           end
           e.n, e.value = e.n + math.max(1, int(info.stack)), e.value + int(info.value)
@@ -1640,17 +1753,52 @@ M.inspect.trade = function(K, args)
     table.sort(order, function(a, b) if a.value ~= b.value then return a.value > b.value end return a.type < b.type end)
     for i = 1, math.min(M.CFG.GOODS_LIST, #order) do goods[i] = order[i] end
   end
-  local msg = d and at and string.format('%d merchant goods at the depot (%d kinds)', n, #goods)
-              or (d and (#cars > 0 and 'caravan not at the depot yet' or 'no caravan') or 'no built trade depot')
+  -- wanted_matches (Run 10 y418: cheap cloth fell off the 30 most valuable kinds): every merchant good that matches a
+  -- want token, whatever its value, in a depot and still carried, per token, type and material
+  local wagg, worder, carried, scanned, capped = {}, {}, 0, 0, false
+  local car = at or cars[1]
+  if car then
+    scanned, capped = wanted_goods(want, function(it, where)
+      local info = item_info(it, car.ref, false, false)
+      local k = L.first_match(want, info)
+      if not k then return end
+      if where == 'carried' then carried = carried + 1 end
+      local key = k .. '|' .. info.type .. '|' .. tostring(info.mat)
+      local e = wagg[key]
+      if not e then
+        e = {token = want[k].src, type = info.type, mat = info.mat, depot = 0, carried = 0, other = 0, value = 0, k = k}
+        wagg[key], worder[#worder + 1] = e, e
+      end
+      e[where], e.value = e[where] + math.max(1, int(info.stack)), e.value + int(info.value)
+    end)
+  end
+  table.sort(worder, function(a, b) if a.k ~= b.k then return a.k < b.k end return a.value > b.value end)
+  local matches, more = {}, math.max(0, #worder - M.CFG.WANTED_LIST)
+  for i = 1, math.min(M.CFG.WANTED_LIST, #worder) do
+    local e = worder[i]
+    matches[i] = {token = e.token, type = e.type, mat = e.mat, depot = e.depot, carried = e.carried, value = e.value,
+                  other = e.other > 0 and e.other or nil}
+  end
+  local msg = d and at and string.format('%d merchant goods at the depot (%d kinds); %d wanted kinds, %d wanted items carried',
+                                         n, #goods, #worder, carried)
+              or (d and (#cars > 0 and ('caravan not at the depot yet' ..
+                                        (#worder > 0 and string.format(' (%d wanted kinds, %d items carried)', #worder, carried)
+                                         or '')) or 'no caravan') or 'no built trade depot')
   local ledger = {}
   for i, e in ipairs(st.ledger or {}) do ledger[i] = e end
   local data = {caravans = json.array(list), depot = d and d.id or -1, goods = json.array(goods), goods_items = n,
+                carried_items = carried, wanted_matches = json.array(matches), wanted_more = more,
+                wanted_scan = capped and ('capped at ' .. scanned) or nil,
                 want = srcs(want), sell = srcs(sell), ledger = json.array(ledger), done = st.done}
-  -- the reply stays within 8 KB: older ledger entries go first, then the cheapest goods kinds
+  -- the reply stays within 8 KB: older ledger entries go first, then the cheapest goods kinds, then the last wanted
+  -- kinds (counted in wanted_more)
   while true do
     local ok, enc = pcall(json.encode, data)
     if not ok or #enc <= 7500 then break end
-    if #ledger > 1 then table.remove(ledger) elseif #goods > 0 then table.remove(goods) else break end
+    if #ledger > 1 then table.remove(ledger)
+    elseif #goods > 0 then table.remove(goods)
+    elseif #matches > 0 then table.remove(matches); data.wanted_more = data.wanted_more + 1
+    else break end
   end
   return true, msg, data
 end
@@ -1676,24 +1824,70 @@ local function valid_tokens(list)
   if list == nil then return true end
   if type(list) ~= 'table' or #list > 40 then return false end
   for _, s in ipairs(list) do
-    if type(s) ~= 'string' or not (s:match('^[a-z_]+$') or s:match('^[a-z_]+:[a-z_]+$')) then return false end
+    if not L.valid(s) then return false end
   end
   return true
 end
 
+local function srcs(l) local r = {} for _, t in ipairs(l) do r[#r + 1] = t.src end return json.array(r) end
+
+-- the trade.want override (until the next plan.reload)
+local function override(K, args)
+  if args.want == nil and args.sell == nil then return end
+  local pp, ov = K.persist.get('plan'), st.ov or {}
+  st.ov = {want = args.want or ov.want, sell = args.sell or ov.sell,
+           loaded = type(pp) == 'table' and int(pp.loaded) or 0}
+  dirty = true
+end
+
+local BAD_TOKENS = 'want/sell must be token lists (cloth/thread subs: plant, silk, yarn)'
+
 -- inbox trade.want {want?, sell?}: overrides plan.trade until the next plan.reload; {} = query
 M.verbs['trade.want'] = function(K, args, cmd)
-  if not valid_tokens(args.want) or not valid_tokens(args.sell) then return false, 'want/sell must be token lists' end
-  if args.want ~= nil or args.sell ~= nil then
-    local pp, ov = K.persist.get('plan'), st.ov or {}
-    st.ov = {want = args.want or ov.want, sell = args.sell or ov.sell,
-             loaded = type(pp) == 'table' and int(pp.loaded) or 0}
-    dirty = true
-    save(K)
-  end
+  if not valid_tokens(args.want) or not valid_tokens(args.sell) then return false, BAD_TOKENS end
+  override(K, args)
+  save(K)
   local want, sell = wants(K)
-  local function srcs(l) local r = {} for _, t in ipairs(l) do r[#r + 1] = t.src end return json.array(r) end
   return true, string.format('want %d, sell %d', #want, #sell), {want = srcs(want), sell = srcs(sell)}
+end
+
+-- inbox trade.retry {civ?, want?, sell?} (Run 10 y418: after a trade the caravan stayed 2,700 ticks more and the wants
+-- had changed; v.traded = 1 blocked a second trade): a new trade in the same visit. Only for a caravan AtDepot (the one
+-- from `civ`, else the first) with time_remaining >= START_MIN (3,000 ticks), never while a trade-screen phase runs or
+-- another caravan's visit holds the module. The optional lists replace the wants like trade.want; the visit record is
+-- reset (traded, tries, the sale haul, a pending retry, the ledger flag), so the next step begins it again
+M.verbs['trade.retry'] = function(K, args, cmd)
+  if not valid_tokens(args.want) or not valid_tokens(args.sell) then return false, BAD_TOKENS end
+  if args.civ ~= nil and type(args.civ) ~= 'string' then return false, 'civ must be a string' end
+  local c
+  for _, x in ipairs(read_caravans()) do
+    if x.state == 'AtDepot' and (args.civ == nil or civ_name(x.ent) == args.civ) then c = x; break end
+  end
+  if not c then return false, 'no caravan at the depot' .. (args.civ and (' from ' .. args.civ) or '') end
+  local name = civ_name(c.ent)
+  if c.bad then return false, name .. ': offended or goods seized' end
+  if int(c.tr) < M.CFG.START_MIN then
+    return false, string.format('%s leaves too soon (%d ticks left, a trade needs %d)', name,
+                                int(c.tr) * M.CFG.TR_TICKS, M.CFG.START_MIN * M.CFG.TR_TICKS)
+  end
+  local v = visit(c.ent)
+  if not v then return false, name .. ': no visit record yet, try again in a moment' end
+  if rt.ent == c.ent and UI_PHASES[rt.phase] then return false, name .. ': a trade is running (' .. rt.phase .. ')' end
+  if rt.ent and rt.ent ~= c.ent and rt.phase ~= 'IDLE' then
+    return false, 'busy with the caravan from ' .. civ_name(rt.ent) .. ' (' .. rt.phase .. ')'
+  end
+  override(K, args)
+  local was = (v.traded or 0) == 1 and 'traded' or string.format('%d tries', int(v.tries))
+  v.traded, v.tries, v.brought, v.retry, v.ledgered, v.blocked, dirty = 0, 0, 0, -1, 0, 0, true
+  if rt.ent == c.ent then
+    close_ui(K)
+    rt.phase, rt.ent, rt.f, rt.job = 'IDLE', nil, nil, nil
+  end
+  save(K)
+  local want, sell = wants(K)
+  K.log('info', 'trade: trade.retry: %s again (was %s), %d ticks left', name, was, int(c.tr) * M.CFG.TR_TICKS)
+  return true, string.format('trade with %s restarts (was %s; %d ticks left)', name, was, int(c.tr) * M.CFG.TR_TICKS),
+         {civ = name, left = int(c.tr) * M.CFG.TR_TICKS, want = srcs(want), sell = srcs(sell)}
 end
 
 return M

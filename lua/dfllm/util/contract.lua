@@ -115,6 +115,7 @@ C.VERBS = {
   ['pause']        = {mod = 'arbiter'},
   ['unpause']      = {mod = 'arbiter'},
   ['trade.want']   = {mod = 'trade'},
+  ['trade.retry']  = {mod = 'trade', modes = {PEACE = true}},   -- a second trade in the same visit (Run 10 y418)
   ['squad.sortie'] = {mod = 'military', approve = true,
                       modes = {ALERT = true, SIEGE = true, BREACH = true, RECOVERY = true}},
   ['lever']        = {mod = 'gate', modes = {PEACE = true}},

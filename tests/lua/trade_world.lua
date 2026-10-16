@@ -129,8 +129,11 @@ local function decode(W, t, i)
     if not tok then return nil end
     local head, a, b = tok:match('^([A-Z_]+):?([A-Z_]*):?([A-Z_]*)$')
     if head == 'INORGANIC' then mode, flags = 'inorganic', {IS_METAL = F.METALS[a] == true}
-    elseif head == 'PLANT' then mode, flags = 'plant', {WOOD = b == 'WOOD', STRUCTURAL_PLANT_MAT = b == 'STRUCTURAL'}
-    elseif head == 'CREATURE' then mode = 'creature' end
+    elseif head == 'PLANT' then
+      mode, flags = 'plant', {WOOD = b == 'WOOD', STRUCTURAL_PLANT_MAT = b == 'STRUCTURAL', THREAD_PLANT = b == 'THREAD'}
+    elseif head == 'CREATURE' then                -- fibre flags of silk and wool (cloth:silk / cloth:yarn)
+      mode, flags = 'creature', {SILK = b == 'SILK', YARN = b == 'WOOL' or b == 'YARN' or b == 'HAIR'}
+    end
   end
   return {type = t, index = i, mode = mode, material = {flags = flags}, getToken = function() return tok end}
 end
