@@ -1,5 +1,5 @@
 # BUG-027 the lockdown raises bridge 17880 on top of citizens: two deaths on its footprint
-Status: fixed in the core: occupancy check before every pull (Claude, 2026-10-16; offline, live-untested); BRIDGE_CRUSH, alert-first order and the tempo-aware pull timeout follow
+Status: fixed: occupancy check before every pull (1ded2eb), alert-first order, waiting-aware deadline and backup lever (c927c4a), BRIDGE_CRUSH and the death cause (Claude, 2026-10-16; offline, live-untested)
 Severity: critical (7 deaths so far, incl. a baby; every invasion costs citizens to our own gate)
 Found: 2026-10-16, Run 10 fort Erushthak Handlelock (region2-site97), y417 autumn and y418 summer, Claude playing
 Module: `lua/dfllm/gate.lua`, `lua/dfllm/siege.lua` (T0..T0+450: O1/B1 up "as soon as nobody (soldiers excluded) is outside, or at T+450")
@@ -81,7 +81,7 @@ GATE_FORCED (A) names it. The Run 10 cases (enemy 100+ tiles away) never qualify
 
 Tests (k_mock; every one fails on 6e34f8a except the lowering guard):
 - `tests/lua/test_siege.lua`: a soldier on B1 in a SIEGE (army far away) holds it for good, GATE_FAIL names him, BREACH
-  at T+900, B1 never pulled (replaces the 300-ticks test); the T+450 raise of O1 waits for a citizen next to it; a
+  only once the army comes near (part 2), B1 never pulled (replaces the 300-ticks test); the T+450 raise of O1 waits for a citizen next to it; a
   pending SIEGE raise is cancelled when a miner steps on B1 and queued again; a tame animal holds B1; a hostile 2 tiles
   from B1 forces the raise onto the soldier with GATE_FORCED; `force_near 0` never forces; `gate.manual`.
 - `tests/lua/test_gate_footprint.lua`: Run 10 on unmanaged bridges (invasion, 4 goblins far away: the recruit on X2, then
@@ -89,6 +89,53 @@ Tests (k_mock; every one fails on 6e34f8a except the lowering guard):
   12 miners crossing B1 one every 30 ticks never see it move under them (the old code crushed miner 705); the lowering
   after the siege waits for a soldier on the raised B1; a baby in arms counts at its mother's position (getPosition).
 - `tests/lua/test_drill.lua`: the raise KPI is seen sooner (T+585 instead of T+603) with the per-frame re-check.
+
+### Part 2: order, waiting, slow pulls (Claude, 2026-10-16)
+The y419 siege also showed `GATE_FAIL B1/O1 not up after 900 ticks (timeout)` and `BREACH O1 not up at T+900` while the
+pulls were under way (live lever latency 11-19 s, i.e. 330-570 ticks at 30 t/s; siege's timer pull at T+450).
+- **Call them in first** (reflex.lua `alert_due`, one rule): the lockdown's deferred civ alert sounds at once while a
+  bridge it wants up waits for units on its footprint (`gate.pulls().foot`); the gate raises once the footprint is clear.
+  siege sounds its alert at T0 anyway; soldiers are not confined by it, the GATE text names their squad station.
+- **An occupied footprint is waiting, not a timeout.** The ticks a bridge waited for units do not count toward its `up`
+  deadline; a bridge held on end for 900 ticks is GATE_FAIL `blocked` (with the names).
+- **Slow pulls go to the backup lever.** A pull under way at the deadline (a worker took it, or the bridge moves) goes once
+  to another linked lever (O1 has three, e.g. 17584/17585/17664) and gets max(300, the measured lever latency) ticks more,
+  then GATE_FAIL `slow`. The GATE_FAIL text names the real seconds (`O1 not up after <ticks> ticks, <s> s (slow)`): the
+  timeouts stay in game ticks because the pullers walk in game ticks, scaled by the measured latency.
+- **No BREACH for a waiting bridge** (siege.lua `failed_bridge`): a bridge `gate.waiting` reports (`blocked`, `pulling`)
+  is no failure while no hostile is within `NEAR_RAISE` (10) tiles of it.
+- Not changed: siege's T+450 timer (an earlier timer shuts out more civilians; with the waiting rule the latency no longer
+  turns into a BREACH). Soldiers are not moved off a bridge (a squad order is military's; the texts name the station).
+
+Tests: `tests/lua/test_siege.lua` slow O1 pull at the deadline goes to the backup lever, no GATE_FAIL/BREACH; both levers
+slow: GATE_FAIL `slow` at deadline + 300, then BREACH; the soldier on B1: BREACH only once the army is within 10 tiles.
+`tests/lua/test_gate_footprint.lua`: a unit next to a lockdown bridge sounds the alert at once (the other slow pulls
+do not hold it back), the bridge rises once he is inside. All fail on 1ded2eb.
+
+### Part 3: BRIDGE_CRUSH and the death cause (Claude, 2026-10-16)
+- **Move records** (gate): each bridge move gate sees (it leaves up/down, or flips between two passes) is recorded with
+  the tick gate saw it start and settle, the bridge and building id, the footprint, the direction, our pull's tick and
+  lever (-1 for a foreign pull) and the closest sighting of every unit within 5 tiles of the footprint while the pull
+  was pending or the bridge moved (the last scan before the move, then every frame while it moves). Kept 2,400 ticks
+  after it settled, at most 16; public `gate.moves()`. GATE (C) `moving` carries `units` (and a kern.log warn) when
+  someone is on or next to the footprint as it starts to move.
+- **BRIDGE_CRUSH (A)** (gate, on UNIT_DEATH; once per unit): the death falls between 100 ticks before the move was seen
+  and 200 after it settled, and gate saw the unit within 2 tiles of the footprint (`how=seen`; also for a death still
+  "missing" in the unit list: gate saw the dwarf there alive, as the player watching the bridge did), or the body of a
+  found death of a fort member or tame animal lies on or next to the footprint (`how=pos`), or the incident says
+  DRAWBRIDGE (`how=incident`). A combat incident (an attacker) is never a crush. Fields: bridge, unit, bid, pull, t, to,
+  how, k, pos; text `citizen 26099 crushed: bridge B1 17880 up (pulled at <tick>), last seen on it at 128,129,122`.
+- **DEATH cause** (dfllm.deaths, care passes `gate.moves()`): the same match makes the cause `crushed` (src `bridge`, or
+  `incident` for DRAWBRIDGE) with `bridge` and the evidence in `why`; a missing death that gate saw on the bridge gets
+  its cause at once (`... last seen on it at 128,129,122; missing in the unit list`), one that is still missing later
+  is matched again by care's re-check while the record lasts. The unit's own position is read only for a found death.
+- care.lua: two lines (the `gate.moves()` call and `d.bridge`); schema/CONTRACTS: BRIDGE_CRUSH (A), DEATH `bridge`,
+  `gate.moves()`; RULES §7.
+
+Tests: `tests/lua/test_care_deaths.lua` (the library match: sighting, body, incident, window; a missing death gate saw
+on B1 is crushed at once; a found body on the footprint and DRAWBRIDGE name the bridge, combat stays killed, a death far
+away stays unknown); `tests/lua/test_gate_footprint.lua` (in a siege a foreign pull moves B1 with a miner on it: GATE
+`moving` names him, his "missing" death is BRIDGE_CRUSH `seen` once; a death far from any move is none).
 
 Live check (next siege or a drill on Handlelock): with somebody on the B1 corridor, `events` shows
 `GATE B1 up waits: ...` and no `LEVER pull B1 up` until the corridor is clear; kern.log has no

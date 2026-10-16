@@ -516,6 +516,8 @@ local function alert_due(K, hd, now, p)
   if not hd.acts.gates then return 'no gates', p end
   if p == nil then p = pulls(K) end
   if not p then return 'no gate module', p end
+  -- BUG-027: a bridge waits for units on its footprint: call the civilians in first (the gate raises once it is clear)
+  if (int(p.foot) or 0) > 0 then return 'units on a bridge', p end
   if (int(p.left) or 0) == 0 then
     local want = int(p.want) or 0
     return (want > 0 and (int(p.up) or 0) >= want) and 'gates up' or 'no pull pending', p

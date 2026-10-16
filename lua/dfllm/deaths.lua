@@ -20,6 +20,12 @@
 -- incident is discovered or an announcement names the unit; care asks again every run. Without a readable incident
 -- the unit sheet's fields count. Evidence that rides along: the deciding source, the thirst and hunger timers, the
 -- patient flag (needs health care, or resting in bed), the last job, the position.
+-- BUG-027 (Run 10: seven citizens crushed by B1 and O1, every DEATH "unknown (not found yet, missing in the unit
+-- list)"): gate records each bridge move (gate.moves: the pull, the move window, the units it saw on or near the
+-- footprint while it pulled or the bridge moved). A death in that window of a unit gate saw on or within BRIDGE_SEEN
+-- tiles of the footprint (a missing death too: gate saw it there alive), or a found death on or next to the footprint,
+-- or an incident DRAWBRIDGE, is `crushed` (src `bridge`, unless the incident decided) with the bridge as evidence.
+-- A combat incident (an attacker) is never a bridge death.
 local C = require('dfllm.util.contract')
 
 local D = {}
@@ -67,6 +73,9 @@ D.TEXT = {dehydrated = 'died of dehydration', starved = 'starved to death', kill
           infection = 'died of an infection', unknown = 'died', mixed = 'died'}
 D.LINES = {thirst = 50000, hunger = 75000, thirsty = 25000, hungry = 50000}   -- unit sheet status lines
 D.REPORTS = 400                                         -- newest announcement log entries read
+-- BUG-027: a death counts for a bridge move from BRIDGE_PRE ticks before gate saw it start until BRIDGE_POST after it
+-- settled (eventful delivers UNIT_DEATH up to 100 ticks late; the move takes ~100 ticks)
+D.BRIDGE_PRE, D.BRIDGE_POST, D.BRIDGE_SEEN = 100, 200, 2
 
 local function int(v) return math.tointeger(v) end
 local function utf(s)
@@ -263,12 +272,81 @@ local function unit_mood(u)
   if D.FAILED[k] then return {kind = k, state = 'failed'} end
 end
 
+---------------------------------------------------------------- bridge moves (BUG-027)
+local function fp_dist(fp, p)
+  if type(fp) ~= 'table' or type(p) ~= 'table' or not int(p[1]) then return nil end
+  local x, y, z = p[1], p[2], p[3]
+  if z < fp[3] or z > fp[6] then return nil end
+  local dx = x < fp[1] and fp[1] - x or (x > fp[4] and x - fp[4] or 0)
+  local dy = y < fp[2] and fp[2] - y or (y > fp[5] and y - fp[5] or 0)
+  return math.max(dx, dy)
+end
+
+-- the newest bridge move (gate.moves() records {t, t1, b, bid, fp, to, pull, seen = {{id, k, d, x, y, z}}}) that
+-- explains the death of unit `id` at tick `died`: gate saw the unit within BRIDGE_SEEN tiles of the footprint
+-- (how 'seen'), or the body lies on or next to it (`pos`, a found death only: how 'pos'), or the incident says
+-- DRAWBRIDGE (`dtype`: the newest move, how 'incident'). {b, bid, to, t, pull, how, d, pos, k} or nil
+function D.bridge(id, died, moves, pos, dtype)
+  died = int(died)
+  if not died or type(moves) ~= 'table' then return nil end
+  local newest
+  for i = #moves, 1, -1 do
+    local m = moves[i]
+    if type(m) == 'table' and int(m.t) and died >= m.t - D.BRIDGE_PRE and died <= (int(m.t1) or died) + D.BRIDGE_POST then
+      local r = {b = m.b, bid = m.bid, to = m.to, t = m.t, pull = m.pull}
+      for _, e in ipairs(type(m.seen) == 'table' and m.seen or {}) do
+        if type(e) == 'table' and e.id == id and (int(e.d) or 99) <= D.BRIDGE_SEEN then
+          r.how, r.d, r.pos, r.k = 'seen', e.d, {e.x, e.y, e.z}, e.k
+          return r
+        end
+      end
+      local d = fp_dist(m.fp, pos)
+      if d and d <= 1 then
+        r.how, r.d, r.pos = 'pos', d, pos
+        return r
+      end
+      newest = newest or r
+    end
+  end
+  if dtype == 'DRAWBRIDGE' and newest then
+    newest.how = 'incident'
+    return newest
+  end
+end
+
+-- "bridge B1 17880 up (pulled at 1234567), last seen on it at 128,127,122"
+function D.bridge_why(m)
+  local s = string.format('bridge %s %s %s', tostring(m.b), tostring(m.bid or '?'), tostring(m.to or 'moved'))
+  if int(m.pull) and m.pull >= 0 then s = s .. string.format(' (pulled at %d)', m.pull) end
+  local p = type(m.pos) == 'table' and int(m.pos[1]) and string.format('%d,%d,%d', m.pos[1], m.pos[2], m.pos[3])
+  if m.how == 'seen' then
+    s = s .. (m.d == 0 and ', last seen on it'
+              or string.format(', last seen %d %s from it', m.d, m.d == 1 and 'tile' or 'tiles'))
+  elseif m.how == 'pos' then s = s .. (m.d == 0 and ', died on it' or ', died next to it')
+  else s = s .. ', incident DRAWBRIDGE' end
+  return p and (s .. ' at ' .. p) or s
+end
+
+local function bridge_result(r, m, why)
+  r.cause, r.src, r.bridge, r.found = 'crushed', 'bridge', m.b, true
+  r.why = {D.bridge_why(m)}
+  if why then r.why[#r.why + 1] = why end
+  return r
+end
+
+-- a dead unit that is no longer in the unit vector: crushed when gate saw it at a bridge that moved then, else nil
+function D.gone(id, died, moves)
+  local m = D.bridge(id, died, moves)
+  if not m then return nil end
+  return bridge_result({cause = 'unknown', src = 'none', why = {}, found = true}, m, 'unit gone')
+end
+
 ---------------------------------------------------------------- the cause
 -- classify(u, o) -> {cause, src ('incident', 'unit', 'report', 'timer', 'mood', 'none'), why = {evidence...},
 --   found (false: not found yet, no cause), dtype, by, killer, mood (kind), thirst, hunger, patient, pos, job}
 -- o = {mood = {kind, state = 'strange'|'failed'} (care's own mood records), since = the death tick (abs),
 --      groups = D.report_groups() (built when needed, of the newest `reports` entries), thirst = Dehydrated line,
---      hunger = Starving line}
+--      hunger = Starving line, died = the death tick for the bridge moves, bridges = gate.moves() (BUG-027)}
 function D.classify(u, o)
   o = o or {}
   local r = {cause = 'unknown', src = 'none', why = {}, found = true}
@@ -281,8 +359,12 @@ function D.classify(u, o)
     end
     return r.rep or nil
   end
-  if ic and not ic.found and not rep() then        -- the unit list says "missing": nothing to tell yet
-    r.found, r.rep = false, nil
+  if ic and not ic.found and not rep() then        -- the unit list says "missing": nothing to tell yet ...
+    r.rep = nil
+    -- ... unless gate saw the dwarf on or next to a bridge as it was pulled or moved (BUG-027)
+    local m = o.bridges and D.bridge(u.id, o.died, o.bridges)
+    if m then return bridge_result(r, m, 'missing in the unit list') end
+    r.found = false
     r.why = {'not found yet, missing in the unit list'}
     return r
   end
@@ -296,6 +378,9 @@ function D.classify(u, o)
     if dtype then src = 'unit' end
   end
   if dtype then base = D.TYPE[dtype] end
+  -- BUG-027: a bridge that moved just then, unless the incident names another cause (combat, ...)
+  local bm = o.bridges and (base == nil or base == 'crushed') and D.bridge(u.id, o.died, o.bridges, r.pos, dtype)
+  if bm then base, src, r.bridge = 'crushed', src or 'bridge', bm.b end
   if not base then
     local h = rep()
     if h and h.cat then base, src = h.cat, 'report' end
@@ -319,6 +404,7 @@ function D.classify(u, o)
     r.cause, r.src = base or 'unknown', src or 'none'
     if mood then w[#w + 1] = 'in a ' .. mood.kind .. ' mood' end
   end
+  if bm then w[#w + 1] = D.bridge_why(bm) end
   if dtype then w[#w + 1] = (src == 'unit' and 'unit ' or 'incident ') .. dtype end
   if r.by and r.cause ~= 'killed' then w[#w + 1] = 'by ' .. r.by .. (r.killer and (' ' .. r.killer) or '') end
   local h = r.rep or nil

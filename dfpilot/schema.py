@@ -452,6 +452,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
                                                                "why:s who:s hint:s pos:p")),
     # BUG-027: a SIEGE/BREACH raise went ahead onto units on or next to the footprint (a hostile within force_near)
     "GATE_FORCED": ("A", "gate", _d("bridge:s", "units:ia hostile:i pos:p job:i")),
+    # BUG-027: a unit died on or next to a bridge just pulled or moving (gate's move records, dfllm.deaths.bridge)
+    "BRIDGE_CRUSH": ("A", "gate", _d("bridge:s unit:i", "bid:i pull:i t:i to:s how:s k:s pos:p")),
     "ALERT_START": ("B", "siege", _d(opt="vis:i")),
     "ALERT_END": ("B", "siege", _d(opt="vis:i")),
     "LOCKDOWN_END": ("B", "reflex", _d(opt="why:s ticks:i doors:i refused:i")),
@@ -478,7 +480,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "PHASE": ("B", "runner", _d(opt="from:s to:s")),
     "PAUSE": ("B", "arbiter", _d("on:f", "by:s ttl:i")),
     "DEATH": ("B", "care", _d(opt="unit:i citizen:f cause:s src:s why:s found:f dtype:s by:s killer:i mood:s "
-                                  "thirst:i hunger:i patient:f pos:p job:s revised:f")),
+                                  "thirst:i hunger:i patient:f pos:p job:s revised:f bridge:s")),
     "DEATH_CLUSTER": ("B", "care", _CLUSTER),
     "ACT_FAIL": ("B", "kern", _d("fn:s", "err:s module:s")),
     "ORDER_STUCK": ("B", "economy", _d("order:i job:s why:s", "n:i days:i dropped:f")),

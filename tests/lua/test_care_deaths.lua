@@ -345,4 +345,67 @@ T.test('outside the window no cluster; the season tally in the state; DEATHS_3PL
   T.eq(W.state().care.died, nil, 'a season later: no deaths to show')
 end)
 
+---------------------------------------------------------------- BUG-027: crushed by a bridge
+-- Run 10: seven citizens died on the B1/O1 footprints, every DEATH said "unknown (not found yet, missing in the unit
+-- list)". gate.moves (here a stand-in) holds the move of B1 with the units gate saw near its footprint.
+local B1 = {128, 127, 122, 128, 129, 122}
+local function gate_stub(W, moves)
+  W.load({name = 'gate', every = {ticks = 600}, moves = function() return W.moves end})
+  W.moves = moves
+end
+local function b1_move(t, seen) return {{t = t, t1 = t + 100, b = 'B1', bid = 17880, fp = B1, to = 'up', pull = t - 200,
+                                         lever = 17584, seen = seen}} end
+
+T.test('library: a death matches a bridge move by sighting (also missing), by the body on or next to the footprint, ' ..
+       'by an incident DRAWBRIDGE; never outside the window', function()
+  local mv = b1_move(1000, {{id = 7, k = 'soldier', d = 0, x = 128, y = 127, z = 122}, {id = 8, k = 'citizen', d = 3,
+                             x = 131, y = 127, z = 122}})
+  local m = DT.bridge(7, 1050, mv)
+  T.eq({m.b, m.bid, m.to, m.pull, m.how, m.d, m.pos, m.k}, {'B1', 17880, 'up', 800, 'seen', 0, {128, 127, 122}, 'soldier'})
+  T.eq(DT.bridge_why(m), 'bridge B1 17880 up (pulled at 800), last seen on it at 128,127,122')
+  T.eq(DT.bridge(8, 1050, mv), nil, 'seen 3 tiles off: no match by sighting')
+  T.eq(DT.bridge(8, 1050, mv, {128, 130, 122}).how, 'pos', 'the body next to the footprint')
+  T.eq(DT.bridge(8, 1050, mv, {128, 131, 122}), nil, 'two tiles off')
+  T.eq(DT.bridge(9, 1050, mv, nil, 'DRAWBRIDGE').how, 'incident')
+  T.eq(DT.bridge(7, 1000 + 100 + 201, mv), nil, 'after the window')
+  T.eq(DT.bridge(7, 1000 - 101, mv), nil, 'before the window')
+  T.eq(DT.bridge(7, 1000 - 100, mv).how, 'seen')
+end)
+
+T.test('BUG-027 Run 10: a citizen gate saw on B1 dies "missing": DEATH crushed (src bridge) with the bridge, at once',
+       function()
+  local W = world{cit = 4, setup = function(W) gate_stub(W, {}) end}
+  W.run(1)
+  W.moves = b1_move(W.K.now().tick, {{id = 2, k = 'citizen', d = 0, x = 128, y = 129, z = 122}})
+  die(W, 2, nil, {found = false})
+  W.run(1)
+  local d = W.find_events('DEATH')
+  T.eq(#d, 1)
+  T.eq({d[1].d.cause, d[1].d.src, d[1].d.bridge, d[1].d.found}, {'crushed', 'bridge', 'B1', 1})
+  T.ok(d[1].msg:find('citizen 2 died: crushed (bridge B1 17880 up (pulled at ', 1, true), d[1].msg)
+  T.ok(d[1].msg:find('last seen on it at 128,129,122; missing in the unit list)', 1, true), d[1].msg)
+  T.eq(W.state().care.died, {crushed = 1})
+end)
+
+T.test('BUG-027: a found death on the footprint and an incident DRAWBRIDGE name the bridge; combat stays killed; ' ..
+       'a citizen far away stays unknown', function()
+  local W = world{cit = 6, units = {{id = 77, invader = true, race = 'GOBLIN'}},
+                  setup = function(W) gate_stub(W, {}) end}
+  W.run(1)
+  W.moves = b1_move(W.K.now().tick, {{id = 3, k = 'soldier', d = 0, x = 128, y = 128, z = 122}})
+  W.move(1, 128, 127, 122)
+  die(W, 1, nil)                                                -- found, no cause: the body on the footprint
+  die(W, 2, 'DRAWBRIDGE')
+  die(W, 3, 'STRUCK_DOWN', {killer = 77})                       -- seen on the bridge, but killed by the goblin
+  W.move(4, 10, 10, 5)
+  die(W, 4, nil, {found = false})
+  W.run(1)
+  local d = deaths(W)
+  T.eq({d[1].d.cause, d[1].d.src, d[1].d.bridge}, {'crushed', 'bridge', 'B1'})
+  T.ok(d[1].d.why:find('died on it at 128,127,122', 1, true), d[1].d.why)
+  T.eq({d[2].d.cause, d[2].d.src, d[2].d.dtype, d[2].d.bridge}, {'crushed', 'incident', 'DRAWBRIDGE', 'B1'})
+  T.eq({d[3].d.cause, d[3].d.bridge}, {'killed', nil})
+  T.eq({d[4].d.cause, d[4].d.found}, {'unknown', 0})
+end)
+
 T.done()

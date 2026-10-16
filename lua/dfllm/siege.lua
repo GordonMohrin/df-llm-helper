@@ -7,7 +7,8 @@
 --     while a pull is pending on levers outside both, seal's lever burrow with the lever tiles (BUG-013).
 --   T0..T0+450: O1/B1 up as soon as nobody (soldiers excluded) is outside, or at T+450, or when a
 --     visible hostile is <= 10 tiles from that bridge (gate keeps the single-pending invariant).
---   T0+900: an outer/inner bridge not up -> BREACH in-game (alert Tiefe+, B2 up, B2_HOLD).
+--   T0+900: an outer/inner bridge not up -> BREACH in-game (alert Tiefe+, B2 up, B2_HOLD); BUG-027: not while gate
+--     reports it waiting (units on its footprint, its pull under way) and no hostile is within NEAR_RAISE of it.
 --   RECOVERY after 2,400 quiet ticks; on quiet time +1,200 B2 then B1 down and alert off,
 --     +2,400 O1 down, +8,400 PEACE and SIEGE_END (A). Any visible invader -> SIEGE again.
 -- Non-invader hostiles count only within reach of the fort (threat.lua), the same rule for entry,
@@ -158,10 +159,18 @@ local function quiet_for(a, now, n)
   return false
 end
 
+-- BUG-027 (Run 10: BREACH "O1 not up at T+900" while the pulls were under way, lever latency 11-19 s): a bridge gate
+-- reports waiting (units on its footprint, or its pull under way) is no failure while no hostile is within NEAR_RAISE
 local function failed_bridge(K, g)
+  local h = K.census.h
+  local nb = type(h) == 'table' and type(h.near_bridge) == 'table' and h.near_bridge or {}
   for _, list in ipairs({g.outer, g.inner}) do
     for _, b in ipairs(list) do
-      if gate_state(K, b) ~= 'up' then return b end
+      if gate_state(K, b) ~= 'up' then
+        local d = nb[b]
+        local okw, wait = K.call('gate', 'waiting', b)
+        if not (okw and wait and not (d and d >= 0 and d <= M.NEAR_RAISE)) then return b end
+      end
     end
   end
   return nil

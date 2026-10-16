@@ -604,14 +604,15 @@ local function mv(id, x, y) return function(W) W.move(id, x, y, Z) end end
 
 -- BUG-027 (Run 10 Handlelock: siege raised B1 with goblins far away onto a recruit and, a season later, a miner; the
 -- old rule raised after 300 ticks onto whoever stood there, ignored the margin and never cancelled a pending raise)
-add{name = 'BUG-027: a soldier on the B1 footprint holds its raise in a SIEGE for good (army far away): GATE_FAIL ' ..
-           'names him, BREACH at T+900, B1 never pulled',
+add{name = 'BUG-027: a soldier on the B1 footprint holds its raise in a SIEGE for good: GATE_FAIL blocked names him ' ..
+           'at T+900; no BREACH while the army is far, BREACH once it comes within 10 tiles of B1; B1 never pulled',
   units = function()
     local r = units(S.army(6, 150, 150))
     r[5].pos = {51, 40, Z}
     return r
   end,
-  run = 1500, modes = {'PEACE>SIEGE', 'SIEGE>BREACH'},
+  at = {{1500, function(W) for i = 1, 6 do W.move(200 + i, 50 + (i - 1) % 3, 32 + (i - 1) // 3, Z) end end}},
+  run = 1700, modes = {'PEACE>SIEGE', 'SIEGE>BREACH'},
   check = function(W)
     local t0 = S.mode_tick(W, 'PEACE>SIEGE')
     T.eq(S.pulls(W, 'O1')[1].tick, t0)
@@ -622,7 +623,9 @@ add{name = 'BUG-027: a soldier on the B1 footprint holds its raise in a SIEGE fo
     T.eq(#gf, 1)
     T.eq({gf[1].d.bridge, gf[1].d.why, gf[1].d.units, gf[1].d.pos}, {'B1', 'blocked', {5}, {51, 40, Z}})
     T.ok(gf[1].msg:find('blocked: soldier 5 on the footprint (squad 1), never raised onto them', 1, true), gf[1].msg)
+    between(gf[1].tick - t0, 900, 930, 'GATE_FAIL blocked after 900 ticks of waiting')
     T.eq(ev1(W, 'BREACH').d.bridge, 'B1')
+    between(S.mode_tick(W, 'SIEGE>BREACH') - t0, 1500, 1560, 'BREACH only once the army is near B1')
     T.eq(#evs(W, 'GATE_FORCED'), 0)
     local g = gate_blocked(W, 'B1')
     T.eq(#g, 1, 'one GATE blocked event')
@@ -701,6 +704,35 @@ add{name = 'BUG-027: force_near 0 (config/reflex.json gate) never raises onto a 
   check = function(W)
     T.eq(#S.pulls(W, 'B1'), 0)
     T.eq(#evs(W, 'GATE_FORCED'), 0)
+  end}
+
+add{name = 'BUG-027 (Run 10: GATE_FAIL timeout, BREACH at T+900 with the pull under way): a slow O1 pull at the ' ..
+           'deadline goes to the backup lever; no GATE_FAIL, no BREACH while the army is far',
+  units = function() return units(S.army(6, 150, 150)) end,
+  lever_cfg = {[11] = {worker = 30, pull = 2000}},
+  run = 1500, modes = {'PEACE>SIEGE'},
+  check = function(W)
+    local t0 = S.mode_tick(W, 'PEACE>SIEGE')
+    local p = S.pulls(W, 'O1')
+    T.eq(#p, 2)
+    T.eq({p[1].lever, p[2].lever}, {11, 12})
+    between(p[2].tick - t0, 900, 930, 'the backup lever at the deadline')
+    T.eq(S.acts(W, 'cancel_own_lever_job')[1].args[1], p[1].job)
+    T.eq(S.bstate(W, 'O1'), 'up')
+    T.eq(#evs(W, 'GATE_FAIL') + #evs(W, 'BREACH'), 0)
+  end}
+
+add{name = 'BUG-027: both O1 levers slow: GATE_FAIL slow after the allowance (300 ticks past the deadline), then BREACH',
+  units = function() return units(S.army(6, 150, 150)) end,
+  lever_cfg = {[11] = {worker = 30, pull = 3000}, [12] = {worker = 30, pull = 3000}},
+  run = 1500, modes = {'PEACE>SIEGE', 'SIEGE>BREACH'},
+  check = function(W)
+    local t0 = S.mode_tick(W, 'PEACE>SIEGE')
+    local gf = ev1(W, 'GATE_FAIL')
+    T.eq({gf.d.bridge, gf.d.why}, {'O1', 'slow'})
+    between(gf.tick - t0, 1200, 1260, 'deadline + 300')
+    T.ok(gf.msg:find('O1 not up after %d+ ticks, %d+ s %(slow%)'), gf.msg)
+    between(S.mode_tick(W, 'SIEGE>BREACH') - t0, 1200, 1260, 'BREACH once the pull is no longer waiting')
   end}
 
 add{name = 'BUG-027 stop-gap: a bridge in gate.manual gets no automatic pull; GATE_FAIL says why',
