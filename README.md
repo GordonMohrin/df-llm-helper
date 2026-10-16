@@ -117,7 +117,7 @@ In game, through `"<DF>/hack/dfhack-run.exe" dfllm <sub>`:
 | `boot` | Start the kernel (`onMapLoad.init` runs it; a no-op without the marker) |
 | `status` | Modules, kernel ms/s, ticks/s, frame gaps |
 | `selftest [quick\|full] \| --mock` | In-game self-test; `--mock` runs without a fort |
-| `stop` / `restore` | Unload the kernel and restore runtime settings / restore them from `restore.json` |
+| `stop [--restore-fps]` / `restore` | Unload the kernel and restore runtime settings / restore them from `restore.json`. In SIEGE, BREACH, ALERT or a lockdown, `stop` keeps the FPS cap and timestream and leaves the guard `dfllm-guard` running (it dismisses blocking popups and holds the clamp) until `boot`/`reload`/`restore`; `--restore-fps` restores everything at once |
 | `reload` | Developers only: boot the code on disk (refused on acceptance saves; the hook blocks it for the LLM) |
 
 Tools: `tools/migrate_v2.py` (install and `--revert`), `tools/embark/embark.py` (experimental embark through the vanilla UI, see `tools/embark/README.md`), `tools/luahost.py` (Lua tests on DFHack's `lua53.dll`), `tools/win/start_df_desktop1.ps1` (start DF via Steam on virtual desktop 1 without taking focus).

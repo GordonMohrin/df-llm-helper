@@ -1,13 +1,6 @@
 # CHANGELOG dfpilot
 
-## Lever burrow check in BREACH, BUG-027 (2026-10-16)
-- Run 10 y419: after `BREACH O1 not up at T+900` (enemy far) every O1/B1 lever lay in Kern+, but the BREACH alert holds the civilians in Tiefe+ and the
-  lever burrow `Hebel+` was never listed in BREACH, so nobody could pull them (`GATE_FAIL ... no worker: its levers lie outside the alert burrow`).
-  In BREACH `gate.rooms` now lists `Hebel+` while no hostile is inside Kern+ and none within 20 tiles of those levers; the GATE_FAIL names the burrows.
-- A mode change that renews an `up` epoch resets that epoch's no-worker history and bad levers. A popup pause cannot cause `no_worker` (game-tick timers).
-- Tests: three cases in `tests/lua/test_gate_footprint.lua`.
-
-## Run 10 batch merged: what to do after `git pull` (2026-10-16, updated with trade and BUG-027)
+## Run 10 batch merged: what to do after `git pull` (2026-10-16, updated with trade, BUG-027 and FR-68)
 - Reload: `dfhack-run dfllm reload` (kernel parts: SIEGE_UNREADY, LOCKDOWN_PARTIAL, TOOL_BLOCKED, refuge levels, CUTOFF re-read,
   build_lost retry, mood cloth kinds); restart `dfllm follow --no-auto` (it audits again; `--no-audit` switches that off).
 - Audit now: `python -m dfpilot audit`; drill by hand: `python -m dfpilot cmd drill '{"why":"manual check"}'`.
@@ -22,9 +15,47 @@
 - Bridges (BUG-027): no pull while any non-hostile unit is on or next to the footprint; forced raise only with a hostile within
   `gate.force_near` (3); alert first, then raise; backup lever; BRIDGE_CRUSH. The runtime hack `gate.BLOCK_WAIT = ...` is obsolete
   (the field no longer exists).
+- Stop guard (FR-68): `dfhack-run dfllm stop` in SIEGE/BREACH/ALERT keeps the FPS cap (30/100) and starts `dfllm-guard`
+  (dismisses known blocking popups, keeps the clock); `dfllm boot`/`reload` remove it, `dfllm restore` or `stop --restore-fps`
+  release the clock. Lever burrow: in BREACH `Hebel+` is listed while no hostile is in Kern+ or near the levers (the cause of
+  `GATE_FAIL no worker` in y419).
 - Next: BUG-028 (BREACH keeps citizens cut off from drink: rescue opening of the inner bridges, BREACH -> SIEGE after a verified
-  seal, SUPPLY_OUTSIDE), FR-68 (emergency popup/clock guard while the kernel is stopped, safe `dfllm stop`), the lever-burrow
-  check behind `GATE_FAIL no worker`.
+  seal, SUPPLY_OUTSIDE).
+
+## Lever burrow check in BREACH, BUG-027 (2026-10-16)
+- Run 10 y419: after `BREACH O1 not up at T+900` (enemy far) every O1/B1 lever lay in Kern+, but the BREACH alert holds the civilians in Tiefe+ and the
+  lever burrow `Hebel+` was never listed in BREACH, so nobody could pull them (`GATE_FAIL ... no worker: its levers lie outside the alert burrow`).
+  In BREACH `gate.rooms` now lists `Hebel+` while no hostile is inside Kern+ and none within 20 tiles of those levers; the GATE_FAIL names the burrows.
+- A mode change that renews an `up` epoch resets that epoch's no-worker history and bad levers. A popup pause cannot cause `no_worker` (game-tick timers).
+- Tests: three cases in `tests/lua/test_gate_footprint.lua`.
+
+## Stop guard FR-68: `dfllm stop` in a fight keeps the clock and the popups clear (2026-10-16; branch fix-ready, offline, live-untested)
+- **Live siege y419 (Run 10):** the session stopped the kernel for ~3 min to pull levers by hand. `dfllm stop` put the
+  FPS cap and timestream back to 500 and left every popup standing, so each death notice ("found dead, dehydrated")
+  halted the simulation until `dfllm reload` (back in BREACH).
+- **`dfllm stop` in SIEGE/BREACH/ALERT or during a reflex lockdown** now restores every setting except the FPS cap and
+  timestream (arbiter `on.UNLOAD` with `hold_ok`; `restore.json` stays `active:1`) and prints/logs a warning: `stopped in
+  SIEGE: FPS cap held at 30, timestream off; guard dfllm-guard runs ...`. `dfllm stop --restore-fps` = the old
+  full restore. PEACE, map unload, reload and restore behave as before.
+- **Guard `dfllm-guard`** (`lua/dfllm/guard.lua`, repeat every 10 frames, also while paused) while the kernel is stopped:
+  dismisses the front popup when the arbiter's whitelist knows it (new public `arbiter.classify`, `act.dismiss_popup`, as
+  the arbiter does), holds the vanilla FPS cap at the mode's clamp (30 SIEGE/BREACH, 100 ALERT) and timestream off (only
+  with D-11 accepted), never pauses or unpauses, logs to `commands.log` (origin `guard`), reports in `<save>/guard.json`.
+  `dfllm boot`/`adopt`/`reload` remove it (the boot's heal puts the original cap back before the new capture; kern.log
+  `stop guard removed at boot: ...`); `dfllm restore` removes it and releases the clock; a map unload removes it and heals.
+- **`status`/`brief`** (Python) print `GUARD: kernel stopped in SIEGE 3m ago; dfllm-guard holds FPS cap 30, timestream off,
+  dismissed 4 popups (death 3, ...) | dfhack-run dfllm boot resumes the kernel, dfllm restore releases the clock` on line 2
+  (`GUARD last seen … ago` when DF closed while it ran); in game `dfllm status` names the guard when the kernel is stopped.
+- Tests: `tests/lua/test_kern_arbiter.lua` (2 FR-68 cases on the real kernel: SIEGE stop, popups, clamp, boot ends it,
+  `--restore-fps`, PEACE, ALERT cap, `dfllm restore`, map unload, reload, D-11, lockdown in PEACE), `tests/test_cli_status.py`
+  (GUARD line, stale, off, malformed), `tests/test_hook.py` (`dfllm stop --restore-fps` allowed).
+- **How to use / Live check:** after `git pull`, `dfhack-run dfllm reload`. In a siege, `dfhack-run dfllm stop` must print
+  `stopped in SIEGE ... FPS cap held at 30 ...; guard dfllm-guard runs`; `dfhack-run dfllm status` says `kernel not running;
+  stop guard on: SIEGE, FPS cap 30, timestream off, N popups dismissed`; `python -m dfpilot status` shows the `GUARD:` line; a
+  death notice disappears within a second while DF's Settings show the FPS cap 30; `<save>/commands.log` has `guard
+  act.dismiss_popup` lines. Then `dfhack-run dfllm boot` (or `reload`): the guard is gone (`guard.json` `on:0`, kern.log
+  `stop guard removed at boot`) and the mode's clock is the kernel's again. `dfhack-run dfllm restore` (or `dfllm stop
+  --restore-fps` while stopped) gives the original FPS cap back without booting.
 
 ## Siege readiness gate FR-65, audit and drill with `follow --no-auto` (2026-10-16; branch fix-ready, offline, live-untested)
 - **Run 10 (Handlelock): `audit FAIL never` and `drill never` for the whole fort.** The session ran `dfllm follow --no-auto`,

@@ -425,17 +425,25 @@ local function popup_count()
   return ok and n or 0
 end
 
--- kind, text, threat: threat = true for M.THREAT_POPUPS (checked first)
+-- public (FR-68: the stop guard dismisses the same popups): kind, threat for a popup text; threat = true for
+-- M.THREAT_POPUPS (checked first); nil for a popup that stays for the player
+function M.classify(text)
+  if type(text) ~= 'string' then return nil end
+  local low = text:lower()                -- live L1b: "Merchants have arrived and ..." starts upper case
+  for kind, marks in pairs(M.THREAT_POPUPS) do
+    for _, m in ipairs(marks) do if low:find(m:lower(), 1, true) then return kind, true end end
+  end
+  for kind, marks in pairs(M.POPUPS) do
+    for _, m in ipairs(marks) do if low:find(m:lower(), 1, true) then return kind, false end end
+  end
+end
+
+-- kind, text, threat of the front popup
 local function popup_kind()
   local ok, text = pcall(function() return dfhack.df2utf(df.global.world.status.popups[0].text) end)
   if not ok or type(text) ~= 'string' then return nil end
-  local low = text:lower()                -- live L1b: "Merchants have arrived and ..." starts upper case
-  for kind, marks in pairs(M.THREAT_POPUPS) do
-    for _, m in ipairs(marks) do if low:find(m:lower(), 1, true) then return kind, text, true end end
-  end
-  for kind, marks in pairs(M.POPUPS) do
-    for _, m in ipairs(marks) do if low:find(m:lower(), 1, true) then return kind, text, false end end
-  end
+  local kind, threat = M.classify(text)
+  if kind then return kind, text, threat end
 end
 
 -- FR-36: hand a threat (or depot) popup to the reflex module once per popup, before anything dismisses it. Without
@@ -535,11 +543,33 @@ end
 
 function M.on.MODE(K, ev) M.apply(K) end
 
-function M.on.UNLOAD(K)
-  if st.orig then
-    restore(K, st.orig)
-    write_restore(K, {v = 2, save = tostring(K.cfg.save or ''), wall = os.time(), active = 0, orig = st.orig})
+-- FR-68: `dfllm stop` (kern passes ev.hold_ok) while the fort is in SIEGE/BREACH/ALERT or a reflex lockdown holds
+-- the clock: every setting goes back except the FPS cap and timestream, which stay where the clock had them;
+-- restore.json stays active (dfllm restore, the next boot or a map unload heals them) and ev.held tells kern what
+-- the guard must hold. Any other unload (map unload, reload, restore, --restore-fps) restores everything.
+M.HOLD_MODES = {SIEGE = true, BREACH = true, ALERT = true}
+function M.on.UNLOAD(K, ev)
+  local held
+  if type(ev) == 'table' and ev.hold_ok == true and (M.HOLD_MODES[K.mode()] or st.clamp ~= nil) then
+    local fps, _, cap = desired(K)
+    local c = clock_cfg(K)
+    cap = int(cap) or c[M.MODE_CAP[K.mode()] or 'siege_cap'] or c.siege_cap
+    -- timestream only where the arbiter drives it at all (D-11 accepted): a rejected D-11 is never touched
+    held = {cap = cap, ts_off = fps <= 0 and ts_accepted(K), why = st.clamp and ('lockdown ' .. tostring(st.clamp))
+            or K.mode()}
+    ev.held = held
   end
+  if not st.orig then return end
+  if held then
+    local rest = {}
+    for k, v in pairs(st.orig) do if k ~= 'fps_cap' and k ~= 'timestream_fps' then rest[k] = v end end
+    restore(K, rest)
+    if math.type(st.cap) ~= 'integer' or st.cap > held.cap then K.act.setting('fps_cap', held.cap) end
+    write_restore(K, {v = 2, save = tostring(K.cfg.save or ''), wall = os.time(), active = 1, orig = st.orig})
+    return
+  end
+  restore(K, st.orig)
+  write_restore(K, {v = 2, save = tostring(K.cfg.save or ''), wall = os.time(), active = 0, orig = st.orig})
 end
 
 function M.state(K)

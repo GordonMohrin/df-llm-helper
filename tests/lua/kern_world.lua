@@ -43,6 +43,8 @@ function H.world(opts)
   opts = opts or {}
   local kern = package.loaded['dfllm.kern']
   if kern and kern.running() then kern.stop('test reset') end
+  local guard = package.loaded['dfllm.guard']                -- FR-68: a stop guard left by an earlier test
+  if guard then guard.remove('test reset') end
   local dir = opts.dfpath or H.tmpdir(opts.tag)
   local W = kmock.new{dfpath = dir, save = opts.save or 'region1', marker = opts.marker, year = opts.year,
                       ytick = opts.ytick, units = opts.units, persist = opts.persist, ms = opts.ms or 100000}

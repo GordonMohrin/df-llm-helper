@@ -1,11 +1,13 @@
 -- dfllm: dfpilot v2 kernel entry (DESIGN §7, CONTRACTS §3.1, §3.5).
 --   dfllm boot                      start the kernel (onMapLoad.init); a no-op on saves without the marker
 --   dfllm adopt [--acceptance]      mark this fort as dfllm-managed (once), load plans/year1.json, boot
---   dfllm stop                      unload the kernel (restores runtime settings)
+--   dfllm stop [--restore-fps]      unload the kernel (restores runtime settings; FR-68: in SIEGE/BREACH/ALERT or a
+--                                   lockdown the FPS cap and timestream stay and the guard `dfllm-guard` dismisses
+--                                   blocking popups until boot/reload/restore; --restore-fps restores everything)
 --   dfllm reload                    stop, drop the cached dfllm modules, boot the code on disk (not on acceptance saves)
 --   dfllm status                    one-screen summary
 --   dfllm selftest [quick|full] [--mock] [--exec FILE]
---   dfllm restore                   restore runtime settings from dfllm-runtime/restore.json
+--   dfllm restore                   restore runtime settings from dfllm-runtime/restore.json (ends the stop guard)
 
 -- put <repo>/lua on package.path so plain require('dfllm.<name>') works (CONTRACTS §3.1)
 local function setup_path()
@@ -34,7 +36,8 @@ if cmd == 'boot' then
 elseif cmd == 'adopt' then
   say(kern.adopt{repo = repo, acceptance = has('--acceptance')})
 elseif cmd == 'stop' then
-  say(kern.stop('stop'))
+  if not kern.running() and has('--restore-fps') then say(kern.restore{repo = repo})   -- release a stop guard
+  else say(kern.stop('stop', {restore_fps = has('--restore-fps')})) end
 elseif cmd == 'reload' then
   -- live engineering: stop, drop every cached dfllm module, boot the code on disk (persist is flushed
   -- by stop, so nothing is lost). Refused on acceptance saves.
@@ -49,7 +52,12 @@ elseif cmd == 'restore' then
   say(kern.restore{repo = repo})
 elseif cmd == 'status' then
   local s = kern.status()
-  if not s then print('dfllm: kernel not running'); return end
+  if not s then
+    local g = require('dfllm.guard').active()
+    print('dfllm: kernel not running' .. (g and ('; stop guard on: ' .. g.text .. (g.err and (' (error: ' .. g.err .. ')')
+          or '') .. '; dfllm boot resumes, dfllm restore releases the clock') or ''))
+    return
+  end
   print(string.format('dfllm %s  mode %s  seq %d  ev %d  boots %d  frame %d', s.save, s.mode, s.seq, s.ev,
                       s.boots or 0, s.frame))
   print(string.format('  kernel %d ms/s (budget %d)  %d ticks/s  max gap %d ms  frame faults %d  dropped events %d',
@@ -82,5 +90,5 @@ elseif cmd == 'selftest' then
   print(string.format('dfllm selftest: %d pass, %d fail %s', r.pass, r.fail,
                       #r.failed > 0 and ('(' .. (r.detail and st.describe(r) or table.concat(r.failed, ', ')) .. ')') or ''))
 else
-  print('usage: dfllm boot | adopt [--acceptance] | stop | reload | status | selftest [quick|full] [--mock] [--exec FILE] | restore')
+  print('usage: dfllm boot | adopt [--acceptance] | stop [--restore-fps] | reload | status | selftest [quick|full] [--mock] [--exec FILE] | restore')
 end

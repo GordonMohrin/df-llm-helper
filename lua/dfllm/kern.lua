@@ -13,6 +13,7 @@ local sched = require('dfllm.util.sched')
 local fio = require('dfllm.io')
 local persistlib = require('dfllm.persist')
 local actlib = require('dfllm.act')
+local guard = require('dfllm.guard')         -- FR-68: what `dfllm stop` leaves running in a dangerous mode
 
 local M = {}
 M.KEY = 'dfllm'
@@ -1195,12 +1196,14 @@ end
 function M.boot(opts)
   opts = opts or {}
   if S then M.stop('reboot') end
+  local guarded = guard.remove('boot')       -- FR-68: the kernel takes the clock and the popups back
   local ok, save = preconditions()
   if not ok then return false, save end
   local marker = read_marker()
   local paths = fio.paths(dfhack.getDFPath(), M.runtime_key(marker, save))
   local st = build{opts = opts, paths = paths, save = save, marked = marker ~= nil}
   local repo = opts.repo or '.'
+  if guarded then st.log_as('kern', 'info', 'stop guard removed at boot: ' .. guarded) end
   if not marker then
     -- unmarked save: only heal settings a crashed session left behind; nothing in the save is touched
     heal_only(st, repo, false)
@@ -1302,15 +1305,35 @@ function M.adopt(opts)
   return M.boot(opts)
 end
 
-function M.stop(why)
+-- why: 'stop' (dfllm stop), 'reload', 'reboot', 'restore', 'unload', 'map gone', ...; opts.restore_fps (dfllm stop
+-- --restore-fps): restore everything as before FR-68. A plain `dfllm stop` while the fort is in SIEGE/BREACH/ALERT
+-- or a reflex lockdown holds the clock keeps the FPS cap and timestream (arbiter on.UNLOAD) and installs the guard.
+function M.stop(why, opts)
   local st = S
   if not st then return false, 'not running' end
   why = why or 'stop'
+  opts = type(opts) == 'table' and opts or {}
+  local ev = {why = why, hold_ok = why == 'stop' and opts.restore_fps ~= true}
+  local arb
   for _, e in ipairs(st.entries) do   -- arbiter restores runtime settings even when disabled
-    if not e.disabled or e.name == 'arbiter' then deliver(st, e, 'UNLOAD', {}) end
+    if not e.disabled or e.name == 'arbiter' then deliver(st, e, 'UNLOAD', ev) end
+    if e.name == 'arbiter' then arb = e.M end
+  end
+  local held = type(ev.held) == 'table' and ev.held or nil
+  local msg = why
+  if held then
+    local okg, gmsg = guard.install{mode = st.mode, cap = held.cap, ts_off = held.ts_off, why = held.why,
+                                    save = st.marked and st.paths.save or nil,
+                                    classify = arb and type(arb.classify) == 'function' and arb.classify or nil}
+    msg = string.format('stopped in %s%s: FPS cap held at %d%s; guard %s %s (dismisses blocking popups, keeps '
+                        .. 'the clock); dfllm boot resumes, dfllm restore releases the clock (or stop --restore-fps)',
+                        st.mode, held.why ~= st.mode and (' (' .. tostring(held.why) .. ')') or '', held.cap,
+                        held.ts_off and ', timestream off' or '', guard.KEY, okg and 'runs' or ('FAILED: ' .. tostring(gmsg)))
+    st.log_as('kern', 'warn', msg)
   end
   st.current = 'kern'
-  st.emit_as('kern', 'UNLOAD', 'C', why, nil)
+  st.emit_as('kern', 'UNLOAD', 'C', held and string.format('%s (guard holds FPS cap %d in %s)', why, held.cap, st.mode)
+                                    or why, nil)
   st.current = nil
   pcall(flush_persist, st, true)
   pcall(compose, st)
@@ -1323,13 +1346,15 @@ function M.stop(why)
   dfhack.onStateChange[M.KEY] = nil
   fio.remove(st.paths.runtime .. '/ACTIVE')
   S = nil
-  return true, why
+  return true, msg
 end
 
--- dfllm restore: stop a running kernel (its arbiter restores) or heal restore.json without booting
+-- dfllm restore: stop a running kernel (its arbiter restores) or heal restore.json without booting; a stop guard
+-- (FR-68) ends here too, so the held FPS cap and timestream come back
 function M.restore(opts)
   opts = opts or {}
   if S then return M.stop('restore') end
+  guard.remove('restore')
   local paths = fio.paths(dfhack.getDFPath(), nil)
   local st = build{opts = opts, paths = paths, save = save_name(), marked = false}
   local okm, mk = pcall(function() return dfhack.isMapLoaded() and read_marker() end)

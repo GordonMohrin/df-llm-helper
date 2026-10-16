@@ -116,7 +116,10 @@ that DF runs, the fort is loaded, then `dfhack-run dfllm status`.
    fort running: defense, supply and the approved plan; it never starts a new ★ phase by itself.
 2. **Pause** in DF whenever you like (space). Nothing in v2 unpauses your pause.
 3. **Stop the kernel** for this game session: `dfhack-run dfllm stop`. It restores the runtime settings (timestream,
-   fps, autosave, overlays, pop cap). The next load of an adopted save boots it again; `dfhack-run dfllm boot`
+   fps, autosave, overlays, pop cap). During a siege, a breach, an alert or an arrival lockdown it keeps the FPS cap
+   (30, alert 100) and timestream off, prints a warning, and a small guard keeps clicking away notices that would halt
+   the game (deaths, migrants, moods) until `dfhack-run dfllm boot` (or `reload`); `dfhack-run dfllm restore` (or
+   `dfllm stop --restore-fps`) gives the normal speed back at once. The next load of an adopted save boots it again; `dfhack-run dfllm boot`
    starts it now. If settings look wrong after a crash or unload: `dfhack-run dfllm restore` (restoring on a real
    unload is not live-tested yet).
 4. **Remove v2 from DF:** close DF, then `python tools/migrate_v2.py --revert` (restores `script-paths.txt` and

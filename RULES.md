@@ -65,7 +65,8 @@ dfllm cmd <verb> '<json args>'
 dfllm bp list | bp preview <tpl> | bp sites <tpl>
 dfllm supervise --once --dry-run   # liveness report (the restarting task is optional, not live-tested)
 ```
-In game (via `dfhack-run`): `dfllm boot|adopt|stop|status|selftest|restore`. `onMapLoad.init`
+In game (via `dfhack-run`): `dfllm boot|adopt|stop|status|selftest|restore` (`stop` in SIEGE/BREACH/ALERT keeps
+the FPS clamp and leaves the popup guard until `boot`; never `stop --restore-fps` in a fight). `onMapLoad.init`
 runs only `dfllm boot` (`tools/migrate_v2.py --apply` sets it up); without the marker it does nothing.
 
 **Session start:** `dfllm doctor`, then `dfllm status`, then start `Monitor` on `dfllm follow`.

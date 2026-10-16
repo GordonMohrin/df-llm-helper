@@ -99,6 +99,8 @@ BLOCKED = [
 ALLOWED = [
     "dfhack-run dfllm status",
     "dfhack-run dfllm boot",
+    "dfhack-run dfllm stop",
+    "dfhack-run dfllm stop --restore-fps",                       # FR-68: the old full restore
     "dfhack-run dfllm selftest --mock",
     f"& {DFRUN} dfllm status 2>&1 | Select-Object -Last 5",
     "dfhack-run load-save region1",

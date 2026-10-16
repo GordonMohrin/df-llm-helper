@@ -546,4 +546,108 @@ T.test('arbiter on the reference k_mock K (strict contract checks)', function()
   T.eq(H.json(dir .. '/dfllm-runtime/restore.json').active, 0)
 end)
 
+---------------------------------------------------------------- FR-68 stop guard
+local guard = require('dfllm.guard')
+local function gtick(W) W.repeats['dfllm-guard'][3]() end
+local function cap() return math.floor(df.global.enabler.fps + 0.5) end
+
+T.test('FR-68 dfllm stop in SIEGE keeps the clock and leaves the guard: popups dismissed, cap held, boot ends it', function()
+  local W = H.world{tag = 'guard'}
+  local g = df.global
+  local K = boot(W)
+  K.set_mode('SIEGE', 'army')
+  H.run(W, 20)
+  T.eq({cap(), W.ts_fps}, {30, -1})
+  g.pause_state = true                          -- the player paused to pull levers by hand
+  local ok, msg = kern.stop('stop')
+  T.ok(ok, msg)
+  T.ok(msg:find('stopped in SIEGE', 1, true) and msg:find('FPS cap held at 30', 1, true), msg)
+  T.eq({cap(), W.ts_fps, g.enabler.gfps, g.d_init.feature.autosave}, {30, -1, 250, df.d_init_autosave.SEASONAL},
+       'only the clock stays (live y419: stop put 500 back)')
+  T.eq(H.json(W.rt .. '/restore.json').active, 1, 'the held cap and timestream are still to restore')
+  T.eq(W.repeats.dfllm, nil, 'the kernel callback is gone')
+  T.ok(W.repeats['dfllm-guard'], 'the guard runs')
+  local gj = H.json(W.sd .. '/guard.json')
+  T.eq({gj.on, gj.mode, gj.cap, gj.ts_off}, {1, 'SIEGE', 30, 1})
+  T.ok(H.read(W.sd .. '/kern.log'):find('guard dfllm-guard runs', 1, true))
+  -- live y419: every death notice halted the fort while the kernel was stopped; erased like the arbiter does
+  local popups = g.world.status.popups
+  popups:insert('#', {text = 'Urist Lolorkol, Miner has been found dead, dehydrated.'})
+  gtick(W)
+  T.eq({#popups, g.pause_state}, {0, true}, 'dismissed; the player pause stays')
+  popups:insert('#', {text = 'The dwarves have found something unusual.'})
+  gtick(W)
+  T.eq(#popups, 1, 'unknown popups stay for the player')
+  popups:erase(0)
+  g.enabler.fps, W.ts_fps = 500, 500            -- anything that raises the clock again
+  gtick(W)
+  T.eq({cap(), W.ts_fps}, {30, -1})
+  gj = H.json(W.sd .. '/guard.json')
+  T.eq({gj.n, gj.kinds, gj.last}, {1, {death = 1}, 'Urist Lolorkol, Miner has been found dead, dehydrated.'})
+  T.ok(guard.active().text:find('SIEGE, FPS cap 30, timestream off, 1 popup dismissed (death 1)', 1, true),
+       guard.active().text)
+  local cl = H.read(W.sd .. '/commands.log')
+  T.ok(cl:find('\tguard\tact.dismiss_popup', 1, true) and cl:find('\tguard\tact.setting', 1, true), cl)
+  -- boot (start, reload) ends the guard; the heal puts the original cap back before the new capture
+  g.pause_state = false
+  K = boot(W)
+  T.eq({W.repeats['dfllm-guard'], guard.active()}, {nil, nil})
+  T.eq(H.json(W.sd .. '/guard.json').on, 0)
+  T.eq(H.json(W.rt .. '/restore.json').orig.fps_cap, 250, 'the original, not the held 30')
+  T.eq({K.mode(), cap()}, {'SIEGE', 30}, 'the kernel holds the siege cap again')
+  T.ok(H.read(W.sd .. '/kern.log'):find('stop guard removed at boot: SIEGE, FPS cap 30', 1, true))
+  -- --restore-fps: the old behaviour
+  T.ok(kern.stop('stop', {restore_fps = true}))
+  T.eq({cap(), W.ts_fps, guard.active()}, {250, 250, nil})
+  T.eq(H.json(W.rt .. '/restore.json').active, 0)
+end)
+
+T.test('FR-68: PEACE stop restores all; ALERT holds the alert cap; dfllm restore, a map unload, reload', function()
+  local W = H.world{tag = 'guard2'}
+  local K = boot(W)
+  H.run(W, 20)
+  T.ok(kern.stop('stop'))
+  T.eq({cap(), guard.active(), H.json(W.rt .. '/restore.json').active}, {250, nil, 0}, 'PEACE: as before')
+  K = boot(W)
+  K.set_mode('ALERT', 'hostile')
+  H.run(W, 20)
+  local _, msg = kern.stop()
+  T.ok(msg:find('stopped in ALERT', 1, true), msg)
+  T.eq({cap(), W.ts_fps}, {100, -1})
+  T.ok(kern.restore{modules = {arbiter}})       -- dfllm restore (dfllm stop --restore-fps on a stopped kernel)
+  T.eq({cap(), W.ts_fps, guard.active(), W.repeats['dfllm-guard']}, {250, 250, nil, nil})
+  K = boot(W)
+  K.set_mode('SIEGE', 'army')
+  H.run(W, 20)
+  kern.stop('stop')
+  T.ok(guard.active())
+  dfhack.onStateChange['dfllm-guard'](SC_MAP_UNLOADED)      -- the map unloads while the guard runs
+  T.eq({guard.active(), cap(), H.json(W.rt .. '/restore.json').active}, {nil, 250, 0}, 'removed, the cap healed')
+  K = boot(W)
+  T.eq(K.mode(), 'SIEGE')
+  kern.stop('reload')                           -- reload boots at once: no guard, everything restored
+  T.eq({guard.active(), cap()}, {nil, 250})
+  -- D-11 rejected: the guard never touches timestream
+  local W2 = H.world{tag = 'guard3'}
+  luahost.mkdir_recursive(W2.dir .. '/config')
+  H.write(W2.dir .. '/config/decisions.yaml', 'D-11: rejected\n')
+  local K2 = boot(W2)
+  K2.set_mode('SIEGE', 'army')
+  K2.set_mode('BREACH', 'inside')
+  H.run(W2, 20)
+  kern.stop()
+  W2.ts_fps = 400
+  gtick(W2)
+  T.eq({cap(), W2.ts_fps, guard.active().ts_off}, {30, 400, false})
+  -- a reflex lockdown holds the clock while the mode is still PEACE (an arrival popup): held too
+  local W3 = H.world{tag = 'guard4'}
+  local reflex = {name = 'reflex', every = {ticks = 10}}
+  function reflex.holding(K, what) return 'arrival:siege' end
+  boot(W3, {reflex})
+  H.run(W3, 20)
+  local _, m3 = kern.stop()
+  T.ok(m3:find('stopped in PEACE (lockdown arrival:siege): FPS cap held at 30', 1, true), m3)
+  T.eq({cap(), W3.ts_fps}, {30, -1})
+end)
+
 T.done()
