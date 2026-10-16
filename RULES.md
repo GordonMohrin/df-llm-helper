@@ -166,7 +166,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | PERF_DEGRADED | `dfllm doctor`; the supervisor restarts DF only in PEACE after an autosave |
 | DECISION_NEEDED | ask the player the question once; the default applies until they answer. `build_blocked`: `inspect` `what=workload` (`construction.blocked`: kind, pos, fails, why); the kernel already unforbade the items on the site; corpses wait for burial; else `bp.cancel` and place it elsewhere |
 | PLAN_EXHAUSTED | year review now (`plan propose`) |
-| PROJECT_BLOCKED | `bp preview`, then `bp.cancel` and place at another site, or fix the material; `build_lost` names the missing pieces (`B1`, traps) and the kernel retries the stage itself (`retry n/8`): wait for it unless the line says the retries are spent |
+| PROJECT_BLOCKED | `bp preview`, then `bp.cancel` and place at another site, or fix the material; `build_lost` names the missing pieces (`B1`, traps) and the kernel retries the stage itself (`retry n/8`): wait for it unless the line says the retries are spent. A seal's `(no material for door: no rock, no logs)`: economy orders its doors/hatches in the stone or wood the fort has and retries once one can be made (MATERIAL_SHORT, B, says what is missing): tell the player (logs, stone: follow places the bedrooms dig) |
 | YEAR_REVIEW | §5 year review |
 | GHOSTS | `inspect` `what=tombs` (causes per body); `tombs.repair`; `no_coffin` → the kernel provisions coffins (`inspect tombs` `prov`: want/short/stock/order/proj); `bp.place tombs` only when `prov` reports no space and no project; `no_body` → a memorial slab |
 | HOSPITAL_DRY | follow the recipe in the line (`inspect` `what=water_sources`: a bank to zone or a dig; a standing cistern: what its well lacks, BUG-031; cavern water never); until water is accepted, a dry hospital zone is worse than none |
@@ -253,7 +253,7 @@ manifest kill boxes, never into shafts or stairs. No civilian reserve squads.
 **Captives:** haul inside at once, then a pit zone; comrades free caged invaders.
 **Economy:** natives first (orders library, labormanager monitor, suspendmanager, buildingplan,
 autochop wood ≥ 14, autobutcher low, tailor, seedwatch on farmed crops at 12). KPI = 0 starving
-postings, not idle %. Idle > 40 % for 3 days → useful backlog only, never filler digging.
+postings, not idle %. Idle > 40 % for 3 days → useful backlog only, never filler digging. Run 11: what planned buildings wait for (doors, hatches, furniture) is ordered in the stone or wood the fort has; stone short with idle miners: a bedrooms dig (PROJECT_REQUEST why=rock, follow); picks short without bars: `pick` in trade.want (economy asks the caravans itself).
 **Moods:** all 12 moodable workshop types in P1; stock ≥ 10 cloth, leather, bone, shell, gems, bars
 from P1; never cancel a mood job. No ore: `plan propose` drafts `explore` each season (`plan check` refuses metal unplanned). No gems: green glass from revealed sand.
 **Labor:** labormanager monitor; economy staffs the Miners (dig backlog, 2-4), Woodcutters (logs) and

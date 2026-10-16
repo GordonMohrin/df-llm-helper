@@ -47,6 +47,9 @@
 --       charcoal, barrels, bins, gear, bolts, idle blocks and crafts) never go below; the floor is the max of
 --       config `reserve`, every holder and every open need; n = 0 drops the holder.
 --   supply() -> {key = {have, held, want, floor, route}}   read-only status (brief, tests)
+--   mat_for(kind, n) -> via | nil, why   Run 11: can the fort make n of a seal piece now (door, hatch, grate, wall;
+--       runner's seal remake): 'item', 'rock', 'wood', a building material, nil + 'no material for door: no rock, no logs'
+--   trade_wants() -> {{buy, n, why}}   Run 11: tokens trade asks the caravans for (picks for the Miners)
 --   keys: wood, rock, bone, shell, leather, cloth, thread, bars, gems, fuel, hides (care's class names
 --   logs, boulders, rough, glass are accepted as aliases).
 -- Pull hooks economy reads when care has them (live L4, care.lua/reserve.lua): care.reserved() -> {class = n}
@@ -118,6 +121,21 @@ M.DEFAULTS = {
                  jobs = {'ConstructDoor', 'ConstructCabinet', 'ConstructChest', 'ConstructCoffin', 'ConstructTable',
                          'ConstructThrone', 'ConstructArmorStand', 'ConstructWeaponRack', 'ConstructHatchCover',
                          'ConstructGrate', 'ConstructFloodgate'}},
+  -- Run 11 (Kilrudrabed y432: 1 boulder, ~110 orders 'no rock', `seal at=last` ended build_lost for its door): the
+  -- item a planned building waits for (doors, hatches, grates, furniture: M.PIECES; buildingplan waits for the item,
+  -- never for raw rock) is ordered in a material the fort has (T.jmake, at most max_n per kind): rock while the free
+  -- stone covers it and the open rock orders, else wood (doors, hatches, grates and floodgates down to the moods' wood
+  -- floor only), else rock behind the other rock orders while stone is free; the walls' building material is what
+  -- buildingplan allows (its logs/boulders/blocks setting goes on when that is all the fort has; never bars); nothing
+  -- makes it, or a seal piece queues behind the rock orders: MATERIAL_SHORT (B) once per set (util/cadence,
+  -- report_days). rock: a "Needs rock" cancel while the stone is short of the rock orders re-enters the order in wood,
+  -- with no free stone at all removes it (drop_per_day); no orders recheck for a rock cancel loop then; rock below the
+  -- need while the miners have nothing to dig: PROJECT_REQUEST bedrooms why=rock (rooms) at most every request_days
+  pieces = {max_n = 6, report_days = 28, tag = 'dfllm:piece_'},
+  rock = {drop_per_day = 20, request_days = 7, rooms = 4},
+  -- Run 11: 2 picks for the Miners' target and 1 iron bar: a pick from the first metal with a spare bar at a forge,
+  -- else economy.trade_wants asks the caravans for picks (trade puts it before plan.trade.want)
+  picks = {tag = 'dfllm:pick', metals = {'COPPER', 'BISMUTH_BRONZE', 'BRONZE', 'IRON', 'STEEL'}, max_jobs = 2},
   -- supply labors labormanager (modern) starved for >= cycles (LABOR_STARVED): a tool labor with a builtin
   -- detail (Miners, Woodcutters, Hunters, Fisherdwarves) left unmanaged becomes managed, so it staffs the
   -- detail; any other starved one makes baseline fall back to monitor mode (live L1: BREWER starved 243
@@ -378,7 +396,8 @@ end
 ---------------------------------------------------------------- item census (sliced, items.other)
 local CATS = {'DRINK', 'FOOD', 'MEAT', 'FISH', 'FISH_RAW', 'CHEESE', 'EGG', 'PLANT', 'PLANT_GROWTH', 'CLOTH', 'SKIN_TANNED',
               'CORPSEPIECE', 'SMALLGEM', 'ROUGH', 'BAR', 'AMMO', 'WOOD', 'BARREL', 'BIN', 'BOULDER', 'THREAD',
-              'SEEDS', 'WEAPON', 'ARMOR', 'HELM', 'PANTS', 'GLOVES', 'SHOES', 'SHIELD', 'QUIVER', 'BAG'}
+              'SEEDS', 'WEAPON', 'ARMOR', 'HELM', 'PANTS', 'GLOVES', 'SHOES', 'SHIELD', 'QUIVER', 'BAG',
+              'DOOR', 'HATCH_COVER', 'GRATE', 'BLOCKS'}
 local SKIP = {'trader', 'garbage_collect', 'removed', 'dump', 'hostile', 'in_building', 'construction', 'rotten'}
 -- FR-62 (Run 9: 18.7k items, economy 12-14 ms/s): one read of the flag word (bitfield `whole`) against the mask of
 -- the SKIP bits instead of eight bitfield reads per item. The first M.MASK_CHECK items of a boot are cross-checked
@@ -666,6 +685,10 @@ local function classify(it, a, cat)
       if not (u and (u.military.squad_id or -1) >= 0) then a.bolts_free = a.bolts_free + n end
     end
   elseif cat == 'WOOD' then a.wood = a.wood + n; reach_mark(a, it, 'wood')
+  elseif M.PIECE_INV[cat] then
+    -- Run 11: free doors, hatch covers, grates and blocks (not built in, not taken by a job): what a seal piece or a
+    -- planned building can use now (T.jmake, economy.mat_for)
+    if not f.in_job then a[M.PIECE_INV[cat]] = a[M.PIECE_INV[cat]] + n end
   elseif cat == 'BARREL' or cat == 'BIN' then  -- live L1b: brewing stalled for want of an empty barrel
     local empty = #dfhack.items.getContainedItems(it) == 0
     if cat == 'BARREL' then
@@ -765,7 +788,7 @@ local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'ge
               'w_xbow', 'w_bow', 'g_body', 'g_head', 'g_pants', 'g_gloves', 'g_shoes', 'g_shield', 'g_weapon', 'g_xbow',
               'g_quiver', 'g_metal', 'fish_raw', 'food_nocook', 'seeds_ok', 'seeds_forb', 'w_pick_free', 'w_axe_free',
               'w_pick_bin', 'w_axe_bin', 'w_pick_res', 'w_axe_res', 'webs', 'webs_near', 'glass', 'gems_glass', 'sand',
-              'bags'}
+              'bags', 'doors', 'hatches', 'grates', 'blocks_free'}
 local function new_acc(c)
   local fs = {}
   for _, k in ipairs(c.food_cats or {}) do fs[k] = true end
@@ -1927,13 +1950,19 @@ local function cancel(K, ev)
   local oid
   if OL.needs(why) then
     oid = find_order_named(key)
-    if oid then needs_cancel(K, c, oid, job, why) end
+    -- Run 11: "Needs rock" while no stone is free: re-entered in wood or removed now, not after needs_drop cancels
+    if oid and M.rock_why(why) and M.no_rock(K, c, oid, job, why) then oid = nil
+    elseif oid then needs_cancel(K, c, oid, job, why) end
   end
   if n < (c.cancel_loop or 5) or st.looped[key] then return end
   st.looped[key] = true
   oid = oid or find_order_named(key)
-  K.emit('CANCEL_LOOP', 'B', string.format('%s cancelled %d times today', job, n), {order = oid or -1, job = job, n = n})
-  if st.rechecked ~= day then           -- orders.txt: recheck stops cancellation spam of stale conditions
+  -- Run 11: a rock loop while the free stone is below the rock orders' need: a recheck only posts the jobs again
+  local rock = M.rock_why(why) and M.rock_short(c, M.view_run(K))
+  K.emit('CANCEL_LOOP', 'B', string.format('%s cancelled %d times today%s', job, n,
+                                           rock and ' (stone short of the rock orders: no recheck)' or ''),
+         {order = oid or -1, job = job, n = n})
+  if st.rechecked ~= day and not rock then   -- orders.txt: recheck stops cancellation spam of stale conditions
     st.rechecked = day
     K.act.orders('recheck')
   end
@@ -3463,6 +3492,375 @@ function M.glass_route(K, key, via)
   return key == 'gems' and (s .. '; trade.want gem') or s
 end
 
+---------------------------------------------------------------- pieces in the material the fort has (Run 11)
+-- Run 11 (Kilrudrabed y432, BREACH, pop 54): REFUGE_FAIL `open to 1 entrance 128,121,143 floor beside door
+-- 127,121,143`; `seal at=last` ended build_lost (missing d): quickfort `orders` makes every door and hatch a rock order
+-- (live L3), ConstructDoor was cancelled for rock with 1 boulder in the fort and ~110 orders said 'no rock'. Doors hold
+-- no building destroyer anyway: any material does. What a planned building waits for gets an order the fort can run
+-- (T.jmake, after T.jmat): rock while the free stone covers the open rock orders, else wood, else rock behind them;
+-- the walls' building material is whatever buildingplan allows. Live y432 (34 boulders, the refuge door 128,121,143
+-- still open): the door item comes first, so a planned door without a runnable door order gets one. Fields, not
+-- locals: the main chunk is at Lua's 200-local limit.
+-- item class (T.jmat's label) -> {kind (seal piece / MATERIAL_SHORT name), job, inv (census key of free items), def
+-- (a defense piece: logs down to the moods' floor), wood (no rock variant)}
+M.PIECES = {door = {kind = 'door', job = 'ConstructDoor', inv = 'doors', def = true},
+            hatch_cover = {kind = 'hatch', job = 'ConstructHatchCover', inv = 'hatches', def = true},
+            grate = {kind = 'grate', job = 'ConstructGrate', inv = 'grates', def = true},
+            floodgate = {kind = 'floodgate', job = 'ConstructFloodgate', def = true},
+            cabinet = {kind = 'cabinet', job = 'ConstructCabinet'}, box = {kind = 'chest', job = 'ConstructChest'},
+            table = {kind = 'table', job = 'ConstructTable'}, chair = {kind = 'chair', job = 'ConstructThrone'},
+            armorstand = {kind = 'armor stand', job = 'ConstructArmorStand'},
+            weaponrack = {kind = 'weapon rack', job = 'ConstructWeaponRack'},
+            bed = {kind = 'bed', job = 'ConstructBed', wood = true}}
+M.PIECE_KIND = (function()
+  local t = {}
+  for _, e in pairs(M.PIECES) do t[e.kind] = e end
+  return t
+end)()
+M.PIECE_INV = {DOOR = 'doors', HATCH_COVER = 'hatches', GRATE = 'grates', BLOCKS = 'blocks_free'}
+-- buildingplan's material settings for building material (walls): the census key of each; logs first when only
+-- one has to be switched on (bars are never switched on: metal is the soldiers')
+M.BM = {{'blocks', 'blocks_free'}, {'boulders', 'rock'}, {'logs', 'wood'}, {'bars', 'bars'}}
+M.BM_ON = {'logs', 'boulders', 'blocks'}
+M.ROCK_WORDS = {'rock', 'stone', 'boulder'}
+
+function M.is_metal(mi)
+  local f = mat_flags({mat_type = 0, mat_index = mi})
+  return f ~= nil and f.IS_METAL == true
+end
+
+-- the boulders the open rock orders still want (the amount left of every order whose input is plain rock: stone
+-- furniture, blocks, crafts, mechanisms; one boulder an item)
+function M.rock_open()
+  local n = 0
+  for _, o in ipairs(orders_all()) do
+    local left_n = math.tointeger(o.amount_left) or 0
+    if left_n > 0 then
+      local okn, jn = pcall(job_name, o)
+      if okn and OL.input(jn, OL.mat_class(o, M.is_metal)) == 'rock' then n = n + left_n end
+    end
+  end
+  return n
+end
+
+-- free stone left once the open rock orders and this run's rock orders have theirs (negative: rock below the need)
+function M.rock_left(c, r)
+  if r.rk == nil then r.rk = M.rock_open() end
+  return stone_free(c, r) - r.rk - (r.planned.rock or 0)
+end
+
+-- no free stone at all, or less than the open rock orders want
+function M.rock_short(c, r) return stone_free(c, r) <= 0 or M.rock_left(c, r) < 0 end
+
+-- logs economy may spend; a defense piece (door, hatch, grate, floodgate) keeps only the moods' and needs' floor, not
+-- the config reserve (Run 11: a seal door before a barrel)
+function M.wood_left(c, r, def)
+  if not def then return left(c, r, 'wood') end
+  local p = r.p
+  local fl = math.max(0, math.max(holder_floor(p, 'wood'), need_n(p, 'wood', r.now)) - (r.held.wood or 0))
+  return math.max(0, (r.inv.wood or 0) - fl - (r.s.used.wood or 0) - (r.planned.wood or 0))
+end
+
+-- a run-shaped view outside a run (the hooks): census, floors, open orders, the workshops of the last run
+function M.view_run(K)
+  local p = pstate(K)
+  return {p = p, inv = K.census.i or {}, now = K.now().tick, held = (st.sup or {}).held or {}, f = st.f or {},
+          s = scan_orders(p), planned = {}}
+end
+
+-- how the fort makes n of a piece now: 'item' (free ones stand), 'rock' (Masons; the free stone covers the open rock
+-- orders too), 'wood' (Carpenters), 'rock' again when stone is free but the rock orders want more (the order queues
+-- behind them; live y432: 34 boulders and the refuge door still open), or nil, why ('no material for door: no rock,
+-- no logs'). A door item comes first: buildingplan waits for the item, never for raw rock or logs.
+function M.piece_route(c, r, e, n)
+  local inv, f = r.inv, r.f or {}
+  if e.inv and (inv[e.inv] or 0) >= n then return 'item' end
+  local masons, carp = f['workshop:Masons'] == true, f['workshop:Carpenters'] == true
+  local rock = not e.wood and M.rock_left(c, r) or 0
+  local free = not e.wood and stone_free(c, r) - (r.planned.rock or 0) or 0
+  local wood = M.wood_left(c, r, e.def)
+  if not e.wood and rock >= n and masons then return 'rock' end
+  if wood >= n and carp then return 'wood' end
+  if not e.wood and free >= n and masons then return 'rock', nil, true end
+  local why = {}
+  if not e.wood then why[#why + 1] = free >= n and 'no Masons' or 'no rock' end
+  why[#why + 1] = wood >= n and 'no Carpenters' or 'no logs'
+  return nil, string.format('no material for %s: %s', e.kind, table.concat(why, ', '))
+end
+
+-- buildingplan's global material settings (its planner overlay; plugin function getGlobalSettings), the plugin's
+-- defaults when it does not answer: blocks, boulders and logs on, bars off
+function M.bp_settings()
+  local s = {blocks = true, boulders = true, logs = true, bars = false}
+  local fn = first_fn(plugin('buildingplan'), {'getGlobalSettings'})
+  if fn then
+    local ok, v = pcall(fn)
+    if ok and type(v) == 'table' then
+      for k in pairs(s) do if v[k] ~= nil then s[k] = v[k] == true end end
+    end
+  end
+  return s
+end
+
+-- what buildingplan builds a wall of now: via (the setting: blocks, boulders, logs, bars), nil + the setting to
+-- switch on (only that material is there), or nil, why
+function M.bm_route(r, s)
+  local inv = r.inv
+  for _, e in ipairs(M.BM) do
+    if s[e[1]] and (inv[e[2]] or 0) > 0 then return e[1] end
+  end
+  for _, k in ipairs(M.BM_ON) do
+    for _, e in ipairs(M.BM) do
+      if e[1] == k and (inv[e[2]] or 0) > 0 then return nil, nil, k end
+    end
+  end
+  return nil, 'no material for wall: no rock, no blocks, no logs'
+end
+
+-- economy.mat_for(kind, n) (CONTRACTS §7): can the fort make n of a seal piece now? kind = door, hatch, grate, wall
+-- (or a furniture kind of M.PIECES). Returns via ('item', 'rock', 'wood'; walls: 'blocks', 'boulders', 'logs', 'bars',
+-- 'setting' when economy switches a buildingplan material on; 'unknown' before the first census) or nil, why
+function M.mat_for(K, kind, n)
+  n = math.max(1, math.tointeger(n) or 1)
+  if not K.census.i then return 'unknown' end
+  local c, r = M.conf(K), M.view_run(K)
+  if kind == 'wall' then
+    local via, why, set = M.bm_route(r, M.bp_settings())
+    if set then return 'setting', 'buildingplan ' .. set .. ' goes on' end
+    return via, why
+  end
+  local e = M.PIECE_KIND[kind]
+  if not e then return nil, 'unknown piece ' .. tostring(kind) end
+  return M.piece_route(c, r, e, n)
+end
+
+-- the open orders of a piece's job: what they make (n). A rock order the free stone cannot cover with the other rock
+-- orders is re-entered in wood where logs allow (act.order_material; the carpenter is not behind them); without logs
+-- it still counts while stone is free (it queues), else it makes nothing (its "Needs rock" cancel removes it: M.no_rock)
+function M.piece_orders(K, c, r, e)
+  local jt, made, queued = df.job_type[e.job], 0, 0
+  local one = df.workquota_frequency_type.OneTime
+  local wj = {}
+  for _, j in ipairs((c.wood_orders or {}).jobs or {}) do wj[j] = true end
+  for _, o in ipairs(orders_all()) do
+    local n = math.tointeger(o.amount_left) or 0
+    if jt ~= nil and o.job_type == jt and n > 0 then
+      if OL.mat_class(o, M.is_metal) ~= 'rock' or M.rock_left(c, r) >= 0 then made = made + n
+      elseif wj[e.job] and o.frequency == one and M.wood_left(c, r, e.def) >= n and (r.f or {})['workshop:Carpenters']
+             and K.act.order_material(o.id, 'wood') then
+        r.cmds = r.cmds + 1
+        r.rk, r.planned.wood, made = (r.rk or 0) - n, (r.planned.wood or 0) + n, made + n
+        K.log('info', 'order %d %s x%d: %d free stone for %d rock orders: re-entered in wood (%d logs)', o.id, e.job, n,
+              stone_free(c, r), r.rk + n, r.inv.wood or 0)
+      elseif stone_free(c, r) >= n then made, queued = made + n, queued + n
+      end
+    end
+  end
+  return made, queued
+end
+
+-- MATERIAL_SHORT (B): the pieces nothing in the fort can make, per reason ('no material for door, cabinet: no rock,
+-- no logs'); once per set of kinds and reasons (util/cadence, pieces.report_days)
+function M.short_report(K, c, r, short)
+  local p = r.p
+  st.short = short
+  if #short == 0 then
+    p.mshort = CAD.quiet(p.mshort)
+    return
+  end
+  local by, reasons, kinds, pieces, total, pre, queued = {}, {}, {}, {}, 0, {}, false
+  for _, s in ipairs(short) do
+    local why = s.pre and s.why or (s.why:match(': (.+)$') or s.why)
+    if not by[why] then by[why] = {}; reasons[#reasons + 1] = why; pre[why] = s.pre or 'no material for' end
+    table.insert(by[why], s.kind)
+    kinds[#kinds + 1] = s.kind
+    pieces[#pieces + 1] = string.format('%s x%d', s.kind, s.n)
+    total = total + s.n
+    queued = queued or s.queued == true
+  end
+  table.sort(kinds)
+  local T0 = K.now()
+  local o = {ticks = ((c.pieces or {}).report_days or 28) * DAY, wall_s = CAD.WALL_S}
+  if not CAD.due(p.mshort, T0, kinds, reasons, o) then return end
+  p.mshort = CAD.mark(T0, kinds, reasons)
+  local parts = {}
+  for _, why in ipairs(reasons) do parts[#parts + 1] = pre[why] .. ' ' .. table.concat(by[why], ', ') .. ': ' .. why end
+  -- the boulders the census holds that masons may not take (ore, flux, DF's economic stone, soft stone, the floor)
+  local free, all = stone_free(c, r), math.tointeger(r.inv.rock) or 0
+  local tail = (queued and string.format('; %d free boulders, %d in rock orders', free, r.rk or 0) or '') ..
+               (all > free and string.format('; %d boulders are ore, flux, economic or soft stone', all - free) or '')
+  local msg = table.concat(parts, '; ')
+  K.log('warn', '%s (%s wait)%s', msg, table.concat(pieces, ', '), tail)
+  K.emit('MATERIAL_SHORT', 'B', (msg .. ' (' .. table.concat(pieces, ', ') .. ' wait)' .. tail):sub(1, 200),
+         {pieces = table.concat(pieces, ', '):sub(1, 200), why = reasons, n = total, rock = free,
+          logs = math.tointeger(r.inv.wood) or 0, boulders = all})
+end
+
+-- rock below the need (the open rock orders, walls without material, care's needs) while the miners have nothing to
+-- dig: PROJECT_REQUEST bedrooms why=rock (a stone dig the fort needs anyway; follow places it), PEACE, with a pick
+function M.rock_dig(K, c, r, walls)
+  local rc = c.rock
+  local free = stone_free(c, r)
+  local need = (r.rk or M.rock_open()) + (walls or 0) + need_n(r.p, 'rock', r.now)
+  st.rock = {free = free, need = need, open = r.rk or 0}
+  if type(rc) ~= 'table' or need <= free or K.mode() ~= 'PEACE' or (r.inv.w_pick or 0) == 0 then return end
+  if ((st.jobc or tool_jobs()).dig or 0) > 0 then return end                -- the miners have digging
+  local okb, bl = K.call('runner', 'dig_backlog')
+  if okb and (int(bl) or 0) > 0 then return end
+  local okp, pend = K.call('runner', 'pending', 'bedrooms')
+  if okp and (int(pend) or 0) > 0 then return end
+  local last = int(r.p.rockreq)
+  if last and r.now - last < (rc.request_days or 7) * DAY then return end
+  r.p.rockreq = r.now
+  local n = rc.rooms or 4
+  K.emit('PROJECT_REQUEST', 'B', string.format('bedrooms x%d: a stone dig, %d free boulders < %d wanted (rock orders, ' ..
+                                               'walls), the miners have nothing to dig', n, free, need),
+         {tpl = 'bedrooms', n = n, why = 'rock', short = need - free})
+end
+
+-- Run 11: the missing items of planned buildings (T.jmat's classes without a free or forbidden item) get an order in
+-- the material the fort has; walls switch buildingplan's material on when that is all there is; the rest is short
+function T.jmake(K, c, r)
+  local jb, pc = r.jb, c.pieces
+  if not jb or type(pc) ~= 'table' then return true end
+  local short, walls, s = {}, 0, nil
+  for _, q in ipairs(jb.mq or {}) do
+    if q.label == 'building material' then
+      s = s or M.bp_settings()
+      local via, why, set = M.bm_route(r, s)
+      st.bp_on = st.bp_on or {}
+      if set and not st.bp_on[set] then
+        st.bp_on[set] = true
+        r.cmds = r.cmds + 1
+        if K.act.run('buildingplan', 'set', set, 'true') then
+          K.log('info', 'buildingplan %s on: %d walls/buildings wait for building material, only %s in the fort', set,
+                q.n, set)
+        end
+      elseif not via and not set then
+        short[#short + 1] = {kind = 'wall', n = q.n, why = why}
+        walls = walls + q.n
+      end
+    else
+      local e = M.PIECES[q.label]
+      if e and q.mt < 0 and q.free == 0 and q.forb == 0 then
+        local need = math.min(q.n, pc.max_n or 6)
+        local made, queued = M.piece_orders(K, c, r, e)
+        local via, why, wait = nil, nil, queued > 0
+        if made < need then
+          local k = need - made
+          via, why, wait = M.piece_route(c, r, e, k)
+          wait = wait or queued > 0
+          local tag = (pc.tag or 'dfllm:piece_') .. e.kind:gsub(' ', '_')
+          if (via == 'rock' or via == 'wood') and not open(r, tag) then
+            local spec = {job = e.job}
+            if via == 'rock' then spec.material = 'INORGANIC'
+            else
+              local fl = e.def and math.max(holder_floor(r.p, 'wood'), need_n(r.p, 'wood', r.now)) or floor_of(c, r.p, r, 'wood')
+              spec.material_category, spec.item_conditions = {'wood'}, {cond(fl + 1, 'WOOD')}
+            end
+            add(r, {tag = tag, spec = spec, n = k, uses = {[via] = 1}, why = e.kind .. ' for a planned building'})
+          elseif not via then short[#short + 1] = {kind = e.kind, n = k, why = why} end
+        end
+        -- a seal piece whose stone order queues behind the other rock orders (no logs for wood): the player hears it
+        if e.def and wait then
+          short[#short + 1] = {kind = e.kind, n = need, pre = 'stone queued for', why = 'behind the other rock orders, ' ..
+                               ((r.f or {})['workshop:Carpenters'] and 'no logs' or 'no Carpenters'), queued = true}
+        end
+      end
+    end
+  end
+  M.short_report(K, c, r, short)
+  M.rock_dig(K, c, r, walls)
+  r.cmds = r.cmds + 1
+  return true
+end
+
+-- Run 11: a "Needs rock" cancel (DF's words name rock, stone or a boulder: "Needs non-economic hard stone") of a
+-- one-time stone order while the free stone is below what the open rock orders want (1 boulder for ~110 of them):
+-- re-entered in wood when logs cover it (a wood variant: wood_orders.jobs); with no free stone at all removed (it would
+-- only cancel again; T.jmake orders what planned buildings still wait for once rock or logs are in). At most
+-- rock.drop_per_day.
+function M.rock_why(why)
+  local s = tostring(why or ''):lower()
+  for _, w in ipairs(M.ROCK_WORDS) do if s:find(w, 1, true) then return true end end
+  return false
+end
+
+function M.no_rock(K, c, oid, job, why)
+  local rc, o = c.rock, order_by_id(oid)
+  if type(rc) ~= 'table' or not o or keep_order(o) then return false end
+  local n = math.tointeger(o.amount_left) or 0
+  if o.frequency ~= df.workquota_frequency_type.OneTime or n <= 0 then return false end
+  local okn, jn = pcall(job_name, o)
+  if not okn or OL.input(jn, OL.mat_class(o, M.is_metal)) ~= 'rock' then return false end
+  local r = M.view_run(K)
+  if M.rock_left(c, r) >= 0 then return false end
+  local free = stone_free(c, r)
+  local day = K.now().tick // DAY
+  if st.rd_day ~= day then st.rd_day, st.rd_n = day, 0 end
+  if st.rd_n >= (rc.drop_per_day or 20) then return false end
+  st.rd_n = st.rd_n + 1
+  local wj = {}
+  for _, j in ipairs((c.wood_orders or {}).jobs or {}) do wj[j] = true end
+  local def = false
+  for _, e in pairs(M.PIECES) do if e.job == jn then def = e.def == true end end
+  if wj[jn] and r.f['workshop:Carpenters'] and M.wood_left(c, r, def) >= n and K.act.order_material(oid, 'wood') then
+    K.log('info', 'order %d %s x%d: "%s", %d free stone for %d in rock orders: re-entered in wood (%d logs)', oid, jn,
+          n, why, free, r.rk, r.inv.wood or 0)
+    return true
+  end
+  if free > 0 then return false end              -- stone is there: the order queues (needs_cancel counts as before)
+  if not K.act.order_remove(oid) then return false end
+  local p, now = r.p, K.now().tick
+  p.ocancel[tostring(oid)] = nil
+  for tag, id in pairs(p.orders) do
+    if id == oid then p.orders[tag], st.backoff[tag] = nil, now + ((c.orders or {}).backoff_days or 10) * DAY end
+  end
+  K.persist.touch('m.economy')
+  K.log('warn', 'order %d %s x%d removed: "%s", %d free stone for %d in rock orders, no logs for it (%d logs)', oid,
+        jn, n, why, stone_free(c, r), r.rk, r.inv.wood or 0)
+  K.emit('ORDER_STUCK', 'B', string.format('order %d %s removed: "%s", stone short of the rock orders, no logs for it',
+                                           oid, jn, tostring(why):sub(1, 60)),
+         {order = oid, job = tostring(jn):sub(1, 40), why = ('no rock: ' .. tostring(why)):sub(1, 60), n = n,
+          dropped = 1})
+  return true
+end
+
+-- Run 11: picks for the Miners (their demand before the tool cap, BUG-023, against every pick in the fort): a pick
+-- from the first metal with a spare bar at a forge, else economy.trade_wants asks the caravans for them
+function M.plan_picks(K, c, r)
+  local pc = c.picks
+  local want, have = (st.want or {}).pick or 0, r.inv.w_pick or 0
+  local pk = {have = have, want = want, short = math.max(0, want - have), route = ''}
+  st.picks = pk
+  if type(pc) ~= 'table' or pk.short == 0 then return end
+  if open(r, pc.tag) then pk.route = 'forge'; return end
+  local g = c.gear or {}
+  local forge, magma = ws_any(r.f, g.forge), r.f['workshop:MagmaForge'] == true
+  for _, m in ipairs(forge and pc.metals or {}) do
+    local tok = 'INORGANIC:' .. m
+    local n = math.min(pk.short, left(c, r, 'bars:' .. tok), left(c, r, 'bars'), magma and pk.short or left(c, r, 'fuel'),
+                       pc.max_jobs or 2)
+    if n > 0 then
+      add(r, {tag = pc.tag, spec = {job = 'MakeWeapon', item_subtype = 'ITEM_WEAPON_PICK', material = tok,
+                                    item_conditions = {cond(1 + floor_of(c, r.p, r, 'bars'), 'BAR', {material = tok}),
+                                                       fuel_cond(r)}},
+              n = n, uses = {['bars:' .. tok] = 1, bars = 1, fuel = magma and 0 or 1}, why = 'picks for the miners'})
+      pk.route = 'forge'
+      return
+    end
+  end
+  pk.route = 'trade' .. (forge and '' or ' (no forge)')
+end
+
+-- economy.trade_wants() (CONTRACTS §7): what economy asks the caravans for, [{buy, n, why}] (trade puts these after
+-- the moods' tokens, before plan.trade.want); Run 11: picks the Miners miss while no bar at a forge makes one
+function M.trade_wants(K)
+  local pk = st.picks
+  if type(pk) ~= 'table' or (pk.short or 0) <= 0 or pk.route == 'forge' then return {} end
+  return {{buy = 'pick', n = pk.short, why = string.format('miners: %d picks < %d', pk.have, pk.want)}}
+end
+
 function T.plan(K, c, r)
   r.cands, r.planned, r.targets, r.route = {}, {}, {}, {}
   for _, key in ipairs({'bone', 'shell'}) do r.targets[key] = target(K, c, r, key) end
@@ -3478,6 +3876,7 @@ function T.plan(K, c, r)
                   glass = need_n(r.p, 'glass', r.now) + (r.glass_cut or 0) > 0}
   local list = {{1.5, plan_supply}, {2, function() plan_containers(K, c, r, 'barrels') end},
                 {urgent.leather and 1 or 4, plan_leather}, {urgent.cloth and 1 or 3.5, plan_cloth},
+                {2.9, M.plan_picks},
                 {urgent.bars and 1 or 3, plan_metal}, {urgent.bars and 1.1 or 3.1, plan_steel}, {3.2, plan_gear},
                 {urgent.glass and 1.2 or 3.3, M.glass_plan}, {5, function() plan_containers(K, c, r, 'bins') end}}
   table.sort(list, function(a, b) return a[1] < b[1] end)
@@ -4549,7 +4948,7 @@ function T.finish(K, c, r)
 end
 
 local FULL = {'guard', 'days', 'kitchen', 'appoint', 'food', 'watch', 'cmdq', 'engine', 'labor_fix', 'scan', 'ocheck',
-              'slaughter', 'plan', 'prune', 'tools', 'starve', 'forbid', 'jobs', 'jsite', 'jmat', 'jfree', 'jresume',
+              'slaughter', 'plan', 'prune', 'tools', 'starve', 'forbid', 'jobs', 'jsite', 'jmat', 'jmake', 'jfree', 'jresume',
               'jcheck', 'jmove', 'pb', 'orders', 'wood', 'chop', 'crops',
               'farm', 'farmslots', 'imports', 'piles', 'status', 'idle', 'finish'}
 local RUSH = {'guard', 'scan', 'plan', 'tools', 'orders', 'wood', 'chop', 'farm', 'finish'}
@@ -4768,6 +5167,10 @@ function M.state(K)
     r.stock.leather = math.max(0, (math.tointeger(inv.leather) or 0) + (math.tointeger(held.leather) or 0))
     r.stock.metal = tostring(route.bars or ''):sub(1, 24)
     if o.mood_miss and #o.mood_miss > 0 then r.stock.mood_miss = {table.unpack(o.mood_miss)} end
+    -- Run 11 (plan propose/check: a stone dig, picks in trade.want): free stone and what the open rock orders, walls
+    -- and needs want of it; picks in the fort and the Miners' demand
+    if st.rock then r.stock.rock, r.stock.rock_need = math.max(0, st.rock.free or 0), math.max(0, st.rock.need or 0) end
+    if st.picks then r.stock.picks, r.stock.pick_want = st.picks.have, st.picks.want end
   end
   local od = st.orders
   if od then r.orders = {n = od.n or 0, bad = od.bad or 0, stuck = od.stuck or 0} end   -- FR-01/FR-39
@@ -5034,6 +5437,8 @@ M.inspect.workload = function(K, args)
                          axe_bin = inv.w_axe_bin or 0, axe_res = inv.w_axe_res or 0},
                 blocked = json.array(blocked), cloth = cloth,
                 construction = jobs,
+                -- Run 11: stone against the rock orders, picks against the Miners, pieces nothing in the fort can make
+                stone = st.rock or json.object{}, picks = st.picks or json.object{}, short = json.array(st.short or {}),
                 starve = sv and {hungry = sv.hungry, cut = #sv.cut, cut_units = {table.unpack(sv.cut, 1, math.min(10, #sv.cut))},
                                  marked = sv.marked, added = sv.added, unreach = sv.unreach} or json.object{}}
   return true, string.format('%d of %d adults without a job (%d without reachable work), %d unclaimed jobs, %d unreachable',

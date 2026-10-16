@@ -565,6 +565,83 @@ T.test('build: too many unsuitable tiles block the project with build_lost', fun
   T.eq(#H.qf_calls(W, 'build', 'run'), 2)
 end)
 
+-- Run 11 (Kilrudrabed y432): `seal at=last` ended build_lost (missing d) while ConstructDoor was cancelled for rock and
+-- logs could have made the door. A seal with one door on a floor tile; DF removes the planned door each time (`lose`).
+local function seal_doc()
+  return {v = 2, tpl = 'seal', site = 'S1', class = 'defense', params = {at = '10,10,100 floor'}, anchor = {10, 10, 100},
+          rot = 0, stages = {{label = 'seal.build', mode = 'build', orders = 1, defense = 1,
+                              chunks = {{pos = {10, 10, 100}, cells = {{0, 0, 0, 'd'}}}}}},
+          manifest = {v = 2}, materials = {}}
+end
+local function lose(W)                              -- the planned door at 10,10,100 vanishes
+  local id = W.bld_at['10,10,100']
+  if id then W.buildings[id], W.bld_at['10,10,100'] = nil, nil end
+end
+local function seal_world(tag, ctl)
+  local W = fresh{tag = tag}
+  H.floor(W, 10, 10, 100, 10, 10)
+  W.load({name = 'economy', every = {ticks = 1200}, mat_for = function(K, kind, n)
+    ctl.asked[#ctl.asked + 1] = kind .. ' x' .. n
+    return ctl.via, ctl.why
+  end})
+  H.place(W, 'y432s0b0', seal_doc())
+  H.settle(W); W.frame(1); H.settle(W)
+  return W
+end
+
+T.test('Run 11: a seal whose door was lost is placed again while economy can make the door, not build_lost', function()
+  local ctl = {asked = {}, via = 'wood'}
+  local W = seal_world('sealmat', ctl)
+  T.eq(#H.qf_calls(W, 'build', 'run'), 1)
+  lose(W); H.runs(W, 1); H.settle(W); W.frame(1); H.settle(W)
+  T.eq(#H.qf_calls(W, 'build', 'run'), 2, 'the one re-apply of every build stage')
+  lose(W); H.runs(W, 1); H.settle(W); W.frame(1); H.settle(W)
+  T.eq(H.proj(W, 'y432s0b0').blocked, '', 'old code: build_lost (missing d) after the one re-apply')
+  T.eq(#H.qf_calls(W, 'build', 'run'), 3)
+  T.eq(ctl.asked[1], 'door x1')
+  T.ok(logged(W, 'info', '^y432s0b0 seal.build: lost pieces placed again %(1/4%): economy can make them'))
+  H.build(W); H.runs(W, 2)
+  T.eq(H.proj(W, 'y432s0b0').done, 1, 'the door stands')
+  -- bounded: a door lost again and again ends build_lost after remake_max more placements
+  local W2 = seal_world('sealmax', ctl)
+  for _ = 1, runner.CFG.remake_max + 2 do lose(W2); H.runs(W2, 1); H.settle(W2); W2.frame(1); H.settle(W2) end
+  T.eq(H.proj(W2, 'y432s0b0').blocked, 'build_lost')
+  T.eq(#H.qf_calls(W2, 'build', 'run'), 2 + runner.CFG.remake_max)
+end)
+
+T.test('Run 11: no material for the seal\'s door: build_lost, PROJECT_BLOCKED names economy\'s reason; retried once ' ..
+       'the door can be made', function()
+  local ctl = {asked = {}, via = nil, why = 'no material for door: no rock, no logs'}
+  local W = seal_world('sealnomat', ctl)
+  lose(W); H.runs(W, 1); H.settle(W); W.frame(1); H.settle(W)
+  lose(W); H.runs(W, 1)
+  T.eq(H.proj(W, 'y432s0b0').blocked, 'build_lost')
+  H.runs(W, 5)                                     -- blocked > 2 days
+  local pb = W.find_events('PROJECT_BLOCKED')
+  T.eq(#pb, 1)
+  T.ok(pb[1].msg:find('blocked: build_lost at seal.build, missing d (no material for door: no rock, no logs)', 1, true),
+       pb[1].msg)
+  T.eq(pb[1].d.mat, 'no material for door: no rock, no logs')
+  H.runs(W, 4)
+  T.eq(H.proj(W, 'y432s0b0').blocked, 'build_lost', 'nothing changed: no retry')
+  ctl.via, ctl.why = 'wood', nil                   -- logs came in
+  H.runs(W, 3)
+  local P = H.proj(W, 'y432s0b0')
+  T.eq({P.stage, P.blocked}, {0, ''})
+  T.ok(logged(W, 'info', '^y432s0b0: build_lost at seal.build, retry 1/8 from seal.build %(its pieces can be made now%)'))
+  -- a seal an older kernel blocked (its retry record knows nothing of material): tried once the door can be made
+  local c2 = {asked = {}, via = nil, why = 'no material for door: no rock, no logs'}
+  local W2 = seal_world('sealold', c2)
+  lose(W2); H.runs(W2, 1); H.settle(W2); W2.frame(1); H.settle(W2)
+  lose(W2); H.runs(W2, 3)
+  local q = W2.K.persist.get('m.runner').rty.y432s0b0
+  T.eq(q.cant, true)
+  q.cant = nil
+  c2.via = 'rock'
+  H.runs(W2, 3)
+  T.eq(H.proj(W2, 'y432s0b0').blocked, '')
+end)
+
 -- BUG-022 (Run 10 Handlelock y364: fortcore stage 2 "s2.dig: 61 hidden tiles never reached; stage completes
 -- without them", then s2.build blocked build_lost for two game years: B1 and its levers never built; the live
 -- workaround cancelled it and placed stage 2 again at site=same). A fortcore-like stage 2: the dig reaches row 10

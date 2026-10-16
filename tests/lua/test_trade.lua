@@ -858,6 +858,21 @@ T.test('Run 10 y418: care.mood_wants buy tokens (cloth:plant) go before the plan
   T.eq(bought(c), {'rope reed cloth'}, 'only the plant cloth, not wool or silk')
 end)
 
+T.test('Run 11: economy.trade_wants (picks for the Miners) go after the moods\' tokens, before the plan wants', function()
+  local W = setup{goods = cloth_goods, plan = plan_want({'bar:iron', 'cloth'}), before_load = function(W)
+    local care = {name = 'care', every = {ticks = 1200}}
+    function care.mood_wants(K) return {{cls = 'cloth', n = 2, unit = 31, label = 'cloth(plant) x2', acq = 'buy',
+                                         buy = 'cloth:plant'}} end
+    W.load(care)
+    local eco = {name = 'economy', every = {ticks = 1200}}
+    function eco.trade_wants(K) return {{buy = 'pick', n = 1, why = 'miners: 2 picks < 3'}, {buy = 'cloth:plant', n = 9}} end
+    W.load(eco)
+  end}
+  W.frame(1)
+  local q = W.inbox('trade.want', {})
+  T.eq(q.data.want, {'cloth:plant', 'pick', 'bar:iron', 'cloth'}, 'mood, economy, plan; a token the moods hold stays theirs')
+end)
+
 T.test('Run 10 y418: trade.retry opens a second trade in the same visit with new wants; refused when it cannot', function()
   local W, M, d, c, U = setup{goods = cloth_goods, plan = plan_want({'cloth:silk'})}
   W.frame(1)

@@ -18,7 +18,7 @@ F.ITEM_TYPES = {'BAR', 'SMALLGEM', 'BLOCKS', 'ROUGH', 'BOULDER', 'WOOD', 'DOOR',
   'BUCKET', 'TABLE', 'COFFIN', 'STATUE', 'CORPSE', 'WEAPON', 'ARMOR', 'SHOES', 'SHIELD', 'HELM', 'GLOVES', 'BIN',
   'FIGURINE', 'AMULET', 'SCEPTER', 'AMMO', 'CROWN', 'RING', 'EARRING', 'BRACELET', 'ANVIL', 'CORPSEPIECE', 'MEAT',
   'FISH', 'FISH_RAW', 'SEEDS', 'PLANT', 'SKIN_TANNED', 'PLANT_GROWTH', 'THREAD', 'CLOTH', 'TOTEM', 'PANTS', 'DRINK', 'CHEESE',
-  'FOOD', 'TOOL', 'EGG', 'BAG'}
+  'FOOD', 'TOOL', 'EGG', 'BAG', 'HATCH_COVER', 'GRATE', 'CABINET'}
 
 local function enum_from(names, first)
   local t = {}
@@ -63,7 +63,8 @@ function F.install(W)
                            'PrepareMeal', 'WeaveCloth', 'ConstructBlocks', 'MakeCrafts', 'StrangeMoodCrafter',
                            'ConstructDoor', 'ConstructCabinet', 'ConstructChest', 'ConstructCoffin', 'ConstructTable',
                            'ConstructThrone', 'ConstructBed', 'CollectSand', 'MakeRawGlass', 'CutGlass',
-                           'ConstructBag'}, 0)
+                           'ConstructBag', 'ConstructHatchCover', 'ConstructGrate', 'ConstructFloodgate',
+                           'ConstructWeaponRack'}, 0)
   df.workquota_frequency_type = enum_from({'OneTime', 'Daily', 'Monthly', 'Seasonally', 'Yearly'}, 0)
   df.workshop_type = enum_from({'Carpenters', 'Farmers', 'Masons', 'Craftsdwarfs', 'Jewelers', 'MetalsmithsForge',
                                 'MagmaForge', 'Bowyers', 'Mechanics', 'Siege', 'Butchers', 'Leatherworks', 'Tanners',

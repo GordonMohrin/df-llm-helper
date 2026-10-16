@@ -121,6 +121,8 @@ C.EVENTS = {
   INTAKE = {cls = 'B', by = 'siege'}, SORTIE = {cls = 'B', by = 'siege'},
   -- Run 11: economy's glass chain for strange moods is blocked (no sand revealed, no bags, no fuel; once per set)
   GLASS_BLOCKED = {cls = 'B', by = 'economy'},
+  -- Run 11: pieces planned buildings wait for that nothing in the fort can make (no rock, no logs; once per set)
+  MATERIAL_SHORT = {cls = 'B', by = 'economy'},
   -- C: log only
   SIEGE_STATUS = {cls = 'C', by = 'siege'}, SEASON = {cls = 'C', by = 'kern'},
   PROJECT_STAGE = {cls = 'C', by = 'runner'}, MODE = {cls = 'C', by = 'kern'},
@@ -197,7 +199,8 @@ C.STATE_OWNERS = {
   ['pop.cap'] = 'readiness', ['pop.gate_cap'] = 'readiness', ['ready.*'] = 'readiness',
   ['stock.drink_d'] = 'economy', ['stock.food_d'] = 'economy', ['stock.meals'] = 'economy',
   ['stock.ore'] = 'economy', ['stock.bars'] = 'economy', ['stock.leather'] = 'economy', ['stock.metal'] = 'economy',
-  ['stock.mood_miss'] = 'economy', ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['labor.*'] = 'economy', ['orders.*'] = 'economy',
+  ['stock.mood_miss'] = 'economy', ['stock.rock'] = 'economy', ['stock.rock_need'] = 'economy',
+  ['stock.picks'] = 'economy', ['stock.pick_want'] = 'economy', ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['labor.*'] = 'economy', ['orders.*'] = 'economy',
   ['threat.*'] = 'threat', ['bridges'] = 'gate', ['owners.*'] = 'arbiter',
   ['mil.*'] = 'military', ['trade.*'] = 'trade',
   ['clock.*'] = 'arbiter', ['alarm.*'] = 'reflex', ['lever.*'] = 'gate',
@@ -305,7 +308,8 @@ C.STATE_SPEC = obj({
                route = str(60)}),          -- the last audit's first attacker-route finding (bypass, refuge)
   -- Run 10: ore/bars/leather stock, the metal route and the classes moods missed (plan propose/check supply goals)
   stock = obj(nil, {drink_d = NAT, food_d = NAT, meals = NAT, hosp_water = FLAG, ore = NAT, bars = NAT, leather = NAT,
-                    metal = str(24), mood_miss = arr(str(12), 0, 8)}),
+                    metal = str(24), mood_miss = arr(str(12), 0, 8), rock = NAT, rock_need = NAT, picks = NAT,
+                    pick_want = NAT}),
   care = obj({stressed_pct = PCT, naked = NAT, ghosts = NAT, corpses_old = NAT, tombs_free = NAT, moods = NAT},
              {coffins = obj({want = NAT, short = NAT, stock = NAT, order = NAT, proj = str(40)}),
               died = obj(nil, nil, NAT)}),

@@ -877,6 +877,21 @@ local function mood_tokens(K, known)
   return r, by
 end
 
+-- Run 11 (Kilrudrabed: 2 picks for the Miners, 1 bar): economy.trade_wants' buy tokens (picks) after the moods' ones,
+-- capped at the units economy misses; a plan token with the same text lifts that cap to the kind's default
+local function econ_tokens(K, known, want, by)
+  local ok, list = K.call('economy', 'trade_wants')
+  if not ok or type(list) ~= 'table' then return end
+  for _, e in ipairs(list) do
+    local tk = type(e) == 'table' and type(e.buy) == 'string' and e.buy ~= '' and L.token(e.buy, known)
+    if tk and not by[tk.src] then
+      tk.cap, tk.econ = math.min(tk.cap, math.max(1, int(e.n) or 1)), true
+      by[tk.src] = tk
+      want[#want + 1] = tk
+    end
+  end
+end
+
 local function wants(K)
   local p = (K.plan or {}).trade or {}
   local w, s = p.want, p.sell
@@ -889,6 +904,7 @@ local function wants(K)
   if type(w) ~= 'table' or #w == 0 then w = M.DEFAULT_WANT end
   local known = function(n) return df.item_type ~= nil and df.item_type[n] ~= nil end
   local want, by = mood_tokens(K, known)
+  econ_tokens(K, known, want, by)
   for _, tk in ipairs(L.tokens(w, known)) do
     local m = by[tk.src]
     if m then m.cap = tk.cap else want[#want + 1] = tk end

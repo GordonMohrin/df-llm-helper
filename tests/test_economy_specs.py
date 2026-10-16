@@ -67,6 +67,11 @@ def _specs(eco: dict) -> list[dict]:
     out += [dict(g["sand"]["spec"], item_conditions=[{"item_type": "BAG", "flags": ["empty"]}]),
             dict(g["make"]["spec"], item_conditions=[{"flags": ["sand_bearing"]}]), g["cut"]["spec"],
             {"job": "ConstructBag", "material_category": ["cloth"]}]
+    # Run 11: a pick from one bar for the Miners; the pieces planned buildings wait for (economy.lua M.PIECES)
+    out += [{"job": "MakeWeapon", "item_subtype": "ITEM_WEAPON_PICK", "kind": "metal"}]
+    out += [{"job": j} for j in ("ConstructDoor", "ConstructHatchCover", "ConstructGrate", "ConstructFloodgate",
+                                 "ConstructCabinet", "ConstructChest", "ConstructTable", "ConstructThrone",
+                                 "ConstructArmorStand", "ConstructWeaponRack", "ConstructBed")]
     return out
 
 

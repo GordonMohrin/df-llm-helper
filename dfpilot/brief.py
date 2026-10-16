@@ -11,10 +11,10 @@ from .events import SEASON, YEAR, clip, est_tokens, fmt_age, fmt_d, fmt_event, f
 STATUS_TOKENS, BRIEF_TOKENS = 300, 1500
 SUPPLY_MIN = {"drink_d": 170, "food_d": 60}
 # B digest order (most useful first); unlisted B types follow alphabetically
-DIGEST_ORDER = ["ALERT_START", "ALERT_END", "LOCKDOWN_END", "STOCK_LOW", "MOOD_NEED", "MOOD_START", "MOOD_END",
-                "CANCEL_LOOP", "BREACH_STOP", "PROJECT_REQUEST", "DEATH_CLUSTER", "DEATH", "CAPTURE", "CARAVAN",
-                "MIGRANTS", "PETITION", "READY_CHANGE", "POPCAP", "AUDIT", "DRILL_RESULT", "PHASE", "PROJECT_DONE",
-                "KERNEL_SLOW", "ACT_FAIL", "WEALTH", "PAUSE"]
+DIGEST_ORDER = ["ALERT_START", "ALERT_END", "LOCKDOWN_END", "STOCK_LOW", "MATERIAL_SHORT", "MOOD_NEED",
+                "MOOD_START", "MOOD_END", "CANCEL_LOOP", "BREACH_STOP", "PROJECT_REQUEST", "DEATH_CLUSTER", "DEATH",
+                "CAPTURE", "CARAVAN", "MIGRANTS", "PETITION", "READY_CHANGE", "POPCAP", "AUDIT", "DRILL_RESULT",
+                "PHASE", "PROJECT_DONE", "KERNEL_SLOW", "ACT_FAIL", "WEALTH", "PAUSE"]
 
 
 LIMITS = {"A": 50, "B": 500, "CMD": 50}   # newest events kept per section (all DECISION_NEEDED of the year)
