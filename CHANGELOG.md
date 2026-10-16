@@ -1,5 +1,49 @@
 # CHANGELOG dfpilot
 
+## Glass for strange moods: raw and cut green glass from revealed sand (2026-10-16; offline, live-untested)
+- **Why (Run 11, Kilrudrabed site98, y429):** no gem vein on the site (`explore` digs since y427), moods kept failing for
+  gems, bars and leather, and every year the first unfulfilled mood dwarf died.
+- **What glass can and cannot replace** (DF's mood filters, DFHack strangemood.cpp; `reserve.glass_ok`): raw glass
+  (ROUGH of GLASS_GREEN/CLEAR/CRYSTAL) serves a glassmaker's base material and the extra "raw glass" (DF asks for it only
+  once the fort has made that glass); cut glass (CutGlass at a jeweler's) serves the extra "cut gems" (SMALLGEM of any
+  material). Glass never serves rough gems (ROUGH of an inorganic: a gem cutter's or setter's base, the extra rough gem),
+  metal bars, blocks, leather or cloth. Only green glass is made (clear/crystal need pearlash or rock crystal), so a
+  glassmaker who prefers clear or crystal glass still waits.
+- **care:** `care.mood_wants` entries carry `glass` (`raw`/`cut`); MOOD_RISK names economy's route for gems and glass
+  (`route gems: cut glass: no glass furnace (asked), no sand revealed, ..., raw 0/9, cut 6; trade.want gem`), the
+  rough-gem route (`rough gems: mine a gem vein or trade.want gem (glass is no rough gem)`) otherwise; the mood's
+  DECISION_NEEDED hint adds cut glass for a cut-gem need.
+- **economy:** census `gems` no longer counts raw glass; new `glass` (raw glass), `gems_glass` (cut glass), `sand` (bags of
+  sand), `bags` (empty bags); key `glass` (no alias of gems). The glass chain (`M.glass_plan`, config `economy.glass`)
+  runs while a mood wants raw glass or cut gems, or with no natural gem in the fort while a mood missed gems/glass within
+  `leather.memory_days`, or from `glass.from_phase` (P3) while the gems are below the mood reserve's gems target
+  (`reserve.targets.gems`, 5): cut glass up to that target plus `glass.raw` (3) raw glass. Steps: no glass furnace (or
+  no jeweler's while cut glass is wanted) -> PROJECT_REQUEST workshops why=glass (follow places the missing moodable
+  shops); no sand zone -> one 1x1 `dfllm-sand` zone on a revealed sand floor on the citizens' walk group, roofed first;
+  no empty bag -> ConstructBag from spare cloth or leather; fuel -> MakeCharcoal (not with a magma glass furnace);
+  orders CollectSand, MakeRawGlass GLASS_GREEN (bag of sand + fuel conditions), CutGlass GLASS_GREEN. Blockers the kernel
+  cannot fix (no sand revealed, no bags, no fuel) -> GLASS_BLOCKED (B) once per set (util/cadence, `glass.report_days`).
+- **snapshot:** exports mark revealed soil floors of a sand layer (`marks.sand`; layer material SOIL_SAND via DFHack
+  tile-material); new hook `snapshot.sand()`; economy asks for one export when none ran this boot.
+- **act:** `sand_zone(pos)` (economy): the zones screen's Sand zone, quickfort zone key `s`. **orderlib:** CollectSand,
+  MakeRawGlass, CutGlass, ConstructBag (workshops, inputs `sand`/`bags`/`glass`; CollectSand is hauling labor).
+- Contracts: event GLASS_BLOCKED (schema, contract.lua, appendix), act `sand_zone`, hook `snapshot.sand`,
+  `economy.route(key, via)`, `care.mood_wants` `glass`, census fields, PROJECT_REQUEST why=glass, marks `sand`. RULES §7
+  MOOD_RISK row, §10 moods; config `economy.glass` (baseline.json).
+- Tests: `tests/lua/test_economy_glass.lua` (new: census, the whole chain, blockers once, no chain with natural gems,
+  magma and the boot export), `test_reserve.lua` (glass_ok), `test_care_moods.lua` (MOOD_RISK routes, mood_wants glass),
+  `test_snapshot.lua` (sand marks, hook), `test_act_supply.lua` (sand_zone), `tests/test_economy_specs.py` (glass jobs on a
+  DF install).
+- **How to use:** nothing for the normal loop. A MOOD_RISK line names the glass route and what blocks it; GLASS_BLOCKED in
+  the brief says what the player must supply (dig into or look at a sand layer, cloth for bags, a wood furnace).
+- **Live check:** after `git pull` and `dfhack-run dfllm reload`, in Kilrudrabed: `dfllm audit` (an export); the newest
+  snapshot under `<save>/snap/` has `marks.sand` if a revealed sand floor lies in its box; within a game day
+  `<save>/kern.log` shows `glass: sand collection zone dfllm-sand at x,y,z` and the zones screen lists a Sand zone there;
+  `dfllm cmd inspect '{"what":"orders"}'` (or the work orders screen) shows `dfllm:bag`/`dfllm:glass_fuel`, then
+  `dfllm:sand` (Collect sand), `dfllm:glass` (Make raw green glass) and `dfllm:cutglass` (Cut green glass); without sand
+  `dfllm events --type GLASS_BLOCKED` names `no_sand`. If a CollectSand order never gets a job ("Needs ..." cancels or
+  ORDER_STUCK), note it in the repo: the order may need a glass furnace link in 53.16.
+
 ## No P3+ without a separated refuge with beds; template `refuge_beds` (2026-10-16; offline, live-untested)
 - **Why (Run 10, post-mortem root cause 5):** Tiefe+ was never usable (beds 8 < 27, open to the entrance 95,127,123,
   58 steps), Kern+ lay on the attack path, at pop 110 there was no safe room; no template could add beds to the refuge

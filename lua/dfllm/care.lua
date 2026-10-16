@@ -411,13 +411,16 @@ end
 
 -- Run 10 (Handlelock: a fey mood died for two leather while no tannery stood and the hunters had no bolts): economy's
 -- route for up to two missing classes, e.g. 'route leather: no tannery (asked), hunt: no bolts, butcher, trade.want
--- leather'; '' without economy or a route word
-local ROUTE_CLS = {leather = true, bars = true, bone = true, shell = true, cloth = true, thread = true}
-local function route_note(K, classes)
+-- leather'; '' without economy or a route word. Run 11 (Kilrudrabed, no gem vein): gems and raw glass too; `glassy` =
+-- a missing gems filter takes cut glass (reserve.glass_ok 'cut'), so economy names its glass chain for it (else the
+-- rough-gem route: glass is no rough gem)
+local ROUTE_CLS = {leather = true, bars = true, bone = true, shell = true, cloth = true, thread = true, gems = true,
+                   glass = true}
+local function route_note(K, classes, glassy)
   local out = {}
   for _, cls in ipairs(classes or {}) do
     if ROUTE_CLS[cls] and #out < 2 then
-      local ok, txt = K.call('economy', 'route', cls)
+      local ok, txt = K.call('economy', 'route', cls, (cls == 'gems' and glassy) and 'glass' or nil)
       if ok and type(txt) == 'string' and txt ~= '' then out[#out + 1] = 'route ' .. cls .. ': ' .. txt end
     end
   end
@@ -451,7 +454,7 @@ local function mood_seen(K, c, r, p, u, kind)
     rec.risk, rec.risk_why, rec.risk_w = now, risk, T.wall
     local miss = still_missing(job, rec)
     rec.missing = miss
-    local rn = #miss > 0 and route_note(K, miss) or ''
+    local rn = #miss > 0 and route_note(K, miss, rec.glass) or ''
     K.emit('MOOD_RISK', 'A', trunc(string.format('mood unit %d (%s%s) %s %d, dies at 75000: %s%s; a mood job cannot be '
                                                  .. 'cancelled%s', u.id, kind, child and ', child' or '', risk,
                                                  risk == 'thirst' and th or hu,
@@ -2067,6 +2070,7 @@ local function mood_report(K, c, r, p)
     if rec then
       local labels, classes, primary, seen, nopath, far = {}, {}, {}, {}, false, 0
       local nosrc, nseen, kinds, plain = {}, {}, {}, {}
+      local glassy = false                          -- Run 11: a missing "cut gems" filter (cut glass serves it)
       local open = open_filters(m)
       for _, nd in ipairs(m.needs) do               -- wants: the hook entries (care.mood_wants)
         local left = nd.n
@@ -2097,21 +2101,25 @@ local function mood_report(K, c, r, p)
           nopath = nopath or not path
           local a = nd.alts[1]                      -- an any-of need (workshop classes): its primary material
           primary[#primary + 1] = a.cls or 'other'
+          -- Run 11: glass = 'raw' (raw glass serves it) | 'cut' (cut glass does) | nil (glass cannot: rough gems, ...)
+          local g = #nd.alts == 1 and R.glass_ok(a) or nil
+          if g == 'cut' then glassy = true end
           if #wants < 20 then
             wants[#wants + 1] = {unit = int(m.sid), cls = a.cls or 'other', n = short, label = labels[#labels],
-                                 acq = table.concat(R.ACQ[a.cls or ''] or {}, ','), buy = R.token(a) or ''}
+                                 acq = table.concat(R.ACQ[a.cls or ''] or {}, ','), buy = R.token(a) or '', glass = g}
           end
         end
       end
       if #labels == 0 then
         if rec.unres then K.log('info', 'mood unit %s: every material is available now', m.sid) end
-        rec.unres, rec.missing, rec.checked, rec.nosrc = nil, {}, rec.checked or now, nil
+        rec.unres, rec.missing, rec.checked, rec.nosrc, rec.glass = nil, {}, rec.checked or now, nil, nil
       else
         local sig = trunc(table.concat(labels, ', '), 200)
         local miss = {}
         for i = 1, math.min(8, #classes) do miss[i] = classes[i] end
         rec.missing = miss
         rec.nosrc = #nosrc > 0 and nosrc or nil
+        rec.glass = glassy or nil
         -- the stock note (kinds, classes nothing in the fort can supply) is kept whole by the cut at 200 bytes
         local note = stock_note(kinds, plain)
         local ns = note ~= '' and ('; ' .. note) or ''
@@ -2121,7 +2129,7 @@ local function mood_report(K, c, r, p)
           rec.checked = now
           local head = string.format('strange mood unit %s (%s%s) starts without ', m.sid, rec.kind,
                                      m.child and ', child' or '')
-          local rn = route_note(K, miss)
+          local rn = route_note(K, miss, glassy)
           local tail = ns .. (rn ~= '' and ('; ' .. rn) or '')
           tail = trunc(tail, 160)
           K.emit('MOOD_RISK', 'A', trunc(head .. trunc(sig, math.max(20, 200 - #head - #tail)) .. tail, 200),
@@ -2156,6 +2164,7 @@ local function mood_report(K, c, r, p)
           if note ~= '' then hints[1] = note end
           if far > 0 then hints[#hints + 1] = string.format('%d outside Kern+: haul in or open the way', far) end
           for _, cls in ipairs(classes) do hints[#hints + 1] = R.HINT[cls] or R.HINT.other end
+          if glassy then hints[#hints + 1] = 'cut gems: cut glass (' .. R.HINT.glass .. ')' end   -- Run 11
           -- live L1b-L3: a missing mood material ended in a failed mood and a death 9 times; care has freed
           -- what exists and started what it can, the rest needs the LLM (dig, trade, plan)
           K.emit('DECISION_NEEDED', 'A', trunc(string.format('strange mood: unit %s (%s%s) still needs %s', m.sid,
@@ -3075,7 +3084,9 @@ end
 -- freed what exists, as a list (<= 20) of {cls, n, unit, label, acq, buy}. economy turns each into a short-term
 -- need of its key (hunters, TAN_A_HIDE, WeaveCloth, SmeltOre, charcoal, autochop); acq = the paths of
 -- reserve.ACQ ('butcher', 'hunt', 'chop', 'dig', 'order:<job>', 'buy'); buy = a trade.lua token ('bar:iron',
--- 'cloth', 'leather', 'gem') or '' for trade to put before plan.trade.want while a caravan is here.
+-- 'cloth', 'leather', 'gem') or '' for trade to put before plan.trade.want while a caravan is here. Run 11: glass =
+-- 'raw' (raw glass serves the filter) or 'cut' (cut glass does: "cut gems" of any material), absent when glass cannot
+-- (reserve.glass_ok); economy's glass chain makes them.
 function M.mood_wants(K)
   return deep(st.wants or {})
 end

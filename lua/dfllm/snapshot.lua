@@ -1,8 +1,9 @@
 -- snapshot (WP7; CONTRACTS §3.4, §7, §9.10): revealed-tile export for Python (bp.topo audit, bp.sites
 -- ranking) and snapshot.tile, the one tile query of the other modules.
 -- Fair play (§1.4, DESIGN §11.1): a tile counts only if revealed; designation.hidden -> '?' in an
--- export and nil from tile(). Marks: soil (quickfort's farm rule, build.lua:65-81) and cavern
--- (designation.feature_global of revealed tiles, tile-material.lua:255); never water_table or damp.
+-- export and nil from tile(). Marks: soil (quickfort's farm rule, build.lua:65-81), cavern
+-- (designation.feature_global of revealed tiles, tile-material.lua:255) and sand (Run 11: a revealed soil floor of a
+-- sand layer, see M.is_sand; economy's sand collection zone); never water_table or damp.
 -- An export runs in slices of CFG.slice tiles per frame ('more'; the ms cadence also runs while
 -- paused) and is written to <save>/snap/<id>.json through a .tmp file, then SNAPSHOT_READY (C).
 -- BUG-026 (Run 10: an audit export of 58,608 tiles ran through a caravan visit that was then lost): an export waits
@@ -30,6 +31,7 @@ local PURPOSES = {audit = true, sites = true, debug = true}
 local ID_OK = '^[A-Za-z0-9_%-]+$'
 
 local job, queue, n_auto    -- running export, waiting exports, generated ids
+local tilemat, sand_cache, sand_known   -- Run 11: DFHack's tile-material module, sand per block layer, found floors
 local yielding             -- BUG-026: the busy module the running export waits for (logged once per wait)
 local tt_cache, occ, live_traps, live_jobs
 
@@ -518,7 +520,7 @@ local function start(K, j)
   local man = K.manifest()
   j.z, j.y, j.rows, j.cur = j.bbox[3], j.bbox[2], {}, {}
   j.traps = trap_index(j.bbox)
-  j.marks = {soil = {}, cavern = {}}
+  j.marks = {soil = {}, cavern = {}, sand = {}}
   j.bridges, j.bstate = {}, {}
   for name, spec in pairs(type(man.bridges) == 'table' and man.bridges or {}) do
     local ok, s, _, gone = K.call('gate', 'state', name)
@@ -540,6 +542,45 @@ local function add_mark(list, x, y, z)
   if #list < M.CFG.marks_max then list[#list + 1] = {x, y, z} end
 end
 
+-- Run 11 (Kilrudrabed, site98: no gem vein, every year the first mood that wanted gems died): is the revealed soil
+-- floor at x, y, z (designation des, already checked not hidden) of a sand layer? The tile sheet names its material
+-- ("yellow sand"); the layer material is DFHack's tile-material GetLayerMat (geology layer of the tile's biome),
+-- sand = inorganic flag SOIL_SAND. Cached per map block column, biome index and layer index. A field: tests replace it.
+M.SAND_MAX = 32                   -- sand floors kept (newest export first) and probed per export
+function M.is_sand(x, y, z, des)
+  if not tilemat then return false end
+  local key = string.format('%d,%d,%s,%s', x // 16, y // 16, tostring(des.biome), tostring(des.geolayer_index))
+  local v = sand_cache[key]
+  if v == nil then
+    local ok, yes = pcall(function()
+      local mi = tilemat.GetLayerMat(x, y, z)
+      return mi ~= nil and mi.inorganic ~= nil and mi.inorganic.flags.SOIL_SAND == true
+    end)
+    v = ok and yes == true
+    sand_cache[key] = v
+  end
+  return v
+end
+
+-- public (Run 11, economy's glass chain): the revealed sand floors the exports of this boot found, newest export
+-- first: {tick = the last export that looked (-1 none yet), tiles = {{x, y, z}} (<= M.SAND_MAX)}
+function M.sand(K)
+  local out = {}
+  for i, t in ipairs(sand_known.tiles) do out[i] = {t[1], t[2], t[3]} end
+  return {tick = sand_known.tick, tiles = out}
+end
+
+local function remember_sand(j)
+  local list, seen = {}, {}
+  for _, src in ipairs({j.marks.sand, sand_known.tiles}) do
+    for _, t in ipairs(src) do
+      local k = t[1] .. ',' .. t[2] .. ',' .. t[3]
+      if not seen[k] and #list < M.SAND_MAX then seen[k] = true; list[#list + 1] = {t[1], t[2], t[3]} end
+    end
+  end
+  sand_known = {tick = j.tick, tiles = list}
+end
+
 -- one row (x0..x1) of level z
 local function scan_row(j, y, z)
   local b = j.bbox
@@ -551,7 +592,10 @@ local function scan_row(j, y, z)
     else
       local ch, _bld, soil = classify(x, y, z, des, oc, j.traps, j.bridges)
       c = ch
-      if soil and c == '.' then add_mark(j.marks.soil, x, y, z) end
+      if soil and c == '.' then
+        add_mark(j.marks.soil, x, y, z)
+        if #j.marks.sand < M.SAND_MAX and M.is_sand(x, y, z, des) then add_mark(j.marks.sand, x, y, z) end
+      end
       if des.feature_global == true then add_mark(j.marks.cavern, x, y, z) end
     end
     out[#out + 1] = c
@@ -583,6 +627,7 @@ end
 
 local function finish(K, j)
   j.tick = K.now().tick
+  remember_sand(j)
   local dir = K.cfg.paths.save and (K.cfg.paths.save .. '/snap')
   if not dir then return end
   local path, err = fio.write_new(dir, j.id .. '.json', encode(j))
@@ -623,6 +668,9 @@ end
 function M.init(K)
   job, queue, n_auto, tt_cache, live_traps, live_jobs, yielding = nil, {}, 0, {}, nil, nil, nil
   occ = occ_values()
+  sand_cache, sand_known = {}, {tick = -1, tiles = {}}
+  local ok, tm = pcall(require, 'tile-material')       -- DFHack library/lua/tile-material.lua
+  tilemat = ok and type(tm) == 'table' and tm or nil
 end
 
 function M.step(K, budget, ctx)

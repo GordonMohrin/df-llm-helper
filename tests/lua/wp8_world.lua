@@ -18,7 +18,7 @@ F.ITEM_TYPES = {'BAR', 'SMALLGEM', 'BLOCKS', 'ROUGH', 'BOULDER', 'WOOD', 'DOOR',
   'BUCKET', 'TABLE', 'COFFIN', 'STATUE', 'CORPSE', 'WEAPON', 'ARMOR', 'SHOES', 'SHIELD', 'HELM', 'GLOVES', 'BIN',
   'FIGURINE', 'AMULET', 'SCEPTER', 'AMMO', 'CROWN', 'RING', 'EARRING', 'BRACELET', 'ANVIL', 'CORPSEPIECE', 'MEAT',
   'FISH', 'FISH_RAW', 'SEEDS', 'PLANT', 'SKIN_TANNED', 'PLANT_GROWTH', 'THREAD', 'CLOTH', 'TOTEM', 'PANTS', 'DRINK', 'CHEESE',
-  'FOOD', 'TOOL', 'EGG'}
+  'FOOD', 'TOOL', 'EGG', 'BAG'}
 
 local function enum_from(names, first)
   local t = {}
@@ -31,7 +31,7 @@ end
 F.BUILDINGS_OTHER = {'IN_PLAY', 'STOCKPILE', 'ANY_ZONE', 'ACTIVITY_ZONE', 'ZONE_HOME', 'ZONE_TOMB', 'ZONE_POND',
   'ZONE_DUMP', 'ZONE_BEDROOM', 'ZONE_MEETING_HALL', 'ZONE_PEN', 'ANY_HOSPITAL', 'ANY_STORAGE', 'BOX', 'CABINET',
   'TRAP', 'DOOR', 'FLOODGATE', 'HATCH', 'WELL', 'TABLE', 'BRIDGE', 'CHAIR', 'TRADE_DEPOT', 'BED', 'FARM_PLOT',
-  'STATUE', 'SLAB', 'COFFIN', 'WEAPON_RACK', 'ARMOR_STAND', 'FURNACE_ANY', 'WORKSHOP_ANY'}
+  'STATUE', 'SLAB', 'COFFIN', 'WEAPON_RACK', 'ARMOR_STAND', 'FURNACE_ANY', 'WORKSHOP_ANY', 'ZONE_SAND_COLLECTION'}
 
 local function strict(W, other, names)
   local ok = {}
@@ -62,12 +62,13 @@ function F.install(W)
   df.job_type = enum_from({'CustomReaction', 'MakeCharcoal', 'SmeltOre', 'MakeQuiver', 'ConstructArmorStand',
                            'PrepareMeal', 'WeaveCloth', 'ConstructBlocks', 'MakeCrafts', 'StrangeMoodCrafter',
                            'ConstructDoor', 'ConstructCabinet', 'ConstructChest', 'ConstructCoffin', 'ConstructTable',
-                           'ConstructThrone', 'ConstructBed'}, 0)
+                           'ConstructThrone', 'ConstructBed', 'CollectSand', 'MakeRawGlass', 'CutGlass',
+                           'ConstructBag'}, 0)
   df.workquota_frequency_type = enum_from({'OneTime', 'Daily', 'Monthly', 'Seasonally', 'Yearly'}, 0)
   df.workshop_type = enum_from({'Carpenters', 'Farmers', 'Masons', 'Craftsdwarfs', 'Jewelers', 'MetalsmithsForge',
                                 'MagmaForge', 'Bowyers', 'Mechanics', 'Siege', 'Butchers', 'Leatherworks', 'Tanners',
                                 'Clothiers', 'Fishery', 'Still', 'Loom'}, 0)
-  df.furnace_type = enum_from({'WoodFurnace', 'Smelter', 'GlassFurnace', 'Kiln'}, 0)
+  df.furnace_type = enum_from({'WoodFurnace', 'Smelter', 'GlassFurnace', 'Kiln', 'MagmaSmelter', 'MagmaGlassFurnace'}, 0)
   local mt = enum_from({'Fey', 'Secretive', 'Possessed', 'Macabre', 'Fell', 'Melancholy', 'Raving', 'Berserk',
                         'Baby', 'Traumatized'}, 0)
   mt.None, mt[-1] = -1, 'None'

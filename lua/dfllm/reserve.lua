@@ -314,6 +314,19 @@ function R.split(hold, stock)
   return caps
 end
 
+-- Run 11 (Kilrudrabed, no gem vein: every year the first mood that wanted gems died): what glass does for a need.
+-- DF's mood filters (DFHack strangemood.cpp, the game's own rules): a glassmaker's base material and the extra "raw
+-- glass" (DF asks for it only once the fort has made that glass) are ROUGH of GLASS_GREEN/CLEAR/CRYSTAL; the extra
+-- "cut gems" are SMALLGEM of any material, so cut glass (CutGlass at a jeweler's) serves them; rough gems (a gem
+-- cutter's or setter's base, the extra rough gem) are ROUGH of an inorganic: glass never serves those, nor bars,
+-- blocks, leather or cloth. 'raw' | 'cut' | nil (a legacy workshop-class need: nil)
+function R.glass_ok(nd)
+  if type(nd) ~= 'table' or nd.legacy then return nil end
+  if nd.cls == 'glass' then return 'raw' end
+  if nd.cls == 'gems' and nd.tname == 'SMALLGEM' and ((nd.mat_type or -1) < 0 or GLASS[nd.mat_type]) then return 'cut' end
+  return nil
+end
+
 -- the class of a whole workshop class (legacy path, no filters): any item of the class's vector
 function R.legacy_need(name)
   local v = R.LEGACY_VEC[name]
@@ -329,8 +342,9 @@ end
 -- the pile's tiles, so binned cloth, thread, gems, bars, leather and bones are reached through it
 function R.is_container(it) return get(it.flags, 'container') == true end
 
--- the reserve class of a stored item, or nil (only plain stock: butchered bones and shells, inorganic gems and
--- metal bars; raw glass, coal and soap are no mood stock)
+-- the reserve class of a stored item, or nil (only plain stock: butchered bones and shells, cut gems (cut glass among
+-- them: a "cut gems" filter takes any material), rough inorganic gems and metal bars; raw glass, coal and soap are no
+-- mood stock)
 function R.item_class(it)
   local t = tname_of(it)
   if t == 'BOULDER' then return 'boulders'

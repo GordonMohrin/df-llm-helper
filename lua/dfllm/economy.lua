@@ -241,6 +241,16 @@ M.DEFAULTS = {
            -- then back to autofarm's default (status); fiber_off only when status names no default
            fiber = {'GRASS_TAIL_PIG', 'REED_ROPE', 'FLAX', 'HEMP', 'JUTE', 'KENAF', 'RAMIE', 'COTTON'},
            fiber_on = 100, fiber_off = 50},
+  -- Run 11 (Kilrudrabed, no gem vein: every year the first mood that wanted gems died): raw green glass from sand for
+  -- the moods' raw-glass and cut-gem filters (M.glass_plan): from_phase = the standing stock without a mood miss, raw =
+  -- raw glass kept, bags = empty bags made for CollectSand, report_days = the GLASS_BLOCKED cadence
+  glass = {from_phase = 'P3', raw = 3, bags = 2, max_jobs = 5, request_days = 14, report_days = 28,
+           furnace = {'furnace:GlassFurnace', 'furnace:MagmaGlassFurnace'}, magma = 'furnace:MagmaGlassFurnace',
+           jeweler = {'workshop:Jewelers'}, fuel_tag = 'dfllm:glass_fuel',
+           sand = {tag = 'dfllm:sand', spec = {job = 'CollectSand'}},
+           make = {tag = 'dfllm:glass', spec = {job = 'MakeRawGlass', material = 'GLASS_GREEN'}},
+           cut = {tag = 'dfllm:cutglass', spec = {job = 'CutGlass', material = 'GLASS_GREEN'}},
+           bag = {tag = 'dfllm:bag', ws = {cloth = 'workshop:Clothiers', leather = 'workshop:Leatherworks'}}},
   metal = {from_phase = 'P2', max_jobs = 10, ores_per_day = 2, smelter = {'furnace:Smelter', 'furnace:MagmaSmelter'},
            charcoal = {tag = 'dfllm:charcoal', buffer = 4, cap = 40, ws = {'furnace:WoodFurnace'}},
            bronze = {tag = 'dfllm:bronze', ore = 'BRONZE_MAKING', bars = 'BRONZE_MAKING2', max_jobs = 5},
@@ -368,7 +378,7 @@ end
 ---------------------------------------------------------------- item census (sliced, items.other)
 local CATS = {'DRINK', 'FOOD', 'MEAT', 'FISH', 'FISH_RAW', 'CHEESE', 'EGG', 'PLANT', 'PLANT_GROWTH', 'CLOTH', 'SKIN_TANNED',
               'CORPSEPIECE', 'SMALLGEM', 'ROUGH', 'BAR', 'AMMO', 'WOOD', 'BARREL', 'BIN', 'BOULDER', 'THREAD',
-              'SEEDS', 'WEAPON', 'ARMOR', 'HELM', 'PANTS', 'GLOVES', 'SHOES', 'SHIELD', 'QUIVER'}
+              'SEEDS', 'WEAPON', 'ARMOR', 'HELM', 'PANTS', 'GLOVES', 'SHOES', 'SHIELD', 'QUIVER', 'BAG'}
 local SKIP = {'trader', 'garbage_collect', 'removed', 'dump', 'hostile', 'in_building', 'construction', 'rotten'}
 -- FR-62 (Run 9: 18.7k items, economy 12-14 ms/s): one read of the flag word (bitfield `whole`) against the mask of
 -- the SKIP bits instead of eight bitfield reads per item. The first M.MASK_CHECK items of a boot are cross-checked
@@ -551,6 +561,7 @@ local function reach_mark(a, it, key)
   if it.flags.in_inventory or not (a.far and a.far(it)) then a.reach[key] = true end
 end
 
+function M.sandy(it) return it:isSandBearing() end      -- Run 11: a bag of sand (no closure per census item)
 local function classify(it, a, cat)
   local f = it.flags
   local w = skip_mask and f.whole
@@ -622,7 +633,20 @@ local function classify(it, a, cat)
       if cf.bone then a.bone = a.bone + n; reach_mark(a, it, 'bone') elseif cf.shell then a.shell = a.shell + n
       elseif cf.leather then a.hides = a.hides + n end      -- a raw hide (deteriorate.lua usable_types)
     end
-  elseif cat == 'SMALLGEM' or cat == 'ROUGH' then a.gems = a.gems + n
+  -- Run 11: raw glass (ROUGH of GLASS_GREEN/CLEAR/CRYSTAL, builtin mats 3-5) is no gem (a rough-gem mood filter wants an
+  -- inorganic); cut glass is a cut gem ("cut gems" filters take any material) and also counted as gems_glass
+  elseif cat == 'SMALLGEM' then
+    a.gems = a.gems + n
+    local mt = it.mat_type
+    if mt == 3 or mt == 4 or mt == 5 then a.gems_glass = a.gems_glass + n end
+  elseif cat == 'ROUGH' then
+    local mt = it.mat_type
+    if mt == 3 or mt == 4 or mt == 5 then a.glass = a.glass + n; reach_mark(a, it, 'glass') else a.gems = a.gems + n end
+  elseif cat == 'BAG' then
+    -- Run 11: a bag of sand (the glass furnace's input; item:isSandBearing, DF's "glassable") or an empty bag (CollectSand)
+    local okb, sandy = pcall(M.sandy, it)
+    if okb and sandy == true then a.sand = a.sand + 1; reach_mark(a, it, 'sand')
+    elseif #dfhack.items.getContainedItems(it) == 0 then a.bags = a.bags + 1; reach_mark(a, it, 'bags') end
   elseif cat == 'BAR' then
     if it.mat_type == 0 then
       a.bars = a.bars + n
@@ -740,7 +764,8 @@ local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'ge
               'flux', 'hides', 'thread', 'thread_plant', 'thread_silk', 'thread_yarn', 'bolts_free', 'w_pick', 'w_axe',
               'w_xbow', 'w_bow', 'g_body', 'g_head', 'g_pants', 'g_gloves', 'g_shoes', 'g_shield', 'g_weapon', 'g_xbow',
               'g_quiver', 'g_metal', 'fish_raw', 'food_nocook', 'seeds_ok', 'seeds_forb', 'w_pick_free', 'w_axe_free',
-              'w_pick_bin', 'w_axe_bin', 'w_pick_res', 'w_axe_res', 'webs', 'webs_near'}
+              'w_pick_bin', 'w_axe_bin', 'w_pick_res', 'w_axe_res', 'webs', 'webs_near', 'glass', 'gems_glass', 'sand',
+              'bags'}
 local function new_acc(c)
   local fs = {}
   for _, k in ipairs(c.food_cats or {}) do fs[k] = true end
@@ -920,10 +945,11 @@ local function scan_orders(p)
 end
 
 ---------------------------------------------------------------- needs, reserves, floors (hook API)
+-- Run 11: glass = raw glass (care's class `glass`: a glassmaker's mood, the extra raw glass), no alias of gems any more
 local KEYS = {wood = true, rock = true, bone = true, shell = true, leather = true, cloth = true, thread = true,
-              bars = true, gems = true, fuel = true, hides = true}
+              bars = true, gems = true, fuel = true, hides = true, glass = true}
 local ALIAS = {logs = 'wood', log = 'wood', boulders = 'rock', boulder = 'rock', stone = 'rock', rough = 'gems',
-               glass = 'gems', gem = 'gems', bar = 'bars', skin = 'hides'}
+               gem = 'gems', bar = 'bars', skin = 'hides'}
 M.KEYS = KEYS
 local function key_of(k)
   k = tostring(k or ''):lower()
@@ -1017,13 +1043,17 @@ local function care_hooks(K, r)
     end
   end
   local wants = {}
+  r.glass_cut = 0                                -- Run 11: "cut gems" the moods miss (cut glass serves them)
   local w = care_hook(K, 'mood_wants')
   if type(w) == 'table' then
     for k, v in pairs(w) do
       local key, n
       if type(k) == 'number' and type(v) == 'table' then key, n = key_of(v.cls or v.class or v.key), count_of(v.n or 1)
       else key, n = key_of(k), count_of(v) end
-      if KEYS[key] and n and n > 0 then wants[key] = (wants[key] or 0) + n end
+      if KEYS[key] and n and n > 0 then
+        wants[key] = (wants[key] or 0) + n
+        if type(v) == 'table' and v.glass == 'cut' then r.glass_cut = r.glass_cut + n end
+      end
     end
   end
   for key in pairs(KEYS) do
@@ -3229,6 +3259,210 @@ function T.slaughter(K, c, r)
   return true
 end
 
+---------------------------------------------------------------- glass for strange moods (Run 11)
+-- Kilrudrabed (site98, y427-429): no gem vein on the site (`explore` digs since y427), and every year the first mood that
+-- wanted gems died. What glass does (reserve.glass_ok, DF's own mood filters): raw glass serves a glassmaker's base
+-- material and the extra raw glass; cut glass (CutGlass at a jeweler's) the extra "cut gems" (SMALLGEM of any
+-- material); nothing of glass serves rough gems (ROUGH of an inorganic: a gem cutter's or setter's base, the extra rough
+-- gem), metal bars, blocks, leather or cloth. The chain runs while a mood wants raw glass or cut gems (care.mood_wants
+-- glass), or, with no natural gem in the fort (census gems - gems_glass = 0), while a mood missed gems or glass within
+-- leather.memory_days, or from glass.from_phase while the gems (care's held ones included) stay below the mood
+-- reserve's gems target (config reserve.targets.gems): cut glass up to that target, glass.raw raw glass on top.
+--   shops  no glass furnace (or no jeweler's while cut glass is wanted): PROJECT_REQUEST workshops why=glass (follow
+--          places the missing moodable shops), every request_days at most, never while a workshops project is pending;
+--   sand   no sand collection zone: one 1x1 zone `dfllm-sand` (act.sand_zone, the zones screen) on a revealed sand
+--          floor on the citizens' walk group (snapshot.sand: the exports' sand marks; snapshot.tile and far), again
+--          only after request_days; before any export of this boot one is asked for (purpose debug);
+--   bags   no empty bag: ConstructBag from spare cloth (clothier's) or leather (leatherworks), up to glass.bags;
+--   fuel   without a magma glass furnace: charcoal (MakeCharcoal at a wood furnace, from spare wood) for the glass jobs;
+--   orders CollectSand (one per empty bag), MakeRawGlass GLASS_GREEN (a bag of sand + fuel), CutGlass GLASS_GREEN.
+-- What the kernel cannot fix itself (no sand revealed, no bags, no fuel) is GLASS_BLOCKED (B), again only when a new
+-- blocker appears after report_days (util/cadence); economy.route('gems'|'glass') names the chain for MOOD_RISK.
+-- Module fields, not locals: the main chunk is at Lua's 200-local limit.
+M.GLASS_WHY = {no_sand = 'no sand revealed (a sand zone needs a revealed sand floor)',
+               no_bags = 'no bags (spare cloth/leather + its shop)', no_fuel = 'no fuel (wood furnace + wood, or magma)'}
+M.GLASS_SHORT = {no_sand = 'no sand revealed', no_bags = 'no bags', no_fuel = 'no fuel'}
+
+-- the mood reserve's gems target (config/baseline.json reserve.targets.gems, care holds that many)
+function M.gem_reserve(K)
+  local rs = type(K.cfg.baseline) == 'table' and K.cfg.baseline.reserve
+  return type(rs) == 'table' and type(rs.targets) == 'table' and math.tointeger(rs.targets.gems) or 5
+end
+
+function M.sand_zones()                          -- sand collection zones of the fort (the player's count too)
+  local ok, n = pcall(function() return #df.global.world.buildings.other.ZONE_SAND_COLLECTION end)
+  return ok and math.tointeger(n) or 0
+end
+
+function M.glass_shop(K, c, r, g, what)
+  local G, p = c.glass, r.p
+  if p.glass_req and r.now - (math.tointeger(p.glass_req) or 0) < (G.request_days or 14) * DAY then
+    g.shop = what .. ' (asked)'
+    return
+  end
+  local okp, pend = K.call('runner', 'pending', 'workshops')
+  if okp and type(pend) == 'number' and pend > 0 then g.shop = what .. ' (queued)'; return end
+  p.glass_req, g.shop = r.now, what .. ' (asked)'
+  K.emit('PROJECT_REQUEST', 'B', string.format('workshops: %s for glass (strange moods: %d raw glass, %d cut gems wanted)',
+                                               what, g.raw, g.cut), {tpl = 'workshops', n = 1, why = 'glass'})
+end
+
+-- one sand collection zone on a revealed sand floor the citizens reach (fair play: only what the exports saw)
+function M.glass_sand(K, c, r, g)
+  local G, p = c.glass, r.p
+  if p.sand_t and r.now - (math.tointeger(p.sand_t) or 0) < (G.request_days or 14) * DAY then g.zone = 'painted'; return end
+  local ok, s = K.call('snapshot', 'sand')
+  if ok and type(s) == 'table' and (math.tointeger(s.tick) or -1) < 0 then
+    if not st.sand_snap then                     -- no export this boot yet: one is asked for, the next run looks
+      st.sand_snap = true
+      K.call('snapshot', 'export', {purpose = 'debug'})
+    end
+    g.zone = 'looking'
+    return
+  end
+  -- candidates: revealed floors on the citizens' walk group (<= 8); roofed ones first (no hauler out in the open)
+  local cand = {}
+  for _, t in ipairs(ok and type(s) == 'table' and type(s.tiles) == 'table' and s.tiles or {}) do
+    local x, y, z = int(t[1]), int(t[2]), int(t[3])
+    local okt, v = K.call('snapshot', 'tile', x, y, z)
+    if x and y and z and okt and type(v) == 'table' and v.c == '.' and not far(K, x, y, z) and #cand < 8 then
+      cand[#cand + 1] = {x, y, z}
+    end
+  end
+  local oko, sky = K.call('snapshot', 'outside_near', cand, 0)
+  local tries = 0
+  for pass = 0, 1 do
+    for i, pos in ipairs(cand) do
+      local open_sky = oko and type(sky) == 'table' and sky[i] == 1
+      if (pass == 0) ~= (open_sky == true) and tries < 4 then
+        tries, r.cmds = tries + 1, r.cmds + 1
+        if K.act.sand_zone(pos) then
+          p.sand_t, p.sand_at, g.zone = r.now, pos, 'painted'
+          K.log('info', 'glass: sand collection zone dfllm-sand at %d,%d,%d', pos[1], pos[2], pos[3])
+          return
+        end
+      end
+    end
+  end
+  g.block[#g.block + 1] = 'no_sand'
+end
+
+-- empty bags for CollectSand from spare cloth or leather (their floors and the moods' needs stay)
+function M.glass_bags(K, c, r, g, short)
+  local G = c.glass
+  local B = G.bag or {}
+  if open(r, B.tag) then g.ord[#g.ord + 1] = 'ConstructBag'; return end
+  for _, kind in ipairs({'cloth', 'leather'}) do
+    local ws = (B.ws or {})[kind]
+    local n = math.min(G.bags or 2, short, left(c, r, kind))
+    if ws and r.f[ws] and add(r, {tag = B.tag, spec = {job = 'ConstructBag', material_category = {kind}}, n = n,
+                                  uses = {[kind] = 1}, why = 'bags'}) then
+      g.ord[#g.ord + 1] = 'ConstructBag'
+      return
+    end
+  end
+  g.block[#g.block + 1] = 'no_bags'
+end
+
+-- fuel for `jobs` raw glass jobs: the spare fuel now (charcoal is ordered for the rest; none and no way: no_fuel)
+function M.glass_fuel(K, c, r, g, jobs)
+  local G = c.glass
+  local fuel = left(c, r, 'fuel')
+  if fuel >= jobs or open(r, G.fuel_tag) then return fuel end
+  local ch = (c.metal or {}).charcoal
+  local n = math.min(jobs - fuel, left(c, r, 'wood'), G.max_jobs or 5)
+  if ch and ws_any(r.f, ch.ws) and add(r, {tag = G.fuel_tag, spec = wood_spec(c, r, {job = 'MakeCharcoal', material_category = {}}),
+                                          n = n, uses = {wood = 1}, why = 'glass fuel'}) then
+    g.ord[#g.ord + 1] = 'MakeCharcoal'
+  elseif fuel <= 0 then
+    g.block[#g.block + 1] = 'no_fuel'
+  end
+  return fuel
+end
+
+function M.glass_report(K, c, r, g)
+  local G, p = c.glass, r.p
+  if #g.block == 0 then p.glass_rep = CAD.quiet(p.glass_rep); return end
+  local T = K.now()
+  if not CAD.due(p.glass_rep, T, {}, g.block, {ticks = (G.report_days or 28) * DAY, wall_s = CAD.WALL_S}) then return end
+  p.glass_rep = CAD.mark(T, {}, g.block)
+  local parts = {}
+  for _, b in ipairs(g.block) do parts[#parts + 1] = M.GLASS_WHY[b] or b end
+  K.emit('GLASS_BLOCKED', 'B', string.format('glass for moods (%d raw, %d cut) blocked: %s', g.raw, g.cut,
+                                             table.concat(parts, '; ')):sub(1, 200),
+         {why = {table.unpack(g.block)}, raw = g.raw, cut = g.cut})
+end
+
+function M.glass_plan(K, c, r)
+  local G, p, inv, now = c.glass, r.p, r.inv, r.now
+  st.glass = nil
+  if type(G) ~= 'table' or not phase_ok(K, c.mood_from_phase or 'P1') then return end
+  local nat = math.max(0, (inv.gems or 0) - (inv.gems_glass or 0))          -- natural gems (no glass)
+  local raw_need, cut_need, res = need_n(p, 'glass', now), r.glass_cut or 0, M.gem_reserve(K)
+  local missed = M.mood_missed(c, p, 'gems', now) or M.mood_missed(c, p, 'glass', now)
+  local standing = nat == 0 and (missed or (phase_ok(K, G.from_phase) and have(r, 'gems') < res))
+  if raw_need + cut_need <= 0 and not standing then
+    p.glass_rep = CAD.quiet(p.glass_rep)         -- the chain is off: a blocker that comes back is news
+    return
+  end
+  local cut = cut_need + (standing and math.max(0, res - have(r, 'gems')) or 0)
+  local raw = raw_need + (standing and (G.raw or 3) or 0) + cut
+  r.targets.glass = raw
+  local g = {raw = raw, cut = cut, have = inv.glass or 0, block = {}, ord = {}}
+  st.glass = g
+  local f, mx = r.f, G.max_jobs or 5
+  local fur, magma, jew = ws_any(f, G.furnace), f[G.magma] == true, ws_any(f, G.jeweler)
+  if not fur then M.glass_shop(K, c, r, g, 'no glass furnace')
+  elseif cut > 0 and not jew then M.glass_shop(K, c, r, g, "no jeweler's") end
+  local raw_short = math.max(0, raw - (inv.glass or 0) - (r.s.live[G.make.tag] or 0))
+  local sand_short = math.max(0, raw_short - (inv.sand or 0) - (r.s.live[G.sand.tag] or 0))
+  if sand_short > 0 then
+    if M.sand_zones() > 0 then g.zone = 'zone' else M.glass_sand(K, c, r, g) end
+    if (inv.bags or 0) == 0 then M.glass_bags(K, c, r, g, sand_short) end
+  end
+  local fuel = mx
+  if raw_short > 0 and not magma then fuel = M.glass_fuel(K, c, r, g, math.min(raw_short, mx)) end
+  if fur and g.zone == 'zone' and sand_short > 0 and not open(r, G.sand.tag) then
+    local spec = copy(G.sand.spec)
+    spec.item_conditions = {cond(1, 'BAG', {flags = {'empty'}})}
+    if add(r, {tag = G.sand.tag, spec = spec, n = math.min(sand_short, left(c, r, 'bags'), mx), uses = {bags = 1},
+               why = 'sand'}) then g.ord[#g.ord + 1] = 'CollectSand' end
+  elseif open(r, G.sand.tag) then g.ord[#g.ord + 1] = 'CollectSand' end
+  if fur and raw_short > 0 and not open(r, G.make.tag) then
+    local spec = copy(G.make.spec)
+    spec.item_conditions = {cond(1, nil, {flags = {'sand_bearing'}}), (not magma) and cond(1, 'BAR', {material = 'COAL'}) or nil}
+    if add(r, {tag = G.make.tag, spec = spec, n = math.min(raw_short, left(c, r, 'sand'), fuel, mx),
+               uses = {sand = 1, fuel = magma and 0 or 1}, why = 'glass'}) then g.ord[#g.ord + 1] = 'MakeRawGlass' end
+  elseif open(r, G.make.tag) then g.ord[#g.ord + 1] = 'MakeRawGlass' end
+  if jew and cut > 0 and not open(r, G.cut.tag) then
+    local spec = copy(G.cut.spec)
+    spec.item_conditions = {cond(1, 'ROUGH', {material = 'GLASS_GREEN'})}
+    if add(r, {tag = G.cut.tag, spec = spec, n = math.min(cut, left(c, r, 'glass'), mx), uses = {glass = 1},
+               why = 'cut glass'}) then g.ord[#g.ord + 1] = 'CutGlass' end
+  elseif open(r, G.cut.tag) then g.ord[#g.ord + 1] = 'CutGlass' end
+  r.route.glass = g.block[1] or g.ord[#g.ord] or 'stock'
+  M.glass_report(K, c, r, g)
+end
+
+-- economy.route for gems and raw glass (care's MOOD_RISK): via 'glass' = the missing gems filter takes cut glass; any
+-- other gems need is a rough gem, which no glass replaces
+function M.glass_route(K, key, via)
+  if key == 'gems' and via ~= 'glass' then
+    return 'rough gems: mine a gem vein or trade.want gem (glass is no rough gem)'
+  end
+  local g, parts = st.glass, {}
+  if type(g) ~= 'table' then
+    parts[1] = 'glass furnace, sand zone, bags, fuel (economy starts the chain)'
+  else
+    if g.shop then parts[#parts + 1] = g.shop end
+    for _, b in ipairs(g.block) do parts[#parts + 1] = M.GLASS_SHORT[b] or b end
+    if #g.ord > 0 then parts[#parts + 1] = table.concat(g.ord, '+') end
+    parts[#parts + 1] = string.format('raw %d/%d', g.have, g.raw) .. (g.cut > 0 and string.format(', cut %d', g.cut) or '')
+  end
+  local s = (key == 'gems' and 'cut glass: ' or 'raw glass: ') .. table.concat(parts, ', ')
+  return key == 'gems' and (s .. '; trade.want gem') or s
+end
+
 function T.plan(K, c, r)
   r.cands, r.planned, r.targets, r.route = {}, {}, {}, {}
   for _, key in ipairs({'bone', 'shell'}) do r.targets[key] = target(K, c, r, key) end
@@ -3240,11 +3474,12 @@ function T.plan(K, c, r)
   r.gear = gear_pre(K, c, r, r.hunt)
   -- priority: needs (moods) first, then drink and food, then soldiers, then stock
   local urgent = {leather = need_n(r.p, 'leather', r.now) > 0, cloth = need_n(r.p, 'cloth', r.now) +
-                  need_n(r.p, 'thread', r.now) > 0, bars = need_n(r.p, 'bars', r.now) > 0}
+                  need_n(r.p, 'thread', r.now) > 0, bars = need_n(r.p, 'bars', r.now) > 0,
+                  glass = need_n(r.p, 'glass', r.now) + (r.glass_cut or 0) > 0}
   local list = {{1.5, plan_supply}, {2, function() plan_containers(K, c, r, 'barrels') end},
                 {urgent.leather and 1 or 4, plan_leather}, {urgent.cloth and 1 or 3.5, plan_cloth},
                 {urgent.bars and 1 or 3, plan_metal}, {urgent.bars and 1.1 or 3.1, plan_steel}, {3.2, plan_gear},
-                {5, function() plan_containers(K, c, r, 'bins') end}}
+                {urgent.glass and 1.2 or 3.3, M.glass_plan}, {5, function() plan_containers(K, c, r, 'bins') end}}
   table.sort(list, function(a, b) return a[1] < b[1] end)
   for _, e in ipairs(list) do e[2](K, c, r) end
   if r.day then
@@ -4363,6 +4598,7 @@ local function route_of(key, inv, f)
   elseif key == 'cloth' then return true, (inv.thread or 0) > 0 and 'weave' or 'thread+weave'
   elseif key == 'thread' then return true, 'process plants'
   elseif key == 'fuel' then return true, 'charcoal'
+  elseif key == 'glass' then return true, 'sand + glass furnace + fuel'
   elseif key == 'bars' then
     if (inv.ore or 0) > 0 then return true, 'smelt' end
     return false, 'no ore: exploration dig or trade'
@@ -4373,9 +4609,10 @@ end
 -- Run 10 (Handlelock: a fey mood died for two leather while no tannery stood): what supplies a mood class now and what
 -- blocks it, for care's MOOD_RISK text, e.g. 'no tannery (asked), hunt: no bolts, butcher, trade.want leather';
 -- '' for an unknown key
-function M.route(K, key)
+function M.route(K, key, via)
   key = key_of(key)
   if not KEYS[key] then return '' end
+  if key == 'gems' or key == 'glass' then return M.glass_route(K, key, via) end   -- Run 11
   local inv, f, c = K.census.i or {}, st.f or {}, M.conf(K)
   local sup = st.sup or {route = {}}
   if key == 'leather' or key == 'hides' then

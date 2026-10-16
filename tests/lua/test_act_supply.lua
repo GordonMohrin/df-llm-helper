@@ -152,4 +152,24 @@ T.test('work_detail opts (Run 10): a specialist leaves the everybody details; eq
   T.eq(u.uniform.pickup_flags.update, false, 'a member that has the labor is not asked again')
 end)
 
+-- Run 11 (Kilrudrabed, no gem vein): the zones screen's Sand zone, one tile, through quickfort zone mode (economy only)
+T.test('sand_zone: a 1x1 dfllm-sand zone (quickfort zone key s) at the position; economy only', function()
+  local W = H.world{tag = 'sz'}
+  local calls = {}
+  local n = 1
+  W.scripts['quickfort'] = {apply_blueprint = function(p)
+    calls[#calls + 1] = p
+    return {zone_designated = {label = 'Zones designated', value = n}}
+  end}
+  local env = mk('economy')
+  T.eq({env.api.sand_zone({20, 5, 100})}, {true, 1})
+  T.eq({calls[1].mode, calls[1].command, calls[1].pos}, {'zone', 'run', {x = 20, y = 5, z = 100}})
+  T.eq(calls[1].data[0][0][0], 's{name=dfllm-sand}')
+  T.eq((mk('runner').api.sand_zone({20, 5, 100})), false, 'not owner')
+  T.eq((env.api.sand_zone({20, 5})), false, 'bad position')
+  n = 0
+  T.eq({env.api.sand_zone({21, 5, 100})}, {false, 'quickfort designated no zone there'})
+  T.eq(#calls, 2)
+end)
+
 T.done()
