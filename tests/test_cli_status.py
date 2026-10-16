@@ -114,8 +114,9 @@ def test_status_r0_is_loud_never_plain_peace(save):
     lines = out.splitlines()
     assert "PEACE(29d) UNREADY P3" in lines[0] and lines[0].startswith("DEFCON 5 | region7")
     assert lines[1] == ("SIEGE UNREADY (R0): audit,no_inner,no_outer | 2 ways in without door or bridge: "
-                        "55,62,117 stair_updown, 61,55,117 floor | traps ? (no audit) | next: dfllm audit; wall/door "
-                        "the open ways in (inspect entrances, bp.place); build the missing fortcore pieces (plan)")
+                        "55,62,117 stair_updown, 61,55,117 floor | traps ? (no audit) | next: dfllm audit; close the "
+                        "open ways in (dfllm cmd bp.place tpl=seal site=S1 at=last); build the missing fortcore "
+                        "pieces (plan)")
     assert "R0 UNREADY worn 0% cv 3 drill never (auto: no bridges; run dfllm cmd drill) audit never (run dfllm audit)" \
         in out
     assert "fail:audit" not in out                             # the blockers stand once, in the UNREADY line

@@ -29,7 +29,7 @@ strip's middle tile as target (DESIGN §5.2).
 from __future__ import annotations
 
 from . import fortcore
-from .primitives import Plan
+from .primitives import Plan, rot_uv
 
 O1_V = fortcore.FP["O1"][1]                              # O1 row in the fortcore frame (7)
 FLINE = [(2, v) for v in (-3, -2, -1)]                   # fortifications in the tunnel's east wall
@@ -144,3 +144,139 @@ def site_problem(at, X) -> str:
                 if n not in allowed and at(*X.pos(*n, 0)) not in OPEN_OK | {"F"}:
                     return "open tile %d,%d,%d beside the corridor" % X.pos(*n, 0)
     return ""
+
+
+# ---------------------------------------------------------------- seal: close the open ways in (Run 10)
+# `inspect entrances` and SIEGE_UNREADY list the ways in that have neither a door nor a bridge (`x,y,z kind`, kind =
+# the tile shape: floor, ramp, stair_up ...). A seal project closes each with one piece, built by the player's own
+# means (a quickfort #build, buildingplan materials):
+# * floor-like tile: a door (`d`; the arrival lockdown forbids it like every entrance door), or with close=wall a
+#   constructed wall, close=grate a wall grate, close=bars vertical bars (walkers blocked, water and air pass);
+# * ramp: a ramp carries no door or wall (quickfort builds constructions on floor, open space and ramp tops only,
+#   build.lua is_valid_tile_construction): the piece goes on the ramp top above it, a constructed wall (auto), a floor
+#   grate (grate) or floor bars (bars); it cuts the ramp's way up and down;
+# * stair: a hatch on the stair tile (it closes the stair's floor, i.e. the way down from it; a way up is closed by
+#   naming the tile above). Walls cannot stand on stairs.
+# Doors and hatches only matter to the lockdown (seal's entrance check counts them); the worst-case audit counts
+# only walls and raised bridges, so a bypass the audit names gets `wall` (topo.audit says where).
+# Params: at = 'x,y,z[ kind[ piece]];...' (absolute tiles, at most SEAL_MAX), close = the default piece. The CLI fills
+# missing kinds from the newest snapshot and expands at=last (cmd.seal_openings). Site: the first tile (any rot).
+FLOORISH_KINDS = frozenset({"floor", "boulder", "pebbles", "shrub", "sapling", "twig", "brook_top", "branch",
+                            "trunk_branch", "passable"})
+STAIR_KINDS = frozenset({"stair", "stair_up", "stair_down", "stair_updown"})
+PIECES = ("door", "wall", "hatch", "grate", "bars")
+CLOSE = ("auto",) + PIECES
+SEAL_MAX = 6
+CHAR_KIND = {".": "floor", "r": "ramp", "<": "stair_up", ">": "stair_down", "X": "stair_updown", "^": "floor"}
+# piece -> quickfort #build key on a floor tile / on a ramp top
+FLOOR_KEY = {"door": "d", "wall": "Cw", "grate": "W", "bars": "B"}
+RAMP_KEY = {"wall": "Cw", "grate": "G", "bars": "~b"}
+
+
+def parse_openings(text: str) -> list[dict]:
+    """'x,y,z[ kind[ piece]];...' -> [{pos, kind, piece}] (kind/piece '' when not given)."""
+    out = []
+    for part in str(text or "").split(";"):
+        toks = part.split()
+        if not toks:
+            continue
+        try:
+            pos = [int(c) for c in toks[0].split(",")]
+            if len(pos) != 3:
+                raise ValueError
+        except ValueError:
+            raise ValueError(f"seal.at: bad tile {toks[0]!r} (want 'x,y,z[ kind[ piece]];...')") from None
+        kind = toks[1].lower() if len(toks) > 1 else ""
+        piece = toks[2].lower() if len(toks) > 2 else ""
+        if piece and piece not in PIECES:
+            raise ValueError(f"seal.at: {toks[0]}: piece {piece!r} not one of {list(PIECES)}")
+        out.append({"pos": pos, "kind": kind, "piece": piece})
+    if len(out) > SEAL_MAX:
+        raise ValueError(f"seal.at: {len(out)} openings > {SEAL_MAX}; split them over several seal projects")
+    return out
+
+
+def format_openings(ops) -> str:
+    return ";".join(" ".join(x for x in ("%d,%d,%d" % tuple(o["pos"]), o.get("kind", ""), o.get("piece", "")) if x)
+                    for o in ops)
+
+
+def seal_pieces(p: dict, anchor=None) -> list[dict]:
+    """[{pos (opening), at (the piece's tile), key, piece, kind, why}] for the seal params (raises ValueError)."""
+    ops = parse_openings(p.get("at", ""))
+    if not ops:
+        if anchor is None:
+            raise ValueError("seal: name the openings (at=x,y,z;...) or at=last")
+        ops = [{"pos": list(anchor), "kind": "floor", "piece": ""}]
+    close = p.get("close", "auto")
+    if close not in CLOSE:
+        raise ValueError(f"seal.close: {close!r} not one of {list(CLOSE)}")
+    out, seen = [], set()
+    for o in ops:
+        x, y, z = o["pos"]
+        kind = o["kind"] or "floor"
+        want = o["piece"] or ("auto" if close == "auto" else close)
+        where = "%d,%d,%d %s" % (x, y, z, kind)
+        if kind in FLOORISH_KINDS:
+            piece = "door" if want in ("auto", "hatch") else want
+            at, key = (x, y, z), FLOOR_KEY[piece]
+        elif kind == "ramp":
+            if want == "door":
+                raise ValueError(f"seal: {where}: a ramp cannot carry a door; use wall, grate or bars (on the ramp top)")
+            piece = "wall" if want in ("auto", "hatch") else want
+            at, key = (x, y, z + 1), RAMP_KEY[piece]
+        elif kind in STAIR_KINDS:
+            if want not in ("auto", "hatch"):
+                raise ValueError(f"seal: {where}: a stair takes only a hatch (name the floor beside it for a "
+                                 f"{want})")
+            piece, at, key = "hatch", (x, y, z), "H"
+        else:
+            raise ValueError(f"seal: {where}: no piece for this tile kind (a floor, ramp or stair tile)")
+        if at in seen:
+            continue
+        seen.add(at)
+        out.append({"pos": [x, y, z], "at": list(at), "key": key, "piece": piece, "kind": kind,
+                    "why": f"{where}: {piece} at {at[0]},{at[1]},{at[2]}" + (" (the ramp top)" if kind == "ramp"
+                                                                             else "")})
+    return out
+
+
+def seal(p: dict, anchor, rot: int) -> Plan:
+    """Close open ways in: a door on a floor, a wall on a ramp top, a hatch on a stair (or wall/grate/bars;
+    absolute tiles from `inspect entrances`, SIEGE_UNREADY or the audit; at=last in dfllm cmd)."""
+    P = Plan("seal", "defense")
+    b = P.stage("seal.build", "build", orders=1, defense=1)
+    ax, ay, az = anchor
+    for pc in seal_pieces(p, anchor):
+        x, y, z = pc["at"]
+        u, v = rot_uv(x - ax, y - ay, (4 - rot) % 4)      # emit rotates by rot: the piece lands on (x, y)
+        b.tile(u, v, z - az, pc["key"])
+    return P
+
+
+def seal_anchor(p: dict):
+    """The seal's own site anchor: its first opening (None without openings)."""
+    ops = parse_openings(p.get("at", ""))
+    return ops[0]["pos"] if ops else None
+
+
+def seal_preview_tiles(p: dict) -> dict:
+    """{(x, y, z): char} of the openings as the entrance check saw them (a preview base: floor, ramp + open top,
+    stair), so `bp preview seal` builds on them instead of on rock."""
+    out = {}
+    for o in parse_openings(p.get("at", "")):
+        x, y, z = o["pos"]
+        k = o["kind"] or "floor"
+        if k == "ramp":
+            out[(x, y, z)], out[(x, y, z + 1)] = "r", "v"
+        else:
+            out[(x, y, z)] = {"stair_up": "<", "stair_down": ">", "stair_updown": "X", "stair": "X"}.get(k, ".")
+    return out
+
+
+seal.sited = True                       # bp.emit calls it with the site's anchor and rotation
+seal.anchor_of = seal_anchor            # bp preview: the site is the first opening
+seal.preview_tiles = seal_preview_tiles
+PARAMS["seal"] = {"at": ("", None, None), "close": ("auto", None, None)}
+BUILD["seal"] = seal
+FREE = frozenset({"seal"})              # builds only on existing open tiles: never refused for touching a project

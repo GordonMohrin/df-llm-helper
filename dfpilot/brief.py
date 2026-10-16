@@ -157,7 +157,7 @@ def line_unready(ctx: Ctx) -> str:
     if a.get("age", -1) < 0 or any(f in ("audit", "audit_old") for f in fails):
         nxt.append("dfllm audit")
     if n > 0:
-        nxt.append("wall/door the open ways in (inspect entrances, bp.place)")
+        nxt.append("close the open ways in (dfllm cmd bp.place tpl=seal site=S1 at=last)")
     if any(f.startswith(R0_FORTCORE) for f in fails):
         nxt.append("build the missing fortcore pieces (plan)")
     if nxt:

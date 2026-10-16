@@ -189,9 +189,35 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
             for i, c in enumerate(out)]
 
 
+SEAL_OPEN = {"floor": ".^", "ramp": "r", "stair_up": "<", "stair_down": ">", "stair_updown": "X", "stair": "<>X"}
+
+
+def _seal(snap: dict, p: dict) -> list[dict]:
+    """seal: the one site is its first opening (absolute tiles, rot 0). Every revealed opening must still be open
+    with the shape its kind names, and every piece's tile must take it (a ramp top must be open space above the
+    ramp); a tile outside the snapshot is taken as given (the entrance check saw it)."""
+    pcs = defense.seal_pieces(p)
+    at = _At(snap)
+    for pc in pcs:
+        c = at(*pc["pos"])
+        if c == "?":
+            raise ValueError(f"seal: {pc['why']}: the tile is not revealed")
+        want = SEAL_OPEN.get(pc["kind"], ".")
+        if c is not None and c not in want:
+            raise ValueError(f"seal: {pc['why']}: the snapshot shows {c!r}, not the {pc['kind']} (closed already?)")
+        top = at(*pc["at"]) if pc["at"] != pc["pos"] else None
+        if top is not None and top not in "_v":
+            raise ValueError(f"seal: {pc['why']}: the ramp top is {top!r}, not open space")
+    return [{"id": "S1", "anchor": list(pcs[0]["pos"]), "rot": 0, "score": 1000,
+             "why": "; ".join(pc["why"] for pc in pcs)}]
+
+
 def _defense(snap: dict, tpl: str, p: dict, manifest: dict | None) -> list[dict]:
     """gallery_o1: the one site the fortcore manifest fixes (defense.frame), if the revealed tiles allow it; raises
-    ValueError with the reason otherwise (one possible site: the reason is more use than an empty ranking)."""
+    ValueError with the reason otherwise (one possible site: the reason is more use than an empty ranking).
+    seal: see _seal."""
+    if tpl == "seal":
+        return _seal(snap, p)
     anchor, rot = defense.frame(manifest)
     X = Xform(anchor, rot)
     why = defense.site_problem(_At(snap), X)

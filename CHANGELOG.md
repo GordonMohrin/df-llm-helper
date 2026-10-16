@@ -1,5 +1,20 @@
 # CHANGELOG dfpilot
 
+## Template `seal`: close the open ways in, one piece per opening (2026-10-16; offline, live-untested)
+- **Why (Run 10):** SIEGE_UNREADY listed `90,109,125 ramp`, `53,126,127 floor`, `95,127,123 floor` as ways in without door
+  or bridge; there was no template for them and the session placed doors by hand with quickfort `#build d`.
+- **`seal`** (`dfpilot/bp/defense.py`, DESIGN §5.2): a door on a floor-like tile, a constructed wall on the ramp top
+  above a ramp (a ramp cannot carry a door), a hatch on a stair; `close=wall|grate|bars` or a piece per opening
+  (`x,y,z floor wall`). `at=last` (the default) takes the openings of the last entrance check (newest SIEGE_UNREADY,
+  else `state.ready.ents`); kinds come from the newest snapshot; closed tiles are left out. Never refused for touching
+  another project. One `seal:piece` line per piece in `cli.log` and on stdout. The renderer now knows hatches on
+  stairs, floor grates/bars on ramp tops and wall grates/bars.
+- Tests: `tests/bp/test_bp_seal.py` (new); the R0 status hint now names the template.
+- **How to use:** `dfllm cmd bp.place tpl=seal site=S1 at=last` (or `at="90,109,125 ramp;53,126,127 floor"`); preview
+  with `dfllm bp preview seal at=...`; the pieces stand in the reply and in `cli.log`.
+- **Live check:** in the Run 10 fort after `bp.place tpl=seal site=S1 at=last` the project builds the doors/walls;
+  `inspect entrances` then reports those ways in with a door (or gone) and the next SIEGE_UNREADY lists fewer.
+
 ## Outward crossbow gallery `gallery_o1` over the O1 approach (2026-10-16; offline, live-untested)
 - **Why (Run 10):** in the siege O1 stayed up and 47 goblins waited in front of it for weeks; nothing could reach or
   shoot them (the inner gallery covers only the killing field). Gordon chose mechanism 3: a ranged option without opening.

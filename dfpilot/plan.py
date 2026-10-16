@@ -15,8 +15,8 @@ import re
 from pathlib import Path
 
 from . import files, paths, schema
-from .cmd import (SAME, BpError, BpUnavailable, bp_files, fmt_reply, fort_manifest, occupancy, place, send,
-                  sites_snapshot, template_info, template_names, write_bp)
+from .cmd import (SAME, BpError, BpUnavailable, bp_files, fmt_reply, fort_manifest, log_seal, occupancy, place,
+                  send, sites_snapshot, template_info, template_names, write_bp)
 
 R_CAPS = {0: 55, 1: 55, 2: 75, 3: 250}    # DESIGN §5.4; R3 (>= 80) only with D-01 = B
 OPTION_A_MAX = 75
@@ -364,6 +364,7 @@ def apply(save_dir: Path, doc: dict, by: str = "llm", wait_s: float = 5.0, dry_r
         return [], f"dry run ok: {len(docs)} blueprint(s) would be written{note}"
     for d in docs:
         write_bp(save_dir, d)
+        log_seal(save_dir, d, by)                           # one cli.log line per seal piece
     files.write_json_atomic(Path(save_dir) / "plan.json", doc)
     cid, reply = send(save_dir, "plan.reload", {}, by=by, wait_s=wait_s)
     return [], f"plan.json y{doc['year']} + {len(docs)} bp{note}; " + fmt_reply(cid, "plan.reload", reply, save_dir)
