@@ -137,7 +137,7 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
     def is_int(v, lo, hi):
         return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
     for k in doc:
-        if k not in ("v", "about", "clock", "hold_quiet_days", "ack_timeout_s", "defaults"):
+        if k not in ("v", "about", "clock", "hold_quiet_days", "ack_timeout_s", "defaults", "gate"):
             errs.append(f"{name}: unknown key {k!r}")
     clock = doc.get("clock", {})
     if not isinstance(clock, dict):
@@ -161,6 +161,23 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
                 errs.append(f"{name}: defaults.{t}: not an interrupt type ({', '.join(schema.INTERRUPTS)})")
             elif not isinstance(acts, list) or any(a not in REFLEX_ACTIONS for a in acts):
                 errs.append(f"{name}: defaults.{t}: a list of {', '.join(REFLEX_ACTIONS)} expected")
+    # BUG-027: gate.force_near (tiles; 0 = never raise onto a unit), gate.manual (bridge names or building ids that
+    # get no automatic pull)
+    gate = doc.get("gate", {})
+    if not isinstance(gate, dict):
+        errs.append(f"{name}: gate must be an object")
+    else:
+        for k, v in gate.items():
+            if k == "force_near":
+                if not is_int(v, 0, 30):
+                    errs.append(f"{name}: gate.force_near: int 0..30 expected, got {v!r}")
+            elif k == "manual":
+                if not isinstance(v, list) or len(v) > 32 or any(
+                        not (is_int(x, 0, 2**31 - 1) or (isinstance(x, str) and re.match(schema.BRIDGE_RE, x)))
+                        for x in v):
+                    errs.append(f"{name}: gate.manual: a list of bridge names (O1, B1) or building ids expected")
+            else:
+                errs.append(f"{name}: gate.{k}: unknown key")
     return errs
 
 
