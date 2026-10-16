@@ -15,6 +15,16 @@
 --     were tuned on; the cadence of a SCALED module (per-run work grows with items/units) is stretched by f
 --     (at most LOAD.stretch_max), and the kernel budget grows with the unit count (critical modules scan every
 --     unit and are never paced).
+--   * boost (BUG-026, Run 10: a caravan visit was lost because trade, paced and demoted for its cost, ran only every
+--     few seconds while its UI phases count real time): a module in BOOST.modules may hold a boost while it must react
+--     in real time (trade: a caravan stands at the depot, the trade screen is open). While boosted its cadence ignores
+--     the demotion factor and the load stretch, slow calls neither demote it nor count as quiet steps, and it is paced
+--     at BOOST.share ms/s (at least its own share x the mode multiplier) outside the PEACE pool; its cost counts as
+--     unpaced, so the pool of the other non-critical modules shrinks (they yield). The debt is cut to one second of
+--     the share it runs on when a boost begins and when it ends, so the module neither starts the boost waiting for
+--     an old debt nor pays for the boosted window afterwards. A boost ends after BOOST.ttl_ms unless renewed. A boost
+--     marked busy (trade: the trade screen is open) also asks the heavy background work of the other modules to wait
+--     (K.busy(): snapshot exports, seal's background jobs).
 local C = require('dfllm.util.contract')
 local KN = C.KERN
 
@@ -27,6 +37,8 @@ S.BUDGET = {ms_s = 25, per_unit = 6, max = 40}
 S.PACE = {share = 2, burst_s = 1, pool_min = 4, g_min = 0.5, alert_mult = 4, busy_ms = 10000,
           shares = {seal = 4, economy = 3, runner = 4, snapshot = 6, trade = 3}}
 S.SCALED = {economy = true, care = true}
+-- BUG-026: who may hold a boost, its pacing share (ms per real second) and how long it lasts without a renewal
+S.BOOST = {share = 20, ttl_ms = 30000, modules = {trade = true}}
 S.REPORT_MS = 6 * 3600 * 1000                         -- KERNEL_SLOW per module at most this often
 S.PROMOTE_RUNS = 3
 S.FLIPS_MAX = 4                                       -- quiet time for a promotion: promote_ms * 2^flips
@@ -67,10 +79,13 @@ end
 function S.due(e, now, ticking)
   local ev = e.M.every
   if type(ev) ~= 'table' then return false end
-  local mult = e.factor * (e.stretch or 1)
+  local mult = S.period(e)
   if ev.ticks then return ticking and (e.last_tick == nil or now.tick - e.last_tick >= ev.ticks * mult) end
   return e.last_ms == nil or now.ms - e.last_ms >= (ev.ms or 1000) * mult
 end
+
+-- cadence multiplier: demotion factor x load stretch; 1 while boosted
+function S.period(e) return e.boost and 1 or e.factor * (e.stretch or 1) end
 
 -- the PEACE pool of the non-critical modules: rate (ms per real second) and the share factor g (0-1]
 function S.pool() return {rate = S.BUDGET.ms_s, g = 1} end
@@ -81,7 +96,7 @@ function S.pool_update(pool, unpaced_ms_s, entries, now_ms)
   pool.rate = math.max(S.PACE.pool_min, S.BUDGET.ms_s - (unpaced_ms_s or 0))
   local sum = 0
   for _, e in ipairs(entries) do
-    if not e.critical and not e.disabled and e.waited_at and now_ms - e.waited_at < S.PACE.busy_ms then
+    if not e.critical and not e.disabled and not e.boost and e.waited_at and now_ms - e.waited_at < S.PACE.busy_ms then
       sum = sum + e.share
     end
   end
@@ -100,11 +115,17 @@ local function drain(o, rate, now_ms)          -- leaky bucket: the debt drains 
   if last and o.debt > 0 and now_ms > last then o.debt = math.max(0, o.debt - rate * (now_ms - last) / 1000) end
 end
 
+-- the share e is paced at now: boosted, BOOST.share (at least its own share x mult) outside the pool
+function S.rate(e, pool, mult)
+  if e.boost then return math.max(S.BOOST.share, e.share * (mult or 1)) end
+  return e.share * (mult or 1) * (pool and pool.g or 1)
+end
+
 -- true when the non-critical module must wait this frame: its debt is over one second of its share, scaled by
 -- mult (outside PEACE) or the pool's g (PEACE)
 function S.paced(e, now_ms, pool, mult)
   if e.critical then return false end
-  local share = e.share * (mult or 1) * (pool and pool.g or 1)
+  local share = S.rate(e, pool, mult)
   drain(e, share, now_ms)
   if e.debt > share * S.PACE.burst_s then
     e.waited_at = now_ms
@@ -118,6 +139,7 @@ end
 --   'demote', report   factor doubled; report = true when it is news (first in REPORT_MS for this module)
 --   nil                nothing to do
 function S.slow(e, ms, now_ms, where)
+  if e.boost then return nil end                          -- BUG-026: a boosted module is not demoted
   if ms <= KN.slow_ms then
     if where == 'step' and e.factor > 1 then e.quiet_runs = e.quiet_runs + 1 end
     return nil
@@ -152,7 +174,7 @@ end
 -- a frame of dt_ms in which the demoted module could run (ticking, or an ms module). Returns true when the
 -- module is promoted one step (factor // 2)
 function S.quiet(e, dt_ms, now_ms)
-  if e.factor <= 1 or dt_ms <= 0 then return false end
+  if e.factor <= 1 or dt_ms <= 0 or e.boost then return false end
   e.quiet_ms = e.quiet_ms + dt_ms
   if e.quiet_ms >= KN.promote_ms * (1 << e.flips) and e.quiet_runs >= S.PROMOTE_RUNS then
     e.factor = e.factor // 2
@@ -164,5 +186,36 @@ end
 
 -- quiet time the next promotion of e needs (ms)
 function S.quiet_need(e) return KN.promote_ms * (1 << (e.flips or 0)) end
+
+-- BUG-026: e asks for (or renews) a boost. Returns 'new' | 'renew', or nil, why ('critical': never paced anyway;
+-- 'not allowed': not in BOOST.modules). why is a short reason (<= 40 bytes, kept for logs and inspect); busy = the
+-- other modules' heavy background work should wait meanwhile (set or cleared on every renewal)
+function S.boost(e, why, now_ms, busy)
+  if e.critical then return nil, 'critical' end
+  if not S.BOOST.modules[e.name] then return nil, 'not allowed' end
+  local b, new = e.boost, false
+  if not b then
+    b, new = {since = now_ms, spent = e.ms_total or 0}, true
+    e.boost = b
+    e.debt = math.min(e.debt, S.rate(e) * S.PACE.burst_s)
+  end
+  b.why, b.until_ms, b.busy = tostring(why or ''):sub(1, 40), now_ms + S.BOOST.ttl_ms, busy == true
+  return new and 'new' or 'renew'
+end
+
+-- ends e's boost -> {why, ms (boost length), spent (ms charged while boosted)} or nil when it held none
+function S.unboost(e, now_ms)
+  local b = e.boost
+  if not b then return nil end
+  e.boost = nil
+  e.debt = math.min(e.debt, e.share * S.PACE.burst_s)
+  return {why = b.why, ms = math.max(0, (now_ms or b.since) - b.since), spent = (e.ms_total or 0) - b.spent}
+end
+
+-- the boost of e ran out (no renewal within BOOST.ttl_ms): ends it like S.unboost; nil when it still holds
+function S.boost_expired(e, now_ms)
+  if e.boost and now_ms >= e.boost.until_ms then return S.unboost(e, now_ms) end
+  return nil
+end
 
 return S

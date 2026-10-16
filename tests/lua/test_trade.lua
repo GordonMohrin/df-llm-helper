@@ -187,7 +187,8 @@ local function setup(o)
   o = o or {}
   local W = F.world{plan = o.plan, persist = o.persist, mode = o.mode}
   local d = F.depot(W, {})
-  local c = F.caravan(W, {state = 'Approaching', tr = o.tr or 1500, goods = o.goods or std_goods(W), wood = o.wood})
+  local goods = type(o.goods) == 'function' and o.goods(W) or o.goods or std_goods(W)
+  local c = F.caravan(W, {state = 'Approaching', tr = o.tr or 1500, goods = goods, wood = o.wood})
   F.goods(W, d, o.ours or std_ours())
   if not o.no_broker then W.broker = W.add_unit{id = 901, citizen = true, pos = {0, 0, 0}} end
   local U = (not o.no_ui) and F.ui(W, d, c, o.ui) or nil
@@ -276,17 +277,89 @@ T.test('flow: a merchant who never agrees -> one retry, then failed, toggles res
   T.eq(U.offers, offers)                       -- no third attempt this visit
 end)
 
-T.test('BUG-026: the retry waits no longer than the caravan stays; the event names phase and time left', function()
-  local W, M, d, c, U = setup{ui = {accept = 50}, tr = 700}   -- the caravan leaves in 700 ticks
+-- the persisted visit record of entity 7
+local function visit7(W) return json.decode(W.persist_raw['dfllm.m.trade']).visits['7'] end
+
+T.test('BUG-026 review: time_remaining counts 10-tick units: the retry waits while the screen may still open', function()
+  -- the live case: 962 left = 9,620 ticks; RETRY_WAIT (1,200 ticks) fits, the old formula cut it to 562
+  local W, M, d, c, U = setup{ui = {accept = 50}, tr = 962}
   W.frame(1)
   to_depot(W, d, c)
   T.ok(F.until_(W, function() return #F.events(W, 'retry') > 0 end, 1500), 'retry')
-  local ev = F.events(W, 'retry')[1].d
-  T.eq(type(ev.ph), 'string')
-  T.eq(type(ev.ph_ms), 'number')
-  T.eq(ev.left, 700)
-  -- RETRY_WAIT 1200 would outlast the caravan; 700 - 400 = 300 does not: both attempts fit in 1000 ticks
-  T.ok(F.until_(W, function() return #F.events(W, 'failed') > 0 end, 1000), 'second attempt before the caravan leaves')
+  local ev = F.events(W, 'retry')[1]
+  T.eq(ev.d.left, 9620, 'left in ticks')
+  T.ok(ev.msg:find('9620 ticks left', 1, true), ev.msg)
+  T.eq({type(ev.d.ph), type(ev.d.ph_ms), type(ev.d.ph_act), type(ev.d.ph_runs)}, {'string', 'number', 'number', 'number'})
+  T.eq(visit7(W).retry - ev.tick, M.CFG.RETRY_WAIT)
+  -- 260 left: the screen may open until 200, 600 ticks from now: the retry waits 600 - RETRY_KEEP = 200
+  local W2, M2, d2, c2 = setup{ui = {accept = 50}}
+  W2.frame(1)
+  to_depot(W2, d2, c2)
+  c2.time_remaining = 260
+  T.ok(F.until_(W2, function() return #F.events(W2, 'retry') > 0 end, 1500), 'retry at 260')
+  T.eq(visit7(W2).retry - F.events(W2, 'retry')[1].tick, 200)
+  T.ok(F.until_(W2, function() return #F.events(W2, 'failed') > 0 end, 2000), 'second attempt in time')
+  -- 205 left: no room for a second attempt: the visit fails with its own reason at once, not later as 'time'
+  local W3, M3, d3, c3 = setup{ui = {accept = 50}}
+  W3.frame(1)
+  to_depot(W3, d3, c3)
+  c3.time_remaining = 205
+  T.ok(F.until_(W3, function() return #F.events(W3, 'failed') > 0 end, 1500), 'failed')
+  T.eq(#F.events(W3, 'retry'), 0, 'no retry without room')
+  T.eq(F.events(W3, 'failed')[1].d.why, 'refused')
+  T.eq(F.events(W3, 'failed')[1].d.left, 2050)
+end)
+
+T.test('BUG-026: a starved trade module (40 ms a run) still trades: boosted, phase limits on its own clock', function()
+  local W, M, d, c, U = setup{}
+  W.cost.trade = 40                            -- every run is a slow call: paced at 3 ms/s and demoted without a boost
+  W.frame(1)
+  to_depot(W, d, c, {ticks = 400})
+  T.ok(F.until_(W, function() return traded(W) end, 8000), 'traded')
+  for _, ph in ipairs({'retry', 'failed'}) do T.eq(#F.events(W, ph), 0, 'no ' .. ph) end
+  T.eq(#W.find_events('KERNEL_SLOW'), 0, 'not demoted while boosted')
+  local boosted
+  for _, l in ipairs(W.logs) do if l.msg:find('trade boosted', 1, true) then boosted = true end end
+  T.ok(boosted, 'kernel boost logged')
+end)
+
+T.test('BUG-026: the boost holds while the visit is on (busy on the trade screen), trade.clock until it ends', function()
+  local W, M, d, c, U = setup{}
+  local e = W.mods.trade
+  W.frame(1)
+  T.ok(e.boost ~= nil, 'boosted while the caravan approaches')
+  T.eq({W.K.busy()}, {}, 'not busy before the trade screen')
+  T.eq(select(2, W.K.call('trade', 'clock')), nil, 'the clock is free while waiting for the depot')
+  to_depot(W, d, c, {ticks = 100})
+  T.ok(e.boost and e.boost.why:find('at the depot', 1, true), 'caravan at the depot')
+  T.ok(F.until_(W, function() return W.K.busy() ~= nil end, 1500), 'busy once a UI phase runs')
+  T.eq(W.K.busy(), 'trade')
+  T.eq(select(2, W.K.call('trade', 'clock')), 'trade')
+  T.ok(F.until_(W, function() return traded(W) end, 1500), 'traded')
+  W.frame(1)
+  T.eq(e.boost, nil, 'released once the visit is done (LEAVE)')
+  T.eq({W.K.busy()}, {})
+  T.eq(select(2, W.K.call('trade', 'clock')), nil, 'the clock is released')
+  -- outside PEACE there is no boost
+  local W2, _, d2, c2 = setup{}
+  W2.frame(1)
+  W2.K.set_mode('ALERT', 'test')
+  W2.frame(1)
+  T.eq(W2.mods.trade.boost, nil, 'no boost in ALERT')
+end)
+
+T.test('BUG-026: a retry after a UI phase keeps the boost and the trade clock until the visit ends', function()
+  local W, M, d, c, U = setup{ui = {accept = 50}}
+  W.frame(1)
+  to_depot(W, d, c)
+  T.ok(F.until_(W, function() return #F.events(W, 'retry') > 0 end, 1500), 'retry')
+  W.frame(1)
+  T.eq(M.CFG and select(2, W.K.call('trade', 'clock')), 'trade', 'clock held through the retry wait')
+  T.ok(W.mods.trade.boost ~= nil, 'boost held through the retry wait')
+  T.ok(F.until_(W, function() return #F.events(W, 'failed') > 0 end, 2000), 'failed')
+  W.frame(1)
+  T.eq(select(2, W.K.call('trade', 'clock')), nil)
+  T.eq(W.mods.trade.boost, nil)
 end)
 
 T.test('BUG-026: a caravan that leaves from the depot with no trade still gets a ledger entry', function()
@@ -722,6 +795,125 @@ T.test('cadence: ticks while waiting, real-time while the screen is open', funct
   T.eq(M.every, {ms = 50})
   F.until_(W, function() return traded(W) end, 600)
   T.eq(M.every, {ticks = 100})
+end)
+
+---------------------------------------------------------------- Run 10 y418: cloth kinds, mood wants, trade.retry
+local function plan_want(want, sell)
+  return {v = 2, year = 3, phase_target = 'P4', seasons = {{build = {}}, {build = {}}, {build = {}}, {build = {}}},
+          policy = {option = 'A', pop_ceiling = 55, beauty = 'used_rooms'}, trade = {want = want, sell = sell or {}}}
+end
+local function cloth_goods(W)
+  return {F.item(W, {type = 'CLOTH', mat = 'CREATURE:SHEEP:WOOL', desc = 'sheep wool cloth', value = 30, stack = 3}),
+          F.item(W, {type = 'CLOTH', mat = 'PLANT:REED_ROPE:THREAD', desc = 'rope reed cloth', value = 12, stack = 5}),
+          F.item(W, {type = 'CLOTH', mat = 'CREATURE:SPIDER_CAVE_GIANT:SILK', desc = 'giant cave spider silk cloth',
+                     value = 60})}
+end
+local function bought(c)
+  local r = {}
+  for _, it in ipairs(c._items) do if not it.flags.trader then r[#r + 1] = it._desc end end
+  table.sort(r)
+  return r
+end
+
+T.test('Run 10 y418: cloth:plant / silk / yarn and thread:* by material flag; plain cloth = any; other subs refused', function()
+  local plant = L.token('cloth:plant')
+  T.eq({plant.flag, L.token('thread:silk').flag, L.token('cloth:yarn').flag}, {'THREAD_PLANT', 'SILK', 'YARN'})
+  T.eq({L.token('cloth:wool'), L.token('thread:pig_tail')}, {nil, nil}, 'only plant, silk, yarn')
+  T.eq({L.valid('cloth:plant'), L.valid('cloth:wool'), L.valid('bar:iron'), L.valid('cloth')}, {true, false, true, true})
+  local reed = {type = 'CLOTH', mat = 'plant:reed_rope:thread', desc = 'rope reed cloth', mf = {THREAD_PLANT = true}}
+  local wool = {type = 'CLOTH', mat = 'creature:sheep:wool', desc = 'sheep wool cloth', mf = {YARN = true}}
+  T.ok(L.match(plant, reed) and not L.match(plant, wool))
+  T.ok(L.match(L.token('cloth:yarn'), wool) and not L.match(L.token('cloth:silk'), wool))
+  T.ok(L.match(L.token('cloth'), reed) and L.match(L.token('cloth'), wool), 'plain cloth = any')
+  T.ok(not L.match(L.token('thread:plant'), reed), 'cloth is not thread')
+  -- no flags read: the material token decides
+  T.ok(L.match(L.token('cloth:yarn'), {type = 'CLOTH', mat = 'creature:alpaca:wool', desc = 'alpaca wool cloth'}))
+  T.eq(L.token_for('CLOTH', 'plant:reed_rope:thread', 'rope reed cloth'), 'cloth:plant')
+  T.eq(L.token_for('THREAD', 'creature:spider_cave_giant:silk', 'silk thread'), 'thread:silk')
+end)
+
+T.test('Run 10 y418: cloth:yarn buys only wool; the trade.want verb refuses other cloth subs', function()
+  local W, M, d, c, U = setup{goods = cloth_goods, plan = plan_want({'cloth:yarn'})}
+  W.frame(1)
+  to_depot(W, d, c)
+  T.ok(F.until_(W, function() return traded(W) end, 1500), 'traded')
+  T.eq(bought(c), {'sheep wool cloth'})
+  local r = W.inbox('trade.want', {want = {'cloth:wool'}})
+  T.eq(r.ok, false)
+  T.ok(r.msg:find('plant, silk, yarn', 1, true), r.msg)
+end)
+
+T.test('Run 10 y418: care.mood_wants buy tokens (cloth:plant) go before the plan wants, capped at the units missing', function()
+  local W, M, d, c, U = setup{goods = cloth_goods, plan = plan_want({'bar:iron'}), before_load = function(W)
+    local care = {name = 'care', every = {ticks = 1200}}
+    function care.mood_wants(K) return {{cls = 'cloth', n = 2, unit = 31, label = 'cloth(plant) x2', acq = 'buy',
+                                         buy = 'cloth:plant'}} end
+    W.load(care)
+  end}
+  W.frame(1)
+  local q = W.inbox('trade.want', {})
+  T.eq(q.data.want, {'cloth:plant', 'bar:iron'}, 'the mood token first')
+  to_depot(W, d, c)
+  T.ok(F.until_(W, function() return traded(W) end, 1500), 'traded')
+  T.eq(bought(c), {'rope reed cloth'}, 'only the plant cloth, not wool or silk')
+end)
+
+T.test('Run 10 y418: trade.retry opens a second trade in the same visit with new wants; refused when it cannot', function()
+  local W, M, d, c, U = setup{goods = cloth_goods, plan = plan_want({'cloth:silk'})}
+  W.frame(1)
+  T.eq(W.inbox('trade.retry', {}).msg, 'no caravan at the depot')
+  to_depot(W, d, c)
+  T.ok(F.until_(W, function() return traded(W) end, 1500), 'first trade')
+  T.eq(U.trades, 1)
+  W.run(300, {skip = 9})
+  T.eq(U.trades, 1, 'v.traded = 1: no second trade by itself')
+  c.time_remaining = 299
+  T.ok(W.inbox('trade.retry', {}).msg:find('leaves too soon', 1, true))
+  c.time_remaining = 1500
+  T.eq(W.inbox('trade.retry', {civ = 'Somebody'}).ok, false)
+  T.eq(W.inbox('trade.retry', {want = {'cloth:wool'}}).ok, false)
+  local r = W.inbox('trade.retry', {want = {'cloth:plant'}})
+  T.eq(r.ok, true, r.msg)
+  T.eq({r.data.civ, r.data.left, r.data.want}, {'The Merchant Guild', 15000, {'cloth:plant'}})
+  T.ok(F.until_(W, function() return W.K.busy() ~= nil end, 1500), 'a trade screen phase again')
+  T.eq(W.inbox('trade.retry', {}).ok, false, 'refused while the trade screen is open')
+  T.ok(F.until_(W, function() return #F.events(W, 'traded') == 2 end, 1500), 'second trade')
+  T.eq(U.trades, 2)
+  T.eq(bought(c), {'giant cave spider silk cloth', 'rope reed cloth'})
+  T.eq(#W.find_events('TRADE_LEDGER'), 2, 'one ledger entry per trade')
+  W.K.set_mode('ALERT', 'test')
+  T.eq(W.inbox('trade.retry', {}).ok, false, 'PEACE only')
+end)
+
+T.test('Run 10 y418: inspect what=trade wanted_matches lists every wanted merchant good, carried ones too, clipped', function()
+  local W, M, d, c, U = setup{goods = cloth_goods, plan = plan_want({'cloth:plant', 'bar:iron'})}
+  local other = df.global.world.items.other
+  -- the merchants unloaded the silk and wool; 40 rope reed cloths are still on them (in_inventory)
+  F.set_state(c, 'AtDepot')
+  for _, it in ipairs(c._items) do
+    if it._desc ~= 'rope reed cloth' then it.flags.in_building = true; d.contained_items:insert('#', {item = it})
+    else it.flags.in_inventory, it._stack = true, 40 end
+    other.CLOTH:insert('#', it)
+  end
+  local ours = F.item(W, {type = 'CLOTH', mat = 'PLANT:FLAX:THREAD', desc = 'flax cloth', value = 20})
+  other.CLOTH:insert('#', ours)                                    -- our own cloth: not a merchant good
+  local r = W.inbox('inspect', {what = 'trade'})
+  T.eq(r.ok, true, r.msg)
+  T.eq(#r.data.wanted_matches, 1)
+  local m = r.data.wanted_matches[1]
+  T.eq({m.token, m.type, m.mat, m.depot, m.carried}, {'cloth:plant', 'CLOTH', 'plant:reed_rope:thread', 0, 40})
+  T.eq({r.data.carried_items, r.data.wanted_more}, {1, 0})
+  -- 60 plant cloth kinds: 40 listed, the rest counted; the reply stays within 8 KB
+  for i = 1, 60 do
+    local it = F.item(W, {type = 'CLOTH', mat = 'PLANT:FIBRE_PLANT_' .. string.char(64 + i % 26 + 1) .. string.char(65 + i // 26)
+                                              .. ':THREAD', desc = 'fibre cloth', value = 3, flags = {trader = true, in_inventory = true}})
+    other.CLOTH:insert('#', it)
+  end
+  r = W.inbox('inspect', {what = 'trade'})
+  T.eq(r.ok, true, r.msg)
+  T.ok(#r.data.wanted_matches <= M.CFG.WANTED_LIST, #r.data.wanted_matches)
+  T.eq(#r.data.wanted_matches + r.data.wanted_more, 61)
+  T.ok(#json.encode(r.data) <= 8192, 'reply ' .. #json.encode(r.data) .. ' bytes')
 end)
 
 T.test('screen reads: <= READS tiles per frame, only the rows a phase needs', function()

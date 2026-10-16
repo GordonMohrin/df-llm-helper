@@ -46,8 +46,9 @@ Related: FR-xx, BUG-xx
 | [BUG-023](BUG-023-woodcutters-do-not-fetch-the-axe.md) | mitigated in 47d98c4 (offline, live-untested): TOOL_BLOCKED, labor repair; pickup trigger needs Gordon's yes | high | woodcutters never fetch the axe from the bin: no FellTree job ever runs, no logs for a year (workaround: put the axe into their hand) | lua/dfllm/economy.lua |
 | [BUG-024](BUG-024-weave-silk-thread-not-found.md) | mitigated in 47d98c4 (offline, live-untested): webs reported as uncollected | medium | weaving silk never starts: "Needs 1 unused collected silk thread" with 6500 reachable silk threads; 84 naked | economy |
 | [BUG-025](BUG-025-trade-looks-at-the-wrong-depot.md) | fixed (live) | medium | with two built depots trade checks the manifest depot while the merchants unload at the other: caravan with goods ends `nothing_listed` | trade |
-| [BUG-026](BUG-026-caravan-retry-too-late-and-silent-loss.md) | mitigated | medium | ui_timeout retry waited 1200 ticks, longer than the caravan stayed; no ledger entry for the lost visit; cause of the timeout unknown | trade |
+| [BUG-026](BUG-026-caravan-retry-too-late-and-silent-loss.md) | fixed (offline, live-untested) | medium | a caravan visit lost to ui_timeout: trade paced/demoted for its cost while its UI phases ran on real time; fix: kernel boost, trade clock (FPS cap 100), phase limits on its own clock, retry in time_remaining units | trade, kern, arbiter |
 | [BUG-027](BUG-027-lockdown-bridge-crushes-citizens.md) | fixed: occupancy, alert order, pull timeout, BRIDGE_CRUSH (offline, live-untested) | critical | the lockdown raises bridges while citizens stand on the footprint: 7 deaths incl. a baby (17880 x=128, O1 x=101) | gate/siege |
+| [BUG-028](BUG-028-breach-traps-people-without-water.md) | open | critical | BREACH keeps inner bridges up for weeks, soldiers/civilians behind them die of thirst; `dfllm stop` leaves popups/fps | siege/gate/military/kern |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

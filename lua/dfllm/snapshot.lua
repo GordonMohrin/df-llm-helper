@@ -5,6 +5,9 @@
 -- (designation.feature_global of revealed tiles, tile-material.lua:255); never water_table or damp.
 -- An export runs in slices of CFG.slice tiles per frame ('more'; the ms cadence also runs while
 -- paused) and is written to <save>/snap/<id>.json through a .tmp file, then SNAPSHOT_READY (C).
+-- BUG-026 (Run 10: an audit export of 58,608 tiles ran through a caravan visit that was then lost): an export waits
+-- while another module holds a busy kernel boost (K.busy(): trade with the trade screen open) and resumes where it
+-- stopped.
 local json = require('dfllm.util.json')
 local fio = require('dfllm.io')
 
@@ -27,6 +30,7 @@ local PURPOSES = {audit = true, sites = true, debug = true}
 local ID_OK = '^[A-Za-z0-9_%-]+$'
 
 local job, queue, n_auto    -- running export, waiting exports, generated ids
+local yielding             -- BUG-026: the busy module the running export waits for (logged once per wait)
 local tt_cache, occ, live_traps, live_jobs
 
 local function int(v) return math.type(v) == 'integer' and v or math.tointeger(v) end
@@ -592,15 +596,23 @@ end
 
 ---------------------------------------------------------------- module
 function M.init(K)
-  job, queue, n_auto, tt_cache, live_traps, live_jobs = nil, {}, 0, {}, nil, nil
+  job, queue, n_auto, tt_cache, live_traps, live_jobs, yielding = nil, {}, 0, {}, nil, nil, nil
   occ = occ_values()
 end
 
 function M.step(K, budget, ctx)
-  if not job then
-    if #queue == 0 then return end
-    job = table.remove(queue, 1)
+  if not job and #queue == 0 then return end
+  local by, why
+  if type(K.busy) == 'function' then by, why = K.busy() end
+  if by then
+    if yielding ~= by then
+      yielding = by
+      K.log('info', 'snapshot: export %s waits while %s is busy (%s)', tostring((job or queue[1]).id), by, tostring(why))
+    end
+    return
   end
+  yielding = nil
+  if not job then job = table.remove(queue, 1) end
   local j = job
   if not j.rows then start(K, j) end
   local b, w, left = j.bbox, j.bbox[4] - j.bbox[1] + 1, M.CFG.slice

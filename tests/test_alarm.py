@@ -144,14 +144,14 @@ def test_reflex_config_validation(tmp_path):
     from dfpilot import fairplay
     assert fairplay.reflex_errors() == []                                    # the shipped config/reflex.json
     shipped = json.loads((fairplay.REPO / "config" / "reflex.json").read_text(encoding="utf-8"))
-    assert shipped["clock"] == {"siege_cap": 30, "alert_cap": 100} and shipped["ack_timeout_s"] == 60
+    assert shipped["clock"] == {"siege_cap": 30, "alert_cap": 100, "trade_cap": 100} and shipped["ack_timeout_s"] == 60
     assert sorted(shipped["defaults"]) == sorted(schema.INTERRUPTS)
     p = tmp_path / "reflex.json"
     assert fairplay.reflex_errors(p) == []                                   # missing: all defaults
-    p.write_text(json.dumps({"v": 2, "clock": {"siege_cap": 5, "warp": 1}, "ack_timeout_s": True,
+    p.write_text(json.dumps({"v": 2, "clock": {"siege_cap": 5, "warp": 1, "trade_cap": 2000}, "ack_timeout_s": True,
                              "defaults": {"ARRIVAL": ["clock", "nuke"], "SIEGE_END": []}, "x": 1}), encoding="utf-8")
     errs = fairplay.reflex_errors(p)
-    for needle in ("clock.siege_cap", "clock.warp", "ack_timeout_s", "defaults.ARRIVAL", "defaults.SIEGE_END",
+    for needle in ("clock.siege_cap", "clock.warp", "clock.trade_cap", "ack_timeout_s", "defaults.ARRIVAL", "defaults.SIEGE_END",
                    "unknown key 'x'"):
         assert any(needle in e for e in errs), (needle, errs)
     assert shipped["refuge"] == {"bed_pct": 25, "breach_days": 7}            # seal.CFG defaults (refuge beds, BUG-019)

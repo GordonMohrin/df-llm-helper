@@ -7,11 +7,7 @@
 - A mode change that renews an `up` epoch resets that epoch's no-worker history and bad levers. A popup pause cannot cause `no_worker` (game-tick timers).
 - Tests: three cases in `tests/lua/test_gate_footprint.lua`.
 
-## Visitors and merchants hold a bridge pull too, BUG-027 (2026-10-16)
-- `gate.watch()` gives sense the footprints of the bridges with work; sense lists the visible friendly non-citizens there (visitors, merchants, tame
-  animals) as `census.h.friends`, and gate holds the pull for them like for citizens. Test in `tests/lua/test_gate_footprint.lua`.
-
-## Run 10 batch merged: what to do after `git pull` (2026-10-16)
+## Run 10 batch merged: what to do after `git pull` (2026-10-16, updated with trade and BUG-027)
 - Reload: `dfhack-run dfllm reload` (kernel parts: SIEGE_UNREADY, LOCKDOWN_PARTIAL, TOOL_BLOCKED, refuge levels, CUTOFF re-read,
   build_lost retry, mood cloth kinds); restart `dfllm follow --no-auto` (it audits again; `--no-audit` switches that off).
 - Audit now: `python -m dfpilot audit`; drill by hand: `python -m dfpilot cmd drill '{"why":"manual check"}'`.
@@ -19,8 +15,16 @@
   burrows screen, seal repaints it. `inspect what=refuge` shows `open`, `exp`, `dead`, `hint`. Forts with doorless entrances now
   often get `flee` (alert off) instead of a confinement with the enemy.
 - Tools (BUG-023): the kernel reports `TOOL_BLOCKED`; the switch `tools.equip_update` stays off until Gordon says yes (fair play).
-- Still open in this batch: trade (BUG-026 cause: priority and clock while trading, `cloth:plant`, `trade.retry`,
-  `wanted_matches`) and the rest of BUG-027 (alert first, backup lever, BRIDGE_CRUSH); they follow in the next commits.
+- Trade (BUG-026): while a caravan visit runs, trade holds a kernel boost (not demoted, 20 ms/s, snapshots and seal background
+  jobs wait) and the arbiter caps the clock at `clock.trade_cap` (100); `caravan.time_remaining` counts 10-tick units. New:
+  `cloth:plant|silk|yarn` / `thread:*` tokens (mood needs reach the want list), verb `trade.retry` (second trade in one visit),
+  `inspect what=trade` `wanted_matches` (also goods still carried by the merchants).
+- Bridges (BUG-027): no pull while any non-hostile unit is on or next to the footprint; forced raise only with a hostile within
+  `gate.force_near` (3); alert first, then raise; backup lever; BRIDGE_CRUSH. The runtime hack `gate.BLOCK_WAIT = ...` is obsolete
+  (the field no longer exists).
+- Next: BUG-028 (BREACH keeps citizens cut off from drink: rescue opening of the inner bridges, BREACH -> SIEGE after a verified
+  seal, SUPPLY_OUTSIDE), FR-68 (emergency popup/clock guard while the kernel is stopped, safe `dfllm stop`), the lever-burrow
+  check behind `GATE_FAIL no worker`.
 
 ## Siege readiness gate FR-65, audit and drill with `follow --no-auto` (2026-10-16; branch fix-ready, offline, live-untested)
 - **Run 10 (Handlelock): `audit FAIL never` and `drill never` for the whole fort.** The session ran `dfllm follow --no-auto`,
@@ -136,6 +140,10 @@
   predates this version it may hold exposed tiles (`sep` 0): ask the player to delete it on the burrows screen; seal paints it again
   without them.
   After a construction: no CUTOFF with `cause not found`; `inspect reach` `runs.cut_unconfirmed` counts the dropped ones.
+## Visitors and merchants hold a bridge pull too, BUG-027 (2026-10-16)
+- `gate.watch()` gives sense the footprints of the bridges with work; sense lists the visible friendly non-citizens there (visitors, merchants, tame
+  animals) as `census.h.friends`, and gate holds the pull for them like for citizens. Test in `tests/lua/test_gate_footprint.lua`.
+
 ## BRIDGE_CRUSH and the death cause `crushed` by a bridge, BUG-027 (2026-10-16)
 - gate records each bridge move (the pull, the move window, the units it saw within 5 tiles of the footprint while it pulled or the bridge moved);
   public `gate.moves()`; GATE `moving` names units on or next to the footprint.
@@ -165,6 +173,36 @@
   It takes the bridge out of the defense (GATE_FAIL `manual`, BREACH at T+900 for an outer/inner one); prefer the fix. Removing `gates` from the reflex
   defaults would not help: siege raises B1 itself.
 - Tests: `tests/lua/test_gate_footprint.lua` (new), seven cases in `tests/lua/test_siege.lua` (the 300-ticks case replaced).
+## Trade: cloth kinds, mood wants, a second trade per visit, wanted goods in inspect (Run 10 y418, 2026-10-16; offline, live-untested)
+- **Cloth and thread kinds:** `cloth:plant`, `cloth:silk`, `cloth:yarn` (and `thread:…`) match by material flag THREAD_PLANT, SILK, YARN;
+  plain `cloth`/`thread` stays "any"; other cloth/thread subs are refused (`dfpilot/schema.py` TOKEN, the `trade.want` verb).
+  `inspect what=trade` names cloth goods with their kind (`cloth:plant`).
+- **care.mood_wants:** the entries' `buy` tokens (e.g. `cloth:plant` from the mood agent's reserve) go before `plan.trade.want`, capped at the
+  units the moods miss; trade buys only the matching kind.
+- **Verb `trade.retry {civ?, want?, sell?}`** (PEACE): a second trade in the same visit while the caravan stands at the depot with
+  `time_remaining` >= 300 (3,000 ticks); resets the visit and optionally the wants (as `trade.want`). Replaces the live `debug.getupvalue` hack.
+- **`inspect what=trade` `wanted_matches`:** every merchant good that matches a want token whatever its value, in a depot or still carried by
+  the merchants and pack animals (from the item vectors of the wanted types), per token, type and material; at most 40 kinds,
+  `wanted_more` counts the rest, the reply stays within 8 KB; `carried_items`.
+- Tests: five cases in `tests/lua/test_trade.lua` and the schema cases in `tests/test_schema.py`, all failing on the previous commit.
+- Live check: `inspect what=trade` shows `wanted_matches` with `carried` > 0 while goods are still on the animals; `trade.want '{"want":
+  ["cloth:plant"]}'` then buys only plant cloth (ledger `bought cloth:plant`); after a trade with time left, `dfllm cmd trade.retry
+  '{"want":[...]}'` answers `trade with <civ> restarts` and a second `CARAVAN traded` follows.
+
+## Trade gets the kernel's priority during a caravan visit, BUG-026 root cause; review of BUG-025/026 (2026-10-16; offline, live-untested)
+- **Kernel boost** (`util/sched.lua`, `kern.lua`, `k_mock.lua`, CONTRACTS §3.3.9/§4): `K.boost(why, busy)`, `K.unboost()`, `K.busy()`. A boosted
+  module (only `trade`) is not demoted, is paced at 20 ms/s outside the PEACE pool, and starts and ends without an old debt; 30 s TTL.
+  `busy` makes snapshot exports and seal's background jobs wait. trade holds it from the start of a visit (caravan approaching or at the
+  depot, PEACE) to its end, busy on the trade screen.
+- **Trade clock** (`arbiter.lua`, `trade.clock()`): FPS cap `clock.trade_cap` (config/reflex.json, default 100) from the first trade-screen
+  phase until the visit ends; never above the player's cap.
+- **Phase limits on trade's own clock** (`PHASE_MS`, `TALK_MS`, `REPLY_MS`; at most 250 ms per run): a starved module no longer times out.
+  `CARAVAN retry/failed` add `ph_act`, `ph_runs`; the event fields are declared in `dfpilot/schema.py`.
+- **Review fixes:** `time_remaining` counts 10-tick units (retry wait, `left` in ticks, no retry without room, `inspect` `left_ticks`); the
+  depot toggles are restored at the depot they were set at and the broker request follows the merchants to their depot; with two depots the
+  sale items wait for the merchants' depot; one depot scan per step; `DEPOT_ITEMS` counts the newest items; a departing caravan's ledger
+  never uses another visit's goods.
+- Tests: 14 new cases (trade, trade ledger, kern load, arbiter, snapshot, seal), all failing on the old code.
 
 ## Trade: retry before the caravan leaves, diagnostics, ledger for lost visits, BUG-026 (2026-10-16)
 - A retry after `ui_timeout` etc. waits at most `time left - 400` ticks (min 100) instead of a fixed 1200, so it still runs before the caravan leaves.

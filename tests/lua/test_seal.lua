@@ -483,4 +483,22 @@ T.test('sense (FR-33): a wild large predator outside counts only near an entranc
   T.eq({run(120, 100, false)}, {'ALERT', 1}, 'no entrance known: as before')
 end)
 
+T.test('BUG-026: background jobs wait while another module holds a busy boost (trade screen); urgent ones run', function()
+  local busy = false
+  local trade = {name = 'trade', every = {ticks = 10}}
+  function trade.step(K) if busy then K.boost('trade screen', true) else K.unboost() end end
+  local W = fort{mods = {trade}}
+  W.run(2400, {skip = 9})
+  local runs0 = inspect(W, 'reach').runs
+  T.ok((runs0.audit or 0) >= 1, 'the boot audit ran')
+  busy = true
+  W.run(20, {skip = 9})
+  T.eq(W.K.busy(), 'trade')
+  W.run(3 * 1200 + 600, {skip = 9})                       -- past audit_every: the periodic audit is due
+  T.eq(inspect(W, 'reach').runs.audit, runs0.audit, 'no background audit while trade is busy')
+  busy = false
+  W.run(200, {skip = 9})
+  T.ok(inspect(W, 'reach').runs.audit > runs0.audit, 'the periodic audit runs once the boost ends')
+end)
+
 T.done()

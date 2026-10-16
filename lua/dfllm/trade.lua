@@ -41,6 +41,23 @@
 --   * depot keeper: a caravan on the map with no built depot raises DEPOT_MISSING (A) once per visit and asks
 --     the runner to queue a depot project (runner.depot_keep; the runner also keeps it in PEACE/RECOVERY). A planned
 --     depot is "being built" only while it progresses; else the message says why not (BUG-005, economy.build_info).
+-- BUG-026 (Run 10: a visit lost to one ui_timeout while the kernel paced and demoted trade for its cost):
+--   * kernel boost: from the start of a visit in PEACE (WAIT with the caravan at the depot or approaching, at most
+--     STUCK_APPROACH ticks) through every UI phase, trade holds K.boost (util/sched.lua: no demotion, a 20 ms/s share
+--     outside the PEACE pool); in UI phases it is busy (snapshot exports and seal's background jobs wait); released at
+--     LEAVE/IDLE, outside PEACE and when the module stops renewing it;
+--   * clock: trade.clock() tells the arbiter to cap the FPS at clock.trade_cap (100) from the first UI phase of a visit
+--     until the visit ends (traded, failed, left), a pending retry included;
+--   * phase limits (PHASE_MS, TALK_MS, REPLY_MS) run on the module's own clock rt.clk: real ms between two of its runs,
+--     at most RUN_MS per run, so a module that waited (paced, a long frame) does not time out a phase it could not work
+--     on; CARAVAN retry/failed events carry ph, ph_ms (real), ph_act (own clock), ph_runs and left (ticks);
+--   * caravan.time_remaining counts 10-tick units (TR_TICKS): the retry wait and `left` are converted to ticks.
+-- Run 10 y418 (Muboomon: 3 wool cloths bought while 40 rope reed cloths were on the pack animals and a mood needed plant
+-- cloth; a second trade needed a live hack):
+--   * cloth:plant|silk|yarn and thread:* match by material flag (THREAD_PLANT, SILK, YARN); plain cloth/thread = any;
+--   * care.mood_wants' buy tokens go before plan.trade.want, capped at the units the moods miss;
+--   * verb trade.retry {civ?, want?, sell?}: a new trade in the same visit (caravan AtDepot, time_remaining >= START_MIN);
+--   * inspect what=trade wanted_matches: every merchant good matching a want token, any value, in a depot or still carried.
 local json = require('dfllm.util.json')
 
 local M = {name = 'trade', every = {ticks = 100}, verbs = {}, inspect = {},
@@ -55,6 +72,7 @@ M.CFG = {
   SELL_MIN = 8,         -- our items worth less are not offered
   MAX_BUY = 60,         -- buy entries per trade
   START_MIN = 300,      -- caravan.time_remaining units (1 unit = 10 ticks, caravan.lua:69) to start
+  TR_TICKS = 10,        -- ticks per caravan.time_remaining unit (DFHack caravan.lua: days * 120)
   OPEN_MIN = 200,       -- ... to open the trade screen
   GOODS_UNTIL = 800,    -- stop waiting for haulers at this time_remaining
   GOODS_STILL = 600,    -- ticks without an increase of our depot goods value = settled
@@ -69,8 +87,12 @@ M.CFG = {
   NOGOODS_WAIT = 1200,  -- ticks at the depot without any merchant goods (caravan.goods and the depot's trader items): the visit ends, nothing is hauled
   BRING_MAX = 100,      -- sale items marked for the depot per visit (BUG-016; was the reused ITEMS)
   RETRY_WAIT = 1200, MAX_TRIES = 2,
-  RETRY_MIN = 100,      -- BUG-026: a retry waits at most (time left - RETRY_KEEP) ticks, never less than this
+  -- BUG-026: a retry waits at most the ticks left before the trade screen may no longer open (time_remaining down to
+  -- OPEN_MIN) minus RETRY_KEEP, never less than RETRY_MIN; with less room than RETRY_MIN there is no retry
+  RETRY_MIN = 100,
   RETRY_KEEP = 400,
+  BRING_WAIT = 600,     -- BUG-025 review: with two built depots and no merchant goods unloaded yet, the sale items wait
+                        -- for the merchants' depot this many ticks at the depot, then go to the manifest depot
   STUCK_APPROACH = 4800,-- ticks Approaching without reaching the depot -> fix/stuck-merchants
   STUCK_STATE = 1200,   -- ticks in trade_state Stuck -> fix/stuck-merchants
   O1_EVERY = 600,       -- ticks between two gate.want('down') for the same bridge
@@ -78,6 +100,7 @@ M.CFG = {
   -- real-time waits: the arbiter runs gfps 30, so one render takes <= 34 ms; the UI part of a trade
   -- took ~1.3 s real time in the offline scenario, and the game keeps running (arbiter owns pause)
   CLICK_MS = 100, STABLE_MS = 200, PHASE_MS = 6000, REPLY_MS = 2500, TALK_MS = 3000,
+  RUN_MS = 250,         -- BUG-026: most real ms one run adds to the module's own clock (PHASE_MS/TALK_MS/REPLY_MS)
   MAX_ADJUST = 4, MAX_REFUSE = 2, OPEN_TRIES = 8, MAX_DIALOGS = 3,
   SWEEP_MS = 3000,      -- real time to keep dismissing a confirm prompt of ours left on screen
   READS = 1000,         -- screen tiles read per frame (CONTRACTS §3.2: <= 2,000 tiles per slice)
@@ -88,6 +111,8 @@ M.CFG = {
   IDLE_TICKS = 100, UI_MS = 50,
   LEDGER_KEEP = 3,      -- visits kept in persist m.trade.ledger (FR-32)
   GOODS_LIST = 30,      -- merchant goods kinds listed by inspect what=trade (FR-18; the reply stays <= 8 KB)
+  WANTED_LIST = 40,     -- kinds in inspect what=trade wanted_matches (every value; clipped with a count)
+  WANTED_SCAN = 20000,  -- items of the wanted types read at most by inspect what=trade (wanted_matches)
 }
 M.DEFAULT_WANT = {'bar:iron', 'anvil', 'cloth'}   -- same default as `dfllm plan propose`
 
@@ -102,7 +127,8 @@ local function int(v) return math.type(v) == 'integer' and v or (type(v) == 'num
 -- token kinds (plan.trade tokens `kind[:sub]`, schema TOKEN); t = df.item_type names, word = required
 -- description word, mat = sub must match the material token (bar:iron must not match pig iron)
 L.KINDS = {
-  bar = {t = {'BAR'}, mat = true}, anvil = {t = {'ANVIL'}}, cloth = {t = {'CLOTH'}}, thread = {t = {'THREAD'}},
+  bar = {t = {'BAR'}, mat = true}, anvil = {t = {'ANVIL'}}, cloth = {t = {'CLOTH'}, fibre = true},
+  thread = {t = {'THREAD'}, fibre = true},
   leather = {t = {'SKIN_TANNED'}}, wood = {t = {'WOOD'}}, log = {t = {'WOOD'}}, logs = {t = {'WOOD'}},
   block = {t = {'BLOCKS'}}, blocks = {t = {'BLOCKS'}}, gem = {t = {'SMALLGEM'}}, gems = {t = {'SMALLGEM'}},
   rough = {t = {'ROUGH'}}, stone = {t = {'BOULDER'}}, boulder = {t = {'BOULDER'}}, seeds = {t = {'SEEDS'}},
@@ -122,7 +148,28 @@ L.CAPS = {default = 10, anvil = 1, bar = 20, cloth = 20, thread = 20, leather = 
           drink = 40, booze = 40, ammo = 100, bolt = 100, bolts = 100, gem = 10, gems = 10, weapon = 3, armor = 3,
           helm = 3, shield = 3, gloves = 6, shoes = 6, pants = 3, crossbow = 3, pick = 2, axe = 2}
 
--- token -> {kind, sub, types={NAME=true}, word, mat, cap} or nil; known(NAME) says whether a raw
+-- fibre kinds of cloth and thread (Run 10 y418: `cloth` bought 3 wool cloths while the merchants carried 40 rope reed
+-- cloths and a strange mood needed plant cloth): cloth:plant / thread:plant = material flag THREAD_PLANT, :silk = SILK,
+-- :yarn = YARN; plain cloth / thread = any; other subs are not tokens
+L.FIBRE = {plant = 'THREAD_PLANT', silk = 'SILK', yarn = 'YARN'}
+
+-- the fibre kind of an item info: from its material flags (info.mf, item_info), else from the material token
+function L.fibre_of(info)
+  local mf = info.mf
+  if type(mf) == 'table' then
+    for sub, flag in pairs(L.FIBRE) do if mf[flag] then return sub end end
+    return nil
+  end
+  local mat = tostring(info.mat or '')
+  if mat:match('^plant:') then return 'plant' end
+  for part in mat:gmatch('[^:]+') do
+    if part == 'silk' then return 'silk' end
+    if part == 'wool' or part == 'yarn' or part == 'hair' then return 'yarn' end
+  end
+  return nil
+end
+
+-- token -> {kind, sub, types={NAME=true}, word, mat, flag, cap} or nil; known(NAME) says whether a raw
 -- df.item_type name exists (fallback kind, e.g. 'splint')
 function L.token(s, known)
   if type(s) ~= 'string' then return nil end
@@ -135,10 +182,23 @@ function L.token(s, known)
     if not (known and known(up)) then return nil end
     spec = {t = {up}}
   end
+  local flag
+  if spec.fibre and sub then
+    flag = L.FIBRE[sub]
+    if not flag then return nil end
+  end
   local types = {}
   for _, n in ipairs(spec.t) do types[n] = true end
-  return {kind = kind, sub = sub, types = types, word = spec.word, mat = spec.mat == true,
+  return {kind = kind, sub = sub, types = types, word = spec.word, mat = spec.mat == true, flag = flag,
           cap = L.CAPS[kind] or L.CAPS.default, src = s}
+end
+
+-- a valid want/sell token string (the schema's TOKEN, checked in Python too): kind[:sub], fibre subs only for cloth/thread
+function L.valid(s)
+  if type(s) ~= 'string' then return false end
+  local kind, sub = s:match('^([a-z_]+):([a-z_]+)$')
+  if not kind then return s:match('^[a-z_]+$') ~= nil end
+  return not (L.KINDS[kind] and L.KINDS[kind].fibre) or L.FIBRE[sub] ~= nil
 end
 
 function L.tokens(list, known)
@@ -171,6 +231,7 @@ function L.match(tk, info)
   if not tk.types[info.type] then return false end
   if tk.word and not L.has_word(info.desc, tk.word) then return false end
   if tk.types.WEAPON and L.has_word(info.desc, 'training') then return false end   -- wooden training axes cannot chop
+  if tk.flag then return L.fibre_of(info) == tk.sub end
   if tk.sub then
     if mat_part(info.mat, tk.sub) then return true end
     if tk.mat then return false end
@@ -307,8 +368,12 @@ local TYPE_TOKEN = {BAR = 'bar', ANVIL = 'anvil', CLOTH = 'cloth', THREAD = 'thr
                     SEEDS = 'seeds', PLANT = 'plant', MEAT = 'meat', FISH = 'fish', CHEESE = 'cheese', EGG = 'egg',
                     FOOD = 'meal', DRINK = 'drink', AMMO = 'ammo', WEAPON = 'weapon', ARMOR = 'armor', HELM = 'helm',
                     SHIELD = 'shield', GLOVES = 'gloves', SHOES = 'shoes', PANTS = 'pants'}
-function L.token_for(t, mat, desc)
+function L.token_for(t, mat, desc, mf)
   local base = TYPE_TOKEN[t]
+  if t == 'CLOTH' or t == 'THREAD' then
+    local f = L.fibre_of({mat = mat, mf = mf})
+    return f and (base .. ':' .. f) or base
+  end
   if t == 'BAR' then
     local m = tostring(mat or ''):match('^[Ii][Nn][Oo][Rr][Gg][Aa][Nn][Ii][Cc]:([A-Za-z_]+)$')
     return m and ('bar:' .. m:lower()) or 'bar'
@@ -404,8 +469,11 @@ end
 
 ---------------------------------------------------------------- DF reads (read-only)
 local st      -- persisted m.trade: {v, done, ratio, visits={<entity>={first, at, tries, traded, stuck, set,
-              --   orig_r, orig_a, retry, ratio, stuck_since, nodepot, brought, blocked}}, ov={want, sell, loaded}|nil}
-local rt      -- runtime: {phase, ent, f (flow of the current visit), job (sliced reader), civ, o1}
+              --   orig_r, orig_a, retry, ratio, stuck_since, nodepot, brought, blocked, ledgered, dep}},
+              --   ov={want, sell, loaded}|nil}
+local rt      -- runtime: {phase, ent, f (flow of the current visit), job (sliced reader), civ, o1, clk (own clock ms),
+              --   run_ms, boosted}
+local dcache  -- one depot scan per step (BUG-025 review): {frame, d, how, n, counts = {[id] = trader items}}
 local pub     -- precomputed state part
 local dirty
 
@@ -451,34 +519,55 @@ end
 
 -- BUG-025 (Run 10: the merchants unloaded at a second, hand-built depot while the kernel kept looking at the manifest
 -- depot, so "nothing_listed" although the caravan had goods): trader-flagged items lying in a depot's contained_items
+-- BUG-025 review: the newest DEPOT_ITEMS entries (the end of contained_items): the merchants unload when they arrive,
+-- so a depot full of older goods of ours (leftovers, autotrade piles) no longer hides theirs
 local function trader_items(b)
   local n = 0
   pcall(function()
     local list = b.contained_items
-    for i = 0, math.min(#list, M.CFG.DEPOT_ITEMS) - 1 do
+    for i = #list - 1, math.max(0, #list - M.CFG.DEPOT_ITEMS), -1 do
       if list[i].item.flags.trader then n = n + 1 end
     end
   end)
   return n
 end
 
--- the trade depot: the built one the merchants unloaded at (most trader goods), else the one holding manifest.depot,
--- else the first built one
-local function find_depot(K)
+-- the built depots, once per step: the one the merchants unloaded at (most trader goods; how 'trader'), else the one
+-- holding manifest.depot ('manifest'), else the first built one ('first'); n = built depots, counts = trader items
+local function depot_scan(K)
+  local frame = K.now().frame
+  if dcache and dcache.frame == frame then return dcache end
   local want = K.manifest().depot
+  local r = {frame = frame, n = 0, counts = {}}
   local best, byman, bytrade, most = nil, nil, nil, 0
   pcall(function()
     for _, b in ipairs(df.global.world.buildings.other.TRADE_DEPOT) do
       if built(b) then
+        r.n = r.n + 1
         best = best or b
         if not byman and type(want) == 'table' and b.z == want[3] and want[1] >= b.x1 and want[1] <= b.x2
            and want[2] >= b.y1 and want[2] <= b.y2 then byman = b end
         local n = trader_items(b)
+        r.counts[b.id] = n
         if n > most then bytrade, most = b, n end
       end
     end
   end)
-  return bytrade or byman or best
+  r.d = bytrade or byman or best
+  r.how = (bytrade and 'trader') or (byman and 'manifest') or (best and 'first') or nil
+  dcache = r
+  return r
+end
+
+local function find_depot(K) return depot_scan(K).d end
+
+-- a trade depot by building id (built or not), nil when it is gone
+local function depot_by_id(id)
+  local r
+  pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.TRADE_DEPOT) do if b.id == id then r = b; return end end
+  end)
+  return r
 end
 
 local function in_depot(p, d) return p.z == d.z and p.x >= d.x1 and p.x <= d.x2 and p.y >= d.y1 and p.y <= d.y2 end
@@ -567,16 +656,11 @@ end
 
 -- BUG-016: merchant goods of the visit: the caravan's own goods list and the trader-flagged items already unloaded
 -- in the depot; 0 = the merchants brought nothing to sell (live: one human and a yak, `nothing_listed`)
-local function merchant_goods(d, c)
+local function merchant_goods(K, d, c)
   local n = 0
   pcall(function() n = #c.ref.goods end)
-  pcall(function()
-    local list = d.contained_items
-    for i = 0, math.min(#list, M.CFG.DEPOT_ITEMS) - 1 do
-      if list[i].item.flags.trader then n = n + 1 end
-    end
-  end)
-  return n
+  local cnt = dcache and dcache.frame == K.now().frame and dcache.counts[d.id]
+  return n + (cnt or trader_items(d))
 end
 
 -- KILL_ANIMAL / KILL_PLANT ethics of the caravan civ (common.lua:303-331)
@@ -678,6 +762,12 @@ local function item_info(it, mer, ea, ew)
   if okd and type(d) == 'string' then info.desc = dfhack.df2utf(d):lower() end
   local okc, n = pcall(function() return #dfhack.items.getContainedItems(it) end)
   info.container = okc and n > 0
+  if info.type == 'CLOTH' or info.type == 'THREAD' then    -- fibre kind (cloth:plant / silk / yarn)
+    pcall(function()
+      local fl = dfhack.matinfo.decode(it:getMaterial(), it:getMaterialIndex()).material.flags
+      info.mf = {THREAD_PLANT = fl.THREAD_PLANT == true, SILK = fl.SILK == true, YARN = fl.YARN == true}
+    end)
+  end
   local f = it.flags
   info.artifact, info.forbid, info.owned = f.artifact == true, f.forbid == true, f.owned == true
   local okb, free = pcall(dfhack.items.checkMandates, it)                -- Lua API.txt:2107
@@ -767,6 +857,26 @@ local function scan_slice(j)
   return j.i > #j.segs
 end
 
+-- care.mood_wants (CONTRACTS §7; Run 10 y418: a strange mood needed plant cloth): each entry's buy token (e.g.
+-- cloth:plant) goes before the plan's wants, capped at the units the moods miss (summed per token); a plan token with
+-- the same text is dropped and lifts that cap to the kind's default
+local function mood_tokens(K, known)
+  local ok, list = K.call('care', 'mood_wants')
+  local r, by = {}, {}
+  if not ok or type(list) ~= 'table' then return r, by end
+  for _, e in ipairs(list) do
+    local tk = type(e) == 'table' and type(e.buy) == 'string' and e.buy ~= '' and L.token(e.buy, known)
+    if tk then
+      local n = math.max(1, int(e.n))
+      local have = by[tk.src]
+      if have then have.need = have.need + n
+      else tk.need, tk.mood = n, true; by[tk.src] = tk; r[#r + 1] = tk end
+    end
+  end
+  for _, tk in ipairs(r) do tk.cap = math.min(tk.cap, tk.need) end
+  return r, by
+end
+
 local function wants(K)
   local p = (K.plan or {}).trade or {}
   local w, s = p.want, p.sell
@@ -778,7 +888,12 @@ local function wants(K)
   if ov then w, s = ov.want or w, ov.sell or s end
   if type(w) ~= 'table' or #w == 0 then w = M.DEFAULT_WANT end
   local known = function(n) return df.item_type ~= nil and df.item_type[n] ~= nil end
-  return L.tokens(w, known), L.tokens(s, known)
+  local want, by = mood_tokens(K, known)
+  for _, tk in ipairs(L.tokens(w, known)) do
+    local m = by[tk.src]
+    if m then m.cap = tk.cap else want[#want + 1] = tk end
+  end
+  return want, L.tokens(s, known)
 end
 
 local function lists_job(K, ui, mer)
@@ -838,8 +953,15 @@ local function set_phase(K, p, why)
     rt.job = nil
   end
   rt.phase = p
-  if rt.f then rt.f.ph_ms, rt.f.ph_tick = K.now().ms, K.now().tick end
+  local f = rt.f
+  if f then
+    f.ph_ms, f.ph_tick, f.ph_clk, f.ph_runs = K.now().ms, K.now().tick, rt.clk, 0
+    if UI_PHASES[p] then f.ui = true end              -- BUG-026: the clock stays lowered until the visit ends
+  end
 end
+
+-- BUG-026: ms on the module's own clock since the phase began (real ms between runs, at most RUN_MS per run)
+local function ph_age(f) return rt.clk - (f.ph_clk or rt.clk) end
 
 local function act_trade(K, op, args)
   local ok, res = K.act.trade(op, args or {})
@@ -870,21 +992,24 @@ local function sweep(K)
   K.act.trade('close', {clear = true})
 end
 
--- put the depot toggles back the way we found them
+-- put the depot toggles back the way we found them, at the depot they were set at (BUG-025 review: with two depots
+-- find_depot may name the other one once the merchants' goods are bought or packed up)
 local function restore_toggles(K, v)
   if not v or v.set == 0 then return end
-  local d = find_depot(K)
+  local d                                         -- a depot that is gone keeps nothing to restore
+  if (v.dep or -1) >= 0 then d = depot_by_id(v.dep) else d = find_depot(K) end
   if d then K.act.trade('request_broker', {depot = d.id, requested = v.orig_r == 1, anyone = v.orig_a == 1}) end
-  v.set, dirty = 0, true
+  v.set, v.dep, dirty = 0, -1, true
   if rt.f then rt.f.req, rt.f.anyone = nil, nil end
 end
 
 local RETRYABLE = {ui_timeout = true, open = true, no_button = true, talker = true, refused = true,
                    changed = true, weight = true, unloading = true, ratio = true, ui_busy = true}
 
--- FR-32: one ledger entry per finished visit (TRADE_LEDGER, persist m.trade.ledger, kern.log)
-local function ledger(K, ent, ok, why, ratio)
-  local f = rt.f or {}
+-- FR-32: one ledger entry per finished visit (TRADE_LEDGER, persist m.trade.ledger, kern.log); f = that visit's flow
+-- (nil: nobody looked at its goods; BUG-026 review: never another visit's flow)
+local function ledger(K, ent, ok, why, ratio, f)
+  f = f or {}
   local cand = f.cand
   local want = cand and cand.want or wants(K)
   local lg = L.ledger(want, cand and cand.buys, cand and cand.sells, ok and f.plan or nil)
@@ -925,7 +1050,7 @@ local function finish(K, ok, why, ratio)
     restore_toggles(K, v)
     caravan_ev(K, 'traded', ent, {ratio = ratio},
                string.format('traded with %s, ratio %d.%02d', civ_name(ent), ratio // 100, ratio % 100))
-    ledger(K, ent, true, 'traded', ratio)
+    ledger(K, ent, true, 'traded', ratio, f)
     if v then v.ledgered = 1 end
     return set_phase(K, 'LEAVE', 'traded')
   end
@@ -933,6 +1058,13 @@ local function finish(K, ok, why, ratio)
   local missing = f and f.missing
   local retry = v and RETRYABLE[why] and v.tries < M.CFG.MAX_TRIES and not missing
   if missing then K.log('warn', 'trade: act.trade is not implemented; this caravan is left to the player') end
+  -- BUG-026 (review): caravan.time_remaining counts 10-tick units; a retry needs the trade screen to open again before
+  -- time_remaining falls to OPEN_MIN. room = ticks until then; with less than RETRY_MIN there is no retry (the visit
+  -- fails with its own reason, not later as 'time')
+  local car = car_of(read_caravans(), ent)
+  local left = car and int(car.tr) * M.CFG.TR_TICKS or -1
+  local room = car and (int(car.tr) - M.CFG.OPEN_MIN) * M.CFG.TR_TICKS or nil
+  if retry and why ~= 'ui_busy' and room and room < M.CFG.RETRY_MIN then retry = false end
   if why == 'ui_busy' then
     K.log('info', 'trade: a player screen is open; trying again later')
     -- BUG-016: the visit used to be lost silently to a forgotten unit sheet; say which screen blocks, once per visit
@@ -944,29 +1076,27 @@ local function finish(K, ok, why, ratio)
                  'trade with ' .. civ_name(ent) .. ' blocked: a player screen is open (' .. fc .. '); close it')
     end
   else
-    -- BUG-026: say which phase ran how long (a ui_timeout used to name nothing) and how much visit time is left
-    local car = car_of(read_caravans(), ent)
+    -- BUG-026: which phase ran how long (a ui_timeout used to name nothing): real ms (ph_ms), ms on the module's own
+    -- clock (ph_act), runs in it (ph_runs), and the ticks the caravan still stays (left)
     caravan_ev(K, retry and 'retry' or 'failed', ent,
-               {why = why, ph = rt.phase, ph_ms = f and f.ph_ms and (K.now().ms - f.ph_ms) or -1, left = car and int(car.tr) or -1},
+               {why = why, ph = rt.phase, ph_ms = f and f.ph_ms and (K.now().ms - f.ph_ms) or -1,
+                ph_act = f and f.ph_clk and ph_age(f) or -1, ph_runs = f and f.ph_runs or -1, left = left},
                'trade with ' .. civ_name(ent) .. (retry and ' retries: ' or ' failed: ') .. tostring(why) ..
-               ' (' .. tostring(rt.phase) .. (car and (', ' .. int(car.tr) .. ' ticks left') or '') .. ')')
+               ' (' .. tostring(rt.phase) .. (car and (', ' .. left .. ' ticks left') or '') .. ')')
   end
   if retry then
-    -- BUG-026 (Run 10, Muboomon y416: ui_timeout, then RETRY_WAIT 1200 > the 962 ticks the caravan had left)
+    -- BUG-026 (Run 10, Muboomon y416): the wait ends while the trade screen may still open (room), RETRY_MIN at least
     local wait = M.CFG.RETRY_WAIT
-    local car = car_of(read_caravans(), ent)
-    if car and int(car.tr) > 0 then
-      wait = math.min(wait, math.max(M.CFG.RETRY_MIN, int(car.tr) - M.CFG.RETRY_KEEP))
-    end
+    if room then wait = math.min(wait, math.max(M.CFG.RETRY_MIN, room - M.CFG.RETRY_KEEP)) end
     v.retry = K.now().tick + wait
     local nf = {ph_ms = K.now().ms, ph_tick = K.now().tick}
-    for _, k in ipairs({'req', 'anyone', 'fb', 'fs', 'g_val', 'g_up', 'g_tick', 'need'}) do nf[k] = f and f[k] end
+    for _, k in ipairs({'req', 'anyone', 'fb', 'fs', 'g_val', 'g_up', 'g_tick', 'need', 'ui'}) do nf[k] = f and f[k] end
     rt.f = nf
     return set_phase(K, 'WAIT', why)
   end
   restore_toggles(K, v)
   if why ~= 'ui_busy' then
-    ledger(K, ent, false, why, 0)
+    ledger(K, ent, false, why, 0, f)
     if v then v.ledgered = 1 end
   end
   set_phase(K, 'LEAVE', why)
@@ -980,7 +1110,7 @@ local function track_visits(K, cars, now)
     local v = st.visits[key]
     if not v then
       v = {first = now, at = -1, tries = 0, traded = 0, stuck = 0, set = 0, orig_r = 0, orig_a = 0, retry = -1,
-           ratio = 0, stuck_since = -1, nodepot = 0}
+           ratio = 0, stuck_since = -1, nodepot = 0, dep = -1}
       st.visits[key], dirty = v, true
       caravan_ev(K, 'arrive', c.ent, nil, 'caravan from ' .. civ_name(c.ent) .. ' ' .. c.state)
     end
@@ -1014,7 +1144,9 @@ local function track_visits(K, cars, now)
   for key, v in pairs(st.visits) do
     if not present[key] then
       local ent = math.tointeger(tonumber(key)) or -1
+      local vf                                       -- this visit's flow, never another caravan's (review)
       if rt.ent == ent then
+        vf = rt.f
         close_ui(K)
         rt.phase, rt.ent, rt.f, rt.job = 'IDLE', nil, nil, nil
       end
@@ -1022,10 +1154,7 @@ local function track_visits(K, cars, now)
       -- BUG-026: a caravan that reached the depot and left with no ledger entry (a pending retry, a wait that never
       -- ended) is still a lost visit: write it, so TRADE_LEDGER and inspect what=trade show it
       if (v.ledgered or 0) == 0 and v.at >= 0 and (v.traded or 0) == 0 then
-        local keep = rt.ent
-        rt.ent = ent
-        ledger(K, ent, false, 'left_untraded', 0)
-        rt.ent = keep
+        ledger(K, ent, false, 'left_untraded', 0, vf)
       end
       st.visits[key], dirty = nil, true
       caravan_ev(K, 'left', ent, {ratio = v.ratio or 0})
@@ -1188,8 +1317,22 @@ local function step_wait(K, cars, now)
   -- BUG-016: the sale goods go to the depot once per VISIT (the flag lives in the visit record, a retry rebuilds
   -- rt.f) and only when the merchants brought something: a caravan without goods ends the visit before a hauler walks
   local at_for = v.at >= 0 and now - v.at or 0
+  -- BUG-025 review: the merchants unloaded at another depot than the one our toggles were set at: put that one back
+  -- (and request the broker below at the merchants' depot)
+  if v.set == 1 and (v.dep or -1) >= 0 and v.dep ~= d.id then restore_toggles(K, v) end
   if not f.brought and (v.brought or 0) == 0 then
-    if merchant_goods(d, c) > 0 then
+    local dsc = depot_scan(K)
+    -- BUG-025 review: with two built depots the sale items wait until the merchants' goods show which one they use
+    -- (or BRING_WAIT ticks at the depot), else they could be hauled to the depot nobody trades at
+    local known = dsc.n < 2 or dsc.how == 'trader' or (c.state == 'AtDepot' and at_for >= M.CFG.BRING_WAIT)
+    local mg = merchant_goods(K, d, c)
+    if mg > 0 and not known then
+      if not f.bring_wait then
+        f.bring_wait = true
+        K.log('info', 'trade: %d depots stand; the sale items wait until the merchants of %s unload', dsc.n,
+              civ_name(rt.ent))
+      end
+    elseif mg > 0 then
       f.brought, v.brought, dirty = true, 1, true
       local _, sell = wants(K)
       local types, seen = {}, {}
@@ -1214,7 +1357,7 @@ local function step_wait(K, cars, now)
     if ok then
       f.req, f.anyone = true, anyone
       if v.set == 0 then
-        v.set, dirty = 1, true
+        v.set, v.dep, dirty = 1, d.id, true
         v.orig_r = type(old) == 'table' and old.requested and 1 or 0
         v.orig_a = type(old) == 'table' and old.anyone and 1 or 0
       end
@@ -1277,8 +1420,8 @@ local function step_open(K, cars)
     if f.missing then return finish(K, false, 'act_missing') end
     return
   end
-  -- another screen is open (the player): never touch it; back to WAIT after PHASE_MS
-  if K.now().ms - f.ph_ms > M.CFG.PHASE_MS then return finish(K, false, 'ui_busy') end
+  -- another screen is open (the player): never touch it; back to WAIT after PHASE_MS (own clock, BUG-026)
+  if ph_age(f) > M.CFG.PHASE_MS then return finish(K, false, 'ui_busy') end
 end
 
 local function step_ready(K, now)
@@ -1295,7 +1438,7 @@ local function step_ready(K, now)
     return set_phase(K, 'WAIT', 'merchants unloading')
   end
   if ui.havetalker ~= 1 then
-    if K.now().ms - f.ph_ms > M.CFG.TALK_MS then return finish(K, false, 'talker') end
+    if ph_age(f) > M.CFG.TALK_MS then return finish(K, false, 'talker') end
     return
   end
   local sig = string.format('%d|%d', #ui.good[0], #ui.good[1])
@@ -1378,7 +1521,7 @@ local function step_offer(K)
   local f = rt.f
   local ok = act_trade(K, 'offer', {})
   if not ok then return finish(K, false, f.missing and 'act_missing' or 'changed') end
-  f.click_ms, f.dialogs = K.now().ms, 0
+  f.click_ms, f.click_clk, f.dialogs = K.now().ms, rt.clk, 0
   f.prompt = true                 -- DFHack confirm may have opened its modal prompt (confirm.lua:142)
   return set_phase(K, 'RESULT')
 end
@@ -1393,7 +1536,7 @@ local function step_result(K, sliced)
     f.prompt, f.dialogs = true, f.dialogs + 1
     if f.dialogs > M.CFG.MAX_DIALOGS then return finish(K, false, 'dialog') end   -- close dismisses it
     local ok, res = act_trade(K, 'offer', {})
-    f.click_ms = K.now().ms
+    f.click_ms, f.click_clk = K.now().ms, rt.clk
     -- act dismissed an ethics prompt; other refusals: not drawn yet or not ours, try again
     if not ok and tostring(res):find('ethics', 1, true) then return finish(K, false, 'ethics') end
     return
@@ -1409,7 +1552,7 @@ local function step_result(K, sliced)
   if (fresh and reply == 'accept') or (a == 0 and b == 0) then return finish(K, true, 'traded', f.ratio) end
   if fresh and reply == 'offended' then return finish(K, false, 'offended') end
   if fresh and reply == 'weight' and not f.light then f.light = true; return remark(K, 'weight') end
-  if fresh or K.now().ms - f.click_ms > M.CFG.REPLY_MS then
+  if fresh or rt.clk - (f.click_clk or rt.clk) > M.CFG.REPLY_MS then
     f.refuse = f.refuse + 1
     if f.refuse > M.CFG.MAX_REFUSE then return finish(K, false, 'refused') end
     f.fb = f.fb * 1.15
@@ -1429,8 +1572,40 @@ end
 
 ---------------------------------------------------------------- module
 local VISIT_KEYS = {'first', 'at', 'tries', 'traded', 'stuck', 'set', 'orig_r', 'orig_a', 'retry', 'ratio',
-                    'stuck_since', 'nodepot', 'brought', 'blocked', 'ledgered'}
-local NEG_DEFAULT = {at = true, retry = true, stuck_since = true}
+                    'stuck_since', 'nodepot', 'brought', 'blocked', 'ledgered', 'dep'}
+local NEG_DEFAULT = {at = true, retry = true, stuck_since = true, dep = true}
+
+-- BUG-026: the kernel boost while this visit is on: begun (WAIT, a pending retry included) with the caravan at the
+-- depot or still approaching (at most STUCK_APPROACH ticks: the first steps of a visit carry `logistics now` and the
+-- sale haul, whose debt must not pace trade past the caravan's arrival), and every UI phase (busy: the other modules'
+-- heavy background work waits); PEACE only; released at LEAVE/IDLE and outside PEACE. -> why, busy
+local function boost_why(K, cars, now)
+  if not rt.ent or K.mode() ~= 'PEACE' then return nil end
+  if UI_PHASES[rt.phase] then return 'trade screen, ' .. civ_name(rt.ent), true end
+  if rt.phase ~= 'WAIT' then return nil end
+  local c, v = car_of(cars, rt.ent), visit(rt.ent)
+  if not c or not v then return nil end
+  if c.state == 'AtDepot' then return 'caravan at the depot, ' .. civ_name(rt.ent), false end
+  if c.state == 'Approaching' and now - v.first < M.CFG.STUCK_APPROACH then
+    return 'caravan approaching, ' .. civ_name(rt.ent), false
+  end
+end
+
+local function sync_boost(K, cars, now)
+  if type(K.boost) ~= 'function' then return end
+  local why, busy = boost_why(K, cars, now)
+  if why then K.boost(why, busy)
+  elseif rt.boosted then K.unboost() end
+  rt.boosted = why ~= nil
+end
+
+-- BUG-026: the module's own clock: real ms since its previous run, at most RUN_MS per run
+local function own_clock(K)
+  local now = K.now().ms
+  local last = rt.run_ms
+  rt.run_ms = now
+  if last and now > last then rt.clk = rt.clk + math.min(now - last, M.CFG.RUN_MS) end
+end
 
 function M.init(K)
   st = {v = 2, done = 0, ratio = 0, visits = json.object{}}
@@ -1447,17 +1622,20 @@ function M.init(K)
     if type(p.ov) == 'table' then st.ov = {want = p.ov.want, sell = p.ov.sell, loaded = int(p.ov.loaded)} end
     if type(p.ledger) == 'table' then st.ledger = p.ledger end
   end
-  rt = {phase = 'IDLE', civ = {}, o1 = {}}
-  pub, dirty = nil, false
+  rt = {phase = 'IDLE', civ = {}, o1 = {}, clk = 0}
+  pub, dirty, dcache = nil, false, nil
   M.every = {ticks = M.CFG.IDLE_TICKS}
 end
 
 function M.step(K, budget, ctx)
+  own_clock(K)
+  if rt.f then rt.f.ph_runs = (rt.f.ph_runs or 0) + 1 end
   local sliced = false
   if rt.job and rt.job.kind == 'scan' then
     if not scan_slice(rt.job) then return 'more' end
     sliced = true
   end
+  dcache = nil
   local now = K.now().tick
   local cars = read_caravans()
   track_visits(K, cars, now)
@@ -1477,15 +1655,25 @@ function M.step(K, budget, ctx)
   elseif ph == 'OFFER' then step_offer(K)
   elseif ph == 'RESULT' then r = step_result(K, sliced)
   elseif ph == 'LEAVE' and not car_of(cars, rt.ent) then rt.phase, rt.ent, rt.f = 'IDLE', nil, nil end
-  if UI_PHASES[rt.phase] and rt.f and not sliced and K.now().ms - rt.f.ph_ms > M.CFG.PHASE_MS * 2 then
+  -- BUG-026: the limit runs on the module's own clock: a run that waited (paced, demoted) adds at most RUN_MS
+  if UI_PHASES[rt.phase] and rt.f and not sliced and ph_age(rt.f) > M.CFG.PHASE_MS * 2 then
     finish(K, false, 'ui_timeout')
     r = nil
   end
   if r ~= 'more' then r = nil end
   pub = {trade = {caravan = #cars > 0 and 1 or 0, ratio = st.ratio, done = st.done}}
+  sync_boost(K, cars, now)
   set_every()
   save(K)
   return r
+end
+
+-- public (CONTRACTS §7, BUG-026): why the arbiter caps the FPS at clock.trade_cap, or nil: from the first UI phase of a
+-- visit until the visit ends (traded, failed, left), a pending retry included; PEACE only
+function M.clock(K)
+  if not rt or not rt.ent or not rt.f or K.mode() ~= 'PEACE' then return nil end
+  if UI_PHASES[rt.phase] or (rt.phase == 'WAIT' and rt.f.ui) then return 'trade' end
+  return nil
 end
 
 function M.state(K) return pub or {} end
@@ -1496,11 +1684,46 @@ function M.done(K) return st and st.done or 0 end
 -- inspect what=trade (FR-18, FR-32): caravans, wants, sell list, the last ledger entries and, while a caravan
 -- stands at the depot, the merchant goods unloaded there (what the depot's goods list shows), grouped by item
 -- type and material with the want token that names them
+-- Run 10 y418 (40 rope reed cloths still on the merchants and pack animals, not in the depot): every merchant good
+-- (flags.trader) of the item types the want tokens name, from the item vectors of those types (no unit reads): where =
+-- 'depot' (in a building), 'carried' (in a merchant's or pack animal's inventory, flags.in_inventory) or 'other'.
+-- fn(item, where); at most WANTED_SCAN items read -> scanned, capped
+local function wanted_goods(want, fn)
+  local types, seen = {}, {}
+  for _, tk in ipairs(want) do
+    for tn in pairs(tk.types) do if not seen[tn] then seen[tn] = true; types[#types + 1] = tn end end
+  end
+  table.sort(types)
+  local scanned, capped = 0, false
+  for _, tn in ipairs(types) do
+    pcall(function()
+      for _, it in ipairs(df.global.world.items.other[tn]) do
+        if scanned >= M.CFG.WANTED_SCAN then capped = true; return end
+        scanned = scanned + 1
+        local f = it.flags
+        if f.trader then
+          local where = 'other'
+          if f.in_building then where = 'depot'
+          elseif f.in_inventory then                 -- on a merchant or pack animal, or in a container
+            where = 'carried'
+            local okc, box = pcall(dfhack.items.getContainer, it)
+            if okc and box and box.flags.in_building then where = 'depot' end     -- a bin in the depot
+          end
+          fn(it, where)
+        end
+      end
+    end)
+  end
+  return scanned, capped
+end
+
 M.inspect.trade = function(K, args)
   local cars = read_caravans()
   local list, at = {}, nil
+  dcache = nil
   for _, c in ipairs(cars) do
-    list[#list + 1] = {civ = civ_name(c.ent), state = c.state, time_left = int(c.tr)}
+    -- time_left = caravan.time_remaining (10-tick units), left_ticks the same in ticks (BUG-026 review)
+    list[#list + 1] = {civ = civ_name(c.ent), state = c.state, time_left = int(c.tr), left_ticks = int(c.tr) * M.CFG.TR_TICKS}
     if c.state == 'AtDepot' and not at then at = c end
   end
   local want, sell = wants(K)
@@ -1511,14 +1734,15 @@ M.inspect.trade = function(K, args)
     local agg, order = {}, {}
     pcall(function()
       local items = d.contained_items
-      for i = 0, math.min(#items, M.CFG.DEPOT_ITEMS) - 1 do
+      for i = #items - 1, math.max(0, #items - M.CFG.DEPOT_ITEMS), -1 do      -- the newest, as trader_items
         local it = items[i].item
         if it and it.flags.trader then
           local info = item_info(it, at.ref, false, false)
           local key = info.type .. '|' .. tostring(info.mat)
           local e = agg[key]
           if not e then
-            e = {type = info.type, mat = info.mat, n = 0, value = 0, token = L.token_for(info.type, info.mat, info.desc)}
+            e = {type = info.type, mat = info.mat, n = 0, value = 0,
+                 token = L.token_for(info.type, info.mat, info.desc, info.mf)}
             agg[key], order[#order + 1] = e, e
           end
           e.n, e.value = e.n + math.max(1, int(info.stack)), e.value + int(info.value)
@@ -1529,17 +1753,52 @@ M.inspect.trade = function(K, args)
     table.sort(order, function(a, b) if a.value ~= b.value then return a.value > b.value end return a.type < b.type end)
     for i = 1, math.min(M.CFG.GOODS_LIST, #order) do goods[i] = order[i] end
   end
-  local msg = d and at and string.format('%d merchant goods at the depot (%d kinds)', n, #goods)
-              or (d and (#cars > 0 and 'caravan not at the depot yet' or 'no caravan') or 'no built trade depot')
+  -- wanted_matches (Run 10 y418: cheap cloth fell off the 30 most valuable kinds): every merchant good that matches a
+  -- want token, whatever its value, in a depot and still carried, per token, type and material
+  local wagg, worder, carried, scanned, capped = {}, {}, 0, 0, false
+  local car = at or cars[1]
+  if car then
+    scanned, capped = wanted_goods(want, function(it, where)
+      local info = item_info(it, car.ref, false, false)
+      local k = L.first_match(want, info)
+      if not k then return end
+      if where == 'carried' then carried = carried + 1 end
+      local key = k .. '|' .. info.type .. '|' .. tostring(info.mat)
+      local e = wagg[key]
+      if not e then
+        e = {token = want[k].src, type = info.type, mat = info.mat, depot = 0, carried = 0, other = 0, value = 0, k = k}
+        wagg[key], worder[#worder + 1] = e, e
+      end
+      e[where], e.value = e[where] + math.max(1, int(info.stack)), e.value + int(info.value)
+    end)
+  end
+  table.sort(worder, function(a, b) if a.k ~= b.k then return a.k < b.k end return a.value > b.value end)
+  local matches, more = {}, math.max(0, #worder - M.CFG.WANTED_LIST)
+  for i = 1, math.min(M.CFG.WANTED_LIST, #worder) do
+    local e = worder[i]
+    matches[i] = {token = e.token, type = e.type, mat = e.mat, depot = e.depot, carried = e.carried, value = e.value,
+                  other = e.other > 0 and e.other or nil}
+  end
+  local msg = d and at and string.format('%d merchant goods at the depot (%d kinds); %d wanted kinds, %d wanted items carried',
+                                         n, #goods, #worder, carried)
+              or (d and (#cars > 0 and ('caravan not at the depot yet' ..
+                                        (#worder > 0 and string.format(' (%d wanted kinds, %d items carried)', #worder, carried)
+                                         or '')) or 'no caravan') or 'no built trade depot')
   local ledger = {}
   for i, e in ipairs(st.ledger or {}) do ledger[i] = e end
   local data = {caravans = json.array(list), depot = d and d.id or -1, goods = json.array(goods), goods_items = n,
+                carried_items = carried, wanted_matches = json.array(matches), wanted_more = more,
+                wanted_scan = capped and ('capped at ' .. scanned) or nil,
                 want = srcs(want), sell = srcs(sell), ledger = json.array(ledger), done = st.done}
-  -- the reply stays within 8 KB: older ledger entries go first, then the cheapest goods kinds
+  -- the reply stays within 8 KB: older ledger entries go first, then the cheapest goods kinds, then the last wanted
+  -- kinds (counted in wanted_more)
   while true do
     local ok, enc = pcall(json.encode, data)
     if not ok or #enc <= 7500 then break end
-    if #ledger > 1 then table.remove(ledger) elseif #goods > 0 then table.remove(goods) else break end
+    if #ledger > 1 then table.remove(ledger)
+    elseif #goods > 0 then table.remove(goods)
+    elseif #matches > 0 then table.remove(matches); data.wanted_more = data.wanted_more + 1
+    else break end
   end
   return true, msg, data
 end
@@ -1551,6 +1810,7 @@ M.on = {
   end,
   -- outside PEACE: leave the screen and send the trader home (the depot sits in the bailey, outside B1)
   MODE = function(K, ev)
+    if ev.to ~= 'PEACE' and rt.boosted and type(K.unboost) == 'function' then K.unboost(); rt.boosted = false end
     if ev.to == 'PEACE' or not rt.f then return end
     close_ui(K)
     restore_toggles(K, visit(rt.ent))
@@ -1564,24 +1824,70 @@ local function valid_tokens(list)
   if list == nil then return true end
   if type(list) ~= 'table' or #list > 40 then return false end
   for _, s in ipairs(list) do
-    if type(s) ~= 'string' or not (s:match('^[a-z_]+$') or s:match('^[a-z_]+:[a-z_]+$')) then return false end
+    if not L.valid(s) then return false end
   end
   return true
 end
 
+local function srcs(l) local r = {} for _, t in ipairs(l) do r[#r + 1] = t.src end return json.array(r) end
+
+-- the trade.want override (until the next plan.reload)
+local function override(K, args)
+  if args.want == nil and args.sell == nil then return end
+  local pp, ov = K.persist.get('plan'), st.ov or {}
+  st.ov = {want = args.want or ov.want, sell = args.sell or ov.sell,
+           loaded = type(pp) == 'table' and int(pp.loaded) or 0}
+  dirty = true
+end
+
+local BAD_TOKENS = 'want/sell must be token lists (cloth/thread subs: plant, silk, yarn)'
+
 -- inbox trade.want {want?, sell?}: overrides plan.trade until the next plan.reload; {} = query
 M.verbs['trade.want'] = function(K, args, cmd)
-  if not valid_tokens(args.want) or not valid_tokens(args.sell) then return false, 'want/sell must be token lists' end
-  if args.want ~= nil or args.sell ~= nil then
-    local pp, ov = K.persist.get('plan'), st.ov or {}
-    st.ov = {want = args.want or ov.want, sell = args.sell or ov.sell,
-             loaded = type(pp) == 'table' and int(pp.loaded) or 0}
-    dirty = true
-    save(K)
-  end
+  if not valid_tokens(args.want) or not valid_tokens(args.sell) then return false, BAD_TOKENS end
+  override(K, args)
+  save(K)
   local want, sell = wants(K)
-  local function srcs(l) local r = {} for _, t in ipairs(l) do r[#r + 1] = t.src end return json.array(r) end
   return true, string.format('want %d, sell %d', #want, #sell), {want = srcs(want), sell = srcs(sell)}
+end
+
+-- inbox trade.retry {civ?, want?, sell?} (Run 10 y418: after a trade the caravan stayed 2,700 ticks more and the wants
+-- had changed; v.traded = 1 blocked a second trade): a new trade in the same visit. Only for a caravan AtDepot (the one
+-- from `civ`, else the first) with time_remaining >= START_MIN (3,000 ticks), never while a trade-screen phase runs or
+-- another caravan's visit holds the module. The optional lists replace the wants like trade.want; the visit record is
+-- reset (traded, tries, the sale haul, a pending retry, the ledger flag), so the next step begins it again
+M.verbs['trade.retry'] = function(K, args, cmd)
+  if not valid_tokens(args.want) or not valid_tokens(args.sell) then return false, BAD_TOKENS end
+  if args.civ ~= nil and type(args.civ) ~= 'string' then return false, 'civ must be a string' end
+  local c
+  for _, x in ipairs(read_caravans()) do
+    if x.state == 'AtDepot' and (args.civ == nil or civ_name(x.ent) == args.civ) then c = x; break end
+  end
+  if not c then return false, 'no caravan at the depot' .. (args.civ and (' from ' .. args.civ) or '') end
+  local name = civ_name(c.ent)
+  if c.bad then return false, name .. ': offended or goods seized' end
+  if int(c.tr) < M.CFG.START_MIN then
+    return false, string.format('%s leaves too soon (%d ticks left, a trade needs %d)', name,
+                                int(c.tr) * M.CFG.TR_TICKS, M.CFG.START_MIN * M.CFG.TR_TICKS)
+  end
+  local v = visit(c.ent)
+  if not v then return false, name .. ': no visit record yet, try again in a moment' end
+  if rt.ent == c.ent and UI_PHASES[rt.phase] then return false, name .. ': a trade is running (' .. rt.phase .. ')' end
+  if rt.ent and rt.ent ~= c.ent and rt.phase ~= 'IDLE' then
+    return false, 'busy with the caravan from ' .. civ_name(rt.ent) .. ' (' .. rt.phase .. ')'
+  end
+  override(K, args)
+  local was = (v.traded or 0) == 1 and 'traded' or string.format('%d tries', int(v.tries))
+  v.traded, v.tries, v.brought, v.retry, v.ledgered, v.blocked, dirty = 0, 0, 0, -1, 0, 0, true
+  if rt.ent == c.ent then
+    close_ui(K)
+    rt.phase, rt.ent, rt.f, rt.job = 'IDLE', nil, nil, nil
+  end
+  save(K)
+  local want, sell = wants(K)
+  K.log('info', 'trade: trade.retry: %s again (was %s), %d ticks left', name, was, int(c.tr) * M.CFG.TR_TICKS)
+  return true, string.format('trade with %s restarts (was %s; %d ticks left)', name, was, int(c.tr) * M.CFG.TR_TICKS),
+         {civ = name, left = int(c.tr) * M.CFG.TR_TICKS, want = srcs(want), sell = srcs(sell)}
 end
 
 return M

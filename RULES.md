@@ -128,7 +128,8 @@ helper is experimental; procedure and fair-play limits: `tools/embark/README.md`
 | `popcap.lower` | `{cap}` | lowers only |
 | `tempo.lower` | `{fps, ttl_s}` | lowers only, never above the mode value |
 | `pause` / `unpause` | `{ttl_s ≤ 600, why?}` / `{}` | rarely; `unpause` releases only an inbox pause. A pause by the player, by DF (save loaded paused) or by a popup is released in DF, by the player |
-| `trade.want` | `{want?, sell?}` | tokens like `bar:iron`, `anvil`, `cloth` |
+| `trade.want` | `{want?, sell?}` | tokens like `bar:iron`, `anvil`, `cloth` (any), `cloth:plant`/`silk`/`yarn` (also `thread:`) |
+| `trade.retry` | `{civ?, want?, sell?}` | PEACE; a second trade in the same visit: caravan at the depot, ≥ 3,000 ticks left |
 | `squad.sortie` | `{squad, target, approve:true}` | ALERT/SIEGE/BREACH/RECOVERY; rare, `approve:true` is a deliberate, logged decision; target = kill box id or position |
 | `lever` | `{bridge, want}` | PEACE only |
 | `inspect` | `{what, key?}` | read-only, ≤ 8 KB; `what=reach`, `entrances`, `defense`, `perimeter`, `refuge` (seal), `what=tombs`, `water_sources`, `what=orders` (blocked orders), `workload` (idle adults, unclaimed jobs, cancel reasons, free picks/axes), `trade` (merchant goods at the depot, last trades) |

@@ -17,13 +17,17 @@
 --     Timestream never runs above the cap it is meant to slow (it cannot slow below DF's frame rate): a timestream
 --     target above the cap is switched off. Same restore.json mechanism as the supply brake. Knobs: config/reflex.json
 --     `clock` (K.cfg.reflex). tempo.lower lowers the cap too (STATUS §6 gap 10).
+--   * trade clamp (BUG-026, Run 10: a caravan visit was lost to a ui_timeout at 270-390 ticks/s): while trade.clock()
+--     names a reason (from the first trade-screen phase of a visit until the visit ends: traded, failed, left), the FPS
+--     cap holds at clock.trade_cap (default 100; timestream above it goes off), never above the captured original.
 local json = require('dfllm.util.json')
 local fio = require('dfllm.io')
 
 local M = {name = 'arbiter', every = {ms = 500}, critical = true, on = {}, verbs = {}}
 
 M.MODE_FPS = {PEACE = 500, ALERT = 250, SIEGE = -1, BREACH = -1, RECOVERY = 250, DRILL = -1}
-M.CLOCK = {siege_cap = 30, alert_cap = 100}   -- FR-51 defaults; config/reflex.json `clock` overrides them
+M.CLOCK = {siege_cap = 30, alert_cap = 100,   -- FR-51 defaults; config/reflex.json `clock` overrides them
+           trade_cap = 100}                   -- BUG-026: while trade holds the clock (trade.clock)
 M.MODE_CAP = {SIEGE = 'siege_cap', BREACH = 'siege_cap', DRILL = 'siege_cap', ALERT = 'alert_cap'}
 M.BRAKE_FPS = 150                  -- tempo and FPS cap while the supply brake holds
 M.P0_SAFE_DAYS = 60                -- P0 brakes only while drink or food is below this
@@ -295,7 +299,7 @@ end
 
 -- clock knobs: M.CLOCK, overridden by config/reflex.json `clock` (ints 10..1000)
 local function clock_cfg(K)
-  local c = {siege_cap = M.CLOCK.siege_cap, alert_cap = M.CLOCK.alert_cap}
+  local c = {siege_cap = M.CLOCK.siege_cap, alert_cap = M.CLOCK.alert_cap, trade_cap = M.CLOCK.trade_cap}
   local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.clock) == 'table' and K.cfg.reflex.clock or {}
   for k in pairs(c) do
     local v = int(r[k])
@@ -313,6 +317,12 @@ local function clamp_why(K)
   if fb and K.now().tick < fb.until_tick and K.now().tick >= fb.since then return fb.why end
 end
 
+-- BUG-026: why trade wants the clock lowered (a trade-screen phase of a visit until it ends), or nil; level-triggered
+local function trade_why(K)
+  local ok, why = K.call('trade', 'clock')
+  if ok and type(why) == 'string' and why ~= '' then return why end
+end
+
 -- desired timestream fps and its owner, plus the FPS cap to drive (nil = the original) and why
 local function desired(K)
   local mode = K.mode()
@@ -328,6 +338,7 @@ local function desired(K)
     fps, by = -1, 'clock'
     if not cap or cc.siege_cap < cap then cap, cwhy = cc.siege_cap, clamp end
   end
+  if st.trade and (not cap or cc.trade_cap < cap) then cap, cwhy = cc.trade_cap, 'trade' end
   if st.brake and fps > M.BRAKE_FPS then
     fps, by = M.BRAKE_FPS, 'brake'
     if not cap or M.BRAKE_FPS < cap then cap, cwhy = M.BRAKE_FPS, 'brake' end
@@ -366,6 +377,11 @@ function M.apply(K)
   if clamp ~= st.clamp then
     K.log('info', 'clock clamp %s', clamp and ('on: ' .. clamp) or 'off')
     st.clamp = clamp
+  end
+  local tw = trade_why(K)
+  if tw ~= st.trade then
+    K.log('info', 'trade clock %s', tw and ('on: FPS cap ' .. clock_cfg(K).trade_cap .. ' (' .. tw .. ')') or 'off')
+    st.trade = tw
   end
   local fps, by, cap, cwhy = desired(K)
   apply_cap(K, cap)
