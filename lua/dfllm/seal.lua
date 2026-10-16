@@ -44,6 +44,8 @@
 -- result after a load) and CFG.work caps one frame; an urgent job pre-empts a background one, which resumes later.
 -- The map edge keeps one tile per walkable run, the stairs and interior come from a flood over the citizens' groups
 -- (not a box over hidden rock), burrow sizes are cached and a periodic audit with unchanged inputs is skipped.
+-- BUG-026: a background job waits while another module holds a busy kernel boost (K.busy(): trade with the trade screen
+-- open); urgent jobs run as always.
 local CAD = require('dfllm.util.cadence')   -- BUG-008: a standing class-A condition is announced again only with news
 local M = {name = 'seal', every = {ticks = 50}, verbs = {}, on = {}, inspect = {}}
 
@@ -2331,6 +2333,7 @@ end
 local function run_jobs(K, t)
   local name, d, u = pick(K, t)
   if not name then return nil end
+  if not u and type(K.busy) == 'function' and K.busy() then return nil end   -- BUG-026: background work waits
   refill(K, u)
   if mem.bucket < (u and 1 or CFG.min_slice) then return u and 'more' or nil end
   mem.left = mem.bucket

@@ -446,7 +446,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "MOOD_START": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
     "MOOD_NEED": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
     "MOOD_END": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
-    "CARAVAN": ("B", "trade", _d(opt="phase:s ratio:i civ:s")),
+    # BUG-016/026: why (failure reason), focus (blocked), ph/ph_ms/ph_act/ph_runs (the phase that ended the attempt: real
+    # ms, ms on the module's own clock, runs), left (ticks the caravan still stays, -1 unknown)
+    "CARAVAN": ("B", "trade", _d(opt="phase:s ratio:i civ:s why:s focus:s ph:s ph_ms:i ph_act:i ph_runs:i left:i")),
     "MIGRANTS": ("B", "economy", _d(opt="n:i")),
     "PETITION": ("B", "care", _d(opt="kind:s")),
     "STOCK_LOW": ("B", "economy", _d("key:s", "days:i min:i")),

@@ -343,9 +343,10 @@ function F.ui(W, d, c, opts)
   end
   local ops = {}
   function ops.request_broker(a)
-    local old = {requested = d.trade_flags.trader_requested, anyone = d.trade_flags.anyone_can_trade}
-    if a.requested ~= nil then d.trade_flags.trader_requested = a.requested end
-    if a.anyone ~= nil then d.trade_flags.anyone_can_trade = a.anyone end
+    local dd = (a.depot and W.buildings[a.depot]) or d          -- the depot named (two-depot tests), else ours
+    local old = {requested = dd.trade_flags.trader_requested, anyone = dd.trade_flags.anyone_can_trade}
+    if a.requested ~= nil then dd.trade_flags.trader_requested = a.requested end
+    if a.anyone ~= nil then dd.trade_flags.anyone_can_trade = a.anyone end
     return true, old
   end
   -- live L4: the depot's TradeAtDepot job posted by act (DF 53 never posted it from the toggle)

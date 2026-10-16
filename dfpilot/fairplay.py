@@ -144,7 +144,7 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
         errs.append(f"{name}: clock must be an object")
     else:
         for k, v in clock.items():
-            if k not in ("siege_cap", "alert_cap"):
+            if k not in ("siege_cap", "alert_cap", "trade_cap"):
                 errs.append(f"{name}: clock.{k}: unknown key")
             elif not is_int(v, 10, 1000):
                 errs.append(f"{name}: clock.{k}: int 10..1000 expected, got {v!r}")

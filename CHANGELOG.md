@@ -1,5 +1,20 @@
 # CHANGELOG dfpilot
 
+## Trade gets the kernel's priority during a caravan visit, BUG-026 root cause; review of BUG-025/026 (2026-10-16; offline, live-untested)
+- **Kernel boost** (`util/sched.lua`, `kern.lua`, `k_mock.lua`, CONTRACTS §3.3.9/§4): `K.boost(why, busy)`, `K.unboost()`, `K.busy()`. A boosted
+  module (only `trade`) is not demoted, is paced at 20 ms/s outside the PEACE pool, and starts and ends without an old debt; 30 s TTL.
+  `busy` makes snapshot exports and seal's background jobs wait. trade holds it from the start of a visit (caravan approaching or at the
+  depot, PEACE) to its end, busy on the trade screen.
+- **Trade clock** (`arbiter.lua`, `trade.clock()`): FPS cap `clock.trade_cap` (config/reflex.json, default 100) from the first trade-screen
+  phase until the visit ends; never above the player's cap.
+- **Phase limits on trade's own clock** (`PHASE_MS`, `TALK_MS`, `REPLY_MS`; at most 250 ms per run): a starved module no longer times out.
+  `CARAVAN retry/failed` add `ph_act`, `ph_runs`; the event fields are declared in `dfpilot/schema.py`.
+- **Review fixes:** `time_remaining` counts 10-tick units (retry wait, `left` in ticks, no retry without room, `inspect` `left_ticks`); the
+  depot toggles are restored at the depot they were set at and the broker request follows the merchants to their depot; with two depots the
+  sale items wait for the merchants' depot; one depot scan per step; `DEPOT_ITEMS` counts the newest items; a departing caravan's ledger
+  never uses another visit's goods.
+- Tests: 14 new cases (trade, trade ledger, kern load, arbiter, snapshot, seal), all failing on the old code.
+
 ## Trade: retry before the caravan leaves, diagnostics, ledger for lost visits, BUG-026 (2026-10-16)
 - A retry after `ui_timeout` etc. waits at most `time left - 400` ticks (min 100) instead of a fixed 1200, so it still runs before the caravan leaves.
 - `CARAVAN retry/failed` events carry `ph`, `ph_ms` and `left` (phase that timed out, real ms in it, ticks the caravan stays).

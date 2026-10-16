@@ -197,6 +197,75 @@ T.test('pacing: the PEACE pool scales the shares of the saturated modules to wha
   kern.stop('test')
 end)
 
+---------------------------------------------------------------- boost (BUG-026)
+T.test('BUG-026 boost: no demotion, paced at the boost share outside the pool, debt cut at both ends, busy, expiry', function()
+  local W = H.world{tag = 'boost', ms_per_frame = 10}
+  local tr = {name = 'trade', every = {ms = 50}, want = false, busy = false, n = 0}
+  function tr.step(K)
+    tr.n = tr.n + 1
+    W.ms = W.ms + 8                                  -- a slow call every run
+    if tr.want then K.boost('caravan at the depot', tr.busy) elseif tr.want == false then K.unboost() end
+  end
+  local eco = {name = 'economy', every = {ticks = 50}}
+  function eco.step() return 'more' end
+  local crit = H.counter('sense', {ticks = 9})
+  H.boot(W, {modules = {crit, eco, tr}})
+  local K = kern.K()
+  frames(W, 3000)                                   -- 30 s without a boost: demoted, paced at 3 ms/s
+  local m = module_info('trade')
+  T.ok(m.factor > 1, 'demoted without a boost: x' .. m.factor)
+  local c0 = kern.costs()
+  frames(W, 3000)
+  local r = rates(c0, kern.costs())
+  T.ok(r.trade <= 3.5, 'share 3: ' .. r.trade)
+  tr.want = true
+  frames(W, 200)
+  local e = nil
+  for _, x in ipairs(kern.status().modules) do if x.name == 'trade' then e = x end end
+  T.eq(e.boost, 'caravan at the depot')
+  T.eq({K.busy()}, {}, 'a boost without busy asks nobody to wait')
+  c0 = kern.costs()
+  local n0 = tr.n
+  frames(W, 3000)
+  r = rates(c0, kern.costs())
+  T.ok(r.trade >= 18 and r.trade <= 21, 'boost share 20: ' .. r.trade)
+  T.ok(tr.n - n0 >= 70, 'runs at the boost share, not every 50 ms x factor paced to 3 ms/s: ' .. (tr.n - n0))
+  T.eq(#H.find(H.events(W), 'KERNEL_SLOW'), 1, 'no new demotion while boosted')
+  tr.busy = true
+  frames(W, 200)
+  T.eq(K.busy(), 'trade')
+  tr.want = false
+  frames(W, 200)
+  T.eq({K.busy()}, {})
+  local raw
+  for _, x in ipairs(kern.status().modules) do if x.name == 'trade' then raw = x end end
+  T.eq(raw.boost, nil, 'unboosted')
+  -- the debt left behind is at most one second of the normal share: trade runs again within a second or two
+  local n1 = tr.n
+  frames(W, 300)
+  T.ok(tr.n > n1, 'not starved after the boost')
+  local log = H.read(W.sd .. '/kern.log')
+  T.ok(log:find('trade boosted: caravan at the depot', 1, true), 'boost logged')
+  T.ok(log:find('trade boost ended (unboost; ', 1, true), 'end logged')
+  kern.stop('test')
+end)
+
+T.test('BUG-026 boost: lapses after BOOST.ttl_ms without a renewal; refused for modules not in BOOST.modules', function()
+  local W = H.world{tag = 'boost2', ms_per_frame = 100}
+  local tr = {name = 'trade', every = {ticks = 100}, once = true}
+  function tr.step(K) if tr.once then tr.once = false; tr.r = {K.boost('test')} end end
+  local eco = {name = 'economy', every = {ticks = 100}}
+  function eco.step(K) eco.r = eco.r or {K.boost('mine')} end
+  H.boot(W, {modules = {eco, tr}})
+  H.run(W, 5)
+  T.eq(tr.r, {true})
+  T.eq(eco.r, {false, 'not allowed'})
+  H.run(W, sched.BOOST.ttl_ms // 100 + 5)
+  for _, x in ipairs(kern.status().modules) do if x.name == 'trade' then T.eq(x.boost, nil, 'lapsed') end end
+  T.ok(H.read(W.sd .. '/kern.log'):find('trade boost ended (expired; test)', 1, true))
+  kern.stop('test')
+end)
+
 ---------------------------------------------------------------- hysteresis
 -- 10 s frames of 1 tick: a slow call per frame
 T.test('hysteresis: KERNEL_SLOW once per module; a flip doubles the quiet time the next promotion needs', function()

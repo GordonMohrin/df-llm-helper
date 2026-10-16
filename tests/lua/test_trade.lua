@@ -276,17 +276,89 @@ T.test('flow: a merchant who never agrees -> one retry, then failed, toggles res
   T.eq(U.offers, offers)                       -- no third attempt this visit
 end)
 
-T.test('BUG-026: the retry waits no longer than the caravan stays; the event names phase and time left', function()
-  local W, M, d, c, U = setup{ui = {accept = 50}, tr = 700}   -- the caravan leaves in 700 ticks
+-- the persisted visit record of entity 7
+local function visit7(W) return json.decode(W.persist_raw['dfllm.m.trade']).visits['7'] end
+
+T.test('BUG-026 review: time_remaining counts 10-tick units: the retry waits while the screen may still open', function()
+  -- the live case: 962 left = 9,620 ticks; RETRY_WAIT (1,200 ticks) fits, the old formula cut it to 562
+  local W, M, d, c, U = setup{ui = {accept = 50}, tr = 962}
   W.frame(1)
   to_depot(W, d, c)
   T.ok(F.until_(W, function() return #F.events(W, 'retry') > 0 end, 1500), 'retry')
-  local ev = F.events(W, 'retry')[1].d
-  T.eq(type(ev.ph), 'string')
-  T.eq(type(ev.ph_ms), 'number')
-  T.eq(ev.left, 700)
-  -- RETRY_WAIT 1200 would outlast the caravan; 700 - 400 = 300 does not: both attempts fit in 1000 ticks
-  T.ok(F.until_(W, function() return #F.events(W, 'failed') > 0 end, 1000), 'second attempt before the caravan leaves')
+  local ev = F.events(W, 'retry')[1]
+  T.eq(ev.d.left, 9620, 'left in ticks')
+  T.ok(ev.msg:find('9620 ticks left', 1, true), ev.msg)
+  T.eq({type(ev.d.ph), type(ev.d.ph_ms), type(ev.d.ph_act), type(ev.d.ph_runs)}, {'string', 'number', 'number', 'number'})
+  T.eq(visit7(W).retry - ev.tick, M.CFG.RETRY_WAIT)
+  -- 260 left: the screen may open until 200, 600 ticks from now: the retry waits 600 - RETRY_KEEP = 200
+  local W2, M2, d2, c2 = setup{ui = {accept = 50}}
+  W2.frame(1)
+  to_depot(W2, d2, c2)
+  c2.time_remaining = 260
+  T.ok(F.until_(W2, function() return #F.events(W2, 'retry') > 0 end, 1500), 'retry at 260')
+  T.eq(visit7(W2).retry - F.events(W2, 'retry')[1].tick, 200)
+  T.ok(F.until_(W2, function() return #F.events(W2, 'failed') > 0 end, 2000), 'second attempt in time')
+  -- 205 left: no room for a second attempt: the visit fails with its own reason at once, not later as 'time'
+  local W3, M3, d3, c3 = setup{ui = {accept = 50}}
+  W3.frame(1)
+  to_depot(W3, d3, c3)
+  c3.time_remaining = 205
+  T.ok(F.until_(W3, function() return #F.events(W3, 'failed') > 0 end, 1500), 'failed')
+  T.eq(#F.events(W3, 'retry'), 0, 'no retry without room')
+  T.eq(F.events(W3, 'failed')[1].d.why, 'refused')
+  T.eq(F.events(W3, 'failed')[1].d.left, 2050)
+end)
+
+T.test('BUG-026: a starved trade module (40 ms a run) still trades: boosted, phase limits on its own clock', function()
+  local W, M, d, c, U = setup{}
+  W.cost.trade = 40                            -- every run is a slow call: paced at 3 ms/s and demoted without a boost
+  W.frame(1)
+  to_depot(W, d, c, {ticks = 400})
+  T.ok(F.until_(W, function() return traded(W) end, 8000), 'traded')
+  for _, ph in ipairs({'retry', 'failed'}) do T.eq(#F.events(W, ph), 0, 'no ' .. ph) end
+  T.eq(#W.find_events('KERNEL_SLOW'), 0, 'not demoted while boosted')
+  local boosted
+  for _, l in ipairs(W.logs) do if l.msg:find('trade boosted', 1, true) then boosted = true end end
+  T.ok(boosted, 'kernel boost logged')
+end)
+
+T.test('BUG-026: the boost holds while the visit is on (busy on the trade screen), trade.clock until it ends', function()
+  local W, M, d, c, U = setup{}
+  local e = W.mods.trade
+  W.frame(1)
+  T.ok(e.boost ~= nil, 'boosted while the caravan approaches')
+  T.eq({W.K.busy()}, {}, 'not busy before the trade screen')
+  T.eq(select(2, W.K.call('trade', 'clock')), nil, 'the clock is free while waiting for the depot')
+  to_depot(W, d, c, {ticks = 100})
+  T.ok(e.boost and e.boost.why:find('at the depot', 1, true), 'caravan at the depot')
+  T.ok(F.until_(W, function() return W.K.busy() ~= nil end, 1500), 'busy once a UI phase runs')
+  T.eq(W.K.busy(), 'trade')
+  T.eq(select(2, W.K.call('trade', 'clock')), 'trade')
+  T.ok(F.until_(W, function() return traded(W) end, 1500), 'traded')
+  W.frame(1)
+  T.eq(e.boost, nil, 'released once the visit is done (LEAVE)')
+  T.eq({W.K.busy()}, {})
+  T.eq(select(2, W.K.call('trade', 'clock')), nil, 'the clock is released')
+  -- outside PEACE there is no boost
+  local W2, _, d2, c2 = setup{}
+  W2.frame(1)
+  W2.K.set_mode('ALERT', 'test')
+  W2.frame(1)
+  T.eq(W2.mods.trade.boost, nil, 'no boost in ALERT')
+end)
+
+T.test('BUG-026: a retry after a UI phase keeps the boost and the trade clock until the visit ends', function()
+  local W, M, d, c, U = setup{ui = {accept = 50}}
+  W.frame(1)
+  to_depot(W, d, c)
+  T.ok(F.until_(W, function() return #F.events(W, 'retry') > 0 end, 1500), 'retry')
+  W.frame(1)
+  T.eq(M.CFG and select(2, W.K.call('trade', 'clock')), 'trade', 'clock held through the retry wait')
+  T.ok(W.mods.trade.boost ~= nil, 'boost held through the retry wait')
+  T.ok(F.until_(W, function() return #F.events(W, 'failed') > 0 end, 2000), 'failed')
+  W.frame(1)
+  T.eq(select(2, W.K.call('trade', 'clock')), nil)
+  T.eq(W.mods.trade.boost, nil)
 end)
 
 T.test('BUG-026: a caravan that leaves from the depot with no trade still gets a ledger entry', function()
