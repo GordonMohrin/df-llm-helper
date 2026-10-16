@@ -10,6 +10,9 @@
 -- WP5 extensions (additive): census.u.insane_ids (insane citizens, for the gate footprint check),
 -- census.h.crazed, census.h.list[i].dc (distance to the nearest citizen outside Kern+, -1 none).
 -- live L6: K.census.a = the fort's visible tame animals (economy's famine slaughter), with the unit count.
+-- BUG-027: while gate has a bridge with work (gate.watch: boxes around its footprints) the hostile scan also lists
+-- the visible friendly non-citizens in those boxes (visitors, merchants, diplomats, tame animals) as census.h.friends
+-- {{id, k}} (<= FRIEND_MAX); gate follows them by id and holds the pull while one stands on or next to a footprint.
 -- FR-62 (Run 9: 402 units, 16 ms/s): the hostile scan touches every unit 10x per second, so the per-unit path
 -- is kept short: inactive units (dead, gone) cost one call, the LARGE_PREDATOR raw flag is cached per
 -- race/caste, and the entrance list (seal) is only fetched when a predator candidate needs it.
@@ -24,6 +27,7 @@ M.LIST_MAX = 40        -- census.h.list: nearest hostiles
 M.OUT_MAX = 20         -- census.u.outside_ids
 M.COUNT_EVERY = 1000   -- ticks between visible-unit counts (perf.csv `units`) and the animal census (census.a)
 M.ANIMAL_MAX = 120     -- census.a.list bound
+M.FRIEND_MAX = 40      -- census.h.friends bound (BUG-027)
 local CIT_FAST = {SIEGE = true, BREACH = true, DRILL = true}
 
 local st                -- module state, reset by init
@@ -138,6 +142,9 @@ local function hscan_begin(K, now, armed)
            count = now.tick - (st.count_tick or -M.COUNT_EVERY) >= M.COUNT_EVERY, animals = {}}
   for _, b in ipairs(g.bridges) do st.hs.near_bridge[b.name] = -1 end
   st.hs.K = K                                   -- FR-33 entrances: fetched on the first predator candidate
+  local okw, wb = K.call('gate', 'watch')       -- BUG-027: friendly non-citizens near the footprints with work
+  st.hs.watch = okw and type(wb) == 'table' and #wb > 0 and wb or nil
+  st.hs.friends, st.hs.fseen = {}, {}
   st.h_tick = now.tick
 end
 
@@ -151,6 +158,28 @@ local function entrances(hs)
 end
 
 local function minpos(cur, d) if cur < 0 or d < cur then return d end return cur end
+
+-- BUG-027: a visible friendly non-citizen in one of gate's watch boxes -> census.h.friends (only while gate watches)
+local function friend(hs, u, U)
+  local fr = hs.friends
+  if #fr >= M.FRIEND_MAX or hs.fseen[u.id] then return end
+  local p = u.pos
+  local x, y, z = p.x, p.y, p.z
+  local hit = false
+  for _, b in ipairs(hs.watch) do
+    if x >= b[1] and x <= b[4] and y >= b[2] and y <= b[5] and z >= b[3] and z <= b[6] then hit = true; break end
+  end
+  if not hit then return end
+  if U.isCitizen(u, true) or U.isResident(u, true) then return end      -- census.u has them
+  if not U.isVisible(u) or U.isHidden(u) or u.flags1.caged then return end
+  local k
+  if U.isTame(u) then k = 'animal'
+  elseif U.isMerchant and U.isMerchant(u) then k = 'merchant'
+  elseif (U.isVisitor and U.isVisitor(u)) or (U.isDiplomat and U.isDiplomat(u)) then k = 'visitor'
+  else return end                                                       -- wild animals and the rest
+  hs.fseen[u.id] = true
+  fr[#fr + 1] = {id = u.id, k = k}
+end
 
 -- live L6: the fort's tame animals (census.a, refreshed with the unit count every COUNT_EVERY ticks): economy
 -- marks surplus ones for slaughter in a famine. Visible, tame, fort-controlled, alive, no citizen.
@@ -246,6 +275,7 @@ local function consider(hs, u)
       hs.units = hs.units + 1
       animal(hs, u, U)
     end
+    if hs.watch then friend(hs, u, U) end
     return 1
   end
   local id = u.id
@@ -261,7 +291,10 @@ local function consider(hs, u)
       if not (U.isCitizen(u) or U.isResident(u)) then hs.crazed = hs.crazed + 1 end   -- insane only
       return 7
     end
-    if U.isTame(u) or U.isFortControlled(u) then return 7 end
+    if U.isTame(u) or U.isFortControlled(u) then
+      if hs.watch then friend(hs, u, U) end
+      return 7
+    end
     -- live L1b: the ghost of a dead citizen (isUndead, isOwnGroup) walked into Kern+ and held the fort in
     -- BREACH for days; an own ghost is care's job (slab, burial), not the siege reflex's
     -- live L3: a berserk child's ghost is no longer isOwnGroup (berserk dwarves leave the group); as a ghost of
@@ -359,7 +392,7 @@ local function hscan_finish(K)
   end
   K.census.h = {tick = hs.tick, vis = hs.vis, inv = hs.inv, great = hs.great, undead = hs.undead, inside = hs.inside,
                 near_o1 = hs.near_o1, near_cit = hs.near_cit, near_bridge = hs.near_bridge, list = list,
-                armed = hs.armed, crazed = hs.crazed}
+                armed = hs.armed, crazed = hs.crazed, friends = hs.friends}
 end
 
 ---------------------------------------------------------------- module
