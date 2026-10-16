@@ -156,7 +156,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | PERF_DEGRADED | `dfllm doctor`; the supervisor restarts DF only in PEACE after an autosave |
 | DECISION_NEEDED | ask the player the question once; the default applies until they answer. `build_blocked`: `inspect` `what=workload` (`construction.blocked`: kind, pos, fails, why); the kernel already unforbade the items on the site; corpses wait for burial; else `bp.cancel` and place it elsewhere |
 | PLAN_EXHAUSTED | year review now (`plan propose`) |
-| PROJECT_BLOCKED | `bp preview`, then `bp.cancel` and place at another site, or fix the material |
+| PROJECT_BLOCKED | `bp preview`, then `bp.cancel` and place at another site, or fix the material; `build_lost` names the missing pieces (`B1`, traps) and the kernel retries the stage itself (`retry n/8`): wait for it unless the line says the retries are spent |
 | YEAR_REVIEW | §5 year review |
 | GHOSTS | `inspect` `what=tombs` (causes per body); `tombs.repair`; `no_coffin` → the kernel provisions coffins (`inspect tombs` `prov`: want/short/stock/order/proj); `bp.place tombs` only when `prov` reports no space and no project; `no_body` → a memorial slab |
 | HOSPITAL_DRY | follow the recipe in the line (`inspect` `what=water_sources`: a bank to zone or a dig); until water is accepted, a dry hospital zone is worse than none |

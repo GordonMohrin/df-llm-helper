@@ -417,7 +417,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "PERF_DEGRADED": ("A", "perf", _d(opt="tps:i base:i pct:i why:s")),
     "DECISION_NEEDED": ("A", "any", _d("id:s", "q:s")),
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
-    "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i")),
+    "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i missing:sa retry:i")),
     "YEAR_REVIEW": ("A", "kern", _d(opt="year:i")),
     "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa")),
     "HOSPITAL_DRY": ("A", "water", _d("why:s", "patients:i zone:i near:i recipe:s")),

@@ -42,7 +42,7 @@ Related: FR-xx, BUG-xx
 | [BUG-019](BUG-019-breach-refuge-refused-for-supplies.md) | open | high | during a breach the only reachable emergency burrow is refused for missing supplies | lua/dfllm/seal.lua, siege.lua |
 | [BUG-020](BUG-020-embark-rectangle-ignores-injected-mouse.md) | open | medium | `embark.py scan` cannot place the rectangle: it ignores the held/injected mouse | tools/embark |
 | [BUG-021](BUG-021-cutoff-false-positive-group-renumber.md) | open | low | CUTOFF fires while everybody reaches everything (group ids renumber during construction) | care / seal |
-| [BUG-022](BUG-022-fortcore-stage2-build-lost-no-retry.md) | open | high | fortcore stage 2 ends `build_lost` for good: B1 and the traps are never built | lua/dfllm/runner.lua |
+| [BUG-022](BUG-022-fortcore-stage2-build-lost-no-retry.md) | fixed (offline, live-untested) | high | fortcore stage 2 ends `build_lost` for good: B1 and the traps are never built | lua/dfllm/runner.lua |
 | [BUG-023](BUG-023-woodcutters-do-not-fetch-the-axe.md) | open | high | woodcutters never fetch the axe from the bin: no FellTree job ever runs, no logs for a year (workaround: put the axe into their hand) | lua/dfllm/economy.lua |
 | [BUG-024](BUG-024-weave-silk-thread-not-found.md) | open | medium | weaving silk never starts: "Needs 1 unused collected silk thread" with 6500 reachable silk threads; 84 naked | economy |
 | [BUG-025](BUG-025-trade-looks-at-the-wrong-depot.md) | fixed (live) | medium | with two built depots trade checks the manifest depot while the merchants unload at the other: caravan with goods ends `nothing_listed` | trade |

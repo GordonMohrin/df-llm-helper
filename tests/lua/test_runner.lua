@@ -563,6 +563,147 @@ T.test('build: too many unsuitable tiles block the project with build_lost', fun
   T.eq(#H.qf_calls(W, 'build', 'run'), 2)
 end)
 
+-- BUG-022 (Run 10 Handlelock y364: fortcore stage 2 "s2.dig: 61 hidden tiles never reached; stage completes
+-- without them", then s2.build blocked build_lost for two game years: B1 and its levers never built; the live
+-- workaround cancelled it and placed stage 2 again at site=same). A fortcore-like stage 2: the dig reaches row 10
+-- and four hidden tiles of row 11 never; the build puts B1 (manifest footprint 12-14,11) and a trap (11,11) on them.
+local function stage2_doc()
+  return {v = 2, tpl = 'fortcore', site = 'S1', class = 'defense', params = {stage = 2}, anchor = {10, 10, 100}, rot = 0,
+          stages = {
+            {label = 's2.dig', mode = 'dig', orders = 0, defense = 1,
+             chunks = {{pos = {10, 10, 100}, cells = {{0, 0, 0, 'd(5x1)'}}},
+                       {pos = {10, 11, 100}, cells = {{0, 0, 0, 'd(5x1)'}, {0, 1, 0, 's(3x1)'}}}}},
+            {label = 's2.build', mode = 'build', orders = 1, defense = 1,
+             chunks = {{pos = {10, 10, 100}, cells = {{0, 0, 0, 'Tl'}, {2, 1, 0, 'gw(3x1)'}, {4, 0, 0, 'Tl'},
+                                                      {1, 1, 0, 'Ts'}}}}},
+            {label = 's2.zone', mode = 'zone', orders = 0, defense = 0,
+             chunks = {{pos = {10, 10, 100}, cells = {{0, 0, 0, 'B(5x1)'}}}}},
+          },
+          manifest = {v = 2, bridges = {B1 = {role = 'inner', fp = {12, 11, 100, 14, 11, 100},
+                                              levers = {{10, 10, 100}, {14, 10, 100}}}}},
+          materials = {}}
+end
+
+-- the hidden tiles of row 11 (x 11-14) and the smoothing row 12 under them: designated or not, nobody reaches them
+local HID = {{11, 11}, {12, 11}, {13, 11}, {14, 11}, {10, 12}, {11, 12}, {12, 12}}
+local function hide(W)
+  for _, t in ipairs(HID) do W.tile(t[1], t[2], 100).hidden = true end
+end
+local function dig_reachable(W)               -- the miners dig every designated tile that is not hidden
+  local keep = {}
+  for _, t in ipairs(HID) do
+    local tl = W.tile(t[1], t[2], 100)
+    if tl.hidden then keep[#keep + 1] = {tl, tl.dig}; tl.dig = '' end
+  end
+  H.dig(W)
+  for _, k in ipairs(keep) do k[1].dig = k[2] end
+end
+
+local function to_build_lost(W)
+  dfhack.buildings = {findAtTile = function(x, y, z)  -- DF's building lookup (a stage placed again, live L2)
+    local id = W.bld_at[x .. ',' .. y .. ',' .. z]
+    return id and W.buildings[id] or nil
+  end}
+  hide(W)
+  H.place(W, 'y364s2b0', stage2_doc())
+  H.runs(W, 1)
+  dig_reachable(W)
+  H.runs(W, runner.CFG.hidden_wait // 600 + 2)   -- the dig completes without the hidden tiles
+  H.runs(W, 1); H.settle(W); W.frame(1); H.settle(W)
+  H.build(W)                                       -- the two levers stand
+  H.runs(W, 3); H.settle(W); W.frame(1); H.settle(W)
+  H.build(W)
+  H.runs(W, 2)
+end
+
+T.test('BUG-022: a build_lost stage names its missing pieces and runs again from its dig stage once the skipped ' ..
+       'tiles are revealed; PROJECT_BLOCKED once', function()
+  local W = fresh{tag = 'blretry'}
+  to_build_lost(W)
+  local P = H.proj(W, 'y364s2b0')
+  T.eq({P.stage, P.blocked}, {1, 'build_lost'})
+  T.ok(logged(W, 'warn', '^y364s2b0 s2.dig: 4 hidden tiles never reached'))
+  -- the hidden tiles the dig stage completed without are kept per chunk (revealed ones are never kept)
+  local sk = W.K.persist.get('m.runner').skip.y364s2b0
+  T.eq({sk.si, sk.n, sk.c['1']}, {0, 7, {{10, 12, 100}, {11, 12, 100}, {12, 12, 100}, {11, 11, 100}, {12, 11, 100},
+                                          {13, 11, 100}, {14, 11, 100}}})
+  H.runs(W, 4)                                     -- blocked > 2 days
+  local pb = W.find_events('PROJECT_BLOCKED')
+  T.eq(#pb, 1)
+  T.eq({pb[1].d.why, pb[1].d.stage, pb[1].d.missing, pb[1].d.retry}, {'build_lost', 's2.build', {'B1', 'trap'}, 0})
+  T.ok(pb[1].msg:find('blocked: build_lost at s2.build, missing B1, trap; retry 1/8 once the skipped tiles are ' ..
+       'revealed, at the latest next season', 1, true), pb[1].msg)
+  local nqf = #W.qf
+  H.runs(W, 20)                                    -- nothing changed: no retry, no repeat
+  T.eq({H.proj(W, 'y364s2b0').blocked, #W.qf, #W.find_events('PROJECT_BLOCKED')}, {'build_lost', nqf, 1})
+  -- years later the gatehouse is reached: the tiles are revealed (still rock)
+  for _, t in ipairs(HID) do W.tile(t[1], t[2], 100).hidden = nil end
+  H.runs(W, 3)
+  P = H.proj(W, 'y364s2b0')
+  T.eq({P.stage, P.blocked}, {0, ''}, 'back at s2.dig')
+  T.ok(logged(W, 'info', '^y364s2b0: build_lost at s2.build, retry 1/8 from s2.dig %(7 more tiles revealed or open%)'))
+  T.eq(W.tile(13, 11, 100).dig, 'd', 'the revealed tiles are designated now')
+  H.dig(W)
+  H.runs(W, 2); H.settle(W); W.frame(1); H.settle(W)
+  H.runs(W, 1); H.settle(W)
+  H.build(W)
+  H.runs(W, 3)
+  P = H.proj(W, 'y364s2b0')
+  T.eq(P.done, 1, 'B1 and the trap stand: the project finished')
+  T.eq(#W.find_events('PROJECT_BLOCKED'), 1)
+  T.eq(W.K.persist.get('m.runner').rty.y364s2b0, nil, 'the records go with the project')
+  dfhack.buildings = nil
+end)
+
+T.test('BUG-022: without news a build_lost stage is retried each retry_every, retry_max times; then one final ' ..
+       'PROJECT_BLOCKED (cadence)', function()
+  local W = fresh{tag = 'blbudget'}
+  runner.CFG.retry_every, runner.CFG.retry_max = 12 * 600, 2
+  to_build_lost(W)
+  H.runs(W, 4)
+  T.eq(#W.find_events('PROJECT_BLOCKED'), 1)
+  local retries = function()
+    local n = 0
+    for _, l in ipairs(W.logs) do if l.msg:find('^y364s2b0: build_lost at s2.build, retry') then n = n + 1 end end
+    return n
+  end
+  for _ = 1, 4 do
+    H.runs(W, 14)
+    dig_reachable(W)
+    H.runs(W, runner.CFG.hidden_wait // 600 + 2); H.settle(W); W.frame(1); H.settle(W)
+    H.build(W)
+    H.runs(W, 3); H.settle(W); W.frame(1); H.settle(W)
+    W.ms = W.ms + 600000                            -- ten wall minutes: only the cadence's news gate is left
+  end
+  T.eq(retries(), 2, 'retry_max')
+  T.ok(logged(W, 'info', 'retry 2/2 from s2.dig %(a season passed%)'))
+  H.runs(W, 20)
+  local pb = W.find_events('PROJECT_BLOCKED')
+  T.eq(H.proj(W, 'y364s2b0').blocked, 'build_lost')
+  T.eq(#pb, 2, 'the first block and the spent budget, nothing in between')
+  T.ok(pb[2].msg:find('; 2 retries spent: bp.cancel and place it again', 1, true), pb[2].msg)
+  T.eq(pb[2].d.retry, 2)
+  dfhack.buildings = nil
+end)
+
+T.test('BUG-022: a stall that clears and comes back at the same stage is announced once (cadence)', function()
+  local W = fresh{tag = 'stallcad'}
+  local week = runner.CFG.stall // 600
+  H.place(W, 'c1', H.dig_doc(2))
+  H.runs(W, week + 2)
+  H.runs(W, 5)
+  T.eq(#W.find_events('PROJECT_BLOCKED'), 1)
+  for _ = 1, 3 do                                   -- dig a little, stall again, blocked > 2 days again
+    H.dig(W, 1)
+    H.runs(W, 1)
+    T.eq(H.proj(W, 'c1').blocked, '')
+    H.runs(W, week + 7)
+    W.ms = W.ms + 600000
+    T.eq(H.proj(W, 'c1').blocked, 'stalled')
+  end
+  T.eq(#W.find_events('PROJECT_BLOCKED'), 1, 'old code: one per episode, every stall again')
+end)
+
 T.test('build: a stage placed again over its own buildings tracks them instead of build_lost (live L2)', function()
   local W = fresh{tag = 'replace'}
   H.floor(W, 10, 10, 100, 20, 10)
