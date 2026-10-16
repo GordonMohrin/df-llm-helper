@@ -1,5 +1,26 @@
 # CHANGELOG dfpilot
 
+## The trade depot after a siege: DEPOT_MISSING says what is done and its material (2026-10-16; offline, live-untested)
+- **Why (Run 11, siege 3, pop 54 -> 29):** the siege destroyed the trade depot; the Muboomon caravan came (NO_DEPOT,
+  DEPOT_MISSING). The keeper (`runner.depot_keep`, FR-43) queues only in PEACE/RECOVERY, and in any other mode the old
+  line read `no known depot site` although fortcore's manifest names the depot; nothing named the depot's material
+  while the fort had 1 boulder.
+- **What it does now:** the runner's keeper (unchanged) queues the 5x5 depot at manifest.depot every run in RECOVERY
+  and PEACE once none stands (test: BREACH refused, RECOVERY queued). DEPOT_MISSING names what is done: `project depot2
+  queued`, `the kernel queues one in PEACE or RECOVERY (now BREACH)`, `no known depot site (no fortcore depot): place
+  one by hand`, and the depot's material from `economy.mat_for('depot', 3)` (`building material: logs`, `no material
+  for depot: no rock, no blocks, no logs`; d `mat`). The planned depot waits for building material like a wall:
+  economy switches buildingplan's logs/boulders/blocks on when that is all the fort has; MATERIAL_SHORT names `depot`
+  (also `workshop`, `building`; constructions stay `wall`).
+- Contracts: DEPOT_MISSING `mat` (schema, appendix, CONTRACTS row); `economy.mat_for` kinds `depot`/`workshop`; RULES §7
+  DEPOT_MISSING.
+- Tests: `tests/lua/test_trade_ledger.lua` (the line in BREACH, RECOVERY and without a site; the keeper after a siege),
+  `tests/lua/test_economy_pieces.lua` (a planned depot without material, logs switched on).
+- **How to use / live check:** after the next siege, in RECOVERY `dfllm status` lists a `depotN` project and kern.log
+  `trade depot missing (keeper): project depotN at x,y,z`; a caravan meanwhile gives DEPOT_MISSING with `project depotN
+  queued; building material: ...`. If the line says `no material for depot`, tell the player (logs or stone). Keep O1
+  down for the builders in PEACE.
+
 ## Seal pieces and furniture in the material the fort has, stone and picks as goals (2026-10-16; offline, live-untested)
 - **Why (Run 11, Kilrudrabed site98 y432, BREACH, pop 54):** REFUGE_FAIL for Kern+ and Tiefe+ `open to 1 entrance
   128,121,143 floor beside door 127,121,143`; `seal at=last` stayed `build_lost (missing d)` while ConstructDoor was

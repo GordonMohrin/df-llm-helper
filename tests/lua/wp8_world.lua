@@ -76,7 +76,7 @@ function F.install(W)
   df.mood_type = mt
   df.civzone_type = enum_from({'Home', 'Tomb', 'Pond', 'Dump'}, 0)
   df.building_type = enum_from({'Chair', 'Bed', 'Table', 'Coffin', 'FarmPlot', 'Furnace', 'TradeDepot', 'Shop',
-                                'Door', 'Floodgate', 'Box', 'Weaponrack', 'Armorstand', 'Workshop'}, 0)
+                                'Door', 'Floodgate', 'Box', 'Weaponrack', 'Armorstand', 'Workshop', 'Construction'}, 0)
   df.abstract_building_type = enum_from({'MEAD_HALL', 'KEEP', 'TEMPLE', 'DARK_TOWER', 'MARKET', 'TOMB',
                                          'DUNGEON', 'UNDERWORLD_SPIRE', 'INN_TAVERN', 'LIBRARY',
                                          'COUNTING_HOUSE', 'GUILDHALL', 'TOWER', 'HOSPITAL'}, 0)

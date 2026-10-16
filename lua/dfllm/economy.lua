@@ -3604,7 +3604,7 @@ end
 
 -- what buildingplan builds a wall of now: via (the setting: blocks, boulders, logs, bars), nil + the setting to
 -- switch on (only that material is there), or nil, why
-function M.bm_route(r, s)
+function M.bm_route(r, s, kind)
   local inv = r.inv
   for _, e in ipairs(M.BM) do
     if s[e[1]] and (inv[e[2]] or 0) > 0 then return e[1] end
@@ -3614,7 +3614,15 @@ function M.bm_route(r, s)
       if e[1] == k and (inv[e[2]] or 0) > 0 then return nil, nil, k end
     end
   end
-  return nil, 'no material for wall: no rock, no blocks, no logs'
+  return nil, 'no material for ' .. (kind or 'wall') .. ': no rock, no blocks, no logs'
+end
+
+-- what a building waiting for building material is called in MATERIAL_SHORT: a wall (construction), the trade depot
+-- (Run 11: destroyed in siege 3), a workshop, else a building
+M.BM_KIND = {Construction = 'wall', TradeDepot = 'depot', Workshop = 'workshop', Furnace = 'workshop'}
+function M.bm_kind(q)
+  local j = (q.jobs or {})[1]
+  return j and M.BM_KIND[j.kind or ''] or (j and 'building') or 'wall'
 end
 
 -- economy.mat_for(kind, n) (CONTRACTS §7): can the fort make n of a seal piece now? kind = door, hatch, grate, wall
@@ -3624,8 +3632,8 @@ function M.mat_for(K, kind, n)
   n = math.max(1, math.tointeger(n) or 1)
   if not K.census.i then return 'unknown' end
   local c, r = M.conf(K), M.view_run(K)
-  if kind == 'wall' then
-    local via, why, set = M.bm_route(r, M.bp_settings())
+  if kind == 'wall' or kind == 'depot' or kind == 'workshop' then
+    local via, why, set = M.bm_route(r, M.bp_settings(), kind)
     if set then return 'setting', 'buildingplan ' .. set .. ' goes on' end
     return via, why
   end
@@ -3727,7 +3735,8 @@ function T.jmake(K, c, r)
   for _, q in ipairs(jb.mq or {}) do
     if q.label == 'building material' then
       s = s or M.bp_settings()
-      local via, why, set = M.bm_route(r, s)
+      local kind = M.bm_kind(q)
+      local via, why, set = M.bm_route(r, s, kind)
       st.bp_on = st.bp_on or {}
       if set and not st.bp_on[set] then
         st.bp_on[set] = true
@@ -3737,7 +3746,7 @@ function T.jmake(K, c, r)
                 q.n, set)
         end
       elseif not via and not set then
-        short[#short + 1] = {kind = 'wall', n = q.n, why = why}
+        short[#short + 1] = {kind = kind, n = q.n, why = why}
         walls = walls + q.n
       end
     else

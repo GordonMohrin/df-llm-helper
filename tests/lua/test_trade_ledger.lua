@@ -249,6 +249,32 @@ T.test('FR-43: a caravan without a built depot raises DEPOT_MISSING (A) once and
   T.eq(#W.find_events('DEPOT_MISSING'), 1, 'once per visit')
 end)
 
+T.test('Run 11 (siege 3 destroyed the depot): DEPOT_MISSING names what the kernel does and the depot\'s material', function()
+  local function run(mode, keep, via, why)
+    local W = F.world{mode = mode}
+    F.caravan(W, {state = 'Approaching', tr = 1500, goods = std_goods(W)})
+    W.load({name = 'runner', every = {ticks = 600}, depot_keep = function(K) return keep[1], keep[2] end})
+    W.load({name = 'economy', every = {ticks = 1200}, mat_for = function(K, kind, n)
+      T.eq({kind, n}, {'depot', 3})
+      return via, why
+    end})
+    W.load(fresh('trade'))
+    W.run(300, {skip = 9})
+    local ev = W.find_events('DEPOT_MISSING')
+    T.eq(#ev, 1)
+    return ev[1]
+  end
+  local e = run('BREACH', {false, 'not in BREACH'}, nil, 'no material for depot: no rock, no blocks, no logs')
+  T.ok(e.msg:find(': the kernel queues one in PEACE or RECOVERY (now BREACH); no material for depot: no rock, no ' ..
+                  'blocks, no logs', 1, true), 'old code: "no known depot site": ' .. e.msg)
+  T.eq({e.d.proj, e.d.mat}, {'', 'no material for depot: no rock, no blocks, no logs'})
+  e = run('RECOVERY', {true, 'depot2'}, 'logs')
+  T.ok(e.msg:find(': project depot2 queued; building material: logs', 1, true), e.msg)
+  e = run('PEACE', {false, 'no known depot site'}, 'unknown')
+  T.ok(e.msg:find(': no known depot site (no fortcore depot): place one by hand', 1, true), e.msg)
+  T.eq(e.d.mat, nil, 'before the first census nothing is said about the material')
+end)
+
 T.test('BUG-005: DEPOT_MISSING says "being built" only while the planned depot progresses, else why not', function()
   local function planned(W, stage, susp, worker)
     local job = {flags = {suspend = susp}, _worker = worker}
@@ -285,6 +311,18 @@ end)
 ---------------------------------------------------------------- the runner's depot keeper
 local H = require('runner_world')
 local runner = require('dfllm.runner')
+
+T.test('Run 11: after a siege the runner queues the destroyed depot in RECOVERY, never in BREACH', function()
+  local W = H.world{tag = 'depotrec', mode = 'BREACH', persist = {manifest = {v = 2, depot = {60, 40, 100}}}}
+  df.global.world.buildings.other.TRADE_DEPOT = kmock.vec{}
+  W.load(runner)
+  W.run(700, {skip = 9})
+  T.eq(H.proj(W, 'depot1'), nil, 'builders stay inside in BREACH')
+  T.eq({select(2, W.K.call('runner', 'depot_keep', 'caravan'))}, {false, 'not in BREACH'})
+  W.K.set_mode('RECOVERY', 'test')
+  W.run(700, {skip = 9})
+  T.ok(H.proj(W, 'depot1'), 'queued in RECOVERY')
+end)
 
 T.test('FR-43: the runner queues a 5x5 depot at manifest.depot when none stands; one project at a time', function()
   local W = H.world{tag = 'depot', persist = {manifest = {v = 2, depot = {60, 40, 100}}}}

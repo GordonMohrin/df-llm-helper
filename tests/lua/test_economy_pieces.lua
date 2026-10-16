@@ -29,10 +29,12 @@ local function job_list(jobs)
   df.global.world.jobs = {list = head}
 end
 
--- a planned building (buildingplan) at x,50,109 waiting for `n` items of item type `itype` ('BM' = building material)
-local function planned(id, itype, n, x)
+-- a planned building (buildingplan) at x,50,109 waiting for `n` items of item type `itype` ('BM' = building material;
+-- a Construction then, or `btype`)
+local function planned(id, itype, n, x, btype)
+  local bt = btype or (itype == 'BM' and 'Construction' or 'Door')
   local b = {id = 500 + id, x1 = x or 20, y1 = 50, x2 = x or 20, y2 = 50, z = 109,
-             getType = function() return df.building_type.Door end, getBuildStage = function() return 0 end}
+             getType = function() return df.building_type[bt] end, getBuildStage = function() return 0 end}
   local ji = itype == 'BM' and {item_type = -1, mat_type = -1, mat_index = -1, quantity = n or 1,
                                 flags2 = {building_material = true}}
              or {item_type = df.item_type[itype], mat_type = -1, mat_index = -1, quantity = n or 1}
@@ -258,6 +260,17 @@ T.test('Run 11: walls wait for building material, only logs in the fort, buildin
   T.eq(#ev, 1)
   T.ok(ev[1].msg:find('no material for wall: no rock, no blocks, no logs', 1, true), ev[1].msg)
   T.eq(mat_for(W2, 'wall', 1), nil)
+  -- Run 11 siege 3: the trade depot rebuilt by the runner's keeper waits for its 3 building materials alike
+  local W3 = world{boulders = 0, logs = 0, jobs = function() return {planned(1, 'BM', 3, 60, 'TradeDepot')} end}
+  days(W3, 1)
+  ev = W3.find_events('MATERIAL_SHORT')
+  T.eq(#ev, 1)
+  T.ok(ev[1].msg:find('no material for depot: no rock, no blocks, no logs (depot x3 wait)', 1, true), ev[1].msg)
+  T.eq(why_for(W3, 'depot', 3), 'no material for depot: no rock, no blocks, no logs')
+  local W4 = world{boulders = 0, logs = 3, bp = {blocks = true, boulders = true, logs = false, bars = false},
+                   jobs = function() return {planned(1, 'BM', 3, 60, 'TradeDepot')} end}
+  days(W4, 1)
+  T.ok(F.has(F.runs(W4), 'buildingplan set logs true'))
 end)
 
 T.test('Run 11: a "Needs rock" cancel while no stone is free: the order goes to wood at once, or is removed without ' ..
