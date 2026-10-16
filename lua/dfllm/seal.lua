@@ -48,6 +48,9 @@
 --             it is missing (burrows screen); it is the last fallback when an opening reaches every other burrow, at
 --             least CFG.dead_gap steps from them. Nothing usable while an opening reaches the burrows: no confinement,
 --             the alert goes off even in a lockdown and the citizens flee on their own (REFUGE_FAIL says so)
+--   siege's supply rules (BUG-028): groups() (citizens, stock and hostile groups read in one go), sides(fp) (the groups
+--             around a bridge), split(list) (what raising bridges together would cut apart: a flood per side, sliced,
+--             urgent outside PEACE); SUPPLY_OUTSIDE (A) when most of the drink or food lies outside Kern+/the refuge
 -- Cost (FR-62): work runs in coroutines; a work unit is about one DF read (tile flags, walk group, tiletype, burrow
 -- test, the fields of one item). A token bucket refilled in real time caps the units per second (CFG.rate, or
 -- CFG.rate_urgent while an urgent job runs: a lever pull, a siege, a CUTOFF re-check, perimeter.record, the first
@@ -113,6 +116,12 @@ M.CFG = {
   -- dead_level tiles (the deepest one dead_max), no citizen and no bed, and links only to the level below and to one
   -- place above; dead_gap = the fewest steps from an opening it may be when it is used unseparated
   dead_level = 400, dead_max = 2000, dead_gap = 10,
+  -- BUG-028 (c): the flood that tells what a raise would cut apart: at most split_max tiles; its answer is used for
+  -- split_age ticks while no bridge, door or construction changed
+  split_max = 20000, split_age = 1200,
+  -- BUG-028 (d): SUPPLY_OUTSIDE when more than sup_out_pct % of a stock (>= sup_min units) lies outside Kern+ and the
+  -- refuge; the plan check wants sup_days days of drink and food inside
+  sup_out_pct = 50, sup_min = 20, sup_days = 90,
   interior = 'Innen+',        -- the whole-interior burrow, painted when Kern+ fails its audit
   paint_chunk = 400, interior_max = 20000, repaint = 7 * DAY,
   levers = 'Hebel+',          -- BUG-013: the lever tiles gate's pulls need inside the civ alert (lever_burrow)
@@ -468,7 +477,7 @@ end
 
 ---------------------------------------------------------------- scheduling
 -- priority among urgent jobs, then among background ones
-local ORDER = {'perim', 'seal', 'quick', 'audit', 'items', 'scan', 'paint', 'edges'}
+local ORDER = {'perim', 'seal', 'split', 'quick', 'audit', 'items', 'scan', 'paint', 'edges'}
 
 -- one pending run per job: the earliest tick and the strongest reason (an event beats 'periodic'/'retire', a
 -- post-siege diff beats everything), so no request is lost
@@ -982,6 +991,46 @@ local function class_tile(R, cls, has, main)
   return best, bg
 end
 
+-- BUG-028 (d) (Run 10 y419: 3093 drink units lay in front of O1, on the goblins' side, 737 (60 days) in the core):
+-- the drink and food inside the lockable core (Kern+ and the refuge) against the whole stock; the days inside scale
+-- economy's stock days (state stock.drink_d/food_d) by that share. SUPPLY_OUTSIDE (A) when the main part of a class
+-- (more than CFG.sup_out_pct) lies outside, once and again only with news (util/cadence, a game month and 30 min).
+-- The days go to the state (alert.core_d/core_f) for the plan check (>= CFG.sup_days inside).
+local function supply_check(K, R)
+  local kern, refuge = R.names.kern, R.names.refuge
+  local kb, rb = R.burrows[kern], R.burrows[refuge]
+  if not (kb and kb.exists) then mem.core = nil; return end
+  local v = K.view()
+  local stock = type(v) == 'table' and type(v.stock) == 'table' and v.stock or {}
+  local res, bad, toks = {}, {}, {}
+  for _, e in ipairs({{'drink', 'drink_d'}, {'food', 'food_d'}}) do
+    local cls, total = e[1], R.cls[e[1]].n
+    local inside = math.min(total, kb[cls] + ((rb and rb.exists and refuge ~= kern) and rb[cls] or 0))
+    local days = int(stock[e[2]])
+    local c = {total = total, inside = inside, pct = total > 0 and (100 * inside // total) or 100,
+               days = (days and total > 0) and math.min(9999, days * inside // total) or nil}
+    res[cls] = c
+    if total >= CFG.sup_min and 100 - c.pct > CFG.sup_out_pct then bad[#bad + 1] = cls; toks[#toks + 1] = cls end
+  end
+  mem.core = res
+  local now = K.now()
+  if #bad == 0 then
+    if st.sup_rec and st.sup_rec.ids and #st.sup_rec.ids > 0 then st.sup_rec, dirty = CAD.quiet(st.sup_rec), true end
+    return
+  end
+  if not CAD.due(st.sup_rec, now, bad, toks, {ticks = 28 * DAY, wall_s = 1800}) then return end
+  st.sup_rec, dirty = CAD.mark(now, bad, toks), true
+  local c = res[bad[1]]
+  local core = kern .. ((rb and rb.exists and refuge ~= kern) and ('/' .. refuge) or '')
+  local hint = string.format('keep >= %d days inside %s: %s', CFG.sup_days, core,
+                             bad[1] == 'drink' and 'a still and a barrel stockpile in the core'
+                             or 'a food stockpile (and the kitchen) in the core')
+  K.emit('SUPPLY_OUTSIDE', 'A', trunc(string.format('%s: %d of %d (%d%%) outside %s, %s days inside: %s', bad[1],
+         c.total - c.inside, c.total, 100 - c.pct, core, c.days and tostring(c.days) or '?', hint), 200),
+         {cls = bad[1], inside = c.inside, total = c.total, pct = c.pct, days = c.days, want = CFG.sup_days,
+          hint = trunc(hint, 120), also = #bad > 1 and bad[2] or nil})
+end
+
 local function commit_audit(K, R, cits)
   local t = now_t(K)
   local totals, by_cls = {}, {}
@@ -1051,6 +1100,7 @@ local function commit_audit(K, R, cits)
   mem.reach = R
   mem.fresh, mem.done_info = {}, {}
   mem.audit = {tick = t, burrows = R.burrows, names = R.names, cit = R.cit.n, need = R.need}
+  supply_check(K, R)
   -- FR-33: Kern+ fails its audit (counts, or BUG-018: an opening reaches it) -> keep the whole-interior burrow ready
   local kb = R.burrows[R.names.kern]
   local ib = R.burrows[CFG.interior]
@@ -2478,6 +2528,9 @@ local function publish(K)
   if r.flee then why = 'flee: ' .. why end
   mem.pub = {want = trunc(r.want, 24), burrow = trunc(r.pick or '', 24), tiles = a and a.tiles or 0,
              inside = a and a.inside or 0, ok = ok and 1 or 0, why = trunc(why, 40)}
+  local core = mem.core                         -- BUG-028 (d): drink and food days inside Kern+ and the refuge
+  if core and core.drink.days then mem.pub.core_d = core.drink.days end
+  if core and core.food.days then mem.pub.core_f = core.food.days end
 end
 
 -- public (CONTRACTS §7, siege): the burrow the civ alert confines to in `mode`; nil = no confinement. `hold`: a reflex
@@ -2780,6 +2833,322 @@ local function check_pending(K)
   return done
 end
 
+---------------------------------------------------------------- BUG-028: walk groups for siege's supply rules
+-- Run 10 y419 (48 goblins before O1): BREACH held all three bridges up for 23 days, 13 citizens between O1 and B1/B2
+-- had no drink (thirst up to 74090), at least 2 died dehydrated. siege asks seal (the walk-group reader) three things:
+-- the groups now (M.groups), the groups around a bridge (M.sides) and, before a raise, what the raise would cut apart
+-- (M.split). Revealed tiles only.
+
+-- public (BUG-028, siege): the walk groups now, read in one go (one frame, one numbering, BUG-021): the citizens on
+-- each group ({id, x, y, z}), the groups holding drink and food (one tile per group of the last audit's stock and its
+-- re-check tiles, read again), the groups visible hostiles stand on, and `stale` while the audit is older than the last
+-- change of a bridge, door or construction (then an urgent audit is queued; its per-group stock tiles come from the
+-- new numbering). nil before the first audit. Cached per tick.
+function M.groups(K)
+  local t = now_t(K)
+  local c = mem.grp_now
+  if c and c.t == t then return c.r end
+  local R = mem.reach
+  if not R then return nil end
+  local left = mem.left
+  mem.left = math.huge                      -- a synchronous read (siege asks): never yields
+  local cit = {}
+  for _, u in ipairs(citizens(K)) do
+    local e = cit[u.g]
+    if not e then e = {}; cit[u.g] = e end
+    e[#e + 1] = {u.id, u.x, u.y, u.z}
+  end
+  local has = {}
+  for _, cls in ipairs({'drink', 'food'}) do
+    local s = {}
+    for _, p in pairs(R.cls[cls].at) do
+      local g = grp(p[1], p[2], p[3])
+      if g and g ~= 0 then s[g] = true end
+    end
+    for _, p in ipairs(R.reps[cls] or {}) do
+      local g = grp(p[1], p[2], p[3])
+      if g and g ~= 0 then s[g] = true end
+    end
+    has[cls] = s
+  end
+  local hos = {}
+  local h = K.census.h
+  for _, e in ipairs(type(h) == 'table' and type(h.list) == 'table' and h.list or {}) do
+    if type(e) == 'table' and int(e.x) and int(e.y) and int(e.z) then
+      local g = grp(e.x, e.y, e.z)
+      if g and g ~= 0 then hos[g] = (hos[g] or 0) + 1 end
+    end
+  end
+  mem.left = left
+  local stale = (mem.fp_t or -1) > R.tick
+  if stale then due('audit', t, 'quick:groups') end
+  -- sealed: seal's last entrance check found no route from the map edge to a citizen and came after the last change
+  local sealed = mem.seal ~= nil and mem.seal.sealed == true and (mem.seal.tick or -1) >= (mem.fp_t or -1)
+  local r = {tick = t, audit = R.tick, stale = stale, sealed = sealed, cit = cit, drink = has.drink, food = has.food,
+             hostile = hos}
+  mem.grp_now = {t = t, r = r}
+  return r
+end
+
+-- the revealed walkable tiles around a footprint on its level (its ring), as keys
+local function ring_keys(fp)
+  local r = {}
+  for x = fp[1] - 1, fp[4] + 1 do
+    for y = fp[2] - 1, fp[5] + 1 do
+      if x < fp[1] or x > fp[4] or y < fp[2] or y > fp[5] then r[#r + 1] = key3(x, y, fp[3]) end
+    end
+  end
+  return r
+end
+
+-- public (BUG-028, siege): the walk groups of the revealed walkable tiles around a bridge footprint: one when nothing
+-- separates its sides (a lowered bridge), two or more while it is raised
+function M.sides(K, fp)
+  local s = {}
+  if type(fp) ~= 'table' or not int(fp[1]) then return s end
+  for _, k in ipairs(ring_keys(fp)) do
+    local g = grp(dec3(k))
+    if g and g ~= 0 then s[g] = true end
+  end
+  return s
+end
+
+-- BUG-028 (c): what raising the bridges of one request would cut apart, before they rise. The footprints are blocked
+-- and a flood starts from each side of each footprint (its ring tiles, joined where they touch), one flood per side,
+-- round-robin, over revealed walkable tiles of the side's walk group; floods that meet are one part. The outward side
+-- of an outer bridge (the one with more open-sky ring tiles) is the outside and is never flooded: a part that reaches
+-- it is the outside too and stops. A part whose floods ran out is small (between two gates); the flood ends once at
+-- most one part still grows and is clearly the biggest (the rest of the fort), or after CFG.split_max tiles (unknown).
+-- The stock per part comes from the item census tiles. The cost is the small parts, never the whole fort.
+local function split_pass(K, req)
+  local t0 = now_t(K)
+  local blocked = {}
+  for _, b in ipairs(req.list) do
+    local fp = b.fp
+    for x = fp[1], fp[4] do for y = fp[2], fp[5] do blocked[key3(x, y, fp[3])] = true end end
+  end
+  -- the sides: the walkable ring tiles of each footprint, joined where they touch (Chebyshev 1, same group)
+  local sides = {}
+  for _, b in ipairs(req.list) do
+    local tiles = {}
+    for _, k in ipairs(ring_keys(b.fp)) do
+      if not blocked[k] then
+        local x, y, z = dec3(k)
+        local des = rev(x, y, z)
+        local g = des and grp(x, y, z)
+        if g and g ~= 0 then tiles[#tiles + 1] = {k = k, x = x, y = y, g = g, out = des.outside == true} end
+      end
+      spend(3)
+    end
+    local up = {}
+    for i = 1, #tiles do up[i] = i end
+    local function f(i) while up[i] ~= i do up[i] = up[up[i]]; i = up[i] end; return i end
+    for i = 1, #tiles do
+      for j = i + 1, #tiles do
+        local a, o = tiles[i], tiles[j]
+        if a.g == o.g and math.abs(o.x - a.x) <= 1 and math.abs(o.y - a.y) <= 1 then up[f(j)] = f(i) end
+      end
+    end
+    local by = {}
+    for i, a in ipairs(tiles) do
+      local r = f(i)
+      local s = by[r]
+      if not s then
+        s = {tiles = {}, nout = 0, g = a.g, bridge = b.name}
+        by[r], sides[#sides + 1] = s, s
+      end
+      s.tiles[#s.tiles + 1] = a.k
+      if a.out then s.nout = s.nout + 1 end
+    end
+    -- the outward side of an outer bridge: the one with the most open-sky ring tiles (never flooded: the outside)
+    if b.role == 'outer' then
+      local best
+      for _, s in pairs(by) do if s.nout > 0 and (not best or s.nout > best.nout) then best = s end end
+      if best then best.outward = true end
+    end
+  end
+  -- one flood per side; label 0 = the outside (stays a root)
+  local par, lab, gof, queue, active = {[0] = 0}, {}, {}, {}, {}
+  local function find(i) while par[i] ~= i do par[i] = par[par[i]]; i = par[i] end; return i end
+  local function union(a, b)
+    local ra, rb = find(a), find(b)
+    if ra == rb then return end
+    if rb == 0 then ra, rb = rb, ra end
+    par[rb] = ra
+  end
+  for _, s in ipairs(sides) do
+    local id = 0
+    if not s.outward then
+      id = #active + 1
+      par[id], queue[id], active[id] = id, {h = 1}, id
+    end
+    s.id = id
+    for _, k in ipairs(s.tiles) do
+      if lab[k] == nil then
+        lab[k], gof[k] = id, s.g
+        if id ~= 0 then queue[id][#queue[id] + 1] = k end
+      elseif lab[k] ~= id then union(lab[k], id) end
+    end
+  end
+  local nb, rtop, n, partial = {}, {}, 0, false
+  while true do
+    local live, nlive, size, done_max = {}, 0, {}, 0
+    for id = 1, #active do
+      local q = queue[id]
+      if find(id) == 0 then q.h = #q + 1 end              -- joined the outside: nothing more to learn there
+      local r = find(id)
+      size[r] = (size[r] or 0) + #q
+      if q.h <= #q and not live[r] then live[r], nlive = true, nlive + 1 end
+    end
+    for r, n0 in pairs(size) do if not live[r] and r ~= 0 then done_max = math.max(done_max, n0) end end
+    -- the last part still growing is the rest of the fort once it is clearly the biggest (or it ran out too)
+    local big = true
+    for r in pairs(live) do if size[r] < math.max(64, 2 * done_max) then big = false end end
+    if nlive == 0 or (nlive == 1 and big) then break end
+    if n >= CFG.split_max then partial = true; break end
+    for id = 1, #active do
+      local q, c = queue[id], 0
+      while q.h <= #q and c < 32 do
+        local k = q[q.h]
+        q.h, c, n = q.h + 1, c + 1, n + 1
+        local g = gof[k]
+        local x, y, z = dec3(k)
+        local m = steps(x, y, z, nb)
+        for i = 1, m do
+          local nk = nb[i]
+          local l = lab[nk]
+          if l == nil and not blocked[nk] then
+            local gg = grp(dec3(nk))
+            if (gg == nil or gg == 0) and i <= 8 then         -- down a ramp: the open top of a ramp one level down
+              if rtop[nk] == nil then rtop[nk] = ramp_top(nk) end
+              if rtop[nk] then
+                nk = nk - 16777216
+                l = lab[nk]
+                gg = l == nil and grp(dec3(nk)) or nil
+              end
+            end
+            if l == nil and gg == g and not blocked[nk] then lab[nk], gof[nk] = id, g; q[#q + 1] = nk end
+          end
+          if l ~= nil and l ~= id then union(l, id) end
+        end
+        spend(12)
+      end
+    end
+  end
+  -- the parts, one per root (parts[1] = the outside); a part still growing is the rest of the fort
+  local parts, pid_of = {}, {}
+  local function part(root)
+    local p = pid_of[root]
+    if not p then
+      p = {id = #parts + 1, outside = root == 0, small = false, drink = 0, food = 0, bridges = {}}
+      parts[#parts + 1], pid_of[root] = p, p
+    end
+    return p
+  end
+  part(0)
+  local rest
+  for id = 1, #active do
+    local p = part(find(id))
+    if not p.outside then
+      local q = queue[id]
+      if q.h <= #q then p.rest = true end
+    end
+  end
+  for _, p in ipairs(parts) do
+    if not p.outside then
+      if p.rest then rest = p else p.small = true end
+    end
+  end
+  local edges = {}
+  for _, s in ipairs(sides) do
+    local p = part(find(s.id))
+    p.bridges[s.bridge] = true
+    local e = edges[s.bridge] or {}
+    e[p.id], edges[s.bridge] = true, e
+  end
+  local tiles = {}
+  for k, l in pairs(lab) do tiles[k] = part(find(l)).id end
+  -- the stock per part: census tiles on a side's group (a flooded tile's part, else open sky = the outside, else the
+  -- rest of the fort)
+  local G = {}
+  for _, s in ipairs(sides) do G[s.g] = true end
+  local I = mem.items
+  for _, k in ipairs(I and I.keys or {}) do
+    local c = I.at[k]
+    local x, y, z = dec3(k)
+    local des = rev(x, y, z)
+    local g = des and grp(x, y, z)
+    if g and G[g] then
+      local pid = tiles[k]
+      local p = pid and parts[pid] or (des.outside and parts[1]) or rest
+      if p then p.drink, p.food = p.drink + c[1], p.food + c[2] end
+    end
+    spend(3)
+  end
+  return {t = t0, sig = req.sig, partial = partial, n = n, parts = parts, tiles = tiles, rest = rest and rest.id,
+          edges = edges, G = G, fp = mem.fp}
+end
+
+local function job_split(K)
+  for _, sig in ipairs(sorted_keys(mem.split_q or {})) do
+    local req = mem.split_q[sig]
+    mem.split[sig] = split_pass(K, req)
+    mem.split_q[sig] = nil
+    mem.stats.split = (mem.stats.split or 0) + 1
+  end
+end
+
+-- public (BUG-028 c, siege): what raising `list` ({{name, fp, role}}, the bridges about to be raised together) would
+-- cut apart, for the citizens where they stand now (soldiers excluded): nil and 'pending' (an urgent split is queued;
+-- ask again) or 'unknown' (no item census yet, the flood hit its limit), else {parts = {{id, n, ids, drink, food,
+-- small, outside, rest, bridges = {name = true}}}, edges = {name = {part id = true}}, cut = {part ids with citizens
+-- and no drink or no food}}. A result is used while no bridge, door or construction changed (the watcher's
+-- fingerprint) and for at most CFG.split_age ticks.
+function M.split(K, list)
+  local names = {}
+  for _, b in ipairs(type(list) == 'table' and list or {}) do
+    if type(b) == 'table' and type(b.name) == 'string' and type(b.fp) == 'table' and #b.fp == 6 then
+      names[#names + 1] = b.name
+    end
+  end
+  if #names == 0 then return nil, 'no bridge' end
+  table.sort(names)
+  local sig = table.concat(names, '+')
+  local t = now_t(K)
+  local r = mem.split[sig]
+  if not r or r.fp ~= mem.fp or t - r.t > CFG.split_age or t < r.t then
+    if not mem.items then return nil, 'unknown' end
+    mem.split_q[sig] = mem.split_q[sig] or {sig = sig, list = list}
+    due('split', t, 'split')
+    return nil, 'pending'
+  end
+  if r.partial then return nil, 'unknown' end
+  local sold = {}
+  local cu = K.census.u
+  for _, id in ipairs(type(cu) == 'table' and type(cu.soldier_ids) == 'table' and cu.soldier_ids or {}) do
+    sold[id] = true
+  end
+  local parts = {}
+  for i, p in ipairs(r.parts) do
+    parts[i] = {id = p.id, n = 0, ids = {}, drink = p.drink, food = p.food, small = p.small, outside = p.outside,
+                rest = p.rest, bridges = p.bridges}
+  end
+  for _, c in ipairs(citizens(K)) do
+    if not sold[c.id] and r.G[c.g] then
+      local k = key3(c.x, c.y, c.z)
+      local pid = r.tiles[k]
+      local des = not pid and rev(c.x, c.y, c.z)
+      local p = pid and parts[pid] or (des and des.outside and parts[1]) or (r.rest and parts[r.rest])
+      if p then p.n = p.n + 1; p.ids[#p.ids + 1] = c.id end
+    end
+  end
+  local cut = {}
+  for _, p in ipairs(parts) do
+    if p.n > 0 and (p.drink == 0 or p.food == 0) then cut[#cut + 1] = p.id end
+  end
+  return {parts = parts, edges = r.edges, cut = cut, t = r.t}
+end
+
 ---------------------------------------------------------------- watcher
 local function fingerprint()
   local parts = {}
@@ -2811,6 +3180,7 @@ local function watch(K, t)
   if fp ~= mem.fp then
     local first = mem.fp == nil
     mem.fp = fp
+    if not first then mem.fp_t = t end          -- BUG-028: a bridge moved: group reads older than this are stale
     local done = check_pending(K)
     if not first then
       if t - (mem.quick_t or -CFG.quick_min) >= CFG.quick_min or done > 0 then
@@ -2842,6 +3212,7 @@ local JOBS = {
   edges = function(K) job_edges(K) end,
   scan = function(K, d) job_scan(K, d.arg == true, d.why) end,
   paint = function(K, d) job_paint(K, d.why) end,
+  split = function(K) job_split(K) end,
 }
 
 local function schedule_periodic(K, t)
@@ -2866,6 +3237,7 @@ end
 local URGENT_SEAL = {lever = true, siege = true, record = true, inspect = true, lockdown = true}
 local function urgent(K, name, d)
   if name == 'quick' then return true end
+  if name == 'split' then return K.mode() ~= 'PEACE' or held(K) end     -- BUG-028: siege waits for it to raise
   if (name == 'edges' and not mem.edges) or (name == 'audit' and not mem.reach) or (name == 'scan' and not mem.scan)
      or (name == 'seal' and not mem.seal) then return true end
   local why = d and d.why or ''
@@ -2957,7 +3329,8 @@ function M.init(K)
   local p = K.persist.get('m.seal')
   p = type(p) == 'table' and p or {}
   st = {v = 2, perim = {}, cut = {}, req = {}, open = {}, hostile = int(p.hostile), painted = int(p.painted),
-        flag_sig = type(p.flag_sig) == 'string' and p.flag_sig or nil, pep = int(p.pep), bsince = int(p.bsince)}
+        flag_sig = type(p.flag_sig) == 'string' and p.flag_sig or nil, pep = int(p.pep), bsince = int(p.bsince),
+        sup_rec = type(p.sup_rec) == 'table' and p.sup_rec or nil}
   if type(p.dead) == 'table' and int(p.dead.t) then
     local d = p.dead
     st.dead = {t = int(d.t), n = int(d.n) or 0, name = type(d.name) == 'string' and d.name or nil,
@@ -2979,7 +3352,7 @@ function M.init(K)
     end
   end
   mem = {tt = {}, due = {}, run = {}, pend = {}, npend = 0, fresh = {}, done_info = {}, left = 0, bsize = {},
-         stats = {}}
+         stats = {}, split = {}, split_q = {}}
   local e = p.edges
   if type(e) == 'table' and int(e.t) and type(e.k) == 'table' then
     local list = {}
@@ -3048,6 +3421,11 @@ M.on.MODE = function(K, ev)
     due('seal', t + CFG.lever_delay, 'siege')
   end
   if to == 'PEACE' and st.swap then st.swap, dirty = nil, true end
+  -- BUG-028 (b): siege leaves BREACH for SIEGE only once the fort is sealed again: the citizens may leave the refuge
+  if from == 'BREACH' and to == 'SIEGE' and st.swap then
+    st.swap, dirty = nil, true
+    K.log('info', 'seal: breach over (sealed): refuge released')
+  end
   if to == 'PEACE' and st.bsince and not held(K) then st.bsince, dirty = nil, true end   -- BUG-019: a new episode
   publish(K)
   save(K)
@@ -3332,6 +3710,7 @@ M.inspect.refuge = function(K, args)
          p.tiles, p.inside, au.cit, p.why ~= '' and (' (' .. p.why .. ')') or ''),
          {tick = au.tick, cit = au.cit, burrows = b, choice = choice, swap = st.swap,
           quiet = quiet(K) == math.huge and -1 or quiet(K), need = need, bsince = st.bsince, hint = hint,
+          supply = mem.core,                    -- BUG-028 (d): drink and food inside Kern+/the refuge vs the stock
           sep = sp and {tick = sp.tick, sealed = sp.sealed and 1 or 0, partial = sp.partial and 1 or 0, n = sp.n}
                 or nil,
           dead = (dead or st.dead) and {n = dead and dead.n, bottom = dead and dead.bottom, mouth = dead and dead.mouth,

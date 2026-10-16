@@ -9,6 +9,9 @@
 --     visible hostile is <= 10 tiles from that bridge (gate keeps the single-pending invariant).
 --   T0+900: an outer/inner bridge not up -> BREACH in-game (alert Tiefe+, B2 up, B2_HOLD); BUG-027: not while gate
 --     reports it waiting (units on its footprint, its pull under way) and no hostile is within NEAR_RAISE of it.
+--   BUG-028 (stranded citizens, see that section): a first raise that would cut citizens off from drink or food waits
+--     for a hostile at the gate; citizens thirsty or hungry behind raised gates get the inner/core bridges lowered once
+--     the outside is sealed (a rescue); BREACH falls back to SIEGE once the fort is sealed again.
 --   RECOVERY after 2,400 quiet ticks; on quiet time +1,200 B2 then B1 down and alert off,
 --     +2,400 O1 down, +8,400 PEACE and SIEGE_END (A). Any visible invader -> SIEGE again.
 -- Non-invader hostiles count only within reach of the fort (threat.lua), the same rule for entry,
@@ -128,7 +131,11 @@ local function go(K, to, why, a, bridge)
   if not K.set_mode(to, why) then return false end
   local vis = a and a.vis or 0
   if to == 'SIEGE' then
-    K.emit('SIEGE_START', 'A', string.format('siege (%s): %d visible, %d invaders', why, vis, a and a.inv or 0),
+    -- BUG-028 (b): back from BREACH once the fort is sealed again
+    local txt = from == 'BREACH'
+                and 'siege again (%s): breach over, every gate up, no hostile inside; %d visible, %d invaders'
+                or 'siege (%s): %d visible, %d invaders'
+    K.emit('SIEGE_START', 'A', string.format(txt, why, vis, a and a.inv or 0),
            {vis = vis, inv = a and a.inv or 0, great = a and a.great or 0, why = why})
     wealth(K, 'siege')
   elseif to == 'ALERT' then
@@ -159,6 +166,365 @@ local function quiet_for(a, now, n)
   return false
 end
 
+---------------------------------------------------------------- stranded citizens (BUG-028)
+-- Run 10 y419 (48 goblins in front of O1 for 60+ days): BREACH wanted B1, B2 and O1 up every pass and ended only on
+-- 2,400 quiet ticks; 13 citizens and soldiers between O1 and B2 had no drink for 23+ days (thirst up to 74,090), at
+-- least 2 died dehydrated while 3,093 drink units lay outside O1 and 737 in the core. Three rules, from seal's walk
+-- groups (revealed tiles) and the units' own thirst and hunger counters (read only):
+--   (a) rescue: citizens (soldiers too) over STRAND_THIRST / STRAND_HUNGER on a walk group without drink / food, cut
+--       off by our raised bridges: once the outside is sealed (every outer bridge up, seal's entrance check after the
+--       last bridge move: no route) and no hostile is inside or on the groups to be joined, the inner and core bridges
+--       on the shortest way to a group with the stock come down (never an outer one; gate's footprint rules hold),
+--       and go up again when every rescued citizen drank or ate, stands in the civ alert's burrow or is gone, after
+--       RESCUE_MAX ticks, or at once when a hostile comes near (abort). STRANDED (A) names group, citizens, thirst and
+--       bridges, and also a rescue that is not possible and why.
+--   (b) BREACH falls back to SIEGE once every outer and inner bridge is up, seal's entrance check after the last move
+--       says no route and no hostile is inside, for SEALED_HOLD ticks (seal releases the refuge then).
+--   (c) before raising: seal.split says which part of the fort each citizen (soldiers excluded: their stations lie
+--       there on purpose, (a) rescues them) would stand on; a raise that would leave citizens on a part without drink
+--       or food waits (no BREACH for it) until a hostile is within CUT_NEAR tiles of that bridge, then goes ahead and
+--       STRANDED (forced) says whom it cut off.
+M.STRAND_THIRST, M.STRAND_HUNGER = 30000, 30000
+M.RESCUE_EVERY, M.RESCUE_MAX = 100, 2400
+M.CUT_NEAR, M.SEALED_HOLD, M.SPLIT_WAIT = 30, 600, 300
+local CAD = require('dfllm.util.cadence')
+
+local function counter(u, k)
+  local ok, v = pcall(function() return u.counters2[k] end)
+  return ok and int(v) or 0
+end
+
+local function near_bridge(K, b)
+  local h = K.census.h
+  local d = type(h) == 'table' and type(h.near_bridge) == 'table' and h.near_bridge[b]
+  return int(d) or -1
+end
+
+-- STRANDED (A), once per news (new citizens or a new phase/bridge/reason); a standing condition (hold, refused) again
+-- not before a game day and 60 s, the steps of a rescue and a forced raise at once
+local function stranded(K, phase, txt, d, ids, toks)
+  local now = K.now()
+  local rec = st.str.rec
+  local o = (phase == 'hold' or phase == 'refused') and {ticks = 1200, wall_s = 60} or {ticks = 0, wall_s = 0}
+  if not CAD.due(rec, now, ids, toks, o) then return end
+  st.str.rec, dirty = CAD.mark(now, ids, toks), true
+  d.phase = phase
+  K.emit('STRANDED', 'A', txt:sub(1, 200), d)
+  K.log('warn', 'siege: %s', txt:sub(1, 200))
+end
+
+-- the fresh walk groups (seal.groups), or nil
+local function groups(K)
+  local ok, G = K.call('seal', 'groups')
+  if ok and type(G) == 'table' and not G.stale then return G end
+end
+
+local function outer_up(K, g)
+  if #g.outer == 0 then return false end
+  for _, b in ipairs(g.outer) do if gate_state(K, b) ~= 'up' then return false end end
+  return true
+end
+
+-- the shortest way over raised non-outer bridges from group `from` to a group with the needed stock: the bridges and
+-- the groups on it, or nil
+local function way(K, g, G, from, need)
+  local adj = {}
+  for _, b in ipairs(g.all) do
+    local spec = g.man.bridges[b]
+    if spec.role ~= 'outer' and gate_state(K, b) == 'up' then
+      local ok, sides = K.call('seal', 'sides', spec.fp)
+      local list = {}
+      for s in pairs(ok and type(sides) == 'table' and sides or {}) do list[#list + 1] = s end
+      table.sort(list)
+      for i = 1, #list do
+        for j = 1, #list do
+          if i ~= j then
+            local e = adj[list[i]] or {}
+            e[#e + 1] = {list[j], b}
+            adj[list[i]] = e
+          end
+        end
+      end
+    end
+  end
+  local prev, q, h = {[from] = false}, {from}, 1
+  while h <= #q do
+    local cur = q[h]
+    h = h + 1
+    if cur ~= from and (not need.drink or G.drink[cur]) and (not need.food or G.food[cur]) then
+      local bs, gs, c = {}, {cur}, cur
+      while prev[c] do
+        bs[#bs + 1] = prev[c][2]
+        c = prev[c][1]
+        gs[#gs + 1] = c
+      end
+      return bs, gs
+    end
+    for _, e in ipairs(adj[cur] or {}) do
+      if prev[e[1]] == nil then prev[e[1]] = {cur, e[2]}; q[#q + 1] = e[1] end
+    end
+  end
+end
+
+-- (a) the citizens over the thresholds on a group without what they need, the worst group first
+local function cut_off(K, G)
+  local cu = K.census.u
+  local by = {}
+  for gid, list in pairs(G.cit) do
+    for _, c in ipairs(list) do
+      local u = df.unit.find(c[1])
+      if u then
+        local th, hu = counter(u, 'thirst_timer'), counter(u, 'hunger_timer')
+        local nd = th > M.STRAND_THIRST and not G.drink[gid]
+        local nf = hu > M.STRAND_HUNGER and not G.food[gid]
+        if nd or nf then
+          local e = by[gid] or {g = gid, ids = {}, thirst = 0, hunger = 0, need = {}, pos = {c[2], c[3], c[4]}}
+          by[gid] = e
+          e.ids[#e.ids + 1] = c[1]
+          e.thirst, e.hunger = math.max(e.thirst, th), math.max(e.hunger, hu)
+          if nd then e.need.drink = true end
+          if nf then e.need.food = true end
+        end
+      end
+    end
+  end
+  local best
+  for _, e in pairs(by) do
+    table.sort(e.ids)
+    if not best or #e.ids > #best.ids or (#e.ids == #best.ids and e.g < best.g) then best = e end
+  end
+  return best
+end
+
+local function needs_txt(e)
+  return (e.need.drink and e.need.food) and 'drink and food' or (e.need.drink and 'drink' or 'food')
+end
+
+-- (a) the rescue: open one, watch one, close it
+local function rescue_step(K, a, g, now)
+  local str = st.str
+  if now - (mem.rs_t or -M.RESCUE_EVERY) < M.RESCUE_EVERY then return end
+  mem.rs_t = now
+  local r = str.rescue
+  if r then
+    local G = groups(K)
+    local why
+    if a and (a.inside or 0) > 0 then why = 'a hostile inside'
+    elseif not outer_up(K, g) then why = 'an outer bridge is not up'
+    elseif G and next(G.hostile) then
+      for gid in pairs(G.hostile) do if G.cit[gid] then why = 'a hostile on the citizens\' walk group' end end
+    end
+    if not why then
+      for _, b in ipairs(r.list) do
+        local d = near_bridge(K, b)
+        if d >= 0 and d <= M.CUT_NEAR then why = string.format('a hostile %d tiles from %s', d, b) end
+      end
+    end
+    local done, left = why == nil, 0
+    if not why then
+      for _, id in ipairs(r.ids) do
+        local u = df.unit.find(id)
+        local alive = u and not (u.flags2 and u.flags2.killed)
+        if alive then
+          local ok_d = not r.need.drink or counter(u, 'thirst_timer') <= M.STRAND_THIRST     -- drank
+          local ok_f = not r.need.food or counter(u, 'hunger_timer') <= M.STRAND_HUNGER      -- ate
+          local home = false
+          if mem.burrow and alert_idx() ~= 0 then
+            local ok, b = pcall(dfhack.burrows.findByName, mem.burrow)
+            local x, y, z = dfhack.units.getPosition(u)
+            if ok and b and x then
+              local ok2, v = pcall(dfhack.burrows.isAssignedTile, b, {x = x, y = y, z = z})
+              home = ok2 and v == true
+            end
+          end
+          if not ((ok_d and ok_f) or home) then left = left + 1 end
+        end
+      end
+      done = left == 0 or now - r.since >= M.RESCUE_MAX
+    end
+    if why or done then
+      str.rescue, dirty = nil, true
+      for _, b in ipairs(r.list) do want(K, b, 'up', 'rescue_end', now + M.BREACH_AT) end
+      local phase = why and 'abort' or 'done'
+      local txt = why and string.format('rescue aborted (%s): raising %s again', why, table.concat(r.list, ', '))
+                  or string.format('rescue over after %d ticks: %d of %d citizens through, raising %s again',
+                                   now - r.since, #r.ids - left, #r.ids, table.concat(r.list, ', '))
+      stranded(K, phase, txt, {grp = r.grp, n = #r.ids, units = r.ids, bridges = r.list, why = why or 'done',
+               left = left}, r.ids, {phase, table.concat(r.list, ',')})
+    end
+    return
+  end
+  -- a new one: only when somebody is over a threshold (the counters are cheap; seal's group reads are not)
+  local cu = K.census.u
+  local any = false
+  for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
+    local u = df.unit.find(id)
+    if u and (counter(u, 'thirst_timer') > M.STRAND_THIRST or counter(u, 'hunger_timer') > M.STRAND_HUNGER) then
+      any = true
+      break
+    end
+  end
+  if not any then return end
+  local G = groups(K)
+  if not G then return end
+  local e = cut_off(K, G)
+  if not e then return end
+  local base = string.format('%d citizens on walk group %d without %s (thirst %d, hunger %d)', #e.ids, e.g,
+                             needs_txt(e), e.thirst, e.hunger)
+  local d = {grp = e.g, n = #e.ids, units = e.ids, thirst = e.thirst, hunger = e.hunger, pos = e.pos,
+             need = needs_txt(e)}
+  local bs, gs = way(K, g, G, e.g, e.need)
+  local why
+  if not bs then why = 'no raised inner or core bridge leads to ' .. needs_txt(e)
+  elseif a and (a.inside or 0) > 0 then why = 'a hostile inside'
+  elseif not outer_up(K, g) then why = 'an outer bridge is not up'
+  elseif not G.sealed then
+    why = 'the outside is not verified sealed'
+    K.call('seal', 'entrance_doors', true)               -- a fresh check (urgent)
+  else
+    for _, gid in ipairs(gs) do
+      if G.hostile[gid] then why = string.format('a hostile on walk group %d', gid) end
+    end
+  end
+  if not why then
+    for _, b in ipairs(bs) do
+      local ok, ok2, msg = K.call('gate', 'want', b, 'down', 'rescue')
+      if not (ok and ok2) then why = string.format('%s: %s', b, tostring(msg)) end
+    end
+  end
+  if why then
+    for _, b in ipairs(bs or {}) do want(K, b, 'up', 'rescue_end', now + M.BREACH_AT) end
+    d.why, d.bridges = why, bs
+    stranded(K, 'refused', string.format('%s: no rescue (%s)', base, why), d, e.ids, {'refused', why})
+    return
+  end
+  str.rescue, dirty = {list = bs, grp = e.g, ids = e.ids, since = now, need = e.need}, true
+  d.bridges = bs
+  stranded(K, 'rescue', string.format('%s: lowering %s (outside sealed, outer gates up)', base, table.concat(bs, ', ')),
+           d, e.ids, {'rescue', table.concat(bs, ',')})
+end
+
+-- a bridge a rescue holds down
+local function rescuing(b)
+  local r = st.str.rescue
+  if not r then return false end
+  for _, x in ipairs(r.list) do if x == b then return true end end
+  return false
+end
+
+-- st.str.hold follows the held set of the bridges asked about (gate asks siege.held at a BREACH entry)
+local function sync_holds(list, held, now)
+  for _, b in ipairs(list) do
+    if held[b] and not st.str.hold[b] then st.str.hold[b], dirty = now, true
+    elseif not held[b] and st.str.hold[b] then st.str.hold[b], dirty = nil, true end
+  end
+  return held
+end
+
+-- (c) the bridges of `list` (names about to be wanted up, not up) whose raise would cut citizens off from all drink or
+-- food: a set of held names; a raise goes ahead with a hostile within CUT_NEAR tiles of the bridge (STRANDED forced)
+local function cut_holds(K, g, list, now)
+  local held = {}
+  local req = {}
+  for _, b in ipairs(list) do
+    local spec = g.man.bridges[b]
+    if spec and not rescuing(b) then req[#req + 1] = {name = b, fp = spec.fp, role = spec.role} end
+  end
+  if #req == 0 then return held end
+  local ok, sp, why = K.call('seal', 'split', req)
+  if not (ok and type(sp) == 'table') then
+    -- the answer is under way: hold for at most SPLIT_WAIT ticks (an unknown one never holds)
+    if ok and why == 'pending' then
+      mem.split_ask = mem.split_ask or now
+      if now - mem.split_ask < M.SPLIT_WAIT then
+        for _, b in ipairs(list) do held[b] = true end
+      end
+    end
+    return sync_holds(list, held, now)
+  end
+  mem.split_ask = nil
+  -- the way from each cut part to a part with drink and food, over the bridges of the request
+  local adj = {}
+  for b, ps in pairs(sp.edges or {}) do
+    local l = {}
+    for p in pairs(ps) do l[#l + 1] = p end
+    for i = 1, #l do
+      for j = 1, #l do
+        if i ~= j then
+          adj[l[i]] = adj[l[i]] or {}
+          table.insert(adj[l[i]], {l[j], b})
+        end
+      end
+    end
+  end
+  local forced = {}
+  for _, pid in ipairs(sp.cut or {}) do
+    local p = sp.parts[pid]
+    local prev, q, h, goal = {[pid] = false}, {pid}, 1, nil
+    while h <= #q and not goal do
+      local cur = q[h]
+      h = h + 1
+      local c = sp.parts[cur]
+      if cur ~= pid and c and c.drink > 0 and c.food > 0 then goal = cur end
+      for _, e in ipairs(adj[cur] or {}) do
+        if prev[e[1]] == nil then prev[e[1]] = {cur, e[2]}; q[#q + 1] = e[1] end
+      end
+    end
+    local c = goal
+    while c and prev[c] do
+      local b = prev[c][2]
+      local d = near_bridge(K, b)
+      if d >= 0 and d <= M.CUT_NEAR then forced[#forced + 1] = {b, d, p}
+      else held[b] = p end
+      c = prev[c][1]
+    end
+  end
+  local hs = {}
+  for b in pairs(held) do hs[#hs + 1] = b; held[b] = true end
+  table.sort(hs)
+  if #hs > 0 then
+    local ids, n = {}, 0
+    for _, pid in ipairs(sp.cut) do
+      for _, id in ipairs(sp.parts[pid].ids) do n = n + 1; ids[#ids + 1] = id end
+    end
+    stranded(K, 'hold', string.format('raising %s held: it would cut %d citizens off from drink or food; raised once a '
+             .. 'hostile is within %d tiles', table.concat(hs, ', '), n, M.CUT_NEAR),
+             {n = n, units = ids, bridges = hs, why = 'cut'}, ids, {'hold', table.concat(hs, ',')})
+  end
+  for _, f in ipairs(forced) do
+    stranded(K, 'forced', string.format('%s raised although it cuts %d citizens off from drink or food: a hostile %d '
+             .. 'tiles from it', f[1], f[3].n, f[2]), {n = f[3].n, units = f[3].ids, bridges = {f[1]}, why = 'hostile',
+             hostile = f[2]}, f[3].ids, {'forced', f[1]})
+  end
+  return sync_holds(list, held, now)
+end
+
+-- (b) BREACH is over once the fort is sealed again: every outer and inner bridge up (an inner one a rescue holds down
+-- excepted: the outer ones seal), seal's check after the last move says no route, no hostile inside or on a citizens'
+-- walk group, SEALED_HOLD ticks long
+local function breach_sealed(K, g, a, now)
+  local ok = a ~= nil and (a.inside or 0) == 0 and #g.outer > 0
+  if ok then
+    for _, list in ipairs({g.outer, g.inner}) do
+      for _, b in ipairs(list) do
+        if gate_state(K, b) ~= 'up' and not (list == g.inner and rescuing(b)) then ok = false end
+      end
+    end
+  end
+  local G = ok and groups(K)
+  if ok then
+    ok = G ~= nil and G.sealed == true
+    for gid in pairs(G and G.hostile or {}) do if G.cit[gid] then ok = false end end
+  end
+  if not ok then
+    if st.str.bs then st.str.bs, dirty = nil, true end
+    return false
+  end
+  st.str.bs = st.str.bs or now
+  dirty = true
+  return now - st.str.bs >= M.SEALED_HOLD
+end
+
 -- BUG-027 (Run 10: BREACH "O1 not up at T+900" while the pulls were under way, lever latency 11-19 s): a bridge gate
 -- reports waiting (units on its footprint, or its pull under way) is no failure while no hostile is within NEAR_RAISE
 local function failed_bridge(K, g)
@@ -169,7 +535,9 @@ local function failed_bridge(K, g)
       if gate_state(K, b) ~= 'up' then
         local d = nb[b]
         local okw, wait = K.call('gate', 'waiting', b)
-        if not (okw and wait and not (d and d >= 0 and d <= M.NEAR_RAISE)) then return b end
+        -- BUG-028: a raise held for citizens it would cut off (no hostile within CUT_NEAR), or a rescue's bridge
+        local held = (st.str.hold[b] and not (d and d >= 0 and d <= M.CUT_NEAR)) or rescuing(b)
+        if not held and not (okw and wait and not (d and d >= 0 and d <= M.NEAR_RAISE)) then return b end
       end
     end
   end
@@ -199,7 +567,8 @@ local function decide(K, a, g, now)
     if fb then go(K, 'BREACH', 'gate_fail', a, fb)
     elseif quiet_for(a, now, M.QUIET) then go(K, 'RECOVERY', 'quiet', a) end
   elseif mode == 'BREACH' then
-    if quiet_for(a, now, M.QUIET) then go(K, 'RECOVERY', 'quiet', a) end
+    if quiet_for(a, now, M.QUIET) then go(K, 'RECOVERY', 'quiet', a)
+    elseif breach_sealed(K, g, a, now) then go(K, 'SIEGE', 'sealed', a) end      -- BUG-028 (b)
   elseif mode == 'RECOVERY' then
     if a and a.inside > 0 then go(K, 'BREACH', 'inside', a)
     elseif a and (a.inv > 0 or a.siege) then go(K, 'SIEGE', 'reentry', a)   -- same reach rule as entry
@@ -385,6 +754,7 @@ local function raise(K, g, now)
   local cu, h = K.census.u, K.census.h
   local outside = type(cu) == 'table' and (cu.tick or -1) >= st.t0 and cu.outside or -1
   local nb = type(h) == 'table' and type(h.near_bridge) == 'table' and h.near_bridge or {}
+  local whys, fresh = {}, {}
   for _, list in ipairs({g.outer, g.inner}) do
     for _, b in ipairs(list) do
       local why = st.req[b]
@@ -393,8 +763,17 @@ local function raise(K, g, now)
         if outside == 0 then why = 'inside'
         elseif t >= M.RAISE_BY then why = 'timer'
         elseif d and d >= 0 and d <= M.NEAR_RAISE then why = 'hostile_near' end
+        if why and gate_state(K, b) ~= 'up' and not rescuing(b) then fresh[#fresh + 1] = b end
       end
-      if why and want(K, b, 'up', why, st.t0 + M.BREACH_AT) and not st.req[b] then
+      whys[b] = why
+    end
+  end
+  -- BUG-028 (c): a first raise that would cut citizens off from drink or food waits (until a hostile is near)
+  local held = #fresh > 0 and cut_holds(K, g, fresh, now) or {}
+  for _, list in ipairs({g.outer, g.inner}) do
+    for _, b in ipairs(list) do
+      local why = whys[b]
+      if why and not held[b] and not rescuing(b) and want(K, b, 'up', why, st.t0 + M.BREACH_AT) and not st.req[b] then
         st.req[b], dirty = why, true
       end
     end
@@ -490,7 +869,15 @@ local function apply(K, a, g, now)
   local mode = K.mode()
   if mode == 'SIEGE' or mode == 'DRILL' then raise(K, g, now)
   elseif mode == 'BREACH' then
-    for _, b in ipairs(g.all) do want(K, b, 'up', 'breach', st.tb + M.BREACH_AT) end
+    -- BUG-028: never over a rescue, and a raise that would cut citizens off from drink or food waits (c)
+    local fresh = {}
+    for _, b in ipairs(g.all) do
+      if not rescuing(b) and gate_state(K, b) ~= 'up' then fresh[#fresh + 1] = b end
+    end
+    local held = #fresh > 0 and cut_holds(K, g, fresh, now) or {}
+    for _, b in ipairs(g.all) do
+      if not held[b] and not rescuing(b) then want(K, b, 'up', 'breach', st.tb + M.BREACH_AT) end
+    end
   elseif mode == 'ALERT' then
     if a and a.near_o1 >= 0 and a.near_o1 <= M.ALERT_O1 then
       for _, b in ipairs(g.outer) do want(K, b, 'up', 'alert') end
@@ -587,6 +974,12 @@ function M.hold_alert(K)
   return 'pending ' .. tostring(burrow)
 end
 
+-- public (BUG-028, gate): siege holds bridge `b` down: a raise that would cut citizens off from drink or food (c), or
+-- a rescue's bridge (a); gate does not raise it on its own at a BREACH entry then
+function M.held(K, b)
+  return st ~= nil and st.str ~= nil and (st.str.hold[b] ~= nil or rescuing(b))
+end
+
 -- public (BUG-013, gate): the burrows the sounding civ alert holds the civilians in (the list siege set last); {} while
 -- it is silent. gate counts a pull whose levers all lie outside them as blocked
 function M.alert_names(K)
@@ -606,6 +999,21 @@ function M.init(K)
         rq = int(p.rq) or 0, rl = now, civ = p.civ == true, b1low = p.b1low == true, ls = int(p.ls)}
   for b, why in pairs(type(p.req) == 'table' and p.req or {}) do
     if type(b) == 'string' then st.req[b] = tostring(why) end
+  end
+  -- BUG-028: an open rescue survives a reload (the live session: after `dfllm reload` BREACH raised B1/B2 at once)
+  local ps = type(p.str) == 'table' and p.str or {}
+  st.str = {hold = {}, rec = type(ps.rec) == 'table' and ps.rec or nil}
+  local r = ps.rescue
+  if type(r) == 'table' and type(r.list) == 'table' and #r.list > 0 and int(r.since) then
+    local list, ids = {}, {}
+    for _, b in ipairs(r.list) do if type(b) == 'string' then list[#list + 1] = b end end
+    for _, id in ipairs(type(r.ids) == 'table' and r.ids or {}) do if int(id) then ids[#ids + 1] = int(id) end end
+    local need = type(r.need) == 'table' and r.need or {}
+    st.str.rescue = {list = list, ids = ids, grp = int(r.grp) or 0, since = int(r.since),
+                     need = {drink = need.drink == true, food = need.food == true}}
+  end
+  for b, t in pairs(type(ps.hold) == 'table' and ps.hold or {}) do
+    if type(b) == 'string' and int(t) then st.str.hold[b] = int(t) end
   end
   if type(p.ep) == 'table' then
     st.ep = {}
@@ -634,6 +1042,8 @@ function M.step(K, budget, ctx)
   local g = geometry(K)
   decide(K, a, g, now)
   track(K, g, now, dt)
+  local mode = K.mode()
+  if mode ~= 'DRILL' and (mode ~= 'RECOVERY' or st.str.rescue) then rescue_step(K, a, g, now) end   -- BUG-028 (a)
   apply(K, a, g, now)
   status(K, a, now)
   save(K)
@@ -645,6 +1055,7 @@ M.on = {
     st.qs, st.aq = nil, nil
     if to == 'SIEGE' or to == 'DRILL' then st.t0, st.req = now, {} end
     if to == 'BREACH' then st.tb = now end
+    st.str.bs = nil                              -- BUG-028 (b): the sealed clock starts again in every mode
     if to == 'RECOVERY' then st.rq, st.rl, st.b1low = 0, now, false end
     if to == 'ALERT' then st.civ, st.far, st.civ_at = false, nil, nil end
     if (to == 'SIEGE' or to == 'BREACH') and not st.ep then

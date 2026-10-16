@@ -919,10 +919,16 @@ local function holders(K, name, fp, sc, dir)
   return hold, nil
 end
 
-local function down_guard(K, name)
+local function down_guard(K, name, why)
   local m = K.mode()
-  if FAST_MODES[m] then return 'down refused in ' .. m end
-  if lock_why(K) then return 'down refused: lockdown' end
+  -- BUG-028: siege's rescue (citizens without drink or food behind our raised gates, the outside sealed) lowers an
+  -- inner or core manifest bridge in these modes and during a lockdown; the hostile guard below still holds
+  local br = st.br[name]
+  local spec = (K.manifest().bridges or {})[name]
+  local rescue = (why or (br and br.want == 'down' and br.why)) == 'rescue' and type(spec) == 'table'
+                 and spec.role ~= 'outer'
+  if FAST_MODES[m] and not rescue then return 'down refused in ' .. m end
+  if lock_why(K) and not rescue then return 'down refused: lockdown' end
   local h = K.census.h
   local d = type(h) == 'table' and type(h.near_bridge) == 'table' and h.near_bridge[name]
   if d == nil and rt[name] and rt[name].fp then d = list_dist(h, rt[name].fp) end
@@ -1364,7 +1370,9 @@ local function ensure_default(K, name, now)
   if m == 'PEACE' then
     local w, why = peace_want(K, name, type(spec) == 'table' and spec.role, now)
     set_want(name, w, why, nil, now)
-  elseif m == 'BREACH' then set_want(name, 'up', 'breach', nil, now) end
+  elseif m == 'BREACH' and select(2, K.call('siege', 'held', name)) ~= true then   -- BUG-028: unless siege holds it
+    set_want(name, 'up', 'breach', nil, now)
+  end
 end
 
 -- lockdown and PEACE gates for the manifest bridges (level-triggered): a lockdown wants outer/inner up in every
@@ -1374,7 +1382,8 @@ local function manifest_pass(K, man, now)
   for _, name in ipairs(bridge_names(man)) do
     local role, br = man.bridges[name].role, st.br[name]
     local w, why
-    if lock and GATE_ROLES[role] then w, why = 'up', 'lockdown'
+    if br and br.want == 'down' and br.why == 'rescue' then w = nil        -- BUG-028: siege's rescue, until it ends
+    elseif lock and GATE_ROLES[role] then w, why = 'up', 'lockdown'
     elseif mode == 'PEACE' and GATE_ROLES[role] and (peace_up(K) or (br and br.why == 'lockdown')) then
       w, why = peace_want(K, name, role, now)
     end
@@ -1587,7 +1596,7 @@ function M.want(K, bridge, want, why, deadline)
   local spec = type(man.bridges) == 'table' and man.bridges[bridge]
   if not valid_spec(spec) then return false, 'no bridge ' .. tostring(bridge) end
   if want == 'down' then
-    local g = down_guard(K, bridge)
+    local g = down_guard(K, bridge, why)
     if g then return false, g end
   end
   local now = K.now().tick
@@ -1824,6 +1833,9 @@ M.on = {
       if ev.to == 'PEACE' then
         local w, why = peace_want(K, name, man.bridges[name].role, now)
         set_want(name, w, why, nil, now)
+      elseif br and br.want == 'down' and br.why == 'rescue' then   -- BUG-028: siege's rescue holds across modes
+      elseif ev.to == 'BREACH' and select(2, K.call('siege', 'held', name)) == true then
+        st.br[name], dirty = nil, true         -- BUG-028: siege holds it (citizens it would cut off); siege wants it
       elseif ev.to == 'BREACH' then
         if br and br.want == 'up' and br.since < now then
           br.since, br.deadline, br.failed, dirty = now, now + M.DEADLINE, false, true
