@@ -17,6 +17,8 @@ local ITEM_FLAGS = {forbid = true, dump = true, melt = true}
 -- plant gatherers in a starvation, by the names DF 53 may give the gathering detail [live-untested])
 A.TOOL_DETAILS = {Miners = true, Woodcutters = true, Hunters = true, Fisherdwarves = true, Planters = true,
                   ['Plant gatherers'] = true, Gatherers = true, Herbalists = true}
+-- the details whose labor needs a tool (pick, axe, crossbow, rod): a specialist (work_detail opts.only) keeps them
+A.TOOL_LABOR_DETAILS = {Miners = true, Woodcutters = true, Hunters = true, Fisherdwarves = true}
 -- the doctor labors act.medic switches and the hospital posts act.hospital_post fills (FR-48)
 A.MEDIC_LABORS = {'DIAGNOSE', 'SURGERY', 'BONE_SETTING'}
 A.HOSPITAL_POSTS = {DOCTOR = true, DIAGNOSTICIAN = true, SURGEON = true, BONE_DOCTOR = true}
@@ -1481,8 +1483,81 @@ local function impls(state)
   -- screen applies a detail's labors to its members; as DFHack's autofish.lua:77-92 does, the unit's
   -- labors follow the detail here. Leaving a detail clears a labor only when no other detail of the
   -- unit (or an everybody-does-this detail) still grants it.
-  function I.work_detail(name, unit_id, on)
+  -- opts (live Run 10, Handlelock: six of eight miners sat in Planters, an everybody-does-this detail, and took the
+  -- farm jobs while 25 dig jobs waited):
+  --   only = true   the member does its tool detail's work only: it leaves every everybody-does-this detail that is no
+  --                 tool detail (A.TOOL_LABOR_DETAILS) and those details' labors go off, except labors of the tool
+  --                 detail itself, of another detail the unit is a selected member of, and opts.keep (labor names);
+  --                 removing such a member (on = false) gives it the everybody labors back.
+  --   equip = true  [live-untested, off by default: needs the player's yes, BUG-023] a tool labor switched on also marks
+  --                 the dwarf for an equipment update (unit.uniform.pickup_flags.update and plotinfo.equipment.update.weapon,
+  --                 the request the engine hands work picks and axes out on; v1 E18 Run 5 measurement). The dwarf still
+  --                 walks to the tool and picks it up himself; no item is moved.
+  function I.work_detail(name, unit_id, on, opts)
     if not A.TOOL_DETAILS[name] then return false, 'not a builtin tool detail: ' .. tostring(name) end
+    opts = type(opts) == 'table' and opts or {}
+    local every_mode = function() return df.work_detail_mode and df.work_detail_mode.EverybodyDoesThis end
+    local function wd_member(w, id)
+      for _, x in ipairs(w.assigned_units) do if x == id then return true end end
+      return false
+    end
+    local function keep_set(names)
+      local s = {}
+      for _, n in ipairs(type(names) == 'table' and names or {}) do
+        local l = df.unit_labor and df.unit_labor[n]
+        if type(l) == 'number' then s[l] = true end
+      end
+      return s
+    end
+    -- the everybody-does-this details a specialist leaves (not the tool details, not `own`)
+    local function everybody_details(details, own)
+      local every, r = every_mode(), {}
+      if not every then return r end
+      for _, w in ipairs(details) do
+        if w ~= own and w.flags.mode == every and not A.TOOL_LABOR_DETAILS[dfhack.df2utf(w.name)] then r[#r + 1] = w end
+      end
+      return r
+    end
+    local function specialize(details, wd, u, id, keep)
+      local away, every, n = everybody_details(details, wd), every_mode(), 0
+      local leave = {}
+      for _, w in ipairs(away) do
+        leave[w] = true
+        local vec = w.assigned_units
+        for i = #vec - 1, 0, -1 do if vec[i] == id then vec:erase(i) end end
+      end
+      for _, w in ipairs(away) do
+        local al = w.allowed_labors
+        for l = 0, #al - 1 do
+          if al[l] and u.status.labors[l] and not wd.allowed_labors[l] and not keep[l] then
+            local held = false
+            local nobody = df.work_detail_mode.NobodyDoesThis
+            for _, x in ipairs(details) do
+              local m = x.flags.mode
+              if not leave[x] and x ~= wd and m ~= every and m ~= nobody and x.allowed_labors[l] and wd_member(x, id) then
+                held = true
+              end
+            end
+            if not held then u.status.labors[l] = false; n = n + 1 end
+          end
+        end
+      end
+      return n
+    end
+    local function generalize(details, wd, u)
+      local n = 0
+      for _, w in ipairs(everybody_details(details, wd)) do
+        local al = w.allowed_labors
+        for l = 0, #al - 1 do
+          if al[l] and not u.status.labors[l] then u.status.labors[l] = true; n = n + 1 end
+        end
+      end
+      return n
+    end
+    local function equip_update(u)
+      pcall(function() u.uniform.pickup_flags.update = true end)
+      pcall(function() df.global.plotinfo.equipment.update.weapon = true end)
+    end
     local details = df.global.plotinfo.labor_info.work_details
     local wd
     for _, w in ipairs(details) do
@@ -1503,12 +1578,21 @@ local function impls(state)
     local al = wd.allowed_labors
     if on then
       if not at then vec:insert(pos, id) end
-      for l = 0, #al - 1 do if al[l] then u.status.labors[l] = true end end
+      local turned = false
+      for l = 0, #al - 1 do
+        if al[l] then
+          if not u.status.labors[l] then turned = true end
+          u.status.labors[l] = true
+        end
+      end
+      if opts.only then specialize(details, wd, u, id, keep_set(opts.keep)) end
+      if opts.equip and A.TOOL_LABOR_DETAILS[name] and (turned or not at) then equip_update(u) end
       return true, at and 'already' or 'added'
     end
     if not at then return true, 'not a member' end
     vec:erase(at)                              -- a unit that left the fort (or died) is only taken off the list
     if not u then return true, 'removed' end
+    if opts.only then generalize(details, wd, u) end
     local every = df.work_detail_mode and df.work_detail_mode.EverybodyDoesThis
     for l = 0, #al - 1 do
       if al[l] then

@@ -444,6 +444,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "SIEGE_UNREADY": ("A", "readiness", _d(opt="fails:sa afails:sa routes:i open:i ents:sa traps:i age:i")),
     # BUG-015: an entrance door the lockdown forbade lost its forbidden flag before the next pass (refused)
     "LOCKDOWN_PARTIAL": ("A", "reflex", _d("doors:i", "refused:ia pos:p retry:f items:i units:i")),
+    # BUG-023 / Run 10: tool detail members without their pick or axe while its jobs wait and free tools exist
+    "TOOL_BLOCKED": ("A", "economy", _d("detail:s tool:s n:i", "members:ia jobs:i days:i free:i bins:i reserved:i "
+                                                               "why:s who:s hint:s pos:p")),
     "ALERT_START": ("B", "siege", _d(opt="vis:i")),
     "ALERT_END": ("B", "siege", _d(opt="vis:i")),
     "LOCKDOWN_END": ("B", "reflex", _d(opt="why:s ticks:i doors:i refused:i")),

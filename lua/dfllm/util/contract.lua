@@ -74,6 +74,8 @@ C.EVENTS = {
   SIEGE_UNREADY = {cls = 'A', by = 'readiness'},
   -- BUG-015: an entrance door the lockdown forbade lost its forbidden flag before the next pass (refused)
   LOCKDOWN_PARTIAL = {cls = 'A', by = 'reflex'},
+  -- BUG-023 / Run 10: members of a tool detail hold no pick or axe for days while its jobs wait and free tools exist
+  TOOL_BLOCKED = {cls = 'A', by = 'economy'},
   -- B: digest
   ALERT_START = {cls = 'B', by = 'siege'}, ALERT_END = {cls = 'B', by = 'siege'},
   LOCKDOWN_END = {cls = 'B', by = 'reflex'},

@@ -64,7 +64,9 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
         # FR-64: >= 2 citizens dehydrated or starved within a month: access, not supply, as a rule
         "DEATHS_PREVENTABLE": "dfllm cmd inspect '{\"what\":\"reach\"}', then refuge; patients: water_sources",
         # BUG-015: a lockdown door that does not hold its forbidden flag (the kernel tries it once more itself)
-        "LOCKDOWN_PARTIAL": "dfllm status; a wall or a second door for that opening (bp.place)"}
+        "LOCKDOWN_PARTIAL": "dfllm status; a wall or a second door for that opening (bp.place)",
+        # BUG-023: tool detail members without pick/axe; the fair-play remedy is the player's (RULES 7)
+        "TOOL_BLOCKED": "dfllm cmd inspect '{\"what\":\"workload\"}', then tell Gordon (RULES 7)"}
 SUPERVISE_EVERY_S = 15                         # supervise.json read cadence
 SUPERVISE_FRESH_S = 3600                       # alerts logged longer ago than this never wake
 HB_STALE_S = 300

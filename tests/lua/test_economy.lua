@@ -574,7 +574,13 @@ local function tool_world(opts)
       if cmd == 'labormanager' and a1 == 'mode' then return true, ctl.mode or mode end
       return true, ''
     end)
-    W.act_result('work_detail', function(name, id, on)
+    -- the detail's labor follows the membership, as act.work_detail does (by name: economy's labor_on)
+    local LAB = {Miners = 'MINE', Woodcutters = 'CUTWOOD', Hunters = 'HUNT'}
+    ctl.wd_opts = {}
+    W.act_result('work_detail', function(name, id, on, o)
+      ctl.wd_opts[#ctl.wd_opts + 1] = {name = name, id = id, on = on, opts = o}
+      local u = W.unit(id)
+      if u and LAB[name] then u.status.labors[LAB[name]] = on and true or nil end
       local v = ctl.wds[name].assigned_units
       for i = 0, #v - 1 do if v[i] == id then if not on then v:erase(i) end; return true end end
       if on then v:insert('#', id) end
@@ -649,9 +655,13 @@ T.test('tool details: woodcutters by log stock, hunters only in a famine, one to
   local W, ctl = tool_world{cit = 12, miners = {5}, cutters = {5}, wood = 30}
   days(W, 1)
   T.eq(members(ctl, 'Miners'), {5, 7})
-  T.eq(members(ctl, 'Woodcutters'), {1, 9}, 'the miner left Woodcutters; wood 30 < 60: two cutters, best skill first')
+  -- Run 10: the player's miner stays in Woodcutters too, but counts only once (as a miner)
+  T.eq(members(ctl, 'Woodcutters'), {1, 5, 9}, 'wood 30 < 60: two cutters besides the miner, best skill first')
   T.eq(members(ctl, 'Hunters'), {}, 'no famine: no hunters')
-  local W2, ctl2 = tool_world{cit = 12, cutters = {3}, wood = 200}
+  local W2, ctl2 = tool_world{cit = 12, wood = 30}
+  days(W2, 1)
+  T.eq(#members(ctl2, 'Woodcutters'), 2)
+  for _ = 1, 200 do F.item(W2, 'WOOD', {}) end
   days(W2, 4)
   T.eq(members(ctl2, 'Woodcutters'), {}, 'logs above autochop max: woodcutters released after shrink_days')
   local W3, ctl3 = tool_world{cit = 12, miners = {5, 7}, food = 0}
@@ -682,26 +692,28 @@ T.test('tool details: one hunter for the mood stock (bone, shell, leather) from 
 end)
 
 T.test('tool details: shrinking keeps the best skill, also a noble member (live L1b: the bookkeeper miner)', function()
-  local W, ctl = tool_world{cit = 22, miners = {2, 5, 7}, backlog = 400, setup = function(W)
+  local W, ctl = tool_world{cit = 22, backlog = 400, setup = function(W)
     dfhack.units.getNoblePositions = function(u) return u._m.noble and {{position = {code = 'BOOKKEEPER'}}} or nil end
   end}
-  W.unit(5)._m.noble = true                     -- skill 10, the best miner
   days(W, 1)
-  T.eq(members(ctl, 'Miners'), {2, 5, 7})
+  T.eq(members(ctl, 'Miners'), {1, 5, 7}, 'three picks: the two skilled and the first unskilled one')
+  W.unit(5)._m.noble = true                     -- skill 10, the best miner, appointed meanwhile
   ctl.backlog = 0
   days(W, 5)
   T.eq(members(ctl, 'Miners'), {5, 7}, 'the unskilled one leaves, the skilled noble stays')
 end)
 
 T.test('tool details: soldiers removed at once, nobles and moody dwarves never picked, modern mode left alone', function()
-  local W, ctl = tool_world{cit = 12, miners = {5, 6}, setup = function(W)
+  local W, ctl = tool_world{cit = 12, setup = function(W)
     dfhack.units.getNoblePositions = function(u) return u._m.noble and {{position = {code = 'MANAGER'}}} or nil end
   end}
-  W.unit(6).military.squad_id = 3
   W.unit(7)._m.noble = true
   W.unit(1).mood = 0
   days(W, 1)
-  T.eq(members(ctl, 'Miners'), {2, 5}, 'soldier out; noble 7 and moody 1 skipped')
+  T.eq(members(ctl, 'Miners'), {2, 5}, 'noble 7 and moody 1 skipped')
+  W.unit(2).military.squad_id = 3
+  days(W, 1)
+  T.eq(members(ctl, 'Miners'), {3, 5}, 'the soldier the kernel added is out at once, the next one joins')
   local W2, ctl2 = tool_world{cit = 12, miners = {5}, mode = 'Mode: modern (labormanager)'}
   days(W2, 2)
   T.eq(members(ctl2, 'Miners'), {5}, 'modern labormanager owns the tool details')

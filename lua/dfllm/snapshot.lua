@@ -21,6 +21,7 @@ M.CFG = {
   liquid_tiles = 4096,            -- tiles one liquids() call may read (FR-47)
   items_tiles = 400,              -- tiles one items_at() call may cover (BUG-009: a building footprint)
   items_max = 200,                -- items one items_at() call returns
+  group_pts = 4000,               -- points one groups() call reads (inspect workload: citizens and open jobs)
 }
 local PURPOSES = {audit = true, sites = true, debug = true}
 local ID_OK = '^[A-Za-z0-9_%-]+$'
@@ -341,6 +342,44 @@ function M.far(K, x, y, z)
     return dfhack.maps.isValidTilePos(pos) and dfhack.maps.getWalkableGroup(pos) or 0
   end)
   return ok and grp ~= 0 and grp ~= home_grp.g
+end
+
+-- groups(K, pts, near): the walkable group of each point {x, y, z} (economy's inspect workload: which open jobs and idle
+-- citizens share a group). With `near`, a tile without a group (the wall a dig job cuts, the trunk a FellTree job fells)
+-- answers the first group of its 8 neighbours on the level, then of the tiles above and below. 0 = no walkable group,
+-- -1 = hidden, invalid or a fault (callers count -1 as reachable); hidden neighbours are never read. At most
+-- M.CFG.group_pts points a call (the rest answer -1).
+local NEAR = {{-1, -1, 0}, {0, -1, 0}, {1, -1, 0}, {-1, 0, 0}, {1, 0, 0}, {-1, 1, 0}, {0, 1, 0}, {1, 1, 0},
+              {0, 0, 1}, {0, 0, -1}}
+local function grp_at(x, y, z)
+  if not dfhack.maps.isValidTilePos(x, y, z) then return -1 end
+  local des = dfhack.maps.getTileFlags(x, y, z)
+  if not des or des.hidden then return -1 end
+  return int(dfhack.maps.getWalkableGroup(xyz2pos(x, y, z))) or -1
+end
+local function grp_near(x, y, z, near)
+  local own = grp_at(x, y, z)
+  if own ~= 0 or not near then return own end
+  for _, d in ipairs(NEAR) do
+    local g = grp_at(x + d[1], y + d[2], z + d[3])
+    if g > 0 then return g end
+  end
+  return 0
+end
+function M.groups(K, pts, near)
+  local out, lim = {}, M.CFG.group_pts or 4000
+  for i, p in ipairs(type(pts) == 'table' and pts or {}) do
+    local g = -1
+    if i <= lim and type(p) == 'table' then
+      local x, y, z = int(p.x or p[1]), int(p.y or p[2]), int(p.z or p[3])
+      if x and y and z then
+        local ok, v = pcall(grp_near, x, y, z, near)
+        g = ok and v or -1
+      end
+    end
+    out[i] = g
+  end
+  return out
 end
 
 -- outside_near(K, pts, r): open-sky test for the reflex module (FR-49/52: the fort's entrance doors, a predator on a
