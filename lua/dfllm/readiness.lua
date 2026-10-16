@@ -12,7 +12,8 @@
 -- after defense stages through snapshot.export (WP7); the result comes back as the `audit` verb
 -- (sent by `dfllm follow`, also with --no-auto, or once by `dfllm audit`).
 -- R0 -> R1 blockers (state ready.fail, DESIGN §5.4): audit (no result yet), audit_old (> a season), audit_fail
--- (bp.topo.audit ok=false), bypass, refuge_sep, civ_sep, caverns (its flags), no_kern, no_refuge (burrows),
+-- (bp.topo.audit ok=false), bypass, refuge_sep, civ_sep, caverns (its flags; Run 11: also an explore shaft open to a
+-- cavern until its plug wall stands, runner.cavern_open), no_kern, no_refuge (burrows),
 -- no_outer, no_inner (no manifest bridge of that role), bridge:<B> (gate does not know it), levers:<B> (< 2 linked).
 -- FR-65 siege readiness gate: while R0 fails in PEACE, SIEGE_UNREADY (A) names the blockers, the ways in without a
 -- door or bridge (seal.entrance_doors) and the trap count of the last audit; first at once (2 days after a load),
@@ -253,6 +254,14 @@ local function evaluate(K, why)
   -- R1
   local f1 = audit_fails(K, now)
   rt.audit_ok = #f1 == 0 and 1 or 0
+  -- Run 11: an explore shaft open to a cavern (runner.cavern_open) keeps R0 until its plug wall stands, also when the
+  -- shaft has left the audit box (project cancelled) or the audit read it as closed
+  local okc, ncav = K.call('runner', 'cavern_open')
+  if okc and type(ncav) == 'number' and ncav > 0 then
+    local has = false
+    for _, f in ipairs(f1) do if f == 'caverns' then has = true end end
+    if not has then f1[#f1 + 1] = 'caverns' end
+  end
   local kern, refuge = burrow_names(man)
   if not dfhack.burrows.findByName(kern) then f1[#f1 + 1] = 'no_kern' end
   if not dfhack.burrows.findByName(refuge) then f1[#f1 + 1] = 'no_refuge' end
@@ -525,6 +534,7 @@ M.on.MODE = function(K, ev)
   refresh(K, 'mode ' .. tostring(ev.to))
 end
 M.on['EV:DRILL_RESULT'] = function(K, ev) refresh(K, 'drill') end
+M.on['EV:CAVERN_PLUG'] = function(K, ev) refresh(K, 'cavern') end     -- Run 11: a shaft opened or plugged
 M.on['EV:PROJECT_STAGE'] = function(K, ev)
   if type(ev.d) == 'table' and ev.d.defense == 1 then rt.lev = nil; request_audit(K, true); save(K) end
 end

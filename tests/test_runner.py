@@ -49,5 +49,28 @@ def test_every_event_validates(dump):
         assert schema.validate("event", ev) == [], ev
 
 
+@pytest.fixture(scope="module")
+def cavern_dump():
+    r = luahost.run_file(ROOT / "tests" / "lua" / "runner_cavern_dump.lua", [str(ROOT)], timeout=60,
+                         paths=[ROOT / "tests" / "lua"])
+    assert r.ok, f"exit {r.code}\n{r.out}\n{r.err}"
+    return json.loads(r.out.strip().splitlines()[-1])
+
+
+def test_cavern_plug_files_validate(cavern_dump):
+    """Run 11: the plug project, its bp document, BREACH_STOP cavern_lake and CAVERN_PLUG queued/done validate."""
+    for s in cavern_dump["snaps"]:
+        assert schema.validate(s["kind"], s["doc"]) == [], (s["kind"], schema.validate(s["kind"], s["doc"]))
+    for ev in cavern_dump["events"]:
+        assert schema.validate("event", ev) == [], ev
+    types = [e["type"] for e in cavern_dump["events"]]
+    stop = next(e for e in cavern_dump["events"] if e["type"] == "BREACH_STOP")
+    assert stop["d"]["why"] == "cavern_lake" and stop["d"]["was"] == "damp" and "cavern lake" in stop["msg"]
+    phases = [e["d"]["phase"] for e in cavern_dump["events"] if e["type"] == "CAVERN_PLUG"]
+    assert phases == ["queued", "done"] and types.count("PROJECT_DONE") == 1
+    bp_doc = next(s["doc"] for s in cavern_dump["snaps"] if s["kind"] == "bp")
+    assert [st["label"] for st in bp_doc["stages"]] == ["p1.dig", "p1.wall", "p0.dig", "p0.wall"]
+
+
 def test_runner_is_lint_clean():
     assert lint.lua([ROOT / "lua" / "dfllm" / "runner.lua"]) == []

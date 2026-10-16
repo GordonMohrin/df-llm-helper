@@ -24,6 +24,9 @@ M.REACH, M.REACH_QUIET = 100, 120  -- xy tiles from a bridge footprint: entry / 
                                     -- a 3x3 embark is 144 wide, so this mainly cuts caverns and far corners
 M.BAND_BELOW, M.BAND_ABOVE = 3, 40 -- z band around the fortcore levels
 M.CIT_NEAR = 40       -- a hostile this close to a citizen outside Kern+ always counts
+-- Run 11: an explore shaft open to a cavern (runner.cavern_open, until its plug wall stands) is a way in below the z
+-- band: a hostile within SHAFT_R tiles (xy) of the shaft, from SHAFT_DZ levels below its bottom up to its top, counts
+M.SHAFT_R, M.SHAFT_DZ = 30, 5
 
 -- report type -> window: inv (counts like INVASION for the SIEGE rule), undead, scan (fast scan only)
 local REPORT_WINDOW = {UNDEAD_ATTACK = 'undead', NIGHT_ATTACK_STARTS = 'undead', AMBUSH_AMBUSHER = 'inv',
@@ -76,12 +79,18 @@ local function fort_geo(K)
   if #fps == 0 then return nil end
   local a = type(man.refuge) == 'table' and man.refuge.anchor
   if type(a) == 'table' and type(a[3]) == 'number' then zlo = math.min(zlo, a[3]) end
-  return {fps = fps, zlo = zlo - M.BAND_BELOW, zhi = zhi + M.BAND_ABOVE}
+  local okc, n, sh = K.call('runner', 'cavern_open')
+  local shafts = okc and type(n) == 'number' and n > 0 and type(sh) == 'table' and sh or nil
+  return {fps = fps, zlo = zlo - M.BAND_BELOW, zhi = zhi + M.BAND_ABOVE, shafts = shafts}
 end
 
--- xy distance (Chebyshev) to the nearest bridge footprint; huge when off the z band
+-- xy distance (Chebyshev) to the nearest bridge footprint; huge when off the z band; 0 beside an open cavern shaft
 local function reach(e, geo)
   if not geo then return 0 end
+  for _, s in ipairs(geo.shafts or {}) do
+    if type(s) == 'table' and type(s[4]) == 'number' and e.z >= s[4] - M.SHAFT_DZ and e.z <= s[3]
+       and math.max(math.abs(e.x - s[1]), math.abs(e.y - s[2])) <= M.SHAFT_R then return 0 end
+  end
   if e.z < geo.zlo or e.z > geo.zhi then return math.huge end
   local best = math.huge
   for _, f in ipairs(geo.fps) do

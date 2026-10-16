@@ -121,6 +121,28 @@ def test_event_rules():
     assert any("bytes" in x for x in errs("event", {**ev, "msg": "ä" * 101}))
 
 
+def test_cavern_events():
+    """Run 11: CAVERN_PLUG (A) names the shaft and the plug; BREACH_STOP carries the raised kind (was, n)."""
+    ev = json.loads(DESIGN_EVENT)
+    plug = {**ev, "type": "CAVERN_PLUG", "cls": "A",
+            "d": {"phase": "queued", "proj": "e1", "plug": "pl100", "why": "cavern_lake", "pos": [136, 73, 127],
+                  "shaft": [136, 73, 137], "z1": 127, "walls": ["136,73,136", "136,73,137"], "n": 552}}
+    assert errs("event", plug) == []
+    assert any("phase: missing" in x for x in errs("event", {**plug, "d": {"proj": "e1"}}))
+    assert errs("event", {**plug, "cls": "B"}) == ["$.cls: CAVERN_PLUG is class A, got B"]
+    stop = {**ev, "type": "BREACH_STOP", "cls": "B",
+            "d": {"proj": "e1", "why": "cavern_lake", "src": "report", "was": "damp", "n": 552, "pos": [136, 73, 127]}}
+    assert errs("event", stop) == []
+    assert any("expected int" in x for x in errs("event", {**stop, "d": {**stop["d"], "n": "552"}}))
+
+
+def test_every_class_a_event_has_a_rules_row():
+    """A class-A event wakes the orchestrator: RULES §7 must name its first move (CAVERN_PLUG, Run 11)."""
+    rules = (Path(__file__).resolve().parent.parent / "RULES.md").read_text(encoding="utf-8")
+    sec = rules.split("## 7.")[1].split("## 8.")[0]
+    assert [t for t, (cls, _, _) in S.EVENTS.items() if cls == "A" and f"| {t}" not in sec and f" {t} " not in sec] == []
+
+
 @pytest.mark.parametrize("verb,args,ok", [
     ("lever", {"bridge": "O1", "want": "up"}, True),
     ("lever", {"bridge": "O1", "want": "sideways"}, False),

@@ -175,6 +175,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | ORDER_BAD | a make-item order without `item_subtype` (DF crash) was removed; never queue such orders, use `order.add` with `item_subtype` |
 | DEPOT_MISSING | a caravan came and no depot stands; the kernel queued a `depot` project: check `status`/`proj`, keep O1 down for builders in PEACE. "does not progress: why" = the planned depot is stuck; without a fortcore depot the kernel moves it inside the entrance after 5 failed resumes (`inspect workload` `depot_move`) |
 | CUTOFF | citizens lost the walk group of their food, drink or beds (confirmed on groups read again, BUG-021); the msg names the tile, a cut-off citizen and a stock tile with their groups. `inspect reach`; a project still building there: `bp.cancel {proj, undo:true}`; a built wall or raised bridge: tell the player at once (no deconstruct verb) |
+| CAVERN_PLUG | a dig broke into a cavern (BREACH_STOP `cavern`/`cavern_lake`; `damp` is aquifer seepage only). `queued`: the kernel plugs the explore shaft (its two top stair tiles channelled, then a constructed wall each; the lower one is given up if DF does not reach it within a day); `done`: the walls stand; `failed`/`none`: tell the player at once, a constructed wall on the named tile by hand. R0 (`caverns`) until the top wall stands; `bp.cancel` the explore without undo |
 | SEAL_LEAK | the gates are up and a route remains: `inspect entrances` names the leak (tile, door/bridge state); tell the player; place a wall there (`bp.place tpl=seal at="x,y,z <kind> wall"`), never lower the bridges |
 | PERIMETER_BROKEN | the kernel re-queued the lost walls/doors (`rp…` project); `inspect perimeter` after a day; tell the player about pieces it could not re-queue (bridges) |
 | AUTOLABOR_LEGACY | autolabor ran in legacy mode (the engine of the Run 9 crashes) and the kernel could not set it to monitor (`fixed=0`; a switch that worked is only a kern.log line): tell the player at once (disable autolabor by hand) |
@@ -193,10 +194,10 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 - Readiness red: max-pop freezes at the current population and beauty pauses.
 - R0 blockers (`ready.fail`; full table DESIGN §5.4): `audit`/`audit_old` no or stale audit → `dfllm audit`;
   `audit_fail`, `bypass` (a way in skips the trap hall), `refuge_sep` (refuge missing or on the attack path),
-  `civ_sep` (no separate civilian/military stair), `caverns` (open) → the audit's own reasons (AUDIT `fails`,
-  SIEGE_UNREADY `afails`); `no_kern`/`no_refuge` burrow missing; `no_outer`/`no_inner` no O1/B1, `bridge:B` not
-  built, `levers:B` < 2 linked levers → fortcore pieces. `status` says `UNREADY` while R0 fails (SIEGE_UNREADY
-  monthly); `drill never (auto: <why>)` → fix `<why>` (drills run by themselves) or `dfllm cmd drill`.
+  `civ_sep` (no separate civilian/military stair), `caverns` (open, or a shaft not yet plugged: CAVERN_PLUG) → the
+  audit's own reasons (AUDIT `fails`, SIEGE_UNREADY `afails`); `no_kern`/`no_refuge` burrow missing; `no_outer`/
+  `no_inner` no O1/B1, `bridge:B` not built, `levers:B` < 2 linked levers → fortcore pieces. `status` says `UNREADY`
+  while R0 fails (SIEGE_UNREADY monthly); `drill never (auto: <why>)` → fix `<why>` or `dfllm cmd drill`.
 - Audit `fails` name the fix (table DESIGN §5.4): `bypass: wall x,y,z floor -> X` / `refuge: on the attack path,
   wall x,y,z floor` = a constructed wall on that tile closes the route (`ramp`: on its top; `(+more)`: other routes
   remain): `dfllm cmd bp.place tpl=seal site=S1 at=audit`, then `dfllm audit`. Doors never fix an audit route.
@@ -264,8 +265,8 @@ autofarm thresholds, fishers and meals follow the citizens (economy; `food_low` 
 **Happiness:** dining hall → own bedrooms (≥ 500) → general temple (≥ 2,000 on petition) → tavern →
 library. 0 naked. Stress KPI: share with category ≤ 1.
 **Beauty:** only `used` rooms, only in PEACE with R1 green; artifacts and masterworks on pedestals.
-**Water and caverns:** light aquifer only via the probe stair (damp report → stop, never
-re-designate); every breach of water or caverns through a 2-wall airlock; caverns stay sealed.
+**Water and caverns:** light aquifer only via the probe stair (damp report → stop, never re-designate); a dig that
+breaks into a cavern (lake) is plugged by the kernel (CAVERN_PLUG); planned breaches via a 2-wall airlock; caverns stay sealed.
 **Trade:** depot in the bailey, O1 down only while no hostile is visible; ratio ≥ 1.5. Goods come
 from stockpiles named `dfllm-trade` (logistics autotrade; fortcore stage 1 builds one next to the depot,
 plus the `dfllm-melt` automelt pile).
@@ -294,7 +295,6 @@ one line for the player and wait for the next wake.
 - `dfllm status` says `follow: OFF`: start `Monitor` on `dfllm follow` again; silence from a dead follow is not "all is well".
 - `dfllm status` stale or no heartbeat for 120 s: read `dfllm supervise --once --dry-run` and tell
   the player (a scheduled supervisor, if set up, handles it); do not restart DF by hand.
-- A command was refused: read the outbox `msg`; fix the args; never retry with a different verb to
-  get around a refusal.
+- A command was refused: read the outbox `msg`, fix the args; never retry with another verb to get around it.
 - The fort is in SIEGE/BREACH: do nothing tactical. Read `status` every few minutes; act after SIEGE_END.
 - Unsure whether something is fair: it is not. Ask the player.

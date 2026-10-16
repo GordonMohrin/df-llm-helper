@@ -484,6 +484,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "WAVE_FAIL": ("A", "siege", _d("kind:s why:s", "wave:i squad:s lost:i units:ia n:i pos:p ticks:i")),
     # BUG-030: a manifest bridge gate saw complete is gone from its footprint (destroyed or removed): no pulls for it
     "BRIDGE_DESTROYED": ("A", "gate", _d("bridge:s", "bid:i role:s last:s mode:s pos:p")),
+    # Run 11: a dig broke into a cavern: phase queued (the explore shaft's plug project), done (the wall stands), failed
+    # (refused, cancelled, blocked), none (no automatic plug: by hand); shaft = its top tile, z1 its bottom z, walls
+    # 'x,y,z' (the lower one first), n = water tiles of a cavern lake, hint = why failed / none
+    "CAVERN_PLUG": ("A", "runner", _d("phase:s proj:s", "plug:s why:s pos:p shaft:p z1:i walls:sa n:i hint:s")),
     # BUG-030: the siege's deep defense: why = destroyers (building destroyers in sight), army (> stations.core_ratio x
     # soldiers), weak (worn or iron/steel below stations.worn/metal); civilians to the separated refuge, squads at the core
     "SIEGE_DEEP": ("A", "siege", _d("why:sa", "bd:i races:sa units:ia vis:i soldiers:i worn:i metal:i refuge:s "
@@ -506,7 +510,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "LABOR_STARVED": ("B", "economy", _d("labor:s", "cycles:i to:s")),
     "WORK_DETAIL": ("B", "economy", _d("detail:s unit:i on:i", "n:i why:s")),
     "CAPTURE": ("B", "care", _d(opt="unit:i race:s")),
-    "BREACH_STOP": ("B", "runner", _d(opt="proj:s why:s pos:p")),
+    # Run 11: why damp|warm|water|cavern|cavern_lake; was = the reported why a look at the revealed tiles raised, n =
+    # the connected water tiles counted; src report|tile|cancel|recheck
+    "BREACH_STOP": ("B", "runner", _d(opt="proj:s why:s pos:p src:s was:s n:i")),
     "KERNEL_SLOW": ("B", "kern", _d("module:s", "ms:i factor:i")),
     "WEALTH": ("B", "siege", _d(opt="created:i exported:i imported:i")),
     "DRILL_RESULT": ("B", "drill", _d(opt="pass:f raised:i worn:i outside:i dbl:i")),

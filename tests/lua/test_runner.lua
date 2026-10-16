@@ -266,8 +266,10 @@ T.test('reports: far ones are ignored, no pos stops every digger, cave collapse 
   T.eq(#W.find_events('BREACH_STOP'), 0)
   W.event('REPORT', {type = 'FEATURE_DISCOVERY', text = 'You have discovered an underground river'})
   W.frame(1)
-  T.eq(H.proj(W, 'a').blocked, 'breach:water')
-  T.eq(H.proj(W, 'b').blocked, 'breach:water')
+  T.eq(H.proj(W, 'a').blocked, 'breach:cavern_lake')         -- Run 11: DF's discovery of water is a cavern lake
+  T.eq(H.proj(W, 'b').blocked, 'breach:cavern_lake')
+  H.runs(W, 2)
+  T.eq(#W.find_events('CAVERN_PLUG'), 0, 'no tile, no explore shaft: no plug and no false alarm')
 end)
 
 T.test('tile checks: revealed water stops the dig; a lost designation without a damp report is re-marked once', function()

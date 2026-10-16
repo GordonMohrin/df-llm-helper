@@ -80,7 +80,10 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
         "TOOL_BLOCKED": "dfllm cmd inspect '{\"what\":\"workload\"}', then tell Gordon (RULES 7)",
         # BUG-030: the kernel already acted (no pulls for a destroyed bridge; the deep defense); tell the player
         "BRIDGE_DESTROYED": "dfllm status; tell Gordon; rebuild it after the siege (plan)",
-        "SIEGE_DEEP": "dfllm status (civilians in the refuge, squads in the core); tell Gordon; nothing tactical"}
+        "SIEGE_DEEP": "dfllm status (civilians in the refuge, squads in the core); tell Gordon; nothing tactical",
+        # Run 11: a dig broke into a cavern; the kernel plugs an explore shaft itself (failed/none: by hand)
+        "CAVERN_PLUG": "tell Gordon (queued: the kernel walls the shaft; failed/none: a constructed wall by hand); "
+                       "bp.cancel the explore without undo"}
 SUPERVISE_EVERY_S = 15                         # supervise.json read cadence
 SUPERVISE_FRESH_S = 3600                       # alerts logged longer ago than this never wake
 HB_STALE_S = 300

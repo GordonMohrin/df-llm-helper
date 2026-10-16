@@ -103,6 +103,22 @@ T.test('R1: a passed audit, Kern+ and Tiefe+, outer+inner bridges with 2 linked 
   T.ok(has(s.fail, 'drill'), 'R2 blockers listed')
 end)
 
+T.test('Run 11: an explore shaft open to a cavern (runner.cavern_open) is R0 caverns until its plug wall stands', function()
+  local W = world()
+  local open = 1
+  W.runner.cavern_open = function(K) return open, open > 0 and {{60, 61, 117, 107}} or {} end
+  day(W)
+  audit(W)                                         -- the audit itself is clean (the shaft lies outside its box)
+  T.eq(lvl(W), 0)
+  T.ok(has(ready(W).fail, 'caverns'), T.show(ready(W).fail))
+  T.eq(ready(W).audit.ok, 1, 'the audit stays the audit')
+  open = 0
+  X.call(W, 'runner', 'emit', 'CAVERN_PLUG', {phase = 'done', proj = 'e1'})   -- the plug stands: looked at once
+  W.frame(1)
+  T.eq(lvl(W), 1)
+  T.ok(not has(ready(W).fail, 'caverns'))
+end)
+
 T.test('R1 blockers: audit flags, stale audit, missing Tiefe+, unlinked lever, no outer bridge', function()
   local W = world()
   day(W)
