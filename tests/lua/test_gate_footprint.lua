@@ -250,4 +250,83 @@ T.test('BUG-027: a merchant (and his pack animal) on B1 hold the SIEGE raise (ce
   T.eq(select(2, W.K.call('gate', 'watch')), nil, 'nothing to watch once B1 is up')
 end)
 
+---------------------------------------------------------------- lever burrow check (BUG-027, Run 10 y419)
+-- live: BREACH 'O1 not up at T+900' (enemy far), then GATE_FAIL "B1 not up ... no worker: its levers lie outside the
+-- alert burrow" although every lever lay in Kern+: in BREACH the alert holds the civilians in Tiefe+.
+-- A DF-like lever sim: a civilian takes a pull only on a lever inside one of the alert's burrows (or with no alert),
+-- and only once somebody is free (W.free_at); a fake seal paints Hebel+ (the bbox of the lever tiles).
+local function in_box(p, b) return p.x >= b[1] and p.x <= b[4] and p.y >= b[2] and p.y <= b[5] and p.z >= b[3] and p.z <= b[6] end
+local function breach_world(units, free_after)
+  local W = S.world{units = units}
+  W.mil = S.military()
+  local seal = {name = 'seal', every = {ticks = 600}}
+  function seal.lever_burrow(K, tiles)
+    if #tiles == 0 then return nil end
+    local b = {1e9, 1e9, 1e9, -1e9, -1e9, -1e9}
+    for _, t in ipairs(tiles) do
+      b = {math.min(b[1], t[1]), math.min(b[2], t[2]), math.min(b[3], t[3]),
+           math.max(b[4], t[1]), math.max(b[5], t[2]), math.max(b[6], t[3])}
+    end
+    W.burrow('Hebel+', b)
+    return 'Hebel+'
+  end
+  S.load(W, {W.mil, seal})
+  W.free_at = S.abs_now() + free_after
+  W.lever_cfg = setmetatable({}, {__index = function(_, id)
+    local lv = W.buildings[id]
+    if S.abs_now() < W.free_at then return {} end
+    if df.global.plotinfo.alerts.civ_alert_idx == 0 then return nil end
+    for _, n in ipairs(W.alert_burrows or {}) do
+      local bb = dfhack.burrows.findByName(n)
+      if bb and in_box({x = lv.x1, y = lv.y1, z = lv.z}, bb._bbox) then return nil end
+    end
+    return {}                                                  -- outside every alert burrow: nobody may take it
+  end})
+  return W
+end
+
+T.test('BUG-027 lever burrow check: BREACH by a gate fail with the enemy far: the alert (Tiefe+) lists Hebel+ for the ' ..
+       'Kern+ levers, the civilians pull O1/B1/B2; no GATE_FAIL outside_alert', function()
+  local W = breach_world(cast(), 1000)                         -- nobody is free for the levers until T+1000
+  W.event('INVASION', {id = 21})
+  S.run(W, 950)
+  T.eq(S.modes(W), {'PEACE>SIEGE', 'SIEGE>BREACH'})
+  T.eq(W.find_events('BREACH')[1].d.why, 'gate_fail')
+  T.eq(W.alert_burrows, {'Tiefe+', 'Hebel+'}, 'the lever tiles are in the alert while the pulls are pending')
+  S.run(W, 600)
+  for _, b in ipairs({'O1', 'B1', 'B2'}) do T.eq(S.bstate(W, b), 'up', b) end
+  T.eq(W.alert_burrows, {'Tiefe+'}, 'the pulls are done: Hebel+ left the list')
+  for _, e in ipairs(W.find_events('GATE_FAIL')) do T.ok(e.d.why ~= 'outside_alert', e.msg) end
+end)
+
+T.test('BUG-027 lever burrow check: BREACH with a hostile inside Kern+: no Hebel+ (attacker-side levers); the ' ..
+       'GATE_FAIL names the alert burrow', function()
+  local W = breach_world(cast({S.inv(299, 60, 50)}), 0)
+  S.run(W, 1000)
+  T.eq(W.K.mode(), 'BREACH')
+  T.eq(W.find_events('BREACH')[1].d.why, 'inside')
+  T.eq(W.alert_burrows, {'Tiefe+'})
+  local gf
+  for _, e in ipairs(W.find_events('GATE_FAIL')) do if e.d.bridge == 'O1' then gf = e end end
+  T.ok(gf, 'O1 GATE_FAIL')
+  T.eq(gf.d.why, 'outside_alert')
+  T.ok(gf.msg:find('no worker: its levers lie outside the alert burrow Tiefe+', 1, true), gf.msg)
+end)
+
+T.test('BUG-027: a popup pause (no ticks, the real clock runs) never turns a pending pull into no_worker or a GATE_FAIL',
+       function()
+  local W = world{units = cast(), lever_cfg = {[11] = {worker = 100}, [12] = {worker = 100}}}
+  W.event('INVASION', {id = 22})
+  run(W, 50)
+  T.eq(#S.pulls(W, 'O1'), 1)
+  df.global.pause_state = true                                 -- a popup: DF pauses, the kernel frames go on
+  for _ = 1, 2000 do W.frame(9); W.watch() end                 -- 32 s of real time
+  df.global.pause_state = false
+  T.eq(#S.acts(W, 'cancel_own_lever_job'), 0)
+  T.eq(#W.find_events('GATE_FAIL'), 0)
+  run(W, 300)
+  T.eq(S.bstate(W, 'O1'), 'up')
+  T.eq(#S.pulls(W, 'O1'), 1, 'the same pull did it')
+end)
+
 T.done()

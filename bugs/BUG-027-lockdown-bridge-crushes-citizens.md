@@ -146,6 +146,29 @@ away stays unknown); `tests/lua/test_gate_footprint.lua` (in a siege a foreign p
 - Test `tests/lua/test_gate_footprint.lua`: a merchant on B1 and his pack animal next to it hold the SIEGE raise, a wild
   animal next to it does not.
 
+### Lever burrow check (Claude, 2026-10-16)
+Live y419: `GATE_FAIL B1 not up ... no worker: its levers lie outside the alert burrow` and `B2 ... blocked`, although all
+six O1/B1 levers lie in Kern+ (`dfhack.burrows.isAssignedTile`); `lever pull --id N --priority` by hand worked later.
+- **Which burrow is compared:** the burrows siege last listed for the sounding civ alert (`siege.alert_names`), each
+  looked up by name, the linked lever tiles tested with `dfhack.burrows.isAssignedTile` (manifest positions, or the
+  lever's own x1,y1,z for a lever found by its link). That test is right. The message came after `BREACH O1 not up at
+  T+900`: in BREACH the alert holds the civilians in the refuge **Tiefe+**, not Kern+, and the lever burrow `Hebel+` was
+  never listed in BREACH (the old attacker-side rule), so no confined civilian could take a Kern+ pull. With the enemy
+  far away (the BREACH came from the gate timeout) that rule only kept O1/B1 down. `B2 ... blocked` is the footprint
+  wait: the citizens fleeing into Tiefe+ cross B2.
+- **Popup:** a popup pauses DF; gate's timers are game ticks (no-worker 200, the deadline) and stand still while paused,
+  so a pause cannot turn a pull into `no_worker` (test below). The hand pull likely worked because the BREACH had
+  ended or somebody was free by then.
+- **Fix:** in BREACH, `gate.rooms` lists the lever burrow too while no visible hostile is inside Kern+ and none is within
+  20 tiles (`M.LEVER_SAFE`) of any linked lever of a bridge still to pull; with a hostile inside or near, the old rule
+  holds. GATE_FAIL `outside_alert` names the burrows (`... outside the alert burrow Tiefe+`). A mode change that renews
+  an `up` epoch also resets that epoch's failure state (no-worker cancels, `nw_out`, bad levers, the allowance), so a
+  SIEGE no-worker cancel no longer decides a BREACH GATE_FAIL.
+- Tests (`tests/lua/test_gate_footprint.lua`, DF's burrow rule for the pulls): BREACH by a gate fail with the enemy far:
+  the alert lists `Tiefe+, Hebel+`, the civilians pull O1/B1/B2, Hebel+ leaves the list, no `outside_alert` (fails on
+  d8baec6); BREACH with a hostile inside Kern+: no Hebel+, the GATE_FAIL names Tiefe+ (fails on d8baec6: no name); a
+  2,000-frame popup pause: no cancel, no GATE_FAIL, the same pull raises O1 afterwards.
+
 Live check (next siege or a drill on Handlelock): with somebody on the B1 corridor, `events` shows
 `GATE B1 up waits: ...` and no `LEVER pull B1 up` until the corridor is clear; kern.log has no
 `raising B1 with a citizen on it`; no DEATH on (128,127..129,122).

@@ -1,5 +1,12 @@
 # CHANGELOG dfpilot
 
+## Lever burrow check in BREACH, BUG-027 (2026-10-16)
+- Run 10 y419: after `BREACH O1 not up at T+900` (enemy far) every O1/B1 lever lay in Kern+, but the BREACH alert holds the civilians in Tiefe+ and the
+  lever burrow `Hebel+` was never listed in BREACH, so nobody could pull them (`GATE_FAIL ... no worker: its levers lie outside the alert burrow`).
+  In BREACH `gate.rooms` now lists `Hebel+` while no hostile is inside Kern+ and none within 20 tiles of those levers; the GATE_FAIL names the burrows.
+- A mode change that renews an `up` epoch resets that epoch's no-worker history and bad levers. A popup pause cannot cause `no_worker` (game-tick timers).
+- Tests: three cases in `tests/lua/test_gate_footprint.lua`.
+
 ## Visitors and merchants hold a bridge pull too, BUG-027 (2026-10-16)
 - `gate.watch()` gives sense the footprints of the bridges with work; sense lists the visible friendly non-citizens there (visitors, merchants, tame
   animals) as `census.h.friends`, and gate holds the pull for them like for citizens. Test in `tests/lua/test_gate_footprint.lua`.

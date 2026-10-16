@@ -39,7 +39,8 @@
 -- lever tiles is enough: seal paints its lever burrow (seal.CFG.levers, 'Hebel+') with every linked lever of the
 -- bridges gate holds, and rooms() hands it to siege for the alert list while a pull is pending on a bridge none of
 -- whose linked levers lies in the alert's main burrow or a lever room; once the pulls are done it leaves the list and
--- the alert draws the puller back. Not in BREACH (the lever-room rule below: attacker-side levers). pulls() tells the
+-- the alert draws the puller back. In BREACH only while no hostile is inside Kern+ or near those levers (BUG-027,
+-- breach_safe; else the lever-room rule below: attacker-side levers). pulls() tells the
 -- reflex what its deferred alert waits for and which pulls the alert blocks (levers outside every alert burrow).
 local geom = require('dfllm.util.geom')
 local DT = require('dfllm.deaths')      -- BUG-027: the bridge-death match (library, no module)
@@ -649,11 +650,37 @@ local function lever_tiles()
   return list
 end
 
+-- BUG-027 lever burrow check (Run 10 y419: BREACH 'O1 not up at T+900' with the enemy far away; then GATE_FAIL "B1 not
+-- up ... no worker: its levers lie outside the alert burrow" although its levers lie in Kern+: in BREACH the alert holds
+-- the civilians in the refuge Tiefe+, and the lever burrow was never listed in BREACH, so nobody could pull a Kern+
+-- lever). In BREACH the lever burrow is listed only while no visible hostile is inside Kern+ and none is within
+-- LEVER_SAFE tiles of any linked lever of a bridge still to pull (a confined civilian walks from the refuge to the
+-- lever and back); with a hostile inside or near, the old rule holds (attacker-side levers are not used).
+M.LEVER_SAFE = 20
+local function breach_safe(K, bs)
+  local h = K.census.h
+  if type(h) ~= 'table' or K.now().tick - (h.tick or -1e9) > 200 or (h.inside or 0) > 0 then return false end
+  for name, r in pairs(rt) do
+    if needs_pull(name) and not lever_in(r, bs) then
+      for _, lid in ipairs(r.levers) do
+        local p = r.pos[lid]
+        if r.linked[lid] and type(p) == 'table' then
+          for _, e in ipairs(type(h.list) == 'table' and h.list or {}) do
+            if math.max(math.abs(e.x - p[1]), math.abs(e.y - p[2]), math.abs(e.z - p[3])) <= M.LEVER_SAFE then
+              return false
+            end
+          end
+        end
+      end
+    end
+  end
+  return true
+end
+
 -- the lever burrow for siege's alert list in `mode`, or nil: only while a pull is pending on a bridge none of whose
 -- linked levers lies on `main` (the alert's burrow) or one of `rooms`; seal paints the lever tiles (kept current: a
--- new linked lever is added on the next ask) and answers its name. Never in BREACH.
+-- new linked lever is added on the next ask) and answers its name. In BREACH only while breach_safe (BUG-027).
 local function lever_room(K, mode, main, rooms)
-  if mode == 'BREACH' then return nil end
   local bs = {}
   for _, n in ipairs(rooms) do bs[#bs + 1] = burrow(n) end
   local mb = burrow(main)
@@ -663,6 +690,7 @@ local function lever_room(K, mode, main, rooms)
     if needs_pull(name) and not lever_in(r, bs) then need = true; break end
   end
   if not need then return nil end
+  if mode == 'BREACH' and not breach_safe(K, bs) then return nil end
   local ok, n = K.call('seal', 'lever_burrow', lever_tiles())
   if ok and type(n) == 'string' and n ~= '' then
     lb_name = n
@@ -933,6 +961,13 @@ local function set_want(name, w, why, deadline, now)
   r.held_sum, r.fail_at, r.switch, r.want_ms = nil, nil, nil, nil
   dirty = true
   return true
+end
+
+-- BUG-027 lever burrow check: a mode change renews an 'up' epoch without set_want; the failures of the old epoch (the
+-- no-worker cancels and whether the alert kept everybody away then, the levers marked bad, the deadline allowance) must
+-- not decide the new one's GATE_FAIL (a SIEGE no-worker cancel made a BREACH fail read outside_alert)
+local function new_epoch(r)
+  r.nw, r.nw_out, r.bad, r.fail_at, r.switch, r.held_sum, r.block_since = 0, nil, {}, nil, nil, nil, nil
 end
 
 -- BUG-027: the ticks this epoch waited for units on the footprint (they do not count toward the deadline)
@@ -1266,7 +1301,11 @@ local function check_fail(K, name, now, mode)
   if (mode or K.mode()) == 'DRILL' then return end    -- a drill reports through drill.kpi, not A events
   if r.fail_tick and now - r.fail_tick < M.FAIL_REPEAT then return end
   r.fail_tick = now
-  local txt = why == FAIL_WHY.outside and 'no worker: its levers lie outside the alert burrow' or why
+  local txt = why
+  if why == FAIL_WHY.outside then                     -- BUG-027: name the burrows the alert holds the civilians in
+    local _, names = alert_burrows(K)
+    txt = 'no worker: its levers lie outside the alert burrow' .. (names and (' ' .. table.concat(names, ', ')) or '')
+  end
   local d = {bridge = name, want = 'up', why = why}
   if why == FAIL_WHY.blocked and r.block then         -- BUG-027: name who holds it (and the soldiers' stations)
     if #r.block > 0 then
@@ -1788,6 +1827,7 @@ M.on = {
       elseif ev.to == 'BREACH' then
         if br and br.want == 'up' and br.since < now then
           br.since, br.deadline, br.failed, dirty = now, now + M.DEADLINE, false, true
+          new_epoch(r)
         else
           set_want(name, 'up', 'breach', now + M.DEADLINE, now)
         end
@@ -1795,6 +1835,7 @@ M.on = {
         if br and br.want == 'down' then st.br[name], dirty = nil, true      -- never lower now
         elseif br and br.want == 'up' and br.since < now then                -- new epoch, siege sets the deadline
           br.since, br.deadline, br.failed, dirty = now, nil, false, true
+          new_epoch(r)
         end
       end
       control(K, name, man.bridges[name], now)   -- cancels a stale own pull at once
