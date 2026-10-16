@@ -1,5 +1,5 @@
 # BUG-031 Run 11: no usable refuge at any invasion, thirsty citizens only reported, HOSPITAL_DRY beside a cistern
-Status: fixed (offline, live-untested)
+Status: fixed in 2634e11 (offline, live-untested)
 Severity: critical (every invasion ended in "no confinement, citizens flee"; confined citizens could go thirsty without a reaction)
 Found: 2026-10-16, Run 11 fort Kilrudrabed (site98), y429, pop 54, dfpilot main 99f69f2, from the game session's events
 Module: `lua/dfllm/seal.lua` (expose, entrance_doors, choose/rate, alert_burrow, episode, groups), `lua/dfllm/siege.lua` (rescue_step), `lua/dfllm/water.lua` (well_wet, finish, recipe), `lua/dfllm/snapshot.lua` (liquids)
