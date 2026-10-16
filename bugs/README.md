@@ -40,7 +40,7 @@ Related: FR-xx, BUG-xx
 | [BUG-017](BUG-017-mood-risk-false-missing.md) | fixed (offline, live-untested) | low | MOOD_RISK reports missing materials although the mood dwarf already holds every item | lua/dfllm/care.lua |
 | [BUG-018](BUG-018-refuge-audit-ignores-entrances.md) | open | high | the refuge audit passes a burrow that contains the entrances and main halls (50 -> 1 in the first real siege) | lua/dfllm/seal.lua, siege.lua |
 | [BUG-019](BUG-019-breach-refuge-refused-for-supplies.md) | open | high | during a breach the only reachable emergency burrow is refused for missing supplies | lua/dfllm/seal.lua, siege.lua |
-| [BUG-020](BUG-020-embark-rectangle-ignores-injected-mouse.md) | open | medium | `embark.py scan` cannot place the rectangle: it ignores the held/injected mouse | tools/embark |
+| [BUG-020](BUG-020-embark-rectangle-ignores-injected-mouse.md) | mitigated (fails early; cause open) | medium | `embark.py scan` cannot place the rectangle: it ignores the held/injected mouse | tools/embark |
 | [BUG-021](BUG-021-cutoff-false-positive-group-renumber.md) | open | low | CUTOFF fires while everybody reaches everything (group ids renumber during construction) | care / seal |
 | [BUG-022](BUG-022-fortcore-stage2-build-lost-no-retry.md) | fixed (offline, live-untested) | high | fortcore stage 2 ends `build_lost` for good: B1 and the traps are never built | lua/dfllm/runner.lua |
 | [BUG-023](BUG-023-woodcutters-do-not-fetch-the-axe.md) | open | high | woodcutters never fetch the axe from the bin: no FellTree job ever runs, no logs for a year (workaround: put the axe into their hand) | lua/dfllm/economy.lua |

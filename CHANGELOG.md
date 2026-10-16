@@ -1,6 +1,6 @@
 # CHANGELOG dfpilot
 
-## Lockdown doors read back, mood needs from the attached items, build_lost retried, BUG-015/017/022 (2026-10-16; offline, live-untested)
+## Lockdown doors read back, mood needs from the attached items, build_lost retried, embark fails early, BUG-015/017/022/020 (2026-10-16; offline, live-untested)
 - **BUG-015:** reflex reads every door it forbade back on the next pass; a door whose flag fell back leaves the count and the undo, is
   named `partial lockdown: door 16970 (74,70,117) refused (flag reset)` and announced once per lockdown by the new class-A event
   `LOCKDOWN_PARTIAL` (with the units and items on its tile), and is tried once more (forbidden + closed, `act.door_forbid` `close`)
@@ -17,6 +17,9 @@
   from its dig stage once those tiles are revealed or more missing cells stand on open floor (checked daily, at the latest a season
   later, 8 retries). PROJECT_BLOCKED follows the cadence rule (once per project, stage and cause; the budget spent once more) and names
   the missing pieces (`missing B1, lever B1 x3, trap`, d `missing`, `retry`). Tests in `tests/lua/test_runner.lua`.
+- **BUG-020 (mitigated):** `embark.py scan` stops early with `local.place: rectangle does not follow the mouse: held A and B,
+  rectangle stays at X` when two confirmed misses for different held pixels show the same rectangle, instead of learning a k from
+  them and running the hold out of the window; the cause stays open. Test in `tests/lua/test_embark.lua`.
 
 ## Trade: retry before the caravan leaves, diagnostics, ledger for lost visits, BUG-026 (2026-10-16)
 - A retry after `ui_timeout` etc. waits at most `time left - 400` ticks (min 100) instead of a fixed 1200, so it still runs before the caravan leaves.
