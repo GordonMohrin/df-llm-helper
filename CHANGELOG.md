@@ -1,5 +1,16 @@
 # CHANGELOG dfpilot
 
+## Run 10 batch merged: what to do after `git pull` (2026-10-16)
+- Reload: `dfhack-run dfllm reload` (kernel parts: SIEGE_UNREADY, LOCKDOWN_PARTIAL, TOOL_BLOCKED, refuge levels, CUTOFF re-read,
+  build_lost retry, mood cloth kinds); restart `dfllm follow --no-auto` (it audits again; `--no-audit` switches that off).
+- Audit now: `python -m dfpilot audit`; drill by hand: `python -m dfpilot cmd drill '{"why":"manual check"}'`.
+- Refuge (BUG-018/019): an `Innen+` painted before this version may contain exposed tiles and stay refused: delete it on the
+  burrows screen, seal repaints it. `inspect what=refuge` shows `open`, `exp`, `dead`, `hint`. Forts with doorless entrances now
+  often get `flee` (alert off) instead of a confinement with the enemy.
+- Tools (BUG-023): the kernel reports `TOOL_BLOCKED`; the switch `tools.equip_update` stays off until Gordon says yes (fair play).
+- Still open in this batch: trade (BUG-026 cause: priority and clock while trading, `cloth:plant`, `trade.retry`,
+  `wanted_matches`) and the rest of BUG-027 (alert first, backup lever, BRIDGE_CRUSH); they follow in the next commits.
+
 ## Siege readiness gate FR-65, audit and drill with `follow --no-auto` (2026-10-16; branch fix-ready, offline, live-untested)
 - **Run 10 (Handlelock): `audit FAIL never` and `drill never` for the whole fort.** The session ran `dfllm follow --no-auto`,
   which also switched off the audit job (the only sender of the `audit` verb), `dfllm cmd audit` is refused by design
