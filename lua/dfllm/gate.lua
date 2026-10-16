@@ -6,7 +6,7 @@
 -- raised it with goblins far away; no combat report, one "missing"): that holds for raising and lowering, in every
 -- mode, and for every unit that is not hostile: fort members by census id (citizens, residents, soldiers and
 -- recruits, insane ones), the fort's tame animals (census.a) and the friendly units sense lists near the footprints
--- gate watches (census.h.friends, when sense lists them). The lever is pulled when the puller finishes
+-- gate watches (census.h.friends, gate.watch). The lever is pulled when the puller finishes
 -- the job, so a pending pull of ours is cancelled (the UI cancel) as soon as such a unit comes on or next to the
 -- footprint, and queued again once it is clear. A bridge is never raised onto a unit only because the wait was long
 -- (the old SIEGE/BREACH rule raised after 300 ticks and ignored the margin and the pending check: the Run 10 deaths);
@@ -72,8 +72,9 @@ M.PULL_ALLOW = 300
 -- the footprint while the pull was pending or the bridge moved) for MOVES_KEEP ticks after it settled; a death that
 -- matches one (dfllm.deaths.bridge) is BRIDGE_CRUSH (A) and care's DEATH cause `crushed` (src bridge)
 M.MOVES_KEEP, M.MOVES_MAX, M.SEEN_MAX = 2400, 16, 40
+M.WATCH_R = 6              -- BUG-027: sense lists friendly non-citizens within this many tiles of a watched footprint
 M.NAME_MAX = 3             -- units named in a GATE / GATE_FAIL / GATE_FORCED text
-M.HOLD_LOG = 300           -- ticks between kern.log lines of one bridge's changing holders
+M.HOLD_LOG = 25            -- ticks between kern.log lines of one bridge's new holders
 M.SETTLE = 50              -- ticks after a pull job left the queue before another may be queued
 M.DEADLINE = 900           -- default: an 'up' not reached by then -> GATE_FAIL (A)
 M.DOWN_GUARD = 30          -- 'down' refused while a visible hostile is this close to the bridge
@@ -928,7 +929,7 @@ local function set_want(name, w, why, deadline, now)
                  deadline = w == 'up' and (deadline or now + M.DEADLINE) or nil, failed = false}
   local r = runtime(name)
   r.bad, r.nw, r.block_since, r.lat0, r.nw_out = {}, 0, nil, nil, nil
-  r.block, r.block_ev, r.hold_log, r.forced_ev = nil, nil, nil, nil
+  r.block, r.block_ev, r.hold_log, r.forced_ev, r.hold_seen = nil, nil, nil, nil, nil
   r.held_sum, r.fail_at, r.switch, r.want_ms = nil, nil, nil, nil
   dirty = true
   return true
@@ -1025,20 +1026,25 @@ local function cut(s, n)
   return #s <= n and s or s:sub(1, n)
 end
 
--- BUG-027: the bridge waits for the units that hold it: one GATE (C) per epoch naming them, then a kern.log line when
--- the set changes (at most every HOLD_LOG ticks: a corridor bridge sees a stream of passers-by)
+-- BUG-027: the bridge waits for the units that hold it: one GATE (C) per epoch naming them, then a kern.log line when a
+-- unit not named yet in this epoch holds it (news only, at most every HOLD_LOG ticks: a corridor sees passers-by)
 local function note_hold(K, name, fp, w, hold, now)
   local r = runtime(name)
   r.block = hold
   local txt = who(hold, fp)
-  local sig = table.concat(ids_of(hold), ',')
   if not r.block_ev then
-    r.block_ev, r.hold_sig, r.hold_log = true, sig, now
+    r.block_ev, r.hold_seen, r.hold_log = true, {}, now
+    for _, e in ipairs(hold) do r.hold_seen[e.id] = true end
     K.emit('GATE', 'C', cut(name .. ' ' .. w .. ' waits: ' .. txt, 200),
            {bridge = name, state = 'blocked', units = ids_of(hold)})
     K.log(FORCE_MODES[K.mode()] and 'warn' or 'info', 'gate: %s %s waits for %s', name, w, txt)
-  elseif sig ~= r.hold_sig and now - (r.hold_log or -M.HOLD_LOG) >= M.HOLD_LOG then
-    r.hold_sig, r.hold_log = sig, now
+    return
+  end
+  local seen, news = r.hold_seen or {}, false
+  for _, e in ipairs(hold) do if not seen[e.id] then news = true end end
+  if news and now - (r.hold_log or -M.HOLD_LOG) >= M.HOLD_LOG then
+    for _, e in ipairs(hold) do seen[e.id] = true end
+    r.hold_seen, r.hold_log = seen, now
     K.log('info', 'gate: %s %s still waits for %s', name, w, txt)
   end
 end
@@ -1609,6 +1615,21 @@ function M.waiting(K, bridge)
   if r.fail_at then return K.now().tick < r.fail_at and 'pulling' or nil end   -- the allowance after the deadline
   if r.last == 'moving' or (r.job and r.job.taken) then return 'pulling' end
   return nil
+end
+
+-- public (BUG-027, sense): boxes {x0, y0, z0, x1, y1, z1} around the footprints of the bridges with work now (a want not
+-- reached, a pull pending, moving), grown by WATCH_R on their z; sense lists the visible friendly non-citizens in them
+-- (visitors, merchants, tame animals) as census.h.friends, so they hold the pull too. nil when none has work.
+function M.watch(K)
+  local list = {}
+  for name, r in pairs(rt) do
+    local br = st.br[name]
+    local fp = r.foot
+    if fp and (r.job or r.mv or r.last == 'moving' or (br and br.want and br.want ~= r.last)) then
+      list[#list + 1] = {fp[1] - M.WATCH_R, fp[2] - M.WATCH_R, fp[3], fp[4] + M.WATCH_R, fp[5] + M.WATCH_R, fp[6]}
+    end
+  end
+  return #list > 0 and list or nil
 end
 
 -- public (BUG-027, care): the recorded bridge moves, oldest first, as plain copies: {t, t1, b, bid, fp, to, pull, lever,

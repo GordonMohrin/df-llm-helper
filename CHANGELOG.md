@@ -1,5 +1,9 @@
 # CHANGELOG dfpilot
 
+## Visitors and merchants hold a bridge pull too, BUG-027 (2026-10-16)
+- `gate.watch()` gives sense the footprints of the bridges with work; sense lists the visible friendly non-citizens there (visitors, merchants, tame
+  animals) as `census.h.friends`, and gate holds the pull for them like for citizens. Test in `tests/lua/test_gate_footprint.lua`.
+
 ## BRIDGE_CRUSH and the death cause `crushed` by a bridge, BUG-027 (2026-10-16)
 - gate records each bridge move (the pull, the move window, the units it saw within 5 tiles of the footprint while it pulled or the bridge moved);
   public `gate.moves()`; GATE `moving` names units on or next to the footprint.

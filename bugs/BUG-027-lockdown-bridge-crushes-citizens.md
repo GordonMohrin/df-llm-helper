@@ -137,6 +137,15 @@ on B1 is crushed at once; a found body on the footprint and DRAWBRIDGE name the 
 away stays unknown); `tests/lua/test_gate_footprint.lua` (in a siege a foreign pull moves B1 with a miner on it: GATE
 `moving` names him, his "missing" death is BRIDGE_CRUSH `seen` once; a death far from any move is none).
 
+### Part 4: visitors and merchants (Claude, 2026-10-16)
+- While gate has a bridge with work, `gate.watch()` hands sense boxes around those footprints (+6 tiles); sense's hostile
+  scan lists the visible friendly non-citizens in them (visitors, diplomats, merchants, tame animals such as pack
+  animals; no wild animals) as `census.h.friends` (<= 40), and gate follows them by id like the citizens. Only while a
+  bridge has work, so the per-unit cost of the scan (FR-62) stays as it was otherwise. A unit not named yet in an epoch
+  is logged (`gate: B1 up still waits for merchant 900 on the footprint, ...`, at most every 25 ticks).
+- Test `tests/lua/test_gate_footprint.lua`: a merchant on B1 and his pack animal next to it hold the SIEGE raise, a wild
+  animal next to it does not.
+
 Live check (next siege or a drill on Handlelock): with somebody on the B1 corridor, `events` shows
 `GATE B1 up waits: ...` and no `LEVER pull B1 up` until the corridor is clear; kern.log has no
 `raising B1 with a citizen on it`; no DEATH on (128,127..129,122).

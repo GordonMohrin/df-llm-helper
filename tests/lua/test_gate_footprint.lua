@@ -224,4 +224,30 @@ T.test('BUG-027 BRIDGE_CRUSH: in a siege a foreign pull (the player\'s, or one f
   T.eq(#W.find_events('BRIDGE_CRUSH'), 1)
 end)
 
+T.test('BUG-027: a merchant (and his pack animal) on B1 hold the SIEGE raise (census.h.friends via gate.watch); a ' ..
+       'wild animal does not', function()
+  local W = world{units = cast({{id = 900, pos = {51, 40, Z}, merchant = true},
+                                {id = 901, pos = {50, 41, Z}, tame = true, animal = true},
+                                {id = 902, pos = {52, 41, Z}, animal = true}})}
+  W.event('INVASION', {id = 11})
+  run(W, 200)
+  T.eq(#S.pulls(W, 'B1'), 0, 'held for the merchant')
+  local f = {}
+  for _, e in ipairs(W.K.census.h.friends or {}) do f[e.id] = e.k end
+  T.eq(f, {[900] = 'merchant', [901] = 'animal'}, 'sense lists the friends near the watched footprint, no wild animal')
+  local said                                   -- the first GATE line named the animal (census.a); the merchant came
+  for _, l in ipairs(W.logs) do                -- with sense's next scan of the watch box: the kern.log line
+    if tostring(l.msg):find('B1 up still waits for merchant 900 on the footprint, animal 901 next to it', 1, true) then
+      said = true
+    end
+  end
+  T.ok(said, 'kern.log names the merchant')
+  W.move(900, 70, 70, Z)
+  W.move(901, 70, 71, Z)
+  run(W, 200)
+  T.eq(S.bstate(W, 'B1'), 'up', 'the wild animal 902 next to it does not hold the raise')
+  T.eq(W.K.call('gate', 'watch'), true)
+  T.eq(select(2, W.K.call('gate', 'watch')), nil, 'nothing to watch once B1 is up')
+end)
+
 T.done()
