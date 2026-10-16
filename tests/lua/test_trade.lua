@@ -276,6 +276,32 @@ T.test('flow: a merchant who never agrees -> one retry, then failed, toggles res
   T.eq(U.offers, offers)                       -- no third attempt this visit
 end)
 
+T.test('BUG-026: the retry waits no longer than the caravan stays; the event names phase and time left', function()
+  local W, M, d, c, U = setup{ui = {accept = 50}, tr = 700}   -- the caravan leaves in 700 ticks
+  W.frame(1)
+  to_depot(W, d, c)
+  T.ok(F.until_(W, function() return #F.events(W, 'retry') > 0 end, 1500), 'retry')
+  local ev = F.events(W, 'retry')[1].d
+  T.eq(type(ev.ph), 'string')
+  T.eq(type(ev.ph_ms), 'number')
+  T.eq(ev.left, 700)
+  -- RETRY_WAIT 1200 would outlast the caravan; 700 - 400 = 300 does not: both attempts fit in 1000 ticks
+  T.ok(F.until_(W, function() return #F.events(W, 'failed') > 0 end, 1000), 'second attempt before the caravan leaves')
+end)
+
+T.test('BUG-026: a caravan that leaves from the depot with no trade still gets a ledger entry', function()
+  local W, M, d, c, U = setup{}
+  W.frame(1)
+  to_depot(W, d, c, {no_trader = true, ticks = 250})
+  F.remove_caravans()
+  W.run(300, {skip = 9})
+  local ev = W.find_events('TRADE_LEDGER')
+  T.eq(#ev, 1)
+  T.eq(ev[1].d.ok, 0)
+  T.ok(tostring(ev[1].d.unmet[1]):find('left_untraded'), tostring(ev[1].d.unmet[1]))
+  T.eq(#F.events(W, 'left'), 1)
+end)
+
 T.test('BUG-016: a retry does not haul the sale items again (once per visit)', function()
   local W, M, d, c, U = setup{ui = {accept = 50}, plan = {v = 2, year = 3, phase_target = 'P4',
     seasons = {{build = {}}, {build = {}}, {build = {}}, {build = {}}},

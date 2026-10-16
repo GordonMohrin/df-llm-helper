@@ -69,6 +69,8 @@ M.CFG = {
   NOGOODS_WAIT = 1200,  -- ticks at the depot without any merchant goods (caravan.goods and the depot's trader items): the visit ends, nothing is hauled
   BRING_MAX = 100,      -- sale items marked for the depot per visit (BUG-016; was the reused ITEMS)
   RETRY_WAIT = 1200, MAX_TRIES = 2,
+  RETRY_MIN = 100,      -- BUG-026: a retry waits at most (time left - RETRY_KEEP) ticks, never less than this
+  RETRY_KEEP = 400,
   STUCK_APPROACH = 4800,-- ticks Approaching without reaching the depot -> fix/stuck-merchants
   STUCK_STATE = 1200,   -- ticks in trade_state Stuck -> fix/stuck-merchants
   O1_EVERY = 600,       -- ticks between two gate.want('down') for the same bridge
@@ -924,6 +926,7 @@ local function finish(K, ok, why, ratio)
     caravan_ev(K, 'traded', ent, {ratio = ratio},
                string.format('traded with %s, ratio %d.%02d', civ_name(ent), ratio // 100, ratio % 100))
     ledger(K, ent, true, 'traded', ratio)
+    if v then v.ledgered = 1 end
     return set_phase(K, 'LEAVE', 'traded')
   end
   if v and why ~= 'ui_busy' then v.tries, dirty = v.tries + 1, true end   -- the player's screen costs no try
@@ -941,18 +944,31 @@ local function finish(K, ok, why, ratio)
                  'trade with ' .. civ_name(ent) .. ' blocked: a player screen is open (' .. fc .. '); close it')
     end
   else
-    caravan_ev(K, retry and 'retry' or 'failed', ent, {why = why},
-               'trade with ' .. civ_name(ent) .. (retry and ' retries: ' or ' failed: ') .. tostring(why))
+    -- BUG-026: say which phase ran how long (a ui_timeout used to name nothing) and how much visit time is left
+    local car = car_of(read_caravans(), ent)
+    caravan_ev(K, retry and 'retry' or 'failed', ent,
+               {why = why, ph = rt.phase, ph_ms = f and f.ph_ms and (K.now().ms - f.ph_ms) or -1, left = car and int(car.tr) or -1},
+               'trade with ' .. civ_name(ent) .. (retry and ' retries: ' or ' failed: ') .. tostring(why) ..
+               ' (' .. tostring(rt.phase) .. (car and (', ' .. int(car.tr) .. ' ticks left') or '') .. ')')
   end
   if retry then
-    v.retry = K.now().tick + M.CFG.RETRY_WAIT
+    -- BUG-026 (Run 10, Muboomon y416: ui_timeout, then RETRY_WAIT 1200 > the 962 ticks the caravan had left)
+    local wait = M.CFG.RETRY_WAIT
+    local car = car_of(read_caravans(), ent)
+    if car and int(car.tr) > 0 then
+      wait = math.min(wait, math.max(M.CFG.RETRY_MIN, int(car.tr) - M.CFG.RETRY_KEEP))
+    end
+    v.retry = K.now().tick + wait
     local nf = {ph_ms = K.now().ms, ph_tick = K.now().tick}
     for _, k in ipairs({'req', 'anyone', 'fb', 'fs', 'g_val', 'g_up', 'g_tick', 'need'}) do nf[k] = f and f[k] end
     rt.f = nf
     return set_phase(K, 'WAIT', why)
   end
   restore_toggles(K, v)
-  if why ~= 'ui_busy' then ledger(K, ent, false, why, 0) end
+  if why ~= 'ui_busy' then
+    ledger(K, ent, false, why, 0)
+    if v then v.ledgered = 1 end
+  end
   set_phase(K, 'LEAVE', why)
 end
 
@@ -1003,6 +1019,14 @@ local function track_visits(K, cars, now)
         rt.phase, rt.ent, rt.f, rt.job = 'IDLE', nil, nil, nil
       end
       restore_toggles(K, v)
+      -- BUG-026: a caravan that reached the depot and left with no ledger entry (a pending retry, a wait that never
+      -- ended) is still a lost visit: write it, so TRADE_LEDGER and inspect what=trade show it
+      if (v.ledgered or 0) == 0 and v.at >= 0 and (v.traded or 0) == 0 then
+        local keep = rt.ent
+        rt.ent = ent
+        ledger(K, ent, false, 'left_untraded', 0)
+        rt.ent = keep
+      end
       st.visits[key], dirty = nil, true
       caravan_ev(K, 'left', ent, {ratio = v.ratio or 0})
     end
@@ -1405,7 +1429,7 @@ end
 
 ---------------------------------------------------------------- module
 local VISIT_KEYS = {'first', 'at', 'tries', 'traded', 'stuck', 'set', 'orig_r', 'orig_a', 'retry', 'ratio',
-                    'stuck_since', 'nodepot', 'brought', 'blocked'}
+                    'stuck_since', 'nodepot', 'brought', 'blocked', 'ledgered'}
 local NEG_DEFAULT = {at = true, retry = true, stuck_since = true}
 
 function M.init(K)
