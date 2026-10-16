@@ -11,7 +11,8 @@
 --     reports it waiting (units on its footprint, its pull under way) and no hostile is within NEAR_RAISE of it.
 --   BUG-028 (stranded citizens, see that section): a first raise that would cut citizens off from drink or food waits
 --     for a hostile at the gate; citizens thirsty or hungry behind raised gates get the inner/core bridges lowered once
---     the outside is sealed (a rescue); BREACH falls back to SIEGE once the fort is sealed again.
+--     the outside is sealed (a rescue); BREACH falls back to SIEGE once the fort is sealed again. BUG-031: thirsty or
+--     hungry in the alert's own burrow with the stock on their walk group: seal refuses that burrow (relax).
 --   RECOVERY after 2,400 quiet ticks; on quiet time +1,200 B2 then B1 down and alert off,
 --     +2,400 O1 down, +8,400 PEACE and SIEGE_END (A). Any visible invader -> SIEGE again.
 -- Non-invader hostiles count only within reach of the fort (threat.lua), the same rule for entry,
@@ -330,6 +331,77 @@ local function needs_txt(e)
   return (e.need.drink and e.need.food) and 'drink and food' or (e.need.drink and 'drink' or 'food')
 end
 
+-- a patient (water's rule: needs health care or rests in bed): his thirst is the caregivers' business (water module)
+local function patient(u)
+  local ok, yes = pcall(function()
+    if u.health and u.health.flags.needs_healthcare then return true end
+    local j = u.job and u.job.current_job
+    return j ~= nil and j.job_type == df.job_type.Rest
+  end)
+  return ok and yes == true
+end
+
+-- (e) BUG-031 (Run 11: STRANDED 'no rescue (the outside is not verified sealed)' for single citizens while the alert
+-- held them in Tiefe+ without drink, no bridge in their way): citizens (soldiers and patients excluded) over a mark on
+-- a walk group that has the drink or food, standing in a burrow of the sounding civ alert: the confinement keeps them
+-- from it. seal marks that burrow dry when its audit finds none of it there (seal.dry), and the alert decision of this
+-- step (apply) confines to a burrow that has it or turns the alert off, even in a lockdown. STRANDED relax names them
+-- (once per news).
+local function relax_step(K, G)
+  if not mem.burrow or (alert_idx() or 0) == 0 then return end
+  local bs = {}
+  for _, n in ipairs(type(mem.alist) == 'table' and mem.alist or {mem.burrow}) do
+    local ok, b = pcall(dfhack.burrows.findByName, n)
+    if ok and b then bs[#bs + 1] = {n, b} end
+  end
+  if #bs == 0 then return end
+  local cu = K.census.u
+  local sold = {}
+  for _, id in ipairs(type(cu) == 'table' and type(cu.soldier_ids) == 'table' and cu.soldier_ids or {}) do
+    sold[id] = true
+  end
+  local by, names = {}, {}
+  for _, gid in ipairs(sorted_keys(G.cit)) do
+    for _, c in ipairs(G.cit[gid]) do
+      local u = not sold[c[1]] and df.unit.find(c[1])
+      if u and not patient(u) then
+        local th, hu = counter(u, 'thirst_timer'), counter(u, 'hunger_timer')
+        local nd = th > M.STRAND_THIRST and G.drink[gid] == true
+        local nf = hu > M.STRAND_HUNGER and G.food[gid] == true
+        if nd or nf then
+          for _, e in ipairs(bs) do
+            local ok, v = pcall(dfhack.burrows.isAssignedTile, e[2], {x = c[2], y = c[3], z = c[4]})
+            if ok and v == true then
+              local r = by[e[1]]
+              if not r then
+                r = {ids = {}, thirst = 0, hunger = 0, need = {}, pos = {c[2], c[3], c[4]}, g = gid}
+                by[e[1]], names[#names + 1] = r, e[1]
+              end
+              r.ids[#r.ids + 1] = c[1]
+              r.thirst, r.hunger = math.max(r.thirst, th), math.max(r.hunger, hu)
+              if nd then r.need.drink = true end
+              if nf then r.need.food = true end
+              break
+            end
+          end
+        end
+      end
+    end
+  end
+  for _, name in ipairs(names) do
+    local r = by[name]
+    table.sort(r.ids)
+    local ok, marked, why = K.call('seal', 'dry', name, r.need, #r.ids)
+    if ok and marked then
+      stranded(K, 'relax', string.format('%d citizen%s confined to %s without %s (thirst %d, hunger %d; it is on their '
+               .. 'walk group): the alert lets them out (%s)', #r.ids, #r.ids == 1 and '' or 's', name, needs_txt(r),
+               r.thirst, r.hunger, tostring(why)),
+               {n = #r.ids, units = r.ids, grp = r.g, thirst = r.thirst, hunger = r.hunger, pos = r.pos,
+                need = needs_txt(r), burrow = name, why = 'confined'}, r.ids, {'relax', name})
+    end
+  end
+end
+
 -- (a) the rescue: open one, watch one, close it
 local function rescue_step(K, a, g, now)
   local str = st.str
@@ -397,6 +469,7 @@ local function rescue_step(K, a, g, now)
   if not any then return end
   local G = groups(K)
   if not G then return end
+  relax_step(K, G)                                         -- (e) BUG-031: the confinement, not a bridge
   local e = cut_off(K, G)
   if not e then return end
   local base = string.format('%d citizens on walk group %d without %s (thirst %d, hunger %d)', #e.ids, e.g,
@@ -409,7 +482,9 @@ local function rescue_step(K, a, g, now)
   elseif a and (a.inside or 0) > 0 then why = 'a hostile inside'
   elseif not outer_up(K, g) then why = 'an outer bridge is not up'
   elseif not G.sealed then
-    why = 'the outside is not verified sealed'
+    -- BUG-031: the way in the entrance check found (a door does not split DF's walk groups: a doored entrance is a
+    -- route to the map edge; only raised bridges and walls seal for a rescue)
+    why = 'the outside is not verified sealed' .. (G.leak and (': ' .. G.leak) or '')
     K.call('seal', 'entrance_doors', true)               -- a fresh check (urgent)
   else
     for _, gid in ipairs(gs) do

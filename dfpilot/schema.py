@@ -433,7 +433,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i missing:sa retry:i")),
     "YEAR_REVIEW": ("A", "kern", _d(opt="year:i")),
     "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa")),
-    "HOSPITAL_DRY": ("A", "water", _d("why:s", "patients:i zone:i near:i recipe:s")),
+    # BUG-031: cistern = why the nearest cistern room does not serve the hospital (no well, its well over 0/7, too far)
+    "HOSPITAL_DRY": ("A", "water", _d("why:s", "patients:i zone:i near:i recipe:s cistern:s")),
     "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i nosrc:sa route:s")),
     # class A since Run 9 (an army walked in while these were digest-only): they wake at once
     "SIEGE_START": ("A", "siege", _d(opt="vis:i inv:i great:i why:s")),
@@ -451,8 +452,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "PERIMETER_BROKEN": ("A", "seal", _d("n:i", "pos:p kinds:sa requeued:i why:s")),
     "SEAL_LEAK": ("A", "seal", _d("routes:i", "pos:p bld:s state:s why:s")),
     # BUG-018/019, FR-67: level of the fallback (SIEGE, SOFT, HOLD, BREACH, DEAD), flee (no separated burrow: no
-    # confinement), open (the entrances that reach the refused burrow, "x,y,z kind")
-    "REFUGE_FAIL": ("A", "seal", _d("burrow:s", "fallback:s why:s tiles:i inside:i mode:s level:s flee:f open:sa")),
+    # confinement), open (the entrances that reach the refused burrow, "x,y,z kind"); BUG-031: open = the tiles they
+    # lead in by (also beside a door that leaves them open), fix = the seal template's `at` that closes them, dry = a
+    # burrow was refused because the citizens it held went thirsty or hungry there
+    "REFUGE_FAIL": ("A", "seal", _d("burrow:s", "fallback:s why:s tiles:i inside:i mode:s level:s flee:f open:sa "
+                                                "fix:s dry:f")),
     "AUTOLABOR_LEGACY": ("A", "baseline", _d("fixed:f", "why:s after:s")),
     # FR-64: >= 2 citizens died of dehydration or starvation within a month (the class-A twin of DEATH_CLUSTER)
     "DEATHS_PREVENTABLE": ("A", "care", _CLUSTER),
@@ -468,9 +472,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-027: a unit died on or next to a bridge just pulled or moving (gate's move records, dfllm.deaths.bridge)
     "BRIDGE_CRUSH": ("A", "gate", _d("bridge:s unit:i", "bid:i pull:i t:i to:s how:s k:s pos:p")),
     # BUG-028: citizens cut off from drink/food by our raised gates; phase hold (a raise waits), forced (raised: a
-    # hostile at the gate), rescue (inner/core bridges lowered), refused (no rescue: why), done, abort
+    # hostile at the gate), rescue (inner/core bridges lowered), refused (no rescue: why), done, abort; BUG-031:
+    # relax (the civ alert's burrow kept them from drink/food on their own walk group: seal refuses it now; burrow)
     "STRANDED": ("A", "siege", _d("phase:s", "n:i units:ia grp:i thirst:i hunger:i bridges:sa why:s need:s pos:p "
-                                             "left:i hostile:i")),
+                                             "left:i hostile:i burrow:s")),
     # BUG-028: the main part of a drink or food stock lies outside Kern+ and the refuge; days = what lies inside
     "SUPPLY_OUTSIDE": ("A", "seal", _d("cls:s", "inside:i total:i pct:i days:i want:i hint:s also:s")),
     # Gordon 2026-10-16: an intake wave (kind intake) or a sortie through O1 (kind sortie) went wrong: why losses,

@@ -83,7 +83,8 @@ C.EVENTS = {
   GATE_FORCED = {cls = 'A', by = 'gate'},
   -- BUG-027: a unit died on or next to a bridge just pulled or moving (gate's move records)
   BRIDGE_CRUSH = {cls = 'A', by = 'gate'},
-  -- BUG-028: citizens cut off from drink/food by our raised gates (a raise held or forced, a rescue and its end)
+  -- BUG-028: citizens cut off from drink/food by our raised gates (a raise held or forced, a rescue and its end);
+  -- BUG-031: relax, the civ alert's burrow kept them from it
   STRANDED = {cls = 'A', by = 'siege'},
   -- BUG-028: the main part of the drink or food stock lies outside the lockable core (Kern+ and the refuge)
   SUPPLY_OUTSIDE = {cls = 'A', by = 'seal'},

@@ -233,9 +233,11 @@ function M.tile(K, x, y, z)
   return {c = c, dig = dig, bld = bld, flow = des.flow_size or 0, magma = des.liquid_type == true}
 end
 
--- water tiles of one level rect (FR-47, water's water_sources scan): {{x, y, flow}} of revealed, non-magma
+-- water tiles of one level rect (FR-47, water's water_sources scan): {{x, y, flow, cavern}} of revealed, non-magma
 -- tiles with flow >= min (default 1), at most M.CFG.liquid_tiles tiles read and 512 returned per call (the
--- caller slices the box). Hidden tiles are skipped: no water_table, no unrevealed water.
+-- caller slices the box). Hidden tiles are skipped: no water_table, no unrevealed water. cavern = 1 on a revealed
+-- cavern tile (designation.feature_global, the export's cavern mark; BUG-031: cavern water is never a hospital's
+-- source), else 0
 function M.liquids(K, x0, y0, x1, y1, z, min)
   x0, y0, x1, y1, z, min = int(x0), int(y0), int(x1), int(y1), int(z), int(min) or 1
   local out = {}
@@ -249,7 +251,7 @@ function M.liquids(K, x0, y0, x1, y1, z, min)
         local f = int(des.flow_size) or 0
         local lt = des.liquid_type
         if f >= min and not (lt == true or (lt ~= false and lt ~= nil and lt ~= 0)) then
-          out[#out + 1] = {x, y, f}
+          out[#out + 1] = {x, y, f, des.feature_global == true and 1 or 0}
           if #out >= 512 then return out end
         end
       end

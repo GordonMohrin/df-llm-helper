@@ -1,5 +1,40 @@
 # CHANGELOG dfpilot
 
+## Run 11: a usable refuge at every invasion, the alert lets thirsty citizens out, HOSPITAL_DRY names the cistern, BUG-031 (2026-10-16; offline, live-untested)
+- **Why (Run 11, Kilrudrabed y429, pop 54):** every invasion said `REFUGE_FAIL Kern+: open to 1 entrance 127,121,143 Door (62 steps)` and
+  `no confinement, citizens flee` although fortcore stage 3 had built Tiefe+; single thirsty citizens got `STRANDED ... no rescue (the outside
+  is not verified sealed)` while the alert held them in Tiefe+ without drink; HOSPITAL_DRY said `... a cistern` every month beside a cistern.
+- **Entrances beside a door (seal):** an opening is all the touching inside tiles next to the outside, and a door on one of them (the seal
+  template puts it on the first) leaves the others open. The exposure flood now keeps one label per start tile: REFUGE_FAIL and `inspect
+  refuge` name the tiles the flood entered by (`open to 1 entrance 25,10,9 floor +1 beside door 25,9,9`, `(door not built)` for a placed
+  door nobody built), `d.fix` / `fix` = the seal template's `at` (`25,10,9 floor;25,11,9 floor`), the message adds `close it: seal at=...`,
+  `hint` the `bp.place` command. `seal.entrance_doors().open` lists these tiles (`door` 1, `note`), so the lockdown text, SIEGE_UNREADY `ents`
+  and `seal at=last` close them.
+- **Breach days per episode (seal):** a lockdown in PEACE that took the dead end opened the 7 days without counts for good, and every later
+  invasion found them spent (flee). They end now once neither a gated mode nor a lockdown holds; a refuge with its own drink/well and food is
+  not bound to them; a spent window is named in the flee text. The refuge is a SIEGE/SOFT-level candidate after `Innen+` (a stocked refuge
+  holds a siege when an opening reaches Kern+).
+- **Thirst in the alert's burrow (siege + seal):** citizens (soldiers and patients excluded) over thirst/hunger 30,000 in a burrow of the
+  sounding civ alert, with the drink/food on their walk group: `seal.dry` marks the burrow when its audit finds none there, every level
+  refuses it for the episode, and the alert moves to a burrow that has it or goes off (also in a lockdown). STRANDED (A) phase `relax`
+  (`burrow`), REFUGE_FAIL `dry`. `refused ... the outside is not verified sealed` names seal's leak (`leak at x,y,z Door closed`).
+- **Hospital water (water + snapshot):** the nearest cistern room of the manifest is named with what its well lacks (`its well 77 stands
+  over 0/7 (dry) at x,y,z`, no well, not built, `47 tiles from the hospital (> 30)`) in `why`, `d.cistern` and the recipe; no cistern
+  PROJECT_REQUEST while one stands within 30 tiles. Cavern water (`snapshot.liquids` 4th value: a revealed cavern tile) is listed in
+  `inspect water_sources` (`cavern` 1) but never offered (caverns stay sealed); no cavern access was added.
+- Contracts: REFUGE_FAIL `fix`, `dry`; STRANDED phase `relax`, `burrow`; HOSPITAL_DRY `cistern` (schema, CONTRACTS appendix and rows);
+  public `seal.dry`, `seal.groups().leak`, `seal.entrance_doors` `open` gaps, `snapshot.liquids` cavern flag; RULES §7 rows STRANDED,
+  HOSPITAL_DRY, REFUGE_FAIL. Bug file BUG-031.
+- Tests: `tests/lua/test_seal_refuge.lua`, `tests/lua/test_stranded.lua`, `tests/lua/test_water_fr.lua` (all new cases fail on 99f69f2).
+- **How to use:** nothing new for the loop. A REFUGE_FAIL with `close it: seal at=...` is placed as `dfllm cmd bp.place
+  '{"tpl":"seal","site":"S1","p":{"at":"<fix>"}}'` (or `at=last` once SIEGE_UNREADY named them); STRANDED `relax` needs no action.
+- **Live check:** after `git pull` and `dfhack-run dfllm reload`, `dfllm cmd inspect '{"what":"refuge"}'`: Kern+ `open` names the tiles beside
+  127,121,143 (not the door), `fix` and `hint` give the seal; `dfllm cmd inspect '{"what":"entrances"}'` counts them as openings without a door.
+  Place the seal; once built, `inspect refuge` shows Kern+ and Tiefe+ `sep` 1 and the choice SIEGE `Kern+`. In the next lockdown REFUGE_FAIL
+  (if any) names a burrow, not `citizens flee`, and `inspect refuge` shows `bsince` empty again once the lockdown has ended (kern.log `episode
+  over`). The next HOSPITAL_DRY names the cistern and the depth under its well; `inspect water_sources` shows the z127 lake with `cavern` 1
+  and its `d`.
+
 ## No P3+ without a separated refuge with beds; template `refuge_beds` (2026-10-16; offline, live-untested)
 - **Why (Run 10, post-mortem root cause 5):** Tiefe+ was never usable (beds 8 < 27, open to the entrance 95,127,123,
   58 steps), Kern+ lay on the attack path, at pop 110 there was no safe room; no template could add beds to the refuge
