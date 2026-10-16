@@ -223,6 +223,32 @@ T.test('PREDATOR: a wild danger on a roofed tile of the citizens group; none on 
   T.eq(#events(W, 'ARRIVAL'), 0, 'a wild animal is no army: no lockdown')
 end)
 
+T.test('Run 10: a roofed wild danger far from every citizen is PREDATOR_FAR (B), no lockdown; one near a citizen is PREDATOR', function()
+  local units = S.fort_units()
+  units[#units + 1] = S.danger(400, 150, 30)         -- the map edge, 70+ tiles from Kern+, no citizen outside Kern+
+  local W = setup{tag = 'predfar', manifest = false, units = units}
+  S.run(W, 200)
+  T.eq(#events(W, 'PREDATOR'), 0, 'no class A interrupt')
+  local f = events(W, 'PREDATOR_FAR')
+  T.eq({#f, f[1].cls, f[1].d.id, f[1].d.dc}, {1, 'B', 400, -1})
+  T.eq(#events(W, 'LOCKDOWN'), 0)
+  T.eq(W.state().alarm.unacked, 0, 'nothing to ack, no clock hold')
+  -- a woodcutter walks out to 12 tiles from it: now it is a danger to a citizen
+  W.move(2, 138, 30, Z)
+  S.run(W, 200)
+  local p = events(W, 'PREDATOR')
+  T.eq({#p, p[1].d.id}, {1, 400})
+end)
+
+T.test('Run 10: reflex.predator_near 0 keeps the old rule (any roofed wild danger on the citizens group)', function()
+  local units = S.fort_units()
+  units[#units + 1] = S.danger(400, 150, 30)
+  local W = setup{tag = 'prednear0', manifest = false, units = units, cfg = {reflex = {v = 2, predator_near = 0}}}
+  S.run(W, 200)
+  T.eq(#events(W, 'PREDATOR'), 1)
+  T.eq(#events(W, 'PREDATOR_FAR'), 0)
+end)
+
 T.test('ack timeout: an unacked DEATHS_3PLUS gets its default (clock) and LOCKDOWN says so; acked ones do not', function()
   local W = setup{tag = 'acktimeout', manifest = false, ms_per_frame = 500}
   W.K.emit('DEATHS_3PLUS', 'A', '3 citizens died today', {n = 3, ids = {1, 2, 3}})

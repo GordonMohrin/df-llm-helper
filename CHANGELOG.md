@@ -1,5 +1,12 @@
 # CHANGELOG dfpilot
 
+## PREDATOR only near the citizens (2026-10-16; offline, live-untested)
+- Live Run 10 y421: four lockdowns in ten game days (clock 30 t/s, civilians confined) for animals at the map edge 60-120 tiles
+  from the fort, because any roofed tile of the citizens' walkable group counted as "inside".
+- A wild danger now raises PREDATOR (A) only inside Kern+ / past B1 or within `predator_near` tiles (config/reflex.json, default
+  40, 0 = the old rule) of a citizen outside Kern+; otherwise one class-B `PREDATOR_FAR` per 1,200 ticks, no lockdown, no clock hold.
+- Live check: `dfllm events --type PREDATOR_FAR` for animals at the edge; PREDATOR only when one comes near a citizen or into Kern+.
+
 ## Tool reservations swept, no pick specs for soldiers, BUG-023 (2026-10-16; offline, live-untested)
 - Live Run 10 y421 after bbf75a4: `pick_res 6` of 9 picks, Woodcutters emptied. Reservations sat in the positions' `assigned_items`;
   economy's tool cap and military's member-based keep fed each other.

@@ -60,6 +60,9 @@ M.ACTIONS = {'clock', 'gates', 'doors', 'alert'}   -- the closed action vocabula
 M.CFG = {
   hold_quiet_days = 2,     -- game days of threat 0 before a lockdown ends (the clock clamp with it)
   ack_timeout_s = 60,      -- real seconds an interrupt may stand unacked before its default applies
+  -- Run 10 y421 (four lockdowns in ten days for animals at the map edge 60-120 tiles away): a wild danger counts
+  -- for PREDATOR only inside Kern+ / past B1 or within this many tiles of a citizen outside Kern+ (0 = no limit)
+  predator_near = 40,
   defaults = {ARRIVAL = {'clock', 'gates', 'doors', 'alert'}, INTRUDER = {'clock', 'gates', 'doors', 'alert'},
               PREDATOR = {'clock', 'alert'}, DEATHS_3PLUS = {'clock'}, NO_DEPOT = {}},
 }
@@ -98,12 +101,15 @@ local function save(K) if dirty then K.persist.set('m.reflex', st); dirty = fals
 
 ---------------------------------------------------------------- config (config/reflex.json via K.cfg.reflex)
 local function cfg(K)
-  local c = {hold_quiet_days = M.CFG.hold_quiet_days, ack_timeout_s = M.CFG.ack_timeout_s, defaults = {}}
+  local c = {hold_quiet_days = M.CFG.hold_quiet_days, ack_timeout_s = M.CFG.ack_timeout_s,
+             predator_near = M.CFG.predator_near, defaults = {}}
   for t, acts in pairs(M.CFG.defaults) do c.defaults[t] = acts end
   local r = type(K.cfg.reflex) == 'table' and K.cfg.reflex or {}
   local q, a = int(r.hold_quiet_days), int(r.ack_timeout_s)
   if q and q >= 0 and q <= 30 then c.hold_quiet_days = q end
   if a and a >= 5 and a <= 3600 then c.ack_timeout_s = a end
+  local pn = int(r.predator_near)
+  if pn and pn >= 0 and pn <= 400 then c.predator_near = pn end
   local valid = {}
   for _, x in ipairs(M.ACTIONS) do valid[x] = true end
   for t, acts in pairs(type(r.defaults) == 'table' and r.defaults or {}) do
@@ -813,6 +819,7 @@ end
 -- one past B1 (zone 2: Kern+, zones Z3/Z4) still counts
 local function inside_scan(K, h, now)
   local hostile, predator, nh, np = nil, nil, 0, 0
+  local near, nf, far_one = cfg(K).predator_near, 0, nil
   local okx, expects = K.call('siege', 'expects')
   local wave = okx and expects == true
   for _, e in ipairs(h.list or {}) do
@@ -822,7 +829,14 @@ local function inside_scan(K, h, now)
     if not (ok and far == true) then
       if e.k == 'danger' then
         local oko, out = K.call('snapshot', 'outside_near', {{e.x, e.y, e.z}}, 0)
-        if oko and type(out) == 'table' and out[1] == 0 then np = np + 1; predator = predator or e end
+        if oko and type(out) == 'table' and out[1] == 0 then
+          -- sense's dc: the distance to the nearest citizen outside Kern+ (-1 none); zone 2 = inside Kern+ / past B1
+          local dc, lim = math.tointeger(e.dc), near
+          if lim > 0 and dc and (e.zn or 0) < 2 and (dc < 0 or dc > lim) then
+            nf = nf + 1
+            if not far_one or (dc >= 0 and (far_one.dc < 0 or dc < far_one.dc)) then far_one = e end
+          else np = np + 1; predator = predator or e end
+        end
       else nh = nh + 1; hostile = hostile or e end
     end
   end
@@ -833,6 +847,14 @@ local function inside_scan(K, h, now)
                 {n = nh, id = hostile.id, pos = {hostile.x, hostile.y, hostile.z}, k = hostile.k})
     end
     rt.intr_last = now
+  end
+  if far_one and not predator and now - (rt.pfar_last or -M.REARM) >= M.REARM then
+    -- class B only: no lockdown, no clock hold for an animal far from every citizen (Run 10)
+    rt.pfar_last = now
+    K.emit('PREDATOR_FAR', 'B', string.format('%d wild dangers on the citizens\' walkable group but far from the citizens '
+           .. '(%d at %d,%d,%d, %s): no lockdown', nf, far_one.id, far_one.x, far_one.y, far_one.z,
+           (math.tointeger(far_one.dc) or -1) >= 0 and ('nearest citizen ' .. far_one.dc .. ' tiles') or 'no citizen outside Kern+'),
+           {n = nf, id = far_one.id, pos = {far_one.x, far_one.y, far_one.z}, dc = math.tointeger(far_one.dc) or -1})
   end
   if predator then
     if now - (rt.pred_last or -M.REARM) >= M.REARM then

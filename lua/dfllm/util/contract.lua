@@ -92,6 +92,7 @@ C.EVENTS = {
   -- B: digest
   ALERT_START = {cls = 'B', by = 'siege'}, ALERT_END = {cls = 'B', by = 'siege'},
   LOCKDOWN_END = {cls = 'B', by = 'reflex'},
+  PREDATOR_FAR = {cls = 'B', by = 'reflex'},
   MOOD_START = {cls = 'B', by = 'care'}, MOOD_NEED = {cls = 'B', by = 'care'},
   MOOD_END = {cls = 'B', by = 'care'}, CARAVAN = {cls = 'B', by = 'trade'},
   MIGRANTS = {cls = 'B', by = 'economy'}, PETITION = {cls = 'B', by = 'care'},
