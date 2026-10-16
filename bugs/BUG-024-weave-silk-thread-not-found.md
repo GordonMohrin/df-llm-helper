@@ -1,5 +1,5 @@
 # BUG-024 weaving silk never starts: "Needs 1 unused collected silk thread" although 6500 reachable silk threads lie in the fort
-Status: open
+Status: mitigated in 47d98c4 (offline, live-untested): webs are reported as uncollected, never as thread; the fort still has no reachable thread
 Severity: medium (84 of 120 citizens are naked for years; Clothiers, Loom and 30+30+30 clothing orders wait)
 Found: 2026-10-16 09:20, Run 10 fort Handlelock (region2-site97, y411), dfpilot main 95fe16d + local trade fix
 Module: economy / order library (`library/basic` WeaveCloth orders 15-17, own order 427 `WeaveCloth` `material_category: ["silk"]`)
@@ -24,3 +24,18 @@ not in the fort and not collected. The extra job `CollectWebs` (Collect Silk) on
 Plant fiber is no way out here: no pig tail, flax, hemp or rope reed seeds (seed stock: grape, pear, cherry, prickle berry, parsnip, plum, cranberry, plump helmet, turnip). Catten brings nothing. Stress stays 0 % with 84 naked citizens, so it is low priority; leather from slaughtered or hunted animals is the remaining way.
 Fix proposal for dfpilot: `inspect what=reach`/economy should count thread by `spider_web` and distance (and say `no collected thread`), and offer a CollectWebs project only when a web lies within reach of the fort.
 
+## Fix (Claude, 2026-10-16)
+The census already left `spider_web` THREAD items out of `thread`; what was missing is saying so.
+- **Census (`lua/dfllm/economy.lua`):** `webs` counts loose spider webs, `webs_near` those of the first 200 a census probes
+  that lie on the citizens' walk group (snapshot.far); webs are never thread or cloth input, so economy queues no WeaveCloth
+  order from them.
+- **Order sanity (FR-01):** a WeaveCloth order without collected thread reads `no collected thread (8657 webs, none on the
+  walk group)` in ORDER_STUCK and `inspect orders` instead of `no thread`.
+- **`inspect workload` `cloth`:** `thread`, `webs`, `webs_near`, care's `naked` and `why` (`no collected thread: the webs lie
+  off the citizens' walk group` or `... N webs on the walk group (weavers collect them)`).
+- **CollectWebs hint:** only when cloth is short, no collected thread exists and webs lie on the citizens' walk group, a
+  kern.log line names them (`weavers collect them: WEAVER labor, webs not forbidden`); DF makes the CollectWebs jobs itself.
+- Not done: a class-A clothing event (the naked count is in `inspect workload` and care's state).
+
+Live check: `inspect workload` `cloth.why` for Handlelock should say the webs lie off the walk group; the stuck silk orders
+(15-17, 427) carry `no collected thread (...)` in `inspect orders`.

@@ -1,5 +1,41 @@
 # CHANGELOG dfpilot
 
+## Economy: miners and woodcutters with their tools, reachable workload, steel chain, webs, BUG-023/BUG-024 (2026-10-16; commit 47d98c4, offline, live-untested)
+- **Miners sizing (Run 10, Handlelock: 29-33 dig jobs waited, target 2):** one miner per `tools.details.Miners.tiles_per` = 10 dig
+  jobs (was 40), one per `runner_per` = 40 of the runner's dig tiles, `ore` = 1 more while metal is wanted and the fort has no ore;
+  every tool detail is capped by its free unreserved tools plus the tools its members hold (picks a squad uniform reserved are no
+  free picks); when it shrinks, members holding the tool stay first. A log line says when one dig front keeps several miners idle.
+- **Members the player put in stay:** economy takes off only the members it added (persist `m.economy.tools[name].mine`); the
+  others count toward the target and make no WORK_DETAIL. Members present at the first run after the update count as the
+  player's. Hunters and fishers still all leave when the fort leaves PEACE.
+- **Labors through `act.work_detail`:** a member without the detail's labor (`labor` = MINE, CUTWOOD, HUNT, FISH) gets it through
+  `act.work_detail` (Lua writes to `assigned_units` set no labor), at most every `repair_days`. `act.work_detail` opts `only`: a
+  miner leaves the everybody-does-this details that are no tool details (Planters in mode 1 took six of eight miners to the farms)
+  and their labors go off except `keep_labors` and those of a selected detail; not during a starvation.
+- **TOOL_BLOCKED (A, BUG-023):** Miners/Woodcutters members without pick/axe for `block_days` while the detail's jobs wait and free
+  tools exist; the event names members, free tools in bins / loose / reserved and a position; cadence rule. The starving-postings
+  line ends `: no axe in hand (Woodcutters 2 of 2)`. The direct equip (moveToInventory) is not implemented (fair play); the
+  engine's pickup request `tools.equip_update` is in `act.work_detail` but off until Gordon says yes. No-bin storage and the
+  E18 pick-uniform squad were not built: v1 measured bins are not the cause and pick uniforms reserve the picks.
+- **`inspect workload` (FR-40):** unclaimed = no worker, a live job-board posting (else `waiting`) and on a citizen's walk group
+  (new `snapshot.groups`; a dig wall or tree counts by its neighbours); `unreachable` apart; `idle_noreach` (idle adults whose
+  group has no unclaimed job); `blocked`, `cloth`, `tools.{pick,axe}_{bin,res}`.
+- **Steel chain:** manager orders waiting for steel bars (`no bars:INORGANIC:STEEL`) get `dfllm:pig_iron` (PIG_IRON_MAKING) and
+  `dfllm:steel` (STEEL_MAKING) orders when a smelter, iron, flux and fuel exist (iron ore is smelted, charcoal follows the bars);
+  otherwise DECISION_NEEDED `steel` names the missing input once (cadence).
+- **BUG-024:** spider webs are counted apart (`webs`, `webs_near`) and never as thread; WeaveCloth orders say `no collected thread
+  (N webs, none on the walk group)`; a CollectWebs hint (log) only for webs on the citizens' walk group.
+- Contracts: event TOOL_BLOCKED (schema, contract.lua, CONTRACTS §12, RULES §7, wake hint); `act.work_detail(name, id, on, opts?)`;
+  census `w_{pick,axe}_{bin,res}`, `webs`, `webs_near`; config `tools.{block_days,repair_days,equip_update,keep_labors}`,
+  per detail `labor/tool/jobs/runner_per/ore/only`, `metal.steel`.
+- Tests: `tests/lua/test_economy_tools.lua`, `tests/lua/test_economy_reach.lua`, an act case in `tests/lua/test_act_supply.lua`
+  (all fail on the old code); tool-detail tests adapted to the kept player's members.
+- **Live check:** after `git pull` + `dfllm reload`: `inspect workload` (Miners target ~3-4 for 33 dig jobs, `blocked` lists the
+  miners/woodcutters without tools, `unreachable` holds the GatherPlants outside the wall, `cloth.why`); a TOOL_BLOCKED wake with
+  the bin position; kern.log `Miners: ... left the everybody-does-this details` and `labor: ... no axe in hand`; `inspect orders`
+  for the steel orders (pig iron/steel orders or DECISION_NEEDED steel naming the missing input); no WORK_DETAIL for the
+  hand-added miners.
+
 ## Trade: retry before the caravan leaves, diagnostics, ledger for lost visits, BUG-026 (2026-10-16)
 - A retry after `ui_timeout` etc. waits at most `time left - 400` ticks (min 100) instead of a fixed 1200, so it still runs before the caravan leaves.
 - `CARAVAN retry/failed` events carry `ph`, `ph_ms` and `left` (phase that timed out, real ms in it, ticks the caravan stays).
