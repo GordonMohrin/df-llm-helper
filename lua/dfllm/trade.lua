@@ -877,6 +877,21 @@ local function mood_tokens(K, known)
   return r, by
 end
 
+-- Run 11 (Kilrudrabed: 2 picks for the Miners, 1 bar): economy.trade_wants' buy tokens (picks) after the moods' ones,
+-- capped at the units economy misses; a plan token with the same text lifts that cap to the kind's default
+local function econ_tokens(K, known, want, by)
+  local ok, list = K.call('economy', 'trade_wants')
+  if not ok or type(list) ~= 'table' then return end
+  for _, e in ipairs(list) do
+    local tk = type(e) == 'table' and type(e.buy) == 'string' and e.buy ~= '' and L.token(e.buy, known)
+    if tk and not by[tk.src] then
+      tk.cap, tk.econ = math.min(tk.cap, math.max(1, int(e.n) or 1)), true
+      by[tk.src] = tk
+      want[#want + 1] = tk
+    end
+  end
+end
+
 local function wants(K)
   local p = (K.plan or {}).trade or {}
   local w, s = p.want, p.sell
@@ -889,6 +904,7 @@ local function wants(K)
   if type(w) ~= 'table' or #w == 0 then w = M.DEFAULT_WANT end
   local known = function(n) return df.item_type ~= nil and df.item_type[n] ~= nil end
   local want, by = mood_tokens(K, known)
+  econ_tokens(K, known, want, by)
   for _, tk in ipairs(L.tokens(w, known)) do
     local m = by[tk.src]
     if m then m.cap = tk.cap else want[#want + 1] = tk end
@@ -1122,6 +1138,11 @@ local function track_visits(K, cars, now)
       local okc, okd, res = K.call('runner', 'depot_keep', 'caravan')
       local proj = okc and okd and type(res) == 'string' and res or ''
       local dp = depot_progress(K)
+      -- Run 11 (siege 3 destroyed the depot, the caravan came in BREACH): what is being done, and its material
+      -- (economy.mat_for: the depot's 3 building materials, buildingplan's settings; the same fallback as the seal)
+      local okm, via, mw = K.call('economy', 'mat_for', 'depot', 3)
+      local mat = okm and (via and via ~= 'unknown' and ('building material: ' .. tostring(via)) or (not via and mw))
+                  or nil
       local tail
       if dp and dp.going then
         tail = string.format(' (one is being built at %d,%d,%d: stage %d/%d)', dp.pos[1] or -1, dp.pos[2] or -1,
@@ -1129,11 +1150,19 @@ local function track_visits(K, cars, now)
       elseif dp then
         tail = string.format(' (the planned one at %d,%d,%d does not progress: %s)', dp.pos[1] or -1, dp.pos[2] or -1,
                              dp.pos[3] or -1, dp.why)
+      elseif proj == 'standing' then
+        tail = ' (a depot building stands, not built)'
+      elseif proj ~= '' then
+        tail = ': project ' .. proj .. ' queued'
+      elseif okc and type(res) == 'string' and res:find('^not in ') then
+        tail = string.format(': the kernel queues one in PEACE or RECOVERY (now %s)', tostring(K.mode()))
       else
-        tail = proj ~= '' and (': ' .. proj) or ': no known depot site'
+        tail = ': no known depot site (no fortcore depot): place one by hand'
       end
+      if mat and not (dp and dp.going) then tail = tail .. '; ' .. mat end
       local d = {civ = civ_name(c.ent), planned = dp and dp.going and 1 or 0, proj = proj:sub(1, 40)}
       if dp and not dp.going then d.stalled, d.why = 1, dp.why end
+      if mat then d.mat = tostring(mat):sub(1, 80) end
       K.emit('DEPOT_MISSING', 'A', string.format('caravan from %s on the map and no trade depot stands%s', civ_name(c.ent),
                                                  tail):sub(1, 200), d)
     end

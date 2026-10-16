@@ -96,7 +96,8 @@ STATE_OWNERS = {
     "pop.cap": "readiness", "pop.gate_cap": "readiness", "ready.*": "readiness",
     "stock.drink_d": "economy", "stock.food_d": "economy", "stock.meals": "economy",
     "stock.ore": "economy", "stock.bars": "economy", "stock.leather": "economy", "stock.metal": "economy",
-    "stock.mood_miss": "economy", "stock.hosp_water": "care", "care.*": "care", "labor.*": "economy", "orders.*": "economy",
+    "stock.mood_miss": "economy", "stock.rock": "economy", "stock.rock_need": "economy", "stock.picks": "economy",
+    "stock.pick_want": "economy", "stock.hosp_water": "care", "care.*": "care", "labor.*": "economy", "orders.*": "economy",
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
     "clock.*": "arbiter", "alarm.*": "reflex", "lever.*": "gate",
     "alert.*": "seal", "wave.*": "siege",
@@ -431,7 +432,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "PERF_DEGRADED": ("A", "perf", _d(opt="tps:i base:i pct:i why:s")),
     "DECISION_NEEDED": ("A", "any", _d("id:s", "q:s")),
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
-    "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i missing:sa retry:i")),
+    # Run 11: mat = why economy cannot make a seal's missing pieces ('no material for door: no rock, no logs')
+    "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i missing:sa retry:i mat:s")),
     "YEAR_REVIEW": ("A", "kern", _d(opt="year:i")),
     "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa")),
     # BUG-031: cistern = why the nearest cistern room does not serve the hospital (no well, its well over 0/7, too far)
@@ -447,7 +449,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "NO_DEPOT": ("A", "reflex", _d(opt="text:s")),
     "LOCKDOWN": ("A", "reflex", _d("why:s", "n:i type:s raised:i doors:i alert:s clock:i")),
     "ORDER_BAD": ("A", "economy", _d("order:i job:s", "dropped:f")),
-    "DEPOT_MISSING": ("A", "trade", _d(opt="civ:s planned:f proj:s stalled:f why:s")),
+    "DEPOT_MISSING": ("A", "trade", _d(opt="civ:s planned:f proj:s stalled:f why:s mat:s")),
     # BUG-021: unit/upos/grp = a cut-off citizen and his walk group, at/agrp = a stock tile of the class and its group
     "CUTOFF": ("A", "seal", _d("cls:s n:i", "pos:p why:s grp:i main:i unit:i upos:p at:p agrp:i")),
     "PERIMETER_BROKEN": ("A", "seal", _d("n:i", "pos:p kinds:sa requeued:i why:s")),
@@ -546,6 +548,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # spare cloth/leather or shop for ConstructBag), no_fuel (no charcoal and no wood furnace or wood, no magma glass
     # furnace); raw/cut = the raw and cut glass wanted; once per set of blockers (util/cadence)
     "GLASS_BLOCKED": ("B", "economy", _d("why:sa", "raw:i cut:i")),
+    # Run 11 (Kilrudrabed y432: 1 boulder, ~110 orders 'no rock'): pieces planned buildings wait for that nothing in the
+    # fort can make (pieces 'door x1, wall x2'; why = the reasons 'no rock, no logs'; rock = free stone, logs, n = the
+    # pieces); once per set of kinds and reasons (util/cadence)
+    "MATERIAL_SHORT": ("B", "economy", _d("pieces:s why:sa", "n:i rock:i logs:i boulders:i")),
     "SIEGE_STATUS": ("C", "siege", _d(opt="vis:i worn:i on_station:i deaths:i captures:i")),
     "SEASON": ("C", "kern", _d(opt="year:i season:i")),
     "PROJECT_STAGE": ("C", "runner", _d("proj:s", "stage:s pct:i")),
@@ -651,8 +657,11 @@ STATE = Obj(
                            "route": Str(maxbytes=60)}),
          # Run 10: ore/bars/leather stock, the metal route ('explore' = no ore, metal wanted), the classes strange
          # moods missed within a year (plan propose/check supply goals)
+         # Run 11: free stone and what the open rock orders, walls and needs want (rock_need); picks in the fort and the
+         # Miners' demand (pick_want): plan propose/check draft a stone dig and picks in trade.want
          "stock": Obj(opt={"drink_d": NAT, "food_d": NAT, "meals": NAT, "hosp_water": FLAG, "ore": NAT, "bars": NAT,
-                           "leather": NAT, "metal": Str(maxbytes=24), "mood_miss": Arr(Str(maxbytes=12), hi=8)}),
+                           "leather": NAT, "metal": Str(maxbytes=24), "mood_miss": Arr(Str(maxbytes=12), hi=8),
+                           "rock": NAT, "rock_need": NAT, "picks": NAT, "pick_want": NAT}),
          "care": Obj(req={"stressed_pct": PCT, "naked": NAT, "ghosts": NAT, "corpses_old": NAT,
                           "tombs_free": NAT, "moods": NAT},
                      # FR-61 coffin provisioner: wanted free coffins, missing slots, coffin items, open orders, project

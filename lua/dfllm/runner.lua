@@ -32,6 +32,7 @@ M.CFG = {
   dry_every = 2 * DAY,   -- dig measurement by quickfort dry run when there is no snapshot module
   keep_every = 3 * DAY, req_cool = 7 * DAY,
   lost_pct = 10,         -- buildings still missing after one re-apply that let a stage pass (%)
+  remake_max = 4,        -- Run 11: more re-applies of a seal stage whose lost pieces economy can make (M.remake)
   -- BUG-022 (Run 10: fortcore stage 2 ended build_lost for two game years, B1 and its levers never built): a
   -- build_lost stage is tried again from its dig stage once the hidden tiles that dig completed without are
   -- revealed or more of its missing cells stand on open floor (checked every retry_check), at the latest
@@ -625,7 +626,8 @@ local function measure_build(K, P, d, R)
   local total = #R.b + #R.c + R.uns
   progress(K, P, d, R, done, total)
   if pend > 0 then return 'done' end
-  if lost > 0 and R.ra ~= 1 then            -- one re-apply: quickfort places only what is missing
+  -- one re-apply: quickfort places only what is missing (Run 11: a seal again while economy can make its pieces)
+  if lost > 0 and (R.ra ~= 1 or M.remake(K, P, d, R)) then
     R.b, R.uns, R.ra, P.chunk = keep, lost, 1, 0
     dirty()
     return 'reapply'
@@ -2346,6 +2348,34 @@ local function retry_sig(K, P, d)
   return n + open
 end
 
+-- Run 11 (Kilrudrabed y432): `seal at=last` ended build_lost (missing d) while ConstructDoor was cancelled for rock and
+-- logs could have made the door. The lost pieces of a seal stage are asked of economy.mat_for: can = one of them can be
+-- made now (a free item, rock, wood, a building material buildingplan takes), why = economy's reason for the first
+-- that cannot ('no material for door: no rock, no logs'); measure_build places them again (remake_max), PROJECT_BLOCKED
+-- names the reason, a build_lost seal is retried once they can be made
+local KEY_PIECE = {d = 'door', H = 'hatch', Cw = 'wall', W = 'grate', G = 'grate'}
+function M.remake_why(K, P, d)
+  if P.tpl ~= 'seal' then return false end
+  local can, why = false, nil
+  for _, s in ipairs((missing_pieces(K, P, d))) do
+    local kind = KEY_PIECE[s:match('^(%S+)') or '']
+    if kind then
+      local ok, via, w = K.call('economy', 'mat_for', kind, int(s:match(' x(%d+)$')) or 1)
+      if ok and via then can = true elseif ok and not why then why = w end
+    end
+  end
+  return can, why
+end
+
+function M.remake(K, P, d, R)
+  local can, why = M.remake_why(K, P, d)
+  if not can or (int(R.rm) or 0) >= M.CFG.remake_max then return false end
+  R.rm = (int(R.rm) or 0) + 1
+  K.log('info', '%s %s: lost pieces placed again (%d/%d): economy can make them%s', P.id, d.stages[P.stage + 1].label,
+        R.rm, M.CFG.remake_max, why and ('; ' .. why) or '')
+  return true
+end
+
 -- the stage to start a retry from: the last dig stage at or before the blocked stage (its skipped tiles may be
 -- designated now), else the blocked stage itself
 local function retry_from(d, si)
@@ -2370,19 +2400,22 @@ local function retry_step(K, P, t)
   local why
   if q.sig == nil then                          -- the baseline, taken in the run that blocked it
     q.sig, q.c = retry_sig(K, P, d), t
+    q.cant = P.tpl == 'seal' and not M.remake_why(K, P, d)      -- Run 11: blocked for want of material
     dirty()
   end
   if t - (int(q.t) or t) >= M.CFG.retry_every then why = 'a season passed'
   elseif t - (int(q.c) or 0) >= M.CFG.retry_check then
     q.c = t
     local sig = retry_sig(K, P, d)
-    if sig > q.sig then why = string.format('%d more tiles revealed or open', sig - q.sig) end
+    if sig > q.sig then why = string.format('%d more tiles revealed or open', sig - q.sig)
+    -- (a seal blocked by an older kernel has no record of it: tried as soon as its pieces can be made)
+    elseif P.tpl == 'seal' and q.cant ~= false and M.remake_why(K, P, d) then why = 'its pieces can be made now' end
     dirty()
   end
   if not why then return end
   local from = retry_from(d, P.stage)
   local blocked = d.stages[P.stage + 1] and d.stages[P.stage + 1].label or '?'
-  q.n, q.t, q.c, q.sig = q.n + 1, t, t, nil
+  q.n, q.t, q.c, q.sig, q.cant = q.n + 1, t, t, nil, nil
   P.stage, P.chunk, P.orders_done = from, 0, 0
   set_blocked(K, P, '')
   P.pct = pct_of(P, d, 0)
@@ -2415,6 +2448,8 @@ local function blocked_event(K, P, t)
     local miss = missing_pieces(K, P, d)
     dd.missing, dd.retry = miss, nr
     msg = msg .. ' at ' .. label .. (#miss > 0 and (', missing ' .. table.concat(miss, ', ')) or '')
+    local _, mw = M.remake_why(K, P, d)      -- Run 11: why economy cannot make a seal's pieces
+    if mw then msg, dd.mat = msg .. ' (' .. mw .. ')', trunc(mw, 80) end
     if final then msg = msg .. string.format('; %d retries spent: bp.cancel and place it again', nr)
     else
       msg = msg .. string.format('; retry %d/%d once the skipped tiles are revealed, at the latest next season',

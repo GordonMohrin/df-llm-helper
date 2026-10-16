@@ -13,6 +13,9 @@ not wake; the follower acts on two of them without the LLM:
   PROJECT_REQUEST tpl=workshops -> the same (care asks when a strange mood finds no workshop)
   PROJECT_REQUEST tpl=farms why=food -> the same with p.plots = n (1-4) at prio 1 (economy asks when the farm
                                   tiles fall short of the citizens and food is low or falling; live L5)
+  PROJECT_REQUEST tpl=bedrooms why=mood_rock|rock -> a bedrooms dig (p.n = n, 1-6) at prio 1: a strange mood waits
+                                  for a boulder (care), or the free stone is below what the rock orders and walls
+                                  want while the miners have nothing to dig (economy, Run 11)
   AUDIT (B) with a bypass wall -> Run 10 (the bypass finding stood for months, the 41 traps stayed unused): in PEACE,
                                   when the audit names a wall (bypass, refuge on the attack path; bp.topo.choke)
                                   that no seal project builds yet, the seal (tpl seal, p.at audit) is placed the
@@ -95,7 +98,7 @@ HB_STALE_S = 300
 FOLLOW_HB_EVERY_S = 10                         # FR-29: follow's own heartbeat (<save>/.follow.hb)
 AUTO_TIMEOUT_S = 60
 TOMBS_COOLDOWN_S = 600
-PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "farms", "seal")   # automatic placements (one job each)
+PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "rock", "farms", "seal")   # automatic placements (one each)
 SEAL_HINT = ("dfllm cmd bp.place tpl=seal site=S1 at=audit (walls the audit's bypass; follow places it itself "
              "unless --no-auto); then dfllm audit")
 AUTO_REQUESTS = ("tombs", "workshops")            # PROJECT_REQUEST templates follow places itself
@@ -350,11 +353,13 @@ class Follower:
                 self._on_snapshot(d, now)
             elif t == "PROJECT_REQUEST" and d.get("tpl") == "tombs":
                 self._request_tombs(d, now)
-            elif t == "PROJECT_REQUEST" and d.get("tpl") == "bedrooms" and d.get("why") == "mood_rock":
+            elif t == "PROJECT_REQUEST" and d.get("tpl") == "bedrooms" and d.get("why") in ("mood_rock", "rock"):
                 # live L4: a strange mood waited for a boulder while nobody placed care's stone dig; the
                 # Possessed mood before it failed within 40 days. A bedrooms dig at prio 1 gives boulders.
+                # Run 11: economy asks the same when the rock orders want more stone than the fort has (1 boulder,
+                # ~110 orders 'no rock') and the miners have nothing to dig
                 n = d.get("n") if isinstance(d.get("n"), int) and not isinstance(d.get("n"), bool) else 4
-                self._request_place("mood_rock", "bedrooms", {"n": max(1, min(n, 6))}, "S1", now, prio=1)
+                self._request_place(d["why"], "bedrooms", {"n": max(1, min(n, 6))}, "S1", now, prio=1)
             elif t == "PROJECT_REQUEST" and d.get("tpl") == "farms" and d.get("why") == "food":
                 # live L5: pop 41 -> 53 on the same 80 farm tiles, food 105 -> 15 days; economy sizes the plots
                 n = d.get("n") if isinstance(d.get("n"), int) and not isinstance(d.get("n"), bool) else 2

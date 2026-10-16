@@ -357,6 +357,34 @@ def test_follow_mood_rock_places_a_prio1_bedrooms_dig(save, monkeypatch):
     assert calls["rank"] == [(sid, "bedrooms", {"n": 4})]
 
 
+def test_follow_rock_places_a_prio1_bedrooms_dig(save, monkeypatch):
+    """Run 11 (Kilrudrabed: 1 boulder, ~110 orders 'no rock'): economy's PROJECT_REQUEST bedrooms why=rock (the free stone
+    below what the rock orders and walls want, the miners without digging) is placed by follow like care's mood_rock:
+    a bedrooms dig at prio 1, n capped at 6; one placement job of its own (not the mood's)."""
+    calls = install_fake_bp(monkeypatch)
+    c = Clock()
+    f, out = F(c)
+    f.poll()
+    append_events(save, [ev(8814, "PROJECT_REQUEST", "bedrooms x9: a stone dig",
+                            {"tpl": "bedrooms", "n": 9, "why": "rock", "short": 110})])
+    f.poll()
+    (snap_cmd,) = inbox_docs(save)
+    assert snap_cmd["verb"] == "snapshot"
+    assert f.jobs["rock"]["tpl"] == "bedrooms" and "mood_rock" not in f.jobs
+    for p in (save / "inbox").glob("*.json"):
+        p.unlink()
+    sid = snap_cmd["id"]
+    snap = json.loads((save / "snap" / "c201.json").read_text("utf-8"))
+    snap["id"] = sid
+    files.write_json_atomic(save / "snap" / f"{sid}.json", snap)
+    append_events(save, [ev(8815, "SNAPSHOT_READY", "", {"id": sid, "path": f"snap/{sid}.json", "purpose": "sites"})])
+    f.poll()
+    (place,) = inbox_docs(save)
+    assert place["verb"] == "bp.place"
+    assert place["args"] == {"tpl": "bedrooms", "site": "S1", "p": {"n": 6}, "prio": 1}
+    assert calls["rank"] == [(sid, "bedrooms", {"n": 6})]
+
+
 def test_follow_farms_for_food_places_prio1_farms_with_plots(save, monkeypatch):
     """live L5: economy's PROJECT_REQUEST farms why=food (farm tiles short of the citizens, food low or falling) is
     placed by follow at once, with the plots economy sized (1-4) and prio 1; a farms request without why=food is

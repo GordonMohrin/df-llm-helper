@@ -106,6 +106,90 @@
     plugged, and the line says so. Compare the levels below the bottom in DF, and the N with `lake_min` 30.
   - `not dug yet` / `top hidden`: the column record is wrong. `inspect persist` m.runner `xs` names its x, y, top, low.
   - No line at all: the runner did not run (`dfllm doctor`).
+## The trade depot after a siege: DEPOT_MISSING says what is done and its material (2026-10-16; offline, live-untested)
+- **Why (Run 11, siege 3, pop 54 -> 29):** the siege destroyed the trade depot; the Muboomon caravan came (NO_DEPOT,
+  DEPOT_MISSING). The keeper (`runner.depot_keep`, FR-43) queues only in PEACE/RECOVERY, and in any other mode the old
+  line read `no known depot site` although fortcore's manifest names the depot; nothing named the depot's material
+  while the fort had 1 boulder.
+- **What it does now:** the runner's keeper (unchanged) queues the 5x5 depot at manifest.depot every run in RECOVERY
+  and PEACE once none stands (test: BREACH refused, RECOVERY queued). DEPOT_MISSING names what is done: `project depot2
+  queued`, `the kernel queues one in PEACE or RECOVERY (now BREACH)`, `no known depot site (no fortcore depot): place
+  one by hand`, and the depot's material from `economy.mat_for('depot', 3)` (`building material: logs`, `no material
+  for depot: no rock, no blocks, no logs`; d `mat`). The planned depot waits for building material like a wall:
+  economy switches buildingplan's logs/boulders/blocks on when that is all the fort has; MATERIAL_SHORT names `depot`
+  (also `workshop`, `building`; constructions stay `wall`).
+- Contracts: DEPOT_MISSING `mat` (schema, appendix, CONTRACTS row); `economy.mat_for` kinds `depot`/`workshop`; RULES §7
+  DEPOT_MISSING.
+- Tests: `tests/lua/test_trade_ledger.lua` (the line in BREACH, RECOVERY and without a site; the keeper after a siege),
+  `tests/lua/test_economy_pieces.lua` (a planned depot without material, logs switched on).
+- **How to use / live check:** after the next siege, in RECOVERY `dfllm status` lists a `depotN` project and kern.log
+  `trade depot missing (keeper): project depotN at x,y,z`; a caravan meanwhile gives DEPOT_MISSING with `project depotN
+  queued; building material: ...`. If the line says `no material for depot`, tell the player (logs or stone). Keep O1
+  down for the builders in PEACE.
+
+## Seal pieces and furniture in the material the fort has, stone and picks as goals (2026-10-16; offline, live-untested)
+- **Why (Run 11, Kilrudrabed site98 y432, BREACH, pop 54):** REFUGE_FAIL for Kern+ and Tiefe+ `open to 1 entrance
+  128,121,143 floor beside door 127,121,143`; `seal at=last` stayed `build_lost (missing d)` while ConstructDoor was
+  cancelled for rock: 1 boulder in the fort, ~110 orders said 'no rock' (quickfort `orders` makes every door, hatch and
+  piece of furniture a rock order, live L3; economy's wood fallback kept 30 logs back and converted nothing), 2 picks,
+  1 iron bar, idle 46-64 %; the game session placed bedrooms by hand for stone. Later 34 boulders and the refuge door
+  still open: buildingplan waits for a door item, never for raw rock, and the door order was gone.
+- **economy, the pieces planned buildings wait for (`T.jmake`, after `T.jmat`; `M.PIECES`):** a planned building's missing
+  door, hatch cover, grate, floodgate, cabinet, chest, table, throne, armor/weapon rack or bed (no free or forbidden item
+  of it) gets an order the fort can run: stone (Masons) while the free stone covers the open rock orders, else wood
+  (Carpenters; doors, hatches, grates and floodgates keep only the moods' wood floor, not the config reserve), else stone
+  behind the other rock orders while stone is free. An open rock order of that job the stone cannot cover is re-entered
+  in wood (`act.order_material`) first. Walls (building material): what buildingplan allows; when that is all the fort
+  has, its `logs`/`boulders`/`blocks` setting goes on (`buildingplan set logs true`, once a boot; never bars). Nothing
+  makes it, or a seal piece queues behind the rock orders without logs: **MATERIAL_SHORT (B, new)** once per set
+  (`no material for door: no rock, no logs (door x1 wait)`, `stone queued for door: behind the other rock orders, no
+  logs; 34 free boulders, 110 in rock orders`, `...; 34 boulders are ore, flux, economic or soft stone`). Census: free
+  `doors`, `hatches`, `grates`, `blocks_free`.
+- **economy, rock:** a "Needs rock/stone/boulder" cancel of a one-time stone order while the free stone is short of the
+  open rock orders is re-entered in wood at once when logs cover it; with no free stone at all the order is removed
+  (ORDER_STUCK dropped, `no rock: ...`; `rock.drop_per_day`), not after 10 cancels; a rock cancel loop gets no
+  `orders recheck` then (it only posted the jobs again; CANCEL_LOOP says `no recheck`). Free stone below what the rock
+  orders, walls and needs want, a pick in the fort, no dig job and no runner dig backlog, no bedrooms project:
+  PROJECT_REQUEST bedrooms why=rock (n 4, `short`) at most weekly; follow places it at prio 1 like care's mood_rock.
+- **economy, picks:** picks below the Miners' demand (BUG-023's `tool_want`): a pick (MakeWeapon ITEM_WEAPON_PICK) from
+  the first metal with a spare bar at a forge (copper first), else `economy.trade_wants()` -> `pick`, which trade puts
+  after the moods' tokens and before plan.trade.want.
+- **Hooks:** `economy.mat_for(kind, n)` (door, hatch, grate, wall, furniture kinds: `item`/`rock`/`wood`/a building
+  material/`setting`, or nil + why), `economy.trade_wants()`. inspect workload: `stone`, `picks`, `short`.
+- **runner (build_lost, small):** a seal stage whose pieces were lost is placed again up to `remake_max` (4) more times
+  while `economy.mat_for` says they can be made (was: one re-apply, then build_lost); a `build_lost` seal is retried once
+  its pieces can be made (daily; also a seal an older kernel blocked); PROJECT_BLOCKED names economy's reason
+  (`missing d (no material for door: no rock, no logs)`, d `mat`).
+- **plan:** `plan propose` drafts `{"tpl":"bedrooms","site":"S1","p":{"n":4}}` (after the audit seal and the refuge
+  pieces) while state `stock.rock` < `stock.rock_need` and no dig template (bedrooms, stockroom, refuge_beds, explore) is
+  under way, and puts `pick` first in trade.want (with `bar:iron`) while `stock.picks` < `stock.pick_want` and no bars;
+  `plan check` warns without them. brief: MATERIAL_SHORT right after STOCK_LOW.
+- Contracts: event MATERIAL_SHORT (B), PROJECT_BLOCKED `mat`, state `stock.rock`/`rock_need`/`picks`/`pick_want` (schema,
+  contract.lua, appendix), hooks `economy.mat_for`/`trade_wants` (CONTRACTS §7), rows PROJECT_REQUEST why=rock,
+  ORDER_STUCK, CANCEL_LOOP; config `economy.pieces`/`rock`/`picks` (baseline.json); RULES §7 PROJECT_BLOCKED, §10
+  economy; DESIGN §5.
+- Tests (all fail on 276b252): `tests/lua/test_economy_pieces.lua` (new: census, the rock door order to wood with 25
+  logs, a planned door/hatch/grate ordered in wood or stone, MATERIAL_SHORT once, 34 boulders behind 110 rock orders and
+  economic stone, walls switch buildingplan logs on, "Needs rock" to wood/removed and no recheck, PROJECT_REQUEST
+  bedrooms why=rock, picks forged or wanted), `tests/lua/test_runner.lua` (the seal placed again while material exists,
+  bounded; build_lost with the reason, the retry once the door can be made, an older kernel's record),
+  `tests/lua/test_trade.lua` (economy's tokens), `tests/test_plan_stone.py` (new), `tests/test_cli_wake.py` (follow
+  places why=rock), `tests/test_wp8_files.py`, `tests/test_economy_specs.py`.
+- **How to use:** nothing for the loop: the kernel orders the pieces and asks for the stone dig itself (keep `follow`
+  running without `--no-auto`). MATERIAL_SHORT in the brief says what the fort lacks (logs: autochop/woodcutters;
+  stone: the bedrooms dig; ore, flux or economic stone: DF's stone use settings are the player's). A PROJECT_BLOCKED
+  seal with `(no material ...)`: tell the player; the kernel retries it once a piece can be made. Year review: keep
+  the drafted bedrooms dig and `pick` in trade.want.
+- **Live check (Run 11):** after `git pull` and `dfhack-run dfllm reload`: within a game day `<save>/kern.log` shows
+  `order N ConstructDoor x1: ... re-entered in wood` or `order dfllm:piece_door x1 (door for a planned building)`
+  (work orders screen: a wooden or stone door order), the door at 128,121,143 gets built and `dfllm cmd inspect
+  '{"what":"refuge"}'` shows Kern+/Tiefe+ `sep` 1. If the old seal project stays `build_lost` with its retries spent:
+  `dfllm cmd bp.cancel '{"proj":"<id>"}'`, then `dfllm cmd bp.place tpl=seal site=S1 at=last` again. `dfllm cmd inspect
+  '{"what":"workload"}'` shows `stone` {free, need}, `picks` {have, want, route} and `short`; `dfllm events --type
+  MATERIAL_SHORT` names what nothing can make; with the stone short and the miners idle `dfllm events --type
+  PROJECT_REQUEST` shows `bedrooms ... why rock` and cli.log follow's placement; `dfllm status` stock and `dfllm plan
+  propose` show the stone dig and `pick` in trade.want. Watch: whether DF's cancel text for a stone door names rock,
+  stone or a boulder (else the cancel path stays the old one), and whether `buildingplan set logs true` is accepted.
 
 ## `seal at=last` takes the current leaks once each, plants and doors handled; `seal at=refuge` hatches the refuge stair; the refuge comes first from the fort's start (2026-10-16; offline, live-untested)
 - **Why (Run 11, Kilrudrabed y429, pop 54):** `bp.place tpl=seal at=all|last` gave the same door 125,103,144 on every

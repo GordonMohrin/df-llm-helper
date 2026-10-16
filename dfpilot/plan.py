@@ -40,6 +40,11 @@ SEAL_REFUGE = {"tpl": "seal", "site": "S1", "p": {"at": "refuge"}}      # BUG-03
 EXPLORE = "explore"                       # bp/mine.py: stair shaft + side tunnels below the core (Run 10: no ore)
 METAL_WORN = 80                           # soldiers' worn % below which metal is a plan goal (P6 deliverable metal 80)
 EXPLORE_DEPTHS = (12, 9, 6, 4, 2)         # propose tries the explore template's default depth first, then shallower
+# Run 11 (Kilrudrabed y432: 1 boulder, ~110 orders 'no rock', 2 picks, 1 bar, idle 46-64 %): a stone dig while the free
+# stone is below what the rock orders and walls want (state stock.rock / rock_need) and no dig template is under way;
+# picks first in trade.want while the fort has fewer than the Miners want (stock.picks / pick_want) and no bars
+STONE_DIGS = ("bedrooms", "stockroom", "refuge_beds", "explore")
+STONE_DIG = {"tpl": "bedrooms", "site": "S1", "p": {"n": 4}}
 SIEGE_EVENTS = ("SIEGE_START", "SIEGE_END", "BREACH")
 SIEGE_MODES = ("SIEGE", "BREACH", "RECOVERY")
 # DESIGN §11.4 always-blocked commands and banned terms (CONTRACTS §1.4); config/allowlist.json adds more
@@ -147,7 +152,18 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             or any(t == STOCKROOM for t, _ in applied),
             "sieged": sieged(save_dir, state),
             "audit": audit_routes(save_dir, state),
-            "refuge": refuge_projects(save_dir, state, applied)}
+            "refuge": refuge_projects(save_dir, state, applied),
+            "stone_dig": stone_digs(save_dir)}
+
+
+def stone_digs(save_dir: Path) -> bool:
+    """Run 11: a dig template (STONE_DIGS) is under way (a bp file without PROJECT_DONE): its digging gives boulders."""
+    done = done_projects(save_dir)
+    for p in bp_files(save_dir):
+        doc = files.read_json(p)
+        if isinstance(doc, dict) and doc.get("tpl") in STONE_DIGS and p.stem not in done:
+            return True
+    return False
 
 
 def done_projects(save_dir: Path) -> set[str]:
@@ -527,7 +543,7 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     re_, rw = refuge_gate(doc, s, fort or {}, prev)         # Run 10: no P3+ without a separated refuge with beds
     errs += re_
     warn += rw
-    se, sw = supply_goals(doc, s)                 # Run 10: ore exploration and leather as plan goals
+    se, sw = supply_goals(doc, s, fort)           # Run 10: ore exploration and leather; Run 11: stone and picks
     errs += se
     warn += sw
     if pol["beauty"] == "used_rooms" and lvl < 1:
@@ -586,14 +602,39 @@ def leather_goal(s: dict | None) -> bool:
     return st.get("leather") == 0 and "leather" in (st.get("mood_miss") or [])
 
 
+def _nat(v) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def rock_goal(s: dict | None) -> str | None:
+    """Run 11: why the fort needs a stone dig, or None: the free stone (state stock.rock) is below what the open rock
+    orders, the walls without material and the needs want (stock.rock_need). Unknown (an older kernel) -> None."""
+    st = (s or {}).get("stock") or {}
+    rock, need = st.get("rock"), st.get("rock_need")
+    if not (_nat(rock) and _nat(need)) or need <= rock:
+        return None
+    return f"rock: {rock} free boulders < {need} wanted (rock orders, walls)"
+
+
+def pick_goal(s: dict | None) -> str | None:
+    """Run 11: picks in the fort (stock.picks) below the Miners' demand (stock.pick_want) and no bars to forge one
+    (stock.bars 0) -> why; else None."""
+    st = (s or {}).get("stock") or {}
+    picks, want = st.get("picks"), st.get("pick_want")
+    if not (_nat(picks) and _nat(want)) or want <= picks or st.get("bars") != 0:
+        return None
+    return f"picks: {picks} < {want} for the Miners and no bars"
+
+
 def _bar_want(want: list) -> bool:
     return any(t == "bar" or t.startswith("bar:") for t in want)
 
 
-def supply_goals(doc: dict, s: dict | None) -> tuple[list[str], list[str]]:
+def supply_goals(doc: dict, s: dict | None, fort: dict | None = None) -> tuple[list[str], list[str]]:
     """(errors, warnings) of the supply goals: metal while ore_goal holds (an error when the plan has neither an `explore`
     build nor a bar trade want, a warning when only the trade want covers it) and leather first in trade.want while
-    leather_goal holds."""
+    leather_goal holds. Run 11 (warnings): a stone dig while rock_goal holds and none is planned or under way (fort
+    stone_dig), pick in trade.want while pick_goal holds."""
     errs: list[str] = []
     warn: list[str] = []
     want = list((doc.get("trade") or {}).get("want") or [])
@@ -609,6 +650,14 @@ def supply_goals(doc: dict, s: dict | None) -> tuple[list[str], list[str]]:
     if leather_goal(s) and "leather" not in want[:3]:
         warn.append("leather: a strange mood missed leather and the fort has none: put leather first in trade.want "
                     "(not among its first three; economy staffs hunters and asks for a tannery)")
+    why = rock_goal(s)
+    if why and not (fort or {}).get("stone_dig") and \
+            not any(b["tpl"] in STONE_DIGS for se in doc["seasons"] for b in se["build"]):
+        warn.append(f"{why}: add {json.dumps(STONE_DIG, separators=(',', ':'))} to the current season (a stone dig; "
+                    "economy orders doors and furniture in wood meanwhile)")
+    why = pick_goal(s)
+    if why and "pick" not in want:
+        warn.append(f"{why}: put pick first in trade.want (and bar:iron for a forge)")
     return errs, warn
 
 
@@ -630,6 +679,10 @@ def draft_supply(doc: dict, s: dict | None, kept: list[int], season: int, tpls) 
         want.insert(0, "bar:iron")
     if leather_goal(s):
         want = ["leather"] + [t for t in want if t != "leather"]
+    if pick_goal(s):                                     # Run 11: picks for the Miners, bars for a forge
+        want = ["pick"] + [t for t in want if t != "pick"]
+        if not _bar_want(want):
+            want.insert(1, "bar:iron")
     trade["want"] = want[:40]
 
 
@@ -734,6 +787,11 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     low = [k for k in ("core_d", "core_f") if isinstance(al.get(k), int) and al[k] < CORE_DAYS]
     if low and (STOCKROOM, None) not in done and (info is None or STOCKROOM in info):
         builds.append({"tpl": STOCKROOM, "site": "S1", **({"p": {"still": 0}} if low == ["core_f"] else {})})
+    # Run 11: rock below the rock orders' need and no dig under way: a bedrooms dig (boulders, rooms the fort needs)
+    stone = rock_goal(s) if not (fort or {}).get("stone_dig") and (info is None or "bedrooms" in info) and \
+        all(b["tpl"] not in STONE_DIGS for b in builds) else None
+    if stone:
+        builds.append(copy.deepcopy(STONE_DIG))
     for p in plist:
         if cur <= p["id"] <= target:
             for d in p["deliver"]:
@@ -774,6 +832,8 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                   " builds; `dfllm plan check` lists the anchors), same = anchor of the earlier stage"),
     }
     draft_supply(doc, s, kept, season, None if info is None else set(info))
+    if stone:
+        doc["notes"] += f"; {stone}: bedrooms@S1 n=4 first (a stone dig)"
     return doc
 
 
