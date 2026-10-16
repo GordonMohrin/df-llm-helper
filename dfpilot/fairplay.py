@@ -137,7 +137,8 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
     def is_int(v, lo, hi):
         return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
     for k in doc:
-        if k not in ("v", "about", "clock", "hold_quiet_days", "ack_timeout_s", "defaults", "refuge", "gate"):
+        if k not in ("v", "about", "clock", "hold_quiet_days", "ack_timeout_s", "defaults", "refuge", "gate", "intake",
+                     "sortie"):
             errs.append(f"{name}: unknown key {k!r}")
     clock = doc.get("clock", {})
     if not isinstance(clock, dict):
@@ -189,7 +190,30 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
                     errs.append(f"{name}: gate.manual: a list of bridge names (O1, B1) or building ids expected")
             else:
                 errs.append(f"{name}: gate.{k}: unknown key")
+    # intake waves and the sortie through O1 (Gordon 2026-10-16; lua/dfllm/siege.lua M.IK_LIM / M.SO_LIM)
+    for blk, lims in (("intake", INTAKE_LIM), ("sortie", SORTIE_LIM)):
+        sec = doc.get(blk, {})
+        if not isinstance(sec, dict):
+            errs.append(f"{name}: {blk} must be an object")
+            continue
+        for k, v in sec.items():
+            lim = lims.get(k)
+            if lim is None:
+                errs.append(f"{name}: {blk}.{k}: unknown key")
+            elif lim == "bool":
+                if not isinstance(v, bool):
+                    errs.append(f"{name}: {blk}.{k}: true or false expected, got {v!r}")
+            elif not is_int(v, *lim):
+                errs.append(f"{name}: {blk}.{k}: int {lim[0]}..{lim[1]} expected, got {v!r}")
     return errs
+
+
+# the kernel's limits for config/reflex.json intake / sortie (siege.lua M.IK_LIM, M.SO_LIM; a bad value = the default)
+INTAKE_LIM: dict = {"on": "bool", "wave": (1, 40), "min_soldiers": (1, 30), "worn": (0, 100), "army_ratio": (1, 50),
+                    "cooldown": (0, 33600), "danger_dist": (0, 200), "stable": (0, 33600), "losses": (1, 30),
+                    "muster": (100, 33600), "fight": (300, 100800)}
+SORTIE_LIM: dict = {"worn": (0, 100), "losses": (1, 30), "max_ticks": (300, 33600), "gather": (100, 33600),
+                    "foe_cv": (0, 100), "near": (1, 50)}
 
 
 # ---------------------------------------------------------------- allowlist (CONTRACTS §9.14)

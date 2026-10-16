@@ -161,3 +161,32 @@ def test_reflex_config_validation(tmp_path):
     assert not any("breach_days" in e for e in errs), errs
     p.write_text("{", encoding="utf-8")
     assert fairplay.reflex_errors(p)[0].startswith("config/reflex.json: not JSON")
+
+
+def test_reflex_config_intake_and_sortie(tmp_path):
+    """Gordon 2026-10-16: the intake waves and the sortie through O1; the shipped values are the kernel's defaults
+    (lua/dfllm/siege.lua M.IK / M.SO) and every key has the kernel's limits (M.IK_LIM / M.SO_LIM)."""
+    import re
+    from dfpilot import fairplay
+    shipped = json.loads((fairplay.REPO / "config" / "reflex.json").read_text(encoding="utf-8"))
+    lua = (fairplay.REPO / "lua" / "dfllm" / "siege.lua").read_text(encoding="utf-8")
+
+    def table(name):
+        m = re.search(r"^M\." + name + r" = \{(.*?)\}\n(?=M\.|local|--)", lua, re.S | re.M)
+        assert m, name
+        out = {}
+        for k, v in re.findall(r"(\w+) = (\{\d+, \d+\}|true|false|\d+)", m.group(1)):
+            out[k] = True if v == "true" else False if v == "false" else (
+                tuple(int(x) for x in re.findall(r"\d+", v)) if v.startswith("{") else int(v))
+        return out
+    assert shipped["intake"] == table("IK") and shipped["sortie"] == table("SO")
+    lim_i = {k: v for k, v in fairplay.INTAKE_LIM.items() if v != "bool"}
+    assert table("IK_LIM") == lim_i and table("SO_LIM") == fairplay.SORTIE_LIM
+    assert set(fairplay.INTAKE_LIM) == set(shipped["intake"]) and set(fairplay.SORTIE_LIM) == set(shipped["sortie"])
+    p = tmp_path / "reflex.json"
+    p.write_text(json.dumps({"v": 2, "intake": {"on": 1, "wave": 0, "cooldown": 1200, "zap": 1},
+                             "sortie": {"worn": 101, "near": 5}}), encoding="utf-8")
+    errs = fairplay.reflex_errors(p)
+    for needle in ("intake.on: true or false", "intake.wave: int 1..40", "intake.zap: unknown key", "sortie.worn"):
+        assert any(needle in e for e in errs), (needle, errs)
+    assert not any("cooldown" in e or "near" in e for e in errs), errs

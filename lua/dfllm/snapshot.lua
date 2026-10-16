@@ -594,6 +594,30 @@ local function finish(K, j)
          {id = j.id, path = rel, purpose = j.purpose})
 end
 
+-- public (siege, intake waves, Gordon 2026-10-16): the built traps inside `boxes` ({{x0,y0,z0,x1,y1,z1}}; levers, track
+-- stops and pressure plates excluded): n and armed (not in their re-arm timeout, ready_timeout 0, the trap sheet's
+-- state); nil on a read fault. One pass over buildings.other.TRAP.
+function M.traps(K, boxes)
+  local n, armed = 0, 0
+  local ok = pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.TRAP) do
+      local kind = TRAP_CH[df.trap_type[b.trap_type] or '']
+      if kind and kind ~= 'P' then
+        local x, y, z = b.centerx, b.centery, b.z
+        for _, bb in ipairs(type(boxes) == 'table' and boxes or {}) do
+          if x >= bb[1] and x <= bb[4] and y >= bb[2] and y <= bb[5] and z >= bb[3] and z <= bb[6] then
+            n = n + 1
+            if (int(flag(b, 'ready_timeout')) or 0) <= 0 then armed = armed + 1 end
+            break
+          end
+        end
+      end
+    end
+  end)
+  if not ok then return nil end
+  return n, armed
+end
+
 ---------------------------------------------------------------- module
 function M.init(K)
   job, queue, n_auto, tt_cache, live_traps, live_jobs, yielding = nil, {}, 0, {}, nil, nil, nil

@@ -35,7 +35,8 @@ TRANSITIONS = {
     "RECOVERY": ["PEACE", "ALERT", "SIEGE", "BREACH"], "DRILL": ["PEACE", "ALERT", "SIEGE"],
 }
 MODE_SETTERS = {"siege": "*", "drill": ["DRILL>PEACE", "PEACE>DRILL"]}
-POSTURES = ["TRAIN", "STATION_B1", "READY_STATION", "B2_HOLD"]
+# READY_IN (BUG-029): every squad at the inner station; INTAKE (Gordon 2026-10-16): field and gallery during a wave
+POSTURES = ["TRAIN", "STATION_B1", "READY_STATION", "B2_HOLD", "READY_IN", "INTAKE"]
 BRIDGE_STATES = ["up", "down", "moving", "unknown"]
 ORDER_LIBS = ["library/basic", "library/furnace", "library/smelting", "library/military",
               "library/rockstock", "library/glassstock"]
@@ -95,7 +96,7 @@ STATE_OWNERS = {
     "stock.hosp_water": "care", "care.*": "care", "labor.*": "economy", "orders.*": "economy",
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
     "clock.*": "arbiter", "alarm.*": "reflex", "lever.*": "gate",
-    "alert.*": "seal",
+    "alert.*": "seal", "wave.*": "siege",
 }
 
 # kernel fault and slowness rules (CONTRACTS §3.3.5-3.3.6), mirrors contract.KERN
@@ -470,6 +471,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
                                              "left:i hostile:i")),
     # BUG-028: the main part of a drink or food stock lies outside Kern+ and the refuge; days = what lies inside
     "SUPPLY_OUTSIDE": ("A", "seal", _d("cls:s", "inside:i total:i pct:i days:i want:i hint:s also:s")),
+    # Gordon 2026-10-16: an intake wave (kind intake) or a sortie through O1 (kind sortie) went wrong: why losses,
+    # past_b1 (a hostile past B1), stuck (the field not clear in time), left_outside (O1 raised with members outside)
+    "WAVE_FAIL": ("A", "siege", _d("kind:s why:s", "wave:i squad:s lost:i units:ia n:i pos:p ticks:i")),
     "ALERT_START": ("B", "siege", _d(opt="vis:i")),
     "ALERT_END": ("B", "siege", _d(opt="vis:i")),
     "LOCKDOWN_END": ("B", "reflex", _d(opt="why:s ticks:i doors:i refused:i")),
@@ -507,6 +511,12 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "TRADE_LEDGER": ("B", "trade", _d(opt="civ:s ok:f ratio:i sold:i sold_v:i bought:i bought_v:i unmet:sa")),
     "SEAL": ("B", "seal", _d(opt="routes:i pos:p why:s sealed:f")),
     "REACH": ("B", "seal", _d(opt="flags:sa cut:i stairs:i")),
+    # Gordon 2026-10-16: intake waves (phase muster, open, close, clear, back, abort, refused) and the sortie through
+    # O1 (phase gather, open, out, recall, close, done, abort, refused); why = the trigger or the refusal
+    "INTAKE": ("B", "siege", _d("phase:s", "wave:i why:s inside:i size:i soldiers:i on_station:i worn:i lost:i "
+                                           "killed:i traps:i armed:i ticks:i")),
+    "SORTIE": ("B", "siege", _d("phase:s", "squad:s why:s units:ia n:i cv:i foes:i est:i worn:i lost:i pos:p "
+                                           "ticks:i")),
     "SIEGE_STATUS": ("C", "siege", _d(opt="vis:i worn:i on_station:i deaths:i captures:i")),
     "SEASON": ("C", "kern", _d(opt="year:i season:i")),
     "PROJECT_STAGE": ("C", "runner", _d("proj:s", "stage:s pct:i")),
@@ -545,8 +555,9 @@ VERB_ARGS: dict[str, Obj] = {
     "unpause": Obj(),
     "trade.want": Obj(opt={"want": Arr(TOKEN, hi=40), "sell": Arr(TOKEN, hi=40)}),
     "trade.retry": Obj(opt={"civ": Str(maxbytes=40), "want": Arr(TOKEN, hi=40), "sell": Arr(TOKEN, hi=40)}),
+    # gate (Gordon 2026-10-16): a sortie through that outer bridge (siege: gather in the bailey, open, kill, recall)
     "squad.sortie": Obj(req={"squad": Str(enum=["A", "B", "C"]), "target": AnyOf(ID, POS),
-                             "approve": Const(True)}),
+                             "approve": Const(True)}, opt={"gate": BRIDGE}),
     "lever": Obj(req={"bridge": BRIDGE, "want": Str(enum=["up", "down"])}),
     "inspect": Obj(req={"what": Str(enum=["state", "modules", "census", "manifest", "projects", "persist",
                                           "perf", "mode", "plan", "tombs", "water_sources", "orders", "workload",
@@ -636,7 +647,9 @@ STATE = Obj(
          # FR-55 lever latency (gate): last pull -> wanted state, in s and ticks (-1 never); pending own pulls
          "lever": Obj(req={"lat_s": Int(-1), "lat_t": Int(-1), "pend": NAT, "wait_s": NAT}),
          "alert": Obj(req={"want": Str(maxbytes=24), "burrow": Str(maxbytes=24), "tiles": NAT, "inside": NAT,
-                           "ok": FLAG}, opt={"why": Str(maxbytes=40), "core_d": NAT, "core_f": NAT})})
+                           "ok": FLAG}, opt={"why": Str(maxbytes=40), "core_d": NAT, "core_f": NAT}),
+         # intake waves (siege, Gordon 2026-10-16): phase, waves so far, the last refusal, the sortie (squad phase)
+         "wave": Obj(req={"ph": Str(maxbytes=8), "n": NAT}, opt={"why": Str(maxbytes=40), "so": Str(maxbytes=24)})})
 
 HEARTBEAT = Obj(req={"v": Const(V), "wall": NAT, "frame": NAT, "tick": TICK, "paused": Bool(), "mode": MODE,
                      "seq": NAT})
@@ -687,7 +700,9 @@ MANIFEST = named("manifest", Obj(
                                               "levers": Arr(POS, 1, 4)}),
                                       lambda b: None if b["fp"][2] == b["fp"][5] else "bridge fp must be one z level",
                                       "bridge footprint on one z"), keys=BRIDGE_RE),
-         "stations": Obj(opt={"melee": POS, "gallery": POS, "b2": POS}),
+         # field (killing field station of a wave, else the first killbox's centre), bailey (sortie gathering point,
+         # else the centre of the first Z1 box): Gordon 2026-10-16
+         "stations": Obj(opt={"melee": POS, "gallery": POS, "b2": POS, "field": POS, "bailey": POS}),
          "killboxes": Arr(Obj(req={"id": ID, "bbox": BBOX}), hi=20),
          "burrows": Obj(extra=Obj(req={"role": Str(enum=["kern", "refuge", "other"])}), keys=r"^.{1,40}$"),
          "edge": Arr(POS, hi=200),

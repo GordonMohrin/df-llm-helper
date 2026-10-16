@@ -16,6 +16,11 @@
 -- FR-62 (Run 9: 402 units, 16 ms/s): the hostile scan touches every unit 10x per second, so the per-unit path
 -- is kept short: inactive units (dead, gone) cost one call, the LARGE_PREDATOR raw flag is cached per
 -- race/caste, and the entrance list (seal) is only fetched when a predator candidate needs it.
+-- Intake waves (Gordon 2026-10-16): every listed hostile carries its zone (zn: 1 = the intake area, manifest zones Z1/Z2
+-- and the killboxes; 2 = past B1: a Kern+ tile or zones Z3/Z4; 0 = elsewhere) and dz = 1 when it is dangerous for an
+-- intake (a great danger, or a caste raw flag BUILDINGDESTROYER, TRAPAVOID or FLIER; cached per race/caste like
+-- LARGE_PREDATOR). census.h counts zin (zone 1), zpast (zone 2), dz and dz_o1 (the nearest dangerous one to O1); the
+-- list puts zone 2, then zone 1 hostiles first, so a wave in the killing field is never cut off by the 40 nearest.
 local geom = require('dfllm.util.geom')
 
 -- every 9 ticks = every frame at full timestream (<= 9-tick skips), so scan periods are not
@@ -65,6 +70,17 @@ local function geometry(K)
     end
   end
   g.kern, g.refuge = burrow_names(man)
+  -- intake waves: the attack zones between O1 and B1 (zone 1) and the zones past B1 (zone 2)
+  g.zin, g.zpast = {}, {}
+  local zones = type(man.zones) == 'table' and man.zones or {}
+  for _, e in ipairs({{'Z1', g.zin}, {'Z2', g.zin}, {'Z3', g.zpast}, {'Z4', g.zpast}}) do
+    for _, bb in ipairs(type(zones[e[1]]) == 'table' and zones[e[1]] or {}) do
+      if type(bb) == 'table' and #bb == 6 then e[2][#e[2] + 1] = bb end
+    end
+  end
+  for _, kb in ipairs(type(man.killboxes) == 'table' and man.killboxes or {}) do
+    if type(kb) == 'table' and type(kb.bbox) == 'table' and #kb.bbox == 6 then g.zin[#g.zin + 1] = kb.bbox end
+  end
   return g
 end
 
@@ -137,6 +153,7 @@ local function hscan_begin(K, now, armed)
   local g = st.geo or geometry(K)
   st.geo = g
   st.hs = {i = 0, seen = {}, list = {}, keys = {}, vis = 0, inv = 0, great = 0, undead = 0, inside = 0, crazed = 0,
+           zin = 0, zpast = 0, dz = 0, dz_o1 = -1,
            near_o1 = -1, near_cit = -1, near_bridge = {}, caged = {}, units = 0, tick = now.tick,
            armed = armed and 1 or 0, geo = g, out_pos = st.out_pos or {},
            count = now.tick - (st.count_tick or -M.COUNT_EVERY) >= M.COUNT_EVERY, animals = {}}
@@ -228,24 +245,46 @@ local function near_entrance(u, hs)
   return false
 end
 
--- the caste raw flag, cached per race and caste for the session (raws do not change while a map is loaded)
+-- the caste raw flags, cached per race and caste for the session (raws do not change while a map is loaded), one raws
+-- read per pair: LARGE_PREDATOR (p) and, for intake waves (Gordon 2026-10-16), a flag that walls, traps or a raised
+-- gate do not stop (dz: BUILDINGDESTROYER, TRAPAVOID, FLIER; an unknown flag name reads as false)
 local pred_raw = {}
-local function raw_predator(race, caste)
+local DZ_FLAGS = {'BUILDINGDESTROYER', 'TRAPAVOID', 'FLIER'}
+local function raw_read(race, caste)
   local r = df.creature_raw.find(race)
-  return r ~= nil and r.caste[caste].flags.LARGE_PREDATOR == true
+  local c = r ~= nil and r.caste[caste]
+  if not c then return {p = false, dz = false} end
+  local e = {p = c.flags.LARGE_PREDATOR == true, dz = false}
+  for _, f in ipairs(DZ_FLAGS) do
+    local ok, v = pcall(function() return c.flags[f] end)
+    if ok and v == true then e.dz = true end
+  end
+  return e
 end
-local function large_predator(u)
+local NO_RAW = {p = false, dz = false}
+local function raw_flags(u)
   local race, caste = u.race, u.caste
-  if race == nil then return false end
+  if race == nil then return NO_RAW end
   local row = pred_raw[race]
   if row == nil then row = {}; pred_raw[race] = row end
   local v = row[caste or -1]
   if v == nil then
-    local ok, yes = pcall(raw_predator, race, caste)
-    v = ok and yes == true
+    local ok, e = pcall(raw_read, race, caste)
+    v = ok and type(e) == 'table' and e or NO_RAW
     row[caste or -1] = v
   end
   return v
+end
+local function large_predator(u) return raw_flags(u).p end
+
+-- intake waves: a hostile an intake must not let in (Gordon 2026-10-16): a great danger or a dz raw flag
+local function dangerous(u) return raw_flags(u).dz end
+
+local function in_boxes(boxes, x, y, z)
+  for _, b in ipairs(boxes) do
+    if x >= b[1] and x <= b[4] and y >= b[2] and y <= b[5] and z >= b[3] and z <= b[6] then return true end
+  end
+  return false
 end
 
 local function predator(u, hs)
@@ -350,15 +389,26 @@ local function consider(hs, u)
     if dcit < 0 or d < dcit then dcit = d end
   end
   if dcit >= 0 then hs.near_cit = minpos(hs.near_cit, dcit) end
+  local zn = 0
   if hs.kb then
     P.x, P.y, P.z = x, y, z
-    if dfhack.burrows.isAssignedTile(hs.kb, P) then hs.inside = hs.inside + 1 end
+    if dfhack.burrows.isAssignedTile(hs.kb, P) then hs.inside, zn = hs.inside + 1, 2 end
+  end
+  if zn == 0 and in_boxes(g.zpast, x, y, z) then zn = 2 end
+  if zn == 0 and in_boxes(g.zin, x, y, z) then zn = 1 end
+  if zn == 2 then hs.zpast = hs.zpast + 1 elseif zn == 1 then hs.zin = hs.zin + 1 end
+  local dz = (great or dangerous(u)) and 1 or 0
+  if dz == 1 then
+    hs.dz = hs.dz + 1
+    if d_o1 >= 0 then hs.dz_o1 = minpos(hs.dz_o1, d_o1) end
   end
   local list = hs.list
-  list[#list + 1] = {id = id, x = x, y = y, z = z, d_o1 = d_o1, dc = dcit,
+  list[#list + 1] = {id = id, x = x, y = y, z = z, d_o1 = d_o1, dc = dcit, zn = zn, dz = dz,
                      k = great and 'great' or (undead and 'undead') or (inv and 'inv') or 'danger'}
-  -- integer sort key: distance (O1, else nearest outside citizen) then scan order
-  hs.keys[#hs.keys + 1] = (d_o1 >= 0 and d_o1 or (dcit >= 0 and dcit or 999999)) * 16777216 + #list
+  -- integer sort key: the zone (past B1, then the intake area), then distance (O1, else nearest outside citizen),
+  -- then scan order
+  local d = zn == 2 and 0 or (zn == 1 and 1 or 2 + (d_o1 >= 0 and d_o1 or (dcit >= 0 and dcit or 999999)))
+  hs.keys[#hs.keys + 1] = d * 16777216 + #list
   return 10
 end
 
@@ -392,7 +442,8 @@ local function hscan_finish(K)
   end
   K.census.h = {tick = hs.tick, vis = hs.vis, inv = hs.inv, great = hs.great, undead = hs.undead, inside = hs.inside,
                 near_o1 = hs.near_o1, near_cit = hs.near_cit, near_bridge = hs.near_bridge, list = list,
-                armed = hs.armed, crazed = hs.crazed, friends = hs.friends}
+                armed = hs.armed, crazed = hs.crazed, friends = hs.friends, zin = hs.zin, zpast = hs.zpast,
+                dz = hs.dz, dz_o1 = hs.dz_o1}
 end
 
 ---------------------------------------------------------------- module

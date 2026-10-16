@@ -807,11 +807,18 @@ local function sighting(K, h, now)
 end
 
 -- INTRUDER / PREDATOR: a visible hostile on the citizens' walkable group (snapshot.far false; unknown counts as
--- the same group, fail-open); a wild danger counts only on a roofed tile (snapshot.outside_near r 0)
+-- the same group, fail-open); a wild danger counts only on a roofed tile (snapshot.outside_near r 0).
+-- Intake waves and the sortie through O1 (Gordon 2026-10-16): while siege runs one (siege.expects), the hostiles
+-- outside B1 are expected (sense zone 0 or 1: the soldiers in the killing field or outside share their walk group);
+-- one past B1 (zone 2: Kern+, zones Z3/Z4) still counts
 local function inside_scan(K, h, now)
   local hostile, predator, nh, np = nil, nil, 0, 0
+  local okx, expects = K.call('siege', 'expects')
+  local wave = okx and expects == true
   for _, e in ipairs(h.list or {}) do
-    local ok, far = K.call('snapshot', 'far', e.x, e.y, e.z)
+    local ok, far = true, false
+    if wave and (e.zn or 0) < 2 then far = true
+    else ok, far = K.call('snapshot', 'far', e.x, e.y, e.z) end
     if not (ok and far == true) then
       if e.k == 'danger' then
         local oko, out = K.call('snapshot', 'outside_near', {{e.x, e.y, e.z}}, 0)

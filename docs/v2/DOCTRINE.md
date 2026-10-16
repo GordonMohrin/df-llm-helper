@@ -98,6 +98,12 @@ Sources: [W] dwarffortresswiki.org (v50+ namespace, fetched today); [D] the inst
 5. When all citizens are inside the burrow, or after at most about 600 ticks, `lever pull --id N --priority`. `--instant` is armok and not allowed. Use 2 levers and check that nobody is on the bridge (raising flings units [W]).
 6. Freeze wealth and beauty projects. Send the LLM one summary.
 
+**Intake waves and the sortie (Gordon 2026-10-16; Run 10 y419: 47 goblins waited for weeks in front of the raised O1, the trap hall and the killing field stayed unused, recruits between O1 and B2 had no drink):**
+- Between waves every squad stands inside B1 on the side with the drink (READY_IN; behind B2 while the core seal is up). Stations outside B1 only during a wave or an approved sortie (BUG-029).
+- A wave (on by default, `config/reflex.json` `intake`): only with O1 and B1 up, the civilians in their burrow and none in the bailey, trap hall or field, enough soldiers on station in uniform (worn ≥ 80 %), traps armed, no great danger, building destroyer, trap avoider or flier in sight, an army at most 4x our soldiers. The squads go out through B1 while O1 is up (the airlock), B1 rises behind them, then O1 lets in up to min(6, soldiers on station) hostiles, rises again, traps, crossbows from the gallery and the melee in the field kill them; once the field is clear the squads come back through B1 and rest (cooldown) before the next wave.
+- O1 closes at once on a loss, a danger near O1, too few soldiers or a lower worn. Never O1 and B1 down at the same time while hostiles are visible.
+- A sortie through O1 only with the player's approval (`squad.sortie` with `gate`): gather in the bailey, O1 down, kill near the target, recall on losses, time or a danger, O1 up when all are back (or a hostile at the gate: who stays outside is named).
+
 **Civilian alert burrow:**
 - The burrow = **the whole sealed interior**: farms, workshops, stockpiles, tombs. Name it with a trailing `+` and `enable burrow` so it auto-expands when adjacent walls are dug [D].
 - Then the alert costs no production. Run 6's alert froze trap reloading, building and farming because the burrow was small.

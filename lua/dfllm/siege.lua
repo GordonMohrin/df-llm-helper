@@ -24,6 +24,7 @@
 -- off while the lockdown holds it, so siege stays the one owner of its state. With peace_gates (D-14) up, RECOVERY
 -- lowers only the core seal (outer/inner stay up). Without manifest outer/inner bridges sealed_ticks counts the time
 -- gate.sealed() holds (the unmanaged bridges a lockdown raised), so a fort without fortcore reports its seal too.
+-- Intake waves, the sortie through O1 and the inner station (Gordon 2026-10-16, BUG-029): see that section below.
 local geom = require('dfllm.util.geom')
 
 -- every frame, but a full step only on a fresh hostile census or every PERIOD ticks, so the
@@ -43,7 +44,8 @@ M.ANCHORS = 20             -- alert anchors kept (positions of citizens outside 
 M.STATUS, M.RETRY, M.POSTURE_REASSERT, M.KILL_EVERY = 600, 600, 3600, 100
 M.DRILL_MAX = 3600         -- a drill normally ends at T+1,200 (drill module)
 
-local POSTURE = {PEACE = 'TRAIN', ALERT = 'STATION_B1', SIEGE = 'READY_STATION', DRILL = 'READY_STATION',
+-- BUG-029: SIEGE stands the squads at the inner station (READY_IN; INTAKE only while a wave runs)
+local POSTURE = {PEACE = 'TRAIN', ALERT = 'STATION_B1', SIEGE = 'READY_IN', DRILL = 'READY_STATION',
                  BREACH = 'B2_HOLD', RECOVERY = 'STATION_B1'}
 local EPISODE = {SIEGE = true, BREACH = true, RECOVERY = true}
 local SHAFT = {['<'] = true, ['>'] = true, X = true, _ = true}
@@ -82,6 +84,24 @@ local function geometry(K)
   end
   if type(man.refuge) == 'table' and type(man.refuge.burrow) == 'string' then refuge = man.refuge.burrow end
   g.kern, g.refuge = kern or 'Kern+', refuge or 'Tiefe+'
+  -- intake waves: the bailey (Z1), the trap hall (Z2), the killboxes, the zones past B1 (Z3/Z4), the stations
+  local zones = type(man.zones) == 'table' and man.zones or {}
+  local function boxes(keys)
+    local r = {}
+    for _, k in ipairs(keys) do
+      for _, bb in ipairs(type(zones[k]) == 'table' and zones[k] or {}) do
+        if type(bb) == 'table' and #bb == 6 then r[#r + 1] = bb end
+      end
+    end
+    return r
+  end
+  g.z1, g.z2, g.z3, g.zpast, g.kb = boxes({'Z1'}), boxes({'Z2'}), boxes({'Z3'}), boxes({'Z3', 'Z4'}), {}
+  for _, kb in ipairs(type(man.killboxes) == 'table' and man.killboxes or {}) do
+    if type(kb) == 'table' and type(kb.bbox) == 'table' and #kb.bbox == 6 then g.kb[#g.kb + 1] = kb.bbox end
+  end
+  g.zin = {}
+  for _, l in ipairs({g.z1, g.z2, g.kb}) do for _, bb in ipairs(l) do g.zin[#g.zin + 1] = bb end end
+  g.stations = type(man.stations) == 'table' and man.stations or {}
   return g
 end
 
@@ -96,6 +116,7 @@ local function assess(K)
   local inv, great, vis, inside = h.inv or 0, h.great or 0, h.vis or 0, h.inside or 0
   return {vis = vis, inv = inv, great = great, undead = h.undead or 0, inside = inside,
           near_o1 = h.near_o1 or -1, near_cit = h.near_cit or -1, near_bridge = h.near_bridge or {},
+          zin = h.zin or 0, zpast = h.zpast or 0, dz = h.dz or 0, dz_o1 = h.dz_o1 or -1,
           siege = (great > 0 and 'great') or (inv >= 6 and 'invaders') or nil, hostile = vis > 0,
           quiet = fresh and vis == 0, calm = fresh and vis == 0, fresh = fresh}
 end
@@ -527,12 +548,19 @@ end
 
 -- BUG-027 (Run 10: BREACH "O1 not up at T+900" while the pulls were under way, lever latency 11-19 s): a bridge gate
 -- reports waiting (units on its footprint, or its pull under way) is no failure while no hostile is within NEAR_RAISE
+-- intake waves and the sortie (Gordon 2026-10-16): a bridge they hold down (st.wd), or raise again within its deadline
+-- (st.wu = the tick), is no gate failure and is not raised by the SIEGE timer
+local function wave_skip(b, now)
+  return st.wd[b] == true or (st.wu[b] ~= nil and now < st.wu[b])
+end
+
 local function failed_bridge(K, g)
   local h = K.census.h
   local nb = type(h) == 'table' and type(h.near_bridge) == 'table' and h.near_bridge or {}
+  local now = K.now().tick
   for _, list in ipairs({g.outer, g.inner}) do
     for _, b in ipairs(list) do
-      if gate_state(K, b) ~= 'up' then
+      if gate_state(K, b) ~= 'up' and not wave_skip(b, now) then
         local d = nb[b]
         local okw, wait = K.call('gate', 'waiting', b)
         -- BUG-028: a raise held for citizens it would cut off (no hostile within CUT_NEAR), or a rescue's bridge
@@ -737,12 +765,15 @@ local function alert_plan(K, a, g, now)
   return on, burrow, held, note, brief or note, audited, flee
 end
 
-local function set_posture(K, P, now)
-  if mem.posture == P and now - mem.posture_tick < M.POSTURE_REASSERT then return end
-  if mem.posture_want == P and now < (mem.posture_retry or now) then return end
-  mem.posture_want = P
+-- var (BUG-029): the core bridges' states for the postures whose station depends on them (READY_IN, STATION_B1): a
+-- change re-issues the stations at once
+local function set_posture(K, P, now, var)
+  var = var or ''
+  if mem.posture == P and mem.pvar == var and now - mem.posture_tick < M.POSTURE_REASSERT then return end
+  if mem.posture_want == P and mem.pvar_want == var and now < (mem.posture_retry or now) then return end
+  mem.posture_want, mem.pvar_want = P, var
   local ok, r = K.call('military', 'posture', P)
-  if ok and r ~= false then mem.posture, mem.posture_tick = P, now
+  if ok and r ~= false then mem.posture, mem.posture_tick, mem.pvar = P, now, var
   else mem.posture_retry = now + M.RETRY end
 end
 
@@ -758,7 +789,8 @@ local function raise(K, g, now)
   for _, list in ipairs({g.outer, g.inner}) do
     for _, b in ipairs(list) do
       local why = st.req[b]
-      if not why then
+      if wave_skip(b, now) then why = nil
+      elseif not why then
         local d = nb[b]
         if outside == 0 then why = 'inside'
         elseif t >= M.RAISE_BY then why = 'timer'
@@ -773,7 +805,8 @@ local function raise(K, g, now)
   for _, list in ipairs({g.outer, g.inner}) do
     for _, b in ipairs(list) do
       local why = whys[b]
-      if why and not held[b] and not rescuing(b) and want(K, b, 'up', why, st.t0 + M.BREACH_AT) and not st.req[b] then
+      if why and not held[b] and not rescuing(b) and not wave_skip(b, now)
+         and want(K, b, 'up', why, st.t0 + M.BREACH_AT) and not st.req[b] then
         st.req[b], dirty = why, true
       end
     end
@@ -829,7 +862,7 @@ end
 -- kill orders only on visible targets inside manifest.killboxes, never on stair/shaft tiles. An
 -- ordered target that is no longer valid (dead, out of the box, out of view) replaces the order at
 -- once with the remaining targets, or withdraws it when none is left; new targets every 100 ticks.
-local function kills(K, g, P, now)
+local function kills(K, g, P, now, melee)
   local h, man = K.census.h, g.man
   local boxes = type(man.killboxes) == 'table' and man.killboxes or {}
   if type(h) ~= 'table' then return end
@@ -846,7 +879,7 @@ local function kills(K, g, P, now)
     end
   end
   table.sort(ids)
-  local sig = table.concat(ids, ',')
+  local sig = (#ids > 0 and melee) and ('m:' .. table.concat(ids, ',')) or table.concat(ids, ',')
   if sig == (mem.kill_sig or '') then return end
   local lost = false
   for id in pairs(mem.kill_set or {}) do if not set[id] then lost = true; break end end
@@ -857,12 +890,704 @@ local function kills(K, g, P, now)
   end
   if not lost and now - (mem.kill_tick or -M.KILL_EVERY) < M.KILL_EVERY then return end
   mem.kill_tick = now
-  local ok, r = K.call('military', 'kill', ids)
+  local ok, r = K.call('military', 'kill', ids, melee and {melee = true} or nil)
   if ok and r ~= false then mem.kill_sig, mem.kill_set = sig, set
   elseif mem.kill_sig then                       -- refused: never leave the old order running
     withdraw(K, P, now)
     mem.kill_sig, mem.kill_set = nil, nil
   end
+end
+
+---------------------------------------------------------------- intake waves and the sortie through O1 (Gordon 2026-10-16)
+-- Run 10 y419 (Handlelock): 47 goblins waited for weeks in front of the raised O1; the trap hall and the killing field
+-- were never used, and no soldier could be sent out (squad.sortie only issued orders, `lever` is PEACE-only). Gordon's
+-- decision: intake waves by default in SIEGE (config/reflex.json `intake`) and an approved sortie through O1.
+-- Intake (st.ik.ph), SIEGE only, one step per siege pass:
+--   idle    O1/B1 up, every squad at the inner station (READY_IN, BUG-029). Each pass checks the preconditions:
+--           fortcore manifest (outer, inner, a killbox, zones Z1 and Z2; Kern+ covering none of that intake area: a
+--           hostile on Kern+ is a BREACH), SIEGE for `stable` ticks, no STRANDED rescue
+--           or raise hold, no sortie, every outer and inner bridge up, the civ alert sounding, no civilian in the intake
+--           area (Z1, Z2, killboxes), no hostile there or past B1, no dangerous hostile in sight (sense dz: a great
+--           danger, a building destroyer, trap avoider or flier by the caste raws), soldiers >= min_soldiers, worn >=
+--           `worn`, visible hostiles <= army_ratio x soldiers, every trap of the intake area armed (snapshot.traps,
+--           '?' when unreadable). A refusal is INTAKE refused (B), once per reason (util/cadence); waits (the siege
+--           is young, a bridge still rises, a sortie, nobody in sight) only set state wave.why.
+--   muster  posture INTAKE (melee to the field, crossbows to the gallery); a core bridge that is up (after a BREACH)
+--           and B1 go down ('intake'; O1 stays up: the airlock, gate enforces it too); once the soldiers stand on
+--           station (all of them, or min_soldiers after half of `muster`) and no civilian is in the area, B1 rises
+--           again, and once it is up: open. `muster` ticks, a hostile in the area or a danger: back (abort).
+--   open    O1 down ('intake'; BUG-027's footprint rules hold). Close (O1 up, raising onto hostiles is fine, gate never
+--           raises onto our units) when the hostiles in the intake area reach min(wave, soldiers on station), the
+--           wave's losses reach `losses` (WAVE_FAIL), a dangerous hostile is within danger_dist of O1, the soldiers on
+--           station fall below min_soldiers, worn drops below `worn`, or nobody came within IK_OPEN_MAX ticks.
+--   fight   O1 up; kill orders on the hostiles in the killboxes to the crossbows and to the melee in the field. The
+--           field is clear once no visible hostile is left in the intake area -> back. `fight` ticks without a clear
+--           field: WAVE_FAIL stuck (B1 never opens while hostiles are in the area; the squads stay).
+--   back    posture READY_IN; B1 down (O1 up, the area clear) until no soldier is left in the area or near the
+--           gallery (or IK_BACK_MAX ticks), then B1 up -> cool.
+--   cool    `cooldown` ticks for drink, food and rest -> idle.
+--   stray   (BUG-029, also with intake off) idle with O1 and B1 up, the area clear and soldiers outside B1 (a raise at
+--           T0 caught them, a restart): B1 down until they are in (or IK_BACK_MAX), then up -> idle. Soldiers between
+--           B1 and B2 (zone Z3) while the core seal is up (BREACH -> SIEGE leaves it up): B2 goes down once, the
+--           mode table's SIEGE state (INTAKE unseal).
+-- Hostiles in the intake area are expected while a wave or a sortie runs: siege's BREACH needs a hostile on Kern+
+-- (unchanged), and reflex skips them for INTRUDER (siege.expects); a hostile past B1 (sense zone 2: Kern+, Z3, Z4)
+-- during a wave is WAVE_FAIL past_b1 and, on Kern+, BREACH as before. Leaving SIEGE ends a wave or a sortie at once.
+-- Sortie (st.so), inbox squad.sortie with `gate` (approved), SIEGE only (siege.sortie checks and answers):
+--   gather  the squad stands in the bailey (stations.bailey, else the centre of Z1; a held order, military.hold_order);
+--           B1 down while somebody still has to come through (O1 up), B1 up once all are in the bailey -> open
+--   open    O1 down ('sortie') -> out once it is down
+--   out     kill order on the visible hostiles within `near` tiles of the target (else a move there); recall on losses
+--           >= `losses` (WAVE_FAIL), no target left, `max_ticks`, a dangerous hostile in sight or a hostile past B1
+--   recall  back to the bailey; O1 up once every member is in the bailey, or at once when a hostile is within
+--           gate.force_near tiles of O1 or after `max_ticks` (WAVE_FAIL left_outside names who stays outside)
+--   close   O1 up -> home: the squad is released (READY_IN), B1 down until nobody is left in the area, B1 up -> done.
+-- Never O1 and B1 down at once while hostiles are visible: siege sequences them, gate refuses an intake/sortie 'down'
+-- that would open both sides (the airlock).
+M.IK = {on = true, wave = 6, min_soldiers = 4, worn = 80, army_ratio = 4, cooldown = 1200, danger_dist = 20,
+        stable = 600, losses = 1, muster = 1200, fight = 4800}
+M.IK_LIM = {wave = {1, 40}, min_soldiers = {1, 30}, worn = {0, 100}, army_ratio = {1, 50}, cooldown = {0, 33600},
+            danger_dist = {0, 200}, stable = {0, 33600}, losses = {1, 30}, muster = {100, 33600}, fight = {300, 100800}}
+M.SO = {worn = 80, losses = 1, max_ticks = 2400, gather = 1200, foe_cv = 10, near = 10}
+M.SO_LIM = {worn = {0, 100}, losses = {1, 30}, max_ticks = {300, 33600}, gather = {100, 33600}, foe_cv = {0, 100},
+            near = {1, 50}}
+M.IK_OPEN_MAX, M.IK_BACK_MAX, M.IK_TRAPS_EVERY, M.SO_RETARGET = 2400, 1200, 600, 100
+M.IK_IDLE_TTL, M.IK_STRAY_EVERY = 300, 100     -- idle: the KPI and the stray check are read this often at most
+local IK_BUSY = {muster = true, open = true, fight = true, back = true, stray = true}
+local IK_FIELD = {muster = true, open = true, fight = true}            -- posture INTAKE
+local IK_SILENT = {stable = true, gate = true, sortie = true, none = true, census = true, stranded = true}
+
+-- config/reflex.json `intake` / `sortie` (fail-open: a bad value is the default; dfpilot.lint --config warns)
+local function cfg_block(K, key, def, lim)
+  local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex[key]) == 'table' and K.cfg.reflex[key] or {}
+  local c = {}
+  for k, v in pairs(def) do
+    local x = r[k]
+    if type(v) == 'boolean' then
+      if type(x) == 'boolean' then c[k] = x else c[k] = v end
+    else
+      x = int(x)
+      local l = lim[k]
+      c[k] = (x and l and x >= l[1] and x <= l[2]) and x or v
+    end
+  end
+  return c
+end
+local function ik_cfg(K) return cfg_block(K, 'intake', M.IK, M.IK_LIM) end
+local function so_cfg(K) return cfg_block(K, 'sortie', M.SO, M.SO_LIM) end
+
+local function in_boxes(boxes, x, y, z)
+  for _, b in ipairs(boxes) do
+    if x >= b[1] and x <= b[4] and y >= b[2] and y <= b[5] and z >= b[3] and z <= b[6] then return true end
+  end
+  return false
+end
+
+local function posp(p)
+  if type(p) ~= 'table' then return nil end
+  local x, y, z = int(p[1] or p.x), int(p[2] or p.y), int(p[3] or p.z)
+  if x and y and z then return {x, y, z} end
+end
+
+-- the civilians (census.u outside_ids: not soldiers, not on Kern+ or the refuge) standing in `boxes`; by id only
+local function civ_in(K, boxes)
+  local cu = K.census.u
+  local n = 0
+  for _, id in ipairs(type(cu) == 'table' and type(cu.outside_ids) == 'table' and cu.outside_ids or {}) do
+    local u = df.unit.find(id)
+    local x, y, z
+    if u then x, y, z = dfhack.units.getPosition(u) end
+    if x and in_boxes(boxes, x, y, z) then n = n + 1 end
+  end
+  return n
+end
+
+-- military.kpi (worn, soldiers on station: a pass over the squads' gear); `ttl` ticks of siege's own cache while idle
+-- (kernel cost on a big fort), fresh (military's 25) while a wave runs
+local function mil_kpi(K, ttl)
+  local now = K.now().tick
+  local c = mem.kpi
+  if ttl and c and now >= c.t and now - c.t < ttl then return c.k end
+  local ok, k = K.call('military', 'kpi')
+  k = ok and type(k) == 'table' and k or nil
+  mem.kpi = {t = now, k = k}
+  return k
+end
+
+local function all_state(K, list, want_s)
+  if #list == 0 then return false end
+  for _, b in ipairs(list) do if gate_state(K, b) ~= want_s then return false end end
+  return true
+end
+
+-- the wave's own wants: down (st.wd, never raised by the SIEGE timer) and up again (st.wu: no gate failure before its
+-- deadline)
+local function wave_down(K, list, why)
+  local ok = true
+  for _, b in ipairs(list) do
+    local okc, ok2 = K.call('gate', 'want', b, 'down', why)
+    if okc and ok2 == true then st.wd[b], st.wu[b], dirty = true, nil, true else ok = false end
+  end
+  return ok
+end
+local function wave_up(K, list, why, now)
+  for _, b in ipairs(list) do
+    if st.wd[b] or not st.wu[b] then st.wu[b] = now + M.BREACH_AT end
+    st.wd[b], dirty = nil, true
+    want(K, b, 'up', why, now + M.BREACH_AT)
+  end
+end
+local function wave_settle(K)            -- a bridge the wave raised is up: the SIEGE rules take it back
+  for b in pairs(st.wu) do
+    if gate_state(K, b) == 'up' then st.wu[b], dirty = nil, true end
+  end
+end
+
+local function ik_event(K, phase, txt, d)
+  d = d or {}
+  d.phase, d.wave = phase, st.ik.n
+  K.emit('INTAKE', 'B', txt:sub(1, 200), d)
+  K.log('info', 'siege: intake %s', txt:sub(1, 200))
+end
+
+-- WAVE_FAIL (A), once per wave (or sortie) and reason
+local function wave_fail(K, rec, kind, why, txt, d)
+  rec.fails = rec.fails or {}
+  if rec.fails[why] then return end
+  rec.fails[why], dirty = true, true
+  d = d or {}
+  d.kind, d.why = kind, why
+  K.emit('WAVE_FAIL', 'A', txt:sub(1, 200), d)
+  K.log('warn', 'siege: %s', txt:sub(1, 200))
+end
+
+local function ik_phase(K, ph, now)
+  st.ik.ph, st.ik.t, st.ik.raise, dirty = ph, now, nil, true
+end
+
+-- the intake area plus a 3-tile box around the gallery: where soldiers of a wave may still stand
+local function out_boxes(g)
+  local r = {}
+  for _, b in ipairs(g.zin) do r[#r + 1] = b end
+  local gp = posp(g.stations.gallery)
+  if gp then r[#r + 1] = {gp[1] - 3, gp[2] - 3, gp[3], gp[1] + 3, gp[2] + 3, gp[3]} end
+  return r
+end
+
+-- armed traps of the intake area, cached IK_TRAPS_EVERY ticks: n, armed (nil: unreadable)
+local function ik_traps(K, g, now)
+  local c = mem.traps
+  if c and now >= c.t and now - c.t < M.IK_TRAPS_EVERY then return c.n, c.armed end
+  local ok, n, armed = K.call('snapshot', 'traps', g.zin)
+  mem.traps = {t = now, n = ok and int(n) or nil, armed = ok and int(armed) or nil}
+  return mem.traps.n, mem.traps.armed
+end
+
+-- tiles of the intake area on Kern+ (a hostile there is 'inside': BREACH), counted at most every 6,000 ticks and over
+-- at most 4,000 tiles; -1 unknown (no Kern+)
+local function kern_overlap(K, g, now)
+  local c = mem.kov
+  if c and now >= c.t and now - c.t < 6000 then return c.n end
+  local n, seen = -1, 0
+  local ok, kb = pcall(dfhack.burrows.findByName, g.kern)
+  if ok and kb then
+    n = 0
+    for _, b in ipairs(g.zin) do
+      for z = b[3], b[6] do
+        for y = b[2], b[5] do
+          for x = b[1], b[4] do
+            seen = seen + 1
+            if seen > 4000 then break end
+            local ok2, v = pcall(dfhack.burrows.isAssignedTile, kb, {x = x, y = y, z = z})
+            if ok2 and v == true then n = n + 1 end
+          end
+        end
+      end
+    end
+  end
+  mem.kov = {t = now, n = n}
+  return n
+end
+
+-- why no wave may start now: reason text and token, or nil
+local function ik_refuse(K, a, g, now, c)
+  if #g.outer == 0 or #g.inner == 0 or #g.kb == 0 then return 'no fortcore O1/B1/killbox in the manifest', 'geometry' end
+  if #g.z1 == 0 or #g.z2 == 0 then return 'the manifest has no zones Z1/Z2 (bailey, trap hall)', 'geometry' end
+  local kov = kern_overlap(K, g, now)
+  if kov > 0 then
+    return string.format('%s covers %d tiles of the bailey, trap hall or field (a wave there is a BREACH)', g.kern, kov),
+           'kern'
+  end
+  if now - st.t0 < c.stable then return string.format('the siege is %d ticks old (< %d)', now - st.t0, c.stable), 'stable' end
+  if st.str.rescue or next(st.str.hold) then return 'a STRANDED rescue or raise hold runs', 'stranded' end
+  if st.so then return 'a sortie is out', 'sortie' end
+  for _, list in ipairs({g.outer, g.inner}) do
+    for _, b in ipairs(list) do
+      if gate_state(K, b) ~= 'up' then return b .. ' is not up', 'gate' end
+    end
+  end
+  if not (a and a.fresh) then return 'no fresh hostile census', 'census' end
+  if (alert_idx() or 0) == 0 then return 'the civ alert is not sounding', 'alert' end
+  local nc = civ_in(K, g.zin)
+  if nc > 0 then return string.format('%d civilians in the bailey, trap hall or killing field', nc), 'civ' end
+  if (a.inside or 0) > 0 or (a.zpast or 0) > 0 then return 'a hostile past B1', 'past' end
+  if (a.zin or 0) > 0 then return string.format('%d hostiles still in the bailey, trap hall or field', a.zin), 'field' end
+  if (a.dz or 0) > 0 then return string.format('%d dangerous hostiles in sight (great danger, building destroyer, trap ' ..
+                                               'avoider or flier)', a.dz), 'danger' end
+  if (a.vis or 0) == 0 then return 'no hostile in sight', 'none' end
+  local k = mil_kpi(K, M.IK_IDLE_TTL)
+  local sol, worn = k and int(k.soldiers) or 0, k and int(k.worn) or 0
+  if sol < c.min_soldiers then return string.format('%d soldiers < %d', sol, c.min_soldiers), 'soldiers' end
+  if worn < c.worn then return string.format('worn %d%% < %d%%', worn, c.worn), 'worn' end
+  if a.vis > c.army_ratio * sol then
+    return string.format('%d hostiles in sight > %d x %d soldiers', a.vis, c.army_ratio, sol), 'army'
+  end
+  local tn, ta = ik_traps(K, g, now)
+  if tn and ta and ta < tn then return string.format('traps re-arming: %d of %d armed', ta, tn), 'traps' end
+  return nil
+end
+
+local function ik_back(K, now, why, txt)
+  ik_phase(K, 'back', now)
+  ik_event(K, why, txt, {why = why})
+end
+
+-- one intake pass (SIEGE)
+local function intake_step(K, a, g, now)
+  local ik = st.ik
+  local c = ik_cfg(K)
+  wave_settle(K)
+  local ph = ik.ph
+  if ph == 'cool' then
+    if now - ik.t >= c.cooldown then ik_phase(K, 'idle', now) else return end
+    ph = 'idle'
+  end
+  if ph == 'stray' then
+    local okm, n_out = K.call('military', 'members_in', nil, out_boxes(g), true)
+    if (a and (a.zin or 0) + (a.inside or 0) + (a.zpast or 0) > 0) or not all_state(K, g.outer, 'up') then
+      wave_up(K, g.inner, 'intake', now)                 -- hostiles in the area or O1 not up: B1 up at once
+      ik_phase(K, 'idle', now)
+      return
+    end
+    if not ik.raise and ((okm and (int(n_out) or 0) == 0 and all_state(K, g.inner, 'down'))
+                         or now - ik.t >= M.IK_BACK_MAX) then
+      ik.raise, ik.left, dirty = true, okm and int(n_out) or 0, true
+      wave_up(K, g.inner, 'intake', now)
+    elseif ik.raise and all_state(K, g.inner, 'up') then
+      local left = ik.left or 0
+      ik_phase(K, 'idle', now)
+      if left > 0 then ik.sn = now + 4 * M.IK_BACK_MAX end     -- they did not come: not again at once
+      ik_event(K, 'back', string.format('soldiers inside, %s up again%s', table.concat(g.inner, ', '),
+               left > 0 and string.format(' (%d still outside)', left) or ''), {why = 'stray', soldiers = left})
+    end
+    return
+  end
+  if ph == 'idle' then
+    -- BUG-029: soldiers outside B1 between waves (a raise at T0 caught them, a restart) come in through the airlock;
+    -- soldiers between B1 and the raised core seal get it lowered (SIEGE keeps B2 down)
+    if #g.outer > 0 and #g.inner > 0 and #g.zin > 0 and now >= (ik.sn or 0)
+       and now - (mem.stray_t or -M.IK_STRAY_EVERY) >= M.IK_STRAY_EVERY and a and a.fresh and (a.zin or 0) == 0
+       and (a.inside or 0) + (a.zpast or 0) == 0 and all_state(K, g.outer, 'up') and all_state(K, g.inner, 'up')
+       and not st.str.rescue and not st.so then
+      mem.stray_t = now
+      local okm, n_out = K.call('military', 'members_in', nil, out_boxes(g), true)
+      if okm and (int(n_out) or 0) > 0 then
+        local downs = {}
+        for _, b in ipairs(g.core) do if gate_state(K, b) == 'up' then downs[#downs + 1] = b end end
+        for _, b in ipairs(g.inner) do downs[#downs + 1] = b end
+        if wave_down(K, downs, 'intake') then
+          for _, b in ipairs(g.core) do st.wd[b] = nil end    -- the core seal stays down (SIEGE)
+          ik_phase(K, 'stray', now)
+          return ik_event(K, 'stray', string.format('%d soldiers outside %s between waves: %s down to let them in ' ..
+                          '(%s up)', n_out, table.concat(g.inner, ', '), table.concat(downs, ', '),
+                          table.concat(g.outer, ', ')), {soldiers = int(n_out)})
+        end
+      end
+      local ups = {}
+      for _, b in ipairs(g.core) do if gate_state(K, b) == 'up' then ups[#ups + 1] = b end end
+      if #ups > 0 and #g.z3 > 0 then
+        local okz, n_z3 = K.call('military', 'members_in', nil, g.z3, true)
+        if okz and (int(n_z3) or 0) > 0 and wave_down(K, ups, 'intake') then
+          for _, b in ipairs(ups) do st.wd[b] = nil end      -- the SIEGE state: it stays down
+          ik_event(K, 'unseal', string.format('%d soldiers between %s and %s without drink: %s down (SIEGE keeps ' ..
+                   'the core seal down)', n_z3, table.concat(g.inner, ', '), table.concat(ups, ', '),
+                   table.concat(ups, ', ')), {soldiers = int(n_z3)})
+        end
+      end
+    end
+    if not c.on then
+      if ik.why ~= 'off' then ik.why, dirty = 'off', true end
+      return
+    end
+    local why, tok = ik_refuse(K, a, g, now, c)
+    if why then
+      if ik.why ~= why:sub(1, 40) then ik.why, dirty = why:sub(1, 40), true end
+      if not IK_SILENT[tok] and CAD.due(ik.rec, K.now(), {}, {tok}, {ticks = 1200, wall_s = 60}) then
+        ik.rec, dirty = CAD.mark(K.now(), {}, {tok}), true
+        ik_event(K, 'refused', 'no intake wave: ' .. why, {why = tok})
+      end
+      return
+    end
+    local k = mil_kpi(K) or {}
+    ik.n, ik.why = ik.n + 1, nil
+    ik.lost0, ik.killed0, ik.fails, ik.rec = st.ep and st.ep.lost or 0, st.ep and st.ep.killed or 0, nil, CAD.quiet(ik.rec)
+    ik_phase(K, 'muster', now)
+    local downs = {}
+    for _, b in ipairs(g.core) do
+      local cs = gate_state(K, b)
+      if cs == 'up' or cs == 'moving' then downs[#downs + 1] = b end
+    end
+    for _, b in ipairs(g.inner) do downs[#downs + 1] = b end
+    wave_down(K, downs, 'intake')
+    for _, b in ipairs(g.core) do st.wd[b] = nil end      -- the core seal stays down (the SIEGE state)
+    local tn, ta = ik_traps(K, g, now)
+    ik_event(K, 'muster', string.format('wave %d: %d soldiers to the killing field, %s down; %d hostiles in sight, traps %s',
+             ik.n, int(k.soldiers) or 0, table.concat(downs, ', '), a.vis or 0,
+             tn and string.format('%d/%d armed', ta or 0, tn) or '?'),
+             {soldiers = int(k.soldiers), worn = int(k.worn), traps = tn, armed = ta})
+    return
+  end
+  local k = mil_kpi(K) or {}
+  local on, sol, worn = int(k.on_station) or 0, int(k.soldiers) or 0, int(k.worn) or 0
+  local lost = (st.ep and st.ep.lost or 0) - (ik.lost0 or 0)
+  local zin, past = a and a.zin or 0, a and ((a.inside or 0) + (a.zpast or 0)) or 0
+  if past > 0 then
+    wave_fail(K, ik, 'intake', 'past_b1', string.format('wave %d: %d hostiles past B1', ik.n, past),
+              {wave = ik.n, n = past})
+  end
+  if lost >= c.losses and (ph == 'open' or ph == 'fight' or ph == 'back') then
+    wave_fail(K, ik, 'intake', 'losses', string.format('wave %d: %d citizens lost (limit %d), O1 up', ik.n, lost,
+              c.losses), {wave = ik.n, lost = lost})
+  end
+  if ph == 'muster' then
+    local bad = (zin > 0 and 'hostiles in the area') or (past > 0 and 'a hostile past B1')
+                or ((a and a.dz or 0) > 0 and 'a dangerous hostile in sight')
+                or (sol < c.min_soldiers and 'too few soldiers') or (worn < c.worn and 'worn too low')
+    if bad or now - ik.t >= c.muster then
+      if zin > 0 or past > 0 then wave_up(K, g.inner, 'intake', now) end   -- else back takes them in with B1 down
+      return ik_back(K, now, 'abort', string.format('wave %d not started: %s', ik.n,
+                     bad or string.format('%d of %d soldiers on station after %d ticks', on, sol, now - ik.t)))
+    end
+    if not ik.raise then
+      if not st.wd[g.inner[1]] then wave_down(K, g.inner, 'intake') end
+      local ready = sol > 0 and (on >= sol or (on >= c.min_soldiers and now - ik.t >= c.muster // 2))
+      if ready and civ_in(K, g.zin) == 0 then
+        ik.raise, dirty = true, true
+        wave_up(K, g.inner, 'intake', now)
+      end
+    elseif all_state(K, g.inner, 'up') then
+      if wave_down(K, g.outer, 'intake') then
+        ik_phase(K, 'open', now)
+        ik.size, dirty = math.max(1, math.min(c.wave, on)), true
+        ik_event(K, 'open', string.format('wave %d: %s down for up to %d hostiles (%d soldiers on station, worn %d%%)',
+                 ik.n, table.concat(g.outer, ', '), ik.size, on, worn),
+                 {size = ik.size, on_station = on, soldiers = sol, worn = worn})
+      end
+    end
+    return
+  end
+  if ph == 'open' then
+    local why
+    if zin >= (ik.size or c.wave) then why = string.format('%d hostiles inside (wave %d)', zin, ik.size or c.wave)
+    elseif lost >= c.losses then why = string.format('%d lost', lost)
+    elseif past > 0 then why = 'a hostile past B1'
+    elseif (a and a.dz_o1 or -1) >= 0 and a.dz_o1 <= c.danger_dist then
+      why = string.format('a dangerous hostile %d tiles from O1', a.dz_o1)
+    elseif on < c.min_soldiers then why = string.format('%d soldiers on station < %d', on, c.min_soldiers)
+    elseif worn < c.worn then why = string.format('worn %d%% < %d%%', worn, c.worn)
+    elseif now - ik.t >= M.IK_OPEN_MAX then why = string.format('nobody came for %d ticks', now - ik.t) end
+    if why then
+      wave_up(K, g.outer, 'intake', now)
+      ik_phase(K, 'fight', now)
+      ik_event(K, 'close', string.format('wave %d: %s up: %s', ik.n, table.concat(g.outer, ', '), why),
+               {why = why:sub(1, 60), inside = zin, size = ik.size, lost = lost})
+    end
+    return
+  end
+  if ph == 'fight' then
+    if zin == 0 and past == 0 and all_state(K, g.outer, 'up') then
+      ik_phase(K, 'back', now)
+      ik_event(K, 'clear', string.format('wave %d: field clear after %d ticks, %d killed, %d lost; squads back inside',
+               ik.n, now - ik.t, (st.ep and st.ep.killed or 0) - (ik.killed0 or 0), lost),
+               {killed = (st.ep and st.ep.killed or 0) - (ik.killed0 or 0), lost = lost})
+    elseif now - ik.t >= c.fight then
+      wave_fail(K, ik, 'intake', 'stuck', string.format('wave %d: %d hostiles still in the bailey, trap hall or field ' ..
+                'after %d ticks; B1 stays up', ik.n, zin, now - ik.t), {wave = ik.n, n = zin, ticks = now - ik.t})
+    end
+    return
+  end
+  if ph == 'back' then
+    if zin > 0 or past > 0 or not all_state(K, g.outer, 'up') then
+      if not all_state(K, g.inner, 'up') or st.wd[g.inner[1]] then wave_up(K, g.inner, 'intake', now) end
+      if zin > 0 and all_state(K, g.outer, 'up') then ik_phase(K, 'fight', now) end   -- they fight again
+      return
+    end
+    if not ik.raise then
+      if not st.wd[g.inner[1]] and not all_state(K, g.inner, 'down') then wave_down(K, g.inner, 'intake') end
+      local ok, n_in = K.call('military', 'members_in', nil, out_boxes(g))
+      if (ok and (int(n_in) or 0) == 0 and all_state(K, g.inner, 'down')) or now - ik.t >= M.IK_BACK_MAX then
+        ik.raise, dirty = true, true
+        wave_up(K, g.inner, 'intake', now)
+      end
+    elseif all_state(K, g.inner, 'up') then
+      ik_phase(K, 'cool', now)
+      ik_event(K, 'back', string.format('wave %d done: squads inside, %s up; next wave in %d ticks at the earliest',
+               ik.n, table.concat(g.inner, ', '), c.cooldown), {ticks = c.cooldown})
+    end
+  end
+end
+
+---------------------------------------------------------------- the sortie through O1
+local function so_event(K, phase, txt, d)
+  d = d or {}
+  d.phase, d.squad = phase, st.so and st.so.sq or d.squad
+  K.emit('SORTIE', 'B', txt:sub(1, 200), d)
+  K.log('info', 'siege: sortie %s', txt:sub(1, 200))
+end
+
+local function so_phase(K, ph, now) st.so.ph, st.so.t, st.so.raise, dirty = ph, now, nil, true end
+
+local function bailey(g)
+  local p = posp(g.stations.bailey)
+  if p then return p end
+  local b = g.z1[1]
+  if b then local c = geom.bbox_center(b); return {c.x, c.y, c.z} end
+end
+
+-- where the squad gathers: the Z1 boxes, else a 3-tile box around the bailey station
+local function bailey_boxes(g, p)
+  if #g.z1 > 0 then return g.z1 end
+  return {{p[1] - 3, p[2] - 3, p[3], p[1] + 3, p[2] + 3, p[3]}}
+end
+
+-- visible hostiles within `near` tiles of the target (census.h.list)
+local function foes(K, tgt, near)
+  local h = K.census.h
+  local r = {}
+  for _, e in ipairs(type(h) == 'table' and h.list or {}) do
+    if math.max(math.abs(e.x - tgt[1]), math.abs(e.y - tgt[2]), math.abs(e.z - tgt[3])) <= near then r[#r + 1] = e.id end
+  end
+  table.sort(r)
+  return r
+end
+
+local function force_near(K)
+  local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.gate) == 'table' and K.cfg.reflex.gate or {}
+  local fn = int(r.force_near)
+  if not fn or fn < 0 or fn > 30 then fn = 3 end
+  return fn
+end
+
+local function so_end(K, why, txt)
+  local so = st.so
+  K.call('military', 'release', so.sq)
+  so_event(K, why, txt, {why = why})
+  st.so, dirty = nil, true
+end
+
+-- one sortie pass (SIEGE)
+local function sortie_step(K, a, g, now)
+  local so = st.so
+  if not so then return end
+  local c = so_cfg(K)
+  local gname = so.gate
+  local lost = (st.ep and st.ep.lost or 0) - (so.lost0 or 0)
+  local zin, past = a and a.zin or 0, a and ((a.inside or 0) + (a.zpast or 0)) or 0
+  local dz = a and a.dz or 0
+  local at = so.at
+  if lost >= c.losses and so.ph ~= 'gather' and so.ph ~= 'home' then
+    wave_fail(K, so, 'sortie', 'losses', string.format('sortie %s: %d citizens lost (limit %d): recall', so.sq, lost,
+              c.losses), {squad = so.sq, lost = lost})
+  end
+  if so.ph == 'gather' then
+    K.call('military', 'hold_order', so.sq, {kind = 'station', pos = at}, 'sortie')
+    if zin > 0 or past > 0 or dz > 0 or now - so.t >= c.gather then
+      if zin > 0 or past > 0 then wave_up(K, g.inner, 'sortie', now) end   -- else home takes them in with B1 down
+      so_phase(K, 'home', now)
+      K.call('military', 'release', so.sq)
+      return so_event(K, 'abort', string.format('sortie %s not started: %s', so.sq,
+                      (zin > 0 and 'hostiles in the area') or (past > 0 and 'a hostile past B1')
+                      or (dz > 0 and 'a dangerous hostile in sight') or 'the squad did not gather in time'))
+    end
+    local _, n_in, n = K.call('military', 'members_in', so.sq, bailey_boxes(g, at))
+    n_in, n = int(n_in) or 0, int(n) or 0
+    if not so.raise then
+      if n > 0 and n_in >= n then
+        so.raise, dirty = true, true
+        wave_up(K, g.inner, 'sortie', now)
+      elseif not st.wd[g.inner[1]] then wave_down(K, g.inner, 'sortie') end
+    elseif all_state(K, g.inner, 'up') then
+      if wave_down(K, {gname}, 'sortie') then
+        so_phase(K, 'open', now)
+        so_event(K, 'open', string.format('sortie %s: %d in the bailey, %s down', so.sq, n, gname), {n = n})
+      end
+    end
+    return
+  end
+  if so.ph == 'open' then
+    if dz > 0 or past > 0 or lost >= c.losses or now - so.t >= c.gather then
+      wave_up(K, {gname}, 'sortie', now)
+      so_phase(K, 'recall', now)
+      return so_event(K, 'recall', string.format('sortie %s: recalled before it went out', so.sq))
+    end
+    if gate_state(K, gname) == 'down' then
+      so_phase(K, 'out', now)
+      so.out = now
+      so_event(K, 'out', string.format('sortie %s: %s down, out to %d,%d,%d', so.sq, gname, so.tgt[1], so.tgt[2],
+               so.tgt[3]), {pos = so.tgt})
+    end
+    return
+  end
+  if so.ph == 'out' then
+    local ids = foes(K, so.tgt, c.near)
+    local why
+    if lost >= c.losses then why = string.format('%d lost', lost)
+    elseif dz > 0 then why = 'a dangerous hostile in sight'
+    elseif past > 0 then why = 'a hostile past B1'
+    elseif #ids == 0 and now - so.out >= M.SO_RETARGET then why = 'no target left'
+    elseif now - so.out >= c.max_ticks then why = string.format('time (%d ticks)', now - so.out) end
+    if why then
+      so_phase(K, 'recall', now)
+      K.call('military', 'hold_order', so.sq, {kind = 'station', pos = at}, 'sortie')
+      return so_event(K, 'recall', string.format('sortie %s: recall (%s), %d killed, %d lost', so.sq, why,
+                      (st.ep and st.ep.killed or 0) - (so.killed0 or 0), lost),
+                      {why = why:sub(1, 60), lost = lost, killed = (st.ep and st.ep.killed or 0) - (so.killed0 or 0)})
+    end
+    if #ids > 0 then K.call('military', 'hold_order', so.sq, {kind = 'kill', units = ids}, 'sortie')
+    else K.call('military', 'hold_order', so.sq, {kind = 'station', pos = so.tgt}, 'sortie') end
+    return
+  end
+  if so.ph == 'recall' then
+    K.call('military', 'hold_order', so.sq, {kind = 'station', pos = at}, 'sortie')
+    local _, n_in, n, _, outs = K.call('military', 'members_in', so.sq, bailey_boxes(g, at))
+    n_in, n = int(n_in) or 0, int(n) or 0
+    local d = near_bridge(K, gname)
+    local fn = force_near(K)
+    local forced = (d >= 0 and d <= fn) and string.format('a hostile %d tiles from %s', d, gname)
+                   or (now - so.t >= c.max_ticks and string.format('%d ticks', now - so.t)) or nil
+    if n_in >= n or forced then
+      wave_up(K, {gname}, 'sortie', now)
+      if n_in < n then
+        wave_fail(K, so, 'sortie', 'left_outside', string.format('sortie %s: %s raised with %d of %d members outside (%s)',
+                  so.sq, gname, n - n_in, n, forced), {squad = so.sq, units = outs, n = n - n_in})
+      end
+      so_phase(K, 'close', now)
+    end
+    return
+  end
+  if so.ph == 'close' then
+    if gate_state(K, gname) == 'up' then
+      K.call('military', 'release', so.sq)
+      so_phase(K, 'home', now)
+      so_event(K, 'close', string.format('sortie %s: %s up, back inside through %s', so.sq, gname,
+               table.concat(g.inner, ', ')))
+    end
+    return
+  end
+  if so.ph == 'home' then
+    if zin > 0 or past > 0 or not all_state(K, g.outer, 'up') then
+      if st.wd[g.inner[1]] or not all_state(K, g.inner, 'up') then wave_up(K, g.inner, 'sortie', now) end
+      return
+    end
+    if not so.raise then
+      if not st.wd[g.inner[1]] and not all_state(K, g.inner, 'down') then wave_down(K, g.inner, 'sortie') end
+      local _, n_in = K.call('military', 'members_in', so.sq, out_boxes(g))
+      if ((int(n_in) or 0) == 0 and all_state(K, g.inner, 'down')) or now - so.t >= c.gather then
+        so.raise, dirty = true, true
+        wave_up(K, g.inner, 'sortie', now)
+      end
+    elseif all_state(K, g.inner, 'up') then
+      so_end(K, 'done', string.format('sortie %s done: %d killed, %d lost', so.sq,
+             (st.ep and st.ep.killed or 0) - (so.killed0 or 0), lost))
+    end
+  end
+end
+
+-- public (military's squad.sortie with args.gate, approved): start a sortie through that outer bridge. Returns ok, msg
+-- (the reply: the squad's combat value against the estimate of the target group, worn, or why not)
+function M.sortie(K, args, cmd_id)
+  local now = K.now().tick
+  local g = geometry(K)
+  local c = so_cfg(K)
+  local key, gname = args and args.squad, args and args.gate
+  if K.mode() ~= 'SIEGE' then
+    return false, string.format('a sortie through %s runs in SIEGE only (mode %s)', tostring(gname), K.mode())
+  end
+  local spec = g.man.bridges and g.man.bridges[gname]
+  if not (type(spec) == 'table' and spec.role == 'outer' and type(spec.fp) == 'table') then
+    return false, tostring(gname) .. ' is no outer manifest bridge'
+  end
+  if st.so then return false, string.format('sortie %s is still out (%s)', st.so.sq, st.so.ph) end
+  if IK_BUSY[st.ik.ph] then return false, 'an intake wave runs (' .. st.ik.ph .. ')' end
+  if st.str.rescue then return false, 'a STRANDED rescue runs' end
+  local tgt = posp(args.target)
+  if not tgt then return false, 'target must be a position [x,y,z] outside ' .. gname end
+  if in_boxes(g.zin, tgt[1], tgt[2], tgt[3]) or in_boxes(g.zpast, tgt[1], tgt[2], tgt[3]) then
+    return false, 'the target lies inside the fort: squad.sortie without gate'
+  end
+  local at = bailey(g)
+  if not at then return false, 'no bailey: manifest zones.Z1 or stations.bailey' end
+  if #g.inner == 0 then return false, 'no inner bridge (B1): no airlock' end
+  for _, b in ipairs(g.inner) do if gate_state(K, b) ~= 'up' then return false, b .. ' is not up' end end
+  if gate_state(K, gname) ~= 'up' then return false, gname .. ' is not up' end
+  local a = assess(K)
+  if not a then return false, 'no hostile census' end
+  if (a.inside or 0) + (a.zpast or 0) > 0 then return false, 'a hostile past B1' end
+  if (a.zin or 0) > 0 then return false, string.format('%d hostiles in the bailey, trap hall or field', a.zin) end
+  if (a.dz or 0) > 0 then return false, string.format('%d dangerous hostiles in sight', a.dz) end
+  if civ_in(K, g.zin) > 0 then return false, 'civilians in the bailey, trap hall or field' end
+  local ok, info = K.call('military', 'squad_info', key)
+  if not (ok and type(info) == 'table') then return false, 'no squad ' .. tostring(key) end
+  if (info.n or 0) == 0 then return false, 'squad ' .. key .. ' has no members' end
+  local f = foes(K, tgt, c.near)
+  local est = #f * c.foe_cv
+  local cmp = string.format('cv %d vs ~%d hostiles x %d = %d, worn %d%%', info.cv or 0, #f, c.foe_cv, est, info.worn or 0)
+  if (info.worn or 0) < c.worn then
+    return false, string.format('squad %s not in uniform: worn %d%% < %d%% (%s)', key, info.worn or 0, c.worn, cmp)
+  end
+  if (info.cv or 0) < est then return false, string.format('squad %s too weak: %s', key, cmp) end
+  st.so = {sq = key, gate = gname, ph = 'gather', t = now, t0 = now, tgt = tgt, at = at, cmd = tostring(cmd_id or '?'),
+           lost0 = st.ep and st.ep.lost or 0, killed0 = st.ep and st.ep.killed or 0}
+  dirty = true
+  K.call('military', 'hold_order', key, {kind = 'station', pos = at}, 'sortie')
+  local msg = string.format('sortie %s through %s: gathering in the bailey at %d,%d,%d, then out to %d,%d,%d; %s',
+                            key, gname, at[1], at[2], at[3], tgt[1], tgt[2], tgt[3], cmp)
+  so_event(K, 'gather', msg, {n = info.n, cv = info.cv, foes = #f, est = est, worn = info.worn, pos = tgt})
+  save(K)
+  return true, msg
+end
+
+-- public (reflex, INTRUDER): an intake wave or a sortie runs, so hostiles outside B1 are expected
+function M.expects(K)
+  return st ~= nil and (IK_BUSY[st.ik.ph] == true or st.so ~= nil)
+end
+
+-- a wave or a sortie moving B1/O1 (BUG-028's rescue waits: they own B1 and bring the soldiers back themselves); while a
+-- wave fights (O1 and B1 up) the rescue runs as usual (a hostile on the joined walk groups refuses it)
+local IK_GATES = {muster = true, open = true, back = true, stray = true}
+local function wave_busy() return IK_GATES[st.ik.ph] == true or st.so ~= nil end
+
+-- leaving SIEGE ends a wave and a sortie at once (BREACH raises every bridge anyway); a BREACH during one is WAVE_FAIL
+-- (past_b1: a hostile on Kern+, else breach: a gate failure)
+local function wave_abort(K, to, now, why)
+  local fail = to == 'BREACH' and (why == 'inside' and 'past_b1' or 'breach') or nil
+  if IK_BUSY[st.ik.ph] then
+    ik_event(K, 'abort', string.format('wave %d ended: mode %s', st.ik.n, to), {why = 'mode'})
+    if fail then
+      wave_fail(K, st.ik, 'intake', fail, string.format('wave %d: BREACH (%s) while the wave ran', st.ik.n,
+                tostring(why)), {wave = st.ik.n})
+    end
+  end
+  if st.ik.ph ~= 'idle' then ik_phase(K, 'idle', now) end
+  if st.so then
+    if fail then
+      wave_fail(K, st.so, 'sortie', fail, string.format('sortie %s: BREACH (%s) while it was out (%s)', st.so.sq,
+                tostring(why), st.so.ph), {squad = st.so.sq})
+    end
+    so_end(K, 'abort', string.format('sortie %s ended: mode %s', st.so.sq, to))
+  end
+  for b in pairs(st.wd) do want(K, b, 'up', 'wave_end', now + M.BREACH_AT) end
+  st.wd, st.wu, dirty = {}, {}, true
 end
 
 local function apply(K, a, g, now)
@@ -885,8 +1610,16 @@ local function apply(K, a, g, now)
   elseif mode == 'RECOVERY' then lower(K, g) end
   local on, burrow, held, _, _, audited, flee = alert_plan(K, a, g, now)
   set_alert(K, on, burrow, g, now, held, audited, flee)
-  set_posture(K, POSTURE[mode], now)
-  if mode == 'SIEGE' or mode == 'BREACH' then kills(K, g, POSTURE[mode], now) end
+  local P = POSTURE[mode]
+  if mode == 'SIEGE' and IK_FIELD[st.ik.ph] then P = 'INTAKE' end      -- an intake wave: field and gallery
+  local var
+  if P == 'READY_IN' or P == 'STATION_B1' then                         -- BUG-029: the inner station follows B2
+    local parts = {}
+    for _, b in ipairs(g.core) do parts[#parts + 1] = gate_state(K, b) end
+    var = table.concat(parts, ',')
+  end
+  set_posture(K, P, now, var)
+  if mode == 'SIEGE' or mode == 'BREACH' then kills(K, g, P, now, P == 'INTAKE') end
 end
 
 ---------------------------------------------------------------- episode bookkeeping
@@ -990,6 +1723,17 @@ function M.alert_names(K)
   return r
 end
 
+-- state `wave` (Gordon 2026-10-16): the intake phase, the waves so far, the last refusal or wait, the sortie
+function M.state(K)
+  if not st then return {} end
+  local ik, so = st.ik, st.so
+  if K.mode() ~= 'SIEGE' and ik.ph == 'idle' and not so then return {} end
+  local w = {ph = ik.ph, n = ik.n}
+  if ik.why then w.why = ik.why:sub(1, 40) end
+  if so then w.so = (so.sq .. ' ' .. so.ph):sub(1, 24) end
+  return {wave = w}
+end
+
 ---------------------------------------------------------------- module
 function M.init(K)
   local now = K.now().tick
@@ -1014,6 +1758,31 @@ function M.init(K)
   end
   for b, t in pairs(type(ps.hold) == 'table' and ps.hold or {}) do
     if type(b) == 'string' and int(t) then st.str.hold[b] = int(t) end
+  end
+  -- intake waves and the sortie (Gordon 2026-10-16) survive a reload
+  local pk = type(p.ik) == 'table' and p.ik or {}
+  local IKPH = {idle = true, muster = true, open = true, fight = true, back = true, cool = true, stray = true}
+  st.ik = {ph = IKPH[pk.ph] and pk.ph or 'idle', n = int(pk.n) or 0, t = int(pk.t) or now, raise = pk.raise == true or nil,
+           size = int(pk.size), lost0 = int(pk.lost0), killed0 = int(pk.killed0), sn = int(pk.sn), left = int(pk.left),
+           why = type(pk.why) == 'string' and pk.why or nil, rec = type(pk.rec) == 'table' and pk.rec or nil}
+  if type(pk.fails) == 'table' then
+    st.ik.fails = {}
+    for k, v in pairs(pk.fails) do if v == true then st.ik.fails[k] = true end end
+  end
+  st.wd, st.wu = {}, {}
+  for b, v in pairs(type(p.wd) == 'table' and p.wd or {}) do if type(b) == 'string' and v == true then st.wd[b] = true end end
+  for b, v in pairs(type(p.wu) == 'table' and p.wu or {}) do if type(b) == 'string' and int(v) then st.wu[b] = int(v) end end
+  local ps2 = p.so
+  local SOPH = {gather = true, open = true, out = true, recall = true, close = true, home = true}
+  if type(ps2) == 'table' and type(ps2.sq) == 'string' and type(ps2.gate) == 'string' and SOPH[ps2.ph]
+     and posp(ps2.tgt) and posp(ps2.at) then
+    st.so = {sq = ps2.sq, gate = ps2.gate, ph = ps2.ph, t = int(ps2.t) or now, t0 = int(ps2.t0) or now,
+             tgt = posp(ps2.tgt), at = posp(ps2.at), cmd = tostring(ps2.cmd or '?'), out = int(ps2.out),
+             lost0 = int(ps2.lost0) or 0, killed0 = int(ps2.killed0) or 0, raise = ps2.raise == true or nil}
+    if type(ps2.fails) == 'table' then
+      st.so.fails = {}
+      for k, v in pairs(ps2.fails) do if v == true then st.so.fails[k] = true end end
+    end
   end
   if type(p.ep) == 'table' then
     st.ep = {}
@@ -1043,7 +1812,12 @@ function M.step(K, budget, ctx)
   decide(K, a, g, now)
   track(K, g, now, dt)
   local mode = K.mode()
-  if mode ~= 'DRILL' and (mode ~= 'RECOVERY' or st.str.rescue) then rescue_step(K, a, g, now) end   -- BUG-028 (a)
+  -- BUG-028 (a); a wave or a sortie brings its soldiers back itself (it owns B1 meanwhile)
+  if mode ~= 'DRILL' and (mode ~= 'RECOVERY' or st.str.rescue) and not wave_busy() then rescue_step(K, a, g, now) end
+  if mode == 'SIEGE' then                                  -- Gordon 2026-10-16: the sortie, then the intake waves
+    sortie_step(K, a, g, now)
+    intake_step(K, a, g, now)
+  end
   apply(K, a, g, now)
   status(K, a, now)
   save(K)
@@ -1065,6 +1839,7 @@ M.on = {
       note_citizens(K)
     end
     mem.kill_sig, mem.kill_set = nil, nil      -- a posture change re-issues every squad's orders
+    if to ~= 'SIEGE' then wave_abort(K, to, now, ev.why) end   -- intake waves and the sortie run in SIEGE only
     if to == 'PEACE' or to == 'DRILL' then st.ep = nil end
     dirty = true
     apply(K, assess(K), geometry(K), now)    -- T0 actions in the detecting step

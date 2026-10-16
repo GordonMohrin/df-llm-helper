@@ -42,6 +42,10 @@
 -- the alert draws the puller back. In BREACH only while no hostile is inside Kern+ or near those levers (BUG-027,
 -- breach_safe; else the lever-room rule below: attacker-side levers). pulls() tells the
 -- reflex what its deferred alert waits for and which pulls the alert blocks (levers outside every alert burrow).
+-- Intake waves and the sortie through O1 (Gordon 2026-10-16): siege's wants 'down' with why 'intake' (outer, inner,
+-- core) or 'sortie' (outer, inner) pass in SIEGE and during a lockdown (SIEGE_DOWN; siege's own hostile checks replace
+-- the 30-tile guard, the footprint rules hold), under the airlock: an outer bridge only while every inner one is up and
+-- wanted up, an inner one only while every outer one is; the lockdown pass leaves those wants alone.
 local geom = require('dfllm.util.geom')
 local DT = require('dfllm.deaths')      -- BUG-027: the bridge-death match (library, no module)
 
@@ -919,16 +923,44 @@ local function holders(K, name, fp, sc, dir)
   return hold, nil
 end
 
+-- the reasons siege lowers a manifest bridge in SIEGE (and BREACH for the rescue) and during a lockdown, by role:
+-- BUG-028 rescue (inner/core), Gordon 2026-10-16 intake waves (outer to let a wave in, inner/core for the soldiers'
+-- way to the killing field and back) and the approved sortie through O1 (outer, inner)
+local SIEGE_DOWN = {rescue = {inner = true, core = true}, intake = {outer = true, inner = true, core = true},
+                    sortie = {outer = true, inner = true}}
+M.SIEGE_DOWN = SIEGE_DOWN
+
+-- the airlock (Gordon 2026-10-16): an intake or sortie 'down' of an outer bridge needs every inner bridge up and wanted
+-- up, of an inner one every outer bridge up and wanted up; never both sides open at once
+local function airlock(K, name, role)
+  local other = role == 'outer' and 'inner' or (role == 'inner' and 'outer') or nil
+  if not other then return nil end
+  local man = K.manifest()
+  for _, n in ipairs(bridge_names(man)) do
+    if man.bridges[n].role == other then
+      local r, br = rt[n], st.br[n]
+      if not (r and r.last == 'up') then return string.format('down refused: %s is not up (airlock)', n) end
+      if br and br.want == 'down' then return string.format('down refused: %s is wanted down (airlock)', n) end
+    end
+  end
+  return nil
+end
+
 local function down_guard(K, name, why)
   local m = K.mode()
   -- BUG-028: siege's rescue (citizens without drink or food behind our raised gates, the outside sealed) lowers an
-  -- inner or core manifest bridge in these modes and during a lockdown; the hostile guard below still holds
+  -- inner or core manifest bridge in these modes and during a lockdown; the hostile guard below still holds.
+  -- Intake waves and the sortie (siege, SIEGE only): their own hostile checks replace the 30-tile guard (a wave is let
+  -- in with the army at the gate); the airlock holds
   local br = st.br[name]
   local spec = (K.manifest().bridges or {})[name]
-  local rescue = (why or (br and br.want == 'down' and br.why)) == 'rescue' and type(spec) == 'table'
-                 and spec.role ~= 'outer'
-  if FAST_MODES[m] and not rescue then return 'down refused in ' .. m end
-  if lock_why(K) and not rescue then return 'down refused: lockdown' end
+  local w = why or (br and br.want == 'down' and br.why) or nil
+  local roles = SIEGE_DOWN[w]
+  local role = type(spec) == 'table' and spec.role or nil
+  local own = roles ~= nil and role ~= nil and roles[role] == true and (w == 'rescue' or m == 'SIEGE')
+  if FAST_MODES[m] and not own then return 'down refused in ' .. m end
+  if lock_why(K) and not own then return 'down refused: lockdown' end
+  if own and w ~= 'rescue' then return airlock(K, name, role) end
   local h = K.census.h
   local d = type(h) == 'table' and type(h.near_bridge) == 'table' and h.near_bridge[name]
   if d == nil and rt[name] and rt[name].fp then d = list_dist(h, rt[name].fp) end
@@ -1382,7 +1414,7 @@ local function manifest_pass(K, man, now)
   for _, name in ipairs(bridge_names(man)) do
     local role, br = man.bridges[name].role, st.br[name]
     local w, why
-    if br and br.want == 'down' and br.why == 'rescue' then w = nil        -- BUG-028: siege's rescue, until it ends
+    if br and br.want == 'down' and SIEGE_DOWN[br.why] then w = nil   -- BUG-028 rescue, intake, sortie: until they end
     elseif lock and GATE_ROLES[role] then w, why = 'up', 'lockdown'
     elseif mode == 'PEACE' and GATE_ROLES[role] and (peace_up(K) or (br and br.why == 'lockdown')) then
       w, why = peace_want(K, name, role, now)

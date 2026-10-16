@@ -83,9 +83,25 @@ def test_status_alert_burrow(save):
     assert schema.validate("state", st) != []
 
 
+def test_status_intake_wave_and_sortie(save):
+    """Gordon 2026-10-16: the intake phase, the waves so far, the last refusal and a sortie stand in the status."""
+    st = json.loads((save / "state.b.json").read_text("utf-8"))
+    st["mode"] = "SIEGE"
+    st["wave"] = {"ph": "fight", "n": 3, "so": "A recall"}
+    assert schema.validate("state", st) == []
+    (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
+    assert "intake fight (waves 3), sortie A recall" in brief.status_text(save)
+    st["wave"] = {"ph": "idle", "n": 0, "why": "worn 40% < 80%"}
+    (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
+    assert "intake idle (waves 0): worn 40% < 80%" in brief.status_text(save)
+    st["wave"]["ph"] = "x" * 9
+    assert schema.validate("state", st) != []
+
+
 def test_status_worst_case_budget(save):
     st = json.loads((save / "state.b.json").read_text("utf-8"))
     st["seq"] = 999
+    st["wave"] = {"ph": "w" * 8, "n": 99, "why": "y" * 40, "so": "s" * 24}
     st["ready"]["fail"] = ["x" * 24] * 8
     st["proj"] = [["p" * 40, "s" * 24, 99, "b" * 40]] * 8
     st["k"].update(slow=["economy", "runner", "care", "snapshot"], disabled=["trade", "baseline"])

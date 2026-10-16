@@ -7,6 +7,14 @@
 --   STATION_B1     like TRAIN, the first melee squad stationed at manifest.stations.melee (inside B1)
 --   READY_STATION  routine 'Ready'; melee at stations.melee, crossbows at stations.gallery
 --   B2_HOLD        routine 'Ready'; every squad holds stations.b2 (the core choke)
+--   READY_IN       routine 'Ready'; every squad, crossbows too, at the inner station (BUG-029, SIEGE between intake
+--                  waves): stations.melee, or stations.b2 while a core bridge (B2) is not down, so the soldiers stand
+--                  on the side of the fort that holds the drink and food (live Run 10: gallery 123,123,122 and melee
+--                  130,128,122 lay between O1 and B2, recruits there were cut off from drink for weeks)
+--   INTAKE         routine 'Ready'; melee in the killing field (stations.field, else the first killbox's centre),
+--                  crossbows in the gallery (else the field); only while siege runs an intake wave
+-- STATION_B1 uses the inner station too (stations.b2 while B2 is not down). An approved sortie order is held (no
+-- posture re-assert replaces it) until siege releases the squad (hold_order / release).
 -- Squads are created with a leader (act.squad_create + act.squad_leader, the squads screen [S2, live L2]); a
 -- squad left without one (seating refused) gets the next recruit as leader with backoff, no further squads
 -- are created meanwhile, Gordon is told once (DECISION_NEEDED squads), and a led UI squad of the same name wins.
@@ -978,11 +986,44 @@ local function release(K, why, kind)
 end
 
 ---------------------------------------------------------------- postures and orders
-local function station_of(P, kind, first_melee, stations)
+-- BUG-029: is a manifest core bridge (B2) not down? (gate.state 'up' or 'moving'; unknown = not built, not up)
+local function core_up(K, man)
+  for name, b in pairs(type(man.bridges) == 'table' and man.bridges or {}) do
+    if type(b) == 'table' and b.role == 'core' then
+      local ok, s = K.call('gate', 'state', name)
+      if ok and (s == 'up' or s == 'moving') then return true end
+    end
+  end
+  return false
+end
+
+-- BUG-029: the inner station, on the side of the fort that holds the drink: stations.melee (inside B1) while every
+-- core bridge is down, else stations.b2 (behind the core seal)
+local function inner_station(K, man, stations)
+  if stations.b2 and core_up(K, man) then return stations.b2 end
+  return stations.melee or stations.b2
+end
+
+-- the killing field station of a wave: stations.field, else the centre of the first killbox
+local function field_station(man, stations)
+  if stations.field then return stations.field end
+  local kb = type(man.killboxes) == 'table' and man.killboxes[1]
+  if type(kb) == 'table' and type(kb.bbox) == 'table' and #kb.bbox == 6 then
+    local c = geom.bbox_center(kb.bbox)
+    return {c.x, c.y, c.z}
+  end
+end
+
+local function station_of(K, man, P, kind, first_melee, stations)
   local melee, gallery, b2 = stations.melee, stations.gallery, stations.b2
-  if P == 'STATION_B1' then return 'train', first_melee and melee or nil end
+  if P == 'STATION_B1' then return 'train', first_melee and inner_station(K, man, stations) or nil end
   if P == 'READY_STATION' then return 'ready', kind == 'xbow' and (gallery or melee) or melee end
   if P == 'B2_HOLD' then return 'ready', b2 or melee end
+  if P == 'READY_IN' then return 'ready', inner_station(K, man, stations) end
+  if P == 'INTAKE' then
+    local field = field_station(man, stations)
+    return 'ready', kind == 'xbow' and (gallery or field) or field
+  end
   return 'train', nil
 end
 
@@ -1015,9 +1056,10 @@ local function apply_squad(K, k, force)
   local e = st.sq[k]
   local s = e and squad(e.id)
   if not s then return true end
+  if rt.held[k] then return true end                 -- siege holds this squad's sortie order (hold_order)
   local man = K.manifest()
   local stations = type(man.stations) == 'table' and man.stations or {}
-  local which, pos = station_of(st.posture, e.kind, k == first_melee_key(), stations)
+  local which, pos = station_of(K, man, st.posture, e.kind, k == first_melee_key(), stations)
   pos = posp(pos)
   local off = not pos and off_season(K, k)
   if off then which = 'off' end
@@ -1109,7 +1151,9 @@ end
 -- public: kill order for the crossbow squads (they fire from the roofed gallery; melee never leave B1).
 -- kill({}) withdraws the running kill orders: those squads get their posture orders again (siege calls
 -- it when no target is left in a kill box). A non-empty list without a valid target is refused.
-function M.kill(K, ids)
+-- opts.melee (intake waves, Gordon 2026-10-16): the melee squads stand in the killing field (posture INTAKE) and get
+-- the order too. A squad siege holds for a sortie (hold_order) never gets one.
+function M.kill(K, ids, opts)
   if type(ids) ~= 'table' then return false, 0 end
   if #ids == 0 then
     local ok = true
@@ -1125,7 +1169,11 @@ function M.kill(K, ids)
   end
   local t = valid_targets(K, ids)
   if #t == 0 then return false, 0 end
-  local sq = squads_of('xbow')
+  local sq, kind = {}, 'xbow'
+  if type(opts) == 'table' and opts.melee == true then kind = nil end      -- every squad
+  for _, q in ipairs(squads_of(kind)) do
+    if not rt.held[q.key] then sq[#sq + 1] = q end
+  end
   if #sq == 0 then return false, 0 end
   local sig = 'kill:' .. table.concat(t, ',')
   local n = 0
@@ -1136,8 +1184,15 @@ function M.kill(K, ids)
   return n > 0, #t
 end
 
--- inbox squad.sortie (approval checked by kern): kill the visible hostiles in a killbox, else move there
+-- inbox squad.sortie (approval checked by kern): kill the visible hostiles in a killbox, else move there.
+-- args.gate (Gordon 2026-10-16): a sortie through that outer bridge; siege runs it (gather in the bailey, open, kill,
+-- recall, close) and answers
 M.verbs['squad.sortie'] = function(K, args, cmd)
+  if args.gate ~= nil then
+    local ok, r, msg = K.call('siege', 'sortie', args, cmd and cmd.id)
+    if not ok then return false, 'siege: ' .. tostring(r) end
+    return r == true, tostring(msg)
+  end
   local k = args.squad
   local e = type(k) == 'string' and st.sq[k]
   local s = e and squad(e.id)
@@ -1163,6 +1218,90 @@ M.verbs['squad.sortie'] = function(K, args, cmd)
   rt.order[k] = 'sortie:' .. tostring(cmd and cmd.id or '?')
   rt.kpi = nil
   return true, 'sortie ' .. k .. ': ' .. what
+end
+
+---------------------------------------------------------------- intake waves and the sortie (siege, Gordon 2026-10-16)
+local function order_sig(o)
+  if o.kind == 'station' and o.pos then return string.format('station:%d,%d,%d', o.pos.x, o.pos.y, o.pos.z) end
+  if o.kind == 'kill' then return 'kill:' .. table.concat(o.units or {}, ',') end
+  return tostring(o.kind)
+end
+
+-- public (siege, the sortie through O1): squad `key` gets `order` ({kind = 'station', pos = {x, y, z} | [x, y, z]} or
+-- {kind = 'kill', units = {ids}}) and keeps it: no posture, re-assert or kill order replaces it until release(key).
+-- Idempotent (the same order is not issued again). Returns ok, msg.
+function M.hold_order(K, key, order, tag)
+  local e = type(key) == 'string' and st.sq[key]
+  local s = e and squad(e.id)
+  if not s then return false, 'no squad ' .. tostring(key) end
+  if type(order) ~= 'table' then return false, 'order required' end
+  local o = {kind = order.kind, units = order.units}
+  if order.kind == 'station' then
+    o.pos = posp(order.pos)
+    if not o.pos then return false, 'station needs a pos' end
+  elseif order.kind ~= 'kill' or type(order.units) ~= 'table' or #order.units == 0 then
+    return false, 'order must be a station or a kill list'
+  end
+  local sig = 'hold:' .. tostring(tag or '') .. ':' .. order_sig(o)
+  if rt.held[key] and rt.order[key] == sig and order_count(s) > 0 then return true, 'kept' end
+  local ok, err = K.act.squad_order(s.id, o)
+  if not ok then return false, 'order failed: ' .. tostring(err) end
+  rt.order[key], rt.held[key], rt.station[key] = sig, true, o.pos
+  rt.kpi = nil
+  return true, 'ordered'
+end
+
+-- public (siege): the held squad gets its posture orders again
+function M.release(K, key)
+  if not rt.held[key] then return true end
+  rt.held[key], rt.order[key] = nil, nil
+  rt.kpi = nil
+  return apply_squad(K, key, true)
+end
+
+-- public (siege): squad members (alive) of squad `key` (nil = every squad) inside any of `boxes` ({x0,y0,z0,x1,y1,z1}):
+-- n inside, n members, ids inside, ids outside the boxes (<= 20 each). posture_only: only the squads that follow their
+-- posture's station (not those on a sortie, a held order or a kill order)
+function M.members_in(K, key, boxes, posture_only)
+  local n_in, n, ins, outs = 0, 0, {}, {}
+  for _, sp in ipairs(M.SQUADS) do
+    local cur = rt.order[sp.key] or ''
+    local own = posture_only == true and (rt.held[sp.key] or cur:sub(1, 7) == 'sortie:' or cur:sub(1, 5) == 'kill:')
+    local e = (key == nil or sp.key == key) and not own and st.sq[sp.key]
+    local s = e and squad(e.id)
+    for _, m in ipairs(s and members(s) or {}) do
+      local p = try(function() return {x = m.unit.pos.x, y = m.unit.pos.y, z = m.unit.pos.z} end)
+      n = n + 1
+      local hit = false
+      for _, b in ipairs(p and boxes or {}) do if geom.in_bbox(p, b) then hit = true; break end end
+      if hit then
+        n_in = n_in + 1
+        if #ins < 20 then ins[#ins + 1] = m.unit.id end
+      elseif #outs < 20 then outs[#outs + 1] = m.unit.id end
+    end
+  end
+  table.sort(ins)
+  table.sort(outs)
+  return n_in, n, ins, outs
+end
+
+-- public (siege, the sortie's check): {n = members, cv = combat value summed, worn = %, ids} of squad `key`, or nil
+function M.squad_info(K, key)
+  local e = type(key) == 'string' and st.sq[key]
+  local s = e and squad(e.id)
+  if not s then return nil end
+  local r = {n = 0, cv = 0, worn = 0, ids = {}}
+  local slots, worn = 0, 0
+  for _, m in ipairs(members(s)) do
+    r.n = r.n + 1
+    r.ids[#r.ids + 1] = m.unit.id
+    r.cv = r.cv + M.cv(m.unit)
+    local a, b = uniform_counts(m.p, m.unit, e.kind)
+    slots, worn = slots + a, worn + b
+  end
+  table.sort(r.ids)
+  r.worn = pct(worn, slots)
+  return r
 end
 
 ---------------------------------------------------------------- loot and free metal gear (FR-46)
@@ -1295,7 +1434,7 @@ function M.init(K)
     end
   end
   rt = {retry = {}, order = {}, station = {}, kpi = nil, kpi_tick = 0, create_fails = 0, mats = {}, wk = {},
-        no_wpn = {}}
+        no_wpn = {}, held = {}}
   dirty = false
   M.every = {ticks = K.mode() == 'PEACE' and M.SLOW or M.FAST}
 end
