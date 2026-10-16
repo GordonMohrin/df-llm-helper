@@ -1,7 +1,7 @@
 # Post-mortem: the y421 spring siege of Run 10 (Erushthak Handlelock, region2-site97), 2026-10-16
 
 Fort after a crash restart: autosave 2 (y421 spring d1, the quicksave before the restart wrote nothing), kernel main 94b9eed. Pop 110, 20 recruits.
-Result so far (y421 spring d32): **pop 108 -> ~50, soldiers 19 -> 1, all three bridges destroyed, O1 gone, 6 trolls and ~50 goblins inside the fort.**
+Result: **the fort fell at y421 mid-spring (d41): pop 108 -> 0 in about 30 game days; the screen says `Conquered. Your strength has been broken.`** All three bridges were destroyed, 6 trolls and ~50 goblins inside. Run 10 is over; Gordon ordered 'always play on, then a new run' (no reload of autosave 2).
 
 ## Timeline (game days of y421 spring)
 | day | what |
@@ -29,3 +29,8 @@ BREACH -> SIEGE -> RECOVERY -> PEACE after the earlier small sieges (y419/y420),
 - Bridges as the last line only against non-destroyers: when trolls/destroyers are seen, evacuate to a refuge that has no bridge in the way instead of relying on gates; refuge beds count must not block the confinement when the alternative is open fighting.
 - Stations only inside the core, never in the corridor, when the army exceeds 3x the soldiers.
 - Leather/metal supply as plan goals (hunters + tannery in the core; ore search deeper).
+
+## Final numbers
+- Run 10 Erushthak Handlelock: embarked y413, fell y421 spring d41 (about 8 game years). Peak pop 120. 3 sieges in the last year (y417 snatcher, y418 snatcher, y419 48 goblins left on their own after 30 days, y421 spring 58 goblins + 6 trolls = the end).
+- Wins on the way: BUG-025/026/027/028 found and fixed with the dev session, the trade works, the kernel survived two sieges without a crush after the fixes.
+- Last facts the dev session should know: destroyed bridges stay in the kernel's manifest (STRANDED 'B1 raised' events kept coming for 9 days after the bridges were gone); `quicksave` after a graphics crash writes nothing (check the file time in `save/`); a restart replays the siege from the autosave with different random waves (11 then 58 invaders).
