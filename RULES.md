@@ -151,6 +151,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | NO_DEPOT | `dfllm ack`; place a trade depot (`bp sites`, `bp.place`) |
 | SIEGE_END | read the summary; if losses > 10 % of citizens, write a postmortem note and lower `pop_ceiling` in the next plan |
 | GATE_FAIL / BREACH | the fort already sealed itself (BREACH: Tiefe+ alert, B2 up, melee at B2). Do not lower bridges. Check `status` again after 600 ticks; tell the player |
+| GATE_FORCED | a SIEGE/BREACH raise went ahead onto the named units because a hostile stood at the gate (`force_near`, BUG-027); expect their DEATH; tell the player. A `blocked` GATE_FAIL names who holds a bridge (never raised onto them): tell the player to move them (a soldier: his squad's station) |
 | DEATHS_3PLUS | the line names the causes; the brief lists the season's deaths by cause; fix the cause in the plan |
 | DEATHS_PREVENTABLE | ≥ 2 citizens dehydrated or starved within a month (stock days, units, patients in the line): `inspect` `what=reach` (forbidden or cut-off drink/food), `what=refuge`; patients → `what=water_sources` (hospital water); tell the player; fix access in the plan |
 | DRILL_FAIL (2nd in a row) | read `ready.fail`; fix gear, squads or geometry; never raise the cap |

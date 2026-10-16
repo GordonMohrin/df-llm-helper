@@ -238,20 +238,6 @@ add{name = 'a hostile within 10 tiles of B1 raises B1 at once; O1 still waits fo
     between(S.pulls(W, 'O1')[1].tick - t0, 450, 490, 'O1 raise')
   end}
 
-add{name = 'a soldier on the B1 footprint delays its raise by 300 ticks in a SIEGE',
-  units = function()
-    local r = units(S.army(6, 150, 150))
-    r[5].pos = {51, 40, Z}
-    return r
-  end,
-  run = 1500, modes = {'PEACE>SIEGE'},
-  check = function(W)
-    local t0 = S.mode_tick(W, 'PEACE>SIEGE')
-    T.eq(S.pulls(W, 'O1')[1].tick, t0)
-    between(S.pulls(W, 'B1')[1].tick - t0, 300, 330, 'B1 raise after the footprint wait')
-    T.eq(cens(W).u.on_bridge.B1, 1)
-  end}
-
 add{name = 'DRILL: a soldier on the footprint blocks the raise until he steps off (no forced raise)',
   units = function()
     local r = S.fort_units()
@@ -615,6 +601,119 @@ local function gate_blocked(W, b)
   return r
 end
 local function mv(id, x, y) return function(W) W.move(id, x, y, Z) end end
+
+-- BUG-027 (Run 10 Handlelock: siege raised B1 with goblins far away onto a recruit and, a season later, a miner; the
+-- old rule raised after 300 ticks onto whoever stood there, ignored the margin and never cancelled a pending raise)
+add{name = 'BUG-027: a soldier on the B1 footprint holds its raise in a SIEGE for good (army far away): GATE_FAIL ' ..
+           'names him, BREACH at T+900, B1 never pulled',
+  units = function()
+    local r = units(S.army(6, 150, 150))
+    r[5].pos = {51, 40, Z}
+    return r
+  end,
+  run = 1500, modes = {'PEACE>SIEGE', 'SIEGE>BREACH'},
+  check = function(W)
+    local t0 = S.mode_tick(W, 'PEACE>SIEGE')
+    T.eq(S.pulls(W, 'O1')[1].tick, t0)
+    T.eq(#S.pulls(W, 'B1'), 0, 'never raised onto the soldier')
+    T.eq(S.bstate(W, 'B1'), 'down')
+    T.eq(cens(W).u.on_bridge.B1, 1)
+    local gf = evs(W, 'GATE_FAIL')
+    T.eq(#gf, 1)
+    T.eq({gf[1].d.bridge, gf[1].d.why, gf[1].d.units, gf[1].d.pos}, {'B1', 'blocked', {5}, {51, 40, Z}})
+    T.ok(gf[1].msg:find('blocked: soldier 5 on the footprint (squad 1), never raised onto them', 1, true), gf[1].msg)
+    T.eq(ev1(W, 'BREACH').d.bridge, 'B1')
+    T.eq(#evs(W, 'GATE_FORCED'), 0)
+    local g = gate_blocked(W, 'B1')
+    T.eq(#g, 1, 'one GATE blocked event')
+    T.eq(g[1].d.units, {5})
+  end}
+
+add{name = 'BUG-027: the T+450 raise of O1 waits for a citizen next to its footprint and pulls once he stepped off',
+  units = function() return units(S.cit(9, 51, 11), S.army(6, 150, 150)) end,
+  at = {{700, mv(9, 60, 70)}},
+  run = 1500, modes = {'PEACE>SIEGE'},
+  check = function(W)
+    local t0 = S.mode_tick(W, 'PEACE>SIEGE')
+    local o1 = S.pulls(W, 'O1')
+    T.eq(#o1, 1)
+    between(o1[1].tick - t0, 700, 730, 'O1 pull one gate pass after he left (not at T+450)')
+    T.eq(S.bstate(W, 'O1'), 'up')
+    T.eq(#evs(W, 'GATE_FAIL') + #evs(W, 'BREACH') + #evs(W, 'GATE_FORCED'), 0)
+    T.eq(gate_blocked(W, 'O1')[1].d.units, {9})
+  end}
+
+add{name = 'BUG-027: a pending SIEGE raise is cancelled when a miner steps on B1, queued again once he is gone',
+  units = function() return units(S.army(6, 150, 150)) end,
+  lever_cfg = {[21] = {worker = 150}, [22] = {worker = 150}},
+  at = {{60, mv(1, 51, 40)}, {400, mv(1, 60, 70)}},
+  run = 1500, modes = {'PEACE>SIEGE'},
+  check = function(W)
+    local b1 = S.pulls(W, 'B1')
+    T.eq(#b1, 2, 'queued at T0, cancelled, queued again')
+    local c = S.acts(W, 'cancel_own_lever_job')
+    T.eq(#c, 1)
+    T.eq(c[1].args[1], b1[1].job)
+    between(rel(W, c[1].tick), 60, 90, 'cancelled within one gate pass')
+    between(rel(W, b1[2].tick), 400, 430, 'queued again after he left')
+    for _, f in ipairs(S.flips(W, 'B1')) do T.ok(rel(W, f.tick) >= 400, 'no move while he stood on it') end
+    T.eq(S.bstate(W, 'B1'), 'up')
+  end}
+
+add{name = 'BUG-027: a tame animal on B1 holds the raise like a citizen (census.a)',
+  units = function() return units({id = 400, pos = {50, 40, Z}, tame = true, animal = true}, S.army(6, 150, 150)) end,
+  at = {{20, function(W) W.set_census('a', {tick = 0, n = 1, list = {{id = 400, race = 1}}}) end},
+        {500, mv(400, 70, 70)}},
+  run = 1200, modes = {'PEACE>SIEGE'},
+  check = function(W)
+    local b1 = S.pulls(W, 'B1')
+    T.eq(#b1, 1)
+    T.ok(rel(W, b1[1].tick) >= 500, 'pulled after the animal left: ' .. rel(W, b1[1].tick))
+    T.eq(gate_blocked(W, 'B1')[1].msg, 'B1 up waits: animal 400 on the footprint')
+  end}
+
+add{name = 'BUG-027: with a hostile at the gate (<= force_near 3 tiles) the SIEGE raise goes ahead onto a soldier ' ..
+           'on B1, and GATE_FORCED (A) names him',
+  units = function()
+    local r = units(S.army(6, 51, 37))
+    r[5].pos = {51, 40, Z}
+    return r
+  end,
+  run = 300,
+  check = function(W)
+    local b1 = S.pulls(W, 'B1')
+    T.eq(#b1, 1)
+    local f = evs(W, 'GATE_FORCED')
+    T.eq(#f, 1)
+    T.eq({f[1].d.bridge, f[1].d.units, f[1].d.hostile, f[1].d.job}, {'B1', {5}, 2, b1[1].job})
+    T.ok(f[1].msg:find('B1 raised onto soldier 5 on the footprint (squad 1): a hostile 2 tiles from it (force_near 3)',
+                       1, true), f[1].msg)
+  end}
+
+add{name = 'BUG-027: force_near 0 (config/reflex.json gate) never raises onto a unit, not even with a hostile at the gate',
+  units = function()
+    local r = units(S.army(6, 51, 37))
+    r[5].pos = {51, 40, Z}
+    return r
+  end,
+  setup = function(W) W.K.cfg.reflex = {v = 2, gate = {force_near = 0}} end,
+  run = 300,
+  check = function(W)
+    T.eq(#S.pulls(W, 'B1'), 0)
+    T.eq(#evs(W, 'GATE_FORCED'), 0)
+  end}
+
+add{name = 'BUG-027 stop-gap: a bridge in gate.manual gets no automatic pull; GATE_FAIL says why',
+  units = function() return units(S.army(6, 150, 150)) end,
+  setup = function(W) W.K.cfg.reflex = {v = 2, gate = {manual = {'B1', 99}}} end,
+  run = 1100, modes = {'PEACE>SIEGE', 'SIEGE>BREACH'},
+  check = function(W)
+    T.eq(#S.pulls(W, 'B1'), 0)
+    T.eq(#S.pulls(W, 'O1'), 1)
+    local gf = evs(W, 'GATE_FAIL')
+    T.eq(gf[1].d.why, 'manual')
+    T.ok(gf[1].msg:find('manual: no automatic pull, config/reflex.json gate.manual', 1, true), gf[1].msg)
+  end}
 
 add{name = 'levers linked after the first resolve: used at once; both bridges up by T+900',
   setup = function(W) unlink(W, {11, 12, 21, 22}) end,

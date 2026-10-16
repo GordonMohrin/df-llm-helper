@@ -133,7 +133,9 @@ T.test('a citizen outside Kern+ fails the drill (bridges still go up at T+600)',
   T.eq(e.pass, 0)
   T.eq(e.outside, 1)
   T.eq(e.fails, {'outside:1'})
-  T.ok(e.raised >= 600 and e.raised <= 900, 'raised by the T+600 timer: ' .. e.raised)
+  -- pulled by siege's T+450 timer (someone is outside); BUG-027: gate re-checks every frame while its pull is
+  -- pending, so it sees the bridges up at T+585 (with 25-tick passes it was T+603)
+  T.ok(e.raised >= 450 and e.raised <= 900, 'raised after the T+450 timer: ' .. e.raised)
   invariants(W)
 end)
 

@@ -409,7 +409,7 @@ _CLUSTER = _d("cause:s n:i", "units:ia causes:sa total:i days:i patients:i pos:p
 # type -> (cls, by, d spec)
 EVENTS: dict[str, tuple[str, str, Obj]] = {
     "SIEGE_END": ("A", "siege", _d(opt="hostiles:i killed:i lost:i captures:i sealed_ticks:i")),
-    "GATE_FAIL": ("A", "gate", _d("bridge:s", "want:s why:s")),
+    "GATE_FAIL": ("A", "gate", _d("bridge:s", "want:s why:s units:ia pos:p")),
     "BREACH": ("A", "siege", _d("why:s", "bridge:s")),
     "DEATHS_3PLUS": ("A", "care", _d(opt="n:i ids:ia causes:sa")),
     "DRILL_FAIL": ("A", "drill", _d(opt="streak:i fails:sa")),
@@ -450,6 +450,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-023 / Run 10: tool detail members without their pick or axe while its jobs wait and free tools exist
     "TOOL_BLOCKED": ("A", "economy", _d("detail:s tool:s n:i", "members:ia jobs:i days:i free:i bins:i reserved:i "
                                                                "why:s who:s hint:s pos:p")),
+    # BUG-027: a SIEGE/BREACH raise went ahead onto units on or next to the footprint (a hostile within force_near)
+    "GATE_FORCED": ("A", "gate", _d("bridge:s", "units:ia hostile:i pos:p job:i")),
     "ALERT_START": ("B", "siege", _d(opt="vis:i")),
     "ALERT_END": ("B", "siege", _d(opt="vis:i")),
     "LOCKDOWN_END": ("B", "reflex", _d(opt="why:s ticks:i doors:i refused:i")),
@@ -489,7 +491,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "SEASON": ("C", "kern", _d(opt="year:i season:i")),
     "PROJECT_STAGE": ("C", "runner", _d("proj:s", "stage:s pct:i")),
     "MODE": ("C", "kern", _d("from:s to:s", "why:s")),
-    "GATE": ("C", "gate", _d("bridge:s", "state:s")),
+    "GATE": ("C", "gate", _d("bridge:s", "state:s units:ia")),
     "LEVER": ("C", "gate", _d("bridge:s", "lever:i job:i")),
     "SNAPSHOT_READY": ("C", "snapshot", _d("id:s path:s", "purpose:s")),
     "CMD": ("C", "kern", _d("id:s verb:s ok:f")),
