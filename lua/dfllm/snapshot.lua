@@ -284,6 +284,27 @@ function M.items_at(K, x0, y0, x1, y1, z)
   return out
 end
 
+-- units standing on the revealed tiles of a level rect (BUG-015: what stands on and next to a door the lockdown cannot
+-- keep forbidden): {{id, x, y}} of the visible living units there, sorted by id; at most M.CFG.items_tiles tiles per
+-- call. Hidden units (ambushers) and hidden tiles never count.
+function M.units_at(K, x0, y0, x1, y1, z)
+  x0, y0, x1, y1, z = int(x0), int(y0), int(x1), int(y1), int(z)
+  local out = {}
+  if not (x0 and y0 and x1 and y1 and z) or x1 < x0 or y1 < y0 then return out end
+  if (x1 - x0 + 1) * (y1 - y0 + 1) > M.CFG.items_tiles then return nil, 'rect too large' end
+  local getTileFlags = dfhack.maps.getTileFlags
+  for _, u in ipairs(df.global.world.units.active) do
+    local p = u.pos
+    if p.z == z and p.x >= x0 and p.x <= x1 and p.y >= y0 and p.y <= y1 and not dfhack.units.isDead(u)
+       and not dfhack.units.isHidden(u) then
+      local des = getTileFlags(p.x, p.y, p.z)
+      if des and not des.hidden then out[#out + 1] = {u.id, p.x, p.y} end
+    end
+  end
+  table.sort(out, function(a, b) return a[1] < b[1] end)
+  return out
+end
+
 -- walk-group query (iter2, care's mood reach): may a walker standing at a reach b? Both are revealed
 -- positions {x, y, z} the caller already knows (the moody dwarf, an item on a revealed tile). It is DF's own
 -- job-feasibility test (dfhack.maps.canWalkBetween, Lua API.txt; the same question act.link_lever asks for

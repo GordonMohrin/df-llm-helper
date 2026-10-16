@@ -50,7 +50,9 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
         "HOSPITAL_DRY": "dfllm cmd inspect '{\"what\":\"water_sources\"}'",
         "MOOD_RISK": "dfllm brief; supply the missing class (never cancel the mood)",
         # FR-64: >= 2 citizens dehydrated or starved within a month: access, not supply, as a rule
-        "DEATHS_PREVENTABLE": "dfllm cmd inspect '{\"what\":\"reach\"}', then refuge; patients: water_sources"}
+        "DEATHS_PREVENTABLE": "dfllm cmd inspect '{\"what\":\"reach\"}', then refuge; patients: water_sources",
+        # BUG-015: a lockdown door that does not hold its forbidden flag (the kernel tries it once more itself)
+        "LOCKDOWN_PARTIAL": "dfllm status; a wall or a second door for that opening (bp.place)"}
 SUPERVISE_EVERY_S = 15                         # supervise.json read cadence
 SUPERVISE_FRESH_S = 3600                       # alerts logged longer ago than this never wake
 HB_STALE_S = 300
