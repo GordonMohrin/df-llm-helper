@@ -200,6 +200,8 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 - Audit `fails` name the fix (table DESIGN §5.4): `bypass: wall x,y,z floor -> X` / `refuge: on the attack path,
   wall x,y,z floor` = a constructed wall on that tile closes the route (`ramp`: on its top; `(+more)`: other routes
   remain): `dfllm cmd bp.place tpl=seal site=S1 at=audit`, then `dfllm audit`. Doors never fix an audit route.
+  `traps N` with a bypass is counted as if its walls stood; `traps 0` beside an armed hall without a bypass = a
+  way into the hall's trap-free end: `dfllm audit` names the tile where the route enters the hall.
 
 ## 9. Decisions (the player's answers in `config/decisions.yaml`; defaults until they answer)
 D-01 cap option A (≤ 75) | D-02 difficulty unchanged | D-03 idle rule (> 40 % for 3 days, useful

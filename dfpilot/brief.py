@@ -152,7 +152,9 @@ def line_unready(ctx: Ctx) -> str:
                    + (", ..." if n > len(ents) else ""))
     else:
         out.append("ways in: not checked yet" if n < 0 else "ways in: all with a door or bridge")
-    out.append(f"traps {a.get('min_traps', 0)}" if a.get("age", -1) >= 0 else "traps ? (no audit)")
+    t = a.get("min_traps", 0)
+    why = "" if "bypass" not in fails else " (counted as if the bypass were walled)" if t else " (a bypass skips the hall)"
+    out.append(f"traps {t}{why}" if a.get("age", -1) >= 0 else "traps ? (no audit)")
     nxt = []
     if a.get("age", -1) < 0 or any(f in ("audit", "audit_old") for f in fails):
         nxt.append("dfllm audit")
@@ -214,7 +216,9 @@ def line_pop(ctx: Ctx) -> str:
             drill += (f" (auto: {r['dhold']}; run dfllm cmd drill)" if r.get("dhold") else " (run dfllm cmd drill)")
         audit = (f"audit {'ok' if a['ok'] else 'FAIL'} {fmt_ticks(a['age'])}" if a["age"] >= 0
                  else "audit never (run dfllm audit)")
-        out.append(f"{head} worn {r['worn']}% cv {r['cv']} {drill} {audit} traps {a['min_traps']}")
+        low = any(str(f).startswith("traps<") for f in r["fail"]) and a["age"] >= 0
+        out.append(f"{head} worn {r['worn']}% cv {r['cv']} {drill} {audit} traps {a['min_traps']}"
+                   + (" (dfllm audit: where the cheapest route enters the hall)" if low else ""))
     return _join(out)
 
 

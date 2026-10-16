@@ -190,6 +190,16 @@ Gameplay modules run on `cur_year_tick` deltas, which stay correct under timestr
   | `levers: B has N lever(s), needs 2`, `levers: a lever of B is outside Z3/Z4`, `bridge B: footprint is not a bridge` | the bridge cannot be raised from inside | build the levers/bridge |
   | `cage trap on the main path at X` | caged invaders get freed by their comrades | replace it with a stone-fall trap |
   | `no attack path with bridges lowered`, `manifest: ...`, `edge: ...` | the snapshot or the manifest is incomplete (nothing to judge) | `dfllm audit` again after the stage is done |
+- **Traps (`min_traps`, status `traps N`):** the armed traps (weapon and stone-fall, `armed` in the snapshot: not
+  resetting) an attacker meets on the cheapest route to Z3/Z4, counted as entered tiles (a diagonal step cuts a bend: the
+  fortcore hall's 41 traps read 35). Run 9 (46 traps) and Run 10 (41 stone-fall traps) showed `traps 0`: the audit's
+  minimum took the bypass it had found, which meets no trap. With a bypass the count is now taken as if the walls its
+  findings name stood (up to 4 routes closed one after the other; if that does not close them all it stays the plain
+  minimum, 0); without a bypass it is the plain minimum over every route, so the R2 rule (≥ 30 on every attacker path,
+  read only while R1 is green) is unchanged. A way into the hall's trap-free end (no bypass, R1 green) still reads 0:
+  `dfllm audit` prints `traps: (41 of 41 armed traps in the trap hall; the counted route enters the hall at x,y,z)`,
+  follow logs the same; status adds `(counted as if the bypass were walled)` / `(a bypass skips the hall)` at R0 and
+  `(dfllm audit: where the cheapest route enters the hall)` while `traps<30` blocks R2.
 - **Siege readiness gate (FR-65):** while R0 fails in PEACE, readiness emits SIEGE_UNREADY (A): the blockers, the ways in without a door or bridge from seal's last entrance check (`x,y,z kind`), the last audit's trap count and its own fail texts; first 2 days after a load at the earliest, then after a game month and 30 real minutes (10 when a blocker or an open way in is new; `util/cadence`). `status` never shows a plain PEACE then: line 1 reads `PEACE UNREADY`, line 2 `SIEGE UNREADY (R0): … | 2 ways in without door or bridge: … | traps 0 | next: …`.
 - **Drills** start by themselves (drill.lua: the first one, yearly, every season while the plan wants R2, after a siege, retries after a failure), only in PEACE without merchants, ≥ 2 days after a load, with an outer/inner manifest bridge, phase ≥ P5 and soldiers. `drill.hold()` names what is missing (state `ready.dhold`; `status`: `drill never (auto: no bridges; run dfllm cmd drill)`); `dfllm cmd drill` runs one by hand in PEACE (without bridges it fails `no_bridges`, but it exercises the alert and the squads).
 

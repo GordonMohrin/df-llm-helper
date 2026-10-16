@@ -1,5 +1,23 @@
 # CHANGELOG dfpilot
 
+## `traps 0` beside an armed trap hall: why, and the count that helps (2026-10-16; offline, live-untested)
+- **Cause:** `bp.topo.audit` `min_traps` was the minimum over every attacker route, and the bypass the same audit found
+  (Run 10: the way down to the refuge level, see the audit-findings entry; Run 9: the other openings) meets no trap,
+  so 41 armed stone-fall traps read `traps 0`. The trap export itself was right (StoneFallTrap -> `S`, armed =
+  `ready_timeout` 0, Z2 = the hall segments); reproduced offline with the Run 10 route shape. The other way to read
+  `0` with the audit `ok` (no bypass): a way into the hall's last, trap-free tiles from the side (also reproduced);
+  that one is a real hole for R2 and is now located by `dfllm audit`.
+- **Fix:** with a bypass the count is taken as if the walls its findings name stood (bypass closed route by route,
+  up to 4); otherwise the plain minimum, so R2 (`traps<30`, read only while R1 is green) is unchanged. A side way into
+  the hall's trap-free end (R1 green) still reads 0 and is now located. `audit(..., info=)` returns `traps` {armed,
+  hall, any_route, walls, enters}; `dfllm audit` prints `traps: (41 of 41 armed traps in the trap hall; ...)`, follow
+  logs it; status adds `(counted as if the bypass were walled)` / `(a bypass skips the hall)` / `(dfllm audit: where
+  the cheapest route enters the hall)`.
+- Tests: `tests/bp/test_bp_traps.py` (new), `tests/bp/test_bp_topo.py`, `tests/test_cli_status.py`.
+- **Live check:** in the Run 10 fort `dfllm audit` prints `traps 35` (or the hall's count) with the bypass finding and
+  `traps: (41 of 41 armed traps in the trap hall; counted with the 1 bypass wall(s) ...)`; once the seal wall stands
+  `dfllm status` shows the same count without the hint.
+
 ## Audit findings say what to build where; `seal at=audit` (2026-10-16; offline, live-untested)
 - **Why (Run 10):** `bypass: edge->Z3/Z4 avoids the trap hall (reaches 139,128,117)` and `refuge: on the attack path
   (reachable without passing Z4)` named no fix. 139,128,117 is one level above the refuge: a way down to the refuge

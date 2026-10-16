@@ -43,7 +43,7 @@ def test_refuge_route_names_the_tunnel_tile_and_one_wall_fixes_both():
     civ = L(0, 45, ZR + 1)
     assert f"bypass: wall {x},{y},{z} floor -> {civ[0]},{civ[1]},{civ[2]}" in res["fails"]
     assert f"refuge: on the attack path, wall {x},{y},{z} floor" in res["fails"]
-    assert res["min_traps"] == 0                               # the route meets no trap (see the traps item)
+    assert res["min_traps"] == 35                              # counted as if the named wall stood (traps item)
     w.set(x, y, z, "C")
     res = bp.audit(w.snapshot(), w.manifest)
     assert res["ok"] and not res["bypass"] and res["refuge_sep"], res["fails"]

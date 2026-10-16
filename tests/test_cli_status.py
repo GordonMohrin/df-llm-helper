@@ -128,8 +128,13 @@ def test_status_r0_variants_and_worst_case(save):
     _r0_state(save, open=-1, ents=None, dhold=None, fail=["audit_fail", "bypass", "refuge_sep", "civ_sep"],
               audit={"ok": 0, "age": 9000, "min_traps": 4})
     out = brief.status_text(save)
-    assert "SIEGE UNREADY (R0): audit_fail,bypass,refuge_sep,civ_sep | ways in: not checked yet | traps 4" in out
+    assert ("SIEGE UNREADY (R0): audit_fail,bypass,refuge_sep,civ_sep | ways in: not checked yet | traps 4 "
+            "(counted as if the bypass were walled)") in out          # Run 9/10: traps 0 beside an armed hall
     assert "next:" not in out.splitlines()[1]
+    _r0_state(save, open=-1, ents=None, dhold=None, fail=["bypass"], audit={"ok": 0, "age": 9000, "min_traps": 0})
+    assert "| traps 0 (a bypass skips the hall)" in brief.status_text(save)
+    _r0_state(save, open=-1, ents=None, dhold=None, fail=["audit_fail", "bypass", "refuge_sep", "civ_sep"],
+              audit={"ok": 0, "age": 9000, "min_traps": 4})
     assert "drill never (run dfllm cmd drill) audit FAIL 7d traps 4" in out
     _r0_state(save, open=0, ents=None)
     assert "ways in: all with a door or bridge" in brief.status_text(save)
