@@ -1,5 +1,64 @@
 # CHANGELOG dfpilot
 
+## Food in Run 11: the real `no cook` cause, a fishery for raw fish, the fishing zone on safe water, `food_low` names the blockers (2026-10-16; offline, live-untested)
+- **Why (Run 11, Kilrudrabed site98, y432 winter, pop 54):** food 24 days and falling, no meat or fish, no farm soil,
+  both kitchens without a job, ORDER_STUCK `PrepareMeal ... no cook` (8 times), nobody fished: the Fisherdwarves detail
+  waits for a fishing zone and the kernel only read zones. In y433 the session found 883-4532 raw fish (FISH_RAW) and no
+  fishery (food had fallen to 5 days); economy's PrepareRawFish order needs one and no template built it.
+- **What `no cook` meant:** not DF's text and not a missing cook: economy's order check names a missing input key as
+  `no <key>`, and PrepareMeal's key is `cook` (the census' cook ingredients). The worker check would have said
+  `no worker COOK`. The census had no ingredient: raw fish are no ingredient before a fishery cleans them, plump helmets
+  are banned (Gordon's rule), and food-class items of a material with neither `EDIBLE_RAW` nor `EDIBLE_COOKED` (leaves,
+  flowers) are no food at all. Best evidence: the label code (`ctx.has('cook')`) and the session's finding of raw fish
+  without a fishery.
+- **Census:** `cook_in` = cook ingredients as a kitchen sees them (non-meal food of an `EDIBLE_COOKED` material not on
+  the Cook ban: `dfhack.kitchen.findExclusion`, a growth with its growth index or -1, or the config ban), `cook_ban`
+  (`cook_ban_g` growths), `food_inedible` (top materials kept), `food_far` (another walk group). The meal order and the
+  order check use `cook_in`. ORDER_STUCK now says e.g. `no cook ingredient (883 raw fish need a fishery, 1566 inedible
+  (OAK:LEAF), 11 cook-banned)` (`why` up to 120 chars); PrepareRawFish without a fishery says `no Fishery`.
+- **Fishery:** raw fish (>= 5) or fishers at work and no fishery: PROJECT_REQUEST `workshops why=fishery` (every 14
+  days at most); `dfllm follow` places a workshops project with only the fishery (`p.add Fishery`, every moodable type
+  skipped) at prio 1. The workshops template takes `add=Fishery` (quickfort `wh`); fortcore stage 1 builds a fishery
+  (new forts).
+- **Fishing zone (fair play: the zones screen, revealed tiles only):** while fishers are wanted (food below 90 days, the
+  pre-alarm or a famine), no fishing zone stands and the fort is in PEACE/RECOVERY, at most weekly: economy reads
+  revealed water around the citizens' median (48 tiles; the fortcore surface and the level below, the citizens' levels
+  and the level below each, at most 6) through `snapshot.liquids` (sliced, 1500 tiles a frame), depth >= 2, never cavern
+  water (caverns stay sealed) or ice (winter), with a standable bank on the citizens' walk group (same level, or one up
+  over open space or a brook top), never on the attack path (Z1/Z2, killboxes), a roofed bank first, then the nearest;
+  `act.fish_zone` paints a 3x3 `dfllm-fish` zone (quickfort zone key `f`) over the water and, with the bank above, over
+  that level too. None: `no safe fishing water (n frozen, n cavern, n shallow, n no bank on the walk group, n on the
+  attack path)` in kern.log and the food decisions. `snapshot.liquids` leaves ice (tiletype material FROZEN_LIQUID) out
+  and lists it apart with `ice`; `snapshot.tile` says `ice`.
+- **Decisions:** `food_low` (below 30 days, class A) and `famine` name the numbers (food days, citizens, meals), the
+  blockers (`block`: fishery, kitchen, cook, fish_zone, hunt, farms, butcher) and the options (`opts`; always
+  `trade.want food`, butcher, gather, `popcap.lower`). `food_low` follows util/cadence (BUG-008): once at once, again
+  only with a new blocker or below 20 days, after max(7 days, 10 min). The famine text no longer claims a missing
+  fishery on the first run of a day (the facts are read before the decisions).
+- **Hunting and the kitchen:** the famine hunters (2, with crossbows and free bolts, PEACE/RECOVERY) hunt from the
+  food_low pre-alarm on; cookable growths on a kitchen ban are let go once per episode (`ban-cooking fruit --unban`;
+  plump helmets are no growth and stay banned, D-09).
+- Contracts: act `fish_zone` (economy), `snapshot.liquids(..., ice)`, `snapshot.tile` `ice`, census fields,
+  DECISION_NEEDED opt `food`, `block`, `opts`; config `economy.fishing`. Docs: RULES §7 DECISION_NEEDED, §10 Labor and
+  Food; DESIGN §5.5/§5.11; CONTRACTS §5, §6.3, §7, appendix.
+- Tests: `tests/lua/test_economy_fishing.lua` (new: census, ORDER_STUCK causes, fishery request, the zone on safe
+  water, no safe water and the decision, no search outside PEACE/with a zone/with food, the unban),
+  `tests/lua/test_snapshot.lua` (ice), `tests/lua/test_act_supply.lua` (fish_zone), `tests/lua/test_economy_food.lua`
+  (cadence), `tests/lua/test_economy.lua`, `tests/lua/test_economy_chains.lua` (pre-alarm hunters),
+  `tests/test_cli_wake.py` (follow places the fishery), `tests/bp` goldens (fortcore fishery).
+- **How to use / what to do now by hand:** nothing new to type: after `git pull` and `dfhack-run dfllm reload` the
+  kernel paints the fishing zone, asks for the fishery and names the blockers. Until then (closed verb set): a fishery
+  with `dfllm cmd bp.place '{"tpl":"workshops","site":"S1","p":{"add":"Fishery"}}'` (live after `git pull`; cmd.place
+  skips the moodable shops the fort has), a fishing zone by hand in the zones screen (the player; no inbox verb paints
+  zones), `trade.want food`/`meat`/`fish` for the next caravan, `popcap.lower`.
+- **Live check (Run 11):** after the reload, within a game day with food below 90 days in PEACE: kern.log `fishing:
+  zone dfllm-fish at x,y,z (...)` or `fishing: no safe fishing water (...)` (winter: `n frozen`); in game the zones
+  screen shows a Fishing zone `dfllm-fish` on the water, the Fisherdwarves detail gets 1-3 members the next day. With
+  raw fish and no fishery: PROJECT_REQUEST `workshops why=fishery` and a workshops project with one `wh` shop (cli.log
+  `auto`). ORDER_STUCK for PrepareMeal names `no cook ingredient (...)` instead of `no cook`; `dfllm brief` OPEN
+  food_low shows `food N d (54 cit, M meals): ...; ... Also: trade.want food, butcher, gather, popcap.lower`. Check the
+  fishers stand on the bank and fish (job Fish), and that raw fish turn into prepared fish at the fishery.
+
 ## `seal at=last` takes the current leaks once each, plants and doors handled; `seal at=refuge` hatches the refuge stair; the refuge comes first from the fort's start (2026-10-16; offline, live-untested)
 - **Why (Run 11, Kilrudrabed y429, pop 54):** `bp.place tpl=seal at=all|last` gave the same door 125,103,144 on every
   repetition (its seal was pending, then the entrance check reused an old answer) and never the new leaks: 188,103,144

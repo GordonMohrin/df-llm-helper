@@ -164,7 +164,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | SIEGE_UNREADY | readiness is R0 in PEACE (monthly while it fails): the line names the blockers (§8), the audit's bypass / refuge route with its fix, the ways in without door or bridge and the traps. A route with `(fix: seal at=audit)`: follow already placed that seal (PEACE, not with `--no-auto`: then `dfllm cmd bp.place tpl=seal site=S1 at=audit`); `(no wall tile: ...)`: `inspect` `what=entrances` and tell the player. `inspect` `what=entrances`; close each open way in with `dfllm cmd bp.place tpl=seal site=S1 at=last` (door on a floor, wall on the ramp top, hatch on a stair; a shrub is gathered first, a sapling or a door the route passes beside gets the neighbour that closes it; openings a seal builds or built are left out, ≤ 6 per seal: place it again for the rest; one `seal:piece` line each, `seal:note` for what it left out, in cli.log), put the missing fortcore pieces into the plan; then `dfllm audit`; tell the player |
 | KERN_FAULT | a module is backed off (`d.backoff_s`; the kernel re-enables it afterwards); note module and error for the repo; do not hot-patch; `module.enable` only after the fix |
 | PERF_DEGRADED | `dfllm doctor`; the supervisor restarts DF only in PEACE after an autosave |
-| DECISION_NEEDED | ask the player the question once; the default applies until they answer. `build_blocked`: `inspect` `what=workload` (`construction.blocked`: kind, pos, fails, why); the kernel already unforbade the items on the site; corpses wait for burial; else `bp.cancel` and place it elsewhere |
+| DECISION_NEEDED | ask the player the question once; the default applies until they answer. `food_low`/`famine`: the line names the blockers (`block`: fishery for raw fish, kitchen, cook ingredient, fish_zone, hunt, farms) and the options (fishery, fishing zone by hand, `trade.want` food, butcher, gather, `popcap.lower`). `build_blocked`: `inspect` `what=workload` (`construction.blocked`: kind, pos, fails, why); the kernel already unforbade the items on the site; corpses wait for burial; else `bp.cancel` and place it elsewhere |
 | PLAN_EXHAUSTED | year review now (`plan propose`) |
 | PROJECT_BLOCKED | `bp preview`, then `bp.cancel` and place at another site, or fix the material; `build_lost` names the missing pieces (`B1`, traps) and the kernel retries the stage itself (`retry n/8`): wait for it unless the line says the retries are spent |
 | YEAR_REVIEW | §5 year review |
@@ -257,11 +257,11 @@ postings, not idle %. Idle > 40 % for 3 days → useful backlog only, never fill
 **Moods:** all 12 moodable workshop types in P1; stock ≥ 10 cloth, leather, bone, shell, gems, bars
 from P1; never cancel a mood job. No ore: `plan propose` drafts `explore` each season (`plan check` refuses metal unplanned). No gems: green glass from revealed sand.
 **Labor:** labormanager monitor; economy staffs the Miners (dig backlog, 2-4), Woodcutters (logs) and
-Hunters (famine; 1 for a short bone/shell/leather mood stock, 2 after a mood missed leather) details itself; you never
+Hunters (famine and `food_low`; 1 for a short bone/shell/leather mood stock, 2 after a mood missed leather) and Fisherdwarves details itself; you never
 change work details.
 **Dead:** one 1x1 tomb per coffin, free tombs ≥ open corpses + 6; autoslab, burial, preserve-tombs.
 **Food/drink:** drink ≥ 170 days, food ≥ 60, ≥ 5 meal kinds; plump helmets are brewed, never cooked. Farms,
-autofarm thresholds, fishers and meals follow the citizens (economy; `food_low` wakes below 30 days).
+autofarm thresholds, fishers, the fishing zone (safe water, never cavern or ice), a fishery for raw fish and meals follow the citizens (economy; `food_low` wakes below 30 days).
 **Happiness:** dining hall → own bedrooms (≥ 500) → general temple (≥ 2,000 on petition) → tavern →
 library. 0 naked. Stress KPI: share with category ≤ 1.
 **Beauty:** only `used` rooms, only in PEACE with R1 green; artifacts and masterworks on pedestals.

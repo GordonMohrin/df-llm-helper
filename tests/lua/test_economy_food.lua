@@ -123,7 +123,7 @@ T.test('farms request: a food stock falling over 14 days asks even with many foo
   T.eq(r[1].n, 1, '30 tiles wanted for 10 citizens: one plot')
 end)
 
-T.test('famine pre-alarm: below 30 food days one class-A DECISION_NEEDED food_low a week; below 10 only famine', function()
+T.test('famine pre-alarm: below 30 food days one class-A DECISION_NEEDED food_low (util/cadence); below 10 only famine', function()
   local W = world{cit = 53, setup = function(W) F.item(W, 'FOOD', {stack_size = 26, subtype = 1}) end}
   settle(W)
   days(W, 1)
@@ -135,8 +135,12 @@ T.test('famine pre-alarm: below 30 food days one class-A DECISION_NEEDED food_lo
   T.ok(e.d.q:find('farms 0/159 tiles', 1, true), e.d.q)
   T.ok(#e.d.q <= 200)
   days(W, 4)
-  T.eq(decisions(W, 'food_low'), 1, 'weekly')
+  T.eq(decisions(W, 'food_low'), 1)
   days(W, 4)
+  T.eq(decisions(W, 'food_low'), 1, 'Run 11 (BUG-008): the same blockers are not asked again')
+  W.ms = W.ms + 600 * 1000
+  for _ = 1, 6 do F.item(W, 'FISH_RAW', {}) end              -- raw fish and no fishery: a new blocker
+  days(W, 1)
   T.eq(decisions(W, 'food_low'), 2)
   local W2 = world{cit = 53}
   settle(W2)

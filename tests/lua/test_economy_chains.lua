@@ -239,6 +239,10 @@ T.test('hunters leave the detail at once when the fort leaves PEACE (MODE rushes
   local W3, ctl3 = hw{food = 1}
   days(W3, 2)
   T.eq(#ctl3.wds.Hunters.assigned_units, 2, 'famine in PEACE: two hunters')
+  local W5, ctl5 = hw{food = 4}                    -- Run 11: 16 food days, the food_low pre-alarm hunts like a famine
+  days(W5, 2)
+  T.ok(persist(W5).famine == nil and persist(W5).food_pre ~= nil, 'pre-alarm, no famine')
+  T.eq(#ctl5.wds.Hunters.assigned_units, 2, 'food low in PEACE: two hunters')
   T.eq(eco_warns(W), {})
   -- the only bolts sit in a soldier's quiver: a hunter would fight in melee, so none is sent
   local W4, ctl4 = hw{}

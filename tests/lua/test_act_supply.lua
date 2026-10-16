@@ -172,4 +172,27 @@ T.test('sand_zone: a 1x1 dfllm-sand zone (quickfort zone key s) at the position;
   T.eq(#calls, 2)
 end)
 
+-- Run 11 (Kilrudrabed: nobody fished, the kernel only read zones): the zones screen's Fishing zone over the water and,
+-- with `up`, over the bank's level above it (economy only)
+T.test('fish_zone: a side x side dfllm-fish zone (quickfort zone key f) centred on the water, up one level too', function()
+  local W = H.world{tag = 'fz'}
+  local calls = {}
+  local n = 1
+  W.scripts['quickfort'] = {apply_blueprint = function(p)
+    calls[#calls + 1] = p
+    return {zone_designated = {label = 'Zones designated', value = n}}
+  end}
+  local env = mk('economy')
+  T.eq({env.api.fish_zone({80, 50, 99}, 3, true)}, {true, 2})
+  T.eq({calls[1].mode, calls[1].pos, calls[2].pos}, {'zone', {x = 79, y = 49, z = 99}, {x = 79, y = 49, z = 100}})
+  T.eq(calls[1].data[0][0][0], 'f{name=dfllm-fish}(3x3)')
+  T.eq({env.api.fish_zone({60, 50, 100}, 3, false)}, {true, 1})
+  T.eq(#calls, 3)
+  T.eq((mk('runner').api.fish_zone({60, 50, 100}, 3)), false, 'not owner')
+  T.eq((env.api.fish_zone({60, 50})), false, 'bad position')
+  n = 0
+  T.eq({env.api.fish_zone({61, 50, 100}, 9)}, {false, 'quickfort designated no zone there'})
+  T.eq(calls[#calls].data[0][0][0], 'f{name=dfllm-fish}(7x7)', 'side capped at 7')
+end)
+
 T.done()

@@ -10,7 +10,9 @@ not wake; the follower acts on two of them without the LLM:
                                   life. --no-audit switches it off. Snapshots `dfllm audit` requested (ids AUDIT_PREFIX)
                                   are left to it)
   PROJECT_REQUEST tpl=tombs    -> snapshot purpose=sites -> best free site (cmd.place) -> bp.place
-  PROJECT_REQUEST tpl=workshops -> the same (care asks when a strange mood finds no workshop)
+  PROJECT_REQUEST tpl=workshops -> the same (care asks when a strange mood finds no workshop); why=fishery (economy:
+                                  raw fish and no fishery, Run 11) -> only the fishery (p.add Fishery, every moodable
+                                  type skipped) at prio 1
   PROJECT_REQUEST tpl=farms why=food -> the same with p.plots = n (1-4) at prio 1 (economy asks when the farm
                                   tiles fall short of the citizens and food is low or falling; live L5)
   AUDIT (B) with a bypass wall -> Run 10 (the bypass finding stood for months, the 41 traps stayed unused): in PEACE,
@@ -95,7 +97,8 @@ HB_STALE_S = 300
 FOLLOW_HB_EVERY_S = 10                         # FR-29: follow's own heartbeat (<save>/.follow.hb)
 AUTO_TIMEOUT_S = 60
 TOMBS_COOLDOWN_S = 600
-PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "farms", "seal")   # automatic placements (one job each)
+# automatic placements (one job each)
+PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "farms", "seal", "fishery")
 SEAL_HINT = ("dfllm cmd bp.place tpl=seal site=S1 at=audit (walls the audit's bypass; follow places it itself "
              "unless --no-auto); then dfllm audit")
 AUTO_REQUESTS = ("tombs", "workshops")            # PROJECT_REQUEST templates follow places itself
@@ -359,6 +362,11 @@ class Follower:
                 # live L5: pop 41 -> 53 on the same 80 farm tiles, food 105 -> 15 days; economy sizes the plots
                 n = d.get("n") if isinstance(d.get("n"), int) and not isinstance(d.get("n"), bool) else 2
                 self._request_place("farms", "farms", {"plots": max(1, min(n, 4))}, "S1", now, prio=1)
+            elif t == "PROJECT_REQUEST" and d.get("tpl") == "workshops" and d.get("why") == "fishery":
+                # Run 11: 883-4532 raw fish lay uncleaned with no fishery and food fell to 5 days: the fishery alone
+                from .cmd import _moodable
+                self._request_place("fishery", "workshops", {"add": "Fishery", "skip": ",".join(_moodable())}, "S1",
+                                    now, prio=1)
             elif t == "PROJECT_REQUEST" and d.get("tpl") in AUTO_REQUESTS:
                 self._request_place(d["tpl"], d["tpl"], {}, "S1", now)   # live L1: a strange mood needs a shop
             elif t == "PLAN_EXHAUSTED" and d.get("phase") in AUTO_PHASES:

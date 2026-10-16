@@ -1022,6 +1022,29 @@ local function impls(state)
     return true, n or 1
   end
 
+  -- zones screen > add zone > Fishing (Run 11, Kilrudrabed: food 24 days, the Fisherdwarves detail waited for a fishing
+  -- zone and the kernel only read zones): a side x side fishing zone named dfllm-fish centred on the water tile pos,
+  -- quickfort zone mode (internal/quickfort/zone.lua key `f`), and with `up` the same rectangle one level higher (the
+  -- fisher's bank stands above the water: a river bank or a brook top). The caller picks revealed, liquid, non-cavern
+  -- water with a bank on the citizens' walk group (economy's fishing search; act reads no tiles). Returns ok, zones
+  -- designated (0 = quickfort skipped every tile: refused).
+  function I.fish_zone(pos, side, up)
+    local x, y, z = xyz(pos)
+    x, y, z = int(x), int(y), int(z)
+    if not (x and y and z) then return false, 'pos must be {x,y,z}' end
+    side = math.max(1, math.min(int(side) or 3, 7))
+    local cell = string.format('f{name=dfllm-fish}(%dx%d)', side, side)
+    local n = 0
+    for _, zz in ipairs(up == true and {z, z + 1} or {z}) do
+      local ok, stats = I.quickfort({mode = 'zone', data = {[0] = {[0] = {[0] = cell}}},
+                                     pos = {x - side // 2, y - side // 2, zz}})
+      if not ok then return false, stats end
+      n = n + (type(stats) == 'table' and int(stats.zone_designated) or 1)
+    end
+    if n == 0 then return false, 'quickfort designated no zone there' end
+    return true, n
+  end
+
   -- live L6 (Paddletribes): removes ONE Pond zone by id (as the player deletes the zone on its sheet); water
   -- uses it for ponds that only recycle the water of the well beside them. Never touches other zones.
   function I.pond_remove(id)

@@ -67,7 +67,7 @@ function F.install(W)
   df.workquota_frequency_type = enum_from({'OneTime', 'Daily', 'Monthly', 'Seasonally', 'Yearly'}, 0)
   df.workshop_type = enum_from({'Carpenters', 'Farmers', 'Masons', 'Craftsdwarfs', 'Jewelers', 'MetalsmithsForge',
                                 'MagmaForge', 'Bowyers', 'Mechanics', 'Siege', 'Butchers', 'Leatherworks', 'Tanners',
-                                'Clothiers', 'Fishery', 'Still', 'Loom'}, 0)
+                                'Clothiers', 'Fishery', 'Still', 'Loom', 'Kitchen'}, 0)
   df.furnace_type = enum_from({'WoodFurnace', 'Smelter', 'GlassFurnace', 'Kiln', 'MagmaSmelter', 'MagmaGlassFurnace'}, 0)
   local mt = enum_from({'Fey', 'Secretive', 'Possessed', 'Macabre', 'Fell', 'Melancholy', 'Raving', 'Berserk',
                         'Baby', 'Traumatized'}, 0)

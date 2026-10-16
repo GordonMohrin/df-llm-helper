@@ -167,6 +167,14 @@
       95
      ],
      "type": "Butchers"
+    },
+    {
+     "pos": [
+      88,
+      117,
+      95
+     ],
+     "type": "Fishery"
     }
    ],
    "zones": {
@@ -313,7 +321,7 @@
    "door": 4,
    "trade_depot": 1,
    "well": 1,
-   "workshop": 7
+   "workshop": 8
   },
   "params": {
    "beds": 8,
@@ -1166,6 +1174,12 @@
         "wt(3x3)"
        ],
        [
+        30,
+        36,
+        0,
+        "wh(3x3)"
+       ],
+       [
         11,
         0,
         3,
@@ -1817,6 +1831,14 @@
       95
      ],
      "type": "Butchers"
+    },
+    {
+     "pos": [
+      88,
+      117,
+      95
+     ],
+     "type": "Fishery"
     }
    ],
    "zones": {
@@ -2675,6 +2697,14 @@
       95
      ],
      "type": "Butchers"
+    },
+    {
+     "pos": [
+      88,
+      117,
+      95
+     ],
+     "type": "Fishery"
     }
    ],
    "zones": {
@@ -3495,6 +3525,14 @@
       95
      ],
      "type": "Butchers"
+    },
+    {
+     "pos": [
+      88,
+      117,
+      95
+     ],
+     "type": "Fishery"
     }
    ],
    "zones": {

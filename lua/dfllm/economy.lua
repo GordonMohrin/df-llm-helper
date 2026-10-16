@@ -76,7 +76,10 @@
 --     container count as unusable (census seeds_forb);
 --   * starvation (food_d <= starve.days with hungry citizens): reachable visible edible shrubs are marked for
 --     gathering (act.plant_gather), the planters and plant gatherers details get members, forbidden food is
---     unforbidden, and DECISION_NEEDED starvation names the citizens who cannot reach food.
+--     unforbidden, and DECISION_NEEDED starvation names the citizens who cannot reach food;
+--   * Run 11 (Kilrudrabed): cook ingredients counted as a kitchen does (cook_in), ORDER_STUCK names why a kitchen
+--     cooks nothing, a fishery request for raw fish, the fishing zone on safe revealed water, and the food_low/famine
+--     decisions name the blockers and the options (section "fishing and the food blockers").
 local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
 local OL = require('dfllm.orderlib')
@@ -185,6 +188,11 @@ M.DEFAULTS = {
   slaughter = {keep_f = 1, keep_m = 1, max = 10, every_days = 7, mood_days = 3, ws = {'workshop:Butchers'}},
   fish = {tag = 'dfllm:fish', min = 5, max = 30, ws = {'workshop:Fishery'},
           spec = {job = 'PrepareRawFish', frequency = 'OneTime'}},
+  -- Run 11 (Kilrudrabed: nobody fished, no fishing zone): the fishing zone search (M.fish_start): r tiles around the
+  -- citizens' median, at most `levels` levels, `tiles` tiles read a frame, water of depth >= min_flow, a side x side
+  -- zone, again after scan_days; `reads` tile reads a frame, `checks` water tiles looked at, `max_water` kept
+  fishing = {r = 48, levels = 6, tiles = 1500, min_flow = 2, side = 3, scan_days = 7, reads = 200, checks = 160,
+             max_water = 3000},
   -- live L5 (Castlerisen y295: pop 41 -> 53 on the same 80 farm tiles, food 105 -> 15 days in a year): food follows
   -- the population. DF gives about `yield` crops per farm tile and season; a citizen uses about `per_dwarf` plants
   -- a season (about 2 eaten, 1 brewed into 5 drinks), so the fort wants cit * per_dwarf / yield farm tiles. Below
@@ -562,6 +570,60 @@ local function reach_mark(a, it, key)
 end
 
 function M.sandy(it) return it:isSandBearing() end      -- Run 11: a bag of sand (no closure per census item)
+
+-- Run 11 (Kilrudrabed y432: both kitchens idle, PrepareMeal 'no cook' for 8 days beside 1566 plant growths): is this
+-- EDIBLE_COOKED food item on the kitchen's Cook ban? The config ban (`kitchen`: plump helmets, Gordon's rule) or a
+-- kitchen exclusion (the kitchen screen; ban-cooking writes the same list): dfhack.kitchen.findExclusion with the item's
+-- type, subtype (a plant growth's growth index; -1 matches too) and material. Cached per census (a.kc).
+function M.cook_banned(a, cat, it)
+  local t, i = item_mat(it)
+  if t == nil or i == nil then return false end
+  local sub = cat == 'PLANT_GROWTH' and (math.tointeger(subtype(it)) or -1) or -1
+  local ck = sub == -1 and cat or (cat .. sub)          -- one string a growth kind, none for the rest
+  local rows = a.kc[ck]
+  if not rows then rows = {}; a.kc[ck] = rows end
+  local row = rows[t]
+  if not row then row = {}; rows[t] = row end
+  local v = row[i]
+  if v == nil then
+    v = false
+    if cat == 'PLANT' and next(a.nocook) then
+      local tok = mat_token(t, i)
+      local plant = tok and tok:match('^PLANT:([^:]+):')
+      v = plant ~= nil and a.nocook[plant] == true
+    end
+    local kit = dfhack.kitchen
+    if not v and kit and kit.findExclusion then
+      local itype = df.item_type[cat]
+      local ok1, k1 = pcall(kit.findExclusion, {Cook = true}, itype, sub, t, i)
+      v = ok1 and (math.tointeger(k1) or -1) >= 0
+      if not v and sub ~= -1 then
+        local ok2, k2 = pcall(kit.findExclusion, {Cook = true}, itype, -1, t, i)
+        v = ok2 and (math.tointeger(k2) or -1) >= 0
+      end
+    end
+    row[i] = v
+  end
+  return v
+end
+
+-- a small tally {key = n} (at most 16 keys; '#' counts them) and its k largest entries {{key, n}}
+function M.tally(t, key, n)
+  if key == nil then return end
+  if t[key] == nil then
+    if (t['#'] or 0) >= 16 then return end
+    t['#'] = (t['#'] or 0) + 1
+  end
+  t[key] = (t[key] or 0) + n
+end
+function M.top(t, k)
+  local r = {}
+  for key, n in pairs(type(t) == 'table' and t or {}) do if key ~= '#' then r[#r + 1] = {key, n} end end
+  table.sort(r, function(x, y) if x[2] ~= y[2] then return x[2] > y[2] end return x[1] < y[1] end)
+  while #r > (k or 3) do table.remove(r) end
+  return r
+end
+
 local function classify(it, a, cat)
   local f = it.flags
   local w = skip_mask and f.whole
@@ -596,6 +658,7 @@ local function classify(it, a, cat)
   -- 42 dwarves starved. Food and drink on another walkable group than the citizens' feed nobody.
   if (cat == 'DRINK' or a.food_set[cat]) and not f.in_inventory and a.far and a.far(it) then
     a.unreach = (a.unreach or 0) + n
+    if cat ~= 'DRINK' then a.food_far = a.food_far + n end     -- Run 11: the kitchen's view (M.cook_why)
     return
   end
   if cat == 'DRINK' then a.drink = a.drink + n
@@ -605,6 +668,18 @@ local function classify(it, a, cat)
     -- dwarf starved), so they count as `cookable`.
     if cat ~= 'FOOD' then
       local mf = mat_flags(it)
+      -- Run 11 (Kilrudrabed: PrepareMeal 'no cook' beside 1566 plant growths): a kitchen cooks what is EDIBLE_COOKED
+      -- and not on its Cook ban (cook_in; cook_ban the banned ones); neither flag is no food at all (food_inedible)
+      if mf and mf.EDIBLE_COOKED then
+        if not M.cook_banned(a, cat, it) then a.cook_in = a.cook_in + n
+        else
+          a.cook_ban = a.cook_ban + n
+          if cat == 'PLANT_GROWTH' then a.cook_ban_g = a.cook_ban_g + n end   -- M.food_unban
+        end
+      elseif not (mf and mf.EDIBLE_RAW) then
+        a.food_inedible = a.food_inedible + n
+        M.tally(a.ined, mat_token(item_mat(it)), n)
+      end
       if not (mf and mf.EDIBLE_RAW) then
         if mf and mf.EDIBLE_COOKED then a.cookable = a.cookable + n end
         return
@@ -765,7 +840,7 @@ local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'ge
               'w_xbow', 'w_bow', 'g_body', 'g_head', 'g_pants', 'g_gloves', 'g_shoes', 'g_shield', 'g_weapon', 'g_xbow',
               'g_quiver', 'g_metal', 'fish_raw', 'food_nocook', 'seeds_ok', 'seeds_forb', 'w_pick_free', 'w_axe_free',
               'w_pick_bin', 'w_axe_bin', 'w_pick_res', 'w_axe_res', 'webs', 'webs_near', 'glass', 'gems_glass', 'sand',
-              'bags'}
+              'bags', 'cook_in', 'cook_ban', 'cook_ban_g', 'food_inedible', 'food_far'}
 local function new_acc(c)
   local fs = {}
   for _, k in ipairs(c.food_cats or {}) do fs[k] = true end
@@ -774,7 +849,7 @@ local function new_acc(c)
     if e.what == 'Cook' and e.item == 'PLANT' and type(e.plant) == 'string' then nocook[e.plant] = true end
   end
   local a = {kinds = {}, food_set = fs, bars_by = {}, ores = {}, seeds = {}, nocook = nocook, fix = {}, fix_seen = {},
-             reach = {}, food_pos = {}, res = {}, tool_items = {pick = {}, axe = {}}, web_probes = 0}
+             reach = {}, food_pos = {}, res = {}, tool_items = {pick = {}, axe = {}}, web_probes = 0, kc = {}, ined = {}}
   for _, k in ipairs(ZERO) do a[k] = 0 end
   -- BUG-023: weapons a squad uniform reserved (equipment screen; DF hands no reserved pick or axe out as a work tool)
   pcall(function()
@@ -826,6 +901,7 @@ local function publish(K, c, a)
   st.bars_by, st.ores, st.seeds = a.bars_by, a.ores, a.seeds
   st.fix, st.reach, st.food_pos, st.unreach = a.fix, a.reach, a.food_pos, a.unreach or 0
   st.tool_items, st.web_pos = a.tool_items, a.web_pos
+  st.ined = M.top(a.ined, 3)                         -- Run 11: the inedible food materials (M.cook_why)
 end
 
 ---------------------------------------------------------------- stock days (7-day moving average)
@@ -916,6 +992,33 @@ end
 local function ws_any(f, list)
   for _, w in ipairs(list or {}) do if f[w] then return true end end
   return false
+end
+M.FISHERY = {'workshop:Fishery'}
+
+-- the census' cook ingredients: cook_in (Run 11), else (an older census) raw-edible food that is no meal and not
+-- plump helmet plus the cook-only items
+function M.cook_n(inv)
+  if inv.cook_in ~= nil then return inv.cook_in end
+  return (inv.food or 0) - (inv.meals or 0) - (inv.food_nocook or 0) + (inv.cookable or 0)
+end
+
+-- Run 11: why a kitchen has nothing to cook (ORDER_STUCK PrepareMeal said 'no cook', read as a missing cook; it was
+-- the input check): 'cook ingredient (883 raw fish need a fishery, 1566 inedible (OAK:LEAF), 30 cut off, 11
+-- cook-banned)'
+function M.cook_why(inv, f)
+  local parts, raw = {}, inv.fish_raw or 0
+  if raw > 0 then
+    parts[1] = string.format('%d raw fish %s', raw, ws_any(f or {}, M.FISHERY) and 'to clean' or 'need a fishery')
+  end
+  if (inv.food_inedible or 0) > 0 then
+    local t = st.ined and st.ined[1]
+    parts[#parts + 1] = string.format('%d inedible%s', inv.food_inedible,
+                                      t and (' (' .. tostring(t[1]):gsub('^PLANT:', '') .. ')') or '')
+  end
+  if (inv.food_far or 0) > 0 then parts[#parts + 1] = string.format('%d cut off', inv.food_far) end
+  if (inv.food_forb or 0) > 0 then parts[#parts + 1] = string.format('%d forbidden', inv.food_forb) end
+  if (inv.cook_ban or 0) > 0 then parts[#parts + 1] = string.format('%d cook-banned', inv.cook_ban) end
+  return 'cook ingredient' .. (#parts > 0 and (' (' .. table.concat(parts, ', ') .. ')') or '')
 end
 
 -- open orders: our tags still live (amount left), the inputs they still hold (meta.uses x left) and the wood
@@ -1111,8 +1214,8 @@ local function meal_jobs(c, r, e)
   if e.key ~= 'food_d' or type(fc) ~= 'table' then return 0, e.max_jobs or 20 end
   local cit, inv = r.cit or 0, r.inv
   local want = cit * (fc.meals_per_dwarf or 0) - (inv.meals or 0)
-  -- what a cook may use: raw-edible food that is no meal and not on the cook ban (plump helmets), cook-only items
-  local ingredients = (inv.food or 0) - (inv.meals or 0) - (inv.food_nocook or 0) + (inv.cookable or 0)
+  -- what a cook may use: EDIBLE_COOKED food that is no meal and not on the kitchen's Cook ban (plump helmets)
+  local ingredients = M.cook_n(inv)
   local jobs = (want > 0 and ingredients >= 10) and (math.min(want, ingredients) + e.per_job - 1) // e.per_job or 0
   return jobs, math.max(e.max_jobs or 20, (cit + (fc.cit_per_job or 2) - 1) // math.max(1, fc.cit_per_job or 2))
 end
@@ -1233,17 +1336,18 @@ local function hunters_spec(c)
   for _, d in ipairs((c.tools or {}).details or {}) do if d.name == 'Hunters' then return d end end
 end
 
--- hunters wanted: famine (PEACE or RECOVERY only), else (PEACE, from mood_from_phase or an open need, not paused
--- for want of game) one while leather, bone or shell is short of its target, `need` while one of them has an open
--- need. Hunters roam outside the walls: in ALERT, SIEGE, BREACH or a DRILL ("nobody outside at T+1,200") they are
--- wanted nowhere, and tools() takes them off the detail at once (reason 'mode'), not after shrink_days.
+-- hunters wanted: famine or (Run 11) the food_low pre-alarm (PEACE or RECOVERY only), else (PEACE, from
+-- mood_from_phase or an open need, not paused for want of game) one while leather, bone or shell is short of its
+-- target, `need` while one of them has an open need. Hunters roam outside the walls: in ALERT, SIEGE, BREACH or a
+-- DRILL ("nobody outside at T+1,200") they are wanted nowhere, and tools() takes them off the detail at once (reason
+-- 'mode'), not after shrink_days.
 local HUNT_MODES = {PEACE = true, RECOVERY = true}
 local function hunt_want(K, c, r)
   local spec = hunters_spec(c)
   if not spec then return 0, 'none' end
   local mode = K.mode()
   if not HUNT_MODES[mode] then return 0, 'mode' end
-  if r.p.famine then return spec.famine or 0, 'famine' end
+  if r.p.famine or r.p.food_pre then return spec.famine or 0, r.p.famine and 'famine' or 'food low' end
   if mode ~= 'PEACE' then return 0, 'mode' end
   local short, needed = false, false
   for _, key in ipairs(spec.mood_keys or {}) do
@@ -2243,7 +2347,7 @@ end
 -- live L3/L4: hunting without a new hide, bone, leather or shell for trial_days pauses for backoff_days
 local function hunt_book(K, c, r, hunters)
   local p, h = r.p, c.hunt or M.DEFAULTS.hunt
-  if hunters == 0 or r.p.famine then p.hunt = nil; return end
+  if hunters == 0 or r.p.famine or r.p.food_pre then p.hunt = nil; return end
   local inv = r.inv
   local score = (inv.bone or 0) + (inv.hides or 0) + (inv.leather or 0) + (inv.shell or 0)
   if type(p.hunt) ~= 'table' or score > (math.tointeger(p.hunt.score) or 0) then
@@ -2615,11 +2719,14 @@ local function famine(K, c, p, days, inv, r)
   end
   if now - (p.famine.woke or 0) >= 7 * DAY then
     p.famine.woke = now
-    K.emit('DECISION_NEEDED', 'A', string.format('famine: %d food days, %d drink days', fd, dd),
-           {id = 'famine', q = string.format('food %d d (%d eatable, %d cookable, %d raw fish%s), drink %d d: gather, farm, cook, trade?',
-                                             fd, inv.food or 0, inv.cookable or 0, inv.fish_raw or 0,
-                                             ((inv.fish_raw or 0) > 0 and not (r and r.f and r.f['workshop:Fishery']))
-                                               and ': build a fishery' or '', dd):sub(1, 200)})
+    -- Run 11: the blockers (no fishery for the raw fish, why the kitchens cook nothing, no safe fishing water, ...)
+    local bl = M.food_block(K, c, r, inv)
+    local q, opts = M.food_q(fd, r, inv, bl)
+    local ids = {}
+    for _, b in ipairs(bl) do ids[#ids + 1] = b[1] end
+    K.emit('DECISION_NEEDED', 'A', string.format('famine: %d food days, %d drink days%s', fd, dd,
+                                                 bl[1] and (': ' .. bl[1][2]) or ''),
+           {id = 'famine', q = q, food = fd, block = ids, opts = opts})
   end
 end
 
@@ -2673,29 +2780,35 @@ local function food_plan(K, c, r)
          {tpl = 'farms', n = plots, why = 'food'})
 end
 
--- the famine pre-alarm: below pre_days (and not yet a famine) a weekly class-A wake with what the fort has
-local function food_pre(K, c, p, days, inv)
+-- the famine pre-alarm: below pre_days (and not yet a famine) a class-A DECISION_NEEDED food_low with the numbers, what
+-- keeps the food from coming (M.food_block) and the options. Run 11 (BUG-008 cadence, util/cadence): the first at
+-- once, again only with news (a new blocker, or food below 20 days) after max(7 days, 10 min)
+local function food_pre(K, c, p, days, inv, r)
   local fc = c.food
   local fd = days.food_d
   local pre, lim = type(fc) == 'table' and (fc.pre_days or 0) or 0, c.famine_days or 10
   if fd >= pre then
     if p.food_pre then p.food_pre = nil; K.log('info', 'food pre-alarm over: %d food days', fd) end
+    if type(p.food_rep) == 'table' then p.food_rep = CAD.quiet(p.food_rep) end
     return
   end
   if fd < lim then return end                       -- the famine wake (famine_days) speaks now
-  local now = K.now().tick
+  local now = K.now()
   if type(p.food_pre) ~= 'table' then
-    p.food_pre = {since = now, woke = 0}
+    p.food_pre = {since = now.tick, woke = 0}
     K.log('warn', 'food pre-alarm: %d food days (< %d)', fd, pre)
   end
-  if p.food_pre.woke ~= 0 and now - p.food_pre.woke < 7 * DAY then return end
-  p.food_pre.woke = now
-  local f = st.food or {}
-  K.emit('DECISION_NEEDED', 'A', string.format('food low: %d food days (pre-alarm, famine below %d)', fd, lim),
-         {id = 'food_low', q = string.format('food %d d: farms %d/%d tiles%s, fishing zone %s, %d raw fish, %d cookable: ' ..
-                                             'farms, gather/fishing zones, butcher, trade?', fd, f.tiles or 0,
-                                             f.need or 0, f.falling and ' (falling)' or '', st.fishzone and 'yes' or 'no',
-                                             inv.fish_raw or 0, inv.cookable or 0):sub(1, 200)})
+  local bl = M.food_block(K, c, r, inv)
+  local ids = {}
+  for _, b in ipairs(bl) do ids[#ids + 1] = b[1] end
+  local toks = {fd < 20 and 'below20' or 'below30'}
+  for _, id in ipairs(ids) do toks[#toks + 1] = id end
+  if not CAD.due(p.food_rep, now, {}, toks, {ticks = 7 * DAY, wall_s = CAD.WALL_S}) then return end
+  p.food_rep, p.food_pre.woke = CAD.mark(now, {}, toks), now.tick
+  local q, opts = M.food_q(fd, r, inv, bl)
+  K.emit('DECISION_NEEDED', 'A', string.format('food low: %d food days (famine below %d)%s', fd, lim,
+                                               bl[1] and (': ' .. bl[1][2]) or ''),
+         {id = 'food_low', q = q, food = fd, block = ids, opts = opts})
 end
 
 -- autofarm status: one "SPELT limit 50 current 32" line per crop autofarm knows, and "Default: 50"
@@ -2764,8 +2877,7 @@ local function order_ctx(K, c, r)
     return f ~= nil and f.IS_METAL == true
   end
   function ctx.has(key)
-    if key == 'cook' then
-      return (inv.food or 0) - (inv.meals or 0) - (inv.food_nocook or 0) + (inv.cookable or 0) > 0
+    if key == 'cook' then return M.cook_n(inv) > 0
     elseif key == 'fish_raw' then return (inv.fish_raw or 0) > 0 end
     local n = key == 'rock' and stone_free(c, r) or stock_of(r, key)
     if n <= 0 then return false end
@@ -2773,6 +2885,7 @@ local function order_ctx(K, c, r)
   end
   -- BUG-024: a loom waits for collected thread; loose spider webs are none (a weaver must collect them first)
   function ctx.label(key)
+    if key == 'cook' then return M.cook_why(inv, ctx.f) end     -- Run 11: 'no cook' read like a missing cook
     if key ~= 'thread' then return key end
     local w, near = inv.webs or 0, inv.webs_near or 0
     if w == 0 then return 'collected thread' end
@@ -3155,7 +3268,8 @@ function T.watch(K, c, r)
   validation_watch(K, r.p)
   alarm_check(K, c, r.p, r.days)
   famine(K, c, r.p, r.days, r.inv, r)
-  food_pre(K, c, r.p, r.days, r.inv)
+  food_pre(K, c, r.p, r.days, r.inv, r)
+  M.food_unban(K, c, r, r.inv)
 end
 
 function T.cmdq(K, c, r)
@@ -3463,6 +3577,341 @@ function M.glass_route(K, key, via)
   return key == 'gems' and (s .. '; trade.want gem') or s
 end
 
+---------------------------------------------------------------- fishing and the food blockers (Run 11)
+-- Kilrudrabed (site98, y432 winter, pop 54, food 24 days and falling): no meat or fish, no farm soil, both kitchens
+-- without a job (ORDER_STUCK PrepareMeal 'no cook'), nobody fished: the Fisherdwarves detail waits for a fishing zone
+-- and the kernel only read zones; in y433 883-4532 raw fish lay uncleaned because no fishery stood (food fell to 5
+-- days). Module fields, not locals: the main chunk is at Lua's 200-local limit.
+--   fishery  raw fish (>= fish.min) or fishers at work and no fishery built: PROJECT_REQUEST workshops why=fishery
+--            (follow places a workshops project with only the fishery) at most every food.request_days;
+--   zone     while fishers are wanted (food below food.want_days, the food_low pre-alarm or a famine), no fishing zone
+--            stands and the fort is in PEACE/RECOVERY, at most every fishing.scan_days: revealed water around the
+--            citizens' median (fishing.r tiles; the fortcore surface and the level below it, the citizens' levels and
+--            the level below each, at most fishing.levels) through snapshot.liquids (ice listed apart), of depth >=
+--            min_flow, never cavern water (caverns stay sealed) or ice (winter), with a standable bank on the citizens'
+--            walk group (same level, or the level above over open space or a brook top), never on the attack path
+--            (manifest Z1/Z2, killboxes); a roofed bank (inside the walls) first, else the nearest. A side x side zone
+--            `dfllm-fish` (act.fish_zone, the zones screen) over the water, and over the bank's level when it stands
+--            above. None: 'no safe fishing water (n frozen, n cavern, ...)' in the food decisions and kern.log;
+--   decisions food_low (< food.pre_days) and famine name these blockers (M.food_block) with the options.
+M.FISH_STAND = {['.'] = true, r = true, ['<'] = true, ['>'] = true, X = true, ['^'] = true}
+M.N8 = {{-1, -1}, {0, -1}, {1, -1}, {-1, 0}, {1, 0}, {-1, 1}, {0, 1}, {1, 1}}
+
+-- the facts (built workshops) of this run: T.watch runs before T.scan, so they are read here first (T.scan again)
+function M.facts_now(K, r)
+  if type(r.f) ~= 'table' or next(r.f) == nil then r.f = facts(K, r.p) end
+  return r.f
+end
+
+-- a free adult citizen (no soldier) holds labor `ln` (unit labors, the work details' result)
+function M.labor_holder(K, ln)
+  local lid = df.unit_labor and df.unit_labor[ln]
+  if type(lid) ~= 'number' then return true end           -- unknown labor name: not checked
+  local cu = K.census.u
+  local sold = {}
+  for _, id in ipairs(type(cu) == 'table' and cu.soldier_ids or {}) do sold[id] = true end
+  for _, id in ipairs(type(cu) == 'table' and cu.ids or {}) do
+    local u = not sold[id] and df.unit.find(id)
+    if u and dfhack.units.isAdult(u) and labor_on(u, lid) then return true end
+  end
+  return false
+end
+
+function M.fishery_request(K, c, r)
+  local f, p = c.fish, r.p
+  if type(f) ~= 'table' then return end
+  if ws_any(M.facts_now(K, r), f.ws) then p.fishery_req, st.fishery = nil, nil; return end
+  local raw = r.inv.fish_raw or 0
+  local fishing = (st.fishers or 0) > 0
+  if raw < (f.min or 5) and not fishing then st.fishery = nil; return end
+  local every = ((c.food or {}).request_days or 14) * DAY
+  local last = math.tointeger(p.fishery_req)
+  if last and r.now - last < every then st.fishery = 'asked'; return end
+  local okp, pend = K.call('runner', 'pending', 'workshops')
+  if last and r.now - last < 4 * every and okp and (math.tointeger(pend) or 0) > 0 then st.fishery = 'queued'; return end
+  p.fishery_req, st.fishery = r.now, 'asked'
+  local fd = (r.days or {}).food_d or 0
+  K.log('warn', 'fishery: none built, %d raw fish%s, food %d days: request', raw,
+        fishing and ', fishers at work' or '', fd)
+  K.emit('PROJECT_REQUEST', 'B', string.format('workshops: a fishery for %d raw fish (food %d days)', raw, fd),
+         {tpl = 'workshops', n = 1, why = 'fishery'})
+end
+
+-- the search of this run: levels and box around the citizens, or nil (a zone stands, nothing wanted, mode, cadence)
+function M.fish_start(K, c, r)
+  local F, p = c.fishing, r.p
+  if type(F) ~= 'table' or not rawget(K.act, 'fish_zone') then return nil end
+  local spec
+  for _, d in ipairs((c.tools or {}).details or {}) do if d.fish then spec = d end end
+  if not spec then return nil end
+  st.fishzone = fishing_zone()                      -- fish_want reads it again in T.plan
+  if st.fishzone then st.fishz = {zone = true}; return nil end
+  local fd = (r.days or {}).food_d or 9999
+  if not (p.famine or p.food_pre or fd < ((c.food or {}).want_days or 90)) then st.fishz = nil; return nil end
+  local last = type(p.fishz) == 'table' and p.fishz or nil
+  if last then st.fishz = last end
+  if not HUNT_MODES[K.mode()] then return nil end
+  if last and r.now - (math.tointeger(last.t) or 0) < (F.scan_days or 7) * DAY then return nil end
+  local xs, ys, zn = {}, {}, {}
+  for _, id in ipairs(type(K.census.u) == 'table' and K.census.u.ids or {}) do
+    local u = df.unit.find(id)
+    local pos = u and u.pos
+    local x, y, z = pos and math.tointeger(pos.x), pos and math.tointeger(pos.y), pos and math.tointeger(pos.z)
+    if x and y and z and x >= 0 then xs[#xs + 1], ys[#ys + 1], zn[z] = x, y, (zn[z] or 0) + 1 end
+  end
+  if #xs == 0 then return nil end
+  table.sort(xs)
+  table.sort(ys)
+  local fz = {stage = 'read', lv = {}, li = 1, mx = xs[(#xs + 1) // 2], my = ys[(#ys + 1) // 2], water = {}, nw = 0,
+              ice = 0, cav = 0, shallow = 0, nobank = 0, path = 0, checked = 0, wi = 1, found = {}}
+  local seen = {}
+  local function lv(z)
+    if z and z >= 0 and not seen[z] and #fz.lv < (F.levels or 6) then seen[z] = true; fz.lv[#fz.lv + 1] = z end
+  end
+  local o1 = (K.manifest().bridges or {}).O1
+  local fp = type(o1) == 'table' and type(o1.fp) == 'table' and math.tointeger(o1.fp[3])
+  if fp then lv(fp + 2); lv(fp + 1) end                  -- fortcore: the surface is two levels above O1
+  local zl = {}
+  for z, n in pairs(zn) do zl[#zl + 1] = {z, n} end
+  table.sort(zl, function(a, b) if a[2] ~= b[2] then return a[2] > b[2] end return a[1] > b[1] end)
+  fz.mz = zl[1][1]
+  for _, e in ipairs(zl) do lv(e[1]); lv(e[1] - 1) end
+  local R = math.max(4, math.tointeger(F.r) or 48)
+  local okm, X, Y = pcall(dfhack.maps.getTileSize)
+  X, Y = okm and math.tointeger(X) or nil, okm and math.tointeger(Y) or nil
+  fz.box = {math.max(0, fz.mx - R), math.max(0, fz.my - R), X and math.min(X - 1, fz.mx + R) or fz.mx + R,
+            Y and math.min(Y - 1, fz.my + R) or fz.my + R}
+  fz.y = fz.box[2]
+  return fz
+end
+
+-- a bank for the water tile w = {x, y, z}: {water, bank, up} or nil, and the tile reads it took
+function M.fish_bank(K, w)
+  local x, y, z = w[1], w[2], w[3]
+  local n = 1
+  local okt, t = K.call('snapshot', 'tile', x, y, z)
+  if not (okt and type(t) == 'table' and (t.c == 'w' or t.c == '~')) or t.ice or t.cav or t.magma then return nil, n end
+  local function stand(xx, yy, zz)
+    n = n + 1
+    local ok, v = K.call('snapshot', 'tile', xx, yy, zz)
+    return ok and type(v) == 'table' and M.FISH_STAND[v.c] == true and not v.cav and not far(K, xx, yy, zz)
+  end
+  for _, o in ipairs(M.N8) do
+    if stand(x + o[1], y + o[2], z) then return {water = {x, y, z}, bank = {x + o[1], y + o[2], z}}, n end
+  end
+  n = n + 1
+  local oku, up = K.call('snapshot', 'tile', x, y, z + 1)
+  if oku and type(up) == 'table' and not up.cav then
+    if up.c == '_' then
+      for _, o in ipairs(M.N8) do
+        if stand(x + o[1], y + o[2], z + 1) then
+          return {water = {x, y, z}, bank = {x + o[1], y + o[2], z + 1}, up = true}, n
+        end
+      end
+    elseif M.FISH_STAND[up.c] and not far(K, x, y, z + 1) then           -- a brook top over its water
+      return {water = {x, y, z}, bank = {x, y, z + 1}, up = true}, n
+    end
+  end
+  return nil, n
+end
+
+-- a tile on the attack path: manifest zones Z1 (bailey), Z2 (trap hall) and the killboxes
+function M.attack_path(K, q)
+  local man = K.manifest()
+  local function inb(b)
+    return type(b) == 'table' and #b >= 6 and q[1] >= b[1] and q[1] <= b[4] and q[2] >= b[2] and q[2] <= b[5]
+           and q[3] >= b[3] and q[3] <= b[6]
+  end
+  for _, k in ipairs({'Z1', 'Z2'}) do
+    for _, b in ipairs(type(man.zones) == 'table' and type(man.zones[k]) == 'table' and man.zones[k] or {}) do
+      if inb(b) then return true end
+    end
+  end
+  for _, kb in ipairs(type(man.killboxes) == 'table' and man.killboxes or {}) do
+    if type(kb) == 'table' and inb(kb.bbox) then return true end
+  end
+  return false
+end
+
+function M.fish_none(fz)
+  if fz.nw == 0 and fz.ice == 0 and fz.cav == 0 and fz.shallow == 0 then
+    return fz.err and 'no fishing water read' or 'no fishing water revealed'
+  end
+  local parts = {}
+  for _, e in ipairs({{fz.ice, 'frozen'}, {fz.cav, 'cavern'}, {fz.shallow, 'shallow'},
+                      {fz.nobank, 'no bank on the walk group'}, {fz.path, 'on the attack path'}}) do
+    if e[1] > 0 then parts[#parts + 1] = string.format('%d %s', e[1], e[2]) end
+  end
+  return 'no safe fishing water (' .. table.concat(parts, ', ') .. ')'
+end
+
+-- one frame of the search: true when done (the zone painted or the reason kept)
+function M.fish_step(K, c, r)
+  local F, fz, p = c.fishing, r.fz, r.p
+  if fz.stage == 'read' then
+    local b, z = fz.box, fz.lv[fz.li]
+    if not z then fz.stage = 'sort'; return false end
+    local w = b[3] - b[1] + 1
+    local rows = math.max(1, math.min(b[4] - fz.y + 1, (F.tiles or 1500) // w, 4096 // w))
+    local ok, list, err = K.call('snapshot', 'liquids', b[1], fz.y, b[3], fz.y + rows - 1, z, 1, true)
+    if not ok or type(list) ~= 'table' then
+      fz.err, fz.stage = 'snapshot.liquids: ' .. tostring(ok and err or list), 'sort'
+      return false
+    end
+    for _, t in ipairs(list) do
+      if t[5] == 1 then fz.ice = fz.ice + 1
+      elseif t[4] == 1 then fz.cav = fz.cav + 1
+      elseif (math.tointeger(t[3]) or 0) < (F.min_flow or 2) then fz.shallow = fz.shallow + 1
+      elseif fz.nw < (F.max_water or 3000) then
+        fz.nw = fz.nw + 1
+        local d = math.max(math.abs(t[1] - fz.mx), math.abs(t[2] - fz.my)) + 3 * math.abs(z - fz.mz)
+        fz.water[fz.nw] = {t[1], t[2], z, d}
+      end
+    end
+    fz.y = fz.y + rows
+    if fz.y > b[4] then fz.y, fz.li = b[2], fz.li + 1 end
+    return false
+  end
+  if fz.stage == 'sort' then
+    table.sort(fz.water, function(a, b)
+      if a[4] ~= b[4] then return a[4] < b[4] end
+      if a[3] ~= b[3] then return a[3] > b[3] end
+      if a[2] ~= b[2] then return a[2] < b[2] end
+      return a[1] < b[1]
+    end)
+    fz.stage = 'check'
+    return false
+  end
+  if fz.stage == 'check' then
+    local reads, lim = 0, F.checks or 160
+    while fz.wi <= #fz.water and fz.checked < lim and reads < (F.reads or 200) do
+      local w = fz.water[fz.wi]
+      fz.wi = fz.wi + 1
+      local dup = false                      -- the same water body as a bank already found outside
+      for _, s in ipairs(fz.found) do
+        local sw = s.water
+        if sw[3] == w[3] and math.max(math.abs(sw[1] - w[1]), math.abs(sw[2] - w[2])) <= 8 then dup = true end
+      end
+      if not dup then
+        fz.checked = fz.checked + 1
+        local site, n = M.fish_bank(K, w)
+        reads = reads + n
+        if not site then fz.nobank = fz.nobank + 1
+        elseif M.attack_path(K, site.bank) then fz.path = fz.path + 1
+        else
+          local oko, sky = K.call('snapshot', 'outside_near', {site.bank}, 0)
+          site.inside = not (oko and type(sky) == 'table' and sky[1] == 1)
+          if site.inside then fz.best = site; break end
+          fz.found[#fz.found + 1] = site
+        end
+      end
+    end
+    if not fz.best and fz.wi <= #fz.water and fz.checked < lim then return false end
+    fz.stage = 'paint'
+    return false
+  end
+  local site = fz.best or fz.found[1]
+  local rec = {t = r.now, ice = fz.ice, cav = fz.cav}
+  if site then
+    r.cmds = r.cmds + 1
+    local ok, n = K.act.fish_zone(site.water, F.side or 3, site.up == true)
+    local w, bk = site.water, site.bank
+    if ok then
+      rec.at, rec.bank, rec.inside, rec.why = w, bk, site.inside and 1 or 0, 'painted'
+      K.log('info', 'fishing: zone dfllm-fish at %d,%d,%d (%s; bank %d,%d,%d), food %d days', w[1], w[2], w[3],
+            site.inside and 'roofed, inside' or 'open sky', bk[1], bk[2], bk[3], (r.days or {}).food_d or 0)
+    else
+      rec.why = ('fishing zone at %d,%d,%d refused: %s'):format(w[1], w[2], w[3], tostring(n)):sub(1, 80)
+      K.log('warn', 'fishing: %s', rec.why)
+    end
+  else
+    rec.why = M.fish_none(fz)
+    K.log('warn', 'fishing: %s around %d,%d on z %s%s', rec.why, fz.mx, fz.my, table.concat(fz.lv, ','),
+          fz.err and (' (' .. fz.err .. ')') or '')
+  end
+  p.fishz, st.fishz = rec, rec
+  return true
+end
+
+-- daily (before T.watch, so the food decisions name what it found): the fishery request, then the fishing zone search
+-- over frames
+function T.fishz(K, c, r)
+  if not r.day then return true end
+  if not r.fz then
+    M.fishery_request(K, c, r)
+    r.fz = M.fish_start(K, c, r) or false
+    if not r.fz then return true end
+    r.cmds = r.cmds + 1
+    return false
+  end
+  r.cmds = r.cmds + 1
+  return M.fish_step(K, c, r)
+end
+
+-- what keeps food from coming, for the food_low and famine decisions: {{id, text}} by weight
+function M.food_block(K, c, r, inv)
+  local f, out = M.facts_now(K, r), {}
+  local function put(id, txt) out[#out + 1] = {id, txt} end
+  local raw = inv.fish_raw or 0
+  if raw > 0 and not ws_any(f, M.FISHERY) then
+    put('fishery', string.format('build a fishery (%d raw fish%s)', raw,
+                                 (st.fishery == 'asked' or st.fishery == 'queued') and (', ' .. st.fishery) or ''))
+  end
+  if not ws_any(f, {'workshop:Kitchen'}) then put('kitchen', 'no kitchen')
+  elseif M.cook_n(inv) <= 0 then put('cook', 'no ' .. M.cook_why(inv, f))
+  elseif not M.labor_holder(K, 'COOK') then put('cook', 'nobody holds the COOK labor') end
+  if not st.fishzone then
+    local z = st.fishz
+    local why = type(z) == 'table' and type(z.why) == 'string' and z.why ~= 'painted' and z.why or nil
+    put('fish_zone', why or 'no fishing zone')
+  end
+  if hunters_spec(c) and (st.hunters or 0) == 0 then
+    local h = st.hunt or {}
+    if (inv.w_xbow or 0) + (inv.w_bow or 0) == 0 then put('hunt', 'hunt: no crossbow')
+    elseif st.no_ammo or (inv.bolts_free or 0) == 0 then put('hunt', 'hunt: no bolts')
+    elseif h.why == 'mode' then put('hunt', 'hunt: not in ' .. tostring(K.mode())) end
+  end
+  local fs = st.food or {}
+  if (fs.need or 0) > (fs.tiles or 0) then
+    put('farms', string.format('farms %d/%d tiles', fs.tiles or 0, fs.need or 0))
+  end
+  local ca = K.census.a
+  if type(ca) == 'table' and (math.tointeger(ca.n) or 0) > 0 and not ws_any(f, (c.slaughter or {}).ws) then
+    put('butcher', "no butcher's shop")
+  end
+  return out
+end
+
+-- the decision text: numbers, blockers (each names its fix), the player's other options (DECISION_NEEDED q <= 200
+-- bytes); opts = every option, the blockers' first (d.opts)
+M.FOOD_OPTS = {fishery = 'fishery', fish_zone = 'fishing zone', kitchen = 'kitchen', hunt = 'bolts'}
+M.FOOD_MORE = {'trade.want food', 'butcher', 'gather', 'popcap.lower'}
+function M.food_q(fd, r, inv, bl)
+  local parts, opts = {}, {}
+  for _, b in ipairs(bl) do
+    parts[#parts + 1] = b[2]:sub(1, 72)
+    if M.FOOD_OPTS[b[1]] then opts[#opts + 1] = M.FOOD_OPTS[b[1]] end
+  end
+  for _, o in ipairs(M.FOOD_MORE) do opts[#opts + 1] = o end
+  local q = string.format('food %d d (%d cit, %d meals)', fd, r and r.cit or 0, inv.meals or 0) ..
+            (#parts > 0 and (': ' .. table.concat(parts, '; ')) or '')
+  local tail = '. Also: ' .. table.concat(M.FOOD_MORE, ', ')
+  if #q + #tail > 200 then q = q:sub(1, math.max(40, 197 - #tail)) .. '...' end
+  return (q .. tail):sub(1, 200), opts
+end
+
+-- Run 11: cookable growths a kitchen exclusion keeps from the cooks (ban-cooking fruit or the kitchen screen; plump
+-- helmets are no growth and stay banned, D-09) are let go once per food_low/famine episode: ban-cooking fruit --unban
+function M.food_unban(K, c, r, inv)
+  local p = r.p
+  if not (p.famine or p.food_pre) then p.food_unban = nil; return end
+  if p.food_unban or (inv.cook_ban_g or 0) <= 0 then return end
+  p.food_unban = r.now
+  r.cmdq[#r.cmdq + 1] = {'ban-cooking', 'fruit', '--unban'}
+  K.log('warn', 'food %d days: %d cookable plant growths on the kitchen ban: ban-cooking fruit --unban',
+        (r.days or {}).food_d or 0, inv.cook_ban_g)
+end
+
 function T.plan(K, c, r)
   r.cands, r.planned, r.targets, r.route = {}, {}, {}, {}
   for _, key in ipairs({'bone', 'shell'}) do r.targets[key] = target(K, c, r, key) end
@@ -3765,7 +4214,7 @@ function T.ocheck(K, c, r)
       end
       local rec = p.ostuck[key]
       if type(rec) ~= 'table' then rec = {since = r.now}; p.ostuck[key] = rec end
-      rec.why, rec.job = why:sub(1, 80), tostring(job):sub(1, 40)
+      rec.why, rec.job = why:sub(1, 120), tostring(job):sub(1, 40)   -- Run 11: room for the cook ingredients' why
       local days = (r.now - (math.tointeger(rec.since) or r.now)) // DAY
       if days >= (oc.stuck_days or 3) then
         oq.stuck = oq.stuck + 1
@@ -4548,7 +4997,7 @@ function T.finish(K, c, r)
   K.persist.touch('m.economy')
 end
 
-local FULL = {'guard', 'days', 'kitchen', 'appoint', 'food', 'watch', 'cmdq', 'engine', 'labor_fix', 'scan', 'ocheck',
+local FULL = {'guard', 'days', 'kitchen', 'appoint', 'food', 'fishz', 'watch', 'cmdq', 'engine', 'labor_fix', 'scan', 'ocheck',
               'slaughter', 'plan', 'prune', 'tools', 'starve', 'forbid', 'jobs', 'jsite', 'jmat', 'jfree', 'jresume',
               'jcheck', 'jmove', 'pb', 'orders', 'wood', 'chop', 'crops',
               'farm', 'farmslots', 'imports', 'piles', 'status', 'idle', 'finish'}

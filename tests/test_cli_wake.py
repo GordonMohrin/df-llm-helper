@@ -385,6 +385,38 @@ def test_follow_farms_for_food_places_prio1_farms_with_plots(save, monkeypatch):
     assert out == []                                  # class B: no wake line
 
 
+def test_follow_fishery_request_places_only_a_fishery_at_prio1(save, monkeypatch):
+    """Run 11: 883-4532 raw fish lay uncleaned with no fishery and food fell to 5 days. economy's PROJECT_REQUEST
+    workshops why=fishery is placed by follow at once: the workshops template with only the fishery (every moodable
+    type skipped) at prio 1."""
+    calls = install_fake_bp(monkeypatch)
+    from dfpilot.bp.rooms import EXTRA_TYPES, MOODABLE_TYPES
+    assert "Fishery" in EXTRA_TYPES
+    c = Clock()
+    f, out = F(c)
+    f.poll()
+    append_events(save, [ev(8813, "PROJECT_REQUEST", "workshops: a fishery for 883 raw fish (food 5 days)",
+                            {"tpl": "workshops", "n": 1, "why": "fishery"})])
+    f.poll()
+    (snap_cmd,) = inbox_docs(save)
+    assert snap_cmd["verb"] == "snapshot"
+    want = {"add": "Fishery", "skip": ",".join(MOODABLE_TYPES)}
+    assert f.jobs["fishery"]["tpl"] == "workshops" and f.jobs["fishery"]["params"] == want
+    for p in (save / "inbox").glob("*.json"):
+        p.unlink()
+    sid = snap_cmd["id"]
+    snap = json.loads((save / "snap" / "c201.json").read_text("utf-8"))
+    snap["id"] = sid
+    files.write_json_atomic(save / "snap" / f"{sid}.json", snap)
+    append_events(save, [ev(8815, "SNAPSHOT_READY", "", {"id": sid, "path": f"snap/{sid}.json", "purpose": "sites"})])
+    f.poll()
+    (place,) = inbox_docs(save)
+    assert place["verb"] == "bp.place"
+    assert place["args"]["tpl"] == "workshops" and place["args"]["prio"] == 1
+    assert place["args"]["p"]["add"] == "Fishery"
+    assert out == []                                  # class B: no wake line
+
+
 def test_follow_plan_exhausted_p0_autostarts_first_deliverable(save, monkeypatch):
     """Live L0/L1: with no plan the fort idled a year and a dwarf starved. PLAN_EXHAUSTED in P0/P1 places the
     phase's first proj deliverable without a project at once (no LLM); the wake still goes out."""

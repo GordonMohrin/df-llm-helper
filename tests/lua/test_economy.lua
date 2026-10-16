@@ -116,7 +116,11 @@ T.test('raw fish (live L4): with a fishery one PrepareRawFish order; without, th
   T.eq(o2, nil)
   local q
   for _, e in ipairs(W2.find_events('DECISION_NEEDED')) do if e.d.id == 'famine' then q = e.d.q end end
-  T.ok(q and q:find('12 raw fish: build a fishery', 1, true), tostring(q))
+  T.ok(q and q:find('build a fishery (12 raw fish', 1, true), tostring(q))
+  T.ok(#q <= 200 and q:find('Also: trade.want food', 1, true), q)
+  local W3 = run(true)
+  for _, e in ipairs(W3.find_events('DECISION_NEEDED')) do if e.d.id == 'famine' then q = e.d.q end end
+  T.ok(not q:find('build a fishery', 1, true), 'Run 11: a fishery stands (the facts of the last run): ' .. q)
 end)
 
 T.test('census is sliced over frames (per_slice items)', function()
