@@ -3,7 +3,10 @@
 -- Fair play (§1.4, DESIGN §11.1): a tile counts only if revealed; designation.hidden -> '?' in an
 -- export and nil from tile(). Marks: soil (quickfort's farm rule, build.lua:65-81), cavern
 -- (designation.feature_global of revealed tiles, tile-material.lua:255) and sand (Run 11: a revealed soil floor of a
--- sand layer, see M.is_sand; economy's sand collection zone); never water_table or damp.
+-- sand layer, see M.is_sand; economy's sand collection zone); never water_table or damp. Run 11: shrub and sapling
+-- marks (a seal piece cannot stand on a plant: the CLI gathers a shrub first and closes a sapling's route on a
+-- neighbour), the roofed ones first (the ways in of seal's entrance check are roofed tiles), then the open-sky ones up
+-- to marks_max; both lists are always written, so an empty list means none.
 -- An export runs in slices of CFG.slice tiles per frame ('more'; the ms cadence also runs while
 -- paused) and is written to <save>/snap/<id>.json through a .tmp file, then SNAPSHOT_READY (C).
 -- BUG-026 (Run 10: an audit export of 58,608 tiles ran through a caravan visit that was then lost): an export waits
@@ -45,14 +48,15 @@ local SHAPE = {EMPTY = '_', ENDLESS_PIT = '_', TWIG = '_', FLOOR = '.', BOULDER 
 local SOIL_MAT = {SOIL = true, GRASS_LIGHT = true, GRASS_DARK = true, GRASS_DRY = true, GRASS_DEAD = true,
                   PLANT = true}
 local SOIL_SHAPE = {FLOOR = true, SHRUB = true, SAPLING = true}
+local PLANT_SHAPE = {SHRUB = 'shrub', SAPLING = 'sapling'}      -- Run 11: snapshot marks (seal pieces)
 local SOLID = {['#'] = true, S = true, C = true, F = true, T = true}
 local TRAP_CH = {WeaponTrap = 'W', StoneFallTrap = 'S', CageTrap = 'C', PressurePlate = 'P'}
 
--- {c, soil} of a tiletype from df.tiletype.attrs (dig.lua:39-90 reads the same attributes)
+-- {c, soil, plant} of a tiletype from df.tiletype.attrs (dig.lua:39-90 reads the same attributes)
 local function tt_info(tt)
   local r = tt_cache[tt]
   if r then return r end
-  r = {c = '?', soil = false}
+  r = {c = '?', soil = false, plant = false}
   pcall(function()
     local a = df.tiletype.attrs[tt]
     local shape = df.tiletype_shape[a.shape]
@@ -63,7 +67,7 @@ local function tt_info(tt)
       elseif mat == 'TREE' or mat == 'ROOT' or mat == 'MUSHROOM' then c = 'T'
       elseif df.tiletype_special[a.special] == 'SMOOTH' then c = 'S' end
     end
-    r.c, r.soil = c, SOIL_MAT[mat] == true and SOIL_SHAPE[shape] == true
+    r.c, r.soil, r.plant = c, SOIL_MAT[mat] == true and SOIL_SHAPE[shape] == true, PLANT_SHAPE[shape] or false
   end)
   tt_cache[tt] = r
   return r
@@ -171,7 +175,7 @@ local function classify(x, y, z, des, oc, traps, bridges)
       else c = f >= 4 and '~' or 'w' end
     end
   end
-  return c, bld, info.soil
+  return c, bld, info.soil, info.plant
 end
 
 -- pending designation of a revealed tile (quickfort dig.lua:95-101 has_designation)
@@ -524,7 +528,8 @@ local function start(K, j)
   local man = K.manifest()
   j.z, j.y, j.rows, j.cur = j.bbox[3], j.bbox[2], {}, {}
   j.traps = trap_index(j.bbox)
-  j.marks = {soil = {}, cavern = {}, sand = {}}
+  j.marks = {soil = {}, cavern = {}, sand = {}, shrub = {}, sapling = {}}
+  j.sky_plants = {shrub = {}, sapling = {}}       -- open-sky plants, appended after the roofed ones
   j.bridges, j.bstate = {}, {}
   for name, spec in pairs(type(man.bridges) == 'table' and man.bridges or {}) do
     local ok, s, _, gone = K.call('gate', 'state', name)
@@ -594,12 +599,13 @@ local function scan_row(j, y, z)
     local c
     if not des or des.hidden then c = '?'
     else
-      local ch, _bld, soil = classify(x, y, z, des, oc, j.traps, j.bridges)
+      local ch, _bld, soil, plant = classify(x, y, z, des, oc, j.traps, j.bridges)
       c = ch
       if soil and c == '.' then
         add_mark(j.marks.soil, x, y, z)
         if #j.marks.sand < M.SAND_MAX and M.is_sand(x, y, z, des) then add_mark(j.marks.sand, x, y, z) end
       end
+      if plant and c == '.' then add_mark(des.outside and j.sky_plants[plant] or j.marks[plant], x, y, z) end
       if des.feature_global == true then add_mark(j.marks.cavern, x, y, z) end
     end
     out[#out + 1] = c
@@ -621,7 +627,16 @@ local function encode(j)
     return a[1] < b[1]
   end)
   local marks = {}
-  for k, list in pairs(j.marks) do if #list > 0 then marks[k] = list end end
+  for k, list in pairs(j.sky_plants) do
+    local m = j.marks[k]
+    for _, p in ipairs(list) do
+      if #m >= M.CFG.marks_max then break end
+      m[#m + 1] = p
+    end
+  end
+  for k, list in pairs(j.marks) do
+    if #list > 0 then marks[k] = list elseif j.sky_plants[k] then marks[k] = json.array({}) end
+  end
   local head = {v = 2, id = j.id, tick = j.tick, purpose = j.purpose, bbox = j.bbox,
                 bridges = json.object(j.bstate), traps = json.array(traps)}
   if next(marks) then head.marks = marks end

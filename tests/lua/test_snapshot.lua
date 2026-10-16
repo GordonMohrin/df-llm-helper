@@ -190,6 +190,33 @@ T.test('export file: rows, bridges, traps, marks (written by the real io)', func
   T.eq({doc.v, doc.id, doc.purpose}, {2, 'c42', 'audit'})
 end)
 
+T.test('Run 11: shrub and sapling marks, the roofed ones first, empty lists written, capped at marks_max', function()
+  local dir = tmpdir()
+  local W, S = world{dfpath = dir, manifest = false, rows = {'#h.g#', '#ghh#'}}
+  W.tiles['3,1,' .. Z].des.outside = true                -- one shrub under the open sky
+  local function export(WW, id, bbox)
+    local reply = WW.inbox('snapshot', {purpose = 'audit', bbox = bbox}, {id = id, by = 'cli'})
+    T.eq(reply.ok, true)
+    for _ = 1, 10 do WW.frame(0, true) end
+    local f = assert(io.open(dir .. '/dfllm-runtime/mock/' .. written(WW, id).d.path, 'rb'))
+    local raw = f:read('a')
+    f:close()
+    return json.decode(raw), raw
+  end
+  local doc = export(W, 'c50', {0, 0, Z, 4, 1, Z})
+  T.eq(doc.rows['z' .. Z], {'#...#', '#...#'}, 'plants stay floor in the legend')
+  T.eq(doc.marks.shrub, {{1, 0, Z}, {2, 1, Z}, {3, 1, Z}}, 'the roofed shrubs first, then the open-sky one')
+  T.eq(doc.marks.sapling, {{3, 0, Z}, {1, 1, Z}})
+  W.tiles['1,0,' .. Z].des.outside = true
+  S.CFG.marks_max = 2
+  doc = export(W, 'c51', {0, 0, Z, 4, 1, Z})
+  S.CFG.marks_max = 500
+  T.eq(doc.marks.shrub, {{2, 1, Z}, {1, 0, Z}}, 'the roofed one wins the cap')
+  local W2 = world{dfpath = dir, manifest = false, rows = {'#..#'}}
+  local _, raw = export(W2, 'c52', {0, 0, Z, 3, 0, Z})
+  T.ok(raw:find('"shrub":[]', 1, true) and raw:find('"sapling":[]', 1, true), 'no plants: empty lists ' .. raw)
+end)
+
 T.test('the manifest bridge footprint follows gate.state (H up, = otherwise)', function()
   local dir = tmpdir()
   local W = world{bridge = 'down', dfpath = dir}

@@ -68,8 +68,13 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
         "QUICKSAVE_FAILED": "tell Gordon at once (the game is not saved); dfllm save again in 2 min or Esc > Save",
         "GHOSTS": "dfllm cmd inspect '{\"what\":\"tombs\"}', then tombs.repair",
         # FR-65: R0 in PEACE; close the listed ways in, build the missing fortcore pieces, then re-audit
-        "SIEGE_UNREADY": "dfllm cmd inspect '{\"what\":\"entrances\"}'; wall/door each open way in (bp.place); "
-                         "then dfllm audit",
+        "SIEGE_UNREADY": "dfllm cmd inspect '{\"what\":\"entrances\"}'; dfllm cmd bp.place tpl=seal site=S1 at=last "
+                         "(a door per open way in); then dfllm audit",
+        # Run 11: seal at=last reads SEAL_LEAK (a wall per leak) and REFUGE_FAIL (its open entrances) too
+        "SEAL_LEAK": "dfllm cmd inspect '{\"what\":\"entrances\"}'; dfllm cmd bp.place tpl=seal site=S1 at=last "
+                     "(walls); tell Gordon",
+        "REFUGE_FAIL": "dfllm cmd inspect '{\"what\":\"refuge\"}'; dfllm cmd bp.place tpl=seal site=S1 at=refuge "
+                       "(its stair hatch and the line's tiles); next plan: refuge pieces first",
         "HOSPITAL_DRY": "dfllm cmd inspect '{\"what\":\"water_sources\"}'",
         "MOOD_RISK": "dfllm brief; supply the missing class (never cancel the mood)",
         # FR-64: >= 2 citizens dehydrated or starved within a month: access, not supply, as a rule

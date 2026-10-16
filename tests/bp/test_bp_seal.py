@@ -32,6 +32,8 @@ def test_one_piece_per_opening():
     with pytest.raises(ValueError, match="only a hatch"):
         pieces("95,127,123 stair_up wall")
     with pytest.raises(ValueError, match="no piece for this tile kind"):
+        pieces("1,2,3 wall")
+    with pytest.raises(ValueError, match="name the neighbouring tile"):       # Run 11: the CLI finds the neighbour
         pieces("1,2,3 Door")
     with pytest.raises(ValueError, match="split them"):
         pieces(";".join(f"{x},1,1 floor" for x in range(7)))

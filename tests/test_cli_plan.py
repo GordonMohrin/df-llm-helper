@@ -677,7 +677,9 @@ def test_refuge_projects_under_way(save, base):
                 "defense": 0, "chunks": [{"pos": [52, 30, 120], "cells": [[0, 0, 0, "d"]]}]}],
                 "manifest": {"v": 2}, "materials": {}}
     f = plan.fort_facts(save, state)["refuge"]
-    assert f == {"stage3": False, "beds": 0, "seal": False, "fortcore": True, "ents": 0}   # fixture: fortcore at s2
+    assert f == {"stage3": False, "beds": 0, "seal": False, "fortcore": True, "ents": 0,   # fixture: fortcore at s2
+                 "seal_n": 0, "refuge_n": 0, "open": [], "burrow": "", "head": None, "head_open": False,
+                 "bed_site": None}
     assert plan.fort_facts(save, {**state, "proj": []})["refuge"]["fortcore"] is False
     cmd.write_bp(save, stub("c1", "fortcore", {"stage": 3, "depth": 3, "refuge": 3, "beds": 8, "retrofit": 0}))
     cmd.write_bp(save, stub("c2", "refuge_beds", {"n": 12, "burrow": "Tiefe+"}))
@@ -691,6 +693,46 @@ def test_refuge_projects_under_way(save, base):
     assert (f["stage3"], f["beds"]) == (False, 12)                       # done: its beds count in alert.ref now
     f = plan.fort_facts(save, {**state, "proj": [["fortcore", "s3.dig", 10, ""]]})["refuge"]
     assert f["stage3"] is True                                           # adopt's fortcore project, stage 3 running
+
+
+def test_fort_facts_read_the_refuge_fail_and_the_seal_count(save, base):
+    """Run 11: fort.refuge.open/burrow from a current REFUGE_FAIL, seal_n = what `seal at=last` would close now."""
+    _, state = base
+    refused = dict(with_refuge(state), alert={"want": "Kern+", "burrow": "Innen+", "tiles": 90, "inside": 4, "ok": 0,
+                                              "ref": {"ex": 1, "sep": 1, "beds": 13, "need": 13}})
+    append_events(save, [ev(8813, "REFUGE_FAIL", "alert burrow Kern+ refused", {
+        "burrow": "Kern+", "fallback": "Innen+", "why": "open to 1 entrance 127,121,143 Door (62 steps)",
+        "open": ["127,121,143 Door"]}), ev(8814, "SIEGE_UNREADY", "siege unready", {
+        "fails": ["bypass"], "routes": 2, "open": 2, "ents": ["188,103,144 floor", "125,103,144 floor"]})])
+    f = plan.fort_facts(save, refused)["refuge"]
+    assert (f["open"], f["burrow"], f["seal_n"]) == (["127,121,143 Door"], "Kern+", 2)  # the door: no snapshot there
+    assert plan.fort_facts(save, with_refuge(state))["refuge"]["open"] == []           # the alert's burrow passes now
+
+
+def test_refuge_stair_head_needs_its_hatch(base):
+    """BUG-031: fortcore's Tiefe+ hangs below Kern+ on the civilians' stair without a closer. While `seal at=refuge`
+    would put a hatch on the stair head (fort.refuge.head_open), the plan needs a seal that does (at=refuge/all or the
+    tile), no later than its first other new build; propose drafts it first."""
+    prev, state = base
+    s1 = dict(with_refuge(state), phase="P1")
+    fort = {"refuge": {"head": "50,65,3 stair_updown", "head_open": True, "refuge_n": 1, "seal_n": 0}}
+    doc = copy.deepcopy(prev)
+    doc["phase_target"] = "P1"
+    doc["seasons"][1]["build"].append({"tpl": "dining", "site": "S1"})
+    (e,), _ = _ref(errs_of(doc, s1, prev=prev, fort=fort))
+    assert e == ("refuge: the civilians' stair enters Tiefe+ below 50,65,3 without a hatch (whatever reaches Kern+ "
+                 "reaches it, BUG-031); the refuge comes first (Run 11): adding builds (dining) waits for it: add "
+                 '{"tpl":"seal","site":"S1","p":{"at":"refuge"}} (the hatch at its stair head and the REFUGE_FAIL tiles)')
+    for at, ok in (("refuge", True), ("all", True), ("50,65,3 stair_updown", True), ("last", False)):
+        d = copy.deepcopy(doc)
+        d["seasons"][1]["build"].insert(len(prev["seasons"][1]["build"]), {"tpl": "seal", "site": "S1", "p": {"at": at}})
+        assert (_ref(errs_of(d, s1, prev=prev, fort=fort))[0] == []) is ok, at
+    phases = json.loads((FIX / "phases.json").read_text("utf-8"))
+    tinfo = {t: {"params": {"stage": 1} if t == "fortcore" else {}, "about": ""}
+             for t in ("fortcore", "tombs", "temple", "seal", "refuge_beds", "stockroom")}
+    got = plan.propose(dict(with_refuge(state)), phases, prev, decisions={}, tinfo=tinfo, fort=fort)
+    assert got["seasons"][1]["build"][len(prev["seasons"][1]["build"])] == {"tpl": "seal", "site": "S1",
+                                                                            "p": {"at": "refuge"}}
 
 
 def test_propose_drafts_the_refuge_first(save, base):
@@ -731,5 +773,81 @@ def test_propose_drafts_the_refuge_first(save, base):
         ph["approve"] = ph["id"] >= "P3"
     s1 = dict(beds, phase="P1")
     doc = plan.propose(s1, early, prev, decisions={}, tinfo=tinfo, fort=fort)
-    assert doc["phase_target"] == "P2" and not any(b["tpl"] == "refuge_beds" for se in doc["seasons"]
-                                                   for b in se["build"])
+    # Run 11: from the fort's start the refuge pieces come before the P1/P2 work (old code: none below P3)
+    assert doc["phase_target"] == "P2" and new(doc)[0] == {"tpl": "refuge_beds", "site": "S1", "p": {"n": 20}}
+    assert _ref(errs_of(doc, s1, prev=prev, fort=fort)) == ([], [])
+    nosite = {"refuge": dict(fort["refuge"], bed_site=False)}         # no refuge room yet: no refuge_beds, a warning
+    doc = plan.propose(s1, early, prev, decisions={}, tinfo=tinfo, fort=nosite)
+    assert not any(b["tpl"] == "refuge_beds" for se in doc["seasons"] for b in se["build"])
+    assert _ref(errs_of(doc, s1, prev=prev, fort=nosite)) == ([], [
+        "refuge: Tiefe+ has 8 beds < 28; no refuge room takes refuge_beds yet (fortcore stage 3 builds it; dfllm bp "
+        "sites refuge_beds)"])
+    # below P3 no refuge burrow is no gate (fortcore stage 3 belongs to P5)
+    none1 = dict(with_refuge(state, ex=0, sep=-1, beds=0), phase="P1")
+    doc = plan.propose(none1, early, prev, decisions={}, tinfo=tinfo, fort=fort)
+    assert STAGE3 not in [b for se in doc["seasons"] for b in se["build"]]
+    assert _ref(errs_of(doc, none1, prev=prev, fort=fort)) == ([], [])
+    # the open door of a current REFUGE_FAIL (Run 11: `Kern+: open to 1 entrance 127,121,143 Door`): the seal first
+    opened = {"refuge": dict(fort["refuge"], open=["127,121,143 Door"], burrow="Kern+", seal_n=1)}
+    doc = plan.propose(dict(with_refuge(state), phase="P1"), early, prev, decisions={}, tinfo=tinfo, fort=opened)
+    assert new(doc)[0] == {"tpl": "seal", "site": "S1", "p": {"at": "last"}}
+
+
+def test_refuge_gate_from_the_forts_start(base):
+    """Run 11 (Kilrudrabed, y429, pop 54): the refuge stood open and short of beds while the plans went on with P1
+    work. Below P3, once the refuge burrow exists, a plan that raises phase_target or adds builds is refused until its
+    refuge pieces come no later than its first other new build (old code: no refuge check below P3)."""
+    prev, state = base
+    s1 = dict(with_refuge(state, sep=0), phase="P1")
+    want = "the refuge comes first (Run 11): adding builds (dining) waits for it"
+    doc = copy.deepcopy(prev)
+    doc["phase_target"] = "P1"
+    doc["seasons"][1]["build"].append({"tpl": "dining", "site": "S1"})
+    seal_err = (f"refuge: an opening reaches Tiefe+ without a door (dfllm cmd inspect what=refuge: `open`); {want}: "
+                'add {"tpl":"seal","site":"S1","p":{"at":"last"}} (doors on the open ways in) or wall it')
+    assert _ref(errs_of(doc, s1, prev=prev)) == ([seal_err], [])
+    nothing = copy.deepcopy(prev)
+    nothing["phase_target"] = "P1"                                        # adds nothing, raises nothing: a warning
+    (w,) = _ref(errs_of(nothing, s1, prev=prev))[1]
+    assert w.startswith("refuge: an opening reaches Tiefe+ without a door") and "the refuge comes first (Run 11):" in w
+    first = copy.deepcopy(doc)
+    first["seasons"][1]["build"].insert(len(prev["seasons"][1]["build"]), {"tpl": "seal", "site": "S1"})
+    assert _ref(errs_of(first, s1, prev=prev)) == ([], [])
+    later = copy.deepcopy(doc)
+    later["seasons"][2]["build"].append({"tpl": "seal", "site": "S1"})
+    (e,), _ = _ref(errs_of(later, s1, prev=prev))
+    assert e == seal_err + " (planned in seasons[2]: move it to seasons[1], before the other new builds)"
+    audit_only = copy.deepcopy(doc)
+    audit_only["seasons"][1]["build"].append({"tpl": "seal", "site": "S1", "p": {"at": "audit"}})
+    assert _ref(errs_of(audit_only, s1, prev=prev))[0] == [seal_err]    # at=audit walls the audit's routes only
+    assert _ref(errs_of(doc, s1, prev=prev, fort={"refuge": {"seal": True}})) == ([], [])   # one under way
+    # `seal at=last` finds nothing to close now (pending, built, no closable tile): a warning, no build can fix it
+    errs, warn = _ref(errs_of(doc, s1, prev=prev, fort={"refuge": {"seal_n": 0}}))
+    assert errs == [] and warn == ["refuge: an opening reaches Tiefe+ without a door (dfllm cmd inspect what=refuge: "
+                                   "`open`); `seal at=last` finds nothing to close now (pending, built or no closable "
+                                   "tile: dfllm cmd inspect what=refuge, what=entrances)"]
+    # one under way but `seal at=last` still finds openings it does not cover: a new seal
+    assert _ref(errs_of(doc, s1, prev=prev, fort={"refuge": {"seal": True, "seal_n": 2}}))[0] == [seal_err]
+    # a current REFUGE_FAIL names the open door of the alert's burrow (Tiefe+ itself separated)
+    rf = {"refuge": {"open": ["127,121,143 Door"], "burrow": "Kern+", "seal_n": 1}}
+    (e,), _ = _ref(errs_of(doc, dict(with_refuge(state), phase="P1"), prev=prev, fort=rf))
+    assert e.startswith(f"refuge: Kern+ is open to 127,121,143 Door (REFUGE_FAIL); {want}: add ")
+    # beds short: refuge_beds first, unless no refuge room takes them yet
+    b1 = dict(with_refuge(state, beds=4, need=14), phase="P1")
+    (e,), _ = _ref(errs_of(doc, b1, prev=prev))
+    assert e == f'refuge: Tiefe+ has 4 beds < 14; {want}: add {{"tpl":"refuge_beds","site":"S1","p":{{"n":10}}}}'
+    assert _ref(errs_of(doc, b1, prev=prev, fort={"refuge": {"bed_site": False}}))[0] == []
+    beds = copy.deepcopy(doc)
+    beds["seasons"][1]["build"].append({"tpl": "refuge_beds", "site": "S1", "p": {"n": 10}})
+    assert _ref(errs_of(beds, b1, prev=prev)) == ([], [])
+    # raising phase_target without builds is P1 work going on too
+    up = copy.deepcopy(prev)
+    up["phase_target"] = "P2"
+    (e,), _ = _ref(errs_of(up, b1, prev=prev))
+    assert "the refuge comes first (Run 11): raising phase_target P1 -> P2 waits for it" in e
+    # P3+: the pieces may not come after the plan's other new builds either
+    late = copy.deepcopy(prev)
+    late["seasons"][1]["build"].append({"tpl": "tombs", "site": "S1"})
+    late["seasons"][2]["build"].append({"tpl": "refuge_beds", "site": "S1", "p": {"n": 10}})
+    (e,), _ = _ref(errs_of(late, with_refuge(state, beds=4, need=14), prev=prev))
+    assert e.endswith("(planned in seasons[2]: move it to seasons[1], before the other new builds)")

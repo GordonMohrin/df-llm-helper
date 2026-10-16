@@ -157,13 +157,26 @@ def site_problem(at, X) -> str:
 #   grate (grate) or floor bars (bars); it cuts the ramp's way up and down;
 # * stair: a hatch on the stair tile (it closes the stair's floor, i.e. the way down from it; a way up is closed by
 #   naming the tile above). Walls cannot stand on stairs.
+# Run 11 (Kilrudrabed): no piece stands on a plant. A shrub gets the player's gather-plants designation first
+# (quickfort #dig `p`, stage seal.clear), its piece follows in stage seal.plant; a tree tile the route crosses (branch,
+# trunk_branch, twig) gets the chop designation (`t`): the felled tree takes the walkable branches with it, no piece.
+# A sapling is no tree yet (quickfort's `t` marks tree tiles only, and no player designation removes a sapling), a
+# door or hatch already stands on its opening, or another building does: the CLI (cmd.seal_openings) puts the piece on
+# the neighbouring tile that closes the same route (bp.topo.SealGeo) and names the opening with `for=x,y,z:kind`; an
+# open route without a roofed tile (SEAL_LEAK) gets a wall on the route's first tile that cuts it from the map edge.
 # Doors and hatches only matter to the lockdown (seal's entrance check counts them); the worst-case audit counts
 # only walls and raised bridges, so a bypass the audit names gets `wall` (topo.audit says where).
-# Params: at = 'x,y,z[ kind[ piece]];...' (absolute tiles, at most SEAL_MAX), close = the default piece. The CLI fills
-# missing kinds from the newest snapshot and expands at=last (cmd.seal_openings). Site: the first tile (any rot).
-FLOORISH_KINDS = frozenset({"floor", "boulder", "pebbles", "shrub", "sapling", "twig", "brook_top", "branch",
-                            "trunk_branch", "passable"})
+# Params: at = 'x,y,z[ kind[ piece]][ for=x,y,z:kind];...' (absolute tiles, at most SEAL_MAX), close = the default
+# piece. The CLI fills missing kinds from the newest snapshot and expands at=last (cmd.seal_openings). Site: the first
+# tile (any rot).
+FLOORISH_KINDS = frozenset({"floor", "boulder", "pebbles", "brook_top", "passable"})
+GATHER_KINDS = frozenset({"shrub"})                       # gather plants (`p`) first, then the piece
+CHOP_KINDS = frozenset({"branch", "trunk_branch", "twig"})   # chop the tree (`t`): its branches go, no piece
 STAIR_KINDS = frozenset({"stair", "stair_up", "stair_down", "stair_updown"})
+CLOSER_KINDS = frozenset({"door", "hatch", "floodgate", "gratewall", "barsvertical"})   # closed already (lockdown)
+NO_PIECE = frozenset({"none", "empty", "wall", "fortification", "ramp_top", "brook_bed", "endless_pit", "bridge",
+                      "hidden", "?", ""})
+OPEN_ROUTE = "open"                                       # SEAL_LEAK: an open route without a roofed tile
 PIECES = ("door", "wall", "hatch", "grate", "bars")
 CLOSE = ("auto",) + PIECES
 SEAL_MAX = 6
@@ -171,43 +184,85 @@ CHAR_KIND = {".": "floor", "r": "ramp", "<": "stair_up", ">": "stair_down", "X":
 # piece -> quickfort #build key on a floor tile / on a ramp top
 FLOOR_KEY = {"door": "d", "wall": "Cw", "grate": "W", "bars": "B"}
 RAMP_KEY = {"wall": "Cw", "grate": "G", "bars": "~b"}
+FOR_WHY = {"sapling": "no piece and no player designation takes a sapling",
+           OPEN_ROUTE: "the first tile that cuts the route from the map edge"}
+
+
+def for_why(kind: str) -> str:
+    """Why a neighbour carries the piece for an opening of this kind (the seal:piece line)."""
+    if kind == OPEN_ROUTE:
+        return FOR_WHY[OPEN_ROUTE]
+    why = FOR_WHY.get(kind) or (f"the route passes beside the {kind}" if kind in CLOSER_KINDS
+                                else f"a {kind} stands on the opening")
+    return "the neighbour on the same route: " + why
+
+
+def piece_kind(kind: str) -> bool:
+    """A tile kind a seal piece is built on (or cleared for) directly."""
+    return kind in FLOORISH_KINDS or kind in GATHER_KINDS or kind in CHOP_KINDS or kind in STAIR_KINDS \
+        or kind == "ramp"
+
+
+def needs_neighbour(kind: str) -> bool:
+    """An opening whose own tile takes no piece but whose route a neighbour can close: a sapling, a door/hatch the
+    route passes beside, another building on it, an open route (SEAL_LEAK)."""
+    return not piece_kind(kind) and kind not in NO_PIECE
+
+
+def _pos(text: str, what: str) -> list[int]:
+    try:
+        pos = [int(c) for c in text.split(",")]
+        if len(pos) != 3:
+            raise ValueError
+    except ValueError:
+        raise ValueError(f"seal.at: bad {what} {text!r} (want 'x,y,z[ kind[ piece]][ for=x,y,z:kind];...')") \
+            from None
+    return pos
 
 
 def parse_openings(text: str) -> list[dict]:
-    """'x,y,z[ kind[ piece]];...' -> [{pos, kind, piece}] (kind/piece '' when not given)."""
+    """'x,y,z[ kind[ piece]][ for=x,y,z:kind];...' -> [{pos, kind, piece, of, of_kind}] (kind/piece '' when not
+    given; of = the opening a neighbour's piece closes, None for the opening's own tile)."""
     out = []
     for part in str(text or "").split(";"):
         toks = part.split()
         if not toks:
             continue
-        try:
-            pos = [int(c) for c in toks[0].split(",")]
-            if len(pos) != 3:
-                raise ValueError
-        except ValueError:
-            raise ValueError(f"seal.at: bad tile {toks[0]!r} (want 'x,y,z[ kind[ piece]];...')") from None
-        kind = toks[1].lower() if len(toks) > 1 else ""
-        piece = toks[2].lower() if len(toks) > 2 else ""
+        pos = _pos(toks[0], "tile")
+        rest, of, of_kind = [], None, ""
+        for t in toks[1:]:
+            if t.lower().startswith("for="):
+                tile, _, of_kind = t[4:].partition(":")
+                of, of_kind = _pos(tile, "for= tile"), of_kind.lower()
+            else:
+                rest.append(t.lower())
+        kind = rest[0] if rest else ""
+        piece = rest[1] if len(rest) > 1 else ""
         if piece and piece not in PIECES:
             raise ValueError(f"seal.at: {toks[0]}: piece {piece!r} not one of {list(PIECES)}")
-        out.append({"pos": pos, "kind": kind, "piece": piece})
+        out.append({"pos": pos, "kind": kind, "piece": piece, "of": of, "of_kind": of_kind})
     if len(out) > SEAL_MAX:
         raise ValueError(f"seal.at: {len(out)} openings > {SEAL_MAX}; split them over several seal projects")
     return out
 
 
 def format_openings(ops) -> str:
-    return ";".join(" ".join(x for x in ("%d,%d,%d" % tuple(o["pos"]), o.get("kind", ""), o.get("piece", "")) if x)
-                    for o in ops)
+    def one(o):
+        of = o.get("of")
+        tail = "for=%d,%d,%d:%s" % (tuple(of) + (o.get("of_kind") or "?",)) if of else ""
+        return " ".join(x for x in ("%d,%d,%d" % tuple(o["pos"]), o.get("kind", ""), o.get("piece", ""), tail) if x)
+    return ";".join(one(o) for o in ops)
 
 
 def seal_pieces(p: dict, anchor=None) -> list[dict]:
-    """[{pos (opening), at (the piece's tile), key, piece, kind, why}] for the seal params (raises ValueError)."""
+    """[{pos (opening or the neighbour), at (the piece's tile), key (#build key, '' for none), piece, kind, clear (the
+    #dig key that clears the tile first: `p` gather a shrub, `t` chop a tree; ''), of (the opening a neighbour closes,
+    or None), why}] for the seal params (raises ValueError)."""
     ops = parse_openings(p.get("at", ""))
     if not ops:
         if anchor is None:
             raise ValueError("seal: name the openings (at=x,y,z;...) or at=last")
-        ops = [{"pos": list(anchor), "kind": "floor", "piece": ""}]
+        ops = [{"pos": list(anchor), "kind": "floor", "piece": "", "of": None, "of_kind": ""}]
     close = p.get("close", "auto")
     if close not in CLOSE:
         raise ValueError(f"seal.close: {close!r} not one of {list(CLOSE)}")
@@ -217,9 +272,14 @@ def seal_pieces(p: dict, anchor=None) -> list[dict]:
         kind = o["kind"] or "floor"
         want = o["piece"] or ("auto" if close == "auto" else close)
         where = "%d,%d,%d %s" % (x, y, z, kind)
-        if kind in FLOORISH_KINDS:
+        clear, note = "", ""
+        if kind in CHOP_KINDS:
+            piece, at, key, clear = "chop", (x, y, z), "", "t"
+        elif kind in FLOORISH_KINDS or kind in GATHER_KINDS:
             piece = "door" if want in ("auto", "hatch") else want
             at, key = (x, y, z), FLOOR_KEY[piece]
+            if kind in GATHER_KINDS:
+                clear, note = "p", "gather the shrub, then "
         elif kind == "ramp":
             if want == "door":
                 raise ValueError(f"seal: {where}: a ramp cannot carry a door; use wall, grate or bars (on the ramp top)")
@@ -230,27 +290,54 @@ def seal_pieces(p: dict, anchor=None) -> list[dict]:
                 raise ValueError(f"seal: {where}: a stair takes only a hatch (name the floor beside it for a "
                                  f"{want})")
             piece, at, key = "hatch", (x, y, z), "H"
+        elif needs_neighbour(kind):
+            raise ValueError(f"seal: {where}: no piece stands there; name the neighbouring tile that closes the "
+                             "route (dfllm cmd bp.place tpl=seal at=last finds it on the snapshot)")
         else:
             raise ValueError(f"seal: {where}: no piece for this tile kind (a floor, ramp or stair tile)")
         if at in seen:
             continue
         seen.add(at)
-        out.append({"pos": [x, y, z], "at": list(at), "key": key, "piece": piece, "kind": kind,
-                    "why": f"{where}: {piece} at {at[0]},{at[1]},{at[2]}" + (" (the ramp top)" if kind == "ramp"
-                                                                             else "")})
+        if piece == "chop":
+            why = f"{where}: chop the tree there (its branches go with it; no piece)"
+        else:
+            why = f"{where}: {note}{piece} at {at[0]},{at[1]},{at[2]}" + (" (the ramp top)" if kind == "ramp" else "")
+        of = o.get("of")
+        if of:
+            ok = o.get("of_kind") or "?"
+            why = "%d,%d,%d %s: %s at %d,%d,%d (%s)" % (*of, "open route" if ok == OPEN_ROUTE else ok, piece, *at,
+                                                       for_why(ok))
+        out.append({"pos": [x, y, z], "at": list(at), "key": key, "piece": piece, "kind": kind, "clear": clear,
+                    "of": list(of) if of else None, "why": why})
     return out
 
 
 def seal(p: dict, anchor, rot: int) -> Plan:
     """Close open ways in: a door on a floor, a wall on a ramp top, a hatch on a stair (or wall/grate/bars;
-    absolute tiles from `inspect entrances`, SIEGE_UNREADY or the audit; at=last in dfllm cmd)."""
+    absolute tiles from `inspect entrances`, SIEGE_UNREADY, SEAL_LEAK or the audit; at=last in dfllm cmd). Stages:
+    seal.build (the pieces on clear tiles), seal.clear (gather/chop designations, Run 11), seal.plant (the pieces on
+    the tiles seal.clear cleared)."""
     P = Plan("seal", "defense")
-    b = P.stage("seal.build", "build", orders=1, defense=1)
     ax, ay, az = anchor
-    for pc in seal_pieces(p, anchor):
+    pcs = seal_pieces(p, anchor)
+
+    def put(stage, pc, key):
         x, y, z = pc["at"]
         u, v = rot_uv(x - ax, y - ay, (4 - rot) % 4)      # emit rotates by rot: the piece lands on (x, y)
-        b.tile(u, v, z - az, pc["key"])
+        stage.tile(u, v, z - az, key)
+    b = P.stage("seal.build", "build", orders=1, defense=1)
+    for pc in pcs:
+        if pc["key"] and not pc["clear"]:
+            put(b, pc, pc["key"])
+    if any(pc["clear"] for pc in pcs):
+        c = P.stage("seal.clear", "dig", defense=1)
+        for pc in pcs:
+            if pc["clear"]:
+                put(c, pc, pc["clear"])
+        b2 = P.stage("seal.plant", "build", orders=1, defense=1)
+        for pc in pcs:
+            if pc["clear"] and pc["key"]:
+                put(b2, pc, pc["key"])
     return P
 
 

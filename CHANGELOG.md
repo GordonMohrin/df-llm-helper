@@ -1,5 +1,70 @@
 # CHANGELOG dfpilot
 
+## `seal at=last` takes the current leaks once each, plants and doors handled; `seal at=refuge` hatches the refuge stair; the refuge comes first from the fort's start (2026-10-16; offline, live-untested)
+- **Why (Run 11, Kilrudrabed y429, pop 54):** `bp.place tpl=seal at=all|last` gave the same door 125,103,144 on every
+  repetition (its seal was pending, then the entrance check reused an old answer) and never the new leaks: 188,103,144
+  floor, 124,81,138 'open route without a roofed tile', shrubs/saplings at 188,88,144 and 177,99,144 (no door stands on
+  a plant). REFUGE_FAIL `Kern+: open to 1 entrance 127,121,143 Door (62 steps)` stood while the plans went on with P1
+  work; the refuge rule of `plan check`/`propose` started at P3.
+- **`seal at=last|all` (`cmd.current_openings`, `cmd.seal_openings`):** the openings come from the newest SEAL_LEAK
+  (unless a newer SEAL check read the fort sealed; a wall, since walk groups pass doors), the entrance check (newest
+  SIEGE_UNREADY `ents`, else `ready.ents`; BUG-031 lists the doorless tiles beside a door there) and a current
+  REFUGE_FAIL's `fix` as given (else its `open`; while `alert.ok` 0 or `alert.ref.sep` 0), one per tile. Left out, like
+  `at=audit` already did: openings a seal project builds (not done) or built (done, unless a snapshot taken after it
+  shows the piece gone). At most 6 per seal; the next `at=last` takes the rest. One `seal:note` line per opening left
+  out or moved (cli.log, and `  seal note:` on stdout of `dfllm cmd`).
+- **Plants and doors (fair play: player designations only, never DFHack `plant remove`):** a shrub gets quickfort's
+  gather-plants designation (`#dig p`, stage `seal.clear`) and its piece after it (stage `seal.plant`); a tree tile
+  (branch, trunk_branch, twig) the chop designation (`t`, no piece: the felled tree takes the branches). A sapling is no
+  tree yet (quickfort's `t` marks tree tiles only; no player designation removes it), so like a door/hatch the route
+  passes beside, or another building on the opening, it gets the neighbouring tile that closes the same route
+  (`bp.topo.SealGeo.neighbour`, written `N floor for=O:kind`). An open route without a roofed tile gets a wall on the
+  first of its first 8 floor/ramp tiles to the snapshot border that cuts the citizen's side (with >= 12 roofed tiles,
+  the fort) from the border (`SealGeo.route`; a citizen in the open field gets none). A door that closes its doorway on
+  the snapshot (a SEAL_LEAK through a door) is left out with a note: a wall there would close the fort's own way.
+- **`seal at=refuge` (BUG-031 open point):** fortcore's Tiefe+ hangs below Kern+ on the civilians' stair without a door
+  or hatch, so whatever reaches Kern+ reaches it. `at=refuge` puts a hatch on that stair one level above the refuge
+  (`cmd.refuge_head`: manifest refuge anchor + `stairs.civ`; seal's refuge flood counts a hatch as a closer, walkers
+  pass it) and adds the current REFUGE_FAIL's `fix` tiles; `at=all` includes the stair head. Offline: with the hatch the
+  core's landing no longer reaches the refuge anchor with doors and hatches closed.
+- **Kernel (snapshot.lua, minimal):** snapshot marks `shrub` and `sapling` (plant tiles; the roofed ones first, then the
+  open-sky ones up to 500; both always written). Without them (an older kernel) the entrance check's kinds stand.
+- **`dfllm plan check`/`propose` (refuge gate, from the fort's start):** once the refuge burrow exists (`alert.ref.ex`),
+  below P3 too: a plan that raises phase_target or adds builds is refused (ERROR) until the seal and the missing
+  `refuge_beds` come no later than its first other new build (at P3+ the same ordering); a plan that adds nothing only
+  warns. The seal: `{"tpl":"seal","site":"S1","p":{"at":"refuge"}}` while the stair head lacks its hatch
+  (`fort.refuge.head_open`: only at=refuge/all or a seal naming the tile fixes that) or the refuge is open and
+  `at=refuge` has tiles; else `at=last` (an opening reaches Tiefe+, or a current REFUGE_FAIL names open entrances). No
+  build is asked that cannot be placed: `seal at=last` finding nothing to close (`seal_n` 0) and, below P3,
+  `refuge_beds` without a site (no fortcore refuge room yet: `bed_site` false) are warnings. `plan propose` drafts the
+  refuge pieces first in the current season (after the audit's seal) at every phase, one seal at most; fortcore stage 3
+  for a missing refuge stays a P3+ draft.
+- Wake hints: SEAL_LEAK points at `bp.place tpl=seal site=S1 at=last`, REFUGE_FAIL at `at=refuge`. Docs: RULES §7 (SIEGE_UNREADY,
+  SEAL_LEAK, REFUGE_FAIL), §8 refuge gate; DESIGN §5.2 seal, §5.4 refuge gate; CONTRACTS §9.10 marks. No event, verb or
+  state field changed (the CONTRACTS appendix is unchanged).
+- Tests: `tests/bp/test_bp_seal_run11.py` (new: no second seal for a pending/built opening, SEAL_LEAK as a source with a
+  wall, shrubs gathered and saplings closed beside, a door the route passes beside, an open route, six per seal, notes;
+  the stair-head hatch on a built fortcore and the refuge it separates; REFUGE_FAIL `fix`; plan facts),
+  `tests/bp/test_bp_seal.py`, `tests/test_cli_plan.py` (the refuge gate from the fort's start, the stair-head hatch,
+  propose below P3, fort facts from REFUGE_FAIL), `tests/lua/test_snapshot.lua` (plant marks).
+- **How to use:** `dfllm cmd bp.place tpl=seal site=S1 at=last` after SIEGE_UNREADY, SEAL_LEAK or REFUGE_FAIL (or the
+  line's `seal at=...`), `at=refuge` once for the refuge stair's hatch; repeat it until it says `nothing to close` (each
+  run takes up to 6 openings no seal covers yet). Read the `seal ...` and `seal note: ...` lines it prints. Year review:
+  `dfllm plan propose` puts the seal and `refuge_beds` first; `dfllm plan check` says what is missing and where it must
+  go.
+- **Live check (Run 11):** after `git pull` and `dfhack-run dfllm reload`, `dfllm bp sites seal --fresh` (a snapshot
+  with the plant marks), then `dfllm cmd bp.place tpl=seal site=S1 at=last`: the output names 188,103,144 (and the other
+  current leaks), no `125,103,144` piece while its seal is pending (`seal note: 125,103,144: left out, seal project ...
+  builds its piece`), `188,88,144 shrub: gather the shrub, then door at 188,88,144`, `177,99,144 sapling: door at
+  <neighbour> (...)`, and for 124,81,138 a wall on the route's first cutting tile or a note that the citizen stood in
+  the open. `dfllm cmd bp.place tpl=seal site=S1 at=refuge` names `<civ stair x,y>,<refuge z+1> stair_updown: hatch at
+  ...`; once built, `dfllm cmd inspect '{"what":"refuge"}'` shows Tiefe+ `sep` 1 while Kern+ is still open. In game the
+  herbalists gather the shrub (designations screen shows it) before the door is built. A second `at=last` right after
+  must not repeat any tile. `dfllm plan propose y.json` on Kilrudrabed (P1/P2, Kern+ open, Tiefe+ short of beds, no
+  hatch on the refuge stair) drafts `seal at=refuge` and `refuge_beds` (if `dfllm bp sites refuge_beds` lists a site) as
+  the first builds of the current season; `dfllm plan check y.json` without them says `refuge: ... the refuge comes
+  first (Run 11): adding builds (...) waits for it`.
+
 ## Glass for strange moods: raw and cut green glass from revealed sand (2026-10-16; offline, live-untested)
 - **Why (Run 11, Kilrudrabed site98, y429):** no gem vein on the site (`explore` digs since y427), moods kept failing for
   gems, bars and leather, and every year the first unfulfilled mood dwarf died.

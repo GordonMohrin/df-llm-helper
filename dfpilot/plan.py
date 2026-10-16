@@ -17,8 +17,8 @@ from pathlib import Path
 
 from . import files, paths, schema
 from .cmd import (SAME, SEAL_AUDIT, BpError, BpUnavailable, audit_routes, bp_files, fmt_reply, fort_manifest,
-                  last_entrances, log_seal, occupancy, place, rank_sites, send, sites_snapshot, template_info,
-                  template_names, write_bp)
+                  last_entrances, log_seal, occupancy, place, rank_sites, refuge_head, refuge_open, seal_openings,
+                  send, sites_snapshot, template_info, template_names, write_bp)
 
 R_CAPS = {0: 55, 1: 55, 2: 75, 3: 250}    # DESIGN §5.4; R3 (>= 80) only with D-01 = B
 OPTION_A_MAX = 75
@@ -29,10 +29,14 @@ O1_PHASE = "P5"                           # plans/year1.json: fortcore stage 3 b
 GALLERY = "gallery_o1"                    # bp/defense.py: the outward crossbow gallery over the O1 approach (Run 10)
 STOCKROOM = "stockroom"                   # bp/rooms.py: food stockpile with barrels + still inside the core (BUG-028)
 REFUGE_PHASE = "P3"                       # Run 10: no P3+ without a separated refuge with beds (alert.ref, bed_pct)
+# Run 11 (Kilrudrabed, y429, pop 54): the refuge stood open (REFUGE_FAIL `Kern+: open to 1 entrance 127,121,143 Door`)
+# and short of beds while the plans went on with P1 work: from the fort's start, once the refuge burrow exists, its
+# pieces come before any other new build (refuge_gate, refuge_drafts)
 REFUGE_BEDS = "refuge_beds"               # bp/rooms.py: a dormitory dug from the refuge room into the rock (Run 10)
 REFUGE_BEDS_MAX = 30                      # its `n` limit
 REFUGE_STAGE = {"tpl": "fortcore", "site": SAME, "p": {"stage": 3}}     # the fortcore refuge (with O1 and B2)
 SEAL_LAST = {"tpl": "seal", "site": "S1", "p": {"at": "last"}}          # doors on the open ways in (BUG-018)
+SEAL_REFUGE = {"tpl": "seal", "site": "S1", "p": {"at": "refuge"}}      # BUG-031: the refuge's stair-head hatch + tiles
 EXPLORE = "explore"                       # bp/mine.py: stair shaft + side tunnels below the core (Run 10: no ore)
 METAL_WORN = 80                           # soldiers' worn % below which metal is a plan goal (P6 deliverable metal 80)
 EXPLORE_DEPTHS = (12, 9, 6, 4, 2)         # propose tries the explore template's default depth first, then shallower
@@ -161,17 +165,55 @@ def _refuge_stage(b: dict) -> bool:
     return b["tpl"] == "fortcore" and _stage_of(p) == 3 and not p.get("retrofit")
 
 
+def _seal_at(save_dir: Path, at: str) -> list[str] | None:
+    """The openings `seal at=<at>` would close now (pending and built ones left out); None when bp is missing."""
+    try:
+        text, _ = seal_openings(save_dir, at)
+    except BpUnavailable:
+        return None
+    except BpError:
+        return []
+    return [x for x in text.split(";") if x.strip()]
+
+
+def _bed_site(save_dir: Path, state: dict | None) -> bool | None:
+    """Whether refuge_beds has a site now (a fortcore refuge room in the manifest and room on the snapshot) while the
+    refuge is short of beds; None when it is not short or nothing is known (no snapshot, no bp package)."""
+    r = ((state or {}).get("alert") or {}).get("ref")
+    if not isinstance(r, dict) or not r.get("ex") or r.get("need", 0) <= r.get("beds", 0):
+        return None
+    if sites_snapshot(save_dir) is None:
+        return None
+    n = min(max(2, r["need"] - r["beds"]), REFUGE_BEDS_MAX)
+    try:
+        sites, _ = rank_sites(save_dir, REFUGE_BEDS, {"n": n})
+    except BpUnavailable:
+        return None
+    except BpError:
+        return False
+    return bool(sites)
+
+
 def refuge_projects(save_dir: Path, state: dict | None = None, applied: set | None = None) -> dict:
     """The refuge work already under way (Run 10): stage3 (a fortcore stage 3 project not done yet, or running in
     state.proj), beds (the `n` of refuge_beds projects not done yet), seal (a seal project not done yet), fortcore
-    (any fortcore stage applied: stage 3 can reuse its anchor) and ents (open ways in the last entrance check names:
-    what `seal at=last` closes). "Not done" = no PROJECT_DONE in events.jsonl and its rotation (a project older than
-    the rotated log counts as under way)."""
+    (any fortcore stage applied: stage 3 can reuse its anchor) and ents (open ways in the last entrance check names).
+    Run 11: seal_n / refuge_n (the openings `seal at=last` / `seal at=refuge` would close now: pending and built ones
+    left out; None unknown), open and burrow (the entrances a current REFUGE_FAIL names and its burrow), head (the
+    refuge's stair head, cmd.refuge_head) and head_open (`seal at=refuge` would put its hatch there: no closer stands,
+    none is under way), bed_site (refuge_beds has a site; None unknown or not short). "Not done" = no PROJECT_DONE in
+    events.jsonl and its rotation (a project older than the rotated log counts as under way)."""
     done = done_projects(save_dir)
+    burrow, op, _, _ = refuge_open(save_dir, state if state is not None else {})
+    head = refuge_head(save_dir)
+    last, ref = _seal_at(save_dir, "last"), _seal_at(save_dir, "refuge")
     out = {"stage3": False, "beds": 0, "seal": False,
            "fortcore": any(t == "fortcore" for t, _ in (applied if applied is not None
                                                          else applied_builds(save_dir, state))),
-           "ents": len(last_entrances(save_dir))}
+           "ents": len(last_entrances(save_dir)), "seal_n": None if last is None else len(last),
+           "refuge_n": None if ref is None else len(ref), "open": op, "burrow": burrow, "head": head,
+           "head_open": bool(head and ref and any(x.split()[0] == head.split()[0] for x in ref)),
+           "bed_site": _bed_site(save_dir, state)}
     for p in bp_files(save_dir):
         doc = files.read_json(p)
         if not isinstance(doc, dict) or not isinstance(doc.get("tpl"), str) or p.stem in done:
@@ -193,59 +235,143 @@ def _compact(b: dict) -> str:
     return json.dumps(b, separators=(",", ":"))
 
 
+def _refuge_seal(b: dict) -> bool:
+    """A seal build that closes the open ways in (at last/all or named tiles; at=audit walls the audit's routes)."""
+    return b["tpl"] == "seal" and str((b.get("p") or {}).get("at", "last")).strip().lower() != "audit"
+
+
+def _head_seal(b: dict, head: str) -> bool:
+    """A seal build that puts the hatch on the refuge's stair head: at=refuge / at=all, or tiles naming it."""
+    if b["tpl"] != "seal":
+        return False
+    at = str((b.get("p") or {}).get("at", "last")).strip()
+    return at.lower() in ("refuge", "all") or head.split()[0] in re.findall(r"(?<![\d,=-])-?\d+,-?\d+,-?\d+", at)
+
+
+def _refuge_fix(b: dict) -> bool:
+    return _refuge_stage(b) or b["tpl"] in ("seal", REFUGE_BEDS)
+
+
 def refuge_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list[str], list[str]]:
     """Run 10: Tiefe+ was never usable (beds 8 < 27, open to the entrance), Kern+ lay on the attack path, and at pop
     110 there was no safe room. A plan with phase_target P3+ is refused while the fort has no separated refuge
     (seal's refuge audit, state alert.ref: exists, sep 1) with beds >= ceil(citizens x refuge.bed_pct %), unless the
     plan's new builds (or projects under way, fort.refuge) fix what is missing: fortcore stage 3 (no refuge yet), a
-    seal (an opening reaches it), refuge_beds with the missing beds."""
+    seal (an opening reaches it), refuge_beds with the missing beds.
+    Run 11: the same from the fort's start once the refuge burrow exists (below P3 a plan that raises phase_target or
+    adds builds is refused, one that adds nothing only warned); a current REFUGE_FAIL naming open entrances
+    (fort.refuge.open) needs the seal too; the fixes may not come in a later season than the plan's first other new
+    build. No fix is asked that no build can give: a seal when `seal at=last` finds nothing to close (seal_n 0), and
+    below P3 refuge_beds without a site (bed_site False; fortcore stage 3 builds the refuge room): warnings."""
     pt = doc["phase_target"]
-    if pt < REFUGE_PHASE:
-        return [], []
+    late = pt >= REFUGE_PHASE
     want = f"phase_target {pt} (P3+) needs a separated refuge with beds for refuge.bed_pct of the citizens"
     r = (s.get("alert") or {}).get("ref")
     if not isinstance(r, dict):
-        return [], [f"refuge not checked: the state has no alert.ref (dfhack-run dfllm reload); {want}"]
+        return ([], [f"refuge not checked: the state has no alert.ref (dfhack-run dfllm reload); {want}"]) if late \
+            else ([], [])
+    if not late and not r["ex"]:
+        return [], []                          # below P3 the refuge comes with fortcore stage 3 (or seal's dead end)
     f = fort.get("refuge") or {}
-    adds = [b for _, _, b in new_builds(doc, prev)]
-    errs, warn = [], []
+    adds = new_builds(doc, prev)
+    others = [(si, b) for si, _, b in adds if not _refuge_fix(b)]
+    limit = min((si for si, _ in others), default=3)
+    hard = True
+    if not late:
+        cur = s.get("phase") or "P0"
+        what = " and ".join(x for x in (f"raising phase_target {cur} -> {pt}" if pt > cur else "",
+                                         f"adding builds ({', '.join(b['tpl'] for _, b in others[:4])})" if others
+                                         else "") if x)
+        hard = bool(what)
+        want = "the refuge comes first (Run 11)" + (f": {what} waits for it" if what else "")
+    errs: list[str] = []
+    warn: list[str] = []
+
+    def need(text: str, season: int | None) -> None:
+        """season: -1 under way, else the first plan season that fixes it, None when nothing does."""
+        if season is not None and season <= limit:
+            return
+        if season is not None:
+            text += f" (planned in seasons[{season}]: move it to seasons[{limit}], before the other new builds)"
+        (errs if hard else warn).append(text)
+
+    def first(pred) -> int | None:
+        return min((si for si, _, b in adds if pred(b)), default=None)
     if not r["ex"]:
-        if not (f.get("stage3") or any(_refuge_stage(b) for b in adds)):
-            errs.append(f"refuge: no refuge burrow (Tiefe+); {want}: add {_compact(REFUGE_STAGE)} (the refuge with "
-                        "O1 and B2; dfllm plan propose drafts it)")
+        need(f"refuge: no refuge burrow (Tiefe+); {want}: add {_compact(REFUGE_STAGE)} (the refuge with O1 and B2; "
+             "dfllm plan propose drafts it)", -1 if f.get("stage3") else first(_refuge_stage))
         return errs, warn                      # its beds and its separation are checked once it exists
-    if r["sep"] == 0 and not (f.get("seal") or any(b["tpl"] == "seal" for b in adds)):
-        errs.append(f"refuge: an opening reaches Tiefe+ without a door (dfllm cmd inspect what=refuge: `open`); {want}"
-                    f": add {_compact(SEAL_LAST)} (doors on the open ways in) or wall it")
-    elif r["sep"] < 0:
+    sn, rn = f.get("seal_n"), f.get("refuge_n")
+    if f.get("head_open") and f.get("head"):
+        need(f"refuge: the civilians' stair enters Tiefe+ below {f['head'].split()[0]} without a hatch (whatever "
+             f"reaches Kern+ reaches it, BUG-031); {want}: add {_compact(SEAL_REFUGE)} (the hatch at its stair head and "
+             "the REFUGE_FAIL tiles)", first(lambda b: _head_seal(b, f["head"])))
+    if r["sep"] == 0 or f.get("open"):
+        if r["sep"] == 0:
+            text = ("refuge: an opening reaches Tiefe+ without a door (dfllm cmd inspect what=refuge: `open`); "
+                    f"{want}: add {_compact(SEAL_LAST)} (doors on the open ways in) or wall it")
+        else:
+            op = f["open"]
+            text = (f"refuge: {f.get('burrow') or 'the alert burrow'} is open to {', '.join(op[:2])}"
+                    + (f" +{len(op) - 2}" if len(op) > 2 else "")
+                    + f" (REFUGE_FAIL); {want}: add {_compact(SEAL_REFUGE if rn else SEAL_LAST)} (a door on each open "
+                    "way in, or on the neighbour that closes its route)")
+        under = -1 if f.get("seal") and not sn and not rn else None
+        planned = first(_refuge_seal)
+        if under is None and planned is None and sn == 0 and not rn:
+            warn.append(text.split("; ")[0] + "; `seal at=last` finds nothing to close now (pending, built or no "
+                        "closable tile: dfllm cmd inspect what=refuge, what=entrances)")
+        else:
+            need(text, under if under is not None else planned)
+    elif r["sep"] < 0 and late:
         warn.append("refuge: Tiefe+ separation not known yet (seal's first check); dfllm cmd inspect what=refuge")
-    planned = f.get("beds", 0) + sum(b.get("p", {}).get("n", 8) for b in adds if b["tpl"] == REFUGE_BEDS)
-    short = r["need"] - r["beds"] - planned
+    short = r["need"] - r["beds"] - f.get("beds", 0)
     if short > 0:
-        rooms = -(-short // REFUGE_BEDS_MAX)
-        errs.append(f"refuge: Tiefe+ has {r['beds']} beds < {r['need']}"
-                    + (f" (+{planned} planned)" if planned else "") + f"; {want}: add "
-                    + _compact({"tpl": REFUGE_BEDS, "site": "S1", "p": {"n": min(max(2, short), REFUGE_BEDS_MAX)}})
-                    + (f" ({rooms} rooms of <= {REFUGE_BEDS_MAX})" if rooms > 1 else ""))
+        got, season = 0, None
+        for si, _, b in sorted(adds, key=lambda t: t[0]):
+            if b["tpl"] == REFUGE_BEDS:
+                got += b.get("p", {}).get("n", 8)
+                if season is None and got >= short:
+                    season = si
+        left = short - got if season is None else short
+        text = (f"refuge: Tiefe+ has {r['beds']} beds < {r['need']}"
+                + (f" (+{got} planned)" if got and season is None else "") + f"; {want}: add "
+                + _compact({"tpl": REFUGE_BEDS, "site": "S1", "p": {"n": min(max(2, left), REFUGE_BEDS_MAX)}}))
+        rooms = -(-left // REFUGE_BEDS_MAX)
+        if rooms > 1:
+            text += f" ({rooms} rooms of <= {REFUGE_BEDS_MAX})"
+        if not late and f.get("bed_site") is False and season is None:
+            warn.append(text.split("; ")[0] + "; no refuge room takes refuge_beds yet (fortcore stage 3 builds it; "
+                        "dfllm bp sites refuge_beds)")
+        else:
+            need(text, season)
     return errs, warn
 
 
-def refuge_drafts(s: dict, fort: dict, done: set) -> list[dict]:
-    """What propose drafts first for the refuge (refuge_gate): fortcore stage 3 when there is no refuge (a fortcore to
-    anchor it on), doors on the open ways in when an opening reaches it, refuge_beds rooms for the missing beds."""
+def refuge_drafts(s: dict, fort: dict, done: set, early: bool = False) -> list[dict]:
+    """What propose drafts first for the refuge (refuge_gate): fortcore stage 3 when there is no refuge (a fortcore
+    to anchor it on; not `early`, below P3); one seal: `at=refuge` (BUG-031: the hatch at the refuge's stair head and
+    a current REFUGE_FAIL's tiles) while it has something to close and the head lacks its hatch or the refuge is open,
+    else doors on the open ways in (`at=last`) when an opening reaches it or a REFUGE_FAIL names open entrances
+    (Run 11: while `seal at=last` finds one to close); refuge_beds rooms for the missing beds (not while refuge_beds
+    has no site)."""
     r = (s.get("alert") or {}).get("ref")
     if not isinstance(r, dict):
         return []
     f = fort.get("refuge") or {}
     if not r["ex"]:
-        if f.get("fortcore") and not f.get("stage3") and ("fortcore", 3) not in done:
+        if not early and f.get("fortcore") and not f.get("stage3") and ("fortcore", 3) not in done:
             return [copy.deepcopy(REFUGE_STAGE)]
         return []
     out = []
-    if r["sep"] == 0 and not f.get("seal") and f.get("ents"):
+    sn, rn = f.get("seal_n"), f.get("refuge_n")
+    opened = r["sep"] == 0 or f.get("open")
+    if f.get("head_open") or (opened and rn):                # BUG-031: the stair-head hatch and REFUGE_FAIL's tiles
+        out.append(copy.deepcopy(SEAL_REFUGE))
+    elif opened and (sn > 0 if sn is not None else not f.get("seal") and f.get("ents")):
         out.append(copy.deepcopy(SEAL_LAST))
     short = r["need"] - r["beds"] - f.get("beds", 0)
-    while short > 0:
+    while short > 0 and f.get("bed_site") is not False:
         n = min(max(2, short), REFUGE_BEDS_MAX)
         out.append({"tpl": REFUGE_BEDS, "site": "S1", "p": {"n": n}})
         short -= n
@@ -277,7 +403,7 @@ def _seals_walls(b: dict, walls: list[str]) -> bool:
     at = str((b.get("p") or {}).get("at", "last")).strip()
     if at.lower() in ("audit", "all"):
         return True
-    named = set(re.findall(r"-?\d+,-?\d+,-?\d+", at))
+    named = set(re.findall(r"(?<![\d,=-])-?\d+,-?\d+,-?\d+", at))     # not the openings a for= names
     return all(w.split(" ", 1)[0] in named for w in walls)
 
 
@@ -598,11 +724,11 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     # Run 10: the audit's bypass wall first (audit_gate refuses growth without it)
     if ((fort or {}).get("audit") or {}).get("open") and (info is None or "seal" in info):
         builds.append(copy.deepcopy(SEAL_AUDIT))
-    # Run 10: then the refuge (refuge_gate refuses P3+ without a separated one with beds)
-    if target >= REFUGE_PHASE:
-        for b in refuge_drafts(s, fort or {}, done):
-            if info is None or b["tpl"] in info:
-                builds.append(b)
+    # Run 10: then the refuge (refuge_gate refuses P3+ without a separated one with beds); Run 11: from the fort's
+    # start once the refuge burrow exists, before every other new build
+    for b in refuge_drafts(s, fort or {}, done, early=target < REFUGE_PHASE):
+        if info is None or b["tpl"] in info:
+            builds.append(b)
     # BUG-028: drink or food inside the core below CORE_DAYS -> a stockroom first (food only: without the still)
     al = s.get("alert") or {}
     low = [k for k in ("core_d", "core_f") if isinstance(al.get(k), int) and al[k] < CORE_DAYS]

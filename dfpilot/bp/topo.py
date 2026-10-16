@@ -502,3 +502,184 @@ def audit(snap: dict, manifest: dict | None, graph: Graph | None = None, info: d
     res["ok"] = not fails
     res["fails"] = fails[:50]
     return res
+
+
+# ---------------------------------------------------------------- seal geometry (Run 11)
+SEAL_SHUT = "+=H"       # closed for the lockdown: doors and hatches (forbidden), bridges (the gates raise them)
+NEAR_R = 3              # the window around an opening that SealGeo.neighbour judges (xy, and one level up and down)
+ROUTE_TRY = 8           # path tiles SealGeo.route tries, from the citizen's end
+ROOF_MIN = 12           # roofed tiles the citizen's side keeps behind such a wall (else he stands in the open)
+MARKS_MAX = 500         # schema: a snapshot mark list holds at most this many tiles
+COVERED = "covered"     # SealGeo: the pieces under way close this route already
+ORTHO = ((0, -1), (1, 0), (0, 1), (-1, 0))
+DIAG = ((1, -1), (1, 1), (-1, 1), (-1, -1))
+
+
+def crop(snap: dict, bb) -> dict:
+    """The part of a snapshot inside bb (clipped to it by the caller): bbox and rows, enough for a Graph."""
+    x0, y0 = snap["bbox"][:2]
+    rows = {f"z{z}": [r[bb[0] - x0:bb[3] - x0 + 1] for r in snap["rows"][f"z{z}"][bb[1] - y0:bb[4] - y0 + 1]]
+            for z in range(bb[2], bb[5] + 1)}
+    return {"bbox": list(bb), "rows": rows}
+
+
+class SealGeo:
+    """Where a seal piece goes when the opening's own tile takes none (Run 11, Kilrudrabed: a door was asked for on
+    shrubs and saplings, on a tile with a door already, and for 'open route without a roofed tile'). Snapshot only:
+    a tile is under the open sky when every tile above it in the snapshot is open space (DF's `outside` flag, which
+    seal's entrance check reads, approximated: a tree crown counts as a roof); plants come from the shrub/sapling
+    marks of a kernel that writes them (`plant_aware`; the roofed ones first, `plant_full` when no list is capped)."""
+
+    def __init__(self, snap: dict):
+        self.snap, self.bbox, self.tick = snap, snap["bbox"], snap.get("tick", 0)
+        marks = snap.get("marks") or {}
+        self.plants: dict[tuple, str] = {}
+        for k in ("shrub", "sapling"):
+            for p in marks.get(k) or []:
+                self.plants.setdefault(tuple(p), k)
+        self.plant_aware = any(k in marks for k in ("shrub", "sapling"))
+        self.plant_full = self.plant_aware and all(len(marks.get(k) or []) < MARKS_MAX for k in ("shrub", "sapling"))
+        self._top: dict[tuple, int] = {}
+        self._g: Graph | None = None
+
+    def char(self, x: int, y: int, z: int) -> str | None:
+        x0, y0, z0, x1, y1, z1 = self.bbox
+        if not (x0 <= x <= x1 and y0 <= y <= y1 and z0 <= z <= z1):
+            return None
+        return self.snap["rows"][f"z{z}"][y - y0][x - x0]
+
+    def plant(self, p) -> str | None:
+        return self.plants.get(tuple(p))
+
+    def sky(self, x: int, y: int, z: int) -> bool:
+        top = self._top.get((x, y))
+        if top is None:
+            z0, z1 = self.bbox[2], self.bbox[5]
+            top = next((zz for zz in range(z1, z0 - 1, -1) if self.char(x, y, zz) != "_"), z0 - 1)
+            self._top[(x, y)] = top
+        return top <= z
+
+    def _kind(self, g: Graph, i: int) -> str | None:
+        """The piece kind a tile of g takes (floor: door or wall; a ramp with an open top: wall on the top), else
+        None (plants, traps, stairs, closers, rock)."""
+        p = g.pos(i)
+        if self.plant(p):
+            return None
+        c = g.t[i]
+        if c == ".":
+            return "floor"
+        if c == "r" and self.char(p[0], p[1], p[2] + 1) in ("_", "v"):
+            return "ramp"
+        return None
+
+    def neighbour(self, pos, closed: bool, avoid=frozenset(), r: int = NEAR_R):
+        """(x, y, z, kind) of the neighbour of the opening `pos` whose piece closes the route through it, or None.
+        In the window of radius r around it (doors, hatches and bridges closed, no climbing: seal's entrance check
+        follows walk groups): the entries are the roofed tiles next to an open-sky tile (seal's openings); those
+        within one tile of the opening, and those touching them, are its route, the other entries are other routes
+        and stay shut. The route runs from the open-sky tiles (and the opening itself unless `closed`: a door or hatch
+        stands on it) to the roofed tiles at the window's rim or on the levels above and below (the fort behind it);
+        the first neighbour (orthogonal first) whose blocking cuts it wins. None when the window shows no such route
+        (the door closes the doorway on the snapshot) or no single tile cuts it; COVERED when the pieces under way on
+        the `avoid` tiles cut it already."""
+        x, y, z = pos
+        if self.char(x, y, z) in (None, "?"):
+            return None
+        X0, Y0, Z0, X1, Y1, Z1 = self.bbox
+        bb = [max(X0, x - r), max(Y0, y - r), max(Z0, z - 1), min(X1, x + r), min(Y1, y + r), min(Z1, z + 1)]
+        g = Graph(crop(self.snap, bb), closed=SEAL_SHUT)
+        o = g.idx(pos)
+        nodes = [i for i in range(g.N) if g.node(i)]
+        sky = {i for i in nodes if self.sky(*g.pos(i))}
+        blocked = bytearray(g.N)
+        if closed:
+            blocked[o] = 1
+        ent = [i for i in nodes if i not in sky and not blocked[i]
+               and any(j in sky for j in g.adj.get(i, ()))]
+        near = lambda a, b: max(abs(p - q) for p, q in zip(g.pos(a), g.pos(b))) <= 1   # noqa: E731
+        mine = {i for i in ent if max(abs(p - q) for p, q in zip(g.pos(i), pos)) <= 1}
+        grow = list(mine)
+        while grow:
+            a = grow.pop()
+            for b in ent:
+                if b not in mine and near(a, b):
+                    mine.add(b)
+                    grow.append(b)
+        for i in ent:
+            if i not in mine:
+                blocked[i] = 1                               # another way in: another seal piece's business
+        src = sorted(sky | ({o} if not closed and g.node(o) else set()))
+        rim = bytearray(g.N)
+        for i in nodes:
+            px, py, pz = g.pos(i)
+            if i not in sky and not blocked[i] and (pz != z or px in (bb[0], bb[3]) or py in (bb[1], bb[4])):
+                rim[i] = 1
+        if g.bfs(src, blocked=blocked, climb=False, stop=rim)[1] is None:
+            return None
+        for t in avoid:                                      # pieces under way: they will stand
+            ti = g.idx(t)
+            if ti is not None:
+                blocked[ti] = 1
+        if g.bfs([i for i in src if not blocked[i]], blocked=blocked, climb=False, stop=rim)[1] is None:
+            return COVERED
+        for dx, dy in ORTHO + DIAG:
+            c = (x + dx, y + dy, z)
+            ci = g.idx(c)
+            if ci is None or not g.node(ci) or blocked[ci] or c in avoid:
+                continue
+            kind = self._kind(g, ci)
+            if kind is None:
+                continue
+            b = bytearray(blocked)
+            b[ci] = 1
+            if g.bfs([s for s in src if not b[s]], blocked=b, climb=False, stop=rim)[1] is None:
+                return c + (kind,)
+        return None
+
+    def graph(self) -> Graph:
+        """The whole snapshot as walk groups see it with the gates up: bridges closed, doors passable."""
+        if self._g is None:
+            self._g = Graph(self.snap, closed="=H")
+        return self._g
+
+    def route(self, pos, avoid=frozenset(), k: int = ROUTE_TRY, roof: int = ROOF_MIN):
+        """(x, y, z, kind) for SEAL_LEAK's 'open route from pos to the map edge without a roofed tile': walking the
+        shortest route from pos to the open-sky tiles of the snapshot border (the map edge in it), the first of its
+        first k floor/ramp tiles whose wall leaves pos without a way to the border while pos keeps at least `roof`
+        roofed tiles on its side (the fort; a citizen in the open field gets no wall). None when no tile does,
+        COVERED when the pieces under way on the `avoid` tiles cut the route already."""
+        g = self.graph()
+        p = g.idx(pos)
+        if not g.node(p):
+            return None
+        x0, y0, _, x1, y1, _ = self.bbox
+        src = [i for i in range(g.N) if g.node(i) and (g.pos(i)[0] in (x0, x1) or g.pos(i)[1] in (y0, y1))
+               and self.sky(*g.pos(i))]
+        par: dict = {}
+        _, hit = g.bfs(src, climb=False, stop=g.mask_pts([pos]), parents=par)
+        if hit is None:
+            return None
+        edge = g.mask_pts([g.pos(i) for i in src])
+        shut = g.mask_pts(list(avoid))
+        if g.bfs([p], blocked=shut, climb=False, stop=edge)[1] is None:
+            return COVERED
+        tried = 0
+        for i in reversed(g.path(par, hit)[:-1]):
+            c = g.pos(i)
+            kind = self._kind(g, i)
+            if kind is None or edge[i] or c in avoid:
+                continue
+            tried += 1
+            if tried > k:
+                break
+            b = bytearray(shut)
+            b[i] = 1
+            seen, h = g.bfs([p], blocked=b, climb=False, stop=edge)
+            if h is None:
+                n = 0
+                for j, v in enumerate(seen):
+                    if v and not self.sky(*g.pos(j)):
+                        n += 1
+                        if n >= roof:
+                            return c + (kind,)
+        return None

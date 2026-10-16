@@ -386,18 +386,10 @@ def workshops_missing(save_dir: Path, types: list | None = None) -> list[str]:
     return [n for n in want if n not in have]
 
 
-# ---------------------------------------------------------------- seal openings (Run 10)
+# ---------------------------------------------------------------- seal openings (Run 10, Run 11)
 SEAL_LAST = ("", "last", "entrances")
+SEAL_REFUGE = ("refuge",)    # BUG-031/Run 11: the refuge's own pieces (the hatch at its stair head, REFUGE_FAIL's tiles)
 AUDIT_WALL = re.compile(r"\bwall (\d+),(\d+),(\d+) (floor|ramp)\b")    # bp.topo.choke in an audit fail
-
-
-def _snap_char(snap: dict | None, x: int, y: int, z: int) -> str | None:
-    if not snap:
-        return None
-    x0, y0, z0, x1, y1, z1 = snap["bbox"]
-    if not (x0 <= x <= x1 and y0 <= y <= y1 and z0 <= z <= z1):
-        return None
-    return snap["rows"][f"z{z}"][y - y0][x - x0]
 
 
 def last_entrances(save_dir: Path) -> list[str]:
@@ -441,8 +433,9 @@ def _wall_pos(wall: str) -> tuple[int, int, int] | None:
     return (int(mt.group(1)), int(mt.group(2)), int(mt.group(3))) if mt else None
 
 
-def seal_projects(save_dir: Path) -> dict[tuple[int, int, int], str]:
-    """{opening tile: seal project id} over every seal project in <save>/bp (cancelled ones are moved out)."""
+def seal_records(save_dir: Path) -> dict[tuple[int, int, int], tuple[str, dict]]:
+    """{tile: (seal project id, piece)} over every seal project in <save>/bp (cancelled ones are moved out): each
+    piece under its opening, the opening it closes for a neighbour (`for=`) and the tile it stands on."""
     out: dict = {}
     dmod = None
     for p in bp_files(save_dir):
@@ -451,12 +444,29 @@ def seal_projects(save_dir: Path) -> dict[tuple[int, int, int], str]:
             continue
         try:
             dmod = dmod or load_bp("defense")
-            ops = dmod.parse_openings(str(doc["params"].get("at", "")))
+            pcs = dmod.seal_pieces(doc["params"], doc.get("anchor"))
         except (BpUnavailable, ValueError):
             continue
-        for o in ops:
-            out.setdefault(tuple(o["pos"]), p.stem)
+        for pc in pcs:
+            for t in (pc["pos"], pc.get("of"), pc["at"]):
+                if t:
+                    out.setdefault(tuple(t), (p.stem, pc))
     return out
+
+
+def seal_projects(save_dir: Path) -> dict[tuple[int, int, int], str]:
+    """{opening tile: seal project id} over every seal project in <save>/bp (cancelled ones are moved out)."""
+    return {t: pid for t, (pid, _) in seal_records(save_dir).items()}
+
+
+def done_ticks(save_dir: Path) -> dict[str, int]:
+    """{project id: tick of its newest PROJECT_DONE} (events.jsonl and its rotation)."""
+    done: dict[str, int] = {}
+    for e in files.iter_events_rev(save_dir):
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        if e.get("type") == "PROJECT_DONE" and isinstance(d.get("proj"), str):
+            done.setdefault(d["proj"], e.get("tick") if isinstance(e.get("tick"), int) else 0)
+    return done
 
 
 def audit_routes(save_dir: Path, state: dict | None = None) -> dict:
@@ -500,46 +510,314 @@ def audit_routes(save_dir: Path, state: dict | None = None) -> dict:
     return {"found": found, "tick": tick, "routes": routes, "walls": walls, "open": open_, "pending": pending}
 
 
+# Run 11 (Kilrudrabed): `seal at=last|all` placed the same door 125,103,144 on every repetition and never the new
+# leaks (188,103,144 floor; 124,81,138 'open route without a roofed tile'; shrubs and saplings at 188,88,144 and
+# 177,99,144). The openings now come from every current source, those a seal project builds or built are left out,
+# and a tile no piece stands on gets its gather designation or a neighbour that closes the same route.
+LEAK_ROUTE = "without a roofed tile"      # seal.lua seal_pass: 'LEAK: open route from x,y,z to the map edge ...'
+SEAL_NOTES: dict[str, list[str]] = {}     # bp id -> what seal_openings left out or moved (log_seal, `dfllm cmd`)
+
+
+def _tick(e: dict) -> int:
+    return e["tick"] if isinstance(e.get("tick"), int) else 0
+
+
+def _p3(v) -> tuple[int, int, int] | None:
+    ok = isinstance(v, (list, tuple)) and len(v) == 3 and all(isinstance(c, int) and not isinstance(c, bool)
+                                                               for c in v)
+    return tuple(v) if ok else None
+
+
+def _state_tick(st: dict) -> int:
+    t = st.get("t") or {}
+    if isinstance(t.get("abs"), int):
+        return t["abs"]
+    return (t.get("y") or 0) * 403200 + (t.get("tick") or 0)
+
+
+def refuge_open(save_dir: Path, state: dict | None = None) -> tuple[str, list[str], int, list[str]]:
+    """(burrow, open, tick, fix) of the newest REFUGE_FAIL that names the entrances reaching the refused burrow, while
+    it is current: the state's civ-alert burrow still fails (alert.ok 0) or the refuge is open (alert.ref.sep 0); else
+    ('', [], 0, []). open = its `open` ('x,y,z kind'; BUG-031: the tiles the routes lead in by, also beside a door),
+    fix = its `fix` split into openings (the seal template's `at` for them; an older kernel without it: open).
+    Run 11: `Kern+: open to 1 entrance 127,121,143 Door (62 steps)`."""
+    st = state if state is not None else (files.read_state(save_dir) or {})
+    al = st.get("alert") if isinstance(st.get("alert"), dict) else None
+    if al is not None and al.get("ok") == 1 and (al.get("ref") or {}).get("sep") != 0:
+        return "", [], 0, []
+    for e in files.iter_events_rev(save_dir):
+        if e.get("type") == "REFUGE_FAIL":
+            d = e.get("d") if isinstance(e.get("d"), dict) else {}
+            op = [x for x in (d.get("open") or []) if isinstance(x, str)]
+            fix = [x.strip() for x in str(d.get("fix") or "").split(";") if x.strip()]
+            return (str(d.get("burrow") or ""), op, _tick(e), fix or op) if op or fix else ("", [], 0, [])
+    return "", [], 0, []
+
+
+def refuge_head(save_dir: Path) -> str | None:
+    """'x,y,z kind' of the tile above the refuge level on the civilians' stair down to it, from the fort manifest
+    (refuge anchor, stairs.civ). BUG-031: fortcore's Tiefe+ hangs below Kern+ on that stair without a door or hatch, so
+    whatever reaches Kern+ reaches the refuge; a hatch there separates it on its own. None without a manifest refuge
+    or such a stair."""
+    try:
+        m = fort_manifest(save_dir)
+    except BpUnavailable:
+        m = files.read_manifest(save_dir) or {}
+    a = (m.get("refuge") or {}).get("anchor") if isinstance(m.get("refuge"), dict) else None
+    if not _p3(a):
+        return None
+    zr = a[2]
+    for c in (m.get("stairs") or {}).get("civ") or []:
+        if isinstance(c, list) and len(c) == 4 and all(isinstance(v, int) for v in c) and min(c[2:]) == zr \
+                and max(c[2:]) > zr:
+            return "%d,%d,%d %s" % (c[0], c[1], zr + 1, "stair_down" if max(c[2:]) == zr + 1 else "stair_updown")
+    return None
+
+
+def current_openings(save_dir: Path, state: dict | None = None) -> list[dict]:
+    """The open ways in now, one per tile, strongest evidence first: [{pos, kind, piece, src, tick}].
+    - the newest SEAL_LEAK, unless a newer SEAL event read the fort sealed: its first leak tile with the building or
+      shape there (`open` for an open route without a roofed tile, pos = the citizen's tile); piece wall on a floor,
+      since walk groups pass doors and only a wall (or a raised bridge) ends a SEAL_LEAK (RULES §7);
+    - the ways in without door or bridge of the last entrance check: the newest SIEGE_UNREADY `ents` (up to 6), else
+      the state's ready.ents (up to 3);
+    - the tiles a current REFUGE_FAIL names (refuge_open: its `fix`, else its `open`)."""
+    dmod = load_bp("defense")
+    st = state if state is not None else (files.read_state(save_dir) or {})
+    out: list[dict] = []
+    seen: set = set()
+
+    def add(text: str, src: str, tick: int, piece: str = "") -> None:
+        try:
+            ops = dmod.parse_openings(text)
+        except ValueError:
+            return
+        for o in ops[:1]:
+            pos = tuple(o["pos"])
+            if pos not in seen:
+                seen.add(pos)
+                out.append({"pos": pos, "kind": o["kind"], "piece": piece or o["piece"], "src": src, "tick": tick})
+    leak = unready = None
+    sealed = False
+    for e in files.iter_events_rev(save_dir):
+        t = e.get("type")
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        if leak is None and t == "SEAL" and d.get("sealed") == 1:
+            sealed = True
+        elif leak is None and t == "SEAL_LEAK":
+            leak = False if sealed else e
+        elif unready is None and t == "SIEGE_UNREADY" and isinstance(d.get("ents"), list):
+            unready = e
+        if leak is not None and unready is not None:
+            break
+    if leak:
+        d = leak.get("d") or {}
+        pos = _p3(d.get("pos"))
+        if pos:
+            kind = dmod.OPEN_ROUTE if LEAK_ROUTE in str(leak.get("msg", "")) else str(d.get("bld") or "").lower()
+            floor = kind in dmod.FLOORISH_KINDS or kind in dmod.GATHER_KINDS
+            add("%d,%d,%d %s" % (pos + (kind or "?",)), "leak", _tick(leak), "wall" if floor else "")
+    if unready:
+        for x in unready["d"]["ents"]:
+            if isinstance(x, str):
+                add(x, "ents", _tick(unready))
+    else:
+        for x in ((st.get("ready") or {}).get("ents") or []):
+            if isinstance(x, str):
+                add(x, "ents", _state_tick(st))
+    burrow, _, rtick, fix = refuge_open(save_dir, st)
+    for x in fix:
+        add(x, f"refuge {burrow}", rtick)
+    return out
+
+
+def _piece_gone(geo, pc: dict, done_tick: int) -> bool:
+    """A finished seal piece the snapshot (taken after it was done) shows no longer standing."""
+    if geo is None or geo.tick <= done_tick or pc["piece"] == "chop":
+        return False
+    c = geo.char(*pc["at"])
+    if c is None or c == "?":
+        return False
+    if pc["kind"] == "ramp":
+        return c in "_v"
+    if pc["kind"] in ("stair", "stair_up", "stair_down", "stair_updown"):
+        return c in "<>X"
+    return c == "."
+
+
+def _seal_kind(dmod, geo, e: dict, notes: list[str]) -> str | None:
+    """The opening's kind on the newest reading: the snapshot's shape wins for plain tiles (as before), the entry's
+    kind where the snapshot cannot tell (plants: the shrub/sapling marks if the snapshot is the newer reading; a door
+    built after the snapshot; tree tiles; buildings; an open route). None (with a note) when it is closed now."""
+    x, y, z = e["pos"]
+    kind = e["kind"]
+    c = geo.char(x, y, z) if geo else None
+    if c is None or c == "?" or kind == dmod.OPEN_ROUTE:
+        return kind
+    newer = geo.tick >= e["tick"]
+    if c == "+":
+        if kind in dmod.CLOSER_KINDS:
+            return kind
+        notes.append(f"{x},{y},{z}: left out, the snapshot shows a door or hatch there (closed)")
+        return None
+    if c not in dmod.CHAR_KIND:
+        notes.append(f"{x},{y},{z}: left out, the snapshot shows {c!r} (closed, or no floor/ramp/stair)")
+        return None
+    if c == ".":
+        mark = geo.plant((x, y, z))
+        if kind in dmod.GATHER_KINDS or kind == "sapling":
+            if newer and geo.plant_aware:
+                return mark or (kind if not geo.plant_full else "floor")
+            return kind
+        if kind in dmod.CLOSER_KINDS:
+            return "floor" if newer else kind                 # the door is gone / built after the snapshot
+        if kind in dmod.CHOP_KINDS or dmod.needs_neighbour(kind):
+            return kind
+        if mark and (newer or not kind):
+            return mark
+    return dmod.CHAR_KIND[c]
+
+
+def _geo_try(fn, notes: list[str], label: str, *a):
+    """A SealGeo search; a WP3 bug costs this opening (a note), never the whole seal, cmd, plan check or follow."""
+    try:
+        return fn(*a)
+    except Exception as e:                     # noqa: BLE001 - see docstring
+        notes.append(f"{label}: snapshot search failed ({type(e).__name__}: {e})")
+        return None
+
+
 def seal_openings(save_dir: Path, at, snap: dict | None = None) -> tuple[str, list[str]]:
-    """The seal template's `at` with every kind filled: at = '' / 'last' / 'entrances' -> the open ways in of the
-    last entrance check; 'audit' -> the walls the newest audit names (bypass, refuge on the attack path); 'all' ->
-    both; kinds from the newest snapshot (sites_snapshot), else from the entry text. Openings the snapshot shows
-    closed (door, wall, bridge, rock) or that name no floor/ramp/stair are left out. Returns (at, notes); raises
-    BpError when nothing is left to close."""
+    """The seal template's `at` with every kind filled: at = '' / 'last' / 'entrances' -> the current open ways in
+    (current_openings: SEAL_LEAK, the entrance check, REFUGE_FAIL); 'audit' -> the walls the newest audit names
+    (bypass, refuge on the attack path); 'all' -> both (an audit wall wins a shared tile); kinds from the newest
+    snapshot (sites_snapshot), else from the entry text. Left out (with a note): openings the snapshot shows closed,
+    and for at=last/all those a seal project builds now or built (unless a snapshot taken after it was done shows the
+    piece gone). A shrub keeps its tile (gather first, bp.defense), a sapling, a door/hatch the route passes beside or
+    another building gets the neighbour that closes the same route, an open route (SEAL_LEAK) a wall on its first tile
+    that cuts it from the map edge (bp.topo.SealGeo). At most SEAL_MAX openings; the rest wait for the next seal.
+    Returns (at, notes); raises BpError when nothing is left to close."""
     dmod = load_bp("defense")
     text = str(at if at is not None else "").strip()
     key = text.lower()
+    notes: list[str] = []
+    entries: list[dict] = []
+    if key in SEAL_LAST + ("all",):
+        entries = current_openings(save_dir)
+    if key in SEAL_REFUGE + ("all",):
+        head = refuge_head(save_dir)
+        o = dmod.parse_openings(head)[0] if head else None
+        if o and all(e["pos"] != tuple(o["pos"]) for e in entries):
+            entries.append({"pos": tuple(o["pos"]), "kind": o["kind"], "piece": "", "src": "head", "tick": -1})
+        if key in SEAL_REFUGE:
+            burrow, _, rtick, fix = refuge_open(save_dir)
+            for x in fix:
+                fo = (dmod.parse_openings(x) or [None])[0]
+                if fo and all(e["pos"] != tuple(fo["pos"]) for e in entries):
+                    entries.append({"pos": tuple(fo["pos"]), "kind": fo["kind"], "piece": "",
+                                    "src": f"refuge {burrow}", "tick": rtick})
     routes = audit_routes(save_dir) if key in ("audit", "all") else None
-    parts = (last_entrances(save_dir) if key in SEAL_LAST + ("all",) else []) + (routes["open"] if routes else [])
-    raw = ";".join(parts) if key in SEAL_LAST + ("audit", "all") else text
-    try:
-        ops = dmod.parse_openings(raw) if raw else []
-    except ValueError as e:
-        raise BpError(str(e)) from e
-    snap = snap if snap is not None else sites_snapshot(save_dir)
-    known = dmod.FLOORISH_KINDS | dmod.STAIR_KINDS | {"ramp"}
-    keep, notes = [], []
-    for o in ops:
-        x, y, z = o["pos"]
-        c = _snap_char(snap, x, y, z)
-        if c is not None and c != "?":                     # the snapshot's shape wins: it is the newer reading
-            if c not in dmod.CHAR_KIND:
-                notes.append(f"{x},{y},{z}: left out, the snapshot shows {c!r} (closed, or no floor/ramp/stair)")
-                continue
-            kind = dmod.CHAR_KIND[c]
-        else:
-            kind = o["kind"]
-        if kind not in known:
-            notes.append(f"{x},{y},{z}: left out, kind {kind or '?'!r} takes no seal piece (name floor, ramp or "
-                         "stair_up/stair_down/stair_updown)")
-            continue
-        keep.append(dict(o, kind=kind))
+    for w in (routes["open"] if routes else []):
+        o = dmod.parse_openings(w)[0]
+        pos = tuple(o["pos"])
+        entry = {"pos": pos, "kind": o["kind"], "piece": o["piece"], "src": "audit", "tick": 1 << 62}
+        entries = [entry if e["pos"] == pos else e for e in entries]
+        if all(e["pos"] != pos for e in entries):
+            entries.append(entry)
+    if key not in SEAL_LAST + SEAL_REFUGE + ("audit", "all"):
+        try:
+            ops = dmod.parse_openings(text) if text else []
+        except ValueError as e:
+            raise BpError(str(e)) from e
+        entries = [{"pos": tuple(o["pos"]), "kind": o["kind"], "piece": o["piece"], "src": "at", "tick": -1,
+                    "of": o["of"], "of_kind": o["of_kind"]} for o in ops]
     if routes and routes["pending"]:                       # a seal project builds them already: never twice
         notes.append("left out (a seal project builds them): " + ", ".join(
             f"{w.rsplit(' ', 2)[0]} ({pid})" for w, pid in routes["pending"].items()))
+    snap = snap if snap is not None else sites_snapshot(save_dir)
+    try:
+        geo_cls = getattr(load_bp("topo"), "SealGeo", None)
+    except BpUnavailable:
+        geo_cls = None
+    geo = geo_cls(snap) if snap and geo_cls else None      # no snapshot geometry: no neighbour or route pieces
+    lastish = [e for e in entries if e["src"] not in ("at", "audit")]
+    recs = seal_records(save_dir) if lastish else {}
+    done = done_ticks(save_dir) if recs else {}
+    avoid = {tuple(pc["pos"] if pc["kind"] == "ramp" else pc["at"])    # the tiles pieces under way will close
+             for pid, pc in recs.values() if pid not in done and pc["key"]}
+    keep: list[dict] = []
+    for e in entries:
+        x, y, z = e["pos"]
+        rec = recs.get(e["pos"]) if e["src"] not in ("at", "audit") else None
+        if rec:
+            pid, pc = rec
+            if pid not in done:
+                notes.append(f"{x},{y},{z}: left out, seal project {pid} builds its piece ({pc['why']})")
+                continue
+            if not _piece_gone(geo, pc, done[pid]):
+                notes.append(f"{x},{y},{z}: left out, sealed by {pid} (done; the entrance check may lag: dfllm cmd "
+                             "inspect what=entrances key=refresh)")
+                continue
+        if e.get("of"):                                    # explicit 'N kind for=O:kind': as given
+            keep.append(dict(e))
+            continue
+        kind = _seal_kind(dmod, geo, e, notes)
+        if kind is None:
+            continue
+        label = f"{x},{y},{z} {'open route' if kind == dmod.OPEN_ROUTE else kind or '?'}"
+        if dmod.piece_kind(kind):
+            keep.append({"pos": e["pos"], "kind": kind, "piece": e["piece"]})
+        elif dmod.needs_neighbour(kind) and (geo is None or geo.char(x, y, z) in (None, "?")):
+            notes.append(f"{label}: left out, its tile is not on the snapshot (dfllm bp sites seal --fresh, then "
+                         "again; or name the tile that closes it: at=\"x,y,z floor\")")
+        elif kind == dmod.OPEN_ROUTE:
+            c = _geo_try(geo.route, notes, label, e["pos"], avoid)
+            if c == "covered":
+                notes.append(f"{label}: left out, a seal under way closes its route")
+                continue
+            if c is None:
+                notes.append(f"{label}: no tile near it cuts it from the map edge with the fort behind it (the "
+                             "citizen stands in the open?): dfllm cmd inspect what=entrances")
+                continue
+            keep.append({"pos": c[:3], "kind": c[3], "piece": "wall", "of": e["pos"], "of_kind": dmod.OPEN_ROUTE})
+        elif dmod.needs_neighbour(kind):
+            c = _geo_try(geo.neighbour, notes, label, e["pos"], kind in dmod.CLOSER_KINDS, avoid)
+            if c == "covered":
+                notes.append(f"{label}: left out, a seal under way closes its route")
+                continue
+            if c is None:
+                if kind not in dmod.CLOSER_KINDS:
+                    why = ("no single neighbouring tile closes its route on the snapshot; dfllm cmd inspect "
+                           "what=entrances")
+                elif e["src"] == "leak":
+                    why = ("the door closes the doorway on the snapshot; walk groups pass doors, so only a wall or "
+                           "a raised bridge ends a SEAL_LEAK there (a wall closes the fort's own way too: decide by "
+                           "hand)")
+                else:
+                    why = ("the door closes the doorway on the snapshot, the kernel still finds the route open: "
+                           "dfllm cmd inspect what=refuge (open, hint)")
+                notes.append(f"{label}: left out, {why}")
+                continue
+            keep.append({"pos": c[:3], "kind": c[3], "piece": e["piece"], "of": e["pos"], "of_kind": kind})
+        else:
+            notes.append(f"{label}: left out, kind {kind or '?'!r} takes no seal piece (name floor, ramp or "
+                         "stair_up/stair_down/stair_updown)")
+    uniq, seen = [], set()
+    for o in keep:                                         # two openings one neighbour closes: one piece
+        if tuple(o["pos"]) not in seen:
+            seen.add(tuple(o["pos"]))
+            uniq.append(o)
+    keep = uniq
+    if len(keep) > dmod.SEAL_MAX:
+        rest = keep[dmod.SEAL_MAX:]
+        notes.append(f"{len(rest)} more for the next seal (place it again once this one is placed): "
+                     + dmod.format_openings(rest[:4]))
+        keep = keep[:dmod.SEAL_MAX]
     if not keep:
         why = "; ".join(notes) or ("the last entrance check names no open way in" if key in SEAL_LAST
-                                   else "the last audit names no wall" if key == "audit" else "no opening named")
+                                   else "the last audit names no wall" if key == "audit"
+                                   else "no refuge stair head in the manifest and no REFUGE_FAIL tile"
+                                   if key in SEAL_REFUGE else "no opening named")
         raise BpError(f"seal: nothing to close ({why})")
     return dmod.format_openings(keep), notes
 
@@ -553,10 +831,13 @@ def seal_lines(doc: dict) -> list[str]:
 
 
 def log_seal(save_dir: Path, doc: dict, by: str) -> list[str]:
-    """cli.log: one line per seal piece (Run 10: the lockdown and the audit name each opening by itself)."""
+    """cli.log: one line per seal piece (Run 10: the lockdown and the audit name each opening by itself) and one
+    `seal:note` per opening seal_openings left out or moved (Run 11)."""
     lines = seal_lines(doc) if doc.get("tpl") == "seal" else []
     for ln in lines:
         files.log_cli(save_dir, by, "seal:piece", {"proj": doc.get("id")}, ln)
+    for ln in SEAL_NOTES.get(str(doc.get("id")), []) if doc.get("tpl") == "seal" else []:
+        files.log_cli(save_dir, by, "seal:note", {"proj": doc.get("id")}, ln)
     return lines
 
 
@@ -568,8 +849,8 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
     `workshops` without a `skip` param skips the moodable types the fort already has or has planned
     (live L1b: the fortcore shops, earlier workshops projects)."""
     params = dict(params or {})
-    if tpl == "seal":                                      # absolute openings; at=last: the last entrance check
-        params["at"], _ = seal_openings(save_dir, params.get("at"), snap)
+    if tpl == "seal":                                      # absolute openings; at=last: the current open ways in
+        params["at"], SEAL_NOTES[bp_id] = seal_openings(save_dir, params.get("at"), snap)
     if tpl == "workshops" and "skip" not in params:
         miss = set(workshops_missing(save_dir))
         have = [n for n in _moodable() if n not in miss]
@@ -849,6 +1130,8 @@ def run(args, save_dir: Path) -> int:
     if args.verb == "bp.place" and a.get("tpl") == "seal" and (reply is None or reply.get("ok")):
         for ln in seal_lines(files.read_json(Path(save_dir) / "bp" / f"{cmd_id}.json") or {}):
             print(f"  seal {ln}")
+        for ln in SEAL_NOTES.get(cmd_id, []):
+            print(f"  seal note: {ln}")
     if reply is None:
         return EXIT_NOREPLY if args.wait > 0 else EXIT_OK
     return EXIT_OK if reply.get("ok") else EXIT_REFUSED
