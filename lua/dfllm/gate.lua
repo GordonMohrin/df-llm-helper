@@ -62,6 +62,11 @@ M.FORCE_NEAR = 3           -- BUG-027: SIEGE/BREACH raise onto a unit only with 
 -- (a dwarf walks about a tile per 9-tick frame, so nobody reaches the margin unseen within FAST ticks)
 M.PENDING = 1
 M.SCAN_R = 5
+-- BUG-027 (Run 10: GATE_FAIL B1/O1 "timeout" at T+900 with the pulls under way, lever latency 11-19 s at 30 t/s): the
+-- time a bridge waits for units on its footprint does not count toward its deadline (a bridge held for DEADLINE ticks
+-- on end is GATE_FAIL blocked); a pull in progress at the deadline (a worker took it, or the bridge moves) goes once to
+-- another linked lever and gets max(PULL_ALLOW, the measured lever latency) ticks more before GATE_FAIL slow
+M.PULL_ALLOW = 300
 M.NAME_MAX = 3             -- units named in a GATE / GATE_FAIL / GATE_FORCED text
 M.HOLD_LOG = 300           -- ticks between kern.log lines of one bridge's changing holders
 M.SETTLE = 50              -- ticks after a pull job left the queue before another may be queued
@@ -83,7 +88,7 @@ local FORCE_MODES = {SIEGE = true, BREACH = true}       -- may RAISE onto a unit
 local LOCK_MODES = {SIEGE = true, BREACH = true}        -- raise the unmanaged bridges even without the reflex module
 local GATE_ROLES = {outer = true, inner = true}         -- the bridges a lockdown and the peace gates hold up
 local FAIL_WHY = {blocked = 'blocked', no_lever = 'no_lever', no_worker = 'no_worker', outside = 'outside_alert',
-                  manual = 'manual'}
+                  manual = 'manual', slow = 'slow'}
 
 local st      -- persisted m.gate: {v, br = {<b> = {want, why, since, deadline, failed}}, kpi = {...},
               --   ex = {X<id> = {bid, raised}} (unmanaged bridges in hand), lat = {s, t}, win = tick, winb = {<b> = tick}}
@@ -918,9 +923,18 @@ local function set_want(name, w, why, deadline, now)
   local r = runtime(name)
   r.bad, r.nw, r.block_since, r.lat0, r.nw_out = {}, 0, nil, nil, nil
   r.block, r.block_ev, r.hold_log, r.forced_ev = nil, nil, nil, nil
+  r.held_sum, r.fail_at, r.switch, r.want_ms = nil, nil, nil, nil
   dirty = true
   return true
 end
+
+-- BUG-027: the ticks this epoch waited for units on the footprint (they do not count toward the deadline)
+local function held_ticks(r, now) return (r.held_sum or 0) + (r.block_since and math.max(0, now - r.block_since) or 0) end
+local function unblock(r, now)
+  if r.block_since then r.held_sum = held_ticks(r, now) end
+  r.block_since, r.block = nil, nil
+end
+local function allow() return math.max(M.PULL_ALLOW, st.lat and st.lat.t or 0) end
 
 local function observe(K, name, r, s, now)
   if s == r.last then return end
@@ -995,6 +1009,7 @@ local function control(K, name, spec, now)
   local s = read(r)
   observe(K, name, r, s, now)
   r.stuck, r.foot, r.spec = nil, spec.fp, spec
+  if w ~= nil and w ~= s and not r.want_ms then r.want_ms = K.now().ms end      -- GATE_FAIL names real seconds
   -- BUG-027: who is on or near the footprint, only while the bridge has work: a census pass every FAST ticks, the
   -- positions of the units it found near in the frames between
   local sc
@@ -1033,6 +1048,8 @@ local function control(K, name, spec, now)
           note_hold(K, name, spec.fp, dir, hold, now)
         end
       end
+      -- BUG-027: the deadline passed with this pull under way: once to another linked lever (check_fail asks)
+      if not stale and r.switch then stale = 'switch' end
       local has_worker = w0 ~= nil
       if not stale then
         if has_worker then r.job.nw = nil
@@ -1051,6 +1068,9 @@ local function control(K, name, spec, now)
         r.bad[r.job.lever] = true; r.nw = r.nw + 1
         local bs = alert_burrows(K)                     -- BUG-013: was the alert keeping everybody away from it?
         r.nw_out = bs ~= nil and not lever_in(r, bs)
+      elseif stale == 'switch' then
+        r.bad[r.job.lever], r.switch = true, nil
+        K.log('info', 'gate: %s pull on lever %d not done by the deadline, trying another lever', name, r.job.lever)
       end
       r.job = nil
       if not ok then r.settle = now + M.SETTLE; return s end -- it may be completing right now
@@ -1062,7 +1082,7 @@ local function control(K, name, spec, now)
     r.stuck = worker(fj) and 'pending' or 'no_worker'
     return s
   end
-  if w == nil or w == s then r.block_since, r.block_ev, r.block = nil, nil, nil; return s end
+  if w == nil or w == s then unblock(r, now); r.block_ev = nil; return s end
   if s == 'unknown' then r.stuck = 'no_lever'; return s end
   if s == 'moving' or now < (r.settle or 0) then return s end
   if w == 'down' and down_guard(K, name) then r.stuck = 'guard'; return s end
@@ -1080,7 +1100,7 @@ local function control(K, name, spec, now)
     r.stuck = 'blocked'
     return s
   end
-  r.block_since, r.block = nil, nil
+  unblock(r, now)
   local lid = pick(K, r, now)
   if not lid then r.stuck, r.resolved = 'no_lever', nil; return s end
   r.last_lever = lid
@@ -1148,8 +1168,27 @@ local function check_fail(K, name, now, mode)
   if not (br and br.want == 'up' and not br.failed and br.deadline and now >= br.deadline) then return end
   local r = runtime(name)
   if r.last == 'up' then return end
+  local slow
+  if r.stuck == 'blocked' and r.block_since then
+    -- BUG-027: waiting for units on the footprint is no timeout: GATE_FAIL blocked after DEADLINE ticks of it on end
+    if now - r.block_since < M.DEADLINE then return end
+  else
+    if now < br.deadline + held_ticks(r, now) then return end
+    -- a pull under way at the deadline: once to another linked lever, then allow() ticks more (GATE_FAIL slow)
+    if r.last == 'moving' or (r.job and r.job.taken) or r.fail_at then
+      if not r.fail_at then
+        local n = 0
+        for _, lid in ipairs(r.levers) do if r.linked[lid] then n = n + 1 end end
+        r.fail_at, r.switch = now + allow(), r.job ~= nil and r.last ~= 'moving' and n > 1
+        K.log('info', 'gate: %s not up at its deadline, pull under way%s; %d ticks more', name,
+              r.switch and ', another lever next' or '', allow())
+      end
+      if now < r.fail_at then return end
+      slow = true
+    end
+  end
   br.failed, dirty = true, true
-  local why = FAIL_WHY[r.stuck] or (r.nw > 0 and 'no_worker') or 'timeout'
+  local why = FAIL_WHY[r.stuck] or (slow and FAIL_WHY.slow) or (r.nw > 0 and 'no_worker') or 'timeout'
   if why == 'no_worker' then                          -- BUG-013: nobody may take it while the alert sounds
     local out = r.nw_out                              -- seen at a no-worker cancel; else now, in a step only (a
     if out == nil and mode == nil then                -- mode change has just moved the alert to another burrow)
@@ -1171,7 +1210,9 @@ local function check_fail(K, name, now, mode)
       d.units, d.pos = ids_of(r.block), {r.block[1].x, r.block[1].y, r.block[1].z}
     end
   elseif why == FAIL_WHY.manual then txt = 'manual: no automatic pull, config/reflex.json gate.manual' end
-  K.emit('GATE_FAIL', 'A', cut(string.format('%s not up after %d ticks (%s)', name, now - br.since, txt), 200), d)
+  local secs = r.want_ms and (K.now().ms - r.want_ms) // 1000 or nil
+  K.emit('GATE_FAIL', 'A', cut(string.format('%s not up after %d ticks%s (%s)', name, now - br.since,
+                                             secs and string.format(', %d s', secs) or '', txt), 200), d)
 end
 
 local function update_every(K)
@@ -1497,6 +1538,18 @@ function M.lockdown(K)
     if (rt[name] or {}).job then info.pend = info.pend + 1 end
   end
   return info
+end
+
+-- public (BUG-027, siege): why a bridge wanted up is not up yet without having failed: 'blocked' (units on or next to
+-- its footprint) or 'pulling' (a pull of ours taken by a worker, or the bridge moving, inside its allowance); nil else.
+-- siege does not count such a bridge as failed (BREACH) while no hostile is near it.
+function M.waiting(K, bridge)
+  local r, br = rt[bridge], st.br[bridge]
+  if not (r and br and br.want == 'up') or r.last == 'up' then return nil end
+  if r.stuck == 'blocked' then return 'blocked' end
+  if r.fail_at then return K.now().tick < r.fail_at and 'pulling' or nil end   -- the allowance after the deadline
+  if r.last == 'moving' or (r.job and r.job.taken) then return 'pulling' end
+  return nil
 end
 
 -- public (FR-49): the fort is sealed by its bridges: >= 1 gate bridge (manifest outer/inner, else the unmanaged ones

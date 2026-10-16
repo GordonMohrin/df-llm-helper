@@ -154,4 +154,34 @@ T.test('BUG-027 Run 10 (baby 27608): a baby in its mother\'s arms counts where t
   dfhack.units.getPosition = getPos
 end)
 
+T.test('BUG-027 order at an arrival: a unit next to a bridge the lockdown wants up sounds the civ alert at once (call ' ..
+       'them in first), the bridge rises once he is inside; the other pulls do not hold the alert back', function()
+  local kmock = require('dfllm.util.k_mock')
+  -- no fort manifest (unmanaged X1..X3); the X1/X3 pulls are slow, so the deferred alert would wait for them
+  local W = S.world{manifest = false, units = cast({S.cit(26099, 51, 39)}),
+                    lever_cfg = {[11] = {worker = 400}, [12] = {worker = 400}, [31] = {worker = 400}, [32] = {worker = 400}}}
+  df.global.world.status.popups = kmock.vec{}
+  local snap = {name = 'snapshot', every = {ticks = 100}}
+  function snap.tile() return {c = '.', dig = '', bld = ''} end
+  function snap.far() return false end
+  snap.outside_near = require('dfllm.snapshot').outside_near
+  package.loaded['dfllm.reflex'] = nil
+  S.load(W, {S.military(), snap, require('dfllm.reflex')})
+  for i = 201, 204 do W.unit(i)._m.hidden = true end      -- the raiders are not in sight yet: a PEACE lockdown
+  W.event('INVASION', {id = 7})
+  S.run(W, 30)
+  W.inbox('ack', {})
+  T.eq(W.K.mode(), 'PEACE')
+  local on = S.acts(W, 'civ_alert', function(a) return a.args[1] == true end)
+  local t0 = W.find_events('ARRIVAL')[1].tick
+  T.ok(#on == 1 and on[1].tick - t0 <= 20, 'the alert at once: ' .. (on[1] and on[1].tick - t0 or -1))
+  local said
+  for _, l in ipairs(W.logs) do if l.msg:find('(units on a bridge)', 1, true) then said = true end end
+  T.ok(said, 'kern.log says why the alert did not wait')
+  T.eq(#S.pulls(W, 'B1'), 0, 'X2 waits for him')
+  W.move(26099, 51, 44, Z)                                   -- the alert called him in
+  S.run(W, 200)
+  T.eq(S.bstate(W, 'B1'), 'up')
+end)
+
 T.done()
