@@ -146,6 +146,26 @@ def test_status_r0_variants_and_worst_case(save):
         assert schema.validate("state", st2) != [], bad
 
 
+def test_status_names_the_stop_guard(save):
+    """FR-68: `dfllm stop` in a siege leaves the guard (FPS cap held, popups dismissed); status says so on line 2."""
+    now = int(time.time())
+    g = {"v": 2, "on": 1, "mode": "SIEGE", "cap": 30, "ts_off": 1, "why": "popup", "since": now - 180, "wall": now - 2,
+         "n": 4, "kinds": {"death": 3, "migrants": 1}, "last": "Urist has been found dead, dehydrated."}
+    files.write_json_atomic(save / "guard.json", g)
+    out = brief.status_text(save)
+    line = out.splitlines()[1]
+    assert line.startswith("GUARD: kernel stopped in SIEGE 3m ago; dfllm-guard holds FPS cap 30, timestream off, "
+                           "dismissed 4 popups (death 3, migrants 1; last: Urist has been found dead, dehydrated.)")
+    assert "dfhack-run dfllm boot resumes the kernel" in line and "dfllm restore releases the clock" in line
+    assert est_tokens(out) <= brief.STATUS_TOKENS and "GUARD: kernel stopped" in brief.brief_text(save)
+    files.write_json_atomic(save / "guard.json", dict(g, wall=now - 3 * 3600))
+    assert "GUARD last seen 3h ago (DF closed or crashed?): the FPS cap may still be 30" in brief.status_text(save)
+    files.write_json_atomic(save / "guard.json", dict(g, on=0, why="boot"))
+    assert "GUARD" not in brief.status_text(save)
+    files.write_json_atomic(save / "guard.json", dict(g, on=True))
+    assert "GUARD" not in brief.status_text(save) and files.read_guard(save) == (None, None)
+
+
 # ---------------------------------------------------------------- brief
 def test_brief_fixture(save, capsys):
     assert run(save, "brief") == 0

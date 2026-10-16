@@ -152,6 +152,22 @@ def follow_off(save_dir: Path, now: float | None = None) -> str | None:
     return None
 
 
+GUARD = "guard.json"
+GUARD_STALE_S = 60                     # the stop guard refreshes `wall` every 5 s while it runs
+
+
+def read_guard(save_dir: Path, now: float | None = None) -> tuple[dict | None, float | None]:
+    """FR-68: (<save>/guard.json of the stop guard, age in s of its `wall`); (None, None) when missing or malformed.
+    The guard runs while doc['on'] == 1 and the age is below GUARD_STALE_S."""
+    doc = read_json(Path(save_dir) / GUARD, retry=False)
+    if not isinstance(doc, dict):
+        return None, None
+    ints = ("on", "cap", "n", "wall", "since", "ts_off")
+    if any(not isinstance(doc.get(k), int) or isinstance(doc.get(k), bool) for k in ints):
+        return None, None
+    return doc, max(0.0, (time.time() if now is None else now) - doc["wall"])
+
+
 # ---------------------------------------------------------------- events
 def _rev_lines(path: Path) -> Iterator[bytes]:
     """Complete lines of a file, last first; an unterminated last line is skipped."""

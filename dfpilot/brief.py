@@ -1,6 +1,7 @@
 """`dfllm status` (<= 300 tokens) and `dfllm brief` (<= 1.5k tokens) from runtime files only."""
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from . import files, paths, schema
@@ -109,6 +110,23 @@ def line_head(ctx: Ctx) -> str:
     return (f"{defcon} | {ctx.save}{df} {fmt_tick(ctx.now_tick())} {mode}" + (f"({_ago(ctx, since)})" if since else "")
             + unready + (f" {s['phase']}" if "phase" in s else "") + f" {t.get('tps', '?')}t/s {run}{hold}"
             + f" hb {fmt_age(ctx.hb_age)}")
+
+
+def line_guard(save_dir: Path) -> str:
+    """FR-68: the stop guard `dfllm stop` left running in a dangerous mode (<save>/guard.json)."""
+    g, age = files.read_guard(save_dir)
+    if g is None or g["on"] != 1:
+        return ""
+    if age > files.GUARD_STALE_S:
+        return (f"GUARD last seen {fmt_age(age)} ago (DF closed or crashed?): the FPS cap may still be {g['cap']}; "
+                "the next dfllm boot or dfllm restore heals it")
+    kinds = g.get("kinds") if isinstance(g.get("kinds"), dict) else {}
+    ks = ", ".join(f"{k} {n}" for k, n in sorted(kinds.items()) if isinstance(n, int))
+    last = str(g.get("last") or "")
+    return (f"GUARD: kernel stopped in {g.get('mode', '?')} {fmt_age(max(0.0, time.time() - g['since']))} ago; "
+            f"dfllm-guard holds FPS cap {g['cap']}{', timestream off' if g['ts_off'] else ''}, dismissed {g['n']} "
+            f"popup{'s' if g['n'] != 1 else ''}" + (f" ({ks}; last: {clip(last, 40)})" if g["n"] else "")
+            + " | dfhack-run dfllm boot resumes the kernel, dfllm restore releases the clock")
 
 
 def unready_r0(ctx: Ctx) -> dict | None:
@@ -297,7 +315,7 @@ def _no_state(ctx: Ctx) -> str:
 # ---------------------------------------------------------------- status
 def status_text(save_dir: Path) -> str:
     ctx = Ctx(save_dir, full=False)
-    lines = [line_head(ctx), files.follow_off(save_dir)]        # FR-29: say loudly when follow is not running
+    lines = [line_head(ctx), line_guard(save_dir), files.follow_off(save_dir)]   # FR-68 guard, FR-29 follow
     if ctx.state is None:
         lines.append(_no_state(ctx))
     else:
@@ -405,6 +423,9 @@ def sec_failures(ctx: Ctx) -> list[str]:
 def brief_text(save_dir: Path, budget: int = BRIEF_TOKENS) -> str:
     ctx = Ctx(save_dir)
     head = [f"# brief {line_head(ctx)}"]
+    guard = line_guard(save_dir)                   # FR-68
+    if guard:
+        head.append(guard)
     off = files.follow_off(save_dir)               # FR-29
     if off:
         head.append(off)
