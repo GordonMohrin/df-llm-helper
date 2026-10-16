@@ -440,6 +440,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "AUTOLABOR_LEGACY": ("A", "baseline", _d("fixed:f", "why:s after:s")),
     # FR-64: >= 2 citizens died of dehydration or starvation within a month (the class-A twin of DEATH_CLUSTER)
     "DEATHS_PREVENTABLE": ("A", "care", _CLUSTER),
+    # FR-65: readiness R0 in PEACE: R1 blockers, the audit's own fails, ways in (seal), those without door or bridge
+    "SIEGE_UNREADY": ("A", "readiness", _d(opt="fails:sa afails:sa routes:i open:i ents:sa traps:i age:i")),
     "ALERT_START": ("B", "siege", _d(opt="vis:i")),
     "ALERT_END": ("B", "siege", _d(opt="vis:i")),
     "LOCKDOWN_END": ("B", "reflex", _d(opt="why:s ticks:i doors:i")),
@@ -571,7 +573,9 @@ STATE = Obj(
          "pop": Obj(opt={"cit": NAT, "adults": NAT, "soldiers": NAT, "cap": NAT, "gate_cap": NAT}),
          "ready": Obj(req={"lvl": Int(0, 3), "worn": PCT, "cv": NAT, "drill_age": Int(-1),
                            "audit": Obj(req={"ok": FLAG, "age": Int(-1), "min_traps": NAT}),
-                           "fail": Arr(Str(maxbytes=24), hi=8)}),
+                           "fail": Arr(Str(maxbytes=24), hi=8)},
+                      # FR-65: ways in without door or bridge (-1 unknown), the first of them, why no auto drill
+                      opt={"open": Int(-1), "ents": Arr(Str(maxbytes=24), hi=3), "dhold": Str(maxbytes=24)}),
          "stock": Obj(opt={"drink_d": NAT, "food_d": NAT, "meals": NAT, "hosp_water": FLAG}),
          "care": Obj(req={"stressed_pct": PCT, "naked": NAT, "ghosts": NAT, "corpses_old": NAT,
                           "tombs_free": NAT, "moods": NAT},

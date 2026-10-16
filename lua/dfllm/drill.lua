@@ -14,7 +14,9 @@
 -- Starts: inbox `drill`, drill.start(why), or automatically in PEACE without merchants: yearly,
 -- every season while the plan wants R2 growth, after a siege, and after a failed drill: a month,
 -- doubling per further failure up to a season, and never while the failure is structural (no Kern+,
--- or too few uniform specs to reach 90 %) until that input changes.
+-- or too few uniform specs to reach 90 %) until that input changes. Automatic drills also need an
+-- outer/inner bridge in the manifest, phase >= P5 (if known), soldiers and 2 days since the load;
+-- drill.hold() names the missing one (FR-65: state ready.dhold, `status`: `drill never (auto: no bridges)`).
 local geom = require('dfllm.util.geom')
 
 local M = {name = 'drill', every = {ticks = 600}, verbs = {}, on = {}}
@@ -282,21 +284,29 @@ local function retry_wait()
   return w
 end
 
--- why an automatic drill is due now, or nil
-function M.due(K, now)
-  if K.mode() ~= 'PEACE' or now - rt.boot < M.SETTLE then return nil end
-  if st.try and now - st.try < M.RETRY_ABORT then return nil end
-  if #gate_bridges(K.manifest()) == 0 then return nil end
+-- why an automatic drill is due now (1st value), else why it is held (2nd value, <= 24 chars; FR-65 status)
+local function check(K, now)
+  if st.t0 then return nil, 'running' end
+  local mode = K.mode()
+  if mode ~= 'PEACE' then return nil, 'mode ' .. mode end
+  if now - rt.boot < M.SETTLE then return nil, 'settling' end
+  if st.try and now - st.try < M.RETRY_ABORT then          -- 5 days after the last start (finished or aborted)
+    local newest = rec.last[#rec.last]
+    return nil, (newest and newest.tick >= st.try) and 'just drilled' or 'aborted'
+  end
+  if #gate_bridges(K.manifest()) == 0 then return nil, 'no bridges' end
   local ph = K.view().phase
   local pn = type(ph) == 'string' and tonumber(ph:match('^P(%d)$')) or nil
-  if pn and pn < M.AUTO_PHASE then return nil end
+  if pn and pn < M.AUTO_PHASE then return nil, string.format('phase %s<P%d', ph, M.AUTO_PHASE) end
   local okm, mk = K.call('military', 'kpi')
-  if not okm or type(mk) ~= 'table' or (mk.soldiers or 0) == 0 then return nil end
+  if not okm or type(mk) ~= 'table' then return nil, 'military?' end
+  if (mk.soldiers or 0) == 0 then return nil, 'no soldiers' end
   local newest = rec.last[#rec.last]
   if not newest then return 'first' end
   if newest.pass == 0 then
     rt.blocked = structural(K, mk)
-    if rt.blocked or now - newest.tick < retry_wait() then return nil end
+    if rt.blocked then return nil, 'blocked:' .. rt.blocked end
+    if now - newest.tick < retry_wait() then return nil, 'retry wait' end
     return 'retry'
   end
   rt.blocked = nil
@@ -304,7 +314,18 @@ function M.due(K, now)
   if st.siege and st.siege > pass then return 'after siege' end
   if wants_r2(K) and now - pass >= M.KEEP_R2 then return 'keep R2' end
   if now - pass >= M.YEARLY then return 'yearly' end
-  return nil
+  return nil, 'passed'
+end
+
+-- why an automatic drill is due now, or nil
+function M.due(K, now) return (check(K, now)) end
+
+-- public (FR-65, readiness -> state ready.dhold): why no automatic drill starts now ('no bridges', 'phase P3<P5',
+-- 'no soldiers', 'mode ALERT', 'blocked:no_kern', 'retry wait', 'passed', 'merchants', ...); nil = one is due
+function M.hold(K)
+  local why, held = check(K, K.now().tick)
+  if why and M.merchants(K) then return 'merchants' end
+  return held
 end
 
 ---------------------------------------------------------------- module

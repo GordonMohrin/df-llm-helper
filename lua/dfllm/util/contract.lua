@@ -70,6 +70,8 @@ C.EVENTS = {
   AUTOLABOR_LEGACY = {cls = 'A', by = 'baseline'},
   -- FR-64: >= 2 citizens died of dehydration or starvation within a month (the A twin of DEATH_CLUSTER)
   DEATHS_PREVENTABLE = {cls = 'A', by = 'care'},
+  -- FR-65: readiness R0 in PEACE (blockers, ways in without door or bridge, traps); monthly while it fails
+  SIEGE_UNREADY = {cls = 'A', by = 'readiness'},
   -- B: digest
   ALERT_START = {cls = 'B', by = 'siege'}, ALERT_END = {cls = 'B', by = 'siege'},
   LOCKDOWN_END = {cls = 'B', by = 'reflex'},
@@ -265,7 +267,8 @@ C.STATE_SPEC = obj({
   save = str(120), phase = str(nil, nil, 'phase'),
   pop = obj(nil, {cit = NAT, adults = NAT, soldiers = NAT, cap = NAT, gate_cap = NAT}),
   ready = obj({lvl = int(0, 3), worn = PCT, cv = NAT, drill_age = int(-1),
-               audit = obj({ok = FLAG, age = int(-1), min_traps = NAT}), fail = arr(str(24), 0, 8)}),
+               audit = obj({ok = FLAG, age = int(-1), min_traps = NAT}), fail = arr(str(24), 0, 8)},
+              {open = int(-1), ents = arr(str(24), 0, 3), dhold = str(24)}),   -- FR-65
   stock = obj(nil, {drink_d = NAT, food_d = NAT, meals = NAT, hosp_water = FLAG}),
   care = obj({stressed_pct = PCT, naked = NAT, ghosts = NAT, corpses_old = NAT, tombs_free = NAT, moods = NAT},
              {coffins = obj({want = NAT, short = NAT, stock = NAT, order = NAT, proj = str(40)}),

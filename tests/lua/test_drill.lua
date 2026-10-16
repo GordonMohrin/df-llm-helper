@@ -340,4 +340,42 @@ T.test('no automatic drill without soldiers or without outer/inner bridges', fun
   T.eq(results(W2).last[1].fails[1], 'no_bridges')
 end)
 
+T.test('FR-65 drill.hold: why no automatic drill starts; readiness publishes it as ready.dhold', function()
+  local W = world{auto = true}                   -- P5: squads A-C set up and equipped
+  T.eq(X.call(W, 'drill', 'hold'), 'settling', 'the first 2 days after a load')
+  W.runner.phase = 'P3'
+  W.state()
+  X.run(W, 1200)
+  T.eq(X.call(W, 'drill', 'hold'), 'phase P3<P5')
+  X.run(W, 1200)                                 -- readiness evaluates every 1,200 ticks
+  T.eq(W.state().ready.dhold, 'phase P3<P5')
+  W.runner.phase = 'P5'
+  W.state()
+  X.equip_all(W)                                 -- the recruits military added meanwhile
+  df.global.plotinfo.caravans:insert('#', {trade_state = df.caravan_state.T_trade_state.AtDepot})
+  T.eq(X.call(W, 'drill', 'hold'), 'merchants', 'due, but merchants on the map')
+  df.global.plotinfo.caravans = require('dfllm.util.k_mock').vec{}
+  T.eq(X.call(W, 'drill', 'hold'), nil, 'due: it starts on the next drill step')
+  X.run(W, 700)
+  T.eq(W.K.mode(), 'DRILL')
+  T.eq(X.call(W, 'drill', 'hold'), 'running')
+  X.run(W, 1300)
+  T.eq(results(W).last[1].pass, 1, T.show(results(W).last[1].fails))
+  T.eq(X.call(W, 'drill', 'hold'), 'just drilled', '5 days after a start')
+  X.run(W, 6000)
+  T.eq(X.call(W, 'drill', 'hold'), 'passed')
+  T.eq(W.state().ready.dhold, 'passed')
+  local nosq = plan(55)
+  nosq.military = {pct = 15, squads = {melee = 0, xbow = 0}, cv_min = 12}
+  local W2 = world{auto = true, plan = nosq}
+  X.run(W2, 1200)
+  T.eq(X.call(W2, 'drill', 'hold'), 'no soldiers')
+  local W3 = X.world{units = X.citizens(30, 1, {skills = SKILLS}), manifest = {v = 2, burrows = S.manifest().burrows}}
+  W3.runner = X.runner('P5')
+  X.load(W3, nil, {X.economy(), X.snapshot(), W3.runner})
+  X.run(W3, 3600)
+  T.eq(X.call(W3, 'drill', 'hold'), 'no bridges')
+  T.eq(W3.state().ready.dhold, 'no bridges')
+end)
+
 T.done()
