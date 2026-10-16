@@ -266,6 +266,10 @@ def line_def(ctx: Ctx) -> str:
         free = {k: v for k, v in (m.get("free") or {}).items() if v}
         if free:                               # FR-46: free metal gear by category (loot included)
             out.append("free metal " + " ".join(f"{k} {v}" for k, v in sorted(free.items())))
+    wv = s.get("wave")
+    if wv:                                     # intake waves and the sortie through O1 (Gordon 2026-10-16)
+        out.append(f"intake {wv['ph']} (waves {wv['n']})" + (f": {wv['why']}" if wv.get("why") else "")
+                   + (f", sortie {wv['so']}" if wv.get("so") else ""))
     tr = s.get("trade")
     if tr and tr["caravan"]:
         out.append("CARAVAN on map")

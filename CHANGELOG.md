@@ -1,5 +1,38 @@
 # CHANGELOG dfpilot
 
+## Intake waves, the sortie through O1, inner stations, BUG-029 (2026-10-16; offline, live-untested)
+- **Intake waves (Gordon's decision, on by default, `config/reflex.json` `intake`):** in SIEGE, once O1 and B1 are up,
+  the civ alert sounds, no civilian or hostile is in the bailey, trap hall or field, nobody is past B1, no great danger,
+  building destroyer, trap avoider or flier is in sight, >= 4 soldiers in uniform (worn >= 80 %), the army is at most 4x
+  the soldiers and the traps of the intake area are armed: B1 goes down with O1 up, the squads go to the killing field
+  (melee) and the gallery (crossbows), B1 rises, O1 goes down for min(6, soldiers on station) hostiles and rises again
+  (also on a loss, a danger within 20 tiles of O1, fewer soldiers on station or a lower worn), kill orders on the field
+  go to crossbows and melee, and once the field is clear the squads come back through B1 and rest 1,200 ticks before
+  the next wave. INTAKE (B) per phase (`refused` once per reason), WAVE_FAIL (A) on losses, a hostile past B1, a field
+  not clear after 4,800 ticks. Hostiles in the intake area are no BREACH and no INTRUDER; one past B1 still is.
+- **Sortie through O1 (`squad.sortie` with `gate`, approved, SIEGE):** the reply compares the squad's combat value with
+  the hostiles near the target x 10 and refuses below it or below worn 80 %; gather in the bailey (B1 up behind them),
+  O1 down, kill near the target, recall on a loss, no target, 2,400 ticks or a danger, O1 up when all are back (or at
+  once with a hostile at the gate: WAVE_FAIL left_outside names who stays out), back inside through B1. SORTIE (B).
+- **Airlock:** gate lowers an outer bridge for an intake or a sortie only while every inner one is up and wanted up,
+  and the reverse; never O1 and B1 down at once. The lockdown leaves those wants alone.
+- **BUG-029 (inner stations):** SIEGE stands every squad, crossbows too, at the inner station (READY_IN:
+  `stations.melee`, `stations.b2` while B2 is not down; STATION_B1 the same); soldiers left on the field side come in
+  through the airlock (`stray`), soldiers between B1 and a raised core seal get it lowered (`unseal`). Flasks open
+  (no supplies setting in act yet).
+- Contracts: postures READY_IN, INTAKE; events INTAKE, SORTIE (B), WAVE_FAIL (A, RULES §7); state `wave` (status line
+  `intake fight (waves 3), sortie A recall`); verb arg `gate`; manifest `stations.field/bailey`; `census.h` zone and
+  danger counts; `gate.want` intake/sortie; `military.hold_order/release/members_in/squad_info`, `kill` opts;
+  `siege.sortie/expects`; `snapshot.traps`; config `intake`/`sortie` (CONTRACTS §9.18, `dfpilot.lint --config`).
+- Tests: `tests/lua/test_intake.lua` (new: a wave opens, closes at the wave size, clears, cools down, opens again;
+  refused with a megabeast, low worn, a civilian in the bailey, intake off, traps re-arming; the trap hall is no
+  BREACH, a hostile past B1 is; losses; the sortie sequence and left_outside; the airlock; BUG-029), updated
+  `test_siege.lua`, `test_siege_sense.lua`; `tests/test_alarm.py`, `tests/test_cli_status.py`.
+- **Live check:** `dfhack-run dfllm reload`; in the next SIEGE `dfllm status` shows `intake ...` and `dfllm events --type INTAKE`
+  the phases; between waves the squads' station is `stations.melee` (130,128,122) or `stations.b2` (138,127,122) while
+  B2 is up, never the gallery; a wave: B1 down with O1 up, squads in the field, B1 up, then O1 down (never both down),
+  O1 up at 6 inside, the field cleared, B1 down for the way back; no BREACH or INTRUDER for goblins in the trap hall.
+  No more waves: `intake.on` false in `config/reflex.json`, then `dfhack-run dfllm reload` (a running wave finishes).
 ## Soldiers no longer reserve the civilians' picks and axes, BUG-023 (2026-10-16; offline, live-untested)
 - Live Run 10: `3 free picks, 3 reserved by squad uniforms` while 2 of 6 miners held none; DF never hands a reserved tool out as a
   work tool. military's weapon guard now keeps one pick per Miners member and one axe per Woodcutters member (was a fixed 2/1) and

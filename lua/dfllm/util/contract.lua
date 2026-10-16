@@ -21,7 +21,9 @@ C.TRANSITIONS = {
 -- who may call K.set_mode: siege any allowed transition; drill only these two
 C.MODE_SETTERS = {siege = '*', drill = {['PEACE>DRILL'] = true, ['DRILL>PEACE'] = true}}
 
-C.POSTURES = {'TRAIN', 'STATION_B1', 'READY_STATION', 'B2_HOLD'}
+-- READY_IN (BUG-029): Ready, every squad at the inner station (stations.melee, stations.b2 while the core seal is
+-- up); INTAKE (Gordon 2026-10-16): Ready, melee in the killing field, crossbows in the gallery, only during a wave
+C.POSTURES = {'TRAIN', 'STATION_B1', 'READY_STATION', 'B2_HOLD', 'READY_IN', 'INTAKE'}
 
 -- Gameplay modules in dispatch order (§3.4). every = default cadence; critical = never demoted.
 C.MODULES = {
@@ -84,6 +86,9 @@ C.EVENTS = {
   STRANDED = {cls = 'A', by = 'siege'},
   -- BUG-028: the main part of the drink or food stock lies outside the lockable core (Kern+ and the refuge)
   SUPPLY_OUTSIDE = {cls = 'A', by = 'seal'},
+  -- Gordon 2026-10-16: an intake wave or a sortie through O1 went wrong (losses, a hostile past B1, the field not
+  -- clear, soldiers left outside)
+  WAVE_FAIL = {cls = 'A', by = 'siege'},
   -- B: digest
   ALERT_START = {cls = 'B', by = 'siege'}, ALERT_END = {cls = 'B', by = 'siege'},
   LOCKDOWN_END = {cls = 'B', by = 'reflex'},
@@ -103,6 +108,9 @@ C.EVENTS = {
   ORDER_STUCK = {cls = 'B', by = 'economy'}, JOBS_SUSPENDED = {cls = 'B', by = 'economy'},
   TRADE_LEDGER = {cls = 'B', by = 'trade'},
   SEAL = {cls = 'B', by = 'seal'}, REACH = {cls = 'B', by = 'seal'},
+  -- Gordon 2026-10-16: intake waves in SIEGE (muster, open, close, clear, back, abort, refused) and the sortie
+  -- through O1 (gather, open, out, recall, close, done, abort)
+  INTAKE = {cls = 'B', by = 'siege'}, SORTIE = {cls = 'B', by = 'siege'},
   -- C: log only
   SIEGE_STATUS = {cls = 'C', by = 'siege'}, SEASON = {cls = 'C', by = 'kern'},
   PROJECT_STAGE = {cls = 'C', by = 'runner'}, MODE = {cls = 'C', by = 'kern'},
@@ -181,7 +189,7 @@ C.STATE_OWNERS = {
   ['threat.*'] = 'threat', ['bridges'] = 'gate', ['owners.*'] = 'arbiter',
   ['mil.*'] = 'military', ['trade.*'] = 'trade',
   ['clock.*'] = 'arbiter', ['alarm.*'] = 'reflex', ['lever.*'] = 'gate',
-  ['alert.*'] = 'seal',
+  ['alert.*'] = 'seal', ['wave.*'] = 'siege',
 }
 
 -- Persistent site-data keys (§10). Stored as dfhack.persistent site strings encoded with util/json.
@@ -303,6 +311,8 @@ C.STATE_SPEC = obj({
   lever = obj({lat_s = int(-1), lat_t = int(-1), pend = NAT, wait_s = NAT}),
   alert = obj({want = str(24), burrow = str(24), tiles = NAT, inside = NAT, ok = FLAG},
               {why = str(40), core_d = NAT, core_f = NAT}),         -- BUG-028: drink/food days inside the core
+  -- intake waves (siege, Gordon 2026-10-16): phase, wave count, the last refusal, the sortie squad and phase
+  wave = obj({ph = str(8), n = NAT}, {why = str(40), so = str(24)}),
 })
 
 -- string formats (§1.1); explicit byte ranges, so LC_CTYPE cannot change them

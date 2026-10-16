@@ -125,7 +125,7 @@ add{name = 'six visible invaders: SIEGE and every T0 action in the detecting ste
     between(rel(W, t0), 0, 50, 'SIEGE latency')
     T.eq(alert_acts(W, true)[1].tick, t0, 'civ alert in the same step')
     T.eq(burrow_acts(W, 'Kern+')[1].tick, t0, 'alert burrow Kern+ in the same step')
-    T.eq(posture_tick(W, 'READY_STATION'), t0, 'READY_STATION in the same step')
+    T.eq(posture_tick(W, 'READY_IN'), t0, 'READY_IN (BUG-029: the inner station) in the same step')
     local ss = ev1(W, 'SIEGE_START')
     T.eq({ss.tick, ss.d.vis, ss.d.inv, ss.d.why}, {t0, 6, 6, 'invaders'})
     T.eq(ev1(W, 'WEALTH').d, {created = 12000, exported = 300, imported = 900})
@@ -364,7 +364,7 @@ add{name = 'RECOVERY: 2,400 quiet ticks; B1 down at +1,200, O1 at +2,400; PEACE 
     T.eq({se.d.hostiles, se.d.killed, se.d.lost, se.d.captures}, {6, 6, 0, 0})
     T.ok(se.d.sealed_ticks > 3000, 'sealed time counted')
     T.eq(W.state().bridges, {O1 = 'down', B1 = 'down', B2 = 'down'})
-    T.eq(postures(W), {'READY_STATION', 'STATION_B1', 'TRAIN'})
+    T.eq(postures(W), {'READY_IN', 'STATION_B1', 'TRAIN'})
   end}
 
 add{name = 'RECOVERY re-entry: a new visible invader sends the FSM straight back to SIEGE and re-raises',

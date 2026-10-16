@@ -133,7 +133,7 @@ helper is experimental; procedure and fair-play limits: `tools/embark/README.md`
 | `pause` / `unpause` | `{ttl_s ≤ 600, why?}` / `{}` | rarely; `unpause` releases only an inbox pause. A pause by the player, by DF (save loaded paused) or by a popup is released in DF, by the player |
 | `trade.want` | `{want?, sell?}` | tokens like `bar:iron`, `anvil`, `cloth` (any), `cloth:plant`/`silk`/`yarn` (also `thread:`) |
 | `trade.retry` | `{civ?, want?, sell?}` | PEACE; a second trade in the same visit: caravan at the depot, ≥ 3,000 ticks left |
-| `squad.sortie` | `{squad, target, approve:true}` | ALERT/SIEGE/BREACH/RECOVERY; rare, `approve:true` is a deliberate, logged decision; target = kill box id or position |
+| `squad.sortie` | `{squad, target, approve:true, gate?}` | ALERT/SIEGE/BREACH/RECOVERY; rare, `approve:true` is a deliberate, logged decision; target = kill box id or position. `gate:"O1"` (SIEGE only): out through O1 to a position outside: gather in the bailey (B1 up behind), O1 down, kill, recall, O1 up, back; refused below `sortie.worn` or when its cv < the hostiles near the target x `foe_cv` (the reply compares them) |
 | `lever` | `{bridge, want}` | PEACE only |
 | `inspect` | `{what, key?}` | read-only, ≤ 8 KB; `what=reach`, `entrances`, `defense`, `perimeter`, `refuge` (seal), `what=tombs`, `water_sources`, `what=orders` (blocked orders), `workload` (idle adults, unclaimed jobs, cancel reasons, free picks/axes), `trade` (merchant goods at the depot, last trades) |
 | `tombs.repair` | `{}` | GHOSTS: the next care run repairs the tombs (any mode) and retries entomb |
@@ -158,6 +158,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | STRANDED | citizens cut off from drink/food by our raised gates (BUG-028): `hold` a raise waits for them (until a hostile is within 30 tiles), `forced` it went ahead, `rescue` the kernel lowered the named inner/core bridges (never O1) and raises them again when they are through (`done`, `abort`), `refused` no rescue and why (O1 down, not sealed, a hostile): tell the player at once; never lower bridges yourself |
 | SUPPLY_OUTSIDE | most of the drink or food stock lies outside Kern+ and the refuge (`d.days` inside): tell the player; the next plan puts a still and a barrel stockpile (food stockpile, kitchen) into the core for >= 90 days |
 | BRIDGE_CRUSH | a unit died on or next to a bridge just pulled or moving (bridge, unit, the pull's tick, how it was matched): tell the player at once; `events` for the GATE lines of that bridge (who waited, GATE_FORCED); the bug goes to the repo (BUG-027) |
+| WAVE_FAIL | an intake wave or a sortie through O1 went wrong (`why`: losses, past_b1, breach, stuck = the field not clear, left_outside = O1 raised with soldiers outside); the kernel closed O1 / recalled the squad: tell the player; `events --type INTAKE`/`SORTIE`; no lever by hand |
 | GATE_FORCED | a SIEGE/BREACH raise went ahead onto the named units because a hostile stood at the gate (`force_near`, BUG-027); expect their DEATH; tell the player. A `blocked` GATE_FAIL names who holds a bridge (never raised onto them): tell the player to move them (a soldier: his squad's station) |
 | DEATHS_3PLUS | the line names the causes; the brief lists the season's deaths by cause; fix the cause in the plan |
 | DEATHS_PREVENTABLE | ≥ 2 citizens dehydrated or starved within a month (stock days, units, patients in the line): `inspect` `what=reach` (forbidden or cut-off drink/food), `what=refuge`; patients → `what=water_sources` (hospital water); tell the player; fix access in the plan |
@@ -227,7 +228,10 @@ is outside, BREACH fallback at T+900. RECOVERY only on 0 visible invaders for 2,
 are lowered stepwise. **Arrival lockdown** (no manifest needed): an arrival popup or report, INVASION
 or the first armed hostile in sight raises every lever-linked bridge, forbids the entrance doors,
 holds the clock and, once its lever pulls are done (≤ 2x the lever latency, 450-1500 ticks), sounds the alert, listing
-the lever tiles (`Hebel+`) while pulls are pending; until threat 0 for 2 days.
+the lever tiles (`Hebel+`) while pulls are pending; until threat 0 for 2 days. **Intake waves** (Gordon 16.10.2026,
+`config/reflex.json` `intake`, on): in SIEGE the squads stand inside B1 with drink (BUG-029); when soldiers, worn, army
+size, traps and the field allow it, B1 lets them into the killing field, rises, O1 lets up to 6 hostiles into bailey and
+trap hall, rises, the field is cleared, the squads go back; INTAKE (B) per phase, WAVE_FAIL (A) when it goes wrong.
 **Military:** squads A, B melee, C crossbows, ≤ 10 each; Constant training, never Off duty;
 Replace clothing + full metal + shield; KPI is worn %, never "assigned". Kill orders only inside
 manifest kill boxes, never into shafts or stairs. No civilian reserve squads.
