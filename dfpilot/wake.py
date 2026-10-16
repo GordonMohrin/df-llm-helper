@@ -50,7 +50,9 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
         "HOSPITAL_DRY": "dfllm cmd inspect '{\"what\":\"water_sources\"}'",
         "MOOD_RISK": "dfllm brief; supply the missing class (never cancel the mood)",
         # FR-64: >= 2 citizens dehydrated or starved within a month: access, not supply, as a rule
-        "DEATHS_PREVENTABLE": "dfllm cmd inspect '{\"what\":\"reach\"}', then refuge; patients: water_sources"}
+        "DEATHS_PREVENTABLE": "dfllm cmd inspect '{\"what\":\"reach\"}', then refuge; patients: water_sources",
+        # BUG-023: tool detail members without pick/axe; the fair-play remedy is the player's (RULES 7)
+        "TOOL_BLOCKED": "dfllm cmd inspect '{\"what\":\"workload\"}', then tell Gordon (RULES 7)"}
 SUPERVISE_EVERY_S = 15                         # supervise.json read cadence
 SUPERVISE_FRESH_S = 3600                       # alerts logged longer ago than this never wake
 HB_STALE_S = 300

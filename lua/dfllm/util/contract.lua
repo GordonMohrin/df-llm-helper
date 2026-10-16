@@ -70,6 +70,8 @@ C.EVENTS = {
   AUTOLABOR_LEGACY = {cls = 'A', by = 'baseline'},
   -- FR-64: >= 2 citizens died of dehydration or starvation within a month (the A twin of DEATH_CLUSTER)
   DEATHS_PREVENTABLE = {cls = 'A', by = 'care'},
+  -- BUG-023 / Run 10: members of a tool detail hold no pick or axe for days while its jobs wait and free tools exist
+  TOOL_BLOCKED = {cls = 'A', by = 'economy'},
   -- B: digest
   ALERT_START = {cls = 'B', by = 'siege'}, ALERT_END = {cls = 'B', by = 'siege'},
   LOCKDOWN_END = {cls = 'B', by = 'reflex'},

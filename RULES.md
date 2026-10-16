@@ -166,6 +166,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | SEAL_LEAK | the gates are up and a route remains: `inspect entrances` names the leak (tile, door/bridge state); tell the player; place a wall there (`bp.place`), never lower the bridges |
 | PERIMETER_BROKEN | the kernel re-queued the lost walls/doors (`rp…` project); `inspect perimeter` after a day; tell the player about pieces it could not re-queue (bridges) |
 | AUTOLABOR_LEGACY | autolabor ran in legacy mode (the engine of the Run 9 crashes) and the kernel could not set it to monitor (`fixed=0`; a switch that worked is only a kern.log line): tell the player at once (disable autolabor by hand) |
+| TOOL_BLOCKED | Miners/Woodcutters members hold no pick/axe while their jobs wait (`inspect workload`: `blocked`, `tools`); `reserved` → squad uniforms hold the tools (military weapons); otherwise tell the player: toggling the detail in the work details screen may make DF hand the tools out (untested); `tools.equip_update` and moving a tool into a hand need his explicit yes (fair play) |
 | REFUGE_FAIL | the civ alert left a burrow without drink, food or beds for the fort's interior (`Innen+`) or no confinement; `inspect refuge`; fix the refuge (stockpile, beds, well) in the next plan |
 
 ## 8. Readiness gate (only readiness raises max-pop)
