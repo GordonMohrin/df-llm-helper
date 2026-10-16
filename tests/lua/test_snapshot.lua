@@ -227,4 +227,38 @@ T.test('default bbox without a manifest: the surface around the map centre', fun
   T.ok(written(W, id))
 end)
 
+-- Run 11 (Kilrudrabed, no gem vein): revealed soil floors of a sand layer become sand marks; snapshot.sand keeps them for
+-- economy's sand collection zone (newest export first); hidden tiles are never asked
+T.test('Run 11: sand marks: revealed sand floors only, kept for snapshot.sand across exports', function()
+  local dir = (os.getenv('TEMP') or '.'):gsub('\\', '/') .. '/dfllm-lua-tests/test_snapshot'
+  luahost.mkdir_recursive(dir .. '/dfllm-runtime/mock/snap')
+  local W, S = world{dfpath = dir, rows = {'#ssXr..dm#', '#?s.....s#'}}
+  T.eq(select(2, W.K.call('snapshot', 'sand')), {tick = -1, tiles = {}}, 'no export yet this boot')
+  local asked = {}
+  S.is_sand = function(x, y, z, des)
+    asked[#asked + 1] = x .. ',' .. y
+    T.eq(des.hidden, false)
+    return x == 2 or x == 8
+  end
+  local reply = W.inbox('snapshot', {purpose = 'audit', bbox = {0, 0, Z, 9, 1, Z}}, {id = 'c51', by = 'cli'})
+  T.eq(reply.ok, true)
+  for _ = 1, 10 do W.frame(0, true) end
+  local ev = written(W, 'c51')
+  T.ok(ev, 'written')
+  local f = assert(io.open(dir .. '/dfllm-runtime/mock/' .. ev.d.path, 'rb'))
+  local doc = json.decode(f:read('a'))
+  f:close()
+  T.eq(doc.marks.sand, {{2, 0, Z}, {2, 1, Z}, {8, 1, Z}})
+  T.eq(asked, {'1,0', '2,0', '2,1', '8,1'}, 'only revealed soil floors (never the hidden tile 1,1 or stone)')
+  local _, sand = W.K.call('snapshot', 'sand')
+  T.eq(sand.tiles, {{2, 0, Z}, {2, 1, Z}, {8, 1, Z}})
+  T.ok(sand.tick >= 0)
+  -- a later export of another box keeps what the earlier one saw (newest first, no duplicates)
+  S.is_sand = function(x, y, z, des) return x == 1 end
+  W.inbox('snapshot', {purpose = 'debug', bbox = {0, 0, Z, 3, 0, Z}}, {id = 'c52', by = 'cli'})
+  for _ = 1, 10 do W.frame(0, true) end
+  T.ok(written(W, 'c52'))
+  T.eq(select(2, W.K.call('snapshot', 'sand')).tiles, {{1, 0, Z}, {2, 0, Z}, {2, 1, Z}, {8, 1, Z}})
+end)
+
 T.done()

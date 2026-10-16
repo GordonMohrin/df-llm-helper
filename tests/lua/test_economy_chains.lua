@@ -349,7 +349,8 @@ T.test('metal: charcoal for the ore, then SmeltOre; bronze from tin + copper ore
   -- no ore, no bars: one exploration request a season, the LLM once a year
   local W3 = world{phase = 'P3', per = {A = 2}, shops = {'MetalsmithsForge'}, furnaces = {'Smelter'}}
   days(W3, 3)
-  local req = W3.find_events('PROJECT_REQUEST')
+  local req = {}
+  for _, e in ipairs(W3.find_events('PROJECT_REQUEST')) do if e.d.tpl == 'explore' then req[#req + 1] = e end end
   T.eq(#req, 1)
   T.eq({req[1].d.tpl, req[1].d.why}, {'explore', 'ore'})
   local dec = {}

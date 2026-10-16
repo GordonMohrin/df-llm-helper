@@ -73,6 +73,7 @@ ACT = {
     "squad_remove": ["military"],
     "squad_routine": ["military"], "squad_order": ["military"], "squad_uniform": ["military"],
     "squad_unequip": ["military"], "squad_release": ["military"], "animal_slaughter": ["economy"], "zone_remove": ["runner"], "manager_office": ["economy"], "pond_remove": ["water"],
+    "sand_zone": ["economy"],
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
     "door_forbid": ["reflex"],
     "burrow_tiles": ["seal"],
@@ -527,6 +528,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
                                            "killed:i traps:i armed:i ticks:i")),
     "SORTIE": ("B", "siege", _d("phase:s", "squad:s why:s units:ia n:i cv:i foes:i est:i worn:i lost:i pos:p "
                                            "ticks:i")),
+    # Run 11: economy's glass chain for strange moods is blocked: why = no_sand (no revealed sand floor), no_bags (no
+    # spare cloth/leather or shop for ConstructBag), no_fuel (no charcoal and no wood furnace or wood, no magma glass
+    # furnace); raw/cut = the raw and cut glass wanted; once per set of blockers (util/cadence)
+    "GLASS_BLOCKED": ("B", "economy", _d("why:sa", "raw:i cut:i")),
     "SIEGE_STATUS": ("C", "siege", _d(opt="vis:i worn:i on_station:i deaths:i captures:i")),
     "SEASON": ("C", "kern", _d(opt="year:i season:i")),
     "PROJECT_STAGE": ("C", "runner", _d("proj:s", "stage:s pct:i")),

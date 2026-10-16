@@ -170,7 +170,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | YEAR_REVIEW | §5 year review |
 | GHOSTS | `inspect` `what=tombs` (causes per body); `tombs.repair`; `no_coffin` → the kernel provisions coffins (`inspect tombs` `prov`: want/short/stock/order/proj); `bp.place tombs` only when `prov` reports no space and no project; `no_body` → a memorial slab |
 | HOSPITAL_DRY | follow the recipe in the line (`inspect` `what=water_sources`: a bank to zone or a dig); until water is accepted, a dry hospital zone is worse than none |
-| MOOD_RISK | supply the missing class now along the named `route` (dig, trade, butcher; leather: tannery, hunters' bolts); a mood job is never cancelled |
+| MOOD_RISK | supply the missing class now along the named `route` (dig, trade, butcher; leather: tannery, hunters' bolts; raw glass and cut gems: economy's glass chain, sand zone + bags + glass furnace + fuel, GLASS_BLOCKED (B) names what stops it; rough gems, bars, leather: never glass); a mood job is never cancelled |
 | QUICKSAVE_FAILED | `dfllm save` found no new save folder (follow's own wake): the game is not saved; tell the player at once, `dfllm save` again in 2 min or save by hand |
 | ORDER_BAD | a make-item order without `item_subtype` (DF crash) was removed; never queue such orders, use `order.add` with `item_subtype` |
 | DEPOT_MISSING | a caravan came and no depot stands; the kernel queued a `depot` project: check `status`/`proj`, keep O1 down for builders in PEACE. "does not progress: why" = the planned depot is stuck; without a fortcore depot the kernel moves it inside the entrance after 5 failed resumes (`inspect workload` `depot_move`) |
@@ -254,7 +254,7 @@ manifest kill boxes, never into shafts or stairs. No civilian reserve squads.
 autochop wood ≥ 14, autobutcher low, tailor, seedwatch on farmed crops at 12). KPI = 0 starving
 postings, not idle %. Idle > 40 % for 3 days → useful backlog only, never filler digging.
 **Moods:** all 12 moodable workshop types in P1; stock ≥ 10 cloth, leather, bone, shell, gems, bars
-from P1; never cancel a mood job. No ore: `plan propose` drafts `explore` each season (`plan check` refuses metal unplanned).
+from P1; never cancel a mood job. No ore: `plan propose` drafts `explore` each season (`plan check` refuses metal unplanned). No gems: green glass from revealed sand.
 **Labor:** labormanager monitor; economy staffs the Miners (dig backlog, 2-4), Woodcutters (logs) and
 Hunters (famine; 1 for a short bone/shell/leather mood stock, 2 after a mood missed leather) details itself; you never
 change work details.

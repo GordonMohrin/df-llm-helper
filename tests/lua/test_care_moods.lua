@@ -480,4 +480,41 @@ T.test('Run 10: MOOD_RISK names the supply route of a missing class (economy.rou
   T.eq(r2[1].msg:find('route', 1, true), nil, r2[1].msg)
 end)
 
+-- Run 11 (Kilrudrabed, no gem vein; every year the first mood that wanted gems died): MOOD_RISK names glass as the route
+-- where it applies (a "cut gems" filter, a raw-glass filter), never for a rough gem
+T.test('Run 11: MOOD_RISK names the glass route for cut gems and raw glass, the rough-gem route otherwise', function()
+  local asked = {}
+  local function route(K, cls, via)
+    asked[#asked + 1] = cls .. ':' .. tostring(via)
+    if cls == 'gems' and via == 'glass' then return 'cut glass: no sand revealed, raw 0/9, cut 6; trade.want gem' end
+    if cls == 'gems' then return 'rough gems: mine a gem vein or trade.want gem (glass is no rough gem)' end
+    if cls == 'glass' then return 'raw glass: CollectSand+MakeRawGlass, raw 1/4' end
+    return ''
+  end
+  local W, Cm = CW.world{cit = 4, economy = true, route = route, setup = function(W)
+    moody(W, 1, 'Fey', {filter('SMALLGEM', {quantity = 1})})                         -- cut gems of any material
+    moody(W, 2, 'Fey', {filter('ROUGH', {mat_type = 0, quantity = 2})})              -- rough gems (inorganic)
+    moody(W, 3, 'Fey', {filter('ROUGH', {mat_type = 3, quantity = 1})})              -- raw green glass
+  end}
+  W.run(1)
+  local by = {}
+  for _, e in ipairs(W.find_events('MOOD_RISK')) do by[e.d.unit] = e end
+  T.ok(by[1] and by[1].d.route == 'route gems: cut glass: no sand revealed, raw 0/9, cut 6; trade.want gem',
+       by[1] and by[1].d.route)
+  T.ok(by[1].msg:find('route gems: cut glass', 1, true), by[1].msg)
+  T.eq(by[2].d.route, 'route gems: rough gems: mine a gem vein or trade.want gem (glass is no rough gem)')
+  T.eq(by[3].d.route, 'route glass: raw glass: CollectSand+MakeRawGlass, raw 1/4')
+  T.eq(asked, {'gems:glass', 'gems:nil', 'glass:nil'})
+  local glass = {}
+  for _, w in ipairs(Cm.mood_wants(W.K)) do glass[w.unit] = w.glass or 'none' end
+  T.eq(glass, {'cut', 'none', 'raw'}, 'care.mood_wants tells economy what glass can do')
+  T.eq(W.K.persist.get('m.care').moods['1'].glass, true)
+  -- the thirst repeat keeps the glass route
+  W.unit(1).counters2 = {thirst_timer = 31000, hunger_timer = 0}
+  CW.day(W)
+  local th
+  for _, e in ipairs(W.find_events('MOOD_RISK')) do if e.d.unit == 1 and e.d.why == 'thirst' then th = e end end
+  T.ok(th and th.d.route:find('cut glass', 1, true), th and th.d.route)
+end)
+
 T.done()

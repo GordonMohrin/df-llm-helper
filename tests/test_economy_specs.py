@@ -62,6 +62,11 @@ def _specs(eco: dict) -> list[dict]:
                 x = it[kind]
                 out.append({"job": x["job"], "item_subtype": x.get("sub"), "kind": kind})
     out += [b["spec"] for b in eco["idle"]["backlog"] if "spec" in b]
+    # Run 11: the glass chain (CollectSand, MakeRawGlass, CutGlass, ConstructBag; item conditions as economy.lua builds)
+    g = eco["glass"]
+    out += [dict(g["sand"]["spec"], item_conditions=[{"item_type": "BAG", "flags": ["empty"]}]),
+            dict(g["make"]["spec"], item_conditions=[{"flags": ["sand_bearing"]}]), g["cut"]["spec"],
+            {"job": "ConstructBag", "material_category": ["cloth"]}]
     return out
 
 
@@ -114,6 +119,7 @@ def test_workshops_plants_and_flags_exist(df, eco):
         ws |= set(eco[sec]["ws"])
     ws |= set(eco["cloth"]["loom"]) | set(eco["cloth"]["thread"]["ws"]) | set(eco["metal"]["smelter"])
     ws |= set(eco["metal"]["charcoal"]["ws"]) | set(eco["gear"]["forge"]) | set(eco["gear"]["leatherworks"])
+    ws |= set(eco["glass"]["furnace"]) | set(eco["glass"]["jeweler"]) | set(eco["glass"]["bag"]["ws"].values())
     for it in eco["gear"]["items"]:
         for kind in ("wood", "bone"):
             ws |= set(it.get(kind, {}).get("ws", []))

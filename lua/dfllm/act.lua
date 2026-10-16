@@ -1007,6 +1007,21 @@ local function impls(state)
     return true, n
   end
 
+  -- zones screen > add zone > Sand (Run 11, Kilrudrabed: no gem vein, raw glass for strange moods): one 1x1 sand
+  -- collection zone named dfllm-sand at pos, quickfort zone mode (internal/quickfort/zone.lua key `s`), as the runner
+  -- draws its gather zone. The caller picks a revealed sand floor (snapshot's sand marks, snapshot.tile; act reads no
+  -- tiles). Returns ok, zones designated (0 = quickfort skipped the tile: refused).
+  function I.sand_zone(pos)
+    local x, y, z = xyz(pos)
+    x, y, z = int(x), int(y), int(z)
+    if not (x and y and z) then return false, 'pos must be {x,y,z}' end
+    local ok, stats = I.quickfort({mode = 'zone', data = {[0] = {[0] = {[0] = 's{name=dfllm-sand}'}}}, pos = {x, y, z}})
+    if not ok then return false, stats end
+    local n = type(stats) == 'table' and int(stats.zone_designated) or nil
+    if n == 0 then return false, 'quickfort designated no zone there' end
+    return true, n or 1
+  end
+
   -- live L6 (Paddletribes): removes ONE Pond zone by id (as the player deletes the zone on its sheet); water
   -- uses it for ponds that only recycle the water of the well beside them. Never touches other zones.
   function I.pond_remove(id)

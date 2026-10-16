@@ -584,4 +584,26 @@ T.test('hooks through K.call: economy reads care.reserved and care.mood_wants', 
   df.global.plotinfo.economic_stone = nil
 end)
 
+-- Run 11 (Kilrudrabed, no gem vein): what raw and cut glass can do for a mood filter (DF's mood rules, strangemood.cpp)
+T.test('Run 11: glass_ok: raw glass for raw-glass filters, cut glass for "cut gems"; never rough gems, bars, leather',
+       function()
+  local W = bare()
+  local R = lib()
+  local function nd(t, spec) return R.need_of(ji(t, spec), 0, 0) end
+  local cut_any, cut_glass = nd('SMALLGEM'), nd('SMALLGEM', {mat_type = 3})
+  local cut_gem = nd('SMALLGEM', {mat_type = 0, mat_index = 3})                  -- a named gem (a preference)
+  local rough, raw = nd('ROUGH', {mat_type = 0}), nd('ROUGH', {mat_type = 3})
+  T.eq({R.glass_ok(cut_any), R.glass_ok(cut_glass), R.glass_ok(cut_gem)}, {'cut', 'cut', nil})
+  T.eq({R.glass_ok(raw), R.glass_ok(nd('ROUGH', {mat_type = 5}))}, {'raw', 'raw'}, 'green, clear or crystal glass')
+  T.eq(R.glass_ok(rough), nil, 'a rough gem (gem cutter, gem setter, the extra rough gem) is an inorganic')
+  T.eq({R.glass_ok(nd('BAR', {mat_type = 0})), R.glass_ok(nd('SKIN_TANNED')), R.glass_ok(nd('CLOTH')),
+        R.glass_ok(nd('BLOCKS', {mat_type = 0}))}, {nil, nil, nil, nil}, 'glass is no metal, leather, cloth or stone')
+  T.eq(R.glass_ok(R.legacy_need('rough')), nil, 'workshop classes without filters: not decided')
+  -- the items: cut glass serves "cut gems", raw glass never a rough gem; cut glass is gem stock of the reserve
+  local cglass = F.item(W, 'SMALLGEM', {mat_type = 3})
+  local rglass = F.item(W, 'ROUGH', {mat_type = 3})
+  T.eq({R.match(cut_any, cglass), R.match(rough, rglass), R.match(raw, rglass)}, {true, false, true})
+  T.eq({R.item_class(cglass), R.item_class(rglass)}, {'gems', nil})
+end)
+
 T.done()

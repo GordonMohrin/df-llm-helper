@@ -90,6 +90,9 @@ O.WS = {
   SmeltOre = any({F'Smelter', F'MagmaSmelter'}), CutGems = any({W'Jewelers'}),
   ConstructCatapultParts = any({W'Siege'}), ConstructBallistaParts = any({W'Siege'}),
   ButcherAnimal = any({W'Butchers'}), TanHide = any({W'Tanners'}),
+  -- Run 11 (Kilrudrabed, no gem vein): economy's glass chain (sand -> raw green glass -> cut glass) and its bags
+  CollectSand = any(GLASS), MakeRawGlass = any(GLASS), CutGlass = any({W'Jewelers'}),
+  ConstructBag = {cloth = CLOTH, silk = CLOTH, yarn = CLOTH, leather = LEATHER},
 }
 
 -- labor (df.unit_labor name) per workshop key; the forge and the craftsdwarf's shop depend on the job/material
@@ -105,6 +108,8 @@ local FORGE_LABOR = {MakeWeapon = 'FORGE_WEAPON', MakeAmmo = 'FORGE_WEAPON', Mak
                      MakeArmor = 'FORGE_ARMOR', MakeHelm = 'FORGE_ARMOR', MakePants = 'FORGE_ARMOR',
                      MakeGloves = 'FORGE_ARMOR', MakeShoes = 'FORGE_ARMOR', MakeShield = 'FORGE_ARMOR'}
 local CRAFT_LABOR = {rock = 'STONE_CRAFT', wood = 'WOOD_CRAFT', bone = 'BONE_CARVE'}
+-- jobs whose labor is not the workshop's (DFHack autolabor joblabormapper.cpp: CollectSand is item hauling)
+O.JOB_LABOR = {CollectSand = 'HAUL_ITEM'}
 
 -- workshop keys an order may run in (nil = unknown: not checked), material class
 function O.workshops(job, mc)
@@ -116,6 +121,7 @@ end
 -- labor names the order's workers need (any of them); nil = unknown
 function O.labors(job, mc, ws)
   if type(ws) ~= 'table' then return nil end
+  if O.JOB_LABOR[job] then return {O.JOB_LABOR[job]} end
   local r, seen = {}, {}
   for _, w in ipairs(ws) do
     local l = O.WS_LABOR[w]
@@ -135,6 +141,10 @@ function O.input(job, mc, mat_token)
   if job == 'PrepareMeal' then return 'cook' end
   if job == 'PrepareRawFish' then return 'fish_raw' end
   if job == 'SmeltOre' then return mat_token and ('ore:' .. mat_token) or nil end
+  -- Run 11: bags of sand (economy's census `sand`), empty bags (`bags`), raw glass (`glass`)
+  if job == 'MakeRawGlass' then return 'sand' end
+  if job == 'CollectSand' then return 'bags' end
+  if job == 'CutGlass' then return 'glass' end
   if not (O.WS[job] or WEAR_JOBS[job]) then return nil end
   if mc == 'wood' then return 'wood'
   elseif mc == 'rock' then return 'rock'

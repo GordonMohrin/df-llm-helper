@@ -116,6 +116,8 @@ C.EVENTS = {
   -- Gordon 2026-10-16: intake waves in SIEGE (muster, open, close, clear, back, abort, refused) and the sortie
   -- through O1 (gather, open, out, recall, close, done, abort)
   INTAKE = {cls = 'B', by = 'siege'}, SORTIE = {cls = 'B', by = 'siege'},
+  -- Run 11: economy's glass chain for strange moods is blocked (no sand revealed, no bags, no fuel; once per set)
+  GLASS_BLOCKED = {cls = 'B', by = 'economy'},
   -- C: log only
   SIEGE_STATUS = {cls = 'C', by = 'siege'}, SEASON = {cls = 'C', by = 'kern'},
   PROJECT_STAGE = {cls = 'C', by = 'runner'}, MODE = {cls = 'C', by = 'kern'},
@@ -167,6 +169,7 @@ C.ACT = {
   squad_create = {'military'}, squad_leader = {'military'}, squad_add = {'military'}, squad_remove = {'military'},
   squad_routine = {'military'}, squad_order = {'military'}, squad_uniform = {'military'},
   squad_unequip = {'military'}, squad_release = {'military'}, animal_slaughter = {'economy'}, zone_remove = {'runner'}, manager_office = {'economy'}, pond_remove = {'water'},
+  sand_zone = {'economy'},
   pull = {'gate'}, cancel_own_lever_job = {'gate'}, link_lever = {'gate'}, burrow_units = {'gate'},
   door_forbid = {'reflex'},
   burrow_tiles = {'seal'},
