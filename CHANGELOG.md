@@ -1,5 +1,20 @@
 # CHANGELOG dfpilot
 
+## Template `stockroom` and the core stock in `dfllm plan` (2026-10-16; offline, live-untested)
+- **Why (BUG-028, Run 10 y419):** 60 days of drink inside the core, 3093 units outside O1; `plan check` only warned.
+- **`stockroom`** (`dfpilot/bp/rooms.py`, DESIGN §5.11): a room in the core with food stockpiles `dfllm-stock` (one
+  barrel or pot per tile, quickfort `barrels=`; drink is stored there too) and a still (`still=1`, default; params
+  `w`, `h`, `still`, `barrels`), joined to Kern+.
+- **`dfllm plan propose`** drafts `stockroom` first while drink or food inside Kern+/the refuge is below 90 days and
+  none was applied (food only: `still=0`). **`dfllm plan check`** adds `core stock: add tpl stockroom to a season`;
+  once the fort has seen a siege (events or mode) the low value is the doctrine minimum: an error until a stockroom is
+  planned or exists (`plan.sieged`, `fort_facts` `stockroom`/`sieged`).
+- Tests: `tests/bp/test_bp_stockroom.py` (new), `tests/test_cli_plan.py`; README template list.
+- **How to use:** year review as usual (`plan propose` puts it in), or `dfllm cmd bp.place tpl=stockroom site=S1`.
+- **Live check:** in the Run 10 fort (`alert.core_d` 60, a siege in the log) `dfllm plan check` on a plan without a
+  stockroom says ERROR `... the doctrine minimum since the fort's first siege`; `plan propose` drafts
+  `stockroom@S1`; after it is built `inspect what=refuge` `supply` and `alert.core_d` rise as the haulers fill it.
+
 ## `traps 0` beside an armed trap hall: why, and the count that helps (2026-10-16; offline, live-untested)
 - **Cause:** `bp.topo.audit` `min_traps` was the minimum over every attacker route, and the bypass the same audit found
   (Run 10: the way down to the refuge level, see the audit-findings entry; Run 9: the other openings) meets no trap,

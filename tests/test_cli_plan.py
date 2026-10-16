@@ -381,7 +381,8 @@ def test_outer_gallery_warning_from_the_o1_phase(base):
 
 def test_fort_facts_read_the_save(save, base):
     from dfpilot import cmd
-    assert plan.fort_facts(save, base[1]) == {"o1": False, "gallery": False}      # proj 'fortcore' at s2.build
+    facts = plan.fort_facts(save, base[1])
+    assert (facts["o1"], facts["gallery"]) == (False, False)                       # proj 'fortcore' at s2.build
     assert plan.fort_facts(save, {**base[1], "proj": [["fortcore", "s3.build", 10, ""]]})["o1"] is True
 
     def stub(bid, tpl, params, manifest):
@@ -392,6 +393,63 @@ def test_fort_facts_read_the_save(save, base):
     o1 = {"v": 2, "bridges": {"O1": {"role": "outer", "fp": [49, 30, 120, 51, 30, 120],
                                      "levers": [[45, 40, 120], [45, 41, 120]]}}}
     cmd.write_bp(save, stub("c4", "fortcore", {"stage": 3}, o1))
-    assert plan.fort_facts(save, {**base[1], "proj": []}) == {"o1": True, "gallery": False}
+    facts = plan.fort_facts(save, {**base[1], "proj": []})
+    assert (facts["o1"], facts["gallery"]) == (True, False)
     cmd.write_bp(save, stub("c5", "gallery_o1", {}, {"v": 2}))
-    assert plan.fort_facts(save, {**base[1], "proj": []}) == {"o1": True, "gallery": True}
+    facts = plan.fort_facts(save, {**base[1], "proj": []})
+    assert (facts["o1"], facts["gallery"]) == (True, True)
+
+
+# ---------------------------------------------------------------- core stock after a siege (BUG-028, stockroom)
+def _low_core(state, d=60, f=120):
+    s = copy.deepcopy(state)
+    s.setdefault("alert", {"want": "Kern+", "burrow": "Kern+", "tiles": 100, "inside": 5, "ok": 1})
+    s["alert"].update(core_d=d, core_f=f)
+    return s
+
+
+def test_core_days_become_the_doctrine_minimum_after_a_siege(base):
+    """Run 10 y419: 60 days of drink inside the core while the army sat outside. Before any siege a warning (with the
+    stockroom hint); after one an error until a stockroom is planned or exists."""
+    doc, state = base
+    s = _low_core(state)
+    errs, warn = errs_of(doc, s, fort={"sieged": False})
+    assert errs == [] and "core stock: add tpl stockroom to a season (site S1; barrel stockpile + still behind B2)" \
+        in warn
+    errs, warn = errs_of(doc, s, fort={"sieged": True})
+    assert errs == ["drink inside Kern+/the refuge lasts 60 d < 90: build a still and a barrel stockpile inside the "
+                    "core (a siege cuts the rest off); the doctrine minimum since the fort's first siege"]
+    planned = copy.deepcopy(doc)
+    planned["seasons"][3]["build"].append({"tpl": "stockroom", "site": "S1"})
+    errs, warn = errs_of(planned, s, fort={"sieged": True})
+    assert errs == [] and any("drink inside Kern+" in w for w in warn) and not any("core stock" in w for w in warn)
+    assert errs_of(doc, s, fort={"sieged": True, "stockroom": True})[0] == []
+    assert errs_of(doc, {**s, "mode": "RECOVERY"})[0]                              # in a siege's aftermath now
+    assert not any("core stock" in w for w in errs_of(doc, _low_core(state, 95, 95))[1])
+
+
+def test_sieged_reads_the_event_log(save, base):
+    assert plan.sieged(save, base[1]) is True                  # the fixture log has a SIEGE_START (41 invaders)
+    for p in (save / "events.jsonl", save / "events.1.jsonl"):
+        lines = [ln for ln in p.read_text("utf-8").splitlines() if '"SIEGE_' not in ln and '"BREACH"' not in ln
+                 and '"to":"SIEGE"' not in ln and '"to":"BREACH"' not in ln]
+        p.write_text("".join(ln + "\n" for ln in lines), encoding="utf-8")
+    assert plan.sieged(save, base[1]) is False
+    assert plan.sieged(save, {**base[1], "mode": "SIEGE"}) is True
+
+
+def test_propose_drafts_a_stockroom_first(base):
+    prev, state = base
+    phases = json.loads((FIX / "phases.json").read_text("utf-8"))
+    tinfo = {t: {"params": {}, "about": ""} for t in ("tombs", "temple", "stockroom", "dining", "workshops")}
+    doc = plan.propose(_low_core(state), phases, prev, decisions={}, tinfo=tinfo)
+    new = doc["seasons"][1]["build"][len(prev["seasons"][1]["build"]):]
+    assert new[0] == {"tpl": "stockroom", "site": "S1"}
+    doc = plan.propose(_low_core(state, d=200, f=30), phases, prev, decisions={}, tinfo=tinfo)
+    new = doc["seasons"][1]["build"][len(prev["seasons"][1]["build"]):]
+    assert new[0] == {"tpl": "stockroom", "site": "S1", "p": {"still": 0}}          # food only: no second still
+    for st in (state, _low_core(state, 95, 95)):
+        assert all(b["tpl"] != "stockroom" for se in plan.propose(st, phases, prev, decisions={}, tinfo=tinfo)[
+            "seasons"] for b in se["build"])
+    done = plan.propose(_low_core(state), phases, prev, decisions={}, tinfo=tinfo, applied={("stockroom", None)})
+    assert all(b["tpl"] != "stockroom" for se in done["seasons"] for b in se["build"])

@@ -25,6 +25,9 @@ BUILDS_PER_SEASON = 3                     # runner runs <= 3 projects at once
 CORE_DAYS = 90                            # BUG-028: drink/food days wanted inside Kern+ and the refuge (seal.CFG.sup_days)
 O1_PHASE = "P5"                           # plans/year1.json: fortcore stage 3 builds the outer bridge O1
 GALLERY = "gallery_o1"                    # bp/defense.py: the outward crossbow gallery over the O1 approach (Run 10)
+STOCKROOM = "stockroom"                   # bp/rooms.py: food stockpile with barrels + still inside the core (BUG-028)
+SIEGE_EVENTS = ("SIEGE_START", "SIEGE_END", "BREACH")
+SIEGE_MODES = ("SIEGE", "BREACH", "RECOVERY")
 # DESIGN §11.4 always-blocked commands and banned terms (CONTRACTS §1.4); config/allowlist.json adds more
 BANNED = ["digv", "digvx", "digtype", "fastdwarf", "caravan extend", "caravan happy", "autodump", "locate-ore",
           "prospect", "showmood", "reveal", "createitem", "dig-now", "build-now", "fix/retrieve-units",
@@ -99,9 +102,21 @@ def stable_ids(doc: dict, prev: dict | None) -> list[str]:
     return errs
 
 
+def sieged(save_dir: Path, state: dict | None = None) -> bool:
+    """The fort has seen a siege: a SIEGE_START/SIEGE_END/BREACH event or a MODE change to SIEGE/BREACH in the event
+    log (events.jsonl and its rotation), or the state's mode is SIEGE/BREACH/RECOVERY now."""
+    if (state or {}).get("mode") in SIEGE_MODES:
+        return True
+    for e in files.iter_events_rev(save_dir):
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        if e.get("type") in SIEGE_EVENTS or (e.get("type") == "MODE" and d.get("to") in ("SIEGE", "BREACH")):
+            return True
+    return False
+
+
 def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
     """What check() needs beyond state, read from the save folder: o1 (the fortcore manifest has an outer bridge, or
-    fortcore stage >= 3 is applied), gallery (a gallery_o1 project or manifest room exists)."""
+    fortcore stage >= 3 is applied), gallery / stockroom (such a project or manifest room exists), sieged (sieged())."""
     applied = applied_builds(save_dir, state)
     try:
         man = fort_manifest(save_dir)
@@ -112,7 +127,10 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
     return {"o1": any(isinstance(b, dict) and b.get("role") == "outer" for b in bridges.values())
             or any(t == "fortcore" and (st or 0) >= 3 for t, st in applied),
             "gallery": any(isinstance(r, dict) and r.get("tpl") == GALLERY for r in rooms)
-            or any(t == GALLERY for t, _ in applied)}
+            or any(t == GALLERY for t, _ in applied),
+            "stockroom": any(isinstance(r, dict) and r.get("tpl") == STOCKROOM for r in rooms)
+            or any(t == STOCKROOM for t, _ in applied),
+            "sieged": sieged(save_dir, state)}
 
 
 def _outer_gallery(doc: dict, s: dict, fort: dict) -> str | None:
@@ -168,13 +186,26 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     for k, m in SUPPLY_MIN.items():
         if sup[k] < m:
             (errs if k != "mood_stock" else warn).append(f"supply.{k} {sup[k]} < doctrine minimum {m}")
-    # BUG-028: drink and food inside the lockable core (seal: state alert.core_d/core_f, days)
+    # BUG-028: drink and food inside the lockable core (seal: state alert.core_d/core_f, days). Below CORE_DAYS a
+    # warning; once the fort has seen a siege it is the doctrine minimum (an error) until a stockroom is planned
     al = s.get("alert") or {}
+    f = fort or {}
+    builds = [b for se in doc["seasons"] for b in se["build"]]
+    stocked = bool(f.get("stockroom")) or any(b["tpl"] == STOCKROOM for b in builds)
+    after_siege = bool(f.get("sieged")) or s.get("mode") in SIEGE_MODES
+    low = False
     for key, cls, fix in (("core_d", "drink", "a still and a barrel stockpile"), ("core_f", "food", "a food stockpile")):
         v = al.get(key)
         if isinstance(v, int) and v < CORE_DAYS:
-            warn.append(f"{cls} inside Kern+/the refuge lasts {v} d < {CORE_DAYS}: build {fix} inside the core "
-                        "(a siege cuts the rest off)")
+            low = True
+            text = (f"{cls} inside Kern+/the refuge lasts {v} d < {CORE_DAYS}: build {fix} inside the core "
+                    "(a siege cuts the rest off)")
+            if after_siege and not stocked:
+                errs.append(text + "; the doctrine minimum since the fort's first siege")
+            else:
+                warn.append(text)
+    if low and not stocked:
+        warn.append(f"core stock: add tpl {STOCKROOM} to a season (site S1; barrel stockpile + still behind B2)")
     gw = _outer_gallery(doc, s, fort or {})
     if gw:
         warn.append(gw)
@@ -261,6 +292,11 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     done = {_build_key(b) for se in (prev or {}).get("seasons", []) for b in se["build"]} | set(applied or ())
     staged = None if info is None else {t for t, i in info.items() if "stage" in i["params"]}
     builds, libs = [], []
+    # BUG-028: drink or food inside the core below CORE_DAYS -> a stockroom first (food only: without the still)
+    al = s.get("alert") or {}
+    low = [k for k in ("core_d", "core_f") if isinstance(al.get(k), int) and al[k] < CORE_DAYS]
+    if low and (STOCKROOM, None) not in done and (info is None or STOCKROOM in info):
+        builds.append({"tpl": STOCKROOM, "site": "S1", **({"p": {"still": 0}} if low == ["core_f"] else {})})
     for p in plist:
         if cur <= p["id"] <= target:
             for d in p["deliver"]:
