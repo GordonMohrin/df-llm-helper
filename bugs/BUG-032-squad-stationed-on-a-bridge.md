@@ -1,5 +1,5 @@
 # BUG-032 A squad stationed next to B2 holds the BREACH raise: GATE_FAIL B2 'not up after 908 ticks'
-Status: fixed (offline, live-untested): stations clear of every bridge footprint and its ring, the squad that holds a raise re-stationed, fortcore stations moved, validator check; part 2: O1's pull in the deep defense goes to a lever the confined civilians may take; part 3: melee squads refilled in a siege from the core
+Status: fixed in 94446e8, 69f14d3 (offline, live-untested): stations clear of every bridge footprint and its ring, the squad that holds a raise re-stationed, fortcore stations moved, validator check; part 2: O1's pull in the deep defense goes to a lever the confined civilians may take; part 3: melee squads refilled in a siege from the core
 Severity: high (wrong decision: our own station kept the core seal down in a BREACH; the gate rule that held it is right)
 Found: 2026-10-16, Run 11 fort Kilrudrabed (site98), y432 spring, a cave dragon siege and a snatcher, then BREACH (0 deaths
 so far), kernel of main up to 276b252, from the game session's events
