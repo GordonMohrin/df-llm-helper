@@ -1,5 +1,5 @@
 # BUG-029 Squad stations behind raised bridges: soldiers cut off from drink for a whole siege
-Status: fixed (offline, live-untested): inner station READY_IN, stray return, unseal (Claude, 2026-10-16); flasks open
+Status: fixed in 285e31d (offline, live-untested): inner station READY_IN, stray return, unseal (Claude, 2026-10-16); flasks open
 Severity: high (wrong decision: soldiers stand where our own gates cut them off from drink; recruits died of thirst in BUG-028)
 Found: 2026-10-16, Run 10 fort Erushthak Handlelock (region2-site97), y419 siege of 47-48 goblins, after the kernel
 restart in SIEGE (6455f16), Claude playing
