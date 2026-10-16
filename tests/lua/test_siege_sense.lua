@@ -225,4 +225,26 @@ T.test('threat.assess reach: z band, 100/120-tile hysteresis, citizens outside, 
   T.eq({a.hostile, a.quiet, a.calm}, {true, false, false}, 'invaders count map-wide')
 end)
 
+T.test('threat.assess reach (Run 11): a hostile beside an explore shaft open to a cavern counts below the band', function()
+  local open = {n = 1, list = {{51, 70, 2, 0}}}       -- the shaft 51,70 from z2 down to z0, plug wall not standing yet
+  local runner = {name = 'runner', every = {ticks = 600},
+                  cavern_open = function(K) return open.n, open.list end}
+  local W = world({S.cit(1, 60, 70)}, {extra = {runner}})
+  local K = W.K
+  W.run(30)
+  local function with(e)
+    W.set_census('h', {tick = K.now().tick, vis = 1, inv = 0, great = e.k == 'great' and 1 or 0, undead = 0, inside = 0,
+                       near_o1 = e.d_o1, near_cit = -1, near_bridge = {}, list = {e}})
+    return select(2, K.call('threat', 'assess'))
+  end
+  -- the cavern level below the band (z 1..50 needs z >= 1): out of reach without the open shaft
+  local a = with({id = 9, x = 70, y = 80, z = -3, k = 'great', d_o1 = 50})
+  T.eq({a.siege, a.hostile}, {'great', true}, '19 tiles from the open shaft, 3 levels below its bottom: it counts')
+  a = with({id = 9, x = 90, y = 80, z = -3, k = 'great', d_o1 = 50})
+  T.eq({a.siege, a.hostile}, {nil, false}, '39 tiles from the shaft: still out of reach')
+  open.n, open.list = 0, {}                            -- the plug wall stands: the cavern is sealed again
+  a = with({id = 9, x = 70, y = 80, z = -3, k = 'great', d_o1 = 50})
+  T.eq({a.siege, a.hostile, a.quiet}, {nil, false, true}, 'plugged: a sealed cavern stays quiet')
+end)
+
 T.done()

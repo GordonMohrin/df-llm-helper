@@ -62,7 +62,12 @@ end
 -- quickfort's designation rules that matter here (dig.lua:171-180 do_mine, :288-297 do_smooth,
 -- :309-314 do_fortification): mine keys designate hidden tiles but never the map edge; smoothing needs
 -- a visible hard wall (W.soil marks soil), a fortification a smooth wall
+-- Run 11: a channel also takes a stair or a floor (quickfort do_channel: down stairs, floors); W.no_channel refuses one
+local CHANNEL = {['#'] = true, S = true, ['.'] = true, ['>'] = true, X = true, ['<'] = true}
 local function diggable(W, t, key, x, y, z)
+  if key == 'h' then
+    return not on_edge(x, y, z) and not (W.no_channel or {})[x .. ',' .. y .. ',' .. z] and (t.hidden or CHANNEL[t.c] == true)
+  end
   if MINE[key] then return not on_edge(x, y, z) and (t.hidden or t.c == '#' or t.c == 'S') end
   if t.hidden then return false end
   if key == 's' then return t.c == '#' and not W.soil[x .. ',' .. y .. ',' .. z] end
@@ -137,7 +142,8 @@ function H.fake_qf(W, p)
         if cmd == 'undo' then
           local id = W.bld_at[k]
           if id then W.buildings[id] = nil; W.bld_at[k] = nil; W.undone = W.undone + 1 end
-        elseif W.unsuitable[k] or W.bld_at[k] or W.tile(tx, ty, z).c ~= '.' then
+        elseif W.unsuitable[k] or W.bld_at[k] or not (W.tile(tx, ty, z).c == '.'
+               or (key:sub(1, 1) == 'C' and (W.tile(tx, ty, z).c == '_' or W.tile(tx, ty, z).c == 'v'))) then
           st.build_unsuitable = st.build_unsuitable + 1
         elseif not p.dry_run then
           building(W, tx, ty, z, key)
@@ -180,7 +186,29 @@ function H.world(opts)
                       if not on_map(x, y, z) then return nil end
                       local t = W.tile(x, y, z)
                       if t.hidden then return nil end
-                      return {c = t.c, dig = t.dig, bld = W.bld_at[x .. ',' .. y .. ',' .. z] and 'Bed' or ''}
+                      return {c = t.c, dig = t.dig, bld = W.bld_at[x .. ',' .. y .. ',' .. z] and 'Bed' or '',
+                              flow = t.flow or ((t.c == '~' and 7) or (t.c == 'w' and 2) or 0), cav = t.cav == true}
+                    end,
+                    -- Run 11: open sky per point (snapshot.outside_near, r = 0: the tile itself; W.tile().outside)
+                    outside_near = function(K, pts)
+                      local out = {}
+                      for i, p in ipairs(pts) do out[i] = W.tile(p[1], p[2], p[3]).outside and 1 or 0 end
+                      return out
+                    end,
+                    -- Run 11: revealed water tiles of a level rect (snapshot.liquids: {{x, y, flow}})
+                    liquids = function(K, x0, y0, x1, y1, z, min)
+                      W.snap.lq = (W.snap.lq or 0) + 1
+                      local out = {}
+                      for k, t in pairs(W.map) do
+                        local x, y, tz = k:match('^(%-?%d+),(%-?%d+),(%-?%d+)$')
+                        x, y, tz = tonumber(x), tonumber(y), tonumber(tz)
+                        local f = t.flow or ((t.c == '~' and 7) or (t.c == 'w' and 2) or 0)
+                        if tz == z and x >= x0 and x <= x1 and y >= y0 and y <= y1 and not t.hidden and f >= (min or 1) then
+                          out[#out + 1] = {x, y, f}
+                        end
+                      end
+                      table.sort(out, function(a, b) return a[2] * 1000 + a[1] < b[2] * 1000 + b[1] end)
+                      return out
                     end}
   end
   return W

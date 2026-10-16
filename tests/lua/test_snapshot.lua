@@ -63,6 +63,13 @@ T.test('tile(): legend classes, hidden is nil, designations, buildings', functio
   T.eq(t(3, 1).c, '_')
 end)
 
+T.test('tile() cav (Run 11): a revealed cavern tile (designation.feature_global) says so, others do not', function()
+  local W = world{rows = {'#c~.'}}
+  local function t(x) local _, r = W.K.call('snapshot', 'tile', x, 0, Z); return r end
+  T.eq({t(0).cav, t(1).cav, t(2).cav, t(3).cav}, {false, true, false, false})
+  T.eq({t(2).c, t(2).flow}, {'~', 6})
+end)
+
 T.test('items_at() (BUG-009): the loose items on the revealed tiles of a footprint, from the map blocks', function()
   local W, S = world()
   W.items_by_id = {}

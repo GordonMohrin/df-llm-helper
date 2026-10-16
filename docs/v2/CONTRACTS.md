@@ -319,12 +319,14 @@ Only these are public across WPs; anything else is module-internal. "Returns" ar
 | `drill.start(why)` | `ok, msg` | PEACE only, no merchants on map |
 | `drill.hold()` | `why` or `nil` | FR-65: why no automatic drill starts now (≤ 24 chars: `no bridges`, `phase P3<P5`, `no soldiers`, `military?`, `mode ALERT`, `settling`, `just drilled`, `aborted`, `blocked:no_kern`, `retry wait`, `passed`, `merchants`, `running`); `nil` = one is due. readiness publishes it as `ready.dhold` |
 | `snapshot.export(opts)` | `ok, id` | `opts = {id?, bbox?, purpose='audit'|'sites'|'debug'}`; sliced; emits `SNAPSHOT_READY` |
-| `snapshot.tile(x, y, z)` | `nil` (hidden/invalid) or `{c=<legend char>, dig=<designation or ''>, bld=<building type or ''>}` | the only tile read for other modules; `dig='job'` when a designation job (Dig, channel, …) sits on the tile, because DF clears `designation.dig` while a miner works it (live L1) |
+| `snapshot.tile(x, y, z)` | `nil` (hidden/invalid) or `{c=<legend char>, dig=<designation or ''>, bld=<building type or ''>, flow=0..7, magma=bool, cav=bool}` | the only tile read for other modules; `dig='job'` when a designation job (Dig, channel, …) sits on the tile, because DF clears `designation.dig` while a miner works it (live L1); `cav`: the revealed tile belongs to a cavern (`designation.feature_global`, the export's cavern mark; Run 11) |
 | `economy.imported(lib)` | `bool` | orders library already imported |
 | `economy.alarm()` | `why` or `nil` | supply alarm (thirst/hunger of >= 2 citizens, drink or food < 10 days); arbiter brakes tempo while set (live L1) |
 | `economy.tool_want()` | `{pick = n, axe = n}` or `nil` | BUG-023: the Miners/Woodcutters demand before economy's tool cap (the cap counts only free unreserved tools); military keeps that many picks/axes out of the soldiers' weapon specs |
 | `runner.dig_backlog()` | `int` | tiles still to dig in the dig stage of every running project (tile count minus the last measured progress); economy sizes the Miners detail from it (live L1b) |
 | `runner.pending(tpl)` | `int` | projects of `tpl` not done yet (care waits for them before asking again) |
+| `runner.cavern_open()` | `n, [[x, y, z_top, z_bottom]]` | Run 11: explore shafts open to a cavern whose plug wall (on the shaft top) does not stand yet (m.runner `cav`, state open/failed); readiness adds `caverns` to R0 while n > 0, threat counts hostiles within `SHAFT_R` (30) tiles of a listed shaft from 5 levels below its bottom up to its top |
+| `runner.opened(P, doc, pos)` | `kind, n` | Run 11: what a breach at pos opened from the revealed tiles: `cavern_lake` (≥ `lake_min` 30 revealed water tiles outside the project's own tiles connected to pos within `lake_r` 12 on its level ± 1, and a revealed cavern tile beside pos or in that water, or none of the sampled water under the open sky: `snapshot.outside_near`), `water` (such a body on the surface), `cavern` (a revealed cavern tile beside pos), nil (seepage); n = the water tiles counted |
 | `runner.bboxes()` | `[bbox]` | bboxes of the projects not done yet; readiness widens the audit snapshot with them (live L2: a dig in progress ran past the box edge and read as a bypass) |
 | `trade.done()` | `int` | caravans traded this fort |
 | `trade.clock()` | `why` or `nil` | BUG-026: `'trade'` from the first trade-screen phase of a caravan visit until the visit ends (traded, failed, left; a pending retry included), PEACE only; the arbiter caps the FPS at `clock.trade_cap` (§9.18) while it is set (level-triggered, every pass) |
@@ -515,7 +517,7 @@ Written by Python from `bp.emit` (WP3) **before** the inbox `bp.place` (file id 
 | Key | Type | Meaning |
 |---|---|---|
 | `v`, `id`, `tpl`, `site` | 2, id, tpl, str | `site` is the label from `bp sites` (S1-S3) |
-| `class` | `'defense'|'infra'|'living'|'beauty'` | mode gating: ALERT allows defense+infra, SIEGE defense only (repairs inside), beauty only PEACE with R1 |
+| `class` | `'defense'|'infra'|'living'|'beauty'` | mode gating: ALERT allows defense+infra, SIEGE defense only (repairs inside), beauty only PEACE with R1; the runner's own `plug` projects (Run 11, CAVERN_PLUG) run in every mode |
 | `params` | object (scalars) | template params |
 | `anchor`, `rot` | pos, 0-3 | where and how it was placed |
 | `stages` | 1-64 × stage | applied in order |
@@ -743,7 +745,8 @@ The fort-specific geometry, written by templates (bp `manifest` fragments) and m
 | LABOR_STARVED | B | economy | **labor** (str), cycles, to (str: managed, monitor) — a supply labor labormanager starved: a builtin tool labor becomes managed, otherwise labormanager falls back to monitor (live L1) |
 | WORK_DETAIL | B | economy | **detail** (str), **unit**, **on** (1 added, 0 removed), n (target), why (str) — economy changed a builtin tool detail (live L1b) |
 | CAPTURE | B | care | unit, race (str) |
-| BREACH_STOP | B | runner | proj (str), why (str: damp, warm, cavern, water), pos (int[3]) |
+| BREACH_STOP | B | runner | proj (str), why (str: damp, warm, water, cavern, cavern_lake), pos (int[3]), src (report, tile, cancel, recheck), was (str: the reported why a look at the revealed tiles raised, Run 11), n (water tiles counted) — msg e.g. `e1: cavern lake (report, not damp: 552 water tiles in reach), digging stopped`; a FEATURE_DISCOVERY of underground water is `cavern_lake`; a project stopped as damp/water/cavern is looked at again daily (src `recheck`) |
+| CAVERN_PLUG | A | runner | **phase** (queued, done, failed, none), **proj** (str: the project that broke in), plug (str: the `plug` project), why (cavern, cavern_lake), pos (int[3] breach), shaft (int[3]: the shaft's top tile), z1 (its bottom z), walls (str[] `x,y,z`, the lower one first), n, hint — Run 11: an explore shaft open to a cavern gets a `plug` project at once (prio 1, every mode, no hazard stop; stages `p1.dig`/`p1.wall` for the tile below the top, `p0.dig`/`p0.wall` for the top: channel `h` on a stair, then `Cw`; the p1 steps are given up after `plug_wait` (a day) each or when quickfort refuses them); `done` once a constructed wall stands on the top tile (the plug's or one built by hand), `failed` when quickfort refuses the top, the plug is cancelled, blocked or ends without the wall, `none` for other templates (no automatic plug); m.runner `cav[<proj>]` |
 | KERNEL_SLOW | B | kern | **module** (str), ms, factor |
 | WEALTH | B | siege | created, exported, imported |
 | DRILL_RESULT | B | drill | pass (flag), raised, worn, outside, dbl |
@@ -946,7 +949,7 @@ Each item names the WP that must adapt its code; WP0 changed the contract, `cont
 Generated by `python -m dfpilot.schema --write-appendix docs/v2/CONTRACTS.md`; `tests/test_schema.py` fails if this block is stale. The digest covers every schema and registry in `schema.py`, so any contract change shows up here.
 
 <!-- BEGIN GENERATED SCHEMAS -->
-Contract digest: `333f165ccffa65341b049936227718e21b26ab465f4df66abda4171c8a4ccb38`
+Contract digest: `26e362edb301087819c7f4dd6dd36824734c2ba19dce60c9fb0c14229dae363f`
 
 DESIGN §6 formats and the inbox verb args. Other kinds: `python -m dfpilot.schema --json-schema <kind>` with kind in heartbeat, phases, bp, restore, lock, allowlist, quicksave, persist.marker, persist.projects, persist.plan, persist.phase, persist.mode, persist.drill, persist.kern. Per-type event `d` (§12) and per-verb `args` are checked by `validate()`; the envelopes leave them open. Compact JSON, keys sorted.
 

@@ -28,6 +28,9 @@ Sources: [W] dwarffortresswiki.org (v50+ namespace, fetched today); [D] the inst
 - Dig a 1-tile probe stair. If tiles are reported damp, stop and never re-designate them.
 - Pass through with a sealed shaft only, or keep the fort above that layer.
 - Every breach of water or caverns goes through a 2-wall airlock with a pathcheck before and after.
+- A dig that breaks into a cavern or a cavern lake by accident (Run 11: an ore shaft into a lake, reported as damp) is
+  closed at once with constructed walls on the shaft's top tiles (the kernel's `plug`, CAVERN_PLUG); doors and hatches
+  do not hold forgotten beasts or building destroyers. Damp is aquifer seepage only.
 
 **Year 1** (game month → goal; real time at about 450 ticks/s):
 1. **Granite (day 0-5):**

@@ -1,5 +1,58 @@
 # CHANGELOG dfpilot
 
+## A cavern breach is named and plugged: BREACH_STOP `cavern_lake`, the `plug` project, CAVERN_PLUG (2026-10-16; offline, live-untested)
+- **Why (Run 11, Kilrudrabed site98):** the explore shaft 136,73 (z137 down) broke into a cavern lake on z127 (1146
+  visible water tiles there, 662 on z126). DF's damp report stopped it and BREACH_STOP said `damp (report)`, so nothing
+  showed that the aborted shaft was now an open way from the cavern into the core (Run 3 fell to forgotten beasts
+  through an opened shaft; doors and hatches do not hold them).
+- **Breach kinds (runner):** a damp/water/cavern stop is held against the revealed tiles at the breach
+  (`runner.opened`): >= `lake_min` (30) revealed water tiles outside the project's own dug tiles connected to it within
+  `lake_r` (12) on its level +- 1, with a revealed cavern tile (`snapshot.tile` new `cav` = `designation.feature_global`)
+  beside it or in that water (or none of that water under the open sky) = `cavern_lake`; a revealed cavern tile
+  beside it = `cavern`; a big body on the surface = `water`; else it stays `damp` (aquifer seepage, also 7/7 in the own
+  shaft). It only raises a stop, never lowers it.
+  A FEATURE_DISCOVERY of underground water (lake, river) is `cavern_lake` (was `water`). BREACH_STOP gains `src`,
+  `was`, `n`; msg `e1: cavern lake (report, not damp: 552 water tiles in reach), digging stopped`. A project stopped as
+  damp/water/cavern without a plug looks again once a day (src `recheck`): its stored breach tile, its shaft bottom and
+  its dug tiles that hold water (the live Run 11 shaft, stopped as damp by the old code, is found this way).
+  `damp_dig`/`seep_max` (light aquifer re-designation) are unchanged; with `damp_dig` a damp report beside a cavern
+  stops the dig all the same.
+- **Plug (runner, at once):** an explore shaft open to a cavern gets a `plug` project (prio 1, class defense, every mode,
+  never stopped by a damp report or water): its top stair tile and the one below each get a channel (`h`: walls cannot
+  stand on stairs, quickfort `is_valid_tile_construction`) and then a constructed wall (`Cw`, buildingplan waits for
+  the material); the lower one first (it is reached only through the upper one), given up when a step of it waits
+  `plug_wait` (a day) or quickfort refuses it; the top one is channelled and walled from the core floor beside it.
+  **CAVERN_PLUG (A, new):** `queued` names the shaft (`x,y zTOP-zBOT`), the breach and the walls; `done` once a
+  constructed wall stands on the shaft top (the plug's or one built by hand); `failed` (quickfort refused the top,
+  the plug was cancelled, blocked or ended without the wall); `none` for other templates (their stairs may be the
+  fort's own: wall the way in by hand). Record m.runner `cav` (outlives the explore project).
+- **Readiness:** `caverns` stays in `ready.fail` (R0) while `runner.cavern_open()` lists a shaft whose top wall does not
+  stand, also when the explore was cancelled and the shaft left the audit box; CAVERN_PLUG triggers a re-evaluation.
+- **Threat:** a hostile within `SHAFT_R` (30) tiles of an open shaft, from 5 levels below its bottom up to its top,
+  counts although it stands below the fort's z band (a cavern creature at the opening raises ALERT); once plugged the
+  sealed cavern is quiet again.
+- Contracts: event CAVERN_PLUG (A, RULES §7 row), BREACH_STOP fields/whys, `snapshot.tile` `cav`, public
+  `runner.cavern_open`/`runner.opened` (schema, contract.lua, CONTRACTS §7/§12 and appendix). RULES §7/§8/§10, DESIGN
+  §5 explore and §11.1, DOCTRINE §1; wake hint for CAVERN_PLUG.
+- Tests: `tests/lua/test_runner_cavern.lua` (new: lake vs damp, the plug's four steps, the lower wall given up,
+  quickfort refusing the top, seepage stays damp, the recheck of an old damp stop, an open cavern, a room breach =
+  none, an underground lake without the cavern flag, the plug in SIEGE and against hazards, damp_dig unchanged),
+  `test_runner.lua` (FEATURE_DISCOVERY water), `test_readiness.lua`, `test_siege_sense.lua` (threat near the shaft),
+  `test_snapshot.lua` (`cav`), `tests/test_schema.py` (the new event).
+- **How to use:** nothing to send: the kernel names the breach and plugs the shaft itself. On a CAVERN_PLUG wake:
+  `queued` -> tell the player, `dfllm status` shows the `pl<tick>` project, then `dfllm cmd bp.cancel
+  '{"proj":"<explore id>"}'` (no undo); `failed`/`none` -> tell the player at once: a constructed wall on the named
+  tile by hand (a stair: channel it first). Readiness stays R0 `caverns` until the top wall stands.
+- **Live check (Run 11 site98):** after `git pull` and `dfhack-run dfllm reload`, within one runner run the explore
+  blocked `breach:damp` shows `breach:cavern_lake` (`dfllm events --type BREACH_STOP`: src `recheck`, was `damp`) and
+  CAVERN_PLUG `queued` names the shaft 136,73 z137-127 (or -126) and walls 136,73,136 + 136,73,137; `dfllm status`
+  `ready.fail` holds `caverns`. Watch in DF: (1) whether a miner channels 136,73,136 from the stair above (if not, the
+  log says `lower wall (p1.dig) given up` after a day); (2) whether quickfort designates the channel on the `j` at
+  z137 and a builder walls the open space from the core floor (`inspect projects`; if refused: CAVERN_PLUG `failed`,
+  wall it by hand); (3) CAVERN_PLUG `done` and `caverns` gone from `ready.fail` (the audit's own cavern check must
+  pass too); (4) `inspect persist` key `m.runner` `cav` holds the record. If the lake tiles carry no `cav`
+  (feature_global), the kind is still `cavern_lake` as long as none of them lies under the open sky.
+
 ## No P3+ without a separated refuge with beds; template `refuge_beds` (2026-10-16; offline, live-untested)
 - **Why (Run 10, post-mortem root cause 5):** Tiefe+ was never usable (beds 8 < 27, open to the entrance 95,127,123,
   58 steps), Kern+ lay on the attack path, at pop 110 there was no safe room; no template could add beds to the refuge

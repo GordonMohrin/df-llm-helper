@@ -216,7 +216,7 @@ end
 
 ---------------------------------------------------------------- public tile query (§7)
 -- nil (hidden or invalid) or {c = legend char, dig = pending designation or '', bld = building type
--- (Door, Bridge, Trap, Well, ...), 'passable'/'impassable' (other buildings) or ''}
+-- (Door, Bridge, Trap, Well, ...), 'passable'/'impassable' (other buildings) or '', flow, magma, cav}
 function M.tile(K, x, y, z)
   x, y, z = int(x), int(y), int(z)
   if not (x and y and z) then return nil end
@@ -229,8 +229,10 @@ function M.tile(K, x, y, z)
   local c, bld = classify(x, y, z, des, oc, live_traps.idx, nil)
   local dig = designation(des, oc)
   if dig == '' and designation_jobs(now)[string.format('%d,%d,%d', x, y, z)] then dig = 'job' end
-  -- flow: liquid depth 0..7 of this revealed tile, magma: true for magma (runner: light-aquifer seepage)
-  return {c = c, dig = dig, bld = bld, flow = des.flow_size or 0, magma = des.liquid_type == true}
+  -- flow: liquid depth 0..7 of this revealed tile, magma: true for magma (runner: light-aquifer seepage); cav: the
+  -- revealed tile belongs to a cavern (designation.feature_global, the export's cavern mark; runner: Run 11 cavern lake)
+  return {c = c, dig = dig, bld = bld, flow = des.flow_size or 0, magma = des.liquid_type == true,
+          cav = des.feature_global == true}
 end
 
 -- water tiles of one level rect (FR-47, water's water_sources scan): {{x, y, flow}} of revealed, non-magma
