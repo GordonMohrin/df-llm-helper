@@ -190,8 +190,34 @@ T.test('Run 10: miners leave the everybody-does-this details (Planters), the kep
   local c7 = calls(ctl, 'Miners', 7)
   T.eq({#c7, c7[1].opts.only}, {1, true}, 'the miner the kernel adds joins as a specialist')
   days(W, 8)
-  T.eq(#calls(ctl, 'Miners', 5), 1, 'out of Planters: nothing left to do')
+  local c5b = calls(ctl, 'Miners', 5)
+  T.eq(#c5b, 2, 'out of Planters: only the tool repair after repair_days (no pick in hand, free picks)')
+  T.eq(c5b[2].opts.equip, 'force')
   T.eq(#calls(ctl, 'Woodcutters'), 0)
+end)
+
+T.test('Run 10: members added before equip_update get the equipment update again (boot, repair_days); TOOL_BLOCKED says so', function()
+  local W, ctl = world{cit = 12, wood = 30, cutters = {1, 9}, bin_axes = 2, fell = 19}
+  days(W, 1)
+  for _, id in ipairs({1, 9}) do
+    local c = calls(ctl, 'Woodcutters', id)
+    T.eq(#c, 1, 'the first pass after a load repairs a member without an axe')
+    T.eq({c[1].on, c[1].opts.equip}, {true, 'force'})
+  end
+  days(W, 3)
+  local ev = W.find_events('TOOL_BLOCKED')
+  T.eq(#ev, 1)
+  T.eq({ev[1].d.detail, ev[1].d.eq}, {'Woodcutters', 2})
+  T.ok(ev[1].d.eq_days >= 2, tostring(ev[1].d.eq_days))
+  T.ok(ev[1].d.hint:find('requested 2 times', 1, true), ev[1].d.hint)
+  T.eq(#calls(ctl, 'Woodcutters', 1), 1, 'not again before repair_days')
+  days(W, 4)
+  T.eq(#calls(ctl, 'Woodcutters', 1), 2, 'again after repair_days')
+  -- with the switch off no forced request is made
+  local W2, ctl2 = world{cit = 12, wood = 30, cutters = {1, 9}, bin_axes = 2, fell = 19,
+                         setup = function(Wx) Wx.K.cfg.baseline.economy.tools.equip_update = false end}
+  days(W2, 1)
+  T.eq(#calls(ctl2, 'Woodcutters', 1), 0, 'equip_update off: no tool repair')
 end)
 
 T.test('BUG-023: woodcutters and miners without their tool -> TOOL_BLOCKED (A) once; starving reason', function()

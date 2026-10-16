@@ -2279,7 +2279,11 @@ local function tool_check(K, tc, r, spec, cur, jc, fixed)
       local names = {}
       for i = 1, math.min(3, #without) do names[i] = unit_name(without[i]):sub(1, 24) end
       local hint = res > 0 and 'squad uniforms reserve tools (military weapon choice); ' or ''
-      hint = hint .. (tc.equip_update == true and 'equipment update requested with the labor' or
+      local eqn, eqt = math.tointeger(rec.eq) or 0, math.tointeger(rec.eqt)
+      local eqd = eqt and math.max(0, (r.now - eqt) // DAY) or nil
+      hint = hint .. (tc.equip_update == true and (eqn > 0 and
+                        string.format('equipment update requested %d times (last %d days ago), no tool picked up yet',
+                                      eqn, eqd or 0) or 'equipment update requested with the labor') or
                       'the player may toggle the detail in the work details screen (untested); tools.equip_update ' ..
                       'needs his yes')
       local msg = string.format('%s: %d of %d hold no %s for %d days, %d %s jobs open; %d free %ss (%s)%s',
@@ -2289,6 +2293,7 @@ local function tool_check(K, tc, r, spec, cur, jc, fixed)
                  jobs = open, days = days, free = free, bins = bins, reserved = res, why = table.concat(toks, ','),
                  who = table.concat(names, ', '), hint = hint:sub(1, 200)}
       if pos then d.pos = pos end
+      if eqn > 0 then d.eq, d.eq_days = eqn, eqd or 0 end
       K.log('warn', '%s', msg)
       K.emit('TOOL_BLOCKED', 'A', msg:sub(1, 200), d)
     end
@@ -2348,6 +2353,8 @@ local function tools(K, c, p, inv, engine, r)
     local ok = K.act.work_detail(spec.name, id, on, opts_of(spec))
     if ok then
       changes = changes + 1
+      -- a member added now got the equipment update with its labor: its tool repair waits repair_days
+      if on then st.fixes[spec.name .. ':' .. id] = now end
       local u = df.unit.find(id)
       local who = u and dfhack.df2utf(dfhack.units.getReadableName(u)) or ('unit ' .. id)
       K.emit('WORK_DETAIL', 'B', string.format('%s %s %s (%s, target %d)', spec.name, on and '+' or '-', who, why,
@@ -2442,18 +2449,26 @@ local function tools(K, c, p, inv, engine, r)
       -- (not in a starvation: T.starve may make anybody a planter then)
       local fixed, evl = {}, spec.only and #cur > 0 and not p.starve and everybody_labors(li, wd, tool_names, keep) or nil
       local sets = evl and #evl > 0 and member_sets(li) or nil
+      -- Run 10 (equip_update on after the members were added): a member without its tool in hand while free tools
+      -- exist gets the equipment update request again, at the first pass after a load and then every repair_days
+      local free_tools = spec.tool and (inv or {})['w_' .. spec.tool .. '_free'] or 0
+      local eq = {}
       for _, u in ipairs(cur) do
         local why
         if spec.labor and not labor_on(u, spec.labor) then why = 'labor'
-        elseif sets and needs_specialist(li, sets, u, evl, wd) then why = 'everybody' end
+        elseif sets and needs_specialist(li, sets, u, evl, wd) then why = 'everybody'
+        elseif tc.equip_update == true and free_tools > 0 and not holds_tool(u, spec.tool) then why = 'tool' end
         local key = spec.name .. ':' .. u.id
         if why and now - (st.fixes[key] or -1e12) >= (tc.repair_days or 7) * DAY then
           st.fixes[key] = now
-          if K.act.work_detail(spec.name, u.id, true, opts_of(spec)) then
+          local o = opts_of(spec)
+          if why == 'tool' then o.equip = 'force' end
+          if K.act.work_detail(spec.name, u.id, true, o) then
             changes = changes + 1
-            fixed[#fixed + 1] = why
+            if why == 'tool' then eq[#eq + 1] = u.id else fixed[#fixed + 1] = why end
             K.log('info', '%s: %s %s', spec.name, unit_name(u.id),
                   why == 'labor' and ('had no ' .. spec.labor .. ' labor: set through the detail') or
+                  why == 'tool' and ('holds no ' .. spec.tool .. ': equipment update requested again') or
                   'left the everybody-does-this details (specialist)')
           end
         end
@@ -2464,6 +2479,11 @@ local function tools(K, c, p, inv, engine, r)
       ps.mine = json.array(list)
       p.tools[spec.name] = json.object(ps)
       for _, u in ipairs(cur) do taken[u.id] = spec.name end
+      if spec.tool and #eq > 0 then
+        local rec = type(p.tblk[spec.name]) == 'table' and p.tblk[spec.name] or {}
+        rec.eq, rec.eqt = (math.tointeger(rec.eq) or 0) + #eq, now
+        p.tblk[spec.name] = json.object(rec)
+      end
       if spec.tool and r and r.day then tool_check(K, tc, r, spec, cur, jc, fixed) end
       local serial = spec.tiles_per and #cur >= 3 and jc.dig > 0 and jc.dig_open == 0 and basis > 2 * jc.dig
       if serial and r and r.day and st.dig_hint ~= jc.dig then

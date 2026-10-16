@@ -1586,7 +1586,9 @@ local function impls(state)
         end
       end
       if opts.only then specialize(details, wd, u, id, keep_set(opts.keep)) end
-      if opts.equip and A.TOOL_LABOR_DETAILS[name] and (turned or not at) then equip_update(u) end
+      -- opts.equip = true: with a labor switched on / a new member; 'force': also for a member that already has it
+      -- (economy's tool repair, Run 10: members added before tools.equip_update was on never got the request)
+      if opts.equip and A.TOOL_LABOR_DETAILS[name] and (turned or not at or opts.equip == 'force') then equip_update(u) end
       return true, at and 'already' or 'added'
     end
     if not at then return true, 'not a member' end

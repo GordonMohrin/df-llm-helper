@@ -1,5 +1,13 @@
 # CHANGELOG dfpilot
 
+## Tool repair: equipment update also for existing members, BUG-023 (2026-10-16; offline, live-untested)
+- Live Run 10 y420: with `tools.equip_update` on, members added before the switch never got the request (Woodcutters 0 of 1 with
+  an axe for 16 days, 5 free axes). Now a Miners/Woodcutters member without its tool while free tools exist gets the equipment
+  update request again (`act.work_detail` opts `equip = 'force'`) at the first pass after a load and every `tools.repair_days`.
+- TOOL_BLOCKED gains `eq`/`eq_days` and the hint says how often the request was made.
+- Live check: `dfhack-run dfllm reload`, then kern.log `... holds no axe: equipment update requested again`; the member should
+  carry the tool within a game day. TOOL_BLOCKED with `eq` >= 2 means the request alone does not help: report it, do not move tools.
+
 ## Stranded behind our own gates: rescue, BREACH -> SIEGE, raise hold, SUPPLY_OUTSIDE, BUG-028 (2026-10-16; offline, live-untested)
 - **Rescue (a):** citizens and soldiers with thirst or hunger > 30,000 on a walk group without drink/food get the inner
   and core bridges on the way to the stock lowered (never O1) once the outer gates are up, the outside is verified

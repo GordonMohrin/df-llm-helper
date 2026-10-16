@@ -459,7 +459,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "LOCKDOWN_PARTIAL": ("A", "reflex", _d("doors:i", "refused:ia pos:p retry:f items:i units:i")),
     # BUG-023 / Run 10: tool detail members without their pick or axe while its jobs wait and free tools exist
     "TOOL_BLOCKED": ("A", "economy", _d("detail:s tool:s n:i", "members:ia jobs:i days:i free:i bins:i reserved:i "
-                                                               "why:s who:s hint:s pos:p")),
+                                                               "why:s who:s hint:s pos:p eq:i eq_days:i")),
     # BUG-027: a SIEGE/BREACH raise went ahead onto units on or next to the footprint (a hostile within force_near)
     "GATE_FORCED": ("A", "gate", _d("bridge:s", "units:ia hostile:i pos:p job:i")),
     # BUG-027: a unit died on or next to a bridge just pulled or moving (gate's move records, dfllm.deaths.bridge)

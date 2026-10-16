@@ -69,3 +69,15 @@ Remedies considered and not built, with the v1 evidence (the v1 repo's `ERFAHRUN
 Live check: `inspect workload` (`blocked`, `tools`), kern.log `labor: ... no axe in hand`, a TOOL_BLOCKED wake with the bin
 position; after Gordon's yes `tools.equip_update: true` in `config/baseline.json` and watch whether the members pick a tool up
 within a game day.
+
+## Live check after the switch (2026-10-16, Run 10 y420) and fix
+With `tools.equip_update` on (6455f16) nothing changed for 16+ game days: Woodcutters 1 member, 0 with an axe (TOOL_BLOCKED
+#5725 "no axe for 5 days, 9 FellTree jobs open, 5 free axes"), Miners 6 members, 4 with a pick. Cause: the request was only
+made when `act.work_detail` switched a labor on or added a member; the members had been added before the switch.
+Fix: economy's tool repair: a member without its tool in hand while free tools exist gets `act.work_detail(..., {equip =
+'force'})` (the equipment update request again) at the first pass after a load and then every `tools.repair_days`; a member the
+kernel adds in a pass is not repaired in the same pass. TOOL_BLOCKED carries `eq` (requests since the block began) and
+`eq_days`; the hint says `equipment update requested N times (last D days ago), no tool picked up yet`. Tests in
+`tests/lua/test_economy_tools.lua` (fail on the old code). Live check: after `dfllm reload`, kern.log `Woodcutters: ... holds no
+axe: equipment update requested again`; within a game day the member should carry an axe. If TOOL_BLOCKED still comes with
+`eq` >= 2, the engine's request is not enough and the cause lies elsewhere (tell Gordon; no tool is put into a hand).
