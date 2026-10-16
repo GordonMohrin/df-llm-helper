@@ -21,6 +21,8 @@ The outbox reply of every automatic command is read; a refusal or no reply withi
 wakes as AUTO_FAIL (a refused bp.place is rolled back). Unread replies are pruned after 10 min.
 Only wake lines go to stdout (one line = one Monitor notification); details go to <save>/cli.log.
 Supervisor alerts (<runtime>/supervise.json, each logged alert key) wake as SUPERVISE (STATUS §6.8, live L1).
+A failed `dfllm save` (<save>/quicksave.json with ok 0 newer than the last one seen; Run 10: a quicksave after a graphics
+crash wrote nothing) wakes as QUICKSAVE_FAILED, also when it failed while follow was not running (within an hour).
 `dfllm audit [--snap ID]`: request a fresh audit snapshot (or take an audit snapshot of this boot), then the same
 manifest check, bp.topo.audit and `audit` verb as follow (by:'follow': the result is computed, never typed; the hook
 still refuses a hand-written `dfllm cmd audit`); it prints the result and the kernel's reply.
@@ -39,11 +41,12 @@ from .events import clip, est_tokens, fmt_tick
 
 WAKE_TOKENS = 150
 WAKE_TYPES = {t for t, (c, _, _) in schema.EVENTS.items() if c == "A"}
-SYNTH = {"HB_STALE", "AUTO_FAIL", "SUPERVISE"}   # follower's own wake reasons (not kern events)
+SYNTH = {"HB_STALE", "AUTO_FAIL", "SUPERVISE", "QUICKSAVE_FAILED"}   # follower's own wake reasons (not kern events)
 # Run 9: an army walked in while SIEGE_START/INVASION waited in the digest; they and the interrupts come right
 # after BREACH and wake at once (URGENT: no merge wait, no hourly limit, one per type per URGENT_REPEAT_S)
 PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", "LOCKDOWN", "GATE_FAIL",
-        "DEATHS_3PLUS", "NO_DEPOT", "DEATHS_PREVENTABLE", "KERN_FAULT", "HB_STALE", "SUPERVISE", "SIEGE_END",
+        "DEATHS_3PLUS", "NO_DEPOT", "DEATHS_PREVENTABLE", "KERN_FAULT", "HB_STALE", "SUPERVISE", "QUICKSAVE_FAILED",
+        "SIEGE_END",
         "DRILL_FAIL", "SIEGE_UNREADY", "PERF_DEGRADED", "DECISION_NEEDED", "PROJECT_BLOCKED", "PLAN_EXHAUSTED",
         "YEAR_REVIEW", "AUTO_FAIL"]
 URGENT = {"BREACH", "SIEGE_START", "INVASION", "LOCKDOWN"} | set(schema.INTERRUPTS)
@@ -56,6 +59,8 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
         "DECISION_NEEDED": "ask Gordon in chat, then config/decisions.yaml", "KERN_FAULT": "dfllm doctor",
         "PERF_DEGRADED": "dfllm doctor", "HB_STALE": "dfllm doctor", "AUTO_FAIL": "dfllm doctor",
         "SUPERVISE": "dfllm supervise --once --dry-run",
+        # Run 10: the game is NOT saved; a restart would load the older save
+        "QUICKSAVE_FAILED": "tell Gordon at once (the game is not saved); dfllm save again in 2 min or Esc > Save",
         "GHOSTS": "dfllm cmd inspect '{\"what\":\"tombs\"}', then tombs.repair",
         # FR-65: R0 in PEACE; close the listed ways in, build the missing fortcore pieces, then re-audit
         "SIEGE_UNREADY": "dfllm cmd inspect '{\"what\":\"entrances\"}'; wall/door each open way in (bp.place); "
@@ -191,6 +196,8 @@ class Follower:
         self._pruned = 0.0
         self.sup_seen: dict | None = None      # supervise alert key -> last 'said' wall seen
         self._sup_read = 0.0
+        self.qs_seen: int | None = None        # Run 10: wall of the last <save>/quicksave.json record seen
+        self._qs_read = 0.0
         self._beat = -1e18
 
     @staticmethod
@@ -204,7 +211,7 @@ class Follower:
     def _attach(self, d: Path) -> None:
         if self.dir is not None:
             self.save_state()
-        self.dir, self.jobs, self.hb_woken, self._saved = d, {}, False, ""
+        self.dir, self.jobs, self.hb_woken, self._saved, self.qs_seen = d, {}, False, "", None
         st = files.read_json(self._state_path())
         since = self.since
         if isinstance(st, dict) and st.get("v") == 2:
@@ -215,6 +222,8 @@ class Follower:
                 if isinstance(st.get("sup_seen"), dict):
                     self.sup_seen = {str(k): float(v) for k, v in st["sup_seen"].items()
                                      if isinstance(v, (int, float)) and not isinstance(v, bool)}
+                qs = st.get("qs_seen")
+                self.qs_seen = qs if isinstance(qs, int) and not isinstance(qs, bool) else None
             except Exception as e:             # noqa: BLE001 - a corrupt .follow.json must not block attaching
                 self.gate.__init__(self.gate.per_type_s, self.gate.merge_s, self.gate.quiet_s, self.gate.per_hour)
                 self.jobs = {}
@@ -252,6 +261,8 @@ class Follower:
                "hb_woken": self.hb_woken}
         if self.sup_seen is not None:
             doc["sup_seen"] = self.sup_seen
+        if self.qs_seen is not None:
+            doc["qs_seen"] = self.qs_seen
         text = files.dumps(doc)
         if text == self._saved:
             return                             # unchanged: no disk write every second
@@ -282,6 +293,7 @@ class Follower:
         self._heartbeat(now)
         self._check_heartbeat(now)
         self._check_supervise(now)
+        self._check_quicksave(now)
         if self.auto or self.audit:
             self._run_jobs(now)
         if now - self._pruned >= PRUNE_EVERY_S:
@@ -370,6 +382,20 @@ class Follower:
                 self.sup_seen[key] = t
                 if now - t <= SUPERVISE_FRESH_S:
                     self._synth("SUPERVISE", f"{key}: {msgs.get(key) or 'see supervise.log'}", now)
+
+    def _check_quicksave(self, now: float) -> None:
+        """Run 10: a `dfllm save` that found no new save folder (<save>/quicksave.json ok 0) -> one QUICKSAVE_FAILED wake
+        per failed attempt; one that failed while follow was not running wakes too when it is less than an hour old."""
+        if now - self._qs_read < SUPERVISE_EVERY_S or self.dir is None:
+            return
+        self._qs_read = now
+        from .save import read_record
+        rec = read_record(self.dir)
+        if rec is None or (self.qs_seen is not None and rec["wall"] <= self.qs_seen):
+            return
+        self.qs_seen = rec["wall"]
+        if not rec["ok"] and now - rec["wall"] <= SUPERVISE_FRESH_S:
+            self._synth("QUICKSAVE_FAILED", f"quicksave ({rec['by']}) wrote nothing: {rec['why']}", now)
 
     # ------------------------------------------------------------ auto actions (no LLM)
     def _send(self, verb: str, args: dict, what: str | None, now: float, snap: dict | None = None) -> str:

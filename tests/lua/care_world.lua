@@ -102,6 +102,7 @@ function CW.world(opts)
   if opts.alarm ~= nil or opts.economy then
     W.alarm, W.floors, W.floor_calls = opts.alarm, {}, 0
     W.load({name = 'economy', every = {ticks = 1200}, alarm = function() return W.alarm or nil end,
+            route = opts.route,                -- Run 10: economy.route(K, cls), named by MOOD_RISK
             reserve = opts.economy_reserve or function(K, key, n, who)
               W.floor_calls = W.floor_calls + 1
               W.floors[key] = n

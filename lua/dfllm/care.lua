@@ -409,6 +409,21 @@ local function nosrc_text(rec, miss)
   return note ~= '' and (' (' .. note .. ')') or ''
 end
 
+-- Run 10 (Handlelock: a fey mood died for two leather while no tannery stood and the hunters had no bolts): economy's
+-- route for up to two missing classes, e.g. 'route leather: no tannery (asked), hunt: no bolts, butcher, trade.want
+-- leather'; '' without economy or a route word
+local ROUTE_CLS = {leather = true, bars = true, bone = true, shell = true, cloth = true, thread = true}
+local function route_note(K, classes)
+  local out = {}
+  for _, cls in ipairs(classes or {}) do
+    if ROUTE_CLS[cls] and #out < 2 then
+      local ok, txt = K.call('economy', 'route', cls)
+      if ok and type(txt) == 'string' and txt ~= '' then out[#out + 1] = 'route ' .. cls .. ': ' .. txt end
+    end
+  end
+  return table.concat(out, '; ')
+end
+
 local function mood_seen(K, c, r, p, u, kind)
   local sid, now = fmt(u.id), K.now().tick
   local child = is_child(u)
@@ -436,12 +451,15 @@ local function mood_seen(K, c, r, p, u, kind)
     rec.risk, rec.risk_why, rec.risk_w = now, risk, T.wall
     local miss = still_missing(job, rec)
     rec.missing = miss
-    K.emit('MOOD_RISK', 'A', trunc(string.format('mood unit %d (%s%s) %s %d, dies at 75000: %s; a mood job cannot be '
+    local rn = #miss > 0 and route_note(K, miss) or ''
+    K.emit('MOOD_RISK', 'A', trunc(string.format('mood unit %d (%s%s) %s %d, dies at 75000: %s%s; a mood job cannot be '
                                                  .. 'cancelled%s', u.id, kind, child and ', child' or '', risk,
                                                  risk == 'thirst' and th or hu,
                                                  #miss > 0 and ('missing ' .. table.concat(miss, ',') .. nosrc_text(rec, miss))
-                                                   or 'nothing missing', #miss > 0 and ', supply it' or ''), 200),
-           {unit = u.id, why = risk, kind = kind, missing = miss, thirst = th, hunger = hu})
+                                                   or 'nothing missing', rn ~= '' and ('; ' .. rn) or '',
+                                                 #miss > 0 and ', supply it' or ''), 200),
+           {unit = u.id, why = risk, kind = kind, missing = miss, thirst = th, hunger = hu,
+            route = rn ~= '' and trunc(rn, 200) or nil})
   elseif not risk then
     rec.risk_why = nil                         -- quiet: the time stays, a new risk within the cadence waits
   end
@@ -2097,13 +2115,18 @@ local function mood_report(K, c, r, p)
         -- the stock note (kinds, classes nothing in the fort can supply) is kept whole by the cut at 200 bytes
         local note = stock_note(kinds, plain)
         local ns = note ~= '' and ('; ' .. note) or ''
-        -- FR-44: the full requirement list against the stock the moment the needs are known
+        -- FR-44: the full requirement list against the stock the moment the needs are known; Run 10: with economy's
+        -- route for the missing classes (what supplies them now and what blocks it)
         if not rec.checked then
           rec.checked = now
           local head = string.format('strange mood unit %s (%s%s) starts without ', m.sid, rec.kind,
                                      m.child and ', child' or '')
-          K.emit('MOOD_RISK', 'A', trunc(head .. trunc(sig, math.max(20, 200 - #head - #ns)) .. ns, 200),
-                 {unit = int(m.sid), why = 'missing', kind = rec.kind, missing = miss, nosrc = rec.nosrc})
+          local rn = route_note(K, miss)
+          local tail = ns .. (rn ~= '' and ('; ' .. rn) or '')
+          tail = trunc(tail, 160)
+          K.emit('MOOD_RISK', 'A', trunc(head .. trunc(sig, math.max(20, 200 - #head - #tail)) .. tail, 200),
+                 {unit = int(m.sid), why = 'missing', kind = rec.kind, missing = miss, nosrc = rec.nosrc,
+                  route = rn ~= '' and trunc(rn, 200) or nil})
         end
         local u = rec.unres
         if type(u) ~= 'table' then u = {since = now, sig = ''}; rec.unres = u end

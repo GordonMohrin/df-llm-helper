@@ -446,4 +446,38 @@ T.test('BUG-017 (Run 10 y418): a plant-cloth mood next to wool cloth: the kind i
   T.eq({w[1].cls, w[1].buy, w[2].cls, w[2].buy}, {'cloth', 'cloth:plant', 'thread', 'thread:yarn'})
 end)
 
+-- Run 10 (Handlelock): a fey mood died for two leather while no tannery stood and the hunters had no bolts; MOOD_RISK
+-- now names economy's route for the missing class (what supplies it now and what blocks it)
+T.test('Run 10: MOOD_RISK names the supply route of a missing class (economy.route)', function()
+  local asked = {}
+  local W = CW.world{economy = true, route = function(K, cls)
+      asked[#asked + 1] = cls
+      return cls == 'leather' and 'no tannery (asked), hunt: no bolts, butcher, trade.want leather' or ''
+    end, setup = function(W)
+      moody(W, 1, 'Fey', {filter('SKIN_TANNED', {quantity = 2})})
+      W.unit(1).counters2 = {thirst_timer = 10000, hunger_timer = 0}
+    end}
+  W.run(1)
+  local r = W.find_events('MOOD_RISK')
+  T.eq(#r, 1)
+  T.ok(r[1].msg:find('starts without leather x2', 1, true), r[1].msg)
+  T.ok(r[1].msg:find('route leather: no tannery (asked), hunt: no bolts', 1, true), r[1].msg)
+  T.ok(#r[1].msg <= 200, #r[1].msg)
+  T.eq(r[1].d.route, 'route leather: no tannery (asked), hunt: no bolts, butcher, trade.want leather')
+  T.eq(asked, {'leather'})
+  W.unit(1).counters2.thirst_timer = 31000
+  CW.day(W)
+  r = W.find_events('MOOD_RISK')
+  T.ok(r[2] and r[2].msg:find('missing leather (leather: no source in the fort); route leather: no tannery', 1, true),
+       r[2] and r[2].msg)
+  T.eq(r[2].d.why, 'thirst')
+  T.ok(r[2].d.route:find('hunt: no bolts', 1, true), r[2].d.route)
+  -- without economy (or a route word) the message stays as before
+  local W2 = CW.world{setup = function(W) moody(W, 1, 'Fey', {filter('SKIN_TANNED', {quantity = 2})}) end}
+  W2.run(1)
+  local r2 = W2.find_events('MOOD_RISK')
+  T.eq(r2[1].d.route, nil)
+  T.eq(r2[1].msg:find('route', 1, true), nil, r2[1].msg)
+end)
+
 T.done()

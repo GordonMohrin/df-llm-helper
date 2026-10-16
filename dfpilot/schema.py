@@ -93,7 +93,8 @@ STATE_OWNERS = {
     "pop.cit": "sense", "pop.adults": "sense", "pop.soldiers": "sense",
     "pop.cap": "readiness", "pop.gate_cap": "readiness", "ready.*": "readiness",
     "stock.drink_d": "economy", "stock.food_d": "economy", "stock.meals": "economy",
-    "stock.hosp_water": "care", "care.*": "care", "labor.*": "economy", "orders.*": "economy",
+    "stock.ore": "economy", "stock.bars": "economy", "stock.leather": "economy", "stock.metal": "economy",
+    "stock.mood_miss": "economy", "stock.hosp_water": "care", "care.*": "care", "labor.*": "economy", "orders.*": "economy",
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
     "clock.*": "arbiter", "alarm.*": "reflex", "lever.*": "gate",
     "alert.*": "seal", "wave.*": "siege",
@@ -432,7 +433,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "YEAR_REVIEW": ("A", "kern", _d(opt="year:i")),
     "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa")),
     "HOSPITAL_DRY": ("A", "water", _d("why:s", "patients:i zone:i near:i recipe:s")),
-    "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i nosrc:sa")),
+    "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i nosrc:sa route:s")),
     # class A since Run 9 (an army walked in while these were digest-only): they wake at once
     "SIEGE_START": ("A", "siege", _d(opt="vis:i inv:i great:i why:s")),
     "INVASION": ("A", "threat", _d(opt="id:i")),
@@ -500,7 +501,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "POPCAP": ("B", "readiness", _d("cap:i", "why:s")),
     "AUDIT": ("B", "readiness", _d(opt="ok:f fails:sa min_traps:i")),
     "PROJECT_DONE": ("B", "runner", _d("proj:s", "tpl:s")),
-    "PROJECT_REQUEST": ("B", "any", _d("tpl:s", "n:i why:s")),
+    "PROJECT_REQUEST": ("B", "any", _d("tpl:s", "n:i why:s bars:i short:i")),
     "PHASE": ("B", "runner", _d(opt="from:s to:s")),
     "PAUSE": ("B", "arbiter", _d("on:f", "by:s ttl:i")),
     "DEATH": ("B", "care", _d(opt="unit:i citizen:f cause:s src:s why:s found:f dtype:s by:s killer:i mood:s "
@@ -620,7 +621,10 @@ STATE = Obj(
                            "fail": Arr(Str(maxbytes=24), hi=8)},
                       # FR-65: ways in without door or bridge (-1 unknown), the first of them, why no auto drill
                       opt={"open": Int(-1), "ents": Arr(Str(maxbytes=24), hi=3), "dhold": Str(maxbytes=24)}),
-         "stock": Obj(opt={"drink_d": NAT, "food_d": NAT, "meals": NAT, "hosp_water": FLAG}),
+         # Run 10: ore/bars/leather stock, the metal route ('explore' = no ore, metal wanted), the classes strange
+         # moods missed within a year (plan propose/check supply goals)
+         "stock": Obj(opt={"drink_d": NAT, "food_d": NAT, "meals": NAT, "hosp_water": FLAG, "ore": NAT, "bars": NAT,
+                           "leather": NAT, "metal": Str(maxbytes=24), "mood_miss": Arr(Str(maxbytes=12), hi=8)}),
          "care": Obj(req={"stressed_pct": PCT, "naked": NAT, "ghosts": NAT, "corpses_old": NAT,
                           "tombs_free": NAT, "moods": NAT},
                      # FR-61 coffin provisioner: wanted free coffins, missing slots, coffin items, open orders, project
@@ -777,6 +781,10 @@ RESTORE = Obj(req={"v": Const(V), "save": Str(maxbytes=120), "wall": NAT, "activ
                                     "population_cap": NAT, "timestream_fps": Int(-1), "weather": Bool(), "fps_cap": NAT,
                                     "overlays": Obj(extra=Bool())})})
 LOCK = Obj(req={"holder": Str(maxbytes=40), "purpose": Str(maxbytes=200), "expires": NAT})
+# <save>/quicksave.json (Python only, `dfllm save`, Run 10): the last quicksave attempt, verified by the save folder
+QUICKSAVE = Obj(req={"v": Const(V), "wall": NAT, "ok": FLAG, "by": Str(enum=BY), "why": Str(maxbytes=200)},
+                opt={"folder": Str(maxbytes=120), "secs": NAT, "last": Str(maxbytes=120), "last_age": Int(-1),
+                     "fails": NAT, "paused": FLAG})
 ALLOWLIST = Obj(req={"v": Const(V),
                      "commands": Obj(extra=Obj(req={"rw": Str(enum=["r", "w"]),
                                                     "args": Arr(Str(maxbytes=200), hi=50)}),
@@ -801,7 +809,7 @@ PERSIST_KERN = Obj(req={"v": Const(V), "ev": NAT, "seq": NAT, "boots": NAT, "dis
 SCHEMAS: dict[str, Spec] = {
     "state": STATE, "heartbeat": HEARTBEAT, "event": EVENT, "inbox": INBOX, "outbox": OUTBOX,
     "plan": PLAN, "phases": PHASES, "bp": BP, "manifest": MANIFEST, "snapshot": SNAPSHOT,
-    "restore": RESTORE, "lock": LOCK, "allowlist": ALLOWLIST,
+    "restore": RESTORE, "lock": LOCK, "allowlist": ALLOWLIST, "quicksave": QUICKSAVE,
     "persist.marker": PERSIST_MARKER, "persist.projects": PERSIST_PROJECTS, "persist.plan": PERSIST_PLAN,
     "persist.phase": PERSIST_PHASE, "persist.mode": PERSIST_MODE, "persist.drill": PERSIST_DRILL,
     "persist.kern": PERSIST_KERN,

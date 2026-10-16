@@ -58,7 +58,9 @@ def test_state_slots_validate_and_carry_wp8_keys(run):
     for d in docs:
         assert schema.validate("state", d) == [], d
     best = max(docs, key=lambda d: d["seq"])
-    assert set(best["stock"]) == {"drink_d", "food_d", "meals", "hosp_water"}
+    # Run 10: ore/bars/leather and the metal route always, mood_miss once a mood missed a class
+    keys = {"drink_d", "food_d", "meals", "hosp_water", "ore", "bars", "leather", "metal"}
+    assert keys <= set(best["stock"]) <= keys | {"mood_miss"}
     assert set(best["labor"]) == {"starving", "idle"}
     assert set(best["care"]) - {"coffins", "died"} == {"stressed_pct", "naked", "ghosts", "corpses_old", "tombs_free",
                                                          "moods"}

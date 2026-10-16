@@ -16,7 +16,7 @@ from pathlib import Path
 
 from . import files, paths, schema
 from .cmd import (SAME, BpError, BpUnavailable, bp_files, fmt_reply, fort_manifest, log_seal, occupancy, place,
-                  send, sites_snapshot, template_info, template_names, write_bp)
+                  rank_sites, send, sites_snapshot, template_info, template_names, write_bp)
 
 R_CAPS = {0: 55, 1: 55, 2: 75, 3: 250}    # DESIGN §5.4; R3 (>= 80) only with D-01 = B
 OPTION_A_MAX = 75
@@ -26,6 +26,9 @@ CORE_DAYS = 90                            # BUG-028: drink/food days wanted insi
 O1_PHASE = "P5"                           # plans/year1.json: fortcore stage 3 builds the outer bridge O1
 GALLERY = "gallery_o1"                    # bp/defense.py: the outward crossbow gallery over the O1 approach (Run 10)
 STOCKROOM = "stockroom"                   # bp/rooms.py: food stockpile with barrels + still inside the core (BUG-028)
+EXPLORE = "explore"                       # bp/mine.py: stair shaft + side tunnels below the core (Run 10: no ore)
+METAL_WORN = 80                           # soldiers' worn % below which metal is a plan goal (P6 deliverable metal 80)
+EXPLORE_DEPTHS = (12, 9, 6, 4, 2)         # propose tries the explore template's default depth first, then shallower
 SIEGE_EVENTS = ("SIEGE_START", "SIEGE_END", "BREACH")
 SIEGE_MODES = ("SIEGE", "BREACH", "RECOVERY")
 # DESIGN §11.4 always-blocked commands and banned terms (CONTRACTS §1.4); config/allowlist.json adds more
@@ -209,6 +212,9 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     gw = _outer_gallery(doc, s, fort or {})
     if gw:
         warn.append(gw)
+    se, sw = supply_goals(doc, s)                 # Run 10: ore exploration and leather as plan goals
+    errs += se
+    warn += sw
     if pol["beauty"] == "used_rooms" and lvl < 1:
         warn.append("beauty used_rooms waits for R1 (runner gates it)")
     seen_libs: set[str] = set()
@@ -235,6 +241,112 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
             if _has_term(text, term):
                 (warn if p.endswith("notes") else errs).append(f"fair play: {p} mentions {term!r}")
     return errs, warn
+
+
+# ---------------------------------------------------------------- supply goals (Run 10)
+def ore_goal(s: dict | None) -> str | None:
+    """Why the fort needs an ore search now, or None. Run 10 (Handlelock): iron stayed at 8 bars for years, three caravans
+    a year brought none, the soldiers wore 38-53 %. Needed when the fort holds no metal ore boulders (state stock.ore 0)
+    and economy's metal route is `explore` (the soldiers' slots or the mood stock want more bars than there are) or the
+    soldiers wear < METAL_WORN %. Unknown (a kernel without stock.ore) -> None."""
+    s = s or {}
+    st = s.get("stock") or {}
+    ore = st.get("ore")
+    if not isinstance(ore, int) or isinstance(ore, bool) or ore > 0:
+        return None
+    if st.get("metal") == "explore":
+        return f"no ore, {st.get('bars', '?')} bars and economy wants metal"
+    mil = s.get("mil") or {}
+    worn = mil.get("worn", (s.get("ready") or {}).get("worn"))
+    soldiers = mil.get("soldiers") or (s.get("pop") or {}).get("soldiers") or 0
+    if isinstance(worn, int) and worn < METAL_WORN and soldiers > 0:
+        return f"no ore, {st.get('bars', '?')} bars, the soldiers wear {worn} % < {METAL_WORN}"
+    return None
+
+
+def leather_goal(s: dict | None) -> bool:
+    """Run 10: a fey mood died for two leather. A strange mood missed leather within a year (state stock.mood_miss) and
+    the fort still has none (stock.leather 0)."""
+    st = (s or {}).get("stock") or {}
+    return st.get("leather") == 0 and "leather" in (st.get("mood_miss") or [])
+
+
+def _bar_want(want: list) -> bool:
+    return any(t == "bar" or t.startswith("bar:") for t in want)
+
+
+def supply_goals(doc: dict, s: dict | None) -> tuple[list[str], list[str]]:
+    """(errors, warnings) of the supply goals: metal while ore_goal holds (an error when the plan has neither an `explore`
+    build nor a bar trade want, a warning when only the trade want covers it) and leather first in trade.want while
+    leather_goal holds."""
+    errs: list[str] = []
+    warn: list[str] = []
+    want = list((doc.get("trade") or {}).get("want") or [])
+    why = ore_goal(s)
+    if why:
+        explore = any(b["tpl"] == EXPLORE for se in doc["seasons"] for b in se["build"])
+        if not explore and not _bar_want(want):
+            errs.append(f"metal: {why}; the plan has neither tpl {EXPLORE} nor a trade want bar:*: add "
+                        f"{{\"tpl\":\"{EXPLORE}\",\"site\":\"S1\"}} to each season and bar:iron to trade.want")
+        elif not explore:
+            warn.append(f"metal: {why}; only trade.want bar (Run 10: three caravans a year brought no iron): add tpl "
+                        f"{EXPLORE} (site S1) to each season until ore is found")
+    if leather_goal(s) and "leather" not in want[:3]:
+        warn.append("leather: a strange mood missed leather and the fort has none: put leather first in trade.want "
+                    "(not among its first three; economy staffs hunters and asks for a tannery)")
+    return errs, warn
+
+
+def draft_supply(doc: dict, s: dict | None, kept: list[int], season: int, tpls) -> None:
+    """propose (Run 10): while ore_goal holds, one `explore` build per season from the current one, the first build after
+    the season's kept (applied) ones, unless the season has one already; bar:iron in trade.want when no bar is wanted;
+    leather first in trade.want while leather_goal holds. tpls = the known template names (None: not checked)."""
+    trade = doc["trade"]
+    want = list(trade.get("want") or [])
+    why = ore_goal(s)
+    if why and (tpls is None or EXPLORE in tpls):
+        for si in range(min(max(season, 0), 3), 4):
+            builds = doc["seasons"][si]["build"]
+            if not any(b["tpl"] == EXPLORE for b in builds):
+                builds.insert(min(kept[si], len(builds)), {"tpl": EXPLORE, "site": "S1"})
+        doc["notes"] += (f"; {why}: {EXPLORE}@S1 each season until ore is found (bp.cancel the later ones once ore "
+                         "shows; p.depth for a shallower shaft)")
+    if why and not _bar_want(want):
+        want.insert(0, "bar:iron")
+    if leather_goal(s):
+        want = ["leather"] + [t for t in want if t != "leather"]
+    trade["want"] = want[:40]
+
+
+def fit_explore(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
+    """propose (CLI): the deepest of EXPLORE_DEPTHS at which `explore` has a site on the sites snapshot (no shaft into
+    an avoided level: p.avoid, a revealed cavern/damp/warm mark); the newly drafted explore builds get that p.depth, or
+    leave the draft when none fits. Builds kept from the applied same-year plan stay as they are. Returns a line for the
+    CLI, None when there was nothing to fit or no snapshot/manifest to fit on."""
+    keep = {(si, bi) for si, se in enumerate(prev["seasons"]) for bi in range(len(se["build"]))} \
+        if prev and prev.get("year") == doc["year"] else set()
+    new = [(si, b) for si, se in enumerate(doc["seasons"]) for bi, b in enumerate(se["build"])
+           if b["tpl"] == EXPLORE and (si, bi) not in keep and "depth" not in (b.get("p") or {})]
+    if not new:
+        return None
+    for d in EXPLORE_DEPTHS:
+        try:
+            sites, _ = rank_sites(save_dir, EXPLORE, {"depth": d})
+        except BpUnavailable:
+            return None
+        except BpError as e:
+            if "avoided level" in str(e):
+                continue
+            return None
+        if sites:
+            if d != EXPLORE_DEPTHS[0]:
+                for _, b in new:
+                    b["p"] = {**(b.get("p") or {}), "depth": d}
+            return f"{EXPLORE}: depth {d} at {sites[0]['anchor']} ({sites[0]['why']})"
+    for si, b in new:
+        doc["seasons"][si]["build"].remove(b)
+    doc["notes"] += f"; no {EXPLORE} site at any depth (avoided levels or no free rock): trade.want bar:iron only"
+    return f"{EXPLORE}: no site at depth {EXPLORE_DEPTHS[-1]}..{EXPLORE_DEPTHS[0]}: not drafted"
 
 
 # ---------------------------------------------------------------- propose
@@ -312,6 +424,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                     libs.append(d["lib"])
     same_year = bool(prev and prev.get("year") == year)
     seasons = copy.deepcopy(prev["seasons"]) if same_year else [{"build": []} for _ in range(4)]
+    kept = [len(se["build"]) for se in seasons]
     for i, b in enumerate(builds):              # appended: applied builds keep their y<Y>s<S>b<I> ids
         seasons[min(3, season + i // BUILDS_PER_SEASON)]["build"].append(b)
     cap = min(level_cap(lvl, d01), OPTION_A_MAX if d01 != "B" else R_CAPS[3])
@@ -335,6 +448,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                   + "; site S<k> = k-th free site at apply time (never overlaps other projects or earlier"
                   " builds; `dfllm plan check` lists the anchors), same = anchor of the earlier stage"),
     }
+    draft_supply(doc, s, kept, season, None if info is None else set(info))
     return doc
 
 
@@ -433,8 +547,11 @@ def run(args, save_dir: Path) -> int:
         phases = load_phases(Path(args.phases) if args.phases else None)
         state = files.read_state(save_dir)
         doc = propose(state, phases, prev, applied=applied_builds(save_dir, state))
+        fit = fit_explore(save_dir, doc, prev)                # Run 10: the ore search fits the known levels
         files.write_json_atomic(path, doc)
         print(f"draft {path}: {_summary(doc)}")
+        if fit:
+            print(f"  {fit}")
         errs, warn = check(doc, state, tpls=templates(), prev=prev, fort=fort_facts(save_dir, state))
         _print_check(errs, warn)
         print("edit the draft, then: dfllm plan check; dfllm plan apply" + ("" if phases else
