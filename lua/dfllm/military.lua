@@ -13,6 +13,11 @@
 --                  130,128,122 lay between O1 and B2, recruits there were cut off from drink for weeks)
 --   INTAKE         routine 'Ready'; melee in the killing field (stations.field, else the first killbox's centre),
 --                  crossbows in the gallery (else the field); only while siege runs an intake wave
+--   CORE           routine 'Ready'; every squad, crossbows too, at the core station (BUG-030, siege's deep defense:
+--                  building destroyers in sight, an army over stations.core_ratio x the soldiers, weak squads):
+--                  stations.core (the core level next to the civilians' stair to the refuge), else stations.b2, else
+--                  stations.melee; never the corridor or the killing field (Run 10 y421: 19 recruits at the melee and
+--                  gallery stations between O1 and B2 died first)
 -- STATION_B1 uses the inner station too (stations.b2 while B2 is not down). An approved sortie order is held (no
 -- posture re-assert replaces it) until siege releases the squad (hold_order / release).
 -- Squads are created with a leader (act.squad_create + act.squad_leader, the squads screen [S2, live L2]); a
@@ -1020,6 +1025,7 @@ local function station_of(K, man, P, kind, first_melee, stations)
   if P == 'READY_STATION' then return 'ready', kind == 'xbow' and (gallery or melee) or melee end
   if P == 'B2_HOLD' then return 'ready', b2 or melee end
   if P == 'READY_IN' then return 'ready', inner_station(K, man, stations) end
+  if P == 'CORE' then return 'ready', stations.core or b2 or melee end            -- BUG-030
   if P == 'INTAKE' then
     local field = field_station(man, stations)
     return 'ready', kind == 'xbow' and (gallery or field) or field

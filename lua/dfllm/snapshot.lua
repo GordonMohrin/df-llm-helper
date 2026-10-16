@@ -521,11 +521,12 @@ local function start(K, j)
   j.marks = {soil = {}, cavern = {}}
   j.bridges, j.bstate = {}, {}
   for name, spec in pairs(type(man.bridges) == 'table' and man.bridges or {}) do
-    local ok, s = K.call('gate', 'state', name)
+    local ok, s, _, gone = K.call('gate', 'state', name)
     s = ok and type(s) == 'string' and s or 'unknown'
+    if ok and gone then s = 'destroyed' end      -- BUG-030: its footprint shows the tiles as they are now
     j.bstate[name] = s
     local fp = type(spec) == 'table' and spec.fp
-    if type(fp) == 'table' and #fp == 6 then
+    if type(fp) == 'table' and #fp == 6 and s ~= 'destroyed' then
       local ch = (s == 'up') and 'H' or '='
       for x = fp[1], fp[4] do for y = fp[2], fp[5] do for z = fp[3], fp[6] do
         j.bridges[x .. ',' .. y .. ',' .. z] = ch

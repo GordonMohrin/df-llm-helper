@@ -113,7 +113,8 @@ function M.assess(K)
              inside = h.inside or 0, near_o1 = h.near_o1 or -1, near_cit = h.near_cit or -1,
              near_bridge = h.near_bridge or {}, tick = h.tick or 0,
              -- intake waves (Gordon 2026-10-16, sense): hostiles in the intake area / past B1, dangerous ones
-             zin = h.zin or 0, zpast = h.zpast or 0, dz = h.dz or 0, dz_o1 = h.dz_o1 or -1}
+             zin = h.zin or 0, zpast = h.zpast or 0, dz = h.dz or 0, dz_o1 = h.dz_o1 or -1,
+             bd = h.bd or 0}            -- BUG-030: visible building destroyers (siege's deep defense)
   a.fresh = now - a.tick <= M.FRESH
   local geo = fort_geo(K)
   local rel, wide, great_rel, great_wide, undead_rel, near = 0, 0, 0, 0, 0, 0

@@ -104,6 +104,12 @@ Sources: [W] dwarffortresswiki.org (v50+ namespace, fetched today); [D] the inst
 - O1 closes at once on a loss, a danger near O1, too few soldiers or a lower worn. Never O1 and B1 down at the same time while hostiles are visible.
 - A sortie through O1 only with the player's approval (`squad.sortie` with `gate`): gather in the bailey, O1 down, kill near the target, recall on losses, time or a danger, O1 up when all are back (or a hostile at the gate: who stays outside is named).
 
+**Plan B: the deep defense (BUG-030; Run 10 y421: 58 goblins and 6 trolls destroyed O1, B1 and B2, the 19 recruits at the stations between O1 and B2 died first, then 40+ civilians in the main hall):**
+- Drawbridges hold goblins; they are no barrier against an army that brings building destroyers (trolls, many forgotten beasts and megabeasts: a bridge that is down, moving or held by a soldier on its footprint is broken), and they are no plan when the squads cannot hold the corridor.
+- So, in a siege: building destroyers in sight, an army larger than 3x our soldiers (`stations.core_ratio`), or weak squads (worn below 60 %) → the civilians go at once to the separated refuge (the BREACH level: no stock counts for a week), every squad, crossbows too, stands at the core station (the core hub next to the civilians' stair to the refuge, `stations.core`; else `stations.b2`), never in the corridor, the gallery or the killing field; no kill orders and no intake waves. One class-A SIEGE_DEEP names the destroyers. Destroyers seen once keep it for the whole siege.
+- A destroyed bridge is an open way: no pulls, no wants, no stranded-citizen holds for it; a lost O1 or B1 is a BREACH at once; RECOVERY counts it as lowered; rebuild it (and its levers) after the siege.
+- What this needs from the plan: a refuge that is separated and stocked (Tiefe+ with its own well, food and beds), soldiers in metal (iron or steel), and enough of them (a 58-strong army needs 20 soldiers to stay out of plan B).
+
 **Civilian alert burrow:**
 - The burrow = **the whole sealed interior**: farms, workshops, stockpiles, tombs. Name it with a trailing `+` and `enable burrow` so it auto-expands when adjacent walls are dug [D].
 - Then the alert costs no production. Run 6's alert froze trap reloading, building and farming because the burrow was small.

@@ -274,4 +274,112 @@ T.test('BUG-028 (d): most of the drink lies on the field: SUPPLY_OUTSIDE (A) wit
   T.eq({al.core_d, al.core_f}, {16, 100})
 end)
 
+---------------------------------------------------------------- BUG-030: a destroyed bridge
+-- Run 10 y421: trolls destroyed O1, B1 and B2; `inspect defense` no longer listed them while the kernel went on with
+-- the stored bridges for days (STRANDED 'B1 raised although it cuts N citizens off' 40+ times, buildings.other.BRIDGE
+-- empty). Here the building goes (DF removes a destroyed building) and the footprint is plain floor again.
+local function destroy(W, n)
+  local b = W.bridge[n]
+  W.buildings[b.id] = nil
+  local v = df.global.world.buildings.other.BRIDGE
+  for i = #v - 1, 0, -1 do if v[i] == b then v:erase(i) end end
+  for x = b.x1, b.x2 do
+    for y = b.y1, b.y2 do
+      W.dyn[SW.key(x, y, b.z)] = nil
+      local t = W.tiles[SW.key(x, y, b.z)]
+      if t then t.occ.building = df.tile_building_occ.None end
+    end
+  end
+  W.bridge[n] = nil
+  SW.regroup(W)
+end
+local function since(list, t)
+  local r = {}
+  for _, e in ipairs(list) do if e.tick >= t then r[#r + 1] = e end end
+  return r
+end
+local function names(list)
+  local r = {}
+  for _, e in ipairs(list) do
+    for _, b in ipairs(e.d.bridges or {e.d.bridge}) do r[#r + 1] = e.type .. ':' .. tostring(b) end
+  end
+  return table.concat(r, ',')
+end
+
+T.test('BUG-030: B1 and B2 destroyed in a breach (two citizens cut off in the zone): BRIDGE_DESTROYED (A) once ' ..
+       'each, no want, pull, GATE_FAIL or STRANDED for them any more, state bridges destroyed, inspect defense says ' ..
+       'so; no SIEGE again (an open way); RECOVERY counts them as lowered and the episode ends', function()
+  -- old code (the live Run 10 picture): B1 and B2 read 'unknown' for good: GATE_FAIL no_lever, STRANDED kept naming
+  -- them ('B1 raised although it cuts 2 citizens off from drink or food'), RECOVERY never dropped the alert (B1 and
+  -- B2 never read 'down'), no BRIDGE_DESTROYED
+  local W = fort{zone = {{11, 34, 15, 0}, {12, 35, 16, 0}}}
+  run(W, 1200)
+  army(W)
+  run(W, 1500)
+  T.eq({W.K.mode(), up(W, 'O1'), up(W, 'B1')}, {'SIEGE', true, false}, 'B1 held for the two in the zone')
+  W.add_unit(S.inv(400, 29, 15, Z))                -- two goblins at O1: B1 is forced up, BREACH at T+900
+  W.add_unit(S.inv(401, 28, 14, Z))
+  run(W, 600)
+  T.eq({W.K.mode(), up(W, 'B1')}, {'BREACH', true}, 'forced up: ' .. table.concat(phases(W), ','))
+  local t0 = W.K.now().tick
+  destroy(W, 'B1')
+  destroy(W, 'B2')
+  run(W, 600)
+  local bd = evs(W, 'BRIDGE_DESTROYED')
+  T.ok(#bd == 2 and bd[1].cls == 'A' and bd[1].d.bridge == 'B1' and bd[2].d.bridge == 'B2', 'BRIDGE_DESTROYED: ' .. #bd)
+  T.eq({bd[1].d.last, bd[1].d.role, bd[1].d.mode}, {'up', 'inner', 'BREACH'})
+  T.ok(bd[1].msg:find('B1 destroyed: no bridge on its footprint at 40,15,5', 1, true) and bd[1].tick - t0 < 50,
+       bd[1].msg)
+  T.eq({W.state().bridges.B1, W.state().bridges.B2, W.state().bridges.O1}, {'destroyed', 'destroyed', 'up'})
+  local _, ok, msg = W.K.call('gate', 'want', 'B1', 'up', 'test')
+  T.ok(ok == false and msg:find('B1 destroyed', 1, true), tostring(msg))
+  local r = W.inbox('inspect', {what = 'defense'})
+  T.ok(r.ok and r.msg:find('B1 destroyed/', 1, true) and r.msg:find('B2 destroyed/', 1, true), r.msg)
+  run(W, 3000)
+  T.eq(#evs(W, 'BRIDGE_DESTROYED'), 2, 'once each')
+  local gone = {B1 = true, B2 = true}
+  local str, fails, pulls = {}, {}, {}
+  for _, e in ipairs(since(evs(W, 'STRANDED'), t0)) do
+    for _, b in ipairs(e.d.bridges or {}) do if gone[b] then str[#str + 1] = e end end
+  end
+  T.eq(#str, 0, 'no STRANDED for B1/B2: ' .. names(since(evs(W, 'STRANDED'), t0)))
+  for _, e in ipairs(since(evs(W, 'GATE_FAIL'), t0)) do if gone[e.d.bridge] then fails[#fails + 1] = e end end
+  for _, e in ipairs(since(evs(W, 'LEVER'), t0)) do if gone[e.d.bridge] then pulls[#pulls + 1] = e end end
+  T.eq({#fails, #pulls}, {0, 0}, 'no GATE_FAIL, no pull for them')
+  T.eq(W.K.mode(), 'BREACH', 'an open way: no SIEGE again')
+  -- (c) the army leaves: RECOVERY lowers B2, B1 counts as lowered, the alert goes off, the episode ends
+  for _, id in ipairs({301, 302, 303, 304, 305, 306, 400, 401}) do W.kill(id); W.event('UNIT_DEATH', {unit = id}) end
+  local n = 0
+  while n < 60 and W.K.mode() ~= 'RECOVERY' do run(W, 100); n = n + 1 end
+  T.eq(W.K.mode(), 'RECOVERY')
+  run(W, 1500)
+  T.eq(df.global.plotinfo.alerts.civ_alert_idx, 0, 'alert off: B1 and B2 open')
+  n = 0
+  while n < 100 and W.K.mode() ~= 'PEACE' do run(W, 100); n = n + 1 end
+  T.eq(W.K.mode(), 'PEACE', 'SIEGE_END: ' .. table.concat(S.modes(W), ' '))
+  T.eq(#evs(W, 'BRIDGE_DESTROYED'), 2)
+  T.eq(W.state().bridges.B1, 'destroyed')
+end)
+
+T.test('BUG-030: O1 destroyed in a siege with every gate up: BREACH at once (why destroyed), not at T+900', function()
+  -- old code: O1 'unknown', BREACH only through the T+900 gate failure check, GATE_FAIL no_lever
+  local W = fort{}
+  run(W, 1200)
+  army(W)
+  run(W, 900)
+  T.eq({W.K.mode(), up(W, 'O1'), up(W, 'B1')}, {'SIEGE', true, true})
+  run(W, 600)
+  local t0 = W.K.now().tick
+  destroy(W, 'O1')
+  run(W, 100)
+  local br = evs(W, 'BREACH')
+  T.ok(#br == 1 and br[1].d.why == 'destroyed' and br[1].d.bridge == 'O1', br[1] and br[1].msg)
+  T.ok(br[1].msg:find('O1 destroyed: an open way', 1, true) and br[1].tick - t0 < 60, br[1].msg)
+  T.eq(evs(W, 'BRIDGE_DESTROYED')[1].d.role, 'outer')
+  run(W, 1500)
+  T.eq({W.K.mode(), up(W, 'B1'), up(W, 'B2')}, {'BREACH', true, true}, 'B1 and B2 hold')
+  T.eq(#since(evs(W, 'GATE_FAIL'), t0), 0, 'no GATE_FAIL')
+  T.eq(W.state().bridges.O1, 'destroyed')
+end)
+
 T.done()

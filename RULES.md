@@ -154,7 +154,9 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | LOCKDOWN_PARTIAL | an entrance door does not hold its forbidden flag (named with what lies on its tile); the kernel tries it once more itself. Read `status` (`doors`, refused); tell the player; a wall or a second door for that opening (`bp.place tpl=seal at="x,y,z floor wall"`) |
 | NO_DEPOT | `dfllm ack`; place a trade depot (`bp sites`, `bp.place`) |
 | SIEGE_END | read the summary; if losses > 10 % of citizens, write a postmortem note and lower `pop_ceiling` in the next plan |
-| GATE_FAIL / BREACH | the fort already sealed itself (BREACH: Tiefe+ alert, B2 up, melee at B2). Do not lower bridges. Check `status` again after 600 ticks; tell the player. Once every gate is up, the outside verified sealed and nobody hostile inside, BREACH falls back to SIEGE by itself (BUG-028) |
+| GATE_FAIL / BREACH | the fort already sealed itself (BREACH: Tiefe+ alert, B2 up, melee at B2; why `destroyed`: an outer/inner bridge is gone, an open way, at once). Do not lower bridges. Check `status` again after 600 ticks; tell the player. Once every gate is up, the outside verified sealed and nobody hostile inside, BREACH falls back to SIEGE by itself (BUG-028) |
+| BRIDGE_DESTROYED | a manifest bridge is gone from its footprint (building destroyers, or removed; BUG-030): the kernel stopped every pull, want, GATE_FAIL and STRANDED for it, `status` shows `DESTROYED`, in SIEGE a lost O1/B1 is a BREACH at once. Tell the player; nothing tactical; after the siege the plan builds it (and its levers) again |
+| SIEGE_DEEP | the deep defense (BUG-030; `why`: `destroyers` building destroyers in sight, bridges are no barrier; `army` hostiles > `stations.core_ratio` (3) x soldiers; `weak` worn < `stations.worn`): civilians confined to the separated refuge (BREACH level), every squad at the core station, no kill orders, no intake waves. Read `status`; tell the player; nothing tactical; after the siege: soldiers, metal, a stocked refuge |
 | STRANDED | citizens cut off from drink/food by our raised gates (BUG-028): `hold` a raise waits for them (until a hostile is within 30 tiles), `forced` it went ahead, `rescue` the kernel lowered the named inner/core bridges (never O1) and raises them again when they are through (`done`, `abort`), `refused` no rescue and why (O1 down, not sealed, a hostile): tell the player at once; never lower bridges yourself |
 | SUPPLY_OUTSIDE | most of the drink or food stock lies outside Kern+ and the refuge (`d.days` inside): tell the player; the next plan builds `stockroom` (barrel food stockpile + still in the core; `plan propose` drafts it, after a siege `plan check` refuses a plan without it while < 90 days lie inside) |
 | BRIDGE_CRUSH | a unit died on or next to a bridge just pulled or moving (bridge, unit, the pull's tick, how it was matched): tell the player at once; `events` for the GATE lines of that bridge (who waited, GATE_FORCED); the bug goes to the repo (BUG-027) |
@@ -231,7 +233,8 @@ alert confines only to a burrow no entrance reaches without a door, hatch or bri
 deepest stair (seal paints `Tiefe+` when missing), else nobody is confined and the citizens flee.
 **Siege reflex (in game, you only read it):** visible invaders → SIEGE in the same step, timestream
 off, FPS cap 30, civ alert on Kern+, squads Ready at their stations, bridges up by T+600 when nobody
-is outside, BREACH fallback at T+900. RECOVERY only on 0 visible invaders for 2,400 ticks; bridges
+is outside, BREACH fallback at T+900 (at once for a destroyed bridge). **Deep defense** (BUG-030): building destroyers
+in sight, an army > 3x our soldiers or weak squads: civilians to the separated refuge, every squad at the core station. RECOVERY only on 0 visible invaders for 2,400 ticks; bridges
 are lowered stepwise. **Arrival lockdown** (no manifest needed): an arrival popup or report, INVASION
 or the first armed hostile in sight raises every lever-linked bridge, forbids the entrance doors,
 holds the clock and, once its lever pulls are done (≤ 2x the lever latency, 450-1500 ticks), sounds the alert, listing

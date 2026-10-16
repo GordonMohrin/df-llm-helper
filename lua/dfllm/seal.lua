@@ -3637,7 +3637,10 @@ M.inspect.defense = function(K)
   for _, n in ipairs(names) do
     local seen = false
     for _, o in ipairs(out) do if o.name == n then seen = true end end
-    if not seen then out[#out + 1] = {name = n, fp = man.bridges[n].fp, state = 'missing'} end
+    if not seen then                                  -- BUG-030: gate saw it complete there: destroyed
+      local _, _, _, gone = K.call('gate', 'state', n)
+      out[#out + 1] = {name = n, fp = man.bridges[n].fp, state = gone and 'destroyed' or 'missing', gone = gone}
+    end
   end
   local parts = {}
   for _, o in ipairs(out) do

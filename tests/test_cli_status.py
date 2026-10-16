@@ -98,10 +98,26 @@ def test_status_intake_wave_and_sortie(save):
     assert schema.validate("state", st) != []
 
 
+def test_status_destroyed_bridges_and_deep_defense(save):
+    """BUG-030: a destroyed bridge stands out in the bridges line; the deep defense in the intake line."""
+    st = json.loads((save / "state.b.json").read_text("utf-8"))
+    st["mode"] = "SIEGE"
+    st["bridges"] = {"O1": "destroyed", "B1": "up", "B2": "down"}
+    st["wave"] = {"ph": "idle", "n": 0, "why": "deep defense (destroyers): the squads", "deep": "destroyers,army"}
+    assert schema.validate("state", st) == []
+    (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
+    out = brief.status_text(save)
+    assert "bridges B1 up B2 down O1 DESTROYED" in out
+    assert "DEEP destroyers,army: civilians in the refuge, squads in the core" in out
+    st["bridges"]["O1"] = "gone"
+    assert schema.validate("state", st) != []
+
+
 def test_status_worst_case_budget(save):
     st = json.loads((save / "state.b.json").read_text("utf-8"))
     st["seq"] = 999
-    st["wave"] = {"ph": "w" * 8, "n": 99, "why": "y" * 40, "so": "s" * 24}
+    st["wave"] = {"ph": "w" * 8, "n": 99, "why": "y" * 40, "so": "s" * 24, "deep": "d" * 24}
+    st["bridges"] = {"O1": "destroyed", "B1": "destroyed", "B2": "destroyed"}
     st["ready"]["fail"] = ["x" * 24] * 8
     st["proj"] = [["p" * 40, "s" * 24, 99, "b" * 40]] * 8
     st["k"].update(slow=["economy", "runner", "care", "snapshot"], disabled=["trade", "baseline"])

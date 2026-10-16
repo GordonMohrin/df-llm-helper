@@ -402,4 +402,91 @@ T.test('gate airlock: an intake/sortie down of O1 is refused while B1 is not up;
   T.eq(W.both_down, 0)
 end)
 
+---------------------------------------------------------------- BUG-030: the deep defense (plan B)
+-- Run 10 y421: 58 goblins and 6 trolls destroyed O1, B1 and B2; 19 recruits (worn 53 %, no metal) at the melee and
+-- gallery stations between O1 and B2 died first, then 40+ civilians in the main hall.
+local TROLL = 77
+local function troll_raws()
+  -- caste 0: the token's level as a number (caste_raw.misc.buildingdestroyer), caste 1: a caste flag
+  local lvl, flag = {flags = {}, misc = {buildingdestroyer = 1}}, {flags = {BUILDINGDESTROYER = true}}
+  df.creature_raw = {find = function(r) if r == TROLL then return {caste = {[0] = lvl, [1] = flag}} end end}
+end
+local function trolls(W, n)
+  for i = 1, n do
+    local u = W.add_unit(S.inv(500 + i, 60 + i, 2, Z, {race = 'TROLL'}))
+    u.race, u.caste = TROLL, i % 2
+  end
+end
+local ALL_CORE = {'station@51,62,10', 'station@51,62,10', 'station@51,62,10'}
+
+T.test('BUG-030: building destroyers in sight (3 trolls): the deep defense: SIEGE_DEEP (A) names them, the civ ' ..
+       'alert confines to the refuge, every squad at the core station (stations.b2), no intake wave; latched for the ' ..
+       'episode', function()
+  -- old code: trolls are only an intake 'danger': civilians stay in Kern+, the squads at the inner station 51,44
+  local W = world{}
+  troll_raws()
+  T.ok(until_(W, 600, function() return W.K.mode() == 'SIEGE' end))
+  trolls(W, 3)
+  T.ok(until_(W, 300, function() return #evs(W, 'SIEGE_DEEP') > 0 end), 'SIEGE_DEEP: ' .. phases(W))
+  local e = evs(W, 'SIEGE_DEEP')[1]
+  T.eq({e.cls, e.d.why, e.d.bd, e.d.races, e.d.units}, {'A', {'destroyers'}, 3, {'TROLL x3'}, {501, 502, 503}})
+  T.ok(e.msg:find('3 building destroyers in sight (TROLL x3, ', 1, true) and e.msg:find('no barrier', 1, true), e.msg)
+  T.ok(e.msg:find('civilians to Tiefe+', 1, true) and e.msg:find('core station 51,62,10', 1, true), e.msg)
+  T.eq(W.K.census.h.bd, 3, 'sense counts them from the raws (level and flag)')
+  run(W, 300)
+  T.eq(W.alert_burrows[1], 'Tiefe+', 'the alert confines to the separated refuge')
+  T.eq({orders_of(W, 'A'), orders_of(W, 'B'), orders_of(W, 'C')}, ALL_CORE)
+  T.eq(W.state().wave.deep, 'destroyers')
+  run(W, 3000)
+  T.eq({#evs(W, 'INTAKE', 'muster'), down_pulls(W, 'O1')}, {0, 0}, 'no wave')
+  T.eq(#evs(W, 'SIEGE_DEEP'), 1, 'once (no news)')
+  for i = 1, 3 do W.unit(500 + i)._m.hidden = true end      -- out of sight: still the plan for this siege
+  run(W, 3000)
+  T.eq({orders_of(W, 'A'), W.alert_burrows[1]}, {'station@51,62,10', 'Tiefe+'}, 'latched')
+  T.eq(W.both_down, 0)
+end)
+
+T.test('BUG-030: an army over 3x the soldiers (30 > 3 x 8): the deep defense (army), INTAKE refused deep; below the ' ..
+       'ratio for 2,400 ticks the squads go back to the inner station and waves are possible again', function()
+  -- old code: 30 <= 4 x 8: a wave musters and the squads go out into the killing field
+  local W = world{army = 30}
+  T.ok(until_(W, 600, function() return W.K.mode() == 'SIEGE' end))
+  T.ok(until_(W, 300, function() return #evs(W, 'SIEGE_DEEP') > 0 end), 'SIEGE_DEEP: ' .. phases(W))
+  local e = evs(W, 'SIEGE_DEEP')[1]
+  T.eq({e.d.why, e.d.vis, e.d.soldiers}, {{'army'}, 30, 8})
+  T.ok(e.msg:find('deep defense: army 30 > 3 x 8 soldiers; civilians to Tiefe+', 1, true), e.msg)
+  run(W, 2000)
+  T.eq(#evs(W, 'INTAKE', 'muster'), 0, 'no wave')
+  local r = evs(W, 'INTAKE', 'refused')
+  T.ok(#r >= 1 and r[#r].d.why == 'deep' and r[#r].msg:find('deep defense (army)', 1, true), phases(W))
+  T.eq({orders_of(W, 'A'), orders_of(W, 'B'), orders_of(W, 'C')}, ALL_CORE)
+  T.eq({W.alert_burrows[1], W.state().wave.deep}, {'Tiefe+', 'army'})
+  local dead = {}
+  for i = 1, 10 do dead[i] = W.goblins[i] end
+  kill(W, dead)                                            -- 20 left: <= 3 x 8
+  run(W, 2000)
+  T.eq(W.state().wave.deep, 'army', 'held for 2,400 ticks')
+  T.ok(until_(W, 900, function() return W.state().wave.deep == nil end), 'released')
+  T.ok(orders_of(W, 'A') ~= 'station@51,62,10', 'the core station released: ' .. orders_of(W, 'A'))
+  T.ok(until_(W, 1500, function() return #evs(W, 'INTAKE', 'muster') > 0 end), 'a wave again: ' .. phases(W))
+end)
+
+T.test('BUG-030: weak squads (worn 0 < 60): the deep defense (weak) at the manifest core station (stations.core, the ' ..
+       'core level by the civilians\' stair); stations.worn 0 turns that reason off', function()
+  local m = manifest()
+  m.stations.core = {60, 70, Z}
+  local W = world{equip = false, manifest = m}
+  T.ok(until_(W, 900, function() return #evs(W, 'SIEGE_DEEP') > 0 end), 'SIEGE_DEEP')
+  local e = evs(W, 'SIEGE_DEEP')[1]
+  T.ok(e.d.why[1] == 'weak' and e.msg:find('worn 0% < 60%', 1, true), e.msg)
+  T.ok(e.msg:find('core station 60,70,10', 1, true) and e.d.pos[1] == 60, e.msg)
+  run(W, 300)
+  T.eq({orders_of(W, 'A'), orders_of(W, 'B'), orders_of(W, 'C')},
+       {'station@60,70,10', 'station@60,70,10', 'station@60,70,10'})
+  W = world{equip = false, reflex = {v = 2, stations = {worn = 0}}}
+  run(W, 1500)
+  T.eq(#evs(W, 'SIEGE_DEEP'), 0, 'stations.worn 0: no weak reason')
+  T.eq(orders_of(W, 'A'), 'station@51,44,10', 'the inner station')
+end)
+
 T.done()

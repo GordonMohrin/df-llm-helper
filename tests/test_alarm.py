@@ -190,3 +190,27 @@ def test_reflex_config_intake_and_sortie(tmp_path):
     for needle in ("intake.on: true or false", "intake.wave: int 1..40", "intake.zap: unknown key", "sortie.worn"):
         assert any(needle in e for e in errs), (needle, errs)
     assert not any("cooldown" in e or "near" in e for e in errs), errs
+
+
+def test_reflex_config_stations(tmp_path):
+    """BUG-030: the deep defense's knobs; the shipped values are the kernel's defaults (lua/dfllm/siege.lua M.ST) with
+    the kernel's limits (M.ST_LIM)."""
+    import re
+    from dfpilot import fairplay
+    shipped = json.loads((fairplay.REPO / "config" / "reflex.json").read_text(encoding="utf-8"))
+    lua = (fairplay.REPO / "lua" / "dfllm" / "siege.lua").read_text(encoding="utf-8")
+
+    def table(name):
+        m = re.search(r"^M\." + name + r" = \{(.*?)\}\n", lua, re.M)
+        assert m, name
+        return {k: (tuple(int(x) for x in re.findall(r"\d+", v)) if v.startswith("{") else int(v))
+                for k, v in re.findall(r"(\w+) = (\{\d+, \d+\}|\d+)", m.group(1))}
+    assert shipped["stations"] == table("ST") == {"core_ratio": 3, "worn": 60, "metal": 0}
+    assert table("ST_LIM") == fairplay.STATIONS_LIM
+    p = tmp_path / "reflex.json"
+    p.write_text(json.dumps({"v": 2, "stations": {"core_ratio": 0, "worn": 60, "zap": 1}}), encoding="utf-8")
+    errs = fairplay.reflex_errors(p)
+    for needle in ("stations.core_ratio: int 1..50", "stations.zap: unknown key"):
+        assert any(needle in e for e in errs), (needle, errs)
+    assert not any("stations.worn" in e for e in errs), errs
+    assert fairplay.reflex_errors(fairplay.REPO / "config" / "reflex.json") == []

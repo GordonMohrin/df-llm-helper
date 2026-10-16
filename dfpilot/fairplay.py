@@ -138,7 +138,7 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
         return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
     for k in doc:
         if k not in ("v", "about", "clock", "hold_quiet_days", "ack_timeout_s", "defaults", "refuge", "gate", "intake",
-                     "sortie", "predator_near"):
+                     "sortie", "predator_near", "stations"):
             errs.append(f"{name}: unknown key {k!r}")
     clock = doc.get("clock", {})
     if not isinstance(clock, dict):
@@ -193,7 +193,7 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
             else:
                 errs.append(f"{name}: gate.{k}: unknown key")
     # intake waves and the sortie through O1 (Gordon 2026-10-16; lua/dfllm/siege.lua M.IK_LIM / M.SO_LIM)
-    for blk, lims in (("intake", INTAKE_LIM), ("sortie", SORTIE_LIM)):
+    for blk, lims in (("intake", INTAKE_LIM), ("sortie", SORTIE_LIM), ("stations", STATIONS_LIM)):
         sec = doc.get(blk, {})
         if not isinstance(sec, dict):
             errs.append(f"{name}: {blk} must be an object")
@@ -216,6 +216,9 @@ INTAKE_LIM: dict = {"on": "bool", "wave": (1, 40), "min_soldiers": (1, 30), "wor
                     "muster": (100, 33600), "fight": (300, 100800)}
 SORTIE_LIM: dict = {"worn": (0, 100), "losses": (1, 30), "max_ticks": (300, 33600), "gather": (100, 33600),
                     "foe_cv": (0, 100), "near": (1, 50)}
+# BUG-030: the deep defense (siege.lua M.ST / M.ST_LIM): an army over core_ratio x soldiers, worn % or the iron/steel
+# share below worn / metal
+STATIONS_LIM: dict = {"core_ratio": (1, 50), "worn": (0, 100), "metal": (0, 100)}
 
 
 # ---------------------------------------------------------------- allowlist (CONTRACTS §9.14)

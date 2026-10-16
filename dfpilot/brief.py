@@ -260,7 +260,9 @@ def line_def(ctx: Ctx) -> str:
     if th:
         out.append(f"threat {th['vis']} vis" + (" ARMED" if th["armed"] else ""))
     if s.get("bridges"):
-        out.append("bridges " + " ".join(f"{b} {v}" for b, v in sorted(s["bridges"].items())))
+        # BUG-030: a destroyed bridge stands out (an open way, no pulls for it)
+        out.append("bridges " + " ".join(f"{b} {'DESTROYED' if v == 'destroyed' else v}"
+                                         for b, v in sorted(s["bridges"].items())))
     if s.get("alert"):
         out.append(line_alert(s["alert"]))
     m = s.get("mil")
@@ -273,7 +275,9 @@ def line_def(ctx: Ctx) -> str:
     wv = s.get("wave")
     if wv:                                     # intake waves and the sortie through O1 (Gordon 2026-10-16)
         out.append(f"intake {wv['ph']} (waves {wv['n']})" + (f": {wv['why']}" if wv.get("why") else "")
-                   + (f", sortie {wv['so']}" if wv.get("so") else ""))
+                   + (f", sortie {wv['so']}" if wv.get("so") else "")
+                   # BUG-030: the deep defense (civilians in the refuge, squads at the core station)
+                   + (f", DEEP {wv['deep']}: civilians in the refuge, squads in the core" if wv.get("deep") else ""))
     tr = s.get("trade")
     if tr and tr["caravan"]:
         out.append("CARAVAN on map")
