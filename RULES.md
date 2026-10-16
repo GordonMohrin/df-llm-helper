@@ -163,7 +163,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | DEATHS_3PLUS | the line names the causes; the brief lists the season's deaths by cause; fix the cause in the plan |
 | DEATHS_PREVENTABLE | ≥ 2 citizens dehydrated or starved within a month (stock days, units, patients in the line): `inspect` `what=reach` (forbidden or cut-off drink/food), `what=refuge`; patients → `what=water_sources` (hospital water); tell the player; fix access in the plan |
 | DRILL_FAIL (2nd in a row) | read `ready.fail`; fix gear, squads or geometry; never raise the cap |
-| SIEGE_UNREADY | readiness is R0 in PEACE (monthly while it fails): the line names the blockers (§8), the ways in without door or bridge and the traps. `inspect` `what=entrances`; close each open way in with `dfllm cmd bp.place tpl=seal site=S1 at=last` (door on a floor, wall on the ramp top, hatch on a stair; one `seal:piece` line each in cli.log), put the missing fortcore pieces into the plan; then `dfllm audit`; tell the player |
+| SIEGE_UNREADY | readiness is R0 in PEACE (monthly while it fails): the line names the blockers (§8), the audit's bypass / refuge route with its fix, the ways in without door or bridge and the traps. A route with `(fix: seal at=audit)`: follow already placed that seal (PEACE, not with `--no-auto`: then `dfllm cmd bp.place tpl=seal site=S1 at=audit`); `(no wall tile: ...)`: `inspect` `what=entrances` and tell the player. `inspect` `what=entrances`; close each open way in with `dfllm cmd bp.place tpl=seal site=S1 at=last` (door on a floor, wall on the ramp top, hatch on a stair; one `seal:piece` line each in cli.log), put the missing fortcore pieces into the plan; then `dfllm audit`; tell the player |
 | KERN_FAULT | a module is backed off (`d.backoff_s`; the kernel re-enables it afterwards); note module and error for the repo; do not hot-patch; `module.enable` only after the fix |
 | PERF_DEGRADED | `dfllm doctor`; the supervisor restarts DF only in PEACE after an autosave |
 | DECISION_NEEDED | ask the player the question once; the default applies until they answer. `build_blocked`: `inspect` `what=workload` (`construction.blocked`: kind, pos, fails, why); the kernel already unforbade the items on the site; corpses wait for burial; else `bp.cancel` and place it elsewhere |
@@ -201,6 +201,11 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 - Audit `fails` name the fix (table DESIGN §5.4): `bypass: wall x,y,z floor -> X` / `refuge: on the attack path,
   wall x,y,z floor` = a constructed wall on that tile closes the route (`ramp`: on its top; `(+more)`: other routes
   remain): `dfllm cmd bp.place tpl=seal site=S1 at=audit`, then `dfllm audit`. Doors never fix an audit route.
+- **Bypass gate (Run 10):** while the last audit names such a wall and no seal project builds it, readiness stays R0
+  (`status`: `audit route: ... | next: wall it ...`), follow places `seal at=audit` itself in PEACE (not with
+  `--no-auto`), and `dfllm plan check` refuses (ERROR) a plan that raises phase_target or adds builds unless one of its
+  new builds, due now, is `{"tpl":"seal","site":"S1","p":{"at":"audit"}}` (`plan propose` drafts it first). A route
+  without a wall tile, or one a seal project already builds, only warns.
   `traps N` with a bypass is counted as if its walls stood; `traps 0` beside an armed hall without a bypass = a
   way into the hall's trap-free end: `dfllm audit` names the tile where the route enters the hall.
 

@@ -13,6 +13,10 @@ not wake; the follower acts on two of them without the LLM:
   PROJECT_REQUEST tpl=workshops -> the same (care asks when a strange mood finds no workshop)
   PROJECT_REQUEST tpl=farms why=food -> the same with p.plots = n (1-4) at prio 1 (economy asks when the farm
                                   tiles fall short of the citizens and food is low or falling; live L5)
+  AUDIT (B) with a bypass wall -> Run 10 (the bypass finding stood for months, the 41 traps stayed unused): in PEACE,
+                                  when the audit names a wall (bypass, refuge on the attack path; bp.topo.choke)
+                                  that no seal project builds yet, the seal (tpl seal, p.at audit) is placed the
+                                  same way (a player's blueprint, never refused for touching a project)
   PLAN_EXHAUSTED phase P0/P1   -> the phase's first proj deliverable without a project (plans/year1.json),
                                   placed the same way (S1, or 'same' for a later fortcore stage): the fort
                                   never idles while it waits for an LLM (live L0/L1: a year idled, a dwarf
@@ -74,7 +78,9 @@ HB_STALE_S = 300
 FOLLOW_HB_EVERY_S = 10                         # FR-29: follow's own heartbeat (<save>/.follow.hb)
 AUTO_TIMEOUT_S = 60
 TOMBS_COOLDOWN_S = 600
-PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "farms")   # automatic placements (one job each)
+PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "farms", "seal")   # automatic placements (one job each)
+SEAL_HINT = ("dfllm cmd bp.place tpl=seal site=S1 at=audit (walls the audit's bypass; follow places it itself "
+             "unless --no-auto); then dfllm audit")
 AUTO_REQUESTS = ("tombs", "workshops")            # PROJECT_REQUEST templates follow places itself
 AUTO_PHASES = ("P0", "P1")                    # PLAN_EXHAUSTED auto-start only for the basic infrastructure
 PRUNE_EVERY_S = 60
@@ -144,6 +150,18 @@ def _prio(t: str) -> int:
     return PRIO.index(t) if t in PRIO else len(PRIO)
 
 
+def next_hint(etype: str, e: dict) -> str:
+    """The wake line's `next:` for an event: NEXT[type]; a SIEGE_UNREADY whose audit fails name a wall (Run 10) gets
+    the seal that builds it."""
+    d = e.get("d") if isinstance(e.get("d"), dict) else {}
+    if etype == "SIEGE_UNREADY" and any(_WALL.search(str(f)) for f in d.get("afails") or []):
+        return SEAL_HINT
+    return NEXT.get(etype, "dfllm brief")
+
+
+_WALL = re.compile(r"\bwall -?\d+,-?\d+,-?\d+ (floor|ramp)\b")
+
+
 def wake_line(burst: dict[str, dict], state: dict | None, held_s: float = 0) -> str:
     """'WAKE y3 sum d20 PEACE | SIEGE_END: msg | GATE_FAIL x2: msg | next: ...' within WAKE_TOKENS."""
     t = (state or {}).get("t") or {}
@@ -151,7 +169,7 @@ def wake_line(burst: dict[str, dict], state: dict | None, held_s: float = 0) -> 
     head = f"WAKE {when} {(state or {}).get('mode', '?')}"
     types = sorted(burst, key=_prio)
     ns = [p["n0"] for p in burst.values() if isinstance(p.get("n0"), int)]
-    hint = NEXT.get(types[0], "dfllm brief")
+    hint = next_hint(types[0], burst[types[0]]["e"])
     tail = f" | next: {hint}" + (f"; dfllm events --cls A --since {min(ns) - 1}" if ns else "")
     room = WAKE_TOKENS - est_tokens(head + tail) - 4
     items, used = [], 0
@@ -321,6 +339,8 @@ class Follower:
                 self._request_place(d["tpl"], d["tpl"], {}, "S1", now)   # live L1: a strange mood needs a shop
             elif t == "PLAN_EXHAUSTED" and d.get("phase") in AUTO_PHASES:
                 self._request_starter(d, now)
+            elif t == "AUDIT" and d.get("ok") in (0, False):
+                self._request_seal(now)
         except Exception as ex:                # noqa: BLE001 - surfaces as one AUTO_FAIL wake
             self._fail(f"event #{e.get('n')} {t}", f"{type(ex).__name__}: {ex}", now)
 
@@ -416,6 +436,20 @@ class Follower:
         self.jobs[key] = {"snap": cid, "since": now, "params": params, "tpl": tpl, "site": site}
         if prio is not None:
             self.jobs[key]["prio"] = prio
+
+    def _request_seal(self, now: float) -> None:
+        """Run 10: the audit named the bypass for months and nobody walled it. In PEACE, the walls of the newest audit
+        that no seal project builds yet (cmd.audit_routes) get the seal at=audit (cmd.place resolves the tiles)."""
+        from .cmd import audit_routes
+        st = files.read_state(self.dir) or {}
+        if st.get("mode") != "PEACE":
+            return                             # builders outside in a fight: the next monthly audit asks again
+        a = audit_routes(self.dir, st)
+        if not a["open"]:
+            return
+        files.log_cli(self.dir, "follow", "auto:seal", {"walls": a["open"]},
+                      f"audit names {a['routes'][0]}: placing the seal at=audit")
+        self._request_place("seal", "seal", {"at": "audit"}, "S1", now)
 
     def _request_starter(self, d: dict, now: float) -> None:
         """PLAN_EXHAUSTED in an auto phase: place the phase's first proj deliverable that has no project yet."""

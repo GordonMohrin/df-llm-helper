@@ -425,4 +425,39 @@ T.test('FR-65: no SIEGE_UNREADY at R1; R0 again (audit_old) is a new episode; a 
   T.ok(unready(W2)[1].msg:find('0 ways in, all with a door or bridge', 1, true), unready(W2)[1].msg)
 end)
 
+T.test('Run 10: the last audit names a bypass with its wall: R0, SIEGE_UNREADY and ready.route name it and the fix ' ..
+       '(seal at=audit); a finding without a wall tile says so; a passed audit clears the route', function()
+  local W = world{seal = seal_fake{tick = 1, sealed = 1, routes = 1, doors = {}, open = {}}}
+  day(W)
+  local fails = {'bypass: wall 100,127,122 floor -> 139,128,117', 'refuge: on the attack path, wall 100,127,122 floor',
+                 'stairs: the civilian stair is on the attack path to Z3'}
+  audit(W, {ok = false, bypass = true, refuge_sep = false, min_traps = 35, fails = fails})
+  day(W, 3)
+  T.eq(lvl(W), 0)
+  local r = ready(W)
+  T.ok(has(r.fail, 'bypass') and has(r.fail, 'refuge_sep'), table.concat(r.fail, ','))
+  -- old code: no route in the state, SIEGE_UNREADY said only 'bypass'
+  T.eq(r.route, 'bypass: wall 100,127,122 floor -> 139,128,117')
+  local u = unready(W)
+  T.eq(#u, 1)
+  T.ok(u[1].msg:find('; bypass: wall 100,127,122 floor -> 139,128,117 (fix: seal at=audit); ', 1, true), u[1].msg)
+  T.ok(u[1].msg:find('; traps 35$') ~= nil, u[1].msg)
+  T.ok(#u[1].msg <= 200, #u[1].msg)
+  T.eq(u[1].d.afails, {fails[1], fails[2], fails[3]})
+  -- the refuge finding alone
+  audit(W, {ok = false, bypass = false, refuge_sep = false, min_traps = 35, fails = {fails[2]}})
+  T.eq(ready(W).route, 'refuge: on the attack path, wall 100,127,122 floor')
+  -- no wall tile on the route (stairs, doors): the finding and where to look
+  audit(W, {ok = false, bypass = true, min_traps = 0, fails = {'bypass: edge->Z3/Z4 avoids the trap hall (reaches 1,2,3)'}})
+  W.ms = W.ms + 3600 * 1000
+  day(W, 31)
+  u = unready(W)
+  T.ok(u[#u].msg:find('bypass: edge->Z3/Z4 avoids the trap hall (reaches 1,2,3) (no wall tile: inspect entrances)', 1,
+                      true), u[#u].msg)
+  -- a passed audit: R1, no route
+  audit(W)
+  T.eq(lvl(W), 1)
+  T.eq(ready(W).route, nil)
+end)
+
 T.done()

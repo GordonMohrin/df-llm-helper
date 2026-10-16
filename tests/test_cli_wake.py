@@ -957,3 +957,86 @@ def test_dfllm_audit_existing_snapshot_and_refusals(save, monkeypatch, capsys):
     assert "manifest truncated" in capsys.readouterr().out and [d["verb"] for d in k.seen] == ["inspect"]
     assert main(["--runtime", rt, "audit", "--timeout", "0.2"]) == 3         # no kernel: no reply
     assert "no reply yet" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- the audit's bypass wall (Run 10)
+BYPASS = "bypass: wall 100,127,122 floor -> 139,128,117"
+
+
+def test_wake_line_unready_with_an_audit_wall_names_the_seal():
+    g = wake.WakeGate()
+    g.add(A(1, "SIEGE_UNREADY", "siege unready (R0: bypass)", {"fails": ["bypass"], "afails": [BYPASS]}), 0)
+    line = wake.wake_line(g.flush(30), STATE)
+    assert "next: dfllm cmd bp.place tpl=seal site=S1 at=audit" in line and est_tokens(line) <= wake.WAKE_TOKENS
+    g.add(A(2, "SIEGE_UNREADY", "siege unready (R0: no_outer)", {"fails": ["no_outer"], "afails": []}), 400)
+    assert "next: dfllm cmd inspect" in wake.wake_line(g.flush(430), STATE)
+
+
+def _sites_snapshot(save, f, c):
+    (snap_cmd,) = inbox_docs(save)
+    assert snap_cmd["verb"] == "snapshot" and snap_cmd["args"] == {"purpose": "sites"}
+    for p in (save / "inbox").glob("*.json"):
+        p.unlink()
+    sid = snap_cmd["id"]
+    snap = json.loads((save / "snap" / "c201.json").read_text("utf-8"))
+    snap["id"] = sid
+    files.write_json_atomic(save / "snap" / f"{sid}.json", snap)
+    append_events(save, [ev(8899, "SNAPSHOT_READY", "", {"id": sid, "path": f"snap/{sid}.json", "purpose": "sites"})])
+    f.poll()
+
+
+def test_follow_seals_the_audit_bypass(save):
+    """Run 10: the audit named the bypass for months and nothing was built. follow (auto) places the seal at=audit
+    for the walls the newest audit names (real templates), once; the next audit with the same wall places nothing."""
+    pytest.importorskip("dfpilot.bp.sites")
+    c = Clock()
+    f, out = F(c)
+    f.poll()
+    append_events(save, [ev(8813, "AUDIT", "audit failed", {"ok": 0, "fails": [BYPASS], "min_traps": 35})])
+    f.poll()
+    _sites_snapshot(save, f, c)
+    (place,) = inbox_docs(save)
+    assert place["verb"] == "bp.place" and place["args"] == {"tpl": "seal", "site": "S1", "p": {"at": "audit"}}
+    assert place["by"] == "follow"
+    bp = json.loads((save / "bp" / f"{place['id']}.json").read_text("utf-8"))
+    assert bp["tpl"] == "seal" and bp["params"]["at"] == "100,127,122 floor wall"
+    log = (save / "cli.log").read_text("utf-8")
+    assert "auto:seal" in log and "seal:piece" in log
+    for p in (save / "inbox").glob("*.json"):
+        p.unlink()
+    c.t += TOMBS_COOLDOWN                                     # past the cooldown: the bp file covers the wall now
+    append_events(save, [ev(8900, "AUDIT", "audit failed", {"ok": 0, "fails": [BYPASS], "min_traps": 35})])
+    f.poll()
+    assert inbox_docs(save) == []
+    assert out == []
+
+
+def test_follow_seals_only_in_peace(save):
+    pytest.importorskip("dfpilot.bp.sites")
+    st = json.loads((save / "state.b.json").read_text("utf-8"))
+    st["mode"] = "SIEGE"
+    (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
+    c = Clock()
+    f, _ = F(c)
+    f.poll()
+    append_events(save, [ev(8813, "AUDIT", "audit failed", {"ok": 0, "fails": [BYPASS], "min_traps": 35})])
+    f.poll()
+    assert inbox_docs(save) == []                             # builders outside in a fight: the next audit asks
+    append_events(save, [ev(8814, "AUDIT", "audit ok", {"ok": 1, "fails": [], "min_traps": 35})])
+    st["mode"] = "PEACE"
+    (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
+    f.poll()
+    assert inbox_docs(save) == []                             # a passed audit names no wall
+    append_events(save, [ev(8815, "AUDIT", "audit failed", {"ok": 0, "fails": [BYPASS], "min_traps": 35})])
+    f.poll()
+    (snap_cmd,) = inbox_docs(save)                            # PEACE: the seal's sites snapshot is requested
+    assert snap_cmd["verb"] == "snapshot"
+
+
+def test_follow_no_auto_places_no_seal(save):
+    pytest.importorskip("dfpilot.bp.sites")
+    f, _ = F(Clock(), auto=False)                             # --no-auto: no placements (the audit still runs)
+    f.poll()
+    append_events(save, [ev(8813, "AUDIT", "audit failed", {"ok": 0, "fails": [BYPASS], "min_traps": 35})])
+    f.poll()
+    assert inbox_docs(save) == []

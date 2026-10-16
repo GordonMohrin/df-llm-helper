@@ -1,6 +1,7 @@
 """`dfllm status` (<= 300 tokens) and `dfllm brief` (<= 1.5k tokens) from runtime files only."""
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 
@@ -136,6 +137,7 @@ def unready_r0(ctx: Ctx) -> dict | None:
 
 
 R0_FORTCORE = ("no_outer", "no_inner", "bridge:", "levers:", "no_kern", "no_refuge")
+WALL_RE = re.compile(r"\bwall -?\d+,-?\d+,-?\d+ (floor|ramp)\b")    # bp.topo.choke's wall in an audit finding
 
 
 def line_unready(ctx: Ctx) -> str:
@@ -155,7 +157,14 @@ def line_unready(ctx: Ctx) -> str:
     t = a.get("min_traps", 0)
     why = "" if "bypass" not in fails else " (counted as if the bypass were walled)" if t else " (a bypass skips the hall)"
     out.append(f"traps {t}{why}" if a.get("age", -1) >= 0 else "traps ? (no audit)")
+    route = r.get("route") if isinstance(r.get("route"), str) else ""
+    if route:                                  # Run 10: the bypass stood for months; name it and its wall
+        out.append(f"audit route: {route}")
     nxt = []
+    if WALL_RE.search(route):
+        nxt.append("wall it: dfllm cmd bp.place tpl=seal site=S1 at=audit (or a plan build seal p.at=audit)")
+    elif route:
+        nxt.append("no wall tile on that route: dfllm cmd inspect what=entrances")
     if a.get("age", -1) < 0 or any(f in ("audit", "audit_old") for f in fails):
         nxt.append("dfllm audit")
     if n > 0:

@@ -1,5 +1,39 @@
 # CHANGELOG dfpilot
 
+## The audit's bypass is walled before the fort grows: `seal at=audit` by follow, plan propose and plan check (2026-10-16; offline, live-untested)
+- **Why (Run 10, post-mortem root cause 1):** `bypass: edge->Z3/Z4 avoids the trap hall (reaches 139,128,117)` stood
+  in the audit for months, the plans raised the phase anyway and the 41 traps stayed unused. The findings now name
+  the wall (`bypass: wall x,y,z floor -> X`), but building it still waited for someone to read it.
+- **Readiness (kernel):** R0 as before; new state `ready.route` = the last audit's first route finding (bypass or
+  refuge on the attack path, <= 60 chars); SIEGE_UNREADY names it with `(fix: seal at=audit)` (or `(no wall tile:
+  inspect entrances)`), the ways-in list is shortened when the line would cut the trap count. `dfllm status` line 2:
+  `audit route: bypass: wall ... | next: wall it: dfllm cmd bp.place tpl=seal site=S1 at=audit (or a plan build seal
+  p.at=audit)`; the SIEGE_UNREADY wake line's `next:` is the seal command when its `afails` name a wall.
+- **Automatic path (follow, auto mode):** on each AUDIT event in PEACE, the walls the newest audit names and no seal
+  project builds yet are placed as `bp.place {"tpl":"seal","site":"S1","p":{"at":"audit"}}` (the follower's
+  placement job, like tombs; `auto:seal` in cli.log, one `seal:piece` line per wall). Not with `--no-auto` (no
+  automatic placements there), not in ALERT/SIEGE (the next monthly audit asks again).
+- **`dfllm plan propose`** drafts that seal as the first new build (the current season; seasons[0] of next year's
+  plan). **`dfllm plan check`**: ERROR when the plan raises phase_target above the current phase or adds builds while
+  such a wall stands in no seal project, unless a new build due now is a seal with `at=audit` / `at=all` / the tiles;
+  a seal in a later season is refused (`move the seal ...`). A route without a wall tile, or one a pending seal
+  builds, is a warning.
+- **`cmd.audit_routes`** (shared): routes, walls, `open` walls, `pending` {wall: seal project}; a seal done before an
+  audit that still names its tile counts as gone. `seal at=audit` leaves pending walls out (never two seals per tile).
+- Contracts: state `ready.route` (schema, contract.lua, CONTRACTS appendix). RULES §7 SIEGE_UNREADY row, §8 bypass
+  gate; DESIGN §5.4.
+- Tests: `tests/test_cli_plan.py` (gate, pending/done/no-wall, state fallback, propose, apply with the real seal),
+  `tests/test_cli_wake.py` (follow places the seal once, PEACE only, not with --no-auto; wake hint),
+  `tests/test_cli_status.py`, `tests/lua/test_readiness.lua`.
+- **How to use:** nothing for the normal loop: keep `dfllm follow` (without `--no-auto`) running and the seal is placed
+  after the next audit. By hand: `dfllm cmd bp.place tpl=seal site=S1 at=audit`. In a plan: `{"tpl":"seal","site":"S1",
+  "p":{"at":"audit"}}` as the first build of the current season (`dfllm plan propose` writes it).
+- **Live check:** after `git pull` and `dfhack-run dfllm reload`, `dfllm audit`; with a bypass `dfllm status` line 2
+  shows `audit route: bypass: wall x,y,z ... | next: wall it ...`; within a few seconds follow logs `auto:seal` and
+  `seal:piece` in `<save>/cli.log` and `dfllm events --type CMD` shows the bp.place; `dfllm plan propose` puts no second
+  seal in (the pending one covers the tile) and `dfllm plan check` warns `seal project ... builds the wall`. Once the
+  wall stands, `dfllm audit` shows no `bypass` (or the next route) and readiness can reach R1.
+
 ## PREDATOR only near the citizens (2026-10-16; offline, live-untested)
 - Live Run 10 y421: four lockdowns in ten game days (clock 30 t/s, civilians confined) for animals at the map edge 60-120 tiles
   from the fort, because any roofed tile of the citizens' walkable group counted as "inside".

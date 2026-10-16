@@ -11,12 +11,13 @@ apply:   check, emit bp/y<Y>s<S>b<I>.json per build (S season 0-3, I index 0-bas
 from __future__ import annotations
 
 import copy
+import json
 import re
 from pathlib import Path
 
 from . import files, paths, schema
-from .cmd import (SAME, BpError, BpUnavailable, bp_files, fmt_reply, fort_manifest, log_seal, occupancy, place,
-                  send, sites_snapshot, template_info, template_names, write_bp)
+from .cmd import (SAME, SEAL_AUDIT, BpError, BpUnavailable, audit_routes, bp_files, fmt_reply, fort_manifest,
+                  log_seal, occupancy, place, send, sites_snapshot, template_info, template_names, write_bp)
 
 R_CAPS = {0: 55, 1: 55, 2: 75, 3: 250}    # DESIGN §5.4; R3 (>= 80) only with D-01 = B
 OPTION_A_MAX = 75
@@ -116,7 +117,8 @@ def sieged(save_dir: Path, state: dict | None = None) -> bool:
 
 def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
     """What check() needs beyond state, read from the save folder: o1 (the fortcore manifest has an outer bridge, or
-    fortcore stage >= 3 is applied), gallery / stockroom (such a project or manifest room exists), sieged (sieged())."""
+    fortcore stage >= 3 is applied), gallery / stockroom (such a project or manifest room exists), sieged (sieged()),
+    audit (cmd.audit_routes: the newest audit's bypass / refuge-on-the-attack-path findings and their walls)."""
     applied = applied_builds(save_dir, state)
     try:
         man = fort_manifest(save_dir)
@@ -130,7 +132,75 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             or any(t == GALLERY for t, _ in applied),
             "stockroom": any(isinstance(r, dict) and r.get("tpl") == STOCKROOM for r in rooms)
             or any(t == STOCKROOM for t, _ in applied),
-            "sieged": sieged(save_dir, state)}
+            "sieged": sieged(save_dir, state),
+            "audit": audit_routes(save_dir, state)}
+
+
+def new_builds(doc: dict, prev: dict | None) -> list[tuple[int, int, dict]]:
+    """(season, index, build) of the builds this plan adds: every build of a plan for another year, else those past
+    the applied plan's length per season (stable_ids keeps the applied ones at their index)."""
+    same = bool(prev) and prev.get("year") == doc["year"]
+    out = []
+    for si, se in enumerate(doc["seasons"]):
+        n = len(prev["seasons"][si]["build"]) if same else 0
+        out += [(si, bi, b) for bi, b in enumerate(se["build"]) if bi >= n]
+    return out
+
+
+def due_season(doc: dict, s: dict) -> int:
+    """The plan season whose builds the runner starts now: the current season for this year's plan, 0 for next
+    year's (CONTRACTS §9.7: a build is due from its season on)."""
+    t = s.get("t") or {}
+    return t.get("season", 0) if t.get("y", doc["year"]) >= doc["year"] else 0
+
+
+def _seals_walls(b: dict, walls: list[str]) -> bool:
+    """A seal build that builds these audit walls: at=audit / at=all, or absolute openings naming every tile."""
+    if b["tpl"] != "seal":
+        return False
+    at = str((b.get("p") or {}).get("at", "last")).strip()
+    if at.lower() in ("audit", "all"):
+        return True
+    named = set(re.findall(r"-?\d+,-?\d+,-?\d+", at))
+    return all(w.split(" ", 1)[0] in named for w in walls)
+
+
+def audit_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list[str], list[str]]:
+    """Run 10: `bypass: edge->Z3/Z4 avoids the trap hall` stood in every audit for months, the plan grew the fort and
+    the 41 traps stayed unused. While the last audit names a bypass or a refuge on the attack path with a wall
+    tile (bp.topo.choke) that no seal project builds yet, a plan that raises phase_target or adds builds is refused
+    unless one of its new builds, due now, is the seal that walls them (SEAL_AUDIT; `plan propose` drafts it first).
+    A route without a wall tile, or one a seal project already builds, only warns (no plan build can fix it)."""
+    a = fort.get("audit") or {}
+    routes = a.get("routes") or []
+    if not routes:
+        return [], []
+    route = routes[0] + (f" (+{len(routes) - 1} more)" if len(routes) > 1 else "")
+    if not a.get("walls"):
+        return [], [f"audit: {route}: no wall tile on the route (stairs, doors or bridges); look at it with dfllm cmd "
+                    "inspect '{\"what\":\"entrances\"}' and close it; readiness stays R0 until then"]
+    open_ = a.get("open") or []
+    if not open_:
+        pend = ", ".join(sorted(set((a.get("pending") or {}).values())))
+        return [], [f"audit: {route}: seal project {pend} builds the wall; dfllm audit once it stands"]
+    due = due_season(doc, s)
+    adds = new_builds(doc, prev)
+    seals = [si for si, _, b in adds if _seals_walls(b, open_)]
+    if any(si <= due for si in seals):
+        return [], []
+    fix = (f"add {json.dumps(SEAL_AUDIT, separators=(',', ':'))} as the first build of seasons[{due}] "
+           "(dfllm plan propose drafts it)")
+    if seals:
+        fix = f"move the seal from seasons[{seals[0]}] to seasons[{due}] (it must run now)"
+    cur = s.get("phase") or "P0"
+    raising = doc["phase_target"] > cur
+    others = [b["tpl"] for _, _, b in adds if b["tpl"] != "seal"]
+    text = f"audit: {route}: wall {', '.join(w.rsplit(' ', 1)[0] for w in open_)} stands in no seal project; {fix}"
+    if raising or others:
+        what = " and ".join(x for x in (f"raising phase_target {cur} -> {doc['phase_target']}" if raising else "",
+                                         f"adding builds ({', '.join(others[:4])})" if others else "") if x)
+        return [text + f"; {what} waits for it"], []
+    return [], [text]
 
 
 def _outer_gallery(doc: dict, s: dict, fort: dict) -> str | None:
@@ -209,6 +279,9 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     gw = _outer_gallery(doc, s, fort or {})
     if gw:
         warn.append(gw)
+    ae, aw = audit_gate(doc, s, fort or {}, prev)           # Run 10: an audit bypass is walled before growth
+    errs += ae
+    warn += aw
     if pol["beauty"] == "used_rooms" and lvl < 1:
         warn.append("beauty used_rooms waits for R1 (runner gates it)")
     seen_libs: set[str] = set()
@@ -267,10 +340,12 @@ def applied_builds(save_dir: Path, state: dict | None = None) -> set[tuple]:
 
 
 def propose(state: dict | None, phases: dict | None, prev: dict | None, decisions: dict | None = None,
-            tinfo: dict | None = None, applied: set | None = None) -> dict:
+            tinfo: dict | None = None, applied: set | None = None, fort: dict | None = None) -> dict:
     """Draft plan: phase_target = last phase before the next ★ phase; builds = `proj` deliverables of the
     phases up to it (a template with a `stage` param gets p.stage; stage >= 2 reuses the anchor: site 'same').
-    Deliverables in `applied` (applied_builds) or in the previous plan (any year) are not drafted again."""
+    Deliverables in `applied` (applied_builds) or in the previous plan (any year) are not drafted again.
+    fort = fort_facts: while the last audit names a bypass / refuge-route wall no seal project builds, the seal
+    that walls it (SEAL_AUDIT) is the first new build (Run 10)."""
     dec = decisions if decisions is not None else load_decisions()
     info = tinfo if tinfo is not None else template_info()
     d01 = schema.decision("D-01", dec)
@@ -292,6 +367,9 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     done = {_build_key(b) for se in (prev or {}).get("seasons", []) for b in se["build"]} | set(applied or ())
     staged = None if info is None else {t for t, i in info.items() if "stage" in i["params"]}
     builds, libs = [], []
+    # Run 10: the audit's bypass wall first (audit_gate refuses growth without it)
+    if ((fort or {}).get("audit") or {}).get("open") and (info is None or "seal" in info):
+        builds.append(copy.deepcopy(SEAL_AUDIT))
     # BUG-028: drink or food inside the core below CORE_DAYS -> a stockroom first (food only: without the still)
     al = s.get("alert") or {}
     low = [k for k in ("core_d", "core_f") if isinstance(al.get(k), int) and al[k] < CORE_DAYS]
@@ -432,10 +510,11 @@ def run(args, save_dir: Path) -> int:
     if args.action == "propose":
         phases = load_phases(Path(args.phases) if args.phases else None)
         state = files.read_state(save_dir)
-        doc = propose(state, phases, prev, applied=applied_builds(save_dir, state))
+        fort = fort_facts(save_dir, state)
+        doc = propose(state, phases, prev, applied=applied_builds(save_dir, state), fort=fort)
         files.write_json_atomic(path, doc)
         print(f"draft {path}: {_summary(doc)}")
-        errs, warn = check(doc, state, tpls=templates(), prev=prev, fort=fort_facts(save_dir, state))
+        errs, warn = check(doc, state, tpls=templates(), prev=prev, fort=fort)
         _print_check(errs, warn)
         print("edit the draft, then: dfllm plan check; dfllm plan apply" + ("" if phases else
               " (no valid plans/year1.json: builds empty)"))

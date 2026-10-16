@@ -3,7 +3,7 @@ import copy
 import json
 
 import pytest
-from cli_v2_helpers import FIX, FakeKern, inbox_docs, install_fake_bp, make_runtime, reset_paths
+from cli_v2_helpers import FIX, FakeKern, append_events, ev, inbox_docs, install_fake_bp, make_runtime, reset_paths
 
 from dfpilot import files, plan, schema
 
@@ -453,3 +453,143 @@ def test_propose_drafts_a_stockroom_first(base):
             "seasons"] for b in se["build"])
     done = plan.propose(_low_core(state), phases, prev, decisions={}, tinfo=tinfo, applied={("stockroom", None)})
     assert all(b["tpl"] != "stockroom" for se in done["seasons"] for b in se["build"])
+
+
+# ---------------------------------------------------------------- audit bypass gate (Run 10)
+BYPASS = "bypass: wall 100,127,122 floor -> 139,128,117"
+REFUGE = "refuge: on the attack path, wall 100,127,122 floor"
+T_AUDIT = 3 * 403200 + 124000
+SEAL = {"tpl": "seal", "site": "S1", "p": {"at": "audit"}}
+GATE_ERR = ('audit: bypass: wall 100,127,122 floor -> 139,128,117 (+1 more): wall 100,127,122 floor stands in no '
+            'seal project; add {"tpl":"seal","site":"S1","p":{"at":"audit"}} as the first build of seasons[1] '
+            "(dfllm plan propose drafts it)")
+
+
+def _audit(save, fails, n=8813, tick=T_AUDIT):
+    append_events(save, [ev(n, "AUDIT", "audit failed", {"ok": 0, "fails": fails, "min_traps": 35}, tick=tick)])
+
+
+def _gate(errs_warn):
+    errs, warn = errs_warn
+    return [e for e in errs if e.startswith("audit:")], [w for w in warn if w.startswith("audit:")]
+
+
+def test_audit_bypass_blocks_growth_until_the_seal_is_planned(save, base):
+    """Run 10: `bypass: edge->Z3/Z4 avoids the trap hall` stood in the audit for months while the plans raised the
+    phase; the 41 traps stayed unused. Now the audit names the wall, and a plan that raises phase_target or adds builds
+    is refused until the seal at=audit is one of its new builds, due now (old code: no audit check at all)."""
+    prev, state = base
+    _audit(save, [BYPASS, REFUGE, "traps<30"])
+    fort = plan.fort_facts(save, state)
+    a = fort["audit"]
+    assert (a["found"], a["routes"], a["walls"], a["open"], a["pending"]) == (
+        True, [BYPASS, REFUGE], ["100,127,122 floor wall"], ["100,127,122 floor wall"], {})
+    doc = copy.deepcopy(prev)                                             # phase_target P4 > the current P3
+    assert _gate(errs_of(doc, state, fort=fort, prev=prev)) == (
+        [GATE_ERR + "; raising phase_target P3 -> P4 waits for it"], [])
+    doc["phase_target"] = "P3"
+    doc["seasons"][1]["build"].append({"tpl": "tombs", "site": "S1"})
+    assert _gate(errs_of(doc, state, fort=fort, prev=prev))[0] == [GATE_ERR + "; adding builds (tombs) waits for it"]
+    nothing = copy.deepcopy(prev)
+    nothing["phase_target"] = "P3"                                        # neither raises nor adds: a warning
+    assert _gate(errs_of(nothing, state, fort=fort, prev=prev)) == ([], [GATE_ERR])
+    ok = copy.deepcopy(doc)
+    ok["phase_target"] = "P4"
+    ok["seasons"][1]["build"].append(SEAL)
+    assert _gate(errs_of(ok, state, fort=fort, prev=prev)) == ([], [])
+    named = copy.deepcopy(doc)
+    named["seasons"][0]["build"].append({"tpl": "seal", "site": "S1", "p": {"at": "100,127,122 floor wall"}})
+    assert _gate(errs_of(named, state, fort=fort, prev=prev)) == ([], [])  # an earlier season is due now too
+    late = copy.deepcopy(doc)
+    late["seasons"][3]["build"].append(SEAL)
+    (e,), _ = _gate(errs_of(late, state, fort=fort, prev=prev))
+    assert "move the seal from seasons[3] to seasons[1] (it must run now)" in e
+    entr = copy.deepcopy(doc)
+    entr["seasons"][1]["build"].append({"tpl": "seal", "site": "S1"})   # at=last: the entrances, not the wall
+    assert _gate(errs_of(entr, state, fort=fort, prev=prev))[0]
+    # a plan for next year: its seasons[0] is the one due
+    y4 = _y4(prev, [SEAL])
+    assert _gate(errs_of(y4, state, fort=fort, prev=prev)) == ([], [])
+    # an audit without route findings: no gate
+    _audit(save, ["traps<30"], n=8814, tick=T_AUDIT + 10)
+    assert plan.fort_facts(save, state)["audit"]["routes"] == []
+    assert _gate(errs_of(prev, state, fort=plan.fort_facts(save, state), prev=prev)) == ([], [])
+
+
+def test_audit_gate_pending_seal_done_seal_and_no_wall(save, base):
+    from dfpilot import cmd
+    prev, state = base
+    _audit(save, [BYPASS])
+    doc = cmd.place(save, "seal", {"at": "audit"}, "S1", "c9")
+    assert doc["params"]["at"] == "100,127,122 floor wall"
+    cmd.write_bp(save, doc)
+    a = plan.fort_facts(save, state)["audit"]
+    assert (a["open"], a["pending"]) == ([], {"100,127,122 floor wall": "c9"})
+    errs, warn = _gate(errs_of(prev, state, fort={"audit": a}, prev=prev))
+    assert errs == [] and warn == [f"audit: {BYPASS}: seal project c9 builds the wall; dfllm audit once it stands"]
+    with pytest.raises(cmd.BpError, match=r"left out \(a seal project builds them\): 100,127,122 \(c9\)"):
+        cmd.seal_openings(save, "audit")                                  # never a second seal for the same tile
+    assert plan.propose(state, None, prev, decisions={}, fort={"audit": a})["seasons"] == prev["seasons"]
+    # c9 finished after this audit (the audit has not seen the wall yet): still covered
+    append_events(save, [ev(8814, "PROJECT_DONE", "c9 done", {"proj": "c9", "tpl": "seal"}, tick=T_AUDIT + 100)])
+    assert plan.fort_facts(save, state)["audit"]["open"] == []
+    # a newer audit still names the tile after c9 was done: the wall is gone (or never stood), seal it again
+    _audit(save, [BYPASS], n=8815, tick=T_AUDIT + 200)
+    a = plan.fort_facts(save, state)["audit"]
+    assert (a["open"], a["pending"]) == (["100,127,122 floor wall"], {})
+    assert _gate(errs_of(prev, state, fort={"audit": a}, prev=prev))[0]
+    # a route without a wall tile (stairs, doors): only a warning, no plan build can fix it
+    _audit(save, ["bypass: edge->Z3/Z4 avoids the trap hall (reaches 1,2,3)"], n=8816, tick=T_AUDIT + 300)
+    a = plan.fort_facts(save, state)["audit"]
+    assert (a["routes"], a["walls"]) == (["bypass: edge->Z3/Z4 avoids the trap hall (reaches 1,2,3)"], [])
+    errs, warn = _gate(errs_of(prev, state, fort={"audit": a}, prev=prev))
+    assert errs == [] and len(warn) == 1 and "no wall tile on the route" in warn[0]
+
+
+def test_audit_routes_fall_back_to_the_state(save, base):
+    """No AUDIT event left (rotated away): the state's ready.route (readiness publishes the finding) is the source."""
+    from dfpilot import cmd
+    _, state = base
+    for p in (save / "events.jsonl", save / "events.1.jsonl"):
+        p.write_text("", encoding="utf-8")
+    s = copy.deepcopy(state)
+    s["ready"]["route"] = BYPASS
+    assert schema.validate("state", s) == []
+    a = cmd.audit_routes(save, s)
+    assert (a["found"], a["routes"], a["open"]) == (False, [BYPASS], ["100,127,122 floor wall"])
+    assert cmd.audit_routes(save, state)["routes"] == []
+
+
+def test_propose_drafts_the_audit_seal_first(save, base):
+    prev, state = base
+    phases = json.loads((FIX / "phases.json").read_text("utf-8"))
+    tinfo = {t: {"params": {}, "about": ""} for t in ("tombs", "temple", "stockroom", "seal")}
+    _audit(save, [BYPASS])
+    fort = plan.fort_facts(save, state)
+    doc = plan.propose(_low_core(state), phases, prev, decisions={}, tinfo=tinfo, fort=fort)
+    new = doc["seasons"][1]["build"][len(prev["seasons"][1]["build"]):]
+    assert new[:2] == [SEAL, {"tpl": "stockroom", "site": "S1"}]          # the seal first, the stockroom after it
+    assert _gate(errs_of(doc, state, fort=fort, prev=prev)) == ([], [])
+    # an earlier seal (done) does not stop it: `done` is per (tpl, stage), the seal is per wall
+    doc = plan.propose(state, phases, prev, decisions={}, tinfo=tinfo, fort=fort, applied={("seal", None)})
+    assert doc["seasons"][1]["build"][len(prev["seasons"][1]["build"])] == SEAL
+    # next year's plan: seasons[0]
+    s4 = dict(state, t=dict(state["t"], y=4, season=0))
+    assert plan.propose(s4, phases, prev, decisions={}, tinfo=tinfo, fort=fort)["seasons"][0]["build"][0] == SEAL
+
+
+def test_apply_builds_the_audit_wall(save, base):
+    """End to end with the real templates: the plan's seal at=audit emits a constructed wall on the audit's tile."""
+    pytest.importorskip("dfpilot.bp.sites")
+    from dfpilot import cmd
+    _audit(save, [BYPASS])
+    doc = _y4(base[0], [SEAL])
+    errs, msg = plan.apply(save, doc, wait_s=0)
+    assert errs == [], errs
+    bp = json.loads((save / "bp" / "y4s0b0.json").read_text("utf-8"))
+    assert bp["tpl"] == "seal" and bp["params"]["at"] == "100,127,122 floor wall"
+    cells = [(ch["pos"][0] + c[0], ch["pos"][1] + c[1], ch["pos"][2] + c[2], c[3]) for st in bp["stages"]
+             for ch in st["chunks"] for c in ch["cells"]]
+    assert cells == [(100, 127, 122, "Cw")]
+    assert "seal:piece" in (save / "cli.log").read_text("utf-8")
+    assert cmd.audit_routes(save)["pending"] == {"100,127,122 floor wall": "y4s0b0"}

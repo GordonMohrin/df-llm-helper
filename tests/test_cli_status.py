@@ -415,3 +415,26 @@ def test_status_orders_and_free_metal(save):
     st["orders"]["bad"] = 0
     (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
     assert not any("item_subtype" in b for b in doctor.diagnose(save)[1])
+
+
+def test_status_r0_names_the_audit_route_and_the_seal(save):
+    """Run 10: `bypass` stood in the R0 line for months without saying where or what to build. The state's
+    ready.route (readiness: the last audit's first route finding) and the seal that walls it stand in line 2."""
+    _r0_state(save, open=0, ents=None, fail=["audit_fail", "bypass", "refuge_sep"],
+              audit={"ok": 0, "age": 9000, "min_traps": 35}, route="bypass: wall 100,127,122 floor -> 139,128,117")
+    line = brief.status_text(save).splitlines()[1]
+    assert ("traps 35 (counted as if the bypass were walled) | audit route: bypass: wall 100,127,122 floor -> "
+            "139,128,117 | next: wall it: dfllm cmd bp.place tpl=seal site=S1 at=audit (or a plan build seal "
+            "p.at=audit)") in line, line
+    _r0_state(save, open=0, ents=None, fail=["bypass"], audit={"ok": 0, "age": 9000, "min_traps": 0},
+              route="bypass: edge->Z3/Z4 avoids the trap hall (reaches 1,2,3)")
+    line = brief.status_text(save).splitlines()[1]
+    assert "audit route: bypass: edge->Z3/Z4" in line and "next: no wall tile on that route: dfllm cmd inspect " \
+        "what=entrances" in line
+    _r0_state(save, open=9, fail=["x" * 24] * 8, ents=["y" * 24] * 3, dhold="z" * 24,
+              route="bypass: wall 1000,1000,100 ramp (+more) -> 1000,1000,100x")
+    out = brief.status_text(save)
+    assert est_tokens(out) <= brief.STATUS_TOKENS
+    st = json.loads((save / "state.b.json").read_text("utf-8"))
+    st["ready"]["route"] = "r" * 61
+    assert schema.validate("state", st) != []

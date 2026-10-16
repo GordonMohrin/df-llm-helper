@@ -290,7 +290,8 @@ C.STATE_SPEC = obj({
   pop = obj(nil, {cit = NAT, adults = NAT, soldiers = NAT, cap = NAT, gate_cap = NAT}),
   ready = obj({lvl = int(0, 3), worn = PCT, cv = NAT, drill_age = int(-1),
                audit = obj({ok = FLAG, age = int(-1), min_traps = NAT}), fail = arr(str(24), 0, 8)},
-              {open = int(-1), ents = arr(str(24), 0, 3), dhold = str(24)}),   -- FR-65
+              {open = int(-1), ents = arr(str(24), 0, 3), dhold = str(24),     -- FR-65
+               route = str(60)}),          -- the last audit's first attacker-route finding (bypass, refuge)
   stock = obj(nil, {drink_d = NAT, food_d = NAT, meals = NAT, hosp_water = FLAG}),
   care = obj({stressed_pct = PCT, naked = NAT, ghosts = NAT, corpses_old = NAT, tombs_free = NAT, moods = NAT},
              {coffins = obj({want = NAT, short = NAT, stock = NAT, order = NAT, proj = str(40)}),

@@ -618,8 +618,10 @@ STATE = Obj(
          "ready": Obj(req={"lvl": Int(0, 3), "worn": PCT, "cv": NAT, "drill_age": Int(-1),
                            "audit": Obj(req={"ok": FLAG, "age": Int(-1), "min_traps": NAT}),
                            "fail": Arr(Str(maxbytes=24), hi=8)},
-                      # FR-65: ways in without door or bridge (-1 unknown), the first of them, why no auto drill
-                      opt={"open": Int(-1), "ents": Arr(Str(maxbytes=24), hi=3), "dhold": Str(maxbytes=24)}),
+                      # FR-65: ways in without door or bridge (-1 unknown), the first of them, why no auto drill;
+                      # route: the last audit's first attacker-route finding (bypass / refuge on the attack path)
+                      opt={"open": Int(-1), "ents": Arr(Str(maxbytes=24), hi=3), "dhold": Str(maxbytes=24),
+                           "route": Str(maxbytes=60)}),
          "stock": Obj(opt={"drink_d": NAT, "food_d": NAT, "meals": NAT, "hosp_water": FLAG}),
          "care": Obj(req={"stressed_pct": PCT, "naked": NAT, "ghosts": NAT, "corpses_old": NAT,
                           "tombs_free": NAT, "moods": NAT},
