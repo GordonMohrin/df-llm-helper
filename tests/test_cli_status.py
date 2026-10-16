@@ -95,6 +95,57 @@ def test_status_worst_case_budget(save):
     assert est_tokens(brief.status_text(save)) <= brief.STATUS_TOKENS
 
 
+def _r0_state(save, **ready):
+    """FR-65: the fixture state at R0 (Run 9/10: fails for the whole session, no audit, no drill)."""
+    st = json.loads((save / "state.b.json").read_text("utf-8"))
+    st["ready"] = dict({"lvl": 0, "worn": 0, "cv": 3, "drill_age": -1, "audit": {"ok": 0, "age": -1, "min_traps": 0},
+                        "fail": ["audit", "no_inner", "no_outer"], "open": 2,
+                        "ents": ["55,62,117 stair_updown", "61,55,117 floor"], "dhold": "no bridges"}, **ready)
+    st["ready"] = {k: v for k, v in st["ready"].items() if v is not None}     # None: leave the optional key out
+    assert schema.validate("state", st) == []
+    (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
+
+
+def test_status_r0_is_loud_never_plain_peace(save):
+    """FR-65: R0 marks the mode UNREADY, the 2nd line lists blockers, open ways in, traps and the next step; the
+    drill and audit say how to run them (`drill never`, `audit never` for the whole Run 10 fort)."""
+    _r0_state(save)
+    out = brief.status_text(save)
+    lines = out.splitlines()
+    assert "PEACE(29d) UNREADY P3" in lines[0] and lines[0].startswith("DEFCON 5 | region7")
+    assert lines[1] == ("SIEGE UNREADY (R0): audit,no_inner,no_outer | 2 ways in without door or bridge: "
+                        "55,62,117 stair_updown, 61,55,117 floor | traps ? (no audit) | next: dfllm audit; wall/door "
+                        "the open ways in (inspect entrances, bp.place); build the missing fortcore pieces (plan)")
+    assert "R0 UNREADY worn 0% cv 3 drill never (auto: no bridges; run dfllm cmd drill) audit never (run dfllm audit)" \
+        in out
+    assert "fail:audit" not in out                             # the blockers stand once, in the UNREADY line
+    assert est_tokens(out) <= brief.STATUS_TOKENS
+    assert "SIEGE UNREADY (R0)" in brief.brief_text(save)
+
+
+def test_status_r0_variants_and_worst_case(save):
+    _r0_state(save, open=-1, ents=None, dhold=None, fail=["audit_fail", "bypass", "refuge_sep", "civ_sep"],
+              audit={"ok": 0, "age": 9000, "min_traps": 4})
+    out = brief.status_text(save)
+    assert "SIEGE UNREADY (R0): audit_fail,bypass,refuge_sep,civ_sep | ways in: not checked yet | traps 4" in out
+    assert "next:" not in out.splitlines()[1]
+    assert "drill never (run dfllm cmd drill) audit FAIL 7d traps 4" in out
+    _r0_state(save, open=0, ents=None)
+    assert "ways in: all with a door or bridge" in brief.status_text(save)
+    _r0_state(save, open=9, fail=["x" * 24] * 8, ents=["y" * 24] * 3, dhold="z" * 24)
+    st = json.loads((save / "state.b.json").read_text("utf-8"))
+    st["proj"] = [["p" * 40, "s" * 24, 99, "b" * 40]] * 8
+    st["k"].update(slow=["economy", "runner", "care", "snapshot"], disabled=["trade", "baseline"])
+    st["alert"] = {"want": "w" * 24, "burrow": "b" * 24, "tiles": 99999, "inside": 250, "ok": 0, "why": "y" * 40}
+    (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
+    out = brief.status_text(save)
+    assert est_tokens(out) <= brief.STATUS_TOKENS and "SIEGE UNREADY (R0)" in out.splitlines()[1]
+    for bad in ({"open": -2}, {"ents": ["e"] * 4}, {"dhold": "h" * 25}):
+        st2 = json.loads(files.dumps(st))
+        st2["ready"].update(bad)
+        assert schema.validate("state", st2) != [], bad
+
+
 # ---------------------------------------------------------------- brief
 def test_brief_fixture(save, capsys):
     assert run(save, "brief") == 0

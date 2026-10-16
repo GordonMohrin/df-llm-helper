@@ -108,6 +108,9 @@ def test_read_state_drops_only_invalid_optional_keys(tmp_path):
     ("python -m dfpilot cmd unpause --by gordon", False),
     ("dfllm --save region1 cmd drill --by=follow", False),
     ("python -m dfpilot cmd audit snap=c1", False),
+    ("python -m dfpilot audit", True),                       # FR-65: computes the result itself, takes no result args
+    ("dfllm --save region1 audit --snap c200 --timeout 30", True),
+    ("bash -c \"dfllm cmd audit '{\\\"snap\\\":\\\"c1\\\"}'\"", False),
     ("bash -c \"dfllm cmd pause ttl_s=60 --by supervise\"", False),
     ("echo '{\"id\":\"a\",\"verb\":\"unpause\",\"args\":{},\"by\":\"gordon\"}' > 'E:/DF/dfllm-runtime/r1/inbox/1-a.json'", False),
     ("git commit -m \"refuse dfllm cmd --by follow\"", True),
@@ -115,6 +118,16 @@ def test_read_state_drops_only_invalid_optional_keys(tmp_path):
 ])
 def test_trust_rules(text, ok):
     assert lint.cmd(text, shell=True)[0] is ok
+
+
+def test_hand_written_audit_points_to_dfllm_audit(tmp_path, monkeypatch):
+    """FR-65: the refusal names the allowed path (Run 10 had no way to audit with `follow --no-auto`)."""
+    ok, why = lint.cmd("python -m dfpilot cmd audit snap=c1", shell=True)
+    assert not ok and "dfllm audit" in why
+    monkeypatch.setenv("DFLLM_HOOK_LOG", str(tmp_path / "hook.log"))
+    code, msg = hook.decide({"tool_name": "Bash", "tool_input": {"command": "dfllm cmd audit snap=c1"}})
+    assert code == 2 and "dfllm audit" in msg
+    assert hook.decide({"tool_name": "Bash", "tool_input": {"command": "python -m dfpilot audit"}}) == (0, "")
 
 
 @pytest.mark.parametrize("tool,path,code", [
@@ -146,5 +159,5 @@ def test_cmd_cli_refuses_foreign_origins_and_audit(tmp_path):
     assert r.returncode == 2 and b"invalid choice" in r.stderr
     audit = '{"snap":"c1","ok":true,"fails":[],"min_traps":0,"bypass":false,"refuge_sep":true,"civ_sep":true,"caverns":true}'
     r = subprocess.run(base + ["cmd", "audit", audit, "--wait", "0"], capture_output=True, cwd=ROOT, timeout=60)
-    assert r.returncode != 0 and b"refused" in r.stdout
+    assert r.returncode != 0 and b"refused" in r.stdout and b"dfllm audit" in r.stdout
     assert not list((save / "inbox").glob("*.json"))

@@ -43,9 +43,20 @@ local function world(opts)
   local runner = X.runner('P5')            -- live L6: military creates squads only in a known phase
   function runner.emit(K, etype, d) return K.emit(etype, nil, etype, d) end
   W.econ, W.snap, W.runner = X.economy(opts.stock), snap, runner
-  X.load(W, {'military', 'readiness'}, {W.econ, snap, runner}, {'sense', 'gate'})
+  local extra = {W.econ, snap, runner}
+  if opts.seal then extra[#extra + 1] = opts.seal end
+  X.load(W, {'military', 'readiness'}, extra, {'sense', 'gate'})
   return W
 end
+
+-- FR-65: a fake seal with the last entrance check (CONTRACTS §7 seal.entrance_doors)
+local function seal_fake(x)
+  local M = {name = 'seal', every = {ticks = 600}, x = x}
+  function M.entrance_doors(K) return M.x end
+  return M
+end
+local LEAKY = {tick = 1, sealed = 0, routes = 3, doors = {{id = 9, pos = {74, 70, 117}}},
+               open = {{pos = {55, 62, 117}, kind = 'stair_updown'}, {pos = {61, 55, 117}, kind = 'floor'}}}
 local function day(W, n) W.run(1200 * (n or 1), {skip = 9}); W.state() end
 local function ready(W) return W.state().ready end
 local function lvl(W) return X.call(W, 'readiness', 'level') end
@@ -332,6 +343,86 @@ T.test('audit verb rejects bad args; ready state is schema-shaped', function()
   T.ok(#p.audit.fails <= 8 and #p.audit.fails[1] <= 60)
   local ev = W.find_events('AUDIT')
   T.ok(#ev[#ev].d.fails <= 8)
+end)
+
+---------------------------------------------------------------- FR-65 siege readiness gate
+local function unready(W) return W.find_events('SIEGE_UNREADY') end
+
+T.test('FR-65 SIEGE_UNREADY (A): R0 in PEACE names blockers, ways in without door or bridge, traps; monthly', function()
+  local man = X.S.manifest()
+  man.bridges.O1 = nil
+  local W = world{manifest = man, seal = seal_fake(LEAKY)}
+  day(W)
+  T.eq(#unready(W), 0, 'not in the first 2 days after a load')
+  day(W, 2)
+  local u = unready(W)
+  T.eq(#u, 1)
+  T.eq(u[1].cls, 'A')
+  T.eq(u[1].d, {fails = {'audit', 'no_outer'}, afails = {}, routes = 3, open = 2,
+                ents = {'55,62,117 stair_updown', '61,55,117 floor'}, traps = -1, age = -1})
+  T.eq(u[1].msg, 'siege unready (R0: audit, no_outer); 2 of 3 ways in without door or bridge: '
+                 .. '55,62,117 stair_updown, 61,55,117 floor; traps ? (no audit)')
+  local r = ready(W)
+  T.eq({r.open, r.ents}, {2, {'55,62,117 stair_updown', '61,55,117 floor'}})
+  -- unchanged: again only after a game month AND 30 real minutes (a month is 75 s at timestream speed)
+  day(W, 29)
+  T.eq(#unready(W), 1, 'a month, but not 30 real minutes')
+  W.ms = W.ms + 1800 * 1000
+  day(W)
+  T.eq(#unready(W), 2, 'monthly while R0 fails')
+  -- a reload keeps the cadence record (persist m.readiness): no repeat at boot
+  for i, e in ipairs(W.entries) do if e.name == 'readiness' then table.remove(W.entries, i) end end
+  W.mods.readiness = nil
+  package.loaded['dfllm.readiness'] = nil
+  W.load(require('dfllm.readiness'))
+  day(W, 3)
+  T.eq(#unready(W), 2, 'no repeat after a reload')
+  -- worse (a failed audit: new blockers): after a month and only 10 real minutes
+  audit(W, {ok = false, bypass = true, min_traps = 0, fails = {'bypass: edge->Z3/Z4 avoids the trap hall'}})
+  T.eq(#unready(W), 2, 'news waits for the month too')
+  day(W, 27)
+  W.ms = W.ms + 600 * 1000
+  day(W)
+  u = unready(W)
+  T.eq(#u, 3)
+  T.eq({u[3].d.fails, u[3].d.traps, u[3].d.afails}, {{'audit_fail', 'bypass', 'no_outer'}, 0,
+                                                      {'bypass: edge->Z3/Z4 avoids the trap hall'}})
+  T.ok(u[3].msg:find('; traps 0$') ~= nil, u[3].msg)
+  -- PEACE only; due again at once when PEACE returns
+  W.K.set_mode('ALERT', 'test')
+  W.ms = W.ms + 3600 * 1000
+  day(W, 30)
+  T.eq(#unready(W), 3, 'not outside PEACE')
+  W.K.set_mode('PEACE', 'test')
+  T.eq(#unready(W), 4)
+  -- no entrance check yet (seal missing or not run): said so
+  local W3 = world()
+  day(W3, 3)
+  u = unready(W3)
+  T.eq({#u, u[1].d.routes, u[1].d.open, u[1].d.fails}, {1, -1, -1, {'audit'}})
+  T.ok(u[1].msg:find('entrances not checked yet', 1, true), u[1].msg)
+  T.eq(ready(W3).open, -1)
+  T.eq(ready(W3).ents, nil)
+end)
+
+T.test('FR-65: no SIEGE_UNREADY at R1; R0 again (audit_old) is a new episode; a sealed fort says so', function()
+  local W = world{seal = seal_fake(LEAKY)}
+  day(W)
+  audit(W)
+  T.eq(lvl(W), 1)
+  W.ms = W.ms + 3600 * 1000
+  day(W, 40)
+  T.eq(#unready(W), 0, 'R1: quiet')
+  T.eq(ready(W).open, 2, 'the open ways in are still published')
+  W.ms = W.ms + 3600 * 1000
+  day(W, 60)
+  local u = unready(W)
+  T.eq(#u, 1)
+  T.eq(u[1].d.fails, {'audit_old'})
+  T.ok(u[1].d.age > 100800, 'audit age ' .. u[1].d.age)
+  local W2 = world{seal = seal_fake{tick = 1, sealed = 1, routes = 0, doors = {}, open = {}}}
+  day(W2, 3)
+  T.ok(unready(W2)[1].msg:find('0 ways in, all with a door or bridge', 1, true), unready(W2)[1].msg)
 end)
 
 T.done()

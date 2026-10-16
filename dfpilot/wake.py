@@ -1,9 +1,14 @@
 """`dfllm follow`: tail events.jsonl, rate-limit class-A wakes, print one wake line (<= 150 tokens) per wake.
+`dfllm audit`: the follower's audit job, run once on demand (FR-65).
 
 DESIGN §8 limits: <= 1 wake per type per 5 min, bursts merged within 60 s, <= 6 wakes per hour.
 Held events are never dropped: they wait (merged) for the next allowed wake. Class B/C events do
 not wake; the follower acts on two of them without the LLM:
   SNAPSHOT_READY purpose=audit -> inspect manifest -> bp.topo.audit(snap, manifest) -> inbox `audit`
+                                  (also with --no-auto: the audit changes nothing in the fort, it is the readiness
+                                  gate's input; Run 10 ran `follow --no-auto` and stayed `audit never` for its whole
+                                  life. --no-audit switches it off. Snapshots `dfllm audit` requested (ids AUDIT_PREFIX)
+                                  are left to it)
   PROJECT_REQUEST tpl=tombs    -> snapshot purpose=sites -> best free site (cmd.place) -> bp.place
   PROJECT_REQUEST tpl=workshops -> the same (care asks when a strange mood finds no workshop)
   PROJECT_REQUEST tpl=farms why=food -> the same with p.plots = n (1-4) at prio 1 (economy asks when the farm
@@ -16,9 +21,13 @@ The outbox reply of every automatic command is read; a refusal or no reply withi
 wakes as AUTO_FAIL (a refused bp.place is rolled back). Unread replies are pruned after 10 min.
 Only wake lines go to stdout (one line = one Monitor notification); details go to <save>/cli.log.
 Supervisor alerts (<runtime>/supervise.json, each logged alert key) wake as SUPERVISE (STATUS §6.8, live L1).
+`dfllm audit [--snap ID]`: request a fresh audit snapshot (or take an audit snapshot of this boot), then the same
+manifest check, bp.topo.audit and `audit` verb as follow (by:'follow': the result is computed, never typed; the hook
+still refuses a hand-written `dfllm cmd audit`); it prints the result and the kernel's reply.
 """
 from __future__ import annotations
 
+import re
 import sys
 import time
 from pathlib import Path
@@ -34,8 +43,8 @@ SYNTH = {"HB_STALE", "AUTO_FAIL", "SUPERVISE"}   # follower's own wake reasons (
 # after BREACH and wake at once (URGENT: no merge wait, no hourly limit, one per type per URGENT_REPEAT_S)
 PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", "LOCKDOWN", "GATE_FAIL",
         "DEATHS_3PLUS", "NO_DEPOT", "DEATHS_PREVENTABLE", "KERN_FAULT", "HB_STALE", "SUPERVISE", "SIEGE_END",
-        "DRILL_FAIL", "PERF_DEGRADED", "DECISION_NEEDED", "PROJECT_BLOCKED", "PLAN_EXHAUSTED", "YEAR_REVIEW",
-        "AUTO_FAIL"]
+        "DRILL_FAIL", "SIEGE_UNREADY", "PERF_DEGRADED", "DECISION_NEEDED", "PROJECT_BLOCKED", "PLAN_EXHAUSTED",
+        "YEAR_REVIEW", "AUTO_FAIL"]
 URGENT = {"BREACH", "SIEGE_START", "INVASION", "LOCKDOWN"} | set(schema.INTERRUPTS)
 URGENT_REPEAT_S = 60
 _IRQ_NEXT = "dfllm ack; dfllm status (the kernel already locked down)"
@@ -47,6 +56,9 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
         "PERF_DEGRADED": "dfllm doctor", "HB_STALE": "dfllm doctor", "AUTO_FAIL": "dfllm doctor",
         "SUPERVISE": "dfllm supervise --once --dry-run",
         "GHOSTS": "dfllm cmd inspect '{\"what\":\"tombs\"}', then tombs.repair",
+        # FR-65: R0 in PEACE; close the listed ways in, build the missing fortcore pieces, then re-audit
+        "SIEGE_UNREADY": "dfllm cmd inspect '{\"what\":\"entrances\"}'; wall/door each open way in (bp.place); "
+                         "then dfllm audit",
         "HOSPITAL_DRY": "dfllm cmd inspect '{\"what\":\"water_sources\"}'",
         "MOOD_RISK": "dfllm brief; supply the missing class (never cancel the mood)",
         # FR-64: >= 2 citizens dehydrated or starved within a month: access, not supply, as a rule
@@ -61,6 +73,8 @@ PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "farms")   # automat
 AUTO_REQUESTS = ("tombs", "workshops")            # PROJECT_REQUEST templates follow places itself
 AUTO_PHASES = ("P0", "P1")                    # PLAN_EXHAUSTED auto-start only for the basic infrastructure
 PRUNE_EVERY_S = 60
+AUDIT_PREFIX = "aud"                           # snapshot ids of `dfllm audit` (it audits them itself, follow does not)
+AUDIT_SNAP_S = 60                              # `dfllm audit`: seconds to wait for its fresh snapshot
 ERR_EVERY_S = 60                               # stderr 'poll error' at most once per minute
 
 
@@ -160,8 +174,9 @@ class Follower:
 
     def __init__(self, save: str | None = None, out: Callable[[str], None] | None = None,
                  clock: Callable[[], float] = time.time, since: int | None = None, auto: bool = True,
-                 gate: WakeGate | None = None):
+                 gate: WakeGate | None = None, audit: bool = True):
         self.pinned, self.out, self.clock, self.since, self.auto = save, out or self._print, clock, since, auto
+        self.audit = audit                     # FR-65: the audit job runs with --no-auto too (only --no-audit stops it)
         self.gate = gate or WakeGate()
         self.dir: Path | None = None
         self.tail: files.EventTail | None = None
@@ -262,7 +277,7 @@ class Follower:
         self._heartbeat(now)
         self._check_heartbeat(now)
         self._check_supervise(now)
-        if self.auto:
+        if self.auto or self.audit:
             self._run_jobs(now)
         if now - self._pruned >= PRUNE_EVERY_S:
             self._pruned = now
@@ -281,7 +296,7 @@ class Follower:
         d = d if isinstance(d, dict) else {}
         if t in WAKE_TYPES and e.get("cls") == "A":
             self.gate.add(e, now)
-        if not self.auto:
+        if not (self.auto or (self.audit and t == "SNAPSHOT_READY")):
             return
         try:                                   # one bad event must not lose the rest of the batch
             if t == "SNAPSHOT_READY":
@@ -369,6 +384,8 @@ class Follower:
         mine = [self.jobs[k] for k in PLACE_KEYS if self.jobs.get(k) and sid and self.jobs[k].get("snap") == sid]
         for job in mine:
             job.update(path=rel or f"snap/{sid}.json", ready=now)
+        if not self.audit or (isinstance(sid, str) and sid.startswith(AUDIT_PREFIX)):
+            return                             # --no-audit, or `dfllm audit` asked for it and audits it itself
         if not mine and purpose == "audit" and sid and rel and files.read_manifest(self.dir) is not None:
             # kern's <save>/manifest.json: no inspect round trip, no 8 KB reply limit (live L1)
             self._audit(sid, rel, {"ok": True, "data": files.read_manifest(self.dir)}, now)
@@ -487,29 +504,11 @@ class Follower:
             self.jobs.pop("replies", None)
 
     def _audit(self, sid: str, rel: str, reply: dict, now: float) -> None:
-        if not reply.get("ok"):
-            return self._fail(f"audit {sid}", f"inspect manifest refused: {reply.get('msg', '')}", now)
-        data = reply.get("data")
-        manifest = data.get("manifest", data) if isinstance(data, dict) else None
-        if isinstance(manifest, dict) and manifest.get("trunc"):
-            # kern.lua reply(): an inspect `data` > 8 KB is replaced by {trunc, bytes}; never audit that
-            return self._fail(f"audit {sid}", f"manifest truncated by kern ({manifest.get('bytes', '?')} bytes "
-                                              "> 8 KB inspect limit); audit not sent", now)
-        errs = schema.validate("manifest", manifest) if isinstance(manifest, dict) else ["not an object"]
-        if errs:
-            return self._fail(f"audit {sid}", f"manifest invalid ({errs[0]}); audit not sent", now)
-        from .cmd import cache_manifest
-        cache_manifest(self.dir, manifest)     # site ranking (cmd.fort_manifest) starts from the kern manifest
-        snap = files.read_snapshot(self.dir / rel)
-        if snap is None:
-            return self._fail(f"audit {sid}", f"snapshot {rel} missing/invalid", now)
         try:
-            from .cmd import load_bp
-            res = load_bp("topo").audit(snap, manifest)
-            args = audit_args(sid, res)
+            args = compute_audit(self.dir, sid, rel, reply)
             self._send("audit", args, f"audit {sid}", now)
         except Exception as e:                 # noqa: BLE001 - any audit failure must surface as one wake
-            return self._fail(f"audit {sid}", f"{type(e).__name__}: {e}", now)
+            return self._fail(f"audit {sid}", e if isinstance(e, AuditError) else f"{type(e).__name__}: {e}", now)
         files.log_cli(self.dir, "follow", "auto:audit", {"snap": sid}, f"ok={args['ok']} traps={args['min_traps']}")
         files.prune_snaps(self.dir)
 
@@ -534,6 +533,33 @@ class Follower:
         files.log_cli(self.dir, "follow", f"auto:{key}", args, f"placed {cid}")
 
 
+class AuditError(RuntimeError):
+    """Why an audit was not sent (the AUTO_FAIL text of follow, the error line of `dfllm audit`)."""
+
+
+def compute_audit(save_dir: Path, sid: str, rel: str, reply: dict) -> dict:
+    """The follower's audit job for one audit snapshot: the kern manifest (an `inspect manifest` reply or
+    {ok, data: <save>/manifest.json}) is checked, cached for site ranking, and bp.topo.audit(snap, manifest) gives
+    the `audit` verb args. Raises AuditError (refused/truncated/invalid manifest, missing snapshot) or the bp error."""
+    if not reply.get("ok"):
+        raise AuditError(f"inspect manifest refused: {reply.get('msg', '')}")
+    data = reply.get("data")
+    manifest = data.get("manifest", data) if isinstance(data, dict) else None
+    if isinstance(manifest, dict) and manifest.get("trunc"):
+        # kern.lua reply(): an inspect `data` > 8 KB is replaced by {trunc, bytes}; never audit that
+        raise AuditError(f"manifest truncated by kern ({manifest.get('bytes', '?')} bytes > 8 KB inspect limit); "
+                         "audit not sent")
+    errs = schema.validate("manifest", manifest) if isinstance(manifest, dict) else ["not an object"]
+    if errs:
+        raise AuditError(f"manifest invalid ({errs[0]}); audit not sent")
+    from .cmd import cache_manifest, load_bp
+    cache_manifest(save_dir, manifest)         # site ranking (cmd.fort_manifest) starts from the kern manifest
+    snap = files.read_snapshot(Path(save_dir) / rel)
+    if snap is None:
+        raise AuditError(f"snapshot {rel} missing/invalid")
+    return audit_args(sid, load_bp("topo").audit(snap, manifest))
+
+
 def audit_args(sid: str, res: dict) -> dict:
     """bp.topo.audit result -> `audit` verb args (types coerced, lists clipped to the schema limits)."""
     fails = [str(f).encode("utf-8")[:80].decode("utf-8", "ignore") for f in (res.get("fails") or [])][:50]
@@ -542,8 +568,112 @@ def audit_args(sid: str, res: dict) -> dict:
             "civ_sep": bool(res.get("civ_sep")), "caverns": bool(res.get("caverns"))}
 
 
+# ---------------------------------------------------------------- dfllm audit (FR-65)
+def _snap_file(save_dir: Path, sid: str, events: bool = False) -> tuple[str, dict] | None:
+    """(rel path, valid snapshot) of snapshot `sid`: snap/<sid>.json, snap/<sid>-<n>.json, else (events) the path its
+    SNAPSHOT_READY event of the running boot names (the scan stops at the newest BOOT)."""
+    d = Path(save_dir)
+    cands = [d / "snap" / f"{sid}.json"]
+    try:
+        cands += sorted((d / "snap").glob(f"{sid}-*.json"))
+    except OSError:
+        pass
+    for p in cands:
+        doc = files.read_snapshot(p) if p.is_file() else None
+        if doc is not None and doc.get("id") == sid:
+            return f"snap/{p.name}", doc
+    for e in (files.iter_events_rev(d) if events else ()):
+        if e.get("type") == "BOOT":
+            break
+        ed = e.get("d") if isinstance(e.get("d"), dict) else {}
+        if e.get("type") == "SNAPSHOT_READY" and ed.get("id") == sid and isinstance(ed.get("path"), str):
+            doc = files.read_snapshot(d / ed["path"])
+            return (ed["path"], doc) if doc is not None else None
+    return None
+
+
+def run_audit(args, save_dir: Path, sleep: Callable[[float], None] = time.sleep,
+              clock: Callable[[], float] = time.monotonic) -> int:
+    """`dfllm audit [--snap ID]`: what follow does on an audit snapshot, once and now. Without --snap it requests a
+    fresh snapshot (purpose audit, the kernel's default box: manifest geometry + margin) and waits for it."""
+    from .cmd import EXIT_BAD, EXIT_NOREPLY, EXIT_OK, EXIT_REFUSED, fmt_reply, send
+    save_dir = Path(save_dir)
+    sid = args.snap
+    if sid is not None and not re.fullmatch(schema.ID_RE, sid):
+        print(f"audit: bad snapshot id {sid!r} (expected {schema.ID_RE})")
+        return EXIT_BAD
+    try:
+        if sid is None:
+            sid = files.new_cmd_id(prefix=AUDIT_PREFIX)
+            _, reply = send(save_dir, "snapshot", {"purpose": "audit"}, by="cli", wait_s=min(10.0, args.timeout),
+                            cmd_id=sid)
+            if reply is None:
+                print(fmt_reply(sid, "snapshot", None, save_dir))
+                return EXIT_NOREPLY
+            if not reply.get("ok"):
+                print(f"audit: snapshot refused: {reply.get('msg', '')}")
+                return EXIT_REFUSED
+        t0, found = clock(), None
+        while True:
+            found = _snap_file(save_dir, sid, events=args.snap is not None)
+            if found is not None or args.snap is not None or clock() - t0 >= args.timeout:
+                break
+            sleep(0.5)
+        if found is None:
+            later = f" within {args.timeout:g} s; try again later: dfllm audit --snap {sid}"
+            print(f"audit: no snapshot {sid}" + (later if args.snap is None else " (dfllm events --type SNAPSHOT_READY)"))
+            return EXIT_NOREPLY if args.snap is None else EXIT_BAD
+        rel, snap = found
+        if snap.get("purpose") != "audit":
+            print(f"audit: snapshot {sid} has purpose {snap.get('purpose')!r}; readiness accepts only audit "
+                  "snapshots (run dfllm audit without --snap)")
+            return EXIT_BAD
+        man = files.read_manifest(save_dir)
+        if man is not None:
+            reply = {"ok": True, "data": man}
+        else:
+            _, reply = send(save_dir, "inspect", {"what": "manifest"}, by="cli", wait_s=args.wait)
+            if reply is None:
+                print("audit: no reply to inspect manifest (is the kernel running? dfllm status)")
+                return EXIT_NOREPLY
+        a = compute_audit(save_dir, sid, rel, reply)
+        cid, reply = send(save_dir, "audit", a, by="follow", wait_s=args.wait)
+    except (AuditError, schema.SchemaError) as e:
+        print(f"audit: not sent: {'; '.join(e.errors[:3]) if isinstance(e, schema.SchemaError) else e}")
+        return EXIT_BAD
+    except Exception as e:                     # noqa: BLE001 - bp unavailable or a WP3 bug: say it, never a traceback
+        print(f"audit: not sent: {type(e).__name__}: {e}")
+        return EXIT_BAD
+    yes = {True: "yes", False: "no"}
+    print(f"audit of snapshot {sid} (tick {snap.get('tick')}): ok {yes[a['ok']]}, traps {a['min_traps']}, "
+          f"bypass {yes[a['bypass']]}, refuge_sep {yes[a['refuge_sep']]}, civ_sep {yes[a['civ_sep']]}, "
+          f"caverns sealed {yes[a['caverns']]}")
+    for f in a["fails"][:6]:
+        print(f"  fail: {f}")
+    if len(a["fails"]) > 6:
+        print(f"  ... {len(a['fails']) - 6} more")
+    print(fmt_reply(cid, "audit", reply, save_dir))
+    files.log_cli(save_dir, "cli", "audit", {"snap": sid}, f"ok={a['ok']} traps={a['min_traps']}")
+    if reply is None:
+        return EXIT_NOREPLY
+    if not reply.get("ok") and "unknown snap" in str(reply.get("msg", "")):
+        print("  (readiness takes only an audit snapshot of the running boot, once: run dfllm audit without --snap)")
+    return EXIT_OK if reply.get("ok") else EXIT_REFUSED
+
+
+def add_audit_parser(sub) -> None:
+    p = sub.add_parser("audit", help="run the path audit now (follow's audit job, once) and send its result",
+                       description="Without --snap: request a fresh audit snapshot, wait for it, audit it with "
+                                   "bp.topo.audit and send the result (readiness R0/R1). Works with follow --no-auto "
+                                   "and without follow.")
+    p.add_argument("--snap", help="audit this audit snapshot of the running boot instead of a fresh one")
+    p.add_argument("--timeout", type=float, default=AUDIT_SNAP_S, help="seconds to wait for the fresh snapshot")
+    p.add_argument("--wait", type=float, default=10.0, help="seconds to wait for each kernel reply")
+
+
 def run(args) -> int:
-    f = Follower(save=args.save_pin, since=args.since, auto=not args.no_auto)
+    f = Follower(save=args.save_pin, since=args.since, auto=not args.no_auto,
+                 audit=not getattr(args, "no_audit", False))
     t0, errors, last_err = time.monotonic(), 0, -1e18
     try:
         while True:
@@ -575,4 +705,6 @@ def add_parser(sub) -> None:
     p.add_argument("--interval", type=float, default=1.0)
     p.add_argument("--once", action="store_true", help="poll once and exit")
     p.add_argument("--max-s", type=float, default=0, help="exit after N seconds")
-    p.add_argument("--no-auto", action="store_true", help="no automatic audit / tombs placement")
+    p.add_argument("--no-auto", action="store_true",
+                   help="no automatic placements (tombs, workshops, farms, P0/P1 starters); the audit still runs")
+    p.add_argument("--no-audit", action="store_true", help="do not run the path audit on audit snapshots either")

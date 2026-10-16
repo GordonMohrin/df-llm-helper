@@ -54,7 +54,9 @@ change the system. Never read ERFAHRUNGEN.md, transcripts or v1 docs as working 
 dfllm doctor                 # ticks/s, kernel ms per module, frame gaps, stalls
 dfllm status                 # <= 300 tokens: DEFCON, mode, clock, lockdown, pop/cap, readiness, alarms
 dfllm brief                  # <= 1.5k tokens: digest for a decision
-dfllm follow                 # Monitor target: one wake line per event that needs you
+dfllm follow                 # Monitor target: one wake line per event that needs you (--no-auto: no
+                             # automatic placements; the path audit still runs)
+dfllm audit [--snap ID]      # the path audit now (fresh audit snapshot -> bp.topo.audit -> verb audit)
 dfllm events --cls A [--since N]
 dfllm wait --until-interrupt [--timeout 15]   # returns at once on an unacked interrupt; keep calls short
 dfllm ack [--n N]            # you saw the interrupts up to N (else the kernel applies their lockdown default)
@@ -122,7 +124,7 @@ helper is experimental; procedure and fair-play limits: `tools/embark/README.md`
 | `bp.cancel` | `{proj, undo?}` | stop a project |
 | `drill` | `{why?}` | PEACE only; the reflex acceptance test |
 | `snapshot` | `{bbox?, purpose?}` | export revealed tiles (audit runs automatically) |
-| `audit` | `bp.topo.audit` result | sent by `follow`, not by you |
+| `audit` | `bp.topo.audit` result | sent by `follow` or `dfllm audit` (they compute it), never `dfllm cmd audit` |
 | `popcap.lower` | `{cap}` | lowers only |
 | `tempo.lower` | `{fps, ttl_s}` | lowers only, never above the mode value |
 | `pause` / `unpause` | `{ttl_s ≤ 600, why?}` / `{}` | rarely; `unpause` releases only an inbox pause. A pause by the player, by DF (save loaded paused) or by a popup is released in DF, by the player |
@@ -151,6 +153,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | DEATHS_3PLUS | the line names the causes; the brief lists the season's deaths by cause; fix the cause in the plan |
 | DEATHS_PREVENTABLE | ≥ 2 citizens dehydrated or starved within a month (stock days, units, patients in the line): `inspect` `what=reach` (forbidden or cut-off drink/food), `what=refuge`; patients → `what=water_sources` (hospital water); tell the player; fix access in the plan |
 | DRILL_FAIL (2nd in a row) | read `ready.fail`; fix gear, squads or geometry; never raise the cap |
+| SIEGE_UNREADY | readiness is R0 in PEACE (monthly while it fails): the line names the blockers (§8), the ways in without door or bridge and the traps. `inspect` `what=entrances`; wall or door each open way in (`bp.place`), put the missing fortcore pieces into the plan; then `dfllm audit`; tell the player |
 | KERN_FAULT | a module is backed off (`d.backoff_s`; the kernel re-enables it afterwards); note module and error for the repo; do not hot-patch; `module.enable` only after the fix |
 | PERF_DEGRADED | `dfllm doctor`; the supervisor restarts DF only in PEACE after an autosave |
 | DECISION_NEEDED | ask the player the question once; the default applies until they answer. `build_blocked`: `inspect` `what=workload` (`construction.blocked`: kind, pos, fails, why); the kernel already unforbade the items on the site; corpses wait for burial; else `bp.cancel` and place it elsewhere |
@@ -178,6 +181,12 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
   value ≥ `cv_min` + ≥ 30 armed traps on every attacker path + food ≥ 60 days, drink ≥ 170 days.
 - **R3 ≥ 80:** only with D-01 = B and ≥ 20 % of soldiers in iron or steel.
 - Readiness red: max-pop freezes at the current population and beauty pauses.
+- R0 blockers (`ready.fail`; full table DESIGN §5.4): `audit`/`audit_old` no or stale audit → `dfllm audit`;
+  `audit_fail`, `bypass` (a way in skips the trap hall), `refuge_sep` (refuge missing or on the attack path),
+  `civ_sep` (no separate civilian/military stair), `caverns` (open) → the audit's own reasons (AUDIT `fails`,
+  SIEGE_UNREADY `afails`); `no_kern`/`no_refuge` burrow missing; `no_outer`/`no_inner` no O1/B1, `bridge:B` not
+  built, `levers:B` < 2 linked levers → fortcore pieces. `status` says `UNREADY` while R0 fails (SIEGE_UNREADY
+  monthly); `drill never (auto: <why>)` → fix `<why>` (drills run by themselves) or `dfllm cmd drill`.
 
 ## 9. Decisions (the player's answers in `config/decisions.yaml`; defaults until they answer)
 D-01 cap option A (≤ 75) | D-02 difficulty unchanged | D-03 idle rule (> 40 % for 3 days, useful

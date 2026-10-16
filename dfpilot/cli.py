@@ -22,6 +22,7 @@ def _parser() -> argparse.ArgumentParser:
     sub = ap.add_subparsers(dest="command", required=True)
     brief.add_parsers(sub)
     wake.add_parser(sub)
+    wake.add_audit_parser(sub)
     events.add_parser(sub)
     plan.add_parser(sub)
     cmd.add_parser(sub)
@@ -247,6 +248,9 @@ def main(argv: list[str] | None = None) -> int:
     if c == "cmd":
         from .cmd import run
         return run(args, save_dir)
+    if c == "audit":
+        from .wake import run_audit
+        return run_audit(args, save_dir)
     if c == "wait":
         from .alarm import run_wait
         return run_wait(args, save_dir)

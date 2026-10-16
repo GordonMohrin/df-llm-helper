@@ -1383,7 +1383,8 @@ def dfhack_line(toks: list[str], dev: bool = False, cwd: str | None = None, al: 
 
 # ---------------------------------------------------------------- trust rules (CONTRACTS §13, R6)
 # `by` in an inbox file is only a label, so the LLM must not claim another origin: `dfllm cmd` only with
-# --by llm|cli, never `dfllm cmd audit` (follow sends audits), no hand-written inbox JSON with "by".
+# --by llm|cli, never `dfllm cmd audit` (follow and `dfllm audit` send audits computed by bp.topo.audit from a
+# kernel snapshot; `dfllm audit` takes no result args, so it stays allowed), no hand-written inbox JSON with "by".
 TRUST_BY = frozenset({"llm", "cli"})
 _RUNTIME = re.compile(r"dfllm-runtime[\\/]", re.I)
 _PY = ("python", "python3", "py", "pythonw")
@@ -1435,7 +1436,8 @@ def _trust_segs(segs: list, depth: int = 0) -> str | None:
                 return f"dfllm cmd --by {by}: the LLM path sends only --by llm or cli (CONTRACTS §13)"
         verb = next((w for w in rest if not w.startswith("-")), None)
         if verb in schema.VERB_BY:
-            return f"dfllm cmd {verb}: sent only by {'/'.join(schema.VERB_BY[verb])} (dfllm follow runs the audit)"
+            return (f"dfllm cmd {verb}: sent only by {'/'.join(schema.VERB_BY[verb])}; run `dfllm audit` instead "
+                    "(it computes the result from a kernel snapshot)")
     return None
 
 
