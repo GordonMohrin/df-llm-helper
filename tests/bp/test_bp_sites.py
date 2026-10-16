@@ -4,7 +4,7 @@ import json
 import pytest
 
 from dfpilot import bp, schema as S
-from dfpilot.bp import render
+from dfpilot.bp import render, rooms
 from dfpilot.bp.primitives import Xform, merge_manifest
 from dfpilot.bp.render import World
 from dfpilot.bp.sites import footprint
@@ -12,7 +12,7 @@ from dfpilot.bp.validate import _rooms
 
 from bp_fixtures import fort_world, terrain
 
-ROOMS = [t for t in sorted(bp.TEMPLATES) if t != "fortcore"]
+ROOMS = sorted(rooms.BUILD)                  # room templates (fortcore and the attached defense add-ons excluded)
 
 
 @pytest.fixture(scope="module")

@@ -80,8 +80,12 @@ def test_raised_bridges_do_not_count(built):
 def test_bypass_and_trap_hall_removal(built):
     snap, man = built
     s2 = set_tiles(snap, shortcut(), ".")
-    res = bp.audit(s2, man)
-    assert res["bypass"] and not res["ok"] and res["min_traps"] == 0
+    info = {}
+    res = bp.audit(s2, man, info=info)
+    # Run 9/10 (`traps 0` beside an armed hall): min_traps is the count once the bypass wall stands; the plain
+    # minimum (the bypass meets no trap) is in info
+    assert res["bypass"] and not res["ok"] and res["min_traps"] == 35
+    assert info["traps"] == {"armed": 41, "hall": 41, "any_route": 0, "walls": 1, "enters": list(L(0, 17, -2))}
     hidden = set_tiles(snap, shortcut(), "?")                                     # unknown is not a path
     assert bp.audit(hidden, man)["ok"]
 

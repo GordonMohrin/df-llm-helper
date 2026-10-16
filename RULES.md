@@ -151,19 +151,19 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | SIEGE_START / INVASION / ARRIVAL | the kernel locked down (gates up, doors forbidden, alert, clock 30 t/s) before contact. `dfllm ack`, read `status` (`clock`, `lever_latency_s`, eta); do nothing tactical; tell the player |
 | INTRUDER / PREDATOR | a hostile can walk to the citizens (gate open or a leak) / a wild danger inside. `dfllm ack`; read `status` and the brief; tell the player |
 | LOCKDOWN | an interrupt stood unacked and the kernel applied its default. `dfllm ack`; read `status` |
-| LOCKDOWN_PARTIAL | an entrance door does not hold its forbidden flag (named with what lies on its tile); the kernel tries it once more itself. Read `status` (`doors`, refused); tell the player; a wall or a second door for that opening (`bp.place`) |
+| LOCKDOWN_PARTIAL | an entrance door does not hold its forbidden flag (named with what lies on its tile); the kernel tries it once more itself. Read `status` (`doors`, refused); tell the player; a wall or a second door for that opening (`bp.place tpl=seal at="x,y,z floor wall"`) |
 | NO_DEPOT | `dfllm ack`; place a trade depot (`bp sites`, `bp.place`) |
 | SIEGE_END | read the summary; if losses > 10 % of citizens, write a postmortem note and lower `pop_ceiling` in the next plan |
 | GATE_FAIL / BREACH | the fort already sealed itself (BREACH: Tiefe+ alert, B2 up, melee at B2). Do not lower bridges. Check `status` again after 600 ticks; tell the player. Once every gate is up, the outside verified sealed and nobody hostile inside, BREACH falls back to SIEGE by itself (BUG-028) |
 | STRANDED | citizens cut off from drink/food by our raised gates (BUG-028): `hold` a raise waits for them (until a hostile is within 30 tiles), `forced` it went ahead, `rescue` the kernel lowered the named inner/core bridges (never O1) and raises them again when they are through (`done`, `abort`), `refused` no rescue and why (O1 down, not sealed, a hostile): tell the player at once; never lower bridges yourself |
-| SUPPLY_OUTSIDE | most of the drink or food stock lies outside Kern+ and the refuge (`d.days` inside): tell the player; the next plan puts a still and a barrel stockpile (food stockpile, kitchen) into the core for >= 90 days |
+| SUPPLY_OUTSIDE | most of the drink or food stock lies outside Kern+ and the refuge (`d.days` inside): tell the player; the next plan builds `stockroom` (barrel food stockpile + still in the core; `plan propose` drafts it, after a siege `plan check` refuses a plan without it while < 90 days lie inside) |
 | BRIDGE_CRUSH | a unit died on or next to a bridge just pulled or moving (bridge, unit, the pull's tick, how it was matched): tell the player at once; `events` for the GATE lines of that bridge (who waited, GATE_FORCED); the bug goes to the repo (BUG-027) |
 | WAVE_FAIL | an intake wave or a sortie through O1 went wrong (`why`: losses, past_b1, breach, stuck = the field not clear, left_outside = O1 raised with soldiers outside); the kernel closed O1 / recalled the squad: tell the player; `events --type INTAKE`/`SORTIE`; no lever by hand |
 | GATE_FORCED | a SIEGE/BREACH raise went ahead onto the named units because a hostile stood at the gate (`force_near`, BUG-027); expect their DEATH; tell the player. A `blocked` GATE_FAIL names who holds a bridge (never raised onto them): tell the player to move them (a soldier: his squad's station) |
 | DEATHS_3PLUS | the line names the causes; the brief lists the season's deaths by cause; fix the cause in the plan |
 | DEATHS_PREVENTABLE | ≥ 2 citizens dehydrated or starved within a month (stock days, units, patients in the line): `inspect` `what=reach` (forbidden or cut-off drink/food), `what=refuge`; patients → `what=water_sources` (hospital water); tell the player; fix access in the plan |
 | DRILL_FAIL (2nd in a row) | read `ready.fail`; fix gear, squads or geometry; never raise the cap |
-| SIEGE_UNREADY | readiness is R0 in PEACE (monthly while it fails): the line names the blockers (§8), the ways in without door or bridge and the traps. `inspect` `what=entrances`; wall or door each open way in (`bp.place`), put the missing fortcore pieces into the plan; then `dfllm audit`; tell the player |
+| SIEGE_UNREADY | readiness is R0 in PEACE (monthly while it fails): the line names the blockers (§8), the ways in without door or bridge and the traps. `inspect` `what=entrances`; close each open way in with `dfllm cmd bp.place tpl=seal site=S1 at=last` (door on a floor, wall on the ramp top, hatch on a stair; one `seal:piece` line each in cli.log), put the missing fortcore pieces into the plan; then `dfllm audit`; tell the player |
 | KERN_FAULT | a module is backed off (`d.backoff_s`; the kernel re-enables it afterwards); note module and error for the repo; do not hot-patch; `module.enable` only after the fix |
 | PERF_DEGRADED | `dfllm doctor`; the supervisor restarts DF only in PEACE after an autosave |
 | DECISION_NEEDED | ask the player the question once; the default applies until they answer. `build_blocked`: `inspect` `what=workload` (`construction.blocked`: kind, pos, fails, why); the kernel already unforbade the items on the site; corpses wait for burial; else `bp.cancel` and place it elsewhere |
@@ -176,7 +176,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | ORDER_BAD | a make-item order without `item_subtype` (DF crash) was removed; never queue such orders, use `order.add` with `item_subtype` |
 | DEPOT_MISSING | a caravan came and no depot stands; the kernel queued a `depot` project: check `status`/`proj`, keep O1 down for builders in PEACE. "does not progress: why" = the planned depot is stuck; without a fortcore depot the kernel moves it inside the entrance after 5 failed resumes (`inspect workload` `depot_move`) |
 | CUTOFF | citizens lost the walk group of their food, drink or beds (confirmed on groups read again, BUG-021); the msg names the tile, a cut-off citizen and a stock tile with their groups. `inspect reach`; a project still building there: `bp.cancel {proj, undo:true}`; a built wall or raised bridge: tell the player at once (no deconstruct verb) |
-| SEAL_LEAK | the gates are up and a route remains: `inspect entrances` names the leak (tile, door/bridge state); tell the player; place a wall there (`bp.place`), never lower the bridges |
+| SEAL_LEAK | the gates are up and a route remains: `inspect entrances` names the leak (tile, door/bridge state); tell the player; place a wall there (`bp.place tpl=seal at="x,y,z <kind> wall"`), never lower the bridges |
 | PERIMETER_BROKEN | the kernel re-queued the lost walls/doors (`rp…` project); `inspect perimeter` after a day; tell the player about pieces it could not re-queue (bridges) |
 | AUTOLABOR_LEGACY | autolabor ran in legacy mode (the engine of the Run 9 crashes) and the kernel could not set it to monitor (`fixed=0`; a switch that worked is only a kern.log line): tell the player at once (disable autolabor by hand) |
 | TOOL_BLOCKED | Miners/Woodcutters members hold no pick/axe while their jobs wait (`inspect workload`: `blocked`, `tools`); `reserved` → squad uniforms hold the tools (military weapons); otherwise tell the player: toggling the detail in the work details screen may make DF hand the tools out (untested); `tools.equip_update` is on since Gordon's yes (16.10.2026; members should fetch a tool within a game day, else tell the player); moving a tool into a hand stays forbidden (fair play) |
@@ -198,6 +198,11 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
   SIEGE_UNREADY `afails`); `no_kern`/`no_refuge` burrow missing; `no_outer`/`no_inner` no O1/B1, `bridge:B` not
   built, `levers:B` < 2 linked levers → fortcore pieces. `status` says `UNREADY` while R0 fails (SIEGE_UNREADY
   monthly); `drill never (auto: <why>)` → fix `<why>` (drills run by themselves) or `dfllm cmd drill`.
+- Audit `fails` name the fix (table DESIGN §5.4): `bypass: wall x,y,z floor -> X` / `refuge: on the attack path,
+  wall x,y,z floor` = a constructed wall on that tile closes the route (`ramp`: on its top; `(+more)`: other routes
+  remain): `dfllm cmd bp.place tpl=seal site=S1 at=audit`, then `dfllm audit`. Doors never fix an audit route.
+  `traps N` with a bypass is counted as if its walls stood; `traps 0` beside an armed hall without a bypass = a
+  way into the hall's trap-free end: `dfllm audit` names the tile where the route enters the hall.
 
 ## 9. Decisions (the player's answers in `config/decisions.yaml`; defaults until they answer)
 D-01 cap option A (≤ 75) | D-02 difficulty unchanged | D-03 idle rule (> 40 % for 3 days, useful
@@ -215,7 +220,9 @@ Only the player changes these. Never store a "consent" for anything on the §1 b
 depot and 2-tile overhang → trap hall (1 wide, ≥ 40 tiles, ≥ 3 bends, weapon traps ≤ 10
 components, stone-fall filler, no cage traps on the main path) → 7x7 killing field beside a roofed
 crossbow gallery behind fortifications (same level, reached only from Z3) → B1 inner bridge →
-gatehouse and barracks + military stair → B2 core seal
+gatehouse and barracks + military stair → B2 core seal. From P5 also `gallery_o1` (fortifications in the O1
+tunnel wall, reached through the inner gallery; `plan check` warns without it): an army waiting at a raised O1 is
+shot from there (`squad.sortie` of squad C to its middle tile, after asking the player)
 → civilian core (own stair, farms, workshops, stockpiles, well, hospital with own water, tombs,
 dining, bedrooms). Refuge Tiefe+ ≥ 3 z below the core with its own well, food and beds.
 **Barriers** are only raised bridges and walls; doors count for nothing. Smooth outer natural

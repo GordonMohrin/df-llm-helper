@@ -44,6 +44,8 @@ PARAMS = {
     # path "" = a dry cistern filled by buckets (pond zone); else the pipe waypoints (see cistern_layout)
     "cistern": {"path": ("", None, None), "rise": (1, 1, 40), "side": ("S", None, None),
                 "water": ("bed", None, None), "level": ("core", None, None)},
+    # BUG-028 (Run 10: 60 days of drink inside the core, 3093 units outside O1): food and drink storage behind B2
+    "stockroom": {"w": (9, 5, 15), "h": (6, 4, 10), "still": (1, 0, 1), "barrels": (0, 0, 200)},
 }
 # quickfort `assigned_unit=` roles (preserve-rooms noble codes) an office may be reserved for
 OFFICE_ROLES = ("manager", "bookkeeper", "broker", "expedition_leader", "mayor", "chief_medical_dwarf")
@@ -301,6 +303,31 @@ def barracks(p: dict) -> Plan:
     return P
 
 
+STOCK_PILE = "dfllm-stock"
+
+
+def stockroom(p: dict) -> Plan:
+    """Core stockroom: a food stockpile (drink and food, in barrels and pots) and an optional still behind the core
+    seal, so a siege that cuts off the outer stock does not (BUG-028)."""
+    P = Plan("stockroom", "infra")
+    W, H = p["w"] | 1, p["h"]
+    box = _box(P, W, H)
+    u0, v0, u1, v1 = box
+    piles = [(u0, v0, u1, v1)]
+    if p["still"]:
+        if H < 4 or W < 5:
+            raise ValueError("stockroom: a still needs w >= 5 and h >= 4")
+        P.stage("build", "build", orders=1).ent(-1, v1 - 2, 1, v1, 0, "wl")      # at the far end, centred
+        P.workshops.append(("Still", (0, v1 - 1, 0)))
+        piles = [(u0, v0, u1, v1 - 3), (u0, v1 - 2, -2, v1), (2, v1 - 2, u1, v1)]
+    pl = P.stage("place", "place")
+    for a, b, c, d in piles:
+        n = (c - a + 1) * (d - b + 1)
+        pl.ent(a, b, c, d, 0, "f", f"name={STOCK_PILE} barrels={p['barrels'] or n}")
+    _finish(P, p, box)
+    return P
+
+
 def captives(p: dict) -> Plan:
     """Captive pit: a 3x3 room with a 1-tile channel; the pit zone sits on the drop (manifest `pit`), away
     from traps. Care assigns caged invaders to it."""
@@ -520,7 +547,8 @@ def cistern(p: dict) -> Plan:
 
 BUILD = {"dining": dining, "bedrooms": bedrooms, "tombs": tombs, "hospital": hospital, "temple": temple,
          "tavern": tavern, "workshops": workshops, "farms": farms, "furnaces": furnaces, "office": office,
-         "captives": captives, "cistern": cistern, "hall": hall, "guildhall": guildhall, "barracks": barracks}
+         "captives": captives, "cistern": cistern, "hall": hall, "guildhall": guildhall, "barracks": barracks,
+         "stockroom": stockroom}
 
 
 def plot_rects(p: dict) -> list[tuple[int, int, int, int, int]]:

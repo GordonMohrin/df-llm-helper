@@ -27,6 +27,7 @@ still refuses a hand-written `dfllm cmd audit`); it prints the result and the ke
 """
 from __future__ import annotations
 
+import inspect
 import re
 import sys
 import time
@@ -508,12 +509,14 @@ class Follower:
             self.jobs.pop("replies", None)
 
     def _audit(self, sid: str, rel: str, reply: dict, now: float) -> None:
+        info: dict = {}
         try:
-            args = compute_audit(self.dir, sid, rel, reply)
+            args = compute_audit(self.dir, sid, rel, reply, info=info)
             self._send("audit", args, f"audit {sid}", now)
         except Exception as e:                 # noqa: BLE001 - any audit failure must surface as one wake
             return self._fail(f"audit {sid}", e if isinstance(e, AuditError) else f"{type(e).__name__}: {e}", now)
-        files.log_cli(self.dir, "follow", "auto:audit", {"snap": sid}, f"ok={args['ok']} traps={args['min_traps']}")
+        files.log_cli(self.dir, "follow", "auto:audit", {"snap": sid},
+                      f"ok={args['ok']} traps={args['min_traps']}" + trap_note(info, args))
         files.prune_snaps(self.dir)
 
     def _place(self, key: str, job: dict, now: float) -> None:
@@ -541,7 +544,23 @@ class AuditError(RuntimeError):
     """Why an audit was not sent (the AUTO_FAIL text of follow, the error line of `dfllm audit`)."""
 
 
-def compute_audit(save_dir: Path, sid: str, rel: str, reply: dict) -> dict:
+def trap_note(info: dict, args: dict) -> str:
+    """' (41 armed in the trap hall; 0 on the cheapest route now, a bypass skips them; ...)' from bp.topo.audit's
+    info (Run 9/10: `traps 0` beside an armed hall needs its reason in plain sight); '' without info."""
+    t = info.get("traps") if isinstance(info, dict) else None
+    if not isinstance(t, dict):
+        return ""
+    out = [f"{t.get('hall', 0)} of {t.get('armed', 0)} armed traps in the trap hall"]
+    if t.get("walls"):
+        out.append(f"counted with the {t['walls']} bypass wall(s) the findings name; the bypass itself meets "
+                   f"{t.get('any_route', 0)}")
+    e = t.get("enters")
+    if args.get("min_traps", 0) < t.get("hall", 0) // 2 and e:
+        out.append("the counted route enters the hall at %d,%d,%d" % tuple(e))
+    return " (" + "; ".join(out) + ")"
+
+
+def compute_audit(save_dir: Path, sid: str, rel: str, reply: dict, info: dict | None = None) -> dict:
     """The follower's audit job for one audit snapshot: the kern manifest (an `inspect manifest` reply or
     {ok, data: <save>/manifest.json}) is checked, cached for site ranking, and bp.topo.audit(snap, manifest) gives
     the `audit` verb args. Raises AuditError (refused/truncated/invalid manifest, missing snapshot) or the bp error."""
@@ -561,7 +580,13 @@ def compute_audit(save_dir: Path, sid: str, rel: str, reply: dict) -> dict:
     snap = files.read_snapshot(Path(save_dir) / rel)
     if snap is None:
         raise AuditError(f"snapshot {rel} missing/invalid")
-    return audit_args(sid, load_bp("topo").audit(snap, manifest))
+    fn = load_bp("topo").audit
+    try:
+        takes_info = "info" in inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        takes_info = False
+    res = fn(snap, manifest, info=info) if takes_info and info is not None else fn(snap, manifest)
+    return audit_args(sid, res)
 
 
 def audit_args(sid: str, res: dict) -> dict:
@@ -640,7 +665,8 @@ def run_audit(args, save_dir: Path, sleep: Callable[[float], None] = time.sleep,
             if reply is None:
                 print("audit: no reply to inspect manifest (is the kernel running? dfllm status)")
                 return EXIT_NOREPLY
-        a = compute_audit(save_dir, sid, rel, reply)
+        info: dict = {}
+        a = compute_audit(save_dir, sid, rel, reply, info=info)
         cid, reply = send(save_dir, "audit", a, by="follow", wait_s=args.wait)
     except (AuditError, schema.SchemaError) as e:
         print(f"audit: not sent: {'; '.join(e.errors[:3]) if isinstance(e, schema.SchemaError) else e}")
@@ -652,12 +678,15 @@ def run_audit(args, save_dir: Path, sleep: Callable[[float], None] = time.sleep,
     print(f"audit of snapshot {sid} (tick {snap.get('tick')}): ok {yes[a['ok']]}, traps {a['min_traps']}, "
           f"bypass {yes[a['bypass']]}, refuge_sep {yes[a['refuge_sep']]}, civ_sep {yes[a['civ_sep']]}, "
           f"caverns sealed {yes[a['caverns']]}")
+    note = trap_note(info, a)
+    if note:
+        print(f"  traps:{note[1:]}")
     for f in a["fails"][:6]:
         print(f"  fail: {f}")
     if len(a["fails"]) > 6:
         print(f"  ... {len(a['fails']) - 6} more")
     print(fmt_reply(cid, "audit", reply, save_dir))
-    files.log_cli(save_dir, "cli", "audit", {"snap": sid}, f"ok={a['ok']} traps={a['min_traps']}")
+    files.log_cli(save_dir, "cli", "audit", {"snap": sid}, f"ok={a['ok']} traps={a['min_traps']}" + note)
     if reply is None:
         return EXIT_NOREPLY
     if not reply.get("ok") and "unknown snap" in str(reply.get("msg", "")):

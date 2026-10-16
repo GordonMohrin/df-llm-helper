@@ -27,6 +27,7 @@ ZONE_KEYS = set("mbhnpwjfsoDBadtTgc")          # quickfort zone.lua / user guide
 PLACE_CHARS = set("afunyrswebhlzSgpdc")
 BURROW_KEYS = {"a", "e"}
 EXTENT_MODES = {"place", "zone", "burrow"}     # every cell must carry an explicit extent
+OPEN_ROOMS = ("bedrooms", "gallery_o1")        # manifest rooms without the closure check (see _rooms)
 
 
 @dataclass(frozen=True)
@@ -107,8 +108,9 @@ def _flood(world: World, start, bbox, diag: bool) -> bool:
 
 def _rooms(world: World, man: dict) -> list[Finding]:
     """Closure of every manifest room; a bedrooms block (one manifest room with an open corridor) is checked
-    per bedroom zone instead."""
-    boxes = [(r["id"], r["bbox"]) for r in man.get("rooms", []) if r["tpl"] != "bedrooms"]
+    per bedroom zone instead. An outward gallery (`gallery_o1`) is open to its corridor by design; topo.audit
+    checks it (reached only through Z3, roofed, facing the O1 approach)."""
+    boxes = [(r["id"], r["bbox"]) for r in man.get("rooms", []) if r["tpl"] not in OPEN_ROOMS]
     boxes += [(f"bedroom {x0},{y0},{z}", [x0, y0, z, x1, y1, z])
               for x0, y0, x1, y1, z in marks_of(world, "zone", "b")]
     out = []
@@ -123,8 +125,9 @@ def _rooms(world: World, man: dict) -> list[Finding]:
     return out
 
 
-def _bypass_kind(snap: dict, man: dict) -> list[Finding]:
-    """Classify a worst-case bypass: diagonal leak, door used as barrier, shortcut bridge or plain bypass."""
+def _bypass_kind(snap: dict, man: dict, text: str = "") -> list[Finding]:
+    """Classify a worst-case bypass: diagonal leak, door used as barrier, shortcut bridge or plain bypass (with the
+    audit's own text `text`, which names the wall that closes it)."""
     g = topo.Graph(snap)
     Z2 = g.mask(man.get("zones", {}).get("Z2", []))
     T = g.mask(man.get("zones", {}).get("Z3", []) + man.get("zones", {}).get("Z4", []))
@@ -148,7 +151,7 @@ def _bypass_kind(snap: dict, man: dict) -> list[Finding]:
                                         "barriers")]
     if unlisted or any(fps[n]["role"] != "outer" for n in on_br):
         return [Finding("shortcut_bridge", f"a bridge opens a path around the trap hall to {end}")]
-    return [Finding("bypass", f"edge->Z3/Z4 path avoids the trap hall (to {end})")]
+    return [Finding("bypass", text or f"edge->Z3/Z4 path avoids the trap hall (to {end})")]
 
 
 def _still(snap, man, diag=True, closed="") -> bool:
@@ -197,7 +200,7 @@ def check_world(docs, final: bool | None = None) -> list[Finding]:
     final = final if final is not None else (last["tpl"] == "fortcore" and last["params"]["stage"] >= 3)
     res = topo.audit(snap, man)
     if res["bypass"]:
-        out += _bypass_kind(snap, man)
+        out += _bypass_kind(snap, man, next((f for f in res["fails"] if f.startswith("bypass:")), ""))
     for f in res["fails"]:
         if f.startswith("stairs"):
             out.append(Finding("single_stair", f))

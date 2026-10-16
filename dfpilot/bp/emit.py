@@ -12,21 +12,26 @@ from __future__ import annotations
 
 import re
 
-from . import fortcore, rooms
+from . import defense, fortcore, rooms
 from .primitives import BRIDGE_KEYS, Plan, Xform, transform_manifest
 
 MAX_W = 40
 # name -> (build(params) -> Plan, {param: (default, lo, hi)}, one-line description)
 TEMPLATES = {"fortcore": (fortcore.build, fortcore.PARAMS, "doctrine fortress core, stages 1-4 (DESIGN §5.2; 4 = traps)"),
              **{n: (f, {**rooms.PARAMS[n], **rooms.COMMON}, (f.__doc__ or n).strip().split("\n")[0])
-                for n, f in rooms.BUILD.items()}}
+                for n, f in rooms.BUILD.items()},
+             **{n: (f, dict(defense.PARAMS.get(n, {})), (f.__doc__ or n).strip().split("\n")[0])
+                for n, f in defense.BUILD.items()}}
+ATTACHED = dict(defense.ATTACHED)     # tpl -> the template whose tiles it is built against (cmd occupancy)
+FREE = frozenset(defense.FREE)        # templates that build only on existing open tiles (no occupancy clash)
 _BURROW_RE = r"^[A-Za-z0-9_+-]{0,20}$"
 
 # build keys -> materials list names (quickfort build.lua:760-1000)
 MATERIAL = {"b": "bed", "f": "cabinet", "h": "chest", "t": "table", "c": "chair", "n": "coffin", "d": "door",
             "Tl": "lever", "Tw": "weapon_trap", "Ts": "stonefall_trap", "Tc": "cage_trap", "R": "traction_bench",
             "l": "well", "r": "weapon_rack", "a": "armor_stand", "~a": "offering_place", "D": "trade_depot",
-            "Cw": "wall", "CF": "fortification", "p": "farm_plot", "g": "drawbridge"}
+            "Cw": "wall", "CF": "fortification", "p": "farm_plot", "g": "drawbridge", "H": "hatch", "W": "grate",
+            "G": "grate", "B": "bars", "~b": "bars"}
 
 
 def list_templates() -> list[dict]:
@@ -81,7 +86,8 @@ def emit(tpl: str, params: dict | None = None, site=None) -> dict:
     anchor, rot, sid = parse_site(site if site is not None else ([0, 0, 0], 0))
     if any(c < 0 for c in anchor):
         raise ValueError(f"anchor {anchor} outside the map")
-    plan: Plan = TEMPLATES[tpl][0](p)
+    build = TEMPLATES[tpl][0]
+    plan: Plan = build(p, anchor, rot) if getattr(build, "sited", False) else build(p)   # seal: absolute tiles
     X = Xform(anchor, rot)
     stages = [s for s in (_stage(st, X) for st in plan.stages) if s["chunks"]]
     lo = min_corner(stages)

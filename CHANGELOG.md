@@ -55,6 +55,93 @@
 - TOOL_BLOCKED gains `eq`/`eq_days` and the hint says how often the request was made.
 - Live check: `dfhack-run dfllm reload`, then kern.log `... holds no axe: equipment update requested again`; the member should
   carry the tool within a game day. TOOL_BLOCKED with `eq` >= 2 means the request alone does not help: report it, do not move tools.
+## Template `stockroom` and the core stock in `dfllm plan` (2026-10-16; offline, live-untested)
+- **Why (BUG-028, Run 10 y419):** 60 days of drink inside the core, 3093 units outside O1; `plan check` only warned.
+- **`stockroom`** (`dfpilot/bp/rooms.py`, DESIGN §5.11): a room in the core with food stockpiles `dfllm-stock` (one
+  barrel or pot per tile, quickfort `barrels=`; drink is stored there too) and a still (`still=1`, default; params
+  `w`, `h`, `still`, `barrels`), joined to Kern+.
+- **`dfllm plan propose`** drafts `stockroom` first while drink or food inside Kern+/the refuge is below 90 days and
+  none was applied (food only: `still=0`). **`dfllm plan check`** adds `core stock: add tpl stockroom to a season`;
+  once the fort has seen a siege (events or mode) the low value is the doctrine minimum: an error until a stockroom is
+  planned or exists (`plan.sieged`, `fort_facts` `stockroom`/`sieged`).
+- Tests: `tests/bp/test_bp_stockroom.py` (new), `tests/test_cli_plan.py`; README template list.
+- **How to use:** year review as usual (`plan propose` puts it in), or `dfllm cmd bp.place tpl=stockroom site=S1`.
+- **Live check:** in the Run 10 fort (`alert.core_d` 60, a siege in the log) `dfllm plan check` on a plan without a
+  stockroom says ERROR `... the doctrine minimum since the fort's first siege`; `plan propose` drafts
+  `stockroom@S1`; after it is built `inspect what=refuge` `supply` and `alert.core_d` rise as the haulers fill it.
+
+## `traps 0` beside an armed trap hall: why, and the count that helps (2026-10-16; offline, live-untested)
+- **Cause:** `bp.topo.audit` `min_traps` was the minimum over every attacker route, and the bypass the same audit found
+  (Run 10: the way down to the refuge level, see the audit-findings entry; Run 9: the other openings) meets no trap,
+  so 41 armed stone-fall traps read `traps 0`. The trap export itself was right (StoneFallTrap -> `S`, armed =
+  `ready_timeout` 0, Z2 = the hall segments); reproduced offline with the Run 10 route shape. The other way to read
+  `0` with the audit `ok` (no bypass): a way into the hall's last, trap-free tiles from the side (also reproduced);
+  that one is a real hole for R2 and is now located by `dfllm audit`.
+- **Fix:** with a bypass the count is taken as if the walls its findings name stood (bypass closed route by route,
+  up to 4); otherwise the plain minimum, so R2 (`traps<30`, read only while R1 is green) is unchanged. A side way into
+  the hall's trap-free end (R1 green) still reads 0 and is now located. `audit(..., info=)` returns `traps` {armed,
+  hall, any_route, walls, enters}; `dfllm audit` prints `traps: (41 of 41 armed traps in the trap hall; ...)`, follow
+  logs it; status adds `(counted as if the bypass were walled)` / `(a bypass skips the hall)` / `(dfllm audit: where
+  the cheapest route enters the hall)`.
+- Tests: `tests/bp/test_bp_traps.py` (new), `tests/bp/test_bp_topo.py`, `tests/test_cli_status.py`.
+- **Live check:** in the Run 10 fort `dfllm audit` prints `traps 35` (or the hall's count) with the bypass finding and
+  `traps: (41 of 41 armed traps in the trap hall; counted with the 1 bypass wall(s) ...)`; once the seal wall stands
+  `dfllm status` shows the same count without the hint.
+
+## Audit findings say what to build where; `seal at=audit` (2026-10-16; offline, live-untested)
+- **Why (Run 10):** `bypass: edge->Z3/Z4 avoids the trap hall (reaches 139,128,117)` and `refuge: on the attack path
+  (reachable without passing Z4)` named no fix. 139,128,117 is one level above the refuge: a way down to the refuge
+  level outside the fort, then up the civilian stair (reproduced offline: a stair from the surface and a tunnel into
+  the refuge room give exactly these two findings).
+- **`bp.topo.choke`:** on the part of the route after it leaves the attack side (Z1/Z2/kill boxes/bridges), walking
+  back from the target, the first tile outside the fort geometry that takes a constructed wall (floor; a ramp the
+  route climbs gets the wall on its top) and whose wall closes every such route (else `(+more)`). Findings now read
+  `bypass: wall x,y,z floor -> X` and `refuge: on the attack path, wall x,y,z floor` (<= 60 characters, readiness'
+  cut); without a wall tile the old texts stay. The validator's `bypass` finding carries the same text.
+- **`seal at=audit`** builds those walls (`at=all`: entrances and audit walls); DESIGN §5.4 has a table of every
+  audit finding, what it means for the player and what to build; RULES §8 one line.
+- Tests: `tests/bp/test_bp_choke.py` (new).
+- **How to use:** `dfllm audit` (each fail names the wall), then `dfllm cmd bp.place tpl=seal site=S1 at=audit` and,
+  once built, `dfllm audit` again.
+- **Live check:** in the Run 10 fort `dfllm audit` shows `bypass: wall x,y,z ... -> 139,128,117` and the refuge
+  finding with the same tile; after the seal is built both are gone (or the next route is named).
+
+## Template `seal`: close the open ways in, one piece per opening (2026-10-16; offline, live-untested)
+- **Why (Run 10):** SIEGE_UNREADY listed `90,109,125 ramp`, `53,126,127 floor`, `95,127,123 floor` as ways in without door
+  or bridge; there was no template for them and the session placed doors by hand with quickfort `#build d`.
+- **`seal`** (`dfpilot/bp/defense.py`, DESIGN §5.2): a door on a floor-like tile, a constructed wall on the ramp top
+  above a ramp (a ramp cannot carry a door), a hatch on a stair; `close=wall|grate|bars` or a piece per opening
+  (`x,y,z floor wall`). `at=last` (the default) takes the openings of the last entrance check (newest SIEGE_UNREADY,
+  else `state.ready.ents`); kinds come from the newest snapshot; closed tiles are left out. Never refused for touching
+  another project. One `seal:piece` line per piece in `cli.log` and on stdout. The renderer now knows hatches on
+  stairs, floor grates/bars on ramp tops and wall grates/bars.
+- Tests: `tests/bp/test_bp_seal.py` (new); the R0 status hint now names the template.
+- **How to use:** `dfllm cmd bp.place tpl=seal site=S1 at=last` (or `at="90,109,125 ramp;53,126,127 floor"`); preview
+  with `dfllm bp preview seal at=...`; the pieces stand in the reply and in `cli.log`.
+- **Live check:** in the Run 10 fort after `bp.place tpl=seal site=S1 at=last` the project builds the doors/walls;
+  `inspect entrances` then reports those ways in with a door (or gone) and the next SIEGE_UNREADY lists fewer.
+
+## Outward crossbow gallery `gallery_o1` over the O1 approach (2026-10-16; offline, live-untested)
+- **Why (Run 10):** in the siege O1 stayed up and 47 goblins waited in front of it for weeks; nothing could reach or
+  shoot them (the inner gallery covers only the killing field). Gordon chose mechanism 3: a ranged option without opening.
+- **Template `gallery_o1`** (`dfpilot/bp/defense.py`, DESIGN §5.2): constructed fortifications in the east wall of the
+  tunnel in front of O1, a roofed 3-tile gallery behind them, reached only through a corridor from the inner gallery
+  (Z3 side). Stages: F line dug from the tunnel, fortifications built, then strip and corridor dug from inside and
+  taken out of every burrow, so the fort is never open. `bp sites gallery_o1` derives the one site from the manifest
+  (O1 frame: inner gallery station + bailey, O1 when listed) and says why when it cannot (tunnel or inner gallery not
+  dug, rock open). Occupancy ignores the fortcore tiles it is built against (`bp.emit.ATTACHED`).
+- **Audit/validator:** manifest room `gallery_o1`; `topo.audit` fails `gallery_o1: reachable without passing Z3`,
+  `not roofed`, `no fortification faces the O1 approach`, `not dug` (the bypass check catches a dug-out or door F line too).
+- **`dfllm plan check`:** warning (not an error) from P5 on when the fort has or builds a fortcore O1 and no
+  `gallery_o1` is planned, applied or in the manifest: `no outward gallery over O1: a waiting army cannot be shot; add
+  tpl gallery_o1 to a season (site S1, once fortcore stage 2 is dug)`.
+- Tests: `tests/bp/test_bp_gallery.py` (new), `tests/test_cli_plan.py`; room-only tests now list `rooms.BUILD`.
+- **How to use:** `dfllm bp sites gallery_o1`, then `dfllm cmd bp.place '{"tpl":"gallery_o1","site":"S1"}'` (or a plan
+  build `{"tpl":"gallery_o1","site":"S1"}`). In a SIEGE with the army waiting at O1: `dfllm cmd squad.sortie
+  '{"squad":"C","target":[x,y,z],"approve":true}'` with the strip's middle tile (after asking the player).
+- **Live check:** in the Run 10 fort `dfllm bp sites gallery_o1` lists S1 at the O1 footprint centre; after the project
+  is done `dfllm audit` shows no `gallery_o1:` fail, `inspect what=manifest` has the room, and a crossbow squad sent
+  there by sortie shoots into the tunnel while O1 stays up.
 
 ## Stranded behind our own gates: rescue, BREACH -> SIEGE, raise hold, SUPPLY_OUTSIDE, BUG-028 (2026-10-16; offline, live-untested)
 - **Rescue (a):** citizens and soldiers with thirst or hunger > 30,000 on a walk group without drink/food get the inner

@@ -130,8 +130,9 @@ def test_status_r0_is_loud_never_plain_peace(save):
     lines = out.splitlines()
     assert "PEACE(29d) UNREADY P3" in lines[0] and lines[0].startswith("DEFCON 5 | region7")
     assert lines[1] == ("SIEGE UNREADY (R0): audit,no_inner,no_outer | 2 ways in without door or bridge: "
-                        "55,62,117 stair_updown, 61,55,117 floor | traps ? (no audit) | next: dfllm audit; wall/door "
-                        "the open ways in (inspect entrances, bp.place); build the missing fortcore pieces (plan)")
+                        "55,62,117 stair_updown, 61,55,117 floor | traps ? (no audit) | next: dfllm audit; close the "
+                        "open ways in (dfllm cmd bp.place tpl=seal site=S1 at=last); build the missing fortcore "
+                        "pieces (plan)")
     assert "R0 UNREADY worn 0% cv 3 drill never (auto: no bridges; run dfllm cmd drill) audit never (run dfllm audit)" \
         in out
     assert "fail:audit" not in out                             # the blockers stand once, in the UNREADY line
@@ -143,8 +144,13 @@ def test_status_r0_variants_and_worst_case(save):
     _r0_state(save, open=-1, ents=None, dhold=None, fail=["audit_fail", "bypass", "refuge_sep", "civ_sep"],
               audit={"ok": 0, "age": 9000, "min_traps": 4})
     out = brief.status_text(save)
-    assert "SIEGE UNREADY (R0): audit_fail,bypass,refuge_sep,civ_sep | ways in: not checked yet | traps 4" in out
+    assert ("SIEGE UNREADY (R0): audit_fail,bypass,refuge_sep,civ_sep | ways in: not checked yet | traps 4 "
+            "(counted as if the bypass were walled)") in out          # Run 9/10: traps 0 beside an armed hall
     assert "next:" not in out.splitlines()[1]
+    _r0_state(save, open=-1, ents=None, dhold=None, fail=["bypass"], audit={"ok": 0, "age": 9000, "min_traps": 0})
+    assert "| traps 0 (a bypass skips the hall)" in brief.status_text(save)
+    _r0_state(save, open=-1, ents=None, dhold=None, fail=["audit_fail", "bypass", "refuge_sep", "civ_sep"],
+              audit={"ok": 0, "age": 9000, "min_traps": 4})
     assert "drill never (run dfllm cmd drill) audit FAIL 7d traps 4" in out
     _r0_state(save, open=0, ents=None)
     assert "ways in: all with a door or bridge" in brief.status_text(save)

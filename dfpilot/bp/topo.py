@@ -167,25 +167,30 @@ class Graph:
             out.append(parents[out[-1]])
         return out[::-1]
 
-    def min_cost(self, sources, cost, targets) -> int | None:
-        """0-1 BFS: fewest cost tiles entered on any path sources -> targets (climbing allowed)."""
+    def min_cost(self, sources, cost, targets, blocked=None, parents=None) -> int | None:
+        """0-1 BFS: fewest cost tiles entered on any path sources -> targets (climbing allowed), avoiding `blocked`;
+        `parents` (a dict) receives the tree of the best paths for `path()`."""
         INF = 1 << 30
         dist = [INF] * self.N
         dq = deque()
         for s in sources:
-            if s is not None and dist[s] > cost[s]:
+            if s is not None and dist[s] > cost[s] and not (blocked and blocked[s]):
                 dist[s] = cost[s]
                 dq.append(s)
         while dq:
             i = dq.popleft()
             if targets[i]:
+                if parents is not None:
+                    parents["hit"] = i
                 return dist[i]
             di = dist[i]
             for lst in (self.adj.get(i, ()), self.cadj.get(i, ())):
                 for j in lst:
                     nd = di + cost[j]
-                    if nd < dist[j]:
+                    if nd < dist[j] and not (blocked and blocked[j]):
                         dist[j] = nd
+                        if parents is not None:
+                            parents[j] = i
                         (dq.appendleft if cost[j] == 0 else dq.append)(j)
         return None
 
@@ -233,8 +238,112 @@ def sources(g: Graph, manifest: dict) -> list[int]:
     return sorted(src)
 
 
-def audit(snap: dict, manifest: dict | None, graph: Graph | None = None) -> dict:
-    """{ok, fails, min_traps, bypass, refuge_sep, civ_sep, caverns} (= the `audit` verb args minus `snap`)."""
+CHOKE_TRY = 4           # candidate tiles a choke search re-checks with a BFS (the first that closes every route wins)
+
+
+def choke_pick(g: Graph, m: dict, path: list[int], src, blocked, stop, attack) -> tuple | None:
+    """What to build where on an attacker route (Run 10: 'bypass ... reaches 139,128,117' named no fix). Only the
+    part of the route after its last tile in the fort's attack side (`attack`: Z1, Z2, kill boxes, bridges) is the
+    foreign way in; walking it back from the target, its tiles outside the fort's own geometry (fort_boxes; else any
+    of them) that take a constructed wall: a floor tile (kind 'floor') or a ramp the route climbs (kind 'ramp': the
+    wall goes on its top, as the seal template builds it). The first of up to CHOKE_TRY candidates whose wall closes
+    every such route wins (closes True); else the first (closes False). None when none fits (a target on the attack
+    side itself, or stairs, doors and bridges only). Doors are never proposed: the worst-case audit counts them
+    open. Returns (tile index, kind, closes)."""
+    fort = g.mask(fort_boxes(m))
+    route = path[:-1]
+    last = max((k for k, i in enumerate(route) if attack[i]), default=-1)
+    foreign = route[last + 1:]
+    own = [i for i in reversed(foreign) if not fort[i]] or list(reversed(foreign))
+    cands = []
+    for i in own:
+        c = g.t[i]
+        if c == ".":
+            cands.append((i, "floor"))
+        elif c == "r":
+            j = path.index(i)
+            zs = {g.pos(n)[2] for n in path[max(0, j - 1):j + 2]}
+            above = i + g.WH if i + g.WH < g.N else None
+            if len(zs) > 1 and above is not None and g.t[above] in "_v":
+                cands.append((i, "ramp"))
+        if len(cands) >= CHOKE_TRY:
+            break
+    if not cands:
+        return None
+    for i, kind in cands:
+        b = bytearray(blocked)
+        b[i] = 1
+        if g.bfs(src, blocked=b, stop=stop)[1] is None:
+            return i, kind, True
+    return cands[0] + (False,)
+
+
+def choke(g: Graph, m: dict, path: list[int], src, blocked, stop, attack) -> str:
+    """choke_pick as finding text: 'wall x,y,z floor', 'wall x,y,z ramp (+more)'; '' when none fits."""
+    ch = choke_pick(g, m, path, src, blocked, stop, attack)
+    if ch is None:
+        return ""
+    i, kind, closes = ch
+    return "wall %d,%d,%d %s" % (g.pos(i) + (kind,)) + ("" if closes else " (+more)")
+
+
+APPROACH_R = 6          # an outward gallery must face attacker tiles within this many tiles of the outer bridge
+
+
+def _outward_galleries(g: Graph, m: dict, src, Z: dict, kill) -> list[str]:
+    """Fails of the manifest rooms of template `gallery_o1`: not dug, reachable from the edge without passing Z3
+    (a new way in: a doorway, a dug fortification tile, a ramp), unroofed, or no fortification beside a gallery
+    tile that also touches an attacker tile within APPROACH_R of the outer bridge (the gallery shoots at nothing)."""
+    rooms = [r for r in m.get("rooms", []) if r.get("tpl") == "gallery_o1"]
+    if not rooms:
+        return []
+    out: list[str] = []
+    outer = [b["fp"] for b in m.get("bridges", {}).values() if b.get("role") == "outer"]
+    seen_out = None
+    for r in rooms:
+        b = r["bbox"]
+        pts = [(x, y, z) for z in range(b[2], b[5] + 1) for y in range(b[1], b[4] + 1) for x in range(b[0], b[3] + 1)]
+        tiles = [p for p in pts if g.node(g.idx(p))]
+        if not tiles:
+            out.append(_msg("gallery_o1: not dug at %d,%d,%d" % tuple(b[:3])))
+            continue
+        _, h = g.bfs(src, blocked=Z["Z3"], stop=g.mask_pts(tiles))
+        if h is not None:
+            out.append(_msg("gallery_o1: reachable without passing Z3 (%d,%d,%d)" % g.pos(h)))
+        if any((a := g.idx((p[0], p[1], p[2] + 1))) is not None and g.t[a] == "_" for p in tiles):
+            out.append("gallery_o1: not roofed")
+        if not outer:
+            continue
+        if seen_out is None:              # the attackers' side: everything reachable outside the fort's zones
+            fps = g.mask([bb["fp"] for bb in m.get("bridges", {}).values()])
+            seen_out, _ = g.bfs(src, blocked=_or(Z["Z1"], Z["Z2"], Z["Z3"], Z["Z4"], kill, fps))
+        if not any(_faces(g, p, seen_out, outer) for p in tiles):
+            out.append("gallery_o1: no fortification faces the O1 approach")
+    return out
+
+
+def _faces(g: Graph, p, seen_out, outer) -> bool:
+    """A fortification beside gallery tile p with an attacker tile beside it within APPROACH_R of an outer bridge."""
+    x, y, z = p
+    for dx, dy in N8:
+        f = g.idx((x + dx, y + dy, z))
+        if f is None or g.t[f] != "F":
+            continue
+        for ex, ey in N8:
+            q = (x + dx + ex, y + dy + ey, z)
+            qi = g.idx(q)
+            if qi is not None and seen_out[qi] and any(
+                    fp[2] == z and max(fp[0] - q[0], q[0] - fp[3], fp[1] - q[1], q[1] - fp[4]) <= APPROACH_R
+                    for fp in outer):
+                return True
+    return False
+
+
+def audit(snap: dict, manifest: dict | None, graph: Graph | None = None, info: dict | None = None) -> dict:
+    """{ok, fails, min_traps, bypass, refuge_sep, civ_sep, caverns} (= the `audit` verb args minus `snap`). `info`
+    (a dict, optional) receives `traps` {armed, hall, any_route, walls, enters}: armed traps in the snapshot and in
+    Z2, the fewest any route meets now, the bypass walls min_traps assumes built, where the counted route enters the
+    hall (for `dfllm audit` and follow's log; never sent)."""
     g = graph or Graph(snap)
     m = manifest or {}
     fails: list[str] = []
@@ -254,10 +363,14 @@ def audit(snap: dict, manifest: dict | None, graph: Graph | None = None) -> dict
     # 1. bypass: with the trap hall removed no edge -> Z3/Z4 path may remain
     if not any(Z["Z2"]):
         fails.append("manifest: no Z2 trap hall")
-    _, hit = g.bfs(src, blocked=Z["Z2"], stop=T)
+    par: dict = {}
+    _, hit = g.bfs(src, blocked=Z["Z2"], stop=T, parents=par)
     res["bypass"] = hit is not None
     if hit is not None:
-        fails.append(_msg("bypass: edge->Z3/Z4 avoids the trap hall (reaches %d,%d,%d)" % g.pos(hit)))
+        side = _or(Z["Z1"], Z["Z2"], kill, g.mask([b["fp"] for b in m.get("bridges", {}).values()]))
+        ch = choke(g, m, g.path(par, hit), src, Z["Z2"], T, side)
+        fails.append(_msg(("bypass: %s -> %d,%d,%d" % ((ch,) + g.pos(hit))) if ch else
+                          "bypass: edge->Z3/Z4 avoids the trap hall (reaches %d,%d,%d)" % g.pos(hit)))
     # 2. armed traps on every attacker path
     cost = bytearray(g.N)
     for t in snap.get("traps", []):
@@ -266,10 +379,43 @@ def audit(snap: dict, manifest: dict | None, graph: Graph | None = None) -> dict
             cost[i] = 1
         if t[3] == "C" and i is not None and (Z["Z1"][i] or Z["Z2"][i] or kill[i]):
             fails.append(_msg("cage trap on the main path at %d,%d,%d" % tuple(t[:3])))
-    mt = g.min_cost(src, cost, T)
+    par: dict = {}
+    mt = g.min_cost(src, cost, T, parents=par)
     if mt is None:
         fails.append("no attack path with bridges lowered (snapshot or manifest incomplete)")
-    res["min_traps"] = mt or 0
+    # Run 9/10: `traps 0` beside 41-46 armed traps in the hall: the minimum over every route took the bypass, which
+    # meets no trap. With a bypass, min_traps is the count once the walls the bypass findings name stand (up to
+    # CHOKE_TRY routes closed one after the other; if that does not close them all, it stays the plain minimum, 0).
+    # Without a bypass it is the plain minimum over every route: the R2 rule (>= 30 armed traps on every attacker
+    # path), read only while R1 is green, is unchanged.
+    walls = bytearray(g.N)                 # with a bypass: the walls its findings name, assumed built
+    nwalls = 0
+    if res["bypass"]:
+        side = _or(Z["Z1"], Z["Z2"], kill, g.mask([b["fp"] for b in m.get("bridges", {}).values()]))
+        for _ in range(CHOKE_TRY):
+            bp_par: dict = {}
+            _, h = g.bfs(src, blocked=_or(Z["Z2"], walls), stop=T, parents=bp_par)
+            if h is None:
+                break
+            ch = choke_pick(g, m, g.path(bp_par, h), src, _or(Z["Z2"], walls), T, side)
+            if ch is None:
+                break
+            walls[ch[0]], nwalls = 1, nwalls + 1
+    closed = bool(nwalls) and g.bfs(src, blocked=_or(Z["Z2"], walls), stop=T)[1] is None
+    best = mt
+    if closed:
+        par = {}
+        best = g.min_cost(src, cost, T, blocked=walls, parents=par)
+    res["min_traps"] = best or 0
+    route = g.path(par, par["hit"]) if "hit" in par else []
+    entry = None                           # the first tile of the last trap-hall stretch the counted route uses
+    for k, i in enumerate(route):
+        if Z["Z2"][i] and (k == 0 or not Z["Z2"][route[k - 1]]):
+            entry = g.pos(i)
+    armed = [i for i in range(g.N) if cost[i]]
+    if info is not None:
+        info["traps"] = {"armed": len(armed), "hall": sum(1 for i in armed if Z["Z2"][i]), "any_route": mt or 0,
+                         "walls": nwalls if closed else 0, "enters": list(entry) if entry else None}
     # 3. refuge separation
     ref = m.get("refuge")
     rpts = ([ref["anchor"]] if ref else []) + list(snap.get("marks", {}).get("refuge", []))
@@ -280,11 +426,16 @@ def audit(snap: dict, manifest: dict | None, graph: Graph | None = None) -> dict
         fails.append("refuge: none (manifest refuge.anchor) or not walkable")
     else:
         _, h1 = g.bfs(core, blocked=_or(attack, Z["Z3"]), climb=False, stop=rmask)
-        _, h2 = g.bfs(src, blocked=_minus(Z["Z4"], rmask), stop=rmask)
+        par = {}
+        rblock = _minus(Z["Z4"], rmask)
+        _, h2 = g.bfs(src, blocked=rblock, stop=rmask, parents=par)
         if h1 is None:
             fails.append("refuge: not reachable from the core without Z1/Z2/Z3")
         if h2 is not None:
-            fails.append("refuge: on the attack path (reachable without passing Z4)")
+            side = _or(attack, g.mask([b["fp"] for b in m.get("bridges", {}).values()]))
+            ch = choke(g, m, g.path(par, h2), src, rblock, rmask, side)
+            fails.append(_msg("refuge: on the attack path, " + ch) if ch else
+                         "refuge: on the attack path (reachable without passing Z4)")
         res["refuge_sep"] = h1 is not None and h2 is None
     # 4. civilian path != attacker path
     st = m.get("stairs", {})
@@ -334,6 +485,9 @@ def audit(snap: dict, manifest: dict | None, graph: Graph | None = None) -> dict
             above = g.idx((gal[0], gal[1], gal[2] + 1))
             if above is not None and g.t[above] == "_":
                 fails.append("gallery: not roofed")
+    # 6b. outward galleries (bp/defense.gallery_o1, Run 10): reached only through Z3, roofed, and a fortification
+    # between the gallery and the tiles in front of the outer bridge, where a waiting army stands
+    fails += _outward_galleries(g, m, src, Z, kill)
     # 7. bridges: levers inside, footprint present
     inner = _or(Z["Z3"], Z["Z4"])
     for n, b in sorted(m.get("bridges", {}).items()):

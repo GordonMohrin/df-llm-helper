@@ -4,14 +4,14 @@ import json
 import pytest
 
 from dfpilot import bp, schema as S
-from dfpilot.bp import fortcore
+from dfpilot.bp import fortcore, rooms
 from dfpilot.bp.emit import MAX_W, cell_key
 from dfpilot.bp.primitives import merge_manifest, parse_cell
 
 from bp_fixtures import SITE, golden
 
 TPLS = sorted(bp.TEMPLATES)
-ROOMS = [t for t in TPLS if t != "fortcore"]
+ROOMS = sorted(rooms.BUILD)                  # room templates (fortcore and the attached defense add-ons excluded)
 
 
 def all_docs(tpl, rot=0, params=None):
@@ -168,7 +168,7 @@ def test_rooms_touch_the_anchor_row_only_through_the_doorway(tpl):
 
 def test_list_templates():
     names = [t["tpl"] for t in bp.list_templates()]
-    assert names == TPLS and len(names) == 16     # + furnaces, office, captives (L1), cistern (L3), hall, guildhall, barracks (L6)
+    assert names == TPLS and len(names) == 19     # + furnaces, office, captives (L1), cistern (L3), hall, guildhall, barracks (L6), gallery_o1, seal, stockroom (Run 10)
     assert all(t["about"] for t in bp.list_templates())
 
 

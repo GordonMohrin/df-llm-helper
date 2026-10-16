@@ -17,6 +17,8 @@ TRAP = {"Tw": "W", "Ts": "S", "Tc": "C", "Tp": "P"}
 STAIR = {"u": "<", "j": ">", "i": "X"}
 DIGX = frozenset("dhujir")
 CONSTRUCT = {"Cw": "C", "CW": "C", "CF": "F", "Cf": ".", "Cu": "<", "Cd": ">", "Cx": "X"}
+COVERS = {"G": ".", "~b": "."}         # floor grate / floor bars: built over open space or a ramp top, walkable
+GATES = {"W": "B", "B": "B"}           # wall grate / vertical bars on a floor: closed, nobody passes (snapshot.lua)
 
 
 def cell_rects(doc: dict):
@@ -147,6 +149,10 @@ class World:
                 ok = c in "_v"
             elif key in BRIDGE_DIR or key in CONSTRUCT:     # bridges/constructions: floor or open space
                 ok = c in FLOORISH or c in "_v"
+            elif key in COVERS:                             # floor grate/bars: over open space or a ramp top
+                ok = c in "_v"
+            elif key == "H":                                # hatch: a floor or a stair (it covers the stair's floor)
+                ok = c in FLOORISH or c in "<>X"
             else:
                 ok = c in FLOORISH
             if not ok:
@@ -164,6 +170,10 @@ class World:
                 self.set(x, y, z, CONSTRUCT[key])
             elif key in ("d", "H"):
                 self.set(x, y, z, "+")
+            elif key in COVERS:
+                self.set(x, y, z, COVERS[key])
+            elif key in GATES:
+                self.set(x, y, z, GATES[key])
             elif key in TRAP:
                 self.set(x, y, z, "^")
                 self.traps.append([x, y, z, TRAP[key], 1 if key == "Tw" else 0, 1])
@@ -260,15 +270,27 @@ def ascii(snap: dict, zs=None, legend: bool = True) -> str:
 
 def preview(tpl: str, params=None, site=None) -> str:
     """`dfllm bp preview`: as-built ASCII per level plus stages and materials (no DF calls)."""
-    from .emit import emit_all, min_corner, parse_site
+    from .emit import TEMPLATES, check_params, emit_all, min_corner, parse_site
     anchor, rot, sid = parse_site(site if site is not None else ([0, 0, 0], 0))
-    far = 1000                                    # probe far from the map edge, then shift into the map
-    lo = min_corner([s for d in emit_all(tpl, params, ([far] * 3, rot)) for s in d["stages"]])
-    shifted = [max(a, far - m) for a, m in zip(anchor, lo)]
-    docs = emit_all(tpl, params, {"id": sid, "anchor": shifted, "rot": rot})
-    w = as_built(docs, pad=1)
+    build = TEMPLATES[tpl][0] if tpl in TEMPLATES else None
+    base = None
+    if getattr(build, "sited", False):            # absolute tiles (seal): its own site, its openings as the base
+        p = check_params(tpl, params)
+        shifted = list(build.anchor_of(p) or anchor)
+        docs = emit_all(tpl, params, {"id": sid, "anchor": shifted, "rot": rot})
+        base = World(docs_bbox(docs, 1))
+        base.set(*shifted, ".")
+        for (x, y, z), c in build.preview_tiles(p).items():
+            base.set(x, y, z, c)
+    else:
+        far = 1000                                # probe far from the map edge, then shift into the map
+        lo = min_corner([s for d in emit_all(tpl, params, ([far] * 3, rot)) for s in d["stages"]])
+        shifted = [max(a, far - m) for a, m in zip(anchor, lo)]
+        docs = emit_all(tpl, params, {"id": sid, "anchor": shifted, "rot": rot})
+    w = as_built(docs, base=base, pad=1)
     lines = [f"{tpl} {docs[-1]['params']} anchor {docs[0]['anchor']} rot {docs[0]['rot']}"
-             + ("" if shifted == anchor else f" (shifted from {anchor} to fit the map)")]
+             + ("" if shifted == anchor else " (its first opening)" if base is not None
+                else f" (shifted from {anchor} to fit the map)")]
     for d in docs:
         st = ", ".join(f"{s['label']}({sum(len(c['cells']) for c in s['chunks'])})" for s in d["stages"])
         lines.append(f"  {d['class']}: {st}")

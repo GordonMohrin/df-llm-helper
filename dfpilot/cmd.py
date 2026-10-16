@@ -266,6 +266,23 @@ def footprint(doc: dict) -> set[tuple[int, int, int]]:
 WET_TPLS = ("cistern",)
 
 
+def free_template(tpl: str) -> bool:
+    """bp.emit.FREE: the template builds only on existing open tiles (seal) and is never refused for touching a
+    project; its tiles still keep later projects away."""
+    try:
+        return tpl in getattr(load_bp("emit"), "FREE", ())
+    except BpUnavailable:
+        return False
+
+
+def attached_to(tpl: str) -> str | None:
+    """The template `tpl` is built against (bp.emit.ATTACHED: gallery_o1 -> fortcore), else None."""
+    try:
+        return getattr(load_bp("emit"), "ATTACHED", {}).get(tpl)
+    except BpUnavailable:
+        return None
+
+
 class Occupancy:
     """Tiles of placed projects. A new project may neither share a tile with another project nor touch one
     (same z, 8-neighbourhood: one rock tile stays between them), except next to its own anchor, where a
@@ -281,12 +298,20 @@ class Occupancy:
         for c in (footprint(doc) if cells is None else cells):
             self.owner.setdefault(c, tag)
 
-    def clash(self, doc: dict, cells: set | None = None, ignore_tpl: str | None = None) -> list[str]:
-        """Ids of the projects this document would overlap or touch (ignore_tpl: its own earlier stages)."""
+    def clash(self, doc: dict, cells: set | None = None, ignore_tpl=None) -> list[str]:
+        """Ids of the projects this document would overlap or touch (ignore_tpl: a template name or several whose
+        projects do not count: its own earlier stages; for an attached template (bp.emit.ATTACHED, e.g. gallery_o1
+        against the fortcore tunnel) the template it is built against)."""
+        if free_template(str(doc.get("tpl"))):
+            return []
         ax, ay, az = doc["anchor"]
         hit: set[str] = set()
+        skip = {ignore_tpl} if isinstance(ignore_tpl, str) else set(ignore_tpl or ())
+        att = attached_to(str(doc.get("tpl")))
+        if att:
+            skip.add(att)
         a = self.owner.get((ax, ay, az))
-        if a and a[1] in WET_TPLS and a[1] != ignore_tpl:
+        if a and a[1] in WET_TPLS and a[1] not in skip:
             hit.add(a[0])
         for x, y, z in (footprint(doc) if cells is None else cells):
             near_anchor = z == az and abs(x - ax) <= 1 and abs(y - ay) <= 1
@@ -295,7 +320,7 @@ class Occupancy:
                     o = self.owner.get((x + dx, y + dy, z))
                     if (dx or dy) and near_anchor and not (o and o[1] in WET_TPLS):
                         continue
-                    if o and o[1] != ignore_tpl:
+                    if o and o[1] not in skip:
                         hit.add(o[0])
         return sorted(hit)
 
@@ -361,6 +386,108 @@ def workshops_missing(save_dir: Path, types: list | None = None) -> list[str]:
     return [n for n in want if n not in have]
 
 
+# ---------------------------------------------------------------- seal openings (Run 10)
+SEAL_LAST = ("", "last", "entrances")
+AUDIT_WALL = re.compile(r"\bwall (\d+),(\d+),(\d+) (floor|ramp)\b")    # bp.topo.choke in an audit fail
+
+
+def _snap_char(snap: dict | None, x: int, y: int, z: int) -> str | None:
+    if not snap:
+        return None
+    x0, y0, z0, x1, y1, z1 = snap["bbox"]
+    if not (x0 <= x <= x1 and y0 <= y <= y1 and z0 <= z <= z1):
+        return None
+    return snap["rows"][f"z{z}"][y - y0][x - x0]
+
+
+def last_entrances(save_dir: Path) -> list[str]:
+    """'x,y,z kind' of the open ways in of the last entrance check: the newest SIEGE_UNREADY (up to 6), else the
+    state's ready.ents (up to 3)."""
+    for e in files.iter_events_rev(save_dir):
+        if e.get("type") == "SIEGE_UNREADY":
+            ents = (e.get("d") or {}).get("ents")
+            if isinstance(ents, list) and ents:
+                return [x for x in ents if isinstance(x, str)]
+            break
+    st = files.read_state(save_dir) or {}
+    return [x for x in ((st.get("ready") or {}).get("ents") or []) if isinstance(x, str)]
+
+
+def last_audit_walls(save_dir: Path) -> list[str]:
+    """'x,y,z kind wall' for every wall the newest audit names (AUDIT `fails`, or SIEGE_UNREADY `afails` if newer):
+    the chokes bp.topo.audit gives for a bypass or a refuge on the attack path."""
+    for e in files.iter_events_rev(save_dir):
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        fails = d.get("fails") if e.get("type") == "AUDIT" else d.get("afails") if e.get("type") == "SIEGE_UNREADY" \
+            else None
+        if isinstance(fails, list):
+            out = []
+            for f in fails:
+                for mt in AUDIT_WALL.finditer(str(f)):
+                    t = f"{mt.group(1)},{mt.group(2)},{mt.group(3)} {mt.group(4)} wall"
+                    if t not in out:
+                        out.append(t)
+            return out
+    return []
+
+
+def seal_openings(save_dir: Path, at, snap: dict | None = None) -> tuple[str, list[str]]:
+    """The seal template's `at` with every kind filled: at = '' / 'last' / 'entrances' -> the open ways in of the
+    last entrance check; 'audit' -> the walls the newest audit names (bypass, refuge on the attack path); 'all' ->
+    both; kinds from the newest snapshot (sites_snapshot), else from the entry text. Openings the snapshot shows
+    closed (door, wall, bridge, rock) or that name no floor/ramp/stair are left out. Returns (at, notes); raises
+    BpError when nothing is left to close."""
+    dmod = load_bp("defense")
+    text = str(at if at is not None else "").strip()
+    key = text.lower()
+    parts = (last_entrances(save_dir) if key in SEAL_LAST + ("all",) else []) + \
+        (last_audit_walls(save_dir) if key in ("audit", "all") else [])
+    raw = ";".join(parts) if key in SEAL_LAST + ("audit", "all") else text
+    try:
+        ops = dmod.parse_openings(raw) if raw else []
+    except ValueError as e:
+        raise BpError(str(e)) from e
+    snap = snap if snap is not None else sites_snapshot(save_dir)
+    known = dmod.FLOORISH_KINDS | dmod.STAIR_KINDS | {"ramp"}
+    keep, notes = [], []
+    for o in ops:
+        x, y, z = o["pos"]
+        c = _snap_char(snap, x, y, z)
+        if c is not None and c != "?":                     # the snapshot's shape wins: it is the newer reading
+            if c not in dmod.CHAR_KIND:
+                notes.append(f"{x},{y},{z}: left out, the snapshot shows {c!r} (closed, or no floor/ramp/stair)")
+                continue
+            kind = dmod.CHAR_KIND[c]
+        else:
+            kind = o["kind"]
+        if kind not in known:
+            notes.append(f"{x},{y},{z}: left out, kind {kind or '?'!r} takes no seal piece (name floor, ramp or "
+                         "stair_up/stair_down/stair_updown)")
+            continue
+        keep.append(dict(o, kind=kind))
+    if not keep:
+        why = "; ".join(notes) or ("the last entrance check names no open way in" if key in SEAL_LAST
+                                   else "the last audit names no wall" if key == "audit" else "no opening named")
+        raise BpError(f"seal: nothing to close ({why})")
+    return dmod.format_openings(keep), notes
+
+
+def seal_lines(doc: dict) -> list[str]:
+    """One line per piece of a seal document (what is built where, for which opening)."""
+    try:
+        return [pc["why"] for pc in load_bp("defense").seal_pieces(doc.get("params") or {}, doc.get("anchor"))]
+    except (BpUnavailable, ValueError):
+        return []
+
+
+def log_seal(save_dir: Path, doc: dict, by: str) -> list[str]:
+    """cli.log: one line per seal piece (Run 10: the lockdown and the audit name each opening by itself)."""
+    lines = seal_lines(doc) if doc.get("tpl") == "seal" else []
+    for ln in lines:
+        files.log_cli(save_dir, by, "seal:piece", {"proj": doc.get("id")}, ln)
+    return lines
+
+
 def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str, occ: Occupancy | None = None,
           same: dict | None = None, snap: dict | None = None) -> dict:
     """Emit tpl for a site label without overlapping other projects (occ, default: every bp/*.json but bp_id).
@@ -369,6 +496,8 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
     `workshops` without a `skip` param skips the moodable types the fort already has or has planned
     (live L1b: the fortcore shops, earlier workshops projects)."""
     params = dict(params or {})
+    if tpl == "seal":                                      # absolute openings; at=last: the last entrance check
+        params["at"], _ = seal_openings(save_dir, params.get("at"), snap)
     if tpl == "workshops" and "skip" not in params:
         miss = set(workshops_missing(save_dir))
         have = [n for n in _moodable() if n not in miss]
@@ -427,6 +556,8 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
 def free_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict | None = None,
                n: int = 3) -> tuple[list[dict], str, int]:
     """(the first n free sites relabelled S1.., snapshot id, ranked count): what `bp.place site=S<k>` resolves."""
+    if tpl == "seal":                                      # as place(): at=last etc. become explicit openings
+        params = {**(params or {}), "at": seal_openings(save_dir, (params or {}).get("at"), snap)[0]}
     sites, snap_id = rank_sites(save_dir, tpl, params, snap) if snap else ranking(save_dir, tpl, params)
     occ = occupancy(save_dir)
     out = []
@@ -593,6 +724,8 @@ def send(save_dir: Path, verb: str, args: dict, by: str = "cli", wait_s: float =
             unplace(save_dir, cmd_id, args["tpl"], prev)
         raise
     files.log_cli(save_dir, by, f"verb:{verb}", args, f"sent {cmd_id}")
+    if verb == "bp.place" and not repair:
+        log_seal(save_dir, doc, by)
     reply = files.read_outbox(save_dir, cmd_id, timeout_s=wait_s) if wait_s > 0 else None
     if reply is not None:
         files.log_cli(save_dir, by, f"reply:{verb}", {"id": cmd_id}, ("ok " if reply.get("ok") else "ERR ")
@@ -641,6 +774,9 @@ def run(args, save_dir: Path) -> int:
         return EXIT_BAD
     print(fmt_reply(cmd_id, args.verb, reply, save_dir)
           + (" (blueprint removed)" if args.verb == "bp.place" and reply is not None and not reply.get("ok") else ""))
+    if args.verb == "bp.place" and a.get("tpl") == "seal" and (reply is None or reply.get("ok")):
+        for ln in seal_lines(files.read_json(Path(save_dir) / "bp" / f"{cmd_id}.json") or {}):
+            print(f"  seal {ln}")
     if reply is None:
         return EXIT_NOREPLY if args.wait > 0 else EXIT_OK
     return EXIT_OK if reply.get("ok") else EXIT_REFUSED
