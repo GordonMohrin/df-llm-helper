@@ -28,8 +28,8 @@ change the system. Never read ERFAHRUNGEN.md, transcripts or v1 docs as working 
    (`uniform.pickup_flags.update`), so the dwarf fetches a pick or axe himself; moving a tool into a hand stays forbidden.
 2. **One door into the game.** Change the game only with `dfllm cmd <verb>` (closed verb set, §5)
    or `dfllm plan apply`. No inline `lua`, no `claude/*` scripts, no `dfhack-run` except the
-   allowed forms (`dfhack-run dfllm …`, `load-save`, the embark helper before adopt). The
-   PreToolUse hook (`dfllm lint --cmd`) blocks the rest; never work around it.
+   allowed forms (`dfhack-run dfllm …`, `load-save`, the embark helper before adopt; a quicksave
+   only as `dfllm save`). The PreToolUse hook (`dfllm lint --cmd`) blocks the rest; never work around it.
 3. **Pause and tempo belong to the arbiter, with one exception (Gordon, 13.10.2026):** when the game is paused
    by DF (after a load, a restart or a popup) and nothing in the arbiter's own pause reasons holds it, you may
    resume it (`pause_state = false`, or Space on the main screen). Never pause to "help"; you may only send
@@ -65,6 +65,7 @@ dfllm plan propose|check|apply
 dfllm cmd <verb> '<json args>'
 dfllm bp list | bp preview <tpl> | bp sites <tpl>
 dfllm supervise --once --dry-run   # liveness report (the restarting task is optional, not live-tested)
+dfllm save                   # DFHack quicksave, verified by the save folder (not in SIEGE/BREACH/DRILL, <= 1 per 10 min)
 ```
 In game (via `dfhack-run`): `dfllm boot|adopt|stop|status|selftest|restore` (`stop` in SIEGE/BREACH/ALERT keeps
 the FPS clamp and leaves the popup guard until `boot`; never `stop --restore-fps` in a fight). `onMapLoad.init` runs only `dfllm boot` (`tools/migrate_v2.py --apply` sets it up); without the marker it does nothing.
@@ -111,10 +112,8 @@ helper is experimental; procedure and fair-play limits: `tools/embark/README.md`
   (phase_target, seasons[].build, military, supply, trade), `plan check`, `plan apply`. One review
   approves 4 season plans. To edit, propose into a file outside `dfllm-runtime/` (the hook blocks
   edits there): `plan propose y.json`, edit, `plan check y.json`, `plan apply y.json`.
-- **New building:** `bp sites <tpl>`, pick S1-S3, `dfllm cmd bp.place '{"tpl":…,"site":"S1"}'`.
-  ≤ 5 turns per building.
-- **Without you** the kernel keeps safety and supply running and finishes the approved plan; it
-  never starts a ★ item.
+- **New building:** `bp sites <tpl>`, pick S1-S3, `dfllm cmd bp.place '{"tpl":…,"site":"S1"}'`. ≤ 5 turns per building.
+- **Without you** the kernel keeps safety and supply running and finishes the approved plan; it never starts a ★ item.
 
 ## 6. Inbox verbs (closed set; `dfllm cmd <verb> '<json>'`)
 | Verb | Args | When |
@@ -171,7 +170,8 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | YEAR_REVIEW | §5 year review |
 | GHOSTS | `inspect` `what=tombs` (causes per body); `tombs.repair`; `no_coffin` → the kernel provisions coffins (`inspect tombs` `prov`: want/short/stock/order/proj); `bp.place tombs` only when `prov` reports no space and no project; `no_body` → a memorial slab |
 | HOSPITAL_DRY | follow the recipe in the line (`inspect` `what=water_sources`: a bank to zone or a dig); until water is accepted, a dry hospital zone is worse than none |
-| MOOD_RISK | supply the missing class now (dig, trade, butcher); a mood job is never cancelled |
+| MOOD_RISK | supply the missing class now along the named `route` (dig, trade, butcher; leather: tannery, hunters' bolts); a mood job is never cancelled |
+| QUICKSAVE_FAILED | `dfllm save` found no new save folder (follow's own wake): the game is not saved; tell the player at once, `dfllm save` again in 2 min or save by hand |
 | ORDER_BAD | a make-item order without `item_subtype` (DF crash) was removed; never queue such orders, use `order.add` with `item_subtype` |
 | DEPOT_MISSING | a caravan came and no depot stands; the kernel queued a `depot` project: check `status`/`proj`, keep O1 down for builders in PEACE. "does not progress: why" = the planned depot is stuck; without a fortcore depot the kernel moves it inside the entrance after 5 failed resumes (`inspect workload` `depot_move`) |
 | CUTOFF | citizens lost the walk group of their food, drink or beds (confirmed on groups read again, BUG-021); the msg names the tile, a cut-off citizen and a stock tile with their groups. `inspect reach`; a project still building there: `bp.cancel {proj, undo:true}`; a built wall or raised bridge: tell the player at once (no deconstruct verb) |
@@ -254,9 +254,10 @@ manifest kill boxes, never into shafts or stairs. No civilian reserve squads.
 autochop wood ≥ 14, autobutcher low, tailor, seedwatch on farmed crops at 12). KPI = 0 starving
 postings, not idle %. Idle > 40 % for 3 days → useful backlog only, never filler digging.
 **Moods:** all 12 moodable workshop types in P1; stock ≥ 10 cloth, leather, bone, shell, gems, bars
-from P1; never cancel a mood job.
+from P1; never cancel a mood job. No ore: `plan propose` drafts `explore` each season (`plan check` refuses metal unplanned).
 **Labor:** labormanager monitor; economy staffs the Miners (dig backlog, 2-4), Woodcutters (logs) and
-Hunters (famine; 1 for a short bone/shell/leather mood stock) details itself; you never change work details.
+Hunters (famine; 1 for a short bone/shell/leather mood stock, 2 after a mood missed leather) details itself; you never
+change work details.
 **Dead:** one 1x1 tomb per coffin, free tombs ≥ open corpses + 6; autoslab, burial, preserve-tombs.
 **Food/drink:** drink ≥ 170 days, food ≥ 60, ≥ 5 meal kinds; plump helmets are brewed, never cooked. Farms,
 autofarm thresholds, fishers and meals follow the citizens (economy; `food_low` wakes below 30 days).
@@ -269,7 +270,7 @@ re-designate); every breach of water or caverns through a 2-wall airlock; cavern
 from stockpiles named `dfllm-trade` (logistics autotrade; fortcore stage 1 builds one next to the depot,
 plus the `dfllm-melt` automelt pile).
 **Speed:** PEACE timestream 500; ALERT FPS cap 100; SIEGE/BREACH/DRILL and any lockdown timestream off,
-FPS cap 30; no Lua quicksaves; DF autosave yearly.
+FPS cap 30; no Lua quicksaves (only `dfllm save`, verified); DF autosave yearly.
 
 ## 11. Phases (`plans/year1.json`; the runner advances when all deliverables pass)
 | Phase | Deliverables |
@@ -295,6 +296,5 @@ one line for the player and wait for the next wake.
   the player (a scheduled supervisor, if set up, handles it); do not restart DF by hand.
 - A command was refused: read the outbox `msg`; fix the args; never retry with a different verb to
   get around a refusal.
-- The fort is in SIEGE/BREACH: do nothing tactical. Read `status` every few minutes; act after
-  SIEGE_END.
+- The fort is in SIEGE/BREACH: do nothing tactical. Read `status` every few minutes; act after SIEGE_END.
 - Unsure whether something is fair: it is not. Ask the player.

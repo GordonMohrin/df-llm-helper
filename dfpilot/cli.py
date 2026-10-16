@@ -1,4 +1,5 @@
-"""`python -m dfpilot` (alias dfllm), DESIGN §7. Reads runtime files only; never calls DF.
+"""`python -m dfpilot` (alias dfllm), DESIGN §7. Reads runtime files only; never calls DF, except `dfllm save` (DFHack's
+quicksave, verified by the save folder; Run 10, dfpilot/save.py).
 
 bp (WP3), lint/hook (WP4) and supervise (WP10) are imported lazily, so they are optional.
 """
@@ -14,8 +15,8 @@ from . import paths
 
 
 def _parser() -> argparse.ArgumentParser:
-    from . import alarm, brief, cmd, doctor, events, plan, wake
-    ap = argparse.ArgumentParser(prog="dfllm", description="dfpilot v2 (files only, 0 DF calls)")
+    from . import alarm, brief, cmd, doctor, events, plan, save, wake
+    ap = argparse.ArgumentParser(prog="dfllm", description="dfpilot v2 (files only; DF calls only in save and supervise)")
     ap.add_argument("--runtime", help="runtime root (default <DF>/dfllm-runtime or $DFLLM_RUNTIME)")
     ap.add_argument("--save", help="save folder (default: ACTIVE, else the newest)")
     ap.add_argument("--df", help="DF folder (default $DFLLM_DF or the Steam path)")
@@ -35,6 +36,7 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--fresh", action="store_true", help="sites: request a new snapshot first and wait for it")
     p.add_argument("--timeout", type=float, default=60.0)
     doctor.add_parser(sub)
+    save.add_parser(sub)
     p = sub.add_parser("supervise", help="liveness, backup, restart (WP10; other flags pass through)",
                        add_help=False)             # -h/--help pass through too: supervise.main lists --dry-run etc.
     p.add_argument("--once", action="store_true")
@@ -259,6 +261,9 @@ def main(argv: list[str] | None = None) -> int:
         return run_ack(args, save_dir)
     if c == "doctor":
         from .doctor import run
+        return run(args, save_dir)
+    if c == "save":                                    # Run 10: the one DF call of the CLI, verified (dfpilot/save.py)
+        from .save import run
         return run(args, save_dir)
     if c == "bp":
         return run_bp(args, save_dir)

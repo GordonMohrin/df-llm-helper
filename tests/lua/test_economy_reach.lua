@@ -175,7 +175,9 @@ T.test('Run 10: orders waiting for steel bars get the steel chain (pig iron, the
   local stl = wo(W, 'dfllm:steel')
   T.ok(stl, 'steel from pig iron + iron + flux')
   T.eq({stl.reaction, stl.amount_total}, {'STEEL_MAKING', 2})
-  T.eq(#W.find_events('DECISION_NEEDED'), 0)
+  local dec = {}
+  for _, e in ipairs(W.find_events('DECISION_NEEDED')) do dec[#dec + 1] = e.d.id end
+  T.eq(dec, {'metal'}, 'no steel decision (4 iron bars, no ore: only the yearly ore question, Run 10)')
 end)
 
 T.test('Run 10: without flux the steel orders name the missing input once (DECISION_NEEDED steel, cadence)', function()

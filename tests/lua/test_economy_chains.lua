@@ -130,7 +130,7 @@ T.test('hook API: need() raises target and floor, rushes the next run, expires; 
   -- expiry
   W.K.call('economy', 'need', 'leather', 2, 'mood:7', 1)
   days(W, 2)
-  T.eq(select(2, W.K.call('economy', 'supply')).leather.floor, 0, 'expired after its days')
+  T.eq(select(2, W.K.call('economy', 'supply')).leather.floor, 2, 'expired after its days: the standing reserve (Run 10)')
   T.eq(eco_warns(W), {})
 end)
 
@@ -404,7 +404,8 @@ T.test('gear: every wanted position; metal by preference, then leather, then woo
   days(W2, 1)
   local body = order(W2, 'dfllm:gear_body')
   T.eq({body.item_subtype, body.material_category, body.amount_total}, {'ITEM_ARMOR_LEATHER', {'leather'}, 1})
-  T.eq(body.item_conditions, {{condition = 'AtLeast', value = 1, item_type = 'SKIN_TANNED'}})
+  -- the standing leather reserve (2, Run 10: a fey mood died for two leather) stays in the fort
+  T.eq(body.item_conditions, {{condition = 'AtLeast', value = 3, item_type = 'SKIN_TANNED'}})
   T.eq(eco_warns(W), {})
 end)
 
@@ -474,6 +475,73 @@ T.test('daily run: at most one DF command per frame, a full day still fits in a 
   T.eq(worst, 1)
   T.ok(seen >= 8, 'engine, status, imports, orders: ' .. seen)
   T.ok(W.state().labor ~= nil, 'the day finished and published')
+end)
+
+-- Run 10 (Handlelock): iron stuck at 8 bars for years while 20 soldiers wore 38-53 %; the explore route waited for 0
+-- spare bars and never fired. Now: no ore and fewer bars than the metal slots want -> PROJECT_REQUEST explore, and the
+-- state tells plan propose/check (stock.ore, bars, metal)
+T.test('Run 10: no ore and 8 iron bars for 20 soldiers: exploration request and state stock.metal explore', function()
+  local W = world{phase = 'P3', per = {A = 10, B = 10}, shops = {'MetalsmithsForge'}, furnaces = {'Smelter'},
+                  setup = function(W) for _ = 1, 8 do F.item(W, 'BAR', {mat_type = 0, mat_index = 51}) end end}
+  days(W, 2)
+  local req = {}
+  for _, e in ipairs(W.find_events('PROJECT_REQUEST')) do if e.d.tpl == 'explore' then req[#req + 1] = e end end
+  T.eq(#req, 1, 'one exploration request a season')
+  T.eq({req[1].d.why, req[1].d.bars}, {'ore', 8})
+  T.ok(req[1].d.short >= 50, 'the soldiers want 60+ bars: ' .. tostring(req[1].d.short))
+  T.ok(req[1].msg:find('no ore, 8 bars', 1, true), req[1].msg)
+  local dec
+  for _, e in ipairs(W.find_events('DECISION_NEEDED')) do if e.d.id == 'metal' then dec = e end end
+  T.ok(dec and dec.d.q:find('tpl explore', 1, true), dec and dec.d.q)
+  local s = W.state()
+  T.eq({s.stock.ore, s.stock.bars, s.stock.metal}, {0, 8, 'explore'})
+  T.eq(W.K.call('economy', 'route', 'bars') and select(2, W.K.call('economy', 'route', 'bars')),
+       'no ore: explore dig (plan), trade.want bar:iron')
+  -- ore came in: no exploration route any more
+  for _ = 1, 2 do F.item(W, 'BOULDER', {mat_type = 0, mat_index = 62}) end      -- hematite
+  days(W, 1)
+  T.eq(W.state().stock.metal ~= 'explore', true)
+  T.eq(W.state().stock.ore, 2)
+end)
+
+-- Run 10: a fey mood died for two leather (no tannery, no hunt); the miss outlives the mood
+T.test('Run 10: a mood missed leather: hunters through the no-game pause, a tannery request, state mood_miss', function()
+  local W, ctl = world{care = true, phase = 'P1', wood = 100, shops = {'Craftsdwarfs'}, wants = {{cls = 'leather', n = 2}},
+                       setup = function(W, ctl)
+    local function wd(name, labor) return {name = name, assigned_units = kmock.vec{}, allowed_labors = {[labor] = true}, flags = {mode = 3}} end
+    ctl.wds = {Miners = wd('Miners', 1), Woodcutters = wd('Woodcutters', 2), Hunters = wd('Hunters', 3)}
+    df.global.plotinfo.labor_info = {work_details = kmock.vec{ctl.wds.Miners, ctl.wds.Woodcutters, ctl.wds.Hunters}}
+    W.act_result('run', function(cmd, a1) if cmd == 'labormanager' and a1 == 'mode' then return true, 'Mode: monitor' end return true, '' end)
+    W.act_result('work_detail', function(name, id, on)
+      local v = ctl.wds[name].assigned_units
+      for i = 0, #v - 1 do if v[i] == id then if not on then v:erase(i) end; return true end end
+      if on then v:insert('#', id) end
+      return true
+    end)
+    F.item(W, 'WEAPON', {subtype = 3})
+    F.item(W, 'AMMO', {subtype = 4, stack_size = 25})
+  end}
+  for i = 1, 10 do W.unit(i).status.labors = {}; W.unit(i).mood = -1 end
+  days(W, 1)
+  local function tan_reqs()
+    local r = {}
+    for _, e in ipairs(W.find_events('PROJECT_REQUEST')) do
+      if e.d.tpl == 'workshops' and e.d.why == 'tannery' then r[#r + 1] = e end
+    end
+    return r
+  end
+  T.eq(#tan_reqs(), 1, 'no tanner\'s shop while a mood needs leather: the workshops project is asked for')
+  T.ok(tan_reqs()[1].msg:find('a mood missed leather', 1, true), tan_reqs()[1].msg)
+  T.eq(#ctl.wds.Hunters.assigned_units, 1, 'an open need hunts (one crossbow)')
+  ctl.wants = nil                                    -- the mood ended (the fey dwarf died)
+  days(W, 16)
+  T.eq(#ctl.wds.Hunters.assigned_units, 1, 'leather still 0 after the mood missed it: hunting goes on through the pause')
+  local s = W.state()
+  T.eq({s.stock.leather, s.stock.mood_miss}, {0, {'leather'}})
+  T.eq(#tan_reqs(), 2, 'asked again after request_days (14)')
+  local _, route = W.K.call('economy', 'route', 'leather')
+  T.eq(route, 'no tannery (asked), hunt: 1 hunter, butcher, trade.want leather')
+  T.eq(eco_warns(W), {})
 end)
 
 T.done()

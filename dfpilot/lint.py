@@ -1366,6 +1366,8 @@ def dfhack_line(toks: list[str], dev: bool = False, cwd: str | None = None, al: 
         return True, "dfllm in-game command"
     if head == "load-save":
         return (len(toks) >= 2), ("load-save" if len(toks) >= 2 else "load-save needs a save folder")
+    if head == "quicksave":                    # Run 10: a bare quicksave after a graphics crash wrote nothing
+        return False, "quicksave: use `python -m dfpilot save` (verified by the save folder's file times, rate-limited)"
     o = fairplay.owned_match([head] + toks[1:])
     if o:
         return False, (f"{o[0]}: owned by {o[1]} in the kernel (DESIGN §3); ask through an inbox verb "

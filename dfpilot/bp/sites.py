@@ -28,13 +28,17 @@ tile rock or unknown with a rock ring (no revealed open tile within 1), nothing 
 tile (a pressurized pipe must not rise into anything). `level=refuge` puts the well room on the refuge level
 (anchors in the fortcore refuge room). `plan_cistern` routes such a pipe on a snapshot (`python -m
 dfpilot.bp.sites cistern --save <folder>` prints the params and the bp.place command).
+Explore (`mine.explore`, Run 10: no ore for years): public Z4 anchors like a room, never on or below the refuge level;
+its footprint ring per level (all round below the anchor level) must be rock or unknown, levels below the snapshot are
+unknown; the shaft must not reach a level in `p.avoid` or one with a revealed cavern, damp or warm mark (ValueError
+names them when nothing else is left). Score: 1000 - 5 per step to a stair + 10 per level below the top of Z4.
 """
 from __future__ import annotations
 
 import heapq
 from collections import deque
 
-from . import defense, fortcore, rooms, topo
+from . import defense, fortcore, mine, rooms, topo
 from .emit import TEMPLATES, check_params
 from .primitives import Xform, rot_uv
 from .rooms import NO_THROUGH, plot_rects
@@ -175,9 +179,11 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     hid = _Pref(snap, lambda c: c == "?")
     mk = _Pref(snap, points=marks)
     wet = _Pref(snap, lambda c: c in WET)
-    rects = footprint(tpl, p)
+    rects = explore_rects(p) if tpl in mine.BUILD else footprint(tpl, p)
     if tpl == "fortcore":
         cands = _fortcore(snap, rects, bad, hid, mk, wet)
+    elif tpl in mine.BUILD:
+        cands = _explore(snap, p, rects, bad, hid, mk, manifest, wet)
     else:
         cands = _rooms(snap, tpl, p, rects, bad, hid, mk, manifest, wet)
     cands.sort(key=lambda c: (-c["score"], c["anchor"][2], c["anchor"][1], c["anchor"][0], c["rot"]))
@@ -410,6 +416,73 @@ def _rooms(snap, tpl, p, rects, bad, hid, mk, manifest, wet=None):
                 why += f", soil {s}/{area} plot tiles" if soil_pts else ", soil unknown"
                 why += f", {top - az} levels below the top of Z4"
             out.append({"anchor": [ax, ay, az], "rot": rot, "score": max(0, score), "box": box, "why": why})
+    return out
+
+
+EXPLORE_LEVEL = 10                    # explore: score per level below the top of Z4 (a deeper start searches deeper)
+AVOID_MARKS = ("cavern", "damp", "warm")
+
+
+def explore_rects(p: dict) -> dict[int, list[tuple[int, int, int, int]]]:
+    """Local check rects of an explore shaft: per level the dug tiles' bbox grown by the wall ring (the shaft top level
+    not toward the anchor row, as rooms; below it all round: a tunnel must not break into an open space there)."""
+    rects: dict[int, list] = {}
+    for w, tiles in mine.explore(p).dug().items():
+        us, vs = [t[0] for t in tiles], [t[1] for t in tiles]
+        rects[w] = [(min(us) - 1, max(1, min(vs) - 1) if w == 0 else min(vs) - 1, max(us) + 1, max(vs) + 1)]
+    return rects
+
+
+def avoid_levels(snap: dict, p: dict) -> set[int]:
+    """Levels an explore shaft must not reach: params.avoid plus every level with a revealed cavern, damp or warm mark
+    (a cavern layer or a wet/hot stone layer: the vanilla UI shows those tiles too)."""
+    out = mine.parse_avoid(p.get("avoid", ""))
+    for k in AVOID_MARKS:
+        out |= {int(q[2]) for q in snap.get("marks", {}).get(k, []) if isinstance(q, (list, tuple)) and len(q) == 3}
+    return out
+
+
+def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
+    """explore (Run 10): public Z4 anchors like a room whose shaft (depth levels) reaches no avoided level; footprint and
+    ring rock or unknown (levels below the snapshot count as unknown); never from the refuge level or below it (the
+    refuge stays a sealed dead end: a cavern breach must not open into it); the deeper the anchor, the better. Raises
+    ValueError naming the levels when only the avoided levels kept every anchor out."""
+    g = Graph(snap)
+    steps_of = _stair_steps(g)
+    keep_out = _keep_out(manifest)
+    top = max(b[5] for b in manifest["zones"]["Z4"])
+    ref = manifest.get("refuge")
+    zr = ref["anchor"][2] if ref else None
+    avoid = avoid_levels(snap, p)
+    out, hit = [], set()
+    for i in _anchor_tiles(g, "explore", p, manifest):
+        ax, ay, az = g.pos(i)
+        if zr is not None and az <= zr:
+            continue
+        lv = {z for z in avoid if az - p["depth"] <= z <= az}
+        if lv:
+            hit |= lv
+            continue
+        for rot in range(4):
+            du, dv = rot_uv(0, 1, rot)
+            door = g.idx((ax + du, ay + dv, az))
+            if door is None or g.t[door] not in GOOD:
+                continue
+            res = _check(rects, ax, ay, az, rot, bad, hid, mk, True, wet)
+            if res is None:
+                continue
+            unknown, missing, box = res
+            if any(_overlap(r, b) for r in _rect_boxes(rects, ax, ay, az, rot) for b in keep_out):
+                continue
+            steps = min(steps_of.get(i, 99), 99)
+            out.append({"anchor": [ax, ay, az], "rot": rot, "box": box,
+                        "score": max(0, 1000 - 5 * steps + EXPLORE_LEVEL * (top - az)),
+                        "why": f"rot{rot}, {top - az} levels below the top of the core, shaft to z{az - p['depth']}, "
+                               f"{steps} steps to a stair, {unknown} unknown tiles, {missing} levels below the snapshot"})
+    if not out and hit:
+        raise ValueError(f"explore: every anchor's shaft of depth {p['depth']} reaches an avoided level "
+                         f"(z{','.join(str(z) for z in sorted(hit)[:6])}: avoid or a cavern/damp/warm mark); "
+                         "give a smaller depth (p.depth)")
     return out
 
 

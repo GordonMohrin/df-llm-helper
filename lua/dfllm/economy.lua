@@ -209,7 +209,8 @@ M.DEFAULTS = {
   },
   -- live L4: floors economy's own consumers keep (wood: the furniture fallback took 70 of 82 logs in L3); care's
   -- forbidden mood reserve counts against them (economy keeps max(0, floor - held) of the free items)
-  reserve = {wood = 20, rock = 0, bone = 0, shell = 0, leather = 0, cloth = 0, thread = 0, bars = 0, gems = 0,
+  -- Run 10: a fey mood needed two leather and died with none in the fort; economy's leather gear keeps two back
+  reserve = {wood = 20, rock = 0, bone = 0, shell = 0, leather = 2, cloth = 0, thread = 0, bars = 0, gems = 0,
              fuel = 0},
   wood = {chop_min = 60, chop_max = 150, margin = 20, band = 90, cap = 400, step = 10},
   -- live L1b: brewing stalled without empty barrels; then dfllm:barrel made 34 barrels (logs 183 -> 66). Below the
@@ -220,7 +221,12 @@ M.DEFAULTS = {
              spec = {job = 'MakeBarrel', material_category = {'wood'}}},
   bins = {tag = 'dfllm:bin', min_empty = 1, cit_pct = 25, min_total = 4, max_total = 20, max_jobs = 2,
           ws = {'workshop:Carpenters'}, spec = {job = 'ConstructBin', material_category = {'wood'}}},
+  -- Run 10 (Handlelock): no tannery stood and a fey mood died for two leather. Without a tanner's shop, while hides lie
+  -- or a mood missed leather within memory_days: PROJECT_REQUEST workshops why=tannery (follow places the missing
+  -- moodable shops) at most every request_days; a mood that missed leather (memory_days) with 0 leather hunts like an
+  -- open need (through the no-game pause)
   leather = {from_phase = 'P1', tag = 'dfllm:tan', after_days = 2, max_jobs = 10, ws = {'workshop:Tanners'},
+             request_days = 14, memory_days = 336,
              spec = {job = 'CustomReaction', reaction = 'TAN_A_HIDE',
                      item_conditions = {{condition = 'AtLeast', value = 1, flags = {'unrotten'},
                                          reaction_product = 'TAN_MAT'}}}},
@@ -341,7 +347,7 @@ end
 
 -- persist m.economy; maps are re-tagged as objects (a decoded empty map is an array, json.lua:104)
 local MAPS = {'imported', 'orders', 'low', 'tools', 'meta', 'needs', 'reserves', 'explore', 'ostuck', 'ocancel',
-              'badseen', 'jres', 'tblk'}
+              'badseen', 'jres', 'tblk', 'mseen'}
 local function pstate(K)
   local p = K.persist.get('m.economy')
   if type(p) ~= 'table' then
@@ -963,6 +969,13 @@ end
 -- stock incl. care's forbidden reserve (what a mood can be given)
 local function have(r, key) return (r.inv[key] or 0) + (r.held[key] or 0) end
 
+-- Run 10: a strange mood missed `key` (care.mood_wants) within leather.memory_days game days (a pure helper; a field,
+-- not a local: the main chunk is at Lua's 200-local limit)
+function M.mood_missed(c, p, key, now)
+  local t = math.tointeger((p.mseen or {})[key])
+  return t ~= nil and now - t <= ((c.leather or {}).memory_days or 336) * DAY
+end
+
 local function mood_target(K, c, key)
   if not phase_ok(K, c.mood_from_phase or 'P1') then return 0 end
   for _, k in ipairs(c.mood_keys or {}) do
@@ -1019,6 +1032,7 @@ local function care_hooks(K, r)
       if type(m) ~= 'table' then m = json.object{}; r.p.needs[key] = m end
       local prev = m.care
       m.care = {n = wants[key], untl = r.now + 2 * DAY}
+      r.p.mseen[key] = r.now                     -- Run 10: the moods' misses outlive the mood (state stock.mood_miss)
       if not prev or (prev.n or 0) < wants[key] then K.log('info', 'need %s %d (care: mood)', key, wants[key]) end
     elseif type(m) == 'table' then m.care = nil end
   end
@@ -1144,10 +1158,12 @@ local function gear_pre(K, c, r, hunt)
     end
   end
   local who = {all = melee + xb, melee = melee, xbow = xb, ranged = xb + hunt}
-  local res = {n = melee + xb, melee = melee, xbow = xb, hunt = hunt, cats = {}, leather = 0, metal_jobs = 0}
+  local res = {n = melee + xb, melee = melee, xbow = xb, hunt = hunt, cats = {}, leather = 0, metal_jobs = 0,
+               bars_need = 0, bars_short = 0}
   -- metal pieces the bars at hand could make (any preferred metal), shared by the slots in order
   local bars = 0
   for _, m in ipairs(g.metals or {}) do bars = bars + (st.bars_by['INORGANIC:' .. m] or 0) end
+  local bars0 = bars
   local forge = ws_any(r.f, g.forge)
   for _, it in ipairs(g.items or {}) do
     local want, sw                                   -- sw: the soldiers' part (worn % inputs)
@@ -1174,8 +1190,12 @@ local function gear_pre(K, c, r, hunt)
       end
       if it.leather and jobs > mj then res.leather = res.leather + (jobs - mj) * (it.leather.n or 1) end
       if it.metal and not it.leather and not it.wood and mj < jobs then res.metal_short = true end
+      -- Run 10: iron stuck at 8 bars for years while 20 soldiers wore 38-53 %: the bars every metal slot wants,
+      -- forge or not (plan_metal's explore route)
+      if it.metal then res.bars_need = res.bars_need + jobs * it.metal.bars end
     end
   end
+  res.bars_short = math.max(0, res.bars_need - bars0)
   return res
 end
 
@@ -1201,9 +1221,12 @@ local function hunt_want(K, c, r)
     if have(r, key) < tgt then short = true end
     if need_n(r.p, key, r.now) > have(r, key) then needed = true end
   end
-  if not short then return 0, 'stock' end
+  -- Run 10 (Handlelock): a fey mood died for two leather; a mood that missed leather while the fort still has none
+  -- hunts like an open need (the next mood fails the same way)
+  local missed = have(r, 'leather') == 0 and M.mood_missed(c, r.p, 'leather', r.now)
+  if not (short or missed) then return 0, 'stock' end
   -- an open mood need still unmet hunts through the "no game" pause (a failed mood ends in a death)
-  if needed then return spec.need or spec.mood or 1, 'need' end
+  if needed or missed then return spec.need or spec.mood or 1, needed and 'need' or 'mood leather' end
   if r.now < (r.p.hunt_off or 0) then return 0, 'no game' end
   if not phase_ok(K, c.mood_from_phase or 'P1') then return 0, 'phase' end
   return spec.mood or 0, 'mood stock'
@@ -1238,12 +1261,36 @@ local function fish_want(K, c, r)
   return clamp(((r.cit or 0) + per - 1) // per, 1, spec.max or 3), r.p.famine and 'famine' or 'food'
 end
 
+-- Run 10 (Handlelock): no tanner's shop stood and a fey mood died for two leather. Without one, while hides lie or a
+-- mood missed leather: PROJECT_REQUEST workshops why=tannery (follow places the missing moodable shops, the Tanners
+-- among them) at most every request_days, never while a workshops project is pending
+function M.tannery_request(K, c, r, L)
+  local missed = M.mood_missed(c, r.p, 'leather', r.now)
+  r.route.leather = 'no tannery'
+  if not ((r.inv.hides or 0) > 0 or missed) then return end
+  if not (missed or phase_ok(K, L.from_phase)) then return end
+  local p = r.p
+  if p.tan_req and r.now - (math.tointeger(p.tan_req) or 0) < (L.request_days or 14) * DAY then
+    r.route.leather = 'no tannery (asked)'
+    return
+  end
+  local okp, pend = K.call('runner', 'pending', 'workshops')
+  if okp and type(pend) == 'number' and pend > 0 then r.route.leather = 'no tannery (queued)'; return end
+  p.tan_req = r.now
+  r.route.leather = 'no tannery (asked)'
+  K.emit('PROJECT_REQUEST', 'B', string.format("workshops: no tanner's shop (%d hides, leather %d of %d%s)",
+                                               r.inv.hides or 0, have(r, 'leather'), r.targets.leather or 0,
+                                               missed and ', a mood missed leather' or ''),
+         {tpl = 'workshops', n = 1, why = 'tannery'})
+end
+
 local function plan_leather(K, c, r)
   local L = c.leather
   local want = target(K, c, r, 'leather') + (phase_ok(K, L.from_phase) and r.gear.leather or 0)
   r.targets.leather = want
   if have(r, 'leather') >= want or open(r, L.tag) then return end
-  if (r.inv.hides or 0) > 0 and (r.p.hides_days or 0) >= (L.after_days or 2) and ws_any(r.f, L.ws) then
+  if not ws_any(r.f, L.ws) then return M.tannery_request(K, c, r, L) end
+  if (r.inv.hides or 0) > 0 and (r.p.hides_days or 0) >= (L.after_days or 2) then
     local n = math.min(left(c, r, 'hides'), want - have(r, 'leather'), L.max_jobs or 10)
     if add(r, {tag = L.tag, spec = L.spec, n = n, uses = {hides = 1}, why = 'leather'}) then r.route.leather = 'tan' end
   end
@@ -1306,7 +1353,7 @@ local function plan_metal(K, c, r)
   local bars_want = target(K, c, r, 'bars')
   r.targets.bars = bars_want
   local steel = type(st.steel) == 'table' and (st.steel.n or 0) > 0     -- orders wait for steel (plan_steel)
-  local wanted = have(r, 'bars') < bars_want or r.gear.metal_jobs > 0 or steel
+  local wanted = have(r, 'bars') < bars_want or r.gear.metal_jobs > 0 or r.gear.bars_short > 0 or steel
   if not wanted then return end
   if not phase_ok(K, Mt.from_phase) and need_n(r.p, 'bars', r.now) == 0 and r.gear.metal_jobs == 0 and not steel then
     return
@@ -1390,22 +1437,27 @@ local function plan_metal(K, c, r)
     add(r, {tag = ch.tag, spec = wood_spec(c, r, {job = 'MakeCharcoal', material_category = {}}), n = n,
             uses = {wood = 1}, why = 'fuel'})
   end
-  -- no ore and no usable bars: exploration (a dig is not economy's to designate) and the LLM once a year
+  -- no ore and too few bars: exploration (a dig is not economy's to designate: `plan propose` drafts the `explore`
+  -- template from state stock.metal) and the LLM once a year. Run 10 (Handlelock): 8 iron bars stayed for years while
+  -- 20 soldiers wanted 60+ (worn 38-53 %), and the old rule waited for 0 spare bars, so this never fired
   local ex = Mt.explore
-  if ex and (r.inv.ore or 0) == 0 and (r.gear.metal_short or have(r, 'bars') < bars_want) and
-     left(c, r, 'bars') == 0 and phase_ok(K, Mt.from_phase) then
+  local short = r.gear.metal_short or r.gear.bars_short > 0 or have(r, 'bars') < bars_want
+  if ex and (r.inv.ore or 0) == 0 and short and phase_ok(K, Mt.from_phase) then
     r.route.bars = 'explore'
     local e = r.p.explore
     if r.now - (math.tointeger(e.req) or -1e12) >= (ex.request_every or 100800) then
       e.req = r.now
-      K.emit('PROJECT_REQUEST', 'B', 'exploration dig for ore (no ore, no bars: soldiers and moods need metal)',
-             {tpl = ex.tpl or 'explore', n = 1, why = 'ore'})
+      K.emit('PROJECT_REQUEST', 'B', string.format('exploration dig for ore (no ore, %d bars, %d more wanted: soldiers '
+                                                   .. 'and moods need metal)', have(r, 'bars'), r.gear.bars_short),
+             {tpl = ex.tpl or 'explore', n = 1, why = 'ore', bars = have(r, 'bars'), short = r.gear.bars_short})
     end
     if r.now - (math.tointeger(e.dec) or -1e12) >= (ex.decide_every or 403200) then
       e.dec = r.now
-      K.emit('DECISION_NEEDED', 'A', string.format('metal: no ore, %d bars; %d forge jobs and %d bars for moods wanted',
-                                                   r.inv.bars or 0, r.gear.metal_jobs, bars_want),
-             {id = 'metal', q = 'no ore or bars: exploration dig into revealed stone (digexp pattern), or trade.want bar:iron/bar:copper?'})
+      K.emit('DECISION_NEEDED', 'A', string.format('metal: no ore, %d bars; %d forge jobs, %d bars for the soldiers and '
+                                                   .. '%d for moods wanted', have(r, 'bars'), r.gear.metal_jobs,
+                                                   r.gear.bars_short, bars_want),
+             {id = 'metal', q = 'no ore: plan propose drafts tpl explore (stair shaft + side tunnels below the core) '
+                                .. 'each season; trade.want bar:iron first?'})
     end
   end
 end
@@ -3183,6 +3235,7 @@ function T.plan(K, c, r)
   r.gear = gear_pre(K, c, r, 0)
   r.targets.leather = target(K, c, r, 'leather') + (phase_ok(K, c.leather.from_phase) and r.gear.leather or 0)
   r.hunt, r.hunt_why = hunt_want(K, c, r)
+  st.hunt = {n = r.hunt, why = r.hunt_why}          -- M.route (care's MOOD_RISK names the leather route)
   r.fish, r.fish_why = fish_want(K, c, r)
   r.gear = gear_pre(K, c, r, r.hunt)
   -- priority: needs (moods) first, then drink and food, then soldiers, then stock
@@ -4248,8 +4301,14 @@ end
 function T.finish(K, c, r)
   if r.day then
     r.p.last_day = r.start
+    -- Run 10: the classes a strange mood missed within leather.memory_days (state stock.mood_miss, plan propose/check)
+    local miss = {}
+    for key in pairs(r.p.mseen) do
+      if M.mood_missed(c, r.p, key, r.now) and #key <= 12 then miss[#miss + 1] = key end
+    end
+    table.sort(miss)
     st.out = {drink_d = r.days.drink_d, food_d = r.days.food_d, meals = r.inv.meal_kinds,
-              starving = st.starving or 0, idle = st.idle or 0}
+              starving = st.starving or 0, idle = st.idle or 0, mood_miss = {table.unpack(miss, 1, math.min(8, #miss))}}
   end
   K.persist.touch('m.economy')
 end
@@ -4309,6 +4368,39 @@ local function route_of(key, inv, f)
     return false, 'no ore: exploration dig or trade'
   end
   return false, 'no route: mining/trade'
+end
+
+-- Run 10 (Handlelock: a fey mood died for two leather while no tannery stood): what supplies a mood class now and what
+-- blocks it, for care's MOOD_RISK text, e.g. 'no tannery (asked), hunt: no bolts, butcher, trade.want leather';
+-- '' for an unknown key
+function M.route(K, key)
+  key = key_of(key)
+  if not KEYS[key] then return '' end
+  local inv, f, c = K.census.i or {}, st.f or {}, M.conf(K)
+  local sup = st.sup or {route = {}}
+  if key == 'leather' or key == 'hides' then
+    local parts, rl = {}, tostring(sup.route.leather or '')
+    if not ws_any(f, (c.leather or {}).ws) then parts[1] = rl:find('^no tannery') and rl or 'no tannery'
+    elseif (inv.hides or 0) > 0 then parts[1] = string.format('tan %d hides', inv.hides) end
+    local h, hn = st.hunt or {}, st.hunters or 0
+    if (inv.w_xbow or 0) + (inv.w_bow or 0) == 0 then parts[#parts + 1] = 'hunt: no crossbow'
+    elseif st.no_ammo then parts[#parts + 1] = 'hunt: no bolts'
+    elseif hn > 0 then parts[#parts + 1] = string.format('hunt: %d hunter%s', hn, hn == 1 and '' or 's')
+    elseif h.why == 'no game' then parts[#parts + 1] = 'hunt paused (no game)'
+    elseif h.why == 'mode' then parts[#parts + 1] = 'hunt: not in ' .. tostring(K.mode())
+    else parts[#parts + 1] = 'hunt' end
+    parts[#parts + 1] = 'butcher'
+    parts[#parts + 1] = 'trade.want leather'
+    return table.concat(parts, ', ')
+  elseif key == 'bars' then
+    if (inv.ore or 0) > 0 then
+      return ws_any(f, (c.metal or {}).smelter) and string.format('smelt %d ore', inv.ore)
+             or string.format('%d ore, no smelter', inv.ore)
+    end
+    return 'no ore: explore dig (plan), trade.want bar:iron'
+  end
+  local _, txt = route_of(key, inv, f)
+  return tostring(sup.route[key] or txt)
 end
 
 function M.need(K, key, n, who, days)
@@ -4429,6 +4521,16 @@ function M.state(K)
   if o then
     r.stock = {drink_d = o.drink_d, food_d = o.food_d, meals = o.meals}
     r.labor = {starving = o.starving, idle = math.max(0, math.min(100, o.idle))}
+    -- Run 10 (plan propose/check: ore exploration and leather as plan goals): metal ore boulders, bars and leather
+    -- (care's forbidden reserve included), the metal route ('explore' = no ore while metal is wanted) and the classes a
+    -- strange mood missed within leather.memory_days
+    local inv, sup = K.census.i or {}, st.sup or {}
+    local held, route = sup.held or {}, sup.route or {}
+    r.stock.ore = math.max(0, math.tointeger(inv.ore) or 0)
+    r.stock.bars = math.max(0, (math.tointeger(inv.bars) or 0) + (math.tointeger(held.bars) or 0))
+    r.stock.leather = math.max(0, (math.tointeger(inv.leather) or 0) + (math.tointeger(held.leather) or 0))
+    r.stock.metal = tostring(route.bars or ''):sub(1, 24)
+    if o.mood_miss and #o.mood_miss > 0 then r.stock.mood_miss = {table.unpack(o.mood_miss)} end
   end
   local od = st.orders
   if od then r.orders = {n = od.n or 0, bad = od.bad or 0, stuck = od.stuck or 0} end   -- FR-01/FR-39

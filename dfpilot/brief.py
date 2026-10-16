@@ -113,6 +113,16 @@ def line_head(ctx: Ctx) -> str:
             + f" hb {fmt_age(ctx.hb_age)}")
 
 
+def line_save(save_dir: Path, now: float | None = None) -> str:
+    """Run 10: the last `dfllm save` failed (<save>/quicksave.json ok 0, within a day): the game is not saved."""
+    from .save import read_record
+    rec = read_record(save_dir)
+    now = time.time() if now is None else now
+    if rec is None or rec["ok"] or now - rec["wall"] > 86400:
+        return ""
+    return f"QUICKSAVE FAILED {fmt_age(max(0.0, now - rec['wall']))} ago: {clip(rec['why'], 120)}"
+
+
 def line_guard(save_dir: Path) -> str:
     """FR-68: the stop guard `dfllm stop` left running in a dangerous mode (<save>/guard.json)."""
     g, age = files.read_guard(save_dir)
@@ -239,7 +249,12 @@ def line_supply(ctx: Ctx) -> str:
         out.append("stock " + " ".join(
             f"{k[:-2]} {st[k]}d" + ("!" if k in lo else "") for k in ("drink_d", "food_d") if k in st)
             + (f" meals {st['meals']}" if "meals" in st else "")
-            + (f" water {'ok' if st['hosp_water'] else 'NO'}" if "hosp_water" in st else ""))
+            + (f" water {'ok' if st['hosp_water'] else 'NO'}" if "hosp_water" in st else "")
+            # Run 10: the ore search and the leather a mood missed (plan propose/check read them too)
+            + (f" ore {st['ore']} bars {st.get('bars', '?')}" + (" (explore)" if st.get("metal") == "explore" else "")
+               if "ore" in st else "")
+            + (f" leather {st['leather']}" if "leather" in st else "")
+            + (f" moods missed {','.join(st['mood_miss'])}" if st.get("mood_miss") else ""))
     c = s.get("care")
     if c:
         out.append(f"stress {c['stressed_pct']}% naked {c['naked']} ghosts {c['ghosts']} corpses {c['corpses_old']}"
@@ -336,7 +351,7 @@ def _no_state(ctx: Ctx) -> str:
 # ---------------------------------------------------------------- status
 def status_text(save_dir: Path) -> str:
     ctx = Ctx(save_dir, full=False)
-    lines = [line_head(ctx), line_guard(save_dir), files.follow_off(save_dir)]   # FR-68 guard, FR-29 follow
+    lines = [line_head(ctx), line_guard(save_dir), files.follow_off(save_dir), line_save(save_dir)]   # FR-68, FR-29
     if ctx.state is None:
         lines.append(_no_state(ctx))
     else:
@@ -450,6 +465,9 @@ def brief_text(save_dir: Path, budget: int = BRIEF_TOKENS) -> str:
     off = files.follow_off(save_dir)               # FR-29
     if off:
         head.append(off)
+    qs = line_save(save_dir)                       # Run 10: the game is not saved
+    if qs:
+        head.append(qs)
     if ctx.state is None:
         head.append(_no_state(ctx))
     else:

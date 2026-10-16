@@ -190,7 +190,8 @@ C.STATE_OWNERS = {
   ['pop.cit'] = 'sense', ['pop.adults'] = 'sense', ['pop.soldiers'] = 'sense',
   ['pop.cap'] = 'readiness', ['pop.gate_cap'] = 'readiness', ['ready.*'] = 'readiness',
   ['stock.drink_d'] = 'economy', ['stock.food_d'] = 'economy', ['stock.meals'] = 'economy',
-  ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['labor.*'] = 'economy', ['orders.*'] = 'economy',
+  ['stock.ore'] = 'economy', ['stock.bars'] = 'economy', ['stock.leather'] = 'economy', ['stock.metal'] = 'economy',
+  ['stock.mood_miss'] = 'economy', ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['labor.*'] = 'economy', ['orders.*'] = 'economy',
   ['threat.*'] = 'threat', ['bridges'] = 'gate', ['owners.*'] = 'arbiter',
   ['mil.*'] = 'military', ['trade.*'] = 'trade',
   ['clock.*'] = 'arbiter', ['alarm.*'] = 'reflex', ['lever.*'] = 'gate',
@@ -296,7 +297,9 @@ C.STATE_SPEC = obj({
                audit = obj({ok = FLAG, age = int(-1), min_traps = NAT}), fail = arr(str(24), 0, 8)},
               {open = int(-1), ents = arr(str(24), 0, 3), dhold = str(24),     -- FR-65
                route = str(60)}),          -- the last audit's first attacker-route finding (bypass, refuge)
-  stock = obj(nil, {drink_d = NAT, food_d = NAT, meals = NAT, hosp_water = FLAG}),
+  -- Run 10: ore/bars/leather stock, the metal route and the classes moods missed (plan propose/check supply goals)
+  stock = obj(nil, {drink_d = NAT, food_d = NAT, meals = NAT, hosp_water = FLAG, ore = NAT, bars = NAT, leather = NAT,
+                    metal = str(24), mood_miss = arr(str(12), 0, 8)}),
   care = obj({stressed_pct = PCT, naked = NAT, ghosts = NAT, corpses_old = NAT, tombs_free = NAT, moods = NAT},
              {coffins = obj({want = NAT, short = NAT, stock = NAT, order = NAT, proj = str(40)}),
               died = obj(nil, nil, NAT)}),

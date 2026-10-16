@@ -89,6 +89,55 @@
   `dfllm status` shows `DEEP destroyers` and `alert Tiefe+`, every squad's station is `stations.b2` (138,127,122; no `stations.core` in a Run 10 manifest); a bridge
   they destroy gives one BRIDGE_DESTROYED and `bridges ... DESTROYED`, then no STRANDED or GATE_FAIL naming it; with trolls
   in sight `inspect census` shows `h.bd` > 0 (if 0, the raws field has another name in 53.16: note it in BUG-030).
+## Ore search and leather as plan goals, verified quicksave (2026-10-16; offline, live-untested)
+- Live Run 10 (Handlelock): iron stayed at 8 bars for years, three caravans a year brought none, 20 soldiers wore 38-53 %;
+  economy's explore route waited for 0 spare bars and never fired, and nothing consumed its request. A fey mood died for two
+  leather (no tannery, no hunters). After a graphics crash `dfhack-run quicksave` wrote nothing (no error, empty output) and
+  the restart loaded a state 30 game days older.
+- **Ore (economy + plan):** the metal route is `explore` while no metal ore boulders lie in the fort and the soldiers' metal
+  slots want more bars than it has (`gear.bars_short`) or the bars are below the mood stock; PROJECT_REQUEST explore carries
+  `bars`/`short`, DECISION_NEEDED metal points at the plan. New state `stock.ore/bars/leather/metal/mood_miss` (economy).
+  New template `explore` (`dfpilot/bp/mine.py`): a 1-wide stair shaft `depth` (12) levels down from the deepest public core
+  floor with W/E/S side tunnels of `arm` (6) tiles every `every` (3) levels and at the bottom; the ranking never starts on or
+  below the refuge level and never reaches a level in `p.avoid` (absolute z, e.g. known aquifer levels) or one with a
+  revealed cavern/damp/warm mark; the runner's damp/warm/cavern stop applies as for every dig. `plan propose` drafts it as
+  the first new build of every season from the current one (fitting `depth` 12/9/6/4/2 to the sites snapshot) and adds
+  `bar:iron` to `trade.want`; `plan check` refuses a plan with neither explore nor a `bar:*` want while the ore goal holds
+  (no ore and route explore, or worn < 80 %) and warns when only the trade want covers it.
+- **Leather (economy + care + plan):** a standing floor of 2 leather (`reserve.leather`); classes a mood missed are kept a
+  year (`leather.memory_days`); a missed leather with 0 in the fort hunts like an open need (through the no-game pause);
+  without a tanner's shop while hides lie or a mood missed leather economy asks for the `workshops` project
+  (PROJECT_REQUEST why=tannery, follow places it; every 14 days at most). MOOD_RISK names the route (`economy.route`, new
+  `d.route`: `route leather: no tannery (asked), hunt: no bolts, butcher, trade.want leather`). `plan propose` puts
+  `leather` first in `trade.want`, `plan check` warns without it. `dfllm status` shows `ore N bars N (explore) leather N
+  moods missed ...`.
+- **Quicksave:** new `dfllm save` (`dfpilot/save.py`): DFHack `quicksave` through dfhack-run, then up to 120 s of 1 s polls
+  of DF's save folder: verified only when a fortress save folder (marker of this fort) holds a `world.sav` newer than the
+  call and DF is done writing. Refused in SIEGE/BREACH/DRILL, without ACTIVE, within 600 s of a verified save or 120 s of
+  a failed one. Every attempt -> `<save>/quicksave.json` (kind `quicksave`, CONTRACTS §9.19) and cli.log; a failure prints
+  `QUICKSAVE_FAILED: ...` (exit 1), `dfllm status`/`brief` show `QUICKSAVE FAILED ... ago`, and `dfllm follow` wakes
+  QUICKSAVE_FAILED (follow's own wake, RULES §7). `tools/run_watch.py` saves through it once a game year (at most 3
+  attempts, `saved_year` only on a verified save). The hook still blocks a bare `dfhack-run quicksave` and names `dfllm save`.
+- Contracts: state `stock.*` keys (schema + contract.lua), event d `MOOD_RISK.route`, `PROJECT_REQUEST.bars/short`, kind
+  `quicksave`; config `economy.reserve.leather` 2, `economy.leather.request_days/memory_days`; CONTRACTS §8, §9.3, §9.19,
+  §12, §15, DESIGN §5.5/§5.9, RULES §1.2, §3, §7, §10.
+- Tests: `tests/lua/test_economy_chains.lua` (8 bars for 20 soldiers -> explore and state; a missed leather mood -> hunting
+  through the pause, tannery requests, route), `tests/lua/test_care_moods.lua` (MOOD_RISK route),
+  `tests/bp/test_bp_explore.py`, `tests/test_plan_supply.py`, `tests/test_save.py` (verified, the Run 10 empty case, another
+  fort's save, a save in progress, refusals, follow wakes, run_watch, hook, status).
+- **Live check / How to use:**
+  - After the next load or `dfhack-run dfllm boot` (the new Lua), `dfllm status`: the stock line shows `ore 0 bars 8 (explore)` in a fort
+    without ore; `dfllm events --type PROJECT_REQUEST` shows `explore why=ore` once a season.
+  - Year review: `dfllm plan propose y.json` drafts `explore@S1` per season (and `bar:iron`, `leather` first after a
+    leather mood); the propose output names the fitted depth (`explore: depth 12 at [x,y,z] ...`); `dfllm plan check
+    y.json` lists the placement; `dfllm plan apply y.json`. Without a plan entry: `dfllm bp sites explore`, then
+    `dfllm cmd bp.place '{"tpl":"explore","site":"S1","p":{"depth":12,"avoid":"113"}}'` (`avoid` = levels known to be
+    aquifer). Watch for BREACH_STOP (damp/cavern) on the project; ore shows as `ore N` in status and smelting starts.
+  - Leather: after a MOOD_RISK naming leather, `dfllm cmd inspect '{"what":"workload"}'` / kern.log for hunters (`Hunters`
+    detail 1-2 with crossbow and bolts) and a `workshops why=tannery` request; trade.want `leather` first.
+  - Quicksave: `python -m dfpilot save` -> `quicksave ok: autosave N written S s after the call` or
+    `QUICKSAVE_FAILED: ...` (then tell Gordon; save by hand). `--dry-run` shows what it would do; `--min-gap 0` forces it.
+    Check once by hand that DF 53.16's `quicksave` lands in an `autosave N` folder or the loaded save's folder (both count).
 
 ## PREDATOR only near the citizens (2026-10-16; offline, live-untested)
 - Live Run 10 y421: four lockdowns in ten game days (clock 30 t/s, civilians confined) for animals at the map edge 60-120 tiles

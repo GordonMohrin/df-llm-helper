@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-from . import defense, fortcore, rooms
+from . import defense, fortcore, mine, rooms
 from .primitives import BRIDGE_KEYS, Plan, Xform, transform_manifest
 
 MAX_W = 40
@@ -22,7 +22,8 @@ TEMPLATES = {"fortcore": (fortcore.build, fortcore.PARAMS, "doctrine fortress co
                     (f.__doc__ or n).strip().split("\n")[0])
                 for n, f in rooms.BUILD.items()},
              **{n: (f, dict(defense.PARAMS.get(n, {})), (f.__doc__ or n).strip().split("\n")[0])
-                for n, f in defense.BUILD.items()}}
+                for n, f in defense.BUILD.items()},
+             **{n: (f, dict(mine.PARAMS[n]), (f.__doc__ or n).strip().split("\n")[0]) for n, f in mine.BUILD.items()}}
 ATTACHED = dict(defense.ATTACHED)     # tpl -> the template whose tiles it is built against (cmd occupancy)
 FREE = frozenset(defense.FREE)        # templates that build only on existing open tiles (no occupancy clash)
 _BURROW_RE = r"^[A-Za-z0-9_+-]{0,20}$"

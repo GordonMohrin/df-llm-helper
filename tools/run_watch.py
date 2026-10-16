@@ -9,7 +9,9 @@ Read only: `python -m dfpilot` (status, census) and tools/run_probe.lua (counts,
 The goals are the ones Gordon set (runs/ZIELE-GORDON.md, runs/ZIELE-PRIORITAETEN.md). GOALS is ordered by
 priority; the FOCUS is the first goal that is not met. If the focus has not changed for 3 rounds the report says
 ESCALATE: stop repeating the same step, find the cause (job diagnosis, material, labour, path).
-The yearly quicksave is done here too (once per game year, spring).
+The yearly quicksave is done here too (once per game year, spring) through `python -m dfpilot save` (Run 10: a
+quicksave after a graphics crash wrote nothing; the CLI checks the save folder's file times, records the attempt in
+<save>/quicksave.json and follow wakes QUICKSAVE_FAILED). A failed save is retried next round, at most SAVE_TRIES a year.
 """
 import json
 import os
@@ -27,6 +29,7 @@ DIGPROG = os.path.join(os.path.dirname(JOURNAL), "dig_program.json")
 CLI = [sys.executable, "-m", "dfpilot"]
 REPO = os.path.dirname(HERE)
 
+SAVE_TRIES = 3                 # verified-quicksave attempts per game year (the CLI rate-limits retries itself)
 SURVIVAL = ("connect", "seeds", "intruders", "thirst/hunger", "drink", "food", "water", "dead")
 MOODABLE = ["W_Carpenters", "W_Masons", "W_Craftsdwarfs", "W_Mechanics", "W_Jewelers", "W_Leatherworks", "W_Clothiers",
             "W_Bowyers", "W_Still", "W_Kitchen", "W_MetalsmithsForge", "W_Loom"]
@@ -38,6 +41,17 @@ def run(cmd, timeout=90):
         return r.stdout
     except Exception as e:  # noqa: BLE001
         return ""
+
+
+def save_verified():
+    """(exit code, last output line) of `python -m dfpilot save --by cli`: 0 verified, 1 failed (QUICKSAVE_FAILED),
+    3 refused, other: the CLI did not run."""
+    try:
+        r = subprocess.run(CLI + ["save", "--by", "cli"], capture_output=True, text=True, timeout=300, cwd=REPO)
+    except Exception as e:  # noqa: BLE001
+        return 2, f"dfllm save did not run: {e}"
+    lines = (r.stdout or "").strip().splitlines()
+    return r.returncode, lines[-1] if lines else (r.stderr or "").strip()[-200:]
 
 
 def probe():
@@ -332,12 +346,27 @@ def report(full=True, journal=False):
         print(f"FOKUS: {focus[1]} ({focus[3]})\n  naechster Schritt: {focus[4]}{esc}")
     else:
         print("FOKUS: alle Ziele erreicht -> naechste Stufe (Wachstum, Prunkfort)")
-    # yearly quicksave (spring, once per game year)
+    # yearly quicksave (spring, once per game year), verified by the save folder (dfpilot/save.py, Run 10)
     if isinstance(year, int) and st.get("saved_year") != year and isinstance(tick, int) and tick < 100800 and not s.get("paused"):
-        run([RUN, "quicksave"], 90)
-        run([sys.executable, os.path.join(HERE, "run_plan.py")], 180)  # YEAR_REVIEW: apply the standing plan
-        st["saved_year"] = year
-        print(f"  Quicksave Jahr {year} ausgefuehrt")
+        if st.get("planned_year") != year:
+            run([sys.executable, os.path.join(HERE, "run_plan.py")], 180)  # YEAR_REVIEW: apply the standing plan
+            st["planned_year"] = year
+        tries = st.get("save_tries") if isinstance(st.get("save_tries"), dict) else {}
+        n = int(tries.get(str(year), 0))
+        if n < SAVE_TRIES:
+            code, out = save_verified()
+            n += 0 if code == 3 else 1       # a refusal (rate limit, siege) is no attempt
+            st["save_tries"] = {str(year): n}
+            if code == 0:
+                st["saved_year"] = year
+                print(f"  Quicksave Jahr {year} verifiziert: {out}")
+            elif code == 3:
+                print(f"  Quicksave Jahr {year} aufgeschoben: {out}")
+            else:
+                print(f"  !! ALARM Quicksave Jahr {year} FEHLGESCHLAGEN (Versuch {n}/{SAVE_TRIES}): {out}")
+        elif st.get("save_alarm") != year:
+            st["save_alarm"] = year
+            print(f"  !! ALARM Quicksave Jahr {year}: {SAVE_TRIES} Versuche ohne neuen Spielstand - von Hand speichern")
     if journal and isinstance(year, int) and st.get("journal_key") != f"{year}{season}":
         st["journal_key"] = f"{year}{season}"
         row = (f"{year} {season} | Pop {s['pop']} | Food {s['food_d']}d | Drink {s['drink_d']}d | Stress {s['stress']}% | "
