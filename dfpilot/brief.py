@@ -105,9 +105,46 @@ def line_head(ctx: Ctx) -> str:
     hold = (f" pause:{own['pause']}" if own.get("pause") else "") + (" tempo:inbox" if own.get("tempo") == "inbox" else "")
     al = s.get("alarm")
     defcon = f"DEFCON {al['defcon']}" if al else "DEFCON ?"     # FR-53: first on line 1
+    unready = " UNREADY" if unready_r0(ctx) else ""            # FR-65: never a plain "PEACE" while R0 fails
     return (f"{defcon} | {ctx.save}{df} {fmt_tick(ctx.now_tick())} {mode}" + (f"({_ago(ctx, since)})" if since else "")
-            + (f" {s['phase']}" if "phase" in s else "") + f" {t.get('tps', '?')}t/s {run}{hold}"
+            + unready + (f" {s['phase']}" if "phase" in s else "") + f" {t.get('tps', '?')}t/s {run}{hold}"
             + f" hb {fmt_age(ctx.hb_age)}")
+
+
+def unready_r0(ctx: Ctx) -> dict | None:
+    """FR-65: the `ready` state while readiness is R0 (the siege readiness gate fails), else None."""
+    r = ctx.s.get("ready")
+    return r if isinstance(r, dict) and r.get("lvl") == 0 else None
+
+
+R0_FORTCORE = ("no_outer", "no_inner", "bridge:", "levers:", "no_kern", "no_refuge")
+
+
+def line_unready(ctx: Ctx) -> str:
+    """FR-65: 'SIEGE UNREADY (R0): <blockers> | <n> ways in without door or bridge: x,y,z kind ... | traps N |
+    next: ...' (DESIGN §5.4 lists the blockers)."""
+    r = unready_r0(ctx)
+    if r is None:
+        return ""
+    fails, a = r.get("fail") or [], r.get("audit") or {}
+    out = [f"SIEGE UNREADY (R0): {','.join(fails) or '?'}"]
+    n, ents = r.get("open", -1), r.get("ents") or []
+    if n > 0:
+        out.append(f"{n} way{'s' if n != 1 else ''} in without door or bridge: " + ", ".join(ents)
+                   + (", ..." if n > len(ents) else ""))
+    else:
+        out.append("ways in: not checked yet" if n < 0 else "ways in: all with a door or bridge")
+    out.append(f"traps {a.get('min_traps', 0)}" if a.get("age", -1) >= 0 else "traps ? (no audit)")
+    nxt = []
+    if a.get("age", -1) < 0 or any(f in ("audit", "audit_old") for f in fails):
+        nxt.append("dfllm audit")
+    if n > 0:
+        nxt.append("wall/door the open ways in (inspect entrances, bp.place)")
+    if any(f.startswith(R0_FORTCORE) for f in fails):
+        nxt.append("build the missing fortcore pieces (plan)")
+    if nxt:
+        out.append("next: " + "; ".join(nxt))
+    return _join(out)
 
 
 def line_alarm(ctx: Ctx) -> str:
@@ -125,7 +162,8 @@ def line_alarm(ctx: Ctx) -> str:
             out.append(f"lockdown {al['why']}")
             if "doors" in al:                  # BUG-012: doors forbidden, and those waiting for citizens outside
                 out.append(f"doors {al['doors']} forbidden" + (f", {al['dwait']} waiting for {al.get('dout', 0)}"
-                                                               f" citizens outside" if al.get("dwait") else ""))
+                                                               f" citizens outside" if al.get("dwait") else "")
+                           + (f", {al['dref']} refused (flag reset)" if al.get("dref") else ""))   # BUG-015
         if al["unacked"]:
             out.append(f"{al['unacked']} interrupts unacked (last #{al['last']}, acked #{al['ack']}): dfllm ack")
         eta = al.get("eta", -1)
@@ -149,9 +187,16 @@ def line_pop(ctx: Ctx) -> str:
     r = s.get("ready")
     if r:
         a = r["audit"]
-        out.append(f"R{r['lvl']}" + (f" fail:{','.join(r['fail'])}" if r["fail"] else " ok")
-                   + f" worn {r['worn']}% cv {r['cv']} drill {fmt_ticks(r['drill_age'])}"
-                   + f" audit {'ok' if a['ok'] else 'FAIL'} {fmt_ticks(a['age'])} traps {a['min_traps']}")
+        if r["lvl"] == 0:
+            head = "R0 UNREADY"                # the blockers stand in the SIEGE UNREADY line (FR-65)
+        else:
+            head = f"R{r['lvl']}" + (f" fail:{','.join(r['fail'])}" if r["fail"] else " ok")
+        drill = f"drill {fmt_ticks(r['drill_age'])}"
+        if r["drill_age"] < 0:                 # FR-65: say why no drill ran and how to run one
+            drill += (f" (auto: {r['dhold']}; run dfllm cmd drill)" if r.get("dhold") else " (run dfllm cmd drill)")
+        audit = (f"audit {'ok' if a['ok'] else 'FAIL'} {fmt_ticks(a['age'])}" if a["age"] >= 0
+                 else "audit never (run dfllm audit)")
+        out.append(f"{head} worn {r['worn']}% cv {r['cv']} {drill} {audit} traps {a['min_traps']}")
     return _join(out)
 
 
@@ -256,7 +301,8 @@ def status_text(save_dir: Path) -> str:
     if ctx.state is None:
         lines.append(_no_state(ctx))
     else:
-        lines += [line_alarm(ctx), line_pop(ctx), line_supply(ctx), line_def(ctx), line_proj(ctx), line_kern(ctx)]
+        lines += [line_unready(ctx), line_alarm(ctx), line_pop(ctx), line_supply(ctx), line_def(ctx), line_proj(ctx),
+                  line_kern(ctx)]
     return fit([[x for x in lines if x]], STATUS_TOKENS)
 
 
@@ -365,8 +411,8 @@ def brief_text(save_dir: Path, budget: int = BRIEF_TOKENS) -> str:
     if ctx.state is None:
         head.append(_no_state(ctx))
     else:
-        head += [x for x in (line_alarm(ctx), line_pop(ctx), line_supply(ctx), line_def(ctx), line_proj(ctx, 8),
-                             line_kern(ctx)) if x]
+        head += [x for x in (line_unready(ctx), line_alarm(ctx), line_pop(ctx), line_supply(ctx), line_def(ctx),
+                             line_proj(ctx, 8), line_kern(ctx)) if x]
     sections = [head]
     for title, lines in (("## plan", sec_plan(ctx)), ("## decisions open (ask Gordon)", sec_decisions(ctx)),
                          ("## class A, newest first", sec_class_a(ctx)),

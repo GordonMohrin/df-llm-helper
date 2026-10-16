@@ -90,6 +90,14 @@ yourself. After 10 minutes paused the agent gets a `DECISION_NEEDED pause` wake 
 `dfllm` command or `python -m dfpilot cmd <verb>` instead and never work around the hook. If nothing is ever
 blocked, check that the agent session started inside the clone (`.claude/settings.json`).
 
+**`status` says `UNREADY`, `audit never` or `drill never`.** The fort is at readiness R0: a siege would find it open
+(the second line names the blockers, the ways in without a door or bridge and the traps; the agent gets a
+`SIEGE_UNREADY` wake once a game month while it lasts). `audit never`: no path audit reached the kernel; keep
+`python -m dfpilot follow` running (`--no-auto` keeps the audit) or run `python -m dfpilot audit` once. `drill never
+(auto: <why>)`: drills start by themselves once `<why>` is fixed (e.g. `no bridges`: fortcore has no O1/B1 yet,
+`phase P3<P5`); `python -m dfpilot cmd drill` runs one by hand in peace. What each blocker means: `docs/v2/DESIGN.md`
+§5.4.
+
 **`follow` prints nothing for a long time.** Normal in peace. `python -m dfpilot status` and `doctor` show the
 fort and the speed at any time. A `heartbeat` older than 120 s in `status` means the kernel is not running: check
 that DF runs, the fort is loaded, then `dfhack-run dfllm status`.

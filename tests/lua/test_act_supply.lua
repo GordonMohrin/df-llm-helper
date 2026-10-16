@@ -116,4 +116,40 @@ T.test('item_flag: economy and military may unforbid (FR-23/25/46/50)', function
   T.eq((mk('trade').api.item_flag(5, 'forbid', false)), false)
 end)
 
+T.test('work_detail opts (Run 10): a specialist leaves the everybody details; equip only when asked', function()
+  local W = H.world{tag = 'wds', units = {{id = 7, citizen = true}}}
+  local MINE, CUT, HAUL, PLANT, FEED = 0, 1, 2, 3, 4
+  local function wd(name, labors, ids, mode)
+    local al = setmetatable({}, {__len = function() return 5 end})
+    for _, l in ipairs(labors) do al[l] = true end
+    return {name = name, assigned_units = kmock.vec(ids), allowed_labors = al, flags = {mode = mode}}
+  end
+  df.work_detail_mode = {EverybodyDoesThis = 1, OnlySelectedDoesThis = 3}
+  df.unit_labor = {FEED_WATER_CIVILIANS = FEED}
+  local miners, cutters = wd('Miners', {MINE}, {}, 3), wd('Woodcutters', {CUT}, {}, 3)
+  local planters, haulers = wd('Planters', {PLANT}, {7}, 1), wd('Haulers', {HAUL}, {7}, 1)
+  local movers, orderly = wd('Movers', {HAUL}, {7}, 3), wd('Orderlies', {FEED}, {}, 1)
+  df.global.plotinfo.labor_info = {work_details = kmock.vec{miners, cutters, planters, haulers, movers, orderly}}
+  df.global.plotinfo.equipment = {update = {weapon = false}}
+  local u = W.unit(7)
+  u.status = {labors = {[PLANT] = true, [HAUL] = true, [FEED] = true}}
+  u.uniform = {pickup_flags = {update = false}}
+  local env = mk('economy')
+  T.eq({env.api.work_detail('Miners', 7, true, {only = true, keep = {'FEED_WATER_CIVILIANS'}})}, {true, 'added'})
+  T.eq({u.status.labors[MINE], u.status.labors[PLANT], u.status.labors[HAUL], u.status.labors[FEED]},
+       {true, false, true, true}, 'PLANT off; HAUL from the selected Movers and the kept FEED stay')
+  T.eq({#planters.assigned_units, #haulers.assigned_units, #movers.assigned_units}, {0, 0, 1},
+       'out of the everybody details, still a selected mover')
+  T.eq({u.uniform.pickup_flags.update, df.global.plotinfo.equipment.update.weapon}, {false, false},
+       'no equipment request without opts.equip')
+  T.eq({env.api.work_detail('Miners', 7, false, {only = true})}, {true, 'removed'})
+  T.eq({u.status.labors[MINE], u.status.labors[PLANT]}, {false, true}, 'back to everybody work')
+  T.eq({env.api.work_detail('Woodcutters', 7, true, {equip = true})}, {true, 'added'})
+  T.eq({u.status.labors[CUT], u.uniform.pickup_flags.update, df.global.plotinfo.equipment.update.weapon},
+       {true, true, true}, '[live-untested] the equipment update request with the tool labor')
+  u.uniform.pickup_flags.update = false
+  T.eq({env.api.work_detail('Woodcutters', 7, true, {equip = true})}, {true, 'already'})
+  T.eq(u.uniform.pickup_flags.update, false, 'a member that has the labor is not asked again')
+end)
+
 T.done()

@@ -4,7 +4,9 @@
 -- lockdown while LOCKDOWN said "alert on Kern+"): siege owns the alert, seal picks the burrow, nothing writes false
 -- while the lockdown holds, and the text says what holds. BUG-012 ("0 entrances": a door one tile behind the east
 -- stair, three openings listed with "no door"): the doors come from seal's entrance routes, the openings without one
--- are named, and the undo after quiet opens exactly the doors the lockdown forbade.
+-- are named, and the undo after quiet opens exactly the doors the lockdown forbade. BUG-018 (the first real siege, 50 ->
+-- 1): the shaft opening has no door and leads into the hall, so no burrow is separated and the lockdown does not confine
+-- (the citizens flee); with a door behind the shaft (opts.shaft_door) BUG-011's interior burrow holds.
 local T = require('testlib')
 local SW = require('seal_world')
 local S = require('siege_world')
@@ -14,8 +16,9 @@ local Z = 5                                    -- the fort level; the surface is
 -- surface z 6: an open field x0-40 y0-24 (outside, reaches the map edge) with a down stair at 20,10 and the top of a
 -- shaft (up/down stair) at 30,13. Fort z 5: hall x2-12 y4-16 (beds, the citizens, Kern+), corridor A y10 x13-18
 -- to a door at 19,10 and the up stair at 20,10 (the opening: the door is one tile behind it), corridor B y13 x13-29
--- to the shaft at 30,13 (an opening without a door), a bedroom x2-4 y18-20 behind its door at 3,17. No drink and
--- no food anywhere: Kern+ and the interior burrow fail their audits (Run 9 behind BUG-001: "drink 0<45, food 2<45").
+-- to the shaft at 30,13 (an opening without a door; opts.shaft_door: a door at 29,13 behind it), a bedroom x2-4 y18-20
+-- behind its door at 3,17. No drink and no food anywhere: Kern+ and the interior burrow fail their audits (Run 9 behind
+-- BUG-001: "drink 0<45, food 2<45").
 local function fort(opts)
   opts = opts or {}
   local W = SW.new{persist = {manifest = {v = 2, burrows = {['Kern+'] = {role = 'kern'}}}}}
@@ -29,12 +32,14 @@ local function fort(opts)
   SW.draw(W, Z, {'+<'}, 19, 10)
   SW.fill(W, Z, 13, 13, 29, 13, '.')
   SW.draw(W, Z, {'X'}, 30, 13)
+  if opts.shaft_door then SW.draw(W, Z, {'+'}, 29, 13) end
   SW.draw(W, Z, {'+'}, 3, 17)
   SW.fill(W, Z, 2, 18, 4, 20, '.')
   SW.draw(W, Z, {'bb'}, 3, 5)
   SW.regroup(W)
   W.stair_door = W.dyn[SW.key(19, 10, Z)]
   W.room_door = W.dyn[SW.key(3, 17, Z)]
+  W.tile_items = {}                            -- 'x,y,z' -> item ids on the ground there (snapshot.items_at)
   for _, c in ipairs({{1, 5, 8}, {2, 6, 9}, {3, 7, 10}, {4, 8, 11}}) do
     W.add_unit{id = c[1], pos = {c[2], c[3], Z}, citizen = true, adult = true}
   end
@@ -45,11 +50,12 @@ local function fort(opts)
     W.alert_burrows = names
     return true, #names
   end)
-  W.act_result('door_forbid', function(id, on)
+  W.act_result('door_forbid', function(id, on, close)
     local b = W.buildings[id]
     if not b or not b.door_flags then return false, 'not a door' end
     local old = b.door_flags.forbidden
     b.door_flags.forbidden = on and true or false
+    if on and close == true then b.door_flags.closed = true end      -- act.lua (BUG-015 retry)
     return true, old
   end)
   W.paint_fn = W.act_results.burrow_tiles      -- seal_world's burrows screen (add + paint)
@@ -57,6 +63,16 @@ local function fort(opts)
   local snap = {name = 'snapshot', every = {ticks = 100}}
   snap.outside_near = require('dfllm.snapshot').outside_near
   function snap.far() return false end
+  snap.units_at = require('dfllm.snapshot').units_at
+  function snap.items_at(K, x0, y0, x1, y1, z)
+    local out = {}
+    for y = y0, y1 do
+      for x = x0, x1 do
+        for _, id in ipairs(W.tile_items[x .. ',' .. y .. ',' .. z] or {}) do out[#out + 1] = {id, x, y} end
+      end
+    end
+    return out
+  end
   for _, n in ipairs({'reflex', 'seal'}) do package.loaded['dfllm.' .. n] = nil end
   S.load(W, {S.military(), snap, require('dfllm.reflex'), require('dfllm.seal')})
   W.run(3000, {skip = 9})                      -- the first audit, the interior burrow painted, the entrance check
@@ -80,17 +96,26 @@ T.test('the fort: Kern+ and the interior burrow fail their audits; the entrance 
   T.ok(r.ok, r.msg)
   T.eq({r.data.burrows['Kern+'].ok, r.data.burrows['Innen+'].ok, r.data.burrows['Innen+'].exists}, {0, 0, 1})
   T.ok(r.data.burrows['Kern+'].why:find('drink 0<4', 1, true), r.data.burrows['Kern+'].why)
+  -- BUG-018: the shaft (no door) leads into the hall; the interior burrow was painted without the tiles it reaches
+  T.eq({r.data.burrows['Kern+'].sep, r.data.burrows['Kern+'].open}, {0, {'30,13,5 stair_updown'}})
+  T.eq({r.data.burrows['Innen+'].sep, r.data.burrows['Innen+'].tiles}, {1, 12})
   T.eq(r.data.choice.ALERT.burrow, '', 'no burrow passes: no confinement outside a lockdown (FR-37)')
-  T.eq(r.data.choice.LOCKDOWN, {want = 'Kern+', burrow = 'Innen+'}, 'a lockdown keeps the interior burrow')
+  T.eq(r.data.choice.LOCKDOWN, {want = 'Kern+', burrow = '', flee = 1},
+       'BUG-018: the interior behind the doors is too small to keep, no dead end: no confinement')
   local e = W.inbox('inspect', {what = 'entrances'})
   T.eq({e.data.sealed, e.data.routes}, {false, 2})
   T.ok(e.msg:find('1 entrance door, 1 opening without one', 1, true), e.msg)
   T.eq(W.hidden_wg, 0)
+  -- a door behind the shaft too: Kern+ is separated (it still lacks drink and food), the lockdown keeps Innen+
+  local W2 = fort{shaft_door = true}
+  r = W2.inbox('inspect', {what = 'refuge'})
+  T.eq({r.data.burrows['Kern+'].sep, r.data.burrows['Kern+'].ok, r.data.burrows['Innen+'].sep}, {1, 0, 1})
+  T.eq(r.data.choice.LOCKDOWN, {want = 'Kern+', burrow = 'Innen+', level = 'HOLD'}, 'a lockdown keeps the interior burrow')
 end)
 
 T.test('BUG-011: the lockdown holds the civ alert on the interior burrow for many frame batches, never false, ' ..
        'and the text says so', function()
-  local W = fort()
+  local W = fort{shaft_door = true}
   local t0 = W.K.now().tick
   T.eq(#acts_since(W, 'civ_alert', 0), 0, 'PEACE: no alert before the arrival')
   W.event('INVASION', {id = 1})
@@ -131,7 +156,7 @@ end)
 
 T.test('BUG-011: no usable burrow at all: "alert: none (REFUGE_FAIL ...)", the alert stays off, the interior burrow ' ..
        'is painted at once and the alert follows without a flip', function()
-  local W = fort{no_paint = true}
+  local W = fort{no_paint = true, shaft_door = true}
   T.eq(W.inbox('inspect', {what = 'refuge'}).data.burrows['Innen+'].exists, 0, 'painting refused: no Innen+')
   local t0 = W.K.now().tick
   W.event('INVASION', {id = 2})
@@ -153,6 +178,42 @@ T.test('BUG-011: no usable burrow at all: "alert: none (REFUGE_FAIL ...)", the a
   while idx() == 0 and holding(W) and n < 40 do W.run(100, {skip = 9}); n = n + 1 end
   T.eq({idx(), W.alert_burrows}, {1, {'Innen+'}}, 'confined once the interior burrow exists')
   T.eq(#acts_since(W, 'civ_alert', t0, false), 0)
+end)
+
+T.test('BUG-018: an arrival with an open entrance into the hall: "alert: none (REFUGE_FAIL Kern+, citizens flee)"; a ' ..
+       'door lost during the lockdown turns the sounding alert off although the lockdown holds it', function()
+  local W = fort()
+  local t0 = W.K.now().tick
+  W.event('INVASION', {id = 6})
+  W.run(30, {skip = 9})
+  W.inbox('ack', {})
+  local arr = evs(W, 'ARRIVAL')[1]
+  T.ok(arr.msg:find('alert: none (REFUGE_FAIL Kern+, citizens flee)', 1, true), arr.msg)
+  T.ok(arr.d.alert:find('open to 1 entrance 30,13,5 stair_updown', 1, true), arr.d.alert)
+  T.eq(idx(), 0)
+  local f = evs(W, 'REFUGE_FAIL')
+  T.ok(#f >= 1 and f[#f].d.flee == 1 and f[#f].d.fallback == '', f[#f] and f[#f].msg)
+  for _ = 1, 10 do
+    W.run(100, {skip = 9})
+    T.eq(#acts_since(W, 'civ_alert', t0, true), 0, 'never sounded')
+  end
+  -- the shaft has a door, the lockdown confines to Innen+; the door is destroyed: an opening reaches Innen+ now
+  local W2 = fort{shaft_door = true}
+  W2.event('INVASION', {id = 7})
+  W2.run(30, {skip = 9})
+  W2.inbox('ack', {})
+  T.eq({idx(), W2.alert_burrows}, {1, {'Innen+'}})
+  local t1 = W2.K.now().tick
+  W2.dyn[SW.key(29, 13, Z)] = nil
+  SW.draw(W2, Z, {'.'}, 29, 13)
+  SW.regroup(W2)
+  W2.inbox('inspect', {what = 'entrances', key = 'refresh'})
+  W2.run(100, {skip = 9})
+  T.ok(holding(W2), 'the lockdown still holds the alert')
+  T.eq(idx(), 0, 'switched off: confined, the citizens would wait in the attackers\' path')
+  T.eq(#acts_since(W2, 'civ_alert', t1, false), 1)
+  local f2 = evs(W2, 'REFUGE_FAIL')
+  T.ok(#f2 >= 1 and f2[#f2].d.flee == 1 and f2[#f2].d.open[1] == '30,13,5 stair_updown', f2[#f2] and f2[#f2].msg)
 end)
 
 T.test('BUG-012: the door one tile behind the stair opening is forbidden, the shaft is named, the undo opens ' ..
@@ -204,7 +265,7 @@ T.test('BUG-012 safety: the door waits while a citizen is outside it, and is for
   T.eq(W.stair_door.door_flags.forbidden, false, 'not locked out')
   local a = W.state().alarm
   T.eq({a.doors, a.dwait, a.dout}, {0, 1, 1}, 'status: 1 door waiting for 1 citizen outside')
-  T.eq({idx(), W.alert_burrows}, {1, {'Innen+'}}, 'the civ alert calls him in meanwhile')
+  T.eq(idx(), 0, 'BUG-018: the shaft without a door leads into the hall, no separated burrow: no confinement')
   W.move(9, 20, 10, Z)                         -- on the stair: inside, but still on the porch outside the door
   W.run(100, {skip = 9})
   T.eq(W.stair_door.door_flags.forbidden, false, 'the porch is still outside the door')
@@ -278,6 +339,140 @@ T.test('BUG-012: a ramp opening with a door two tiles behind it on the level bel
   T.eq(#x.doors, 1, 'the door behind the hidden tile is never found')
   T.eq({x.doors[1].id, x.doors[1].pos, #x.open}, {door.id, {10, 22, Z}, 0})
   T.eq(W.hidden_wg, 0, 'no walk group of a hidden tile was read')
+end)
+
+-- BUG-015 (test fort y372: door 16970 behind the east stair, `b.door_flags.forbidden = true` read false one frame
+-- later, pants and shoes on its tile; ARRIVAL said "doors 1 forbidden", LOCKDOWN_END "0 doors opened"): DF's reset is
+-- modelled on the door itself: while `stuck()` holds, a forbidden flag set in one frame reads false in any later one
+local function resetting(W, b, stuck)
+  local raw, set_at = {}, nil
+  for k, v in pairs(b.door_flags) do raw[k] = v end
+  b.door_flags = setmetatable({}, {
+    __index = function(_, k)
+      if k == 'forbidden' and raw.forbidden and set_at ~= W.frame_n and stuck() then raw.forbidden = false end
+      return raw[k]
+    end,
+    __newindex = function(_, k, v)
+      raw[k] = v
+      if k == 'forbidden' and v then set_at = W.frame_n end
+    end})
+  return raw
+end
+
+local function forbids(W, id, on)
+  local r = {}
+  for _, a in ipairs(W.find_acts('door_forbid')) do
+    if a.args[1] == id and (on == nil or a.args[2] == on) then r[#r + 1] = a end
+  end
+  return r
+end
+
+T.test('BUG-015: a door whose flag DF resets is read back on the next pass, refused and named, tried once more ' ..
+       '(forbidden + closed) after the items left its tile; LOCKDOWN_END counts the doors really held', function()
+  local W = fort()
+  local door = W.stair_door
+  local key = '19,10,' .. Z
+  W.tile_items[key] = {1495335, 1495341}       -- pants and shoes on the door tile
+  local raw = resetting(W, door, function() return #(W.tile_items[key] or {}) > 0 end)
+  W.event('INVASION', {id = 15})
+  W.run(30, {skip = 9})
+  W.inbox('ack', {})
+  local arr = evs(W, 'ARRIVAL')[1]
+  T.ok(arr.msg:find('doors 1 forbidden', 1, true), 'commanded in the arrival step: ' .. arr.msg)
+  local p = evs(W, 'LOCKDOWN_PARTIAL')
+  T.eq(#p, 1, 'the next pass read the flag back')
+  T.ok(p[1].tick > arr.tick and p[1].tick - arr.tick <= 20, 'next pass: T+' .. (p[1].tick - arr.tick))
+  T.ok(p[1].msg:find(string.format('^partial lockdown: door %d %%(19,10,%d%%) refused %%(flag reset; 2 items, 0 units',
+       door.id, Z)), p[1].msg)
+  T.ok(p[1].msg:find('one retry (forbidden + closed) once that changes', 1, true), p[1].msg)
+  T.ok(p[1].msg:find('doors 0 held', 1, true), p[1].msg)
+  T.eq({p[1].cls, p[1].d.doors, p[1].d.refused, p[1].d.pos, p[1].d.retry, p[1].d.items},
+       {'A', 0, {door.id}, {19, 10, Z}, 1, 2})
+  local a = W.state().alarm
+  T.eq({a.doors, a.dref}, {0, 1}, 'status: 0 forbidden, 1 refused')
+  -- a second announcement (the arbiter's snatcher popup) names the refused door as a partial lockdown entry (the
+  -- whole text: the 200-byte event text drops the doors part behind clock and alert)
+  local ok, _, txt = W.K.call('reflex', 'announce', 'snatcher', 'Snatcher! Protect the children!', 'popup')
+  T.ok(ok and txt:find(string.format('doors 0 forbidden, partial lockdown: door %d (19,10,%d) refused ' ..
+       '(flag reset), stair_updown 30,13,%d has no door', door.id, Z, Z), 1, true), txt)
+  W.inbox('ack', {})
+  W.run(20, {skip = 9})
+  T.eq(#forbids(W, door.id, true), 1, 'no retry while the tile is unchanged')
+  -- the items are hauled away: the one retry, closed as well; the flag holds now
+  W.tile_items[key] = nil
+  W.run(60, {skip = 9})
+  local tries = forbids(W, door.id, true)
+  T.eq(#tries, 2)
+  T.eq({tries[2].args[2], tries[2].args[3]}, {true, true}, 'the retry asks for closed too')
+  W.run(30, {skip = 9})
+  T.eq(raw.forbidden, true)
+  a = W.state().alarm
+  T.eq({a.doors, a.dref}, {1, nil})
+  T.eq(#evs(W, 'LOCKDOWN_PARTIAL'), 1, 'one announcement')
+  local n = 0
+  while holding(W) and n < 80 do W.run(100, {skip = 9}); n = n + 1 end
+  W.run(300, {skip = 9})
+  local e = evs(W, 'LOCKDOWN_END')
+  T.eq(#e, 1)
+  T.ok(e[1].msg:find('; 1 doors opened$'), e[1].msg)
+  T.eq(e[1].d.doors, 1)
+  T.eq(raw.forbidden, false, 'the undo opened the door it held')
+end)
+
+T.test('BUG-015: a visitor in the doorway: refused with 1 unit there; he steps aside, the retry closes the door', function()
+  local W = fort{units = {{id = 77, pos = {19, 10, Z}, visitor = true, adult = true}}}
+  local door = W.stair_door
+  local raw = resetting(W, door, function() local u = W.unit(77)._m; return u.x == 19 and u.y == 10 end)
+  raw.closed = false                           -- open: he stands in it
+  W.event('INVASION', {id = 18})
+  W.run(30, {skip = 9})
+  W.inbox('ack', {})
+  local p = evs(W, 'LOCKDOWN_PARTIAL')[1]
+  T.ok(p and p.msg:find('refused (flag reset; 0 items, 1 units on or next to its tile)', 1, true), p and p.msg)
+  T.eq(p.d.units, 1)
+  W.run(100, {skip = 9})
+  T.eq(#forbids(W, door.id, true), 1, 'he still stands there')
+  W.move(77, 18, 10, Z)                        -- one step into the corridor: the tile changed
+  W.run(40, {skip = 9})
+  local tries = forbids(W, door.id, true)
+  T.eq({#tries, tries[2] and tries[2].args[3]}, {2, true}, 'retried and closed: nobody in the doorway now')
+  W.run(20, {skip = 9})
+  T.eq({raw.forbidden, raw.closed, W.state().alarm.doors, W.state().alarm.dref}, {true, true, 1, nil})
+end)
+
+T.test('BUG-015: a door that never holds is tried exactly twice; LOCKDOWN_END says 0 opened, 1 refused; the ' ..
+       'failed retry does not repeat LOCKDOWN_PARTIAL (cadence) and nothing is opened that was not held', function()
+  local W = fort()
+  local door = W.stair_door
+  local raw = resetting(W, door, function() return true end)
+  W.event('INVASION', {id = 16})
+  W.run(30, {skip = 9})
+  W.inbox('ack', {})
+  T.eq(#evs(W, 'LOCKDOWN_PARTIAL'), 1)
+  W.run(1100, {skip = 9})
+  T.eq(#forbids(W, door.id, true), 1, 'the tile never changed: no retry before DOOR_RETRY')
+  W.run(200, {skip = 9})
+  local tries = forbids(W, door.id, true)
+  T.eq(#tries, 2, 'the retry at DOOR_RETRY')
+  T.eq(tries[2].args[3], true)
+  W.run(1200, {skip = 9})
+  T.eq(#forbids(W, door.id, true), 2, 'never a third time')
+  T.eq(#evs(W, 'LOCKDOWN_PARTIAL'), 1, 'the failed retry is a log line within the cadence')
+  T.eq(W.state().alarm.dref, 1)
+  local n = 0
+  while holding(W) and n < 80 do W.run(100, {skip = 9}); n = n + 1 end
+  W.run(300, {skip = 9})
+  local e = evs(W, 'LOCKDOWN_END')
+  T.eq(#e, 1)
+  T.ok(e[1].msg:find('; 0 doors opened, 1 refused (flag reset)', 1, true), e[1].msg)
+  T.eq({e[1].d.doors, e[1].d.refused}, {0, 1})
+  T.eq(#forbids(W, door.id, false), 0, 'a refused door is never "opened"')
+  T.eq(raw.forbidden, false)
+  -- the next lockdown is a new episode: its refusal is told at once
+  W.event('INVASION', {id = 17})
+  W.run(30, {skip = 9})
+  W.inbox('ack', {})
+  T.eq(#evs(W, 'LOCKDOWN_PARTIAL'), 2)
 end)
 
 T.done()

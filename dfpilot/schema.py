@@ -417,11 +417,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "PERF_DEGRADED": ("A", "perf", _d(opt="tps:i base:i pct:i why:s")),
     "DECISION_NEEDED": ("A", "any", _d("id:s", "q:s")),
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
-    "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i")),
+    "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i missing:sa retry:i")),
     "YEAR_REVIEW": ("A", "kern", _d(opt="year:i")),
     "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa")),
     "HOSPITAL_DRY": ("A", "water", _d("why:s", "patients:i zone:i near:i recipe:s")),
-    "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i")),
+    "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i nosrc:sa")),
     # class A since Run 9 (an army walked in while these were digest-only): they wake at once
     "SIEGE_START": ("A", "siege", _d(opt="vis:i inv:i great:i why:s")),
     "INVASION": ("A", "threat", _d(opt="id:i")),
@@ -433,20 +433,30 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "LOCKDOWN": ("A", "reflex", _d("why:s", "n:i type:s raised:i doors:i alert:s clock:i")),
     "ORDER_BAD": ("A", "economy", _d("order:i job:s", "dropped:f")),
     "DEPOT_MISSING": ("A", "trade", _d(opt="civ:s planned:f proj:s stalled:f why:s")),
-    "CUTOFF": ("A", "seal", _d("cls:s n:i", "pos:p why:s grp:i main:i")),
+    # BUG-021: unit/upos/grp = a cut-off citizen and his walk group, at/agrp = a stock tile of the class and its group
+    "CUTOFF": ("A", "seal", _d("cls:s n:i", "pos:p why:s grp:i main:i unit:i upos:p at:p agrp:i")),
     "PERIMETER_BROKEN": ("A", "seal", _d("n:i", "pos:p kinds:sa requeued:i why:s")),
     "SEAL_LEAK": ("A", "seal", _d("routes:i", "pos:p bld:s state:s why:s")),
-    "REFUGE_FAIL": ("A", "seal", _d("burrow:s", "fallback:s why:s tiles:i inside:i mode:s")),
+    # BUG-018/019, FR-67: level of the fallback (SIEGE, SOFT, HOLD, BREACH, DEAD), flee (no separated burrow: no
+    # confinement), open (the entrances that reach the refused burrow, "x,y,z kind")
+    "REFUGE_FAIL": ("A", "seal", _d("burrow:s", "fallback:s why:s tiles:i inside:i mode:s level:s flee:f open:sa")),
     "AUTOLABOR_LEGACY": ("A", "baseline", _d("fixed:f", "why:s after:s")),
     # FR-64: >= 2 citizens died of dehydration or starvation within a month (the class-A twin of DEATH_CLUSTER)
     "DEATHS_PREVENTABLE": ("A", "care", _CLUSTER),
+    # FR-65: readiness R0 in PEACE: R1 blockers, the audit's own fails, ways in (seal), those without door or bridge
+    "SIEGE_UNREADY": ("A", "readiness", _d(opt="fails:sa afails:sa routes:i open:i ents:sa traps:i age:i")),
+    # BUG-015: an entrance door the lockdown forbade lost its forbidden flag before the next pass (refused)
+    "LOCKDOWN_PARTIAL": ("A", "reflex", _d("doors:i", "refused:ia pos:p retry:f items:i units:i")),
+    # BUG-023 / Run 10: tool detail members without their pick or axe while its jobs wait and free tools exist
+    "TOOL_BLOCKED": ("A", "economy", _d("detail:s tool:s n:i", "members:ia jobs:i days:i free:i bins:i reserved:i "
+                                                               "why:s who:s hint:s pos:p")),
     # BUG-027: a SIEGE/BREACH raise went ahead onto units on or next to the footprint (a hostile within force_near)
     "GATE_FORCED": ("A", "gate", _d("bridge:s", "units:ia hostile:i pos:p job:i")),
     # BUG-027: a unit died on or next to a bridge just pulled or moving (gate's move records, dfllm.deaths.bridge)
     "BRIDGE_CRUSH": ("A", "gate", _d("bridge:s unit:i", "bid:i pull:i t:i to:s how:s k:s pos:p")),
     "ALERT_START": ("B", "siege", _d(opt="vis:i")),
     "ALERT_END": ("B", "siege", _d(opt="vis:i")),
-    "LOCKDOWN_END": ("B", "reflex", _d(opt="why:s ticks:i doors:i")),
+    "LOCKDOWN_END": ("B", "reflex", _d(opt="why:s ticks:i doors:i refused:i")),
     "MOOD_START": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
     "MOOD_NEED": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
     "MOOD_END": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
@@ -575,7 +585,9 @@ STATE = Obj(
          "pop": Obj(opt={"cit": NAT, "adults": NAT, "soldiers": NAT, "cap": NAT, "gate_cap": NAT}),
          "ready": Obj(req={"lvl": Int(0, 3), "worn": PCT, "cv": NAT, "drill_age": Int(-1),
                            "audit": Obj(req={"ok": FLAG, "age": Int(-1), "min_traps": NAT}),
-                           "fail": Arr(Str(maxbytes=24), hi=8)}),
+                           "fail": Arr(Str(maxbytes=24), hi=8)},
+                      # FR-65: ways in without door or bridge (-1 unknown), the first of them, why no auto drill
+                      opt={"open": Int(-1), "ents": Arr(Str(maxbytes=24), hi=3), "dhold": Str(maxbytes=24)}),
          "stock": Obj(opt={"drink_d": NAT, "food_d": NAT, "meals": NAT, "hosp_water": FLAG}),
          "care": Obj(req={"stressed_pct": PCT, "naked": NAT, "ghosts": NAT, "corpses_old": NAT,
                           "tombs_free": NAT, "moods": NAT},
@@ -600,7 +612,8 @@ STATE = Obj(
          "clock": Obj(req={"cap": NAT, "orig": NAT, "ts": Int(-1, 1000), "held": FLAG, "why": Str(maxbytes=24)}),
          # FR-53 interrupt channel (reflex): DEFCON 1 (worst) .. 5, unacked interrupts, last/acked event n
          "alarm": Obj(req={"defcon": Int(1, 5), "unacked": NAT, "last": NAT, "ack": NAT, "lock": FLAG,
-                           "why": Str(maxbytes=24)}, opt={"eta": Int(-1), "doors": NAT, "dwait": NAT, "dout": NAT}),
+                           "why": Str(maxbytes=24)}, opt={"eta": Int(-1), "doors": NAT, "dwait": NAT, "dout": NAT,
+                                                       "dref": NAT}),
          # FR-55 lever latency (gate): last pull -> wanted state, in s and ticks (-1 never); pending own pulls
          "lever": Obj(req={"lat_s": Int(-1), "lat_t": Int(-1), "pend": NAT, "wait_s": NAT}),
          "alert": Obj(req={"want": Str(maxbytes=24), "burrow": Str(maxbytes=24), "tiles": NAT, "inside": NAT,

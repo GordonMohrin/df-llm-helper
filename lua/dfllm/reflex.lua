@@ -20,6 +20,11 @@
 --          (seal.door_outside; the civ alert calls him in), at most ALERT_AFTER ticks, not at all with a visible
 --          hostile within DOOR_NEAR of it: nobody is locked out with the army ("1 waiting for 2 citizens outside");
 --          BUG-013: the wait ends ALERT_AFTER ticks after the civ alert began to call them in
+--          BUG-015 (the entrance door 16970 lost its forbidden flag within one frame, ARRIVAL still said "doors 1
+--          forbidden"): every forbidden door is read back on the next pass; a door whose flag fell back leaves the
+--          count, is named as a partial lockdown entry ("door 16970 (74,70,117) refused (flag reset)") and
+--          LOCKDOWN_PARTIAL (A) says so; it is tried once more (forbidden + closed) when the units or items on and
+--          next to its tile changed, at the latest DOOR_RETRY ticks later
 --   alert  siege sounds the civ alert (it asks M.holding) once no lever pull of the lockdown is pending (gate.pulls:
 --          every wanted bridge up, or none left to pull), at the deadline (BUG-013: ALERT_LAT x the last measured
 --          lever latency, ALERT_AFTER..ALERT_MAX ticks, ALERT_UNKNOWN before the first measurement), or at once when
@@ -83,7 +88,8 @@ local REPORT_KIND = {AMBUSH_AMBUSHER = 'ambush', BEAST_AMBUSH = 'ambush', AMBUSH
 local ARMY = {siege = true, invasion = true, beast = true, invader = true}   -- DEFCON 2 kinds
 
 local st      -- persisted m.reflex: {v, hold = {why, kinds, acts, since, last, qs}|nil, doors = {ids}, ack = {n, wall},
-              --   irq = {{n, type, tick, wall, ms, msg, done}}}
+              --   irq = {{n, type, tick, wall, ms, msg, done}}, vfy = {{id, t, try, pos}} (forbidden, not read back
+              --   yet; BUG-015), ref = {{id, t, try, pos, sig, items, units}} (refused: the flag fell back), prec}
 local rt      -- runtime: door cache, sighting/intruder bookkeeping, alarm.txt signature, eta
 local dirty
 
@@ -116,6 +122,21 @@ function M.kind_of(text)
   for _, m in ipairs(M.TEXT) do
     if low:find(m[1], 1, true) then return m[2] end
   end
+end
+
+M.ALERT_TEXT = 90         -- bytes of the alert's answer in the text (the whole of it is d.alert)
+M.MSG_MAX = 200           -- an event text is cut there (kern), and so is alarm.txt's copy
+
+-- prefix .. parts (', ' between) .. tail within MSG_MAX: a part that does not fit is left out whole (its numbers are
+-- in d), the tail (the announcement) is cut; Run 9's ARRIVAL lost its alert and doors to the cut
+local function compose(prefix, parts, tail)
+  local s, first = prefix, true
+  for _, p in ipairs(parts) do
+    local add = (first and '' or ', ') .. p
+    if #s + #add <= M.MSG_MAX then s, first = s .. add, false end
+  end
+  if tail and #s < M.MSG_MAX then s = s .. tail:sub(1, M.MSG_MAX - #s) end
+  return s
 end
 
 ---------------------------------------------------------------- the entrance doors
@@ -170,6 +191,10 @@ end
 M.OPEN_SHOWN = 2           -- openings without a door named in the text (the rest counted)
 M.DOOR_NEAR = 15           -- a visible hostile this close to a waiting door forbids it at once
 M.DOOR_POLL = 20           -- ticks between two looks at the doors still waiting for citizens outside
+-- BUG-015: a refused door (its forbidden flag fell back before the next pass) is tried once more, with `closed`, once
+-- the visible units on or next to its tile or the items on it changed, at the latest DOOR_RETRY ticks after the refusal
+M.DOOR_RETRY = 1200
+M.REF_SHOWN = 2            -- refused doors named in the text (the rest counted)
 
 -- citizens on the outside side of each door (seal.door_outside: open sky of its walk group, the porch of its opening,
 -- the doorway); without seal, sense's citizens outside Kern+ hold every door. Returns {[id] = n}, distinct n.
@@ -205,12 +230,62 @@ local function doors_late(h, now)
   return t0 ~= nil and now - t0 >= M.ALERT_AFTER
 end
 
+-- BUG-015: what stands on and next to a door's tile: the visible units within one tile on its level
+-- (snapshot.units_at) and the items on the ground of the tile itself (snapshot.items_at; revealed tiles only). Returns a signature (a retry waits for it
+-- to change), the items, the units on or next to the tile and the units on the tile itself.
+local function tile_sig(K, p)
+  local us, on = {}, 0
+  local oku, ul = K.call('snapshot', 'units_at', p[1] - 1, p[2] - 1, p[1] + 1, p[2] + 1, p[3])
+  if oku and type(ul) == 'table' then
+    for _, u in ipairs(ul) do
+      us[#us + 1] = string.format('%d@%d,%d', u[1], u[2], u[3])
+      if u[2] == p[1] and u[3] == p[2] then on = on + 1 end
+    end
+  end
+  local its = {}
+  local ok, l = K.call('snapshot', 'items_at', p[1], p[2], p[1], p[2], p[3])
+  if ok and type(l) == 'table' then
+    for _, it in ipairs(l) do its[#its + 1] = tostring(it[1]) end
+  end
+  return table.concat(us, ' ') .. '|' .. table.concat(its, ' '), #its, #us, on
+end
+
+local function find_ref(id)
+  for i, r in ipairs(st.ref) do if r.id == id then return r, i end end
+end
+
+local function drop_door(id)
+  for i = #st.doors, 1, -1 do if st.doors[i] == id then table.remove(st.doors, i) end end
+end
+
+-- BUG-015: a refused door's one retry is due once what stands on or next to its tile changed, at the latest
+-- DOOR_RETRY ticks after the refusal
+local function retry_due(K, r, now)
+  if r.try ~= 1 then return false end
+  if now - r.t >= M.DOOR_RETRY or now < r.t then return true end
+  return (tile_sig(K, r.pos)) ~= r.sig
+end
+
+-- the refused doors of this lockdown that are not being tried again (not in st.doors), in refusal order
+local function refused_now()
+  local mine, l = {}, {}
+  for _, id in ipairs(st.doors) do mine[id] = true end
+  for _, r in ipairs(st.ref) do if not mine[r.id] then l[#l + 1] = r end end
+  return l
+end
+
+local function ref_text(r)
+  return string.format('door %d (%d,%d,%d) refused (flag reset)', r.id, r.pos[1], r.pos[2], r.pos[3])
+end
+
 -- forbid the entrance doors not forbidden yet: the open-sky scan and seal's entrance doors. A door forbidden by
 -- us stays ours (never forbidden twice, never again once the player opened it); a door the player forbade is left
 -- alone and never opened. Safety (citizens shut out): a door waits while a citizen is on its outside side (the civ
 -- alert calls them in meanwhile) and is forbidden once nobody is left there, at once with a visible hostile within
--- DOOR_NEAR of it, and in any case once doors_late (ALERT_AFTER after the alert sounded). Returns the text part
--- and the number newly forbidden; rt.wait = the doors still waiting, rt.wait_out = the citizens they wait for.
+-- DOOR_NEAR of it, and in any case once doors_late (ALERT_AFTER after the alert sounded). BUG-015: a door whose flag
+-- fell back (verify_doors) is a partial lockdown entry, tried once more (forbidden + closed) when retry_due. Returns
+-- the text part and the number newly forbidden; rt.wait = the doors still waiting, rt.wait_out = the citizens they
+-- wait for.
 local function forbid_doors(K, now, refresh)
   local near = entrance_doors(K, now, refresh)
   local sd, sstate = seal_doors(K, refresh)
@@ -235,8 +310,11 @@ local function forbid_doors(K, now, refresh)
     if not mine[d.id] then
       local b = df.building.find(d.id)
       local f = b and b.door_flags and b.door_flags.forbidden
-      if b and not f then todo[#todo + 1] = d
-      elseif b and f then already = already + 1 end
+      local r, ri = find_ref(d.id)
+      if b and f then
+        already = already + 1
+        if r then table.remove(st.ref, ri); dirty = true end   -- forbidden by someone else meanwhile: not ours
+      elseif b and not (r and not retry_due(K, r, now)) then todo[#todo + 1] = d end
     end
   end
   local out, nout = {}, 0
@@ -244,9 +322,21 @@ local function forbid_doors(K, now, refresh)
   local wait = {}
   for _, d in ipairs(todo) do
     if late or (out[d.id] or 0) == 0 or hostile_near(K, d.pos, now) then
-      if K.act.door_forbid(d.id, true) then
+      local r = find_ref(d.id)
+      local ok
+      if r then
+        local _, _, _, on = tile_sig(K, r.pos)
+        ok = K.act.door_forbid(d.id, true, on == 0)            -- the retry closes it too, nobody in the doorway
+      else ok = K.act.door_forbid(d.id, true) end
+      if ok then
         n, mine[d.id] = n + 1, true
         st.doors[#st.doors + 1] = d.id
+        st.vfy[#st.vfy + 1] = {id = d.id, t = now, try = r and 2 or 1, pos = d.pos}
+        if r then
+          r.try = 2                                              -- the one retry is spent
+          K.log('info', 'reflex: door %d (%d,%d,%d) tried again (forbidden + closed)', d.id, d.pos[1], d.pos[2],
+                d.pos[3])
+        end
         dirty = true
       end
     else wait[#wait + 1] = d.id end
@@ -257,6 +347,11 @@ local function forbid_doors(K, now, refresh)
     s = s .. string.format(', %d waiting for %d citizen%s outside', #wait, rt.wait_out, rt.wait_out == 1 and '' or 's')
   end
   if already > 0 then s = s .. ' (' .. already .. ' were already)' end
+  local pl, refs = {}, refused_now()
+  for i, r in ipairs(refs) do
+    if i > M.REF_SHOWN then pl[#pl] = pl[#pl] .. ' +' .. (#refs - M.REF_SHOWN); break end
+    pl[#pl + 1] = ref_text(r)
+  end
   if sd and #sd.open > 0 then
     local l = {}
     for i, o in ipairs(sd.open) do
@@ -264,13 +359,83 @@ local function forbid_doors(K, now, refresh)
       l[#l + 1] = string.format('%s %d,%d,%d', o.kind, o.pos[1], o.pos[2], o.pos[3])
     end
     local more = #sd.open - #l
-    s = s .. string.format(', partial lockdown: %s%s %s no door', table.concat(l, ', '),
-                           more > 0 and (' +' .. more) or '', #sd.open == 1 and 'has' or 'have')
-  elseif not sd and sstate == 'pending' then s = s .. ', entrance check pending' end
+    pl[#pl + 1] = string.format('%s%s %s no door', table.concat(l, ', '), more > 0 and (' +' .. more) or '',
+                                #sd.open == 1 and 'has' or 'have')
+  end
+  if #pl > 0 then s = s .. ', partial lockdown: ' .. table.concat(pl, ', ') end
+  if not sd and sstate == 'pending' then s = s .. ', entrance check pending' end
   return s, n
 end
 
--- undo after quiet: exactly the doors this lockdown forbade (st.doors), the ones still forbidden
+-- BUG-015: LOCKDOWN_PARTIAL (A) for the doors refused so far (cadence: the first refusal of a lockdown at once, a new
+-- door or a failed retry again after max(7 days, 10 min); a lockdown is one episode)
+local function announce_refused(K, now, r)
+  local refs = refused_now()
+  if #refs == 0 then return end
+  local ids, toks = {}, {}
+  for _, x in ipairs(refs) do
+    ids[#ids + 1] = x.id
+    toks[#toks + 1] = x.id .. ':' .. (x.try == 1 and 'retry' or 'final')
+  end
+  local T = K.now()
+  local due = CAD.due(st.prec, T, ids, toks)
+  local what = string.format('door %d (%d,%d,%d) refused (flag reset; %d items, %d units on or next to its tile)',
+                             r.id, r.pos[1], r.pos[2], r.pos[3], r.items or 0, r.units or 0)
+  local next_ = r.try == 1 and string.format('one retry (forbidden + closed) once that changes (<= %d ticks)',
+                                              M.DOOR_RETRY) or 'the retry failed too'
+  if not due then
+    K.log('warn', 'reflex: %s, %s', what, next_)
+    return
+  end
+  st.prec, dirty = CAD.mark(T, ids, toks), true
+  local parts = {what, next_, string.format('doors %d held', #st.doors)}
+  if #refs > 1 then parts[#parts + 1] = string.format('%d refused in all', #refs) end
+  K.emit('LOCKDOWN_PARTIAL', 'A', compose('partial lockdown: ', parts),
+         {doors = #st.doors, refused = ids, pos = {r.pos[1], r.pos[2], r.pos[3]}, retry = r.try == 1 and 1 or 0,
+          items = r.items or 0, units = r.units or 0})
+end
+
+-- BUG-015 (Run 10 test fort: door 16970's flag read false one frame after act.door_forbid, "doors 1 forbidden"
+-- nevertheless): the doors forbidden on an earlier pass are read back. Held: they count. Fell back: the door leaves
+-- st.doors (the count, the undo), joins st.ref with what stands on its tile, and LOCKDOWN_PARTIAL says so; held on the
+-- retry: the refusal ends; fell back on the retry: it stays refused for this lockdown.
+local function verify_doors(K, now)
+  if #st.vfy == 0 then return end
+  local keep, last = {}, nil
+  for _, v in ipairs(st.vfy) do
+    if now == v.t then keep[#keep + 1] = v
+    else
+      local b = df.building.find(v.id)
+      local f = b and b.door_flags and b.door_flags.forbidden
+      local r, ri = find_ref(v.id)
+      if not b then
+        drop_door(v.id)
+        if r then table.remove(st.ref, ri) end
+      elseif f then
+        if r then
+          table.remove(st.ref, ri)
+          K.log('info', 'reflex: door %d (%d,%d,%d) held on the retry', v.id, v.pos[1], v.pos[2], v.pos[3])
+        end
+      else
+        drop_door(v.id)
+        local sig, ni, nu = tile_sig(K, v.pos)
+        if r then r.t, r.try, r.sig, r.items, r.units = now, 2, sig, ni, nu
+        else
+          r = {id = v.id, t = now, try = 1, pos = v.pos, sig = sig, items = ni, units = nu}
+          st.ref[#st.ref + 1] = r
+        end
+        K.log('warn', 'reflex: door %d (%d,%d,%d) refused: forbidden flag reset after %d ticks (try %d; %d items, ' ..
+              '%d units on or next to the tile)', v.id, v.pos[1], v.pos[2], v.pos[3], now - v.t, r.try, ni, nu)
+        last = r
+      end
+    end
+  end
+  st.vfy, dirty = keep, true
+  if last then announce_refused(K, now, last) end
+end
+
+-- undo after quiet: exactly the doors this lockdown forbade (st.doors), the ones still forbidden; a refused door
+-- (BUG-015) is not among them and is never counted
 local function open_doors(K)
   local n = 0
   for _, id in ipairs(st.doors) do
@@ -279,9 +444,10 @@ local function open_doors(K)
       if K.act.door_forbid(id, false) then n = n + 1 end
     end
   end
-  st.doors, dirty = {}, true
-  rt.seal_tick, rt.door_pts, rt.wait, rt.wait_out = nil, nil, nil, nil
-  return n
+  local nref = #refused_now()
+  st.doors, st.vfy, st.ref, st.prec, dirty = {}, {}, {}, nil, true
+  rt.seal_tick, rt.door_pts, rt.wait, rt.wait_out, rt.ref_t = nil, nil, nil, nil, nil
+  return n, nref
 end
 
 ---------------------------------------------------------------- hold and the actions
@@ -302,21 +468,6 @@ local function sorted(set)
   for k in pairs(set) do r[#r + 1] = k end
   table.sort(r)
   return r
-end
-
-M.ALERT_TEXT = 90         -- bytes of the alert's answer in the text (the whole of it is d.alert)
-M.MSG_MAX = 200           -- an event text is cut there (kern), and so is alarm.txt's copy
-
--- prefix .. parts (', ' between) .. tail within MSG_MAX: a part that does not fit is left out whole (its numbers are
--- in d), the tail (the announcement) is cut; Run 9's ARRIVAL lost its alert and doors to the cut
-local function compose(prefix, parts, tail)
-  local s, first = prefix, true
-  for _, p in ipairs(parts) do
-    local add = (first and '' or ', ') .. p
-    if #s + #add <= M.MSG_MAX then s, first = s .. add, false end
-  end
-  if tail and #s < M.MSG_MAX then s = s .. tail:sub(1, M.MSG_MAX - #s) end
-  return s
 end
 
 -- BUG-013: how long the lockdown's civ alert may wait for its lever pulls, from the last lever latency in ticks
@@ -472,14 +623,16 @@ local function release(K, now)
   if not h then return end
   st.hold, dirty = nil, true
   rt.pull_sig, rt.pull_t = nil, nil
-  local n = open_doors(K)
+  local n, nref = open_doors(K)
   K.call('arbiter', 'hold')
   -- the alert off before the gate pass: the lowering pulls are queued while nobody is confined (BUG-013)
   K.call('siege', 'hold_alert')
   K.call('gate', 'lockdown')
-  local msg = string.format('lockdown over (%s): threat 0 for %d days; %d doors opened', h.why,
-                            cfg(K).hold_quiet_days, n)
-  K.emit('LOCKDOWN_END', 'B', msg, {why = h.why, ticks = now - h.since, doors = n})
+  local msg = string.format('lockdown over (%s): threat 0 for %d days; %d doors opened%s', h.why,
+                            cfg(K).hold_quiet_days, n, nref > 0 and string.format(', %d refused (flag reset)', nref) or '')
+  local d = {why = h.why, ticks = now - h.since, doors = n}
+  if nref > 0 then d.refused = nref end
+  K.emit('LOCKDOWN_END', 'B', msg, d)
   K.log('info', 'reflex: %s', msg)
 end
 
@@ -738,14 +891,20 @@ end
 
 -- BUG-012: while a lockdown holds the doors, a new answer of seal's entrance check (the fresh check the lockdown
 -- asked for, a lever pull, a construction) may name doors not forbidden yet; they are forbidden at once
--- and the doors still waiting for citizens outside are looked at every DOOR_POLL ticks
+-- and the doors still waiting for citizens outside (BUG-015: and the refused ones with a retry left) are looked at
+-- every DOOR_POLL ticks
 local function door_step(K, now)
   local hd = st.hold
   if not (hd and hd.acts.doors) then return end
   local x = seal_doors(K, false)
   local news = x and x.tick ~= rt.seal_tick
   local poll = rt.wait and #rt.wait > 0 and (now - (rt.wait_t or now) >= M.DOOR_POLL or now < (rt.wait_t or now))
-  if not (news or poll or (rt.wait == nil and hd.doors_at)) then return end
+  -- BUG-015: a refused door with its retry left is looked at every DOOR_POLL ticks (retry_due)
+  local retry = false
+  for _, r in ipairs(st.ref) do if r.try == 1 then retry = true; break end end
+  retry = retry and (now - (rt.ref_t or -M.DOOR_POLL) >= M.DOOR_POLL or now < (rt.ref_t or now))
+  if not (news or poll or retry or (rt.wait == nil and hd.doors_at)) then return end
+  if retry then rt.ref_t = now end
   local s, n = forbid_doors(K, now, false)
   if n > 0 then K.log('info', 'reflex: %d more entrance doors forbidden: %s', n, s) end
 end
@@ -799,11 +958,26 @@ end
 ---------------------------------------------------------------- module
 function M.init(K)
   local p = K.persist.get('m.reflex')
-  st = {v = 2, doors = {}, ack = {n = 0, wall = 0}, irq = {}}
+  st = {v = 2, doors = {}, ack = {n = 0, wall = 0}, irq = {}, vfy = {}, ref = {}}
   if type(p) == 'table' then
     for _, id in ipairs(type(p.doors) == 'table' and p.doors or {}) do
       if int(id) then st.doors[#st.doors + 1] = int(id) end
     end
+    -- BUG-015: doors not read back yet and refused doors survive a reload
+    local function pos3(q) return type(q) == 'table' and int(q[1]) and int(q[2]) and int(q[3]) and
+                                  {int(q[1]), int(q[2]), int(q[3])} or nil end
+    for _, v in ipairs(type(p.vfy) == 'table' and p.vfy or {}) do
+      local q = type(v) == 'table' and int(v.id) and pos3(v.pos)
+      if q then st.vfy[#st.vfy + 1] = {id = int(v.id), t = int(v.t) or 0, try = int(v.try) == 2 and 2 or 1, pos = q} end
+    end
+    for _, r in ipairs(type(p.ref) == 'table' and p.ref or {}) do
+      local q = type(r) == 'table' and int(r.id) and pos3(r.pos)
+      if q then
+        st.ref[#st.ref + 1] = {id = int(r.id), t = int(r.t) or 0, try = int(r.try) == 2 and 2 or 1, pos = q,
+                               sig = tostring(r.sig or ''), items = int(r.items) or 0, units = int(r.units) or 0}
+      end
+    end
+    if type(p.prec) == 'table' then st.prec = p.prec end
     if type(p.ack) == 'table' then st.ack = {n = int(p.ack.n) or 0, wall = int(p.ack.wall) or 0} end
     for _, r in ipairs(type(p.irq) == 'table' and p.irq or {}) do
       if type(r) == 'table' and int(r.n) and type(r.type) == 'string' then
@@ -840,6 +1014,7 @@ function M.step(K, budget, ctx)
   end
   if not rt.doors or now - rt.doors.tick >= M.DOOR_EVERY or now < rt.doors.tick then entrance_doors(K, now) end
   alert_step(K, now)
+  verify_doors(K, now)
   door_step(K, now)
   quiet_step(K, h, now)
   ack_step(K, now)
@@ -885,6 +1060,8 @@ function M.state(K)
   if st.hold and st.hold.acts.doors then           -- the lockdown's doors: forbidden, waiting, citizens outside
     a.doors = #st.doors
     if rt.wait and #rt.wait > 0 then a.dwait, a.dout = #rt.wait, rt.wait_out or 0 end
+    local nref = #refused_now()
+    if nref > 0 then a.dref = nref end              -- BUG-015: refused, the flag fell back
   end
   return {alarm = a}
 end

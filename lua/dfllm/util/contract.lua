@@ -70,6 +70,12 @@ C.EVENTS = {
   AUTOLABOR_LEGACY = {cls = 'A', by = 'baseline'},
   -- FR-64: >= 2 citizens died of dehydration or starvation within a month (the A twin of DEATH_CLUSTER)
   DEATHS_PREVENTABLE = {cls = 'A', by = 'care'},
+  -- FR-65: readiness R0 in PEACE (blockers, ways in without door or bridge, traps); monthly while it fails
+  SIEGE_UNREADY = {cls = 'A', by = 'readiness'},
+  -- BUG-015: an entrance door the lockdown forbade lost its forbidden flag before the next pass (refused)
+  LOCKDOWN_PARTIAL = {cls = 'A', by = 'reflex'},
+  -- BUG-023 / Run 10: members of a tool detail hold no pick or axe for days while its jobs wait and free tools exist
+  TOOL_BLOCKED = {cls = 'A', by = 'economy'},
   -- BUG-027: a SIEGE/BREACH raise went ahead onto units on or next to the footprint (a hostile at the gate)
   GATE_FORCED = {cls = 'A', by = 'gate'},
   -- BUG-027: a unit died on or next to a bridge just pulled or moving (gate's move records)
@@ -269,7 +275,8 @@ C.STATE_SPEC = obj({
   save = str(120), phase = str(nil, nil, 'phase'),
   pop = obj(nil, {cit = NAT, adults = NAT, soldiers = NAT, cap = NAT, gate_cap = NAT}),
   ready = obj({lvl = int(0, 3), worn = PCT, cv = NAT, drill_age = int(-1),
-               audit = obj({ok = FLAG, age = int(-1), min_traps = NAT}), fail = arr(str(24), 0, 8)}),
+               audit = obj({ok = FLAG, age = int(-1), min_traps = NAT}), fail = arr(str(24), 0, 8)},
+              {open = int(-1), ents = arr(str(24), 0, 3), dhold = str(24)}),   -- FR-65
   stock = obj(nil, {drink_d = NAT, food_d = NAT, meals = NAT, hosp_water = FLAG}),
   care = obj({stressed_pct = PCT, naked = NAT, ghosts = NAT, corpses_old = NAT, tombs_free = NAT, moods = NAT},
              {coffins = obj({want = NAT, short = NAT, stock = NAT, order = NAT, proj = str(40)}),
@@ -287,7 +294,7 @@ C.STATE_SPEC = obj({
   trade = obj({caravan = FLAG, ratio = NAT, done = NAT}),
   clock = obj({cap = NAT, orig = NAT, ts = int(-1, 1000), held = FLAG, why = str(24)}),
   alarm = obj({defcon = int(1, 5), unacked = NAT, last = NAT, ack = NAT, lock = FLAG, why = str(24)},
-              {eta = int(-1), doors = NAT, dwait = NAT, dout = NAT}),
+              {eta = int(-1), doors = NAT, dwait = NAT, dout = NAT, dref = NAT}),
   lever = obj({lat_s = int(-1), lat_t = int(-1), pend = NAT, wait_s = NAT}),
   alert = obj({want = str(24), burrow = str(24), tiles = NAT, inside = NAT, ok = FLAG}, {why = str(40)}),
 })

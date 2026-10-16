@@ -311,18 +311,20 @@ local function alert_list(K, burrow)
   return l
 end
 
-local function set_alert(K, on, burrow, g, now, held)
+local function set_alert(K, on, burrow, g, now, held, audited, flee)
   local cur = alert_idx()
   if not on then
     -- BUG-011 (Run 9: on, then off 12 ticks later, every batch): while a reflex lockdown holds the alert nobody
-    -- silences it; no usable burrow means the alert is not sounded, never that a sounding one is switched off
-    if held then return end
+    -- silences it; no usable burrow means the alert is not sounded, never that a sounding one is switched off.
+    -- BUG-018 (the first real siege, 50 -> 1: the alert held everybody in the halls the goblins walked into): unless
+    -- seal found no separated burrow at all (flee): confined, the citizens wait in the attackers' path; free, they flee
+    if held and not flee then return end
     if cur ~= nil and cur ~= 0 then K.act.civ_alert(false) end
     return
   end
   -- live L1b: BREACH before fortcore stage 3 asked for Tiefe+ every RETRY (one ACT_FAIL each time); a refuge
-  -- that does not exist yet means Kern+ at once
-  if burrow ~= g.kern and not burrow_exists(burrow) then burrow = g.kern end
+  -- that does not exist yet means Kern+ at once. BUG-018: never for seal's pick (seal refused Kern+ for a reason)
+  if not audited and burrow ~= g.kern and not burrow_exists(burrow) then burrow = g.kern end
   local list = alert_list(K, burrow)
   local sig = table.concat(list, '|')
   if mem.asig ~= sig and now >= (mem.alert_retry or now) then
@@ -330,10 +332,15 @@ local function set_alert(K, on, burrow, g, now, held)
     else                                   -- the burrow alone, else (e.g. no Tiefe+ yet) Kern+ beats no alert
       mem.alert_retry = now + M.RETRY
       if #list > 1 and K.act.alert_burrows({burrow}) then mem.burrow, mem.asig, mem.alist = burrow, burrow, {burrow}
-      elseif burrow ~= g.kern and mem.burrow ~= g.kern and K.act.alert_burrows({g.kern}) then
+      elseif not audited and burrow ~= g.kern and mem.burrow ~= g.kern and K.act.alert_burrows({g.kern}) then
         mem.burrow, mem.asig, mem.alist = g.kern, g.kern, {g.kern}
       end
     end
+  end
+  -- BUG-018: seal's pick could not be listed: the alert never sounds (or keeps sounding) on another, older list
+  if audited and mem.burrow ~= burrow then
+    if cur ~= nil and cur ~= 0 and not held then K.act.civ_alert(false) end
+    return
   end
   if mem.burrow and cur == 0 and now >= (mem.civ_retry or now) then
     if not K.act.civ_alert(true) then mem.civ_retry = now + M.RETRY end
@@ -344,20 +351,21 @@ end
 -- they can never disagree (Run 9: hold_alert sounded Kern+ without asking seal, the next step's seal answer nil
 -- switched it off). FR-33/37/57: seal audits the burrow (drink, food, beds for the population; the refuge after a
 -- BREACH until quiet) and may choose another one or none (nil: no confinement); a held lockdown keeps the interior
--- burrow (seal.choose). Without seal the mode's burrow as before. Returns on, burrow, held, note and brief (why not
--- the mode's burrow, in full and short; nil when it is).
+-- burrow (seal.choose). BUG-018: seal confines only to a separated burrow (or the dead end); flee = no burrow is
+-- separated, the alert goes off even in a lockdown. Without seal the mode's burrow as before. Returns on, burrow, held,
+-- note and brief (why not the mode's burrow, in full and short; nil when it is), audited (seal chose) and flee.
 local function alert_plan(K, a, g, now)
   local held = alert_held(K)
   local on, burrow = alert_wanted(K, a, g, now, held), K.mode() == 'BREACH' and g.refuge or g.kern
-  local note, brief
+  local note, brief, audited, flee
   if on then
-    local okb, pick, why, short = K.call('seal', 'alert_burrow', K.mode(), burrow, held)
+    local okb, pick, why, short, fl = K.call('seal', 'alert_burrow', K.mode(), burrow, held)
     if okb then
-      burrow, on = pick, pick ~= nil
+      burrow, on, audited, flee = pick, pick ~= nil, true, fl == true
       note, brief = type(why) == 'string' and why or nil, type(short) == 'string' and short or nil
     end
   end
-  return on, burrow, held, note, brief or note
+  return on, burrow, held, note, brief or note, audited, flee
 end
 
 local function set_posture(K, P, now)
@@ -488,8 +496,8 @@ local function apply(K, a, g, now)
       for _, b in ipairs(g.outer) do want(K, b, 'up', 'alert') end
     end
   elseif mode == 'RECOVERY' then lower(K, g) end
-  local on, burrow, held = alert_plan(K, a, g, now)
-  set_alert(K, on, burrow, g, now, held)
+  local on, burrow, held, _, _, audited, flee = alert_plan(K, a, g, now)
+  set_alert(K, on, burrow, g, now, held, audited, flee)
   set_posture(K, POSTURE[mode], now)
   if mode == 'SIEGE' or mode == 'BREACH' then kills(K, g, POSTURE[mode], now) end
 end
@@ -555,13 +563,13 @@ end
 function M.hold_alert(K)
   local now = K.now().tick
   local g = geometry(K)
-  local on, burrow, held, note, brief = alert_plan(K, assess(K), g, now)
+  local on, burrow, held, note, brief, audited, flee = alert_plan(K, assess(K), g, now)
   local function say(fmt, b, n)
     if not n then return b end
     return string.format(fmt, b, note), string.format(fmt, b, brief)
   end
   if not on then
-    set_alert(K, false, burrow, g, now, held)
+    set_alert(K, false, burrow, g, now, held, audited, flee)
     save(K)
     if not held then return 'off' end
     local idx = alert_idx()
@@ -569,10 +577,10 @@ function M.hold_alert(K)
     if idx ~= nil and idx ~= 0 and mem.burrow then return say('%s kept (%s)', mem.burrow, true) end
     return say('%s (%s)', 'none', true)
   end
-  if not burrow_exists(burrow) and not burrow_exists(g.kern) then
+  if not burrow_exists(burrow) and (audited or not burrow_exists(g.kern)) then
     return 'none (no burrow ' .. tostring(burrow) .. ')'
   end
-  set_alert(K, true, burrow, g, now, held)
+  set_alert(K, true, burrow, g, now, held, audited, flee)
   save(K)
   local idx = alert_idx()
   if idx ~= nil and idx ~= 0 then return say('%s (%s)', tostring(mem.burrow or burrow), note) end

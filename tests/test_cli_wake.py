@@ -5,7 +5,7 @@ import sys
 import time
 
 import pytest
-from cli_v2_helpers import append_events, ev, inbox_docs, install_fake_bp, make_runtime, reset_paths
+from cli_v2_helpers import FakeKern, append_events, ev, inbox_docs, install_fake_bp, make_runtime, reset_paths
 
 from dfpilot import files, schema, wake
 from dfpilot.events import est_tokens
@@ -840,3 +840,120 @@ def test_follow_wakes_on_siege_start_in_the_same_poll(save):
     clock.t += 1
     f.poll()
     assert len(out) == 1 and "SIEGE_START" in out[0]
+
+
+# ---------------------------------------------------------------- FR-65: the audit with --no-auto, dfllm audit
+MANIFEST = {"v": 2, "bridges": {"B1": {"role": "inner", "fp": [12, 21, 120, 12, 21, 120], "levers": [[10, 20, 120]]}}}
+
+
+def test_follow_no_auto_still_audits_but_places_nothing(save, monkeypatch):
+    """Run 10: `follow --no-auto` left the fort `audit never` for its whole life; the audit is no placement."""
+    calls = install_fake_bp(monkeypatch)
+    c = Clock()
+    f, out = F(c, auto=False)
+    insp = start_audit(save, f)
+    assert insp["verb"] == "inspect" and insp["args"] == {"what": "manifest"}
+    kern_reply(save, insp, data=MANIFEST)
+    f.poll()
+    (aud,) = inbox_docs(save)
+    assert aud["verb"] == "audit" and aud["by"] == "follow" and aud["args"]["snap"] == "c200"
+    assert calls["audit"] == [("c200", MANIFEST)]
+    kern_reply(save, aud, msg="audit stored, readiness R0", data={"lvl": 0})
+    append_events(save, [ev(8814, "PROJECT_REQUEST", "tombs", {"tpl": "tombs", "n": 6, "why": "free<need"})])
+    f.poll()
+    c.t += 30
+    f.poll()
+    assert inbox_docs(save) == [] and out == []                 # no tombs placement, no AUTO_FAIL
+
+
+def test_follow_no_audit_and_dfllm_audit_snapshots_are_left_alone(save, monkeypatch):
+    install_fake_bp(monkeypatch)
+    c = Clock()
+    f, _ = F(c, auto=False, audit=False)
+    f.poll()
+    append_events(save, [ev(8813, "SNAPSHOT_READY", "", {"id": "c200", "path": "snap/c200.json", "purpose": "audit"})])
+    f.poll()
+    assert inbox_docs(save) == [] and f.jobs == {}             # --no-audit
+    g, _ = F(c)
+    append_events(save, [ev(8814, "SNAPSHOT_READY", "", {"id": "aud18f0a", "path": "snap/aud18f0a.json",
+                                                         "purpose": "audit"})])
+    g.poll()
+    assert inbox_docs(save) == [] and g.tail.last_n == 8814    # `dfllm audit` audits its own snapshot
+
+
+def test_follow_help_says_no_auto_keeps_the_audit(capsys):
+    from dfpilot.cli import main
+    with pytest.raises(SystemExit):
+        main(["follow", "--help"])
+    out = " ".join(capsys.readouterr().out.split())
+    assert "the audit still runs" in out and "--no-audit" in out
+
+
+def test_siege_unready_wakes_with_its_first_move():
+    e = A(9100, "SIEGE_UNREADY", "siege unready (R0: no_outer); 2 of 3 ways in without door or bridge: 55,62,117 "
+          "stair_updown, 61,55,117 floor; traps 0", {"open": 2, "routes": 3})
+    line = wake.wake_line({"SIEGE_UNREADY": {"c": 1, "n0": 9100, "e": e}}, None)
+    assert "SIEGE_UNREADY: siege unready (R0: no_outer)" in line and "entrances" in line and "dfllm audit" in line
+    assert est_tokens(line) <= wake.WAKE_TOKENS and "SIEGE_UNREADY" in wake.WAKE_TYPES
+
+
+def _audit_kern(save, manifest=MANIFEST, audit_reply=(True, "audit stored, readiness R1", {"lvl": 1})):
+    """A fake kern for `dfllm audit`: snapshot -> writes snap/<id>.json (the fixture audit snapshot), inspect ->
+    the manifest, audit -> audit_reply."""
+    snap = json.loads((save / "snap" / "c200.json").read_text("utf-8"))
+
+    def reply(doc):
+        if doc["verb"] == "snapshot":
+            files.write_json_atomic(save / "snap" / f"{doc['id']}.json",
+                                    dict(snap, id=doc["id"], purpose=doc["args"]["purpose"]))
+            return True, f"queued snapshot {doc['id']}", {"id": doc["id"]}
+        if doc["verb"] == "inspect":
+            return True, "manifest", manifest
+        return audit_reply
+    return FakeKern(save, reply)
+
+
+def _audit_ns(**kw):
+    a = {"snap": None, "timeout": 10.0, "wait": 5.0}
+    a.update(kw)
+    return type("A", (), a)()
+
+
+def test_dfllm_audit_fresh_snapshot(save, monkeypatch, capsys):
+    """FR-65: `dfllm audit` = follow's audit job once: a fresh audit snapshot -> manifest -> bp.topo.audit -> verb."""
+    calls = install_fake_bp(monkeypatch)
+    with _audit_kern(save) as k:
+        assert wake.run_audit(_audit_ns(), save) == 0
+    out = capsys.readouterr().out
+    snap_cmd, insp, aud = k.seen
+    sid = snap_cmd["id"]
+    assert snap_cmd["verb"] == "snapshot" and snap_cmd["args"] == {"purpose": "audit"} and snap_cmd["by"] == "cli"
+    assert sid.startswith(wake.AUDIT_PREFIX) and insp["args"] == {"what": "manifest"}
+    assert aud["verb"] == "audit" and aud["by"] == "follow" and schema.validate("inbox", aud) == []
+    assert aud["args"] == {"snap": sid, "ok": False, "fails": ["traps<30"], "min_traps": 22, "bypass": False,
+                           "refuge_sep": True, "civ_sep": True, "caverns": True}
+    assert calls["audit"] == [(sid, MANIFEST)]
+    assert f"audit of snapshot {sid}" in out and "ok no, traps 22" in out and "fail: traps<30" in out
+    assert "audit stored, readiness R1" in out
+
+
+def test_dfllm_audit_existing_snapshot_and_refusals(save, monkeypatch, capsys):
+    from dfpilot.cli import main
+    install_fake_bp(monkeypatch)
+    rt = str(save.parent)
+    assert main(["--runtime", rt, "audit", "--snap", "c201"]) == 2          # a sites snapshot
+    assert "purpose 'sites'" in capsys.readouterr().out
+    assert main(["--runtime", rt, "audit", "--snap", "nope"]) == 2
+    assert "no snapshot nope" in capsys.readouterr().out
+    assert main(["--runtime", rt, "audit", "--snap", "../c200"]) == 2
+    assert "bad snapshot id" in capsys.readouterr().out
+    with _audit_kern(save, audit_reply=(False, "unknown snap", None)) as k:
+        assert main(["--runtime", rt, "audit", "--snap", "c200"]) == 1
+    out = capsys.readouterr().out
+    assert [d["verb"] for d in k.seen] == ["inspect", "audit"]               # no new snapshot requested
+    assert "ERR" in out and "unknown snap" in out and "without --snap" in out
+    with _audit_kern(save, manifest={"trunc": 1, "bytes": 9412}) as k:
+        assert main(["--runtime", rt, "audit", "--snap", "c200"]) == 2
+    assert "manifest truncated" in capsys.readouterr().out and [d["verb"] for d in k.seen] == ["inspect"]
+    assert main(["--runtime", rt, "audit", "--timeout", "0.2"]) == 3         # no kernel: no reply
+    assert "no reply yet" in capsys.readouterr().out

@@ -233,8 +233,12 @@ function S.place(ex, ey, cfg)
     end,
     -- live L0: DF still takes the real OS cursor when Gordon moves his mouse on another desktop
     -- (about 1 frame in 15), so a miss teaches k only when the same rectangle is seen twice for
-    -- the same held pixel
-    done = function(v, ctx)
+    -- the same held pixel.
+    -- BUG-020 (DF restarted and its window moved: the rectangle stayed at 224,132 whatever pixel was
+    -- held, and k learnt from two identical misses ran the hold out of the window): two confirmed
+    -- misses that should put the rectangle on different tiles (another held pixel or camera) but
+    -- show the same rectangle fail at once; k is never learnt from them
+    done = function(v, ctx, mem)
       local m = v.cs and v.cs.emb_min
       if not m or not ctx.p_px then return false, 'no rectangle yet' end
       if not v.cs.choosing_embark or popup_abort(v) then return false, 'not placing' end
@@ -243,7 +247,16 @@ function S.place(ex, ey, cfg)
       if not zc then return false, 'no local camera' end
       local key = p[1] .. ',' .. p[2] .. '>' .. m[1] .. ',' .. m[2]
       if ctx.p_seen == key then
-        ctx.pk = {m[1] - zc[1] - (p[1] - c[1]) // s, m[2] - zc[2] - (p[2] - c[2]) // s}
+        local want = {zc[1] + (p[1] - c[1]) // s, zc[2] + (p[2] - c[2]) // s}   -- rect_min - k
+        local o = mem and mem.p_conf
+        if o and (o.want[1] ~= want[1] or o.want[2] ~= want[2]) and o.m[1] == m[1] and o.m[2] == m[2] then
+          local cams = (o.zc[1] ~= zc[1] or o.zc[2] ~= zc[2])
+            and string.format(' (camera %d,%d and %d,%d)', o.zc[1], o.zc[2], zc[1], zc[2]) or ''
+          return 'fail', string.format('rectangle does not follow the mouse: held %d,%d and %d,%d%s, rectangle stays at %d,%d',
+                                       o.p[1], o.p[2], p[1], p[2], cams, m[1], m[2])
+        end
+        if mem then mem.p_conf = {p = {p[1], p[2]}, zc = {zc[1], zc[2]}, m = {m[1], m[2]}, want = want} end
+        ctx.pk = {m[1] - want[1], m[2] - want[2]}
       end
       ctx.p_seen = key
       return false, 'rectangle at ' .. m[1] .. ',' .. m[2]

@@ -259,12 +259,19 @@ T.test('fishers: food short and a fishing zone -> one per 15 citizens (max 3); n
   settle(W3)
   days(W3, 2)
   T.eq(#ctl3.wd.assigned_units, 0, 'no fishing zone: nobody fishes')
-  local W4, ctl4 = fish_world{cit = 53, food = 600, fishers = {1, 2}}
+  local W4, ctl4 = fish_world{cit = 53}
   settle(W4)
+  days(W4, 1)
+  T.eq(#ctl4.wd.assigned_units, 3)
+  F.item(W4, 'FOOD', {stack_size = 600, subtype = 1})
   days(W4, 2)
-  T.eq(#ctl4.wd.assigned_units, 2, 'food enough: shrinking waits shrink_days')
+  T.eq(#ctl4.wd.assigned_units, 3, 'food enough: shrinking waits shrink_days')
   days(W4, 3)
-  T.eq(#ctl4.wd.assigned_units, 0, 'then the fishers go home')
+  T.eq(#ctl4.wd.assigned_units, 0, 'then the fishers economy sent go home')
+  local W5, ctl5 = fish_world{cit = 53, food = 600, fishers = {1, 2}}
+  settle(W5)
+  days(W5, 5)
+  T.eq(#ctl5.wd.assigned_units, 2, 'Run 10: fishers the player put in stay in PEACE')
 end)
 
 T.test('fishers leave at once outside PEACE/RECOVERY (they stand at the water outside the walls)', function()

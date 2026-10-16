@@ -463,6 +463,25 @@ T.test('runner: a read that is not of the placed target fails (rectangle follows
   T.eq(r, 'fail'); T.ok(msg:find('no held pixel', 1, true), msg)
 end)
 
+T.test('BUG-020: a rectangle that stays put for two different held pixels fails early, k is not learnt from it', function()
+  -- live 2026-10-15 (DF restarted, window moved): "rectangle at 224,132 (holding -817,-1449)" after 12 tries; the
+  -- rectangle ignored every held pixel and k came from two identical observations
+  local D = F.new({screen = 'world', follow = false})
+  D.emb_min, D.region = {224, 132}, {14, 8}
+  local run, _, ctx = start(D, {v = 2, id = 's3', mode = 'scan', cands = {{8, 30}}})
+  T.eq(run.state, 'failed', run.msg)
+  local a, b, c, d, x, y = run.msg:match('rectangle does not follow the mouse: held (%-?%d+),(%-?%d+) and ' ..
+                                         '(%-?%d+),(%-?%d+).*, rectangle stays at (%d+),(%d+)')
+  T.ok(a, run.msg)
+  T.ok(a ~= c or b ~= d, 'two different pixels: ' .. run.msg)
+  T.eq({tonumber(x), tonumber(y)}, {224, 132})
+  T.ok(run.msg:find('^local%.place:'), run.msg)
+  T.ok(run.tries <= 8, 'early: ' .. run.tries .. ' tries, not 12: ' .. table.concat(run.log, ' | '))
+  -- the k learnt from the first confirmed miss stands; the second, identical one taught nothing
+  local w = ctx.pk
+  T.ok(w and (w[1] ~= 0 or w[2] ~= 0), 'one k from the first miss')
+end)
+
 T.test('runner: wait results spend no tries; the timeout still ends them', function()
   local t, k = 0, 0
   local env = {capture = function() return V.from_lines({}) end, now = function() return t end,

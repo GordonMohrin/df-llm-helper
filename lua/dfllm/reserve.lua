@@ -179,15 +179,24 @@ function R.need_of(ji, idx, got)
   return nd
 end
 
--- the needs of a strange-mood job (only filters still short of items), or nil when it cannot be read
+-- the needs of a strange-mood job (only filters still short of items), or nil when it cannot be read.
+-- BUG-017 (test fort y374: MOOD_RISK named bars, cloth, bone and logs while the dwarf held all 8 items): an attached
+-- item without a filter index (job_item_idx < 0, or an index the filters do not have) still covers a filter it fits;
+-- it is matched to the first need still short of that kind
 function R.job_needs(job)
   if not R.is_mood_job(job) then return nil end
   local ok, elems = pcall(function() return job.job_items.elements end)
   if not ok or elems == nil then return nil end
-  local got = {}
+  local okn, nel = pcall(function() return #elems end)
+  nel = okn and int(nel) or nil
+  local got, loose = {}, {}
   for _, ref in ipairs(get(job, 'items') or {}) do
     local i = int(get(ref, 'job_item_idx'))
-    if i and i >= 0 then got[i] = (got[i] or 0) + 1 end
+    if i and i >= 0 and (not nel or i < nel) then got[i] = (got[i] or 0) + 1
+    else
+      local it = get(ref, 'item')
+      if it then loose[#loose + 1] = it end
+    end
   end
   local out = {}
   local okl = pcall(function()
@@ -197,6 +206,19 @@ function R.job_needs(job)
     end
   end)
   if not okl then return nil end
+  if #loose > 0 then
+    for _, it in ipairs(loose) do
+      for _, nd in ipairs(out) do
+        local okm, yes = pcall(R.match, nd, it)
+        if nd.n > 0 and okm and yes then nd.n = nd.n - 1; break end
+      end
+    end
+    local kept = {}
+    for _, nd in ipairs(out) do
+      if nd.n > 0 then nd.label = R.label(nd); kept[#kept + 1] = nd end
+    end
+    out = kept
+  end
   return out
 end
 
@@ -251,6 +273,45 @@ function R.match(nd, it)
     end
   end
   return true
+end
+
+-- cloth and thread kinds (BUG-017, Run 10 y418: a plant-cloth mood next to a reserve line "cloth 0/7" that was all
+-- wool): the kind of a CLOTH or THREAD item from its material flags (SILK, THREAD_PLANT, YARN), or nil when it cannot
+-- be read; cache = {['<mat_type>:<mat_index>'] = kind|false} spares the material lookups of a scan
+R.SUBS = {'plant', 'silk', 'yarn'}
+R.KINDED = {cloth = true, thread = true}
+function R.kind(it, cache)
+  local t = tname_of(it)
+  if t ~= 'CLOTH' and t ~= 'THREAD' then return nil end
+  local key = tostring(get(it, 'mat_type')) .. ':' .. tostring(get(it, 'mat_index'))
+  local k = cache and cache[key]
+  if k ~= nil then return k or nil end
+  k = false
+  for _, sub in ipairs(R.SUBS) do
+    if mat_flag(it, SUBFLAG[sub]) then k = sub; break end
+  end
+  if cache then cache[key] = k end
+  return k or nil
+end
+
+-- the hold of a kinded class split over its kinds (water filling): every kind in stock gets its share, a kind with
+-- less stock than its share leaves the rest to the others; stock = {plant = n, silk = n, yarn = n} -> {kind = cap}
+function R.split(hold, stock)
+  local caps, left, open = {}, math.max(0, int(hold) or 0), {}
+  for _, k in ipairs(R.SUBS) do
+    caps[k] = 0
+    if (int(stock[k]) or 0) > 0 then open[#open + 1] = k end
+  end
+  while left > 0 and #open > 0 do
+    local share, nxt = math.max(1, left // #open), {}
+    for _, k in ipairs(open) do
+      local add = math.min(share, stock[k] - caps[k], left)
+      caps[k], left = caps[k] + add, left - add
+      if caps[k] < stock[k] then nxt[#nxt + 1] = k end
+    end
+    open = nxt
+  end
+  return caps
 end
 
 -- the class of a whole workshop class (legacy path, no filters): any item of the class's vector
@@ -325,10 +386,13 @@ function R.hold(c, cls, f)
   return math.max(0, math.min(tgt, avail))
 end
 
--- trade token for a need (trade.lua L.KINDS), or nil
+-- trade token for a need (trade.lua L.KINDS), or nil. BUG-017 (Run 10 y418): a cloth or thread filter that names
+-- its kind asks for that kind ('cloth:plant', 'cloth:silk', 'cloth:yarn', 'thread:*'); plain 'cloth' only when any
+-- kind fits
 function R.token(nd)
   local k = R.BUY[nd.cls]
   if not k then return nil end
+  if R.KINDED[nd.cls] and nd.sub then return k .. ':' .. nd.sub end
   if nd.cls == 'bars' then
     local m = mat_name(nd.mat_type, nd.mat_index)
     if m and m:match('^[a-z_]+$') then return 'bar:' .. m end

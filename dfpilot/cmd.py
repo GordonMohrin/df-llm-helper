@@ -628,7 +628,8 @@ def run(args, save_dir: Path) -> int:
         return EXIT_BAD
     if args.verb in schema.VERB_BY and args.by not in schema.VERB_BY[args.verb]:
         print(f"refused (not sent): {args.verb} is sent only by "        # CONTRACTS §13 trust rules (R6)
-              f"{' / '.join(sorted(schema.VERB_BY[args.verb]))} (dfllm follow runs the audit itself)")
+              f"{' / '.join(sorted(schema.VERB_BY[args.verb]))}: run `dfllm audit` (it computes the result from a "
+              "kernel snapshot; dfllm follow runs it too)")
         return EXIT_BAD
     try:
         cmd_id, reply = send(save_dir, args.verb, a, by=args.by, wait_s=args.wait, cmd_id=args.id)

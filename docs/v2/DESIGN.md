@@ -155,6 +155,25 @@ Gameplay modules run on `cur_year_tick` deltas, which stay correct under timestr
 - **R2 "grow to ≤75":** R1, plus a drill passed ≤100,800 ticks ago (bridges up ≤T+900, worn ≥90 %, nobody outside at T+1,200, 0 double toggles), soldiers ≥15 % of adults and ≥8 with combat value per soldier ≥ `plan.cv_min` (default 12), ≥30 armed traps on every attacker path, food ≥60 days and drink ≥170 days.
 - **R3 "≥80":** D-01 = Option B and ≥20 % of soldiers wearing iron or steel.
 - **Demotion:** readiness red → max-pop frozen at the current population and beauty pauses. The S10 read of the difficulty siege triggers sets the R2 ceiling at trigger − 5, leaving margin for births and visitors.
+- **R0 → R1 blockers** (state `ready.fail` at R0, `status` line `SIEGE UNREADY (R0): …`, event SIEGE_UNREADY; `lua/dfllm/readiness.lua`):
+
+  | Token | Means | First fix |
+  |---|---|---|
+  | `audit` | no audit result yet. readiness exports an audit snapshot monthly and after defense stages (only once the manifest has geometry); follow's audit job turns it into the `audit` verb | keep `dfllm follow` running (`--no-auto` keeps the audit) or run `dfllm audit` |
+  | `audit_old` | the last audit is older than a season (100,800 ticks) | the same |
+  | `audit_fail` | `bp.topo.audit` said ok=false; its own reasons are the AUDIT event's `fails` (SIEGE_UNREADY `afails`), e.g. `manifest: no Z2 trap hall`, `stairs: need a civilian and a separate military stair`, `levers: B1 has 1 lever(s), needs 2` | fix what they name, then `dfllm audit` |
+  | `bypass` | with every bridge lowered and every door open, a path from the map edge (or the snapshot border) reaches Z3/Z4 without crossing the trap hall Z2, or there is no Z2 | wall the extra ways in; doors count for nothing |
+  | `refuge_sep` | no walkable refuge (`manifest.refuge.anchor`), or it is not reachable from the core Z4 without Z1/Z2/Z3, or attackers reach it without passing Z4 | fortcore stage 3 refuge (Tiefe+), a dead end below the core |
+  | `civ_sep` | no civilian plus a separate military stair (≥ 2 tiles apart), the civilian stair inside Z1/Z2/a kill box or on the attack path to Z3, or core → refuge needs attacker zones or the military stair | fortcore stairs |
+  | `caverns` | a cavern tile is reachable from Z3/Z4 | 2-wall airlock (§10) |
+  | `no_kern`, `no_refuge` | burrow Kern+ / Tiefe+ (manifest roles `kern`/`refuge`) missing | fortcore stages 1 / 3, or the burrows screen |
+  | `no_outer`, `no_inner` | no manifest bridge of role `outer` (O1) / `inner` (B1) | fortcore stage 3 / 2 |
+  | `bridge:<B>` | gate cannot read manifest bridge `<B>` (not built yet, or destroyed) | build it (again) |
+  | `levers:<B>` | fewer than 2 levers linked to `<B>` | build the levers; gate links built ones in PEACE |
+
+  R1 → R2: `drill` (no passed drill), `drill_old`, `redrill` (a siege since the pass), `army<N%`, `soldiers<8`, `cv<N`, `traps<30`, `food<N`, `drink<N`, `military?`/`food?`/`drink?` (no number yet). R2 → R3: `option_a` (D-01), `metal<20%`. A fort without the fortcore manifest stays R0.
+- **Siege readiness gate (FR-65):** while R0 fails in PEACE, readiness emits SIEGE_UNREADY (A): the blockers, the ways in without a door or bridge from seal's last entrance check (`x,y,z kind`), the last audit's trap count and its own fail texts; first 2 days after a load at the earliest, then after a game month and 30 real minutes (10 when a blocker or an open way in is new; `util/cadence`). `status` never shows a plain PEACE then: line 1 reads `PEACE UNREADY`, line 2 `SIEGE UNREADY (R0): … | 2 ways in without door or bridge: … | traps 0 | next: …`.
+- **Drills** start by themselves (drill.lua: the first one, yearly, every season while the plan wants R2, after a siege, retries after a failure), only in PEACE without merchants, ≥ 2 days after a load, with an outer/inner manifest bridge, phase ≥ P5 and soldiers. `drill.hold()` names what is missing (state `ready.dhold`; `status`: `drill never (auto: no bridges; run dfllm cmd drill)`); `dfllm cmd drill` runs one by hand in PEACE (without bridges it fails `no_bridges`, but it exercises the alert and the squads).
 
 **5.5 Economy and labor.**
 - **Baseline on adopt and on every load:** `control-panel enable` for the native list in §3; `prioritize -a defaults`; autochop with wood ≥14; autobutcher with low targets and ≤2 cats; `tailor materials silk cloth yarn`; `pop-control set max-pop 55` and `wave-size 8`; `labormanager mode monitor`.

@@ -11,6 +11,7 @@
 local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
 local geom = require('dfllm.util.geom')
+local CAD = require('dfllm.util.cadence')   -- BUG-022: PROJECT_BLOCKED once per stage and cause
 
 local M = {name = 'runner', every = {ticks = 600},
            reports = {DIG_CANCEL_DAMP = true, DIG_CANCEL_WARM = true, CAVE_COLLAPSE = true,
@@ -30,6 +31,11 @@ M.CFG = {
   dry_every = 2 * DAY,   -- dig measurement by quickfort dry run when there is no snapshot module
   keep_every = 3 * DAY, req_cool = 7 * DAY,
   lost_pct = 10,         -- buildings still missing after one re-apply that let a stage pass (%)
+  -- BUG-022 (Run 10: fortcore stage 2 ended build_lost for two game years, B1 and its levers never built): a
+  -- build_lost stage is tried again from its dig stage once the hidden tiles that dig completed without are
+  -- revealed or more of its missing cells stand on open floor (checked every retry_check), at the latest
+  -- retry_every after the block; at most retry_max times; skip_max hidden tiles kept per project
+  retry_every = C.TICKS.SEASON, retry_check = DAY, retry_max = 8, retry_probe = 120, skip_max = 200,
   plan_loads = 1, list_max = 64, done_keep = 16, fail_max = 3,
   orders_cells = 8,      -- cells per quickfort 'orders' call (S6: one 19-cell call took 60 ms; KPI: any call
                          -- <= 50 ms; about 8 ms fixed plus 1-2 ms per cell), one call per slice
@@ -154,6 +160,7 @@ end
 local function forget(id)
   for k in pairs(S.tiles) do if k:sub(1, #id + 1) == id .. '/' then S.tiles[k] = nil end end
   S.bbox[id], S.meas[id] = nil, nil
+  if S.rt and S.rt.skip then S.rt.skip[id], S.rt.rty[id], S.rt.pb[id] = nil, nil, nil end   -- BUG-022 records
 end
 
 -- data[dz][dy][dx] = text relative to the chunk pos (quickfort.txt:170-176, api.lua:13)
@@ -389,8 +396,9 @@ local function probe(K, t, seen)
   S.slice.probes = S.slice.probes + 1
   local key = t[4]
   if type(v) ~= 'table' or v.c == nil or v.c == '?' then          -- hidden or off the map
-    if MINE[key] and on_map(t[1], t[2], t[3]) and not on_edge(t[1], t[2], t[3]) then return 'pend', nil, true, true end
-    return 'skip'
+    local onm = on_map(t[1], t[2], t[3])
+    if MINE[key] and onm and not on_edge(t[1], t[2], t[3]) then return 'pend', nil, true, true end
+    return 'skip', nil, nil, onm or nil                             -- BUG-022: hidden, kept for the retry
   end
   if HAZARD[v.c] == 'water' and M.CFG.damp_dig then
     local depth = int(v.flow) or 7
@@ -470,11 +478,30 @@ local function lost(K, P, d, R, ci, t)
   dirty()
 end
 
+-- BUG-022: the hidden tiles a dig stage completed without (quickfort could not designate them, or nobody reached
+-- them), per chunk: m.runner skip[<proj>] = {si, n, c = {['<chunk>'] = {{x, y, z}, ...}}}, at most skip_max tiles.
+-- A build_lost retry asks snapshot.tile whether they are revealed now (hidden tiles answer nil and are never read).
+local function note_skipped(P, si, ci, list)
+  if #list == 0 then return end
+  local r = S.rt.skip[P.id]
+  if type(r) ~= 'table' or r.si ~= si then r = {si = si, n = 0, c = json.object{}}; S.rt.skip[P.id] = r end
+  r.c = obj(r.c)
+  local key = tostring(ci)
+  local l = type(r.c[key]) == 'table' and r.c[key] or {}
+  for _, t in ipairs(list) do
+    if r.n >= M.CFG.skip_max then break end
+    l[#l + 1] = {t[1], t[2], t[3]}
+    r.n = r.n + 1
+  end
+  r.c[key] = l
+  dirty()
+end
+
 local function measure_dig(K, P, d, R)
   local tiles = stage_tiles(P.id, d, P.stage)
   local m = S.meas[P.id]
   if not m or m.si ~= P.stage then
-    m = {si = P.stage, ci = 1, pend = 0, done = 0, hid = 0, snap = S.snap_ok}
+    m = {si = P.stage, ci = 1, pend = 0, done = 0, hid = 0, snap = S.snap_ok, hidl = {}}
     if not m.snap then                       -- dry runs: one pass per dry_every, start to start
       if R.dry and now(K) - R.dry < M.CFG.dry_every then return 'done' end
       R.dry = now(K)
@@ -491,10 +518,13 @@ local function measure_dig(K, P, d, R)
         R.sp = obj(R.sp)                     -- per chunk: tiles seen designated ('1'), persisted
         local sk = tostring(ci)
         local sp = R.sp[sk] or ''
+        local hs, hp = {}, {}                -- BUG-022: hidden tiles skipped / pending in this chunk
         for i, t in ipairs(tl) do
           local seen = sp:sub(i, i) == '1'
           local r, why, mark, hidden = probe(K, t, seen)
-          if hidden then m.hid = m.hid + 1 end
+          if hidden then
+            if r == 'pend' then m.hid = m.hid + 1; hp[#hp + 1] = t else hs[#hs + 1] = t end
+          end
           if r == nil then S.snap_ok, S.meas[P.id] = false, nil; return 'yield' end   -- dry run instead
           if mark and not seen then sp = mask_set(sp, i); R.sp[sk] = sp; dirty() end
           if r == 'breach' then
@@ -509,8 +539,10 @@ local function measure_dig(K, P, d, R)
           end
           if r == 'pend' then pend = pend + 1 elseif r == 'skip' then skip = skip + 1 else done = done + 1 end
         end
+        if pend > 0 then m.hidl[#m.hidl + 1] = {ci = ci - 1, hs = hs, hp = hp} end
         if pend == 0 then
           R.sp[sk] = nil
+          note_skipped(P, P.stage, ci - 1, hs)
           if skip > 0 then
             R.sk = (R.sk or 0) + skip
             K.log('info', '%s %s chunk %d: %d tiles never designated, skipped', P.id, d.stages[P.stage + 1].label,
@@ -539,6 +571,12 @@ local function measure_dig(K, P, d, R)
     K.log('warn', '%s %s: %d hidden tiles never reached; stage completes without them', P.id,
           d.stages[P.stage + 1].label, m.pend)
     R.sk = (R.sk or 0) + m.pend
+    for _, h in ipairs(m.hidl) do
+      local all = {}
+      for _, t in ipairs(h.hs) do all[#all + 1] = t end
+      for _, t in ipairs(h.hp) do all[#all + 1] = t end
+      note_skipped(P, P.stage, h.ci, all)
+    end
   end
   R.lost = R.sk or 0                         -- tiles left undug because quickfort skipped them
   return 'complete'
@@ -569,7 +607,13 @@ local function measure_build(K, P, d, R)
     dirty()
     return 'reapply'
   end
-  if lost * 100 > total * M.CFG.lost_pct then set_blocked(K, P, 'build_lost'); return 'done' end
+  if lost * 100 > total * M.CFG.lost_pct then
+    set_blocked(K, P, 'build_lost')
+    local q = obj(S.rt.rty[P.id])          -- BUG-022: the retry record (count kept across retries)
+    q.n, q.t, q.sig, q.c = int(q.n) or 0, now(K), nil, now(K)
+    S.rt.rty[P.id] = q
+    return 'done'
+  end
   R.lost = lost
   return 'complete'
 end
@@ -1381,22 +1425,181 @@ local function keepers(K)
   end
 end
 
+---------------------------------------------------------------- build_lost: missing pieces and the retry (BUG-022)
+-- does a cell's tile hold what the stage placed? A building there (findAtTile, else snapshot's bld), or a finished
+-- construction / closing tile (snapshot legend); hidden tiles hold nothing we may know of
+local function cell_present(K, t)
+  local find = dfhack.buildings and dfhack.buildings.findAtTile
+  if find then
+    local ok, b = pcall(find, t[1], t[2], t[3])
+    if ok and b then return true end
+  end
+  local okt, tile = K.call('snapshot', 'tile', t[1], t[2], t[3])
+  if not (okt and type(tile) == 'table') then return false, nil end
+  return (tile.bld ~= nil and tile.bld ~= '') or OCCUPIED[tile.c] == true, tile
+end
+
+-- the name of a piece: the manifest bridge whose footprint holds the cell (B1), a bridge's lever ('lever B1'),
+-- 'trap' for a trap key, else the key
+local function piece_name(d, t, key)
+  local br = type(d.manifest) == 'table' and type(d.manifest.bridges) == 'table' and d.manifest.bridges or {}
+  local names = {}
+  for n in pairs(br) do names[#names + 1] = n end
+  table.sort(names)
+  for _, n in ipairs(names) do
+    local b = br[n]
+    local fp = type(b) == 'table' and b.fp
+    if type(fp) == 'table' and #fp == 6 and geom.in_bbox(t, fp) then return n end
+    for _, l in ipairs(type(b) == 'table' and type(b.levers) == 'table' and b.levers or {}) do
+      if l[1] == t[1] and l[2] == t[2] and l[3] == t[3] then return 'lever ' .. n end
+    end
+  end
+  if key:sub(1, 1) == 'T' and key ~= 'Tl' then return 'trap' end
+  if key == 'Tl' then return 'lever' end
+  return key
+end
+
+-- the pieces of the blocked build stage still missing: {'B1', 'lever B1 x2', 'trap x3'} (<= 8, first-seen order) and
+-- the number of missing cells that stand on open floor now (the retry signature)
+local function missing_pieces(K, P, d)
+  local st = d and d.stages[P.stage + 1]
+  if not (st and st.mode == 'build') then return {}, 0 end
+  local order, cnt, open = {}, {}, 0
+  for _, ch in ipairs(st.chunks) do
+    for _, cell in ipairs(ch.cells) do
+      local tl = {}
+      cell_tiles(ch, cell, tl)
+      local key = tl[1] and tl[1][4] or ''
+      local cons = key:sub(1, 1) == 'C'
+      local miss, floor = false, false
+      for i, t in ipairs(tl) do
+        if i > 1 and not cons then break end                  -- a building occupies its cell's first tile
+        local here, tile = cell_present(K, t)
+        if not here then
+          miss = true
+          if tile and tile.c == '.' then floor = true end
+        end
+      end
+      if miss then
+        local n = piece_name(d, tl[1], key)
+        if not cnt[n] then cnt[n] = 0; order[#order + 1] = n end
+        cnt[n] = cnt[n] + 1
+        if floor then open = open + 1 end
+      end
+    end
+  end
+  local out = {}
+  for i, n in ipairs(order) do
+    if i > 8 then break end
+    out[#out + 1] = trunc(cnt[n] > 1 and (n .. ' x' .. cnt[n]) or n, 60)
+  end
+  return out, open
+end
+
+-- how far the map came since the block: the kept hidden tiles of the project now revealed (snapshot.tile answers
+-- revealed tiles only; at most retry_probe asked) plus the missing cells now on open floor
+local function retry_sig(K, P, d)
+  local n, asked = 0, 0
+  local r = S.rt.skip[P.id]
+  for _, l in pairs(type(r) == 'table' and type(r.c) == 'table' and r.c or {}) do
+    for _, t in ipairs(type(l) == 'table' and l or {}) do
+      if asked >= M.CFG.retry_probe then break end
+      asked = asked + 1
+      local ok, v = K.call('snapshot', 'tile', t[1], t[2], t[3])
+      if ok and type(v) == 'table' and v.c ~= nil and v.c ~= '?' then n = n + 1 end
+    end
+  end
+  local _, open = missing_pieces(K, P, d)
+  return n + open
+end
+
+-- the stage to start a retry from: the last dig stage at or before the blocked stage (its skipped tiles may be
+-- designated now), else the blocked stage itself
+local function retry_from(d, si)
+  for i = si, 0, -1 do
+    if d.stages[i + 1] and d.stages[i + 1].mode == 'dig' then return i end
+  end
+  return si
+end
+
+-- BUG-022 (the live workaround, done by the runner: cancel + re-plan stage 2 at site=same): a build_lost project
+-- runs again from its dig stage once the map came further (retry_sig grew) or retry_every passed, retry_max times
+local function retry_step(K, P, t)
+  local q = S.rt.rty[P.id]
+  if type(q) ~= 'table' then
+    q = {n = 0, t = P.since, c = P.since}
+    S.rt.rty[P.id] = q
+  end
+  q.n = int(q.n) or 0
+  if q.n >= M.CFG.retry_max then return end
+  local d = doc(K, P.id)
+  if not d then return end
+  local why
+  if q.sig == nil then                          -- the baseline, taken in the run that blocked it
+    q.sig, q.c = retry_sig(K, P, d), t
+    dirty()
+  end
+  if t - (int(q.t) or t) >= M.CFG.retry_every then why = 'a season passed'
+  elseif t - (int(q.c) or 0) >= M.CFG.retry_check then
+    q.c = t
+    local sig = retry_sig(K, P, d)
+    if sig > q.sig then why = string.format('%d more tiles revealed or open', sig - q.sig) end
+    dirty()
+  end
+  if not why then return end
+  local from = retry_from(d, P.stage)
+  local blocked = d.stages[P.stage + 1] and d.stages[P.stage + 1].label or '?'
+  q.n, q.t, q.c, q.sig = q.n + 1, t, t, nil
+  P.stage, P.chunk, P.orders_done = from, 0, 0
+  set_blocked(K, P, '')
+  P.pct = pct_of(P, d, 0)
+  S.rt.p[P.id] = new_R(t, from)
+  S.meas[P.id] = nil
+  S.rt.skip[P.id] = nil                       -- the dig stage keeps the tiles it skips this time
+  K.log('info', '%s: build_lost at %s, retry %d/%d from %s (%s)', P.id, blocked, q.n, M.CFG.retry_max,
+        d.stages[from + 1].label, why)
+  dirty()
+end
+
+-- PROJECT_BLOCKED (A) after blocked_a; util/cadence per project: once per stage and cause (a stall that clears and
+-- comes back at the same stage is no news; Run 10: "PROJECT_BLOCKED stalled every few days" for two game years);
+-- build_lost names the missing pieces and the retry, and a spent retry budget is one more (final) announcement
+local function blocked_event(K, P, t)
+  local d = doc(K, P.id)
+  local st = d and d.stages[P.stage + 1]
+  local label = trunc(st and st.label or '', 24)
+  local q = S.rt.rty[P.id]
+  local nr = type(q) == 'table' and int(q.n) or 0
+  local final = P.blocked == 'build_lost' and nr >= M.CFG.retry_max
+  local T = K.now()
+  local ids, toks = {P.id .. ':' .. label}, {final and 'build_lost:final' or P.blocked}
+  local rec = S.rt.pb[P.id]
+  if not CAD.due(rec, T, ids, toks) then return end
+  S.rt.pb[P.id] = CAD.mark(T, ids, toks)
+  local msg = P.id .. ' (' .. P.tpl .. ') blocked: ' .. P.blocked
+  local dd = {proj = P.id, tpl = P.tpl, stage = label, why = P.blocked, ticks = t - P.since}
+  if P.blocked == 'build_lost' then
+    local miss = missing_pieces(K, P, d)
+    dd.missing, dd.retry = miss, nr
+    msg = msg .. ' at ' .. label .. (#miss > 0 and (', missing ' .. table.concat(miss, ', ')) or '')
+    if final then msg = msg .. string.format('; %d retries spent: bp.cancel and place it again', nr)
+    else
+      msg = msg .. string.format('; retry %d/%d once the skipped tiles are revealed, at the latest next season',
+                                 nr + 1, M.CFG.retry_max)
+    end
+  end
+  K.emit('PROJECT_BLOCKED', 'A', trunc(msg, 200), dd)
+  dirty()
+end
+
 ---------------------------------------------------------------- runs
 local function end_run(K)
   local t = now(K)
   if K.mode() == 'PEACE' then
     for _, P in ipairs(S.pd.list) do
+      if P.done ~= 1 and P.blocked == 'build_lost' then retry_step(K, P, t) end
       if P.done ~= 1 and P.blocked ~= '' and P.blocked ~= 'cancel' and t - P.since > M.CFG.blocked_a then
-        local R = R_of(K, P)
-        if R.be ~= 1 then
-          local d = doc(K, P.id)
-          local st = d and d.stages[P.stage + 1]
-          K.emit('PROJECT_BLOCKED', 'A', P.id .. ' (' .. P.tpl .. ') blocked: ' .. P.blocked,
-                 {proj = P.id, tpl = P.tpl, stage = trunc(st and st.label or '', 24), why = P.blocked,
-                  ticks = t - P.since})
-          R.be = 1
-          dirty()
-        end
+        blocked_event(K, P, t)
       end
     end
   end
@@ -1456,6 +1659,7 @@ function M.init(K)
   M.CFG.damp_dig = rt.damp_dig == true
   rt.v, rt.p, rt.hist, rt.planned, rt.req, rt.keep = 2, obj(rt.p), obj(rt.hist), obj(rt.planned), obj(rt.req),
     obj(rt.keep)
+  rt.skip, rt.rty, rt.pb = obj(rt.skip), obj(rt.rty), obj(rt.pb)   -- BUG-022: skipped tiles, retries, cadence
   if type(rt.exh) ~= 'string' then rt.exh = '' end
   K.persist.set('m.runner', rt)
   S.rt = rt

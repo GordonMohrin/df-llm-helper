@@ -2,7 +2,8 @@
 
 Reads the hook JSON from stdin as UTF-8 ({tool_name, tool_input: {command}, cwd, ...}) and judges every
 dfhack-run call in tool_input.command with lint.cmd(shell=True), including the CONTRACTS §13 trust rules
-(--by only llm/cli, no `dfllm cmd audit`, no hand-written inbox JSON with "by"). Shell tools: Bash,
+(--by only llm/cli, no `dfllm cmd audit`, no hand-written inbox JSON with "by"; `dfllm audit` stays allowed: it
+takes no result args and sends what bp.topo.audit computes from a kernel snapshot). Shell tools: Bash,
 PowerShell, Monitor and the desktop terminal (TOOLS, matched in .claude/settings.json); any other tool
 whose input carries a command string is judged the same way. File tools (FILE_TOOLS: Write, Edit,
 MultiEdit, NotebookEdit) may not write under dfllm-runtime/ or to config/decisions.yaml.

@@ -137,7 +137,7 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
     def is_int(v, lo, hi):
         return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
     for k in doc:
-        if k not in ("v", "about", "clock", "hold_quiet_days", "ack_timeout_s", "defaults", "gate"):
+        if k not in ("v", "about", "clock", "hold_quiet_days", "ack_timeout_s", "defaults", "refuge", "gate"):
             errs.append(f"{name}: unknown key {k!r}")
     clock = doc.get("clock", {})
     if not isinstance(clock, dict):
@@ -152,6 +152,17 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
         errs.append(f"{name}: hold_quiet_days: int 0..30 expected")
     if "ack_timeout_s" in doc and not is_int(doc["ack_timeout_s"], 5, 3600):
         errs.append(f"{name}: ack_timeout_s: int 5..3600 expected")
+    # seal's refuge knobs (refuge beds, BUG-019): beds >= ceil(citizens x bed_pct / 100); BREACH level days
+    ref = doc.get("refuge", {})
+    if not isinstance(ref, dict):
+        errs.append(f"{name}: refuge must be an object")
+    else:
+        for k, v in ref.items():
+            lim = {"bed_pct": (0, 100), "breach_days": (0, 60)}.get(k)
+            if lim is None:
+                errs.append(f"{name}: refuge.{k}: unknown key")
+            elif not is_int(v, *lim):
+                errs.append(f"{name}: refuge.{k}: int {lim[0]}..{lim[1]} expected, got {v!r}")
     dflt = doc.get("defaults", {})
     if not isinstance(dflt, dict):
         errs.append(f"{name}: defaults must be an object")

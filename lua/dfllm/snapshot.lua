@@ -21,6 +21,7 @@ M.CFG = {
   liquid_tiles = 4096,            -- tiles one liquids() call may read (FR-47)
   items_tiles = 400,              -- tiles one items_at() call may cover (BUG-009: a building footprint)
   items_max = 200,                -- items one items_at() call returns
+  group_pts = 4000,               -- points one groups() call reads (inspect workload: citizens and open jobs)
 }
 local PURPOSES = {audit = true, sites = true, debug = true}
 local ID_OK = '^[A-Za-z0-9_%-]+$'
@@ -284,6 +285,27 @@ function M.items_at(K, x0, y0, x1, y1, z)
   return out
 end
 
+-- units standing on the revealed tiles of a level rect (BUG-015: what stands on and next to a door the lockdown cannot
+-- keep forbidden): {{id, x, y}} of the visible living units there, sorted by id; at most M.CFG.items_tiles tiles per
+-- call. Hidden units (ambushers) and hidden tiles never count.
+function M.units_at(K, x0, y0, x1, y1, z)
+  x0, y0, x1, y1, z = int(x0), int(y0), int(x1), int(y1), int(z)
+  local out = {}
+  if not (x0 and y0 and x1 and y1 and z) or x1 < x0 or y1 < y0 then return out end
+  if (x1 - x0 + 1) * (y1 - y0 + 1) > M.CFG.items_tiles then return nil, 'rect too large' end
+  local getTileFlags = dfhack.maps.getTileFlags
+  for _, u in ipairs(df.global.world.units.active) do
+    local p = u.pos
+    if p.z == z and p.x >= x0 and p.x <= x1 and p.y >= y0 and p.y <= y1 and not dfhack.units.isDead(u)
+       and not dfhack.units.isHidden(u) then
+      local des = getTileFlags(p.x, p.y, p.z)
+      if des and not des.hidden then out[#out + 1] = {u.id, p.x, p.y} end
+    end
+  end
+  table.sort(out, function(a, b) return a[1] < b[1] end)
+  return out
+end
+
 -- walk-group query (iter2, care's mood reach): may a walker standing at a reach b? Both are revealed
 -- positions {x, y, z} the caller already knows (the moody dwarf, an item on a revealed tile). It is DF's own
 -- job-feasibility test (dfhack.maps.canWalkBetween, Lua API.txt; the same question act.link_lever asks for
@@ -320,6 +342,44 @@ function M.far(K, x, y, z)
     return dfhack.maps.isValidTilePos(pos) and dfhack.maps.getWalkableGroup(pos) or 0
   end)
   return ok and grp ~= 0 and grp ~= home_grp.g
+end
+
+-- groups(K, pts, near): the walkable group of each point {x, y, z} (economy's inspect workload: which open jobs and idle
+-- citizens share a group). With `near`, a tile without a group (the wall a dig job cuts, the trunk a FellTree job fells)
+-- answers the first group of its 8 neighbours on the level, then of the tiles above and below. 0 = no walkable group,
+-- -1 = hidden, invalid or a fault (callers count -1 as reachable); hidden neighbours are never read. At most
+-- M.CFG.group_pts points a call (the rest answer -1).
+local NEAR = {{-1, -1, 0}, {0, -1, 0}, {1, -1, 0}, {-1, 0, 0}, {1, 0, 0}, {-1, 1, 0}, {0, 1, 0}, {1, 1, 0},
+              {0, 0, 1}, {0, 0, -1}}
+local function grp_at(x, y, z)
+  if not dfhack.maps.isValidTilePos(x, y, z) then return -1 end
+  local des = dfhack.maps.getTileFlags(x, y, z)
+  if not des or des.hidden then return -1 end
+  return int(dfhack.maps.getWalkableGroup(xyz2pos(x, y, z))) or -1
+end
+local function grp_near(x, y, z, near)
+  local own = grp_at(x, y, z)
+  if own ~= 0 or not near then return own end
+  for _, d in ipairs(NEAR) do
+    local g = grp_at(x + d[1], y + d[2], z + d[3])
+    if g > 0 then return g end
+  end
+  return 0
+end
+function M.groups(K, pts, near)
+  local out, lim = {}, M.CFG.group_pts or 4000
+  for i, p in ipairs(type(pts) == 'table' and pts or {}) do
+    local g = -1
+    if i <= lim and type(p) == 'table' then
+      local x, y, z = int(p.x or p[1]), int(p.y or p[2]), int(p.z or p[3])
+      if x and y and z then
+        local ok, v = pcall(grp_near, x, y, z, near)
+        g = ok and v or -1
+      end
+    end
+    out[i] = g
+  end
+  return out
 end
 
 -- outside_near(K, pts, r): open-sky test for the reflex module (FR-49/52: the fort's entrance doors, a predator on a

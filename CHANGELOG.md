@@ -4,6 +4,131 @@
 - `gate.watch()` gives sense the footprints of the bridges with work; sense lists the visible friendly non-citizens there (visitors, merchants, tame
   animals) as `census.h.friends`, and gate holds the pull for them like for citizens. Test in `tests/lua/test_gate_footprint.lua`.
 
+## Run 10 batch merged: what to do after `git pull` (2026-10-16)
+- Reload: `dfhack-run dfllm reload` (kernel parts: SIEGE_UNREADY, LOCKDOWN_PARTIAL, TOOL_BLOCKED, refuge levels, CUTOFF re-read,
+  build_lost retry, mood cloth kinds); restart `dfllm follow --no-auto` (it audits again; `--no-audit` switches that off).
+- Audit now: `python -m dfpilot audit`; drill by hand: `python -m dfpilot cmd drill '{"why":"manual check"}'`.
+- Refuge (BUG-018/019): an `Innen+` painted before this version may contain exposed tiles and stay refused: delete it on the
+  burrows screen, seal repaints it. `inspect what=refuge` shows `open`, `exp`, `dead`, `hint`. Forts with doorless entrances now
+  often get `flee` (alert off) instead of a confinement with the enemy.
+- Tools (BUG-023): the kernel reports `TOOL_BLOCKED`; the switch `tools.equip_update` stays off until Gordon says yes (fair play).
+- Still open in this batch: trade (BUG-026 cause: priority and clock while trading, `cloth:plant`, `trade.retry`,
+  `wanted_matches`) and the rest of BUG-027 (alert first, backup lever, BRIDGE_CRUSH); they follow in the next commits.
+
+## Siege readiness gate FR-65, audit and drill with `follow --no-auto` (2026-10-16; branch fix-ready, offline, live-untested)
+- **Run 10 (Handlelock): `audit FAIL never` and `drill never` for the whole fort.** The session ran `dfllm follow --no-auto`,
+  which also switched off the audit job (the only sender of the `audit` verb), `dfllm cmd audit` is refused by design
+  (VERB_BY, hook) and `snapshot purpose=audit` alone produces no result. Now `--no-auto` stops only the automatic
+  placements (tombs, workshops, farms, P0/P1 starters); the audit still runs (it changes nothing in the fort, it is the
+  readiness input). `--no-audit` switches it off too.
+- **`dfllm audit [--snap ID] [--timeout S] [--wait S]`**: follow's audit job once, on demand: a fresh audit snapshot (the
+  kernel's default box: manifest geometry + margin; ids `aud…`, which follow leaves alone) or `--snap` (an audit snapshot
+  of this boot), the kern manifest, `bp.topo.audit`, the `audit` verb (`by:'follow'`; shared code `wake.compute_audit`).
+  It takes no result args, so the trust rule holds: the hook and `dfllm cmd` still refuse a hand-written `dfllm cmd audit`
+  and now point to `dfllm audit`. Exit 0 stored, 1 refused (e.g. `unknown snap`), 2 not sent, 3 no reply.
+- **Drills were scheduled all along** (first, yearly, every season for R2, after a siege, retries), but only with an
+  outer/inner manifest bridge, phase ≥ P5 and soldiers, so a fort without fortcore never drilled and nobody saw why.
+  New public `drill.hold()` (`no bridges`, `phase P3<P5`, `no soldiers`, `retry wait`, `merchants`, …), published by
+  readiness as `ready.dhold`; `status`: `drill never (auto: no bridges; run dfllm cmd drill)`, `audit never (run dfllm audit)`.
+- **FR-65:** readiness emits **SIEGE_UNREADY (A)** while R0 fails in PEACE: the R1 blockers (`no_outer`, `bridge:B1`,
+  `levers:B1`, `refuge_sep`, …), the ways in without a door or bridge from seal's last entrance check (`x,y,z kind`, via the
+  public `seal.entrance_doors`; seal.lua is unchanged), the last audit's trap count and its own fail texts; first 2 days
+  after a load at the earliest, then after a game month and 30 real minutes (10 when a blocker or an open way in is new;
+  util/cadence, the record persists in `m.readiness`). State `ready.open/ents/dhold` (optional). `status` and `brief`
+  never show a plain PEACE at R0: line 1 `PEACE UNREADY`, line 2 `SIEGE UNREADY (R0): <blockers> | 2 ways in without door
+  or bridge: … | traps 0 | next: dfllm audit; wall/door the open ways in …`. follow's hint: `inspect entrances`, then
+  `dfllm audit`. The R0 → R1 tokens are explained in `docs/v2/DESIGN.md` §5.4 (table) and RULES §8.
+- Tests: `tests/lua/test_readiness.lua` (2 FR-65 cases: payload, cadence, reload, PEACE only, R1 quiet, no entrance check),
+  `tests/lua/test_drill.lua` (`drill.hold` reasons, `ready.dhold`), `tests/test_cli_wake.py` (`--no-auto` keeps the
+  audit, `--no-audit`, `aud…` snapshots, `dfllm audit` fresh/`--snap`/refusals, the wake hint), `tests/test_cli_status.py`
+  (UNREADY lines, budget, schema), `tests/test_integration_v2.py` (trust rules for `dfllm audit`).
+- **How to use / Live check (game session with `--no-auto`):** restart the watcher (`python -m dfpilot follow --no-auto`:
+  it now audits every audit snapshot), then run the audit at once: `python -m dfpilot audit` (prints `audit of snapshot
+  aud… : ok no, traps 0, bypass yes, …`, the fails and `ok … audit: audit stored, readiness R0`); an older audit snapshot of
+  this boot: `python -m dfpilot audit --snap <id>` (ids: `python -m dfpilot events --type SNAPSHOT_READY`). A drill by hand
+  (PEACE, no merchants): `python -m dfpilot cmd drill '{"why":"manual check"}'`, result after T+1,200 in `python -m dfpilot
+  events --type DRILL_RESULT`. Check: `python -m dfpilot status` shows `audit FAIL <age>` or `audit ok` instead of `audit
+  never`. The kernel part (SIEGE_UNREADY, `ready.open/ents/dhold`, `drill never (auto: …)`) comes with the next load of the
+  save; then within 2 game days at R0 in PEACE a `SIEGE_UNREADY` wake whose ways in match `python -m dfpilot cmd inspect
+  '{"what":"entrances"}'` (`python -m dfpilot events --type SIEGE_UNREADY`).
+## Lockdown doors read back, mood needs from the attached items, build_lost retried, embark fails early, BUG-015/017/022/020 (2026-10-16; offline, live-untested)
+- **BUG-015:** reflex reads every door it forbade back on the next pass; a door whose flag fell back leaves the count and the undo, is
+  named `partial lockdown: door 16970 (74,70,117) refused (flag reset)` and announced once per lockdown by the new class-A event
+  `LOCKDOWN_PARTIAL` (with the units and items on its tile), and is tried once more (forbidden + closed, `act.door_forbid` `close`)
+  when its tile changed, at the latest 1,200 ticks later. LOCKDOWN_END counts only doors really held (`, 1 refused (flag reset)`);
+  state `alarm.dref`; new `snapshot.units_at`. Tests in `tests/lua/test_lockdown.lua`, `tests/lua/test_kern_act.lua`.
+- **BUG-017:** MOOD_RISK and MOOD_NEED list only mood filters still without an attached item: care reads the mood job again at
+  report time, the thirst/hunger MOOD_RISK drops classes the dwarf collected since the last run (`nothing missing`), and
+  `reserve.job_needs` matches attached items without a filter index to the filter they fit. A class with no item in the fort is
+  named (`leather: no source in the fort`, d `nosrc`). Cloth and thread kinds (Run 10 y418): `care.mood_wants` `buy` =
+  `cloth:plant|silk|yarn` (`thread:*`) for a kinded filter, MOOD_RISK names the kind's stock (`cloth(plant) 0 in stock`), and the
+  mood reserve splits its cloth/thread hold over the kinds in stock (line `cloth 10/10 (plant 2, silk 5, yarn 7 in stock)`).
+  Tests in `tests/lua/test_care_moods.lua`, `tests/lua/test_reserve.lua`.
+- **BUG-022:** a dig stage keeps the hidden tiles it completed without (m.runner `skip`, per chunk); a `build_lost` project runs again
+  from its dig stage once those tiles are revealed or more missing cells stand on open floor (checked daily, at the latest a season
+  later, 8 retries). PROJECT_BLOCKED follows the cadence rule (once per project, stage and cause; the budget spent once more) and names
+  the missing pieces (`missing B1, lever B1 x3, trap`, d `missing`, `retry`). Tests in `tests/lua/test_runner.lua`.
+- **BUG-020 (mitigated):** `embark.py scan` stops early with `local.place: rectangle does not follow the mouse: held A and B,
+  rectangle stays at X` when two confirmed misses for different held pixels show the same rectangle, instead of learning a k from
+  them and running the hold out of the window; the cause stays open. Test in `tests/lua/test_embark.lua`.
+## Economy: miners and woodcutters with their tools, reachable workload, steel chain, webs, BUG-023/BUG-024 (2026-10-16; commit 47d98c4, offline, live-untested)
+- **Miners sizing (Run 10, Handlelock: 29-33 dig jobs waited, target 2):** one miner per `tools.details.Miners.tiles_per` = 10 dig
+  jobs (was 40), one per `runner_per` = 40 of the runner's dig tiles, `ore` = 1 more while metal is wanted and the fort has no ore;
+  every tool detail is capped by its free unreserved tools plus the tools its members hold (picks a squad uniform reserved are no
+  free picks); when it shrinks, members holding the tool stay first. A log line says when one dig front keeps several miners idle.
+- **Members the player put in stay:** economy takes off only the members it added (persist `m.economy.tools[name].mine`); the
+  others count toward the target and make no WORK_DETAIL. Members present at the first run after the update count as the
+  player's. Hunters and fishers still all leave when the fort leaves PEACE.
+- **Labors through `act.work_detail`:** a member without the detail's labor (`labor` = MINE, CUTWOOD, HUNT, FISH) gets it through
+  `act.work_detail` (Lua writes to `assigned_units` set no labor), at most every `repair_days`. `act.work_detail` opts `only`: a
+  miner leaves the everybody-does-this details that are no tool details (Planters in mode 1 took six of eight miners to the farms)
+  and their labors go off except `keep_labors` and those of a selected detail; not during a starvation.
+- **TOOL_BLOCKED (A, BUG-023):** Miners/Woodcutters members without pick/axe for `block_days` while the detail's jobs wait and free
+  tools exist; the event names members, free tools in bins / loose / reserved and a position; cadence rule. The starving-postings
+  line ends `: no axe in hand (Woodcutters 2 of 2)`. The direct equip (moveToInventory) is not implemented (fair play); the
+  engine's pickup request `tools.equip_update` is in `act.work_detail` but off until Gordon says yes. No-bin storage and the
+  E18 pick-uniform squad were not built: v1 measured bins are not the cause and pick uniforms reserve the picks.
+- **`inspect workload` (FR-40):** unclaimed = no worker, a live job-board posting (else `waiting`) and on a citizen's walk group
+  (new `snapshot.groups`; a dig wall or tree counts by its neighbours); `unreachable` apart; `idle_noreach` (idle adults whose
+  group has no unclaimed job); `blocked`, `cloth`, `tools.{pick,axe}_{bin,res}`.
+- **Steel chain:** manager orders waiting for steel bars (`no bars:INORGANIC:STEEL`) get `dfllm:pig_iron` (PIG_IRON_MAKING) and
+  `dfllm:steel` (STEEL_MAKING) orders when a smelter, iron, flux and fuel exist (iron ore is smelted, charcoal follows the bars);
+  otherwise DECISION_NEEDED `steel` names the missing input once (cadence).
+- **BUG-024:** spider webs are counted apart (`webs`, `webs_near`) and never as thread; WeaveCloth orders say `no collected thread
+  (N webs, none on the walk group)`; a CollectWebs hint (log) only for webs on the citizens' walk group.
+- Contracts: event TOOL_BLOCKED (schema, contract.lua, CONTRACTS §12, RULES §7, wake hint); `act.work_detail(name, id, on, opts?)`;
+  census `w_{pick,axe}_{bin,res}`, `webs`, `webs_near`; config `tools.{block_days,repair_days,equip_update,keep_labors}`,
+  per detail `labor/tool/jobs/runner_per/ore/only`, `metal.steel`.
+- Tests: `tests/lua/test_economy_tools.lua`, `tests/lua/test_economy_reach.lua`, an act case in `tests/lua/test_act_supply.lua`
+  (all fail on the old code); tool-detail tests adapted to the kept player's members.
+- **Live check:** after `git pull` + `dfllm reload`: `inspect workload` (Miners target ~3-4 for 33 dig jobs, `blocked` lists the
+  miners/woodcutters without tools, `unreachable` holds the GatherPlants outside the wall, `cloth.why`); a TOOL_BLOCKED wake with
+  the bin position; kern.log `Miners: ... left the everybody-does-this details` and `labor: ... no axe in hand`; `inspect orders`
+  for the steel orders (pig iron/steel orders or DECISION_NEEDED steel naming the missing input); no WORK_DETAIL for the
+  hand-added miners.
+## Refuge: separated burrows only, BREACH level, the dead end Tiefe+, bed share, CUTOFF confirmed, BUG-018/019/021, FR-67 (2026-10-16; offline, live-untested)
+- **BUG-018:** a burrow is confined to only when no entrance of seal's entrance BFS reaches it without a door, hatch, bridge or floodgate
+  (an exposure flood after every BFS; a porch of <= 12 tiles behind an entrance does not count) and no visible hostile stands in it.
+  REFUGE_FAIL names the entrances (`Kern+: open to 1 entrance 20,10,9 stair_up (5 steps)`, `d.open`); with no separated burrow and no
+  dead end nobody is confined (`flee`): siege turns the alert off even while a lockdown holds it and never substitutes Kern+ for seal's pick.
+  `Innen+` is painted without the exposed tiles.
+- **BUG-019/FR-67:** levels SIEGE (counts) and BREACH (separated, reachable, >= 9 tiles, no counts) for `breach_days` (7). The dead end behind
+  the deepest stair is painted as `Tiefe+` when missing (boot, scans; at once in BREACH or with an entrance into the burrows) and is the
+  last fallback (>= 10 steps from every entrance). Live case Run 10 y419 (`Tiefe+: 63 tiles<109, beds 8<28 -> confining to Kern+`) now
+  gives Tiefe+.
+- **Refuge beds:** beds >= ceil(citizens x `bed_pct` %) (25: the share asleep at once; `beds 18<23` was 18 beds for about 90 citizens, not
+  23 citizens); a shortfall only ranks the burrows (one with enough beds first), never refuses the only usable one; the text says the
+  formula (`beds 18<23 (25% of 90 citizens)`). Knobs `refuge.bed_pct` and `refuge.breach_days` in `config/reflex.json` (lint --config).
+- **BUG-021:** CUTOFF only after the citizens' and the class tiles' groups were read again in one go; the text names a cut-off citizen and a
+  stock tile with their groups (`d.unit/upos/at/agrp`). The entrance check starts over when the walk groups were renumbered while it ran.
+- Tests: `tests/lua/test_seal_refuge.lua` (new), `tests/lua/test_lockdown.lua`, `tests/lua/test_seal.lua`, `tests/test_seal_files.py`,
+  `tests/test_alarm.py`. Events: REFUGE_FAIL `level/flee/open`, CUTOFF `unit/upos/at/agrp` (`dfpilot/schema.py`).
+- **Live check:** `dfllm cmd inspect '{"what":"refuge","key":"refresh"}'`: `burrows.Kern+` shows `sep` (0 with `open` = the doorless
+  entrances), `ok` 0 while an entrance reaches it; `dead` names the dead end and `burrows.Tiefe+` exists (kern.log `seal: Tiefe+ painted
+  with N tiles ...`); `choice.SIEGE/BREACH` name Tiefe+ (`level` BREACH or DEAD) or `flee` 1; `need.beds_rule`; `hint`. If `Innen+`
+  predates this version it may hold exposed tiles (`sep` 0): ask the player to delete it on the burrows screen; seal paints it again
+  without them.
+  After a construction: no CUTOFF with `cause not found`; `inspect reach` `runs.cut_unconfirmed` counts the dropped ones.
 ## BRIDGE_CRUSH and the death cause `crushed` by a bridge, BUG-027 (2026-10-16)
 - gate records each bridge move (the pull, the move window, the units it saw within 5 tiles of the footprint while it pulled or the bridge moved);
   public `gate.moves()`; GATE `moving` names units on or next to the footprint.

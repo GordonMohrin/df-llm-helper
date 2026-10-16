@@ -54,7 +54,9 @@ change the system. Never read ERFAHRUNGEN.md, transcripts or v1 docs as working 
 dfllm doctor                 # ticks/s, kernel ms per module, frame gaps, stalls
 dfllm status                 # <= 300 tokens: DEFCON, mode, clock, lockdown, pop/cap, readiness, alarms
 dfllm brief                  # <= 1.5k tokens: digest for a decision
-dfllm follow                 # Monitor target: one wake line per event that needs you
+dfllm follow                 # Monitor target: one wake line per event that needs you (--no-auto: no
+                             # automatic placements; the path audit still runs)
+dfllm audit [--snap ID]      # the path audit now (fresh audit snapshot -> bp.topo.audit -> verb audit)
 dfllm events --cls A [--since N]
 dfllm wait --until-interrupt [--timeout 15]   # returns at once on an unacked interrupt; keep calls short
 dfllm ack [--n N]            # you saw the interrupts up to N (else the kernel applies their lockdown default)
@@ -122,7 +124,7 @@ helper is experimental; procedure and fair-play limits: `tools/embark/README.md`
 | `bp.cancel` | `{proj, undo?}` | stop a project |
 | `drill` | `{why?}` | PEACE only; the reflex acceptance test |
 | `snapshot` | `{bbox?, purpose?}` | export revealed tiles (audit runs automatically) |
-| `audit` | `bp.topo.audit` result | sent by `follow`, not by you |
+| `audit` | `bp.topo.audit` result | sent by `follow` or `dfllm audit` (they compute it), never `dfllm cmd audit` |
 | `popcap.lower` | `{cap}` | lowers only |
 | `tempo.lower` | `{fps, ttl_s}` | lowers only, never above the mode value |
 | `pause` / `unpause` | `{ttl_s ≤ 600, why?}` / `{}` | rarely; `unpause` releases only an inbox pause. A pause by the player, by DF (save loaded paused) or by a popup is released in DF, by the player |
@@ -145,6 +147,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | SIEGE_START / INVASION / ARRIVAL | the kernel locked down (gates up, doors forbidden, alert, clock 30 t/s) before contact. `dfllm ack`, read `status` (`clock`, `lever_latency_s`, eta); do nothing tactical; tell the player |
 | INTRUDER / PREDATOR | a hostile can walk to the citizens (gate open or a leak) / a wild danger inside. `dfllm ack`; read `status` and the brief; tell the player |
 | LOCKDOWN | an interrupt stood unacked and the kernel applied its default. `dfllm ack`; read `status` |
+| LOCKDOWN_PARTIAL | an entrance door does not hold its forbidden flag (named with what lies on its tile); the kernel tries it once more itself. Read `status` (`doors`, refused); tell the player; a wall or a second door for that opening (`bp.place`) |
 | NO_DEPOT | `dfllm ack`; place a trade depot (`bp sites`, `bp.place`) |
 | SIEGE_END | read the summary; if losses > 10 % of citizens, write a postmortem note and lower `pop_ceiling` in the next plan |
 | GATE_FAIL / BREACH | the fort already sealed itself (BREACH: Tiefe+ alert, B2 up, melee at B2). Do not lower bridges. Check `status` again after 600 ticks; tell the player |
@@ -153,22 +156,24 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | DEATHS_3PLUS | the line names the causes; the brief lists the season's deaths by cause; fix the cause in the plan |
 | DEATHS_PREVENTABLE | ≥ 2 citizens dehydrated or starved within a month (stock days, units, patients in the line): `inspect` `what=reach` (forbidden or cut-off drink/food), `what=refuge`; patients → `what=water_sources` (hospital water); tell the player; fix access in the plan |
 | DRILL_FAIL (2nd in a row) | read `ready.fail`; fix gear, squads or geometry; never raise the cap |
+| SIEGE_UNREADY | readiness is R0 in PEACE (monthly while it fails): the line names the blockers (§8), the ways in without door or bridge and the traps. `inspect` `what=entrances`; wall or door each open way in (`bp.place`), put the missing fortcore pieces into the plan; then `dfllm audit`; tell the player |
 | KERN_FAULT | a module is backed off (`d.backoff_s`; the kernel re-enables it afterwards); note module and error for the repo; do not hot-patch; `module.enable` only after the fix |
 | PERF_DEGRADED | `dfllm doctor`; the supervisor restarts DF only in PEACE after an autosave |
 | DECISION_NEEDED | ask the player the question once; the default applies until they answer. `build_blocked`: `inspect` `what=workload` (`construction.blocked`: kind, pos, fails, why); the kernel already unforbade the items on the site; corpses wait for burial; else `bp.cancel` and place it elsewhere |
 | PLAN_EXHAUSTED | year review now (`plan propose`) |
-| PROJECT_BLOCKED | `bp preview`, then `bp.cancel` and place at another site, or fix the material |
+| PROJECT_BLOCKED | `bp preview`, then `bp.cancel` and place at another site, or fix the material; `build_lost` names the missing pieces (`B1`, traps) and the kernel retries the stage itself (`retry n/8`): wait for it unless the line says the retries are spent |
 | YEAR_REVIEW | §5 year review |
 | GHOSTS | `inspect` `what=tombs` (causes per body); `tombs.repair`; `no_coffin` → the kernel provisions coffins (`inspect tombs` `prov`: want/short/stock/order/proj); `bp.place tombs` only when `prov` reports no space and no project; `no_body` → a memorial slab |
 | HOSPITAL_DRY | follow the recipe in the line (`inspect` `what=water_sources`: a bank to zone or a dig); until water is accepted, a dry hospital zone is worse than none |
 | MOOD_RISK | supply the missing class now (dig, trade, butcher); a mood job is never cancelled |
 | ORDER_BAD | a make-item order without `item_subtype` (DF crash) was removed; never queue such orders, use `order.add` with `item_subtype` |
 | DEPOT_MISSING | a caravan came and no depot stands; the kernel queued a `depot` project: check `status`/`proj`, keep O1 down for builders in PEACE. "does not progress: why" = the planned depot is stuck; without a fortcore depot the kernel moves it inside the entrance after 5 failed resumes (`inspect workload` `depot_move`) |
-| CUTOFF | citizens lost the walk group of their food, drink or beds; the msg names the tile. `inspect reach`; a project still building there: `bp.cancel {proj, undo:true}`; a built wall or raised bridge: tell the player at once (no deconstruct verb) |
+| CUTOFF | citizens lost the walk group of their food, drink or beds (confirmed on groups read again, BUG-021); the msg names the tile, a cut-off citizen and a stock tile with their groups. `inspect reach`; a project still building there: `bp.cancel {proj, undo:true}`; a built wall or raised bridge: tell the player at once (no deconstruct verb) |
 | SEAL_LEAK | the gates are up and a route remains: `inspect entrances` names the leak (tile, door/bridge state); tell the player; place a wall there (`bp.place`), never lower the bridges |
 | PERIMETER_BROKEN | the kernel re-queued the lost walls/doors (`rp…` project); `inspect perimeter` after a day; tell the player about pieces it could not re-queue (bridges) |
 | AUTOLABOR_LEGACY | autolabor ran in legacy mode (the engine of the Run 9 crashes) and the kernel could not set it to monitor (`fixed=0`; a switch that worked is only a kern.log line): tell the player at once (disable autolabor by hand) |
-| REFUGE_FAIL | the civ alert left a burrow without drink, food or beds for the fort's interior (`Innen+`) or no confinement; `inspect refuge`; fix the refuge (stockpile, beds, well) in the next plan |
+| TOOL_BLOCKED | Miners/Woodcutters members hold no pick/axe while their jobs wait (`inspect workload`: `blocked`, `tools`); `reserved` → squad uniforms hold the tools (military weapons); otherwise tell the player: toggling the detail in the work details screen may make DF hand the tools out (untested); `tools.equip_update` and moving a tool into a hand need his explicit yes (fair play) |
+| REFUGE_FAIL | the civ alert refused a burrow: an entrance reaches it without a door/hatch/bridge (`open to N entrances x,y,z ...`) or a hostile stands in it (BUG-018), or it lacks drink/food (beds only rank: `beds 18<23 (25% of 90 citizens)`); the fallback is `Innen+`, the refuge or the dead end `Tiefe+` without counts (BREACH level, 7 days), or none (`flee`: alert off, citizens flee on their own). `inspect refuge` (`open`, `hint`); tell the player; close the named entrances (door or wall) and stock the refuge in the next plan |
 
 ## 8. Readiness gate (only readiness raises max-pop)
 - **R0:** cap 55 (pop-control `max-pop 55`, `wave-size 8`).
@@ -180,6 +185,12 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
   value ≥ `cv_min` + ≥ 30 armed traps on every attacker path + food ≥ 60 days, drink ≥ 170 days.
 - **R3 ≥ 80:** only with D-01 = B and ≥ 20 % of soldiers in iron or steel.
 - Readiness red: max-pop freezes at the current population and beauty pauses.
+- R0 blockers (`ready.fail`; full table DESIGN §5.4): `audit`/`audit_old` no or stale audit → `dfllm audit`;
+  `audit_fail`, `bypass` (a way in skips the trap hall), `refuge_sep` (refuge missing or on the attack path),
+  `civ_sep` (no separate civilian/military stair), `caverns` (open) → the audit's own reasons (AUDIT `fails`,
+  SIEGE_UNREADY `afails`); `no_kern`/`no_refuge` burrow missing; `no_outer`/`no_inner` no O1/B1, `bridge:B` not
+  built, `levers:B` < 2 linked levers → fortcore pieces. `status` says `UNREADY` while R0 fails (SIEGE_UNREADY
+  monthly); `drill never (auto: <why>)` → fix `<why>` (drills run by themselves) or `dfllm cmd drill`.
 
 ## 9. Decisions (the player's answers in `config/decisions.yaml`; defaults until they answer)
 D-01 cap option A (≤ 75) | D-02 difficulty unchanged | D-03 idle rule (> 40 % for 3 days, useful
@@ -201,7 +212,9 @@ gatehouse and barracks + military stair → B2 core seal
 → civilian core (own stair, farms, workshops, stockpiles, well, hospital with own water, tombs,
 dining, bedrooms). Refuge Tiefe+ ≥ 3 z below the core with its own well, food and beds.
 **Barriers** are only raised bridges and walls; doors count for nothing. Smooth outer natural
-walls. No shortcut bridges. Metrics use the real state of every bridge and door.
+walls. No shortcut bridges. Metrics use the real state of every bridge and door. **Refuge (BUG-018):** the civ
+alert confines only to a burrow no entrance reaches without a door, hatch or bridge; else the dead end behind the
+deepest stair (seal paints `Tiefe+` when missing), else nobody is confined and the citizens flee.
 **Siege reflex (in game, you only read it):** visible invaders → SIEGE in the same step, timestream
 off, FPS cap 30, civ alert on Kern+, squads Ready at their stations, bridges up by T+600 when nobody
 is outside, BREACH fallback at T+900. RECOVERY only on 0 visible invaders for 2,400 ticks; bridges

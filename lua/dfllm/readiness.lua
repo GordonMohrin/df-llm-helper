@@ -9,8 +9,16 @@
 --   R3  R2 + D-01 = B + >= 20 % of soldiers in iron or steel body armor
 -- Cap = min(level cap, plan.policy.pop_ceiling, inbox popcap.lower). A demotion freezes max-pop at
 -- the current population; outside PEACE max-pop never rises. Audits are requested monthly and
--- after defense stages through snapshot.export (WP7); the result comes back as the `audit` verb.
+-- after defense stages through snapshot.export (WP7); the result comes back as the `audit` verb
+-- (sent by `dfllm follow`, also with --no-auto, or once by `dfllm audit`).
+-- R0 -> R1 blockers (state ready.fail, DESIGN §5.4): audit (no result yet), audit_old (> a season), audit_fail
+-- (bp.topo.audit ok=false), bypass, refuge_sep, civ_sep, caverns (its flags), no_kern, no_refuge (burrows),
+-- no_outer, no_inner (no manifest bridge of that role), bridge:<B> (gate does not know it), levers:<B> (< 2 linked).
+-- FR-65 siege readiness gate: while R0 fails in PEACE, SIEGE_UNREADY (A) names the blockers, the ways in without a
+-- door or bridge (seal.entrance_doors) and the trap count of the last audit; first at once (2 days after a load),
+-- then again after a game month and 30 real minutes, or 10 when it got worse (util/cadence).
 local geom = require('dfllm.util.geom')
+local CAD = require('dfllm.util.cadence')
 
 local M = {name = 'readiness', every = {ticks = 1200}, verbs = {}, on = {}}
 
@@ -24,6 +32,11 @@ M.LEVERS_EVERY = 33600
 M.MIN_LEVERS, M.TRAPS, M.METAL, M.R2_SOLDIERS = 2, 30, 20, 8
 M.STOCK_HYST = 90        -- % of a stock minimum that keeps R2 once reached (no flapping)
 M.PAD = {8, 16, 1}       -- audit bbox margin around the manifest geometry (live L7: a bedrooms block 8 tiles past the geometry ended on the box edge and read as a way in)
+-- FR-65 SIEGE_UNREADY cadence (util/cadence): a game month, and at least UNREADY_WALL_S real seconds for an unchanged
+-- R0 (at timestream speed a month is 75 s) or UNREADY_NEWS_S when a new blocker or a new open way in appeared
+M.UNREADY_EVERY, M.UNREADY_WALL_S, M.UNREADY_NEWS_S = 33600, 1800, 600
+M.UNREADY_SETTLE = 2400  -- not in the first 2 days after a load (seal's first entrance check, the lever check)
+M.ENTS = 6               -- ways in named by SIEGE_UNREADY (the state keeps 3)
 local QUIET_MODES = {PEACE = true, ALERT = true, RECOVERY = true}   -- audit snapshots allowed
 
 local st      -- persisted m.readiness
@@ -187,6 +200,22 @@ local function request_audit(K, force)
   else K.log('warn', 'readiness: audit snapshot not exported: %s', tostring(ok and id or ok2)) end
 end
 
+-- FR-65: seal's last entrance check (CONTRACTS §7 seal.entrance_doors): independent routes from the map edge to
+-- the citizens, those with neither a door nor a bridge, and those as 'x,y,z kind'; -1, -1 before the first check
+local function entrances(K)
+  local ok, x = K.call('seal', 'entrance_doors')
+  if not ok or type(x) ~= 'table' then return -1, -1, {} end
+  local open = type(x.open) == 'table' and x.open or {}
+  local ents = {}
+  for _, o in ipairs(open) do
+    local p = type(o) == 'table' and o.pos
+    if type(p) == 'table' and int(p[1]) and int(p[2]) and int(p[3]) and #ents < M.ENTS then
+      ents[#ents + 1] = cut(string.format('%d,%d,%d %s', p[1], p[2], p[3], tostring(o.kind or '?')), 24)
+    end
+  end
+  return math.max(0, int(x.routes) or 0), #open, ents
+end
+
 ---------------------------------------------------------------- levels
 local function audit_fails(K, now)
   local a = st.audit
@@ -253,6 +282,9 @@ local function evaluate(K, why)
   rt.fail = out
   rt.cv = cv
   rt.worn = last and int(last.worn) or (kpi and kpi.worn) or 0   -- worn measured by the last drill
+  rt.routes, rt.open, rt.ents = entrances(K)                       -- FR-65
+  local okd, hold = K.call('drill', 'hold')
+  rt.dhold = okd and type(hold) == 'string' and cut(hold, 24) or nil
   if lvl ~= st.lvl then
     local from = st.lvl or 0
     st.lvl, dirty = lvl, true
@@ -303,8 +335,51 @@ local function apply_cap(K)
   end
 end
 
+---------------------------------------------------------------- FR-65 siege readiness gate
+local function unready_msg(fails, routes, open, ents, traps)
+  local ent
+  if routes < 0 then ent = 'entrances not checked yet'
+  elseif open == 0 then ent = string.format('%d way%s in, all with a door or bridge', routes, routes == 1 and '' or 's')
+  else
+    local shown = {}
+    for i = 1, math.min(#ents, 3) do shown[i] = ents[i] end
+    ent = string.format('%d of %d ways in without door or bridge: %s%s', open, routes, table.concat(shown, ', '),
+                        open > #shown and ', ...' or '')
+  end
+  return cut(string.format('siege unready (R0: %s); %s; traps %s', #fails > 0 and table.concat(fails, ', ') or '?',
+                           ent, traps >= 0 and tostring(traps) or '? (no audit)'), 200)
+end
+
+-- while R0 fails in PEACE: SIEGE_UNREADY (A) at once, then after a game month and UNREADY_WALL_S (UNREADY_NEWS_S when
+-- a blocker or an open way in is new); once R1 holds, the record keeps its times (util/cadence quiet)
+local function unready(K)
+  local now = K.now()
+  if (st.lvl or 0) > 0 then
+    local u = st.unready
+    if u and (#u.ids > 0 or #u.toks > 0) then st.unready, dirty = CAD.quiet(u), true end
+    return
+  end
+  if K.mode() ~= 'PEACE' or now.tick - rt.boot < M.UNREADY_SETTLE then return end
+  local fails, ents = rt.fail or {}, rt.ents or {}
+  local due = CAD.due(st.unready, now, ents, fails, {ticks = M.UNREADY_EVERY, wall_s = M.UNREADY_NEWS_S})
+              or CAD.elapsed(st.unready, now, M.UNREADY_EVERY, M.UNREADY_WALL_S)
+  if not due then return end
+  local a = st.audit
+  local traps = a and int(a.min_traps) or -1
+  local afails = {}
+  for i = 1, math.min(type(a) == 'table' and type(a.fails) == 'table' and #a.fails or 0, 3) do
+    afails[i] = cut(a.fails[i], 60)
+  end
+  local routes, open = rt.routes or -1, rt.open or -1
+  K.emit('SIEGE_UNREADY', 'A', unready_msg(fails, routes, open, ents, traps),
+         {fails = fails, afails = afails, routes = routes, open = open, ents = ents, traps = traps,
+          age = a and math.max(0, now.tick - a.tick) or -1})
+  st.unready, dirty = CAD.mark(now, ents, fails), true
+end
+
 local function refresh(K, why)
   evaluate(K, why)
+  unready(K)
   apply_cap(K)
   rt.pub = true
   save(K)
@@ -375,7 +450,16 @@ function M.init(K)
         audit_due = int(p.audit_due) or 0, audit_snap = p.audit_snap}
   if type(p.audit) == 'table' and int(p.audit.tick) then st.audit = p.audit end
   if type(p.inbox) == 'table' and int(p.inbox.cap) then st.inbox = {cap = int(p.inbox.cap), plan = int(p.inbox.plan)} end
-  rt = {lev = nil, applied = false, pub = false, fail = {}, cv = 0, worn = 0}
+  local u = p.unready                                          -- FR-65: the last SIEGE_UNREADY (util/cadence record)
+  if type(u) == 'table' and int(u.t) then
+    local function strs(l)
+      local r = {}
+      for _, v in ipairs(type(l) == 'table' and l or {}) do if type(v) == 'string' then r[#r + 1] = v end end
+      return r
+    end
+    st.unready = {t = int(u.t), w = int(u.w), ids = strs(u.ids), toks = strs(u.toks)}
+  end
+  rt = {lev = nil, applied = false, pub = false, fail = {}, cv = 0, worn = 0, boot = K.now().tick}
   dirty = false
 end
 
@@ -391,12 +475,19 @@ function M.state(K)
   if not rt or not rt.pub then return {} end
   local now = K.now().tick
   local a = st.audit
-  return {ready = {lvl = st.lvl or 0, worn = math.max(0, math.min(100, rt.worn or 0)), cv = math.max(0, rt.cv or 0),
-                   drill_age = rt.pass_tick and math.max(0, now - rt.pass_tick) or -1,
-                   audit = {ok = rt.audit_ok or 0, age = a and math.max(0, now - a.tick) or -1,
-                            min_traps = a and a.min_traps or 0},
-                   fail = rt.fail},
-          pop = {cap = M.cap(K), gate_cap = rt.gate_cap or M.CAPS[0]}}
+  local r = {lvl = st.lvl or 0, worn = math.max(0, math.min(100, rt.worn or 0)), cv = math.max(0, rt.cv or 0),
+             drill_age = rt.pass_tick and math.max(0, now - rt.pass_tick) or -1,
+             audit = {ok = rt.audit_ok or 0, age = a and math.max(0, now - a.tick) or -1,
+                      min_traps = a and a.min_traps or 0},
+             fail = rt.fail,
+             open = math.max(-1, rt.open or -1)}                -- FR-65: ways in without door or bridge (-1 unknown)
+  if rt.ents and #rt.ents > 0 then
+    local e = {}
+    for i = 1, math.min(#rt.ents, 3) do e[i] = rt.ents[i] end
+    r.ents = e
+  end
+  if rt.dhold then r.dhold = rt.dhold end                     -- why no automatic drill starts (drill.hold)
+  return {ready = r, pop = {cap = M.cap(K), gate_cap = rt.gate_cap or M.CAPS[0]}}
 end
 
 M.on.MODE = function(K, ev)

@@ -97,7 +97,8 @@ Python, run from the clone: `python -m dfpilot <command>` (the docs write it as 
 
 | Command | What it does |
 |---|---|
-| `follow [--since N] [--once] [--no-auto]` | The event watcher: one wake line (<= 150 tokens) per class-A event, at most 6 per hour; also runs the path audit and places some projects by itself |
+| `follow [--since N] [--once] [--no-auto] [--no-audit]` | The event watcher: one wake line (<= 150 tokens) per class-A event, at most 6 per hour; also runs the path audit on every audit snapshot and places some projects by itself (`--no-auto`: no placements, the audit still runs) |
+| `audit [--snap ID]` | The path audit now: a fresh audit snapshot, `bp.topo.audit`, the result to readiness (what `follow` does on each audit snapshot); prints the result and the new readiness level |
 | `status` | One screen, <= 300 tokens: mode, phase, pop/cap, readiness, projects, kernel cost |
 | `brief [--budget N]` | A digest of <= 1.5k tokens for one decision (give it to the subagent) |
 | `events [--cls A] [--since N] [--type T]` | Read the event log |
