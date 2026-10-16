@@ -44,6 +44,7 @@ Related: FR-xx, BUG-xx
 | [BUG-021](BUG-021-cutoff-false-positive-group-renumber.md) | open | low | CUTOFF fires while everybody reaches everything (group ids renumber during construction) | care / seal |
 | [BUG-022](BUG-022-fortcore-stage2-build-lost-no-retry.md) | open | high | fortcore stage 2 ends `build_lost` for good: B1 and the traps are never built | lua/dfllm/runner.lua |
 | [BUG-023](BUG-023-woodcutters-do-not-fetch-the-axe.md) | open | high | woodcutters never fetch the axe from the bin: no FellTree job ever runs, no logs for a year (workaround: put the axe into their hand) | lua/dfllm/economy.lua |
+| [BUG-024](BUG-024-weave-silk-thread-not-found.md) | open | medium | weaving silk never starts: "Needs 1 unused collected silk thread" with 6500 reachable silk threads; 84 naked | economy |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
