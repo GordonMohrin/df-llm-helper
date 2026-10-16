@@ -558,6 +558,7 @@ function M.new(opts)
       local cls = e.critical and 'critical' or 'other'
       e.backoff = e.backoff and math.min(e.backoff * 2, KN.backoff_max_ms[cls]) or KN.backoff_ms[cls]
       e.disabled, e.cont, e.disabled_until, e.fault_ms = true, false, W.ms + e.backoff, {}
+      W.unboost(e, 'backed off')
       emit_as('kern', 'KERN_FAULT', 'A', e.name .. ' backed off ' .. e.backoff // 1000 .. ' s after 3 faults',
               {module = e.name, err = trunc(err, 120), n = #keep, backoff_s = e.backoff // 1000})
     end
@@ -595,6 +596,37 @@ function M.new(opts)
     return W.fort_load
   end
   function K.flush() flush_req = true end
+
+  -- boost (BUG-026, util/sched.lua): as in kern; W.boosts = {name = entry}
+  W.boosts = {}
+  function W.unboost(e, why)
+    local r = sched.unboost(e, W.ms)
+    if not r then return end
+    W.boosts[e.name] = nil
+    W.logs[#W.logs + 1] = {level = 'info', module = 'kern', msg = e.name .. ' boost ended (' .. why .. '; ' .. r.why .. ')'}
+  end
+  function K.boost(why, busy)
+    local e = W.mods[current or '']
+    if not e then return false, 'no module' end
+    local r, err = sched.boost(e, why, W.ms, busy)
+    if not r then return false, err end
+    if r == 'new' then
+      W.boosts[e.name] = e
+      W.logs[#W.logs + 1] = {level = 'info', module = 'kern', msg = e.name .. ' boosted: ' .. e.boost.why}
+    end
+    return true
+  end
+  function K.unboost()
+    local e = W.mods[current or '']
+    if e and e.boost then W.unboost(e, 'unboost') end
+  end
+  function K.busy()
+    for name, e in pairs(W.boosts) do
+      local b = e.boost
+      if b and b.busy and W.ms < b.until_ms then return name, b.why end
+    end
+    return nil
+  end
 
   -- state composition
   local function compose()
@@ -760,6 +792,7 @@ function M.new(opts)
     for _, e in ipairs(W.entries) do
       if not e.disabled and e.M.step then
         local ev = e.M.every or {}
+        if e.boost and W.ms >= e.boost.until_ms then W.unboost(e, 'expired') end
         if e.factor > 1 and (ticking or ev.ms) and sched.quiet(e, W.ms_per_frame, W.ms) then
           W.logs[#W.logs + 1] = {level = 'info', module = 'kern', msg = e.name .. ' promoted to x' .. e.factor}
         end
@@ -825,7 +858,9 @@ function M.new(opts)
       elseif what == 'projects' then return true, 'projects', K.persist.get('projects') or {}
       elseif what == 'modules' then
         local r = {}
-        for _, e in ipairs(W.entries) do r[#r + 1] = {name = e.name, disabled = e.disabled or false, factor = e.factor} end
+        for _, e in ipairs(W.entries) do
+          r[#r + 1] = {name = e.name, disabled = e.disabled or false, factor = e.factor, boost = e.boost and e.boost.why or nil}
+        end
         return true, 'modules', r
       elseif what == 'persist' then
         local r = {}

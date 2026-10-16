@@ -30,3 +30,26 @@ Both depots report `accessible=false` (no wagon path from the map edge?). If the
 The broker traded at 17590 although `accessible=false`, so that flag is no reliable wagon-path test.
 
 Related: BUG-016 (the same visit logic), FR-43 (depot keeper)
+
+## Review (Claude, 2026-10-16) of d0cfb71
+The choice itself is right for the live case (the depot with the merchants' goods wins). Findings, fixed with tests in
+`tests/lua/test_trade_ledger.lua` (each fails on d0cfb71):
+- **Toggles restored at the wrong depot.** `restore_toggles` asked `find_depot` again. Once the merchants' goods are bought or packed up
+  (no trader items anywhere), it names the manifest or first depot, so "Broker requested" stayed set at the hand-built one after every visit
+  that ended there. Now the visit remembers the depot its toggles were set at (`v.dep`, persisted) and restores exactly that one (nothing if
+  it is gone). Test `the toggles are put back at the depot they were set at ...`.
+- **The request did not follow the merchants.** The broker was requested at the depot named before the merchants unloaded (first or
+  manifest depot); when their goods then appeared in the other one, `f.req` was already set and no request went there. Now the old depot's
+  toggles are put back and the broker is requested at the merchants' depot.
+- **Sale items hauled to the wrong depot.** The batch goes out as soon as `caravan.goods` is non-empty, i.e. while the caravan approaches,
+  before any depot holds trader goods: with two depots it went to the first/manifest depot. Now, with two or more built depots, it waits
+  until a depot holds the merchants' goods (or `BRING_WAIT` = 600 ticks at the depot). Test `the sale items wait for the merchants' depot;
+  the broker request moves there`.
+- **Cost.** `find_depot` counted trader items in every built depot on every call: `track_visits` (per caravan), `step_wait`,
+  `merchant_goods` (its own second count), `restore_toggles`: several scans of up to `DEPOT_ITEMS` items per depot and step. Now one scan
+  per step (`depot_scan`, counts shared). Test `one depot scan per step ...`.
+- **`DEPOT_ITEMS` limit.** The count read the first 600 `contained_items`: a depot with more than 600 older goods of ours hid the
+  merchants' goods again (wrong depot, `nothing_listed`). The count (and `inspect what=trade`'s goods list) now reads the newest 600. Test
+  `DEPOT_ITEMS counts the newest items ...`.
+- Not changed: ties go to the depot listed first; with goods split over two depots only the chosen depot's goods are on its trade screen
+  (DF's own behaviour), the rest stays unsold; `accessible=false` is still unexplained.

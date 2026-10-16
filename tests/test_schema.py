@@ -145,6 +145,15 @@ def test_event_rules():
     ("plan.reload", {"x": 1}, False),
     ("trade.want", {"want": ["bar:iron", "anvil"]}, True),
     ("trade.want", {"want": ["Bar Iron"]}, False),
+    # Run 10 y418: cloth/thread kinds plant, silk, yarn; other subs are refused; trade.retry
+    ("trade.want", {"want": ["cloth:plant", "thread:silk", "cloth:yarn", "cloth"]}, True),
+    ("trade.want", {"want": ["cloth:wool"]}, False),
+    ("trade.want", {"sell": ["thread:pig_tail"]}, False),
+    ("trade.retry", {}, True),
+    ("trade.retry", {"civ": "Muboomon", "want": ["cloth:plant"], "sell": ["crafts"]}, True),
+    ("trade.retry", {"want": "cloth"}, False),
+    ("trade.retry", {"civ": 7}, False),
+    ("trade.retry", {"traded": 0}, False),
 ])
 def test_verb_args(verb, args, ok):
     doc = {"id": "c1", "verb": verb, "args": args, "by": S.VERB_BY.get(verb, ["llm"])[0]}

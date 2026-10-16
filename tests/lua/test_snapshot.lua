@@ -139,6 +139,29 @@ T.test('export: sliced, schema-shaped rows, manifest bridge from gate, traps, ma
   T.eq({ev.d.purpose, ev.d.path:match('^snap/')}, {'audit', 'snap/'})
 end)
 
+T.test('BUG-026: an export waits while another module holds a busy boost (trade screen) and resumes after', function()
+  local W, S = world()
+  local busy = true
+  local trade = {name = 'trade', every = {ms = 100}}
+  function trade.step(K) if busy then K.boost('trade screen', true) else K.unboost() end end
+  W.load(trade)
+  local saved = S.CFG.slice
+  S.CFG.slice = 10
+  W.frame(0, true)
+  T.eq(W.K.busy(), 'trade')
+  local _, ok, id = W.K.call('snapshot', 'export', {purpose = 'audit', bbox = {0, 0, Z, 9, 3, Z}})
+  T.eq(ok, true)
+  for _ = 1, 20 do W.frame(0, true) end
+  T.eq(written(W, id), nil, 'no slice while trade is busy')
+  local logged
+  for _, l in ipairs(W.logs) do if l.msg:find('waits while trade is busy', 1, true) then logged = true end end
+  T.ok(logged, 'the wait is logged')
+  busy = false
+  for _ = 1, 20 do W.frame(0, true); if written(W, id) then break end end
+  S.CFG.slice = saved
+  T.ok(written(W, id), 'resumed once the boost ended')
+end)
+
 T.test('export file: rows, bridges, traps, marks (written by the real io)', function()
   local dir = (os.getenv('TEMP') or '.'):gsub('\\', '/') .. '/dfllm-lua-tests/test_snapshot'
   luahost.mkdir_recursive(dir .. '/dfllm-runtime/mock/snap')

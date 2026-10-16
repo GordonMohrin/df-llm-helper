@@ -5,8 +5,8 @@
 -- Cost owners (FR-62): every module call is booked to its module; the kernel's own housekeeping to
 -- k.state (state a/b), k.io (event/log files, heartbeat), k.persist (site data; a module's own keys are
 -- booked to it), k.inbox (inbox without the verb handlers), k.events (eventful queue without the
--- handlers); the remainder is `kern` (the dispatcher). Pacing, demotion hysteresis and the fort-size
--- load live in util/sched.lua (shared with k_mock).
+-- handlers); the remainder is `kern` (the dispatcher). Pacing, demotion hysteresis, the fort-size
+-- load and the boost (BUG-026: K.boost/K.unboost/K.busy) live in util/sched.lua (shared with k_mock).
 local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
 local sched = require('dfllm.util.sched')
@@ -127,7 +127,7 @@ local function build(o)
               buckets = {}, p = {ms = 0, frames = 0, gap_max = 0, gaps3 = 0, unpaused_ms = 0, mods = {}},
               dropped = 0, report_any = false, report_types = {}, ev_listen = {}, kern_faults = 0,
               rot_warned = {}, io_warned = {}, cum = {}, cum_ms = 0, load = sched.load(-1, 0),
-              pool = sched.pool(), frame_paced = 0}
+              pool = sched.pool(), frame_paced = 0, boosts = {}}
   st.now = {tick = abs_now(), ytick = df.global.cur_year_tick, year = df.global.cur_year,
             season = df.global.cur_year_tick // SEASON, ms = dfhack.getTickCount(), wall = os.time(),
             paused = df.global.pause_state == true, frame = 0}
@@ -205,6 +205,7 @@ local function build(o)
       local cls = e.critical and 'critical' or 'other'
       e.backoff = e.backoff and math.min(e.backoff * 2, KN.backoff_max_ms[cls]) or KN.backoff_ms[cls]
       e.disabled, e.cont, e.disabled_until, e.fault_ms = true, false, now_ms + e.backoff, {}
+      st.unboost(e, 'backed off')
       emit_as('kern', 'KERN_FAULT', 'A', e.name .. ' backed off ' .. e.backoff // 1000 .. ' s after ' .. #keep .. ' faults',
               {module = e.name, err = clean(first_line(msg), 120), n = #keep, backoff_s = e.backoff // 1000})
       persist_rec()
@@ -253,7 +254,7 @@ local function build(o)
     e.ms_total = e.ms_total + self_ms
     book(e.name, self_ms)
     sched.spend(e, self_ms)
-    if not e.critical then st.frame_paced = st.frame_paced + self_ms end
+    if not e.critical and not e.boost then st.frame_paced = st.frame_paced + self_ms end
     if self_ms > st.frame_top_ms then st.frame_top_ms, st.frame_top = self_ms, e.name end
     if not r[1] then fault(e, where, r[2]); return false, r[2] end
     charge(e, where, self_ms)
@@ -286,7 +287,7 @@ local function build(o)
     book(e.name, ms)
     e.ms_total = e.ms_total + ms
     sched.spend(e, ms)
-    if not e.critical then st.frame_paced = st.frame_paced + ms end
+    if not e.critical and not e.boost then st.frame_paced = st.frame_paced + ms end
     child_ms = child_ms + ms
   end
 
@@ -336,8 +337,46 @@ local function build(o)
     end,
   }
 
+  ------------------------------------------------------------ boost (BUG-026, util/sched.lua)
+  -- end e's boost (why: 'unboost', 'expired', 'backed off'); logged with its length and what it cost
+  function st.unboost(e, why)
+    local r = sched.unboost(e, st.now.ms)
+    if not r then return end
+    st.boosts[e.name] = nil
+    st.log_as('kern', 'info', string.format('%s boost ended (%s; %s) after %d s, %d ms charged', e.name, why, r.why,
+                                            r.ms // 1000, round(r.spent)))
+  end
+
   ------------------------------------------------------------ K (§4)
   function K.now() return st.now end
+  -- BUG-026: the calling module asks for priority (sched.BOOST) while it must react in real time; renewed by
+  -- calling again, it lapses after BOOST.ttl_ms without a renewal; busy: heavy background work waits (K.busy).
+  -- -> true, or false, why
+  function K.boost(why, busy)
+    local e = st.mods[st.current or '']
+    if not e then return false, 'no module' end
+    local r, err = sched.boost(e, why, st.now.ms, busy)
+    if not r then return false, err end
+    if r == 'new' then
+      st.boosts[e.name] = e
+      log_as('kern', 'info', string.format('%s boosted: %s (paced at %d ms/s, not demoted; background work of the ' ..
+                                           'other modules waits)', e.name, e.boost.why, round(sched.rate(e))))
+    end
+    return true
+  end
+  function K.unboost()
+    local e = st.mods[st.current or '']
+    if e and e.boost then st.unboost(e, 'unboost') end
+  end
+  -- name, why of a module holding a busy boost, or nil: heavy background work (snapshot exports, seal's background
+  -- jobs) waits while one holds
+  function K.busy()
+    for name, e in pairs(st.boosts) do
+      local b = e.boost
+      if b and b.busy and st.now.ms < b.until_ms then return name, b.why end
+    end
+    return nil
+  end
   function K.emit(etype, cls, msg, d) return emit_as(st.current, etype, cls, msg, d) end
   function K.mode() return st.mode end
   function K.mode_since() return st.mode_since end
@@ -744,7 +783,8 @@ local function kern_verb(st, verb, args, cmd)
                    -- FR-62: pacing share (ms/s), current debt, frames it waited, cadence stretch (%), demotion flips
                    share = not e.critical and round(e.share) or nil, debt = not e.critical and round(e.debt) or nil,
                    paced = e.paced_n > 0 and e.paced_n or nil, stretch_pct = round((e.stretch or 1) * 100),
-                   flips = e.flips > 0 and e.flips or nil, demotions = e.demotions}
+                   flips = e.flips > 0 and e.flips or nil, demotions = e.demotions,
+                   boost = e.boost and e.boost.why or nil}
     end
     return true, 'modules', {modules = r, load = M.load_info(st), budget = sched.budget(st.load)}
   elseif what == 'persist' then
@@ -989,13 +1029,14 @@ local function frame(st)
       local ev = e.M.every
       if type(ev) ~= 'table' then ev = NO_EVERY end
       local ms_mod = ev.ms ~= nil
+      if e.boost and t0 >= e.boost.until_ms then st.unboost(e, 'expired') end
       if e.factor > 1 and (ticking or ms_mod) and sched.quiet(e, dt_frame, t0) then
         st.log_as('kern', 'info', e.name .. ' promoted to x' .. e.factor)
         st.flush_req = true
       end
       local cont, due = e.cont, e.cont
       if not cont and ev ~= NO_EVERY then   -- sched.due, inlined: this loop runs every frame
-        local per = e.factor * e.stretch
+        local per = e.boost and 1 or e.factor * e.stretch      -- sched.period
         if not ms_mod then due = ticking and (e.last_tick == nil or now.tick - e.last_tick >= ev.ticks * per)
         else due = e.last_ms == nil or now.ms - e.last_ms >= ev.ms * per end
       end
@@ -1335,7 +1376,8 @@ function M.status()
   local mods = {}
   for _, e in ipairs(st.entries) do
     mods[#mods + 1] = {name = e.name, disabled = e.disabled or false, factor = e.factor, ms = round(e.ms_total),
-                       faults = #e.fault_ms, paced = e.paced_n, share = not e.critical and e.share or nil}
+                       faults = #e.fault_ms, paced = e.paced_n, share = not e.critical and e.share or nil,
+                       boost = e.boost and e.boost.why or nil}
   end
   return {save = st.save_name, mode = st.mode, seq = st.seq, ev = st.ev_n, frame = st.frame_n, boots = st.boots,
           ms_s = round(w.ms_s), tps = round(w.tps), gap_max_ms = round(w.gap), modules = mods, runtime = st.paths.save,

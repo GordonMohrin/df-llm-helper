@@ -129,8 +129,11 @@ local function decode(W, t, i)
     if not tok then return nil end
     local head, a, b = tok:match('^([A-Z_]+):?([A-Z_]*):?([A-Z_]*)$')
     if head == 'INORGANIC' then mode, flags = 'inorganic', {IS_METAL = F.METALS[a] == true}
-    elseif head == 'PLANT' then mode, flags = 'plant', {WOOD = b == 'WOOD', STRUCTURAL_PLANT_MAT = b == 'STRUCTURAL'}
-    elseif head == 'CREATURE' then mode = 'creature' end
+    elseif head == 'PLANT' then
+      mode, flags = 'plant', {WOOD = b == 'WOOD', STRUCTURAL_PLANT_MAT = b == 'STRUCTURAL', THREAD_PLANT = b == 'THREAD'}
+    elseif head == 'CREATURE' then                -- fibre flags of silk and wool (cloth:silk / cloth:yarn)
+      mode, flags = 'creature', {SILK = b == 'SILK', YARN = b == 'WOOL' or b == 'YARN' or b == 'HAIR'}
+    end
   end
   return {type = t, index = i, mode = mode, material = {flags = flags}, getToken = function() return tok end}
 end
@@ -343,9 +346,10 @@ function F.ui(W, d, c, opts)
   end
   local ops = {}
   function ops.request_broker(a)
-    local old = {requested = d.trade_flags.trader_requested, anyone = d.trade_flags.anyone_can_trade}
-    if a.requested ~= nil then d.trade_flags.trader_requested = a.requested end
-    if a.anyone ~= nil then d.trade_flags.anyone_can_trade = a.anyone end
+    local dd = (a.depot and W.buildings[a.depot]) or d          -- the depot named (two-depot tests), else ours
+    local old = {requested = dd.trade_flags.trader_requested, anyone = dd.trade_flags.anyone_can_trade}
+    if a.requested ~= nil then dd.trade_flags.trader_requested = a.requested end
+    if a.anyone ~= nil then dd.trade_flags.anyone_can_trade = a.anyone end
     return true, old
   end
   -- live L4: the depot's TradeAtDepot job posted by act (DF 53 never posted it from the toggle)

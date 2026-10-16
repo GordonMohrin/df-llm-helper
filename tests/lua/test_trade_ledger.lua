@@ -130,6 +130,109 @@ T.test('BUG-025: with two depots the kernel follows the one the merchants unload
   T.eq(r.data.depot, 50, 'no trader goods anywhere: the first built depot')
 end)
 
+-- BUG-025 review: two built depots (50 the first, 51 hand-built), our goods in 51, the caravan Approaching
+local function two_depots(o)
+  o = o or {}
+  local W = F.world{}
+  local d50 = F.depot(W, {id = 50})
+  local d51 = F.depot(W, {id = 51, x = 40, y = 40})
+  local c = F.caravan(W, {state = 'Approaching', tr = 1500, goods = std_goods(W)})
+  F.goods(W, d51, std_ours())
+  W.broker = W.add_unit{id = 901, citizen = true, pos = {0, 0, 0}}
+  local U = F.ui(W, d51, c, o.ui)
+  local M = fresh('trade')
+  W.load(M)
+  return W, d50, d51, c, U, M
+end
+local function unload(c, d) for _, it in ipairs(c._items) do d.contained_items:insert('#', {item = it}) end end
+local function plan_sell(W)
+  W.set_plan({v = 2, year = 3, phase_target = 'P4', seasons = {{build = {}}, {build = {}}, {build = {}}, {build = {}}},
+              policy = {option = 'A', pop_ceiling = 55, beauty = 'used_rooms'},
+              trade = {want = {'bar:iron', 'anvil', 'cloth'}, sell = {'crafts'}}})
+end
+
+T.test('BUG-025 review: the sale items wait for the merchants\' depot; the broker request moves there', function()
+  local W, d50, d51, c, U = two_depots()
+  plan_sell(W)
+  W.run(300, {skip = 9})                      -- goods only on the caravan: no depot shows the merchants' choice
+  T.eq(U.brought, nil, 'nothing hauled while two depots stand and nobody unloaded')
+  T.eq(d50.trade_flags.trader_requested, true, 'broker requested at the first depot meanwhile')
+  F.set_state(c, 'AtDepot')
+  unload(c, d51)                               -- the merchants unload at the hand-built depot
+  W.run(300, {skip = 9})
+  T.eq(U.brought and U.brought.depot, 51, 'hauled to the merchants\' depot')
+  T.eq({d50.trade_flags.trader_requested, d51.trade_flags.trader_requested}, {false, true}, 'request moved to 51')
+end)
+
+T.test('BUG-025 review: the toggles are put back at the depot they were set at when the merchants left', function()
+  local W, d50, d51, c, U = two_depots()
+  F.set_state(c, 'AtDepot')
+  unload(c, d51)
+  W.run(300, {skip = 9})                       -- no trader: the visit waits at depot 51
+  T.eq(d51.trade_flags.trader_requested, true)
+  F.remove_caravans()                          -- the merchants pack up and leave: no trader goods anywhere
+  d51.contained_items = kmock.vec{}
+  W.run(200, {skip = 9})
+  T.eq(#F.events(W, 'left'), 1)
+  T.eq({d50.trade_flags.trader_requested, d51.trade_flags.trader_requested}, {false, false},
+       'restored at 51, not at the first built depot')
+end)
+
+T.test('BUG-025 review: DEPOT_ITEMS counts the newest items: older goods of ours do not hide the merchants\'', function()
+  local W, d50, d51, c, U, M = two_depots()
+  local saved = M.CFG.DEPOT_ITEMS
+  M.CFG.DEPOT_ITEMS = 5                        -- 10 of our figurines in 51 come first
+  F.set_state(c, 'AtDepot')
+  unload(c, d51)
+  local r = W.inbox('inspect', {what = 'trade'})
+  M.CFG.DEPOT_ITEMS = saved
+  T.eq({r.data.depot, r.data.goods_items}, {51, 4})
+end)
+
+-- contained_items behind a proxy that counts element reads
+local function counting(v)
+  local n = {0}
+  return setmetatable({}, {__len = function() return #v end,
+                           __index = function(_, k) if math.type(k) == 'integer' then n[1] = n[1] + 1 end return v[k] end,
+                           __ipairs = function() return ipairs(v) end}), n
+end
+
+T.test('BUG-025 review: one depot scan per step (find_depot is used several times a step)', function()
+  local W, d50, d51, c, U = two_depots()
+  F.set_state(c, 'AtDepot')
+  unload(c, d51)
+  W.run(300, {skip = 9})
+  local n
+  d51.contained_items, n = counting(d51.contained_items)
+  local items = #d51.contained_items
+  n[1] = 0
+  W.frame(100)                                 -- one trade step (100 ticks)
+  T.ok(n[1] > 0 and n[1] <= items, 'items read ' .. n[1] .. ' for ' .. items .. ' in the depot')
+end)
+
+T.test('BUG-026 review: a caravan that leaves untraded gets its own ledger, never another visit\'s goods', function()
+  local W = F.world{}
+  local d = F.depot(W, {})
+  local a = F.caravan(W, {entity = 7, civ = 'Alpha', state = 'AtDepot', tr = 1500,
+                          goods = {F.item(W, {type = 'BAR', mat = 'INORGANIC:IRON', desc = 'iron bars', value = 100, stack = 5}),
+                                   F.item(W, {type = 'FIGURINE', mat = 'INORGANIC:GOLD', desc = 'gold figurine', value = 500})}})
+  local b = F.caravan(W, {entity = 8, civ = 'Beta', state = 'AtDepot', tr = 1500, goods = std_goods(W)})
+  F.goods(W, d, std_ours())
+  W.broker = W.add_unit{id = 901, citizen = true, pos = {0, 0, 0}}
+  F.ui(W, d, a)
+  F.trader(W, d, true)
+  W.load(fresh('trade'))
+  W.run(1100, {skip = 9})
+  T.ok(F.until_(W, function() return #F.events(W, 'traded') > 0 end, 1500), 'Alpha traded')
+  df.global.plotinfo.caravans = kmock.vec{a}  -- Beta leaves untraded while Alpha's flow is the current one
+  W.run(200, {skip = 9})
+  local beta
+  for _, e in ipairs(W.find_events('TRADE_LEDGER')) do if e.d.civ == 'Beta' then beta = e end end
+  T.ok(beta, 'Beta has a ledger entry')
+  T.eq(beta.d.unmet, {'bar:iron:left_untraded', 'anvil:left_untraded', 'cloth:left_untraded'},
+       'nobody looked at Beta\'s goods: not "none" from Alpha\'s')
+end)
+
 T.test('FR-43: a caravan without a built depot raises DEPOT_MISSING (A) once and asks the runner for one', function()
   local calls = {}
   local W = F.world{}

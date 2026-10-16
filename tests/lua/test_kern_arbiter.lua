@@ -468,6 +468,48 @@ T.test('FR-51 clock governor: mode caps, the reflex clamp, config override, rest
   T.eq(capv(), 250, 'the original cap is back after unload')
 end)
 
+T.test('BUG-026 trade clock: trade.clock() caps the FPS at clock.trade_cap, never above the original; released after', function()
+  local dir = H.tmpdir('kmocktradeclock')
+  local W = kmock.new{dfpath = dir, cfg = {reflex = {v = 2, clock = {trade_cap = 80}}}}
+  luahost.mkdir_recursive(dir .. '/dfllm-runtime')
+  package.loaded['plugins.timestream'] = {timestream_getFps = function() return W.timestream_fps end}
+  package.loaded['plugins.overlay'] = nil
+  local why
+  local trade = {name = 'trade', every = {ticks = 100}}
+  function trade.clock(K) return why end
+  W.load(trade)
+  W.load(arbiter)
+  W.settings.fps_cap = nil
+  W.run(10, {paused = true})
+  T.eq(W.settings.fps_cap, nil, 'no cap write while trade holds nothing')
+  why = 'trade'
+  W.run(40, {paused = true})
+  T.eq({W.settings.fps_cap, W.timestream_fps}, {80, -1}, 'clock.trade_cap; timestream above it goes off')
+  T.eq(W.state().clock, {cap = 80, orig = 250, ts = -1, held = 0, why = 'trade'})
+  W.K.set_mode('SIEGE', 'test')                 -- a lower mode cap wins
+  T.eq(W.settings.fps_cap, 30)
+  W.K.set_mode('RECOVERY', 'test')
+  W.K.set_mode('PEACE', 'test')
+  T.eq(W.settings.fps_cap, 80)
+  why = nil
+  W.run(40, {paused = true})
+  T.eq({W.settings.fps_cap, W.timestream_fps}, {250, 500}, 'released: the original cap and the mode tempo')
+  local logged
+  for _, l in ipairs(W.logs) do if l.msg:find('trade clock on: FPS cap 80', 1, true) then logged = true end end
+  T.ok(logged, 'logged')
+  -- the default trade_cap (100) and a player cap below it: never raised
+  local dir2 = H.tmpdir('kmocktradeclock2')
+  local W2 = kmock.new{dfpath = dir2}
+  luahost.mkdir_recursive(dir2 .. '/dfllm-runtime')
+  df.global.enabler.fps = 60
+  local t2 = {name = 'trade', every = {ticks = 100}}
+  function t2.clock(K) return 'trade' end
+  W2.load(t2)
+  W2.load(arbiter)
+  W2.run(40, {paused = true})
+  T.eq(W2.state().clock.cap, 60, 'the player cap 60 is below trade_cap 100: kept')
+end)
+
 T.test('FR-51 crash heal: a lowered FPS cap (any value below the original) is restored', function()
   local W = H.world{tag = 'healcap'}
   luahost.mkdir_recursive(W.rt)
