@@ -433,10 +433,13 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "LOCKDOWN": ("A", "reflex", _d("why:s", "n:i type:s raised:i doors:i alert:s clock:i")),
     "ORDER_BAD": ("A", "economy", _d("order:i job:s", "dropped:f")),
     "DEPOT_MISSING": ("A", "trade", _d(opt="civ:s planned:f proj:s stalled:f why:s")),
-    "CUTOFF": ("A", "seal", _d("cls:s n:i", "pos:p why:s grp:i main:i")),
+    # BUG-021: unit/upos/grp = a cut-off citizen and his walk group, at/agrp = a stock tile of the class and its group
+    "CUTOFF": ("A", "seal", _d("cls:s n:i", "pos:p why:s grp:i main:i unit:i upos:p at:p agrp:i")),
     "PERIMETER_BROKEN": ("A", "seal", _d("n:i", "pos:p kinds:sa requeued:i why:s")),
     "SEAL_LEAK": ("A", "seal", _d("routes:i", "pos:p bld:s state:s why:s")),
-    "REFUGE_FAIL": ("A", "seal", _d("burrow:s", "fallback:s why:s tiles:i inside:i mode:s")),
+    # BUG-018/019, FR-67: level of the fallback (SIEGE, SOFT, HOLD, BREACH, DEAD), flee (no separated burrow: no
+    # confinement), open (the entrances that reach the refused burrow, "x,y,z kind")
+    "REFUGE_FAIL": ("A", "seal", _d("burrow:s", "fallback:s why:s tiles:i inside:i mode:s level:s flee:f open:sa")),
     "AUTOLABOR_LEGACY": ("A", "baseline", _d("fixed:f", "why:s after:s")),
     # FR-64: >= 2 citizens died of dehydration or starvation within a month (the class-A twin of DEATH_CLUSTER)
     "DEATHS_PREVENTABLE": ("A", "care", _CLUSTER),

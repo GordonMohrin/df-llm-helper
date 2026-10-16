@@ -358,7 +358,7 @@ T.test('refuge: Kern+ without drink is refused; the interior burrow Innen+ is pa
   T.ok(d.burrows['Kern+'].why:find('4 tiles<20', 1, true) and d.burrows['Kern+'].why:find('drink 0<5', 1, true),
        d.burrows['Kern+'].why)
   T.eq({d.burrows['Tiefe+'].ok, d.burrows['Innen+'].ok, d.burrows['Innen+'].tiles}, {1, 1, 101})
-  T.eq(d.choice.ALERT, {want = 'Kern+', burrow = 'Innen+'})
+  T.eq(d.choice.ALERT, {want = 'Kern+', burrow = 'Innen+', level = 'SIEGE'})
   T.ok(msg:find('alert PEACE: Innen+, 101 tiles, 5/5 inside', 1, true), msg)
   local ok, pick = W.K.call('seal', 'alert_burrow', 'ALERT', 'Kern+')
   T.eq({ok, pick}, {true, 'Innen+'})
@@ -405,15 +405,39 @@ T.test('refuge swap: BREACH confines to Tiefe+; held until 3 quiet days, then ba
   T.eq(#evs(W, 'REFUGE_FAIL'), 0)
 end)
 
-T.test('refuge swap refused: a refuge without supplies is not chosen in BREACH (Kern+ stays)', function()
+T.test('BUG-019: in BREACH the refuge needs no drink, food or beds (BREACH level) for breach_days; then the counts ' ..
+       'again (Kern+)', function()
+  -- old code: "REFUGE_FAIL alert burrow Tiefe+ refused (Tiefe+: drink 0<5, food 0<5, ...): confining to Kern+"
   local W = refuge_fort{kern = {2, 2, Z, 8, 8, Z}, items = false}
   SW.item(W, 'DRINK', 6, 6, Z, 10)
   SW.item(W, 'PLANT', 6, 3, Z, 10)
   W.run(300, {skip = 9})
+  local d = inspect(W, 'refuge')
+  T.eq({d.burrows['Tiefe+'].ok, d.burrows['Tiefe+'].counts, d.burrows['Tiefe+'].breach, d.burrows['Tiefe+'].sep},
+       {0, 0, 1, 1}, d.burrows['Tiefe+'].why)
+  T.eq(d.choice.BREACH, {want = 'Tiefe+', burrow = 'Tiefe+', level = 'BREACH'})
+  W.set_mode('BREACH')
   local ok, pick = W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')
-  T.eq(pick, 'Kern+')
+  T.eq({ok, pick}, {true, 'Tiefe+'})
+  T.eq(#evs(W, 'REFUGE_FAIL'), 0, 'the pick is the refuge: no refusal')
+  T.ok(W.logs[#W.logs].msg:find('Tiefe+ holds the citizens without drink, food or bed counts (BREACH level) for 7 days',
+       1, true), W.logs[#W.logs].msg)
+  W.run(6 * 1200, {skip = 9})
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')), 'Tiefe+', 'day 6: still')
+  W.run(1300, {skip = 9})
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')), 'Kern+', 'after 7 days the counts count')
   local f = evs(W, 'REFUGE_FAIL')
   T.ok(#f == 1 and f[1].d.burrow == 'Tiefe+' and f[1].d.why:find('drink 0<5', 1, true), f[1] and f[1].d.why)
+  -- config/reflex.json refuge.breach_days
+  local W2 = refuge_fort{kern = {2, 2, Z, 8, 8, Z}, items = false}
+  W2.K.cfg.reflex = {v = 2, refuge = {breach_days = 1}}
+  SW.item(W2, 'DRINK', 6, 6, Z, 10)
+  SW.item(W2, 'PLANT', 6, 3, Z, 10)
+  W2.run(300, {skip = 9})
+  W2.set_mode('BREACH')
+  T.eq(select(2, W2.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')), 'Tiefe+')
+  W2.run(1300, {skip = 9})
+  T.eq(select(2, W2.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')), 'Kern+', 'breach_days 1')
 end)
 
 ---------------------------------------------------------------- siege and sense hooks
