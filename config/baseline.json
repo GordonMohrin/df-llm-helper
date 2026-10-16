@@ -44,7 +44,7 @@
                        "MASON", "FEED_WATER_CIVILIANS", "RECOVER_WOUNDED", "MINE", "CUTWOOD", "HUNT", "FISH"],
             "builtin": ["MINE", "CUTWOOD", "HUNT", "FISH"]},
   "starving": {"stale_age": 12000, "min_days": 3, "keep": 7},
-  "tools": {"shrink_days": 3, "block_days": 3, "repair_days": 7, "equip_update": false,
+  "tools": {"shrink_days": 3, "block_days": 3, "repair_days": 7, "equip_update": true,
             "keep_labors": ["FEED_WATER_CIVILIANS", "RECOVER_WOUNDED"],
             "key_labors": ["MASON", "CARPENTER", "BREWER", "PLANT", "COOK", "MECHANIC", "DIAGNOSE", "SMELT",
                            "FORGE_WEAPON", "FORGE_ARMOR"],

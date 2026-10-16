@@ -1,5 +1,5 @@
 # BUG-023 woodcutters in the Woodcutters detail never take FellTree jobs: the two axes lie in a bin in a stockpile and nobody fetches one
-Status: mitigated in 47d98c4 (offline, live-untested): detection, TOOL_BLOCKED (A), labor repair, miners out of everybody details; the pickup trigger `tools.equip_update` is off until Gordon says yes
+Status: mitigated in 47d98c4 (offline, live-untested): detection, TOOL_BLOCKED (A), labor repair, miners out of everybody details; the pickup trigger `tools.equip_update` is on since Gordon's yes (2026-10-16)
 Severity: high (no logs for a game year: no furniture, no barrels, no brewing, mood deaths, 81 buildings waiting)
 Found: 2026-10-15 21:20-22:10, Run 10 fort Handlelock (region2-site97, y366-368), dfpilot main 95fe16d + local trade fix
 Module: `lua/dfllm/economy.lua` (builtin tool details `Woodcutters`, `tools` axe count), `act.work_detail`
@@ -51,11 +51,12 @@ What the kernel does now (`lua/dfllm/economy.lua` tool details, `lua/dfllm/act.l
   leaves PEACE.
 - **Tool cap:** a detail never gets more members than free unreserved tools plus the tools its members hold; when it
   shrinks, members holding the tool stay first.
-- **Equipment update [live-untested, off]:** `tools.equip_update = true` makes `act.work_detail` set the dwarf's
+- **Equipment update [live-untested, on since Gordon's yes 2026-10-16]:** `tools.equip_update = true` makes `act.work_detail` set the dwarf's
   `uniform.pickup_flags.update` and `plotinfo.equipment.update.weapon` when it switches a tool labor on. That is the request
   the engine hands work picks and axes out on (v1 E18 Run 5: without the per-dwarf flag non-squad miners never got a work
   pick); the dwarf still walks to the tool himself. It is a write to a unit field, so v1 kept it in the exception register
-  (FP08): switch it on only with Gordon's yes.
+  (FP08): switch it on only with Gordon's yes. Gordon said yes on 2026-10-16: `config/baseline.json` `tools.equip_update: true`
+  (RULES §1.1 exception, `docs/v2/DECISIONS.md`).
 
 Remedies considered and not built, with the v1 evidence (the v1 repo's `ERFAHRUNGEN.md`, E18 Run 3 and Run 5, and its `lua/claude/pickfix.lua`):
 - **Loose storage (`max_bins 0`, a weapon pile without bins):** v1 Run 3 emptied the bin and set `storage.max_bins=0`

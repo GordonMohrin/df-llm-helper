@@ -185,7 +185,7 @@ T.test('Run 10: miners leave the everybody-does-this details (Planters), the kep
   T.eq(#c5, 1, 'the player\'s miner in Planters is made a specialist once')
   T.eq(c5[1].opts.only, true)
   T.eq(c5[1].opts.keep, {'FEED_WATER_CIVILIANS', 'RECOVER_WOUNDED'})
-  T.eq(c5[1].opts.equip, nil, 'tools.equip_update is off by default (needs the player\'s yes)')
+  T.eq(c5[1].opts.equip, true, 'tools.equip_update is on (Gordon\'s yes 2026-10-16): the labor comes with the equipment update')
   T.eq(members(ctl, 'Planters'), {6}, 'both miners left Planters')
   local c7 = calls(ctl, 'Miners', 7)
   T.eq({#c7, c7[1].opts.only}, {1, true}, 'the miner the kernel adds joins as a specialist')
@@ -213,7 +213,7 @@ T.test('BUG-023: woodcutters and miners without their tool -> TOOL_BLOCKED (A) o
   T.eq(wc.d.members, {1, 9})
   T.eq(wc.d.pos, {102, 124, 122}, 'the bin the axes lie in')
   T.ok(wc.msg:find('hold no axe', 1, true) and wc.msg:find('2 in bins', 1, true), wc.msg)
-  T.ok(wc.d.hint:find('equip_update', 1, true), wc.d.hint)
+  T.ok(wc.d.hint:find('equipment update requested', 1, true), wc.d.hint)
   local mn = by.Miners
   T.ok(mn, 'miners blocked')
   T.eq({mn.d.tool, mn.d.jobs, mn.d.free, mn.d.why}, {'pick', 25, 2, 'loose'})

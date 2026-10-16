@@ -142,8 +142,9 @@ M.DEFAULTS = {
   -- `keep_labors` stay). Every detail: members lacking its `labor` get it again through act.work_detail (at most every
   -- `repair_days`); members the kernel did not add (the player's) stay, count toward the target and make no WORK_DETAIL.
   -- A member without its `tool` in hand for `block_days` while `jobs` wait and free tools exist: TOOL_BLOCKED (A).
-  -- equip_update [live-untested, needs the player's yes, BUG-023]: act.work_detail also requests the equipment update.
-  tools = {shrink_days = 3, block_days = 3, repair_days = 7, equip_update = false,
+  -- equip_update [live-untested, BUG-023]: act.work_detail also requests the equipment update. On since Gordon's yes
+  -- (2026-10-16, a fair-play exception: RULES §1.1, docs/v2/DECISIONS.md).
+  tools = {shrink_days = 3, block_days = 3, repair_days = 7, equip_update = true,
            keep_labors = {'FEED_WATER_CIVILIANS', 'RECOVER_WOUNDED'},
            key_labors = {'MASON', 'CARPENTER', 'BREWER', 'PLANT', 'COOK', 'MECHANIC', 'DIAGNOSE', 'SMELT',
                          'FORGE_WEAPON', 'FORGE_ARMOR'},

@@ -30,7 +30,9 @@
 - Refuge (BUG-018/019): an `Innen+` painted before this version may contain exposed tiles and stay refused: delete it on the
   burrows screen, seal repaints it. `inspect what=refuge` shows `open`, `exp`, `dead`, `hint`. Forts with doorless entrances now
   often get `flee` (alert off) instead of a confinement with the enemy.
-- Tools (BUG-023): the kernel reports `TOOL_BLOCKED`; the switch `tools.equip_update` stays off until Gordon says yes (fair play).
+- Tools (BUG-023): the kernel reports `TOOL_BLOCKED`; `tools.equip_update` is on (Gordon's yes 2026-10-16, a fair-play exception):
+  tool-detail members get the equipment update request with their labor and should fetch a pick/axe within a game day.
+  Confirmed the same day: `gate.force_near` 3 and the BREACH lever burrow (`docs/v2/DECISIONS.md`).
 - Trade (BUG-026): while a caravan visit runs, trade holds a kernel boost (not demoted, 20 ms/s, snapshots and seal background
   jobs wait) and the arbiter caps the clock at `clock.trade_cap` (100); `caravan.time_remaining` counts 10-tick units. New:
   `cloth:plant|silk|yarn` / `thread:*` tokens (mood needs reach the want list), verb `trade.retry` (second trade in one visit),

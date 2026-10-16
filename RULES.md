@@ -23,7 +23,9 @@ change the system. Never read ERFAHRUNGEN.md, transcripts or v1 docs as working 
 1. **Fair play.** Only UI-equivalent actions. Never: createitem, dig-now, build-now, reveal,
    teleport, fastdwarf, `--instant`, `digv`/`digvx`, `digtype --hidden`, `caravan extend|happy`,
    autodump, locate-ore, prospect, showmood, `fix/retrieve-units`, reads of hidden tiles or
-   `water_table`, edits of units, skills, items, positions or timers.
+   `water_table`, edits of units, skills, items, positions or timers. One exception (Gordon, 16.10.2026, BUG-023):
+   `tools.equip_update` lets `act.work_detail` set a tool-detail member's equipment update request
+   (`uniform.pickup_flags.update`), so the dwarf fetches a pick or axe himself; moving a tool into a hand stays forbidden.
 2. **One door into the game.** Change the game only with `dfllm cmd <verb>` (closed verb set, §5)
    or `dfllm plan apply`. No inline `lua`, no `claude/*` scripts, no `dfhack-run` except the
    allowed forms (`dfhack-run dfllm …`, `load-save`, the embark helper before adopt). The
@@ -176,7 +178,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | SEAL_LEAK | the gates are up and a route remains: `inspect entrances` names the leak (tile, door/bridge state); tell the player; place a wall there (`bp.place`), never lower the bridges |
 | PERIMETER_BROKEN | the kernel re-queued the lost walls/doors (`rp…` project); `inspect perimeter` after a day; tell the player about pieces it could not re-queue (bridges) |
 | AUTOLABOR_LEGACY | autolabor ran in legacy mode (the engine of the Run 9 crashes) and the kernel could not set it to monitor (`fixed=0`; a switch that worked is only a kern.log line): tell the player at once (disable autolabor by hand) |
-| TOOL_BLOCKED | Miners/Woodcutters members hold no pick/axe while their jobs wait (`inspect workload`: `blocked`, `tools`); `reserved` → squad uniforms hold the tools (military weapons); otherwise tell the player: toggling the detail in the work details screen may make DF hand the tools out (untested); `tools.equip_update` and moving a tool into a hand need his explicit yes (fair play) |
+| TOOL_BLOCKED | Miners/Woodcutters members hold no pick/axe while their jobs wait (`inspect workload`: `blocked`, `tools`); `reserved` → squad uniforms hold the tools (military weapons); otherwise tell the player: toggling the detail in the work details screen may make DF hand the tools out (untested); `tools.equip_update` is on since Gordon's yes (16.10.2026; members should fetch a tool within a game day, else tell the player); moving a tool into a hand stays forbidden (fair play) |
 | REFUGE_FAIL | the civ alert refused a burrow: an entrance reaches it without a door/hatch/bridge (`open to N entrances x,y,z ...`) or a hostile stands in it (BUG-018), or it lacks drink/food (beds only rank: `beds 18<23 (25% of 90 citizens)`); the fallback is `Innen+`, the refuge or the dead end `Tiefe+` without counts (BREACH level, 7 days), or none (`flee`: alert off, citizens flee on their own). `inspect refuge` (`open`, `hint`); tell the player; close the named entrances (door or wall) and stock the refuge in the next plan |
 
 ## 8. Readiness gate (only readiness raises max-pop)

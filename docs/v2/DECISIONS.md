@@ -27,6 +27,16 @@ Gordon answers each decision once. The answer goes into `config/decisions.yaml` 
 | D-13 | Automatic beauty pause at high wealth | `no`, `yes` | `no` | runner | yes: beauty projects pause above a wealth threshold (to be defined); without it, wealth is only logged with every threat event |
 | D-14 | `peace_gates`: state of the gate bridges in PEACE (FR-49/55) | `down`, `up` | `down` | gate, siege | up: in PEACE the manifest outer/inner bridges stay up, and so do the lever-linked bridges a lockdown raised; they open only for a window (a caravan on the map, migrants arriving, an inbox `lever` down for that bridge), each while no hostile is visible, and close 600 ticks after it; RECOVERY lowers only the core seal |
 
+### Answered by Gordon (2026-10-16, chat)
+- **`tools.equip_update` on (BUG-023):** yes. A fair-play exception: when `act.work_detail` switches a tool labor on
+  (Miners/MINE, Woodcutters/CUTWOOD), it also sets the member's equipment update request (`uniform.pickup_flags.update`,
+  `plotinfo.equipment.update.weapon`), so the dwarf walks to a free pick or axe himself. `config/baseline.json` has it on;
+  putting a tool into a hand (`moveToInventory`) stays forbidden.
+- **`gate.force_near` = 3 (BUG-027):** confirmed. A SIEGE/BREACH raise goes ahead onto units on or next to a bridge only
+  with a visible hostile within 3 tiles of its footprint (GATE_FORCED).
+- **Lever burrow in BREACH (BUG-027):** confirmed. While no hostile is inside Kern+ and none within 20 tiles of the
+  levers, the BREACH alert lists `Hebel+`, so civilians from the refuge may walk to a Kern+ lever.
+
 ### Answered by Gordon (2026-10-15, chat)
 - **D-14 `down`:** "Brücken im Frieden sollen natürlich unten sein, damit die Zwerge die ganze Zeit diese Shortcuts
   runterlaufen können." The shortcut bridges over the trap corridor stay down in PEACE; the arrival reflex raises them.
