@@ -696,6 +696,62 @@ T.test('live L6: melee uniforms keep 1 axe and 2 picks for civilians (explicit w
   T.eq(choice, 4)
 end)
 
+-- BUG-023 (Run 10): the tool details' members, not the fixed 1 axe / 2 picks, are what the soldiers leave to the civilians
+local function tool_details(miners, cutters)
+  local function wd(name, labor, n)
+    local ids = {}
+    for i = 1, n do ids[i] = 60 + i end
+    return {name = name, assigned_units = kmock_vec(ids), allowed_labors = {[labor] = true}, flags = {}}
+  end
+  return {wd('Miners', 'MINE', miners), wd('Woodcutters', 'CUTWOOD', cutters)}
+end
+
+T.test('BUG-023: melee uniforms leave one pick per Miners member and one axe per Woodcutters member', function()
+  local W = boot{n = 70, work_details = tool_details(6, 2)}
+  for _ = 1, 2 do X.weapon(W, 'ITEM_WEAPON_SPEAR') end
+  X.weapon(W, 'ITEM_WEAPON_SWORD_SHORT')
+  for _ = 1, 3 do X.weapon(W, 'ITEM_WEAPON_AXE_BATTLE') end
+  for _ = 1, 3 do X.weapon(W, 'ITEM_WEAPON_PICK') end
+  W.set_census('i', {tick = 0, w_axe = 3, w_pick = 3})
+  W.run(9, {skip = 9})
+  W.run(3600, {skip = 9})
+  local _, per = mil().targets(W.K)
+  local g = mil().weapon_guard(W.K, per)
+  T.eq({g.axe, g.pick, g.keep.axe, g.keep.pick}, {1, 0, 2, 6}, '3 - 2 woodcutters axes, 3 - 6 miners picks')
+  local got = {}
+  for _, k in ipairs({'A', 'B'}) do
+    for _, p in ipairs(X.squad_of(W, k).positions) do
+      local w = p.equipment.uniform.weapon
+      if p.occupant >= 0 and #w > 0 then got[w[0].subtype] = (got[w[0].subtype] or 0) + 1 end
+    end
+  end
+  T.eq(got, {ITEM_WEAPON_SPEAR = 2, ITEM_WEAPON_SWORD_SHORT = 1, ITEM_WEAPON_AXE_BATTLE = 1}, 'no pick for a soldier')
+end)
+
+T.test('BUG-023: pick specs beyond the spare picks are given up (their reservation keeps the miners without picks)', function()
+  local W = setup(50, {work_details = tool_details(6, 1)})
+  local A = X.squad_of(W, 'A')
+  X.set_uniform(A, {positions = {0, 1, 2}, items = {{cat = 'weapon', type = 'WEAPON', subtype = 'ITEM_WEAPON_PICK'}}})
+  X.weapon(W, 'ITEM_WEAPON_MACE')
+  for _ = 1, 3 do X.weapon(W, 'ITEM_WEAPON_PICK') end
+  W.set_census('i', {tick = 0, w_axe = 10, w_pick = 3})
+  W.run(3600, {skip = 9})
+  local picks, mace, none = 0, 0, 0
+  for _, k in ipairs({'A', 'B'}) do
+    for _, p in ipairs(X.squad_of(W, k).positions) do
+      if p.occupant >= 0 then
+        local w = p.equipment.uniform.weapon
+        if #w == 0 then none = none + 1
+        elseif w[0].subtype == 'ITEM_WEAPON_PICK' then picks = picks + 1
+        elseif w[0].subtype == 'ITEM_WEAPON_MACE' then mace = mace + 1 end
+      end
+    end
+  end
+  T.eq(picks, 0, '3 picks for 6 miners: no soldier keeps a pick spec')
+  T.ok(mace >= 1 and none >= 1, string.format('mace %d, none %d', mace, none))
+  T.ok(logged(W, 'give up their pick/axe spec'), 'logged')
+end)
+
 T.test('live L6: guarded, an individual-choice weapon spec is replaced (or dropped when nothing is spare)', function()
   local W = setup(50)                                  -- census.i unknown: individual choice
   local A = X.squad_of(W, 'A')

@@ -628,6 +628,20 @@ local function weapon_specs(p)
   return r
 end
 
+-- BUG-023 (Run 10): the tools the builtin tool details need stay with them: one pick per Miners member, one axe
+-- per Woodcutters member (economy sizes them by the free tools), AXE_KEEP / PICK_KEEP as the floor. Read-only.
+local function tool_keep()
+  local keep = {pick = M.PICK_KEEP, axe = M.AXE_KEEP}
+  try(function()
+    for _, wd in ipairs(df.global.plotinfo.labor_info.work_details) do
+      local name, n = dfhack.df2utf(wd.name), #wd.assigned_units
+      if name == 'Miners' then keep.pick = math.max(keep.pick, n)
+      elseif name == 'Woodcutters' then keep.axe = math.max(keep.axe, n) end
+    end
+  end)
+  return keep
+end
+
 -- nil while the melee soldiers wanted cannot drain the tools, else the axes and picks soldiers may hold
 local function weapon_guard(K, per)
   local ci = K.census.i
@@ -636,10 +650,48 @@ local function weapon_guard(K, per)
   for _, sp in ipairs(M.SQUADS) do if sp.kind == 'melee' then melee = melee + (per[sp.key] or 0) end end
   if melee == 0 then return nil end
   local axes, picks = int(ci.w_axe) or 0, int(ci.w_pick) or 0
-  if axes - M.AXE_KEEP >= melee and picks - M.PICK_KEEP >= melee then return nil end
-  return {axe = math.max(0, axes - M.AXE_KEEP), pick = math.max(0, picks - M.PICK_KEEP)}
+  local keep = tool_keep()
+  if axes - keep.axe >= melee and picks - keep.pick >= melee then return nil end
+  return {axe = math.max(0, axes - keep.axe), pick = math.max(0, picks - keep.pick), keep = keep}
 end
 M.weapon_guard = weapon_guard
+
+-- BUG-023 (Run 10: "3 free picks, 3 reserved by squad uniforms" while 2 of 6 miners held none): an explicit pick or
+-- axe weapon spec makes DF reserve a free tool for the position (v1 E18: reserved tools are never handed out as
+-- work tools). While guarded, the specs of a tool kind beyond the spare tools are given up: {pick = n, axe = n}.
+local function tool_excess(g)
+  if not g then return nil end
+  local claim = {pick = 0, axe = 0}
+  for _, sp in ipairs(M.SQUADS) do
+    local e = st.sq[sp.key]
+    local s = e and squad(e.id)
+    if s then
+      try(function()
+        for _, p in ipairs(s.positions) do
+          for _, sub in ipairs(weapon_specs(p)) do
+            local w = weapon_kind(sub)
+            if w and claim[w.k] then claim[w.k] = claim[w.k] + 1 end
+          end
+        end
+      end)
+    end
+  end
+  local ex = {pick = math.max(0, claim.pick - g.pick), axe = math.max(0, claim.axe - g.axe)}
+  return (ex.pick > 0 or ex.axe > 0) and ex or nil
+end
+
+local function holds_kind(u, k)              -- the soldier carries a weapon of that kind (a pick, an axe)
+  return try(function()
+    for _, e in ipairs(u.inventory) do
+      local it = e.item
+      if it and it:getType() == df.item_type.WEAPON then
+        local w = weapon_kind(it:getSubtype())
+        if w and w.k == k then return true end
+      end
+    end
+    return false
+  end) == true
+end
 
 -- up to n weapon tokens for bare melee positions: free melee weapons that are no tools (minus the explicit specs
 -- that already claim them), then the spare axes, then the spare picks
@@ -708,12 +760,30 @@ local function ensure_weapons(K, k, s)
   local e = st.sq[k]
   if not e or e.kind == 'xbow' or not retry_ok(K, 'wpn' .. k) then return end
   local g = rt.wguard
-  local need = {}
+  local need, marked = {}, {}
   for _, m in ipairs(members(s)) do
     local ws = weapon_specs(m.p)
     local bad = #ws == 0 and (g ~= nil or nw_has(e, m.pos))
     if g and not bad then for _, sub in ipairs(ws) do if sub < 0 then bad = true end end end
-    if bad then need[#need + 1] = m.pos end
+    if bad then need[#need + 1] = m.pos; marked[m.pos] = true end
+  end
+  -- BUG-023: tool specs beyond the spare tools are re-planned, the soldiers without that tool in hand first
+  local ex, given = g and rt.wexcess, 0
+  if ex then
+    for pass = 1, 2 do
+      for _, m in ipairs(members(s)) do
+        for _, sub in ipairs(weapon_specs(m.p)) do
+          local w = weapon_kind(sub)
+          if w and (ex[w.k] or 0) > 0 and not marked[m.pos] and (pass == 2) == holds_kind(m.unit, w.k) then
+            need[#need + 1], marked[m.pos], ex[w.k], given = m.pos, true, ex[w.k] - 1, given + 1
+          end
+        end
+      end
+    end
+  end
+  if given > 0 then
+    K.log('info', 'military: squad %s: %d positions give up their pick/axe spec (the Miners/Woodcutters need the tools; '
+          .. 'a reserved tool is never handed out as a work tool)', k, given)
   end
   if #need == 0 then cleared('wpn' .. k); return end
   table.sort(need)
@@ -745,7 +815,7 @@ local function ensure_weapons(K, k, s)
   if #plan < #need and not rt.no_wpn[k] then
     rt.no_wpn[k] = true
     K.log('warn', 'military: squad %s: %d positions without a weapon (no spare weapon; %d axes and %d picks stay '
-          .. 'with the civilians)', k, #need - #plan, M.AXE_KEEP, M.PICK_KEEP)
+          .. 'with the civilians)', k, #need - #plan, (g.keep or {}).axe or M.AXE_KEEP, (g.keep or {}).pick or M.PICK_KEEP)
   end
   backoff(K, 'wpn' .. k)
 end
@@ -1197,6 +1267,7 @@ function M.step(K, budget, ctx)
   if zero and mode == 'PEACE' then release(K, zero)
   elseif short and mode == 'PEACE' then release(K, 'tools', 'melee') end
   rt.wguard = weapon_guard(K, per)
+  rt.wexcess = tool_excess(rt.wguard)
   local list
   local function recruits() list = list or M.recruits(K); return list end   -- only when needed
   for _, sp in ipairs(M.SQUADS) do

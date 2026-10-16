@@ -2278,7 +2278,7 @@ local function tool_check(K, tc, r, spec, cur, jc, fixed)
       rec.ann = CAD.mark(now, without, toks)
       local names = {}
       for i = 1, math.min(3, #without) do names[i] = unit_name(without[i]):sub(1, 24) end
-      local hint = res > 0 and 'squad uniforms reserve tools (military weapon choice); ' or ''
+      local hint = res > 0 and 'squad uniforms reserve tools (military gives up the pick/axe specs beyond the spare tools); ' or ''
       local eqn, eqt = math.tointeger(rec.eq) or 0, math.tointeger(rec.eqt)
       local eqd = eqt and math.max(0, (r.now - eqt) // DAY) or nil
       hint = hint .. (tc.equip_update == true and (eqn > 0 and

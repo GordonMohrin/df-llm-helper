@@ -1,5 +1,13 @@
 # CHANGELOG dfpilot
 
+## Soldiers no longer reserve the civilians' picks and axes, BUG-023 (2026-10-16; offline, live-untested)
+- Live Run 10: `3 free picks, 3 reserved by squad uniforms` while 2 of 6 miners held none; DF never hands a reserved tool out as a
+  work tool. military's weapon guard now keeps one pick per Miners member and one axe per Woodcutters member (was a fixed 2/1) and
+  re-plans explicit pick/axe specs beyond the spare tools; act's `squad_uniform`/`squad_unequip` give a released, unheld item back
+  from `items_assigned` to `items_unassigned`, as the squads screen does.
+- Live check: kern.log `military: squad X: N positions give up their pick/axe spec`, `inspect what=workload` reserved tools 0,
+  then the members pick their tools up (TOOL_BLOCKED stops).
+
 ## Tool repair: equipment update also for existing members, BUG-023 (2026-10-16; offline, live-untested)
 - Live Run 10 y420: with `tools.equip_update` on, members added before the switch never got the request (Woodcutters 0 of 1 with
   an axe for 16 days, 5 free axes). Now a Miners/Woodcutters member without its tool while free tools exist gets the equipment

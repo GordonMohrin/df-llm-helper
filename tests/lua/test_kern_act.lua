@@ -576,6 +576,51 @@ T.test('squad_unequip (live L6): squad equipment screen remove - specs, assigned
   T.eq((env.api.squad_unequip(4242)), false)
 end)
 
+T.test('BUG-023: a removed or replaced weapon spec gives its unheld item back to items_unassigned (no reservation left)', function()
+  local W = H.world{tag = 'rel', units = {{id = 5, citizen = true, pos = {1, 1, 1}}, {id = 6, citizen = true, pos = {1, 1, 1}},
+                                          {id = 7, citizen = true, pos = {1, 1, 1}}}}
+  local _, squads = mil_world(W)
+  df.item_type = {ARMOR = 0, HELM = 1, SHIELD = 2, WEAPON = 3, AMMO = 4, [0] = 'ARMOR', [1] = 'HELM', [2] = 'SHIELD',
+                  [3] = 'WEAPON', [4] = 'AMMO'}
+  df.global.world.raws = {itemdefs = {weapons = kmock.vec{{id = 'ITEM_WEAPON_PICK', subtype = 0},
+                                                         {id = 'ITEM_WEAPON_SPEAR', subtype = 1}}}}
+  df.squad_uniform_spec = {new = function() return {indiv_choice = {}, assigned = kmock.vec{}, delete = function() end} end}
+  local items = {}
+  for _, id in ipairs({501, 502, 503}) do items[id] = {id = id, getType = function() return 3 end} end
+  local find0 = df.item.find
+  df.item.find = function(id) return items[id] or find0(id) end
+  local held = {[503] = true}
+  dfhack.items = dfhack.items or {}
+  local holder0 = dfhack.items.getHolderUnit
+  dfhack.items.getHolderUnit = function(it) return held[it.id] and {id = 6} or nil end
+  local env = mk()
+  env.who_v = 'military'
+  local _, sid = env.api.squad_create('A', {})
+  local sq = squads[sid]
+  df.global.world.squads = {all = kmock.vec{sq}}
+  for _, p in ipairs(sq.positions) do p.equipment.assigned_items, p.equipment.quiver = kmock.vec{}, -1 end
+  env.api.squad_uniform(sid, {mode = 'replace', positions = {0, 1, 2},
+                              items = {{cat = 'weapon', type = 'WEAPON', subtype = 'ITEM_WEAPON_PICK'}}})
+  for i, id in ipairs({501, 502, 503}) do
+    local p = sq.positions[i - 1]
+    p.equipment.uniform.weapon[0].assigned:insert('#', id)
+    p.equipment.assigned_items:insert('#', id)
+  end
+  df.global.plotinfo.equipment = {items_assigned = {WEAPON = kmock.vec{501, 502, 503, 600}},
+                                  items_unassigned = {WEAPON = kmock.vec{400, 700}}}
+  local eq = df.global.plotinfo.equipment
+  local function ids(v) local r = {} for _, x in ipairs(v) do r[#r + 1] = x end return r end
+  -- the squads screen replaces position 0's pick by a spear: 501 leaves the position and the reservation
+  T.eq((env.api.squad_uniform(sid, {mode = 'replace', positions = {0},
+                                    items = {{cat = 'weapon', type = 'WEAPON', subtype = 'ITEM_WEAPON_SPEAR'}}})), true)
+  T.eq(ids(sq.positions[0].equipment.assigned_items), {})
+  T.eq({ids(eq.items_assigned.WEAPON), ids(eq.items_unassigned.WEAPON)}, {{502, 503, 600}, {400, 501, 700}})
+  -- remove the weapon specs of positions 1 and 2: 502 goes back, 503 stays assigned (a soldier carries it)
+  T.eq((env.api.squad_unequip(sid, {1, 2}, {'weapon'})), true)
+  T.eq({ids(eq.items_assigned.WEAPON), ids(eq.items_unassigned.WEAPON)}, {{503, 600}, {400, 501, 502, 700}})
+  df.item.find, dfhack.items.getHolderUnit = find0, holder0
+end)
+
 T.test('animal_slaughter (live L6): the animal sheet toggle for tame fort animals, never pets or citizens', function()
   local W = H.world{tag = 'slau', units = {{id = 5, citizen = true}, {id = 20, tame = true, animal = true},
                                            {id = 21, tame = true, animal = true}, {id = 22, animal = true},

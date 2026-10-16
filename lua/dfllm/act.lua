@@ -771,6 +771,42 @@ local function impls(state)
       pcall(function() sp:delete() end)
     end
   end
+  -- BUG-023 (v1 E18 Run 5, Run 10 "3 reserved by squad uniforms"): an item whose spec is gone stays in
+  -- plotinfo.equipment.items_assigned ("assigned, never picked up"), and DF never hands a reserved pick or axe out as a
+  -- work tool. As the squads screen's removal does, an item that no position lists any more and nobody carries goes
+  -- back to items_unassigned (sorted). Returns the number released.
+  local function release_items(ids)
+    if #ids == 0 then return 0 end
+    local n = 0
+    pcall(function()
+      local refd = {}
+      for _, s in ipairs(df.global.world.squads.all) do
+        for _, p in ipairs(s.positions) do
+          for _, id in ipairs(p.equipment.assigned_items) do refd[id] = true end
+        end
+      end
+      local eq = df.global.plotinfo.equipment
+      for _, id in ipairs(ids) do
+        local it = df.item.find(id)
+        if it and not refd[id] and not dfhack.items.getHolderUnit(it) then
+          local key = df.item_type[it:getType()]
+          local va, vu = eq.items_assigned[key], eq.items_unassigned[key]
+          local was = false
+          for j = #va - 1, 0, -1 do if va[j] == id then va:erase(j); was = true end end
+          if was then
+            local at, have = #vu, false
+            for j = 0, #vu - 1 do
+              if vu[j] == id then have = true end
+              if at == #vu and vu[j] > id then at = j end
+            end
+            if not have then vu:insert(at, id) end
+            n = n + 1
+          end
+        end
+      end
+    end)
+    return n
+  end
   function I.squad_uniform(squad_id, spec)
     local sq = df.squad.find(int(squad_id) or -1)
     if not sq or sq.entity_id ~= df.global.plotinfo.group_id then return false, 'no fort squad ' .. tostring(squad_id) end
@@ -792,10 +828,20 @@ local function impls(state)
       only = {}
       for _, i in ipairs(spec.positions) do only[i] = true end
     end
-    local n = 0
+    local n, freed = 0, {}
     for i, p in ipairs(sq.positions) do
       if not only or only[i] then
         local u = p.equipment.uniform
+        -- the replaced specs' items leave the position (else they stay reserved for it, BUG-023)
+        local ai = p.equipment.assigned_items
+        for c in pairs(cats) do
+          for _, sp in ipairs(u[c]) do
+            for _, id in ipairs(sp.assigned or {}) do
+              freed[#freed + 1] = id
+              if ai then for j = #ai - 1, 0, -1 do if ai[j] == id then ai:erase(j) end end end
+            end
+          end
+        end
         for c in pairs(cats) do clear_specs(u[c]) end
         for _, r in ipairs(recs) do
           local sp = df.squad_uniform_spec:new()
@@ -825,6 +871,7 @@ local function impls(state)
         sq.ammo.ammunition:insert('#', a)
       end
     end
+    release_items(freed)
     equipment_update(sq)
     return true, n
   end
@@ -855,15 +902,17 @@ local function impls(state)
         which[c] = true
       end
     end
-    local n = 0
+    local n, freed = 0, {}
     for i, p in ipairs(sq.positions) do
       if not only or only[i] then
         local eq = p.equipment
         local ai = eq.assigned_items
+        if not cats then for _, id in ipairs(ai) do freed[#freed + 1] = id end end
         for c in pairs(which) do
           for _, sp in ipairs(eq.uniform[c]) do
             for _, id in ipairs(sp.assigned) do
               n = n + 1
+              freed[#freed + 1] = id
               if cats then
                 for j = #ai - 1, 0, -1 do if ai[j] == id then ai:erase(j) end end
               end
@@ -879,6 +928,7 @@ local function impls(state)
         end
       end
     end
+    release_items(freed)
     equipment_update(sq)
     return true, n
   end

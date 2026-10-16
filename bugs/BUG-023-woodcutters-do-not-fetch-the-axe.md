@@ -81,3 +81,20 @@ kernel adds in a pass is not repaired in the same pass. TOOL_BLOCKED carries `eq
 `tests/lua/test_economy_tools.lua` (fail on the old code). Live check: after `dfllm reload`, kern.log `Woodcutters: ... holds no
 axe: equipment update requested again`; within a game day the member should carry an axe. If TOOL_BLOCKED still comes with
 `eq` >= 2, the engine's request is not enough and the cause lies elsewhere (tell Gordon; no tool is put into a hand).
+
+## Second live check (Run 10 y420 autumn) and the reservation fix
+The repeated request was not enough either: TOOL_BLOCKED #5887 `Miners: 2 of 6 hold no pick for 4 days, 36 dig jobs open; 3 free
+picks (3 loose, 3 reserved by squad uniforms) [eq=2]`; Woodcutters 0 of 1 with an axe, 5 free axes. The free tools lay loose on
+the floor, not in a container. Cause (v1 E18 Run 5, measured then): DF hands work tools (`plotinfo.equipment.work_weapons`) out
+only from UNRESERVED free tools; an explicit pick/axe weapon spec of a squad position reserves free tools in position order
+(`spec.assigned`, `position.assigned_items`, global `items_assigned`), and military's weapon guard gave soldiers every pick beyond
+a fixed `PICK_KEEP` 2 (axes beyond `AXE_KEEP` 1), whatever the tool details needed. Fix:
+- military: the tools kept for the civilians are one pick per Miners member and one axe per Woodcutters member (floors 2/1);
+  explicit pick/axe specs beyond the spare tools are re-planned (other melee weapons, else none), soldiers without the tool in
+  hand first (`military: squad A: N positions give up their pick/axe spec`).
+- act: `squad_uniform` (replace) takes the replaced specs' items off the position, and `squad_uniform`/`squad_unequip` give an
+  item that no position lists and nobody carries back from `items_assigned` to `items_unassigned` (what the squads screen's
+  removal does; v1 `pickfix` did the same by hand).
+Tests: `tests/lua/test_military.lua` (two BUG-023 cases), `tests/lua/test_kern_act.lua` (release); all fail on the old code.
+Live check: kern.log `give up their pick/axe spec`; `inspect workload` `tools` shows `pick_res`/`axe_res` falling to 0; with the
+equipment update requests the miners/woodcutters should carry a tool within a game day.
