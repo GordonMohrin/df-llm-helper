@@ -31,6 +31,9 @@
 -- SIEGE is a BREACH at once (why destroyed), RECOVERY counts it as lowered; and the deep defense (plan B, see that
 -- section): building destroyers in sight, an army over stations.core_ratio x our soldiers or weak squads send the
 -- civilians to the separated refuge and every squad to the core station.
+-- BUG-032 (Run 11 y432: the squads at the manifest's b2, one tile behind B2, held the BREACH raise): military keeps every
+-- station clear of the bridge footprints; each step siege hands gate.holds() to military.restation, which moves a squad
+-- whose soldiers at their station hold a raise (restation_step); the deep-defense text names military's core station.
 local geom = require('dfllm.util.geom')
 
 -- every frame, but a full step only on a fresh hostile census or every PERIOD ticks, so the
@@ -1638,6 +1641,8 @@ function M.sortie(K, args, cmd_id)
   end
   local at = bailey(g)
   if not at then return false, 'no bailey: manifest zones.Z1 or stations.bailey' end
+  local okp, safe = K.call('military', 'safe_pos', at, 'bailey')     -- BUG-032: clear of O1's and B1's footprints
+  if okp and posp(safe) then at = posp(safe) end
   if #g.inner == 0 then return false, 'no inner bridge (B1): no airlock' end
   for _, b in ipairs(g.inner) do if gate_state(K, b) ~= 'up' then return false, b .. ' is not up' end end
   if gate_state(K, gname) ~= 'up' then return false, gname .. ' is not up' end
@@ -1763,8 +1768,13 @@ local function destroyers(K)
   return races, ids, near, order
 end
 
--- the core station of posture CORE (military.station_of): stations.core, else stations.b2, else stations.melee
-local function core_station(g) return posp(g.stations.core) or posp(g.stations.b2) or posp(g.stations.melee) end
+-- the core station of posture CORE (military.station_of): stations.core, else stations.b2, else stations.melee; BUG-032:
+-- military's own pick (clear of the bridge footprints) when it answers
+local function core_station(K, g)
+  local ok, p = K.call('military', 'station_for', 'CORE')
+  if ok and posp(p) then return posp(p) end
+  return posp(g.stations.core) or posp(g.stations.b2) or posp(g.stations.melee)
+end
 
 local function deep_step(K, a, g, now)
   if not (a and a.fresh) then return end
@@ -1811,7 +1821,7 @@ local function deep_step(K, a, g, now)
     parts[#parts + 1] = d.worn < d.c.worn and string.format('worn %d%% < %d%%', d.worn, d.c.worn)
                         or string.format('iron/steel %d%% < %d%%', d.metal, d.c.metal)
   end
-  local p = core_station(g)
+  local p = core_station(K, g)
   local txt = string.format('deep defense: %s; civilians to %s (the separated refuge), every squad at the core station '
                             .. '%s, no intake waves', table.concat(parts, '; '), g.refuge,
                             p and string.format('%d,%d,%d', p[1], p[2], p[3]) or '(none in the manifest)')
@@ -1866,6 +1876,22 @@ local function apply(K, a, g, now)
   set_posture(K, P, now, var)
   -- BUG-030: no kill orders in the deep defense (they would draw the crossbows into the gallery and the field)
   if mode == 'BREACH' or (mode == 'SIEGE' and (not deep or P == 'INTAKE')) then kills(K, g, P, now, P == 'INTAKE') end
+end
+
+-- BUG-032 (Run 11 y432: GATE_FAIL B2 'not up after 908 ticks', the squad at its station next to B2 held the BREACH
+-- raise): soldiers standing at their squad's station hold a raise (gate.holds) -> military re-stations that squad clear
+-- of the footprint at once (the squads screen's move order); the forced raise (a hostile within gate.force_near) stays
+-- gate's rule. Every mode (a lockdown in PEACE raises too), on each full step.
+local function restation_step(K)
+  local ok, holds = K.call('gate', 'holds')
+  if not (ok and type(holds) == 'table') then return end
+  for _, h in ipairs(holds) do
+    if type(h) == 'table' and h.want == 'up' then
+      for _, e in ipairs(type(h.units) == 'table' and h.units or {}) do
+        if e.k == 'soldier' then K.call('military', 'restation', holds); return end
+      end
+    end
+  end
 end
 
 ---------------------------------------------------------------- episode bookkeeping
@@ -2076,6 +2102,7 @@ function M.step(K, budget, ctx)
     intake_step(K, a, g, now)
   end
   apply(K, a, g, now)
+  restation_step(K)                                        -- BUG-032
   status(K, a, now)
   save(K)
 end

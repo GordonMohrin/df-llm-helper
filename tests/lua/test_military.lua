@@ -297,7 +297,7 @@ T.test('postures: READY_STATION, B2_HOLD, STATION_B1, TRAIN set routine and stat
   T.eq({A.cur_routine_idx, B.cur_routine_idx, Cq.cur_routine_idx}, {3, 3, 3}, 'Ready')
   T.eq({orders(A), orders(B), orders(Cq)}, {'station@51,44,10', 'station@51,44,10', 'station@51,28,11'})
   T.ok(X.call(W, 'military', 'posture', 'B2_HOLD'))
-  T.eq({orders(A), orders(B), orders(Cq)}, {'station@51,62,10', 'station@51,62,10', 'station@51,62,10'})
+  T.eq({orders(A), orders(B), orders(Cq)}, {'station@51,63,10', 'station@51,63,10', 'station@51,63,10'})
   T.ok(X.call(W, 'military', 'posture', 'STATION_B1'))
   T.eq({A.cur_routine_idx, B.cur_routine_idx, Cq.cur_routine_idx}, {2, 2, 2}, 'training')
   T.eq({orders(A), orders(B), orders(Cq)}, {'station@51,44,10', '', ''})

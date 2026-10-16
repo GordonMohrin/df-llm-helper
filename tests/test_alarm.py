@@ -205,12 +205,17 @@ def test_reflex_config_stations(tmp_path):
         assert m, name
         return {k: (tuple(int(x) for x in re.findall(r"\d+", v)) if v.startswith("{") else int(v))
                 for k, v in re.findall(r"(\w+) = (\{\d+, \d+\}|\d+)", m.group(1))}
-    assert shipped["stations"] == table("ST") == {"core_ratio": 3, "worn": 60, "metal": 0}
-    assert table("ST_LIM") == fairplay.STATIONS_LIM
+    st = dict(shipped["stations"])
+    spread = st.pop("spread")                    # BUG-032: military's knob (lua/dfllm/military.lua M.SPREAD)
+    assert st == table("ST") == {"core_ratio": 3, "worn": 60, "metal": 0}
+    mil = (fairplay.REPO / "lua" / "dfllm" / "military.lua").read_text(encoding="utf-8")
+    assert int(re.search(r"^M\.SPREAD = (\d+)", mil, re.M).group(1)) == spread == 1
+    lim = tuple(int(x) for x in re.search(r"^M\.SPREAD_LIM = \{(\d+), (\d+)\}", mil, re.M).groups())
+    assert {**table("ST_LIM"), "spread": lim} == fairplay.STATIONS_LIM
     p = tmp_path / "reflex.json"
-    p.write_text(json.dumps({"v": 2, "stations": {"core_ratio": 0, "worn": 60, "zap": 1}}), encoding="utf-8")
+    p.write_text(json.dumps({"v": 2, "stations": {"core_ratio": 0, "worn": 60, "zap": 1, "spread": 6}}), encoding="utf-8")
     errs = fairplay.reflex_errors(p)
-    for needle in ("stations.core_ratio: int 1..50", "stations.zap: unknown key"):
+    for needle in ("stations.core_ratio: int 1..50", "stations.zap: unknown key", "stations.spread: int 0..5"):
         assert any(needle in e for e in errs), (needle, errs)
     assert not any("stations.worn" in e for e in errs), errs
     assert fairplay.reflex_errors(fairplay.REPO / "config" / "reflex.json") == []

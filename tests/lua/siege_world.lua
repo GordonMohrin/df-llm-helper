@@ -23,7 +23,8 @@ function S.manifest()
     refuge = {anchor = {70, 70, Z - 6}, burrow = 'Tiefe+'},
     killboxes = {{id = 'K1', bbox = {48, 25, Z, 54, 31, Z}}},
     stairs = {civ = {{60, 60, Z - 6, Z}}, mil = {{49, 26, Z - 2, Z}}},
-    stations = {melee = {51, 44, Z}, gallery = {51, 28, Z + 1}, b2 = {51, 62, Z}},
+    -- BUG-032: b2 three tiles behind B2 (a station lies more than gate margin 1 + spread 1 from every footprint)
+    stations = {melee = {51, 44, Z}, gallery = {51, 28, Z + 1}, b2 = {51, 63, Z}},
   }
 end
 S.KERN = {40, 41, Z - 2, 80, 95, Z}

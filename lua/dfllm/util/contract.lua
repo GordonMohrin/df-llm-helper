@@ -121,6 +121,8 @@ C.EVENTS = {
   INTAKE = {cls = 'B', by = 'siege'}, SORTIE = {cls = 'B', by = 'siege'},
   -- Run 11: economy's glass chain for strange moods is blocked (no sand revealed, no bags, no fuel; once per set)
   GLASS_BLOCKED = {cls = 'B', by = 'economy'},
+  -- BUG-032: military moved a squad station off a bridge footprint and its ring (bridge, chain, none, hold)
+  STATION_MOVED = {cls = 'B', by = 'military'},
   -- C: log only
   SIEGE_STATUS = {cls = 'C', by = 'siege'}, SEASON = {cls = 'C', by = 'kern'},
   PROJECT_STAGE = {cls = 'C', by = 'runner'}, MODE = {cls = 'C', by = 'kern'},

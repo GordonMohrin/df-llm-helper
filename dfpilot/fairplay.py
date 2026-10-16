@@ -217,8 +217,9 @@ INTAKE_LIM: dict = {"on": "bool", "wave": (1, 40), "min_soldiers": (1, 30), "wor
 SORTIE_LIM: dict = {"worn": (0, 100), "losses": (1, 30), "max_ticks": (300, 33600), "gather": (100, 33600),
                     "foe_cv": (0, 100), "near": (1, 50)}
 # BUG-030: the deep defense (siege.lua M.ST / M.ST_LIM): an army over core_ratio x soldiers, worn % or the iron/steel
-# share below worn / metal
-STATIONS_LIM: dict = {"core_ratio": (1, 50), "worn": (0, 100), "metal": (0, 100)}
+# share below worn / metal; BUG-032: spread = tiles around its station point a squad stands on (military.lua M.SPREAD:
+# a station lies more than gate's margin + spread tiles from every bridge footprint)
+STATIONS_LIM: dict = {"core_ratio": (1, 50), "worn": (0, 100), "metal": (0, 100), "spread": (0, 5)}
 
 
 # ---------------------------------------------------------------- allowlist (CONTRACTS §9.14)

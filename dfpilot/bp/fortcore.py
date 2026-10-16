@@ -53,6 +53,11 @@ WORKSHOPS = [("wc", "Carpenters", 6, 42), ("wm", "Masons", 10, 42), ("wr", "Craf
              ("wu", "Butchers", 17, 42)]    # live L6: a famine beside grazers and no butcher's shop (year-1 P0)
 DOORS = ((-4, 45), (4, 45), (0, 41), (6, 37))         # core hub -> dorm, workshops, stores; stores -> refuse
 CORE = (-13, 34, 19, 48)                              # core level rect (u0, v0, u1, v1): Z4 and Kern+
+# BUG-032: squad stations of stage 2 at ze; every station lies more than STATION_CLEAR tiles from every bridge
+# footprint on its level (gate.MARGIN 1 + the squad's spread around its station point 1; validate.station_bridge).
+# melee: the gatehouse centre (4 from B1, 5 from B2; was (0, 36), 2 from B1: its squad stood in B1's ring);
+# gallery: the middle of the crossbow gallery beside the killing field
+STATIONS = {"melee": [0, 38, ZE], "gallery": [5, 29, ZE]}
 
 
 def hall_tiles() -> list[tuple[int, int]]:
@@ -229,13 +234,15 @@ def _manifest(stage: int, zc: int, zr: int) -> dict:
     bridges = []
     if stage >= 2:
         bridges.append("B1")
-        m["stations"] = {"melee": [0, 36, ZE], "gallery": [5, 29, ZE]}
+        m["stations"] = {k: list(v) for k, v in STATIONS.items()}
         m["killboxes"] = [{"id": "K1", "bbox": [u0, v0, ZE, u1, v1, ZE]}]
     if stage >= 3:
         bridges += ["O1", "B2"]
-        m["stations"]["b2"] = [1, 44, ZE]
-        # BUG-030: the deep defense's core station: the core hub next to the civilians' stair to the refuge, one level
-        # below B2 (a station at b2 stands next to B2's footprint and holds its raise)
+        # BUG-032 (Run 11 y432: GATE_FAIL B2 'not up after 908 ticks', the squads at b2 = (1, 44, ze), one tile behind
+        # B2's footprint, held the BREACH raise): the Z4 landing (5x3) is B2's margin ring, its lever room and the
+        # civilians' stair head, no room for a squad; b2 is the core hub west of the civilians' stair (the core level
+        # behind B2, with the drink), core (BUG-030, the deep defense) the same hub east of it
+        m["stations"]["b2"] = [CIV[0] - 2, CIV[1], zc]
         m["stations"]["core"] = [CIV[0] + 2, CIV[1], zc]
         m["burrows"]["Tiefe+"] = {"role": "refuge"}
         m["refuge"] = {"anchor": [2, 45, zr], "burrow": "Tiefe+"}

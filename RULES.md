@@ -157,7 +157,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | SUPPLY_OUTSIDE | most of the drink or food stock lies outside Kern+ and the refuge (`d.days` inside): tell the player; the next plan builds `stockroom` (barrel food stockpile + still in the core; `plan propose` drafts it, after a siege `plan check` refuses a plan without it while < 90 days lie inside) |
 | BRIDGE_CRUSH | a unit died on or next to a bridge just pulled or moving (bridge, unit, the pull's tick, how it was matched): tell the player at once; `events` for the GATE lines of that bridge (who waited, GATE_FORCED); the bug goes to the repo (BUG-027) |
 | WAVE_FAIL | an intake wave or a sortie through O1 went wrong (`why`: losses, past_b1, breach, stuck = the field not clear, left_outside = O1 raised with soldiers outside); the kernel closed O1 / recalled the squad: tell the player; `events --type INTAKE`/`SORTIE`; no lever by hand |
-| GATE_FORCED | a SIEGE/BREACH raise went ahead onto the named units because a hostile stood at the gate (`force_near`, BUG-027); expect their DEATH; tell the player. A `blocked` GATE_FAIL names who holds a bridge (never raised onto them): tell the player to move them (a soldier: his squad's station) |
+| GATE_FORCED | a SIEGE/BREACH raise went ahead onto the named units because a hostile stood at the gate (`force_near`, BUG-027); expect their DEATH; tell the player. A `blocked` GATE_FAIL names who holds a bridge (never raised onto them): tell the player to move them (a soldier at his squad's station: military re-stations the squad itself, STATION_MOVED (B), BUG-032) |
 | DEATHS_3PLUS | the line names the causes; the brief lists the season's deaths by cause; fix the cause in the plan |
 | DEATHS_PREVENTABLE | ≥ 2 citizens dehydrated or starved within a month (stock days, units, patients in the line): `inspect` `what=reach` (forbidden or cut-off drink/food), `what=refuge`; patients → `what=water_sources` (hospital water); tell the player; fix access in the plan |
 | DRILL_FAIL (2nd in a row) | read `ready.fail`; fix gear, squads or geometry; never raise the cap |
@@ -247,7 +247,7 @@ the lever tiles (`Hebel+`) while pulls are pending; until threat 0 for 2 days. *
 `config/reflex.json` `intake`, on): in SIEGE the squads stand inside B1 with drink (BUG-029); when soldiers, worn, army
 size, traps and the field allow it, B1 lets them into the killing field, rises, O1 lets up to 6 hostiles into bailey and
 trap hall, rises, the field is cleared, the squads go back; INTAKE (B) per phase, WAVE_FAIL (A) when it goes wrong.
-**Military:** squads A, B melee, C crossbows, ≤ 10 each; Constant training, never Off duty;
+**Military:** squads A, B melee, C crossbows, ≤ 10 each; stations > 2 tiles from every bridge (BUG-032); Constant training, never Off duty;
 Replace clothing + full metal + shield; KPI is worn %, never "assigned". Kill orders only inside
 manifest kill boxes, never into shafts or stairs. No civilian reserve squads.
 **Captives:** haul inside at once, then a pit zone; comrades free caged invaders.
