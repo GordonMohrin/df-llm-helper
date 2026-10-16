@@ -38,10 +38,10 @@ Related: FR-xx, BUG-xx
 | [BUG-015](BUG-015-door-forbid-flag-reset-in-one-frame.md) | open | high | the entrance door 74,70,117 cannot be kept forbidden (flag reset within one frame), the lockdown still reports it | lua/dfllm/act.lua, reflex.lua |
 | [BUG-016](BUG-016-trade-blocked-by-open-unit-sheet.md) | fixed (Claude, 20:00) | medium | two caravans lost: trade waits for ever on `ui_busy` while a unit sheet stays open | lua/dfllm/trade.lua |
 | [BUG-017](BUG-017-mood-risk-false-missing.md) | open | low | MOOD_RISK reports missing materials although the mood dwarf already holds every item | lua/dfllm/care.lua |
-| [BUG-018](BUG-018-refuge-audit-ignores-entrances.md) | open | high | the refuge audit passes a burrow that contains the entrances and main halls (50 -> 1 in the first real siege) | lua/dfllm/seal.lua, siege.lua |
-| [BUG-019](BUG-019-breach-refuge-refused-for-supplies.md) | open | high | during a breach the only reachable emergency burrow is refused for missing supplies | lua/dfllm/seal.lua, siege.lua |
+| [BUG-018](BUG-018-refuge-audit-ignores-entrances.md) | fixed (offline, live-untested) | high | the refuge audit passes a burrow that contains the entrances and main halls (50 -> 1 in the first real siege) | lua/dfllm/seal.lua, siege.lua |
+| [BUG-019](BUG-019-breach-refuge-refused-for-supplies.md) | fixed (offline, live-untested) | high | during a breach the only reachable emergency burrow is refused for missing supplies | lua/dfllm/seal.lua, siege.lua |
 | [BUG-020](BUG-020-embark-rectangle-ignores-injected-mouse.md) | open | medium | `embark.py scan` cannot place the rectangle: it ignores the held/injected mouse | tools/embark |
-| [BUG-021](BUG-021-cutoff-false-positive-group-renumber.md) | open | low | CUTOFF fires while everybody reaches everything (group ids renumber during construction) | care / seal |
+| [BUG-021](BUG-021-cutoff-false-positive-group-renumber.md) | fixed (offline, live-untested) | low | CUTOFF fires while everybody reaches everything (group ids renumber during construction) | care / seal |
 | [BUG-022](BUG-022-fortcore-stage2-build-lost-no-retry.md) | open | high | fortcore stage 2 ends `build_lost` for good: B1 and the traps are never built | lua/dfllm/runner.lua |
 | [BUG-023](BUG-023-woodcutters-do-not-fetch-the-axe.md) | open | high | woodcutters never fetch the axe from the bin: no FellTree job ever runs, no logs for a year (workaround: put the axe into their hand) | lua/dfllm/economy.lua |
 | [BUG-024](BUG-024-weave-silk-thread-not-found.md) | open | medium | weaving silk never starts: "Needs 1 unused collected silk thread" with 6500 reachable silk threads; 84 naked | economy |
