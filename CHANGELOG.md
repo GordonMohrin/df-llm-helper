@@ -23,7 +23,7 @@
   `BREACH>SIEGE sealed`) once O1, B1, B2 are up and `inspect entrances` says sealed; a raise of B1 with citizens between
   O1 and B1 gives STRANDED `hold` instead of stranding them. Drop the `BLOCK_WAIT` hotfix.
 
-## Run 10 batch merged: what to do after `git pull` (2026-10-16, updated with trade, BUG-027 and FR-68)
+## Run 10 batch merged: what to do after `git pull` (2026-10-16, updated with trade, BUG-027, FR-68 and BUG-028)
 - Reload: `dfhack-run dfllm reload` (kernel parts: SIEGE_UNREADY, LOCKDOWN_PARTIAL, TOOL_BLOCKED, refuge levels, CUTOFF re-read,
   build_lost retry, mood cloth kinds); restart `dfllm follow --no-auto` (it audits again; `--no-audit` switches that off).
 - Audit now: `python -m dfpilot audit`; drill by hand: `python -m dfpilot cmd drill '{"why":"manual check"}'`.
@@ -42,8 +42,10 @@
   (dismisses known blocking popups, keeps the clock); `dfllm boot`/`reload` remove it, `dfllm restore` or `stop --restore-fps`
   release the clock. Lever burrow: in BREACH `Hebel+` is listed while no hostile is in Kern+ or near the levers (the cause of
   `GATE_FAIL no worker` in y419).
-- Next: BUG-028 (BREACH keeps citizens cut off from drink: rescue opening of the inner bridges, BREACH -> SIEGE after a verified
-  seal, SUPPLY_OUTSIDE).
+- Siege supply (BUG-028): stranded citizens (thirst/hunger > 30000 on a group without drink/food) get the inner bridges
+  lowered once the outside is verified sealed (STRANDED rescue/done/abort/refused, never O1); BREACH falls back to SIEGE after
+  600 sealed ticks; a raise that would cut citizens off from all drink/food waits (STRANDED hold) unless a hostile is within
+  30 tiles; SUPPLY_OUTSIDE when most of the drink/food lies outside Kern+/refuge; `dfllm plan check` warns below 90 days inside.
 
 ## Lever burrow check in BREACH, BUG-027 (2026-10-16)
 - Run 10 y419: after `BREACH O1 not up at T+900` (enemy far) every O1/B1 lever lay in Kern+, but the BREACH alert holds the civilians in Tiefe+ and the
