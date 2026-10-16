@@ -7,8 +7,9 @@ top, a down stair dug into the rock beside it; the shaft runs down at (0,1,w) to
 level w has arms of `arm` tiles west (-u), east (+u) and south (+v) of the shaft tile.
 Fair play: nothing here reads the map. `sites.rank` places it on revealed tiles only (a footprint ring of rock or
 unknown, no revealed open, wet or marked tile), never with a shaft that reaches a level in `avoid` (absolute z: levels
-the player knows to be aquifer, e.g. from the embark info or damp stone the miners reported) or a level with a revealed
-cavern, damp or warm mark; the runner stops the dig at a damp, warm or cavern report (BREACH_STOP) as for every dig.
+the player knows to be aquifer, e.g. from the embark info or damp stone the miners reported), a level with a revealed
+cavern, damp or warm mark or the level of a cavern breach the kernel recorded (manifest `caverns`, Run 11); the runner
+stops the dig at a damp, warm or cavern report (BREACH_STOP) as for every dig, and plugs a shaft open to a cavern.
 """
 from __future__ import annotations
 

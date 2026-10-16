@@ -141,6 +141,8 @@ function H.fake_qf(W, p)
         local k = tx .. ',' .. ty .. ',' .. z
         if cmd == 'undo' then
           local id = W.bld_at[k]
+          local b = id and W.buildings[id]
+          if b and b._under then W.tile(tx, ty, z).c = b._under end   -- Run 11: a removed hatch leaves its stair
           if id then W.buildings[id] = nil; W.bld_at[k] = nil; W.undone = W.undone + 1 end
         elseif W.unsuitable[k] or W.bld_at[k] or not (W.tile(tx, ty, z).c == '.'
                or (key:sub(1, 1) == 'C' and (W.tile(tx, ty, z).c == '_' or W.tile(tx, ty, z).c == 'v'))) then
@@ -186,7 +188,9 @@ function H.world(opts)
                       if not on_map(x, y, z) then return nil end
                       local t = W.tile(x, y, z)
                       if t.hidden then return nil end
-                      return {c = t.c, dig = t.dig, bld = W.bld_at[x .. ',' .. y .. ',' .. z] and 'Bed' or '',
+                      local bid = W.bld_at[x .. ',' .. y .. ',' .. z]
+                      local bb = bid and W.buildings[bid]
+                      return {c = t.c, dig = t.dig, bld = bid and (bb and bb._bld or 'Bed') or '',
                               flow = t.flow or ((t.c == '~' and 7) or (t.c == 'w' and 2) or 0), cav = t.cav == true}
                     end,
                     -- Run 11: open sky per point (snapshot.outside_near, r = 0: the tile itself; W.tile().outside)
@@ -212,6 +216,21 @@ function H.world(opts)
                     end}
   end
   return W
+end
+
+-- Run 11: a hatch the player built on a tile (snapshot legend '+', bld 'Hatch'); quickfort undo removes it and leaves
+-- the tile it stood on (under, e.g. '>' for a shaft's down stair)
+function H.hatch(W, x, y, z, under)
+  local id = df.global.building_next_id
+  df.global.building_next_id = id + 1
+  W.add_building{id = id, _t = df.building_type.Door, _st = 1, _pos = {x, y, z}, _key = 'H', _bld = 'Hatch',
+                 _under = under or W.tile(x, y, z).c,
+                 getType = function(self) return self._t end,
+                 getBuildStage = function(self) return self._st end,
+                 getMaxBuildStage = function() return 1 end}
+  W.bld_at[x .. ',' .. y .. ',' .. z] = id
+  W.tile(x, y, z).c = '+'
+  return id
 end
 
 -- miners: dig up to n designated tiles (sorted, deterministic)

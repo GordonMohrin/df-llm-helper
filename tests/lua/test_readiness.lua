@@ -117,6 +117,12 @@ T.test('Run 11: an explore shaft open to a cavern (runner.cavern_open) is R0 cav
   W.frame(1)
   T.eq(lvl(W), 1)
   T.ok(not has(ready(W).fail, 'caverns'))
+  -- Run 11 (c1a14676): the daily shaft check finds a stalled explore open to a cavern lake: R0 at once, not next day
+  open = 1
+  X.call(W, 'runner', 'emit', 'CAVERN_PLUG', {phase = 'queued', proj = 'c1a14676', state = 'stalled'})
+  W.frame(1)
+  T.eq(lvl(W), 0)
+  T.ok(has(ready(W).fail, 'caverns'), T.show(ready(W).fail))
 end)
 
 T.test('R1 blockers: audit flags, stale audit, missing Tiefe+, unlinked lever, no outer bridge', function()

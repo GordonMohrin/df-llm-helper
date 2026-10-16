@@ -2,8 +2,8 @@
 tunnels below the core) and its site ranking on revealed tiles only."""
 import pytest
 
-from dfpilot import bp
-from dfpilot.bp import mine
+from dfpilot import bp, schema
+from dfpilot.bp import mine, sites
 from dfpilot.bp.primitives import merge_manifest
 from dfpilot.bp.render import World
 
@@ -83,6 +83,21 @@ def test_explore_sites_keep_off_avoided_and_cavern_levels(deep):
     with pytest.raises(ValueError, match=r"avoided level \(z16"):
         bp.rank(cave, "explore", {}, manifest=man)
     assert [s["why"].split(", ")[2] for s in bp.rank(cave, "explore", {"depth": 6}, manifest=man)][0] == "shaft to z19"
+
+
+def test_explore_sites_stop_above_a_recorded_cavern_breach(deep):
+    """Run 11 (y432-433: explores kept breaking into the cavern lakes on z127, far below the sites snapshot): the
+    kernel's manifest `caverns` (the tiles where a dig broke into a cavern) keeps every shaft above those levels, so
+    `plan propose` (fit_explore) fits the depth above them."""
+    snap, man = deep
+    cav = {**man, "caverns": [[90, 10, 16]]}                   # a breach far from the core, below the snapshot
+    assert schema.validate("manifest", cav) == []
+    assert sites.avoid_levels(snap, {}, cav) == {16} and sites.avoid_levels(snap, {}) == set()
+    with pytest.raises(ValueError, match=r"avoided level \(z16.*cavern breach"):
+        bp.rank(snap, "explore", {}, manifest=cav)
+    best = bp.rank(snap, "explore", {"depth": 6}, manifest=cav)
+    assert best and all(int(s["why"].split("shaft to z")[1].split(",")[0]) > 16 for s in best)
+    assert bp.rank(snap, "explore", {}, manifest=man)             # without the record depth 12 still fits
 
 
 def test_explore_hidden_rock_is_diggable_revealed_space_is_not(deep):

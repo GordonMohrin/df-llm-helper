@@ -134,6 +134,12 @@ def test_cavern_events():
             "d": {"proj": "e1", "why": "cavern_lake", "src": "report", "was": "damp", "n": 552, "pos": [136, 73, 127]}}
     assert errs("event", stop) == []
     assert any("expected int" in x for x in errs("event", {**stop, "d": {**stop["d"], "n": "552"}}))
+    # Run 11 (c1a14676): the daily shaft check names the explore's state (a stalled one is stopped, src check)
+    assert errs("event", {**plug, "d": {**plug["d"], "state": "stalled"}}) == []
+    check = {**stop, "d": {"proj": "c1a14676", "why": "cavern_lake", "src": "check", "state": "stalled", "n": 1146,
+                           "pos": [136, 73, 127]}}
+    assert errs("event", check) == []
+    assert any("state" in x for x in errs("event", {**check, "d": {**check["d"], "state": 3}}))
 
 
 def test_every_class_a_event_has_a_rules_row():

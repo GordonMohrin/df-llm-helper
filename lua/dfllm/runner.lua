@@ -12,6 +12,7 @@ local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
 local geom = require('dfllm.util.geom')
 local CAD = require('dfllm.util.cadence')   -- BUG-022: PROJECT_BLOCKED once per stage and cause
+local fio = require('dfllm.io')             -- Run 11: the bp folder (explores that left the list)
 
 local M = {name = 'runner', every = {ticks = 600},
            reports = {DIG_CANCEL_DAMP = true, DIG_CANCEL_WARM = true, CAVE_COLLAPSE = true,
@@ -50,6 +51,9 @@ M.CFG = {
   -- shaft open to a cavern is plugged at once (a constructed wall on its two top stair tiles; the lower one is given
   -- up when a step of it waits plug_wait). Projects stopped as damp/water/cavern look again every `recheck`.
   lake_r = 12, lake_min = 30, plug_wait = DAY, recheck = DAY, cav_keep = 16,
+  -- Run 11 (c1a14676 stood 'stalled' with its shaft open to a cavern lake): every explore shaft is looked at daily
+  -- whatever its project's state, at most shaft_n per run, reading at most shaft_probe of its dug tiles for water
+  shaft_n = 4, shaft_probe = 60, shaft_keep = 24, scan_n = 8, cav_levels = 32,
 }
 local MODES = {dig = true, build = true, place = true, zone = true, burrow = true}
 local CLASSES = {defense = true, infra = true, living = true, beauty = true}
@@ -437,6 +441,7 @@ local function mask_set(s, i)
 end
 
 local breach -- forward
+local note_cavern -- forward (Run 11: cavern breach levels for the explore ranking)
 
 -- DF announces a damp or warm stop with DIG_CANCEL_DAMP / DIG_CANCEL_WARM (spike S7 ids 52/51); this
 -- scans the newest `n` entries of the vanilla announcement log (world.status.reports, what the player
@@ -662,6 +667,21 @@ local function own_tiles(P, d)
   return own
 end
 
+-- the same for the document of a project that left the list (its bp file): not cached, nothing outlives the check
+local function doc_own(d)
+  local own = {}
+  for _, st in ipairs(type(d) == 'table' and type(d.stages) == 'table' and d.stages or {}) do
+    for _, ch in ipairs(type(st.chunks) == 'table' and st.chunks or {}) do
+      for _, cell in ipairs(type(ch.cells) == 'table' and ch.cells or {}) do
+        local out = {}
+        cell_tiles(ch, cell, out)
+        for _, t in ipairs(out) do own[tkey(t[1], t[2], t[3])] = true end
+      end
+    end
+  end
+  return own
+end
+
 local function tile_at(K, x, y, z)
   local ok, v = K.call('snapshot', 'tile', x, y, z)
   if S.slice then S.slice.probes = S.slice.probes + 1 end
@@ -672,16 +692,22 @@ end
 -- project's own tiles, connected to pos within lake_r on its level +- 1, with a revealed cavern tile beside pos or in
 -- that water, or none of the sampled water under the open sky), 'water' (such a body on the surface: a brook, a
 -- river), 'cavern' (a revealed cavern tile beside pos), else nil (seepage: damp stays damp). Second value: the
--- connected water tiles counted.
-function M.opened(K, P, d, pos)
+-- connected water tiles counted. own = the project's own tiles (own_tiles / doc_own).
+local function opened_at(K, own, pos)
   local x, y, z = int(pos and pos[1]), int(pos and pos[2]), int(pos and pos[3])
   if not (x and y and z) then return nil, 0 end
-  local r, wet = M.CFG.lake_r, {}
-  for dz = -1, 1 do
-    local ok, list = K.call('snapshot', 'liquids', x - r, y - r, x + r, y + r, z + dz, 1)
-    for _, w in ipairs(ok and type(list) == 'table' and list or {}) do wet[tkey(w[1], w[2], z + dz)] = {w[1], w[2], z + dz} end
+  local wet = {}
+  -- the flood starts only at pos or a tile beside it: a dry 3x3x3 needs no wide read (the daily shaft check asks often)
+  for _, r in ipairs({1, M.CFG.lake_r}) do
+    for dz = -1, 1 do
+      local ok, list = K.call('snapshot', 'liquids', x - r, y - r, x + r, y + r, z + dz, 1)
+      for _, w in ipairs(ok and type(list) == 'table' and list or {}) do
+        wet[tkey(w[1], w[2], z + dz)] = {w[1], w[2], z + dz}
+      end
+    end
+    if next(wet) == nil then break end
   end
-  local own, seen, queue, n, body = own_tiles(P, d), {}, {}, 0, {}
+  local seen, queue, n, body = {}, {}, 0, {}
   local function push(k) if wet[k] and not seen[k] then seen[k] = true; queue[#queue + 1] = wet[k] end end
   push(tkey(x, y, z))
   for _, o in ipairs(N26) do push(tkey(x + o[1], y + o[2], z + o[3])) end
@@ -719,14 +745,16 @@ function M.opened(K, P, d, pos)
   return nil, n
 end
 
--- the project's stair column (dig cells u/j/i: the one under pos, else the longest), read top down on revealed tiles:
--- {x, y, top, bot, s0 = {x, y, z, char}, s1 = the tile below s0 or nil}; nil without one or when its top is not dug
+function M.opened(K, P, d, pos) return opened_at(K, own_tiles(P, d), pos) end
+
+-- the project's stair column (dig cells u/j/i: the one under pos, else the longest): {x, y, top, low, zs = {[z] =
+-- true}} or nil; tiles_of(si) = the document's tiles of stage si per chunk (stage_tiles, or raw_tiles uncached)
 local STAIR_KEY = {u = true, j = true, i = true}
-local function shaft_of(K, P, d, pos)
+local function column_of(d, tiles_of, pos)
   local cols, keys = {}, {}
   for si = 0, #d.stages - 1 do
     if d.stages[si + 1].mode == 'dig' then
-      local tiles = stage_tiles(P.id, d, si)
+      local tiles = tiles_of(si)
       for ci = 1, #tiles do
         for _, t in ipairs(tiles[ci]) do
           if STAIR_KEY[t[4]] then
@@ -746,29 +774,96 @@ local function shaft_of(K, P, d, pos)
     if not best or c.n > best.n then best = c end
   end
   if not best then return nil end
-  local top
-  for z in pairs(best.zs) do if not top or z > top then top = z end end
-  local v0 = tile_at(K, best.x, best.y, top)
-  if not v0 or WALL[v0.c] then return nil end        -- never dug at the top: the column does not reach the fort
-  local sh = {x = best.x, y = best.y, top = top, bot = top, s0 = {best.x, best.y, top, v0.c}}
-  local z = top - 1
-  while best.zs[z] do
-    local v = tile_at(K, best.x, best.y, z)
+  for z in pairs(best.zs) do
+    if not best.top or z > best.top then best.top = z end
+    if not best.low or z < best.low then best.low = z end
+  end
+  return best
+end
+
+-- a column read top down on revealed tiles: {x, y, top, bot, s0 = {x, y, z, char, building or nil}, s1 = the tile
+-- below s0 or nil, wet = {{x, y, z}, ...} its tiles that hold water}; nil, why ('not dug': the top is rock, the column
+-- does not reach the fort; 'hidden') otherwise. col.zs (else every z from top down to col.low) names its levels.
+local function read_shaft(K, col)
+  local v0 = tile_at(K, col.x, col.y, col.top)
+  if not v0 then return nil, 'hidden' end
+  if WALL[v0.c] then return nil, 'not dug' end        -- never dug at the top: the column does not reach the fort
+  local b0 = (v0.bld == 'Hatch' or v0.bld == 'Door') and v0.bld or nil     -- Run 11: a hatch/door on the top
+  local sh = {x = col.x, y = col.y, top = col.top, bot = col.top, s0 = {col.x, col.y, col.top, v0.c, b0}, wet = {}}
+  if HAZARD[v0.c] == 'water' then sh.wet[1] = {col.x, col.y, col.top} end
+  local z = col.top - 1
+  while (col.zs and col.zs[z]) or (not col.zs and z >= (int(col.low) or col.top)) do
+    local v = tile_at(K, col.x, col.y, z)
     if not v or WALL[v.c] then break end
-    if z == top - 1 then sh.s1 = {best.x, best.y, z, v.c} end
+    if z == col.top - 1 then sh.s1 = {col.x, col.y, z, v.c} end
+    if HAZARD[v.c] == 'water' then sh.wet[#sh.wet + 1] = {col.x, col.y, z} end
     sh.bot, z = z, z - 1
   end
   return sh
 end
 
+local function shaft_of(K, P, d, pos)
+  local col = column_of(d, function(si) return stage_tiles(P.id, d, si) end, pos)
+  return col and read_shaft(K, col) or nil
+end
+
+-- the shaft is closed by a constructed wall: on its top, or (Run 11: a hatch or door on the top, the live 136,73,137)
+-- on the tile below it. A hatch or a door alone is no plug: forgotten beasts and building destroyers pass them.
+local COVER = {Hatch = true, Door = true}
+local function walled(K, s0, s1)
+  local v0 = type(s0) == 'table' and tile_at(K, s0[1], s0[2], s0[3]) or nil
+  if not v0 then return false end
+  if v0.c == 'C' then return true, 'top' end
+  if v0.c ~= '+' and not COVER[v0.bld] then return false end
+  local v1 = type(s1) == 'table' and tile_at(K, s1[1], s1[2], s1[3]) or nil
+  return v1 ~= nil and v1.c == 'C', 'below'
+end
+
+-- Run 11 (c1a14676): the explore's shaft record m.runner xs[<id>] (see shaft_check), made from d, else its bp file,
+-- when the project is first looked at, done or cancelled (it outlives the project); nil for other templates or
+-- without a stair column. raw_tiles: a stage's tiles per chunk, not cached (the record must not keep caches alive).
+local function raw_tiles(d, si)
+  local out = {}
+  for ci, ch in ipairs(d.stages[si + 1].chunks) do
+    local l = {}
+    for _, cell in ipairs(ch.cells) do cell_tiles(ch, cell, l) end
+    out[ci] = l
+  end
+  return out
+end
+
+local function file_doc(K, id)
+  local d = read_bp(K, id)
+  if d and check_doc(d, 'explore') == nil then return d end
+end
+
+local function note_shaft(K, P, d)
+  if P.tpl ~= 'explore' then return nil end
+  local r = S.rt.xs[P.id]
+  if type(r) == 'table' then return r end
+  d = d or file_doc(K, P.id)
+  if type(d) ~= 'table' or type(d.stages) ~= 'table' then return nil end
+  local col = column_of(d, function(si) return raw_tiles(d, si) end, nil)
+  if not col then return nil end
+  r = {x = col.x, y = col.y, top = col.top, low = col.low, t = now(K)}
+  S.rt.xs[P.id] = r
+  dirty()
+  return r
+end
+
 -- quickfort keys that wall one shaft tile: walls cannot stand on stairs (quickfort build.lua
 -- is_valid_tile_construction: floor, open space, ramp top), so a stair is channelled into open space first
+-- Run 11: a hatch or door on the tile (the live shaft top 136,73,137 got a hatch by hand) is removed first: quickfort
+-- undo of its build key (the player's 'remove building', a deconstruct job; PEACE only), then channel and wall
 local STAIR_C = {['<'] = true, ['>'] = true, X = true}
-local function piece_keys(c)
+local FREE_KEY = {Hatch = 'H', Door = 'd'}
+local function piece_keys(c, bld)
   if c == 'C' then return {} end
   if STAIR_C[c] then return {'h', 'Cw'} end
+  if c == '+' or FREE_KEY[bld] then return {'free:' .. (FREE_KEY[bld] or 'H'), 'h', 'Cw'} end   -- door/hatch
   return {'Cw'}
 end
+local function is_free(st) return st.label:sub(-5) == '.free' end
 
 local function wall_list(rec)
   local out = {}
@@ -778,18 +873,45 @@ local function wall_list(rec)
   return out
 end
 
--- the plug project: per piece (the lower one first: it is reached through the upper one) 'pN.dig' (channel) and
--- 'pN.wall' (a constructed wall); buildingplan waits for the material (no orders), like runner.repair
+-- Run 11 (y432-433: explores kept hitting the cavern lakes on z127): every tile where a dig broke into a cavern (the
+-- breach of BREACH_STOP cavern/cavern_lake, the shaft check's hit) is kept, m.runner cz = {{x, y, z, why, t}, ...}
+-- (<= cav_levels, newest kept), and mirrored into the fort manifest as `caverns` = {{x, y, z}, ...}: bp.sites' explore
+-- ranking avoids those levels (no shaft reaches one), so plan propose fits the depth above them.
+local function publish_caverns(K)
+  local man = K.manifest()
+  local list = {}
+  for i, c in ipairs(S.rt.cz) do list[i] = {c[1], c[2], c[3]} end
+  man.caverns = list
+  K.persist.set('manifest', man)
+end
+
+function note_cavern(K, pos, why)
+  local x, y, z = int(type(pos) == 'table' and pos[1]), int(type(pos) == 'table' and pos[2]),
+                  int(type(pos) == 'table' and pos[3])
+  if not (x and y and z) then return end
+  S.rt.cz = type(S.rt.cz) == 'table' and S.rt.cz or {}
+  for _, c in ipairs(S.rt.cz) do if c[1] == x and c[2] == y and c[3] == z then return end end
+  table.insert(S.rt.cz, {x, y, z, tostring(why or 'cavern'), now(K)})
+  while #S.rt.cz > M.CFG.cav_levels do table.remove(S.rt.cz, 1) end
+  publish_caverns(K)
+  dirty()
+  K.log('info', 'cavern at %d,%d,%d (%s): explore shafts stop above z%d', x, y, z, tostring(why), z)
+end
+
+-- the plug project: per piece (the lower one first: it is reached through the upper one) 'pN.free' (a hatch or door
+-- on it removed), 'pN.dig' (channel) and 'pN.wall' (a constructed wall); buildingplan waits for the material (no
+-- orders), like runner.repair
 local function plug_doc(rec)
   local stages, walls = {}, 0
   for _, pc in ipairs({{'p1', rec.s1 or false}, {'p0', rec.s0 or false}}) do
     local p = pc[2]
     if type(p) == 'table' then
-      for _, key in ipairs(piece_keys(p[4])) do
-        local dig = key == 'h'
-        stages[#stages + 1] = {label = pc[1] .. (dig and '.dig' or '.wall'), mode = dig and 'dig' or 'build', orders = 0,
-                               defense = 1, chunks = {{pos = {p[1], p[2], p[3]}, cells = {{0, 0, 0, key}}}}}
-        if not dig then walls = walls + 1 end
+      for _, key in ipairs(piece_keys(p[4], p[5])) do
+        local dig, free = key == 'h', key:sub(1, 5) == 'free:'
+        stages[#stages + 1] = {label = pc[1] .. (dig and '.dig' or free and '.free' or '.wall'),
+                               mode = dig and 'dig' or 'build', orders = 0, defense = 1,
+                               chunks = {{pos = {p[1], p[2], p[3]}, cells = {{0, 0, 0, free and key:sub(6) or key}}}}}
+        if not dig and not free then walls = walls + 1 end
       end
     end
   end
@@ -820,16 +942,22 @@ end
 -- A dig project broke into a cavern (why cavern/cavern_lake) at pos. An explore shaft (a dead end into the unknown) is
 -- plugged at once by a `plug` project (prio 1, every mode, never stopped by a hazard): its top stair tile and the one
 -- below get a constructed wall each. Other templates get CAVERN_PLUG 'none' (their stairs may be the fort's own:
--- walled by hand). m.runner cav[<proj>] = {proj, tpl, why, pos, n, t, st = open|done|failed|none, plug, s0, s1, bot, s1x}
-local function plug(K, P, d, why, pos, n)
+-- walled by hand). m.runner cav[<proj>] = {proj, tpl, why, pos, n, t, st = open|done|failed|none, plug, s0, s1, bot, s1x,
+-- state}. ex (the daily shaft check, Run 11 c1a14676): {sh = the shaft read already, state = the explore's state then
+-- (running, stalled, blocked:<why>, breach:<why>, cancel, done, cancelled)}; P may then be a stub {id, tpl}.
+local function plug(K, P, d, why, pos, n, ex)
+  ex = ex or {}
+  if CAVERN[why] then note_cavern(K, pos, why) end
   if P.tpl == 'plug' or type(S.rt.cav[P.id]) == 'table' then return end
-  local rec = {proj = P.id, tpl = P.tpl, why = why, t = now(K), n = n or 0, st = 'none', plug = ''}
+  local rec = {proj = P.id, tpl = P.tpl, why = why, t = now(K), n = n or 0, st = 'none', plug = '', state = ex.state}
   if type(pos) == 'table' and int(pos[1]) then rec.pos = {int(pos[1]), int(pos[2]), int(pos[3])} end
   S.rt.cav[P.id] = rec
   dirty()
   local label = (why:gsub('_', ' '))
   local where = rec.pos and string.format(' at %d,%d,%d', rec.pos[1], rec.pos[2], rec.pos[3]) or ''
-  local sh = P.tpl == 'explore' and shaft_of(K, P, d, rec.pos) or nil
+  local sh = ex.sh or (P.tpl == 'explore' and d and shaft_of(K, P, d, rec.pos)) or nil
+  local who = ex.state and string.format('%s (%s; shaft check)', P.id, ex.state) or P.id
+  local st_d = ex.state and {state = trunc(ex.state, 40)} or nil
   if not sh then
     local hint = P.tpl == 'explore' and 'no dug stair column reaches the fort' or ('no automatic plug for ' .. P.tpl)
     plug_emit(K, rec, 'none', string.format('%s (%s): %s%s; %s: wall the way in by hand (a constructed wall, '
@@ -844,21 +972,31 @@ local function plug(K, P, d, why, pos, n)
     K.log('info', '%s: the shaft %d,%d z%d-%d into the %s is walled already', P.id, sh.x, sh.y, sh.top, sh.bot, label)
     return
   end
-  local id = plug_id(K)
-  local ok, err = register(K, id, pd, 1, 'plug')
+  -- a plug project for this shaft that outlived its record (site data written at different times, then a reload)
+  local id
+  for _, Q in ipairs(S.pd.list) do
+    local qd = Q.tpl == 'plug' and Q.done ~= 1 and doc(K, Q.id)
+    if qd and type(qd.params) == 'table' and qd.params.of == P.id then id = Q.id end
+  end
+  local ok, err = id ~= nil, nil
+  if not id then
+    id = plug_id(K)
+    ok, err = register(K, id, pd, 1, 'plug')
+  end
   if not ok then
     rec.st = 'failed'
     plug_emit(K, rec, 'failed', string.format('%s: the shaft %d,%d z%d-%d opens into a %s%s; plug not queued (%s): build '
-                                              .. 'a constructed wall on %d,%d,%d by hand', P.id, sh.x, sh.y, sh.top, sh.bot,
-                                              label, where, tostring(err), sh.x, sh.y, sh.top), {hint = trunc(err, 60)})
+                                              .. 'a constructed wall on %d,%d,%d by hand', who, sh.x, sh.y, sh.top, sh.bot,
+                                              label, where, tostring(err), sh.x, sh.y, sh.top),
+              {hint = trunc(err, 60), state = st_d and st_d.state})
     return
   end
   rec.plug, rec.st = id, 'open'
   local msg = string.format('%s: the shaft %d,%d z%d-%d opens into a %s%s; plug %s: constructed walls at %s '
-                            .. '(stairs channelled first)', P.id, sh.x, sh.y, sh.top, sh.bot, label, where, id,
+                            .. '(stairs channelled first)', who, sh.x, sh.y, sh.top, sh.bot, label, where, id,
                             table.concat(wall_list(rec), ' + '))
   K.log('warn', '%s', msg)
-  plug_emit(K, rec, 'queued', msg)
+  plug_emit(K, rec, 'queued', msg, st_d)
 end
 
 local function plug_rec(id)
@@ -882,22 +1020,27 @@ local function plug_skip(K, P, d, why)
   dirty()
 end
 
-local function plug_refused(K, P, d, st)
-  if st.label:sub(1, 3) == 'p1.' then return plug_skip(K, P, d, 'quickfort refused ' .. st.label) end
+-- why: nil = quickfort refused the step; else why it ended (Run 11: the hatch on the top was not removed in time)
+local function plug_refused(K, P, d, st, why)
+  local what = why or ('quickfort refused ' .. st.label)
+  if st.label:sub(1, 3) == 'p1.' then return plug_skip(K, P, d, what) end
   set_blocked(K, P, 'plug_refused')
   local rec = plug_rec(P.id)
   if rec and rec.st ~= 'failed' then
     rec.st = 'failed'
     dirty()
     local p = st.chunks[1].pos
-    plug_emit(K, rec, 'failed', string.format('plug %s for %s: quickfort refused %s at %d,%d,%d: build a constructed '
-                                              .. 'wall there by hand (channel the stair first)', P.id, rec.proj, st.label,
-                                              p[1], p[2], p[3]), {hint = 'refused ' .. st.label})
+    plug_emit(K, rec, 'failed', string.format('plug %s for %s: %s at %d,%d,%d: build a constructed wall there by hand '
+                                              .. '(%s)', P.id, rec.proj, what, p[1], p[2], p[3],
+                                              is_free(st) and 'remove the hatch or door, channel the stair, wall it'
+                                              or 'channel the stair first'),
+              {hint = trunc(why or ('refused ' .. st.label), 60)})
   end
 end
 
 -- end of every run: a plug record is done once a constructed wall stands on the shaft top (the plug's, or one built by
--- hand); a plug project that is gone, finished without the wall or blocked fails once (the record stays open: R0)
+-- hand), or below a hatch/door on the top (walled; a hatch alone never counts); a plug project that is gone, finished
+-- without the wall or blocked fails once (the record stays open: R0)
 local function plug_watch(K)
   local ids, old = {}, {}
   for id in pairs(S.rt.cav) do ids[#ids + 1] = id end
@@ -906,8 +1049,15 @@ local function plug_watch(K)
     local r = S.rt.cav[id]
     if type(r) ~= 'table' then S.rt.cav[id] = nil; dirty()
     elseif (r.st == 'open' or r.st == 'failed') and type(r.s0) == 'table' then
-      local v = tile_at(K, r.s0[1], r.s0[2], r.s0[3])
-      if v and v.c == 'C' then
+      local shut, where = walled(K, r.s0, r.s1)
+      if shut and where == 'below' then
+        r.st, r.td = 'done', now(K)
+        dirty()
+        plug_emit(K, r, 'done', string.format('plug %s for %s: constructed wall on %d,%d,%d below the %s on %d,%d,%d; the '
+                                              .. 'shaft to the %s is closed', r.plug ~= '' and r.plug or '(by hand)', id,
+                                              r.s1[1], r.s1[2], r.s1[3], r.s0[5] or 'building', r.s0[1], r.s0[2],
+                                              r.s0[3], (r.why:gsub('_', ' '))))
+      elseif shut then
         local low = ''
         if type(r.s1) == 'table' then
           local v1 = tile_at(K, r.s1[1], r.s1[2], r.s1[3])
@@ -1044,6 +1194,24 @@ end
 
 local function apply(K, P, st, R)
   local ch = st.chunks[P.chunk + 1]
+  if P.tpl == 'plug' then
+    local c = ch.cells[1]
+    local v = tile_at(K, ch.pos[1] + c[1], ch.pos[2] + c[2], ch.pos[3] + c[3])
+    if is_free(st) then                      -- Run 11: the hatch/door on the shaft top: the player's 'remove building'
+      local ok, stats = qf(K, {mode = 'build', data = chunk_data(ch), pos = ch.pos, command = 'undo'})
+      K.log('info', '%s %s: removing the %s at %d,%d,%d (quickfort undo: %s)', P.id, st.label, c[4] == 'd' and 'door'
+            or 'hatch', ch.pos[1], ch.pos[2], ch.pos[3], ok and 'ok' or tostring(stats))
+      P.chunk, R.last = P.chunk + 1, now(K)
+      dirty()
+      return true
+    end
+    -- a channel on a tile that is open already (the removed hatch stood on open space or a floor): nothing to dig
+    if st.mode == 'dig' and v and (v.c == '_' or v.c == 'v' or v.c == 'C') then
+      P.chunk, R.last = P.chunk + 1, now(K)
+      dirty()
+      return true
+    end
+  end
   if st.mode == 'zone' then
     local skip
     ch, skip = zoned_cells(ch)
@@ -1221,6 +1389,8 @@ local function finish(K, P, d)
   h.ls = math.max(h.ls or 0, labels_done(d, #d.stages))
   S.rt.hist[P.tpl] = h
   P.done, P.pct, P.blocked, P.since = 1, 100, '', now(K)
+  local xr = note_shaft(K, P, d)              -- Run 11: a finished explore's shaft stays open: the shaft check watches it
+  if xr then xr.fin = 'done' end
   K.persist.set('bp.' .. P.id, nil)
   S.rt.p[P.id] = nil
   forget(P.id)
@@ -1249,6 +1419,29 @@ local function work(K, P, meas)
       plug_skip(K, P, d, string.format('not done within %d day%s', n, n == 1 and '' or 's'))
       return 'yield'
     end
+    -- Run 11: a hatch/door on the shaft top: none of it once the wall below it stands (the shaft is closed by a
+    -- constructed wall); else removed only in PEACE (an open shaft in a fight, seal's perimeter diff), given up after
+    -- plug_wait
+    if P.tpl == 'plug' and is_free(st) then
+      local rec = plug_rec(P.id)
+      if rec and walled(K, rec.s0, rec.s1) then
+        K.log('info', '%s: the wall below the %s stands; the top stays as it is', P.id, rec.s0[5] or 'building')
+        P.stage = #d.stages
+        dirty()
+        return work(K, P, meas)
+      end
+      if K.mode() ~= 'PEACE' and P.chunk == 0 then P.since = now(K); R.last = now(K); dirty(); return 'done' end
+      if not meas and P.chunk > 0 and now(K) - P.since >= M.CFG.plug_wait then
+        local p = st.chunks[1].pos
+        local v = tile_at(K, p[1], p[2], p[3])
+        if v and v.c == '+' then
+          local n = math.max(1, M.CFG.plug_wait // DAY)
+          plug_refused(K, P, d, st, string.format('the %s was not removed within %d day%s', rec and rec.s0[5] or 'hatch',
+                                                  n, n == 1 and '' or 's'))
+          return 'done'
+        end
+      end
+    end
     local need_orders = st.orders == 1 and P.orders_done ~= 1
     if meas and (need_orders or P.chunk < #st.chunks or (st.mode ~= 'dig' and st.mode ~= 'build')) then
       return 'done'
@@ -1267,7 +1460,11 @@ local function work(K, P, meas)
       return 'done'                          -- measure from the next run on
     else
       local res = 'complete'
-      if st.mode == 'dig' then res = measure_dig(K, P, d, R)
+      if P.tpl == 'plug' and is_free(st) then    -- done once no hatch/door stands there any more
+        local p = st.chunks[1].pos
+        local v = tile_at(K, p[1], p[2], p[3])
+        res = (v and v.c ~= '+' and not COVER[v.bld]) and 'complete' or 'done'
+      elseif st.mode == 'dig' then res = measure_dig(K, P, d, R)
       elseif st.mode == 'build' then res = measure_build(K, P, d, R) end
       if res == 'complete' then stage_done(K, P, d, st, R)
       elseif res ~= 'reapply' then return res end
@@ -1278,6 +1475,8 @@ end
 
 ---------------------------------------------------------------- undo (bp.cancel undo, BREACH_STOP)
 local function remove(K, P)
+  local xr = note_shaft(K, P, doc(K, P.id))   -- Run 11: a cancelled explore's shaft may still stand (shaft check)
+  if xr then xr.fin = 'cancelled' end
   for i, Q in ipairs(S.pd.list) do if Q == P then table.remove(S.pd.list, i); break end end
   K.persist.set('bp.' .. P.id, nil)
   S.rt.p[P.id] = nil
@@ -1313,23 +1512,26 @@ local function undo(K, P)
   return 'done'
 end
 
--- 'e1: cavern lake (report, not damp: 1146 water tiles in reach), digging stopped'
-local function breach_msg(id, why, src, was, n)
+-- 'e1: cavern lake (report, not damp: 1146 water tiles in reach), digging stopped'; the shaft check (state, Run 11):
+-- 'c1a14676: cavern lake (check, was stalled: 1146 water tiles in reach), digging stopped'
+local function breach_msg(id, why, src, was, n, state)
   local s = id .. ': ' .. (why:gsub('_', ' ')) .. ' (' .. src
-  if was then
-    s = s .. ', not ' .. was .. ((n or 0) > 0 and string.format(': %d water tiles in reach', n)
-                                 or ': a revealed cavern tile beside it')
+  if was or state then
+    s = s .. (was and (', not ' .. was) or (', was ' .. state))
+          .. ((n or 0) > 0 and string.format(': %d water tiles in reach', n) or ': a revealed cavern tile beside it')
   end
   return s .. '), digging stopped'
 end
 
 -- Run 11: a damp/water/cavern stop is first held against the revealed tiles at pos (M.opened: a cavern lake or an open
--- cavern raises it, never lowers it); a cavern kind then plugs an explore shaft (CAVERN_PLUG)
-function breach(K, P, why, pos, src)
+-- cavern raises it, never lowers it); a cavern kind then plugs an explore shaft (CAVERN_PLUG). ex (the daily shaft
+-- check found the opening already, src 'check'): {state = the project's state, n = water tiles, sh = the shaft read}
+function breach(K, P, why, pos, src, ex)
   if P.tpl == 'plug' or P.blocked:sub(1, 7) == 'breach:' or P.blocked == 'cancel' then return false end
   local d, R = doc(K, P.id), R_of(K, P)
   local was, n
-  if pos and d and RANK[why] then
+  if ex then n = ex.n
+  elseif pos and d and RANK[why] then
     local k, cnt = M.opened(K, P, d, pos)
     if k and RANK[k] > RANK[why] then why, was, n = k, why, cnt end
   end
@@ -1355,70 +1557,275 @@ function breach(K, P, why, pos, src)
   end
   local dd = {proj = P.id, why = why, src = src, pos = pos and {pos[1], pos[2], pos[3]} or nil}
   if was then dd.was, dd.n = was, n end
+  if ex then dd.state, dd.n = trunc(ex.state, 40), n or 0 end
   S.rt.br[P.id] = {why = why, pos = dd.pos, t = now(K), c = now(K)}   -- the recheck looks there first
-  K.emit('BREACH_STOP', 'B', breach_msg(P.id, why, src, was, n), dd)
+  K.emit('BREACH_STOP', 'B', breach_msg(P.id, why, src, was, n, ex and ex.state), dd)
   K.flush()
   dirty()
-  if CAVERN[why] and dd.pos and d then plug(K, P, d, why, dd.pos, n) end
+  if CAVERN[why] and dd.pos and d then plug(K, P, d, why, dd.pos, n, ex) end
   return true
 end
 
+-- the dig tiles of a document that hold water (at most `probes` tiles read, `max` found): {{x, y, z}, ...}
+local function wet_tiles(K, d, tiles_of, probes, max)
+  local out, asked = {}, 0
+  for si = 0, #d.stages - 1 do
+    local tiles = d.stages[si + 1].mode == 'dig' and tiles_of(si) or {}
+    for ci = 1, #tiles do
+      for _, tt in ipairs(tiles[ci]) do
+        if asked >= probes or #out >= max then return out end
+        asked = asked + 1
+        local v = tile_at(K, tt[1], tt[2], tt[3])
+        if v and HAZARD[v.c] == 'water' then out[#out + 1] = {tt[1], tt[2], tt[3]} end
+      end
+    end
+  end
+  return out
+end
+
+-- a stop raised by a look at the revealed tiles (src 'recheck': the project was stopped as damp/water/cavern)
+local function raise(K, P, b, kind, hit, was, cnt)
+  set_blocked(K, P, 'breach:' .. kind)
+  b.why, b.pos = kind, hit and {hit[1], hit[2], hit[3]} or b.pos
+  local dd = {proj = P.id, why = kind, src = 'recheck', was = was, n = cnt or 0}
+  if hit then dd.pos = {hit[1], hit[2], hit[3]} end
+  K.emit('BREACH_STOP', 'B', breach_msg(P.id, kind, 'recheck', was, cnt), dd)
+end
+
 -- Run 11 (the live shaft was stopped as damp before this check existed): once a recheck, a project stopped as
--- damp/water/cavern without a plug record looks at its stored breach tile, its shaft bottom and its dug tiles that hold
--- water; a cavern lake or an open cavern there raises the stop (BREACH_STOP src 'recheck') and plugs the shaft. A
--- cavern stop without a tile (a report without pos) is plugged on the first recheck.
+-- damp/water/cavern without a plug record looks at its stored breach tile and its dug tiles that hold water; a
+-- cavern lake or an open cavern there raises the stop (BREACH_STOP src 'recheck'; CAVERN_PLUG 'none': no automatic
+-- plug for these templates). Explore projects are the shaft check's (below), in every state.
 local RECHECK = {['breach:damp'] = true, ['breach:water'] = true, ['breach:cavern'] = true,
                  ['breach:cavern_lake'] = true}
-local function recheck(K, t)
+local function recheck_stops(K, t, parts)
   for _, P in ipairs(S.pd.list) do
     local b = S.rt.br[P.id]
     local due = type(b) ~= 'table' or not int(b.c) or t - int(b.c) >= M.CFG.recheck
-    if due and P.done ~= 1 and RECHECK[P.blocked] and P.tpl ~= 'plug' and S.rt.cav[P.id] == nil then
+    if due and P.done ~= 1 and RECHECK[P.blocked] and P.tpl ~= 'plug' and P.tpl ~= 'explore'
+       and S.rt.cav[P.id] == nil then
       if type(b) ~= 'table' then b = {}; S.rt.br[P.id] = b end
       b.c = t
       dirty()
       local d = doc(K, P.id)
       if d then
-        local was = P.blocked:sub(8)
-        local cands, asked = {}, 0
+        local was, st0 = P.blocked:sub(8), P.blocked
+        local cands = {}
         if type(b.pos) == 'table' and int(b.pos[1]) then cands[1] = b.pos end
-        local sh = P.tpl == 'explore' and shaft_of(K, P, d, b.pos) or nil
-        if sh then cands[#cands + 1] = {sh.x, sh.y, sh.bot} end
-        for si = 0, #d.stages - 1 do
-          local tiles = d.stages[si + 1].mode == 'dig' and stage_tiles(P.id, d, si) or {}
-          for ci = 1, #tiles do
-            for _, tt in ipairs(tiles[ci]) do
-              if asked < M.CFG.retry_probe and #cands < 3 then
-                asked = asked + 1
-                local v = tile_at(K, tt[1], tt[2], tt[3])
-                if v and HAZARD[v.c] == 'water' then cands[#cands + 1] = {tt[1], tt[2], tt[3]} end
-              end
-            end
-          end
-        end
+        for _, w in ipairs(wet_tiles(K, d, function(si) return stage_tiles(P.id, d, si) end, M.CFG.retry_probe,
+                                     3 - #cands)) do cands[#cands + 1] = w end
         local hit, kind, cnt
         for _, c in ipairs(cands) do
           local k, n = M.opened(K, P, d, c)
           if k and CAVERN[k] then hit, kind, cnt = c, k, n; break end
         end
-        -- a cavern stop from a report without a tile: an explore shaft is plugged anyway (a dead end), others only on
-        -- what the tiles show
-        if CAVERN[was] and (not kind or RANK[kind] < RANK[was]) and (kind or P.tpl == 'explore') then
-          kind, hit = was, hit or cands[1]
-        end
+        -- a cavern stop from a report without a tile: only on what the tiles show (an explore shaft: the shaft check)
+        if CAVERN[was] and kind and RANK[kind] < RANK[was] then kind = was end
         if kind then
-          if kind ~= was then
-            set_blocked(K, P, 'breach:' .. kind)
-            b.why, b.pos = kind, hit and {hit[1], hit[2], hit[3]} or b.pos
-            local dd = {proj = P.id, why = kind, src = 'recheck', was = was, n = cnt or 0}
-            if hit then dd.pos = {hit[1], hit[2], hit[3]} end
-            K.emit('BREACH_STOP', 'B', breach_msg(P.id, kind, 'recheck', was, cnt), dd)
-          end
+          if kind ~= was then raise(K, P, b, kind, hit, was, cnt) end
           plug(K, P, d, kind, hit, cnt)
         end
+        parts[#parts + 1] = string.format('%s (%s) %s: %s', P.id, P.tpl, st0,
+                                          kind and ((kind:gsub('_', ' ')) .. ', no automatic plug') or 'no cavern')
       end
     end
   end
+end
+
+-- Run 11 (Kilrudrabed site98, explore c1a14676: after a reload it stood at 'dig 98 % stalled' while its shaft 136,73
+-- z137-127 opened into a cavern lake; the recheck above only looked at projects stopped as damp/water/cavern, so the
+-- shaft stayed open): every explore's stair column is noted (m.runner xs[<id>] = {x, y, top, low, t, c = last check,
+-- fin = done|cancelled once the project left, off = nothing left to watch}) and looked at once a day and at the first
+-- runs after a boot, at most shaft_n per run, whatever the project's state: running, stalled, blocked, stopped, done or
+-- cancelled. A column whose top is dug is read top down on revealed tiles; its bottom, its tiles that hold water, the
+-- stored breach tile and the document's dug tiles that hold water are held against the revealed tiles (opened_at, the
+-- breach test). A cavern lake or an open cavern there plugs the shaft at once (CAVERN_PLUG queued, field state); a
+-- project still digging is stopped first (BREACH_STOP src 'check', its applied chunks undone), one stopped as
+-- damp/water is raised (src 'recheck'). Each run that looked logs one line naming every shaft looked at and the result.
+local function shaft_state(P, r)
+  if not P then return r.fin or 'gone' end
+  if P.done == 1 then return 'done' end
+  local b = P.blocked
+  if b == '' then return 'running' end
+  if b == 'stalled' or b == 'cancel' or b:sub(1, 7) == 'breach:' then return b end
+  return 'blocked:' .. b
+end
+
+local CAV_RES = {open = 'plug %s under way', failed = 'plug %s failed: wall the shaft top by hand', done = 'plugged'}
+
+-- one shaft: the result text for the log line; r.off once nothing is left to watch
+local function shaft_look(K, t, id, r)
+  local P = find(id)
+  local live = P ~= nil and P.done ~= 1
+  local state = shaft_state(P, r)
+  local c = S.rt.cav[id]
+  if type(c) == 'table' and c.st ~= 'none' then
+    if c.st == 'done' then r.off = 1 end
+    return state, string.format(CAV_RES[c.st] or c.st, c.plug ~= '' and c.plug or '(by hand)')
+  end
+  local sh, why0 = read_shaft(K, r)
+  local shut, where = false, nil
+  if sh then shut, where = walled(K, sh.s0, sh.s1) end
+  if not sh or shut then
+    if sh or not live then r.off = 1 end
+    return state, sh and (where == 'below' and string.format('closed (a constructed wall below the %s on its top)',
+                                                              sh.s0[5] or 'building')
+                          or 'closed (a constructed wall on its top)')
+                  or (why0 == 'hidden' and 'top hidden' or 'not dug yet'), sh and sh.bot
+  end
+  -- a hatch or door on the top is no plug (doctrine: forgotten beasts and building destroyers pass them)
+  local cover = (sh.s0[4] == '+' or sh.s0[5]) and string.format(' (the %s on its top is no plug)',
+                                                               (sh.s0[5] or 'hatch'):lower()) or ''
+  local d = live and doc(K, id) or nil
+  local fd = not d and file_doc(K, id) or nil
+  local own
+  if d then own = own_tiles(P, d) elseif fd then own = doc_own(fd) else
+    own = {}
+    for z = r.low, r.top do own[tkey(r.x, r.y, z)] = true end
+  end
+  local cands, seen = {}, {}
+  local function add(p)
+    local x, y, z = int(type(p) == 'table' and p[1]), int(type(p) == 'table' and p[2]), int(type(p) == 'table' and p[3])
+    if x and y and z and #cands < 4 and not seen[tkey(x, y, z)] then
+      seen[tkey(x, y, z)] = true
+      cands[#cands + 1] = {x, y, z}
+    end
+  end
+  local b = S.rt.br[id]
+  if type(b) == 'table' then add(b.pos) end
+  add({sh.x, sh.y, sh.bot})
+  for _, w in ipairs(sh.wet) do add(w) end
+  local dd = d or fd
+  if dd and #cands < 4 then
+    local tiles_of = d and function(si) return stage_tiles(id, d, si) end or function(si) return raw_tiles(fd, si) end
+    for _, w in ipairs(wet_tiles(K, dd, tiles_of, M.CFG.shaft_probe, 4)) do add(w) end
+  end
+  local hit, kind, cnt, best, bk = nil, nil, nil, 0, nil
+  for _, cp in ipairs(cands) do
+    local k, n = opened_at(K, own, cp)
+    if (n or 0) > best then best, bk = n, k end
+    if k and CAVERN[k] then hit, kind, cnt = cp, k, n; break end
+  end
+  local was = live and P.blocked:match('^breach:(.+)$') or nil
+  -- a cavern stop from a report without a tile: the explore shaft is plugged anyway (a dead end into the cavern)
+  if was and CAVERN[was] and (not kind or RANK[kind] < RANK[was]) then kind, hit = was, hit or cands[1] end
+  if not kind then
+    return state, (best > 0 and string.format('no cavern (%d water tiles in reach%s)', best,
+                                              bk == 'water' and ', under the open sky' or '') or 'no cavern') .. cover,
+           sh.bot
+  end
+  if type(c) == 'table' then S.rt.cav[id] = nil end           -- an old 'none' (no dug column then): look again
+  local ex = {sh = sh, state = state, n = cnt or 0}
+  if live and was then
+    if RANK[was] and RANK[kind] > RANK[was] then
+      if type(b) ~= 'table' then b = {}; S.rt.br[id] = b end
+      raise(K, P, b, kind, hit, was, cnt)
+    end
+  elseif live and P.blocked ~= 'cancel' then
+    breach(K, P, kind, hit, 'check', ex)                       -- still digging: stop it, undo its designations
+  end
+  if S.rt.cav[id] == nil then plug(K, P or {id = id, tpl = 'explore'}, d, kind, hit, cnt, ex) end
+  local c2 = S.rt.cav[id]
+  local label = (kind:gsub('_', ' ')) .. ((cnt or 0) > 0 and string.format(' (%d water tiles)', cnt) or '')
+  local out = c2 and c2.st == 'open' and ('plug ' .. c2.plug .. ' queued') or (c2 and c2.st == 'done' and 'walled already')
+              or ('plug ' .. (c2 and c2.st or '?'))
+  return state, label .. ' -> ' .. out .. cover, sh.bot
+end
+
+local function shaft_check(K, t, parts)
+  S.xseen, S.xmiss = S.xseen or {}, S.xmiss or {}
+  for _, P in ipairs(S.pd.list) do        -- explores queued before the check existed (or by an older kernel)
+    if P.tpl == 'explore' and S.rt.xs[P.id] == nil and not S.xmiss[P.id] then
+      local c = S.rt.cav[P.id]
+      if not (type(c) == 'table' and c.st == 'done') and not note_shaft(K, P, P.done ~= 1 and doc(K, P.id) or nil) then
+        S.xmiss[P.id] = true                -- no document and no bp file with a stair column: not read again this boot
+      end
+    end
+  end
+  -- explores that left the list before their shafts were recorded (Run 11: c1a14676 was cancelled under the older
+  -- kernel, a hatch on its top): their bp files, scan_n a run from the first check after a boot on (state 'gone')
+  if S.xscan == nil then
+    S.xscan = {}
+    for _, n in ipairs(fio.listdir(K.cfg.paths.save .. '/bp')) do
+      local id = type(n) == 'string' and n:match('^([A-Za-z0-9_-]+)%.json$')
+      local c = id and S.rt.cav[id]
+      if id and not find(id) and S.rt.xs[id] == nil and not (type(c) == 'table' and c.st ~= 'none') then
+        S.xscan[#S.xscan + 1] = id
+      end
+    end
+    table.sort(S.xscan, function(a, b) return a > b end)    -- taken from the end: in name order
+  end
+  for _ = 1, M.CFG.scan_n do
+    local id = table.remove(S.xscan)
+    if not id then break end
+    local r = not find(id) and S.rt.xs[id] == nil and note_shaft(K, {id = id, tpl = 'explore'}, file_doc(K, id))
+    if r then r.fin = 'gone' end
+  end
+  -- due: not looked at since the boot, else daily; a stopped explore keeps its stop's cadence (m.runner br: a fresh
+  -- stop was looked at when it came, one without a record at once)
+  local function every(c) return not int(c) or t - c >= M.CFG.recheck or t < c end
+  local due = {}
+  for id, r in pairs(S.rt.xs) do
+    if type(r) ~= 'table' or not (int(r.x) and int(r.y) and int(r.top) and int(r.low)) then S.rt.xs[id] = nil; dirty()
+    elseif r.off ~= 1 then
+      local P, b = find(id), S.rt.br[id]
+      local stopped = P ~= nil and P.done ~= 1 and RECHECK[P.blocked]
+      if not S.xseen[id] or (stopped and every(type(b) == 'table' and b.c or nil)) or (not stopped and every(r.c)) then
+        due[#due + 1] = id
+      end
+    end
+  end
+  table.sort(due, function(a, b)
+    local ra, rb = S.rt.xs[a], S.rt.xs[b]
+    local sa, sb = S.xseen[a] and 1 or 0, S.xseen[b] and 1 or 0
+    if sa ~= sb then return sa < sb end
+    if (ra.c or -1) ~= (rb.c or -1) then return (ra.c or -1) < (rb.c or -1) end
+    return a < b
+  end)
+  for i = 1, math.min(#due, M.CFG.shaft_n) do
+    local id = due[i]
+    local r, P = S.rt.xs[id], find(id)
+    r.c, S.xseen[id] = t, true
+    if P and P.done ~= 1 and RECHECK[P.blocked] then
+      if type(S.rt.br[id]) ~= 'table' then S.rt.br[id] = {} end
+      S.rt.br[id].c = t
+    end
+    dirty()
+    local state, res, bot = shaft_look(K, t, id, r)
+    parts[#parts + 1] = string.format('%s %d,%d z%d-%d %s: %s', id, r.x, r.y, r.top, bot or r.low, state, res)
+  end
+  if #due > M.CFG.shaft_n then parts[#parts + 1] = string.format('%d more next run', #due - M.CFG.shaft_n) end
+  -- at most shaft_keep records: the ones with nothing left to watch go first, then those of projects that left the list
+  local ids = {}
+  for id in pairs(S.rt.xs) do ids[#ids + 1] = id end
+  if #ids > M.CFG.shaft_keep then
+    local function rank(id)
+      local r, P = S.rt.xs[id], find(id)
+      return (r.off == 1 and 0 or (P == nil or P.done == 1) and 1 or 2)
+    end
+    table.sort(ids, function(a, b)
+      local ka, kb = rank(a), rank(b)
+      if ka ~= kb then return ka < kb end
+      return (S.rt.xs[a].t or 0) < (S.rt.xs[b].t or 0)
+    end)
+    for i = 1, #ids - M.CFG.shaft_keep do if rank(ids[i]) < 2 then S.rt.xs[ids[i]] = nil end end
+    dirty()
+  end
+end
+
+-- the daily look at stopped digs and explore shafts; one log line per run that looked (the live session reads why a
+-- shaft is or is not plugged there), and one at the first run after a boot even when there is nothing to look at
+local function recheck(K, t)
+  local parts = {}
+  recheck_stops(K, t, parts)
+  shaft_check(K, t, parts)
+  if #parts > 0 then
+    if #parts > 9 then parts = {table.unpack(parts, 1, 8)}; parts[9] = '...' end
+    K.log('info', 'cavern check: %s', table.concat(parts, '; '))
+  elseif not S.xlog then
+    K.log('info', 'cavern check: no explore shaft and no stopped dig to look at')
+  end
+  S.xlog = true
 end
 
 local function cancel(K, P, with_undo)
@@ -2088,10 +2495,23 @@ function M.init(K)
   rt.v, rt.p, rt.hist, rt.planned, rt.req, rt.keep = 2, obj(rt.p), obj(rt.hist), obj(rt.planned), obj(rt.req),
     obj(rt.keep)
   rt.skip, rt.rty, rt.pb = obj(rt.skip), obj(rt.rty), obj(rt.pb)   -- BUG-022: skipped tiles, retries, cadence
-  rt.cav, rt.br = obj(rt.cav), obj(rt.br)                           -- Run 11: cavern plugs, breach records
+  rt.cav, rt.br, rt.xs = obj(rt.cav), obj(rt.br), obj(rt.xs)       -- Run 11: cavern plugs, breach records, shafts
+  if type(rt.cz) ~= 'table' then rt.cz = {} end                      -- Run 11: cavern breach tiles
   if type(rt.exh) ~= 'string' then rt.exh = '' end
   K.persist.set('m.runner', rt)
   S.rt = rt
+  -- cavern breaches recorded before the level list existed (CAVERN_PLUG and BREACH_STOP records, Run 11)
+  local man_cav = type(K.manifest().caverns) == 'table' and #K.manifest().caverns or 0
+  for _, tbl in ipairs({rt.cav, rt.br}) do
+    local ids = {}
+    for id in pairs(tbl) do ids[#ids + 1] = id end
+    table.sort(ids)
+    for _, id in ipairs(ids) do
+      local r = tbl[id]
+      if type(r) == 'table' and CAVERN[r.why] and type(r.pos) == 'table' then note_cavern(K, r.pos, r.why) end
+    end
+  end
+  if #rt.cz > 0 and man_cav ~= #rt.cz then publish_caverns(K) end
   -- 'dig_lost' is no safety stop (damp/warm/water are 'breach:*'): every boot retries such projects once
   for _, P in ipairs(pd.list) do
     if P.blocked == 'dig_lost' then
