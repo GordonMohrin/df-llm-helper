@@ -25,6 +25,11 @@
 -- lowers only the core seal (outer/inner stay up). Without manifest outer/inner bridges sealed_ticks counts the time
 -- gate.sealed() holds (the unmanaged bridges a lockdown raised), so a fort without fortcore reports its seal too.
 -- Intake waves, the sortie through O1 and the inner station (Gordon 2026-10-16, BUG-029): see that section below.
+-- BUG-030 (Run 10 y421: 58 goblins and 6 trolls destroyed O1, B1 and B2): a bridge gate reports destroyed (gate.state's
+-- third value) is an open way: never wanted up, no raise hold or STRANDED for it, a destroyed outer/inner bridge in
+-- SIEGE is a BREACH at once (why destroyed), RECOVERY counts it as lowered; and the deep defense (plan B, see that
+-- section): building destroyers in sight, an army over stations.core_ratio x our soldiers or weak squads send the
+-- civilians to the separated refuge and every squad to the core station.
 local geom = require('dfllm.util.geom')
 
 -- every frame, but a full step only on a fresh hostile census or every PERIOD ticks, so the
@@ -116,13 +121,15 @@ local function assess(K)
   local inv, great, vis, inside = h.inv or 0, h.great or 0, h.vis or 0, h.inside or 0
   return {vis = vis, inv = inv, great = great, undead = h.undead or 0, inside = inside,
           near_o1 = h.near_o1 or -1, near_cit = h.near_cit or -1, near_bridge = h.near_bridge or {},
-          zin = h.zin or 0, zpast = h.zpast or 0, dz = h.dz or 0, dz_o1 = h.dz_o1 or -1,
+          zin = h.zin or 0, zpast = h.zpast or 0, dz = h.dz or 0, dz_o1 = h.dz_o1 or -1, bd = h.bd or 0,
           siege = (great > 0 and 'great') or (inv >= 6 and 'invaders') or nil, hostile = vis > 0,
           quiet = fresh and vis == 0, calm = fresh and vis == 0, fresh = fresh}
 end
 
+-- 'up', 'down', 'moving', 'unknown' or (BUG-030) 'destroyed': gate found no bridge on the footprint any more
 local function gate_state(K, b)
-  local ok, s = K.call('gate', 'state', b)
+  local ok, s, _, gone = K.call('gate', 'state', b)
+  if ok and gone then return 'destroyed' end
   return ok and s or 'unknown'
 end
 
@@ -163,8 +170,10 @@ local function go(K, to, why, a, bridge)
     K.emit('ALERT_START', 'B', string.format('alert: %d visible hostiles', vis), {vis = vis})
     wealth(K, 'alert')
   elseif to == 'BREACH' then
-    K.emit('BREACH', 'A', 'breach: ' .. (bridge and (bridge .. ' not up at T+900') or 'hostile inside Kern+'),
-           {why = why == 'gate_fail' and 'gate_fail' or 'inside', bridge = bridge})
+    local what = (why == 'destroyed' and bridge and (bridge .. ' destroyed: an open way'))      -- BUG-030
+                 or (bridge and (bridge .. ' not up at T+900')) or 'hostile inside Kern+'
+    K.emit('BREACH', 'A', 'breach: ' .. what,
+           {why = (why == 'gate_fail' or why == 'destroyed') and why or 'inside', bridge = bridge})
     wealth(K, 'breach')
   elseif to == 'PEACE' and from == 'ALERT' then
     K.emit('ALERT_END', 'B', 'alert over', {vis = vis})
@@ -572,6 +581,13 @@ local function failed_bridge(K, g)
   return nil
 end
 
+-- BUG-030: the first destroyed outer or inner bridge (an open way), or nil
+local function destroyed_gate(K, g)
+  for _, list in ipairs({g.outer, g.inner}) do
+    for _, b in ipairs(list) do if gate_state(K, b) == 'destroyed' then return b end end
+  end
+end
+
 local function decide(K, a, g, now)
   local mode = K.mode()
   if mode == 'PEACE' then
@@ -591,6 +607,8 @@ local function decide(K, a, g, now)
     elseif st.aq then st.aq, dirty = nil, true end
   elseif mode == 'SIEGE' then
     if a and a.inside > 0 then go(K, 'BREACH', 'inside', a); return end
+    local db = destroyed_gate(K, g)            -- BUG-030: no T+900 wait for a bridge that is gone
+    if db then go(K, 'BREACH', 'destroyed', a, db); return end
     local fb = now - st.t0 >= M.BREACH_AT and failed_bridge(K, g)
     if fb then go(K, 'BREACH', 'gate_fail', a, fb)
     elseif quiet_for(a, now, M.QUIET) then go(K, 'RECOVERY', 'quiet', a) end
@@ -751,12 +769,16 @@ end
 -- burrow (seal.choose). BUG-018: seal confines only to a separated burrow (or the dead end); flee = no burrow is
 -- separated, the alert goes off even in a lockdown. Without seal the mode's burrow as before. Returns on, burrow, held,
 -- note and brief (why not the mode's burrow, in full and short; nil when it is), audited (seal chose) and flee.
+-- BUG-030: the deep defense in SIEGE asks for the separated refuge as a BREACH does (seal's BREACH level: no drink,
+-- food or bed counts for breach_days; after it seal holds the refuge until back_days are quiet)
 local function alert_plan(K, a, g, now)
   local held = alert_held(K)
-  local on, burrow = alert_wanted(K, a, g, now, held), K.mode() == 'BREACH' and g.refuge or g.kern
+  local mode = K.mode()
+  local deep = mode == 'SIEGE' and st.deep ~= nil
+  local on, burrow = alert_wanted(K, a, g, now, held), (mode == 'BREACH' or deep) and g.refuge or g.kern
   local note, brief, audited, flee
   if on then
-    local okb, pick, why, short, fl = K.call('seal', 'alert_burrow', K.mode(), burrow, held)
+    local okb, pick, why, short, fl = K.call('seal', 'alert_burrow', deep and 'BREACH' or mode, burrow, held)
     if okb then
       burrow, on, audited, flee = pick, pick ~= nil, true, fl == true
       note, brief = type(why) == 'string' and why or nil, type(short) == 'string' and short or nil
@@ -789,7 +811,7 @@ local function raise(K, g, now)
   for _, list in ipairs({g.outer, g.inner}) do
     for _, b in ipairs(list) do
       local why = st.req[b]
-      if wave_skip(b, now) then why = nil
+      if wave_skip(b, now) or gate_state(K, b) == 'destroyed' then why = nil      -- BUG-030: nothing to raise
       elseif not why then
         local d = nb[b]
         if outside == 0 then why = 'inside'
@@ -821,15 +843,19 @@ local function lower(K, g)
   local keep = tostring(K.cfg.decisions and K.cfg.decisions['D-14'] or 'down') == 'up'
   if q >= M.REC_INNER then
     local cores = true
+    local function open(b)                    -- BUG-030: a destroyed bridge is an open way, as good as lowered
+      local s = gate_state(K, b)
+      return s == 'down' or s == 'destroyed'
+    end
     for _, b in ipairs(g.core) do
       want(K, b, 'down', 'recovery')
-      if gate_state(K, b) ~= 'down' then cores = false end
+      if not open(b) then cores = false end
     end
     low = cores
     if cores and not keep then
       for _, b in ipairs(g.inner) do
         want(K, b, 'down', 'recovery')
-        if gate_state(K, b) ~= 'down' then low = false end
+        if not open(b) then low = false end
       end
     end
   end
@@ -975,6 +1001,14 @@ local function cfg_block(K, key, def, lim)
 end
 local function ik_cfg(K) return cfg_block(K, 'intake', M.IK, M.IK_LIM) end
 local function so_cfg(K) return cfg_block(K, 'sortie', M.SO, M.SO_LIM) end
+
+-- BUG-030: the deep defense's reasons, in a fixed order ('destroyers,army,weak'), '' while it is off
+local DEEP_WHY = {'destroyers', 'army', 'weak'}
+local function deep_txt()
+  local r = {}
+  for _, w in ipairs(DEEP_WHY) do if st.deep and st.deep.why[w] then r[#r + 1] = w end end
+  return table.concat(r, ',')
+end
 
 local function in_boxes(boxes, x, y, z)
   for _, b in ipairs(boxes) do
@@ -1142,6 +1176,8 @@ local function ik_refuse(K, a, g, now, c)
   if a.vis > c.army_ratio * sol then
     return string.format('%d hostiles in sight > %d x %d soldiers', a.vis, c.army_ratio, sol), 'army'
   end
+  -- BUG-030: the deep defense holds every squad in the core
+  if st.deep then return 'deep defense (' .. deep_txt() .. '): the squads hold the core', 'deep' end
   local tn, ta = ik_traps(K, g, now)
   if tn and ta and ta < tn then return string.format('traps re-arming: %d of %d armed', ta, tn), 'traps' end
   return nil
@@ -1590,18 +1626,150 @@ local function wave_abort(K, to, now, why)
   st.wd, st.wu, dirty = {}, {}, true
 end
 
+---------------------------------------------------------------- the deep defense (BUG-030, plan B)
+-- Run 10 y421 (Handlelock): 58 goblins and 6 trolls (building destroyers) destroyed O1, B1 and B2; 19 recruits (worn 53
+-- %, no metal) at the melee (130,128,122) and gallery (123,123,122) stations between O1 and B2 died first, then 40+
+-- civilians in the main hall had nobody between them and the invaders. Raised bridges stop goblins; they are no plan
+-- against an army that brings building destroyers, nor when the squads cannot hold the corridor. SIEGE only, on each
+-- pass with a fresh hostile census; the reasons (st.deep.why):
+--   destroyers  sense counts visible hostiles whose caste raws make them building destroyers (census.h.bd): the bridges
+--               are no barrier (latched for the episode)
+--   army        visible hostiles > stations.core_ratio (3) x soldiers (military.kpi; only a fort with soldiers: one
+--               without relies on its bridges as before)
+--   weak        worn < stations.worn (60 %) or the share of soldiers in iron/steel < stations.metal (0 = not checked)
+-- While it holds: the civ alert confines to the separated refuge at seal's BREACH level (alert_plan asks seal as in a
+-- BREACH: no drink, food or bed counts for breach_days, BUG-018/019; seal keeps the refuge afterwards until back_days
+-- are quiet), every squad stands at the core station (posture CORE: stations.core on the core level next to the
+-- civilians' stair, else stations.b2, else stations.melee), no kill orders (they would draw the crossbows to the
+-- gallery and the field) and no intake wave (INTAKE refused 'deep'); a wave already in the field ends by its own
+-- rules. SIEGE_DEEP (A) names the reasons and the destroyers, again only when a reason or a destroyer race is new
+-- (util/cadence). army and weak end DEEP_HOLD ticks after they went away unless destroyers were seen; RECOVERY, PEACE
+-- and ALERT end it (BREACH keeps it: the refuge is BREACH's own rule anyway, its squads hold the B2 choke). Kernel
+-- cost: no new scan (bd rides on sense's hostile pass, the KPI on siege's 300-tick cache).
+M.ST = {core_ratio = 3, worn = 60, metal = 0}
+M.ST_LIM = {core_ratio = {1, 50}, worn = {0, 100}, metal = {0, 100}}
+M.DEEP_HOLD = 2400
+local function st_cfg(K) return cfg_block(K, 'stations', M.ST, M.ST_LIM) end
+
+-- the reasons now (tokens in DEEP_WHY order) and the numbers behind them
+local function deep_reasons(K, a)
+  local why, d = {}, {bd = int(a.bd) or 0, vis = int(a.vis) or 0}
+  if d.bd > 0 then why[#why + 1] = 'destroyers' end
+  local k = mil_kpi(K, M.IK_IDLE_TTL)
+  local sol = k and int(k.soldiers) or 0
+  if sol > 0 then
+    local c = st_cfg(K)
+    d.sol, d.worn, d.metal, d.c = sol, int(k.worn) or 0, int(k.metal_pct) or 0, c
+    if d.vis > c.core_ratio * sol then why[#why + 1] = 'army' end
+    if d.worn < c.worn or d.metal < c.metal then why[#why + 1] = 'weak' end
+  end
+  return why, d
+end
+
+-- the visible building destroyers of census.h.list: {'TROLL x6'} by race, their ids, the nearest one's distance to O1
+local function destroyers(K)
+  local h = K.census.h
+  local by, order, ids, near = {}, {}, {}, -1
+  for _, e in ipairs(type(h) == 'table' and type(h.list) == 'table' and h.list or {}) do
+    if e.bd == 1 then
+      local ok, race = pcall(dfhack.units.getRaceName, df.unit.find(e.id))
+      race = (ok and type(race) == 'string' and race ~= '') and race or '?'
+      if not by[race] then by[race], order[#order + 1] = 0, race end
+      by[race] = by[race] + 1
+      if #ids < 20 then ids[#ids + 1] = e.id end
+      local d = int(e.d_o1)
+      if d and d >= 0 and (near < 0 or d < near) then near = d end
+    end
+  end
+  table.sort(order)
+  local races = {}
+  for i, r in ipairs(order) do races[i] = string.format('%s x%d', r, by[r]) end
+  table.sort(ids)
+  return races, ids, near, order
+end
+
+-- the core station of posture CORE (military.station_of): stations.core, else stations.b2, else stations.melee
+local function core_station(g) return posp(g.stations.core) or posp(g.stations.b2) or posp(g.stations.melee) end
+
+local function deep_step(K, a, g, now)
+  if not (a and a.fresh) then return end
+  local why, d = deep_reasons(K, a)
+  local dp = st.deep
+  if #why == 0 then
+    if dp and not dp.bd then
+      if not dp.clear then dp.clear, dirty = now, true
+      elseif now - dp.clear >= M.DEEP_HOLD then
+        K.log('info', 'siege: deep defense over (%s gone for %d ticks): the squads go back to the inner station',
+              deep_txt(), now - dp.clear)
+        st.deep, st.deep_rec, dirty = nil, CAD.quiet(st.deep_rec), true
+        mem.kill_sig, mem.kill_set = nil, nil
+      end
+    end
+    return
+  end
+  if not dp then
+    dp = {t = now, why = {}, bd = false}
+    st.deep = dp
+    mem.kill_sig, mem.kill_set = nil, nil      -- the posture change re-issues every squad's orders
+  end
+  if dp.clear then dp.clear = nil end
+  for _, w in ipairs(why) do dp.why[w] = true end
+  if d.bd > 0 then dp.bd = true end
+  dirty = true
+  local races, ids, near, kinds = destroyers(K)
+  local toks = {}
+  for _, w in ipairs(why) do toks[#toks + 1] = w end
+  for _, r in ipairs(kinds) do toks[#toks + 1] = r end
+  if not CAD.due(st.deep_rec, K.now(), {}, toks, {ticks = 0, wall_s = 0}) then return end
+  st.deep_rec = CAD.mark(K.now(), {}, toks)
+  local parts, has = {}, {}
+  for _, w in ipairs(why) do has[w] = true end
+  if has.destroyers then
+    parts[#parts + 1] = string.format('%d building destroyer%s in sight (%s%s): the bridges are no barrier', d.bd,
+                                      d.bd == 1 and '' or 's', #races > 0 and table.concat(races, ', ') or '?',
+                                      near >= 0 and string.format(', %d tiles from O1', near) or '')
+  end
+  if has.army then
+    parts[#parts + 1] = string.format('army %d > %d x %d soldiers', d.vis, d.c.core_ratio, d.sol)
+  end
+  if has.weak then
+    parts[#parts + 1] = d.worn < d.c.worn and string.format('worn %d%% < %d%%', d.worn, d.c.worn)
+                        or string.format('iron/steel %d%% < %d%%', d.metal, d.c.metal)
+  end
+  local p = core_station(g)
+  local txt = string.format('deep defense: %s; civilians to %s (the separated refuge), every squad at the core station '
+                            .. '%s, no intake waves', table.concat(parts, '; '), g.refuge,
+                            p and string.format('%d,%d,%d', p[1], p[2], p[3]) or '(none in the manifest)')
+  local all = {}
+  for _, w in ipairs(DEEP_WHY) do if dp.why[w] then all[#all + 1] = w end end
+  K.emit('SIEGE_DEEP', 'A', txt:sub(1, 200), {why = all, bd = d.bd, races = races, units = ids, vis = d.vis,
+                                              soldiers = d.sol, worn = d.worn, metal = d.metal, refuge = g.refuge,
+                                              pos = p})
+  K.log('warn', 'siege: %s', txt:sub(1, 200))
+end
+
+-- BUG-030: a raise hold (BUG-028 c) on a bridge that is gone holds nothing
+local function prune_holds(K)
+  for b in pairs(st.str.hold) do
+    if gate_state(K, b) == 'destroyed' then st.str.hold[b], dirty = nil, true end
+  end
+end
+
 local function apply(K, a, g, now)
   local mode = K.mode()
   if mode == 'SIEGE' or mode == 'DRILL' then raise(K, g, now)
   elseif mode == 'BREACH' then
-    -- BUG-028: never over a rescue, and a raise that would cut citizens off from drink or food waits (c)
-    local fresh = {}
+    -- BUG-028: never over a rescue, and a raise that would cut citizens off from drink or food waits (c); BUG-030:
+    -- a destroyed bridge is neither raised nor held
+    local fresh, gone = {}, {}
     for _, b in ipairs(g.all) do
-      if not rescuing(b) and gate_state(K, b) ~= 'up' then fresh[#fresh + 1] = b end
+      local s = gate_state(K, b)
+      if s == 'destroyed' then gone[b] = true
+      elseif not rescuing(b) and s ~= 'up' then fresh[#fresh + 1] = b end
     end
     local held = #fresh > 0 and cut_holds(K, g, fresh, now) or {}
     for _, b in ipairs(g.all) do
-      if not held[b] and not rescuing(b) then want(K, b, 'up', 'breach', st.tb + M.BREACH_AT) end
+      if not held[b] and not rescuing(b) and not gone[b] then want(K, b, 'up', 'breach', st.tb + M.BREACH_AT) end
     end
   elseif mode == 'ALERT' then
     if a and a.near_o1 >= 0 and a.near_o1 <= M.ALERT_O1 then
@@ -1611,7 +1779,9 @@ local function apply(K, a, g, now)
   local on, burrow, held, _, _, audited, flee = alert_plan(K, a, g, now)
   set_alert(K, on, burrow, g, now, held, audited, flee)
   local P = POSTURE[mode]
-  if mode == 'SIEGE' and IK_FIELD[st.ik.ph] then P = 'INTAKE' end      -- an intake wave: field and gallery
+  local deep = mode == 'SIEGE' and st.deep ~= nil
+  if mode == 'SIEGE' and IK_FIELD[st.ik.ph] then P = 'INTAKE'          -- an intake wave: field and gallery
+  elseif deep then P = 'CORE' end                                       -- BUG-030: every squad at the core station
   local var
   if P == 'READY_IN' or P == 'STATION_B1' then                         -- BUG-029: the inner station follows B2
     local parts = {}
@@ -1619,7 +1789,8 @@ local function apply(K, a, g, now)
     var = table.concat(parts, ',')
   end
   set_posture(K, P, now, var)
-  if mode == 'SIEGE' or mode == 'BREACH' then kills(K, g, P, now, P == 'INTAKE') end
+  -- BUG-030: no kill orders in the deep defense (they would draw the crossbows into the gallery and the field)
+  if mode == 'BREACH' or (mode == 'SIEGE' and (not deep or P == 'INTAKE')) then kills(K, g, P, now, P == 'INTAKE') end
 end
 
 ---------------------------------------------------------------- episode bookkeeping
@@ -1731,6 +1902,7 @@ function M.state(K)
   local w = {ph = ik.ph, n = ik.n}
   if ik.why then w.why = ik.why:sub(1, 40) end
   if so then w.so = (so.sq .. ' ' .. so.ph):sub(1, 24) end
+  if st.deep and K.mode() == 'SIEGE' then w.deep = deep_txt():sub(1, 24) end    -- BUG-030: the deep defense
   return {wave = w}
 end
 
@@ -1784,6 +1956,14 @@ function M.init(K)
       for k, v in pairs(ps2.fails) do if v == true then st.so.fails[k] = true end end
     end
   end
+  -- BUG-030: the deep defense survives a reload within the episode
+  local pd = p.deep
+  if type(pd) == 'table' and type(pd.why) == 'table' then
+    st.deep = {t = int(pd.t) or now, why = {}, bd = pd.bd == true, clear = int(pd.clear)}
+    for _, w in ipairs(DEEP_WHY) do if pd.why[w] == true then st.deep.why[w] = true end end
+    if not next(st.deep.why) then st.deep = nil end
+  end
+  st.deep_rec = type(p.deep_rec) == 'table' and p.deep_rec or nil
   if type(p.ep) == 'table' then
     st.ep = {}
     for _, f in ipairs({'start', 'hmax', 'seen', 'killed', 'lost', 'caps', 'sealed'}) do st.ep[f] = int(p.ep[f]) or 0 end
@@ -1812,6 +1992,8 @@ function M.step(K, budget, ctx)
   decide(K, a, g, now)
   track(K, g, now, dt)
   local mode = K.mode()
+  prune_holds(K)                                           -- BUG-030
+  if mode == 'SIEGE' then deep_step(K, a, g, now) end
   -- BUG-028 (a); a wave or a sortie brings its soldiers back itself (it owns B1 meanwhile)
   if mode ~= 'DRILL' and (mode ~= 'RECOVERY' or st.str.rescue) and not wave_busy() then rescue_step(K, a, g, now) end
   if mode == 'SIEGE' then                                  -- Gordon 2026-10-16: the sortie, then the intake waves
@@ -1841,8 +2023,11 @@ M.on = {
     mem.kill_sig, mem.kill_set = nil, nil      -- a posture change re-issues every squad's orders
     if to ~= 'SIEGE' then wave_abort(K, to, now, ev.why) end   -- intake waves and the sortie run in SIEGE only
     if to == 'PEACE' or to == 'DRILL' then st.ep = nil end
+    if to ~= 'SIEGE' and to ~= 'BREACH' then st.deep, st.deep_rec = nil, nil end   -- BUG-030: the episode is over
     dirty = true
-    apply(K, assess(K), geometry(K), now)    -- T0 actions in the detecting step
+    local a, g = assess(K), geometry(K)
+    if to == 'SIEGE' then deep_step(K, a, g, now) end     -- BUG-030: destroyers at T0 send the civilians deep at once
+    apply(K, a, g, now)                      -- T0 actions in the detecting step
     save(K)
   end,
   UNIT_DEATH = function(K, ev)

@@ -63,6 +63,32 @@
   `seal:piece` in `<save>/cli.log` and `dfllm events --type CMD` shows the bp.place; `dfllm plan propose` puts no second
   seal in (the pending one covers the tile) and `dfllm plan check` warns `seal project ... builds the wall`. Once the
   wall stands, `dfllm audit` shows no `bypass` (or the next route) and readiness can reach R1.
+## Destroyed bridges and the deep defense against building destroyers, BUG-030 (2026-10-16; offline, live-untested)
+- **Why (Run 10 fell, y421):** 58 goblins and 6 trolls destroyed O1, B1 and B2; the kernel kept their wants for nine days
+  (GATE_FAIL `no_lever`, `STRANDED B1 raised although it cuts N citizens off` 40+ times with `buildings.other.BRIDGE`
+  empty); the civilians stayed in Kern+ and the 19 recruits at the melee and gallery stations between O1 and B2.
+- **Destroyed bridges (gate):** a manifest bridge gate saw complete on its footprint and that is gone now is destroyed:
+  BRIDGE_DESTROYED (A, once), its want, pull and move record dropped, `gate.want` refuses it, no GATE_FAIL, state
+  `bridges` `destroyed` (status `DESTROYED`), `inspect defense` `destroyed`, the audit snapshot shows the bare
+  footprint; `gate.state` keeps `unknown` (readiness `bridge:B`) plus the destroyed tick; checked again once a day
+  (`rebuilt`). siege: no raise hold or STRANDED for it, a lost O1/B1 in SIEGE is BREACH at once (why `destroyed`),
+  RECOVERY counts it as lowered.
+- **Deep defense (siege, SIEGE only):** building destroyers in sight (new `census.h.bd`, from the caste flag or
+  `caste_raw.misc.buildingdestroyer`), an army > `stations.core_ratio` (3) x soldiers, or weak squads (worn <
+  `stations.worn` 60, iron/steel < `stations.metal` 0 = off; `config/reflex.json` `stations`): civilians to the
+  separated refuge at seal's BREACH level, every squad at the core station (new posture CORE: manifest `stations.core`,
+  fortcore's core hub by the civilians' stair, else `stations.b2`), no kill orders, no
+  intake wave (INTAKE refused `deep`); SIEGE_DEEP (A) names reasons and destroyers; state `wave.deep`, status `DEEP ...`.
+- Contracts: events BRIDGE_DESTROYED, SIEGE_DEEP (A, RULES §7), BREACH why `destroyed`, GATE `rebuilt`, bridge state
+  `destroyed`, `wave.deep`, posture CORE, manifest `stations.core` (fortcore stage 3), config `stations`, `gate.state`
+  third value (CONTRACTS §19 BD). Docs: BUG-030, DESIGN §3/§4/
+  §5.3, DOCTRINE §2 (plan B), RULES §7/§10.
+- Tests: `tests/lua/test_stranded.lua` (B1 and B2 destroyed in a breach; O1 destroyed in SIEGE), `tests/lua/test_intake.lua`
+  (trolls, army 30 vs 8 soldiers, weak squads), `tests/test_cli_status.py`, `tests/test_alarm.py`.
+- **Live check:** `dfhack-run dfllm reload`; in the next siege with trolls `dfllm events --type SIEGE_DEEP` names them,
+  `dfllm status` shows `DEEP destroyers` and `alert Tiefe+`, every squad's station is `stations.b2` (138,127,122; no `stations.core` in a Run 10 manifest); a bridge
+  they destroy gives one BRIDGE_DESTROYED and `bridges ... DESTROYED`, then no STRANDED or GATE_FAIL naming it; with trolls
+  in sight `inspect census` shows `h.bd` > 0 (if 0, the raws field has another name in 53.16: note it in BUG-030).
 
 ## PREDATOR only near the citizens (2026-10-16; offline, live-untested)
 - Live Run 10 y421: four lockdowns in ten game days (clock 30 t/s, civilians confined) for animals at the map edge 60-120 tiles

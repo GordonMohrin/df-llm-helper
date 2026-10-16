@@ -21,6 +21,7 @@
 -- intake (a great danger, or a caste raw flag BUILDINGDESTROYER, TRAPAVOID or FLIER; cached per race/caste like
 -- LARGE_PREDATOR). census.h counts zin (zone 1), zpast (zone 2), dz and dz_o1 (the nearest dangerous one to O1); the
 -- list puts zone 2, then zone 1 hostiles first, so a wave in the killing field is never cut off by the 40 nearest.
+-- BUG-030: census.h.bd counts the visible building destroyers (raws, see raw_read), list entries carry bd = 1 for them.
 local geom = require('dfllm.util.geom')
 
 -- every 9 ticks = every frame at full timestream (<= 9-tick skips), so scan periods are not
@@ -153,7 +154,7 @@ local function hscan_begin(K, now, armed)
   local g = st.geo or geometry(K)
   st.geo = g
   st.hs = {i = 0, seen = {}, list = {}, keys = {}, vis = 0, inv = 0, great = 0, undead = 0, inside = 0, crazed = 0,
-           zin = 0, zpast = 0, dz = 0, dz_o1 = -1,
+           zin = 0, zpast = 0, dz = 0, dz_o1 = -1, bd = 0,
            near_o1 = -1, near_cit = -1, near_bridge = {}, caged = {}, units = 0, tick = now.tick,
            armed = armed and 1 or 0, geo = g, out_pos = st.out_pos or {},
            count = now.tick - (st.count_tick or -M.COUNT_EVERY) >= M.COUNT_EVERY, animals = {}}
@@ -247,21 +248,29 @@ end
 
 -- the caste raw flags, cached per race and caste for the session (raws do not change while a map is loaded), one raws
 -- read per pair: LARGE_PREDATOR (p) and, for intake waves (Gordon 2026-10-16), a flag that walls, traps or a raised
--- gate do not stop (dz: BUILDINGDESTROYER, TRAPAVOID, FLIER; an unknown flag name reads as false)
+-- gate do not stop (dz: BUILDINGDESTROYER, TRAPAVOID, FLIER; an unknown flag name reads as false). BUG-030 (Run 10
+-- y421: six trolls destroyed O1, B1 and B2): bd = a building destroyer, the caste flag or the token's level
+-- [BUILDINGDESTROYER:1|2], which the caste raws keep as a number (caste_raw.misc.buildingdestroyer [? live]); both are
+-- read, a missing field reads as none
 local pred_raw = {}
 local DZ_FLAGS = {'BUILDINGDESTROYER', 'TRAPAVOID', 'FLIER'}
 local function raw_read(race, caste)
   local r = df.creature_raw.find(race)
   local c = r ~= nil and r.caste[caste]
-  if not c then return {p = false, dz = false} end
-  local e = {p = c.flags.LARGE_PREDATOR == true, dz = false}
+  if not c then return {p = false, dz = false, bd = false} end
+  local e = {p = c.flags.LARGE_PREDATOR == true, dz = false, bd = false}
   for _, f in ipairs(DZ_FLAGS) do
     local ok, v = pcall(function() return c.flags[f] end)
-    if ok and v == true then e.dz = true end
+    if ok and v == true then
+      e.dz = true
+      if f == 'BUILDINGDESTROYER' then e.bd = true end
+    end
   end
+  local ok, n = pcall(function() return c.misc.buildingdestroyer end)
+  if ok and type(n) == 'number' and n > 0 then e.dz, e.bd = true, true end
   return e
 end
-local NO_RAW = {p = false, dz = false}
+local NO_RAW = {p = false, dz = false, bd = false}
 local function raw_flags(u)
   local race, caste = u.race, u.caste
   if race == nil then return NO_RAW end
@@ -277,8 +286,6 @@ local function raw_flags(u)
 end
 local function large_predator(u) return raw_flags(u).p end
 
--- intake waves: a hostile an intake must not let in (Gordon 2026-10-16): a great danger or a dz raw flag
-local function dangerous(u) return raw_flags(u).dz end
 
 local function in_boxes(boxes, x, y, z)
   for _, b in ipairs(boxes) do
@@ -397,14 +404,19 @@ local function consider(hs, u)
   if zn == 0 and in_boxes(g.zpast, x, y, z) then zn = 2 end
   if zn == 0 and in_boxes(g.zin, x, y, z) then zn = 1 end
   if zn == 2 then hs.zpast = hs.zpast + 1 elseif zn == 1 then hs.zin = hs.zin + 1 end
-  local dz = (great or dangerous(u)) and 1 or 0
+  -- intake waves: a hostile an intake must not let in (Gordon 2026-10-16): a great danger or a dz raw flag; BUG-030: a
+  -- building destroyer (bd, also in dz) sends the siege into its deep defense
+  local rf = raw_flags(u)
+  local dz = (great or rf.dz) and 1 or 0
   if dz == 1 then
     hs.dz = hs.dz + 1
     if d_o1 >= 0 then hs.dz_o1 = minpos(hs.dz_o1, d_o1) end
   end
   local list = hs.list
-  list[#list + 1] = {id = id, x = x, y = y, z = z, d_o1 = d_o1, dc = dcit, zn = zn, dz = dz,
-                     k = great and 'great' or (undead and 'undead') or (inv and 'inv') or 'danger'}
+  local entry = {id = id, x = x, y = y, z = z, d_o1 = d_o1, dc = dcit, zn = zn, dz = dz,
+                 k = great and 'great' or (undead and 'undead') or (inv and 'inv') or 'danger'}
+  if rf.bd then entry.bd, hs.bd = 1, hs.bd + 1 end
+  list[#list + 1] = entry
   -- integer sort key: the zone (past B1, then the intake area), then distance (O1, else nearest outside citizen),
   -- then scan order
   local d = zn == 2 and 0 or (zn == 1 and 1 or 2 + (d_o1 >= 0 and d_o1 or (dcit >= 0 and dcit or 999999)))
@@ -443,7 +455,7 @@ local function hscan_finish(K)
   K.census.h = {tick = hs.tick, vis = hs.vis, inv = hs.inv, great = hs.great, undead = hs.undead, inside = hs.inside,
                 near_o1 = hs.near_o1, near_cit = hs.near_cit, near_bridge = hs.near_bridge, list = list,
                 armed = hs.armed, crazed = hs.crazed, friends = hs.friends, zin = hs.zin, zpast = hs.zpast,
-                dz = hs.dz, dz_o1 = hs.dz_o1}
+                dz = hs.dz, dz_o1 = hs.dz_o1, bd = hs.bd}
 end
 
 ---------------------------------------------------------------- module

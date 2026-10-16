@@ -234,6 +234,9 @@ def _manifest(stage: int, zc: int, zr: int) -> dict:
     if stage >= 3:
         bridges += ["O1", "B2"]
         m["stations"]["b2"] = [1, 44, ZE]
+        # BUG-030: the deep defense's core station: the core hub next to the civilians' stair to the refuge, one level
+        # below B2 (a station at b2 stands next to B2's footprint and holds its raise)
+        m["stations"]["core"] = [CIV[0] + 2, CIV[1], zc]
         m["burrows"]["Tiefe+"] = {"role": "refuge"}
         m["refuge"] = {"anchor": [2, 45, zr], "burrow": "Tiefe+"}
     if bridges:

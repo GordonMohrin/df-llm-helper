@@ -46,7 +46,8 @@ WAKE_TYPES = {t for t, (c, _, _) in schema.EVENTS.items() if c == "A"}
 SYNTH = {"HB_STALE", "AUTO_FAIL", "SUPERVISE"}   # follower's own wake reasons (not kern events)
 # Run 9: an army walked in while SIEGE_START/INVASION waited in the digest; they and the interrupts come right
 # after BREACH and wake at once (URGENT: no merge wait, no hourly limit, one per type per URGENT_REPEAT_S)
-PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", "LOCKDOWN", "GATE_FAIL",
+PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", "LOCKDOWN", "SIEGE_DEEP",
+        "BRIDGE_DESTROYED", "GATE_FAIL",
         "DEATHS_3PLUS", "NO_DEPOT", "DEATHS_PREVENTABLE", "KERN_FAULT", "HB_STALE", "SUPERVISE", "SIEGE_END",
         "DRILL_FAIL", "SIEGE_UNREADY", "PERF_DEGRADED", "DECISION_NEEDED", "PROJECT_BLOCKED", "PLAN_EXHAUSTED",
         "YEAR_REVIEW", "AUTO_FAIL"]
@@ -71,7 +72,10 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
         # BUG-015: a lockdown door that does not hold its forbidden flag (the kernel tries it once more itself)
         "LOCKDOWN_PARTIAL": "dfllm status; a wall or a second door for that opening (bp.place)",
         # BUG-023: tool detail members without pick/axe; the fair-play remedy is the player's (RULES 7)
-        "TOOL_BLOCKED": "dfllm cmd inspect '{\"what\":\"workload\"}', then tell Gordon (RULES 7)"}
+        "TOOL_BLOCKED": "dfllm cmd inspect '{\"what\":\"workload\"}', then tell Gordon (RULES 7)",
+        # BUG-030: the kernel already acted (no pulls for a destroyed bridge; the deep defense); tell the player
+        "BRIDGE_DESTROYED": "dfllm status; tell Gordon; rebuild it after the siege (plan)",
+        "SIEGE_DEEP": "dfllm status (civilians in the refuge, squads in the core); tell Gordon; nothing tactical"}
 SUPERVISE_EVERY_S = 15                         # supervise.json read cadence
 SUPERVISE_FRESH_S = 3600                       # alerts logged longer ago than this never wake
 HB_STALE_S = 300

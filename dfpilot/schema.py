@@ -35,9 +35,10 @@ TRANSITIONS = {
     "RECOVERY": ["PEACE", "ALERT", "SIEGE", "BREACH"], "DRILL": ["PEACE", "ALERT", "SIEGE"],
 }
 MODE_SETTERS = {"siege": "*", "drill": ["DRILL>PEACE", "PEACE>DRILL"]}
-# READY_IN (BUG-029): every squad at the inner station; INTAKE (Gordon 2026-10-16): field and gallery during a wave
-POSTURES = ["TRAIN", "STATION_B1", "READY_STATION", "B2_HOLD", "READY_IN", "INTAKE"]
-BRIDGE_STATES = ["up", "down", "moving", "unknown"]
+# READY_IN (BUG-029): every squad at the inner station; INTAKE (Gordon 2026-10-16): field and gallery during a wave;
+# CORE (BUG-030): every squad at the core station in the deep defense
+POSTURES = ["TRAIN", "STATION_B1", "READY_STATION", "B2_HOLD", "READY_IN", "INTAKE", "CORE"]
+BRIDGE_STATES = ["up", "down", "moving", "unknown", "destroyed"]   # BUG-030: destroyed = gone from its footprint
 ORDER_LIBS = ["library/basic", "library/furnace", "library/smelting", "library/military",
               "library/rockstock", "library/glassstock"]
 SNAP_LEGEND = "?_.#SCF<>Xrv+=H^Bw~%T"
@@ -474,6 +475,12 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # Gordon 2026-10-16: an intake wave (kind intake) or a sortie through O1 (kind sortie) went wrong: why losses,
     # past_b1 (a hostile past B1), stuck (the field not clear in time), left_outside (O1 raised with members outside)
     "WAVE_FAIL": ("A", "siege", _d("kind:s why:s", "wave:i squad:s lost:i units:ia n:i pos:p ticks:i")),
+    # BUG-030: a manifest bridge gate saw complete is gone from its footprint (destroyed or removed): no pulls for it
+    "BRIDGE_DESTROYED": ("A", "gate", _d("bridge:s", "bid:i role:s last:s mode:s pos:p")),
+    # BUG-030: the siege's deep defense: why = destroyers (building destroyers in sight), army (> stations.core_ratio x
+    # soldiers), weak (worn or iron/steel below stations.worn/metal); civilians to the separated refuge, squads at the core
+    "SIEGE_DEEP": ("A", "siege", _d("why:sa", "bd:i races:sa units:ia vis:i soldiers:i worn:i metal:i refuge:s "
+                                              "pos:p")),
     "ALERT_START": ("B", "siege", _d(opt="vis:i")),
     "ALERT_END": ("B", "siege", _d(opt="vis:i")),
     "LOCKDOWN_END": ("B", "reflex", _d(opt="why:s ticks:i doors:i refused:i")),
@@ -657,7 +664,9 @@ STATE = Obj(
                                              "ref": Obj(req={"ex": FLAG, "sep": Int(-1, 1), "beds": NAT,
                                                              "need": NAT})}),
          # intake waves (siege, Gordon 2026-10-16): phase, waves so far, the last refusal, the sortie (squad phase)
-         "wave": Obj(req={"ph": Str(maxbytes=8), "n": NAT}, opt={"why": Str(maxbytes=40), "so": Str(maxbytes=24)})})
+         # BUG-030: deep = the deep defense's reasons ("destroyers,army,weak")
+         "wave": Obj(req={"ph": Str(maxbytes=8), "n": NAT}, opt={"why": Str(maxbytes=40), "so": Str(maxbytes=24),
+                                                                 "deep": Str(maxbytes=24)})})
 
 HEARTBEAT = Obj(req={"v": Const(V), "wall": NAT, "frame": NAT, "tick": TICK, "paused": Bool(), "mode": MODE,
                      "seq": NAT})
@@ -709,8 +718,9 @@ MANIFEST = named("manifest", Obj(
                                       lambda b: None if b["fp"][2] == b["fp"][5] else "bridge fp must be one z level",
                                       "bridge footprint on one z"), keys=BRIDGE_RE),
          # field (killing field station of a wave, else the first killbox's centre), bailey (sortie gathering point,
-         # else the centre of the first Z1 box): Gordon 2026-10-16
-         "stations": Obj(opt={"melee": POS, "gallery": POS, "b2": POS, "field": POS, "bailey": POS}),
+         # else the centre of the first Z1 box): Gordon 2026-10-16; core (BUG-030: the deep defense's station on the
+         # core level next to the civilians' stair, else b2)
+         "stations": Obj(opt={"melee": POS, "gallery": POS, "b2": POS, "field": POS, "bailey": POS, "core": POS}),
          "killboxes": Arr(Obj(req={"id": ID, "bbox": BBOX}), hi=20),
          "burrows": Obj(extra=Obj(req={"role": Str(enum=["kern", "refuge", "other"])}), keys=r"^.{1,40}$"),
          "edge": Arr(POS, hi=200),

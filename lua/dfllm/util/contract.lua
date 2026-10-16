@@ -22,8 +22,9 @@ C.TRANSITIONS = {
 C.MODE_SETTERS = {siege = '*', drill = {['PEACE>DRILL'] = true, ['DRILL>PEACE'] = true}}
 
 -- READY_IN (BUG-029): Ready, every squad at the inner station (stations.melee, stations.b2 while the core seal is
--- up); INTAKE (Gordon 2026-10-16): Ready, melee in the killing field, crossbows in the gallery, only during a wave
-C.POSTURES = {'TRAIN', 'STATION_B1', 'READY_STATION', 'B2_HOLD', 'READY_IN', 'INTAKE'}
+-- up); INTAKE (Gordon 2026-10-16): Ready, melee in the killing field, crossbows in the gallery, only during a wave;
+-- CORE (BUG-030): Ready, every squad at the core station (stations.core, else b2, else melee) in the deep defense
+C.POSTURES = {'TRAIN', 'STATION_B1', 'READY_STATION', 'B2_HOLD', 'READY_IN', 'INTAKE', 'CORE'}
 
 -- Gameplay modules in dispatch order (§3.4). every = default cadence; critical = never demoted.
 C.MODULES = {
@@ -89,6 +90,9 @@ C.EVENTS = {
   -- Gordon 2026-10-16: an intake wave or a sortie through O1 went wrong (losses, a hostile past B1, the field not
   -- clear, soldiers left outside)
   WAVE_FAIL = {cls = 'A', by = 'siege'},
+  -- BUG-030: a manifest bridge gate saw complete is gone from its footprint (destroyed); the siege's deep defense
+  -- (building destroyers in sight, an army over stations.core_ratio x the soldiers, weak squads): refuge and core
+  BRIDGE_DESTROYED = {cls = 'A', by = 'gate'}, SIEGE_DEEP = {cls = 'A', by = 'siege'},
   -- B: digest
   ALERT_START = {cls = 'B', by = 'siege'}, ALERT_END = {cls = 'B', by = 'siege'},
   LOCKDOWN_END = {cls = 'B', by = 'reflex'},
@@ -300,7 +304,7 @@ C.STATE_SPEC = obj({
   orders = obj({n = NAT, bad = NAT, stuck = NAT}),
   threat = obj({vis = NAT, armed = FLAG}),
   proj = arr({t = 'tup', items = {str(nil, nil, 'id'), str(24), PCT, str(40)}}, 0, 8),
-  bridges = obj(nil, nil, str(nil, {'up', 'down', 'moving', 'unknown'}), 'bridge'),
+  bridges = obj(nil, nil, str(nil, {'up', 'down', 'moving', 'unknown', 'destroyed'}), 'bridge'),   -- BUG-030
   owners = obj({pause = {t = 'any', of = {{t = 'null'}, str(nil, {'inbox', 'gordon', 'popup', 'df'})}},
                 tempo = str(nil, {'mode', 'inbox', 'brake', 'clock'})}),
   mil = obj({squads = NAT, soldiers = NAT, worn = PCT, cv = NAT, metal_pct = PCT, on_station = NAT},
@@ -315,8 +319,9 @@ C.STATE_SPEC = obj({
               {why = str(40), core_d = NAT, core_f = NAT,           -- BUG-028: drink/food days inside the core
                -- Run 10: the refuge burrow: exists, separated (1, 0 open, -1 unknown), beds, beds wanted (bed_pct)
                ref = obj({ex = FLAG, sep = int(-1, 1), beds = NAT, need = NAT})}),
-  -- intake waves (siege, Gordon 2026-10-16): phase, wave count, the last refusal, the sortie squad and phase
-  wave = obj({ph = str(8), n = NAT}, {why = str(40), so = str(24)}),
+  -- intake waves (siege, Gordon 2026-10-16): phase, wave count, the last refusal, the sortie squad and phase; BUG-030:
+  -- deep = the deep defense's reasons ('destroyers,army,weak')
+  wave = obj({ph = str(8), n = NAT}, {why = str(40), so = str(24), deep = str(24)}),
 })
 
 -- string formats (§1.1); explicit byte ranges, so LC_CTYPE cannot change them

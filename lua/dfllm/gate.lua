@@ -46,6 +46,15 @@
 -- core) or 'sortie' (outer, inner) pass in SIEGE and during a lockdown (SIEGE_DOWN; siege's own hostile checks replace
 -- the 30-tile guard, the footprint rules hold), under the airlock: an outer bridge only while every inner one is up and
 -- wanted up, an inner one only while every outer one is; the lockdown pass leaves those wants alone.
+-- Destroyed bridges (BUG-030, Run 10 y421: trolls destroyed O1, B1 and B2; for nine days gate kept their wants, GATE_FAIL
+-- read no_lever and siege's STRANDED named 'B1 raised' 40+ times while buildings.other.BRIDGE was empty): gate keeps the
+-- building id of every manifest bridge it saw complete on its footprint (persisted m.gate.seen). When that building is
+-- gone and no bridge stands on the footprint any more, the bridge is destroyed (or removed): BRIDGE_DESTROYED (A) once,
+-- its want, pull and move record are dropped, no want is accepted for it (gate.want refuses), it is no gate failure, and
+-- state `bridges` says 'destroyed'. gate.state(bridge) keeps answering 'unknown' for it (as for a bridge not built yet:
+-- readiness' bridge:B blocker) and adds the tick it was found destroyed as its third value, so siege can treat it as an
+-- open way. Its footprint is searched for a new complete bridge once a game day (GONE_RECHECK): a rebuilt one is a
+-- plain manifest bridge again (GATE C 'rebuilt').
 local geom = require('dfllm.util.geom')
 local DT = require('dfllm.deaths')      -- BUG-027: the bridge-death match (library, no module)
 
@@ -93,6 +102,7 @@ M.WIN_CLOSE = 600          -- D-14 up: a window closes this many ticks after its
 M.WIN_MIGRANTS = 2400      -- ... a migrant arrival report keeps it open this long
 M.WIN_CARAVAN = 4800       -- ... a caravan arrival report (trade's state keeps it open while a caravan is here)
 M.WIN_LEVER = 2400         -- ... an inbox `lever` down keeps that bridge open this long
+M.GONE_RECHECK = 1200      -- BUG-030: a destroyed bridge's footprint is searched for a rebuilt one once a game day
 
 local FAST_MODES = {SIEGE = true, BREACH = true, DRILL = true}
 local FORCE_MODES = {SIEGE = true, BREACH = true}       -- may RAISE onto a unit, only with a hostile at the gate
@@ -102,7 +112,9 @@ local FAIL_WHY = {blocked = 'blocked', no_lever = 'no_lever', no_worker = 'no_wo
                   manual = 'manual', slow = 'slow'}
 
 local st      -- persisted m.gate: {v, br = {<b> = {want, why, since, deadline, failed}}, kpi = {...},
-              --   ex = {X<id> = {bid, raised}} (unmanaged bridges in hand), lat = {s, t}, win = tick, winb = {<b> = tick}}
+              --   ex = {X<id> = {bid, raised}} (unmanaged bridges in hand), lat = {s, t}, win = tick, winb = {<b> = tick},
+              --   seen = {<b> = {bid, fp}} (BUG-030: the complete bridge last seen on the footprint fp 'x,y,z,...'),
+              --   gone = {<b> = {t, bid, last}} (destroyed: when, which building, its last state)}
 local rt      -- runtime per bridge: building ids, own job, settle, block, rotation
 local rt_ex   -- runtime: cached unmanaged bridge list {tick, list = {{name, bid, spec}}}
 local pub     -- precomputed state part {bridges = {...}}
@@ -421,6 +433,9 @@ end
 -- BREACH: rooms behind the core seal only, and only while the refuge lacks a linked lever of their bridges (the
 -- B2 landing lies next to B2, which may still be down while attackers are inside Kern+)
 local function allowed(K, rm, mode)
+  local live = false                            -- BUG-030: a room whose bridges are all destroyed has no duty
+  for bn in pairs(rm.bridges) do if not st.gone[bn] then live = true; break end end
+  if not live then return false end
   if mode ~= 'BREACH' then return true end
   return rm.roles.core == true and not rm.roles.outer and not rm.roles.inner and not refuge_covers(K, rm)
 end
@@ -986,6 +1001,7 @@ end
 ---------------------------------------------------------------- desired state
 -- a new want starts a new epoch (deadline, failure flag, lever rotation); same want keeps it
 local function set_want(name, w, why, deadline, now)
+  if st.gone[name] then return false end        -- BUG-030: a destroyed bridge takes no want
   local br = st.br[name]
   if br and br.want == w then
     if deadline and br.deadline == nil then br.deadline, dirty = deadline, true end
@@ -1135,12 +1151,72 @@ local function forced_event(K, name, fp, hold, hd, job)
   K.log('warn', 'gate: %s', txt)
 end
 
+-- BUG-030: a building whose build stage cannot be read counts as complete (fail-open: the test worlds have none)
+local function complete(b)
+  local ok, r = pcall(function() return b:getBuildStage() >= b:getMaxBuildStage() end)
+  return not ok or r == true
+end
+
+-- BUG-030: is manifest bridge `name` destroyed? It is when gate saw a complete bridge on this footprint (st.seen) and
+-- now no bridge stands there (the cached building is gone and a fresh resolve finds none). The first time:
+-- BRIDGE_DESTROYED (A); its want, our pull and its move record are dropped. A complete bridge on the footprint again
+-- ends it (GATE C 'rebuilt'). Unmanaged bridges are left to extras_pass (forgotten when their levers lose them).
+local function gone_check(K, name, r, spec, now)
+  if spec.role == 'extra' then return false end
+  if r.fps_src ~= spec.fp then r.fps_src, r.fps = spec.fp, table.concat(spec.fp, ',') end
+  local sig = r.fps
+  local seen = st.seen[name]
+  if seen and seen.fp ~= sig then                 -- the manifest moved the bridge: a new footprint, a new record
+    st.seen[name], st.gone[name], seen, dirty = nil, nil, nil, true
+  end
+  if r.bid and not df.building.find(r.bid) then   -- the cached building vanished: look at the footprint now
+    r.resolved = nil
+    resolve(r, spec, now, true)
+  end
+  if r.bid then
+    if seen and seen.bid == r.bid and not st.gone[name] then return false end    -- it stands (one lookup)
+    local b = df.building.find(r.bid)
+    local done = b ~= nil and complete(b)
+    if done and not (seen and seen.bid == r.bid) then st.seen[name], dirty = {bid = r.bid, fp = sig}, true end
+    if st.gone[name] then
+      if not done then return true end            -- a new one is being built: still no barrier
+      st.gone[name], r.gone_next, dirty = nil, nil, true
+      K.emit('GATE', 'C', name .. ' rebuilt', {bridge = name, state = 'rebuilt'})
+      K.log('info', 'gate: %s rebuilt (building %d)', name, r.bid)
+    end
+    return false
+  end
+  if st.gone[name] then return true end
+  if not seen then return false end               -- never seen complete: not built yet ('unknown' as before)
+  local last = r.last or 'unknown'
+  if r.job then K.act.cancel_own_lever_job(r.job.id); r.job = nil end
+  if r.mv then r.mv.t1, r.mv = now, nil end
+  unblock(r, now)
+  r.block_ev, r.stuck, r.near, r.last, r.gone_next = nil, nil, nil, 'destroyed', now + M.GONE_RECHECK
+  st.gone[name], st.br[name], dirty = {t = now, bid = seen.bid, last = last}, nil, true
+  local c = geom.bbox_center(spec.fp)
+  local mode = K.mode()
+  local txt = string.format('%s destroyed: no bridge on its footprint at %d,%d,%d any more (building %d, last %s, %s); '
+                            .. 'no pulls for it, an open way until it is rebuilt', name, c.x, c.y, c.z, seen.bid, last,
+                            mode)
+  K.emit('BRIDGE_DESTROYED', 'A', cut(txt, 200), {bridge = name, bid = seen.bid, role = tostring(spec.role or ''),
+                                                  last = last, mode = mode, pos = {c.x, c.y, c.z}})
+  K.log('warn', 'gate: %s', txt)
+  return true
+end
+
 -- one controller pass for one bridge; returns the observed state
 local function control(K, name, spec, now)
   local r = runtime(name)
+  -- BUG-030: a destroyed bridge gets no pull; its footprint is looked at again once a game day
+  if st.gone[name] then
+    if r.gone_next and now < r.gone_next and r.gone_next - now <= M.GONE_RECHECK then return 'destroyed' end
+    r.gone_next, r.resolved = now + M.GONE_RECHECK, nil
+  end
   local br = st.br[name]
   local w = br and br.want
   resolve(r, spec, now, w ~= nil and w ~= r.last)
+  if gone_check(K, name, r, spec, now) then return 'destroyed' end
   local s = read(r)
   r.foot, r.spec, r.stuck = spec.fp, spec, nil
   if w ~= nil and w ~= s and not r.want_ms then r.want_ms = K.now().ms end      -- GATE_FAIL names real seconds
@@ -1538,9 +1614,21 @@ function M.init(K)
       st.kpi = k
     end
   end
-  st.ex, st.winb = {}, {}
+  st.ex, st.winb, st.seen, st.gone = {}, {}, {}, {}
   if type(p) == 'table' then
     local function int(v) return type(v) == 'number' and math.tointeger(v) or nil end
+    -- BUG-030: the complete bridge last seen on each manifest footprint, and the destroyed ones
+    for name, x in pairs(type(p.seen) == 'table' and p.seen or {}) do
+      if type(name) == 'string' and type(x) == 'table' and int(x.bid) and type(x.fp) == 'string' then
+        st.seen[name] = {bid = int(x.bid), fp = x.fp}
+      end
+    end
+    for name, x in pairs(type(p.gone) == 'table' and p.gone or {}) do
+      if type(name) == 'string' and type(x) == 'table' and int(x.t) and st.seen[name] then
+        st.gone[name] = {t = int(x.t), bid = int(x.bid) or st.seen[name].bid,
+                         last = tostring(x.last or 'unknown'):sub(1, 9)}
+      end
+    end
     for name, x in pairs(type(p.ex) == 'table' and p.ex or {}) do
       if type(name) == 'string' and type(x) == 'table' and int(x.bid) then
         st.ex[name] = {bid = int(x.bid), raised = int(x.raised) == 1 and 1 or 0}
@@ -1580,9 +1668,10 @@ local function pass(K, force)
   local gone = {}                                -- forget bridges the manifest no longer lists (not the unmanaged)
   for name in pairs(rt) do gone[name] = true end
   for name in pairs(st.br) do gone[name] = true end
+  for name in pairs(st.seen) do gone[name] = true end
   for name in pairs(gone) do
     if not valid_spec((man.bridges or {})[name]) and not is_extra(name) and not (rt[name] and rt[name].fp) then
-      rt[name], st.br[name], dirty = nil, nil, true
+      rt[name], st.br[name], st.seen[name], st.gone[name], dirty = nil, nil, nil, nil, true
     end
   end
   pullers_step(K, now)
@@ -1627,6 +1716,8 @@ function M.want(K, bridge, want, why, deadline)
   local man = K.manifest()
   local spec = type(man.bridges) == 'table' and man.bridges[bridge]
   if not valid_spec(spec) then return false, 'no bridge ' .. tostring(bridge) end
+  local GONE = ' destroyed: no bridge on its footprint'          -- BUG-030
+  if st.gone[bridge] then return false, bridge .. GONE end
   if want == 'down' then
     local g = down_guard(K, bridge, why)
     if g then return false, g end
@@ -1636,6 +1727,7 @@ function M.want(K, bridge, want, why, deadline)
   control(K, bridge, spec, now)
   update_every(K)
   flush(K)
+  if st.gone[bridge] then return false, bridge .. GONE end         -- found destroyed just now
   return true, (changed and 'wanted ' or 'still ') .. bridge .. ' ' .. want
 end
 
@@ -1670,7 +1762,9 @@ end
 function M.lockdown(K)
   local now = K.now().tick
   local man = K.manifest()
-  for _, name in ipairs(bridge_names(man)) do resolve(runtime(name), man.bridges[name], now) end
+  for _, name in ipairs(bridge_names(man)) do
+    if not st.gone[name] then resolve(runtime(name), man.bridges[name], now) end
+  end
   local states = pass(K, true)
   local info = M.pulls(K)
   info.pend, info.names = 0, {}
@@ -1753,14 +1847,19 @@ function M.points(K)
   return r
 end
 
--- module state part (no bridge) or public gate.state(bridge) -> state, pending job id
+-- module state part (no bridge) or public gate.state(bridge) -> state, pending job id, the tick it was found destroyed
+-- (BUG-030; nil while it stands or was never built)
 function M.state(K, bridge)
   if bridge == nil then return pub or {} end
   local man = K.manifest()
   local spec = type(man.bridges) == 'table' and man.bridges[bridge]
   if not valid_spec(spec) then return 'unknown', nil end
+  -- BUG-030: a destroyed bridge reads 'unknown' (readiness: bridge:B) with the tick it was found destroyed
+  if st.gone[bridge] then return 'unknown', nil, st.gone[bridge].t end
   local r = runtime(bridge)
-  resolve(r, spec, K.now().tick)
+  local now = K.now().tick
+  resolve(r, spec, now)
+  if gone_check(K, bridge, r, spec, now) then return 'unknown', nil, st.gone[bridge].t end
   local s = read(r)
   local j = r.job and r.job.id
   if not j then
@@ -1858,31 +1957,34 @@ M.on = {
     pullers_step(K, now)                         -- T0: pullers walk to the levers; PEACE etc. release them
     for _, name in ipairs(bridge_names(man)) do
       local r = runtime(name)
-      resolve(r, man.bridges[name], now)
-      observe(K, name, r, read(r), now, man.bridges[name].fp)
-      check_fail(K, name, now, ev.from) -- settle the old epoch first (SIEGE->BREACH at T+900 = its deadline)
-      local br = st.br[name]
-      if ev.to == 'PEACE' then
-        local w, why = peace_want(K, name, man.bridges[name].role, now)
-        set_want(name, w, why, nil, now)
-      elseif br and br.want == 'down' and br.why == 'rescue' then   -- BUG-028: siege's rescue holds across modes
-      elseif ev.to == 'BREACH' and select(2, K.call('siege', 'held', name)) == true then
-        st.br[name], dirty = nil, true         -- BUG-028: siege holds it (citizens it would cut off); siege wants it
-      elseif ev.to == 'BREACH' then
-        if br and br.want == 'up' and br.since < now then
-          br.since, br.deadline, br.failed, dirty = now, now + M.DEADLINE, false, true
-          new_epoch(r)
-        else
-          set_want(name, 'up', 'breach', now + M.DEADLINE, now)
+      if not st.gone[name] then resolve(r, man.bridges[name], now) end
+      -- BUG-030: a destroyed bridge has no epoch (one found destroyed now is BRIDGE_DESTROYED, never GATE_FAIL)
+      if not (st.gone[name] or gone_check(K, name, r, man.bridges[name], now)) then
+        observe(K, name, r, read(r), now, man.bridges[name].fp)
+        check_fail(K, name, now, ev.from) -- settle the old epoch first (SIEGE->BREACH at T+900 = its deadline)
+        local br = st.br[name]
+        if ev.to == 'PEACE' then
+          local w, why = peace_want(K, name, man.bridges[name].role, now)
+          set_want(name, w, why, nil, now)
+        elseif br and br.want == 'down' and br.why == 'rescue' then   -- BUG-028: siege's rescue holds across modes
+        elseif ev.to == 'BREACH' and select(2, K.call('siege', 'held', name)) == true then
+          st.br[name], dirty = nil, true         -- BUG-028: siege holds it (citizens it would cut off); siege wants it
+        elseif ev.to == 'BREACH' then
+          if br and br.want == 'up' and br.since < now then
+            br.since, br.deadline, br.failed, dirty = now, now + M.DEADLINE, false, true
+            new_epoch(r)
+          else
+            set_want(name, 'up', 'breach', now + M.DEADLINE, now)
+          end
+        elseif ev.to == 'SIEGE' or ev.to == 'DRILL' then
+          if br and br.want == 'down' then st.br[name], dirty = nil, true      -- never lower now
+          elseif br and br.want == 'up' and br.since < now then                -- new epoch, siege sets the deadline
+            br.since, br.deadline, br.failed, dirty = now, nil, false, true
+            new_epoch(r)
+          end
         end
-      elseif ev.to == 'SIEGE' or ev.to == 'DRILL' then
-        if br and br.want == 'down' then st.br[name], dirty = nil, true      -- never lower now
-        elseif br and br.want == 'up' and br.since < now then                -- new epoch, siege sets the deadline
-          br.since, br.deadline, br.failed, dirty = now, nil, false, true
-          new_epoch(r)
-        end
+        control(K, name, man.bridges[name], now)   -- cancels a stale own pull at once
       end
-      control(K, name, man.bridges[name], now)   -- cancels a stale own pull at once
     end
     update_every(K)
     flush(K)

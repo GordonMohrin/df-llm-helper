@@ -163,3 +163,22 @@ def test_retrofit_rooms_only_is_a_burrow_project_with_a_rooms_fragment(stage):
     m_old = manifest(full[:stage])
     merged = merge_manifest(m_old, r["manifest"])
     assert set(merged["burrows"]) >= names and merged.get("bridges") == m_old.get("bridges")
+
+
+@pytest.mark.parametrize("rot", range(4))
+def test_core_station_lies_in_the_core_by_the_civilian_stair(rot):
+    """BUG-030: stage 3's `stations.core` (the deep defense's station, posture CORE) lies on Kern+ next to the
+    civilians' stair to the refuge, on another level than every bridge (a station at `b2` stands next to B2's footprint
+    and holds its raise), outside the attack zones Z1-Z3 and the killing field."""
+    ds = docs(rot)
+    m = manifest(ds)
+    core = m["stations"]["core"]
+    assert "core" not in (ds[1]["manifest"].get("stations") or {}), "stage 3 brings it, with B2 and the refuge"
+    assert tuple(core) in burrow_tiles(ds, "Kern+")
+    civ = m["stairs"]["civ"][0]
+    assert max(abs(core[0] - civ[0]), abs(core[1] - civ[1])) <= 2 and civ[2] <= core[2] <= civ[3]
+    assert all(core[2] != b["fp"][2] for b in m["bridges"].values())
+    inside = lambda p, b: b[0] <= p[0] <= b[3] and b[1] <= p[1] <= b[4] and b[2] <= p[2] <= b[5]  # noqa: E731
+    attack = [b for k in ("Z1", "Z2", "Z3") for b in m["zones"].get(k, [])] + [k["bbox"] for k in m["killboxes"]]
+    assert not any(inside(core, b) for b in attack)
+    assert S.validate("manifest", m) == []
