@@ -42,6 +42,13 @@
 -- the alert draws the puller back. In BREACH only while no hostile is inside Kern+ or near those levers (BUG-027,
 -- breach_safe; else the lever-room rule below: attacker-side levers). pulls() tells the
 -- reflex what its deferred alert waits for and which pulls the alert blocks (levers outside every alert burrow).
+-- Run 11 y432 winter (deep defense, GATE_FAIL O1 'no_worker', lever 18664 pulled again and again; by hand taken at
+-- once): the confined civilians stood in Tiefe+, O1's refuge lever lay there, so Hebel+ was never listed, and the pulls
+-- went to the Kern+ levers first (their order put Kern+ first outside BREACH), which nobody confined could take. Now:
+-- a pull goes first to a lever in the burrows the sounding alert lists (BREACH: the refuge, as before); a pull that
+-- waits on a lever outside them while a usable one lies inside moves to it at once (not after NO_WORKER); the lever
+-- burrow is listed too when every lever inside failed this epoch; and whenever the alert confines to the refuge
+-- (BREACH, the deep defense, a lockdown that took Tiefe+) the lever burrow follows breach_safe.
 -- Intake waves and the sortie through O1 (Gordon 2026-10-16): siege's wants 'down' with why 'intake' (outer, inner,
 -- core) or 'sortie' (outer, inner) pass in SIEGE and during a lockdown (SIEGE_DOWN; siege's own hostile checks replace
 -- the 30-tile guard, the footprint rules hold), under the airlock: an outer bridge only while every inner one is up and
@@ -628,13 +635,19 @@ local function alert_burrows(K)
   return bs, names
 end
 
--- a linked lever of the bridge lies on a tile of one of the burrows `bs`
-local function lever_in(r, bs)
+-- lever `lid` of the bridge lies on a tile of one of the burrows `bs`
+local function at_in(r, lid, bs)
+  local p = r.pos[lid]
+  if type(p) ~= 'table' then return false end
+  for _, b in ipairs(bs) do if on_tile(b, p[1], p[2], p[3]) then return true end end
+  return false
+end
+
+-- a linked lever of the bridge lies on a tile of one of the burrows `bs`; usable: one that did not fail this epoch
+-- (r.bad: no worker took it, or its pull did nothing)
+local function lever_in(r, bs, usable)
   for _, lid in ipairs(r and r.levers or {}) do
-    local p = r.pos[lid]
-    if r.linked[lid] and type(p) == 'table' then
-      for _, b in ipairs(bs) do if on_tile(b, p[1], p[2], p[3]) then return true end end
-    end
+    if r.linked[lid] and not (usable and r.bad[lid]) and at_in(r, lid, bs) then return true end
   end
   return false
 end
@@ -696,9 +709,19 @@ local function breach_safe(K, bs)
   return true
 end
 
+-- Run 11 y432 winter (GATE_FAIL O1 'no_worker', lever 18664 pulled again and again, the same pull by hand taken at
+-- once): the civ alert confines the civilians to the refuge in BREACH, in the deep defense (SIEGE_DEEP, BUG-030) and in
+-- a lockdown whose seal pick was the refuge; there the lever burrow follows BREACH's safety rule (breach_safe)
+local function refuge_level(K, mode, main)
+  if mode == 'BREACH' then return true end
+  local _, rn = core_burrows(K.manifest())
+  return main ~= nil and main == rn
+end
+
 -- the lever burrow for siege's alert list in `mode`, or nil: only while a pull is pending on a bridge none of whose
--- linked levers lies on `main` (the alert's burrow) or one of `rooms`; seal paints the lever tiles (kept current: a
--- new linked lever is added on the next ask) and answers its name. In BREACH only while breach_safe (BUG-027).
+-- linked levers lies on `main` (the alert's burrow) or one of `rooms`, or all of those failed this epoch (no worker
+-- took them); seal paints the lever tiles (kept current: a new linked lever is added on the next ask) and answers its
+-- name. While the alert confines to the refuge (BREACH, the deep defense, a lockdown) only while breach_safe (BUG-027).
 local function lever_room(K, mode, main, rooms)
   local bs = {}
   for _, n in ipairs(rooms) do bs[#bs + 1] = burrow(n) end
@@ -706,10 +729,10 @@ local function lever_room(K, mode, main, rooms)
   if mb then bs[#bs + 1] = mb end
   local need = false
   for name, r in pairs(rt) do
-    if needs_pull(name) and not lever_in(r, bs) then need = true; break end
+    if needs_pull(name) and not lever_in(r, bs, true) then need = true; break end
   end
   if not need then return nil end
-  if mode == 'BREACH' and not breach_safe(K, bs) then return nil end
+  if refuge_level(K, mode, main) and not breach_safe(K, bs) then return nil end
   local ok, n = K.call('seal', 'lever_burrow', lever_tiles())
   if ok and type(n) == 'string' and n ~= '' then
     lb_name = n
@@ -718,14 +741,16 @@ local function lever_room(K, mode, main, rooms)
 end
 
 -- lever order for a pull: 0 = in an allowed room with a puller present, 1 = on a tile of the burrow the civ alert
--- holds the civilians in (BREACH: the refuge if it exists, else Kern+, as siege), 2 = in another allowed room,
--- 3 = the rest; manifest order inside a class (live L3: in BREACH the levers in Kern+ had no worker, GATE_FAIL
--- no_worker x3). In BREACH a linked refuge lever thus comes before the B2 landing.
+-- holds the civilians in (BREACH: the refuge if it exists, as siege; else the burrows of the sounding alert, siege's
+-- list; else Kern+), 2 = in another allowed room, 3 = the rest; manifest order inside a class (live L3: in BREACH the
+-- levers in Kern+ had no worker, GATE_FAIL no_worker x3). In BREACH a linked refuge lever thus comes before the B2
+-- landing; Run 11 y432 winter: in the deep defense (the alert in the refuge, mode SIEGE) the Kern+ levers came first
+-- and no confined civilian could take them
 local function order(K, r, cand, now)
   local mode = K.mode()
   local kn, rn = core_burrows(K.manifest())
-  local home = mode == 'BREACH' and burrow(rn) or nil
-  home = home or burrow(kn)
+  local homes = mode == 'BREACH' and burrow(rn) and {burrow(rn)} or alert_burrows(K)
+  if not homes or #homes == 0 then homes = {burrow(kn)} end
   local rooms, pres = {}, {}
   for _, rm in ipairs(room_list(K, now)) do
     if allowed(K, rm, mode) then rooms[#rooms + 1] = {rm = rm, b = burrow(rm.name)} end
@@ -741,7 +766,7 @@ local function order(K, r, cand, now)
       if pres[room.name] == nil then pres[room.name] = present(room) end
       if pres[room.name] > 0 then return 0 end
     end
-    if on_tile(home, p[1], p[2], p[3]) then return 1 end
+    for _, b in ipairs(homes) do if on_tile(b, p[1], p[2], p[3]) then return 1 end end
     return room and 2 or 3
   end
   local cls, idx = {}, {}
@@ -844,8 +869,11 @@ local function within(sc, m)
   return r
 end
 
--- a soldier's squad and its station order (the squads screen): on the bridge, or on the way through it
-local function squad_note(id, fp)
+-- a soldier's squad and its station order (the squads screen): on the bridge (d 0), next to it (d <= MARGIN), his
+-- squad's station a few tiles away while he stands at it (BUG-032: DF stands a squad's soldiers on the tiles around
+-- its station point; siege has military re-station such a squad), or on the way through it
+M.STATION_NEAR = 2          -- a soldier this close to his squad's station stands at it (military: spread + 1)
+local function squad_note(id, fp, e)
   local ok, s = pcall(function()
     local u = df.unit.find(id)
     local sid = u and u.military.squad_id
@@ -856,7 +884,13 @@ local function squad_note(id, fp)
       local okp, x, y, z = pcall(function() return o.pos.x, o.pos.y, o.pos.z end)
       if okp and type(x) == 'number' and x >= 0 then
         local d = fp_dist(fp, x, y, z)
-        if d and d <= M.MARGIN then return string.format('squad %d stationed on the bridge at %d,%d,%d', sid, x, y, z) end
+        if d == 0 then return string.format('squad %d stationed on the bridge at %d,%d,%d', sid, x, y, z) end
+        if d and d <= M.MARGIN then
+          return string.format('squad %d stationed next to the bridge at %d,%d,%d', sid, x, y, z)
+        end
+        if d and e and e.z == z and math.max(math.abs(e.x - x), math.abs(e.y - y)) <= M.STATION_NEAR then
+          return string.format('squad %d stationed %d tiles from the bridge at %d,%d,%d', sid, d, x, y, z)
+        end
         return string.format('squad %d on its way to its station %d,%d,%d', sid, x, y, z)
       end
     end
@@ -871,7 +905,7 @@ local function who(list, fp)
   for i, e in ipairs(list) do
     if i > M.NAME_MAX then parts[#parts + 1] = string.format('+%d more', #list - M.NAME_MAX); break end
     local s = string.format('%s %d %s', e.k, e.id, e.d == 0 and 'on the footprint' or 'next to it')
-    local q = e.k == 'soldier' and fp and squad_note(e.id, fp)
+    local q = e.k == 'soldier' and fp and squad_note(e.id, fp, e)
     parts[#parts + 1] = q and (s .. ' (' .. q .. ')') or s
   end
   return table.concat(parts, ', ')
@@ -1263,6 +1297,14 @@ local function control(K, name, spec, now)
       end
       -- BUG-027: the deadline passed with this pull under way: once to another linked lever (check_fail asks)
       if not stale and r.switch then stale = 'switch' end
+      -- Run 11 y432 winter: our pull waits for a worker on a lever outside the burrows the sounding civ alert holds the
+      -- civilians in (queued before the alert sounded, or the alert moved to the refuge) while another linked lever
+      -- lies inside: that one at once, not after NO_WORKER ticks of nobody
+      if not stale and not w0 and (r.job.ock == nil or now - r.job.ock >= M.FAST) then
+        r.job.ock = now
+        local bs = alert_burrows(K)
+        if bs and not at_in(r, r.job.lever, bs) and lever_in(r, bs, true) then stale = 'outside' end
+      end
       local has_worker = w0 ~= nil
       if not stale then
         if has_worker then r.job.nw = nil
@@ -1284,6 +1326,9 @@ local function control(K, name, spec, now)
       elseif stale == 'switch' then
         r.bad[r.job.lever], r.switch = true, nil
         K.log('info', 'gate: %s pull on lever %d not done by the deadline, trying another lever', name, r.job.lever)
+      elseif stale == 'outside' then
+        K.log('info', 'gate: %s pull on lever %d lies outside the alert burrows, a lever inside them instead', name,
+              r.job.lever)
       end
       r.job = nil
       if not ok then r.settle = now + M.SETTLE; return s end -- it may be completing right now
@@ -1791,6 +1836,29 @@ function M.waiting(K, bridge)
   return nil
 end
 
+-- public (BUG-032, military): the margin every pull waits for around a footprint (military keeps squad stations
+-- farther away than this plus the spread of a squad around its station)
+function M.margin(K) return M.MARGIN end
+
+-- public (BUG-032, siege -> military.restation): the bridges whose pull waits for units on or next to the footprint now
+-- (as of the last pass): {{bridge, want, fp = {x0, y0, z0, x1, y1, z1}, since, units = {{id, k, d, x, y, z}}}}, sorted
+-- by bridge; k as in the GATE text (citizen, soldier, child, animal, ...), d = tiles from the footprint
+function M.holds(K)
+  local r = {}
+  for name, x in pairs(rt or {}) do
+    local br = st.br[name]
+    if type(x.block) == 'table' and #x.block > 0 and x.foot and br and br.want then
+      local units = {}
+      for i, e in ipairs(x.block) do units[i] = {id = e.id, k = e.k, d = e.d, x = e.x, y = e.y, z = e.z} end
+      local f = x.foot
+      r[#r + 1] = {bridge = name, want = br.want, fp = {f[1], f[2], f[3], f[4], f[5], f[6]}, since = x.block_since,
+                   units = units}
+    end
+  end
+  table.sort(r, function(a, b) return a.bridge < b.bridge end)
+  return r
+end
+
 -- public (BUG-027, sense): boxes {x0, y0, z0, x1, y1, z1} around the footprints of the bridges with work now (a want not
 -- reached, a pull pending, moving), grown by WATCH_R on their z; sense lists the visible friendly non-citizens in them
 -- (visitors, merchants, tame animals) as census.h.friends, so they hold the pull too. nil when none has work.
@@ -1883,7 +1951,8 @@ end
 -- public (WP5 extension, live L3): the lever rooms allowed in `mode` (default: now) that exist, sorted; siege
 -- adds them to the civ-alert burrow list (BREACH: only the rooms behind the core seal whose bridges have no
 -- linked lever inside the refuge yet). BUG-013: then seal's lever burrow while a pull is pending on a bridge whose
--- linked levers all lie outside `main` (the alert's burrow) and those rooms (not in BREACH)
+-- linked levers all lie outside `main` (the alert's burrow) and those rooms, or failed there this epoch; while `main`
+-- is the refuge or the mode BREACH only while breach_safe (Run 11 y432 winter, the deep defense)
 function M.rooms(K, mode, main)
   mode = mode or K.mode()
   local r = {}

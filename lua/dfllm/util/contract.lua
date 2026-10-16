@@ -124,6 +124,8 @@ C.EVENTS = {
   GLASS_BLOCKED = {cls = 'B', by = 'economy'},
   -- Run 11: pieces planned buildings wait for that nothing in the fort can make (no rock, no logs; once per set)
   MATERIAL_SHORT = {cls = 'B', by = 'economy'},
+  -- BUG-032: military moved a squad station off a bridge footprint and its ring (bridge, chain, none, hold)
+  STATION_MOVED = {cls = 'B', by = 'military'},
   -- C: log only
   SIEGE_STATUS = {cls = 'C', by = 'siege'}, SEASON = {cls = 'C', by = 'kern'},
   PROJECT_STAGE = {cls = 'C', by = 'runner'}, MODE = {cls = 'C', by = 'kern'},

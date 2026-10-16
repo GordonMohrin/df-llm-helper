@@ -85,7 +85,8 @@ alert burrow without regard to destroyers or the army's size), `lua/dfllm/milita
 ## Open
 - A manifest without `stations.core` (every fort made before this change, Run 10's too) falls back to `stations.b2`
   (fortcore [1,44]), one tile from B2's footprint: soldiers there hold a B2 raise (BUG-027 margin) until a hostile is
-  within `force_near` (BREACH's B2_HOLD had the same problem: GATE_FORCED B2 in Run 10).
+  within `force_near` (BREACH's B2_HOLD had the same problem: GATE_FORCED B2 in Run 10). Fixed by BUG-032 (Run 11:
+  military moves such a station clear of the footprint, fortcore's b2 is on the core level).
 - The Z3 lever room keeps its two lever pullers in a deep SIEGE (gate's SIEGE duty); they leave it at the BREACH.
 - A fort without soldiers relies on its bridges as before (no `army`/`weak` reason); destroyers still send it deep.
 - `stations.metal` is 0 (off) by default: with iron/steel required, every year-1 siege would go deep.

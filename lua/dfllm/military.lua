@@ -20,6 +20,15 @@
 --                  gallery stations between O1 and B2 died first)
 -- STATION_B1 uses the inner station too (stations.b2 while B2 is not down). An approved sortie order is held (no
 -- posture re-assert replaces it) until siege releases the squad (hold_order / release).
+-- BUG-032 (Run 11 y432: GATE_FAIL B2 'not up after 908 ticks', squad 104 stationed next to B2 at fortcore's
+-- stations.b2, one tile behind its footprint, held the BREACH raise): a posture names a chain of stations; the first
+-- one that lies more than gate.MARGIN + stations.spread (config/reflex.json, 1) tiles from every manifest bridge
+-- footprint on its level is taken, else it moves to the nearest revealed plain floor on the inner side of the
+-- footprints that hold it (dfllm.stations), else the next station of the chain (entries marked alt only after one
+-- failed: core, the core level's centre z4). STATION_MOVED (B) and a kern.log line name the old and the new station.
+-- Soldiers standing at their squad's station who still hold a raise (a crowd of 30 on a landing) get their squad
+-- re-stationed at once (M.restation, asked by siege with gate.holds()): a station whose crowd stays out of the ring,
+-- on the inner side of that bridge, else the next of the chain; military keeps it for the posture (rt.over).
 -- Squads are created with a leader (act.squad_create + act.squad_leader, the squads screen [S2, live L2]); a
 -- squad left without one (seating refused) gets the next recruit as leader with backoff, no further squads
 -- are created meanwhile, Gordon is told once (DECISION_NEEDED squads), and a led UI squad of the same name wins.
@@ -36,6 +45,7 @@
 -- status) counts the free metal gear per category.
 local geom = require('dfllm.util.geom')
 local C = require('dfllm.util.contract')
+local SL = require('dfllm.stations')       -- BUG-032: stations clear of the bridge footprints (library, no module)
 
 local M = {name = 'military', every = {ticks = 3600}, verbs = {}, on = {}}
 
@@ -49,6 +59,17 @@ M.ADD_PER_STEP = 5
 M.KEEP_EXTRA = 2            -- remove soldiers only when a squad is this far above its target
 M.KPI_TTL = 25
 M.STATION_R = 3             -- a soldier within 3 tiles (same z) of the station is on station
+M.SPREAD = 1                -- BUG-032: tiles around its station point DF stands a squad on (cfg stations.spread)
+M.SPREAD_LIM = {0, 5}
+M.RELOC_TTL = 6000          -- BUG-032: ticks a station's replacement is kept (revealed tiles change slowly)
+M.NOTE_EVERY = 2400         -- BUG-032: a squad with no station clear of a bridge it holds is told at most this often
+-- Run 11 siege 3 (y432/433: 25 dead, pop 54 -> 29, soldiers 10 -> 5, O1 destroyed): squads A and B emptied and were
+-- never refilled, only C (5) remained. In SIEGE/BREACH (SIEGE_FILL) a melee squad below half its target is refilled
+-- from healthy adult civilians who stand in Kern+ (the core), never from the refuge; the first melee squad's target is
+-- at least HOLD_MIN then (the core stations need them; neither the shrunk population target nor the tools-first rule
+-- lowers it in a siege). Tool-detail members only after everybody else (they keep their place in PEACE).
+M.HOLD_MIN = 5              -- melee soldiers the core stations need in a siege (half a squad: the routine's minimum)
+M.SIEGE_THIRST, M.SIEGE_HUNGER = 25000, 50000   -- healthy: below DF's thirsty / hungry marks, no wound, awake
 M.RETRY, M.RETRY_MAX = 1200, 33600
 M.NOTIFY_AFTER = 2          -- failed squad creations before DECISION_NEEDED (once per boot)
 -- routine names (CONTRACTS §5 squad_routine resolves by name); first exact, then substring
@@ -95,6 +116,7 @@ M.LOOT = {per_run = 40, every = 3600, cats = {{'WEAPON', 'weapon'}, {'ARMOR', 'b
 local WORN_ROLES = {'Worn', 'Weapon', 'Strapped'}
 
 local seat_leader   -- defined after the squad helpers
+local SIEGE_FILL, hold_floor, siege_short   -- Run 11 siege 3, defined before M.step
 local st      -- persisted m.military: {v, sq = {A = {id, uni, kind, auto}}, posture, pt, unstick}
 local rt      -- runtime: retry ticks, applied orders, kpi cache, notified flags
 local dirty
@@ -293,11 +315,57 @@ end
 
 local function labors(u) return try(function() return u.status.labors end) end
 
--- candidates sorted best first: combat value, then strength + toughness, then id; plus exclusion counts
-function M.recruits(K)
+-- Run 11 siege 3: the manifest's Kern+ and refuge burrows (roles kern/refuge, refuge.burrow wins), as gate reads them
+local function core_home(K)
+  local man = K.manifest()
+  local kern, refuge
+  local names = {}
+  for name in pairs(type(man.burrows) == 'table' and man.burrows or {}) do names[#names + 1] = name end
+  table.sort(names)
+  for _, name in ipairs(names) do
+    local role = type(man.burrows[name]) == 'table' and man.burrows[name].role
+    if role == 'kern' and (kern == nil or name == 'Kern+') then kern = name end
+    if role == 'refuge' and (refuge == nil or name == 'Tiefe+') then refuge = name end
+  end
+  if type(man.refuge) == 'table' and type(man.refuge.burrow) == 'string' then refuge = man.refuge.burrow end
+  local function find(n) return n and try(function() return dfhack.burrows.findByName(n) end) or nil end
+  return {kern = find(kern or 'Kern+'), refuge = find(refuge or 'Tiefe+'), kname = kern or 'Kern+'}
+end
+
+local function on_burrow(b, x, y, z)
+  if not b or not x then return false end
+  return try(function() return dfhack.burrows.isAssignedTile(b, {x = x, y = y, z = z}) end) == true
+end
+
+-- in the core: on a Kern+ tile and not on a refuge tile (a citizen in the refuge stays there)
+local function core_where(home, u)
+  local x, y, z = nil, nil, nil
+  local ok, a, b, c = pcall(dfhack.units.getPosition, u)
+  if ok then x, y, z = a, b, c end
+  if on_burrow(home.refuge, x, y, z) then return 'refuge' end
+  if on_burrow(home.kern, x, y, z) then return nil end
+  return 'outside'
+end
+
+-- healthy enough to fight now: no wound, awake, not thirsty or hungry (fields a fake unit lacks read as fine)
+local function healthy(u)
+  local wounds = try(function() return #u.body.wounds end) or 0
+  local out = try(function() return u.counters.unconscious end) or 0
+  local th = try(function() return u.counters2.thirst_timer end) or 0
+  local hu = try(function() return u.counters2.hunger_timer end) or 0
+  return wounds == 0 and out <= 0 and th < M.SIEGE_THIRST and hu < M.SIEGE_HUNGER
+end
+
+-- candidates sorted best first: combat value, then strength + toughness, then id; plus exclusion counts.
+-- siege (Run 11 siege 3, SIEGE/BREACH): only healthy adults standing in Kern+ and not in the refuge; members of the
+-- tool details and holders of a tool labor come last instead of never (counted as tool all the same)
+function M.recruits(K, siege)
   local cu = K.census.u
   local out, why = {}, {tool = 0, sole = 0, noble = 0, mood = 0, child = 0, squad = 0}
+  if siege then why.outside, why.refuge, why.hurt = 0, 0, 0 end
   if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then return out, why end
+  local home = siege and core_home(K)
+  if siege and not home.kern then why.no_core = 1; return out, why end   -- no Kern+: the core cannot be told
   local adults = {}
   for _, id in ipairs(cu.ids) do
     local u = df.unit.find(id)
@@ -319,7 +387,7 @@ function M.recruits(K)
   local sole = {}
   for l, n in pairs(count) do if n == 1 then sole[holder[l]] = true end end
   local tools = tool_members()
-  local cand = {}
+  local cand, cand2 = {}, {}
   for _, u in ipairs(adults) do
     local lab = labors(u)
     local tool_labor = false
@@ -327,21 +395,30 @@ function M.recruits(K)
       for _, l in ipairs(M.TOOL_LABORS) do if try(function() return lab[l] end) then tool_labor = true end end
     end
     local mood = try(function() return u.mood end)
+    local where = siege and core_where(home, u)
+    local function c() return {id = u.id, cv = M.cv(u), body = attr(u, 'STRENGTH') + attr(u, 'TOUGHNESS')} end
     if (try(function() return u.military.squad_id end) or -1) >= 0 then why.squad = why.squad + 1
-    elseif tools[u.id] or tool_labor then why.tool = why.tool + 1
+    elseif where then why[where] = why[where] + 1
+    elseif siege and not healthy(u) then why.hurt = why.hurt + 1
+    elseif tools[u.id] or tool_labor then
+      why.tool = why.tool + 1
+      if siege and not sole[u.id] and not noble(u) and not (mood ~= nil and mood >= 0) then cand2[#cand2 + 1] = c() end
     elseif sole[u.id] then why.sole = why.sole + 1
     elseif noble(u) then why.noble = why.noble + 1
     elseif mood ~= nil and mood >= 0 then why.mood = why.mood + 1
     else
-      cand[#cand + 1] = {id = u.id, cv = M.cv(u), body = attr(u, 'STRENGTH') + attr(u, 'TOUGHNESS')}
+      cand[#cand + 1] = c()
     end
   end
-  table.sort(cand, function(a, b)
+  local function best(a, b)
     if a.cv ~= b.cv then return a.cv > b.cv end
     if a.body ~= b.body then return a.body > b.body end
     return a.id < b.id
-  end)
-  for i, c in ipairs(cand) do out[i] = c.id end
+  end
+  table.sort(cand, best)
+  table.sort(cand2, best)
+  for _, c in ipairs(cand) do out[#out + 1] = c.id end
+  for _, c in ipairs(cand2) do out[#out + 1] = c.id end
   return out, why
 end
 
@@ -946,15 +1023,22 @@ function seat_leader(K, k, s, recruits)
   stuck(K)
 end
 
-local function fill(K, k, s, want, recruits)
+-- siege (Run 11 siege 3): in SIEGE/BREACH only a squad below half its target is refilled, from M.recruits(K, true)
+local function fill(K, k, s, want, recruits, siege)
   local mem = members(s)
   local n = #mem
-  if n < want and retry_ok(K, 'add' .. k) and leader_set(s) then
-    local added = 0
+  local low = not siege or n < (want + 1) // 2
+  if n < want and low and retry_ok(K, 'add' .. k) and leader_set(s) then
+    local added, ids = 0, {}
     while n < want and added < M.ADD_PER_STEP and #recruits() > 0 do
       local uid = table.remove(recruits(), 1)
-      if K.act.squad_add(s.id, uid) then n, added = n + 1, added + 1
+      if K.act.squad_add(s.id, uid) then n, added, ids[#ids + 1] = n + 1, added + 1, uid
       else backoff(K, 'add' .. k); break end
+    end
+    if siege and added > 0 then
+      rt.kpi = nil
+      K.log('warn', 'military: %s refill: squad %s %d -> %d of %d with healthy civilians from the core: %s',
+            K.mode(), k, n - added, n, want, table.concat(ids, ','))
     end
   elseif n > want + M.KEEP_EXTRA and K.mode() == 'PEACE' then
     local worst                                  -- lowest combat value, never the leader
@@ -1003,10 +1087,11 @@ local function core_up(K, man)
 end
 
 -- BUG-029: the inner station, on the side of the fort that holds the drink: stations.melee (inside B1) while every
--- core bridge is down, else stations.b2 (behind the core seal)
-local function inner_station(K, man, stations)
-  if stations.b2 and core_up(K, man) then return stations.b2 end
-  return stations.melee or stations.b2
+-- core bridge is down, else stations.b2 (behind the core seal). BUG-032: a chain (see station_of)
+local ALT_CORE, ALT_Z4 = {name = 'core', alt = true}, {name = 'z4', alt = true}
+local function inner_chain(K, man, stations)
+  if stations.b2 and core_up(K, man) then return {'b2', ALT_CORE, ALT_Z4, 'melee'} end
+  return {'melee', 'b2', ALT_CORE, ALT_Z4}
 end
 
 -- the killing field station of a wave: stations.field, else the centre of the first killbox
@@ -1019,17 +1104,20 @@ local function field_station(man, stations)
   end
 end
 
+-- the routine and the station chain of a posture (nil: no station). BUG-032: an entry is a manifest station name,
+-- 'field' (field_station), 'z4' (the centre of the biggest Z4 box: the core level; the nearest revealed floor to it)
+-- or {name, pos, alt}; alt entries are tried only after an earlier one could not be made clear of the bridges, so a
+-- manifest without them keeps the stations it had (BUG-029/030 order: b2 or melee, core or b2 or melee, ...)
 local function station_of(K, man, P, kind, first_melee, stations)
-  local melee, gallery, b2 = stations.melee, stations.gallery, stations.b2
-  if P == 'STATION_B1' then return 'train', first_melee and inner_station(K, man, stations) or nil end
-  if P == 'READY_STATION' then return 'ready', kind == 'xbow' and (gallery or melee) or melee end
-  if P == 'B2_HOLD' then return 'ready', b2 or melee end
-  if P == 'READY_IN' then return 'ready', inner_station(K, man, stations) end
-  if P == 'CORE' then return 'ready', stations.core or b2 or melee end            -- BUG-030
-  if P == 'INTAKE' then
-    local field = field_station(man, stations)
-    return 'ready', kind == 'xbow' and (gallery or field) or field
+  if P == 'STATION_B1' then return 'train', first_melee and inner_chain(K, man, stations) or nil end
+  if P == 'READY_STATION' then
+    if kind == 'xbow' then return 'ready', {'gallery', 'melee', {name = 'b2', alt = true}, ALT_CORE, ALT_Z4} end
+    return 'ready', {'melee', {name = 'b2', alt = true}, ALT_CORE, ALT_Z4}
   end
+  if P == 'B2_HOLD' then return 'ready', {'b2', ALT_CORE, ALT_Z4, 'melee'} end
+  if P == 'READY_IN' then return 'ready', inner_chain(K, man, stations) end
+  if P == 'CORE' then return 'ready', {'core', 'b2', ALT_Z4, 'melee'} end            -- BUG-030
+  if P == 'INTAKE' then return 'ready', kind == 'xbow' and {'gallery', 'field'} or {'field'} end
   return 'train', nil
 end
 
@@ -1046,6 +1134,135 @@ local function posp(p)
   local x, y, z = int(p[1] or p.x), int(p[2] or p.y), int(p[3] or p.z)
   if not (x and y and z) then return nil end
   return geom.pos(x, y, z)
+end
+
+local function pstr(p) return p and string.format('%d,%d,%d', p.x, p.y, p.z) or '?' end
+
+---------------------------------------------------------------- BUG-032: stations clear of the bridges
+-- config/reflex.json stations.spread: the tiles around its station point DF stands a squad's soldiers on
+local function spread(K)
+  local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.stations) == 'table' and K.cfg.reflex.stations or {}
+  local s = int(r.spread)
+  if not s or s < M.SPREAD_LIM[1] or s > M.SPREAD_LIM[2] then s = M.SPREAD end
+  return s
+end
+
+-- the clearance (a station lies farther than this from every footprint on its level) and gate's margin
+local function clearance(K)
+  local ok, m = K.call('gate', 'margin')
+  m = ok and int(m) or 1
+  return m + spread(K), m
+end
+
+-- snapshot.tile (revealed tiles only: nil for a hidden one, fair play), nil without the module
+local function tile_reader(K)
+  return function(x, y, z)
+    local ok, t = K.call('snapshot', 'tile', x, y, z)
+    return ok and type(t) == 'table' and t or nil
+  end
+end
+
+-- a chain entry -> name, position, seek (find the nearest floor to it even when no bridge holds it)
+local function resolve(man, stations, ent)
+  local name = type(ent) == 'table' and ent.name or ent
+  if type(ent) == 'table' and ent.pos then return name, posp(ent.pos), ent.seek end
+  if name == 'field' then return name, posp(field_station(man, stations)) end
+  if name == 'z4' then return name, SL.z4_centre(man), true end
+  return name, posp(stations[name])
+end
+
+-- the nearest revealed floor to p clear of the bridges (cached per manifest, position and clearance for RELOC_TTL)
+local function reloc(K, man, brs, p, blk, clear, o)
+  local now = now_tick(K)
+  if rt.reloc_man ~= man then rt.reloc, rt.reloc_man = {}, man end
+  local key = string.format('%s|%d|%s', pstr(p), clear, o.tag or '')
+  local c = rt.reloc[key]
+  if c and now >= c.t and now - c.t < M.RELOC_TTL then return c.q or nil end
+  local q = SL.relocate(man, brs, p, blk, {clear = clear, need_by = o.need_by, side = o.side, ring = clear,
+                                           tile = tile_reader(K)})
+  q = q and geom.pos(q.x, q.y, q.z) or nil
+  rt.reloc[key] = {t = now, q = q or false}
+  return q
+end
+
+-- the station of a chain: the first entry that lies clear of every bridge footprint (o.need_by: a stricter clearance
+-- for a bridge; o.side: an inner side it must lie on), else moved to the nearest revealed floor on the inner side of
+-- the footprints that hold it, else the next entry (alt entries only after one failed; o.all: every entry).
+-- Returns {pos, name, from (the entry's own position when it moved), first = {name, pos}, blk = the first holder}
+local function pick(K, man, stations, chain, o)
+  o = o or {}
+  local clear = clearance(K)
+  local brs = SL.bridges(man)
+  local r, failed = {}, o.all == true
+  for _, ent in ipairs(chain) do
+    local alt = type(ent) == 'table' and ent.alt
+    if failed or not alt then
+      local name, p, seek = resolve(man, stations, ent)
+      if p then
+        if not r.first then r.first = {name = name, pos = p} end
+        local blk = SL.blockers(brs, p, clear, o.need_by)
+        local inside = not o.side or o.side(p.x, p.y, p.z)
+        if #blk == 0 and inside and not seek then r.pos, r.name = p, name; return r end
+        local q = reloc(K, man, brs, p, blk, clear, o)
+        if q then r.pos, r.name, r.from = q, name, (not seek) and p or nil; r.blk = r.blk or blk[1]; return r end
+        r.blk = r.blk or blk[1] or (not inside and {name = o.bridge or '?', d = -1}) or nil
+        failed = true
+      end
+    end
+  end
+  return r
+end
+
+local function blk_txt(b, clear, margin)
+  if not b then return '' end
+  if b.d and b.d < 0 then return string.format(' on the outer side of %s', b.name) end
+  local need = b.need or clear
+  return string.format(' %d tile%s from bridge %s (clearance %d: gate margin %d + spread %d)', b.d,
+                       b.d == 1 and '' or 's', b.name, need, margin, need - margin)
+end
+
+-- STATION_MOVED (B) and a kern.log line once per station and outcome (per boot): moved (why bridge), another station of
+-- the chain (chain), none clear (none: the first stays)
+local function note_pick(K, r)
+  local f = r.first
+  if not f or (r.name == f.name and not r.from) then return end
+  local to = r.pos
+  local key = f.name .. '@' .. pstr(f.pos)
+  local sig = to and (r.name .. '@' .. pstr(to)) or 'none'
+  rt.noted = rt.noted or {}
+  if rt.noted[key] == sig then return end
+  rt.noted[key] = sig
+  local clear, margin = clearance(K)
+  local b = r.blk
+  local why, txt
+  if to and r.name == f.name then
+    why = 'bridge'
+    txt = string.format('station %s %s lies%s: moved to %s (the nearest revealed floor on its inner side)', f.name,
+                        pstr(f.pos), blk_txt(b, clear, margin), pstr(to))
+  elseif to then
+    why = 'chain'
+    txt = string.format('station %s %s lies%s, no revealed floor clear of it on its inner side within %d tiles: %s %s '
+                        .. 'instead', f.name, pstr(f.pos), blk_txt(b, clear, margin), SL.SEARCH_R, r.name, pstr(to))
+  else
+    why = 'none'
+    txt = string.format('station %s %s lies%s and no station of its chain is clear of the bridges: kept (its soldiers '
+                        .. 'hold that bridge)', f.name, pstr(f.pos), blk_txt(b, clear, margin))
+  end
+  local d = {why = why, station = r.name or f.name, first = f.name, from = geom.arr(f.pos)}
+  if to then d.to = geom.arr(to) end
+  if b then d.bridge, d.d = b.name, b.d end
+  K.emit('STATION_MOVED', 'B', txt:sub(1, 200), d)
+  K.log(why == 'bridge' and 'info' or 'warn', 'military: %s', txt)
+end
+
+-- the station of posture P for squad kind `kind` (first melee): pos or nil, and the chain's first entry
+local function posture_station(K, man, stations, P, kind, first_melee)
+  local which, chain = station_of(K, man, P, kind, first_melee, stations)
+  if not chain then return which, nil, nil end
+  local r = pick(K, man, stations, chain)
+  note_pick(K, r)
+  local src = r.first and (r.first.name .. '@' .. pstr(r.first.pos)) or nil
+  return which, r.pos or (r.first and r.first.pos), src
 end
 
 -- is this squad on its free months right now? (see M.FREE_MONTHS)
@@ -1065,8 +1282,11 @@ local function apply_squad(K, k, force)
   if rt.held[k] then return true end                 -- siege holds this squad's sortie order (hold_order)
   local man = K.manifest()
   local stations = type(man.stations) == 'table' and man.stations or {}
-  local which, pos = station_of(K, man, st.posture, e.kind, k == first_melee_key(), stations)
-  pos = posp(pos)
+  local which, pos, src = posture_station(K, man, stations, st.posture, e.kind, k == first_melee_key())
+  local ov = rt.over[k]                               -- BUG-032: re-stationed off a bridge it held (restation)
+  if ov then
+    if ov.P == st.posture and ov.src == src then pos = ov.pos else rt.over[k] = nil end
+  end
   local off = not pos and off_season(K, k)
   if off then which = 'off' end
   local ok = true
@@ -1265,6 +1485,144 @@ function M.release(K, key)
   return apply_squad(K, key, true)
 end
 
+---------------------------------------------------------------- BUG-032: stations and the bridges (siege)
+-- public (siege): the station posture P gives a squad of `kind` (default melee) now, {x, y, z} or nil: siege names
+-- the core station of the deep defense with it
+function M.station_for(K, P, kind)
+  local man = K.manifest()
+  local stations = type(man.stations) == 'table' and man.stations or {}
+  local _, pos = posture_station(K, man, stations, P, kind or 'melee', true)
+  return pos and {pos.x, pos.y, pos.z} or nil
+end
+
+-- public (siege, the sortie's gathering point): `pos` clear of every bridge footprint (moved to the nearest revealed
+-- floor on the inner side of the footprints that hold it), {x, y, z}; the position itself when none is found
+function M.safe_pos(K, pos, name)
+  local p = posp(pos)
+  if not p then return nil end
+  local man = K.manifest()
+  local r = pick(K, man, type(man.stations) == 'table' and man.stations or {}, {{name = name or 'pos', pos = p}})
+  note_pick(K, r)
+  local q = r.pos or p
+  return {q.x, q.y, q.z}
+end
+
+-- the fort squad of a soldier and its station order (the squads screen's move order): {sid, p} or nil
+local function station_order(uid)
+  return try(function()
+    local u = df.unit.find(uid)
+    local sid = u and int(u.military.squad_id)
+    if not sid or sid < 0 then return nil end
+    local s = squad(sid)
+    if not s then return nil end
+    for _, o in ipairs(s.orders) do
+      local okp, x, y, z = pcall(function() return o.pos.x, o.pos.y, o.pos.z end)
+      if okp and int(x) and int(y) and int(z) and x >= 0 then return {sid = sid, s = s, p = geom.pos(x, y, z)} end
+    end
+    return nil
+  end)
+end
+
+local function key_of(sid)
+  for _, sp in ipairs(M.SQUADS) do
+    local e = st.sq[sp.key]
+    if e and e.id == sid then return sp.key end
+  end
+end
+
+-- one squad whose soldiers stand at its station on or next to footprint fp of bridge `bname`: a station whose crowd
+-- (the farthest of them from the station, q.o) stays out of the ring, on that bridge's inner side; true if ordered
+local function restation_one(K, man, stations, bname, fp, q, clear, margin)
+  local key = key_of(q.sid)
+  if key and rt.held[key] then return false end            -- siege's sortie owns that squad's orders
+  local need = math.max(clear, margin + q.o)
+  local side = SL.side(man, fp, q.p, clear)
+  local chain = {{name = 'station', pos = q.p}}
+  if key then
+    local e = st.sq[key]
+    local _, ch = station_of(K, man, st.posture, e.kind, key == first_melee_key(), stations)
+    for _, ent in ipairs(ch or {}) do chain[#chain + 1] = ent end
+  end
+  for _, n in ipairs({'core', 'b2', 'z4'}) do chain[#chain + 1] = n end
+  local r = pick(K, man, stations, chain, {need_by = {[bname] = need}, side = side, all = true, bridge = bname,
+                                           tag = bname .. ':' .. need})
+  local label = key and string.format('squad %d (%s)', q.sid, key) or string.format('squad %d', q.sid)
+  local head = string.format('%s holds the raise of %s: soldier %d %d tile%s from its footprint, %d from the squad\'s '
+                             .. 'station %s', label, bname, q.ids[1], q.d, q.d == 1 and '' or 's', q.o, pstr(q.p))
+  local d = {why = 'hold', squad = q.sid, key = key, bridge = bname, from = geom.arr(q.p), units = q.ids,
+             d = q.d, first = 'station'}
+  if not r.pos or (r.pos.x == q.p.x and r.pos.y == q.p.y and r.pos.z == q.p.z) then
+    rt.rs_note = rt.rs_note or {}
+    local nk, now = q.sid .. ':' .. bname, now_tick(K)
+    if rt.rs_note[nk] and now >= rt.rs_note[nk] and now - rt.rs_note[nk] < M.NOTE_EVERY then return false end
+    rt.rs_note[nk] = now
+    d.why, d.station = 'none', 'station'
+    local txt = head .. string.format(': no station clear of it on its inner side (crowd %d tiles): kept', need)
+    K.emit('STATION_MOVED', 'B', txt:sub(1, 200), d)
+    K.log('warn', 'military: %s', txt)
+    return false
+  end
+  if key then
+    local _, _, src = posture_station(K, man, stations, st.posture, st.sq[key].kind, key == first_melee_key())
+    rt.over[key] = {P = st.posture, src = src, pos = r.pos, bridge = bname}
+    apply_squad(K, key, true)
+  elseif not K.act.squad_order(q.sid, {kind = 'station', pos = r.pos}) then
+    return false
+  end
+  rt.kpi = nil
+  d.station, d.to = r.name, geom.arr(r.pos)
+  local txt = head .. string.format(': re-stationed at %s (%s)', pstr(r.pos), r.name)
+  K.emit('STATION_MOVED', 'B', txt:sub(1, 200), d)
+  K.log('warn', 'military: %s', txt)
+  return true
+end
+
+-- public (BUG-032, siege): soldiers hold a raise (gate.holds(): the bridges waiting for units on or next to their
+-- footprint). Every fort squad with a station order whose soldiers stand at it (within stations.spread + 1 tiles of
+-- it, or the station itself within the clearance of that footprint) gets a station clear of the bridge at once (the squads
+-- screen's move order): its station moved away on the bridge's inner side far enough that the crowd stays out of the
+-- ring, else the next station of the posture's chain, the core station, b2 or the core level (z4). A squad military
+-- leads keeps it for the posture (rt.over); a squad on a kill order or held for a sortie is left alone. Soldiers only
+-- passing through (farther from their station) are not moved: the raise waits for them as before. Returns the number
+-- of squads ordered.
+function M.restation(K, holds)
+  if type(holds) ~= 'table' then return 0 end
+  local man = K.manifest()
+  local stations = type(man.stations) == 'table' and man.stations or {}
+  local clear, margin = clearance(K)
+  local crowd = spread(K) + 1                 -- a soldier this close to his squad's station stands at it
+  local n = 0
+  for _, h in ipairs(holds) do
+    local fp = type(h) == 'table' and h.want == 'up' and type(h.bridge) == 'string' and SL.fp(h.fp)
+    if fp then
+      local by, order = {}, {}
+      for _, e in ipairs(type(h.units) == 'table' and h.units or {}) do
+        local x, y, z = int(e.x), int(e.y), int(e.z)
+        local so = e.k == 'soldier' and x and y and z and station_order(e.id)
+        if so and so.p.z == z then
+          local o = math.max(math.abs(x - so.p.x), math.abs(y - so.p.y))
+          local ds = SL.dist(fp, so.p.x, so.p.y, so.p.z)
+          if o <= crowd or (ds and ds <= clear) then
+            local q = by[so.sid]
+            if not q then
+              q = {sid = so.sid, p = so.p, o = 0, ids = {}, d = int(e.d) or 0}
+              by[so.sid], order[#order + 1] = q, so.sid
+            end
+            if o > q.o then q.o = o end
+            q.ids[#q.ids + 1] = e.id
+          end
+        end
+      end
+      table.sort(order)
+      for _, sid in ipairs(order) do
+        if restation_one(K, man, stations, h.bridge, fp, by[sid], clear, margin) then n = n + 1 end
+      end
+    end
+  end
+  if n > 0 then save(K) end
+  return n
+end
+
 -- public (siege): squad members (alive) of squad `key` (nil = every squad) inside any of `boxes` ({x0,y0,z0,x1,y1,z1}):
 -- n inside, n members, ids inside, ids outside the boxes (<= 20 each). posture_only: only the squads that follow their
 -- posture's station (not those on a sortie, a held order or a kill order)
@@ -1440,9 +1798,40 @@ function M.init(K)
     end
   end
   rt = {retry = {}, order = {}, station = {}, kpi = nil, kpi_tick = 0, create_fails = 0, mats = {}, wk = {},
-        no_wpn = {}, held = {}}
+        no_wpn = {}, held = {}, over = {}}
   dirty = false
   M.every = {ticks = K.mode() == 'PEACE' and M.SLOW or M.FAST}
+end
+
+-- Run 11 siege 3: the wants in a siege: the first melee squad (by the plan, the tools-first rule ignored) at least
+-- HOLD_MIN, the others their targets
+SIEGE_FILL = {SIEGE = true, BREACH = true}
+function hold_floor(K, per)
+  local r = {}
+  for k, v in pairs(per) do r[k] = v end
+  for _, sp in ipairs(active(K)) do
+    if sp.kind == 'melee' then
+      if (r[sp.key] or 0) < M.HOLD_MIN then r[sp.key] = M.HOLD_MIN end
+      break
+    end
+  end
+  return r
+end
+
+-- a squad below half its want in a siege and nobody in the core to refill it: kern.log says why, at most every
+-- NOTE_EVERY ticks per squad
+function siege_short(K, k, s, want, recruits, why)
+  local n = #members(s)
+  if n >= (want + 1) // 2 or #recruits() > 0 then return end
+  local now = now_tick(K)
+  rt.sf_note = rt.sf_note or {}
+  if rt.sf_note[k] and now >= rt.sf_note[k] and now - rt.sf_note[k] < M.NOTE_EVERY then return end
+  rt.sf_note[k] = now
+  why = why or {}
+  K.log('warn', 'military: %s: squad %s %d of %d and no healthy civilian in the core to refill it (in the refuge %d, '
+        .. 'outside the core %d, hurt %d, in squads %d, sole key labor %d, nobles %d, moods %d%s)', K.mode(), k, n, want,
+        why.refuge or 0, why.outside or 0, why.hurt or 0, why.squad or 0, why.sole or 0, why.noble or 0, why.mood or 0,
+        why.no_core and ', no Kern+ burrow' or '')
 end
 
 function M.step(K, budget, ctx)
@@ -1459,10 +1848,15 @@ function M.step(K, budget, ctx)
   local _, per, zero, short = M.targets(K)
   if zero and mode == 'PEACE' then release(K, zero)
   elseif short and mode == 'PEACE' then release(K, 'tools', 'melee') end
+  local siege = SIEGE_FILL[mode] == true
+  if siege then per = hold_floor(K, per) end                          -- Run 11 siege 3
   rt.wguard = weapon_guard(K, per)
   rt.wexcess = tool_excess(rt.wguard)
-  local list
-  local function recruits() list = list or M.recruits(K); return list end   -- only when needed
+  local list, why
+  local function recruits()                                           -- only when needed
+    if not list then list, why = M.recruits(K, siege) end
+    return list
+  end
   for _, sp in ipairs(M.SQUADS) do
     local want = per[sp.key] or 0
     local e = st.sq[sp.key]
@@ -1472,7 +1866,8 @@ function M.step(K, budget, ctx)
         if want > 0 and not leader_set(s) then seat_leader(K, sp.key, s, recruits) end   -- addToSquad needs one
         ensure_uniform(K, sp.key, s, want)
         ensure_weapons(K, sp.key, s)
-        fill(K, sp.key, s, want, recruits)
+        fill(K, sp.key, s, want, recruits, siege)
+        if siege then siege_short(K, sp.key, s, want, recruits, why) end
       end
     end
   end

@@ -4,7 +4,7 @@
 -- The real sense, threat, siege, gate, military and reflex on the siege world (k_mock, strict) with the WP6 squad
 -- fakes (tests/lua/wp6_world.lua) and zones: O1 y=10, Z1 bailey y11-15, Z2 trap hall x51 y16-24 and the passage
 -- y32-39, K1 y25-31 (the gallery above it at z+1, reached from the gatehouse as in fortcore), B1 y=40, Z3 gatehouse
--- (Kern+, the melee station 51,44), B2 y=60, Z4 core (the b2 station 51,62). Soldiers walk to their squad's station
+-- (Kern+, the melee station 51,44), B2 y=60, Z4 core (the b2 station 51,63). Soldiers walk to their squad's station
 -- order (teleport) only where no bridge between is up; goblins step into the field one per frame while O1 is down.
 local T = require('testlib')
 local S = require('siege_world')
@@ -41,7 +41,11 @@ local function world(o)
   if o.traps then function snap.traps(K, boxes) return o.traps[1], o.traps[2] end end
   package.loaded['dfllm.reflex'] = nil
   X.load(W, {'military'}, {X.runner('P5'), snap, require('dfllm.reflex')})
-  W.run(9, {skip = 9})                                 -- military: squads A, B (melee) and C (crossbows), 8 soldiers
+  -- military staffs A, B (melee) and C (crossbows), 8 soldiers, in PEACE (the army out of sight for that frame): a
+  -- squad created in a siege is refilled to military.HOLD_MIN at once (Run 11 siege 3)
+  for _, u in ipairs(units) do if u.invader then W.unit(u.id)._m.hidden = true end end
+  W.run(9, {skip = 9})
+  for _, u in ipairs(units) do if u.invader then W.unit(u.id)._m.hidden = nil end end
   if o.equip ~= false then X.equip_all(W) end
   W.goblins = {}
   for _, u in ipairs(units) do if u.invader then W.goblins[#W.goblins + 1] = u.id end end
@@ -281,7 +285,7 @@ T.test('BUG-029: between waves every squad, the crossbows too, stands inside B1 
   -- the core seal rises (BREACH -> SIEGE leaves it up): the inner station moves behind it at once
   W.bridges.B2.gate_flags.closed = true
   run(W, 100)
-  T.eq({orders_of(W, 'A'), orders_of(W, 'C')}, {'station@51,62,10', 'station@51,62,10'}, 'behind B2 with the drink')
+  T.eq({orders_of(W, 'A'), orders_of(W, 'C')}, {'station@51,63,10', 'station@51,63,10'}, 'behind B2 with the drink')
   W.bridges.B2.gate_flags.closed = false
   run(W, 100)
   T.eq(orders_of(W, 'C'), 'station@51,44,10')
@@ -417,7 +421,7 @@ local function trolls(W, n)
     u.race, u.caste = TROLL, i % 2
   end
 end
-local ALL_CORE = {'station@51,62,10', 'station@51,62,10', 'station@51,62,10'}
+local ALL_CORE = {'station@51,63,10', 'station@51,63,10', 'station@51,63,10'}
 
 T.test('BUG-030: building destroyers in sight (3 trolls): the deep defense: SIEGE_DEEP (A) names them, the civ ' ..
        'alert confines to the refuge, every squad at the core station (stations.b2), no intake wave; latched for the ' ..
@@ -431,7 +435,7 @@ T.test('BUG-030: building destroyers in sight (3 trolls): the deep defense: SIEG
   local e = evs(W, 'SIEGE_DEEP')[1]
   T.eq({e.cls, e.d.why, e.d.bd, e.d.races, e.d.units}, {'A', {'destroyers'}, 3, {'TROLL x3'}, {501, 502, 503}})
   T.ok(e.msg:find('3 building destroyers in sight (TROLL x3, ', 1, true) and e.msg:find('no barrier', 1, true), e.msg)
-  T.ok(e.msg:find('civilians to Tiefe+', 1, true) and e.msg:find('core station 51,62,10', 1, true), e.msg)
+  T.ok(e.msg:find('civilians to Tiefe+', 1, true) and e.msg:find('core station 51,63,10', 1, true), e.msg)
   T.eq(W.K.census.h.bd, 3, 'sense counts them from the raws (level and flag)')
   run(W, 300)
   T.eq(W.alert_burrows[1], 'Tiefe+', 'the alert confines to the separated refuge')
@@ -442,7 +446,7 @@ T.test('BUG-030: building destroyers in sight (3 trolls): the deep defense: SIEG
   T.eq(#evs(W, 'SIEGE_DEEP'), 1, 'once (no news)')
   for i = 1, 3 do W.unit(500 + i)._m.hidden = true end      -- out of sight: still the plan for this siege
   run(W, 3000)
-  T.eq({orders_of(W, 'A'), W.alert_burrows[1]}, {'station@51,62,10', 'Tiefe+'}, 'latched')
+  T.eq({orders_of(W, 'A'), W.alert_burrows[1]}, {'station@51,63,10', 'Tiefe+'}, 'latched')
   T.eq(W.both_down, 0)
 end)
 
@@ -467,7 +471,7 @@ T.test('BUG-030: an army over 3x the soldiers (30 > 3 x 8): the deep defense (ar
   run(W, 2000)
   T.eq(W.state().wave.deep, 'army', 'held for 2,400 ticks')
   T.ok(until_(W, 900, function() return W.state().wave.deep == nil end), 'released')
-  T.ok(orders_of(W, 'A') ~= 'station@51,62,10', 'the core station released: ' .. orders_of(W, 'A'))
+  T.ok(orders_of(W, 'A') ~= 'station@51,63,10', 'the core station released: ' .. orders_of(W, 'A'))
   T.ok(until_(W, 1500, function() return #evs(W, 'INTAKE', 'muster') > 0 end), 'a wave again: ' .. phases(W))
 end)
 

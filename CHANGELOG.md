@@ -248,6 +248,82 @@
   `auto`). ORDER_STUCK for PrepareMeal names `no cook ingredient (...)` instead of `no cook`; `dfllm brief` OPEN
   food_low shows `food N d (54 cit, M meals): ...; ... Also: trade.want food, butcher, gather, popcap.lower`. Check the
   fishers stand on the bank and fish (job Fish), and that raw fish turn into prepared fish at the fishery.
+## Melee squads refilled in a siege from healthy civilians in the core, never from the refuge (Run 11 siege 3, 2026-10-16; offline, live-untested)
+- **Why (Run 11, Kilrudrabed, siege 3 of y432/433):** 25 dead (pop 54 -> 29, soldiers 10 -> 5), O1 destroyed; squads A and B
+  emptied (deaths) and were never refilled, only C (5) remained. military's upkeep refilled only to the population target
+  (it shrinks with the deaths, and the tools-first rule takes melee out entirely below 3 axes or picks) and from anybody,
+  the refuge included.
+- **military:** in SIEGE/BREACH a melee squad below half its target is refilled (act.squad_add, the squads screen) with
+  healthy adults (no wound, awake, thirst < 25,000, hunger < 50,000) who stand in Kern+ and not in the refuge; tool-detail
+  members and tool-labor holders come last (sole key-labor holders, nobles, moods never); the first melee squad's target is
+  at least `HOLD_MIN` (5: the core stations) then, ignoring the shrunk target and the tools-first rule; no top-up at or
+  above half; the leader of an emptied squad comes from the same list. kern.log `military: SIEGE refill: squad A 0 -> 5
+  of 5 with healthy civilians from the core: <ids>`, or at most every 2,400 ticks `military: SIEGE: squad A 1 of 5 and no
+  healthy civilian in the core to refill it (in the refuge N, outside the core N, hurt N, ...)`. PEACE unchanged (its
+  release rules take the extra soldiers back).
+- Docs: DESIGN §5.3, DOCTRINE, RULES §10, bugs/BUG-032 part 3. No event, verb or state field changed.
+- Tests: `tests/lua/test_military_refill.lua` (new; fail on 94446e8 except the PEACE case). The intake and station test
+  worlds staff their squads in PEACE first.
+- **Live check:** in the next siege with losses: kern.log `military: SIEGE refill: squad A ...`, the squads screen shows A
+  back at 5; no citizen leaves Tiefe+ to join; `dfllm status` soldiers back up.
+
+## Squad stations never on or next to a bridge, a squad that holds a raise moves at once, the deep defense's lever pulls reach the refuge (BUG-032, 2026-10-16; offline, live-untested)
+- **Why (Run 11, Kilrudrabed site98, y432 spring: a cave dragon siege and a snatcher, then BREACH, 0 deaths so far):**
+  `GATE_FAIL B2: 'not up after 908 ticks'` (blocked): squad 104 stationed at 115,116,142, soldier 27836 held the raise
+  (BUG-027's occupancy rule, correct). The station is the manifest's `stations.b2` (fortcore stage 3, local (1, 44, ze),
+  one tile behind B2's footprint), taken by BREACH's posture B2_HOLD; gate's text says "stationed on the bridge" for a
+  station on or next to the footprint. y432 winter d64: `GATE_FAIL O1 'no_worker'` in the deep defense, lever 18664 pulled
+  again and again while every civilian stood confined in Tiefe+; by hand the pull was taken at once.
+- **Stations clear of the bridges (military, new library `lua/dfllm/stations.lua`):** every posture names a chain of
+  stations (B2_HOLD: b2, then core, the core level's centre `z4`, melee; READY_IN/STATION_B1 the same while B2 is up, else
+  melee, b2, ...; CORE: core, b2, z4, melee; READY_STATION: [gallery,] melee, then b2, core, z4; INTAKE: [gallery,] field;
+  the extra entries only after an earlier one failed). The first one that lies more than gate's MARGIN (1) +
+  `stations.spread` (config/reflex.json, new, default 1: DF stands a squad on the tiles around its station point) tiles
+  from every manifest bridge footprint on its level is taken; else it moves to the nearest revealed plain floor
+  (snapshot.tile `.`, no building, off the stairs, within 8 tiles; a hidden tile never counts) on the inner side of the
+  footprints that hold it (the deepest manifest zone around the footprint: O1 -> Z1, B1 -> Z3, B2 -> Z4; else the
+  station's side, else away from `edge`); else the next of the chain. siege's deep-defense core station
+  (`military.station_for`) and the sortie's gathering point (`military.safe_pos`) use the same rule. STATION_MOVED (B,
+  new) and kern.log name the old and the new station, once per station and outcome.
+- **A squad that holds a raise moves (siege -> military.restation):** each siege pass reads `gate.holds()` (new: the bridges
+  whose pull waits for units, and who); a soldier holding a raise who stands at his squad's station (within spread + 1
+  tiles of its station order) gets his squad a station clear of that footprint at once (the squads screen's move order):
+  moved on the bridge's inner side far enough that the crowd stays out of the ring, else the posture's chain, core, b2,
+  z4. Kept for the posture; a player's own squad gets the move order directly; kill orders and sortie holds are left
+  alone; a soldier only passing over the footprint is not moved (the raise waits, BUG-027). The forced raise
+  (`gate.force_near`) is unchanged. STATION_MOVED `hold` (or `none`).
+- **fortcore:** `stations.melee` (0, 38, ze), the gatehouse centre (was (0, 36), two tiles from B1); `stations.b2`
+  (-2, 45, zc), the core hub west of the civilians' stair (was (1, 44, ze) on the Z4 landing: B2's margin row, its lever
+  room and the civilians' stair head); `core` unchanged. New placements only; a live manifest keeps its values and the
+  kernel moves them. **Validator:** `station_bridge` (error) for a station on a bridge footprint or within 2 tiles of one.
+- **gate:** the GATE/GATE_FAIL text says `stationed on the bridge` (on it), `stationed next to the bridge`, `stationed K
+  tiles from the bridge` (the soldier stands at his station) or `on its way to its station`. Lever pulls with the
+  civilians in the refuge: the lever order's first class is the burrows of the sounding alert (BREACH: the refuge, as
+  before; was Kern+ in every other mode, so the deep defense pulled Kern+ levers nobody confined could take while O1's
+  refuge lever kept `Hebel+` off the list); a pull waiting without a worker on a lever outside the alert's burrows moves
+  at once to a usable one inside; `Hebel+` is listed also once every lever inside failed this epoch; wherever the alert
+  confines to the refuge (BREACH, the deep defense, a lockdown that took Tiefe+) `Hebel+` follows breach_safe.
+- Contracts: event STATION_MOVED (schema, contract.lua, CONTRACTS §12 and the appendix); `gate.margin`, `gate.holds`,
+  `military.restation`, `station_for`, `safe_pos`, the posture chains, the lever order (§7); config `stations.spread`
+  (§9.18, `python -m dfpilot.lint --config`); manifest stations rule (§11). RULES §7 GATE_FORCED row, §10 Military;
+  DESIGN §5.3; DOCTRINE; bugs/BUG-032.
+- Tests: `tests/lua/test_stations.lua` (new: the library rules; Run 11 replay: BREACH with b2 one tile behind B2 -> every
+  squad at the relocated tile, B2 up, no GATE_FAIL; a hidden tile skipped; no floor -> core; a player's station next to
+  B2 and a player's own squad re-stationed at once; a passer-by not moved), `tests/lua/test_gate_footprint.lua` (deep
+  defense: Hebel+ while the pulls are pending, a confined civilian pulls; the refuge lever first; no Hebel+ with a
+  hostile near the levers), `tests/bp/test_bp_stations.py` (new: fortcore stations in every rotation and stage, the
+  validator), `tests/test_alarm.py` (stations.spread). The shared test world's b2 moved from 51,62 to 51,63.
+- **How to use:** nothing for the normal loop. STATION_MOVED in the brief says where a squad now stands and why; a
+  GATE_FAIL `blocked` that names a soldier "on its way" is a passer-by (wait); one at his station should not repeat.
+- **Live check (Run 11):** after `git pull` and `dfhack-run dfllm reload`: `dfllm cmd inspect '{"what":"manifest"}'`
+  shows `stations.b2` 115,116,142 (the manifest path, bug question 4). At the next SIEGE/BREACH (ALERT for melee):
+  `dfllm events --type STATION_MOVED` and kern.log `military: station b2 115,116,142 lies 1 tile from bridge B2
+  (clearance 2: gate margin 1 + spread 1): moved to ...`; the squads screen shows the new station; with every squad on
+  the landing a `STATION_MOVED hold` (`squad 104 (A) holds the raise of B2: ... re-stationed at ...`) and B2 up within the
+  lever latency; no `GATE_FAIL B2 ... blocked` naming a soldier at his station. In the next deep defense or BREACH:
+  `dfllm events --type LEVER` shows the first O1 pull on a lever inside the alert's burrows (the refuge lever); no
+  `GATE_FAIL O1 no_worker` while the civilians stand in Tiefe+. If soldiers spread wider than one tile around their
+  station in 53.16 (repeated STATION_MOVED hold), raise `stations.spread` (0-5) in config/reflex.json.
 
 ## `seal at=last` takes the current leaks once each, plants and doors handled; `seal at=refuge` hatches the refuge stair; the refuge comes first from the fort's start (2026-10-16; offline, live-untested)
 - **Why (Run 11, Kilrudrabed y429, pop 54):** `bp.place tpl=seal at=all|last` gave the same door 125,103,144 on every

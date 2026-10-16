@@ -546,6 +546,12 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
                                            "killed:i traps:i armed:i ticks:i")),
     "SORTIE": ("B", "siege", _d("phase:s", "squad:s why:s units:ia n:i cv:i foes:i est:i worn:i lost:i pos:p "
                                            "ticks:i")),
+    # BUG-032 (Run 11: a squad stationed next to B2 held its BREACH raise): military moved a squad station off a bridge
+    # footprint and its ring (gate margin + stations.spread): why bridge (to the nearest revealed floor on the inner
+    # side), chain (the next station of the posture's chain), none (nothing clear: kept), hold (soldiers at their
+    # station held a raise: the squad re-stationed at once); station/first = chain entries, from/to positions, bridge
+    # and d = the footprint that held it and its distance, squad/key/units for hold
+    "STATION_MOVED": ("B", "military", _d("why:s", "station:s first:s from:p to:p bridge:s d:i squad:i key:s units:ia")),
     # Run 11: economy's glass chain for strange moods is blocked: why = no_sand (no revealed sand floor), no_bags (no
     # spare cloth/leather or shop for ConstructBag), no_fuel (no charcoal and no wood furnace or wood, no magma glass
     # furnace); raw/cut = the raw and cut glass wanted; once per set of blockers (util/cadence)

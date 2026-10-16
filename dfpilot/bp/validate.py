@@ -3,7 +3,8 @@
 `check_doc(doc)`: schema, cell syntax and keys per mode, text length, chunk weight.
 `check_world(docs)`: simulates the documents (render.as_built) and applies the doctrine rules on the
 as-built snapshot: single stair, shortcut bridge, refuge on the attack path, doors as barriers, diagonal
-leaks, unclosed rooms, plus trap hall / killing field / gallery / lever / burrow / refuge-well rules.
+leaks, unclosed rooms, plus trap hall / killing field / gallery / lever / burrow / refuge-well rules and
+squad stations clear of the bridge footprints (BUG-032).
 `validate(docs)` = both. Findings are (code, msg, level); level 'error' rejects.
 """
 from __future__ import annotations
@@ -28,6 +29,12 @@ PLACE_CHARS = set("afunyrswebhlzSgpdc")
 BURROW_KEYS = {"a", "e"}
 EXTENT_MODES = {"place", "zone", "burrow"}     # every cell must carry an explicit extent
 OPEN_ROOMS = ("bedrooms", "gallery_o1")        # manifest rooms without the closure check (see _rooms)
+# BUG-032 (Run 11: the squads at fortcore's stations.b2, one tile behind B2, held its BREACH raise): a squad station
+# lies more than STATION_CLEAR tiles (Chebyshev, same z) from every bridge footprint: gate's MARGIN (lua/dfllm/gate.lua,
+# every pull waits for the units on or next to the footprint) + the spread of a squad around its station point
+# (military M.SPREAD, config/reflex.json stations.spread)
+GATE_MARGIN, STATION_SPREAD = 1, 1
+STATION_CLEAR = GATE_MARGIN + STATION_SPREAD
 
 
 @dataclass(frozen=True)
@@ -185,6 +192,29 @@ def _trap_hall(world: World, man: dict) -> list[Finding]:
     return out
 
 
+def fp_dist(fp, p) -> int | None:
+    """Chebyshev distance (x, y) of position p to a bridge footprint on its z; None on another level."""
+    if not (fp[2] <= p[2] <= fp[5]):
+        return None
+    dx = fp[0] - p[0] if p[0] < fp[0] else (p[0] - fp[3] if p[0] > fp[3] else 0)
+    dy = fp[1] - p[1] if p[1] < fp[1] else (p[1] - fp[4] if p[1] > fp[4] else 0)
+    return max(dx, dy)
+
+
+def _stations(man: dict) -> list[Finding]:
+    """BUG-032: no squad station on a bridge footprint or within STATION_CLEAR tiles of one."""
+    out = []
+    for name, p in sorted(man.get("stations", {}).items()):
+        for b, spec in sorted(man.get("bridges", {}).items()):
+            d = fp_dist(spec["fp"], p)
+            if d is not None and d <= STATION_CLEAR:
+                where = "on" if d == 0 else f"{d} tile{'s' if d > 1 else ''} from"
+                out.append(Finding("station_bridge", f"station {name} {p[0]},{p[1]},{p[2]} lies {where} bridge {b}'s "
+                                                     f"footprint (needs > {STATION_CLEAR}: gate margin {GATE_MARGIN} + "
+                                                     f"squad spread {STATION_SPREAD})"))
+    return out
+
+
 def check_world(docs, final: bool | None = None) -> list[Finding]:
     """Doctrine checks on the as-built result of `docs` (applied in order). `final` (default: the last
     document is fortcore stage 3 or 4) also requires O1, B2, refuge, Tiefe+ and the refuge well."""
@@ -194,6 +224,7 @@ def check_world(docs, final: bool | None = None) -> list[Finding]:
     out += [Finding("farm_soil", w, "warning") for w in world.warnings]
     man, snap = world.manifest, world.snapshot()
     out += _rooms(world, man)
+    out += _stations(man)
     if not any(d["tpl"] == "fortcore" for d in docs):
         return out
     last = docs[-1]

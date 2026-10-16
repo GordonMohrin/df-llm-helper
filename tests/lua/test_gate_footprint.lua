@@ -256,8 +256,8 @@ end)
 -- A DF-like lever sim: a civilian takes a pull only on a lever inside one of the alert's burrows (or with no alert),
 -- and only once somebody is free (W.free_at); a fake seal paints Hebel+ (the bbox of the lever tiles).
 local function in_box(p, b) return p.x >= b[1] and p.x <= b[4] and p.y >= b[2] and p.y <= b[5] and p.z >= b[3] and p.z <= b[6] end
-local function breach_world(units, free_after)
-  local W = S.world{units = units}
+local function breach_world(units, free_after, manifest)
+  local W = S.world{units = units, manifest = manifest}
   W.mil = S.military()
   local seal = {name = 'seal', every = {ticks = 600}}
   function seal.lever_burrow(K, tiles)
@@ -311,6 +311,72 @@ T.test('BUG-027 lever burrow check: BREACH with a hostile inside Kern+: no Hebel
   T.ok(gf, 'O1 GATE_FAIL')
   T.eq(gf.d.why, 'outside_alert')
   T.ok(gf.msg:find('no worker: its levers lie outside the alert burrow Tiefe+', 1, true), gf.msg)
+end)
+
+---------------------------------------------------------------- the deep defense: civilians in the refuge (Run 11 y432)
+-- live y432 winter d64: GATE_FAIL O1 'no_worker', the kernel pulled lever 18664 again and again, `lever pull --id 18664
+-- --priority` by hand was taken at once; the civilians stood confined in Tiefe+ (deep defense SIEGE_DEEP, BUG-030).
+-- An army of 30 > 3 x 8 soldiers (the fake military) sends the siege deep: the alert confines to Tiefe+.
+local function deep_cast(extra)
+  local r = cast(extra)
+  for _, u in ipairs(S.army(26, 150, 160, 400)) do r[#r + 1] = u end   -- 30 in sight
+  return r
+end
+local function lever_id(W, p)
+  for _, lv in ipairs(W.levers) do if lv.x1 == p[1] and lv.y1 == p[2] and lv.z == p[3] then return lv.id end end
+end
+local function gfails(W, why)
+  local r = {}
+  for _, e in ipairs(W.find_events('GATE_FAIL')) do if why == nil or e.d.why == why then r[#r + 1] = e end end
+  return r
+end
+
+T.test('Run 11 deep defense: O1 and B1 raised with every civilian confined to Tiefe+ and their levers in Kern+ -> the ' ..
+       'alert lists Hebel+ while the pulls are pending (no hostile in Kern+ or near the levers), a confined civilian ' ..
+       'pulls; no GATE_FAIL', function()
+  local W = breach_world(deep_cast(), 0)
+  W.event('INVASION', {id = 31})
+  S.run(W, 60)
+  T.eq(W.K.mode(), 'SIEGE')
+  T.ok(#W.find_events('SIEGE_DEEP') == 1, 'the deep defense')
+  T.eq(W.alert_burrows, {'Tiefe+', 'Hebel+'}, 'the refuge and the lever tiles while the pulls are pending')
+  S.run(W, 400)
+  T.eq({S.bstate(W, 'O1'), S.bstate(W, 'B1')}, {'up', 'up'})
+  T.eq(W.alert_burrows, {'Tiefe+'}, 'the pulls are done: Hebel+ left the list')
+  T.eq(#gfails(W), 0)
+end)
+
+T.test('Run 11 deep defense: O1 and B1 each with a lever inside Tiefe+ (fortcore stage 3) -> the pull goes to it at ' ..
+       'once, not to a Kern+ lever nobody confined may take (the old order waited 200 ticks per Kern+ lever)', function()
+  local m = S.manifest()
+  local ref = {O1 = {70, 70, Z - 6}, B1 = {71, 70, Z - 6}}
+  for b, p in pairs(ref) do table.insert(m.bridges[b].levers, p) end
+  local W = breach_world(deep_cast(), 0, m)
+  W.event('INVASION', {id = 32})
+  S.run(W, 60)
+  T.eq(W.alert_burrows, {'Tiefe+'}, 'a usable lever inside the refuge: no Hebel+')
+  S.run(W, 240)
+  for b, p in pairs(ref) do
+    T.eq(S.bstate(W, b), 'up', b .. ' up within 300 ticks')
+    local pl = S.pulls(W, b)
+    T.eq(pl[#pl].lever, lever_id(W, p), b .. ': the refuge lever did it')
+  end
+  T.eq(#gfails(W), 0)
+  local n = 0
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find('lies outside the alert burrows, a lever inside them', 1, true) then n = n + 1 end end
+  T.ok(n <= 2, 'at most one switch per bridge (the pull queued before the alert sounded): ' .. n)
+  for _, l in ipairs(W.logs) do T.ok(not tostring(l.msg):find('no worker', 1, true), l.msg) end
+end)
+
+T.test('Run 11 deep defense with a hostile 15 tiles from the Kern+ levers: no Hebel+ (the BREACH rule: no civilian is ' ..
+       'drawn out of the refuge toward it); GATE_FAIL outside_alert names Tiefe+', function()
+  local W = breach_world(deep_cast({S.inv(450, 51, 30)}), 0)
+  W.event('INVASION', {id = 33})
+  S.run(W, 1000)
+  T.ok(#W.find_events('SIEGE_DEEP') >= 1)
+  T.eq(W.alert_burrows, {'Tiefe+'})
+  local gf = gfails(W, 'outside_alert')
+  T.ok(#gf >= 1 and gf[1].msg:find('outside the alert burrow Tiefe+', 1, true), gf[1] and gf[1].msg or 'no GATE_FAIL')
 end)
 
 T.test('BUG-027: a popup pause (no ticks, the real clock runs) never turns a pending pull into no_worker or a GATE_FAIL',
