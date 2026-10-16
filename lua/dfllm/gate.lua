@@ -1,9 +1,19 @@
 -- gate (WP5): drawbridges with the single-pending-pull invariant (DESIGN §4, CONTRACTS §7).
 -- A pull is queued only if (1) the wanted state differs from gate_flags.raised (lever.lua:39-41),
 -- (2) the bridge is not raising/lowering, (3) NO PullLever job is pending on any
--- lever of that bridge, and (4) no citizen stands on the footprint. Raising waits <= 300 ticks
--- (only in SIEGE/BREACH do we pull after that); lowering crushes whatever is on the footprint, so
--- it waits as long as it takes and our pending lowering pull is cancelled when a citizen steps on.
+-- lever of that bridge, and (4) no living unit that is not hostile stands on the footprint or next to it (MARGIN).
+-- BUG-027 (Run 10 Handlelock, y417/y418: a recruit and a miner died on B1's footprint 128,127..129,122 after siege
+-- raised it with goblins far away; no combat report, one "missing"): that holds for raising and lowering, in every
+-- mode, and for every unit that is not hostile: fort members by census id (citizens, residents, soldiers and
+-- recruits, insane ones), the fort's tame animals (census.a) and the friendly units sense lists near the footprints
+-- gate watches (census.h.friends, when sense lists them). The lever is pulled when the puller finishes
+-- the job, so a pending pull of ours is cancelled (the UI cancel) as soon as such a unit comes on or next to the
+-- footprint, and queued again once it is clear. A bridge is never raised onto a unit only because the wait was long
+-- (the old SIEGE/BREACH rule raised after 300 ticks and ignored the margin and the pending check: the Run 10 deaths);
+-- only a raise in SIEGE/BREACH with a visible hostile within force_near tiles of the footprint (config/reflex.json
+-- `gate.force_near`, default 3, 0 = never) goes ahead, and GATE_FORCED (A) names the units. Bridges named in
+-- `gate.manual` (manifest names or building ids) get no automatic pull at all (a stop-gap; the inbox `lever` still
+-- works). A held 'up' reaches GATE_FAIL (blocked) at its deadline with the units and their squad stations named.
 -- Our own job without a worker for 200 ticks is cancelled (act.cancel_own_lever_job, the UI
 -- cancel) and the next pull goes to the backup lever.
 -- Pulls go through act.pull -> reqscript('lever').leverPullJob (lever.lua:4, never deduplicates).
@@ -39,14 +49,21 @@ local M = {name = 'gate', every = {ticks = 600}, critical = true, verbs = {},
 
 M.FAST, M.SLOW = 25, 600   -- cadence: FAST in SIEGE/BREACH/DRILL or while a bridge has work
 M.NO_WORKER = 200          -- ticks our queued pull may wait without a worker
-M.BLOCK_WAIT = 300         -- ticks to wait for citizens to leave the footprint before a forced raise
 -- live L4: a drill raised B1 15 ticks after the footprint had cleared; the militia commander, carrying her
 -- baby, stepped back on while the bridge moved (108 ticks) and both died (death cause DRAWBRIDGE). A bridge
--- moves ~100 ticks after its pull, so a non-forced pull (any lowering; a raise outside SIEGE/BREACH) also
--- waits for this many tiles around the footprint to be clear, and a pending one is cancelled when a citizen
--- comes that close. One tile: the commander had just stepped off; fortcore's melee station stands 2 tiles from B1
--- and its soldiers would hold B1 down for a whole drill with a wider margin.
+-- moves ~100 ticks after its pull, so every pull (BUG-027: in SIEGE/BREACH too) waits for this many tiles around
+-- the footprint to be clear, and a pending one is cancelled when a unit comes that close. One tile: the commander
+-- had just stepped off; fortcore's melee station stands 2 tiles from B1 and its soldiers would hold B1 down for a
+-- whole drill with a wider margin.
 M.MARGIN = 1
+M.FORCE_NEAR = 3           -- BUG-027: SIEGE/BREACH raise onto a unit only with a visible hostile this close (cfg)
+-- BUG-027: while one of our pulls is pending gate re-checks it every frame (M.PENDING); the census pass (every FAST
+-- ticks) keeps the units within SCAN_R tiles of the footprint, and the frames in between re-read only their positions
+-- (a dwarf walks about a tile per 9-tick frame, so nobody reaches the margin unseen within FAST ticks)
+M.PENDING = 1
+M.SCAN_R = 5
+M.NAME_MAX = 3             -- units named in a GATE / GATE_FAIL / GATE_FORCED text
+M.HOLD_LOG = 300           -- ticks between kern.log lines of one bridge's changing holders
 M.SETTLE = 50              -- ticks after a pull job left the queue before another may be queued
 M.DEADLINE = 900           -- default: an 'up' not reached by then -> GATE_FAIL (A)
 M.DOWN_GUARD = 30          -- 'down' refused while a visible hostile is this close to the bridge
@@ -62,16 +79,18 @@ M.WIN_CARAVAN = 4800       -- ... a caravan arrival report (trade's state keeps 
 M.WIN_LEVER = 2400         -- ... an inbox `lever` down keeps that bridge open this long
 
 local FAST_MODES = {SIEGE = true, BREACH = true, DRILL = true}
-local FORCE_MODES = {SIEGE = true, BREACH = true}       -- may RAISE with a citizen on it after 300 ticks
+local FORCE_MODES = {SIEGE = true, BREACH = true}       -- may RAISE onto a unit, only with a hostile at the gate
 local LOCK_MODES = {SIEGE = true, BREACH = true}        -- raise the unmanaged bridges even without the reflex module
 local GATE_ROLES = {outer = true, inner = true}         -- the bridges a lockdown and the peace gates hold up
-local FAIL_WHY = {blocked = 'blocked', no_lever = 'no_lever', no_worker = 'no_worker', outside = 'outside_alert'}
+local FAIL_WHY = {blocked = 'blocked', no_lever = 'no_lever', no_worker = 'no_worker', outside = 'outside_alert',
+                  manual = 'manual'}
 
 local st      -- persisted m.gate: {v, br = {<b> = {want, why, since, deadline, failed}}, kpi = {...},
               --   ex = {X<id> = {bid, raised}} (unmanaged bridges in hand), lat = {s, t}, win = tick, winb = {<b> = tick}}
 local rt      -- runtime per bridge: building ids, own job, settle, block, rotation
 local rt_ex   -- runtime: cached unmanaged bridge list {tick, list = {{name, bid, spec}}}
 local pub     -- precomputed state part {bridges = {...}}
+local last_pass   -- tick of the last full pass (BUG-027: frames in between only re-check pending pulls)
 local dirty
 local PULL    -- df.job_type.PullLever
 
@@ -590,7 +609,7 @@ end
 
 -- the bridge still needs a pull: its wanted state is not reached and it has a linked lever; a bridge waiting for a
 -- citizen to leave its footprint (the alert calls him in), for the down guard or without a lever needs none now
-local NO_PULL = {no_lever = true, blocked = true, guard = true}
+local NO_PULL = {no_lever = true, blocked = true, guard = true, manual = true}
 local function needs_pull(name)
   local br, r = st.br[name], rt[name]
   if not (br and br.want and r) or r.last == br.want or NO_PULL[r.stuck] then return false end
@@ -695,19 +714,131 @@ end
 
 local function grown(fp, m) return {fp[1] - m, fp[2] - m, fp[3], fp[4] + m, fp[5] + m, fp[6]} end
 
--- citizens (sane or not, CONTRACTS §1.4: by census id) on the footprint now; -1 = unknown (no census)
-local function citizens_on(K, name, fp)
+-- Chebyshev distance of a tile to a footprint box on its own z levels; nil on another z
+local function fp_dist(fp, x, y, z)
+  if type(x) ~= 'number' or z < fp[3] or z > fp[6] then return nil end
+  local dx = x < fp[1] and fp[1] - x or (x > fp[4] and x - fp[4] or 0)
+  local dy = y < fp[2] and fp[2] - y or (y > fp[5] and y - fp[5] or 0)
+  return math.max(dx, dy)
+end
+
+-- BUG-027: the living units that are not hostile within `rad` tiles of a footprint (same z), by id only (CONTRACTS
+-- §1.4): fort members from the census (citizens, residents, soldiers and recruits, children, babies (in arms: at
+-- the mother's position, dfhack.units.getPosition), insane ones), the fort's tame
+-- animals (census.a) and the friendly units sense lists near the footprints gate watches (census.h.friends).
+-- {n, on, list = {{id, k, d, x, y, z}} sorted by distance (d = 0: on the footprint)}; nil while the census is unknown.
+local function around(K, fp, rad)
   local cu = K.census.u
-  if type(cu) ~= 'table' then return -1 end
-  if type(cu.ids) ~= 'table' then return (cu.on_bridge or {})[name] or -1 end
-  local n = 0
-  for _, list in ipairs({cu.ids, type(cu.insane_ids) == 'table' and cu.insane_ids or {}}) do
-    for _, id in ipairs(list) do
-      local u = df.unit.find(id)
-      if u and not dfhack.units.isDead(u) and geom.in_bbox(u.pos, fp) then n = n + 1 end
+  if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then return nil end
+  local res, seen = {n = 0, on = 0, list = {}}, {}
+  local isDead, getPos = dfhack.units.isDead, dfhack.units.getPosition
+  local function add(id, k)
+    if math.type(id) ~= 'integer' or seen[id] then return end
+    seen[id] = true
+    local u = df.unit.find(id)
+    if not u or isDead(u) then return end
+    local x, y, z = getPos(u)            -- a carried baby (or a caged unit) is where its carrier is, not at u.pos
+    local d = fp_dist(fp, x, y, z)
+    if not d or d > rad then return end
+    if k == 'citizen' and u.military and u.military.squad_id >= 0 then k = 'soldier' end
+    res.n = res.n + 1
+    if d == 0 then res.on = res.on + 1 end
+    res.list[#res.list + 1] = {id = id, k = k, d = d, x = x, y = y, z = z}
+  end
+  for _, id in ipairs(cu.ids) do add(id, 'citizen') end
+  for _, id in ipairs(type(cu.insane_ids) == 'table' and cu.insane_ids or {}) do add(id, 'insane') end
+  local h, a = K.census.h, K.census.a
+  for _, e in ipairs(type(h) == 'table' and type(h.friends) == 'table' and h.friends or {}) do
+    if type(e) == 'table' then add(e.id, type(e.k) == 'string' and e.k or 'visitor') end
+  end
+  for _, e in ipairs(type(a) == 'table' and type(a.list) == 'table' and a.list or {}) do
+    if type(e) == 'table' then add(e.id, 'animal') end
+  end
+  table.sort(res.list, function(p, q) if p.d ~= q.d then return p.d < q.d end return p.id < q.id end)
+  return res
+end
+
+-- the units of the last census pass (near = {t, list}) where they stand now (by id), as around() returns them
+local function refresh(near, fp)
+  local res = {n = 0, on = 0, list = {}}
+  local isDead, getPos = dfhack.units.isDead, dfhack.units.getPosition
+  for _, e in ipairs(near.list) do
+    local u = df.unit.find(e.id)
+    if u and not isDead(u) then
+      local x, y, z = getPos(u)
+      local d = fp_dist(fp, x, y, z)
+      if d and d <= M.SCAN_R then
+        res.n = res.n + 1
+        if d == 0 then res.on = res.on + 1 end
+        res.list[#res.list + 1] = {id = e.id, k = e.k, d = d, x = x, y = y, z = z}
+      end
     end
   end
-  return n
+  table.sort(res.list, function(p, q) if p.d ~= q.d then return p.d < q.d end return p.id < q.id end)
+  return res
+end
+
+-- the units of a scan within `m` tiles of the footprint (the ones that hold a pull)
+local function within(sc, m)
+  local r = {}
+  for _, e in ipairs(sc and sc.list or {}) do if e.d <= m then r[#r + 1] = e end end
+  return r
+end
+
+-- a soldier's squad and its station order (the squads screen): on the bridge, or on the way through it
+local function squad_note(id, fp)
+  local ok, s = pcall(function()
+    local u = df.unit.find(id)
+    local sid = u and u.military.squad_id
+    if math.type(sid) ~= 'integer' or sid < 0 then return nil end
+    local sq = df.squad and df.squad.find(sid)
+    if not sq then return 'squad ' .. sid end
+    for _, o in ipairs(sq.orders) do
+      local okp, x, y, z = pcall(function() return o.pos.x, o.pos.y, o.pos.z end)
+      if okp and type(x) == 'number' and x >= 0 then
+        local d = fp_dist(fp, x, y, z)
+        if d and d <= M.MARGIN then return string.format('squad %d stationed on the bridge at %d,%d,%d', sid, x, y, z) end
+        return string.format('squad %d on its way to its station %d,%d,%d', sid, x, y, z)
+      end
+    end
+    return 'squad ' .. sid
+  end)
+  return ok and s or nil
+end
+
+-- "soldier 26535 on the footprint (squad 3 stationed on the bridge at ...), citizen 26099 next to it, +2 more"
+local function who(list, fp)
+  local parts = {}
+  for i, e in ipairs(list) do
+    if i > M.NAME_MAX then parts[#parts + 1] = string.format('+%d more', #list - M.NAME_MAX); break end
+    local s = string.format('%s %d %s', e.k, e.id, e.d == 0 and 'on the footprint' or 'next to it')
+    local q = e.k == 'soldier' and fp and squad_note(e.id, fp)
+    parts[#parts + 1] = q and (s .. ' (' .. q .. ')') or s
+  end
+  return table.concat(parts, ', ')
+end
+
+local function ids_of(list)
+  local r = {}
+  for i, e in ipairs(list) do if i <= 20 then r[i] = e.id end end
+  return r
+end
+
+-- config/reflex.json `gate` (BUG-027): {force_near = 0..30 tiles (0 = never raise onto a unit), manual = [bridge
+-- name | building id]}; bad values fall back to the defaults (fail-open, `python -m dfpilot.lint --config` warns)
+local function gcfg(K)
+  local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.gate) == 'table' and K.cfg.reflex.gate or {}
+  local fn = math.tointeger(r.force_near)
+  if not fn or fn < 0 or fn > 30 then fn = M.FORCE_NEAR end
+  return fn, type(r.manual) == 'table' and r.manual or {}
+end
+
+local function manual(K, name, bid)
+  local _, list = gcfg(K)
+  for _, v in ipairs(list) do
+    if v == name or (bid ~= nil and math.tointeger(v) == bid) then return true end
+  end
+  return false
 end
 
 -- min Chebyshev distance of a listed visible hostile to a footprint (unmanaged bridges: sense only measures the
@@ -722,6 +853,30 @@ local function list_dist(h, f)
     if best < 0 or d < best then best = d end
   end
   return best
+end
+
+-- BUG-027: the distance of the nearest visible hostile to this bridge (sense's near_bridge for manifest bridges, else
+-- the hostile list), -1 none or a stale census
+local function hostile_dist(K, name, fp)
+  local h = K.census.h
+  if type(h) ~= 'table' or K.now().tick - (h.tick or -1e9) > 200 then return -1 end
+  local d = type(h.near_bridge) == 'table' and h.near_bridge[name]
+  if math.type(d) ~= 'integer' then d = list_dist(h, fp) end
+  return d
+end
+
+-- BUG-027: who holds a pull of `name` toward `dir` now: {units within MARGIN} (empty = clear), and the force: a raise
+-- in SIEGE/BREACH with a visible hostile within force_near tiles goes ahead anyway (returns the holders and the
+-- hostile's distance). An unknown census (hold.unknown) holds every unforced pull.
+local function holders(K, name, fp, sc, dir)
+  local hold = within(sc, M.MARGIN)
+  if dir == 'up' and FORCE_MODES[K.mode()] then
+    local fn = gcfg(K)
+    local d = fn > 0 and hostile_dist(K, name, fp) or -1
+    if d >= 0 and d <= fn then return hold, d end
+  end
+  if not sc then hold.unknown = true end
+  return hold, nil
 end
 
 local function down_guard(K, name)
@@ -762,6 +917,7 @@ local function set_want(name, w, why, deadline, now)
                  deadline = w == 'up' and (deadline or now + M.DEADLINE) or nil, failed = false}
   local r = runtime(name)
   r.bad, r.nw, r.block_since, r.lat0, r.nw_out = {}, 0, nil, nil, nil
+  r.block, r.block_ev, r.hold_log, r.forced_ev = nil, nil, nil, nil
   dirty = true
   return true
 end
@@ -794,6 +950,42 @@ local function observe(K, name, r, s, now)
   r.settled, r.settled_at = s, now
 end
 
+local function cut(s, n)
+  s = tostring(s or '')
+  return #s <= n and s or s:sub(1, n)
+end
+
+-- BUG-027: the bridge waits for the units that hold it: one GATE (C) per epoch naming them, then a kern.log line when
+-- the set changes (at most every HOLD_LOG ticks: a corridor bridge sees a stream of passers-by)
+local function note_hold(K, name, fp, w, hold, now)
+  local r = runtime(name)
+  r.block = hold
+  local txt = who(hold, fp)
+  local sig = table.concat(ids_of(hold), ',')
+  if not r.block_ev then
+    r.block_ev, r.hold_sig, r.hold_log = true, sig, now
+    K.emit('GATE', 'C', cut(name .. ' ' .. w .. ' waits: ' .. txt, 200),
+           {bridge = name, state = 'blocked', units = ids_of(hold)})
+    K.log(FORCE_MODES[K.mode()] and 'warn' or 'info', 'gate: %s %s waits for %s', name, w, txt)
+  elseif sig ~= r.hold_sig and now - (r.hold_log or -M.HOLD_LOG) >= M.HOLD_LOG then
+    r.hold_sig, r.hold_log = sig, now
+    K.log('info', 'gate: %s %s still waits for %s', name, w, txt)
+  end
+end
+
+-- BUG-027: a raise forced by a hostile at the gate goes ahead with units on or next to the footprint: GATE_FORCED (A)
+-- names them, once per pull
+local function forced_event(K, name, fp, hold, hd, job)
+  local r = runtime(name)
+  if #hold == 0 or r.forced_ev == job then return end
+  r.forced_ev = job
+  local txt = string.format('%s raised onto %s: a hostile %d tiles from it (force_near %d)', name, who(hold, fp), hd,
+                            (gcfg(K)))
+  K.emit('GATE_FORCED', 'A', cut(txt, 200), {bridge = name, units = ids_of(hold), hostile = hd,
+                                             pos = {hold[1].x, hold[1].y, hold[1].z}, job = job})
+  K.log('warn', 'gate: %s', txt)
+end
+
 -- one controller pass for one bridge; returns the observed state
 local function control(K, name, spec, now)
   local r = runtime(name)
@@ -802,7 +994,17 @@ local function control(K, name, spec, now)
   resolve(r, spec, now, w ~= nil and w ~= r.last)
   local s = read(r)
   observe(K, name, r, s, now)
-  r.stuck = nil
+  r.stuck, r.foot, r.spec = nil, spec.fp, spec
+  -- BUG-027: who is on or near the footprint, only while the bridge has work: a census pass every FAST ticks, the
+  -- positions of the units it found near in the frames between
+  local sc
+  if r.job or (w ~= nil and w ~= s) then
+    if r.near and now >= r.near.t and now - r.near.t < M.FAST then sc = refresh(r.near, spec.fp)
+    else
+      sc = around(K, spec.fp, M.SCAN_R)
+      r.near = sc and {t = now, list = sc.list} or nil
+    end
+  else r.near = nil end
   -- 1. our own queued pull
   if r.job then
     local lv = df.building.find(r.job.lever)
@@ -819,11 +1021,18 @@ local function control(K, name, spec, now)
       -- pull would now toggle it back)
       local stale = (w ~= nil and w ~= dir) or (dir == 'down' and down_guard(K, name) ~= nil)
                     or s ~= r.job.before
-      -- a citizen stepped onto the footprint before our lowering pull was done: cancel it
-      if not stale and dir == 'down' and citizens_on(K, name, spec.fp) ~= 0 then stale = 'blocked' end
-      -- live L4: a citizen near the footprint cancels a pending non-forced pull too (M.MARGIN)
-      if not stale and not (dir == 'up' and FORCE_MODES[K.mode()])
-         and citizens_on(K, name, grown(spec.fp, M.MARGIN)) > 0 then stale = 'blocked' end
+      -- BUG-027 (Run 10: the old rule kept a SIEGE raise pending while a miner and a recruit walked onto B1): the
+      -- lever moves the bridge when the puller finishes the job, so a unit on or next to the footprint cancels our
+      -- pending pull in every mode and both ways (live L4: the margin); only a forced raise goes on (GATE_FORCED)
+      if not stale then
+        local hold, hd = holders(K, name, spec.fp, sc, dir)
+        if hd then forced_event(K, name, spec.fp, hold, hd, r.job.id)
+        elseif #hold > 0 then
+          stale = 'blocked'
+          r.block_since = r.block_since or now
+          note_hold(K, name, spec.fp, dir, hold, now)
+        end
+      end
       local has_worker = w0 ~= nil
       if not stale then
         if has_worker then r.job.nw = nil
@@ -853,28 +1062,25 @@ local function control(K, name, spec, now)
     r.stuck = worker(fj) and 'pending' or 'no_worker'
     return s
   end
-  if w == nil or w == s then r.block_since, r.block_ev = nil, nil; return s end
+  if w == nil or w == s then r.block_since, r.block_ev, r.block = nil, nil, nil; return s end
   if s == 'unknown' then r.stuck = 'no_lever'; return s end
   if s == 'moving' or now < (r.settle or 0) then return s end
   if w == 'down' and down_guard(K, name) then r.stuck = 'guard'; return s end
-  -- (4) footprint: raising flings, lowering crushes. 'down' waits without limit (also when the
-  -- census is unknown); 'up' is forced after BLOCK_WAIT only in SIEGE/BREACH.
-  local on = citizens_on(K, name, spec.fp)
-  local forced = w == 'up' and FORCE_MODES[K.mode()]
-  local near = forced and 0 or citizens_on(K, name, grown(spec.fp, M.MARGIN))
-  if on > 0 or near > 0 or (w == 'down' and on < 0) then
+  -- BUG-027 stop-gap: a bridge in gate.manual gets no automatic pull (the inbox `lever` still pulls it)
+  if manual(K, name, r.bid) and not tostring(br.why or ''):find('^lever:') then r.stuck = 'manual'; return s end
+  -- (4) footprint (BUG-027): raising flings, lowering crushes. Both wait, as long as it takes, for every unit that is
+  -- not hostile on or next to the footprint (an unknown census too); a raise in SIEGE/BREACH goes ahead only with a
+  -- visible hostile within force_near tiles of it (never because the wait was long)
+  local hold, hd = holders(K, name, spec.fp, sc, w)
+  -- no census yet (the first frame after a boot): wait silently, the pull is still to do (reflex's alert waits for it)
+  if not hd and hold.unknown then r.stuck = 'census'; return s end
+  if not hd and #hold > 0 then
     r.block_since = r.block_since or now
-    if not r.block_ev then
-      r.block_ev = true
-      K.emit('GATE', 'C', name .. ' ' .. w .. ' waits: citizen on the footprint', {bridge = name, state = 'blocked'})
-    end
-    if not (forced and now - r.block_since >= M.BLOCK_WAIT) then
-      r.stuck = 'blocked'
-      return s
-    end
-    K.log('warn', 'gate: raising %s with a citizen on it after %d ticks', name, now - r.block_since)
+    note_hold(K, name, spec.fp, w, hold, now)
+    r.stuck = 'blocked'
+    return s
   end
-  r.block_since, r.block_ev = nil, nil
+  r.block_since, r.block = nil, nil
   local lid = pick(K, r, now)
   if not lid then r.stuck, r.resolved = 'no_lever', nil; return s end
   r.last_lever = lid
@@ -887,6 +1093,7 @@ local function control(K, name, spec, now)
   if not (r.lat0 and r.lat0.want == w) then r.lat0 = {tick = now, ms = K.now().ms, want = w} end
   st.kpi.pulls, dirty = st.kpi.pulls + 1, true
   K.emit('LEVER', 'C', 'pull ' .. name .. ' ' .. w, {bridge = name, lever = lid, job = job})
+  if hd then forced_event(K, name, spec.fp, hold, hd, job) end
   return s
 end
 
@@ -956,9 +1163,15 @@ local function check_fail(K, name, now, mode)
   if (mode or K.mode()) == 'DRILL' then return end    -- a drill reports through drill.kpi, not A events
   if r.fail_tick and now - r.fail_tick < M.FAIL_REPEAT then return end
   r.fail_tick = now
-  K.emit('GATE_FAIL', 'A', string.format('%s not up after %d ticks (%s)', name, now - br.since,
-         why == FAIL_WHY.outside and 'no worker: its levers lie outside the alert burrow' or why),
-         {bridge = name, want = 'up', why = why})
+  local txt = why == FAIL_WHY.outside and 'no worker: its levers lie outside the alert burrow' or why
+  local d = {bridge = name, want = 'up', why = why}
+  if why == FAIL_WHY.blocked and r.block then         -- BUG-027: name who holds it (and the soldiers' stations)
+    if #r.block > 0 then
+      txt = 'blocked: ' .. who(r.block, r.foot) .. ', never raised onto them'
+      d.units, d.pos = ids_of(r.block), {r.block[1].x, r.block[1].y, r.block[1].z}
+    end
+  elseif why == FAIL_WHY.manual then txt = 'manual: no automatic pull, config/reflex.json gate.manual' end
+  K.emit('GATE_FAIL', 'A', cut(string.format('%s not up after %d ticks (%s)', name, now - br.since, txt), 200), d)
 end
 
 local function update_every(K)
@@ -970,6 +1183,7 @@ local function update_every(K)
     end
   end
   local want = fast and M.FAST or M.SLOW
+  for _, r in pairs(rt) do if r.job then want = M.PENDING; break end end      -- BUG-027: every frame
   if M.every.ticks ~= want then M.every = {ticks = want} end
 end
 
@@ -1038,7 +1252,8 @@ local function discover(K, now, force)
       if is_lever(lv) then
         for bid in pairs(targets(lv) or {}) do
           local e = found[bid]
-          if not e and not managed[bid] then
+          -- BUG-027 stop-gap: a bridge in gate.manual is never taken in hand
+          if not e and not managed[bid] and not manual(K, string.format('X%d', bid % 10000000), bid) then
             local b = df.building.find(bid)
             if b and is_bridge(b) then
               e = {bid = bid, b = b, levers = {}}
@@ -1153,7 +1368,7 @@ function M.init(K)
       if type(name) == 'string' and int(t) then st.winb[name] = int(t) end
     end
   end
-  rt, rt_ex, pub, dirty, PULL = {}, nil, nil, false, nil
+  rt, rt_ex, pub, dirty, PULL, last_pass = {}, nil, nil, false, nil, nil
   pl, rooms_c, lb_name = {rooms = {}}, nil, nil
   M.every = {ticks = FAST_MODES[K.mode()] and M.FAST or M.SLOW}
 end
@@ -1199,7 +1414,24 @@ local function pass(K, force)
   return states
 end
 
-function M.step(K, budget, ctx) pass(K, false) end
+-- BUG-027: between the full passes (every FAST ticks while a bridge has work) a frame only re-checks the bridges with
+-- a pull of ours pending, so a unit stepping next to the footprint cancels it before the puller is done
+local function pending_pass(K, now)
+  for name, r in pairs(rt) do
+    if r.job and r.spec then control(K, name, r.spec, now) end
+  end
+  update_every(K)
+  flush(K)
+end
+
+function M.step(K, budget, ctx)
+  local now = K.now().tick
+  if M.every.ticks == M.PENDING and last_pass and now >= last_pass and now - last_pass < M.FAST then
+    return pending_pass(K, now)
+  end
+  last_pass = now
+  pass(K, false)
+end
 
 -- public (CONTRACTS §7): request a bridge state. 'up' is always honoured; 'down' is refused in
 -- SIEGE/BREACH/DRILL and while a visible hostile is within 30 tiles. deadline (abs tick, optional,
@@ -1238,6 +1470,7 @@ function M.pulls(K)
         res.left = res.left + 1
         if bs and not lever_in(r, bs) then res.out = res.out + 1 end
       elseif r and r.stuck == 'blocked' then res.foot = res.foot + 1
+      elseif r and r.stuck == 'manual' then res.manual = (res.manual or 0) + 1      -- BUG-027 gate.manual
       else res.nolever = res.nolever + 1 end
     end
   end

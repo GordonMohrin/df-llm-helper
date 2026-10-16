@@ -70,6 +70,8 @@ C.EVENTS = {
   AUTOLABOR_LEGACY = {cls = 'A', by = 'baseline'},
   -- FR-64: >= 2 citizens died of dehydration or starvation within a month (the A twin of DEATH_CLUSTER)
   DEATHS_PREVENTABLE = {cls = 'A', by = 'care'},
+  -- BUG-027: a SIEGE/BREACH raise went ahead onto units on or next to the footprint (a hostile at the gate)
+  GATE_FORCED = {cls = 'A', by = 'gate'},
   -- B: digest
   ALERT_START = {cls = 'B', by = 'siege'}, ALERT_END = {cls = 'B', by = 'siege'},
   LOCKDOWN_END = {cls = 'B', by = 'reflex'},
