@@ -2531,6 +2531,17 @@ local function publish(K)
   local core = mem.core                         -- BUG-028 (d): drink and food days inside Kern+ and the refuge
   if core and core.drink.days then mem.pub.core_d = core.drink.days end
   if core and core.food.days then mem.pub.core_f = core.food.days end
+  -- Run 10 (Tiefe+ open to the entrance, beds 8<27, no safe room at pop 110): the refuge burrow for `dfllm plan
+  -- check` (no P3+ without it): exists, separated (1, 0 an opening reaches it, -1 not known yet), beds, beds wanted
+  local need = mem.audit and mem.audit.need
+  if need then
+    local _, refuge = burrow_names(K)
+    local ra = au[refuge]
+    local ex = ra ~= nil and ra.exists == true
+    local s = ex and sep_of(refuge) or nil
+    mem.pub.ref = {ex = ex and 1 or 0, sep = s == nil and -1 or (s.exp and 0 or 1),
+                   beds = ex and math.max(0, int(ra.beds) or 0) or 0, need = math.max(0, int(need.beds) or 0)}
+  end
 end
 
 -- public (CONTRACTS §7, siege): the burrow the civ alert confines to in `mode`; nil = no confinement. `hold`: a reflex

@@ -13,6 +13,7 @@ from dfpilot.bp.validate import _rooms
 from bp_fixtures import fort_world, terrain
 
 ROOMS = sorted(rooms.BUILD)                  # room templates (fortcore and the attached defense add-ons excluded)
+CORE_ROOMS = sorted(set(rooms.BUILD) - rooms.REFUGE_LEVEL)   # refuge_beds sits in the refuge (test_bp_refuge_beds)
 
 
 @pytest.fixture(scope="module")
@@ -105,7 +106,7 @@ def test_ranking_cannot_see_hidden_content(fort):
     assert bp.rank(snap, "bedrooms", manifest=man) == bp.rank(other, "bedrooms", manifest=man)
 
 
-@pytest.mark.parametrize("tpl", ROOMS)
+@pytest.mark.parametrize("tpl", CORE_ROOMS)
 def test_room_sites_build_inside_the_core(fort, tpl):
     snap, man = fort
     sites = bp.rank(snap, tpl, manifest=man)
@@ -143,7 +144,7 @@ def _near(box, b, margin=1, dz=0):
         b[1] - margin <= box[4] and box[2] <= b[5] + dz and b[2] - dz <= box[5]
 
 
-@pytest.mark.parametrize("tpl", ROOMS)
+@pytest.mark.parametrize("tpl", CORE_ROOMS)
 def test_room_sites_keep_off_the_military_side_and_the_refuge(fort, tpl):
     snap, man = fort
     mil = [[s[0], s[1], s[2], s[0], s[1], s[3]] for s in man["stairs"]["mil"]]

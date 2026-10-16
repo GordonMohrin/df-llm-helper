@@ -651,7 +651,11 @@ STATE = Obj(
          # FR-55 lever latency (gate): last pull -> wanted state, in s and ticks (-1 never); pending own pulls
          "lever": Obj(req={"lat_s": Int(-1), "lat_t": Int(-1), "pend": NAT, "wait_s": NAT}),
          "alert": Obj(req={"want": Str(maxbytes=24), "burrow": Str(maxbytes=24), "tiles": NAT, "inside": NAT,
-                           "ok": FLAG}, opt={"why": Str(maxbytes=40), "core_d": NAT, "core_f": NAT}),
+                           "ok": FLAG}, opt={"why": Str(maxbytes=40), "core_d": NAT, "core_f": NAT,
+                                             # Run 10: the refuge burrow (Tiefe+): exists, separated (1, 0 an
+                                             # opening reaches it, -1 not known yet), beds, beds wanted (bed_pct)
+                                             "ref": Obj(req={"ex": FLAG, "sep": Int(-1, 1), "beds": NAT,
+                                                             "need": NAT})}),
          # intake waves (siege, Gordon 2026-10-16): phase, waves so far, the last refusal, the sortie (squad phase)
          "wave": Obj(req={"ph": Str(maxbytes=8), "n": NAT}, opt={"why": Str(maxbytes=40), "so": Str(maxbytes=24)})})
 

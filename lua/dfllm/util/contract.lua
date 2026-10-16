@@ -312,7 +312,9 @@ C.STATE_SPEC = obj({
               {eta = int(-1), doors = NAT, dwait = NAT, dout = NAT, dref = NAT}),
   lever = obj({lat_s = int(-1), lat_t = int(-1), pend = NAT, wait_s = NAT}),
   alert = obj({want = str(24), burrow = str(24), tiles = NAT, inside = NAT, ok = FLAG},
-              {why = str(40), core_d = NAT, core_f = NAT}),         -- BUG-028: drink/food days inside the core
+              {why = str(40), core_d = NAT, core_f = NAT,           -- BUG-028: drink/food days inside the core
+               -- Run 10: the refuge burrow: exists, separated (1, 0 open, -1 unknown), beds, beds wanted (bed_pct)
+               ref = obj({ex = FLAG, sep = int(-1, 1), beds = NAT, need = NAT})}),
   -- intake waves (siege, Gordon 2026-10-16): phase, wave count, the last refusal, the sortie squad and phase
   wave = obj({ph = str(8), n = NAT}, {why = str(40), so = str(24)}),
 })

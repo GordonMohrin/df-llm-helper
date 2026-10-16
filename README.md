@@ -43,7 +43,7 @@ LLM agent (Claude Code, ...): year planner and exception handler, never a tactic
 What the kernel does without the LLM:
 - **Siege reflex** in the game step that first sees visible invaders: siege mode, civilian alert, squads to their stations, bridges up as soon as nobody is outside; a sealed fallback (BREACH) if a bridge is not up after 900 ticks.
 - **Supply:** stock days for food and drink, brewing, meals, barrels, farms and fishers sized to the population, manager orders, tool details (miners, woodcutters, hunters).
-- **Building:** a project runner digs, builds and zones template blueprints (fortress core with drawbridges, levers, killing field and refuge; dining, bedrooms, tombs, hospital, temple, tavern, workshops, farms, furnaces, office, captives, cistern, stockroom; the defense add-ons gallery_o1 and seal). The fort advances through phases P0-P7 from `plans/year1.json`.
+- **Building:** a project runner digs, builds and zones template blueprints (fortress core with drawbridges, levers, killing field and refuge; dining, bedrooms, tombs, hospital, temple, tavern, workshops, farms, furnaces, office, captives, cistern, stockroom, refuge_beds; the defense add-ons gallery_o1 and seal). The fort advances through phases P0-P7 from `plans/year1.json`.
 - **Care:** strange moods (materials, reserves), burials, corpses, ghosts, thirsty patients, stress and clothing.
 - **Readiness gate:** the population cap (55) rises only after a worst-case path audit and a passed drill.
 - **Trade:** a caravan state machine (broker job, goods from `dfllm-trade` stockpiles, ratio check).

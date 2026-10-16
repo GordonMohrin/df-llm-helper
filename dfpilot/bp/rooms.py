@@ -46,14 +46,19 @@ PARAMS = {
                 "water": ("bed", None, None), "level": ("core", None, None)},
     # BUG-028 (Run 10: 60 days of drink inside the core, 3093 units outside O1): food and drink storage behind B2
     "stockroom": {"w": (9, 5, 15), "h": (6, 4, 10), "still": (1, 0, 1), "barrels": (0, 0, 200)},
+    # Run 10 (Tiefe+ beds 8 < 27, no safe room at pop 110): a dormitory dug from the refuge room, in the refuge burrow
+    "refuge_beds": {"n": (8, 2, 30), "burrow": ("Tiefe+", None, None)},
 }
+# templates that sit on the refuge level (anchors in the fortcore refuge room, sites.rank): they never join Z4 (the
+# civilian core; a Z4 box beside the refuge would let the audit's core -> refuge check start next to it)
+REFUGE_LEVEL = frozenset({"refuge_beds"})
 # quickfort `assigned_unit=` roles (preserve-rooms noble codes) an office may be reserved for
 OFFICE_ROLES = ("manager", "bookkeeper", "broker", "expedition_leader", "mayor", "chief_medical_dwarf")
 USE = {"dining": "used", "bedrooms": "used", "tombs": "used", "temple": "used", "hall": "used",
        "guildhall": "used", "barracks": "used"}
 # rooms nobody should walk through: sites.rank opens no new room from their tiles behind a door
 NO_THROUGH = frozenset({"bedrooms", "tombs", "hospital", "temple", "office", "captives", "hall", "guildhall",
-                        "barracks"})
+                        "barracks", "refuge_beds"})
 
 
 def _box(P: Plan, W: int, H: int, door: bool = True):
@@ -328,6 +333,29 @@ def stockroom(p: dict) -> Plan:
     return P
 
 
+REFUGE_BED_COLS = (-3, -2, -1, 1, 2, 3)        # beds beside the centre aisle u = 0
+
+
+def refuge_beds(p: dict) -> Plan:
+    """Refuge dormitory: `n` beds in a room dug from the refuge room, a dormitory zone, in the refuge burrow."""
+    # Run 10: the civ alert refused Tiefe+ for beds 8 < 27 (25 % of the citizens asleep at once, refuge.bed_pct), and
+    # nothing in the plans could add beds there (rooms stay off the refuge level). The room is dug from a refuge floor
+    # tile into rock (sites.rank: the footprint and its wall ring rock or unknown, nothing open beside it), so it opens
+    # no way in: its only opening is the doorway into the refuge. Bed rows alternate with aisle rows, the centre
+    # column is the aisle from the door: every bed has a free tile beside it.
+    P = Plan("refuge_beds", "living")
+    n, cols = p["n"], len(REFUGE_BED_COLS)
+    rows = -(-n // cols)
+    box = _box(P, 7, 2 * rows - 1)
+    u0, v0, u1, v1 = box
+    b = P.stage("build", "build", orders=1)
+    for i in range(n):
+        r, c = divmod(i, cols)
+        b.tile(REFUGE_BED_COLS[c], v0 + 2 * r, 0, "b")
+    _finish(P, p, box, "D", "name=RefugeBeds")
+    return P
+
+
 def captives(p: dict) -> Plan:
     """Captive pit: a 3x3 room with a 1-tile channel; the pit zone sits on the drop (manifest `pit`), away
     from traps. Care assigns caged invaders to it."""
@@ -548,7 +576,7 @@ def cistern(p: dict) -> Plan:
 BUILD = {"dining": dining, "bedrooms": bedrooms, "tombs": tombs, "hospital": hospital, "temple": temple,
          "tavern": tavern, "workshops": workshops, "farms": farms, "furnaces": furnaces, "office": office,
          "captives": captives, "cistern": cistern, "hall": hall, "guildhall": guildhall, "barracks": barracks,
-         "stockroom": stockroom}
+         "stockroom": stockroom, "refuge_beds": refuge_beds}
 
 
 def plot_rects(p: dict) -> list[tuple[int, int, int, int, int]]:

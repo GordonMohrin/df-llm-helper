@@ -126,7 +126,8 @@ T.test('BUG-019: in BREACH (a goblin inside Kern+) the dead end Tiefe+ is taken 
   local ok, pick, note = W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')
   T.eq({ok, pick, note}, {true, 'Tiefe+', nil})
   T.eq(#evs(W, 'REFUGE_FAIL'), 0)
-  T.eq(W.state().alert, {want = 'Tiefe+', burrow = 'Tiefe+', tiles = 19, inside = 0, ok = 1, why = ''})
+  T.eq(W.state().alert, {want = 'Tiefe+', burrow = 'Tiefe+', tiles = 19, inside = 0, ok = 1, why = '',
+                         ref = {ex = 1, sep = 1, beds = 0, need = 1}})
 end)
 
 T.test('BUG-019 live (Run 10 y419: "REFUGE_FAIL Tiefe+: 63 tiles<109, beds 8<28 -> confining to Kern+"): 30 ' ..
@@ -186,6 +187,25 @@ T.test('refuge beds: beds >= ceil(citizens x 25%); a shortfall only ranks (the b
   local W3 = fort{door = true, citizens = 9, cfg = {bed_pct = 0}}
   local d3 = inspect(W3, 'refuge')
   T.eq({d3.need.beds, d3.burrows['Kern+'].ok, d3.burrows['Kern+'].why}, {0, 1, ''})
+end)
+
+T.test('Run 10 (Tiefe+ open to the entrance, beds 8<27): the state carries the refuge for dfllm plan check: exists, ' ..
+       'separated, beds and the beds wanted (refuge.bed_pct)', function()
+  -- old code: no alert.ref
+  local W = fort{citizens = 9}                       -- the dead end Tiefe+, reached by the doorless entrance
+  T.eq(W.state().alert.ref, {ex = 1, sep = 0, beds = 0, need = 3})
+  local W2 = fort{door = true, citizens = 9}
+  T.eq(W2.state().alert.ref, {ex = 1, sep = 1, beds = 0, need = 3})
+  local W3 = fort{shaft = false}                     -- no dead end: no refuge burrow at all
+  T.eq(W3.state().alert.ref, {ex = 0, sep = -1, beds = 0, need = 1})
+  local W4 = fort{door = true, citizens = 9, cfg = {bed_pct = 50}}
+  T.eq(W4.state().alert.ref.need, 5)
+  local C = require('dfllm.util.contract')
+  local bad = {}
+  for _, e in ipairs(C.check_state({alert = W.state().alert})) do
+    if e:find('^%$%.alert') then bad[#bad + 1] = e end
+  end
+  T.eq(bad, {}, 'the alert block is contract-shaped')
 end)
 
 ---------------------------------------------------------------- BUG-021

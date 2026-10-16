@@ -1,5 +1,35 @@
 # CHANGELOG dfpilot
 
+## No P3+ without a separated refuge with beds; template `refuge_beds` (2026-10-16; offline, live-untested)
+- **Why (Run 10, post-mortem root cause 5):** Tiefe+ was never usable (beds 8 < 27, open to the entrance 95,127,123,
+  58 steps), Kern+ lay on the attack path, at pop 110 there was no safe room; no template could add beds to the refuge
+  (every room stays off the refuge level).
+- **Kernel (seal):** state `alert.ref` = `{ex, sep, beds, need}`: the refuge burrow exists, is separated (1; 0 an
+  opening reaches it without door/hatch/bridge; -1 not known yet), its beds, and the beds wanted (ceil(citizens x
+  `refuge.bed_pct` %), config/reflex.json, default 25).
+- **`dfllm plan check`:** ERROR for phase_target P3+ while the refuge is missing, open or short of beds, unless the
+  plan's new builds (or projects under way) fix it: no refuge -> `{"tpl":"fortcore","site":"same","p":{"stage":3}}`;
+  an opening -> a seal (`{"tpl":"seal","site":"S1","p":{"at":"last"}}`); beds short -> `{"tpl":"refuge_beds",
+  "site":"S1","p":{"n":N}}` (the `n` add up to the shortfall). Separation unknown, or a state without `alert.ref`,
+  warns. **`dfllm plan propose`** drafts these first (right after the audit's seal).
+- **Template `refuge_beds`** (`dfpilot/bp/rooms.py`, params `n` 2-30, `burrow` Tiefe+): a dormitory dug from a floor
+  tile of the fortcore refuge room into the rock (the footprint and its wall ring rock or unknown: no new way in), a
+  door, beds beside a centre aisle, a dormitory zone, in the refuge burrow; never in Z4, private. `bp sites
+  refuge_beds` lists the refuge-room anchors.
+- Contracts: state `alert.ref` (schema, contract.lua, CONTRACTS appendix and §9.3 row). RULES §7 REFUGE_FAIL, §8 refuge
+  gate, §11 P5 note; DESIGN §5.4 refuge gate; README template list.
+- Tests: `tests/bp/test_bp_refuge_beds.py` (new: sited in the refuge, audit ok and refuge separate after it is built,
+  rejected beside an open tile, layout, needs the refuge), `tests/test_cli_plan.py` (gate, projects under way,
+  propose), `tests/lua/test_seal_refuge.lua` (alert.ref); generic room tests keep refuge_beds out of the core checks.
+- **How to use:** year review as usual: `dfllm plan propose` puts the refuge pieces first; `dfllm plan check` says what
+  is missing. By hand: `dfllm bp sites refuge_beds`, `dfllm cmd bp.place '{"tpl":"refuge_beds","site":"S1",
+  "p":{"n":20}}'`.
+- **Live check:** after `git pull` and `dfhack-run dfllm reload`, `dfllm cmd inspect '{"what":"refuge"}'` (Tiefe+ `beds`,
+  `sep`, `need.beds`) and the state's `alert.ref` agree; in a fort like Run 10 (Tiefe+ 8 beds, 110 citizens)
+  `dfllm plan check` on a P4+ plan says `refuge: Tiefe+ has 8 beds < 28 ...` and `dfllm plan propose` drafts
+  `refuge_beds` n=20 (plus the seal at=last while Tiefe+ is open); once built, `inspect refuge` shows the beds in
+  Tiefe+ and `dfllm audit` stays without `refuge:` and `bypass` findings.
+
 ## The audit's bypass is walled before the fort grows: `seal at=audit` by follow, plan propose and plan check (2026-10-16; offline, live-untested)
 - **Why (Run 10, post-mortem root cause 1):** `bypass: edge->Z3/Z4 avoids the trap hall (reaches 139,128,117)` stood
   in the audit for months, the plans raised the phase anyway and the 41 traps stayed unused. The findings now name

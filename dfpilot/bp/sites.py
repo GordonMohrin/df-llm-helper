@@ -19,6 +19,8 @@ the footprint may hold a revealed open tile. Score: flat dry surface over the fo
 (live L3: the only water was a brook 90 tiles away and bedridden dwarves died of thirst): + up to 60 when a
 revealed body of water (>= 8 tiles: a brook, river or lake, not a puddle or a sump) is within WATER_NEAR (30)
 walking steps of the anchor, minus 1 per step beyond, -80 when no revealed water is reachable at all.
+Refuge beds (`rooms.refuge_beds`, Run 10): anchors on the floor of the fortcore refuge room (no lever tile), the
+dormitory dug into the rock beside it (footprint and wall ring rock or unknown: it opens no new way in).
 Cistern (`rooms.cistern`): a dry cistern ranks like any room; with a `path` (the pipe to a brook or river) only
 anchors whose pipe ends at a valid intake count: shaft column B and breach tile G on revealed bank floor, the
 water W behind G (`water=bed`: one level below the bank, a brook; `bank`: at bank level), every pipe and shaft
@@ -301,9 +303,15 @@ def _lever_tiles(m: dict) -> set[tuple[int, int, int]]:
     return {tuple(p) for b in m.get("bridges", {}).values() for p in b.get("levers", [])}
 
 
+def on_refuge(tpl: str, p: dict) -> bool:
+    """Templates that sit on the refuge level: refuge_beds (Run 10), a cistern with level=refuge."""
+    return tpl in rooms.REFUGE_LEVEL or (tpl == "cistern" and p.get("level") == "refuge")
+
+
 def _anchor_tiles(g: Graph, tpl: str, p: dict, manifest: dict) -> list[int]:
-    """Room anchors: public Z4 floor; a cistern with level=refuge: floor of the refuge room (no lever tile)."""
-    if tpl == "cistern" and p["level"] == "refuge":
+    """Room anchors: public Z4 floor; refuge_beds and a cistern with level=refuge: floor of the refuge room (no lever
+    tile)."""
+    if on_refuge(tpl, p):
         m = g.mask(refuge_rooms(manifest))
         levers = _lever_tiles(manifest)
         return [i for i, c in enumerate(g.t) if m[i] and c in ".X" and g.pos(i) not in levers]
@@ -356,7 +364,7 @@ def _rooms(snap, tpl, p, rects, bad, hid, mk, manifest, wet=None):
     farm = tpl == "farms"
     cis = rooms.cistern_layout(p) if tpl == "cistern" else None
     intake = bool(cis and cis["intake"])
-    on_refuge = tpl == "cistern" and p["level"] == "refuge"
+    refuge_level = on_refuge(tpl, p)
     core_rects = footprint("cistern", {**p, "path": ""}) if intake else rects
     at = _At(snap)
     if farm:
@@ -388,7 +396,7 @@ def _rooms(snap, tpl, p, rects, bad, hid, mk, manifest, wet=None):
                 cb = list(_rect_boxes(core_rects, ax, ay, az, rot))
                 core = (min(b[0] for b in cb), min(b[1] for b in cb), min(b[2] for b in cb),
                         max(b[3] for b in cb), max(b[4] for b in cb), max(b[5] for b in cb))
-            if zr is not None and core[2] <= zr <= core[5] and not on_refuge:
+            if zr is not None and core[2] <= zr <= core[5] and not refuge_level:
                 continue                                   # the refuge level stays the refuge's own
             steps = min(steps_of.get(i, 99), 99)
             score = 1000 - 5 * steps - unknown // 10
