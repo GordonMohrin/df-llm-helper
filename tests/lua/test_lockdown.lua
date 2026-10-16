@@ -4,7 +4,9 @@
 -- lockdown while LOCKDOWN said "alert on Kern+"): siege owns the alert, seal picks the burrow, nothing writes false
 -- while the lockdown holds, and the text says what holds. BUG-012 ("0 entrances": a door one tile behind the east
 -- stair, three openings listed with "no door"): the doors come from seal's entrance routes, the openings without one
--- are named, and the undo after quiet opens exactly the doors the lockdown forbade.
+-- are named, and the undo after quiet opens exactly the doors the lockdown forbade. BUG-018 (the first real siege, 50 ->
+-- 1): the shaft opening has no door and leads into the hall, so no burrow is separated and the lockdown does not confine
+-- (the citizens flee); with a door behind the shaft (opts.shaft_door) BUG-011's interior burrow holds.
 local T = require('testlib')
 local SW = require('seal_world')
 local S = require('siege_world')
@@ -14,8 +16,9 @@ local Z = 5                                    -- the fort level; the surface is
 -- surface z 6: an open field x0-40 y0-24 (outside, reaches the map edge) with a down stair at 20,10 and the top of a
 -- shaft (up/down stair) at 30,13. Fort z 5: hall x2-12 y4-16 (beds, the citizens, Kern+), corridor A y10 x13-18
 -- to a door at 19,10 and the up stair at 20,10 (the opening: the door is one tile behind it), corridor B y13 x13-29
--- to the shaft at 30,13 (an opening without a door), a bedroom x2-4 y18-20 behind its door at 3,17. No drink and
--- no food anywhere: Kern+ and the interior burrow fail their audits (Run 9 behind BUG-001: "drink 0<45, food 2<45").
+-- to the shaft at 30,13 (an opening without a door; opts.shaft_door: a door at 29,13 behind it), a bedroom x2-4 y18-20
+-- behind its door at 3,17. No drink and no food anywhere: Kern+ and the interior burrow fail their audits (Run 9 behind
+-- BUG-001: "drink 0<45, food 2<45").
 local function fort(opts)
   opts = opts or {}
   local W = SW.new{persist = {manifest = {v = 2, burrows = {['Kern+'] = {role = 'kern'}}}}}
@@ -29,6 +32,7 @@ local function fort(opts)
   SW.draw(W, Z, {'+<'}, 19, 10)
   SW.fill(W, Z, 13, 13, 29, 13, '.')
   SW.draw(W, Z, {'X'}, 30, 13)
+  if opts.shaft_door then SW.draw(W, Z, {'+'}, 29, 13) end
   SW.draw(W, Z, {'+'}, 3, 17)
   SW.fill(W, Z, 2, 18, 4, 20, '.')
   SW.draw(W, Z, {'bb'}, 3, 5)
@@ -92,17 +96,26 @@ T.test('the fort: Kern+ and the interior burrow fail their audits; the entrance 
   T.ok(r.ok, r.msg)
   T.eq({r.data.burrows['Kern+'].ok, r.data.burrows['Innen+'].ok, r.data.burrows['Innen+'].exists}, {0, 0, 1})
   T.ok(r.data.burrows['Kern+'].why:find('drink 0<4', 1, true), r.data.burrows['Kern+'].why)
+  -- BUG-018: the shaft (no door) leads into the hall; the interior burrow was painted without the tiles it reaches
+  T.eq({r.data.burrows['Kern+'].sep, r.data.burrows['Kern+'].open}, {0, {'30,13,5 stair_updown'}})
+  T.eq({r.data.burrows['Innen+'].sep, r.data.burrows['Innen+'].tiles}, {1, 12})
   T.eq(r.data.choice.ALERT.burrow, '', 'no burrow passes: no confinement outside a lockdown (FR-37)')
-  T.eq(r.data.choice.LOCKDOWN, {want = 'Kern+', burrow = 'Innen+'}, 'a lockdown keeps the interior burrow')
+  T.eq(r.data.choice.LOCKDOWN, {want = 'Kern+', burrow = '', flee = 1},
+       'BUG-018: the interior behind the doors is too small to keep, no dead end: no confinement')
   local e = W.inbox('inspect', {what = 'entrances'})
   T.eq({e.data.sealed, e.data.routes}, {false, 2})
   T.ok(e.msg:find('1 entrance door, 1 opening without one', 1, true), e.msg)
   T.eq(W.hidden_wg, 0)
+  -- a door behind the shaft too: Kern+ is separated (it still lacks drink and food), the lockdown keeps Innen+
+  local W2 = fort{shaft_door = true}
+  r = W2.inbox('inspect', {what = 'refuge'})
+  T.eq({r.data.burrows['Kern+'].sep, r.data.burrows['Kern+'].ok, r.data.burrows['Innen+'].sep}, {1, 0, 1})
+  T.eq(r.data.choice.LOCKDOWN, {want = 'Kern+', burrow = 'Innen+', level = 'HOLD'}, 'a lockdown keeps the interior burrow')
 end)
 
 T.test('BUG-011: the lockdown holds the civ alert on the interior burrow for many frame batches, never false, ' ..
        'and the text says so', function()
-  local W = fort()
+  local W = fort{shaft_door = true}
   local t0 = W.K.now().tick
   T.eq(#acts_since(W, 'civ_alert', 0), 0, 'PEACE: no alert before the arrival')
   W.event('INVASION', {id = 1})
@@ -143,7 +156,7 @@ end)
 
 T.test('BUG-011: no usable burrow at all: "alert: none (REFUGE_FAIL ...)", the alert stays off, the interior burrow ' ..
        'is painted at once and the alert follows without a flip', function()
-  local W = fort{no_paint = true}
+  local W = fort{no_paint = true, shaft_door = true}
   T.eq(W.inbox('inspect', {what = 'refuge'}).data.burrows['Innen+'].exists, 0, 'painting refused: no Innen+')
   local t0 = W.K.now().tick
   W.event('INVASION', {id = 2})
@@ -165,6 +178,42 @@ T.test('BUG-011: no usable burrow at all: "alert: none (REFUGE_FAIL ...)", the a
   while idx() == 0 and holding(W) and n < 40 do W.run(100, {skip = 9}); n = n + 1 end
   T.eq({idx(), W.alert_burrows}, {1, {'Innen+'}}, 'confined once the interior burrow exists')
   T.eq(#acts_since(W, 'civ_alert', t0, false), 0)
+end)
+
+T.test('BUG-018: an arrival with an open entrance into the hall: "alert: none (REFUGE_FAIL Kern+, citizens flee)"; a ' ..
+       'door lost during the lockdown turns the sounding alert off although the lockdown holds it', function()
+  local W = fort()
+  local t0 = W.K.now().tick
+  W.event('INVASION', {id = 6})
+  W.run(30, {skip = 9})
+  W.inbox('ack', {})
+  local arr = evs(W, 'ARRIVAL')[1]
+  T.ok(arr.msg:find('alert: none (REFUGE_FAIL Kern+, citizens flee)', 1, true), arr.msg)
+  T.ok(arr.d.alert:find('open to 1 entrance 30,13,5 stair_updown', 1, true), arr.d.alert)
+  T.eq(idx(), 0)
+  local f = evs(W, 'REFUGE_FAIL')
+  T.ok(#f >= 1 and f[#f].d.flee == 1 and f[#f].d.fallback == '', f[#f] and f[#f].msg)
+  for _ = 1, 10 do
+    W.run(100, {skip = 9})
+    T.eq(#acts_since(W, 'civ_alert', t0, true), 0, 'never sounded')
+  end
+  -- the shaft has a door, the lockdown confines to Innen+; the door is destroyed: an opening reaches Innen+ now
+  local W2 = fort{shaft_door = true}
+  W2.event('INVASION', {id = 7})
+  W2.run(30, {skip = 9})
+  W2.inbox('ack', {})
+  T.eq({idx(), W2.alert_burrows}, {1, {'Innen+'}})
+  local t1 = W2.K.now().tick
+  W2.dyn[SW.key(29, 13, Z)] = nil
+  SW.draw(W2, Z, {'.'}, 29, 13)
+  SW.regroup(W2)
+  W2.inbox('inspect', {what = 'entrances', key = 'refresh'})
+  W2.run(100, {skip = 9})
+  T.ok(holding(W2), 'the lockdown still holds the alert')
+  T.eq(idx(), 0, 'switched off: confined, the citizens would wait in the attackers\' path')
+  T.eq(#acts_since(W2, 'civ_alert', t1, false), 1)
+  local f2 = evs(W2, 'REFUGE_FAIL')
+  T.ok(#f2 >= 1 and f2[#f2].d.flee == 1 and f2[#f2].d.open[1] == '30,13,5 stair_updown', f2[#f2] and f2[#f2].msg)
 end)
 
 T.test('BUG-012: the door one tile behind the stair opening is forbidden, the shaft is named, the undo opens ' ..
@@ -216,7 +265,7 @@ T.test('BUG-012 safety: the door waits while a citizen is outside it, and is for
   T.eq(W.stair_door.door_flags.forbidden, false, 'not locked out')
   local a = W.state().alarm
   T.eq({a.doors, a.dwait, a.dout}, {0, 1, 1}, 'status: 1 door waiting for 1 citizen outside')
-  T.eq({idx(), W.alert_burrows}, {1, {'Innen+'}}, 'the civ alert calls him in meanwhile')
+  T.eq(idx(), 0, 'BUG-018: the shaft without a door leads into the hall, no separated burrow: no confinement')
   W.move(9, 20, 10, Z)                         -- on the stair: inside, but still on the porch outside the door
   W.run(100, {skip = 9})
   T.eq(W.stair_door.door_flags.forbidden, false, 'the porch is still outside the door')

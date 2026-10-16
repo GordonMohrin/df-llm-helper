@@ -91,6 +91,29 @@
   the bin position; kern.log `Miners: ... left the everybody-does-this details` and `labor: ... no axe in hand`; `inspect orders`
   for the steel orders (pig iron/steel orders or DECISION_NEEDED steel naming the missing input); no WORK_DETAIL for the
   hand-added miners.
+## Refuge: separated burrows only, BREACH level, the dead end Tiefe+, bed share, CUTOFF confirmed, BUG-018/019/021, FR-67 (2026-10-16; offline, live-untested)
+- **BUG-018:** a burrow is confined to only when no entrance of seal's entrance BFS reaches it without a door, hatch, bridge or floodgate
+  (an exposure flood after every BFS; a porch of <= 12 tiles behind an entrance does not count) and no visible hostile stands in it.
+  REFUGE_FAIL names the entrances (`Kern+: open to 1 entrance 20,10,9 stair_up (5 steps)`, `d.open`); with no separated burrow and no
+  dead end nobody is confined (`flee`): siege turns the alert off even while a lockdown holds it and never substitutes Kern+ for seal's pick.
+  `Innen+` is painted without the exposed tiles.
+- **BUG-019/FR-67:** levels SIEGE (counts) and BREACH (separated, reachable, >= 9 tiles, no counts) for `breach_days` (7). The dead end behind
+  the deepest stair is painted as `Tiefe+` when missing (boot, scans; at once in BREACH or with an entrance into the burrows) and is the
+  last fallback (>= 10 steps from every entrance). Live case Run 10 y419 (`Tiefe+: 63 tiles<109, beds 8<28 -> confining to Kern+`) now
+  gives Tiefe+.
+- **Refuge beds:** beds >= ceil(citizens x `bed_pct` %) (25: the share asleep at once; `beds 18<23` was 18 beds for about 90 citizens, not
+  23 citizens); a shortfall only ranks the burrows (one with enough beds first), never refuses the only usable one; the text says the
+  formula (`beds 18<23 (25% of 90 citizens)`). Knobs `refuge.bed_pct` and `refuge.breach_days` in `config/reflex.json` (lint --config).
+- **BUG-021:** CUTOFF only after the citizens' and the class tiles' groups were read again in one go; the text names a cut-off citizen and a
+  stock tile with their groups (`d.unit/upos/at/agrp`). The entrance check starts over when the walk groups were renumbered while it ran.
+- Tests: `tests/lua/test_seal_refuge.lua` (new), `tests/lua/test_lockdown.lua`, `tests/lua/test_seal.lua`, `tests/test_seal_files.py`,
+  `tests/test_alarm.py`. Events: REFUGE_FAIL `level/flee/open`, CUTOFF `unit/upos/at/agrp` (`dfpilot/schema.py`).
+- **Live check:** `dfllm cmd inspect '{"what":"refuge","key":"refresh"}'`: `burrows.Kern+` shows `sep` (0 with `open` = the doorless
+  entrances), `ok` 0 while an entrance reaches it; `dead` names the dead end and `burrows.Tiefe+` exists (kern.log `seal: Tiefe+ painted
+  with N tiles ...`); `choice.SIEGE/BREACH` name Tiefe+ (`level` BREACH or DEAD) or `flee` 1; `need.beds_rule`; `hint`. If `Innen+`
+  predates this version it may hold exposed tiles (`sep` 0): ask the player to delete it on the burrows screen; seal paints it again
+  without them.
+  After a construction: no CUTOFF with `cause not found`; `inspect reach` `runs.cut_unconfirmed` counts the dropped ones.
 
 ## Trade: retry before the caravan leaves, diagnostics, ledger for lost visits, BUG-026 (2026-10-16)
 - A retry after `ui_timeout` etc. waits at most `time left - 400` ticks (min 100) instead of a fixed 1200, so it still runs before the caravan leaves.

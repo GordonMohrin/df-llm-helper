@@ -154,5 +154,10 @@ def test_reflex_config_validation(tmp_path):
     for needle in ("clock.siege_cap", "clock.warp", "ack_timeout_s", "defaults.ARRIVAL", "defaults.SIEGE_END",
                    "unknown key 'x'"):
         assert any(needle in e for e in errs), (needle, errs)
+    assert shipped["refuge"] == {"bed_pct": 25, "breach_days": 7}            # seal.CFG defaults (refuge beds, BUG-019)
+    p.write_text(json.dumps({"v": 2, "refuge": {"bed_pct": 101, "breach_days": 3, "tiles": 1}}), encoding="utf-8")
+    errs = fairplay.reflex_errors(p)
+    assert any("refuge.bed_pct" in e for e in errs) and any("refuge.tiles: unknown key" in e for e in errs), errs
+    assert not any("breach_days" in e for e in errs), errs
     p.write_text("{", encoding="utf-8")
     assert fairplay.reflex_errors(p)[0].startswith("config/reflex.json: not JSON")

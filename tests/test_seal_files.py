@@ -86,6 +86,9 @@ def test_class_a_events(run):
     assert len(cut) == 1
     d = cut[0]["d"]
     assert (d["cls"], d["n"], d["why"], d["pos"][0]) == ("food", 1, "wall", 33)
+    # BUG-021: the cut-off citizen (west of the wall line) and a food tile (east of it) with their walk groups
+    assert d["unit"] == 1 and d["upos"] == [30, 25, 9] and d["at"][0] > 33 and d["agrp"] != d["grp"]
+    assert f"; citizen 1 at 30,25,9 on group {d['grp']}" in cut[0]["msg"]
     assert any(e["d"].get("sealed") == 0 for e in by_type(evs, "SEAL"))
 
 
@@ -103,7 +106,7 @@ def test_inspect_replies(run):
     r = reply(run, "i4")
     au = r["data"]["burrows"]
     assert au["Kern+"]["ok"] == 0 and au["Innen+"]["ok"] == 1 and au["Innen+"]["tiles"] > 100
-    assert r["data"]["choice"]["ALERT"] == {"want": "Kern+", "burrow": "Innen+"}
+    assert r["data"]["choice"]["ALERT"] == {"want": "Kern+", "burrow": "Innen+", "level": "SIEGE"}
     r = reply(run, "i5")
     assert r["ok"] and r["data"]["by"]["wall"] == 1 and r["data"]["diff"]["gone"] == ["40,26,9"]
     r = reply(run, "i6")

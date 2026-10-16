@@ -166,12 +166,12 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | MOOD_RISK | supply the missing class now (dig, trade, butcher); a mood job is never cancelled |
 | ORDER_BAD | a make-item order without `item_subtype` (DF crash) was removed; never queue such orders, use `order.add` with `item_subtype` |
 | DEPOT_MISSING | a caravan came and no depot stands; the kernel queued a `depot` project: check `status`/`proj`, keep O1 down for builders in PEACE. "does not progress: why" = the planned depot is stuck; without a fortcore depot the kernel moves it inside the entrance after 5 failed resumes (`inspect workload` `depot_move`) |
-| CUTOFF | citizens lost the walk group of their food, drink or beds; the msg names the tile. `inspect reach`; a project still building there: `bp.cancel {proj, undo:true}`; a built wall or raised bridge: tell the player at once (no deconstruct verb) |
+| CUTOFF | citizens lost the walk group of their food, drink or beds (confirmed on groups read again, BUG-021); the msg names the tile, a cut-off citizen and a stock tile with their groups. `inspect reach`; a project still building there: `bp.cancel {proj, undo:true}`; a built wall or raised bridge: tell the player at once (no deconstruct verb) |
 | SEAL_LEAK | the gates are up and a route remains: `inspect entrances` names the leak (tile, door/bridge state); tell the player; place a wall there (`bp.place`), never lower the bridges |
 | PERIMETER_BROKEN | the kernel re-queued the lost walls/doors (`rp…` project); `inspect perimeter` after a day; tell the player about pieces it could not re-queue (bridges) |
 | AUTOLABOR_LEGACY | autolabor ran in legacy mode (the engine of the Run 9 crashes) and the kernel could not set it to monitor (`fixed=0`; a switch that worked is only a kern.log line): tell the player at once (disable autolabor by hand) |
 | TOOL_BLOCKED | Miners/Woodcutters members hold no pick/axe while their jobs wait (`inspect workload`: `blocked`, `tools`); `reserved` → squad uniforms hold the tools (military weapons); otherwise tell the player: toggling the detail in the work details screen may make DF hand the tools out (untested); `tools.equip_update` and moving a tool into a hand need his explicit yes (fair play) |
-| REFUGE_FAIL | the civ alert left a burrow without drink, food or beds for the fort's interior (`Innen+`) or no confinement; `inspect refuge`; fix the refuge (stockpile, beds, well) in the next plan |
+| REFUGE_FAIL | the civ alert refused a burrow: an entrance reaches it without a door/hatch/bridge (`open to N entrances x,y,z ...`) or a hostile stands in it (BUG-018), or it lacks drink/food (beds only rank: `beds 18<23 (25% of 90 citizens)`); the fallback is `Innen+`, the refuge or the dead end `Tiefe+` without counts (BREACH level, 7 days), or none (`flee`: alert off, citizens flee on their own). `inspect refuge` (`open`, `hint`); tell the player; close the named entrances (door or wall) and stock the refuge in the next plan |
 
 ## 8. Readiness gate (only readiness raises max-pop)
 - **R0:** cap 55 (pop-control `max-pop 55`, `wave-size 8`).
@@ -210,7 +210,9 @@ gatehouse and barracks + military stair → B2 core seal
 → civilian core (own stair, farms, workshops, stockpiles, well, hospital with own water, tombs,
 dining, bedrooms). Refuge Tiefe+ ≥ 3 z below the core with its own well, food and beds.
 **Barriers** are only raised bridges and walls; doors count for nothing. Smooth outer natural
-walls. No shortcut bridges. Metrics use the real state of every bridge and door.
+walls. No shortcut bridges. Metrics use the real state of every bridge and door. **Refuge (BUG-018):** the civ
+alert confines only to a burrow no entrance reaches without a door, hatch or bridge; else the dead end behind the
+deepest stair (seal paints `Tiefe+` when missing), else nobody is confined and the citizens flee.
 **Siege reflex (in game, you only read it):** visible invaders → SIEGE in the same step, timestream
 off, FPS cap 30, civ alert on Kern+, squads Ready at their stations, bridges up by T+600 when nobody
 is outside, BREACH fallback at T+900. RECOVERY only on 0 visible invaders for 2,400 ticks; bridges
