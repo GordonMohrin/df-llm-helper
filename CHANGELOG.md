@@ -1,5 +1,112 @@
 # CHANGELOG dfpilot
 
+## The daily shaft check: an explore shaft open to a cavern is plugged in any project state, a hatch is no plug, explores stop above known cavern levels (2026-10-16; offline, live-untested)
+- **Why (Run 11, Kilrudrabed site98, y432-433, kernel a6c33a9 with the cavern plug):** CAVERN_PLUG never came for the
+  explore c1a14676. It stood at `dig 98 % stalled` while its shaft 136,73 (z137 down) was open next to a cavern lake
+  (1146 water tiles on z127). Earlier it had ended `BREACH_STOP damp`; after the reload it showed as stalled, not
+  stopped. The game session then put a hatch on the shaft top (`seal at=136,73,137`) and cancelled c1a14676, but by the
+  doctrine a hatch does not hold forgotten beasts or building destroyers. Later explores kept hitting the z127 cavern
+  lakes (y432s1b0 at 112,59 was plugged cleanly).
+- **Cause:** the plug of the cavern-plug entry below comes only from a breach stop (`breach()`, with a tile and the
+  project document) and from the daily recheck. The recheck takes a project only while it is stopped as
+  `breach:damp|water|cavern|cavern_lake`, not done and without a plug record (m.runner `cav`). `runner.cavern_open()`
+  (readiness `caverns`, threat) lists only those records. A stalled explore (or a running, blocked, done or cancelled
+  one) was never looked at, so readiness never saw the open shaft. Nothing in the runner turns `breach:*` back into
+  `stalled`, so the stop was lost outside it. Most likely (not verified live): the reload restored site data older than
+  the map. kern writes changed site data at most every 10 s (keys >= 8 KB such as m.runner every 60 s), and nothing
+  writes it before a DF save. A save inside that window keeps the dug shaft and the undone designations but holds the
+  project as it was before the stop. Its undone tiles then read as lost and were designated once more; nobody could dig
+  them, so the project stood at 98 % and stalled after 7 days. The explore ranking also knew nothing of the z127 lakes:
+  they lie below the sites snapshot, so its cavern marks never showed them.
+- **Shaft check (runner, every mode):** every explore's stair column is recorded (m.runner `xs[<id>]` = {x, y, top,
+  low, t, c, fin, off}; at most `shaft_keep` 24). The record is made from the document when the check first sees the
+  project, and when the project is done or cancelled, so it outlives the project. Explores that left the list before
+  their record existed (c1a14676) are found in `<save>/bp/*.json`, `scan_n` (8) files a run after a boot, with state
+  `gone`. A shaft is looked at at the first run after a boot and then once a day, at most `shaft_n` (4) per run. A
+  stopped explore keeps its stop's cadence (m.runner `br`). The check runs whatever the project's state: running,
+  stalled, blocked, stopped, being cancelled, done, cancelled or gone.
+  - What it reads: a column whose top is dug is read top down on revealed tiles. Its bottom, its tiles that hold water,
+    the stored breach tile and up to `shaft_probe` (60) dug tiles of the document that hold water go through the breach
+    test of the entry below (`opened_at`; `runner.opened` is unchanged). A cavern lake or an open cavern there plugs the
+    shaft at once.
+  - CAVERN_PLUG `queued` gains `state`, with msg `c1a14676 (stalled; shaft check): the shaft 136,73 z137-127 opens into
+    a cavern lake at 136,73,127; plug ...`.
+  - A project still digging (running, stalled, blocked) is stopped first: BREACH_STOP src `check` with `state`, msg
+    `c1a14676: cavern lake (check, was stalled: 1146 water tiles in reach), digging stopped`, and its applied chunks
+    are undone, so nobody digs on into the lake.
+  - One stopped as damp/water is raised as before (src `recheck`). A `warm` stop keeps its name and is plugged.
+  - A done, cancelled, cancelling or gone explore is only plugged.
+  - A plug project for the shaft that outlived its record (an older m.runner after a reload) is used again, never a
+    second one. An old CAVERN_PLUG `none` (no dug column then) is looked at again.
+  - Non-explore stops keep the old recheck (CAVERN_PLUG `none`: walled by hand).
+- **A hatch or door is no plug:** a shaft is closed only by a constructed wall, on its top or (with a hatch or door on
+  the top) on the tile below it. CAVERN_PLUG `done` comes only then, and the check reads such a shaft as open: `(the
+  hatch on its top is no plug)`. The plug walls the tile below first (channel + `Cw`, reached through the hatch). Once
+  that wall stands the plug ends and the hatch stays. If that step is given up (`plug_wait`), stage `p0.free` removes
+  the hatch or door with quickfort `undo` of its build key (`H`/`d`: the player's remove-building, a deconstruct job),
+  in PEACE only (no open shaft in a fight, and seal retires a piece gone in PEACE instead of rebuilding it). The top
+  is then channelled and walled. A hatch DF has not removed after `plug_wait` fails the plug (`the Hatch was not
+  removed within 1 day`: by hand).
+- **Known cavern levels for the explore ranking:** every tile where a dig broke into a cavern (each plug's breach:
+  BREACH_STOP `cavern`/`cavern_lake`, the shaft check's hit) is kept in m.runner `cz` (<= 32, newest kept; made at boot
+  from the existing plug and breach records). It is mirrored into the fort manifest as `caverns` (schema: manifest
+  `caverns`). `bp.sites.avoid_levels` adds their levels, so no explore shaft reaches one. `plan propose` (fit_explore,
+  unchanged) then fits the depth above them, and `bp sites explore` names them (`avoid, a cavern/damp/warm mark or a
+  cavern breach`).
+- **Readiness:** the plug record makes `runner.cavern_open()` list the shaft at once, and CAVERN_PLUG re-evaluates, so
+  R0 `caverns` holds until the wall stands. Threat counts hostiles near the shaft from then on.
+- **Log line (kern.log, info), one per run that looked:** for example `cavern check: c1a14676 136,73 z137-127 gone:
+  cavern lake (1146 water tiles) -> plug pl5400 queued (the hatch on its top is no plug); e2 40,41 z100-95 running: no
+  cavern (12 water tiles in reach)`. Other results: `closed (a constructed wall on its top)` or `(... below the Hatch on
+  its top)`, `not dug yet`, `top hidden`, `plug <id> under way`, `plug <id> failed: wall the shaft top by hand`,
+  `plugged`, `N more next run`. A stopped room dig reads `r1 (bedrooms) breach:damp: no cavern`. With nothing to look
+  at, the first run after a boot logs `cavern check: no explore shaft and no stopped dig to look at`. A new cavern level
+  logs `cavern at x,y,z (cavern_lake): explore shafts stop above zZ`.
+- **Cost:** `opened_at` reads the wide `lake_r` box only when water touches the tile (a 3x3x3 read first: the flood
+  starts only there); a dry shaft costs a column read plus about 30 tile reads per candidate.
+- Fair play: revealed tiles only (snapshot.tile, snapshot.liquids, the cav flag); never water_table. Removing a hatch
+  is the player's remove-building order.
+- Contracts: CAVERN_PLUG `state`; BREACH_STOP src `check` and `state` (schema, contract.lua comment, CONTRACTS §12 rows
+  and appendix); manifest `caverns` (CONTRACTS §11, schema); m.runner `xs`, `cz`; CONTRACTS `runner.cavern_open`.
+  RULES §7 CAVERN_PLUG row, DESIGN §5 explore, `bp/sites.py` and `bp/mine.py` docstrings.
+- Tests: `tests/lua/test_runner_shaft.lua` (new; every test fails on the old runner). It covers:
+  - the live c1a14676: stalled at 98 % after a reload without the stop or a shaft record. It is stopped and plugged,
+    `cavern_open` lists 136,73 z137-127, the pending arm tile is undone, the log line is right, and a further reload
+    without the plug record reuses the plug;
+  - a running explore, a done one and a cancelled one;
+  - the log line (no cavern, closed, not dug, daily, at once after a boot) and a `warm` stop;
+  - a hatch on the top: walled below, `done`, the hatch stays; the lower wall given up, so the hatch is removed in
+    PEACE only and the top walled; a hatch never removed: `failed`;
+  - an explore cancelled under the older kernel, found in the bp folder (`gone`); the manifest `caverns` rebuilt after
+    a reload.
+
+  `runner_world.lua` gains `H.hatch`. Also `test_readiness.lua` (R0 `caverns` at once on CAVERN_PLUG queued),
+  `tests/test_runner.py` with `runner_shaft_dump.lua` (the new events validate), `tests/test_schema.py` (the `state`
+  fields), and `tests/bp/test_bp_explore.py` (a recorded breach at z16 keeps depth 12 out, depth 6 fits).
+- **How to use:** nothing to send.
+  - On a CAVERN_PLUG wake with `state`, tell the player which shaft is walled. For a stalled/running/blocked state,
+    `bp.cancel` the explore without undo; it is stopped already. For done/cancelled/gone there is nothing to cancel.
+  - Leave a hatch the session put on a shaft: the plug walls below it (or removes it in PEACE). Never count a hatch as
+    the fix.
+  - To see why a shaft is or is not plugged, read the newest `cavern check:` line in
+    `<DF>/dfllm-runtime/<save>/kern.log`.
+- **Live check (Run 11 site98):** after `git pull` and `dfhack-run dfllm reload`, the first runner runs read the bp
+  folder.
+  - Expected line: `cavern check: c1a14676 136,73 z137-<bottom> gone: cavern lake (... water tiles) -> plug pl<tick>
+    queued (the hatch on its top is no plug)`. CAVERN_PLUG `queued` comes with state `gone` and walls 136,73,136 +
+    136,73,137; `dfllm status` shows the `pl<tick>` project, and `ready.fail` holds `caverns`.
+  - In DF: a miner channels 136,73,136 through the hatch and a builder walls it, then CAVERN_PLUG `done` reads
+    `constructed wall on 136,73,136 below the Hatch on 136,73,137`. Otherwise, after a day the hatch gets a
+    remove-building job in PEACE, and the top is channelled and walled.
+  - `inspect persist` m.runner `cz` and `<save>/manifest.json` `caverns` hold the z127 breach tiles (112,59 and others).
+    `dfllm bp sites explore` / `plan propose` then keep the shaft bottoms at z128 or above: depth fitted, or the
+    message names `cavern breach`.
+  - If the line says `no cavern (N water tiles in reach)` instead, no revealed lake or cavern tile touches the shaft's
+    dug tiles (its revealed bottom lies above the lake, z131 per the session). The shaft then ends in rock; it is not
+    plugged, and the line says so. Compare the levels below the bottom in DF, and the N with `lake_min` 30.
+  - `not dug yet` / `top hidden`: the column record is wrong. `inspect persist` m.runner `xs` names its x, y, top, low.
+  - No line at all: the runner did not run (`dfllm doctor`).
+
 ## `seal at=last` takes the current leaks once each, plants and doors handled; `seal at=refuge` hatches the refuge stair; the refuge comes first from the fort's start (2026-10-16; offline, live-untested)
 - **Why (Run 11, Kilrudrabed y429, pop 54):** `bp.place tpl=seal at=all|last` gave the same door 125,103,144 on every
   repetition (its seal was pending, then the entrance check reused an old answer) and never the new leaks: 188,103,144

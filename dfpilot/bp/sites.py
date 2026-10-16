@@ -30,8 +30,8 @@ tile (a pressurized pipe must not rise into anything). `level=refuge` puts the w
 dfpilot.bp.sites cistern --save <folder>` prints the params and the bp.place command).
 Explore (`mine.explore`, Run 10: no ore for years): public Z4 anchors like a room, never on or below the refuge level;
 its footprint ring per level (all round below the anchor level) must be rock or unknown, levels below the snapshot are
-unknown; the shaft must not reach a level in `p.avoid` or one with a revealed cavern, damp or warm mark (ValueError
-names them when nothing else is left). Score: 1000 - 5 per step to a stair + 10 per level below the top of Z4.
+unknown; the shaft must not reach a level in `p.avoid`, one with a revealed cavern, damp or warm mark, or (Run 11) the
+level of a cavern breach the kernel recorded (manifest `caverns`) (ValueError names them when nothing else is left). Score: 1000 - 5 per step to a stair + 10 per level below the top of Z4.
 """
 from __future__ import annotations
 
@@ -433,12 +433,15 @@ def explore_rects(p: dict) -> dict[int, list[tuple[int, int, int, int]]]:
     return rects
 
 
-def avoid_levels(snap: dict, p: dict) -> set[int]:
+def avoid_levels(snap: dict, p: dict, manifest: dict | None = None) -> set[int]:
     """Levels an explore shaft must not reach: params.avoid plus every level with a revealed cavern, damp or warm mark
-    (a cavern layer or a wet/hot stone layer: the vanilla UI shows those tiles too)."""
+    (a cavern layer or a wet/hot stone layer: the vanilla UI shows those tiles too), plus (Run 11: explores kept
+    breaking into the cavern lakes on z127, below the sites snapshot) the level of every cavern breach the kernel
+    recorded (manifest `caverns`)."""
     out = mine.parse_avoid(p.get("avoid", ""))
     for k in AVOID_MARKS:
         out |= {int(q[2]) for q in snap.get("marks", {}).get(k, []) if isinstance(q, (list, tuple)) and len(q) == 3}
+    out |= {int(q[2]) for q in (manifest or {}).get("caverns", []) if isinstance(q, (list, tuple)) and len(q) == 3}
     return out
 
 
@@ -453,7 +456,7 @@ def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
     top = max(b[5] for b in manifest["zones"]["Z4"])
     ref = manifest.get("refuge")
     zr = ref["anchor"][2] if ref else None
-    avoid = avoid_levels(snap, p)
+    avoid = avoid_levels(snap, p, manifest)
     out, hit = [], set()
     for i in _anchor_tiles(g, "explore", p, manifest):
         ax, ay, az = g.pos(i)
@@ -481,7 +484,8 @@ def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
                                f"{steps} steps to a stair, {unknown} unknown tiles, {missing} levels below the snapshot"})
     if not out and hit:
         raise ValueError(f"explore: every anchor's shaft of depth {p['depth']} reaches an avoided level "
-                         f"(z{','.join(str(z) for z in sorted(hit)[:6])}: avoid or a cavern/damp/warm mark); "
+                         f"(z{','.join(str(z) for z in sorted(hit)[:6])}: avoid, a cavern/damp/warm mark or a cavern "
+                         "breach); "
                          "give a smaller depth (p.depth)")
     return out
 

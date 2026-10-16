@@ -72,5 +72,27 @@ def test_cavern_plug_files_validate(cavern_dump):
     assert [st["label"] for st in bp_doc["stages"]] == ["p1.dig", "p1.wall", "p0.dig", "p0.wall"]
 
 
+@pytest.fixture(scope="module")
+def shaft_dump():
+    r = luahost.run_file(ROOT / "tests" / "lua" / "runner_shaft_dump.lua", [str(ROOT)], timeout=60,
+                         paths=[ROOT / "tests" / "lua"])
+    assert r.ok, f"exit {r.code}\n{r.out}\n{r.err}"
+    return json.loads(r.out.strip().splitlines()[-1])
+
+
+def test_shaft_check_events_validate(shaft_dump):
+    """Run 11 (c1a14676): the daily shaft check's BREACH_STOP (src check) and CAVERN_PLUG (field state) validate."""
+    for s in shaft_dump["snaps"]:
+        assert schema.validate(s["kind"], s["doc"]) == [], (s["kind"], schema.validate(s["kind"], s["doc"]))
+    for ev in shaft_dump["events"]:
+        assert schema.validate("event", ev) == [], ev
+    stop = [e["d"] for e in shaft_dump["events"] if e["type"] == "BREACH_STOP"]
+    assert [(d["proj"], d["src"], d["state"], d["why"]) for d in stop] == [("c1a14676", "check", "stalled",
+                                                                             "cavern_lake")]
+    plugs = {e["d"]["proj"]: e["d"] for e in shaft_dump["events"] if e["type"] == "CAVERN_PLUG"}
+    assert {k: (d["phase"], d["state"]) for k, d in plugs.items()} == {"c1a14676": ("queued", "stalled"),
+                                                                       "e2": ("queued", "done")}
+
+
 def test_runner_is_lint_clean():
     assert lint.lua([ROOT / "lua" / "dfllm" / "runner.lua"]) == []

@@ -486,8 +486,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "BRIDGE_DESTROYED": ("A", "gate", _d("bridge:s", "bid:i role:s last:s mode:s pos:p")),
     # Run 11: a dig broke into a cavern: phase queued (the explore shaft's plug project), done (the wall stands), failed
     # (refused, cancelled, blocked), none (no automatic plug: by hand); shaft = its top tile, z1 its bottom z, walls
-    # 'x,y,z' (the lower one first), n = water tiles of a cavern lake, hint = why failed / none
-    "CAVERN_PLUG": ("A", "runner", _d("phase:s proj:s", "plug:s why:s pos:p shaft:p z1:i walls:sa n:i hint:s")),
+    # 'x,y,z' (the lower one first), n = water tiles of a cavern lake, hint = why failed / none; state = the explore's
+    # state when the daily shaft check found the opening (running, stalled, blocked:<why>, breach:<why>, cancel, done,
+    # cancelled; Run 11 c1a14676)
+    "CAVERN_PLUG": ("A", "runner", _d("phase:s proj:s", "plug:s why:s pos:p shaft:p z1:i walls:sa n:i hint:s state:s")),
     # BUG-030: the siege's deep defense: why = destroyers (building destroyers in sight), army (> stations.core_ratio x
     # soldiers), weak (worn or iron/steel below stations.worn/metal); civilians to the separated refuge, squads at the core
     "SIEGE_DEEP": ("A", "siege", _d("why:sa", "bd:i races:sa units:ia vis:i soldiers:i worn:i metal:i refuge:s "
@@ -511,8 +513,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "WORK_DETAIL": ("B", "economy", _d("detail:s unit:i on:i", "n:i why:s")),
     "CAPTURE": ("B", "care", _d(opt="unit:i race:s")),
     # Run 11: why damp|warm|water|cavern|cavern_lake; was = the reported why a look at the revealed tiles raised, n =
-    # the connected water tiles counted; src report|tile|cancel|recheck
-    "BREACH_STOP": ("B", "runner", _d(opt="proj:s why:s pos:p src:s was:s n:i")),
+    # the connected water tiles counted; src report|tile|cancel|recheck|check (the daily shaft check stopped an explore
+    # that was still digging; state = its state then: running, stalled, blocked:<why>)
+    "BREACH_STOP": ("B", "runner", _d(opt="proj:s why:s pos:p src:s was:s n:i state:s")),
     "KERNEL_SLOW": ("B", "kern", _d("module:s", "ms:i factor:i")),
     "WEALTH": ("B", "siege", _d(opt="created:i exported:i imported:i")),
     "DRILL_RESULT": ("B", "drill", _d(opt="pass:f raised:i worn:i outside:i dbl:i")),
@@ -750,6 +753,9 @@ MANIFEST = named("manifest", Obj(
          "rooms": Arr(Obj(req={"id": ID, "tpl": TPL, "use": Str(enum=["used", "utility"]), "bbox": BBOX,
                               "tier": NAT}), hi=200),
          "workshops": Arr(Obj(req={"type": Str(maxbytes=40), "pos": POS}), hi=100),
+         # Run 11: tiles where a dig broke into a cavern (the runner's BREACH_STOP cavern/cavern_lake and shaft check):
+         # the explore ranking keeps every shaft above their levels
+         "caverns": Arr(POS, hi=32),
          "pit": POS, "depot": POS}))
 
 # ---------------------------------------------------------------- blueprint project

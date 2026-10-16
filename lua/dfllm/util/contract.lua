@@ -94,7 +94,8 @@ C.EVENTS = {
   -- BUG-030: a manifest bridge gate saw complete is gone from its footprint (destroyed); the siege's deep defense
   -- (building destroyers in sight, an army over stations.core_ratio x the soldiers, weak squads): refuge and core
   BRIDGE_DESTROYED = {cls = 'A', by = 'gate'}, SIEGE_DEEP = {cls = 'A', by = 'siege'},
-  -- Run 11: a dig broke into a cavern (lake): the explore shaft's plug (queued, done, failed) or none (by hand)
+  -- Run 11: a dig broke into a cavern (lake): the explore shaft's plug (queued, done, failed) or none (by hand); the
+  -- daily shaft check (any explore state, field state) queues it too
   CAVERN_PLUG = {cls = 'A', by = 'runner'},
   -- B: digest
   ALERT_START = {cls = 'B', by = 'siege'}, ALERT_END = {cls = 'B', by = 'siege'},
