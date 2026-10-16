@@ -81,3 +81,6 @@ kernel adds in a pass is not repaired in the same pass. TOOL_BLOCKED carries `eq
 `tests/lua/test_economy_tools.lua` (fail on the old code). Live check: after `dfllm reload`, kern.log `Woodcutters: ... holds no
 axe: equipment update requested again`; within a game day the member should carry an axe. If TOOL_BLOCKED still comes with
 `eq` >= 2, the engine's request is not enough and the cause lies elsewhere (tell Gordon; no tool is put into a hand).
+
+## Live check y420 autumn d10 (697a95d, Run 10): the equipment request alone does not equip
+After `dfllm reload` the kernel requested the equipment update again (kern.log: "holds no pick/axe: equipment update requested again"). About 2 game days later TOOL_BLOCKED #5887 `eq=2`: Miners 6 members, 4 with a pick in the Weapon slot, 2 without while 36 dig jobs are open; Woodcutters 1 member, 0 with an axe, 9 FellTree jobs open. 3 free picks and 5 free axes lie loose on the floor at (121,135,124) / (124,134,124). No tool was handed out by hand. Open: assign the tool through ownership or a Miners squad uniform (pick only), or stock the loose tools in a tools stockpile; reported to the dev session 2026-10-16.
