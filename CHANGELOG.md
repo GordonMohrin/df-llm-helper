@@ -1,5 +1,13 @@
 # CHANGELOG dfpilot
 
+## BRIDGE_CRUSH and the death cause `crushed` by a bridge, BUG-027 (2026-10-16)
+- gate records each bridge move (the pull, the move window, the units it saw within 5 tiles of the footprint while it pulled or the bridge moved);
+  public `gate.moves()`; GATE `moving` names units on or next to the footprint.
+- New class-A event `BRIDGE_CRUSH` (gate, on UNIT_DEATH, once per unit): a death in a move's window of a unit gate saw within 2 tiles of the footprint
+  (also a death still "missing" in the unit list), a found body on or next to it, or an incident DRAWBRIDGE; never a combat incident.
+- care's DEATH says `crushed` (src `bridge`) with `bridge` and the evidence (`dfllm.deaths.bridge`); Run 10's seven deaths all read `unknown (missing)`.
+- Tests: three cases in `tests/lua/test_care_deaths.lua`, one in `tests/lua/test_gate_footprint.lua`.
+
 ## Gates: call them in first, an occupied footprint is waiting, slow pulls go to the backup lever, BUG-027 (2026-10-16)
 - The lockdown's deferred civ alert sounds at once while a bridge it wants up waits for units on its footprint (call the civilians in first; the gate raises
   once the footprint is clear; reflex.lua `alert_due`).

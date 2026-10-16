@@ -42,6 +42,7 @@
 -- the alert draws the puller back. Not in BREACH (the lever-room rule below: attacker-side levers). pulls() tells the
 -- reflex what its deferred alert waits for and which pulls the alert blocks (levers outside every alert burrow).
 local geom = require('dfllm.util.geom')
+local DT = require('dfllm.deaths')      -- BUG-027: the bridge-death match (library, no module)
 
 local M = {name = 'gate', every = {ticks = 600}, critical = true, verbs = {},
            reports = {MIGRANT_ARRIVAL = true, MIGRANT_ARRIVAL_NAMED = true, D_MIGRANTS_ARRIVAL = true,
@@ -67,6 +68,10 @@ M.SCAN_R = 5
 -- on end is GATE_FAIL blocked); a pull in progress at the deadline (a worker took it, or the bridge moves) goes once to
 -- another linked lever and gets max(PULL_ALLOW, the measured lever latency) ticks more before GATE_FAIL slow
 M.PULL_ALLOW = 300
+-- BUG-027: each bridge move is recorded (gate.moves: the pull, the move window, every unit seen within SCAN_R tiles of
+-- the footprint while the pull was pending or the bridge moved) for MOVES_KEEP ticks after it settled; a death that
+-- matches one (dfllm.deaths.bridge) is BRIDGE_CRUSH (A) and care's DEATH cause `crushed` (src bridge)
+M.MOVES_KEEP, M.MOVES_MAX, M.SEEN_MAX = 2400, 16, 40
 M.NAME_MAX = 3             -- units named in a GATE / GATE_FAIL / GATE_FORCED text
 M.HOLD_LOG = 300           -- ticks between kern.log lines of one bridge's changing holders
 M.SETTLE = 50              -- ticks after a pull job left the queue before another may be queued
@@ -96,6 +101,7 @@ local rt      -- runtime per bridge: building ids, own job, settle, block, rotat
 local rt_ex   -- runtime: cached unmanaged bridge list {tick, list = {{name, bid, spec}}}
 local pub     -- precomputed state part {bridges = {...}}
 local last_pass   -- tick of the last full pass (BUG-027: frames in between only re-check pending pulls)
+local mvl         -- BUG-027 runtime: the last bridge moves, oldest first; crushed = {<unit id> = true} announced
 local dirty
 local PULL    -- df.job_type.PullLever
 
@@ -783,10 +789,10 @@ local function refresh(near, fp)
   return res
 end
 
--- the units of a scan within `m` tiles of the footprint (the ones that hold a pull)
+-- the units of a scan (or a plain list of them) within `m` tiles of the footprint (the ones that hold a pull)
 local function within(sc, m)
   local r = {}
-  for _, e in ipairs(sc and sc.list or {}) do if e.d <= m then r[#r + 1] = e end end
+  for _, e in ipairs(sc and (sc.list or sc) or {}) do if e.d <= m then r[#r + 1] = e end end
   return r
 end
 
@@ -936,9 +942,59 @@ local function unblock(r, now)
 end
 local function allow() return math.max(M.PULL_ALLOW, st.lat and st.lat.t or 0) end
 
-local function observe(K, name, r, s, now)
+-- BUG-027: units seen near the footprint while the bridge is pulled or moves, the closest sighting per unit
+local function mv_note(m, list, now)
+  for _, e in ipairs(list or {}) do
+    local i = m.by[e.id]
+    if not i and #m.seen < M.SEEN_MAX then
+      m.seen[#m.seen + 1] = {id = e.id, k = e.k, d = e.d, x = e.x, y = e.y, z = e.z, t = now}
+      m.by[e.id] = #m.seen
+    elseif i and e.d < m.seen[i].d then
+      m.seen[i] = {id = e.id, k = e.k, d = e.d, x = e.x, y = e.y, z = e.z, t = now}
+    end
+  end
+end
+
+local function mv_prune(now)
+  local keep = {}
+  for _, m in ipairs(mvl.list) do
+    if now - (m.t1 or now) <= M.MOVES_KEEP then keep[#keep + 1] = m end
+  end
+  while #keep > M.MOVES_MAX do table.remove(keep, 1) end
+  mvl.list = keep
+end
+
+-- a bridge left its settled state (or flipped between two passes): open a move record seeded with the units the last
+-- scan saw near the footprint (the pull was done then)
+local function mv_open(K, name, r, s, now, fp, prev, cur)
+  local to = s == 'moving' and (r.settled == 'up' and 'down' or 'up') or s
+  local m = {t = now, b = name, bid = r.bid, fp = fp and {fp[1], fp[2], fp[3], fp[4], fp[5], fp[6]} or nil, to = to,
+             pull = r.job and r.job.queued or -1, lever = r.job and r.job.lever or -1, seen = {}, by = {}}
+  if prev and now - prev.t <= 2 * M.FAST then mv_note(m, prev.list, prev.t) end
+  if cur then mv_note(m, cur.list, now) end
+  mvl.list[#mvl.list + 1] = m
+  mv_prune(now)
+  if s == 'moving' then r.mv = m else m.t1 = now end
+  return m
+end
+
+local function observe(K, name, r, s, now, fp, prev, cur)
   if s == r.last then return end
-  if r.last ~= nil then K.emit('GATE', 'C', name .. ' ' .. s, {bridge = name, state = s}) end
+  local m
+  if (s == 'moving' or ((s == 'up' or s == 'down') and (r.last == 'up' or r.last == 'down'))) and not r.mv then
+    m = mv_open(K, name, r, s, now, fp or r.foot, prev, cur)
+  elseif r.mv and s ~= 'moving' then
+    r.mv.t1, r.mv = now, nil
+  end
+  if r.last ~= nil then
+    local d = {bridge = name, state = s}
+    local near = m and within(m.seen, M.MARGIN)
+    if near and #near > 0 then                        -- BUG-027: it moves with units on or next to it
+      d.units = ids_of(near)
+      K.log('warn', 'gate: %s moving %s with %s', name, m.to, who(near, m.fp))
+    end
+    K.emit('GATE', 'C', name .. ' ' .. s, d)
+  end
   r.last = s
   if s == 'moving' or s == 'unknown' then return end
   local br = st.br[name]
@@ -1007,19 +1063,21 @@ local function control(K, name, spec, now)
   local w = br and br.want
   resolve(r, spec, now, w ~= nil and w ~= r.last)
   local s = read(r)
-  observe(K, name, r, s, now)
-  r.stuck, r.foot, r.spec = nil, spec.fp, spec
+  r.foot, r.spec, r.stuck = spec.fp, spec, nil
   if w ~= nil and w ~= s and not r.want_ms then r.want_ms = K.now().ms end      -- GATE_FAIL names real seconds
   -- BUG-027: who is on or near the footprint, only while the bridge has work: a census pass every FAST ticks, the
   -- positions of the units it found near in the frames between
   local sc
-  if r.job or (w ~= nil and w ~= s) then
+  local prev = r.near
+  if r.job or (w ~= nil and w ~= s) or s == 'moving' then
     if r.near and now >= r.near.t and now - r.near.t < M.FAST then sc = refresh(r.near, spec.fp)
     else
       sc = around(K, spec.fp, M.SCAN_R)
       r.near = sc and {t = now, list = sc.list} or nil
     end
   else r.near = nil end
+  observe(K, name, r, s, now, spec.fp, prev, sc)
+  if r.mv and sc then mv_note(r.mv, sc.list, now) end       -- who stands near it while it moves
   -- 1. our own queued pull
   if r.job then
     local lv = df.building.find(r.job.lever)
@@ -1224,7 +1282,7 @@ local function update_every(K)
     end
   end
   local want = fast and M.FAST or M.SLOW
-  for _, r in pairs(rt) do if r.job then want = M.PENDING; break end end      -- BUG-027: every frame
+  for _, r in pairs(rt) do if r.job or r.mv then want = M.PENDING; break end end   -- BUG-027: every frame
   if M.every.ticks ~= want then M.every = {ticks = want} end
 end
 
@@ -1410,6 +1468,7 @@ function M.init(K)
     end
   end
   rt, rt_ex, pub, dirty, PULL, last_pass = {}, nil, nil, false, nil, nil
+  mvl = {list = {}, crushed = {}}
   pl, rooms_c, lb_name = {rooms = {}}, nil, nil
   M.every = {ticks = FAST_MODES[K.mode()] and M.FAST or M.SLOW}
 end
@@ -1459,7 +1518,7 @@ end
 -- a pull of ours pending, so a unit stepping next to the footprint cancels it before the puller is done
 local function pending_pass(K, now)
   for name, r in pairs(rt) do
-    if r.job and r.spec then control(K, name, r.spec, now) end
+    if (r.job or r.mv) and r.spec then control(K, name, r.spec, now) end
   end
   update_every(K)
   flush(K)
@@ -1552,6 +1611,19 @@ function M.waiting(K, bridge)
   return nil
 end
 
+-- public (BUG-027, care): the recorded bridge moves, oldest first, as plain copies: {t, t1, b, bid, fp, to, pull, lever,
+-- seen = {{id, k, d, x, y, z, t}}} (t = the tick gate saw the move start, t1 = settled, nil while moving; pull = the
+-- tick our pull was queued, -1 a foreign one; seen = the closest sighting of each unit within SCAN_R tiles)
+function M.moves(K)
+  local r = {}
+  for i, m in ipairs(mvl and mvl.list or {}) do
+    local seen = {}
+    for j, e in ipairs(m.seen) do seen[j] = {id = e.id, k = e.k, d = e.d, x = e.x, y = e.y, z = e.z, t = e.t} end
+    r[i] = {t = m.t, t1 = m.t1, b = m.b, bid = m.bid, fp = m.fp, to = m.to, pull = m.pull, lever = m.lever, seen = seen}
+  end
+  return r
+end
+
 -- public (FR-49): the fort is sealed by its bridges: >= 1 gate bridge (manifest outer/inner, else the unmanaged ones
 -- in hand) and every one of them up. siege counts sealed_ticks with it when the manifest has no outer/inner bridge.
 function M.sealed(K)
@@ -1638,7 +1710,38 @@ function M.reset_kpi(K)
   flush(K)
 end
 
+-- BUG-027: a dead unit that gate saw on or next to a bridge as it was pulled or moved (by id; a missing death too: gate
+-- saw it there alive), or whose body lies on or next to it (a found death of a fort member or tame animal), or whose
+-- incident says DRAWBRIDGE, within the move's window: BRIDGE_CRUSH (A), once per unit. A combat incident is no crush.
+local function unit_death(K, ev)
+  local id = ev.unit
+  if math.type(id) ~= 'integer' or not mvl or #mvl.list == 0 or mvl.crushed[id] then return end
+  local now = ev.tick or K.now().tick
+  local u = df.unit.find(id)
+  local ic = u and DT.incident(u)
+  if ic and ic.cause and DT.TYPE[ic.cause] == 'killed' then return end
+  local pos
+  if u and not (ic and not ic.found) then
+    local U = dfhack.units
+    local ok, own = pcall(function() return U.isOwnGroup(u) or U.isTame(u) end)
+    if ok and own then
+      local x, y, z = U.getPosition(u)
+      if x then pos = {x, y, z} end
+    end
+  end
+  local m = DT.bridge(id, now, mvl.list, pos, ic and ic.cause)
+  if not m then return end
+  mvl.crushed[id] = true
+  local who_k = m.k or 'unit'
+  local txt = string.format('%s %d crushed: %s', who_k, id, DT.bridge_why(m))
+  local d = {bridge = tostring(m.b), unit = id, bid = m.bid, pull = m.pull, t = m.t, to = m.to, how = m.how, k = m.k}
+  if m.pos then d.pos = m.pos end
+  K.emit('BRIDGE_CRUSH', 'A', cut(txt, 200), d)
+  K.log('warn', 'gate: %s', txt)
+end
+
 M.on = {
+  UNIT_DEATH = unit_death,
   -- D-14 up: migrants and caravans open the PEACE window (trade's state keeps it open while a caravan is here)
   REPORT = function(K, ev)
     local now = K.now().tick
@@ -1655,7 +1758,7 @@ M.on = {
     for _, name in ipairs(bridge_names(man)) do
       local r = runtime(name)
       resolve(r, man.bridges[name], now)
-      observe(K, name, r, read(r), now)
+      observe(K, name, r, read(r), now, man.bridges[name].fp)
       check_fail(K, name, now, ev.from) -- settle the old epoch first (SIEGE->BREACH at T+900 = its deadline)
       local br = st.br[name]
       if ev.to == 'PEACE' then

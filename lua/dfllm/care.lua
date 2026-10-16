@@ -2464,10 +2464,13 @@ end
 -- the cause of one citizen's death (dfllm.deaths.classify); `since` = the death tick (a report up to half a day
 -- older counts: eventful delivers UNIT_DEATH up to 100 ticks late); groups = the announcement log, read once
 local function classify(K, c, p, id, since, groups)
+  local okm, mv = K.call('gate', 'moves')          -- BUG-027: the bridge moves (a citizen crushed by a bridge)
+  mv = okm and type(mv) == 'table' and mv or nil
   local u = df.unit.find(id)
-  if not u then return {cause = 'unknown', src = 'none', why = {'unit gone'}, found = true} end
+  if not u then return DT.gone(id, since, mv) or {cause = 'unknown', src = 'none', why = {'unit gone'}, found = true} end
   local ok, res = pcall(DT.classify, u, {mood = mood_of(p, id), since = since and since - DAY // 2, groups = groups,
-                                         reports = c.death_reports, thirst = c.death_thirst, hunger = c.death_hunger})
+                                         reports = c.death_reports, thirst = c.death_thirst, hunger = c.death_hunger,
+                                         died = since, bridges = mv})
   if ok and type(res) == 'table' then return res end
   K.log('warn', 'care: death cause of %d unreadable: %s', id, tostring(res))
   return {cause = 'unknown', src = 'none', why = {'unreadable'}, found = true}
@@ -2485,6 +2488,7 @@ local function death_d(id, res, revised)
   if res.patient then d.patient = 1 end
   if res.pos then d.pos = res.pos end
   if res.job then d.job = res.job end
+  if res.bridge then d.bridge = trunc(tostring(res.bridge), 20) end
   if revised then d.revised = 1 end
   return d
 end

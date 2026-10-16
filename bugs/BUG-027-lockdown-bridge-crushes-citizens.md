@@ -1,5 +1,5 @@
 # BUG-027 the lockdown raises bridge 17880 on top of citizens: two deaths on its footprint
-Status: fixed in the core: occupancy check before every pull (1ded2eb), alert-first order, waiting-aware deadline and backup lever (Claude, 2026-10-16; offline, live-untested); BRIDGE_CRUSH follows
+Status: fixed: occupancy check before every pull (1ded2eb), alert-first order, waiting-aware deadline and backup lever (c927c4a), BRIDGE_CRUSH and the death cause (Claude, 2026-10-16; offline, live-untested)
 Severity: critical (7 deaths so far, incl. a baby; every invasion costs citizens to our own gate)
 Found: 2026-10-16, Run 10 fort Erushthak Handlelock (region2-site97), y417 autumn and y418 summer, Claude playing
 Module: `lua/dfllm/gate.lua`, `lua/dfllm/siege.lua` (T0..T0+450: O1/B1 up "as soon as nobody (soldiers excluded) is outside, or at T+450")
@@ -111,6 +111,31 @@ Tests: `tests/lua/test_siege.lua` slow O1 pull at the deadline goes to the backu
 slow: GATE_FAIL `slow` at deadline + 300, then BREACH; the soldier on B1: BREACH only once the army is within 10 tiles.
 `tests/lua/test_gate_footprint.lua`: a unit next to a lockdown bridge sounds the alert at once (the other slow pulls
 do not hold it back), the bridge rises once he is inside. All fail on 1ded2eb.
+
+### Part 3: BRIDGE_CRUSH and the death cause (Claude, 2026-10-16)
+- **Move records** (gate): each bridge move gate sees (it leaves up/down, or flips between two passes) is recorded with
+  the tick gate saw it start and settle, the bridge and building id, the footprint, the direction, our pull's tick and
+  lever (-1 for a foreign pull) and the closest sighting of every unit within 5 tiles of the footprint while the pull
+  was pending or the bridge moved (the last scan before the move, then every frame while it moves). Kept 2,400 ticks
+  after it settled, at most 16; public `gate.moves()`. GATE (C) `moving` carries `units` (and a kern.log warn) when
+  someone is on or next to the footprint as it starts to move.
+- **BRIDGE_CRUSH (A)** (gate, on UNIT_DEATH; once per unit): the death falls between 100 ticks before the move was seen
+  and 200 after it settled, and gate saw the unit within 2 tiles of the footprint (`how=seen`; also for a death still
+  "missing" in the unit list: gate saw the dwarf there alive, as the player watching the bridge did), or the body of a
+  found death of a fort member or tame animal lies on or next to the footprint (`how=pos`), or the incident says
+  DRAWBRIDGE (`how=incident`). A combat incident (an attacker) is never a crush. Fields: bridge, unit, bid, pull, t, to,
+  how, k, pos; text `citizen 26099 crushed: bridge B1 17880 up (pulled at <tick>), last seen on it at 128,129,122`.
+- **DEATH cause** (dfllm.deaths, care passes `gate.moves()`): the same match makes the cause `crushed` (src `bridge`, or
+  `incident` for DRAWBRIDGE) with `bridge` and the evidence in `why`; a missing death that gate saw on the bridge gets
+  its cause at once (`... last seen on it at 128,129,122; missing in the unit list`), one that is still missing later
+  is matched again by care's re-check while the record lasts. The unit's own position is read only for a found death.
+- care.lua: two lines (the `gate.moves()` call and `d.bridge`); schema/CONTRACTS: BRIDGE_CRUSH (A), DEATH `bridge`,
+  `gate.moves()`; RULES §7.
+
+Tests: `tests/lua/test_care_deaths.lua` (the library match: sighting, body, incident, window; a missing death gate saw
+on B1 is crushed at once; a found body on the footprint and DRAWBRIDGE name the bridge, combat stays killed, a death far
+away stays unknown); `tests/lua/test_gate_footprint.lua` (in a siege a foreign pull moves B1 with a miner on it: GATE
+`moving` names him, his "missing" death is BRIDGE_CRUSH `seen` once; a death far from any move is none).
 
 Live check (next siege or a drill on Handlelock): with somebody on the B1 corridor, `events` shows
 `GATE B1 up waits: ...` and no `LEVER pull B1 up` until the corridor is clear; kern.log has no

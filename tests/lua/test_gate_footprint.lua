@@ -184,4 +184,44 @@ T.test('BUG-027 order at an arrival: a unit next to a bridge the lockdown wants 
   T.eq(S.bstate(W, 'B1'), 'up')
 end)
 
+T.test('BUG-027 BRIDGE_CRUSH: in a siege a foreign pull (the player\'s, or one from before a reload) moves B1 with a ' ..
+       'miner on it; he dies "missing": BRIDGE_CRUSH (A) names bridge, unit and how; once; none far from a move',
+       function()
+  local W = world{units = cast({S.cit(26099, 51, 40)}), lever_cfg = {[21] = {worker = 100, pull = 40}}}
+  S.foreign_job(W, 21)                                         -- gate never pulls next to it (single pending pull)
+  W.event('INVASION', {id = 9})
+  run(W, 300)
+  T.eq(W.K.mode(), 'SIEGE')
+  T.eq(S.bstate(W, 'B1'), 'up')
+  T.eq(#S.pulls(W, 'B1'), 0, 'not our pull')
+  T.eq(#W.crushed, 1, 'the sim saw him on the moving bridge')
+  local ok, moves = W.K.call('gate', 'moves')
+  T.ok(ok and #moves >= 1)
+  local m = moves[#moves]
+  T.eq({m.b, m.bid, m.to, m.pull}, {'B1', 2, 'up', -1})
+  T.eq({m.seen[1].id, m.seen[1].d, m.seen[1].k}, {26099, 0, 'citizen'})
+  local g
+  for _, e in ipairs(W.find_events('GATE')) do if e.d.bridge == 'B1' and e.d.state == 'moving' then g = e end end
+  T.eq(g.d.units, {26099}, 'GATE moving names him')
+  local u = W.unit(26099)
+  W.kill(26099)
+  u.counters = {death_id = 9001}
+  df.incident = {find = function(id) if id == 9001 then return {death_cause = -1, criminal = -1,
+                                                                 flags = {discovered = false}} end end}
+  W.event('UNIT_DEATH', {unit = 26099})
+  run(W, 20)
+  local bc = W.find_events('BRIDGE_CRUSH')
+  T.eq(#bc, 1)
+  T.eq({bc[1].cls, bc[1].d.bridge, bc[1].d.unit, bc[1].d.how, bc[1].d.pull, bc[1].d.to, bc[1].d.pos},
+       {'A', 'B1', 26099, 'seen', -1, 'up', {51, 40, Z}})
+  T.ok(bc[1].msg:find('citizen 26099 crushed: bridge B1 2 up, last seen on it at 51,40,' .. Z, 1, true), bc[1].msg)
+  W.event('UNIT_DEATH', {unit = 26099})
+  run(W, 20)
+  T.eq(#W.find_events('BRIDGE_CRUSH'), 1, 'once per unit')
+  W.kill(1)                                                   -- inside Kern+, never near a bridge
+  W.event('UNIT_DEATH', {unit = 1})
+  run(W, 20)
+  T.eq(#W.find_events('BRIDGE_CRUSH'), 1)
+end)
+
 T.done()
