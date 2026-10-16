@@ -247,7 +247,7 @@ the lever tiles (`Hebel+`) while pulls are pending; until threat 0 for 2 days. *
 `config/reflex.json` `intake`, on): in SIEGE the squads stand inside B1 with drink (BUG-029); when soldiers, worn, army
 size, traps and the field allow it, B1 lets them into the killing field, rises, O1 lets up to 6 hostiles into bailey and
 trap hall, rises, the field is cleared, the squads go back; INTAKE (B) per phase, WAVE_FAIL (A) when it goes wrong.
-**Military:** squads A, B melee, C crossbows, ≤ 10 each; stations > 2 tiles from every bridge (BUG-032); Constant training, never Off duty;
+**Military:** squads A, B melee, C crossbows, ≤ 10 each; stations > 2 tiles from every bridge (BUG-032); in a siege a melee squad below half is refilled from healthy core civilians, never the refuge; Constant training, never Off duty;
 Replace clothing + full metal + shield; KPI is worn %, never "assigned". Kill orders only inside
 manifest kill boxes, never into shafts or stairs. No civilian reserve squads.
 **Captives:** haul inside at once, then a pit zone; comrades free caged invaders.

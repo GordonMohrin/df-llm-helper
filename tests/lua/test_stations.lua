@@ -47,7 +47,11 @@ local function world(o)
   function snap.far(K, x, y, z) return y < 25 end
   package.loaded['dfllm.reflex'] = nil
   X.load(W, {'military'}, {X.runner('P5'), snap, require('dfllm.reflex')})
-  W.run(9, {skip = 9})                            -- military: squads A, B (melee) and C (crossbows), 8 soldiers
+  -- military staffs A, B (melee) and C (crossbows), 8 soldiers, in PEACE (the army out of sight for that frame): a
+  -- squad created in a siege is refilled to military.HOLD_MIN at once (Run 11 siege 3)
+  for _, u in ipairs(units) do if u.invader then W.unit(u.id)._m.hidden = true end end
+  W.run(9, {skip = 9})
+  for _, u in ipairs(units) do if u.invader then W.unit(u.id)._m.hidden = nil end end
   X.equip_all(W)
   return W
 end

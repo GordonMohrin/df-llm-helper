@@ -63,6 +63,13 @@ M.SPREAD = 1                -- BUG-032: tiles around its station point DF stands
 M.SPREAD_LIM = {0, 5}
 M.RELOC_TTL = 6000          -- BUG-032: ticks a station's replacement is kept (revealed tiles change slowly)
 M.NOTE_EVERY = 2400         -- BUG-032: a squad with no station clear of a bridge it holds is told at most this often
+-- Run 11 siege 3 (y432/433: 25 dead, pop 54 -> 29, soldiers 10 -> 5, O1 destroyed): squads A and B emptied and were
+-- never refilled, only C (5) remained. In SIEGE/BREACH (SIEGE_FILL) a melee squad below half its target is refilled
+-- from healthy adult civilians who stand in Kern+ (the core), never from the refuge; the first melee squad's target is
+-- at least HOLD_MIN then (the core stations need them; neither the shrunk population target nor the tools-first rule
+-- lowers it in a siege). Tool-detail members only after everybody else (they keep their place in PEACE).
+M.HOLD_MIN = 5              -- melee soldiers the core stations need in a siege (half a squad: the routine's minimum)
+M.SIEGE_THIRST, M.SIEGE_HUNGER = 25000, 50000   -- healthy: below DF's thirsty / hungry marks, no wound, awake
 M.RETRY, M.RETRY_MAX = 1200, 33600
 M.NOTIFY_AFTER = 2          -- failed squad creations before DECISION_NEEDED (once per boot)
 -- routine names (CONTRACTS §5 squad_routine resolves by name); first exact, then substring
@@ -109,6 +116,7 @@ M.LOOT = {per_run = 40, every = 3600, cats = {{'WEAPON', 'weapon'}, {'ARMOR', 'b
 local WORN_ROLES = {'Worn', 'Weapon', 'Strapped'}
 
 local seat_leader   -- defined after the squad helpers
+local SIEGE_FILL, hold_floor, siege_short   -- Run 11 siege 3, defined before M.step
 local st      -- persisted m.military: {v, sq = {A = {id, uni, kind, auto}}, posture, pt, unstick}
 local rt      -- runtime: retry ticks, applied orders, kpi cache, notified flags
 local dirty
@@ -307,11 +315,57 @@ end
 
 local function labors(u) return try(function() return u.status.labors end) end
 
--- candidates sorted best first: combat value, then strength + toughness, then id; plus exclusion counts
-function M.recruits(K)
+-- Run 11 siege 3: the manifest's Kern+ and refuge burrows (roles kern/refuge, refuge.burrow wins), as gate reads them
+local function core_home(K)
+  local man = K.manifest()
+  local kern, refuge
+  local names = {}
+  for name in pairs(type(man.burrows) == 'table' and man.burrows or {}) do names[#names + 1] = name end
+  table.sort(names)
+  for _, name in ipairs(names) do
+    local role = type(man.burrows[name]) == 'table' and man.burrows[name].role
+    if role == 'kern' and (kern == nil or name == 'Kern+') then kern = name end
+    if role == 'refuge' and (refuge == nil or name == 'Tiefe+') then refuge = name end
+  end
+  if type(man.refuge) == 'table' and type(man.refuge.burrow) == 'string' then refuge = man.refuge.burrow end
+  local function find(n) return n and try(function() return dfhack.burrows.findByName(n) end) or nil end
+  return {kern = find(kern or 'Kern+'), refuge = find(refuge or 'Tiefe+'), kname = kern or 'Kern+'}
+end
+
+local function on_burrow(b, x, y, z)
+  if not b or not x then return false end
+  return try(function() return dfhack.burrows.isAssignedTile(b, {x = x, y = y, z = z}) end) == true
+end
+
+-- in the core: on a Kern+ tile and not on a refuge tile (a citizen in the refuge stays there)
+local function core_where(home, u)
+  local x, y, z = nil, nil, nil
+  local ok, a, b, c = pcall(dfhack.units.getPosition, u)
+  if ok then x, y, z = a, b, c end
+  if on_burrow(home.refuge, x, y, z) then return 'refuge' end
+  if on_burrow(home.kern, x, y, z) then return nil end
+  return 'outside'
+end
+
+-- healthy enough to fight now: no wound, awake, not thirsty or hungry (fields a fake unit lacks read as fine)
+local function healthy(u)
+  local wounds = try(function() return #u.body.wounds end) or 0
+  local out = try(function() return u.counters.unconscious end) or 0
+  local th = try(function() return u.counters2.thirst_timer end) or 0
+  local hu = try(function() return u.counters2.hunger_timer end) or 0
+  return wounds == 0 and out <= 0 and th < M.SIEGE_THIRST and hu < M.SIEGE_HUNGER
+end
+
+-- candidates sorted best first: combat value, then strength + toughness, then id; plus exclusion counts.
+-- siege (Run 11 siege 3, SIEGE/BREACH): only healthy adults standing in Kern+ and not in the refuge; members of the
+-- tool details and holders of a tool labor come last instead of never (counted as tool all the same)
+function M.recruits(K, siege)
   local cu = K.census.u
   local out, why = {}, {tool = 0, sole = 0, noble = 0, mood = 0, child = 0, squad = 0}
+  if siege then why.outside, why.refuge, why.hurt = 0, 0, 0 end
   if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then return out, why end
+  local home = siege and core_home(K)
+  if siege and not home.kern then why.no_core = 1; return out, why end   -- no Kern+: the core cannot be told
   local adults = {}
   for _, id in ipairs(cu.ids) do
     local u = df.unit.find(id)
@@ -333,7 +387,7 @@ function M.recruits(K)
   local sole = {}
   for l, n in pairs(count) do if n == 1 then sole[holder[l]] = true end end
   local tools = tool_members()
-  local cand = {}
+  local cand, cand2 = {}, {}
   for _, u in ipairs(adults) do
     local lab = labors(u)
     local tool_labor = false
@@ -341,21 +395,30 @@ function M.recruits(K)
       for _, l in ipairs(M.TOOL_LABORS) do if try(function() return lab[l] end) then tool_labor = true end end
     end
     local mood = try(function() return u.mood end)
+    local where = siege and core_where(home, u)
+    local function c() return {id = u.id, cv = M.cv(u), body = attr(u, 'STRENGTH') + attr(u, 'TOUGHNESS')} end
     if (try(function() return u.military.squad_id end) or -1) >= 0 then why.squad = why.squad + 1
-    elseif tools[u.id] or tool_labor then why.tool = why.tool + 1
+    elseif where then why[where] = why[where] + 1
+    elseif siege and not healthy(u) then why.hurt = why.hurt + 1
+    elseif tools[u.id] or tool_labor then
+      why.tool = why.tool + 1
+      if siege and not sole[u.id] and not noble(u) and not (mood ~= nil and mood >= 0) then cand2[#cand2 + 1] = c() end
     elseif sole[u.id] then why.sole = why.sole + 1
     elseif noble(u) then why.noble = why.noble + 1
     elseif mood ~= nil and mood >= 0 then why.mood = why.mood + 1
     else
-      cand[#cand + 1] = {id = u.id, cv = M.cv(u), body = attr(u, 'STRENGTH') + attr(u, 'TOUGHNESS')}
+      cand[#cand + 1] = c()
     end
   end
-  table.sort(cand, function(a, b)
+  local function best(a, b)
     if a.cv ~= b.cv then return a.cv > b.cv end
     if a.body ~= b.body then return a.body > b.body end
     return a.id < b.id
-  end)
-  for i, c in ipairs(cand) do out[i] = c.id end
+  end
+  table.sort(cand, best)
+  table.sort(cand2, best)
+  for _, c in ipairs(cand) do out[#out + 1] = c.id end
+  for _, c in ipairs(cand2) do out[#out + 1] = c.id end
   return out, why
 end
 
@@ -960,15 +1023,22 @@ function seat_leader(K, k, s, recruits)
   stuck(K)
 end
 
-local function fill(K, k, s, want, recruits)
+-- siege (Run 11 siege 3): in SIEGE/BREACH only a squad below half its target is refilled, from M.recruits(K, true)
+local function fill(K, k, s, want, recruits, siege)
   local mem = members(s)
   local n = #mem
-  if n < want and retry_ok(K, 'add' .. k) and leader_set(s) then
-    local added = 0
+  local low = not siege or n < (want + 1) // 2
+  if n < want and low and retry_ok(K, 'add' .. k) and leader_set(s) then
+    local added, ids = 0, {}
     while n < want and added < M.ADD_PER_STEP and #recruits() > 0 do
       local uid = table.remove(recruits(), 1)
-      if K.act.squad_add(s.id, uid) then n, added = n + 1, added + 1
+      if K.act.squad_add(s.id, uid) then n, added, ids[#ids + 1] = n + 1, added + 1, uid
       else backoff(K, 'add' .. k); break end
+    end
+    if siege and added > 0 then
+      rt.kpi = nil
+      K.log('warn', 'military: %s refill: squad %s %d -> %d of %d with healthy civilians from the core: %s',
+            K.mode(), k, n - added, n, want, table.concat(ids, ','))
     end
   elseif n > want + M.KEEP_EXTRA and K.mode() == 'PEACE' then
     local worst                                  -- lowest combat value, never the leader
@@ -1733,6 +1803,37 @@ function M.init(K)
   M.every = {ticks = K.mode() == 'PEACE' and M.SLOW or M.FAST}
 end
 
+-- Run 11 siege 3: the wants in a siege: the first melee squad (by the plan, the tools-first rule ignored) at least
+-- HOLD_MIN, the others their targets
+SIEGE_FILL = {SIEGE = true, BREACH = true}
+function hold_floor(K, per)
+  local r = {}
+  for k, v in pairs(per) do r[k] = v end
+  for _, sp in ipairs(active(K)) do
+    if sp.kind == 'melee' then
+      if (r[sp.key] or 0) < M.HOLD_MIN then r[sp.key] = M.HOLD_MIN end
+      break
+    end
+  end
+  return r
+end
+
+-- a squad below half its want in a siege and nobody in the core to refill it: kern.log says why, at most every
+-- NOTE_EVERY ticks per squad
+function siege_short(K, k, s, want, recruits, why)
+  local n = #members(s)
+  if n >= (want + 1) // 2 or #recruits() > 0 then return end
+  local now = now_tick(K)
+  rt.sf_note = rt.sf_note or {}
+  if rt.sf_note[k] and now >= rt.sf_note[k] and now - rt.sf_note[k] < M.NOTE_EVERY then return end
+  rt.sf_note[k] = now
+  why = why or {}
+  K.log('warn', 'military: %s: squad %s %d of %d and no healthy civilian in the core to refill it (in the refuge %d, '
+        .. 'outside the core %d, hurt %d, in squads %d, sole key labor %d, nobles %d, moods %d%s)', K.mode(), k, n, want,
+        why.refuge or 0, why.outside or 0, why.hurt or 0, why.squad or 0, why.sole or 0, why.noble or 0, why.mood or 0,
+        why.no_core and ', no Kern+ burrow' or '')
+end
+
 function M.step(K, budget, ctx)
   local now = now_tick(K)
   local mode = K.mode()
@@ -1747,10 +1848,15 @@ function M.step(K, budget, ctx)
   local _, per, zero, short = M.targets(K)
   if zero and mode == 'PEACE' then release(K, zero)
   elseif short and mode == 'PEACE' then release(K, 'tools', 'melee') end
+  local siege = SIEGE_FILL[mode] == true
+  if siege then per = hold_floor(K, per) end                          -- Run 11 siege 3
   rt.wguard = weapon_guard(K, per)
   rt.wexcess = tool_excess(rt.wguard)
-  local list
-  local function recruits() list = list or M.recruits(K); return list end   -- only when needed
+  local list, why
+  local function recruits()                                           -- only when needed
+    if not list then list, why = M.recruits(K, siege) end
+    return list
+  end
   for _, sp in ipairs(M.SQUADS) do
     local want = per[sp.key] or 0
     local e = st.sq[sp.key]
@@ -1760,7 +1866,8 @@ function M.step(K, budget, ctx)
         if want > 0 and not leader_set(s) then seat_leader(K, sp.key, s, recruits) end   -- addToSquad needs one
         ensure_uniform(K, sp.key, s, want)
         ensure_weapons(K, sp.key, s)
-        fill(K, sp.key, s, want, recruits)
+        fill(K, sp.key, s, want, recruits, siege)
+        if siege then siege_short(K, sp.key, s, want, recruits, why) end
       end
     end
   end

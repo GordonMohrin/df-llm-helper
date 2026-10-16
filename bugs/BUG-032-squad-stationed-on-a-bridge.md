@@ -1,5 +1,5 @@
 # BUG-032 A squad stationed next to B2 holds the BREACH raise: GATE_FAIL B2 'not up after 908 ticks'
-Status: fixed (offline, live-untested): stations clear of every bridge footprint and its ring, the squad that holds a raise re-stationed, fortcore stations moved, validator check; part 2: O1's pull in the deep defense goes to a lever the confined civilians may take
+Status: fixed (offline, live-untested): stations clear of every bridge footprint and its ring, the squad that holds a raise re-stationed, fortcore stations moved, validator check; part 2: O1's pull in the deep defense goes to a lever the confined civilians may take; part 3: melee squads refilled in a siege from the core
 Severity: high (wrong decision: our own station kept the core seal down in a BREACH; the gate rule that held it is right)
 Found: 2026-10-16, Run 11 fort Kilrudrabed (site98), y432 spring, a cave dragon siege and a snatcher, then BREACH (0 deaths
 so far), kernel of main up to 276b252, from the game session's events
@@ -114,7 +114,30 @@ by hand was taken at once; the civilians stood confined in Tiefe+ (deep defense,
   (or on a lever of the alert's burrows); no `GATE_FAIL ... no_worker` with the civilians in Tiefe+; with a hostile near
   the Z3 levers a GATE_FAIL `outside_alert ... Tiefe+` instead of pulls nobody takes.
 
+## Part 3: melee squads never refilled in a siege (Run 11 siege 3, same session)
+Siege 3 of Run 11 ended with 25 dead (pop 54 -> 29, soldiers 10 -> 5) and O1 destroyed; squads A and B emptied (deaths) and
+were never refilled, only C (5) remained (BUG-032's station and part 2 were among the causes).
+- **Cause (from the code):** military's upkeep refills in every mode, but to the population target (`targets`: the share of
+  the adults, shrinking with the deaths: 22 adults -> A 1, B 1) and only from `recruits()`, which looks neither at the
+  confinement nor at health (it may pull a civilian out of the refuge); the tools-first rule (fewer than 3 axes or picks)
+  takes the melee squads out of the targets entirely, so an emptied A/B had no target at all. Which of these held live is
+  not known (no kern.log at hand).
+- **Fix (military.lua):** in SIEGE/BREACH a melee squad below half its target is refilled (act.squad_add, the squads
+  screen) from `recruits(K, siege)`: healthy adults (no wound, awake, thirst < 25,000, hunger < 50,000) standing in Kern+
+  and not in the refuge, tool-detail members and tool-labor holders last (sole key-labor holders, nobles and moods
+  never); the first melee squad's target is at least `HOLD_MIN` (5, half a squad: the core stations) then, ignoring the
+  shrunk target and the tools-first rule; at or above half no top-up; kern.log `military: SIEGE refill: squad A 0 -> 5 of
+  5 with healthy civilians from the core: ...`, or (at most every 2,400 ticks) `... no healthy civilian in the core to
+  refill it (in the refuge N, outside the core N, hurt N, ...)`. PEACE unchanged.
+- Tests (`tests/lua/test_military_refill.lua`, fail on 94446e8 except the PEACE case): A and B die in a SIEGE -> A 5, B its
+  target; never from the refuge, outside, hurt or thirsty (the best fighters stand there); the tools-first rule; no top-up
+  at half; nobody in the core -> the kern.log line; PEACE unchanged. The intake and station test worlds now staff their
+  squads in PEACE (a squad created in a siege is refilled to HOLD_MIN at once).
+- Live check: in the next siege with losses, kern.log `military: SIEGE refill: squad A ...` and the squads screen; no
+  citizen leaves Tiefe+ for a squad.
+
 ## Open
+- Part 3 is a different bug than the stations; it lives here because 032 was this session's number (split it if wanted).
 - Part 2 is a best guess: if `lever pull --priority` by hand is taken where the kernel's pull is not although the lever lies
   inside the alert's burrows, the difference is elsewhere (compare `dfllm events --type LEVER` with the hand pull's job).
 - The re-station keeps a squad military leads at its new station until the posture changes; after the raise it does not

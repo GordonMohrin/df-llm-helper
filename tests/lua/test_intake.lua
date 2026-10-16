@@ -41,7 +41,11 @@ local function world(o)
   if o.traps then function snap.traps(K, boxes) return o.traps[1], o.traps[2] end end
   package.loaded['dfllm.reflex'] = nil
   X.load(W, {'military'}, {X.runner('P5'), snap, require('dfllm.reflex')})
-  W.run(9, {skip = 9})                                 -- military: squads A, B (melee) and C (crossbows), 8 soldiers
+  -- military staffs A, B (melee) and C (crossbows), 8 soldiers, in PEACE (the army out of sight for that frame): a
+  -- squad created in a siege is refilled to military.HOLD_MIN at once (Run 11 siege 3)
+  for _, u in ipairs(units) do if u.invader then W.unit(u.id)._m.hidden = true end end
+  W.run(9, {skip = 9})
+  for _, u in ipairs(units) do if u.invader then W.unit(u.id)._m.hidden = nil end end
   if o.equip ~= false then X.equip_all(W) end
   W.goblins = {}
   for _, u in ipairs(units) do if u.invader then W.goblins[#W.goblins + 1] = u.id end end

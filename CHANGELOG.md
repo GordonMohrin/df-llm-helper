@@ -1,5 +1,24 @@
 # CHANGELOG dfpilot
 
+## Melee squads refilled in a siege from healthy civilians in the core, never from the refuge (Run 11 siege 3, 2026-10-16; offline, live-untested)
+- **Why (Run 11, Kilrudrabed, siege 3 of y432/433):** 25 dead (pop 54 -> 29, soldiers 10 -> 5), O1 destroyed; squads A and B
+  emptied (deaths) and were never refilled, only C (5) remained. military's upkeep refilled only to the population target
+  (it shrinks with the deaths, and the tools-first rule takes melee out entirely below 3 axes or picks) and from anybody,
+  the refuge included.
+- **military:** in SIEGE/BREACH a melee squad below half its target is refilled (act.squad_add, the squads screen) with
+  healthy adults (no wound, awake, thirst < 25,000, hunger < 50,000) who stand in Kern+ and not in the refuge; tool-detail
+  members and tool-labor holders come last (sole key-labor holders, nobles, moods never); the first melee squad's target is
+  at least `HOLD_MIN` (5: the core stations) then, ignoring the shrunk target and the tools-first rule; no top-up at or
+  above half; the leader of an emptied squad comes from the same list. kern.log `military: SIEGE refill: squad A 0 -> 5
+  of 5 with healthy civilians from the core: <ids>`, or at most every 2,400 ticks `military: SIEGE: squad A 1 of 5 and no
+  healthy civilian in the core to refill it (in the refuge N, outside the core N, hurt N, ...)`. PEACE unchanged (its
+  release rules take the extra soldiers back).
+- Docs: DESIGN §5.3, DOCTRINE, RULES §10, bugs/BUG-032 part 3. No event, verb or state field changed.
+- Tests: `tests/lua/test_military_refill.lua` (new; fail on 94446e8 except the PEACE case). The intake and station test
+  worlds staff their squads in PEACE first.
+- **Live check:** in the next siege with losses: kern.log `military: SIEGE refill: squad A ...`, the squads screen shows A
+  back at 5; no citizen leaves Tiefe+ to join; `dfllm status` soldiers back up.
+
 ## Squad stations never on or next to a bridge, a squad that holds a raise moves at once, the deep defense's lever pulls reach the refuge (BUG-032, 2026-10-16; offline, live-untested)
 - **Why (Run 11, Kilrudrabed site98, y432 spring: a cave dragon siege and a snatcher, then BREACH, 0 deaths so far):**
   `GATE_FAIL B2: 'not up after 908 ticks'` (blocked): squad 104 stationed at 115,116,142, soldier 27836 held the raise
