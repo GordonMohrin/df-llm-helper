@@ -22,6 +22,7 @@ local ROLE = {O1 = 'outer', B1 = 'inner', B2 = 'core'}
 local function fort(opts)
   opts = opts or {}
   local man = {v = 2, bridges = {}, burrows = {['Kern+'] = {role = 'kern'}}}
+  if opts.tiefe then man.burrows['Tiefe+'] = {role = 'refuge'} end
   for n, fp in pairs(FP) do
     man.bridges[n] = {role = ROLE[n], fp = fp, levers = {{LEVER[n][1], LEVER[n][2], Z}}}
   end
@@ -54,6 +55,7 @@ local function fort(opts)
   end
   for _, u in ipairs(opts.units or {}) do W.add_unit(u) end
   W.burrow('Kern+', {46, 8, Z, 60, 22, Z})
+  if opts.tiefe then W.burrow('Tiefe+', opts.tiefe) end              -- BUG-031: a refuge room without drink
   W.act_result('alert_burrows', function(names)
     for _, n in ipairs(names) do if not dfhack.burrows.findByName(n) then return false, 'no burrow ' .. n end end
     W.alert_burrows = names
@@ -380,6 +382,68 @@ T.test('BUG-030: O1 destroyed in a siege with every gate up: BREACH at once (why
   T.eq({W.K.mode(), up(W, 'B1'), up(W, 'B2')}, {'BREACH', true, true}, 'B1 and B2 hold')
   T.eq(#since(evs(W, 'GATE_FAIL'), t0), 0, 'no GATE_FAIL')
   T.eq(W.state().bridges.O1, 'destroyed')
+end)
+
+---------------------------------------------------------------- BUG-031 (b): the confinement, not a bridge
+T.test('BUG-031 (b): BREACH holds the citizens in Tiefe+ (a room of the core without drink); one goes thirsty there ' ..
+       'while the core\'s drink is on his walk group: STRANDED relax, seal marks Tiefe+ dry and the alert moves to ' ..
+       'Kern+ in the same step (old: he stayed confined, nothing reacted, or "no rescue (the outside is not ' ..
+       'verified sealed)")', function()
+  local W = fort{tiefe = {47, 19, Z, 49, 21, Z}, units = {S.cit(11, 53, 12)}}
+  W.lever.O1.linked_mechanisms = require('dfllm.util.k_mock').vec{}     -- O1 stays down: BREACH stays BREACH
+  run(W, 1200)
+  army(W)
+  run(W, 300)
+  W.K.set_mode('BREACH', 'test')
+  run(W, 600)
+  T.eq({W.K.mode(), up(W, 'O1'), up(W, 'B1'), up(W, 'B2')}, {'BREACH', false, true, true})
+  T.eq(W.alert_burrows and W.alert_burrows[1], 'Tiefe+', 'confined to the refuge')
+  W.move(11, 48, 20, Z)                                                 -- in Tiefe+, thirsty
+  W.unit(11).counters2 = {thirst_timer = 41000, hunger_timer = 0}
+  local n = 0
+  while n < 30 and #evs(W, 'STRANDED') == 0 do run(W, 100); n = n + 1 end
+  local e = evs(W, 'STRANDED')
+  T.ok(#e == 1 and e[1].d.phase == 'relax', table.concat(phases(W), ','))
+  T.eq({e[1].d.units, e[1].d.burrow, e[1].d.need, e[1].d.thirst}, {{11}, 'Tiefe+', 'drink', 41000})
+  T.ok(e[1].msg:find('1 citizen confined to Tiefe+ without drink (thirst 41000, hunger 0; it is on their walk ' ..
+       'group): the alert lets them out (Tiefe+ holds no drink)', 1, true), e[1].msg)
+  run(W, 100)
+  T.eq(W.alert_burrows[1], 'Kern+', 'the burrow with the drink')
+  T.eq(df.global.plotinfo.alerts.civ_alert_idx, 1, 'still confined, now where the drink is')
+  local f = evs(W, 'REFUGE_FAIL')
+  T.ok(#f >= 1 and f[#f].d.burrow == 'Tiefe+' and f[#f].d.fallback == 'Kern+' and f[#f].d.dry == 1, f[#f] and f[#f].msg)
+  run(W, 1200)
+  T.eq(#evs(W, 'STRANDED'), 1, 'once')
+  T.eq(W.alert_burrows[1], 'Kern+', 'Tiefe+ stays refused while it holds no drink')
+end)
+
+T.test('BUG-031: "no rescue (the outside is not verified sealed)" names the way in the entrance check found', function()
+  local W = fort{units = {S.cit(11, 53, 12)}}
+  W.lever.O1.linked_mechanisms = require('dfllm.util.k_mock').vec{}
+  run(W, 1200)
+  army(W)
+  run(W, 300)
+  W.K.set_mode('BREACH', 'test')
+  run(W, 300)
+  -- O1 is down: every outer bridge up is the first condition; pretend it is up for gate (the lever is gone) by
+  -- raising it in the map
+  W.bridge.O1.gate_flags.raised = true
+  SW.regroup(W)
+  -- a door from the field into the zone beside O1: a door does not split DF's walk groups, the zone reaches the
+  -- map edge through it
+  SW.draw(W, Z, {'+'}, 30, 13)
+  SW.regroup(W)
+  W.move(11, 34, 15, Z)
+  run(W, 1200)                                     -- seal's entrance check after the change
+  W.unit(11).counters2 = {thirst_timer = 40000, hunger_timer = 0}
+  local n, e = 0, nil
+  while n < 30 and not e do
+    run(W, 100)
+    n = n + 1
+    for _, x in ipairs(evs(W, 'STRANDED')) do if x.d.phase == 'refused' then e = x end end
+  end
+  T.ok(e ~= nil, table.concat(phases(W), ','))
+  T.ok(e.msg:find('no rescue (the outside is not verified sealed: leak at 30,13,5 Door closed)', 1, true), e.msg)
 end)
 
 T.done()

@@ -156,9 +156,11 @@ T.test('FR-67: an entrance into Kern+ and no dead end: no confinement, the citiz
   T.ok(note:find('; no separated burrow: civ alert off, citizens flee on their own', 1, true), note)
   local f = evs(W, 'REFUGE_FAIL')
   T.eq(#f, 1)
-  T.eq({f[1].d.burrow, f[1].d.fallback, f[1].d.flee, f[1].d.open}, {'Kern+', '', 1, {'20,10,9 stair_up'}})
-  T.ok(f[1].msg:find('no confinement; no separated burrow: civ alert off, citizens flee on their own', 1, true),
-       f[1].msg)
+  T.eq({f[1].d.burrow, f[1].d.fallback, f[1].d.flee, f[1].d.open, f[1].d.fix},
+       {'Kern+', '', 1, {'20,10,9 stair_up'}, '20,10,9 stair_up'})
+  -- BUG-031: what closes the entrance comes first (a hatch on the stair: seal at=...), then why nobody is confined
+  T.ok(f[1].msg:find('no confinement; close it: seal at=20,10,9 stair_up; no separated burrow: civ alert off, ' ..
+       'citizens flee on their own', 1, true), f[1].msg)
   local st = W.state().alert
   T.eq({st.burrow, st.ok}, {'', 0})
   T.ok(st.why:find('^flee: Kern%+: open to 1 entrance'), st.why)
@@ -247,6 +249,167 @@ T.test('BUG-021: a real cut is confirmed and says which citizen and which stock 
   T.eq({e.d.unit, e.d.upos}, {1, {9, 9, Z}})
   T.ok(e.d.at ~= nil and e.d.at[2] > 11 and e.d.agrp ~= nil and e.d.agrp ~= e.d.grp, require('dfllm.util.json').encode(e.d))
   T.ok(e.msg:find(string.format(' at %d,%d,%d on group %d', e.d.at[1], e.d.at[2], e.d.at[3], e.d.agrp), 1, true), e.msg)
+end)
+
+---------------------------------------------------------------- BUG-031 (Run 11)
+-- Run 11 (Kilrudrabed y429, pop 54): "REFUGE_FAIL Kern+: open to 1 entrance 127,121,143 Door (62 steps)" at every
+-- invasion, "no confinement, citizens flee", although the fortcore refuge stood. The fort: z9 the hall x5-15 y5-15
+-- (Kern+), a 3-wide corridor y9-11 x16-25 to the open sky at x26-40 (the field reaches the map edge); opts.doors: the
+-- built doors on the mouth (x25), opts.planned: a door there nobody built; the shaft at 6,6 down to the dead end on z5
+-- (painted as Tiefe+), or (opts.refuge) the stocked refuge room x10-14 y4-8 z5 behind a door at 7,6 (Tiefe+, with its
+-- own drink, food and a bed); opts.innen: an Innen+ painted over the hall long ago
+local function mouth_fort(opts)
+  opts = opts or {}
+  local burrows = {['Kern+'] = {role = 'kern'}}
+  if opts.refuge then burrows['Tiefe+'] = {role = 'refuge'} end
+  local W = SW.new{persist = {manifest = {v = 2, burrows = burrows}}}
+  SW.fill(W, Z, 0, 0, 40, 30, '#')
+  SW.fill(W, Z, 5, 5, 15, 15, '.')
+  SW.fill(W, Z, 16, 9, 25, 11, '.')
+  SW.fill(W, Z, 26, 0, 40, 30, ',')
+  for _, y in ipairs(opts.doors or {}) do SW.draw(W, Z, {'+'}, 25, y) end
+  if opts.planned then
+    SW.draw(W, Z, {'+'}, 25, opts.planned)
+    W.dyn[SW.key(25, opts.planned, Z)]._stage = 0                  -- placed, not built
+  end
+  SW.draw(W, Z, {'bb'}, 12, 12)
+  SW.draw(W, Z, {'>'}, 6, 6)
+  for z = Z - 3, Z - 1 do
+    SW.fill(W, z, 0, 0, 40, 30, '#')
+    SW.draw(W, z, {'X'}, 6, 6)
+  end
+  SW.fill(W, Z - 4, 0, 0, 40, 30, '#')
+  if opts.refuge then
+    SW.draw(W, Z - 4, {'<+..'}, 6, 6)
+    SW.fill(W, Z - 4, 10, 4, 14, 8, '.')
+    SW.draw(W, Z - 4, {'bb'}, 10, 8)
+  else
+    SW.fill(W, Z - 4, 5, 5, 8, 8, '.')
+    SW.draw(W, Z - 4, {'<'}, 6, 6)
+  end
+  SW.regroup(W)
+  local cits = {}
+  for i = 1, opts.citizens or 3 do cits[i] = {i, 8 + i % 6, 9 + i // 6, Z} end
+  SW.citizens(W, cits)
+  SW.item(W, 'DRINK', 9, 13, Z, 20)
+  SW.item(W, 'PLANT', 9, 14, Z, 20)
+  if opts.refuge then
+    SW.item(W, 'DRINK', 12, 5, Z - 4, 20)
+    SW.item(W, 'PLANT', 13, 5, Z - 4, 20)
+    W.burrow('Tiefe+', {10, 4, Z - 4, 14, 8, Z - 4})
+  end
+  W.burrow('Kern+', {5, 5, Z, 15, 15, Z})
+  if opts.innen then W.burrow('Innen+', {5, 5, Z, 15, 15, Z}) end
+  package.loaded['dfllm.seal'] = nil
+  local M = require('dfllm.seal')
+  W.load(M)
+  W.run(opts.settle or 2400, {skip = 9})
+  return W, M
+end
+
+T.test('BUG-031: a door on one tile of a 3-wide entrance leaves the other two open: REFUGE_FAIL names them (not the ' ..
+       'door), with the seal that closes them; the lockdown and SIEGE_UNREADY list them as ways in without a door; ' ..
+       'doors on them separate Kern+', function()
+  -- old code: "open to 1 entrance 25,9,9 Door (10 steps)", open {'25,9,9 Door'}, entrance_doors open {} (the opening
+  -- has a door): nothing ever named or closed the two doorless tiles
+  local W = mouth_fort{doors = {9}}
+  local d = inspect(W, 'refuge')
+  local k = d.burrows['Kern+']
+  T.eq({k.sep, k.ok, k.open, k.fix}, {0, 0, {'25,10,9 floor', '25,11,9 floor'}, '25,10,9 floor;25,11,9 floor'})
+  T.ok(k.why:find('open to 1 entrance 25,10,9 floor +1 beside door 25,9,9 (10 steps)', 1, true), k.why)
+  T.ok(d.hint:find('close the entrances into Kern+: dfllm cmd bp.place \'{"tpl":"seal","site":"S1","p":{"at":' ..
+       '"25,10,9 floor;25,11,9 floor"}}\'', 1, true), d.hint)
+  local _, x = W.K.call('seal', 'entrance_doors')
+  T.eq(#x.doors, 1)
+  T.eq(x.open, {{pos = {25, 10, Z}, kind = 'floor', door = 1}, {pos = {25, 11, Z}, kind = 'floor', door = 1}})
+  local _, pick, note = W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+')
+  T.eq(pick, 'Tiefe+')
+  local f = evs(W, 'REFUGE_FAIL')
+  T.eq(#f, 1)
+  T.eq({f[1].d.open, f[1].d.fix}, {{'25,10,9 floor', '25,11,9 floor'}, '25,10,9 floor;25,11,9 floor'})
+  T.ok(f[1].msg:find('confining to Tiefe+; close it: seal at=25,10,9 floor;25,11,9 floor', 1, true), f[1].msg)
+  -- the seal is built (doors on both tiles): the next check finds Kern+ separated
+  SW.draw(W, Z, {'+'}, 25, 10)
+  SW.draw(W, Z, {'+'}, 25, 11)
+  SW.regroup(W)
+  inspect(W, 'entrances', 'refresh')
+  d = inspect(W, 'refuge', 'refresh')
+  T.eq({d.burrows['Kern+'].sep, d.burrows['Kern+'].ok, d.burrows['Kern+'].fix}, {1, 1, nil})
+  T.eq(d.choice.SIEGE, {want = 'Kern+', burrow = 'Kern+', level = 'SIEGE'})
+  T.eq(select(2, W.K.call('seal', 'entrance_doors')).open, {})
+end)
+
+T.test('BUG-031: a door the seal template placed and nobody built is no barrier: the entrance is named "(door not ' ..
+       'built)" and takes no second seal piece', function()
+  -- old code: "open to 1 entrance 25,10,9 Door" (the planned door read like a built one)
+  local W = mouth_fort{doors = {9, 11}, planned = 10}
+  local k = inspect(W, 'refuge').burrows['Kern+']
+  T.eq({k.sep, k.open, k.fix}, {0, {'25,10,9 floor'}, nil})
+  T.ok(k.why:find('open to 1 entrance 25,10,9 floor (door not built) beside door 25,9,9', 1, true), k.why)
+  local _, x = W.K.call('seal', 'entrance_doors')
+  T.eq(x.open, {{pos = {25, 10, Z}, kind = 'floor', door = 1, note = 'door not built'}})
+end)
+
+T.test('BUG-031: a lockdown in PEACE took the dead end and opened the breach days; they end with the lockdown, so ' ..
+       'the next invasion takes the dead end again (old: "no confinement, citizens flee" at every invasion)', function()
+  local W = fort()
+  local _, pick = W.K.call('seal', 'alert_burrow', 'PEACE', 'Kern+', true)      -- an arrival or predator lockdown
+  T.eq(pick, 'Tiefe+')
+  T.ok(inspect(W, 'refuge').bsince ~= nil, 'the breach days run')
+  W.run(1200, {skip = 9})                                                         -- the lockdown is over
+  T.eq(inspect(W, 'refuge').bsince, nil)
+  T.ok(logged(W, 'seal: episode over: breach days and thirst marks reset'), 'kern.log')
+  W.run(12000, {skip = 9})                                                        -- ten days later: an invasion
+  W.set_mode('SIEGE')
+  local _, pick2, note, short, flee = W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+')
+  T.eq({pick2, short, flee}, {'Tiefe+', 'REFUGE_FAIL Kern+, dead end Tiefe+', false}, note)
+  -- within one episode the days still run out: then the refusal says why the refuge is no way out either
+  W.run(9600, {skip = 9})
+  local _, pick3, note3, _, flee3 = W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+')
+  T.eq({pick3, flee3}, {nil, true})
+  T.ok(note3:find('no separated burrow (Tiefe+: the 7 days without counts are spent', 1, true), note3)
+end)
+
+T.test('BUG-031: a refuge with its own drink, food and beds behind a door holds a siege at the SIEGE level when an ' ..
+       'entrance reaches Kern+ (old: the BREACH level for 7 days, then the citizens fled)', function()
+  local W = mouth_fort{refuge = true, innen = true}
+  local d = inspect(W, 'refuge')
+  T.eq({d.burrows['Kern+'].sep, d.burrows['Innen+'].sep, d.burrows['Tiefe+'].sep, d.burrows['Tiefe+'].counts},
+       {0, 0, 1, 1})
+  T.eq(d.choice.SIEGE, {want = 'Kern+', burrow = 'Tiefe+', level = 'SIEGE'})
+  W.set_mode('SIEGE')
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+')), 'Tiefe+')
+  W.run(9600, {skip = 9})                                                        -- eight days of siege
+  local _, pick, _, _, flee = W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+')
+  T.eq({pick, flee}, {'Tiefe+', false})
+  T.eq(inspect(W, 'refuge').bsince, nil, 'no breach days for a stocked refuge')
+end)
+
+T.test('BUG-031 (b): citizens confined to the dead end went thirsty there (siege tells seal): every level refuses ' ..
+       'it while it holds no drink, the alert goes off even in a lockdown; the mark ends with the episode', function()
+  local W = fort()
+  W.set_mode('SIEGE')
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+')), 'Tiefe+')
+  local _, marked, why, fresh = W.K.call('seal', 'dry', 'Kern+', {drink = true}, 2)
+  T.eq({marked, why}, {false, 'Kern+ holds drink 20, food 20 (audit tick ' .. inspect(W, 'refuge').tick .. ')'})
+  _, marked, why, fresh = W.K.call('seal', 'dry', 'Tiefe+', {drink = true}, 2)
+  T.eq({marked, why, fresh}, {true, 'Tiefe+ holds no drink', true})
+  T.ok(logged(W, 'seal: Tiefe+ marked dry: 2 confined citizens without drink there'), 'kern.log')
+  local d = inspect(W, 'refuge')
+  T.eq({d.burrows['Tiefe+'].dry, d.dry['Tiefe+'].drink}, {'no drink for 2 thirsty citizens', true})
+  local _, pick, note, short, flee = W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+')
+  T.eq({pick, short, flee}, {nil, 'REFUGE_FAIL Kern+, citizens flee', true})
+  T.ok(note:find('no separated burrow (Tiefe+: no drink for 2 thirsty citizens): civ alert off', 1, true), note)
+  local f = evs(W, 'REFUGE_FAIL')
+  T.eq({f[#f].d.dry, f[#f].d.flee}, {1, 1})
+  -- a lockdown without danger: the dry burrow alone turns the alert off (BUG-011's "never off" yields)
+  local _, pick2, note2, short2, flee2 = W.K.call('seal', 'alert_burrow', 'PEACE', 'Tiefe+', true)
+  T.eq({pick2, flee2}, {nil, true}, note2)
+  W.set_mode('PEACE')
+  W.run(1200, {skip = 9})
+  T.eq(inspect(W, 'refuge').dry, nil, 'the episode is over')
+  W.set_mode('SIEGE')
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+')), 'Tiefe+')
 end)
 
 T.done()

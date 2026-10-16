@@ -23,7 +23,9 @@
 --     (sliced, after the run's decisions); per water body its level, size, depth, an accepted zone or well
 --     over it, a standable bank reachable from the citizens (snapshot.reach), else the shortest dig through
 --     revealed natural wall on that level to such a bank. Run on request, and weekly while the hospital
---     gate is dry. Hidden tiles are never read;
+--     gate is dry. Hidden tiles are never read. BUG-031: cavern water (a revealed cavern tile in the body) is
+--     listed (`cavern` 1) but never offered: caverns stay sealed; a cistern room of the manifest is named with
+--     what it lacks (no well, its well over 0/7, out of reach) instead of "a cistern";
 --   * buckets (bucket-delivery fallback: caregivers carry water from any well or Water Source zone in a free
 --     bucket): want = max(the hospital's desired buckets, buckets_min) + 1 per patient (<= buckets_max).
 --     Forbidden buckets on revealed Kern+ tiles are unforbidden (item_flag; not in BREACH, and without a Kern+
@@ -105,18 +107,26 @@ local function tile(K, x, y, z)
   return nil
 end
 local function wet_char(c) return c == 'w' or c == '~' end
+local ROCK = {['#'] = true, S = true, C = true, F = true, T = true}     -- snapshot legend: walls, fortifications, trees
 
 -- water under a well: the bucket goes down the open shaft (`_`) to the first water tile (a ramp or floor under
 -- the hole holds the water itself and reads `w`/`~`); a dry ramp, rock, a floor or a hidden tile ends the
--- shaft. Without a tile reader nothing counts as wet.
+-- shaft. Without a tile reader nothing counts as wet. BUG-031 (Run 11: HOSPITAL_DRY monthly beside a cistern, the
+-- recipe "a cistern"): the second value says what the shaft ends on, {at = {x, y, z}, flow = depth 0..7 (nil
+-- unknown), why = 'water' | 'dry' (a floor or ramp without water) | 'rock' | 'hidden' | 'deep' (open space below the
+-- shaft limit)}, for the HOSPITAL_DRY text
 function M.well_wet(K, x, y, z, depth)
   for zz = z - 1, z - (depth or 12), -1 do
     local t = tile(K, x, y, zz)
-    if not t then return false end
-    if wet_char(t.c) then return true end
-    if t.c ~= '_' then return false end
+    local at = {x, y, zz}
+    if not t then return false, {at = at, why = 'hidden'} end
+    local f = math.tointeger(t.flow)
+    if wet_char(t.c) then return true, {at = at, flow = f, why = 'water'} end
+    if t.c ~= '_' then
+      return false, {at = at, flow = f or 0, why = ROCK[t.c] and 'rock' or 'dry'}
+    end
   end
-  return false
+  return false, {at = {x, y, z - (depth or 12)}, why = 'deep'}
 end
 
 -- water the game accepts in a Water Source zone (FR-33a/34): a revealed tile of depth >= deep, never magma.
@@ -227,8 +237,10 @@ local function phase_sites(K, c, r)
   for _, w in ipairs(vec(function() return other.WELL end)) do
     local done = true
     pcall(function() done = w:getBuildStage() >= w:getMaxBuildStage() end)
-    local wet = done and M.well_wet(K, w.x1, w.y1, w.z, c.shaft)
-    r.sources[#r.sources + 1] = {kind = 'well', id = w.id, x = w.x1, y = w.y1, z = w.z, wet = wet}
+    local wet, info = false, nil
+    if done then wet, info = M.well_wet(K, w.x1, w.y1, w.z, c.shaft) end
+    r.sources[#r.sources + 1] = {kind = 'well', id = w.id, x = w.x1, y = w.y1, z = w.z, wet = wet,
+                                 built = done, below = info}                  -- BUG-031: what the shaft ends on
   end
   local locs = hospital_locations()
   local wsrc = df.civzone_type and df.civzone_type.WaterSource
@@ -407,24 +419,28 @@ has_liquids = function(K)
 end
 
 emit_gate = function(K, c, a)
-  local fix = M.recipe(c)
+  local fix = M.recipe(c, a.cis)
   K.emit('HOSPITAL_DRY', 'A', trunc(string.format('%s without accepted water, %d patient(s): %s',
                                                   a.planned and 'planned hospital' or 'hospital', a.patients, fix), 200),
-         {why = trunc(a.why, 200), patients = a.patients, zone = a.zone, near = c.near, recipe = trunc(fix, 200)})
+         {why = trunc(a.why, 200), patients = a.patients, zone = a.zone, near = c.near, recipe = trunc(fix, 200),
+          cistern = a.cis and trunc(a.cis.txt, 120) or nil})
 end
 
 -- the one-line recipe of the hospital gate from the last scan: zone a reachable bank, else the shortest dig,
--- else a cistern; deleting the hospital zone lets the patients fetch their own drink meanwhile
-function M.recipe(c)
+-- else a cistern; deleting the hospital zone lets the patients fetch their own drink meanwhile. BUG-031: with a
+-- cistern room standing (`cis`, cistern_state), not "a cistern" but what that one lacks
+function M.recipe(c, cis)
   local ws = st.ws
   local tail = '; until then delete the hospital zone'
   if not ws then
+    if cis then return cis.fix .. tail end
     return string.format('a well over water or a Water Source zone on water >= %d/7 within %d tiles (inspect '
                          .. 'water_sources)%s', c.deep, c.near, tail)
   end
-  local best
+  local best, cav
   for _, b in ipairs(ws.bodies or {}) do
-    if b.d <= c.near and (b.bank or b.dig) then
+    if b.cavern == 1 and b.d <= c.near and not cav then cav = b end
+    if b.cavern ~= 1 and b.d <= c.near and (b.bank or b.dig) then
       if not best or (b.bank and not best.bank) or ((b.bank ~= nil) == (best.bank ~= nil) and b.d < best.d) then
         best = b
       end
@@ -440,8 +456,71 @@ function M.recipe(c)
                          .. 'it%s', d.n, d.from[1], d.from[2], d.from[3], d.to[1], d.to[2], d.to[3], best.at[1],
                          best.at[2], best.at[3], tail)
   end
-  return string.format('no reachable water >= %d/7 within %d tiles: a cistern (bp sites cistern)%s', c.deep, c.near,
-                       tail)
+  if cis then return cis.fix .. tail end
+  local ctxt = cav and string.format(' (the cavern water at %d,%d,%d is none: caverns stay sealed)', cav.at[1], cav.at[2],
+                                     cav.at[3]) or ''
+  return string.format('no reachable water >= %d/7 within %d tiles%s: a cistern (bp sites cistern)%s', c.deep, c.near,
+                       ctxt, tail)
+end
+
+-- BUG-031 (Run 11: a cistern stood since y426 and HOSPITAL_DRY said "no reachable water >= 4/7 within 30 tiles: a
+-- cistern" every month): why the nearest cistern room of the manifest (tpl cistern; its bbox is the well room, the
+-- 3x3 cistern lies one level below) does not serve hospital zone `h`. Its well is the WELL source inside the room; the
+-- cistern's water is read on its revealed tiles (snapshot.tile; hidden ones never). Returns nil without a cistern room,
+-- else {id, txt (the state: ' cistern <id>: its well <w> at x,y,z stands over 0/7 (dry)', ' ... is 38 tiles from the
+-- hospital (> 30)', ' ... has no built well'), fix (what to do), near (within `near` tiles), d}
+local function cistern_state(K, c, r, h)
+  local best
+  for _, rm in ipairs(K.manifest().rooms or {}) do
+    local b = rm.tpl == 'cistern' and type(rm.bbox) == 'table' and rm.bbox
+    if b and math.tointeger(b[1]) and math.tointeger(b[6]) then
+      local well
+      for _, s in ipairs(r.sources) do
+        if s.kind == 'well' and s.z == b[3] and s.x >= b[1] and s.x <= b[4] and s.y >= b[2] and s.y <= b[5] then
+          well = s
+        end
+      end
+      local cx, cy = (b[1] + b[4]) // 2, (b[2] + b[5]) // 2
+      local d = dist_box(well and well.x or cx, well and well.y or cy, b[3], h)
+      if not best or d < best.d then best = {rm = rm, well = well, d = d, at = {cx, cy, b[3]}, b = b} end
+    end
+  end
+  if not best then return nil end
+  local id, w, at = tostring(best.rm.id or '?'), best.well, best.at
+  local maxf, seen = 0, 0                     -- the deepest revealed water of the cistern below the room
+  for y = best.b[2], best.b[5] do
+    for x = best.b[1], best.b[4] do
+      local t = tile(K, x, y, best.b[3] - 1)
+      if t then
+        seen = seen + 1
+        local f = math.tointeger(t.flow) or (t.c == '~' and 4 or (t.c == 'w' and 1 or 0))
+        if f > maxf then maxf = f end
+      end
+    end
+  end
+  local out = {id = id, d = best.d, near = best.d <= c.near}
+  local far = not out.near and string.format(', %d tiles from the hospital (> %d)', best.d, c.near) or ''
+  if not w then
+    out.txt = string.format('cistern %s at %d,%d,%d has no well%s', id, at[1], at[2], at[3], far)
+    out.fix = out.txt .. ': build it'
+  elseif not w.built then
+    out.txt = string.format('cistern %s: its well %d at %d,%d,%d is not built%s', id, w.id, w.x, w.y, w.z, far)
+    out.fix = out.txt .. ': finish it'
+  elseif not w.wet then
+    local bl = w.below or {}
+    local p = bl.at or {w.x, w.y, w.z - 1}
+    local what = bl.why == 'hidden' and 'a hidden tile' or (bl.why == 'rock' and 'rock'
+                 or (bl.why == 'deep' and 'a dry shaft' or string.format('%d/7 (dry)', bl.flow or 0)))
+    out.txt = string.format('cistern %s: its well %d stands over %s at %d,%d,%d (cistern max %d/7)%s', id, w.id, what,
+                            p[1], p[2], p[3], maxf, far)
+    out.fix = out.txt .. ': fill it (pond zone and bucket carriers, or its pipe)'
+  else
+    out.txt = string.format('cistern %s: its well %d at %d,%d,%d (water %d/7) is %d tiles from the hospital (> %d)', id,
+                            w.id, w.x, w.y, w.z, (w.below and w.below.flow) or maxf, best.d, c.near)
+    out.fix = out.txt .. ': a hospital zone near it'
+  end
+  out.max, out.seen = maxf, seen
+  return out
 end
 
 local function new_scan(K, c, r)
@@ -490,7 +569,7 @@ local function scan_read(K, c, sc)
       end
       for _, t in ipairs(list) do
         local key = k3(t[1], t[2], sc.z)
-        if not sc.tiles[key] and sc.n < 4000 then sc.tiles[key], sc.n = {t[1], t[2], sc.z, t[3]}, sc.n + 1 end
+        if not sc.tiles[key] and sc.n < 4000 then sc.tiles[key], sc.n = {t[1], t[2], sc.z, t[3], t[4]}, sc.n + 1 end
       end
       budget = budget - w * rows
       sc.y = sc.y + rows
@@ -509,11 +588,12 @@ local function scan_group(c, sc)
     if not seen[k] then
       seen[k] = true
       local t0 = sc.tiles[k]
-      local body, stack = {z = t0[3], tiles = {}, max = 0, d = math.huge}, {t0}
+      local body, stack = {z = t0[3], tiles = {}, max = 0, d = math.huge, cav = 0}, {t0}
       while #stack > 0 do
         local t = table.remove(stack)
         body.tiles[#body.tiles + 1] = t
         if t[4] > body.max then body.max = t[4] end
+        if t[5] == 1 then body.cav = 1 end            -- BUG-031: a cavern tile makes it cavern water
         local d = dist_box(t[1], t[2], t[3], sc.ref)
         if d < body.d then body.d = d end
         for _, o in ipairs(N8) do
@@ -539,6 +619,9 @@ end
 local function scan_body(K, c, sc, body)
   local z, deepset = body.z, sc.tiles
   local res = {z = z, n = #body.tiles, max = body.max, at = body.at, d = body.d, zone = -1, well = -1, reach = 0}
+  -- BUG-031 (Run 11: a 7/7 cavern lake 1146 tiles on z127 below an aborted shaft): caverns stay sealed (DOCTRINE: every
+  -- breach of caverns through a 2-wall airlock), so cavern water is listed but never looked at for a bank or a dig
+  if body.cav == 1 then res.cavern = 1; return res end
   for _, s in ipairs(sc.sources or {}) do
     for _, t in ipairs(body.tiles) do
       if s.kind == 'zone' and s.wet and s.box and (s.box.z == z or (c.zone_below == true and s.box.z == z + 1))
@@ -644,10 +727,10 @@ end
 local function finish(K, c, r, p)
   local now = K.now().tick
   pond_loops(K, c, r)
-  local hosp_ok, best_h = #r.hosp > 0, nil
+  local hosp_ok, best_h, dry_h = #r.hosp > 0, nil, nil
   for _, h in ipairs(r.hosp) do
     local ok, b = served(K, c, r, h)
-    if not ok then hosp_ok = false end
+    if not ok then hosp_ok, dry_h = false, dry_h or h end
     if b and (not best_h or b.d < best_h.d) then best_h = b end
   end
   local refuge = burrow(K, 'refuge', 'Tiefe+')
@@ -670,9 +753,11 @@ local function finish(K, c, r, p)
   local dry = not hosp_ok and #r.hosp > 0
   local cause = {}
   if #r.hosp == 0 then cause[#cause + 1] = 'no hospital zone' end
+  local cis = dry and cistern_state(K, c, r, dry_h) or nil              -- BUG-031: why the cistern does not count
   if dry then
     cause[#cause + 1] = best_h and string.format('nearest accepted water %d tiles from the hospital', best_h.d)
                         or 'no wet well or deep (>= ' .. c.deep .. '/7) Water Source zone'
+    if cis then cause[#cause + 1] = cis.txt end
   end
   if wet == 0 then cause[#cause + 1] = 'no accepted water at all' end
   if r.free + fixed == 0 then cause[#cause + 1] = 'no free bucket' end
@@ -741,7 +826,7 @@ local function finish(K, c, r, p)
       p.hosp_t, p.hosp_w, p.hosp_ids, p.hosp_toks = now, T.wall, pids, toks
       local h = r.hosp[1]
       local a = {planned = planned, patients = #r.patients, zone = h and h.id or -1,
-                 why = planned and 'no accepted water on the map' or why}
+                 why = planned and 'no accepted water on the map' or why, cis = cis}
       if not st.ws and has_liquids(K) then
         st.gate_pending, st.ws_want = a, true             -- the first one waits for the scan's recipe (a few frames)
       else
@@ -749,7 +834,9 @@ local function finish(K, c, r, p)
       end
     end
     local okp, pend = K.call('runner', 'pending', 'cistern')
-    if not (okp and type(pend) == 'number' and pend > 0) and now - (p.req or -c.request_every) >= c.request_every then
+    -- BUG-031: a cistern within reach of the hospital needs water, not a second cistern (the recipe says how)
+    if not (okp and type(pend) == 'number' and pend > 0) and not (cis and cis.near)
+       and now - (p.req or -c.request_every) >= c.request_every then
       p.req = now
       K.emit('PROJECT_REQUEST', 'B', 'cistern: the hospital has no accepted water within ' .. c.near .. ' tiles',
              {tpl = 'cistern', n = 1, why = 'hospital_water'})
@@ -876,7 +963,8 @@ function M.inspect(K, what, key)
          {tick = w.tick, age = now - w.tick, queued = queued, deep = w.deep, boxes = w.boxes, tiles = w.tiles,
           levels = w.levels, bodies = w.bodies, sources = srcs, err = w.err,
           note = 'sources [kind, id, x, y, z, accepted]; bank: stand there and fill or zone the water; dig: opening '
-                 .. 'the last wall floods the dug tiles (dig from above or behind a floodgate)'}
+                 .. 'the last wall floods the dug tiles (dig from above or behind a floodgate); cavern 1: cavern water, '
+                 .. 'never offered (caverns stay sealed)'}
 end
 
 -- last summary (brief, tests): patients, thirst, wells, hospital/refuge water, buckets

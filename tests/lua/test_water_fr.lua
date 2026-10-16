@@ -17,7 +17,8 @@ local function world(opts)
   opts = opts or {}
   local units = {}
   for i = 1, 4 do units[i] = {id = i, citizen = true, pos = {12, 12, 5}} end
-  local persist = {manifest = {v = 2, burrows = {['Kern+'] = {role = 'kern'}}, zones = {Z4 = {{0, 0, 0, 99, 99, 20}}}}}
+  local persist = {manifest = {v = 2, burrows = {['Kern+'] = {role = 'kern'}}, zones = {Z4 = {{0, 0, 0, 99, 99, 20}}},
+                               rooms = opts.rooms}}
   local W = F.world{cfg = {baseline = F.cfg()}, units = units, persist = persist}
   df.civzone_type.WaterSource, df.civzone_type[10] = 10, 'WaterSource'
   df.job_type.Rest, df.job_type[77] = 77, 'Rest'
@@ -48,7 +49,8 @@ local function world(opts)
       for y = y0, y1 do
         for x = x0, x1 do
           local f = DEPTH[W.cmap[x .. ',' .. y .. ',' .. z] or ''] or 0
-          if f >= (min or 1) then out[#out + 1] = {x, y, f} end
+          local cav = opts.cavern and opts.cavern[x .. ',' .. y .. ',' .. z] and 1 or 0     -- BUG-031
+          if f >= (min or 1) then out[#out + 1] = {x, y, f, cav} end
         end
       end
       return out
@@ -188,15 +190,88 @@ T.test('snapshot.liquids: revealed water only, magma never, depth filter, the re
   local W = kmock.new{}
   local S = fresh('snapshot')
   W.load(S)
-  local function t(x, y, z, flow, hidden, magma)
+  local function t(x, y, z, flow, hidden, magma, cav)
     W.tiles = W.tiles or {}
-    W.tiles[x .. ',' .. y .. ',' .. z] = {des = {hidden = hidden, flow_size = flow, liquid_type = magma}, occ = {}}
+    W.tiles[x .. ',' .. y .. ',' .. z] = {des = {hidden = hidden, flow_size = flow, liquid_type = magma,
+                                                feature_global = cav}, occ = {}}
   end
   t(1, 1, 5, 7); t(2, 1, 5, 3); t(3, 1, 5, 6, true); t(1, 2, 5, 7, false, true); t(2, 2, 5, 0)
-  T.eq(S.liquids(W.K, 0, 0, 4, 4, 5, 4), {{1, 1, 7}})
-  T.eq(S.liquids(W.K, 0, 0, 4, 4, 5), {{1, 1, 7}, {2, 1, 3}})
+  t(3, 3, 5, 7, false, false, true)                                     -- BUG-031: a revealed cavern lake tile
+  T.eq(S.liquids(W.K, 0, 0, 4, 4, 5, 4), {{1, 1, 7, 0}, {3, 3, 7, 1}})
+  T.eq(S.liquids(W.K, 0, 0, 4, 4, 5), {{1, 1, 7, 0}, {2, 1, 3, 0}, {3, 3, 7, 1}})
   T.eq(S.liquids(W.K, 4, 4, 0, 0, 5), {}, 'an empty rect')
   T.eq({S.liquids(W.K, 0, 0, 99, 99, 5)}, {nil, 'rect too large'})
+end)
+
+---------------------------------------------------------------- BUG-031 (Run 11)
+-- Run 11 (Kilrudrabed y429): a cistern stood since y426 and HOSPITAL_DRY came monthly with "no reachable water >= 4/7
+-- within 30 tiles: a cistern (bp sites cistern)". The cistern room (manifest tpl cistern, bbox = the well room; the
+-- 3x3 cistern one level below) and its well now say why they do not count.
+local function cistern_room(x, y, z) return {id = 'cistern' .. x .. '_' .. y .. '_' .. z .. 'r0', tpl = 'cistern',
+                                             use = 'utility', bbox = {x - 1, y - 1, z, x + 1, y + 1, z}} end
+
+T.test('BUG-031: a dry cistern beside the hospital: HOSPITAL_DRY names it, its well and the depth under it (0/7) and ' ..
+       'what to do; no second cistern is requested (old: "... a cistern (bp sites cistern)" every month)', function()
+  local W = world{rooms = {cistern_room(20, 12, 5)}, tiles = {['20,12,4'] = '.', ['19,12,4'] = '.', ['21,12,4'] = '.'},
+                  setup = function(W)
+                    hospital(W)
+                    F.building(W, 'WELL', {id = 77, x1 = 20, y1 = 12, x2 = 20, y2 = 12, z = 5})
+                  end}
+  day(W)
+  local hd = W.find_events('HOSPITAL_DRY')
+  T.eq(#hd, 1)
+  T.ok(hd[1].d.recipe:find('cistern cistern20_12_5r0: its well 77 stands over 0/7 (dry) at 20,12,4 (cistern max ' ..
+       '0/7): fill it (pond zone and bucket carriers, or its pipe); until then delete the hospital zone', 1, true),
+       hd[1].d.recipe)
+  T.ok(hd[1].msg:find('its well 77 stands over 0/7 (dry)', 1, true), hd[1].msg)
+  T.ok(hd[1].d.why:find('cistern cistern20_12_5r0: its well 77 stands over 0/7', 1, true), hd[1].d.why)
+  T.eq(hd[1].d.cistern:sub(1, 23), 'cistern cistern20_12_5r')
+  T.eq(W.find_events('PROJECT_REQUEST'), {}, 'the cistern needs water, not a second cistern')
+end)
+
+T.test('BUG-031: a wet cistern 47 tiles from the hospital does not serve it: HOSPITAL_DRY says how far; a well with ' ..
+       'water in reach serves (any depth under a well, deep water only for a zone)', function()
+  local W = world{rooms = {cistern_room(61, 61, 5)}, tiles = {['61,61,4'] = '~'},
+                  setup = function(W)
+                    hospital(W)
+                    F.building(W, 'WELL', {id = 78, x1 = 61, y1 = 61, x2 = 61, y2 = 61, z = 5})
+                  end}
+  day(W)
+  local hd = W.find_events('HOSPITAL_DRY')
+  T.eq(#hd, 1)
+  T.ok(hd[1].d.recipe:find('cistern cistern61_61_5r0: its well 78 at 61,61,5 (water 7/7) is 47 tiles from the ' ..
+       'hospital (> 30): a hospital zone near it', 1, true), hd[1].d.recipe)
+  T.eq(#W.find_events('PROJECT_REQUEST'), 1, 'a cistern out of reach: one near the hospital is still asked for')
+  local W2 = world{rooms = {cistern_room(20, 12, 5)}, tiles = {['20,12,4'] = 'w'},
+                   setup = function(W)
+                     hospital(W)
+                     F.building(W, 'WELL', {id = 79, x1 = 20, y1 = 12, x2 = 20, y2 = 12, z = 5})
+                   end}
+  day(W2)
+  T.eq(W2.find_events('HOSPITAL_DRY'), {}, '2/7 under the well: served')
+end)
+
+T.test('BUG-031: deep cavern water with a reachable bank is listed but never offered (caverns stay sealed): the ' ..
+       'recipe names it as none, or the cistern\'s state (old: "zone the water at 20,12,5 (7/7) as Water Source")',
+       function()
+  local cav = {['20,12,5'] = true, ['21,12,5'] = true}
+  local tiles = {['20,12,5'] = '~', ['21,12,5'] = '~', ['19,12,5'] = '.'}
+  local W = world{tiles = tiles, cavern = cav, setup = hospital}
+  day(W)
+  local hd = W.find_events('HOSPITAL_DRY')
+  T.eq(#hd, 1)
+  T.ok(hd[1].d.recipe:find('no reachable water >= 4/7 within 30 tiles (the cavern water at 20,12,5 is none: ' ..
+       'caverns stay sealed): a cistern', 1, true), hd[1].d.recipe)
+  local b = sources(W).bodies[1]
+  T.eq({b.cavern, b.bank, b.dig, b.reach}, {1, nil, nil, 0})
+  local t2 = {['20,12,5'] = '~', ['21,12,5'] = '~', ['19,12,5'] = '.', ['40,12,4'] = '.'}
+  local W2 = world{tiles = t2, cavern = cav, rooms = {cistern_room(40, 12, 5)}, setup = function(W)
+    hospital(W)
+    F.building(W, 'WELL', {id = 80, x1 = 40, y1 = 12, x2 = 40, y2 = 12, z = 5})
+  end}
+  day(W2)
+  T.ok(W2.find_events('HOSPITAL_DRY')[1].d.recipe:find('^cistern cistern40_12_5r0: its well 80 stands over 0/7'),
+       W2.find_events('HOSPITAL_DRY')[1].d.recipe)
 end)
 
 T.done()
