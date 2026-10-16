@@ -22,6 +22,7 @@ R_CAPS = {0: 55, 1: 55, 2: 75, 3: 250}    # DESIGN §5.4; R3 (>= 80) only with D
 OPTION_A_MAX = 75
 SUPPLY_MIN = {"drink_d": 170, "food_d": 60, "mood_stock": 10}
 BUILDS_PER_SEASON = 3                     # runner runs <= 3 projects at once
+CORE_DAYS = 90                            # BUG-028: drink/food days wanted inside Kern+ and the refuge (seal.CFG.sup_days)
 # DESIGN §11.4 always-blocked commands and banned terms (CONTRACTS §1.4); config/allowlist.json adds more
 BANNED = ["digv", "digvx", "digtype", "fastdwarf", "caravan extend", "caravan happy", "autodump", "locate-ore",
           "prospect", "showmood", "reveal", "createitem", "dig-now", "build-now", "fix/retrieve-units",
@@ -133,6 +134,13 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     for k, m in SUPPLY_MIN.items():
         if sup[k] < m:
             (errs if k != "mood_stock" else warn).append(f"supply.{k} {sup[k]} < doctrine minimum {m}")
+    # BUG-028: drink and food inside the lockable core (seal: state alert.core_d/core_f, days)
+    al = s.get("alert") or {}
+    for key, cls, fix in (("core_d", "drink", "a still and a barrel stockpile"), ("core_f", "food", "a food stockpile")):
+        v = al.get(key)
+        if isinstance(v, int) and v < CORE_DAYS:
+            warn.append(f"{cls} inside Kern+/the refuge lasts {v} d < {CORE_DAYS}: build {fix} inside the core "
+                        "(a siege cuts the rest off)")
     if pol["beauty"] == "used_rooms" and lvl < 1:
         warn.append("beauty used_rooms waits for R1 (runner gates it)")
     seen_libs: set[str] = set()

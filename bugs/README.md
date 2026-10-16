@@ -48,7 +48,7 @@ Related: FR-xx, BUG-xx
 | [BUG-025](BUG-025-trade-looks-at-the-wrong-depot.md) | fixed (live) | medium | with two built depots trade checks the manifest depot while the merchants unload at the other: caravan with goods ends `nothing_listed` | trade |
 | [BUG-026](BUG-026-caravan-retry-too-late-and-silent-loss.md) | fixed (offline, live-untested) | medium | a caravan visit lost to ui_timeout: trade paced/demoted for its cost while its UI phases ran on real time; fix: kernel boost, trade clock (FPS cap 100), phase limits on its own clock, retry in time_remaining units | trade, kern, arbiter |
 | [BUG-027](BUG-027-lockdown-bridge-crushes-citizens.md) | fixed: occupancy, alert order, pull timeout, BRIDGE_CRUSH (offline, live-untested) | critical | the lockdown raises bridges while citizens stand on the footprint: 7 deaths incl. a baby (17880 x=128, O1 x=101) | gate/siege |
-| [BUG-028](BUG-028-breach-traps-people-without-water.md) | open | critical | BREACH keeps inner bridges up for weeks, soldiers/civilians behind them die of thirst; `dfllm stop` leaves popups/fps | siege/gate/military/kern |
+| [BUG-028](BUG-028-breach-traps-people-without-water.md) | fixed (offline, live-untested): rescue, BREACH -> SIEGE, raise hold, SUPPLY_OUTSIDE; stop: FR-68 | critical | BREACH keeps inner bridges up for weeks, soldiers/civilians behind them die of thirst; `dfllm stop` leaves popups/fps | siege/gate/military/kern |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

@@ -1,5 +1,28 @@
 # CHANGELOG dfpilot
 
+## Stranded behind our own gates: rescue, BREACH -> SIEGE, raise hold, SUPPLY_OUTSIDE, BUG-028 (2026-10-16; offline, live-untested)
+- **Rescue (a):** citizens and soldiers with thirst or hunger > 30,000 on a walk group without drink/food get the inner
+  and core bridges on the way to the stock lowered (never O1) once the outer gates are up, the outside is verified
+  sealed and no hostile is inside or on the joined groups; up again once they are through (drank, ate, in the alert
+  burrow, gone; at most 2,400 ticks) or at once when a hostile comes near. gate accepts `want(b, 'down', 'rescue')` in
+  SIEGE/BREACH and during a lockdown (hostile guard and footprint rules unchanged). STRANDED (A) `rescue/done/abort`,
+  `refused` with the reason. An open rescue survives a reload.
+- **BREACH -> SIEGE (b):** every outer gate up, the fresh entrance check says no route, nobody hostile inside: SIEGE after
+  600 ticks (`SIEGE_START ... (sealed): breach over`), the refuge is released. New transition in `contract.TRANSITIONS`.
+- **Raise hold (c):** before siege first raises a bridge, `seal.split` floods each side of the footprints; a raise that
+  would leave citizens (not soldiers) on a part without drink or food waits (no BREACH for it) until a hostile is within
+  30 tiles of that bridge, then goes ahead: STRANDED `hold` / `forced`.
+- **SUPPLY_OUTSIDE (d, A):** more than half of the drink or food stock lies outside Kern+ and the refuge (cadence: a month,
+  news only); state `alert.core_d/core_f` (days inside), `dfllm plan check` warns below 90 days, `inspect refuge`
+  `supply`. **(e)** the runtime hotfix `gate.BLOCK_WAIT = 10000000` is obsolete since 0b0abec.
+- Tests: `tests/lua/test_stranded.lua` (new), `tests/test_cli_plan.py`. Contracts: STRANDED, SUPPLY_OUTSIDE (schema,
+  contract, CONTRACTS §12, RULES §7), `seal.groups/sides/split`, `siege.held`, `gate.want` rescue, state `alert.core_*`.
+- **Live check:** after `dfllm reload` in the Run 10 fort (O1 up, B1/B2 down by hand): `dfllm events --type STRANDED`
+  shows no `rescue` while nobody is thirsty; `inspect what=refuge` `supply` (drink inside vs total) and a SUPPLY_OUTSIDE
+  wake for the 3093 units outside O1; with the kernel running, BREACH ends in SIEGE (`events --type MODE`:
+  `BREACH>SIEGE sealed`) once O1, B1, B2 are up and `inspect entrances` says sealed; a raise of B1 with citizens between
+  O1 and B1 gives STRANDED `hold` instead of stranding them. Drop the `BLOCK_WAIT` hotfix.
+
 ## Run 10 batch merged: what to do after `git pull` (2026-10-16, updated with trade, BUG-027 and FR-68)
 - Reload: `dfhack-run dfllm reload` (kernel parts: SIEGE_UNREADY, LOCKDOWN_PARTIAL, TOOL_BLOCKED, refuge levels, CUTOFF re-read,
   build_lost retry, mood cloth kinds); restart `dfllm follow --no-auto` (it audits again; `--no-audit` switches that off).

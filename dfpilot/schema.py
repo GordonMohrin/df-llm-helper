@@ -31,7 +31,7 @@ INBOX_NAME_RE = r"^(\d{13})-([A-Za-z0-9_-]{1,40})\.json$"
 MODES = ["PEACE", "ALERT", "SIEGE", "BREACH", "RECOVERY", "DRILL"]
 TRANSITIONS = {
     "PEACE": ["ALERT", "SIEGE", "DRILL"], "ALERT": ["PEACE", "SIEGE", "BREACH"],
-    "SIEGE": ["BREACH", "RECOVERY"], "BREACH": ["RECOVERY"],
+    "SIEGE": ["BREACH", "RECOVERY"], "BREACH": ["RECOVERY", "SIEGE"],
     "RECOVERY": ["PEACE", "ALERT", "SIEGE", "BREACH"], "DRILL": ["PEACE", "ALERT", "SIEGE"],
 }
 MODE_SETTERS = {"siege": "*", "drill": ["DRILL>PEACE", "PEACE>DRILL"]}
@@ -464,6 +464,12 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "GATE_FORCED": ("A", "gate", _d("bridge:s", "units:ia hostile:i pos:p job:i")),
     # BUG-027: a unit died on or next to a bridge just pulled or moving (gate's move records, dfllm.deaths.bridge)
     "BRIDGE_CRUSH": ("A", "gate", _d("bridge:s unit:i", "bid:i pull:i t:i to:s how:s k:s pos:p")),
+    # BUG-028: citizens cut off from drink/food by our raised gates; phase hold (a raise waits), forced (raised: a
+    # hostile at the gate), rescue (inner/core bridges lowered), refused (no rescue: why), done, abort
+    "STRANDED": ("A", "siege", _d("phase:s", "n:i units:ia grp:i thirst:i hunger:i bridges:sa why:s need:s pos:p "
+                                             "left:i hostile:i")),
+    # BUG-028: the main part of a drink or food stock lies outside Kern+ and the refuge; days = what lies inside
+    "SUPPLY_OUTSIDE": ("A", "seal", _d("cls:s", "inside:i total:i pct:i days:i want:i hint:s also:s")),
     "ALERT_START": ("B", "siege", _d(opt="vis:i")),
     "ALERT_END": ("B", "siege", _d(opt="vis:i")),
     "LOCKDOWN_END": ("B", "reflex", _d(opt="why:s ticks:i doors:i refused:i")),
@@ -630,7 +636,7 @@ STATE = Obj(
          # FR-55 lever latency (gate): last pull -> wanted state, in s and ticks (-1 never); pending own pulls
          "lever": Obj(req={"lat_s": Int(-1), "lat_t": Int(-1), "pend": NAT, "wait_s": NAT}),
          "alert": Obj(req={"want": Str(maxbytes=24), "burrow": Str(maxbytes=24), "tiles": NAT, "inside": NAT,
-                           "ok": FLAG}, opt={"why": Str(maxbytes=40)})})
+                           "ok": FLAG}, opt={"why": Str(maxbytes=40), "core_d": NAT, "core_f": NAT})})
 
 HEARTBEAT = Obj(req={"v": Const(V), "wall": NAT, "frame": NAT, "tick": TICK, "paused": Bool(), "mode": MODE,
                      "seq": NAT})

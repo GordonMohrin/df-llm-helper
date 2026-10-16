@@ -41,6 +41,22 @@ def test_fixture_plan_passes(base):
     assert errs == [] and warn == []
 
 
+def test_core_supply_days_warn(base):
+    """BUG-028 (Run 10 y419: 737 drink units, 60 days, in the core; 3093 outside O1): seal's core days in the state
+    give a warning (not an error) below 90 days, for drink and food separately."""
+    doc, state = base
+    s = copy.deepcopy(state)
+    s.setdefault("alert", {"want": "Kern+", "burrow": "Kern+", "tiles": 100, "inside": 5, "ok": 1})
+    s["alert"].update(core_d=60, core_f=120)
+    errs, warn = errs_of(doc, s, tpls=["workshops", "hospital", "bedrooms", "tavern"])
+    assert errs == []
+    assert [w for w in warn if "inside Kern+" in w] == [
+        "drink inside Kern+/the refuge lasts 60 d < 90: build a still and a barrel stockpile inside the core "
+        "(a siege cuts the rest off)"]
+    s["alert"].update(core_d=95)
+    assert not [w for w in errs_of(doc, s)[1] if "inside Kern+" in w]
+
+
 def test_schema_errors_reported(base):
     doc, state = base
     doc["policy"]["pop_ceiling"] = 55.0

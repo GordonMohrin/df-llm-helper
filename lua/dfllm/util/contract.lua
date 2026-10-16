@@ -14,7 +14,7 @@ C.TRANSITIONS = {
   PEACE    = {ALERT = true, SIEGE = true, DRILL = true},
   ALERT    = {PEACE = true, SIEGE = true, BREACH = true},
   SIEGE    = {BREACH = true, RECOVERY = true},
-  BREACH   = {RECOVERY = true},
+  BREACH   = {RECOVERY = true, SIEGE = true},       -- BUG-028: SIEGE once the fort is sealed again
   RECOVERY = {PEACE = true, ALERT = true, SIEGE = true, BREACH = true},
   DRILL    = {PEACE = true, ALERT = true, SIEGE = true},
 }
@@ -80,6 +80,10 @@ C.EVENTS = {
   GATE_FORCED = {cls = 'A', by = 'gate'},
   -- BUG-027: a unit died on or next to a bridge just pulled or moving (gate's move records)
   BRIDGE_CRUSH = {cls = 'A', by = 'gate'},
+  -- BUG-028: citizens cut off from drink/food by our raised gates (a raise held or forced, a rescue and its end)
+  STRANDED = {cls = 'A', by = 'siege'},
+  -- BUG-028: the main part of the drink or food stock lies outside the lockable core (Kern+ and the refuge)
+  SUPPLY_OUTSIDE = {cls = 'A', by = 'seal'},
   -- B: digest
   ALERT_START = {cls = 'B', by = 'siege'}, ALERT_END = {cls = 'B', by = 'siege'},
   LOCKDOWN_END = {cls = 'B', by = 'reflex'},
@@ -297,7 +301,8 @@ C.STATE_SPEC = obj({
   alarm = obj({defcon = int(1, 5), unacked = NAT, last = NAT, ack = NAT, lock = FLAG, why = str(24)},
               {eta = int(-1), doors = NAT, dwait = NAT, dout = NAT, dref = NAT}),
   lever = obj({lat_s = int(-1), lat_t = int(-1), pend = NAT, wait_s = NAT}),
-  alert = obj({want = str(24), burrow = str(24), tiles = NAT, inside = NAT, ok = FLAG}, {why = str(40)}),
+  alert = obj({want = str(24), burrow = str(24), tiles = NAT, inside = NAT, ok = FLAG},
+              {why = str(40), core_d = NAT, core_f = NAT}),         -- BUG-028: drink/food days inside the core
 })
 
 -- string formats (§1.1); explicit byte ranges, so LC_CTYPE cannot change them
