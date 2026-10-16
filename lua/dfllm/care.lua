@@ -373,6 +373,42 @@ local function mood_needs(job, ws)
   return {{alts = alts, n = 1, legacy = table.concat(mats, '/')}}, 'workshop'
 end
 
+-- BUG-017 (test fort y374: MOOD_RISK thirst said "missing bars,cloth,bone,logs" while the dwarf held all 8 items):
+-- the classes of the last report that a filter of the mood job still lacks now (the dwarf attaches items between two
+-- care runs); without a readable mood job the last report stands
+local function still_missing(job, rec)
+  local miss = type(rec.missing) == 'table' and rec.missing or {}
+  local list = job and R.job_needs(job)
+  if not list then return miss end
+  local open, out = {}, {}
+  for _, nd in ipairs(list) do open[nd.cls] = true end
+  for _, cls in ipairs(miss) do if open[cls] then out[#out + 1] = cls end end
+  return out
+end
+
+-- BUG-017: the stock note of short needs: '<kind> N in stock' per cloth or thread kind ({{name, n}}), and
+-- '<a>, <b>: no source in the fort' for the other classes without any item in the fort (names)
+local function stock_note(kinds, plain)
+  local parts = {}
+  for _, e in ipairs(kinds) do parts[#parts + 1] = string.format('%s %d in stock', e[1], e[2]) end
+  if #plain > 0 then parts[#parts + 1] = table.concat(plain, ', ') .. ': no source in the fort' end
+  return table.concat(parts, '; ')
+end
+
+-- ' (leather: no source in the fort)' for the classes of `miss` the last report found no item of at all (rec.nosrc:
+-- 'leather', 'cloth(plant)')
+local function nosrc_text(rec, miss)
+  local set, kinds, plain = {}, {}, {}
+  for _, cls in ipairs(miss) do set[cls] = true end
+  for _, name in ipairs(type(rec.nosrc) == 'table' and rec.nosrc or {}) do
+    if set[tostring(name):match('^[%a_]+') or ''] then
+      if tostring(name):find('(', 1, true) then kinds[#kinds + 1] = {name, 0} else plain[#plain + 1] = name end
+    end
+  end
+  local note = stock_note(kinds, plain)
+  return note ~= '' and (' (' .. note .. ')') or ''
+end
+
 local function mood_seen(K, c, r, p, u, kind)
   local sid, now = fmt(u.id), K.now().tick
   local child = is_child(u)
@@ -395,18 +431,20 @@ local function mood_seen(K, c, r, p, u, kind)
   local risk = (th >= c.mood_thirst and 'thirst') or (hu >= c.mood_hunger and 'hunger') or nil
   local T = K.now()
   local last = rec.risk and {t = rec.risk, w = rec.risk_w, ids = {sid}, toks = {rec.risk_why}} or nil
+  local job = u.job and u.job.current_job
   if risk and CAD.due(last, T, {sid}, {risk}, {ticks = c.mood_risk_every, wall_s = c.wake_wall_s}) then
     rec.risk, rec.risk_why, rec.risk_w = now, risk, T.wall
-    local miss = type(rec.missing) == 'table' and rec.missing or {}
+    local miss = still_missing(job, rec)
+    rec.missing = miss
     K.emit('MOOD_RISK', 'A', trunc(string.format('mood unit %d (%s%s) %s %d, dies at 75000: %s; a mood job cannot be '
-                                                 .. 'cancelled, supply it', u.id, kind, child and ', child' or '', risk,
+                                                 .. 'cancelled%s', u.id, kind, child and ', child' or '', risk,
                                                  risk == 'thirst' and th or hu,
-                                                 #miss > 0 and ('missing ' .. table.concat(miss, ',')) or 'nothing missing'), 200),
+                                                 #miss > 0 and ('missing ' .. table.concat(miss, ',') .. nosrc_text(rec, miss))
+                                                   or 'nothing missing', #miss > 0 and ', supply it' or ''), 200),
            {unit = u.id, why = risk, kind = kind, missing = miss, thirst = th, hunger = hu})
   elseif not risk then
     rec.risk_why = nil                         -- quiet: the time stays, a new risk within the cadence waits
   end
-  local job = u.job and u.job.current_job
   local ws = job and M.mood_workshop(job)
   if not ws and (not job or R.is_mood_job(job)) then   -- no workshop claimed yet (a mood job without a holder too)
     if rec.nojob < 0 then rec.nojob = now end
@@ -1901,8 +1939,12 @@ local function need_item(K, c, r, p, t, it)
   local f = it.flags
   local x, y, z = item_pos(it)
   if not x then return end
+  -- BUG-017: the need's stock = the matching items the fort knows of, usable now or after a fix (forbidden, far,
+  -- held); a short need's scan sees every item of its vectors, so the count is complete for it
+  local kt = known_tile(K, x, y, z)
+  if kt then nd.src = nd.src + 1 end
   if not f.forbid and not f.dump then
-    if known_tile(K, x, y, z) then
+    if kt then
       if reachable(K, r, t.m.upos, x, y, z) then
         r.claimed[it.id], nd.avail = true, nd.avail + 1
       else
@@ -1979,9 +2021,26 @@ local function acquire(K, r, p, classes)
   end
 end
 
--- after the scan: per mood the needs still short; MOOD_NEED (B) with the concrete list whenever it changes,
--- the acquisitions, and DECISION_NEEDED (A) once unresolved for wake_ticks (at once without any path),
--- again every rewake_ticks
+-- BUG-017: what the mood job still lacks right now, per filter index ({[idx] = n}): the needs were read when the run
+-- began and the dwarf keeps attaching items while a sliced run goes on. nil = not a job-filter mood or not readable
+-- (then the needs of the run stand)
+local function open_filters(m)
+  if m.via ~= 'job' then return nil end
+  local ok, list = pcall(function()
+    local u = df.unit.find(m.uid)
+    local j = u and u.job.current_job
+    if j and j.id == m.job_id then return R.job_needs(j) end
+  end)
+  if not (ok and type(list) == 'table') then return nil end
+  local open = {}
+  for _, nd in ipairs(list) do open[nd.idx] = nd.n end
+  return open
+end
+
+-- after the scan: per mood the needs still short (BUG-017: and still without an attached item); MOOD_NEED (B) with
+-- the concrete list whenever it changes, the acquisitions, and DECISION_NEEDED (A) once unresolved for wake_ticks (at
+-- once without any path), again every rewake_ticks. A class without any item in the fort is named
+-- ('leather: no source in the fort').
 local function mood_report(K, c, r, p)
   local rc, now = r.rc, K.now().tick
   local wants = {}
@@ -1989,10 +2048,27 @@ local function mood_report(K, c, r, p)
     local rec = not m.gone and p.moods[m.sid]
     if rec then
       local labels, classes, primary, seen, nopath, far = {}, {}, {}, {}, false, 0
+      local nosrc, nseen, kinds, plain = {}, {}, {}, {}
+      local open = open_filters(m)
       for _, nd in ipairs(m.needs) do               -- wants: the hook entries (care.mood_wants)
-        if nd.avail < nd.n then
-          local short = nd.n - nd.avail
+        local left = nd.n
+        if open and nd.nd and nd.nd.idx then left = math.min(nd.n, open[nd.nd.idx] or 0) end
+        if nd.avail < left then
+          local short = left - nd.avail
           far = far + (nd.far or 0)
+          -- BUG-017 (Run 10 y418): a cloth or thread kind names its own stock ('cloth(plant) 0 in stock': wool cloth
+          -- serves no plant-cloth filter); another class without any item: 'leather: no source in the fort'
+          local a0 = nd.alts[1]
+          local kname = (#nd.alts == 1 and R.KINDED[a0.cls or ''] and a0.sub) and (a0.cls .. '(' .. a0.sub .. ')') or nil
+          local name = kname or ((a0.cls and a0.cls ~= 'other') and a0.cls or (a0.tname or 'item'):lower())
+          if not nseen[name] then
+            nseen[name] = true
+            if kname then kinds[#kinds + 1] = {kname, nd.src or 0} end
+            if (nd.src or 0) == 0 then
+              nosrc[#nosrc + 1] = name
+              if not kname then plain[#plain + 1] = name end
+            end
+          end
           labels[#labels + 1] = nd.legacy or R.label(nd.nd, short)
           local path = false
           for _, alt in ipairs(nd.alts) do
@@ -2011,18 +2087,23 @@ local function mood_report(K, c, r, p)
       end
       if #labels == 0 then
         if rec.unres then K.log('info', 'mood unit %s: every material is available now', m.sid) end
-        rec.unres, rec.missing, rec.checked = nil, {}, rec.checked or now
+        rec.unres, rec.missing, rec.checked, rec.nosrc = nil, {}, rec.checked or now, nil
       else
         local sig = trunc(table.concat(labels, ', '), 200)
         local miss = {}
         for i = 1, math.min(8, #classes) do miss[i] = classes[i] end
         rec.missing = miss
+        rec.nosrc = #nosrc > 0 and nosrc or nil
+        -- the stock note (kinds, classes nothing in the fort can supply) is kept whole by the cut at 200 bytes
+        local note = stock_note(kinds, plain)
+        local ns = note ~= '' and ('; ' .. note) or ''
         -- FR-44: the full requirement list against the stock the moment the needs are known
         if not rec.checked then
           rec.checked = now
-          K.emit('MOOD_RISK', 'A', trunc(string.format('strange mood unit %s (%s%s) starts without %s', m.sid, rec.kind,
-                                                       m.child and ', child' or '', sig), 200),
-                 {unit = int(m.sid), why = 'missing', kind = rec.kind, missing = miss})
+          local head = string.format('strange mood unit %s (%s%s) starts without ', m.sid, rec.kind,
+                                     m.child and ', child' or '')
+          K.emit('MOOD_RISK', 'A', trunc(head .. trunc(sig, math.max(20, 200 - #head - #ns)) .. ns, 200),
+                 {unit = int(m.sid), why = 'missing', kind = rec.kind, missing = miss, nosrc = rec.nosrc})
         end
         local u = rec.unres
         if type(u) ~= 'table' then u = {since = now, sig = ''}; rec.unres = u end
@@ -2038,17 +2119,19 @@ local function mood_report(K, c, r, p)
             if bytes > 300 then break end
             list[i] = labels[i]
           end
-          K.emit('MOOD_NEED', 'B', string.format('mood unit %s (%s, %s%s) needs %s', m.sid, rec.kind,
-                                                 m.ws ~= '' and m.ws or '?', m.child and ', child' or '', sig),
+          K.emit('MOOD_NEED', 'B', trunc(string.format('mood unit %s (%s, %s%s) needs %s', m.sid, rec.kind,
+                                                       m.ws ~= '' and m.ws or '?', m.child and ', child' or '', sig) .. ns,
+                                         200),
                  {unit = int(m.sid), kind = rec.kind, need = sig, ws = m.ws, via = m.via, child = m.child and 1 or 0,
-                  list = list, acq = trunc(table.concat(acq, ' '), 200), far = far})
+                  list = list, acq = trunc(table.concat(acq, ' '), 200), far = far, nosrc = rec.nosrc})
         end
         acquire(K, r, p, primary)
         local age = now - (u.since or now)
         if (nopath or age >= rc.wake_ticks) and (u.woke == nil or now - u.woke >= rc.rewake_ticks) then
           u.woke = now
           local hints = {}
-          if far > 0 then hints[1] = string.format('%d outside Kern+: haul in or open the way', far) end
+          if note ~= '' then hints[1] = note end
+          if far > 0 then hints[#hints + 1] = string.format('%d outside Kern+: haul in or open the way', far) end
           for _, cls in ipairs(classes) do hints[#hints + 1] = R.HINT[cls] or R.HINT.other end
           -- live L1b-L3: a missing mood material ended in a failed mood and a death 9 times; care has freed
           -- what exists and started what it can, the rest needs the LLM (dig, trade, plan)
@@ -2069,7 +2152,7 @@ local function phase_needs(K, c, r, p)
     r.nq, r.nqi = {}, 1
     for _, m in ipairs(r.mood_list) do
       for _, nd in ipairs(m.needs) do
-        nd.avail, nd.fixes, nd.far = 0, 0, 0
+        nd.avail, nd.fixes, nd.far, nd.src = 0, 0, 0, 0
         for _, alt in ipairs(nd.alts) do
           for _, v in ipairs(alt.vecs or {}) do r.nq[#r.nq + 1] = {m = m, nd = nd, alt = alt, vec = v} end
         end
@@ -2182,9 +2265,28 @@ local function on_site(sites, x, y, z)
   return false
 end
 
+-- BUG-017 (Run 10 y418: the reserve line said "cloth 0/7" while all 7 were wool and a plant-cloth mood found
+-- none): cloth and thread are counted per kind (reserve.kind: plant, silk, yarn), the stock = free items (not busy,
+-- not carried, not forbidden) and the reserve's own; at most KIND_SCAN items per vector, only while the class holds
+M.KIND_SCAN = 2000
+local function kind_stock(r, cls)
+  local out, n = {plant = 0, silk = 0, yarn = 0}, 0
+  r.kcache = r.kcache or {}
+  for _, it in ipairs(vec(function() return df.global.world.items.other[R.VECS[cls][1]] end)) do
+    n = n + 1
+    if n > M.KIND_SCAN then break end
+    if not R.busy(it) and not R.carried(it) and (not it.flags.forbid or r.res_ids[it.id]) then
+      local k = R.kind(it, r.kcache)
+      if k then out[k] = out[k] + 1 end
+    end
+  end
+  return out
+end
+
 local function reserve_begin(K, c, r, p)
   local rc, inv, held = r.rc, K.census.i, p.reserve.held
-  local rs = {pi = 1, ii = 0, def = {}, acts = 0, want = 0, tot = {}, found = {}, sites = build_sites()}
+  local rs = {pi = 1, ii = 0, def = {}, acts = 0, want = 0, tot = {}, found = {}, sites = build_sites(), kcap = {},
+              kheld = {}}
   for _, cls in ipairs(R.CLASSES) do
     local keep = {}
     for _, id in ipairs(type(held[cls]) == 'table' and held[cls] or {}) do
@@ -2232,6 +2334,16 @@ local function reserve_begin(K, c, r, p)
     r.res_floor[cls] = (stale and pushed) and math.min(hold, pushed) or hold
     if stale or r.mood_cls[cls] then hold = math.min(hold, #ids) end   -- or a mood takes from this class now
     r.res_hold[cls] = hold
+    if R.KINDED[cls] and hold > 0 then          -- BUG-017: the hold split over the kinds in stock
+      local ks = kind_stock(r, cls)
+      r.kstock = r.kstock or {}
+      r.kstock[cls], rs.kcap[cls], rs.kheld[cls] = ks, R.split(hold, ks), {}
+      for _, id in ipairs(ids) do
+        local it = df.item.find(id)
+        local k = it and R.kind(it, r.kcache)
+        if k then rs.kheld[cls][k] = (rs.kheld[cls][k] or 0) + 1 end
+      end
+    end
     rs.tot[cls] = f.total
     while #ids > hold and rs.acts < rc.per_run do                 -- release beyond the hold, newest first
       local id = ids[#ids]
@@ -2269,7 +2381,11 @@ local function reserve_item(K, r, p, rs, it)
   local x, y, z = item_pos(it)
   if not inside(r, x, y, z) or not revealed(K, x, y, z) then return end
   if on_site(rs.sites, x, y, z) then return end                    -- BUG-009: never forbid on a building site
+  -- BUG-017: a cloth or thread kind is held up to its share of the hold, so every kind in stock keeps a stash
+  local kind = rs.kcap[cls] and R.kind(it, r.kcache)
+  if kind and (rs.kheld[cls][kind] or 0) >= (rs.kcap[cls][kind] or 0) then return end
   if K.act.item_flag(it.id, 'forbid', true) then
+    if kind then rs.kheld[cls][kind] = (rs.kheld[cls][kind] or 0) + 1 end
     local ids = p.reserve.held[cls]
     ids[#ids + 1] = it.id
     r.res_ids[it.id] = true
@@ -2694,7 +2810,11 @@ local function finish(K, c, r, p)
   local held, parts = {}, {}
   for _, cls in ipairs(R.CLASSES) do
     held[cls] = #(p.reserve.held[cls] or {})
-    if r.res_hold[cls] then parts[#parts + 1] = string.format('%s %d/%d', cls, held[cls], r.res_hold[cls]) end
+    if r.res_hold[cls] then
+      local ks = r.kstock and r.kstock[cls]
+      parts[#parts + 1] = string.format('%s %d/%d', cls, held[cls], r.res_hold[cls]) ..
+        (ks and string.format(' (plant %d, silk %d, yarn %d in stock)', ks.plant, ks.silk, ks.yarn) or '')
+    end
   end
   st.held = held
   st.wants = r.wants or {}

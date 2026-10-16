@@ -37,7 +37,7 @@ Related: FR-xx, BUG-xx
 | [BUG-014](BUG-014-autolabor-legacy-false-failure.md) | fixed in 413f614 (offline, live-untested) | low | AUTOLABOR_LEGACY says "mode monitor failed, still legacy" although the mode was switched | lua/dfllm/baseline.lua |
 | [BUG-015](BUG-015-door-forbid-flag-reset-in-one-frame.md) | fixed (offline, live-untested; cause open) | high | the entrance door 74,70,117 cannot be kept forbidden (flag reset within one frame), the lockdown still reports it | lua/dfllm/act.lua, reflex.lua |
 | [BUG-016](BUG-016-trade-blocked-by-open-unit-sheet.md) | fixed (Claude, 20:00) | medium | two caravans lost: trade waits for ever on `ui_busy` while a unit sheet stays open | lua/dfllm/trade.lua |
-| [BUG-017](BUG-017-mood-risk-false-missing.md) | open | low | MOOD_RISK reports missing materials although the mood dwarf already holds every item | lua/dfllm/care.lua |
+| [BUG-017](BUG-017-mood-risk-false-missing.md) | fixed (offline, live-untested) | low | MOOD_RISK reports missing materials although the mood dwarf already holds every item | lua/dfllm/care.lua |
 | [BUG-018](BUG-018-refuge-audit-ignores-entrances.md) | open | high | the refuge audit passes a burrow that contains the entrances and main halls (50 -> 1 in the first real siege) | lua/dfllm/seal.lua, siege.lua |
 | [BUG-019](BUG-019-breach-refuge-refused-for-supplies.md) | open | high | during a breach the only reachable emergency burrow is refused for missing supplies | lua/dfllm/seal.lua, siege.lua |
 | [BUG-020](BUG-020-embark-rectangle-ignores-injected-mouse.md) | open | medium | `embark.py scan` cannot place the rectangle: it ignores the held/injected mouse | tools/embark |
