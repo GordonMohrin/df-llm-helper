@@ -447,20 +447,36 @@ local function built(b)
   return not ok or r
 end
 
--- the trade depot: the built one holding manifest.depot, else the first built one
+-- BUG-025 (Run 10: the merchants unloaded at a second, hand-built depot while the kernel kept looking at the manifest
+-- depot, so "nothing_listed" although the caravan had goods): trader-flagged items lying in a depot's contained_items
+local function trader_items(b)
+  local n = 0
+  pcall(function()
+    local list = b.contained_items
+    for i = 0, math.min(#list, M.CFG.DEPOT_ITEMS) - 1 do
+      if list[i].item.flags.trader then n = n + 1 end
+    end
+  end)
+  return n
+end
+
+-- the trade depot: the built one the merchants unloaded at (most trader goods), else the one holding manifest.depot,
+-- else the first built one
 local function find_depot(K)
   local want = K.manifest().depot
-  local best
+  local best, byman, bytrade, most = nil, nil, nil, 0
   pcall(function()
     for _, b in ipairs(df.global.world.buildings.other.TRADE_DEPOT) do
       if built(b) then
-        if type(want) == 'table' and b.z == want[3] and want[1] >= b.x1 and want[1] <= b.x2
-           and want[2] >= b.y1 and want[2] <= b.y2 then best = b; break end
         best = best or b
+        if not byman and type(want) == 'table' and b.z == want[3] and want[1] >= b.x1 and want[1] <= b.x2
+           and want[2] >= b.y1 and want[2] <= b.y2 then byman = b end
+        local n = trader_items(b)
+        if n > most then bytrade, most = b, n end
       end
     end
   end)
-  return best
+  return bytrade or byman or best
 end
 
 local function in_depot(p, d) return p.z == d.z and p.x >= d.x1 and p.x <= d.x2 and p.y >= d.y1 and p.y <= d.y2 end

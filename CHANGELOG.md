@@ -1,5 +1,10 @@
 # CHANGELOG dfpilot
 
+## Trade follows the depot the merchants use, BUG-025 (2026-10-16)
+- `find_depot` prefers the built depot holding the most trader-flagged items (the merchants' goods), then the manifest depot, then the first built one. Before, a second
+  hand-built depot made `inspect what=trade` and the visit logic look at an empty building: Catten's caravan ended `nothing_listed` while 49 goods lay in the other depot.
+- Test `BUG-025` in `tests/lua/test_trade_ledger.lua`.
+
 ## Trade: sale goods once per visit, none for empty caravans, blocked visits are reported, BUG-016 (2026-10-15)
 - **Sale items are marked for the depot once per visit** (`v.brought` in the visit record) instead of once per attempt: each `ui_busy`/`ui_timeout` retry
   used to mark another 100 items, which kept ~100 `BringItemToDepot` jobs open and starved planting.

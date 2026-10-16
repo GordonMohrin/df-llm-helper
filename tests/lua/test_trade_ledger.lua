@@ -117,6 +117,19 @@ T.test('FR-18: inspect what=trade lists the merchant goods at the depot with the
   T.eq(r.data.caravans[1].state, 'AtDepot')
 end)
 
+T.test('BUG-025: with two depots the kernel follows the one the merchants unloaded at', function()
+  local W, d, c = setup()
+  local d2 = F.depot(W, {id = 51, x = 40, y = 40})                      -- a second, hand-built depot
+  F.set_state(c, 'AtDepot')
+  for _, it in ipairs(c._items) do it.flags.trader = true; d2.contained_items:insert('#', {item = it}) end
+  local r = W.inbox('inspect', {what = 'trade'})
+  T.eq(r.ok, true, r.msg)
+  T.eq({r.data.depot, r.data.goods_items}, {51, 4}, 'goods lie in depot 51, not in the first built one')
+  d2.contained_items = kmock.vec{}                                          -- the goods leave again
+  r = W.inbox('inspect', {what = 'trade'})
+  T.eq(r.data.depot, 50, 'no trader goods anywhere: the first built depot')
+end)
+
 T.test('FR-43: a caravan without a built depot raises DEPOT_MISSING (A) once and asks the runner for one', function()
   local calls = {}
   local W = F.world{}
