@@ -233,6 +233,46 @@ def sources(g: Graph, manifest: dict) -> list[int]:
     return sorted(src)
 
 
+CHOKE_TRY = 4           # candidate tiles a choke search re-checks with a BFS (the first that closes every route wins)
+
+
+def choke(g: Graph, m: dict, path: list[int], src, blocked, stop, attack) -> str:
+    """What to build where on an attacker route (Run 10: 'bypass ... reaches 139,128,117' named no fix). Only the
+    part of the route after its last tile in the fort's attack side (`attack`: Z1, Z2, kill boxes, bridges) is the
+    foreign way in; walking it back from the target, its tiles outside the fort's own geometry (fort_boxes; else any
+    of them) that take a constructed wall: a floor tile ('wall x,y,z floor') or a ramp the route climbs (the wall
+    goes on its top: 'wall x,y,z ramp', the seal template's kinds). The first of up to CHOKE_TRY candidates whose
+    wall closes every such route wins; else the first, marked '(+more)'. '' when none fits (a target on the attack
+    side itself, or stairs, doors and bridges only). Doors are never proposed: the worst-case audit counts them open."""
+    fort = g.mask(fort_boxes(m))
+    route = path[:-1]
+    last = max((k for k, i in enumerate(route) if attack[i]), default=-1)
+    foreign = route[last + 1:]
+    own = [i for i in reversed(foreign) if not fort[i]] or list(reversed(foreign))
+    cands = []
+    for k, i in enumerate(own):
+        c = g.t[i]
+        if c == ".":
+            cands.append((i, "floor"))
+        elif c == "r":
+            j = path.index(i)
+            zs = {g.pos(n)[2] for n in path[max(0, j - 1):j + 2]}
+            above = i + g.WH if i + g.WH < g.N else None
+            if len(zs) > 1 and above is not None and g.t[above] in "_v":
+                cands.append((i, "ramp"))
+        if len(cands) >= CHOKE_TRY:
+            break
+    if not cands:
+        return ""
+    for i, kind in cands:
+        b = bytearray(blocked)
+        b[i] = 1
+        if g.bfs(src, blocked=b, stop=stop)[1] is None:
+            return "wall %d,%d,%d %s" % (g.pos(i) + (kind,))
+    i, kind = cands[0]
+    return "wall %d,%d,%d %s (+more)" % (g.pos(i) + (kind,))
+
+
 APPROACH_R = 6          # an outward gallery must face attacker tiles within this many tiles of the outer bridge
 
 
@@ -306,10 +346,14 @@ def audit(snap: dict, manifest: dict | None, graph: Graph | None = None) -> dict
     # 1. bypass: with the trap hall removed no edge -> Z3/Z4 path may remain
     if not any(Z["Z2"]):
         fails.append("manifest: no Z2 trap hall")
-    _, hit = g.bfs(src, blocked=Z["Z2"], stop=T)
+    par: dict = {}
+    _, hit = g.bfs(src, blocked=Z["Z2"], stop=T, parents=par)
     res["bypass"] = hit is not None
     if hit is not None:
-        fails.append(_msg("bypass: edge->Z3/Z4 avoids the trap hall (reaches %d,%d,%d)" % g.pos(hit)))
+        side = _or(Z["Z1"], Z["Z2"], kill, g.mask([b["fp"] for b in m.get("bridges", {}).values()]))
+        ch = choke(g, m, g.path(par, hit), src, Z["Z2"], T, side)
+        fails.append(_msg(("bypass: %s -> %d,%d,%d" % ((ch,) + g.pos(hit))) if ch else
+                          "bypass: edge->Z3/Z4 avoids the trap hall (reaches %d,%d,%d)" % g.pos(hit)))
     # 2. armed traps on every attacker path
     cost = bytearray(g.N)
     for t in snap.get("traps", []):
@@ -332,11 +376,16 @@ def audit(snap: dict, manifest: dict | None, graph: Graph | None = None) -> dict
         fails.append("refuge: none (manifest refuge.anchor) or not walkable")
     else:
         _, h1 = g.bfs(core, blocked=_or(attack, Z["Z3"]), climb=False, stop=rmask)
-        _, h2 = g.bfs(src, blocked=_minus(Z["Z4"], rmask), stop=rmask)
+        par = {}
+        rblock = _minus(Z["Z4"], rmask)
+        _, h2 = g.bfs(src, blocked=rblock, stop=rmask, parents=par)
         if h1 is None:
             fails.append("refuge: not reachable from the core without Z1/Z2/Z3")
         if h2 is not None:
-            fails.append("refuge: on the attack path (reachable without passing Z4)")
+            side = _or(attack, g.mask([b["fp"] for b in m.get("bridges", {}).values()]))
+            ch = choke(g, m, g.path(par, h2), src, rblock, rmask, side)
+            fails.append(_msg("refuge: on the attack path, " + ch) if ch else
+                         "refuge: on the attack path (reachable without passing Z4)")
         res["refuge_sep"] = h1 is not None and h2 is None
     # 4. civilian path != attacker path
     st = m.get("stairs", {})

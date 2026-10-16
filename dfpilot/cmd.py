@@ -388,6 +388,7 @@ def workshops_missing(save_dir: Path, types: list | None = None) -> list[str]:
 
 # ---------------------------------------------------------------- seal openings (Run 10)
 SEAL_LAST = ("", "last", "entrances")
+AUDIT_WALL = re.compile(r"\bwall (\d+),(\d+),(\d+) (floor|ramp)\b")    # bp.topo.choke in an audit fail
 
 
 def _snap_char(snap: dict | None, x: int, y: int, z: int) -> str | None:
@@ -412,14 +413,36 @@ def last_entrances(save_dir: Path) -> list[str]:
     return [x for x in ((st.get("ready") or {}).get("ents") or []) if isinstance(x, str)]
 
 
+def last_audit_walls(save_dir: Path) -> list[str]:
+    """'x,y,z kind wall' for every wall the newest audit names (AUDIT `fails`, or SIEGE_UNREADY `afails` if newer):
+    the chokes bp.topo.audit gives for a bypass or a refuge on the attack path."""
+    for e in files.iter_events_rev(save_dir):
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        fails = d.get("fails") if e.get("type") == "AUDIT" else d.get("afails") if e.get("type") == "SIEGE_UNREADY" \
+            else None
+        if isinstance(fails, list):
+            out = []
+            for f in fails:
+                for mt in AUDIT_WALL.finditer(str(f)):
+                    t = f"{mt.group(1)},{mt.group(2)},{mt.group(3)} {mt.group(4)} wall"
+                    if t not in out:
+                        out.append(t)
+            return out
+    return []
+
+
 def seal_openings(save_dir: Path, at, snap: dict | None = None) -> tuple[str, list[str]]:
     """The seal template's `at` with every kind filled: at = '' / 'last' / 'entrances' -> the open ways in of the
-    last entrance check; kinds from the newest snapshot (sites_snapshot), else from the entry text. Openings the
-    snapshot shows closed (door, wall, bridge, rock) or that name no floor/ramp/stair are left out. Returns
-    (at, notes); raises BpError when nothing is left to close."""
+    last entrance check; 'audit' -> the walls the newest audit names (bypass, refuge on the attack path); 'all' ->
+    both; kinds from the newest snapshot (sites_snapshot), else from the entry text. Openings the snapshot shows
+    closed (door, wall, bridge, rock) or that name no floor/ramp/stair are left out. Returns (at, notes); raises
+    BpError when nothing is left to close."""
     dmod = load_bp("defense")
     text = str(at if at is not None else "").strip()
-    raw = ";".join(last_entrances(save_dir)) if text.lower() in SEAL_LAST else text
+    key = text.lower()
+    parts = (last_entrances(save_dir) if key in SEAL_LAST + ("all",) else []) + \
+        (last_audit_walls(save_dir) if key in ("audit", "all") else [])
+    raw = ";".join(parts) if key in SEAL_LAST + ("audit", "all") else text
     try:
         ops = dmod.parse_openings(raw) if raw else []
     except ValueError as e:
@@ -443,8 +466,8 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None) -> tuple[str, li
             continue
         keep.append(dict(o, kind=kind))
     if not keep:
-        why = "; ".join(notes) or ("the last entrance check names no open way in" if text.lower() in SEAL_LAST
-                                   else "no opening named")
+        why = "; ".join(notes) or ("the last entrance check names no open way in" if key in SEAL_LAST
+                                   else "the last audit names no wall" if key == "audit" else "no opening named")
         raise BpError(f"seal: nothing to close ({why})")
     return dmod.format_openings(keep), notes
 

@@ -197,6 +197,9 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
   SIEGE_UNREADY `afails`); `no_kern`/`no_refuge` burrow missing; `no_outer`/`no_inner` no O1/B1, `bridge:B` not
   built, `levers:B` < 2 linked levers → fortcore pieces. `status` says `UNREADY` while R0 fails (SIEGE_UNREADY
   monthly); `drill never (auto: <why>)` → fix `<why>` (drills run by themselves) or `dfllm cmd drill`.
+- Audit `fails` name the fix (table DESIGN §5.4): `bypass: wall x,y,z floor -> X` / `refuge: on the attack path,
+  wall x,y,z floor` = a constructed wall on that tile closes the route (`ramp`: on its top; `(+more)`: other routes
+  remain): `dfllm cmd bp.place tpl=seal site=S1 at=audit`, then `dfllm audit`. Doors never fix an audit route.
 
 ## 9. Decisions (the player's answers in `config/decisions.yaml`; defaults until they answer)
 D-01 cap option A (≤ 75) | D-02 difficulty unchanged | D-03 idle rule (> 40 % for 3 days, useful

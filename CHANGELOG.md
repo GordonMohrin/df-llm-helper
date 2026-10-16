@@ -1,5 +1,23 @@
 # CHANGELOG dfpilot
 
+## Audit findings say what to build where; `seal at=audit` (2026-10-16; offline, live-untested)
+- **Why (Run 10):** `bypass: edge->Z3/Z4 avoids the trap hall (reaches 139,128,117)` and `refuge: on the attack path
+  (reachable without passing Z4)` named no fix. 139,128,117 is one level above the refuge: a way down to the refuge
+  level outside the fort, then up the civilian stair (reproduced offline: a stair from the surface and a tunnel into
+  the refuge room give exactly these two findings).
+- **`bp.topo.choke`:** on the part of the route after it leaves the attack side (Z1/Z2/kill boxes/bridges), walking
+  back from the target, the first tile outside the fort geometry that takes a constructed wall (floor; a ramp the
+  route climbs gets the wall on its top) and whose wall closes every such route (else `(+more)`). Findings now read
+  `bypass: wall x,y,z floor -> X` and `refuge: on the attack path, wall x,y,z floor` (<= 60 characters, readiness'
+  cut); without a wall tile the old texts stay. The validator's `bypass` finding carries the same text.
+- **`seal at=audit`** builds those walls (`at=all`: entrances and audit walls); DESIGN §5.4 has a table of every
+  audit finding, what it means for the player and what to build; RULES §8 one line.
+- Tests: `tests/bp/test_bp_choke.py` (new).
+- **How to use:** `dfllm audit` (each fail names the wall), then `dfllm cmd bp.place tpl=seal site=S1 at=audit` and,
+  once built, `dfllm audit` again.
+- **Live check:** in the Run 10 fort `dfllm audit` shows `bypass: wall x,y,z ... -> 139,128,117` and the refuge
+  finding with the same tile; after the seal is built both are gone (or the next route is named).
+
 ## Template `seal`: close the open ways in, one piece per opening (2026-10-16; offline, live-untested)
 - **Why (Run 10):** SIEGE_UNREADY listed `90,109,125 ramp`, `53,126,127 floor`, `95,127,123 floor` as ways in without door
   or bridge; there was no template for them and the session placed doors by hand with quickfort `#build d`.
