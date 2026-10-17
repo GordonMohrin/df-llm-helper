@@ -1,5 +1,55 @@
 # CHANGELOG dfpilot
 
+## A dry hospital loses its zones before its patients die; a hospital is planned only near accepted water (2026-10-17; offline, live-untested)
+- **Why (Run 11, Kilrudrabed site98, y439 spring d28, BUG-034):** DEATHS_PREVENTABLE: 5 bedridden patients died of thirst
+  (75,000), 8 more were over 40,000. The hospital (4 locations 6/8/10/17, 5 zones) had no accepted water (`water NO`);
+  HOSPITAL_DRY had said so for a long time and its recipe asked to "delete the hospital zone", which nothing in the kernel
+  could do. The game session removed the 5 zones by hand: GiveWater jobs brought water again (4 at once). The plans kept
+  drafting `hospital` (y439 s2).
+- **Kernel (`water.lua`, new act `hospital_remove`, owner water):** while a patient's thirst is over `water.patient_thirst`
+  (config/baseline.json, 25,000), every zone of a hospital location none of whose zones has an accepted source within
+  `near` (30) tiles is removed (zones screen > remove, one zone by id, only zones linked to a HOSPITAL location, never the
+  zone open on the zone sheet), at most `remove_per_run` (8) a run; a location with one served zone keeps all of them.
+  - HOSPITAL_REMOVED (A): `removed 5 dry hospital zone(s) 61,62,63,64,65 (location 6,8,10,17): 8 patient(s) over thirst
+    25000, unit 10 at 48000; nearest accepted water 60,12,5 (46 tiles); water before a new hospital` (d: zones, locs,
+    units, n, thirst, patients, give, failed, near, src, d). No patient_thirst or HOSPITAL_DRY in that run.
+  - kern.log: the removal (warn, with the GiveWater jobs running then) and, a day later, `water: a day after the hospital
+    removal (tick T): N GiveWater job(s), ...` (`inspect water_sources` `removed`): the next live removal measures the DF
+    rule it rests on (BUG-034 lists what is established and what is not).
+  - HOSPITAL_DRY's recipe tail is now `until then the kernel removes it at thirst 25000`; patient_thirst's recipe says
+    `(GiveWater resumes or patients fetch their own drink)`. `water.hosp_remove` false keeps the old report-only way.
+  - water.conf ignores a config value of another type than its default; `python -m dfpilot.lint --config` checks the
+    `water` keys and ranges (`fairplay.WATER_LIM`, mirrored from water.lua by a test).
+- **State `water` (owner water):** `{patients, thirst_max, hosp_ok, refuge_ok, buckets_free, hosp, src}`, `src` = up to 8
+  accepted sources [x,y,z] nearest the hospital (else the citizens) first. The brief/status line shows it as
+  `hospital ok|DRY|none src N patients N (thirst N)` instead of care's narrower `water ok|NO` (`stock.hosp_water`).
+- **Plan:** `plan check` refuses a plan that adds a `hospital` while no accepted source lies within `near` tiles of the
+  hospital's site (the S1 anchor of `bp sites hospital`) or the state lists none; the error names the fix (a cistern
+  first, or the cistern under way must hold water). No sites snapshot: a warning (distance not checked). An older kernel
+  without the `water` key: not checked. `plan propose` holds the hospital back under the same rule and drafts
+  `cistern@S1` in its place once (not while a cistern project or room exists), with a note; so the hospital is no longer
+  drafted each review while the fort has no water.
+- Contracts: ACT `hospital_remove` (water), EVENTS HOSPITAL_REMOVED (A, water), STATE `water.*` (contract.lua, schema.py,
+  CONTRACTS §5/§7/§9.3/§9.17/§12 and the appendix), RULES §7 `HOSPITAL_DRY / HOSPITAL_REMOVED`, DESIGN §5 hospital water,
+  FR-34 status, follow's wake hint.
+- Tests (fail on fcada16): `tests/lua/test_water.lua` (Run 11 replay, a served location keeps its zones, the mark and the
+  config knobs, remove_per_run, a refused removal, `water.src`), `tests/lua/test_kern_act.lua` (hospital_remove),
+  `tests/test_hospital_water.py` (schema, config, plan check/propose, fort facts, status). Existing water tests that are
+  about patient_thirst run with the removal off; the HOSPITAL_DRY recipe tests expect the new tail.
+- **How to use:** nothing to send. HOSPITAL_REMOVED: tell the player which zones went and why; the next plan puts water
+  first (`plan propose` drafts the cistern; `plan check` refuses a hospital without water near it). Once real water stands
+  near the old room, re-zone it as a hospital by hand or place a new one (`bp sites hospital`).
+- **Live check (Run 11 site98):** after `git pull` and `dfhack-run dfllm reload`:
+  - `state.a.json`/`b.json` carry `water` (`hosp`, `src`); `dfllm status` shows `hospital DRY src 0 ...` or `hospital
+    none ...` (the zones are already gone by hand).
+  - If a hospital zone stands dry and a patient's thirst passes 25,000: within a game day HOSPITAL_REMOVED wakes, the zones
+    are gone from the zones screen, kern.log has `water: removed hospital zone(s) ...`; a day later `water: a day after
+    the hospital removal ...: N GiveWater job(s)`. N > 0 with thirst falling confirms the rule; N 0 with patients still
+    thirsty: read the patients' job lines and the gamelog (`Give water: ...`) and add it to BUG-034.
+  - `dfllm plan propose`: no `hospital` in the draft while `water.src` is empty or far, `cistern@S1` instead (unless a
+    cistern stands or is under way) and the note `hospital held back (BUG-034): ...`; `dfllm plan check` on a plan that
+    still adds the hospital prints `ERROR hospital (seasons[N]): ...`.
+  - `python -m dfpilot.lint --config` prints `config ok`.
 ## A seal door that cannot stand becomes a constructed wall: the template checks the door rule, the runner walls a door quickfort refuses (2026-10-16; offline, live-untested)
 - **Why (Run 11, Kilrudrabed site98, y435 autumn, kernel c75b7c0):** the seal piece door 128,121,143 (project
   c1a147087d) stayed `build_lost` although the fort had 26 boulders and 171 logs. quickfort `#build d` on that tile by
