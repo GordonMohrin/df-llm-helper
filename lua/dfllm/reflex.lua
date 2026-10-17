@@ -34,6 +34,15 @@
 --          the alert state and seal picks the burrow (Kern+, else the interior Innen+); the text says what
 --          really holds ("alert: Innen+ (REFUGE_FAIL ...)", "alert: none (...)"), never what was asked (BUG-011),
 --          and so do the gates ("gates: 2 of 4 up, 2 pulls blocked (levers outside the alert burrow)")
+--   recall Run 11 (siege 8, y441: 16 citizens were outside Kern+ when the arrival came, 7 still outside at the breach):
+--          while citizens (soldiers excluded) stand outside Kern+ and the refuge, the alert sounds at once instead of
+--          after the pulls (alert_due 'citizens outside'): the alert lists seal's lever burrow while a pull is pending
+--          (gate.rooms, BUG-013, live-confirmed), so the pulls go on under it. The doors then wait for those citizens up
+--          to RECALL_MAX ticks after the alert sounded (ALERT_AFTER when it did not really sound: no burrow, they are not
+--          called), never with a visible hostile within DOOR_NEAR of the door. The recall (st.hold.rc) is reported:
+--          kern.log at its start (how many, the ETA), at SIEGE/BREACH while some are still out, RECALL (B) when all
+--          came in (ticks), at RECALL_MAX with the ones still out ('late') and at the lockdown's end ('end'); the
+--          ARRIVAL/LOCKDOWN text says '16 citizens outside Kern+ called in' / '7 of 16 citizens still outside ...'
 -- then ARRIVAL (A) carries what was done and the text. A popup is dismissed by the arbiter only after this returned
 -- (FR-36). The lockdown holds until threat is 0 (no visible invader, great danger in reach or hostile inside, the
 -- threat scan not armed, ARM ticks after the last trigger) for hold_quiet_days game days; then the doors it forbade
@@ -96,6 +105,12 @@ M.ALERT_MAX = 1500
 M.ALERT_LAT = 2
 M.ALERT_UNKNOWN = 900
 M.ALERT_NEAR = 30          -- ... and not at all for a hostile this close to a citizen outside Kern+
+-- Run 11 (siege 8): citizens outside Kern+ are called in at once; the doors wait for them up to RECALL_MAX ticks after
+-- the alert sounded (a dwarf walks ~9 ticks a tile: 2,400 ticks bring one home from ~250 tiles), looked at every
+-- RECALL_POLL ticks
+M.RECALL_MAX = 2400
+M.RECALL_POLL = 25
+M.RECALL_IDS = 20          -- citizen ids a recall keeps (census.u.outside_ids holds 20)
 -- popup / report text -> kind (lower case plain markers)
 M.TEXT = {{'vile force of darkness', 'siege'}, {'an ambush', 'ambush'}, {'snatcher', 'snatcher'},
           {'has come', 'beast'}, {'need a trade depot', 'no_depot'}}
@@ -103,7 +118,8 @@ local REPORT_KIND = {AMBUSH_AMBUSHER = 'ambush', BEAST_AMBUSH = 'ambush', AMBUSH
                      MEGABEAST_ARRIVAL = 'beast', WEREBEAST_ARRIVAL = 'beast', MERCHANTS_NEED_DEPOT = 'no_depot'}
 local ARMY = {siege = true, invasion = true, beast = true, invader = true}   -- DEFCON 2 kinds
 
-local st      -- persisted m.reflex: {v, hold = {why, kinds, acts, since, last, qs}|nil, doors = {ids}, ack = {n, wall},
+local st      -- persisted m.reflex: {v, hold = {why, kinds, acts, since, last, qs, rc (Run 11: the recall {t, n, ids, eta,
+              --   called, burrow, left, late, done})}|nil, doors = {ids}, ack = {n, wall},
               --   irq = {{n, type, tick, wall, ms, msg, done (1 default applied, 2 none: its unit far), u (unit)}},
               --   vfy = {{id, t, try, pos}} (forbidden, not read back yet; BUG-015), ref = {{id, t, try, pos, sig, items,
               --   units}} (refused: the flag fell back), prec, far = {t, ids} (Run 11: expired far)}
@@ -244,12 +260,16 @@ end
 
 -- BUG-013: the doors stop waiting for the citizens outside ALERT_AFTER ticks after the civ alert began to call them in
 -- (the alert itself may wait for the lever pulls up to ALERT_MAX); a lockdown without the alert action counts from
--- the moment it first wanted the doors
+-- the moment it first wanted the doors. Run 11 (siege 8: 16 citizens outside at the arrival): a recall (the alert
+-- sounded with citizens outside and really called them: a burrow was listed) holds them open RECALL_MAX ticks
 local function doors_late(h, now)
   if not h then return true end
-  local t0 = h.doors_at
-  if h.acts.alert then t0 = h.alert_on and (h.alert_t or h.doors_at) or nil end
-  return t0 ~= nil and now - t0 >= M.ALERT_AFTER
+  local t0, wait = h.doors_at, M.ALERT_AFTER
+  if h.acts.alert then
+    t0 = h.alert_on and (h.alert_t or h.doors_at) or nil
+    if h.rc and h.rc.called then wait = M.RECALL_MAX end
+  end
+  return t0 ~= nil and now - t0 >= wait
 end
 
 -- BUG-015: what stands on and next to a door's tile: the visible units within one tile on its level
@@ -706,19 +726,30 @@ local function pulls(K)
   return ok and type(p) == 'table' and p or false
 end
 
+-- Run 11: the citizens (soldiers excluded) outside Kern+ and the refuge in a fresh census (sense), 0 when none or not
+-- known (no Kern+ burrow: -1, an old census)
+local function outside_now(K, now)
+  local cu = K.census.u
+  if type(cu) ~= 'table' or now - (int(cu.tick) or -1e9) > M.FRESH then return 0 end
+  return math.max(0, int(cu.outside) or 0)
+end
+
 -- BUG-013: why the lockdown's deferred civ alert sounds now, or nil; p = gate.pulls (fetched when nil). At once when
--- a hostile is near a citizen outside Kern+ or inside, or when the lockdown raises no gate; else once no lever pull is
--- pending (the gates are up or none is left to pull), or at its deadline hd.alert_at. Returns why, p.
+-- a hostile is near a citizen outside Kern+ or inside, when citizens are outside Kern+ (Run 11: call them home first;
+-- the pulls go on under the alert with the lever burrow listed) or when the lockdown raises no gate; else once no lever
+-- pull is pending (the gates are up or none is left to pull), or at its deadline hd.alert_at. Returns why, p.
 local function alert_due(K, hd, now, p)
   local hc = K.census.h
   if type(hc) == 'table' and (((hc.near_cit or -1) >= 0 and hc.near_cit <= M.ALERT_NEAR) or (hc.inside or 0) > 0) then
     return 'hostile near', p
   end
-  if not hd.acts.gates then return 'no gates', p end
-  if p == nil then p = pulls(K) end
-  if not p then return 'no gate module', p end
+  if hd.acts.gates and p == nil then p = pulls(K) end
   -- BUG-027: a bridge waits for units on its footprint: call the civilians in first (the gate raises once it is clear)
-  if (int(p.foot) or 0) > 0 then return 'units on a bridge', p end
+  if hd.acts.gates and p and (int(p.foot) or 0) > 0 then return 'units on a bridge', p end
+  local out = outside_now(K, now)
+  if out > 0 then return string.format('%d %s outside Kern+', out, plural(out, 'citizen')), p end
+  if not hd.acts.gates then return 'no gates', p end
+  if not p then return 'no gate module', p end
   if (int(p.left) or 0) == 0 then
     local want = int(p.want) or 0
     return (want > 0 and (int(p.up) or 0) >= want) and 'gates up' or 'no pull pending', p
@@ -737,8 +768,108 @@ local function alert_deadline(hd, now, p)
   hd.alert_at, dirty = now + hd.wait, true
 end
 
--- issue `acts` (idempotent); returns the parts of the text, in the order they matter (clock, alert, doors, gates,
--- citizens outside, bridge names), and the d fields for the event
+---------------------------------------------------------------- Run 11: the recall (citizens outside called home)
+-- the burrows the sounding civ alert confines to (siege's list), {} while it is silent
+local function alert_now(K)
+  local ok, names = K.call('siege', 'alert_names')
+  return ok and type(names) == 'table' and names or {}
+end
+
+local function outside_ids(K)
+  local cu, ids = K.census.u, {}
+  for _, id in ipairs(type(cu) == 'table' and type(cu.outside_ids) == 'table' and cu.outside_ids or {}) do
+    if #ids < M.RECALL_IDS and int(id) then ids[#ids + 1] = int(id) end
+  end
+  return ids
+end
+
+-- the lockdown's alert has sounded: citizens outside Kern+ now start its recall (one per lockdown). called = the alert
+-- really confines to a burrow (else they are not called: seal found no usable burrow, BUG-018)
+local function recall_start(K, h, now)
+  if not h or h.rc then return end
+  local n = outside_now(K, now)
+  if n == 0 then return end
+  local names = alert_now(K)
+  h.rc = {t = now, n = n, ids = outside_ids(K), left = n, eta = (rt.eta or -1) >= 0 and rt.eta or -1,
+          called = #names > 0, burrow = names[1]}
+  dirty = true
+  K.log(#names > 0 and 'info' or 'warn', 'reflex: recall: %d %s outside Kern+ at the alert (%s)%s; %s', n,
+        plural(n, 'citizen'), h.why,
+        h.rc.eta >= 0 and string.format(', the nearest invader ~%d ticks from an entrance', h.rc.eta) or '',
+        #names > 0 and string.format('called into %s, the doors wait for them up to %d ticks', names[1], M.RECALL_MAX)
+                   or 'not called in: the civ alert does not sound (no usable burrow)')
+end
+
+-- the recall in the ARRIVAL/LOCKDOWN text: called (right after the alert, it matters most) 'recall: 16 outside Kern+',
+-- 'recall: 7 of 16 still outside after 600 t', 'recall: 16 in within 640 t'; else (after the gates, as before) '16
+-- citizens outside Kern+' and, when the alert did not really sound, '(not called in: no alert burrow)'. Returns the
+-- text and whether it is a called recall
+local function recall_text(h, now, out)
+  local rc = h and h.rc
+  if not rc then
+    return (out or 0) > 0 and string.format('%d %s outside Kern+', out, plural(out, 'citizen')) or nil, false
+  end
+  if rc.done then return string.format('recall: %d in within %d t', rc.n, rc.done - rc.t), true end
+  local left = out or rc.left or rc.n
+  if not rc.called then
+    return string.format('%d %s outside Kern+ (not called in: no alert burrow)', left, plural(left, 'citizen')), false
+  end
+  if now - rc.t < M.RECALL_POLL and left >= rc.n then return string.format('recall: %d outside Kern+', rc.n), true end
+  return string.format('recall: %d of %d still outside after %d t', left, rc.n, now - rc.t), true
+end
+
+local function recall_event(K, h, now, why, left)
+  local rc = h.rc
+  local ticks = now - rc.t
+  local msg
+  if why == 'done' then
+    msg = string.format('recall (%s): all %d %s outside Kern+ at the alert came in within %d ticks%s', h.why, rc.n,
+                        plural(rc.n, 'citizen'), ticks, rc.late and string.format(' (%d ticks after the doors closed)',
+                        now - rc.late) or '')
+  elseif why == 'late' then
+    msg = string.format('recall (%s): %d of %d citizens still outside Kern+ after %d ticks: the doors stop waiting for '
+                        .. 'them', h.why, left, rc.n, ticks)
+  else
+    msg = string.format('recall (%s): the lockdown ended with %d of %d citizens still outside Kern+ after %d ticks',
+                        h.why, left, rc.n, ticks)
+  end
+  local d = {n = rc.n, left = left, ticks = ticks, why = why, called = rc.called and 1 or 0, eta = rc.eta}
+  if left > 0 then d.units = outside_ids(K) end
+  if rc.burrow then d.burrow = rc.burrow end
+  K.emit('RECALL', 'B', msg:sub(1, 200), d)
+  K.log(why == 'done' and 'info' or 'warn', 'reflex: %s', msg)
+end
+
+-- every RECALL_POLL ticks while a recall is open: all in (RECALL done), RECALL_MAX passed with some still out (late:
+-- the doors close on them), an alert that sounds only now calls them (called)
+local function recall_step(K, now)
+  local h = st.hold
+  local rc = h and h.rc
+  if not rc or rc.done then return end
+  if now >= (rt.rc_t or -1e9) and now - (rt.rc_t or -1e9) < M.RECALL_POLL then return end
+  rt.rc_t = now
+  local cu = K.census.u
+  if type(cu) ~= 'table' or now - (int(cu.tick) or -1e9) > M.FRESH or (int(cu.outside) or -1) < 0 then return end
+  local left = int(cu.outside)
+  if left ~= rc.left then rc.left, dirty = left, true end
+  if not rc.called then
+    local names = alert_now(K)
+    if #names > 0 then
+      rc.called, rc.burrow, dirty = true, names[1], true
+      K.log('info', 'reflex: recall: the civ alert sounds now (%s): %d citizens outside Kern+ called in', names[1], left)
+    end
+  end
+  if left == 0 then
+    rc.done, dirty = now, true
+    recall_event(K, h, now, 'done', 0)
+  elseif not rc.late and now - rc.t >= M.RECALL_MAX then
+    rc.late, dirty = now, true
+    recall_event(K, h, now, 'late', left)
+  end
+end
+
+-- issue `acts` (idempotent); returns the parts of the text, in the order they matter (clock, alert, the recall or the
+-- citizens outside, doors, gates, bridge names), and the d fields for the event
 local function issue(K, acts, now)
   local part, d = {}, {}
   local want = {}
@@ -765,9 +896,10 @@ local function issue(K, acts, now)
   end
   if want.alert then
     local h = st.hold
+    local due_why
     if h and not h.alert_on then
       local why, p = alert_due(K, h, now, pinfo)
-      if why then h.alert_on, h.alert_t, dirty = true, now, true
+      if why then h.alert_on, h.alert_t, dirty, due_why = true, now, true, why
       else alert_deadline(h, now, p) end
     end
     if not h or h.alert_on then
@@ -775,6 +907,8 @@ local function issue(K, acts, now)
       local ok, r, short = K.call('siege', 'hold_alert')
       d.alert = ok and tostring(r):sub(1, 200) or 'none (no siege module)'
       if ok and type(short) == 'string' then part.alert = short end
+      if due_why then K.log('info', 'reflex: civ alert: %s (%s)', d.alert, due_why) end
+      recall_start(K, h, now)                                    -- Run 11: citizens outside are called in now
     else
       d.alert = string.format('after the gates (<= %d ticks)', math.max(0, (h.alert_at or now) - now))
     end
@@ -789,12 +923,13 @@ local function issue(K, acts, now)
   end
   local cu = K.census.u
   local out = type(cu) == 'table' and int(cu.outside) or nil
-  if out and out > 0 then
-    d.out = out
-    part.out = out .. ' citizens outside Kern+'
-  end
+  if out and out > 0 then d.out = out end
+  local h = st.hold
+  local rtxt, called = recall_text(h, now, out and math.max(0, out) or nil)
+  if called then part.recall = rtxt else part.out = rtxt end
+  if h and h.rc then d.recall, d.rc_left = h.rc.n, h.rc.done and 0 or (out and math.max(0, out) or h.rc.left) end
   local parts = {}
-  for _, k in ipairs({'clock', 'alert', 'doors', 'gates', 'out', 'names'}) do
+  for _, k in ipairs({'clock', 'alert', 'recall', 'doors', 'gates', 'out', 'names'}) do
     if part[k] then parts[#parts + 1] = part[k] end
   end
   return parts, d
@@ -827,6 +962,11 @@ local function release(K, now)
   local c = cfg(K)
   local names, nfar = far_mark(K, now)
   nfar = nfar or 0
+  if h.rc and not h.rc.done then                       -- Run 11: the recall ends with the lockdown
+    rt.rc_t = nil
+    recall_step(K, now)
+    if not h.rc.done then recall_event(K, h, now, 'end', h.rc.left or h.rc.n) end
+  end
   st.hold, dirty = nil, true
   rt.pull_sig, rt.pull_t = nil, nil
   local n, nref = open_doors(K)
@@ -1140,6 +1280,7 @@ local function alert_step(K, now)
     local okc, r = K.call('siege', 'hold_alert')
     K.log('info', 'reflex: civ alert: %s (%s)%s', okc and tostring(r) or 'none (no siege module)', why,
           p and hd.acts.gates and ('; ' .. gates_text(p)) or '')
+    recall_start(K, hd, now)
     rt.pull_t = now
     return
   end
@@ -1272,6 +1413,16 @@ function M.init(K)
                  alert_t = int(h.alert_t), wait = int(h.wait)}
       for k, v in pairs(type(h.kinds) == 'table' and h.kinds or {}) do if v == true then st.hold.kinds[k] = true end end
       for k, v in pairs(type(h.acts) == 'table' and h.acts or {}) do if v == true then st.hold.acts[k] = true end end
+      local rc = h.rc                                      -- Run 11: an open recall survives a reload
+      if type(rc) == 'table' and int(rc.t) and int(rc.n) then
+        local ids = {}
+        for _, id in ipairs(type(rc.ids) == 'table' and rc.ids or {}) do
+          if int(id) and #ids < M.RECALL_IDS then ids[#ids + 1] = int(id) end
+        end
+        st.hold.rc = {t = int(rc.t), n = int(rc.n), ids = ids, left = int(rc.left) or int(rc.n), eta = int(rc.eta) or -1,
+                      called = rc.called == true, burrow = type(rc.burrow) == 'string' and rc.burrow or nil,
+                      late = int(rc.late), done = int(rc.done)}
+      end
     end
     -- Run 11: the hostiles a lockdown expired far stay so across a reload
     local f = p.far
@@ -1295,12 +1446,13 @@ function M.step(K, budget, ctx)
   if fresh and h.tick ~= rt.htick then
     rt.htick = h.tick
     if rt.ftick ~= h.tick then far_scan(K, h, now) end      -- Run 11 (threat may have asked far_ids first)
+    eta(K, h, now)                                          -- Run 11: the first sighting's ARRIVAL and recall carry it
     sighting(K, h, now)
     inside_scan(K, h, now)
-    eta(K, h, now)
     rt.appr = nil
   end
   alert_step(K, now)
+  recall_step(K, now)                                      -- Run 11: before the doors (late lets them close)
   verify_doors(K, now)
   door_step(K, now)
   quiet_step(K, h, now)
@@ -1323,7 +1475,24 @@ M.on = {
     record(K, ev.n, ev.type, ev.msg)
     save(K)
   end,
-  MODE = function(K, ev) alarm_write(K) end,
+  MODE = function(K, ev)
+    -- Run 11 (siege 8: 7 citizens still outside at the breach): the recall's state when the fight begins or breaks in
+    local h = st.hold
+    local rc = h and h.rc
+    if rc and not rc.done and (ev.to == 'SIEGE' or ev.to == 'BREACH') then
+      local now = K.now().tick
+      rt.rc_t = nil
+      recall_step(K, now)
+      if not rc.done then
+        local ids = outside_ids(K)
+        local l = {}
+        for i = 1, math.min(#ids, 6) do l[i] = tostring(ids[i]) end
+        K.log('warn', 'reflex: recall: %d of %d citizens still outside Kern+ at the %s, %d ticks after the alert (%s)',
+              rc.left or rc.n, rc.n, ev.to, now - rc.t, #l > 0 and table.concat(l, ',') or '?')
+      end
+    end
+    alarm_write(K)
+  end,
 }
 
 -- verb `ack {n?}`: the operator saw the interrupts up to n (default: all); the timeout default no longer applies

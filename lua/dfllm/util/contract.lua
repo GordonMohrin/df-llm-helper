@@ -111,6 +111,9 @@ C.EVENTS = {
   -- Run 11: d.cause far (it ended with hostiles in sight beyond reflex.lockdown_near; d.far names them, d.nfar) | quiet
   LOCKDOWN_END = {cls = 'B', by = 'reflex'},
   PREDATOR_FAR = {cls = 'B', by = 'reflex'},
+  -- Run 11 (siege 8): the lockdown's recall of the citizens outside Kern+ (d.why done | late | end; n, left, ticks,
+  -- units still out, called, burrow, eta); a switch of the civ alert's burrow during a fight (d.from, to, why, mode)
+  RECALL = {cls = 'B', by = 'reflex'}, REFUGE_SWITCH = {cls = 'B', by = 'seal'},
   MOOD_START = {cls = 'B', by = 'care'}, MOOD_NEED = {cls = 'B', by = 'care'},
   MOOD_END = {cls = 'B', by = 'care'}, CARAVAN = {cls = 'B', by = 'trade'},
   MIGRANTS = {cls = 'B', by = 'economy'}, PETITION = {cls = 'B', by = 'care'},

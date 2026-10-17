@@ -563,6 +563,9 @@ local function burrow_audit(K, ncit, a)
   end
   a.ok = a.sup and not a.bed_short                       -- the counts in full (the rating adds the separation)
   a.room = a.exists and a.tiles >= need.tiles            -- BUG-011: big enough to be kept for a lockdown
+  -- Run 11 (siege 8: Tiefe+ had no drink): the SIEGE level's drink rule alone (drink >= citizens or a well)
+  a.wet = a.exists == true and (a.drink >= need.drink or a.wells > 0)
+  a.dneed = need.drink
   a.why = table.concat(why, ', ')
   return a, need, pct
 end
@@ -2722,10 +2725,11 @@ local function dry_why(name, a)
 end
 
 -- burrow `name` at level `lvl`: SIEGE (separated, reachable, no hostile in it, the counts and the beds), SOFT (the same
--- with beds short), HOLD (separated and big enough: BUG-011's lockdown fallback, the counts waived), BREACH (separated,
--- reachable, CFG.breach_tiles; no counts, BUG-019) and DEAD (as BREACH, but an opening may reach it CFG.dead_gap steps
--- or more away: the dead end, FR-67). Returns ok, why, danger (refused because an opening reaches it or a hostile
--- stands in it), dry (BUG-031: refused because the citizens in it went thirsty or hungry there).
+-- with beds short), HOLD (separated and big enough: BUG-011's lockdown fallback, the counts waived), WET (Run 11: as
+-- BREACH plus the SIEGE level's drink rule, drink >= citizens or a well; no food, bed or size counts, no window),
+-- BREACH (separated, reachable, CFG.breach_tiles; no counts, BUG-019) and DEAD (as BREACH, but an opening may reach it
+-- CFG.dead_gap steps or more away: the dead end, FR-67). Returns ok, why, danger (refused because an opening reaches it
+-- or a hostile stands in it), dry (BUG-031: refused because the citizens in it went thirsty or hungry there).
 local function rate(K, au, name, lvl, t)
   local a = au[name]
   if not (a and a.exists) then return false, 'missing' end
@@ -2735,8 +2739,11 @@ local function rate(K, au, name, lvl, t)
   if s and s.exp and not (lvl == 'DEAD' and (s.d or 0) >= CFG.dead_gap) then return false, s.why, true end
   if hostile_in(K, name, t) then return false, 'hostile inside', true end
   if a.reach == 0 then return false, 'out of the citizens\' reach' end
-  if lvl == 'BREACH' or lvl == 'DEAD' then
+  if lvl == 'BREACH' or lvl == 'DEAD' or lvl == 'WET' then
     if a.tiles < CFG.breach_tiles then return false, string.format('%d tiles<%d', a.tiles, CFG.breach_tiles) end
+    if lvl == 'WET' and not a.wet then
+      return false, string.format('no drink (drink %d<%d, no well)', int(a.drink) or 0, int(a.dneed) or 0)
+    end
     return true
   end
   if lvl == 'HOLD' then return a.room == true, a.why end
@@ -2745,17 +2752,21 @@ local function rate(K, au, name, lvl, t)
   return true
 end
 
--- the civ-alert burrow for `mode`, without side effects. want = default (siege: Kern+, the refuge in BREACH); after a
--- BREACH the refuge is held until CFG.back_days without a visible hostile. In order:
---   1. in BREACH (and while its refuge is held) the refuge at the BREACH level, for breach_days (BUG-019)
+-- the civ-alert burrow for `mode`, without side effects. want = default (siege: Kern+, the refuge in BREACH and in the
+-- deep defense, which asks as 'BREACH'); after a BREACH the refuge is held until CFG.back_days without a visible
+-- hostile. Run 11 (siege 8: Tiefe+ had no drink; the citizens were sent there and switched back during the fight): a
+-- burrow with drink comes first, a refuge without drink is the last resort of a breached or open fort. In order:
+--   1. in BREACH (and while its refuge is held) the refuge with its drink (WET: no other counts, no window)
 --   2. want, Kern+, the interior burrow and (BUG-031) the refuge at the SIEGE level, then at SOFT (beds short): a
 --      refuge with its own well or stock, food and beds holds a siege when an opening reaches Kern+
 --   3. `hold` (BUG-011, a reflex lockdown holds the alert): the interior burrow at HOLD, whatever it lacks: it holds
 --      every stock, bed and well inside the fort (but the tiles an opening reaches), so confining to it takes nothing
 --      from the citizens but the surface, which is what the lockdown is for
---   4. an opening reaches a candidate or a hostile stands in it (danger), or BREACH: the refuge at BREACH, then at DEAD
---      (FR-67: the dead end behind the deepest stair), for breach_days (a refuge with its counts for longer)
---   5. nil = no confinement; flee when there is danger, a BREACH or (BUG-031) a burrow the citizens went thirsty or
+--   4. Run 11: the same chain at WET (drink, nothing else counted): a burrow with drink before a dry refuge
+--   5. only when the fort is breached or open (BREACH, or danger: an opening reaches a candidate or a hostile stands in
+--      it): the refuge at BREACH, then at DEAD (FR-67: the dead end behind the deepest stair), without drink only for
+--      breach_days (one with its drink for longer)
+--   6. nil = no confinement; flee when there is danger, a BREACH or (BUG-031) a burrow the citizens went thirsty or
 --      hungry in (BUG-018: siege turns the alert off even in a lockdown, the citizens flee on their own)
 -- Returns {pick, want, why (the first refusal of an existing burrow), level, forced (the kept interior's own failure),
 -- danger, flee, dry (a refusal for thirst/hunger), rwhy (why the refuge was refused, BUG-031)}.
@@ -2777,9 +2788,9 @@ local function choose(K, mode, want, hold)
     return false
   end
   local bwin = breach_open(K, t)
-  local rsup = au[refuge] ~= nil and au[refuge].sup == true
+  local rwet = au[refuge] ~= nil and au[refuge].wet == true      -- Run 11: its drink frees it from the window
   local held_refuge = want == refuge and (mode == 'BREACH' or st.swap ~= nil)
-  if held_refuge and (bwin or rsup) and try(refuge, 'BREACH') then return r end
+  if held_refuge and try(refuge, 'WET') then return r end
   local chain, seen = {}, {}
   for _, n in ipairs({want, kern, CFG.interior, refuge}) do
     if not seen[n] then seen[n] = true; chain[#chain + 1] = n end
@@ -2788,9 +2799,10 @@ local function choose(K, mode, want, hold)
     for _, n in ipairs(chain) do if try(n, lvl) then return r end end
   end
   if hold and try(CFG.interior, 'HOLD') then r.forced = au[CFG.interior].why; return r end
+  for _, n in ipairs(chain) do if try(n, 'WET') then return r end end
   if r.danger or mode == 'BREACH' then
-    if bwin or rsup then
-      if not held_refuge and try(refuge, 'BREACH') then return r end
+    if bwin or rwet then
+      if try(refuge, 'BREACH') then return r end
       if try(refuge, 'DEAD') then return r end
     elseif au[refuge] and au[refuge].exists then
       r.rwhy = string.format('%s: the %d days without counts are spent (since tick %d)', refuge, rcfg(K).breach_days,
@@ -2802,11 +2814,13 @@ local function choose(K, mode, want, hold)
 end
 
 local HOLD_FRESH = 100     -- ticks a lockdown's alert_burrow(..., hold) stands for publish (siege asks every <= 25)
+local FIGHT = {SIEGE = true, BREACH = true}   -- Run 11: the modes of fight_rule (no switch without a reason)
 local function held(K) return mem.hold_t ~= nil and now_t(K) - mem.hold_t <= HOLD_FRESH end
 
+-- Run 11: while a burrow is kept during a fight (fight_rule, mem.keep_r), the state shows it: it is what the alert holds
 local function publish(K)
   local mode = K.mode()
-  local r = choose(K, mode == 'PEACE' and 'ALERT' or mode, nil, held(K))
+  local r = (mem.keep_sig and FIGHT[mode] and mem.keep_r) or choose(K, mode == 'PEACE' and 'ALERT' or mode, nil, held(K))
   local au = mem.audit and mem.audit.burrows or {}
   local a = r.pick and au[r.pick]
   local ok = r.pick ~= nil and r.pick == r.want
@@ -2830,15 +2844,71 @@ local function publish(K)
   end
 end
 
+-- Run 11 (siege 8, y441: the refuge switched between Tiefe+ and Kern+ during the fight; every switch walks the
+-- citizens through the fort while the enemy is in it): in SIEGE and BREACH the burrow the sounding alert holds them in
+-- (`cur`) is left only for a reason worse than staying. leave_why returns the reason key and its text, nil = keep it:
+-- gone (the burrow is missing), dry (seal.dry: siege found them dehydrating or starving there, its fight mark),
+-- unseparated (an opening reaches it; the refuge keeps the dead-end tolerance, dead_gap), breached (a visible hostile
+-- stands in it), unreachable, window (a refuge without drink after breach_days)
+local function leave_why(K, au, cur, refuge, t)
+  local a = au[cur]
+  if not (a and a.exists) then return 'gone', 'missing' end
+  local dw = dry_why(cur, a)
+  if dw then return 'dry', dw end
+  local s = sep_of(cur)
+  if s and s.exp and not (cur == refuge and (s.d or 0) >= CFG.dead_gap) then return 'unseparated', tostring(s.why) end
+  if hostile_in(K, cur, t) then return 'breached', 'a hostile inside' end
+  if a.reach == 0 then return 'unreachable', 'out of the citizens\' reach' end
+  if cur == refuge and not a.wet and not breach_open(K, t) then
+    return 'window', string.format('no drink, and the %d days without counts are spent', rcfg(K).breach_days)
+  end
+end
+
+-- the switch rule on choose's answer r (a fight, the alert sounding on `cur`, r.pick another burrow or none): a move
+-- to the refuge (BREACH, the deep defense: the way leads away from the entrances) or a leave_why reason switches
+-- (REFUGE_SWITCH, B, once per switch; kern.log), anything else keeps `cur` (r.level KEEP, r.kept = the free pick;
+-- kern.log once per pair)
+local function fight_rule(K, r, cur, refuge, au, t)
+  local key, txt = leave_why(K, au, cur, refuge, t)
+  local mode = K.mode()
+  if not key and r.pick ~= refuge then
+    r.kept = {pick = r.pick, level = r.level, flee = r.flee, why = r.why}
+    r.pick, r.level, r.flee, r.forced = cur, 'KEEP', false, nil
+    local sig = cur .. '>' .. tostring(r.kept.pick)
+    if mem.keep_sig ~= sig then
+      mem.keep_sig = sig
+      K.log('info', 'seal: the civ alert stays on %s during the %s: %s would walk the citizens through the danger, and ' ..
+            '%s is neither breached nor open', cur, mode, r.kept.pick and ('a switch to ' .. r.kept.pick) or
+            'turning it off', cur)
+    end
+    return r
+  end
+  mem.keep_sig = nil
+  local why = key or 'deeper'
+  local to = r.pick or ''
+  local sig = cur .. '>' .. to .. ':' .. why
+  if mem.sw_sig ~= sig then
+    mem.sw_sig = sig
+    local msg = string.format('alert burrow %s -> %s during the %s: %s', cur, to ~= '' and to or 'none (alert off)',
+                              mode, key and string.format('%s %s (%s)', cur, key, trunc(txt, 80))
+                                    or string.format('to the refuge %s, away from the entrances', to))
+    K.emit('REFUGE_SWITCH', 'B', trunc(msg, 200), {from = cur, to = to, why = why, mode = mode, level = r.level})
+    K.log('warn', 'seal: %s', trunc(msg, 200))
+  end
+  return r
+end
+
 -- public (CONTRACTS §7, siege): the burrow the civ alert confines to in `mode`; nil = no confinement. `hold`: a reflex
--- lockdown holds the alert (BUG-011, choose); a missing or too small interior burrow is painted at once then. FR-67: in
+-- lockdown holds the alert (BUG-011, choose); a missing or too small interior burrow is painted at once then. `cur`
+-- (Run 11): the burrow the sounding alert holds the citizens in now (nil while silent): in SIEGE/BREACH it is kept
+-- unless fight_rule finds a reason to leave it. FR-67: in
 -- BREACH, or with an opening reaching the burrows, a missing refuge is painted from the dead end at once (at most
 -- daily). The second and third values say why the pick is not `default` (nil when it is), in full ('REFUGE_FAIL
 -- <burrow>: <why>[; <interior> kept for the lockdown although <why> | <interior> missing, paint queued | <refuge> is a
 -- dead end ... | no separated burrow ...]') and short ('REFUGE_FAIL <burrow>[, lockdown fallback | , <interior>
 -- missing | , dead end <refuge> | , citizens flee]'); the fourth is true when the citizens are to flee (BUG-018: no
 -- separated burrow; siege turns the alert off even in a lockdown).
-function M.alert_burrow(K, mode, default, hold)
+function M.alert_burrow(K, mode, default, hold, cur)
   mode = mode or K.mode()
   hold = hold == true
   local kern, refuge = burrow_names(K)
@@ -2851,7 +2921,12 @@ function M.alert_burrow(K, mode, default, hold)
   end
   if mode == 'PEACE' and not hold and st.bsince then st.bsince, dirty = nil, true end   -- the episode is over
   local r = choose(K, mode, default, hold)
+  local au0 = mem.audit and mem.audit.burrows
+  if FIGHT[K.mode()] and type(cur) == 'string' and cur ~= '' and cur ~= r.pick and au0 then
+    r = fight_rule(K, r, cur, refuge, au0, t)                    -- Run 11: no switch without a reason
+  elseif not (FIGHT[K.mode()] and cur == r.pick) then mem.keep_sig = nil end
   local pick, want, why, forced = r.pick, r.want, r.why, r.forced
+  local keep = r.level == 'KEEP'
   if mode == 'BREACH' and pick == refuge and not st.swap then st.swap, dirty = {since = t}, true end
   if (r.level == 'BREACH' or r.level == 'DEAD') and not st.bsince then
     st.bsince, dirty = t, true
@@ -2881,6 +2956,11 @@ function M.alert_burrow(K, mode, default, hold)
       tail = string.format('; %s is %s: no drink, food or bed counts for %d days', pick,
                            r.level == 'DEAD' and 'the dead end' or 'separated', rcfg(K).breach_days)
     end
+  elseif r.level == 'WET' then
+    if pick ~= want then tail = string.format('; %s has its drink (no food, bed or size counts)', pick) end
+  elseif keep then
+    tail = string.format('; %s kept during the %s: %s would walk the citizens through the danger', pick, K.mode(),
+                         r.kept.pick and ('a switch to ' .. r.kept.pick) or 'turning the alert off')
   elseif not pick then
     -- (an interior burrow an opening reaches is never repainted: painting adds tiles, it never separates one)
     local ipaint = hold and au and not (ia and ia.room) and not (sep_of(CFG.interior) or {}).exp
@@ -2900,7 +2980,7 @@ function M.alert_burrow(K, mode, default, hold)
              .. itail .. dtail
     elseif ipaint then tail = itail end
   end
-  if pick ~= want and why then
+  if pick ~= want and why and not keep then
     -- BUG-008: once per episode, again only when the refused burrow, the fallback or the reason changed, and then
     -- not before max(1 game day, 60 s wall clock) (util/cadence; the unconditional daily repeat was 3 s at timestream)
     local ids = {want .. '>' .. tostring(pick)}
@@ -2924,21 +3004,41 @@ function M.alert_burrow(K, mode, default, hold)
     end
   end
   if pick == want and st.refuge_rec then st.refuge_rec, dirty = nil, true end   -- the episode ended
+  mem.keep_r = keep and r or nil
   publish(K)
   save(K)
   local note, brief
-  if pick ~= want then
+  if keep then
+    -- Run 11: the burrow the alert holds now, kept during the fight (fight_rule); nil when it is the default
+    if pick ~= want then
+      note = trunc((r.kept.why and ('REFUGE_FAIL ' .. r.kept.why) or '') .. (r.kept.why and tail or tail:sub(3)), 160)
+      brief = string.format('%s kept (%s)', pick, K.mode())
+    end
+  elseif pick ~= want then
     note = trunc((why and ('REFUGE_FAIL ' .. why) or (want .. ' missing')) .. (tail or ''), 160)
     brief = (why and ('REFUGE_FAIL ' .. want) or (want .. ' missing')) .. (forced and ', lockdown fallback' or '')
     if r.flee and r.dry and not r.danger and mode ~= 'BREACH' then brief = brief .. ', alert off (no drink/food in it)'
     elseif r.flee then brief = brief .. ', citizens flee'
-    elseif r.level == 'BREACH' or r.level == 'DEAD' then
+    elseif r.level == 'BREACH' or r.level == 'DEAD' or r.level == 'WET' then
       brief = brief .. (r.level == 'DEAD' and ', dead end ' or ', ') .. tostring(pick)
     elseif tail and not forced then
       brief = brief .. ', ' .. CFG.interior .. ((ia and ia.exists) and ' too small' or ' missing')
     end
   end
   return pick, note, brief, r.flee == true
+end
+
+-- public (Run 11, readiness: siege 8's Tiefe+ had no drink): the refuge burrow's drink by the last audit: {name,
+-- exists, drink (units: drink items, FR-59), need (citizens x drink_per_cit), wells (built wells on it), wet (drink >= need
+-- or a well: the SIEGE level's drink rule)}; nil before the first audit
+function M.refuge_drink(K)
+  local au = mem and mem.audit and mem.audit.burrows
+  if not au then return nil end
+  local _, refuge = burrow_names(K)
+  local a = au[refuge]
+  if not a then return nil end
+  return {name = refuge, exists = a.exists == true, drink = int(a.drink) or 0, need = int(a.dneed) or 0,
+          wells = int(a.wells) or 0, wet = a.wet == true}
 end
 
 -- public (BUG-031 (b), siege): citizens the civ alert holds in burrow `name` are over siege's thirst or hunger mark

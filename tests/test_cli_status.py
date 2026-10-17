@@ -433,6 +433,14 @@ def test_status_orders_and_free_metal(save):
     assert not any("item_subtype" in b for b in doctor.diagnose(save)[1])
 
 
+def test_status_r0_refuge_dry_names_the_drink(save):
+    """Run 11 (siege 8: Tiefe+ had no drink): the R0 blocker refuge_dry names its fix in the UNREADY line."""
+    _r0_state(save, open=0, ents=None, fail=["refuge_dry"], audit={"ok": 1, "age": 9000, "min_traps": 35})
+    line = brief.status_text(save).splitlines()[1]
+    assert line.startswith("SIEGE UNREADY (R0): refuge_dry") and \
+        "next: the refuge has no drink: a well/cistern there or a drink stockpile in it (plan)" in line, line
+
+
 def test_status_r0_names_the_audit_route_and_the_seal(save):
     """Run 10: `bypass` stood in the R0 line for months without saying where or what to build. The state's
     ready.route (readiness: the last audit's first route finding) and the seal that walls it stand in line 2."""

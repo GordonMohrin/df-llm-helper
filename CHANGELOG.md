@@ -1,5 +1,105 @@
 # CHANGELOG dfpilot
 
+## A refuge without drink is reported before a siege: readiness R0 `refuge_dry` (2026-10-17; offline, live-untested)
+- **Why (Run 11 siege 8, y441):** Tiefe+ had no drink; nothing said so before the siege (seal's REFUGE_FAIL comes only
+  when the alert is wanted, the refuge gate of `plan check` looks at separation and beds).
+- **readiness:** a new R0 blocker `refuge_dry`: the refuge burrow exists and seal's last audit finds drink < citizens
+  and no well, or its wells are dry (state `water.refuge_ok` 0: no wet well on a Tiefe+ tile). SIEGE_UNREADY (A, the
+  FR-65 cadence: at once 2 days after a load, then monthly and 30 real minutes, 10 with news) names it after the
+  blockers: `siege unready (R0: refuge_dry); Tiefe+ has no drink (drink 0<52, no well): build a well/cistern or stock
+  drink there; ...` (`d.rdry`). No seal answer (missing, no audit yet) is no blocker (fail-open).
+- **seal:** public `seal.refuge_drink()` (`{name, exists, drink, need, wells, wet}` from the last audit).
+- **Python:** the wake line of such a SIEGE_UNREADY says `next: the refuge has no drink: next plan a well/cistern there
+  (bp sites cistern) or a drink stockpile`; `dfllm status`/`brief` add the same to the UNREADY line's `next:`.
+- Contracts: §7 `seal.refuge_drink`, §12 SIEGE_UNREADY `rdry` (schema, appendix); RULES §8 (R1 needs Tiefe+ with drink;
+  the blocker; in place, 300 lines), DESIGN §4/§5.4, DOCTRINE plan B.
+- Tests: `tests/lua/test_readiness.lua` (R0 `refuge_dry` with the text; a well counts unless water says it is dry; a
+  stock clears it; no seal answer: no blocker), `tests/lua/test_seal_refuge.lua` (`seal.refuge_drink` on the real
+  audit), `tests/test_cli_wake.py`, `tests/test_cli_status.py`; each fails on 2f6ab27.
+- **Live check (Run 12):** `dfllm status` in PEACE: `SIEGE UNREADY (R0): ...refuge_dry...` while Tiefe+ holds no drink
+  (Run 11's fort: it had none); after a well over water or a drink stockpile with >= one unit per citizen in Tiefe+,
+  the blocker goes once seal's audit has counted it (the item census runs weekly in PEACE, the audit every 3 days). A fort that was R1 with a dry Tiefe+ drops to R0 (max-pop
+  freezes at the current population): expected; tell the player why.
+
+## Citizens outside are called home at once; a refuge with drink first; no switch of the alert burrow during a fight without a reason (2026-10-17; offline, live-untested)
+- **Why (Run 11, Kilrudrabed site98, siege 8, y441 spring d23: 2 cave dragons, 4 goblins, a jabberer, a snatcher, an
+  ambush; pop 52 -> 3 in ~3 days; docs/v2/POSTMORTEM-run11-siege8-y441.md cause 3):** 16 citizens were outside Kern+
+  when the arrival came, 7 still outside at the breach; Tiefe+ had no drink; the alert burrow switched between Tiefe+
+  and Kern+ during the fight.
+- **Causes (from the code):**
+  - BUG-013's order: the lockdown's civ alert waited for the lever pulls (up to 2x the lever latency, 450-1500 ticks)
+    unless a hostile was within 30 tiles of a citizen outside; an ambush or snatcher arrival with hidden enemies gave
+    the citizens outside no call for up to 1,500 ticks. The doors then waited only 450 ticks after the alert for those
+    still outside.
+  - The refuge choice took a refuge without drink before a burrow with drink: in BREACH and in the deep defense (siege
+    asks seal at the BREACH level; Run 11's squads were `weak`, worn 58 %, so every siege was a deep defense) the dry
+    Tiefe+ came first, for 7 days.
+  - Nothing held the alert burrow during a fight. Every siege step asked seal afresh, so the burrow followed each
+    change of the free pick: Kern+ separated again by a finished seal piece or a lever pull, the deep defense ending
+    (army/weak gone for 2,400 ticks), the BREACH window spent, or BUG-031's relax (seal.dry at thirst 30,000) moved the
+    citizens from Tiefe+ up to Kern+ (or turned the alert off) in the middle of the fight.
+- **1. The recall (reflex):**
+  - `alert_due`: while a fresh census counts citizens (soldiers excluded) outside Kern+ and the refuge, the lockdown's
+    alert sounds at once ('N citizens outside Kern+'); the lever pulls go on under it, gate lists the lever burrow
+    `Hebel+` while a pull is pending (BUG-013's live-confirmed path). Units on a bridge footprint still come first
+    (BUG-027), nobody outside keeps the old wait for the pulls.
+  - The doors wait for citizens outside up to `reflex.RECALL_MAX` (2,400) ticks after the alert (450 when it did not
+    really sound: no burrow, they are not called), never with a visible hostile within 15 tiles of the door (unchanged).
+  - The recall (`m.reflex.hold.rc`, persisted): kern.log at its start (`reflex: recall: 16 citizens outside Kern+ at the
+    alert (arrival:siege), the nearest invader ~600 ticks from an entrance; called into Kern+, the doors wait for them
+    up to 2400 ticks`) and at SIEGE/BREACH while some are out (`... 7 of 16 citizens still outside Kern+ at the
+    BREACH, 900 ticks after the alert (ids)`); RECALL (B) `done` (all in, with the ticks), `late` (RECALL_MAX passed,
+    the ids still out) and `end` (the lockdown ended first). ARRIVAL/LOCKDOWN carry `recall`/`rc_left` and name it
+    right after the alert (`alert: Kern+, recall: 16 outside Kern+, doors ...`; later `recall: 7 of 16 still outside
+    after 600 t`, `recall: 16 in within 640 t`). The first sighting's ARRIVAL now carries the ETA (computed before it).
+- **2. The refuge (seal, siege):**
+  - New level WET: separated, reachable, `breach_tiles`, and the SIEGE level's drink rule (drink >= citizens or a
+    well); no food, bed or size counts, no window. Order: a BREACH ask (BREACH, the deep defense, a refuge held after a
+    BREACH) takes the refuge at WET first; then want -> Kern+ -> Innen+ -> refuge at SIEGE/SOFT, HOLD, the same chain
+    at WET; a refuge without drink (BREACH, then DEAD) only when the fort is breached or open (a BREACH ask or an
+    entrance reaching the candidates), for `breach_days`. So the deep defense keeps the citizens in a separated Kern+
+    with drink when Tiefe+ is dry (REFUGE_FAIL `Tiefe+: no drink (drink 0<52, no well)`), and a gate-fail BREACH keeps
+    them there until a hostile is inside Kern+.
+  - The switch rule (`seal.alert_burrow(mode, default, hold, cur)`, siege passes the burrow the sounding alert holds;
+    after a reload it reads it back from the civ alert's list):
+    in SIEGE and BREACH that burrow is kept unless it is gone, marked dry, unseparated (an entrance reaches it; the
+    refuge keeps the dead-end tolerance), breached (a visible hostile in it), unreachable, a refuge without drink past
+    its window, or the new pick is the refuge (deeper, away from the entrances). A switch is REFUGE_SWITCH (B, once per
+    switch: `alert burrow Kern+ -> Tiefe+ during the BREACH: Kern+ breached (a hostile inside)`) and a kern.log warn; a
+    kept burrow a kern.log line (`seal: the civ alert stays on Tiefe+ during the SIEGE: a switch to Kern+ would walk
+    the citizens through the danger, and Tiefe+ is neither breached nor open`), `short` `Tiefe+ kept (SIEGE)`, the
+    state shows it. PEACE/ALERT lockdowns choose freely as before.
+  - BUG-031's relax in SIEGE/BREACH marks a burrow dry only over thirst 50,000 / hunger 75,000 (`siege.FIGHT_THIRST/
+    HUNGER`, DF's dehydrated/starving lines, ~25,000 ticks before death); below them kern.log names who waits (once
+    per set) and the alert stays. The 30,000 mark holds outside a fight.
+- Contracts: events RECALL (B, reflex), REFUGE_SWITCH (B, seal); ARRIVAL/LOCKDOWN `recall`, `rc_left` (LOCKDOWN also
+  `out`); REFUGE_FAIL level WET; `seal.alert_burrow` `cur`; §9.18 doors/alert; STRANDED relax; §14 deep defense (schema,
+  contract.lua, CONTRACTS rows and appendix). RULES §7 (ARRIVAL, BREACH, STRANDED, REFUGE_FAIL) and §10 in place (300
+  lines), DESIGN §4, DOCTRINE plan B.
+- Tests (k_mock; each fails on 2f6ab27):
+  - `tests/lua/test_lockdown_gates.lua`: one citizen outside: the alert at once with 4 pulls pending (old: after the
+    pulls), every pull done under it with `Hebel+`, the door open at T+900 (old: alert + 450), forbidden at alert +
+    2,400, RECALL late then done; 16 citizens outside: `recall: 16 outside Kern+`, the door waits while 9 and then 7
+    come home, kern.log `7 of 16 ... at the SIEGE`, RECALL done, the door forbidden then; nobody outside: the old wait.
+  - `tests/lua/test_seal_refuge.lua`: the deep defense with a dry dead end keeps Kern+ (REFUGE_FAIL no drink), a
+    stocked dead end is taken without a window; in SIEGE the dead end is kept when a door separates Kern+ again (old:
+    back to Kern+), left for Kern+ once a hostile stands in it (REFUGE_SWITCH breached), PEACE picks freely.
+  - `tests/lua/test_seal.lua`: BREACH keeps a supplied Kern+ against a dry Tiefe+, a goblin in Kern+ switches (breached),
+    the dry refuge is kept after the goblin left and left after `breach_days` (REFUGE_SWITCH window).
+  - `tests/lua/test_stranded.lua`: the BUG-031 relax in a BREACH: thirst 41,000 keeps the alert (log), 51,000 relaxes
+    (STRANDED, REFUGE_SWITCH dry to Kern+).
+  - `tests/lua/test_reflex.lua`: the deferred-alert test with a citizen outside sounds at once.
+- **Live check (Run 12):** after `git pull` and `dfhack-run dfllm reload`:
+  - The next arrival with citizens on the surface: ARRIVAL `alert: Kern+, recall: N outside Kern+, doors ...`, kern.log
+    `reflex: civ alert: Kern+ (N citizens outside Kern+)` and `reflex: recall: N citizens outside Kern+ at the alert`;
+    the lever pulls still go up (`gates: ... (levers in Hebel+)`; GATE_FAIL `outside_alert` would mean the lever burrow
+    failed: note it). `dfllm events --type RECALL` after a few minutes: `done` with the ticks, or `late` with the ids.
+  - Doors: forbidden once the citizens are in, at alert + 2,400 at the latest, at once with a hostile within 15 tiles.
+  - A siege with a dry Tiefe+ and the deep defense: REFUGE_FAIL `Tiefe+: no drink`, the alert stays on Kern+; any
+    switch during SIEGE/BREACH is a REFUGE_SWITCH (B) in the brief with its reason; `seal: the civ alert stays on ...`
+    lines in kern.log otherwise. A REFUGE_SWITCH without a breach, an open entrance or thirst is a bug: note it.
+  - Tiefe+ still needs drink: a well, a cistern or a drink stockpile there (plan).
+
 ## Seal first: an open seal or plug runs before everything and pauses the housing/work projects; a stuck seal says so (SEAL_STUCK); the rebuild policy below 10 citizens; plan check/propose follow both (2026-10-17; offline, live-untested)
 - **Why (Run 11, Kilrudrabed site98, y441 spring d23, siege 8: 2 cave dragons, 4 goblins, a jabberer, a snatcher, an
   ambush; pop 52 -> 3 in about three days; post-mortem `docs/v2/POSTMORTEM-run11-siege8-y441.md`):** root cause 1 was
@@ -194,6 +294,7 @@
   - kern.log `military: melee filled to N of M: S gear sets (...)`; the squads A/B hold at most max(2, S); with metal
     short squad C grows by up to the free crossbows. In a SIEGE, A still refills to 5 (kern.log `SIEGE refill`).
   - `dfllm plan check` on a draft without explore while `METAL SHORT`: warning `metal: ... only the caravans`.
+
 ## A destroyed bridge is rebuilt only in quiet PEACE, and not again after two losses to building destroyers without the player (2026-10-17; offline, live-untested)
 - **Why (Run 11, Kilrudrabed site98, y434-y438 winter):** cave dragons (building destroyers) destroyed the outer
   drawbridge O1 (114,79,142) in all five sieges. The perimeter keeper (seal, FR-56) re-queued it every time: its

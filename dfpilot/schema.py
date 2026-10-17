@@ -454,13 +454,15 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # class A since Run 9 (an army walked in while these were digest-only): they wake at once
     "SIEGE_START": ("A", "siege", _d(opt="vis:i inv:i great:i why:s")),
     "INVASION": ("A", "threat", _d(opt="id:i")),
-    # reflex (FR-36/49/51-53): arrival announcements, interrupts (INTERRUPTS) and the lockdown it applied
-    "ARRIVAL": ("A", "any", _d("kind:s", "src:s text:s raised:i doors:i alert:s clock:i out:i eta:i")),
+    # reflex (FR-36/49/51-53): arrival announcements, interrupts (INTERRUPTS) and the lockdown it applied; Run 11:
+    # recall = citizens outside Kern+ when the lockdown's alert sounded (called home at once), rc_left = still outside
+    "ARRIVAL": ("A", "any", _d("kind:s", "src:s text:s raised:i doors:i alert:s clock:i out:i eta:i recall:i "
+                                         "rc_left:i")),
     # Run 11: dist = tiles from the nearest citizen outside Kern+ or entrance (-1 unknown), far = beyond lockdown_near
     "INTRUDER": ("A", "reflex", _d(opt="n:i id:i pos:p k:s dist:i far:f")),
     "PREDATOR": ("A", "reflex", _d(opt="n:i id:i pos:p")),
     "NO_DEPOT": ("A", "reflex", _d(opt="text:s")),
-    "LOCKDOWN": ("A", "reflex", _d("why:s", "n:i type:s raised:i doors:i alert:s clock:i")),
+    "LOCKDOWN": ("A", "reflex", _d("why:s", "n:i type:s raised:i doors:i alert:s clock:i out:i recall:i rc_left:i")),
     "ORDER_BAD": ("A", "economy", _d("order:i job:s", "dropped:f")),
     "DEPOT_MISSING": ("A", "trade", _d(opt="civ:s planned:f proj:s stalled:f why:s mat:s")),
     # BUG-021: unit/upos/grp = a cut-off citizen and his walk group, at/agrp = a stock tile of the class and its group
@@ -477,8 +479,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "AUTOLABOR_LEGACY": ("A", "baseline", _d("fixed:f", "why:s after:s")),
     # FR-64: >= 2 citizens died of dehydration or starvation within a month (the class-A twin of DEATH_CLUSTER)
     "DEATHS_PREVENTABLE": ("A", "care", _CLUSTER),
-    # FR-65: readiness R0 in PEACE: R1 blockers, the audit's own fails, ways in (seal), those without door or bridge
-    "SIEGE_UNREADY": ("A", "readiness", _d(opt="fails:sa afails:sa routes:i open:i ents:sa traps:i age:i")),
+    # FR-65: readiness R0 in PEACE: R1 blockers, the audit's own fails, ways in (seal), those without door or bridge;
+    # Run 11: rdry = the refuge without drink and what to build (blocker refuge_dry)
+    "SIEGE_UNREADY": ("A", "readiness", _d(opt="fails:sa afails:sa routes:i open:i ents:sa traps:i age:i rdry:s")),
     # BUG-015: an entrance door the lockdown forbade lost its forbidden flag before the next pass (refused)
     "LOCKDOWN_PARTIAL": ("A", "reflex", _d("doors:i", "refused:ia pos:p retry:f items:i units:i")),
     # BUG-023 / Run 10: tool detail members without their pick or axe while its jobs wait and free tools exist; Run 11:
@@ -526,6 +529,16 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "LOCKDOWN_END": ("B", "reflex", _d(opt="why:s ticks:i doors:i refused:i cause:s far:sa nfar:i")),
     # Run 10: a roofed wild danger on the citizens' group but beyond reflex.predator_near of every citizen (no lockdown)
     "PREDATOR_FAR": ("B", "reflex", _d("n:i id:i", "pos:p dc:i")),
+    # Run 11 (siege 8: 16 citizens outside Kern+ at the arrival): the lockdown's recall; why done (all came in), late
+    # (reflex.RECALL_MAX passed: the doors stop waiting), end (the lockdown ended first); n = outside at the alert,
+    # left = still outside, ticks since the alert, units = those still out (<= 20), called = the alert really confined
+    # (a burrow listed), burrow, eta = ticks of the nearest invader to an entrance then (-1 unknown)
+    "RECALL": ("B", "reflex", _d("why:s n:i left:i ticks:i", "units:ia called:f burrow:s eta:i")),
+    # Run 11 (siege 8: the refuge switched Tiefe+/Kern+ during the fight): the civ alert's burrow changed in SIEGE or
+    # BREACH; why = breached (a hostile in it), unseparated (an opening reaches it), gone, dry (seal.dry: thirsty or
+    # hungry there), window (a refuge without drink after refuge.breach_days), unreachable, deeper (to the refuge, away
+    # from the entrances: BREACH or the deep defense); to '' = the alert off (no usable burrow)
+    "REFUGE_SWITCH": ("B", "seal", _d("from:s to:s why:s mode:s", "level:s")),
     "MOOD_START": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
     "MOOD_NEED": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
     "MOOD_END": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),

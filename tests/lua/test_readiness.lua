@@ -45,6 +45,7 @@ local function world(opts)
   W.econ, W.snap, W.runner = X.economy(opts.stock), snap, runner
   local extra = {W.econ, snap, runner}
   if opts.seal then extra[#extra + 1] = opts.seal end
+  for _, m in ipairs(opts.extra or {}) do extra[#extra + 1] = m end
   X.load(W, {'military', 'readiness'}, extra, {'sense', 'gate'})
   return W
 end
@@ -468,6 +469,53 @@ T.test('FR-65: no SIEGE_UNREADY at R1; R0 again (audit_old) is a new episode; a 
   local W2 = world{seal = seal_fake{tick = 1, sealed = 1, routes = 0, doors = {}, open = {}}}
   day(W2, 3)
   T.ok(unready(W2)[1].msg:find('0 ways in, all with a door or bridge', 1, true), unready(W2)[1].msg)
+end)
+
+T.test('Run 11 (siege 8: Tiefe+ had no drink): a refuge without drink is the R0 blocker refuge_dry; SIEGE_UNREADY says ' ..
+       'what to build; a well counts unless water says it is dry; a drink stock clears it', function()
+  local sf = seal_fake{tick = 1, sealed = 1, routes = 0, doors = {}, open = {}}
+  sf.rd = {name = 'Tiefe+', exists = true, drink = 0, need = 50, wells = 0, wet = false}
+  function sf.refuge_drink(K) return sf.rd end
+  -- water's state (refuge_ok: a wet well on a Tiefe+ tile); nil = the water module publishes nothing
+  local wf = {name = 'water', every = {ticks = 1200}}
+  function wf.state(K)
+    if wf.ok == nil then return {} end
+    return {water = {patients = 0, thirst_max = 0, hosp_ok = 1, refuge_ok = wf.ok, buckets_free = 0, hosp = 0, src = {}}}
+  end
+  local W = world{seal = sf, extra = {wf}}
+  day(W)
+  audit(W)
+  T.eq(lvl(W), 0, 'old code: R1 (the refuge only had to exist)')
+  T.eq(ready(W).fail, {'refuge_dry'})
+  day(W, 2)
+  local u = unready(W)
+  T.eq(#u, 1)
+  T.eq({u[1].d.fails, u[1].d.rdry}, {{'refuge_dry'},
+       'Tiefe+ has no drink (drink 0<50, no well): build a well/cistern or stock drink there'})
+  T.ok(u[1].msg:find('siege unready (R0: refuge_dry); Tiefe+ has no drink (drink 0<50, no well): build a well/cistern ' ..
+       'or stock drink there; 0 ways in, all with a door or bridge; traps 35', 1, true), u[1].msg)
+  -- a well: counts, unless water's state says the refuge has no wet well
+  sf.rd = {name = 'Tiefe+', exists = true, drink = 0, need = 50, wells = 1, wet = true}
+  day(W)
+  T.eq(lvl(W), 1, 'a well in the refuge')
+  wf.ok = 0
+  W.state()                                       -- the state readiness reads (K.view)
+  day(W)
+  T.eq({lvl(W), ready(W).fail}, {0, {'refuge_dry'}})
+  T.eq(#unready(W) >= 1 and unready(W)[#unready(W)].d.rdry ~= nil, true)
+  wf.ok = 1
+  W.state()                                       -- the state readiness reads (K.view)
+  day(W)
+  T.eq(lvl(W), 1, 'its well has water')
+  -- a drink stock for every citizen clears it too
+  wf.ok = 0
+  sf.rd = {name = 'Tiefe+', exists = true, drink = 60, need = 50, wells = 1, wet = true}
+  day(W)
+  T.eq(lvl(W), 1)
+  -- no answer from seal (missing, backed off, no audit yet): no blocker (fail-open)
+  sf.rd = nil
+  day(W)
+  T.eq(lvl(W), 1)
 end)
 
 T.test('Run 10: the last audit names a bypass with its wall: R0, SIEGE_UNREADY and ready.route name it and the fix ' ..
