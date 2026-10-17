@@ -1667,6 +1667,8 @@ local function impls(state)
   --                 the dwarf for an equipment update (unit.uniform.pickup_flags.update and plotinfo.equipment.update.weapon,
   --                 the request the engine hands work picks and axes out on; v1 E18 Run 5 measurement). The dwarf still
   --                 walks to the tool and picks it up himself; no item is moved.
+  --   select = true [live-untested, BUG-038] with on: a detail on "nobody does this" (it grants nothing) is set to
+  --                 "only selected do this" (the work details screen's toggle); every other mode stays.
   -- Joining Miners, Woodcutters or Hunters (BUG-023, Run 11) also switches off the other two tool labors (A.TOOL_EXCL)
   -- when no detail grants them (a selected detail the unit is a member of, or an everybody-does-this one): DF's own
   -- labor pass clears them too, and the labors screen never lets a dwarf hold two of them (each wants its own tool).
@@ -1773,6 +1775,13 @@ local function impls(state)
     end
     local al = wd.allowed_labors
     if on then
+      local sel = ''
+      local wm = df.work_detail_mode
+      if opts.select and wm and wm.NobodyDoesThis ~= nil and wm.OnlySelectedDoesThis ~= nil
+         and wd.flags.mode == wm.NobodyDoesThis then
+        wd.flags.mode = wm.OnlySelectedDoesThis
+        sel = '; only selected do this now'
+      end
       if not at then vec:insert(pos, id) end
       local turned = false
       for l = 0, #al - 1 do
@@ -1786,7 +1795,7 @@ local function impls(state)
       -- opts.equip = true: with a labor switched on / a new member; 'force': also for a member that already has it
       -- (economy's tool repair, Run 10: members added before tools.equip_update was on never got the request)
       if opts.equip and A.TOOL_LABOR_DETAILS[name] and (turned or not at or opts.equip == 'force') then equip_update(u) end
-      return true, at and 'already' or 'added'
+      return true, (at and 'already' or 'added') .. sel
     end
     if not at then return true, 'not a member' end
     vec:erase(at)                              -- a unit that left the fort (or died) is only taken off the list

@@ -855,12 +855,14 @@ def log_seal(save_dir: Path, doc: dict, by: str) -> list[str]:
 
 
 def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str, occ: Occupancy | None = None,
-          same: dict | None = None, snap: dict | None = None) -> dict:
+          same: dict | None = None, snap: dict | None = None, need: list | tuple = ()) -> dict:
     """Emit tpl for a site label without overlapping other projects (occ, default: every bp/*.json but bp_id).
     'same' = the anchor/rot of this template's last placement (`same`, else bp/.placed-<tpl>.json);
     'S<k>' = the k-th ranked site whose footprint is free, so S1 is always the best free site.
     `workshops` without a `skip` param skips the moodable types the fort already has or has planned
-    (live L1b: the fortcore shops, earlier workshops projects)."""
+    (live L1b: the fortcore shops, earlier workshops projects). `need`: `add` types the kernel saw missing on the map
+    (BUG-038: economy's fishery request; the fort manifest keeps a destroyed fishery), kept although the manifest
+    lists them."""
     params = dict(params or {})
     if tpl == "seal":                                      # absolute openings; at=last: the current open ways in
         params["at"], SEAL_NOTES[bp_id] = seal_openings(save_dir, params.get("at"), snap,
@@ -873,7 +875,8 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
     if tpl == "workshops" and params.get("add"):          # live L6: never a second still or butcher's shop
         want = [t.strip() for t in str(params["add"]).split(",") if t.strip()]
         miss = set(workshops_missing(save_dir, want))
-        keep = [t for t in want if t in miss or t not in _extra_shops()]   # unknown names: emit reports them
+        # unknown names: emit reports them; `need` (BUG-038): the kernel saw it missing on the map
+        keep = [t for t in want if t in miss or t not in _extra_shops() or t in need]
         if keep:
             params["add"] = ",".join(keep)
         else:
@@ -948,9 +951,10 @@ def resolve_site(save_dir: Path, tpl: str, label: str, params: dict | None = Non
 
 
 def emit_bp(save_dir: Path, tpl: str, params: dict, label: str, bp_id: str, site: dict | None = None,
-            write: bool = True, snap: dict | None = None) -> dict:
+            write: bool = True, snap: dict | None = None, need: list | tuple = ()) -> dict:
     """place() (or emit_at an explicit site), then write <save>/bp/<bp_id>.json + bp/.placed-<tpl>.json."""
-    doc = emit_at(tpl, params, site, label, bp_id) if site else place(save_dir, tpl, params, label, bp_id, snap=snap)
+    doc = emit_at(tpl, params, site, label, bp_id) if site else place(save_dir, tpl, params, label, bp_id, snap=snap,
+                                                                      need=need)
     if write:
         write_bp(save_dir, doc)
     return doc
@@ -1066,9 +1070,9 @@ def place_params(args: dict) -> dict:
 
 # ---------------------------------------------------------------- send
 def send(save_dir: Path, verb: str, args: dict, by: str = "cli", wait_s: float = 5.0,
-         cmd_id: str | None = None, snap: dict | None = None) -> tuple[str, dict | None]:
-    """Validate + write the inbox file (+ bp/<id>.json first for bp.place, sited on `snap` if given);
-    wait for the outbox reply. A refused bp.place is rolled back (bp file and .placed-<tpl>.json)."""
+         cmd_id: str | None = None, snap: dict | None = None, need: list | tuple = ()) -> tuple[str, dict | None]:
+    """Validate + write the inbox file (+ bp/<id>.json first for bp.place, sited on `snap` if given; `need`: see
+    place()); wait for the outbox reply. A refused bp.place is rolled back (bp file and .placed-<tpl>.json)."""
     errs = schema.validate_args(verb, args)
     if cmd_id is not None and not re.fullmatch(schema.ID_RE, cmd_id):
         errs.append(f"$.id: {cmd_id!r} does not match {schema.ID_RE}")
@@ -1083,7 +1087,8 @@ def send(save_dir: Path, verb: str, args: dict, by: str = "cli", wait_s: float =
         doc = repair_doc(save_dir, args["tpl"], args["repair"], args.get("keys"), cmd_id)
         files.write_json_atomic(Path(save_dir) / "bp" / f"{cmd_id}.json", doc)
     elif verb == "bp.place":
-        doc = emit_bp(save_dir, args["tpl"], place_params(args), args["site"], cmd_id, write=False, snap=snap)
+        doc = emit_bp(save_dir, args["tpl"], place_params(args), args["site"], cmd_id, write=False, snap=snap,
+                      need=need)
         prev = write_bp(save_dir, doc)
     try:
         files.write_inbox(save_dir, verb, args, by, cmd_id, ts)
