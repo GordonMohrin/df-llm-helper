@@ -288,9 +288,12 @@ local function evaluate(K, why)
       local wells_dry = (int(rd.wells) or 0) > 0 and type(wv) == 'table' and wv.refuge_ok == 0
       if (int(rd.drink) or 0) < (int(rd.need) or 0) and ((int(rd.wells) or 0) == 0 or wells_dry) then
         f1[#f1 + 1] = 'refuge_dry'
+        -- BUG-035 (Run 11: 13 wells, 1 wet, none in Tiefe+): whether the refuge has no well or only dry ones
+        local nw = int(rd.wells) or 0
         rt.rdry = string.format('%s has no drink (drink %d<%d, %s): build a well/cistern or stock drink there',
                                 tostring(rd.name), int(rd.drink) or 0, int(rd.need) or 0,
-                                wells_dry and 'its well is dry' or 'no well')
+                                nw == 0 and ('no well in ' .. tostring(rd.name))
+                                or (nw == 1 and 'its 1 well is dry' or string.format('its %d wells are dry', nw)))
       end
     end
   end
@@ -461,6 +464,8 @@ end
 
 ---------------------------------------------------------------- public API (CONTRACTS §7)
 function M.level(K) return st.lvl or 0 end
+-- public (BUG-035): the refuge_dry text of the last evaluation (nil while the refuge has drink or a wet well)
+function M.refuge_dry(K) return rt.rdry end
 function M.cap(K) return st.cap or rt.gate_cap or M.CAPS[0] end
 
 ---------------------------------------------------------------- verbs

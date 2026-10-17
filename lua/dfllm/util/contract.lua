@@ -112,7 +112,8 @@ C.EVENTS = {
   LOCKDOWN_END = {cls = 'B', by = 'reflex'},
   PREDATOR_FAR = {cls = 'B', by = 'reflex'},
   -- Run 11 (siege 8): the lockdown's recall of the citizens outside Kern+ (d.why done | late | end; n, left, ticks,
-  -- units still out, called, burrow, eta); a switch of the civ alert's burrow during a fight (d.from, to, why, mode)
+  -- units still out, called, burrow, eta; BUG-035: why stuck, reasons, stuck, pull, nnew, newu); a switch of the civ
+  -- alert's burrow during a fight (d.from, to, why, mode)
   RECALL = {cls = 'B', by = 'reflex'}, REFUGE_SWITCH = {cls = 'B', by = 'seal'},
   MOOD_START = {cls = 'B', by = 'care'}, MOOD_NEED = {cls = 'B', by = 'care'},
   MOOD_END = {cls = 'B', by = 'care'}, CARAVAN = {cls = 'B', by = 'trade'},
@@ -353,7 +354,9 @@ C.STATE_SPEC = obj({
   trade = obj({caravan = FLAG, ratio = NAT, done = NAT}),
   clock = obj({cap = NAT, orig = NAT, ts = int(-1, 1000), held = FLAG, why = str(24)}),
   alarm = obj({defcon = int(1, 5), unacked = NAT, last = NAT, ack = NAT, lock = FLAG, why = str(24)},
-              {eta = int(-1), doors = NAT, dwait = NAT, dout = NAT, dref = NAT, far = NAT}),
+              {eta = int(-1), doors = NAT, dwait = NAT, dout = NAT, dref = NAT, far = NAT,
+               -- BUG-035: the open recall: called, still out of rto, left since, cannot come
+               rn = NAT, rleft = NAT, rnew = NAT, rstuck = NAT, rto = str(24)}),
   lever = obj({lat_s = int(-1), lat_t = int(-1), pend = NAT, wait_s = NAT}),
   alert = obj({want = str(24), burrow = str(24), tiles = NAT, inside = NAT, ok = FLAG},
               {why = str(40), core_d = NAT, core_f = NAT,           -- BUG-028: drink/food days inside the core

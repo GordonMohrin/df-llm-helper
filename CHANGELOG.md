@@ -1,5 +1,61 @@
 # CHANGELOG dfpilot
 
+## The recall follows the citizens it called and says why one does not come; a door on his only way in opens again; who cannot come holds no door (BUG-035; 2026-10-17; offline, live-untested)
+- **Why (Run 11 siege 9, y445: invasion 13, 2 cave dragons, 2 goblins, a snatcher, then an ambush; pop 49 -> 39):**
+  ARRIVAL said `recall: 5 outside Kern+`, then `recall: 9 of 5 still outside after 1246 t` (the count grew past its
+  start); in the ambush `2 of 2 citizens still outside Kern+` after 2,407 and 4,807 ticks, never `done`, with the alert on
+  Tiefe+ and the doors `8 waiting for 1 citizen outside`. The two (28346, 28350) were the same in both lockdowns: idle,
+  unhurt, on the citizens' only walk group. `bugs/BUG-035-recall-count-grows-and-two-never-come.md`.
+- **Causes (from the code):** the recall compared the live census total with its start count (reflex.lua:853); the
+  census counts "on no Kern+ or Tiefe+ tile" (sense.lua:131), so lever pullers walking to their rooms, a PullLever job in
+  Hebel+ and the walk down to Tiefe+ after the switch all raised it; the texts said Kern+ whatever the burrow; a door was
+  forbidden although a recalled citizen's only way in crossed it (`seal.door_outside` counts the doorway, open sky of its
+  walk group and the opening's porch, a walk that stops at every door and after 200 tiles; seal's entrance doors include
+  the first door on the route to the nearest citizen, his own room's door); a citizen who cannot come (lying, caged, held
+  at a lever by gate) held the doors for 2,400 ticks.
+- **The recall (reflex, sense):** measured in the burrows the alert really confines to (its own, plus Kern+/Tiefe+/Innen+
+  when listed; `sense.recount`, census `away`/`away_ids`/`away_to`) and by id: `left` = the called citizens still out,
+  `nnew` = those out since (named once in kern.log), a switch of the alert's burrow re-targets it (kern.log `the civ alert
+  moved from Kern+ to Tiefe+ ...`). Texts: `recall: 3 of 5 still outside Tiefe+ after 1246 t, +4 more out since, 2
+  cannot come`. Gate's lever pullers (`gate.puller_of`) stay by their levers on purpose: never counted as still out.
+- **The diagnosis (read-only, by census id):** kern.log at the start `reflex: recall: out at the alert: 28346:idle@135,77,137
+  ...`; per citizen still out a key: gone, caged, chained, carried, mood, down, patient, sleep, `puller:<room>`,
+  `burrow:<name>`, walk, `job:<type>`, away, idle (`/res` a resident). RECALL_PATH (600) ticks after the alert seal's path
+  check (`seal.recall_path`, urgent, sliced, <= 6,000 tiles of his walk group, forbidden doors crossable at a cost) for
+  one who could come: through doors this lockdown forbade only: they open again for him and wait until he is in (kern.log
+  `reflex: recall: door N (x,y,z) opened again: citizen ...`), never with a hostile within 15 tiles; a door the player
+  forbade or a hostile at it `locked:<id>`; `group`; `path`.
+- **Doors:** a citizen who cannot come holds no door (`seal.door_outside(ids, skip)`); RECALL (B) why `stuck` once per
+  lockdown names them (`recall (arrival:ambush): 2 of 2 citizens outside Tiefe+ cannot come, the doors do not wait for
+  them (...)`), later ones in kern.log.
+- **Water and readiness:** `water: ... refuge dry (13 wells, 0 in Tiefe+), 1 wet sources` (kpi `rwells`, `rwet`);
+  `refuge_dry` says `no well in Tiefe+` or `its 2 wells are dry`.
+- Contracts: RECALL `why` stuck, `reasons`, `stuck`, `pull`, `nnew`, `newu`; ARRIVAL/LOCKDOWN `rc_new`; state `alarm`
+  `rn`, `rleft`, `rnew`, `rstuck`, `rto` (`dfllm status`/`brief`: `recall: 2 of 5 still outside Tiefe+ (2 cannot come:
+  RECALL stuck names them), +4 more out since`); census §6.1 `away*`; §7 `sense.recount`, `seal.recall_path`,
+  `seal.door_outside` skip, `gate.puller_of`, `readiness.refuge_dry` (schema, contract.lua, appendix). RULES §7 ARRIVAL in
+  place (300 lines), DESIGN §4.
+- Tests: `tests/lua/test_recall.lua` (10: the corridor `+4 more out since` where the old code says `recall: 7 of 3 still
+  outside`, the switch to Tiefe+, an alert on Tiefe+ from the start, a room off the porch behind its own door (the
+  entrance door opens again and closes once he is in), a hostile at a reopened door, a citizen lying on the field, a
+  lever puller, another walk group, a reload), `tests/lua/test_water.lua`, `tests/lua/test_readiness.lua`,
+  `tests/test_cli_status.py`; each fails on 784399f.
+- Found, not fixed: soldiers are never waited for (census and `door_outside` leave them out, the civ alert does not call
+  them): a squad outside the doors when they are forbidden is locked out (siege 9: soldiers 16 -> 6).
+- **Live check (Run 12):** after `git pull` and `dfhack-run dfllm reload`:
+  - At each lockdown alert: kern.log `reflex: recall: N citizens outside <burrow> at the alert (...)` and the line after
+    it `reflex: recall: out at the alert: id:key@x,y,z ...`: send both for the next arrival.
+  - kern.log `reflex: recall: N more citizens out of <burrow> since the alert ...` (who walks out after the alert and
+    why: `puller:...`, `job:PullLever`, `walk`, `idle`), `the civ alert moved from Kern+ to Tiefe+`, `door N (x,y,z)
+    opened again: citizen ...`, `N more citizens outside <burrow> cannot come`.
+  - `dfllm events --type RECALL`: `stuck` once with `d.reasons`, then `done` (`d.nnew`, `d.pull`) or `late`/`end` with
+    `d.reasons`; a citizen idle with a way in (`idle`, no `door`/`locked`) after RECALL_MAX is news: send his token, the
+    lockdown's door lines and his position.
+  - `dfllm status` while it runs: `recall: L of N still outside <burrow> ...`.
+  - kern.log `water: ... refuge dry (W wells, R in Tiefe+[, K of them wet])`; SIEGE_UNREADY `refuge_dry` with `no well in
+    Tiefe+` or `its N wells are dry`.
+  - A door opened again with an enemy near, or a RECALL `stuck` for a citizen who walks in shortly after: note it.
+
 ## A refuge without drink is reported before a siege: readiness R0 `refuge_dry` (2026-10-17; offline, live-untested)
 - **Why (Run 11 siege 8, y441):** Tiefe+ had no drink; nothing said so before the siege (seal's REFUGE_FAIL comes only
   when the alert is wanted, the refuge gate of `plan check` looks at separation and beds).

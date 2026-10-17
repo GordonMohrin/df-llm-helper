@@ -347,6 +347,24 @@ def test_status_shows_the_clock_clamp_defcon_lever_latency_and_eta(save):
     assert est_tokens(out) <= brief.STATUS_TOKENS
 
 
+def test_status_names_the_open_recall_its_burrow_newcomers_and_who_cannot_come(save):
+    # BUG-035 (Run 11 siege 9: 'recall: 9 of 5 still outside', two never came): the alarm's recall fields
+    st = json.loads((save / "state.b.json").read_text("utf-8"))
+    st["mode"] = "SIEGE"
+    st["alarm"] = {"defcon": 2, "unacked": 0, "last": 8830, "ack": 8830, "lock": 1, "why": "arrival:ambush",
+                   "doors": 8, "dwait": 0, "rn": 5, "rleft": 2, "rnew": 4, "rstuck": 2, "rto": "Tiefe+"}
+    assert schema.validate("state", st) == []
+    (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
+    out = brief.status_text(save)
+    assert ("recall: 2 of 5 still outside Tiefe+ (2 cannot come: RECALL stuck names them), +4 more out since"
+            in out), out
+    st["alarm"].update(rstuck=0, rnew=0)
+    (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
+    out = brief.status_text(save)
+    assert "recall: 2 of 5 still outside Tiefe+" in out and "cannot come" not in out and "more out" not in out
+    assert brief.line_alarm.__doc__
+
+
 def test_status_clock_lowered_by_the_mode_alone(save):
     st = json.loads((save / "state.b.json").read_text("utf-8"))
     st["mode"] = "ALERT"

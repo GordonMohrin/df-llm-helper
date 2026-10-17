@@ -43,6 +43,16 @@
 --          kern.log at its start (how many, the ETA), at SIEGE/BREACH while some are still out, RECALL (B) when all
 --          came in (ticks), at RECALL_MAX with the ones still out ('late') and at the lockdown's end ('end'); the
 --          ARRIVAL/LOCKDOWN text says '16 citizens outside Kern+ called in' / '7 of 16 citizens still outside ...'
+--          BUG-035 (Run 11 siege 9: 'recall: 9 of 5 still outside', the same two citizens never came in, in siege 9 and
+--          in the ambush after it, the doors waited 2,400 ticks for one of them): the recall measures arrival in the
+--          burrows the alert really confines to (its own, Kern+/Tiefe+/Innen+ it lists; sense.recount counts against
+--          them) and follows the citizens it called by id: those out since are counted apart ('+4 more out since'), a
+--          switch of the alert's burrow re-targets it (kern.log). Every citizen still out is diagnosed (read-only:
+--          caged, carried, mood, down, patient, sleep, gate's lever puller, his own burrow, walking, a job, idle; seal's
+--          path check RECALL_PATH ticks after the alert for one who could come: a way only through doors this lockdown
+--          forbade opens them again for him, a door the player forbade or another walk group is reported). One who
+--          cannot come holds no door (seal.door_outside skip) and RECALL stuck says so once per lockdown; gate's
+--          pullers stay by their levers on purpose and never keep the recall open
 -- then ARRIVAL (A) carries what was done and the text. A popup is dismissed by the arbiter only after this returned
 -- (FR-36). The lockdown holds until threat is 0 (no visible invader, great danger in reach or hostile inside, the
 -- threat scan not armed, ARM ticks after the last trigger) for hold_quiet_days game days; then the doors it forbade
@@ -110,7 +120,7 @@ M.ALERT_NEAR = 30          -- ... and not at all for a hostile this close to a c
 -- RECALL_POLL ticks
 M.RECALL_MAX = 2400
 M.RECALL_POLL = 25
-M.RECALL_IDS = 20          -- citizen ids a recall keeps (census.u.outside_ids holds 20)
+M.RECALL_IDS = 40          -- citizen ids a recall keeps (BUG-035: census.u.away_ids holds 40, outside_ids 20)
 -- popup / report text -> kind (lower case plain markers)
 M.TEXT = {{'vile force of darkness', 'siege'}, {'an ambush', 'ambush'}, {'snatcher', 'snatcher'},
           {'has come', 'beast'}, {'need a trade depot', 'no_depot'}}
@@ -236,16 +246,33 @@ M.REF_SHOWN = 2            -- refused doors named in the text (the rest counted)
 
 -- citizens on the outside side of each door (seal.door_outside: open sky of its walk group, the porch of its opening,
 -- the doorway); without seal, sense's citizens outside Kern+ hold every door. Returns {[id] = n}, distinct n.
+-- BUG-035: the citizens the recall found unable to come (rt.nohold: lying, caged, held at a lever, no way in) hold none
 local function door_outside(K, list)
   local ids = {}
   for _, d in ipairs(list) do ids[#ids + 1] = d.id end
-  local ok, per, n = K.call('seal', 'door_outside', ids)
+  local ok, per, n = K.call('seal', 'door_outside', ids, rt.nohold or {})
   if ok and type(per) == 'table' then return per, int(n) or 0 end
   local cu = K.census.u
   local o = type(cu) == 'table' and int(cu.outside) or 0
+  if o and o > 0 and rt.nohold then
+    for _, id in ipairs(type(cu.outside_ids) == 'table' and cu.outside_ids or {}) do
+      if rt.nohold[id] then o = o - 1 end
+    end
+  end
   local r = {}
   if o and o > 0 then for _, id in ipairs(ids) do r[id] = o end else o = 0 end
   return r, o
+end
+
+-- BUG-035: a door the recall opened again for citizens whose only way in crosses it (rt.need) waits while one of them
+-- is still out (rt.rout); returns how many
+local function needers(id)
+  local nd = rt.need and rt.need[id]
+  if not nd then return 0 end
+  local c = 0
+  for uid in pairs(nd) do if rt.rout and rt.rout[uid] then c = c + 1 end end
+  if c == 0 then rt.need[id] = nil end
+  return c
 end
 
 -- a visible hostile within DOOR_NEAR of p (a fresh census only)
@@ -337,7 +364,10 @@ local function forbid_doors(K, now, refresh)
     return sstate == 'pending' and 'doors: no tile test, entrance check pending' or 'doors: no tile test', 0
   end
   local cand, seen = {}, {}
-  for _, l in ipairs({near or {}, sd and sd.doors or {}}) do
+  local reo = {}                                             -- BUG-035: the doors opened again for recalled citizens
+  for _, d in pairs(rt.reo or {}) do reo[#reo + 1] = d end
+  table.sort(reo, function(a, b) return a.id < b.id end)
+  for _, l in ipairs({near or {}, sd and sd.doors or {}, reo}) do
     for _, d in ipairs(l) do
       if int(d.id) and not seen[d.id] then seen[d.id] = true; cand[#cand + 1] = d end
     end
@@ -363,7 +393,15 @@ local function forbid_doors(K, now, refresh)
   if #todo > 0 and not late then out, nout = door_outside(K, todo) end
   local wait = {}
   for _, d in ipairs(todo) do
-    if late or (out[d.id] or 0) == 0 or hostile_near(K, d.pos, now) then
+    local need = not late and needers(d.id) or 0           -- BUG-035: opened again for a recalled citizen
+    if need > 0 and (out[d.id] or 0) == 0 then nout = nout + need end
+    if late or ((out[d.id] or 0) == 0 and need == 0) or hostile_near(K, d.pos, now) then
+      -- BUG-035: the citizens it was opened for are locked out by it now (the recall reports them, they hold no door)
+      for uid in pairs(rt.need and rt.need[d.id] or {}) do
+        local g = rt.dg and rt.dg[uid]
+        if g and g.key == 'door:' .. d.id then g.key, g.path = 'locked:' .. d.id, 'locked:' .. d.id end
+      end
+      if rt.need then rt.need[d.id] = nil end
       local r = find_ref(d.id)
       local ok
       if r then
@@ -372,6 +410,7 @@ local function forbid_doors(K, now, refresh)
       else ok = K.act.door_forbid(d.id, true) end
       if ok then
         n, mine[d.id] = n + 1, true
+        if rt.reo then rt.reo[d.id] = nil end
         st.doors[#st.doors + 1] = d.id
         st.vfy[#st.vfy + 1] = {id = d.id, t = now, try = r and 2 or 1, pos = d.pos}
         if r then
@@ -489,6 +528,7 @@ local function open_doors(K)
   local nref = #refused_now()
   st.doors, st.vfy, st.ref, st.prec, dirty = {}, {}, {}, nil, true
   rt.seal_tick, rt.door_pts, rt.wait, rt.wait_out, rt.ref_t = nil, nil, nil, nil, nil
+  rt.need, rt.reo, rt.nohold, rt.rout, rt.dg, rt.rm = nil, nil, nil, nil, nil, nil   -- BUG-035: the recall's doors
   return n, nref
 end
 
@@ -769,7 +809,7 @@ local function alert_deadline(hd, now, p)
 end
 
 ---------------------------------------------------------------- Run 11: the recall (citizens outside called home)
--- the burrows the sounding civ alert confines to (siege's list), {} while it is silent
+-- the burrows the sounding civ alert confines to (siege's list, its own burrow first), {} while it is silent
 local function alert_now(K)
   local ok, names = K.call('siege', 'alert_names')
   return ok and type(names) == 'table' and names or {}
@@ -783,89 +823,486 @@ local function outside_ids(K)
   return ids
 end
 
--- the lockdown's alert has sounded: citizens outside Kern+ now start its recall (one per lockdown). called = the alert
--- really confines to a burrow (else they are not called: seal found no usable burrow, BUG-018)
+-- the fort's Kern+ and refuge burrow names (manifest roles kern/refuge; sense, gate and siege read them alike)
+local function core_names(K)
+  local man = K.manifest()
+  local kern, refuge
+  local bs = type(man.burrows) == 'table' and man.burrows or {}
+  local names = {}
+  for name in pairs(bs) do if type(name) == 'string' then names[#names + 1] = name end end
+  table.sort(names)
+  for _, name in ipairs(names) do
+    local role = type(bs[name]) == 'table' and bs[name].role
+    if role == 'kern' and (kern == nil or name == 'Kern+') then kern = name end
+    if role == 'refuge' and (refuge == nil or name == 'Tiefe+') then refuge = name end
+  end
+  if type(man.refuge) == 'table' and type(man.refuge.burrow) == 'string' then refuge = man.refuge.burrow end
+  return kern or 'Kern+', refuge or 'Tiefe+'
+end
+
+-- BUG-035 (Run 11, the ambush after siege 9: the alert held the citizens in Tiefe+, the recall texts said 'outside
+-- Kern+'): the burrows a recall measures arrival in: the sounding alert's own burrow (siege lists it first) and any of
+-- Kern+, the refuge and Innen+ it lists too; the lever burrows (Hebel+, the dfllm-levers rooms) are no destination
+M.INTERIOR = 'Innen+'
+local function target(K, names)
+  local t, seen = {}, {}
+  if #names == 0 then return t end
+  local kern, refuge = core_names(K)
+  local core = {[kern] = true, [refuge] = true, [M.INTERIOR] = true}
+  for i, n in ipairs(names) do
+    if type(n) == 'string' and not seen[n] and (i == 1 or core[n]) then seen[n], t[#t + 1] = true, n end
+  end
+  return t
+end
+
+local function sig(l) return table.concat(type(l) == 'table' and l or {}, '/') end
+
+-- the burrows a recall's texts name: its burrows, else (not called: the alert lists none) Kern+
+local function rc_where(K, rc)
+  if rc and type(rc.to) == 'table' and #rc.to > 0 then return sig(rc.to) end
+  return (core_names(K))
+end
+
+-- sense counts the citizens on none of `names` from now on (census.u away/away_ids/away_to; nil stops it)
+local function recount(K, names)
+  K.call('sense', 'recount', names)
+  rt.aw_sig = names and sig(names) or nil
+end
+
+-- BUG-035 (Run 11 siege 9: 'recall: 9 of 5 still outside' as the alert moved the citizens from Kern+ to Tiefe+): the
+-- recall follows the citizens it called (rc.ids, sorted) instead of the live total. From census.u: sense's away list
+-- when it measured rc.to, else the citizens outside Kern+ and the refuge. Returns nil without a usable count, else
+-- {still = start ids still out, new = ids out now that were not out at the alert, tot = out now, extra = start ids out
+-- beyond a cut list (an estimate; 0 while the list holds them all)}
+local function measure(rc, cu)
+  local list, tot
+  if type(rc.to) == 'table' and #rc.to > 0 and sig(cu.away_to) == sig(rc.to) and int(cu.away) then
+    list, tot = type(cu.away_ids) == 'table' and cu.away_ids or {}, int(cu.away)
+  else
+    list, tot = type(cu.outside_ids) == 'table' and cu.outside_ids or {}, int(cu.outside)
+  end
+  if not tot or tot < 0 then return nil end
+  local inl, maxl = {}, -1
+  for _, id in ipairs(list) do
+    if int(id) then inl[id] = true; if id > maxl then maxl = id end end
+  end
+  local cut, start, still, maybe = tot > #list, {}, {}, 0
+  for _, id in ipairs(rc.ids) do
+    start[id] = true
+    if inl[id] then still[#still + 1] = id
+    elseif cut and id > maxl then maybe = maybe + 1 end
+  end
+  local new = {}
+  for _, id in ipairs(list) do if int(id) and not start[id] then new[#new + 1] = id end end
+  local extra = math.min(maybe + math.max(0, rc.n - #rc.ids), math.max(0, tot - #list))
+  return {still = still, new = new, tot = tot, extra = extra}
+end
+
+---------------------------------------------------------------- BUG-035: why a citizen is not in (read-only)
+-- Run 11 (siege 9 and the ambush after it: the same two citizens, unhurt, idle, on the citizens' only walk group, never
+-- came in; the doors waited 2,400 ticks for one of them). Per citizen still out of the recall's burrows, by census id:
+-- gone (dead, not found), caged, chained, carried (flags1.rider: a baby carried, a snatched child [? live]), mood (a
+-- strange mood), down (unconscious or lying on the ground), patient (job Rest: a hospital bed), sleep (job Sleep),
+-- puller:<room> (gate holds him by its levers), burrow:<name> (his own burrow assignment, burrows screen > units, to a
+-- burrow the alert does not list), walk (his path ends in the recall's burrows), job:<type> (a job elsewhere), away (a
+-- path elsewhere), idle (no job, no path); seal's path check (recall_path, for one who could come, RECALL_PATH ticks
+-- after the alert) adds door:<id> (his only way crosses doors this lockdown forbade: they open again for him),
+-- locked:<id> (a door the player forbade, a hostile at it, or the doors stopped waiting), group (no tile of the burrows
+-- on his walk group) and path (no way within its bound). /res marks a resident who is no citizen.
+M.NOHOLD = {gone = true, caged = true, chained = true, carried = true, mood = true, down = true, patient = true,
+            sleep = true, puller = true, burrow = true, locked = true, group = true, path = true}
+M.EXCUSED = {gone = true, puller = true}   -- never counted as still out (the dead; gate's pullers stay on purpose)
+M.RECALL_DIAG = 300        -- ticks a diagnosis is kept for a citizen still out
+M.RECALL_PATH = 600        -- ticks after the alert before seal's path check for one who could come but is still out
+M.RECALL_SHOWN = 20        -- ids and reasons in RECALL d
+M.TOK_SHOWN = 4            -- reasons named in a text
+
+local function key_kind(key) return (tostring(key or ''):match('^([%a_]+)')) end
+
+local function try(f)
+  local ok, v = pcall(f)
+  if ok then return v end
+end
+
+-- what a diagnosis needs once per poll: gate's pullers, burrow id -> name, the alert's burrows (resolved)
+local function diag_ctx(K, rc, names)
+  local okp, pul = K.call('gate', 'puller_of')
+  local c = {pullers = okp and type(pul) == 'table' and pul or {}, bnames = {}, listed = {}, tb = {}}
+  pcall(function()
+    for _, b in ipairs(df.global.plotinfo.burrows.list) do c.bnames[b.id] = b.name end
+  end)
+  for _, n in ipairs(names or {}) do c.listed[n] = true end
+  for _, n in ipairs(rc.to or {}) do
+    c.listed[n] = true
+    local b = dfhack.burrows.findByName(n)
+    if b then c.tb[#c.tb + 1] = b end
+  end
+  return c
+end
+
+local function diag(K, c, id)
+  local U = dfhack.units
+  local u = df.unit.find(id)
+  if not u or try(function() return U.isDead(u) end) == true then return {key = 'gone'} end
+  local x, y, z = U.getPosition(u)
+  if not x then return {key = 'gone'} end
+  local r = {x = x, y = y, z = z}
+  if try(function() return U.isResident(u) and not U.isCitizen(u) end) == true then r.res = true end
+  local function f1(k) return try(function() return u.flags1[k] end) == true end
+  local job = try(function() return u.job.current_job end)
+  local jt = job and try(function() return job.job_type end)
+  local function is(name)
+    local v = try(function() return df.job_type[name] end)
+    return v ~= nil and jt == v
+  end
+  local dest = try(function()
+    local d = u.path.dest
+    if d.x >= 0 then return {x = d.x, y = d.y, z = d.z} end
+  end)
+  if f1('caged') then r.key = 'caged'
+  elseif f1('chained') then r.key = 'chained'
+  elseif f1('rider') then r.key = 'carried'
+  elseif (try(function() return u.mood end) or -1) >= 0 then r.key = 'mood'
+  elseif (try(function() return u.counters.unconscious end) or 0) > 0 or f1('on_ground') then r.key = 'down'
+  elseif is('Rest') then r.key = 'patient'
+  elseif is('Sleep') then r.key = 'sleep'
+  elseif c.pullers[id] then r.key = 'puller:' .. tostring(c.pullers[id])
+  else
+    local own
+    pcall(function()
+      for _, bid in ipairs(u.burrows) do
+        local n = c.bnames[bid]
+        if n and not c.listed[n] then own = own or n end
+      end
+    end)
+    local walk = false
+    if dest then
+      for _, b in ipairs(c.tb) do
+        if dfhack.burrows.isAssignedTile(b, dest) then walk = true; break end
+      end
+    end
+    if own then r.key = 'burrow:' .. own
+    elseif walk then r.key = 'walk'
+    elseif jt then r.key = 'job:' .. tostring(try(function() return df.job_type[jt] end) or jt)
+    elseif dest then r.key = 'away'
+    else r.key = 'idle' end
+  end
+  return r
+end
+
+-- '28346:locked:16970@135,77,137/d12/res'
+local function token(id, g)
+  if not g or not g.x then return string.format('%d:%s', id, g and g.key or '?') end
+  return string.format('%d:%s@%d,%d,%d%s%s', id, g.key, g.x, g.y, g.z, (g.d or -1) >= 0 and ('/d' .. g.d) or '',
+                       g.res and '/res' or '')
+end
+
+local function tokens(ids, n)
+  local l = {}
+  for _, id in ipairs(ids) do
+    if #l >= (n or M.RECALL_SHOWN) then break end
+    l[#l + 1] = token(id, rt.dg and rt.dg[id]):sub(1, 60)
+  end
+  return l
+end
+
+-- the door(s) of a path check's answer: all this lockdown's own (st.doors, or opened again for a recalled citizen
+-- already) and no hostile within DOOR_NEAR: opened again, they wait for him (forbid_doors); else 'locked:<id>'
+local function reopen(K, rc, id, doors, now)
+  local mine = {}
+  for _, d in ipairs(st.doors) do mine[d] = true end
+  rt.need = rt.need or {}
+  for _, did in ipairs(doors) do
+    if not mine[did] and not rt.need[did] then return 'locked:' .. did end
+  end
+  if rc.late then return 'locked:' .. doors[1] end
+  for _, did in ipairs(doors) do
+    if mine[did] then
+      local b = df.building.find(did)
+      local p = b and door_pos(b)
+      if not p or hostile_near(K, p, now) or not K.act.door_forbid(did, false) then return 'locked:' .. did end
+      drop_door(did)
+      for i = #st.vfy, 1, -1 do if st.vfy[i].id == did then table.remove(st.vfy, i) end end
+      dirty = true
+      rt.reo = rt.reo or {}
+      rt.reo[did] = {id = did, pos = p}                        -- forbid_doors looks at it again (it waits for him)
+      rt.wait = rt.wait or {}
+      rt.wait[#rt.wait + 1] = did
+      local g = rt.dg[id] or {}
+      K.log('warn', 'reflex: recall: door %d (%d,%d,%d) opened again: citizen %d at %s has no way into %s without it ' ..
+            '(seal path check); it waits for him', did, p[1], p[2], p[3], id,
+            g.x and string.format('%d,%d,%d', g.x, g.y, g.z) or '?', rc_where(K, rc))
+    end
+    rt.need[did] = rt.need[did] or {}
+    rt.need[did][id] = true
+  end
+  return 'door:' .. doors[1]
+end
+
+-- a fresh (or kept) diagnosis for each id; with `paths` seal's path check for those who could come, RECALL_PATH ticks
+-- after the alert, again 2 x RECALL_PATH after its last answer (and at once after the alert moved), applied as soon as
+-- seal has it: door (opened again for him) / locked, group, path; ok, far and unknown leave the diagnosis
+local PATH_KEY = {group = 'group', none = 'path'}
+local function diagnose(K, rc, ids, now, names, force, paths)
+  rt.dg = rt.dg or {}
+  local c
+  for _, id in ipairs(ids) do
+    local g = rt.dg[id]
+    if force or not g or now - g.t >= M.RECALL_DIAG or now < g.t then
+      c = c or diag_ctx(K, rc, names)
+      local ng = diag(K, c, id)
+      ng.t = now
+      if g then ng.path, ng.pt, ng.d = g.path, g.pt, g.d end      -- the path check's answer stays
+      if ng.path and not M.NOHOLD[key_kind(ng.key)] then ng.key = ng.path end
+      rt.dg[id] = ng
+    end
+  end
+  if not paths or #(rc.to or {}) == 0 or now - rc.t < M.RECALL_PATH then return end
+  local ask = {}
+  for _, id in ipairs(ids) do
+    local g = rt.dg[id]
+    if g and g.path ~= nil and now - (g.pt or now) >= 2 * M.RECALL_PATH then g.path = nil end
+    if g and g.path == nil and (not M.NOHOLD[key_kind(g.key)] or key_kind(g.key) == 'locked') then ask[#ask + 1] = id end
+  end
+  if #ask == 0 then return end
+  local ok, res = K.call('seal', 'recall_path', ask, rc.to, math.max(rt.pq_since or rc.t, now - M.RECALL_PATH))
+  if not ok or type(res) ~= 'table' then return end
+  for _, id in ipairs(ask) do
+    local r, g = res[id], rt.dg[id]
+    if type(r) == 'table' and g then
+      local key = PATH_KEY[r.r]
+      if r.r == 'door' and type(r.doors) == 'table' and #r.doors > 0 then key = reopen(K, rc, id, r.doors, now) end
+      g.path, g.pt, g.d = key or false, now, int(r.d) or -1
+      if key then g.key = key
+      elseif key_kind(g.key) == 'locked' then g.key = 'idle' end    -- the door is open again (or another way)
+    end
+  end
+end
+
+-- the lockdown's alert has sounded: citizens out of the burrows it confines to start its recall (one per lockdown).
+-- called = the alert really confines to a burrow (else they are not called: seal found no usable burrow, BUG-018);
+-- BUG-035: measured against those burrows (sense counts again at once), each one diagnosed in kern.log
 local function recall_start(K, h, now)
   if not h or h.rc then return end
-  local n = outside_now(K, now)
-  if n == 0 then return end
   local names = alert_now(K)
-  h.rc = {t = now, n = n, ids = outside_ids(K), left = n, eta = (rt.eta or -1) >= 0 and rt.eta or -1,
-          called = #names > 0, burrow = names[1]}
+  local to = target(K, names)
+  local n, ids
+  if #to > 0 then
+    recount(K, to)
+    local cu = K.census.u
+    if type(cu) == 'table' and sig(cu.away_to) == sig(to) and int(cu.away) then
+      n, ids = int(cu.away), {}
+      for _, id in ipairs(type(cu.away_ids) == 'table' and cu.away_ids or {}) do
+        if #ids < M.RECALL_IDS and int(id) then ids[#ids + 1] = int(id) end
+      end
+    end
+  end
+  if not n then n, ids = outside_now(K, now), outside_ids(K) end
+  if n == 0 then
+    if #to > 0 then recount(K, nil) end
+    return
+  end
+  h.rc = {t = now, n = n, ids = ids, left = n, eta = (rt.eta or -1) >= 0 and rt.eta or -1, called = #names > 0,
+          burrow = #to > 0 and sig(to) or nil, to = to, nnew = 0}
+  rt.dg, rt.need, rt.rout, rt.nohold, rt.slog, rt.nlog, rt.pq_since, rt.rm = {}, {}, {}, {}, {}, {}, now, nil
   dirty = true
-  K.log(#names > 0 and 'info' or 'warn', 'reflex: recall: %d %s outside Kern+ at the alert (%s)%s; %s', n,
-        plural(n, 'citizen'), h.why,
+  local where = rc_where(K, h.rc)
+  K.log(#names > 0 and 'info' or 'warn', 'reflex: recall: %d %s outside %s at the alert (%s)%s; %s', n,
+        plural(n, 'citizen'), where, h.why,
         h.rc.eta >= 0 and string.format(', the nearest invader ~%d ticks from an entrance', h.rc.eta) or '',
-        #names > 0 and string.format('called into %s, the doors wait for them up to %d ticks', names[1], M.RECALL_MAX)
+        #names > 0 and string.format('called into %s, the doors wait for them up to %d ticks', where, M.RECALL_MAX)
                    or 'not called in: the civ alert does not sound (no usable burrow)')
+  diagnose(K, h.rc, ids, now, names, true, false)
+  K.log('info', 'reflex: recall: out at the alert: %s%s', table.concat(tokens(ids), ' '),
+        n > #ids and string.format(' +%d not listed', n - #ids) or '')
 end
 
 -- the recall in the ARRIVAL/LOCKDOWN text: called (right after the alert, it matters most) 'recall: 16 outside Kern+',
--- 'recall: 7 of 16 still outside after 600 t', 'recall: 16 in within 640 t'; else (after the gates, as before) '16
--- citizens outside Kern+' and, when the alert did not really sound, '(not called in: no alert burrow)'. Returns the
--- text and whether it is a called recall
-local function recall_text(h, now, out)
+-- 'recall: 7 of 16 still outside Tiefe+ after 600 t, +4 more out since, 2 cannot come', 'recall: 16 in within 640 t'; else
+-- (after the gates, as before) '16 citizens outside Kern+' and, when the alert did not really sound, '(not called in:
+-- no alert burrow)'. Returns the text and whether it is a called recall
+local function recall_text(K, h, now, out)
   local rc = h and h.rc
   if not rc then
-    return (out or 0) > 0 and string.format('%d %s outside Kern+', out, plural(out, 'citizen')) or nil, false
+    return (out or 0) > 0 and string.format('%d %s outside %s', out, plural(out, 'citizen'), (core_names(K))) or nil,
+           false
   end
-  if rc.done then return string.format('recall: %d in within %d t', rc.n, rc.done - rc.t), true end
-  local left = out or rc.left or rc.n
+  local where = rc_where(K, rc)
+  if rc.done then
+    local pull = rc.pull or 0
+    if pull > 0 then
+      return string.format('recall: %d of %d in within %d t, %d lever %s stay', rc.n - pull, rc.n, rc.done - rc.t, pull,
+                           plural(pull, 'puller')), true
+    end
+    return string.format('recall: %d in within %d t', rc.n, rc.done - rc.t), true
+  end
+  local left = rc.left or rc.n
   if not rc.called then
-    return string.format('%d %s outside Kern+ (not called in: no alert burrow)', left, plural(left, 'citizen')), false
+    return string.format('%d %s outside %s (not called in: no alert burrow)', left, plural(left, 'citizen'), where), false
   end
-  if now - rc.t < M.RECALL_POLL and left >= rc.n then return string.format('recall: %d outside Kern+', rc.n), true end
-  return string.format('recall: %d of %d still outside after %d t', left, rc.n, now - rc.t), true
+  if now - rc.t < M.RECALL_POLL and left >= rc.n then return string.format('recall: %d outside %s', rc.n, where), true end
+  local s = string.format('recall: %d of %d still outside %s after %d t', left, rc.n, where, now - rc.t)
+  if (rc.nnew or 0) > 0 then s = s .. string.format(', +%d more out since', rc.nnew) end
+  if (rc.stuck or 0) > 0 then s = s .. string.format(', %d cannot come', rc.stuck) end
+  return s, true
 end
 
-local function recall_event(K, h, now, why, left)
+-- RECALL (B): done | late | end, and BUG-035's stuck (once per lockdown: start ids that cannot come)
+local function recall_event(K, h, now, why, m)
   local rc = h.rc
   local ticks = now - rc.t
+  local where = rc_where(K, rc)
+  local left = rc.left or 0
+  local still, rest = {}, {}
+  for _, id in ipairs(m and m.still or {}) do
+    local g = rt.dg and rt.dg[id]
+    local k = g and key_kind(g.key)
+    if M.EXCUSED[k] then rest[#rest + 1] = id
+    elseif M.NOHOLD[k] then still[#still + 1] = id               -- those who cannot come first
+    else rest[#rest + 1] = id end
+    -- the doors stopped waiting: a door opened again for him is forbidden again
+    if g and rc.late and key_kind(g.key) == 'door' then
+      g.key = (g.key:gsub('^door', 'locked'))
+      g.path = g.key
+    end
+  end
+  local ncant = #still
+  for _, id in ipairs(rest) do
+    local g = rt.dg and rt.dg[id]
+    if not (g and M.EXCUSED[key_kind(g.key)]) then still[#still + 1] = id end
+  end
+  local new = m and m.new or {}
+  local toks = tokens(still, why == 'stuck' and math.min(ncant, M.TOK_SHOWN) or M.TOK_SHOWN)
   local msg
   if why == 'done' then
-    msg = string.format('recall (%s): all %d %s outside Kern+ at the alert came in within %d ticks%s', h.why, rc.n,
-                        plural(rc.n, 'citizen'), ticks, rc.late and string.format(' (%d ticks after the doors closed)',
-                        now - rc.late) or '')
+    local pull = rc.pull or 0
+    if pull > 0 then
+      msg = string.format('recall (%s): %d of %d citizens outside %s at the alert came in within %d ticks, the other %d '
+                          .. 'lever %s at the levers', h.why, rc.n - pull, rc.n, where, ticks, pull,
+                          plural(pull, 'puller'))
+    else
+      msg = string.format('recall (%s): all %d %s outside %s at the alert came in within %d ticks', h.why, rc.n,
+                          plural(rc.n, 'citizen'), where, ticks)
+    end
+    if rc.late then msg = msg .. string.format(' (%d ticks after the doors closed)', now - rc.late) end
   elseif why == 'late' then
-    msg = string.format('recall (%s): %d of %d citizens still outside Kern+ after %d ticks: the doors stop waiting for '
-                        .. 'them', h.why, left, rc.n, ticks)
+    msg = string.format('recall (%s): %d of %d citizens still outside %s after %d ticks: the doors stop waiting for '
+                        .. 'them', h.why, left, rc.n, where, ticks)
+  elseif why == 'stuck' then
+    msg = string.format('recall (%s): %d of %d citizens outside %s cannot come, the doors do not wait for them',
+                        h.why, rc.stuck or 0, rc.n, where)
   else
-    msg = string.format('recall (%s): the lockdown ended with %d of %d citizens still outside Kern+ after %d ticks',
-                        h.why, left, rc.n, ticks)
+    msg = string.format('recall (%s): the lockdown ended with %d of %d citizens still outside %s after %d ticks',
+                        h.why, left, rc.n, where, ticks)
   end
+  if why ~= 'stuck' and (rc.nnew or 0) > 0 then msg = msg .. string.format('; +%d more out of %s since', rc.nnew, where) end
+  if #toks > 0 then msg = msg .. ' (' .. table.concat(toks, ' ') .. ')' end
   local d = {n = rc.n, left = left, ticks = ticks, why = why, called = rc.called and 1 or 0, eta = rc.eta}
-  if left > 0 then d.units = outside_ids(K) end
-  if rc.burrow then d.burrow = rc.burrow end
+  if #still > 0 then
+    d.units = {}
+    for i = 1, math.min(#still, M.RECALL_SHOWN) do d.units[i] = still[i] end
+  end
+  local all = {}
+  for _, id in ipairs(m and m.still or {}) do all[#all + 1] = id end
+  for _, id in ipairs(new) do all[#all + 1] = id end
+  if #all > 0 then d.reasons = tokens(all) end
+  if (rc.nnew or 0) > 0 then
+    d.nnew, d.newu = rc.nnew, {}
+    for i = 1, math.min(#new, M.RECALL_SHOWN) do d.newu[i] = new[i] end
+  end
+  if (rc.stuck or 0) > 0 then d.stuck = rc.stuck end
+  if (rc.pull or 0) > 0 then d.pull = rc.pull end
+  if rc.burrow then d.burrow = rc.burrow:sub(1, 60) end
   K.emit('RECALL', 'B', msg:sub(1, 200), d)
   K.log(why == 'done' and 'info' or 'warn', 'reflex: %s', msg)
+  if #all > #toks then K.log('info', 'reflex: recall %s: %s', why, table.concat(tokens(all), ' ')) end
 end
 
--- every RECALL_POLL ticks while a recall is open: all in (RECALL done), RECALL_MAX passed with some still out (late:
--- the doors close on them), an alert that sounds only now calls them (called)
-local function recall_step(K, now)
+-- every RECALL_POLL ticks while a recall is open: the alert's burrows (one that sounds only now calls them; BUG-035: a
+-- switch re-targets the recall), the start ids still out and those who left since, their diagnoses and path checks,
+-- then all in (RECALL done), the first that cannot come (RECALL stuck, once), RECALL_MAX passed with some still out
+-- (late: the doors close on them). Returns the measure (nil without a usable census)
+local function recall_step(K, now, force)
   local h = st.hold
   local rc = h and h.rc
   if not rc or rc.done then return end
-  if now >= (rt.rc_t or -1e9) and now - (rt.rc_t or -1e9) < M.RECALL_POLL then return end
+  if not force and now >= (rt.rc_t or -1e9) and now - (rt.rc_t or -1e9) < M.RECALL_POLL then return end
   rt.rc_t = now
+  local names = alert_now(K)
+  local to = target(K, names)
+  if not rc.called and #names > 0 then
+    rc.called, dirty = true, true
+    K.log('info', 'reflex: recall: the civ alert sounds now (%s): %d citizens outside %s called in', names[1],
+          rc.left or rc.n, sig(to))
+  end
+  if #to > 0 and sig(to) ~= sig(rc.to) then
+    local from = rc_where(K, rc)
+    rc.to, rc.burrow, dirty = to, sig(to), true
+    recount(K, to)
+    rt.dg, rt.pq_since = {}, now                             -- every diagnosis and path check against the new burrows
+    local cu = K.census.u
+    K.log('warn', 'reflex: recall: the civ alert moved from %s to %s %d ticks after it sounded: %d citizens not in %s ' ..
+          'now; the recall follows its %d', from, rc.burrow, now - rc.t, type(cu) == 'table' and int(cu.away) or -1,
+          rc.burrow, rc.n)
+  elseif #to > 0 and rt.aw_sig ~= sig(to) then
+    recount(K, to)                                           -- after a reload: sense counts against them again
+  end
   local cu = K.census.u
-  if type(cu) ~= 'table' or now - (int(cu.tick) or -1e9) > M.FRESH or (int(cu.outside) or -1) < 0 then return end
-  local left = int(cu.outside)
-  if left ~= rc.left then rc.left, dirty = left, true end
-  if not rc.called then
-    local names = alert_now(K)
-    if #names > 0 then
-      rc.called, rc.burrow, dirty = true, names[1], true
-      K.log('info', 'reflex: recall: the civ alert sounds now (%s): %d citizens outside Kern+ called in', names[1], left)
+  if type(cu) ~= 'table' or now - (int(cu.tick) or -1e9) > M.FRESH then return end
+  local m = measure(rc, cu)
+  if not m then return end
+  rt.rm, rt.dg = m, rt.dg or {}
+  diagnose(K, rc, m.still, now, names, false, true)
+  -- those who left since the alert: diagnosed and named once each in kern.log
+  local nd = {}
+  for i = 1, math.min(#m.new, M.RECALL_SHOWN) do nd[i] = m.new[i] end
+  diagnose(K, rc, nd, now, names, false, false)
+  rt.nlog = rt.nlog or {}
+  local fresh = {}
+  for _, id in ipairs(nd) do if not rt.nlog[id] then rt.nlog[id] = true; fresh[#fresh + 1] = id end end
+  if #fresh > 0 then
+    K.log('warn', 'reflex: recall: %d more %s out of %s since the alert (%d ticks; not out at its start): %s', #fresh,
+          plural(#fresh, 'citizen'), rc_where(K, rc), now - rc.t, table.concat(tokens(fresh), ' '))
+  end
+  rt.rout, rt.nohold = {}, {}
+  local pull, stuck, sl, gone = 0, 0, {}, 0
+  for _, id in ipairs(m.still) do
+    rt.rout[id] = true
+    local k = key_kind(rt.dg[id] and rt.dg[id].key)
+    if M.NOHOLD[k] then rt.nohold[id] = true end
+    if k == 'puller' then pull = pull + 1
+    elseif k == 'gone' then gone = gone + 1
+    elseif M.NOHOLD[k] then stuck, sl[#sl + 1] = stuck + 1, id end
+  end
+  for _, id in ipairs(nd) do
+    if M.NOHOLD[key_kind(rt.dg[id] and rt.dg[id].key)] then rt.nohold[id] = true end
+  end
+  local left = #m.still - pull - gone + m.extra
+  local nnew = math.max(0, m.tot - #m.still - m.extra)
+  if left ~= rc.left or nnew ~= rc.nnew or stuck ~= (rc.stuck or 0) or pull ~= (rc.pull or 0) then
+    rc.left, rc.nnew, rc.stuck, rc.pull, dirty = left, nnew, stuck, pull, true
+  end
+  rt.slog = rt.slog or {}
+  if stuck > 0 then
+    local news = {}
+    for _, id in ipairs(sl) do if not rt.slog[id] then rt.slog[id] = true; news[#news + 1] = id end end
+    if not rc.rep then
+      rc.rep, dirty = now, true
+      recall_event(K, h, now, 'stuck', m)
+    elseif #news > 0 then
+      K.log('warn', 'reflex: recall: %d more %s outside %s cannot come: %s', #news, plural(#news, 'citizen'),
+            rc_where(K, rc), table.concat(tokens(news), ' '))
     end
   end
   if left == 0 then
     rc.done, dirty = now, true
-    recall_event(K, h, now, 'done', 0)
+    recall_event(K, h, now, 'done', m)
+    recount(K, nil)                                          -- sense stops counting against its burrows
   elseif not rc.late and now - rc.t >= M.RECALL_MAX then
     rc.late, dirty = now, true
-    recall_event(K, h, now, 'late', left)
+    recall_event(K, h, now, 'late', m)
   end
+  return m
 end
 
 -- issue `acts` (idempotent); returns the parts of the text, in the order they matter (clock, alert, the recall or the
@@ -925,9 +1362,12 @@ local function issue(K, acts, now)
   local out = type(cu) == 'table' and int(cu.outside) or nil
   if out and out > 0 then d.out = out end
   local h = st.hold
-  local rtxt, called = recall_text(h, now, out and math.max(0, out) or nil)
+  local rtxt, called = recall_text(K, h, now, out and math.max(0, out) or nil)
   if called then part.recall = rtxt else part.out = rtxt end
-  if h and h.rc then d.recall, d.rc_left = h.rc.n, h.rc.done and 0 or (out and math.max(0, out) or h.rc.left) end
+  if h and h.rc then
+    d.recall, d.rc_left = h.rc.n, h.rc.done and 0 or (h.rc.left or h.rc.n)
+    if (h.rc.nnew or 0) > 0 then d.rc_new = h.rc.nnew end            -- BUG-035: left the alert's burrows since
+  end
   local parts = {}
   for _, k in ipairs({'clock', 'alert', 'recall', 'doors', 'gates', 'out', 'names'}) do
     if part[k] then parts[#parts + 1] = part[k] end
@@ -963,10 +1403,10 @@ local function release(K, now)
   local names, nfar = far_mark(K, now)
   nfar = nfar or 0
   if h.rc and not h.rc.done then                       -- Run 11: the recall ends with the lockdown
-    rt.rc_t = nil
-    recall_step(K, now)
-    if not h.rc.done then recall_event(K, h, now, 'end', h.rc.left or h.rc.n) end
+    local m = recall_step(K, now, true) or rt.rm
+    if not h.rc.done then recall_event(K, h, now, 'end', m) end
   end
+  if h.rc then recount(K, nil) end                     -- BUG-035: sense stops counting against its burrows
   st.hold, dirty = nil, true
   rt.pull_sig, rt.pull_t = nil, nil
   local n, nref = open_doors(K)
@@ -1419,9 +1859,14 @@ function M.init(K)
         for _, id in ipairs(type(rc.ids) == 'table' and rc.ids or {}) do
           if int(id) and #ids < M.RECALL_IDS then ids[#ids + 1] = int(id) end
         end
+        local to = {}                                      -- BUG-035: the burrows it measures arrival in
+        for _, n in ipairs(type(rc.to) == 'table' and rc.to or {}) do
+          if type(n) == 'string' and #to < 4 then to[#to + 1] = n end
+        end
         st.hold.rc = {t = int(rc.t), n = int(rc.n), ids = ids, left = int(rc.left) or int(rc.n), eta = int(rc.eta) or -1,
                       called = rc.called == true, burrow = type(rc.burrow) == 'string' and rc.burrow or nil,
-                      late = int(rc.late), done = int(rc.done)}
+                      late = int(rc.late), done = int(rc.done), to = to, nnew = int(rc.nnew) or 0,
+                      stuck = int(rc.stuck) or 0, pull = int(rc.pull) or 0, rep = int(rc.rep)}
       end
     end
     -- Run 11: the hostiles a lockdown expired far stay so across a reload
@@ -1481,14 +1926,12 @@ M.on = {
     local rc = h and h.rc
     if rc and not rc.done and (ev.to == 'SIEGE' or ev.to == 'BREACH') then
       local now = K.now().tick
-      rt.rc_t = nil
-      recall_step(K, now)
+      local m = recall_step(K, now, true) or rt.rm
       if not rc.done then
-        local ids = outside_ids(K)
-        local l = {}
-        for i = 1, math.min(#ids, 6) do l[i] = tostring(ids[i]) end
-        K.log('warn', 'reflex: recall: %d of %d citizens still outside Kern+ at the %s, %d ticks after the alert (%s)',
-              rc.left or rc.n, rc.n, ev.to, now - rc.t, #l > 0 and table.concat(l, ',') or '?')
+        local l = tokens(m and m.still or {}, 6)
+        K.log('warn', 'reflex: recall: %d of %d citizens still outside %s at the %s, %d ticks after the alert (%s)%s',
+              rc.left or rc.n, rc.n, rc_where(K, rc), ev.to, now - rc.t, #l > 0 and table.concat(l, ' ') or '?',
+              (rc.nnew or 0) > 0 and string.format('; +%d more out since', rc.nnew) or '')
       end
     end
     alarm_write(K)
@@ -1518,6 +1961,11 @@ function M.state(K)
     if rt.wait and #rt.wait > 0 then a.dwait, a.dout = #rt.wait, rt.wait_out or 0 end
     local nref = #refused_now()
     if nref > 0 then a.dref = nref end              -- BUG-015: refused, the flag fell back
+  end
+  local rc = st.hold and st.hold.rc                 -- BUG-035: the recall: called, still out, left since, cannot come
+  if rc and rc.called and not rc.done then
+    a.rn, a.rleft, a.rnew, a.rstuck = rc.n, rc.left or rc.n, rc.nnew or 0, rc.stuck or 0
+    a.rto = rc_where(K, rc):sub(1, 24)
   end
   if #st.far.ids > 0 then a.far = #st.far.ids end   -- Run 11: hostiles whose lockdown expired far
   return {alarm = a}

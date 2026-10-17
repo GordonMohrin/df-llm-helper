@@ -209,6 +209,10 @@ def line_alarm(ctx: Ctx) -> str:
                 out.append(f"doors {al['doors']} forbidden" + (f", {al['dwait']} waiting for {al.get('dout', 0)}"
                                                                f" citizens outside" if al.get("dwait") else "")
                            + (f", {al['dref']} refused (flag reset)" if al.get("dref") else ""))   # BUG-015
+            if al.get("rn"):                   # BUG-035: the open recall (called, still out, who cannot come)
+                out.append(f"recall: {al.get('rleft', al['rn'])} of {al['rn']} still outside {al.get('rto') or '?'}"
+                           + (f" ({al['rstuck']} cannot come: RECALL stuck names them)" if al.get("rstuck") else "")
+                           + (f", +{al['rnew']} more out since" if al.get("rnew") else ""))
         if al.get("far"):                      # Run 11: invaders a lockdown expired far (they re-arm on approach)
             out.append(f"{al['far']} invaders far (lockdown expired; re-arm within lockdown_near)")
         if al["unacked"]:

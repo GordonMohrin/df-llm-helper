@@ -360,6 +360,31 @@ T.test('refuge: a wet well on a Tiefe+ tile', function()
   T.eq(M2.kpi(W2.K).refuge_ok, 0)
 end)
 
+T.test('BUG-035 (Run 11: "refuge dry, 1 wet sources (13 wells)"): the summary says how many wells lie in Tiefe+ and ' ..
+       'how many of those are wet', function()
+  local function line(W)
+    for _, l in ipairs(W.logs) do if tostring(l.msg):find('water: ', 1, true) then return l.msg end end
+    return ''
+  end
+  -- three wells: one dry in Tiefe+, a wet one and a dry one outside it
+  local W, M = world{tiles = {['20,20,1'] = 'w'}, setup = function(W)
+    well(W, 45, 45, 2); well(W, 20, 20, 2); well(W, 70, 70, 2)
+  end}
+  day(W)
+  local k = M.kpi(W.K)
+  T.eq({k.refuge_ok, k.wells, k.rwells, k.rwet}, {0, 3, 1, 0})
+  T.ok(line(W):find('refuge dry (3 wells, 1 in Tiefe+, 0 of them wet), 1 wet sources', 1, true), line(W))
+  -- none in Tiefe+
+  local W2, M2 = world{tiles = {['20,20,1'] = 'w'}, setup = function(W) well(W, 20, 20, 2) end}
+  day(W2)
+  T.eq({M2.kpi(W2.K).rwells, M2.kpi(W2.K).rwet}, {0, 0})
+  T.ok(line(W2):find('refuge dry (1 well, 0 in Tiefe+), 1 wet sources', 1, true), line(W2))
+  -- its well is wet
+  local W3, M3 = world{tiles = {['45,45,1'] = 'w'}, setup = function(W) well(W, 45, 45, 2) end}
+  day(W3)
+  T.ok(line(W3):find('refuge ok (1 well, 1 in Tiefe+, 1 of them wet), 1 wet sources', 1, true), line(W3))
+end)
+
 T.test('cistern flood: water on the well room floor wakes the LLM every 2 days; one wet tile once is a poured bucket', function()
   local man = {v = 2, burrows = {['Kern+'] = {role = 'kern'}}, zones = {Z4 = {{0, 0, 0, 99, 99, 20}}},
                rooms = {{id = 'cistern50_50_2r0', tpl = 'cistern', use = 'utility', bbox = {49, 52, 2, 51, 54, 2},

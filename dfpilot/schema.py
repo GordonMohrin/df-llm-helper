@@ -455,14 +455,16 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "SIEGE_START": ("A", "siege", _d(opt="vis:i inv:i great:i why:s")),
     "INVASION": ("A", "threat", _d(opt="id:i")),
     # reflex (FR-36/49/51-53): arrival announcements, interrupts (INTERRUPTS) and the lockdown it applied; Run 11:
-    # recall = citizens outside Kern+ when the lockdown's alert sounded (called home at once), rc_left = still outside
+    # recall = citizens outside the alert's burrows when the lockdown's alert sounded (called home at once), rc_left =
+    # those of them still outside; BUG-035: rc_new = citizens out of those burrows since who were not out then
     "ARRIVAL": ("A", "any", _d("kind:s", "src:s text:s raised:i doors:i alert:s clock:i out:i eta:i recall:i "
-                                         "rc_left:i")),
+                                         "rc_left:i rc_new:i")),
     # Run 11: dist = tiles from the nearest citizen outside Kern+ or entrance (-1 unknown), far = beyond lockdown_near
     "INTRUDER": ("A", "reflex", _d(opt="n:i id:i pos:p k:s dist:i far:f")),
     "PREDATOR": ("A", "reflex", _d(opt="n:i id:i pos:p")),
     "NO_DEPOT": ("A", "reflex", _d(opt="text:s")),
-    "LOCKDOWN": ("A", "reflex", _d("why:s", "n:i type:s raised:i doors:i alert:s clock:i out:i recall:i rc_left:i")),
+    "LOCKDOWN": ("A", "reflex", _d("why:s", "n:i type:s raised:i doors:i alert:s clock:i out:i recall:i rc_left:i "
+                                            "rc_new:i")),
     "ORDER_BAD": ("A", "economy", _d("order:i job:s", "dropped:f")),
     "DEPOT_MISSING": ("A", "trade", _d(opt="civ:s planned:f proj:s stalled:f why:s mat:s")),
     # BUG-021: unit/upos/grp = a cut-off citizen and his walk group, at/agrp = a stock tile of the class and its group
@@ -532,8 +534,15 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # Run 11 (siege 8: 16 citizens outside Kern+ at the arrival): the lockdown's recall; why done (all came in), late
     # (reflex.RECALL_MAX passed: the doors stop waiting), end (the lockdown ended first); n = outside at the alert,
     # left = still outside, ticks since the alert, units = those still out (<= 20), called = the alert really confined
-    # (a burrow listed), burrow, eta = ticks of the nearest invader to an entrance then (-1 unknown)
-    "RECALL": ("B", "reflex", _d("why:s n:i left:i ticks:i", "units:ia called:f burrow:s eta:i")),
+    # (a burrow listed), burrow, eta = ticks of the nearest invader to an entrance then (-1 unknown). BUG-035 (Run 11
+    # siege 9: 'recall: 9 of 5 still outside', two never came): burrow = the burrows it measures arrival in (the alert's,
+    # 'Kern+/Tiefe+'), why stuck (once per lockdown: some of them cannot come; they hold no door), reasons =
+    # 'id:key@x,y,z[/dN][/res]' per citizen still out, then per newcomer (reflex.NOHOLD keys: gone caged chained carried
+    # mood down patient sleep puller:<room> burrow:<name> locked:<door> group path; others walk job:<type> away idle
+    # door:<door> (opened again for him)), stuck = how many cannot come, pull = gate's lever pullers among them (never
+    # counted as still out), nnew/newu = citizens out since who were not out at the alert (<= 20 ids)
+    "RECALL": ("B", "reflex", _d("why:s n:i left:i ticks:i", "units:ia called:f burrow:s eta:i reasons:sa stuck:i "
+                                                             "pull:i nnew:i newu:ia")),
     # Run 11 (siege 8: the refuge switched Tiefe+/Kern+ during the fight): the civ alert's burrow changed in SIEGE or
     # BREACH; why = breached (a hostile in it), unseparated (an opening reaches it), gone, dry (seal.dry: thirsty or
     # hungry there), window (a refuge without drink after refuge.breach_days), unreachable, deeper (to the refuge, away
@@ -745,7 +754,11 @@ STATE = Obj(
          "alarm": Obj(req={"defcon": Int(1, 5), "unacked": NAT, "last": NAT, "ack": NAT, "lock": FLAG,
                            "why": Str(maxbytes=24)}, opt={"eta": Int(-1), "doors": NAT, "dwait": NAT, "dout": NAT,
                                                        # Run 11: hostiles whose lockdown expired far
-                                                       "dref": NAT, "far": NAT}),
+                                                       "dref": NAT, "far": NAT,
+                                                       # BUG-035: the open recall (called, still out of rto,
+                                                       # left since, cannot come)
+                                                       "rn": NAT, "rleft": NAT, "rnew": NAT, "rstuck": NAT,
+                                                       "rto": Str(maxbytes=24)}),
          # FR-55 lever latency (gate): last pull -> wanted state, in s and ticks (-1 never); pending own pulls
          "lever": Obj(req={"lat_s": Int(-1), "lat_t": Int(-1), "pend": NAT, "wait_s": NAT}),
          "alert": Obj(req={"want": Str(maxbytes=24), "burrow": Str(maxbytes=24), "tiles": NAT, "inside": NAT,

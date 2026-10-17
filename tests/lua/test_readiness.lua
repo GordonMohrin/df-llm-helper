@@ -490,10 +490,11 @@ T.test('Run 11 (siege 8: Tiefe+ had no drink): a refuge without drink is the R0 
   day(W, 2)
   local u = unready(W)
   T.eq(#u, 1)
+  -- BUG-035 (Run 11: 13 wells, none in Tiefe+): the text says the refuge has no well of its own
   T.eq({u[1].d.fails, u[1].d.rdry}, {{'refuge_dry'},
-       'Tiefe+ has no drink (drink 0<50, no well): build a well/cistern or stock drink there'})
-  T.ok(u[1].msg:find('siege unready (R0: refuge_dry); Tiefe+ has no drink (drink 0<50, no well): build a well/cistern ' ..
-       'or stock drink there; 0 ways in, all with a door or bridge; traps 35', 1, true), u[1].msg)
+       'Tiefe+ has no drink (drink 0<50, no well in Tiefe+): build a well/cistern or stock drink there'})
+  T.ok(u[1].msg:find('siege unready (R0: refuge_dry); Tiefe+ has no drink (drink 0<50, no well in Tiefe+): build a ' ..
+       'well/cistern or stock drink there; 0 ways in, all with a door or bridge; traps 35', 1, true), u[1].msg)
   -- a well: counts, unless water's state says the refuge has no wet well
   sf.rd = {name = 'Tiefe+', exists = true, drink = 0, need = 50, wells = 1, wet = true}
   day(W)
@@ -503,6 +504,12 @@ T.test('Run 11 (siege 8: Tiefe+ had no drink): a refuge without drink is the R0 
   day(W)
   T.eq({lvl(W), ready(W).fail}, {0, {'refuge_dry'}})
   T.eq(#unready(W) >= 1 and unready(W)[#unready(W)].d.rdry ~= nil, true)
+  local R = W.mods.readiness.M
+  local function rdry() return R.refuge_dry and tostring(R.refuge_dry(W.K)) or 'no readiness.refuge_dry' end
+  T.ok(rdry():find('Tiefe+ has no drink (drink 0<50, its 1 well is dry)', 1, true), rdry())
+  sf.rd = {name = 'Tiefe+', exists = true, drink = 0, need = 50, wells = 2, wet = true}
+  day(W)
+  T.ok(rdry():find('Tiefe+ has no drink (drink 0<50, its 2 wells are dry)', 1, true), rdry())
   wf.ok = 1
   W.state()                                       -- the state readiness reads (K.view)
   day(W)

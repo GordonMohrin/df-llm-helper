@@ -189,7 +189,7 @@ local function burrow(K, role, default)
   local name = default
   for n, b in pairs(K.manifest().burrows or {}) do if b.role == role then name = n end end
   local ok, b = pcall(function() return dfhack.burrows.findByName(name) end)   -- Lua API.txt:2412
-  return ok and b or nil
+  return ok and b or nil, name
 end
 
 local function on_burrow(b, x, y, z)
@@ -853,10 +853,13 @@ local function finish(K, c, r, p)
     if not ok then hosp_ok, dry_h = false, dry_h or h end
     if b and (not best_h or b.d < best_h.d) then best_h = b end
   end
-  local refuge = burrow(K, 'refuge', 'Tiefe+')
-  local refuge_ok = false
+  local refuge, rname = burrow(K, 'refuge', 'Tiefe+')
+  local refuge_ok, rwells, rwet = false, 0, 0          -- BUG-035: the wells in the refuge and the wet ones of them
   for _, s in ipairs(r.sources) do
-    if s.kind == 'well' and s.wet and on_burrow(refuge, s.x, s.y, s.z) then refuge_ok = true end
+    if s.kind == 'well' and on_burrow(refuge, s.x, s.y, s.z) then
+      rwells = rwells + 1
+      if s.wet then rwet, refuge_ok = rwet + 1, true end
+    end
   end
   local wells, wet = 0, 0
   for _, s in ipairs(r.sources) do
@@ -1020,13 +1023,17 @@ local function finish(K, c, r, p)
                hosp_ok = hosp_ok and 1 or 0, refuge_ok = refuge_ok and 1 or 0, buckets = r.buckets,
                buckets_free = r.free + fixed, buckets_full = r.full, buckets_want = want, unforbid = fixed,
                ordered = ordered, missing = math.max(0, missing), carers = #r.carers, gate = gate and 1 or 0,
-               hosp = nh, give = r.give, removed = removed and #removed.zones or 0, src = src_list(r)}
+               hosp = nh, give = r.give, removed = removed and #removed.zones or 0, src = src_list(r),
+               rwells = rwells, rwet = rwet}
   local prev = st.out or {}
   if prev.hosp_ok ~= out.hosp_ok or prev.refuge_ok ~= out.refuge_ok or prev.patients ~= out.patients
-     or prev.hosp ~= out.hosp or fixed > 0 or ordered > 0 then
-    K.log('info', 'water: %d patients (max thirst %d), hospital %s, refuge %s, %d wet sources (%d wells), buckets %d free of %d '
+     or prev.hosp ~= out.hosp or prev.rwells ~= out.rwells or fixed > 0 or ordered > 0 then
+    -- BUG-035 (Run 11: 'refuge dry, 1 wet sources (13 wells)'): where the wells are relative to the refuge
+    local rw = string.format('%d %s, %d in %s', wells, wells == 1 and 'well' or 'wells', rwells, rname)
+    if rwells > 0 then rw = rw .. string.format(', %d of them wet', rwet) end
+    K.log('info', 'water: %d patients (max thirst %d), hospital %s, refuge %s (%s), %d wet sources, buckets %d free of %d '
           .. '(want %d, unforbid %d, ordered %d), %d GiveWater', out.patients, tmax,
-          nh == 0 and 'none' or (hosp_ok and 'ok' or 'dry'), refuge_ok and 'ok' or 'dry', wet, wells, out.buckets_free,
+          nh == 0 and 'none' or (hosp_ok and 'ok' or 'dry'), refuge_ok and 'ok' or 'dry', rw, wet, out.buckets_free,
           r.buckets, want, fixed, ordered, r.give)
   end
   st.out = out

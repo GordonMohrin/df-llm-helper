@@ -2102,6 +2102,16 @@ function M.pullers(K, bridge)
   return n
 end
 
+-- public (BUG-035, reflex's recall): the lever pullers gate holds in their rooms now, {[unit id] = room}: they stay by
+-- the levers on purpose (siege lists the room in the alert), so the recall neither waits for them nor holds a door
+function M.puller_of(K)
+  local r = {}
+  for name, p in pairs(pl and pl.rooms or {}) do
+    for _, id in ipairs(p.ids or {}) do r[id] = name end
+  end
+  return r
+end
+
 function M.reset_kpi(K)
   st.kpi = new_kpi(K.now().tick)
   dirty = true
