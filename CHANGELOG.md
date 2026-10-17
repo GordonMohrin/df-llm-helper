@@ -1,5 +1,63 @@
 # CHANGELOG dfpilot
 
+## The manager's office gets its chair and table; unvalidated orders are watched by age; fruit is brewed; the drink line names why nothing brews (BUG-042, 2026-10-17; the cause live confirmed, the fix offline, live-untested)
+- **Why (Run 11, y471):** Kilrudrabed site98, kernel b873eb6/0038b55: `drink 93d!` in summer, `drink 32d!` 18 days later
+  (19 patients, thirst 25394) beside 15 stills without a job, 275 plants, 3079 growths. Every brew order (the kernel's
+  1250 dfllm:drink x10, the session's 1260/1261 x30) stood `validated=false`, 112 of 446 orders in all; the manager
+  (Astesh, hf 5769) idle and unhurt; his Office zone 18631 (127-129,73-75 z141) held no chair and no table. A table and a
+  chair built there (127,74 / 128,74): he took ManageWorkOrders at once, unvalidated 112 -> 51, the brew orders validated
+  (live confirmed). Also: 110 ConstructDoor orders, 12 empty of 85 barrels for 60 brews, 14 of 32 adults idle beside 241
+  GatherPlants jobs, and cli.log `follow AUTO_FAIL {} workshops: bp.sites.rank(workshops): workshops: nothing left to
+  build` after every fishery request since the reload. `bugs/BUG-042-drink-falls-without-a-brew-order.md`.
+- **Causes (proved from the code):** act.manager_office (act.lua:1097-1110) only assigns a zone, nothing checked its
+  chair/table; validation_watch spoke only below 10 % validated (economy.lua:2243), so 334 old orders kept it silent;
+  an unvalidated order counts as live (scan_orders 1107, plan_supply 1302, T.orders 5202), so the stuck dfllm:drink
+  blocked every new one without a line; only BREW_DRINK_FROM_PLANT was ever ordered (244-247); barrels only below 4
+  empty and 80 in all (1335-1339); gatherers only below 30 food days (5015); the runner orders a door per cell without
+  a building at every seal, retry and remake (runner.lua:1535, 3226).
+- **economy (office):** `M.office_check` daily: the manager's Office zone needs a built chair and table; a missing one
+  goes on a free floor tile of the zone through `runner.repair` (quickfort `#build`, buildingplan waits for the item, T.jmake
+  orders it), at most every `office.retry_days` (7): kern.log and MANAGER_OFFICE (B) `manager office 18631 has no chair,
+  no table: chair at 128,73,141, table at 129,73,141 placed (rp...)`; a placed piece not built names the free items
+  (census `chairs`, `tables`); M.PIECES chair/table use them.
+- **economy (validation by age):** `M.unval_watch` replaces the ratio: the 8 lowest unvalidated order ids with their
+  first-seen tick; past `orders.unval_days` (2) with an able manager DECISION_NEEDED manager_office (A, util/cadence once
+  per reason) `N manager orders not validated for D days (B brews among them): <reason>` with the fix in q; ORDER_STUCK /
+  inspect orders `unvalidated: manager office 18631 has no chair, no table`; state `orders.unval`, `uval_d`, `mgr`.
+- **economy (drink):** `dfllm:drink_fruit` BREW_DRINK_FROM_PLANT_GROWTH; the deficit split by the census' brewable stock
+  (`brew_p` PLANT with DRINK_MAT, plump helmets always; `brew_g` PLANT_GROWTH with DRINK_MAT; `M.brew_share`); barrels for
+  the brews the open BREW_ orders want below the target (`barrels.brew_wait` 30, past grow_total); `M.drink_low`
+  DECISION_NEEDED drink_low below `drink.low_d` (60): block (still, brew, unvalidated, plants, barrels, brewer), auto;
+  state `stock.dwhy`; gatherers also below `gather.drink_d` (60) while the brewable plants are short of the deficit (off
+  at `gather.drink_off` 100).
+- **runner:** a door/hatch cell gets no quickfort order while the open one-time orders of its job hold `orders_cap` (10).
+- **Python:** status/brief `drink: <dwhy>` and `orders: N unvalidated, oldest D d: <reason>`; follow's heartbeat carries
+  its code stamp, status `follow: OLD CODE (...): restart dfllm follow`; the tannery request keeps `Tanners` (need);
+  `bp office` builds chair and table; `fairplay.economy_errors` in `lint --config`.
+- Contracts: state `stock.dwhy`, `orders.unval/uval_d/mgr`, MANAGER_OFFICE (B), DECISION_NEEDED drink_low/manager_office
+  (`drink`) in schema.py, contract.lua, CONTRACTS §9.3/§12 and the appendix; RULES §7 DECISION_NEEDED, §10 labor and
+  food, §13 follow in place (300 lines); DESIGN §5.11.
+- Not changed (judgment): no brew task straight at a still (a hand-built reaction job needs DF's reagent items; FR-39's
+  crashes; the office check fixes the cause): it needs the player's yes and a live test.
+- Tests (each new one fails on 0038b55, the fishery replay excepted): `tests/lua/test_economy_drink.lua` (new),
+  `tests/lua/test_economy_gather.lua`, `tests/lua/test_runner.lua`, `tests/test_bug042.py` (new); adjusted
+  `tests/lua/test_economy_orders.lua` (the office reason), `tests/test_wp8_files.py` (stock.dwhy), office goldens;
+  `tests/lua/wp8_world.lua` fakes (reaction products, Office zones).
+- **Live check (Run 11):** before the reload, read-only: the follow process' start time against the pull, `.follow.json`
+  `jobs`, `dfllm events --type PROJECT_REQUEST --limit 0` (why at the AUTO_FAIL epochs); kern.log `manager orders, `
+  lines of the seals. After `git pull`, `dfhack-run dfllm reload` and a restart of `dfllm follow`:
+  - `dfllm status`: no `follow: OLD CODE`; with drink below 170: `drink: <cause>` (none once the brews run);
+  - within a day: no MANAGER_OFFICE for 18631 (chair and table stand); a later siege that breaks them: `manager office
+    18631 has no chair...: chair at ... placed (rp...)`, the repair project in `status`;
+  - unvalidated orders older than 2 days: DECISION_NEEDED manager_office with the reason, `orders: N unvalidated` in
+    status; none while he validates;
+  - kern.log `order dfllm:drink_fruit xN (drink_d)` below 170 drink days with fruit in stock; `drink N days: M brews wait,
+    E of B barrels empty: barrels wanted W` and `order dfllm:barrel x4`;
+  - below 60 drink days: one DECISION_NEEDED drink_low naming the blocker; `gather: drink N days, P brewable plants < Q`
+    only when the plants are short;
+  - the next seal/retry with doors: `... door cells get no manager order: 110 open ConstructDoor orders (cap 10)`;
+  - the next fishery request: cli.log `follow auto:fishery ... placed`, a workshops project at prio 1.
+
 ## A seal no longer waits for a shrub nobody gathers; SEAL_STUCK says what a stuck piece waits for; plan check stops repeating it (BUG-041, 2026-10-17; offline, live-untested)
 - **Why (Run 11, y461):** Kilrudrabed site98, y461 summer d45, kernel e8a28a6: kern.log `seal first: c1a149cf2ff540c801
   (seal) built nothing for 5 days at seal.clear: 1 piece open (door 59,62,146)`, `dfllm plan check` `... is stuck for 220

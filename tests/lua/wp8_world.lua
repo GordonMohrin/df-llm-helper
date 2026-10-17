@@ -47,9 +47,10 @@ local function strict(W, other, names)
   end})
 end
 
--- materials: F.mat(W, type, index, {token=, flags={EDIBLE_RAW=true}})
+-- materials: F.mat(W, type, index, {token=, flags={EDIBLE_RAW=true}, products={'DRINK_MAT'}})
 function F.mat(W, t, i, spec)
-  W.mats[t .. ':' .. i] = {type = t, index = i, token = spec.token or (t .. ':' .. i), flags = spec.flags or {}}
+  W.mats[t .. ':' .. i] = {type = t, index = i, token = spec.token or (t .. ':' .. i), flags = spec.flags or {},
+                           products = spec.products}
 end
 
 -- install the WP8 fakes on an existing k_mock world (also used on top of tests/lua/kern_world.lua)
@@ -74,7 +75,7 @@ function F.install(W)
                         'Baby', 'Traumatized'}, 0)
   mt.None, mt[-1] = -1, 'None'
   df.mood_type = mt
-  df.civzone_type = enum_from({'Home', 'Tomb', 'Pond', 'Dump'}, 0)
+  df.civzone_type = enum_from({'Home', 'Tomb', 'Pond', 'Dump', 'Office', 'Bedroom'}, 0)
   df.building_type = enum_from({'Chair', 'Bed', 'Table', 'Coffin', 'FarmPlot', 'Furnace', 'TradeDepot', 'Shop',
                                 'Door', 'Floodgate', 'Box', 'Weaponrack', 'Armorstand', 'Workshop', 'Construction'}, 0)
   df.abstract_building_type = enum_from({'MEAD_HALL', 'KEEP', 'TEMPLE', 'DARK_TOWER', 'MARKET', 'TOMB',
@@ -108,7 +109,8 @@ function F.install(W)
       if type(t) == 'table' then t, i = t.mat_type, t.mat_index end
       local m = W.mats[tostring(t) .. ':' .. tostring(i)]
       if not m then return nil end
-      return {type = m.type, index = m.index, material = {flags = m.flags}, getToken = function() return m.token end}
+      return {type = m.type, index = m.index, getToken = function() return m.token end,
+              material = {flags = m.flags, reaction_product = m.products and {id = m.products} or nil}}
     end,
     find = function(a, b)
       local tok = b and (a .. ':' .. b) or a

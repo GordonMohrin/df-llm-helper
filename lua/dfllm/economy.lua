@@ -240,10 +240,17 @@ M.DEFAULTS = {
   food = {yield = 1, per_dwarf = 3, plot_tiles = 35, plots_max = 4, want_days = 90, trend_days = 14,
           request_days = 14, pre_days = 30, crops_per_dwarf = 4, crops_min = 50, crops_max = 400, crops_step = 10,
           status_days = 7, meals_per_dwarf = 2, cit_per_job = 2},
+  -- BUG-042 (Run 11, y471: 3079 plant growths, 275 plants, drink 93 -> 32 days): the drink deficit is brewed from what
+  -- the census finds brewable (`src`: brew_p = PLANT with DRINK_MAT, plump helmets always; brew_g = PLANT_GROWTH with
+  -- DRINK_MAT, fruit), split by their stock (M.brew_share); with neither in the fort the plant order takes it all
   supply = {
-    {tag = 'dfllm:drink', key = 'drink_d', per_job = 5, max_jobs = 30,
+    {tag = 'dfllm:drink', key = 'drink_d', per_job = 5, max_jobs = 30, src = 'brew_p',
      spec = {job = 'CustomReaction', reaction = 'BREW_DRINK_FROM_PLANT', frequency = 'OneTime',
              item_conditions = {{condition = 'AtLeast', flags = {'unrotten'}, item_type = 'PLANT', reaction_product = 'DRINK_MAT', value = 2},
+                                {condition = 'AtLeast', flags = {'empty', 'food_storage'}, value = 1}}}},
+    {tag = 'dfllm:drink_fruit', key = 'drink_d', per_job = 5, max_jobs = 30, src = 'brew_g',
+     spec = {job = 'CustomReaction', reaction = 'BREW_DRINK_FROM_PLANT_GROWTH', frequency = 'OneTime',
+             item_conditions = {{condition = 'AtLeast', flags = {'unrotten'}, item_type = 'PLANT_GROWTH', reaction_product = 'DRINK_MAT', value = 2},
                                 {condition = 'AtLeast', flags = {'empty', 'food_storage'}, value = 1}}}},
     {tag = 'dfllm:food', key = 'food_d', per_job = 4, max_jobs = 20,
      spec = {job = 'PrepareMeal', meal_ingredients = 2, frequency = 'OneTime',
@@ -258,8 +265,10 @@ M.DEFAULTS = {
   -- live L1b: brewing stalled without empty barrels; then dfllm:barrel made 34 barrels (logs 183 -> 66). Below the
   -- drink target the cap is max_total, below nofloor_days of drink barrels may use the wood floor
   -- live L6: while drink is short and fewer than min_empty barrels are empty, the cap grows up to grow_total
+  -- BUG-042 (Run 11, y471: 60 brews waited for 12 empty barrels among 85): below the drink target the brews the open
+  -- BREW_ orders still want (at most brew_wait) are empty barrels wanted too, past grow_total
   barrels = {tag = 'dfllm:barrel', min_empty = 4, drink_pct = 150, cit_pct = 50, min_total = 8, max_total = 30,
-             grow_total = 80, nofloor_days = 30, max_jobs = 4, ws = {'workshop:Carpenters'},
+             grow_total = 80, nofloor_days = 30, max_jobs = 4, brew_wait = 30, ws = {'workshop:Carpenters'},
              spec = {job = 'MakeBarrel', material_category = {'wood'}}},
   bins = {tag = 'dfllm:bin', min_empty = 1, cit_pct = 25, min_total = 4, max_total = 20, max_jobs = 2,
           ws = {'workshop:Carpenters'}, spec = {job = 'ConstructBin', material_category = {'wood'}}},
@@ -348,7 +357,18 @@ M.DEFAULTS = {
   -- reported (ORDER_STUCK, at most report_per_day a day); needs_drop "Needs ..." cancels remove it, and an own
   -- dfllm order is not entered again for backoff_days. Run 11: an unvalidated order while the manager cannot validate
   -- (injured, in a mood, gone) names that reason; after manager_days of it DECISION_NEEDED manager_absent
-  orders = {stuck_days = 3, needs_drop = 10, backoff_days = 10, report_per_day = 3, manager_days = 3},
+  -- BUG-042 (Run 11, y471: the manager's office held no chair and no table; 112 of 446 orders, the brew orders among
+  -- them, waited unvalidated while 334 older ones were validated): an order unvalidated for unval_days with a manager
+  -- who could validate is DECISION_NEEDED manager_office with the reason (M.unval_watch), and the manager's office gets
+  -- its chair and table (M.office_check: `office`)
+  orders = {stuck_days = 3, needs_drop = 10, backoff_days = 10, report_per_day = 3, manager_days = 3, unval_days = 2},
+  -- BUG-042: the manager's Office zone needs a chair (and a table: the live fix was both) to validate work orders; a
+  -- missing one is placed on a free floor tile of the zone (runner.repair: quickfort build, buildingplan waits for the
+  -- item) at most every retry_days; zones larger than max_tiles are searched only that far
+  office = {table = true, retry_days = 7, max_tiles = 400},
+  -- BUG-042: below low_d drink days (and above alarm.days, where the thirst decision speaks) a class-A DECISION_NEEDED
+  -- drink_low names why the stills do not brew (M.drink_why) and what the kernel did; again with news after 7 days
+  drink = {low_d = 60},
   -- FR-16: resumed per day; a job kept suspended held_days asks for the preventblocking decision;
   -- preventblocking 'keep' leaves suspendmanager's own setting until jobs.release decides
   -- BUG-009/004/005: footprints scanned and items unforbidden per day, items read per missing class, failed resumes
@@ -369,7 +389,10 @@ M.DEFAULTS = {
   -- BUG-038 (Run 11, y451: food_low at 26 days, 450 unclaimed GatherPlants jobs, nobody gathered): below food.pre_days
   -- (the food_low line, famine included) with >= min_jobs unclaimed GatherPlants jobs, the plant gathering detail
   -- (starve.details.gatherers) gets members up to n (M.gather_low); the ones economy added leave at off_days food days
-  gather = {n = 4, min_jobs = 10, off_days = 60},
+  -- BUG-042: also below drink_d drink days while the brewable plants (census brew_p + brew_g) cannot brew the deficit
+  -- to the drink target (5 drinks a plant); the members stay until food >= off_days and drink >= drink_off (or enough
+  -- brewable plants)
+  gather = {n = 4, min_jobs = 10, off_days = 60, drink_d = 60, drink_off = 100},
 }
 
 local st = {}
@@ -426,7 +449,7 @@ end
 local CATS = {'DRINK', 'FOOD', 'MEAT', 'FISH', 'FISH_RAW', 'CHEESE', 'EGG', 'PLANT', 'PLANT_GROWTH', 'CLOTH', 'SKIN_TANNED',
               'CORPSEPIECE', 'SMALLGEM', 'ROUGH', 'BAR', 'AMMO', 'WOOD', 'BARREL', 'BIN', 'BOULDER', 'THREAD',
               'SEEDS', 'WEAPON', 'ARMOR', 'HELM', 'PANTS', 'GLOVES', 'SHOES', 'SHIELD', 'QUIVER', 'BAG',
-              'DOOR', 'HATCH_COVER', 'GRATE', 'BLOCKS'}
+              'DOOR', 'HATCH_COVER', 'GRATE', 'BLOCKS', 'CHAIR', 'TABLE'}
 local SKIP = {'trader', 'garbage_collect', 'removed', 'dump', 'hostile', 'in_building', 'construction', 'rotten'}
 -- FR-62 (Run 9: 18.7k items, economy 12-14 ms/s): one read of the flag word (bitfield `whole`) against the mask of
 -- the SKIP bits instead of eight bitfield reads per item. The first M.MASK_CHECK items of a boot are cross-checked
@@ -647,6 +670,43 @@ function M.cook_banned(a, cat, it)
   return v
 end
 
+-- BUG-042: does a material have the DRINK_MAT reaction product (a still brews it)? (material.reaction_product.id, a
+-- vector of strings; DFHack gives string pointers with .value)
+function M.drink_mat(t, i)
+  local mi = dfhack.matinfo.decode(t, i)
+  local rp = mi and mi.material and mi.material.reaction_product
+  if not rp or not rp.id then return false end
+  for _, id in ipairs(rp.id) do
+    local v = type(id) == 'string' and id or id.value
+    if v == 'DRINK_MAT' then return true end
+  end
+  return false
+end
+
+-- BUG-042: a brewable plant item: DRINK_MAT, or a plump helmet (the kitchen's Cook ban, Gordon's rule: brewed, never
+-- cooked); cached per census and material (a.bc)
+function M.brew_ok(a, cat, it)
+  local t, i = item_mat(it)
+  if t == nil or i == nil then return false end
+  local row = a.bc[t]
+  if not row then row = {}; a.bc[t] = row end
+  local v = row[i]
+  if v == nil then
+    v = false
+    if cat == 'PLANT' and next(a.nocook) then
+      local tok = mat_token(t, i)
+      local plant = tok and tok:match('^PLANT:([^:]+):')
+      v = plant ~= nil and a.nocook[plant] == true
+    end
+    if not v then
+      local ok, yes = pcall(M.drink_mat, t, i)
+      v = ok and yes == true
+    end
+    row[i] = v
+  end
+  return v
+end
+
 -- a small tally {key = n} (at most 16 keys; '#' counts them) and its k largest entries {{key, n}}
 function M.tally(t, key, n)
   if key == nil then return end
@@ -729,6 +789,10 @@ local function classify(it, a, cat)
     -- food = what a dwarf can eat now: meals and raw-edible items. Cook-only items (egg yolks, raw fish,
     -- flour) feed nobody without a kitchen job (live L1: 34 yolks reported as 250 food days while a
     -- dwarf starved), so they count as `cookable`.
+    -- BUG-042: the brewable ones (DRINK_MAT; plump helmets always) are the stills' input (brew_p plants, brew_g fruit)
+    if (cat == 'PLANT' or cat == 'PLANT_GROWTH') and M.brew_ok(a, cat, it) then
+      if cat == 'PLANT' then a.brew_p = a.brew_p + n else a.brew_g = a.brew_g + n end
+    end
     if cat ~= 'FOOD' then
       local mf = mat_flags(it)
       -- Run 11 (Kilrudrabed: PrepareMeal 'no cook' beside 1566 plant growths): a kitchen cooks what is EDIBLE_COOKED
@@ -915,7 +979,8 @@ local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'ge
               'g_quiver', 'g_metal', 'fish_raw', 'food_nocook', 'seeds_ok', 'seeds_forb', 'w_pick_free', 'w_axe_free',
               'w_pick_bin', 'w_axe_bin', 'w_pick_res', 'w_axe_res', 'webs', 'webs_near', 'glass', 'gems_glass', 'sand',
               'bags', 'doors', 'hatches', 'grates', 'blocks_free', 'cook_in', 'cook_ban', 'cook_ban_g', 'food_inedible', 'food_far',
-              'w_pick_forb', 'w_axe_forb', 'w_pick_melt', 'w_axe_melt', 'w_pick_own', 'w_axe_own', 'melt'}
+              'w_pick_forb', 'w_axe_forb', 'w_pick_melt', 'w_axe_melt', 'w_pick_own', 'w_axe_own', 'melt',
+              'brew_p', 'brew_g', 'chairs', 'tables'}
 local function new_acc(c)
   local fs = {}
   for _, k in ipairs(c.food_cats or {}) do fs[k] = true end
@@ -924,7 +989,8 @@ local function new_acc(c)
     if e.what == 'Cook' and e.item == 'PLANT' and type(e.plant) == 'string' then nocook[e.plant] = true end
   end
   local a = {kinds = {}, food_set = fs, bars_by = {}, ores = {}, seeds = {}, nocook = nocook, fix = {}, fix_seen = {},
-             reach = {}, food_pos = {}, res = {}, tool_items = {pick = {}, axe = {}}, web_probes = 0, kc = {}, ined = {}}
+             reach = {}, food_pos = {}, res = {}, tool_items = {pick = {}, axe = {}}, web_probes = 0, kc = {}, ined = {},
+             bc = {}}
   for _, k in ipairs(ZERO) do a[k] = 0 end
   -- BUG-023: weapons a squad uniform reserved (equipment screen; DF hands no reserved pick or axe out as a work tool)
   pcall(function()
@@ -1101,7 +1167,8 @@ end
 local function scan_orders(p)
   local own = {}
   for tag, id in pairs(p.orders) do own[id] = tag end
-  local s = {live = {}, used = {}}
+  local s = {live = {}, used = {}, brew = M.brew_orders()}
+  st.brew = s.brew
   for _, o in ipairs(orders_all()) do
     local left = o.amount_left or 0
     if left > 0 then
@@ -1120,6 +1187,21 @@ local function scan_orders(p)
   end
   for tag in pairs(p.meta) do if not s.live[tag] then p.meta[tag] = nil end end
   return s
+end
+
+-- BUG-042: the open brew orders (CustomReaction BREW_*, any owner): {n, left (brews they still want), valid (validated
+-- ones), unval (their brews waiting for the manager)}
+function M.brew_orders()
+  local b = {n = 0, left = 0, valid = 0, unval = 0}
+  for _, o in ipairs(orders_all()) do
+    local left = math.tointeger(o.amount_left) or 0
+    if left > 0 and tostring(o.reaction_name or ''):sub(1, 5) == 'BREW_' then
+      b.n, b.left = b.n + 1, b.left + left
+      local okv, valid = pcall(function() return o.status.validated end)
+      if okv and valid == false then b.unval = b.unval + left else b.valid = b.valid + 1 end
+    end
+  end
+  return b
 end
 
 ---------------------------------------------------------------- needs, reserves, floors (hook API)
@@ -1282,6 +1364,17 @@ local function plan_fish(K, c, r)
   add(r, {tag = f.tag, spec = f.spec, n = math.min(raw, math.max(f.max or 30, r.cit or 0)), why = 'fish_raw'})
 end
 
+-- BUG-042: the part of the drink deficit's brew jobs one brew order takes (e.src: the census key of its brewable
+-- plants): split by the brew_p / brew_g stock, at most one job a plant; with neither in the fort the plant order takes
+-- it all (DF's item condition waits for plants, drink_low names them missing)
+function M.brew_share(r, e, jobs)
+  if jobs <= 0 then return 0 end
+  local bp, bg = math.tointeger(r.inv.brew_p) or 0, math.tointeger(r.inv.brew_g) or 0
+  if bp + bg <= 0 then return e.src == 'brew_p' and jobs or 0 end
+  local mine = e.src == 'brew_g' and bg or bp
+  return math.min(mine, (jobs * mine + bp + bg - 1) // (bp + bg))
+end
+
 -- cooking keeps food (live L5: gathered fruit and butchered meat rot; meals keep): meals_per_dwarf prepared meals
 -- per citizen, and the job cap of the food order grows with the fort
 local function meal_jobs(c, r, e)
@@ -1304,6 +1397,7 @@ local function plan_supply(K, c, r)
       if r.days[e.key] then
         local tgt, d = math.tointeger(sup[e.key]) or 0, r.days[e.key]
         if d < tgt then jobs = ((tgt - d) * (st.rate[e.key] or 0) // 1000 + e.per_job - 1) // e.per_job end
+        if e.src then jobs = M.brew_share(r, e, jobs) end              -- BUG-042: plants and fruit
       else
         local tgt, hv = math.tointeger(e.min) or math.tointeger(sup.mood_stock) or 10, r.inv[e.key] or 0
         if hv < tgt then jobs = (tgt - hv + e.per_job - 1) // e.per_job end
@@ -1333,9 +1427,15 @@ local function plan_containers(K, c, r, which)
   end
   local cap = short and (b.max_total or 30) or clamp(r.cit * (b.cit_pct or 50) // 100, b.min_total or 0, b.max_total or 30)
   local empty_miss = (b.min_empty or 0) - (inv[which .. '_empty'] or 0)
-  -- live L6 (Laborkings): 30 barrels, all full of food and drink, drink below the target: max_total stopped the
-  -- stills. While drink is short and the empty barrels are missing, the cap grows past max_total (up to grow_total)
-  if short and empty_miss > 0 and b.grow_total then
+  -- BUG-042 (Run 11, y471: 60 brews, 12 empty barrels among 85): the brews the open BREW_ orders want are empty
+  -- barrels wanted too while drink is short; the cap grows past grow_total by them (they end with the orders)
+  local bw = short and math.min((r.s.brew or {}).left or 0, b.brew_wait or 0) or 0
+  if bw - (inv.barrels_empty or 0) > math.max(0, empty_miss) then
+    empty_miss = bw - (inv.barrels_empty or 0)
+    cap = math.max(cap, (inv.barrels or 0) + empty_miss)
+    if r.day then K.log('info', 'drink %d days: %d brews wait, %d of %d barrels empty: barrels wanted %d',
+                        r.days.drink_d or 0, bw, inv.barrels_empty or 0, inv.barrels or 0, empty_miss) end
+  elseif short and empty_miss > 0 and b.grow_total then
     local grown = math.min(b.grow_total, (inv[which] or 0) + empty_miss)
     if grown > cap then
       cap = grown
@@ -2223,7 +2323,11 @@ end
 
 -- Manager orders that never get validated (live L1: the MANAGER position has required_office 1, so above
 -- a population threshold the manager validates only from an office with a chair; DF posts no
--- ManageWorkOrders job otherwise). After 3 days with orders, a manager and nothing validated: wake the LLM.
+-- ManageWorkOrders job otherwise). BUG-042 (Run 11, y471): the office zone stood without a chair and a table, 112 of
+-- 446 orders (the brew orders among them) waited for months while the 334 older ones were validated, and the ratio
+-- rule (< 10 % validated) never spoke. Now: the office's chair and table are checked daily (M.office_check) and any
+-- order unvalidated for orders.unval_days while the manager could validate is DECISION_NEEDED manager_office with the
+-- reason (M.unval_watch).
 local function validation_watch(K, p, c)
   -- live L6: a new manager (the old one died or left) stood without an office; the office check runs every
   -- day for whoever is manager now, not only when no order was validated
@@ -2232,23 +2336,203 @@ local function validation_watch(K, p, c)
     p.office_t = now
     local okc, res = K.act.manager_office()
     if okc and res == 'assigned' then K.log('warn', 'manager had no office: free Office zone assigned') end
+    local oko, err = pcall(M.office_check, K, c, p)
+    if not oko then K.log('warn', 'office check: %s', tostring(err)) end
   end
-  if M.manager_watch(K, p, c) then p.unval = nil; return end    -- Run 11: the manager cannot validate (injured, ...)
-  local ok, total, valid = pcall(function()
-    local t, v = 0, 0
-    for _, o in ipairs(orders_all()) do t = t + 1; if o.status.validated then v = v + 1 end end
-    return t, v
-  end)
-  -- live L6: one hand-validated order kept the watch quiet while 117 of 118 waited; below 10% validated counts
-  if not ok or total == 0 or valid * 10 >= total then p.unval = nil; return end
-  local vac = select(2, pcall(positions))
-  if type(vac) ~= 'table' or vac.MANAGER then p.unval = nil; return end   -- no manager yet: appoint first
-  p.unval = p.unval or {since = now, woke = 0}
-  if now - p.unval.since >= 3 * DAY and now - (p.unval.woke or 0) >= 7 * DAY then
-    p.unval.woke = now
-    K.emit('DECISION_NEEDED', 'A', string.format('%d manager orders, none validated for 3 days', total),
-           {id = 'manager_office', q = 'manager validates no orders: office zone with a chair for the manager?'})
+  if M.manager_watch(K, p, c) then p.uv, st.unval = nil, nil; return end   -- Run 11: injured, in a mood, gone
+  M.unval_watch(K, p, c)
+end
+
+-- BUG-042: the Office zone assigned to unit `uid` and the chairs and tables standing in it: {zone, box = {x1, y1, x2,
+-- y2, z}, chair, table (built), chair_p, table_p (planned)}, or nil, 'no office zone'. Read-only (zones, buildings).
+function M.in_zone(z, x, y, zz)
+  if zz ~= z.z or x < z.x1 or x > z.x2 or y < z.y1 or y > z.y2 then return false end
+  local fn = dfhack.buildings and dfhack.buildings.containsTile
+  if not fn then return true end
+  local ok, yes = pcall(fn, z, x, y)
+  return not ok or yes == true
+end
+function M.office_of(K, uid)
+  local zone
+  for _, z in ipairs(df.global.world.buildings.other.ACTIVITY_ZONE) do
+    if z.type == df.civzone_type.Office and z.assigned_unit_id == uid then zone = z; break end
   end
+  if not zone then return nil, 'no office zone' end
+  local rec = {zone = zone.id, box = {zone.x1, zone.y1, zone.x2, zone.y2, zone.z}, chair = 0, table = 0, chair_p = 0,
+               table_p = 0, zobj = zone}
+  for kind, vec in pairs({chair = 'CHAIR', table = 'TABLE'}) do
+    for _, b in ipairs(df.global.world.buildings.other[vec]) do
+      if M.in_zone(zone, b.x1 or b.centerx or -1, b.y1 or b.centery or -1, b.z) then
+        if built(b) then rec[kind] = rec[kind] + 1 else rec[kind .. '_p'] = rec[kind .. '_p'] + 1 end
+      end
+    end
+  end
+  return rec
+end
+
+-- BUG-042: free floor tiles of the office zone (revealed floor, no building or planned one, no designation), the first
+-- n; the second next to the first when one is (the chair beside its table, as the live fix)
+function M.office_spots(K, c, rec, n)
+  local x1, y1, x2, y2, z = table.unpack(rec.box)
+  local out, reads = {}, 0
+  local lim = math.tointeger(((c.office or {}).max_tiles)) or 400
+  local find = dfhack.buildings and dfhack.buildings.findAtTile
+  for y = y1, y2 do
+    for x = x1, x2 do
+      reads = reads + 1
+      if reads > lim then break end
+      if M.in_zone(rec.zobj, x, y, z) then
+        local okt, t = K.call('snapshot', 'tile', x, y, z)
+        local free = okt and type(t) == 'table' and t.c == '.' and (t.bld or '') == '' and (t.dig or '') == ''
+        if free and find then
+          local okb, b = pcall(find, x, y, z)
+          free = okb and b == nil
+        end
+        if free then out[#out + 1] = {x, y, z} end
+      end
+    end
+  end
+  if #out >= 2 and n >= 2 then
+    local a = out[1]
+    for k = 2, #out do
+      local q = out[k]
+      if math.max(math.abs(q[1] - a[1]), math.abs(q[2] - a[2])) == 1 then out[2], out[k] = q, out[2]; break end
+    end
+  end
+  return {table.unpack(out, 1, math.min(n, #out))}
+end
+
+-- BUG-042 (daily, from validation_watch): the manager's office must hold a chair (and a table, office.table) to
+-- validate work orders. A missing one (destroyed in a siege, never built) is placed on a free floor tile of the zone
+-- through runner.repair (quickfort #build: the player's build designation; buildingplan waits for the item, T.jmake
+-- orders it), at most every office.retry_days per office; kern.log and MANAGER_OFFICE (B) name it. st.office = what
+-- the reasons and texts say (why: 'manager office 18631 has no chair, no table'), nil when the office is complete.
+function M.office_check(K, c, p)
+  local oc = c.office or M.DEFAULTS.office
+  st.office = nil
+  local mg = M.manager_state(K)
+  if type(mg) ~= 'table' or not mg.unit then return end           -- no manager (appoint) or gone (manager_watch)
+  local rec = M.office_of(K, mg.unit)
+  if not rec then
+    st.office = {why = 'the manager has no office zone', fix = 'an Office zone with a chair and a table for him ' ..
+                 '(bp.place office)'}
+    return
+  end
+  local o = type(p.office) == 'table' and p.office or nil
+  local nob, miss = {}, {}                          -- kinds not built; not built and not planned either
+  for _, kind in ipairs({'chair', 'table'}) do
+    if (kind == 'chair' or oc.table ~= false) and rec[kind] == 0 then
+      nob[#nob + 1] = kind
+      if rec[kind .. '_p'] == 0 then miss[#miss + 1] = kind end
+    end
+  end
+  if #nob == 0 then
+    if o then K.log('info', 'manager office %d: chair and table stand', rec.zone); p.office = nil end
+    return
+  end
+  local why = string.format('manager office %d has no %s', rec.zone, table.concat(nob, ', no '))
+  st.office = {zone = rec.zone, why = why, at = o and o.zone == rec.zone and o.at ~= '' and o.at or nil}
+  if #miss == 0 then                                  -- placed: buildingplan waits for the items and a builder
+    local inv, none = K.census.i or {}, {}
+    for _, kind in ipairs(nob) do if (math.tointeger(inv[kind .. 's']) or 0) == 0 then none[#none + 1] = kind end end
+    st.office.fix = #none > 0 and string.format('not built: no free %s; add it at a workshop by hand (its order waits ' ..
+                                                'for him too)', table.concat(none, ', no '))
+                    or 'not built yet (buildingplan waits for a builder)'
+    return
+  end
+  local now = K.now().tick
+  if o and o.zone == rec.zone and now - (math.tointeger(o.t) or 0) < (oc.retry_days or 7) * DAY then return end
+  local spots = M.office_spots(K, c, rec, #miss)
+  if #spots < #miss then
+    st.office.fix = string.format('no free floor tile in office %d (%d,%d-%d,%d z%d): a chair and a table in it by hand',
+                                  rec.zone, rec.box[1], rec.box[2], rec.box[3], rec.box[4], rec.box[5])
+    if not o or o.zone ~= rec.zone or o.at ~= '' then
+      p.office = {zone = rec.zone, t = now, at = ''}
+      K.log('warn', '%s: %s', why, st.office.fix)
+      K.emit('MANAGER_OFFICE', 'B', (why .. ': ' .. st.office.fix):sub(1, 200),
+             {zone = rec.zone, chair = rec.chair, table = rec.table, why = why:sub(1, 80)})
+    end
+    return
+  end
+  local cells, at = {}, {}
+  for k, kind in ipairs(miss) do
+    local q = spots[k]
+    cells[#cells + 1] = {q[1], q[2], q[3], kind == 'chair' and 'c' or 't'}
+    at[#at + 1] = string.format('%s at %d,%d,%d', kind, q[1], q[2], q[3])
+  end
+  local okr, r1, r2 = K.call('runner', 'repair', cells, why)
+  if not (okr and r1) then
+    st.office.fix = 'not placed: ' .. tostring(r2 or r1)
+    K.log('warn', '%s: %s', why, st.office.fix)
+    return
+  end
+  local placed = table.concat(at, ', ')
+  p.office = {zone = rec.zone, t = now, at = placed, proj = tostring(r2 or '')}
+  st.office.at = placed
+  K.persist.touch('m.economy')
+  K.log('warn', '%s: %s placed (%s)', why, placed, tostring(r2 or ''))
+  K.emit('MANAGER_OFFICE', 'B', string.format('%s: %s placed (%s)', why, placed, tostring(r2 or '')):sub(1, 200),
+         {zone = rec.zone, chair = rec.chair, table = rec.table, placed = placed:sub(1, 80), proj = tostring(r2 or ''),
+          why = why:sub(1, 80)})
+end
+
+-- BUG-042: why an available manager validates nothing: the office (st.office) and its fix tail, else the manager by
+-- name
+function M.unval_why(K)
+  local o = st.office
+  if type(o) == 'table' and o.why then
+    local tail = (o.at and (': ' .. o.at .. ' placed') or '') .. (o.fix and ((o.at and '; ' or ': ') .. o.fix) or '')
+    return o.why, tail
+  end
+  local mg = M.manager_state(K)
+  local who = type(mg) == 'table' and mg.name and ('manager ' .. mg.name) or 'the manager'
+  return who .. ' validates nothing (his office has a chair and a table)', ': inspect the manager (job, path to the office)'
+end
+
+-- BUG-042: orders waiting for validation by age (the 8 lowest order ids, first seen in p.uv): any unvalidated one for
+-- orders.unval_days while a manager is appointed and able (manager_watch said nothing) is DECISION_NEEDED
+-- manager_office (A, util/cadence: once per reason, again after 7 days and 10 min); st.unval = {n, d, why}
+function M.unval_watch(K, p, c)
+  local oc = c.orders or M.DEFAULTS.orders
+  local now = K.now()
+  local ids = {}
+  for _, o in ipairs(orders_all()) do
+    local okv, valid = pcall(function() return o.status.validated end)
+    if okv and valid == false and (math.tointeger(o.amount_left) or 0) > 0 then ids[#ids + 1] = o.id end
+  end
+  table.sort(ids)
+  local old = type(p.uv) == 'table' and p.uv or {}
+  local uv, age = json.object{}, 0
+  for k = 1, math.min(8, #ids) do
+    local key = tostring(ids[k])
+    local t = math.tointeger(old[key]) or now.tick
+    uv[key] = t
+    age = math.max(age, now.tick - t)
+  end
+  p.uv = #ids > 0 and uv or nil
+  if #ids == 0 then
+    if type(p.unval_ann) == 'table' and st.unval and st.unval.why then
+      K.log('info', 'manager orders validated again')
+    end
+    st.unval = nil
+    if type(p.unval_ann) == 'table' then p.unval_ann = CAD.quiet(p.unval_ann) end
+    return
+  end
+  local days = age // DAY
+  st.unval = {n = #ids, d = days}
+  if days < (oc.unval_days or 2) then return end
+  local okv, vac = pcall(positions)
+  if not okv or type(vac) ~= 'table' or vac.MANAGER then return end   -- no manager yet: appoint first
+  local why, fix = M.unval_why(K)
+  st.unval.why = why
+  if not CAD.due(p.unval_ann, now, {}, {why}, {ticks = 7 * DAY, wall_s = CAD.WALL_S}) then return end
+  p.unval_ann = CAD.mark(now, {}, {why})
+  local b = st.brew or M.brew_orders()
+  local brew = (b.unval or 0) > 0 and string.format(' (%d brews among them)', b.unval) or ''
+  K.log('warn', '%d manager orders not validated for %d days%s: %s%s', #ids, days, brew, why, fix)
+  K.emit('DECISION_NEEDED', 'A', string.format('%d manager orders not validated for %d days%s: %s', #ids, days, brew,
+                                               why):sub(1, 200),
+         {id = 'manager_office', q = (why .. fix):sub(1, 200)})
 end
 
 ---------------------------------------------------------------- supply alarm, starved labors (live L1)
@@ -3396,6 +3680,77 @@ local function food_pre(K, c, p, days, inv, r)
          {id = 'food_low', q = q, food = fd, block = ids, opts = opts, auto = aids})
 end
 
+-- BUG-042 (Run 11, y471: drink 93 -> 32 days beside 15 stills, 275 plants and 3079 growths; every brew order waited
+-- for the manager, whose office had no chair): why the stills do not brew the drink deficit, {{id, text}} by weight:
+-- no still, no brew order (or none validated: the manager's reason), no brewable plants, no empty barrel, nobody
+-- brews; and what the kernel does itself {{id, text}} (brew orders out, barrels ordered, the office's chair placed)
+function M.drink_block(K, c, r, inv)
+  local f, out, auto = M.facts_now(K, r), {}, {}
+  local function put(id, txt) out[#out + 1] = {id, txt} end
+  local b = st.brew or M.brew_orders()
+  local plants = (inv.brew_p or 0) + (inv.brew_g or 0)
+  if not ws_any(f, {'workshop:Still'}) then put('still', 'no still') end
+  if b.n == 0 then put('brew', 'no brew order')
+  elseif (b.unval or 0) > 0 and st.unval and st.unval.why then        -- past orders.unval_days (M.unval_watch)
+    put('unvalidated', string.format('%d brews wait for validation: %s', b.unval, st.unval.why))
+  end
+  if plants == 0 then put('plants', 'no brewable plants') end
+  if (inv.barrels_empty or 0) == 0 then put('barrels', 'no empty barrel') end
+  if not M.labor_holder(K, 'BREWER') then put('brewer', 'nobody brews (Brewing on no citizen)') end
+  if b.n > 0 then auto[#auto + 1] = {'brew', string.format('%d brews ordered', b.left)} end
+  local o = st.office
+  if type(o) == 'table' and o.at and o.at ~= '' then auto[#auto + 1] = {'office', o.at .. ' placed'} end
+  if r.s and r.s.live['dfllm:barrel'] then auto[#auto + 1] = {'barrels', 'barrels ordered'} end
+  local sg = st.gather
+  if type(sg) == 'table' and (sg.n or 0) > 0 then auto[#auto + 1] = {'gather', string.format('%d gatherers', sg.n)} end
+  return out, auto
+end
+
+-- BUG-042: the drink cause in one line (state stock.dwhy, <= 80 bytes) while drink is below the plan's target, or nil
+function M.drink_why(K, c, r)
+  local d = (r.days or {}).drink_d or 9999
+  if d >= (math.tointeger((K.plan.supply or {}).drink_d) or 170) then return nil end
+  local bl = M.drink_block(K, c, r, r.inv or {})
+  return bl[1] and bl[1][2]:sub(1, 80) or nil
+end
+
+-- BUG-042: the drink pre-alarm: below drink.low_d (and from alarm.days on, where DECISION_NEEDED thirst speaks), a
+-- class-A DECISION_NEEDED drink_low with the days, why the stills do not brew and what the kernel did; once per
+-- episode, again with news (a new cause, below 30 days) after max(7 days, 10 min) (util/cadence)
+function M.drink_low(K, c, r)
+  local p, dd = r.p, (r.days or {}).drink_d or 9999
+  local low = math.tointeger(((c.drink or {}).low_d)) or 0
+  st.dwhy = M.drink_why(K, c, r)
+  if dd >= low then
+    if p.drink_pre then p.drink_pre = nil; K.log('info', 'drink pre-alarm over: %d drink days', dd) end
+    if type(p.drink_rep) == 'table' then p.drink_rep = CAD.quiet(p.drink_rep) end
+    return
+  end
+  if dd < ((c.alarm or M.DEFAULTS.alarm).days or 10) then return end      -- the thirst wake speaks now
+  local now = K.now()
+  if not p.drink_pre then
+    p.drink_pre = now.tick
+    K.log('warn', 'drink pre-alarm: %d drink days (< %d)%s', dd, low, st.dwhy and (': ' .. st.dwhy) or '')
+  end
+  local bl, auto = M.drink_block(K, c, r, r.inv or {})
+  local ids, aids, head = M.food_head(bl, auto)
+  local toks = {dd < 30 and 'below30' or 'below60'}
+  for _, id in ipairs(ids) do toks[#toks + 1] = id end
+  if not CAD.due(p.drink_rep, now, {}, toks, {ticks = 7 * DAY, wall_s = CAD.WALL_S}) then return end
+  p.drink_rep = CAD.mark(now, {}, toks)
+  local parts, au = {}, {}
+  for _, x in ipairs(bl) do parts[#parts + 1] = x[2]:sub(1, 90) end
+  for _, x in ipairs(auto) do au[#au + 1] = x[2]:sub(1, 50) end
+  local ap = #au > 0 and ('; auto: ' .. table.concat(au, ', ')) or ''
+  local q = string.format('drink %d d (%d cit, %d brewable plants, %d empty barrels)', dd, r.cit or 0,
+                          (r.inv.brew_p or 0) + (r.inv.brew_g or 0), r.inv.barrels_empty or 0) ..
+            (#parts > 0 and (': ' .. table.concat(parts, '; ')) or '')
+  if #q + #ap > 200 then q = q:sub(1, math.max(40, 197 - #ap)) .. '...' end
+  K.emit('DECISION_NEEDED', 'A', string.format('drink low: %d drink days (thirst alarm below %d)%s', dd,
+                                               (c.alarm or M.DEFAULTS.alarm).days or 10, head):sub(1, 200),
+         {id = 'drink_low', q = (q .. ap):sub(1, 200), drink = dd, block = ids, auto = aids})
+end
+
 -- autofarm status: one "SPELT limit 50 current 32" line per crop autofarm knows, and "Default: 50"
 function M.parse_autofarm(out)
   local crops, default = {}, nil
@@ -3456,7 +3811,7 @@ end
 local function order_ctx(K, c, r)
   local inv = r.inv or {}
   local reach = st.reach
-  local ctx = {f = r.f or {}, holders = {}, mgr = M.manager_state(K)}
+  local ctx = {f = r.f or {}, holders = {}, mgr = M.manager_state(K), uwhy = st.unval and st.unval.why}
   function ctx.is_metal(mi)
     local f = mat_flags({mat_type = 0, mat_index = mi})
     return f ~= nil and f.IS_METAL == true
@@ -3512,6 +3867,9 @@ function M.order_reasons(o, ctx)
   if type(mg) == 'table' and mg.why then
     local okv, valid = pcall(function() return o.status.validated end)
     if okv and valid == false then return 'unvalidated: no manager available (' .. mg.why .. ')', job end
+  elseif ctx.uwhy then                       -- BUG-042: the manager's office has no chair, ...
+    local okv, valid = pcall(function() return o.status.validated end)
+    if okv and valid == false then return 'unvalidated: ' .. ctx.uwhy, job end
   end
   local mc = OL.mat_class(o, ctx.is_metal)
   local ws, labors
@@ -3862,6 +4220,7 @@ function T.watch(K, c, r)
   famine(K, c, r.p, r.days, r.inv, r)
   food_pre(K, c, r.p, r.days, r.inv, r)
   M.food_unban(K, c, r, r.inv)
+  M.drink_low(K, c, r)                             -- BUG-042
 end
 
 function T.cmdq(K, c, r)
@@ -4185,7 +4544,8 @@ M.PIECES = {door = {kind = 'door', job = 'ConstructDoor', inv = 'doors', def = t
             grate = {kind = 'grate', job = 'ConstructGrate', inv = 'grates', def = true},
             floodgate = {kind = 'floodgate', job = 'ConstructFloodgate', def = true},
             cabinet = {kind = 'cabinet', job = 'ConstructCabinet'}, box = {kind = 'chest', job = 'ConstructChest'},
-            table = {kind = 'table', job = 'ConstructTable'}, chair = {kind = 'chair', job = 'ConstructThrone'},
+            table = {kind = 'table', job = 'ConstructTable', inv = 'tables'},
+            chair = {kind = 'chair', job = 'ConstructThrone', inv = 'chairs'},
             armorstand = {kind = 'armor stand', job = 'ConstructArmorStand'},
             weaponrack = {kind = 'weapon rack', job = 'ConstructWeaponRack'},
             bed = {kind = 'bed', job = 'ConstructBed', wood = true}}
@@ -4194,7 +4554,8 @@ M.PIECE_KIND = (function()
   for _, e in pairs(M.PIECES) do t[e.kind] = e end
   return t
 end)()
-M.PIECE_INV = {DOOR = 'doors', HATCH_COVER = 'hatches', GRATE = 'grates', BLOCKS = 'blocks_free'}
+M.PIECE_INV = {DOOR = 'doors', HATCH_COVER = 'hatches', GRATE = 'grates', BLOCKS = 'blocks_free', CHAIR = 'chairs',
+               TABLE = 'tables'}     -- BUG-042: the manager office's chair and table
 -- buildingplan's material settings for building material (walls): the census key of each; logs first when only
 -- one has to be switched on (bars are never switched on: metal is the soldiers')
 M.BM = {{'blocks', 'blocks_free'}, {'boulders', 'rock'}, {'logs', 'wood'}, {'bars', 'bars'}}
@@ -4988,31 +5349,52 @@ function M.gather_cand(K, c, member)
   return r
 end
 
+-- BUG-042: the brewable plants the drink deficit to the plan's target wants (5 drinks a plant) and the ones in the
+-- census (brew_p + brew_g): need, have
+function M.brew_need(K, r)
+  local dd = (r.days or {}).drink_d or 9999
+  local tgt = math.tointeger((K.plan.supply or {}).drink_d) or 170
+  local inv = r.inv or {}
+  local have = (math.tointeger(inv.brew_p) or 0) + (math.tointeger(inv.brew_g) or 0)
+  if dd >= tgt then return 0, have end
+  return ((tgt - dd) * (st.rate.drink_d or 0) // 1000 + 4) // 5, have
+end
+
 function M.gather_low(K, c, r)
   local g, p = c.gather, r.p
   if type(g) ~= 'table' or (math.tointeger(g.n) or 0) <= 0 then st.gather = nil; return end
   local fd = (r.days or {}).food_d or 9999
+  local dd = (r.days or {}).drink_d or 9999
+  -- BUG-042: drink low while the brewable plants cannot brew the deficit (the stills' input is gathered too)
+  local bneed, bhave = M.brew_need(K, r)
+  local dshort = bhave < bneed
   local pg = type(p.gather) == 'table' and type(p.gather.ids) == 'table' and p.gather or nil
   local jc = st.jobc
   local open = type(jc) == 'table' and math.tointeger(jc.gather_open) or 0
-  if pg and fd >= (g.off_days or 60) then                                -- food is back: ours leave
+  if pg and fd >= (g.off_days or 60) and not (dshort and dd < (g.drink_off or 0)) then   -- food (and drink) back
     local out = {}
     for _, id in ipairs(pg.ids) do
       local uid = math.tointeger(id)
       if uid and K.act.work_detail(pg.d, uid, false) then
         out[#out + 1] = unit_name(uid)
-        K.emit('WORK_DETAIL', 'B', string.format('%s - %s (food back at %d days)', pg.d, unit_name(uid), fd),
-               {detail = pg.d, unit = uid, on = 0, n = 0, why = 'food_low over'})
+        K.emit('WORK_DETAIL', 'B', string.format('%s - %s (food back at %d days, drink %d days)', pg.d, unit_name(uid),
+                                                 fd, dd),
+               {detail = pg.d, unit = uid, on = 0, n = 0, why = (pg.why or 'food_low') .. ' over'})
       end
     end
     r.cmds = r.cmds + 1
-    K.log('info', 'gather: food %d days (>= %d): %d plant gatherers off %s (%s)', fd, g.off_days or 60, #out,
-          tostring(pg.d), table.concat(out, ', '))
+    K.log('info', 'gather: food %d days (>= %d), drink %d days: %d plant gatherers off %s (%s)', fd, g.off_days or 60,
+          dd, #out, tostring(pg.d), table.concat(out, ', '))
     p.gather, st.gather = nil, nil
     return
   end
   st.gather = pg and {n = #pg.ids, open = open, d = pg.d} or nil
-  if fd >= ((c.food or {}).pre_days or 30) then return end                -- no food_low: nothing new
+  local flow = fd < ((c.food or {}).pre_days or 30)
+  local dlow = dd < (g.drink_d or 0) and dshort
+  if not (flow or dlow) then return end                                  -- no food_low, no drink_low: nothing new
+  local why = flow and 'food_low' or 'drink_low'
+  local lead = flow and string.format('food %d days', fd)
+               or string.format('drink %d days, %d brewable plants < %d', dd, bhave, bneed)
   if st.engine == 'modern' or type(jc) ~= 'table' or not HUNT_MODES[K.mode()] then return end
   if open < (g.min_jobs or 10) then return end
   st.gather = st.gather or {n = 0, open = open}
@@ -5044,9 +5426,9 @@ function M.gather_low(K, c, r)
       if not member[id] then
         have, names[#names + 1] = have + 1, unit_name(id)
         if not mine[id] then mine[id], ids[#ids + 1] = true, id end
-        K.emit('WORK_DETAIL', 'B', string.format('%s + %s (food_low: %d food days, %d gather jobs, target %d)', name,
-                                                 unit_name(id), fd, open, want),
-               {detail = name, unit = id, on = 1, n = want, why = 'food_low'})
+        K.emit('WORK_DETAIL', 'B', string.format('%s + %s (%s: %s, %d gather jobs, target %d)', name,
+                                                 unit_name(id), why, lead, open, want),
+               {detail = name, unit = id, on = 1, n = want, why = why})
       end
       flipped, nobody = flipped or nobody, false
     end
@@ -5054,14 +5436,14 @@ function M.gather_low(K, c, r)
   r.cmds = r.cmds + 1
   local fl = flipped and '; it was nobody does this: now only selected' or ''
   if #names == 0 then
-    if flipped then K.log('warn', 'gather: food %d days, %d unclaimed GatherPlants jobs: %s%s', fd, open, name, fl)
+    if flipped then K.log('warn', 'gather: %s, %d unclaimed GatherPlants jobs: %s%s', lead, open, name, fl)
     elseif not pg then st.gather.why = string.format('no free citizen for %s (%d of %d)', name, have, want) end
     return
   end
   table.sort(ids)
-  p.gather = {d = name, ids = json.array(ids), t = pg and pg.t or r.now}
+  p.gather = {d = name, ids = json.array(ids), t = pg and pg.t or r.now, why = pg and pg.why or why}
   st.gather = {n = #ids, open = open, d = name}
-  K.log('warn', 'gather: food %d days, %d unclaimed GatherPlants jobs: %s +%d (%s), %d of %d%s', fd, open, name,
+  K.log('warn', 'gather: %s, %d unclaimed GatherPlants jobs: %s +%d (%s), %d of %d%s', lead, open, name,
         #names, table.concat(names, ', '), have, want, fl)
 end
 
@@ -6476,9 +6858,18 @@ function M.state(K)
     -- melting (the invaders' gear in the melt pile)
     if st.metal then r.stock.mshort = st.metal.short and 1 or 0 end
     r.stock.melt = math.max(0, math.tointeger(inv.melt) or 0)
+    -- BUG-042: why the stills do not brew while drink is below the target ('no validated brew order: manager office
+    -- 18631 has no chair')
+    if st.dwhy then r.stock.dwhy = tostring(st.dwhy):sub(1, 80) end
   end
   local od = st.orders
   if od then r.orders = {n = od.n or 0, bad = od.bad or 0, stuck = od.stuck or 0} end   -- FR-01/FR-39
+  -- BUG-042: orders waiting for validation, the days the oldest waits, and why (once past orders.unval_days)
+  local uv = st.unval
+  if r.orders and type(uv) == 'table' then
+    r.orders.unval, r.orders.uval_d = math.max(0, uv.n or 0), math.max(0, uv.d or 0)
+    if uv.why then r.orders.mgr = tostring(uv.why):sub(1, 80) end
+  end
   return r
 end
 

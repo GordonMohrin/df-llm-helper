@@ -245,14 +245,16 @@ def furnaces(p: dict) -> Plan:
 
 
 def office(p: dict) -> Plan:
-    """A noble's office: chair + office zone reserved for `role` (preserve-rooms). Live L1: the manager
-    validates work orders only from an office once the fort reaches a population threshold."""
+    """A noble's office: chair + table + office zone reserved for `role` (preserve-rooms). Live L1: the manager
+    validates work orders only from an office once the fort reaches a population threshold. BUG-042 (Run 11, y471):
+    an office zone without its chair and table validated nothing for months; a table and a chair side by side made the
+    manager take ManageWorkOrders at once (economy's office check keeps them: sieges destroy furniture)."""
     role = str(p["role"]).lower()
     if role not in OFFICE_ROLES:
         raise ValueError(f"office: unknown role {role!r}; known: {', '.join(OFFICE_ROLES)}")
     P = Plan("office", "living")
     box = _box(P, 3, 3)
-    P.stage("build", "build", orders=1).tile(0, box[1] + 1, 0, "c")
+    P.stage("build", "build", orders=1).tile(0, box[1] + 1, 0, "c").tile(1, box[1] + 1, 0, "t")
     _finish(P, p, box, "o", f"assigned_unit={role} name=Office")
     return P
 

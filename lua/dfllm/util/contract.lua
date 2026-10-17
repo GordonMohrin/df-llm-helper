@@ -56,7 +56,9 @@ C.EVENTS = {
   BREACH = {cls = 'A', by = 'siege'}, DEATHS_3PLUS = {cls = 'A', by = 'care'},
   DRILL_FAIL = {cls = 'A', by = 'drill'}, KERN_FAULT = {cls = 'A', by = 'kern'},
   -- DECISION_NEEDED food_low/famine (economy): food, block, opts and, BUG-038, auto (fishery: its request is out or
-  -- queued; gather: plant gatherers added): what the kernel does itself, never an option for the player
+  -- queued; gather: plant gatherers added): what the kernel does itself, never an option for the player; BUG-042:
+  -- drink_low (drink = days; block: still, brew, unvalidated, plants, barrels, brewer; auto: brew, office, barrels,
+  -- gather) and manager_office (unvalidated orders older than orders.unval_days, with the reason)
   PERF_DEGRADED = {cls = 'A', by = 'perf'}, DECISION_NEEDED = {cls = 'A', by = 'any'},
   -- PROJECT_BLOCKED (and PROJECT_DONE) d.walled, Run 11: the seal doors quickfort refused, planned as walls ('x,y,z');
   -- BUG-037 d.park: the days a project blocked for good stood before it was parked (msg: its bp.cancel command)
@@ -146,6 +148,8 @@ C.EVENTS = {
   GLASS_BLOCKED = {cls = 'B', by = 'economy'},
   -- Run 11: pieces planned buildings wait for that nothing in the fort can make (no rock, no logs; once per set)
   MATERIAL_SHORT = {cls = 'B', by = 'economy'},
+  -- BUG-042: the manager's office lacked its chair/table (he validates nothing without them); what economy placed
+  MANAGER_OFFICE = {cls = 'B', by = 'economy'},
   -- BUG-032: military moved a squad station off a bridge footprint and its ring (bridge, chain, none, hold)
   STATION_MOVED = {cls = 'B', by = 'military'},
   -- C: log only
@@ -229,6 +233,7 @@ C.STATE_OWNERS = {
   ['stock.ore'] = 'economy', ['stock.bars'] = 'economy', ['stock.leather'] = 'economy', ['stock.metal'] = 'economy',
   ['stock.mood_miss'] = 'economy', ['stock.rock'] = 'economy', ['stock.rock_need'] = 'economy',
   ['stock.picks'] = 'economy', ['stock.pick_want'] = 'economy', ['stock.mshort'] = 'economy', ['stock.melt'] = 'economy',
+  ['stock.dwhy'] = 'economy',
   ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['labor.*'] = 'economy', ['orders.*'] = 'economy',
   ['threat.*'] = 'threat', ['bridges'] = 'gate', ['owners.*'] = 'arbiter',
   ['mil.*'] = 'military', ['trade.*'] = 'trade',
@@ -341,12 +346,14 @@ C.STATE_SPEC = obj({
   -- Run 10: ore/bars/leather stock, the metal route and the classes moods missed (plan propose/check supply goals)
   stock = obj(nil, {drink_d = NAT, food_d = NAT, meals = NAT, hosp_water = FLAG, ore = NAT, bars = NAT, leather = NAT,
                     metal = str(24), mood_miss = arr(str(12), 0, 8), rock = NAT, rock_need = NAT, picks = NAT,
-                    pick_want = NAT, mshort = FLAG, melt = NAT}),   -- Run 11: metal short, items marked for melting
+                    pick_want = NAT, mshort = FLAG, melt = NAT,     -- Run 11: metal short, items marked for melting
+                    dwhy = str(80)}),               -- BUG-042: why the stills do not brew below the drink target
   care = obj({stressed_pct = PCT, naked = NAT, ghosts = NAT, corpses_old = NAT, tombs_free = NAT, moods = NAT},
              {coffins = obj({want = NAT, short = NAT, stock = NAT, order = NAT, proj = str(40)}),
               died = obj(nil, nil, NAT)}),
   labor = obj({starving = NAT, idle = PCT}),
-  orders = obj({n = NAT, bad = NAT, stuck = NAT}),
+  -- BUG-042: unvalidated live orders, the days the oldest waits, why the manager validates nothing (past unval_days)
+  orders = obj({n = NAT, bad = NAT, stuck = NAT}, {unval = NAT, uval_d = NAT, mgr = str(80)}),
   threat = obj({vis = NAT, armed = FLAG}),
   proj = arr({t = 'tup', items = {str(nil, nil, 'id'), str(24), PCT, str(40)}}, 0, 8),
   -- Run 11 siege 8: seal first (the leading open seal or plug: pieces open, projects it pauses, other open seals,

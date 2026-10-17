@@ -5,6 +5,7 @@ consumed as complete ('\\n'-terminated) lines. Python writes via '.<name>.tmp' +
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import secrets
@@ -141,14 +142,32 @@ def read_follow_hb(save_dir: Path, now: float | None = None) -> tuple[dict | Non
     return (doc if isinstance(doc, dict) else None), max(0.0, (time.time() if now is None else now) - mt)
 
 
+def code_stamp() -> str:
+    """BUG-042: a digest of the dfpilot package's .py files (path, size, mtime): what a long-running `follow` imported
+    against what lies on disk now (Run 11: the BUG-038 placement fix was pulled while an older follow kept running)."""
+    root = Path(__file__).resolve().parent
+    h = hashlib.sha1()
+    for p in sorted(root.rglob("*.py")):
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        h.update(f"{p.relative_to(root).as_posix()}:{st.st_size}:{st.st_mtime_ns}\n".encode())
+    return h.hexdigest()[:12]
+
+
 def follow_off(save_dir: Path, now: float | None = None) -> str | None:
-    """'follow: OFF (last heartbeat 3h ago)' when follow is not beating for this save, else None."""
+    """'follow: OFF (last heartbeat 3h ago)' when follow is not beating for this save; BUG-042: 'follow: OLD CODE ...'
+    when the running follow imported other dfpilot code than lies on disk now (a pull it never saw); else None."""
     from .events import fmt_age
-    _, age = read_follow_hb(save_dir, now)
+    doc, age = read_follow_hb(save_dir, now)
     if age is None:
         return "follow: OFF (no heartbeat yet: start dfllm follow)"
     if age > FOLLOW_STALE_S:
         return f"follow: OFF (last heartbeat {fmt_age(age)} ago)"
+    code = (doc or {}).get("code")
+    if isinstance(code, str) and code != code_stamp():
+        return "follow: OLD CODE (dfpilot changed on disk since it started): restart dfllm follow"
     return None
 
 

@@ -77,7 +77,12 @@ local function world(opts)
     return true
   end)
   for _ = 1, 4 do F.item(W, 'BARREL', {}) end
-  F.item(W, 'DRINK', {stack_size = 4000})
+  ctl.drink = F.item(W, 'DRINK', {stack_size = opts.drink or 4000})
+  if opts.plants then                                       -- BUG-042: brewable plump helmets
+    F.mat(W, 419, 50, {token = 'PLANT:MUSHROOM_HELMET_PLUMP:STRUCTURAL', flags = {EDIBLE_RAW = true},
+                       products = {'DRINK_MAT'}})
+    ctl.plants = F.item(W, 'PLANT', {mat_type = 419, mat_index = 50, stack_size = opts.plants})
+  end
   ctl.food = F.item(W, 'FOOD', {stack_size = opts.food or 8, subtype = 1})
   F.item(W, 'WEAPON', {subtype = 1, _pos = {20, 20, 5}})
   W.subdefs[1] = {id = 'ITEM_WEAPON_PICK', skill_melee = df.job_skill.MINING, skill_ranged = -1}
@@ -192,6 +197,35 @@ T.test('BUG-038: a detail on "nobody does this" is set to only selected; too few
   T.eq(#d, 1)
   T.ok(d[1].d.q:find('gather: no plant gathering detail', 1, true), d[1].d.q)
   T.eq(d[1].d.auto, nil)
+end)
+
+-- BUG-042 (Run 11, y471: drink 93 -> 32 days, 14 of 32 adults idle beside 241 unclaimed GatherPlants jobs; the
+-- gatherers came only below 30 food days): below gather.drink_d drink days while the brewable plants cannot brew the
+-- deficit to the drink target, the plant gatherers join too (the same guards); they leave once food and drink are back
+T.test('BUG-042: drink low with too few brewable plants -> plant gatherers (why drink_low); none with plants enough; '
+       .. 'off when drink is back', function()
+  local W, ctl = world{food = 2000, drink = 20, plants = 0}
+  days(W, 2)
+  T.eq(members(ctl), {1, 6, 9, 10}, 'the same picks as for food (guards kept)')
+  local wd = W.find_events('WORK_DETAIL')
+  T.eq(wd[1].d.why, 'drink_low')
+  T.ok(wd[1].msg:find('drink_low: drink 31 days, 0 brewable plants < ', 1, true), wd[1].msg)
+  local gl = gather_logs(W)
+  T.eq(#gl, 1)
+  T.ok(gl[1]:find('^gather: drink 31 days, 0 brewable plants < %d+, 30 unclaimed GatherPlants jobs'), gl[1])
+  T.eq(W.K.persist.get('m.economy').gather.why, 'drink_low')
+  -- drink back (and food fine): ours leave
+  ctl.drink.stack_size = 4000
+  days(W, 2)
+  T.eq(members(ctl), {})
+  local off = 0
+  for _, e in ipairs(W.find_events('WORK_DETAIL')) do if e.d.on == 0 then off = off + 1; T.eq(e.d.why, 'drink_low over') end end
+  T.eq(off, 4)
+  -- enough brewable plants for the deficit: gathering is no help, nobody joins
+  local W2, ctl2 = world{food = 2000, drink = 20, plants = 500}
+  days(W2, 2)
+  T.eq(members(ctl2), {}, '500 plump helmets brew the deficit')
+  T.eq(#W2.find_events('WORK_DETAIL'), 0)
 end)
 
 T.done()

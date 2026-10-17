@@ -42,6 +42,11 @@ M.CFG = {
   plan_loads = 1, list_max = 64, done_keep = 16, fail_max = 3,
   orders_cells = 8,      -- cells per quickfort 'orders' call (S6: one 19-cell call took 60 ms; KPI: any call
                          -- <= 50 ms; about 8 ms fixed plus 1-2 ms per cell), one call per slice
+  -- BUG-042 (Run 11, y471: 110 ConstructDoor among 446 manager orders): seals, their retries and remakes ordered a
+  -- door again for every door cell whose planned door was gone, while the older rock orders still waited for stone. A
+  -- door or hatch cell gets no quickfort order while the open one-time orders of its job hold orders_cap items
+  -- (economy's T.jmake orders what a planned door still waits for, counting those orders)
+  orders_cap = 10,
   breach_r = 3, cavern_r = 10, undo_now = 2,
   -- live L6 (Laborkings: a light aquifer under most of the map, damp from z128 down): a human digs through a
   -- light aquifer - damp stone is designated again and shallow seepage (<= seep_max/7) is no stop. Deep
@@ -1506,6 +1511,22 @@ local function occupied_cell(K, c)
   return okt and type(tile) == 'table' and OCCUPIED[tile.c] == true
 end
 
+-- BUG-042: quickfort keys whose manager orders are capped (orders_cap) and the items the open one-time orders of their
+-- jobs still make ({ConstructDoor = n}); {} when the orders cannot be read
+M.CAP_KEYS = {d = 'ConstructDoor', H = 'ConstructHatchCover'}
+function M.open_piece_orders()
+  local r = {}
+  pcall(function()
+    local one = df.workquota_frequency_type.OneTime
+    for _, o in ipairs(df.global.world.manager_orders.all) do
+      local n = int(o.amount_left) or 0
+      local job = n > 0 and o.frequency == one and df.job_type[o.job_type]
+      if job == 'ConstructDoor' or job == 'ConstructHatchCover' then r[job] = (r[job] or 0) + n end
+    end
+  end)
+  return r
+end
+
 -- the id DF gives the next manager order (nil when it cannot be read)
 local function next_order_id()
   local ok, v = pcall(function() return df.global.world.manager_orders.manager_order_next_id end)
@@ -1530,9 +1551,13 @@ local function orders(K, P, st, R)
   local i0 = math.max(1, int(R.oc) or 1)
   local i1 = math.min(#cells, i0 + M.CFG.orders_cells - 1)
   local data, n = {}, 0
+  local open, capped = M.open_piece_orders(), {}
   for i = i0, i1 do
     local c = cells[i]
-    if not occupied_cell(K, c) then
+    local job = M.CAP_KEYS[tostring(c[4]):match('^[^{(:/]*')]
+    if job and (open[job] or 0) >= M.CFG.orders_cap then capped[job] = (capped[job] or 0) + 1
+    elseif not occupied_cell(K, c) then
+      if job then open[job] = (open[job] or 0) + 1 end
       local gz = data[c[3]] or {}
       data[c[3]] = gz
       local row = gz[c[2]] or {}
@@ -1540,6 +1565,10 @@ local function orders(K, P, st, R)
       row[c[1]] = c[4]
       n = n + 1
     end
+  end
+  for job, k in pairs(capped) do
+    K.log('info', '%s %s: %d %s cells get no manager order: %d open %s orders (cap %d)', P.id, st.label, k,
+          job == 'ConstructDoor' and 'door' or 'hatch', open[job] or 0, job, M.CFG.orders_cap)
   end
   local ok, res = true, {}
   local n0 = SEALS[P.tpl] and n > 0 and next_order_id() or nil
