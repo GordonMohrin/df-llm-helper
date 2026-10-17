@@ -165,9 +165,12 @@ T.test('a done explore and a cancelled one: their shafts still stand; a lake bes
   T.ok(r.ok, r.msg)
   T.eq(H.proj(W, 'e3'), nil)
   T.eq(W.K.persist.get('m.runner').xs.e3.fin, 'cancelled')
+  local n0 = #checks(W)
   H.runs(W, 3)
   T.eq(#W.find_events('CAVERN_PLUG'), 0, 'dry shafts: nothing')
-  T.ok(checks(W)[#checks(W)]:find('e3 80,41 z100-95 cancelled: no cavern', 1, true), checks(W)[#checks(W)])
+  local seen3 = false                             -- (BUG-033: each shaft daily; e3 keeps its own day phase)
+  for i = n0 + 1, #checks(W) do seen3 = seen3 or checks(W)[i]:find('e3 80,41 z100-95 cancelled: no cavern', 1, true) end
+  T.ok(seen3, table.concat(checks(W), ' || '))
   pool(W, 30, 30, 50, 40, 91, 92)                 -- north of e1's bottom (z92)
   pool(W, 81, 30, 100, 52, 94, 95)                -- east of e3's bottom (z95)
   H.runs(W, 3)

@@ -7,6 +7,8 @@
 -- callback (repeat-util.lua: recordRepeatRuntime around the whole kernel frame), i.e. the same time as
 -- the row's ms_s measured again by DFHack: only unpaused frames (PerfCounters::incCounter) and on the
 -- coarse getTickCount clock. It is a cross-check of the total, never a module of its own.
+-- BUG-033: `caller>callee` entries (e.g. runner>snapshot) are the part of the caller's entry spent in K.calls of
+-- another module; no owners of their own either.
 -- Row tps = ticks per *unpaused* second (pauses are not slowness; 0 when < MIN_UNPAUSED_MS ran).
 -- Rows more than MAX_PAUSED_PCT paused, or whose target fps changed (inbox tempo.lower), are not
 -- used for the DEGRADED rule.
@@ -25,7 +27,7 @@ M.HEADER = 'wall,tick,mode,tps,pop,units,items,ms_s,gap_max_ms,gaps3,mods'
 
 local st = {}
 
-local function new_acc() return {ms = 0, frames = 0, gap_max = 0, gaps3 = 0, unpaused_ms = 0, mods = {}} end
+local function new_acc() return {ms = 0, frames = 0, gap_max = 0, gaps3 = 0, unpaused_ms = 0, mods = {}, via = {}} end
 
 -- arbiter's desired timestream fps (WP1-internal K.call); 'na' without an arbiter or with D-11 off
 local function target(K)
@@ -64,6 +66,12 @@ local function mods_field(acc, extra)
   for _, n in ipairs(names) do parts[#parts + 1] = string.format('%s=%d', n, ri(acc.mods[n])) end
   if ri(acc.ms - sum) > 0 then parts[#parts + 1] = string.format('kern=%d', ri(acc.ms - sum)) end
   if extra then parts[#parts + 1] = string.format('repeat=%d', extra) end
+  -- BUG-033: 'caller>callee=ms', the time the caller spent in K.calls of another module (snapshot queries, ...);
+  -- already inside the caller's own entry, so not an owner and not added to the sum
+  local edges = {}
+  for n, ms in pairs(acc.via or {}) do if ri(ms) > 0 then edges[#edges + 1] = n end end
+  table.sort(edges)
+  for _, n in ipairs(edges) do parts[#parts + 1] = string.format('%s=%d', n, ri(acc.via[n])) end
   return table.concat(parts, ';')
 end
 
@@ -143,6 +151,7 @@ function M.step(K)
     acc.unpaused_ms = acc.unpaused_ms + (take.unpaused_ms or 0)
     if take.gap_max > acc.gap_max then acc.gap_max = take.gap_max end
     for n, ms in pairs(take.mods) do acc.mods[n] = (acc.mods[n] or 0) + ms end
+    for n, ms in pairs(take.via or {}) do acc.via[n] = (acc.via[n] or 0) + ms end
     if take.gap_max >= M.FREEZE_MS and (not st.freeze_tick or now.tick - st.freeze_tick >= 1200) then
       st.freeze_tick = now.tick
       K.emit('PERF_DEGRADED', 'A', string.format('frame freeze %d ms', take.gap_max), {why = 'freeze'})

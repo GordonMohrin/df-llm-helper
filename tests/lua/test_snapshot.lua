@@ -259,9 +259,11 @@ T.test('refusals: bad purpose, bbox order, too big, full queue; default bbox fro
   T.eq(ok, false)
   T.ok(why:find('tiles'), why)
   S.CFG.max_tiles = saved
-  for _ = 1, S.CFG.queue + 1 do T.eq(select(2, K.call('snapshot', 'export', {bbox = {0, 0, Z, 1, 1, Z}})), true) end
-  local _, ok2, why2 = K.call('snapshot', 'export', {bbox = {0, 0, Z, 1, 1, Z}})
-  T.eq({ok2, why2}, {false, 'export queue full'})
+  for i = 1, S.CFG.queue + 1 do T.eq(select(2, K.call('snapshot', 'export', {bbox = {i, 0, Z, i, 0, Z}})), true) end
+  local _, ok2, why2 = K.call('snapshot', 'export', {bbox = {0, 3, Z, 0, 3, Z}})
+  T.eq(ok2, false)
+  T.ok(why2:find('^export queue full: running s%d+%-%d+ debug by kernel 0%% for 0 s; queued 4: s%d+%-%d+ debug by kernel'),
+       why2)
   local W2 = world()
   local _, okd, id = W2.K.call('snapshot', 'export', {purpose = 'sites'})
   T.eq(okd, true)

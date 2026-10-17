@@ -15,6 +15,7 @@ local MISSING = setmetatable({}, {__name = 'persist.missing'})
 function P.new(env)
   local cache, dirty = {}, {}
   local size, written = {}, {}     -- last encoded length and write time per key (big keys wait)
+  local noted = {}                 -- BUG-033: keys whose size was logged (once a boot, >= 64 KB)
   local store = {}
   local api = {}
 
@@ -86,6 +87,11 @@ function P.new(env)
             local enc = json.encode(v)
             dfhack.persistent.saveSiteDataString(dk, enc)
             size[key] = #enc
+            if #enc >= 65536 and not noted[key] then     -- BUG-033: a record that big costs its owner each write
+              noted[key] = true
+              env.log('info', string.format('persist %s: %d KB encoded (its owner pays each write%s)', key, #enc // 1024,
+                                            env.big and string.format(', at most every %d s', env.big.ms // 1000) or ''))
+            end
           end
         end)
         written[key] = now
@@ -100,6 +106,13 @@ function P.new(env)
   end
 
   function store.dirty() return next(dirty) ~= nil end
+
+  -- BUG-033: the last encoded size (bytes) of every key written this boot (inspect persist)
+  function store.sizes()
+    local r = {}
+    for k, n in pairs(size) do r[k] = n end
+    return r
+  end
 
   -- cached keys that hold a value (for inspect)
   function store.keys()

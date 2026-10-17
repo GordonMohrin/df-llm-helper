@@ -187,6 +187,15 @@ local function request_audit(K, force)
     if force then st.audit_due, dirty = 1, true end
     return
   end
+  -- BUG-033 (Run 11: a monthly request every ~75 s real time while each export waited behind the last): the monthly
+  -- audit waits while the previous audit snapshot is still queued or being exported
+  if not force and st.audit_snap then
+    local okp, pend = K.call('snapshot', 'pending', st.audit_snap)
+    if okp and pend == true then
+      K.log('info', 'readiness: monthly audit waits for snapshot %s (still queued or exporting)', st.audit_snap)
+      return
+    end
+  end
   local man = K.manifest()
   local bbox = M.audit_bbox(man)
   if not bbox then return end                                 -- nothing built yet
@@ -202,7 +211,7 @@ local function request_audit(K, force)
     end
   end
   st.audit_req, st.audit_due, dirty = now, 0, true
-  local ok, ok2, id = K.call('snapshot', 'export', {purpose = 'audit', bbox = bbox})
+  local ok, ok2, id = K.call('snapshot', 'export', {purpose = 'audit', bbox = bbox, by = 'readiness'})
   if ok and ok2 then st.audit_snap = tostring(id)
   else K.log('warn', 'readiness: audit snapshot not exported: %s', tostring(ok and id or ok2)) end
 end

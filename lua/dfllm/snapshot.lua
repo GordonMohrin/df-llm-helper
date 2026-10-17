@@ -11,7 +11,17 @@
 -- paused) and is written to <save>/snap/<id>.json through a .tmp file, then SNAPSHOT_READY (C).
 -- BUG-026 (Run 10: an audit export of 58,608 tiles ran through a caravan visit that was then lost): an export waits
 -- while another module holds a busy kernel boost (K.busy(): trade with the trade screen open) and resumes where it
--- stopped.
+-- stopped; BUG-033: at most CFG.busy_max_ms per export.
+-- BUG-033 (Run 11, site98: `export queue full` for months, `bp sites --fresh` never got its file, audit_old 4.5 years):
+-- the other modules' tile/water queries were charged to this module's pacing debt, so its export slices waited for
+-- good (kern now books a K.call to the caller). The queue itself: every request names who asked (`by`); an inbox
+-- request (dfllm audit, bp sites --fresh, follow; a CLI waits for its file) goes ahead of the kernel's own ones (a
+-- running kernel export is put back behind it), may push the newest kernel request out of a full queue and runs
+-- boosted (sched.BOOST.shares.snapshot); a request for the same purpose whose box equals or contains (or lies in) a
+-- waiting one joins it (one scan, one file and one SNAPSHOT_READY per request id); `any` (economy's sand) is
+-- satisfied by any export already queued or running; a waiting request older than CFG.max_age_ms, a running export
+-- without a slice for CFG.stall_ms and one whose slice failed CFG.fail_max times are dropped (kern.log warn); a
+-- refusal names the running export, who asked, its progress and why it waits, and the queued ones. state `snap`.
 local json = require('dfllm.util.json')
 local fio = require('dfllm.io')
 
@@ -21,6 +31,11 @@ M.CFG = {
   slice = 1000,                   -- tiles per frame (DESIGN §4: <= 2,000)
   max_tiles = 250000,             -- refuse bigger boxes (100 x 100 x 25)
   queue = 4,                      -- exports waiting behind the running one
+  -- BUG-033: a waiting request is dropped after this long (an inbox one: its CLI gave up long before; a kernel one:
+  -- its module asks again), a running export after stall_ms without a slice or fail_max failed slices; an export
+  -- waits for another module's busy boost at most busy_max_ms; slices of an inbox export run boosted
+  max_age_ms = {user = 900000, bg = 1800000}, stall_ms = 600000, fail_max = 2, busy_max_ms = 180000,
+  paced_ms = 2000,                -- state/refusal: an export without a slice for this long is 'paced'
   margin = {16, 16, 2},           -- default box: manifest geometry plus this
   sites = {w = 96, h = 96, below = 8, above = 3},   -- default box without a manifest
   marks_max = 500,
@@ -34,6 +49,7 @@ local PURPOSES = {audit = true, sites = true, debug = true}
 local ID_OK = '^[A-Za-z0-9_%-]+$'
 
 local job, queue, n_auto    -- running export, waiting exports, generated ids
+local stats, boosted       -- BUG-033: {done, drop} this boot; snapshot holds a kernel boost (inbox export)
 local tilemat, sand_cache, sand_known   -- Run 11: DFHack's tile-material module, sand per block layer, found floors
 local yielding             -- BUG-026: the busy module the running export waits for (logged once per wait)
 local tt_cache, occ, live_traps, live_jobs
@@ -506,11 +522,107 @@ local function new_id(K)
   return string.format('s%d-%d', K.now().tick, n_auto)
 end
 
--- public (§7): queue an export -> ok, id (sliced; SNAPSHOT_READY when the file is written)
+local function contains(a, b)            -- box a holds box b
+  return a[1] <= b[1] and a[2] <= b[2] and a[3] <= b[3] and a[4] >= b[4] and a[5] >= b[5] and a[6] >= b[6]
+end
+local function ntiles(b) return (b[4] - b[1] + 1) * (b[5] - b[2] + 1) * (b[6] - b[3] + 1) end
+local function mins(ms) return ms >= 60000 and string.format('%d min', ms // 60000) or string.format('%d s', ms // 1000) end
+
+-- the requests a job answers: its own id first, then the ones that joined it
+local function ids_of(j)
+  local r = {j.id}
+  for _, a in ipairs(j.alias or {}) do r[#r + 1] = a.id end
+  return r
+end
+
+-- the share of the box a running export has scanned (0-99)
+local function pct(j)
+  if not j.rows then return 0 end
+  local b = j.bbox
+  local rows = (b[6] - b[3] + 1) * (b[5] - b[2] + 1)
+  local done = (j.z - b[3]) * (b[5] - b[2] + 1) + (j.y - b[2])
+  return math.max(0, math.min(99, done * 100 // math.max(1, rows)))
+end
+
+-- why the running export waits now: '' (it ran a slice lately), 'busy <module>', 'paced' (no slice for paced_ms:
+-- the kernel holds the module back, it faults or it is backed off), 'queued' (not started)
+local function waits(j, now)
+  if j.busy_by then return 'busy ' .. j.busy_by end
+  local last = j.last_ms or j.t
+  if now - last >= M.CFG.paced_ms then return string.format('%s %s', j.rows and 'paced' or 'not started', mins(now - last)) end
+  return ''
+end
+
+local function short(j, now, running)
+  local s = string.format('%s %s by %s', j.id, j.purpose, j.by)
+  if running then
+    local w = waits(j, now)
+    s = s .. string.format(' %d%% for %s', pct(j), mins(now - j.t)) .. (w ~= '' and (' (' .. w .. ')') or '')
+  else s = s .. ' ' .. mins(now - j.t) end
+  return s
+end
+
+-- 'running s1-2 audit by readiness 40% for 9 min (paced 8 min); queued 4: aud1 audit by cli:cli 3 min, ...'
+local function describe(now)
+  local parts = {}
+  if job then parts[#parts + 1] = 'running ' .. short(job, now, true) end
+  if #queue > 0 then
+    local q = {}
+    for i, j in ipairs(queue) do if i <= 3 then q[#q + 1] = short(j, now, j.rows ~= nil) end end
+    parts[#parts + 1] = string.format('queued %d: %s%s', #queue, table.concat(q, ', '), #queue > 3 and ', ...' or '')
+  end
+  return table.concat(parts, '; ')
+end
+
+local function drop(K, j, why)
+  stats.drop = stats.drop + 1
+  K.log('warn', 'snapshot: dropped %s (%s, %d tiles, by %s, asked %s ago): %s', table.concat(ids_of(j), '+'),
+        j.purpose, j.tiles, j.by, mins(K.now().ms - j.t), why)
+end
+
+-- BUG-033: waiting requests past their age (a kernel export put back behind an inbox one: since its last slice), a
+-- running export that made no progress for stall_ms
+local function expire(K, now)
+  local keep = {}
+  for _, j in ipairs(queue) do
+    local max = j.user and M.CFG.max_age_ms.user or M.CFG.max_age_ms.bg
+    if now - (j.last_ms or j.t) >= max then drop(K, j, 'waited longer than ' .. mins(max))
+    else keep[#keep + 1] = j end
+  end
+  queue = keep
+  if job and job.rows and now - (job.last_ms or job.t) >= M.CFG.stall_ms then
+    drop(K, job, string.format('no slice for %s at %d%%', mins(now - (job.last_ms or job.t)), pct(job)))
+    job = nil
+  elseif job and not job.rows and now - job.t >= (job.user and M.CFG.max_age_ms.user or M.CFG.max_age_ms.bg) then
+    drop(K, job, 'not started within ' .. mins(now - job.t))
+    job = nil
+  end
+end
+
+-- an inbox request goes ahead of the kernel's own ones (stable within each class)
+local function enqueue(j)
+  local at = #queue + 1
+  if j.user then
+    at = 1
+    while queue[at] and queue[at].user do at = at + 1 end
+  end
+  table.insert(queue, at, j)
+  return at
+end
+
+-- public (§7): queue an export -> ok, id (sliced; SNAPSHOT_READY when the file is written), and a note (joined,
+-- position). opts = {id?, bbox?, purpose, by? (who asks: a module name, 'inbox:<by>'), user? (an inbox request),
+-- any? (BUG-033: any export queued or running will do; its id is returned)}
 function M.export(K, opts)
   opts = type(opts) == 'table' and opts or {}
   local purpose = opts.purpose or 'debug'
   if not PURPOSES[purpose] then return false, 'purpose must be audit, sites or debug' end
+  local now = K.now().ms
+  expire(K, now)
+  if opts.any and (job or #queue > 0) then
+    local j = job or queue[1]
+    return true, j.id, 'an export runs already: ' .. j.id
+  end
   local id = opts.id or new_id(K)
   if type(id) ~= 'string' or #id > 40 or not id:match(ID_OK) then return false, 'bad snapshot id' end
   local bbox
@@ -524,12 +636,44 @@ function M.export(K, opts)
     bbox = default_bbox(K)
   end
   if not bbox then return false, 'bbox outside the map' end
-  local n = (bbox[4] - bbox[1] + 1) * (bbox[5] - bbox[2] + 1) * (bbox[6] - bbox[3] + 1)
+  local n = ntiles(bbox)
   if n > M.CFG.max_tiles then return false, string.format('bbox has %d tiles > %d', n, M.CFG.max_tiles) end
-  if job and #queue >= M.CFG.queue then return false, 'export queue full' end
-  local j = {id = id, purpose = purpose, bbox = bbox, tiles = n}
-  if job then queue[#queue + 1] = j else job = j end
-  return true, id
+  local user, by = opts.user == true, tostring(opts.by or 'kernel'):sub(1, 24)
+  -- BUG-033: the same purpose, one box holding the other: one scan answers both (a waiting job only)
+  for _, q in ipairs(queue) do
+    if not q.rows and q.purpose == purpose and (contains(q.bbox, bbox) or contains(bbox, q.bbox)) then
+      local u = {math.min(q.bbox[1], bbox[1]), math.min(q.bbox[2], bbox[2]), math.min(q.bbox[3], bbox[3]),
+                 math.max(q.bbox[4], bbox[4]), math.max(q.bbox[5], bbox[5]), math.max(q.bbox[6], bbox[6])}
+      q.bbox, q.tiles = u, ntiles(u)
+      q.alias = q.alias or {}
+      q.alias[#q.alias + 1] = {id = id, by = by}
+      if user and not q.user then
+        q.user = true
+        for i, x in ipairs(queue) do if x == q then table.remove(queue, i); break end end
+        enqueue(q)
+      end
+      return true, id, string.format('joins %s (%s by %s, %d tiles)', q.id, q.purpose, q.by, q.tiles)
+    end
+  end
+  if #queue >= M.CFG.queue then
+    local victim
+    if user then for i = #queue, 1, -1 do if not queue[i].user and not queue[i].rows then victim = i; break end end end
+    if not victim then return false, 'export queue full: ' .. describe(now) end
+    local v = table.remove(queue, victim)
+    drop(K, v, string.format('the queue was full and %s (%s by %s) goes first', id, purpose, by))
+  end
+  local j = {id = id, purpose = purpose, bbox = bbox, tiles = n, by = by, user = user, t = now}
+  if not job and #queue == 0 then job = j; return true, id, 'next' end    -- it starts at the next step
+  local pos = enqueue(j)
+  local ahead = job and (' behind ' .. short(job, now, true)) or ''
+  return true, id, pos > 1 and string.format('in line %d%s', pos, ahead) or (job and ('next' .. ahead) or 'next')
+end
+
+-- public (BUG-033, readiness): is the snapshot `id` still queued or being exported?
+function M.pending(K, id)
+  for _, j in ipairs(job and {job} or {}) do for _, x in ipairs(ids_of(j)) do if x == id then return true end end end
+  for _, j in ipairs(queue) do for _, x in ipairs(ids_of(j)) do if x == id then return true end end end
+  return false
 end
 
 local function start(K, j)
@@ -621,7 +765,9 @@ local function scan_row(j, y, z)
   return table.concat(out)
 end
 
-local function encode(j)
+-- the file text of request `id` (the job's own or one that joined it): the head per id, the rows once (j.body)
+local function encode(j, id)
+  if j.body then return j.head(id) .. j.body end
   local parts = {}
   for z = j.bbox[3], j.bbox[6] do
     local rows = j.rows[z]
@@ -648,23 +794,36 @@ local function encode(j)
   local head = {v = 2, id = j.id, tick = j.tick, purpose = j.purpose, bbox = j.bbox,
                 bridges = json.object(j.bstate), traps = json.array(traps)}
   if next(marks) then head.marks = marks end
-  local h = json.encode(head)
-  return h:sub(1, -2) .. ',"rows":{' .. table.concat(parts, ',') .. '}}'
+  j.head = function(x)
+    head.id = x
+    return json.encode(head):sub(1, -2)
+  end
+  j.body = ',"rows":{' .. table.concat(parts, ',') .. '}}'
+  return j.head(id) .. j.body
 end
 
+-- one file and one SNAPSHOT_READY per request id (BUG-033: requests that joined the job get their own)
 local function finish(K, j)
   j.tick = K.now().tick
   remember_sand(j)
+  stats.done = stats.done + 1
   local dir = K.cfg.paths.save and (K.cfg.paths.save .. '/snap')
   if not dir then return end
-  local path, err = fio.write_new(dir, j.id .. '.json', encode(j))
-  if not path then
-    K.log('error', 'snapshot %s: %s', j.id, tostring(err))
-    return
+  for i, id in ipairs(ids_of(j)) do
+    local path, err = fio.write_new(dir, id .. '.json', encode(j, id))
+    if not path then
+      K.log('error', 'snapshot %s: %s', id, tostring(err))
+    else
+      local rel = 'snap/' .. fio.basename(path)
+      local who = i == 1 and j.by or j.alias[i - 1].by
+      K.emit('SNAPSHOT_READY', 'C', string.format('snapshot %s (%s, %d tiles, by %s)', id, j.purpose, j.tiles, who),
+             {id = id, path = rel, purpose = j.purpose})
+    end
   end
-  local rel = 'snap/' .. fio.basename(path)
-  K.emit('SNAPSHOT_READY', 'C', string.format('snapshot %s (%s, %d tiles)', j.id, j.purpose, j.tiles),
-         {id = j.id, path = rel, purpose = j.purpose})
+  local now = K.now().ms
+  K.log('info', 'snapshot: %s (%s, %d tiles, by %s) written %s after the request (%s scanning)',
+        table.concat(ids_of(j), '+'), j.purpose, j.tiles, j.by, mins(now - j.t), mins(now - (j.t0 or now)))
+  j.head, j.body = nil, nil
 end
 
 -- public (siege, intake waves, Gordon 2026-10-16): the built traps inside `boxes` ({{x0,y0,z0,x1,y1,z1}}; levers, track
@@ -694,26 +853,73 @@ end
 ---------------------------------------------------------------- module
 function M.init(K)
   job, queue, n_auto, tt_cache, live_traps, live_jobs, yielding = nil, {}, 0, {}, nil, nil, nil
+  stats, boosted = {done = 0, drop = 0}, false
   occ = occ_values()
   sand_cache, sand_known = {}, {tick = -1, tiles = {}}
   local ok, tm = pcall(require, 'tile-material')       -- DFHack library/lua/tile-material.lua
   tilemat = ok and type(tm) == 'table' and tm or nil
 end
 
-function M.step(K, budget, ctx)
-  if not job and #queue == 0 then return end
-  local by, why
-  if type(K.busy) == 'function' then by, why = K.busy() end
-  if by then
-    if yielding ~= by then
-      yielding = by
-      K.log('info', 'snapshot: export %s waits while %s is busy (%s)', tostring((job or queue[1]).id), by, tostring(why))
-    end
-    return
+-- BUG-033: the boost while an export someone waits for (an inbox request) runs; never busy
+local function sync_boost(K, j)
+  if type(K.boost) ~= 'function' then return end
+  if j and j.user then
+    K.boost('export ' .. j.id .. ' for ' .. j.by, false)
+    boosted = true
+  elseif boosted then
+    K.unboost()
+    boosted = false
   end
-  yielding = nil
+end
+
+function M.step(K, budget, ctx)
+  local now = K.now().ms
+  expire(K, now)
+  if not job and #queue == 0 then sync_boost(K, nil); return end
+  -- BUG-033: an inbox request goes ahead of a running kernel export, which keeps its rows and resumes after it
+  if job and not job.user and queue[1] and queue[1].user then
+    K.log('info', 'snapshot: %s (%s by %s) waits at %d%% for %s (%s by %s)', job.id, job.purpose, job.by, pct(job),
+          queue[1].id, queue[1].purpose, queue[1].by)
+    job.busy_by, job.busy_at = nil, nil
+    enqueue(job)
+    job = nil
+  end
   if not job then job = table.remove(queue, 1) end
   local j = job
+  sync_boost(K, j)
+  local by, why
+  if type(K.busy) == 'function' then by, why = K.busy() end
+  if by and by ~= M.name then
+    j.busy_ms = (j.busy_ms or 0) + (j.busy_at and math.max(0, now - j.busy_at) or 0)
+    j.busy_at = now
+    if j.busy_ms < M.CFG.busy_max_ms then
+      if yielding ~= by then
+        yielding = by
+        K.log('info', 'snapshot: export %s waits while %s is busy (%s)', tostring(j.id), by, tostring(why))
+      end
+      j.busy_by = by
+      return
+    end
+    if j.busy_by then
+      K.log('warn', 'snapshot: export %s goes on although %s is busy (%s): it waited %s', j.id, by, tostring(why),
+            mins(j.busy_ms))
+    end
+    j.busy_by = nil
+  else
+    j.busy_at, j.busy_by = nil, nil
+  end
+  yielding = nil
+  -- BUG-033: a slice that failed (a fault leaves inflight set) is counted; fail_max of them drop the export, so one
+  -- bad tile cannot hold the queue (and back the module off) for good
+  if j.inflight then
+    j.fails = (j.fails or 0) + 1
+    if j.fails >= M.CFG.fail_max then
+      drop(K, j, string.format('its slice failed %d times at z%s y%s', j.fails, tostring(j.z), tostring(j.y)))
+      job, j.inflight = nil, nil
+      return #queue > 0 and 'more' or nil
+    end
+  end
+  j.inflight = true
   if not j.rows then start(K, j) end
   local b, w, left = j.bbox, j.bbox[4] - j.bbox[1] + 1, M.CFG.slice
   while left > 0 and j.z <= b[6] do
@@ -724,19 +930,41 @@ function M.step(K, budget, ctx)
     j.y = j.y + 1
     if j.y > b[5] then j.y, j.z = b[2], j.z + 1 end
   end
+  j.inflight, j.last_ms = nil, now
   if j.z <= b[6] then return 'more' end
   finish(K, j)
   job = nil
   if #queue > 0 then return 'more' end
+  sync_boost(K, nil)
 end
 
 M.on.UNLOAD = function(K) job, queue = nil, {} end
 
+-- BUG-033: state `snap` (doctor, status): requests waiting (the running one included), the oldest one's age in s,
+-- exports written and requests dropped this boot; with an export running or waiting: its id, purpose, who asked, its
+-- progress and why it waits ('busy trade', 'paced 3 min', 'not started 2 min', '')
+function M.state(K)
+  local now = K.now().ms
+  local q, old = #queue + (job and 1 or 0), 0
+  for _, j in ipairs(queue) do old = math.max(old, now - j.t) end
+  if job then old = math.max(old, now - job.t) end
+  local d = {q = q, old_s = old // 1000, done = stats and stats.done or 0, drop = stats and stats.drop or 0}
+  local j = job or queue[1]
+  if j then
+    d.run, d.p, d.by, d.pct = j.id, j.purpose, j.by, pct(j)
+    d.wait = (job and waits(j, now) or ('not started ' .. mins(now - j.t))):sub(1, 24)
+  end
+  return {snap = d}
+end
+
 -- inbox snapshot {bbox?, purpose?}: snap id = command id (CONTRACTS §13)
+-- BUG-033: an inbox request (a CLI or follow waits for its file) goes first and runs boosted; a refusal names the queue
 M.verbs.snapshot = function(K, args, cmd)
-  local ok, id = M.export(K, {id = cmd and cmd.id, bbox = args.bbox, purpose = args.purpose or 'debug'})
-  if not ok then return false, id end
-  return true, 'queued snapshot ' .. id, {id = id}
+  local by = 'inbox:' .. tostring(cmd and cmd.by or '?')
+  local ok, id, note = M.export(K, {id = cmd and cmd.id, bbox = args.bbox, purpose = args.purpose or 'debug', by = by,
+                                    user = true})
+  if not ok then return false, id, {queue = #queue + (job and 1 or 0)} end
+  return true, 'queued snapshot ' .. id .. (note and (' (' .. note .. ')') or ''), {id = id}
 end
 
 return M

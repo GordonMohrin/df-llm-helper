@@ -24,7 +24,8 @@
 --     the share it runs on when a boost begins and when it ends, so the module neither starts the boost waiting for
 --     an old debt nor pays for the boosted window afterwards. A boost ends after BOOST.ttl_ms unless renewed. A boost
 --     marked busy (trade: the trade screen is open) also asks the heavy background work of the other modules to wait
---     (K.busy(): snapshot exports, seal's background jobs).
+--     (K.busy(): snapshot exports, seal's background jobs). BUG-033: snapshot may hold a (never busy) boost at
+--     BOOST.shares.snapshot while an export someone waits for runs (an inbox request).
 local C = require('dfllm.util.contract')
 local KN = C.KERN
 
@@ -37,8 +38,10 @@ S.BUDGET = {ms_s = 25, per_unit = 6, max = 40}
 S.PACE = {share = 2, burst_s = 1, pool_min = 4, g_min = 0.5, alert_mult = 4, busy_ms = 10000,
           shares = {seal = 4, economy = 3, runner = 4, snapshot = 6, trade = 3}}
 S.SCALED = {economy = true, care = true}
--- BUG-026: who may hold a boost, its pacing share (ms per real second) and how long it lasts without a renewal
-S.BOOST = {share = 20, ttl_ms = 30000, modules = {trade = true}}
+-- BUG-026: who may hold a boost, its pacing share (ms per real second) and how long it lasts without a renewal.
+-- BUG-033: snapshot holds one (never busy) while it exports for an inbox request (dfllm audit, bp sites --fresh,
+-- follow: a CLI waits for the file), at its own boost share
+S.BOOST = {share = 20, ttl_ms = 30000, modules = {trade = true, snapshot = true}, shares = {snapshot = 12}}
 S.REPORT_MS = 6 * 3600 * 1000                         -- KERNEL_SLOW per module at most this often
 S.PROMOTE_RUNS = 3
 S.FLIPS_MAX = 4                                       -- quiet time for a promotion: promote_ms * 2^flips
@@ -117,7 +120,7 @@ end
 
 -- the share e is paced at now: boosted, BOOST.share (at least its own share x mult) outside the pool
 function S.rate(e, pool, mult)
-  if e.boost then return math.max(S.BOOST.share, e.share * (mult or 1)) end
+  if e.boost then return math.max(S.BOOST.shares[e.name] or S.BOOST.share, e.share * (mult or 1)) end
   return e.share * (mult or 1) * (pool and pool.g or 1)
 end
 

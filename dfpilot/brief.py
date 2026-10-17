@@ -337,6 +337,7 @@ def line_kern(ctx: Ctx) -> str:
     out = []
     if k:
         out.append(f"kern {k['ms_s']}ms/s gap {k['gap_max_ms']}ms faults {k['faults']}"
+                   + (f" top {k['top']}" if k.get("top") else "")             # BUG-033: the top cost owner
                    + (f" slow:{','.join(k['slow'])}" if k["slow"] else "")
                    + (f" disabled:{','.join(k['disabled'])}" if k.get("disabled") else ""))
     if "ev" in s:
@@ -347,6 +348,13 @@ def line_kern(ctx: Ctx) -> str:
     if ctx.inbox:
         out.append(f"inbox {len(ctx.inbox)} pending (oldest {fmt_age(max(x[1] for x in ctx.inbox))})")
     return _join(out)
+
+
+def line_snap(ctx: Ctx) -> str:
+    """BUG-033: a starving snapshot export queue (the oldest request waits >= doctor.SNAP_STARVE_S), else ''."""
+    from .doctor import snap_queue
+    line, starving = snap_queue(ctx.s)
+    return f"{line} (dfllm audit / bp sites --fresh wait; dfllm doctor)" if line and starving else ""
 
 
 def _no_state(ctx: Ctx) -> str:
@@ -362,7 +370,7 @@ def status_text(save_dir: Path) -> str:
         lines.append(_no_state(ctx))
     else:
         lines += [line_unready(ctx), line_alarm(ctx), line_pop(ctx), line_supply(ctx), line_def(ctx), line_proj(ctx),
-                  line_kern(ctx)]
+                  line_kern(ctx), line_snap(ctx)]
     return fit([[x for x in lines if x]], STATUS_TOKENS)
 
 
@@ -478,7 +486,7 @@ def brief_text(save_dir: Path, budget: int = BRIEF_TOKENS) -> str:
         head.append(_no_state(ctx))
     else:
         head += [x for x in (line_unready(ctx), line_alarm(ctx), line_pop(ctx), line_supply(ctx), line_def(ctx),
-                             line_proj(ctx, 8), line_kern(ctx)) if x]
+                             line_proj(ctx, 8), line_kern(ctx), line_snap(ctx)) if x]
     sections = [head]
     for title, lines in (("## plan", sec_plan(ctx)), ("## decisions open (ask Gordon)", sec_decisions(ctx)),
                          ("## class A, newest first", sec_class_a(ctx)),
