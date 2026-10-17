@@ -1,5 +1,5 @@
 # BUG-034 Patients die of thirst in a dry hospital: HOSPITAL_DRY stood for seasons, the kernel never acted, the plans drafted `hospital` again
-Status: fixed (offline, live-untested): the kernel removes a dry hospital's zones once a patient is thirsty (HOSPITAL_REMOVED), `plan check` refuses and `plan propose` holds back a hospital without accepted water near it (a cistern first), the state's `water` key
+Status: fixed in 54b4d36 (offline, live-untested): the kernel removes a dry hospital's zones once a patient is thirsty (HOSPITAL_REMOVED), `plan check` refuses and `plan propose` holds back a hospital without accepted water near it (a cistern first), the state's `water` key
 Severity: critical (loses citizens: 5 bedridden patients died of thirst, DEATHS_PREVENTABLE)
 Found: 2026-10-17, Run 11 fort Kilrudrabed (site98), y439 spring d28, dfpilot main fcada16, from the game session's events
 and its hand repair
