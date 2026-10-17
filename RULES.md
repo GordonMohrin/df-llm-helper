@@ -196,7 +196,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 - R0 blockers (`ready.fail`; full table DESIGN §5.4): `audit`/`audit_old` no or stale audit → `dfllm audit`;
   `audit_fail`, `bypass` (a way in skips the trap hall), `refuge_sep` (refuge missing or on the attack path),
   `civ_sep` (no separate civilian/military stair), `caverns` (open, or a shaft not yet plugged: CAVERN_PLUG) → the
-  audit's own reasons (AUDIT `fails`, SIEGE_UNREADY `afails`); `no_kern`/`no_refuge` burrow missing; `refuge_dry` the refuge has no drink (stock < citizens, no wet well; Run 11) → a well/cistern or drink stockpile there; `no_outer`/
+  audit's own reasons (AUDIT `fails`, SIEGE_UNREADY `afails`); `no_kern`/`no_refuge` burrow missing; `refuge_dry` the refuge has no drink (stock < citizens, no wet well; Run 11) → a well/cistern or drink stockpile there; `hospital_out` a hospital zone outside Kern+/Tiefe+ (BUG-036) → a hospital inside Tiefe+ next to water; `no_outer`/
   `no_inner` no O1/B1, `bridge:B` not built, `levers:B` < 2 linked levers → fortcore pieces; `lost:B` a gate given up after building destroyers → the player's answer (DECISION_NEEDED `bridge_rebuild`). `status` says `UNREADY`
   while R0 fails (SIEGE_UNREADY monthly); `drill never (auto: <why>)` → fix `<why>` or `dfllm cmd drill`.
 - Audit `fails` name the fix (table DESIGN §5.4): `bypass: wall x,y,z floor -> X` / `refuge: on the attack path,

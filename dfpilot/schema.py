@@ -450,6 +450,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # refused removals, and the nearest accepted source (src, d tiles) if any
     "HOSPITAL_REMOVED": ("A", "water", _d("zones:ia", "locs:ia units:ia n:i thirst:i patients:i give:i failed:i near:i "
                                                       "d:i src:p")),
+    # BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds in the BREACH): in SIEGE/BREACH, once per fight,
+    # n of the patients lie outside the burrow the civ alert confines to (burrow; Kern+/Tiefe+ while it is silent):
+    # units, all patients, mode, hosp_out = hospital zones outside Kern+ and the refuge
+    "PATIENTS_OUT": ("B", "water", _d("n:i burrow:s", "patients:i units:ia mode:s hosp_out:i")),
     "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i nosrc:sa route:s")),
     # class A since Run 9 (an army walked in while these were digest-only): they wake at once
     "SIEGE_START": ("A", "siege", _d(opt="vis:i inv:i great:i why:s")),
@@ -483,7 +487,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "DEATHS_PREVENTABLE": ("A", "care", _CLUSTER),
     # FR-65: readiness R0 in PEACE: R1 blockers, the audit's own fails, ways in (seal), those without door or bridge;
     # Run 11: rdry = the refuge without drink and what to build (blocker refuge_dry)
-    "SIEGE_UNREADY": ("A", "readiness", _d(opt="fails:sa afails:sa routes:i open:i ents:sa traps:i age:i rdry:s")),
+    # BUG-036: hout = the hospital outside Kern+ and the refuge and what to do (blocker hospital_out)
+    "SIEGE_UNREADY": ("A", "readiness", _d(opt="fails:sa afails:sa routes:i open:i ents:sa traps:i age:i rdry:s "
+                                               "hout:s")),
     # BUG-015: an entrance door the lockdown forbade lost its forbidden flag before the next pass (refused)
     "LOCKDOWN_PARTIAL": ("A", "reflex", _d("doors:i", "refused:ia pos:p retry:f items:i units:i")),
     # BUG-023 / Run 10: tool detail members without their pick or axe while its jobs wait and free tools exist; Run 11:
@@ -781,7 +787,9 @@ STATE = Obj(
          # well, free buckets, the accepted sources (a well over water, a Water Source zone on water >= 4/7) nearest
          # to the hospital (else the citizens) first: plan propose/check allow a hospital only within `near` of one
          "water": Obj(req={"patients": NAT, "thirst_max": NAT, "hosp_ok": FLAG, "refuge_ok": FLAG,
-                           "buckets_free": NAT, "hosp": NAT, "src": Arr(Tup([NAT, NAT, NAT]), hi=8)})})
+                           "buckets_free": NAT, "hosp": NAT, "src": Arr(Tup([NAT, NAT, NAT]), hi=8)},
+                      # BUG-036: hospital zones with tiles outside Kern+ and the refuge (readiness R0 hospital_out)
+                      opt={"hosp_out": NAT})})
 
 HEARTBEAT = Obj(req={"v": Const(V), "wall": NAT, "frame": NAT, "tick": TICK, "paused": Bool(), "mode": MODE,
                      "seq": NAT})

@@ -180,6 +180,7 @@ Gameplay modules run on `cur_year_tick` deltas, which stay correct under timestr
   | `caverns` | a cavern tile is reachable from Z3/Z4 | 2-wall airlock (§10) |
   | `no_kern`, `no_refuge` | burrow Kern+ / Tiefe+ (manifest roles `kern`/`refuge`) missing | fortcore stages 1 / 3, or the burrows screen |
   | `refuge_dry` | Run 11 (siege 8: Tiefe+ had no drink): the refuge holds drink < citizens and no well, or its wells are dry (water state `refuge_ok` 0); seal's audit, `seal.refuge_drink` | a well or cistern in the refuge (`bp sites cistern`) or a drink stockpile in it; SIEGE_UNREADY `rdry` says which |
+  | `hospital_out` | BUG-036 (Run 11 siege 9: two cave dragons killed 7 patients in their hospital beds in the BREACH): a hospital zone with tiles outside Kern+ and the refuge (water state `hosp_out`); a lying patient cannot walk to the refuge, only a rescue moves him | a hospital inside Tiefe+ (or Kern+ behind the seal) next to accepted water (BUG-034: a cistern there first), then remove the old zones; SIEGE_UNREADY `hout` names the zone; in a fight PATIENTS_OUT (B) counts the patients outside the alert burrow |
   | `no_outer`, `no_inner` | no manifest bridge of role `outer` (O1) / `inner` (B1) | fortcore stage 3 / 2 |
   | `bridge:<B>` | gate cannot read manifest bridge `<B>` (not built yet, or destroyed) | build it (again) |
   | `levers:<B>` | fewer than 2 levers linked to `<B>` | build the levers; gate links built ones in PEACE |

@@ -192,6 +192,11 @@ local function burrow(K, role, default)
   return ok and b or nil, name
 end
 
+local function burrow_named(name)
+  local ok, b = pcall(function() return dfhack.burrows.findByName(name) end)
+  return ok and b or nil
+end
+
 local function on_burrow(b, x, y, z)
   if not b or not x then return false end
   local ok, yes = pcall(function() return dfhack.burrows.isAssignedTile(b, {x = x, y = y, z = z}) end)
@@ -843,6 +848,69 @@ local function src_list(r)
   return out
 end
 
+---------------------------------------------------------------- BUG-036: the hospital outside the core
+-- Run 11 siege 9 (y445): two cave dragons struck down 8 citizens in the BREACH, 7 of them patients in hospital beds; a
+-- lying patient cannot walk to the refuge (only a rescue or hauling moves him), so the hospital (its zone and beds) has to
+-- lie in Tiefe+, or at least in Kern+ behind the seal, AND next to accepted water (BUG-034). Per hospital zone: the tiles
+-- of its rect (<= HOSP_TILES, evenly sampled) on neither burrow (state water.hosp_out, readiness R0 hospital_out); in a fight
+-- (SIEGE/BREACH) once the patients outside the burrow the civ alert confines to (PATIENTS_OUT, B; Kern+ and the refuge
+-- while it is silent). Reads burrow tiles and the census patients only; moves nobody.
+M.HOSP_TILES = 100         -- tiles looked at per hospital zone (an even sample of a bigger one)
+local FIGHT = {SIEGE = true, BREACH = true}
+
+local function hospital_out(r, kern, refuge, kname, rname)
+  local zones = {}
+  if kern or refuge then
+    for _, h in ipairs(r.hosp) do
+      local area, step = (h.x2 - h.x1 + 1) * (h.y2 - h.y1 + 1), 1
+      while area > M.HOSP_TILES * step * step do step = step + 1 end     -- a big zone: an even sample of its tiles
+      local n, out = 0, 0
+      for y = h.y1, h.y2, step do
+        for x = h.x1, h.x2, step do
+          n = n + 1
+          if not (on_burrow(kern, x, y, h.z) or on_burrow(refuge, x, y, h.z)) then out = out + 1 end
+        end
+      end
+      if out > 0 then
+        zones[#zones + 1] = {id = h.id, loc = h.loc, x = (h.x1 + h.x2) // 2, y = (h.y1 + h.y2) // 2, z = h.z,
+                             tiles = out, of = n}
+      end
+    end
+  end
+  return {n = #zones, total = #r.hosp, zones = zones, kern = kname, refuge = rname}
+end
+
+local function patients_out(K, r, kern, refuge, kname, rname, ho)
+  local mode = K.mode()
+  if not FIGHT[mode] then st.pout = nil; return end
+  if st.pout or #r.patients == 0 then return end
+  local okn, names = K.call('siege', 'alert_names')
+  names = okn and type(names) == 'table' and names or {}
+  local b1 = type(names[1]) == 'string' and burrow_named(names[1]) or nil
+  local bs, label = {kern, refuge}, kname .. '/' .. rname
+  if b1 then bs, label = {b1}, names[1] end
+  local out, ids, at = {}, {}, {}
+  for _, pt in ipairs(r.patients) do
+    local inb = false
+    for _, b in ipairs(bs) do if on_burrow(b, pt.x, pt.y, pt.z) then inb = true; break end end
+    if not inb then
+      out[#out + 1] = pt
+      if #ids < 20 then ids[#ids + 1] = pt.id end
+      if #at < 3 and pt.x then at[#at + 1] = string.format('%d at %d,%d,%d', pt.id, pt.x, pt.y, pt.z) end
+    end
+  end
+  if #out == 0 then return end
+  st.pout = K.now().tick
+  local tail = ho.n > 0 and string.format('; the hospital lies outside %s/%s: move it into %s next to accepted water',
+                                          kname, rname, rname)
+               or '; plan the hospital inside the refuge'
+  local msg = string.format('%s: %d of %d patients lie outside the alert burrow %s (%s): they cannot walk there, only a '
+                            .. 'rescue moves them%s', mode, #out, #r.patients, label, table.concat(at, ', '), tail)
+  K.emit('PATIENTS_OUT', 'B', trunc(msg, 200), {n = #out, patients = #r.patients, burrow = trunc(label, 60), units = ids,
+                                                mode = mode, hosp_out = ho.n})
+  K.log('warn', 'water: %s', msg)
+end
+
 local function finish(K, c, r, p)
   local now = K.now().tick
   local T = K.now()
@@ -854,6 +922,10 @@ local function finish(K, c, r, p)
     if b and (not best_h or b.d < best_h.d) then best_h = b end
   end
   local refuge, rname = burrow(K, 'refuge', 'Tiefe+')
+  local kern, kname = burrow(K, 'kern', 'Kern+')
+  local ho = hospital_out(r, kern, refuge, kname, rname)    -- BUG-036
+  st.hout = ho
+  patients_out(K, r, kern, refuge, kname, rname, ho)
   local refuge_ok, rwells, rwet = false, 0, 0          -- BUG-035: the wells in the refuge and the wet ones of them
   for _, s in ipairs(r.sources) do
     if s.kind == 'well' and on_burrow(refuge, s.x, s.y, s.z) then
@@ -1024,16 +1096,18 @@ local function finish(K, c, r, p)
                buckets_free = r.free + fixed, buckets_full = r.full, buckets_want = want, unforbid = fixed,
                ordered = ordered, missing = math.max(0, missing), carers = #r.carers, gate = gate and 1 or 0,
                hosp = nh, give = r.give, removed = removed and #removed.zones or 0, src = src_list(r),
-               rwells = rwells, rwet = rwet}
+               rwells = rwells, rwet = rwet, hosp_out = ho.n}
   local prev = st.out or {}
   if prev.hosp_ok ~= out.hosp_ok or prev.refuge_ok ~= out.refuge_ok or prev.patients ~= out.patients
-     or prev.hosp ~= out.hosp or prev.rwells ~= out.rwells or fixed > 0 or ordered > 0 then
+     or prev.hosp ~= out.hosp or prev.rwells ~= out.rwells or prev.hosp_out ~= out.hosp_out or fixed > 0
+     or ordered > 0 then
     -- BUG-035 (Run 11: 'refuge dry, 1 wet sources (13 wells)'): where the wells are relative to the refuge
     local rw = string.format('%d %s, %d in %s', wells, wells == 1 and 'well' or 'wells', rwells, rname)
     if rwells > 0 then rw = rw .. string.format(', %d of them wet', rwet) end
     K.log('info', 'water: %d patients (max thirst %d), hospital %s, refuge %s (%s), %d wet sources, buckets %d free of %d '
           .. '(want %d, unforbid %d, ordered %d), %d GiveWater', out.patients, tmax,
-          nh == 0 and 'none' or (hosp_ok and 'ok' or 'dry'), refuge_ok and 'ok' or 'dry', rw, wet, out.buckets_free,
+          nh == 0 and 'none' or (hosp_ok and 'ok' or 'dry') .. (ho.n > 0 and string.format(' (%d of %d zones outside %s/%s)',
+          ho.n, ho.total, kname, rname) or ''), refuge_ok and 'ok' or 'dry', rw, wet, out.buckets_free,
           r.buckets, want, fixed, ordered, r.give)
   end
   st.out = out
@@ -1138,7 +1212,14 @@ function M.state(K)
     return {}
   end
   return {water = {patients = o.patients, thirst_max = o.thirst_max, hosp_ok = o.hosp_ok, refuge_ok = o.refuge_ok,
-                   buckets_free = o.buckets_free, hosp = o.hosp, src = o.src or json.array{}}}
+                   buckets_free = o.buckets_free, hosp = o.hosp, src = o.src or json.array{}, hosp_out = o.hosp_out}}
+end
+
+-- public (BUG-036, readiness): the hospital zones outside Kern+ and the refuge by the last run: {n, total, zones = {{id,
+-- loc, x, y, z (the zone's centre), tiles (outside), of (tiles looked at, <= HOSP_TILES)}}, kern, refuge}; n 0 before the
+-- first run
+function M.hospital_out(K)
+  return st.hout or {n = 0, total = 0, zones = {}}
 end
 
 return M

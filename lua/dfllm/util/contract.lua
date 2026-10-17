@@ -63,6 +63,8 @@ C.EVENTS = {
   GHOSTS = {cls = 'A', by = 'care'}, HOSPITAL_DRY = {cls = 'A', by = 'water'}, MOOD_RISK = {cls = 'A', by = 'care'},
   -- BUG-034: the zones of a hospital without accepted water were removed while a patient was over water.patient_thirst
   HOSPITAL_REMOVED = {cls = 'A', by = 'water'},
+  -- BUG-036: in a fight, patients lie outside the burrow the civ alert confines to (once per fight; they cannot walk)
+  PATIENTS_OUT = {cls = 'B', by = 'water'},
   -- A since Run 9 (an army walked in while these were digest-only): wake at once
   SIEGE_START = {cls = 'A', by = 'siege'}, INVASION = {cls = 'A', by = 'threat'},
   -- A, reflex (FR-36/49/51-53): arrival announcements and the interrupt channel (C.INTERRUPTS)
@@ -374,7 +376,8 @@ C.STATE_SPEC = obj({
   -- water (BUG-034): patients, their max thirst, the hospital served (flag) and its zones, the refuge's well, free
   -- buckets, the accepted sources (a well over water, a Water Source zone on water >= 4/7) nearest first
   water = obj({patients = NAT, thirst_max = NAT, hosp_ok = FLAG, refuge_ok = FLAG, buckets_free = NAT, hosp = NAT,
-               src = arr({t = 'tup', items = {NAT, NAT, NAT}}, 0, 8)}),
+               src = arr({t = 'tup', items = {NAT, NAT, NAT}}, 0, 8)},
+              {hosp_out = NAT}),           -- BUG-036: hospital zones with tiles outside Kern+ and the refuge
 })
 
 -- string formats (§1.1); explicit byte ranges, so LC_CTYPE cannot change them

@@ -254,13 +254,32 @@ def hospital_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[li
     cistern and holds the hospital back. An older kernel (no state.water) is not checked, as the supply goals; a
     source without a site to measure from (no sites snapshot) is a warning."""
     adds = [si for si, _, b in new_builds(doc, prev) if b["tpl"] == HOSPITAL]
+    out = hospital_outside(s, adds)                        # BUG-036: the hospital belongs inside Tiefe+/Kern+
     hw = hospital_water(s, fort) if adds else None
     if hw is None:
-        return [], []
+        return [], out
     where = f"hospital (seasons[{adds[0]}])"
     if hw["ok"]:
-        return [], ([f"{where}: {hw['why']}"] if hw["d"] is None else [])
-    return [f"{where}: {hw['why']}: its patients would die of thirst (BUG-034); {_water_fix(doc, fort)}"], []
+        return [], ([f"{where}: {hw['why']}"] if hw["d"] is None else []) + out
+    return [f"{where}: {hw['why']}: its patients would die of thirst (BUG-034); {_water_fix(doc, fort)}"], out
+
+
+def hospital_outside(s: dict | None, adds: list[int]) -> list[str]:
+    """BUG-036 (Run 11 siege 9: two cave dragons killed 7 patients in their hospital beds outside the refuge): while
+    the kernel counts hospital zones outside Kern+ and the refuge (state water.hosp_out, readiness R0 hospital_out), a
+    warning with the fix; a new hospital in the plan is reminded where its site must lie. Lying patients cannot walk to
+    the refuge; only a rescue moves them. The plan cannot see burrow tiles: the kernel's count decides."""
+    w = (s or {}).get("water")
+    n = w.get("hosp_out") if isinstance(w, dict) else None
+    if not isinstance(n, int) or isinstance(n, bool) or n <= 0:
+        return []
+    out = [f"hospital: {n} of {w.get('hosp', n)} zones lie outside Kern+/Tiefe+ (readiness R0 hospital_out, BUG-036): "
+           "its lying patients cannot walk to the refuge in a breach; plan a hospital inside Tiefe+ (or Kern+ behind the "
+           "seal) next to accepted water (a cistern there first, BUG-034), then remove the old zones"]
+    if adds:
+        out.append(f"hospital (seasons[{adds[0]}]): its site must lie inside Tiefe+ (or Kern+ behind the seal): the "
+                   f"fort's hospital lies outside them now (hosp_out {n}, BUG-036)")
+    return out
 
 
 def stone_digs(save_dir: Path) -> bool:

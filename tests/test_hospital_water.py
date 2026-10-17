@@ -218,3 +218,52 @@ def test_status_shows_the_kernels_hospital_water(save, capsys):
     assert brief._hospital({"water": {"patients": 0, "thirst_max": 0, "hosp_ok": 0, "refuge_ok": 0,
                                       "buckets_free": 0, "hosp": 0, "src": [[1, 2, 3]]}}, {}) == " hospital none src 1"
     assert brief._hospital({}, {"hosp_water": 0}) == " water NO"
+
+
+# ---------------------------------------------------------------- BUG-036: the hospital outside the core
+def test_bug036_contracts_hosp_out_state_patients_out_event_and_unready_hout(base):
+    """Run 11 siege 9 (y445): two cave dragons struck down 8 citizens in the BREACH, 7 of them patients in hospital
+    beds outside the refuge. The kernel's water state counts the hospital zones outside Kern+/Tiefe+ (hosp_out),
+    PATIENTS_OUT (B) says in a fight how many patients lie outside the alert burrow, SIEGE_UNREADY carries hout."""
+    _, state = base
+    s = watered(state, src=[(60, 12, 5)])
+    s["water"]["hosp_out"] = 2
+    assert schema.validate("state", s) == []
+    assert any("hosp_out" in e for e in schema.validate("state", dict(s, water=dict(s["water"], hosp_out=-1))))
+    e = {"n": 9100, "tick": 5, "type": "PATIENTS_OUT", "cls": "B",
+         "msg": "BREACH: 7 of 7 patients lie outside the alert burrow Tiefe+ (28392 at 115,77,144): they cannot walk "
+                "there, only a rescue moves them",
+         "d": {"n": 7, "patients": 7, "burrow": "Tiefe+", "units": [1, 2, 3, 4, 5, 6, 7], "mode": "BREACH",
+               "hosp_out": 1}}
+    assert schema.validate("event", e) == []
+    assert schema.EVENTS["PATIENTS_OUT"][:2] == ("B", "water")
+    assert any("burrow: missing" in x for x in schema.validate("event", dict(e, d={"n": 1})))
+    u = {"fails": ["hospital_out"], "hout": "the hospital lies outside Kern+/Tiefe+ (1 of 2 zones; zone 34 at "
+                                            "115,77,144): its patients cannot walk to the refuge; move it into Tiefe+ "
+                                            "next to accepted water"}
+    assert schema.validate_event_d("SIEGE_UNREADY", u) == []
+
+
+def test_bug036_check_warns_while_the_hospital_lies_outside_kern_and_tiefe(base):
+    """plan check: the kernel counts hospital zones outside Kern+/Tiefe+ (state water.hosp_out): a warning names the
+    fix (a hospital inside Tiefe+ next to accepted water, BUG-034 first); a new hospital in the plan is named too. No
+    warning without the key (an older kernel) or with 0."""
+    doc, state = base
+    s = watered(state, src=[(40, 20, 6)])
+    s["water"]["hosp_out"] = 2
+    fort = {"hosp": {"cistern": False, "site": [20, 20, 5]}}
+    _, warn = check(doc, s, fort=fort)
+    hw = [w for w in warn if w.startswith("hospital")]
+    assert hw == ["hospital: 2 of 5 zones lie outside Kern+/Tiefe+ (readiness R0 hospital_out, BUG-036): its lying "
+                  "patients cannot walk to the refuge in a breach; plan a hospital inside Tiefe+ (or Kern+ behind the "
+                  "seal) next to accepted water (a cistern there first, BUG-034), then remove the old zones"], hw
+    d = with_hospital(doc)
+    errs, warn = check(d, s, fort=fort)
+    assert hosp_errs(errs) == []
+    hw = [w for w in warn if w.startswith("hospital (seasons[2])")]
+    assert hw == ["hospital (seasons[2]): its site must lie inside Tiefe+ (or Kern+ behind the seal): the fort's "
+                  "hospital lies outside them now (hosp_out 2, BUG-036)"], hw
+    s["water"]["hosp_out"] = 0
+    assert not [w for w in check(d, s, fort=fort)[1] if w.startswith("hospital")]
+    del s["water"]["hosp_out"]
+    assert not [w for w in check(d, s, fort=fort)[1] if w.startswith("hospital")]

@@ -969,6 +969,20 @@ def test_siege_unready_refuge_dry_names_the_drink():
     assert est_tokens(line) <= wake.WAKE_TOKENS
 
 
+def test_siege_unready_hospital_out_names_the_move():
+    """BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds outside the refuge): the wake line of a
+    SIEGE_UNREADY with hospital_out says to plan the hospital inside Tiefe+ next to water."""
+    e = A(9300, "SIEGE_UNREADY", "siege unready (R0: hospital_out); the hospital lies outside Kern+/Tiefe+ (1 of 2 "
+          "zones; zone 34 at 115,77,144): its patients cannot walk to the refuge; move it into Tiefe+ next to accepted "
+          "water", {"fails": ["hospital_out"], "hout": "the hospital lies outside Kern+/Tiefe+ (1 of 2 zones; zone 34 at "
+                    "115,77,144): its patients cannot walk to the refuge; move it into Tiefe+ next to accepted water"})
+    assert schema.validate_event_d("SIEGE_UNREADY", e["d"]) == []
+    line = wake.wake_line({"SIEGE_UNREADY": {"c": 1, "n0": 9300, "e": e}}, None)
+    assert "next: the hospital lies outside the core: plan it inside Tiefe+ next to accepted water (bp sites " \
+           "hospital; a cistern there first), then remove the old zones" in line, line
+    assert est_tokens(line) <= wake.WAKE_TOKENS
+
+
 def _audit_kern(save, manifest=MANIFEST, audit_reply=(True, "audit stored, readiness R1", {"lvl": 1})):
     """A fake kern for `dfllm audit`: snapshot -> writes snap/<id>.json (the fixture audit snapshot), inspect ->
     the manifest, audit -> audit_reply."""

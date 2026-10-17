@@ -459,6 +459,16 @@ def test_status_r0_refuge_dry_names_the_drink(save):
         "next: the refuge has no drink: a well/cistern there or a drink stockpile in it (plan)" in line, line
 
 
+def test_status_r0_hospital_out_names_the_move(save):
+    """BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds outside the refuge): the R0 blocker
+    hospital_out names its fix in the UNREADY line."""
+    _r0_state(save, open=0, ents=None, fail=["hospital_out"], audit={"ok": 1, "age": 9000, "min_traps": 35})
+    line = brief.status_text(save).splitlines()[1]
+    assert line.startswith("SIEGE UNREADY (R0): hospital_out") and \
+        ("next: the hospital lies outside Kern+/Tiefe+: plan it inside Tiefe+ next to accepted water (a cistern there "
+         "first), then remove the old zones") in line, line
+
+
 def test_status_r0_names_the_audit_route_and_the_seal(save):
     """Run 10: `bypass` stood in the R0 line for months without saying where or what to build. The state's
     ready.route (readiness: the last audit's first route finding) and the seal that walls it stand in line 2."""

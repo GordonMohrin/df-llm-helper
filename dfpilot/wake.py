@@ -189,6 +189,8 @@ def next_hint(etype: str, e: dict) -> str:
         return SEAL_HINT
     if etype == "SIEGE_UNREADY" and "refuge_dry" in (d.get("fails") or []):
         return REFUGE_DRY_HINT
+    if etype == "SIEGE_UNREADY" and "hospital_out" in (d.get("fails") or []):
+        return HOSPITAL_OUT_HINT
     if etype == "DECISION_NEEDED" and d.get("id") == "bridge_rebuild":
         return rebuild_hint(d)
     return NEXT.get(etype, "dfllm brief")
@@ -205,6 +207,9 @@ def rebuild_hint(d: dict) -> str:
 _WALL = re.compile(r"\bwall -?\d+,-?\d+,-?\d+ (floor|ramp)\b")
 # Run 11 (siege 8: Tiefe+ had no drink): readiness R0 refuge_dry; a dry refuge holds the citizens only in a breach
 REFUGE_DRY_HINT = "the refuge has no drink: next plan a well/cistern there (bp sites cistern) or a drink stockpile"
+# BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds outside the refuge): readiness R0 hospital_out
+HOSPITAL_OUT_HINT = ("the hospital lies outside the core: plan it inside Tiefe+ next to accepted water (bp sites hospital;"
+                     " a cistern there first), then remove the old zones")
 
 
 def wake_line(burst: dict[str, dict], state: dict | None, held_s: float = 0) -> str:

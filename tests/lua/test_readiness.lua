@@ -525,6 +525,42 @@ T.test('Run 11 (siege 8: Tiefe+ had no drink): a refuge without drink is the R0 
   T.eq(lvl(W), 1)
 end)
 
+T.test('BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds outside the refuge): a hospital outside ' ..
+       'Kern+ and Tiefe+ is the R0 blocker hospital_out; SIEGE_UNREADY names it and the fix; none outside or no water ' ..
+       'state: no blocker', function()
+  local sf = seal_fake{tick = 1, sealed = 1, routes = 0, doors = {}, open = {}}
+  local wf = {name = 'water', every = {ticks = 1200}}
+  function wf.state(K)
+    if wf.out == nil then return {} end
+    return {water = {patients = 0, thirst_max = 0, hosp_ok = 1, refuge_ok = 1, buckets_free = 0, hosp = 2, src = {},
+                     hosp_out = wf.out}}
+  end
+  function wf.hospital_out(K)
+    return {n = wf.out or 0, total = 2, kern = 'Kern+', refuge = 'Tiefe+',
+            zones = {{id = 34, loc = 6, x = 115, y = 77, z = 144, tiles = 15, of = 15}}}
+  end
+  local W = world{seal = sf, extra = {wf}}
+  day(W)
+  audit(W)
+  T.eq(lvl(W), 1, 'no water state: no blocker (fail-open)')
+  wf.out = 1
+  W.state()
+  day(W)
+  T.eq({lvl(W), ready(W).fail}, {0, {'hospital_out'}}, 'old code: R1')
+  day(W, 2)
+  local u = unready(W)
+  T.eq(#u, 1)
+  local want = 'the hospital lies outside Kern+/Tiefe+ (1 of 2 zones; zone 34 at 115,77,144): its patients cannot ' ..
+               'walk to the refuge; move it into Tiefe+ next to accepted water'
+  T.ok(tostring(u[1].d.hout):find(want, 1, true), tostring(u[1].d.hout))
+  T.ok(u[1].msg:find('siege unready (R0: hospital_out); ' .. want, 1, true), u[1].msg)
+  T.ok(#u[1].msg <= 200)
+  wf.out = 0
+  W.state()
+  day(W)
+  T.eq(lvl(W), 1, 'moved inside: the blocker goes')
+end)
+
 T.test('Run 10: the last audit names a bypass with its wall: R0, SIEGE_UNREADY and ready.route name it and the fix ' ..
        '(seal at=audit); a finding without a wall tile says so; a passed audit clears the route', function()
   local W = world{seal = seal_fake{tick = 1, sealed = 1, routes = 1, doors = {}, open = {}}}

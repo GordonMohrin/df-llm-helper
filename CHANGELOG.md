@@ -1,5 +1,32 @@
 # CHANGELOG dfpilot
 
+## A hospital outside Kern+/Tiefe+ is a readiness blocker; in a fight the patients outside the alert burrow are reported (BUG-036; 2026-10-17; offline, live-untested)
+- **Why (Run 11 siege 9, y445):** 10 citizens lost, all in the BREACH; two cave dragons struck down 8, 7 of them
+  patients in hospital beds (2 bled out at 115,77,144 and 124,91,144); the wounded soldiers (16 -> 6) lay there and were
+  never moved into Tiefe+. A lying patient cannot walk to the refuge; only a rescue or hauling moves him, and the kernel
+  never moves units (fair play). `bugs/BUG-036-patients-killed-in-hospital-during-breach.md`.
+- **water:** hospital zones with tiles outside Kern+ and the refuge (<= 100 tiles a zone, evenly sampled): state
+  `water.hosp_out`, `water.hospital_out()` (zones with their centre), the log line `hospital ok (1 of 2 zones outside
+  Kern+/Tiefe+)`. In SIEGE/BREACH, once per fight: PATIENTS_OUT (B) `BREACH: 7 of 7 patients lie outside the alert burrow
+  Tiefe+ (...): they cannot walk there, only a rescue moves them; the hospital lies outside Kern+/Tiefe+: move it into
+  Tiefe+ next to accepted water` (Kern+/Tiefe+ while the alert is silent).
+- **readiness:** R0 blocker `hospital_out` while `water.hosp_out` > 0 (no water state: none); SIEGE_UNREADY `hout`
+  `the hospital lies outside Kern+/Tiefe+ (1 of 2 zones; zone 34 at 115,77,144): its patients cannot walk to the refuge;
+  move it into Tiefe+ next to accepted water`.
+- **Python:** wake `next: the hospital lies outside the core: plan it inside Tiefe+ next to accepted water (bp sites
+  hospital; a cistern there first), then remove the old zones`; `status`/`brief` UNREADY `next:`; `plan check` warns
+  while the kernel counts zones outside (a new hospital: its site must lie inside Tiefe+/Kern+). Both rules hold: inside
+  (BUG-036) AND next to accepted water (BUG-034, still a refusal).
+- Contracts: state `water.hosp_out`, event PATIENTS_OUT (B, water), SIEGE_UNREADY `hout`, §7 `water.hospital_out`
+  (schema, contract.lua, appendix); RULES §8 R0 list in place (300 lines), DESIGN §5.4, DOCTRINE plan B.
+- Tests: `tests/lua/test_water.lua`, `tests/lua/test_readiness.lua`, `tests/test_hospital_water.py`,
+  `tests/test_cli_status.py`, `tests/test_cli_wake.py`; each fails on cea6072.
+- **Live check (Run 12):** kern.log `water: ... hospital ok|dry (N of M zones outside Kern+/Tiefe+)` names a hospital
+  outside; `dfllm status` in PEACE: `SIEGE UNREADY (R0): ...hospital_out...` with the next step; after a hospital inside
+  Tiefe+ next to accepted water (and the old zones removed by hand or plan), the blocker goes at water's next run. At the
+  next SIEGE/BREACH with patients: `dfllm events --type PATIENTS_OUT` once, with the units; send them and their positions
+  a few hundred ticks later (does DF rescue a patient during a civ alert at all?).
+
 ## The recall follows the citizens it called and says why one does not come; a door on his only way in opens again; who cannot come holds no door (BUG-035; 2026-10-17; offline, live-untested)
 - **Why (Run 11 siege 9, y445: invasion 13, 2 cave dragons, 2 goblins, a snatcher, then an ambush; pop 49 -> 39):**
   ARRIVAL said `recall: 5 outside Kern+`, then `recall: 9 of 5 still outside after 1246 t` (the count grew past its
