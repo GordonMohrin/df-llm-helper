@@ -1,5 +1,5 @@
 # BUG-035 The recall's count grows past its start ('9 of 5 still outside') and two citizens never come in
-Status: fixed (offline, live-untested): the recall follows the citizens it called by id and measures arrival in the
+Status: fixed in cea6072 (offline, live-untested): the recall follows the citizens it called by id and measures arrival in the
 burrows the alert really confines to, newcomers counted apart; every citizen still out is diagnosed (read-only) with a
 reason; seal's path check finds a way that crosses doors this lockdown forbade and the door opens again for him;
 citizens who cannot come hold no door (RECALL `stuck`); water and `refuge_dry` say where the wells are

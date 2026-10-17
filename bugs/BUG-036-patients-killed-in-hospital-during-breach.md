@@ -1,5 +1,5 @@
 # BUG-036 Patients killed in their hospital beds during the BREACH: the hospital lay outside the refuge
-Status: fixed (offline, live-untested): readiness R0 blocker `hospital_out` (a hospital zone outside Kern+/Tiefe+, water
+Status: fixed in 5e6d754 (offline, live-untested): readiness R0 blocker `hospital_out` (a hospital zone outside Kern+/Tiefe+, water
 state `hosp_out`), named in SIEGE_UNREADY, `status`/`brief` and the wake line with the fix; `plan check` warns; in a
 fight PATIENTS_OUT (B) says once how many patients lie outside the alert burrow
 Severity: critical (loses citizens: 7 patients and their wounded soldiers struck down where they lay)
