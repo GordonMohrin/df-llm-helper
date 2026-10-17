@@ -1,5 +1,5 @@
 # BUG-042 Drink falls from 93 to 32 days beside 15 idle stills: the manager validates nothing (his office has no chair and no table)
-Status: fixed in <commit> (the cause live confirmed y471 winter d42: a table and a chair built in the office let the
+Status: fixed in 98e5bfc (the cause live confirmed y471 winter d42: a table and a chair built in the office let the
 manager take ManageWorkOrders at once, unvalidated orders 112 -> 51, the brew orders validated; the fix offline,
 live-untested)
 Severity: critical (drink 32 days with 19 patients, patient thirst 25394; deaths of thirst were near)
