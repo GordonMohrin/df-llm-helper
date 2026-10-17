@@ -318,7 +318,9 @@ T.test('Run 11: an unvalidated order while the manager rests injured says so (OR
   T.eq(st[#st].d.why, 'unvalidated: no manager available (the manager is gone)')
 end)
 
-T.test('Run 11: an unvalidated order with an available manager keeps its own reasons', function()
+-- BUG-042: an order unvalidated past orders.unval_days with an available manager is held by the validation, not by its
+-- material: the reason names why the manager validates nothing (here: he has no office zone)
+T.test('Run 11/BUG-042: an unvalidated order with an available manager names why he validates nothing', function()
   local W = world{masons = false, setup = function(W)
     F.order(W, {job_type = df.job_type.ConstructDoor, mat_type = 0, mat_index = -1, amount_left = 4,
                 material_category = {}, status = {validated = false}})
@@ -327,10 +329,11 @@ T.test('Run 11: an unvalidated order with an available manager keeps its own rea
   days(W, 4)
   local ev = W.find_events('ORDER_STUCK')
   T.eq(#ev, 1)
-  T.ok(ev[1].d.why:find('no rock', 1, true) and not ev[1].d.why:find('manager', 1, true), ev[1].d.why)
+  T.eq(ev[1].d.why, 'unvalidated: the manager has no office zone')
   local dn = W.find_events('DECISION_NEEDED')
   T.eq(#dn, 1)
   T.eq(dn[1].d.id, 'manager_office', 'none validated with a manager at hand: the office question as before')
+  T.ok(dn[1].d.q:find('Office zone with a chair and a table', 1, true), dn[1].d.q)
 end)
 
 T.done()

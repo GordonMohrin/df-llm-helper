@@ -912,7 +912,8 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
                                                         params.get("close") or "auto")
     if tpl == "workshops" and "skip" not in params:
         miss = set(workshops_missing(save_dir))
-        have = [n for n in _moodable() if n not in miss]
+        # BUG-042: a moodable type the kernel saw missing on the map (economy's tannery request) is built again
+        have = [n for n in _moodable() if n not in miss and n not in need]
         if have:
             params["skip"] = ",".join(have)
     if tpl == "workshops" and params.get("add"):          # live L6: never a second still or butcher's shop

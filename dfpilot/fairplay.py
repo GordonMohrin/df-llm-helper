@@ -324,6 +324,51 @@ def runner_errors(path: str | Path | None = None) -> list[str]:
     return errs
 
 
+# BUG-042 (lua/dfllm/economy.lua M.DEFAULTS): the economy knobs of the drink line, the unvalidated-order watch, the
+# manager's office and the drink gatherers ("bool", else an int range); economy.conf takes the file's part as it is,
+# so a bad value here would reach the kernel: lint --config refuses it. Other economy keys are checked by the mirror
+# test (tests/lua/test_economy.lua: config/baseline.json == economy.DEFAULTS).
+ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400)},
+                     "orders": {"unval_days": (1, 60)},
+                     "office": {"table": "bool", "retry_days": (1, 112), "max_tiles": (1, 10000)},
+                     "gather": {"drink_d": (0, 400), "drink_off": (0, 400)},
+                     "barrels": {"brew_wait": (0, 200)}}
+ECONOMY_OWN = ("drink", "office")             # parts whose every key is listed above
+
+
+def economy_errors(path: str | Path | None = None) -> list[str]:
+    """Problems of the BUG-042 knobs in the "economy" part of config/baseline.json: values of another type or out of
+    range, unknown keys of the parts BUG-042 added (drink, office). A missing file or part is fine."""
+    p = Path(path or BASELINE_PATH)
+    if not p.exists():
+        return []
+    name = "config/baseline.json"
+    try:
+        doc = json.loads(_read(p))
+    except ValueError as e:
+        return [f"{name}: not JSON ({e})"]
+    sec = doc.get("economy", {}) if isinstance(doc, dict) else {}
+    if not isinstance(sec, dict):
+        return [f"{name}: economy must be an object"]
+    errs = []
+    for part, lims in ECONOMY_LIM.items():
+        v = sec.get(part, {})
+        if not isinstance(v, dict):
+            errs.append(f"{name}: economy.{part} must be an object")
+            continue
+        for k, x in v.items():
+            lim = lims.get(k)
+            if lim is None:
+                if part in ECONOMY_OWN:
+                    errs.append(f"{name}: economy.{part}.{k}: unknown key")
+            elif lim == "bool":
+                if not isinstance(x, bool):
+                    errs.append(f"{name}: economy.{part}.{k}: true or false expected, got {x!r}")
+            elif not (isinstance(x, int) and not isinstance(x, bool) and lim[0] <= x <= lim[1]):
+                errs.append(f"{name}: economy.{part}.{k}: int {lim[0]}..{lim[1]} expected, got {x!r}")
+    return errs
+
+
 # ---------------------------------------------------------------- allowlist (CONTRACTS §9.14)
 _AL_CACHE: dict[str, tuple[float, dict]] = {}
 

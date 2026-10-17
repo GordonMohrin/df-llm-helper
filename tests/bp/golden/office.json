@@ -39,7 +39,8 @@
   },
   "materials": {
    "chair": 1,
-   "door": 1
+   "door": 1,
+   "table": 1
   },
   "params": {
    "burrow": "Kern+",
@@ -104,6 +105,12 @@
         2,
         0,
         "c"
+       ],
+       [
+        1,
+        2,
+        0,
+        "t"
        ]
       ],
       "pos": [

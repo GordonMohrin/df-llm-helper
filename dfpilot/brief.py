@@ -321,6 +321,13 @@ def line_supply(ctx: Ctx) -> str:
                if "ore" in st else "")
             + (f" leather {st['leather']}" if "leather" in st else "")
             + (f" moods missed {','.join(st['mood_miss'])}" if st.get("mood_miss") else ""))
+        # BUG-042: why the stills do not brew while drink is below the target (the kernel's own cause)
+        if st.get("dwhy"):
+            out.append(f"drink: {st['dwhy']}")
+    od = s.get("orders")
+    if isinstance(od, dict) and od.get("mgr"):
+        # BUG-042: orders wait for the manager: how many, how long, why (the office's chair/table, ...)
+        out.append(f"orders: {od.get('unval', 0)} unvalidated, oldest {od.get('uval_d', 0)} d: {od['mgr']}")
     c = s.get("care")
     if c:
         out.append(f"stress {c['stressed_pct']}% naked {c['naked']} ghosts {c['ghosts']} corpses {c['corpses_old']}"

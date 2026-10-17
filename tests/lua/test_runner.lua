@@ -2,6 +2,7 @@
 -- capacity keepers, manifest merge (CONTRACTS §7, §9.8-§9.9, §10-§13), on k_mock with a fake quickfort.
 local T = require('testlib')
 local H = require('runner_world')
+local kmock = require('dfllm.util.k_mock')
 local json = require('dfllm.util.json')
 local runner = require('dfllm.runner')
 
@@ -813,6 +814,38 @@ T.test('build: a stage placed again over its own buildings tracks them instead o
   H.runs(W, 2)
   T.eq(H.proj(W, 'h2').done, 1)
   dfhack.buildings = nil
+end)
+
+-- BUG-042 (Run 11, y471: 110 ConstructDoor among 446 manager orders, most of them rock doors waiting for stone): a seal
+-- placed again, retried or remade ordered a door for every door cell without a building while the older door orders
+-- still waited. A door or hatch cell gets no manager order while the open one-time orders of its job hold orders_cap.
+T.test('BUG-042: door/hatch cells get no quickfort order while open door orders hold orders_cap; others do', function()
+  local W = fresh{tag = 'dcap'}
+  H.floor(W, 10, 10, 100, 20, 10)
+  local jt, ft, mo = df.job_type, df.workquota_frequency_type, df.global.world.manager_orders
+  df.job_type = {ConstructDoor = 10, ConstructHatchCover = 21, ConstructBed = 16, [10] = 'ConstructDoor',
+                 [21] = 'ConstructHatchCover', [16] = 'ConstructBed'}
+  df.workquota_frequency_type = {OneTime = 0, Daily = 1, [0] = 'OneTime', [1] = 'Daily'}
+  local list = {}
+  for i = 1, 110 do list[i] = {id = i, job_type = 10, frequency = 0, amount_left = 1, mat_type = 0} end
+  df.global.world.manager_orders = {all = kmock.vec(list), manager_order_next_id = 111}
+  H.place(W, 'h', build_doc({{0, 0, 0, 'd'}, {2, 0, 0, 'b'}, {4, 0, 0, 'H'}}))
+  H.settle(W); W.frame(1); H.settle(W)
+  local keys = {}
+  for _, o in ipairs(W.orders) do H.cells(o, function(_, _, _, k) keys[#keys + 1] = k end) end
+  table.sort(keys)
+  T.eq(keys, {'H', 'b'}, 'the door cell is left out (110 open door orders >= 10), bed and hatch ordered')
+  T.ok(logged(W, 'info', '^h build: 1 door cells get no manager order: 110 open ConstructDoor orders %(cap 10%)'))
+  -- below the cap the door is ordered as before
+  local W2 = fresh{tag = 'dcap2'}
+  H.floor(W2, 10, 10, 100, 20, 10)
+  df.global.world.manager_orders = {all = kmock.vec({list[1], list[2]}), manager_order_next_id = 111}
+  H.place(W2, 'h', build_doc({{0, 0, 0, 'd'}}))
+  H.settle(W2); W2.frame(1); H.settle(W2)
+  local k2 = {}
+  for _, o in ipairs(W2.orders) do H.cells(o, function(_, _, _, k) k2[#k2 + 1] = k end) end
+  T.eq(k2, {'d'})
+  df.job_type, df.workquota_frequency_type, df.global.world.manager_orders = jt, ft, mo
 end)
 
 T.test('zone: one-owner zone cells already zoned (tomb over a tombed coffin) are left out (live L3)', function()

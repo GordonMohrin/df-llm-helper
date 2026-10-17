@@ -112,6 +112,7 @@ HB_STALE_S = 300
 FOLLOW_HB_EVERY_S = 10                         # FR-29: follow's own heartbeat (<save>/.follow.hb)
 AUTO_TIMEOUT_S = 60
 TOMBS_COOLDOWN_S = 600
+CODE = files.code_stamp()                      # BUG-042: the dfpilot code this follow process imported
 PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "rock", "farms", "seal", "fishery")   # automatic placements (one each)
 SEAL_HINT = ("dfllm cmd bp.place tpl=seal site=S1 at=audit (walls the audit's bypass; follow places it itself "
              "unless --no-auto); then dfllm audit")
@@ -417,7 +418,10 @@ class Follower:
                 self._request_place("fishery", "workshops", {"add": "Fishery", "skip": ",".join(_moodable())}, "S1",
                                     now, prio=1, need=["Fishery"])
             elif t == "PROJECT_REQUEST" and d.get("tpl") in AUTO_REQUESTS:
-                self._request_place(d["tpl"], d["tpl"], {}, "S1", now)   # live L1: a strange mood needs a shop
+                # live L1: a strange mood needs a shop; BUG-042: economy's tannery request names the Tanners the map
+                # lacks, kept although the fort manifest lists a destroyed one (as the fishery, BUG-038)
+                need = ["Tanners"] if d.get("tpl") == "workshops" and d.get("why") == "tannery" else None
+                self._request_place(d["tpl"], d["tpl"], {}, "S1", now, need=need)
             elif t == "PLAN_EXHAUSTED" and d.get("phase") in AUTO_PHASES:
                 self._request_starter(d, now)
             elif t == "AUDIT" and d.get("ok") in (0, False):
@@ -435,7 +439,8 @@ class Follower:
             return
         self._beat = now
         try:
-            files.write_follow_hb(self.dir, {"v": 2, "wall": int(now), "last_n": self.tail.last_n if self.tail else 0})
+            files.write_follow_hb(self.dir, {"v": 2, "wall": int(now), "last_n": self.tail.last_n if self.tail else 0,
+                                             "code": CODE})       # BUG-042: status names a follow on old code
         except OSError as e:
             sys.stderr.write(f"follow: cannot write heartbeat: {e}\n")
 
