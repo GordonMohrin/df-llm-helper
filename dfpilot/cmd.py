@@ -18,7 +18,7 @@ import re
 import time
 from pathlib import Path
 
-from . import files, schema
+from . import files, paths, schema
 
 EXIT_OK, EXIT_REFUSED, EXIT_BAD, EXIT_NOREPLY = 0, 1, 2, 3
 
@@ -170,7 +170,7 @@ def _digest(doc) -> str:
     return hashlib.sha1(files.dumps(doc).encode("utf-8")).hexdigest()[:16]
 
 
-def _rank(snap: dict, tpl: str, params: dict | None, n: int, manifest: dict | None) -> list:
+def _rank(snap: dict, tpl: str, params: dict | None, n: int, manifest: dict | None, water: dict | None = None) -> list:
     fn = load_bp("sites").rank
     try:
         names = inspect.signature(fn).parameters    # WP3 extensions; CONTRACTS §15 has rank(snap, tpl, params)
@@ -179,37 +179,80 @@ def _rank(snap: dict, tpl: str, params: dict | None, n: int, manifest: dict | No
     kw = {"n": n} if "n" in names else {}
     if "manifest" in names and manifest is not None:
         kw["manifest"] = manifest
+    if "water" in names and water is not None:
+        kw["water"] = water
     sites = _call_bp(f"bp.sites.rank({tpl})", fn, snap, tpl, params or None, **kw)
     if not isinstance(sites, list):
         raise BpError(f"bp.sites.rank returned {type(sites).__name__}, expected a list")
     return [s for s in sites if isinstance(s, dict)]
 
 
+# BUG-034/040 (Run 11, y453: `bp sites hospital` offered sites the plan check then refused for lack of water): the
+# hospital's sites follow the kernel's accepted water (state water.src) within water.lua's radius
+WATER_TPLS = ("hospital",)
+WATER_NEAR = 30                           # water.lua `near` (config/baseline.json water.near): source -> hospital tiles
+
+
+def water_near() -> int:
+    """water.lua's `near` (config/baseline.json water.near, else 30): how far an accepted source may lie from a
+    hospital zone for the kernel to count it served."""
+    doc = files.read_json(paths.config_dir() / "baseline.json")
+    v = (doc.get("water") or {}).get("near") if isinstance(doc, dict) and isinstance(doc.get("water"), dict) else None
+    return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else WATER_NEAR
+
+
+def water_ctx(save_dir: Path, tpl: str, state: dict | None = None) -> dict | None:
+    """BUG-040: the water a WATER_TPLS site must lie near (bp.sites.rank `water`): {src, near, lbl?, refuge?} from the
+    state (water.src, water.src_l; alert.ref box/wd/ws: where the refuge lies and its nearest accepted water). None for
+    other templates and while the state has no `water` key (an older kernel: not filtered, as before)."""
+    if tpl not in WATER_TPLS:
+        return None
+    s = state if state is not None else files.read_state(save_dir)
+    w = (s or {}).get("water")
+    if not isinstance(w, dict):
+        return None
+    src = [list(p) for p in w.get("src") or [] if isinstance(p, list) and len(p) == 3]
+    out: dict = {"src": src, "near": water_near()}
+    lbl = w.get("src_l")                       # the first ones (water.lua SRC_LBL), in src order
+    if isinstance(lbl, list):
+        out["lbl"] = [str(x) for x in lbl[:len(src)]]
+    ref = ((s.get("alert") or {}).get("ref") or {}) if isinstance(s.get("alert"), dict) else {}
+    if isinstance(ref, dict) and isinstance(ref.get("box"), list):
+        man = files.read_manifest(save_dir) or {}
+        name = (man.get("refuge") or {}).get("burrow") if isinstance(man.get("refuge"), dict) else None
+        out["refuge"] = {"name": name if isinstance(name, str) else "Tiefe+", "box": ref["box"],
+                         "wd": ref.get("wd", -1), "ws": ref.get("ws"), "ok": w.get("refuge_ok")}
+    return out
+
+
 def rank_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict | None = None,
                n: int = RANK_N, manifest: dict | None = None) -> tuple[list, str]:
-    """Rank tpl on `snap` (default: sites_snapshot) with the fort manifest; cache the raw ranking with its
-    params, snapshot id and manifest digest."""
+    """Rank tpl on `snap` (default: sites_snapshot) with the fort manifest (and, BUG-040, the accepted water for a
+    hospital); cache the raw ranking with its params, snapshot id, manifest and water digests."""
     snap = snap or sites_snapshot(save_dir)
     if snap is None:
         raise BpError("no snapshot: run `dfllm bp sites <tpl> --fresh` (or `dfllm cmd snapshot purpose=sites`)")
     manifest = manifest if manifest is not None else fort_manifest(save_dir)
-    sites = _rank(snap, tpl, params, n, manifest)
+    water = water_ctx(save_dir, tpl)
+    sites = _rank(snap, tpl, params, n, manifest, water)
     files.write_json_atomic(_sites_cache(save_dir, tpl), {"v": 2, "tpl": tpl, "snap": snap["id"], "n": n,
                                                           "params": params or {}, "man": _digest(manifest),
-                                                          "sites": sites})
+                                                          "water": _digest(water), "sites": sites})
     return sites, snap["id"]
 
 
 def ranking(save_dir: Path, tpl: str, params: dict | None = None, snap: dict | None = None) -> tuple[list, str]:
-    """The cached ranking only if it was made for these params, on the snapshot ranking would use now and with
-    the same fort manifest (a cache for other params or an older snapshot skips rank's safety checks)."""
+    """The cached ranking only if it was made for these params, on the snapshot ranking would use now, with the
+    same fort manifest and (BUG-040) the same accepted water (a cache for other params, an older snapshot or other
+    water skips rank's safety checks)."""
     snap = snap or sites_snapshot(save_dir)
     if snap is None:
         raise BpError("no snapshot: run `dfllm bp sites <tpl> --fresh` (or `dfllm cmd snapshot purpose=sites`)")
     manifest = fort_manifest(save_dir)
     c = files.read_json(_sites_cache(save_dir, tpl))
     if isinstance(c, dict) and c.get("snap") == snap["id"] and c.get("params") == (params or {}) \
-            and c.get("n", 3) >= RANK_N and c.get("man") == _digest(manifest) and isinstance(c.get("sites"), list):
+            and c.get("n", 3) >= RANK_N and c.get("man") == _digest(manifest) \
+            and c.get("water", _digest(None)) == _digest(water_ctx(save_dir, tpl)) and isinstance(c.get("sites"), list):
         return [s for s in c["sites"] if isinstance(s, dict)], snap["id"]
     return rank_sites(save_dir, tpl, params, snap, manifest=manifest)
 

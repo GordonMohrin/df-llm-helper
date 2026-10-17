@@ -561,6 +561,49 @@ T.test('BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds outsid
   T.eq(lvl(W), 1, 'moved inside: the blocker goes')
 end)
 
+T.test('BUG-040 (Run 11 y453: "Tiefe+ has no drink" for months, nobody knew where Tiefe+ lies; the one wet well stood ' ..
+       'in Kern+): refuge_dry names the refuge\'s bbox and z-levels and its nearest accepted water; hospital_out sends ' ..
+       'the hospital into Kern+ next to that water when Tiefe+ has none of its own', function()
+  local sf = seal_fake{tick = 1, sealed = 1, routes = 0, doors = {}, open = {}}
+  sf.rd = {name = 'Tiefe+', exists = true, drink = 0, need = 31, wells = 1, wet = false, wwet = 0,
+           box = {126, 56, 129, 128, 77, 136}, near = {d = 9, at = {128, 77, 136}, src = {137, 77, 143}}}
+  function sf.refuge_drink(K) return sf.rd end
+  local wf = {name = 'water', every = {ticks = 1200}}
+  function wf.state(K)
+    return {water = {patients = 0, thirst_max = 0, hosp_ok = 0, refuge_ok = 0, buckets_free = 0, hosp = 2,
+                     src = {{137, 77, 143}}, hosp_out = wf.out or 0}}
+  end
+  function wf.label(K, x, y, z) return string.format('well 19098 at %d,%d,%d in Kern+', x, y, z) end
+  function wf.hospital_out(K)
+    return {n = wf.out or 0, total = 2, kern = 'Kern+', refuge = 'Tiefe+',
+            zones = {{id = 34, loc = 6, x = 115, y = 77, z = 144, tiles = 15, of = 15}}}
+  end
+  local W = world{seal = sf, extra = {wf}}
+  W.state()
+  day(W)
+  audit(W)
+  T.eq(ready(W).fail, {'refuge_dry'})
+  local R = W.mods.readiness.M
+  T.eq(R.refuge_dry(W.K), 'Tiefe+ has no drink (drink 0<31, its 1 well is dry; Tiefe+ 126-128,56-77 z129-136, nearest ' ..
+       'accepted water: well 19098 at 137,77,143 in Kern+, 9 tiles): build a well/cistern or stock drink there',
+       'old code: no place, no water')
+  T.ok(#R.refuge_dry(W.K) <= 200)
+  wf.out = 1
+  W.state()
+  day(W, 3)
+  local u = unready(W)
+  local hout = tostring(u[#u].d.hout)
+  T.eq(hout, 'the hospital lies outside Kern+/Tiefe+ (1 of 2 zones; zone 34 at 115,77,144): its patients cannot walk ' ..
+       'to the refuge; no accepted water in Tiefe+: move it next to well 19098 at 137,77,143 in Kern+',
+       'old code: "move it into Tiefe+ next to accepted water"')
+  T.ok(#u[#u].msg <= 200)
+  -- no accepted water at all
+  sf.rd.near = nil
+  day(W)
+  T.ok(R.refuge_dry(W.K):find('Tiefe+ 126-128,56-77 z129-136, no accepted water in the fort', 1, true),
+       R.refuge_dry(W.K))
+end)
+
 T.test('Run 10: the last audit names a bypass with its wall: R0, SIEGE_UNREADY and ready.route name it and the fix ' ..
        '(seal at=audit); a finding without a wall tile says so; a passed audit clears the route', function()
   local W = world{seal = seal_fake{tick = 1, sealed = 1, routes = 1, doors = {}, open = {}}}

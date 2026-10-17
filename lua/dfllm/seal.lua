@@ -456,14 +456,24 @@ end
 
 -- tiles of a burrow (burrows screen count): blocks x 256 tiles, sliced. FR-62: kept while the block count is
 -- unchanged, up to CFG.bsize_stale (seal's own painting forgets it). Also up to 16 sample tiles spread over it (the
--- first one and every 64th; BUG-019: is the burrow reachable?) and the block count.
-local function burrow_size(name, t)
+-- first one and every 64th; BUG-019: is the burrow reachable?) and the block count. BUG-040 (Run 11 y453: 'Tiefe+ has
+-- no drink' and nobody knew where Tiefe+ lies): the same pass keeps the tiles' bbox (box) and, with `pts` (the accepted
+-- water sources, water's state src), the tile nearest to one of them (near = {d (Chebyshev, z included), at, src});
+-- mem.bsize[name] holds both. A call without pts takes the cached count whatever its points.
+local function burrow_size(name, t, pts)
   local blocks = block_list(name)
   spend(1)
   if not blocks then return 0, {}, 0 end
+  local pk
+  if pts then
+    local o = {}
+    for i, q in ipairs(pts) do o[i] = string.format('%s,%s,%s', q[1], q[2], q[3]) end
+    pk = table.concat(o, ';')
+  end
   local c = mem.bsize[name]
-  if c and c.nb == #blocks and t - c.t < CFG.bsize_stale then return c.n, c.s or {}, c.nb end
+  if c and c.nb == #blocks and t - c.t < CFG.bsize_stale and (pk == nil or c.pk == pk) then return c.n, c.s or {}, c.nb end
   local n, s = 0, {}
+  local x0, y0, z0, x1, y1, z1, near = math.huge, math.huge, math.huge, -math.huge, -math.huge, -math.huge, nil
   for i = 1, #blocks do
     local b = burrow(name)                                         -- never keep a DF pointer across frames
     local blk = b and blocks[i]
@@ -475,12 +485,26 @@ local function burrow_size(name, t)
         if dfhack.burrows.isAssignedBlockTile(b, blk, x, y) then
           n = n + 1
           if mp and #s < 16 and (n == 1 or n % 64 == 0) then s[#s + 1] = {mp.x + x, mp.y + y, mp.z} end
+          if mp then
+            local tx, ty, tz = mp.x + x, mp.y + y, mp.z
+            if tx < x0 then x0 = tx end
+            if tx > x1 then x1 = tx end
+            if ty < y0 then y0 = ty end
+            if ty > y1 then y1 = ty end
+            if tz < z0 then z0 = tz end
+            if tz > z1 then z1 = tz end
+            for _, q in ipairs(pts or {}) do
+              local d = math.max(math.abs(tx - q[1]), math.abs(ty - q[2]), math.abs(tz - q[3]))
+              if not near or d < near.d then near = {d = d, at = {tx, ty, tz}, src = {q[1], q[2], q[3]}} end
+            end
+          end
         end
       end
       spend(16)
     end
   end
-  mem.bsize[name] = {nb = #blocks, n = n, t = t, s = s}
+  local box = x1 >= x0 and {x0, y0, z0, x1, y1, z1} or nil
+  mem.bsize[name] = {nb = #blocks, n = n, t = t, s = s, box = box, near = near, pk = pk}
   return n, s, #blocks
 end
 
@@ -556,6 +580,9 @@ local function burrow_audit(K, ncit, a)
   if not a.exists then why[1] = 'missing'
   else
     if a.tiles < need.tiles then why[#why + 1] = string.format('%d tiles<%d', a.tiles, need.tiles) end
+    -- BUG-040: a built well still counts here even when water calls it dry (a.wwet): the civ alert keeps a dry
+    -- refuge until its citizens get thirsty (BUG-031 (b), M.dry) instead of only the 7 breach days; the reports
+    -- (refuge_drink.wwet, readiness refuge_dry by water's refuge_ok) say the truth
     if a.drink < need.drink and a.wells == 0 then why[#why + 1] = string.format('drink %d<%d', a.drink, need.drink) end
     if a.food < need.food then why[#why + 1] = string.format('food %d<%d', a.food, need.food) end
     a.sup = #why == 0
@@ -690,8 +717,17 @@ local function audit_pass(K)
     end
     spend(2)
   end
+  -- BUG-040: the refuge's place and its nearest accepted water (water's state src), and the wet wells per burrow
+  local wv = K.view().water
+  local wsrc = type(wv) == 'table' and type(wv.src) == 'table' and wv.src or {}
   for _, n in ipairs(names) do
-    if B[n].exists then B[n].tiles, B[n].samples, B[n].nb = burrow_size(n, t0) end
+    if B[n].exists then
+      B[n].tiles, B[n].samples, B[n].nb = burrow_size(n, t0, n == refuge and wsrc or nil)
+      local bs = mem.bsize[n] or {}
+      B[n].box, B[n].near = bs.box, n == refuge and bs.near or nil
+      local okw, ww = K.call('water', 'wet_wells', n)
+      if okw and math.type(ww) == 'integer' then B[n].wwet = ww end
+    end
   end
   -- BUG-019: reachable = a citizen inside, or a walkable sample tile on a citizen's walk group, both read now (one
   -- frame, one numbering, BUG-021); -1 = no walkable sample
@@ -2844,6 +2880,13 @@ local function publish(K)
     local s = ex and sep_of(refuge) or nil
     mem.pub.ref = {ex = ex and 1 or 0, sep = s == nil and -1 or (s.exp and 0 or 1),
                    beds = ex and math.max(0, int(ra.beds) or 0) or 0, need = math.max(0, int(need.beds) or 0)}
+    -- BUG-040: where the refuge lies and its nearest tile's distance to the nearest accepted source (status, plan)
+    if ex and type(ra.box) == 'table' then
+      local n = ra.near
+      mem.pub.ref.box = {table.unpack(ra.box, 1, 6)}
+      mem.pub.ref.wd = n and n.d or -1
+      if n then mem.pub.ref.ws = {n.src[1], n.src[2], n.src[3]} end
+    end
   end
 end
 
@@ -3041,7 +3084,10 @@ function M.refuge_drink(K)
   local a = au[refuge]
   if not a then return nil end
   return {name = refuge, exists = a.exists == true, drink = int(a.drink) or 0, need = int(a.dneed) or 0,
-          wells = int(a.wells) or 0, wet = a.wet == true}
+          wells = int(a.wells) or 0, wet = a.wet == true,
+          -- BUG-040: the wells water calls wet (nil unknown; `wet` above still counts every built well, the alert's
+          -- rule), the tiles' bbox, the tile nearest to an accepted source
+          wwet = a.wwet, box = a.box, near = a.near}
 end
 
 -- public (BUG-031 (b), siege): citizens the civ alert holds in burrow `name` are over siege's thirst or hunger mark
@@ -4384,8 +4430,9 @@ M.inspect.refuge = function(K, args)
     local s = sep_of(name)
     local why = a.why
     if s and s.exp then why = s.why .. (why ~= '' and (', ' .. why) or '') end
-    b[name] = {exists = a.exists and 1 or 0, tiles = a.tiles, inside = a.inside, drink = a.drink, food = a.food,
-               beds = a.beds, wells = a.wells, ok = rate(K, au.burrows, name, 'SIEGE', t) and 1 or 0,
+        b[name] = {exists = a.exists and 1 or 0, tiles = a.tiles, inside = a.inside, drink = a.drink, food = a.food,
+               beds = a.beds, wells = a.wells, wwet = a.wwet, box = a.box,       -- BUG-040: wet wells, where it lies
+               near = a.near, ok = rate(K, au.burrows, name, 'SIEGE', t) and 1 or 0,
                counts = a.ok and 1 or 0, breach = rate(K, au.burrows, name, 'BREACH', t) and 1 or 0,
                sep = s == nil and -1 or (s.exp and 0 or 1), open = s and s.exp and s.open or nil,
                exp = s and s.exp and s.n or nil, steps = s and s.exp and s.d or nil, reach = a.reach, why = why,

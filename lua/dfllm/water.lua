@@ -38,6 +38,14 @@
 --   * cisterns (manifest rooms tpl `cistern`): revealed water on the well room floor (2 tiles, or 1 tile in
 --     two runs in a row) means the pipe is flooding the room: DECISION_NEEDED cistern_flood (A), close the
 --     floodgate with the room's lever;
+--   * dry cisterns (BUG-040, Run 11 y453: the cisterns y450s0b0 and y452s1b0 were done, their wells never wet): a
+--     manifest cistern room (merged when its project is done) whose built well stays dry for cistern_dry_days is
+--     reported once per dry spell (CISTERN_DRY, B) with what should fill it: its pond zone (bucket-fed), a pond zone this
+--     module removed as a loop, its pipe's floodgate lever, or nothing; the nearest accepted water to carry from;
+--   * the sources' burrows (BUG-040): each source is labelled with Kern+ or the refuge when it stands on it (state
+--     water.src_l, M.label for readiness's texts); M.wet_wells(name) tells seal how many wells of a burrow are wet
+--     (seal.refuge_drink reports them: a dry cistern's well is no drink for the refuge; readiness's refuge_dry already
+--     counts only wet ones through refuge_ok);
 --   * dry hospital removal (BUG-034, Run 11): while a patient's thirst is over patient_thirst (25,000), every zone of
 --     a hospital location none of whose zones is served is removed (act.hospital_remove, the zones screen), at most
 --     remove_per_run a run; a location with one served zone keeps all of them. HOSPITAL_REMOVED (A) names the zones,
@@ -71,8 +79,11 @@ M.DEFAULTS = {
   -- BUG-034: a dry hospital's zones go once a patient is over patient_thirst (DF's "thirsty" mark is ~25,000-50,000;
   -- dehydration kills at ~75,000); hosp_remove false keeps them (report only, as before)
   patient_thirst = 25000, hosp_remove = true, remove_per_run = 8,
+  -- BUG-040: a done cistern whose built well stays dry this many days is reported once (CISTERN_DRY, B)
+  cistern_dry_days = 30,
 }
 M.SRC_MAX = 8                                -- accepted sources in the state (water.src), nearest first
+M.SRC_LBL = 4                                -- BUG-040: labels of the first ones (water.src_l: 'well 19098 in Kern+')
 M.BUCKET_ORDER = {job = 'MakeBucket', material_category = {'wood'}, frequency = 'OneTime'}
 local BUSY = {'in_job', 'trader', 'removed', 'garbage_collect', 'construction', 'in_building', 'hostile'}
 
@@ -408,8 +419,10 @@ local function supply_buckets(K, c, r, p, want)
   return fixed, ordered, missing
 end
 
--- pond zones beside a wet well (see the header): the carriers would pour the well's own water back into it
-local function pond_loops(K, c, r)
+-- pond zones beside a wet well (see the header): the carriers would pour the well's own water back into it. BUG-040:
+-- each removal is kept (p.prm, the last 8: id, rect centre, tick): a cistern's pond removed this way is named in
+-- CISTERN_DRY (once its own well was wet the carriers took from it: a bucket-fed cistern cannot fill past that)
+local function pond_loops(K, c, r, p)
   if #r.ponds == 0 or not M.can('pond_remove') then return 0 end
   for _, s in ipairs(r.sources) do
     if s.kind == 'zone' and s.wet then return 0 end            -- a real supply exists: the pond is no loop
@@ -424,6 +437,9 @@ local function pond_loops(K, c, r)
           n = n + 1
           K.log('warn', 'water: pond zone %d removed: the wet well %d beside it was its water source (a loop)',
                 pd.id, s.id)
+          p.prm = type(p.prm) == 'table' and p.prm or json.array{}
+          p.prm[#p.prm + 1] = json.array{pd.id, (pd.x1 + pd.x2) // 2, (pd.y1 + pd.y2) // 2, pd.z, K.now().tick}
+          while #p.prm > 8 do table.remove(p.prm, 1) end
         end
         break
       end
@@ -843,9 +859,93 @@ local function src_list(r)
     if a.d ~= b.d then return a.d < b.d end
     return a.s.id < b.s.id
   end)
-  local out = json.array{}
-  for i = 1, math.min(M.SRC_MAX, #l) do out[i] = json.array{l[i].s.x, l[i].s.y, l[i].s.z} end
-  return out
+  local out, lbl = json.array{}, json.array{}
+  for i = 1, math.min(M.SRC_MAX, #l) do
+    local s = l[i].s
+    out[i] = json.array{s.x, s.y, s.z}
+    if i <= M.SRC_LBL then                                     -- BUG-040: the nearest ones (state size)
+      lbl[i] = trunc(string.format('%s %d', s.kind, s.id) .. (s.inn and (' in ' .. s.inn) or ''), 32)
+    end
+  end
+  return out, lbl
+end
+
+---------------------------------------------------------------- BUG-040: cisterns that stay dry
+-- Run 11 (Kilrudrabed site98, y453): the cisterns y450s0b0 and y452s1b0 were PROJECT_DONE and their wells never held
+-- water: the fort had no revealed open water (water NO since the run began), so nothing could fill them, and nobody said
+-- so. A cistern room of the manifest (merged when its project is done) whose built well stays dry for cistern_dry_days
+-- is reported once per dry spell (CISTERN_DRY, B; kern.log): what should fill it (fill: pond = bucket-fed by its pond
+-- zone, pond_removed = pond_loops removed that zone as a loop, pipe = its floodgate waits for the well room's lever,
+-- none), the nearest accepted water to carry from. Its project id from the runner's kept boxes, the pipe from its bp
+-- file (runner.kept_in, runner.bp_params; read-only, only when reporting).
+local function cistern_dry(K, c, r, p, now)
+  p.cdry = json.object(type(p.cdry) == 'table' and p.cdry or {})
+  local seen = {}
+  for _, rm in ipairs(K.manifest().rooms or {}) do
+    local b = rm.tpl == 'cistern' and type(rm.bbox) == 'table' and type(rm.id) == 'string' and rm.bbox
+    if b and math.tointeger(b[1]) and math.tointeger(b[6]) then
+      local well
+      for _, s in ipairs(r.sources) do
+        if s.kind == 'well' and s.built and s.z == b[3] and s.x >= b[1] and s.x <= b[4] and s.y >= b[2]
+           and s.y <= b[5] then well = s end
+      end
+      local rec = p.cdry[rm.id]
+      if well then seen[rm.id] = true end
+      if well and well.wet then
+        if type(rec) == 'table' and rec.said then
+          K.log('info', 'water: cistern %s: its well %d holds water again', rm.id, well.id)
+        end
+        p.cdry[rm.id] = nil
+      elseif well and type(rec) ~= 'table' then
+        p.cdry[rm.id] = {t = now}
+      elseif well and not rec.said and now - (math.tointeger(rec.t) or now) >= c.cistern_dry_days * DAY then
+        rec.said = now
+        local box = {x1 = b[1], y1 = b[2], x2 = b[4], y2 = b[5], z = b[3]}
+        local fill, pond = 'none', nil
+        for _, pd in ipairs(r.ponds) do
+          if pd.z == b[3] and pd.x1 >= b[1] and pd.x2 <= b[4] and pd.y1 >= b[2] and pd.y2 <= b[5] then
+            fill, pond = 'pond', pd.id
+          end
+        end
+        for _, e in ipairs(fill == 'none' and type(p.prm) == 'table' and p.prm or {}) do
+          if e[4] == b[3] and e[2] >= b[1] and e[2] <= b[4] and e[3] >= b[2] and e[3] <= b[5] then
+            fill, pond = 'pond_removed', e[1]
+          end
+        end
+        local okk, proj = K.call('runner', 'kept_in', b)
+        proj = okk and type(proj) == 'string' and proj or nil
+        if fill == 'none' and proj then
+          local okp, prm = K.call('runner', 'bp_params', proj)
+          if okp and type(prm) == 'table' and type(prm.path) == 'string' and prm.path ~= '' then fill = 'pipe' end
+        end
+        local best
+        for _, s in ipairs(r.sources) do
+          if s.wet and s ~= well then
+            local d = dist_box(s.x, s.y, s.z, box)
+            if not best or d < best.d then best = {d = d, s = s} end
+          end
+        end
+        local how = ({pond = string.format('bucket-fed (pond zone %s)', tostring(pond)),
+                      pond_removed = string.format('bucket-fed, its pond zone %s removed as a pond loop (its own well '
+                                                   .. 'fed it)', tostring(pond)),
+                      pipe = 'piped: its floodgate waits for the lever (link it, pull it once)',
+                      none = 'no pond zone, no pipe: nothing fills it'})[fill]
+        local carry = best and string.format('carry from: %s %d at %d,%d,%d (%d tiles)', best.s.kind, best.s.id,
+                                             best.s.x, best.s.y, best.s.z, best.d)
+                      or 'no accepted water to carry from (no revealed water source)'
+        local days = (now - (math.tointeger(rec.t) or now)) // DAY
+        local msg = string.format('cistern %s done, its well %d at %d,%d,%d dry for %d days: %s; %s', proj or rm.id,
+                                  well.id, well.x, well.y, well.z, days, how, carry)
+        local tail = '; no drink for a hospital or the refuge'
+        if #msg + #tail <= 200 then msg = msg .. tail end
+        K.emit('CISTERN_DRY', 'B', trunc(msg, 200),
+               {room = trunc(rm.id, 60), proj = proj, well = well.id, pos = {well.x, well.y, well.z}, days = days,
+                fill = fill, pond = pond, src = best and {best.s.x, best.s.y, best.s.z} or nil, d = best and best.d or nil})
+        K.log('warn', 'water: %s', msg)
+      end
+    end
+  end
+  for id in pairs(p.cdry) do if not seen[id] then p.cdry[id] = nil end end
 end
 
 ---------------------------------------------------------------- BUG-036: the hospital outside the core
@@ -914,7 +1014,7 @@ end
 local function finish(K, c, r, p)
   local now = K.now().tick
   local T = K.now()
-  pond_loops(K, c, r)
+  pond_loops(K, c, r, p)
   local hosp_ok, best_h, dry_h = #r.hosp > 0, nil, nil
   for _, h in ipairs(r.hosp) do
     local ok, b = served(K, c, r, h)
@@ -928,6 +1028,8 @@ local function finish(K, c, r, p)
   patients_out(K, r, kern, refuge, kname, rname, ho)
   local refuge_ok, rwells, rwet = false, 0, 0          -- BUG-035: the wells in the refuge and the wet ones of them
   for _, s in ipairs(r.sources) do
+    -- BUG-040: the burrow each source stands on (Kern+ first, else the refuge): state water.src_l, M.label
+    s.inn = on_burrow(kern, s.x, s.y, s.z) and kname or (on_burrow(refuge, s.x, s.y, s.z) and rname or nil)
     if s.kind == 'well' and on_burrow(refuge, s.x, s.y, s.z) then
       rwells = rwells + 1
       if s.wet then rwet, refuge_ok = rwet + 1, true end
@@ -1077,6 +1179,7 @@ local function finish(K, c, r, p)
     end
   end
   st.wet_rooms = wet_rooms
+  cistern_dry(K, c, r, p, now)                        -- BUG-040: a done cistern whose well stays dry
   -- the hospital zones left after this run's removal, and whether every one of them is served (BUG-034)
   local nh = #r.hosp
   if removed then
@@ -1091,11 +1194,12 @@ local function finish(K, c, r, p)
     end
     hosp_ok = hosp_ok and nh > 0
   end
+  local srcs, slbl = src_list(r)
   local out = {patients = #r.patients, thirsty = thirsty, thirst_max = tmax, wells = wells, wet = wet,
                hosp_ok = hosp_ok and 1 or 0, refuge_ok = refuge_ok and 1 or 0, buckets = r.buckets,
                buckets_free = r.free + fixed, buckets_full = r.full, buckets_want = want, unforbid = fixed,
                ordered = ordered, missing = math.max(0, missing), carers = #r.carers, gate = gate and 1 or 0,
-               hosp = nh, give = r.give, removed = removed and #removed.zones or 0, src = src_list(r),
+               hosp = nh, give = r.give, removed = removed and #removed.zones or 0, src = srcs, src_l = slbl,
                rwells = rwells, rwet = rwet, hosp_out = ho.n}
   local prev = st.out or {}
   if prev.hosp_ok ~= out.hosp_ok or prev.refuge_ok ~= out.refuge_ok or prev.patients ~= out.patients
@@ -1178,15 +1282,26 @@ function M.inspect(K, what, key)
   local now = K.now().tick
   if (not st.ws or now - st.ws.tick >= c.ws_every) and not st.scan then st.ws_want = true end
   local srcs = {}
-  for _, s in ipairs(st.src or {}) do
-    if #srcs < 30 then srcs[#srcs + 1] = {s.kind, s.id, s.x, s.y, s.z, s.wet and 1 or 0} end
+  for _, s in ipairs(st.src or {}) do        -- BUG-040: + the depth of the water under a well (-1 unknown) and its burrow
+    if #srcs < 30 then
+      srcs[#srcs + 1] = {s.kind, s.id, s.x, s.y, s.z, s.wet and 1 or 0,
+                         s.below and math.tointeger(s.below.flow) or -1, s.inn or ''}
+    end
+  end
+  -- BUG-040: where the refuge lies and how far its nearest tile is from the nearest accepted water (seal's audit)
+  local okr, rd = K.call('seal', 'refuge_drink')
+  local ref
+  if okr and type(rd) == 'table' and type(rd.box) == 'table' then
+    local n = type(rd.near) == 'table' and rd.near or nil
+    ref = {name = rd.name, box = rd.box, d = n and n.d or -1, at = n and n.at or nil,
+           src = n and n.src and M.label(K, n.src[1], n.src[2], n.src[3]) or nil, wells = rd.wells, wet = rd.wwet}
   end
   local queued = (st.ws_want or st.scan) and 1 or 0
   local rm = pstate(K).rm                     -- BUG-034: the last dry hospital removal (zones, patients, GiveWater jobs)
   rm = type(rm) == 'table' and rm or nil
   if not st.ws then
     return true, 'water_sources: scan queued for the next water run',
-           {tick = now, queued = queued, deep = c.deep, sources = srcs, removed = rm}
+           {tick = now, queued = queued, deep = c.deep, sources = srcs, removed = rm, refuge = ref}
   end
   local w = st.ws
   local reach = 0
@@ -1194,8 +1309,10 @@ function M.inspect(K, what, key)
   return true, string.format('water_sources: %d bodies >= %d/7, %d with a bank or a dig, %d sources', #w.bodies, w.deep,
                              reach, #srcs),
          {tick = w.tick, age = now - w.tick, queued = queued, deep = w.deep, boxes = w.boxes, tiles = w.tiles,
-          levels = w.levels, bodies = w.bodies, sources = srcs, err = w.err, removed = rm,
-          note = 'sources [kind, id, x, y, z, accepted]; bank: stand there and fill or zone the water; dig: opening '
+          levels = w.levels, bodies = w.bodies, sources = srcs, err = w.err, removed = rm, refuge = ref,
+          note = 'sources [kind, id, x, y, z, accepted, depth under a well (-1 unknown), burrow]; refuge: its bbox, d = '
+                 .. 'its nearest tile to the nearest accepted source (-1 none); bank: stand there and fill or zone the '
+                 .. 'water; dig: opening '
                  .. 'the last wall floods the dug tiles (dig from above or behind a floodgate); cavern 1: cavern water, '
                  .. 'never offered (caverns stay sealed); removed: the last dry hospital removal (t, zones, locs, '
                  .. 'n patients, tmax, give = GiveWater jobs then, after = a day later)'}
@@ -1212,7 +1329,35 @@ function M.state(K)
     return {}
   end
   return {water = {patients = o.patients, thirst_max = o.thirst_max, hosp_ok = o.hosp_ok, refuge_ok = o.refuge_ok,
-                   buckets_free = o.buckets_free, hosp = o.hosp, src = o.src or json.array{}, hosp_out = o.hosp_out}}
+                   buckets_free = o.buckets_free, hosp = o.hosp, src = o.src or json.array{}, hosp_out = o.hosp_out,
+                   src_l = o.src_l}}
+end
+
+-- public (BUG-040, readiness): 'well 19098 at 137,77,143 in Kern+' for an accepted source of the last run at that tile,
+-- else 'accepted water at x,y,z'
+function M.label(K, x, y, z)
+  for _, s in ipairs(st.src or {}) do
+    if s.wet and s.x == x and s.y == y and s.z == z then
+      return string.format('%s %d at %d,%d,%d', s.kind, s.id, x, y, z) .. (s.inn and (' in ' .. s.inn) or '')
+    end
+  end
+  return string.format('accepted water at %d,%d,%d', math.tointeger(x) or -1, math.tointeger(y) or -1,
+                       math.tointeger(z) or -1)
+end
+
+-- public (BUG-040, seal's burrow audit reports it: a dry cistern's well is no drink for the refuge): the wet wells and all built
+-- wells on burrow `name` by the last run (burrow tiles read now); nil before the first run or without that burrow
+function M.wet_wells(K, name)
+  local b = type(name) == 'string' and st.src and burrow_named(name) or nil
+  if not b then return nil end
+  local wet, n = 0, 0
+  for _, s in ipairs(st.src) do
+    if s.kind == 'well' and s.built and on_burrow(b, s.x, s.y, s.z) then
+      n = n + 1
+      if s.wet then wet = wet + 1 end
+    end
+  end
+  return wet, n
 end
 
 -- public (BUG-036, readiness): the hospital zones outside Kern+ and the refuge by the last run: {n, total, zones = {{id,

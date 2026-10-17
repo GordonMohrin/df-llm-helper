@@ -131,7 +131,8 @@ def test_check_measures_the_water_from_the_hospital_site(base):
     assert hosp_errs(errs) == [] and not [w for w in warn if w.startswith("hospital")]
     far = watered(state, src=[(90, 90, 5), (60, 20, 5)])
     e = hosp_errs(check(d, far, fort=fort)[0])
-    assert len(e) == 1 and e[0].startswith("hospital (seasons[2]): the nearest accepted water 60,20,5 is 40 tiles from "
+    # BUG-040: measured from the hospital's zone (x 17-23 at rot 0), as water.lua and the site ranking do: 37, not 40
+    assert len(e) == 1 and e[0].startswith("hospital (seasons[2]): the nearest accepted water 60,20,5 is 37 tiles from "
                                            "the hospital site 20,20,5 (> 30): its patients would die of thirst")
     # a source but no site to measure from (no snapshot): allowed, with a warning
     errs, warn = check(d, far, fort={"hosp": {"cistern": False, "site": None}})

@@ -53,6 +53,8 @@ local function fort(opts)
   SW.item(W, 'PLANT', 9, 14, Z, 20)
   W.burrow('Kern+', {5, 5, Z, 15, 15, Z})
   if opts.cfg then W.K.cfg.reflex = {v = 2, refuge = opts.cfg} end
+  if opts.well then SW.draw(W, Z - 4, {'W'}, 7, 7) end          -- BUG-040: a well in the dead end (a dry cistern's)
+  for _, m in ipairs(opts.mods or {}) do W.load(m) end
   package.loaded['dfllm.seal'] = nil
   local M = require('dfllm.seal')
   W.load(M)
@@ -127,7 +129,7 @@ T.test('BUG-019: in BREACH (a goblin inside Kern+) the dead end Tiefe+ is taken 
   T.eq({ok, pick, note}, {true, 'Tiefe+', nil})
   T.eq(#evs(W, 'REFUGE_FAIL'), 0)
   T.eq(W.state().alert, {want = 'Tiefe+', burrow = 'Tiefe+', tiles = 19, inside = 0, ok = 1, why = '',
-                         ref = {ex = 1, sep = 1, beds = 0, need = 1}})
+                         ref = {ex = 1, sep = 1, beds = 0, need = 1, box = {5, 5, 5, 8, 8, 8}, wd = -1}})   -- BUG-040
 end)
 
 T.test('BUG-019 live (Run 10 y419: "REFUGE_FAIL Tiefe+: 63 tiles<109, beds 8<28 -> confining to Kern+"): 30 ' ..
@@ -195,9 +197,10 @@ T.test('Run 10 (Tiefe+ open to the entrance, beds 8<27): the state carries the r
        'separated, beds and the beds wanted (refuge.bed_pct)', function()
   -- old code: no alert.ref
   local W = fort{citizens = 9}                       -- the dead end Tiefe+, reached by the doorless entrance
-  T.eq(W.state().alert.ref, {ex = 1, sep = 0, beds = 0, need = 3})
+  -- BUG-040: plus where it lies (box) and its nearest accepted water (wd -1: none known)
+  T.eq(W.state().alert.ref, {ex = 1, sep = 0, beds = 0, need = 3, box = {5, 5, 5, 8, 8, 8}, wd = -1})
   local W2 = fort{door = true, citizens = 9}
-  T.eq(W2.state().alert.ref, {ex = 1, sep = 1, beds = 0, need = 3})
+  T.eq(W2.state().alert.ref, {ex = 1, sep = 1, beds = 0, need = 3, box = {5, 5, 5, 8, 8, 8}, wd = -1})
   local W3 = fort{shaft = false}                     -- no dead end: no refuge burrow at all
   T.eq(W3.state().alert.ref, {ex = 0, sep = -1, beds = 0, need = 1})
   local W4 = fort{door = true, citizens = 9, cfg = {bed_pct = 50}}
@@ -428,7 +431,8 @@ T.test('Run 11 (siege 8: Tiefe+ had no drink): the deep defense (siege asks at t
        f[#f] and f[#f].msg)
   T.eq(inspect(W, 'refuge').bsince, nil, 'no breach days')
   T.eq(select(2, W.K.call('seal', 'refuge_drink')),
-       {name = 'Tiefe+', exists = true, drink = 0, need = 3, wells = 0, wet = false}, 'what readiness reads (refuge_dry)')
+       {name = 'Tiefe+', exists = true, drink = 0, need = 3, wells = 0, wet = false, box = {5, 5, 5, 8, 8, 8}},
+       'what readiness reads (refuge_dry; BUG-040: where it lies)')
   -- drink in the dead end (a barrel carried down): the refuge with its drink, without the 7-day window
   SW.item(W, 'DRINK', 6, 7, Z - 4, 5)
   W.run(2400, {skip = 9})
@@ -474,6 +478,46 @@ T.test('Run 11 (siege 8: the alert switched between Tiefe+ and Kern+ during the 
   W.set_mode('PEACE')
   T.eq(select(2, W.K.call('seal', 'alert_burrow', 'PEACE', 'Kern+', true, 'Tiefe+')), 'Kern+')
   T.eq(#evs(W, 'REFUGE_SWITCH'), 1)
+end)
+
+
+---------------------------------------------------------------- BUG-040 (Run 11, y453)
+T.test('BUG-040 (Run 11 y453: Tiefe+ drink 0, wells 1, the alert on the dry Tiefe+): refuge_drink and inspect say ' ..
+       'how many of its wells the water module calls wet (the alert\'s own rule still counts every built well: it ' ..
+       'holds a dry refuge until the citizens get thirsty, BUG-031 (b)), where the refuge lies and how far its nearest ' ..
+       'tile is from the nearest accepted water (state alert.ref box/wd/ws)', function()
+  local wf
+  wf = SW.fake('water', {
+    wet_wells = function(K, name) if name == 'Tiefe+' then return wf.wet, 1 end end,
+    state = function(K)
+      return {water = {patients = 0, thirst_max = 0, hosp_ok = 0, refuge_ok = wf.wet, buckets_free = 0, hosp = 0,
+                       src = {{12, 6, 9}}}}
+    end})
+  wf.wet = 0
+  local W = fort{door = true, well = true, mods = {wf}}
+  W.state()                                          -- the water state seal reads (K.view): one accepted source
+  inspect(W, 'refuge', 'refresh')
+  W.run(1200, {skip = 9})
+  local d = inspect(W, 'refuge')
+  local t = d.burrows['Tiefe+']
+  T.eq({t.wells, t.wwet}, {1, 0})
+  local rd = select(2, W.K.call('seal', 'refuge_drink'))
+  T.eq({rd.wells, rd.wwet, rd.wet}, {1, 0, true}, 'old code: no wwet')
+  T.eq(rd.box, {5, 5, 5, 8, 8, 8})
+  T.eq({rd.near.d, rd.near.src}, {4, {12, 6, 9}})
+  T.eq({t.box, t.near.d}, {{5, 5, 5, 8, 8, 8}, 4})
+  local ref = W.state().alert.ref
+  T.eq({ref.box, ref.wd, ref.ws}, {{5, 5, 5, 8, 8, 8}, 4, {12, 6, 9}})
+  -- its well holds water
+  wf.wet = 1
+  W.state()
+  inspect(W, 'refuge', 'refresh')
+  W.run(1200, {skip = 9})
+  T.eq(select(2, W.K.call('seal', 'refuge_drink')).wwet, 1)
+  -- no water module (an older kernel, water backed off): not known
+  local W2 = fort{door = true, well = true}
+  rd = select(2, W2.K.call('seal', 'refuge_drink'))
+  T.eq({rd.wells, rd.wwet, rd.wet, rd.near}, {1, nil, true, nil})
 end)
 
 T.done()

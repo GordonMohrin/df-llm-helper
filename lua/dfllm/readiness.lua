@@ -246,6 +246,28 @@ local function route_of(a)
   end
 end
 
+---------------------------------------------------------------- BUG-040: where the refuge lies
+-- Run 11 (y453: 'Tiefe+ has no drink' for months, and nobody knew where Tiefe+ lies or how far the one wet well was):
+-- seal.refuge_drink's bbox and nearest tile to an accepted source (seal's burrow audit, no scan of its own) as
+-- 'Tiefe+ 126-128,56-77 z129-136, nearest accepted water: well 19098 at 137,77,143 in Kern+, 9 tiles'; second value the
+-- source's label, third whether the refuge has no accepted water of its own (water's state refuge_ok 0: a hospital
+-- then belongs into Kern+ next to that water)
+local function refuge_where(K, rd)
+  if type(rd) ~= 'table' or type(rd.box) ~= 'table' or not int(rd.box[1]) then return nil end
+  local b = rd.box
+  local s = string.format('%s %d-%d,%d-%d z%d-%d', tostring(rd.name), b[1], b[4], b[2], b[5], b[3], b[6])
+  local wv = K.view().water
+  local dry = type(wv) == 'table' and wv.refuge_ok == 0
+  local n = rd.near
+  if type(n) ~= 'table' or type(n.src) ~= 'table' or not int(n.d) then
+    return s .. ', no accepted water in the fort', nil, true
+  end
+  local okl, lbl = K.call('water', 'label', n.src[1], n.src[2], n.src[3])
+  lbl = okl and type(lbl) == 'string' and lbl or string.format('accepted water at %d,%d,%d', n.src[1], n.src[2],
+                                                                n.src[3])
+  return s .. string.format(', nearest accepted water: %s, %d tiles', lbl, n.d), lbl, dry
+end
+
 ---------------------------------------------------------------- levels
 local function audit_fails(K, now)
   local a = st.audit
@@ -291,10 +313,12 @@ local function evaluate(K, why)
         f1[#f1 + 1] = 'refuge_dry'
         -- BUG-035 (Run 11: 13 wells, 1 wet, none in Tiefe+): whether the refuge has no well or only dry ones
         local nw = int(rd.wells) or 0
-        rt.rdry = string.format('%s has no drink (drink %d<%d, %s): build a well/cistern or stock drink there',
-                                tostring(rd.name), int(rd.drink) or 0, int(rd.need) or 0,
-                                nw == 0 and ('no well in ' .. tostring(rd.name))
-                                or (nw == 1 and 'its 1 well is dry' or string.format('its %d wells are dry', nw)))
+        local where = refuge_where(K, rd)                 -- BUG-040: where it lies, its nearest accepted water
+        rt.rdry = cut(string.format('%s has no drink (drink %d<%d, %s%s): build a well/cistern or stock drink there',
+                                    tostring(rd.name), int(rd.drink) or 0, int(rd.need) or 0,
+                                    nw == 0 and ('no well in ' .. tostring(rd.name))
+                                    or (nw == 1 and 'its 1 well is dry' or string.format('its %d wells are dry', nw)),
+                                    where and ('; ' .. where) or ''), 200)
       end
     end
   end
@@ -306,11 +330,21 @@ local function evaluate(K, why)
     f1[#f1 + 1] = 'hospital_out'
     local okh, ho = K.call('water', 'hospital_out')
     local z = okh and type(ho) == 'table' and type(ho.zones) == 'table' and ho.zones[1] or nil
-    rt.hout = string.format('the hospital lies outside %s/%s (%d of %d zones%s): its patients cannot walk to the refuge; '
-                            .. 'move it into %s next to accepted water', kern, refuge, int(wv.hosp_out) or 0,
-                            okh and type(ho) == 'table' and int(ho.total) or (int(wv.hosp) or 0),
-                            z and string.format('; zone %d at %d,%d,%d', int(z.id) or -1, int(z.x) or -1, int(z.y) or -1,
-                                                int(z.z) or -1) or '', refuge)
+    -- BUG-040 (Run 11 y453: Tiefe+ had no accepted water at all): then the hospital goes into Kern+ next to the water
+    local okd, rd = K.call('seal', 'refuge_drink')
+    local _, lbl, dry = refuge_where(K, okd and rd or nil)
+    local dest = string.format('move it into %s next to accepted water', refuge)
+    if dry and lbl then                                -- 'in Kern+' stands in the label when the water lies there
+      dest = string.format('no accepted water in %s: move it %snext to %s', refuge,
+                           lbl:find(' in ' .. kern, 1, true) and '' or ('into ' .. kern .. ' '), lbl)
+    elseif dry then
+      dest = string.format('no accepted water in the fort: water first, then the hospital in %s next to it', kern)
+    end
+    rt.hout = cut(string.format('the hospital lies outside %s/%s (%d of %d zones%s): its patients cannot walk to the '
+                                .. 'refuge; %s', kern, refuge, int(wv.hosp_out) or 0,
+                                okh and type(ho) == 'table' and int(ho.total) or (int(wv.hosp) or 0),
+                                z and string.format('; zone %d at %d,%d,%d', int(z.id) or -1, int(z.x) or -1,
+                                                    int(z.y) or -1, int(z.z) or -1) or '', dest), 200)
   end
   if not rt.lev or now - rt.lev.tick >= M.LEVERS_EVERY then rt.lev = check_levers(K, man) end
   local okl, lost = K.call('seal', 'lost_gates')             -- BUG-030 rebuild policy: held bridges

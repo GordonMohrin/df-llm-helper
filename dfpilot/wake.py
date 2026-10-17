@@ -216,10 +216,13 @@ def rebuild_hint(d: dict) -> str:
 
 _WALL = re.compile(r"\bwall -?\d+,-?\d+,-?\d+ (floor|ramp)\b")
 # Run 11 (siege 8: Tiefe+ had no drink): readiness R0 refuge_dry; a dry refuge holds the citizens only in a breach
-REFUGE_DRY_HINT = "the refuge has no drink: next plan a well/cistern there (bp sites cistern) or a drink stockpile"
-# BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds outside the refuge): readiness R0 hospital_out
-HOSPITAL_OUT_HINT = ("the hospital lies outside the core: plan it inside Tiefe+ next to accepted water (bp sites hospital;"
-                     " a cistern there first), then remove the old zones")
+# BUG-040: a bucket-fed cistern without revealed open water in reach stays dry (plan check warns, CISTERN_DRY)
+REFUGE_DRY_HINT = ("the refuge has no drink: next plan a well/cistern there (bp sites cistern; only with a fill source, "
+                   "BUG-040) or a drink stockpile")
+# BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds outside the refuge): readiness R0 hospital_out;
+# BUG-040 (y453: Tiefe+ had no accepted water): then Kern+ next to the water
+HOSPITAL_OUT_HINT = ("the hospital lies outside the core: plan it next to accepted water inside Tiefe+, or in Kern+ when "
+                     "Tiefe+ has none (bp sites hospital names the water), then remove the old zones")
 
 
 def wake_line(burst: dict[str, dict], state: dict | None, held_s: float = 0) -> str:

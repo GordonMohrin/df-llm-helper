@@ -459,6 +459,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # n of the patients lie outside the burrow the civ alert confines to (burrow; Kern+/Tiefe+ while it is silent):
     # units, all patients, mode, hosp_out = hospital zones outside Kern+ and the refuge
     "PATIENTS_OUT": ("B", "water", _d("n:i burrow:s", "patients:i units:ia mode:s hosp_out:i")),
+    # BUG-040 (Run 11 y453: the cisterns y450s0b0/y452s1b0 were done, their wells never wet): a manifest cistern whose
+    # built well stood dry for water.cistern_dry_days, once per dry spell: room, project, well (id, pos), days, fill
+    # (pond: bucket-fed with its pond zone; pond_removed: water removed that pond as a loop; pipe: its floodgate lever;
+    # none), pond (zone id), src/d (the nearest accepted water to carry from, tiles)
+    "CISTERN_DRY": ("B", "water", _d("room:s days:i fill:s", "proj:s well:i pos:p pond:i src:p d:i")),
     "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i nosrc:sa route:s")),
     # class A since Run 9 (an army walked in while these were digest-only): they wake at once
     "SIEGE_START": ("A", "siege", _d(opt="vis:i inv:i great:i why:s")),
@@ -784,7 +789,12 @@ STATE = Obj(
                                              # Run 10: the refuge burrow (Tiefe+): exists, separated (1, 0 an
                                              # opening reaches it, -1 not known yet), beds, beds wanted (bed_pct)
                                              "ref": Obj(req={"ex": FLAG, "sep": Int(-1, 1), "beds": NAT,
-                                                             "need": NAT})}),
+                                                             "need": NAT},
+                                                        # BUG-040: where it lies (bbox of its tiles) and how far its
+                                                        # nearest tile is from the nearest accepted source ws (-1:
+                                                        # none)
+                                                        opt={"box": Tup([INT] * 6), "wd": Int(-1),
+                                                             "ws": Tup([NAT, NAT, NAT])})}),
          # intake waves (siege, Gordon 2026-10-16): phase, waves so far, the last refusal, the sortie (squad phase)
          # BUG-030: deep = the deep defense's reasons ("destroyers,army,weak")
          "wave": Obj(req={"ph": Str(maxbytes=8), "n": NAT}, opt={"why": Str(maxbytes=40), "so": Str(maxbytes=24),
@@ -800,8 +810,9 @@ STATE = Obj(
          # to the hospital (else the citizens) first: plan propose/check allow a hospital only within `near` of one
          "water": Obj(req={"patients": NAT, "thirst_max": NAT, "hosp_ok": FLAG, "refuge_ok": FLAG,
                            "buckets_free": NAT, "hosp": NAT, "src": Arr(Tup([NAT, NAT, NAT]), hi=8)},
-                      # BUG-036: hospital zones with tiles outside Kern+ and the refuge (readiness R0 hospital_out)
-                      opt={"hosp_out": NAT})})
+                      # BUG-036: hospital zones with tiles outside Kern+ and the refuge (readiness R0 hospital_out);
+                      # BUG-040: src_l = a label per src ('well 19098 in Kern+': kind, id, the burrow it is on)
+                      opt={"hosp_out": NAT, "src_l": Arr(Str(maxbytes=32), hi=8)})})
 
 HEARTBEAT = Obj(req={"v": Const(V), "wall": NAT, "frame": NAT, "tick": TICK, "paused": Bool(), "mode": MODE,
                      "seq": NAT})

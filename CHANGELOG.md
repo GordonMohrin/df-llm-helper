@@ -1,5 +1,66 @@
 # CHANGELOG dfpilot
 
+## Hospital sites follow the accepted water, the refuge's place is named, dry cisterns are reported (BUG-040, 2026-10-17; offline, live-untested)
+- **Why (Run 11, y453):** Kilrudrabed site98, y453 summer, kernel b49acfb: no new hospital was planned (the session
+  waited for water: `plan check` refuses a hospital without a source), wounded lay in beds without a hospital;
+  `inspect water_sources` 16 wells, one wet (19098 at 137,77,143); `bp sites hospital` offered S1 139,61,139 and S2
+  144,61,139; the cisterns y450s0b0/y452s1b0 PROJECT_DONE with dry wells (`water NO` all run); Tiefe+ dry (refuge_dry)
+  and nobody knew where it lies (inspect refuge, autumn d7: dead end 126,56,129 - 128,77,136, z129-136, drink 0, 1 dry
+  well; Kern+ 14 wells).
+- **Causes (from the code; bugs/BUG-040):** the room ranking had no water term for a hospital (sites.py:364-419; the
+  fortcore's water bonus uses revealed bodies, not accepted sources); plan check measured only S1's anchor (water.lua
+  measures the zone), a refused ranking read as "not checked", the ranking cache ignored the water; no text named the
+  refuge's place; nothing checked a cistern's fill source (propose drafted the bucket-fed `cistern@S1`), the kernel never
+  reported a done cistern that stays dry, and water.lua's pond-loop rule removes a bucket-fed cistern's pond once its own
+  well is wet (live L6). By water.lua's measure the live S1/S2 zones lie 10 tiles from 19098 (inside 30): the session's
+  refusal must have come from an empty `water.src` at check time (not decided offline).
+- **sites/cmd:** `rank(..., water=)` for `hospital`: only sites whose zone lies within `water.near` (30) of an accepted
+  source (state `water.src`; Chebyshev to the zone rect, z included, as water.lua's `served`), +2 per tile nearer, `why`
+  and `water {d, src}` name the source (`well 19098 at 137,77,143 in Kern+ 10 tiles`); none: `no accepted water in the
+  fort` / `no site within 30 tiles of accepted water (nearest: ...; the nearest candidate ... is N tiles from it); no
+  accepted water in Tiefe+ (box; nearest: ..., N tiles from Tiefe+): ...`. `cmd.water_ctx` from the state, its digest in
+  the sites cache; `dfllm bp sites hospital` prints `accepted water (sites lie within 30 tiles of it): ...`.
+  `sites.fill_source`: revealed brook/river/lake (>= 8 tiles, no cavern mark, not the fort's own sump) reachable on
+  foot from the core.
+- **plan:** check measures the offered site's zone and refuses with the ranking's own reason (sites and check agree);
+  a new bucket-fed cistern (no `p.path`) without a fill source is a warning; propose drafts none (note `no cistern either
+  (BUG-040: ...)`), the hospital gate's fix no longer sends the player to one.
+- **Kernel:** water: sources labelled with their burrow (state `water.src_l`, first 4; `water.label`,
+  `water.wet_wells`), `inspect water_sources` sources `[kind, id, x, y, z, accepted, depth, burrow]` and `refuge`;
+  CISTERN_DRY (B): a manifest cistern whose built well stays dry `water.cistern_dry_days` (30), once per dry spell, with
+  `fill` (pond, pond_removed, pipe, none), the project (`runner.kept_in`), the pipe (`runner.bp_params`) and the nearest
+  accepted water to carry from (`cistern y450s0b0 done, its well 812 at ... dry for 30 days: bucket-fed (pond zone 77);
+  no accepted water to carry from (no revealed water source); no drink for a hospital or the refuge`); seal:
+  `burrow_size` keeps the bbox and the refuge's tile nearest an accepted source (state `alert.ref` `box`, `wd`, `ws`;
+  `refuge_drink` `box`, `near`, `wwet`); readiness: `refuge_dry` `Tiefe+ has no drink (drink 0<31, its 1 well is dry;
+  Tiefe+ 126-128,56-77 z129-136, nearest accepted water: well 19098 at 137,77,143 in Kern+, 9 tiles): ...`,
+  `hospital_out` `...; no accepted water in Tiefe+: move it next to well 19098 at 137,77,143 in Kern+`.
+- **Python:** status/brief `next:` name the refuge's place and water, the hospital line `src 1 (well 19098 at ... in
+  Kern+)`; wake hints (refuge_dry: a cistern only with a fill source; hospital_out: Kern+ when Tiefe+ has no water).
+- Not changed (judgment): seal's alert rating still counts a dry well as the refuge's drink (seal.lua:559, 570): counting
+  only wet ones would cut a dry Tiefe+'s hold in a siege from "until thirsty" (BUG-031 (b)) to the 7 breach days.
+- Config: `water.cistern_dry_days` (1-400; `fairplay.WATER_LIM`). Contracts: state `water.src_l`, `alert.ref`
+  box/wd/ws, CISTERN_DRY (schema, contract.lua, appendix), §7 publics, §5 inspect water_sources; RULES §7 HOSPITAL_DRY row
+  and §8 refuge_dry/hospital_out in place (300 lines); DESIGN hospital water.
+- Tests (each new one fails on 3d5fe0a): `tests/test_hospital_sites.py` (new: the ranking with water, its refusals, the
+  live numbers, fill_source, sites and check agree on a save, the cache, the CLI line, the cistern warning and propose,
+  status), `tests/lua/test_water.lua` (CISTERN_DRY: once per spell, pond/pond_removed/pipe/none, the carry source;
+  labels, wet_wells, inspect), `tests/lua/test_seal_refuge.lua` (box, near, wwet, alert.ref), `tests/lua/test_readiness.lua`
+  (the refuge_dry and hospital_out texts); adjusted: `test_hospital_water.py` (zone distance 37, not 40),
+  `test_seal_refuge.lua` (alert.ref/refuge_drink exact tables), `test_water_fr.lua` (source entry), `test_cli_wake.py`
+  (hint).
+- **Live check (Run 11):** before the reload, read-only: `bp/y450s0b0.json` and `bp/y452s1b0.json` `params.path`; kern.log
+  `water: pond zone N removed` lines; the `dfllm plan check` line that refused the hospital and `state.json` `water.src`.
+  After `git pull` and `dfhack-run dfllm reload`:
+  - `dfllm cmd inspect '{"what":"water_sources"}'`: 19098's entry `[well, 19098, 137, 77, 143, 1, <depth>, <burrow>]`
+    (depth >= 1; send it), `refuge` `{name: Tiefe+, box: [126,56,129,128,77,136] or so, d: ~9, src: well 19098 ...}`;
+  - `dfllm bp sites hospital`: the water line and S1-S3 each with `well 19098 at 137,77,143 ... N tiles`; then `dfllm plan
+    check` with a hospital at S1 passes the water rule (a refusal now carries the ranking's reason);
+  - `dfllm status`: `next: the refuge has no drink (Tiefe+ ...; no accepted water in it; nearest accepted water: well
+    19098 ..., N tiles)`; the next SIEGE_UNREADY `rdry` with the place;
+  - within 30 game days (~40 min at timestream speed): one CISTERN_DRY per dry cistern (`dfllm events --type CISTERN_DRY`)
+    with `fill`; `pond_removed` confirms the pond-loop conflict, `none` a cistern without a pond zone or pipe.
+
 ## One huge step no longer starves a module for hours; the cavern check converges and logs only news (BUG-039, 2026-10-17; offline, live-untested)
 - **Why (Run 11, y451):** Kilrudrabed site98, y451 winter d63, kernel e11d17a, PEACE, 293 units: `inspect workload` said
   `runner: no run ended for 49 days (at task 1/3 work y451s3b0, 1 slices)`; `inspect modules` runner `debt 67760`,
