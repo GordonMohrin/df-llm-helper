@@ -133,6 +133,19 @@ function H.fake_qf(W, p)
             st.out_of_bounds = st.out_of_bounds + 1
           elseif cmd == 'undo' then
             if t.dig ~= '' then t.dig = ''; st.dig_designated = st.dig_designated + 1 end
+          elseif key == 'p' and not t.hidden then
+            -- BUG-041: quickfort do_gather marks SHRUB tiles only (W.tile().plant); elsewhere a counted no-op
+            st.dig_designated = st.dig_designated + 1
+            if t.plant == 'shrub' and not p.dry_run and cmd == 'run' then t.dig = 'p' end
+          elseif key == 'x' then
+            -- quickfort do_remove_designation: only a tile with a designation flag (a posted job without one stays)
+            if t.dig ~= '' and t.dig ~= 'job' then
+              st.dig_designated = st.dig_designated + 1
+              if not p.dry_run and cmd == 'run' then t.dig = '' end
+            else st.dig_invalid_tiles = st.dig_invalid_tiles + 1 end
+          elseif key == 't' and t.tree and not t.hidden then
+            st.dig_designated = st.dig_designated + 1     -- quickfort do_chop: tree tiles (W.tile().tree)
+            if not p.dry_run and cmd == 'run' then t.dig = 't' end
           elseif diggable(W, t, key, tx, ty, z) then
             st.dig_designated = st.dig_designated + 1
             if not p.dry_run and cmd == 'run' then t.dig = key end
@@ -204,6 +217,16 @@ function H.world(opts)
                       local bb = bid and W.buildings[bid]
                       return {c = t.c, dig = t.dig, bld = bid and (bb and bb._bld or 'Bed') or '',
                               flow = t.flow or ((t.c == '~' and 7) or (t.c == 'w' and 2) or 0), cav = t.cav == true}
+                    end,
+                    -- BUG-041: walk groups per point (snapshot.groups: -1 hidden or off the map, else W.tile().g or 0)
+                    groups = function(K, pts)
+                      W.snap.gcalls = (W.snap.gcalls or 0) + 1
+                      local out = {}
+                      for i, p in ipairs(pts) do
+                        local t = on_map(p[1], p[2], p[3]) and W.tile(p[1], p[2], p[3])
+                        out[i] = (not t or t.hidden) and -1 or (t.g or 0)
+                      end
+                      return out
                     end,
                     -- Run 11: open sky per point (snapshot.outside_near, r = 0: the tile itself; W.tile().outside)
                     outside_near = function(K, pts)

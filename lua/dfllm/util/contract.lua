@@ -111,7 +111,8 @@ C.EVENTS = {
   -- daily shaft check (any explore state, field state) queues it too
   CAVERN_PLUG = {cls = 'A', by = 'runner'},
   -- Run 11 siege 8: an open seal or plug built nothing for runner seal_first.stuck_days; the others run again (d.proj,
-  -- tpl, stage, days, n, pieces 'door x,y,z', mat, blocked)
+  -- tpl, stage, days, n, pieces 'door x,y,z', mat, blocked; BUG-041 wait: the job and its labor, a piece no citizen
+  -- reaches)
   SEAL_STUCK = {cls = 'A', by = 'runner'},
   -- B: digest
   ALERT_START = {cls = 'B', by = 'siege'}, ALERT_END = {cls = 'B', by = 'siege'},

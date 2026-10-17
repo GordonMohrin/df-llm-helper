@@ -1,7 +1,7 @@
 """seal at=last|all, Run 11 (Kilrudrabed, y429): `bp.place tpl=seal at=all|last` gave the same door 125,103,144 on every
 repetition and never the new leaks (188,103,144 floor; 124,81,138 'open route without a roofed tile'; shrubs and
 saplings at 188,88,144 and 177,99,144). The openings now come from SEAL_LEAK, the entrance check and REFUGE_FAIL;
-those a seal project builds or built are left out; a shrub is gathered first, a sapling or a door the route passes
+those a seal project builds or built are left out; a shrub carries its piece (BUG-041), a sapling or a door the route passes
 beside gets the neighbouring tile that closes the same route, an open route a wall on its first tile that cuts it
 from the map edge (with the fort behind it)."""
 import json
@@ -90,23 +90,24 @@ def test_seal_leak_is_a_source_and_gets_a_wall(tmp_path):
     assert cmd.seal_openings(save, "last")[0] == "6,2,0 floor"
 
 
-def test_shrubs_are_gathered_and_saplings_closed_beside(tmp_path):
-    """188,88,144 shrub / 177,99,144 sapling: no door stands on a plant. The shrub gets the gather designation (#dig p)
-    before its door, the sapling (no tree yet: neither quickfort's chop nor any player designation takes it) a door on
-    the neighbour that closes its route (old code: doors on both plants, the snapshot's '.' read as floor)."""
+def test_shrubs_carry_their_piece_and_saplings_are_closed_beside(tmp_path):
+    """188,88,144 shrub / 177,99,144 sapling. BUG-041 (Run 11 y461: a gather designation before the door waited 220
+    days for a plant gatherer): the shrub's door goes on the shrub in seal.build (quickfort builds on SHRUB tiles); the
+    sapling (no tree yet: neither quickfort's chop nor any player designation takes it) gets a door on the neighbour
+    that closes its route (y429 code: doors on both plants, the snapshot's '.' read as floor)."""
     marks = {"shrub": [[6, 2, 0]], "sapling": [[9, 2, 0]]}
     save = save_with(tmp_path, [fort(marks)], [unready(7, ["6,2,0 shrub", "9,2,0 sapling"])])
     at, _ = cmd.seal_openings(save, "last")
     assert at == "6,2,0 shrub;9,3,0 floor for=9,2,0:sapling"
     doc = bp.emit("seal", {"at": at}, {"id": "S1", "anchor": [6, 2, 0], "rot": 0})
     got = [(st["label"], k, (x0, y0, z)) for st, k, _, x0, y0, _, _, z in cell_rects(doc)]
-    assert got == [("seal.build", "d", (9, 3, 0)), ("seal.clear", "p", (6, 2, 0)), ("seal.plant", "d", (6, 2, 0))]
+    assert got == [("seal.build", "d", (6, 2, 0)), ("seal.build", "d", (9, 3, 0))]
     assert doc["materials"] == {"door": 2}
     assert [pc["why"] for pc in defense.seal_pieces({"at": at})] == [
-        "6,2,0 shrub: gather the shrub, then door at 6,2,0",
+        "6,2,0 shrub: door at 6,2,0 on the shrub (quickfort builds on shrub tiles; no gather job)",
         "9,2,0 sapling: door at 9,3,0 (the neighbour on the same route: no piece and no player designation takes a "
         "sapling)"]
-    assert bp.check_doc({**doc, "id": "c1"}) == []                       # p is a quickfort #dig key
+    assert bp.check_doc({**doc, "id": "c1"}) == []
     # a snapshot of an older kernel (no plant marks) cannot tell: the entrance check's kinds stand
     assert cmd.seal_openings(save, "last", snap=fort())[0] == at
     # a newer plant-aware snapshot without the marks: both are gone, plain doors

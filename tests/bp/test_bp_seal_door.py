@@ -98,10 +98,10 @@ def test_explicit_pieces_close_and_unknown_tiles(tmp_path):
     assert cmd.seal_openings(save, "3,3,0 floor", snap=hall(hidden))[0] == "3,3,0 floor"
     bare = save_with(tmp_path / "bare", [], [])
     assert cmd.seal_openings(bare, "3,3,0 floor")[0] == "3,3,0 floor"           # no snapshot: quickfort decides
-    # a shrub there: gathered first, then the wall
+    # a shrub there: the wall goes on the shrub (BUG-041: no gather first)
     doc = bp.emit("seal", {"at": "3,3,0 shrub nodoor"}, {"id": "S1", "anchor": [3, 3, 0], "rot": 0})
     got = [(st["label"], k) for st, k, *_ in cell_rects(doc)]
-    assert got == [("seal.clear", "p"), ("seal.plant", "Cw")]
+    assert got == [("seal.build", "Cw")]
 
 
 def test_nodoor_round_trip_and_a_neighbour():

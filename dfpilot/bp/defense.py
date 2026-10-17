@@ -157,9 +157,12 @@ def site_problem(at, X) -> str:
 #   grate (grate) or floor bars (bars); it cuts the ramp's way up and down;
 # * stair: a hatch on the stair tile (it closes the stair's floor, i.e. the way down from it; a way up is closed by
 #   naming the tile above). Walls cannot stand on stairs.
-# Run 11 (Kilrudrabed): no piece stands on a plant. A shrub gets the player's gather-plants designation first
-# (quickfort #dig `p`, stage seal.clear), its piece follows in stage seal.plant; a tree tile the route crosses (branch,
-# trunk_branch, twig) gets the chop designation (`t`): the felled tree takes the walkable branches with it, no piece.
+# Run 11 (Kilrudrabed): a tree tile the route crosses (branch, trunk_branch, twig) gets the chop designation (`t`,
+# stage seal.clear): the felled tree takes the walkable branches with it, no piece. BUG-041 (Run 11 y461: the seal door
+# 59,62,146 on a shrub waited 220 days for a gather designation nobody did; the plant gathering detail is filled only
+# below 30 food days): a shrub's piece goes on the shrub in seal.build. quickfort builds doors and constructions on
+# SHRUB and SAPLING tiles as on floors (internal/quickfort/build.lua is_valid_tile_generic, DFHack 53.16-r2: FLOOR,
+# BOULDER, PEBBLES, TWIG, SAPLING, SHRUB; doors: is_tile_generic_and_wall_adjacent), the in-game rule it enforces.
 # A sapling is no tree yet (quickfort's `t` marks tree tiles only, and no player designation removes a sapling), a
 # door or hatch already stands on its opening, or another building does: the CLI (cmd.seal_openings) puts the piece on
 # the neighbouring tile that closes the same route (bp.topo.SealGeo) and names the opening with `for=x,y,z:kind`; an
@@ -174,7 +177,8 @@ def site_problem(at, X) -> str:
 # AT_MAX characters), close = the default piece. The CLI fills missing kinds from the newest snapshot and expands
 # at=last (cmd.seal_openings). Site: the first tile (any rot).
 FLOORISH_KINDS = frozenset({"floor", "boulder", "pebbles", "brook_top", "passable"})
-GATHER_KINDS = frozenset({"shrub"})                       # gather plants (`p`) first, then the piece
+SHRUB_KINDS = frozenset({"shrub"})                       # BUG-041: the piece on the shrub (no gather first)
+SHRUB_WHY = "on the shrub (quickfort builds on shrub tiles; no gather job)"
 CHOP_KINDS = frozenset({"branch", "trunk_branch", "twig"})   # chop the tree (`t`): its branches go, no piece
 STAIR_KINDS = frozenset({"stair", "stair_up", "stair_down", "stair_updown"})
 CLOSER_KINDS = frozenset({"door", "hatch", "floodgate", "gratewall", "barsvertical"})   # closed already (lockdown)
@@ -229,7 +233,7 @@ def door_piece(o: dict, close: str = "auto") -> bool:
     auto, door or hatch (a hatch on a floor is a door, seal_pieces)?"""
     kind = o.get("kind") or "floor"
     want = o.get("piece") or close
-    return (kind in FLOORISH_KINDS or kind in GATHER_KINDS) and want in ("auto", "door", "hatch")
+    return (kind in FLOORISH_KINDS or kind in SHRUB_KINDS) and want in ("auto", "door", "hatch")
 
 
 def for_why(kind: str) -> str:
@@ -243,7 +247,7 @@ def for_why(kind: str) -> str:
 
 def piece_kind(kind: str) -> bool:
     """A tile kind a seal piece is built on (or cleared for) directly."""
-    return kind in FLOORISH_KINDS or kind in GATHER_KINDS or kind in CHOP_KINDS or kind in STAIR_KINDS \
+    return kind in FLOORISH_KINDS or kind in SHRUB_KINDS or kind in CHOP_KINDS or kind in STAIR_KINDS \
         or kind == "ramp"
 
 
@@ -323,13 +327,13 @@ def seal_pieces(p: dict, anchor=None) -> list[dict]:
         clear, note, nodoor = "", "", ""
         if kind in CHOP_KINDS:
             piece, at, key, clear = "chop", (x, y, z), "", "t"
-        elif kind in FLOORISH_KINDS or kind in GATHER_KINDS:
+        elif kind in FLOORISH_KINDS or kind in SHRUB_KINDS:
             piece = "door" if want in ("auto", "hatch") else want
             if piece == "door" and o.get("nodoor"):          # Run 11: no wall beside it, so no door (door_stands)
                 piece, nodoor = "wall", f"door unsuitable at {x},{y},{z} ({NODOOR_WHY}): wall instead"
             at, key = (x, y, z), FLOOR_KEY[piece]
-            if kind in GATHER_KINDS:
-                clear, note = "p", "gather the shrub, then "
+            if kind in SHRUB_KINDS:                          # BUG-041: on the shrub, no gather designation first
+                note = " " + SHRUB_WHY
         elif kind == "ramp":
             if want == "door":
                 raise ValueError(f"seal: {where}: a ramp cannot carry a door; use wall, grate or bars (on the ramp top)")
@@ -351,9 +355,9 @@ def seal_pieces(p: dict, anchor=None) -> list[dict]:
         if piece == "chop":
             why = f"{where}: chop the tree there (its branches go with it; no piece)"
         elif nodoor:
-            why = f"{where}: {note}{nodoor}"
+            why = f"{where}: {nodoor}" + (" (on the shrub)" if note else "")
         else:
-            why = f"{where}: {note}{piece} at {at[0]},{at[1]},{at[2]}" + (" (the ramp top)" if kind == "ramp" else "")
+            why = f"{where}: {piece} at {at[0]},{at[1]},{at[2]}{note}" + (" (the ramp top)" if kind == "ramp" else "")
         of = o.get("of")
         if of:
             ok = o.get("of_kind") or "?"
@@ -369,8 +373,8 @@ def seal_pieces(p: dict, anchor=None) -> list[dict]:
 def seal(p: dict, anchor, rot: int) -> Plan:
     """Close open ways in: a door on a floor, a wall on a ramp top, a hatch on a stair (or wall/grate/bars;
     absolute tiles from `inspect entrances`, SIEGE_UNREADY, SEAL_LEAK or the audit; at=last in dfllm cmd). Stages:
-    seal.build (the pieces on clear tiles), seal.clear (gather/chop designations, Run 11), seal.plant (the pieces on
-    the tiles seal.clear cleared)."""
+    seal.build (every piece, shrubs included: BUG-041), seal.clear (the chop designations of tree tiles, Run 11),
+    seal.plant (a piece seal.clear clears the tile for; none since BUG-041, kept for the stage's meaning)."""
     P = Plan("seal", "defense")
     ax, ay, az = anchor
     pcs = seal_pieces(p, anchor)

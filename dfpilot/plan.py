@@ -60,6 +60,7 @@ SUPPLY_TPLS = ("farms", "cistern", STOCKROOM)                      # food/water/
 BEDS_TPLS = ("bedrooms", REFUGE_BEDS)
 FOOD_SHOPS = {"Still", "Kitchen", "Butchers", "Fishery"}
 SEAL_PAUSES = {"work", "beds", "supply"}                           # paused while a seal is open (supply: not in need)
+STUCK_SHORT_D = 28            # BUG-041: a seal stuck this long (a game month) gets one short plan check line
 REBUILD_KINDS = {"seal", "tombs", "supply", "beds", "depot", "repair"}
 REBUILD_DEF = (10, 12)                    # config/baseline.json runner.rebuild {pop, off} defaults (runner.lua M.CFG)
 SIEGE_EVENTS = ("SIEGE_START", "SIEGE_END", "BREACH")
@@ -349,17 +350,38 @@ def done_projects(save_dir: Path) -> set[str]:
     return out
 
 
+def stuck_reasons(save_dir: Path) -> dict[str, str]:
+    """BUG-041: per seal project, why its newest SEAL_STUCK says it waits: d.wait (the job and its labor, a piece no
+    citizen reaches), else the material, the block or the first pieces."""
+    out: dict[str, str] = {}
+    for e in files.iter_events_rev(save_dir):
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        p = d.get("proj")
+        if e.get("type") != "SEAL_STUCK" or not isinstance(p, str) or p in out:
+            continue
+        pcs = [x for x in d.get("pieces") or [] if isinstance(x, str)]
+        why = next((d[k] for k in ("wait", "mat", "blocked") if isinstance(d.get(k), str) and d[k]), "")
+        out[p] = why or ", ".join(pcs[:2])
+    return out
+
+
 def open_seals(save_dir: Path, state: dict | None = None) -> list[dict]:
     """Run 11 siege 8: the seal projects not done yet: state sched.seal first (the runner's leading open seal or plug:
     proj, n pieces open, stuck, days), then every seal bp file without a PROJECT_DONE ({proj, n: None}); while the state
-    lists the running projects (state.proj, seals first) only those (a cancelled seal leaves its bp file behind)."""
+    lists the running projects (state.proj, seals first) only those (a cancelled seal leaves its bp file behind).
+    BUG-041: a row parked for good (BUG-037 `parked: ...`: it pauses nothing) is no open seal; a stuck one carries
+    `why` (stuck_reasons) when a SEAL_STUCK names it."""
     out: list[dict] = []
     s = state or {}
     se = (s.get("sched") or {}).get("seal")
     if isinstance(se, dict) and isinstance(se.get("proj"), str):
         out.append({"proj": se["proj"], "n": se.get("n"), "stuck": bool(se.get("stuck")), "days": se.get("days", 0)})
+        why = stuck_reasons(save_dir).get(se["proj"]) if se.get("stuck") else None
+        if why:
+            out[0]["why"] = why
     rows = s.get("proj")
-    live = {r[0] for r in rows if isinstance(r, list) and r} if isinstance(rows, list) else None
+    live = {r[0] for r in rows if isinstance(r, list) and r and not str(r[-1] if len(r) > 3 else "").startswith(
+        "parked:")} if isinstance(rows, list) else None
     done = done_projects(save_dir)
     for p in bp_files(save_dir):
         if p.stem in done or (live is not None and p.stem not in live) or any(x["proj"] == p.stem for x in out):
@@ -421,8 +443,9 @@ def rebuild_state(s: dict | None) -> dict | None:
 def seal_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> list[str]:
     """Warnings (Run 11 siege 8). A new seal build after another new build (an earlier season, or the same season
     before it): seal first. A seal project open now (fort.seals, state sched.seal) and new housing/work builds due now:
-    the runner pauses them in PEACE until it is done; a stuck one (SEAL_STUCK) is named. Under the rebuild policy:
-    every new build the runner pauses (not seal, tombs, food/drink, beds)."""
+    the runner pauses them in PEACE until it is done; a stuck one (SEAL_STUCK) is named with why it waits (BUG-041), in
+    full below STUCK_SHORT_D days, then in one short line. Under the rebuild policy: every new build the runner pauses
+    (not seal, tombs, food/drink, beds)."""
     warn: list[str] = []
     adds = new_builds(doc, prev)
     for si, bi, b in adds:
@@ -444,8 +467,12 @@ def seal_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> list[str]:
         n = x.get("n")
         what = f"seal {x['proj']}" + (f" ({n} piece{'s' if n != 1 else ''} open)" if isinstance(n, int) else "") \
             + (f" +{len(seals) - 1}" if len(seals) > 1 else "")
-        if x.get("stuck"):
-            warn.append(f"{what} is stuck for {x.get('days', 0)} d (SEAL_STUCK): fix it first (material, a refused tile; "
+        why = f": {x['why']}" if x.get("why") else ""
+        days = x.get("days", 0) if isinstance(x.get("days"), int) else 0
+        if x.get("stuck") and days >= STUCK_SHORT_D:      # BUG-041: announced long ago: one short line, no orders
+            warn.append(f"{what} stuck {days} d (SEAL_STUCK, announced{why}): {', '.join(later[:4])} run beside it")
+        elif x.get("stuck"):
+            warn.append(f"{what} is stuck for {days} d (SEAL_STUCK{why}): fix it first (material, a refused tile; "
                         f"dfllm cmd inspect what=workload); until then {', '.join(later[:4])} run beside it")
         else:
             warn.append(f"{what} is open: the runner pauses {', '.join(later[:4])}"
