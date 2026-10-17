@@ -141,7 +141,7 @@ T.test('a deep Water Source zone near the hospital: served, no gate; the scan ru
   local r = W.inbox('inspect', {what = 'water_sources'})
   T.ok(r.ok and r.msg:find('scan queued', 1, true), r.msg)
   T.eq(r.data.queued, 1)
-  T.eq(r.data.sources, {{'zone', 70, 19, 12, 5, 1}})
+  T.eq(r.data.sources, {{'zone', 70, 19, 12, 5, 1, -1, 'Kern+'}})   -- BUG-040: + depth under a well, the burrow
   day(W)
   local d = sources(W)
   T.eq({d.bodies[1].zone, d.bodies[1].bank, d.queued}, {70, {19, 12, 5}, 0})

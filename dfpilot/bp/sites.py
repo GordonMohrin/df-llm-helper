@@ -32,6 +32,11 @@ Explore (`mine.explore`, Run 10: no ore for years): public Z4 anchors like a roo
 its footprint ring per level (all round below the anchor level) must be rock or unknown, levels below the snapshot are
 unknown; the shaft must not reach a level in `p.avoid`, one with a revealed cavern, damp or warm mark, or (Run 11) the
 level of a cavern breach the kernel recorded (manifest `caverns`) (ValueError names them when nothing else is left). Score: 1000 - 5 per step to a stair + 10 per level below the top of Z4.
+Hospital (BUG-040, Run 11 y453: the sites ignored the water the plan check demands): with `water` (the kernel's accepted
+sources, state water.src; cmd.water_ctx) only sites whose hospital zone lies within `near` (water.lua's radius, 30) of an
+accepted source count, measured as water.lua's served() does (Chebyshev from the source to the zone rect, z included);
++2 per tile nearer; ValueError names the source, the nearest candidate and the refuge's water when none is left.
+`fill_source`: what a bucket-fed cistern (no pipe) could be filled from (revealed open water reachable from the core).
 """
 from __future__ import annotations
 
@@ -166,9 +171,11 @@ def _check(rects, ax, ay, az, rot, bad, hid, mk, allow_below: bool, wet=None):
 
 
 def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None = None,
-         n: int = 3) -> list[dict]:
+         n: int = 3, water: dict | None = None) -> list[dict]:
     """Top `n` sites, best first: [{id:'S1'.., anchor:[x,y,z], rot, score:int, why:str}].
-    Room templates need `manifest` (the fort manifest, `inspect manifest`) with zones.Z4."""
+    Room templates need `manifest` (the fort manifest, `inspect manifest`) with zones.Z4.
+    `water` (BUG-040, WATER_TPLS only): {src: [[x,y,z]..] accepted sources, near, lbl?: labels parallel to src,
+    refuge?: {name, box, wd, ws}}: only sites near accepted water, each with water {d, src}; None = not filtered."""
     p = check_params(tpl, params)
     if tpl in defense.BUILD:
         return _defense(snap, tpl, p, manifest)[:n]
@@ -186,6 +193,8 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         cands = _explore(snap, p, rects, bad, hid, mk, manifest, wet)
     else:
         cands = _rooms(snap, tpl, p, rects, bad, hid, mk, manifest, wet)
+    if tpl in WATER_TPLS and water is not None:
+        cands = _near_water(cands, tpl, p, water)
     cands.sort(key=lambda c: (-c["score"], c["anchor"][2], c["anchor"][1], c["anchor"][0], c["rot"]))
     out: list[dict] = []
     for c in cands:
@@ -193,8 +202,137 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
             out.append(c)
             if len(out) == n:
                 break
-    return [{"id": f"S{i + 1}", "anchor": c["anchor"], "rot": c["rot"], "score": c["score"], "why": c["why"]}
-            for i, c in enumerate(out)]
+    return [{"id": f"S{i + 1}", "anchor": c["anchor"], "rot": c["rot"], "score": c["score"], "why": c["why"],
+             **({"water": c["water"]} if "water" in c else {})} for i, c in enumerate(out)]
+
+
+# ---------------------------------------------------------------- BUG-040: a hospital only near accepted water
+WATER_TPLS = ("hospital",)            # templates whose sites follow the kernel's accepted water (BUG-034/040)
+
+
+def zone_box(tpl: str, p: dict, anchor, rot: int) -> list[int]:
+    """The room's zone rect [x0, y0, z0, x1, y1, z1] at a placement (the template's room bbox, rotated): what water.lua
+    measures a hospital's water from."""
+    plan = TEMPLATES[tpl][0](check_params(tpl, p))
+    b = plan.rooms[0]["bbox"]
+    x0, y0, x1, y1 = _rot_rect((b[0], b[1], b[3], b[4]), anchor[0], anchor[1], rot)
+    return [x0, y0, anchor[2] + b[2], x1, y1, anchor[2] + b[5]]
+
+
+def box_dist(pt, box) -> int:
+    """water.lua dist_box: Chebyshev distance from a tile to a rect, z included."""
+    d = [max(box[k] - pt[k], 0, pt[k] - box[k + 3]) for k in range(3)]
+    return max(d)
+
+
+def _pos(t) -> str:
+    return ",".join(str(int(v)) for v in t)
+
+
+def src_label(water: dict, i: int) -> str:
+    """'well 19098 at 137,77,143 in Kern+' (state water.src_l) or 'accepted water at 137,77,143'."""
+    lbl = water.get("lbl") or []
+    pos = _pos(water["src"][i])
+    if i < len(lbl) and isinstance(lbl[i], str) and lbl[i]:
+        kind, _, inn = lbl[i].partition(" in ")
+        return f"{kind} at {pos}" + (f" in {inn}" if inn else "")
+    return f"accepted water at {pos}"
+
+
+def refuge_water(water: dict) -> str:
+    """BUG-040 (Run 11: Tiefe+ z129-136 had no accepted water, the one wet well stood in Kern+): '; no accepted water in
+    Tiefe+ (126-128,56-77 z129-136; nearest: well 19098 at 137,77,143 in Kern+, 9 tiles from Tiefe+)', '' while a
+    wet well stands in the refuge (state water.refuge_ok) or its place is not known (state alert.ref box/wd/ws)."""
+    ref = water.get("refuge") or {}
+    box = ref.get("box")
+    if not (isinstance(box, list) and len(box) == 6) or ref.get("ok") == 1:
+        return ""
+    name = ref.get("name") or "Tiefe+"
+    where = f"{box[0]}-{box[3]},{box[1]}-{box[4]} z{box[2]}-{box[5]}"
+    src, wd, ws = water.get("src") or [], ref.get("wd", -1), ref.get("ws")
+    if not src or not isinstance(wd, int) or wd < 0:
+        return f"; no accepted water in {name} ({where})"
+    i = next((k for k, s in enumerate(src) if list(s) == list(ws or [])), 0)
+    return f"; no accepted water in {name} ({where}; nearest: {src_label(water, i)}, {wd} tiles from {name})"
+
+
+def _near_water(cands: list, tpl: str, p: dict, water: dict) -> list:
+    """Candidates whose zone lies within `near` of an accepted source (water.lua served()), scored +2 per tile nearer;
+    ValueError when there is no accepted source or no candidate near one."""
+    src = [list(s) for s in water.get("src") or [] if isinstance(s, (list, tuple)) and len(s) == 3]
+    water = {**water, "src": src}
+    near = water.get("near") or WATER_NEAR
+    rw = refuge_water(water)
+    if not src:
+        raise ValueError(f"{tpl}: no accepted water in the fort (state water.src is empty: no well over water, no Water "
+                         "Source zone on water >= 4/7): a hospital without it is worse than none (BUG-034); water first "
+                         "(dfllm cmd inspect '{\"what\":\"water_sources\"}')" + rw)
+    out, best = [], None
+    for c in cands:
+        zb = zone_box(tpl, p, c["anchor"], c["rot"])
+        d, i = min((box_dist(s, zb), k) for k, s in enumerate(src))
+        if best is None or d < best[0]:
+            best = (d, c, i)
+        if d <= near:
+            out.append({**c, "score": c["score"] + 2 * (near - d), "water": {"d": d, "src": src[i]},
+                        "why": c["why"] + f", {src_label(water, i)} {d} tiles"})
+    if not out:
+        if best is None:
+            raise ValueError(f"{tpl}: no valid site on the snapshot (nearest accepted water: {src_label(water, 0)}){rw}")
+        d, c, i = best
+        raise ValueError(f"{tpl}: no site within {near} tiles of accepted water (nearest: {src_label(water, i)}; the "
+                         f"nearest candidate {_pos(c['anchor'])} rot{c['rot']} is {d} tiles from it){rw}: dig the core "
+                         f"toward that water (bp.place at an explicit anchor A<x>_<y>_<z> within {near} tiles of it) or "
+                         "bring water nearer (a Water Source zone on deep water, a piped cistern: python -m "
+                         "dfpilot.bp.sites cistern)")
+    return out
+
+
+def fill_source(snap: dict, manifest: dict | None) -> dict:
+    """BUG-040 (Run 11: the cisterns y450s0b0 and y452s1b0 were done and their wells stayed dry): what a bucket-fed
+    cistern (no pipe) could be filled from: a revealed body of drinkable water (>= 8 tiles: a brook, river or lake; not
+    one with a cavern mark, not water inside the fort's own geometry such as a sump or a cistern) that a walker reaches
+    from the civilian core (Z4). A wet well is no fill source (live L6: the carriers take from the nearest source, the
+    cistern's own well once it is wet, and water.lua removes such a pond as a loop). Returns {ok, why, steps, at}."""
+    z4 = ((manifest or {}).get("zones") or {}).get("Z4") or []
+    cav = {tuple(q) for q in (snap.get("marks") or {}).get("cavern", []) if isinstance(q, (list, tuple))}
+    fort = [(b[0] - 1, b[1] - 1, b[2] - 1, b[3] + 1, b[4] + 1, b[5] + 1) for b in topo.fort_boxes(manifest or {})]
+
+    def inside(t):
+        return any(b[0] <= t[0] <= b[3] and b[1] <= t[1] <= b[4] and b[2] <= t[2] <= b[5] for b in fort)
+    keep, ncav = [], 0
+    for comp in _water_components(snap, 8):
+        if any((x + dx, y + dy, z + dz) in cav for x, y, z in comp for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+               for dz in (-1, 0, 1)):
+            ncav += 1
+            continue
+        if any(inside(t) for t in comp):
+            continue
+        keep.append(comp)
+    sid = snap.get("id", "?")
+    cv = f" ({ncav} cavern water bod{'y' if ncav == 1 else 'ies'}: never)" if ncav else ""
+    if not keep:
+        return {"ok": False, "steps": None, "at": None,
+                "why": f"no revealed brook, river or lake (>= 8 tiles) on snapshot {sid}{cv}"}
+    if not z4:
+        return {"ok": None, "steps": None, "at": None, "why": "the fort manifest has no core (zones.Z4): not checked"}
+    g = Graph(snap)
+    dist = water_steps(g, [t for comp in keep for t in comp])
+    core = g.mask(z4)
+    steps = min((d for i, d in dist.items() if core[i]), default=None)
+    if steps is None:
+        return {"ok": False, "steps": None, "at": None,
+                "why": f"no revealed brook, river or lake (>= 8 tiles) reachable on foot from the core on snapshot "
+                       f"{sid}{cv}"}
+    i = min((k for k, d in dist.items() if core[k] and d == steps))
+    while dist[i] > 0:                                       # downhill to the bank tile a carrier fills at
+        nxt = next((j for j in g.adj.get(i, ()) if dist.get(j) == dist[i] - 1), None)
+        if nxt is None:
+            break
+        i = nxt
+    at = list(g.pos(i))
+    return {"ok": True, "steps": steps, "at": at,
+            "why": f"revealed water at {_pos(at)}, {steps} steps from the core on snapshot {sid}"}
 
 
 SEAL_OPEN = {"floor": ".^", "ramp": "r", "stair_up": "<", "stair_down": ">", "stair_updown": "X", "stair": "<>X"}
@@ -591,6 +729,11 @@ def _ring_ok(at, marks, x, y, z, wet_above=True) -> bool:
 def _water_bodies(snap: dict, min_tiles: int) -> set:
     """Revealed drinkable water tiles that belong to a body of at least `min_tiles` tiles (8-connected per level,
     and across levels): a brook, river or lake, never a 2-tile well sump."""
+    return {t for comp in _water_components(snap, min_tiles) for t in comp}
+
+
+def _water_components(snap: dict, min_tiles: int) -> list[list]:
+    """The bodies of _water_bodies one by one (each a list of tiles, in a stable order)."""
     x0, y0, z0, x1, y1, z1 = snap["bbox"]
     wet = set()
     for z in range(z0, z1 + 1):
@@ -598,8 +741,8 @@ def _water_bodies(snap: dict, min_tiles: int) -> set:
             for i, c in enumerate(row):
                 if c in WATER:
                     wet.add((x0 + i, y0 + j, z))
-    keep, seen = set(), set()
-    for t in wet:
+    keep, seen = [], set()
+    for t in sorted(wet):
         if t in seen:
             continue
         comp, dq = [t], deque([t])
@@ -614,7 +757,7 @@ def _water_bodies(snap: dict, min_tiles: int) -> set:
                         comp.append(n)
                         dq.append(n)
         if len(comp) >= min_tiles:
-            keep.update(comp)
+            keep.append(comp)
     return keep
 
 

@@ -68,6 +68,8 @@ C.EVENTS = {
   HOSPITAL_REMOVED = {cls = 'A', by = 'water'},
   -- BUG-036: in a fight, patients lie outside the burrow the civ alert confines to (once per fight; they cannot walk)
   PATIENTS_OUT = {cls = 'B', by = 'water'},
+  -- BUG-040: a done cistern whose well stood dry for water.cistern_dry_days (once per dry spell, with what fills it)
+  CISTERN_DRY = {cls = 'B', by = 'water'},
   -- A since Run 9 (an army walked in while these were digest-only): wake at once
   SIEGE_START = {cls = 'A', by = 'siege'}, INVASION = {cls = 'A', by = 'threat'},
   -- A, reflex (FR-36/49/51-53): arrival announcements and the interrupt channel (C.INTERRUPTS)
@@ -373,7 +375,10 @@ C.STATE_SPEC = obj({
   alert = obj({want = str(24), burrow = str(24), tiles = NAT, inside = NAT, ok = FLAG},
               {why = str(40), core_d = NAT, core_f = NAT,           -- BUG-028: drink/food days inside the core
                -- Run 10: the refuge burrow: exists, separated (1, 0 open, -1 unknown), beds, beds wanted (bed_pct)
-               ref = obj({ex = FLAG, sep = int(-1, 1), beds = NAT, need = NAT})}),
+               ref = obj({ex = FLAG, sep = int(-1, 1), beds = NAT, need = NAT},
+                         -- BUG-040: its tiles' bbox and its nearest tile's distance to the nearest accepted source ws
+                         {box = {t = 'tup', items = {int(), int(), int(), int(), int(), int()}}, wd = int(-1),
+                          ws = {t = 'tup', items = {NAT, NAT, NAT}}})}),
   -- intake waves (siege, Gordon 2026-10-16): phase, wave count, the last refusal, the sortie squad and phase; BUG-030:
   -- deep = the deep defense's reasons ('destroyers,army,weak')
   wave = obj({ph = str(8), n = NAT}, {why = str(40), so = str(24), deep = str(24)}),
@@ -387,7 +392,9 @@ C.STATE_SPEC = obj({
   -- buckets, the accepted sources (a well over water, a Water Source zone on water >= 4/7) nearest first
   water = obj({patients = NAT, thirst_max = NAT, hosp_ok = FLAG, refuge_ok = FLAG, buckets_free = NAT, hosp = NAT,
                src = arr({t = 'tup', items = {NAT, NAT, NAT}}, 0, 8)},
-              {hosp_out = NAT}),           -- BUG-036: hospital zones with tiles outside Kern+ and the refuge
+              -- BUG-036: hospital zones with tiles outside Kern+ and the refuge; BUG-040: a label per src ('well 19098
+              -- in Kern+')
+              {hosp_out = NAT, src_l = arr(str(32), 0, 8)}),
 })
 
 -- string formats (§1.1); explicit byte ranges, so LC_CTYPE cannot change them

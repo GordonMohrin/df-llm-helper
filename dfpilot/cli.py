@@ -145,6 +145,9 @@ def run_bp(args, save_dir: Path | None) -> int:
         sites, snap_id, ranked = free_sites(save_dir, args.tpl, params, snap)
         print(f"free sites for {args.tpl}{fmt_params(params)} on snapshot {snap_id} ({ranked} ranked; place: "
               f"dfllm cmd bp.place tpl={args.tpl} site=S1{fmt_params(params)} --by llm):")
+        note = water_note(save_dir, args.tpl)
+        if note:
+            print(f"  {note}")
         for s in sites:
             print(f"  {s.get('id')} anchor {s.get('anchor')} rot {s.get('rot')} score {s.get('score')}: {s.get('why', '')}")
         if not sites:
@@ -154,6 +157,23 @@ def run_bp(args, save_dir: Path | None) -> int:
         print(f"bp: {e}")
         files.log_cli(save_dir, "cli", f"bp.{args.action}", {"tpl": args.tpl}, f"ERR {e}")
         return 1
+
+
+def water_note(save_dir: Path, tpl: str) -> str:
+    """BUG-040: the water a hospital's sites follow (cmd.water_ctx): 'accepted water (30 tiles of a hospital zone):
+    well 19098 at 137,77,143 in Kern+; Tiefe+ ... has no accepted water within 30 tiles (nearest: ...)', '' otherwise."""
+    from .cmd import BpUnavailable, load_bp, water_ctx
+    w = water_ctx(save_dir, tpl)
+    if not w or not w["src"]:
+        return ""
+    try:
+        s = load_bp("sites")
+    except BpUnavailable:
+        return ""
+    names = ", ".join(s.src_label(w, i) for i in range(min(3, len(w["src"]))))
+    rw = s.refuge_water(w)
+    return (f"accepted water (sites lie within {w['near']} tiles of it): {names}"
+            + (f"{rw}: the hospital goes into Kern+ next to the water" if rw else ""))
 
 
 # ---------------------------------------------------------------- delegations (WP10, WP4)

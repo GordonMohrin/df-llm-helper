@@ -723,4 +723,130 @@ T.test('BUG-034: the state water.src lists the accepted sources nearest the hosp
   T.eq(C.check_state(W.state()), {})
 end)
 
+---------------------------------------------------------------- BUG-040 (Run 11, y453)
+-- the cistern room of the live save: tpl cistern (merged into the manifest when its project is done), the well room
+-- x49-51 y52-54 z2 with its well at 50,53 over the cistern on z1, the pond hole at 51,53
+local CIS_MAN = {v = 2, burrows = {['Kern+'] = {role = 'kern'}, ['Tiefe+'] = {role = 'refuge'}},
+                 zones = {Z4 = {{0, 0, 0, 99, 99, 20}}},
+                 rooms = {{id = 'cistern50_50_2r0', tpl = 'cistern', use = 'utility', bbox = {49, 52, 2, 51, 54, 2},
+                           tier = 0}}}
+local function cistern_world(opts)
+  opts = opts or {}
+  local wid
+  local W, M = world{manifest = CIS_MAN, tiles = opts.tiles or {['50,53,1'] = '.'}, setup = function(W)
+    df.civzone_type.Pond = 11
+    df.civzone_type[11] = 'Pond'
+    wid = well(W, 50, 53, 2).id
+    if opts.pond ~= false then
+      W.pond = F.building(W, 'ANY_ZONE', {id = 77, type = df.civzone_type.Pond, x1 = 51, y1 = 53, x2 = 51, y2 = 53,
+                                          z = 2})
+    end
+    W.load({name = 'runner', every = {ticks = 600},
+            kept_in = function(K, b) return b[1] == 49 and 'y450s0b0' or nil end,
+            bp_params = function(K, id) return {path = opts.path or ''} end})
+    if opts.setup then opts.setup(W) end
+  end}
+  return W, M, wid
+end
+local function logged(W, pat)
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find(pat, 1, true) then return l end end
+end
+
+T.test('BUG-040 (Run 11 y453: the cisterns y450s0b0 and y452s1b0 were PROJECT_DONE, their wells never wet, nobody ' ..
+       'said why): a done cistern whose well stays dry for 30 days: CISTERN_DRY (B) once, with what should fill it; ' ..
+       'wet again ends the spell, the next dry spell is reported again', function()
+  local W, M, wid = cistern_world()
+  day(W, 29)
+  T.eq(#W.find_events('CISTERN_DRY'), 0, 'not before 30 days')
+  day(W, 2)
+  local e = W.find_events('CISTERN_DRY')
+  T.eq(#e, 1, 'old code: never a word')
+  T.eq(e[1].cls, 'B')
+  T.eq({e[1].d.proj, e[1].d.room, e[1].d.fill, e[1].d.pond, e[1].d.well, e[1].d.days},
+       {'y450s0b0', 'cistern50_50_2r0', 'pond', 77, wid, 30})
+  T.eq(e[1].d.pos, {50, 53, 2})
+  local want = string.format('cistern y450s0b0 done, its well %d at 50,53,2 dry for 30 days: bucket-fed (pond zone ' ..
+                             '77); no accepted water to carry from (no revealed water source); no drink for a ' ..
+                             'hospital or the refuge', wid)
+  T.eq(e[1].msg, want)
+  T.ok(logged(W, 'water: ' .. want), 'kern.log')
+  day(W, 40)
+  T.eq(#W.find_events('CISTERN_DRY'), 1, 'once per dry spell')
+  W.cmap['50,53,1'] = 'w'                                    -- a few buckets reached the cistern: the well is wet
+  day(W)
+  T.ok(logged(W, 'water: cistern cistern50_50_2r0: its well ' .. wid .. ' holds water again'), 'kern.log')
+  W.cmap['50,53,1'] = '.'
+  day(W, 31)
+  T.eq(#W.find_events('CISTERN_DRY'), 2, 'a new dry spell')
+  -- a cistern room without a built well is no done cistern (HOSPITAL_DRY's cistern state says "no well")
+  local W2 = world{manifest = CIS_MAN}
+  day(W2, 32)
+  T.eq(#W2.find_events('CISTERN_DRY'), 0)
+end)
+
+T.test('BUG-040: the reason names a pond zone water removed as a loop (the cistern\'s own well was the carriers\' ' ..
+       'source), a pipe waiting for its lever, nothing at all, and the nearest accepted water to carry from', function()
+  local C2 = require('dfllm.util.contract')
+  -- the well was wet once (a bucket), the pond loop rule removed the cistern's pond zone, then the well dried again
+  local W, M, wid = cistern_world{tiles = {['50,53,1'] = 'w'}, setup = function(W)
+    W.act_result('pond_remove', function(id) W.pond.type = 0; return true, 1 end)
+  end}
+  C2.ACT.pond_remove = {'water'}
+  day(W)
+  T.ok(logged(W, 'water: pond zone 77 removed'), 'the pond loop rule')
+  W.cmap['50,53,1'] = '.'
+  day(W, 31)
+  local e = W.find_events('CISTERN_DRY')
+  T.eq(#e, 1)
+  T.eq({e[1].d.fill, e[1].d.pond}, {'pond_removed', 77})
+  T.ok(e[1].msg:find('bucket-fed, its pond zone 77 removed as a pond loop (its own well fed it)', 1, true), e[1].msg)
+  -- piped: the floodgate waits for its lever; a wet well elsewhere is the water to carry from
+  local W2, _, wid2 = cistern_world{pond = false, path = '1,6;1,9;4,9', tiles = {['50,53,1'] = '.', ['20,20,1'] = 'w'},
+                                    setup = function(W) W.wid = well(W, 20, 20, 2).id end}
+  day(W2, 31)
+  e = W2.find_events('CISTERN_DRY')
+  T.eq(#e, 1)
+  T.eq({e[1].d.fill, e[1].d.src, e[1].d.d}, {'pipe', {20, 20, 2}, 32})
+  T.ok(e[1].msg:find('piped: its floodgate waits for the lever (link it, pull it once); carry from: well ' .. W2.wid ..
+                     ' at 20,20,2 (32 tiles)', 1, true), e[1].msg)
+  T.ok(#e[1].msg <= 200)
+  -- no pond zone, no pipe
+  local W3 = cistern_world{pond = false}
+  day(W3, 31)
+  T.eq(W3.find_events('CISTERN_DRY')[1].d.fill, 'none')
+  T.ok(W3.find_events('CISTERN_DRY')[1].msg:find('no pond zone, no pipe: nothing fills it', 1, true))
+  T.eq(C.check_state(W3.state()), {})
+end)
+
+T.test('BUG-040: every accepted source is labelled with the burrow it stands on (state water.src_l, water.label); ' ..
+       'wet_wells tells seal how many wells of a burrow are wet; inspect water_sources gives the depth under a well, ' ..
+       'the burrow and where the refuge lies', function()
+  local W, M = world{tiles = {['20,20,1'] = 'w', ['45,45,1'] = '.', ['80,80,1'] = '~'}, setup = function(W)
+    W.burrow('Kern+', {0, 0, 0, 30, 30, 20})               -- Kern+ x0-30, Tiefe+ x40-60 z2
+    W.w1, W.w2, W.w3 = well(W, 20, 20, 2).id, well(W, 45, 45, 2).id, well(W, 80, 80, 2).id
+    W.load({name = 'seal', every = {ticks = 100000}, refuge_drink = function(K)
+      return {name = 'Tiefe+', exists = true, drink = 0, need = 4, wells = 1, wet = false, wwet = 0,
+              box = {40, 40, 2, 60, 60, 2}, near = {d = 20, at = {40, 40, 2}, src = {20, 20, 2}}}
+    end})
+  end}
+  day(W)
+  local w = W.state().water
+  T.eq(w.src, {{20, 20, 2}, {80, 80, 2}})                  -- the dry Tiefe+ well is no source
+  T.eq(w.src_l, {'well ' .. W.w1 .. ' in Kern+', 'well ' .. W.w3}, 'old code: no labels')
+  T.eq(M.label(W.K, 20, 20, 2), 'well ' .. W.w1 .. ' at 20,20,2 in Kern+')
+  T.eq(M.label(W.K, 1, 2, 3), 'accepted water at 1,2,3')
+  T.eq({M.wet_wells(W.K, 'Tiefe+')}, {0, 1})
+  T.eq({M.wet_wells(W.K, 'Kern+')}, {1, 1})
+  T.eq(M.wet_wells(W.K, 'Nowhere+'), nil)
+  local r = W.inbox('inspect', {what = 'water_sources'})
+  T.ok(r.ok, r.msg)
+  local by = {}
+  for _, s in ipairs(r.data.sources) do by[s[2]] = s end
+  T.eq(by[W.w1], {'well', W.w1, 20, 20, 2, 1, -1, 'Kern+'})   -- the mock's tiles carry no depth
+  T.eq(by[W.w2], {'well', W.w2, 45, 45, 2, 0, 0, 'Tiefe+'})
+  T.eq({r.data.refuge.name, r.data.refuge.box, r.data.refuge.d, r.data.refuge.src},
+       {'Tiefe+', {40, 40, 2, 60, 60, 2}, 20, 'well ' .. W.w1 .. ' at 20,20,2 in Kern+'})
+  T.eq(C.check_state(W.state()), {})
+end)
+
 T.done()

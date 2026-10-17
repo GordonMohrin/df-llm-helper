@@ -1017,8 +1017,9 @@ def test_siege_unready_hospital_out_names_the_move():
                     "115,77,144): its patients cannot walk to the refuge; move it into Tiefe+ next to accepted water"})
     assert schema.validate_event_d("SIEGE_UNREADY", e["d"]) == []
     line = wake.wake_line({"SIEGE_UNREADY": {"c": 1, "n0": 9300, "e": e}}, None)
-    assert "next: the hospital lies outside the core: plan it inside Tiefe+ next to accepted water (bp sites " \
-           "hospital; a cistern there first), then remove the old zones" in line, line
+    # BUG-040 (y453: Tiefe+ had no accepted water; a bucket-fed cistern there would have stayed dry): Kern+ next to it
+    assert "next: the hospital lies outside the core: plan it next to accepted water inside Tiefe+, or in Kern+ when " \
+           "Tiefe+ has none (bp sites hospital names the water), then remove the old zones" in line, line
     assert est_tokens(line) <= wake.WAKE_TOKENS
 
 

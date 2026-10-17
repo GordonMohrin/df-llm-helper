@@ -242,6 +242,8 @@ WATER_LIM: dict = {
     "ws_dig": (0, 50), "ws_reach": (0, 100), "ws_reads": (1, 10000),
     # BUG-034: the zones of a dry hospital go once a patient's thirst is over patient_thirst (hosp_remove false: never)
     "patient_thirst": _THIRST, "hosp_remove": "bool", "remove_per_run": (0, 32),
+    # BUG-040: a done cistern whose well stays dry this many days is reported once (CISTERN_DRY, B)
+    "cistern_dry_days": (1, 400),
 }
 
 

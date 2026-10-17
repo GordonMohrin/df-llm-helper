@@ -181,11 +181,17 @@ def line_unready(ctx: Ctx) -> str:
         nxt.append("close the open ways in (dfllm cmd bp.place tpl=seal site=S1 at=last)")
     if any(f.startswith(R0_FORTCORE) for f in fails):
         nxt.append("build the missing fortcore pieces (plan)")
+    where, far, lbl = refuge_place(ctx.s)      # BUG-040: where Tiefe+ lies and its nearest accepted water
     if "refuge_dry" in fails:                  # Run 11 siege 8: a dry Tiefe+ holds the citizens only in a breach
-        nxt.append("the refuge has no drink: a well/cistern there or a drink stockpile in it (plan)")
+        nxt.append("the refuge has no drink" + (f" ({where})" if where else "")
+                   + ": a well/cistern there or a drink stockpile in it (plan)")
     if "hospital_out" in fails:                # BUG-036: lying patients cannot walk to the refuge in a breach
-        nxt.append("the hospital lies outside Kern+/Tiefe+: plan it inside Tiefe+ next to accepted water (a cistern "
-                   "there first), then remove the old zones")
+        if far:                                # BUG-040 (Run 11 y453): Tiefe+ has no accepted water: Kern+ next to it
+            nxt.append("the hospital lies outside Kern+/Tiefe+: Tiefe+ has no accepted water near it, so plan it inside "
+                       f"Kern+ next to {lbl or 'accepted water'} (dfllm bp sites hospital), then remove the old zones")
+        else:
+            nxt.append("the hospital lies outside Kern+/Tiefe+: plan it inside Tiefe+ next to accepted water (a cistern "
+                       "there first), then remove the old zones")
     lost = [f.split(":", 1)[1] for f in fails if f.startswith("lost:")]
     if lost:                                   # BUG-030 rebuild policy: held for the player, not a fortcore piece
         nxt.append(f"{','.join(lost)} lost to building destroyers: Gordon's answer (DECISION_NEEDED bridge_rebuild: "
@@ -256,6 +262,36 @@ def line_pop(ctx: Ctx) -> str:
     return _join(out)
 
 
+def src_name(w: dict, i: int) -> str:
+    """BUG-040: 'well 19098 at 137,77,143 in Kern+' from state water.src/src_l, else 'accepted water at x,y,z'."""
+    src, lbl = w.get("src") or [], w.get("src_l") or []
+    pos = ",".join(str(v) for v in src[i])
+    if i < len(lbl) and isinstance(lbl[i], str) and lbl[i]:
+        kind, _, inn = lbl[i].partition(" in ")
+        return f"{kind} at {pos}" + (f" in {inn}" if inn else "")
+    return f"accepted water at {pos}"
+
+
+def refuge_place(s: dict) -> tuple[str, bool, str]:
+    """BUG-040 (Run 11 y453: 'Tiefe+ has no drink' and nobody knew where Tiefe+ lies): ('Tiefe+ 126-128,56-77
+    z129-136; no accepted water in it, nearest: well 19098 at 137,77,143 in Kern+, 9 tiles', dry = no wet well in the
+    refuge (state water.refuge_ok 0), the nearest source's label) from state alert.ref (box, wd, ws) and water (src,
+    src_l, refuge_ok); ('', False, '') while the state does not say where the refuge lies."""
+    ref = ((s.get("alert") or {}).get("ref") or {}) if isinstance(s.get("alert"), dict) else {}
+    box = ref.get("box") if isinstance(ref, dict) else None
+    if not (isinstance(box, list) and len(box) == 6):
+        return "", False, ""
+    where = f"Tiefe+ {box[0]}-{box[3]},{box[1]}-{box[4]} z{box[2]}-{box[5]}"
+    w = s.get("water") if isinstance(s.get("water"), dict) else {}
+    dry = w.get("refuge_ok") == 0
+    src, wd, ws = w.get("src") or [], ref.get("wd", -1), ref.get("ws")
+    if not src or not isinstance(wd, int) or wd < 0:
+        return where + "; no accepted water in the fort", True, ""
+    i = next((k for k, p in enumerate(src) if p == ws), 0)
+    lbl = src_name(w, i)
+    return where + ("; no accepted water in it" if dry else "") + f"; nearest accepted water: {lbl}, {wd} tiles", dry, lbl
+
+
 def _hospital(s: dict, st: dict) -> str:
     """BUG-034: the hospital's water as the kernel's water module judges it (state water: an accepted source within
     `near` tiles of every hospital zone; src = accepted sources; the patients), else care's narrower stock.hosp_water
@@ -264,6 +300,7 @@ def _hospital(s: dict, st: dict) -> str:
     if isinstance(w, dict):
         h = "none" if not w["hosp"] else ("ok" if w["hosp_ok"] else "DRY")
         return (f" hospital {h} src {len(w['src'])}"
+                + (f" ({src_name(w, 0)})" if w["src"] and w.get("src_l") else "")       # BUG-040: which and where
                 + (f" patients {w['patients']} (thirst {w['thirst_max']})" if w["patients"] else ""))
     return f" water {'ok' if st['hosp_water'] else 'NO'}" if "hosp_water" in st else ""
 

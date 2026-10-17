@@ -3537,6 +3537,30 @@ function M.cavern_open(K)
   return n, list
 end
 
+-- public (BUG-040, water's CISTERN_DRY): the id of the finished project whose kept box (m.runner keep) holds the centre
+-- of bbox b ({x0, y0, z0, x1, y1, z1}), the smallest such box; nil when none
+function M.kept_in(K, b)
+  if type(b) ~= 'table' or not int(b[1]) or not int(b[6]) then return nil end
+  local cx, cy, cz = (b[1] + b[4]) // 2, (b[2] + b[5]) // 2, (b[3] + b[6]) // 2
+  local best, size
+  for id, k in pairs(S.rt and S.rt.keep or {}) do
+    if type(k) == 'table' and int(k[1]) and cx >= k[1] and cx <= k[4] and cy >= k[2] and cy <= k[5] and cz >= k[3]
+       and cz <= k[6] then
+      local n = (k[4] - k[1] + 1) * (k[5] - k[2] + 1) * (k[6] - k[3] + 1)
+      if not size or n < size or (n == size and tostring(id) < tostring(best)) then best, size = id, n end
+    end
+  end
+  return best
+end
+
+-- public (BUG-040, water's CISTERN_DRY: piped or bucket-fed): a project's params from its bp file (read once per report;
+-- the persisted doc is gone once the project is done), nil when the file is missing or unreadable
+function M.bp_params(K, id)
+  if type(id) ~= 'string' or not id:match('^[%w_.%-]+$') then return nil end
+  local d = read_bp(K, id)
+  return type(d) == 'table' and type(d.params) == 'table' and d.params or nil
+end
+
 -- WP7/WP8 (care): projects of a template that are not done yet (capacity requests wait for them; BUG-037: not parked)
 function M.pending(K, tpl)
   local n = 0
