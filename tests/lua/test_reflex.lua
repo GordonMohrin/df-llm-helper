@@ -446,4 +446,154 @@ T.test('snapshot.outside_near: revealed open-sky tiles within r on the same z; h
   T.eq(f(W.K, {{4, 4, 3}, {5, 5, 3}}, 0), {0, 1})
 end)
 
+---------------------------------------------------------------- Run 11: the lockdown expires far (site98 y439)
+-- Live: ALERT and an arrival:ambush lockdown for 45 days (clock 30 t/s, 6 doors forbidden, idle 68 %, 9 t/s instead of
+-- 400) for ONE invader, ELK_BIRD 28188 at 184,1,144 at the map edge (the citizens' walk group, 100+ tiles from
+-- everybody): LOCKDOWN_END needed threat 0 for hold_quiet_days, which never came.
+local ELK, GOB = 88, 89
+local function raws()
+  local elk = {flags = {CAN_LEARN = false, CAN_SPEAK = false, MOUNT_EXOTIC = true}}
+  local gob = {flags = {CAN_LEARN = true, CAN_SPEAK = true}}
+  df.creature_raw = {find = function(r)
+    if r == ELK then return {caste = {[0] = elk}} elseif r == GOB then return {caste = {[0] = gob}} end
+  end}
+end
+local function add(W, spec, race)
+  local u = W.add_unit(spec)
+  u.race, u.caste = race, 0
+  return u
+end
+local function logged(W, pat)
+  for _, l in ipairs(W.logs) do if l.msg:find(pat, 1, true) then return l.msg end end
+end
+
+T.test('Run 11: an ELK_BIRD invader (a mount: no CAN_LEARN/CAN_SPEAK) 130 tiles away is no invader: no INTRUDER, no ' ..
+       'ALERT, the ambush lockdown ends after hold_quiet_days naming it (cause far); near a citizen it is a PREDATOR', function()
+  local W = setup{tag = 'elkbird', manifest = false}
+  raws()
+  add(W, S.inv(28188, 184, 1, Z, {race = 'ELK_BIRD'}), ELK)
+  W.tiles['184,1,' .. Z] = {des = {outside = true}}     -- the open map edge, 132 tiles from the open-sky door 503 (52,8)
+  W.event('REPORT', {type = 'AMBUSH_AMBUSHER', text = 'An ambush! Curse them!'})
+  S.run(W, 60)
+  local arr = events(W, 'ARRIVAL')
+  T.eq({#arr, arr[1].d.kind}, {1, 'ambush'})
+  local h = W.K.census.h
+  T.eq({h.vis, h.inv, h.an, h.list[1].k, h.list[1].an}, {1, 0, 1, 'danger', 1}, 'a wild animal, not an invader')
+  W.inbox('ack', {})
+  S.run(W, 2400 + 2400 + 400)                           -- ARM, then hold_quiet_days (2) of quiet
+  T.eq(#events(W, 'INTRUDER'), 0)
+  T.eq(#events(W, 'ALERT_START'), 0, 'old code: ALERT for 45 days')
+  T.eq(W.K.mode(), 'PEACE')
+  local e = events(W, 'LOCKDOWN_END')
+  T.eq(#e, 1, 'old code: the lockdown never ended')
+  T.eq({e[1].d.why, e[1].d.cause, e[1].d.nfar}, {'arrival:ambush', 'far', 1})
+  T.eq(e[1].d.far, {'animal 28188 ELK_BIRD at 184,1,10 (132 tiles)'})
+  T.ok(e[1].msg:find('lockdown over (arrival:ambush): threat 0 for 2 days, 1 far: animal 28188 ELK_BIRD', 1, true),
+       e[1].msg)
+  T.eq(W.doors.entrance.door_flags.forbidden, false, 'its doors open again')
+  T.eq({W.state().alarm.lock, cap(W), W.timestream_fps}, {0, 250, 500})
+  T.eq(#events(W, 'ARRIVAL'), 1, 'never an arrival of its own')
+  -- a woodcutter outside meets it on a roofed tile: the predator rules (PREDATOR, ALERT), still no arrival lockdown
+  W.move(2, 100, 20, Z)
+  W.move(28188, 110, 20, Z)
+  S.run(W, 300)
+  T.eq(#events(W, 'PREDATOR'), 1)
+  T.eq(W.K.mode(), 'ALERT', 'threat counts it within predator_near of a citizen outside Kern+')
+  T.eq(#events(W, 'ARRIVAL'), 1)
+end)
+
+T.test('Run 11: one goblin at the map edge (98 tiles): the lockdown expires after hold_quiet_days (cause far, named), ' ..
+       'ALERT ends with it, no new arrival for it; it comes within lockdown_near (40) of an entrance: re-armed at once',
+       function()
+  local W = setup{tag = 'farinv', manifest = false}
+  raws()
+  add(W, S.inv(300, 150, 30, Z), GOB)
+  S.run(W, 120)
+  local arr = events(W, 'ARRIVAL')
+  T.eq({#arr, arr[1].d.kind, arr[1].d.src}, {1, 'invader', 'sighting'})
+  local intr = events(W, 'INTRUDER')
+  T.eq({#intr, intr[1].d.id, intr[1].d.far, intr[1].d.dist}, {1, 300, 1, 98})
+  T.ok(intr[1].msg:find('far: 98 tiles from the citizens and entrances', 1, true), intr[1].msg)
+  T.eq(W.K.mode(), 'ALERT')
+  W.inbox('ack', {})
+  S.run(W, 2400 + 2400 + 400)
+  local e = events(W, 'LOCKDOWN_END')
+  T.eq(#e, 1, 'old code: never (an invader in sight)')
+  T.eq({e[1].d.cause, e[1].d.nfar, e[1].d.far}, {'far', 1, {'inv 300 GOBLIN at 150,30,10 (98 tiles)'}})
+  T.ok(e[1].msg:find('no invader within 40 tiles of a citizen or an entrance for 2 days, 1 far: inv 300', 1, true),
+       e[1].msg)
+  T.eq({W.state().alarm.lock, W.state().alarm.far}, {0, 1})
+  S.run(W, 1500)
+  T.eq(W.K.mode(), 'PEACE', 'ALERT ends: threat counts the expired-far invader for nothing')
+  T.eq(#events(W, 'ALERT_END'), 1)
+  S.run(W, 3000)
+  T.eq({#events(W, 'ARRIVAL'), #events(W, 'INTRUDER'), #events(W, 'LOCKDOWN')}, {1, 1, 0}, 'no re-arm while it stays far')
+  T.eq({W.doors.entrance.door_flags.forbidden, cap(W)}, {false, 250})
+  -- the expired-far list survives a reload
+  local p = json.decode(W.persist_raw['dfllm.m.reflex'])
+  T.eq(p.far.ids, {300})
+  -- it walks toward the fort: 18 tiles from the open-sky door 503 (52,8)
+  W.move(300, 70, 20, Z)
+  S.run(W, 60)
+  arr = events(W, 'ARRIVAL')
+  T.eq(#arr, 2, 're-armed')
+  T.ok(arr[2].d.text:find('inv 300 came within 18 tiles of an entrance after its lockdown ended far', 1, true),
+       arr[2].d.text)
+  T.ok(logged(W, 'inv 300 at 70,20,10 came within 18 tiles of an entrance after its lockdown ended far'), 'kern.log')
+  T.eq({W.state().alarm.lock, W.state().alarm.far, cap(W)}, {1, nil, 30})
+  S.run(W, 60)
+  T.eq(W.K.mode(), 'ALERT', 'it counts again')
+end)
+
+T.test('Run 11: an invader within lockdown_near keeps the lockdown; lockdown_near 0 keeps the old rule; in a siege the ' ..
+       'far rule never ends it', function()
+  local W = setup{tag = 'nearinv', manifest = false}
+  raws()
+  add(W, S.inv(300, 80, 20, Z), GOB)                     -- 28 tiles from the door 503
+  S.run(W, 60)
+  W.inbox('ack', {})
+  S.run(W, 6000)
+  T.eq(#events(W, 'LOCKDOWN_END'), 0)
+  local W2 = setup{tag = 'farinv0', manifest = false, cfg = {reflex = {v = 2, lockdown_near = 0}}}
+  raws()
+  add(W2, S.inv(300, 150, 30, Z), GOB)
+  S.run(W2, 60)
+  W2.inbox('ack', {})
+  S.run(W2, 6000)
+  T.eq(#events(W2, 'LOCKDOWN_END'), 0, 'lockdown_near 0: threat 0 only')
+  local units = S.fort_units()
+  for _, u in ipairs(S.army(6, 150, 30)) do units[#units + 1] = u end
+  local W3 = setup{tag = 'farsiege', manifest = false, units = units}
+  S.run(W3, 60)
+  T.eq(W3.K.mode(), 'SIEGE')
+  W3.inbox('ack', {})
+  S.run(W3, 6000)
+  T.eq({#events(W3, 'LOCKDOWN_END'), W3.state().alarm.lock}, {0, 1}, 'six invaders in sight: a siege, not far')
+end)
+
+T.test('Run 11: the ack timeout applies no default for an INTRUDER whose unit is far (alarm.txt: far); one that ' ..
+       'comes near raises a new INTRUDER at once and gets it', function()
+  local W = setup{tag = 'farack', manifest = false, ms_per_frame = 500}
+  raws()
+  add(W, S.inv(300, 150, 30, Z), GOB)
+  S.run(W, 30)
+  local arr, intr = events(W, 'ARRIVAL'), events(W, 'INTRUDER')
+  T.eq({#arr, #intr}, {1, 1})
+  W.inbox('ack', {n = arr[1].n})                         -- the arrival seen, the INTRUDER not
+  S.run(W, 9 * 140)                                      -- 70 s
+  T.eq(#events(W, 'LOCKDOWN'), 0, 'old code: LOCKDOWN unacked:INTRUDER for a unit 98 tiles away')
+  T.ok(alarm_txt(W):find('\tINTRUDER\tfar\t'), alarm_txt(W))
+  T.ok(logged(W, 'unacked for 6'), 'kern.log')
+  T.ok(logged(W, 'its unit 300 is far (98 tiles from the citizens and entrances, lockdown_near 40): no default'),
+       'kern.log names why')
+  T.eq(W.state().alarm.defcon, 2, 'a far INTRUDER is no DEFCON 1 (the arrival lockdown holds)')
+  W.move(300, 70, 20, Z)
+  S.run(W, 30)
+  intr = events(W, 'INTRUDER')
+  T.eq({#intr, intr[2].d.far, intr[2].d.dist}, {2, 0, 18}, 'near after a far-only INTRUDER: at once')
+  S.run(W, 9 * 140)
+  local l = events(W, 'LOCKDOWN')
+  T.eq({#l, l[1].d.type, l[1].d.n}, {1, 'INTRUDER', intr[2].n})
+end)
+
 T.done()

@@ -146,7 +146,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | Event | First move |
 |---|---|
 | SIEGE_START / INVASION / ARRIVAL | the kernel locked down (gates up, doors forbidden, alert, clock 30 t/s) before contact. `dfllm ack`, read `status` (`clock`, `lever_latency_s`, eta); do nothing tactical; tell the player |
-| INTRUDER / PREDATOR | a hostile can walk to the citizens (gate open or a leak) / a wild danger inside Kern+ or within `predator_near` (40) tiles of a citizen outside it (farther ones are only PREDATOR_FAR, class B). `dfllm ack`; read `status` and the brief; tell the player |
+| INTRUDER / PREDATOR | a hostile can walk to the citizens (gate open or a leak) / a wild danger inside Kern+ or within `predator_near` (40) tiles of a citizen outside it (farther ones are only PREDATOR_FAR, class B). `dfllm ack`; read `status` and the brief; tell the player. An INTRUDER with `far: N tiles` gets no lockdown default (alarm.txt `far`); it comes again once the unit is within `lockdown_near` |
 | LOCKDOWN | an interrupt stood unacked and the kernel applied its default. `dfllm ack`; read `status` |
 | LOCKDOWN_PARTIAL | an entrance door does not hold its forbidden flag (named with what lies on its tile); the kernel tries it once more itself. Read `status` (`doors`, refused); tell the player; a wall or a second door for that opening (`bp.place tpl=seal at="x,y,z floor wall"`) |
 | NO_DEPOT | `dfllm ack`; place a trade depot (`bp sites`, `bp.place`) |
@@ -244,7 +244,7 @@ in sight, an army > 3x our soldiers or weak squads: civilians to the separated r
 are lowered stepwise. **Arrival lockdown** (no manifest needed): an arrival popup or report, INVASION
 or the first armed hostile in sight raises every lever-linked bridge, forbids the entrance doors,
 holds the clock and, once its lever pulls are done (≤ 2x the lever latency, 450-1500 ticks), sounds the alert, listing
-the lever tiles (`Hebel+`) while pulls are pending; until threat 0 for 2 days. **Intake waves** (Gordon 16.10.2026,
+the lever tiles (`Hebel+`) while pulls are pending; until threat 0 for 2 days, or (Run 11) 2 days with every invader in sight beyond `lockdown_near` (40) of the citizens outside Kern+ and the entrances (LOCKDOWN_END `cause` far names them; they count for nothing until one comes that close, which re-arms it; an invader the raws call an animal, a mount left behind, is a wild danger). **Intake waves** (Gordon 16.10.2026,
 `config/reflex.json` `intake`, on): in SIEGE the squads stand inside B1 with drink (BUG-029); when soldiers, worn, army
 size, traps and the field allow it, B1 lets them into the killing field, rises, O1 lets up to 6 hostiles into bailey and
 trap hall, rises, the field is cleared, the squads go back; INTAKE (B) per phase, WAVE_FAIL (A) when it goes wrong.

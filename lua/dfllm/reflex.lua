@@ -39,6 +39,16 @@
 -- threat scan not armed, ARM ticks after the last trigger) for hold_quiet_days game days; then the doors it forbade
 -- open again, clock and alert follow the mode, and gate lowers the bridges it raised (peace_gates D-14 down) or
 -- keeps them up (D-14 up). LOCKDOWN_END (B).
+-- Run 11 (Kilrudrabed site98 y439: ALERT and an arrival:ambush lockdown for 45 days, clock 30 t/s, 6 doors forbidden,
+-- idle 68 %, for ONE invader, an ELK_BIRD mount left behind at the map edge 100+ tiles from everybody): the lockdown
+-- also expires without an approach. In PEACE/ALERT visible invaders do not stop the quiet clock while every one of them
+-- stays beyond lockdown_near (config/reflex.json, 40; 0 = off) tiles of every citizen outside Kern+ (sense dc) and of
+-- every entrance (gate.points, the lockdown's doors, seal.entrances); one closer, inside Kern+, of unknown distance or
+-- not listed restarts it (far_scan, far_now). LOCKDOWN_END then says `cause` far and names the hostiles in sight; the
+-- invaders among them become expired far (st.far, reflex.far_ids): threat counts them for nothing, so ALERT ends too,
+-- the sighting and INTRUDER skip them, and an ack timeout applies no default for a far unit. One that comes within
+-- lockdown_near leaves the list at once and counts again: it re-arms the lockdown (ARRIVAL 'came within N tiles').
+-- sense lists an invader the raws call an animal (an = 1) as a wild danger: the predator rules, never an arrival.
 --
 -- Interrupt channel (FR-53). INTERRUPTS (contract): ARRIVAL; INTRUDER (a visible invader, undead or great danger on
 -- the citizens' walkable group); PREDATOR (a visible wild danger on a roofed tile of that group); DEATHS_3PLUS (care);
@@ -63,6 +73,9 @@ M.CFG = {
   -- Run 10 y421 (four lockdowns in ten days for animals at the map edge 60-120 tiles away): a wild danger counts
   -- for PREDATOR only inside Kern+ / past B1 or within this many tiles of a citizen outside Kern+ (0 = no limit)
   predator_near = 40,
+  -- Run 11: a visible hostile within this many tiles of a citizen outside Kern+ or of an entrance is an approach; a
+  -- lockdown expires after hold_quiet_days without one, invaders visible farther away included (0 = off)
+  lockdown_near = 40,
   defaults = {ARRIVAL = {'clock', 'gates', 'doors', 'alert'}, INTRUDER = {'clock', 'gates', 'doors', 'alert'},
               PREDATOR = {'clock', 'alert'}, DEATHS_3PLUS = {'clock'}, NO_DEPOT = {}},
 }
@@ -91,9 +104,11 @@ local REPORT_KIND = {AMBUSH_AMBUSHER = 'ambush', BEAST_AMBUSH = 'ambush', AMBUSH
 local ARMY = {siege = true, invasion = true, beast = true, invader = true}   -- DEFCON 2 kinds
 
 local st      -- persisted m.reflex: {v, hold = {why, kinds, acts, since, last, qs}|nil, doors = {ids}, ack = {n, wall},
-              --   irq = {{n, type, tick, wall, ms, msg, done}}, vfy = {{id, t, try, pos}} (forbidden, not read back
-              --   yet; BUG-015), ref = {{id, t, try, pos, sig, items, units}} (refused: the flag fell back), prec}
-local rt      -- runtime: door cache, sighting/intruder bookkeeping, alarm.txt signature, eta
+              --   irq = {{n, type, tick, wall, ms, msg, done (1 default applied, 2 none: its unit far), u (unit)}},
+              --   vfy = {{id, t, try, pos}} (forbidden, not read back yet; BUG-015), ref = {{id, t, try, pos, sig, items,
+              --   units}} (refused: the flag fell back), prec, far = {t, ids} (Run 11: expired far)}
+local rt      -- runtime: door cache, sighting/intruder bookkeeping, alarm.txt signature, eta; Run 11: fset (st.far as a
+              --   set), ap (per listed hostile: near/unknown/far, dc, de, d), ftick (the census ap belongs to), appr
 local dirty
 
 local function int(v) return type(v) == 'number' and math.tointeger(v) or nil end
@@ -102,14 +117,15 @@ local function save(K) if dirty then K.persist.set('m.reflex', st); dirty = fals
 ---------------------------------------------------------------- config (config/reflex.json via K.cfg.reflex)
 local function cfg(K)
   local c = {hold_quiet_days = M.CFG.hold_quiet_days, ack_timeout_s = M.CFG.ack_timeout_s,
-             predator_near = M.CFG.predator_near, defaults = {}}
+             predator_near = M.CFG.predator_near, lockdown_near = M.CFG.lockdown_near, defaults = {}}
   for t, acts in pairs(M.CFG.defaults) do c.defaults[t] = acts end
   local r = type(K.cfg.reflex) == 'table' and K.cfg.reflex or {}
   local q, a = int(r.hold_quiet_days), int(r.ack_timeout_s)
   if q and q >= 0 and q <= 30 then c.hold_quiet_days = q end
   if a and a >= 5 and a <= 3600 then c.ack_timeout_s = a end
-  local pn = int(r.predator_near)
+  local pn, ln = int(r.predator_near), int(r.lockdown_near)
   if pn and pn >= 0 and pn <= 400 then c.predator_near = pn end
+  if ln and ln >= 0 and ln <= 400 then c.lockdown_near = ln end
   local valid = {}
   for _, x in ipairs(M.ACTIONS) do valid[x] = true end
   for t, acts in pairs(type(r.defaults) == 'table' and r.defaults or {}) do
@@ -456,6 +472,185 @@ local function open_doors(K)
   return n, nref
 end
 
+---------------------------------------------------------------- Run 11: approach and expired far
+M.FAR_MAX = 40             -- hostiles kept as expired far (st.far), the newest
+M.FAR_SHOWN = 3            -- named in LOCKDOWN_END
+M.FAR_PRUNE = 1200         -- ticks between looks at expired-far units not listed: dead or gone ones are dropped
+local FAR_MODES = {PEACE = true, ALERT = true}   -- the quiet clock runs past far invaders only there (never in a siege)
+
+local function far_set()
+  local f = {}
+  for _, id in ipairs(st.far and st.far.ids or {}) do f[id] = true end
+  rt.fset = f
+end
+
+local function far_drop(gone)
+  local keep = {}
+  for _, id in ipairs(st.far.ids) do if not gone[id] then keep[#keep + 1] = id end end
+  st.far.ids, dirty = keep, true
+  far_set()
+end
+
+-- the entrance points an approach is measured to: gate's (manifest O1 centres, else the unmanaged bridges in hand), the
+-- lockdown's doors (else the open-sky door scan) and seal's entrance tiles; the last non-empty set is kept (the doors
+-- leave rt.door_pts when a lockdown ends, gate hands the unmanaged bridges back)
+local function entry_pts(K)
+  local pts = {}
+  local okg, gp = K.call('gate', 'points')
+  for _, p in ipairs(okg and type(gp) == 'table' and gp or {}) do
+    if type(p) == 'table' and int(p.x) and int(p.y) and int(p.z) then pts[#pts + 1] = {x = p.x, y = p.y, z = p.z} end
+  end
+  for _, d in ipairs(rt.door_pts or (rt.doors and rt.doors.list) or {}) do
+    pts[#pts + 1] = {x = d.pos[1], y = d.pos[2], z = d.pos[3]}
+  end
+  local oke, ent = K.call('seal', 'entrances')
+  for _, p in ipairs(oke and type(ent) == 'table' and ent or {}) do
+    if type(p) == 'table' and int(p[1]) and int(p[2]) and int(p[3]) then pts[#pts + 1] = {x = p[1], y = p[2], z = p[3]} end
+  end
+  if #pts > 0 then rt.epts = pts end
+  return rt.epts or pts
+end
+
+local function nearest(e, pts)
+  local best = -1
+  for _, p in ipairs(pts) do
+    local d = geom.dist(e, p)
+    if best < 0 or d < best then best = d end
+  end
+  return best
+end
+
+-- per listed hostile of census h, rt.ap[id] = {near, how ('inside' | 'citizen' | 'entrance' | 'off'), unknown, dc, de,
+-- d, e}: near = inside Kern+ / past B1 (zone 2), or within lockdown_near of a citizen outside Kern+ (sense dc) or of an
+-- entrance (de), every one with lockdown_near 0 (off); unknown = neither distance known; else far, d = the smaller known
+-- distance. An expired-far hostile that is near leaves st.far (rt.appr names it for the sighting); one not listed is
+-- dropped once its unit is dead or gone (every FAR_PRUNE ticks)
+local function far_scan(K, h, now)
+  rt.ftick = h.tick
+  local L = cfg(K).lockdown_near
+  if L == 0 and #st.far.ids > 0 then st.far.ids, dirty = {}, true; far_set() end
+  local ap, list = {}, h.list or {}
+  local pts = #list > 0 and entry_pts(K) or {}
+  local fs, gone = rt.fset, nil
+  for _, e in ipairs(list) do
+    local dc, de = int(e.dc) or -1, nearest(e, pts)
+    local r = {dc = dc, de = de, e = e, d = (dc >= 0 and de >= 0) and math.min(dc, de) or math.max(dc, de)}
+    if (e.zn or 0) == 2 then r.near, r.how = true, 'inside'
+    elseif L == 0 then r.near, r.how = true, 'off'
+    elseif dc >= 0 and dc <= L then r.near, r.how = true, 'citizen'
+    elseif de >= 0 and de <= L then r.near, r.how = true, 'entrance'
+    elseif r.d < 0 then r.unknown = true end
+    ap[e.id] = r
+    if fs[e.id] and r.near then
+      gone = gone or {}
+      gone[e.id] = true
+      local what = r.how == 'inside' and 'inside Kern+' or string.format('%d tiles of %s', r.how == 'citizen' and dc or de,
+                                                                          r.how == 'citizen' and 'a citizen' or 'an entrance')
+      rt.appr = {id = e.id, k = e.an == 1 and 'animal' or e.k, what = what}
+      K.log('info', 'reflex: %s %d at %d,%d,%d came within %s after its lockdown ended far: it counts again',
+            rt.appr.k, e.id, e.x, e.y, e.z, what)
+    end
+  end
+  if not gone and #st.far.ids > 0 and (now - (rt.fprune or -M.FAR_PRUNE) >= M.FAR_PRUNE or now < (rt.fprune or now)) then
+    rt.fprune = now
+    for _, id in ipairs(st.far.ids) do
+      if not ap[id] then
+        local ok, alive = pcall(function()
+          local u = df.unit.find(id)
+          return u ~= nil and dfhack.units.isActive(u) and not dfhack.units.isDead(u)
+        end)
+        if ok and not alive then gone = gone or {}; gone[id] = true end
+      end
+    end
+  end
+  if gone then far_drop(gone) end
+  rt.ap = ap
+end
+
+-- public (K.call, threat.assess): the visible hostiles whose lockdown expired far, {[id] = true} (read-only). A fresh
+-- census is scanned first, so one that came near counts again in the same pass
+function M.far_ids(K)
+  if not st then return {} end
+  local h = K.census.h
+  if #st.far.ids > 0 and type(h) == 'table' and h.tick ~= rt.ftick and K.now().tick - (h.tick or -1e9) <= M.FRESH then
+    local ok, err = pcall(far_scan, K, h, K.now().tick)
+    if not ok then
+      rt.ftick = h.tick
+      K.log('warn', 'reflex: far scan failed: %s', tostring(err))
+    end
+  end
+  return rt.fset
+end
+
+-- the quiet clock may run past the visible invaders: PEACE/ALERT, lockdown_near on, the census lists every invader and
+-- each one is far (not near, distance known)
+local function far_now(K, h)
+  if cfg(K).lockdown_near == 0 or not FAR_MODES[K.mode()] or rt.ftick ~= h.tick then return false end
+  local listed = 0
+  for _, e in ipairs(h.list or {}) do
+    if e.k == 'inv' then
+      listed = listed + 1
+      local a = rt.ap and rt.ap[e.id]
+      if not a or a.near or a.unknown then return false end
+    end
+  end
+  return listed >= (h.inv or 0)
+end
+
+-- why the unit of an interrupt is far now (expired far, or listed beyond lockdown_near), or nil
+local function unit_far(K, u)
+  u = int(u)
+  if not u or cfg(K).lockdown_near == 0 then return nil end
+  if rt.fset[u] then return 'expired far' end
+  local h = K.census.h
+  local a = rt.ap and rt.ap[u]
+  if a and type(h) == 'table' and rt.ftick == h.tick and K.now().tick - (h.tick or -1e9) <= M.FRESH
+     and not a.near and not a.unknown then
+    return string.format('%d tiles from the citizens and entrances', a.d)
+  end
+end
+
+local function race_of(id)
+  local ok, r = pcall(function() return dfhack.units.getRaceName(df.unit.find(id)) end)
+  return ok and type(r) == 'string' and r ~= '' and r or '?'
+end
+
+-- at a lockdown's end: the listed hostiles beyond lockdown_near (invaders first, then by distance) are named ('inv 300
+-- GOBLIN at 150,30,10 (99 tiles)'); the invaders among them become expired far (st.far: the quiet clock saw every
+-- invader far for hold_quiet_days, it tracks no other kind). Returns the names and their number
+local function far_mark(K, now)
+  local h = K.census.h
+  if cfg(K).lockdown_near == 0 or type(h) ~= 'table' or rt.ftick ~= h.tick or not rt.ap then return {} end
+  local l = {}
+  for _, e in ipairs(h.list or {}) do
+    local a = rt.ap[e.id]
+    if a and not a.near and not a.unknown then l[#l + 1] = a end
+  end
+  table.sort(l, function(p, q)
+    local pi, qi = p.e.k == 'inv', q.e.k == 'inv'
+    if pi ~= qi then return pi end
+    if p.d ~= q.d then return p.d < q.d end
+    return p.e.id < q.e.id
+  end)
+  local names, have = {}, {}
+  for _, id in ipairs(st.far.ids) do have[id] = true end
+  for _, a in ipairs(l) do
+    local e = a.e
+    if #names < M.FAR_SHOWN then
+      names[#names + 1] = string.format('%s %d %s at %d,%d,%d (%d tiles)', e.an == 1 and 'animal' or e.k, e.id,
+                                        race_of(e.id), e.x, e.y, e.z, a.d)
+    end
+    if e.k == 'inv' and not have[e.id] then
+      have[e.id] = true
+      st.far.ids[#st.far.ids + 1] = e.id
+    end
+  end
+  while #st.far.ids > M.FAR_MAX do table.remove(st.far.ids, 1) end
+  if #l > 0 then st.far.t, dirty = now, true end
+  far_set()
+  return names, #l
+end
+
 ---------------------------------------------------------------- hold and the actions
 local function holding(K, what)
   local h = st and st.hold
@@ -624,9 +819,14 @@ local function engage(K, kind, why, acts, now)
   return parts, d
 end
 
+-- Run 11: cause 'far' when hostiles beyond lockdown_near are still in sight (named; they become expired far), else
+-- 'quiet' (threat 0)
 local function release(K, now)
   local h = st.hold
   if not h then return end
+  local c = cfg(K)
+  local names, nfar = far_mark(K, now)
+  nfar = nfar or 0
   st.hold, dirty = nil, true
   rt.pull_sig, rt.pull_t = nil, nil
   local n, nref = open_doors(K)
@@ -634,10 +834,24 @@ local function release(K, now)
   -- the alert off before the gate pass: the lowering pulls are queued while nobody is confined (BUG-013)
   K.call('siege', 'hold_alert')
   K.call('gate', 'lockdown')
-  local msg = string.format('lockdown over (%s): threat 0 for %d days; %d doors opened%s', h.why,
-                            cfg(K).hold_quiet_days, n, nref > 0 and string.format(', %d refused (flag reset)', nref) or '')
-  local d = {why = h.why, ticks = now - h.since, doors = n}
+  local tail = string.format('%d doors opened%s', n, nref > 0 and string.format(', %d refused (flag reset)', nref) or '')
+  local msg
+  if nfar > 0 then
+    -- the quiet clock watched the invaders only: with one in sight it ran because each one stayed far
+    local head = (names[1] or ''):find('^inv ') and string.format('no invader within %d tiles of a citizen or an ' ..
+                 'entrance for %d days', c.lockdown_near, c.hold_quiet_days) or
+                 string.format('threat 0 for %d days', c.hold_quiet_days)
+    local parts = {string.format('%s, %d far: %s', head, nfar, names[1] or '?')}
+    for i = 2, #names do parts[#parts + 1] = names[i] end
+    if nfar > #names then parts[#parts + 1] = string.format('+%d', nfar - #names) end
+    parts[#parts + 1] = tail
+    msg = compose(string.format('lockdown over (%s): ', h.why), parts)
+  else
+    msg = string.format('lockdown over (%s): threat 0 for %d days; %s', h.why, c.hold_quiet_days, tail)
+  end
+  local d = {why = h.why, ticks = now - h.since, doors = n, cause = nfar > 0 and 'far' or 'quiet'}
   if nref > 0 then d.refused = nref end
+  if nfar > 0 then d.far, d.nfar = names, nfar end
   K.emit('LOCKDOWN_END', 'B', msg, d)
   K.log('info', 'reflex: %s', msg)
 end
@@ -661,7 +875,7 @@ local function defcon(K)
   local mode, h = K.mode(), K.census.h
   local inside = type(h) == 'table' and (h.inside or 0) > 0
   local open = {}
-  for _, r in ipairs(st.irq) do if r.n > (st.ack.n or 0) then open[r.type] = true end end
+  for _, r in ipairs(st.irq) do if r.n > (st.ack.n or 0) then open[r.done == 2 and 'far' or r.type] = true end end
   if mode == 'BREACH' or inside or open.INTRUDER then return 1 end
   local army = false
   for k in pairs(st.hold and st.hold.kinds or {}) do if ARMY[k] then army = true end end
@@ -681,7 +895,7 @@ local function alarm_text(K, dc)
   if rt.eta and rt.eta >= 0 then head = head .. string.format(' | eta ~%d t', rt.eta) end
   local lines = {head}
   for _, r in ipairs(st.irq) do
-    local s = r.n <= (st.ack.n or 0) and 'acked' or (r.done == 1 and 'default' or 'unacked')
+    local s = r.n <= (st.ack.n or 0) and 'acked' or (r.done == 1 and 'default' or (r.done == 2 and 'far' or 'unacked'))
     lines[#lines + 1] = string.format('%d\t%d\t%d\t%s\t%s\t%s', r.n, r.wall, r.tick, r.type, s,
                                       (tostring(r.msg):gsub('[\t\r\n]', ' ')))
   end
@@ -704,10 +918,10 @@ local function alarm_write(K, force)
   end
 end
 
-local function record(K, n, etype, msg)
+local function record(K, n, etype, msg, u)
   local now = K.now()
   st.irq[#st.irq + 1] = {n = n, type = etype, tick = now.tick, wall = now.wall, ms = now.ms,
-                         msg = tostring(msg):sub(1, 200), done = 0}
+                         msg = tostring(msg):sub(1, 200), done = 0, u = int(u)}
   while #st.irq > M.KEEP do table.remove(st.irq, 1) end
   dirty = true
   alarm_write(K, true)
@@ -716,7 +930,7 @@ end
 -- emit a class-A interrupt and put it into alarm.txt in the same step
 local function interrupt(K, etype, msg, d)
   local n = K.emit(etype, 'A', msg, d)
-  if math.type(n) == 'integer' then record(K, n, etype, msg) end
+  if math.type(n) == 'integer' then record(K, n, etype, msg, type(d) == 'table' and d.id or nil) end
   return n
 end
 
@@ -796,11 +1010,19 @@ function M.announce(K, kind, text, src)
   return true, arrival(K, kind, src or 'popup', text)
 end
 
--- every step: the first armed hostile in sight (a visible invader, a great danger in reach of the fort)
+-- every step: the first armed hostile in sight (a visible invader, a great danger in reach of the fort). Run 11: the
+-- listed invaders whose lockdown expired far do not count; one that came within lockdown_near again (far_scan) does
 local function sighting(K, h, now)
-  if (h.inv or 0) > 0 then
+  local inv = h.inv or 0
+  if inv > 0 and next(rt.fset) then
+    for _, e in ipairs(h.list or {}) do if e.k == 'inv' and rt.fset[e.id] then inv = inv - 1 end end
+  end
+  if inv > 0 then
     if not (st.hold and st.hold.kinds.invader) then
-      arrival(K, 'invader', 'sighting', string.format('%d armed invaders in sight', h.inv))
+      local a = rt.appr and rt.appr.k == 'inv' and rt.appr
+      arrival(K, 'invader', 'sighting', a and string.format('%s %d came within %s after its lockdown ended far', a.k,
+                                                            a.id, a.what)
+                                        or string.format('%d armed invaders in sight', inv))
     end
     return
   end
@@ -817,14 +1039,18 @@ end
 -- Intake waves and the sortie through O1 (Gordon 2026-10-16): while siege runs one (siege.expects), the hostiles
 -- outside B1 are expected (sense zone 0 or 1: the soldiers in the killing field or outside share their walk group);
 -- one past B1 (zone 2: Kern+, zones Z3/Z4) still counts
+-- Run 11: an invader, undead or great danger whose lockdown expired far is no INTRUDER (it counts again once far_scan
+-- finds it within lockdown_near); the INTRUDER names a near one first (far_scan) and comes again at once when one comes
+-- near after an INTRUDER for far ones only (its ack timeout default skips a far unit)
 local function inside_scan(K, h, now)
-  local hostile, predator, nh, np = nil, nil, 0, 0
+  local hostile, predator, nh, np, hnear = nil, nil, 0, 0, false
   local near, nf, far_one = cfg(K).predator_near, 0, nil
   local okx, expects = K.call('siege', 'expects')
   local wave = okx and expects == true
   for _, e in ipairs(h.list or {}) do
     local ok, far = true, false
-    if wave and (e.zn or 0) < 2 then far = true
+    if e.k ~= 'danger' and rt.fset[e.id] then far = true
+    elseif wave and (e.zn or 0) < 2 then far = true
     else ok, far = K.call('snapshot', 'far', e.x, e.y, e.z) end
     if not (ok and far == true) then
       if e.k == 'danger' then
@@ -837,14 +1063,24 @@ local function inside_scan(K, h, now)
             if not far_one or (dc >= 0 and (far_one.dc < 0 or dc < far_one.dc)) then far_one = e end
           else np = np + 1; predator = predator or e end
         end
-      else nh = nh + 1; hostile = hostile or e end
+      else
+        nh = nh + 1
+        local a = rt.ap and rt.ap[e.id]
+        local nr = not a or a.near == true or a.unknown == true
+        if not hostile or (nr and not hnear) then hostile, hnear = e, nr end
+      end
     end
   end
   if hostile then
-    if now - (rt.intr_last or -M.REARM) >= M.REARM then
-      interrupt(K, 'INTRUDER', string.format('%d hostiles on the citizens\' walkable group (%s %d at %d,%d,%d)', nh,
-                hostile.k, hostile.id, hostile.x, hostile.y, hostile.z),
-                {n = nh, id = hostile.id, pos = {hostile.x, hostile.y, hostile.z}, k = hostile.k})
+    if now - (rt.intr_last or -M.REARM) >= M.REARM or (hnear and not rt.intr_near) then
+      local a = rt.ap and rt.ap[hostile.id]
+      local dist = a and a.d or -1
+      interrupt(K, 'INTRUDER', string.format('%d hostiles on the citizens\' walkable group (%s %d at %d,%d,%d%s)', nh,
+                hostile.k, hostile.id, hostile.x, hostile.y, hostile.z,
+                hnear and '' or string.format('; far: %d tiles from the citizens and entrances', dist)),
+                {n = nh, id = hostile.id, pos = {hostile.x, hostile.y, hostile.z}, k = hostile.k, dist = dist,
+                 far = hnear and 0 or 1})
+      rt.intr_near = hnear
     end
     rt.intr_last = now
   end
@@ -876,7 +1112,7 @@ local function eta(K, h, now)
   local best = -1
   if #pts > 0 then
     for _, e in ipairs(h.list or {}) do
-      if e.k == 'inv' or e.k == 'great' then
+      if (e.k == 'inv' or e.k == 'great') and not (e.k == 'inv' and rt.fset[e.id]) then
         for _, p in ipairs(pts) do
           local dd = geom.dist(e, p)
           if best < 0 or dd < best then best = dd end
@@ -939,12 +1175,14 @@ local function door_step(K, now)
 end
 
 -- the quiet clock: no visible invader, great danger in reach or hostile inside, threat not armed, ARM after the
--- last trigger; hold_quiet_days of it end the lockdown
+-- last trigger; hold_quiet_days of it end the lockdown. Run 11: in PEACE/ALERT visible invaders do not stop it while
+-- each one is listed and beyond lockdown_near of every citizen outside Kern+ and every entrance (far_now)
 local function quiet_step(K, h, now)
   local hd = st.hold
   if not hd then return end
   local fresh = type(h) == 'table' and now - (h.tick or -1e9) <= M.FRESH
-  local quiet = fresh and (h.inv or 0) == 0 and (h.inside or 0) == 0 and now - hd.last >= M.ARM
+  local quiet = fresh and (h.inside or 0) == 0 and now - hd.last >= M.ARM
+  if quiet and (h.inv or 0) > 0 then quiet = far_now(K, h) end
   if quiet and (h.great or 0) > 0 then
     local ok, a = K.call('threat', 'assess')
     quiet = ok and type(a) == 'table' and (a.great_rel or 0) == 0
@@ -971,7 +1209,14 @@ local function ack_step(K, now)
     if r.n > (st.ack.n or 0) and r.done == 0 and age >= c.ack_timeout_s then
       r.done, dirty = 1, true
       local acts = c.defaults[r.type] or {}
-      if #acts == 0 then
+      -- Run 11: no default for an INTRUDER/PREDATOR whose unit is far now (expired far, or listed beyond lockdown_near):
+      -- the same far unit never re-applies the lockdown; it re-arms once it comes within lockdown_near
+      local far = #acts > 0 and (r.type == 'INTRUDER' or r.type == 'PREDATOR') and unit_far(K, r.u)
+      if far then
+        r.done = 2
+        K.log('info', 'reflex: interrupt #%d %s unacked for %d s; its unit %d is far (%s, lockdown_near %d): no default',
+              r.n, r.type, age, r.u, far, c.lockdown_near)
+      elseif #acts == 0 then
         K.log('info', 'reflex: interrupt #%d %s unacked for %d s; no default action', r.n, r.type, age)
       else
         local parts, d = engage(K, 'unacked', 'unacked:' .. r.type, acts, now)
@@ -987,7 +1232,7 @@ end
 ---------------------------------------------------------------- module
 function M.init(K)
   local p = K.persist.get('m.reflex')
-  st = {v = 2, doors = {}, ack = {n = 0, wall = 0}, irq = {}, vfy = {}, ref = {}}
+  st = {v = 2, doors = {}, ack = {n = 0, wall = 0}, irq = {}, vfy = {}, ref = {}, far = {t = 0, ids = {}}}
   if type(p) == 'table' then
     for _, id in ipairs(type(p.doors) == 'table' and p.doors or {}) do
       if int(id) then st.doors[#st.doors + 1] = int(id) end
@@ -1011,7 +1256,8 @@ function M.init(K)
     for _, r in ipairs(type(p.irq) == 'table' and p.irq or {}) do
       if type(r) == 'table' and int(r.n) and type(r.type) == 'string' then
         st.irq[#st.irq + 1] = {n = int(r.n), type = r.type, tick = int(r.tick) or 0, wall = int(r.wall) or 0,
-                               ms = int(r.ms) or K.now().ms, msg = tostring(r.msg or ''), done = int(r.done) == 1 and 1 or 0}
+                               ms = int(r.ms) or K.now().ms, msg = tostring(r.msg or ''),
+                               done = (int(r.done) == 1 or int(r.done) == 2) and int(r.done) or 0, u = int(r.u)}
       end
     end
     local dp = p.depot
@@ -1027,21 +1273,33 @@ function M.init(K)
       for k, v in pairs(type(h.kinds) == 'table' and h.kinds or {}) do if v == true then st.hold.kinds[k] = true end end
       for k, v in pairs(type(h.acts) == 'table' and h.acts or {}) do if v == true then st.hold.acts[k] = true end end
     end
+    -- Run 11: the hostiles a lockdown expired far stay so across a reload
+    local f = p.far
+    if type(f) == 'table' and type(f.ids) == 'table' then
+      st.far.t = int(f.t) or 0
+      for _, id in ipairs(f.ids) do
+        if int(id) and #st.far.ids < M.FAR_MAX then st.far.ids[#st.far.ids + 1] = int(id) end
+      end
+    end
   end
   rt, dirty = {}, false
+  far_set()
 end
 
 function M.step(K, budget, ctx)
   local now = K.now().tick
   local h = K.census.h
   local fresh = type(h) == 'table' and now - (h.tick or -1e9) <= M.FRESH
+  -- the open-sky door scan first: Run 11's far_scan measures the hostiles to those doors too
+  if not rt.doors or now - rt.doors.tick >= M.DOOR_EVERY or now < rt.doors.tick then entrance_doors(K, now) end
   if fresh and h.tick ~= rt.htick then
     rt.htick = h.tick
+    if rt.ftick ~= h.tick then far_scan(K, h, now) end      -- Run 11 (threat may have asked far_ids first)
     sighting(K, h, now)
     inside_scan(K, h, now)
     eta(K, h, now)
+    rt.appr = nil
   end
-  if not rt.doors or now - rt.doors.tick >= M.DOOR_EVERY or now < rt.doors.tick then entrance_doors(K, now) end
   alert_step(K, now)
   verify_doors(K, now)
   door_step(K, now)
@@ -1092,6 +1350,7 @@ function M.state(K)
     local nref = #refused_now()
     if nref > 0 then a.dref = nref end              -- BUG-015: refused, the flag fell back
   end
+  if #st.far.ids > 0 then a.far = #st.far.ids end   -- Run 11: hostiles whose lockdown expired far
   return {alarm = a}
 end
 

@@ -450,7 +450,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "INVASION": ("A", "threat", _d(opt="id:i")),
     # reflex (FR-36/49/51-53): arrival announcements, interrupts (INTERRUPTS) and the lockdown it applied
     "ARRIVAL": ("A", "any", _d("kind:s", "src:s text:s raised:i doors:i alert:s clock:i out:i eta:i")),
-    "INTRUDER": ("A", "reflex", _d(opt="n:i id:i pos:p k:s")),
+    # Run 11: dist = tiles from the nearest citizen outside Kern+ or entrance (-1 unknown), far = beyond lockdown_near
+    "INTRUDER": ("A", "reflex", _d(opt="n:i id:i pos:p k:s dist:i far:f")),
     "PREDATOR": ("A", "reflex", _d(opt="n:i id:i pos:p")),
     "NO_DEPOT": ("A", "reflex", _d(opt="text:s")),
     "LOCKDOWN": ("A", "reflex", _d("why:s", "n:i type:s raised:i doors:i alert:s clock:i")),
@@ -511,7 +512,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
                                               "pos:p")),
     "ALERT_START": ("B", "siege", _d(opt="vis:i")),
     "ALERT_END": ("B", "siege", _d(opt="vis:i")),
-    "LOCKDOWN_END": ("B", "reflex", _d(opt="why:s ticks:i doors:i refused:i")),
+    # Run 11: cause far (ended with hostiles in sight beyond reflex.lockdown_near; far names <= 3, nfar) or quiet
+    "LOCKDOWN_END": ("B", "reflex", _d(opt="why:s ticks:i doors:i refused:i cause:s far:sa nfar:i")),
     # Run 10: a roofed wild danger on the citizens' group but beyond reflex.predator_near of every citizen (no lockdown)
     "PREDATOR_FAR": ("B", "reflex", _d("n:i id:i", "pos:p dc:i")),
     "MOOD_START": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
@@ -707,7 +709,8 @@ STATE = Obj(
          # FR-53 interrupt channel (reflex): DEFCON 1 (worst) .. 5, unacked interrupts, last/acked event n
          "alarm": Obj(req={"defcon": Int(1, 5), "unacked": NAT, "last": NAT, "ack": NAT, "lock": FLAG,
                            "why": Str(maxbytes=24)}, opt={"eta": Int(-1), "doors": NAT, "dwait": NAT, "dout": NAT,
-                                                       "dref": NAT}),
+                                                       # Run 11: hostiles whose lockdown expired far
+                                                       "dref": NAT, "far": NAT}),
          # FR-55 lever latency (gate): last pull -> wanted state, in s and ticks (-1 never); pending own pulls
          "lever": Obj(req={"lat_s": Int(-1), "lat_t": Int(-1), "pend": NAT, "wait_s": NAT}),
          "alert": Obj(req={"want": Str(maxbytes=24), "burrow": Str(maxbytes=24), "tiles": NAT, "inside": NAT,

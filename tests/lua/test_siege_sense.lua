@@ -247,4 +247,58 @@ T.test('threat.assess reach (Run 11): a hostile beside an explore shaft open to 
   T.eq({a.siege, a.hostile, a.quiet}, {nil, false, true}, 'plugged: a sealed cavern stays quiet')
 end)
 
+-- Run 11 (site98 y439): an ELK_BIRD invader, a mount the invaders left behind, held ALERT and a lockdown for 45 days
+T.test('census.h (Run 11): an invader the raws call an animal is a wild danger (an = 1), never an invader; an ' ..
+       'intelligent one, one without readable raws and a mount that can learn stay invaders', function()
+  local castes = {[1] = {flags = {CAN_LEARN = false, CAN_SPEAK = false}},          -- an animal (no INTELLIGENT)
+                  [2] = {flags = {CAN_LEARN = true, CAN_SPEAK = true}},            -- a goblin
+                  [3] = {flags = {MOUNT_EXOTIC = true}},                           -- flags unreadable: the mount flag
+                  [4] = {flags = {MOUNT = true, CAN_LEARN = true}},                -- a mount that can learn
+                  [5] = {flags = {}}}                                              -- nothing known
+  df.creature_raw = nil
+  local units = {S.cit(1, 60, 70)}
+  for i = 1, 5 do units[#units + 1] = S.inv(300 + i, 100 + i, 10) end
+  local W = world(units)
+  df.creature_raw = {find = function(r) return castes[r] and {caste = {[0] = castes[r]}} end}
+  for i = 1, 5 do W.unit(300 + i).race, W.unit(300 + i).caste = i, 0 end
+  W.run(10)
+  local h = W.K.census.h
+  T.eq({h.vis, h.inv, h.an}, {5, 3, 2})
+  local k = {}
+  for _, e in ipairs(h.list) do k[e.id] = (e.k == 'danger' and e.an == 1) and 'animal' or e.k end
+  T.eq(k, {[301] = 'animal', [302] = 'inv', [303] = 'animal', [304] = 'inv', [305] = 'inv'})
+end)
+
+T.test('threat.assess (Run 11): an animal invader counts only within predator_near of a citizen outside Kern+ or ' ..
+       'inside; the expired-far invaders (reflex.far_ids) count for nothing', function()
+  local far = {}
+  local reflex = {name = 'reflex', every = {ticks = 10}, far_ids = function(K) return far end}
+  local W = world({S.cit(1, 60, 70)}, {extra = {reflex}})
+  local K = W.K
+  W.run(30)
+  local function with(list, inv)
+    W.set_census('h', {tick = K.now().tick, vis = #list, inv = inv or 0, great = 0, undead = 0, inside = 0,
+                       near_o1 = list[1].d_o1, near_cit = list[1].dc or -1, near_bridge = {}, list = list})
+    return select(2, K.call('threat', 'assess'))
+  end
+  -- 20 tiles from O1, in reach of every bridge: a wild danger counts, the animal invader does not
+  local a = with({{id = 9, x = 51, y = 30, z = Z, k = 'danger', d_o1 = 20, dc = -1}})
+  T.eq({a.hostile, a.calm}, {true, false}, 'a wild danger in reach')
+  a = with({{id = 9, x = 51, y = 30, z = Z, k = 'danger', an = 1, d_o1 = 20, dc = -1}})
+  T.eq({a.hostile, a.calm, a.quiet}, {false, true, true}, 'the animal invader far from every citizen')
+  a = with({{id = 9, x = 51, y = 30, z = Z, k = 'danger', an = 1, d_o1 = 20, dc = 35}})
+  T.eq({a.hostile, a.calm}, {true, false}, '35 tiles from a citizen outside Kern+ (predator_near 40)')
+  a = with({{id = 9, x = 51, y = 50, z = Z, k = 'danger', an = 1, d_o1 = 40, dc = -1, zn = 2}})
+  T.eq(a.hostile, true, 'inside Kern+')
+  -- an invader at the map edge: counts map-wide, unless its lockdown expired far
+  a = with({{id = 300, x = 150, y = 30, z = Z, k = 'inv', d_o1 = 99, dc = -1}}, 1)
+  T.eq({a.inv, a.hostile, a.calm}, {1, true, false})
+  far[300] = true
+  a = with({{id = 300, x = 150, y = 30, z = Z, k = 'inv', d_o1 = 99, dc = -1}}, 1)
+  T.eq({a.inv, a.hostile, a.calm, a.quiet, a.far}, {0, false, true, true, 1}, 'expired far')
+  a = with({{id = 300, x = 150, y = 30, z = Z, k = 'inv', d_o1 = 99, dc = -1},
+            {id = 301, x = 150, y = 31, z = Z, k = 'inv', d_o1 = 99, dc = -1}}, 2)
+  T.eq({a.inv, a.hostile, a.far}, {1, true, 1}, 'a second invader counts')
+end)
+
 T.done()
