@@ -110,6 +110,7 @@ KERN = {
     "backoff_ms": {"critical": 30000, "other": 600000}, "backoff_max_ms": {"critical": 480000, "other": 3600000},
     "backoff_reset_ms": 3600000,
     "slow_ms": 5, "slow_n": 3, "slow_window_ms": 600000, "promote_ms": 600000, "max_factor": 8,
+    "big_ms": 1000,
 }
 
 # blueprint size caps (CONTRACTS §9.8): the kernel decodes a bp in one call (~14 ms per 1,000 cells)
@@ -575,7 +576,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # the connected water tiles counted; src report|tile|cancel|recheck|check (the daily shaft check stopped an explore
     # that was still digging; state = its state then: running, stalled, blocked:<why>)
     "BREACH_STOP": ("B", "runner", _d(opt="proj:s why:s pos:p src:s was:s n:i state:s")),
-    "KERNEL_SLOW": ("B", "kern", _d("module:s", "ms:i factor:i")),
+    "KERNEL_SLOW": ("B", "kern", _d("module:s", "ms:i factor:i task:s")),
     "WEALTH": ("B", "siege", _d(opt="created:i exported:i imported:i")),
     "DRILL_RESULT": ("B", "drill", _d(opt="pass:f raised:i worn:i outside:i dbl:i")),
     "READY_CHANGE": ("B", "readiness", _d(opt="from:i to:i fail:sa")),
@@ -660,7 +661,7 @@ VERB_ARGS: dict[str, Obj] = {
     "inspect": Obj(req={"what": Str(enum=["state", "modules", "census", "manifest", "projects", "persist",
                                           "perf", "mode", "plan", "tombs", "water_sources", "orders", "workload",
                                           "trade", "reach", "entrances", "defense", "perimeter", "refuge"])},
-                   opt={"key": Str(maxbytes=80)}),
+                   opt={"key": Str(maxbytes=80), "field": Str(r"^[A-Za-z0-9_]{1,40}$")}),
     "selftest": Obj(opt={"suite": Str(enum=["quick", "full"])}),
     "module.enable": Obj(req={"module": MODULE}),
     "tombs.repair": Obj(),

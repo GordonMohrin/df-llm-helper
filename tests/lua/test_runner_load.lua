@@ -50,9 +50,10 @@ local function shaft_xy(i) return 20 + (i % 6) * 36, 20 + (i // 6) * 50 end
 
 -- n explores dug and done, their bottoms (z91) beside water: even ones a 20-tile run of seepage (no cavern, reaches
 -- past lake_r0), odd ones a small pocket; files other bp files. Then a reload: the world the check runs on.
-local function fort(tag, n, files)
+local function fort(tag, n, files, cfg)
   for k, v in pairs(CFG0) do runner.CFG[k] = v end
   runner.CFG.active = 4
+  for k, v in pairs(cfg or {}) do runner.CFG[k] = v end
   local W = H.world{tag = tag}
   W.load(runner)
   for i = 1, n do
@@ -170,14 +171,105 @@ T.test('BUG-033: one shaft a slice; seepage reads the small box; a finished wet 
   end
   W2.load(runner)
   H.runs(W2, 4)
-  local n0 = 0
-  for _, l in ipairs(W2.logs) do if l.msg:find('^cavern check: ') then n0 = n0 + 1 end end
-  H.runs(W2, 8)                                    -- 4 days
-  local n1 = 0
-  for _, l in ipairs(W2.logs) do if l.msg:find('^cavern check: ') then n1 = n1 + 1 end end
+  -- BUG-039: an unchanged look is no log line any more; the looks are counted on the records (xs[id].c, the look's tick)
+  local looks, last = 0, W2.K.persist.get('m.runner').xs.x1.c
+  for _ = 1, 8 do                                  -- 4 days
+    H.runs(W2, 1)
+    local c = W2.K.persist.get('m.runner').xs.x1.c
+    if c ~= last then looks, last = looks + 1, c end
+  end
   local lines = {}
   for _, l in ipairs(W2.logs) do if l.msg:find('^cavern check: ') then lines[#lines + 1] = l.msg end end
-  T.ok(n1 - n0 >= 4, 'dry finished shafts: looked at daily (' .. (n1 - n0) .. ' lines in 4 days): ' .. table.concat(lines, ' | '))
+  T.ok(looks >= 4, 'dry finished shafts: looked at daily (' .. looks .. ' looks in 4 days): ' .. table.concat(lines, ' | '))
+end)
+
+---------------------------------------------------------------- BUG-039: the cavern check's churn
+-- Run 11 y451 (kernel d782dfa/e11d17a): kern.log's runner lines were nearly only 'cavern check: y433s3b0 116,129 ...
+-- no cavern; ...; 11 more next run', the same four groups again and again: the runner ran every 4,800+ ticks (demoted
+-- x8, paced), 15 finished shafts were due daily and a run looks at shaft_n (4); every run logged the same line.
+local function dry_all(W, n)
+  for i = 1, n do
+    local x, y = shaft_xy(i)
+    for dx = 1, 20 do local t = W.tile(x + dx, y + 2, 91); t.c, t.flow = '#', 0 end
+    for dx = 1, 2 do for dy = 2, 3 do local t = W.tile(x - dx, y + dy, 91); t.c, t.flow = '#', 0 end end
+  end
+end
+local function check_lines(W, from)
+  local r = {}
+  for i = from or 1, #W.logs do if W.logs[i].msg:find('^cavern check: ') then r[#r + 1] = W.logs[i].msg end end
+  return r
+end
+
+T.test('BUG-039 live: runs 4 days apart, 15 finished dry shafts: the check converges, logs only news, the live ' ..
+       'explore every run', function()
+  local W = fort('sat', 15, 0)
+  dry_all(W, 15)
+  W.load(runner)
+  W.mods.runner.factor = 8                         -- demoted x8: a run every 4,800 ticks (4 days), as live
+  H.place(W, 'lv', explore_doc(200, 200, 100, 9, 6, 3))
+  H.runs(W, 6, 4800)
+  local xs = W.K.persist.get('m.runner').xs
+  T.ok(xs.lv ~= nil, 'the live explore has a record')
+  local n0, live_looks, runs = #W.logs, 0, 14
+  for _ = 1, runs do
+    local c0 = xs.lv and xs.lv.c
+    H.runs(W, 1, 4800)
+    xs = W.K.persist.get('m.runner').xs
+    if xs.lv and xs.lv.c ~= c0 then live_looks = live_looks + 1 end
+  end
+  local lines = check_lines(W, n0 + 1)
+  local more = 0
+  for _, l in ipairs(lines) do if l:find('more next run', 1, true) then more = more + 1 end end
+  -- the old check: 16 due every run, 4 looked at: '12 more next run' in every one of the 14 lines
+  T.ok(#lines <= 2, string.format('%d check lines in %d runs (news only): %s', #lines, runs, table.concat(lines, ' | ')))
+  T.ok(more <= 1, 'the backlog is gone: ' .. table.concat(lines, ' | '))
+  T.eq(live_looks, runs, 'the live explore is looked at every run (first in the queue)')
+  local t, oldest = W.K.now().tick, 0
+  for id, r in pairs(xs) do
+    if id ~= 'lv' then oldest = math.max(oldest, t - (r.c or 0)) end
+    if id ~= 'lv' then T.ok((r.per or 1) <= runner.CFG.fin_max_d, id .. ' per ' .. tostring(r.per)) end
+  end
+  T.ok(oldest <= (runner.CFG.fin_max_d + 8) * 1200, 'every finished shaft still looked at within fin_max_d: ' .. oldest)
+  -- a change is news again: a lake beside x3's bottom is plugged at its next look and named in the line
+  local x, y = shaft_xy(3)
+  for yy = y + 2, y + 6 do for xx = x - 12, x - 1 do local tl = W.tile(xx, yy, 91); tl.c, tl.flow, tl.cav = '~', 7, true end end
+  local n1 = #W.logs
+  for _ = 1, 20 do
+    H.runs(W, 1, 4800)
+    if #W.find_events('CAVERN_PLUG') > 0 then break end
+  end
+  T.eq(#W.find_events('CAVERN_PLUG'), 1, 'the lake beside a finished shaft is still found')
+  T.ok(table.concat(check_lines(W, n1 + 1), ' | '):find('x3 ', 1, true), table.concat(check_lines(W, n1 + 1), ' | '))
+end)
+
+T.test('BUG-039: the trim keeps the record of a done explore still in the list (else it was noted again, due at once)',
+       function()
+  local W = fort('trim', 25, 0, {done_keep = 40})
+  dry_all(W, 25)
+  W.load(runner)
+  H.runs(W, 4)
+  local before = {}
+  for id, r in pairs(W.K.persist.get('m.runner').xs) do before[id] = r.t end
+  H.runs(W, 12)
+  local renoted, gone = 0, 0
+  for id, t0 in pairs(before) do
+    local r = W.K.persist.get('m.runner').xs[id]
+    if not r then gone = gone + 1 elseif r.t ~= t0 then renoted = renoted + 1 end
+  end
+  -- the old trim: every check dropped a done explore's record and the next run noted it again (25 > shaft_keep 24)
+  T.eq({renoted, gone}, {0, 0}, 'no record dropped and noted again')
+end)
+
+T.test('BUG-039: the runner names what a slice does (M.doing: kern\'s slow and huge step lines)', function()
+  for k, v in pairs(CFG0) do runner.CFG[k] = v end
+  local W = H.world{tag = 'doing'}
+  W.load(runner)
+  local seen = {}
+  W.act_result('quickfort', function(p) seen[#seen + 1] = runner.doing(); return H.fake_qf(W, p) end)
+  H.place(W, 'bd1', H.doc{tpl = 'bedrooms', x = 10})
+  H.runs(W, 1)
+  T.eq(seen[1], 'work bd1 dig chunk 1/2 (task 1/3, slice 1)')
+  T.ok(runner.doing():find('^end %(task 3/3, slice %d+%)$') ~= nil, runner.doing())
 end)
 
 T.test('BUG-033: a seal past remake_max asks economy nothing more (the cell reads came before the budget check)', function()

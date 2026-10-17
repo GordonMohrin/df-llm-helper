@@ -203,7 +203,9 @@ T.test('the log line names every shaft looked at: no cavern, closed, not dug; da
   T.eq(#lines, n0 + 1, 'one line a day')
   T.ok(lines[#lines]:find('e1 40,41 z100-97 running: no cavern (1 water tiles in reach)', 1, true), lines[#lines])
   T.ok(lines[#lines]:find('e2 80,41 z100-99 running: closed (a constructed wall on its top)', 1, true), lines[#lines])
-  T.ok(lines[#lines]:find('e3 120,41 z100-92 running: not dug yet', 1, true), lines[#lines])
+  -- BUG-039: a look that did not change since the last one is counted, not named again (e3 was named at its first look)
+  T.ok(lines[#lines]:find('; 1 unchanged', 1, true), lines[#lines])
+  T.ok(table.concat(lines, ' || '):find('e3 120,41 z100-92 running: not dug yet', 1, true), table.concat(lines, ' || '))
   T.eq(#W.find_events('CAVERN_PLUG'), 0)
   -- a reload: the first run after the boot looks at once
   local persist = H.reloaded(W)

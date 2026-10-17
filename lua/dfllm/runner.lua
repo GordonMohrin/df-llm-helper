@@ -62,6 +62,12 @@ M.CFG = {
   -- look found water in reach but no cavern is looked at every fin_every (a dry one and live ones stay daily); a bp
   -- file is decoded only when it is an explore's (and once a boot: what the check needs of it is kept, S.xdoc)
   fin_every = 8 * DAY,
+  -- BUG-039 (Run 11 y451: 'cavern check: ... 11 more next run' every run, the same shafts again and again: runs 4+ days
+  -- apart, 15 shafts due daily, shaft_n looks a run): while more shafts are due than a run looks at (saturated), a
+  -- finished shaft whose look did not change waits fin_every, then twice as long after each unchanged look, at most
+  -- fin_max_d days; a change, or a live explore: daily again. Live explores are looked at first. The log line only
+  -- names news (a changed look, the first look after a boot, a plug, a stop); else a summary per util/cadence
+  fin_max_d = 64,
   -- Run 11 (siege 8, y441 spring: pop 52 -> 3): the way in 114,73,143 had no door; its seal (c1a147c261), placed two
   -- days before the attack, waited unfinished behind the other projects. Seal first: an open seal or cavern plug takes
   -- the first slots (also when stalled), digs at designation priority 1 and moves its quickfort orders to the top of
@@ -136,6 +142,13 @@ local SEALS = {seal = true, plug = true}     -- seal first (Run 11 siege 8): wha
 local function dprio(P) return SEALS[P.tpl] and 1 or P.prio end   -- a seal's dig designations: priority 1
 local function pnum(id) return int(tostring(id or ''):match('^P([0-9])$')) end
 local function qf_room() return S.slice.qf < S.slice.qf_max end
+-- BUG-039 (Run 11 y451: one runner step took 68.6 s, kern.log named only 'runner'): what this slice does, for kern's
+-- slow and huge step lines (M.doing): 'work y451s3b0 s2.place chunk 1/1 (task 1/3, slice 1)'
+function Q.doing(P, st, what)
+  local d = S.dtask
+  S.doing = string.format('%s%s%s%s%s', d and d.k or 'run', P and (' ' .. P.id) or '', st and (' ' .. st.label) or '',
+                          what and (' ' .. what) or '', d and string.format(' (task %d/%d, slice %d)', d.i, d.n, d.sl) or '')
+end
 local function qf(K, p) S.slice.qf = S.slice.qf + 1; return K.act.quickfort(p) end
 
 -- last = no stall before it (waiting resets it); ps = the project's own last progress (BUG-037: waiting for a slot
@@ -1389,6 +1402,7 @@ local function apply(K, P, st, R)
     end
   end
   local p = {mode = st.mode, data = chunk_data(ch), pos = ch.pos}
+  Q.doing(P, st, string.format('chunk %d/%d', P.chunk + 1, #st.chunks))
   if st.mode == 'dig' then p.priority = dprio(P) end
   local pre = st.mode == 'build' and pre_occupied(K, ch, R) or 0
   -- FR-22: seal remembers the closing cells (walls, doors, bridges) and takes a reach baseline before they are queued
@@ -1590,6 +1604,7 @@ local function finish(K, P, d)
   forget(P.id)
   K.emit('PROJECT_DONE', 'B', trunc(P.id .. ' (' .. P.tpl .. ') done' .. (wn and ('; ' .. wn) or ''), 200),
          {proj = P.id, tpl = P.tpl, walled = wl})
+  K.log('info', '%s (%s) done', P.id, P.tpl)  -- BUG-039: kern.log names every project that leaves the open list
   K.flush()
   dirty()
 end
@@ -1696,6 +1711,7 @@ end
 local function remove(K, P)
   local xr = note_shaft(K, P, doc(K, P.id))   -- Run 11: a cancelled explore's shaft may still stand (shaft check)
   if xr then xr.fin = 'cancelled' end
+  K.log('info', '%s (%s) cancelled at stage %d: removed from the list', P.id, P.tpl, P.stage)   -- BUG-039
   for i, Q in ipairs(S.pd.list) do if Q == P then table.remove(S.pd.list, i); break end end
   K.persist.set('bp.' .. P.id, nil)
   S.rt.p[P.id] = nil
@@ -1817,7 +1833,8 @@ end
 -- plug for these templates). Explore projects are the shaft check's (below), in every state.
 local RECHECK = {['breach:damp'] = true, ['breach:water'] = true, ['breach:cavern'] = true,
                  ['breach:cavern_lake'] = true}
-local function recheck_stops(K, t, parts)
+local function recheck_stops(K, t, c)
+  local parts = c.parts
   for _, P in ipairs(S.pd.list) do
     local b = S.rt.br[P.id]
     local due = type(b) ~= 'table' or not int(b.c) or t - int(b.c) >= M.CFG.recheck
@@ -1844,8 +1861,9 @@ local function recheck_stops(K, t, parts)
           if kind ~= was then raise(K, P, b, kind, hit, was, cnt) end
           plug(K, P, d, kind, hit, cnt)
         end
-        parts[#parts + 1] = string.format('%s (%s) %s: %s', P.id, P.tpl, st0,
-                                          kind and ((kind:gsub('_', ' ')) .. ', no automatic plug') or 'no cavern')
+        local line = string.format('%s (%s) %s: %s', P.id, P.tpl, st0,
+                                   kind and ((kind:gsub('_', ' ')) .. ', no automatic plug') or 'no cavern')
+        if Q.news(b, line) then parts[#parts + 1] = line else c.same = c.same + 1 end   -- BUG-039: news only
       end
     end
   end
@@ -1960,7 +1978,9 @@ end
 -- explores without a record and scans the bp folder (scan_n files a run)
 local function shaft_prep(K, t)
   S.xseen, S.xmiss = S.xseen or {}, S.xmiss or {}
-  for _, P in ipairs(S.pd.list) do        -- explores queued before the check existed (or by an older kernel)
+  -- explores queued before the check existed (or by an older kernel); BUG-039: never one whose record the trim dropped
+  -- this boot (S.xmiss: it would be due again at once, the same shafts every run)
+  for _, P in ipairs(S.pd.list) do
     if P.tpl == 'explore' and S.rt.xs[P.id] == nil and not S.xmiss[P.id] then
       local c = S.rt.cav[P.id]
       if not (type(c) == 'table' and c.st == 'done') and not note_shaft(K, P, P.done ~= 1 and doc(K, P.id) or nil) then
@@ -1984,42 +2004,72 @@ local function shaft_prep(K, t)
   for _ = 1, M.CFG.scan_n do
     local id = table.remove(S.xscan)
     if not id then break end
-    local r = not find(id) and S.rt.xs[id] == nil and note_shaft(K, {id = id, tpl = 'explore'}, file_doc(K, id))
+    local r = not find(id) and S.rt.xs[id] == nil and not S.xmiss[id] and
+              note_shaft(K, {id = id, tpl = 'explore'}, file_doc(K, id))
     if r then r.fin = 'gone' end
   end
   -- due: not looked at since the boot, else daily; a stopped explore keeps its stop's cadence (m.runner br: a fresh
   -- stop was looked at when it came, one without a record at once); BUG-033: a finished one whose last look found water
   -- in reach but no cavern (r.q) every fin_every
+  -- BUG-039: a finished shaft's cadence r.per (days; r.q of an older kernel: fin_every)
   local function every(c, per) return not int(c) or t - c >= (per or M.CFG.recheck) or t < c end
-  local due = {}
+  local due, lv = {}, {}
   for id, r in pairs(S.rt.xs) do
     if type(r) ~= 'table' or not (int(r.x) and int(r.y) and int(r.top) and int(r.low)) then S.rt.xs[id] = nil; dirty()
     elseif r.off ~= 1 then
       local P, b = find(id), S.rt.br[id]
       local stopped = P ~= nil and P.done ~= 1 and RECHECK[P.blocked]
       local live = P ~= nil and P.done ~= 1
-      local per = (not live and r.q == 1) and M.CFG.fin_every or nil
+      local per = not live and ((int(r.per) and int(r.per) * DAY) or (r.q == 1 and M.CFG.fin_every)) or nil
       if not S.xseen[id] or (stopped and every(type(b) == 'table' and b.c or nil)) or (not stopped and every(r.c, per)) then
-        due[#due + 1] = id
+        due[#due + 1], lv[id] = id, live and 0 or 1
       end
     end
   end
-  table.sort(due, function(a, b)
+  table.sort(due, function(a, b)           -- the never seen this boot, then the live explores (BUG-039), then the oldest
     local ra, rb = S.rt.xs[a], S.rt.xs[b]
     local sa, sb = S.xseen[a] and 1 or 0, S.xseen[b] and 1 or 0
     if sa ~= sb then return sa < sb end
+    if lv[a] ~= lv[b] then return lv[a] < lv[b] end
     if (ra.c or -1) ~= (rb.c or -1) then return (ra.c or -1) < (rb.c or -1) end
     return a < b
   end)
+  S.xsat = #due > M.CFG.shaft_n                -- BUG-039: saturated: finished unchanged shafts wait longer
   local list = {}
   for i = 1, math.min(#due, M.CFG.shaft_n) do list[i] = due[i] end
   return list, math.max(0, #due - M.CFG.shaft_n)
 end
 
--- one shaft look (its own slice, BUG-033): the log part
-local function shaft_one(K, t, id, parts)
+-- BUG-039: a short signature of a look (its text without numbers: water counts move); news = it differs from the
+-- record's last one (rec.sg, kept in the record)
+function Q.sig(text)
+  local h = 5381
+  for ch in tostring(text):gsub('%d+', '#'):gmatch('.') do h = (h * 33 + ch:byte()) % 2147483647 end
+  return h
+end
+function Q.news(rec, text)
+  local sg = Q.sig(text)
+  local was = rec.sg
+  rec.sg = sg
+  return was ~= sg
+end
+
+-- BUG-039: the cadence of a finished shaft after a look (r.per days; nil = daily): unchanged while the check is
+-- saturated: fin_every, then doubled up to fin_max_d; changed: daily (a wet one: fin_every, BUG-033); live: daily
+function Q.cadence(r, live, same, wet)
+  local fd = M.CFG.fin_every // DAY
+  r.q = nil
+  if live then r.per = nil
+  elseif not same then r.per = wet and fd or nil
+  elseif S.xsat then r.per = math.min(M.CFG.fin_max_d, math.max(fd, 2 * (int(r.per) or 1)))
+  elseif wet then r.per = math.max(fd, int(r.per) or 0) end
+end
+
+-- one shaft look (its own slice, BUG-033): the log part (BUG-039: only news; c.same counts the others)
+local function shaft_one(K, t, id, c)
   local r, P = S.rt.xs[id], find(id)
   if type(r) ~= 'table' then return end
+  local first = not S.xseen[id]
   r.c, S.xseen[id] = t, true
   if P and P.done ~= 1 and RECHECK[P.blocked] then
     if type(S.rt.br[id]) ~= 'table' then S.rt.br[id] = {} end
@@ -2029,27 +2079,32 @@ local function shaft_one(K, t, id, parts)
   local state, res, bot = shaft_look(K, t, id, r)
   P = find(id)
   -- a finished shaft with water in reach but no cavern (the costly look: the wide water boxes) waits fin_every; a dry
-  -- one (a 3x3x3 read per candidate) stays daily
-  r.q = (not (P ~= nil and P.done ~= 1) and type(res) == 'string' and res:find('^no cavern %(%d+ water') ~= nil) and 1
-        or nil
-  parts[#parts + 1] = string.format('%s %d,%d z%d-%d %s: %s', id, r.x, r.y, r.top, bot or r.low, state, res)
+  -- one (a 3x3x3 read per candidate) stays daily; BUG-039: an unchanged one waits longer while the check is saturated
+  local same = not Q.news(r, state .. ': ' .. tostring(res))
+  Q.cadence(r, P ~= nil and P.done ~= 1, same, type(res) == 'string' and res:find('^no cavern %(%d+ water') ~= nil)
+  if same and not first then c.same = c.same + 1; return end
+  c.parts[#c.parts + 1] = string.format('%s %d,%d z%d-%d %s: %s', id, r.x, r.y, r.top, bot or r.low, state, res)
 end
 
--- at most shaft_keep records: the ones with nothing left to watch go first, then those of projects that left the list
+-- at most shaft_keep records: the ones with nothing left to watch go first, then those of projects that left the list.
+-- BUG-039: a done explore still in the list keeps its record (the next run noted it again, due at once: the same
+-- shafts every run), and a dropped one is not noted again this boot (S.xmiss)
 local function shaft_trim()
   local ids = {}
   for id in pairs(S.rt.xs) do ids[#ids + 1] = id end
   if #ids > M.CFG.shaft_keep then
     local function rank(id)
       local r, P = S.rt.xs[id], find(id)
-      return (r.off == 1 and 0 or (P == nil or P.done == 1) and 1 or 2)
+      return (r.off == 1 and 0 or P == nil and 1 or 2)
     end
     table.sort(ids, function(a, b)
       local ka, kb = rank(a), rank(b)
       if ka ~= kb then return ka < kb end
       return (S.rt.xs[a].t or 0) < (S.rt.xs[b].t or 0)
     end)
-    for i = 1, #ids - M.CFG.shaft_keep do if rank(ids[i]) < 2 then S.rt.xs[ids[i]] = nil end end
+    for i = 1, #ids - M.CFG.shaft_keep do
+      if rank(ids[i]) < 2 then S.rt.xs[ids[i]], S.xmiss[ids[i]] = nil, true end
+    end
     dirty()
   end
 end
@@ -2058,27 +2113,41 @@ end
 -- stopped digs and the bp scan in the first slice, then one shaft a slice): one log line per run that looked (the live
 -- session reads why a shaft is or is not plugged there), and one at the first run after a boot even when there is
 -- nothing to look at. -> 'yield' (more slices) or 'done'
+-- BUG-039: the line names only news (a changed look, the first look after a boot, a plug or a stop); a run with none
+-- logs a summary at most once per util/cadence (7 days and 10 min, again only after a line with news)
 local function check_task(K, t)
   local c = S.chk
   if not c then
-    c = {parts = {}}
-    recheck_stops(K, t, c.parts)
+    c = {parts = {}, same = 0}
+    recheck_stops(K, t, c)
     c.due, c.more = shaft_prep(K, t)
+    c.n = #c.due
     S.chk = c
     if #c.due > 0 then return 'yield' end
   end
   local id = table.remove(c.due, 1)
   if id then
-    shaft_one(K, t, id, c.parts)
+    shaft_one(K, t, id, c)
     if #c.due > 0 then return 'yield' end
   end
   S.chk = nil
   local parts = c.parts
-  if c.more > 0 then parts[#parts + 1] = string.format('%d more next run', c.more) end
   shaft_trim()
+  local tail = (c.same > 0 and string.format('; %d unchanged', c.same) or '') ..
+               (c.more > 0 and string.format('; %d more next run', c.more) or '')
   if #parts > 0 then
-    if #parts > 9 then parts = {table.unpack(parts, 1, 8)}; parts[9] = '...' end
-    K.log('info', 'cavern check: %s', table.concat(parts, '; '))
+    if #parts > 8 then parts = {table.unpack(parts, 1, 8)}; parts[9] = '...' end
+    K.log('info', 'cavern check: %s%s', table.concat(parts, '; '), tail)
+    S.xq = CAD.quiet(S.xq)
+  elseif c.same > 0 then
+    local T = K.now()
+    if CAD.due(S.xq, T, {}, {'same'}) then
+      S.xq = CAD.mark(T, {}, {'same'})
+      local n = 0
+      for _ in pairs(S.rt.xs) do n = n + 1 end
+      K.log('info', 'cavern check: nothing new (%d looked at, %d shafts watched%s)', c.n, n,
+            c.more > 0 and string.format('; %d more next run: finished unchanged shafts wait longer', c.more) or '')
+    end
   elseif not S.xlog then
     K.log('info', 'cavern check: no explore shaft and no stopped dig to look at')
   end
@@ -3247,12 +3316,15 @@ end
 -- the next run goes on from there), so one task can never hold the run, and with it every slot, for good
 function M.step(K, budget, ctx)
   S.slice = {qf = 0, probes = 0, qf_max = M.CFG.qf_per_slice}
-  if not (ctx and ctx.cont) or not S.run then begin_run(K) end
+  if not (ctx and ctx.cont) or not S.run then S.dtask, S.doing = nil, 'begin run'; begin_run(K) end
   local run = S.run
   run.sl = (run.sl or 0) + 1
   while run.i <= #run.tasks do
     local task = run.tasks[run.i]
     local P = task.id and find(task.id)
+    S.dtask = {k = task.k, i = run.i, n = #run.tasks, sl = run.sl}
+    local d0 = P and doc(K, P.id)
+    Q.doing(P, d0 and d0.stages[P.stage + 1])
     local r = 'done'
     if task.k == 'end' then end_run(K)
     elseif task.k == 'check' then r = check_task(K, run.t or now(K)) == 'yield' and 'yield' or 'done'   -- the run's tick
@@ -3277,6 +3349,9 @@ function M.step(K, budget, ctx)
   S.run, S.ended = nil, now(K)
   save(K)
 end
+
+-- BUG-039: what the runner's last slice did (kern asks right after a slow or huge step or handler)
+function M.doing() return S.doing end
 
 -- BUG-037: no run ended for run_idle_d days (or since the boot): {d, i, n, task, sl, age} of the run in hand, else nil
 function Q.run_state(K)

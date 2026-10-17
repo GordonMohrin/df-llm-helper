@@ -222,26 +222,37 @@ local function build(o)
   -- BUG-033: svc = ms of the call spent in K.calls of other modules: a slow call is judged on the module's own code
   -- (its calls into others are paced as its cost, but neither demote it nor the callee); the messages name the callee
   -- with the most time when there was any (top)
-  local function charge(e, where, ms, svc, top)
+  -- BUG-039: task = what the module said it was doing (M.doing), named in the messages and KERNEL_SLOW d.task
+  local function charge(e, where, ms, svc, top, task)
     if NO_CHARGE[where] then return end
     if svc then ms = ms - svc end
     local act, report = sched.slow(e, ms, dfhack.getTickCount(), where)
     if not act then return end
     local msr = round(ms)
     local via = (svc and top and svc >= 1) and string.format('; +%d ms in %s calls', round(svc), top) or ''
+    local inw = task and (' in ' .. task) or ''
     if act == 'fault' then
-      emit_as('kern', 'KERN_FAULT', 'A', e.name .. ' slow (' .. msr .. ' ms' .. via .. ')',
+      emit_as('kern', 'KERN_FAULT', 'A', e.name .. ' slow (' .. msr .. ' ms' .. inw .. via .. ')',
               {module = e.name, err = 'slow', n = KN.slow_n})
       return
     end
     if report then
-      emit_as('kern', 'KERNEL_SLOW', 'B', e.name .. ' demoted x' .. e.factor .. (via ~= '' and (' (' .. via:sub(3) .. ')') or ''),
-              {module = e.name, ms = msr, factor = e.factor})
+      local why = task and (msr .. ' ms' .. inw .. via) or (via ~= '' and via:sub(3)) or nil
+      emit_as('kern', 'KERNEL_SLOW', 'B', e.name .. ' demoted x' .. e.factor .. (why and (' (' .. why .. ')') or ''),
+              {module = e.name, ms = msr, factor = e.factor, task = task and trunc(task, 40) or nil})
     else
-      log_as('kern', 'info', string.format('%s demoted x%d (%d ms%s; already reported; promotion after %d quiet min)',
-                                           e.name, e.factor, msr, via, sched.quiet_need(e) // 60000))
+      log_as('kern', 'info', string.format('%s demoted x%d (%d ms%s%s; already reported; promotion after %d quiet min)',
+                                           e.name, e.factor, msr, inw, via, sched.quiet_need(e) // 60000))
     end
     st.flush_req = true
+  end
+
+  -- BUG-039: what a module says it is doing (optional M.doing() -> string), asked only after a slow call
+  local function doing(e)
+    local f = e.M.doing
+    if type(f) ~= 'function' then return nil end
+    local ok, v = pcall(f)
+    return ok and type(v) == 'string' and v ~= '' and clean(v, 80) or nil
   end
 
   -- cost per owner: the perf window (perf.csv) and the cumulative totals (selftest's 1-min budget check)
@@ -253,24 +264,46 @@ local function build(o)
 
   local child_ms = 0
   local svc = nil      -- BUG-033: {ms, by = {callee = ms}} of the K.calls inside the running call_in
+  local slow_act = nil -- BUG-039: {fn = 'quickfort place', ms} the slowest act call inside the running call_in
+  st.on_act_cost = function(fn, ms, args)
+    if slow_act and ms <= slow_act.ms then return end
+    local p = fn == 'quickfort' and args and type(args[1]) == 'table' and args[1] or nil
+    slow_act = {fn = p and string.format('quickfort %s%s', tostring(p.mode),
+                                         (p.command and p.command ~= 'run') and (' ' .. tostring(p.command)) or '') or fn,
+                ms = ms}
+  end
+  -- BUG-039 (Run 11 y451: one runner step took 68.6 s): a call of KN.big_ms or more is named in kern.log: who, where,
+  -- what it did (M.doing), its slowest act call and the capped debt; inspect modules `big` keeps the largest
+  local function big_call(e, where, ms, task, act)
+    if not e.big or ms >= e.big.ms then e.big = {ms = ms, what = trunc(where .. (task and (' ' .. task) or ''), 80), at = st.now.ms} end
+    local parts = {}
+    if task then parts[#parts + 1] = task end
+    if act and act.ms >= 1 then parts[#parts + 1] = string.format('slowest act: %s %d ms', act.fn, round(act.ms)) end
+    log_as('kern', 'warn', string.format('%s %s took %d ms%s%s', e.name, where, round(ms),
+                                         #parts > 0 and (' (' .. table.concat(parts, '; ') .. ')') or '',
+                                         e.critical and '' or string.format('; debt capped at %d ms (%d s of its share)',
+                                                                            round(sched.cap(e)), sched.PACE.debt_cap_s)))
+  end
   local function call_in(e, where, f, ...)
-    local prev, saved, svc0 = st.current, child_ms, svc
-    st.current, child_ms, svc = e.name, 0, nil
+    local prev, saved, svc0, act0 = st.current, child_ms, svc, slow_act
+    st.current, child_ms, svc, slow_act = e.name, 0, nil, nil
     local t0 = cost_ms()
     local r = table.pack(xpcall(f, debug.traceback, K, ...))
     local dt = cost_ms() - t0
     local self_ms = dt - child_ms
-    local mine = svc
-    st.current, child_ms, svc = prev, saved + dt, svc0
+    local mine, act = svc, slow_act
+    st.current, child_ms, svc, slow_act = prev, saved + dt, svc0, act0
     e.ms_total = e.ms_total + self_ms
     book(e.name, self_ms)
     sched.spend(e, self_ms)
     if not e.critical and not e.boost then st.frame_paced = st.frame_paced + self_ms end
     if self_ms > st.frame_top_ms then st.frame_top_ms, st.frame_top = self_ms, e.name end
+    local task = where == 'step' and self_ms > KN.slow_ms and doing(e) or nil
+    if self_ms >= KN.big_ms and not NO_CHARGE[where] then big_call(e, where, self_ms, task, act) end
     if not r[1] then fault(e, where, r[2]); return false, r[2] end
     local top, tms = nil, 0
     for k, v in pairs(mine and mine.by or {}) do if v > tms then top, tms = k, v end end
-    charge(e, where, self_ms, mine and mine.ms, top)
+    charge(e, where, self_ms, mine and mine.ms, top, task)
     return table.unpack(r, 1, r.n)
   end
   st.call_in = call_in
@@ -364,6 +397,7 @@ local function build(o)
     who = function() return st.current end,
     allowlist = function() return st.cfg and st.cfg.allowlist or actlib.BUILTIN_ALLOWLIST end,
     log_cmd = log_cmd,
+    clock = cost_ms, on_cost = st.on_act_cost,      -- BUG-039: the slowest act call of a huge step
     fail = function(fn, err, module)
       local key = 'ACT_FAIL' .. fn .. module .. err
       local last = st.once[key]
@@ -766,7 +800,10 @@ local function reply(st, cmd, ok, msg, data, args)
     elseif json.is_array(data) or (#data > 0) then data = {items = data} end
     local okd, enc = pcall(json.encode, data)
     if not okd then r.data = {err = 'unencodable'}
-    elseif #enc > 8192 then r.data = {trunc = 1, bytes = #enc}
+    elseif #enc > 8192 then
+      r.data = {trunc = 1, bytes = #enc}
+      -- BUG-039 (Run 11: `inspect persist m.runner` read as 'no p key'): the reply says so; a field reads a part
+      r.msg = clean(r.msg .. string.format(' (data %d bytes > 8 KB: not sent; ask for one field)', #enc), 300)
     else r.data = data end
   end
   local path, err = fio.write_new(st.paths.outbox, cmd.id .. '.json', json.encode(r))
@@ -861,13 +898,24 @@ local function kern_verb(st, verb, args, cmd)
                    flips = e.flips > 0 and e.flips or nil, demotions = e.demotions,
                    boost = e.boost and e.boost.why or nil,
                    -- BUG-033: ms this module spent in K.calls of other modules (booked to the callers)
-                   svc = (e.svc_ms or 0) >= 0.5 and round(e.svc_ms) or nil}
+                   svc = (e.svc_ms or 0) >= 0.5 and round(e.svc_ms) or nil,
+                   -- BUG-039: slices the pacing floor gave it; its largest call this boot (>= KN.big_ms)
+                   floor = (e.floor_n or 0) > 0 and e.floor_n or nil,
+                   big = e.big and {ms = round(e.big.ms), what = e.big.what,
+                                    ago_s = math.max(0, (st.now.ms - e.big.at) // 1000)} or nil}
     end
     return true, 'modules', {modules = r, load = M.load_info(st), budget = sched.budget(st.load)}
   elseif what == 'persist' then
     if type(args.key) == 'string' then
       if not C.persist_key(args.key) then return false, 'unknown persist key' end
-      return true, args.key, K.persist.get(args.key) or json.object{}
+      local v = K.persist.get(args.key)
+      -- BUG-039: one top-level field of a big record (m.runner is over the 8 KB reply limit: `field:'p'`)
+      if type(args.field) == 'string' then
+        local f = type(v) == 'table' and v[args.field] or nil
+        if f == nil then return true, args.key .. '.' .. args.field .. ': none', json.object{} end
+        return true, args.key .. '.' .. args.field, type(f) == 'table' and f or {value = f}
+      end
+      return true, args.key, v or json.object{}
     end
     return true, 'persist', {keys = st.pstore.keys(), bytes = json.object(st.pstore.sizes())}   -- BUG-033: sizes
   elseif what == 'perf' then
@@ -1046,6 +1094,18 @@ local function note_paced(st, e)
   end
 end
 
+-- BUG-039: the pacing floor gave a module that waited PACE.floor_ms one slice whatever its debt (kern.log once per
+-- module per 10 min, with the count)
+local function note_floor(st, e, cont)
+  local t = st.now.ms
+  if e.floor_log and t - e.floor_log < KN.slow_window_ms then return end
+  e.floor_log = t
+  st.log_as('kern', 'warn', string.format('%s waited %d s for a slice%s (debt %d ms over its share of %s ms/s): one slice '
+                                          .. 'anyway (pacing floor, %d so far)', e.name, sched.PACE.floor_ms // 1000,
+                                          cont and ' with its run in hand' or '', round(e.debt), tostring(e.share),
+                                          e.floor_n or 0))
+end
+
 local function frame(st)
   local t0, c0 = dfhack.getTickCount(), cost_ms()
   st.frame_n = st.frame_n + 1
@@ -1118,8 +1178,13 @@ local function frame(st)
         else due = e.last_ms == nil or now.ms - e.last_ms >= ev.ms * per end
       end
       if due then
-        if not e.critical and sched.paced(e, t0, pool, mult) then note_paced(st, e)
-        else run_step(st, e, cont) end
+        local wait, why = false, nil
+        if not e.critical then wait, why = sched.paced(e, t0, pool, mult) end
+        if wait then note_paced(st, e)
+        else
+          if why == 'floor' then note_floor(st, e, cont) end
+          run_step(st, e, cont)
+        end
       end
     end
   end
@@ -1479,6 +1544,7 @@ function M.status()
   for _, e in ipairs(st.entries) do
     mods[#mods + 1] = {name = e.name, disabled = e.disabled or false, factor = e.factor, ms = round(e.ms_total),
                        faults = #e.fault_ms, paced = e.paced_n, share = not e.critical and e.share or nil,
+                       floor = e.floor_n or 0, big = e.big and {ms = round(e.big.ms), what = e.big.what} or nil,
                        boost = e.boost and e.boost.why or nil}
   end
   return {save = st.save_name, mode = st.mode, seq = st.seq, ev = st.ev_n, frame = st.frame_n, boots = st.boots,

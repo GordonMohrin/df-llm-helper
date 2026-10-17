@@ -11,6 +11,10 @@
 --     (paced within the last PACE.busy_ms) add up to more than the pool, every share is scaled down by the same
 --     factor g (at least PACE.g_min: half a share keeps every module working), so they fit together and none
 --     starves. Outside PEACE the shares are PACE.alert_mult times larger and there is no pool (latency over speed).
+--     BUG-039 (Run 11 y451: ONE runner step took 68.6 s; its debt of 67,760 ms drained at 2-4 ms per real second, so
+--     its run in hand got no slice for hours, 49 game days and counting): the debt is capped at PACE.debt_cap_s
+--     seconds of the module's share (boosted: of its boost share), and a due module that waited PACE.floor_ms gets
+--     one slice whatever its debt (the pacing floor; S.paced -> false, 'floor'; e.floor_n counts them).
 --   * fort-size load: f = max(1, units / LOAD.units, items / LOAD.items) against the reference fort the cadences
 --     were tuned on; the cadence of a SCALED module (per-run work grows with items/units) is stretched by f
 --     (at most LOAD.stretch_max), and the kernel budget grows with the unit count (critical modules scan every
@@ -36,7 +40,8 @@ S.LOAD = {units = 150, items = 6000, stretch_max = 3}
 -- 16 ms/s for 402 units; critical modules keep their latency and are never paced), at most 40
 S.BUDGET = {ms_s = 25, per_unit = 6, max = 40}
 S.PACE = {share = 2, burst_s = 1, pool_min = 4, g_min = 0.5, alert_mult = 4, busy_ms = 10000,
-          shares = {seal = 4, economy = 3, runner = 4, snapshot = 6, trade = 3}}
+          shares = {seal = 4, economy = 3, runner = 4, snapshot = 6, trade = 3},
+          debt_cap_s = 30, floor_ms = 30000}           -- BUG-039: the debt cap (s of share), the pacing floor
 S.SCALED = {economy = true, care = true}
 -- BUG-026: who may hold a boost, its pacing share (ms per real second) and how long it lasts without a renewal.
 -- BUG-033: snapshot holds one (never busy) while it exports for an inbox request (dfllm audit, bp sites --fresh,
@@ -63,7 +68,7 @@ end
 function S.init(e)
   local m = e.M or {}
   e.share = (type(m.share) == 'number' and m.share > 0) and m.share or S.PACE.shares[e.name] or S.PACE.share
-  e.debt, e.debt_at, e.paced_n = 0, nil, 0
+  e.debt, e.debt_at, e.paced_n, e.floor_n = 0, nil, 0, 0
   e.quiet_ms, e.quiet_runs, e.flips = 0, 0, 0
   e.stretch = 1
   return e
@@ -107,9 +112,17 @@ function S.pool_update(pool, unpaced_ms_s, entries, now_ms)
   return pool.rate
 end
 
--- cost of a call charged to e (every call; critical modules are never paced)
+-- BUG-039: the most debt e may carry: debt_cap_s seconds of its share (boosted: of its boost share), so one huge
+-- call (a 68 s step) costs it at most debt_cap_s seconds of waiting, not hours
+function S.cap(e)
+  local s = e.share or S.PACE.share
+  if e.boost then s = math.max(s, S.BOOST.shares[e.name] or S.BOOST.share) end
+  return s * S.PACE.debt_cap_s
+end
+
+-- cost of a call charged to e (every call; critical modules are never paced); the debt is capped (BUG-039)
 function S.spend(e, ms)
-  if not e.critical and ms > 0 then e.debt = e.debt + ms end
+  if not e.critical and ms > 0 then e.debt = math.min(e.debt + ms, S.cap(e)) end
 end
 
 local function drain(o, rate, now_ms)          -- leaky bucket: the debt drains at `rate` ms per real second
@@ -125,15 +138,21 @@ function S.rate(e, pool, mult)
 end
 
 -- true when the non-critical module must wait this frame: its debt is over one second of its share, scaled by
--- mult (outside PEACE) or the pool's g (PEACE)
+-- mult (outside PEACE) or the pool's g (PEACE). BUG-039 pacing floor: a module that has waited floor_ms (real time,
+-- since the first frame it was due and had to wait) runs anyway -> false, 'floor' (e.floor_n counts them; the wait
+-- starts again with the next frame it must wait). Called only for due modules (a run in hand is due every frame).
 function S.paced(e, now_ms, pool, mult)
   if e.critical then return false end
   local share = S.rate(e, pool, mult)
   drain(e, share, now_ms)
   if e.debt > share * S.PACE.burst_s then
     e.waited_at = now_ms
-    return true
+    e.wait0 = e.wait0 or now_ms
+    if now_ms - e.wait0 < S.PACE.floor_ms then return true end
+    e.floor_n, e.wait0 = (e.floor_n or 0) + 1, nil
+    return false, 'floor'
   end
+  e.wait0 = nil
   return false
 end
 
