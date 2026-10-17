@@ -270,6 +270,8 @@ def line_supply(ctx: Ctx) -> str:
             + _hospital(s, st)
             # Run 10: the ore search and the leather a mood missed (plan propose/check read them too)
             + (f" ore {st['ore']} bars {st.get('bars', '?')}" + (" (explore)" if st.get("metal") == "explore" else "")
+               # Run 11: metal short for the soldiers (the kernel asks every caravan for metal), gear to melt
+               + (" METAL SHORT" if st.get("mshort") else "") + (f" melt {st['melt']}" if st.get("melt") else "")
                if "ore" in st else "")
             + (f" leather {st['leather']}" if "leather" in st else "")
             + (f" moods missed {','.join(st['mood_miss'])}" if st.get("mood_miss") else ""))
@@ -311,6 +313,10 @@ def line_def(ctx: Ctx) -> str:
     if m:
         out.append(f"mil {m['squads']}sq {m['soldiers']}sol worn {m['worn']}% cv {m['cv']} metal {m['metal_pct']}%"
                    f" station {m['on_station']}")
+        cap = m.get("cap")
+        if cap:                                # Run 11: the melee squads follow the armor + weapon + shield sets
+            out.append(f"melee {cap['melee']}/{cap['want']} (gear sets {cap['sets']})"
+                       + (f", +{cap['xbow']} crossbow (metal short)" if cap["xbow"] else ""))
         free = {k: v for k, v in (m.get("free") or {}).items() if v}
         if free:                               # FR-46: free metal gear by category (loot included)
             out.append("free metal " + " ".join(f"{k} {v}" for k, v in sorted(free.items())))

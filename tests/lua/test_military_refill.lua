@@ -120,4 +120,86 @@ T.test('Run 11 siege 3: in PEACE nothing changes (the population target, from an
   T.eq(#logs(W, 'refill'), 0)
 end)
 
+-- Run 11 siege 8 (Kilrudrabed y441: 10 soldiers at worn 58 %, no metal in ten years; the recruits without armor or a
+-- weapon died first): the melee squads are filled only as far as the gear goes. A set = a true body armor, a melee
+-- weapon (metal melee weapons, then the axes beyond the woodcutters' keep) and a shield (economy's census g_body,
+-- g_weapon, w_axe, g_shield); the first melee squad keeps GEAR_FLOOR (2). While economy says metal is short, the
+-- positions the gear cannot fill go to the crossbow squad as far as the free crossbows go. targets' `per` stays the
+-- demand (economy orders the gear for it).
+local GEAR = {tick = 0, w_pick = 20, w_axe = 4, g_weapon = 0, g_body = 10, g_shield = 10, g_xbow = 0}
+local function gear_world(n, census, metal_short)
+  local W = X.world{n = n}
+  local mods = {X.runner('P5')}
+  if metal_short ~= nil then
+    mods[#mods + 1] = {name = 'economy', every = {ticks = 1200}, metal = function() return {short = metal_short} end}
+  end
+  X.load(W, {'military'}, mods, {'sense'})
+  W.set_census('i', census)
+  W.state()
+  W.run(9, {skip = 9})
+  W.run(3600, {skip = 9})
+  return W
+end
+local function count(W, k) local s = X.squad_of(W, k); return s and alive(W, s) or 0 end
+
+T.test('Run 11 siege 8: melee filled to the armor + weapon + shield sets (3 spare axes: 3 sets), the demand kept; ' ..
+       'state mil.cap, kern.log', function()
+  -- old code: A 3, B 3 (the population target), no gear value from targets
+  local W = gear_world(50, GEAR)
+  local M = X.mod('military')
+  local n, per, _, _, g = M.targets(W.K)
+  T.eq({n, per.A, per.B, per.C}, {8, 3, 3, 2}, 'the demand (economy orders the gear for it)')
+  T.ok(g, 'a gear cap')
+  T.eq({g.sets, g.melee, g.want, g.xbow, g.fill.A, g.fill.B, g.fill.C}, {3, 3, 6, 0, 3, 0, 2})
+  T.eq({count(W, 'A'), count(W, 'B'), count(W, 'C')}, {3, 0, 2})
+  T.eq(W.state().mil.cap, {sets = 3, melee = 3, want = 6, xbow = 0})
+  T.eq(#logs(W, 'military: melee filled to 3 of 6: 3 gear sets (body armor 10, melee weapons 3, shields 10)'), 1)
+  -- no set at all: the first squad keeps its leader and one
+  local c0 = {}
+  for k, v in pairs(GEAR) do c0[k] = v end
+  c0.g_shield = 0
+  W.set_census('i', c0)
+  local _, _, _, _, g0 = M.targets(W.K)
+  T.eq({g0.sets, g0.fill.A, g0.fill.B}, {0, 2, 0}, 'GEAR_FLOOR')
+  -- enough gear: no cap
+  local c1 = {}
+  for k, v in pairs(GEAR) do c1[k] = v end
+  c1.g_weapon = 6
+  W.set_census('i', c1)
+  T.eq(select(5, M.targets(W.K)), nil, 'the sets fill every melee position')
+  -- an older census without the gear counts: no cap (unknown)
+  W.set_census('i', {tick = 0, w_axe = 20, w_pick = 20})
+  T.eq(select(5, M.targets(W.K)), nil)
+end)
+
+T.test('Run 11 siege 8: metal short: the positions the gear cannot fill go to the crossbows, as far as crossbows go', function()
+  -- old code: C stays at its 2 positions, A and B at 3 each with no armor or weapon for half of them
+  local c = {}
+  for k, v in pairs(GEAR) do c[k] = v end
+  c.g_xbow = 4
+  local W = gear_world(50, c, true)
+  local _, per, _, _, g = X.mod('military').targets(W.K)
+  T.eq({per.C, g.xbow, g.fill.C}, {2, 3, 4}, '3 more crossbow positions in the demand, 2 crossbows free beyond C\'s own')
+  T.eq({count(W, 'A'), count(W, 'B'), count(W, 'C')}, {3, 0, 4})
+  T.eq(W.state().mil.cap, {sets = 3, melee = 3, want = 6, xbow = 3})
+  T.eq(#logs(W, 'metal short: 3 more crossbow positions'), 1)
+  -- metal not short: no shift
+  local W2 = gear_world(50, c, false)
+  local _, _, _, _, g2 = X.mod('military').targets(W2.K)
+  T.eq({g2.xbow, g2.fill.C}, {0, 2})
+end)
+
+T.test('Run 11 siege 8: in a SIEGE the first melee squad is still refilled to HOLD_MIN beyond the gear; B stays capped',
+       function()
+  local W = gear_world(50, GEAR)
+  local A = X.squad_of(W, 'A')
+  T.eq(alive(W, A), 3)
+  W.K.set_mode('SIEGE', 'test')
+  kill_squad(W, A)
+  W.run(1300, {skip = 9})
+  T.eq(alive(W, A), 5, 'the core stations need bodies at the choke: HOLD_MIN from healthy core civilians')
+  T.eq(count(W, 'B'), 0, 'no gear for B: not drafted')
+  T.ok(#logs(W, 'military: SIEGE refill: squad A ') >= 1)
+end)
+
 T.done()

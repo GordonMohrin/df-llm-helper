@@ -85,6 +85,94 @@
   - If the work orders screen does not show the seal's order on top, `order_top` failed: note the kern.log line and
     DFHack's error in BUG notes. If DF does not take orders in list order, the move changes nothing: note that too.
   - A seal that cannot be built: SEAL_STUCK after 3 days names the piece; the paused projects run again.
+## Metal without an ore find: every caravan is asked for metal, the melt pile gets its fuel, the melee squads follow the gear, plan check wants a metal route (2026-10-17; offline, live-untested)
+- **Why (Run 11, Kilrudrabed site98, siege 8 y441, pop 52 -> 10; post-mortem `docs/v2/POSTMORTEM-run11-siege8-y441.md`
+  cause 4):** 10 soldiers, worn 58 %, bars 0 for ten game years. No metal ore on the site, the explore never found any,
+  the caravans were never asked for iron (trade.want held `bar:iron` among the plan's wants, nothing raised it), and
+  the invaders' gear of eight sieges was never melted: with no ore and no bar, economy ordered no charcoal, so the
+  smelter's melt jobs had no fuel. Melee recruits without armor or a weapon died first.
+- **1. Metal short -> every caravan is asked for metal (economy `M.metal_plan`, config `economy.metal_short`):**
+  - Metal is short for the soldiers while soldiers are wanted (military.targets), they wear < `worn` (80) %, no ore
+    boulder of a gear metal lies in the fort (steel, iron, bronze, bismuth bronze, copper) and the gear-metal bars are
+    below what the metal slots want (`gear.bars_short`). Public `economy.metal()` = `{short, worn, bars, ore, need,
+    melt}`; state `stock.mshort` (0/1).
+  - Then `economy.trade_wants` (trade puts it after the moods' tokens, before plan.trade.want) holds, marked
+    `metal = 1`: `pick` and `axe` up to `tools` (3 each: military's tools-first minimum), then `metal_short.wants`
+    in order: `bar:iron`, `bar:steel`, `armor:metal`, `weapon:metal`, `helm:metal`, `shield`, `pants:metal`,
+    `gloves:metal`, `shoes:metal`, `bar:bronze`, `bar:bismuth_bronze`, `bar:copper` (n = the bars the metal slots
+    miss, or that slot's missing pieces).
+  - Pay for it: economy keeps `crafts` (40) crafts (`dfllm:trade_crafts`, MakeCrafts in free stone while the stone
+    covers the rock orders, else wood above `idle.wood_min`, at most 10 an order, needs a craftsdwarf's workshop).
+- **trade (`trade.lua`):** a new token sub `kind:metal` (`armor:metal`, `weapon:metal`, `bar:metal`, ...) = an item of
+  a metal material (IS_METAL; never leather, wood or a training weapon). A metal want is capped at its units up to
+  `METAL_CAP` (30), not the kind's default (armor 3, bars 20). While one stands, a non-empty plan sell list gets
+  `crafts`, and the crafts go to the depot with the sale items, up to `BRING_METAL` (200) instead of 100. Every
+  caravan, since the wants are read per visit.
+- **3. Other metal sources (economy):**
+  - The census counts metal weapons, armor and ammo marked for melting (`melt`, state `stock.melt`; the invaders'
+    gear the `dfllm-melt` automelt pile marks). With a smelter, the charcoal sizing counts their melt jobs (one fuel
+    each, up to `metal.max_jobs`), also with no ore and no bar (old: no charcoal at all then).
+  - Checked, unchanged: military's loot pass (FR-46) unforbids the invaders' metal gear every 3,600 ticks in PEACE
+    and quiet RECOVERY after every siege; baseline registers the melt pile once a smelter stands; melted bars are
+    census bars, and the gear orders (`plan_gear`) take the first gear metal with enough bars (steel, iron, bronze,
+    bismuth bronze, copper), so copper and bronze come before nothing; bronze is alloyed from tin and copper bars or
+    ores while forge jobs want metal.
+- **2. The melee squads follow the gear (military, `M.GEAR_FLOOR` 2):**
+  - A melee set = a true body armor, a melee weapon (metal melee weapons, then the axes beyond the woodcutters' keep;
+    never a pick) and a shield, free or carried by soldiers (census.i `g_body`, `g_weapon`, `w_axe`, `g_shield`).
+  - `military.targets()` returns a fifth value `gear` = `{sets, melee, want, xbow, fill, parts}` when the sets do
+    not fill every melee position: `per` stays the demand (economy orders the gear for it), the squads are filled to
+    `fill` = max(2, sets) in plan order. A census without the gear counts: no cap.
+  - Metal short: the melee positions left go to the crossbow squad (C, from P5): `xbow` more in the demand (economy
+    makes crossbows, quivers and bolts for them; their armor is counted with the melee positions they stand in for),
+    filled as far as the crossbows beyond C's own positions go (`g_xbow`).
+  - Excess soldiers leave as before (PEACE, one per upkeep, more than 2 above the fill). kern.log `military: melee
+    filled to 3 of 6: 3 gear sets (body armor 10, melee weapons 3, shields 10); metal short: 3 more crossbow
+    positions`; state `mil.cap` = `{sets, melee, want, xbow}`; status/brief `melee 3/6 (gear sets 3), +3 crossbow
+    (metal short)` and `METAL SHORT melt N`.
+  - Decision, the siege refill (Run 11 siege 3): in SIEGE/BREACH the first melee squad is still refilled up to
+    `HOLD_MIN` (5) from healthy core civilians beyond the gear: the core choke needs bodies, and a drafted civilian
+    stands with the squad at the core station (the deep defense) instead of fleeing. The other melee squads stay
+    capped by the gear in a siege too.
+- **plan check (`plan.py` `metal_gate`, `metal_short`, `metal_facts`):** while the plan wants soldiers (phase_target
+  >= P2 and a melee or crossbow squad) and the fort holds no metal for them (state `stock.ore`/`bars` 0 and
+  `stock.mshort` 1; an older kernel: worn < 80 %), a plan with no metal route at all is an ERROR (`metal: no route:
+  ...`; no `explore` build and none under way, nothing marked for melting, no trade depot); with only a depot it warns
+  (`only the caravans`). It replaces the Run 10 "neither explore nor bar:*" error when both would fire. fort_facts
+  gains `metal` = `{depot, explore}`.
+- Contracts: `military.targets`, `economy.metal`, `economy.trade_wants` `metal`, state `stock.mshort/melt`, `mil.cap`,
+  the `:metal` token (schema, contract.lua, CONTRACTS rows and appendix); config `economy.metal_short`
+  (baseline.json = DEFAULTS); RULES §6/§10 (in place, 300 lines), DESIGN §5 (metal without an ore find), DOCTRINE
+  (military).
+  - `tests/lua/test_economy_chains.lua`: metal short (no ore, no bars, worn 15 %, squad A 5): the 14 wants in order
+    with their units (`bar:iron` 55, `pick`/`axe` 3), `economy.metal`, stock.mshort 1, the wood crafts order; an iron
+    ore boulder ends it; no soldiers wanted: nothing. Three iron armors marked for melting, no ore, no bar: census
+    `melt` 3, charcoal ordered, stock.melt 3; no smelter: none.
+  - `tests/lua/test_trade.lua`: the `:metal` matching; a flow with economy's metal wants: 30 iron bars (six stacks)
+    and six breastplates bought (the kind caps 20 and 3), no leather armor, `crafts` added to the sell list, 200
+    sale items with the crafts brought.
+  - `tests/lua/test_military_refill.lua`: 3 spare axes = 3 sets: A 3, B 0, C 2 with the demand 3/3/2, state
+    `mil.cap`, the kern.log line; no shield: A 2 (floor); enough gear or an older census: no cap; metal short with 4
+    crossbows: 3 more crossbow positions, C filled to 4; SIEGE: A refilled to 5 beyond the gear, B not drafted.
+  - `tests/test_plan_supply.py`: `metal_short`, the gate (error, depot warning, explore planned / under way, melt, P1,
+    no squad, not short, older kernel), fort_facts `metal`, status/brief lines; `tests/test_wp8_files.py` state keys.
+- **How to use:** nothing to send. `dfllm status` shows `METAL SHORT` while it holds; the wake/brief shows the gear
+  cap. At a year review with `plan check` `metal: no route`: add `{"tpl":"explore","site":"S1"}` where the miners can
+  dig (or a depot). Tell the player that the melee squads stay small until armor, weapons and shields exist, and that
+  the crossbow squad takes the rest.
+- **Live check (Run 12):** after `git pull` and `dfhack-run dfllm reload`:
+  - Without metal ore and bars, within a game day kern.log/state: `stock.mshort` 1, `dfllm status` `METAL SHORT`;
+    `dfllm cmd trade.want '{}'` lists `pick`, `axe` (while below 3), `bar:iron`, `bar:steel`, `armor:metal`, ... before
+    the plan's wants. Manager orders show `dfllm:trade_crafts` (MakeCrafts) once a craftsdwarf's workshop stands.
+  - At the next caravan: kern.log `trade: N sale items sent to the depot (metal short for the soldiers: crafts too)`;
+    TRADE_LEDGER lists what was bought, or `bar:iron:none` (the merchants had none). Note in this entry what the
+    dwarven and human caravans actually carried (`inspect what=trade` `wanted_matches`).
+  - After a siege with dead invaders: `dfllm status`/state `mil.free` grows (loot unforbidden), then `stock.melt`
+    (the melt pile's marks) and a `dfllm:charcoal` order while a smelter and a wood furnace stand; bars rise as the
+    smelter melts. If `stock.melt` stays 0 with loot lying around, the melt pile takes nothing: note it here.
+  - kern.log `military: melee filled to N of M: S gear sets (...)`; the squads A/B hold at most max(2, S); with metal
+    short squad C grows by up to the free crossbows. In a SIEGE, A still refills to 5 (kern.log `SIEGE refill`).
+  - `dfllm plan check` on a draft without explore while `METAL SHORT`: warning `metal: ... only the caravans`.
 ## A destroyed bridge is rebuilt only in quiet PEACE, and not again after two losses to building destroyers without the player (2026-10-17; offline, live-untested)
 - **Why (Run 11, Kilrudrabed site98, y434-y438 winter):** cave dragons (building destroyers) destroyed the outer
   drawbridge O1 (114,79,142) in all five sieges. The perimeter keeper (seal, FR-56) re-queued it every time: its

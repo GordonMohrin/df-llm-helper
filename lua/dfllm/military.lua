@@ -69,6 +69,16 @@ M.NOTE_EVERY = 2400         -- BUG-032: a squad with no station clear of a bridg
 -- at least HOLD_MIN then (the core stations need them; neither the shrunk population target nor the tools-first rule
 -- lowers it in a siege). Tool-detail members only after everybody else (they keep their place in PEACE).
 M.HOLD_MIN = 5              -- melee soldiers the core stations need in a siege (half a squad: the routine's minimum)
+-- Run 11 (Kilrudrabed y441, siege 8: 10 soldiers at worn 58 %, no metal in ten years; the recruits without armor or a
+-- weapon died first): melee positions are filled only as far as the gear goes (M.gear_fill). A melee set = a true body
+-- armor, a melee weapon (metal melee weapons, then the axes beyond the woodcutters' keep; never a pick) and a shield,
+-- free or carried by soldiers (economy's census: g_body, g_weapon, w_axe, g_shield). The melee squads are filled to
+-- max(GEAR_FLOOR, sets) in plan order (the first squad keeps its leader and one: it trains and takes gear as it comes);
+-- while economy says metal is short (economy.metal) the positions the gear cannot fill go to the crossbow squad (wooden
+-- crossbows, wood/bone bolts: no metal), which economy equips (targets' 5th value) and military fills as far as the
+-- crossbows beyond its own positions go (g_xbow). SIEGE/BREACH: the first melee squad is still refilled up to HOLD_MIN
+-- from healthy core civilians beyond the gear (the core stations need bodies at the choke); the rest stays capped.
+M.GEAR_FLOOR = 2
 M.SIEGE_THIRST, M.SIEGE_HUNGER = 25000, 50000   -- healthy: below DF's thirsty / hungry marks, no wound, awake
 M.RETRY, M.RETRY_MAX = 1200, 33600
 M.NOTIFY_AFTER = 2          -- failed squad creations before DECISION_NEEDED (once per boot)
@@ -464,7 +474,11 @@ local function active(K)
 end
 
 -- soldiers wanted in total and per squad key; third value: why the total is 0 on purpose ('tools': fewer than
--- TOOLS_MIN axes or picks, 'phase': a known phase before P2), else nil. Existing soldiers are released then.
+-- TOOLS_MIN axes or picks, 'phase': a known phase before P2), else nil. Existing soldiers are released then. Fourth:
+-- the tools-first rule took the melee squads. Fifth (Run 11): the gear cap, nil when the gear fills every melee
+-- position (or the census does not know it): {sets, melee, want, xbow, fill = {key = n}, parts}: `per` stays the demand
+-- (economy orders the gear for it), `fill` is what the squads are filled to, `xbow` the crossbow positions added to
+-- the demand while metal is short
 function M.targets(K)
   local cu = K.census.u
   local adults, cit = type(cu) == 'table' and cu.adults or 0, type(cu) == 'table' and cu.cit or 0
@@ -506,7 +520,7 @@ function M.targets(K)
     left = left - share
   end
   if xbow and left > 0 then per[xbow] = math.min(M.SIZE, per[xbow] + left) end   -- melee squads full
-  return n, per, nil, short
+  return n, per, nil, short, M.gear_fill(K, per, act)
 end
 
 ---------------------------------------------------------------- squads: adopt, create, uniform, fill
@@ -753,6 +767,45 @@ local function weapon_guard(K, per)
   return {axe = math.max(0, axes - keep.axe), pick = math.max(0, picks - keep.pick), keep = keep}
 end
 M.weapon_guard = weapon_guard
+
+-- Run 11: melee sets in the fort (true body armor, melee weapons incl. the spare axes, shields; free or carried by
+-- soldiers), nil while economy's census does not count them; second value the parts
+function M.gear_sets(K)
+  local ci = K.census.i
+  if type(ci) ~= 'table' then return nil end
+  local body, wpn, shield = int(ci.g_body), int(ci.g_weapon), int(ci.g_shield)
+  if not (body and wpn and shield) then return nil end
+  local axes = math.max(0, (int(ci.w_axe) or 0) - tool_keep(K).axe)
+  return math.min(body, wpn + axes, shield), {body = body, weapon = wpn + axes, shield = shield}
+end
+
+-- Run 11: the gear cap of M.targets (see M.GEAR_FLOOR): nil when the sets fill every melee position wanted
+function M.gear_fill(K, per, act)
+  local sets, parts = M.gear_sets(K)
+  if not sets then return nil end
+  local melee, xk, want = {}, nil, 0
+  for _, s in ipairs(act) do
+    if s.kind == 'melee' then melee[#melee + 1] = s.key; want = want + (per[s.key] or 0) else xk = s.key end
+  end
+  local fill, avail, got = {}, math.max(sets, M.GEAR_FLOOR), 0
+  for k, v in pairs(per) do fill[k] = v end
+  for _, k in ipairs(melee) do
+    local f = math.min(per[k] or 0, avail)
+    fill[k], avail, got = f, avail - f, got + f
+  end
+  if got >= want then return nil end
+  local g = {sets = sets, melee = got, want = want, xbow = 0, fill = fill, parts = parts}
+  local okm, mt = K.call('economy', 'metal')
+  if xk and okm and type(mt) == 'table' and mt.short then
+    local base = per[xk] or 0
+    local extra = math.min(want - got, M.SIZE - base)
+    if extra > 0 then
+      local ci = K.census.i
+      g.xbow, fill[xk] = extra, base + math.min(extra, math.max(0, (int(ci.g_xbow) or 0) - base))
+    end
+  end
+  return g
+end
 
 -- BUG-023 (Run 10: "3 free picks, 3 reserved by squad uniforms" while 2 of 6 miners held none): an explicit pick or
 -- axe weapon spec makes DF reserve a free tool for the position (v1 E18: reserved tools are never handed out as
@@ -1845,11 +1898,13 @@ function M.step(K, budget, ctx)
     K.act.run('uniform-unstick', '--all', '--drop', '--free')
     st.unstick, dirty = now, true
   end
-  local _, per, zero, short = M.targets(K)
+  local _, per, zero, short, gear = M.targets(K)
   if zero and mode == 'PEACE' then release(K, zero)
   elseif short and mode == 'PEACE' then release(K, 'tools', 'melee') end
+  M.gear_note(K, gear)
+  if gear then per = gear.fill end                                    -- Run 11: the squads follow the gear
   local siege = SIEGE_FILL[mode] == true
-  if siege then per = hold_floor(K, per) end                          -- Run 11 siege 3
+  if siege then per = hold_floor(K, per) end                          -- Run 11 siege 3 (beyond the gear: HOLD_MIN)
   rt.wguard = weapon_guard(K, per)
   rt.wexcess = tool_excess(rt.wguard)
   local list, why
@@ -1880,11 +1935,26 @@ function M.step(K, budget, ctx)
   save(K)
 end
 
+-- Run 11: kern.log names the gear cap when it changes (rt.gear: state mil.cap)
+function M.gear_note(K, g)
+  local sig = g and string.format('%d/%d/%d/%d', g.melee, g.want, g.sets, g.xbow) or nil
+  rt.gear = g
+  if sig == rt.gear_sig then return end
+  rt.gear_sig = sig
+  if not g then K.log('info', 'military: the gear fills every melee position wanted'); return end
+  local p = g.parts or {}
+  K.log('info', 'military: melee filled to %d of %d: %d gear sets (body armor %d, melee weapons %d, shields %d)%s',
+        g.melee, g.want, g.sets, p.body or 0, p.weapon or 0, p.shield or 0,
+        g.xbow > 0 and string.format('; metal short: %d more crossbow positions', g.xbow) or '')
+end
+
 function M.state(K)
   local k = rt and rt.kpi
   if not k then return {} end
   local mil = {squads = k.squads, soldiers = k.soldiers, worn = k.worn, cv = k.cv, metal_pct = k.metal_pct,
                on_station = k.on_station}
+  local g = rt.gear                                  -- Run 11: the melee squads follow the gear
+  if g then mil.cap = {sets = g.sets, melee = g.melee, want = g.want, xbow = g.xbow} end
   if rt.free then                                    -- FR-46: free metal gear per category (only the ones held)
     local free = {}
     for cat, n in pairs(rt.free) do if n > 0 then free[cat] = n end end

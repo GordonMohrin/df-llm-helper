@@ -98,7 +98,7 @@ STATE_OWNERS = {
     "stock.drink_d": "economy", "stock.food_d": "economy", "stock.meals": "economy",
     "stock.ore": "economy", "stock.bars": "economy", "stock.leather": "economy", "stock.metal": "economy",
     "stock.mood_miss": "economy", "stock.rock": "economy", "stock.rock_need": "economy", "stock.picks": "economy",
-    "stock.pick_want": "economy", "stock.hosp_water": "care", "care.*": "care", "labor.*": "economy", "orders.*": "economy",
+    "stock.pick_want": "economy", "stock.mshort": "economy", "stock.melt": "economy", "stock.hosp_water": "care", "care.*": "care", "labor.*": "economy", "orders.*": "economy",
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
     "clock.*": "arbiter", "alarm.*": "reflex", "lever.*": "gate",
     "alert.*": "seal", "wave.*": "siege", "snap.*": "snapshot", "water.*": "water",
@@ -695,7 +695,10 @@ STATE = Obj(
          # Miners' demand (pick_want): plan propose/check draft a stone dig and picks in trade.want
          "stock": Obj(opt={"drink_d": NAT, "food_d": NAT, "meals": NAT, "hosp_water": FLAG, "ore": NAT, "bars": NAT,
                            "leather": NAT, "metal": Str(maxbytes=24), "mood_miss": Arr(Str(maxbytes=12), hi=8),
-                           "rock": NAT, "rock_need": NAT, "picks": NAT, "pick_want": NAT}),
+                           "rock": NAT, "rock_need": NAT, "picks": NAT, "pick_want": NAT,
+                           # Run 11: metal short for the soldiers (economy.metal: plan check's metal route gate) and the
+                           # metal items marked for melting (the invaders' gear in the melt pile)
+                           "mshort": FLAG, "melt": NAT}),
          "care": Obj(req={"stressed_pct": PCT, "naked": NAT, "ghosts": NAT, "corpses_old": NAT,
                           "tombs_free": NAT, "moods": NAT},
                      # FR-61 coffin provisioner: wanted free coffins, missing slots, coffin items, open orders, project
@@ -718,7 +721,10 @@ STATE = Obj(
          "mil": Obj(req={"squads": NAT, "soldiers": NAT, "worn": PCT, "cv": NAT, "metal_pct": PCT,
                          "on_station": NAT},
                     opt={"free": Obj(opt={k: NAT for k in ("weapon", "body", "head", "pants", "gloves", "shoes",
-                                                           "shield", "ammo")})}),
+                                                           "shield", "ammo")}),
+                         # Run 11: the melee squads follow the gear (military.gear_fill): sets, melee filled to, melee
+                         # wanted, crossbow positions added while metal is short
+                         "cap": Obj(req={"sets": NAT, "melee": NAT, "want": NAT, "xbow": NAT})}),
          "trade": Obj(req={"caravan": FLAG, "ratio": NAT, "done": NAT}),
          # FR-51 clock governor (arbiter): the vanilla FPS cap it drives, the captured original, timestream fps
          "clock": Obj(req={"cap": NAT, "orig": NAT, "ts": Int(-1, 1000), "held": FLAG, "why": Str(maxbytes=24)}),

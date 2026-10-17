@@ -216,7 +216,8 @@ C.STATE_OWNERS = {
   ['stock.drink_d'] = 'economy', ['stock.food_d'] = 'economy', ['stock.meals'] = 'economy',
   ['stock.ore'] = 'economy', ['stock.bars'] = 'economy', ['stock.leather'] = 'economy', ['stock.metal'] = 'economy',
   ['stock.mood_miss'] = 'economy', ['stock.rock'] = 'economy', ['stock.rock_need'] = 'economy',
-  ['stock.picks'] = 'economy', ['stock.pick_want'] = 'economy', ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['labor.*'] = 'economy', ['orders.*'] = 'economy',
+  ['stock.picks'] = 'economy', ['stock.pick_want'] = 'economy', ['stock.mshort'] = 'economy', ['stock.melt'] = 'economy',
+  ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['labor.*'] = 'economy', ['orders.*'] = 'economy',
   ['threat.*'] = 'threat', ['bridges'] = 'gate', ['owners.*'] = 'arbiter',
   ['mil.*'] = 'military', ['trade.*'] = 'trade',
   ['clock.*'] = 'arbiter', ['alarm.*'] = 'reflex', ['lever.*'] = 'gate',
@@ -327,7 +328,7 @@ C.STATE_SPEC = obj({
   -- Run 10: ore/bars/leather stock, the metal route and the classes moods missed (plan propose/check supply goals)
   stock = obj(nil, {drink_d = NAT, food_d = NAT, meals = NAT, hosp_water = FLAG, ore = NAT, bars = NAT, leather = NAT,
                     metal = str(24), mood_miss = arr(str(12), 0, 8), rock = NAT, rock_need = NAT, picks = NAT,
-                    pick_want = NAT}),
+                    pick_want = NAT, mshort = FLAG, melt = NAT}),   -- Run 11: metal short, items marked for melting
   care = obj({stressed_pct = PCT, naked = NAT, ghosts = NAT, corpses_old = NAT, tombs_free = NAT, moods = NAT},
              {coffins = obj({want = NAT, short = NAT, stock = NAT, order = NAT, proj = str(40)}),
               died = obj(nil, nil, NAT)}),
@@ -344,7 +345,8 @@ C.STATE_SPEC = obj({
                 tempo = str(nil, {'mode', 'inbox', 'brake', 'clock'})}),
   mil = obj({squads = NAT, soldiers = NAT, worn = PCT, cv = NAT, metal_pct = PCT, on_station = NAT},
             {free = obj(nil, {weapon = NAT, body = NAT, head = NAT, pants = NAT, gloves = NAT, shoes = NAT,
-                              shield = NAT, ammo = NAT})}),
+                              shield = NAT, ammo = NAT}),
+             cap = obj({sets = NAT, melee = NAT, want = NAT, xbow = NAT})}),   -- Run 11: melee follows the gear
   trade = obj({caravan = FLAG, ratio = NAT, done = NAT}),
   clock = obj({cap = NAT, orig = NAT, ts = int(-1, 1000), held = FLAG, why = str(24)}),
   alarm = obj({defcon = int(1, 5), unacked = NAT, last = NAT, ack = NAT, lock = FLAG, why = str(24)},

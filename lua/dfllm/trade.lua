@@ -58,6 +58,11 @@
 --   * care.mood_wants' buy tokens go before plan.trade.want, capped at the units the moods miss;
 --   * verb trade.retry {civ?, want?, sell?}: a new trade in the same visit (caravan AtDepot, time_remaining >= START_MIN);
 --   * inspect what=trade wanted_matches: every merchant good matching a want token, any value, in a depot or still carried.
+-- Run 11 (Kilrudrabed y431-y441: bars 0 for ten years, the caravans were never asked for iron; siege 8 lost):
+--   * `kind:metal` tokens (armor:metal, weapon:metal, bar:metal) match a metal material (IS_METAL);
+--   * economy.trade_wants' metal wants (metal = 1: picks, axes, bars, metal gear while metal is short for the soldiers)
+--     are capped at their units up to METAL_CAP; while they stand the crafts are sold too (a non-empty plan sell list
+--     gets `crafts`) and the crafts go to the depot with the sale items, up to BRING_METAL.
 local json = require('dfllm.util.json')
 
 local M = {name = 'trade', every = {ticks = 100}, verbs = {}, inspect = {},
@@ -113,6 +118,10 @@ M.CFG = {
   GOODS_LIST = 30,      -- merchant goods kinds listed by inspect what=trade (FR-18; the reply stays <= 8 KB)
   WANTED_LIST = 40,     -- kinds in inspect what=trade wanted_matches (every value; clipped with a count)
   WANTED_SCAN = 20000,  -- items of the wanted types read at most by inspect what=trade (wanted_matches)
+  -- Run 11 (metal short for the soldiers, economy.trade_wants metal = 1): units bought per metal want at most (the
+  -- slots' missing pieces, not the kind's default cap), sale items marked for the depot then
+  METAL_CAP = 30,
+  BRING_METAL = 200,
 }
 M.DEFAULT_WANT = {'bar:iron', 'anvil', 'cloth'}   -- same default as `dfllm plan propose`
 
@@ -169,7 +178,11 @@ function L.fibre_of(info)
   return nil
 end
 
--- token -> {kind, sub, types={NAME=true}, word, mat, flag, cap} or nil; known(NAME) says whether a raw
+-- Run 11: `kind:metal` (armor:metal, weapon:metal, bar:metal, ...) = an item of a metal material (flag IS_METAL), not a
+-- material or description word
+L.METAL = 'metal'
+
+-- token -> {kind, sub, types={NAME=true}, word, mat, flag, metal, cap} or nil; known(NAME) says whether a raw
 -- df.item_type name exists (fallback kind, e.g. 'splint')
 function L.token(s, known)
   if type(s) ~= 'string' then return nil end
@@ -190,7 +203,7 @@ function L.token(s, known)
   local types = {}
   for _, n in ipairs(spec.t) do types[n] = true end
   return {kind = kind, sub = sub, types = types, word = spec.word, mat = spec.mat == true, flag = flag,
-          cap = L.CAPS[kind] or L.CAPS.default, src = s}
+          metal = sub == L.METAL or nil, cap = L.CAPS[kind] or L.CAPS.default, src = s}
 end
 
 -- a valid want/sell token string (the schema's TOKEN, checked in Python too): kind[:sub], fibre subs only for cloth/thread
@@ -231,6 +244,7 @@ function L.match(tk, info)
   if not tk.types[info.type] then return false end
   if tk.word and not L.has_word(info.desc, tk.word) then return false end
   if tk.types.WEAPON and L.has_word(info.desc, 'training') then return false end   -- wooden training axes cannot chop
+  if tk.metal then return info.metal == true end
   if tk.flag then return L.fibre_of(info) == tk.sub end
   if tk.sub then
     if mat_part(info.mat, tk.sub) then return true end
@@ -762,6 +776,9 @@ local function item_info(it, mer, ea, ew)
   if okd and type(d) == 'string' then info.desc = dfhack.df2utf(d):lower() end
   local okc, n = pcall(function() return #dfhack.items.getContainedItems(it) end)
   info.container = okc and n > 0
+  pcall(function()                                         -- Run 11: armor:metal, weapon:metal, ...
+    info.metal = dfhack.matinfo.decode(it:getMaterial(), it:getMaterialIndex()).material.flags.IS_METAL == true
+  end)
   if info.type == 'CLOTH' or info.type == 'THREAD' then    -- fibre kind (cloth:plant / silk / yarn)
     pcall(function()
       local fl = dfhack.matinfo.decode(it:getMaterial(), it:getMaterialIndex()).material.flags
@@ -878,18 +895,35 @@ local function mood_tokens(K, known)
 end
 
 -- Run 11 (Kilrudrabed: 2 picks for the Miners, 1 bar): economy.trade_wants' buy tokens (picks) after the moods' ones,
--- capped at the units economy misses; a plan token with the same text lifts that cap to the kind's default
+-- capped at the units economy misses; a plan token with the same text lifts that cap to the kind's default. Run 11
+-- (bars 0 for ten years, the caravans never asked for iron): a want economy marks `metal` (metal short for the
+-- soldiers: bars, metal gear, picks, axes) is capped at its units up to METAL_CAP, not the kind's default
 local function econ_tokens(K, known, want, by)
   local ok, list = K.call('economy', 'trade_wants')
   if not ok or type(list) ~= 'table' then return end
   for _, e in ipairs(list) do
     local tk = type(e) == 'table' and type(e.buy) == 'string' and e.buy ~= '' and L.token(e.buy, known)
     if tk and not by[tk.src] then
-      tk.cap, tk.econ = math.min(tk.cap, math.max(1, int(e.n) or 1)), true
+      local n = math.max(1, int(e.n) or 1)
+      tk.cap, tk.econ = e.metal and math.min(n, M.CFG.METAL_CAP) or math.min(tk.cap, n), true
+      tk.short = e.metal and true or nil
       by[tk.src] = tk
       want[#want + 1] = tk
     end
   end
+end
+
+-- Run 11: metal short (an economy want marked metal): crafts are sold too when the plan's sell list names other goods
+-- only (an empty sell list sells whatever lies at the depot); returns the sell list and whether metal is short
+function L.metal_sell(want, sell, known)
+  local short = false
+  for _, tk in ipairs(want) do if tk.short then short = true; break end end
+  if not short or #sell == 0 then return sell, short end
+  for _, tk in ipairs(sell) do if tk.kind == 'crafts' then return sell, short end end
+  local r = {}
+  for i, tk in ipairs(sell) do r[i] = tk end
+  r[#r + 1] = L.token('crafts', known)
+  return r, short
 end
 
 local function wants(K)
@@ -907,9 +941,10 @@ local function wants(K)
   econ_tokens(K, known, want, by)
   for _, tk in ipairs(L.tokens(w, known)) do
     local m = by[tk.src]
-    if m then m.cap = tk.cap else want[#want + 1] = tk end
+    if m then m.cap = math.max(m.short and m.cap or 0, tk.cap) else want[#want + 1] = tk end
   end
-  return want, L.tokens(s, known)
+  local sell, short = L.metal_sell(want, L.tokens(s, known), known)
+  return want, sell, short
 end
 
 local function lists_job(K, ui, mer)
@@ -1363,15 +1398,19 @@ local function step_wait(K, cars, now)
       end
     elseif mg > 0 then
       f.brought, v.brought, dirty = true, 1, true
-      local _, sell = wants(K)
+      local _, sell, short = wants(K)
       local types, seen = {}, {}
       for _, tk in ipairs(sell) do
         for tn in pairs(tk.types) do if not seen[tn] then seen[tn] = true; types[#types + 1] = tn end end
       end
+      -- Run 11: metal short for the soldiers: the crafts go to the depot too, and more sale items
+      if short then for _, tn in ipairs(L.KINDS.crafts.t) do if not seen[tn] then seen[tn] = true; types[#types + 1] = tn end end end
       table.sort(types)
       if #types > 0 then
-        local ok, n = act_trade(K, 'bring', {depot = d.id, types = types, max = M.CFG.BRING_MAX})
-        K.log('info', 'trade: %s sale items sent to the depot', ok and tostring(n) or ('no (' .. tostring(n) .. ')'))
+        local ok, n = act_trade(K, 'bring', {depot = d.id, types = types,
+                                             max = short and M.CFG.BRING_METAL or M.CFG.BRING_MAX})
+        K.log('info', 'trade: %s sale items sent to the depot%s', ok and tostring(n) or ('no (' .. tostring(n) .. ')'),
+              short and ' (metal short for the soldiers: crafts too)' or '')
       end
     elseif at_for >= M.CFG.NOGOODS_WAIT then
       K.log('info', 'trade: the merchants of %s brought nothing to sell; no sale items are hauled', civ_name(rt.ent))
