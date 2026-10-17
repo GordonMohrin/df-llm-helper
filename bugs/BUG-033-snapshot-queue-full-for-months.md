@@ -1,5 +1,5 @@
 # BUG-033 The snapshot export queue stays full for months; the runner costs 35 ms/s in PEACE
-Status: fixed in bfad790 (offline, live-untested): a K.call is the caller's cost; the snapshot queue (who asked, joins, inbox
+Status: fixed in bfad790, confirmed live (Run 11 y439 autumn d70, 9089d54): a K.call is the caller's cost; the snapshot queue (who asked, joins, inbox
 requests first and boosted, age/stall/fault drops, a capped busy wait, a refusal that names the queue, state `snap`);
 readiness' monthly audit waits for its pending snapshot; the runner's shaft check sliced and cheaper; doctor/status name
 a starving queue and the top cost owner
@@ -102,3 +102,9 @@ says who holds the queue; the runner stays within its pacing share in PEACE.
 See the CHANGELOG entry (2026-10-17).
 
 Related: FR-62 (pacing), BUG-026 (boost, busy), BUG-007 (kernel cost), 8cc2e8e (shaft check)
+
+## Live confirmation (Run 11, y439 autumn d70, kernel 9089d54)
+`dfllm audit` finished within seconds (`audit stored, readiness R0`), `audit_old` cleared. `dfllm doctor`: kernel 36 ms/s
+average, 66 max (limit 26 for 163 units); modules kern 6.4, reflex 5.5, gate 3.9, sense 3.4, snapshot 2.8, seal 2.5, siege 1.8,
+economy 1.6 ms/s; `top cost: kern 6.4`. The runner no longer shows among the top modules (35 ms/s before); PEACE runs at 426
+ticks/s. Still open: the kernel total stays above its limit (36 vs. 26), and about 6 ms/s are not attributed to a module in the list.
