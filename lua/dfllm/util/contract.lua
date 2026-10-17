@@ -61,6 +61,8 @@ C.EVENTS = {
   YEAR_REVIEW = {cls = 'A', by = 'kern'},
   -- FR-04/26 ghosts and unburied citizens, FR-34 a hospital without accepted water, FR-44 a strange mood at risk
   GHOSTS = {cls = 'A', by = 'care'}, HOSPITAL_DRY = {cls = 'A', by = 'water'}, MOOD_RISK = {cls = 'A', by = 'care'},
+  -- BUG-034: the zones of a hospital without accepted water were removed while a patient was over water.patient_thirst
+  HOSPITAL_REMOVED = {cls = 'A', by = 'water'},
   -- A since Run 9 (an army walked in while these were digest-only): wake at once
   SIEGE_START = {cls = 'A', by = 'siege'}, INVASION = {cls = 'A', by = 'threat'},
   -- A, reflex (FR-36/49/51-53): arrival announcements and the interrupt channel (C.INTERRUPTS)
@@ -184,6 +186,7 @@ C.ACT = {
   squad_create = {'military'}, squad_leader = {'military'}, squad_add = {'military'}, squad_remove = {'military'},
   squad_routine = {'military'}, squad_order = {'military'}, squad_uniform = {'military'},
   squad_unequip = {'military'}, squad_release = {'military'}, animal_slaughter = {'economy'}, zone_remove = {'runner'}, manager_office = {'economy'}, pond_remove = {'water'},
+  hospital_remove = {'water'},                     -- BUG-034: the zones of a dry hospital while a patient is thirsty
   sand_zone = {'economy'}, fish_zone = {'economy'},
   pull = {'gate'}, cancel_own_lever_job = {'gate'}, link_lever = {'gate'}, burrow_units = {'gate'},
   door_forbid = {'reflex'},
@@ -214,7 +217,7 @@ C.STATE_OWNERS = {
   ['threat.*'] = 'threat', ['bridges'] = 'gate', ['owners.*'] = 'arbiter',
   ['mil.*'] = 'military', ['trade.*'] = 'trade',
   ['clock.*'] = 'arbiter', ['alarm.*'] = 'reflex', ['lever.*'] = 'gate',
-  ['alert.*'] = 'seal', ['wave.*'] = 'siege', ['snap.*'] = 'snapshot',
+  ['alert.*'] = 'seal', ['wave.*'] = 'siege', ['snap.*'] = 'snapshot', ['water.*'] = 'water',
 }
 
 -- Persistent site-data keys (§10). Stored as dfhack.persistent site strings encoded with util/json.
@@ -353,6 +356,10 @@ C.STATE_SPEC = obj({
   snap = obj({q = NAT, old_s = NAT, done = NAT, drop = NAT},
              {run = str(nil, nil, 'id'), p = str(nil, {'audit', 'sites', 'debug'}), by = str(24), pct = PCT,
               wait = str(24)}),
+  -- water (BUG-034): patients, their max thirst, the hospital served (flag) and its zones, the refuge's well, free
+  -- buckets, the accepted sources (a well over water, a Water Source zone on water >= 4/7) nearest first
+  water = obj({patients = NAT, thirst_max = NAT, hosp_ok = FLAG, refuge_ok = FLAG, buckets_free = NAT, hosp = NAT,
+               src = arr({t = 'tup', items = {NAT, NAT, NAT}}, 0, 8)}),
 })
 
 -- string formats (§1.1); explicit byte ranges, so LC_CTYPE cannot change them

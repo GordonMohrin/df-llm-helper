@@ -37,13 +37,18 @@
 --     is the real supply; at most `pond_per_run` a run;
 --   * cisterns (manifest rooms tpl `cistern`): revealed water on the well room floor (2 tiles, or 1 tile in
 --     two runs in a row) means the pipe is flooding the room: DECISION_NEEDED cistern_flood (A), close the
---     floodgate with the room's lever.
+--     floodgate with the room's lever;
+--   * dry hospital removal (BUG-034, Run 11): while a patient's thirst is over patient_thirst (25,000), every zone of
+--     a hospital location none of whose zones is served is removed (act.hospital_remove, the zones screen), at most
+--     remove_per_run a run; a location with one served zone keeps all of them. HOSPITAL_REMOVED (A) names the zones,
+--     the locations and the patients; a day later kern.log says how many GiveWater jobs run (see remove_dry).
 -- Fair play: reads citizens by census id (thirst, health flags, current job, position, labors), buildings.other
 -- vectors (WELL, ZONE_WATER_SOURCE or ANY_ZONE), items.other.BUCKET (flags, position, whether a bucket still
 -- holds water: such a bucket is no free bucket), manager orders, site locations, burrow
--- membership; tiles only through snapshot.tile (revealed only). Never edits units, jobs or zones.
--- Writes only through K.act, and only acts whose contract owners list `water` (item_flag, workorder; the
--- module also runs before that contract change, reporting what it would do in the events instead).
+-- membership; tiles only through snapshot.tile (revealed only). Never edits units or jobs; zones only through act
+-- (a Pond zone beside a wet well, the zones of a dry hospital: the zones screen's remove).
+-- Writes only through K.act, and only acts whose contract owners list `water` (item_flag, workorder, pond_remove,
+-- hospital_remove; the module also runs before such a contract change, reporting what it would do instead).
 local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
 local CAD = require('dfllm.util.cadence')   -- BUG-008: when a standing class-A condition is announced again
@@ -63,7 +68,11 @@ M.DEFAULTS = {
   units_per_slice = 40, items_per_slice = 200, zone_tiles = 25, order_backoff = 3 * DAY,
   deep = 4, zone_below = false, gate_every = 28 * DAY, wake_wall_s = 600,
   ws_dz = 3, ws_tiles = 1500, ws_every = 7 * DAY, ws_bodies = 12, ws_dig = 8, ws_reach = 6, ws_reads = 400,
+  -- BUG-034: a dry hospital's zones go once a patient is over patient_thirst (DF's "thirsty" mark is ~25,000-50,000;
+  -- dehydration kills at ~75,000); hosp_remove false keeps them (report only, as before)
+  patient_thirst = 25000, hosp_remove = true, remove_per_run = 8,
 }
+M.SRC_MAX = 8                                -- accepted sources in the state (water.src), nearest first
 M.BUCKET_ORDER = {job = 'MakeBucket', material_category = {'wood'}, frequency = 'OneTime'}
 local BUSY = {'in_job', 'trader', 'removed', 'garbage_collect', 'construction', 'in_building', 'hostile'}
 
@@ -77,11 +86,17 @@ local function vec(f)
   return ok and v or {}
 end
 
+-- config/baseline.json "water" tunes the defaults; a value of another type than its default is ignored (BUG-034: a
+-- string thirst would fault every run; `python -m dfpilot.lint --config` names it)
 function M.conf(K)
   local c = type(K.cfg.baseline) == 'table' and K.cfg.baseline.water
   local r = {}
   for k, v in pairs(M.DEFAULTS) do r[k] = v end
-  if type(c) == 'table' then for k, v in pairs(c) do r[k] = v end end
+  if type(c) == 'table' then
+    for k, v in pairs(c) do
+      if M.DEFAULTS[k] == nil or type(v) == type(M.DEFAULTS[k]) then r[k] = v end
+    end
+  end
   return r
 end
 
@@ -209,6 +224,22 @@ local function carer(u)
   return ok and yes == true
 end
 
+-- BUG-034: a citizen carrying water to a patient now (current job GiveWater, the unit sheet's job line "Give water";
+-- GiveWater2 where the enum has it): the run's count tells whether the game posts and keeps such jobs (the DF rule
+-- HOSPITAL_REMOVED rests on)
+local function giving(u)
+  local ok, yes = pcall(function()
+    local j = u.job and u.job.current_job
+    if j == nil then return false end
+    for _, name in ipairs({'GiveWater', 'GiveWater2'}) do
+      local t = df.job_type[name]
+      if t ~= nil and j.job_type == t then return true end
+    end
+    return false
+  end)
+  return ok and yes == true
+end
+
 local function phase_units(K, c, r)
   local n = 0
   while r.idx < #r.ids and n < c.units_per_slice do
@@ -222,6 +253,7 @@ local function phase_units(K, c, r)
       r.patients[#r.patients + 1] = {id = id, thirst = th, x = x, y = y, z = z}
     elseif u then
       if carer(u) then r.carers[#r.carers + 1] = id end
+      if giving(u) then r.give = r.give + 1 end
       if #r.home < 60 then
         local x, y, z = dfhack.units.getPosition(u)
         if x then r.home[#r.home + 1] = {x = x, y = y, z = z} end
@@ -257,7 +289,7 @@ local function phase_sites(K, c, r)
     end
     if locs[zn.location_id] then
       r.hosp[#r.hosp + 1] = {id = zn.id, x1 = zn.x1, y1 = zn.y1, x2 = zn.x2, y2 = zn.y2, z = zn.z,
-                             want = desired_buckets(locs[zn.location_id])}
+                             want = desired_buckets(locs[zn.location_id]), loc = zn.location_id}
     end
     if wsrc and zn.type == wsrc and not seen[zn.id] then zones[#zones + 1] = zn; seen[zn.id] = true end
   end
@@ -426,12 +458,17 @@ emit_gate = function(K, c, a)
           cistern = a.cis and trunc(a.cis.txt, 120) or nil})
 end
 
+-- whether the kernel removes a dry hospital's zones itself (BUG-034): config and the contract owner
+local function removes(c) return c.hosp_remove ~= false and M.can('hospital_remove') end
+
 -- the one-line recipe of the hospital gate from the last scan: zone a reachable bank, else the shortest dig,
 -- else a cistern; deleting the hospital zone lets the patients fetch their own drink meanwhile. BUG-031: with a
--- cistern room standing (`cis`, cistern_state), not "a cistern" but what that one lacks
+-- cistern room standing (`cis`, cistern_state), not "a cistern" but what that one lacks. BUG-034: the kernel deletes
+-- the zones itself once a patient is over patient_thirst, so the tail says when instead of asking for it
 function M.recipe(c, cis)
   local ws = st.ws
-  local tail = '; until then delete the hospital zone'
+  local tail = removes(c) and string.format('; until then the kernel removes it at thirst %d', c.patient_thirst)
+               or '; until then delete the hospital zone'
   if not ws then
     if cis then return cis.fix .. tail end
     return string.format('a well over water or a Water Source zone on water >= %d/7 within %d tiles (inspect '
@@ -724,8 +761,91 @@ local function scan_step(K, c)
   return false
 end
 
+---------------------------------------------------------------- dry hospital removal (BUG-034)
+-- Run 11 (Kilrudrabed site98, y439 spring): 5 bedridden patients died of thirst (75,000) and 8 more were over 40,000 in a
+-- hospital of 4 locations and 5 zones without accepted water, while HOSPITAL_DRY had said so for a long time and nothing
+-- acted. The game session removed the 5 zones by hand (zones screen) and GiveWater jobs brought water to the patients
+-- again (4 at once); Run 9 (FR-34): deleting the hospital zone made the survivor stand up, drink and eat. The DF rule
+-- both rest on, as far as the live notes show it (bugs/BUG-034): a patient in a hospital without accepted water gets no
+-- water (GiveWater cancelled "No water source" in Run 9, posted and never done in L5); without the hospital zone he does.
+-- So while a patient is over patient_thirst, every zone of a hospital location none of whose zones is served goes; a
+-- location with a served zone keeps all of its zones. The location itself stays (an empty entry on the locations screen).
+-- Returns {zones, over} when zones were removed in this run, else nil.
+local function remove_dry(K, c, r, p, T)
+  if not removes(c) then return nil end
+  local over = {}
+  for _, pt in ipairs(r.patients) do if pt.thirst > c.patient_thirst then over[#over + 1] = pt end end
+  if #over == 0 then return nil end
+  local wet_loc = {}
+  for _, h in ipairs(r.hosp) do if served(K, c, r, h) then wet_loc[h.loc] = true end end
+  local zones, locs, seen, failed, first = {}, {}, {}, 0, nil
+  for _, h in ipairs(r.hosp) do
+    if not wet_loc[h.loc] and #zones + failed < c.remove_per_run then
+      if K.act.hospital_remove(h.id) then             -- a refusal is an ACT_FAIL (B); the next run tries again
+        zones[#zones + 1], first = h.id, first or h
+        if not seen[h.loc] then seen[h.loc], locs[#locs + 1] = true, h.loc end
+      else
+        failed = failed + 1
+      end
+    end
+  end
+  if #zones == 0 then return nil end
+  table.sort(over, function(a, b) return a.thirst > b.thirst end)
+  local ids = {}
+  for i = 1, math.min(8, #over) do ids[i] = over[i].id end
+  local best
+  for _, s in ipairs(r.sources) do
+    if s.wet then
+      local d = dist_box(s.x, s.y, s.z, first)
+      if not best or d < best.d then best = {d = d, s = s} end
+    end
+  end
+  local src = best and string.format('nearest accepted water %d,%d,%d (%d tiles)', best.s.x, best.s.y, best.s.z, best.d)
+              or 'no accepted water on the map'
+  local function list(t)
+    local o = {}
+    for i = 1, math.min(6, #t) do o[i] = fmt(t[i]) end
+    return table.concat(o, ',') .. (#t > 6 and '+' or '')
+  end
+  local top = over[1]
+  K.emit('HOSPITAL_REMOVED', 'A',
+         trunc(string.format('removed %d dry hospital zone(s) %s (location %s): %d patient(s) over thirst %d, unit %d at '
+                             .. '%d; %s; water before a new hospital', #zones, list(zones), list(locs), #over,
+                             c.patient_thirst, top.id, top.thirst, src), 200),
+         {zones = zones, locs = locs, units = ids, n = #over, thirst = top.thirst, patients = #r.patients,
+          give = r.give, failed = failed, near = c.near, d = best and best.d or nil,
+          src = best and {best.s.x, best.s.y, best.s.z} or nil})
+  K.log('warn', 'water: removed hospital zone(s) %s of location(s) %s (no accepted water within %d tiles): %d patient(s) '
+        .. 'over thirst %d (unit %d at %d), %d GiveWater job(s) now; %s', list(zones), list(locs), c.near, #over,
+        c.patient_thirst, top.id, top.thirst, r.give, src)
+  p.rm = {t = T.tick, zones = zones, locs = locs, n = #over, tmax = top.thirst, give = r.give}
+  return {zones = zones, over = over}
+end
+
+-- the accepted sources (a well over water, a deep Water Source zone), nearest to the first hospital zone (else the
+-- citizens' median) first, at most SRC_MAX as [x, y, z] (state water.src: plan propose/check, BUG-034)
+local function src_list(r)
+  local ref = r.hosp[1]
+  if not ref and #r.home > 0 then
+    local mx, my, mz = median(r.home, 'x'), median(r.home, 'y'), median(r.home, 'z')
+    ref = {x1 = mx, y1 = my, x2 = mx, y2 = my, z = mz}
+  end
+  local l = {}
+  for _, s in ipairs(r.sources) do
+    if s.wet then l[#l + 1] = {s = s, d = ref and dist_box(s.x, s.y, s.z, ref) or 0} end
+  end
+  table.sort(l, function(a, b)
+    if a.d ~= b.d then return a.d < b.d end
+    return a.s.id < b.s.id
+  end)
+  local out = json.array{}
+  for i = 1, math.min(M.SRC_MAX, #l) do out[i] = json.array{l[i].s.x, l[i].s.y, l[i].s.z} end
+  return out
+end
+
 local function finish(K, c, r, p)
   local now = K.now().tick
+  local T = K.now()
   pond_loops(K, c, r)
   local hosp_ok, best_h, dry_h = #r.hosp > 0, nil, nil
   for _, h in ipairs(r.hosp) do
@@ -763,11 +883,24 @@ local function finish(K, c, r, p)
   if r.free + fixed == 0 then cause[#cause + 1] = 'no free bucket' end
   if #r.carers == 0 then cause[#cause + 1] = 'no caregiver with FEED_WATER_CIVILIANS' end
   local why = #cause > 0 and table.concat(cause, ', ') or 'water, buckets and caregivers present'
-  -- FR-34: the one-line recipe (Run 9: deleting the hospital zone made the survivor stand up, drink and eat)
-  local recipe = dry and 'delete the hospital zone (patients fetch their own drink) or carry water'
+  -- FR-34: the one-line recipe (Run 9: deleting the hospital zone made the survivor stand up, drink and eat; Run 11:
+  -- GiveWater jobs ran again, BUG-034). With the removal on, a dry hospital is left only when the removal failed
+  local recipe = dry and 'delete the hospital zone (GiveWater resumes or patients fetch their own drink) or carry water'
                  or 'check the GiveWater jobs: caregivers, buckets, the way to the water'
   local carers = {}
   for i = 1, math.min(8, #r.carers) do carers[i] = r.carers[i] end
+  -- BUG-034: a dry hospital's zones go before the patients die (HOSPITAL_REMOVED carries the patients: no patient_thirst
+  -- and no HOSPITAL_DRY in the same run)
+  local removed = dry and remove_dry(K, c, r, p, T) or nil
+  -- a day after a removal: how many GiveWater jobs run now (the DF rule the removal rests on, BUG-034)
+  local rm = p.rm
+  if type(rm) == 'table' and rm.after == nil and math.tointeger(rm.t) and now - rm.t >= DAY then
+    local tm = 0
+    for _, pt in ipairs(r.patients) do if pt.thirst > tm then tm = pt.thirst end end
+    rm.after, rm.tmax_after = r.give, tm
+    K.log('info', 'water: a day after the hospital removal (tick %d): %d GiveWater job(s), %d patient(s), max thirst %d '
+          .. '(was %d)', rm.t, r.give, #r.patients, tm, math.tointeger(rm.tmax) or -1)
+  end
   -- p.alarm: patients over the alarm in this episode (id -> tick they crossed it)
   local over, fresh = {}, false
   for _, pt in ipairs(r.patients) do
@@ -787,9 +920,10 @@ local function finish(K, c, r, p)
   local woke = false
   -- BUG-008: the weekly reminder also waits wake_wall_s wall seconds (a game week is 21 s at timestream speed); a
   -- patient crossing the alarm still wakes at once
-  local T = K.now()
-  if #over > 0 and (fresh or CAD.elapsed({t = p.alarm_t or -c.alarm_every, w = p.alarm_w}, T, c.alarm_every,
-                                         c.wake_wall_s)) then
+  if removed then
+    p.alarm_t, p.alarm_w, woke = now, T.wall, true            -- HOSPITAL_REMOVED named them (BUG-034)
+  elseif #over > 0 and (fresh or CAD.elapsed({t = p.alarm_t or -c.alarm_every, w = p.alarm_w}, T, c.alarm_every,
+                                             c.wake_wall_s)) then
     p.alarm_t, p.alarm_w, woke = now, T.wall, true
     table.sort(over, function(a, b) return a.thirst > b.thirst end)
     local ids = {}
@@ -868,16 +1002,32 @@ local function finish(K, c, r, p)
     end
   end
   st.wet_rooms = wet_rooms
+  -- the hospital zones left after this run's removal, and whether every one of them is served (BUG-034)
+  local nh = #r.hosp
+  if removed then
+    local gone = {}
+    for _, id in ipairs(removed.zones) do gone[id] = true end
+    nh, hosp_ok = 0, true
+    for _, h in ipairs(r.hosp) do
+      if not gone[h.id] then
+        nh = nh + 1
+        if not served(K, c, r, h) then hosp_ok = false end
+      end
+    end
+    hosp_ok = hosp_ok and nh > 0
+  end
   local out = {patients = #r.patients, thirsty = thirsty, thirst_max = tmax, wells = wells, wet = wet,
                hosp_ok = hosp_ok and 1 or 0, refuge_ok = refuge_ok and 1 or 0, buckets = r.buckets,
                buckets_free = r.free + fixed, buckets_full = r.full, buckets_want = want, unforbid = fixed,
-               ordered = ordered, missing = math.max(0, missing), carers = #r.carers, gate = gate and 1 or 0}
+               ordered = ordered, missing = math.max(0, missing), carers = #r.carers, gate = gate and 1 or 0,
+               hosp = nh, give = r.give, removed = removed and #removed.zones or 0, src = src_list(r)}
   local prev = st.out or {}
   if prev.hosp_ok ~= out.hosp_ok or prev.refuge_ok ~= out.refuge_ok or prev.patients ~= out.patients
-     or fixed > 0 or ordered > 0 then
+     or prev.hosp ~= out.hosp or fixed > 0 or ordered > 0 then
     K.log('info', 'water: %d patients (max thirst %d), hospital %s, refuge %s, %d wet sources (%d wells), buckets %d free of %d '
-          .. '(want %d, unforbid %d, ordered %d)', out.patients, tmax, hosp_ok and 'ok' or 'dry',
-          refuge_ok and 'ok' or 'dry', wet, wells, out.buckets_free, r.buckets, want, fixed, ordered)
+          .. '(want %d, unforbid %d, ordered %d), %d GiveWater', out.patients, tmax,
+          nh == 0 and 'none' or (hosp_ok and 'ok' or 'dry'), refuge_ok and 'ok' or 'dry', wet, wells, out.buckets_free,
+          r.buckets, want, fixed, ordered, r.give)
   end
   st.out = out
   st.src = r.sources
@@ -892,7 +1042,7 @@ local function new_run(K)
   local ids = {}
   for _, id in ipairs(type(cu) == 'table' and cu.ids or {}) do ids[#ids + 1] = id end
   return {ph = 1, idx = 0, ids = ids, patients = {}, sources = {}, hosp = {}, buckets = 0, free = 0, full = 0,
-          forbidden = {}, ponds = {}, carers = {}, home = {}}
+          forbidden = {}, ponds = {}, carers = {}, home = {}, give = 0}
 end
 
 function M.init(K)
@@ -951,9 +1101,11 @@ function M.inspect(K, what, key)
     if #srcs < 30 then srcs[#srcs + 1] = {s.kind, s.id, s.x, s.y, s.z, s.wet and 1 or 0} end
   end
   local queued = (st.ws_want or st.scan) and 1 or 0
+  local rm = pstate(K).rm                     -- BUG-034: the last dry hospital removal (zones, patients, GiveWater jobs)
+  rm = type(rm) == 'table' and rm or nil
   if not st.ws then
     return true, 'water_sources: scan queued for the next water run',
-           {tick = now, queued = queued, deep = c.deep, sources = srcs}
+           {tick = now, queued = queued, deep = c.deep, sources = srcs, removed = rm}
   end
   local w = st.ws
   local reach = 0
@@ -961,23 +1113,25 @@ function M.inspect(K, what, key)
   return true, string.format('water_sources: %d bodies >= %d/7, %d with a bank or a dig, %d sources', #w.bodies, w.deep,
                              reach, #srcs),
          {tick = w.tick, age = now - w.tick, queued = queued, deep = w.deep, boxes = w.boxes, tiles = w.tiles,
-          levels = w.levels, bodies = w.bodies, sources = srcs, err = w.err,
+          levels = w.levels, bodies = w.bodies, sources = srcs, err = w.err, removed = rm,
           note = 'sources [kind, id, x, y, z, accepted]; bank: stand there and fill or zone the water; dig: opening '
                  .. 'the last wall floods the dug tiles (dig from above or behind a floodgate); cavern 1: cavern water, '
-                 .. 'never offered (caverns stay sealed)'}
+                 .. 'never offered (caverns stay sealed); removed: the last dry hospital removal (t, zones, locs, '
+                 .. 'n patients, tmax, give = GiveWater jobs then, after = a day later)'}
 end
 
 -- last summary (brief, tests): patients, thirst, wells, hospital/refuge water, buckets
 function M.kpi(K) return st.out end
 
--- published only once the contract has a `water` state key (STATE_SPEC + STATE_OWNERS 'water.*')
+-- published only once the contract has a `water` state key (STATE_SPEC + STATE_OWNERS 'water.*'; BUG-034): hosp = the
+-- hospital zones, src = the accepted sources nearest first (plan propose/check: a hospital only within `near` of one)
 function M.state(K)
   local o = st.out
   if not o or not (C.STATE_SPEC.opt and C.STATE_SPEC.opt.water) or C.STATE_OWNERS['water.*'] ~= 'water' then
     return {}
   end
   return {water = {patients = o.patients, thirst_max = o.thirst_max, hosp_ok = o.hosp_ok, refuge_ok = o.refuge_ok,
-                   buckets_free = o.buckets_free}}
+                   buckets_free = o.buckets_free, hosp = o.hosp, src = o.src or json.array{}}}
 end
 
 return M

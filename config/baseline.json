@@ -222,6 +222,11 @@
   "death_hunger": 75000,
   "death_reports": 400
  },
+ "water": {
+  "patient_thirst": 25000,
+  "hosp_remove": true,
+  "remove_per_run": 8
+ },
  "reserve": {
   "from_phase": "P1",
   "share": {"boulders": 0.25, "logs": 0.25}, "share_min": 5,

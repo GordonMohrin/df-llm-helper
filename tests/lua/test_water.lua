@@ -1,6 +1,7 @@
--- water (live L3): patients' thirst, hospital and refuge water, bucket supply, the cistern flood alarm.
--- `water` is in contract.MODULES (iter2 integration); ACT item_flag/workorder list water, and the tests toggle
--- that per test to check the feature detection.
+-- water (live L3): patients' thirst, hospital and refuge water, bucket supply, the cistern flood alarm; BUG-034: a dry
+-- hospital's zones are removed once a patient is thirsty (HOSPITAL_REMOVED), the state's water key.
+-- `water` is in contract.MODULES (iter2 integration); ACT item_flag/workorder/hospital_remove list water, and the tests
+-- toggle that per test to check the feature detection.
 local C = require('dfllm.util.contract')
 local listed = false
 for _, m in ipairs(C.MODULES) do if m.name == 'water' then listed = true end end
@@ -10,21 +11,24 @@ local F = require('wp8_world')
 local kmock = require('dfllm.util.k_mock')
 F.BUILDINGS_OTHER[#F.BUILDINGS_OTHER + 1] = 'ZONE_WATER_SOURCE'      -- a real buildings_other_id (dfhack.dll)
 
-local function owners(on)
-  for _, fn in ipairs({'item_flag', 'workorder'}) do
+-- rm = false: water may not remove hospital zones (the patient_thirst and HOSPITAL_DRY cases of a fort where the
+-- removal is off or refused)
+local function owners(on, rm)
+  for _, fn in ipairs({'item_flag', 'workorder', 'hospital_remove'}) do
     local keep = {}
     for _, o in ipairs(C.ACT[fn]) do if o ~= 'water' then keep[#keep + 1] = o end end
-    if on then keep[#keep + 1] = 'water' end
+    if on and (fn ~= 'hospital_remove' or rm ~= false) then keep[#keep + 1] = 'water' end
     C.ACT[fn] = keep
   end
 end
 
 local function fresh() package.loaded['dfllm.water'] = nil; return require('dfllm.water') end
 
--- opts: patients = {{id, thirst, rest|care, pos}}, act (default true), tiles = {['x,y,z'] = c}, manifest
+-- opts: patients = {{id, thirst, rest|care, pos}}, act (default true), rm (false: no hospital removal), tiles =
+-- {['x,y,z'] = c}, manifest
 local function world(opts)
   opts = opts or {}
-  owners(opts.act ~= false)
+  owners(opts.act ~= false, opts.rm)
   local units = {}
   for i = 1, opts.cit or 4 do units[i] = {id = i, citizen = true, pos = {50, 50, 10}} end
   local persist = {manifest = opts.manifest or {v = 2, burrows = {['Kern+'] = {role = 'kern'},
@@ -82,7 +86,7 @@ T.test('config/baseline.json may tune water; the defaults stand without it', fun
 end)
 
 T.test('a bedridden patient over 30k thirst without water: patient_thirst (A) with cause and recipe, cistern requested', function()
-  local W, M = world{patients = {{id = 2, thirst = 45000, rest = true, pos = {12, 12, 5}}},
+  local W, M = world{rm = false, patients = {{id = 2, thirst = 45000, rest = true, pos = {12, 12, 5}}},
                      setup = function(W) F.hospital(W, {10, 10, 14, 14, 5}) end}
   day(W)
   local pt = needed(W, 'patient_thirst')
@@ -111,7 +115,7 @@ T.test('a bedridden patient over 30k thirst without water: patient_thirst (A) wi
 end)
 
 T.test('one patient_thirst line for all patients; a patient crossing the alarm wakes at once', function()
-  local W, M = world{patients = {{id = 2, thirst = 45000, rest = true}, {id = 3, thirst = 52000, care = true},
+  local W, M = world{rm = false, patients = {{id = 2, thirst = 45000, rest = true}, {id = 3, thirst = 52000, care = true},
                                  {id = 4, thirst = 29000, care = true}},
                      setup = function(W) F.hospital(W, {10, 10, 14, 14, 5}) end}
   day(W)
@@ -140,7 +144,7 @@ T.test('hospital gate (FR-31/34): HOSPITAL_DRY when the dry episode starts; BUG-
   T.eq(#hd, 1)
   T.eq(hd[1].cls, 'A')
   T.eq({hd[1].d.patients, hd[1].d.near}, {1, 30})
-  T.ok(hd[1].d.recipe:find('delete the hospital zone', 1, true), hd[1].d.recipe)
+  T.ok(hd[1].d.recipe:find('until then the kernel removes it at thirst 25000', 1, true), hd[1].d.recipe)  -- BUG-034
   T.ok(#hd[1].msg <= 200 and #hd[1].d.recipe <= 200)
   day(W, 7)
   W.ms = W.ms + 600000
@@ -331,6 +335,8 @@ T.test('without the contract change water writes nothing (feature detection, str
   T.eq(#W.find_acts('workorder'), 0)
   T.eq(#needed(W, 'patient_thirst'), 1)
   T.eq(M.kpi(W.K).missing, 3)
+  T.eq(#W.find_acts('hospital_remove'), 0, 'BUG-034: no hospital_remove owner, no removal')
+  T.eq(#W.find_events('HOSPITAL_REMOVED'), 0)
   owners(true)
 end)
 
@@ -410,13 +416,213 @@ T.test('pond loop (live L6): a Pond zone beside a wet well is removed; a real Wa
   T.eq(run(true), {}, 'a wet Water Source zone is the real supply: no loop')
 end)
 
-T.test('state: nothing published until the contract has a water key; the census is sliced', function()
+T.test('state: water is published once a run is done (BUG-034: the contract has the key); the census is sliced', function()
   local W, M = world{cit = 90}
   W.run(100, {skip = 100})
-  T.eq(W.state().water, nil)
+  T.eq(W.state().water, nil, 'the first run is still slicing the 90 citizens')
   day(W)
   T.ok(M.kpi(W.K) ~= nil)
   T.eq(M.kpi(W.K).patients, 0)
+  local w = W.state().water
+  T.eq({w.patients, w.thirst_max, w.hosp, w.hosp_ok, w.refuge_ok, #w.src}, {0, 0, 0, 0, 0, 0})
+  T.eq(C.check_state(W.state()), {})
+  local spec = C.STATE_SPEC.opt.water                          -- an older contract without the key: nothing
+  C.STATE_SPEC.opt.water = nil
+  T.eq(M.state(W.K), {})
+  C.STATE_SPEC.opt.water = spec
+end)
+
+---------------------------------------------------------------- BUG-034 (Run 11)
+-- Run 11 (Kilrudrabed site98, y439 spring d28): 5 bedridden patients died of thirst (75,000), 8 more were over 40,000;
+-- the hospital (4 locations, 5 zones) had no accepted water and HOSPITAL_DRY had said so for a long time. The game
+-- session removed the 5 zones by hand and GiveWater jobs brought water to the patients again (4 at once).
+local function removable(W)                    -- the zones screen's remove: the zone leaves the vectors
+  W.act_result('hospital_remove', function(id)
+    local v = df.global.world.buildings.other.ANY_ZONE
+    for i = #v - 1, 0, -1 do
+      if v[i].id == id then v:erase(i); return true, 1 end
+    end
+    return false, 'no such zone'
+  end)
+end
+local function zone_of(W, loc, box)            -- a second zone of an existing hospital location
+  return F.building(W, 'ANY_ZONE', {x1 = box[1], y1 = box[2], x2 = box[3], y2 = box[4], z = box[5], location_id = loc})
+end
+local function logs(W, pat)
+  local r = {}
+  for _, l in ipairs(W.logs) do if l.module == 'water' and l.msg:find(pat, 1, true) then r[#r + 1] = l end end
+  return r
+end
+local function run11(opts)
+  opts = opts or {}
+  local pts = {}
+  for i = 1, 8 do pts[#pts + 1] = {id = 2 + i, thirst = 40000 + i * 1000, care = true} end     -- 41k .. 48k
+  pts[#pts + 1] = {id = 11, thirst = 9000, rest = true}
+  pts[#pts + 1] = {id = 12, thirst = 12000, care = true}
+  local W, M = world{cit = 16, patients = pts, rm = opts.rm, tiles = {['60,12,5'] = '~'}, setup = function(W)
+    local z = {}
+    z[1] = F.hospital(W, {10, 10, 14, 14, 5})
+    z[2] = zone_of(W, z[1].location_id, {16, 10, 18, 12, 5})
+    z[3] = F.hospital(W, {10, 20, 14, 24, 5})
+    z[4] = F.hospital(W, {10, 30, 14, 34, 5})
+    z[5] = F.hospital(W, {20, 30, 24, 34, 5})
+    W.zones = z
+    F.building(W, 'ZONE_WATER_SOURCE', {id = 90, type = df.civzone_type.WaterSource, x1 = 60, y1 = 12, x2 = 60,
+                                        y2 = 12, z = 5, spec_sub_flag = {active = true}})       -- 46 tiles away
+    removable(W)
+    if opts.setup then opts.setup(W) end
+  end}
+  return W, M
+end
+
+T.test('BUG-034 (Run 11): a dry hospital with patients over 25,000: all 5 zones of its 4 locations are removed, ' ..
+       'HOSPITAL_REMOVED (A) names zones, locations and patients; no patient_thirst or HOSPITAL_DRY beside it ' ..
+       '(old: HOSPITAL_DRY only, the zones stayed and the patients died)', function()
+  local W, M = run11()
+  day(W)
+  local z = W.zones
+  local acts = W.find_acts('hospital_remove')
+  T.eq(#acts, 5)
+  local ids = {}
+  for i, a in ipairs(acts) do ids[i] = a.args[1] end
+  T.eq(ids, {z[1].id, z[2].id, z[3].id, z[4].id, z[5].id})
+  local ev = W.find_events('HOSPITAL_REMOVED')
+  T.eq(#ev, 1)
+  local e = ev[1]
+  T.eq(e.cls, 'A')
+  T.eq(e.d.zones, ids)
+  T.eq(e.d.locs, {z[1].location_id, z[3].location_id, z[4].location_id, z[5].location_id})
+  T.eq({e.d.n, e.d.thirst, e.d.units[1], #e.d.units, e.d.patients, e.d.failed, e.d.near}, {8, 48000, 10, 8, 10, 0, 30})
+  T.eq({e.d.src, e.d.d}, {{60, 12, 5}, 46})
+  T.ok(e.msg:find('^removed 5 dry hospital zone%(s%) ' .. z[1].id .. ','), e.msg)
+  T.ok(e.msg:find('8 patient(s) over thirst 25000, unit 10 at 48000; nearest accepted water 60,12,5 (46 tiles)', 1,
+                  true), e.msg)
+  T.ok(#e.msg <= 200, #e.msg)
+  T.eq(#needed(W, 'patient_thirst'), 0, 'HOSPITAL_REMOVED carries the patients')
+  T.eq(#W.find_events('HOSPITAL_DRY'), 0)
+  T.eq(#logs(W, 'water: removed hospital zone(s) '), 1)
+  local k = M.kpi(W.K)
+  T.eq({k.removed, k.hosp, k.give}, {5, 0, 0})
+  T.eq(W.state().water.hosp, 0)
+  T.eq(W.state().water.src, {{60, 12, 5}})
+  -- the next days: no hospital zone, so no dry gate and nothing to remove; a day later the GiveWater jobs are counted
+  df.job_type.GiveWater, df.job_type[78] = 78, 'GiveWater'
+  W.unit(1).job.current_job = {job_type = 78}
+  W.unit(13).job.current_job = {job_type = 78}
+  day(W)
+  T.eq(#W.find_acts('hospital_remove'), 5)
+  T.eq(#W.find_events('HOSPITAL_REMOVED'), 1)
+  T.eq(#W.find_events('HOSPITAL_DRY'), 0, 'no hospital zone left: no dry gate')
+  local after = logs(W, 'a day after the hospital removal')
+  T.eq(#after, 1)
+  T.ok(after[1].msg:find(': 2 GiveWater job(s), 10 patient(s), max thirst 48000 (was 48000)', 1, true), after[1].msg)
+  local rm = W.inbox('inspect', {what = 'water_sources'}).data.removed
+  T.eq({rm.zones, rm.n, rm.tmax, rm.give, rm.after}, {ids, 8, 48000, 0, 2})
+  day(W, 2)
+  T.eq(#logs(W, 'a day after the hospital removal'), 1, 'once per removal')
+  df.job_type.GiveWater, df.job_type[78] = nil, nil
+end)
+
+T.test('BUG-034: never while the hospital has a working source: a location with one served zone keeps all of its ' ..
+       'zones; only the dry location goes', function()
+  local W = run11{setup = function(W)
+    well(W, 20, 12, 5)                                         -- 2 tiles from zone 2, 6 from zone 1 (location 1)
+    W.cmap['20,12,4'] = '~'
+  end}
+  day(W)
+  local ids = {}
+  for i, a in ipairs(W.find_acts('hospital_remove')) do ids[i] = a.args[1] end
+  -- zones 3 and 5 are within 30 tiles of the well too (served); zone 4 (10..14 x 30..34) is 18 tiles away: served
+  T.eq(ids, {}, 'every location has a zone within 30 tiles of the wet well')
+  T.eq(#W.find_events('HOSPITAL_REMOVED'), 0)
+  T.eq({W.state().water.hosp, W.state().water.hosp_ok}, {5, 1})
+  local W2 = run11{setup = function(W)
+    W.cmap['20,12,4'] = '~'
+    well(W, 20, 12, 5)
+    local far = F.hospital(W, {80, 80, 84, 84, 5})              -- a fifth location 60 tiles from the well
+    zone_of(W, W.zones[1].location_id, {80, 90, 82, 92, 5})     -- location 1 also has a far zone: it stays
+    W.far = far
+  end}
+  day(W2)
+  ids = {}
+  for i, a in ipairs(W2.find_acts('hospital_remove')) do ids[i] = a.args[1] end
+  T.eq(ids, {W2.far.id}, 'only the location without a served zone')
+  T.eq(W2.find_events('HOSPITAL_REMOVED')[1].d.locs, {W2.far.location_id})
+  T.eq({W2.state().water.hosp, W2.state().water.hosp_ok}, {6, 0}, 'location 1 keeps its far zone too')
+  local W3 = run11{setup = function(W)
+    W.cmap['20,12,4'] = '~'
+    well(W, 20, 12, 5)
+    W.far = F.hospital(W, {80, 80, 84, 84, 5})
+  end}
+  day(W3)
+  T.eq(#W3.find_acts('hospital_remove'), 1)
+  T.eq({W3.state().water.hosp, W3.state().water.hosp_ok}, {5, 1}, 'the zones left are all served')
+end)
+
+T.test('BUG-034: below patient_thirst nothing goes (HOSPITAL_DRY as before); config patient_thirst, hosp_remove false ' ..
+       '(the old report), remove_per_run, a refused removal is tried again', function()
+  local W = world{patients = {{id = 2, thirst = 24000, care = true}}, setup = function(W)
+    F.hospital(W, {10, 10, 14, 14, 5}); removable(W)
+  end}
+  day(W)
+  T.eq(#W.find_acts('hospital_remove'), 0)
+  T.eq(#W.find_events('HOSPITAL_DRY'), 1)
+  W.unit(2).counters2.thirst_timer = 26000
+  day(W)
+  T.eq(#W.find_acts('hospital_remove'), 1, 'over 25,000: removed')
+  local function cfg_world(water, thirst)
+    local W2 = world{patients = {{id = 2, thirst = thirst, care = true}}, setup = function(W)
+      F.hospital(W, {10, 10, 14, 14, 5}); F.hospital(W, {10, 20, 14, 24, 5}); F.hospital(W, {10, 30, 14, 34, 5})
+      removable(W)
+    end}
+    local cfg = F.cfg()
+    cfg.water = water
+    W2.K.cfg.baseline = cfg
+    day(W2)
+    return W2
+  end
+  T.eq(#cfg_world({patient_thirst = 40000}, 35000).find_acts('hospital_remove'), 0, 'a higher mark from config')
+  T.eq(#cfg_world({patient_thirst = 'high'}, 35000).find_acts('hospital_remove'), 3, 'a string is ignored: 25,000')
+  local off = cfg_world({hosp_remove = false}, 35000)
+  T.eq(#off.find_acts('hospital_remove'), 0)
+  T.eq(#needed(off, 'patient_thirst'), 1, 'report only, as before BUG-034')
+  T.ok(needed(off, 'patient_thirst')[1].d.q:find('delete the hospital zone (GiveWater resumes', 1, true))
+  local capped = cfg_world({remove_per_run = 2}, 35000)
+  T.eq(#capped.find_acts('hospital_remove'), 2)
+  T.eq(capped.find_events('HOSPITAL_REMOVED')[1].d.zones, {capped.find_acts('hospital_remove')[1].args[1],
+                                                           capped.find_acts('hospital_remove')[2].args[1]})
+  day(capped)
+  T.eq(#capped.find_acts('hospital_remove'), 3, 'the rest in the next run')
+  T.eq(#capped.find_events('HOSPITAL_REMOVED'), 2)
+  -- a refused removal (the zone sheet is open): no event, the next run tries again
+  local W3 = world{patients = {{id = 2, thirst = 30500, care = true}}, setup = function(W)
+    F.hospital(W, {10, 10, 14, 14, 5})
+  end}
+  W3.act_result('hospital_remove', function() return false, 'zone sheet open' end)
+  day(W3)
+  T.eq(#W3.find_acts('hospital_remove'), 1)
+  T.eq(#W3.find_events('HOSPITAL_REMOVED'), 0)
+  T.eq(#needed(W3, 'patient_thirst'), 1, 'the patient_thirst line still comes')
+  removable(W3)
+  day(W3)
+  T.eq(#W3.find_acts('hospital_remove'), 2)
+  T.eq(W3.find_events('HOSPITAL_REMOVED')[1].d.n, 1)
+end)
+
+T.test('BUG-034: the state water.src lists the accepted sources nearest the hospital first (at most 8); a dry well and ' ..
+       'a shallow zone are none', function()
+  local W = world{tiles = {['30,12,4'] = '~', ['20,12,4'] = 'w', ['50,12,4'] = '.', ['70,12,5'] = '~'},
+                  setup = function(W)
+                    F.hospital(W, {10, 10, 14, 14, 5})
+                    well(W, 30, 12, 5); well(W, 20, 12, 5); well(W, 50, 12, 5)
+                    F.building(W, 'ZONE_WATER_SOURCE', {id = 91, type = df.civzone_type.WaterSource, x1 = 70, y1 = 12,
+                                                        x2 = 70, y2 = 12, z = 5, spec_sub_flag = {active = true}})
+                  end}
+  day(W)
+  local w = W.state().water
+  T.eq(w.src, {{20, 12, 5}, {30, 12, 5}, {70, 12, 5}})
+  T.eq({w.hosp, w.hosp_ok}, {1, 1})
+  T.eq(C.check_state(W.state()), {})
 end)
 
 T.done()

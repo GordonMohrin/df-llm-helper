@@ -86,7 +86,7 @@ T.test('HOSPITAL_DRY waits for the scan, then names the reachable bank of the ne
   T.eq(#hd, 1)
   T.ok(hd[1].d.recipe:find('zone the water at 20,12,5 (7/7) as Water Source, bank 19,12,5 is reachable', 1, true),
        hd[1].d.recipe)
-  T.ok(hd[1].d.recipe:find('until then delete the hospital zone', 1, true))
+  T.ok(hd[1].d.recipe:find('until then the kernel removes it at thirst 25000', 1, true), hd[1].d.recipe)   -- BUG-034
   T.eq(hd[1].d.zone, W.find_events('HOSPITAL_DRY')[1].d.zone)
   local d = sources(W)
   T.eq(#d.bodies, 1)
@@ -165,7 +165,8 @@ T.test('without a hospital the scan centres on the citizens; without snapshot.li
 end)
 
 T.test('a slow scan (ws_tiles small) never delays the patients\' run past its cadence', function()
-  local W, M = world{tiles = {['20,12,5'] = '~', ['19,12,5'] = '.'}, setup = hospital, cfg = {ws_tiles = 45},
+  local W, M = world{tiles = {['20,12,5'] = '~', ['19,12,5'] = '.'}, setup = hospital,
+                     cfg = {ws_tiles = 45, hosp_remove = false},           -- BUG-034: the patient_thirst line itself
                      patients = {{id = 2, thirst = 1000}}}
   W.run(100, {skip = 100})                                     -- the run, then the scan starts
   W.unit(2).counters2.thirst_timer = 35000
@@ -221,7 +222,8 @@ T.test('BUG-031: a dry cistern beside the hospital: HOSPITAL_DRY names it, its w
   local hd = W.find_events('HOSPITAL_DRY')
   T.eq(#hd, 1)
   T.ok(hd[1].d.recipe:find('cistern cistern20_12_5r0: its well 77 stands over 0/7 (dry) at 20,12,4 (cistern max ' ..
-       '0/7): fill it (pond zone and bucket carriers, or its pipe); until then delete the hospital zone', 1, true),
+       '0/7): fill it (pond zone and bucket carriers, or its pipe); until then the kernel removes it at thirst 25000', 1,
+       true),
        hd[1].d.recipe)
   T.ok(hd[1].msg:find('its well 77 stands over 0/7 (dry)', 1, true), hd[1].msg)
   T.ok(hd[1].d.why:find('cistern cistern20_12_5r0: its well 77 stands over 0/7', 1, true), hd[1].d.why)

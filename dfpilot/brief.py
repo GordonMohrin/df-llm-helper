@@ -247,6 +247,18 @@ def line_pop(ctx: Ctx) -> str:
     return _join(out)
 
 
+def _hospital(s: dict, st: dict) -> str:
+    """BUG-034: the hospital's water as the kernel's water module judges it (state water: an accepted source within
+    `near` tiles of every hospital zone; src = accepted sources; the patients), else care's narrower stock.hosp_water
+    (a wet well beside a hospital zone, on its level)."""
+    w = s.get("water")
+    if isinstance(w, dict):
+        h = "none" if not w["hosp"] else ("ok" if w["hosp_ok"] else "DRY")
+        return (f" hospital {h} src {len(w['src'])}"
+                + (f" patients {w['patients']} (thirst {w['thirst_max']})" if w["patients"] else ""))
+    return f" water {'ok' if st['hosp_water'] else 'NO'}" if "hosp_water" in st else ""
+
+
 def line_supply(ctx: Ctx) -> str:
     s, out = ctx.s, []
     st = s.get("stock")
@@ -255,7 +267,7 @@ def line_supply(ctx: Ctx) -> str:
         out.append("stock " + " ".join(
             f"{k[:-2]} {st[k]}d" + ("!" if k in lo else "") for k in ("drink_d", "food_d") if k in st)
             + (f" meals {st['meals']}" if "meals" in st else "")
-            + (f" water {'ok' if st['hosp_water'] else 'NO'}" if "hosp_water" in st else "")
+            + _hospital(s, st)
             # Run 10: the ore search and the leather a mood missed (plan propose/check read them too)
             + (f" ore {st['ore']} bars {st.get('bars', '?')}" + (" (explore)" if st.get("metal") == "explore" else "")
                if "ore" in st else "")

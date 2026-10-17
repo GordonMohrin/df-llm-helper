@@ -720,6 +720,43 @@ T.test('zone_remove (live L6): only the zones of that dfllm-* name are deconstru
   T.eq({env.api.zone_remove('dfllm-none')}, {true, 0})
 end)
 
+T.test('hospital_remove (BUG-034): one zone of a hospital location, never another zone or the one on the zone sheet', function()
+  H.world{tag = 'hrm'}
+  local gone, sel = {}, nil
+  local old_abt = df.abstract_building_type
+  df.abstract_building_type = {TEMPLE = 2, HOSPITAL = 13}
+  local function loc(id, t) return {id = id, getType = function() return t end} end
+  local site = {buildings = kmock.vec{loc(6, 13), loc(7, 2), loc(8, 13)}}
+  dfhack.world = dfhack.world or {}
+  local old_site = dfhack.world.getCurrentSite
+  dfhack.world.getCurrentSite = function() return site end
+  local zones = df.global.world.buildings.other.ANY_ZONE
+  for _, z in ipairs({{id = 950, location_id = 6}, {id = 951, location_id = 7}, {id = 952, location_id = -1},
+                      {id = 953, location_id = 8}}) do zones:insert('#', z) end
+  dfhack.buildings = dfhack.buildings or {}
+  dfhack.buildings.deconstruct = function(z) gone[#gone + 1] = z.id; return z.id ~= 953 end
+  dfhack.gui = dfhack.gui or {}
+  local old_sel = dfhack.gui.getSelectedCivZone
+  dfhack.gui.getSelectedCivZone = function() return sel end
+  local env = mk()
+  env.who_v = 'care'
+  T.eq({env.api.hospital_remove(950)}, {false, 'not owner'})
+  env.who_v = 'water'
+  T.eq({env.api.hospital_remove(951)}, {false, 'not a hospital zone'}, 'a temple zone')
+  T.eq({env.api.hospital_remove(952)}, {false, 'not a hospital zone'}, 'a zone without a location')
+  T.eq({env.api.hospital_remove(999)}, {false, 'no such zone'})
+  T.eq({env.api.hospital_remove('x')}, {false, 'bad zone id'})
+  sel = zones[0]
+  T.eq({env.api.hospital_remove(950)}, {false, 'zone sheet open'})
+  sel = nil
+  T.eq({env.api.hospital_remove(950)}, {true, 1})
+  T.eq({env.api.hospital_remove(953)}, {false, 'deconstruct refused'})
+  T.eq(gone, {950, 953})
+  T.eq(#env.fails, 7)
+  T.eq(env.lines[#env.lines][2], 'act.hospital_remove')
+  dfhack.gui.getSelectedCivZone, dfhack.world.getCurrentSite, df.abstract_building_type = old_sel, old_site, old_abt
+end)
+
 T.test('link_lever [S3, live L2]: one LinkBuildingToTrigger job with two free reachable mechanisms', function()
   local W = H.world{tag = 'link'}
   local vec = kmock.vec

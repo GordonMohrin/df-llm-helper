@@ -17,8 +17,8 @@ from pathlib import Path
 
 from . import files, paths, schema
 from .cmd import (SAME, SEAL_AUDIT, BpError, BpUnavailable, audit_routes, bp_files, fmt_reply, fort_manifest,
-                  last_entrances, log_seal, occupancy, place, rank_sites, refuge_head, refuge_open, seal_openings,
-                  send, sites_snapshot, template_info, template_names, write_bp)
+                  free_sites, last_entrances, log_seal, occupancy, place, rank_sites, refuge_head, refuge_open,
+                  seal_openings, send, sites_snapshot, template_info, template_names, write_bp)
 
 R_CAPS = {0: 55, 1: 55, 2: 75, 3: 250}    # DESIGN §5.4; R3 (>= 80) only with D-01 = B
 OPTION_A_MAX = 75
@@ -45,6 +45,12 @@ EXPLORE_DEPTHS = (12, 9, 6, 4, 2)         # propose tries the explore template's
 # picks first in trade.want while the fort has fewer than the Miners want (stock.picks / pick_want) and no bars
 STONE_DIGS = ("bedrooms", "stockroom", "refuge_beds", "explore")
 STONE_DIG = {"tpl": "bedrooms", "site": "S1", "p": {"n": 4}}
+# BUG-034 (Run 11, Kilrudrabed site98 y439: 5 patients died of thirst in a hospital without accepted water, and the plans
+# drafted `hospital` again each review): a hospital only within `near` tiles of an accepted source (state water.src: a
+# well over water, a Water Source zone on water >= 4/7), else the cistern first (hospital_gate, propose)
+HOSPITAL = "hospital"                     # bp/rooms.py: beds, traction bench, its own well spot (location=hospital)
+CISTERN = {"tpl": "cistern", "site": "S1"}    # bp/rooms.py: a well over real water (a pipe from a brook, or bucket-fed)
+WATER_NEAR = 30                           # water.lua `near` (config/baseline.json water.near): source -> hospital tiles
 SIEGE_EVENTS = ("SIEGE_START", "SIEGE_END", "BREACH")
 SIEGE_MODES = ("SIEGE", "BREACH", "RECOVERY")
 # DESIGN §11.4 always-blocked commands and banned terms (CONTRACTS §1.4); config/allowlist.json adds more
@@ -153,7 +159,95 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "sieged": sieged(save_dir, state),
             "audit": audit_routes(save_dir, state),
             "refuge": refuge_projects(save_dir, state, applied),
-            "stone_dig": stone_digs(save_dir)}
+            "stone_dig": stone_digs(save_dir),
+            "hosp": hospital_facts(save_dir, state, rooms)}
+
+
+def hospital_facts(save_dir: Path, state: dict | None, rooms: list) -> dict:
+    """BUG-034: cistern = a cistern project not done yet or a manifest cistern room; site = the anchor `bp.place
+    tpl=hospital site=S1` would take now (cmd.free_sites; only looked up while the state lists accepted water, None
+    without a sites snapshot or the bp package)."""
+    done = done_projects(save_dir)
+    cis = any(isinstance(r, dict) and r.get("tpl") == CISTERN["tpl"] for r in rooms)
+    for p in bp_files(save_dir):
+        doc = files.read_json(p)
+        if isinstance(doc, dict) and doc.get("tpl") == CISTERN["tpl"] and p.stem not in done:
+            cis = True
+    site = None
+    w = (state or {}).get("water")
+    if isinstance(w, dict) and w.get("src") and sites_snapshot(save_dir) is not None:
+        try:
+            free, _, _ = free_sites(save_dir, HOSPITAL, {}, n=1)
+        except (BpError, BpUnavailable):
+            free = []
+        site = free[0]["anchor"] if free and isinstance(free[0].get("anchor"), list) else None
+    return {"cistern": cis, "site": site}
+
+
+def water_near() -> int:
+    """water.lua's `near` (config/baseline.json water.near, else 30): how far an accepted source may lie from a
+    hospital zone for the kernel to count it served."""
+    doc = files.read_json(paths.config_dir() / "baseline.json")
+    v = (doc.get("water") or {}).get("near") if isinstance(doc, dict) and isinstance(doc.get("water"), dict) else None
+    return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else WATER_NEAR
+
+
+def _pos(p) -> str:
+    return ",".join(str(int(x)) for x in p)
+
+
+def hospital_water(s: dict | None, fort: dict | None = None) -> dict | None:
+    """BUG-034: the water a new hospital would have. None while the state has no `water` key (an older kernel: not
+    checked). Else {ok, why, d, src, site}: the kernel's accepted sources (state water.src, nearest the hospital or the
+    citizens first) against the hospital's site (fort.hosp.site); ok = a source within water_near() tiles of it
+    (Chebyshev, z included, as water.lua's served). Without a known site any source counts (d None: not checked)."""
+    w = (s or {}).get("water")
+    if not isinstance(w, dict):
+        return None
+    src = [p for p in w.get("src") or [] if isinstance(p, list) and len(p) == 3]
+    near = water_near()
+    site = ((fort or {}).get("hosp") or {}).get("site")
+    if not src:
+        return {"ok": False, "src": None, "d": None, "site": site,
+                "why": "no accepted water in the fort (a well over water or a Water Source zone on water >= 4/7: "
+                       "state water.src is empty)"}
+    if not site:
+        return {"ok": True, "src": src[0], "d": None, "site": None,
+                "why": f"accepted water at {_pos(src[0])}; its distance to the hospital's site is not checked (no "
+                       "sites snapshot: dfllm bp sites hospital --fresh)"}
+    d, best = min((max(abs(p[0] - site[0]), abs(p[1] - site[1]), abs(p[2] - site[2])), p) for p in src)
+    return {"ok": d <= near, "src": best, "d": d, "site": site,
+            "why": f"the nearest accepted water {_pos(best)} is {d} tiles from the hospital site {_pos(site)}"
+                   + ("" if d <= near else f" (> {near})")}
+
+
+def _water_fix(doc: dict, fort: dict | None) -> str:
+    """What comes before a refused hospital: the cistern under way or planned must hold water, else a cistern."""
+    tail = (f"plan propose drafts the hospital again once the state's water.src lists a source within {water_near()} "
+            "tiles of its site")
+    if ((fort or {}).get("hosp") or {}).get("cistern"):
+        return ("remove it; the cistern under way or standing must hold water first (HOSPITAL_DRY names what its well "
+                f"lacks; dfllm cmd inspect '{{\"what\":\"water_sources\"}}'); {tail}")
+    if any(b["tpl"] == CISTERN["tpl"] for se in doc["seasons"] for b in se["build"]):
+        return f"remove it; the planned cistern must hold water first; {tail}"
+    return (f"remove it and add {_compact(CISTERN)} first (dfllm bp sites cistern), or zone deep water as Water Source "
+            f"(dfllm cmd inspect '{{\"what\":\"water_sources\"}}'); {tail}")
+
+
+def hospital_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list[str], list[str]]:
+    """BUG-034: a plan that adds a hospital is refused while the fort has no accepted water for it (hospital_water): a
+    dry hospital is worse than none (its patients get no water; the kernel removes its zones once one is thirsty,
+    HOSPITAL_REMOVED). Water comes first: a cistern or a Water Source zone on deep water; `plan propose` drafts the
+    cistern and holds the hospital back. An older kernel (no state.water) is not checked, as the supply goals; a
+    source without a site to measure from (no sites snapshot) is a warning."""
+    adds = [si for si, _, b in new_builds(doc, prev) if b["tpl"] == HOSPITAL]
+    hw = hospital_water(s, fort) if adds else None
+    if hw is None:
+        return [], []
+    where = f"hospital (seasons[{adds[0]}])"
+    if hw["ok"]:
+        return [], ([f"{where}: {hw['why']}"] if hw["d"] is None else [])
+    return [f"{where}: {hw['why']}: its patients would die of thirst (BUG-034); {_water_fix(doc, fort)}"], []
 
 
 def stone_digs(save_dir: Path) -> bool:
@@ -543,6 +637,9 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     re_, rw = refuge_gate(doc, s, fort or {}, prev)         # Run 10: no P3+ without a separated refuge with beds
     errs += re_
     warn += rw
+    he, hw_ = hospital_gate(doc, s, fort or {}, prev)       # BUG-034: no hospital without accepted water near it
+    errs += he
+    warn += hw_
     se, sw = supply_goals(doc, s, fort)           # Run 10: ore exploration and leather; Run 11: stone and picks
     errs += se
     warn += sw
@@ -792,6 +889,9 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         all(b["tpl"] not in STONE_DIGS for b in builds) else None
     if stone:
         builds.append(copy.deepcopy(STONE_DIG))
+    # BUG-034: the hospital only with accepted water near its site; else the cistern in its place (once), noted
+    hw = hospital_water(s, fort)
+    held, cistern = None, False
     for p in plist:
         if cur <= p["id"] <= target:
             for d in p["deliver"]:
@@ -802,6 +902,12 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                         if d["stage"] >= 2:
                             b["site"] = SAME
                     if _build_key(b) not in done and all(_build_key(x) != _build_key(b) for x in builds):
+                        if b["tpl"] == HOSPITAL and hw is not None and not hw["ok"]:
+                            held = hw
+                            if _cistern_due(fort, done, builds, info):
+                                builds.append(copy.deepcopy(CISTERN))
+                                cistern = True
+                            continue
                         builds.append(b)
                 elif d["k"] == "orders" and d["lib"] not in libs:
                     libs.append(d["lib"])
@@ -834,7 +940,20 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     draft_supply(doc, s, kept, season, None if info is None else set(info))
     if stone:
         doc["notes"] += f"; {stone}: bedrooms@S1 n=4 first (a stone dig)"
+    if held:
+        under = ((fort or {}).get("hosp") or {}).get("cistern")
+        doc["notes"] += (f"; hospital held back (BUG-034): {held['why']}"
+                         + ("; cistern@S1 in its place" if cistern else "; the cistern under way or standing must hold "
+                            "water first" if under else "; water first (a cistern or a Water Source zone on deep "
+                            "water: dfllm cmd inspect water_sources)"))
     return doc
+
+
+def _cistern_due(fort: dict | None, done: set, builds: list, info: dict | None) -> bool:
+    """propose (BUG-034): a cistern in place of a held-back hospital, unless one is under way or stands (fort.hosp),
+    was applied or planned before, is drafted already, or the bp package has no cistern template."""
+    return not ((fort or {}).get("hosp") or {}).get("cistern") and (CISTERN["tpl"], None) not in done \
+        and (info is None or CISTERN["tpl"] in info) and all(x["tpl"] != CISTERN["tpl"] for x in builds)
 
 
 # ---------------------------------------------------------------- apply

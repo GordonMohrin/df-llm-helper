@@ -73,6 +73,7 @@ ACT = {
     "squad_remove": ["military"],
     "squad_routine": ["military"], "squad_order": ["military"], "squad_uniform": ["military"],
     "squad_unequip": ["military"], "squad_release": ["military"], "animal_slaughter": ["economy"], "zone_remove": ["runner"], "manager_office": ["economy"], "pond_remove": ["water"],
+    "hospital_remove": ["water"],                  # BUG-034: the zones of a dry hospital while a patient is thirsty
     "sand_zone": ["economy"], "fish_zone": ["economy"],
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
     "door_forbid": ["reflex"],
@@ -100,7 +101,7 @@ STATE_OWNERS = {
     "stock.pick_want": "economy", "stock.hosp_water": "care", "care.*": "care", "labor.*": "economy", "orders.*": "economy",
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
     "clock.*": "arbiter", "alarm.*": "reflex", "lever.*": "gate",
-    "alert.*": "seal", "wave.*": "siege", "snap.*": "snapshot",
+    "alert.*": "seal", "wave.*": "siege", "snap.*": "snapshot", "water.*": "water",
 }
 
 # kernel fault and slowness rules (CONTRACTS §3.3.5-3.3.6), mirrors contract.KERN
@@ -444,6 +445,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa")),
     # BUG-031: cistern = why the nearest cistern room does not serve the hospital (no well, its well over 0/7, too far)
     "HOSPITAL_DRY": ("A", "water", _d("why:s", "patients:i zone:i near:i recipe:s cistern:s")),
+    # BUG-034: the zones of a hospital without accepted water went while a patient was over water.patient_thirst: zones,
+    # their locations, the patients over it (units, n, the top thirst), all patients, GiveWater jobs running then (give),
+    # refused removals, and the nearest accepted source (src, d tiles) if any
+    "HOSPITAL_REMOVED": ("A", "water", _d("zones:ia", "locs:ia units:ia n:i thirst:i patients:i give:i failed:i near:i "
+                                                      "d:i src:p")),
     "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i nosrc:sa route:s")),
     # class A since Run 9 (an army walked in while these were digest-only): they wake at once
     "SIEGE_START": ("A", "siege", _d(opt="vis:i inv:i great:i why:s")),
@@ -729,7 +735,12 @@ STATE = Obj(
          # who asked, progress, why it waits ('busy trade', 'paced 3 min', 'not started 2 min')
          "snap": Obj(req={"q": NAT, "old_s": NAT, "done": NAT, "drop": NAT},
                      opt={"run": ID, "p": Str(enum=["audit", "sites", "debug"]), "by": Str(maxbytes=24), "pct": PCT,
-                          "wait": Str(maxbytes=24)})})
+                          "wait": Str(maxbytes=24)}),
+         # water (BUG-034): patients, their max thirst, the hospital served (flag) and its zones (hosp), the refuge's
+         # well, free buckets, the accepted sources (a well over water, a Water Source zone on water >= 4/7) nearest
+         # to the hospital (else the citizens) first: plan propose/check allow a hospital only within `near` of one
+         "water": Obj(req={"patients": NAT, "thirst_max": NAT, "hosp_ok": FLAG, "refuge_ok": FLAG,
+                           "buckets_free": NAT, "hosp": NAT, "src": Arr(Tup([NAT, NAT, NAT]), hi=8)})})
 
 HEARTBEAT = Obj(req={"v": Const(V), "wall": NAT, "frame": NAT, "tick": TICK, "paused": Bool(), "mode": MODE,
                      "seq": NAT})

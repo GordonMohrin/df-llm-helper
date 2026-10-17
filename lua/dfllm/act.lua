@@ -1064,6 +1064,33 @@ local function impls(state)
     return false, 'no such zone'
   end
 
+  -- BUG-034 (Run 11, Kilrudrabed y439: 5 bedridden patients died of thirst in a hospital without water; the game session
+  -- removed its 5 zones by hand and GiveWater jobs brought water again): zones screen > select the zone > remove, for ONE
+  -- activity zone of a hospital location (its location_id names a HOSPITAL abstract building of the site, as water
+  -- reads it from buildings.other.ANY_ZONE). dfhack.buildings.deconstruct, as pond_remove and quickfort's zone undo do;
+  -- the location itself stays (the locations screen keeps it). Never another zone, never the one open on the zone
+  -- sheet. Returns ok, 1.
+  function I.hospital_remove(id)
+    id = math.tointeger(id)
+    if not id then return false, 'bad zone id' end
+    local hosp = {}
+    local site = dfhack.world.getCurrentSite()
+    local htype = df.abstract_building_type.HOSPITAL
+    for _, l in ipairs(site and site.buildings or {}) do
+      if l:getType() == htype then hosp[l.id] = true end
+    end
+    for _, z in ipairs(df.global.world.buildings.other.ANY_ZONE) do
+      if z.id == id then
+        if not hosp[z.location_id] then return false, 'not a hospital zone' end
+        local sel = dfhack.gui and dfhack.gui.getSelectedCivZone and dfhack.gui.getSelectedCivZone(true) or nil
+        if sel == z then return false, 'zone sheet open' end
+        if dfhack.buildings.deconstruct(z) then return true, 1 end
+        return false, 'deconstruct refused'
+      end
+    end
+    return false, 'no such zone'
+  end
+
   -- live L6 (reclaimed Paddletribes): the office zone had no owner, so the manager validated no order
   -- (117 of 118 waiting, the stills idle, drink 0). Assigns an unowned Office zone to the manager, as the
   -- zone sheet's "Assign" does (dfhack.buildings.setOwner). Never takes an office someone owns.

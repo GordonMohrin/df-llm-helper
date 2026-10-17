@@ -227,6 +227,50 @@ STATIONS_LIM: dict = {"core_ratio": (1, 50), "worn": (0, 100), "metal": (0, 100)
 # since the player's last answer (verb bridge.rebuild) is not rebuilt automatically any more; 0 = always rebuilt
 PERIMETER_LIM: dict = {"stop_after": (0, 20)}
 
+BASELINE_PATH = REPO / "config" / "baseline.json"
+_THIRST = (1000, 75000)                   # DF's thirst timer: "thirsty" ~25,000-50,000, dehydration kills ~75,000
+_TICKS = (1, 4032000)                     # a cadence in game ticks (at most ten years)
+# lua/dfllm/water.lua M.DEFAULTS: the knobs config/baseline.json "water" may tune ("bool", else an int range).
+# water.conf ignores a value of another type; tests/test_hospital_water.py checks the key set against water.lua.
+WATER_LIM: dict = {
+    "thirst_alarm": _THIRST, "thirst_watch": _THIRST, "near": (1, 200), "shaft": (1, 60), "pond_near": (0, 20),
+    "pond_per_run": (0, 20), "buckets_min": (0, 50), "bucket_per_patient": (0, 10), "buckets_max": (0, 100),
+    "unforbid_per_run": (0, 100), "alarm_every": _TICKS, "hosp_every": _TICKS, "request_every": _TICKS,
+    "flood_every": _TICKS, "flood_tiles": (1, 100), "units_per_slice": (1, 1000), "items_per_slice": (1, 10000),
+    "zone_tiles": (1, 10000), "order_backoff": _TICKS, "deep": (1, 7), "zone_below": "bool", "gate_every": _TICKS,
+    "wake_wall_s": (0, 86400), "ws_dz": (0, 20), "ws_tiles": (1, 100000), "ws_every": _TICKS, "ws_bodies": (1, 100),
+    "ws_dig": (0, 50), "ws_reach": (0, 100), "ws_reads": (1, 10000),
+    # BUG-034: the zones of a dry hospital go once a patient's thirst is over patient_thirst (hosp_remove false: never)
+    "patient_thirst": _THIRST, "hosp_remove": "bool", "remove_per_run": (0, 32),
+}
+
+
+def water_errors(path: str | Path | None = None) -> list[str]:
+    """Problems of the optional "water" part of config/baseline.json (BUG-034): unknown keys and values the kernel
+    ignores (another type than its default) or should not get (out of range). A missing file or part is fine."""
+    p = Path(path or BASELINE_PATH)
+    if not p.exists():
+        return []
+    name = "config/baseline.json"
+    try:
+        doc = json.loads(_read(p))
+    except ValueError as e:
+        return [f"{name}: not JSON ({e})"]
+    sec = doc.get("water", {}) if isinstance(doc, dict) else {}
+    if not isinstance(sec, dict):
+        return [f"{name}: water must be an object"]
+    errs = []
+    for k, v in sec.items():
+        lim = WATER_LIM.get(k)
+        if lim is None:
+            errs.append(f"{name}: water.{k}: unknown key")
+        elif lim == "bool":
+            if not isinstance(v, bool):
+                errs.append(f"{name}: water.{k}: true or false expected, got {v!r}")
+        elif not (isinstance(v, int) and not isinstance(v, bool) and lim[0] <= v <= lim[1]):
+            errs.append(f"{name}: water.{k}: int {lim[0]}..{lim[1]} expected, got {v!r}")
+    return errs
+
 
 # ---------------------------------------------------------------- allowlist (CONTRACTS §9.14)
 _AL_CACHE: dict[str, tuple[float, dict]] = {}
