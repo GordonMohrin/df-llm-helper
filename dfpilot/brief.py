@@ -170,12 +170,17 @@ def line_unready(ctx: Ctx) -> str:
     route = r.get("route") if isinstance(r.get("route"), str) else ""
     if route:                                  # Run 10: the bypass stood for months; name it and its wall
         out.append(f"audit route: {route}")
+    why = a.get("why") if isinstance(a.get("why"), str) else ""
+    if why:                                    # BUG-043 (Run 11 y479): the audit box over the tile cap, for weeks
+        out.append(f"audit snapshot refused: {why}")
     nxt = []
     if WALL_RE.search(route):
         nxt.append("wall it: dfllm cmd bp.place tpl=seal site=S1 at=audit (or a plan build seal p.at=audit)")
     elif route:
         nxt.append("no wall tile on that route: dfllm cmd inspect what=entrances")
-    if a.get("age", -1) < 0 or any(f in ("audit", "audit_old") for f in fails):
+    if why:
+        nxt.append("the refusal's way out, then dfllm audit")
+    elif a.get("age", -1) < 0 or any(f in ("audit", "audit_old") for f in fails):
         nxt.append("dfllm audit")
     if n > 0:
         nxt.append("close the open ways in (dfllm cmd bp.place tpl=seal site=S1 at=last)")
@@ -256,6 +261,8 @@ def line_pop(ctx: Ctx) -> str:
             drill += (f" (auto: {r['dhold']}; run dfllm cmd drill)" if r.get("dhold") else " (run dfllm cmd drill)")
         audit = (f"audit {'ok' if a['ok'] else 'FAIL'} {fmt_ticks(a['age'])}" if a["age"] >= 0
                  else "audit never (run dfllm audit)")
+        if a.get("cov"):                       # BUG-043: what its snapshot covered (margin, shafts, pieces out)
+            audit += f" ({a['cov']})"
         low = any(str(f).startswith("traps<") for f in r["fail"]) and a["age"] >= 0
         out.append(f"{head} worn {r['worn']}% cv {r['cv']} {drill} {audit} traps {a['min_traps']}"
                    + (" (dfllm audit: where the cheapest route enters the hall)" if low else ""))

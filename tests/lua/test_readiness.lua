@@ -336,11 +336,13 @@ T.test('stock hysteresis: R2 holds down to 90 % of the minimum', function()
 end)
 
 ---------------------------------------------------------------- audit requests
-T.test('audit snapshots: manifest bbox, monthly, after defense stages (1 day gap), deferred in SIEGE', function()
+T.test('audit snapshots: the default audit box, monthly, after defense stages (1 day gap), deferred in SIEGE', function()
   local W = world()
   day(W)
   T.eq(#W.snap.exports, 1)
-  T.eq(W.snap.exports[1].opts, {purpose = 'audit', bbox = {40, 0, 3, 78, 86, 12}, by = 'readiness'})
+  -- BUG-043: no box of readiness' own (it grew to 370,414 tiles with the explores): snapshot's default audit box
+  -- (tests/lua/test_snapshot_box.lua: the manifest geometry, runner.boxes, explore shafts as columns)
+  T.eq(W.snap.exports[1].opts, {purpose = 'audit', by = 'readiness'})
   day(W, 27)
   T.eq(#W.snap.exports, 1, 'monthly')
   day(W, 2)
@@ -361,11 +363,50 @@ T.test('audit snapshots: manifest bbox, monthly, after defense stages (1 day gap
   W.K.set_mode('RECOVERY', 'test')
   day(W)
   T.eq(#W.snap.exports, 5, 'requested once the fort is quiet')
-  -- live L2: a project still digging past the manifest box widens the box (no cut-off corridor = bypass)
-  function W.runner.bboxes(K) return {{60, 70, 5, 66, 95, 5}} end
-  X.call(W, 'runner', 'emit', 'PROJECT_STAGE', {proj = 'p2', stage = 's2.build', pct = 50, defense = 1})
-  day(W, 2)
-  T.eq(W.snap.exports[#W.snap.exports].opts.bbox, {40, 0, 3, 78, 111, 12})
+end)
+
+-- BUG-043 (Run 11 y479: 'readiness: audit snapshot not exported: bbox has 308132 tiles > 250000' in kern.log only):
+-- the refusal stays in the state for status/brief until an audit is stored again
+T.test('BUG-043: a refused audit request stays in ready.audit.why until an audit is stored', function()
+  local W = world()
+  local why = 'bbox 149x113x20 = 336740 tiles > 300000 at margin 0,0,0 (x 43-191 y 36-148 z 128-147; stretched ...'
+  local real = W.snap.export
+  function W.snap.export(K, o) return false, why end
+  day(W)
+  T.eq(ready(W).audit.why, why:sub(1, 80))
+  T.ok(#W.find_events('AUDIT') == 0)
+  W.snap.export = real
+  audit(W)
+  W.state()
+  T.eq(ready(W).audit.why, nil, 'cleared by the stored audit')
+end)
+
+-- BUG-043: an audit proves nothing about what its snapshot did not cover: an explicit box that left fort pieces out
+-- (SNAPSHOT_READY out/first) makes the audit a fail with a coverage line; the default box's margin and shafts are named
+T.test('BUG-043: an audit of a snapshot that left fort pieces out fails (coverage); ready.audit.cov', function()
+  local W = world()
+  day(W)
+  local n = 0
+  function W.snap.export(K, o)
+    n = n + 1
+    local id = 'cov' .. n
+    local d = {id = id, path = 'snap/' .. id .. '.json', purpose = 'audit'}
+    if n == 1 then d.out, d.first = 2, 'explore c1a14b1a6cc8ca4801' else d.margin, d.cols = '8,8,1', 2 end
+    K.emit('SNAPSHOT_READY', 'C', 'snapshot ' .. id, d)
+    return true, id
+  end
+  local r = audit(W)
+  T.eq(r.ok, true, r.msg)
+  local ev = W.find_events('AUDIT')
+  T.eq(ev[#ev].d.ok, 0, 'not ok although bp.topo.audit said ok')
+  T.eq(ev[#ev].d.fails[1], 'coverage: 2 pieces left out (explore c1a14b1a6cc8ca4801)')
+  W.state()
+  T.eq(ready(W).audit.cov, 'out 2: explore c1a14b1a6cc8ca4801')
+  T.ok(has(ready(W).fail, 'audit_fail'), T.show(ready(W).fail))
+  audit(W)
+  W.state()
+  T.eq(ready(W).audit.cov, 'margin 8,8,1, 2 shafts')
+  T.ok(not has(ready(W).fail, 'audit_fail'), 'a full default box: the audit counts')
 end)
 
 T.test('audit verb rejects bad args; ready state is schema-shaped', function()

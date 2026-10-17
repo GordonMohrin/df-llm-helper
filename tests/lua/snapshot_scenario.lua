@@ -24,14 +24,19 @@ SW.draw(W, Z, {
 }, 0, 0)
 SW.draw(W, Z + 1, {'???????????', '???????????', '???????????', '???????????', '???????????',
                    '???????????', '???????????', '???????????', '???????????'}, 0, 0)
+for z = 4, Z - 1 do SW.draw(W, z, {'#X#'}, 4, 6) end      -- BUG-043: an explore shaft below the fort (x 5, y 6)
 local gate = {name = 'gate', every = {ticks = 600}}
 function gate.state(K, b) if b == nil then return {} end return 'down' end
+-- BUG-043: a runner stand-in with one running explore (its box: the shaft and its arms, z 4-9)
+local runner = {name = 'runner', every = {ticks = 600}}
+function runner.boxes(K) return {{b = {4, 5, 4, 6, 7, 9}, id = 'x1', tpl = 'explore'}} end
 local kern = require('dfllm.kern')
-local ok, msg = H.boot(W, {repo = H.REPO or W.dir, modules = {gate, require('dfllm.snapshot')}})
+local ok, msg = H.boot(W, {repo = H.REPO or W.dir, modules = {gate, runner, require('dfllm.snapshot')}})
 assert(ok, msg)
 H.inbox(W, 'c300', 'snapshot', {purpose = 'audit', bbox = {0, 0, Z, 10, 8, Z + 1}}, 'cli')
 H.inbox(W, 'c301', 'snapshot', {purpose = 'sites'}, 'cli')
 H.inbox(W, 'c302', 'snapshot', {purpose = 'nope'}, 'cli')
+H.inbox(W, 'c303', 'snapshot', {purpose = 'audit'}, 'cli')      -- BUG-043: the default audit box, a union
 for _ = 1, 400 do H.frame(W, 0, 50) end
 kern.stop('scenario end')
 print('scenario done')

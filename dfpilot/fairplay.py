@@ -324,6 +324,36 @@ def runner_errors(path: str | Path | None = None) -> list[str]:
     return errs
 
 
+# BUG-043 (lua/dfllm/snapshot.lua M.CAP_LIM, CFG.max_tiles): config/baseline.json "snapshot": max_tiles = the tiles
+# one export reads at most (sliced, CFG.slice 1000 a frame: 400,000 = 400 slices). snapshot.lua keeps its default for
+# a value of another type or out of range; lint --config refuses it.
+SNAPSHOT_LIM: dict = {"max_tiles": (10000, 1000000)}
+
+
+def snapshot_errors(path: str | Path | None = None) -> list[str]:
+    """Problems of the optional "snapshot" part of config/baseline.json (BUG-043): unknown keys, values the kernel
+    ignores (another type, out of range). A missing file or part is fine."""
+    p = Path(path or BASELINE_PATH)
+    if not p.exists():
+        return []
+    name = "config/baseline.json"
+    try:
+        doc = json.loads(_read(p))
+    except ValueError as e:
+        return [f"{name}: not JSON ({e})"]
+    sec = doc.get("snapshot", {}) if isinstance(doc, dict) else {}
+    if not isinstance(sec, dict):
+        return [f"{name}: snapshot must be an object"]
+    errs = []
+    for k, v in sec.items():
+        lim = SNAPSHOT_LIM.get(k)
+        if lim is None:
+            errs.append(f"{name}: snapshot.{k}: unknown key")
+        elif not (isinstance(v, int) and not isinstance(v, bool) and lim[0] <= v <= lim[1]):
+            errs.append(f"{name}: snapshot.{k}: int {lim[0]}..{lim[1]} expected, got {v!r}")
+    return errs
+
+
 # BUG-042 (lua/dfllm/economy.lua M.DEFAULTS): the economy knobs of the drink line, the unvalidated-order watch, the
 # manager's office and the drink gatherers ("bool", else an int range); economy.conf takes the file's part as it is,
 # so a bad value here would reach the kernel: lint --config refuses it. Other economy keys are checked by the mirror

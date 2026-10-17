@@ -22,6 +22,9 @@
 -- satisfied by any export already queued or running; a waiting request older than CFG.max_age_ms, a running export
 -- without a slice for CFG.stall_ms and one whose slice failed CFG.fail_max times are dropped (kern.log warn); a
 -- refusal names the running export, who asked, its progress and why it waits, and the queued ones. state `snap`.
+-- BUG-043 (Run 11 y479: 'bbox has 252108 tiles > 250000'): the default box is made of the fort's pieces, an audit's
+-- explore shafts are column parts of a union export (' ' = not exported), the margin shrinks before a refusal, and a
+-- refusal names the box per axis and the piece that stretches it (the block 'the default box' below).
 local json = require('dfllm.util.json')
 local fio = require('dfllm.io')
 
@@ -29,14 +32,18 @@ local M = {name = 'snapshot', every = {ms = 250}, verbs = {}, on = {}}
 
 M.CFG = {
   slice = 1000,                   -- tiles per frame (DESIGN §4: <= 2,000)
-  max_tiles = 250000,             -- refuse bigger boxes (100 x 100 x 25)
+  -- BUG-043 (Run 11 y479: 'bbox has 252108 tiles > 250000'): tiles one export reads at most (400 slices; config/
+  -- baseline.json snapshot.max_tiles within M.CAP_LIM), and the file box of a union export at most
+  max_tiles = 400000, grid_max = 1500000,
   queue = 4,                      -- exports waiting behind the running one
   -- BUG-033: a waiting request is dropped after this long (an inbox one: its CLI gave up long before; a kernel one:
   -- its module asks again), a running export after stall_ms without a slice or fail_max failed slices; an export
   -- waits for another module's busy boost at most busy_max_ms; slices of an inbox export run boosted
   max_age_ms = {user = 900000, bg = 1800000}, stall_ms = 600000, fail_max = 2, busy_max_ms = 180000,
   paced_ms = 2000,                -- state/refusal: an export without a slice for this long is 'paced'
-  margin = {16, 16, 2},           -- default box: manifest geometry plus this
+  -- BUG-043: default box: the fort's pieces plus the first margin that keeps it within max_tiles (x, y, z); an
+  -- explore shaft's column part: its box plus col_margin; at most parts_max parts (more columns share the last one)
+  margin_steps = {{16, 16, 2}, {8, 8, 1}, {4, 4, 1}, {0, 0, 0}}, col_margin = {2, 2, 1}, parts_max = 24,
   sites = {w = 96, h = 96, below = 8, above = 3},   -- default box without a manifest
   marks_max = 500,
   trap_ttl = 1200,                -- ticks between trap index refreshes for tile()
@@ -49,6 +56,7 @@ local PURPOSES = {audit = true, sites = true, debug = true}
 local ID_OK = '^[A-Za-z0-9_%-]+$'
 
 local job, queue, n_auto    -- running export, waiting exports, generated ids
+local margin_used           -- BUG-043: the margin each purpose's default box used last (logged on a change)
 local stats, boosted       -- BUG-033: {done, drop} this boot; snapshot holds a kernel boost (inbox export)
 local tilemat, sand_cache, sand_known   -- Run 11: DFHack's tile-material module, sand per block layer, found floors
 local yielding             -- BUG-026: the busy module the running export waits for (logged once per wait)
@@ -462,37 +470,6 @@ local function clamp_bbox(b)
   return r
 end
 
-local function grow(bb, p)
-  if type(p) ~= 'table' or #p < 3 then return bb end
-  local q = {int(p[1]), int(p[2]), int(p[3]), int(p[4] or p[1]), int(p[5] or p[2]), int(p[6] or p[3])}
-  for i = 1, 6 do if not q[i] then return bb end end
-  if not bb then return q end
-  return {math.min(bb[1], q[1]), math.min(bb[2], q[2]), math.min(bb[3], q[3]),
-          math.max(bb[4], q[4]), math.max(bb[5], q[5]), math.max(bb[6], q[6])}
-end
-
--- the manifest geometry (bridges, levers, zones, rooms, killboxes, stations, stairs, refuge, pit, depot)
-local function manifest_bbox(man)
-  local bb
-  for _, b in pairs(type(man.bridges) == 'table' and man.bridges or {}) do
-    bb = grow(bb, b.fp)
-    for _, l in ipairs(type(b.levers) == 'table' and b.levers or {}) do bb = grow(bb, l) end
-  end
-  for _, list in pairs(type(man.zones) == 'table' and man.zones or {}) do
-    for _, z in ipairs(type(list) == 'table' and list or {}) do bb = grow(bb, z) end
-  end
-  for _, key in ipairs({'killboxes', 'rooms'}) do
-    for _, e in ipairs(type(man[key]) == 'table' and man[key] or {}) do bb = grow(bb, type(e) == 'table' and e.bbox) end
-  end
-  for _, p in pairs(type(man.stations) == 'table' and man.stations or {}) do bb = grow(bb, p) end
-  for _, kind in ipairs({'civ', 'mil'}) do
-    local s = type(man.stairs) == 'table' and man.stairs[kind]
-    for _, c in ipairs(type(s) == 'table' and s or {}) do bb = grow(bb, {c[1], c[2], c[3], c[1], c[2], c[4]}) end
-  end
-  if type(man.refuge) == 'table' then bb = grow(bb, man.refuge.anchor) end
-  return grow(grow(bb, man.pit), man.depot)
-end
-
 -- top revealed non-open tile of the map's centre column (z of the surface around the embark)
 local function surface_z(cx, cy, zmax)
   for z = zmax - 1, 0, -1 do
@@ -504,12 +481,8 @@ local function surface_z(cx, cy, zmax)
   end
 end
 
-local function default_bbox(K)
-  local bb = manifest_bbox(K.manifest())
-  if bb then
-    local m = M.CFG.margin
-    return clamp_bbox({bb[1] - m[1], bb[2] - m[2], bb[3] - m[3], bb[4] + m[1], bb[5] + m[2], bb[6] + m[3]})
-  end
+-- the box without a manifest: the surface around the map centre
+local function surface_bbox()
   local X, Y, Z = map_size()
   local s = M.CFG.sites
   local cx, cy = X // 2, Y // 2
@@ -526,6 +499,243 @@ local function contains(a, b)            -- box a holds box b
   return a[1] <= b[1] and a[2] <= b[2] and a[3] <= b[3] and a[4] >= b[4] and a[5] >= b[5] and a[6] >= b[6]
 end
 local function ntiles(b) return (b[4] - b[1] + 1) * (b[5] - b[2] + 1) * (b[6] - b[3] + 1) end
+
+---------------------------------------------------------------- BUG-043: the default box (the fort's pieces)
+-- Run 11 (site98 y479, kernel 2eea070): `dfllm audit` and `bp sites --fresh` refused 'bbox has 252108 tiles > 250000',
+-- readiness' own audit box (manifest + running projects) 308,132 and then 370,414 tiles: the fort spans its whole
+-- 192-tile map width, and every explore shaft 12 levels below the core added whole x-y planes of the fort (149 x 113
+-- tiles a level) although it is a few tiles wide. Now one composition serves every default box: the fort's pieces
+-- (the manifest geometry; for an audit also the runner's boxes: running projects, finished rooms, seals, plugs,
+-- repairs and explores it keeps) make the main box plus a margin; an explore shaft is a column part of its own (its box
+-- plus col_margin); tiles of the file's bounding box outside every part are ' ' (not exported; bp.topo counts a
+-- walkable tile beside one as the outside, like the box border). Over the cap the margin shrinks stepwise
+-- (margin_steps) before the request is refused, and a refusal names the box per axis and the piece that stretches it.
+M.NOSCAN = ' '                     -- the legend char of a tile no part of the export covers (CONTRACTS §9.10)
+M.CAP_LIM = {10000, 1000000}       -- config/baseline.json snapshot.max_tiles (dfpilot/fairplay.py SNAPSHOT_LIM)
+
+local function box6(p)
+  if type(p) ~= 'table' or p[1] == nil or p[2] == nil or p[3] == nil then return nil end
+  local q = {int(p[1]), int(p[2]), int(p[3]), int(p[4] or p[1]), int(p[5] or p[2]), int(p[6] or p[3])}
+  for i = 1, 6 do if not q[i] then return nil end end
+  for i = 1, 3 do if q[i] > q[i + 3] then q[i], q[i + 3] = q[i + 3], q[i] end end
+  return q
+end
+
+local function union(a, b)
+  return {math.min(a[1], b[1]), math.min(a[2], b[2]), math.min(a[3], b[3]),
+          math.max(a[4], b[4]), math.max(a[5], b[5]), math.max(a[6], b[6])}
+end
+
+local function bbox_of(list, field)
+  local bb
+  for _, e in ipairs(list) do
+    local b = field and e[field] or e
+    bb = bb and union(bb, b) or {b[1], b[2], b[3], b[4], b[5], b[6]}
+  end
+  return bb
+end
+
+local function grown(b, m) return {b[1] - m[1], b[2] - m[2], b[3] - m[3], b[4] + m[1], b[5] + m[2], b[6] + m[3]} end
+
+local function sorted_keys(t)
+  local r = {}
+  for k in pairs(type(t) == 'table' and t or {}) do r[#r + 1] = k end
+  table.sort(r, function(a, b) return tostring(a) < tostring(b) end)
+  return r
+end
+
+-- the fort's pieces {b, what, col, proj}: the manifest geometry (bridges and levers, zones, killboxes, rooms,
+-- stations, the edge, stairs, refuge, pit, depot); for an audit also runner.boxes (col: an explore's shaft)
+local function pieces(K, purpose)
+  local out, man = {}, K.manifest()
+  local function add(what, p, col, proj)
+    local b = box6(p)
+    if b then out[#out + 1] = {b = b, what = what, col = col == true, proj = proj} end
+  end
+  local br = type(man.bridges) == 'table' and man.bridges or {}
+  for _, name in ipairs(sorted_keys(br)) do
+    local b = br[name]
+    if type(b) == 'table' then
+      add('bridge ' .. tostring(name), b.fp)
+      for _, l in ipairs(type(b.levers) == 'table' and b.levers or {}) do add('lever ' .. tostring(name), l) end
+    end
+  end
+  local zs = type(man.zones) == 'table' and man.zones or {}
+  for _, k in ipairs(sorted_keys(zs)) do
+    for _, z in ipairs(type(zs[k]) == 'table' and zs[k] or {}) do add('zone ' .. tostring(k), z) end
+  end
+  for _, key in ipairs({'killboxes', 'rooms'}) do
+    for i, e in ipairs(type(man[key]) == 'table' and man[key] or {}) do
+      if type(e) == 'table' then add((key == 'rooms' and 'room ' or 'killbox ') .. tostring(e.id or i), e.bbox) end
+    end
+  end
+  local stn = type(man.stations) == 'table' and man.stations or {}
+  for _, k in ipairs(sorted_keys(stn)) do add('station ' .. tostring(k), stn[k]) end
+  for _, p in ipairs(type(man.edge) == 'table' and man.edge or {}) do add('edge', p) end
+  for _, kind in ipairs({'civ', 'mil'}) do
+    local s = type(man.stairs) == 'table' and man.stairs[kind]
+    for _, c in ipairs(type(s) == 'table' and s or {}) do
+      if type(c) == 'table' then add('stair ' .. kind, {c[1], c[2], c[3], c[1], c[2], c[4] or c[3]}) end
+    end
+  end
+  if type(man.refuge) == 'table' then add('refuge', man.refuge.anchor) end
+  add('pit', man.pit)
+  add('depot', man.depot)
+  if purpose == 'audit' then
+    local ok, list = K.call('runner', 'boxes')
+    for _, e in ipairs(ok and type(list) == 'table' and list or {}) do
+      if type(e) == 'table' then
+        add(tostring(e.tpl or 'project') .. ' ' .. tostring(e.id or '?'), e.b, e.tpl == 'explore', tostring(e.id or ''))
+      end
+    end
+  end
+  return out
+end
+
+-- the x spans of the parts covering row (y, z), merged and ascending: {{x0, x1}, ...}
+local function row_spans(parts, y, z, upto)
+  local iv = {}
+  for k = 1, upto or #parts do
+    local p = parts[k]
+    if y >= p[2] and y <= p[5] and z >= p[3] and z <= p[6] then iv[#iv + 1] = {p[1], p[4]} end
+  end
+  if #iv < 2 then return iv end
+  table.sort(iv, function(a, b) return a[1] < b[1] end)
+  local out = {{iv[1][1], iv[1][2]}}
+  for i = 2, #iv do
+    local last, s = out[#out], iv[i]
+    if s[1] <= last[2] + 1 then last[2] = math.max(last[2], s[2]) else out[#out + 1] = {s[1], s[2]} end
+  end
+  return out
+end
+
+-- the tiles of the union of the parts: the first whole, every other one where no earlier part covers it
+local function union_tiles(parts)
+  local n = ntiles(parts[1])
+  for k = 2, #parts do
+    local p = parts[k]
+    for z = p[3], p[6] do
+      for y = p[2], p[5] do
+        local w = p[4] - p[1] + 1
+        for _, s in ipairs(row_spans(parts, y, z, k - 1)) do
+          local a, b = math.max(s[1], p[1]), math.min(s[2], p[4])
+          if a <= b then w = w - (b - a + 1) end
+        end
+        n = n + w
+      end
+    end
+  end
+  return n
+end
+
+local function cap_of(K)
+  local c = type(K.cfg) == 'table' and type(K.cfg.baseline) == 'table' and K.cfg.baseline.snapshot
+  local v = type(c) == 'table' and c.max_tiles
+  local L = M.CAP_LIM
+  return (math.type(v) == 'integer' and v >= L[1] and v <= L[2]) and v or M.CFG.max_tiles
+end
+
+local function mstr(m) return string.format('%d,%d,%d', m[1], m[2], m[3]) end
+local function dims(b) return string.format('%dx%dx%d', b[4] - b[1] + 1, b[5] - b[2] + 1, b[6] - b[3] + 1) end
+local function span(b) return string.format('x %d-%d y %d-%d z %d-%d', b[1], b[4], b[2], b[5], b[3], b[6]) end
+
+-- the main box at margin m first, then each column part outside it (clamped to the map); columns past parts_max
+-- share the last part
+local function parts_at(mb, cols, m)
+  local main = clamp_bbox(grown(mb, m))
+  if not main then return nil end
+  local parts = {main}
+  for _, c in ipairs(cols) do
+    local b = clamp_bbox(grown(c.b, M.CFG.col_margin))
+    if b and not contains(main, b) then
+      if #parts < M.CFG.parts_max then parts[#parts + 1] = b else parts[#parts] = union(parts[#parts], b) end
+    end
+  end
+  return parts
+end
+
+-- the face of the main box whose pieces stretch it the most at margin m: the tiles it would lose if that face moved in
+-- to the next piece along its axis (the other faces kept): {p (its first piece), n (pieces on it), f (1-6: x0 y0 z0 x1
+-- y1 z1), v (the coordinate), saved (tiles)}
+local AXIS = {'x', 'y', 'z', 'x', 'y', 'z'}
+local function stretcher(main, m)
+  local bb = bbox_of(main, 'b')
+  local full = clamp_bbox(grown(bb, m))
+  local best
+  for f = 1, 6 do
+    local at, nv = {}, nil
+    for _, p in ipairs(main) do
+      if p.b[f] == bb[f] then at[#at + 1] = p
+      elseif f <= 3 then nv = math.min(nv or p.b[f], p.b[f])
+      else nv = math.max(nv or p.b[f], p.b[f]) end
+    end
+    if nv then
+      local nb = {bb[1], bb[2], bb[3], bb[4], bb[5], bb[6]}
+      nb[f] = nv
+      local q = clamp_bbox(grown(nb, m))
+      local saved = ntiles(full) - (q and ntiles(q) or 0)
+      if not best or saved > best.saved then best = {p = at[1], n = #at, f = f, v = bb[f], saved = saved} end
+    end
+  end
+  return best
+end
+
+-- 'bbox 117x62x14 = 101556 tiles > 100000 at margin 0,0,0 (x 59-175 y 52-113 z 132-145; stretched most by room
+-- cistern118_88_132r0 at z132: 29016 tiles less without it); way out: ...' (<= 300 bytes)
+local function refusal(c, main, cap)
+  local b = c.parts[1]
+  local s = string.format('bbox %s%s = %d tiles > %d at margin %s (%s', dims(b),
+                          c.cols > 0 and string.format(' + %d shaft column%s', c.cols, c.cols == 1 and '' or 's') or '',
+                          c.tiles, cap, mstr(c.margin), span(b))
+  local st = stretcher(main, c.margin)
+  if st then
+    s = s .. string.format('; stretched most by %s%s at %s%d: %d tiles less without %s', st.p.what:sub(1, 40),
+                           st.n > 1 and string.format(' (+%d more)', st.n - 1) or '', AXIS[st.f], st.v, st.saved,
+                           st.n > 1 and 'them' or 'it')
+  end
+  s = s .. ')'
+  if ntiles(c.bbox) > M.CFG.grid_max then s = s .. string.format('; file box %s > %d', dims(c.bbox), M.CFG.grid_max) end
+  local out = st and st.p.proj and st.p.proj ~= '' and string.format('bp.cancel %s if it can go, or ', st.p.proj) or ''
+  return (s .. '; way out: ' .. out .. 'raise snapshot.max_tiles in config/baseline.json (<= ' .. M.CAP_LIM[2] ..
+          '), dfhack-run dfllm reload'):sub(1, 300)
+end
+
+-- the default box of a purpose: {parts, bbox, tiles, margin?, cols, out = 0} or nil, why. The first margin step whose
+-- union fits the cap wins; without fort pieces the surface around the map centre (no margin, no columns)
+local function compose(K, purpose)
+  local pcs = pieces(K, purpose)
+  local main, cols = {}, {}
+  for _, p in ipairs(pcs) do if p.col then cols[#cols + 1] = p else main[#main + 1] = p end end
+  if #main == 0 then
+    local b = surface_bbox()
+    if not b then return nil, 'bbox outside the map' end
+    return {parts = {b}, bbox = b, tiles = ntiles(b), cols = 0, out = 0}
+  end
+  local mb, cap, last = bbox_of(main, 'b'), cap_of(K), nil
+  for _, m in ipairs(M.CFG.margin_steps) do
+    local parts = parts_at(mb, cols, m)
+    if parts then
+      last = {parts = parts, bbox = bbox_of(parts), tiles = union_tiles(parts), margin = m, cols = #parts - 1, out = 0}
+      if last.tiles <= cap and ntiles(last.bbox) <= M.CFG.grid_max then return last end
+    end
+  end
+  if not last then return nil, 'bbox outside the map' end
+  return nil, refusal(last, main, cap)
+end
+
+-- an explicit audit box: the fort pieces it leaves out (n, the first one's label)
+local function left_out(K, b)
+  local n, first = 0, nil
+  for _, p in ipairs(pieces(K, 'audit')) do
+    local q = clamp_bbox(p.b)
+    if q and not contains(b, q) then
+      n = n + 1
+      first = first or p.what
+    end
+  end
+  return n, first
+end
+
 local function mins(ms) return ms >= 60000 and string.format('%d min', ms // 60000) or string.format('%d s', ms // 1000) end
 
 -- the requests a job answers: its own id first, then the ones that joined it
@@ -610,9 +820,33 @@ local function enqueue(j)
   return at
 end
 
--- public (§7): queue an export -> ok, id (sliced; SNAPSHOT_READY when the file is written), and a note (joined,
--- position). opts = {id?, bbox?, purpose, by? (who asks: a module name, 'inbox:<by>'), user? (an inbox request),
--- any? (BUG-033: any export queued or running will do; its id is returned)}
+-- BUG-043: parts a covers parts b (every part of b lies in one of a)
+local function covers(a, b)
+  for _, q in ipairs(b) do
+    local inside = false
+    for _, p in ipairs(a) do if contains(p, q) then inside = true; break end end
+    if not inside then return false end
+  end
+  return true
+end
+
+-- BUG-043: what the reply and SNAPSHOT_READY say about a job's box ('margin 8,8,1', shaft columns, pieces left out)
+local function cov_note(j)
+  local t = {}
+  if j.margin and j.step and j.step > 1 then t[#t + 1] = 'margin ' .. mstr(j.margin) end
+  if (j.cols or 0) > 0 then t[#t + 1] = string.format('%d shaft column%s', j.cols, j.cols == 1 and '' or 's') end
+  if (j.out or 0) > 0 then
+    t[#t + 1] = string.format('leaves out %d fort piece%s: %s', j.out, j.out == 1 and '' or 's', tostring(j.first))
+  end
+  return table.concat(t, ', ')
+end
+
+-- public (§7): queue an export -> ok, id (sliced; SNAPSHOT_READY when the file is written), a note (joined,
+-- position; BUG-043: the margin, shaft columns, fort pieces an explicit audit box leaves out) and the box {tiles,
+-- margin?, cols?, out?, first?}. opts = {id?, bbox?, purpose, by? (who asks: a module name, 'inbox:<by>'), user? (an
+-- inbox request), any? (BUG-033: any export queued or running will do; its id is returned)}. Without bbox the box is
+-- the default of the purpose (BUG-043: the fort's pieces plus a margin, shrunk stepwise over the cap; an audit's
+-- explore shafts as column parts)
 function M.export(K, opts)
   opts = type(opts) == 'table' and opts or {}
   local purpose = opts.purpose or 'debug'
@@ -625,26 +859,52 @@ function M.export(K, opts)
   end
   local id = opts.id or new_id(K)
   if type(id) ~= 'string' or #id > 40 or not id:match(ID_OK) then return false, 'bad snapshot id' end
-  local bbox
+  local c
   if opts.bbox ~= nil then
     local b = opts.bbox
     if type(b) ~= 'table' or #b ~= 6 then return false, 'bbox must be [x0,y0,z0,x1,y1,z1]' end
     for i = 1, 6 do if not int(b[i]) then return false, 'bbox must hold integers' end end
     if b[1] > b[4] or b[2] > b[5] or b[3] > b[6] then return false, 'bbox corners out of order' end
-    bbox = clamp_bbox({int(b[1]), int(b[2]), int(b[3]), int(b[4]), int(b[5]), int(b[6])})
+    local bbox = clamp_bbox({int(b[1]), int(b[2]), int(b[3]), int(b[4]), int(b[5]), int(b[6])})
+    if not bbox then return false, 'bbox outside the map' end
+    local n, cap = ntiles(bbox), cap_of(K)
+    if n > cap then
+      return false, string.format('bbox %s = %d tiles > %d (%s); way out: a smaller bbox, or none (the fort\'s own '
+                                  .. 'box)', dims(bbox), n, cap, span(bbox))
+    end
+    c = {parts = {bbox}, bbox = bbox, tiles = n, cols = 0, out = 0}
+    if purpose == 'audit' then c.out, c.first = left_out(K, bbox) end
   else
-    bbox = default_bbox(K)
+    local why
+    c, why = compose(K, purpose)
+    if not c then return false, why end
+    if c.margin then                              -- BUG-043: log once per purpose which margin was used
+      local ms = mstr(c.margin)
+      local first = mstr(M.CFG.margin_steps[1])
+      if margin_used[purpose] ~= ms then
+        if ms ~= first then
+          K.log('warn', 'snapshot: the %s box is over %d tiles at margin %s: margin %s used (%d tiles, %s%s)', purpose,
+                cap_of(K), first, ms, c.tiles, span(c.parts[1]),
+                c.cols > 0 and string.format(', %d shaft columns', c.cols) or '')
+        elseif margin_used[purpose] then
+          K.log('info', 'snapshot: the %s box fits at margin %s again (%d tiles)', purpose, ms, c.tiles)
+        end
+        margin_used[purpose] = ms
+      end
+      for i, m in ipairs(M.CFG.margin_steps) do if mstr(m) == ms then c.step = i; break end end
+    end
   end
-  if not bbox then return false, 'bbox outside the map' end
-  local n = ntiles(bbox)
-  if n > M.CFG.max_tiles then return false, string.format('bbox has %d tiles > %d', n, M.CFG.max_tiles) end
+  local n, bbox = c.tiles, c.bbox
   local user, by = opts.user == true, tostring(opts.by or 'kernel'):sub(1, 24)
+  local info = {tiles = n, margin = c.margin and mstr(c.margin) or nil, cols = c.cols > 0 and c.cols or nil,
+                out = c.out > 0 and c.out or nil, first = c.out > 0 and c.first or nil}
   -- BUG-033: the same purpose, one box holding the other: one scan answers both (a waiting job only)
   for _, q in ipairs(queue) do
-    if not q.rows and q.purpose == purpose and (contains(q.bbox, bbox) or contains(bbox, q.bbox)) then
-      local u = {math.min(q.bbox[1], bbox[1]), math.min(q.bbox[2], bbox[2]), math.min(q.bbox[3], bbox[3]),
-                 math.max(q.bbox[4], bbox[4]), math.max(q.bbox[5], bbox[5]), math.max(q.bbox[6], bbox[6])}
-      q.bbox, q.tiles = u, ntiles(u)
+    if not q.rows and q.purpose == purpose and (covers(q.parts, c.parts) or covers(c.parts, q.parts)) then
+      if not covers(q.parts, c.parts) then
+        q.parts, q.bbox, q.tiles, q.margin, q.step, q.cols = c.parts, bbox, n, c.margin, c.step, c.cols
+      end
+      if (c.out or 0) < (q.out or 0) then q.out, q.first = c.out, c.first end
       q.alias = q.alias or {}
       q.alias[#q.alias + 1] = {id = id, by = by}
       if user and not q.user then
@@ -652,7 +912,11 @@ function M.export(K, opts)
         for i, x in ipairs(queue) do if x == q then table.remove(queue, i); break end end
         enqueue(q)
       end
-      return true, id, string.format('joins %s (%s by %s, %d tiles)', q.id, q.purpose, q.by, q.tiles)
+      local note = cov_note(q)
+      return true, id, string.format('joins %s (%s by %s, %d tiles%s)', q.id, q.purpose, q.by, q.tiles,
+                                     note ~= '' and ('; ' .. note) or ''),
+             {tiles = q.tiles, margin = q.margin and mstr(q.margin) or nil, cols = (q.cols or 0) > 0 and q.cols or nil,
+              out = (q.out or 0) > 0 and q.out or nil, first = (q.out or 0) > 0 and q.first or nil}
     end
   end
   if #queue >= M.CFG.queue then
@@ -662,11 +926,15 @@ function M.export(K, opts)
     local v = table.remove(queue, victim)
     drop(K, v, string.format('the queue was full and %s (%s by %s) goes first', id, purpose, by))
   end
-  local j = {id = id, purpose = purpose, bbox = bbox, tiles = n, by = by, user = user, t = now}
-  if not job and #queue == 0 then job = j; return true, id, 'next' end    -- it starts at the next step
+  local j = {id = id, purpose = purpose, bbox = bbox, parts = c.parts, tiles = n, margin = c.margin, step = c.step,
+             cols = c.cols, out = c.out, first = c.first, by = by, user = user, t = now}
+  local note = cov_note(j)
+  note = note ~= '' and ('; ' .. note) or ''
+  if not job and #queue == 0 then job = j; return true, id, 'next' .. note, info end    -- it starts at the next step
   local pos = enqueue(j)
   local ahead = job and (' behind ' .. short(job, now, true)) or ''
-  return true, id, pos > 1 and string.format('in line %d%s', pos, ahead) or (job and ('next' .. ahead) or 'next')
+  return true, id, (pos > 1 and string.format('in line %d%s', pos, ahead) or (job and ('next' .. ahead) or 'next')) ..
+         note, info
 end
 
 -- public (BUG-033, readiness): is the snapshot `id` still queued or being exported?
@@ -742,11 +1010,10 @@ local function remember_sand(j)
   sand_known = {tick = j.tick, tiles = list}
 end
 
--- one row (x0..x1) of level z
-local function scan_row(j, y, z)
-  local b = j.bbox
+-- the tiles x0..x1 of row y, level z
+local function scan_span(j, y, z, x0, x1)
   local out, getTileFlags = {}, dfhack.maps.getTileFlags
-  for x = b[1], b[4] do
+  for x = x0, x1 do
     local des, oc = getTileFlags(x, y, z)
     local c
     if not des or des.hidden then c = '?'
@@ -765,6 +1032,25 @@ local function scan_row(j, y, z)
   return table.concat(out)
 end
 
+-- one row (x0..x1) of level z -> its text and the tiles read; BUG-043: only inside the job's parts, ' ' elsewhere
+local function scan_row(j, y, z)
+  local b = j.bbox
+  if #j.parts > 1 or not contains(j.parts[1], b) then
+    local out, x, n = {}, b[1], 0
+    for _, s in ipairs(row_spans(j.parts, y, z)) do
+      local a, e = math.max(s[1], b[1]), math.min(s[2], b[4])
+      if a <= e then
+        if a > x then out[#out + 1] = string.rep(M.NOSCAN, a - x) end
+        out[#out + 1] = (scan_span(j, y, z, a, e))
+        n, x = n + e - a + 1, e + 1
+      end
+    end
+    if x <= b[4] then out[#out + 1] = string.rep(M.NOSCAN, b[4] - x + 1) end
+    return table.concat(out), n
+  end
+  return scan_span(j, y, z, b[1], b[4]), b[4] - b[1] + 1
+end
+
 -- the file text of request `id` (the job's own or one that joined it): the head per id, the rows once (j.body)
 local function encode(j, id)
   if j.body then return j.head(id) .. j.body end
@@ -774,7 +1060,11 @@ local function encode(j, id)
     parts[#parts + 1] = string.format('"z%d":["%s"]', z, table.concat(rows, '","'))
   end
   local traps = {}
-  for _, t in pairs(j.traps) do traps[#traps + 1] = t end
+  for _, t in pairs(j.traps) do
+    if covers(j.parts, {{t[1], t[2], t[3], t[1], t[2], t[3]}}) then
+      traps[#traps + 1] = t                       -- BUG-043: only traps on exported tiles
+    end
+  end
   table.sort(traps, function(a, b)
     if a[3] ~= b[3] then return a[3] < b[3] end
     if a[2] ~= b[2] then return a[2] < b[2] end
@@ -794,6 +1084,8 @@ local function encode(j, id)
   local head = {v = 2, id = j.id, tick = j.tick, purpose = j.purpose, bbox = j.bbox,
                 bridges = json.object(j.bstate), traps = json.array(traps)}
   if next(marks) then head.marks = marks end
+  if #j.parts > 1 or not contains(j.parts[1], j.bbox) then head.parts = j.parts end      -- BUG-043: a union export
+  if j.margin then head.margin = {j.margin[1], j.margin[2], j.margin[3]} end           -- the default box's margin
   j.head = function(x)
     head.id = x
     return json.encode(head):sub(1, -2)
@@ -816,8 +1108,13 @@ local function finish(K, j)
     else
       local rel = 'snap/' .. fio.basename(path)
       local who = i == 1 and j.by or j.alias[i - 1].by
-      K.emit('SNAPSHOT_READY', 'C', string.format('snapshot %s (%s, %d tiles, by %s)', id, j.purpose, j.tiles, who),
-             {id = id, path = rel, purpose = j.purpose})
+      -- BUG-043: a default box's margin when it shrank, its shaft columns, the pieces an explicit audit box left out
+      local note = cov_note(j)
+      K.emit('SNAPSHOT_READY', 'C', string.format('snapshot %s (%s, %d tiles, by %s%s)', id, j.purpose, j.tiles, who,
+                                                  note ~= '' and ('; ' .. note) or ''),
+             {id = id, path = rel, purpose = j.purpose, margin = (j.step or 1) > 1 and mstr(j.margin) or nil,
+              cols = (j.cols or 0) > 0 and j.cols or nil, out = (j.out or 0) > 0 and j.out or nil,
+              first = (j.out or 0) > 0 and tostring(j.first):sub(1, 60) or nil})
     end
   end
   local now = K.now().ms
@@ -853,7 +1150,7 @@ end
 ---------------------------------------------------------------- module
 function M.init(K)
   job, queue, n_auto, tt_cache, live_traps, live_jobs, yielding = nil, {}, 0, {}, nil, nil, nil
-  stats, boosted = {done = 0, drop = 0}, false
+  stats, boosted, margin_used = {done = 0, drop = 0}, false, {}
   occ = occ_values()
   sand_cache, sand_known = {}, {tick = -1, tiles = {}}
   local ok, tm = pcall(require, 'tile-material')       -- DFHack library/lua/tile-material.lua
@@ -925,8 +1222,9 @@ function M.step(K, budget, ctx)
   while left > 0 and j.z <= b[6] do
     j.rows[j.z] = j.rows[j.z] or {}
     local r = j.rows[j.z]
-    r[#r + 1] = scan_row(j, j.y, j.z)
-    left = left - w
+    local text, n = scan_row(j, j.y, j.z)
+    r[#r + 1] = text
+    left = left - math.max(1, n + (w - n) // 16)  -- BUG-043: a tile not exported costs a char, not a read
     j.y = j.y + 1
     if j.y > b[5] then j.y, j.z = b[2], j.z + 1 end
   end
@@ -961,10 +1259,12 @@ end
 -- BUG-033: an inbox request (a CLI or follow waits for its file) goes first and runs boosted; a refusal names the queue
 M.verbs.snapshot = function(K, args, cmd)
   local by = 'inbox:' .. tostring(cmd and cmd.by or '?')
-  local ok, id, note = M.export(K, {id = cmd and cmd.id, bbox = args.bbox, purpose = args.purpose or 'debug', by = by,
-                                    user = true})
+  local ok, id, note, info = M.export(K, {id = cmd and cmd.id, bbox = args.bbox, purpose = args.purpose or 'debug',
+                                          by = by, user = true})
   if not ok then return false, id, {queue = #queue + (job and 1 or 0)} end
-  return true, 'queued snapshot ' .. id .. (note and (' (' .. note .. ')') or ''), {id = id}
+  local d = {id = id}                       -- BUG-043: the box's tiles, margin, shaft columns, pieces left out
+  for k, v in pairs(type(info) == 'table' and info or {}) do d[k] = v end
+  return true, 'queued snapshot ' .. id .. (note and (' (' .. note .. ')') or ''), d
 end
 
 return M

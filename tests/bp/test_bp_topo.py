@@ -90,6 +90,26 @@ def test_bypass_and_trap_hall_removal(built):
     assert bp.audit(hidden, man)["ok"]
 
 
+def test_bug043_unexported_tiles_are_the_outside(built):
+    """BUG-043: a union export writes ' ' for the tiles no part covers (beyond a shaft's column, beside the fort box);
+    what lies there was not read, so a walkable tile beside one starts attackers like the bbox border. A tunnel from
+    the core that ends beside such a tile is a way in; the same tunnel ending in hidden rock ('?') is none."""
+    snap, man = built
+    s2 = set_tiles(snap, [L(0, 49, -5)], ".")                     # a tunnel south out of the core hub
+    for c in "?#":
+        assert bp.audit(set_tiles(s2, [L(0, 50, -5)], c), man)["ok"]
+    cut = set_tiles(s2, [L(0, 50, -5)], " ")
+    b = cut["bbox"]
+    union = {**cut, "parts": [[b[0], b[1], b[2], b[3], b[4] - 1, b[5]], [b[0], b[4], b[2], b[3], b[4], b[5]]],
+             "margin": [0, 0, 0]}
+    assert S.validate("snapshot", union) == []
+    res = bp.audit(union, man)
+    assert res["bypass"] and not res["ok"]
+    assert res["fails"][0] == "bypass: wall %d,%d,%d floor -> %d,%d,%d" % (L(0, 49, -5) + L(-1, 48, -5))
+    whole = set_tiles(snap, [(b[0], y, z) for z in range(b[2], b[5] + 1) for y in range(b[1], b[4] + 1)], " ")
+    assert bp.audit(whole, man)["ok"], "an unexported strip beside rock changes nothing"
+
+
 def test_cut_hall_means_no_attack_path(built):
     snap, man = built
     res = bp.audit(set_tiles(snap, [L(3, 18, -2)], "?"), man)    # mid-run (corners are cut diagonally)

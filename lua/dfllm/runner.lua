@@ -1619,12 +1619,21 @@ end
 -- at its closed floodgate and fortification, which the audit then sees.
 -- live L7: a finished bedrooms block at the audit box edge read as a way in (bypass, readiness R0 for a year):
 -- every finished room project stays inside the audit box, not only the cistern
+-- BUG-043 (Run 11 y479: the audit must cover the entrances and the shafts): finished seals, plugs and repairs (the
+-- pieces that close the ways in) and explores (their shaft: a column part of the audit export) stay too; m.runner kk
+-- names their template (KEEP_BOX 'kind'), so boxes() knows a kept shaft and kept_in() answers with rooms only
 local KEEP_BOX = {cistern = true, bedrooms = true, tombs = true, hall = true, guildhall = true, barracks = true,
                   temple = true, tavern = true, dining = true, hospital = true, office = true, workshops = true,
-                  farms = true, furnaces = true, captives = true, refuge_drink = true}
+                  farms = true, furnaces = true, captives = true, refuge_drink = true,
+                  seal = 'kind', plug = 'kind', repair = 'kind', explore = 'kind'}
+
+local function keep_box(P, d)
+  S.rt.keep[P.id] = project_bbox(P.id, d)
+  if KEEP_BOX[P.tpl] == 'kind' then S.rt.kk[P.id] = P.tpl end
+end
 
 local function finish(K, P, d)
-  if KEEP_BOX[P.tpl] then S.rt.keep[P.id] = project_bbox(P.id, d) end
+  if KEEP_BOX[P.tpl] then keep_box(P, d) end
   local man = K.manifest()
   M.merge_manifest(man, d.manifest)
   K.persist.set('manifest', man)
@@ -3448,6 +3457,7 @@ function M.init(K)
   rt.skip, rt.rty, rt.pb = obj(rt.skip), obj(rt.rty), obj(rt.pb)   -- BUG-022: skipped tiles, retries, cadence
   rt.cav, rt.br, rt.xs = obj(rt.cav), obj(rt.br), obj(rt.xs)       -- Run 11: cavern plugs, breach records, shafts
   rt.dw = obj(rt.dw)                                                 -- Run 11: seal doors planned as walls
+  rt.kk = obj(rt.kk)                                                 -- BUG-043: the template of a kept seal/explore box
   rt.park = obj(rt.park)                                             -- BUG-037: parked projects announced
   if type(rt.cz) ~= 'table' then rt.cz = {} end                      -- Run 11: cavern breach tiles
   if type(rt.exh) ~= 'string' then rt.exh = '' end
@@ -3566,19 +3576,34 @@ function M.queue(K)
                        table.concat(names, ', ')), data
 end
 
--- public (live L2): bboxes of the projects not done yet (readiness puts them into the audit snapshot)
-function M.bboxes(K)
-  local r = {}
+-- public (live L2, BUG-043): the boxes of the projects the audit snapshot holds, named: {{b, id, tpl}}: the projects
+-- not done yet and the kept boxes of finished ones (KEEP_BOX; a kept seal, plug, repair or explore by m.runner kk,
+-- else the list's template or 'done'). snapshot's default audit box is made of them (an explore as a column part)
+function M.boxes(K)
+  local r, tpl = {}, {}
   for _, P in ipairs(S.pd.list) do
+    tpl[P.id] = P.tpl
     if P.done ~= 1 then
       local d = doc(K, P.id)
-      if d then r[#r + 1] = project_bbox(P.id, d) end
+      if d then r[#r + 1] = {b = project_bbox(P.id, d), id = P.id, tpl = P.tpl} end
     elseif KEEP_BOX[P.tpl] and not S.rt.keep[P.id] then   -- finished before the box was kept: its bp file
       local d = read_bp(K, P.id)
-      if d and not check_doc(d, P.tpl) then S.rt.keep[P.id] = project_bbox(P.id, d); forget(P.id); dirty() end
+      if d and not check_doc(d, P.tpl) then keep_box(P, d); forget(P.id); dirty() end
     end
   end
-  for _, b in pairs(S.rt.keep) do r[#r + 1] = b end
+  local ids = {}
+  for id in pairs(S.rt.keep) do ids[#ids + 1] = id end
+  table.sort(ids)
+  for _, id in ipairs(ids) do
+    r[#r + 1] = {b = S.rt.keep[id], id = id, tpl = S.rt.kk[id] or tpl[id] or 'done'}
+  end
+  return r
+end
+
+-- public (live L2): the boxes of M.boxes alone
+function M.bboxes(K)
+  local r = {}
+  for i, e in ipairs(M.boxes(K)) do r[i] = e.b end
   return r
 end
 
@@ -3714,7 +3739,7 @@ function M.kept_in(K, b)
   local best, size
   for id, k in pairs(S.rt and S.rt.keep or {}) do
     if type(k) == 'table' and int(k[1]) and cx >= k[1] and cx <= k[4] and cy >= k[2] and cy <= k[5] and cz >= k[3]
-       and cz <= k[6] then
+       and cz <= k[6] and not (S.rt.kk and S.rt.kk[id]) then        -- BUG-043: a kept seal or shaft is no room
       local n = (k[4] - k[1] + 1) * (k[5] - k[2] + 1) * (k[6] - k[3] + 1)
       if not size or n < size or (n == size and tostring(id) < tostring(best)) then best, size = id, n end
     end

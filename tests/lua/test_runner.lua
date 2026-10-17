@@ -142,6 +142,38 @@ T.test('bboxes: running projects, and a finished cistern stays in (its pipe leav
   T.eq(again, boxes)
 end)
 
+-- BUG-043 (Run 11 y479): snapshot's default audit box is made of runner.boxes; an explore is a column part of it, and
+-- the audit must keep the entrances (finished seals) and the shafts (finished explores) after they are done
+T.test('BUG-043: boxes names each project; finished seals and explores stay in, a kept explore stays an explore', function()
+  local W = fresh{tag = 'boxes'}
+  T.ok(H.place(W, 'b1', H.dig_doc(1, {tpl = 'bedrooms', params = {}, class = 'living', label = 'dig'})).ok)
+  T.ok(H.place(W, 'e1', H.dig_doc(1, {tpl = 'explore', params = {depth = 2}, class = 'infra', label = 'dig', x = 40})).ok)
+  T.ok(H.place(W, 's1', H.dig_doc(1, {tpl = 'seal', params = {}, class = 'defense', label = 'dig', x = 70})).ok)
+  H.settle(W)
+  local function named(W2)
+    local r = {}
+    for _, e in ipairs(select(2, W2.K.call('runner', 'boxes'))) do r[e.id] = e.tpl end
+    return r
+  end
+  T.eq(named(W), {b1 = 'bedrooms', e1 = 'explore', s1 = 'seal'})
+  W.frame(1); H.settle(W)
+  for _ = 1, 6 do H.runs(W, 1); H.dig(W) end
+  H.runs(W, 4)
+  T.eq({H.proj(W, 'e1').done, H.proj(W, 's1').done}, {1, 1})
+  T.eq(named(W), {b1 = 'bedrooms', e1 = 'explore', s1 = 'seal'}, 'finished: their boxes kept')
+  T.eq(W.K.persist.get('m.runner').kk, {e1 = 'explore', s1 = 'seal'})
+  local eb = select(2, W.K.call('runner', 'boxes'))
+  for _, e in ipairs(eb) do
+    if e.id ~= 'b1' then T.eq(select(2, W.K.call('runner', 'kept_in', e.b)), nil, 'a kept ' .. e.tpl .. ' is no room') end
+  end
+  local pd = W.K.persist.get('projects')              -- the done projects pruned from the list (done_keep)
+  local keep = {}
+  for _, P in ipairs(pd.list) do if P.done ~= 1 then keep[#keep + 1] = P end end
+  pd.list = keep
+  T.eq(named(W), {b1 = 'done', e1 = 'explore', s1 = 'seal'}, 'a kept shaft stays a column after the list forgets it')
+  T.eq(#select(2, W.K.call('runner', 'bboxes')), 3)
+end)
+
 T.test('dig_backlog: tiles left in the running dig stages (economy sizes the Miners detail from it)', function()
   local W = fresh{tag = 'backlog'}
   H.place(W, 'b1', H.dig_doc(2))                         -- 2 chunks x 5 tiles of rock

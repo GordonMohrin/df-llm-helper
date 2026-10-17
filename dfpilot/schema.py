@@ -41,7 +41,7 @@ POSTURES = ["TRAIN", "STATION_B1", "READY_STATION", "B2_HOLD", "READY_IN", "INTA
 BRIDGE_STATES = ["up", "down", "moving", "unknown", "destroyed"]   # BUG-030: destroyed = gone from its footprint
 ORDER_LIBS = ["library/basic", "library/furnace", "library/smelting", "library/military",
               "library/rockstock", "library/glassstock"]
-SNAP_LEGEND = "?_.#SCF<>Xrv+=H^Bw~%T"
+SNAP_LEGEND = "?_.#SCF<>Xrv+=H^Bw~%T "     # BUG-043: " " = not exported (outside every part of a union export)
 TRAP_TYPES = ["W", "S", "C", "P", "X"]
 BY = ["llm", "gordon", "cli", "follow", "supervise", "test"]
 
@@ -635,7 +635,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "MODE": ("C", "kern", _d("from:s to:s", "why:s")),
     "GATE": ("C", "gate", _d("bridge:s", "state:s units:ia")),
     "LEVER": ("C", "gate", _d("bridge:s", "lever:i job:i")),
-    "SNAPSHOT_READY": ("C", "snapshot", _d("id:s path:s", "purpose:s")),
+    # BUG-043: margin = a default box's margin when it shrank ('8,8,1'), cols = its explore shaft columns, out/first =
+    # the fort pieces an explicit audit box left out (readiness fails such an audit: `coverage: ...`)
+    "SNAPSHOT_READY": ("C", "snapshot", _d("id:s path:s", "purpose:s margin:s cols:i out:i first:s")),
     "CMD": ("C", "kern", _d("id:s verb:s ok:f")),
     "BOOT": ("C", "kern", _d(opt="save:s v:i boots:i")),
     "UNLOAD": ("C", "kern", _d()),
@@ -729,7 +731,9 @@ STATE = Obj(
     opt={"save": Str(maxbytes=120), "phase": PHASE,
          "pop": Obj(opt={"cit": NAT, "adults": NAT, "soldiers": NAT, "cap": NAT, "gate_cap": NAT}),
          "ready": Obj(req={"lvl": Int(0, 3), "worn": PCT, "cv": NAT, "drill_age": Int(-1),
-                           "audit": Obj(req={"ok": FLAG, "age": Int(-1), "min_traps": NAT}),
+                           # BUG-043: why readiness' last audit request was refused; what the last audit covered
+                           "audit": Obj(req={"ok": FLAG, "age": Int(-1), "min_traps": NAT},
+                                        opt={"why": Str(maxbytes=80), "cov": Str(maxbytes=40)}),
                            "fail": Arr(Str(maxbytes=24), hi=8)},
                       # FR-65: ways in without door or bridge (-1 unknown), the first of them, why no auto drill;
                       # route: the last audit's first attacker-route finding (bypass / refuge on the attack path)
@@ -932,7 +936,10 @@ SNAPSHOT = Obj(req={"v": Const(V), "id": ID, "tick": TICK, "purpose": Str(enum=[
                                               keys=r"^z-?\d+$"),
                     "bridges": Obj(extra=Str(enum=BRIDGE_STATES), keys=BRIDGE_RE),
                     "traps": Arr(TRAP)},
-               opt={"marks": Obj(extra=Arr(POS, hi=500), keys=r"^[a-z_]{1,20}$")})
+               # BUG-043: a union export lists its parts (the main box first; tiles outside every part are " "), a
+               # default box its margin (x, y, z)
+               opt={"marks": Obj(extra=Arr(POS, hi=500), keys=r"^[a-z_]{1,20}$"),
+                    "parts": Arr(BBOX, 1, 24), "margin": Tup([NAT, NAT, NAT])})
 
 
 def _snapshot_post(doc: dict, out: list[str]) -> None:

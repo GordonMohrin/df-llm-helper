@@ -42,7 +42,6 @@ M.AUDIT_GAP = 1200       -- at most one audit request per day
 M.LEVERS_EVERY = 33600
 M.MIN_LEVERS, M.TRAPS, M.METAL, M.R2_SOLDIERS = 2, 30, 20, 8
 M.STOCK_HYST = 90        -- % of a stock minimum that keeps R2 once reached (no flapping)
-M.PAD = {8, 16, 1}       -- audit bbox margin around the manifest geometry (live L7: a bedrooms block 8 tiles past the geometry ended on the box edge and read as a way in)
 -- FR-65 SIEGE_UNREADY cadence (util/cadence): a game month, and at least UNREADY_WALL_S real seconds for an unchanged
 -- R0 (at timestream speed a month is 75 s) or UNREADY_NEWS_S when a new blocker or a new open way in appeared
 M.UNREADY_EVERY, M.UNREADY_WALL_S, M.UNREADY_NEWS_S = 33600, 1800, 600
@@ -149,39 +148,16 @@ local function check_levers(K, man)
 end
 
 ---------------------------------------------------------------- audit requests
-local function grow(bb, p)
-  if type(p) ~= 'table' or #p < 3 then return bb end
-  local x0, y0, z0 = p[1], p[2], p[3]
-  local x1, y1, z1 = p[4] or x0, p[5] or y0, p[6] or z0
-  if not bb then return {x0, y0, z0, x1, y1, z1} end
-  return {math.min(bb[1], x0), math.min(bb[2], y0), math.min(bb[3], z0),
-          math.max(bb[4], x1), math.max(bb[5], y1), math.max(bb[6], z1)}
-end
-
--- union of the manifest geometry plus a margin (nil: let snapshot choose)
-function M.audit_bbox(man)
-  local bb
-  for _, b in pairs(type(man.bridges) == 'table' and man.bridges or {}) do
-    bb = grow(bb, b.fp)
-    for _, l in ipairs(type(b.levers) == 'table' and b.levers or {}) do bb = grow(bb, l) end
+-- BUG-043 (Run 11 y479: 'audit snapshot not exported: bbox has 308132 tiles > 250000', then 370,414): readiness built
+-- its own box (the manifest geometry + PAD, every running project's box + PAD: an explore 12 levels below the core
+-- added whole planes of the fort). The box is snapshot's default for an audit now (snapshot.lua's pieces: the manifest
+-- geometry and runner.boxes, an explore shaft as a column part, the margin shrunk stepwise over the cap), the same
+-- one `dfllm audit` gets; readiness only asks once the manifest has geometry.
+local function has_geometry(man)
+  for _, k in ipairs({'bridges', 'zones', 'killboxes', 'stations', 'edge', 'stairs'}) do
+    if type(man[k]) == 'table' and next(man[k]) ~= nil then return true end
   end
-  for _, list in pairs(type(man.zones) == 'table' and man.zones or {}) do
-    for _, z in ipairs(list) do bb = grow(bb, z) end
-  end
-  for _, kb in ipairs(type(man.killboxes) == 'table' and man.killboxes or {}) do bb = grow(bb, kb.bbox) end
-  for _, p in pairs(type(man.stations) == 'table' and man.stations or {}) do bb = grow(bb, p) end
-  for _, p in ipairs(type(man.edge) == 'table' and man.edge or {}) do bb = grow(bb, p) end
-  for _, kind in ipairs({'civ', 'mil'}) do
-    for _, c in ipairs(type(man.stairs) == 'table' and type(man.stairs[kind]) == 'table' and man.stairs[kind] or {}) do
-      bb = grow(bb, {c[1], c[2], c[3], c[1], c[2], c[4]})
-    end
-  end
-  if type(man.refuge) == 'table' then bb = grow(bb, man.refuge.anchor) end
-  bb = grow(grow(bb, man.pit), man.depot)
-  if not bb then return nil end
-  local P = M.PAD
-  return {math.max(0, bb[1] - P[1]), math.max(0, bb[2] - P[2]), math.max(0, bb[3] - P[3]),
-          bb[4] + P[1], bb[5] + P[2], bb[6] + P[3]}
+  return type(man.refuge) == 'table' or type(man.pit) == 'table' or type(man.depot) == 'table'
 end
 
 local function request_audit(K, force)
@@ -200,24 +176,18 @@ local function request_audit(K, force)
       return
     end
   end
-  local man = K.manifest()
-  local bbox = M.audit_bbox(man)
-  if not bbox then return end                                 -- nothing built yet
-  -- live L2: a bedrooms dig still in progress ran past the box edge; the audit took the cut-off corridor
-  -- for a way in (bypass) and readiness fell R1 -> R0. Running projects are inside the box too.
-  local okb, boxes = K.call('runner', 'bboxes')
-  for _, b in ipairs(okb and type(boxes) == 'table' and boxes or {}) do
-    if type(b) == 'table' and #b == 6 then
-      local P = M.PAD
-      bbox = {math.min(bbox[1], math.max(0, b[1] - P[1])), math.min(bbox[2], math.max(0, b[2] - P[2])),
-              math.min(bbox[3], math.max(0, b[3] - P[3])), math.max(bbox[4], b[4] + P[1]),
-              math.max(bbox[5], b[5] + P[2]), math.max(bbox[6], b[6] + P[3])}
-    end
-  end
+  if not has_geometry(K.manifest()) then return end          -- nothing built yet
+  -- live L2: a bedrooms dig still in progress ran past the box edge; the audit took the cut-off corridor for a way in
+  -- (bypass) and readiness fell R1 -> R0: running projects are in the box (snapshot.lua's pieces: runner.boxes)
   st.audit_req, st.audit_due, dirty = now, 0, true
-  local ok, ok2, id = K.call('snapshot', 'export', {purpose = 'audit', bbox = bbox, by = 'readiness'})
-  if ok and ok2 then st.audit_snap = tostring(id)
-  else K.log('warn', 'readiness: audit snapshot not exported: %s', tostring(ok and id or ok2)) end
+  local ok, ok2, id = K.call('snapshot', 'export', {purpose = 'audit', by = 'readiness'})
+  if ok and ok2 then
+    st.audit_snap, st.audit_why = tostring(id), nil
+  else
+    -- BUG-043: the refusal stays in the state (ready.audit.why) until an audit snapshot is exported again
+    st.audit_why = cut(ok and id or ok2, 80)
+    K.log('warn', 'readiness: audit snapshot not exported: %s', tostring(ok and id or ok2))
+  end
 end
 
 -- FR-65: seal's last entrance check (CONTRACTS §7 seal.entrance_doors): independent routes from the map edge to
@@ -530,20 +500,39 @@ local function bool(v) return type(v) == 'boolean' end
 -- CONTRACTS §13 (R6): an audit is accepted only for a snapshot this boot exported with purpose
 -- 'audit' (seen as EV:SNAPSHOT_READY) and only once; `by` is checked by kern (VERB_BY)
 M.SNAPS_KEPT = 8
+-- BUG-043: and what each one covers (snapshot's SNAPSHOT_READY: the default box's margin when it shrank, its shaft
+-- columns, the fort pieces an explicit box left out)
 M.on['EV:SNAPSHOT_READY'] = function(K, ev)
   local d = type(ev) == 'table' and ev.d
   if type(d) ~= 'table' or d.purpose ~= 'audit' or type(d.id) ~= 'string' then return end
-  rt.snaps = rt.snaps or {}
+  rt.snaps, rt.cov = rt.snaps or {}, rt.cov or {}
   local list = rt.snaps
   list[#list + 1] = d.id
-  while #list > M.SNAPS_KEPT do table.remove(list, 1) end
+  rt.cov[d.id] = {margin = type(d.margin) == 'string' and d.margin or nil, cols = int(d.cols) or 0,
+                  out = int(d.out) or 0, first = type(d.first) == 'string' and d.first or nil}
+  while #list > M.SNAPS_KEPT do rt.cov[table.remove(list, 1)] = nil end
 end
 
 local function take_snap(id)
   for i, s in ipairs(rt.snaps or {}) do
-    if s == id then table.remove(rt.snaps, i); return true end
+    if s == id then
+      table.remove(rt.snaps, i)
+      local c = rt.cov and rt.cov[id]
+      if rt.cov then rt.cov[id] = nil end
+      return true, c
+    end
   end
   return false
+end
+
+-- BUG-043: 'margin 8,8,1, 2 shafts' / 'out 3: explore y451s0b0' (state ready.audit.cov), '' for a full default box
+local function cov_text(c)
+  if type(c) ~= 'table' then return '' end
+  local t = {}
+  if (c.out or 0) > 0 then t[#t + 1] = string.format('out %d: %s', c.out, tostring(c.first)) end
+  if c.margin then t[#t + 1] = 'margin ' .. c.margin end
+  if (c.cols or 0) > 0 then t[#t + 1] = string.format('%d shaft%s', c.cols, c.cols == 1 and '' or 's') end
+  return cut(table.concat(t, ', '), 40)
 end
 
 M.verbs.audit = function(K, args, cmd)
@@ -551,15 +540,23 @@ M.verbs.audit = function(K, args, cmd)
      or not (bool(args.bypass) and bool(args.refuge_sep) and bool(args.civ_sep) and bool(args.caverns)) then
     return false, 'bad audit args'
   end
-  if not take_snap(args.snap) then return false, 'unknown snap' end
+  local known, cov = take_snap(args.snap)
+  if not known then return false, 'unknown snap' end
   local fails = {}
-  for i = 1, math.min(#args.fails, 8) do fails[i] = cut(args.fails[i], 60) end
+  -- BUG-043: an audit of a snapshot that left fort pieces out (an explicit box) proves nothing about them: it fails
+  local out = type(cov) == 'table' and (cov.out or 0) > 0
+  if out then fails[1] = cut(string.format('coverage: %d piece%s left out (%s)', cov.out, cov.out == 1 and '' or 's',
+                                           tostring(cov.first)), 60) end
+  for i = 1, math.min(#args.fails, 8 - #fails) do fails[#fails + 1] = cut(args.fails[i], 60) end
   local f = function(b) return b and 1 or 0 end
-  st.audit = {tick = K.now().tick, snap = cut(args.snap, 40), ok = f(args.ok), fails = fails,
+  st.audit = {tick = K.now().tick, snap = cut(args.snap, 40), ok = (args.ok and not out) and 1 or 0, fails = fails,
               min_traps = math.max(0, int(args.min_traps)), bypass = f(args.bypass),
-              refuge_sep = f(args.refuge_sep), civ_sep = f(args.civ_sep), caverns = f(args.caverns)}
+              refuge_sep = f(args.refuge_sep), civ_sep = f(args.civ_sep), caverns = f(args.caverns),
+              cov = cov_text(cov)}
+  st.audit_why = nil
   dirty = true
-  K.emit('AUDIT', 'B', string.format('audit %s: %d traps min%s', args.ok and 'ok' or 'failed', st.audit.min_traps,
+  K.emit('AUDIT', 'B', string.format('audit %s: %d traps min%s', st.audit.ok == 1 and 'ok' or 'failed',
+         st.audit.min_traps,
          #fails > 0 and (', ' .. fails[1]) or ''), {ok = st.audit.ok, fails = fails, min_traps = st.audit.min_traps})
   refresh(K, 'audit')
   return true, string.format('audit stored, readiness R%d', st.lvl), {lvl = st.lvl}
@@ -582,7 +579,8 @@ function M.init(K)
   local p = K.persist.get('m.readiness')
   p = type(p) == 'table' and p or {}
   st = {v = 2, lvl = int(p.lvl) or 0, cap = int(p.cap), siege = int(p.siege), audit_req = int(p.audit_req),
-        audit_due = int(p.audit_due) or 0, audit_snap = p.audit_snap}
+        audit_due = int(p.audit_due) or 0, audit_snap = p.audit_snap,
+        audit_why = type(p.audit_why) == 'string' and p.audit_why or nil}
   if type(p.audit) == 'table' and int(p.audit.tick) then st.audit = p.audit end
   if type(p.inbox) == 'table' and int(p.inbox.cap) then st.inbox = {cap = int(p.inbox.cap), plan = int(p.inbox.plan)} end
   local u = p.unready                                          -- FR-65: the last SIEGE_UNREADY (util/cadence record)
@@ -613,7 +611,9 @@ function M.state(K)
   local r = {lvl = st.lvl or 0, worn = math.max(0, math.min(100, rt.worn or 0)), cv = math.max(0, rt.cv or 0),
              drill_age = rt.pass_tick and math.max(0, now - rt.pass_tick) or -1,
              audit = {ok = rt.audit_ok or 0, age = a and math.max(0, now - a.tick) or -1,
-                      min_traps = a and a.min_traps or 0},
+                      min_traps = a and a.min_traps or 0,
+                      -- BUG-043: why readiness' last audit request was refused; what the last audit's snapshot covered
+                      why = st.audit_why, cov = a and type(a.cov) == 'string' and a.cov ~= '' and a.cov or nil},
              fail = rt.fail,
              open = math.max(-1, rt.open or -1)}                -- FR-65: ways in without door or bridge (-1 unknown)
   if rt.ents and #rt.ents > 0 then
