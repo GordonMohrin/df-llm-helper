@@ -1,5 +1,81 @@
 # CHANGELOG dfpilot
 
+## A seal door that cannot stand becomes a constructed wall: the template checks the door rule, the runner walls a door quickfort refuses (2026-10-16; offline, live-untested)
+- **Why (Run 11, Kilrudrabed site98, y435 autumn, kernel c75b7c0):** the seal piece door 128,121,143 (project
+  c1a147087d) stayed `build_lost` although the fort had 26 boulders and 171 logs. quickfort `#build d` on that tile by
+  hand: `Unsuitable tiles for building: 1`, buildings designated 0. The tile is a revealed GrassDarkFloor2 FLOOR (no
+  plant, building, unit or item, outside=false); a door already stands on its neighbour 127,121,143. `Cw` on the same
+  tile designated at once. The runner counted the refused door as lost, placed it again (the one re-apply, then
+  `remake_max` more since economy could make a door) and blocked `build_lost`; its retries repeat the door.
+- **The door rule (read from DFHack's `internal/quickfort/build.lua`):** `d` uses `is_tile_generic_and_wall_adjacent`.
+  The tile must be generic (floor, boulder, pebbles, twig, sapling, shrub; revealed, flow <= 1, no building), and at
+  least one of its four orthogonal neighbours on the same z must have the tile shape WALL or FORTIFICATION. In the
+  snapshot legend: `#`/`S` natural wall, `C` constructed wall, `F` fortification, `T` tree trunk. A door or hatch
+  beside it (a floor under a building), a bridge, another building, open space, ramps, stairs and diagonal walls do not
+  count. A wall planned in the same stage does not count either: quickfort places the stage at once. Hatches, wall
+  grates, vertical bars and floodgates need no support. Uncertainty: quickfort reads a hidden neighbour's real tile
+  type, which we may not. Its header says it enforces the in-game rule ("doors have to be adjacent to a wall"); DF's
+  own build menu was not checked. So a hidden neighbour, or no snapshot, keeps the door, and quickfort decides.
+  `validate.py` and the as-built simulation assumed nothing here before; the simulation now applies the rule.
+- **Template and CLI (`bp/defense.py`, `cmd.seal_openings`):** `defense.door_stands(char_at, pos)` returns True (a
+  wall beside it), False (all four neighbours revealed, none a wall) or None (the snapshot cannot tell).
+  - A door piece (auto, door or hatch on a floor-like or shrub tile, with the seal's `close`) on a False tile gets the
+    new `at` token `nodoor`. Example: `128,121,143 floor nodoor`, also with `for=`. seal_pieces emits `Cw` for it, so
+    `materials` counts a wall.
+  - The `seal:piece` line reads `128,121,143 floor: door unsuitable at 128,121,143 (no wall or fortification beside
+    it): wall instead`. A `seal:note` reads `... (... on the snapshot): wall instead`.
+  - An explicit `door` gets the wall too. `close=grate`/`bars` keep their piece.
+  - `at` now stays within `AT_MAX` (200, bp.emit's string limit); the rest goes to `N more for the next seal`. Six
+    `for=` openings with `nodoor` would have run past it.
+- **Simulation (`bp/render.py`):** `as_built` reports `build d at x,y,z: no wall or fortification beside it (quickfort
+  refuses the door; a wall of the same stage is not built yet)`, so validate gives `build_tile`. Every template's
+  doors pass it (all stand in rock doorways).
+- **Runner (`door_walls`):** after a seal build chunk whose `build_unsuitable` exceeds the occupied tiles, each `d`
+  cell with nothing on its revealed tile is planned once as `Cw` on the same tile.
+  - The cell changes in `bp.<id>`, which is set again. This is the one exception to "written once"; a seal document is
+    small. `materials` changes from door to wall.
+  - The tiles go into m.runner `dw[<proj>]` (<= 8), and the chunk is applied again in the next slice. The pieces it
+    placed already count as occupied, not lost.
+  - kern.log (warn): `c1a147087d seal.build: door unsuitable at 128,121,143: wall instead (quickfort refused the door;
+    no wall or fortification beside it)`. The reason is added when the revealed neighbours show it.
+  - PROJECT_BLOCKED and PROJECT_DONE carry `walled` (`x,y,z`) and say it in the msg: `... missing Cw; door unsuitable
+    at 128,121,143: wall instead; retry 1/8 ...`, or `c1a147087d (seal) done; door unsuitable at 128,121,143: wall
+    instead`.
+  - A wall refused too ends as before (`build_lost`, missing `Cw`); the door is never tried again.
+  - A seal that an older kernel left `build_lost` with such a door (the live c1a147087d) is retried once for it, at
+    the daily check. kern.log: `c1a147087d: build_lost at seal.build, retry N/8 from seal.build (its door at
+    128,121,143 has no wall or fortification beside it: a wall if quickfort refuses the door)`; m.runner `rty` `dw`.
+  - A wall shuts the fort's own way through that tile for good (a door only in a lockdown); CUTOFF still watches the
+    walk groups.
+- Contracts: PROJECT_BLOCKED and PROJECT_DONE `walled` (schema, contract.lua comment, CONTRACTS §12 rows and appendix);
+  CONTRACTS §10 `bp.<id>` exception; seal `at` token `nodoor` (DESIGN §5 seal); RULES §7 PROJECT_BLOCKED.
+- Tests:
+  - `tests/bp/test_bp_seal_door.py` (new, all 6 fail on 6dd9f2d): the live replay (REFUGE_FAIL fix beside a door ->
+    `nodoor`, `Cw`, the piece line, validate clean); the door rule per legend char; explicit door, close, wall beside
+    it, hidden neighbour, no snapshot, shrub; the `nodoor`/`for=` round trip; the `AT_MAX` cap; the simulation rule.
+  - `tests/lua/test_runner_door.lua` (new, all 4 fail on the old runner): the live tiles (door, then `Cw`, log line,
+    persisted cell and `dw`, PROJECT_DONE `walled`, no build_lost); a chunk with a supported and an unsupported door;
+    the wall refused too (one door call, PROJECT_BLOCKED text); c1a147087d as kernel c75b7c0 left it (retried within a
+    day, walled, done) and the once rule.
+  - `tests/lua/runner_world.lua`: the fake quickfort applies the door rule; every existing suite still passes.
+- **How to use:** nothing to send.
+  - A PROJECT_DONE or PROJECT_BLOCKED with `door unsuitable at x,y,z: wall instead`: tell the player that tile is
+    walled. If citizens lose a way, CUTOFF names it.
+  - To keep a door there, the player builds a wall or pillar beside the tile by hand first.
+  - `seal at=...` placements show the `nodoor` choice in their `seal:piece`/`seal:note` lines.
+- **Live check (Run 11 site98):** after `git pull` and `dfhack-run dfllm reload`, within a game day (PEACE) kern.log
+  shows the retry line for c1a147087d, then `c1a147087d seal.build: door unsuitable at 128,121,143: wall instead
+  (quickfort refused the door; no wall or fortification beside it)`.
+  - In DF: a constructed wall is planned on 128,121,143 (buildingplan waits for boulders/logs if none are free) and
+    gets built.
+  - PROJECT_DONE: `c1a147087d (seal) done; door unsuitable at 128,121,143: wall instead`; `dfllm cmd inspect
+    '{"what":"refuge"}'` then shows Kern+ no longer open there.
+  - If the line says `quickfort refused the door` without the reason, a neighbour is hidden or a wall: read the four
+    tiles in DF.
+  - No retry line within two days: the project is not `build_lost` in PEACE, or its retries are spent (`inspect
+    persist` m.runner `rty`). Then `dfllm cmd bp.cancel '{"proj":"c1a147087d"}'` and `dfllm cmd bp.place tpl=seal
+    site=S1 at=last`. cli.log should show `seal:piece ... door unsuitable at 128,121,143 ...: wall instead`.
+
 ## The daily shaft check: an explore shaft open to a cavern is plugged in any project state, a hatch is no plug, explores stop above known cavern levels (2026-10-16; offline, live-untested)
 - **Why (Run 11, Kilrudrabed site98, y432-433, kernel a6c33a9 with the cavern plug):** CAVERN_PLUG never came for the
   explore c1a14676. It stood at `dig 98 % stalled` while its shaft 136,73 (z137 down) was open next to a cavern lake

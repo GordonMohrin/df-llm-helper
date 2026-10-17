@@ -434,8 +434,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # butcher) and opts (the options, the blockers' first)
     "DECISION_NEEDED": ("A", "any", _d("id:s", "q:s food:i block:sa opts:sa")),
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
-    # Run 11: mat = why economy cannot make a seal's missing pieces ('no material for door: no rock, no logs')
-    "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i missing:sa retry:i mat:s")),
+    # Run 11: mat = why economy cannot make a seal's missing pieces ('no material for door: no rock, no logs');
+    # walled = the seal doors quickfort refused (no wall beside them) that the runner planned as walls ('x,y,z')
+    "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i missing:sa retry:i mat:s walled:sa")),
     "YEAR_REVIEW": ("A", "kern", _d(opt="year:i")),
     "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa")),
     # BUG-031: cistern = why the nearest cistern room does not serve the hospital (no well, its well over 0/7, too far)
@@ -526,7 +527,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "READY_CHANGE": ("B", "readiness", _d(opt="from:i to:i fail:sa")),
     "POPCAP": ("B", "readiness", _d("cap:i", "why:s")),
     "AUDIT": ("B", "readiness", _d(opt="ok:f fails:sa min_traps:i")),
-    "PROJECT_DONE": ("B", "runner", _d("proj:s", "tpl:s")),
+    "PROJECT_DONE": ("B", "runner", _d("proj:s", "tpl:s walled:sa")),       # Run 11: walled as PROJECT_BLOCKED
     "PROJECT_REQUEST": ("B", "any", _d("tpl:s", "n:i why:s bars:i short:i")),
     "PHASE": ("B", "runner", _d(opt="from:s to:s")),
     "PAUSE": ("B", "arbiter", _d("on:f", "by:s ttl:i")),

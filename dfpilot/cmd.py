@@ -687,7 +687,7 @@ def _geo_try(fn, notes: list[str], label: str, *a):
         return None
 
 
-def seal_openings(save_dir: Path, at, snap: dict | None = None) -> tuple[str, list[str]]:
+def seal_openings(save_dir: Path, at, snap: dict | None = None, close: str = "auto") -> tuple[str, list[str]]:
     """The seal template's `at` with every kind filled: at = '' / 'last' / 'entrances' -> the current open ways in
     (current_openings: SEAL_LEAK, the entrance check, REFUGE_FAIL); 'audit' -> the walls the newest audit names
     (bypass, refuge on the attack path); 'all' -> both (an audit wall wins a shared tile); kinds from the newest
@@ -695,8 +695,10 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None) -> tuple[str, li
     and for at=last/all those a seal project builds now or built (unless a snapshot taken after it was done shows the
     piece gone). A shrub keeps its tile (gather first, bp.defense), a sapling, a door/hatch the route passes beside or
     another building gets the neighbour that closes the same route, an open route (SEAL_LEAK) a wall on its first tile
-    that cuts it from the map edge (bp.topo.SealGeo). At most SEAL_MAX openings; the rest wait for the next seal.
-    Returns (at, notes); raises BpError when nothing is left to close."""
+    that cuts it from the map edge (bp.topo.SealGeo). A door (with `close`: the template's default piece) on a tile
+    the snapshot shows without a wall or fortification beside it gets `nodoor`, a wall instead (Run 11: quickfort
+    refuses such a door, bp.defense.door_stands). At most SEAL_MAX openings and AT_MAX characters; the rest wait for
+    the next seal. Returns (at, notes); raises BpError when nothing is left to close."""
     dmod = load_bp("defense")
     text = str(at if at is not None else "").strip()
     key = text.lower()
@@ -730,7 +732,7 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None) -> tuple[str, li
         except ValueError as e:
             raise BpError(str(e)) from e
         entries = [{"pos": tuple(o["pos"]), "kind": o["kind"], "piece": o["piece"], "src": "at", "tick": -1,
-                    "of": o["of"], "of_kind": o["of_kind"]} for o in ops]
+                    "of": o["of"], "of_kind": o["of_kind"], "nodoor": o["nodoor"]} for o in ops]
     if routes and routes["pending"]:                       # a seal project builds them already: never twice
         notes.append("left out (a seal project builds them): " + ", ".join(
             f"{w.rsplit(' ', 2)[0]} ({pid})" for w, pid in routes["pending"].items()))
@@ -766,7 +768,7 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None) -> tuple[str, li
             continue
         label = f"{x},{y},{z} {'open route' if kind == dmod.OPEN_ROUTE else kind or '?'}"
         if dmod.piece_kind(kind):
-            keep.append({"pos": e["pos"], "kind": kind, "piece": e["piece"]})
+            keep.append({"pos": e["pos"], "kind": kind, "piece": e["piece"], "nodoor": e.get("nodoor", False)})
         elif dmod.needs_neighbour(kind) and (geo is None or geo.char(x, y, z) in (None, "?")):
             notes.append(f"{label}: left out, its tile is not on the snapshot (dfllm bp sites seal --fresh, then "
                          "again; or name the tile that closes it: at=\"x,y,z floor\")")
@@ -808,11 +810,22 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None) -> tuple[str, li
             seen.add(tuple(o["pos"]))
             uniq.append(o)
     keep = uniq
-    if len(keep) > dmod.SEAL_MAX:
-        rest = keep[dmod.SEAL_MAX:]
+    walled = []
+    for o in keep:                  # Run 11 (site98 y435): quickfort builds a door only next to a wall or fortification
+        if geo is not None and not o.get("nodoor") and dmod.door_piece(o, close) \
+                and dmod.door_stands(geo.char, o["pos"]) is False:
+            o["nodoor"] = True
+            walled.append(o)
+    keep, rest = keep[:dmod.SEAL_MAX], keep[dmod.SEAL_MAX:]
+    while len(keep) > 1 and len(dmod.format_openings(keep)) > dmod.AT_MAX:   # bp.emit takes at most 200 characters
+        rest.insert(0, keep.pop())
+    for o in walled:
+        if o in keep:
+            notes.append("%d,%d,%d %s: door unsuitable at %d,%d,%d (%s on the snapshot): wall instead"
+                         % (*(o.get("of") or o["pos"]), o.get("of_kind") or o["kind"], *o["pos"], dmod.NODOOR_WHY))
+    if rest:
         notes.append(f"{len(rest)} more for the next seal (place it again once this one is placed): "
                      + dmod.format_openings(rest[:4]))
-        keep = keep[:dmod.SEAL_MAX]
     if not keep:
         why = "; ".join(notes) or ("the last entrance check names no open way in" if key in SEAL_LAST
                                    else "the last audit names no wall" if key == "audit"
@@ -850,7 +863,8 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
     (live L1b: the fortcore shops, earlier workshops projects)."""
     params = dict(params or {})
     if tpl == "seal":                                      # absolute openings; at=last: the current open ways in
-        params["at"], SEAL_NOTES[bp_id] = seal_openings(save_dir, params.get("at"), snap)
+        params["at"], SEAL_NOTES[bp_id] = seal_openings(save_dir, params.get("at"), snap,
+                                                        params.get("close") or "auto")
     if tpl == "workshops" and "skip" not in params:
         miss = set(workshops_missing(save_dir))
         have = [n for n in _moodable() if n not in miss]
@@ -910,7 +924,8 @@ def free_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict 
                n: int = 3) -> tuple[list[dict], str, int]:
     """(the first n free sites relabelled S1.., snapshot id, ranked count): what `bp.place site=S<k>` resolves."""
     if tpl == "seal":                                      # as place(): at=last etc. become explicit openings
-        params = {**(params or {}), "at": seal_openings(save_dir, (params or {}).get("at"), snap)[0]}
+        params = {**(params or {}), "at": seal_openings(save_dir, (params or {}).get("at"), snap,
+                                                        (params or {}).get("close") or "auto")[0]}
     sites, snap_id = rank_sites(save_dir, tpl, params, snap) if snap else ranking(save_dir, tpl, params)
     occ = occupancy(save_dir)
     out = []
