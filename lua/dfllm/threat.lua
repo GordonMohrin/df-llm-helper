@@ -11,6 +11,13 @@
 -- titan at the far map edge therefore never locks the fort in SIEGE/ALERT; a visible great danger
 -- out of reach is reported once as DECISION_NEEDED (A) instead. Entry uses REACH, quiet/calm use
 -- REACH_QUIET (hysteresis), so entry, RECOVERY re-entry and quiet agree.
+-- Run 11 (site98 y439: one ELK_BIRD invader, a mount left behind at the map edge, kept ALERT for 45 days):
+--   * an invader sense lists as an animal (an = 1, k 'danger') counts by the predator rule only: inside Kern+ / past B1
+--     (zone 2) or within reflex.predator_near (config/reflex.json, 40; 0 = the danger reach rule) of a citizen outside
+--     Kern+;
+--   * the hostiles reflex lists as expired far (reflex.far_ids: a lockdown ended after hold_quiet_days without one of
+--     them coming within reflex.lockdown_near of a citizen or an entrance) count for nothing (inv, reach, calm, quiet)
+--     until one comes that close (reflex drops it from the list then), so ALERT ends with the lockdown.
 local M = {name = 'threat', every = {ticks = 25}, critical = true,
            reports = {UNDEAD_ATTACK = true, NIGHT_ATTACK_STARTS = true, MEGABEAST_ARRIVAL = true,
                       WEREBEAST_ARRIVAL = true, BEAST_AMBUSH = true, AMBUSH_AMBUSHER = true,
@@ -102,11 +109,29 @@ local function reach(e, geo)
   return best
 end
 
--- does census.h list entry e count within xy radius r?
-local function counts(e, geo, r)
+-- Run 11: tiles from a citizen outside Kern+ within which an animal invader counts (reflex.predator_near; 0 = no limit:
+-- the danger rule); nil = the danger rule
+local function animal_near(K)
+  local r = type(K.cfg.reflex) == 'table' and K.cfg.reflex or {}
+  local n = int(r.predator_near)
+  if n == nil or n < 0 or n > 400 then n = M.CIT_NEAR end
+  return n > 0 and n or nil
+end
+
+-- does census.h list entry e count within xy radius r? an = the predator rule's limit for an animal invader (or nil)
+local function counts(e, geo, r, an)
   if e.k == 'inv' then return true end
+  if e.an == 1 and an then
+    return (e.zn or 0) == 2 or (type(e.dc) == 'number' and e.dc >= 0 and e.dc <= an)
+  end
   if type(e.dc) == 'number' and e.dc >= 0 and e.dc <= M.CIT_NEAR then return true end
   return reach(e, geo) <= r
+end
+
+-- Run 11: the hostiles reflex lists as expired far ({[id] = true}), or nil
+local function far_ids(K)
+  local ok, f = K.call('reflex', 'far_ids')
+  return ok and type(f) == 'table' and next(f) ~= nil and f or nil
 end
 
 ---------------------------------------------------------------- assess
@@ -126,21 +151,28 @@ function M.assess(K)
              bd = h.bd or 0}            -- BUG-030: visible building destroyers (siege's deep defense)
   a.fresh = now - a.tick <= M.FRESH
   local geo = fort_geo(K)
-  local rel, wide, great_rel, great_wide, undead_rel, near = 0, 0, 0, 0, 0, 0
+  local an, far = animal_near(K), far_ids(K)
+  local rel, wide, great_rel, great_wide, undead_rel, near, nfar, far_inv = 0, 0, 0, 0, 0, 0, 0, 0
   for _, e in ipairs(h.list or {}) do
-    if counts(e, geo, M.REACH) then
-      rel = rel + 1
-      if e.k == 'great' then great_rel = great_rel + 1 end
-      if e.k == 'undead' then undead_rel = undead_rel + 1 end
-    end
-    if counts(e, geo, M.REACH_QUIET) then
-      wide = wide + 1
-      if e.k == 'great' then great_wide = great_wide + 1 end
-      -- visible dangers near O1 (without an O1 in the manifest every counted hostile is near)
-      if e.d_o1 == nil or e.d_o1 < 0 or e.d_o1 <= M.NEAR_O1 then near = near + 1 end
+    if far and far[e.id] and e.k ~= 'great' then
+      nfar = nfar + 1
+      if e.k == 'inv' then far_inv = far_inv + 1 end
+    else
+      if counts(e, geo, M.REACH, an) then
+        rel = rel + 1
+        if e.k == 'great' then great_rel = great_rel + 1 end
+        if e.k == 'undead' then undead_rel = undead_rel + 1 end
+      end
+      if counts(e, geo, M.REACH_QUIET, an) then
+        wide = wide + 1
+        if e.k == 'great' then great_wide = great_wide + 1 end
+        -- visible dangers near O1 (without an O1 in the manifest every counted hostile is near)
+        if e.d_o1 == nil or e.d_o1 < 0 or e.d_o1 <= M.NEAR_O1 then near = near + 1 end
+      end
     end
   end
-  a.rel, a.great_rel, a.near_dangers = rel, great_rel, near
+  a.rel, a.great_rel, a.near_dangers, a.far = rel, great_rel, near, nfar
+  a.inv = math.max(0, a.inv - far_inv)     -- Run 11: invaders whose lockdown expired far count again on approach
   local inv_armed = now < st.inv
   if great_rel > 0 then a.siege = 'great'
   elseif a.inv >= M.SIEGE_INV then a.siege = 'invaders'
@@ -161,7 +193,7 @@ function M.step(K, budget, ctx)
   for _, e in ipairs(h.list or {}) do
     if e.k == 'great' and not far_seen[e.id] then
       geo = geo or fort_geo(K)
-      if not counts(e, geo, M.REACH_QUIET) then
+      if not counts(e, geo, M.REACH_QUIET, nil) then
         far_seen[e.id] = true
         local q = string.format('great danger %d visible out of reach at %d,%d,%d: no siege; seal, watch or sortie?',
                                 e.id, e.x, e.y, e.z)

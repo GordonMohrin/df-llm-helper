@@ -1,5 +1,84 @@
 # CHANGELOG dfpilot
 
+## A lockdown expires when no invader comes near; an invader's animal is a wild danger; no ack default for a far unit (2026-10-17; offline, live-untested)
+- **Why (Run 11, Kilrudrabed site98, y439 spring d1):** the kernel stood in ALERT with an `arrival:ambush` lockdown for
+  45 days (clock 30 t/s, 6 doors forbidden, idle 68 %, 9 t/s instead of 400). The only threat: ONE invader, ELK_BIRD
+  28188 at 184,1,144 (the map edge, walk group 29 = the citizens', 100+ tiles from everybody, status `threat 1 vis`).
+- **Causes (from the code):**
+  - sense counted the mount the invaders left behind as an invader (`isInvader`), so `census.h.inv` was 1 for good;
+  - reflex's quiet clock needed `inv == 0` for `hold_quiet_days` (LOCKDOWN_END), which never came;
+  - threat counts invaders map-wide, so siege's ALERT exit (`calm`) never came either (runner builds only
+    defense/infra in ALERT, FPS cap 100);
+  - the unacked path: every INTRUDER for such a unit (again after a reload or after it was out of sight for 1,200
+    ticks) applied its lockdown default after 60 s and restarted the quiet clock.
+- **1. The lockdown expires far (reflex, `config/reflex.json` `lockdown_near`, int 0-400, default 40; 0 = off):**
+  - An approach = a visible invader within `lockdown_near` tiles (Chebyshev) of a citizen outside Kern+ (sense `dc`)
+    or of an entrance (gate.points, the lockdown's doors or the open-sky door scan, seal.entrances; the last known set).
+  - In PEACE/ALERT the quiet clock runs on with invaders in sight while every one is listed and beyond it. One closer,
+    inside Kern+, of unknown distance or beyond the 40 listed restarts it. Never in SIEGE/BREACH/RECOVERY: a siege
+    keeps its own rules.
+  - After `hold_quiet_days` (2) the lockdown ends: doors open, clock and alert follow the mode, the gates as before.
+    LOCKDOWN_END (B) gets `cause` (`far` | `quiet`), `far` (<= 3 names) and `nfar`:
+    `lockdown over (arrival:invader): no invader within 40 tiles of a citizen or an entrance for 2 days, 1 far: inv 300
+    GOBLIN at 150,30,10 (98 tiles), 1 doors opened`.
+  - The invaders it named become expired far (persisted `m.reflex.far`, <= 40, `reflex.far_ids()`):
+    - threat.assess counts them for nothing (`inv`, reach, calm, quiet; `a.far`), so ALERT ends 1,200 ticks later;
+    - the sighting skips them (no new ARRIVAL), INTRUDER skips them, the ETA leaves them out;
+    - state `alarm.far` counts them; status/brief: `N invaders far (lockdown expired; re-arm within lockdown_near)`.
+  - Re-arm: one that comes within `lockdown_near` (or inside) leaves the list at once and counts again. kern.log
+    `reflex: inv 300 at 70,20,10 came within 18 tiles of an entrance after its lockdown ended far: it counts again`;
+    the sighting raises the lockdown again with ARRIVAL (A) `invader` (text `inv 300 came within 18 tiles of an
+    entrance after its lockdown ended far`); threat counts it, so the mode goes ALERT. Dead or gone units leave the
+    list daily.
+- **2. An invader's animal is a wild danger (sense, threat):**
+  - sense reads the caste raws (cached per race/caste with LARGE_PREDATOR): CAN_LEARN and CAN_SPEAK both false (not
+    intelligent), or, when those do not read false, MOUNT/MOUNT_EXOTIC without CAN_LEARN/CAN_SPEAK true. A missing
+    flag is no evidence: the unit stays an invader. Great dangers and undead are never reclassified.
+  - Such an invader is not in `census.h.inv` (counted in `census.h.an`), is listed as k `danger` with `an = 1`, and
+    takes the non-invader walk-group rule. It never starts an arrival lockdown by itself.
+  - reflex applies the PREDATOR rules to it (roofed tile; inside Kern+ or within `predator_near`, else PREDATOR_FAR).
+  - threat counts it only inside Kern+ / past B1 or within `predator_near` (40) of a citizen outside Kern+, never by
+    the 100-tile bridge reach, so it keeps no ALERT. `vis` still counts it (it is a visible hostile).
+- **3. No ack-timeout default for a far unit (reflex `ack_step`):**
+  - An interrupt record keeps its unit (`u`). An INTRUDER/PREDATOR still unacked after `ack_timeout_s` gets no
+    default while that unit is expired far or listed beyond `lockdown_near`. kern.log: `reflex: interrupt #N INTRUDER
+    unacked for 63 s; its unit 300 is far (98 tiles from the citizens and entrances, lockdown_near 40): no default`.
+  - alarm.txt shows `far` in the status column. Such an unacked INTRUDER is no DEFCON 1.
+  - INTRUDER names a near unit first, carries `dist` and `far`; for a far one the msg ends `; far: N tiles from the
+    citizens and entrances`. It comes again at once when one comes near after an INTRUDER for far ones only; that
+    one's default applies as before.
+- Contracts: config `lockdown_near` (schema/fairplay `reflex_errors`, config/reflex.json); LOCKDOWN_END `cause far
+  nfar`, INTRUDER `dist far` (schema, contract.lua comment); state `alarm.far` (schema, contract.lua); census.h `an`
+  and list `an` (§6.2); `reflex.far_ids()` (§7); §9.18, §12 rows and the interrupt paragraph, alarm.txt `far` (§8,
+  dfpilot/alarm.py), appendix regenerated; RULES §7 INTRUDER row and §10 arrival lockdown (in place, 300 lines);
+  DESIGN §4.
+- Tests (k_mock siege world, the real sense, threat, siege, gate, reflex and arbiter):
+  - `tests/lua/test_reflex.lua`:
+    - the Run 11 replay: ELK_BIRD 28188 (no CAN_LEARN/CAN_SPEAK) at the open map edge, an ambush lockdown: no
+      INTRUDER, no ALERT, LOCKDOWN_END after hold_quiet_days (`cause` far, `animal 28188 ELK_BIRD at 184,1,10 (132
+      tiles)`), doors open, clock free; near a woodcutter on a roofed tile it is a PREDATOR (ALERT), still no arrival.
+      Old code: an `invader` ARRIVAL, INTRUDER, ALERT, the lockdown never ends.
+    - one goblin 98 tiles away: far INTRUDER, LOCKDOWN_END cause far, ALERT_END, no re-arm for 3,000 ticks, the list
+      persisted; 18 tiles from an entrance: ARRIVAL again, lockdown and ALERT. Old code: no LOCKDOWN_END.
+    - guards: a goblin within 40 tiles keeps the lockdown; `lockdown_near` 0 keeps the old rule; six invaders (SIEGE)
+      never end it far.
+    - the ack timeout: no LOCKDOWN for the far INTRUDER (alarm.txt `far`, kern.log), DEFCON 2; it comes near: a new
+      INTRUDER at once and its LOCKDOWN. Old code: LOCKDOWN `unacked:INTRUDER` for a unit 98 tiles away.
+  - `tests/lua/test_siege_sense.lua`: the raw rule (animal, goblin, mount flag alone, a mount that can learn, nothing
+    known); threat's predator rule for an animal invader and the expired-far exclusion.
+- **How to use:** nothing to send. LOCKDOWN_END `cause far` lists what is still in sight. Tell the player the fort
+  went back to work with those far away; the kernel re-arms on its own if one comes within 40 tiles. A larger margin:
+  raise `lockdown_near` in config/reflex.json (0 restores the old rule).
+- **Live check (Run 11 site98):** after `git pull` and `dfhack-run dfllm reload`:
+  - Within 1,200 ticks ALERT_END: the bird no longer counts (an animal), mode PEACE. `threat 1 vis` stays (visible).
+  - Within about 2 game days (ARM after the last trigger, then hold_quiet_days) LOCKDOWN_END `lockdown over
+    (arrival:ambush): threat 0 for 2 days, 1 far: animal 28188 ELK_BIRD at 184,1,144 (N tiles), 6 doors opened`; the
+    six doors unforbidden, clock free, timestream back (~400 t/s), idle falls as the runner builds again.
+  - If its raws can learn or speak, it stays an invader (ALERT holds, the LOCKDOWN_END names `inv 28188 ELK_BIRD`):
+    the far rule ends both all the same, ALERT_END 1,200 ticks after LOCKDOWN_END, `status` `1 invaders far`.
+  - No LOCKDOWN_END after 3 days: kern.log `came within` (it walked near an entrance or a citizen), or a new
+    ARRIVAL/INTRUDER restarted the clock; `dfllm events --type LOCKDOWN` must show no `unacked:INTRUDER` for it.
+
 ## A seal door that cannot stand becomes a constructed wall: the template checks the door rule, the runner walls a door quickfort refuses (2026-10-16; offline, live-untested)
 - **Why (Run 11, Kilrudrabed site98, y435 autumn, kernel c75b7c0):** the seal piece door 128,121,143 (project
   c1a147087d) stayed `build_lost` although the fort had 26 boulders and 171 logs. quickfort `#build d` on that tile by

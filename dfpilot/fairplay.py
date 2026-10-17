@@ -138,7 +138,7 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
         return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
     for k in doc:
         if k not in ("v", "about", "clock", "hold_quiet_days", "ack_timeout_s", "defaults", "refuge", "gate", "intake",
-                     "sortie", "predator_near", "stations"):
+                     "sortie", "predator_near", "lockdown_near", "stations"):
             errs.append(f"{name}: unknown key {k!r}")
     clock = doc.get("clock", {})
     if not isinstance(clock, dict):
@@ -153,6 +153,8 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
         errs.append(f"{name}: hold_quiet_days: int 0..30 expected")
     if "predator_near" in doc and not is_int(doc["predator_near"], 0, 400):
         errs.append(f"{name}: predator_near: int 0..400 expected")
+    if "lockdown_near" in doc and not is_int(doc["lockdown_near"], 0, 400):
+        errs.append(f"{name}: lockdown_near: int 0..400 expected")
     if "ack_timeout_s" in doc and not is_int(doc["ack_timeout_s"], 5, 3600):
         errs.append(f"{name}: ack_timeout_s: int 5..3600 expected")
     # seal's refuge knobs (refuge beds, BUG-019): beds >= ceil(citizens x bed_pct / 100); BREACH level days

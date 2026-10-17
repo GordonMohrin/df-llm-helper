@@ -3,7 +3,8 @@
 The kernel writes <save>/alarm.txt in the step an interrupt (schema.INTERRUPTS) is emitted, and on every ack or DEFCON
 change (rewritten in place):
     DEFCON <n> | mode <MODE> | unacked <k>[ (oldest <s> s)] | last <n> | ack <n> | lockdown <why (acts)|off>[ | eta ~<t> t]
-    <n>\\t<wall>\\t<tick>\\t<TYPE>\\t<acked|unacked|default>\\t<msg>        (one line per recent interrupt, oldest first)
+    <n>\\t<wall>\\t<tick>\\t<TYPE>\\t<acked|unacked|default|far>\\t<msg>    (one line per recent interrupt, oldest first;
+                                                                    far = no default: its unit is far, Run 11)
 `wait` returns at once while interrupts stand unacked, else as soon as a new one appears (alarm.txt or, as a
 fallback, an interrupt type in events.jsonl), so an LLM never sits in a long blocking call: keep --timeout short
 (default 15 s) and call it again. `ack` sends the inbox verb `ack {n?}`; an interrupt left unacked for the kernel's

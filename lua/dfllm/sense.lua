@@ -22,6 +22,8 @@
 -- LARGE_PREDATOR). census.h counts zin (zone 1), zpast (zone 2), dz and dz_o1 (the nearest dangerous one to O1); the
 -- list puts zone 2, then zone 1 hostiles first, so a wave in the killing field is never cut off by the 40 nearest.
 -- BUG-030: census.h.bd counts the visible building destroyers (raws, see raw_read), list entries carry bd = 1 for them.
+-- Run 11: an invader the raws call an animal (raw_read an) is listed as k 'danger' with an = 1 and counted in census.h.an,
+-- never in inv.
 local geom = require('dfllm.util.geom')
 
 -- every 9 ticks = every frame at full timestream (<= 9-tick skips), so scan periods are not
@@ -154,7 +156,7 @@ local function hscan_begin(K, now, armed)
   local g = st.geo or geometry(K)
   st.geo = g
   st.hs = {i = 0, seen = {}, list = {}, keys = {}, vis = 0, inv = 0, great = 0, undead = 0, inside = 0, crazed = 0,
-           zin = 0, zpast = 0, dz = 0, dz_o1 = -1, bd = 0,
+           zin = 0, zpast = 0, dz = 0, dz_o1 = -1, bd = 0, an = 0,
            near_o1 = -1, near_cit = -1, near_bridge = {}, caged = {}, units = 0, tick = now.tick,
            armed = armed and 1 or 0, geo = g, out_pos = st.out_pos or {},
            count = now.tick - (st.count_tick or -M.COUNT_EVERY) >= M.COUNT_EVERY, animals = {}}
@@ -252,25 +254,36 @@ end
 -- y421: six trolls destroyed O1, B1 and B2): bd = a building destroyer, the caste flag or the token's level
 -- [BUILDINGDESTROYER:1|2], which the caste raws keep as a number (caste_raw.misc.buildingdestroyer [? live]); both are
 -- read, a missing field reads as none
+-- Run 11 (site98 y439: one ELK_BIRD invader 28188, a mount left behind at the map edge, held the fort in ALERT and a
+-- lockdown for 45 days): an = an animal, a caste the raws say can neither learn nor speak (CAN_LEARN and CAN_SPEAK both
+-- read false; the creature description's "intelligent" [? live: DF 53 flag names, as DFHack's own scripts read them]),
+-- or, when those two do not read false, a MOUNT/MOUNT_EXOTIC caste not known to learn or speak. A missing or unreadable
+-- flag is no evidence: the invader stays an invader.
 local pred_raw = {}
 local DZ_FLAGS = {'BUILDINGDESTROYER', 'TRAPAVOID', 'FLIER'}
+local function flag(c, f)
+  local ok, v = pcall(function() return c.flags[f] end)
+  if ok then return v end
+end
 local function raw_read(race, caste)
   local r = df.creature_raw.find(race)
   local c = r ~= nil and r.caste[caste]
-  if not c then return {p = false, dz = false, bd = false} end
-  local e = {p = c.flags.LARGE_PREDATOR == true, dz = false, bd = false}
+  if not c then return {p = false, dz = false, bd = false, an = false} end
+  local e = {p = c.flags.LARGE_PREDATOR == true, dz = false, bd = false, an = false}
   for _, f in ipairs(DZ_FLAGS) do
-    local ok, v = pcall(function() return c.flags[f] end)
-    if ok and v == true then
+    if flag(c, f) == true then
       e.dz = true
       if f == 'BUILDINGDESTROYER' then e.bd = true end
     end
   end
   local ok, n = pcall(function() return c.misc.buildingdestroyer end)
   if ok and type(n) == 'number' and n > 0 then e.dz, e.bd = true, true end
+  local learn, speak = flag(c, 'CAN_LEARN'), flag(c, 'CAN_SPEAK')
+  e.an = (learn == false and speak == false)
+         or (learn ~= true and speak ~= true and (flag(c, 'MOUNT') == true or flag(c, 'MOUNT_EXOTIC') == true))
   return e
 end
-local NO_RAW = {p = false, dz = false, bd = false}
+local NO_RAW = {p = false, dz = false, bd = false, an = false}
 local function raw_flags(u)
   local race, caste = u.race, u.caste
   if race == nil then return NO_RAW end
@@ -353,6 +366,13 @@ local function consider(hs, u)
   end
   local x, y, z = U.getPosition(u)
   if not x then return 7 end
+  local great = U.isGreatDanger(u)      -- megabeasts, titans, forgotten beasts, demons (Lua API.txt:1672)
+  local rf = raw_flags(u)
+  -- Run 11 (site98 y439): an invader whose raws make it an animal (rf.an: a mount or pet the invaders left behind,
+  -- ELK_BIRD 28188 at the map edge for 45 days) counts like a wild animal: not in inv (no arrival lockdown of its own;
+  -- threat and reflex apply the predator rules), k 'danger' with an = 1, and the walk-group rule below applies to it
+  local an = inv and rf.an == true and not great and not undead
+  if an then inv = false end
   -- live L7 (Paddletribes): demons in the underworld (z1-5, a walkable group of their own) were visible from the
   -- map's edge and kept the fort in ALERT (idle 78 %, O1 up). A non-invader on another walkable group that cannot
   -- fly cannot reach anyone: not a hostile (the cavern olm rule above, for every kind)
@@ -369,11 +389,11 @@ local function consider(hs, u)
     end)
     if okg and other then return 7 end
   end
-  local great = U.isGreatDanger(u)      -- megabeasts, titans, forgotten beasts, demons (Lua API.txt:1672)
   hs.vis = hs.vis + 1
   if great then hs.great = hs.great + 1 end
   if undead then hs.undead = hs.undead + 1 end
   if inv then hs.inv = hs.inv + 1 end
+  if an then hs.an = hs.an + 1 end
   local g, d_o1, dcit = hs.geo, -1, -1
   local o = g.o1
   if o then
@@ -406,7 +426,6 @@ local function consider(hs, u)
   if zn == 2 then hs.zpast = hs.zpast + 1 elseif zn == 1 then hs.zin = hs.zin + 1 end
   -- intake waves: a hostile an intake must not let in (Gordon 2026-10-16): a great danger or a dz raw flag; BUG-030: a
   -- building destroyer (bd, also in dz) sends the siege into its deep defense
-  local rf = raw_flags(u)
   local dz = (great or rf.dz) and 1 or 0
   if dz == 1 then
     hs.dz = hs.dz + 1
@@ -416,6 +435,7 @@ local function consider(hs, u)
   local entry = {id = id, x = x, y = y, z = z, d_o1 = d_o1, dc = dcit, zn = zn, dz = dz,
                  k = great and 'great' or (undead and 'undead') or (inv and 'inv') or 'danger'}
   if rf.bd then entry.bd, hs.bd = 1, hs.bd + 1 end
+  if an then entry.an = 1 end
   list[#list + 1] = entry
   -- integer sort key: the zone (past B1, then the intake area), then distance (O1, else nearest outside citizen),
   -- then scan order
@@ -455,7 +475,7 @@ local function hscan_finish(K)
   K.census.h = {tick = hs.tick, vis = hs.vis, inv = hs.inv, great = hs.great, undead = hs.undead, inside = hs.inside,
                 near_o1 = hs.near_o1, near_cit = hs.near_cit, near_bridge = hs.near_bridge, list = list,
                 armed = hs.armed, crazed = hs.crazed, friends = hs.friends, zin = hs.zin, zpast = hs.zpast,
-                dz = hs.dz, dz_o1 = hs.dz_o1, bd = hs.bd}
+                dz = hs.dz, dz_o1 = hs.dz_o1, bd = hs.bd, an = hs.an}
 end
 
 ---------------------------------------------------------------- module
