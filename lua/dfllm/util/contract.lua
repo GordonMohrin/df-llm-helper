@@ -63,6 +63,8 @@ C.EVENTS = {
   GHOSTS = {cls = 'A', by = 'care'}, HOSPITAL_DRY = {cls = 'A', by = 'water'}, MOOD_RISK = {cls = 'A', by = 'care'},
   -- BUG-034: the zones of a hospital without accepted water were removed while a patient was over water.patient_thirst
   HOSPITAL_REMOVED = {cls = 'A', by = 'water'},
+  -- BUG-036: in a fight, patients lie outside the burrow the civ alert confines to (once per fight; they cannot walk)
+  PATIENTS_OUT = {cls = 'B', by = 'water'},
   -- A since Run 9 (an army walked in while these were digest-only): wake at once
   SIEGE_START = {cls = 'A', by = 'siege'}, INVASION = {cls = 'A', by = 'threat'},
   -- A, reflex (FR-36/49/51-53): arrival announcements and the interrupt channel (C.INTERRUPTS)
@@ -112,7 +114,8 @@ C.EVENTS = {
   LOCKDOWN_END = {cls = 'B', by = 'reflex'},
   PREDATOR_FAR = {cls = 'B', by = 'reflex'},
   -- Run 11 (siege 8): the lockdown's recall of the citizens outside Kern+ (d.why done | late | end; n, left, ticks,
-  -- units still out, called, burrow, eta); a switch of the civ alert's burrow during a fight (d.from, to, why, mode)
+  -- units still out, called, burrow, eta; BUG-035: why stuck, reasons, stuck, pull, nnew, newu); a switch of the civ
+  -- alert's burrow during a fight (d.from, to, why, mode)
   RECALL = {cls = 'B', by = 'reflex'}, REFUGE_SWITCH = {cls = 'B', by = 'seal'},
   MOOD_START = {cls = 'B', by = 'care'}, MOOD_NEED = {cls = 'B', by = 'care'},
   MOOD_END = {cls = 'B', by = 'care'}, CARAVAN = {cls = 'B', by = 'trade'},
@@ -353,7 +356,9 @@ C.STATE_SPEC = obj({
   trade = obj({caravan = FLAG, ratio = NAT, done = NAT}),
   clock = obj({cap = NAT, orig = NAT, ts = int(-1, 1000), held = FLAG, why = str(24)}),
   alarm = obj({defcon = int(1, 5), unacked = NAT, last = NAT, ack = NAT, lock = FLAG, why = str(24)},
-              {eta = int(-1), doors = NAT, dwait = NAT, dout = NAT, dref = NAT, far = NAT}),
+              {eta = int(-1), doors = NAT, dwait = NAT, dout = NAT, dref = NAT, far = NAT,
+               -- BUG-035: the open recall: called, still out of rto, left since, cannot come
+               rn = NAT, rleft = NAT, rnew = NAT, rstuck = NAT, rto = str(24)}),
   lever = obj({lat_s = int(-1), lat_t = int(-1), pend = NAT, wait_s = NAT}),
   alert = obj({want = str(24), burrow = str(24), tiles = NAT, inside = NAT, ok = FLAG},
               {why = str(40), core_d = NAT, core_f = NAT,           -- BUG-028: drink/food days inside the core
@@ -371,7 +376,8 @@ C.STATE_SPEC = obj({
   -- water (BUG-034): patients, their max thirst, the hospital served (flag) and its zones, the refuge's well, free
   -- buckets, the accepted sources (a well over water, a Water Source zone on water >= 4/7) nearest first
   water = obj({patients = NAT, thirst_max = NAT, hosp_ok = FLAG, refuge_ok = FLAG, buckets_free = NAT, hosp = NAT,
-               src = arr({t = 'tup', items = {NAT, NAT, NAT}}, 0, 8)}),
+               src = arr({t = 'tup', items = {NAT, NAT, NAT}}, 0, 8)},
+              {hosp_out = NAT}),           -- BUG-036: hospital zones with tiles outside Kern+ and the refuge
 })
 
 -- string formats (§1.1); explicit byte ranges, so LC_CTYPE cannot change them

@@ -959,13 +959,27 @@ def test_siege_unready_wakes_with_its_first_move():
 
 def test_siege_unready_refuge_dry_names_the_drink():
     """Run 11 (siege 8: Tiefe+ had no drink): readiness R0 refuge_dry; the wake line says what to build."""
-    e = A(9200, "SIEGE_UNREADY", "siege unready (R0: refuge_dry); Tiefe+ has no drink (drink 0<52, no well): build a "
+    e = A(9200, "SIEGE_UNREADY", "siege unready (R0: refuge_dry); Tiefe+ has no drink (drink 0<52, no well in Tiefe+): build a "
           "well/cistern or stock drink there; 0 ways in, all with a door or bridge; traps 35",
-          {"fails": ["refuge_dry"], "rdry": "Tiefe+ has no drink (drink 0<52, no well): build a well/cistern or stock "
+          {"fails": ["refuge_dry"], "rdry": "Tiefe+ has no drink (drink 0<52, no well in Tiefe+): build a well/cistern or stock "
                                             "drink there", "open": 0, "routes": 0})
     assert schema.validate_event_d("SIEGE_UNREADY", e["d"]) == []
     line = wake.wake_line({"SIEGE_UNREADY": {"c": 1, "n0": 9200, "e": e}}, None)
     assert "Tiefe+ has no drink" in line and "next: the refuge has no drink: next plan a well/cistern there" in line
+    assert est_tokens(line) <= wake.WAKE_TOKENS
+
+
+def test_siege_unready_hospital_out_names_the_move():
+    """BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds outside the refuge): the wake line of a
+    SIEGE_UNREADY with hospital_out says to plan the hospital inside Tiefe+ next to water."""
+    e = A(9300, "SIEGE_UNREADY", "siege unready (R0: hospital_out); the hospital lies outside Kern+/Tiefe+ (1 of 2 "
+          "zones; zone 34 at 115,77,144): its patients cannot walk to the refuge; move it into Tiefe+ next to accepted "
+          "water", {"fails": ["hospital_out"], "hout": "the hospital lies outside Kern+/Tiefe+ (1 of 2 zones; zone 34 at "
+                    "115,77,144): its patients cannot walk to the refuge; move it into Tiefe+ next to accepted water"})
+    assert schema.validate_event_d("SIEGE_UNREADY", e["d"]) == []
+    line = wake.wake_line({"SIEGE_UNREADY": {"c": 1, "n0": 9300, "e": e}}, None)
+    assert "next: the hospital lies outside the core: plan it inside Tiefe+ next to accepted water (bp sites " \
+           "hospital; a cistern there first), then remove the old zones" in line, line
     assert est_tokens(line) <= wake.WAKE_TOKENS
 
 

@@ -15,7 +15,8 @@
 -- (bp.topo.audit ok=false), bypass, refuge_sep, civ_sep, caverns (its flags; Run 11: also an explore shaft open to a
 -- cavern until its plug wall stands, runner.cavern_open), no_kern, no_refuge (burrows), refuge_dry (Run 11, siege 8:
 -- the refuge holds no drink by seal's audit, seal.refuge_drink: drink < citizens and no well, or its wells are dry by
--- water's state refuge_ok 0; SIEGE_UNREADY says what to build),
+-- water's state refuge_ok 0; SIEGE_UNREADY says what to build), hospital_out (BUG-036, Run 11 siege 9: a hospital
+-- zone with tiles outside Kern+ and the refuge by water's state hosp_out; its lying patients cannot walk to the refuge),
 -- no_outer, no_inner (no manifest bridge of that role), bridge:<B> (gate does not know it), levers:<B> (< 2 linked),
 -- lost:<B> (BUG-030 rebuild policy: a bridge the perimeter keeper no longer rebuilds after perimeter.stop_after losses
 -- to building destroyers, seal.lost_gates; it stands for bridge:<B> and levers:<B>: the fix is the player's answer to
@@ -288,11 +289,28 @@ local function evaluate(K, why)
       local wells_dry = (int(rd.wells) or 0) > 0 and type(wv) == 'table' and wv.refuge_ok == 0
       if (int(rd.drink) or 0) < (int(rd.need) or 0) and ((int(rd.wells) or 0) == 0 or wells_dry) then
         f1[#f1 + 1] = 'refuge_dry'
+        -- BUG-035 (Run 11: 13 wells, 1 wet, none in Tiefe+): whether the refuge has no well or only dry ones
+        local nw = int(rd.wells) or 0
         rt.rdry = string.format('%s has no drink (drink %d<%d, %s): build a well/cistern or stock drink there',
                                 tostring(rd.name), int(rd.drink) or 0, int(rd.need) or 0,
-                                wells_dry and 'its well is dry' or 'no well')
+                                nw == 0 and ('no well in ' .. tostring(rd.name))
+                                or (nw == 1 and 'its 1 well is dry' or string.format('its %d wells are dry', nw)))
       end
     end
+  end
+  -- BUG-036 (Run 11 siege 9: two cave dragons killed 7 patients in their hospital beds): a hospital outside Kern+ and
+  -- the refuge (water's state hosp_out; no water state: no blocker, fail-open). Its patients cannot walk to the refuge
+  rt.hout = nil
+  local wv = K.view().water
+  if type(wv) == 'table' and (int(wv.hosp_out) or 0) > 0 then
+    f1[#f1 + 1] = 'hospital_out'
+    local okh, ho = K.call('water', 'hospital_out')
+    local z = okh and type(ho) == 'table' and type(ho.zones) == 'table' and ho.zones[1] or nil
+    rt.hout = string.format('the hospital lies outside %s/%s (%d of %d zones%s): its patients cannot walk to the refuge; '
+                            .. 'move it into %s next to accepted water', kern, refuge, int(wv.hosp_out) or 0,
+                            okh and type(ho) == 'table' and int(ho.total) or (int(wv.hosp) or 0),
+                            z and string.format('; zone %d at %d,%d,%d', int(z.id) or -1, int(z.x) or -1, int(z.y) or -1,
+                                                int(z.z) or -1) or '', refuge)
   end
   if not rt.lev or now - rt.lev.tick >= M.LEVERS_EVERY then rt.lev = check_levers(K, man) end
   local okl, lost = K.call('seal', 'lost_gates')             -- BUG-030 rebuild policy: held bridges
@@ -403,7 +421,7 @@ local function route_fix(route)
   return route .. ' (no wall tile: inspect entrances)'
 end
 
-local function unready_msg(fails, routes, open, ents, traps, route, rdry)
+local function unready_msg(fails, routes, open, ents, traps, route, rdry, hout)
   local ent
   if routes < 0 then ent = 'entrances not checked yet'
   elseif open == 0 then ent = string.format('%d way%s in, all with a door or bridge', routes, routes == 1 and '' or 's')
@@ -417,6 +435,7 @@ local function unready_msg(fails, routes, open, ents, traps, route, rdry)
   local fix = route_fix(route)
   if fix then head = head .. fix .. '; ' end
   if rdry then head = head .. rdry .. '; ' end                 -- Run 11: the refuge without drink
+  if hout then head = head .. hout .. '; ' end                 -- BUG-036: the hospital outside Kern+/the refuge
   local tail = '; traps ' .. (traps >= 0 and tostring(traps) or '? (no audit)')
   if #head + #ent + #tail > 200 and open > 0 then              -- the list stands in d.ents: keep the traps visible
     ent = string.format('%d of %d ways in without door or bridge', open, routes)
@@ -445,9 +464,9 @@ local function unready(K)
     afails[i] = cut(a.fails[i], 60)
   end
   local routes, open = rt.routes or -1, rt.open or -1
-  K.emit('SIEGE_UNREADY', 'A', unready_msg(fails, routes, open, ents, traps, rt.route, rt.rdry),
+  K.emit('SIEGE_UNREADY', 'A', unready_msg(fails, routes, open, ents, traps, rt.route, rt.rdry, rt.hout),
          {fails = fails, afails = afails, routes = routes, open = open, ents = ents, traps = traps,
-          age = a and math.max(0, now.tick - a.tick) or -1, rdry = rt.rdry})
+          age = a and math.max(0, now.tick - a.tick) or -1, rdry = rt.rdry, hout = rt.hout})
   st.unready, dirty = CAD.mark(now, ents, fails), true
 end
 
@@ -461,6 +480,8 @@ end
 
 ---------------------------------------------------------------- public API (CONTRACTS §7)
 function M.level(K) return st.lvl or 0 end
+-- public (BUG-035): the refuge_dry text of the last evaluation (nil while the refuge has drink or a wet well)
+function M.refuge_dry(K) return rt.rdry end
 function M.cap(K) return st.cap or rt.gate_cap or M.CAPS[0] end
 
 ---------------------------------------------------------------- verbs

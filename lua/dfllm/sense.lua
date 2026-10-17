@@ -24,6 +24,9 @@
 -- BUG-030: census.h.bd counts the visible building destroyers (raws, see raw_read), list entries carry bd = 1 for them.
 -- Run 11: an invader the raws call an animal (raw_read an) is listed as k 'danger' with an = 1 and counted in census.h.an,
 -- never in inv.
+-- BUG-035 (Run 11 siege 9: 'recall: 9 of 5 still outside' while the alert moved the citizens from Kern+ to Tiefe+):
+-- while reflex's recall runs it names the burrows the sounding civ alert confines to (recount); every citizen scan then
+-- also counts the sane non-soldier citizens on none of their tiles: census.u.away, away_ids (<= AWAY_MAX), away_to.
 local geom = require('dfllm.util.geom')
 
 -- every 9 ticks = every frame at full timestream (<= 9-tick skips), so scan periods are not
@@ -33,6 +36,8 @@ local M = {name = 'sense', every = {ticks = 9}, critical = true}
 M.SLICE_WORK = 600     -- hostile-scan work per slice: ~600 ordinary units or ~60 hostiles ('more' for the rest)
 M.LIST_MAX = 40        -- census.h.list: nearest hostiles
 M.OUT_MAX = 20         -- census.u.outside_ids
+M.AWAY_MAX = 40        -- census.u.away_ids (BUG-035: the recall's start set and the citizens who left since)
+M.AWAY_NAMES = 4       -- burrows a recall may name
 M.COUNT_EVERY = 1000   -- ticks between visible-unit counts (perf.csv `units`) and the animal census (census.a)
 M.ANIMAL_MAX = 120     -- census.a.list bound
 M.FRIEND_MAX = 40      -- census.h.friends bound (BUG-027)
@@ -101,6 +106,13 @@ local function scan_citizens(K, now)
   st.geo = g
   local kb = B.findByName(g.kern)
   local rb = B.findByName(g.refuge)
+  -- BUG-035: the recall's burrows (reflex.recall via recount), resolved per scan (never keep a DF pointer)
+  local awb
+  for _, n in ipairs(st.aw_to or {}) do
+    local b = B.findByName(n)
+    if b then awb = awb or {}; awb[#awb + 1] = b end
+  end
+  local away, aw = 0, {}
   -- include_insane (API.txt:1696); the sane ones are exactly getCitizens() (isCitizen/isResident
   -- default to sane only, API.txt:1464-1470). Insane ones only count on bridge footprints.
   local all = U.getCitizens(false, true)
@@ -134,6 +146,13 @@ local function scan_citizens(K, now)
         out[#out + 1] = id
         out_pos[#out_pos + 1] = {x = x, y = y, z = z}
       end
+      if awb and sane and not soldier then
+        local inb = false
+        for _, b in ipairs(awb) do
+          if B.isAssignedTile(b, P) then inb = true; break end
+        end
+        if not inb then away = away + 1; aw[#aw + 1] = id end
+      end
     end
   end
   table.sort(ids)
@@ -148,6 +167,13 @@ local function scan_citizens(K, now)
                 ids = ids, soldier_ids = sids, outside = kb and outside or -1, outside_ids = out_ids,
                 on_bridge = on_bridge, stressed = stressed, caged = st.caged or {}, units = st.units or -1,
                 insane_ids = insane}
+  if awb then
+    table.sort(aw)
+    local l, to = {}, {}
+    for i = 1, math.min(#aw, M.AWAY_MAX) do l[i] = aw[i] end
+    for i, n in ipairs(st.aw_to) do to[i] = n end
+    K.census.u.away, K.census.u.away_ids, K.census.u.away_to = away, l, to
+  end
   st.pub = {pop = {cit = cit, adults = adults, soldiers = soldiers}}
 end
 
@@ -517,5 +543,18 @@ M.on = {
 }
 
 function M.state(K) return st.pub or {} end
+
+-- public (BUG-035, reflex's recall): the burrows the recall measures arrival in (the sounding civ alert's confining
+-- burrows, <= AWAY_NAMES), or nil to stop; the citizens are counted again at once (census.u away, away_ids, away_to)
+-- and on every later citizen scan. Returns census.u
+function M.recount(K, names)
+  local l = {}
+  for _, n in ipairs(type(names) == 'table' and names or {}) do
+    if type(n) == 'string' and #l < M.AWAY_NAMES then l[#l + 1] = n end
+  end
+  st.aw_to = #l > 0 and l or nil
+  scan_citizens(K, K.now())
+  return K.census.u
+end
 
 return M

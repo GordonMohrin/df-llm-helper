@@ -360,6 +360,104 @@ T.test('refuge: a wet well on a Tiefe+ tile', function()
   T.eq(M2.kpi(W2.K).refuge_ok, 0)
 end)
 
+T.test('BUG-035 (Run 11: "refuge dry, 1 wet sources (13 wells)"): the summary says how many wells lie in Tiefe+ and ' ..
+       'how many of those are wet', function()
+  local function line(W)
+    for _, l in ipairs(W.logs) do if tostring(l.msg):find('water: ', 1, true) then return l.msg end end
+    return ''
+  end
+  -- three wells: one dry in Tiefe+, a wet one and a dry one outside it
+  local W, M = world{tiles = {['20,20,1'] = 'w'}, setup = function(W)
+    well(W, 45, 45, 2); well(W, 20, 20, 2); well(W, 70, 70, 2)
+  end}
+  day(W)
+  local k = M.kpi(W.K)
+  T.eq({k.refuge_ok, k.wells, k.rwells, k.rwet}, {0, 3, 1, 0})
+  T.ok(line(W):find('refuge dry (3 wells, 1 in Tiefe+, 0 of them wet), 1 wet sources', 1, true), line(W))
+  -- none in Tiefe+
+  local W2, M2 = world{tiles = {['20,20,1'] = 'w'}, setup = function(W) well(W, 20, 20, 2) end}
+  day(W2)
+  T.eq({M2.kpi(W2.K).rwells, M2.kpi(W2.K).rwet}, {0, 0})
+  T.ok(line(W2):find('refuge dry (1 well, 0 in Tiefe+), 1 wet sources', 1, true), line(W2))
+  -- its well is wet
+  local W3, M3 = world{tiles = {['45,45,1'] = 'w'}, setup = function(W) well(W, 45, 45, 2) end}
+  day(W3)
+  T.ok(line(W3):find('refuge ok (1 well, 1 in Tiefe+, 1 of them wet), 1 wet sources', 1, true), line(W3))
+end)
+
+T.test('BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds by cave dragons): a hospital zone on tiles ' ..
+       'outside Kern+ and Tiefe+ counts in hosp_out (kpi, state), water.hospital_out names it; inside Kern+ or in ' ..
+       'Tiefe+ it does not', function()
+  local W, M = world{setup = function(W)
+    W.burrow('Kern+', {0, 0, 0, 30, 30, 20})              -- the core: x0-30 y0-30
+    F.hospital(W, {10, 10, 14, 14, 5})                     -- in Kern+
+    F.hospital(W, {42, 42, 44, 44, 2})                     -- in Tiefe+
+    F.hospital(W, {70, 70, 74, 72, 5})                     -- outside both
+    F.hospital(W, {28, 20, 33, 22, 5})                     -- half in Kern+: 9 of its 18 tiles outside
+  end}
+  day(W)
+  local k = M.kpi(W.K)
+  T.eq({k.hosp, k.hosp_out}, {4, 2})
+  T.eq(W.state().water.hosp_out, 2, 'the state carries it (readiness, plan check)')
+  local ho = M.hospital_out(W.K)
+  T.eq({ho.n, ho.total, #ho.zones}, {2, 4, 2})
+  T.eq({ho.zones[1].x, ho.zones[1].y, ho.zones[1].z, ho.zones[1].tiles, ho.zones[1].of}, {72, 71, 5, 15, 15})
+  T.eq({ho.zones[2].tiles, ho.zones[2].of}, {9, 18})
+  T.eq({ho.kern, ho.refuge}, {'Kern+', 'Tiefe+'})
+  -- all inside: none
+  local W2, M2 = world{setup = function(W) F.hospital(W, {10, 10, 14, 14, 5}) end}
+  day(W2)
+  T.eq({M2.kpi(W2.K).hosp_out, M2.hospital_out(W2.K).n}, {0, 0})
+  -- a big zone (30x30, 900 tiles) is sampled evenly: 100 tiles looked at
+  local W3, M3 = world{setup = function(W)
+    W.burrow('Kern+', {0, 0, 0, 30, 30, 20})
+    F.hospital(W, {20, 0, 49, 29, 5})
+  end}
+  day(W3)
+  local z = M3.hospital_out(W3.K).zones[1]
+  T.eq({z.of, z.tiles}, {100, 60})          -- x 20,23,...,47: 6 of 10 columns beyond x 30
+end)
+
+T.test('BUG-036: in a fight (SIEGE/BREACH) the patients outside the burrow the alert confines to are reported once ' ..
+       'per fight (PATIENTS_OUT, B): they cannot walk there, only a rescue moves them', function()
+  local W, M = world{patients = {{id = 2, thirst = 9000, rest = true, pos = {72, 71, 5}},
+                                 {id = 3, thirst = 9000, rest = true, pos = {43, 43, 2}}},
+                     setup = function(W)
+                       W.burrow('Kern+', {0, 0, 0, 30, 30, 20})
+                       F.hospital(W, {70, 70, 74, 72, 5})
+                       F.hospital(W, {42, 42, 44, 44, 2})
+                       W.load({name = 'siege', every = {ticks = 100000},
+                               alert_names = function() return W.alert_names or {} end})
+                     end}
+  day(W)
+  T.eq(#W.find_events('PATIENTS_OUT'), 0, 'PEACE: nothing')
+  W.alert_names = {'Tiefe+'}
+  W.set_mode('BREACH')
+  day(W)
+  local po = W.find_events('PATIENTS_OUT')
+  T.eq(#po, 1)
+  T.eq(po[1].cls, 'B')
+  T.eq({po[1].d.n, po[1].d.patients, po[1].d.burrow, po[1].d.units, po[1].d.mode, po[1].d.hosp_out},
+       {1, 2, 'Tiefe+', {2}, 'BREACH', 1})
+  T.ok(po[1].msg:find('BREACH: 1 of 2 patients lie outside the alert burrow Tiefe+ (2 at 72,71,5)', 1, true), po[1].msg)
+  T.ok(po[1].msg:find('only a rescue moves them', 1, true), po[1].msg)
+  day(W, 2)
+  T.eq(#W.find_events('PATIENTS_OUT'), 1, 'once per fight')
+  W.set_mode('PEACE')
+  day(W)
+  W.set_mode('SIEGE')
+  day(W)
+  T.eq(#W.find_events('PATIENTS_OUT'), 2, 'the next fight again')
+  -- the alert silent: measured against Kern+ and Tiefe+
+  W.alert_names = {}
+  W.set_mode('PEACE')
+  day(W)
+  W.set_mode('SIEGE')
+  day(W)
+  local last = W.find_events('PATIENTS_OUT')
+  T.eq(last[#last].d.burrow, 'Kern+/Tiefe+')
+end)
+
 T.test('cistern flood: water on the well room floor wakes the LLM every 2 days; one wet tile once is a poured bucket', function()
   local man = {v = 2, burrows = {['Kern+'] = {role = 'kern'}}, zones = {Z4 = {{0, 0, 0, 99, 99, 20}}},
                rooms = {{id = 'cistern50_50_2r0', tpl = 'cistern', use = 'utility', bbox = {49, 52, 2, 51, 54, 2},

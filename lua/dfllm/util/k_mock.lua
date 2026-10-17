@@ -317,7 +317,9 @@ function M.new(opts)
     local p = m.pos or {0, 0, 0}
     m.id, m.pos, m.x, m.y, m.z = id, nil, p[1] or p.x, p[2] or p.y, p[3] or p.z
     local u = {id = id, pos = view(m, {x = 'x', y = 'y', z = 'z'}),
-               flags1 = view(m, {caged = 'caged', inactive = 'offmap'}), flags2 = view(m, {killed = 'dead'}),
+               -- BUG-035: on_ground (spec lying), rider (spec carried: a baby carried, a snatched child), chained
+               flags1 = view(m, {caged = 'caged', inactive = 'offmap', on_ground = 'lying', rider = 'carried',
+                                 chained = 'chained'}), flags2 = view(m, {killed = 'dead'}),
                military = {squad_id = m.squad or -1, squad_position = -1}, civ_id = m.civ_id or -1,
                inventory = vec{}, status = {}, _m = m}
     units_by_id[id] = u

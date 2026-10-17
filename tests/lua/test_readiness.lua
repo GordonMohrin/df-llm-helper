@@ -490,10 +490,11 @@ T.test('Run 11 (siege 8: Tiefe+ had no drink): a refuge without drink is the R0 
   day(W, 2)
   local u = unready(W)
   T.eq(#u, 1)
+  -- BUG-035 (Run 11: 13 wells, none in Tiefe+): the text says the refuge has no well of its own
   T.eq({u[1].d.fails, u[1].d.rdry}, {{'refuge_dry'},
-       'Tiefe+ has no drink (drink 0<50, no well): build a well/cistern or stock drink there'})
-  T.ok(u[1].msg:find('siege unready (R0: refuge_dry); Tiefe+ has no drink (drink 0<50, no well): build a well/cistern ' ..
-       'or stock drink there; 0 ways in, all with a door or bridge; traps 35', 1, true), u[1].msg)
+       'Tiefe+ has no drink (drink 0<50, no well in Tiefe+): build a well/cistern or stock drink there'})
+  T.ok(u[1].msg:find('siege unready (R0: refuge_dry); Tiefe+ has no drink (drink 0<50, no well in Tiefe+): build a ' ..
+       'well/cistern or stock drink there; 0 ways in, all with a door or bridge; traps 35', 1, true), u[1].msg)
   -- a well: counts, unless water's state says the refuge has no wet well
   sf.rd = {name = 'Tiefe+', exists = true, drink = 0, need = 50, wells = 1, wet = true}
   day(W)
@@ -503,6 +504,12 @@ T.test('Run 11 (siege 8: Tiefe+ had no drink): a refuge without drink is the R0 
   day(W)
   T.eq({lvl(W), ready(W).fail}, {0, {'refuge_dry'}})
   T.eq(#unready(W) >= 1 and unready(W)[#unready(W)].d.rdry ~= nil, true)
+  local R = W.mods.readiness.M
+  local function rdry() return R.refuge_dry and tostring(R.refuge_dry(W.K)) or 'no readiness.refuge_dry' end
+  T.ok(rdry():find('Tiefe+ has no drink (drink 0<50, its 1 well is dry)', 1, true), rdry())
+  sf.rd = {name = 'Tiefe+', exists = true, drink = 0, need = 50, wells = 2, wet = true}
+  day(W)
+  T.ok(rdry():find('Tiefe+ has no drink (drink 0<50, its 2 wells are dry)', 1, true), rdry())
   wf.ok = 1
   W.state()                                       -- the state readiness reads (K.view)
   day(W)
@@ -516,6 +523,42 @@ T.test('Run 11 (siege 8: Tiefe+ had no drink): a refuge without drink is the R0 
   sf.rd = nil
   day(W)
   T.eq(lvl(W), 1)
+end)
+
+T.test('BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds outside the refuge): a hospital outside ' ..
+       'Kern+ and Tiefe+ is the R0 blocker hospital_out; SIEGE_UNREADY names it and the fix; none outside or no water ' ..
+       'state: no blocker', function()
+  local sf = seal_fake{tick = 1, sealed = 1, routes = 0, doors = {}, open = {}}
+  local wf = {name = 'water', every = {ticks = 1200}}
+  function wf.state(K)
+    if wf.out == nil then return {} end
+    return {water = {patients = 0, thirst_max = 0, hosp_ok = 1, refuge_ok = 1, buckets_free = 0, hosp = 2, src = {},
+                     hosp_out = wf.out}}
+  end
+  function wf.hospital_out(K)
+    return {n = wf.out or 0, total = 2, kern = 'Kern+', refuge = 'Tiefe+',
+            zones = {{id = 34, loc = 6, x = 115, y = 77, z = 144, tiles = 15, of = 15}}}
+  end
+  local W = world{seal = sf, extra = {wf}}
+  day(W)
+  audit(W)
+  T.eq(lvl(W), 1, 'no water state: no blocker (fail-open)')
+  wf.out = 1
+  W.state()
+  day(W)
+  T.eq({lvl(W), ready(W).fail}, {0, {'hospital_out'}}, 'old code: R1')
+  day(W, 2)
+  local u = unready(W)
+  T.eq(#u, 1)
+  local want = 'the hospital lies outside Kern+/Tiefe+ (1 of 2 zones; zone 34 at 115,77,144): its patients cannot ' ..
+               'walk to the refuge; move it into Tiefe+ next to accepted water'
+  T.ok(tostring(u[1].d.hout):find(want, 1, true), tostring(u[1].d.hout))
+  T.ok(u[1].msg:find('siege unready (R0: hospital_out); ' .. want, 1, true), u[1].msg)
+  T.ok(#u[1].msg <= 200)
+  wf.out = 0
+  W.state()
+  day(W)
+  T.eq(lvl(W), 1, 'moved inside: the blocker goes')
 end)
 
 T.test('Run 10: the last audit names a bypass with its wall: R0, SIEGE_UNREADY and ready.route name it and the fix ' ..

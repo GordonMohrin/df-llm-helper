@@ -141,6 +141,9 @@ M.CFG = {
   -- many times by building destroyers since the player's last answer is not rebuilt automatically any more
   -- (config/reflex.json perimeter.stop_after, 0 = always rebuilt); the bridge queue is looked at daily in quiet PEACE
   stop_after = 2, gates_every = DAY, gq_max = 16, gq_keep = 60 * DAY,
+  -- BUG-035 (Run 11 siege 9: two citizens stood idle outside the alert burrow for 4,800 ticks): the recall's path check
+  -- visits at most rpath_max tiles per citizen and crosses at most rpath_doors forbidden doors; ids per call
+  rpath_max = 6000, rpath_doors = 2, rpath_ids = 8,
 }
 local CFG = M.CFG
 
@@ -489,7 +492,7 @@ end
 
 ---------------------------------------------------------------- scheduling
 -- priority among urgent jobs, then among background ones
-local ORDER = {'perim', 'gates', 'seal', 'split', 'quick', 'audit', 'items', 'scan', 'paint', 'edges'}
+local ORDER = {'perim', 'gates', 'seal', 'split', 'rpath', 'quick', 'audit', 'items', 'scan', 'paint', 'edges'}
 
 -- one pending run per job: the earliest tick and the strongest reason (an event beats 'periodic'/'retire', a
 -- post-siege diff beats everything), so no request is lost
@@ -3153,16 +3156,19 @@ end
 -- each door in `ids`: on a revealed open-sky tile of the door's walk group, on the porch of an opening the door closes
 -- (the last entrance check), or in the doorway. A door is forbidden only once nobody is left there, so nobody is
 -- locked out with the army. Returns {[id] = n} and the number of distinct citizens counted; citizens by census id.
-function M.door_outside(K, ids)
+-- BUG-035: `skip` = {[unit id] = true}, the citizens reflex's recall found unable to come (lying, caged, held at a
+-- lever, no way in): they hold no door.
+function M.door_outside(K, ids, skip)
   local s = mem.seal
   local cu = K.census.u
   local sold = {}
   for _, id in ipairs(type(cu) == 'table' and type(cu.soldier_ids) == 'table' and cu.soldier_ids or {}) do
     sold[id] = true
   end
+  skip = type(skip) == 'table' and skip or {}
   local cits = {}
   for _, c in ipairs(citizens(K)) do
-    if not sold[c.id] then
+    if not sold[c.id] and not skip[c.id] then
       local des = rev(c.x, c.y, c.z)
       local k = key3(c.x, c.y, c.z)
       cits[#cits + 1] = {id = c.id, g = c.g, k = k, out = des and des.outside == true,
@@ -3613,6 +3619,132 @@ function M.split(K, list)
   return {parts = parts, edges = r.edges, cut = cut, t = r.t}
 end
 
+---------------------------------------------------------------- BUG-035: the recall's path check
+-- Run 11 siege 9 (two citizens, unhurt, on the citizens' only walk group, stood idle at the core's north edge for 4,800
+-- ticks while the civ alert called them; walk groups ignore a forbidden door, so 'same group' proves no way): from a
+-- citizen's tile over revealed walkable tiles of his walk group (DF moves: 8 on a level, stairs, ramps up and down) to
+-- the nearest tile of one of the target burrows; a forbidden door is a wall that may be crossed at the cost of one door
+-- (CFG.rpath_doors at most), so the answer is the way with the fewest forbidden doors (hatches are not looked at).
+-- Read-only.
+-- {r = 'ok' (a way without a forbidden door), 'door' (only through `doors`, ids from the citizen outward), 'none' (the
+-- flood ended without reaching it), 'far' (rpath_max tiles visited), 'group' (no tile sample of the burrows lies on his
+-- walk group), 'unknown' (no unit, hidden or unwalkable tile), d = steps (-1), g = his walk group, n = tiles visited}
+local function forbidden_door(x, y, z)
+  local des, occ = rev(x, y, z)
+  spend(1)
+  local b = des and bld_on(x, y, z, occ)
+  if b and btype(b) == 'Door' and dflag(b, 'forbidden') then return int(b.id) end
+end
+
+local function rpath_one(K, id, names)
+  local u = df.unit.find(id)
+  spend(1)
+  if not u then return {r = 'unknown'} end
+  local x, y, z = dfhack.units.getPosition(u)
+  if not x then return {r = 'unknown'} end
+  local G = grp(x, y, z)
+  spend(2)
+  if not G or G == 0 then return {r = 'unknown'} end
+  local t = now_t(K)
+  local any, groups = false, {}
+  for _, n in ipairs(names) do
+    local _, smp = burrow_size(n, t)
+    for _, p in ipairs(smp or {}) do
+      local g = grp(p[1], p[2], p[3])
+      spend(2)
+      if g and g ~= 0 then groups[g], any = true, true end
+    end
+  end
+  if any and not groups[G] then return {r = 'group', g = G, d = -1} end
+  local bs = {}
+  for _, n in ipairs(names) do bs[#bs + 1] = burrow(n) end
+  local function target(kx, ky, kz)
+    for _, b in ipairs(bs) do
+      spend(1)
+      if in_burrow(b, kx, ky, kz) then return true end
+    end
+    return false
+  end
+  local start = key3(x, y, z)
+  local seen, dist, chain = {[start] = true}, {[start] = 0}, {[start] = false}
+  local cur, nb, visited = {start}, {}, 0
+  local function chain_ids(c)
+    local l = {}
+    while c do table.insert(l, 1, c.id); c = c.prev end
+    return l
+  end
+  for level = 0, CFG.rpath_doors do
+    local nxt, head = {}, 1
+    while head <= #cur do
+      local k = cur[head]
+      head, visited = head + 1, visited + 1
+      if visited > CFG.rpath_max then return {r = 'far', g = G, d = -1, n = visited - 1} end
+      local kx, ky, kz = dec3(k)
+      if target(kx, ky, kz) then
+        return {r = level == 0 and 'ok' or 'door', d = dist[k], doors = chain_ids(chain[k]), g = G, n = visited}
+      end
+      local n = steps(kx, ky, kz, nb)
+      for i = 1, n do
+        local nk = nb[i]
+        if not seen[nk] then
+          local nx, ny, nz = dec3(nk)
+          local g = grp(nx, ny, nz)
+          spend(2)
+          if g ~= nil and g ~= G and i <= 8 and not seen[nk - 16777216] and ramp_top(nk) then
+            nk = nk - 16777216                     -- down a ramp: the open top beside it, one level down
+            nx, ny, nz = dec3(nk)
+            g = grp(nx, ny, nz)
+            spend(2)
+          end
+          if g == G and not seen[nk] then
+            seen[nk], dist[nk] = true, dist[k] + 1
+            local did = forbidden_door(nx, ny, nz)
+            if did then chain[nk] = {id = did, prev = chain[k]}; nxt[#nxt + 1] = nk
+            else chain[nk] = chain[k]; cur[#cur + 1] = nk end
+          end
+        end
+      end
+    end
+    if #nxt == 0 then break end
+    cur = nxt
+  end
+  return {r = 'none', g = G, d = -1, n = visited}
+end
+
+local function job_rpath(K)
+  local rp = mem.rp
+  if not rp then return end
+  for _, id in ipairs(sorted_keys(rp.q)) do
+    local names = rp.q[id]
+    rp.q[id] = nil
+    local res = rpath_one(K, id, names)
+    res.t = now_t(K)
+    rp.res[id] = res
+  end
+end
+
+-- public (BUG-035, reflex's recall): the path check above for the citizens `ids` (<= CFG.rpath_ids a call) toward the
+-- burrows `names`: an id without an answer at or after tick `since` is queued (an urgent job, sliced); returns the
+-- answers so far {[id] = {r, d, doors, g, n, t}} (only those at or after `since`)
+function M.recall_path(K, ids, names, since)
+  if type(ids) ~= 'table' or type(names) ~= 'table' or #names == 0 then return {} end
+  mem.rp = mem.rp or {q = {}, res = {}}
+  local rp, out, t, n = mem.rp, {}, now_t(K), 0
+  since = int(since) or t
+  local nl = {}
+  for i, nm in ipairs(names) do if type(nm) == 'string' and i <= 4 then nl[#nl + 1] = nm end end
+  for _, id in ipairs(ids) do
+    id = int(id)
+    if id then
+      local r = rp.res[id]
+      if r and r.t >= since then out[id] = r
+      elseif not rp.q[id] and n < CFG.rpath_ids then rp.q[id], n = nl, n + 1 end
+    end
+  end
+  if next(rp.q) then due('rpath', t, 'recall') end
+  return out
+end
+
 ---------------------------------------------------------------- watcher
 local function fingerprint()
   local parts = {}
@@ -3678,6 +3810,7 @@ local JOBS = {
   scan = function(K, d) job_scan(K, d.arg == true, d.why) end,
   paint = function(K, d) job_paint(K, d.why) end,
   split = function(K) job_split(K) end,
+  rpath = function(K) job_rpath(K) end,
 }
 
 local function schedule_periodic(K, t)
@@ -3722,6 +3855,7 @@ local function urgent(K, name, d)
   end
   if name == 'perim' then return why == 'pre' or why == 'post' end
   if name == 'gates' then return true end                                -- a few footprint reads
+  if name == 'rpath' then return true end                                -- BUG-035: the recall waits for it
   if name == 'audit' then
     return why:find('^quick') ~= nil or why:find('^mode') ~= nil or why:find('^before') ~= nil
   end

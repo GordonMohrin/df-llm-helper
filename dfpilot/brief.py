@@ -183,6 +183,9 @@ def line_unready(ctx: Ctx) -> str:
         nxt.append("build the missing fortcore pieces (plan)")
     if "refuge_dry" in fails:                  # Run 11 siege 8: a dry Tiefe+ holds the citizens only in a breach
         nxt.append("the refuge has no drink: a well/cistern there or a drink stockpile in it (plan)")
+    if "hospital_out" in fails:                # BUG-036: lying patients cannot walk to the refuge in a breach
+        nxt.append("the hospital lies outside Kern+/Tiefe+: plan it inside Tiefe+ next to accepted water (a cistern "
+                   "there first), then remove the old zones")
     lost = [f.split(":", 1)[1] for f in fails if f.startswith("lost:")]
     if lost:                                   # BUG-030 rebuild policy: held for the player, not a fortcore piece
         nxt.append(f"{','.join(lost)} lost to building destroyers: Gordon's answer (DECISION_NEEDED bridge_rebuild: "
@@ -209,6 +212,10 @@ def line_alarm(ctx: Ctx) -> str:
                 out.append(f"doors {al['doors']} forbidden" + (f", {al['dwait']} waiting for {al.get('dout', 0)}"
                                                                f" citizens outside" if al.get("dwait") else "")
                            + (f", {al['dref']} refused (flag reset)" if al.get("dref") else ""))   # BUG-015
+            if al.get("rn"):                   # BUG-035: the open recall (called, still out, who cannot come)
+                out.append(f"recall: {al.get('rleft', al['rn'])} of {al['rn']} still outside {al.get('rto') or '?'}"
+                           + (f" ({al['rstuck']} cannot come: RECALL stuck names them)" if al.get("rstuck") else "")
+                           + (f", +{al['rnew']} more out since" if al.get("rnew") else ""))
         if al.get("far"):                      # Run 11: invaders a lockdown expired far (they re-arm on approach)
             out.append(f"{al['far']} invaders far (lockdown expired; re-arm within lockdown_near)")
         if al["unacked"]:

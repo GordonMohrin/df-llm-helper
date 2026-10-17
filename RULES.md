@@ -144,7 +144,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 ## 7. Class-A events and the first move
 | Event | First move |
 |---|---|
-| SIEGE_START / INVASION / ARRIVAL | the kernel locked down (gates up, doors forbidden, alert, clock 30 t/s) before contact; citizens outside Kern+ are called home at once (`recall: 16 outside Kern+`; RECALL (B) says when all are in). `dfllm ack`, read `status` (`clock`, `lever_latency_s`, eta); do nothing tactical; tell the player |
+| SIEGE_START / INVASION / ARRIVAL | the kernel locked down (gates up, doors forbidden, alert, clock 30 t/s) before contact; citizens outside the alert's burrow are called home at once (`recall: 16 outside Kern+`; RECALL (B) says when all are in, `stuck` names who cannot come and why: tell the player). `dfllm ack`, read `status` (`clock`, `lever_latency_s`, eta); do nothing tactical; tell the player |
 | INTRUDER / PREDATOR | a hostile can walk to the citizens (gate open or a leak) / a wild danger inside Kern+ or within `predator_near` (40) tiles of a citizen outside it (farther ones are only PREDATOR_FAR, class B). `dfllm ack`; read `status` and the brief; tell the player. An INTRUDER with `far: N tiles` gets no lockdown default (alarm.txt `far`); it comes again once the unit is within `lockdown_near` |
 | LOCKDOWN | an interrupt stood unacked and the kernel applied its default. `dfllm ack`; read `status` |
 | LOCKDOWN_PARTIAL | an entrance door does not hold its forbidden flag (named with what lies on its tile); the kernel tries it once more itself. Read `status` (`doors`, refused); tell the player; a wall or a second door for that opening (`bp.place tpl=seal at="x,y,z floor wall"`) |
@@ -196,7 +196,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 - R0 blockers (`ready.fail`; full table DESIGN §5.4): `audit`/`audit_old` no or stale audit → `dfllm audit`;
   `audit_fail`, `bypass` (a way in skips the trap hall), `refuge_sep` (refuge missing or on the attack path),
   `civ_sep` (no separate civilian/military stair), `caverns` (open, or a shaft not yet plugged: CAVERN_PLUG) → the
-  audit's own reasons (AUDIT `fails`, SIEGE_UNREADY `afails`); `no_kern`/`no_refuge` burrow missing; `refuge_dry` the refuge has no drink (stock < citizens, no wet well; Run 11) → a well/cistern or drink stockpile there; `no_outer`/
+  audit's own reasons (AUDIT `fails`, SIEGE_UNREADY `afails`); `no_kern`/`no_refuge` burrow missing; `refuge_dry` the refuge has no drink (stock < citizens, no wet well; Run 11) → a well/cistern or drink stockpile there; `hospital_out` a hospital zone outside Kern+/Tiefe+ (BUG-036) → a hospital inside Tiefe+ next to water; `no_outer`/
   `no_inner` no O1/B1, `bridge:B` not built, `levers:B` < 2 linked levers → fortcore pieces; `lost:B` a gate given up after building destroyers → the player's answer (DECISION_NEEDED `bridge_rebuild`). `status` says `UNREADY`
   while R0 fails (SIEGE_UNREADY monthly); `drill never (auto: <why>)` → fix `<why>` or `dfllm cmd drill`.
 - Audit `fails` name the fix (table DESIGN §5.4): `bypass: wall x,y,z floor -> X` / `refuge: on the attack path,
