@@ -30,3 +30,8 @@ BUG-025..043 (Depot, Seal, Station auf Brücke, Recall, Runner-Hänger, Fishery/
 - Audit-Datei aud1a14ba261dd94c201.json: 356 KB, 337440 Kacheln (44431 ' '), parts 3, margin [16,16,2], bbox [44,9,132,191,160,146].
 - `bp sites refuge_drink --fresh`: 'no site for 12 barrels (5x3) beside the refuge room 110-118,114-120 z136' (mein n=11 bei 118,114,136 steht schon).
 - Kein neuer bypass bemerkt.
+
+## Nachtrag y485 (17.10.2026)
+14. **Stimmungs-Tode durch Durst/Hunger (wiederkehrend)**: y484 Fey-Stimmung (Einheit 28872, thirst 75000, hunger 76725) und y485 Possessed-Stimmung (28844, thirst 75002, hunger 100339, 'patient') – Zwerge in strange mood essen/trinken nicht und sterben, wenn die Werkstatt-Arbeit nicht zustande kommt (MOOD_RISK meldete nur 'nothing missing; a mood job cannot be cancelled'). Wunsch: Kernel soll Stimmungs-Zwerge mit Durst > 40000 per Trink-Job versorgen oder die Materialsuche beschleunigen; FR: Stimmungs-Zwerg-Überwachung (Hunger/Durst) mit Notversorgung (Getränk neben die Werkstatt legen).
+15. **Bevölkerung sinkt in Frieden (50 -> 33 in 2 Jahren)** ohne Belagerung: Stimmungs-Tode, Altersschwund; keine Migranten seit y481. Pop 33, erwachsene Zwerge nur 16 (Rest?) – zu klären, ob 'adults' Kinder zählt. 'Migrants'-Wellen bleiben aus (Fort-Wohlstand/Pop-Cap?).
+16. **Seal 115,73,143 (Tür) bleibt offen** trotz seal-Projekt c1a14b92909f3d7801 seit y483 Sommer d69; status zeigt weiter '1 way in without door or bridge: 115,73,143 floor'.
