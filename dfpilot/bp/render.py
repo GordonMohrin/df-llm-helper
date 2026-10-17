@@ -4,7 +4,8 @@
 (rock below the surface, the surface floor at the anchor z of a fortcore, open air above; room templates get
 an all-rock base with the access tile open). It approximates DF: `d` mines a wall to floor, `h` removes the
 floor (ramp below if the tile below is a wall, the channelled tile becomes the ramp top), `u/j/i` carve
-stairs, `s` smooths walls, constructions and furniture need floor (quickfort build.lua:49-60, :151).
+stairs, `s` smooths walls, constructions and furniture need floor (quickfort build.lua:49-60, :151), a door a wall or
+fortification beside it that stood before its stage (build.lua is_tile_generic_and_wall_adjacent; Run 11).
 Bridges are simulated lowered (`=`). The validators and tests audit this snapshot.
 """
 from __future__ import annotations
@@ -19,6 +20,10 @@ DIGX = frozenset("dhujir")
 CONSTRUCT = {"Cw": "C", "CW": "C", "CF": "F", "Cf": ".", "Cu": "<", "Cd": ">", "Cx": "X"}
 COVERS = {"G": ".", "~b": "."}         # floor grate / floor bars: built over open space or a ramp top, walkable
 GATES = {"W": "B", "B": "B"}           # wall grate / vertical bars on a floor: closed, nobody passes (snapshot.lua)
+# a door stands only beside a tile of shape WALL or FORTIFICATION (bp.defense door rule; `?` hidden and a tile off the
+# world: unknown, quickfort reads the real tile); a wall planned in the door's own stage is no wall yet
+DOOR_WALLS = frozenset("#SCFT?")
+N4 = ((1, 0), (-1, 0), (0, 1), (0, -1))
 
 
 def cell_rects(doc: dict):
@@ -62,6 +67,7 @@ class World:
         self.occupied: set[tuple[int, int, int]] = set()
         self.manifest: dict = {"v": 2}
         self.soil: set[tuple[int, int, int]] = set()     # snapshot marks.soil (farm plots need soil or mud)
+        self.staged: set[tuple[int, int, int]] = set()   # constructions of the build stage being applied
 
     @classmethod
     def from_snapshot(cls, snap: dict) -> "World":
@@ -92,8 +98,11 @@ class World:
 
     # ------------------------------------------------------------ apply
     def apply(self, doc: dict) -> "World":
+        cur = None
         for st, key, props, x0, y0, x1, y1, z in cell_rects(doc):
             mode = st["mode"]
+            if st is not cur:
+                cur, self.staged = st, set()
             if mode == "dig":
                 for y in range(y0, y1 + 1):
                     for x in range(x0, x1 + 1):
@@ -157,6 +166,9 @@ class World:
                 ok = c in FLOORISH
             if not ok:
                 self.errors.append(f"build {key} at {x},{y},{z} on {c!r}")
+            elif key == "d" and not self._door_wall(x, y, z):
+                self.errors.append(f"build d at {x},{y},{z}: no wall or fortification beside it (quickfort refuses "
+                                   "the door; a wall of the same stage is not built yet)")
             if (x, y, z) in self.occupied and key not in CONSTRUCT:  # one building per tile (build.lua:46)
                 self.errors.append(f"build {key} at {x},{y},{z}: tile already has a building")
             self.occupied.add((x, y, z))
@@ -168,6 +180,7 @@ class World:
         for x, y in tiles:
             if key in CONSTRUCT:
                 self.set(x, y, z, CONSTRUCT[key])
+                self.staged.add((x, y, z))
             elif key in ("d", "H"):
                 self.set(x, y, z, "+")
             elif key in COVERS:
@@ -181,6 +194,15 @@ class World:
                 self.set(x, y, z, "=")
             elif key == "s":
                 self.set(x, y, z, "B")             # statues block movement
+
+    def _door_wall(self, x, y, z) -> bool:
+        """A wall or fortification (or an unknown tile) orthogonally beside x,y,z that stood before this stage."""
+        for dx, dy in N4:
+            n = (x + dx, y + dy, z)
+            c = self.get(*n)
+            if (c is None or c in DOOR_WALLS) and n not in self.staged:
+                return True
+        return False
 
     # ------------------------------------------------------------ export
     def raise_bridges(self, names=None) -> "World":

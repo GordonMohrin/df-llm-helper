@@ -176,6 +176,7 @@ local function forget(id)
   S.bbox[id], S.meas[id] = nil, nil
   if S.rt and S.rt.skip then S.rt.skip[id], S.rt.rty[id], S.rt.pb[id] = nil, nil, nil end   -- BUG-022 records
   if S.rt and S.rt.br then S.rt.br[id] = nil end    -- Run 11: the breach record (m.runner cav outlives the project)
+  if S.rt and S.rt.dw then S.rt.dw[id] = nil end    -- Run 11: the seal doors planned as walls (door_walls)
 end
 
 -- data[dz][dy][dx] = text relative to the chunk pos (quickfort.txt:170-176, api.lua:13)
@@ -1194,6 +1195,81 @@ local function tomb_dups(d)
   return cut, total, first
 end
 
+-- Run 11 (Kilrudrabed site98 y435): the seal piece door 128,121,143 (a door already stood on its neighbour 127,121,143)
+-- stayed build_lost with 26 boulders and 171 logs in stock: quickfort said 'Unsuitable tiles for building: 1', while a
+-- constructed wall on the same tile went in at once. quickfort places a door only where one of its four orthogonal
+-- neighbours has the tile shape WALL or FORTIFICATION (build.lua is_tile_generic_and_wall_adjacent; a door, hatch or
+-- planned wall beside it does not count; dfpilot/bp/defense.py states the rule and its uncertainty). A seal door that
+-- quickfort counts as unsuitable is planned once as a constructed wall on the same tile (Cw: any open floor takes it):
+-- the cell's key in the project's copy becomes Cw (bp.<id> set again, the one exception to 'written once'; a seal
+-- document is small), the chunk is applied again, m.runner dw[<proj>] keeps the tiles ('x,y,z', <= 8), and the
+-- kern.log line, PROJECT_BLOCKED and PROJECT_DONE name them ('door unsuitable at x,y,z: wall instead').
+local DOOR_SUPPORT = {['#'] = true, S = true, C = true, F = true, T = true}   -- snapshot legend of WALL/FORTIFICATION
+local N4 = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
+
+-- the door rule on the revealed tiles: 'no wall or fortification beside it' when all four orthogonal neighbours are
+-- revealed and none is one, else '' (a hidden neighbour may be a wall: quickfort reads it, we may not)
+local function door_unsupported(K, x, y, z)
+  for _, n in ipairs(N4) do
+    local ok, v = K.call('snapshot', 'tile', x + n[1], y + n[2], z)
+    if not (ok and type(v) == 'table') or v.c == nil or v.c == '?' or DOOR_SUPPORT[v.c] then return '' end
+  end
+  return 'no wall or fortification beside it'
+end
+
+-- 'door unsuitable at x,y,z: wall instead' (doors ... walls) for the project's walled doors, and their tiles; nil without
+local function walled_note(id)
+  local l = S.rt.dw and S.rt.dw[id]
+  if type(l) ~= 'table' or #l == 0 then return nil end
+  return string.format(#l == 1 and 'door unsuitable at %s: wall instead' or 'doors unsuitable at %s: walls instead',
+                       table.concat(l, ', ')), l
+end
+
+-- does a cell's tile hold what the stage placed? A building there (findAtTile, else snapshot's bld), or a finished
+-- construction / closing tile (snapshot legend); hidden tiles hold nothing we may know of (BUG-022)
+local function cell_present(K, t)
+  local find = dfhack.buildings and dfhack.buildings.findAtTile
+  if find then
+    local ok, b = pcall(find, t[1], t[2], t[3])
+    if ok and b then return true end
+  end
+  local okt, tile = K.call('snapshot', 'tile', t[1], t[2], t[3])
+  if not (okt and type(tile) == 'table') then return false, nil end
+  return (tile.bld ~= nil and tile.bld ~= '') or OCCUPIED[tile.c] == true, tile
+end
+
+-- after a seal build chunk: its doors quickfort refused (n unsuitable cells, nothing on a door's revealed tile now)
+-- become constructed walls in the project's copy; returns how many
+local function door_walls(K, P, d, st, ch, n)
+  if P.tpl ~= 'seal' or n <= 0 or type(d) ~= 'table' then return 0 end
+  local got = 0
+  for _, c in ipairs(ch.cells) do
+    if got >= n then break end
+    if c[4]:match('^[^{(:/]*') == 'd' then
+      local x, y, z = ch.pos[1] + c[1], ch.pos[2] + c[2], ch.pos[3] + c[3]
+      local here, tile = cell_present(K, {x, y, z})
+      if not here and tile then
+        c[4], got = 'Cw', got + 1
+        local l = type(S.rt.dw[P.id]) == 'table' and S.rt.dw[P.id] or {}
+        if #l < 8 then l[#l + 1] = tkey(x, y, z) end
+        S.rt.dw[P.id] = l
+        local why = door_unsupported(K, x, y, z)
+        K.log('warn', '%s %s: door unsuitable at %d,%d,%d: wall instead (quickfort refused the door%s)', P.id,
+              st.label, x, y, z, why ~= '' and ('; ' .. why) or '')
+      end
+    end
+  end
+  if got == 0 then return 0 end
+  local m = d.materials
+  if type(m) == 'table' and int(m.door) then
+    m.door, m.wall = int(m.door) > got and int(m.door) - got or nil, (int(m.wall) or 0) + got
+  end
+  K.persist.set('bp.' .. P.id, d)
+  for k in pairs(S.tiles) do if k:sub(1, #P.id + 1) == P.id .. '/' then S.tiles[k] = nil end end
+  dirty()
+  return got
+end
+
 local function apply(K, P, st, R)
   local ch = st.chunks[P.chunk + 1]
   if P.tpl == 'plug' then
@@ -1260,6 +1336,8 @@ local function apply(K, P, st, R)
     end
   elseif st.mode == 'build' then
     local n1 = df.global.building_next_id
+    -- Run 11: the seal doors quickfort refused are constructed walls now; this chunk is applied again with them
+    local walls = door_walls(K, P, doc(K, P.id), st, ch, (int(stats.build_unsuitable) or 0) - pre)
     if math.type(n0) ~= 'integer' or math.type(n1) ~= 'integer' then R.noid = 1
     else
       for id = n0, n1 - 1 do
@@ -1270,8 +1348,9 @@ local function apply(K, P, st, R)
         end
       end
       if R.ra == 1 then R.uns = math.max(0, R.uns - (n1 - n0))
-      else R.uns = R.uns + math.max(0, (int(stats.build_unsuitable) or 0) - pre) + bad end
+      else R.uns = R.uns + math.max(0, (int(stats.build_unsuitable) or 0) - pre - walls) + bad end
     end
+    if walls > 0 then R.last = now(K); dirty(); return true end
   end
   P.chunk = P.chunk + 1
   R.last = now(K)
@@ -1393,10 +1472,12 @@ local function finish(K, P, d)
   P.done, P.pct, P.blocked, P.since = 1, 100, '', now(K)
   local xr = note_shaft(K, P, d)              -- Run 11: a finished explore's shaft stays open: the shaft check watches it
   if xr then xr.fin = 'done' end
+  local wn, wl = walled_note(P.id)            -- Run 11: the seal doors quickfort refused stand as walls
   K.persist.set('bp.' .. P.id, nil)
   S.rt.p[P.id] = nil
   forget(P.id)
-  K.emit('PROJECT_DONE', 'B', P.id .. ' (' .. P.tpl .. ') done', {proj = P.id, tpl = P.tpl})
+  K.emit('PROJECT_DONE', 'B', trunc(P.id .. ' (' .. P.tpl .. ') done' .. (wn and ('; ' .. wn) or ''), 200),
+         {proj = P.id, tpl = P.tpl, walled = wl})
   K.flush()
   dirty()
 end
@@ -2261,18 +2342,6 @@ local function keepers(K)
 end
 
 ---------------------------------------------------------------- build_lost: missing pieces and the retry (BUG-022)
--- does a cell's tile hold what the stage placed? A building there (findAtTile, else snapshot's bld), or a finished
--- construction / closing tile (snapshot legend); hidden tiles hold nothing we may know of
-local function cell_present(K, t)
-  local find = dfhack.buildings and dfhack.buildings.findAtTile
-  if find then
-    local ok, b = pcall(find, t[1], t[2], t[3])
-    if ok and b then return true end
-  end
-  local okt, tile = K.call('snapshot', 'tile', t[1], t[2], t[3])
-  if not (okt and type(tile) == 'table') then return false, nil end
-  return (tile.bld ~= nil and tile.bld ~= '') or OCCUPIED[tile.c] == true, tile
-end
 
 -- the name of a piece: the manifest bridge whose footprint holds the cell (B1), a bridge's lever ('lever B1'),
 -- 'trap' for a trap key, else the key
@@ -2376,6 +2445,22 @@ function M.remake(K, P, d, R)
   return true
 end
 
+-- Run 11 (c1a147087d, build_lost before the door_walls fix): 'x,y,z' of a missing door of a blocked seal stage that the
+-- revealed tiles show without a wall or fortification beside it (door_unsupported), else nil: the retry lets quickfort
+-- refuse it once more, and door_walls plans it as a wall
+local function lost_door(K, P, d)
+  local st = P.tpl == 'seal' and d and d.stages[P.stage + 1]
+  if not (st and st.mode == 'build') then return nil end
+  for _, ch in ipairs(st.chunks) do
+    for _, c in ipairs(ch.cells) do
+      local x, y, z = ch.pos[1] + c[1], ch.pos[2] + c[2], ch.pos[3] + c[3]
+      if c[4]:match('^[^{(:/]*') == 'd' and not cell_present(K, {x, y, z}) and door_unsupported(K, x, y, z) ~= '' then
+        return tkey(x, y, z)
+      end
+    end
+  end
+end
+
 -- the stage to start a retry from: the last dig stage at or before the blocked stage (its skipped tiles may be
 -- designated now), else the blocked stage itself
 local function retry_from(d, si)
@@ -2409,7 +2494,13 @@ local function retry_step(K, P, t)
     local sig = retry_sig(K, P, d)
     if sig > q.sig then why = string.format('%d more tiles revealed or open', sig - q.sig)
     -- (a seal blocked by an older kernel has no record of it: tried as soon as its pieces can be made)
-    elseif P.tpl == 'seal' and q.cant ~= false and M.remake_why(K, P, d) then why = 'its pieces can be made now' end
+    elseif P.tpl == 'seal' and q.cant ~= false and M.remake_why(K, P, d) then why = 'its pieces can be made now'
+    -- Run 11: a door quickfort refused under an older kernel (no wall beside it): once, so door_walls walls it
+    elseif P.tpl == 'seal' and q.dw ~= 1 then
+      local at = lost_door(K, P, d)
+      if at then q.dw, why = 1, 'its door at ' .. at .. ' has no wall or fortification beside it: a wall if quickfort ' ..
+                                'refuses the door' end
+    end
     dirty()
   end
   if not why then return end
@@ -2444,18 +2535,21 @@ local function blocked_event(K, P, t)
   S.rt.pb[P.id] = CAD.mark(T, ids, toks)
   local msg = P.id .. ' (' .. P.tpl .. ') blocked: ' .. P.blocked
   local dd = {proj = P.id, tpl = P.tpl, stage = label, why = P.blocked, ticks = t - P.since}
+  local wn, wl = walled_note(P.id)            -- Run 11: seal doors quickfort refused, planned as walls (door_walls)
+  dd.walled = wl
   if P.blocked == 'build_lost' then
     local miss = missing_pieces(K, P, d)
     dd.missing, dd.retry = miss, nr
     msg = msg .. ' at ' .. label .. (#miss > 0 and (', missing ' .. table.concat(miss, ', ')) or '')
     local _, mw = M.remake_why(K, P, d)      -- Run 11: why economy cannot make a seal's pieces
     if mw then msg, dd.mat = msg .. ' (' .. mw .. ')', trunc(mw, 80) end
+    if wn then msg = msg .. '; ' .. wn end
     if final then msg = msg .. string.format('; %d retries spent: bp.cancel and place it again', nr)
     else
       msg = msg .. string.format('; retry %d/%d once the skipped tiles are revealed, at the latest next season',
                                  nr + 1, M.CFG.retry_max)
     end
-  end
+  elseif wn then msg = msg .. ' at ' .. label .. '; ' .. wn end
   K.emit('PROJECT_BLOCKED', 'A', trunc(msg, 200), dd)
   dirty()
 end
@@ -2531,6 +2625,7 @@ function M.init(K)
     obj(rt.keep)
   rt.skip, rt.rty, rt.pb = obj(rt.skip), obj(rt.rty), obj(rt.pb)   -- BUG-022: skipped tiles, retries, cadence
   rt.cav, rt.br, rt.xs = obj(rt.cav), obj(rt.br), obj(rt.xs)       -- Run 11: cavern plugs, breach records, shafts
+  rt.dw = obj(rt.dw)                                                 -- Run 11: seal doors planned as walls
   if type(rt.cz) ~= 'table' then rt.cz = {} end                      -- Run 11: cavern breach tiles
   if type(rt.exh) ~= 'string' then rt.exh = '' end
   K.persist.set('m.runner', rt)

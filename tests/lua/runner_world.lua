@@ -103,6 +103,17 @@ local function fake_orders(W, p)
   return st
 end
 
+-- Run 11: quickfort builds a door only beside a tile of shape WALL or FORTIFICATION (build.lua
+-- is_tile_generic_and_wall_adjacent): rough/smooth rock, a constructed wall, a fortification, a tree trunk; a door or a
+-- planned building beside it does not count
+local DOOR_WALL = {['#'] = true, S = true, C = true, F = true, T = true}
+local function door_wall_beside(W, x, y, z)
+  for _, n in ipairs({{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) do
+    if DOOR_WALL[W.tile(x + n[1], y + n[2], z).c] then return true end
+  end
+  return false
+end
+
 -- the fake quickfort.apply_blueprint behind act.quickfort; returns ok, stats (act.lua:402-407 shape)
 -- W.qf_fail fails every call, W.qf_fail_cmd only calls with that command
 function H.fake_qf(W, p)
@@ -145,7 +156,8 @@ function H.fake_qf(W, p)
           if b and b._under then W.tile(tx, ty, z).c = b._under end   -- Run 11: a removed hatch leaves its stair
           if id then W.buildings[id] = nil; W.bld_at[k] = nil; W.undone = W.undone + 1 end
         elseif W.unsuitable[k] or W.bld_at[k] or not (W.tile(tx, ty, z).c == '.'
-               or (key:sub(1, 1) == 'C' and (W.tile(tx, ty, z).c == '_' or W.tile(tx, ty, z).c == 'v'))) then
+               or (key:sub(1, 1) == 'C' and (W.tile(tx, ty, z).c == '_' or W.tile(tx, ty, z).c == 'v')))
+               or (key == 'd' and not door_wall_beside(W, tx, ty, z)) then
           st.build_unsuitable = st.build_unsuitable + 1
         elseif not p.dry_run then
           building(W, tx, ty, z, key)

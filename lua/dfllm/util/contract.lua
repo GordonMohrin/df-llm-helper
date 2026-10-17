@@ -56,6 +56,7 @@ C.EVENTS = {
   BREACH = {cls = 'A', by = 'siege'}, DEATHS_3PLUS = {cls = 'A', by = 'care'},
   DRILL_FAIL = {cls = 'A', by = 'drill'}, KERN_FAULT = {cls = 'A', by = 'kern'},
   PERF_DEGRADED = {cls = 'A', by = 'perf'}, DECISION_NEEDED = {cls = 'A', by = 'any'},
+  -- PROJECT_BLOCKED (and PROJECT_DONE) d.walled, Run 11: the seal doors quickfort refused, planned as walls ('x,y,z')
   PLAN_EXHAUSTED = {cls = 'A', by = 'runner'}, PROJECT_BLOCKED = {cls = 'A', by = 'runner'},
   YEAR_REVIEW = {cls = 'A', by = 'kern'},
   -- FR-04/26 ghosts and unburied citizens, FR-34 a hospital without accepted water, FR-44 a strange mood at risk
