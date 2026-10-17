@@ -90,6 +90,15 @@ named with what it did; the daily shaft check keeps up or says why, and does not
 - Not changed: the food stockpile import itself (a DFHack call; one per pile). Proposal: set a food pile's settings
   without the stockpiles plugin's 'all' import, or one pile per quickfort call; first confirm the cost live.
 
+## Live confirmed (Run 11, read-only, before the reload to b49acfb)
+- commands.log at tick 182164588: `runner act.quickfort [{"cells":3,"command":"run","mode":"place","ms":68603,
+  "pos":[144,62,137]}] ok`: the place call of y451s3b0 (three food stockpiles in one call) took the 68,603 ms, right
+  after `y451s3b0 build`; PROJECT_DONE y451s3b0 (stockroom) is event #18499. The DFHack food import is still the
+  suspected cost inside that call (not measured separately).
+- The projects that left the list finished: PROJECT_DONE since n >= 17000 holds depot7 (#17151), y451s3b0 and the
+  y450-y452 plan builds. Not yet found: PROJECT_DONE of c1a14831718f432f01, c1a1484d0449597801, c1a1484d088187e701,
+  c1a14867db95857619 (asked for).
+
 ## Live data that decides it (read-only)
 1. commands.log near tick 182164588: the runner's `act.quickfort` line with `"mode":"place"` and its `"ms"` (68,000 =
    cause 2 confirmed); events `PROJECT_STAGE` y451s3b0 `build done` at the same tick.
