@@ -3976,8 +3976,8 @@ function M.glass_sand(K, c, r, g)
   local ok, s = K.call('snapshot', 'sand')
   if ok and type(s) == 'table' and (math.tointeger(s.tick) or -1) < 0 then
     if not st.sand_snap then                     -- no export this boot yet: one is asked for, the next run looks
-      st.sand_snap = true
-      K.call('snapshot', 'export', {purpose = 'debug'})
+      st.sand_snap = true                        -- (BUG-033: any export queued or running will do)
+      K.call('snapshot', 'export', {purpose = 'debug', by = 'economy', any = true})
     end
     g.zone = 'looking'
     return

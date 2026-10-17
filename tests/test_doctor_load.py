@@ -70,3 +70,55 @@ def test_small_fort_keeps_the_base_limit(save):
     lines, bad = doctor.diagnose(save)
     assert any("(limit 25);" in x for x in lines)
     assert "kernel 27 ms/s > 25: top sense 17, seal 10" in bad
+
+
+# ---------------------------------------------------------------- BUG-033
+def _state(save, **snap):
+    import json
+    p = save / "state.b.json"
+    st = json.loads(p.read_text("utf-8"))
+    if snap:
+        st["snap"] = snap
+    st["k"]["top"] = "runner 35 (snapshot 20)"
+    p.write_text(json.dumps(st), encoding="utf-8")
+    (save / "state.a.json").unlink(missing_ok=True)
+    return st
+
+
+def test_bug033_call_edges_are_no_owners_and_name_the_top_cost(save):
+    # Run 11: runner 35 ms/s; with BUG-033 its snapshot queries are inside its entry, the edge says how much
+    mods = "runner=1050;snapshot=180;sense=270;runner>snapshot=600;economy>snapshot=90;economy=150;kern=60"
+    write_perf(save, [(455, 120, 9000, 58, mods)] * 20)
+    lines, bad = doctor.diagnose(save)
+    mline = next(x for x in lines if x.startswith("modules ms/s:"))
+    assert ">" not in mline and mline.startswith("modules ms/s: runner 35.0 sense 9.0 snapshot 6.0 economy 5.0")
+    assert "top cost: runner 35.0 ms/s (snapshot 20.0 of it, in its calls)" in lines
+    over = next(b for b in bad if b.startswith("kernel "))
+    assert over == "kernel 58 ms/s > 25: top runner 35, sense 9, snapshot 6"
+
+
+def test_bug033_a_starving_snapshot_queue_is_one_line_and_a_problem(save):
+    from dfpilot import brief
+    write_perf(save, [(455, 120, 9000, 20, "sense=300;runner=120")] * 20)
+    _state(save, q=5, old_s=720, done=0, drop=2, run="s1209600-1", p="audit", by="readiness", pct=40,
+           wait="paced 9 min")
+    lines, bad = doctor.diagnose(save)
+    assert ("snapshot queue: 5 waiting, oldest 12 min; first s1209600-1 audit by readiness 40% (paced 9 min); "
+            "2 dropped this boot") in lines
+    assert any(b.startswith("snapshot exports starve (5 waiting, oldest 12 min; first s1209600-1 audit by readiness 40% "
+                            "(paced 9 min); 2 dropped this boot): dfllm audit and bp sites --fresh get no file") for b in bad)
+    text = brief.status_text(save)
+    assert "snapshot queue: 5 waiting, oldest 12 min" in text and "top runner 35 (snapshot 20)" in text
+    # a queue that moves is a line in doctor, no problem, and nothing in status
+    _state(save, q=1, old_s=20, done=4, drop=0, run="aud1", p="audit", by="inbox:cli", pct=60, wait="")
+    lines, bad = doctor.diagnose(save)
+    assert "snapshot queue: 1 waiting, oldest 20 s; first aud1 audit by inbox:cli 60%" in lines
+    assert not any(b.startswith("snapshot") for b in bad)
+    assert "snapshot queue" not in brief.status_text(save)
+    # a big export that gets its slices (wait '' or seconds) is slow, not starving
+    _state(save, q=2, old_s=420, done=4, drop=0, run="s1-2", p="audit", by="readiness", pct=80, wait="paced 3 s")
+    lines, bad = doctor.diagnose(save)
+    assert "snapshot queue: 2 waiting, oldest 7 min; first s1-2 audit by readiness 80% (paced 3 s)" in lines
+    assert not any(b.startswith("snapshot") for b in bad)
+    _state(save, q=0, old_s=0, done=4, drop=0)
+    assert not any(x.startswith("snapshot queue") for x in doctor.diagnose(save)[0])

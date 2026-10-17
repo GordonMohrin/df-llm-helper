@@ -52,9 +52,15 @@ M.CFG = {
   -- shaft open to a cavern is plugged at once (a constructed wall on its two top stair tiles; the lower one is given
   -- up when a step of it waits plug_wait). Projects stopped as damp/water/cavern look again every `recheck`.
   lake_r = 12, lake_min = 30, plug_wait = DAY, recheck = DAY, cav_keep = 16,
+  lake_r0 = 4,           -- BUG-033: the first wider box; lake_r only when the flood reaches its edge
   -- Run 11 (c1a14676 stood 'stalled' with its shaft open to a cavern lake): every explore shaft is looked at daily
   -- whatever its project's state, at most shaft_n per run, reading at most shaft_probe of its dug tiles for water
   shaft_n = 4, shaft_probe = 60, shaft_keep = 24, scan_n = 8, cav_levels = 32,
+  -- BUG-033 (Run 11 site98, y438: runner 35 ms/s in PEACE, frames up to 447 ms): the check is sliced (the stopped
+  -- digs and the bp scan one slice, then one shaft a slice); a finished explore (done, cancelled, gone) whose last
+  -- look found water in reach but no cavern is looked at every fin_every (a dry one and live ones stay daily); a bp
+  -- file is decoded only when it is an explore's (and once a boot: what the check needs of it is kept, S.xdoc)
+  fin_every = 8 * DAY,
 }
 local MODES = {dig = true, build = true, place = true, zone = true, burrow = true}
 local CLASSES = {defense = true, infra = true, living = true, beauty = true}
@@ -173,6 +179,7 @@ end
 
 local function forget(id)
   for k in pairs(S.tiles) do if k:sub(1, #id + 1) == id .. '/' then S.tiles[k] = nil end end
+  if S.own then S.own[id] = nil end                -- BUG-033: own_tiles cache
   S.bbox[id], S.meas[id] = nil, nil
   if S.rt and S.rt.skip then S.rt.skip[id], S.rt.rty[id], S.rt.pb[id] = nil, nil, nil end   -- BUG-022 records
   if S.rt and S.rt.br then S.rt.br[id] = nil end    -- Run 11: the breach record (m.runner cav outlives the project)
@@ -658,8 +665,11 @@ for dz = -1, 1 do
   end
 end
 
--- every tile the project's stages name: water there lies in our own excavation (seepage), not in a natural body
+-- every tile the project's stages name: water there lies in our own excavation (seepage), not in a natural body.
+-- BUG-033: kept per project (S.own; forget and door_walls drop it): the damp reports and the daily check ask often
 local function own_tiles(P, d)
+  S.own = S.own or {}
+  if S.own[P.id] then return S.own[P.id] end
   local own = {}
   for si = 0, #d.stages - 1 do
     local tiles = stage_tiles(P.id, d, si)
@@ -667,6 +677,7 @@ local function own_tiles(P, d)
       for _, t in ipairs(tiles[ci]) do own[tkey(t[1], t[2], t[3])] = true end
     end
   end
+  S.own[P.id] = own
   return own
 end
 
@@ -696,38 +707,61 @@ end
 -- that water, or none of the sampled water under the open sky), 'water' (such a body on the surface: a brook, a
 -- river), 'cavern' (a revealed cavern tile beside pos), else nil (seepage: damp stays damp). Second value: the
 -- connected water tiles counted. own = the project's own tiles (own_tiles / doc_own).
-local function opened_at(K, own, pos)
+-- lq (BUG-033): a memo of the liquids reads, shared by the candidates of one shaft look (the same column: the same
+-- wide boxes on overlapping levels)
+local function opened_at(K, own, pos, lq)
   local x, y, z = int(pos and pos[1]), int(pos and pos[2]), int(pos and pos[3])
   if not (x and y and z) then return nil, 0 end
   local wet = {}
-  -- the flood starts only at pos or a tile beside it: a dry 3x3x3 needs no wide read (the daily shaft check asks often)
-  for _, r in ipairs({1, M.CFG.lake_r}) do
-    for dz = -1, 1 do
-      local ok, list = K.call('snapshot', 'liquids', x - r, y - r, x + r, y + r, z + dz, 1)
-      for _, w in ipairs(ok and type(list) == 'table' and list or {}) do
-        wet[tkey(w[1], w[2], z + dz)] = {w[1], w[2], z + dz}
+  local function liquids(x0, y0, x1, y1, zz)
+    local key = x0 .. ',' .. y0 .. ',' .. x1 .. ',' .. y1 .. ',' .. zz
+    local hit = lq and lq[key]
+    if hit then return true, hit end
+    local ok, list = K.call('snapshot', 'liquids', x0, y0, x1, y1, zz, 1)
+    if lq and ok and type(list) == 'table' then lq[key] = list end
+    return ok, list
+  end
+  -- the flood starts only at pos or a tile beside it: a dry 3x3x3 needs no wider read (the daily shaft check asks
+  -- often); BUG-033: the box then grows (lake_r0, then lake_r) only while the flood reaches its edge, so a pocket of
+  -- seepage costs a 9x9 read, not the 25x25 one
+  local seen, queue, n, body
+  local function flood(r)
+    seen, queue, n, body = {}, {}, 0, {}
+    local edge = false
+    local function push(k) if wet[k] and not seen[k] then seen[k] = true; queue[#queue + 1] = wet[k] end end
+    push(tkey(x, y, z))
+    for _, o in ipairs(N26) do push(tkey(x + o[1], y + o[2], z + o[3])) end
+    local i = 1
+    while i <= #queue do
+      local t = queue[i]
+      i = i + 1
+      if math.max(math.abs(t[1] - x), math.abs(t[2] - y)) >= r then edge = true end
+      if not own[tkey(t[1], t[2], t[3])] then
+        n = n + 1
+        if #body < 16 then body[#body + 1] = t end
       end
+      for dy = -1, 1 do
+        for dx = -1, 1 do if dx ~= 0 or dy ~= 0 then push(tkey(t[1] + dx, t[2] + dy, t[3])) end end
+      end
+      push(tkey(t[1], t[2], t[3] - 1))
+      push(tkey(t[1], t[2], t[3] + 1))
     end
-    if next(wet) == nil then break end
+    return edge
   end
-  local seen, queue, n, body = {}, {}, 0, {}
-  local function push(k) if wet[k] and not seen[k] then seen[k] = true; queue[#queue + 1] = wet[k] end end
-  push(tkey(x, y, z))
-  for _, o in ipairs(N26) do push(tkey(x + o[1], y + o[2], z + o[3])) end
-  local i = 1
-  while i <= #queue do
-    local t = queue[i]
-    i = i + 1
-    if not own[tkey(t[1], t[2], t[3])] then
-      n = n + 1
-      if #body < 16 then body[#body + 1] = t end
+  local radii = {1, math.min(M.CFG.lake_r0 or M.CFG.lake_r, M.CFG.lake_r), M.CFG.lake_r}
+  for ri, r in ipairs(radii) do
+    if ri == 1 or r > radii[ri - 1] then
+      for dz = -1, 1 do
+        local ok, list = liquids(x - r, y - r, x + r, y + r, z + dz)
+        for _, w in ipairs(ok and type(list) == 'table' and list or {}) do
+          wet[tkey(w[1], w[2], z + dz)] = {w[1], w[2], z + dz}
+        end
+      end
+      if next(wet) == nil then break end
+      if ri > 1 and (not flood(r) or ri == #radii) then break end
     end
-    for dy = -1, 1 do
-      for dx = -1, 1 do if dx ~= 0 or dy ~= 0 then push(tkey(t[1] + dx, t[2] + dy, t[3])) end end
-    end
-    push(tkey(t[1], t[2], t[3] - 1))
-    push(tkey(t[1], t[2], t[3] + 1))
   end
+  if not seen then flood(M.CFG.lake_r) end
   local function cav(t) local v = tile_at(K, t[1], t[2], t[3]); return v ~= nil and v.cav == true end
   local found = cav({x, y, z})
   for _, o in ipairs(N26) do
@@ -738,14 +772,15 @@ local function opened_at(K, own, pos)
     if found then break end
     found = cav(t)
   end
+  -- third value (BUG-033): the water tiles the flood reached ('x,y,z' set): a candidate among them answers the same
   if n >= M.CFG.lake_min then
-    if found then return 'cavern_lake', n end
+    if found then return 'cavern_lake', n, seen end
     local ok, outs = K.call('snapshot', 'outside_near', body, 0)   -- an underground body without the cavern flag
-    for _, o in ipairs(ok and type(outs) == 'table' and outs or {}) do if o == 1 then return 'water', n end end
-    return 'cavern_lake', n
+    for _, o in ipairs(ok and type(outs) == 'table' and outs or {}) do if o == 1 then return 'water', n, seen end end
+    return 'cavern_lake', n, seen
   end
-  if found then return 'cavern', n end
-  return nil, n
+  if found then return 'cavern', n, seen end
+  return nil, n, seen
 end
 
 function M.opened(K, P, d, pos) return opened_at(K, own_tiles(P, d), pos) end
@@ -822,7 +857,7 @@ local function walled(K, s0, s1)
   return v1 ~= nil and v1.c == 'C', 'below'
 end
 
--- Run 11 (c1a14676): the explore's shaft record m.runner xs[<id>] (see shaft_check), made from d, else its bp file,
+-- Run 11 (c1a14676): the explore's shaft record m.runner xs[<id>] (see shaft_prep), made from d, else its bp file,
 -- when the project is first looked at, done or cancelled (it outlives the project); nil for other templates or
 -- without a stair column. raw_tiles: a stage's tiles per chunk, not cached (the record must not keep caches alive).
 local function raw_tiles(d, si)
@@ -835,9 +870,35 @@ local function raw_tiles(d, si)
   return out
 end
 
+-- BUG-033 (Run 11: every boot decoded each bp file of the fort, twice for the non-explores, 8 files a run, and every
+-- daily look decoded a finished explore's file again): only an explore's file is decoded (the files are compact JSON,
+-- Python's files.dumps and util/json alike: the template reads `"tpl":"explore"`), once a boot. What the check needs
+-- of it is kept in S.xdoc[id] = {stages = {{mode}}, tiles = {[si] = per-chunk dig tiles}, own = its tiles}, or false.
 local function file_doc(K, id)
-  local d = read_bp(K, id)
-  if d and check_doc(d, 'explore') == nil then return d end
+  S.xdoc = S.xdoc or {}
+  local c = S.xdoc[id]
+  if c ~= nil then return c or nil end
+  S.xdoc[id] = false
+  local f = io.open(K.cfg.paths.save .. '/bp/' .. id .. '.json', 'rb')
+  if not f then return nil end
+  local raw = f:read('a')
+  f:close()
+  if type(raw) ~= 'string' or not raw:find('"tpl":"explore"', 1, true) then return nil end
+  local d = json.try_decode(raw)
+  if type(d) ~= 'table' or d == json.null or check_doc(d, 'explore') ~= nil then return nil end
+  c = {stages = {}, tiles = {}, own = doc_own(d)}
+  for si, st in ipairs(d.stages) do
+    c.stages[si] = {mode = st.mode}
+    if st.mode == 'dig' then c.tiles[si - 1] = raw_tiles(d, si - 1) end
+  end
+  S.xdoc[id] = c
+  return c
+end
+
+-- a stage's tiles per chunk of a live document (uncached) or of a file_doc record
+local function tiles_fn(d)
+  if d.tiles then return function(si) return d.tiles[si] or {} end end
+  return function(si) return raw_tiles(d, si) end
 end
 
 local function note_shaft(K, P, d)
@@ -846,7 +907,7 @@ local function note_shaft(K, P, d)
   if type(r) == 'table' then return r end
   d = d or file_doc(K, P.id)
   if type(d) ~= 'table' or type(d.stages) ~= 'table' then return nil end
-  local col = column_of(d, function(si) return raw_tiles(d, si) end, nil)
+  local col = column_of(d, tiles_fn(d), nil)
   if not col then return nil end
   r = {x = col.x, y = col.y, top = col.top, low = col.low, t = now(K)}
   S.rt.xs[P.id] = r
@@ -1266,6 +1327,7 @@ local function door_walls(K, P, d, st, ch, n)
   end
   K.persist.set('bp.' .. P.id, d)
   for k in pairs(S.tiles) do if k:sub(1, #P.id + 1) == P.id .. '/' then S.tiles[k] = nil end end
+  if S.own then S.own[P.id] = nil end
   dirty()
   return got
 end
@@ -1762,7 +1824,7 @@ local function shaft_look(K, t, id, r)
   local d = live and doc(K, id) or nil
   local fd = not d and file_doc(K, id) or nil
   local own
-  if d then own = own_tiles(P, d) elseif fd then own = doc_own(fd) else
+  if d then own = own_tiles(P, d) elseif fd then own = fd.own else
     own = {}
     for z = r.low, r.top do own[tkey(r.x, r.y, z)] = true end
   end
@@ -1780,14 +1842,19 @@ local function shaft_look(K, t, id, r)
   for _, w in ipairs(sh.wet) do add(w) end
   local dd = d or fd
   if dd and #cands < 4 then
-    local tiles_of = d and function(si) return stage_tiles(id, d, si) end or function(si) return raw_tiles(fd, si) end
+    local tiles_of = d and function(si) return stage_tiles(id, d, si) end or tiles_fn(fd)
     for _, w in ipairs(wet_tiles(K, dd, tiles_of, M.CFG.shaft_probe, 4)) do add(w) end
   end
   local hit, kind, cnt, best, bk = nil, nil, nil, 0, nil
+  -- BUG-033: the candidates share their liquids reads, and one inside the water an earlier flood reached is skipped
+  local lq, covered = {}, {}
   for _, cp in ipairs(cands) do
-    local k, n = opened_at(K, own, cp)
-    if (n or 0) > best then best, bk = n, k end
-    if k and CAVERN[k] then hit, kind, cnt = cp, k, n; break end
+    if not covered[tkey(cp[1], cp[2], cp[3])] then
+      local k, n, seen = opened_at(K, own, cp, lq)
+      for key in pairs(seen or {}) do covered[key] = true end
+      if (n or 0) > best then best, bk = n, k end
+      if k and CAVERN[k] then hit, kind, cnt = cp, k, n; break end
+    end
   end
   local was = live and P.blocked:match('^breach:(.+)$') or nil
   -- a cavern stop from a report without a tile: the explore shaft is plugged anyway (a dead end into the cavern)
@@ -1815,7 +1882,9 @@ local function shaft_look(K, t, id, r)
   return state, label .. ' -> ' .. out .. cover, sh.bot
 end
 
-local function shaft_check(K, t, parts)
+-- the shafts to look at this run (at most shaft_n, the never seen first) and how many more are due; also notes the
+-- explores without a record and scans the bp folder (scan_n files a run)
+local function shaft_prep(K, t)
   S.xseen, S.xmiss = S.xseen or {}, S.xmiss or {}
   for _, P in ipairs(S.pd.list) do        -- explores queued before the check existed (or by an older kernel)
     if P.tpl == 'explore' and S.rt.xs[P.id] == nil and not S.xmiss[P.id] then
@@ -1845,15 +1914,18 @@ local function shaft_check(K, t, parts)
     if r then r.fin = 'gone' end
   end
   -- due: not looked at since the boot, else daily; a stopped explore keeps its stop's cadence (m.runner br: a fresh
-  -- stop was looked at when it came, one without a record at once)
-  local function every(c) return not int(c) or t - c >= M.CFG.recheck or t < c end
+  -- stop was looked at when it came, one without a record at once); BUG-033: a finished one whose last look found water
+  -- in reach but no cavern (r.q) every fin_every
+  local function every(c, per) return not int(c) or t - c >= (per or M.CFG.recheck) or t < c end
   local due = {}
   for id, r in pairs(S.rt.xs) do
     if type(r) ~= 'table' or not (int(r.x) and int(r.y) and int(r.top) and int(r.low)) then S.rt.xs[id] = nil; dirty()
     elseif r.off ~= 1 then
       local P, b = find(id), S.rt.br[id]
       local stopped = P ~= nil and P.done ~= 1 and RECHECK[P.blocked]
-      if not S.xseen[id] or (stopped and every(type(b) == 'table' and b.c or nil)) or (not stopped and every(r.c)) then
+      local live = P ~= nil and P.done ~= 1
+      local per = (not live and r.q == 1) and M.CFG.fin_every or nil
+      if not S.xseen[id] or (stopped and every(type(b) == 'table' and b.c or nil)) or (not stopped and every(r.c, per)) then
         due[#due + 1] = id
       end
     end
@@ -1865,20 +1937,32 @@ local function shaft_check(K, t, parts)
     if (ra.c or -1) ~= (rb.c or -1) then return (ra.c or -1) < (rb.c or -1) end
     return a < b
   end)
-  for i = 1, math.min(#due, M.CFG.shaft_n) do
-    local id = due[i]
-    local r, P = S.rt.xs[id], find(id)
-    r.c, S.xseen[id] = t, true
-    if P and P.done ~= 1 and RECHECK[P.blocked] then
-      if type(S.rt.br[id]) ~= 'table' then S.rt.br[id] = {} end
-      S.rt.br[id].c = t
-    end
-    dirty()
-    local state, res, bot = shaft_look(K, t, id, r)
-    parts[#parts + 1] = string.format('%s %d,%d z%d-%d %s: %s', id, r.x, r.y, r.top, bot or r.low, state, res)
+  local list = {}
+  for i = 1, math.min(#due, M.CFG.shaft_n) do list[i] = due[i] end
+  return list, math.max(0, #due - M.CFG.shaft_n)
+end
+
+-- one shaft look (its own slice, BUG-033): the log part
+local function shaft_one(K, t, id, parts)
+  local r, P = S.rt.xs[id], find(id)
+  if type(r) ~= 'table' then return end
+  r.c, S.xseen[id] = t, true
+  if P and P.done ~= 1 and RECHECK[P.blocked] then
+    if type(S.rt.br[id]) ~= 'table' then S.rt.br[id] = {} end
+    S.rt.br[id].c = t
   end
-  if #due > M.CFG.shaft_n then parts[#parts + 1] = string.format('%d more next run', #due - M.CFG.shaft_n) end
-  -- at most shaft_keep records: the ones with nothing left to watch go first, then those of projects that left the list
+  dirty()
+  local state, res, bot = shaft_look(K, t, id, r)
+  P = find(id)
+  -- a finished shaft with water in reach but no cavern (the costly look: the wide water boxes) waits fin_every; a dry
+  -- one (a 3x3x3 read per candidate) stays daily
+  r.q = (not (P ~= nil and P.done ~= 1) and type(res) == 'string' and res:find('^no cavern %(%d+ water') ~= nil) and 1
+        or nil
+  parts[#parts + 1] = string.format('%s %d,%d z%d-%d %s: %s', id, r.x, r.y, r.top, bot or r.low, state, res)
+end
+
+-- at most shaft_keep records: the ones with nothing left to watch go first, then those of projects that left the list
+local function shaft_trim()
   local ids = {}
   for id in pairs(S.rt.xs) do ids[#ids + 1] = id end
   if #ids > M.CFG.shaft_keep then
@@ -1896,12 +1980,28 @@ local function shaft_check(K, t, parts)
   end
 end
 
--- the daily look at stopped digs and explore shafts; one log line per run that looked (the live session reads why a
--- shaft is or is not plugged there), and one at the first run after a boot even when there is nothing to look at
-local function recheck(K, t)
-  local parts = {}
-  recheck_stops(K, t, parts)
-  shaft_check(K, t, parts)
+-- the daily look at stopped digs and explore shafts (task 'check' of every run, every mode; BUG-033: sliced, the
+-- stopped digs and the bp scan in the first slice, then one shaft a slice): one log line per run that looked (the live
+-- session reads why a shaft is or is not plugged there), and one at the first run after a boot even when there is
+-- nothing to look at. -> 'yield' (more slices) or 'done'
+local function check_task(K, t)
+  local c = S.chk
+  if not c then
+    c = {parts = {}}
+    recheck_stops(K, t, c.parts)
+    c.due, c.more = shaft_prep(K, t)
+    S.chk = c
+    if #c.due > 0 then return 'yield' end
+  end
+  local id = table.remove(c.due, 1)
+  if id then
+    shaft_one(K, t, id, c.parts)
+    if #c.due > 0 then return 'yield' end
+  end
+  S.chk = nil
+  local parts = c.parts
+  if c.more > 0 then parts[#parts + 1] = string.format('%d more next run', c.more) end
+  shaft_trim()
   if #parts > 0 then
     if #parts > 9 then parts = {table.unpack(parts, 1, 8)}; parts[9] = '...' end
     K.log('info', 'cavern check: %s', table.concat(parts, '; '))
@@ -1909,6 +2009,7 @@ local function recheck(K, t)
     K.log('info', 'cavern check: no explore shaft and no stopped dig to look at')
   end
   S.xlog = true
+  return 'done'
 end
 
 local function cancel(K, P, with_undo)
@@ -2437,8 +2538,9 @@ function M.remake_why(K, P, d)
 end
 
 function M.remake(K, P, d, R)
+  if P.tpl ~= 'seal' or (int(R.rm) or 0) >= M.CFG.remake_max then return false end   -- BUG-033: before the cell reads
   local can, why = M.remake_why(K, P, d)
-  if not can or (int(R.rm) or 0) >= M.CFG.remake_max then return false end
+  if not can then return false end
   R.rm = (int(R.rm) or 0) + 1
   K.log('info', '%s %s: lost pieces placed again (%d/%d): economy can make them%s', P.id, d.stages[P.stage + 1].label,
         R.rm, M.CFG.remake_max, why and ('; ' .. why) or '')
@@ -2565,8 +2667,7 @@ local function end_run(K)
       end
     end
   end
-  recheck(K, t)                              -- Run 11: cavern stops, the plug's wall (every mode)
-  plug_watch(K)
+  plug_watch(K)                              -- Run 11: the plug's wall (every mode); the check ran as its own task
   phases(K)
   if K.mode() == 'PEACE' then exhausted(K) end
   if DEPOT_MODES[K.mode()] then M.depot_keep(K, 'keeper') end
@@ -2608,8 +2709,9 @@ local function begin_run(K)
       end
     end
   end
+  tasks[#tasks + 1] = {k = 'check'}           -- Run 11 cavern stops and shafts (BUG-033: sliced)
   tasks[#tasks + 1] = {k = 'end'}
-  S.run = {tasks = tasks, i = 1}
+  S.run, S.chk = {tasks = tasks, i = 1, t = t}, nil
 end
 
 ---------------------------------------------------------------- module interface
@@ -2667,6 +2769,7 @@ function M.step(K, budget, ctx)
     local P = task.id and find(task.id)
     local r = 'done'
     if task.k == 'end' then end_run(K)
+    elseif task.k == 'check' then r = check_task(K, run.t or now(K)) == 'yield' and 'yield' or 'done'   -- the run's tick
     elseif P and task.k == 'undo' then r = undo(K, P)
     elseif P and task.k == 'work' and P.done ~= 1 and not halted(P) then
       -- the mode may change between slices of one run (SIEGE/BREACH freeze the runner at once)

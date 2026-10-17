@@ -2,7 +2,8 @@
 -- One repeat-util frame callback dispatches every module; eventful callbacks only enqueue;
 -- all files are written from here (state a/b, events, heartbeat, outbox, logs). Boot is a no-op
 -- without the site marker, except healing a crashed restore.json (runtime settings, any save).
--- Cost owners (FR-62): every module call is booked to its module; the kernel's own housekeeping to
+-- Cost owners (FR-62): every module call is booked to its module (BUG-033: a K.call from one module into
+-- another to the CALLER, with the edge 'caller>callee' kept); the kernel's own housekeeping to
 -- k.state (state a/b), k.io (event/log files, heartbeat), k.persist (site data; a module's own keys are
 -- booked to it), k.inbox (inbox without the verb handlers), k.events (eventful queue without the
 -- handlers); the remainder is `kern` (the dispatcher). Pacing, demotion hysteresis, the fort-size
@@ -125,10 +126,10 @@ local function build(o)
               ev_n = 0, seq = 0, mode = 'PEACE', mode_since = 0, view = nil, flush_req = false,
               last_state_ms = nil, last_hb_ms = nil, last_inbox_ms = nil, last_ev_flush_ms = 0,
               last_persist_ms = 0, inbox_pending = {}, inbox_retry = {}, inbox_stuck = {}, once = {},
-              buckets = {}, p = {ms = 0, frames = 0, gap_max = 0, gaps3 = 0, unpaused_ms = 0, mods = {}},
+              buckets = {}, p = {ms = 0, frames = 0, gap_max = 0, gaps3 = 0, unpaused_ms = 0, mods = {}, via = {}},
               dropped = 0, report_any = false, report_types = {}, ev_listen = {}, kern_faults = 0,
-              rot_warned = {}, io_warned = {}, cum = {}, cum_ms = 0, load = sched.load(-1, 0),
-              pool = sched.pool(), frame_paced = 0, boosts = {}}
+              rot_warned = {}, io_warned = {}, cum = {}, cum_via = {}, cum_ms = 0, load = sched.load(-1, 0),
+              pool = sched.pool(), frame_paced = 0, boosts = {}, top_ring = {}}
   st.now = {tick = abs_now(), ytick = df.global.cur_year_tick, year = df.global.cur_year,
             season = df.global.cur_year_tick // SEASON, ms = dfhack.getTickCount(), wall = os.time(),
             paused = df.global.pause_state == true, frame = 0}
@@ -218,20 +219,27 @@ local function build(o)
   -- (factor x2) or raise KERN_FAULT 'slow' for a critical one (at most once per 10 min). KERNEL_SLOW is
   -- emitted once per module per 6 h, later demotions are only logged; promotion needs quiet running
   -- time (frame loop, sched.quiet) that doubles after each flip (CONTRACTS §3.3.6, FR-62)
-  local function charge(e, where, ms)
+  -- BUG-033: svc = ms of the call spent in K.calls of other modules: a slow call is judged on the module's own code
+  -- (its calls into others are paced as its cost, but neither demote it nor the callee); the messages name the callee
+  -- with the most time when there was any (top)
+  local function charge(e, where, ms, svc, top)
     if NO_CHARGE[where] then return end
+    if svc then ms = ms - svc end
     local act, report = sched.slow(e, ms, dfhack.getTickCount(), where)
     if not act then return end
     local msr = round(ms)
+    local via = (svc and top and svc >= 1) and string.format('; +%d ms in %s calls', round(svc), top) or ''
     if act == 'fault' then
-      emit_as('kern', 'KERN_FAULT', 'A', e.name .. ' slow (' .. msr .. ' ms)', {module = e.name, err = 'slow', n = KN.slow_n})
+      emit_as('kern', 'KERN_FAULT', 'A', e.name .. ' slow (' .. msr .. ' ms' .. via .. ')',
+              {module = e.name, err = 'slow', n = KN.slow_n})
       return
     end
     if report then
-      emit_as('kern', 'KERNEL_SLOW', 'B', e.name .. ' demoted x' .. e.factor, {module = e.name, ms = msr, factor = e.factor})
+      emit_as('kern', 'KERNEL_SLOW', 'B', e.name .. ' demoted x' .. e.factor .. (via ~= '' and (' (' .. via:sub(3) .. ')') or ''),
+              {module = e.name, ms = msr, factor = e.factor})
     else
-      log_as('kern', 'info', string.format('%s demoted x%d (%d ms; already reported; promotion after %d quiet min)',
-                                           e.name, e.factor, msr, sched.quiet_need(e) // 60000))
+      log_as('kern', 'info', string.format('%s demoted x%d (%d ms%s; already reported; promotion after %d quiet min)',
+                                           e.name, e.factor, msr, via, sched.quiet_need(e) // 60000))
     end
     st.flush_req = true
   end
@@ -244,25 +252,53 @@ local function build(o)
   st.book = book
 
   local child_ms = 0
+  local svc = nil      -- BUG-033: {ms, by = {callee = ms}} of the K.calls inside the running call_in
   local function call_in(e, where, f, ...)
-    local prev, saved = st.current, child_ms
-    st.current, child_ms = e.name, 0
+    local prev, saved, svc0 = st.current, child_ms, svc
+    st.current, child_ms, svc = e.name, 0, nil
     local t0 = cost_ms()
     local r = table.pack(xpcall(f, debug.traceback, K, ...))
     local dt = cost_ms() - t0
     local self_ms = dt - child_ms
-    st.current, child_ms = prev, saved + dt
+    local mine = svc
+    st.current, child_ms, svc = prev, saved + dt, svc0
     e.ms_total = e.ms_total + self_ms
     book(e.name, self_ms)
     sched.spend(e, self_ms)
     if not e.critical and not e.boost then st.frame_paced = st.frame_paced + self_ms end
     if self_ms > st.frame_top_ms then st.frame_top_ms, st.frame_top = self_ms, e.name end
     if not r[1] then fault(e, where, r[2]); return false, r[2] end
-    charge(e, where, self_ms)
+    local top, tms = nil, 0
+    for k, v in pairs(mine and mine.by or {}) do if v > tms then top, tms = k, v end end
+    charge(e, where, self_ms, mine and mine.ms, top)
     return table.unpack(r, 1, r.n)
   end
   st.call_in = call_in
   st.frame_top_ms, st.frame_top = 0, nil
+
+  -- BUG-033: a K.call from one module into another (snapshot.tile/liquids/far, runner.dig_backlog, ...) is part of the
+  -- CALLER's work: its time stays in the caller's self time (booked and paced there; slow calls are judged on the own
+  -- code), so a service module's own pacing debt never grows from queries it did not choose (Run 11: snapshot's debt
+  -- from the other modules' tile and water reads kept its exports waiting for months). The callee's share is recorded
+  -- as the edge 'caller>callee' (perf.csv, inspect modules `svc`); faults still count against the callee.
+  local function call_via(caller, e, where, f, ...)
+    local prev, saved, svc0 = st.current, child_ms, svc
+    st.current, child_ms, svc = e.name, 0, nil
+    local t0 = cost_ms()
+    local r = table.pack(xpcall(f, debug.traceback, K, ...))
+    local dt = cost_ms() - t0
+    local nested = child_ms                    -- handlers inside it, booked to other owners already
+    st.current, child_ms, svc = prev, saved + nested, svc0
+    local own = dt - nested                    -- (a K.call the callee makes in turn is inside it, edge kept too)
+    if svc then svc.ms, svc.by[e.name] = svc.ms + own, (svc.by[e.name] or 0) + own
+    else svc = {ms = own, by = {[e.name] = own}} end
+    local edge = caller.name .. '>' .. e.name
+    st.p.via[edge] = (st.p.via[edge] or 0) + own
+    st.cum_via[edge] = (st.cum_via[edge] or 0) + own
+    e.svc_ms = (e.svc_ms or 0) + own
+    if not r[1] then fault(e, where, r[2]); return false, r[2] end
+    return table.unpack(r, 1, r.n)
+  end
 
   -- kernel housekeeping booked as its own owner (k.state, k.io, ...); module calls inside it stay with
   -- the modules (child time). Errors propagate to the frame's xpcall as before.
@@ -360,8 +396,9 @@ local function build(o)
     if not r then return false, err end
     if r == 'new' then
       st.boosts[e.name] = e
-      log_as('kern', 'info', string.format('%s boosted: %s (paced at %d ms/s, not demoted; background work of the ' ..
-                                           'other modules waits)', e.name, e.boost.why, round(sched.rate(e))))
+      log_as('kern', 'info', string.format('%s boosted: %s (paced at %d ms/s, not demoted%s)', e.name, e.boost.why,
+                                           round(sched.rate(e)), busy and '; background work of the other modules waits'
+                                           or ''))
     end
     return true
   end
@@ -393,6 +430,8 @@ local function build(o)
     if e.disabled then return false, 'disabled' end
     local f = e.M[fn]
     if type(f) ~= 'function' then return false, 'no function ' .. tostring(fn) end
+    local caller = st.mods[st.current or '']
+    if caller and caller ~= e then return call_via(caller, e, 'call ' .. tostring(fn), f, ...) end   -- BUG-033
     return call_in(e, 'call ' .. tostring(fn), f, ...)
   end
   function K.view() return st.view or {} end
@@ -584,6 +623,40 @@ end
 local SHRINK = {'proj', 'alert', 'mil', 'trade', 'care', 'labor', 'stock', 'ready', 'bridges', 'threat', 'pop',
                 'phase'}
 
+-- BUG-033: the top cost owner of the last minute for state k.top (doctor and status name it in one line), e.g.
+-- 'runner 35 (snapshot 20)': the owner's ms per real second and, in brackets, the module its K.calls spent the most
+-- in; nil before 10 s of samples. Samples of the cumulative costs are kept every 2 s for 60 s.
+M.TOP_MS, M.TOP_EVERY_MS = 60000, 2000
+local function top_owner(st)
+  local now, ring = st.now.ms, st.top_ring
+  local last = ring[#ring]
+  if not last or now - last.at >= M.TOP_EVERY_MS then
+    local cum, via = {}, {}
+    for k, v in pairs(st.cum) do cum[k] = v end
+    for k, v in pairs(st.cum_via) do via[k] = v end
+    ring[#ring + 1] = {at = now, cum = cum, via = via}
+    while #ring > 2 and now - ring[2].at >= M.TOP_MS do table.remove(ring, 1) end
+  end
+  local first = ring[1]
+  local secs = (now - first.at) / 1000
+  if secs < 10 then return nil end
+  local best, bms = nil, 0
+  for k, v in pairs(st.cum) do
+    local d = (v - (first.cum[k] or 0)) / secs
+    if d > bms or (d == bms and best and k < best) then best, bms = k, d end
+  end
+  if not best or bms < 0.5 then return nil end
+  local callee, cms = nil, 0
+  for k, v in pairs(st.cum_via) do
+    local a, b = k:match('^([^>]+)>(.+)$')
+    local d = (v - (first.via[k] or 0)) / secs
+    if a == best and d > cms then callee, cms = b, d end
+  end
+  local s = string.format('%s %d', best, round(bms))
+  if callee and cms >= 0.5 then s = s .. string.format(' (%s %d)', callee, round(cms)) end
+  return trunc(s, 40)
+end
+
 local function compose(st)
   st.seq = st.seq + 1
   local now, w = st.now, window(st)
@@ -600,6 +673,7 @@ local function compose(st)
                     abs = now.tick, wall = now.wall, frame = now.frame},
                k = {ms_s = w.ms_s, gap_max_ms = w.gap, slow = slow, faults = faults, ms_max = w.fmax}}
   if #disabled > 0 then doc.k.disabled = disabled end
+  doc.k.top = top_owner(st)
   for _, e in ipairs(st.entries) do
     if not e.disabled and e.M.state then
       local ok, part = st.call_in(e, 'state', e.M.state)
@@ -785,7 +859,9 @@ local function kern_verb(st, verb, args, cmd)
                    share = not e.critical and round(e.share) or nil, debt = not e.critical and round(e.debt) or nil,
                    paced = e.paced_n > 0 and e.paced_n or nil, stretch_pct = round((e.stretch or 1) * 100),
                    flips = e.flips > 0 and e.flips or nil, demotions = e.demotions,
-                   boost = e.boost and e.boost.why or nil}
+                   boost = e.boost and e.boost.why or nil,
+                   -- BUG-033: ms this module spent in K.calls of other modules (booked to the callers)
+                   svc = (e.svc_ms or 0) >= 0.5 and round(e.svc_ms) or nil}
     end
     return true, 'modules', {modules = r, load = M.load_info(st), budget = sched.budget(st.load)}
   elseif what == 'persist' then
@@ -793,7 +869,7 @@ local function kern_verb(st, verb, args, cmd)
       if not C.persist_key(args.key) then return false, 'unknown persist key' end
       return true, args.key, K.persist.get(args.key) or json.object{}
     end
-    return true, 'persist', {keys = st.pstore.keys()}
+    return true, 'persist', {keys = st.pstore.keys(), bytes = json.object(st.pstore.sizes())}   -- BUG-033: sizes
   elseif what == 'perf' then
     local w = window(st)
     local d = {ms_s = w.ms_s, tps = w.tps, gap_max_ms = w.gap, ms_max = w.fmax, dropped = st.dropped,
@@ -1371,7 +1447,7 @@ function M.K() return S and S.K end
 function M.perf_take()
   if not S then return nil end
   local p = S.p
-  S.p = {ms = 0, frames = 0, gap_max = 0, gaps3 = 0, unpaused_ms = 0, mods = {}}
+  S.p = {ms = 0, frames = 0, gap_max = 0, gaps3 = 0, unpaused_ms = 0, mods = {}, via = {}}
   p.dropped = S.dropped
   return p
 end
@@ -1380,9 +1456,10 @@ end
 -- (modules and the k.* parts), at = getTickCount of the current frame
 function M.costs()
   if not S then return nil end
-  local mods = {}
+  local mods, via = {}, {}
   for k, v in pairs(S.cum) do mods[k] = v end
-  return {ms = S.cum_ms, at = S.now.ms, mods = mods}
+  for k, v in pairs(S.cum_via) do via[k] = v end       -- BUG-033: 'caller>callee' ms (inside the caller's mods)
+  return {ms = S.cum_ms, at = S.now.ms, mods = mods, via = via}
 end
 
 -- fort-size load {units, items, f} and the kernel budget (ms per real second) that fits it (FR-62)

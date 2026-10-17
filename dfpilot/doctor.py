@@ -15,8 +15,11 @@ EVENTS_WARN_B = 5 << 20
 # kernel budget for the fort size, mirrors lua/dfllm/util/sched.lua (S.LOAD.units, S.BUDGET; FR-62): 25 ms/s on the
 # reference fort (150 units), +6 per 150 units above it (critical modules scan every unit), at most 40
 LOAD_UNITS, BUDGET_PER_UNIT, BUDGET_MAX = 150, 6, 40
-# perf.csv mods keys that are not cost owners: DFHack's counter for the whole frame callback (a cross-check)
+# perf.csv mods keys that are not cost owners: DFHack's counter for the whole frame callback (a cross-check); BUG-033:
+# 'caller>callee' keys are the part of the caller's own entry spent in another module's code (its K.calls)
 NOT_OWNERS = ("repeat",)
+# BUG-033: a snapshot request waiting this long (state snap.old_s) is a starving export queue
+SNAP_STARVE_S = 300
 
 
 def budget_for(units: int) -> int:
@@ -61,17 +64,58 @@ def perf_summary(rows: list[dict]) -> dict:
         by_mode.setdefault(r["mode"], []).append(r["tps"])
     mods: dict[str, int] = {}
     cross: dict[str, int] = {}
+    via: dict[str, int] = {}
     for r in rows:
         for k, v in r["mods"].items():
-            d = cross if k in NOT_OWNERS else mods
+            d = via if ">" in k else cross if k in NOT_OWNERS else mods
             d[k] = d.get(k, 0) + v
     return {"rows": len(rows), "span_s": span, "last": rows[-1],
             "tps": {m: (int(statistics.median(v)), min(v), max(v)) for m, v in by_mode.items()},
             "ms_s_avg": round(sum(r["ms_s"] for r in rows) / len(rows)), "ms_s_max": max(r["ms_s"] for r in rows),
             "gap_max": max(r["gap_max_ms"] for r in rows), "gaps3": sum(r["gaps3"] for r in rows),
             "mods": sorted(((k, v / span) for k, v in mods.items()), key=lambda x: -x[1]),
+            "via": sorted(((k, v / span) for k, v in via.items()), key=lambda x: -x[1]),
             "repeat": cross["repeat"] / span if "repeat" in cross else None,
             "budget": budget_for(rows[-1]["units"])}
+
+
+def _mins(secs: int) -> str:
+    return f"{secs // 60} min" if secs >= 60 else f"{secs} s"
+
+
+def top_cost(s: dict) -> str | None:
+    """BUG-033: the top cost owner of the perf window in one line, with the module its K.calls spent the most in
+    (a K.call is booked to the caller): 'top cost: runner 35.0 ms/s (snapshot 20.0 of it, in its calls)'."""
+    if not s or not s.get("mods"):
+        return None
+    name, ms = s["mods"][0]
+    edges = [(k.split(">", 1)[1], v) for k, v in s.get("via") or [] if k.split(">", 1)[0] == name]
+    out = f"top cost: {name} {ms:.1f} ms/s"
+    if edges and edges[0][1] >= 0.1:
+        out += f" ({edges[0][0]} {edges[0][1]:.1f} of it, in its calls)"
+    return out
+
+
+def snap_queue(state: dict | None) -> tuple[str | None, bool]:
+    """BUG-033: the snapshot export queue (state snap) in one line, and whether it starves (the oldest request waits
+    >= SNAP_STARVE_S: dfllm audit and bp sites --fresh get no file)."""
+    sn = (state or {}).get("snap")
+    if not isinstance(sn, dict):
+        return None, False
+    q, old, drop = sn.get("q") or 0, sn.get("old_s") or 0, sn.get("drop") or 0
+    if not q:
+        return (f"snapshot queue: empty ({sn.get('done', 0)} written, {drop} dropped this boot)" if drop else None), False
+    run = ""
+    if sn.get("run"):
+        wait = sn.get("wait") or ""
+        run = (f"; first {sn['run']} {sn.get('p', '?')} by {sn.get('by', '?')} {sn.get('pct', 0)}%"
+               + (f" ({wait})" if wait else ""))
+    line = (f"snapshot queue: {q} waiting, oldest {_mins(old)}{run}"
+            + (f"; {drop} dropped this boot" if drop else ""))
+    # a big export that gets its slices is slow, not starving: the first one waits ('busy ...', 'paced N min',
+    # 'not started N min')
+    wait = str(sn.get("wait") or "")
+    return line, old >= SNAP_STARVE_S and (wait.startswith("busy") or wait.endswith(" min"))
 
 
 def diagnose(save_dir: Path) -> tuple[list[str], list[str]]:
@@ -101,6 +145,7 @@ def diagnose(save_dir: Path) -> tuple[list[str], list[str]]:
         top = " ".join(f"{k} {v:.1f}" for k, v in s["mods"][:8])
         if s["mods"]:
             out.append("modules ms/s: " + top)
+            out.append(top_cost(s))
         if s["repeat"] is not None:            # FR-62: the same frame time, timed again by DFHack
             out.append(f"DFHack repeat counter {s['repeat']:.1f} ms/s: the whole dfllm frame callback (unpaused frames, "
                        f"getTickCount clock), a cross-check of the kernel total, not a module")
@@ -134,6 +179,12 @@ def diagnose(save_dir: Path) -> tuple[list[str], list[str]]:
                    + (f" ms_max {k['ms_max']}" if "ms_max" in k else ""))
         if k.get("disabled"):
             bad.append(f"disabled modules: {','.join(k['disabled'])}")
+        sq, starving = snap_queue(state)           # BUG-033
+        if sq:
+            out.append(sq)
+        if starving:
+            bad.append(f"snapshot exports starve ({sq.split(': ', 1)[1]}): dfllm audit and bp sites --fresh get no file "
+                       f"(kern.log 'snapshot:' lines; BUG-033)")
     evs = files.tail_events(d, 0, limit=300, types={"KERNEL_SLOW", "KERN_FAULT", "PERF_DEGRADED", "ACT_FAIL", "ORDER_BAD"})
     for e in evs[-6:]:
         out.append(f"  #{e['n']} {e['type']}: {e.get('msg', '')}")

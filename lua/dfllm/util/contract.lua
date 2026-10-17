@@ -209,7 +209,7 @@ C.STATE_OWNERS = {
   ['threat.*'] = 'threat', ['bridges'] = 'gate', ['owners.*'] = 'arbiter',
   ['mil.*'] = 'military', ['trade.*'] = 'trade',
   ['clock.*'] = 'arbiter', ['alarm.*'] = 'reflex', ['lever.*'] = 'gate',
-  ['alert.*'] = 'seal', ['wave.*'] = 'siege',
+  ['alert.*'] = 'seal', ['wave.*'] = 'siege', ['snap.*'] = 'snapshot',
 }
 
 -- Persistent site-data keys (§10). Stored as dfhack.persistent site strings encoded with util/json.
@@ -302,7 +302,9 @@ C.STATE_SPEC = obj({
   t = obj({y = NAT, tick = int(0, 403199), season = int(0, 3), tps = NAT, paused = BOOL},
           {abs = NAT, wall = NAT, frame = NAT}),
   mode = str(nil, C.MODES),
-  k = obj({ms_s = NAT, gap_max_ms = NAT, slow = arr(MODULE), faults = NAT}, {disabled = arr(MODULE), ms_max = NAT}),
+  -- BUG-033: top = the top cost owner of the last minute, 'runner 35 (snapshot 20)'
+  k = obj({ms_s = NAT, gap_max_ms = NAT, slow = arr(MODULE), faults = NAT},
+          {disabled = arr(MODULE), ms_max = NAT, top = str(40)}),
   ev = NAT,
 }, {
   save = str(120), phase = str(nil, nil, 'phase'),
@@ -340,6 +342,12 @@ C.STATE_SPEC = obj({
   -- intake waves (siege, Gordon 2026-10-16): phase, wave count, the last refusal, the sortie squad and phase; BUG-030:
   -- deep = the deep defense's reasons ('destroyers,army,weak')
   wave = obj({ph = str(8), n = NAT}, {why = str(40), so = str(24), deep = str(24)}),
+  -- BUG-033: the snapshot export queue: requests waiting (the running one included), the oldest one's age (s), exports
+  -- written and requests dropped this boot; the running (else the first waiting) export: id, purpose, who asked,
+  -- progress, why it waits
+  snap = obj({q = NAT, old_s = NAT, done = NAT, drop = NAT},
+             {run = str(nil, nil, 'id'), p = str(nil, {'audit', 'sites', 'debug'}), by = str(24), pct = PCT,
+              wait = str(24)}),
 })
 
 -- string formats (§1.1); explicit byte ranges, so LC_CTYPE cannot change them

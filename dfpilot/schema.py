@@ -100,7 +100,7 @@ STATE_OWNERS = {
     "stock.pick_want": "economy", "stock.hosp_water": "care", "care.*": "care", "labor.*": "economy", "orders.*": "economy",
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
     "clock.*": "arbiter", "alarm.*": "reflex", "lever.*": "gate",
-    "alert.*": "seal", "wave.*": "siege",
+    "alert.*": "seal", "wave.*": "siege", "snap.*": "snapshot",
 }
 
 # kernel fault and slowness rules (CONTRACTS §3.3.5-3.3.6), mirrors contract.KERN
@@ -656,8 +656,9 @@ STATE = Obj(
          "t": Obj(req={"y": NAT, "tick": Int(0, 403199), "season": Int(0, 3), "tps": NAT, "paused": Bool()},
                   opt={"abs": TICK, "wall": NAT, "frame": NAT}),
          "mode": MODE,
+         # BUG-033: top = the top cost owner of the last minute, 'runner 35 (snapshot 20)'
          "k": Obj(req={"ms_s": NAT, "gap_max_ms": NAT, "slow": Arr(MODULE), "faults": NAT},
-                  opt={"disabled": Arr(MODULE), "ms_max": NAT}),
+                  opt={"disabled": Arr(MODULE), "ms_max": NAT, "top": Str(maxbytes=40)}),
          "ev": NAT},
     opt={"save": Str(maxbytes=120), "phase": PHASE,
          "pop": Obj(opt={"cit": NAT, "adults": NAT, "soldiers": NAT, "cap": NAT, "gate_cap": NAT}),
@@ -711,7 +712,13 @@ STATE = Obj(
          # intake waves (siege, Gordon 2026-10-16): phase, waves so far, the last refusal, the sortie (squad phase)
          # BUG-030: deep = the deep defense's reasons ("destroyers,army,weak")
          "wave": Obj(req={"ph": Str(maxbytes=8), "n": NAT}, opt={"why": Str(maxbytes=40), "so": Str(maxbytes=24),
-                                                                 "deep": Str(maxbytes=24)})})
+                                                                 "deep": Str(maxbytes=24)}),
+         # BUG-033: the snapshot export queue: requests waiting (the running one included), the oldest one's age (s),
+         # exports written and requests dropped this boot; the running (else the first waiting) export: id, purpose,
+         # who asked, progress, why it waits ('busy trade', 'paced 3 min', 'not started 2 min')
+         "snap": Obj(req={"q": NAT, "old_s": NAT, "done": NAT, "drop": NAT},
+                     opt={"run": ID, "p": Str(enum=["audit", "sites", "debug"]), "by": Str(maxbytes=24), "pct": PCT,
+                          "wait": Str(maxbytes=24)})})
 
 HEARTBEAT = Obj(req={"v": Const(V), "wall": NAT, "frame": NAT, "tick": TICK, "paused": Bool(), "mode": MODE,
                      "seq": NAT})

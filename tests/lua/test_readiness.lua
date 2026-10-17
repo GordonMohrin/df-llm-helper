@@ -316,7 +316,7 @@ T.test('audit snapshots: manifest bbox, monthly, after defense stages (1 day gap
   local W = world()
   day(W)
   T.eq(#W.snap.exports, 1)
-  T.eq(W.snap.exports[1].opts, {purpose = 'audit', bbox = {40, 0, 3, 78, 86, 12}})
+  T.eq(W.snap.exports[1].opts, {purpose = 'audit', bbox = {40, 0, 3, 78, 86, 12}, by = 'readiness'})
   day(W, 27)
   T.eq(#W.snap.exports, 1, 'monthly')
   day(W, 2)

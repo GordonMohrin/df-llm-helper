@@ -1,5 +1,101 @@
 # CHANGELOG dfpilot
 
+## The snapshot queue no longer starves: a K.call is the caller's cost, inbox exports go first; the runner's shaft check sliced and cheaper; doctor names a starving queue and the top cost (BUG-033; 2026-10-17; offline, live-untested)
+- **Why (Run 11, Kilrudrabed site98, y438 winter, kernel e3a62ab), for months:** `dfllm bp sites <tpl> --fresh --timeout
+  150` -> `no snapshot within 150s`; `dfllm audit` -> `snapshot refused: export queue full`; readiness `audit_old` (4.5
+  years); `plan check` on a stale snapshot (`explore: only 0 free site(s)`), so no explore while the fort had no iron and
+  0 bars. `dfllm doctor` in PEACE: kernel 54 ms/s on average, runner 35 ms/s, max 447 ms (limit 25), frame gap 21 s.
+- **Cause 1 (proven offline):** kern booked every `K.call` to the callee. The other modules' `snapshot.tile`,
+  `liquids` and `far` queries (runner probes and shaft check, economy's census and fishing search, water, care,
+  military, reflex) went into snapshot's pacing debt. Its export slices wait while that debt is over one second of its
+  share (6 ms/s, halved in the PEACE pool), so once the queries cost about that much, the running export never got
+  another slice. Test: 1,500 tile reads per runner run keep an 81,920-tile export from finishing for 10 min on the old
+  kernel; it finishes in about a minute now.
+- **Cause 2 (proven offline):** nothing ever left the queue. No age limit, no dedup by purpose or box, no priority.
+  readiness asked for a new audit every game month (about 75 s real time) whether its last one was exported or not, so
+  a stalled queue filled up (4 waiting + 1 running) and refused everything after it, naming nobody.
+- **Checked, not the cause:** trade's busy boost (BUG-026) is released (30 s TTL, unboost at LEAVE/IDLE, mode change,
+  back-off); an export now waits for it at most 3 min. A faulting export would also have held the queue (now dropped).
+- **Cause 3 (the runner's cost; suspected for the live numbers, measured offline as work):** the daily shaft check
+  (8cc2e8e) decoded every bp file of the fort after each boot, the non-explores twice, 8 files a run. Every look at a
+  finished explore decoded its file again. Up to 4 shafts ran in one slice, each wet candidate with a 25 x 25 x 3 water
+  read, every day, for every shaft. Offline (12 finished explores beside seepage): 16,064 tile and water reads a game
+  day before, 1,970 now.
+- **kern:** a `K.call` from one module into another is the caller's cost: booked and paced in the caller's step. A slow
+  call is judged on the module's own code, so such a call demotes neither side (the service was demoted for its
+  callers' queries before); KERNEL_SLOW/KERN_FAULT `slow` name the callee: `economy demoted x2 (+6 ms in snapshot
+  calls)`. The callee's part is kept as the edge `caller>callee`: perf.csv `mods` entries (no owners, not
+  added to `ms_s`), `inspect what=modules` `svc`, state `k.top` (`runner 35 (snapshot 20)`: the top owner of the last
+  minute and the module its calls spent the most in). Faults still count against the callee; a call from kern itself
+  (inspect) stays with it. A site-data record of 64 KB or more is named once a boot in kern.log (`persist m.runner: N KB
+  encoded (its owner pays each write, at most every 60 s)`); `inspect what=persist` adds `bytes`.
+  - Side effect: modules that query a lot (runner, economy's census and fishing search) are now paced for those
+    queries, so their passes take more real time; the totals stay within the shares and the pool.
+- **snapshot:** the queue now works as follows.
+  - Every request names who asked (`by`: `readiness`, `economy`, `inbox:cli`, `inbox:follow`, ...).
+  - An inbox request (a CLI or follow waits for its file) goes ahead of the kernel's own and runs boosted
+    (`sched.BOOST.shares.snapshot` 12 ms/s, never busy). A running kernel export waits at its row and resumes after it.
+  - In a full queue, an inbox request pushes the newest kernel request out.
+  - A request for the same purpose whose box equals, contains or lies in a waiting one joins it. One scan covers the
+    union box; each request id still gets its own file and SNAPSHOT_READY.
+  - `any` (economy's sand) is satisfied by any export queued or running.
+  - Dropped, with a kern.log warn `snapshot: dropped <ids> (...): <why>`: a request waiting longer than 15 min (inbox)
+    or 30 min (kernel), a running export without a slice for 10 min, an export whose slice failed twice.
+  - Refusal: `export queue full: running <id> <purpose> by <by> P% for T (<why it waits>); queued N: <id> <purpose> by
+    <by> T, ...`. Reply when queued: `queued snapshot <id> (next | in line N behind ... | joins <id> (...))`.
+  - kern.log when written: `snapshot: <ids> (<purpose>, N tiles, by <by>) written T after the request (T scanning)`.
+  - State `snap` = {q, old_s, done, drop, run, p, by, pct, wait}.
+- **readiness:** the monthly audit waits while its last audit snapshot is still queued or exporting (`snapshot.pending`,
+  kern.log `readiness: monthly audit waits for snapshot <id> ...`).
+- **runner, shaft check:** now its own task, sliced: the stopped digs and the bp scan in the first slice, then one shaft
+  a slice.
+  - Only an explore's bp file is decoded (the compact JSON names `"tpl":"explore"`), and once a boot.
+  - The water box grows 3x3, 9x9, 25x25 only while the flood reaches its edge. A candidate inside a flood already read
+    is skipped, and the candidates share their reads.
+  - A finished shaft whose last look found water in reach but no cavern (m.runner `xs.q`) is looked at every
+    `fin_every` (8 days). Dry ones and live explores stay daily; looks run at the run's start tick.
+  - Also: `own_tiles` is cached per project (damp reports, breach tests); `M.remake` checks its budget before it reads
+    the cells.
+- **doctor/status:**
+  - doctor line `top cost: runner 35.0 ms/s (snapshot 20.0 of it, in its calls)`.
+  - doctor line `snapshot queue: 5 waiting, oldest 12 min; first <id> audit by readiness 40% (paced 9 min)`.
+  - doctor problem `snapshot exports starve (...)` once the oldest request waits 5 min while the first one gets no
+    slices (`busy`, `paced N min`, `not started N min`); status then shows the queue line, and `top ...` in its kern line.
+- Contracts: CONTRACTS §3.3.8-9 (caller pays, edges, snapshot boost), §4 `K.call`, §7 `snapshot.export` (opts, note,
+  queue rules, refusal text) and `snapshot.pending`, §9.3 `k.top` and `snap` (schema, contract.lua, appendix), §9.11
+  perf.csv edges, §12 CAVERN_PLUG shaft check (`xs.q`), §13 `snapshot` verb, §19 SQ. RULES rows `snapshot` and
+  PERF_DEGRADED (no new lines).
+- Tests (fail on the old code):
+  - `tests/lua/test_snapshot_queue.lua` (new, 9 of 10 fail on e3a62ab; the fault case is a guard): the live starvation
+    on the real kernel; caller pays with perf.csv/inspect/state traces; the boosted inbox export ahead of a kernel one;
+    joins; the full queue; age/stall/fault drops and the busy cap; `any`, `pending` and state; readiness' monthly wait;
+    the persist size line.
+  - `tests/lua/test_runner_load.lua` (new, all 3 fail): the bp folder after a boot, the daily check's reads and slices,
+    the remake budget.
+  - `tests/test_doctor_load.py` (2 new): the edges are no owners, the top cost line, the starving queue line and problem.
+  - Adapted: `test_snapshot.lua` (a full queue of distinct boxes, the refusal text), `test_readiness.lua` (`by`),
+    `test_runner_shaft.lua` (each shaft keeps its own day phase).
+- **How to use:** nothing to send.
+  - A `snapshot refused: export queue full: ...` now names the running export, who asked and why it waits. Tell the
+    player; nothing to cancel by hand (it drops itself after its age or stall limit).
+  - `dfllm doctor`: read `top cost:` and the `snapshot queue:` line.
+- **Live check (Run 11 site98):** after `git pull` and `dfhack-run dfllm reload`, in PEACE:
+  - `dfllm audit` writes its snapshot within its 60 s. kern.log shows `snapshot boosted: export aud... for inbox:cli`,
+    then `snapshot: aud... (audit, N tiles, by inbox:cli) written T after the request`, then `snapshot boost ended`.
+    The audit is sent; `dfllm status` drops `audit_old` once readiness has it.
+  - `dfllm bp sites <tpl> --fresh --timeout 150` lists sites within about a minute; `plan check` sees free explore sites
+    again.
+  - `dfllm doctor` after 10 min: `top cost: ...` names the owner and its calls, perf.csv rows carry `runner>snapshot=`,
+    and no `snapshot exports starve` problem. runner should be within its share (about 4 ms/s, or 16 ms/s outside
+    PEACE).
+  - `dfllm cmd inspect '{"what":"modules"}'`: snapshot `svc` (ms served to others) and runner `debt`/`paced`/`factor`;
+    `{"what":"persist"}` `bytes`. A `persist <key>: N KB encoded` line in kern.log names a big record (m.runner: report
+    its size).
+  - kern.log `cavern check:` lines keep coming (one shaft a slice); `N more next run` should vanish after the first game
+    days; `readiness: monthly audit waits for snapshot ...` only while one is pending.
+  - If `snapshot exports starve` remains: read the `snapshot: ...` lines (who asked, why it waits) and `inspect modules`
+    for snapshot's `debt`, `paced`, `disabled`, and report them.
+
 ## A seal door that cannot stand becomes a constructed wall: the template checks the door rule, the runner walls a door quickfort refuses (2026-10-16; offline, live-untested)
 - **Why (Run 11, Kilrudrabed site98, y435 autumn, kernel c75b7c0):** the seal piece door 128,121,143 (project
   c1a147087d) stayed `build_lost` although the fort had 26 boulders and 171 logs. quickfort `#build d` on that tile by
