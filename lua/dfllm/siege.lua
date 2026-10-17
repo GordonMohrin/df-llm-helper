@@ -349,7 +349,10 @@ end
 -- a walk group that has the drink or food, standing in a burrow of the sounding civ alert: the confinement keeps them
 -- from it. seal marks that burrow dry when its audit finds none of it there (seal.dry), and the alert decision of this
 -- step (apply) confines to a burrow that has it or turns the alert off, even in a lockdown. STRANDED relax names them
--- (once per news).
+-- (once per news). Run 11 (siege 8: the refuge switched Tiefe+/Kern+ during the fight): in SIEGE and BREACH a move
+-- walks the citizens through the danger, so the mark waits for FIGHT_THIRST / FIGHT_HUNGER (DF's dehydrated and
+-- starving lines, ~25,000 ticks before death); below them kern.log says who waits (once per set) and the alert stays
+M.FIGHT_THIRST, M.FIGHT_HUNGER = 50000, 75000
 local function relax_step(K, G)
   if not mem.burrow or (alert_idx() or 0) == 0 then return end
   local bs = {}
@@ -363,32 +366,57 @@ local function relax_step(K, G)
   for _, id in ipairs(type(cu) == 'table' and type(cu.soldier_ids) == 'table' and cu.soldier_ids or {}) do
     sold[id] = true
   end
-  local by, names = {}, {}
+  local mode = K.mode()
+  local fight = mode == 'SIEGE' or mode == 'BREACH'
+  local mt, mh = fight and M.FIGHT_THIRST or M.STRAND_THIRST, fight and M.FIGHT_HUNGER or M.STRAND_HUNGER
+  local by, names, wait, wnames = {}, {}, {}, {}
+  local function note(set, list, name, c, gid, th, hu, nd, nf)
+    local r = set[name]
+    if not r then
+      r = {ids = {}, thirst = 0, hunger = 0, need = {}, pos = {c[2], c[3], c[4]}, g = gid}
+      set[name], list[#list + 1] = r, name
+    end
+    r.ids[#r.ids + 1] = c[1]
+    r.thirst, r.hunger = math.max(r.thirst, th), math.max(r.hunger, hu)
+    if nd then r.need.drink = true end
+    if nf then r.need.food = true end
+  end
   for _, gid in ipairs(sorted_keys(G.cit)) do
     for _, c in ipairs(G.cit[gid]) do
       local u = not sold[c[1]] and df.unit.find(c[1])
       if u and not patient(u) then
         local th, hu = counter(u, 'thirst_timer'), counter(u, 'hunger_timer')
-        local nd = th > M.STRAND_THIRST and G.drink[gid] == true
-        local nf = hu > M.STRAND_HUNGER and G.food[gid] == true
-        if nd or nf then
+        local wd = th > M.STRAND_THIRST and G.drink[gid] == true
+        local wf = hu > M.STRAND_HUNGER and G.food[gid] == true
+        if wd or wf then
+          local nd, nf = wd and th > mt, wf and hu > mh
           for _, e in ipairs(bs) do
             local ok, v = pcall(dfhack.burrows.isAssignedTile, e[2], {x = c[2], y = c[3], z = c[4]})
             if ok and v == true then
-              local r = by[e[1]]
-              if not r then
-                r = {ids = {}, thirst = 0, hunger = 0, need = {}, pos = {c[2], c[3], c[4]}, g = gid}
-                by[e[1]], names[#names + 1] = r, e[1]
-              end
-              r.ids[#r.ids + 1] = c[1]
-              r.thirst, r.hunger = math.max(r.thirst, th), math.max(r.hunger, hu)
-              if nd then r.need.drink = true end
-              if nf then r.need.food = true end
+              if nd or nf then note(by, names, e[1], c, gid, th, hu, nd, nf)
+              else note(wait, wnames, e[1], c, gid, th, hu, wd, wf) end
               break
             end
           end
         end
       end
+    end
+  end
+  -- Run 11: below the fight mark the alert stays; kern.log names them once per set
+  local wsig = {}
+  for _, name in ipairs(wnames) do
+    local r = wait[name]
+    table.sort(r.ids)
+    wsig[#wsig + 1] = name .. ':' .. table.concat(r.ids, ',')
+  end
+  wsig = table.concat(wsig, ';')
+  if wsig ~= (mem.relax_wait or '') then
+    mem.relax_wait = wsig
+    for _, name in ipairs(wnames) do
+      local r = wait[name]
+      K.log('warn', 'siege: %d citizen%s thirsty or hungry in %s (thirst %d, hunger %d; %s on their walk group) during ' ..
+            'the %s: the alert stays (a move walks them through the danger); it lets them out at thirst %d or hunger %d',
+            #r.ids, #r.ids == 1 and '' or 's', name, r.thirst, r.hunger, needs_txt(r), mode, mt, mh)
     end
   end
   for _, name in ipairs(names) do
@@ -847,8 +875,10 @@ end
 -- burrow (seal.choose). BUG-018: seal confines only to a separated burrow (or the dead end); flee = no burrow is
 -- separated, the alert goes off even in a lockdown. Without seal the mode's burrow as before. Returns on, burrow, held,
 -- note and brief (why not the mode's burrow, in full and short; nil when it is), audited (seal chose) and flee.
--- BUG-030: the deep defense in SIEGE asks for the separated refuge as a BREACH does (seal's BREACH level: no drink,
--- food or bed counts for breach_days; after it seal holds the refuge until back_days are quiet)
+-- BUG-030: the deep defense in SIEGE asks for the separated refuge as a BREACH does (seal's BREACH ask: the refuge with
+-- its drink first; Run 11: one without drink only once Kern+ is breached or open; after it seal holds the refuge until
+-- back_days are quiet). Run 11 (siege 8: the refuge switched Tiefe+/Kern+ during the fight): seal gets the burrow the
+-- sounding alert holds the citizens in, and keeps it in SIEGE/BREACH unless leaving it is worse than staying
 local function alert_plan(K, a, g, now)
   local held = alert_held(K)
   local mode = K.mode()
@@ -856,7 +886,8 @@ local function alert_plan(K, a, g, now)
   local on, burrow = alert_wanted(K, a, g, now, held), (mode == 'BREACH' or deep) and g.refuge or g.kern
   local note, brief, audited, flee
   if on then
-    local okb, pick, why, short, fl = K.call('seal', 'alert_burrow', deep and 'BREACH' or mode, burrow, held)
+    local cur = (alert_idx() or 0) ~= 0 and mem.burrow or nil
+    local okb, pick, why, short, fl = K.call('seal', 'alert_burrow', deep and 'BREACH' or mode, burrow, held, cur)
     if okb then
       burrow, on, audited, flee = pick, pick ~= nil, true, fl == true
       note, brief = type(why) == 'string' and why or nil, type(short) == 'string' and short or nil

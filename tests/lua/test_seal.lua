@@ -20,6 +20,9 @@ local function has(list, pat)
   for _, s in ipairs(list or {}) do if tostring(s):find(pat, 1, true) then return true end end
   return false
 end
+local function logged(W, pat)
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find(pat, 1, true) then return l end end
+end
 
 ---------------------------------------------------------------- the reach fort (z 5)
 -- room A x2-8 y2-8 (beds, drink, food), corridor y5 x9-11, room B x12-18 y2-8 (seeds); citizens 1-2 in A, 3-5 in B
@@ -405,9 +408,11 @@ T.test('refuge swap: BREACH confines to Tiefe+; held until 3 quiet days, then ba
   T.eq(#evs(W, 'REFUGE_FAIL'), 0)
 end)
 
-T.test('BUG-019: in BREACH the refuge needs no drink, food or beds (BREACH level) for breach_days; then the counts ' ..
-       'again (Kern+)', function()
-  -- old code: "REFUGE_FAIL alert burrow Tiefe+ refused (Tiefe+: drink 0<5, food 0<5, ...): confining to Kern+"
+T.test('BUG-019 + Run 11: in BREACH a refuge without drink is taken only once Kern+ is breached (a goblin inside), ' ..
+       'at the BREACH level for breach_days; while Kern+ holds, its drink keeps the citizens there; during the fight ' ..
+       'the dry refuge is kept (no switch back through the fort) until its window is spent (REFUGE_SWITCH window)',
+       function()
+  -- old code: in BREACH the dry Tiefe+ at once (Kern+ intact), and back to Kern+ whenever the free pick said so
   local W = refuge_fort{kern = {2, 2, Z, 8, 8, Z}, items = false}
   SW.item(W, 'DRINK', 6, 6, Z, 10)
   SW.item(W, 'PLANT', 6, 3, Z, 10)
@@ -415,19 +420,37 @@ T.test('BUG-019: in BREACH the refuge needs no drink, food or beds (BREACH level
   local d = inspect(W, 'refuge')
   T.eq({d.burrows['Tiefe+'].ok, d.burrows['Tiefe+'].counts, d.burrows['Tiefe+'].breach, d.burrows['Tiefe+'].sep},
        {0, 0, 1, 1}, d.burrows['Tiefe+'].why)
-  T.eq(d.choice.BREACH, {want = 'Tiefe+', burrow = 'Tiefe+', level = 'BREACH'})
+  T.eq(d.choice.BREACH, {want = 'Tiefe+', burrow = 'Kern+', level = 'SIEGE'}, 'Kern+ has the drink and holds')
   W.set_mode('BREACH')
-  local ok, pick = W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')
-  T.eq({ok, pick}, {true, 'Tiefe+'})
-  T.eq(#evs(W, 'REFUGE_FAIL'), 0, 'the pick is the refuge: no refusal')
-  T.ok(W.logs[#W.logs].msg:find('Tiefe+ holds the citizens without drink, food or bed counts (BREACH level) for 7 days',
-       1, true), W.logs[#W.logs].msg)
-  W.run(6 * 1200, {skip = 9})
-  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')), 'Tiefe+', 'day 6: still')
-  W.run(1300, {skip = 9})
-  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')), 'Kern+', 'after 7 days the counts count')
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')), 'Kern+')
   local f = evs(W, 'REFUGE_FAIL')
-  T.ok(#f == 1 and f[1].d.burrow == 'Tiefe+' and f[1].d.why:find('drink 0<5', 1, true), f[1] and f[1].d.why)
+  T.ok(#f == 1 and f[1].d.burrow == 'Tiefe+' and f[1].d.why:find('Tiefe+: no drink (drink 0<5, no well)', 1, true),
+       f[1] and f[1].d.why)
+  -- a goblin in Kern+: the dry refuge at the BREACH level, the switch named
+  W.set_census('h', {tick = W.K.now().tick, vis = 1, armed = 1, inside = 1, list = {{id = 300, x = 4, y = 4, z = Z}}})
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+', false, 'Kern+')), 'Tiefe+')
+  T.ok(logged(W, 'seal: Tiefe+ holds the citizens without drink, food or bed counts (BREACH level) for 7 days'),
+       'kern.log')
+  local sw = evs(W, 'REFUGE_SWITCH')
+  T.eq({#sw, sw[1] and sw[1].cls, sw[1] and sw[1].d.from, sw[1] and sw[1].d.to, sw[1] and sw[1].d.why},
+       {1, 'B', 'Kern+', 'Tiefe+', 'breached'})
+  T.ok(sw[1].msg:find('alert burrow Kern+ -> Tiefe+ during the BREACH: Kern+ breached (a hostile inside)', 1, true),
+       sw[1].msg)
+  -- the goblin is gone: the free pick is Kern+ again, but the citizens stay in the refuge while it holds
+  W.set_census('h', {tick = W.K.now().tick, vis = 0, armed = 1, inside = 0, list = {}})
+  W.run(6 * 1200, {skip = 9})
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')), 'Kern+', 'the free pick')
+  local ok, pick, note, short = W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+', false, 'Tiefe+')
+  T.eq({ok, pick, note, short}, {true, 'Tiefe+', nil, nil}, 'day 6: kept')
+  T.eq(W.state().alert.burrow, 'Tiefe+', 'the state shows what the alert holds')
+  T.eq(#evs(W, 'REFUGE_SWITCH'), 1)
+  T.ok(logged(W, 'seal: the civ alert stays on Tiefe+ during the BREACH: a switch to Kern+ would walk the citizens ' ..
+       'through the danger'), 'kern.log names the kept burrow')
+  W.run(1300, {skip = 9})
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+', false, 'Tiefe+')), 'Kern+',
+       'after 7 days without drink: left for the burrow with drink')
+  sw = evs(W, 'REFUGE_SWITCH')
+  T.eq({#sw, sw[2].d.from, sw[2].d.to, sw[2].d.why}, {2, 'Tiefe+', 'Kern+', 'window'})
   -- config/reflex.json refuge.breach_days
   local W2 = refuge_fort{kern = {2, 2, Z, 8, 8, Z}, items = false}
   W2.K.cfg.reflex = {v = 2, refuge = {breach_days = 1}}
@@ -435,9 +458,11 @@ T.test('BUG-019: in BREACH the refuge needs no drink, food or beds (BREACH level
   SW.item(W2, 'PLANT', 6, 3, Z, 10)
   W2.run(300, {skip = 9})
   W2.set_mode('BREACH')
-  T.eq(select(2, W2.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')), 'Tiefe+')
+  W2.set_census('h', {tick = W2.K.now().tick, vis = 1, armed = 1, inside = 1, list = {{id = 300, x = 4, y = 4, z = Z}}})
+  T.eq(select(2, W2.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+', false, 'Kern+')), 'Tiefe+')
+  W2.set_census('h', {tick = W2.K.now().tick, vis = 0, armed = 1, inside = 0, list = {}})
   W2.run(1300, {skip = 9})
-  T.eq(select(2, W2.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')), 'Kern+', 'breach_days 1')
+  T.eq(select(2, W2.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+', false, 'Tiefe+')), 'Kern+', 'breach_days 1')
 end)
 
 ---------------------------------------------------------------- siege and sense hooks

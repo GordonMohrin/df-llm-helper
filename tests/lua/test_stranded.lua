@@ -385,33 +385,52 @@ T.test('BUG-030: O1 destroyed in a siege with every gate up: BREACH at once (why
 end)
 
 ---------------------------------------------------------------- BUG-031 (b): the confinement, not a bridge
-T.test('BUG-031 (b): BREACH holds the citizens in Tiefe+ (a room of the core without drink); one goes thirsty there ' ..
-       'while the core\'s drink is on his walk group: STRANDED relax, seal marks Tiefe+ dry and the alert moves to ' ..
-       'Kern+ in the same step (old: he stayed confined, nothing reacted, or "no rescue (the outside is not ' ..
-       'verified sealed)")', function()
+T.test('BUG-031 (b) + Run 11 (siege 8: the refuge switched Tiefe+/Kern+ during the fight): a goblin in Kern+ sends ' ..
+       'the citizens to Tiefe+ (a core room without drink: the BREACH refuge, REFUGE_SWITCH breached); the goblin is ' ..
+       'gone, one goes thirsty there (41000) with the drink on his walk group: in the BREACH the alert stays (old: ' ..
+       'STRANDED relax and the switch at once); dehydrated (51000): STRANDED relax, Tiefe+ marked dry, the alert to ' ..
+       'Kern+ (REFUGE_SWITCH dry)', function()
   local W = fort{tiefe = {47, 19, Z, 49, 21, Z}, units = {S.cit(11, 53, 12)}}
   W.lever.O1.linked_mechanisms = require('dfllm.util.k_mock').vec{}     -- O1 stays down: BREACH stays BREACH
   run(W, 1200)
   army(W)
   run(W, 300)
-  W.K.set_mode('BREACH', 'test')
-  run(W, 600)
-  T.eq({W.K.mode(), up(W, 'O1'), up(W, 'B1'), up(W, 'B2')}, {'BREACH', false, true, true})
-  T.eq(W.alert_burrows and W.alert_burrows[1], 'Tiefe+', 'confined to the refuge')
+  T.eq({W.K.mode(), W.alert_burrows and W.alert_burrows[1]}, {'SIEGE', 'Kern+'})
+  W.add_unit(S.inv(320, 58, 12, Z))                                      -- a goblin in the core (Kern+)
+  run(W, 300)
+  T.eq(W.K.mode(), 'BREACH')
+  T.eq(W.alert_burrows[1], 'Tiefe+', 'Kern+ breached: the refuge, without drink, for the BREACH window')
+  local sw = evs(W, 'REFUGE_SWITCH')
+  T.ok(#sw == 1 and sw[1].d.from == 'Kern+' and sw[1].d.to == 'Tiefe+' and sw[1].d.why == 'breached',
+       sw[1] and sw[1].msg)
+  W.unit(320)._m.hidden = true                                          -- out of sight: Kern+ is free again
+  run(W, 300)
+  T.eq({W.K.mode(), W.alert_burrows[1]}, {'BREACH', 'Tiefe+'}, 'kept: Kern+ would walk them back through the fort')
+  T.eq(#evs(W, 'REFUGE_SWITCH'), 1)
   W.move(11, 48, 20, Z)                                                 -- in Tiefe+, thirsty
   W.unit(11).counters2 = {thirst_timer = 41000, hunger_timer = 0}
+  run(W, 1000)
+  T.eq(#evs(W, 'STRANDED'), 0, 'below the fight mark (50,000): no relax')
+  T.eq(W.alert_burrows[1], 'Tiefe+')
+  local said
+  for _, l in ipairs(W.logs) do
+    if l.msg:find('siege: 1 citizen thirsty or hungry in Tiefe+ (thirst 41000, hunger 0; drink on their walk group) ' ..
+                  'during the BREACH: the alert stays', 1, true) then said = true end
+  end
+  T.ok(said, 'kern.log names who waits')
+  W.unit(11).counters2 = {thirst_timer = 51000, hunger_timer = 0}
   local n = 0
   while n < 30 and #evs(W, 'STRANDED') == 0 do run(W, 100); n = n + 1 end
   local e = evs(W, 'STRANDED')
   T.ok(#e == 1 and e[1].d.phase == 'relax', table.concat(phases(W), ','))
-  T.eq({e[1].d.units, e[1].d.burrow, e[1].d.need, e[1].d.thirst}, {{11}, 'Tiefe+', 'drink', 41000})
-  T.ok(e[1].msg:find('1 citizen confined to Tiefe+ without drink (thirst 41000, hunger 0; it is on their walk ' ..
+  T.eq({e[1].d.units, e[1].d.burrow, e[1].d.need, e[1].d.thirst}, {{11}, 'Tiefe+', 'drink', 51000})
+  T.ok(e[1].msg:find('1 citizen confined to Tiefe+ without drink (thirst 51000, hunger 0; it is on their walk ' ..
        'group): the alert lets them out (Tiefe+ holds no drink)', 1, true), e[1].msg)
   run(W, 100)
   T.eq(W.alert_burrows[1], 'Kern+', 'the burrow with the drink')
   T.eq(df.global.plotinfo.alerts.civ_alert_idx, 1, 'still confined, now where the drink is')
-  local f = evs(W, 'REFUGE_FAIL')
-  T.ok(#f >= 1 and f[#f].d.burrow == 'Tiefe+' and f[#f].d.fallback == 'Kern+' and f[#f].d.dry == 1, f[#f] and f[#f].msg)
+  sw = evs(W, 'REFUGE_SWITCH')
+  T.eq({#sw, sw[#sw].d.from, sw[#sw].d.to, sw[#sw].d.why}, {2, 'Tiefe+', 'Kern+', 'dry'})
   run(W, 1200)
   T.eq(#evs(W, 'STRANDED'), 1, 'once')
   T.eq(W.alert_burrows[1], 'Kern+', 'Tiefe+ stays refused while it holds no drink')

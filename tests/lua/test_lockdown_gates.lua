@@ -175,7 +175,8 @@ local function last_flip(W)
   return t
 end
 
-local function settle(W) run(W, 1800) end      -- seal's first audit and entrance check, Kern+ ok
+local function settle(W) run(W, 1800) end
+local M_RECALL = 2400                          -- reflex.RECALL_MAX      -- seal's first audit and entrance check, Kern+ ok
 
 T.test('the fort: Kern+ passes its audit, the four levers lie outside it, no manifest bridge', function()
   local W = fort()
@@ -201,8 +202,9 @@ T.test('BUG-013: a hostile near a citizen sounds the alert at once; every pull i
   T.eq({#arr, arr[1] and arr[1].d.kind}, {1, 'invader'})
   W.inbox('ack', {})
   local t0 = arr[1].tick
-  T.ok(arr[1].msg:find('alert: Kern+, doors 1 forbidden, gates: 0 of 4 up, 4 pulls pending (levers in Hebel+)', 1,
-       true), arr[1].msg)
+  -- Run 11: the woodcutter outside is the recall, named right after the alert
+  T.ok(arr[1].msg:find('alert: Kern+, recall: 1 outside Kern+, doors 1 forbidden, gates: 0 of 4 up, 4 pulls pending ' ..
+       '(levers in Hebel+)', 1, true), arr[1].msg)
   T.eq({arr[1].d.raised, arr[1].d.up, arr[1].d.left, arr[1].d.blocked}, {4, 0, 4, 0})
   T.eq(idx(), 1, 'a hostile near a citizen: the alert at once')
   local on = acts(W, 'civ_alert', true)
@@ -313,25 +315,107 @@ T.test('BUG-013: the deadline follows the measured lever latency: 2x, at least 4
   end
 end)
 
-T.test('BUG-013 + BUG-012: a door waits for a citizen outside ALERT_AFTER ticks after the alert began to call him ' ..
-       'in, not after the trigger (the alert waited for the pulls)', function()
+T.test('Run 11 recall (siege 8 y441: 16 citizens outside Kern+ at the arrival, 7 still outside at the breach): a ' ..
+       'citizen outside sounds the alert at once although the pulls are pending (old: it waited for the pulls, ~T+400 ' ..
+       'here); the pulls go on under it with Hebel+; the door waits for him RECALL_MAX ticks after the alert (old: 450); ' ..
+       'RECALL (B) late, then done with the ticks he took', function()
   local W = fort{units = {{id = 9, pos = {24, 9, Z + 1}, citizen = true, adult = true}}}
   settle(W)
   local door = W.dyn[SW.key(19, 10, Z)]
-  W.busy_until = W.K.now().tick + 300           -- the pulls take a while: the alert sounds at about T+400
+  W.busy_until = W.K.now().tick + 300           -- nobody takes a pull before T+300
   W.event('INVASION', {id = 5})
   run(W, 30)
   W.inbox('ack', {})
   local arr = W.find_events('ARRIVAL')[1]
   local t0 = arr.tick
-  T.ok(arr.msg:find('1 waiting for 1 citizen outside', 1, true), arr.msg)
-  run(W, 1200)
+  T.ok(arr.msg:find('alert: Kern+, recall: 1 outside Kern+, doors 0 forbidden, 1 waiting for 1 citizen outside', 1,
+       true), arr.msg)
+  T.eq({arr.d.out, arr.d.recall, arr.d.rc_left}, {1, 1, 1})
   local on = acts(W, 'civ_alert', true)[1]
+  T.ok(on and on.tick - t0 <= 10, 'the alert at once: T+' .. (on and on.tick - t0 or -1))
+  T.eq(W.alert_burrows, {'Kern+', 'Hebel+'}, 'pulls pending: the lever tiles are in the alert')
+  T.ok(logged(W, 'reflex: civ alert: Kern+ (1 citizen outside Kern+)'), 'kern.log says why the alert did not wait')
+  T.ok(logged(W, 'reflex: recall: 1 citizen outside Kern+ at the alert (arrival:invasion); called into Kern+, the ' ..
+       'doors wait for them up to 2400 ticks'), 'kern.log: the recall starts')
+  run(W, 900)
+  T.eq(up(W), 4, 'every pull done under the alert')
+  for _, tk in ipairs(W.taken) do T.eq(tk.alert, true) end
+  T.eq(door.door_flags.forbidden, false, 'T+900: the door still waits for him (old: forbidden at alert + 450)')
+  T.eq(#W.find_events('RECALL'), 0)
+  run(W, 1600)
   local f = acts(W, 'door_forbid', door.id)[1]
-  T.ok(on and on.tick - t0 > 300, 'the alert waited for the pulls: T+' .. (on and on.tick - t0 or -1))
-  T.ok(f and f.tick - on.tick >= 450 and f.tick - on.tick <= 480,
+  T.ok(f and f.tick - on.tick >= 2400 and f.tick - on.tick <= 2440,
        string.format('door at T+%d, alert at T+%d', f and f.tick - t0 or -1, on.tick - t0))
   T.eq(door.door_flags.forbidden, true)
+  local rc = W.find_events('RECALL')
+  T.eq(#rc, 1)
+  T.eq({rc[1].cls, rc[1].d.why, rc[1].d.n, rc[1].d.left, rc[1].d.units, rc[1].d.called}, {'B', 'late', 1, 1, {9}, 1})
+  T.ok(rc[1].msg:find('recall (arrival:invasion): 1 of 1 citizens still outside Kern+ after 24', 1, true), rc[1].msg)
+  -- he comes in at last (the alert still calls him; a door is no barrier to the walk group): done, with the ticks
+  W.move(9, 8, 12, Z)
+  run(W, 150)
+  rc = W.find_events('RECALL')
+  T.eq(#rc, 2)
+  T.eq({rc[2].d.why, rc[2].d.left, rc[2].d.n}, {'done', 0, 1})
+  T.ok(rc[2].d.ticks >= 2400, tostring(rc[2].d.ticks))
+  T.ok(rc[2].msg:find('recall (arrival:invasion): all 1 citizen outside Kern+ at the alert came in within', 1, true),
+       rc[2].msg)
+end)
+
+T.test('Run 11 recall (siege 8): 16 citizens outside Kern+ at the arrival: the alert at once, the door waits while they ' ..
+       'come home; the siege comes into sight with 7 still out (kern.log names them); RECALL done with the ticks, the ' ..
+       'door forbidden once the last one is in', function()
+  local units = {}
+  for i = 1, 16 do units[i] = {id = 100 + i, pos = {22 + i % 8, 15 + i // 8, Z + 1}, citizen = true, adult = true} end
+  local W = fort{units = units}
+  settle(W)
+  local door = W.dyn[SW.key(19, 10, Z)]
+  W.event('INVASION', {id = 8})
+  run(W, 30)
+  W.inbox('ack', {})
+  local arr = W.find_events('ARRIVAL')[1]
+  local t0 = arr.tick
+  T.ok(arr.msg:find('alert: Kern+, recall: 16 outside Kern+', 1, true), arr.msg)
+  T.eq({arr.d.out, arr.d.recall, arr.d.rc_left}, {16, 16, 16})
+  T.eq(idx(), 1, 'called in at once')
+  T.ok(logged(W, 'reflex: recall: 16 citizens outside Kern+ at the alert (arrival:invasion)'), 'kern.log')
+  for i = 1, 9 do W.move(100 + i, 5 + i % 6, 5 + i // 6, Z) end            -- nine are home
+  run(W, 300)
+  T.eq(door.door_flags.forbidden, false, 'seven still out')
+  -- six goblins come into sight at the far corner of the field (18+ tiles from the door): SIEGE
+  for i = 1, 6 do W.add_unit(S.inv(300 + i, 37 + i % 3, 21 + i // 3, Z + 1)) end
+  local n = 0
+  while W.K.mode() ~= 'SIEGE' and n < 20 do run(W, 30); n = n + 1 end
+  T.eq(W.K.mode(), 'SIEGE')
+  T.ok(logged(W, 'reflex: recall: 7 of 16 citizens still outside Kern+ at the SIEGE'), 'kern.log at the siege')
+  T.eq(door.door_flags.forbidden, false, 'the army is far from the door: it still waits')
+  for i = 10, 16 do W.move(100 + i, 5 + i % 6, 8 + i // 6, Z) end           -- the rest
+  run(W, 200)
+  local rc = W.find_events('RECALL')
+  T.eq(#rc, 1)
+  T.eq({rc[1].d.why, rc[1].d.n, rc[1].d.left, rc[1].d.called, rc[1].d.burrow}, {'done', 16, 0, 1, 'Kern+'})
+  T.ok(rc[1].d.ticks > 300 and rc[1].d.ticks < 1200, tostring(rc[1].d.ticks))
+  T.ok(rc[1].msg:find('recall (arrival:invasion): all 16 citizens outside Kern+ at the alert came in within', 1, true),
+       rc[1].msg)
+  T.eq(door.door_flags.forbidden, true, 'forbidden once nobody is left outside')
+  local f = acts(W, 'door_forbid', door.id)[1]
+  T.ok(f.tick - t0 < M_RECALL, 'before the recall window ended: T+' .. (f.tick - t0))
+end)
+
+T.test('Run 11 recall: nobody outside: the alert still waits for the pulls (BUG-013 unchanged), no recall', function()
+  local W = fort()
+  settle(W)
+  W.busy_until = W.K.now().tick + 300
+  W.event('INVASION', {id = 6})
+  run(W, 30)
+  W.inbox('ack', {})
+  local arr = W.find_events('ARRIVAL')[1]
+  T.ok(arr.msg:find('alert: after the gates', 1, true), arr.msg)
+  T.eq(arr.d.recall, nil)
+  run(W, 600)
+  local on = acts(W, 'civ_alert', true)[1]
+  T.ok(on and on.tick - arr.tick > 300, 'after the pulls: T+' .. (on and on.tick - arr.tick or -1))
+  T.eq(#W.find_events('RECALL'), 0)
 end)
 
 T.test('BUG-013: seal.lever_burrow keeps the lever tiles current: a new lever is painted, an erased tile comes back',

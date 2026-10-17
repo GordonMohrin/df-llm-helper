@@ -412,4 +412,65 @@ T.test('BUG-031 (b): citizens confined to the dead end went thirsty there (siege
   T.eq(select(2, W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+')), 'Tiefe+')
 end)
 
+---------------------------------------------------------------- Run 11, siege 8 (y441)
+T.test('Run 11 (siege 8: Tiefe+ had no drink): the deep defense (siege asks at the BREACH level in SIEGE) keeps the ' ..
+       'citizens in Kern+, separated and with its drink, instead of the dry dead end (old: Tiefe+ at the BREACH level ' ..
+       'for 7 days); a refuge with its drink is taken (WET) and not bound to the window', function()
+  local W = fort{door = true}
+  W.set_mode('SIEGE')
+  local d = inspect(W, 'refuge')
+  T.eq({d.burrows['Tiefe+'].sep, d.burrows['Tiefe+'].drink, d.burrows['Kern+'].ok}, {1, 0, 1})
+  local _, pick, note, short = W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')
+  T.eq({pick, short}, {'Kern+', 'REFUGE_FAIL Tiefe+'}, note)
+  T.ok(note:find('REFUGE_FAIL Tiefe+: no drink (drink 0<3, no well)', 1, true), note)
+  local f = evs(W, 'REFUGE_FAIL')
+  T.ok(#f >= 1 and f[#f].d.burrow == 'Tiefe+' and f[#f].d.fallback == 'Kern+' and f[#f].d.level == 'SIEGE',
+       f[#f] and f[#f].msg)
+  T.eq(inspect(W, 'refuge').bsince, nil, 'no breach days')
+  -- drink in the dead end (a barrel carried down): the refuge with its drink, without the 7-day window
+  SW.item(W, 'DRINK', 6, 7, Z - 4, 5)
+  W.run(2400, {skip = 9})
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')), 'Tiefe+')
+  W.run(9600, {skip = 9})
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')), 'Tiefe+', 'eight days later: still')
+  T.eq(inspect(W, 'refuge').bsince, nil, 'its drink: no breach days')
+end)
+
+T.test('Run 11 (siege 8: the alert switched between Tiefe+ and Kern+ during the fight): in SIEGE the dead end Tiefe+ ' ..
+       'holds the citizens while Kern+ is open; a door closes the entrance (Kern+ separated, its drink): the alert stays ' ..
+       'on Tiefe+ (old: back to Kern+, through the fort); a hostile in Tiefe+: the switch, REFUGE_SWITCH breached; ' ..
+       'outside a fight the free pick holds', function()
+  local W = fort()
+  W.set_mode('SIEGE')
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+')), 'Tiefe+', 'the dead end')
+  SW.draw(W, Z, {'+'}, 19, 10)
+  SW.regroup(W)
+  inspect(W, 'entrances', 'refresh')
+  W.run(1200, {skip = 9})
+  T.eq(inspect(W, 'refuge').burrows['Kern+'].sep, 1, 'the door separates Kern+')
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+')), 'Kern+', 'the free pick')
+  local _, kept, note, short = W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+', false, 'Tiefe+')
+  T.eq({kept, short}, {'Tiefe+', 'Tiefe+ kept (SIEGE)'}, note)
+  T.ok(note:find('Tiefe+ kept during the SIEGE: a switch to Kern+ would walk the citizens through the danger', 1, true),
+       note)
+  T.ok(logged(W, 'seal: the civ alert stays on Tiefe+ during the SIEGE: a switch to Kern+ would walk the citizens ' ..
+       'through the danger, and Tiefe+ is neither breached nor open'), 'kern.log')
+  T.eq(#evs(W, 'REFUGE_SWITCH'), 0)
+  T.eq(W.state().alert.burrow, 'Tiefe+')
+  -- a goblin in the dead end: Tiefe+ breached, the citizens go to Kern+
+  W.set_census('h', {tick = W.K.now().tick, vis = 1, armed = 1, inside = 0, list = {{id = 300, x = 6, y = 7, z = Z - 4}}})
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+', false, 'Tiefe+')), 'Kern+')
+  local sw = evs(W, 'REFUGE_SWITCH')
+  T.eq({#sw, sw[1].d.from, sw[1].d.to, sw[1].d.why, sw[1].d.mode}, {1, 'Tiefe+', 'Kern+', 'breached', 'SIEGE'})
+  T.ok(sw[1].msg:find('alert burrow Tiefe+ -> Kern+ during the SIEGE: Tiefe+ breached (a hostile inside)', 1, true),
+       sw[1].msg)
+  W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+', false, 'Tiefe+')
+  T.eq(#evs(W, 'REFUGE_SWITCH'), 1, 'once per switch')
+  -- a lockdown in PEACE is no fight: the free pick
+  W.set_census('h', {tick = W.K.now().tick, vis = 0, armed = 0, inside = 0, list = {}})
+  W.set_mode('PEACE')
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'PEACE', 'Kern+', true, 'Tiefe+')), 'Kern+')
+  T.eq(#evs(W, 'REFUGE_SWITCH'), 1)
+end)
+
 T.done()

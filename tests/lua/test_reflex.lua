@@ -359,9 +359,9 @@ T.test('alert without a Kern+ burrow: the lockdown reports it instead of failing
 end)
 
 T.test('BUG-013: the deferred alert waits for the pulls up to its deadline (900 ticks before a lever latency was ' ..
-       'measured, else 2x it, 450..1500), and not at all for a hostile near a citizen outside', function()
-  local units = S.fort_units()
-  units[#units + 1] = S.cit(9, 45, 9)                -- a woodcutter outside Kern+
+       'measured, else 2x it, 450..1500), and not at all for a citizen outside (Run 11: the recall) or a hostile near ' ..
+       'one', function()
+  local units = S.fort_units()                       -- everybody in Kern+ (the soldier does not count)
   local W = setup{tag = 'alertnear', manifest = false, units = units}
   W.lever_default = {}                               -- nobody takes the pulls: the gates never rise
   W.event('INVASION', {id = 3})
@@ -381,13 +381,19 @@ T.test('BUG-013: the deferred alert waits for the pulls up to its deadline (900 
     if l.msg:find(want, 1, true) then said = true end
   end
   T.ok(said, 'kern.log names the deadline and the pulls left')
-  local W2 = setup{tag = 'alertnear2', manifest = false, units = units}
+  local units2 = S.fort_units()
+  units2[#units2 + 1] = S.cit(9, 45, 9)              -- a woodcutter outside Kern+
+  local W2 = setup{tag = 'alertnear2', manifest = false, units = units2}
   W2.lever_default = {}
+  S.run(W2, 30)                                      -- sense's first census
   W2.event('INVASION', {id = 4})
-  S.run(W2, 60)
+  S.run(W2, 20)
+  T.eq(df.global.plotinfo.alerts.civ_alert_idx, 1, 'Run 11: a citizen outside: at once (the recall), pulls pending')
+  local a2 = events(W2, 'ARRIVAL')[1]
+  T.ok(a2.msg:find('alert: Kern+, recall: 1 outside Kern+', 1, true), a2.msg)
   W2.add_unit(S.inv(310, 46, 12))
   S.run(W2, 60)
-  T.eq(df.global.plotinfo.alerts.civ_alert_idx, 1, 'a hostile 3 tiles from the woodcutter: at once')
+  T.eq(df.global.plotinfo.alerts.civ_alert_idx, 1, 'a hostile 3 tiles from the woodcutter: still on')
   -- a lever latency measured before: 2 x 300 ticks
   local W3 = setup{tag = 'alertlat', manifest = false, units = units,
                    persist = {['m.gate'] = {v = 2, br = {}, kpi = {}, lat = {s = 10, t = 300}}}}
