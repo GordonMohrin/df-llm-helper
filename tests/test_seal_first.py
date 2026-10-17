@@ -102,3 +102,143 @@ def test_rules_name_the_first_move():
     rules = (ROOT / "RULES.md").read_text(encoding="utf-8")
     assert "| SEAL_STUCK |" in rules and "**Rebuild (Run 11):**" in rules
     assert len(rules.splitlines()) <= 300
+
+
+# ---------------------------------------------------------------- plan check / propose
+TPLS = ("tombs", "temple", "dining", "workshops", "fortcore", "explore", "bedrooms", "hospital", "tavern", "seal",
+        "stockroom", "cistern", "farms")
+OPEN = [{"proj": SEAL, "n": 3, "stuck": False, "days": 0}]
+
+
+@pytest.fixture
+def base(save):
+    return json.loads((save / "plan.json").read_text("utf-8")), files.read_state(save)
+
+
+def check(doc, state, **kw):
+    return plan.check(doc, state, decisions={}, banned=plan.BANNED, **kw)
+
+
+def added(doc, season, *builds):
+    d = copy.deepcopy(doc)
+    d["seasons"][season]["build"] += [dict(b) for b in builds]
+    return d
+
+
+def sealw(warn):
+    return [w for w in warn if "seal" in w and ("first" in w or "open" in w or "stuck" in w)]
+
+
+def test_check_warns_when_other_builds_come_before_a_seal(base):
+    prev, state = base
+    seal = {"tpl": "seal", "site": "S1", "p": {"at": "last"}}
+    temple = {"tpl": "temple", "site": "S1"}
+    _, warn = check(added(prev, 1, temple, seal), state, prev=prev, fort={})
+    assert ("seasons[1].build[2] seal comes after temple: seal first (Run 11 siege 8: a seal placed late was unfinished "
+            "at the attack); put it first in seasons[1]") in warn, warn
+    d = added(added(prev, 1, temple), 2, seal)
+    _, warn = check(d, state, prev=prev, fort={})
+    assert any(w.startswith("seasons[2].build[1] seal comes after temple") and w.endswith(
+        "move it to the front of seasons[1]") for w in warn), warn
+    _, warn = check(added(prev, 1, seal, temple), state, prev=prev, fort={})
+    assert sealw(warn) == [], "seal first: no warning"
+
+
+def test_check_warns_on_builds_an_open_seal_pauses(base):
+    prev, state = base
+    d = added(prev, 1, {"tpl": "temple", "site": "S1"}, {"tpl": "fortcore", "site": "same", "p": {"stage": 3}})
+    _, warn = check(d, state, prev=prev, fort={"seals": OPEN})
+    assert (f"seal {SEAL} (3 pieces open) is open: the runner pauses temple in PEACE until it is done (seal first); "
+            "food/drink only in an emergency") in warn, warn
+    _, warn = check(d, state, prev=prev, fort={"seals": [dict(OPEN[0], stuck=True, days=4)]})
+    assert any(w.startswith(f"seal {SEAL} (3 pieces open) is stuck for 4 d (SEAL_STUCK): fix it first") for w in warn)
+    _, warn = check(added(prev, 3, {"tpl": "temple", "site": "S1"}), state, prev=prev, fort={"seals": OPEN})
+    assert sealw(warn) == [], "a later season: not due now"
+
+
+def test_open_seals_reads_the_state_and_the_bp_folder(save):
+    s = files.read_state(save)
+    assert plan.open_seals(save, s) == []
+    (save / "bp" / "y3s1b1.json").write_text(json.dumps({"v": 2, "id": "y3s1b1", "tpl": "seal"}), encoding="utf-8")
+    assert plan.open_seals(save, s) == [], "the state's running projects do not list it (cancelled)"
+    s["proj"] = [["y3s1b1", "seal.build", 0, ""]] + s["proj"]
+    assert plan.open_seals(save, s) == [{"proj": "y3s1b1", "n": None, "stuck": False, "days": 0}]
+    assert plan.open_seals(save, {k: v for k, v in s.items() if k != "proj"})[0]["proj"] == "y3s1b1", "no rows: files"
+    s["sched"] = {"seal": {"proj": SEAL, "n": 2, "paused": 1, "stuck": 0}}
+    assert [x["proj"] for x in plan.open_seals(save, s)] == [SEAL, "y3s1b1"]
+    assert plan.fort_facts(save, s)["seals"][0] == {"proj": SEAL, "n": 2, "stuck": False, "days": 0}
+
+
+def rebuilt(state, cit=2, phase="P4", sched=True):
+    s = copy.deepcopy(state)
+    s["pop"]["cit"], s["phase"] = cit, phase
+    if sched:
+        s["sched"] = {"rb": {"pop": cit, "lo": 10, "hi": 12, "paused": 3}}
+    assert schema.validate("state", s) == []
+    return s
+
+
+def test_rebuild_propose_drafts_only_seal_tombs_food_and_beds(base):
+    _, state = base
+    phases = json.loads((FIX / "phases.json").read_text("utf-8"))
+    tinfo = {t: {"params": {}, "about": ""} for t in TPLS}
+    s = rebuilt(state)
+    doc = plan.propose(s, phases, None, decisions={}, tinfo=tinfo, applied=set(), fort={})
+    assert schema.validate("plan", doc) == []
+    tpls = [b["tpl"] for se in doc["seasons"] for b in se["build"]]
+    assert sorted(tpls) == ["bedrooms", "tombs"], tpls
+    assert doc["phase_target"] == "P4", "no phase raise in the rebuild"
+    assert "rebuild (pop 2 < 10, until 12): only seal/tombs/food/beds drafted (left out: tavern, temple); " \
+           "phase_target stays P4" in doc["notes"]
+    errs, warn = check(doc, s, tpls=list(TPLS), fort={})
+    assert not [w for w in warn if w.startswith("rebuild")], warn
+    _, warn = check(added(doc, 1, {"tpl": "temple", "site": "S1"}, {"tpl": "explore", "site": "S1"}), s,
+                    tpls=list(TPLS), fort={})
+    assert ("rebuild: pop 2 < 10: the runner pauses temple, explore until pop >= 12 (only seal, tombs, food/drink, beds "
+            "and the depot run); dfllm plan propose drafts only those") in warn, warn
+    # metal short (no ore, no bars, soldiers wanted): no metal error while the rebuild pauses an explore
+    m = copy.deepcopy(s)
+    m["stock"].update({"ore": 0, "bars": 0, "metal": "explore", "mshort": 1})
+    m.setdefault("mil", {})["worn"] = 40
+    mdoc = copy.deepcopy(doc)
+    mdoc["trade"]["want"] = []
+    errs, warn = check(mdoc, m, tpls=list(TPLS), fort={"metal": {"depot": False, "explore": False}})
+    assert not [e for e in errs if e.startswith("metal")], errs
+    assert [w for w in warn if w.startswith("metal")] == [
+        "metal: waits for the rebuild (pop 2 < 10): the runner pauses an explore until pop >= 12; trade.want only "
+        "meanwhile"], warn
+    n52 = copy.deepcopy(m)
+    n52.pop("sched")
+    n52["pop"]["cit"] = 52
+    assert [e for e in check(mdoc, n52, tpls=list(TPLS), fort={"metal": {"depot": False, "explore": False}})[0]
+            if e.startswith("metal")], "a fort of 52: the metal route is required"
+    d = copy.deepcopy(doc)
+    d["phase_target"] = "P5"
+    assert any(w.startswith("rebuild: phase_target P4 -> P5") for w in check(d, s, tpls=list(TPLS), fort={})[1])
+    # a normal fort of 52: the same propose drafts the P4/P5 builds and raises the target
+    n = plan.propose(rebuilt(state, cit=52, sched=False), phases, None, decisions={}, tinfo=tinfo, applied=set(),
+                     fort={})
+    assert {"tavern", "temple"} <= {b["tpl"] for se in n["seasons"] for b in se["build"]} and n["phase_target"] > "P4"
+    # an open seal: the note says housing waits for it
+    o = plan.propose(state, phases, None, decisions={}, tinfo=tinfo, applied=set(), fort={"seals": OPEN})
+    assert f"seal {SEAL} open: housing/work builds wait for it (seal first)" in o["notes"]
+
+
+def test_rebuild_state_without_the_kernels_record(save, tmp_path):
+    s = files.read_state(save)
+    assert plan.rebuild_state(rebuilt(s)) == {"pop": 2, "lo": 10, "hi": 12}
+    assert plan.rebuild_state(rebuilt(s, sched=False)) == {"pop": 2, "lo": 10, "hi": 12}, "an older kernel: pop.cit"
+    assert plan.rebuild_state(rebuilt(s, phase="P1", sched=False)) is None, "a new fort"
+    x = rebuilt(s, sched=False)
+    x["sched"] = {"seal": {"proj": SEAL, "n": 1, "paused": 0}}
+    assert plan.rebuild_state(x) is None, "the kernel publishes sched without rb: no rebuild"
+    cfg = tmp_path / "config"
+    cfg.mkdir(exist_ok=True)
+    (cfg / "baseline.json").write_text(json.dumps({"v": 2, "runner": {"rebuild": {"pop": 0}}}), encoding="utf-8")
+    assert plan.rebuild_state(rebuilt(s, sched=False)) is None, "rebuild.pop 0: off"
+    assert plan.build_kind({"tpl": "workshops", "site": "S1", "p": {"add": "Fishery", "skip": ",".join(
+        plan._moodable())}}) == "supply"
+    assert [plan.build_kind(b) for b in ({"tpl": "fortcore", "site": "S1", "p": {"stage": 1}},
+                                         {"tpl": "fortcore", "site": "same", "p": {"stage": 3}},
+                                         {"tpl": "refuge_beds", "site": "S1"}, {"tpl": "cistern", "site": "S1"})] == \
+        ["work", "defense", "beds", "supply"]

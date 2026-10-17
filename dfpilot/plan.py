@@ -16,9 +16,9 @@ import re
 from pathlib import Path
 
 from . import files, paths, schema
-from .cmd import (SAME, SEAL_AUDIT, BpError, BpUnavailable, audit_routes, bp_files, fmt_reply, fort_manifest,
-                  free_sites, last_entrances, log_seal, occupancy, place, rank_sites, refuge_head, refuge_open,
-                  seal_openings, send, sites_snapshot, template_info, template_names, write_bp)
+from .cmd import (SAME, SEAL_AUDIT, BpError, BpUnavailable, _moodable, audit_routes, bp_files, fmt_reply,
+                  fort_manifest, free_sites, last_entrances, log_seal, occupancy, place, rank_sites, refuge_head,
+                  refuge_open, seal_openings, send, sites_snapshot, template_info, template_names, write_bp)
 
 R_CAPS = {0: 55, 1: 55, 2: 75, 3: 250}    # DESIGN §5.4; R3 (>= 80) only with D-01 = B
 OPTION_A_MAX = 75
@@ -51,6 +51,17 @@ STONE_DIG = {"tpl": "bedrooms", "site": "S1", "p": {"n": 4}}
 HOSPITAL = "hospital"                     # bp/rooms.py: beds, traction bench, its own well spot (location=hospital)
 CISTERN = {"tpl": "cistern", "site": "S1"}    # bp/rooms.py: a well over real water (a pipe from a brook, or bucket-fed)
 WATER_NEAR = 30                           # water.lua `near` (config/baseline.json water.near): source -> hospital tiles
+# Run 11 siege 8 (y441, pop 52 -> 3: the seal c1a147c261 placed two days before the attack was not finished): the runner
+# runs seal projects first and, while one is open in PEACE, pauses the housing/work builds; below rebuild.pop citizens
+# it runs only seal, tombs, food/drink, beds and the depot (runner.lua kind_of; this mirrors it for the plan builds)
+SEAL = "seal"
+DEFENSE_TPLS = ("seal", "barracks", "captives", GALLERY)          # defense class: never paused (fortcore stage >= 2 too)
+SUPPLY_TPLS = ("farms", "cistern", STOCKROOM)                      # food/water/drink (and a food/drink-only workshops)
+BEDS_TPLS = ("bedrooms", REFUGE_BEDS)
+FOOD_SHOPS = {"Still", "Kitchen", "Butchers", "Fishery"}
+SEAL_PAUSES = {"work", "beds", "supply"}                           # paused while a seal is open (supply: not in need)
+REBUILD_KINDS = {"seal", "tombs", "supply", "beds", "depot", "repair"}
+REBUILD_DEF = (10, 12)                    # config/baseline.json runner.rebuild {pop, off} defaults (runner.lua M.CFG)
 SIEGE_EVENTS = ("SIEGE_START", "SIEGE_END", "BREACH")
 SIEGE_MODES = ("SIEGE", "BREACH", "RECOVERY")
 # DESIGN §11.4 always-blocked commands and banned terms (CONTRACTS §1.4); config/allowlist.json adds more
@@ -161,7 +172,8 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "refuge": refuge_projects(save_dir, state, applied),
             "stone_dig": stone_digs(save_dir),
             "hosp": hospital_facts(save_dir, state, rooms),
-            "metal": metal_facts(save_dir, man, applied)}
+            "metal": metal_facts(save_dir, man, applied),
+            "seals": open_seals(save_dir, state)}
 
 
 def hospital_facts(save_dir: Path, state: dict | None, rooms: list) -> dict:
@@ -269,6 +281,135 @@ def done_projects(save_dir: Path) -> set[str]:
         if e.get("type") == "PROJECT_DONE" and isinstance(d.get("proj"), str):
             out.add(d["proj"])
     return out
+
+
+def open_seals(save_dir: Path, state: dict | None = None) -> list[dict]:
+    """Run 11 siege 8: the seal projects not done yet: state sched.seal first (the runner's leading open seal or plug:
+    proj, n pieces open, stuck, days), then every seal bp file without a PROJECT_DONE ({proj, n: None}); while the state
+    lists the running projects (state.proj, seals first) only those (a cancelled seal leaves its bp file behind)."""
+    out: list[dict] = []
+    s = state or {}
+    se = (s.get("sched") or {}).get("seal")
+    if isinstance(se, dict) and isinstance(se.get("proj"), str):
+        out.append({"proj": se["proj"], "n": se.get("n"), "stuck": bool(se.get("stuck")), "days": se.get("days", 0)})
+    rows = s.get("proj")
+    live = {r[0] for r in rows if isinstance(r, list) and r} if isinstance(rows, list) else None
+    done = done_projects(save_dir)
+    for p in bp_files(save_dir):
+        if p.stem in done or (live is not None and p.stem not in live) or any(x["proj"] == p.stem for x in out):
+            continue
+        doc = files.read_json(p)
+        if isinstance(doc, dict) and doc.get("tpl") == SEAL:
+            out.append({"proj": p.stem, "n": None, "stuck": False, "days": 0})
+    return out
+
+
+def _food_shops(p: dict) -> bool:
+    add = {x.strip() for x in str(p.get("add", "")).split(",") if x.strip()}
+    skip = {x.strip() for x in str(p.get("skip", "")).split(",") if x.strip()}
+    moodable = set(_moodable())
+    return bool(add) and add <= FOOD_SHOPS and (not moodable or moodable <= skip)
+
+
+def build_kind(b: dict) -> str:
+    """What a plan build is to the runner's seal first and rebuild policy (runner.lua kind_of): seal, tombs, supply,
+    beds, defense or work (a plan build is never a depot or repair: the kernel queues those)."""
+    tpl, p = b["tpl"], b.get("p") or {}
+    if tpl == SEAL:
+        return "seal"
+    if tpl == "tombs":
+        return "tombs"
+    if tpl in SUPPLY_TPLS or (tpl == "workshops" and _food_shops(p)):
+        return "supply"
+    if tpl in BEDS_TPLS:
+        return "beds"
+    if tpl in DEFENSE_TPLS or (tpl == "fortcore" and (_stage_of(p) or 1) >= 2):
+        return "defense"
+    return "work"
+
+
+def rebuild_cfg() -> tuple[int, int]:
+    """config/baseline.json runner.rebuild (pop, off); the defaults for a missing or bad value (runner.conf)."""
+    doc = files.read_json(paths.config_dir() / "baseline.json")
+    rb = ((doc.get("runner") or {}).get("rebuild") if isinstance(doc, dict) else None) or {}
+    ok = [isinstance(rb.get(k), int) and not isinstance(rb.get(k), bool) and 0 <= rb[k] <= 250 for k in ("pop", "off")]
+    lo = rb["pop"] if ok[0] else REBUILD_DEF[0]
+    hi = rb["off"] if ok[1] else REBUILD_DEF[1]
+    return lo, max(lo, hi)
+
+
+def rebuild_state(s: dict | None) -> dict | None:
+    """The rebuild policy as the kernel holds it (state sched.rb: pop, lo, hi), else, for a kernel without it, pop.cit
+    below rebuild.pop in a fort past P1; None when it does not hold."""
+    s = s or {}
+    rb = (s.get("sched") or {}).get("rb")
+    if isinstance(rb, dict):
+        return {"pop": rb.get("pop", 0), "lo": rb.get("lo", REBUILD_DEF[0]), "hi": rb.get("hi", rb.get("lo", 0))}
+    cit = (s.get("pop") or {}).get("cit")
+    lo, hi = rebuild_cfg()
+    if lo > 0 and isinstance(cit, int) and cit < lo and (s.get("phase") or "P0") >= "P2" and "sched" not in s:
+        return {"pop": cit, "lo": lo, "hi": hi}
+    return None
+
+
+def seal_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> list[str]:
+    """Warnings (Run 11 siege 8). A new seal build after another new build (an earlier season, or the same season
+    before it): seal first. A seal project open now (fort.seals, state sched.seal) and new housing/work builds due now:
+    the runner pauses them in PEACE until it is done; a stuck one (SEAL_STUCK) is named. Under the rebuild policy:
+    every new build the runner pauses (not seal, tombs, food/drink, beds)."""
+    warn: list[str] = []
+    adds = new_builds(doc, prev)
+    for si, bi, b in adds:
+        if b["tpl"] != SEAL:
+            continue
+        before = [x["tpl"] for sj, bj, x in adds if x["tpl"] != SEAL and (sj, bj) < (si, bi)]
+        if before:
+            first = min(sj for sj, bj, x in adds if x["tpl"] != SEAL and (sj, bj) < (si, bi))
+            where = (f"put it first in seasons[{si}]" if first == si
+                     else f"move it to the front of seasons[{first}]")
+            warn.append(f"seasons[{si}].build[{bi}] seal comes after {', '.join(before[:4])}"
+                        + (f" +{len(before) - 4}" if len(before) > 4 else "")
+                        + f": seal first (Run 11 siege 8: a seal placed late was unfinished at the attack); {where}")
+    due = due_season(doc, s)
+    seals = fort.get("seals") or []
+    later = [b["tpl"] for si, _, b in adds if si <= due and build_kind(b) in SEAL_PAUSES]
+    if seals and later:
+        x = seals[0]
+        n = x.get("n")
+        what = f"seal {x['proj']}" + (f" ({n} piece{'s' if n != 1 else ''} open)" if isinstance(n, int) else "") \
+            + (f" +{len(seals) - 1}" if len(seals) > 1 else "")
+        if x.get("stuck"):
+            warn.append(f"{what} is stuck for {x.get('days', 0)} d (SEAL_STUCK): fix it first (material, a refused tile; "
+                        f"dfllm cmd inspect what=workload); until then {', '.join(later[:4])} run beside it")
+        else:
+            warn.append(f"{what} is open: the runner pauses {', '.join(later[:4])}"
+                        + (f" +{len(later) - 4}" if len(later) > 4 else "")
+                        + " in PEACE until it is done (seal first); food/drink only in an emergency")
+    rb = rebuild_state(s)
+    if rb:
+        held = [b["tpl"] for _, _, b in adds if build_kind(b) not in REBUILD_KINDS]
+        if held:
+            warn.append(f"rebuild: pop {rb['pop']} < {rb['lo']}: the runner pauses {', '.join(held[:5])}"
+                        + (f" +{len(held) - 5}" if len(held) > 5 else "")
+                        + f" until pop >= {rb['hi']} (only seal, tombs, food/drink, beds and the depot run); "
+                          "dfllm plan propose drafts only those")
+        cur = s.get("phase") or "P0"
+        if doc["phase_target"] > cur:
+            warn.append(f"rebuild: phase_target {cur} -> {doc['phase_target']} while pop {rb['pop']} < {rb['lo']}: "
+                        "the next phase's builds wait for the rebuild")
+    return warn
+
+
+def rebuild_metal(errs: list[str], warn: list[str], s: dict | None) -> tuple[list[str], list[str]]:
+    """Run 11 siege 8: under the rebuild policy the runner pauses an explore (and the fort has no soldiers to arm), so the
+    metal route's errors and its `add explore` warnings give way to one warning: metal comes after the rebuild."""
+    rb = rebuild_state(s)
+    if not rb or not any(x.startswith("metal:") for x in errs + warn):
+        return errs, warn
+    return ([e for e in errs if not e.startswith("metal:")],
+            [w for w in warn if not w.startswith("metal:")]
+            + [f"metal: waits for the rebuild (pop {rb['pop']} < {rb['lo']}): the runner pauses an explore until pop >= "
+               f"{rb['hi']}; trade.want only meanwhile"])
 
 
 def _refuge_stage(b: dict) -> bool:
@@ -641,9 +782,10 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     he, hw_ = hospital_gate(doc, s, fort or {}, prev)       # BUG-034: no hospital without accepted water near it
     errs += he
     warn += hw_
-    se, sw = supply_goals(doc, s, fort)           # Run 10: ore exploration and leather; Run 11: stone and picks
+    se, sw = rebuild_metal(*supply_goals(doc, s, fort), s)   # Run 10: ore and leather; Run 11: stone, picks, metal
     errs += se
     warn += sw
+    warn += seal_gate(doc, s, fort or {}, prev)   # Run 11 siege 8: seal first; the rebuild policy
     if pol["beauty"] == "used_rooms" and lvl < 1:
         warn.append("beauty used_rooms waits for R1 (runner gates it)")
     seen_libs: set[str] = set()
@@ -917,7 +1059,9 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     phases up to it (a template with a `stage` param gets p.stage; stage >= 2 reuses the anchor: site 'same').
     Deliverables in `applied` (applied_builds) or in the previous plan (any year) are not drafted again.
     fort = fort_facts: while the last audit names a bypass / refuge-route wall no seal project builds, the seal
-    that walls it (SEAL_AUDIT) is the first new build (Run 10)."""
+    that walls it (SEAL_AUDIT) is the first new build (Run 10). Run 11 siege 8: seal builds come first; under the
+    rebuild policy (rebuild_state) only seal, tombs, food/drink and beds are drafted (no explore), phase_target stays
+    the current phase and the notes say what was left out; an open seal (fort.seals) gets a note."""
     dec = decisions if decisions is not None else load_decisions()
     info = tinfo if tinfo is not None else template_info()
     d01 = schema.decision("D-01", dec)
@@ -936,6 +1080,9 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
             star = p["id"]
             break
         target = p["id"]
+    rb = rebuild_state(s)                   # Run 11 siege 8: below rebuild.pop the fort rebuilds; no phase raise
+    if rb:
+        target = cur
     done = {_build_key(b) for se in (prev or {}).get("seasons", []) for b in se["build"]} | set(applied or ())
     staged = None if info is None else {t for t, i in info.items() if "stage" in i["params"]}
     builds, libs = [], []
@@ -979,6 +1126,11 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                         builds.append(b)
                 elif d["k"] == "orders" and d["lib"] not in libs:
                     libs.append(d["lib"])
+    builds.sort(key=lambda b: b["tpl"] != SEAL)  # Run 11 siege 8: seal first (the runner runs it first anyway)
+    left_out = []
+    if rb:                                       # the rebuild drafts only what the runner runs then
+        left_out = [b["tpl"] for b in builds if build_kind(b) not in REBUILD_KINDS]
+        builds = [b for b in builds if build_kind(b) in REBUILD_KINDS]
     same_year = bool(prev and prev.get("year") == year)
     seasons = copy.deepcopy(prev["seasons"]) if same_year else [{"build": []} for _ in range(4)]
     kept = [len(se["build"]) for se in seasons]
@@ -1005,9 +1157,17 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                   + "; site S<k> = k-th free site at apply time (never overlaps other projects or earlier"
                   " builds; `dfllm plan check` lists the anchors), same = anchor of the earlier stage"),
     }
-    draft_supply(doc, s, kept, season, None if info is None else set(info))
+    tp = None if info is None else set(info)
+    draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb else tp)   # rebuild: no explore
     if stone:
         doc["notes"] += f"; {stone}: bedrooms@S1 n=4 first (a stone dig)"
+    if rb:
+        doc["notes"] += (f"; rebuild (pop {rb['pop']} < {rb['lo']}, until {rb['hi']}): only seal/tombs/food/beds drafted"
+                         + (f" (left out: {', '.join(sorted(set(left_out)))})" if left_out else "")
+                         + f"; phase_target stays {cur}")
+    seals = (fort or {}).get("seals") or []
+    if seals and any(build_kind(b) in SEAL_PAUSES for b in builds):
+        doc["notes"] += f"; seal {seals[0]['proj']} open: housing/work builds wait for it (seal first)"
     if held:
         under = ((fort or {}).get("hosp") or {}).get("cistern")
         doc["notes"] += (f"; hospital held back (BUG-034): {held['why']}"

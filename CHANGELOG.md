@@ -1,6 +1,6 @@
 # CHANGELOG dfpilot
 
-## Seal first: an open seal or plug runs before everything and pauses the housing/work projects; a stuck seal says so (SEAL_STUCK); the rebuild policy below 10 citizens (2026-10-17; offline, live-untested)
+## Seal first: an open seal or plug runs before everything and pauses the housing/work projects; a stuck seal says so (SEAL_STUCK); the rebuild policy below 10 citizens; plan check/propose follow both (2026-10-17; offline, live-untested)
 - **Why (Run 11, Kilrudrabed site98, y441 spring d23, siege 8: 2 cave dragons, 4 goblins, a jabberer, a snatcher, an
   ambush; pop 52 -> 3 in about three days; post-mortem `docs/v2/POSTMORTEM-run11-siege8-y441.md`):** root cause 1 was
   the way in 114,73,143 without a door. Its seal (c1a147c261) was placed two days before the attack and was not
@@ -38,7 +38,8 @@
   - The event names the open pieces, economy's material reason and the block: `c1a147c261 (seal) built nothing for 3
     days at seal.build: 1 piece open (door 114,73,143)[; build_lost][; no material for door: no rock, no logs]; the
     other projects run again`. d: proj, tpl, stage, days, n, pieces, mat, blocked.
-  - util/cadence per project: a repeat needs another piece set and 7 days.
+  - Once per stuck episode; util/cadence per project: an episode within 7 days of the last announcement (after the
+    seal moved in between) is only logged.
   - A piece that moves again pauses the others again (kern.log `seal first: <id> moves again`).
 - **Rebuild policy (runner, a PEACE/RECOVERY policy, not a mode):**
   - Below `rebuild.pop` (10) citizens in a fallen fort, only seal, plug, tombs/coffins, supply (food/drink), beds,
@@ -46,11 +47,25 @@
   - A fallen fort had `rebuild.off` citizens before (m.runner `pk`, this kernel's record) or is past P1. A fresh embark
     of 7 is not rebuilding.
   - It ends at `rebuild.off` (12): hysteresis; m.runner `rb` keeps it across reloads.
-  - kern.log `rebuild: pop 2 < 10 (peak 54, phase P4): only seal, plug, tombs, food/drink, beds, wall repairs and the
-    depot run until pop >= 12`, the paused set as above, and `rebuild over: pop 12 >= 12: every project runs again`.
+  - kern.log `rebuild: pop 2 < 10 (peak 2, phase P4): only seal, plug, tombs, food/drink, beds, wall repairs and the
+    depot run until pop >= 12` (the peak is what this kernel saw), the paused set as above, and `rebuild over: pop 12 >= 12: every project runs again`.
 - **Status (state `sched`, new):** `seal open: 3 pieces (c1a147c261), others paused` (`runs first` when it pauses
   none now), `seal stuck 3 d: 1 piece (c1a147c261), others run (SEAL_STUCK)`, `rebuild: pop 2 < 10, only
   seal/tombs/food/beds (4 paused, ends at 12)`. The line comes before `proj` in status and brief.
+- **Plan (`dfllm plan check` / `propose`):**
+  - `check` warns when a new seal build comes after another new build: in an earlier season (`move it to the front of
+    seasons[N]`), or before it in its season (`put it first in seasons[N]`).
+  - `check` warns when a seal project is open (state `sched.seal`, else a seal bp file without PROJECT_DONE that the
+    state's running projects list) and new
+    housing/work builds are due now: `seal c1a147c261 (3 pieces open) is open: the runner pauses temple in PEACE
+    until it is done (seal first)`. A stuck one: `... is stuck for 4 d (SEAL_STUCK): fix it first`.
+  - Under the rebuild policy (state `sched.rb`; a kernel without it: `pop.cit` < `rebuild.pop` in a fort past P1),
+    `check` warns on every new build the runner pauses and on a phase raise. The metal route's errors and `add
+    explore` warnings (metal_gate, ore goal) give way to one warning then: `metal: waits for the rebuild (pop 2 < 10):
+    the runner pauses an explore until pop >= 12; trade.want only meanwhile` (`rebuild_metal`).
+  - `propose` puts seal builds first. Under the rebuild it drafts only seal, tombs, food/drink and beds (no explore),
+    keeps phase_target and notes `rebuild (pop 2 < 10, until 12): only seal/tombs/food/beds drafted (left out: tavern,
+    temple); phase_target stays P4`. With an open seal it notes `seal <id> open: housing/work builds wait for it`.
 - **Config (config/baseline.json `runner`, new):** `seal_first: {on: true, stuck_days: 3, food_d: 30, drink_d: 30}`,
   `rebuild: {pop: 10, off: 12}`. `pop` 0 switches the rebuild policy off. `on` false means no pause and no
   SEAL_STUCK (the order and the dig priority stay). `python -m dfpilot.lint --config` checks keys, ranges and off >=
@@ -67,13 +82,17 @@
     the clock waits through a siege, `mat` and `blocked`; rebuild in PEACE and RECOVERY with the hysteresis; a
     new fort of 7, a fort that had 15, `pop` 0, a reload.
   - `tests/lua/test_act_supply.lua` (order_top: order, owner, refusals).
-  - `tests/test_seal_first.py` (new): the event, the state, the status lines, the config, RULES.
+  - `tests/test_seal_first.py` (new): the event, the state, the status lines, the config, RULES; plan check (a seal
+    after other builds, an open or stuck seal, the rebuild warnings), `open_seals`, propose under the rebuild (only
+    bedrooms and tombs of P4, target kept, the note, no metal error; a fort of 52 drafts all), the open-seal note,
+    `rebuild_state` without the kernel's record and with `rebuild.pop` 0, `build_kind`.
   - `tests/lua/test_runner_cavern.lua` passes unchanged: a paused room dig still finds the cavern lake it dug into.
 - **How to use:** nothing to send.
   - `dfllm status`: `seal open: ...` means the seal goes first and housing waits.
   - SEAL_STUCK: tell the player the open way in. No material: logs, a stone dig (follow places it). A refused tile:
     `bp.cancel`, then `bp.place tpl=seal at=last` again, or a wall by hand.
-  - Rebuild: the status line says what runs; it ends at 12 citizens by itself.
+  - Rebuild: the status line says what runs; it ends at 12 citizens by itself. Year review: keep what `plan propose`
+    drafts; `plan check` warnings on paused builds mean they wait.
 - **Live check (Run 11 site98, 2 citizens, or Run 12):** after `git pull` and `dfhack-run dfllm reload`:
   - Within a game day kern.log shows `rebuild: pop 2 < 10 (peak 2, phase P..)` (the fort is past P1) and the paused
     set. `dfllm status` shows `rebuild: pop 2 < 10, only seal/tombs/food/beds (...)`; tombs/coffin projects keep
@@ -85,6 +104,8 @@
   - If the work orders screen does not show the seal's order on top, `order_top` failed: note the kern.log line and
     DFHack's error in BUG notes. If DF does not take orders in list order, the move changes nothing: note that too.
   - A seal that cannot be built: SEAL_STUCK after 3 days names the piece; the paused projects run again.
+  - `dfllm plan propose` on the 2-citizen fort: only seal/tombs/food/beds builds and the `rebuild (...)` note; `dfllm
+    plan check` of a plan with a workshop: `rebuild: pop 2 < 10: the runner pauses workshops ...`.
 ## Metal without an ore find: every caravan is asked for metal, the melt pile gets its fuel, the melee squads follow the gear, plan check wants a metal route (2026-10-17; offline, live-untested)
 - **Why (Run 11, Kilrudrabed site98, siege 8 y441, pop 52 -> 10; post-mortem `docs/v2/POSTMORTEM-run11-siege8-y441.md`
   cause 4):** 10 soldiers, worn 58 %, bars 0 for ten game years. No metal ore on the site, the explore never found any,
