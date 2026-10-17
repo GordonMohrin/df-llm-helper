@@ -272,6 +272,53 @@ def water_errors(path: str | Path | None = None) -> list[str]:
     return errs
 
 
+# Run 11 siege 8 (lua/dfllm/runner.lua conf): config/baseline.json "runner": seal first (an open seal or plug runs
+# first and pauses the housing/work projects in PEACE until done or stuck for stuck_days; food_d/drink_d below which the
+# food/drink projects go on) and the rebuild policy (below pop citizens only seal/tombs/food/beds/depot, until off;
+# pop 0 = off). runner.conf keeps the default for a value of another type or out of range.
+RUNNER_LIM: dict = {"seal_first": {"on": "bool", "stuck_days": (1, 60), "food_d": (0, 400), "drink_d": (0, 400)},
+                    "rebuild": {"pop": (0, 250), "off": (0, 250)}}
+
+
+def runner_errors(path: str | Path | None = None) -> list[str]:
+    """Problems of the optional "runner" part of config/baseline.json (Run 11 siege 8): unknown keys, values the kernel
+    ignores (another type, out of range) and rebuild.off below rebuild.pop. A missing file or part is fine."""
+    p = Path(path or BASELINE_PATH)
+    if not p.exists():
+        return []
+    name = "config/baseline.json"
+    try:
+        doc = json.loads(_read(p))
+    except ValueError as e:
+        return [f"{name}: not JSON ({e})"]
+    sec = doc.get("runner", {}) if isinstance(doc, dict) else {}
+    if not isinstance(sec, dict):
+        return [f"{name}: runner must be an object"]
+    errs = []
+    for part, v in sec.items():
+        lims = RUNNER_LIM.get(part)
+        if lims is None:
+            errs.append(f"{name}: runner.{part}: unknown key")
+            continue
+        if not isinstance(v, dict):
+            errs.append(f"{name}: runner.{part} must be an object")
+            continue
+        for k, x in v.items():
+            lim = lims.get(k)
+            if lim is None:
+                errs.append(f"{name}: runner.{part}.{k}: unknown key")
+            elif lim == "bool":
+                if not isinstance(x, bool):
+                    errs.append(f"{name}: runner.{part}.{k}: true or false expected, got {x!r}")
+            elif not (isinstance(x, int) and not isinstance(x, bool) and lim[0] <= x <= lim[1]):
+                errs.append(f"{name}: runner.{part}.{k}: int {lim[0]}..{lim[1]} expected, got {x!r}")
+    rb = sec.get("rebuild") if isinstance(sec.get("rebuild"), dict) else {}
+    lo, hi = rb.get("pop"), rb.get("off")
+    if all(isinstance(x, int) and not isinstance(x, bool) for x in (lo, hi)) and hi < lo:
+        errs.append(f"{name}: runner.rebuild.off {hi} < pop {lo} (the policy would end at once; the kernel uses pop)")
+    return errs
+
+
 # ---------------------------------------------------------------- allowlist (CONTRACTS §9.14)
 _AL_CACHE: dict[str, tuple[float, dict]] = {}
 

@@ -57,8 +57,8 @@ PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", 
         "BRIDGE_DESTROYED", "GATE_FAIL",
         "DEATHS_3PLUS", "NO_DEPOT", "DEATHS_PREVENTABLE", "KERN_FAULT", "HB_STALE", "SUPERVISE", "QUICKSAVE_FAILED",
         "SIEGE_END",
-        "DRILL_FAIL", "SIEGE_UNREADY", "PERF_DEGRADED", "DECISION_NEEDED", "PROJECT_BLOCKED", "PLAN_EXHAUSTED",
-        "YEAR_REVIEW", "AUTO_FAIL"]
+        "DRILL_FAIL", "SIEGE_UNREADY", "PERF_DEGRADED", "DECISION_NEEDED", "SEAL_STUCK", "PROJECT_BLOCKED",
+        "PLAN_EXHAUSTED", "YEAR_REVIEW", "AUTO_FAIL"]
 URGENT = {"BREACH", "SIEGE_START", "INVASION", "LOCKDOWN"} | set(schema.INTERRUPTS)
 URGENT_REPEAT_S = 60
 _IRQ_NEXT = "dfllm ack; dfllm status (the kernel already locked down)"
@@ -99,7 +99,10 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
         "SIEGE_DEEP": "dfllm status (civilians in the refuge, squads in the core); tell Gordon; nothing tactical",
         # Run 11: a dig broke into a cavern; the kernel plugs an explore shaft itself (failed/none: by hand)
         "CAVERN_PLUG": "tell Gordon (queued: the kernel walls the shaft; failed/none: a constructed wall by hand); "
-                       "bp.cancel the explore without undo"}
+                       "bp.cancel the explore without undo",
+        # Run 11 siege 8: an open seal built nothing for stuck_days; the other projects run again
+        "SEAL_STUCK": "tell Gordon the open way in; dfllm cmd inspect '{\"what\":\"workload\"}' (material); no "
+                      "material: logs, a stone dig; a refused tile: bp.cancel, then bp.place tpl=seal at=last or by hand"}
 SUPERVISE_EVERY_S = 15                         # supervise.json read cadence
 SUPERVISE_FRESH_S = 3600                       # alerts logged longer ago than this never wake
 HB_STALE_S = 300

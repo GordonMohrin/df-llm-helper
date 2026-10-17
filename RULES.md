@@ -39,8 +39,7 @@ change the system. Never read ERFAHRUNGEN.md, transcripts or v1 docs as working 
 5. **Opt-in per save.** The kernel acts only on saves with the `dfllm` marker (`dfllm adopt`).
    Adopt only a fort the player gave you for this; the player's own forts stay untouched (Gordon:
    never Inchcraft).
-6. **Growth is earned.** Never raise the pop cap, start beauty or wealth projects, or open caverns
-   outside the readiness gate (§8). Approve ★ phases only when the gate is green.
+6. **Growth is earned.** Never raise the pop cap, start beauty or wealth projects, or open caverns outside the readiness gate (§8). Approve ★ phases only when the gate is green.
 7. **No new tooling in play.** If something is missing, write a short note for the player; code
    changes go through the repo (tests, lint, commit and push by the repo's rules), never into the
    running game.
@@ -177,6 +176,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | DEPOT_MISSING | a caravan came and no depot stands; the kernel queued a `depot` project (after a siege: in RECOVERY/PEACE, the line says so; its building material as for walls, `no material for depot: ...` = tell the player): check `status`/`proj`, keep O1 down for builders in PEACE. "does not progress: why" = the planned depot is stuck; without a fortcore depot the kernel moves it inside the entrance after 5 failed resumes (`inspect workload` `depot_move`) |
 | CUTOFF | citizens lost the walk group of their food, drink or beds (confirmed on groups read again, BUG-021); the msg names the tile, a cut-off citizen and a stock tile with their groups. `inspect reach`; a project still building there: `bp.cancel {proj, undo:true}`; a built wall or raised bridge: tell the player at once (no deconstruct verb) |
 | CAVERN_PLUG | a dig broke into a cavern (BREACH_STOP `cavern`/`cavern_lake`; `damp` is aquifer seepage only), or the daily shaft check found an explore shaft open to one in any state (`state`: running, stalled, done, cancelled ...; kern.log `cavern check:` names each shaft and why it is or is not plugged). `queued`: the kernel plugs the explore shaft (its two top stair tiles channelled, then a constructed wall each; the lower one is given up if DF does not reach it within a day); `done`: the walls stand; `failed`/`none`: tell the player at once, a constructed wall on the named tile by hand. A hatch or door is no plug (the kernel walls below it or removes it in PEACE). R0 (`caverns`) until the wall stands; `bp.cancel` the explore without undo (unless done or cancelled) |
+| SEAL_STUCK | an open seal or plug built nothing for `seal_first.stuck_days` (3, config/baseline.json `runner`): it stops pausing the other projects; the line names the open pieces and why (`mat`, `blocked`). Tell the player the open way in; no material: logs, a stone dig (follow places it); a refused tile: `bp.cancel`, then `seal at=last` again, or a wall by hand. Seal first (Run 11 siege 8): a seal or plug always runs first (first slot, dig priority 1, its work orders on top) and in PEACE pauses housing/work projects until done (`status` `seal open: N pieces (id), others paused`; never defense, tombs, the depot, repairs, food/drink in an emergency) |
 | SEAL_LEAK | the gates are up and a route remains: `inspect entrances` names the leak (tile, door/bridge state); tell the player; `dfllm cmd bp.place tpl=seal site=S1 at=last` walls it (walk groups pass doors; an open route without a roofed tile gets a wall on its first tile that cuts it from the map edge; a leak through a door is left out with a note: decide by hand), never lower the bridges |
 | PERIMETER_BROKEN | the kernel re-queued the lost walls/doors (`rp…` project); a lost bridge waits for quiet PEACE (`wait`, its own peace-only `rp…`) or the player (`held`); `inspect perimeter` after a day; tell the player about pieces it could not re-queue |
 | AUTOLABOR_LEGACY | autolabor ran in legacy mode (the engine of the Run 9 crashes) and the kernel could not set it to monitor (`fixed=0`; a switch that worked is only a kern.log line): tell the player at once (disable autolabor by hand) |
@@ -261,6 +261,7 @@ from P1; never cancel a mood job. No ore: `plan propose` drafts `explore` each s
 Hunters (famine and `food_low`; 1 for a short bone/shell/leather mood stock, 2 after a mood missed leather) and Fisherdwarves details itself; you never
 change work details.
 **Dead:** one 1x1 tomb per coffin, free tombs ≥ open corpses + 6; autoslab, burial, preserve-tombs.
+**Rebuild (Run 11):** below `rebuild.pop` (10) citizens in a fallen fort (past P1 or once ≥ 12) only seal, plug, tombs, food/drink, beds, wall repairs and the depot run in PEACE/RECOVERY until 12 (`status` `rebuild: pop N < 10, ...`).
 **Food/drink:** drink ≥ 170 days, food ≥ 60, ≥ 5 meal kinds; plump helmets are brewed, never cooked. Farms,
 autofarm thresholds, fishers, the fishing zone (safe water, never cavern or ice), a fishery for raw fish and meals follow the citizens (economy; `food_low` wakes below 30 days).
 **Happiness:** dining hall → own bedrooms (≥ 500) → general temple (≥ 2,000 on petition) → tavern →
@@ -288,8 +289,7 @@ FPS cap 30; no Lua quicksaves (only `dfllm save`, verified); DF autosave yearly.
 ★ = entered only when your plan's `phase_target` reaches it.
 
 ## 12. Token budget
-≤ 3 M input tokens and ≤ 30k output tokens per real hour (alarm at 5 M). ≤ 6 wakes per hour.
-Brief ≤ 1.5k, status ≤ 300, wake line ≤ 150. If a wake needs more than 5 tool calls, stop, write one line for the player and wait for the next wake.
+≤ 3 M input tokens and ≤ 30k output tokens per real hour (alarm at 5 M). ≤ 6 wakes per hour. Brief ≤ 1.5k, status ≤ 300, wake line ≤ 150. If a wake needs more than 5 tool calls, stop, write one line for the player and wait for the next wake.
 
 ## 13. When something looks wrong
 - `dfllm status` says `follow: OFF`: start `Monitor` on `dfllm follow` again; silence from a dead follow is not "all is well".

@@ -343,6 +343,33 @@ def line_proj(ctx: Ctx, n: int = 3) -> str:
     return "proj " + ", ".join(items) + (f" +{len(pr) - n}" if len(pr) > n else "")
 
 
+def line_sched(ctx: Ctx) -> str:
+    """Run 11 siege 8 (state sched, runner): 'seal open: 3 pieces (c1a147c261), others paused' while an open seal or plug
+    pauses the housing/work projects (`runs first` when it pauses none now, e.g. outside PEACE), 'seal stuck 3 d: ...,
+    others run (SEAL_STUCK)' once it built nothing for seal_first.stuck_days; 'rebuild: pop 2 < 10, only
+    seal/tombs/food/beds (4 paused, ends at 12)' while the rebuild policy holds."""
+    sc = ctx.s.get("sched")
+    if not isinstance(sc, dict):
+        return ""
+    out = []
+    se = sc.get("seal")
+    if isinstance(se, dict):
+        n = se.get("n", 0)
+        more = f" +{se['more']} seal{'s' if se['more'] != 1 else ''}" if se.get("more") else ""
+        what = f"{n} piece{'s' if n != 1 else ''} ({se.get('proj')}{more})"
+        if se.get("stuck"):
+            out.append(f"seal stuck {se.get('days', 0)} d: {what}, others run (SEAL_STUCK)")
+        else:
+            out.append(f"seal open: {what}, " + ("others paused" if se.get("paused") else "runs first"))
+    rb = sc.get("rb")
+    if isinstance(rb, dict):
+        tail = ", ".join(x for x in (f"{rb['paused']} paused" if rb.get("paused") else "",
+                                     f"ends at {rb['hi']}" if rb.get("hi") else "") if x)
+        out.append(f"rebuild: pop {rb.get('pop')} < {rb.get('lo')}, only seal/tombs/food/beds" + (f" ({tail})" if tail
+                                                                                                  else ""))
+    return _join(out)
+
+
 def line_kern(ctx: Ctx) -> str:
     s = ctx.s
     k = s.get("k")
@@ -381,8 +408,8 @@ def status_text(save_dir: Path) -> str:
     if ctx.state is None:
         lines.append(_no_state(ctx))
     else:
-        lines += [line_unready(ctx), line_alarm(ctx), line_pop(ctx), line_supply(ctx), line_def(ctx), line_proj(ctx),
-                  line_kern(ctx), line_snap(ctx)]
+        lines += [line_unready(ctx), line_alarm(ctx), line_pop(ctx), line_supply(ctx), line_def(ctx), line_sched(ctx),
+                  line_proj(ctx), line_kern(ctx), line_snap(ctx)]
     return fit([[x for x in lines if x]], STATUS_TOKENS)
 
 
@@ -498,7 +525,7 @@ def brief_text(save_dir: Path, budget: int = BRIEF_TOKENS) -> str:
         head.append(_no_state(ctx))
     else:
         head += [x for x in (line_unready(ctx), line_alarm(ctx), line_pop(ctx), line_supply(ctx), line_def(ctx),
-                             line_proj(ctx, 8), line_kern(ctx), line_snap(ctx)) if x]
+                             line_sched(ctx), line_proj(ctx, 8), line_kern(ctx), line_snap(ctx)) if x]
     sections = [head]
     for title, lines in (("## plan", sec_plan(ctx)), ("## decisions open (ask Gordon)", sec_decisions(ctx)),
                          ("## class A, newest first", sec_class_a(ctx)),

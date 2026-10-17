@@ -79,7 +79,7 @@ ACT = {
     "door_forbid": ["reflex"],
     "burrow_tiles": ["seal"],
     "popcap": ["readiness"],
-    "quickfort": ["runner"],
+    "quickfort": ["runner"], "order_top": ["runner"],     # Run 11 siege 8: a seal's manager orders to the top
     "orders_import": ["economy"], "orders": ["economy"], "workorder": ["economy", "water", "care"],
     "order_suspend": ["economy"], "kitchen_exclude": ["economy"], "appoint": ["economy"],
     "work_detail": ["economy"], "order_material": ["economy"], "order_remove": ["economy"],
@@ -92,7 +92,7 @@ ACT = {
 
 STATE_OWNERS = {
     "v": "kern", "seq": "kern", "ev": "kern", "t.*": "kern", "mode": "kern", "save": "kern", "k.*": "kern",
-    "phase": "runner", "proj": "runner",
+    "phase": "runner", "proj": "runner", "sched.*": "runner",
     "pop.cit": "sense", "pop.adults": "sense", "pop.soldiers": "sense",
     "pop.cap": "readiness", "pop.gate_cap": "readiness", "ready.*": "readiness",
     "stock.drink_d": "economy", "stock.food_d": "economy", "stock.meals": "economy",
@@ -512,6 +512,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # state when the daily shaft check found the opening (running, stalled, blocked:<why>, breach:<why>, cancel, done,
     # cancelled; Run 11 c1a14676)
     "CAVERN_PLUG": ("A", "runner", _d("phase:s proj:s", "plug:s why:s pos:p shaft:p z1:i walls:sa n:i hint:s state:s")),
+    # Run 11 siege 8 (seal first): an open seal or plug built nothing for runner seal_first.stuck_days: it stops pausing
+    # the other projects; pieces = the first 6 open ones ('door x,y,z'), n = all open, mat = why economy cannot make
+    # them, blocked = the project's block (build_lost ...)
+    "SEAL_STUCK": ("A", "runner", _d("proj:s", "tpl:s stage:s days:i n:i pieces:sa mat:s blocked:s")),
     # BUG-030: the siege's deep defense: why = destroyers (building destroyers in sight), army (> stations.core_ratio x
     # soldiers), weak (worn or iron/steel below stations.worn/metal); civilians to the separated refuge, squads at the core
     "SIEGE_DEEP": ("A", "siege", _d("why:sa", "bd:i races:sa units:ia vis:i soldiers:i worn:i metal:i refuge:s "
@@ -703,6 +707,11 @@ STATE = Obj(
          "orders": Obj(req={"n": NAT, "bad": NAT, "stuck": NAT}),
          "threat": Obj(req={"vis": NAT, "armed": FLAG}),
          "proj": Arr(Tup([ID, Str(maxbytes=24), PCT, Str(maxbytes=40)]), hi=8),
+         # Run 11 siege 8: seal first (the leading open seal or plug: pieces open, projects it pauses, other open seals,
+         # stuck 1 = it built nothing for stuck_days, days) and the rebuild policy (citizens, its bounds, projects paused)
+         "sched": Obj(opt={"seal": Obj(req={"proj": ID, "n": NAT, "paused": NAT},
+                                       opt={"more": NAT, "stuck": FLAG, "days": NAT}),
+                           "rb": Obj(req={"pop": NAT, "lo": NAT, "paused": NAT}, opt={"hi": NAT})}),
          "bridges": Obj(extra=Str(enum=BRIDGE_STATES), keys=BRIDGE_RE),
          "owners": Obj(req={"pause": AnyOf(Null(), Str(enum=["inbox", "gordon", "popup", "df"])),
                             "tempo": Str(enum=["mode", "inbox", "brake", "clock"])}),
