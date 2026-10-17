@@ -285,6 +285,7 @@ C.KERN = {
   backoff_reset_ms = 3600000,                       -- 1 h without a fault resets the doubling
   slow_ms = 5, slow_n = 3, slow_window_ms = 600000, -- 3 calls > 5 ms (os.clock) within 10 min = slow
   promote_ms = 600000, max_factor = 8,              -- factor halves after 10 min without a slow call
+  big_ms = 1000,                                    -- BUG-039: a call this long is named in kern.log (what, act)
 }
 
 -- Report routing hints (§4.1, names = df.announcement_type; confirm in spike S7).

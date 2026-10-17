@@ -1,5 +1,51 @@
 # CHANGELOG dfpilot
 
+## One huge step no longer starves a module for hours; the cavern check converges and logs only news (BUG-039, 2026-10-17; offline, live-untested)
+- **Why (Run 11, y451):** Kilrudrabed site98, y451 winter d63, kernel e11d17a, PEACE, 293 units: `inspect workload` said
+  `runner: no run ended for 49 days (at task 1/3 work y451s3b0, 1 slices)`; `inspect modules` runner `debt 67760`,
+  `paced 78381`; kern.log `runner demoted x4 (68603 ms; ...)`, `frame gap 68640 ms (blame runner)`, DF unresponsive ~60 s.
+  One runner step took 68.6 s; its debt drained at 2-4 ms per real second, so the run in hand got no further slice (15-30
+  game years at 450 ticks/s), and BUG-037's watchdog counts only slices that run. kern.log was nearly only `cavern check:
+  ...; 11 more next run` with the same shafts again and again.
+- **Cause (proven offline; bugs/BUG-039):** the pacing debt had no bound and a due module no floor
+  (`util/sched.lua` `spend`, `paced`). What took the 68 s is probable, not proven: the stockroom y451s3b0's place stage,
+  one quickfort call placing three food stockpiles; quickfort's `configure_stockpile` imports `library/cat_food` per pile,
+  and DFHack's `OrganicMatLookup::food_mat_by_idx` copies `world.raws.mat_table` per food element (O(N^2) in an old
+  world's organic materials). The shaft check: runs 4+ days apart, 15 finished shafts due daily, 4 looks a run; the trim
+  dropped a done explore's record that the next run noted again (due at once).
+- **sched/kern (kern and k_mock):** the debt is capped at `PACE.debt_cap_s` (30) s of the share (runner 120 ms); a due
+  module that waited `PACE.floor_ms` (30 s) gets one slice whatever its debt (kern.log `runner waited 30 s for a slice with
+  its run in hand (...): one slice anyway (pacing floor, N so far)` once per module per 10 min; `inspect modules` `floor`).
+  A call of `KERN.big_ms` (1 s) or more: kern.log `runner step took 68603 ms (work y451s3b0 place chunk 1/1 (task 1/3,
+  slice 1); slowest act: quickfort place 68590 ms); debt capped at 120 ms (30 s of its share)`, `inspect modules` `big`.
+  KERNEL_SLOW and the demotion line name the task (`d.task`, the module's optional `M.doing()`); act calls timed on the
+  cost clock. `inspect persist` takes `field` (`{"what":"persist","key":"m.runner","field":"p"}`; m.runner is over the 8
+  KB reply limit, which read as 'no p key'); a reply over 8 KB says so in its msg.
+- **runner:** `M.doing()` (`work <id> <stage> chunk i/n (task i/n, slice s)`); kern.log `<id> (<tpl>) done` and `<id> (<tpl>)
+  cancelled at stage N: removed from the list`. Shaft check: never seen first, then live explores, then the oldest look;
+  while saturated, a finished shaft whose look did not change (`xs.sg`) waits `xs.per` days (8, doubled per unchanged
+  look, at most `fin_max_d` 64; a change: daily); the line names only news (`...; 3 unchanged; 2 more next run`), else
+  `cavern check: nothing new (...)` per util/cadence; the stopped-dig recheck too (`br.sg`); the trim keeps a done explore
+  still in the list and notes no dropped record again that boot.
+- Contracts: §3.2 `M.doing`, §3.3.6 the task and the big-call line, §3.3.8 cap and floor, §12 KERNEL_SLOW `task`,
+  CAVERN_PLUG shaft check, §13 inspect `field`, contract `KERN.big_ms` (schema, appendix). BUG-037 names its live trigger.
+- Tests (each fails on e11d17a): `tests/lua/test_kern_pacing.lua` (the 68.6 s step on the real kernel, cap and floor,
+  KERNEL_SLOW task), `tests/lua/test_runner_load.lua` (15 finished shafts with runs 4 days apart, the trim; plus the
+  runner's `doing`); adjusted: `test_runner_shaft` (an unchanged look is counted, not named), `test_runner_load` (a dry
+  finished shaft's daily looks counted on its record).
+- **Live check (Run 11):** before the reload, read-only: commands.log near tick 182164588, the runner's `act.quickfort`
+  line with `"mode":"place"` and its `"ms"` (about 68,000 confirms the food-pile import); the same for the stockroom
+  c1a148317945f66101 at y446.3; `dfllm events --type PROJECT_DONE,PROJECT_STAGE --since 17000 --limit 0` for the ids that
+  left the list; `ls <save>/bp/.cancelled/`. After `git pull` and `dfhack-run dfllm reload`:
+  - within a minute: `inspect workload` no longer ends with `runner: no run ended for N days`; `inspect modules` runner
+    `debt` at most 120; status `proj` moves again (y451s3b0 goes on with its burrow stage: its piles were placed in the
+    68 s slice). The next food stockpile placement (a stockroom, fortcore s1/s3 `place`) may freeze DF again: then kern.log
+    `runner step took N ms (work <id> place chunk ...; slowest act: quickfort place N ms)` and the runner resumes within
+    30 s;
+  - kern.log `pacing floor` lines are rare (none while no step is huge); `cavern check:` lines only with news, at most one
+    `nothing new` a week; after a few runs no `more next run`;
+  - `dfllm cmd inspect '{"what":"persist","key":"m.runner","field":"p"}'` lists the open projects' records.
+
 ## Projects no longer wait for months behind slot holders that build nothing; a stopped runner and terminal blocks are named (BUG-037, 2026-10-17; offline, live-untested)
 - **Why (Run 11, y449):** Kilrudrabed site98, y449 spring d46, kernel 784399f, PEACE, ~39 citizens: two bedrooms, a
   stockroom, a tavern, tombs and a prio-2 trade depot stood `queued` at 0 % for months; 15 of 27 adults had no job,

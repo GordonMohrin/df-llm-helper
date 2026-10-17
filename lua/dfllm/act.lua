@@ -1874,9 +1874,12 @@ end
 
 ---------------------------------------------------------------- the act table K.act
 -- env = {who = fn() -> module|nil, tick = fn() -> abs tick, allowlist = fn() -> doc,
---        log_cmd = fn(origin, what, args_json, result), fail = fn(fn, err, module)}
+--        log_cmd = fn(origin, what, args_json, result), fail = fn(fn, err, module),
+--        optional: clock = fn() -> ms (the cost clock), on_cost = fn(fn, ms, args) after each call (BUG-039)}
 function A.new(env)
   local state = {own_jobs = {}, who = env.who, allowlist = env.allowlist}
+  -- the cost clock in ms (kern's: os.clock in game, the mock clock in tests); os.clock without one
+  local clock = env.clock or function() return os.clock() * 1000 end
   local I = impls(state)
   local owners = {}
   for fn, list in pairs(C.ACT) do
@@ -1895,13 +1898,15 @@ function A.new(env)
       elseif not f then
         ok, res = false, 'not implemented'
       else
-        local c0 = os.clock()
+        local c0 = clock()
         local pok, a, b = pcall(f, ...)
-        cost = math.floor((os.clock() - c0) * 1000 + 0.5)
+        cost = math.floor(clock() - c0 + 0.5)
         if not pok then ok, res = false, tostring(a)
         else ok, res = a and true or false, b end
       end
       local result = ok and 'ok' or ('ERR ' .. tostring(res))
+      -- BUG-039: kern keeps the slowest act call of the running module call (its huge-step line names it)
+      if cost and env.on_cost then pcall(env.on_cost, fn, cost, args) end
       env.log_cmd(who or 'kern', 'act.' .. fn, describe(fn, args, cost), result)
       if not ok then env.fail(fn, trim(res, 160), who or 'kern') end
       return ok, res

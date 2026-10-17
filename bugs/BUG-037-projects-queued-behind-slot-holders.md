@@ -1,8 +1,8 @@
 # BUG-037 Projects stay 'queued' at 0 % for months behind slot holders that build nothing; terminal blocks never leave
 Status: fixed in 5799e85 (offline, live-untested): slot holders without progress yield, a stuck seal competes like a stalled
 project, a run watchdog, the seal-first count fault-contained, `sched.q/run/pk` and `queued behind <id>` rows, parked
-projects (blocked for good past `queue.park_days`), `inspect workload` names the runner's queue. The live trigger is
-not proven: see "Live data that decides it".
+projects (blocked for good past `queue.park_days`), `inspect workload` names the runner's queue. The live trigger
+(y451, e11d17a) is a pacing starvation after one 68.6 s runner step: BUG-039, see "Live trigger".
 Severity: high (wrong decision: six projects and a prio-2 trade depot never started for months, 15 of 27 adults idle,
 the game session queued wood crafts as filler)
 Found: 2026-10-17, Run 11 fort Kilrudrabed (site98), y449 spring d46, kernel 784399f, mode PEACE, ~39 citizens, from the
@@ -99,6 +99,19 @@ likelier one. Reading found no task that yields for ever (`work`, `measure_dig`,
    depot7 (`si`, `prog`, `last`, `mt`, `fail`, `of`, `oc`, `undo`), `sf`, `pz`, `cav`/`xs` of y432s1b0.
 7. With this kernel: `dfllm status` (`runner: no run ended for N d (task i/n <task>, S slices)` names the stuck task;
    `queued: N behind <holders>`), kern.log `runner watchdog:` / `seal first/rebuild failed`.
+
+## Live trigger (Run 11, y451 winter d63, kernel e11d17a; BUG-039)
+After the reload to e11d17a the projects ran at once (seal first, `build: N manager orders` for both bedrooms, the
+tavern and the tombs) and left the open list within ~20 days; then `inspect workload` said `runner: no run ended for 49
+days (at task 1/3 work y451s3b0, 1 slices)`, `inspect modules` runner `debt 67760`, kern.log `runner demoted x4 (68603
+ms)`, `frame gap 68640 ms (blame runner)`. **Proven offline (BUG-039, `tests/lua/test_kern_pacing.lua`): one 68.6 s
+runner step left a pacing debt that drains at 2-4 ms per real second, so the run in hand got no slice for hours (15-30
+game years at 450 ticks/s); the watchdog here counts slices that run, so it never fired.** The 68 s were most likely
+quickfort placing the stockroom's three food stockpiles (DFHack's stockpiles import, O(N^2) in the world's organic
+materials; BUG-039 cause 2). The same mechanism fits this bug's first picture (no work since y446.3, when the stockroom
+c1a148317945f66101 reached its place and burrow stages): a long freeze there leaves a debt that takes real hours, years
+of game time, to drain; unproven until commands.log shows that call's `ms`. Fix: BUG-039 (debt cap, pacing floor, the
+huge step named). Causes 1-5 above are real but were not the live trigger.
 
 ## Tests
 `tests/lua/test_runner_queue.lua` (three stuck seals, the yielding dig, parked projects, the seal-first fault, the
