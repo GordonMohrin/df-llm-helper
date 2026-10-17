@@ -49,7 +49,9 @@
 --   supply() -> {key = {have, held, want, floor, route}}   read-only status (brief, tests)
 --   mat_for(kind, n) -> via | nil, why   Run 11: can the fort make n of a seal piece now (door, hatch, grate, wall;
 --       runner's seal remake): 'item', 'rock', 'wood', a building material, nil + 'no material for door: no rock, no logs'
---   trade_wants() -> {{buy, n, why}}   Run 11: tokens trade asks the caravans for (picks for the Miners)
+--   trade_wants() -> {{buy, n, why, metal?}}   Run 11: tokens trade asks the caravans for (picks for the Miners; while
+--       metal is short for the soldiers picks, axes, bars and metal gear, metal = 1)
+--   metal() -> {short, worn, bars, ore, need, melt} | nil   Run 11: is metal short for the soldiers (M.metal_plan)
 --   keys: wood, rock, bone, shell, leather, cloth, thread, bars, gems, fuel, hides (care's class names
 --   logs, boulders, rough, glass are accepted as aliases).
 -- Pull hooks economy reads when care has them (live L4, care.lua/reserve.lua): care.reserved() -> {class = n}
@@ -139,6 +141,20 @@ M.DEFAULTS = {
   -- Run 11: 2 picks for the Miners' target and 1 iron bar: a pick from the first metal with a spare bar at a forge,
   -- else economy.trade_wants asks the caravans for picks (trade puts it before plan.trade.want)
   picks = {tag = 'dfllm:pick', metals = {'COPPER', 'BISMUTH_BRONZE', 'BRONZE', 'IRON', 'STEEL'}, max_jobs = 2},
+  -- Run 11 (Kilrudrabed y431-y441: no metal ore on the site, bars 0 for ten years, the caravans were never asked for
+  -- iron; 10 soldiers at worn 58 % lost siege 8): metal is short while soldiers are wanted, they wear < `worn` %, no ore
+  -- boulder of a gear metal lies in the fort and the gear-metal bars are below what the soldiers' metal slots want
+  -- (M.metal_plan). Then trade_wants asks every caravan for `wants` in this order (n = the bars short, or that slot's
+  -- missing pieces) after picks and axes up to `tools` (military's tools-first minimum), and the fort keeps `crafts`
+  -- crafts to sell for it (MakeCrafts in free stone, else wood above idle.wood_min; at most `craft_jobs` an order)
+  metal_short = {worn = 80, tools = 3, crafts = 40, craft_jobs = 10, craft_tag = 'dfllm:trade_crafts',
+                 craft_ws = {'workshop:Craftsdwarfs'},
+                 wants = {{buy = 'bar:iron', n = 'bars'}, {buy = 'bar:steel', n = 'bars'},
+                          {buy = 'armor:metal', n = 'body'}, {buy = 'weapon:metal', n = 'weapon'},
+                          {buy = 'helm:metal', n = 'head'}, {buy = 'shield', n = 'shield'},
+                          {buy = 'pants:metal', n = 'pants'}, {buy = 'gloves:metal', n = 'gloves'},
+                          {buy = 'shoes:metal', n = 'shoes'}, {buy = 'bar:bronze', n = 'bars'},
+                          {buy = 'bar:bismuth_bronze', n = 'bars'}, {buy = 'bar:copper', n = 'bars'}}},
   -- supply labors labormanager (modern) starved for >= cycles (LABOR_STARVED): a tool labor with a builtin
   -- detail (Miners, Woodcutters, Hunters, Fisherdwarves) left unmanaged becomes managed, so it staffs the
   -- detail; any other starved one makes baseline fall back to monitor mode (live L1: BREWER starved 243
@@ -655,6 +671,14 @@ function M.tool_forb(a, it)
   local list = a.tool_items[k]
   if #list < M.TOOL_LIST then list[#list + 1] = {id = it.id, forb = true} end
 end
+
+-- Run 11 (bars 0 for ten years beside eight sieges of invaders' gear): a metal weapon, armor piece or ammo marked for
+-- melting (the dfllm-melt pile's automelt) is bars to come; census `melt` counts them, so plan_metal orders the fuel a
+-- smelter's melt jobs burn even while the fort holds no ore and no bar
+function M.melt_mark(a, it)
+  local mf = mat_flags(it)
+  if mf and mf.IS_METAL then a.melt = a.melt + 1 end
+end
 local function classify(it, a, cat)
   local f = it.flags
   local w = skip_mask and f.whole
@@ -688,6 +712,7 @@ local function classify(it, a, cat)
     if cat == 'WEAPON' then M.tool_forb(a, it) end
     return
   end
+  if f.melt and (cat == 'WEAPON' or cat == 'AMMO' or GEAR_CAT[cat]) then M.melt_mark(a, it) end   -- Run 11
   -- live L7 (Paddletribes): 117 of 137 "edible" fruit lay in cut-off caves; the fort read 101 food days while 35 of
   -- 42 dwarves starved. Food and drink on another walkable group than the citizens' feed nobody.
   if (cat == 'DRINK' or a.food_set[cat]) and not f.in_inventory and a.far and a.far(it) then
@@ -886,7 +911,7 @@ local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'ge
               'g_quiver', 'g_metal', 'fish_raw', 'food_nocook', 'seeds_ok', 'seeds_forb', 'w_pick_free', 'w_axe_free',
               'w_pick_bin', 'w_axe_bin', 'w_pick_res', 'w_axe_res', 'webs', 'webs_near', 'glass', 'gems_glass', 'sand',
               'bags', 'doors', 'hatches', 'grates', 'blocks_free', 'cook_in', 'cook_ban', 'cook_ban_g', 'food_inedible', 'food_far',
-              'w_pick_forb', 'w_axe_forb', 'w_pick_melt', 'w_axe_melt', 'w_pick_own', 'w_axe_own'}
+              'w_pick_forb', 'w_axe_forb', 'w_pick_melt', 'w_axe_melt', 'w_pick_own', 'w_axe_own', 'melt'}
 local function new_acc(c)
   local fs = {}
   for _, k in ipairs(c.food_cats or {}) do fs[k] = true end
@@ -1329,15 +1354,19 @@ end
 local function gear_pre(K, c, r, hunt)
   local g = c.gear
   local melee, xb = 0, 0
-  local ok, _, per = K.call('military', 'targets')
+  local ok, _, per, _, _, gx = K.call('military', 'targets')
   if ok and type(per) == 'table' then
     for key, v in pairs(per) do
       local n = math.tointeger(v) or 0
       if key == 'C' then xb = xb + n else melee = melee + n end
     end
   end
-  local who = {all = melee + xb, melee = melee, xbow = xb, ranged = xb + hunt}
-  local res = {n = melee + xb, melee = melee, xbow = xb, hunt = hunt, cats = {}, leather = 0, metal_jobs = 0,
+  -- Run 11: metal short, the melee positions the gear cannot fill go to the crossbows (military.targets' gear.xbow):
+  -- crossbows, quivers and bolts for them; their armor is already counted with the melee positions they stand in for
+  local xa = xb
+  if ok and type(gx) == 'table' then xb = xb + math.max(0, math.tointeger(gx.xbow) or 0) end
+  local who = {all = melee + xa, melee = melee, xbow = xb, ranged = xb + hunt}
+  local res = {n = melee + xa, melee = melee, xbow = xb, hunt = hunt, cats = {}, leather = 0, metal_jobs = 0,
                bars_need = 0, bars_short = 0}
   -- metal pieces the bars at hand could make (any preferred metal), shared by the slots in order
   local bars = 0
@@ -1606,11 +1635,14 @@ local function plan_metal(K, c, r)
   end
   -- charcoal for the smelting and forging there is material for
   local ch = Mt.charcoal
-  local material = (r.inv.ore or 0) + (r.inv.bars or 0) > 0
+  -- Run 11: the metal items marked for melting (census melt: the invaders' gear in the dfllm-melt pile) need a fuel each
+  -- at a smelter; with no ore and no bar nothing ordered charcoal, so the melt jobs never ran
+  local melt = ws_any(r.f, Mt.smelter) and (r.inv.melt or 0) or 0
+  local material = (r.inv.ore or 0) + (r.inv.bars or 0) + melt > 0
   if ch and material and not magma and not open(r, ch.tag) and ws_any(r.f, ch.ws) then
-    -- fuel for: the ore still to smelt, the forge jobs the bars (and ore, ~4 bars each) could feed, the fuel
-    -- the open orders hold, plus a buffer
-    local jobs = math.max(smelt_jobs, math.min(r.inv.ore or 0, Mt.max_jobs or 10)) +
+    -- fuel for: the ore still to smelt, the items to melt, the forge jobs the bars (and ore, ~4 bars each) could feed,
+    -- the fuel the open orders hold, plus a buffer
+    local jobs = math.max(smelt_jobs, math.min(r.inv.ore or 0, Mt.max_jobs or 10)) + math.min(melt, Mt.max_jobs or 10) +
                  math.min(r.gear.metal_jobs, (r.inv.bars or 0) + (r.inv.ore or 0) * 4)
     local want = math.min(ch.cap or 40, jobs + (r.s.used.fuel or 0) + (ch.buffer or 4))
     local n = math.min(want - (r.inv.fuel or 0), left(c, r, 'wood'), Mt.max_jobs or 10)
@@ -4495,12 +4527,83 @@ function M.plan_picks(K, c, r)
   pk.route = 'trade' .. (forge and '' or ' (no forge)')
 end
 
--- economy.trade_wants() (CONTRACTS §7): what economy asks the caravans for, [{buy, n, why}] (trade puts these after
--- the moods' tokens, before plan.trade.want); Run 11: picks the Miners miss while no bar at a forge makes one
+-- Run 11 (Kilrudrabed y431-y441, site98: no metal ore on the site, bars 0 for ten years, the explore found none and the
+-- caravans were never asked for iron; 10 soldiers at worn 58 % lost siege 8): metal is short while soldiers are wanted
+-- (gear.n), they wear < metal_short.worn %, no ore boulder of a gear metal lies in the fort and the gear-metal bars are
+-- below what the soldiers' metal slots want (gear.bars_short). Then economy.trade_wants asks every caravan for metal
+-- (picks and axes up to `tools`, the bars, the missing metal pieces per slot, the alloy metals) and the fort keeps
+-- `crafts` crafts to sell for it. st.metal: economy.metal() (military.targets: the melee squads follow the gear),
+-- state stock.mshort/melt.
+function M.metal_plan(K, c, r)
+  local ms, g, inv = c.metal_short, r.gear, r.inv
+  if type(ms) ~= 'table' then st.metal = nil; return end
+  local gm = {}
+  for _, m in ipairs((c.gear or {}).metals or {}) do gm['INORGANIC:' .. m] = true end
+  local ore, bars = 0, 0
+  for _, o in pairs(st.ores or {}) do
+    for _, m in ipairs(o.metals or {}) do if gm[m] then ore = ore + (o.n or 0); break end end
+  end
+  for tok in pairs(gm) do bars = bars + (st.bars_by[tok] or 0) end
+  local okk, kpi = K.call('military', 'kpi')
+  local worn = okk and type(kpi) == 'table' and math.tointeger(kpi.worn) or 0
+  local short = g.n > 0 and worn < (ms.worn or 80) and ore == 0 and g.bars_short > 0
+  local mt = {short = short, worn = worn, bars = bars, ore = ore, need = g.bars_short, melt = inv.melt or 0, wants = {}}
+  st.metal = mt
+  if not short then return end
+  local why = string.format('metal short: worn %d%%, %d bars, no ore, %d bars wanted', worn, bars, g.bars_short)
+  for _, k in ipairs({'pick', 'axe'}) do              -- military's tools-first rule: no melee squad below `tools` each
+    local have = inv['w_' .. k] or 0
+    local n = math.max((ms.tools or 3) - have, ((st.want or {})[k] or 0) - have)
+    if n > 0 then mt.wants[#mt.wants + 1] = {buy = k, n = n, why = string.format('%d %ss; %s', have, k, why), metal = 1} end
+  end
+  for _, w in ipairs(ms.wants or {}) do
+    local rec = g.cats[w.n]
+    local n = w.n == 'bars' and g.bars_short or (rec and rec.miss or 0)
+    if type(w.buy) == 'string' and n > 0 then mt.wants[#mt.wants + 1] = {buy = w.buy, n = n, why = why, metal = 1} end
+  end
+  -- goods to pay with: crafts in free stone (not while stone is short of the rock orders), else in wood
+  local tag = ms.craft_tag or 'dfllm:trade_crafts'
+  local want = (ms.crafts or 40) - (inv.crafts or 0)
+  if want <= 0 or open(r, tag) or not ws_any(r.f, ms.craft_ws or {'workshop:Craftsdwarfs'}) then return end
+  local n = math.min(want, ms.craft_jobs or 10)
+  local rk = st.rock
+  local rock = math.min(stone_free(c, r), left(c, r, 'rock'))
+  if rock >= 10 and not (type(rk) == 'table' and (rk.need or 0) > (rk.free or 0)) then
+    add(r, {tag = tag, spec = {job = 'MakeCrafts', material = 'INORGANIC'}, n = math.min(n, rock // 2),
+            uses = {rock = 1}, why = 'crafts to trade for metal'})
+  else
+    local wood = left(c, r, 'wood') - ((c.idle or {}).wood_min or 60)
+    if wood > 0 then
+      add(r, {tag = tag, spec = wood_spec(c, r, {job = 'MakeCrafts'}), n = math.min(n, wood), uses = {wood = 1},
+              why = 'crafts to trade for metal'})
+    end
+  end
+end
+
+-- economy.metal() (CONTRACTS §7): {short, worn, bars, ore, need, melt} of the last plan (M.metal_plan), nil before it
+function M.metal(K)
+  local mt = st.metal
+  if type(mt) ~= 'table' then return nil end
+  return {short = mt.short, worn = mt.worn, bars = mt.bars, ore = mt.ore, need = mt.need, melt = mt.melt}
+end
+
+-- economy.trade_wants() (CONTRACTS §7): what economy asks the caravans for, [{buy, n, why, metal?}] (trade puts these
+-- after the moods' tokens, before plan.trade.want); Run 11: picks the Miners miss while no bar at a forge makes one;
+-- while metal is short (M.metal_plan) picks and axes, bars and metal gear (metal = 1: trade sells more for them)
 function M.trade_wants(K)
+  local r, by = {}, {}
   local pk = st.picks
-  if type(pk) ~= 'table' or (pk.short or 0) <= 0 or pk.route == 'forge' then return {} end
-  return {{buy = 'pick', n = pk.short, why = string.format('miners: %d picks < %d', pk.have, pk.want)}}
+  if type(pk) == 'table' and (pk.short or 0) > 0 and pk.route ~= 'forge' then
+    r[1] = {buy = 'pick', n = pk.short, why = string.format('miners: %d picks < %d', pk.have, pk.want)}
+    by.pick = r[1]
+  end
+  local mt = st.metal
+  for _, w in ipairs(type(mt) == 'table' and mt.short and mt.wants or {}) do
+    local e = by[w.buy]
+    if e then e.n, e.metal = math.max(e.n, w.n), 1
+    else e = {buy = w.buy, n = w.n, why = w.why, metal = 1}; r[#r + 1] = e; by[w.buy] = e end
+  end
+  return r
 end
 
 
@@ -4856,7 +4959,7 @@ function T.plan(K, c, r)
                 {urgent.leather and 1 or 4, plan_leather}, {urgent.cloth and 1 or 3.5, plan_cloth},
                 {2.9, M.plan_picks},
                 {urgent.bars and 1 or 3, plan_metal}, {urgent.bars and 1.1 or 3.1, plan_steel}, {3.2, plan_gear},
-                {urgent.glass and 1.2 or 3.3, M.glass_plan}, {5, function() plan_containers(K, c, r, 'bins') end}}
+                {3.25, M.metal_plan}, {urgent.glass and 1.2 or 3.3, M.glass_plan}, {5, function() plan_containers(K, c, r, 'bins') end}}
   table.sort(list, function(a, b) return a[1] < b[1] end)
   for _, e in ipairs(list) do e[2](K, c, r) end
   if r.day then
@@ -6157,6 +6260,10 @@ function M.state(K)
     -- and needs want of it; picks in the fort and the Miners' demand
     if st.rock then r.stock.rock, r.stock.rock_need = math.max(0, st.rock.free or 0), math.max(0, st.rock.need or 0) end
     if st.picks then r.stock.picks, r.stock.pick_want = st.picks.have, st.picks.want end
+    -- Run 11: metal short for the soldiers (M.metal_plan: plan check's metal route gate) and the metal items marked for
+    -- melting (the invaders' gear in the melt pile)
+    if st.metal then r.stock.mshort = st.metal.short and 1 or 0 end
+    r.stock.melt = math.max(0, math.tointeger(inv.melt) or 0)
   end
   local od = st.orders
   if od then r.orders = {n = od.n or 0, bad = od.bad or 0, stuck = od.stuck or 0} end   -- FR-01/FR-39

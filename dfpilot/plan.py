@@ -160,7 +160,8 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "audit": audit_routes(save_dir, state),
             "refuge": refuge_projects(save_dir, state, applied),
             "stone_dig": stone_digs(save_dir),
-            "hosp": hospital_facts(save_dir, state, rooms)}
+            "hosp": hospital_facts(save_dir, state, rooms),
+            "metal": metal_facts(save_dir, man, applied)}
 
 
 def hospital_facts(save_dir: Path, state: dict | None, rooms: list) -> dict:
@@ -727,6 +728,69 @@ def _bar_want(want: list) -> bool:
     return any(t == "bar" or t.startswith("bar:") for t in want)
 
 
+# ---------------------------------------------------------------- the metal route (Run 11)
+def metal_facts(save_dir: Path, man: dict, applied: set) -> dict:
+    """Run 11: depot = a trade depot stands or is planned (manifest `depot`, a fortcore or depot project applied: the
+    kernel asks every caravan for metal itself while metal is short, economy.trade_wants); explore = an `explore`
+    project not done yet (a bp file without PROJECT_DONE)."""
+    done = done_projects(save_dir)
+    explore = False
+    for p in bp_files(save_dir):
+        doc = files.read_json(p)
+        if isinstance(doc, dict) and doc.get("tpl") == EXPLORE and p.stem not in done:
+            explore = True
+            break
+    depot = bool(man.get("depot")) or any(t in ("fortcore", "depot") for t, _ in applied)
+    return {"depot": depot, "explore": explore}
+
+
+def metal_short(s: dict | None) -> bool | None:
+    """Run 11: the fort holds no metal for its soldiers: no ore boulders and no bars (state stock.ore/bars 0) and
+    economy's metal judgment (stock.mshort: soldiers wanted, worn < 80 %, no gear-metal ore, bars below the metal
+    slots), or for an older kernel without it the soldiers wearing < METAL_WORN % (none counts as 0). None = unknown."""
+    s = s or {}
+    st = s.get("stock") or {}
+    ore, bars = st.get("ore"), st.get("bars")
+    if not (_nat(ore) and _nat(bars)):
+        return None
+    if ore > 0 or bars > 0:
+        return False
+    if _nat(st.get("mshort")):
+        return st["mshort"] == 1
+    worn = (s.get("mil") or {}).get("worn", (s.get("ready") or {}).get("worn"))
+    return not _nat(worn) or worn < METAL_WORN
+
+
+def metal_gate(doc: dict, s: dict | None, fort: dict | None = None) -> tuple[list[str], list[str]]:
+    """Run 11 (Kilrudrabed y431-y441: no ore on the site, bars 0 for ten years, the explore never found any, the
+    caravans never brought iron; 10 soldiers at worn 58 % lost siege 8): (errors, warnings). While the plan wants
+    soldiers (phase_target >= P2 and a melee or crossbow squad) and the fort holds no metal for them (metal_short), the
+    plan needs a metal route: an `explore` build or one under way (fort metal.explore), metal items marked for melting
+    (stock.melt: the invaders' gear), or a trade depot (fort metal.depot: the kernel asks every caravan for bars and
+    metal gear). None of them: an ERROR. Only the depot: a warning (Run 10/11: the caravans brought no iron)."""
+    errs: list[str] = []
+    warn: list[str] = []
+    sq = (doc.get("military") or schema.PLAN_DEFAULTS["military"])["squads"]
+    if doc["phase_target"] < "P2" or sq["melee"] + sq["xbow"] < 1 or not metal_short(s):
+        return errs, warn
+    st = (s or {}).get("stock") or {}
+    fm = (fort or {}).get("metal") or {}
+    explore = fm.get("explore") or any(b["tpl"] == EXPLORE for se in doc["seasons"] for b in se["build"])
+    melt = st.get("melt") if _nat(st.get("melt")) else 0
+    if explore or melt > 0:
+        return errs, warn
+    why = (f"the plan wants soldiers ({sq['melee']} melee, {sq['xbow']} crossbow squads) and the fort has no ore, no "
+           "bars")
+    if not fm.get("depot"):
+        errs.append(f"metal: no route: {why}, no explore, nothing to melt and no trade depot: add "
+                    f"{{\"tpl\":\"{EXPLORE}\",\"site\":\"S1\"}} (or a depot for the caravans; the melee squads fill "
+                    "only as far as armor, weapon and shield sets go)")
+    else:
+        warn.append(f"metal: {why}, no explore and nothing to melt: only the caravans (the kernel asks each for bars, "
+                    f"metal gear, picks and axes); add tpl {EXPLORE} (site S1) where the miners can dig")
+    return errs, warn
+
+
 def supply_goals(doc: dict, s: dict | None, fort: dict | None = None) -> tuple[list[str], list[str]]:
     """(errors, warnings) of the supply goals: metal while ore_goal holds (an error when the plan has neither an `explore`
     build nor a bar trade want, a warning when only the trade want covers it) and leather first in trade.want while
@@ -755,6 +819,10 @@ def supply_goals(doc: dict, s: dict | None, fort: dict | None = None) -> tuple[l
     why = pick_goal(s)
     if why and "pick" not in want:
         warn.append(f"{why}: put pick first in trade.want (and bar:iron for a forge)")
+    me, mw = metal_gate(doc, s, fort)              # Run 11: soldiers wanted and no metal route at all
+    if me:
+        errs = [e for e in errs if not e.startswith("metal:")] + me
+    warn += [w for w in mw if not any(x.startswith("metal:") for x in warn + errs)]
     return errs, warn
 
 

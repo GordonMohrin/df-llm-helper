@@ -127,7 +127,7 @@ helper is experimental; procedure and fair-play limits: `tools/embark/README.md`
 | `popcap.lower` | `{cap}` | lowers only |
 | `tempo.lower` | `{fps, ttl_s}` | lowers only, never above the mode value |
 | `pause` / `unpause` | `{ttl_s ≤ 600, why?}` / `{}` | rarely; `unpause` releases only an inbox pause. A pause by the player, by DF (save loaded paused) or by a popup is released in DF, by the player |
-| `trade.want` | `{want?, sell?}` | tokens like `bar:iron`, `anvil`, `cloth` (any), `cloth:plant`/`silk`/`yarn` (also `thread:`) |
+| `trade.want` | `{want?, sell?}` | tokens like `bar:iron`, `anvil`, `cloth` (any), `cloth:plant`/`silk`/`yarn` (also `thread:`), `armor:metal` (`:metal` = a metal material) |
 | `trade.retry` | `{civ?, want?, sell?}` | PEACE; a second trade in the same visit: caravan at the depot, ≥ 3,000 ticks left |
 | `squad.sortie` | `{squad, target, approve:true, gate?}` | ALERT/SIEGE/BREACH/RECOVERY; rare, `approve:true` is a deliberate, logged decision; target = kill box id or position. `gate:"O1"` (SIEGE only): out through O1 to a position outside: gather in the bailey (B1 up behind), O1 down, kill, recall, O1 up, back; refused below `sortie.worn` or when its cv < the hostiles near the target x `foe_cv` (the reply compares them) |
 | `lever` | `{bridge, want}` | PEACE only |
@@ -248,15 +248,15 @@ the lever tiles (`Hebel+`) while pulls are pending; until threat 0 for 2 days, o
 `config/reflex.json` `intake`, on): in SIEGE the squads stand inside B1 with drink (BUG-029); when soldiers, worn, army
 size, traps and the field allow it, B1 lets them into the killing field, rises, O1 lets up to 6 hostiles into bailey and
 trap hall, rises, the field is cleared, the squads go back; INTAKE (B) per phase, WAVE_FAIL (A) when it goes wrong.
-**Military:** squads A, B melee, C crossbows, ≤ 10 each; stations > 2 tiles from every bridge (BUG-032); in a siege a melee squad below half is refilled from healthy core civilians, never the refuge; Constant training, never Off duty;
+**Military:** squads A, B melee, C crossbows, ≤ 10 each; stations > 2 tiles from every bridge (BUG-032); in a siege a melee squad below half is refilled from healthy core civilians, never the refuge; melee squads fill only to the armor+weapon+shield sets (≥ 2; the siege refill to 5 goes beyond; metal short: the rest to C); Constant training, never Off duty;
 Replace clothing + full metal + shield; KPI is worn %, never "assigned". Kill orders only inside
 manifest kill boxes, never into shafts or stairs. No civilian reserve squads.
 **Captives:** haul inside at once, then a pit zone; comrades free caged invaders.
 **Economy:** natives first (orders library, labormanager monitor, suspendmanager, buildingplan,
 autochop wood ≥ 14, autobutcher low, tailor, seedwatch on farmed crops at 12). KPI = 0 starving
-postings, not idle %. Idle > 40 % for 3 days → useful backlog only, never filler digging. Run 11: what planned buildings wait for (doors, hatches, furniture) is ordered in the stone or wood the fort has; stone short with idle miners: a bedrooms dig (PROJECT_REQUEST why=rock, follow); picks short without bars: `pick` in trade.want (economy asks the caravans itself).
+postings, not idle %. Idle > 40 % for 3 days → useful backlog only, never filler digging. Run 11: what planned buildings wait for (doors, hatches, furniture) is ordered in the stone or wood the fort has; stone short with idle miners: a bedrooms dig (PROJECT_REQUEST why=rock, follow); picks short without bars: `pick` in trade.want (economy asks the caravans itself); metal short (no ore, bars short, worn < 80 %): economy asks every caravan for picks, axes, bars, metal gear and sells crafts for it, melts the invaders' gear.
 **Moods:** all 12 moodable workshop types in P1; stock ≥ 10 cloth, leather, bone, shell, gems, bars
-from P1; never cancel a mood job. No ore: `plan propose` drafts `explore` each season (`plan check` refuses metal unplanned). No gems: green glass from revealed sand.
+from P1; never cancel a mood job. No ore: `plan propose` drafts `explore` each season (`plan check` refuses metal unplanned, and soldiers with no metal route at all). No gems: green glass from revealed sand.
 **Labor:** labormanager monitor; economy staffs the Miners (dig backlog, 2-4), Woodcutters (logs) and
 Hunters (famine and `food_low`; 1 for a short bone/shell/leather mood stock, 2 after a mood missed leather) and Fisherdwarves details itself; you never
 change work details.

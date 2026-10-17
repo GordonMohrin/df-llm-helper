@@ -873,6 +873,62 @@ T.test('Run 11: economy.trade_wants (picks for the Miners) go after the moods\' 
   T.eq(q.data.want, {'cloth:plant', 'pick', 'bar:iron', 'cloth'}, 'mood, economy, plan; a token the moods hold stays theirs')
 end)
 
+-- Run 11 (Kilrudrabed y431-y441: bars 0 for ten years, the caravans were never asked for iron; 10 soldiers at worn 58 %
+-- lost siege 8): `kind:metal` matches an item of a metal material; economy's metal wants (metal = 1) are capped at their
+-- units, not the kind's default, the crafts are sold too and more sale items go to the depot
+T.test('Run 11: armor:metal / weapon:metal / bar:metal match a metal material, never leather, wood or a training weapon', function()
+  local iron = {type = 'ARMOR', mat = 'inorganic:iron', desc = 'iron breastplate', metal = true}
+  local hide = {type = 'ARMOR', mat = 'creature:cow:leather', desc = 'cow leather armor', metal = false}
+  T.ok(L.token('armor:metal').metal, 'the metal sub')
+  T.ok(L.match(L.token('armor:metal'), iron), 'iron breastplate')
+  T.ok(not L.match(L.token('armor:metal'), hide), 'leather armor is no metal armor')
+  T.ok(L.match(L.token('armor'), hide), 'plain armor still takes any')
+  T.ok(L.match(L.token('weapon:metal'), {type = 'WEAPON', mat = 'inorganic:steel', desc = 'steel short sword', metal = true}))
+  T.ok(not L.match(L.token('weapon:metal'), {type = 'WEAPON', mat = 'inorganic:iron', desc = 'iron training axe',
+                                             metal = true}), 'no training weapon')
+  T.ok(not L.match(L.token('weapon:metal'), {type = 'WEAPON', mat = 'plant:oak:wood', desc = 'oaken crossbow', metal = false}))
+  T.ok(L.match(L.token('bar:metal'), {type = 'BAR', mat = 'inorganic:copper', desc = 'copper bars', metal = true}))
+  T.ok(not L.match(L.token('bar:metal'), {type = 'BAR', mat = 'coal:charcoal', desc = 'charcoal', metal = false}))
+  T.ok(L.valid('armor:metal') and L.valid('shield:metal'))
+end)
+
+T.test('Run 11: metal short: economy\'s metal wants first and capped at their units, crafts sold and brought too', function()
+  local function goods(W)
+    local r = {}
+    for _ = 1, 8 do r[#r + 1] = F.item(W, {type = 'BAR', mat = 'INORGANIC:IRON', desc = 'iron bars', value = 100, stack = 5}) end
+    for _ = 1, 6 do r[#r + 1] = F.item(W, {type = 'ARMOR', mat = 'INORGANIC:IRON', desc = 'iron breastplate', value = 120}) end
+    r[#r + 1] = F.item(W, {type = 'ARMOR', mat = 'CREATURE:COW:LEATHER', desc = 'cow leather armor', value = 20})
+    r[#r + 1] = F.item(W, {type = 'CLOTH', mat = 'PLANT:REED_ROPE:THREAD', desc = 'rope reed cloth', value = 12})
+    return r
+  end
+  local ours = {}
+  for _ = 1, 6 do ours[#ours + 1] = {type = 'FIGURINE', value = 900} end
+  ours[#ours + 1] = {type = 'RING', value = 40}
+  local W, M, d, c, U = setup{goods = goods, ours = ours, plan = plan_want({'cloth'}, {'ring'}), before_load = function(W)
+    local eco = {name = 'economy', every = {ticks = 1200}}
+    function eco.trade_wants(K)
+      return {{buy = 'bar:iron', n = 40, why = 'metal short', metal = 1}, {buy = 'armor:metal', n = 6, why = 'metal short', metal = 1}}
+    end
+    W.load(eco)
+  end}
+  W.frame(1)
+  local q = W.inbox('trade.want', {})
+  T.eq(q.data.want, {'bar:iron', 'armor:metal', 'cloth'}, 'the metal wants before the plan\'s')
+  T.eq(q.data.sell, {'ring', 'crafts'}, 'metal short: the crafts are sold too')
+  to_depot(W, d, c)
+  T.ok(F.until_(W, function() return traded(W) end, 1500), 'traded')
+  T.ok(U.brought, 'sale items sent to the depot')
+  T.eq(U.brought.max, 200, 'more sale items while metal is short')
+  local types = {}
+  for _, t in ipairs(U.brought.types) do types[t] = true end
+  T.ok(types.RING and types.FIGURINE and types.GOBLET, 'the plan\'s sale types and the crafts')
+  local got = {}
+  for _, it in ipairs(c._items) do if not it.flags.trader then got[it._desc] = (got[it._desc] or 0) + 1 end end
+  T.eq(got['iron breastplate'], 6, 'six breastplates (the kind\'s default cap is 3)')
+  T.eq(got['iron bars'], 6, '30 bars (METAL_CAP; the kind\'s default 20): six stacks of 5')
+  T.eq(got['cow leather armor'], nil, 'no leather armor for armor:metal')
+end)
+
 T.test('Run 10 y418: trade.retry opens a second trade in the same visit with new wants; refused when it cannot', function()
   local W, M, d, c, U = setup{goods = cloth_goods, plan = plan_want({'cloth:silk'})}
   W.frame(1)

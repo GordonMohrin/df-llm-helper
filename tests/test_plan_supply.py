@@ -164,3 +164,85 @@ def test_status_shows_ore_and_leather(save, base):
     files.write_json_atomic(save / ("state.a.json" if s["seq"] % 2 else "state.b.json"), s)
     text = brief.status_text(save)
     assert "ore 0 bars 8 (explore) leather 0 moods missed leather" in text, text
+
+
+# ---------------------------------------------------------------- Run 11: the metal route
+# Kilrudrabed (y431-y441): no ore on the site, bars 0 for ten years, the explore never found any, the caravans never
+# brought iron; 10 soldiers at worn 58 % lost siege 8. While the plan wants soldiers and the fort holds no metal for
+# them, `plan check` refuses a plan without any metal route (explore, metal to melt, a depot for the caravans)
+def bare(state, **stock):
+    """No ore, no bars, economy says metal is short for the soldiers (stock.mshort), nothing marked for melting."""
+    return noore(state, **{"bars": 0, "metal": "explore", "mshort": 1, "melt": 0, **stock})
+
+
+def test_metal_short_reads_economys_judgment(base):
+    _, state = base
+    assert plan.metal_short(state) is None                              # an older kernel without stock.ore
+    assert plan.metal_short(bare(state)) is True
+    assert plan.metal_short(bare(state, mshort=0)) is False             # economy: worn >= 80 or no soldiers wanted
+    assert plan.metal_short(noore(state)) is False                      # 8 bars
+    old = noore(state, bars=0)                                          # no stock.mshort: the soldiers' worn %
+    assert plan.metal_short(old) is False                               # the fixture's 94 %
+    old["mil"]["worn"] = 58
+    assert plan.metal_short(old) is True
+
+
+def test_metal_gate_no_route_at_all_is_an_error(base):
+    # old code: no metal_gate; plan check passed a plan with soldiers and no way to any metal
+    doc, state = base
+    d = copy.deepcopy(doc)
+    d["trade"]["want"] = ["anvil", "cloth"]
+    s = bare(state)
+    none = {"metal": {"depot": False, "explore": False}}
+    errs, warn = plan.metal_gate(d, s, none)
+    assert errs == ["metal: no route: the plan wants soldiers (1 melee, 0 crossbow squads) and the fort has no ore, no "
+                    "bars, no explore, nothing to melt and no trade depot: add {\"tpl\":\"explore\",\"site\":\"S1\"} (or a "
+                    "depot for the caravans; the melee squads fill only as far as armor, weapon and shield sets go)"]
+    # through check: the Run 10 "neither explore nor bar:*" error gives way to it (one metal error)
+    errs, _ = check(d, s, fort=none)
+    assert [e for e in errs if e.startswith("metal")] == plan.metal_gate(d, s, none)[0]
+    # a depot: only the caravans (the kernel asks each for metal): a warning
+    errs, warn = plan.metal_gate(d, s, {"metal": {"depot": True, "explore": False}})
+    assert errs == [] and len(warn) == 1 and warn[0].startswith("metal: the plan wants soldiers")
+    assert "only the caravans (the kernel asks each for bars, metal gear, picks and axes)" in warn[0]
+    # a route: an explore build, one under way, or the invaders' gear to melt
+    d2 = copy.deepcopy(d)
+    d2["seasons"][2]["build"].append(dict(EX))
+    assert plan.metal_gate(d2, s, none) == ([], [])
+    assert plan.metal_gate(d, s, {"metal": {"depot": False, "explore": True}}) == ([], [])
+    assert plan.metal_gate(d, bare(state, melt=4), none) == ([], [])
+    # no soldiers wanted (before P2, or no squad), or metal not short: nothing
+    d3 = copy.deepcopy(d)
+    d3["phase_target"] = "P1"
+    assert plan.metal_gate(d3, s, none) == ([], [])
+    d4 = copy.deepcopy(d)
+    d4["military"]["squads"] = {"melee": 0, "xbow": 0}
+    assert plan.metal_gate(d4, s, none) == ([], [])
+    assert plan.metal_gate(d, bare(state, mshort=0), none) == ([], [])
+    assert plan.metal_gate(d, state, none) == ([], [])                  # an older kernel: not checked
+
+
+def test_fort_facts_metal_route(save, base):
+    _, state = base
+    fm = plan.fort_facts(save, state)["metal"]
+    assert fm["explore"] is False
+    files.write_json_atomic(save / "bp" / "y3s1b9.json", {"tpl": "explore", "id": "y3s1b9"})
+    assert plan.fort_facts(save, state)["metal"]["explore"] is True     # an explore without PROJECT_DONE
+    from cli_v2_helpers import append_events
+    append_events(save, [{"n": 99990, "t": 1, "y": 3, "type": "PROJECT_DONE", "cls": "B", "mod": "runner",
+                          "msg": "done", "d": {"proj": "y3s1b9"}}])
+    assert plan.fort_facts(save, state)["metal"]["explore"] is False
+    assert isinstance(fm["depot"], bool)
+
+
+def test_brief_shows_metal_short_and_the_gear_cap(save, base):
+    from dfpilot import brief
+    _, state = base
+    s = bare(state, melt=3)
+    s["mil"]["cap"] = {"sets": 3, "melee": 3, "want": 6, "xbow": 2}
+    assert schema.validate("state", s) == []
+    s["seq"] += 10
+    files.write_json_atomic(save / ("state.a.json" if s["seq"] % 2 else "state.b.json"), s)
+    assert "ore 0 bars 0 (explore) METAL SHORT melt 3" in brief.status_text(save)
+    text = brief.brief_text(save)
+    assert "melee 3/6 (gear sets 3), +2 crossbow (metal short)" in text, text

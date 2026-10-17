@@ -549,4 +549,58 @@ T.test('Run 10: a mood missed leather: hunters through the no-game pause, a tann
   T.eq(eco_warns(W), {})
 end)
 
+-- Run 11 (Kilrudrabed y431-y441: no metal ore on the site, bars 0 for ten years, the caravans were never asked for iron;
+-- 10 soldiers at worn 58 % lost siege 8): metal short for the soldiers -> economy.trade_wants asks every caravan for
+-- picks, axes, bars and metal gear (metal = 1), the fort makes crafts to pay with, state stock.mshort
+T.test('Run 11: metal short (no ore, no bars, worn 15 %): trade_wants asks for picks, axes, bars, metal gear; crafts', function()
+  -- old code: trade_wants {} (no Miners detail short), no crafts order, no stock.mshort
+  local W = world{phase = 'P3', per = {A = 5}, wood = 100, shops = {'MetalsmithsForge', 'Craftsdwarfs'}, furnaces = {'Smelter'}}
+  days(W, 2)
+  local tw = select(2, W.K.call('economy', 'trade_wants'))
+  local buy, n = {}, {}
+  for _, e in ipairs(tw) do buy[#buy + 1] = e.buy; n[e.buy] = e.n; T.eq(e.metal, 1, e.buy) end
+  T.eq(buy, {'pick', 'axe', 'bar:iron', 'bar:steel', 'armor:metal', 'weapon:metal', 'helm:metal', 'shield', 'pants:metal',
+             'gloves:metal', 'shoes:metal', 'bar:bronze', 'bar:bismuth_bronze', 'bar:copper'})
+  T.eq({n.pick, n.axe, n['armor:metal'], n['weapon:metal'], n.shield, n['gloves:metal']}, {3, 3, 5, 5, 5, 10},
+       'tools up to 3 each (military\'s tools-first rule), the slots\' missing pieces')
+  T.eq(n['bar:iron'], 55, 'the bars the metal slots want: 15 + 5 + 10 + 5 + 5 + 10 + 5')
+  T.ok(tw[3].why:find('metal short: worn 15%, 0 bars, no ore, 55 bars wanted', 1, true), tw[3].why)
+  local s = W.state().stock
+  T.eq({s.mshort, s.melt}, {1, 0})
+  T.eq(select(2, W.K.call('economy', 'metal')), {short = true, worn = 15, bars = 0, ore = 0, need = 55, melt = 0})
+  local cr = order(W, 'dfllm:trade_crafts')
+  T.ok(cr, 'crafts to trade for the metal')
+  T.eq({cr.job, cr.material_category, cr.amount_total}, {'MakeCrafts', {'wood'}, 10}, 'no free stone: wood above wood_min')
+  -- iron ore found: smelting is the route, the caravans are not asked any more
+  F.item(W, 'BOULDER', {mat_type = 0, mat_index = 62})                           -- hematite
+  days(W, 1)
+  T.eq(select(2, W.K.call('economy', 'trade_wants')), {})
+  T.eq(W.state().stock.mshort, 0)
+  -- no soldiers wanted: not short
+  local W2 = world{phase = 'P3', per = {}, wood = 100, shops = {'MetalsmithsForge'}}
+  days(W2, 2)
+  T.eq({select(2, W2.K.call('economy', 'trade_wants')), W2.state().stock.mshort}, {{}, 0})
+  T.eq(eco_warns(W), {})
+end)
+
+T.test('Run 11: metal gear marked for melting with no ore and no bar: charcoal for the melt jobs (stock.melt)', function()
+  -- old code: no ore and no bars -> no charcoal, so the smelter never melted the invaders' gear
+  local W = world{phase = 'P3', per = {A = 2}, wood = 60, shops = {'MetalsmithsForge'}, furnaces = {'Smelter', 'WoodFurnace'},
+                  setup = function(W)
+    for _ = 1, 3 do F.item(W, 'ARMOR', {mat_type = 0, mat_index = 51, flags = {melt = true}}) end   -- iron, melt pile
+    F.item(W, 'ARMOR', {mat_type = 37, mat_index = 5, flags = {melt = true}})                       -- leather: no metal
+  end}
+  days(W, 1)
+  T.eq({W.K.census.i.melt, W.K.census.i.g_body}, {3, 0}, 'marked items are bars to come, no armor to wear')
+  local ch = order(W, 'dfllm:charcoal')
+  T.ok(ch, 'charcoal for the melt jobs')
+  T.eq(ch.job, 'MakeCharcoal')
+  T.eq(W.state().stock.melt, 3)
+  -- without a smelter nothing melts: no charcoal for it
+  local W2 = world{phase = 'P3', per = {A = 2}, wood = 60, shops = {'MetalsmithsForge'}, furnaces = {'WoodFurnace'},
+                   setup = function(W) F.item(W, 'ARMOR', {mat_type = 0, mat_index = 51, flags = {melt = true}}) end}
+  days(W2, 1)
+  T.eq(order(W2, 'dfllm:charcoal'), nil)
+end)
+
 T.done()
