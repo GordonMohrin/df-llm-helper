@@ -1,5 +1,5 @@
 # BUG-038 No fishery after the sieges destroyed it; 450 GatherPlants jobs nobody takes at food_low
-Status: fixed (offline, live-untested): the fishery request keeps its clock when a fishery is seen, `queued` holds only
+Status: fixed in ef88f66 (offline, live-untested): the fishery request keeps its clock when a fishery is seen, `queued` holds only
 for a moving fishery project, follow places the fishery although the fort manifest lists a destroyed one, plant
 gatherers join at food_low with unclaimed GatherPlants jobs and leave when food is back, the food decisions name what
 the kernel did itself (`auto`)
