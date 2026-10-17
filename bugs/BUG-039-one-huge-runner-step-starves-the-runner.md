@@ -1,5 +1,5 @@
 # BUG-039 One 68.6 s runner step left the runner without a slice for 49+ game days; the cavern check logged the same line every run
-Status: fixed in <commit> (offline, live-untested): the pacing debt is capped and a due module gets a slice after 30 s
+Status: fixed in 3e2d39c (offline, live-untested): the pacing debt is capped and a due module gets a slice after 30 s
 whatever its debt (pacing floor); a step of 1 s or more is named in kern.log (what the module did, its slowest act call);
 KERNEL_SLOW names the task; the shaft check converges (finished unchanged shafts wait longer while it is saturated) and
 logs only news; kern.log names every project that is done or cancelled; `inspect persist` reads one field.
