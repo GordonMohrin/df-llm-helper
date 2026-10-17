@@ -535,8 +535,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "CAVERN_PLUG": ("A", "runner", _d("phase:s proj:s", "plug:s why:s pos:p shaft:p z1:i walls:sa n:i hint:s state:s")),
     # Run 11 siege 8 (seal first): an open seal or plug built nothing for runner seal_first.stuck_days: it stops pausing
     # the other projects; pieces = the first 6 open ones ('door x,y,z'), n = all open, mat = why economy cannot make
-    # them, blocked = the project's block (build_lost ...)
-    "SEAL_STUCK": ("A", "runner", _d("proj:s", "tpl:s stage:s days:i n:i pieces:sa mat:s blocked:s")),
+    # them, blocked = the project's block (build_lost ...); BUG-041: wait = why the first open piece waits, as far as the
+    # kernel can tell ('FellTree at x,y,z: Wood cutting enabled for 0 of 26 citizens: nobody takes it', 'no citizen
+    # reaches wall x,y,z or a tile beside it (walk groups 5018; citizens 7827)')
+    "SEAL_STUCK": ("A", "runner", _d("proj:s", "tpl:s stage:s days:i n:i pieces:sa mat:s blocked:s wait:s")),
     # BUG-030: the siege's deep defense: why = destroyers (building destroyers in sight), army (> stations.core_ratio x
     # soldiers), weak (worn or iron/steel below stations.worn/metal); civilians to the separated refuge, squads at the core
     "SIEGE_DEEP": ("A", "siege", _d("why:sa", "bd:i races:sa units:ia vis:i soldiers:i worn:i metal:i refuge:s "

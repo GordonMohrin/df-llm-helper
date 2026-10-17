@@ -594,7 +594,9 @@ local function measure_dig(K, P, d, R)
         local plug = P.tpl == 'plug'
         for i, t in ipairs(tl) do
           local seen = sp:sub(i, i) == '1'
-          local r, why, mark, hidden = probe(K, t, seen, plug)
+          local r, why, mark, hidden
+          if t[4] == 'p' and P.tpl == 'seal' then r = Q.gathered(K, P, d, R, t)    -- BUG-041: no gather waited for
+          else r, why, mark, hidden = probe(K, t, seen, plug) end
           if hidden then
             if r == 'pend' then m.hid = m.hid + 1; hp[#hp + 1] = t else hs[#hs + 1] = t end
           end
@@ -625,9 +627,12 @@ local function measure_dig(K, P, d, R)
         done = done + skip
       else
         if not qf_room() then return 'yield' end
-        local ch = chunks[ci]
-        local ok, st = qf(K, {mode = 'dig', data = chunk_data(ch), pos = ch.pos, dry_run = true})
-        local left = ok and type(st) == 'table' and int(st.dig_designated)  -- dig.lua:878, still to dig
+        local ch = Q.nogather(P, chunks[ci])  -- BUG-041: a seal's gather cells count as done
+        local left = 0
+        if #ch.cells > 0 then
+          local ok, st = qf(K, {mode = 'dig', data = chunk_data(ch), pos = ch.pos, dry_run = true})
+          left = ok and type(st) == 'table' and int(st.dig_designated)       -- dig.lua:878, still to dig
+        end
         pend = left and math.min(left, #tl) or #tl
         done = #tl - pend
       end
@@ -1400,6 +1405,10 @@ local function apply(K, P, st, R)
       K.log('info', '%s %s chunk %d: %d cells already zoned, left out', P.id, st.label, P.chunk, skip)
       if #ch.cells == 0 then P.chunk = P.chunk + 1; moved(K, R); dirty(); return true end
     end
+  elseif st.mode == 'dig' then                 -- BUG-041: a seal's gather cells are never designated (Q.nogather)
+    local skip
+    ch, skip = Q.nogather(P, ch)
+    if skip > 0 and #ch.cells == 0 then P.chunk = P.chunk + 1; moved(K, R); dirty(); return true end
   end
   local p = {mode = st.mode, data = chunk_data(ch), pos = ch.pos}
   Q.doing(P, st, string.format('chunk %d/%d', P.chunk + 1, #st.chunks))
@@ -2369,17 +2378,147 @@ local function open_pieces(K, P, d)
   return #order, names
 end
 
+-- BUG-041 (Run 11 y461: the seal door 59,62,146 on a shrub waited 220 days at seal.clear for a gather designation;
+-- nobody gathers above 30 food days, economy's gather task): quickfort builds doors and constructions on SHRUB tiles
+-- (internal/quickfort/build.lua is_valid_tile_generic, 53.16-r2: FLOOR, BOULDER, PEBBLES, TWIG, SAPLING, SHRUB), so a
+-- seal's gather cell (`p`, stage seal.clear of the CLI before BUG-041) waits for nothing: apply leaves it out, the
+-- measure counts it done and removes a gather designation still flagged on its tile (quickfort #dig x, the designations
+-- screen's remove; a job DF posted already, without the flag, is left: the plant goes when the piece is built).
+-- kern.log once per stage (R.gn), again when it removed a designation
+function Q.nogather(P, ch)
+  if P.tpl ~= 'seal' then return ch, 0 end
+  local keep, n = {}, 0
+  for _, c in ipairs(ch.cells) do
+    if c[4]:match('^[^{(:/]*') == 'p' then n = n + 1 else keep[#keep + 1] = c end
+  end
+  if n == 0 then return ch, 0 end
+  return {pos = ch.pos, cells = keep}, n
+end
+function Q.gathered(K, P, d, R, t)
+  local ok, v = K.call('snapshot', 'tile', t[1], t[2], t[3])
+  S.slice.probes = S.slice.probes + 1
+  local rm = false
+  if ok and type(v) == 'table' and v.dig ~= nil and v.dig ~= '' and v.dig ~= 'job' and qf_room() then
+    local okx, sx = qf(K, {mode = 'dig', data = {[0] = {[0] = {[0] = 'x'}}}, pos = {t[1], t[2], t[3]}})
+    rm = okx and type(sx) == 'table' and (int(sx.dig_designated) or 0) > 0
+  end
+  if R.gn == 1 and not rm then return 'done' end
+  R.gn = 1
+  local piece = 'piece'                        -- what a later stage builds on that tile (the seal.plant door)
+  for si = P.stage + 2, #d.stages do
+    for _, ch in ipairs(d.stages[si].chunks) do
+      for _, c in ipairs(ch.cells) do
+        if ch.pos[1] + c[1] == t[1] and ch.pos[2] + c[2] == t[2] and ch.pos[3] + c[3] == t[3] then
+          piece = PIECE_NAME[c[4]:match('^[^{(:/]*')] or piece
+        end
+      end
+    end
+  end
+  K.log('info', '%s %s: no gather at %d,%d,%d: the %s goes on the shrub (quickfort builds on shrub tiles; a gather job ' ..
+        'waits for a plant gatherer)%s', P.id, d.stages[P.stage + 1].label, t[1], t[2], t[3], piece,
+        rm and '; its gather designation removed' or '')
+  dirty()
+  return 'done'
+end
+
+-- BUG-041: why the first open piece of a stuck seal waits, as far as the labors and the revealed tiles tell (SEAL_STUCK
+-- d.wait; once per stuck event, no scan of its own): a clear stage's job (chop FellTree, gather GatherPlants) with the
+-- citizens who have its labor enabled; 'no citizen reaches <piece> or a tile beside it (walk groups 5018; citizens 7827)'
+-- when the piece's tile, its 8 neighbours on the level and the tiles above and below (the builders' standing tiles,
+-- generously) are on no citizen's walk group (snapshot.groups; a hidden one is unknown and makes no claim; tiles off
+-- the map are no standing tiles). Informative only: the piece stays open (a raised bridge or a ramp not dug yet may
+-- cut it off for now; flyers and climbers need no walk group)
+Q.JOB = {t = {'FellTree', 'CUTWOOD', 'Wood cutting'}, p = {'GatherPlants', 'HERBALIST', 'Plant gathering'}}
+function Q.wait_why(K, P, d)
+  local st = d.stages[P.stage + 1]
+  if not st or is_free(st) then return nil end
+  local R = S.rt.p[P.id]
+  local cd = type(R) == 'table' and R.si == P.stage and type(R.cd) == 'string' and R.cd or ''
+  local tiles, t = stage_tiles(P.id, d, P.stage), nil
+  for ci = 1, #tiles do
+    if st.mode ~= 'dig' or cd:sub(ci, ci) ~= '1' then
+      for _, x in ipairs(tiles[ci]) do
+        local done = (st.mode == 'build' and piece_built(K, x)) or (st.mode == 'dig' and x[4] == 'p' and P.tpl == 'seal')
+        if not done then t = x; break end
+      end
+    end
+    if t then break end
+  end
+  if not t then return nil end
+  local cits, out = {}, {}
+  local cu = K.census.u
+  for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
+    local u = df.unit.find(id)
+    if u then cits[#cits + 1] = u end
+  end
+  local job = st.mode == 'dig' and Q.JOB[t[4]]
+  if job then
+    local n = 0
+    for _, u in ipairs(cits) do
+      local ok, v = pcall(function() return u.status.labors[job[2]] end)
+      if ok and v == true then n = n + 1 end
+    end
+    out[#out + 1] = string.format('%s at %d,%d,%d: %s enabled for %d of %d citizens%s', job[1], t[1], t[2], t[3], job[3],
+                                  n, #cits, n == 0 and ': nobody takes it' or '')
+  end
+  if #cits > 0 then
+    local pts = {}
+    for dz = -1, 1 do
+      for dy = -1, 1 do
+        for dx = -1, 1 do
+          if (dz == 0 or (dx == 0 and dy == 0)) and on_map(t[1] + dx, t[2] + dy, t[3] + dz) then
+            pts[#pts + 1] = {t[1] + dx, t[2] + dy, t[3] + dz}
+          end
+        end
+      end
+    end
+    local np = #pts
+    for i = 1, math.min(#cits, 50) do
+      local ok, x, y, z = pcall(dfhack.units.getPosition, cits[i])
+      if ok and int(x) then pts[#pts + 1] = {x, y, z} end
+    end
+    local ok, g = K.call('snapshot', 'groups', pts, false)
+    if ok and type(g) == 'table' then
+      local cg, cl, tg, tl, hit, unk = {}, {}, {}, {}, false, false
+      for i = np + 1, #pts do
+        local v = int(g[i])
+        if v and v > 0 and not cg[v] then cg[v] = true; cl[#cl + 1] = v end
+      end
+      for i = 1, np do
+        local v = int(g[i]) or -1
+        if v < 0 then unk = true
+        elseif v > 0 then
+          hit = hit or cg[v] == true
+          if not tg[v] then tg[v] = true; tl[#tl + 1] = v end
+        end
+      end
+      if #cl > 0 and not hit and not unk then
+        table.sort(tl)
+        table.sort(cl)
+        out[#out + 1] = string.format('no citizen reaches %s %d,%d,%d or a tile beside it (walk groups %s; citizens %s)',
+                                      PIECE_NAME[t[4]] or t[4], t[1], t[2], t[3],
+                                      #tl > 0 and table.concat(tl, ',', 1, math.min(#tl, 4)) or 'none',
+                                      table.concat(cl, ',', 1, math.min(#cl, 4)))
+      end
+    end
+  end
+  return #out > 0 and table.concat(out, '; ') or nil
+end
+
 -- SEAL_STUCK (A): the seal built nothing for stuck_days; util/cadence per project (r.ev): a repeat needs news and
--- 7 days (Run 9 GHOSTS rule)
+-- 7 days (Run 9 GHOSTS rule). BUG-041: d.wait = Q.wait_why
 local function stuck_event(K, P, d, n, names, ticks, r)
   local st = d.stages[P.stage + 1]
   local label = trunc(st and st.label or 'done', 24)
   local days = ticks // DAY
   local _, mat = M.remake_why(K, P, d)
-  local msg = string.format('%s (%s) built nothing for %s at %s: %s open%s%s%s; the other projects run again', P.id,
+  local okw, wait = pcall(Q.wait_why, K, P, d)
+  wait = okw and type(wait) == 'string' and trunc(wait, 160) or nil
+  local msg = string.format('%s (%s) built nothing for %s at %s: %s open%s%s%s%s; the other projects run again', P.id,
                             P.tpl, plural(days, 'day'), label, plural(n, 'piece'),
                             #names > 0 and (' (' .. table.concat(names, ', ') .. ')') or '',
-                            P.blocked ~= '' and ('; ' .. P.blocked) or '', mat and ('; ' .. mat) or '')
+                            P.blocked ~= '' and ('; ' .. P.blocked) or '', mat and ('; ' .. mat) or '',
+                            wait and ('; ' .. wait) or '')
   K.log('warn', 'seal first: %s', msg)
   local T = K.now()
   local ids = #names > 0 and names or {P.id}
@@ -2388,6 +2527,7 @@ local function stuck_event(K, P, d, n, names, ticks, r)
   local dd = {proj = P.id, tpl = P.tpl, stage = label, days = days, n = n, pieces = names}
   if mat then dd.mat = trunc(mat, 80) end
   if P.blocked ~= '' then dd.blocked = trunc(P.blocked, 24) end
+  if wait then dd.wait = wait end
   K.emit('SEAL_STUCK', 'A', trunc(msg, 200), dd)
   K.flush()
 end

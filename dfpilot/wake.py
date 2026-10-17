@@ -103,7 +103,9 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
                        "bp.cancel the explore without undo",
         # Run 11 siege 8: an open seal built nothing for stuck_days; the other projects run again
         "SEAL_STUCK": "tell Gordon the open way in; dfllm cmd inspect '{\"what\":\"workload\"}' (material); no "
-                      "material: logs, a stone dig; a refused tile: bp.cancel, then bp.place tpl=seal at=last or by hand"}
+                      "material: logs, a stone dig; a refused tile: bp.cancel, then bp.place tpl=seal at=last or by hand; "
+                      "d.wait (BUG-041): a job nobody has the labor for (Gordon: work details) or a piece no citizen "
+                      "reaches (a wall on another tile)"}
 SUPERVISE_EVERY_S = 15                         # supervise.json read cadence
 SUPERVISE_FRESH_S = 3600                       # alerts logged longer ago than this never wake
 HB_STALE_S = 300

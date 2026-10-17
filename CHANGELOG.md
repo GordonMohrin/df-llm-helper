@@ -1,5 +1,60 @@
 # CHANGELOG dfpilot
 
+## A seal no longer waits for a shrub nobody gathers; SEAL_STUCK says what a stuck piece waits for; plan check stops repeating it (BUG-041, 2026-10-17; offline, live-untested)
+- **Why (Run 11, y461):** Kilrudrabed site98, y461 summer d45, kernel e8a28a6: kern.log `seal first: c1a149cf2ff540c801
+  (seal) built nothing for 5 days at seal.clear: 1 piece open (door 59,62,146)`, `dfllm plan check` `... is stuck for 220
+  d (SEAL_STUCK): fix it first` year after year (before it the ramp head 79,116,146 in c1a147c261, stuck 196 d, cancelled
+  by the session). Each new seal paused the plan's builds for 3 days. Read-only live data: 59,62,146 is a shrub in a shrub
+  field on the citizens' walk group 7827, a wall beside it, the map 192 x 192 x 165 (no edge); 256-450 GatherPlants jobs
+  unclaimed for years, food 700+ days. `bugs/BUG-041-seal-clear-waits-on-an-ungathered-shrub.md`.
+- **Cause (proved from the code):** the seal template gave a shrub a gather designation (`#dig p`, stage `seal.clear`)
+  before its door (`seal.plant`; defense.py:332, 387, 391); the runner's measure waits while the tile shows the designation
+  or its job (runner.lua:479, 642); the plant gathering detail is filled only below 30 food days (economy.lua:5015,
+  BUG-038), so nobody ever gathered. quickfort never needed it: DFHack 53.16-r2 `internal/quickfort/build.lua`
+  `is_valid_tile_generic` (49-58) takes SHRUB and SAPLING tiles like floors for doors (`is_tile_generic_and_wall_adjacent`)
+  and constructions (`is_valid_tile_has_space`). plan check printed the full stuck warning at every check and counted a
+  parked seal's bp file as open (plan.py:362, 448).
+- **Template:** a shrub's piece (door, `nodoor` wall, or the piece named) goes into `seal.build` on the shrub (`59,62,146
+  shrub: door at 59,62,146 on the shrub (quickfort builds on shrub tiles; no gather job)`); `seal.clear` keeps the chop of
+  tree tiles; saplings keep the neighbour rule. `defense.GATHER_KINDS` is `SHRUB_KINDS`.
+- **Runner (seals placed before the fix, the live one):** a seal's `p` cells are left out of every dig apply and dry run
+  (`Q.nogather`) and count as done in the measure (`Q.gathered`), which removes a gather designation still flagged on the
+  tile (quickfort #dig `x`, the designations screen's remove; a job DF posted without the flag is left to DF); kern.log
+  once per stage `<id> seal.clear: no gather at 59,62,146: the door goes on the shrub (quickfort builds on shrub tiles; a
+  gather job waits for a plant gatherer)[; its gather designation removed]`.
+- **SEAL_STUCK `wait` (`Q.wait_why`, once per stuck event; no scan of its own):** a clear stage's job and its labor
+  (`FellTree at 57,62,146: Wood cutting enabled for 0 of 26 citizens: nobody takes it`); `no citizen reaches wall
+  100,100,146 or a tile beside it (walk groups 5018; citizens 7827)` when that tile, its 8 neighbours and the tiles above
+  and below are revealed, on the map and on no citizen's walk group (snapshot.groups; a hidden tile is unknown: no
+  claim). Informative only: no piece is counted done for it (dropped after the live data showed 59,62,146 reachable; a
+  raised bridge or an undug ramp may cut a piece off for now; flyers and climbers need no walk group). In the msg too;
+  the wake hint names it.
+- **plan check:** `open_seals` leaves out rows `parked: ...` (BUG-037: a parked seal pauses nothing) and carries `why`
+  (`stuck_reasons`: the newest SEAL_STUCK's wait, mat, blocked, else its pieces); `seal ... is stuck for 4 d (SEAL_STUCK:
+  <why>): fix it first ...` below `STUCK_SHORT_D` (28) days, then one line `seal ... stuck 220 d (SEAL_STUCK, announced:
+  <why>): temple run beside it`.
+- Contracts: SEAL_STUCK `wait` (schema, contract.lua, §12 row, appendix); RULES §7 SIEGE_UNREADY/SEAL_STUCK rows in place
+  (300 lines); DESIGN seal paragraph.
+- Tests (each new one fails on e8a28a6): `tests/lua/test_runner_seal_clear.lua` (new: the y461 replay with the live
+  tiles, the designation an older kernel placed and a posted job, a chop nobody takes, a piece no citizen reaches with a
+  hidden neighbour, a reachable one and the map edge), `tests/bp/test_bp_seal_shrub.py` (new: the live door in seal.build,
+  shrub wall plus chop), `tests/test_seal_stuck_plan.py` (new: a parked seal, the reason, the short line);
+  `tests/lua/runner_world.lua` (fake quickfort `p` on shrubs, `x`, `t` on trees; snapshot.groups); adjusted:
+  `test_runner_seal_first.lua` (the dig-priority seal chops a tree), `test_bp_seal_run11.py`, `test_bp_seal_door.py` (the
+  shrub's piece in seal.build).
+- **Live check (Run 11):** before the reload, read-only: `dfllm events --type SEAL_STUCK --limit 0` (the c1a147c261 one:
+  stage, pieces, blocked, mat) and, for the ramp head, `dfhack.maps.getWalkableGroup` of 79,116,146, its 8 neighbours on
+  z146, 79,116,145 and 79,116,147, and of a citizen. After `git pull` and `dfhack-run dfllm reload`:
+  - within a run: kern.log `c1a149cf2ff540c801 seal.clear: no gather at 59,62,146: the door goes on the shrub (...)`
+    (`; its gather designation removed` when the flag was still set), then `seal first: c1a149cf2ff540c801 moves again`;
+    the designations screen shows no gather mark on 59,62,146; the work orders a door for it on top (seal first);
+  - within a few game days: a door on the shrub tile (`dfhack-run lua "print(dfhack.buildings.findAtTile(59,62,146))"`),
+    PROJECT_DONE c1a149cf2ff540c801, `paused projects run again`; send it if DF refuses the door on the shrub instead
+    (SEAL_STUCK at `seal.plant` with `build_lost`);
+  - `dfllm cmd bp.place tpl=seal site=S1 at=last` with a shrub opening: the `seal:piece` line `... door at x,y,z on the shrub (...)`;
+  - a later SEAL_STUCK: `d.wait` names the job or the reach; `dfllm plan check` shows `stuck N d (SEAL_STUCK, announced:
+    ...)` once it is a month old.
+
 ## Hospital sites follow the accepted water, the refuge's place is named, dry cisterns are reported (BUG-040, 2026-10-17; offline, live-untested)
 - **Why (Run 11, y453):** Kilrudrabed site98, y453 summer, kernel b49acfb: no new hospital was planned (the session
   waited for water: `plan check` refuses a hospital without a source), wounded lay in beds without a hospital;

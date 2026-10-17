@@ -142,11 +142,10 @@ T.test('seal first: a seal\'s dig designations are priority 1 (placed at prio 4)
        function()
   local W = world{tag = 'prio'}
   H.floor(W, SX + 2, SY, Z, SX + 2, SY)
+  -- BUG-041: a seal's gather cells are no longer designated (its piece goes on the shrub); a chop still is
   local d = seal_doc(nil, {{label = 'seal.clear', mode = 'dig', orders = 0, defense = 1,
-                            chunks = {{pos = {SX + 2, SY, Z}, cells = {{0, 0, 0, 'p'}}}}},
-                           {label = 'seal.plant', mode = 'build', orders = 0, defense = 1,
-                            chunks = {{pos = {SX + 2, SY, Z}, cells = {{0, 0, 0, 'd'}}}}}})
-  W.tile(SX + 2, SY, Z).c = '#'                         -- the shrub's tile (the fake quickfort designates it)
+                            chunks = {{pos = {SX + 2, SY, Z}, cells = {{0, 0, 0, 't'}}}}}})
+  W.tile(SX + 2, SY, Z).tree = true                     -- a tree branch on the route (the fake quickfort chops it)
   H.place(W, 'b4', H.dig_doc(1, {tpl = 'fortcore', class = 'defense', params = {stage = 2}, x = 10}))
   H.place(W, SEAL, d)
   H.runs(W, 1)

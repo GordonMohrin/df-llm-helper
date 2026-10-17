@@ -658,7 +658,7 @@ def current_openings(save_dir: Path, state: dict | None = None) -> list[dict]:
         pos = _p3(d.get("pos"))
         if pos:
             kind = dmod.OPEN_ROUTE if LEAK_ROUTE in str(leak.get("msg", "")) else str(d.get("bld") or "").lower()
-            floor = kind in dmod.FLOORISH_KINDS or kind in dmod.GATHER_KINDS
+            floor = kind in dmod.FLOORISH_KINDS or kind in dmod.SHRUB_KINDS
             add("%d,%d,%d %s" % (pos + (kind or "?",)), "leak", _tick(leak), "wall" if floor else "")
     if unready:
         for x in unready["d"]["ents"]:
@@ -708,7 +708,7 @@ def _seal_kind(dmod, geo, e: dict, notes: list[str]) -> str | None:
         return None
     if c == ".":
         mark = geo.plant((x, y, z))
-        if kind in dmod.GATHER_KINDS or kind == "sapling":
+        if kind in dmod.SHRUB_KINDS or kind == "sapling":
             if newer and geo.plant_aware:
                 return mark or (kind if not geo.plant_full else "floor")
             return kind
