@@ -1,5 +1,5 @@
 # BUG-037 Projects stay 'queued' at 0 % for months behind slot holders that build nothing; terminal blocks never leave
-Status: fixed (offline, live-untested): slot holders without progress yield, a stuck seal competes like a stalled
+Status: fixed in 5799e85 (offline, live-untested): slot holders without progress yield, a stuck seal competes like a stalled
 project, a run watchdog, the seal-first count fault-contained, `sched.q/run/pk` and `queued behind <id>` rows, parked
 projects (blocked for good past `queue.park_days`), `inspect workload` names the runner's queue. The live trigger is
 not proven: see "Live data that decides it".
