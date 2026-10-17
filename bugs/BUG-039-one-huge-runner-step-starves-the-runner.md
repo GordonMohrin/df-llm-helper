@@ -95,9 +95,10 @@ named with what it did; the daily shaft check keeps up or says why, and does not
   "pos":[144,62,137]}] ok`: the place call of y451s3b0 (three food stockpiles in one call) took the 68,603 ms, right
   after `y451s3b0 build`; PROJECT_DONE y451s3b0 (stockroom) is event #18499. The DFHack food import is still the
   suspected cost inside that call (not measured separately).
-- The projects that left the list finished: PROJECT_DONE since n >= 17000 holds depot7 (#17151), y451s3b0 and the
-  y450-y452 plan builds. Not yet found: PROJECT_DONE of c1a14831718f432f01, c1a1484d0449597801, c1a1484d088187e701,
-  c1a14867db95857619 (asked for).
+- The projects that left the list all finished, none was lost: PROJECT_DONE stockroom c1a148317945f66101 #16381, seal
+  c1a148696a3d6da701 #16514, tavern c1a1484d088187e701 #16640, bedrooms c1a14831718f432f01 #16752 and
+  c1a1484d0449597801 #16763, tombs c1a14867db95857619 #16770, depot7 #17151, each after its PROJECT_STAGE row to 100 %;
+  no bp.cancel of them in commands.log, their bp files are still in bp/. The 'queued' rows were a stale view.
 
 ## Live data that decides it (read-only)
 1. commands.log near tick 182164588: the runner's `act.quickfort` line with `"mode":"place"` and its `"ms"` (68,000 =
