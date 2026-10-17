@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from .. import schema as S
 from . import topo
 from .emit import MAX_W
-from .primitives import parse_cell
+from .primitives import cell_cfg, parse_cell
 from .render import World, as_built, marks_of
 
 DIG_KEYS = set("dhujirztpseFTvMnx") | {"bc", "bf", "bm", "bM", "bd", "bD", "bh", "bH",
@@ -28,7 +28,9 @@ ZONE_KEYS = set("mbhnpwjfsoDBadtTgc")          # quickfort zone.lua / user guide
 PLACE_CHARS = set("afunyrswebhlzSgpdc")
 BURROW_KEYS = {"a", "e"}
 EXTENT_MODES = {"place", "zone", "burrow"}     # every cell must carry an explicit extent
-OPEN_ROOMS = ("bedrooms", "gallery_o1")        # manifest rooms without the closure check (see _rooms)
+# manifest rooms without the closure check (see _rooms); FR-69: the refuge drink store has no door (its doorway opens
+# into the refuge room; sites.rank keeps rock or unknown all round its footprint, so the doorway is its only opening)
+OPEN_ROOMS = ("bedrooms", "gallery_o1", "refuge_drink")
 # BUG-032 (Run 11: the squads at fortcore's stations.b2, one tile behind B2, held its BREACH raise): a squad station
 # lies more than STATION_CLEAR tiles (Chebyshev, same z) from every bridge footprint: gate's MARGIN (lua/dfllm/gate.lua,
 # every pull waits for the units on or next to the footprint) + the spread of a squad around its station point
@@ -82,6 +84,8 @@ def check_doc(doc: dict) -> list[Finding]:
                     continue
                 if not _key_ok(st["mode"], key):
                     out.append(Finding("cell", f"{where}: key {key!r} not valid in #{st['mode']}"))
+                if st["mode"] != "place" and cell_cfg(text) is not None:     # FR-69: `:=booze` configures stockpiles
+                    out.append(Finding("cell", f"{where}: a stockpile configuration only in #place"))
                 if st["mode"] in EXTENT_MODES and ext is None:
                     out.append(Finding("cell", f"{where}: needs an explicit (WxH) extent"))
                 if min(dx, dy, dz) < 0:

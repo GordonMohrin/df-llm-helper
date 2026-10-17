@@ -15,7 +15,8 @@
 -- (bp.topo.audit ok=false), bypass, refuge_sep, civ_sep, caverns (its flags; Run 11: also an explore shaft open to a
 -- cavern until its plug wall stands, runner.cavern_open), no_kern, no_refuge (burrows), refuge_dry (Run 11, siege 8:
 -- the refuge holds no drink by seal's audit, seal.refuge_drink: drink < citizens and no well, or its wells are dry by
--- water's state refuge_ok 0; SIEGE_UNREADY says what to build), hospital_out (BUG-036, Run 11 siege 9: a hospital
+-- water's state refuge_ok 0; SIEGE_UNREADY says what to build: FR-69 the refuge drink store, or that it waits for
+-- barrels), hospital_out (BUG-036, Run 11 siege 9: a hospital
 -- zone with tiles outside Kern+ and the refuge by water's state hosp_out; its lying patients cannot walk to the refuge),
 -- no_outer, no_inner (no manifest bridge of that role), bridge:<B> (gate does not know it), levers:<B> (< 2 linked),
 -- lost:<B> (BUG-030 rebuild policy: a bridge the perimeter keeper no longer rebuilds after perimeter.stop_after losses
@@ -314,11 +315,16 @@ local function evaluate(K, why)
         -- BUG-035 (Run 11: 13 wells, 1 wet, none in Tiefe+): whether the refuge has no well or only dry ones
         local nw = int(rd.wells) or 0
         local where = refuge_where(K, rd)                 -- BUG-040: where it lies, its nearest accepted water
-        rt.rdry = cut(string.format('%s has no drink (drink %d<%d, %s%s): build a well/cistern or stock drink there',
+        -- FR-69 (Run 11 y477: 1199 drinks in one Kern+ pile, none in Tiefe+): the fix is the refuge drink store
+        -- (bp refuge_drink, plan propose drafts it); one that stands (seal sees its pile there) waits for barrels
+        local sto = type(rd.store) == 'table' and (int(rd.store.tiles) or 0) > 0 and rd.store or nil
+        rt.rdry = cut(string.format('%s has no drink (drink %d<%d, %s%s): %s',
                                     tostring(rd.name), int(rd.drink) or 0, int(rd.need) or 0,
                                     nw == 0 and ('no well in ' .. tostring(rd.name))
                                     or (nw == 1 and 'its 1 well is dry' or string.format('its %d wells are dry', nw)),
-                                    where and ('; ' .. where) or ''), 200)
+                                    where and ('; ' .. where) or '',
+                                    sto and string.format('its drink store (%d tiles) waits for barrels', sto.tiles)
+                                    or 'plan its drink store (bp sites refuge_drink)'), 200)
       end
     end
   end

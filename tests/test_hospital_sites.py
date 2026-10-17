@@ -222,8 +222,8 @@ def test_check_warns_and_propose_drafts_no_bucket_fed_cistern_without_fill(save)
     cw = [w for w in warn if w.startswith("cistern")]
     assert cw == ["cistern (seasons[1]): bucket-fed (no p.path) and no fill source: no revealed brook, river or lake "
                   "(>= 8 tiles) on snapshot c201; it stays dry like y450s0b0/y452s1b0 (BUG-040): leave it out; a piped "
-                  "cistern needs revealed water too (python -m dfpilot.bp.sites cistern); drink stockpiles in the "
-                  "refuge instead"], warn
+                  "cistern needs revealed water too (python -m dfpilot.bp.sites cistern); the refuge drink store (tpl "
+                  "refuge_drink, FR-69) instead"], warn
     piped = copy.deepcopy(doc)
     piped["seasons"][1]["build"].append({"tpl": "cistern", "site": "S1", "p": {"path": "1,6;1,9"}})
     assert not [w for w in plan.check(piped, s, decisions={}, banned=plan.BANNED, fort=fort, prev=doc)[1]

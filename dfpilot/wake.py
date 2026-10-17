@@ -220,8 +220,9 @@ def rebuild_hint(d: dict) -> str:
 _WALL = re.compile(r"\bwall -?\d+,-?\d+,-?\d+ (floor|ramp)\b")
 # Run 11 (siege 8: Tiefe+ had no drink): readiness R0 refuge_dry; a dry refuge holds the citizens only in a breach
 # BUG-040: a bucket-fed cistern without revealed open water in reach stays dry (plan check warns, CISTERN_DRY)
-REFUGE_DRY_HINT = ("the refuge has no drink: next plan a well/cistern there (bp sites cistern; only with a fill source, "
-                   "BUG-040) or a drink stockpile")
+# FR-69 (y477: 1199 drinks in one Kern+ pile, none in Tiefe+): the refuge drink store first (plan propose drafts it)
+REFUGE_DRY_HINT = ("the refuge has no drink: next plan its drink store (tpl refuge_drink, FR-69: plan propose drafts "
+                   "it) or a well/cistern there with a fill source (BUG-040)")
 # BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds outside the refuge): readiness R0 hospital_out;
 # BUG-040 (y453: Tiefe+ had no accepted water): then Kern+ next to the water
 HOSPITAL_OUT_HINT = ("the hospital lies outside the core: plan it next to accepted water inside Tiefe+, or in Kern+ when "

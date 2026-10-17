@@ -386,7 +386,9 @@ C.STATE_SPEC = obj({
                ref = obj({ex = FLAG, sep = int(-1, 1), beds = NAT, need = NAT},
                          -- BUG-040: its tiles' bbox and its nearest tile's distance to the nearest accepted source ws
                          {box = {t = 'tup', items = {int(), int(), int(), int(), int(), int()}}, wd = int(-1),
-                          ws = {t = 'tup', items = {NAT, NAT, NAT}}})}),
+                          ws = {t = 'tup', items = {NAT, NAT, NAT}},
+                          -- FR-69: drink units on its tiles, drink wanted, tiles of its drink store (0 none)
+                          dr = NAT, dn = NAT, st = NAT})}),
   -- intake waves (siege, Gordon 2026-10-16): phase, wave count, the last refusal, the sortie squad and phase; BUG-030:
   -- deep = the deep defense's reasons ('destroyers,army,weak')
   wave = obj({ph = str(8), n = NAT}, {why = str(40), so = str(24), deep = str(24)}),

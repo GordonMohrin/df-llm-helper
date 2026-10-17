@@ -806,7 +806,11 @@ STATE = Obj(
                                                         # nearest tile is from the nearest accepted source ws (-1:
                                                         # none)
                                                         opt={"box": Tup([INT] * 6), "wd": Int(-1),
-                                                             "ws": Tup([NAT, NAT, NAT])})}),
+                                                             "ws": Tup([NAT, NAT, NAT]),
+                                                             # FR-69: drink units on its tiles, drink wanted
+                                                             # (citizens x drink_per_cit), tiles of its drink store
+                                                             # (stockpiles dfllm-drink on it; 0 none)
+                                                             "dr": NAT, "dn": NAT, "st": NAT})}),
          # intake waves (siege, Gordon 2026-10-16): phase, waves so far, the last refusal, the sortie (squad phase)
          # BUG-030: deep = the deep defense's reasons ("destroyers,army,weak")
          "wave": Obj(req={"ph": Str(maxbytes=8), "n": NAT}, opt={"why": Str(maxbytes=40), "so": Str(maxbytes=24),

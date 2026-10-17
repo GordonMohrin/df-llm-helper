@@ -1,5 +1,82 @@
 # CHANGELOG dfpilot
 
+## The refuge gets its own drink store; refuge_dry names it; plan propose drafts it, plan check warns (FR-69 refuge drink store, 2026-10-17; offline, live-untested)
+- **Why (Run 11, y477):** Kilrudrabed site98, y477 spring d77, kernel b23b5d4, `inspect refuge`: Tiefe+ drink 0, wells 1
+  (dry), 59 beds, 212 tiles, inside 0, food 1054 (a stair/shaft refuge, z136-138); Kern+ drink 919, 15 wells; Innen+ drink
+  895. Of the fort's 1493 drinks, 1199 stood in the one Kern+ food stockpile `dfllm-stock` (18535, 121-126,73-81 z138, all
+  76 plant drinks allowed); readiness stayed R0 `refuge_dry` (the deep defense confines the citizens to a dry Tiefe+ only
+  in a breach, for 7 days); `bp sites cistern` offered only far sites (105,127,142 / 148,80,139 / 89,124,142). The session
+  asked: (a) add 18535's room to Tiefe+, or (b) a drink stockpile with barrels inside Tiefe+. Decision (coordinator,
+  safety first): (b); (a) only where the code proves the room lies behind the refuge's own seal.
+- **Cause:** nothing in the plans could put drink into the refuge: fortcore stage 3's refuge pile (3x2, all food) holds
+  food, and DF hauls no item out of a stockpile that accepts it (the drinks sat in `dfllm-stock`); the only drafted fix
+  for a dry refuge was a cistern, which needs a fill source near the refuge (BUG-040: none).
+- **bp (template `refuge_drink`, REFUGE_LEVEL like refuge_beds):** a room dug from a floor tile of the fortcore refuge room
+  into the rock (sites.rank: footprint and wall ring rock or unknown, so its doorway into the refuge is its only opening:
+  it lies inside the refuge's region, adds no way in, `sep` and the deep defense stay; no door to build or forbid), a
+  food stockpile `dfllm-drink` set to drink only (quickfort `:=booze`, the stockpiles library preset) with one barrel per
+  tile that takes from `take` (default `dfllm-stock`, quickfort `take_from`: the haulers move drink barrels into it up to
+  its tiles; a name no pile has only prints a quickfort error, the pile is made anyway), stage `burrow` paints room and
+  doorway Tiefe+; never Z4; class infra. Size `rooms.refuge_drink_n`: `n` barrels = max(citizens × 1 (seal
+  `drink_per_cit`, the refuge_dry rule), citizens × `refuge.breach_days` (7) × economy `seed_milli.drink` (53)/1000)
+  drinks at a conservative 5 drinks a barrel (one brew job's yield, economy `per_job`; DF stores later brews in it: the
+  live `dfllm-stock` held 1199 drinks on 54 tiles), 2-24 (3 wide up to 9 barrels, else 5 wide; 5x5 at most): 52
+  citizens -> 11 barrels (5x3). No site: rank raises `refuge_drink: no site for 11 barrels (5x3) beside the refuge room
+  ...: ...; a smaller store fits: n=6 (3x2): dfllm bp sites refuge_drink n=6`, or `not even a 3x1 store ...: the refuge
+  needs a well or cistern of its own ...`, or `no refuge in the fort manifest`. Cells: `primitives` Item.cfg /
+  `cell_cfg`, `parse_cell` reads `key{props}:cfg(WxH)`; `validate` refuses a configuration outside #place;
+  `OPEN_ROOMS` + refuge_drink (doorless).
+- **plan:** `drink_gate` (check): while readiness says `refuge_dry` and no store stands (state `alert.ref.st` > 0, or a
+  done refuge_drink project / kernel manifest room), is planned or under way: a warning `refuge: Tiefe+ has no drink
+  (readiness R0 refuge_dry: drink 0<52): add {"tpl":"refuge_drink","site":"S1","p":{"n":11}} (FR-69: ...)`, with the
+  smaller store the ranking found room for, or why it has no site; a store that stands and is still short: `... though
+  its drink store stands (15 tiles): it fills as the haulers bring barrels in ...`. `refuge_drafts` (propose) adds the
+  store after the refuge beds (before the other new builds; `take: ""` without a core stockroom); never a cistern for
+  it. `fort_facts.refuge` `drink` (barrels under way), `drink_room`, `drink_fit`/`drink_why` (ranked on the sites
+  snapshot only while refuge_dry). `refuge_drink` is a refuge fix in the refuge gate and supply to the seal-first/
+  rebuild kinds (runner `SUPPLY`); the cistern gate's text names it.
+- **Kernel:** seal's burrow audit reads the stockpiles named `CFG.store` (`dfllm-drink`, at most 4, 100 tiles each) with
+  tiles on the refuge: `refuge_drink().store` = `{n, tiles, drink, at}` (`inspect refuge` per burrow `store`; the drink
+  on those tiles counts like any drink there, FR-59: barrels stand where they are hauled), state `alert.ref` `dr`
+  (drink on its tiles), `dn` (drink wanted), `st` (store tiles); its `hint` names refuge_drink and refuge_beds.
+  readiness's `refuge_dry`: `Tiefe+ has no drink (drink 0<52, no well in Tiefe+): plan its drink store (bp sites
+  refuge_drink)`, once the pile stands `...: its drink store (12 tiles) waits for barrels`; it clears once drink ≥
+  citizens (unchanged rule). runner: refuge_drink in `SUPPLY` and `KEEP_BOX` (a done store stays in the audit box).
+- **Python texts:** wake's refuge_dry hint and status/brief `next:` name the store first.
+- **Not done (judgment):** (a) adding an existing room to Tiefe+: seal's separation flood (`expose`) starts at the
+  entrances, so "not exposed" holds for all of Kern+ whenever the gates are shut; nothing computes the region bounded by
+  the refuge's own closer (its stair-head hatch), so a plan option cannot prove a room lies behind it without a new
+  sliced flood and contract. By the live numbers the room of 18535 (z138) lies above the refuge level (z136) on the
+  civilians' stair, on the core's side of the stair-head hatch (z137, `seal at=refuge`): it would be refused anyway.
+  The kernel's refuge_dry rule (drink ≥ citizens) is unchanged; the store is sized to hold at least that.
+- Contracts: state `alert.ref` `dr`/`dn`/`st` (schema.py, contract.lua, CONTRACTS §10 row, appendix), `seal.refuge_drink`
+  `store` (§7 row), SIEGE_UNREADY `rdry` text (§12 row), the #place cell configuration (§9.8); RULES §7 REFUGE_FAIL, §8
+  `refuge_dry`, §10 refuge in place (300 lines); DESIGN §5.4 table row and the refuge drink store paragraph; DOCTRINE;
+  docs/feature-requests FR-69.
+- Tests (each new one fails on b23b5d4): `tests/bp/test_bp_refuge_drink.py` (new: sizing, layout and cell, the cell
+  configuration only in #place, sites in the refuge room with the audit's refuge separation kept, the no-site reason and
+  the smaller store), `tests/test_plan_refuge_drink.py` (new: the check's warning and its variants, propose drafts it
+  and not a cistern, fort facts), `tests/lua/test_seal_refuge.lua` (the store's pile on Tiefe+ counted with its barrels,
+  a pile of that name in Kern+ is none, alert.ref dr/dn/st), `tests/lua/test_readiness.lua` (refuge_dry names the store,
+  waits for barrels, clears); adjusted: the old refuge_dry texts (`test_readiness.lua`, `test_cli_wake.py`,
+  `test_cli_status.py`, `test_hospital_sites.py`), alert.ref goldens (`test_seal_refuge.lua`), `test_cli_plan.py`
+  (fort_facts keys), `test_bp_emit.py` (22 templates), new golden `refuge_drink.json/.txt`.
+- **Live check (Run 11):** after `git pull`, `dfhack-run dfllm reload`, a restart of `dfllm follow`:
+  - `dfllm bp sites refuge_drink n=11 --fresh`: S1-S3 anchors on the refuge room's floor (z of Tiefe+'s lowest level), or
+    the no-site line naming a smaller `n` (then `dfllm bp sites refuge_drink n=<that>`);
+  - `dfllm plan propose y.json`: the store `{"tpl":"refuge_drink","site":"S1","p":{"n":11}}` among the first new builds
+    (no cistern for the refuge); `dfllm plan check y.json`: no refuge drink warning once it is in; or place it at once:
+    `dfllm cmd bp.place '{"tpl":"refuge_drink","site":"S1","p":{"n":11}}'`;
+  - after its dig: the stockpile `dfllm-drink` in the stockpile list (food, only drinks enabled; max barrels 11), linked
+    to take from `dfllm-stock` (the stockpile's links screen); kern.log / DFHack console: no `unhandled property`, a
+    `cannot find stockpile ... dfllm-stock` only in a fort without it; the burrows screen: the room in Tiefe+;
+  - within days: haulers carry drink barrels from 18535 into it; `dfllm cmd inspect '{"what":"refuge"}'` Tiefe+ `store`
+    `{n:1, tiles:15, drink:N}` and `drink` rising; `dfllm status`: refuge_dry gone once drink ≥ citizens (52); before
+    that SIEGE_UNREADY `rdry` `... its drink store (15 tiles) waits for barrels`;
+  - `dfllm audit`: refuge_sep unchanged (the store adds no way in); `inspect refuge` Tiefe+ `sep` as before;
+  - if the barrels never come (no take_from link, DF hauling): note it for the repo (stockpile priority or a `give_to`
+    on dfllm-stock are the next steps, not a direct item move).
+
 ## The manager's office gets its chair and table; unvalidated orders are watched by age; fruit is brewed; the drink line names why nothing brews (BUG-042, 2026-10-17; the cause live confirmed, the fix offline, live-untested)
 - **Why (Run 11, y471):** Kilrudrabed site98, kernel b873eb6/0038b55: `drink 93d!` in summer, `drink 32d!` 18 days later
   (19 patients, thirst 25394) beside 15 stills without a job, 275 plants, 3079 growths. Every brew order (the kernel's

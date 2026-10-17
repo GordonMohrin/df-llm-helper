@@ -1621,7 +1621,7 @@ end
 -- every finished room project stays inside the audit box, not only the cistern
 local KEEP_BOX = {cistern = true, bedrooms = true, tombs = true, hall = true, guildhall = true, barracks = true,
                   temple = true, tavern = true, dining = true, hospital = true, office = true, workshops = true,
-                  farms = true, furnaces = true, captives = true}
+                  farms = true, furnaces = true, captives = true, refuge_drink = true}
 
 local function finish(K, P, d)
   if KEEP_BOX[P.tpl] then S.rt.keep[P.id] = project_bbox(P.id, d) end
@@ -2260,10 +2260,10 @@ end
 
 ---------------------------------------------------------------- seal first and the rebuild policy (Run 11 siege 8)
 -- What a project is to them (kind_of): seal (seal, plug), tombs (tombs, care's coffins), depot, supply (farms,
--- cistern, stockroom, a workshops project of food/drink shops only: follow's fishery), beds (bedrooms, refuge_beds),
--- repair (runner.repair of lost walls and doors; a peace-only one rebuilds a bridge: defense), defense (any other
--- defense class project: fortcore stages 2-4, barracks, captives, gallery_o1) and work (the rest: rooms, workshops,
--- furnaces, explore, fortcore stage 1, beauty).
+-- cistern, stockroom, refuge_drink (FR-69), a workshops project of food/drink shops only: follow's fishery), beds
+-- (bedrooms, refuge_beds), repair (runner.repair of lost walls and doors; a peace-only one rebuilds a bridge:
+-- defense), defense (any other defense class project: fortcore stages 2-4, barracks, captives, gallery_o1) and work
+-- (the rest: rooms, workshops, furnaces, explore, fortcore stage 1, beauty).
 -- An open seal pauses in PEACE: work, beds, and supply unless an emergency holds (food or drink days below
 -- seal_first food_d/drink_d, a patient without accepted water). Never paused: seal, tombs (GHOSTS: the dead must be
 -- buried), the depot (a caravan leaves without one), repairs and defense (they close or guard the fort too). While the
@@ -2271,7 +2271,7 @@ end
 -- digs on: its boulders become the seal's walls.
 -- The rebuild policy runs (PEACE/RECOVERY; the mode's class gating still holds) seal, tombs, supply, beds, repair and
 -- the depot; the rest pauses.
-local SUPPLY = {farms = true, cistern = true, stockroom = true}
+local SUPPLY = {farms = true, cistern = true, stockroom = true, refuge_drink = true}     -- FR-69: the refuge's store
 local BEDS = {bedrooms = true, refuge_beds = true}
 local FOOD_SHOPS = {Still = true, Kitchen = true, Butchers = true, Fishery = true}
 local SEAL_PAUSES = {work = true, beds = true, supply = true}

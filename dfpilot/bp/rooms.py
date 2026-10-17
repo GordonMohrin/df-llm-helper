@@ -1,7 +1,8 @@
 """Room templates (DESIGN §5.6, §5.9, §5.10, §5.2): dining, bedrooms, tombs, hospital, temple, tavern,
 workshops, farms; since live L1 also furnaces (smelter + wood furnace), office (a noble's office with a
 chair) and captives (pit zone over a 1-tile drop, manifest `pit`); since live L3 the `cistern` (a well over
-real water: well room, cistern, optional pipe from a revealed brook or river; see `cistern`).
+real water: well room, cistern, optional pipe from a revealed brook or river; see `cistern`); since Run 10 the refuge's
+own rooms (REFUGE_LEVEL): `refuge_beds` and (FR-69) `refuge_drink`, a drink store dug from the refuge room.
 
 Local frame (rot 0): the anchor (0,0,0) is an *existing* walkable tile (a corridor of the core); the room
 is dug south of it. (0,1) is the doorway (door or open corridor start), the interior starts at v=2.
@@ -11,6 +12,8 @@ hack/data/blueprints/dreamfort.csv). Zones and stockpiles always carry explicit 
 emit adds every room's dug bbox to manifest Z4, so later rooms can open from its public tiles.
 """
 from __future__ import annotations
+
+import re
 
 from .primitives import Plan
 
@@ -49,10 +52,13 @@ PARAMS = {
     "stockroom": {"w": (9, 5, 15), "h": (6, 4, 10), "still": (1, 0, 1), "barrels": (0, 0, 200)},
     # Run 10 (Tiefe+ beds 8 < 27, no safe room at pop 110): a dormitory dug from the refuge room, in the refuge burrow
     "refuge_beds": {"n": (8, 2, 30), "burrow": ("Tiefe+", None, None)},
+    # FR-69 (Run 11 y477: Tiefe+ drink 0, 1199 of 1493 drinks in the Kern+ pile dfllm-stock): a drink store dug from the
+    # refuge room; n = barrels (refuge_drink_n), take = the stockpile it takes drink from ('' none)
+    "refuge_drink": {"n": (12, 2, 24), "take": ("dfllm-stock", None, None), "burrow": ("Tiefe+", None, None)},
 }
 # templates that sit on the refuge level (anchors in the fortcore refuge room, sites.rank): they never join Z4 (the
 # civilian core; a Z4 box beside the refuge would let the audit's core -> refuge check start next to it)
-REFUGE_LEVEL = frozenset({"refuge_beds"})
+REFUGE_LEVEL = frozenset({"refuge_beds", "refuge_drink"})
 # quickfort `assigned_unit=` roles (preserve-rooms noble codes) an office may be reserved for
 OFFICE_ROLES = ("manager", "bookkeeper", "broker", "expedition_leader", "mayor", "chief_medical_dwarf")
 USE = {"dining": "used", "bedrooms": "used", "tombs": "used", "temple": "used", "hall": "used",
@@ -359,6 +365,61 @@ def refuge_beds(p: dict) -> Plan:
     return P
 
 
+# FR-69 refuge drink store (Run 11, Kilrudrabed y477: Tiefe+ held 0 of the fort's 1493 drinks, 1199 lay in the one
+# Kern+ stockpile dfllm-stock; readiness R0 refuge_dry; the cistern sites lay far from the refuge). Sizing: the kernel
+# calls the refuge dry below citizens x DRINK_PER_CIT drink units (seal.CFG.drink_per_cit, readiness refuge_dry); the
+# deep defense holds the citizens there for breach_days (7, config/reflex.json refuge) at economy's DRINK_MILLI per
+# citizen and day (config/baseline.json economy.seed_milli.drink, x1000; a dwarf drinks about every 19 days). A barrel
+# is counted as DRINKS_PER_BARREL drinks, conservatively: one brew job fills an empty barrel with 5 (economy per_job)
+# and DF stores later brews of that drink in it (live Run 11: 1199 drinks on the 54 tiles of dfllm-stock), so a full
+# store holds more than it was sized for. At most REFUGE_DRINK_MAX barrels: a 5x5 room beside a dead-end refuge.
+DRINK_PILE = "dfllm-drink"            # the store's stockpile name (seal.CFG.store finds it on the refuge's tiles)
+DRINK_PER_CIT, DRINK_MILLI, BREACH_DAYS = 1, 53, 7
+DRINKS_PER_BARREL = 5
+REFUGE_DRINK_MAX = 24
+CELL_MAX = 64                         # schema CHUNK cell text bytes (CONTRACTS §9.8)
+_PILE_NAME = re.compile(r"[A-Za-z0-9_+-]{0,20}")
+
+
+def refuge_drink_n(cit: int, days: int = BREACH_DAYS, milli: int = DRINK_MILLI) -> int:
+    """Barrels for the refuge drink store: max(citizens x DRINK_PER_CIT, citizens x days x milli / 1000) drinks at
+    DRINKS_PER_BARREL a barrel, 2..REFUGE_DRINK_MAX."""
+    cit = max(0, int(cit or 0))
+    units = max(cit * DRINK_PER_CIT, -(-cit * max(0, days) * max(0, milli) // 1000))
+    return min(REFUGE_DRINK_MAX, max(2, -(-units // DRINKS_PER_BARREL)))
+
+
+def drink_room(n: int) -> tuple[int, int]:
+    """(W, H) of the store's interior for n barrels: 3 wide up to 9, else 5 wide; one barrel per tile."""
+    w = 3 if n <= 9 else 5
+    return w, -(-n // w)
+
+
+def refuge_drink(p: dict) -> Plan:
+    """Refuge drink store: a drink-only stockpile with barrels in a room dug from the refuge room, in the refuge burrow."""
+    # The room is dug from a refuge floor tile into rock like refuge_beds (sites.rank: footprint and wall ring rock or
+    # unknown, nothing open beside it): its only opening is the doorway into the refuge, so it lies inside the refuge's
+    # region and adds no way in (the separation `sep`, the deep defense). No door: nothing to build, nothing to forbid.
+    # The pile is a food stockpile set to drink only (quickfort `:=booze`, the stockpiles library preset) with one
+    # barrel per tile, linked to take from `take` (quickfort take_from: the haulers move drink barrels from that pile
+    # into this one, up to its tiles; a name no stockpile has only prints a quickfort error, the pile is made anyway)
+    take = p["take"]
+    if not _PILE_NAME.fullmatch(take):
+        raise ValueError(f"refuge_drink.take: bad stockpile name {take!r}")
+    P = Plan("refuge_drink", "infra")
+    n = p["n"]
+    box = _box(P, *drink_room(n), door=False)
+    u0, v0, u1, v1 = box
+    props = f"name={DRINK_PILE} barrels={n}" + (f" take_from={take}" if take else "")
+    cell = f"f{{{props}}}:=booze({u1 - u0 + 1}x{v1 - v0 + 1})"
+    if len(cell.encode("utf-8")) > CELL_MAX:
+        raise ValueError(f"refuge_drink.take: {take!r} makes the stockpile cell {len(cell)} > {CELL_MAX} bytes "
+                         f"(a name of at most {CELL_MAX - len(cell) + len(take)} characters)")
+    P.stage("place", "place").ent(u0, v0, u1, v1, 0, "f", props, cfg="=booze")
+    _finish(P, p, box)
+    return P
+
+
 def captives(p: dict) -> Plan:
     """Captive pit: a 3x3 room with a 1-tile channel; the pit zone sits on the drop (manifest `pit`), away
     from traps. Care assigns caged invaders to it."""
@@ -579,7 +640,7 @@ def cistern(p: dict) -> Plan:
 BUILD = {"dining": dining, "bedrooms": bedrooms, "tombs": tombs, "hospital": hospital, "temple": temple,
          "tavern": tavern, "workshops": workshops, "farms": farms, "furnaces": furnaces, "office": office,
          "captives": captives, "cistern": cistern, "hall": hall, "guildhall": guildhall, "barracks": barracks,
-         "stockroom": stockroom, "refuge_beds": refuge_beds}
+         "stockroom": stockroom, "refuge_beds": refuge_beds, "refuge_drink": refuge_drink}
 
 
 def plot_rects(p: dict) -> list[tuple[int, int, int, int, int]]:

@@ -7,6 +7,7 @@ before emission: ordered stages of tile items and rect entities plus a manifest 
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Iterator
 
@@ -69,6 +70,7 @@ class Item:
     props: str = ""
     ent: bool = False
     dir: str = ""          # bridges: local raise direction N/E/S/W
+    cfg: str = ""          # #place: quickfort stockpile configuration after ':' (e.g. '=booze'; FR-69)
 
     def tiles(self) -> Iterator[tuple[int, int, int]]:
         for v in range(min(self.v0, self.v1), max(self.v0, self.v1) + 1):
@@ -84,8 +86,8 @@ class Stage:
     defense: int = 0
     items: list[Item] = field(default_factory=list)
 
-    def add(self, u0, v0, u1, v1, w, key, props="", ent=False, dir=""):
-        self.items.append(Item(u0, v0, u1, v1, w, key, props, ent, dir))
+    def add(self, u0, v0, u1, v1, w, key, props="", ent=False, dir="", cfg=""):
+        self.items.append(Item(u0, v0, u1, v1, w, key, props, ent, dir, cfg))
         return self
 
     def tile(self, u, v, w, key, props=""):
@@ -94,8 +96,8 @@ class Stage:
     def rect(self, u0, v0, u1, v1, w, key="d"):
         return self.add(u0, v0, u1, v1, w, key)
 
-    def ent(self, u0, v0, u1, v1, w, key, props="", dir=""):
-        return self.add(u0, v0, u1, v1, w, key, props, True, dir)
+    def ent(self, u0, v0, u1, v1, w, key, props="", dir="", cfg=""):
+        return self.add(u0, v0, u1, v1, w, key, props, True, dir, cfg)
 
     def stair(self, u, v, w_bottom, w_top):
         """Stair column: up stair at the bottom, up/down between, down stair at the top (quickfort u/i/j)."""
@@ -210,21 +212,28 @@ _KEY_OK = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_~+
 
 
 def parse_cell(text: str):
-    """Split quickfort cell text `key{props}(WxH)` (ported from v1 planners/blueprint.py, simplified to the
-    syntax we emit). Returns (key, props or None, (w, h) or None, error or None)."""
+    """Split quickfort cell text `key{props}:cfg(WxH)` (ported from v1 planners/blueprint.py, simplified to the
+    syntax we emit; `:cfg` is a #place stockpile configuration, cell_cfg). Returns (key, props or None, (w, h) or
+    None, error or None)."""
     i, n = 0, len(text)
-    while i < n and text[i] not in "{(":
+    while i < n and text[i] not in "{(:":
         i += 1
     key = text[:i]
     if not key or any(c not in _KEY_OK for c in key):
         return key, None, None, f"bad key {key!r}"
-    props = ext = None
+    props = ext = cfg = None
     while i < n:
         if text[i] == "{":
             j = text.find("}", i)
-            if j < 0 or props is not None:
+            if j < 0 or props is not None or cfg is not None:
                 return key, props, ext, "unbalanced or repeated {}"
             props, i = text[i + 1:j], j + 1
+        elif text[i] == ":" and cfg is None and ext is None:
+            j = text.find("(", i)
+            j = n if j < 0 else j
+            cfg, i = text[i + 1:j], j
+            if not _CFG_RE.fullmatch(cfg):
+                return key, props, ext, f"bad stockpile configuration {cfg!r}"
         elif text[i] == "(":
             j = text.find(")", i)
             if j < 0 or ext is not None:
@@ -240,6 +249,25 @@ def parse_cell(text: str):
         else:
             return key, props, ext, f"unexpected {text[i]!r}"
     return key, props, ext, None
+
+
+# quickfort #place stockpile configuration (quickfort-user-guide `Stockpile configuration`): `<op><preset>[/<filter>]`
+# segments, op = set/disable/enable; `f:=booze(5x4)`, `p:-cat_weapons/other/(7x3)`
+_CFG_RE = re.compile(r"(?:[=+-][A-Za-z0-9_]+(?:/[A-Za-z0-9_,]*/?)?)+")
+
+
+def cell_cfg(text: str) -> str | None:
+    """The stockpile configuration of a cell (`f{name=x}:=booze(3x3)` -> '=booze'), None without one."""
+    key, _, _, err = parse_cell(text)
+    if err:
+        return None
+    rest = text[len(key):]
+    if rest.startswith("{"):
+        rest = rest[rest.find("}") + 1:]
+    if not rest.startswith(":"):
+        return None
+    j = rest.find("(")
+    return rest[1:j if j >= 0 else len(rest)]
 
 
 def props_dict(props: str | None) -> dict[str, str]:
