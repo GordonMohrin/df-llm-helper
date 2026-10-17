@@ -73,6 +73,15 @@ Module: `lua/dfllm/economy.lua` (M.fishery_request, the food decisions, T.starve
   reports them). The runner's gather zone around the fortcore anchor reaches outside the walls; changing it is a
   runner matter (not touched here).
 
+## Live confirmed (Run 11, y452 winter d20, read-only, before the reload to ba45a2a)
+- The cadence held: consecutive `fishery: none built` lines at game ticks 181900330, 181933241 (+32911), 181962051
+  (+28810), 181991352 (+29301); the gaps of 115-400 were the 1st column (real seconds). Causes 1/2 did not fire here.
+- Cause 3 is the live cause: `<save>/cli.log` shows `AUTO_FAIL {} workshops: bp.sites.rank(workshops): workshops:
+  nothing left to build` right after each request (epoch 1792219335, 1792219534, 1792219730 after the kern.log
+  requests at 1792219316/515/711); no `no sites snapshot`.
+- Still open: the gatherers at food_low (food was at 700+ days after the reload) and the follow placement with
+  `need=["Fishery"]` at the next request.
+
 ## Not decided offline (the read-only live data that decides it)
 - The repeated `request` lines with one event: the 2nd column (game tick) of consecutive `fishery: none built` lines in
   kern.log/kern.1.log. >= 16,800 ticks apart: the cadence held and the gaps of 115-400 were the 1st column (real
