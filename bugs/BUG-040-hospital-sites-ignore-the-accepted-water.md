@@ -1,5 +1,5 @@
 # BUG-040 Hospital sites ignore the accepted water; nobody knows where Tiefe+ lies; cisterns without a fill source stand dry
-Status: fixed in <commit> (offline, live-untested): `bp sites hospital` ranks and filters by the kernel's accepted water
+Status: fixed in f3d82df (offline, live-untested): `bp sites hospital` ranks and filters by the kernel's accepted water
 (water.lua's measure and radius) and names the source, the nearest candidate and the refuge's water; `plan check`
 measures the site the sites offer (both agree); status/brief/`refuge_dry`/`hospital_out`/`inspect water_sources` name
 where Tiefe+ lies and its nearest accepted water; CISTERN_DRY (B) reports a done cistern whose well stays dry; `plan
