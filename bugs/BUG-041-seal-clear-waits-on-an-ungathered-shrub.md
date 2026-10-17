@@ -1,5 +1,5 @@
 # BUG-041 seal.clear waits for good on a shrub nobody gathers; SEAL_STUCK stays in plan check for years
-Status: fixed in <commit> (offline, live-untested): the seal template builds a shrub's piece on the shrub (no gather
+Status: fixed in 88c8014 (offline, live-untested): the seal template builds a shrub's piece on the shrub (no gather
 stage); the runner skips the gather cell of a seal placed before the fix and removes its designation; SEAL_STUCK `wait`
 names a clear job nobody has the labor for and a piece no citizen reaches; `plan check` names the reason and shortens a
 seal stuck for a month to one line, a parked seal is no open seal
