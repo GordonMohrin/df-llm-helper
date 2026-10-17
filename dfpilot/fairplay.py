@@ -138,7 +138,7 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
         return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
     for k in doc:
         if k not in ("v", "about", "clock", "hold_quiet_days", "ack_timeout_s", "defaults", "refuge", "gate", "intake",
-                     "sortie", "predator_near", "stations"):
+                     "sortie", "predator_near", "stations", "perimeter"):
             errs.append(f"{name}: unknown key {k!r}")
     clock = doc.get("clock", {})
     if not isinstance(clock, dict):
@@ -193,7 +193,8 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
             else:
                 errs.append(f"{name}: gate.{k}: unknown key")
     # intake waves and the sortie through O1 (Gordon 2026-10-16; lua/dfllm/siege.lua M.IK_LIM / M.SO_LIM)
-    for blk, lims in (("intake", INTAKE_LIM), ("sortie", SORTIE_LIM), ("stations", STATIONS_LIM)):
+    for blk, lims in (("intake", INTAKE_LIM), ("sortie", SORTIE_LIM), ("stations", STATIONS_LIM),
+                      ("perimeter", PERIMETER_LIM)):
         sec = doc.get(blk, {})
         if not isinstance(sec, dict):
             errs.append(f"{name}: {blk} must be an object")
@@ -220,6 +221,9 @@ SORTIE_LIM: dict = {"worn": (0, 100), "losses": (1, 30), "max_ticks": (300, 3360
 # share below worn / metal; BUG-032: spread = tiles around its station point a squad stands on (military.lua M.SPREAD:
 # a station lies more than gate's margin + spread tiles from every bridge footprint)
 STATIONS_LIM: dict = {"core_ratio": (1, 50), "worn": (0, 100), "metal": (0, 100), "spread": (0, 5)}
+# BUG-030 rebuild policy (seal.lua CFG.stop_after): a manifest bridge destroyed stop_after times by building destroyers
+# since the player's last answer (verb bridge.rebuild) is not rebuilt automatically any more; 0 = always rebuilt
+PERIMETER_LIM: dict = {"stop_after": (0, 20)}
 
 
 # ---------------------------------------------------------------- allowlist (CONTRACTS §9.14)

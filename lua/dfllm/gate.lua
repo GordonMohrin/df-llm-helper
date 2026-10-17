@@ -62,6 +62,13 @@
 -- readiness' bridge:B blocker) and adds the tick it was found destroyed as its third value, so siege can treat it as an
 -- open way. Its footprint is searched for a new complete bridge once a game day (GONE_RECHECK): a rebuilt one is a
 -- plain manifest bridge again (GATE C 'rebuilt').
+-- Loss history (BUG-030 rebuild policy; Run 11 site98, y434-y438: cave dragons destroyed O1 in all five sieges and the
+-- perimeter keeper rebuilt it every time): per manifest bridge (persisted m.gate.lost) how often it was destroyed (n),
+-- how often with building destroyers in sight (bd: census.h.bd within LOST_BD ticks before the loss), their races, the
+-- newest LOST_EV losses (tick, year, mode, bd), how often it stood again (reb), the building items of the bridges lost
+-- (it, mat: read from the building once, when gate first sees it complete) and the lever links gate queued after a
+-- loss (lk). seal's perimeter keeper reads it (gate.losses) to stop rebuilding a bridge the destroyers keep breaking;
+-- `inspect defense` shows it. A new footprint in the manifest starts a new record.
 local geom = require('dfllm.util.geom')
 local DT = require('dfllm.deaths')      -- BUG-027: the bridge-death match (library, no module)
 
@@ -110,6 +117,8 @@ M.WIN_MIGRANTS = 2400      -- ... a migrant arrival report keeps it open this lo
 M.WIN_CARAVAN = 4800       -- ... a caravan arrival report (trade's state keeps it open while a caravan is here)
 M.WIN_LEVER = 2400         -- ... an inbox `lever` down keeps that bridge open this long
 M.GONE_RECHECK = 1200      -- BUG-030: a destroyed bridge's footprint is searched for a rebuilt one once a game day
+M.LOST_BD = 2400           -- loss history: building destroyers in sight this many ticks before a loss make it theirs
+M.LOST_EV, M.LOST_RACES = 6, 4   -- ... the newest losses and the destroyer races kept per bridge
 
 local FAST_MODES = {SIEGE = true, BREACH = true, DRILL = true}
 local FORCE_MODES = {SIEGE = true, BREACH = true}       -- may RAISE onto a unit, only with a hostile at the gate
@@ -120,9 +129,11 @@ local FAIL_WHY = {blocked = 'blocked', no_lever = 'no_lever', no_worker = 'no_wo
 
 local st      -- persisted m.gate: {v, br = {<b> = {want, why, since, deadline, failed}}, kpi = {...},
               --   ex = {X<id> = {bid, raised}} (unmanaged bridges in hand), lat = {s, t}, win = tick, winb = {<b> = tick},
-              --   seen = {<b> = {bid, fp}} (BUG-030: the complete bridge last seen on the footprint fp 'x,y,z,...'),
-              --   gone = {<b> = {t, bid, last}} (destroyed: when, which building, its last state)}
+              --   seen = {<b> = {bid, fp, it, mat}} (BUG-030: the complete bridge last seen on the footprint fp
+              --   'x,y,z,...', its building items and their material), gone = {<b> = {t, bid, last}} (destroyed: when,
+              --   which building, its last state), lost = {<b> = {n, bd, reb, it, mat, lk, races, ev}} (loss history)}
 local rt      -- runtime per bridge: building ids, own job, settle, block, rotation
+local bds     -- runtime: {t, races} the last pass that saw building destroyers (census.h.bd), for the loss history
 local rt_ex   -- runtime: cached unmanaged bridge list {tick, list = {{name, bid, spec}}}
 local pub     -- precomputed state part {bridges = {...}}
 local last_pass   -- tick of the last full pass (BUG-027: frames in between only re-check pending pulls)
@@ -1191,6 +1202,76 @@ local function complete(b)
   return not ok or r == true
 end
 
+-- loss history: the building's construction items (use_mode 2, the building's item list in the UI): their count and
+-- the first one's material and item type ('granite blocks'); nil, nil when DF does not say
+local function bridge_items(b)
+  local okn, n = pcall(function()
+    local c = 0
+    for _, ci in ipairs(b.contained_items) do if ci.use_mode == 2 then c = c + 1 end end
+    return c
+  end)
+  if not okn or math.type(n) ~= 'integer' then return nil, nil end
+  local okm, mat = pcall(function()
+    for _, ci in ipairs(b.contained_items) do
+      if ci.use_mode == 2 then
+        local mi = dfhack.matinfo.decode(ci.item)
+        local ty = df.item_type[ci.item:getType()]
+        return string.format('%s %s', mi and mi:toString() or '?', tostring(ty or '?'):lower())
+      end
+    end
+  end)
+  return n, okm and type(mat) == 'string' and mat:sub(1, 40) or nil
+end
+
+-- loss history: the races of the building destroyers in sight now (census.h.list entries with bd = 1), sorted
+local function destroyer_races(h)
+  local seen, races = {}, {}
+  for _, e in ipairs(type(h) == 'table' and type(h.list) == 'table' and h.list or {}) do
+    if type(e) == 'table' and e.bd == 1 then
+      local ok, race = pcall(function() return dfhack.units.getRaceName(df.unit.find(e.id)) end)
+      race = ok and type(race) == 'string' and race ~= '' and race:sub(1, 24) or '?'
+      if not seen[race] and #races < M.LOST_RACES then seen[race], races[#races + 1] = true, race end
+    end
+  end
+  table.sort(races)
+  return races
+end
+
+-- loss history: note building destroyers in sight (each pass; their races at most once per SLOW ticks)
+local function note_destroyers(K, now)
+  local h = K.census.h
+  local n = type(h) == 'table' and math.tointeger(h.bd) or nil
+  if not n or n <= 0 then return false end
+  if bds and now - bds.t < M.SLOW and #bds.races > 0 then bds.t = now
+  else bds = {t = now, races = destroyer_races(h)} end
+  return true
+end
+
+-- loss history: manifest bridge `name` (last seen as `seen`) was found destroyed now; returns its record
+local function lose(K, name, seen, now, mode)
+  local L = st.lost[name]
+  if not L then
+    L = {n = 0, bd = 0, reb = 0, it = 0, lk = 0, races = {}, ev = {}}
+    st.lost[name] = L
+  end
+  local by = note_destroyers(K, now) or (bds ~= nil and now - bds.t <= M.LOST_BD)
+  L.n = L.n + 1
+  if by then
+    L.bd = L.bd + 1
+    local have = {}
+    for _, r in ipairs(L.races) do have[r] = true end
+    for _, r in ipairs(bds and bds.races or {}) do
+      if not have[r] and #L.races < M.LOST_RACES then have[r], L.races[#L.races + 1] = true, r end
+    end
+    table.sort(L.races)
+  end
+  L.it = L.it + (seen.it or 0)
+  if seen.mat then L.mat = seen.mat end
+  L.ev[#L.ev + 1] = {t = now, y = K.now().year or 0, m = mode, bd = by and 1 or 0}
+  while #L.ev > M.LOST_EV do table.remove(L.ev, 1) end
+  return L, by
+end
+
 -- BUG-030: is manifest bridge `name` destroyed? It is when gate saw a complete bridge on this footprint (st.seen) and
 -- now no bridge stands there (the cached building is gone and a fresh resolve finds none). The first time:
 -- BRIDGE_DESTROYED (A); its want, our pull and its move record are dropped. A complete bridge on the footprint again
@@ -1201,7 +1282,7 @@ local function gone_check(K, name, r, spec, now)
   local sig = r.fps
   local seen = st.seen[name]
   if seen and seen.fp ~= sig then                 -- the manifest moved the bridge: a new footprint, a new record
-    st.seen[name], st.gone[name], seen, dirty = nil, nil, nil, true
+    st.seen[name], st.gone[name], st.lost[name], seen, dirty = nil, nil, nil, nil, true
   end
   if r.bid and not df.building.find(r.bid) then   -- the cached building vanished: look at the footprint now
     r.resolved = nil
@@ -1211,12 +1292,17 @@ local function gone_check(K, name, r, spec, now)
     if seen and seen.bid == r.bid and not st.gone[name] then return false end    -- it stands (one lookup)
     local b = df.building.find(r.bid)
     local done = b ~= nil and complete(b)
-    if done and not (seen and seen.bid == r.bid) then st.seen[name], dirty = {bid = r.bid, fp = sig}, true end
+    if done and not (seen and seen.bid == r.bid) then
+      local it, mat = bridge_items(b)
+      st.seen[name], dirty = {bid = r.bid, fp = sig, it = it, mat = mat}, true
+    end
     if st.gone[name] then
       if not done then return true end            -- a new one is being built: still no barrier
       st.gone[name], r.gone_next, dirty = nil, nil, true
+      local L = st.lost[name]
+      if L then L.reb = L.reb + 1 end
       K.emit('GATE', 'C', name .. ' rebuilt', {bridge = name, state = 'rebuilt'})
-      K.log('info', 'gate: %s rebuilt (building %d)', name, r.bid)
+      K.log('info', 'gate: %s rebuilt (building %d, %d losses so far)', name, r.bid, L and L.n or 0)
     end
     return false
   end
@@ -1230,11 +1316,14 @@ local function gone_check(K, name, r, spec, now)
   st.gone[name], st.br[name], dirty = {t = now, bid = seen.bid, last = last}, nil, true
   local c = geom.bbox_center(spec.fp)
   local mode = K.mode()
+  local L, by = lose(K, name, seen, now, mode)
   local txt = string.format('%s destroyed: no bridge on its footprint at %d,%d,%d any more (building %d, last %s, %s); '
-                            .. 'no pulls for it, an open way until it is rebuilt', name, c.x, c.y, c.z, seen.bid, last,
-                            mode)
+                            .. 'no pulls for it, an open way until it is rebuilt; lost %dx, %d with building '
+                            .. 'destroyers in sight%s', name, c.x, c.y, c.z, seen.bid, last, mode, L.n, L.bd,
+                            by and #L.races > 0 and (' (' .. table.concat(L.races, ',') .. ')') or '')
   K.emit('BRIDGE_DESTROYED', 'A', cut(txt, 200), {bridge = name, bid = seen.bid, role = tostring(spec.role or ''),
-                                                  last = last, mode = mode, pos = {c.x, c.y, c.z}})
+                                                  last = last, mode = mode, pos = {c.x, c.y, c.z}, n = L.n, bd = L.bd,
+                                                  destroyers = by and 1 or 0, races = L.races})
   K.log('warn', 'gate: %s', txt)
   return true
 end
@@ -1413,6 +1502,8 @@ local function links(K, name, spec, r, now)
         r.link_wait = nil
         if math.type(res) == 'integer' then
           st.kpi.links, dirty = (st.kpi.links or 0) + 1, true
+          local L = st.lost[name]                   -- loss history: a link for a rebuilt bridge (mechanisms)
+          if L then L.lk = L.lk + 1 end
           K.emit('LEVER', 'C', 'link ' .. name, {bridge = name, lever = lv.id, job = res})
         end
         r.resolved = nil                          -- re-read the links on the next pass
@@ -1659,13 +1750,31 @@ function M.init(K)
       st.kpi = k
     end
   end
-  st.ex, st.winb, st.seen, st.gone = {}, {}, {}, {}
+  st.ex, st.winb, st.seen, st.gone, st.lost = {}, {}, {}, {}, {}
   if type(p) == 'table' then
     local function int(v) return type(v) == 'number' and math.tointeger(v) or nil end
     -- BUG-030: the complete bridge last seen on each manifest footprint, and the destroyed ones
     for name, x in pairs(type(p.seen) == 'table' and p.seen or {}) do
       if type(name) == 'string' and type(x) == 'table' and int(x.bid) and type(x.fp) == 'string' then
-        st.seen[name] = {bid = int(x.bid), fp = x.fp}
+        st.seen[name] = {bid = int(x.bid), fp = x.fp, it = int(x.it),
+                         mat = type(x.mat) == 'string' and x.mat:sub(1, 40) or nil}
+      end
+    end
+    -- the loss history per manifest bridge (BUG-030 rebuild policy)
+    for name, x in pairs(type(p.lost) == 'table' and p.lost or {}) do
+      if type(name) == 'string' and type(x) == 'table' and int(x.n) then
+        local L = {n = int(x.n), bd = int(x.bd) or 0, reb = int(x.reb) or 0, it = int(x.it) or 0, lk = int(x.lk) or 0,
+                   mat = type(x.mat) == 'string' and x.mat:sub(1, 40) or nil, races = {}, ev = {}}
+        for _, r in ipairs(type(x.races) == 'table' and x.races or {}) do
+          if type(r) == 'string' and #L.races < M.LOST_RACES then L.races[#L.races + 1] = r:sub(1, 24) end
+        end
+        for _, e in ipairs(type(x.ev) == 'table' and x.ev or {}) do
+          if type(e) == 'table' and int(e.t) and #L.ev < M.LOST_EV then
+            L.ev[#L.ev + 1] = {t = int(e.t), y = int(e.y) or 0, m = tostring(e.m or '?'):sub(1, 9),
+                               bd = int(e.bd) == 1 and 1 or 0}
+          end
+        end
+        st.lost[name] = L
       end
     end
     for name, x in pairs(type(p.gone) == 'table' and p.gone or {}) do
@@ -1686,7 +1795,7 @@ function M.init(K)
       if type(name) == 'string' and int(t) then st.winb[name] = int(t) end
     end
   end
-  rt, rt_ex, pub, dirty, PULL, last_pass = {}, nil, nil, false, nil, nil
+  rt, rt_ex, pub, dirty, PULL, last_pass, bds = {}, nil, nil, false, nil, nil, nil
   mvl = {list = {}, crushed = {}}
   pl, rooms_c, lb_name = {rooms = {}}, nil, nil
   M.every = {ticks = FAST_MODES[K.mode()] and M.FAST or M.SLOW}
@@ -1714,11 +1823,13 @@ local function pass(K, force)
   for name in pairs(rt) do gone[name] = true end
   for name in pairs(st.br) do gone[name] = true end
   for name in pairs(st.seen) do gone[name] = true end
+  for name in pairs(st.lost) do gone[name] = true end
   for name in pairs(gone) do
     if not valid_spec((man.bridges or {})[name]) and not is_extra(name) and not (rt[name] and rt[name].fp) then
-      rt[name], st.br[name], st.seen[name], st.gone[name], dirty = nil, nil, nil, nil, true
+      rt[name], st.br[name], st.seen[name], st.gone[name], st.lost[name], dirty = nil, nil, nil, nil, nil, true
     end
   end
+  note_destroyers(K, now)                        -- loss history: who was in sight before a bridge is lost
   pullers_step(K, now)
   manifest_pass(K, man, now)
   for _, name in ipairs(bridge_names(man)) do
@@ -1935,6 +2046,24 @@ function M.state(K, bridge)
     j = fj and fj.id or nil
   end
   return s, j
+end
+
+-- public (BUG-030 rebuild policy): the loss history of manifest bridge `name` (a copy: {n, bd, reb, it, mat, lk, races,
+-- ev = {{t, y, m, bd}}}, nil when it was never destroyed), or with `name` nil every record by bridge name
+local function copy_lost(L)
+  local ev, races = {}, {}
+  for i, e in ipairs(L.ev) do ev[i] = {t = e.t, y = e.y, m = e.m, bd = e.bd} end
+  for i, r in ipairs(L.races) do races[i] = r end
+  return {n = L.n, bd = L.bd, reb = L.reb, it = L.it, mat = L.mat, lk = L.lk, races = races, ev = ev}
+end
+function M.losses(K, name)
+  if name ~= nil then
+    local L = st.lost[name]
+    return L and copy_lost(L) or nil
+  end
+  local r = {}
+  for n, L in pairs(st.lost) do r[n] = copy_lost(L) end
+  return r
 end
 
 function M.kpi(K)

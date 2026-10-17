@@ -431,8 +431,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "KERN_FAULT": ("A", "kern", _d("module:s", "err:s n:i backoff_s:i")),
     "PERF_DEGRADED": ("A", "perf", _d(opt="tps:i base:i pct:i why:s")),
     # Run 11: food_low/famine add food (days), block (blocker ids: fishery, kitchen, cook, fish_zone, hunt, farms,
-    # butcher) and opts (the options, the blockers' first)
-    "DECISION_NEEDED": ("A", "any", _d("id:s", "q:s food:i block:sa opts:sa")),
+    # butcher) and opts (the options, the blockers' first); BUG-030 rebuild policy: id bridge_rebuild names the bridge,
+    # its losses (n), those with building destroyers in sight (bd), rebuilds (reb), the items of the lost bridges and
+    # their material, the lever links queued after a loss, the destroyer races, the loss years, perimeter.stop_after
+    "DECISION_NEEDED": ("A", "any", _d("id:s", "q:s food:i block:sa opts:sa bridge:s n:i bd:i reb:i items:i mat:s "
+                                               "links:i races:sa years:ia stop:i")),
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
     # Run 11: mat = why economy cannot make a seal's missing pieces ('no material for door: no rock, no logs');
     # walled = the seal doors quickfort refused (no wall beside them) that the runner planned as walls ('x,y,z')
@@ -455,7 +458,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "DEPOT_MISSING": ("A", "trade", _d(opt="civ:s planned:f proj:s stalled:f why:s mat:s")),
     # BUG-021: unit/upos/grp = a cut-off citizen and his walk group, at/agrp = a stock tile of the class and its group
     "CUTOFF": ("A", "seal", _d("cls:s n:i", "pos:p why:s grp:i main:i unit:i upos:p at:p agrp:i")),
-    "PERIMETER_BROKEN": ("A", "seal", _d("n:i", "pos:p kinds:sa requeued:i why:s")),
+    # BUG-030 rebuild policy: wait = lost bridges built again only in quiet PEACE, held = not rebuilt (DECISION_NEEDED)
+    "PERIMETER_BROKEN": ("A", "seal", _d("n:i", "pos:p kinds:sa requeued:i why:s wait:sa held:sa")),
     "SEAL_LEAK": ("A", "seal", _d("routes:i", "pos:p bld:s state:s why:s")),
     # BUG-018/019, FR-67: level of the fallback (SIEGE, SOFT, HOLD, BREACH, DEAD), flee (no separated burrow: no
     # confinement), open (the entrances that reach the refused burrow, "x,y,z kind"); BUG-031: open = the tiles they
@@ -492,7 +496,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # past_b1 (a hostile past B1), stuck (the field not clear in time), left_outside (O1 raised with members outside)
     "WAVE_FAIL": ("A", "siege", _d("kind:s why:s", "wave:i squad:s lost:i units:ia n:i pos:p ticks:i")),
     # BUG-030: a manifest bridge gate saw complete is gone from its footprint (destroyed or removed): no pulls for it
-    "BRIDGE_DESTROYED": ("A", "gate", _d("bridge:s", "bid:i role:s last:s mode:s pos:p")),
+    # rebuild policy: n = its losses so far, bd = those with building destroyers in sight, destroyers = this one, races
+    "BRIDGE_DESTROYED": ("A", "gate", _d("bridge:s", "bid:i role:s last:s mode:s pos:p n:i bd:i destroyers:f "
+                                                     "races:sa")),
     # Run 11: a dig broke into a cavern: phase queued (the explore shaft's plug project), done (the wall stands), failed
     # (refused, cancelled, blocked), none (no automatic plug: by hand); shaft = its top tile, z1 its bottom z, walls
     # 'x,y,z' (the lower one first), n = water tiles of a cavern lake, hint = why failed / none; state = the explore's
@@ -625,6 +631,8 @@ VERB_ARGS: dict[str, Obj] = {
                          "item-definition jobs need item_subtype (FR-39)"),
     "jobs.release": Obj(opt={"all": Bool(), "preventblocking": Bool()}),
     "perimeter.record": Obj(),
+    # BUG-030 rebuild policy: the player's answer to DECISION_NEEDED bridge_rebuild: rebuild that bridge anyway
+    "bridge.rebuild": Obj(req={"bridge": BRIDGE}),
 }
 # verb -> (handler module, allowed modes or None, needs approve)
 VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
@@ -640,7 +648,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "tombs.repair": ("care", None, False),
     "ack": ("reflex", None, False),
     "order.add": ("economy", None, False), "jobs.release": ("economy", None, False),
-    "perimeter.record": ("seal", None, False),
+    "perimeter.record": ("seal", None, False), "bridge.rebuild": ("seal", None, False),
 }
 # verbs accepted only from these `by` origins (CONTRACTS §9.5; `by` is a label, the hook is the guard)
 VERB_BY: dict[str, list[str]] = {"audit": ["follow", "test"]}

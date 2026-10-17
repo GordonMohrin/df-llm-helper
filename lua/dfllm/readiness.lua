@@ -14,7 +14,10 @@
 -- R0 -> R1 blockers (state ready.fail, DESIGN §5.4): audit (no result yet), audit_old (> a season), audit_fail
 -- (bp.topo.audit ok=false), bypass, refuge_sep, civ_sep, caverns (its flags; Run 11: also an explore shaft open to a
 -- cavern until its plug wall stands, runner.cavern_open), no_kern, no_refuge (burrows),
--- no_outer, no_inner (no manifest bridge of that role), bridge:<B> (gate does not know it), levers:<B> (< 2 linked).
+-- no_outer, no_inner (no manifest bridge of that role), bridge:<B> (gate does not know it), levers:<B> (< 2 linked),
+-- lost:<B> (BUG-030 rebuild policy: a bridge the perimeter keeper no longer rebuilds after perimeter.stop_after losses
+-- to building destroyers, seal.lost_gates; it stands for bridge:<B> and levers:<B>: the fix is the player's answer to
+-- DECISION_NEEDED bridge_rebuild, not a fortcore piece).
 -- FR-65 siege readiness gate: while R0 fails in PEACE, SIEGE_UNREADY (A) names the blockers, the ways in without a
 -- door or bridge (seal.entrance_doors) and the trap count of the last audit; first at once (2 days after a load),
 -- then again after a game month and 30 real minutes, or 10 when it got worse (util/cadence).
@@ -266,7 +269,13 @@ local function evaluate(K, why)
   if not dfhack.burrows.findByName(kern) then f1[#f1 + 1] = 'no_kern' end
   if not dfhack.burrows.findByName(refuge) then f1[#f1 + 1] = 'no_refuge' end
   if not rt.lev or now - rt.lev.tick >= M.LEVERS_EVERY then rt.lev = check_levers(K, man) end
-  for _, f in ipairs(rt.lev.fails) do f1[#f1 + 1] = f end
+  local okl, lost = K.call('seal', 'lost_gates')             -- BUG-030 rebuild policy: held bridges
+  lost = okl and type(lost) == 'table' and lost or {}
+  for _, name in ipairs(sorted_keys(lost)) do f1[#f1 + 1] = 'lost:' .. name end
+  for _, f in ipairs(rt.lev.fails) do
+    local b = f:match('^bridge:(.+)$') or f:match('^levers:(.+)$')
+    if not (b and lost[b]) then f1[#f1 + 1] = f end
+  end
   -- R2
   local f2 = {}
   local pass, last = drills(K)
