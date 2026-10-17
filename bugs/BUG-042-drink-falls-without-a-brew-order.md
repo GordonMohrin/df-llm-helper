@@ -104,6 +104,13 @@ M.gather_low), `lua/dfllm/act.lua` (manager_office), `lua/dfllm/runner.lua` (ord
   P0 below 60 drink/food days; the fort sits in P0 because its farms project is build_lost, BUG-037); it never touches
   orders.
 
+## Live confirmed (Run 11)
+- y471 winter d42: a table and a chair built in office 18631: the manager took ManageWorkOrders, unvalidated orders
+  112 -> 51, the brew orders 1250/1260/1261 validated.
+- y474 summer d72: the fishery's AUTO_FAIL came from a stale follow process (running since 2026-10-16 19:41:08 with
+  the pre-BUG-038 code); restarted 2026-10-17 19:21:42 on c5166eb. The game session never added still jobs by Lua;
+  it only queued manager orders (CustomReaction BREW_*).
+
 ## Not decided offline (the read-only live data that decides it)
 - Which follow failed the fishery: the start time of the running `dfllm follow` process against the pull to ba45a2a/
   b873eb6 (Windows: `Get-CimInstance Win32_Process -Filter "Name like 'python%'" | select ProcessId,CreationDate,CommandLine`),

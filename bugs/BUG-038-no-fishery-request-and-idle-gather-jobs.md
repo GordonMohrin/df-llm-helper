@@ -82,6 +82,11 @@ Module: `lua/dfllm/economy.lua` (M.fishery_request, the food decisions, T.starve
 - Still open: the gatherers at food_low (food was at 700+ days after the reload) and the follow placement with
   `need=["Fishery"]` at the next request.
 
+- y474: the AUTO_FAIL `workshops: nothing left to build` after the reload to b873eb6 came from a stale follow: the
+  game session's `dfpilot follow` process (PIDs 50208/23344) ran since 2026-10-16 19:41:08, with the code from before
+  BUG-032/038, so it never passed `need=["Fishery"]`. Restarted 2026-10-17 19:21:42 (PID 27072) on c5166eb. Since
+  BUG-042, status says `follow: OLD CODE ... restart dfllm follow` for such a process.
+
 ## Not decided offline (the read-only live data that decides it)
 - The repeated `request` lines with one event: the 2nd column (game tick) of consecutive `fishery: none built` lines in
   kern.log/kern.1.log. >= 16,800 ticks apart: the cadence held and the gaps of 115-400 were the 1st column (real
