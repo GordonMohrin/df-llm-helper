@@ -59,6 +59,11 @@ local function fort(opts)
   W.act_result('alert_burrows', function(names)
     for _, n in ipairs(names) do if not dfhack.burrows.findByName(n) then return false, 'no burrow ' .. n end end
     W.alert_burrows = names
+    -- the civ-alert screen's list (DF: alerts.list[1].burrows, burrow ids), read back after a reload (Run 11)
+    local kmock = require('dfllm.util.k_mock')
+    local ids = kmock.vec{}
+    for _, n in ipairs(names) do ids:insert('#', dfhack.burrows.findByName(n).id) end
+    df.global.plotinfo.alerts.list = kmock.vec{{burrows = kmock.vec{}}, {burrows = ids}}
     return true, #names
   end)
   W.job_seq, W.own = 7000, {}
@@ -406,6 +411,10 @@ T.test('BUG-031 (b) + Run 11 (siege 8: the refuge switched Tiefe+/Kern+ during t
   W.unit(320)._m.hidden = true                                          -- out of sight: Kern+ is free again
   run(W, 300)
   T.eq({W.K.mode(), W.alert_burrows[1]}, {'BREACH', 'Tiefe+'}, 'kept: Kern+ would walk them back through the fort')
+  T.eq(#evs(W, 'REFUGE_SWITCH'), 1)
+  require('dfllm.siege').init(W.K)                                      -- a reload: siege's memory is empty
+  run(W, 300)
+  T.eq(W.alert_burrows[1], 'Tiefe+', 'after a reload the sounding burrow is read back from the alert')
   T.eq(#evs(W, 'REFUGE_SWITCH'), 1)
   W.move(11, 48, 20, Z)                                                 -- in Tiefe+, thirsty
   W.unit(11).counters2 = {thirst_timer = 41000, hunger_timer = 0}

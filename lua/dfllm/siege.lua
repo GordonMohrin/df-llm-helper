@@ -879,6 +879,26 @@ end
 -- its drink first; Run 11: one without drink only once Kern+ is breached or open; after it seal holds the refuge until
 -- back_days are quiet). Run 11 (siege 8: the refuge switched Tiefe+/Kern+ during the fight): seal gets the burrow the
 -- sounding alert holds the citizens in, and keeps it in SIEGE/BREACH unless leaving it is worse than staying
+-- Run 11: the burrow the sounding civ alert confines to, read back from the alert's list (list[1].burrows, act's
+-- alert_burrows) while siege's memory holds none (after a reload): the one of Kern+, the refuge and Innen+ it lists,
+-- nil when none or more than one
+local function sounding_burrow(g)
+  local ok, name = pcall(function()
+    local list = df.global.plotinfo.alerts.list
+    if #list < 2 then return nil end
+    local ids, found = {}, nil
+    for _, id in ipairs(list[1].burrows) do ids[id] = true end
+    for _, b in ipairs(df.global.plotinfo.burrows.list) do
+      if ids[b.id] and (b.name == g.kern or b.name == g.refuge or b.name == 'Innen+') then
+        if found then return nil end
+        found = b.name
+      end
+    end
+    return found
+  end)
+  return ok and name or nil
+end
+
 local function alert_plan(K, a, g, now)
   local held = alert_held(K)
   local mode = K.mode()
@@ -886,7 +906,7 @@ local function alert_plan(K, a, g, now)
   local on, burrow = alert_wanted(K, a, g, now, held), (mode == 'BREACH' or deep) and g.refuge or g.kern
   local note, brief, audited, flee
   if on then
-    local cur = (alert_idx() or 0) ~= 0 and mem.burrow or nil
+    local cur = (alert_idx() or 0) ~= 0 and (mem.burrow or sounding_burrow(g)) or nil
     local okb, pick, why, short, fl = K.call('seal', 'alert_burrow', deep and 'BREACH' or mode, burrow, held, cur)
     if okb then
       burrow, on, audited, flee = pick, pick ~= nil, true, fl == true

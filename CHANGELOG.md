@@ -60,7 +60,8 @@
     entrance reaching the candidates), for `breach_days`. So the deep defense keeps the citizens in a separated Kern+
     with drink when Tiefe+ is dry (REFUGE_FAIL `Tiefe+: no drink (drink 0<52, no well)`), and a gate-fail BREACH keeps
     them there until a hostile is inside Kern+.
-  - The switch rule (`seal.alert_burrow(mode, default, hold, cur)`, siege passes the burrow the sounding alert holds):
+  - The switch rule (`seal.alert_burrow(mode, default, hold, cur)`, siege passes the burrow the sounding alert holds;
+    after a reload it reads it back from the civ alert's list):
     in SIEGE and BREACH that burrow is kept unless it is gone, marked dry, unseparated (an entrance reaches it; the
     refuge keeps the dead-end tolerance), breached (a visible hostile in it), unreachable, a refuge without drink past
     its window, or the new pick is the refuge (deeper, away from the entrances). A switch is REFUGE_SWITCH (B, once per
