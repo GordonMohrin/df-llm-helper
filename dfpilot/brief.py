@@ -184,7 +184,7 @@ def line_unready(ctx: Ctx) -> str:
     where, far, lbl = refuge_place(ctx.s)      # BUG-040: where Tiefe+ lies and its nearest accepted water
     if "refuge_dry" in fails:                  # Run 11 siege 8: a dry Tiefe+ holds the citizens only in a breach
         nxt.append("the refuge has no drink" + (f" ({where})" if where else "")
-                   + ": a well/cistern there or a drink stockpile in it (plan)")
+                   + ": its drink store (tpl refuge_drink, FR-69; plan) or a well/cistern there")
     if "hospital_out" in fails:                # BUG-036: lying patients cannot walk to the refuge in a breach
         if far:                                # BUG-040 (Run 11 y453): Tiefe+ has no accepted water: Kern+ next to it
             nxt.append("the hospital lies outside Kern+/Tiefe+: Tiefe+ has no accepted water near it, so plan it inside "

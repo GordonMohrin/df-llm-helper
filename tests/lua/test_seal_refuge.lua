@@ -129,7 +129,8 @@ T.test('BUG-019: in BREACH (a goblin inside Kern+) the dead end Tiefe+ is taken 
   T.eq({ok, pick, note}, {true, 'Tiefe+', nil})
   T.eq(#evs(W, 'REFUGE_FAIL'), 0)
   T.eq(W.state().alert, {want = 'Tiefe+', burrow = 'Tiefe+', tiles = 19, inside = 0, ok = 1, why = '',
-                         ref = {ex = 1, sep = 1, beds = 0, need = 1, box = {5, 5, 5, 8, 8, 8}, wd = -1}})   -- BUG-040
+                         ref = {ex = 1, sep = 1, beds = 0, need = 1, box = {5, 5, 5, 8, 8, 8}, wd = -1,   -- BUG-040
+                                dr = 0, dn = 3, st = 0}})                                                   -- FR-69
 end)
 
 T.test('BUG-019 live (Run 10 y419: "REFUGE_FAIL Tiefe+: 63 tiles<109, beds 8<28 -> confining to Kern+"): 30 ' ..
@@ -198,9 +199,12 @@ T.test('Run 10 (Tiefe+ open to the entrance, beds 8<27): the state carries the r
   -- old code: no alert.ref
   local W = fort{citizens = 9}                       -- the dead end Tiefe+, reached by the doorless entrance
   -- BUG-040: plus where it lies (box) and its nearest accepted water (wd -1: none known)
-  T.eq(W.state().alert.ref, {ex = 1, sep = 0, beds = 0, need = 3, box = {5, 5, 5, 8, 8, 8}, wd = -1})
+  -- FR-69: its drink, the drink it wants, its drink store's tiles
+  T.eq(W.state().alert.ref, {ex = 1, sep = 0, beds = 0, need = 3, box = {5, 5, 5, 8, 8, 8}, wd = -1, dr = 0, dn = 9,
+                             st = 0})
   local W2 = fort{door = true, citizens = 9}
-  T.eq(W2.state().alert.ref, {ex = 1, sep = 1, beds = 0, need = 3, box = {5, 5, 5, 8, 8, 8}, wd = -1})
+  T.eq(W2.state().alert.ref, {ex = 1, sep = 1, beds = 0, need = 3, box = {5, 5, 5, 8, 8, 8}, wd = -1, dr = 0, dn = 9,
+                              st = 0})
   local W3 = fort{shaft = false}                     -- no dead end: no refuge burrow at all
   T.eq(W3.state().alert.ref, {ex = 0, sep = -1, beds = 0, need = 1})
   local W4 = fort{door = true, citizens = 9, cfg = {bed_pct = 50}}
@@ -518,6 +522,40 @@ T.test('BUG-040 (Run 11 y453: Tiefe+ drink 0, wells 1, the alert on the dry Tief
   local W2 = fort{door = true, well = true}
   rd = select(2, W2.K.call('seal', 'refuge_drink'))
   T.eq({rd.wells, rd.wwet, rd.wet, rd.near}, {1, nil, true, nil})
+end)
+
+---------------------------------------------------------------- FR-69 (Run 11, y477)
+T.test('FR-69 (Run 11 y477: Tiefe+ drink 0 while 1199 of 1493 drinks lay in one Kern+ stockpile): the refuge drink ' ..
+       'store (a stockpile dfllm-drink on Tiefe+ tiles, bp refuge_drink): refuge_drink and inspect refuge count the ' ..
+       'barrels on it (store: piles, tiles, drink), the state carries alert.ref dr/dn/st; drink >= citizens on it: the ' ..
+       'refuge is wet; a pile of that name in Kern+ is no store', function()
+  local W = fort{door = true}
+  -- the dead end Tiefe+ (x5-8 y5-8 z5 and the shaft): the store pile on 5-7,8 z5; a pile of the same name in Kern+
+  local store = {id = 901, name = 'dfllm-drink', x1 = 5, y1 = 8, x2 = 7, y2 = 8, z = Z - 4, centerx = 6, centery = 8}
+  local other = {id = 902, name = 'dfllm-drink', x1 = 12, y1 = 6, x2 = 13, y2 = 6, z = Z, centerx = 12, centery = 6}
+  df.global.world.buildings.other.STOCKPILE:insert('#', store)
+  df.global.world.buildings.other.STOCKPILE:insert('#', other)
+  inspect(W, 'refuge', 'refresh')
+  W.run(1200, {skip = 9})
+  local rd = select(2, W.K.call('seal', 'refuge_drink'))
+  T.eq({rd.drink, rd.need, rd.wet, rd.store}, {0, 3, false, {n = 1, tiles = 3, drink = 0, at = {5, 8, Z - 4}}},
+       'old code: no store')
+  T.eq(inspect(W, 'refuge').burrows['Tiefe+'].store, {n = 1, tiles = 3, drink = 0, at = {5, 8, Z - 4}})
+  T.eq(inspect(W, 'refuge').burrows['Kern+'].store, nil)
+  local ref = W.state().alert.ref
+  T.eq({ref.dr, ref.dn, ref.st}, {0, 3, 3})
+  -- two barrels of drink hauled onto the store (2 + 2 drinks: the citizens' 3)
+  for _, x in ipairs({5, 6}) do
+    local b = SW.container(W, 'BARREL', x, 8, Z - 4)
+    SW.store(SW.item(W, 'DRINK', x, 8, Z - 4, 2), b)
+  end
+  inspect(W, 'refuge', 'refresh')                    -- the census and audit again (PEACE: else within 3-7 days)
+  W.run(1200, {skip = 9})
+  rd = select(2, W.K.call('seal', 'refuge_drink'))
+  T.eq({rd.drink, rd.wet, rd.store.drink}, {4, true, 4})
+  ref = W.state().alert.ref
+  T.eq({ref.dr, ref.st}, {4, 3})
+  T.eq(inspect(W, 'refuge').burrows['Tiefe+'].drink, 4)
 end)
 
 T.done()

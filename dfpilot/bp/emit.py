@@ -135,7 +135,7 @@ def _stage(st, X: Xform) -> dict:
         x0, y0, x1, y1 = X.rect(it.u0, it.v0, it.u1, it.v1)
         z = X.az + it.w
         key = BRIDGE_KEYS[X.dir(it.dir)] if it.key == "g" and st.mode == "build" else it.key   # g = goods pile in #place
-        props = "{" + it.props + "}" if it.props else ""
+        props = ("{" + it.props + "}" if it.props else "") + (":" + it.cfg if it.cfg else "")   # FR-69: `:=booze`
         if st.mode == "burrow":
             for (a, b, c, d) in _split(x0, y0, x1, y1):
                 cells.append((a, b, z, f"{key}{props}({c - a + 1}x{d - b + 1})", (c - a + 1) * (d - b + 1)))

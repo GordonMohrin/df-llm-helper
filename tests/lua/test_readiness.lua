@@ -491,10 +491,11 @@ T.test('Run 11 (siege 8: Tiefe+ had no drink): a refuge without drink is the R0 
   local u = unready(W)
   T.eq(#u, 1)
   -- BUG-035 (Run 11: 13 wells, none in Tiefe+): the text says the refuge has no well of its own
+  -- FR-69: the fix is the refuge drink store (was 'build a well/cistern or stock drink there')
   T.eq({u[1].d.fails, u[1].d.rdry}, {{'refuge_dry'},
-       'Tiefe+ has no drink (drink 0<50, no well in Tiefe+): build a well/cistern or stock drink there'})
-  T.ok(u[1].msg:find('siege unready (R0: refuge_dry); Tiefe+ has no drink (drink 0<50, no well in Tiefe+): build a ' ..
-       'well/cistern or stock drink there; 0 ways in, all with a door or bridge; traps 35', 1, true), u[1].msg)
+       'Tiefe+ has no drink (drink 0<50, no well in Tiefe+): plan its drink store (bp sites refuge_drink)'})
+  T.ok(u[1].msg:find('siege unready (R0: refuge_dry); Tiefe+ has no drink (drink 0<50, no well in Tiefe+): plan its ' ..
+       'drink store (bp sites refuge_drink); 0 ways in, all with a door or bridge; traps 35', 1, true), u[1].msg)
   -- a well: counts, unless water's state says the refuge has no wet well
   sf.rd = {name = 'Tiefe+', exists = true, drink = 0, need = 50, wells = 1, wet = true}
   day(W)
@@ -585,7 +586,7 @@ T.test('BUG-040 (Run 11 y453: "Tiefe+ has no drink" for months, nobody knew wher
   T.eq(ready(W).fail, {'refuge_dry'})
   local R = W.mods.readiness.M
   T.eq(R.refuge_dry(W.K), 'Tiefe+ has no drink (drink 0<31, its 1 well is dry; Tiefe+ 126-128,56-77 z129-136, nearest ' ..
-       'accepted water: well 19098 at 137,77,143 in Kern+, 9 tiles): build a well/cistern or stock drink there',
+       'accepted water: well 19098 at 137,77,143 in Kern+, 9 tiles): plan its drink store (bp sites refuge_drink)',
        'old code: no place, no water')
   T.ok(#R.refuge_dry(W.K) <= 200)
   wf.out = 1
@@ -602,6 +603,44 @@ T.test('BUG-040 (Run 11 y453: "Tiefe+ has no drink" for months, nobody knew wher
   day(W)
   T.ok(R.refuge_dry(W.K):find('Tiefe+ 126-128,56-77 z129-136, no accepted water in the fort', 1, true),
        R.refuge_dry(W.K))
+end)
+
+T.test('FR-69 (Run 11 y477: Tiefe+ drink 0 while 1199 drinks lay in one Kern+ stockpile): refuge_dry names the ' ..
+       'refuge drink store: none -> plan it (bp sites refuge_drink); one that stands but is short -> it waits for ' ..
+       'barrels; drink >= citizens on it clears refuge_dry', function()
+  local sf = seal_fake{tick = 1, sealed = 1, routes = 0, doors = {}, open = {}}
+  sf.rd = {name = 'Tiefe+', exists = true, drink = 0, need = 52, wells = 1, wet = true, wwet = 0,
+           box = {126, 56, 129, 128, 77, 136}, near = {d = 9, at = {128, 77, 136}, src = {137, 77, 143}}}
+  function sf.refuge_drink(K) return sf.rd end
+  local wf = {name = 'water', every = {ticks = 1200}}
+  function wf.state(K)
+    return {water = {patients = 0, thirst_max = 0, hosp_ok = 1, refuge_ok = 0, buckets_free = 0, hosp = 0,
+                     src = {{137, 77, 143}}}}
+  end
+  function wf.label(K, x, y, z) return string.format('well 19098 at %d,%d,%d in Kern+', x, y, z) end
+  local W = world{seal = sf, extra = {wf}}
+  W.state()
+  day(W)
+  audit(W)
+  T.eq(ready(W).fail, {'refuge_dry'})
+  local R = W.mods.readiness.M
+  local where = '; Tiefe+ 126-128,56-77 z129-136, nearest accepted water: well 19098 at 137,77,143 in Kern+, 9 tiles'
+  T.eq(R.refuge_dry(W.K), 'Tiefe+ has no drink (drink 0<52, its 1 well is dry' .. where .. '): plan its drink store ' ..
+       '(bp sites refuge_drink)', 'old code: build a well/cistern or stock drink there')
+  T.ok(#R.refuge_dry(W.K) <= 200)
+  -- the store stands (seal sees the dfllm-drink pile on Tiefe+) and holds 8 so far
+  sf.rd.drink, sf.rd.store = 8, {n = 1, tiles = 12, drink = 8, at = {127, 60, 136}}
+  day(W)
+  T.eq(R.refuge_dry(W.K), 'Tiefe+ has no drink (drink 8<52, its 1 well is dry' .. where .. '): its drink store (12 ' ..
+       'tiles) waits for barrels')
+  day(W, 2)
+  local u = unready(W)
+  T.ok(#u >= 1 and tostring(u[#u].d.rdry):find('its drink store (12 tiles) waits for barrels', 1, true),
+       u[#u] and u[#u].d.rdry)
+  -- enough drink on it: refuge_dry goes (the well stays dry)
+  sf.rd.drink, sf.rd.store.drink = 52, 52
+  day(W)
+  T.eq({lvl(W), has(ready(W).fail, 'refuge_dry'), R.refuge_dry(W.K)}, {1, false, nil})
 end)
 
 T.test('Run 10: the last audit names a bypass with its wall: R0, SIEGE_UNREADY and ready.route name it and the fix ' ..

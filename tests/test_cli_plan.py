@@ -679,7 +679,7 @@ def test_refuge_projects_under_way(save, base):
     f = plan.fort_facts(save, state)["refuge"]
     assert f == {"stage3": False, "beds": 0, "seal": False, "fortcore": True, "ents": 0,   # fixture: fortcore at s2
                  "seal_n": 0, "refuge_n": 0, "open": [], "burrow": "", "head": None, "head_open": False,
-                 "bed_site": None}
+                 "bed_site": None, "drink": 0, "drink_room": False, "drink_fit": None, "drink_why": None}   # FR-69
     assert plan.fort_facts(save, {**state, "proj": []})["refuge"]["fortcore"] is False
     cmd.write_bp(save, stub("c1", "fortcore", {"stage": 3, "depth": 3, "refuge": 3, "beds": 8, "retrofit": 0}))
     cmd.write_bp(save, stub("c2", "refuge_beds", {"n": 12, "burrow": "Tiefe+"}))

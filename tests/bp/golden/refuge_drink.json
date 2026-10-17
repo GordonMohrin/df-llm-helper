@@ -1,0 +1,134 @@
+[
+ {
+  "anchor": [
+   70,
+   70,
+   100
+  ],
+  "class": "infra",
+  "manifest": {
+   "rooms": [
+    {
+     "bbox": [
+      68,
+      72,
+      100,
+      72,
+      74,
+      100
+     ],
+     "id": "refuge_d70_70_100r0",
+     "tier": 0,
+     "tpl": "refuge_drink",
+     "use": "utility"
+    }
+   ],
+   "v": 2
+  },
+  "materials": {},
+  "params": {
+   "burrow": "Tiefe+",
+   "n": 12,
+   "take": "dfllm-stock"
+  },
+  "rot": 0,
+  "site": "S1",
+  "stages": [
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        2,
+        0,
+        0,
+        "d"
+       ],
+       [
+        0,
+        1,
+        0,
+        "d(5x1)"
+       ],
+       [
+        0,
+        2,
+        0,
+        "d(5x1)"
+       ],
+       [
+        0,
+        3,
+        0,
+        "d(5x1)"
+       ]
+      ],
+      "pos": [
+       68,
+       71,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "f{name=dfllm-drink barrels=12 take_from=dfllm-stock}:=booze(5x3)"
+       ]
+      ],
+      "pos": [
+       68,
+       72,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "place",
+    "mode": "place",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        2,
+        0,
+        0,
+        "a{name=Tiefe+ create=true}(1x1)"
+       ],
+       [
+        0,
+        1,
+        0,
+        "a{name=Tiefe+ create=true}(5x3)"
+       ]
+      ],
+      "pos": [
+       68,
+       71,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "burrow",
+    "mode": "burrow",
+    "orders": 0
+   }
+  ],
+  "tpl": "refuge_drink",
+  "v": 2
+ }
+]

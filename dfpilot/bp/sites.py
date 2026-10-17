@@ -20,7 +20,9 @@ the footprint may hold a revealed open tile. Score: flat dry surface over the fo
 revealed body of water (>= 8 tiles: a brook, river or lake, not a puddle or a sump) is within WATER_NEAR (30)
 walking steps of the anchor, minus 1 per step beyond, -80 when no revealed water is reachable at all.
 Refuge beds (`rooms.refuge_beds`, Run 10): anchors on the floor of the fortcore refuge room (no lever tile), the
-dormitory dug into the rock beside it (footprint and wall ring rock or unknown: it opens no new way in).
+dormitory dug into the rock beside it (footprint and wall ring rock or unknown: it opens no new way in). The refuge drink
+store (`rooms.refuge_drink`, FR-69) the same way; with no site the ValueError says why and names the largest smaller
+store that has one (Run 11's Tiefe+ is a cramped 212-tile shaft).
 Cistern (`rooms.cistern`): a dry cistern ranks like any room; with a `path` (the pipe to a brook or river) only
 anchors whose pipe ends at a valid intake count: shaft column B and breach tile G on revealed bank floor, the
 water W behind G (`water=bed`: one level below the bank, a brook; `bank`: at bank level), every pipe and shaft
@@ -193,6 +195,8 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         cands = _explore(snap, p, rects, bad, hid, mk, manifest, wet)
     else:
         cands = _rooms(snap, tpl, p, rects, bad, hid, mk, manifest, wet)
+        if not cands and tpl == "refuge_drink":
+            raise ValueError(_no_store(snap, p, manifest, bad, hid, mk, wet))
     if tpl in WATER_TPLS and water is not None:
         cands = _near_water(cands, tpl, p, water)
     cands.sort(key=lambda c: (-c["score"], c["anchor"][2], c["anchor"][1], c["anchor"][0], c["rot"]))
@@ -204,6 +208,30 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
                 break
     return [{"id": f"S{i + 1}", "anchor": c["anchor"], "rot": c["rot"], "score": c["score"], "why": c["why"],
              **({"water": c["water"]} if "water" in c else {})} for i, c in enumerate(out)]
+
+
+def _no_store(snap, p, manifest, bad, hid, mk, wet) -> str:
+    """FR-69: why the refuge drink store has no site beside the refuge room, and the largest smaller store that has one
+    (the refuge room's walls hold rooms, sumps, stairs and levers; a cramped refuge leaves rock only for a small one)."""
+    if not manifest.get("refuge"):
+        return ("refuge_drink: no refuge in the fort manifest (fortcore stage 3 digs the refuge room the store is dug "
+                "from)")
+    where = ", ".join(f"{b[0]}-{b[3]},{b[1]}-{b[4]} z{b[2]}" for b in refuge_rooms(manifest)[:2])
+    shape = rooms.drink_room(p["n"])
+    head = f"refuge_drink: no site for {p['n']} barrels ({shape[0]}x{shape[1]}) beside the refuge room {where}"
+    tried = {shape}
+    for k in (9, 6, 4, 2):
+        wh = rooms.drink_room(k)
+        if k >= p["n"] or wh in tried:
+            continue
+        tried.add(wh)
+        q = {**p, "n": k}
+        if _rooms(snap, "refuge_drink", q, footprint("refuge_drink", q), bad, hid, mk, manifest, wet):
+            return (f"{head}: no wall of it has rock or unknown tiles for that room and its wall ring; a smaller store "
+                    f"fits: n={k} ({wh[0]}x{wh[1]}): dfllm bp sites refuge_drink n={k}")
+    return (f"{head}, not even a 3x1 store (2 barrels): no wall of it has rock or unknown tiles behind it for a room "
+            "and its wall ring (rooms, sumps, stairs, levers or caves beside it); the refuge needs a well or cistern of "
+            "its own (dfllm bp sites cistern level=refuge) or its drink carried in")
 
 
 # ---------------------------------------------------------------- BUG-040: a hospital only near accepted water
@@ -448,7 +476,8 @@ def _lever_tiles(m: dict) -> set[tuple[int, int, int]]:
 
 
 def on_refuge(tpl: str, p: dict) -> bool:
-    """Templates that sit on the refuge level: refuge_beds (Run 10), a cistern with level=refuge."""
+    """Templates that sit on the refuge level: refuge_beds (Run 10), refuge_drink (FR-69), a cistern with
+    level=refuge."""
     return tpl in rooms.REFUGE_LEVEL or (tpl == "cistern" and p.get("level") == "refuge")
 
 

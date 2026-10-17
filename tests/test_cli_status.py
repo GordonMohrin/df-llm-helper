@@ -456,7 +456,7 @@ def test_status_r0_refuge_dry_names_the_drink(save):
     _r0_state(save, open=0, ents=None, fail=["refuge_dry"], audit={"ok": 1, "age": 9000, "min_traps": 35})
     line = brief.status_text(save).splitlines()[1]
     assert line.startswith("SIEGE UNREADY (R0): refuge_dry") and \
-        "next: the refuge has no drink: a well/cistern there or a drink stockpile in it (plan)" in line, line
+        "next: the refuge has no drink: its drink store (tpl refuge_drink, FR-69; plan) or a well/cistern there" in line, line
 
 
 def test_status_r0_hospital_out_names_the_move(save):

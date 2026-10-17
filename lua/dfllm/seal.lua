@@ -144,6 +144,10 @@ M.CFG = {
   -- BUG-035 (Run 11 siege 9: two citizens stood idle outside the alert burrow for 4,800 ticks): the recall's path check
   -- visits at most rpath_max tiles per citizen and crosses at most rpath_doors forbidden doors; ids per call
   rpath_max = 6000, rpath_doors = 2, rpath_ids = 8,
+  -- FR-69 (Run 11 y477: Tiefe+ drink 0 while 1199 of 1493 drinks lay in one Kern+ stockpile): the refuge's drink store
+  -- is a stockpile of this name with tiles on the refuge burrow (dfpilot/bp/rooms.py refuge_drink, DRINK_PILE); an
+  -- audit reads at most store_piles such piles and store_tiles tiles of each
+  store = 'dfllm-drink', store_piles = 4, store_tiles = 100,
 }
 local CFG = M.CFG
 
@@ -600,6 +604,44 @@ local function burrow_audit(K, ncit, a)
   return a, need, pct
 end
 
+-- FR-69: the refuge's drink store: the stockpiles named CFG.store with tiles on burrow `name` (the pile's rect, at most
+-- CFG.store_tiles tiles): {n = piles, tiles = their tiles on it, drink = the census drink on those tiles (I, FR-59:
+-- barrels on a pile count where they stand), at = the first such tile}; nil when there is none. No scan of its own
+-- beyond the stockpile vector and the piles' tiles
+local function drink_store(name, I)
+  local out, i = nil, 0
+  while true do
+    local v = vec('buildings', 'STOCKPILE')                         -- re-read after every yield
+    if not v or i >= #v then break end
+    local sp = v[i]
+    i = i + 1
+    local ok, nm, x1, y1, x2, y2, z = pcall(function() return sp.name, sp.x1, sp.y1, sp.x2, sp.y2, sp.z end)
+    spend(1)
+    local b = ok and nm == CFG.store and burrow(name)
+    if b and int(x1) and int(y1) and int(x2) and int(y2) and int(z) then
+      local t, d, at, nt = 0, 0, nil, 0
+      for y = y1, y2 do
+        for x = x1, x2 do
+          nt = nt + 1
+          if nt <= CFG.store_tiles and in_burrow(b, x, y, z) then
+            t = t + 1
+            local c = I and I.at[key3(x, y, z)]
+            if c then d = d + c[1] end
+            at = at or {x, y, z}
+          end
+        end
+      end
+      spend(2 * math.min(nt, CFG.store_tiles))
+      if t > 0 then
+        out = out or {n = 0, tiles = 0, drink = 0}
+        out.n, out.tiles, out.drink, out.at = out.n + 1, out.tiles + t, out.drink + d, out.at or at
+        if out.n >= CFG.store_piles then break end
+      end
+    end
+  end
+  return out
+end
+
 local function audit_names(K)
   local kern, refuge = burrow_names(K)
   local names = {kern}
@@ -729,6 +771,7 @@ local function audit_pass(K)
       if okw and math.type(ww) == 'integer' then B[n].wwet = ww end
     end
   end
+  if B[refuge] and B[refuge].exists then B[refuge].store = drink_store(refuge, I) end     -- FR-69
   -- BUG-019: reachable = a citizen inside, or a walkable sample tile on a citizen's walk group, both read now (one
   -- frame, one numbering, BUG-021); -1 = no walkable sample
   local now_g, nread = nil, 0
@@ -2880,6 +2923,11 @@ local function publish(K)
     local s = ex and sep_of(refuge) or nil
     mem.pub.ref = {ex = ex and 1 or 0, sep = s == nil and -1 or (s.exp and 0 or 1),
                    beds = ex and math.max(0, int(ra.beds) or 0) or 0, need = math.max(0, int(need.beds) or 0)}
+    -- FR-69: its drink, the drink it wants (refuge_dry's rule) and its drink store's tiles (plan check/propose)
+    if ex then
+      mem.pub.ref.dr, mem.pub.ref.dn = math.max(0, int(ra.drink) or 0), math.max(0, int(ra.dneed) or 0)
+      mem.pub.ref.st = type(ra.store) == 'table' and math.max(0, int(ra.store.tiles) or 0) or 0
+    end
     -- BUG-040: where the refuge lies and its nearest tile's distance to the nearest accepted source (status, plan)
     if ex and type(ra.box) == 'table' then
       local n = ra.near
@@ -3076,7 +3124,8 @@ end
 
 -- public (Run 11, readiness: siege 8's Tiefe+ had no drink): the refuge burrow's drink by the last audit: {name,
 -- exists, drink (units: drink items, FR-59), need (citizens x drink_per_cit), wells (built wells on it), wet (drink >= need
--- or a well: the SIEGE level's drink rule)}; nil before the first audit
+-- or a well: the SIEGE level's drink rule)}; nil before the first audit. FR-69: store = its drink store (drink_store:
+-- {n, tiles, drink, at}; nil none)
 function M.refuge_drink(K)
   local au = mem and mem.audit and mem.audit.burrows
   if not au then return nil end
@@ -3087,7 +3136,7 @@ function M.refuge_drink(K)
           wells = int(a.wells) or 0, wet = a.wet == true,
           -- BUG-040: the wells water calls wet (nil unknown; `wet` above still counts every built well, the alert's
           -- rule), the tiles' bbox, the tile nearest to an accepted source
-          wwet = a.wwet, box = a.box, near = a.near}
+          wwet = a.wwet, box = a.box, near = a.near, store = a.store}
 end
 
 -- public (BUG-031 (b), siege): citizens the civ alert holds in burrow `name` are over siege's thirst or hunger mark
@@ -4437,7 +4486,7 @@ M.inspect.refuge = function(K, args)
                sep = s == nil and -1 or (s.exp and 0 or 1), open = s and s.exp and s.open or nil,
                exp = s and s.exp and s.n or nil, steps = s and s.exp and s.d or nil, reach = a.reach, why = why,
                fix = s and s.exp and s.fix ~= '' and s.fix or nil,                  -- BUG-031: seal at=...
-               dry = dry_why(name, a)}
+               dry = dry_why(name, a), store = a.store}                            -- FR-69: the drink store
   end
   local choice = {}
   local function ch(m, hold)
@@ -4458,8 +4507,9 @@ M.inspect.refuge = function(K, args)
   local ra = au.burrows[refuge]
   local hint
   if ra and ra.exists and not ra.ok then
-    hint = trunc(string.format('%s holds without counts only in a breach (%d days): for a siege it needs %s; plan a '
-                               .. 'stockpile and bedrooms there', refuge, rc.breach_days, ra.why), 200)
+    hint = trunc(string.format('%s holds without counts only in a breach (%d days): for a siege it needs %s; plan '
+                               .. 'refuge_drink (its drink store) and refuge_beds there', refuge, rc.breach_days, ra.why),
+                 200)
   end
   -- BUG-031: an entrance reaches Kern+ (and so the refuge below it): the build that closes it comes first
   local kern = burrow_names(K)
