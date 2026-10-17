@@ -55,6 +55,8 @@ C.EVENTS = {
   SIEGE_END = {cls = 'A', by = 'siege'}, GATE_FAIL = {cls = 'A', by = 'gate'},
   BREACH = {cls = 'A', by = 'siege'}, DEATHS_3PLUS = {cls = 'A', by = 'care'},
   DRILL_FAIL = {cls = 'A', by = 'drill'}, KERN_FAULT = {cls = 'A', by = 'kern'},
+  -- DECISION_NEEDED food_low/famine (economy): food, block, opts and, BUG-038, auto (fishery: its request is out or
+  -- queued; gather: plant gatherers added): what the kernel does itself, never an option for the player
   PERF_DEGRADED = {cls = 'A', by = 'perf'}, DECISION_NEEDED = {cls = 'A', by = 'any'},
   -- PROJECT_BLOCKED (and PROJECT_DONE) d.walled, Run 11: the seal doors quickfort refused, planned as walls ('x,y,z')
   PLAN_EXHAUSTED = {cls = 'A', by = 'runner'}, PROJECT_BLOCKED = {cls = 'A', by = 'runner'},

@@ -366,6 +366,10 @@ M.DEFAULTS = {
             planters = 4, plants = {'GRASS_WHEAT_CAVE', 'MUSHROOM_HELMET_PLUMP', 'POD_SWEET', 'BUSH_QUARRY',
                                     'MUSHROOM_CUP_DIMPLE'},
             details = {planters = {'Planters'}, gatherers = {'Plant gatherers', 'Gatherers', 'Herbalists'}}},
+  -- BUG-038 (Run 11, y451: food_low at 26 days, 450 unclaimed GatherPlants jobs, nobody gathered): below food.pre_days
+  -- (the food_low line, famine included) with >= min_jobs unclaimed GatherPlants jobs, the plant gathering detail
+  -- (starve.details.gatherers) gets members up to n (M.gather_low); the ones economy added leave at off_days food days
+  gather = {n = 4, min_jobs = 10, off_days = 60},
 }
 
 local st = {}
@@ -2428,15 +2432,17 @@ local TOOL_KEY = {MINING = 'w_pick', AXE = 'w_axe', CROSSBOW = 'w_xbow', BOW = '
 local JOB_NAME = {dig = 'dig', fell = 'FellTree'}
 
 -- one pass over the job list: designation dig jobs and FellTree jobs, all and unclaimed (no worker, not suspended)
--- (also digging nobody planned through the runner)
+-- (also digging nobody planned through the runner); BUG-038: GatherPlants too (M.gather_low reads them, no scan of its
+-- own)
 local function tool_jobs()
-  local r = {dig = 0, dig_open = 0, fell = 0, fell_open = 0, dig_pts = {}, fell_pts = {}}
+  local r = {dig = 0, dig_open = 0, fell = 0, fell_open = 0, gather = 0, gather_open = 0, dig_pts = {}, fell_pts = {}}
   pcall(function()
     local link, i = df.global.world.jobs.list.next, 0
     while link and i < 20000 do
       local j = link.item
       local tn = j and df.job_type[j.job_type]
-      local kind = tn and (DIG_JOBS[tn] and 'dig' or (tn == 'FellTree' and 'fell')) or nil
+      local kind = tn and (DIG_JOBS[tn] and 'dig' or (tn == 'FellTree' and 'fell') or (tn == 'GatherPlants' and 'gather'))
+                   or nil
       if kind then
         r[kind] = r[kind] + 1
         local okw, w = pcall(dfhack.job.getWorker, j)
@@ -2444,7 +2450,7 @@ local function tool_jobs()
           r[kind .. '_open'] = r[kind .. '_open'] + 1
           -- BUG-023 round 5: where the first open ones lie (the tool diagnosis: can the members take one?)
           local pts = r[kind .. '_pts']
-          if #pts < 40 then
+          if pts and #pts < 40 then
             local okp, x, y, z = pcall(function() return j.pos.x, j.pos.y, j.pos.z end)
             if okp and math.tointeger(x) then pts[#pts + 1] = {x, y, z} end
           end
@@ -3293,13 +3299,11 @@ local function famine(K, c, p, days, inv, r)
   if now - (p.famine.woke or 0) >= 7 * DAY then
     p.famine.woke = now
     -- Run 11: the blockers (no fishery for the raw fish, why the kitchens cook nothing, no safe fishing water, ...)
-    local bl = M.food_block(K, c, r, inv)
-    local q, opts = M.food_q(fd, r, inv, bl)
-    local ids = {}
-    for _, b in ipairs(bl) do ids[#ids + 1] = b[1] end
-    K.emit('DECISION_NEEDED', 'A', string.format('famine: %d food days, %d drink days%s', fd, dd,
-                                                 bl[1] and (': ' .. bl[1][2]) or ''),
-           {id = 'famine', q = q, food = fd, block = ids, opts = opts})
+    local bl, auto = M.food_block(K, c, r, inv)
+    local q, opts = M.food_q(fd, r, inv, bl, auto)
+    local ids, aids, head = M.food_head(bl, auto)
+    K.emit('DECISION_NEEDED', 'A', string.format('famine: %d food days, %d drink days%s', fd, dd, head),
+           {id = 'famine', q = q, food = fd, block = ids, opts = opts, auto = aids})
   end
 end
 
@@ -3371,17 +3375,15 @@ local function food_pre(K, c, p, days, inv, r)
     p.food_pre = {since = now.tick, woke = 0}
     K.log('warn', 'food pre-alarm: %d food days (< %d)', fd, pre)
   end
-  local bl = M.food_block(K, c, r, inv)
-  local ids = {}
-  for _, b in ipairs(bl) do ids[#ids + 1] = b[1] end
+  local bl, auto = M.food_block(K, c, r, inv)
+  local ids, aids, head = M.food_head(bl, auto)
   local toks = {fd < 20 and 'below20' or 'below30'}
   for _, id in ipairs(ids) do toks[#toks + 1] = id end
   if not CAD.due(p.food_rep, now, {}, toks, {ticks = 7 * DAY, wall_s = CAD.WALL_S}) then return end
   p.food_rep, p.food_pre.woke = CAD.mark(now, {}, toks), now.tick
-  local q, opts = M.food_q(fd, r, inv, bl)
-  K.emit('DECISION_NEEDED', 'A', string.format('food low: %d food days (famine below %d)%s', fd, lim,
-                                               bl[1] and (': ' .. bl[1][2]) or ''),
-         {id = 'food_low', q = q, food = fd, block = ids, opts = opts})
+  local q, opts = M.food_q(fd, r, inv, bl, auto)
+  K.emit('DECISION_NEEDED', 'A', string.format('food low: %d food days (famine below %d)%s', fd, lim, head),
+         {id = 'food_low', q = q, food = fd, block = ids, opts = opts, auto = aids})
 end
 
 -- autofarm status: one "SPELT limit 50 current 32" line per crop autofarm knows, and "Default: 50"
@@ -4647,22 +4649,62 @@ function M.labor_holder(K, ln)
   return false
 end
 
+-- BUG-038: the pending workshops project that builds a fishery (its doc's manifest lists one; the runner's project
+-- list and doc, read-only): {id, stage, pct, halted = P.blocked unless '' or 'stalled'} or nil. Only `workshops`
+-- projects: fortcore stage 1 lists a fishery too, built long ago in a fort whose later stages still run
+function M.fishery_proj(K, ws)
+  local pd = K.persist.get('projects')
+  for _, P in ipairs(type(pd) == 'table' and type(pd.list) == 'table' and pd.list or {}) do
+    local id = type(P) == 'table' and P.tpl == 'workshops' and P.done ~= 1 and tostring(P.id or '')
+    local d = id and id:match('^[%w_.%-]+$') and K.persist.get('bp.' .. id)
+    local m = type(d) == 'table' and type(d.manifest) == 'table' and d.manifest.workshops
+    for _, w in ipairs(type(m) == 'table' and m or {}) do
+      if type(w) == 'table' and ('workshop:' .. tostring(w.type)) == (ws or M.FISHERY)[1] then
+        local b = tostring(P.blocked or '')
+        return {id = id, stage = P.stage, pct = P.pct, halted = (b ~= '' and b ~= 'stalled') and b or nil}
+      end
+    end
+  end
+end
+
+-- raw fish (>= fish.min) or fishers at work and no fishery built: PROJECT_REQUEST workshops why=fishery at most every
+-- food.request_days (p.fishery_req, the last request). BUG-038 (Run 11, y451: the fishery was destroyed in the sieges,
+-- food fell from 51 to 22 days and no fishery came): a fishery seen standing leaves the clock alone (a fishery built
+-- from the request and destroyed again waits for the period, one destroyed long after its request is asked at once);
+-- 'queued' (no request) only while a pending workshops project builds a fishery, is not halted and moved (stage or
+-- pct, p.fishery_q) within the period, and for at most 4 periods; else asked again. kern.log names why it asks.
 function M.fishery_request(K, c, r)
   local f, p = c.fish, r.p
   if type(f) ~= 'table' then return end
-  if ws_any(M.facts_now(K, r), f.ws) then p.fishery_req, st.fishery = nil, nil; return end
+  local last = math.tointeger(p.fishery_req)
+  if ws_any(M.facts_now(K, r), f.ws) then st.fishery, p.fishery_q = nil, nil; return end
   local raw = r.inv.fish_raw or 0
   local fishing = (st.fishers or 0) > 0
   if raw < (f.min or 5) and not fishing then st.fishery = nil; return end
   local every = ((c.food or {}).request_days or 14) * DAY
-  local last = math.tointeger(p.fishery_req)
-  if last and r.now - last < every then st.fishery = 'asked'; return end
-  local okp, pend = K.call('runner', 'pending', 'workshops')
-  if last and r.now - last < 4 * every and okp and (math.tointeger(pend) or 0) > 0 then st.fishery = 'queued'; return end
+  local q, pq = M.fishery_proj(K, f.ws), type(p.fishery_q) == 'table' and p.fishery_q or nil
+  if not q then pq = nil
+  elseif not pq or pq.id ~= q.id or pq.s ~= q.stage or pq.pct ~= q.pct then      -- new, or it moved
+    pq = {id = q.id, s = q.stage, pct = q.pct, t = r.now, t0 = pq and pq.id == q.id and pq.t0 or r.now}
+  end
+  p.fishery_q = pq
+  st.fishery_proj = q and q.id or nil
+  if last and r.now - last < every then st.fishery = q and 'queued' or 'asked'; return end
+  local why
+  if q then
+    local still = r.now - (math.tointeger(pq.t) or r.now)
+    local open = r.now - (last or math.tointeger(pq.t0) or r.now)
+    if not q.halted and still < every and open < 4 * every then st.fishery = 'queued'; return end
+    why = q.halted and string.format('project %s %s', q.id, q.halted:sub(1, 30))
+          or still >= every and string.format('project %s has not moved for %d days', q.id, still // DAY)
+          or string.format('project %s open for %d days', q.id, open // DAY)
+  else
+    why = last and string.format('%d days since the last request', (r.now - last) // DAY) or 'first request'
+  end
   p.fishery_req, st.fishery = r.now, 'asked'
   local fd = (r.days or {}).food_d or 0
-  K.log('warn', 'fishery: none built, %d raw fish%s, food %d days: request', raw,
-        fishing and ', fishers at work' or '', fd)
+  K.log('warn', 'fishery: none built, %d raw fish%s, food %d days: request (%s)', raw,
+        fishing and ', fishers at work' or '', fd, why)
   K.emit('PROJECT_REQUEST', 'B', string.format('workshops: a fishery for %d raw fish (food %d days)', raw, fd),
          {tpl = 'workshops', n = 1, why = 'fishery'})
 end
@@ -4878,14 +4920,161 @@ function T.fishz(K, c, r)
   return M.fish_step(K, c, r)
 end
 
--- what keeps food from coming, for the food_low and famine decisions: {{id, text}} by weight
+---------------------------------------------------------------- plant gatherers at food_low (BUG-038)
+-- Run 11 (Kilrudrabed y451, pop 26): food_low at 26 days, `inspect workload` 'unclaimed: GatherPlants 450' (the
+-- runner's dfllm-gather zone below 30 food days; FR-25 marks shrubs only in a starvation) with 4 of 26 idle: nobody
+-- gathered. Below food.pre_days (the food_low line, famine included), in PEACE/RECOVERY, not in labormanager's modern
+-- mode, with >= gather.min_jobs unclaimed GatherPlants jobs in the tool details' daily job census (st.jobc of the last
+-- tools pass, no scan of its own): the plant gathering detail (starve.details.gatherers by name, else the detail that
+-- grants HERBALIST) gets members up to gather.n through act.work_detail (opts.select: a detail on "nobody does this"
+-- is set to "only selected", the work details screen's toggle); idle citizens first, then HERBALISM, then id; never a
+-- soldier, a noble, a mood, a doctor (DIAGNOSE, SURGERY, BONE_SETTING), the only holder of a key labor or a member of
+-- a tool detail. The members it added (p.gather) leave once food is back at gather.off_days (between the lines nothing
+-- changes). One kern.log line per change, WORK_DETAIL (B) why=food_low per member; st.gather feeds the food decisions
+-- (d.auto gather, or the blocker 'gather: <why>').
+M.MEDIC = {'DIAGNOSE', 'SURGERY', 'BONE_SETTING'}
+M.TOOL_DETAILS = {Miners = true, Woodcutters = true, Hunters = true, Fisherdwarves = true}
+
+-- the citizens who may join the gatherers, best first: {id, ...}
+function M.gather_cand(K, c, member)
+  local cu = K.census.u or {}
+  local sold, cnt, holder, tool_m = {}, {}, {}, {}
+  for _, id in ipairs(cu.soldier_ids or {}) do sold[id] = true end
+  pcall(function()
+    for _, w in ipairs(df.global.plotinfo.labor_info.work_details) do
+      if M.TOOL_DETAILS[dfhack.df2utf(w.name)] then for _, id in ipairs(w.assigned_units) do tool_m[id] = true end end
+    end
+  end)
+  local adults = {}
+  for _, id in ipairs(cu.ids or {}) do
+    local u = df.unit.find(id)
+    if u and not dfhack.units.isDead(u) and dfhack.units.isAdult(u) then
+      adults[#adults + 1] = u
+      for _, l in ipairs((c.tools or {}).key_labors or {}) do
+        if labor_on(u, l) then cnt[l], holder[l] = (cnt[l] or 0) + 1, id end
+      end
+    end
+  end
+  local sole = {}
+  for l, n in pairs(cnt) do if n == 1 then sole[holder[l]] = true end end
+  local sid = df.job_skill and df.job_skill.HERBALISM
+  local cand = {}
+  for _, u in ipairs(adults) do
+    local id, doc = u.id, false
+    for _, l in ipairs(M.MEDIC) do if labor_on(u, l) then doc = true end end
+    local squad = u.military and math.tointeger(u.military.squad_id) or -1
+    if not (member[id] or sold[id] or tool_m[id] or sole[id] or doc or squad >= 0 or noble(u) or (u.mood or -1) >= 0) then
+      cand[#cand + 1] = {id = id, idle = (u.job == nil or u.job.current_job == nil) and 1 or 0,
+                         sk = sid and dfhack.units.getNominalSkill(u, sid, true) or 0}
+    end
+  end
+  table.sort(cand, function(a, b)
+    if a.idle ~= b.idle then return a.idle > b.idle end
+    if a.sk ~= b.sk then return a.sk > b.sk end
+    return a.id < b.id
+  end)
+  local r = {}
+  for i, e in ipairs(cand) do r[i] = e.id end
+  return r
+end
+
+function M.gather_low(K, c, r)
+  local g, p = c.gather, r.p
+  if type(g) ~= 'table' or (math.tointeger(g.n) or 0) <= 0 then st.gather = nil; return end
+  local fd = (r.days or {}).food_d or 9999
+  local pg = type(p.gather) == 'table' and type(p.gather.ids) == 'table' and p.gather or nil
+  local jc = st.jobc
+  local open = type(jc) == 'table' and math.tointeger(jc.gather_open) or 0
+  if pg and fd >= (g.off_days or 60) then                                -- food is back: ours leave
+    local out = {}
+    for _, id in ipairs(pg.ids) do
+      local uid = math.tointeger(id)
+      if uid and K.act.work_detail(pg.d, uid, false) then
+        out[#out + 1] = unit_name(uid)
+        K.emit('WORK_DETAIL', 'B', string.format('%s - %s (food back at %d days)', pg.d, unit_name(uid), fd),
+               {detail = pg.d, unit = uid, on = 0, n = 0, why = 'food_low over'})
+      end
+    end
+    r.cmds = r.cmds + 1
+    K.log('info', 'gather: food %d days (>= %d): %d plant gatherers off %s (%s)', fd, g.off_days or 60, #out,
+          tostring(pg.d), table.concat(out, ', '))
+    p.gather, st.gather = nil, nil
+    return
+  end
+  st.gather = pg and {n = #pg.ids, open = open, d = pg.d} or nil
+  if fd >= ((c.food or {}).pre_days or 30) then return end                -- no food_low: nothing new
+  if st.engine == 'modern' or type(jc) ~= 'table' or not HUNT_MODES[K.mode()] then return end
+  if open < (g.min_jobs or 10) then return end
+  st.gather = st.gather or {n = 0, open = open}
+  local sc = c.starve or M.DEFAULTS.starve
+  local name, wd = find_detail((sc.details or {}).gatherers, 'HERBALIST')
+  if not name then st.gather.why = 'no plant gathering detail'; return end
+  local wm = df.work_detail_mode or {}
+  local mode = wd.flags and wd.flags.mode
+  if wm.EverybodyDoesThis ~= nil and mode == wm.EverybodyDoesThis then
+    st.gather.why = name .. ' is everybody-does-this (the jobs wait for another reason)'
+    return
+  end
+  local member, have = {}, 0
+  for _, id in ipairs(wd.assigned_units) do member[id], have = true, have + 1 end
+  local want = math.tointeger(g.n) or 4
+  local nobody = wm.NobodyDoesThis ~= nil and mode == wm.NobodyDoesThis
+  if have >= want and not nobody then return end
+  local ids, mine, names = {}, {}, {}
+  for _, id in ipairs(pg and pg.ids or {}) do
+    local uid = math.tointeger(id)
+    if uid and not mine[uid] then mine[uid], ids[#ids + 1] = true, uid end
+  end
+  -- enough members on a "nobody does this" detail (the player's): the first of them sets it to only selected
+  local list = have >= want and {wd.assigned_units[0]} or M.gather_cand(K, c, member)
+  local flipped = false
+  for _, id in ipairs(list) do
+    if have >= want and not nobody then break end
+    if K.act.work_detail(name, id, true, {select = true}) then
+      if not member[id] then
+        have, names[#names + 1] = have + 1, unit_name(id)
+        if not mine[id] then mine[id], ids[#ids + 1] = true, id end
+        K.emit('WORK_DETAIL', 'B', string.format('%s + %s (food_low: %d food days, %d gather jobs, target %d)', name,
+                                                 unit_name(id), fd, open, want),
+               {detail = name, unit = id, on = 1, n = want, why = 'food_low'})
+      end
+      flipped, nobody = flipped or nobody, false
+    end
+  end
+  r.cmds = r.cmds + 1
+  local fl = flipped and '; it was nobody does this: now only selected' or ''
+  if #names == 0 then
+    if flipped then K.log('warn', 'gather: food %d days, %d unclaimed GatherPlants jobs: %s%s', fd, open, name, fl)
+    elseif not pg then st.gather.why = string.format('no free citizen for %s (%d of %d)', name, have, want) end
+    return
+  end
+  table.sort(ids)
+  p.gather = {d = name, ids = json.array(ids), t = pg and pg.t or r.now}
+  st.gather = {n = #ids, open = open, d = name}
+  K.log('warn', 'gather: food %d days, %d unclaimed GatherPlants jobs: %s +%d (%s), %d of %d%s', fd, open, name,
+        #names, table.concat(names, ', '), have, want, fl)
+end
+
+function T.gather(K, c, r) if r.day then M.gather_low(K, c, r) end end
+
+-- what keeps food from coming, for the food_low and famine decisions: {{id, text}} by weight, and what the kernel
+-- does about it itself (BUG-038): {{id, text}} (the fishery request, the gatherers)
 function M.food_block(K, c, r, inv)
-  local f, out = M.facts_now(K, r), {}
+  local f, out, auto = M.facts_now(K, r), {}, {}
   local function put(id, txt) out[#out + 1] = {id, txt} end
   local raw = inv.fish_raw or 0
   if raw > 0 and not ws_any(f, M.FISHERY) then
-    put('fishery', string.format('build a fishery (%d raw fish%s)', raw,
-                                 (st.fishery == 'asked' or st.fishery == 'queued') and (', ' .. st.fishery) or ''))
+    if st.fishery == 'asked' or st.fishery == 'queued' then          -- BUG-038: follow places it, nothing to decide
+      auto[#auto + 1] = {'fishery', string.format('fishery %s (%d raw fish%s)', st.fishery, raw,
+                                                  st.fishery == 'queued' and st.fishery_proj and (', ' .. st.fishery_proj)
+                                                  or '')}
+    else put('fishery', string.format('build a fishery (%d raw fish)', raw)) end
+  end
+  local sg = st.gather
+  if type(sg) == 'table' then
+    if (sg.n or 0) > 0 then auto[#auto + 1] = {'gather', string.format('%d gatherers added (%d gather jobs)', sg.n,
+                                                                     sg.open or 0)}
+    elseif sg.why then put('gather', 'gather: ' .. sg.why) end
   end
   if not ws_any(f, {'workshop:Kitchen'}) then put('kitchen', 'no kitchen')
   elseif M.cook_n(inv) <= 0 then put('cook', 'no ' .. M.cook_why(inv, f))
@@ -4909,25 +5098,38 @@ function M.food_block(K, c, r, inv)
   if type(ca) == 'table' and (math.tointeger(ca.n) or 0) > 0 and not ws_any(f, (c.slaughter or {}).ws) then
     put('butcher', "no butcher's shop")
   end
-  return out
+  return out, auto
 end
 
--- the decision text: numbers, blockers (each names its fix), the player's other options (DECISION_NEEDED q <= 200
--- bytes); opts = every option, the blockers' first (d.opts)
+-- the decision text: numbers, blockers (each names its fix), what the kernel does itself (BUG-038: `auto: ...`, never
+-- cut), the player's other options (DECISION_NEEDED q <= 200 bytes); opts = every option, the blockers' first (d.opts)
 M.FOOD_OPTS = {fishery = 'fishery', fish_zone = 'fishing zone', kitchen = 'kitchen', hunt = 'bolts'}
 M.FOOD_MORE = {'trade.want food', 'butcher', 'gather', 'popcap.lower'}
-function M.food_q(fd, r, inv, bl)
-  local parts, opts = {}, {}
+function M.food_q(fd, r, inv, bl, auto)
+  local parts, opts, au = {}, {}, {}
   for _, b in ipairs(bl) do
     parts[#parts + 1] = b[2]:sub(1, 72)
     if M.FOOD_OPTS[b[1]] then opts[#opts + 1] = M.FOOD_OPTS[b[1]] end
   end
   for _, o in ipairs(M.FOOD_MORE) do opts[#opts + 1] = o end
+  for _, a in ipairs(auto or {}) do au[#au + 1] = a[2]:sub(1, 44) end
+  local ap = #au > 0 and ('; auto: ' .. table.concat(au, ', ')) or ''
   local q = string.format('food %d d (%d cit, %d meals)', fd, r and r.cit or 0, inv.meals or 0) ..
             (#parts > 0 and (': ' .. table.concat(parts, '; ')) or '')
   local tail = '. Also: ' .. table.concat(M.FOOD_MORE, ', ')
-  if #q + #tail > 200 then q = q:sub(1, math.max(40, 197 - #tail)) .. '...' end
-  return (q .. tail):sub(1, 200), opts
+  if #q + #ap + #tail > 200 then q = q:sub(1, math.max(30, 197 - #ap - #tail)) .. '...' end
+  return (q .. ap .. tail):sub(1, 200), opts
+end
+
+-- the decision's d.block / d.auto ids and the head of its line: the first blocker, then 'auto: fishery, gather'
+function M.food_head(bl, auto)
+  local ids, aids = {}, {}
+  for _, b in ipairs(bl) do ids[#ids + 1] = b[1] end
+  for _, a in ipairs(auto or {}) do aids[#aids + 1] = a[1] end
+  local h = {}
+  if bl[1] then h[1] = bl[1][2] end
+  if #aids > 0 then h[#h + 1] = 'auto: ' .. table.concat(aids, ', ') end
+  return ids, #aids > 0 and aids or nil, #h > 0 and (': ' .. table.concat(h, '; ')) or ''
 end
 
 -- Run 11: cookable growths a kitchen exclusion keeps from the cooks (ban-cooking fruit or the kitchen screen; plump
@@ -6036,8 +6238,8 @@ function T.finish(K, c, r)
   K.persist.touch('m.economy')
 end
 
-local FULL = {'guard', 'days', 'kitchen', 'appoint', 'food', 'fishz', 'watch', 'cmdq', 'engine', 'labor_fix', 'scan', 'ocheck',
-              'slaughter', 'plan', 'prune', 'tools', 'starve', 'forbid', 'jobs', 'jsite', 'jmat', 'jmake', 'jfree', 'jresume',
+local FULL = {'guard', 'days', 'kitchen', 'appoint', 'food', 'fishz', 'gather', 'watch', 'cmdq', 'engine', 'labor_fix',
+              'scan', 'ocheck', 'slaughter', 'plan', 'prune', 'tools', 'starve', 'forbid', 'jobs', 'jsite', 'jmat', 'jmake', 'jfree', 'jresume',
               'jcheck', 'jmove', 'pb', 'orders', 'wood', 'chop', 'crops',
               'farm', 'farmslots', 'imports', 'piles', 'status', 'idle', 'finish'}
 local RUSH = {'guard', 'scan', 'plan', 'tools', 'orders', 'wood', 'chop', 'farm', 'finish'}

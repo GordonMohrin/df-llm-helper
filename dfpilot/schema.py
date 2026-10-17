@@ -432,11 +432,13 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "KERN_FAULT": ("A", "kern", _d("module:s", "err:s n:i backoff_s:i")),
     "PERF_DEGRADED": ("A", "perf", _d(opt="tps:i base:i pct:i why:s")),
     # Run 11: food_low/famine add food (days), block (blocker ids: fishery, kitchen, cook, fish_zone, hunt, farms,
-    # butcher) and opts (the options, the blockers' first); BUG-030 rebuild policy: id bridge_rebuild names the bridge,
-    # its losses (n), those with building destroyers in sight (bd), rebuilds (reb), the items of the lost bridges and
-    # their material, the lever links queued after a loss, the destroyer races, the loss years, perimeter.stop_after
-    "DECISION_NEEDED": ("A", "any", _d("id:s", "q:s food:i block:sa opts:sa bridge:s n:i bd:i reb:i items:i mat:s "
-                                               "links:i races:sa years:ia stop:i")),
+    # butcher, gather) and opts (the options, the blockers' first); BUG-038: auto (what the kernel does itself:
+    # fishery = its fishery request is out or queued, gather = plant gatherers added); BUG-030 rebuild policy: id
+    # bridge_rebuild names the bridge, its losses (n), those with building destroyers in sight (bd), rebuilds (reb), the
+    # items of the lost bridges and their material, the lever links queued after a loss, the destroyer races, the loss
+    # years, perimeter.stop_after
+    "DECISION_NEEDED": ("A", "any", _d("id:s", "q:s food:i block:sa opts:sa auto:sa bridge:s n:i bd:i reb:i items:i "
+                                               "mat:s links:i races:sa years:ia stop:i")),
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
     # Run 11: mat = why economy cannot make a seal's missing pieces ('no material for door: no rock, no logs');
     # walled = the seal doors quickfort refused (no wall beside them) that the runner planned as walls ('x,y,z')

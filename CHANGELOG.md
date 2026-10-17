@@ -1,5 +1,58 @@
 # CHANGELOG dfpilot
 
+## A destroyed fishery is asked for again and placed; plant gatherers at food_low; the food decisions name what the kernel did (BUG-038; 2026-10-17; offline, live-untested)
+- **Why (Run 11, y451):** Kilrudrabed (site98, pop ~26 after several sieges), summer d40-45: DECISION_NEEDED food_low
+  (26 days) with the fishery as an option; the sieges had destroyed the fishery, 138 FISH_RAW lay there, food fell from
+  51 to 22 days; kern.log said `fishery: none built, 128 raw fish, fishers at work, food 51 days: request` again and
+  again, one PROJECT_REQUEST workshops why=fishery was seen (#18323) and follow placed nothing: the game session built
+  the fishery by hand. `inspect workload`: `unclaimed: GatherPlants 450` (46 unreachable), 4 of 26 idle, nobody
+  gathered. `bugs/BUG-038-no-fishery-request-and-idle-gather-jobs.md`.
+- **Causes (from the code):** the request clock was cleared whenever a fishery was counted as built (economy.lua:4653),
+  so a fishery built and destroyed again was asked for at once each time; `queued` held for any pending workshops
+  project for up to 56 days (4660); follow's placement dropped `add=Fishery` because the fort manifest (fortcore stage 1,
+  a workshops project of y433) still lists the destroyed fishery, leaving `workshops: nothing left to build` (cmd.py:873,
+  bp/rooms.py:202) and no project; the plant gatherers were staffed only in a starvation (FR-25 at 0 food days); the
+  GatherPlants jobs come from the runner's `dfllm-gather` zone (below 30 food days) and FR-25's marks.
+- **economy (fishery):** a fishery seen standing leaves the clock alone; `queued` only while a pending `workshops`
+  project whose doc lists a Fishery is not halted and moved (stage/pct) within `food.request_days`, at most 4 periods
+  (runner's `projects` and `bp.<id>`, read-only); kern.log names why it asks (`(first request)`, `(16 days since the last
+  request)`, `(project w2 has not moved for 14 days)`, `(project w2 build_lost)`).
+- **follow:** the fishery request is placed with `need=["Fishery"]` (send/emit_bp/place): a needed `add` type stays
+  although the manifest lists it; other placements keep the dedupe (never a second still).
+- **economy (gatherers):** task `gather` before the food decisions: below `food.pre_days` (30), PEACE/RECOVERY, not in
+  modern labormanager mode, with >= `gather.min_jobs` (10) unclaimed GatherPlants jobs in the tool details' daily job
+  census (tool_jobs counts GatherPlants; no scan of its own): the plant gathering detail gets members up to `gather.n`
+  (4), idle first, then HERBALISM; never a soldier, noble, mood, doctor, a key labor's only holder or a tool detail's
+  member; off again at `gather.off_days` (60) food days (only the ones economy added). WORK_DETAIL (B) why `food_low` /
+  `food_low over`, one kern.log line per change (`gather: food 13 days, 450 unclaimed GatherPlants jobs: Plant gatherers
+  +4 (...), 4 of 4`). **act.work_detail** `opts.select` [live-untested]: a detail on "nobody does this" becomes "only
+  selected do this" (the work details screen's toggle).
+- **Decisions:** food_low/famine: `d.auto` (`fishery`, `gather`), `q` `...; auto: fishery asked (138 raw fish), 4
+  gatherers added (450 gather jobs). Also: ...`, the line `...: no kitchen; auto: fishery, gather`; the fishery is no
+  blocker, option or cadence news while its request is out or queued; a gatherer step that cannot act is the blocker
+  `gather: no plant gathering detail` (or everybody-does-this, no free citizen).
+- Config: `economy.gather {n, min_jobs, off_days}` (config/baseline.json = economy.DEFAULTS). Contracts: DECISION_NEEDED
+  `auto` (schema, contract.lua, appendix), §5 `work_detail` `select`, §12 DECISION_NEEDED; RULES §7/§10 in place (300
+  lines), DESIGN fishing paragraph.
+- Tests: `tests/lua/test_economy_fishing.lua`, `tests/lua/test_economy_gather.lua` (new), `tests/lua/test_act_supply.lua`,
+  `tests/lua/test_economy.lua`, `tests/lua/test_economy_food.lua`, `tests/test_cli_wake.py`; each new test fails on d782dfa.
+- Not changed: the 46 unreachable GatherPlants jobs stay (nobody can take them; `inspect workload` reports them); the
+  runner's gather zone (runner.lua, out of scope here) reaches outside the walls around the fortcore anchor.
+- **Live check (Run 11/12):** after `git pull` and `dfhack-run dfllm reload`:
+  - kern.log `fishery: none built, N raw fish..., food D days: request (<why>)` at most once per 14 days while no
+    fishery stands, each followed by `dfllm events --type PROJECT_REQUEST --limit 0` one `why=fishery`; then cli.log
+    `follow auto:fishery ... placed`, a `workshops` project in `status` (prio 1). Send the 2nd (tick) column of two
+    consecutive request lines if they come closer than 16,800 ticks.
+  - With a fishery project pending: no request while it moves; `request (project <id> has not moved for 14 days)` when
+    the runner's queue holds it (BUG-037).
+  - At food_low with GatherPlants waiting: kern.log `gather: food D days, N unclaimed GatherPlants jobs: <detail> +4
+    (...)`, WORK_DETAIL why=food_low, `inspect workload` unclaimed GatherPlants falling; `gather: food D days (>= 60):
+    4 plant gatherers off <detail>` once food is back. A decision blocker `gather: no plant gathering detail` = DF 53
+    has no such detail by default: tell the player (one with the Plant gathering labor, "only selected").
+  - The next food_low/famine wake: `auto: fishery, gather` in the line, `d.auto` in `dfllm events --type DECISION_NEEDED`.
+  - Who made the 450 GatherPlants jobs: kern.log `food N days: gather zone ...` (runner) or `starvation: ... shrubs
+    marked` (FR-25): send the line.
+
 ## A hospital outside Kern+/Tiefe+ is a readiness blocker; in a fight the patients outside the alert burrow are reported (BUG-036; 2026-10-17; offline, live-untested)
 - **Why (Run 11 siege 9, y445):** 10 citizens lost, all in the BREACH; two cave dragons struck down 8, 7 of them
   patients in hospital beds (2 bled out at 115,77,144 and 124,91,144); the wounded soldiers (16 -> 6) lay there and were

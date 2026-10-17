@@ -12,7 +12,8 @@ not wake; the follower acts on two of them without the LLM:
   PROJECT_REQUEST tpl=tombs    -> snapshot purpose=sites -> best free site (cmd.place) -> bp.place
   PROJECT_REQUEST tpl=workshops -> the same (care asks when a strange mood finds no workshop); why=fishery (economy:
                                   raw fish and no fishery, Run 11) -> only the fishery (p.add Fishery, every moodable
-                                  type skipped) at prio 1
+                                  type skipped) at prio 1, also while the fort manifest still lists a destroyed one
+                                  (BUG-038: the kernel asks only while none stands)
   PROJECT_REQUEST tpl=farms why=food -> the same with p.plots = n (1-4) at prio 1 (economy asks when the farm
                                   tiles fall short of the citizens and food is low or falling; live L5)
   PROJECT_REQUEST tpl=bedrooms why=mood_rock|rock -> a bedrooms dig (p.n = n, 1-6) at prio 1: a strange mood waits
@@ -397,8 +398,10 @@ class Follower:
             elif t == "PROJECT_REQUEST" and d.get("tpl") == "workshops" and d.get("why") == "fishery":
                 # Run 11: 883-4532 raw fish lay uncleaned with no fishery and food fell to 5 days: the fishery alone
                 from .cmd import _moodable
+                # BUG-038: the fort manifest keeps a destroyed fishery (fortcore stage 1, the y433 project); the
+                # kernel saw none on the map, so the manifest's dedupe of `add` must not drop it
                 self._request_place("fishery", "workshops", {"add": "Fishery", "skip": ",".join(_moodable())}, "S1",
-                                    now, prio=1)
+                                    now, prio=1, need=["Fishery"])
             elif t == "PROJECT_REQUEST" and d.get("tpl") in AUTO_REQUESTS:
                 self._request_place(d["tpl"], d["tpl"], {}, "S1", now)   # live L1: a strange mood needs a shop
             elif t == "PLAN_EXHAUSTED" and d.get("phase") in AUTO_PHASES:
@@ -470,10 +473,11 @@ class Follower:
             self._synth("QUICKSAVE_FAILED", f"quicksave ({rec['by']}) wrote nothing: {rec['why']}", now)
 
     # ------------------------------------------------------------ auto actions (no LLM)
-    def _send(self, verb: str, args: dict, what: str | None, now: float, snap: dict | None = None) -> str:
+    def _send(self, verb: str, args: dict, what: str | None, now: float, snap: dict | None = None,
+              need: list | None = None) -> str:
         """Send without waiting; with `what`, the reply is read in _run_jobs (refusal/timeout -> AUTO_FAIL)."""
         from .cmd import send
-        cid, _ = send(self.dir, verb, args, by="follow", wait_s=0, snap=snap)
+        cid, _ = send(self.dir, verb, args, by="follow", wait_s=0, snap=snap, need=tuple(need or ()))
         if what:
             self.jobs.setdefault("replies", {})[cid] = {"verb": verb, "what": what, "since": now,
                                                         "tpl": args.get("tpl")}
@@ -503,7 +507,8 @@ class Follower:
         params = {"n": d["n"]} if isinstance(d.get("n"), int) and not isinstance(d.get("n"), bool) else {}
         self._request_place("tombs", "tombs", params, "S1", now)
 
-    def _request_place(self, key: str, tpl: str, params: dict, site: str, now: float, prio: int | None = None) -> None:
+    def _request_place(self, key: str, tpl: str, params: dict, site: str, now: float, prio: int | None = None,
+                       need: list | None = None) -> None:
         job = self.jobs.get(key)
         if job and now - job.get("since", 0) < (AUTO_TIMEOUT_S if not job.get("placed") else TOMBS_COOLDOWN_S):
             return
@@ -514,6 +519,8 @@ class Follower:
         self.jobs[key] = {"snap": cid, "since": now, "params": params, "tpl": tpl, "site": site}
         if prio is not None:
             self.jobs[key]["prio"] = prio
+        if need:
+            self.jobs[key]["need"] = list(need)
 
     def _request_seal(self, now: float) -> None:
         """Run 10: the audit named the bypass for months and nobody walled it. In PEACE, the walls of the newest audit
@@ -644,7 +651,8 @@ class Follower:
             if isinstance(job.get("prio"), int):
                 args["prio"] = job["prio"]
             prev = files.read_json(_placed(self.dir, tpl))
-            cid = self._send("bp.place", args, tpl, now, snap=snap)
+            need = job.get("need") if isinstance(job.get("need"), list) else None
+            cid = self._send("bp.place", args, tpl, now, snap=snap, need=need)
         except Exception as e:                 # noqa: BLE001 - WP3 bugs included: one AUTO_FAIL, job dropped
             self.jobs.pop(key, None)
             return self._fail(tpl, e, now)

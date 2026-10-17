@@ -159,6 +159,83 @@ T.test('Run 11: raw fish and no fishery -> PROJECT_REQUEST workshops why=fishery
   T.eq(requests(W2, 'fishery'), {}, 'a fishery stands')
 end)
 
+-- BUG-038 (Run 11, y451, pop 26): the fishery was destroyed in the sieges, 138 raw fish lay there, food fell from 51 to
+-- 22 days and no fishery came. A fishery that was seen restarts no request clock; 'queued' holds only while a pending
+-- workshops project builds a fishery and moves (runner's project list and its doc, read-only)
+local function gone(W, b)
+  local v = df.global.world.buildings.other.WORKSHOP_ANY
+  for i = #v - 1, 0, -1 do if v[i] == b then v:erase(i) end end
+end
+local function fish_logs(W)
+  local r = {}
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find('fishery: none built', 1, true) then r[#r + 1] = l.msg end end
+  return r
+end
+-- a runner project (persist 'projects' + its doc 'bp.<id>'); fishery: its manifest lists a Fishery
+local function project(W, id, fishery, o)
+  o = o or {}
+  local pd = W.K.persist.get('projects') or {v = 2, list = {}}
+  local P = {id = id, tpl = o.tpl or 'workshops', site = 'S1', class = 'infra', prio = 1, stage = 0, chunk = 0,
+             pct = o.pct or 0, blocked = o.blocked or '', since = 0, created = 0, done = o.done or 0}
+  pd.list[#pd.list + 1] = P
+  W.K.persist.set('projects', pd)
+  W.K.persist.set('bp.' .. id, {v = 2, tpl = P.tpl, manifest = {v = 2, workshops = {
+    {type = fishery and 'Fishery' or 'Craftsdwarfs', pos = {10, 10, 100}}}}})
+  return P
+end
+
+T.test('BUG-038: a fishery seen for a while restarts no request clock; one destroyed long after its request is asked at once', function()
+  local W = world{food = 2000, setup = function(W) for _ = 1, 10 do F.item(W, 'FISH_RAW', {}) end end}
+  days(W, 1)
+  T.eq(#requests(W, 'fishery'), 1)
+  local b = F.workshop(W, 'Fishery')
+  days(W, 2)
+  gone(W, b)                                       -- built from the request, destroyed in the next siege
+  days(W, 3)
+  T.eq(#requests(W, 'fishery'), 1, 'within request_days of the last request: no second one (d782dfa: asked at once)')
+  days(W, 10)
+  T.eq(#requests(W, 'fishery'), 2, 'the period is over')
+  b = F.workshop(W, 'Fishery')
+  days(W, 30)
+  T.eq(#requests(W, 'fishery'), 2, 'a fishery stands')
+  gone(W, b)
+  days(W, 1)
+  T.eq(#requests(W, 'fishery'), 3, 'destroyed a month after the last request: asked at once')
+  local l = fish_logs(W)
+  T.eq(#l, 3, 'one kern.log line per request')
+  T.ok(l[1]:find('(first request)', 1, true), l[1])
+  T.ok((math.tointeger(tonumber(l[3]:match('%((%d+) days since the last request%)'))) or 0) >= 30, l[3])
+end)
+
+T.test('BUG-038: queued only while a pending workshops project builds a fishery and moves; else asked again', function()
+  local W, ctl = world{food = 2000, setup = function(W) for _ = 1, 10 do F.item(W, 'FISH_RAW', {}) end end}
+  days(W, 1)
+  T.eq(#requests(W, 'fishery'), 1)
+  project(W, 'w1', false)                          -- the moodable shops: no fishery in it
+  ctl.pending = 1
+  days(W, 15)
+  T.eq(#requests(W, 'fishery'), 2, 'a workshops project without a fishery holds nothing (d782dfa: queued 56 days)')
+  local P = project(W, 'w2', true)                 -- follow placed the fishery
+  ctl.pending = 2
+  for _ = 1, 20 do P.pct = P.pct + 1; days(W, 1) end
+  T.eq(#requests(W, 'fishery'), 2, 'the fishery project moves: queued')
+  days(W, 13)
+  T.eq(#requests(W, 'fishery'), 2, 'still within request_days of its last move')
+  days(W, 2)
+  T.eq(#requests(W, 'fishery'), 3, 'the project has not moved for request_days (BUG-037: a queue that never starts it)')
+  local l = fish_logs(W)
+  T.ok((math.tointeger(tonumber(l[2]:match('%((%d+) days since the last request%)'))) or 0) >= 14, l[2])
+  T.ok(l[3]:find('project w2 has not moved for 14 days', 1, true), l[3])
+  P.blocked, P.pct = 'build_lost', P.pct + 1
+  days(W, 15)
+  T.eq(#requests(W, 'fishery'), 4, 'a halted project holds nothing')
+  T.ok(fish_logs(W)[4]:find('project w2 build_lost', 1, true), fish_logs(W)[4])
+  local W2 = world{food = 2000, setup = function(W2) for _ = 1, 10 do F.item(W2, 'FISH_RAW', {}) end end}
+  local P2 = project(W2, 'w9', true)               -- the player placed one before any request
+  for _ = 1, 30 do P2.pct = P2.pct + 1; days(W2, 1) end
+  T.eq(requests(W2, 'fishery'), {}, 'a moving fishery project of the player: no request')
+end)
+
 -- the citizens stand at 50,50,100. Nearest water: a cavern lake, ice, a river whose bank lies on another walk group,
 -- then an open-sky river with a bank; farther a roofed pool one level down under open space
 local function waters()
@@ -220,15 +297,19 @@ T.test('Run 11: no safe fishing water (frozen, cavern) -> no zone; food_low name
   days(W, 8)
   T.eq(#decisions(W, 'food_low'), 1)
   for _ = 1, 10 do F.item(W, 'FISH_RAW', {}) end
-  days(W, 1)
-  T.eq(#decisions(W, 'food_low'), 1, 'news, but the wall clock waits 10 minutes')
   W.ms = W.ms + 600 * 1000
+  days(W, 1)
+  T.eq(#decisions(W, 'food_low'), 1, 'BUG-038: raw fish and no fishery is asked by itself (PROJECT_REQUEST): no news')
+  T.eq(#requests(W, 'fishery'), 1)
+  W.set_census('a', {n = 3})                                 -- tame animals and no butcher's shop: a new blocker
   days(W, 1)
   d = decisions(W, 'food_low')
   T.eq(#d, 2)
-  T.eq(d[2].d.block[1], 'fishery')
-  T.ok(d[2].d.q:find('build a fishery (10 raw fish, asked)', 1, true), d[2].d.q)
-  T.ok(d[2].msg:find('food low: 20 food days (famine below 10): build a fishery', 1, true), d[2].msg)
+  T.eq(d[2].d.auto, {'fishery'})
+  T.ok(not F.has(d[2].d.block, 'fishery') and F.has(d[2].d.block, 'butcher'), table.concat(d[2].d.block, ','))
+  T.ok(not F.has(d[2].d.opts, 'fishery'), table.concat(d[2].d.opts, ','))
+  T.ok(d[2].d.q:find('; auto: fishery asked (10 raw fish). Also: ', 1, true), d[2].d.q)
+  T.ok(d[2].msg:find('food low: 20 food days (famine below 10): no kitchen; auto: fishery', 1, true), d[2].msg)
   -- the winter ends: the next search (scan_days) finds the river thawed
   ctl.water = {{60, 50, 100, 7}}
   days(W, 7)

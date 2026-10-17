@@ -183,7 +183,8 @@
   "starve": {"days": 0, "hunger": 50000, "plants_max": 200, "plants_per_slice": 400, "report_days": 2, "gatherers": 4,
              "planters": 4, "plants": ["GRASS_WHEAT_CAVE", "MUSHROOM_HELMET_PLUMP", "POD_SWEET", "BUSH_QUARRY",
                                        "MUSHROOM_CUP_DIMPLE"],
-             "details": {"planters": ["Planters"], "gatherers": ["Plant gatherers", "Gatherers", "Herbalists"]}}
+             "details": {"planters": ["Planters"], "gatherers": ["Plant gatherers", "Gatherers", "Herbalists"]}},
+  "gather": {"n": 4, "min_jobs": 10, "off_days": 60}
  },
  "care": {
   "units_per_slice": 50,

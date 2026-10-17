@@ -445,6 +445,45 @@ def test_follow_fishery_request_places_only_a_fishery_at_prio1(save, monkeypatch
     assert out == []                                  # class B: no wake line
 
 
+def test_follow_fishery_request_places_it_although_the_manifest_lists_a_destroyed_one(save, monkeypatch):
+    """BUG-038 (Run 11, y451): the fishery was destroyed in the sieges, but the fort manifest (fortcore stage 1, the
+    workshops project of y433) still lists one: follow's placement dropped `add=Fishery` as already there, nothing was
+    left to build and no fishery came. The kernel asks only while no fishery stands, so follow places it anyway; the
+    dedupe of `add` (never a second still) stays for every other placement."""
+    calls = install_fake_bp(monkeypatch)
+    from dfpilot import cmd
+    from dfpilot.bp.rooms import MOODABLE_TYPES
+    files.write_json_atomic(save / "bp" / "f433.json", {
+        "v": 2, "id": "f433", "tpl": "workshops", "site": "S1", "class": "infra", "params": {}, "anchor": [60, 40, 120],
+        "rot": 0, "stages": [], "materials": {},
+        "manifest": {"v": 2, "workshops": [{"type": "Fishery", "pos": [61, 41, 120]}]}})
+    assert cmd.workshops_missing(save, ["Fishery"]) == []          # the manifest still has it
+    c = Clock()
+    f, out = F(c)
+    f.poll()
+    append_events(save, [ev(18323, "PROJECT_REQUEST", "workshops: a fishery for 138 raw fish (food 22 days)",
+                            {"tpl": "workshops", "n": 1, "why": "fishery"})])
+    f.poll()
+    (snap_cmd,) = inbox_docs(save)
+    for p in (save / "inbox").glob("*.json"):
+        p.unlink()
+    sid = snap_cmd["id"]
+    snap = json.loads((save / "snap" / "c201.json").read_text("utf-8"))
+    snap["id"] = sid
+    files.write_json_atomic(save / "snap" / f"{sid}.json", snap)
+    append_events(save, [ev(18324, "SNAPSHOT_READY", "", {"id": sid, "path": f"snap/{sid}.json", "purpose": "sites"})])
+    f.poll()
+    (place,) = inbox_docs(save)
+    assert place["verb"] == "bp.place"
+    assert calls["emit"] and calls["emit"][-1][1].get("add") == "Fishery", calls["emit"]
+    assert calls["emit"][-1][1].get("skip") == ",".join(MOODABLE_TYPES)
+    assert [ln for ln in out if "AUTO_FAIL" in ln] == []
+    # a hand placement of the same params still drops a shop the manifest has (live L6: never a second still)
+    doc = cmd.place(save, "workshops", {"add": "Fishery,Still", "skip": ",".join(MOODABLE_TYPES)}, "S1", "x1",
+                    snap=snap)
+    assert calls["emit"][-1][1].get("add") == "Still", (doc, calls["emit"][-1])
+
+
 def test_follow_plan_exhausted_p0_autostarts_first_deliverable(save, monkeypatch):
     """Live L0/L1: with no plan the fort idled a year and a dwarf starved. PLAN_EXHAUSTED in P0/P1 places the
     phase's first proj deliverable without a project at once (no LLM); the wake still goes out."""

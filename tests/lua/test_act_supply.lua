@@ -182,6 +182,31 @@ T.test('work_detail: joining Miners takes off a stray HUNT/CUTWOOD labor, a Hunt
   T.eq(u8.status.labors[HUNT], false)
 end)
 
+-- BUG-038 (Run 11): the plant gatherers at food_low; a detail on "nobody does this" grants nothing, so opts.select sets
+-- it to "only selected" (the work details screen's toggle); without opts.select or on another mode nothing changes
+T.test('work_detail opts.select: a "nobody does this" detail becomes "only selected"; other modes stay', function()
+  local W = H.world{tag = 'wdsel', units = {{id = 7, citizen = true}, {id = 8, citizen = true}}}
+  local HERB = 2
+  local function wd(name, ids, mode)
+    local al = setmetatable({[HERB] = true}, {__len = function() return 3 end})
+    return {name = name, assigned_units = kmock.vec(ids), allowed_labors = al, flags = {mode = mode}}
+  end
+  df.work_detail_mode = {EverybodyDoesThis = 1, NobodyDoesThis = 2, OnlySelectedDoesThis = 3}
+  df.unit_labor = {HERBALIST = HERB}
+  local g = wd('Plant gatherers', {}, 2)
+  df.global.plotinfo.labor_info = {work_details = kmock.vec{g}}
+  W.unit(7).status = {labors = {}}
+  W.unit(8).status = {labors = {}}
+  local env = mk('economy')
+  T.eq({env.api.work_detail('Plant gatherers', 7, true)}, {true, 'added'})
+  T.eq(g.flags.mode, 2, 'no opts.select: the mode stays')
+  T.eq({env.api.work_detail('Plant gatherers', 8, true, {select = true})}, {true, 'added; only selected do this now'})
+  T.eq({g.flags.mode, W.unit(8).status.labors[HERB]}, {3, true})
+  g.flags.mode = 1
+  T.eq({env.api.work_detail('Plant gatherers', 7, true, {select = true})}, {true, 'already'})
+  T.eq(g.flags.mode, 1, 'everybody does this stays')
+end)
+
 -- Run 11 (Kilrudrabed, no gem vein): the zones screen's Sand zone, one tile, through quickfort zone mode (economy only)
 T.test('sand_zone: a 1x1 dfllm-sand zone (quickfort zone key s) at the position; economy only', function()
   local W = H.world{tag = 'sz'}
