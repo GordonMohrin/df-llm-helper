@@ -764,7 +764,8 @@ def _snap_file(save_dir: Path, sid: str, events: bool = False) -> tuple[str, dic
 def run_audit(args, save_dir: Path, sleep: Callable[[float], None] = time.sleep,
               clock: Callable[[], float] = time.monotonic) -> int:
     """`dfllm audit [--snap ID]`: what follow does on an audit snapshot, once and now. Without --snap it requests a
-    fresh snapshot (purpose audit, the kernel's default box: manifest geometry + margin) and waits for it."""
+    fresh snapshot (purpose audit, the kernel's default audit box: the fort's pieces + a margin, explore shafts as
+    column parts, BUG-043) and waits for it."""
     from .cmd import EXIT_BAD, EXIT_NOREPLY, EXIT_OK, EXIT_REFUSED, fmt_reply, send
     save_dir = Path(save_dir)
     sid = args.snap

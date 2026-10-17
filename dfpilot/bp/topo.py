@@ -1,7 +1,8 @@
 """Worst-case topology audit on snapshots (DESIGN §5.4 R1; CONTRACTS §9.10 legend, §13 `audit` verb).
 
 Worst case: every bridge footprint is passable (lowered, `=` and `H`), doors and hatches are open (`+`),
-hidden tiles (`?`) are impassable unknown. Movement model (DF-like, 8-connected, no corner rule, so
+hidden tiles (`?`) are impassable unknown; a tile a union export did not read (` `, BUG-043) is the outside: a walkable
+tile beside it starts attackers like the bbox border. Movement model (DF-like, 8-connected, no corner rule, so
 diagonal gaps leak):
 - walkable: `. < > X r v + = H ^ w`, and `_` resting on a solid tile (`# S C F`: the top of a wall);
 - stairs: `<`/`X` below `>`/`X`; a `+` counts as either (a hatch may cover a stair);
@@ -15,6 +16,7 @@ from __future__ import annotations
 from collections import deque
 
 PASS = frozenset(".<>Xrv+=H^w")
+NOSCAN = " "                        # BUG-043: a tile no part of a union export covers (CONTRACTS §9.10)
 SOLID = frozenset("#SCF")
 CLIMB = frozenset("#FT")
 UPC, DNC = frozenset("<X+"), frozenset(">X+")
@@ -224,7 +226,9 @@ def fort_boxes(m: dict) -> list:
 def sources(g: Graph, manifest: dict) -> list[int]:
     """Attacker sources: the manifest `edge` tiles plus every walkable or climbable bbox-border tile outside
     the fort's own geometry. `edge` alone would hide surface regions it cannot reach (the far bank of a
-    river, a cliff face); leaving out the fort keeps a tight snapshot bbox from starting attackers inside."""
+    river, a cliff face); leaving out the fort keeps a tight snapshot bbox from starting attackers inside.
+    BUG-043: a union export (`parts`) writes NOSCAN for the tiles no part covers; a walkable or climbable tile beside
+    one on its level is a border tile too (beyond it lies what the export did not read, as beyond the bbox)."""
     src = {i for i in (g.idx(p) for p in manifest.get("edge", [])) if g.node(i)}
     inner = g.mask(fort_boxes(manifest))
     W, H = g.W, g.H
@@ -235,6 +239,13 @@ def sources(g: Graph, manifest: dict) -> list[int]:
             i = z * g.WH + r
             if (g.walk[i] or g.cling[i]) and not inner[i]:
                 src.add(i)
+    if NOSCAN in g.t:
+        t = g.t
+        for i in range(g.N):
+            if (g.walk[i] or g.cling[i]) and not inner[i] and i not in src:
+                x, y = i % W, (i // W) % H
+                if any(0 <= x + dx < W and 0 <= y + dy < H and t[i + dy * W + dx] == NOSCAN for dx, dy in N8):
+                    src.add(i)
     return sorted(src)
 
 

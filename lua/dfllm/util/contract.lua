@@ -313,8 +313,8 @@ C.REPORTS = {
   AMBUSH_THIEF = 'threat', AMBUSH_SNATCHER = 'threat',
 }
 
--- snapshot tile legend (§9.10): one ASCII char per tile
-C.SNAP_LEGEND = '?_.#SCF<>Xrv+=H^Bw~%T'
+-- snapshot tile legend (§9.10): one ASCII char per tile; BUG-043: ' ' = not exported (outside every part of a union)
+C.SNAP_LEGEND = '?_.#SCF<>Xrv+=H^Bw~%T '
 
 ---------------------------------------------------------------- state.json spec (§9.3)
 -- Same tree as schema.STATE (tests/test_schema.py compares both and runs shared vectors).
@@ -340,7 +340,9 @@ C.STATE_SPEC = obj({
   save = str(120), phase = str(nil, nil, 'phase'),
   pop = obj(nil, {cit = NAT, adults = NAT, soldiers = NAT, cap = NAT, gate_cap = NAT}),
   ready = obj({lvl = int(0, 3), worn = PCT, cv = NAT, drill_age = int(-1),
-               audit = obj({ok = FLAG, age = int(-1), min_traps = NAT}), fail = arr(str(24), 0, 8)},
+               -- BUG-043: why readiness' last audit request was refused; what the last audit's snapshot covered
+               audit = obj({ok = FLAG, age = int(-1), min_traps = NAT}, {why = str(80), cov = str(40)}),
+               fail = arr(str(24), 0, 8)},
               {open = int(-1), ents = arr(str(24), 0, 3), dhold = str(24),     -- FR-65
                route = str(60)}),          -- the last audit's first attacker-route finding (bypass, refuge)
   -- Run 10: ore/bars/leather stock, the metal route and the classes moods missed (plan propose/check supply goals)

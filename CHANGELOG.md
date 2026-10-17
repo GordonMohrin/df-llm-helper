@@ -1,5 +1,86 @@
 # CHANGELOG dfpilot
 
+## The audit and sites snapshots fit again: one box of the fort's pieces, explore shafts as narrow columns, margin steps, a cap of 400,000 tiles and a refusal that names what stretches the box (BUG-043, 2026-10-17; offline, live-untested)
+- **Why (Run 11, y479):** Kilrudrabed site98, y479 winter d79, kernel 2eea070: `dfllm audit` -> `audit: snapshot refused:
+  bbox has 252108 tiles > 250000`, `bp sites <tpl> --fresh` the same; kern.log `readiness: audit snapshot not exported:
+  bbox has 308132 tiles > 250000`, soon after 370414. No fresh audit (readiness `audit_old`/`audit_fail`, the seal reach
+  audit stale), no fresh sites (`bp sites` without `--fresh` ranks on an old snapshot). The fort's 260 bp files have
+  anchors in x 59-189, y 37-136, z 129-146; new explores c1a14b1a6cc8ca4801 (153,52,139) and c1a14b1a7266974401
+  (89,125,142) were digging down.
+- **Cause (bugs/BUG-043):** two single-box builders: snapshot's default (`dfllm audit`, `bp sites --fresh`: the manifest
+  geometry + margin 16,16,2) and readiness' own (the manifest + PAD 8,16,1, widened by every running project's whole
+  planned box + PAD). Every level of a box is a whole x-y plane of the fort: 252,108 = 149 x 94 x 18, 308,132 = 149 x
+  94 x 22, 370,414 = 149 x 113 x 22 (x 43-191: the fort reaches the 192-wide map's east edge). A 12-level explore enters
+  readiness' box with all its levels at once (z 127 + PAD = 126, 22 levels instead of 18); the y growth 94 -> 113 is
+  exactly the new explore at (89,125,142) (its south arm ends at y 132, + 16 = 148). Beside it: `dfllm audit`'s box left
+  out the running projects readiness put in (live L2), finished seals (the entrances) and explores (the shafts) were in
+  no box once done.
+- **snapshot (one composition for every default box):** the fort's pieces = the manifest geometry (bridges and levers,
+  zones, killboxes, rooms, stations, `edge`, stairs, refuge, pit, depot), for an audit also `runner.boxes()`. The main
+  box = their bounding box + the first of `margin_steps` (16,16,2 -> 8,8,1 -> 4,4,1 -> 0,0,0) whose export fits
+  `max_tiles`; an audit's explore is a **column part** of its own (its box + `col_margin` 2,2,1; `parts_max` 24). A union
+  export reads only its parts (the cap counts those tiles; a tile not read costs a char, not a read, in the 1000-tile
+  slice), writes ` ` (not exported) for the rest of its bounding box (`grid_max` 1,500,000) and `parts`/`margin` in the
+  head; traps and marks only on exported tiles. A shrunk margin: kern.log once per change `snapshot: the audit box is
+  over 400000 tiles at margin 16,16,2: margin 8,8,1 used (N tiles, x .. y .. z ..[, N shaft columns])`.
+- **The cap:** `max_tiles` 250,000 -> 400,000 (config/baseline.json `snapshot.max_tiles`, 10,000-1,000,000, `python -m
+  dfpilot.lint --config`; read at boot). Still 1000 tiles a frame (`slice`), so the cost of a frame is unchanged: a full
+  400,000-tile export is 400 slices; at one slice per cadence (250 ms, the slowest a paced kernel export runs) that is
+  100 s, a boosted inbox export (`dfllm audit`, `bp sites --fresh`; BUG-033) gets a slice every frame within its 12 ms/s
+  and took seconds live at y439. `dfllm audit` waits 60 s (`--timeout`); the Python audit grows about linearly
+  (offline: 0.2 s for 120,000 tiles, 1 s for a 150 x 113 x 22 fort box of 372,900).
+- **The refusal:** `bbox 117x62x14[ + N shaft columns] = 101556 tiles > 100000 at margin 0,0,0 (x 59-175 y 52-113 z
+  132-145; stretched most by room cistern118_88_132r0 at z132: 29016 tiles less without it); way out: [bp.cancel <proj>
+  if it can go, or ]raise snapshot.max_tiles in config/baseline.json (<= 1000000), dfhack-run dfllm reload` (the face
+  of the main box that costs most when moved in to the next piece; <= 300 bytes); an explicit box: `bbox WxHxD = N
+  tiles > CAP (x .. y .. z ..); way out: a smaller bbox, or none (the fort's own box)`.
+- **Coverage:** nothing is left out of a default box (the margin only shrinks). An explicit audit box names the pieces
+  it leaves out (`queued snapshot ... (...; leaves out 1 fort piece: explore x1)`, SNAPSHOT_READY `out`/`first`), and
+  readiness fails an audit of it (`coverage: N pieces left out (...)` first in its fails: `audit_fail`). The reply data
+  `{id, tiles, margin, cols, out, first}`; SNAPSHOT_READY `margin` (when it shrank) and `cols`.
+- **bp.topo:** a walkable tile beside a ` ` tile on its level is an attacker source, like the bbox border (what lies
+  there was not read); `bp.sites` never counts ` ` as rock.
+- **readiness:** asks `{purpose = 'audit', by = 'readiness'}` once the manifest has geometry (no box of its own: the
+  same box `dfllm audit` gets; `M.audit_bbox`/`M.PAD` gone). A refused request stands in state `ready.audit.why` until
+  its next request is accepted or an audit is stored; `ready.audit.cov` = what the last audit covered (`out 2: explore
+  ...`, `margin 8,8,1`, `2 shafts`). status/brief: `| audit snapshot refused: bbox ... | next: the refusal's way out,
+  then dfllm audit` in the SIEGE UNREADY line, `audit ok 3d (margin 8,8,1, 2 shafts)` in the readiness line.
+- **runner:** `M.boxes()` = `{b, id, tpl}` per box (`bboxes()` its boxes); `KEEP_BOX` + `seal`, `plug`, `repair` (they
+  close the ways in) and `explore` (m.runner `kk`: a kept shaft stays a column part after the project list forgets it; `kept_in`, BUG-040's
+  cistern lookup, answers with rooms only).
+- **Sites (task d):** the sites box is the main box of the manifest alone (no project boxes, no shafts; live 252,108
+  tiles: it fits at 16,16,2 now). No narrower box per template from Python: the newest sites snapshot is shared by every
+  template, seal's openings, `plan propose/check` and follow's placements, and a room needs the whole Z4.
+- **Not done (judgment):** finished seals/explores that left the project list before this fix are not recovered (every
+  bp file decoded once: 260 in Run 11, BUG-033's cost lesson); the runner's daily shaft check still watches their
+  shafts (CAVERN_PLUG, readiness `caverns`). No new R0 token (`audit`/`audit_old` with `ready.audit.why`; a partial
+  audit is `audit_fail`).
+- Contracts: CONTRACTS §7 `snapshot.export`, `runner.boxes`; §9.3 `ready.audit.why/cov`; §9.10 `parts`, `margin`,
+  legend ` `; §9.17 `snapshot.max_tiles`; §12 SNAPSHOT_READY; §13 `snapshot` verb; tracker row SB; appendix
+  regenerated; schema.py/contract.lua (legend, state); fairplay `SNAPSHOT_LIM`; RULES §6 `snapshot`, §8 `audit`;
+  DESIGN §5.4 `audit`; STATUS §7.
+- Tests (each new one fails on 2eea070): `tests/lua/test_snapshot_box.lua` (new: the live 252,108-tile box, the margin
+  steps and their log, the refusal text, the audit box with the runner's projects and an explore column, the union
+  file, an explicit box's coverage), `tests/lua/test_readiness.lua` (the request without a box; `ready.audit.why`; a
+  partial audit fails, `ready.audit.cov`), `tests/lua/test_runner.lua` (`boxes`, the kept seal and explore),
+  `tests/test_snapshot_box.py` (new: union snapshot and state schema, the status texts, config validation and the Lua
+  limits), `tests/test_snapshot_files.py` (the union file on the real kernel: parts, ` ` rows, schema, bp.topo; the
+  reply data), `tests/bp/test_bp_topo.py` (an unexported tile is the outside).
+- **Live check (Run 11):** after `git pull`, `dfhack-run dfllm reload` and a restart of `dfllm follow`:
+  - `dfllm audit`: no refusal; the reply `queued snapshot aud... (next[; margin 8,8,1][, N shaft columns])`, then
+    `audit of snapshot ...`; `dfllm status`: no `audit snapshot refused`, `audit_old` gone once stored;
+  - kern.log within a game month: no `readiness: audit snapshot not exported`; `snapshot: <id> (audit, N tiles, by
+    readiness) written T after the request (T scanning)` with N well below 370,414 (the explores as columns); a
+    `snapshot: the audit box is over ... margin ... used` line only if it shrank; `dfllm doctor`: no starving queue;
+  - `dfllm bp sites refuge_drink n=11 --fresh` (or any template): sites, no refusal;
+  - the newest audit file `<save>/snap/<id>.json`: `parts` (main box + one per explore), `margin`, rows with ` `
+    beside the shaft columns; `dfllm events --type SNAPSHOT_READY` shows `cols`;
+  - the audit's fails: no new `bypass` at a shaft column's edge (a tunnel there means the shaft broke into something:
+    `inspect what=entrances`, CAVERN_PLUG); if one appears, note the tile for the repo;
+  - if it ever refuses again: the text names the box, its axes and the stretching piece; read `<save>/manifest.json`
+    for that piece; then raise `snapshot.max_tiles` (config/baseline.json, `python -m dfpilot.lint --config`,
+    `dfhack-run dfllm reload`) or cancel the named project; tell the player.
+
 ## The refuge gets its own drink store; refuge_dry names it; plan propose drafts it, plan check warns (FR-69 refuge drink store, 2026-10-17; offline, live-untested)
 - **Why (Run 11, y477):** Kilrudrabed site98, y477 spring d77, kernel b23b5d4, `inspect refuge`: Tiefe+ drink 0, wells 1
   (dry), 59 beds, 212 tiles, inside 0, food 1054 (a stair/shaft refuge, z136-138); Kern+ drink 919, 15 wells; Innen+ drink

@@ -33,7 +33,7 @@ def test_snapshot_lua_lints_clean():
 def test_snap_files_validate_and_events(run):
     evs = files.tail_events(run, 0)
     ready = {e["d"]["id"]: e for e in evs if e["type"] == "SNAPSHOT_READY"}
-    assert set(ready) == {"c300", "c301"}
+    assert set(ready) == {"c300", "c301", "c303"}
     for e in evs:
         assert schema.validate("event", e) == [], e
     for sid, e in ready.items():
@@ -46,13 +46,15 @@ def test_snap_files_validate_and_events(run):
     assert audit["rows"]["z11"][0] == "?" * 11
     assert audit["bridges"] == {"O1": "down"}
     assert audit["traps"] == [[5, 4, 10, "W", 2, 1]]
-    assert files.latest_snapshot(run, "audit")["id"] == "c300"
+    assert files.latest_snapshot(run, "audit")["id"] == "c303"              # the newest (BUG-043: the union)
 
 
 @needs_lua
 def test_snapshot_verb_replies(run):
     rep = {p.stem: json.loads(p.read_text(encoding="utf-8")) for p in (run / "outbox").glob("*.json")}
-    assert rep["c300"]["ok"] is True and rep["c300"]["data"] == {"id": "c300"}
+    # BUG-043: the reply data says the box's tiles and, for an explicit audit box, the fort pieces it leaves out
+    assert rep["c300"]["ok"] is True and rep["c300"]["data"] == {"id": "c300", "tiles": 198, "out": 1,
+                                                                 "first": "explore x1"}
     assert rep["c301"]["ok"] is True
     assert rep["c302"]["ok"] is False
     for r in rep.values():
@@ -69,3 +71,26 @@ def test_topo_audit_runs_on_the_exported_snapshot(run):
     assert set(res) >= {"ok", "fails", "min_traps", "bypass", "refuge_sep", "civ_sep", "caverns"}
     args = dict(res, snap=snap["id"])
     assert schema.validate_args("audit", args) == []
+
+
+@needs_lua
+def test_bug043_union_audit_file_on_the_real_kernel(run):
+    """BUG-043 (Run 11 y479: readiness' audit box 370,414 tiles > 250,000, mostly whole fort planes for explore shafts):
+    the default audit box is the fort box plus a column part per explore shaft; the file lists its parts, the tiles
+    outside every part are ' ' (not exported); it validates and bp.topo.audit runs on it."""
+    from dfpilot.bp import topo
+    evs = {e["d"]["id"]: e for e in files.tail_events(run, 0) if e["type"] == "SNAPSHOT_READY"}
+    d = evs["c303"]["d"]
+    assert d["cols"] == 1 and "out" not in d and "margin" not in d             # the first margin step fitted
+    assert evs["c300"]["d"]["out"] == 1 and evs["c300"]["d"]["first"] == "explore x1"
+    snap = files.read_snapshot(run / d["path"])
+    assert snap is not None, schema.validate("snapshot", files.read_json(run / d["path"]))
+    assert snap["bbox"] == [0, 0, 3, 25, 23, 12]
+    assert snap["parts"] == [[0, 0, 8, 25, 23, 12], [2, 3, 3, 8, 9, 10]] and snap["margin"] == [16, 16, 2]
+    assert snap["rows"]["z5"][6] == "  ??#X#??" + " " * 17          # the shaft's column, nothing else on z5
+    assert snap["rows"]["z5"][0] == " " * 26
+    assert snap["rows"]["z10"][6][:11] == "##....+...#"                  # the fort level in full
+    man = {"v": 2, "bridges": {"O1": {"role": "outer", "fp": [4, 2, 10, 6, 2, 10], "levers": [[8, 5, 10], [9, 5, 10]]}},
+           "zones": {"Z3": [[2, 5, 10, 9, 7, 10]]}, "edge": [[5, 0, 10]]}
+    res = topo.audit(snap, man)
+    assert schema.validate_args("audit", dict(res, snap=snap["id"])) == []

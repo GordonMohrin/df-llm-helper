@@ -1168,9 +1168,10 @@ passed; `lint lua/dfllm` and `lint lua` 0 findings; config ok.
   - `dig` is the lower-case `df.tile_dig_designation` name, `smooth`, `engrave`, `track` or `''`;
   - `bld` is the building type (Door, Hatch, Bridge, Trap, Well…), `passable`, `impassable` or `''`.
 - §7 `snapshot.export`:
-  - without `bbox` the box is the manifest geometry plus a 16/16/2 margin;
+  - without `bbox` the box is the manifest geometry plus a 16/16/2 margin (BUG-043: the fort's pieces, an audit's
+    explore shafts as column parts, the margin shrunk stepwise over the cap; CONTRACTS §7);
   - without a manifest it is 96×96 around the map centre, from 8 levels below the surface to 3 above;
-  - at most 250,000 tiles; 4 exports may queue.
+  - at most 250,000 tiles (BUG-043: 400,000, config `snapshot.max_tiles`); 4 exports may queue.
 - §7: `military.kill({})` means withdraw, and `military.posture(P, force)`.
 - §9.9: `baseline` passes on `marker.baseline == 1` or `baseline.done()`.
 - §5 `act.quickfort` with `command='orders'`: creates manager orders; stats carry integer keys holding the order quantities.
