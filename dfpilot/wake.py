@@ -191,7 +191,16 @@ def next_hint(etype: str, e: dict) -> str:
         return REFUGE_DRY_HINT
     if etype == "DECISION_NEEDED" and d.get("id") == "bridge_rebuild":
         return rebuild_hint(d)
+    if etype == "PROJECT_BLOCKED" and d.get("park") is not None and d.get("proj"):
+        return park_hint(d)
     return NEXT.get(etype, "dfllm brief")
+
+
+def park_hint(d: dict) -> str:
+    """BUG-037: a project blocked for good was parked (no slot, no pause, the keepers free); the kernel never cancels it.
+    Cancelling it without undo keeps what it built (an explore's shaft stays watched)."""
+    return (f"tell Gordon; once he agrees: dfllm cmd bp.cancel '{{\"proj\":\"{d['proj']}\"}}' (no undo), then place "
+            "it again elsewhere if still wanted")
 
 
 def rebuild_hint(d: dict) -> str:

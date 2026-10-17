@@ -375,7 +375,27 @@ def line_sched(ctx: Ctx) -> str:
                                      f"ends at {rb['hi']}" if rb.get("hi") else "") if x)
         out.append(f"rebuild: pop {rb.get('pop')} < {rb.get('lo')}, only seal/tombs/food/beds" + (f" ({tail})" if tail
                                                                                                   else ""))
+    out += sched_queue(sc)
     return _join(out)
+
+
+def sched_queue(sc: dict) -> list[str]:
+    """BUG-037 (Run 11 y449: six projects 'queued' at 0 % for months): who holds the runner's slots while projects wait
+    ('queued: 6 behind c1a148696a3d6da701 seal, depot7 depot 9 d no progress, ...'), a runner whose runs stopped ('runner:
+    no run ended for 30 d (task 2/9 work c1a1..., 900 slices): dfllm doctor') and the parked projects."""
+    out = []
+    run = sc.get("run")
+    if isinstance(run, dict):
+        at = (f" (task {run.get('i')}/{run.get('n')} {run.get('task', '?')}, {run.get('sl', 0)} slices)"
+              if run.get("task") else "")
+        out.append(f"runner: no run ended for {run.get('d')} d{at}: dfllm doctor, inspect modules")
+    q = sc.get("q")
+    if isinstance(q, dict) and q.get("n"):
+        who = ", ".join(f"{i} {t}" + (f" {d} d no progress" if d >= 2 else "") for i, t, d in q.get("by") or [])
+        out.append(f"queued: {q['n']} behind {who or '?'}")
+    if sc.get("pk"):
+        out.append(f"{sc['pk']} parked (blocked for good: bp.cancel, PROJECT_BLOCKED)")
+    return out
 
 
 def line_kern(ctx: Ctx) -> str:

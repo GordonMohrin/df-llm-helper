@@ -56,7 +56,8 @@ C.EVENTS = {
   BREACH = {cls = 'A', by = 'siege'}, DEATHS_3PLUS = {cls = 'A', by = 'care'},
   DRILL_FAIL = {cls = 'A', by = 'drill'}, KERN_FAULT = {cls = 'A', by = 'kern'},
   PERF_DEGRADED = {cls = 'A', by = 'perf'}, DECISION_NEEDED = {cls = 'A', by = 'any'},
-  -- PROJECT_BLOCKED (and PROJECT_DONE) d.walled, Run 11: the seal doors quickfort refused, planned as walls ('x,y,z')
+  -- PROJECT_BLOCKED (and PROJECT_DONE) d.walled, Run 11: the seal doors quickfort refused, planned as walls ('x,y,z');
+  -- BUG-037 d.park: the days a project blocked for good stood before it was parked (msg: its bp.cancel command)
   PLAN_EXHAUSTED = {cls = 'A', by = 'runner'}, PROJECT_BLOCKED = {cls = 'A', by = 'runner'},
   YEAR_REVIEW = {cls = 'A', by = 'kern'},
   -- FR-04/26 ghosts and unburied citizens, FR-34 a hospital without accepted water, FR-44 a strange mood at risk
@@ -342,7 +343,13 @@ C.STATE_SPEC = obj({
   -- Run 11 siege 8: seal first (the leading open seal or plug: pieces open, projects it pauses, other open seals,
   -- stuck 1 = it built nothing for stuck_days, days) and the rebuild policy (citizens, its bounds, projects paused)
   sched = obj(nil, {seal = obj({proj = str(nil, nil, 'id'), n = NAT, paused = NAT}, {more = NAT, stuck = FLAG, days = NAT}),
-                    rb = obj({pop = NAT, lo = NAT, paused = NAT}, {hi = NAT})}),
+                    rb = obj({pop = NAT, lo = NAT, paused = NAT}, {hi = NAT}),
+                    -- BUG-037: projects waiting for a slot and the slot holders (id, template, days without own
+                    -- progress); no run ended for d days (the run in hand: task i of n, its label, slices, age in days);
+                    -- parked projects (blocked for good past runner queue.park_days)
+                    q = obj({n = NAT, by = arr({t = 'tup', items = {str(nil, nil, 'id'), str(16), NAT}}, 0, 8)}),
+                    run = obj({d = NAT}, {i = NAT, n = NAT, task = str(40), sl = NAT, age = NAT}),
+                    pk = NAT}),
   bridges = obj(nil, nil, str(nil, {'up', 'down', 'moving', 'unknown', 'destroyed'}), 'bridge'),   -- BUG-030
   owners = obj({pause = {t = 'any', of = {{t = 'null'}, str(nil, {'inbox', 'gordon', 'popup', 'df'})}},
                 tempo = str(nil, {'mode', 'inbox', 'brake', 'clock'})}),
