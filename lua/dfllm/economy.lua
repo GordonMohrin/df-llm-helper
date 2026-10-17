@@ -2293,7 +2293,7 @@ local JOB_NAME = {dig = 'dig', fell = 'FellTree'}
 -- one pass over the job list: designation dig jobs and FellTree jobs, all and unclaimed (no worker, not suspended)
 -- (also digging nobody planned through the runner)
 local function tool_jobs()
-  local r = {dig = 0, dig_open = 0, fell = 0, fell_open = 0}
+  local r = {dig = 0, dig_open = 0, fell = 0, fell_open = 0, dig_pts = {}, fell_pts = {}}
   pcall(function()
     local link, i = df.global.world.jobs.list.next, 0
     while link and i < 20000 do
@@ -2303,7 +2303,15 @@ local function tool_jobs()
       if kind then
         r[kind] = r[kind] + 1
         local okw, w = pcall(dfhack.job.getWorker, j)
-        if okw and w == nil and not j.flags.suspend then r[kind .. '_open'] = r[kind .. '_open'] + 1 end
+        if okw and w == nil and not j.flags.suspend then
+          r[kind .. '_open'] = r[kind .. '_open'] + 1
+          -- BUG-023 round 5: where the first open ones lie (the tool diagnosis: can the members take one?)
+          local pts = r[kind .. '_pts']
+          if #pts < 40 then
+            local okp, x, y, z = pcall(function() return j.pos.x, j.pos.y, j.pos.z end)
+            if okp and math.tointeger(x) then pts[#pts + 1] = {x, y, z} end
+          end
+        end
       end
       link, i = link.next, i + 1
     end
@@ -2538,8 +2546,9 @@ end
 
 -- the diagnosis of a blocked tool detail: {picks = {per free tool}, units = {per member without it}, keys (blockers in
 -- order), key, why (the first blocker's text), whys (all), civ, ww}
-function M.tool_diag(K, spec, kind, without, cur)
+function M.tool_diag(K, spec, kind, without, cur, jc)
   local dg = {picks = {}, units = {}, keys = {}, texts = {}, civ = 0, ww = 0}
+  pcall(function() dg.upw = df.global.plotinfo.equipment.update.weapon == true or nil end)   -- DF has not run it yet
   local okp, pool, ww, wu, wn = pcall(M.td_pool)
   if not okp then pool, ww, wu, wn = nil, {}, {}, 0 end
   dg.ww = wn or 0
@@ -2581,6 +2590,12 @@ function M.tool_diag(K, spec, kind, without, cur)
   end
   local okg, grp = K.call('snapshot', 'groups', pts, false)   -- walk groups (-1 unknown: counts as reachable)
   grp = okg and type(grp) == 'table' and grp or nil
+  -- the open jobs of the detail (a tool job is what sends a dwarf for his tool): their walk groups (a wall to dig counts
+  -- by its neighbours)
+  local jp = type(jc) == 'table' and jc[(spec.jobs or '') .. '_pts'] or {}
+  local okjg, jg = false, nil
+  if #jp > 0 and grp then okjg, jg = K.call('snapshot', 'groups', jp, true) end
+  jg = okjg and type(jg) == 'table' and jg or nil
   for i, it in ipairs(items) do
     local f, fl = it.flags, {}
     for _, k in ipairs(M.TD_FLAGS) do if f[k] then fl[#fl + 1] = k end end
@@ -2662,9 +2677,18 @@ function M.tool_diag(K, spec, kind, without, cur)
         if g < 0 or gi < 0 or g == gi then n = n + 1 end
       end
       r.walk = n
+      if jg then                                            -- open jobs he can take: on his group, in his burrows
+        local nj = 0
+        for k, p in ipairs(jp) do
+          local gj = math.tointeger(jg[k]) or -1
+          if (g < 0 or gj < 0 or g == gj) and (not lim or M.td_in_burrows(lim, p)) then nj = nj + 1 end
+        end
+        r.jobs = nj
+      end
     end
     dg.units[i] = r
   end
+  dg.njobs = #jp
   M.td_blockers(dg, spec, kind, #without)
   return dg
 end
@@ -2693,6 +2717,11 @@ function M.td_blockers(dg, spec, kind, nwo)
   end
   local cut = where{U, function(r) return r.walk == 0 and #P > 0 end}
   if #cut > 0 then add('walk', string.format('no free %s on the walk group of %d', kind, #cut)) end
+  local nojob = where{U, function(r) return r.jobs == 0 end}
+  if #nojob > 0 then
+    add('jobs', string.format('%d can take none of the first %d open %s jobs (off their walk group or burrows)', #nojob,
+                              dg.njobs or 0, JOB_NAME[spec.jobs] or tostring(spec.jobs)))
+  end
   local paired = where{P, function(r) return r.ww ~= nil and r.wws ~= 'member' end}
   if #paired > 0 then
     local ids = {}
@@ -2756,6 +2785,7 @@ function M.td_unit_str(r)
   if r.wu then s = s .. ' wu=' .. r.wu .. ':' .. (r.wus or '?') end
   if r.inb then s = s .. string.format(' bur%d/in%d', r.bur, r.inb) end
   if r.walk then s = s .. ' walk' .. r.walk end
+  if r.jobs then s = s .. ' jobs' .. r.jobs end
   if r.pk then s = s .. ' pk' .. r.pk .. (r.pkt and '*' or '') end
   if r.upd then s = s .. ' upd' end
   if r.pat then s = s .. ' patient' end
@@ -2820,7 +2850,7 @@ local function tool_check(K, tc, r, spec, cur, jc, fixed)
   local seen = {}
   for _, t in ipairs(fixed or {}) do if not seen[t] then seen[t] = true; toks[#toks + 1] = t end end
   -- what keeps DF from handing the tools out (M.tool_diag); its blockers are cause tokens too, so a new one is news
-  local okd, dg = pcall(M.tool_diag, K, spec, kind, without, cur)
+  local okd, dg = pcall(M.tool_diag, K, spec, kind, without, cur, jc)
   if not okd then K.log('warn', '%s: tool diagnosis failed: %s', spec.name, tostring(dg)); dg = nil end
   local ctoks = {table.unpack(toks)}
   for _, k in ipairs(dg and dg.keys or {}) do ctoks[#ctoks + 1] = 'b:' .. k end
@@ -2840,9 +2870,9 @@ local function tool_check(K, tc, r, spec, cur, jc, fixed)
     local ps, us = {}, {}
     for _, x in ipairs(dg.picks) do ps[#ps + 1] = M.td_pick_str(x) end
     for _, x in ipairs(dg.units) do us[#us + 1] = M.td_unit_str(x) end
-    K.log(level, 'tools: %s blocked (%s): %s | civ alert burrows %d, work tool pairs %d | %ss: %s | members: %s',
-          spec.name, table.concat(dg.keys, ','), dg.whys, dg.civ, dg.ww, kind, table.concat(ps, '; '),
-          table.concat(us, '; '))
+    K.log(level, 'tools: %s blocked (%s): %s | civ alert burrows %d, work tool pairs %d%s | %ss: %s | members: %s',
+          spec.name, table.concat(dg.keys, ','), dg.whys, dg.civ, dg.ww, dg.upw and ', update.weapon pending' or '',
+          kind, table.concat(ps, '; '), table.concat(us, '; '))
   end
   st.tdk = st.tdk or {}
   local logged = false

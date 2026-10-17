@@ -469,7 +469,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "LOCKDOWN_PARTIAL": ("A", "reflex", _d("doors:i", "refused:ia pos:p retry:f items:i units:i")),
     # BUG-023 / Run 10: tool detail members without their pick or axe while its jobs wait and free tools exist; Run 11:
     # forb = forbidden tools (no free one needed), blk/bk = the blockers' texts/keys of economy's diagnosis (labor,
-    # tool2, alert, burrow, walk, pair, flag, pool, upair, fetch, pending, none), picks/units = compact records, civ =
+    # tool2, alert, burrow, walk, jobs, pair, flag, pool, upair, fetch, pending, none), picks/units = compact records, civ =
     # the civ alert's burrows, ww = DF's work tool pairs
     "TOOL_BLOCKED": ("A", "economy", _d("detail:s tool:s n:i", "members:ia jobs:i days:i free:i bins:i reserved:i "
                                                                "why:s who:s hint:s pos:p eq:i eq_days:i forb:i blk:s "

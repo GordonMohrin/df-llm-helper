@@ -383,4 +383,34 @@ T.test('BUG-023 round 5: a free pick marked for melting loses the mark; forbidde
   T.ok(ev[1].d.blk:find(c2.forb.id .. ':forbid', 1, true), ev[1].d.blk)
 end)
 
+T.test('BUG-023 round 5: the members can take none of the open dig jobs (off their walk group), a member off the '
+       .. 'picks\' walk group', function()
+  local W, ctl = world{cit = 12, picks = 2, miners = {5, 7}, setup = function(Wx, c)
+    equipment{items_unassigned = {c.picks[1].id, c.picks[2].id}}
+    Wx.load({name = 'snapshot', every = {ticks = 100}, tile = function() return {c = '.'} end,
+             far = function() return false end,
+             groups = function(K, pts, near)                   -- x < 50: group 1, else group 2
+               local g = {}
+               for i, p in ipairs(pts) do g[i] = type(p) == 'table' and (p[1] < 50 and 1 or 2) or -1 end
+               return g
+             end})
+  end}
+  local jobs = {}
+  for k = 1, 14 do jobs[k] = {'Dig', nil, {x = 60 + k, y = 5, z = 5}} end
+  job_list(jobs)
+  days(W, 4)
+  local ev = W.find_events('TOOL_BLOCKED')
+  T.eq(#ev, 1)
+  T.eq(ev[1].d.bk, 'jobs', ev[1].d.blk)
+  T.ok(ev[1].d.blk:find('2 can take none of the first 14 open dig jobs', 1, true), ev[1].d.blk)
+  T.ok(ev[1].d.units[1]:find('walk2 jobs0', 1, true), ev[1].d.units[1])
+  W.move(7, 70, 5, 5)                                                   -- member 7 now on the jobs' group
+  W.ms = W.ms + 600000
+  days(W, 8)
+  ev = W.find_events('TOOL_BLOCKED')
+  T.eq(#ev, 2)
+  T.eq(ev[2].d.bk, 'walk,jobs', ev[2].d.blk)
+  T.ok(ev[2].d.blk:find('no free pick on the walk group of 1', 1, true), ev[2].d.blk)
+end)
+
 T.done()

@@ -20,9 +20,11 @@
     building on its tile.
   - Per member without one (6): the detail's labor, a second tool labor, DF's pair for him (`wu=item:held|loose|forbidden|
     gone|held by N`), the burrows DF keeps him to (the civ alert's while it sounds, else `unit.burrows`) and the free tools
-    in them, the tools on his walk group (snapshot.groups), `uniform_pickup`, a pending `pickup_flags.update`, patient, job.
-  - Blockers in order: `labor`, `tool2`, `alert`, `burrow`, `walk`, `pair`, `flag`, `pool`, `upair`, `fetch`, `pending`,
-    else `none`. TOOL_BLOCKED gains `blk` (texts), `bk` (keys), `picks`, `units` (compact records, <= 3), `civ`, `ww`,
+    in them, the tools on his walk group (snapshot.groups), the first 40 open dig/FellTree jobs he can take (his group, his
+    burrows: a tool job is what sends a dwarf for his tool), `uniform_pickup`, a pending `pickup_flags.update`, patient,
+    job; DF's pending `update.weapon` (kern.log).
+  - Blockers in order: `labor`, `tool2`, `alert`, `burrow`, `walk`, `jobs`, `pair`, `flag`, `pool`, `upair`, `fetch`,
+    `pending`, else `none`. TOOL_BLOCKED gains `blk` (texts), `bk` (keys), `picks`, `units` (compact records, <= 3), `civ`, `ww`,
     `forb`, the message the first text when it fits; a new blocker key is news (util/cadence). kern.log `tools: Miners
     blocked (<keys>): <texts> | civ alert burrows N, work tool pairs N | picks: ... | members: ...` at the first pass after
     a load and whenever the diagnosis changes; `inspect` `{what:'workload', key:'tools'}` returns every record, and the
@@ -52,21 +54,23 @@
   census keys `w_*_forb/_melt/_own`; `act.work_detail`'s tool labor rule; `inspect workload` `key:'tools'`; ORDER_STUCK's
   manager reason; config `economy.orders.manager_days` (`config/baseline.json`); RULES §7 TOOL_BLOCKED and DECISION_NEEDED
   rows; `dfllm follow`'s TOOL_BLOCKED hint (`key:'tools'`). BUG-023 section "Fourth live check".
-- Tests (fail on the old code): `tests/lua/test_economy_tools.lua` (three `BUG-023 round 5` cases: a pick paired with a dead
+- Tests (fail on the old code): `tests/lua/test_economy_tools.lua` (four `BUG-023 round 5` cases: a pick paired with a dead
   unit, an unmanifested one and a member paired with a gone pick, the kern.log line and `key=tools`; a second tool labor,
   the civ alert and an own burrow, a new blocker is news; melt mark off, forbidden picks counted, unforbidden and reported
-  without a free one), `tests/lua/test_act_supply.lua` (one tool labor), `tests/lua/test_economy_orders.lua` (the resting
+  without a free one; the dig jobs and the picks off the members' walk group), `tests/lua/test_act_supply.lua` (one tool labor), `tests/lua/test_economy_orders.lua` (the resting
   manager: reasons, DECISION_NEEDED, recovery, a dead manager; an available manager keeps the old reasons).
   `tests/lua/test_economy_jobs.lua` reads the new tool counts.
 - **How to use:** TOOL_BLOCKED: read `d.bk`/`d.blk`; `labor`, `tool2`, melt and forbidden picks the kernel repairs itself;
-  `alert`/`burrow`: which burrow holds them in PEACE (lever rooms, the civ alert); `pair`/`pool`/`upair`/`fetch`/`pending`/
+  `alert`/`burrow`/`walk`/`jobs`: which burrow (lever rooms, the civ alert) or walk group keeps them from the tools or the
+  jobs; `pair`/`pool`/`upair`/`fetch`/`pending`/
   `none`: DF's own equipment state, tell the player with the records from `key:'tools'` (no verb fixes it).
   DECISION_NEEDED `manager_absent`: ask the player for an acting manager.
 - **Live check (Run 11 site98):** after `git pull` and `dfhack-run dfllm reload`, within a game day:
   - kern.log `tools: Miners blocked (<keys>): ...` with the three picks (1836340 103,108,139 ...) and the members; then
     TOOL_BLOCKED with `bk`/`blk`. `dfllm cmd inspect '{"what":"workload","key":"tools"}'` for every record.
   - Expected reading: `pool` (`1836340:unmanifested` or `:none`: DF lost them from its free list), `pair ... (dead N)` (DF
-    keeps them as dead miners' work tools), `upair` (a member paired with a lost pick), `burrow`/`alert`, `fetch`,
+    keeps them as dead miners' work tools), `upair` (a member paired with a lost pick), `burrow`/`alert`, `walk`/`jobs`,
+    `fetch`,
     `pending` or `none`. Report the line to the dev session; with `fetch` look at the member's job.
   - Orders: `dfllm cmd inspect '{"what":"orders"}'` lists the coffins/doors with `unvalidated: no manager available
     (manager <name> resting/injured)`; after 3 days of it DECISION_NEEDED `manager_absent`.

@@ -155,9 +155,10 @@ Fix (Claude, 2026-10-16):
   a soldier, a member or another), its owner, `far`, the building on its tile; per member without one (6) the labor,
   a second tool labor, DF's work tool pair (`wu=item:held|loose|forbidden|gone|held by N`), the burrows DF keeps him to
   (the civ alert's while it sounds, else `unit.burrows`) and how many free tools lie in them, how many share his walk
-  group (snapshot.groups), `uniform_pickup` (with `*` when it lists a free tool), a pending `pickup_flags.update`, patient,
-  his job. Blockers in order: `labor`, `tool2`, `alert`, `burrow`, `walk`, `pair`, `flag`, `pool`, `upair`, `fetch`,
-  `pending`, else `none`. TOOL_BLOCKED gains `blk`, `bk`, `picks`, `units`, `civ`, `ww`, `forb`; a new blocker key is a
+  group (snapshot.groups), how many of the first 40 open dig/FellTree jobs he can take (his group, his burrows: a tool
+  job is what sends a dwarf for his tool), `uniform_pickup` (with `*` when it lists a free tool), a pending `pickup_flags.update`, patient,
+  his job. Blockers in order: `labor`, `tool2`, `alert`, `burrow`, `walk`, `jobs`, `pair`, `flag`, `pool`, `upair`,
+  `fetch`, `pending`, else `none`. TOOL_BLOCKED gains `blk`, `bk`, `picks`, `units`, `civ`, `ww`, `forb`; a new blocker key is a
   cause (util/cadence), so the next report after `dfllm reload` comes with it. kern.log: `tools: Miners blocked (<keys>):
   <texts> | civ alert burrows N, work tool pairs N | picks: ... | members: ...` (at once after a load and whenever the
   diagnosis changes); `inspect workload` `key:'tools'` returns every record.
@@ -170,10 +171,10 @@ Fix (Claude, 2026-10-16):
 - Not built: an item move, an edit of `work_weapons`/`work_units`/`items_unmanifested` (no UI does them), a hauling job or
   a stockpile for the picks (v1 measured that bins and stockpiles do not matter), `setAutomaticProfessions` (DF's own work
   detail pass would hand the miners the everybody-does-this labors back).
-Tests: `tests/lua/test_economy_tools.lua` (three `BUG-023 round 5` cases), `tests/lua/test_act_supply.lua` (one tool labor);
+Tests: `tests/lua/test_economy_tools.lua` (four `BUG-023 round 5` cases), `tests/lua/test_act_supply.lua` (one tool labor);
 all fail on the old code.
 Live check: after `dfllm reload` a TOOL_BLOCKED with `bk`/`blk` (within a game day) and the kern.log `tools: Miners blocked`
 line; `dfllm cmd inspect '{"what":"workload","key":"tools"}'` for every record. Read: `pool` (a pick in no list or
 unmanifested), `pair ... (dead N)` (DF keeps it as a dead miner's work tool), `upair` (a member paired with a lost pick),
-`burrow`/`alert` (which burrow holds them), `fetch` (DF assigned it: why does he not walk there, see his job), `pending`
+`burrow`/`alert` (which burrow holds them), `walk`/`jobs` (the tools or the dig jobs lie off their walk group), `fetch` (DF assigned it: why does he not walk there, see his job), `pending`
 (DF did not process the request), `none` (nothing visible: tell the dev session with the records).
