@@ -8,6 +8,7 @@
 -- BREACH_STOP, PROJECT_BLOCKED and the bedroom/tomb capacity keepers. Suspended buildings are
 -- suspendmanager's job: nothing here touches jobs. The mode is checked before every work slice,
 -- so a run stops at once when SIEGE/BREACH begins; stalled projects only get slots nobody else wants.
+-- Run 11 siege 8: seal first (seals and plugs before everything, SEAL_STUCK) and the rebuild policy (state sched).
 local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
 local geom = require('dfllm.util.geom')
@@ -61,6 +62,16 @@ M.CFG = {
   -- look found water in reach but no cavern is looked at every fin_every (a dry one and live ones stay daily); a bp
   -- file is decoded only when it is an explore's (and once a boot: what the check needs of it is kept, S.xdoc)
   fin_every = 8 * DAY,
+  -- Run 11 (siege 8, y441 spring: pop 52 -> 3): the way in 114,73,143 had no door; its seal (c1a147c261), placed two
+  -- days before the attack, waited unfinished behind the other projects. Seal first: an open seal or cavern plug takes
+  -- the first slots (also when stalled), digs at designation priority 1 and moves its quickfort orders to the top of
+  -- the work orders; in PEACE the housing/work projects pause until it is done, or until it built nothing for
+  -- seal_stuck_days (SEAL_STUCK, A: the others run again). Rebuild (Run 11 after siege 8: 2 citizens, 59 unburied
+  -- dead): below rebuild_pop citizens in a fort past P1 or that had rebuild_off of them, in PEACE/RECOVERY only seal,
+  -- plug, tombs, food/drink, beds, wall repairs and the depot run, until rebuild_off. config/baseline.json "runner":
+  -- {seal_first: {on, stuck_days, food_d, drink_d}, rebuild: {pop, off}} (fairplay.RUNNER_LIM; a bad value: default)
+  seal_first = true, seal_stuck_days = 3, emerg_food_d = 30, emerg_drink_d = 30, rebuild_pop = 10, rebuild_off = 12,
+  hold_n = 3,            -- paused projects in a dig stage watched per run (miners dig what is designated: a breach)
 }
 local MODES = {dig = true, build = true, place = true, zone = true, burrow = true}
 local CLASSES = {defense = true, infra = true, living = true, beauty = true}
@@ -109,6 +120,8 @@ local function find(id)
 end
 local function doc(K, id) return K.persist.get('bp.' .. id) end
 local function halted(P) return P.blocked ~= '' and P.blocked ~= 'stalled' end
+local SEALS = {seal = true, plug = true}     -- seal first (Run 11 siege 8): what closes a way in runs before the rest
+local function dprio(P) return SEALS[P.tpl] and 1 or P.prio end   -- a seal's dig designations: priority 1
 local function pnum(id) return int(tostring(id or ''):match('^P([0-9])$')) end
 local function qf_room() return S.slice.qf < S.slice.qf_max end
 local function qf(K, p) S.slice.qf = S.slice.qf + 1; return K.act.quickfort(p) end
@@ -485,7 +498,7 @@ local function lost(K, P, d, R, ci, t)
   if (why == nil or why == 'damp' or why == 'unknown') and M.CFG.damp_dig then
     if (R.rl[sk] or 0) < M.CFG.damp_redig and qf_room() then
       R.rl[sk] = (R.rl[sk] or 0) + 1
-      qf(K, {mode = 'dig', data = chunk_data(ch), pos = ch.pos, priority = P.prio})
+      qf(K, {mode = 'dig', data = chunk_data(ch), pos = ch.pos, priority = dprio(P)})
       K.log('warn', '%s chunk %d: damp stone at %d,%d,%d designated again (light aquifer, %d/%d)', P.id, ci - 1,
             t[1], t[2], t[3], R.rl[sk], M.CFG.damp_redig)
       dirty()
@@ -503,7 +516,7 @@ local function lost(K, P, d, R, ci, t)
     return
   end
   R.rl[sk] = 1                                  -- the seen marks stay: the tiles are designated again
-  qf(K, {mode = 'dig', data = chunk_data(ch), pos = ch.pos, priority = P.prio})
+  qf(K, {mode = 'dig', data = chunk_data(ch), pos = ch.pos, priority = dprio(P)})
   K.log('warn', '%s %s chunk %d: designation at %d,%d,%d lost without a damp report: chunk designated again', P.id,
         d.stages[P.stage + 1].label, ci - 1, t[1], t[2], t[3])
   dirty()
@@ -1361,7 +1374,7 @@ local function apply(K, P, st, R)
     end
   end
   local p = {mode = st.mode, data = chunk_data(ch), pos = ch.pos}
-  if st.mode == 'dig' then p.priority = P.prio end
+  if st.mode == 'dig' then p.priority = dprio(P) end
   local pre = st.mode == 'build' and pre_occupied(K, ch, R) or 0
   -- FR-22: seal remembers the closing cells (walls, doors, bridges) and takes a reach baseline before they are queued
   if st.mode == 'build' then K.call('seal', 'closing', P.id, P.tpl, P.class, ch) end
@@ -1455,6 +1468,25 @@ local function occupied_cell(K, c)
   return okt and type(tile) == 'table' and OCCUPIED[tile.c] == true
 end
 
+-- the id DF gives the next manager order (nil when it cannot be read)
+local function next_order_id()
+  local ok, v = pcall(function() return df.global.world.manager_orders.manager_order_next_id end)
+  return ok and math.type(v) == 'integer' and v or nil
+end
+
+-- seal first (Run 11 siege 8: ~110 rock orders stood before a seal's door): the manager orders a seal's quickfort
+-- `orders` call made (ids n0 .. the next id - 1) move to the top of the work orders, the player's up arrow
+local function orders_first(K, P, st, n0)
+  local n1 = next_order_id()
+  if not (n0 and n1 and n1 > n0) then return end
+  local ids = {}
+  for id = n0, math.min(n1 - 1, n0 + 31) do ids[#ids + 1] = id end
+  local ok, n = K.act.order_top(ids)
+  if ok and (int(n) or 0) > 0 then
+    K.log('info', '%s %s: %d manager orders moved to the top of the work orders (seal first)', P.id, st.label, n)
+  end
+end
+
 local function orders(K, P, st, R)
   local cells = order_cells(st)
   local i0 = math.max(1, int(R.oc) or 1)
@@ -1472,7 +1504,9 @@ local function orders(K, P, st, R)
     end
   end
   local ok, res = true, {}
+  local n0 = SEALS[P.tpl] and n > 0 and next_order_id() or nil
   if n > 0 then ok, res = qf(K, {mode = st.mode, data = data, pos = {0, 0, 0}, command = 'orders'}) end
+  if ok and n0 then orders_first(K, P, st, n0) end
   if not ok then
     R.of = (R.of or 0) + 1
     dirty()
@@ -1544,8 +1578,30 @@ local function finish(K, P, d)
   dirty()
 end
 
--- meas: measure-only pass of a stalled project without a slot (no orders, no applies)
-local function work(K, P, meas)
+-- seal first / rebuild (Run 11 siege 8): a paused project's applied dig chunks are still dug by the miners: a hazard
+-- on one of their revealed tiles stops it as the measure does (breach src 'tile'); no progress, no new chunk
+local function hold_watch(K, P, d, st, R)
+  if st.mode ~= 'dig' or P.chunk == 0 then return 'done' end
+  local tiles = stage_tiles(P.id, d, P.stage)
+  for ci = 1, math.min(P.chunk, #tiles) do
+    if R.cd:sub(ci, ci) ~= '1' then
+      for _, t in ipairs(tiles[ci]) do
+        if S.slice.probes >= M.CFG.probe then return 'done' end
+        local r, why = probe(K, t, true, false)
+        if r == nil then return 'done' end
+        if r == 'breach' then
+          breach(K, P, why, {t[1], t[2], t[3]}, 'tile')
+          return 'done'
+        end
+      end
+    end
+  end
+  return 'done'
+end
+
+-- meas: measure-only pass of a stalled project without a slot (no orders, no applies); hold: a paused project (seal
+-- first, rebuild): measured, never ordered or applied (its next stage waits), its applied dig chunks watched
+local function work(K, P, meas, hold)
   local d = doc(K, P.id)
   if not d then set_blocked(K, P, 'bp_missing'); return 'done' end
   local applied = false
@@ -1573,7 +1629,7 @@ local function work(K, P, meas)
         K.log('info', '%s: the wall below the %s stands; the top stays as it is', P.id, rec.s0[5] or 'building')
         P.stage = #d.stages
         dirty()
-        return work(K, P, meas)
+        return work(K, P, meas, hold)
       end
       if K.mode() ~= 'PEACE' and P.chunk == 0 then P.since = now(K); R.last = now(K); dirty(); return 'done' end
       if not meas and P.chunk > 0 and now(K) - P.since >= M.CFG.plug_wait then
@@ -1592,12 +1648,14 @@ local function work(K, P, meas)
       return 'done'
     end
     if need_orders then
+      if hold then return 'done' end
       if not qf_room() then return 'yield' end
       local r = orders(K, P, st, R)
       if not r then return 'done' end
       if r == 'more' then return 'yield' end               -- the next orders slice in the next frame
     end
     if P.chunk < #st.chunks then
+      if hold then return hold_watch(K, P, d, st, R) end
       if not qf_room() then return 'yield' end
       if not apply(K, P, st, R) then return 'done' end
       applied = true
@@ -2063,15 +2121,305 @@ local function allowed(K, P, d)
   return false
 end
 
+-- seal first (Run 11 siege 8): seal and plug projects before every other, then prio, then age
 local function sorted()
   local r = {}
   for _, P in ipairs(S.pd.list) do if P.done ~= 1 then r[#r + 1] = P end end
   table.sort(r, function(a, b)
+    local sa, sb = SEALS[a.tpl] and 0 or 1, SEALS[b.tpl] and 0 or 1
+    if sa ~= sb then return sa < sb end
     if a.prio ~= b.prio then return a.prio < b.prio end
     if a.created ~= b.created then return a.created < b.created end
     return a.id < b.id
   end)
   return r
+end
+
+---------------------------------------------------------------- seal first and the rebuild policy (Run 11 siege 8)
+-- What a project is to them (kind_of): seal (seal, plug), tombs (tombs, care's coffins), depot, supply (farms,
+-- cistern, stockroom, a workshops project of food/drink shops only: follow's fishery), beds (bedrooms, refuge_beds),
+-- repair (runner.repair of lost walls and doors; a peace-only one rebuilds a bridge: defense), defense (any other
+-- defense class project: fortcore stages 2-4, barracks, captives, gallery_o1) and work (the rest: rooms, workshops,
+-- furnaces, explore, fortcore stage 1, beauty).
+-- An open seal pauses in PEACE: work, beds, and supply unless an emergency holds (food or drink days below
+-- seal_first food_d/drink_d, a patient without accepted water). Never paused: seal, tombs (GHOSTS: the dead must be
+-- buried), the depot (a caravan leaves without one), repairs and defense (they close or guard the fort too). While the
+-- free stone is below what the rock orders and walls want (stock.rock < rock_need), a paused project in a dig stage
+-- digs on: its boulders become the seal's walls.
+-- The rebuild policy runs (PEACE/RECOVERY; the mode's class gating still holds) seal, tombs, supply, beds, repair and
+-- the depot; the rest pauses.
+local SUPPLY = {farms = true, cistern = true, stockroom = true}
+local BEDS = {bedrooms = true, refuge_beds = true}
+local FOOD_SHOPS = {Still = true, Kitchen = true, Butchers = true, Fishery = true}
+local SEAL_PAUSES = {work = true, beds = true, supply = true}
+local REBUILD_RUNS = {seal = true, tombs = true, supply = true, beds = true, repair = true, depot = true}
+local PIECE_NAME = {d = 'door', H = 'hatch', Cw = 'wall', W = 'grate', G = 'grate', B = 'bars', h = 'channel',
+                    p = 'gather', t = 'chop'}
+
+local function words(s)
+  local out = {}
+  for v in tostring(s or ''):gmatch('[^,%s]+') do out[#out + 1] = v end
+  return out
+end
+local function plural(n, w) return string.format('%d %s%s', n, w, n == 1 and '' or 's') end
+
+-- a workshops project of food and drink shops only (every moodable type skipped, `add` Still/Kitchen/Butchers/Fishery)
+local function food_shops(d)
+  local p = type(d) == 'table' and type(d.params) == 'table' and d.params or {}
+  local add, skip = words(p.add), {}
+  if #add == 0 then return false end
+  for _, a in ipairs(add) do if not FOOD_SHOPS[a] then return false end end
+  for _, s in ipairs(words(p.skip)) do skip[s] = true end
+  for _, m in ipairs(M.MOODABLE) do if not skip[m] then return false end end
+  return true
+end
+
+local function kind_of(P, d)
+  local t = P.tpl
+  if SEALS[t] then return 'seal' end
+  if t == 'tombs' or t == 'depot' then return t end
+  if SUPPLY[t] or (t == 'workshops' and food_shops(d)) then return 'supply' end
+  if BEDS[t] then return 'beds' end
+  if t == 'repair' then
+    return (type(d) == 'table' and type(d.params) == 'table' and d.params.peace == 1) and 'defense' or 'repair'
+  end
+  return P.class == 'defense' and 'defense' or 'work'
+end
+
+-- config/baseline.json "runner" over M.CFG (a value of another type or out of range keeps the default)
+local function nat(v, lo, hi, d) return (math.type(v) == 'integer' and v >= lo and v <= hi) and v or d end
+local function conf(K)
+  local c = type(K.cfg) == 'table' and type(K.cfg.baseline) == 'table' and K.cfg.baseline.runner
+  c = type(c) == 'table' and c or {}
+  local sf = type(c.seal_first) == 'table' and c.seal_first or {}
+  local rb = type(c.rebuild) == 'table' and c.rebuild or {}
+  local r = {on = M.CFG.seal_first, stuck = nat(sf.stuck_days, 1, 60, M.CFG.seal_stuck_days) * DAY,
+             food_d = nat(sf.food_d, 0, 400, M.CFG.emerg_food_d), drink_d = nat(sf.drink_d, 0, 400, M.CFG.emerg_drink_d),
+             pop = nat(rb.pop, 0, 250, M.CFG.rebuild_pop), off = nat(rb.off, 0, 250, M.CFG.rebuild_off)}
+  if type(sf.on) == 'boolean' then r.on = sf.on end
+  r.off = math.max(r.off, r.pop)
+  return r
+end
+
+-- a food, water or drink emergency (economy's stock days, water's dry hospital with patients), else nil
+local function emergency(K, c)
+  local v = K.view()
+  local st = type(v.stock) == 'table' and v.stock or {}
+  local fd, dd = int(st.food_d), int(st.drink_d)
+  if fd and fd < c.food_d then return string.format('food %d d', fd) end
+  if dd and dd < c.drink_d then return string.format('drink %d d', dd) end
+  local w = type(v.water) == 'table' and v.water or {}
+  if (int(w.patients) or 0) > 0 and w.hosp_ok == 0 then return 'patients without water' end
+end
+
+local function rock_short(K)
+  local st = K.view().stock
+  if type(st) ~= 'table' then return false end
+  local rock, need = int(st.rock), int(st.rock_need)
+  return rock ~= nil and need ~= nil and rock < need
+end
+
+-- a piece stands built on the tile: a finished building (not a planned one), or a finished construction / closing tile
+-- on the snapshot (a construction is no building once it is built)
+local function piece_built(K, t)
+  local find = dfhack.buildings and dfhack.buildings.findAtTile
+  if find then
+    local ok, b = pcall(find, t[1], t[2], t[3])
+    if ok and b then return not is_construction(b) and built(b) end
+  end
+  local okt, tile = K.call('snapshot', 'tile', t[1], t[2], t[3])
+  return okt and type(tile) == 'table' and OCCUPIED[tile.c] == true
+end
+
+-- the pieces of an open seal or plug not built yet: their count and the first 6 as 'door 114,73,143'. One per tile (a
+-- shrub's gather and the door after it are one piece); the current build stage reads its cells (piece_built), the
+-- current dig stage counts the cells of chunks not measured done, a later stage every cell; a plug's hatch removal is
+-- no piece
+local function open_pieces(K, P, d)
+  local order, key = {}, {}
+  local R = S.rt.p[P.id]
+  local cd = type(R) == 'table' and R.si == P.stage and type(R.cd) == 'string' and R.cd or ''
+  for si = P.stage, #d.stages - 1 do
+    local st = d.stages[si + 1]
+    if not is_free(st) then
+      for ci, ch in ipairs(st.chunks) do
+        for _, cell in ipairs(ch.cells) do
+          local tl = {}
+          cell_tiles(ch, cell, tl)
+          local t = tl[1]
+          local open = t ~= nil
+          if open and si == P.stage then
+            if st.mode == 'build' then open = not piece_built(K, t)
+            elseif st.mode == 'dig' then open = cd:sub(ci, ci) ~= '1' end
+          end
+          if open then
+            local k = tkey(t[1], t[2], t[3])
+            if not key[k] then order[#order + 1] = k end
+            if not key[k] or st.mode == 'build' then key[k] = t[4] end
+          end
+        end
+      end
+    end
+  end
+  local names = {}
+  for i = 1, math.min(#order, 6) do names[i] = (PIECE_NAME[key[order[i]]] or key[order[i]]) .. ' ' .. order[i] end
+  return #order, names
+end
+
+-- SEAL_STUCK (A): the seal built nothing for stuck_days; util/cadence per project (r.ev): a repeat needs news and
+-- 7 days (Run 9 GHOSTS rule)
+local function stuck_event(K, P, d, n, names, ticks, r)
+  local st = d.stages[P.stage + 1]
+  local label = trunc(st and st.label or 'done', 24)
+  local days = ticks // DAY
+  local _, mat = M.remake_why(K, P, d)
+  local msg = string.format('%s (%s) built nothing for %s at %s: %s open%s%s%s; the other projects run again', P.id,
+                            P.tpl, plural(days, 'day'), label, plural(n, 'piece'),
+                            #names > 0 and (' (' .. table.concat(names, ', ') .. ')') or '',
+                            P.blocked ~= '' and ('; ' .. P.blocked) or '', mat and ('; ' .. mat) or '')
+  K.log('warn', 'seal first: %s', msg)
+  local T = K.now()
+  local ids = #names > 0 and names or {P.id}
+  if not CAD.due(r.ev, T, ids, {'stuck'}) then return end
+  r.ev = CAD.mark(T, ids, {'stuck'})
+  local dd = {proj = P.id, tpl = P.tpl, stage = label, days = days, n = n, pieces = names}
+  if mat then dd.mat = trunc(mat, 80) end
+  if P.blocked ~= '' then dd.blocked = trunc(P.blocked, 24) end
+  K.emit('SEAL_STUCK', 'A', trunc(msg, 200), dd)
+  K.flush()
+end
+
+-- the rebuild policy is for a fallen fort, not a new one: it had rebuild_off citizens (m.runner pk, this kernel's
+-- record) or got past P1 (a fresh embark of 7 is no rebuild)
+local function fallen(K, c)
+  return (int(S.rt.pk) or 0) >= c.off or (pnum(S.phase) or 0) >= 2
+end
+
+-- once a run (begin_run): the open seals and their progress clocks (m.runner sf[<proj>] = {sig, t, st, ev}), the
+-- rebuild switch (m.runner rb, pk) and what the pause rules need now (S.focus)
+local function focus(K)
+  local c, t = conf(K), now(K)
+  local f = {c = c, n = 0, more = 0, stuck = {}, emerg = emergency(K, c), rock = rock_short(K)}
+  S.rt.sf = obj(S.rt.sf)
+  local open = {}
+  for _, P in ipairs(sorted()) do
+    local d = SEALS[P.tpl] and P.blocked ~= 'cancel' and doc(K, P.id)
+    if d then
+      open[P.id] = true
+      local n, names = open_pieces(K, P, d)
+      local R = S.rt.p[P.id]
+      local sig = string.format('%d:%d:%d:%d', P.stage, P.chunk, n, type(R) == 'table' and int(R.prog) or 0)
+      local r = S.rt.sf[P.id]
+      if type(r) ~= 'table' then r = {sig = sig, t = t, st = 0}; S.rt.sf[P.id] = r; dirty() end
+      if r.sig ~= sig then                            -- a piece built, a stage or chunk further: the clock starts again
+        if r.st == 1 then
+          r.st, r.ev = 0, CAD.quiet(r.ev)
+          K.log('info', 'seal first: %s moves again (%s open): it pauses the others again', P.id, plural(n, 'piece'))
+        end
+        r.sig, r.t = sig, t
+        dirty()
+      elseif r.st ~= 1 and (not c.on or not allowed(K, P, d)) then
+        r.t = t                                       -- the clock waits while the mode freezes the seal
+        dirty()
+      elseif r.st ~= 1 and t - r.t >= c.stuck then
+        r.st = 1
+        dirty()
+        stuck_event(K, P, d, n, names, t - r.t, r)
+      end
+      if r.st == 1 then f.stuck[#f.stuck + 1] = {id = P.id, n = n, days = (t - r.t) // DAY}
+      elseif not f.lead then f.lead, f.n, f.names = P.id, n, names
+      else f.more = f.more + 1 end
+    end
+  end
+  for id in pairs(S.rt.sf) do if not open[id] then S.rt.sf[id] = nil; dirty() end end
+  -- rebuild: on below c.pop in a fallen fort, off again at c.off (hysteresis); c.pop 0 = off
+  local cu = K.census.u
+  local cit = type(cu) == 'table' and int(cu.cit) or nil
+  if cit and cit > (int(S.rt.pk) or 0) then S.rt.pk = cit; dirty() end
+  local rb = S.rt.rb
+  if c.pop <= 0 then
+    if type(rb) == 'table' then
+      S.rt.rb = nil; dirty(); K.log('info', 'rebuild: off (rebuild.pop 0): every project runs again')
+    end
+  elseif cit and type(rb) ~= 'table' and cit < c.pop and fallen(K, c) then
+    S.rt.rb = {t = t, pop = cit}
+    dirty()
+    K.log('warn', 'rebuild: pop %d < %d (peak %d, phase %s): only seal, plug, tombs, food/drink, beds, wall repairs and ' ..
+          'the depot run until pop >= %d', cit, c.pop, int(S.rt.pk) or 0, tostring(S.phase or '-'), c.off)
+  elseif cit and type(rb) == 'table' and cit >= c.off then
+    S.rt.rb = nil
+    dirty()
+    K.log('info', 'rebuild over: pop %d >= %d: every project runs again', cit, c.off)
+  end
+  if type(S.rt.rb) == 'table' then f.rb = {pop = cit or int(S.rt.rb.pop) or 0, lo = c.pop, hi = c.off} end
+  return f
+end
+
+-- why the policy pauses this project now ('seal <id>', 'rebuild pop 2<10'), else nil; seals never pause
+local function paused(K, P, d)
+  local f = S.focus
+  if not f or SEALS[P.tpl] then return nil end
+  local k, m = kind_of(P, d), K.mode()
+  if f.lead and f.c.on and m == 'PEACE' and SEAL_PAUSES[k] and not (k == 'supply' and f.emerg) then
+    local st = d and d.stages[P.stage + 1]
+    if not (f.rock and st and st.mode == 'dig') then return 'seal ' .. f.lead end
+  end
+  if f.rb and (m == 'PEACE' or m == 'RECOVERY') and not REBUILD_RUNS[k] then
+    return string.format('rebuild pop %d<%d', f.rb.pop, f.rb.lo)
+  end
+end
+
+-- one kern.log line when the set of paused projects changes (who pauses them, the first 8), one when they resume
+local function note_pause(K, pz)
+  local f = S.focus
+  local groups, order = {}, {}
+  for _, e in ipairs(pz) do
+    if not groups[e.why] then groups[e.why] = {}; order[#order + 1] = e.why end
+    local g = groups[e.why]
+    g[#g + 1] = e.P.id .. ' ' .. e.P.tpl
+  end
+  local parts = {}
+  for _, why in ipairs(order) do
+    local g, head = groups[why], why
+    if why:sub(1, 5) == 'seal ' then
+      head = string.format('seal first: %s with %s open%s runs first', f.lead, plural(f.n, 'piece'),
+                           #f.names > 0 and (' (' .. table.concat(f.names, ', ') .. ')') or '')
+      if f.emerg then head = head .. ' (' .. f.emerg .. ': food/drink projects go on)' end
+    elseif f.rb then
+      head = string.format('rebuild: pop %d < %d (until %d), only seal/tombs/food/beds', f.rb.pop, f.rb.lo, f.rb.hi)
+    end
+    parts[#parts + 1] = string.format('%s; paused: %s%s', head, table.concat(g, ', ', 1, math.min(#g, 8)),
+                                      #g > 8 and string.format(' +%d', #g - 8) or '')
+  end
+  local key = table.concat(order, '|') .. '|'
+  for _, e in ipairs(pz) do key = key .. e.P.id .. ',' end
+  if #pz == 0 then key = '' end
+  local was = S.rt.pz or ''
+  if key == was then return end
+  S.rt.pz = key
+  dirty()
+  if #pz > 0 then K.log('info', '%s', table.concat(parts, ' | '))
+  else
+    local m = K.mode()
+    local why = (f.lead or f.rb) and ('mode ' .. m) or (#f.stuck > 0 and ('seal ' .. f.stuck[1].id .. ' stuck'))
+                or 'no seal open, no rebuild'
+    K.log('info', 'paused projects run again (%s)', why)
+  end
+end
+
+-- state.sched (status: `seal open: 3 pieces (c1a147c261), others paused`; `rebuild: pop 2 < 10, ...`)
+local function sched_state(f, pz)
+  local ns, nr = 0, 0
+  for _, e in ipairs(pz) do if e.why:sub(1, 5) == 'seal ' then ns = ns + 1 else nr = nr + 1 end end
+  local s = {}
+  if f.lead then
+    s.seal = {proj = f.lead, n = f.n, paused = ns, more = f.more + #f.stuck, stuck = 0}
+  elseif #f.stuck > 0 then
+    local x = f.stuck[1]
+    s.seal = {proj = x.id, n = x.n, paused = 0, more = #f.stuck - 1, stuck = 1, days = x.days}
+  end
+  if f.rb then s.rb = {pop = f.rb.pop, lo = f.rb.lo, hi = f.rb.hi, paused = nr} end
+  return next(s) and s or nil
 end
 
 function rows(K)
@@ -2082,7 +2430,11 @@ function rows(K)
     local st = d and d.stages[P.stage + 1]
     local b = P.blocked
     if b == '' then
-      if not allowed(K, P, d) then b = 'frozen' elseif S.active and not S.active[P.id] then b = 'queued' end
+      local ok = allowed(K, P, d)
+      local pw = ok and paused(K, P, d)
+      if not ok then b = 'frozen'
+      elseif pw then b = 'paused: ' .. pw
+      elseif S.active and not S.active[P.id] then b = 'queued' end
     end
     out[#out + 1] = {P.id, trunc(st and st.label or 'done', 24), P.pct, trunc(b, 40)}
   end
@@ -2686,19 +3038,32 @@ local function begin_run(K)
   sync_plan(K)
   S.snap_ok = K.enabled('snapshot')
   S.active = {}
+  S.focus = focus(K)                          -- Run 11 siege 8: seal first and the rebuild policy
   local tasks, n, t = {}, 0, now(K)
   local list = sorted()
   for _, P in ipairs(list) do
     local R = S.rt.p[P.id]
     if (type(R) == 'table' and R.undo) or P.blocked == 'cancel' then tasks[#tasks + 1] = {k = 'undo', id = P.id} end
   end
-  -- pass 1: projects that can progress; pass 2: stalled ones (waiting for materials or workers) take
-  -- the slots left over, otherwise up to meas_extra of them get a measure-only pass when due
-  local extra = 0
+  -- pass 1: projects that can progress (and every seal or plug, stalled or not: seal first); pass 2: stalled ones
+  -- (waiting for materials or workers) take the slots left over, otherwise up to meas_extra of them get a
+  -- measure-only pass when due. A paused project waits like a frozen one (no chunk, no stall)
+  local extra, pz, held = 0, {}, 0
   for pass = 1, 2 do
     for _, P in ipairs(list) do
-      if not halted(P) and (P.blocked == 'stalled') == (pass == 2) then
-        local ok = allowed(K, P, doc(K, P.id))
+      if not halted(P) and (P.blocked == 'stalled' and not SEALS[P.tpl]) == (pass == 2) then
+        local d = doc(K, P.id)
+        local ok = allowed(K, P, d)
+        local why = ok and paused(K, P, d) or nil
+        if why then
+          ok = false
+          pz[#pz + 1] = {P = P, why = why}
+          local st = d and d.stages[P.stage + 1]
+          if st and st.mode == 'dig' and P.chunk > 0 and held < M.CFG.hold_n then   -- its designations are dug on
+            held = held + 1
+            tasks[#tasks + 1] = {k = 'work', id = P.id, hold = true}
+          end
+        end
         if ok and n < M.CFG.active then
           n = n + 1
           S.active[P.id] = true
@@ -2709,12 +3074,14 @@ local function begin_run(K)
             extra, R.mt = extra + 1, t
             tasks[#tasks + 1] = {k = 'work', id = P.id, meas = true}
           end
-          R.last = t                         -- waiting (queued or frozen) is no stall
+          R.last = t                         -- waiting (queued, frozen or paused) is no stall
           dirty()
         end
       end
     end
   end
+  note_pause(K, pz)
+  S.sched = sched_state(S.focus, pz)
   tasks[#tasks + 1] = {k = 'check'}           -- Run 11 cavern stops and shafts (BUG-033: sliced)
   tasks[#tasks + 1] = {k = 'end'}
   S.run, S.chk = {tasks = tasks, i = 1, t = t}, nil
@@ -2779,8 +3146,10 @@ function M.step(K, budget, ctx)
     elseif P and task.k == 'undo' then r = undo(K, P)
     elseif P and task.k == 'work' and P.done ~= 1 and not halted(P) then
       -- the mode may change between slices of one run (SIEGE/BREACH freeze the runner at once)
-      if allowed(K, P, doc(K, P.id)) then r = work(K, P, task.meas)
-      else R_of(K, P).last = now(K); dirty() end
+      local d = doc(K, P.id)
+      if not allowed(K, P, d) then R_of(K, P).last = now(K); dirty()
+      elseif task.hold or paused(K, P, d) then r = work(K, P, task.meas, true)
+      else r = work(K, P, task.meas) end
     end
     if r == 'yield' then save(K); return 'more' end
     run.i = run.i + 1
@@ -2789,7 +3158,7 @@ function M.step(K, budget, ctx)
   save(K)
 end
 
-function M.state(K) return {phase = S.phase, proj = S.rows} end
+function M.state(K) return {phase = S.phase, proj = S.rows, sched = S.sched} end
 
 -- public (live L2): bboxes of the projects not done yet (readiness puts them into the audit snapshot)
 function M.bboxes(K)

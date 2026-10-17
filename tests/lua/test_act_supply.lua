@@ -225,4 +225,19 @@ T.test('fish_zone: a side x side dfllm-fish zone (quickfort zone key f) centred 
   T.eq(calls[#calls].data[0][0][0], 'f{name=dfllm-fish}(7x7)', 'side capped at 7')
 end)
 
+T.test('order_top (Run 11 siege 8, seal first): the named orders move to the top in the given order (runner only)',
+       function()
+  H.world{tag = 'otop'}
+  local mo = df.global.world.manager_orders
+  for id = 1, 5 do mo.all:insert('#', {id = id}) end
+  T.eq({mk('economy').api.order_top({4})}, {false, 'not owner'})
+  local env = mk('runner')
+  T.eq({env.api.order_top({5, 4, 9})}, {true, 2}, 'an id not in the list is skipped')
+  local ids = {}
+  for i = 0, #mo.all - 1 do ids[#ids + 1] = mo.all[i].id end
+  T.eq(ids, {5, 4, 1, 2, 3})
+  T.eq({env.api.order_top({})}, {false, 'need 1-32 order ids'})
+  T.eq({env.api.order_top({'x'})}, {false, 'bad order id x'})
+end)
+
 T.done()

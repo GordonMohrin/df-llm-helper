@@ -1368,6 +1368,28 @@ local function impls(state)
     return true, out
   end
 
+  -- work orders screen > an order's up arrow, pressed until it stands first (Run 11 siege 8, seal first: ~110 rock
+  -- orders stood before a seal's door): the named manager orders (<= 32 ids) move to the top of the list in the given
+  -- order, the others keep theirs; ids not in the list are skipped. Returns ok, the number moved.
+  function I.order_top(ids)
+    if type(ids) ~= 'table' or #ids == 0 or #ids > 32 then return false, 'need 1-32 order ids' end
+    local rank = {}
+    for i, v in ipairs(ids) do
+      local id = int(v)
+      if not id then return false, 'bad order id ' .. tostring(v) end
+      rank[id] = rank[id] or i
+    end
+    local all = df.global.world.manager_orders.all
+    local pick = {}
+    for i = #all - 1, 0, -1 do
+      local o = all[i]
+      if rank[o.id] then pick[#pick + 1] = o; all:erase(i) end
+    end
+    table.sort(pick, function(a, b) return rank[a.id] < rank[b.id] end)
+    for i = #pick, 1, -1 do all:insert(0, pick[i]) end
+    return true, #pick
+  end
+
   function I.orders_import(lib)
     if not A.ORDER_LIBS[lib] then return false, 'unknown orders library ' .. tostring(lib) end
     return cmd_run('orders', 'import', lib)

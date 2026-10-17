@@ -1,5 +1,90 @@
 # CHANGELOG dfpilot
 
+## Seal first: an open seal or plug runs before everything and pauses the housing/work projects; a stuck seal says so (SEAL_STUCK); the rebuild policy below 10 citizens (2026-10-17; offline, live-untested)
+- **Why (Run 11, Kilrudrabed site98, y441 spring d23, siege 8: 2 cave dragons, 4 goblins, a jabberer, a snatcher, an
+  ambush; pop 52 -> 3 in about three days; post-mortem `docs/v2/POSTMORTEM-run11-siege8-y441.md`):** root cause 1 was
+  the way in 114,73,143 without a door. Its seal (c1a147c261) was placed two days before the attack and was not
+  finished: the runner works three projects at once, sorted by prio and age, so a seal placed at prio 4 waited behind a
+  prio-1 stone dig and the older projects; its door order queued behind the other rock orders. Afterwards the fort had
+  2 citizens (food 845 d, drink 1210 d, 22 coffins, 59 unburied dead, migrants still coming).
+- **Seal first (runner):**
+  - `seal` and `plug` projects sort before every other project and take a pass-1 slot even when stalled.
+  - Their dig designations use priority 1, whatever the project's prio.
+  - The manager orders their quickfort `orders` call made move to the top of the work orders. This is the new act
+    `order_top(ids)`, the work orders screen's up arrow. kern.log: `<id> seal.build: 1 manager orders moved to the top
+    of the work orders (seal first)`.
+  - While one is open and not stuck, in PEACE the housing/work projects pause: no orders and no new chunk. That is
+    `work` (rooms, workshops, furnaces, explore, fortcore stage 1, beauty), `beds` (bedrooms, refuge_beds) and
+    `supply` (farms, cistern, stockroom, a workshops project of only Still/Kitchen/Butchers/Fishery).
+  - What a paused project already designated is dug on by the miners. So a paused dig stage with applied chunks is
+    still measured (at most `hold_n` 3 a run): a breach stops it, and a finished dig stage completes.
+  - **Never paused:**
+    - defense projects (fortcore stages 2-4, barracks, captives, gallery_o1, a peace-only bridge repair): they
+      close or guard the fort too;
+    - `tombs` and care's coffins (GHOSTS: the dead must be buried);
+    - the `depot` (a caravan leaves without one);
+    - `repair` (lost walls and doors).
+  - **Exceptions while paused:**
+    - `supply` goes on in a food, water or drink emergency: food or drink days below `seal_first.food_d` /
+      `drink_d` (30), or a patient without accepted water (state water);
+    - a paused dig stage digs on while the free stone is below what the rock orders and walls want (`stock.rock` <
+      `rock_need`): its boulders become the seal's walls.
+  - kern.log names each change of the paused set: `seal first: c1a147c261 with 1 piece open (door 114,73,143) runs
+    first; paused: bd1 bedrooms, ws1 workshops`, and `paused projects run again (no seal open, no rebuild)`.
+  - `dfllm status` rows show `paused: seal <id>`.
+- **A stuck seal (SEAL_STUCK, A, new):** a seal or plug whose progress (stage, chunk, pieces not built, measured
+  progress) did not move for `seal_first.stuck_days` (3) game days stops pausing the others.
+  - The clock waits while the mode freezes the seal (a siege) or seal first is off. m.runner `sf[<proj>]`.
+  - The event names the open pieces, economy's material reason and the block: `c1a147c261 (seal) built nothing for 3
+    days at seal.build: 1 piece open (door 114,73,143)[; build_lost][; no material for door: no rock, no logs]; the
+    other projects run again`. d: proj, tpl, stage, days, n, pieces, mat, blocked.
+  - util/cadence per project: a repeat needs another piece set and 7 days.
+  - A piece that moves again pauses the others again (kern.log `seal first: <id> moves again`).
+- **Rebuild policy (runner, a PEACE/RECOVERY policy, not a mode):**
+  - Below `rebuild.pop` (10) citizens in a fallen fort, only seal, plug, tombs/coffins, supply (food/drink), beds,
+    wall repairs and the depot run. The mode's class gating still holds (RECOVERY: no living projects).
+  - A fallen fort had `rebuild.off` citizens before (m.runner `pk`, this kernel's record) or is past P1. A fresh embark
+    of 7 is not rebuilding.
+  - It ends at `rebuild.off` (12): hysteresis; m.runner `rb` keeps it across reloads.
+  - kern.log `rebuild: pop 2 < 10 (peak 54, phase P4): only seal, plug, tombs, food/drink, beds, wall repairs and the
+    depot run until pop >= 12`, the paused set as above, and `rebuild over: pop 12 >= 12: every project runs again`.
+- **Status (state `sched`, new):** `seal open: 3 pieces (c1a147c261), others paused` (`runs first` when it pauses
+  none now), `seal stuck 3 d: 1 piece (c1a147c261), others run (SEAL_STUCK)`, `rebuild: pop 2 < 10, only
+  seal/tombs/food/beds (4 paused, ends at 12)`. The line comes before `proj` in status and brief.
+- **Config (config/baseline.json `runner`, new):** `seal_first: {on: true, stuck_days: 3, food_d: 30, drink_d: 30}`,
+  `rebuild: {pop: 10, off: 12}`. `pop` 0 switches the rebuild policy off. `on` false means no pause and no
+  SEAL_STUCK (the order and the dig priority stay). `python -m dfpilot.lint --config` checks keys, ranges and off >=
+  pop (`fairplay.runner_errors`).
+- Contracts: act `order_top` (§5; schema/contract.lua ACT, owner runner), event SEAL_STUCK (§12), state `sched` (§9.3),
+  §9.8 seal first and rebuild, §9.17 `runner`, §19 row SF, appendix regenerated; RULES §7 SEAL_STUCK (seal first in
+  its row) and §10 Rebuild (300 lines: two wrapped lines joined); DESIGN §4; follow's wake hint and PRIO.
+- Tests (each fails on 2f6ab27):
+  - `tests/lua/test_runner_seal_first.lua` (new, 8): the siege 8 replay (the seal 4th in the old order runs first,
+    its order on top, bd1/ws1 paused with the log line and `sched`, the paused dig measured, no orders or chunks
+    for the workshops until the door stands, then they run); dig priority 1 and a stalled seal's slot; the
+    exceptions (defense, tombs, depot; farms and the fishery in a food emergency; paused digs while stone is
+    short); the plug pauses too, `on` false; SEAL_STUCK after 3 days, once, the others run, done after the build;
+    the clock waits through a siege, `mat` and `blocked`; rebuild in PEACE and RECOVERY with the hysteresis; a
+    new fort of 7, a fort that had 15, `pop` 0, a reload.
+  - `tests/lua/test_act_supply.lua` (order_top: order, owner, refusals).
+  - `tests/test_seal_first.py` (new): the event, the state, the status lines, the config, RULES.
+  - `tests/lua/test_runner_cavern.lua` passes unchanged: a paused room dig still finds the cavern lake it dug into.
+- **How to use:** nothing to send.
+  - `dfllm status`: `seal open: ...` means the seal goes first and housing waits.
+  - SEAL_STUCK: tell the player the open way in. No material: logs, a stone dig (follow places it). A refused tile:
+    `bp.cancel`, then `bp.place tpl=seal at=last` again, or a wall by hand.
+  - Rebuild: the status line says what runs; it ends at 12 citizens by itself.
+- **Live check (Run 11 site98, 2 citizens, or Run 12):** after `git pull` and `dfhack-run dfllm reload`:
+  - Within a game day kern.log shows `rebuild: pop 2 < 10 (peak 2, phase P..)` (the fort is past P1) and the paused
+    set. `dfllm status` shows `rebuild: pop 2 < 10, only seal/tombs/food/beds (...)`; tombs/coffin projects keep
+    running.
+  - The next seal (`bp.place tpl=seal at=last`, or follow's `at=audit`): kern.log `seal first: <id> with N pieces open
+    ... runs first; paused: ...`. In DF the seal's door/wall order stands first in the work orders screen and its
+    construction gets built before the paused rooms. `dfllm status` `seal open: N pieces (<id>), others paused`;
+    after it: `paused projects run again`.
+  - If the work orders screen does not show the seal's order on top, `order_top` failed: note the kern.log line and
+    DFHack's error in BUG notes. If DF does not take orders in list order, the move changes nothing: note that too.
+  - A seal that cannot be built: SEAL_STUCK after 3 days names the piece; the paused projects run again.
 ## A destroyed bridge is rebuilt only in quiet PEACE, and not again after two losses to building destroyers without the player (2026-10-17; offline, live-untested)
 - **Why (Run 11, Kilrudrabed site98, y434-y438 winter):** cave dragons (building destroyers) destroyed the outer
   drawbridge O1 (114,79,142) in all five sieges. The perimeter keeper (seal, FR-56) re-queued it every time: its

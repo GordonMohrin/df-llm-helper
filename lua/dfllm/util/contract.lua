@@ -103,6 +103,9 @@ C.EVENTS = {
   -- Run 11: a dig broke into a cavern (lake): the explore shaft's plug (queued, done, failed) or none (by hand); the
   -- daily shaft check (any explore state, field state) queues it too
   CAVERN_PLUG = {cls = 'A', by = 'runner'},
+  -- Run 11 siege 8: an open seal or plug built nothing for runner seal_first.stuck_days; the others run again (d.proj,
+  -- tpl, stage, days, n, pieces 'door x,y,z', mat, blocked)
+  SEAL_STUCK = {cls = 'A', by = 'runner'},
   -- B: digest
   ALERT_START = {cls = 'B', by = 'siege'}, ALERT_END = {cls = 'B', by = 'siege'},
   -- Run 11: d.cause far (it ended with hostiles in sight beyond reflex.lockdown_near; d.far names them, d.nfar) | quiet
@@ -192,7 +195,7 @@ C.ACT = {
   door_forbid = {'reflex'},
   burrow_tiles = {'seal'},
   popcap = {'readiness'},
-  quickfort = {'runner'},
+  quickfort = {'runner'}, order_top = {'runner'},  -- Run 11 siege 8: a seal's manager orders to the top (seal first)
   orders_import = {'economy'}, orders = {'economy'}, workorder = {'economy', 'water', 'care'},
   order_suspend = {'economy'}, kitchen_exclude = {'economy'}, appoint = {'economy'}, work_detail = {'economy'},
   order_material = {'economy'}, order_remove = {'economy'}, job_resume = {'economy'}, farm_crop = {'economy'},
@@ -207,7 +210,7 @@ C.ACT = {
 C.STATE_OWNERS = {
   ['v'] = 'kern', ['seq'] = 'kern', ['ev'] = 'kern', ['t.*'] = 'kern', ['mode'] = 'kern',
   ['save'] = 'kern', ['k.*'] = 'kern',
-  ['phase'] = 'runner', ['proj'] = 'runner',
+  ['phase'] = 'runner', ['proj'] = 'runner', ['sched.*'] = 'runner',
   ['pop.cit'] = 'sense', ['pop.adults'] = 'sense', ['pop.soldiers'] = 'sense',
   ['pop.cap'] = 'readiness', ['pop.gate_cap'] = 'readiness', ['ready.*'] = 'readiness',
   ['stock.drink_d'] = 'economy', ['stock.food_d'] = 'economy', ['stock.meals'] = 'economy',
@@ -332,6 +335,10 @@ C.STATE_SPEC = obj({
   orders = obj({n = NAT, bad = NAT, stuck = NAT}),
   threat = obj({vis = NAT, armed = FLAG}),
   proj = arr({t = 'tup', items = {str(nil, nil, 'id'), str(24), PCT, str(40)}}, 0, 8),
+  -- Run 11 siege 8: seal first (the leading open seal or plug: pieces open, projects it pauses, other open seals,
+  -- stuck 1 = it built nothing for stuck_days, days) and the rebuild policy (citizens, its bounds, projects paused)
+  sched = obj(nil, {seal = obj({proj = str(nil, nil, 'id'), n = NAT, paused = NAT}, {more = NAT, stuck = FLAG, days = NAT}),
+                    rb = obj({pop = NAT, lo = NAT, paused = NAT}, {hi = NAT})}),
   bridges = obj(nil, nil, str(nil, {'up', 'down', 'moving', 'unknown', 'destroyed'}), 'bridge'),   -- BUG-030
   owners = obj({pause = {t = 'any', of = {{t = 'null'}, str(nil, {'inbox', 'gordon', 'popup', 'df'})}},
                 tempo = str(nil, {'mode', 'inbox', 'brake', 'clock'})}),
