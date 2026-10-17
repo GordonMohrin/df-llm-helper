@@ -84,8 +84,10 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
         "DEATHS_PREVENTABLE": "dfllm cmd inspect '{\"what\":\"reach\"}', then refuge; patients: water_sources",
         # BUG-015: a lockdown door that does not hold its forbidden flag (the kernel tries it once more itself)
         "LOCKDOWN_PARTIAL": "dfllm status; a wall or a second door for that opening (bp.place)",
-        # BUG-023: tool detail members without pick/axe; the fair-play remedy is the player's (RULES 7)
-        "TOOL_BLOCKED": "dfllm cmd inspect '{\"what\":\"workload\"}', then tell Gordon (RULES 7)",
+        # BUG-023: tool detail members without pick/axe; the fair-play remedy is the player's (RULES 7); Run 11: d.bk/blk
+        # name the blocker, key=tools gives every record of the diagnosis
+        "TOOL_BLOCKED": "dfllm cmd inspect '{\"what\":\"workload\",\"key\":\"tools\"}' (d.bk names the blocker), "
+                        "then tell Gordon (RULES 7)",
         # BUG-030: the kernel already acted (no pulls for a destroyed bridge; the deep defense); tell the player
         "BRIDGE_DESTROYED": "dfllm status; tell Gordon; rebuild it after the siege (plan)",
         "SIEGE_DEEP": "dfllm status (civilians in the refuge, squads in the core); tell Gordon; nothing tactical",

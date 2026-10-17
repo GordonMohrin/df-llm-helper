@@ -322,8 +322,9 @@ M.DEFAULTS = {
   order_guard = {drop = true, per_run = 4},
   -- FR-01/FR-10: an order that cannot run (workshop, input on the citizens' walk group, worker) for stuck_days is
   -- reported (ORDER_STUCK, at most report_per_day a day); needs_drop "Needs ..." cancels remove it, and an own
-  -- dfllm order is not entered again for backoff_days
-  orders = {stuck_days = 3, needs_drop = 10, backoff_days = 10, report_per_day = 3},
+  -- dfllm order is not entered again for backoff_days. Run 11: an unvalidated order while the manager cannot validate
+  -- (injured, in a mood, gone) names that reason; after manager_days of it DECISION_NEEDED manager_absent
+  orders = {stuck_days = 3, needs_drop = 10, backoff_days = 10, report_per_day = 3, manager_days = 3},
   -- FR-16: resumed per day; a job kept suspended held_days asks for the preventblocking decision;
   -- preventblocking 'keep' leaves suspendmanager's own setting until jobs.release decides
   -- BUG-009/004/005: footprints scanned and items unforbidden per day, items read per missing class, failed resumes
@@ -581,6 +582,16 @@ local function reach_mark(a, it, key)
 end
 
 function M.sandy(it) return it:isSandBearing() end      -- Run 11: a bag of sand (no closure per census item)
+-- BUG-023 (Run 11): a forbidden pick or axe nobody carries is no free tool, but the tool details may want it: counted
+-- (w_pick_forb, w_axe_forb) and listed (tool_items, forb) so T.forbid unforbids it while a member lacks that tool
+M.TOOL_LIST = 8                       -- tools of each kind the census lists (free first come, forbidden too)
+function M.tool_forb(a, it)
+  local k = weapon_kind(it)
+  if (k ~= 'pick' and k ~= 'axe') or holder(it) then return end
+  a['w_' .. k .. '_forb'] = a['w_' .. k .. '_forb'] + 1
+  local list = a.tool_items[k]
+  if #list < M.TOOL_LIST then list[#list + 1] = {id = it.id, forb = true} end
+end
 local function classify(it, a, cat)
   local f = it.flags
   local w = skip_mask and f.whole
@@ -610,7 +621,10 @@ local function classify(it, a, cat)
       if f.forbid then fix(a, it, cat == 'SEEDS' and 'seeds' or 'food') end
       return
     end
-  elseif f.forbid then return end
+  elseif f.forbid then
+    if cat == 'WEAPON' then M.tool_forb(a, it) end
+    return
+  end
   -- live L7 (Paddletribes): 117 of 137 "edible" fruit lay in cut-off caves; the fort read 101 food days while 35 of
   -- 42 dwarves starved. Food and drink on another walkable group than the citizens' feed nobody.
   if (cat == 'DRINK' or a.food_set[cat]) and not f.in_inventory and a.far and a.far(it) then
@@ -758,8 +772,15 @@ local function classify(it, a, cat)
         local res = a.res[it.id] == true
         if cont then a['w_' .. k .. '_bin'] = a['w_' .. k .. '_bin'] + 1 end
         if res then a['w_' .. k .. '_res'] = a['w_' .. k .. '_res'] + 1 end
+        -- BUG-023 (Run 11): marked for melting (L1b: the melt pile's marks kept the spare picks from the miners for a
+        -- year) or owned by a dwarf: no work tool for anybody else
+        if f.melt then a['w_' .. k .. '_melt'] = a['w_' .. k .. '_melt'] + 1 end
+        if f.owned then a['w_' .. k .. '_own'] = a['w_' .. k .. '_own'] + 1 end
         local list = a.tool_items[k]
-        if #list < 6 then list[#list + 1] = {id = it.id, bin = cont and cont.id or nil, res = res or nil} end
+        if #list < M.TOOL_LIST then
+          list[#list + 1] = {id = it.id, bin = cont and cont.id or nil, res = res or nil, melt = f.melt or nil,
+                             own = f.owned or nil}
+        end
       end
     elseif k == 'xbow' or k == 'bow' then
       local u = holder(it)
@@ -788,7 +809,8 @@ local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'ge
               'w_xbow', 'w_bow', 'g_body', 'g_head', 'g_pants', 'g_gloves', 'g_shoes', 'g_shield', 'g_weapon', 'g_xbow',
               'g_quiver', 'g_metal', 'fish_raw', 'food_nocook', 'seeds_ok', 'seeds_forb', 'w_pick_free', 'w_axe_free',
               'w_pick_bin', 'w_axe_bin', 'w_pick_res', 'w_axe_res', 'webs', 'webs_near', 'glass', 'gems_glass', 'sand',
-              'bags', 'doors', 'hatches', 'grates', 'blocks_free'}
+              'bags', 'doors', 'hatches', 'grates', 'blocks_free', 'w_pick_forb', 'w_axe_forb', 'w_pick_melt',
+              'w_axe_melt', 'w_pick_own', 'w_axe_own'}
 local function new_acc(c)
   local fs = {}
   for _, k in ipairs(c.food_cats or {}) do fs[k] = true end
@@ -2051,7 +2073,7 @@ end
 -- Manager orders that never get validated (live L1: the MANAGER position has required_office 1, so above
 -- a population threshold the manager validates only from an office with a chair; DF posts no
 -- ManageWorkOrders job otherwise). After 3 days with orders, a manager and nothing validated: wake the LLM.
-local function validation_watch(K, p)
+local function validation_watch(K, p, c)
   -- live L6: a new manager (the old one died or left) stood without an office; the office check runs every
   -- day for whoever is manager now, not only when no order was validated
   local now = K.now().tick
@@ -2060,6 +2082,7 @@ local function validation_watch(K, p)
     local okc, res = K.act.manager_office()
     if okc and res == 'assigned' then K.log('warn', 'manager had no office: free Office zone assigned') end
   end
+  if M.manager_watch(K, p, c) then p.unval = nil; return end    -- Run 11: the manager cannot validate (injured, ...)
   local ok, total, valid = pcall(function()
     local t, v = 0, 0
     for _, o in ipairs(orders_all()) do t = t + 1; if o.status.validated then v = v + 1 end end
@@ -2157,6 +2180,97 @@ local function unit_name(id)
   local u = df.unit.find(id)
   local ok, n = pcall(function() return dfhack.df2utf(dfhack.units.getReadableName(u)) end)
   return ok and type(n) == 'string' and n or ('unit ' .. tostring(id))
+end
+
+-- Run 11 (Kilrudrabed y434: the manager, hf 5443, rested with a wound; ConstructCoffin wood x25 and four ConstructDoor
+-- wood orders stayed unvalidated while ORDER_STUCK named their material): can the MANAGER validate work orders now?
+-- {hf, unit, name, why, since}: why = nil when he can, else 'no manager appointed', 'the manager is gone' (dead, left,
+-- not on the map), 'manager <name> resting/injured' (needs health care or rests in bed: water's patient rule),
+-- 'manager <name> in a strange mood'; nil when the fort's positions cannot be read or MANAGER is not offered yet
+function M.manager_state(K)
+  local ok, r = pcall(function()
+    local ent = df.global.plotinfo.main.fortress_entity
+    if not ent then return nil end
+    local pid
+    for _, p in ipairs(ent.positions.own) do if p.code == 'MANAGER' and p.flags.ACTIVE then pid = p.id end end
+    if not pid then return nil end
+    local hf
+    for _, a in ipairs(ent.positions.assignments) do
+      if a.position_id == pid and (a.histfig or -1) >= 0 then hf = a.histfig end
+    end
+    if not hf then return {why = 'no manager appointed'} end
+    local u
+    local cu = K.census.u
+    for _, id in ipairs(type(cu) == 'table' and cu.ids or {}) do
+      local x = df.unit.find(id)
+      if x and x.hist_figure_id == hf then u = x; break end
+    end
+    if not u then
+      pcall(function()
+        local h = df.historical_figure.find(hf)
+        u = h and df.unit.find(h.unit_id) or nil
+      end)
+    end
+    if not u or dfhack.units.isDead(u) or not dfhack.units.isActive(u) then
+      return {hf = hf, why = 'the manager is gone'}
+    end
+    local name = unit_name(u.id):match('^[^,%s]+') or unit_name(u.id)       -- the first name (the reason fits 80 bytes)
+    local r = {hf = hf, unit = u.id, name = name:sub(1, 16)}
+    local okp, pat = pcall(function()
+      if u.health and u.health.flags.needs_healthcare then return true end
+      local j, rest = u.job and u.job.current_job, df.job_type.Rest
+      return j ~= nil and rest ~= nil and j.job_type == rest
+    end)
+    if okp and pat then r.why = 'manager ' .. r.name .. ' resting/injured'
+    elseif (u.mood or -1) >= 0 then r.why = 'manager ' .. r.name .. ' in a strange mood' end
+    return r
+  end)
+  return ok and r or nil
+end
+
+-- Run 11: the manager holds the office but cannot validate (M.manager_state why) while work orders wait unvalidated:
+-- after orders.manager_days a DECISION_NEEDED manager_absent (A, util/cadence: once per manager and reason) asks the
+-- player for an acting manager (the nobles screen: another citizen takes the office; the kernel never replaces a
+-- holder). True while that holds (validation_watch's office question waits then).
+function M.manager_watch(K, p, c)
+  local mg = M.manager_state(K)
+  local un, jobs = 0, {}
+  if type(mg) == 'table' and mg.hf and mg.why then
+    for _, o in ipairs(orders_all()) do
+      local okv, valid = pcall(function() return o.status.validated end)
+      if okv and valid == false and (math.tointeger(o.amount_left) or 0) > 0 then
+        un = un + 1
+        if #jobs < 3 then
+          local okn, jn = pcall(function() return df.job_type[o.job_type] end)
+          jobs[#jobs + 1] = string.format('%s x%d', okn and tostring(jn) or '?', math.tointeger(o.amount_left) or 0)
+        end
+      end
+    end
+  end
+  if un == 0 then
+    if type(p.mabs) == 'table' then
+      if p.mabs.ann then K.log('info', 'manager orders validated again (%s)', type(mg) == 'table' and mg.name or '?') end
+      p.mabs = p.mabs.ann and {ann = CAD.quiet(p.mabs.ann)} or nil
+    end
+    return false
+  end
+  local now = K.now()
+  local rec = type(p.mabs) == 'table' and p.mabs or {}
+  rec.since = math.tointeger(rec.since) or now.tick
+  local days = (now.tick - rec.since) // DAY
+  p.mabs = json.object(rec)
+  if days < (((c or {}).orders or M.DEFAULTS.orders).manager_days or 3) then return true end
+  if CAD.due(rec.ann, now, {mg.hf}, {mg.why}) then
+    rec.ann = CAD.mark(now, {mg.hf}, {mg.why})
+    p.mabs = json.object(rec)
+    local what = table.concat(jobs, ', ') .. (un > #jobs and string.format(' and %d more', un - #jobs) or '')
+    K.log('warn', 'no manager available (%s) for %d days: %d work orders not validated (%s)', mg.why, days, un, what)
+    K.emit('DECISION_NEEDED', 'A', string.format('no manager available (%s) for %d days: %d orders not validated (%s)',
+                                                 mg.why, days, un, what):sub(1, 200),
+           {id = 'manager_absent', q = string.format('%s: %d orders wait for validation (%s); appoint an acting manager '
+                                                     .. 'on the nobles screen?', mg.why, un, what):sub(1, 200)})
+  end
+  return true
 end
 
 ---------------------------------------------------------------- tool work details (live L1b)
@@ -2343,11 +2457,323 @@ end
 -- block_days -> TOOL_BLOCKED (A, util/cadence: again only for a new member or cause). Woodcutters never fetched the two
 -- axes from a bin (19 FellTree jobs, a year without logs); six of eight miners held no pick while 4 lay free.
 local function tool_where(kind)               -- where the first free tool of the census lies (a bin: the bin's tile)
-  for _, e in ipairs((st.tool_items or {})[kind] or {}) do
-    local it = df.item.find(e.id)
-    local ok, x, y, z = pcall(function() return dfhack.items.getPosition(it) end)
-    if it and ok and x then return {x, y, z} end
+  for pass = 1, 2 do                          -- a free one first, a forbidden one (BUG-023, Run 11) only without
+    for _, e in ipairs((st.tool_items or {})[kind] or {}) do
+      if (pass == 1) == not e.forb then
+        local it = df.item.find(e.id)
+        local ok, x, y, z = pcall(function() return dfhack.items.getPosition(it) end)
+        if it and ok and x then return {x, y, z} end
+      end
+    end
   end
+end
+
+-- BUG-023 round 5 (Run 11 site98 y434: `Miners: hold no pick for 240 days, 14 dig jobs open; 3 free picks loose`
+-- after 240 days of equipment update requests; the picks lay on the floor, not forbidden, not reserved, on the
+-- citizens' walk group). What DF needs before it hands a free pick or axe out as a work tool (the pairs
+-- plotinfo.equipment.work_weapons / work_units), read once a day for up to TD_PICKS free tools and TD_UNITS members
+-- without one, so that TOOL_BLOCKED names the blocker. Read-only. Module fields, not locals (the main chunk is at Lua's
+-- 200-local limit).
+M.TD_PICKS, M.TD_UNITS = 4, 6
+M.TD_FLAGS = {'in_job', 'owned', 'melt', 'forbid', 'artifact', 'hostile', 'encased', 'foreign', 'in_inventory'}
+M.TD_BLOCK = {in_job = true, owned = true, melt = true, forbid = true, artifact = true, hostile = true, encased = true}
+-- the tool labors one dwarf may hold only one of (act.TOOL_EXCL; DFHack manipulator.cpp: mutually exclusive)
+M.TD_EXCL = {Miners = 'MINE', Woodcutters = 'CUTWOOD', Hunters = 'HUNT'}
+
+-- DF's equipment lists for weapons: pool[id] = 'm' (items_unmanifested: not sorted yet), 'a' (items_assigned: reserved
+-- by a squad position), 'u' (items_unassigned: free for a squad or as a work tool); ww[item] = unit and wu[unit] = item
+-- of the work tool pairs (work_weapons and work_units, parallel vectors), n = pairs
+function M.td_pool()
+  local eq = df.global.plotinfo.equipment
+  local pool, ww, wu, n = {}, {}, {}, 0
+  for _, e in ipairs({{'items_unmanifested', 'm'}, {'items_assigned', 'a'}, {'items_unassigned', 'u'}}) do
+    local ok = pcall(function() for _, id in ipairs(eq[e[1]].WEAPON) do pool[id] = e[2] end end)
+    if not ok and e[2] == 'u' then pool = nil end           -- the free list unreadable: no pool verdict
+  end
+  pcall(function()
+    local wv, uv = eq.work_weapons, eq.work_units
+    n = #wv
+    for i = 0, #wv - 1 do
+      local item, unit = wv[i], uv[i]
+      if item ~= nil then ww[item] = unit or -1 end
+      if unit ~= nil then wu[unit] = item end
+    end
+  end)
+  return pool, ww, wu, n
+end
+
+-- the tile lies in one of the burrows `ids` (plotinfo.burrows.list ids; dfhack.burrows.isAssignedTile)
+function M.td_in_burrows(ids, p)
+  local want = {}
+  for _, id in ipairs(ids) do want[id] = true end
+  local ok, yes = pcall(function()
+    for _, b in ipairs(df.global.plotinfo.burrows.list) do
+      if want[b.id] and dfhack.burrows.isAssignedTile(b, {x = p[1], y = p[2], z = p[3]}) then return true end
+    end
+    return false
+  end)
+  return ok and yes == true
+end
+
+-- a tool labor of another exclusive tool detail (M.TD_EXCL) the unit holds while no detail grants it (act.work_detail
+-- switches it off when the unit joins a tool detail): its name, or nil
+function M.stray_tool(li, u, own, name)
+  if not M.TD_EXCL[name] then return nil end
+  local wm = df.work_detail_mode or {}
+  for dn, ln in pairs(M.TD_EXCL) do
+    local l = df.unit_labor and df.unit_labor[ln]
+    if dn ~= name and type(l) == 'number' and labor_on(u, ln) and not own.allowed_labors[l] then
+      local held = false
+      for _, x in ipairs(li.work_details) do
+        local m = x.flags.mode
+        if x ~= own and x.allowed_labors[l] and m ~= wm.NobodyDoesThis then
+          if m == wm.EverybodyDoesThis then held = true
+          else for _, id in ipairs(x.assigned_units) do if id == u.id then held = true end end end
+        end
+      end
+      if not held then return ln end
+    end
+  end
+end
+
+-- the diagnosis of a blocked tool detail: {picks = {per free tool}, units = {per member without it}, keys (blockers in
+-- order), key, why (the first blocker's text), whys (all), civ, ww}
+function M.tool_diag(K, spec, kind, without, cur)
+  local dg = {picks = {}, units = {}, keys = {}, texts = {}, civ = 0, ww = 0}
+  local okp, pool, ww, wu, wn = pcall(M.td_pool)
+  if not okp then pool, ww, wu, wn = nil, {}, {}, 0 end
+  dg.ww = wn or 0
+  local civ
+  pcall(function()
+    local al = df.global.plotinfo.alerts
+    local i = al.civ_alert_idx
+    if i and i ~= 0 then
+      civ = {}
+      for _, id in ipairs(al.list[i].burrows) do civ[#civ + 1] = id end
+    end
+  end)
+  dg.civ = civ and #civ or 0
+  local members = {}
+  for _, u in ipairs(cur or {}) do members[u.id] = true end
+  local items, list = {}, (st.tool_items or {})[kind] or {}
+  for pass = 1, 2 do                                        -- the free tools first, then the forbidden ones
+    for _, e in ipairs(list) do
+      if #items < M.TD_PICKS and (pass == 1) == not e.forb then
+        local it = df.item.find(e.id)
+        if it and not holder(it) then items[#items + 1] = it end
+      end
+    end
+  end
+  local units = {}
+  for _, id in ipairs(without) do
+    local u = #units < M.TD_UNITS and df.unit.find(id)
+    if u then units[#units + 1] = u end
+  end
+  local pts, ipos, nu = {}, {}, #units
+  for i, u in ipairs(units) do
+    local ok, x, y, z = pcall(function() return u.pos.x, u.pos.y, u.pos.z end)
+    pts[i] = ok and x and {x, y, z} or false
+  end
+  for i, it in ipairs(items) do
+    local ok, x, y, z = pcall(dfhack.items.getPosition, it)
+    ipos[i] = ok and x and {x, y, z} or false
+    pts[nu + i] = ipos[i]
+  end
+  local okg, grp = K.call('snapshot', 'groups', pts, false)   -- walk groups (-1 unknown: counts as reachable)
+  grp = okg and type(grp) == 'table' and grp or nil
+  for i, it in ipairs(items) do
+    local f, fl = it.flags, {}
+    for _, k in ipairs(M.TD_FLAGS) do if f[k] then fl[#fl + 1] = k end end
+    local r = {id = it.id, at = ipos[i] or nil, flags = fl, pool = pool and (pool[it.id] or '-') or '?'}
+    local wid = ww[it.id]
+    if wid then
+      local wun = df.unit.find(wid)
+      r.ww = wid
+      r.wws = not wun and 'gone' or (dfhack.units.isDead(wun) and 'dead') or (members[wid] and 'member') or
+              ((wun.military.squad_id or -1) >= 0 and 'soldier') or 'other'
+    end
+    local okw, ow = pcall(dfhack.items.getOwner, it)
+    if okw and ow then r.own, r.own_dead = ow.id, dfhack.units.isDead(ow) or nil end
+    local okc, cont = pcall(dfhack.items.getContainer, it)
+    if okc and cont then r.cont = cont.id end
+    local okq, wear = pcall(function() return it.wear end)            -- 1-3: worn (x), well worn (X), tattered (XX)
+    if okq and (math.tointeger(wear) or 0) > 0 then r.wear = math.tointeger(wear) end
+    if ipos[i] then
+      local x, y, z = ipos[i][1], ipos[i][2], ipos[i][3]
+      local okf, far = K.call('snapshot', 'far', x, y, z)
+      if okf and far == true then r.far = true end
+      local okb, b = pcall(dfhack.buildings.findAtTile, x, y, z)
+      if okb and b then
+        local okt, tn = pcall(function() return df.building_type[b:getType()] end)
+        r.bld = okt and tn or 'building'
+      end
+    end
+    r.g = grp and grp[nu + i] or nil
+    dg.picks[i] = r
+  end
+  local rest = df.job_type and df.job_type.Rest
+  for i, u in ipairs(units) do
+    local r = {id = u.id, lab = spec.labor == nil or labor_on(u, spec.labor), xl = {}, bur = 0}
+    for dn, ln in pairs(M.TD_EXCL) do if dn ~= spec.name and labor_on(u, ln) then r.xl[#r.xl + 1] = ln end end
+    table.sort(r.xl)
+    local wi = wu[u.id]
+    if wi then
+      local it = df.item.find(wi)
+      local h = it and holder(it)
+      r.wu = wi
+      r.wus = not it and 'gone' or (h and (h.id == u.id and 'held' or ('held by ' .. h.id))) or
+              (it.flags.forbid and 'forbidden') or 'loose'
+      for _, t in ipairs(items) do if t.id == wi then r.wfree = true end end   -- one of the free tools: not fetched yet
+    end
+    pcall(function()
+      r.upd = u.uniform.pickup_flags.update == true or nil
+      local pk = u.uniform.uniform_pickup
+      r.pk = #pk
+      for _, id in ipairs(pk) do
+        if id == wi then r.pkt = true end
+        for _, t in ipairs(items) do if t.id == id then r.pkt = true end end
+      end
+    end)
+    local j = u.job and u.job.current_job
+    r.job = j and tostring(df.job_type[j.job_type] or '?') or 'idle'
+    local okh, pat = pcall(function()
+      return (u.health and u.health.flags.needs_healthcare) or (j ~= nil and rest ~= nil and j.job_type == rest)
+    end)
+    r.pat = okh and pat and true or nil
+    -- the burrows DF keeps the member to: the civ alert's while it sounds (civilians), else his own (unit.burrows)
+    local lim
+    if civ and (u.military.squad_id or -1) < 0 then lim = civ
+    else
+      pcall(function()
+        if #u.burrows > 0 then
+          lim = {}
+          for _, b in ipairs(u.burrows) do lim[#lim + 1] = b end
+        end
+      end)
+    end
+    if lim then
+      r.bur, r.inb = #lim, 0
+      for k = 1, #items do if ipos[k] and M.td_in_burrows(lim, ipos[k]) then r.inb = r.inb + 1 end end
+    end
+    if grp then
+      local g, n = math.tointeger(grp[i]) or -1, 0
+      for k = 1, #items do
+        local gi = math.tointeger(grp[nu + k]) or -1
+        if g < 0 or gi < 0 or g == gi then n = n + 1 end
+      end
+      r.walk = n
+    end
+    dg.units[i] = r
+  end
+  M.td_blockers(dg, spec, kind, #without)
+  return dg
+end
+
+-- the blockers of a diagnosis, most basic first (keys and their texts)
+function M.td_blockers(dg, spec, kind, nwo)
+  local function add(key, text) dg.keys[#dg.keys + 1] = key; dg.texts[#dg.texts + 1] = text end
+  local function where(pred)
+    local r = {}
+    for _, x in ipairs(pred[1]) do if pred[2](x) then r[#r + 1] = x end end
+    return r
+  end
+  local U, P = dg.units, dg.picks
+  local nolab = where{U, function(r) return not r.lab end}
+  if #nolab > 0 then add('labor', string.format('%d of %d lack the %s labor', #nolab, nwo, tostring(spec.labor))) end
+  local two = where{U, function(r) return #r.xl > 0 end}
+  if #two > 0 then
+    add('tool2', string.format('%d hold a second tool labor (%s %s): one tool labor per dwarf', #two, two[1].id,
+                               table.concat(two[1].xl, '+')))
+  end
+  local fenced = where{U, function(r) return r.inb ~= nil and r.inb == 0 and #P > 0 end}
+  if #fenced > 0 then
+    add(dg.civ > 0 and 'alert' or 'burrow', dg.civ > 0 and
+        string.format('the civ alert holds %d in its burrows, no free %s inside', #fenced, kind) or
+        string.format('%d are limited to burrows without a free %s', #fenced, kind))
+  end
+  local cut = where{U, function(r) return r.walk == 0 and #P > 0 end}
+  if #cut > 0 then add('walk', string.format('no free %s on the walk group of %d', kind, #cut)) end
+  local paired = where{P, function(r) return r.ww ~= nil and r.wws ~= 'member' end}
+  if #paired > 0 then
+    local ids = {}
+    for _, r in ipairs(paired) do ids[#ids + 1] = string.format('%d (%s %d)', r.id, r.wws or '?', r.ww) end
+    add('pair', string.format('DF lists %s %s as work tool of another unit (work_weapons)', kind,
+                              table.concat(ids, ', ')))
+  end
+  local flagged = where{P, function(r)
+    for _, f in ipairs(r.flags) do if M.TD_BLOCK[f] then return true end end
+    return false
+  end}
+  if #flagged > 0 then
+    local fl = {}
+    for _, r in ipairs(flagged) do
+      for _, f in ipairs(r.flags) do if M.TD_BLOCK[f] then fl[#fl + 1] = r.id .. ':' .. f end end
+    end
+    add('flag', string.format('%d of %d %ss flagged (%s)', #flagged, #P, kind, table.concat(fl, ' ')))
+  end
+  local off = where{P, function(r) return r.pool ~= 'u' and r.pool ~= '?' end}
+  if #off > 0 then
+    local pl = {}
+    for _, r in ipairs(off) do pl[#pl + 1] = r.id .. ':' .. (r.pool == 'm' and 'unmanifested' or r.pool == 'a' and
+                                                               'assigned' or 'none') end
+    add('pool', string.format('%d %ss not in DF\'s free equipment list items_unassigned (%s)', #off, kind,
+                              table.concat(pl, ' ')))
+  end
+  local up = where{U, function(r) return r.wu ~= nil and r.wus ~= 'held' and not r.wfree end}
+  if #up > 0 then
+    add('upair', string.format('DF pairs %d with another %s (%d: %s %s)', #up, kind, up[1].id, tostring(up[1].wu),
+                               up[1].wus or '?'))
+  end
+  local fetch = where{U, function(r) return r.pkt == true or r.wfree == true end}
+  if #fetch > 0 then
+    add('fetch', string.format('DF assigned %d a free %s (work_units, uniform_pickup), not fetched yet (job %s)', #fetch,
+                               kind, fetch[1].job))
+  end
+  local pend = where{U, function(r) return r.upd == true end}
+  if #pend > 0 then add('pending', string.format('DF has not processed the equipment request of %d', #pend)) end
+  if #dg.keys == 0 then
+    add('none', string.format('nothing visible: the free %ss are in DF\'s list, the members have the labor, reach them '
+                              .. 'and are no work tool pair', kind))
+  end
+  dg.key, dg.why, dg.whys = dg.keys[1], dg.texts[1], table.concat(dg.texts, '; ')
+end
+
+-- compact forms of a diagnosis' records (TOOL_BLOCKED picks/units, <= 60 bytes each; kern.log)
+function M.td_pick_str(r)
+  local s = string.format('%d %s %s', r.id, r.at and string.format('%d,%d,%d', r.at[1], r.at[2], r.at[3]) or '?',
+                          r.pool)
+  if r.ww then s = s .. ' ww=' .. r.ww .. ':' .. (r.wws or '?') end
+  if r.own then s = s .. ' own=' .. r.own .. (r.own_dead and ':dead' or '') end
+  if #r.flags > 0 then s = s .. ' ' .. table.concat(r.flags, ',') end
+  if r.wear then s = s .. ' wear' .. r.wear end
+  if r.far then s = s .. ' far' end
+  if r.bld then s = s .. ' ' .. r.bld end
+  return s:sub(1, 60)
+end
+function M.td_unit_str(r)
+  local s = string.format('%d %s', r.id, r.lab and 'lab' or 'nolab')
+  if #r.xl > 0 then s = s .. ' +' .. table.concat(r.xl, '+') end
+  if r.wu then s = s .. ' wu=' .. r.wu .. ':' .. (r.wus or '?') end
+  if r.inb then s = s .. string.format(' bur%d/in%d', r.bur, r.inb) end
+  if r.walk then s = s .. ' walk' .. r.walk end
+  if r.pk then s = s .. ' pk' .. r.pk .. (r.pkt and '*' or '') end
+  if r.upd then s = s .. ' upd' end
+  if r.pat then s = s .. ' patient' end
+  return (s .. ' ' .. tostring(r.job)):sub(1, 60)
+end
+
+-- the diagnosis in TOOL_BLOCKED's d: blk (the blockers' texts), bk (their keys), picks / units (compact records, the
+-- first 3), civ, ww; the event's d must stay below kern's 1 KB (units, then picks, then the texts give way)
+function M.td_event(d, dg)
+  d.blk, d.bk, d.civ, d.ww = dg.whys:sub(1, 200), table.concat(dg.keys, ','):sub(1, 60), dg.civ, dg.ww
+  d.picks, d.units = {}, {}
+  for i = 1, math.min(3, #dg.picks) do d.picks[i] = M.td_pick_str(dg.picks[i]) end
+  for i = 1, math.min(3, #dg.units) do d.units[i] = M.td_unit_str(dg.units[i]) end
+  local function size() local ok, s = pcall(json.encode, d); return ok and #s or 2000 end
+  while size() > 1000 and #d.units > 0 do table.remove(d.units) end
+  while size() > 1000 and #d.picks > 0 do table.remove(d.picks) end
+  if size() > 1000 then d.blk = dg.why:sub(1, 120) end
+  if size() > 1000 and d.hint then d.hint = d.hint:sub(1, 80) end
 end
 
 local function tool_check(K, tc, r, spec, cur, jc, fixed)
@@ -2360,33 +2786,75 @@ local function tool_check(K, tc, r, spec, cur, jc, fixed)
   for _, u in ipairs(cur) do if not holds_tool(u, kind) then without[#without + 1] = u.id end end
   table.sort(without)
   local free = inv['w_' .. kind .. '_free'] or 0
-  st.tblk = st.tblk or {}
-  if #without == 0 or open == 0 or free == 0 then
-    st.tblk[spec.name] = nil
+  local forb = inv['w_' .. kind .. '_forb'] or 0                  -- BUG-023 (Run 11): forbidden ones, unforbidden
+  st.tblk, st.tneed, st.tdiag = st.tblk or {}, st.tneed or {}, st.tdiag or {}
+  -- the members lack this tool while its jobs wait: T.forbid may unforbid that many forbidden ones
+  st.tneed[kind] = #without > 0 and open > 0 and #without or nil
+  if #without == 0 or open == 0 or free + forb == 0 then
+    st.tblk[spec.name], st.tdiag[spec.name] = nil, nil
     p.tblk[spec.name] = rec.ann and json.object{ann = CAD.quiet(rec.ann)} or nil
     return
   end
   rec.since = math.tointeger(rec.since) or r.now
   local days = (r.now - rec.since) // DAY
   local bins, res = inv['w_' .. kind .. '_bin'] or 0, inv['w_' .. kind .. '_res'] or 0
+  -- BUG-023 (Run 11; live L1b: the melt pile's marks kept the spare picks from the miners for a year): a free tool marked
+  -- for melting loses the mark (the item sheet's melt toggle), as many a day as members lack the tool
+  local unmelt = 0
+  for _, e in ipairs((st.tool_items or {})[kind] or {}) do
+    if e.melt and not e.forb and unmelt < #without and K.act.item_flag(e.id, 'melt', false) then
+      e.melt, unmelt = nil, unmelt + 1
+    end
+  end
+  if unmelt > 0 then
+    K.log('info', '%s: %d free %s(s) marked for melting while %d members hold none: melt mark taken off', spec.name,
+          unmelt, kind, #without)
+    fixed = fixed or {}
+    fixed[#fixed + 1] = 'melt'
+  end
   local toks = {}
   if bins > 0 then toks[#toks + 1] = 'bin' end
   if free - bins > 0 then toks[#toks + 1] = 'loose' end
   if res > 0 then toks[#toks + 1] = 'reserved' end
+  if forb > 0 then toks[#toks + 1] = 'forbidden' end
   local seen = {}
   for _, t in ipairs(fixed or {}) do if not seen[t] then seen[t] = true; toks[#toks + 1] = t end end
+  -- what keeps DF from handing the tools out (M.tool_diag); its blockers are cause tokens too, so a new one is news
+  local okd, dg = pcall(M.tool_diag, K, spec, kind, without, cur)
+  if not okd then K.log('warn', '%s: tool diagnosis failed: %s', spec.name, tostring(dg)); dg = nil end
+  local ctoks = {table.unpack(toks)}
+  for _, k in ipairs(dg and dg.keys or {}) do ctoks[#ctoks + 1] = 'b:' .. k end
   local pos = tool_where(kind)
   local where = {}
   if bins > 0 then where[#where + 1] = string.format('%d in bins', bins) end
   if free - bins > 0 then where[#where + 1] = string.format('%d loose', free - bins) end
   if res > 0 then where[#where + 1] = string.format('%d reserved by squad uniforms', res) end
+  if forb > 0 then where[#where + 1] = string.format('%d forbidden', forb) end
   local at = pos and string.format(' at %d,%d,%d', pos[1], pos[2], pos[3]) or ''
   st.tblk[spec.name] = {n = #without, of = #cur, jobs = open, days = days, free = free, bins = bins, res = res,
-                        why = table.concat(toks, ','), tool = kind}
+                        forb = forb, why = table.concat(toks, ','), tool = kind, blk = dg and dg.key or nil,
+                        blk_why = dg and dg.why or nil}
+  st.tdiag[spec.name] = dg
+  local function diag_line(level)
+    if not dg then return end
+    local ps, us = {}, {}
+    for _, x in ipairs(dg.picks) do ps[#ps + 1] = M.td_pick_str(x) end
+    for _, x in ipairs(dg.units) do us[#us + 1] = M.td_unit_str(x) end
+    K.log(level, 'tools: %s blocked (%s): %s | civ alert burrows %d, work tool pairs %d | %ss: %s | members: %s',
+          spec.name, table.concat(dg.keys, ','), dg.whys, dg.civ, dg.ww, kind, table.concat(ps, '; '),
+          table.concat(us, '; '))
+  end
+  st.tdk = st.tdk or {}
+  local logged = false
+  if dg and st.tdk[spec.name] ~= dg.whys then             -- the diagnosis changed (or the first one after a load)
+    st.tdk[spec.name] = dg.whys
+    diag_line('info')
+    logged = true
+  end
   if days >= (tc.block_days or 3) then
     local now = K.now()
-    if CAD.due(rec.ann, now, without, toks) then
-      rec.ann = CAD.mark(now, without, toks)
+    if CAD.due(rec.ann, now, without, ctoks) then
+      rec.ann = CAD.mark(now, without, ctoks)
       local names = {}
       for i = 1, math.min(3, #without) do names[i] = unit_name(without[i]):sub(1, 24) end
       local hint = res > 0 and 'squad uniforms reserve tools (military gives up the pick/axe specs beyond the spare tools); ' or ''
@@ -2400,12 +2868,16 @@ local function tool_check(K, tc, r, spec, cur, jc, fixed)
       local msg = string.format('%s: %d of %d hold no %s for %d days, %d %s jobs open; %d free %ss (%s)%s',
                                 spec.name, #without, #cur, kind, days, open, JOB_NAME[spec.jobs] or spec.jobs, free, kind,
                                 table.concat(where, ', '), at)
+      if dg and #msg + #dg.why + 2 <= 200 then msg = msg .. ': ' .. dg.why end
       local d = {detail = spec.name, tool = kind, n = #without, members = {table.unpack(without, 1, math.min(10, #without))},
                  jobs = open, days = days, free = free, bins = bins, reserved = res, why = table.concat(toks, ','),
                  who = table.concat(names, ', '), hint = hint:sub(1, 200)}
       if pos then d.pos = pos end
       if eqn > 0 then d.eq, d.eq_days = eqn, eqd or 0 end
+      if forb > 0 then d.forb = forb end
+      if dg then M.td_event(d, dg) end
       K.log('warn', '%s', msg)
+      if not logged then diag_line('warn') end
       K.emit('TOOL_BLOCKED', 'A', msg:sub(1, 200), d)
     end
   end
@@ -2569,21 +3041,30 @@ local function tools(K, c, p, inv, engine, r)
       local free_tools = spec.tool and (inv or {})['w_' .. spec.tool .. '_free'] or 0
       local eq = {}
       for _, u in ipairs(cur) do
-        local why
+        local why, xl
         if spec.labor and not labor_on(u, spec.labor) then why = 'labor'
         elseif sets and needs_specialist(li, sets, u, evl, wd) then why = 'everybody'
-        elseif tc.equip_update == true and free_tools > 0 and not holds_tool(u, spec.tool) then why = 'tool' end
+        else
+          -- BUG-023 (Run 11): a second tool labor no detail grants (MINE/CUTWOOD/HUNT: one per dwarf) goes off
+          xl = M.stray_tool(li, u, wd, spec.name)
+          if xl then why = 'xlabor'
+          elseif tc.equip_update == true and free_tools > 0 and not holds_tool(u, spec.tool) then why = 'tool' end
+        end
         local key = spec.name .. ':' .. u.id
         if why and now - (st.fixes[key] or -1e12) >= (tc.repair_days or 7) * DAY then
           st.fixes[key] = now
           local o = opts_of(spec)
-          if why == 'tool' then o.equip = 'force' end
+          local lacks = spec.tool and not holds_tool(u, spec.tool)
+          if why == 'tool' or (why == 'xlabor' and lacks and o.equip) then o.equip = 'force' end
           if K.act.work_detail(spec.name, u.id, true, o) then
             changes = changes + 1
             if why == 'tool' then eq[#eq + 1] = u.id else fixed[#fixed + 1] = why end
+            if why == 'xlabor' and o.equip == 'force' then eq[#eq + 1] = u.id end
             K.log('info', '%s: %s %s', spec.name, unit_name(u.id),
                   why == 'labor' and ('had no ' .. spec.labor .. ' labor: set through the detail') or
                   why == 'tool' and ('holds no ' .. spec.tool .. ': equipment update requested again') or
+                  why == 'xlabor' and ('held a second tool labor (' .. xl .. ', no detail grants it): taken off ' ..
+                                       'through the detail') or
                   'left the everybody-does-this details (specialist)')
           end
         end
@@ -2787,7 +3268,7 @@ end
 local function order_ctx(K, c, r)
   local inv = r.inv or {}
   local reach = st.reach
-  local ctx = {f = r.f or {}, holders = {}}
+  local ctx = {f = r.f or {}, holders = {}, mgr = M.manager_state(K)}
   function ctx.is_metal(mi)
     local f = mat_flags({mat_type = 0, mat_index = mi})
     return f ~= nil and f.IS_METAL == true
@@ -2837,6 +3318,13 @@ end
 function M.order_reasons(o, ctx)
   local okn, job = pcall(job_name, o)
   if not okn or type(job) ~= 'string' then return nil end
+  -- Run 11 (the manager rested with a wound; 25 coffins and four doors stayed unvalidated while ORDER_STUCK named their
+  -- material): an order the manager has not validated runs only once he can validate it, so that is its reason
+  local mg = ctx.mgr
+  if type(mg) == 'table' and mg.why then
+    local okv, valid = pcall(function() return o.status.validated end)
+    if okv and valid == false then return 'unvalidated: no manager available (' .. mg.why .. ')', job end
+  end
   local mc = OL.mat_class(o, ctx.is_metal)
   local ws, labors
   if job == 'CustomReaction' then ws, labors = reaction_needs(o.reaction_name)
@@ -3181,7 +3669,7 @@ function T.kitchen(K, c, r) pcall(kitchen, K, c, r.days.food_d) end
 function T.appoint(K, c, r) M.appoint_vacant(K) end
 function T.food(K, c, r) if r.day then food_plan(K, c, r) end end
 function T.watch(K, c, r)
-  validation_watch(K, r.p)
+  validation_watch(K, r.p, c)
   alarm_check(K, c, r.p, r.days)
   famine(K, c, r.p, r.days, r.inv, r)
   food_pre(K, c, r.p, r.days, r.inv)
@@ -4798,6 +5286,14 @@ function T.forbid(K, c, r)
     for _, e in ipairs(st.fix or {}) do
       if e.why ~= 'food' or r.p.starve then r.fx[#r.fx + 1] = e end
     end
+    -- BUG-023 (Run 11): forbidden picks/axes nobody carries, as many as members of a tool detail lack that tool while
+    -- its jobs wait (tool_check's st.tneed)
+    for kind, n in pairs(st.tneed or {}) do
+      local k = 0
+      for _, e in ipairs((st.tool_items or {})[kind] or {}) do
+        if e.forb and k < n then k = k + 1; r.fx[#r.fx + 1] = {id = e.id, why = kind} end
+      end
+    end
   end
   local lim = (c.forbid or M.DEFAULTS.forbid).per_day or 30
   while #r.fx > 0 and r.fx_n < lim do
@@ -5323,14 +5819,43 @@ M.inspect.orders = function(K, args)
          {n = n, stuck = od.stuck or 0, bad = od.bad or 0, list = json.array(list), more = n - #list}
 end
 
+-- the census' pick and axe counts (inspect workload `tools`): all, free (nobody carries them), of them in a bin,
+-- reserved by a squad uniform, marked for melting, owned; and the forbidden ones nobody carries (BUG-023)
+function M.tool_counts(inv)
+  local t = {}
+  for _, k in ipairs({'pick', 'axe'}) do
+    t[k] = inv['w_' .. k] or 0
+    for _, s in ipairs({'free', 'bin', 'res', 'forb', 'melt', 'own'}) do t[k .. '_' .. s] = inv['w_' .. k .. '_' .. s] or 0 end
+  end
+  return t
+end
+
+-- inspect what=workload key=tools (BUG-023 round 5): the tool details' diagnosis, every free tool and member record of
+-- tool_check's last daily pass (M.tool_diag), the census counts
+function M.inspect_tools(K)
+  local out = {}
+  for name, dg in pairs(st.tdiag or {}) do
+    local ps, us = {}, {}
+    for _, x in ipairs(dg.picks) do ps[#ps + 1] = M.td_pick_str(x) end
+    for _, x in ipairs(dg.units) do us[#us + 1] = M.td_unit_str(x) end
+    local b = (st.tblk or {})[name] or {}
+    out[#out + 1] = {detail = name, tool = b.tool, n = b.n, of = b.of, jobs = b.jobs, days = b.days, keys = dg.keys,
+                     why = dg.texts, civ = dg.civ, ww = dg.ww, picks = json.array(ps), units = json.array(us)}
+  end
+  table.sort(out, function(x, y) return x.detail < y.detail end)
+  local first = out[1]
+  return true, first and string.format('%d tool details blocked; %s: %s', #out, first.detail, first.why[1] or '?') or
+                 'no tool detail blocked', {blocked = json.array(out), tools = M.tool_counts(K.census.i or {})}
+end
+
 -- inspect what=workload (FR-40): adults without a job, unclaimed jobs by type, top cancel reasons, free tools,
 -- suspended construction jobs and the starvation report. Run 10 (Handlelock) listed 45 PlantSeeds jobs as unclaimed
 -- that were all taken and 32 GatherPlants jobs outside the wall that nobody could reach. Now a job is unclaimed only
 -- without a worker and, when DF's job board (world.jobs.postings) is readable, with a live posting (`waiting` = jobs
 -- neither worked nor posted); an unclaimed job on no citizen's walk group (snapshot.groups; a wall or trunk counts by
 -- its neighbours) is `unreachable`, and an idle adult whose walk group holds no unclaimed job while there are some is
--- `idle_noreach` (idle, no reachable work). `blocked`: the tool details' TOOL_BLOCKED state (BUG-023); `cloth`: thread,
--- spider webs (none of them collected, BUG-024) and care's naked count.
+-- `idle_noreach` (idle, no reachable work). `blocked`: the tool details' TOOL_BLOCKED state (BUG-023; with key=tools only
+-- their diagnosis, M.inspect_tools); `cloth`: thread, spider webs (none of them collected, BUG-024) and care's naked count.
 local JOB_SCAN = 50000
 local function job_board()
   local set, n = {}, 0
@@ -5344,6 +5869,7 @@ local function job_board()
 end
 
 M.inspect.workload = function(K, args)
+  if type(args) == 'table' and args.key == 'tools' then return M.inspect_tools(K) end
   local cu = K.census.u or {}
   local sold = {}
   for _, id in ipairs(cu.soldier_ids or {}) do sold[id] = true end
@@ -5427,7 +5953,8 @@ M.inspect.workload = function(K, args)
   local sv = st.starve
   local blocked = {}
   for name, b in pairs(st.tblk or {}) do
-    blocked[#blocked + 1] = {detail = name, tool = b.tool, n = b.n, of = b.of, jobs = b.jobs, days = b.days, why = b.why}
+    blocked[#blocked + 1] = {detail = name, tool = b.tool, n = b.n, of = b.of, jobs = b.jobs, days = b.days, why = b.why,
+                             forb = b.forb, blk = b.blk, blk_why = b.blk_why and b.blk_why:sub(1, 120) or nil}
   end
   table.sort(blocked, function(x, y) return x.detail < y.detail end)
   local care = (K.view() or {}).care
@@ -5441,9 +5968,7 @@ M.inspect.workload = function(K, args)
   local data = {adults = adults, idle = #idle, idle_noreach = noreach, idle_units = names, jobs = total,
                 suspended = sus, waiting = posted and waiting or nil,
                 unclaimed = jobs_of(open, 12), unreachable = jobs_of(far, 8), cancels = top(why, 8),
-                tools = {pick = inv.w_pick or 0, pick_free = inv.w_pick_free or 0, pick_bin = inv.w_pick_bin or 0,
-                         pick_res = inv.w_pick_res or 0, axe = inv.w_axe or 0, axe_free = inv.w_axe_free or 0,
-                         axe_bin = inv.w_axe_bin or 0, axe_res = inv.w_axe_res or 0},
+                tools = M.tool_counts(inv),
                 blocked = json.array(blocked), cloth = cloth,
                 construction = jobs,
                 -- Run 11: stone against the rock orders, picks against the Miners, pieces nothing in the fort can make

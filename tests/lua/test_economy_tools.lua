@@ -259,4 +259,128 @@ T.test('BUG-023: woodcutters and miners without their tool -> TOOL_BLOCKED (A) o
   T.eq(W.inbox('inspect', {what = 'workload'}).data.blocked[1].detail, 'Miners', 'the woodcutters hold their axes')
 end)
 
+-- BUG-023 round 5 (Run 11 site98 y434): `Miners: hold no pick for 240 days, 14 dig jobs open; 3 free picks loose` with
+-- the reservation sweep and 240 days of equipment update requests behind it. The report now names what keeps DF from
+-- handing the picks out: DF's equipment lists (items_unmanifested / items_unassigned / items_assigned), the work tool
+-- pairs (work_weapons / work_units), the members' labors, burrows and the civ alert.
+local function equipment(lists)
+  local eq = {update = {}}
+  for _, k in ipairs({'items_unmanifested', 'items_unassigned', 'items_assigned'}) do
+    eq[k] = {WEAPON = kmock.vec(lists[k] or {})}
+  end
+  eq.work_weapons, eq.work_units = kmock.vec(lists.ww or {}), kmock.vec(lists.wu or {})
+  df.global.plotinfo.equipment = eq
+end
+local function log_has(W, s)
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find(s, 1, true) then return l.msg end end
+end
+
+T.test('BUG-023 round 5: TOOL_BLOCKED names the blocker (a pick paired with a dead unit, one unmanifested, a member '
+       .. 'paired with a gone pick); kern.log and inspect workload key=tools carry every record', function()
+  local W, ctl = world{cit = 12, picks = 3, dig = 14, miners = {5, 7}, setup = function(Wx, c)
+    Wx.add_unit{id = 40, citizen = true, dead = true}
+    local p1, p2, p3 = c.picks[1].id, c.picks[2].id, c.picks[3].id
+    equipment{items_unassigned = {p1, p2}, items_unmanifested = {p3}, ww = {p1, 9999}, wu = {40, 7}}
+  end}
+  days(W, 4)
+  local ev = W.find_events('TOOL_BLOCKED')
+  T.eq(#ev, 1)
+  local d = ev[1].d
+  T.eq(d.bk, 'pair,pool,upair', d.blk)
+  T.ok(d.blk:find('work tool of another unit', 1, true) and d.blk:find('dead 40', 1, true), d.blk)
+  T.ok(d.blk:find(ctl.picks[3].id .. ':unmanifested', 1, true), d.blk)
+  T.ok(d.blk:find('9999 gone', 1, true), d.blk)
+  T.eq(d.why, 'loose', 'the cause tokens stay the tools\' places')
+  T.eq(#d.picks, 3)
+  T.eq(d.picks[1], ctl.picks[1].id .. ' 20,20,5 u ww=40:dead')
+  T.eq(d.picks[3], ctl.picks[3].id .. ' 20,20,5 m')
+  T.eq(d.units[2], '7 lab wu=9999:gone ?')
+  T.eq({d.civ, d.ww}, {0, 2})
+  T.ok(#require('dfllm.util.json').encode(d) <= 1024, 'below kern\'s 1 KB')
+  local line = log_has(W, 'tools: Miners blocked (pair,pool,upair)')
+  T.ok(line and line:find('work tool pairs 2', 1, true) and line:find('members: 5 lab', 1, true), tostring(line))
+  local r = W.inbox('inspect', {what = 'workload', key = 'tools'})
+  T.eq(r.ok, true, r.msg)
+  T.eq(r.data.blocked[1].keys, {'pair', 'pool', 'upair'})
+  T.eq(#r.data.blocked[1].picks, 3)
+  T.eq(r.data.tools.pick_free, 3)
+  T.eq(W.inbox('inspect', {what = 'workload'}).data.blocked[1].blk, 'pair')
+  -- the same blockers and members: never repeated
+  days(W, 8)
+  T.eq(#W.find_events('TOOL_BLOCKED'), 1, 'unchanged: not repeated')
+end)
+
+T.test('BUG-023 round 5: the civ alert and own burrows without the picks, a second tool labor (repaired), a new '
+       .. 'blocker is news', function()
+  local W, ctl = world{cit = 12, picks = 2, dig = 14, miners = {5, 7}, setup = function(Wx, c)
+    equipment{items_unassigned = {c.picks[1].id, c.picks[2].id}}
+    Wx.unit(7).status.labors.HUNT = true                              -- no Hunters membership grants it
+  end}
+  days(W, 4)
+  local ev = W.find_events('TOOL_BLOCKED')
+  T.eq(#ev, 1)
+  T.eq(ev[1].d.bk, 'tool2', ev[1].d.blk)
+  T.ok(ev[1].d.blk:find('7 HUNT', 1, true), ev[1].d.blk)
+  local c7 = calls(ctl, 'Miners', 7)
+  T.eq({#c7, c7[1].opts.equip}, {1, 'force'}, 'the second tool labor is taken off through the detail (with the request)')
+  T.ok(log_has(W, 'held a second tool labor (HUNT, no detail grants it)'))
+  W.unit(7).status.labors.HUNT = nil
+  -- the civ alert holds the civilians in Kern+ (0..10), the picks lie at 20,20,5
+  local b = W.burrow('Kern+', {0, 0, 0, 10, 10, 10})
+  df.global.plotinfo.alerts.civ_alert_idx = 1
+  df.global.plotinfo.alerts.list = kmock.vec{{burrows = kmock.vec{}}, {burrows = kmock.vec{b.id}}}
+  W.ms = W.ms + 600000                                                 -- the cadence's wall-clock part (10 min)
+  days(W, 8)
+  ev = W.find_events('TOOL_BLOCKED')
+  T.eq(#ev, 2, 'a new blocker is news (util/cadence)')
+  T.eq({ev[2].d.bk, ev[2].d.civ}, {'alert', 1})
+  T.ok(ev[2].d.units[1]:find('bur1/in0', 1, true), ev[2].d.units[1])
+  -- the alert over, a member limited to his own burrow (unit.burrows)
+  df.global.plotinfo.alerts.civ_alert_idx = 0
+  W.unit(5).burrows = kmock.vec{b.id}
+  W.ms = W.ms + 600000
+  days(W, 8)
+  ev = W.find_events('TOOL_BLOCKED')
+  T.eq(#ev, 3)
+  T.eq(ev[3].d.bk, 'burrow', ev[3].d.blk)
+  T.ok(ev[3].d.blk:find('1 are limited to burrows without a free pick', 1, true), ev[3].d.blk)
+end)
+
+T.test('BUG-023 round 5: a free pick marked for melting loses the mark; forbidden picks count, TOOL_BLOCKED comes '
+       .. 'without free ones and T.forbid unforbids them while the miners need them', function()
+  local W, ctl = world{cit = 12, picks = 1, dig = 14, miners = {5, 7}, setup = function(Wx, c)
+    c.picks[1].flags.melt = true
+    c.forb = F.item(Wx, 'WEAPON', {subtype = 1, flags = {forbid = true}, _pos = {22, 20, 5}})
+    Wx.act_result('item_flag', function(id, flag, on)
+      if c.stuck then return false, 'refused' end
+      Wx.items_by_id[id].flags[flag] = on
+      return true
+    end)
+  end}
+  settle(W)
+  T.eq({W.K.census.i.w_pick_free, W.K.census.i.w_pick_melt, W.K.census.i.w_pick_forb}, {1, 1, 1})
+  days(W, 1)
+  local fl = {}
+  for _, a in ipairs(W.find_acts('item_flag')) do fl[#fl + 1] = a.args[1] .. ':' .. a.args[2] .. ':' .. tostring(a.args[3]) end
+  T.ok(F.has(fl, ctl.picks[1].id .. ':melt:false'), table.concat(fl, ' '))
+  T.ok(F.has(fl, ctl.forb.id .. ':forbid:false'), table.concat(fl, ' '))
+  T.ok(log_has(W, 'marked for melting while 2 members hold none: melt mark taken off'))
+  days(W, 1)
+  T.eq({W.K.census.i.w_pick_free, W.K.census.i.w_pick_melt, W.K.census.i.w_pick_forb}, {2, 0, 0})
+  T.eq(W.inbox('inspect', {what = 'workload'}).data.tools.pick_forb, 0)
+  -- no free pick at all, one forbidden that cannot be unforbidden: TOOL_BLOCKED still comes (the old check needed free)
+  local W2, c2 = world{cit = 12, picks = 0, dig = 14, miners = {5, 7}, setup = function(Wx, c)
+    c.stuck = true
+    c.forb = F.item(Wx, 'WEAPON', {subtype = 1, flags = {forbid = true}, _pos = {22, 20, 5}})
+    Wx.act_result('item_flag', function() return false, 'refused' end)
+  end}
+  days(W2, 4)
+  local ev = W2.find_events('TOOL_BLOCKED')
+  T.eq(#ev, 1)
+  T.eq({ev[1].d.free, ev[1].d.forb}, {0, 1})
+  T.ok(ev[1].msg:find('1 forbidden', 1, true), ev[1].msg)
+  T.eq(ev[1].d.pos, {22, 20, 5})
+  T.ok(ev[1].d.blk:find(c2.forb.id .. ':forbid', 1, true), ev[1].d.blk)
+end)
+
 T.done()

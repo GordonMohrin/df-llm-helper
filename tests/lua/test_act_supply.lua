@@ -152,6 +152,36 @@ T.test('work_detail opts (Run 10): a specialist leaves the everybody details; eq
   T.eq(u.uniform.pickup_flags.update, false, 'a member that has the labor is not asked again')
 end)
 
+-- BUG-023 (Run 11): one tool labor per dwarf (MINE, CUTWOOD, HUNT each want their own tool; the labors screen never
+-- sets two): joining a tool detail switches off the other tool labors no detail grants; a second tool detail the unit
+-- is a member of (the player's) keeps its labor
+T.test('work_detail: joining Miners takes off a stray HUNT/CUTWOOD labor, a Hunters membership keeps HUNT', function()
+  local W = H.world{tag = 'wdx', units = {{id = 7, citizen = true}, {id = 8, citizen = true}}}
+  local MINE, CUT, HUNT = 0, 1, 2
+  local function wd(name, labors, ids, mode)
+    local al = setmetatable({}, {__len = function() return 3 end})
+    for _, l in ipairs(labors) do al[l] = true end
+    return {name = name, assigned_units = kmock.vec(ids), allowed_labors = al, flags = {mode = mode}}
+  end
+  df.work_detail_mode = {EverybodyDoesThis = 1, NobodyDoesThis = 2, OnlySelectedDoesThis = 3}
+  df.unit_labor = {MINE = MINE, CUTWOOD = CUT, HUNT = HUNT}
+  local hunters = wd('Hunters', {HUNT}, {8}, 3)
+  df.global.plotinfo.labor_info = {work_details = kmock.vec{wd('Miners', {MINE}, {}, 3), wd('Woodcutters', {CUT}, {}, 3),
+                                                              hunters}}
+  local u7, u8 = W.unit(7), W.unit(8)
+  u7.status = {labors = {[HUNT] = true, [CUT] = true}}
+  u8.status = {labors = {[HUNT] = true}}
+  local env = mk('economy')
+  T.eq({env.api.work_detail('Miners', 7, true)}, {true, 'added'})
+  T.eq({u7.status.labors[MINE], u7.status.labors[CUT], u7.status.labors[HUNT]}, {true, false, false},
+       'no detail grants CUTWOOD or HUNT: off')
+  T.eq({env.api.work_detail('Miners', 8, true)}, {true, 'added'})
+  T.eq({u8.status.labors[MINE], u8.status.labors[HUNT]}, {true, true}, 'the player\'s Hunters membership keeps HUNT')
+  hunters.flags.mode = 2                                               -- nobody does this: it grants nothing
+  T.eq({env.api.work_detail('Miners', 8, true)}, {true, 'already'})
+  T.eq(u8.status.labors[HUNT], false)
+end)
+
 -- Run 11 (Kilrudrabed, no gem vein): the zones screen's Sand zone, one tile, through quickfort zone mode (economy only)
 T.test('sand_zone: a 1x1 dfllm-sand zone (quickfort zone key s) at the position; economy only', function()
   local W = H.world{tag = 'sz'}

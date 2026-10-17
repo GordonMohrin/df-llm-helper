@@ -1,5 +1,5 @@
 # BUG-023 woodcutters in the Woodcutters detail never take FellTree jobs: the two axes lie in a bin in a stockpile and nobody fetches one
-Status: mitigated in 47d98c4 (offline, live-untested): detection, TOOL_BLOCKED (A), labor repair, miners out of everybody details; the pickup trigger `tools.equip_update` is on since Gordon's yes (2026-10-16)
+Status: open (Run 11 y434: the picks still not handed out); mitigated in 47d98c4 (offline, live-untested): detection, TOOL_BLOCKED (A), labor repair, miners out of everybody details; the pickup trigger `tools.equip_update` is on since Gordon's yes (2026-10-16); round 5: the diagnosis names DF's blocker (offline, live-untested)
 Severity: high (no logs for a game year: no furniture, no barrels, no brewing, mood deaths, 81 buildings waiting)
 Found: 2026-10-15 21:20-22:10, Run 10 fort Handlelock (region2-site97, y366-368), dfpilot main 95fe16d + local trade fix
 Module: `lua/dfllm/economy.lua` (builtin tool details `Woodcutters`, `tools` axe count), `act.work_detail`
@@ -120,3 +120,60 @@ Tests: `tests/lua/test_military.lua` (`BUG-023: picks and axes reserved for posi
 guard test without picks), `tests/lua/test_kern_act.lua` (squad_release).
 Live check: kern.log `military: N of M reserved picks/axes nobody carries unassigned`; `inspect what=workload` `pick_res`/`axe_res`
 -> 0 (or only axes behind explicit axe specs); Woodcutters refilled by economy; members carry their tools within a game day.
+
+## Fourth live check (Run 11 site98 y434 spring) and round 5: the diagnosis
+TOOL_BLOCKED `Miners: ... hold no pick for 240 days, 14 dig jobs open; 3 free picks loose` with the release sweep (d4d1a96)
+running and 240 days of equipment update requests (`equip='force'`, 697a95d). The picks 1836340 (103,108,139), 1885239
+(112,87,142) and 1886349 (114,117,136) lay on the floor, not forbidden, not reserved (`pick_res` 0), on the citizens' walk
+group. Nobody claimed a dig job: a dwarf without a work tool never takes one (v1 E18 Run 3: no "needs pick" cancel), so
+DF's work tool assignment itself (`plotinfo.equipment.work_weapons`/`work_units`, filled on `update.weapon` from free
+unreserved weapons, v1 E18 Run 5) never chose them.
+
+What the code shows (proven):
+- The census counted a pick marked for melting or owned by a dwarf as free (live L1b: the melt pile's marks kept the spare
+  picks from the miners for a year; baseline only keeps picks out of melt piles from then on), and it ignored forbidden
+  picks entirely: with only forbidden ones TOOL_BLOCKED never came (`free == 0`) and nothing unforbade them.
+- Nothing kept a member from holding a second tool labor (MINE + CUTWOOD/HUNT) that no detail grants (a stray labor from
+  before; DFHack's manipulator treats the three as mutually exclusive, autolabor: "the exclusive labors require
+  equipment"); DF's own labor pass would clear it.
+- TOOL_BLOCKED read nothing of DF's equipment state, the members' burrows or the civ alert, so four rounds could not say
+  why DF did not hand the picks out.
+
+Checked and not the cause: the census' pick is a weapon whose def has `skill_melee` MINING, the test DFHack's autolabor
+`count_tools` uses for a mining tool; merchant goods, dumped, hostile and built-in items are never counted as free.
+
+Suspected, not provable offline (the diagnosis reads each): the picks are not in `items_unassigned` (stuck in
+`items_unmanifested` or in no list after their miners died in siege 3), DF still lists them as work tools of dead
+miners (`work_weapons`/`work_units`), the members are paired with other (lost) picks, or a burrow (a lever room, the civ
+alert) holds them. The two vectors are read as parallel (item i belongs to unit i; df-structures names them
+`civilian_item_id`/`civilian_unit_id`).
+
+Fix (Claude, 2026-10-16):
+- **Diagnosis** (`economy.tool_diag`, daily while blocked, read-only): per free tool (4; forbidden ones after the free)
+  its flags (in_job, owned, melt, forbid, artifact, hostile, encased, foreign, container), wear, DF's list
+  (`u` unassigned, `a` assigned, `m` unmanifested, `-` none), its work tool pair (the unit and whether it is dead, gone,
+  a soldier, a member or another), its owner, `far`, the building on its tile; per member without one (6) the labor,
+  a second tool labor, DF's work tool pair (`wu=item:held|loose|forbidden|gone|held by N`), the burrows DF keeps him to
+  (the civ alert's while it sounds, else `unit.burrows`) and how many free tools lie in them, how many share his walk
+  group (snapshot.groups), `uniform_pickup` (with `*` when it lists a free tool), a pending `pickup_flags.update`, patient,
+  his job. Blockers in order: `labor`, `tool2`, `alert`, `burrow`, `walk`, `pair`, `flag`, `pool`, `upair`, `fetch`,
+  `pending`, else `none`. TOOL_BLOCKED gains `blk`, `bk`, `picks`, `units`, `civ`, `ww`, `forb`; a new blocker key is a
+  cause (util/cadence), so the next report after `dfllm reload` comes with it. kern.log: `tools: Miners blocked (<keys>):
+  <texts> | civ alert burrows N, work tool pairs N | picks: ... | members: ...` (at once after a load and whenever the
+  diagnosis changes); `inspect workload` `key:'tools'` returns every record.
+- **Melt marks** off a free pick/axe while members lack it (act.item_flag, the item sheet), as many a day as lack one.
+- **Forbidden** picks/axes nobody carries are counted (`w_pick_forb`, `w_axe_forb`; also `_melt`, `_own`) and unforbidden by
+  T.forbid (PEACE/RECOVERY, revealed, on the walk group) while members lack that tool; TOOL_BLOCKED comes with them too.
+- **One tool labor:** `act.work_detail` joining Miners/Woodcutters/Hunters switches the other two tool labors off when no
+  detail grants them (a second tool detail the unit is in keeps its labor); economy's repair makes that pass for such a
+  member (`held a second tool labor (HUNT, no detail grants it)`, with the equipment request).
+- Not built: an item move, an edit of `work_weapons`/`work_units`/`items_unmanifested` (no UI does them), a hauling job or
+  a stockpile for the picks (v1 measured that bins and stockpiles do not matter), `setAutomaticProfessions` (DF's own work
+  detail pass would hand the miners the everybody-does-this labors back).
+Tests: `tests/lua/test_economy_tools.lua` (three `BUG-023 round 5` cases), `tests/lua/test_act_supply.lua` (one tool labor);
+all fail on the old code.
+Live check: after `dfllm reload` a TOOL_BLOCKED with `bk`/`blk` (within a game day) and the kern.log `tools: Miners blocked`
+line; `dfllm cmd inspect '{"what":"workload","key":"tools"}'` for every record. Read: `pool` (a pick in no list or
+unmanifested), `pair ... (dead N)` (DF keeps it as a dead miner's work tool), `upair` (a member paired with a lost pick),
+`burrow`/`alert` (which burrow holds them), `fetch` (DF assigned it: why does he not walk there, see his job), `pending`
+(DF did not process the request), `none` (nothing visible: tell the dev session with the records).

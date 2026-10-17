@@ -16,7 +16,7 @@ local function add_jobs(names)
   end
 end
 local JOBS = {'MakeArmor', 'MakePants', 'MakeShoes', 'MakeGloves', 'MakeHelm', 'MakeWeapon', 'MakeAmmo', 'MakeShield',
-              'BrewDrink', 'ConstructBuilding', 'MakeBarrel'}
+              'BrewDrink', 'ConstructBuilding', 'MakeBarrel', 'Rest'}
 
 local function world(opts)
   opts = opts or {}
@@ -255,6 +255,82 @@ T.test('FR-10: "Needs ..." cancels past needs_drop remove the order; supply orde
   local r = W.inbox('inspect', {what = 'workload'})
   T.eq(r.ok, true, r.msg)
   T.eq(r.data.cancels[1], {why = 'Needs empty barrel', n = 12})
+end)
+
+-- Run 11 (Kilrudrabed y434): the manager (hf 5443) rested with a wound; ConstructCoffin wood x25 and four ConstructDoor
+-- wood orders stayed unvalidated while ORDER_STUCK named their material. Unvalidated + no manager available is the
+-- reason now, and after orders.manager_days DECISION_NEEDED manager_absent asks for an acting manager.
+local function manager(W, hf_unit)
+  local vec = kmock.vec
+  df.global.plotinfo.main = {fortress_entity = {positions = {
+    own = vec{{id = 3, code = 'MANAGER', flags = {ACTIVE = true}}},
+    assignments = vec{{id = 1, position_id = 3, histfig = 5443, histfig2 = 5443}}}}}
+  local u = W.unit(hf_unit)
+  u.hist_figure_id = 5443
+  u._m.name = 'Ber Ostukdakost, Manager'
+  return u
+end
+
+T.test('Run 11: an unvalidated order while the manager rests injured says so (ORDER_STUCK), then DECISION_NEEDED '
+       .. 'manager_absent; a recovered manager ends it', function()
+  local W = world{masons = false, setup = function(W)
+    F.workshop(W, 'Carpenters')
+    for _ = 1, 40 do F.item(W, 'WOOD', {}) end
+    F.order(W, {job_type = df.job_type.ConstructCoffin, mat_type = -1, mat_index = -1, amount_left = 25,
+                material_category = {wood = true}, status = {validated = false}, _name = 'Construct wooden coffin'})
+    F.order(W, {job_type = df.job_type.ConstructDoor, mat_type = 0, mat_index = -1, amount_left = 4,
+                material_category = {}, status = {validated = false}, _name = 'Construct rock door'})  -- no rock either
+    F.order(W, {job_type = df.job_type.ConstructTable, mat_type = -1, mat_index = -1, amount_left = 2,
+                material_category = {wood = true}, status = {validated = true}})
+  end}
+  local mg = manager(W, 2)
+  mg.job.current_job = {id = 902, job_type = df.job_type.Rest}
+  days(W, 2)
+  T.eq(#W.find_events('DECISION_NEEDED'), 0, 'not before manager_days')
+  days(W, 2)
+  local ev = W.find_events('ORDER_STUCK')
+  T.eq(#ev, 2, 'both unvalidated orders, the validated wooden table runs')
+  for _, e in ipairs(ev) do
+    T.eq(e.d.why, 'unvalidated: no manager available (manager Ber resting/injured)', 'instead of no rock/no Masons')
+  end
+  local dn = W.find_events('DECISION_NEEDED')
+  T.eq(#dn, 1)
+  T.eq(dn[1].d.id, 'manager_absent')
+  T.ok(dn[1].msg:find('ConstructCoffin x25', 1, true) and dn[1].msg:find('2 orders not validated', 1, true), dn[1].msg)
+  T.ok(dn[1].d.q:find('acting manager', 1, true), dn[1].d.q)
+  local r = W.inbox('inspect', {what = 'orders'})
+  T.eq(r.data.list[1].why, 'unvalidated: no manager available (manager Ber resting/injured)')
+  days(W, 8)
+  T.eq(#W.find_events('DECISION_NEEDED'), 1, 'once per manager and reason (util/cadence)')
+  -- the manager is up again and validates: no reason, the episode ends
+  mg.job.current_job = {id = 903}
+  for _, o in ipairs(df.global.world.manager_orders.all) do o.status = {validated = true} end
+  days(W, 1)
+  local again = false
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find('manager orders validated again (Ber)', 1, true) then again = true end end
+  T.ok(again, 'the end is logged')
+  -- a gone manager (dead) is no manager either
+  W.kill(2)
+  F.order(W, {job_type = df.job_type.ConstructCoffin, mat_type = -1, mat_index = -1, amount_left = 3,
+              material_category = {wood = true}, status = {validated = false}})
+  days(W, 4)
+  local st = W.find_events('ORDER_STUCK')
+  T.eq(st[#st].d.why, 'unvalidated: no manager available (the manager is gone)')
+end)
+
+T.test('Run 11: an unvalidated order with an available manager keeps its own reasons', function()
+  local W = world{masons = false, setup = function(W)
+    F.order(W, {job_type = df.job_type.ConstructDoor, mat_type = 0, mat_index = -1, amount_left = 4,
+                material_category = {}, status = {validated = false}})
+  end}
+  manager(W, 2)
+  days(W, 4)
+  local ev = W.find_events('ORDER_STUCK')
+  T.eq(#ev, 1)
+  T.ok(ev[1].d.why:find('no rock', 1, true) and not ev[1].d.why:find('manager', 1, true), ev[1].d.why)
+  local dn = W.find_events('DECISION_NEEDED')
+  T.eq(#dn, 1)
+  T.eq(dn[1].d.id, 'manager_office', 'none validated with a manager at hand: the office question as before')
 end)
 
 T.done()
