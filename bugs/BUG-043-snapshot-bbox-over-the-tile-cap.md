@@ -1,5 +1,5 @@
 # BUG-043 The audit and sites snapshots are refused: the fort's bounding box grew past 250,000 tiles
-Status: fixed (offline, live-untested): one default box composition for every purpose (the fort's pieces), explore shafts
+Status: fixed in e0be1c7 (offline, live-untested): one default box composition for every purpose (the fort's pieces), explore shafts
 as narrow column parts of a union export (' ' = not exported, the outside for bp.topo), the margin shrunk stepwise
 (16,16,2 -> 8,8,1 -> 4,4,1 -> 0,0,0) before a refusal, `max_tiles` 400,000 (config `snapshot.max_tiles`), a refusal
 that names the box per axis and the piece that stretches it; readiness asks without a box of its own, keeps the
