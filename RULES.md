@@ -187,7 +187,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 - **R0:** cap 55 (pop-control `max-pop 55`, `wave-size 8`).
 - **R1 sealed:** worst-case audit passes (all bridges lowered, doors open, trap hall removed: no
   edge→Z3 path; refuge reachable without Z2/Z3; civilian path ≠ attacker path; caverns sealed);
-  Kern+ and Tiefe+ exist; 2 levers per bridge.
+  Kern+ and Tiefe+ (with drink) exist; 2 levers per bridge.
 - **R2 grow to ≤ 75:** R1 + drill passed ≤ 100,800 ticks ago (bridges up ≤ T+900, worn ≥ 90 %,
   nobody outside at T+1,200, 0 double toggles) + soldiers ≥ 15 % of adults and ≥ 8 with combat
   value ≥ `cv_min` + ≥ 30 armed traps on every attacker path + food ≥ 60 days, drink ≥ 170 days.
@@ -196,7 +196,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 - R0 blockers (`ready.fail`; full table DESIGN §5.4): `audit`/`audit_old` no or stale audit → `dfllm audit`;
   `audit_fail`, `bypass` (a way in skips the trap hall), `refuge_sep` (refuge missing or on the attack path),
   `civ_sep` (no separate civilian/military stair), `caverns` (open, or a shaft not yet plugged: CAVERN_PLUG) → the
-  audit's own reasons (AUDIT `fails`, SIEGE_UNREADY `afails`); `no_kern`/`no_refuge` burrow missing; `no_outer`/
+  audit's own reasons (AUDIT `fails`, SIEGE_UNREADY `afails`); `no_kern`/`no_refuge` burrow missing; `refuge_dry` the refuge has no drink (stock < citizens, no wet well; Run 11) → a well/cistern or drink stockpile there; `no_outer`/
   `no_inner` no O1/B1, `bridge:B` not built, `levers:B` < 2 linked levers → fortcore pieces; `lost:B` a gate given up after building destroyers → the player's answer (DECISION_NEEDED `bridge_rebuild`). `status` says `UNREADY`
   while R0 fails (SIEGE_UNREADY monthly); `drill never (auto: <why>)` → fix `<why>` or `dfllm cmd drill`.
 - Audit `fails` name the fix (table DESIGN §5.4): `bypass: wall x,y,z floor -> X` / `refuge: on the attack path,

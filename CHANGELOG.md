@@ -1,5 +1,26 @@
 # CHANGELOG dfpilot
 
+## A refuge without drink is reported before a siege: readiness R0 `refuge_dry` (2026-10-17; offline, live-untested)
+- **Why (Run 11 siege 8, y441):** Tiefe+ had no drink; nothing said so before the siege (seal's REFUGE_FAIL comes only
+  when the alert is wanted, the refuge gate of `plan check` looks at separation and beds).
+- **readiness:** a new R0 blocker `refuge_dry`: the refuge burrow exists and seal's last audit finds drink < citizens
+  and no well, or its wells are dry (state `water.refuge_ok` 0: no wet well on a Tiefe+ tile). SIEGE_UNREADY (A, the
+  FR-65 cadence: at once 2 days after a load, then monthly and 30 real minutes, 10 with news) names it after the
+  blockers: `siege unready (R0: refuge_dry); Tiefe+ has no drink (drink 0<52, no well): build a well/cistern or stock
+  drink there; ...` (`d.rdry`). No seal answer (missing, no audit yet) is no blocker (fail-open).
+- **seal:** public `seal.refuge_drink()` (`{name, exists, drink, need, wells, wet}` from the last audit).
+- **Python:** the wake line of such a SIEGE_UNREADY says `next: the refuge has no drink: next plan a well/cistern there
+  (bp sites cistern) or a drink stockpile`; `dfllm status`/`brief` add the same to the UNREADY line's `next:`.
+- Contracts: §7 `seal.refuge_drink`, §12 SIEGE_UNREADY `rdry` (schema, appendix); RULES §8 (R1 needs Tiefe+ with drink;
+  the blocker; in place, 300 lines), DESIGN §4/§5.4, DOCTRINE plan B.
+- Tests: `tests/lua/test_readiness.lua` (R0 `refuge_dry` with the text; a well counts unless water says it is dry; a
+  stock clears it; no seal answer: no blocker), `tests/lua/test_seal_refuge.lua` (`seal.refuge_drink` on the real
+  audit), `tests/test_cli_wake.py`, `tests/test_cli_status.py`; each fails on 2f6ab27.
+- **Live check (Run 12):** `dfllm status` in PEACE: `SIEGE UNREADY (R0): ...refuge_dry...` while Tiefe+ holds no drink
+  (Run 11's fort: it had none); after a well over water or a drink stockpile with >= one unit per citizen in Tiefe+,
+  the blocker goes once seal's audit has counted it (the item census runs weekly in PEACE, the audit every 3 days). A fort that was R1 with a dry Tiefe+ drops to R0 (max-pop
+  freezes at the current population): expected; tell the player why.
+
 ## Citizens outside are called home at once; a refuge with drink first; no switch of the alert burrow during a fight without a reason (2026-10-17; offline, live-untested)
 - **Why (Run 11, Kilrudrabed site98, siege 8, y441 spring d23: 2 cave dragons, 4 goblins, a jabberer, a snatcher, an
   ambush; pop 52 -> 3 in ~3 days; docs/v2/POSTMORTEM-run11-siege8-y441.md cause 3):** 16 citizens were outside Kern+

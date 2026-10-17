@@ -479,8 +479,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "AUTOLABOR_LEGACY": ("A", "baseline", _d("fixed:f", "why:s after:s")),
     # FR-64: >= 2 citizens died of dehydration or starvation within a month (the class-A twin of DEATH_CLUSTER)
     "DEATHS_PREVENTABLE": ("A", "care", _CLUSTER),
-    # FR-65: readiness R0 in PEACE: R1 blockers, the audit's own fails, ways in (seal), those without door or bridge
-    "SIEGE_UNREADY": ("A", "readiness", _d(opt="fails:sa afails:sa routes:i open:i ents:sa traps:i age:i")),
+    # FR-65: readiness R0 in PEACE: R1 blockers, the audit's own fails, ways in (seal), those without door or bridge;
+    # Run 11: rdry = the refuge without drink and what to build (blocker refuge_dry)
+    "SIEGE_UNREADY": ("A", "readiness", _d(opt="fails:sa afails:sa routes:i open:i ents:sa traps:i age:i rdry:s")),
     # BUG-015: an entrance door the lockdown forbade lost its forbidden flag before the next pass (refused)
     "LOCKDOWN_PARTIAL": ("A", "reflex", _d("doors:i", "refused:ia pos:p retry:f items:i units:i")),
     # BUG-023 / Run 10: tool detail members without their pick or axe while its jobs wait and free tools exist; Run 11:

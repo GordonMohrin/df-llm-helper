@@ -427,9 +427,12 @@ T.test('Run 11 (siege 8: Tiefe+ had no drink): the deep defense (siege asks at t
   T.ok(#f >= 1 and f[#f].d.burrow == 'Tiefe+' and f[#f].d.fallback == 'Kern+' and f[#f].d.level == 'SIEGE',
        f[#f] and f[#f].msg)
   T.eq(inspect(W, 'refuge').bsince, nil, 'no breach days')
+  T.eq(select(2, W.K.call('seal', 'refuge_drink')),
+       {name = 'Tiefe+', exists = true, drink = 0, need = 3, wells = 0, wet = false}, 'what readiness reads (refuge_dry)')
   -- drink in the dead end (a barrel carried down): the refuge with its drink, without the 7-day window
   SW.item(W, 'DRINK', 6, 7, Z - 4, 5)
   W.run(2400, {skip = 9})
+  T.eq(select(2, W.K.call('seal', 'refuge_drink')).wet, true)
   T.eq(select(2, W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')), 'Tiefe+')
   W.run(9600, {skip = 9})
   T.eq(select(2, W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')), 'Tiefe+', 'eight days later: still')

@@ -13,7 +13,9 @@
 -- (sent by `dfllm follow`, also with --no-auto, or once by `dfllm audit`).
 -- R0 -> R1 blockers (state ready.fail, DESIGN §5.4): audit (no result yet), audit_old (> a season), audit_fail
 -- (bp.topo.audit ok=false), bypass, refuge_sep, civ_sep, caverns (its flags; Run 11: also an explore shaft open to a
--- cavern until its plug wall stands, runner.cavern_open), no_kern, no_refuge (burrows),
+-- cavern until its plug wall stands, runner.cavern_open), no_kern, no_refuge (burrows), refuge_dry (Run 11, siege 8:
+-- the refuge holds no drink by seal's audit, seal.refuge_drink: drink < citizens and no well, or its wells are dry by
+-- water's state refuge_ok 0; SIEGE_UNREADY says what to build),
 -- no_outer, no_inner (no manifest bridge of that role), bridge:<B> (gate does not know it), levers:<B> (< 2 linked),
 -- lost:<B> (BUG-030 rebuild policy: a bridge the perimeter keeper no longer rebuilds after perimeter.stop_after losses
 -- to building destroyers, seal.lost_gates; it stands for bridge:<B> and levers:<B>: the fix is the player's answer to
@@ -276,7 +278,22 @@ local function evaluate(K, why)
   end
   local kern, refuge = burrow_names(man)
   if not dfhack.burrows.findByName(kern) then f1[#f1 + 1] = 'no_kern' end
-  if not dfhack.burrows.findByName(refuge) then f1[#f1 + 1] = 'no_refuge' end
+  rt.rdry = nil
+  if not dfhack.burrows.findByName(refuge) then f1[#f1 + 1] = 'no_refuge'
+  else
+    -- Run 11 (siege 8: Tiefe+ had no drink; a dry refuge holds the citizens only in a breach, for a week)
+    local okd, rd = K.call('seal', 'refuge_drink')
+    if okd and type(rd) == 'table' and rd.exists == true then
+      local wv = K.view().water
+      local wells_dry = (int(rd.wells) or 0) > 0 and type(wv) == 'table' and wv.refuge_ok == 0
+      if (int(rd.drink) or 0) < (int(rd.need) or 0) and ((int(rd.wells) or 0) == 0 or wells_dry) then
+        f1[#f1 + 1] = 'refuge_dry'
+        rt.rdry = string.format('%s has no drink (drink %d<%d, %s): build a well/cistern or stock drink there',
+                                tostring(rd.name), int(rd.drink) or 0, int(rd.need) or 0,
+                                wells_dry and 'its well is dry' or 'no well')
+      end
+    end
+  end
   if not rt.lev or now - rt.lev.tick >= M.LEVERS_EVERY then rt.lev = check_levers(K, man) end
   local okl, lost = K.call('seal', 'lost_gates')             -- BUG-030 rebuild policy: held bridges
   lost = okl and type(lost) == 'table' and lost or {}
@@ -386,7 +403,7 @@ local function route_fix(route)
   return route .. ' (no wall tile: inspect entrances)'
 end
 
-local function unready_msg(fails, routes, open, ents, traps, route)
+local function unready_msg(fails, routes, open, ents, traps, route, rdry)
   local ent
   if routes < 0 then ent = 'entrances not checked yet'
   elseif open == 0 then ent = string.format('%d way%s in, all with a door or bridge', routes, routes == 1 and '' or 's')
@@ -399,6 +416,7 @@ local function unready_msg(fails, routes, open, ents, traps, route)
   local head = string.format('siege unready (R0: %s); ', #fails > 0 and table.concat(fails, ', ') or '?')
   local fix = route_fix(route)
   if fix then head = head .. fix .. '; ' end
+  if rdry then head = head .. rdry .. '; ' end                 -- Run 11: the refuge without drink
   local tail = '; traps ' .. (traps >= 0 and tostring(traps) or '? (no audit)')
   if #head + #ent + #tail > 200 and open > 0 then              -- the list stands in d.ents: keep the traps visible
     ent = string.format('%d of %d ways in without door or bridge', open, routes)
@@ -427,9 +445,9 @@ local function unready(K)
     afails[i] = cut(a.fails[i], 60)
   end
   local routes, open = rt.routes or -1, rt.open or -1
-  K.emit('SIEGE_UNREADY', 'A', unready_msg(fails, routes, open, ents, traps, rt.route),
+  K.emit('SIEGE_UNREADY', 'A', unready_msg(fails, routes, open, ents, traps, rt.route, rt.rdry),
          {fails = fails, afails = afails, routes = routes, open = open, ents = ents, traps = traps,
-          age = a and math.max(0, now.tick - a.tick) or -1})
+          age = a and math.max(0, now.tick - a.tick) or -1, rdry = rt.rdry})
   st.unready, dirty = CAD.mark(now, ents, fails), true
 end
 

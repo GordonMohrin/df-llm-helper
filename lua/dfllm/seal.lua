@@ -3028,6 +3028,19 @@ function M.alert_burrow(K, mode, default, hold, cur)
   return pick, note, brief, r.flee == true
 end
 
+-- public (Run 11, readiness: siege 8's Tiefe+ had no drink): the refuge burrow's drink by the last audit: {name,
+-- exists, drink (units: drink items, FR-59), need (citizens x drink_per_cit), wells (built wells on it), wet (drink >= need
+-- or a well: the SIEGE level's drink rule)}; nil before the first audit
+function M.refuge_drink(K)
+  local au = mem and mem.audit and mem.audit.burrows
+  if not au then return nil end
+  local _, refuge = burrow_names(K)
+  local a = au[refuge]
+  if not a then return nil end
+  return {name = refuge, exists = a.exists == true, drink = int(a.drink) or 0, need = int(a.dneed) or 0,
+          wells = int(a.wells) or 0, wet = a.wet == true}
+end
+
 -- public (BUG-031 (b), siege): citizens the civ alert holds in burrow `name` are over siege's thirst or hunger mark
 -- (need = {drink = bool, food = bool}, n of them) while their walk group has it: the confinement keeps them from it.
 -- When the last audit finds none of it in the burrow (drink items; a well in it serves nobody, the thirst says so),
