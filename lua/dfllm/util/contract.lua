@@ -78,7 +78,8 @@ C.EVENTS = {
   SIEGE_UNREADY = {cls = 'A', by = 'readiness'},
   -- BUG-015: an entrance door the lockdown forbade lost its forbidden flag before the next pass (refused)
   LOCKDOWN_PARTIAL = {cls = 'A', by = 'reflex'},
-  -- BUG-023 / Run 10: members of a tool detail hold no pick or axe for days while its jobs wait and free tools exist
+  -- BUG-023 / Run 10: members of a tool detail hold no pick or axe for days while its jobs wait and free tools exist;
+  -- Run 11: forbidden ones count too (forb), d.blk/bk/picks/units/civ/ww = economy's diagnosis of what DF lacks
   TOOL_BLOCKED = {cls = 'A', by = 'economy'},
   -- BUG-027: a SIEGE/BREACH raise went ahead onto units on or next to the footprint (a hostile at the gate)
   GATE_FORCED = {cls = 'A', by = 'gate'},

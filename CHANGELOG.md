@@ -75,6 +75,80 @@
   - No retry line within two days: the project is not `build_lost` in PEACE, or its retries are spent (`inspect
     persist` m.runner `rty`). Then `dfllm cmd bp.cancel '{"proj":"c1a147087d"}'` and `dfllm cmd bp.place tpl=seal
     site=S1 at=last`. cli.log should show `seal:piece ... door unsuitable at 128,121,143 ...: wall instead`.
+## TOOL_BLOCKED names what keeps DF from handing the picks out; melt marks, forbidden tools and a second tool labor repaired; unvalidated orders name the absent manager (2026-10-16; offline, live-untested)
+- **Why (Run 11, Kilrudrabed site98, y434 spring):**
+  - BUG-023 goes on: TOOL_BLOCKED `Miners: ... hold no pick for 240 days, 14 dig jobs open; 3 free picks loose`. The picks
+    1836340, 1885239 and 1886349 lay on the floor, not forbidden, not reserved, on the citizens' walk group; the release
+    sweep (d4d1a96) and 240 days of equipment update requests (697a95d) changed nothing, and the report could not say why.
+  - New work orders (ConstructCoffin wood x25, four ConstructDoor wood) stayed unvalidated: the manager (hf 5443) rested
+    with a wound. ORDER_STUCK named their material instead; kernel orders wait the same way.
+- **Causes:** proven from the code: the census counted a melt-marked or owned pick as free (live L1b: melt marks kept the
+  spare picks from the miners for a year) and ignored forbidden picks entirely (TOOL_BLOCKED needed a free one); a member
+  could keep a second tool labor (MINE + HUNT/CUTWOOD) no detail grants; TOOL_BLOCKED read nothing of DF's equipment lists,
+  the work tool pairs, the members' burrows or the civ alert. Suspected (the diagnosis reads each): the picks are in no
+  free list (unmanifested after their miners died in siege 3), DF keeps them as dead miners' work tools, the members are
+  paired with lost picks, or a burrow holds them. The order reasons never looked at `status.validated`.
+- **Diagnosis (economy, daily while a tool detail is blocked, read-only, `economy.tool_diag`):**
+  - Per free tool (4, forbidden ones after the free): flags (in_job, owned, melt, forbid, artifact, hostile, encased,
+    foreign, container), DF's list (`u` items_unassigned, `a` assigned, `m` unmanifested, `-` none), its work tool pair
+    (`work_weapons`/`work_units`, read as parallel vectors: unit and dead/gone/soldier/member/other), owner, `far`, the
+    building on its tile.
+  - Per member without one (6): the detail's labor, a second tool labor, DF's pair for him (`wu=item:held|loose|forbidden|
+    gone|held by N`), the burrows DF keeps him to (the civ alert's while it sounds, else `unit.burrows`) and the free tools
+    in them, the tools on his walk group (snapshot.groups), the first 40 open dig/FellTree jobs he can take (his group, his
+    burrows: a tool job is what sends a dwarf for his tool), `uniform_pickup`, a pending `pickup_flags.update`, patient,
+    job; DF's pending `update.weapon` (kern.log).
+  - Blockers in order: `labor`, `tool2`, `alert`, `burrow`, `walk`, `jobs`, `pair`, `flag`, `pool`, `upair`, `fetch`,
+    `pending`, else `none`. TOOL_BLOCKED gains `blk` (texts), `bk` (keys), `picks`, `units` (compact records, <= 3), `civ`, `ww`,
+    `forb`, the message the first text when it fits; a new blocker key is news (util/cadence). kern.log `tools: Miners
+    blocked (<keys>): <texts> | civ alert burrows N, work tool pairs N | picks: ... | members: ...` at the first pass after
+    a load and whenever the diagnosis changes; `inspect` `{what:'workload', key:'tools'}` returns every record, and the
+    workload `blocked` rows carry `blk`.
+- **Repairs (economy, act):**
+  - A free pick/axe marked for melting loses the mark while members lack it (act.item_flag, the item sheet's toggle), as many
+    a day as lack one (kern.log `... marked for melting while N members hold none: melt mark taken off`).
+  - Forbidden picks/axes nobody carries are counted (`w_pick_forb`, `w_axe_forb`; also `w_pick_melt`, `w_pick_own` and the
+    axe ones; `inspect workload` `tools`) and unforbidden by T.forbid (PEACE/RECOVERY, revealed, on the walk group) while
+    members lack that tool; TOOL_BLOCKED also comes with only forbidden ones (`N forbidden`).
+  - One tool labor per dwarf: `act.work_detail` joining Miners, Woodcutters or Hunters switches the other two tool labors off
+    when no detail grants them (a second tool detail the unit is in keeps its labor); economy's repair makes that pass for
+    such a member (`held a second tool labor (HUNT, no detail grants it): taken off through the detail`, with the
+    equipment request).
+  - Not built: item moves, edits of `work_weapons`/`work_units`/the equipment lists (no UI does them), hauling jobs or a
+    stockpile for the picks (v1 measured that bins and stockpiles do not decide it), `setAutomaticProfessions` (DF's work
+    detail pass would give the miners the everybody-does-this labors back).
+- **The absent manager (economy orders part):** `economy.manager_state` reads the MANAGER holder: none appointed, gone
+  (dead, left, off the map), resting/injured (needs health care or rests in bed), in a strange mood. An unvalidated order
+  while he cannot validate has only that reason: ORDER_STUCK `why` `unvalidated: no manager available (manager Ber
+  resting/injured)`, also in `inspect orders`. After `orders.manager_days` (3) of unvalidated orders: DECISION_NEEDED
+  `manager_absent` (A, util/cadence: once per manager and reason) `no manager available (...) for N days: M orders not
+  validated (ConstructCoffin x25, ...)`, q: appoint an acting manager on the nobles screen? The kernel never replaces a
+  holder (no act verb; the player's choice); the office question (`manager_office`) waits meanwhile; kern.log `manager
+  orders validated again` ends the episode.
+- Contracts: TOOL_BLOCKED `forb blk bk picks units civ ww` (schema, contract.lua comment, CONTRACTS row and appendix); the
+  census keys `w_*_forb/_melt/_own`; `act.work_detail`'s tool labor rule; `inspect workload` `key:'tools'`; ORDER_STUCK's
+  manager reason; config `economy.orders.manager_days` (`config/baseline.json`); RULES §7 TOOL_BLOCKED and DECISION_NEEDED
+  rows; `dfllm follow`'s TOOL_BLOCKED hint (`key:'tools'`). BUG-023 section "Fourth live check".
+- Tests (fail on the old code): `tests/lua/test_economy_tools.lua` (four `BUG-023 round 5` cases: a pick paired with a dead
+  unit, an unmanifested one and a member paired with a gone pick, the kern.log line and `key=tools`; a second tool labor,
+  the civ alert and an own burrow, a new blocker is news; melt mark off, forbidden picks counted, unforbidden and reported
+  without a free one; the dig jobs and the picks off the members' walk group), `tests/lua/test_act_supply.lua` (one tool labor), `tests/lua/test_economy_orders.lua` (the resting
+  manager: reasons, DECISION_NEEDED, recovery, a dead manager; an available manager keeps the old reasons).
+  `tests/lua/test_economy_jobs.lua` reads the new tool counts.
+- **How to use:** TOOL_BLOCKED: read `d.bk`/`d.blk`; `labor`, `tool2`, melt and forbidden picks the kernel repairs itself;
+  `alert`/`burrow`/`walk`/`jobs`: which burrow (lever rooms, the civ alert) or walk group keeps them from the tools or the
+  jobs; `pair`/`pool`/`upair`/`fetch`/`pending`/
+  `none`: DF's own equipment state, tell the player with the records from `key:'tools'` (no verb fixes it).
+  DECISION_NEEDED `manager_absent`: ask the player for an acting manager.
+- **Live check (Run 11 site98):** after `git pull` and `dfhack-run dfllm reload`, within a game day:
+  - kern.log `tools: Miners blocked (<keys>): ...` with the three picks (1836340 103,108,139 ...) and the members; then
+    TOOL_BLOCKED with `bk`/`blk`. `dfllm cmd inspect '{"what":"workload","key":"tools"}'` for every record.
+  - Expected reading: `pool` (`1836340:unmanifested` or `:none`: DF lost them from its free list), `pair ... (dead N)` (DF
+    keeps them as dead miners' work tools), `upair` (a member paired with a lost pick), `burrow`/`alert`, `walk`/`jobs`,
+    `fetch`,
+    `pending` or `none`. Report the line to the dev session; with `fetch` look at the member's job.
+  - Orders: `dfllm cmd inspect '{"what":"orders"}'` lists the coffins/doors with `unvalidated: no manager available
+    (manager <name> resting/injured)`; after 3 days of it DECISION_NEEDED `manager_absent`.
 
 ## The daily shaft check: an explore shaft open to a cavern is plugged in any project state, a hatch is no plug, explores stop above known cavern levels (2026-10-16; offline, live-untested)
 - **Why (Run 11, Kilrudrabed site98, y432-433, kernel a6c33a9 with the cavern plug):** CAVERN_PLUG never came for the

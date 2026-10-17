@@ -19,6 +19,9 @@ A.TOOL_DETAILS = {Miners = true, Woodcutters = true, Hunters = true, Fisherdwarv
                   ['Plant gatherers'] = true, Gatherers = true, Herbalists = true}
 -- the details whose labor needs a tool (pick, axe, crossbow, rod): a specialist (work_detail opts.only) keeps them
 A.TOOL_LABOR_DETAILS = {Miners = true, Woodcutters = true, Hunters = true, Fisherdwarves = true}
+-- BUG-023 (Run 11): the tool labors one dwarf may hold only one of (DFHack manipulator.cpp `special` columns: MINE,
+-- CUTWOOD, HUNT are "mutually exclusive"; autolabor: "all the exclusive labors require equipment"), by their detail
+A.TOOL_EXCL = {Miners = 'MINE', Woodcutters = 'CUTWOOD', Hunters = 'HUNT'}
 -- the doctor labors act.medic switches and the hospital posts act.hospital_post fills (FR-48)
 A.MEDIC_LABORS = {'DIAGNOSE', 'SURGERY', 'BONE_SETTING'}
 A.HOSPITAL_POSTS = {DOCTOR = true, DIAGNOSTICIAN = true, SURGEON = true, BONE_DOCTOR = true}
@@ -1615,6 +1618,10 @@ local function impls(state)
   --                 the dwarf for an equipment update (unit.uniform.pickup_flags.update and plotinfo.equipment.update.weapon,
   --                 the request the engine hands work picks and axes out on; v1 E18 Run 5 measurement). The dwarf still
   --                 walks to the tool and picks it up himself; no item is moved.
+  -- Joining Miners, Woodcutters or Hunters (BUG-023, Run 11) also switches off the other two tool labors (A.TOOL_EXCL)
+  -- when no detail grants them (a selected detail the unit is a member of, or an everybody-does-this one): DF's own
+  -- labor pass clears them too, and the labors screen never lets a dwarf hold two of them (each wants its own tool).
+  -- A second tool detail the unit is a member of (the player's choice) keeps its labor.
   function I.work_detail(name, unit_id, on, opts)
     if not A.TOOL_DETAILS[name] then return false, 'not a builtin tool detail: ' .. tostring(name) end
     opts = type(opts) == 'table' and opts or {}
@@ -1680,6 +1687,24 @@ local function impls(state)
       pcall(function() u.uniform.pickup_flags.update = true end)
       pcall(function() df.global.plotinfo.equipment.update.weapon = true end)
     end
+    -- the other tool labors (A.TOOL_EXCL) no detail grants the unit go off (see above)
+    local function stray_tools(details, wd, u, id)
+      local every, nobody = every_mode(), df.work_detail_mode and df.work_detail_mode.NobodyDoesThis
+      for dn, ln in pairs(A.TOOL_EXCL) do
+        local l = df.unit_labor and df.unit_labor[ln]
+        if dn ~= name and type(l) == 'number' and u.status.labors[l] and not wd.allowed_labors[l] then
+          local held = false
+          for _, x in ipairs(details) do
+            local m = x.flags.mode
+            if x ~= wd and x.allowed_labors[l] and (nobody == nil or m ~= nobody) and
+               ((every ~= nil and m == every) or wd_member(x, id)) then
+              held = true
+            end
+          end
+          if not held then u.status.labors[l] = false end
+        end
+      end
+    end
     local details = df.global.plotinfo.labor_info.work_details
     local wd
     for _, w in ipairs(details) do
@@ -1708,6 +1733,7 @@ local function impls(state)
         end
       end
       if opts.only then specialize(details, wd, u, id, keep_set(opts.keep)) end
+      if A.TOOL_EXCL[name] then stray_tools(details, wd, u, id) end
       -- opts.equip = true: with a labor switched on / a new member; 'force': also for a member that already has it
       -- (economy's tool repair, Run 10: members added before tools.equip_update was on never got the request)
       if opts.equip and A.TOOL_LABOR_DETAILS[name] and (turned or not at or opts.equip == 'force') then equip_update(u) end

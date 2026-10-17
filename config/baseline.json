@@ -166,7 +166,7 @@
   },
   "cancel_loop": 5,
   "order_guard": {"drop": true, "per_run": 4},
-  "orders": {"stuck_days": 3, "needs_drop": 10, "backoff_days": 10, "report_per_day": 3},
+  "orders": {"stuck_days": 3, "needs_drop": 10, "backoff_days": 10, "report_per_day": 3, "manager_days": 3},
   "jobs": {"release_per_day": 20, "held_days": 3, "preventblocking": "keep", "sites_per_day": 40, "unforbid_per_day": 60,
            "mat_scan": 2000, "fail_alarm": 3, "depot_move_after": 5, "move_days": 28, "move_r": 12, "move_dz": 2,
            "move_gap": 3, "move_probes": 150},
