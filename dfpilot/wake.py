@@ -91,7 +91,8 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
         "TOOL_BLOCKED": "dfllm cmd inspect '{\"what\":\"workload\",\"key\":\"tools\"}' (d.bk names the blocker), "
                         "then tell Gordon (RULES 7)",
         # BUG-030: the kernel already acted (no pulls for a destroyed bridge; the deep defense); tell the player
-        "BRIDGE_DESTROYED": "dfllm status; tell Gordon; rebuild it after the siege (plan)",
+        "BRIDGE_DESTROYED": "dfllm status; tell Gordon; the kernel rebuilds it in quiet PEACE (or asks: "
+                            "DECISION_NEEDED bridge_rebuild); nothing tactical",
         "SIEGE_DEEP": "dfllm status (civilians in the refuge, squads in the core); tell Gordon; nothing tactical",
         # Run 11: a dig broke into a cavern; the kernel plugs an explore shaft itself (failed/none: by hand)
         "CAVERN_PLUG": "tell Gordon (queued: the kernel walls the shaft; failed/none: a constructed wall by hand); "
@@ -180,7 +181,17 @@ def next_hint(etype: str, e: dict) -> str:
     d = e.get("d") if isinstance(e.get("d"), dict) else {}
     if etype == "SIEGE_UNREADY" and any(_WALL.search(str(f)) for f in d.get("afails") or []):
         return SEAL_HINT
+    if etype == "DECISION_NEEDED" and d.get("id") == "bridge_rebuild":
+        return rebuild_hint(d)
     return NEXT.get(etype, "dfllm brief")
+
+
+def rebuild_hint(d: dict) -> str:
+    """BUG-030 rebuild policy: the kernel stopped rebuilding a bridge the building destroyers keep breaking; the
+    player's answer is a verb (rebuild) or a plan (wall, a second outer gate), leaving it is the default."""
+    b = d.get("bridge") or "O1"
+    return (f"ask Gordon: rebuild (dfllm cmd bridge.rebuild '{{\"bridge\":\"{b}\"}}'), wall it or a second "
+            "outer gate (plan), or leave it (default)")
 
 
 _WALL = re.compile(r"\bwall -?\d+,-?\d+,-?\d+ (floor|ramp)\b")

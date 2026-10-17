@@ -1946,10 +1946,16 @@ local function inside(K, P, d)    -- the whole project lies in one Z3/Z4 bbox (r
 end
 
 -- CONTRACTS §9.8 class gating: ALERT/RECOVERY defense+infra, SIEGE defense inside, beauty PEACE+R1; the cavern plug
--- (Run 11) in every mode: an open way from a cavern matters most in a fight
+-- (Run 11) in every mode: an open way from a cavern matters most in a fight; a lost bridge's repair (seal, BUG-030
+-- rebuild policy: params.peace) only in PEACE without a reflex lockdown
 local function allowed(K, P, d)
   if P.tpl == 'plug' then return true end
   local m = K.mode()
+  if P.tpl == 'repair' and d and type(d.params) == 'table' and d.params.peace == 1 then
+    if m ~= 'PEACE' then return false end
+    local ok, why = K.call('reflex', 'holding')
+    return not (ok and type(why) == 'string' and why ~= '')
+  end
   if m == 'PEACE' then return P.class ~= 'beauty' or beauty_ok(K) end
   if m == 'ALERT' or m == 'RECOVERY' then return P.class == 'defense' or P.class == 'infra' end
   if m == 'SIEGE' then return P.class == 'defense' and d ~= nil and inside(K, P, d) end
@@ -2746,8 +2752,9 @@ end
 
 -- FR-56 (seal): a defense project that builds lost perimeter pieces again. cells = {{x, y, z, text}, ...} absolute
 -- quickfort build cells (Cw, d, gw(3x1) ...); like cmd.py's repair_doc, buildingplan waits for the materials (no
--- orders) and there is no manifest fragment. Returns ok, project id.
-function M.repair(K, cells, why)
+-- orders) and there is no manifest fragment. opts.peace (seal, a lost bridge; BUG-030 rebuild policy): params.peace
+-- = 1, the project is built only in PEACE without a reflex lockdown (allowed). Returns ok, project id.
+function M.repair(K, cells, why, opts)
   if type(cells) ~= 'table' or #cells == 0 or #cells > 500 then return false, 'need 1-500 cells' end
   local list = {}
   for i, c in ipairs(cells) do
@@ -2757,7 +2764,8 @@ function M.repair(K, cells, why)
   end
   sort_cells(list)
   local id = new_id(K, 'rp')
-  local d = {v = 2, tpl = 'repair', site = 'repair', class = 'defense', params = obj{}, rot = 0,
+  local d = {v = 2, tpl = 'repair', site = 'repair', class = 'defense',
+             params = (type(opts) == 'table' and opts.peace) and obj{peace = 1} or obj{}, rot = 0,
              anchor = {list[1][1], list[1][2], list[1][3]}, manifest = {v = 2}, materials = obj{},
              stages = {{label = 's1.build', mode = 'build', orders = 0, defense = 1, chunks = abs_chunks(list)}}}
   local ok, err = register(K, id, d, 2, 'repair')

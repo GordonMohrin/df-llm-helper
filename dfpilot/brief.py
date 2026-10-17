@@ -181,6 +181,10 @@ def line_unready(ctx: Ctx) -> str:
         nxt.append("close the open ways in (dfllm cmd bp.place tpl=seal site=S1 at=last)")
     if any(f.startswith(R0_FORTCORE) for f in fails):
         nxt.append("build the missing fortcore pieces (plan)")
+    lost = [f.split(":", 1)[1] for f in fails if f.startswith("lost:")]
+    if lost:                                   # BUG-030 rebuild policy: held for the player, not a fortcore piece
+        nxt.append(f"{','.join(lost)} lost to building destroyers: Gordon's answer (DECISION_NEEDED bridge_rebuild: "
+                   f"dfllm cmd bridge.rebuild, a wall or a second outer gate in the plan)")
     if nxt:
         out.append("next: " + "; ".join(nxt))
     return _join(out)

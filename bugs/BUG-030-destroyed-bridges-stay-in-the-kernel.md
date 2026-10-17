@@ -1,5 +1,5 @@
 # BUG-030 Destroyed bridges stay in the kernel; no plan B against building destroyers; stations in the kill field
-Status: fixed in 486b5ce (offline, live-untested): BRIDGE_DESTROYED, a destroyed bridge is an open way, the deep defense SIEGE_DEEP (2026-10-16)
+Status: fixed in 486b5ce (offline, live-untested): BRIDGE_DESTROYED, a destroyed bridge is an open way, the deep defense SIEGE_DEEP (2026-10-16). Rebuild policy (2026-10-17, Run 11, offline, live-untested): a lost bridge is rebuilt only in quiet PEACE and not after `perimeter.stop_after` losses to building destroyers without the player
 Severity: critical (Run 10 fell: pop 108 -> 0 in about 30 game days)
 Found: 2026-10-16, Run 10 fort Erushthak Handlelock (region2-site97), y421 spring siege of 58 goblins and 6 trolls, kernel
 main 94b9eed, the orchestrator playing (`docs/v2/POSTMORTEM-run10-siege-y421.md`)
@@ -90,6 +90,88 @@ alert burrow without regard to destroyers or the army's size), `lua/dfllm/milita
 - The Z3 lever room keeps its two lever pullers in a deep SIEGE (gate's SIEGE duty); they leave it at the BREACH.
 - A fort without soldiers relies on its bridges as before (no `army`/`weak` reason); destroyers still send it deep.
 - `stations.metal` is 0 (off) by default: with iron/steel required, every year-1 siege would go deep.
+
+## Rebuild policy (2026-10-17, Run 11)
+### Actual
+- Run 11 (Kilrudrabed, region site98, y434-y438 winter): the outer drawbridge O1 (114,79,142) was destroyed in all five
+  sieges by cave dragons (building destroyers; SIEGE_DEEP said `the bridges are no barrier`). The perimeter keeper
+  (seal, FR-56) re-queued it every time: the post-siege diff runs when the fort enters RECOVERY (and again at
+  SIEGE_END and when it is quiet), so PERIMETER_BROKEN -> an `rp...` repair project with the bridge cell and the walls
+  was queued in RECOVERY, and the runner builds `repair` (class defense) in ALERT and RECOVERY. The builders stood on
+  O1's footprint on the attack path, the next siege broke the gate first, and nothing ever asked the player. Siege 5
+  went well otherwise (3 losses; the BUG-032 station fix, the refuge switch and the refill worked).
+- Nothing counted the losses: gate's `m.gate.gone` holds only the current destruction, `seen` only the last building.
+
+### Expected
+- A destroyed bridge is never rebuilt during SIEGE, BREACH, ALERT, RECOVERY or a reflex lockdown; its repair is queued
+  only once the fort is quiet again (PEACE, no lockdown) and built only then.
+- After `perimeter.stop_after` (default 2) losses to building destroyers the kernel stops rebuilding it, tells the
+  player once with the history (losses, destroyers, years, what the rebuilds took) and the options, and readiness says
+  why the fort is R0. The player's answer re-enables the rebuild.
+- The loss count per bridge is persisted and shown in `inspect defense`.
+
+### Fix (2026-10-17)
+- **gate: the loss history** (`m.gate.lost`, public `gate.losses(bridge?)`): per manifest bridge `n` losses, `bd` of
+  them with building destroyers in sight (`census.h.bd` now or within `gate.LOST_BD` 2,400 ticks before; gate notes the
+  last sighting and the races each pass), `races` (<= 4), `ev` the newest 6 losses `{t, y, m, bd}`, `reb` times it
+  stood again (GATE `rebuilt`), `it`/`mat` the construction items of the lost bridges and their material (read from
+  the building's item list once, when gate first sees it complete; best effort), `lk` the lever links queued after a
+  loss. BRIDGE_DESTROYED carries `n`, `bd`, `destroyers` (this loss), `races` and ends `lost 2x, 2 with building
+  destroyers in sight (DRAGON)`. A new footprint in the manifest (a moved gate) starts a new record.
+- **seal: the bridge queue** (`m.seal.gq`): the post-siege diff sends a lost bridge (one with its quickfort build text,
+  `gw(3x1)`) to the queue instead of the RECOVERY repair; walls, doors and the rest keep the RECOVERY repair.
+  PERIMETER_BROKEN names it: `wait` (`...; bridge O1 after the fight (quiet PEACE)`). In quiet PEACE (the episode's last
+  diff, a daily look, the verb) each entry is queued as its own `repair` project with `opts.peace`; an entry stays
+  until its bridge stands again (its perimeter piece keeps the build text: the retire passes leave it alone) or 60
+  days after its repair was queued; a footprint the player walled is retired (never rebuilt).
+- **runner:** `runner.repair(cells, why, opts)`: `opts.peace` -> `params.peace = 1`; such a project is frozen outside
+  PEACE and during a reflex lockdown (`allowed`; one condition, no other runner change).
+- **The stop rule:** a manifest bridge destroyed `perimeter.stop_after` (config/reflex.json `perimeter`, 0-20, 2; 0 =
+  always rebuilt) times by building destroyers since the player's last answer is held: no repair, DECISION_NEEDED
+  `bridge_rebuild` (A, once per loss count, after the fight, in quiet PEACE): `O1 destroyed 2x by building destroyers
+  (DRAGON; y437,y438), rebuilt 1x (3 items in the lost bridges, granite blocks, 1 lever link): no automatic rebuild
+  after 2; rebuild, wall, outer gate or leave?`, `d` = bridge, n, bd, reb, items, mat, links, races, years, stop and
+  opts (rebuild: `dfllm cmd bridge.rebuild {"bridge":"O1"}`; walls on its footprint + a door entrance (plan); a second
+  outer gate further out (plan, by hand); leave: no rebuild, the default). `seal.lost_gates()` lists the held ones.
+- **The answer:** verb `bridge.rebuild {bridge}` (seal, any mode): stores the bridge's `bd` as answered (the stop rule
+  counts again from it: asked again after `stop_after` more losses), queues the held bridge at once in quiet PEACE
+  (the reply names the project), else in the next quiet PEACE; refused for a name the manifest does not list.
+- **Readiness/doctrine:** a held bridge is the R0 blocker `lost:<B>` in place of `bridge:<B>` and `levers:<B>` (the fix
+  is the player's answer, not a fortcore piece; the brief's `next:` says so). The doctrine: against building destroyers
+  the gate is no barrier, the deep defense (refuge, core station) is the answer, and a lost O1/B1 is a BREACH at once
+  (both unchanged); a gate they break twice is not rebuilt without the player.
+- `inspect defense`: each manifest bridge with a history carries `lost` (the record) and `rebuild` (`stop_after`, `ans`,
+  `state` held/waits/queued/auto, `proj`); the msg `O1 destroyed/- 0lev lost 2x (2 bd) held`. `inspect perimeter`:
+  `bridges` (the queue).
+- Kernel cost: one census field per gate pass; per lost bridge a few footprint reads a game day in PEACE.
+- Tests: `tests/lua/test_bridge_rebuild.lua` (new, all 4 fail on fcada16): the loss history (counts, races, year,
+  rebuild, items, lever link, a loss without destroyers, a reload); the Run 11 replay with the real gate and seal (siege
+  1: the wall in RECOVERY, O1 only in PEACE as a peace-only repair; siege 2: held, DECISION_NEEDED once with the
+  history, `inspect defense` held; `bridge.rebuild`; the 3rd loss rebuilt, the 4th asked again); ALERT and a PEACE
+  lockdown hold it back; a walled footprint, `stop_after` 0, the verb's refusal, a reload, an answer during a siege.
+  `tests/lua/test_runner.lua` (a peace-only repair frozen in ALERT/RECOVERY/SIEGE and a lockdown), `test_readiness.lua`
+  (`lost:O1`), `tests/test_bridge_rebuild.py` (verb, event fields, config, wake line, brief); each fails on fcada16.
+
+### Live check (Run 11 site98)
+- After `git pull` and `dfhack-run dfllm reload`: the kernel has no loss history for O1 yet (the five losses happened
+  before this change; gate counts from the first loss it sees). If O1 stands now, the next siege that breaks it gives
+  BRIDGE_DESTROYED `lost 1x, 1 with building destroyers in sight (...)`; check `census.h.bd` named the dragons.
+- After that siege: PERIMETER_BROKEN `...; bridge O1 after the fight (quiet PEACE)`, no `rp` project for O1 in
+  RECOVERY (`dfllm status` proj), then in PEACE kern.log `seal: lost bridge O1 at 114,79,142 queued again as rp...
+  (quiet PEACE)`; the project shows `frozen` in any ALERT or lockdown until it is built.
+- The second such loss: no rebuild; DECISION_NEEDED `bridge_rebuild` in PEACE; `dfllm status` readiness `lost:O1`;
+  `dfllm cmd inspect '{"what":"defense"}'` shows `O1 destroyed/- 0lev lost 2x (2 bd) held`. Ask Gordon; `dfllm cmd
+  bridge.rebuild '{"bridge":"O1"}'` only on his word.
+- To stop at once instead (no more rebuild of O1 even after one loss): Gordon sets `"perimeter": {"stop_after": 1}` in
+  config/reflex.json and `dfhack-run dfllm reload`.
+- An `rp` project an older kernel queued for O1 keeps the old gating (it may build in ALERT/RECOVERY).
+
+### Open
+- Only manifest bridges have a history; a learned perimeter bridge without a manifest name (FR-60 forts) is rebuilt
+  in quiet PEACE every time (no stop rule).
+- The stop rule counts only losses with building destroyers in sight (`census.h.bd`); if the raws read stays 0 in DF
+  53.16, a gate is rebuilt (in PEACE) every time, as before.
+- The options `wall` and `outer gate` are the player's (plan or by hand); no template builds a second outer gate yet.
 
 Related: BUG-018/019 (separated refuge, BREACH level), BUG-027 (footprint rules), BUG-028 (raise hold, STRANDED),
 BUG-029 (inner stations), Gordon's intake waves (2026-10-16)

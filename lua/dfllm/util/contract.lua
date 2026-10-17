@@ -93,8 +93,10 @@ C.EVENTS = {
   -- Gordon 2026-10-16: an intake wave or a sortie through O1 went wrong (losses, a hostile past B1, the field not
   -- clear, soldiers left outside)
   WAVE_FAIL = {cls = 'A', by = 'siege'},
-  -- BUG-030: a manifest bridge gate saw complete is gone from its footprint (destroyed); the siege's deep defense
-  -- (building destroyers in sight, an army over stations.core_ratio x the soldiers, weak squads): refuge and core
+  -- BUG-030: a manifest bridge gate saw complete is gone from its footprint (destroyed; d.n/bd/destroyers/races: its
+  -- loss history, gate.losses); the siege's deep defense (building destroyers in sight, an army over
+  -- stations.core_ratio x the soldiers, weak squads): refuge and core. PERIMETER_BROKEN d.wait/held and
+  -- DECISION_NEEDED id bridge_rebuild (bridge, n, bd, reb, items, mat, links, races, years, stop): the rebuild policy
   BRIDGE_DESTROYED = {cls = 'A', by = 'gate'}, SIEGE_DEEP = {cls = 'A', by = 'siege'},
   -- Run 11: a dig broke into a cavern (lake): the explore shaft's plug (queued, done, failed) or none (by hand); the
   -- daily shaft check (any explore state, field state) queues it too
@@ -166,6 +168,8 @@ C.VERBS = {
   ['order.add']    = {mod = 'economy'},
   ['jobs.release'] = {mod = 'economy'},
   ['perimeter.record'] = {mod = 'seal'},
+  -- BUG-030 rebuild policy: the player's answer to DECISION_NEEDED bridge_rebuild (rebuild that bridge anyway)
+  ['bridge.rebuild'] = {mod = 'seal'},
 }
 -- Verbs accepted only from these `by` origins (§9.5). `by` is a label, not authentication: the
 -- hook (WP4) keeps the LLM from writing these origins; this check is the second line.

@@ -161,6 +161,29 @@ T.test('R1 blockers: audit flags, stale audit, missing Tiefe+, unlinked lever, n
   T.eq(ready(W4).fail, {'no_outer'})
 end)
 
+T.test('BUG-030 rebuild policy: a bridge the perimeter keeper no longer rebuilds (seal.lost_gates) is the R0 blocker ' ..
+       'lost:<B> in place of bridge:<B> and levers:<B> (the fix is the player\'s answer, not a fortcore piece)', function()
+  -- old code: bridge:O1, levers:O1 (brief: "build the missing fortcore pieces") while O1 is held for the player
+  local function gone(W)
+    W.buildings[1] = nil                                        -- O1 (siege_world S.BRIDGE_ID) is not on the map
+    local v = df.global.world.buildings.other.BRIDGE
+    for i = #v - 1, 0, -1 do if v[i].id == 1 then v:erase(i) end end
+    for _, id in ipairs({11, 12}) do W.buildings[id].linked_mechanisms = require('dfllm.util.k_mock').vec{} end
+  end
+  local s = seal_fake({tick = 1, sealed = 1, routes = 1, doors = {}, open = {}})
+  s.lost = {}
+  function s.lost_gates(K) return s.lost end
+  local W = world{seal = s}
+  gone(W)
+  day(W)
+  audit(W)
+  T.eq(ready(W).fail, {'bridge:O1', 'levers:O1'})
+  s.lost = {O1 = {n = 2, bd = 2, since = 5, asked = 2}}
+  day(W)
+  T.eq(lvl(W), 0)
+  T.eq(ready(W).fail, {'lost:O1'})
+end)
+
 ---------------------------------------------------------------- R2 / R3 and caps
 T.test('R2: drill, army share, >= 8 soldiers, cv, traps, stock; cap 75 only if the plan ceiling allows', function()
   local W = world{drill = NOW0 - 500}

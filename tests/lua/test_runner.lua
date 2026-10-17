@@ -1265,4 +1265,40 @@ T.test('FR-56: runner.repair queues a defense project of the lost cells (min-cor
   T.eq({W.K.call('runner', 'repair', {{1, 2, 'x', 'Cw'}}, 'x')}, {true, false, 'bad cell 1'})
 end)
 
+T.test('BUG-030 rebuild policy: a lost bridge\'s repair (opts.peace) is frozen in ALERT, RECOVERY, SIEGE and during ' ..
+       'a lockdown and built only in quiet PEACE; a plain repair still runs in ALERT', function()
+  -- old code: opts ignored, params {}: the bridge repair ran in ALERT and RECOVERY like every defense project
+  local W = fresh{tag = 'repair_peace', mode = 'ALERT'}
+  local lock
+  W.load{name = 'reflex', every = {ticks = 100000}, holding = function() return lock end}
+  H.floor(W, 40, 40, 100, 45, 45)
+  local _, ok, id = W.K.call('runner', 'repair', {{42, 45, 100, 'gw(3x1)'}}, 'bridge O1 after the fight', {peace = true})
+  T.ok(ok)
+  T.eq(W.K.persist.get('bp.' .. id).params, {peace = 1})
+  local _, ok2, wall = W.K.call('runner', 'repair', {{44, 41, 100, 'Cw'}}, 'perimeter after the siege')
+  T.ok(ok2)
+  T.eq(W.K.persist.get('bp.' .. wall).params, {})
+  H.runs(W, 2)
+  local function built(pos)
+    for _, c in ipairs(H.qf_calls(W, 'build', 'run')) do if c.pos[1] == pos then return true end end
+    return false
+  end
+  T.ok(built(44) and not built(42), 'ALERT: the wall, not the bridge')
+  T.eq(row(W, id)[4], 'frozen')
+  for _, m in ipairs({'RECOVERY', 'SIEGE'}) do
+    W.set_mode(m)
+    H.runs(W, 2)
+    T.ok(not built(42), m)
+  end
+  W.set_mode('PEACE')
+  lock = 'arrival:siege'
+  H.runs(W, 2)
+  T.ok(not built(42), 'a lockdown in PEACE')
+  T.eq(row(W, id)[4], 'frozen')
+  T.eq(H.proj(W, id).blocked, '', 'frozen time is no stall')
+  lock = nil
+  H.runs(W, 1)
+  T.ok(built(42), 'quiet PEACE')
+end)
+
 T.done()
