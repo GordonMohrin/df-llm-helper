@@ -46,6 +46,13 @@ Module: `dfpilot/bp/defense.py:177, 326-332, 386-394` (the template), `lua/dfllm
 59,62,146 is reachable (live data): the game session's first guess (a piece outside the citizens' walk group) was not
 the cause here.
 
+## Live confirmed (Run 11, y465/466, kernel b873eb6)
+kern.log after the reload: `c1a149cf2ff540c801 seal.clear: no gather at 59,62,146: the door goes on the shrub
+(quickfort builds on shrub tiles; ...)`, `seal.plant: 1 manager orders moved to the top ... (seal first)`, `seal.plant:
+1 manager orders, 1 items`, `seal first: c1a149cf2ff540c801 moves again (0 pieces open)`, `c1a149cf2ff540c801 (seal)
+done`: DF built the door on the shrub about 120 ticks after the reload; the seal that had hung for ~1500 days is done,
+no SEAL_STUCK since. The older ramp head 79,116,146 (c1a147c261) stays undecided.
+
 ## Not decided offline
 - **Does DF build the door on the shrub?** quickfort places it (the rule above); that the builder completes it and the
   shrub goes is the in-game rule quickfort mirrors, not seen live. Decides it: after the reload, the door at 59,62,146
