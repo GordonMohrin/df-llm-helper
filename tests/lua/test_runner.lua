@@ -112,7 +112,7 @@ T.test('at most 3 projects are worked at once; the rest are queued by prio', fun
   for _, c in ipairs(H.qf_calls(W, 'dig', 'run')) do started[c.pos[1]] = true end
   T.ok(started[50] and started[10] and started[20], 'prio 1 first, then the oldest')
   T.ok(not started[30] and not started[40])
-  T.eq(row(W, 'p3')[4], 'queued')
+  T.eq(row(W, 'p3')[4], 'queued behind p5 +2')       -- BUG-037: the rows name the first slot holder
   T.eq(row(W, 'p5')[4], '')
 end)
 
@@ -757,9 +757,13 @@ T.test('BUG-022: without news a build_lost stage is retried each retry_every, re
   T.eq(retries(), 2, 'retry_max')
   T.ok(logged(W, 'info', 'retry 2/2 from s2.dig %(a season passed%)'))
   H.runs(W, 20)
-  local pb = W.find_events('PROJECT_BLOCKED')
+  local pb, park = {}, {}
+  for _, e in ipairs(W.find_events('PROJECT_BLOCKED')) do       -- BUG-037: parked 30 days later, its own announcement
+    if e.d.park then park[#park + 1] = e else pb[#pb + 1] = e end
+  end
   T.eq(H.proj(W, 'y364s2b0').blocked, 'build_lost')
   T.eq(#pb, 2, 'the first block and the spent budget, nothing in between')
+  T.ok(#park <= 1 and (#park == 0 or park[1].d.park >= 29), 'parked once, after queue.park_days')
   T.ok(pb[2].msg:find('; 2 retries spent: bp.cancel and place it again', 1, true), pb[2].msg)
   T.eq(pb[2].d.retry, 2)
   dfhack.buildings = nil

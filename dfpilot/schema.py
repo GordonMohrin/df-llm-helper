@@ -440,7 +440,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
     # Run 11: mat = why economy cannot make a seal's missing pieces ('no material for door: no rock, no logs');
     # walled = the seal doors quickfort refused (no wall beside them) that the runner planned as walls ('x,y,z')
-    "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i missing:sa retry:i mat:s walled:sa")),
+    # BUG-037: park = days a project blocked for good stood before it was parked (its cancel command is in msg)
+    "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i missing:sa retry:i mat:s walled:sa "
+                                                    "park:i")),
     "YEAR_REVIEW": ("A", "kern", _d(opt="year:i")),
     "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa")),
     # BUG-031: cistern = why the nearest cistern room does not serve the hospital (no well, its well over 0/7, too far)
@@ -742,7 +744,14 @@ STATE = Obj(
          # stuck 1 = it built nothing for stuck_days, days) and the rebuild policy (citizens, its bounds, projects paused)
          "sched": Obj(opt={"seal": Obj(req={"proj": ID, "n": NAT, "paused": NAT},
                                        opt={"more": NAT, "stuck": FLAG, "days": NAT}),
-                           "rb": Obj(req={"pop": NAT, "lo": NAT, "paused": NAT}, opt={"hi": NAT})}),
+                           "rb": Obj(req={"pop": NAT, "lo": NAT, "paused": NAT}, opt={"hi": NAT}),
+                           # BUG-037: projects waiting for a slot and the slot holders (id, template, days without own
+                           # progress); no run ended for d days (the run in hand: task i of n, its label, slices, age
+                           # in days); parked projects (blocked for good past runner queue.park_days)
+                           "q": Obj(req={"n": NAT, "by": Arr(Tup([ID, Str(maxbytes=16), NAT]), hi=8)}),
+                           "run": Obj(req={"d": NAT}, opt={"i": NAT, "n": NAT, "task": Str(maxbytes=40), "sl": NAT,
+                                                           "age": NAT}),
+                           "pk": NAT}),
          "bridges": Obj(extra=Str(enum=BRIDGE_STATES), keys=BRIDGE_RE),
          "owners": Obj(req={"pause": AnyOf(Null(), Str(enum=["inbox", "gordon", "popup", "df"])),
                             "tempo": Str(enum=["mode", "inbox", "brake", "clock"])}),

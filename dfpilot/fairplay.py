@@ -276,8 +276,11 @@ def water_errors(path: str | Path | None = None) -> list[str]:
 # first and pauses the housing/work projects in PEACE until done or stuck for stuck_days; food_d/drink_d below which the
 # food/drink projects go on) and the rebuild policy (below pop citizens only seal/tombs/food/beds/depot, until off;
 # pop 0 = off). runner.conf keeps the default for a value of another type or out of range.
+# BUG-037: queue = the slot rules (a slot holder without own progress for yield_days yields its slot; a project blocked
+# for good is parked after park_days: out of the pause, the keepers and PLAN_EXHAUSTED, announced once with bp.cancel)
 RUNNER_LIM: dict = {"seal_first": {"on": "bool", "stuck_days": (1, 60), "food_d": (0, 400), "drink_d": (0, 400)},
-                    "rebuild": {"pop": (0, 250), "off": (0, 250)}}
+                    "rebuild": {"pop": (0, 250), "off": (0, 250)},
+                    "queue": {"yield_days": (1, 60), "park_days": (1, 400)}}
 
 
 def runner_errors(path: str | Path | None = None) -> list[str]:

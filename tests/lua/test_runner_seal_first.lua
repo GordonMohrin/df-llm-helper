@@ -162,7 +162,8 @@ T.test('seal first: a seal\'s dig designations are priority 1 (placed at prio 4)
   H.proj(W2, SEAL).blocked = 'stalled'
   H.runs(W2, 1)
   T.eq(why(W2, SEAL), 'stalled')
-  T.ok(W2.mods.runner and H.proj(W2, 'f3') and why(W2, 'f3') == 'queued', 'the third other project waits')
+  T.ok(W2.mods.runner and H.proj(W2, 'f3') and why(W2, 'f3') == 'queued behind ' .. SEAL .. ' +2',
+       'the third other project waits')
 end)
 
 T.test('seal first exceptions: defense, tombs and the depot run; food/drink projects only in an emergency; a paused ' ..

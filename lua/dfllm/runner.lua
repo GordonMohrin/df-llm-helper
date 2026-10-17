@@ -72,6 +72,17 @@ M.CFG = {
   -- {seal_first: {on, stuck_days, food_d, drink_d}, rebuild: {pop, off}} (fairplay.RUNNER_LIM; a bad value: default)
   seal_first = true, seal_stuck_days = 3, emerg_food_d = 30, emerg_drink_d = 30, rebuild_pop = 10, rebuild_off = 12,
   hold_n = 3,            -- paused projects in a dig stage watched per run (miners dig what is designated: a breach)
+  -- BUG-037 (Run 11 y449: bedrooms, stockroom, tavern, tombs and a prio-2 depot 'queued' at 0 % for months, 15 of 27
+  -- adults idle): a slot holder whose own progress (a chunk applied, manager orders made, measured progress, a stage
+  -- done: R.ps) is yield_days old yields its slot (it competes with the stalled projects); a seal or plug keeps its slot
+  -- while stalled only until it is stuck (seal_first.stuck_days). A project blocked for good (build_lost with its
+  -- retries spent, breach:*, apply_fail, bp_missing, plug_refused) is parked after park_days: it no longer counts for
+  -- the seal-first pause, the keepers, M.pending, the depot keeper and PLAN_EXHAUSTED, its row goes last, and
+  -- PROJECT_BLOCKED names the cancel command once. Never cancelled by the kernel (an undo removes built work, and an
+  -- explore's box stays in the audit). config/baseline.json "runner": {queue: {yield_days, park_days}}. Watchdog: a
+  -- task that yields task_slices times in a row is skipped this run (kern.log); state sched.run once no run ended for
+  -- run_idle_d days
+  yield_days = 7, park_days = 30, task_slices = 600, run_idle_d = 3,
 }
 local MODES = {dig = true, build = true, place = true, zone = true, burrow = true}
 local CLASSES = {defense = true, infra = true, living = true, beauty = true}
@@ -92,6 +103,7 @@ local OWNER = {baseline = 'baseline', squads = 'military', metal = 'military', d
 local PLAN_DRIVEN = {proj = true, workshops = true}
 
 local S = {}   -- module state, rebuilt by init (persist docs + caches)
+local Q = {}   -- BUG-037: the slot and park rules (a table: the main chunk is near Lua's 200 locals)
 
 ---------------------------------------------------------------- small helpers
 local function int(v) return math.tointeger(type(v) == 'string' and tonumber(v) or v) end
@@ -126,9 +138,12 @@ local function pnum(id) return int(tostring(id or ''):match('^P([0-9])$')) end
 local function qf_room() return S.slice.qf < S.slice.qf_max end
 local function qf(K, p) S.slice.qf = S.slice.qf + 1; return K.act.quickfort(p) end
 
+-- last = no stall before it (waiting resets it); ps = the project's own last progress (BUG-037: waiting for a slot
+-- resets it, holding one does not)
 local function new_R(t, si)
-  return json.object{si = si, prog = 0, last = t, cd = '', cdt = 0, b = {}, c = {}, uns = 0, ra = 0, fail = 0}
+  return json.object{si = si, prog = 0, last = t, ps = t, cd = '', cdt = 0, b = {}, c = {}, uns = 0, ra = 0, fail = 0}
 end
+local function moved(K, R) local t = now(K); R.last, R.ps = t, t end
 local function R_of(K, P)
   local r = S.rt.p[P.id]
   if type(r) ~= 'table' or r.si ~= P.stage then r = new_R(now(K), P.stage); S.rt.p[P.id] = r; dirty() end
@@ -402,7 +417,7 @@ local function progress(K, P, d, R, done, total, dig)
   P.pct = pct_of(P, d, total > 0 and (100 * done) // total or 0)
   local t = now(K)
   if done > R.prog then
-    R.prog, R.last = done, t
+    R.prog, R.last, R.ps = done, t, t
     if dig then S.rt.dpt = t end
     if P.blocked == 'stalled' then set_blocked(K, P, '') end
   elseif P.blocked == '' and t - R.last >= M.CFG.stall and not (dig and t - (S.rt.dpt or -M.CFG.stall) < M.CFG.stall) then
@@ -1354,13 +1369,13 @@ local function apply(K, P, st, R)
       local ok, stats = qf(K, {mode = 'build', data = chunk_data(ch), pos = ch.pos, command = 'undo'})
       K.log('info', '%s %s: removing the %s at %d,%d,%d (quickfort undo: %s)', P.id, st.label, c[4] == 'd' and 'door'
             or 'hatch', ch.pos[1], ch.pos[2], ch.pos[3], ok and 'ok' or tostring(stats))
-      P.chunk, R.last = P.chunk + 1, now(K)
+      P.chunk = P.chunk + 1; moved(K, R)
       dirty()
       return true
     end
     -- a channel on a tile that is open already (the removed hatch stood on open space or a floor): nothing to dig
     if st.mode == 'dig' and v and (v.c == '_' or v.c == 'v' or v.c == 'C') then
-      P.chunk, R.last = P.chunk + 1, now(K)
+      P.chunk = P.chunk + 1; moved(K, R)
       dirty()
       return true
     end
@@ -1370,7 +1385,7 @@ local function apply(K, P, st, R)
     ch, skip = zoned_cells(ch)
     if skip > 0 then
       K.log('info', '%s %s chunk %d: %d cells already zoned, left out', P.id, st.label, P.chunk, skip)
-      if #ch.cells == 0 then P.chunk = P.chunk + 1; R.last = now(K); dirty(); return true end
+      if #ch.cells == 0 then P.chunk = P.chunk + 1; moved(K, R); dirty(); return true end
     end
   end
   local p = {mode = st.mode, data = chunk_data(ch), pos = ch.pos}
@@ -1393,7 +1408,7 @@ local function apply(K, P, st, R)
     local no = st.mode == 'dig' and (int(stats.dig_invalid_tiles) or 0) + (int(stats.out_of_bounds) or 0)
                or st.mode == 'build' and (int(stats.build_unsuitable) or 0) or 0
     if no > 0 then
-      P.chunk, R.last = P.chunk + 1, now(K)
+      P.chunk = P.chunk + 1; moved(K, R)
       dirty()
       plug_refused(K, P, doc(K, P.id), st)
       return true
@@ -1425,10 +1440,10 @@ local function apply(K, P, st, R)
       if R.ra == 1 then R.uns = math.max(0, R.uns - (n1 - n0))
       else R.uns = R.uns + math.max(0, (int(stats.build_unsuitable) or 0) - pre - walls) + bad end
     end
-    if walls > 0 then R.last = now(K); dirty(); return true end
+    if walls > 0 then moved(K, R); dirty(); return true end
   end
   P.chunk = P.chunk + 1
-  R.last = now(K)
+  moved(K, R)
   dirty()
   return true
 end
@@ -1507,6 +1522,7 @@ local function orders(K, P, st, R)
   local n0 = SEALS[P.tpl] and n > 0 and next_order_id() or nil
   if n > 0 then ok, res = qf(K, {mode = st.mode, data = data, pos = {0, 0, 0}, command = 'orders'}) end
   if ok and n0 then orders_first(K, P, st, n0) end
+  if ok and n > 0 then R.ps = now(K) end      -- BUG-037: manager orders made are new jobs
   if not ok then
     R.of = (R.of or 0) + 1
     dirty()
@@ -2193,13 +2209,31 @@ local function conf(K)
   c = type(c) == 'table' and c or {}
   local sf = type(c.seal_first) == 'table' and c.seal_first or {}
   local rb = type(c.rebuild) == 'table' and c.rebuild or {}
+  local q = type(c.queue) == 'table' and c.queue or {}
   local r = {on = M.CFG.seal_first, stuck = nat(sf.stuck_days, 1, 60, M.CFG.seal_stuck_days) * DAY,
              food_d = nat(sf.food_d, 0, 400, M.CFG.emerg_food_d), drink_d = nat(sf.drink_d, 0, 400, M.CFG.emerg_drink_d),
-             pop = nat(rb.pop, 0, 250, M.CFG.rebuild_pop), off = nat(rb.off, 0, 250, M.CFG.rebuild_off)}
+             pop = nat(rb.pop, 0, 250, M.CFG.rebuild_pop), off = nat(rb.off, 0, 250, M.CFG.rebuild_off),
+             yield = nat(q.yield_days, 1, 60, M.CFG.yield_days) * DAY,     -- BUG-037
+             park = nat(q.park_days, 1, 400, M.CFG.park_days) * DAY}
   if type(sf.on) == 'boolean' then r.on = sf.on end
   r.off = math.max(r.off, r.pop)
   return r
 end
+
+-- BUG-037: blocked for good (nothing in the kernel clears it: build_lost with its retries spent, a breach stop, quickfort
+-- failing, the document gone, the plug refused); parked once it stood park_days (pt: conf(K).park)
+Q.FINAL = {apply_fail = true, bp_missing = true, plug_refused = true}
+function Q.terminal(P)
+  local b = P.blocked
+  if b:sub(1, 7) == 'breach:' or Q.FINAL[b] then return true end
+  local q = b == 'build_lost' and S.rt.rty[P.id]
+  return type(q) == 'table' and (int(q.n) or 0) >= M.CFG.retry_max
+end
+function Q.parked(K, P, pt)
+  return P.done ~= 1 and P.blocked ~= '' and Q.terminal(P) and now(K) - (int(P.since) or 0) >= (pt or conf(K).park)
+end
+-- a project the keepers, M.pending, the depot keeper and PLAN_EXHAUSTED wait for: not done, not parked
+function Q.live(K, P, pt) return P.done ~= 1 and not Q.parked(K, P, pt) end
 
 -- a food, water or drink emergency (economy's stock days, water's dry hospital with patients), else nil
 local function emergency(K, c)
@@ -2299,11 +2333,12 @@ end
 -- rebuild switch (m.runner rb, pk) and what the pause rules need now (S.focus)
 local function focus(K)
   local c, t = conf(K), now(K)
-  local f = {c = c, n = 0, more = 0, stuck = {}, emerg = emergency(K, c), rock = rock_short(K)}
+  local f = {c = c, n = 0, more = 0, stuck = {}, stk = {}, emerg = emergency(K, c), rock = rock_short(K)}
   S.rt.sf = obj(S.rt.sf)
   local open = {}
   for _, P in ipairs(sorted()) do
-    local d = SEALS[P.tpl] and P.blocked ~= 'cancel' and doc(K, P.id)
+    -- BUG-037: a parked seal (blocked for good past park_days) is out of the way: it pauses nothing, SEAL_STUCK is done
+    local d = SEALS[P.tpl] and P.blocked ~= 'cancel' and not Q.parked(K, P, c.park) and doc(K, P.id)
     if d then
       open[P.id] = true
       local n, names = open_pieces(K, P, d)
@@ -2326,7 +2361,7 @@ local function focus(K)
         dirty()
         stuck_event(K, P, d, n, names, t - r.t, r)
       end
-      if r.st == 1 then f.stuck[#f.stuck + 1] = {id = P.id, n = n, days = (t - r.t) // DAY}
+      if r.st == 1 then f.stuck[#f.stuck + 1] = {id = P.id, n = n, days = (t - r.t) // DAY}; f.stk[P.id] = true
       elseif not f.lead then f.lead, f.n, f.names = P.id, n, names
       else f.more = f.more + 1 end
     end
@@ -2422,9 +2457,17 @@ local function sched_state(f, pz)
   return next(s) and s or nil
 end
 
+-- BUG-037: a queued row names the first slot holder ('queued behind c1a148696a3d6da701 +2', state sched.q has all);
+-- a project that yielded its slot says so; parked projects come last ('parked: build_lost')
 function rows(K)
-  local out = {}
+  local out, pt, sl = {}, conf(K).park, S.slots or {}
+  local behind = #sl > 0 and ('queued behind ' .. sl[1] .. (#sl > 1 and (' +' .. (#sl - 1)) or '')) or 'queued'
+  local list, last, pk = {}, {}, {}
   for _, P in ipairs(sorted()) do
+    if Q.parked(K, P, pt) then pk[P.id] = true; last[#last + 1] = P else list[#list + 1] = P end
+  end
+  for _, P in ipairs(last) do list[#list + 1] = P end
+  for _, P in ipairs(list) do
     if #out >= 8 then break end
     local d = doc(K, P.id)
     local st = d and d.stages[P.stage + 1]
@@ -2432,13 +2475,16 @@ function rows(K)
     if b == '' then
       local ok = allowed(K, P, d)
       local pw = ok and paused(K, P, d)
+      local yd = S.yielded and S.yielded[P.id]
       if not ok then b = 'frozen'
       elseif pw then b = 'paused: ' .. pw
-      elseif S.active and not S.active[P.id] then b = 'queued' end
-    end
+      elseif S.active and not S.active[P.id] then
+        b = yd and string.format('no progress %d d: slot yielded', yd) or behind
+      end
+    elseif pk[P.id] then b = 'parked: ' .. b end
     out[#out + 1] = {P.id, trunc(st and st.label or 'done', 24), P.pct, trunc(b, 40)}
   end
-  S.rows = out
+  S.rows, S.npk = out, #last
 end
 
 ---------------------------------------------------------------- phases (CONTRACTS §9.9)
@@ -2549,10 +2595,11 @@ local function phases(K)
   S.phase = ph.phase
 end
 
--- nothing queued, no plan build pending, and the phase cannot advance through projects
+-- nothing queued (BUG-037: a parked project does not count), no plan build pending, and the phase cannot advance
+-- through projects
 local function exhausted(K)
   if S.plan_pending or not S.stuck then return end
-  for _, P in ipairs(S.pd.list) do if P.done ~= 1 then return end end
+  for _, P in ipairs(S.pd.list) do if Q.live(K, P) then return end end
   local pp = K.persist.get('plan')
   -- live L1b: once more after every finished project, so follow can start a phase's next deliverable
   local fin = 0
@@ -2583,7 +2630,7 @@ local function zones(name)
 end
 
 local function keeper_on(K, tpl)
-  for _, P in ipairs(S.pd.list) do if P.tpl == tpl and P.done ~= 1 then return false end end
+  for _, P in ipairs(S.pd.list) do if P.tpl == tpl and Q.live(K, P) then return false end end   -- BUG-037: not parked
   local last = S.rt.req[tpl]
   if last and now(K) - last < M.CFG.req_cool then return false end
   if S.rt.hist[tpl] then return true end
@@ -2719,7 +2766,7 @@ function M.depot_keep(K, why)
     return true, 'standing'
   end
   for _, P in ipairs(S.pd.list) do
-    if P.tpl == 'depot' and P.done ~= 1 then return true, P.id end
+    if P.tpl == 'depot' and Q.live(K, P) then return true, P.id end   -- BUG-037: a parked one is no depot project
   end
   local m = K.manifest().depot
   local pos = type(m) == 'table' and int(m[1]) and int(m[2]) and int(m[3]) and {int(m[1]), int(m[2]), int(m[3])}
@@ -3014,16 +3061,45 @@ local function blocked_event(K, P, t)
   dirty()
 end
 
+-- BUG-037: a parked project (blocked for good past park_days) is announced once (PROJECT_BLOCKED d.park, util/cadence
+-- per project, m.runner park) with the command that cancels it. The kernel never cancels it itself: an undo would
+-- remove what it built, and an explore stays in the audit box and its shaft in the shaft check either way.
+function Q.park_event(K, P, t)
+  local d = doc(K, P.id)
+  local st = d and d.stages[P.stage + 1]
+  local label = trunc(st and st.label or '', 24)
+  local T = K.now()
+  local ids, toks = {P.id .. ':' .. label}, {'parked'}
+  if not CAD.due(S.rt.park[P.id], T, ids, toks) then return end
+  S.rt.park[P.id] = CAD.mark(T, ids, toks)
+  local days = (t - P.since) // DAY
+  local keep = P.tpl == 'explore' and 'its shaft stays watched' or P.blocked == 'build_lost' and 'what it built stays'
+               or 'nothing is undone'
+  local msg = string.format('%s (%s) blocked %d d: %s at %s; parked; cancel: dfllm cmd bp.cancel \'{"proj":"%s"}\' '
+                            .. '(no undo: %s)', P.id, P.tpl, days, P.blocked, label, P.id, keep)
+  K.log('warn', '%s', msg)
+  K.emit('PROJECT_BLOCKED', 'A', trunc(msg, 200),
+         {proj = P.id, tpl = P.tpl, stage = label, why = P.blocked, ticks = t - P.since, park = days})
+  dirty()
+end
+
 ---------------------------------------------------------------- runs
 local function end_run(K)
   local t = now(K)
+  local pt = conf(K).park
   if K.mode() == 'PEACE' then
     for _, P in ipairs(S.pd.list) do
       if P.done ~= 1 and P.blocked == 'build_lost' then retry_step(K, P, t) end
-      if P.done ~= 1 and P.blocked ~= '' and P.blocked ~= 'cancel' and t - P.since > M.CFG.blocked_a then
+      if Q.parked(K, P, pt) then Q.park_event(K, P, t)
+      elseif P.done ~= 1 and P.blocked ~= '' and P.blocked ~= 'cancel' and t - P.since > M.CFG.blocked_a then
         blocked_event(K, P, t)
       end
     end
+  end
+  for id, r in pairs(S.rt.park) do              -- a park record whose project left (or runs again): quiet
+    local P = find(id)
+    if not P or P.done == 1 then S.rt.park[id] = nil; dirty()
+    elseif type(r) == 'table' and #(r.ids or {}) > 0 and not Q.parked(K, P, pt) then S.rt.park[id] = CAD.quiet(r); dirty() end
   end
   plug_watch(K)                              -- Run 11: the plug's wall (every mode); the check ran as its own task
   phases(K)
@@ -3038,20 +3114,38 @@ local function begin_run(K)
   sync_plan(K)
   S.snap_ok = K.enabled('snapshot')
   S.active = {}
-  S.focus = focus(K)                          -- Run 11 siege 8: seal first and the rebuild policy
-  local tasks, n, t = {}, 0, now(K)
+  -- Run 11 siege 8: seal first and the rebuild policy. BUG-037: a fault in them must not stop every project (a begin_run
+  -- that dies here leaves every row 'queued' and applies nothing): this run goes on without them, kern.log names it
+  local okf, f = pcall(focus, K)
+  if not okf then
+    local err = trunc(f, 160)
+    if S.ferr ~= err then S.ferr = err; K.log('error', 'seal first/rebuild failed, this run without them: %s', err) end
+    f = {c = conf(K), n = 0, more = 0, stuck = {}, stk = {}}
+  else S.ferr = nil end
+  S.focus = f
+  local tasks, n, t, c = {}, 0, now(K), f.c
   local list = sorted()
   for _, P in ipairs(list) do
     local R = S.rt.p[P.id]
     if (type(R) == 'table' and R.undo) or P.blocked == 'cancel' then tasks[#tasks + 1] = {k = 'undo', id = P.id} end
   end
-  -- pass 1: projects that can progress (and every seal or plug, stalled or not: seal first); pass 2: stalled ones
-  -- (waiting for materials or workers) take the slots left over, otherwise up to meas_extra of them get a
-  -- measure-only pass when due. A paused project waits like a frozen one (no chunk, no stall)
-  local extra, pz, held = 0, {}, 0
+  -- pass 1: projects that can progress (and every open seal or plug that is not stuck, stalled or not: seal first);
+  -- pass 2 (the slots left over, else up to meas_extra measure-only passes when due): stalled ones (waiting for
+  -- materials or workers), a stuck seal, and (BUG-037) a project whose own progress (R.ps) is c.yield old: its slot goes
+  -- to a waiting project. A paused project waits like a frozen one (no chunk, no stall); waiting for a slot is no
+  -- idleness (R.ps), holding one is
+  local function second(P, R)
+    if SEALS[P.tpl] and c.on and not f.stk[P.id] then return false end
+    if P.blocked == 'stalled' or (SEALS[P.tpl] and f.stk[P.id]) then return true end
+    return type(R) == 'table' and R.si == P.stage and t - (int(R.ps) or t) >= c.yield
+  end
+  local extra, pz, held, slots, yielded, waiting = 0, {}, 0, {}, {}, 0
   for pass = 1, 2 do
     for _, P in ipairs(list) do
-      if not halted(P) and (P.blocked == 'stalled' and not SEALS[P.tpl]) == (pass == 2) then
+      local R0 = S.rt.p[P.id]
+      if type(R0) == 'table' and R0.ps == nil then R0.ps = t; dirty() end      -- a project of an older kernel
+      local p2 = not halted(P) and second(P, R0)
+      if not halted(P) and p2 == (pass == 2) then
         local d = doc(K, P.id)
         local ok = allowed(K, P, d)
         local why = ok and paused(K, P, d) or nil
@@ -3067,6 +3161,7 @@ local function begin_run(K)
         if ok and n < M.CFG.active then
           n = n + 1
           S.active[P.id] = true
+          slots[#slots + 1] = P.id
           tasks[#tasks + 1] = {k = 'work', id = P.id}
         else
           local R = R_of(K, P)
@@ -3074,7 +3169,10 @@ local function begin_run(K)
             extra, R.mt = extra + 1, t
             tasks[#tasks + 1] = {k = 'work', id = P.id, meas = true}
           end
+          if ok and pass == 1 then waiting = waiting + 1 end
+          if ok and p2 and P.blocked ~= 'stalled' and not SEALS[P.tpl] then yielded[P.id] = (t - int(R.ps)) // DAY end
           R.last = t                         -- waiting (queued, frozen or paused) is no stall
+          if pass == 1 then R.ps = t end     -- BUG-037: nor is it idleness
           dirty()
         end
       end
@@ -3082,14 +3180,25 @@ local function begin_run(K)
   end
   note_pause(K, pz)
   S.sched = sched_state(S.focus, pz)
+  -- BUG-037: who holds the slots while others wait (state sched.q, the rows 'queued behind <id>'; the idle days of each)
+  S.slots, S.yielded, S.q = slots, yielded, nil
+  if waiting > 0 then
+    local by = {}
+    for _, id in ipairs(slots) do
+      local P, R = find(id), S.rt.p[id]
+      by[#by + 1] = {id, trunc(P and P.tpl or '?', 16), type(R) == 'table' and math.max(0, (t - (int(R.ps) or t)) // DAY) or 0}
+    end
+    S.q = {n = waiting, by = by}
+  end
   tasks[#tasks + 1] = {k = 'check'}           -- Run 11 cavern stops and shafts (BUG-033: sliced)
   tasks[#tasks + 1] = {k = 'end'}
-  S.run, S.chk = {tasks = tasks, i = 1, t = t}, nil
+  S.run, S.chk = {tasks = tasks, i = 1, t = t, sl = 0, ty = 0}, nil
 end
 
 ---------------------------------------------------------------- module interface
 function M.init(K)
-  S = {tiles = {}, bbox = {}, meas = {}, absent = {}, rows = {}, active = nil, slice = {qf = 0, probes = 0, qf_max = 1}}
+  S = {tiles = {}, bbox = {}, meas = {}, absent = {}, rows = {}, active = nil, slice = {qf = 0, probes = 0, qf_max = 1},
+       boot = K.now().tick}
   local pd = K.persist.get('projects')
   if type(pd) ~= 'table' or type(pd.list) ~= 'table' then pd = {v = 2, list = {}}; K.persist.set('projects', pd) end
   S.pd = pd
@@ -3101,6 +3210,7 @@ function M.init(K)
   rt.skip, rt.rty, rt.pb = obj(rt.skip), obj(rt.rty), obj(rt.pb)   -- BUG-022: skipped tiles, retries, cadence
   rt.cav, rt.br, rt.xs = obj(rt.cav), obj(rt.br), obj(rt.xs)       -- Run 11: cavern plugs, breach records, shafts
   rt.dw = obj(rt.dw)                                                 -- Run 11: seal doors planned as walls
+  rt.park = obj(rt.park)                                             -- BUG-037: parked projects announced
   if type(rt.cz) ~= 'table' then rt.cz = {} end                      -- Run 11: cavern breach tiles
   if type(rt.exh) ~= 'string' then rt.exh = '' end
   K.persist.set('m.runner', rt)
@@ -3133,10 +3243,13 @@ function M.init(K)
   rows(K)
 end
 
+-- BUG-037 watchdog: a task that yields task_slices slices in a row is skipped for this run (kern.log; what it did stays,
+-- the next run goes on from there), so one task can never hold the run, and with it every slot, for good
 function M.step(K, budget, ctx)
   S.slice = {qf = 0, probes = 0, qf_max = M.CFG.qf_per_slice}
   if not (ctx and ctx.cont) or not S.run then begin_run(K) end
   local run = S.run
+  run.sl = (run.sl or 0) + 1
   while run.i <= #run.tasks do
     local task = run.tasks[run.i]
     local P = task.id and find(task.id)
@@ -3147,18 +3260,67 @@ function M.step(K, budget, ctx)
     elseif P and task.k == 'work' and P.done ~= 1 and not halted(P) then
       -- the mode may change between slices of one run (SIEGE/BREACH freeze the runner at once)
       local d = doc(K, P.id)
-      if not allowed(K, P, d) then R_of(K, P).last = now(K); dirty()
+      if not allowed(K, P, d) then moved(K, R_of(K, P)); dirty()
       elseif task.hold or paused(K, P, d) then r = work(K, P, task.meas, true)
       else r = work(K, P, task.meas) end
     end
-    if r == 'yield' then save(K); return 'more' end
-    run.i = run.i + 1
+    if r == 'yield' then
+      run.ty = (run.ty or 0) + 1
+      if run.ty < M.CFG.task_slices then save(K); return 'more' end
+      S.wd = (S.wd or 0) + 1
+      K.log('warn', 'runner watchdog: task %d/%d (%s%s) yielded %d slices in a row: skipped this run', run.i, #run.tasks,
+            task.k, task.id and (' ' .. task.id) or '', run.ty)
+      if task.k == 'check' then S.chk = nil end
+    end
+    run.i, run.ty = run.i + 1, 0
   end
-  S.run = nil
+  S.run, S.ended = nil, now(K)
   save(K)
 end
 
-function M.state(K) return {phase = S.phase, proj = S.rows, sched = S.sched} end
+-- BUG-037: no run ended for run_idle_d days (or since the boot): {d, i, n, task, sl, age} of the run in hand, else nil
+function Q.run_state(K)
+  local t, t0 = now(K), S.ended or S.boot
+  if not t0 or t - t0 < M.CFG.run_idle_d * DAY then return nil end
+  local out, r = {d = (t - t0) // DAY}, S.run
+  if r then
+    local task = r.tasks[r.i]
+    out.i, out.n, out.sl, out.age = r.i, #r.tasks, int(r.sl) or 0, math.max(0, (t - r.t) // DAY)
+    if task then out.task = trunc(task.k .. (task.id and (' ' .. task.id) or ''), 40) end
+  end
+  return out
+end
+
+function M.state(K)
+  local sc, q, run, pk = S.sched, S.q, Q.run_state(K), (S.npk or 0) > 0 and S.npk or nil
+  if q or run or pk then
+    sc = sc and copy(sc) or {}
+    sc.q, sc.run, sc.pk = q, run, pk
+  end
+  return {phase = S.phase, proj = S.rows, sched = sc}
+end
+
+-- BUG-037 (economy's inspect workload and idle rule): the runner's queue in one clause, nil when nothing waits;
+-- data {n, by = {{id, tpl, idle days}}, run = run_state, pk}
+function M.queue(K)
+  local q, run = S.q, Q.run_state(K)
+  local data = {n = q and q.n or 0, by = q and q.by or {}, run = run, pk = S.npk or 0}
+  if run then
+    return string.format('runner: no run ended for %d days%s, %d projects wait', run.d,
+                         run.task and string.format(' (at task %d/%d %s, %d slices)', run.i, run.n, run.task, run.sl)
+                         or '', data.n), data
+  end
+  if not q then return nil, data end
+  local names, idle = {}, 0
+  for _, b in ipairs(q.by) do
+    names[#names + 1] = string.format('%s %s%s', b[1], b[2], b[3] >= 2 and string.format(' %d d without progress', b[3])
+                                                                 or '')
+    if b[3] >= 2 then idle = idle + 1 end
+  end
+  return string.format('runner: %d project%s queued behind %d slot holder%s%s (%s)', q.n, q.n == 1 and '' or 's',
+                       #q.by, #q.by == 1 and '' or 's', idle == #q.by and #q.by > 0 and ' without progress' or '',
+                       table.concat(names, ', ')), data
+end
 
 -- public (live L2): bboxes of the projects not done yet (readiness puts them into the audit snapshot)
 function M.bboxes(K)
@@ -3300,10 +3462,10 @@ function M.cavern_open(K)
   return n, list
 end
 
--- WP7/WP8 (care): projects of a template that are not done yet (capacity requests wait for them)
+-- WP7/WP8 (care): projects of a template that are not done yet (capacity requests wait for them; BUG-037: not parked)
 function M.pending(K, tpl)
   local n = 0
-  for _, P in ipairs(S.pd and S.pd.list or {}) do if P.tpl == tpl and P.done ~= 1 then n = n + 1 end end
+  for _, P in ipairs(S.pd and S.pd.list or {}) do if P.tpl == tpl and Q.live(K, P) then n = n + 1 end end
   return n
 end
 

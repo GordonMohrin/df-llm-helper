@@ -237,7 +237,8 @@
  },
  "runner": {
   "seal_first": {"on": true, "stuck_days": 3, "food_d": 30, "drink_d": 30},
-  "rebuild": {"pop": 10, "off": 12}
+  "rebuild": {"pop": 10, "off": 12},
+  "queue": {"yield_days": 7, "park_days": 30}
  },
  "reserve": {
   "from_phase": "P1",

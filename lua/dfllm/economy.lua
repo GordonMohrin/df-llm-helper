@@ -2000,6 +2000,14 @@ local function backlog_act(K, b, p)
 end
 
 -- true when it acted (a command)
+-- BUG-037: the runner's queue in one clause ('runner: 6 projects queued behind 3 slot holders ...'), nil when nothing
+-- waits; and its data
+local function runner_queue(K)
+  local ok, msg, data = K.call('runner', 'queue')
+  if not ok then return nil, nil end
+  return type(msg) == 'string' and msg or nil, type(data) == 'table' and data or nil
+end
+
 local function idle_rule(K, c, p, inv, rock)
   local rule = decision(K, 'D-03')
   if st.idle == nil then return false end
@@ -2008,7 +2016,9 @@ local function idle_rule(K, c, p, inv, rock)
   if rule == 'off' or p.idle_days < need or K.mode() ~= 'PEACE' then return false end
   local b = backlog_pick(K, c, p, inv, rock)
   if not b then
-    K.log('info', 'idle %d%% for %d days, useful backlog empty: no action', st.idle, p.idle_days)
+    local rq = runner_queue(K)
+    K.log('info', 'idle %d%% for %d days, useful backlog empty: no action%s', st.idle, p.idle_days,
+          rq and ('; ' .. rq) or '')
     return false
   end
   if backlog_act(K, b, p) then
@@ -6563,8 +6573,12 @@ M.inspect.workload = function(K, args)
                 stone = st.rock or json.object{}, picks = st.picks or json.object{}, short = json.array(st.short or {}),
                 starve = sv and {hungry = sv.hungry, cut = #sv.cut, cut_units = {table.unpack(sv.cut, 1, math.min(10, #sv.cut))},
                                  marked = sv.marked, added = sv.added, unreach = sv.unreach} or json.object{}}
+  -- BUG-037 (Run 11 y449: '15 without reachable work, 0 unclaimed jobs' while six projects stood queued for months): the
+  -- runner's queue is named as the reason ('runner: 6 projects queued behind 3 slot holders without progress (...)')
+  local rq, rd = runner_queue(K)
+  data.runner = rd
   return true, string.format('%d of %d adults without a job (%d without reachable work), %d unclaimed jobs, %d unreachable',
-                             #idle, adults, noreach, n_open, n_far), data
+                             #idle, adults, noreach, n_open, n_far) .. (rq and ('; ' .. rq) or ''), data
 end
 
 return M

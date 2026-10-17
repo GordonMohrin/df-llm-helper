@@ -195,4 +195,21 @@ T.test('FR-40: ids of dead or departed citizens leave every work detail; workloa
   T.eq({r.data.unreachable, r.data.idle_noreach, r.data.waiting}, {{}, 0, nil}, 'no snapshot, no job board: all count')
 end)
 
+T.test('BUG-037 (Run 11 y449: 15 of 27 adults idle, 0 unclaimed jobs, six projects queued for months): inspect workload ' ..
+       'and the idle rule name the runner\'s queue as the reason', function()
+  local Q = 'runner: 6 projects queued behind 3 slot holders without progress (c1a145d32caa7c6f06 farms 9 d without ' ..
+            'progress, depot7 depot 9 d without progress, c1a148696a3d6da701 seal 2 d without progress)'
+  local W = world{cit = 6, busy = 1, setup = function(W)
+    job_list({})
+    W.load({name = 'runner', every = {ticks = 600}, queue = function() return Q, {n = 6} end})
+  end}
+  days(W, 8)                                              -- idle 83 %: combine on day 3, then nothing useful left
+  local r = W.inbox('inspect', {what = 'workload'})
+  T.eq(r.msg, '5 of 6 adults without a job (0 without reachable work), 0 unclaimed jobs, 0 unreachable; ' .. Q)
+  T.eq(r.data.runner, {n = 6})
+  local hit
+  for _, l in ipairs(W.logs) do if l.msg:find('useful backlog empty: no action; ' .. Q, 1, true) then hit = l end end
+  T.ok(hit, 'the idle rule\'s line')
+end)
+
 T.done()

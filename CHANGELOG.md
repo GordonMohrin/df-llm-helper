@@ -1,5 +1,65 @@
 # CHANGELOG dfpilot
 
+## Projects no longer wait for months behind slot holders that build nothing; a stopped runner and terminal blocks are named (BUG-037, 2026-10-17; offline, live-untested)
+- **Why (Run 11, y449):** Kilrudrabed site98, y449 spring d46, kernel 784399f, PEACE, ~39 citizens: two bedrooms, a
+  stockroom, a tavern, tombs and a prio-2 trade depot stood `queued` at 0 % for months; 15 of 27 adults had no job,
+  `inspect workload` said `0 unclaimed jobs`, the game session queued wood crafts as filler. The farms (`build_lost`,
+  retries spent since y426) and an explore (`breach:cavern_lake` since y432) stood in the list for good.
+- **Causes (from the code; bugs/BUG-037):** an open seal or plug took a pass-1 slot even when stalled and stuck
+  (SEAL_STUCK only ended its pause); a dig stage never stalled while another project dug; a fault in the seal-first count
+  (`focus`) left `S.active` empty, so every row read `queued` and nothing was applied; `rows()` named no slot holder,
+  and nothing showed a runner whose runs had stopped; projects blocked for good kept PLAN_EXHAUSTED, the keepers,
+  `runner.pending` and the depot keeper waiting. The live picture (the prio-2 depot `queued` too, no work since y446.3)
+  fits a runner whose runs stopped or whose `begin_run` died before the slots; which one is not proven offline.
+- **runner:**
+  - A slot holder whose own progress (`R.ps`: a chunk applied, manager orders made, measured progress, a stage done;
+    waiting for a slot, frozen or paused resets it) is `queue.yield_days` (7) old competes with the stalled projects for
+    the slots left over. A seal or plug keeps its pass-1 slot (seal first) only until it is stuck, then it is treated
+    like a stalled project (still measured; done once its pieces stand).
+  - Rows: `queued behind <first slot holder> +2`, `no progress 9 d: slot yielded`, parked projects last (`parked:
+    build_lost`). State `sched.q` (waiting, the holders with their days without progress), `sched.run` (no run ended
+    for `run_idle_d` 3 days: the run in hand, its task, slices, age), `sched.pk`.
+  - Watchdog: a task that yields `task_slices` (600) slices in a row is skipped for that run (kern.log `runner watchdog:
+    task i/n (work <id>) yielded N slices in a row: skipped this run`); a fault in the seal-first/rebuild count leaves
+    that run without them (kern.log `seal first/rebuild failed, this run without them: ...`, once per message).
+  - Parked: a project blocked for good (`build_lost` with the retries spent, `breach:*`, `apply_fail`, `bp_missing`,
+    `plug_refused`) for `queue.park_days` (30) no longer counts for the seal-first pause and state, `runner.pending`, the
+    bedrooms/tombs keepers, the depot keeper and PLAN_EXHAUSTED; PROJECT_BLOCKED (A) once with `d.park` and the command
+    (`... parked; cancel: dfllm cmd bp.cancel '{"proj":"<id>"}' (no undo: what it built stays)`). The kernel never
+    cancels it: an undo removes built work; an explore stays in the audit box and its shaft in the shaft check.
+  - `runner.queue()`: the queue in one clause for economy.
+- **economy:** `inspect workload` and the idle rule's `useful backlog empty` line end with the runner's clause
+  (`; runner: 6 projects queued behind 3 slot holders without progress (...)` or `; runner: no run ended for N days (at
+  task i/n ...), N projects wait`), data `runner`.
+- **Python:** `dfllm status`/`brief` lines `queued: 6 behind c1a148696a3d6da701 seal, depot7 depot 9 d no progress, ...`,
+  `runner: no run ended for 30 d (task 2/9 work ..., 900 slices): dfllm doctor, inspect modules`, `2 parked (blocked for
+  good: bp.cancel, PROJECT_BLOCKED)`; the wake line of a parked PROJECT_BLOCKED says `next: tell Gordon; once he agrees:
+  dfllm cmd bp.cancel '{"proj":"<id>"}' (no undo) ...`.
+- Config: `config/baseline.json` `runner.queue {yield_days: 7 (1-60), park_days: 30 (1-400)}` (`fairplay.RUNNER_LIM`,
+  `python -m dfpilot.lint --config`). Contracts: §7 `runner.queue`, `runner.pending`; §9.3 `proj`, `sched.q/run/pk`; §9.8
+  slots and parking; §9.17 `runner.queue`; §12 PROJECT_BLOCKED `park` (schema, contract.lua, appendix). RULES
+  PROJECT_BLOCKED row in place (300 lines).
+- Tests (each fails on 784399f): `tests/lua/test_runner_queue.lua` (three stuck seals held every slot, the yielding dig,
+  parked projects with PLAN_EXHAUSTED and `pending`, a parked seal, the seal-first fault, the watchdog, `sched.run` of
+  a paced run), `tests/lua/test_economy_jobs.lua` (the workload and idle clause), `tests/test_runner_queue.py`;
+  adjusted: `test_runner.lua` (the `queued behind` text; the park announcement is not one of BUG-022's), the seal-first
+  slot test, `tests/test_seal_first.py` (the config).
+- **Live check (Run 11/12):** after `git pull` and `dfhack-run dfllm reload`:
+  - First the old cause, read-only: `dfllm cmd inspect '{"what":"modules"}'` (runner `disabled`, `faults`, `paced`,
+    `debt`, `factor`), `dfllm doctor`, kern.log lines of module `runner` since y446 (any `error`), `runner paced` /
+    `demoted` / `backed off` lines, `dfllm events --type KERN_FAULT`, the runner's last `act.quickfort` in commands.log.
+  - Within a minute: `dfllm status` shows `seal open: 1 piece (c1a148696a3d6da701), others paused` (the new seal pauses
+    beds/work in PEACE: expected) and `queued: N behind ...` for the tombs/depot if the slots are full. A line `runner: no
+    run ended for N d (task i/n ...)` names the stuck task: note it for the repo; kern.log `runner watchdog: ...` after
+    600 slices of it.
+  - The depot and the tombs (never paused) get chunks within a few runs (`inspect projects` `chunk` > 0); the
+    stockroom, bedrooms and tavern wait as `paused: seal c1a148696a3d6da701` until the door stands, or until the seal is
+    stuck after 3 days without a built piece (SEAL_STUCK); then they run. Nothing moving within a day: the old cause
+    holds; send the read-only data above.
+  - Within a game day: PROJECT_BLOCKED `parked` once each for c1a145d32caa7c6f06 (farms) and y432s1b0 (explore), with
+    the bp.cancel command; ask the player, then cancel them without undo; a PLAN_EXHAUSTED may follow (year review).
+  - `dfllm cmd inspect '{"what":"workload"}'` ends with `; runner: ...` while projects wait.
+
 ## A hospital outside Kern+/Tiefe+ is a readiness blocker; in a fight the patients outside the alert burrow are reported (BUG-036; 2026-10-17; offline, live-untested)
 - **Why (Run 11 siege 9, y445):** 10 citizens lost, all in the BREACH; two cave dragons struck down 8, 7 of them
   patients in hospital beds (2 bled out at 115,77,144 and 124,91,144); the wounded soldiers (16 -> 6) lay there and were
