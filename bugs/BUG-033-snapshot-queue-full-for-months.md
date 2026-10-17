@@ -1,5 +1,5 @@
 # BUG-033 The snapshot export queue stays full for months; the runner costs 35 ms/s in PEACE
-Status: fixed (offline, live-untested): a K.call is the caller's cost; the snapshot queue (who asked, joins, inbox
+Status: fixed in bfad790 (offline, live-untested): a K.call is the caller's cost; the snapshot queue (who asked, joins, inbox
 requests first and boosted, age/stall/fault drops, a capped busy wait, a refusal that names the queue, state `snap`);
 readiness' monthly audit waits for its pending snapshot; the runner's shaft check sliced and cheaper; doctor/status name
 a starving queue and the top cost owner
