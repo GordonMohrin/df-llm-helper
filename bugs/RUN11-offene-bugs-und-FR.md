@@ -48,3 +48,8 @@ BUG-025..043 (Depot, Seal, Station auf Brücke, Recall, Runner-Hänger, Fishery/
 
 ## Nachtrag y497 Sommer d29 (18.10.2026)
 23. **Belagerung 14 (y497 Sommer d23-29): 24 Verluste** (Pop 49 -> 26; 'on_station=0', also keine Soldaten an der Station). Die beiden offenen Zugänge 113,73,143 und 115,73,143 (Tür-Bau seit y483 ungelöst, siehe 21/22) waren wieder offen; recall '10 of 30 still outside Tiefe+, 10 cannot come'. Das Muster: jede 2.-3. Belagerung kostet 20-36 Bürger, solange diese Zugänge offen sind und kein Metall-Gear existiert (worn 36 %). Die ungelöste Tür ist inzwischen der teuerste Einzelfehler des Runs.
+
+## Nachtrag y497 Herbst d45 (18.10.2026) – Fort fast tot
+24. **Pop 49 -> 26 -> 1 in einem Spieljahr**: nach Belagerung 14 (24 Verluste) starben am d31 fünf Patienten gleichzeitig an Durst (28970, 29039, 28627, 29100, 28968: thirst 75000, hunger 80-119k) – trotz 'hospital ok' und 24-27 freien Eimern und 4 Pflegern (siehe 18). Danach weitere Tode; zuletzt 1 Bürger (1 Soldat), 0 Erwachsene mit Arbeit. act.manager_office 'no manager', act.appoint 'not an adult living citizen', BREWER/PRESSING 'no worker' seit 24 Tagen.
+25. **DECISION_NEEDED squads: 'appoint a militia commander/captain (nobles screen)'** – der Kernel kann keinen Hauptmann ernennen, ohne Hauptmann keine Squads (S2). Wunsch: act.appoint über die DF-Ernennungsliste (assignments.histfig) bzw. Hinweis, wie der Spieler es per Lua-Ernennung tut.
+26. **Run-Fazit Run 11**: y431 bis y497 (66 Spieljahre); Hauptursachen für die dauernden Verluste: (a) offene Zugänge (Tür 115,73,143) durch einen nicht lösbaren Bau-Job, (b) verlorene Brücken/Hebel nie wiederaufgebaut, (c) Hospital-Durst (4+ Patienten gleichzeitig tot) trotz Wasser, (d) kein Metall-Gear (worn 20-50 %).
