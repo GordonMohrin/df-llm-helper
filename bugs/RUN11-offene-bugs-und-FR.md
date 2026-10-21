@@ -69,3 +69,8 @@ BUG-025..043 (Depot, Seal, Station auf Brücke, Recall, Runner-Hänger, Fishery/
 
 ## Run 12 Nachtrag (y504 Sommer d22)
 38. **Kein Kraeutersammler im Fort**: 275 GatherPlants-Auftraege unclaimed, weil niemand `unit_labor.HERBALIST` hat (PLANT 8, HERBALIST 0). Idle-Heuristik zaehlt "0 without reachable work", obwohl niemand die Arbeit darf. Vorschlag: Kernel prueft Labor-Abdeckung fuer jeden Jobtyp mit >N unclaimed Auftraegen und schaltet das Labor fuer Idle-Zivilisten ein. Von Hand: 8 Idle-Zivilisten auf HERBALIST.
+
+## Run 13 (Wheelsblows, region2-site84)
+39. **QUICKSAVE_FAILED y506 aut d11**: `dfpilot save` meldet nach 122 s "no fortress save folder newer than the call (dfhack-run printed nothing)"; neuester Save war ein Autosave von vor 12 min. Moeglicherweise Quicksave waehrend aktivem Autosave-Slot oder Frame-Stau bei grosser Welt (region2, Saves 54-110 s).
+40. **Popup-Pause kehrt alle ~15 min wieder** (run pause:popup, DECISION_NEEDED "Gordon unpauses in DF"): jede Schleife musste popup.lua laufen lassen. FR: Kernel soll harmlose Popups (Migranten, Handel, Stimmung) selbst quittieren.
+41. **Plan-Draft nach bp.place(fortcore)**: farms/dining/office @S1 lieferten danach "0 free sites", obwohl vorher Sites da waren; Reihenfolge bp.place vs. plan propose unklar dokumentiert.
