@@ -1,5 +1,51 @@
 # CHANGELOG dfpilot
 
+## Integration audit: the closure of a lost bridge gets the seal's rules (walls first, a stuck door is named and walled), the rebuild policy runs it and care's drink nook, a parked lever no longer delays the lockdown's alert (BUG-081, BUG-082, 2026-10-23, audit I2; offline, live-untested)
+- **Why:** packages A1 (seal door), A2 (lost bridge -> wall + door), B3 (drink nook), C2 (parked levers) were each reviewed alone and merged one
+  after the other; nobody had read the combination. Two combinations were defects (below); the rest of the list is in "Integration audit I2".
+- **BUG-081 (bugs/BUG-081):** the closure (`seal` asks `runner.repair(cells, why, {peace = true, closure = true})`) was an ordinary peace-only
+  repair: (1) walls and door in one quickfort call: the door beside planned walls is refused, the first re-apply runs before the walls
+  stand, the project ended `build_lost` with the door never placed (retry a season later); now `params.cl = 1`, prio 1, stage `s1.walls`
+  then `s2.door`. (2) A1's stuck clock, SEAL_STUCK `wait` and the door -> wall fallback were `seal`-only: a closure door that never
+  gets built kept the fort open for ever; the closure keeps the same clock (it pauses nobody: no `sched` entry), SEAL_STUCK names
+  the cause (tpl `repair`), SEAL_WALLED replaces the door after `wall_days` under A1's rules, and `KP.standing` counts the walled
+  tile as closed. (3) The rebuild policy (fallen fort below `rebuild.pop`) paused every peace-only repair as `defense`, the closure
+  too: now `repair`, it runs; a bridge rebuild stays paused as before. (4) `mood_drink` (care) fell into kind `work`: an open seal
+  and the rebuild policy paused the drink for a dying mood dwarf; new kind `mood`, never paused, runs in the rebuild policy.
+- **BUG-082 (bugs/BUG-082):** a bridge whose levers are all parked for no effect (BUG-068) counted as a pull to wait for: the
+  lockdown's deferred civ alert waited up to `ALERT_MAX` (1500) ticks for it; `NO_PULL.no_effect`, `gate.pulls().parked`.
+- Contracts: CONTRACTS rows `runner.repair` (`opts.closure`), class/rebuild row, `gate.pulls()` (`parked?`), SEAL_STUCK `tpl`,
+  SEAL_WALLED; no new event or config key (schema.py, contract.lua and the appendix unchanged); RULES.md unchanged (300 lines).
+- Tests (each fails on 9bcb14f): `tests/lua/test_i2_closure.lua` (new), `tests/lua/test_i2_gate_parked.lua` (new),
+  `tests/lua/test_perimeter_keeper.lua` (the keeper asks for a closure; a walled door tile is closed).
+- **Live check:** after the next lost bridge in a fort: `dfllm cmd inspect '{"what":"workload"}'` shows the closure project `rp...` in
+  stage `s1.walls`, later `s2.door`; a door that waits: SEAL_STUCK with `tpl repair` and `wait` (`door x,y,z: job N suspended by ...`),
+  five days later SEAL_WALLED (`closure`) and `status` bridges `replaced`. A lockdown with every lever parked (LEVER_NOEFFECT): kern.log
+  `reflex: civ alert: no pull pending` at once instead of `deadline N ticks, M pulls left`.
+
+### Integration audit I2 (seal, perimeter, runner, project kinds; first-pass state f17e2b3..9bcb14f)
+Hypotheses and results (file:line at 9bcb14f):
+1. **Every template added since f17e2b3 has a kind and a keep decision.** `mood_drink` (care.lua:1678, runner.lua:4403): kind fell
+   through to `work` (runner.lua:2512 `kind_of`): **real**, fixed (kind `mood`); no audit-box keep (a one-tile stockpile inside a
+   workshop's box; BUG-043's box holds not-done projects through `boxes()` and the kept room/shaft/seal boxes, consistent with
+   `tombs`/`depot` that keep nothing for a stockpile-only project). The closure repair: `defense` for the rebuild policy
+   (runner.lua:2518): **real**, fixed; it is kept as `repair` by `KEEP_BOX.repair = 'kind'` (kk, outside `kept_in`, tested by
+   dumping `runner.boxes` before and after a reload). `refuge_drink`: `SUPPLY` (paused by an open seal unless an emergency, runs
+   in the rebuild policy) and `KEEP_BOX`: consistent. The tool pile (economy `T.toolpile`, `act.tool_pile`) and `zone.place`
+   (`zonelib`, `act.zone_place`) are no runner projects: no kind needed.
+2. **A closure door behind the order cap / a stuck door.** Refuted for the cap (a repair stage has `orders = 0`, economy's `T.jmake`
+   orders the item); **real** for everything else: the door was refused beside planned walls (build_lost), and SEAL_STUCK, the wall
+   fallback and the clock were seal-only (BUG-081).
+3. **Seal open + closure + lost farms + refuge_drink + mood nook on 3 slots.** Seal and closure run, the nook runs, the store waits
+   for the seal (supply, no emergency), the build_lost farms project is halted and holds no slot, nothing runs in SIEGE
+   (`allowed`); closure at prio 1 sorts before the plan's prio-4 projects; no starvation found beyond item 1.
+4. **`runner.lua` locals and state.** Still exactly 200 top-level locals (headroom 0 before and after; this change adds none: new
+   code lives in `Q`/`M` fields); runner state 1,347 bytes worst case measured on synthetic maxima (8 rows 793, sched 344, adopt 170),
+   `proj` is the first key the 4 KB shrink sheds; nothing added to it.
+5. **Parked lever (NO_PULL) vs the alert's pending-pull wait.** **Real**, fixed (BUG-082).
+6. **B3 culprit fields vs A2's keeper.** Refuted: `tby`/`tghost` are report fields only; a bridge toppled by a tantrum or a ghost is an
+   `nd` loss (no destroyer in sight), rebuilt at once, and counted by `vanish_after` (3) like any other (`KP.verdict`).
+
 ## Integration audit: state size, status ranking and token budgets of the merged packages (BUG-079, BUG-080, 2026-10-23; offline, live-untested)
 - **Why:** BUG-044..075 and FR-70..78 were reviewed one by one; nobody read the combination. A maximal fixture (a fort of 80, every
   optional field of every module, all R0 blockers, a lockdown held by a gremlin, a reclaimed fort that lost a fifth of its peak)

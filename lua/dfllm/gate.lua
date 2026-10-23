@@ -673,7 +673,9 @@ end
 
 -- the bridge still needs a pull: its wanted state is not reached and it has a linked lever; a bridge waiting for a
 -- citizen to leave its footprint (the alert calls him in), for the down guard or without a lever needs none now
-local NO_PULL = {no_lever = true, blocked = true, guard = true, manual = true}
+-- BUG-082: no_effect (every linked lever parked, BUG-068) is no pull to wait for either: the lockdown's deferred civ alert
+-- (reflex.alert_due, gate.pulls().left) must not wait for it up to ALERT_MAX ticks
+local NO_PULL = {no_lever = true, blocked = true, guard = true, manual = true, no_effect = true}
 local function needs_pull(name)
   local br, r = st.br[name], rt[name]
   if not (br and br.want and r) or r.last == br.want or NO_PULL[r.stuck] then return false end
@@ -2029,6 +2031,7 @@ function M.pulls(K)
         if bs and not lever_in(r, bs) then res.out = res.out + 1 end
       elseif r and r.stuck == 'blocked' then res.foot = res.foot + 1
       elseif r and r.stuck == 'manual' then res.manual = (res.manual or 0) + 1      -- BUG-027 gate.manual
+      elseif r and r.stuck == 'no_effect' then res.parked = (res.parked or 0) + 1   -- BUG-082: every lever parked
       else res.nolever = res.nolever + 1 end
     end
   end

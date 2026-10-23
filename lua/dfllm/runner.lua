@@ -2473,21 +2473,23 @@ end
 -- What a project is to them (kind_of): seal (seal, plug), tombs (tombs, care's coffins), depot, explore (DECISIONS 4:
 -- the ore search is paused by the rebuild policy but not by an open seal), supply (farms,
 -- cistern, stockroom, refuge_drink (FR-69), a workshops project of food/drink shops only: follow's fishery), beds
--- (bedrooms, refuge_beds), repair (runner.repair of lost walls and doors; a peace-only one rebuilds a bridge:
--- defense), defense (any other defense class project: fortcore stages 2-4, barracks, captives, gallery_o1) and work
--- (the rest: rooms, workshops, furnaces, explore, fortcore stage 1, beauty).
+-- (bedrooms, refuge_beds), repair (runner.repair of lost walls and doors, and seal's wall + door for a lost bridge,
+-- BUG-081: params.cl; a peace-only one that rebuilds a bridge is defense), mood (care's drink nook beside a mood
+-- workshop, BUG-063/081), defense (any other defense class project: fortcore stages 2-4, barracks, captives,
+-- gallery_o1) and work (the rest: rooms, workshops, furnaces, explore, fortcore stage 1, beauty).
 -- An open seal pauses in PEACE: work, beds, and supply unless an emergency holds (food or drink days below
 -- seal_first food_d/drink_d, a patient without accepted water). Never paused: seal, tombs (GHOSTS: the dead must be
--- buried), the depot (a caravan leaves without one), repairs and defense (they close or guard the fort too). While the
+-- buried), mood (a dwarf in a strange mood drinks nothing while his job waits), the depot (a caravan leaves without one),
+-- repairs and defense (they close or guard the fort too). While the
 -- free stone is below what the rock orders and walls want (stock.rock < rock_need), a paused project in a dig stage
 -- digs on: its boulders become the seal's walls.
--- The rebuild policy runs (PEACE/RECOVERY; the mode's class gating still holds) seal, tombs, supply, beds, repair and
--- the depot; the rest pauses.
+-- The rebuild policy runs (PEACE/RECOVERY; the mode's class gating still holds) seal, tombs, supply, beds, repair, mood
+-- and the depot; the rest pauses.
 local SUPPLY = {farms = true, cistern = true, stockroom = true, refuge_drink = true}     -- FR-69: the refuge's store
 local BEDS = {bedrooms = true, refuge_beds = true}
 local FOOD_SHOPS = {Still = true, Kitchen = true, Butchers = true, Fishery = true}
 local SEAL_PAUSES = {work = true, beds = true, supply = true}
-local REBUILD_RUNS = {seal = true, tombs = true, supply = true, beds = true, repair = true, depot = true}
+local REBUILD_RUNS = {seal = true, tombs = true, supply = true, beds = true, repair = true, depot = true, mood = true}
 local PIECE_NAME = {d = 'door', H = 'hatch', Cw = 'wall', W = 'grate', G = 'grate', B = 'bars', h = 'channel',
                     p = 'gather', t = 'chop'}
 
@@ -2516,8 +2518,10 @@ local function kind_of(P, d)
   if SUPPLY[t] or (t == 'workshops' and food_shops(d)) then return 'supply' end
   if BEDS[t] then return 'beds' end
   if t == 'repair' then
-    return (type(d) == 'table' and type(d.params) == 'table' and d.params.peace == 1) and 'defense' or 'repair'
+    local p = type(d) == 'table' and type(d.params) == 'table' and d.params or {}
+    return (p.peace == 1 and p.cl ~= 1) and 'defense' or 'repair'     -- BUG-081: a closure is a repair, not a bridge
   end
+  if t == 'mood_drink' then return 'mood' end                         -- BUG-081: a drink for a mood dwarf, never paused
   return P.class == 'defense' and 'defense' or 'work'
 end
 
@@ -2766,6 +2770,13 @@ function Q.wait_why(K, P, d)
   return #out > 0 and table.concat(out, '; ') or nil
 end
 
+-- BUG-081 (integration audit I2): seal's wall + door for a lost bridge (runner.repair opts.closure, params.cl = 1) is a
+-- seal in all but name: the same door waits for the same item, a suspended job or a builder, and the fort stays open
+-- until it stands. It keeps the stuck clock of a seal (SEAL_STUCK with the cause, the wall fallback), but pauses nobody
+function Q.closure(P, d)
+  return P.tpl == 'repair' and type(d) == 'table' and type(d.params) == 'table' and d.params.cl == 1
+end
+
 -- SEAL_STUCK (A): the seal built nothing for stuck_days; util/cadence per project (r.ev): a repeat needs news and
 -- 7 days (Run 9 GHOSTS rule). BUG-041: d.wait = Q.wait_why
 local function stuck_event(K, P, d, n, names, ticks, r)
@@ -2775,11 +2786,12 @@ local function stuck_event(K, P, d, n, names, ticks, r)
   local _, mat = M.remake_why(K, P, d)
   local okw, wait = pcall(Q.wait_why, K, P, d)
   wait = okw and type(wait) == 'string' and trunc(wait, 160) or nil
-  local msg = string.format('%s (%s) built nothing for %s at %s: %s open%s%s%s%s; the other projects run again', P.id,
+  local msg = string.format('%s (%s) built nothing for %s at %s: %s open%s%s%s%s; %s', P.id,
                             P.tpl, plural(days, 'day'), label, plural(n, 'piece'),
                             #names > 0 and (' (' .. table.concat(names, ', ') .. ')') or '',
                             P.blocked ~= '' and ('; ' .. P.blocked) or '', mat and ('; ' .. mat) or '',
-                            wait and ('; ' .. wait) or '')
+                            wait and ('; ' .. wait) or '',
+                            P.tpl == 'repair' and 'the lost bridge stays open' or 'the other projects run again')
   K.log('warn', 'seal first: %s', msg)
   local T = K.now()
   local ids = #names > 0 and names or {P.id}
@@ -2808,7 +2820,8 @@ local function focus(K)
   local open = {}
   for _, P in ipairs(sorted()) do
     -- BUG-037: a parked seal (blocked for good past park_days) is out of the way: it pauses nothing, SEAL_STUCK is done
-    local d = SEALS[P.tpl] and P.blocked ~= 'cancel' and not Q.parked(K, P, c.park) and doc(K, P.id)
+    local d = (SEALS[P.tpl] or P.tpl == 'repair') and P.blocked ~= 'cancel' and not Q.parked(K, P, c.park) and doc(K, P.id)
+    if d and P.tpl == 'repair' and not Q.closure(P, d) then d = nil end     -- BUG-081: only a closure keeps the clock
     if d then
       open[P.id] = true
       local n, names = open_pieces(K, P, d)
@@ -2819,7 +2832,8 @@ local function focus(K)
       if r.sig ~= sig then                            -- a piece built, a stage or chunk further: the clock starts again
         if r.st == 1 then
           r.st, r.ev = 0, CAD.quiet(r.ev)
-          K.log('info', 'seal first: %s moves again (%s open): it pauses the others again', P.id, plural(n, 'piece'))
+          K.log('info', 'seal first: %s moves again (%s open)%s', P.id, plural(n, 'piece'),
+                P.tpl == 'repair' and '' or ': it pauses the others again')
         end
         r.sig, r.t, r.nw, r.nu, r.wt = sig, t, nil, nil, nil
         dirty()
@@ -2831,7 +2845,8 @@ local function focus(K)
         dirty()
         stuck_event(K, P, d, n, names, t - r.t, r)
       end
-      if r.st == 1 then f.stuck[#f.stuck + 1] = {id = P.id, n = n, days = (t - r.t) // DAY}; f.stk[P.id] = true
+      if P.tpl == 'repair' then                       -- BUG-081: a closure pauses nobody and is never "stuck" for the others
+      elseif r.st == 1 then f.stuck[#f.stuck + 1] = {id = P.id, n = n, days = (t - r.t) // DAY}; f.stk[P.id] = true
       elseif not f.lead then f.lead, f.n, f.names = P.id, n, names
       else f.more = f.more + 1 end
     end
@@ -2874,8 +2889,9 @@ function Q.stuck_walls(K, c)
   if okh and type(hold) == 'string' and hold ~= '' then return end
   local t = now(K)
   for _, P in ipairs(sorted()) do
-    local r = P.tpl == 'seal' and (P.blocked == '' or P.blocked == 'stalled') and S.rt.sf[P.id]
+    local r = (P.tpl == 'seal' or P.tpl == 'repair') and (P.blocked == '' or P.blocked == 'stalled') and S.rt.sf[P.id]
     local d = type(r) == 'table' and r.st == 1 and t - r.t >= c.stuck + c.wall_days and doc(K, P.id)
+    if d and P.tpl == 'repair' and not Q.closure(P, d) then d = nil end       -- BUG-081
     local st = d and d.stages[P.stage + 1]
     if st and st.mode == 'build' and P.chunk >= #st.chunks and t - (int(r.wt) or -DAY) >= DAY then
       r.wt = t                                   -- looked at once a game day (read-only calls, a few reads)
@@ -2931,8 +2947,8 @@ function Q.stuck_walls(K, c)
               if #l < 8 then l[#l + 1] = at end
               S.rt.sw[P.id] = l
               local days = (t - r.t) // DAY
-              local msg = string.format('%s (seal): door %s stuck %d days replaced by a wall (%s)', P.id, at, days,
-                                        why or 'cause not readable')
+              local msg = string.format('%s (%s): door %s stuck %d days replaced by a wall (%s)', P.id,
+                                        P.tpl == 'seal' and 'seal' or 'closure', at, days, why or 'cause not readable')
               K.log('warn', 'seal first: %s', msg)
               K.emit('SEAL_WALLED', 'B', trunc(msg, 200), {proj = P.id, at = at, was = 'door', days = days,
                                                           why = trunc(why or 'cause not readable', 160)})
@@ -4324,7 +4340,10 @@ end
 -- FR-56 (seal): a defense project that builds lost perimeter pieces again. cells = {{x, y, z, text}, ...} absolute
 -- quickfort build cells (Cw, d, gw(3x1) ...); like cmd.py's repair_doc, buildingplan waits for the materials (no
 -- orders) and there is no manifest fragment. opts.peace (seal, a lost bridge; BUG-030 rebuild policy): params.peace
--- = 1, the project is built only in PEACE without a reflex lockdown (allowed). Returns ok, project id.
+-- = 1, the project is built only in PEACE without a reflex lockdown (allowed). opts.closure (seal's wall + door for a
+-- lost bridge, BUG-081): params.cl = 1, prio 1, the walls in stage s1.walls and the door in s2.door; a repair that
+-- closes a way in is kind 'repair' for the rebuild policy (it runs) and keeps the seal clock of SEAL_STUCK and the wall
+-- fallback of BUG-044 (Q.closure). Returns ok, project id.
 function M.repair(K, cells, why, opts)
   if type(cells) ~= 'table' or #cells == 0 or #cells > 500 then return false, 'need 1-500 cells' end
   local list = {}
@@ -4335,11 +4354,27 @@ function M.repair(K, cells, why, opts)
   end
   sort_cells(list)
   local id = new_id(K, 'rp')
+  local cl = type(opts) == 'table' and opts.closure == true     -- BUG-081: the keeper's wall + door for a lost bridge
+  local stages = {{label = 's1.build', mode = 'build', orders = 0, defense = 1, chunks = abs_chunks(list)}}
+  if cl then
+    -- the walls first, the door in a stage of its own: quickfort places a door only beside a standing WALL or
+    -- FORTIFICATION, a planned wall beside it does not count (door_walls), so a door in the walls' own call is refused
+    -- and, the walls built meanwhile, the project ended build_lost with the door never placed (a season until its retry)
+    local walls, doors = {}, {}
+    for _, c in ipairs(list) do
+      local t = c[4]:match('^[^{(:/]*') == 'd' and doors or walls
+      t[#t + 1] = c
+    end
+    if #walls > 0 and #doors > 0 then
+      stages = {{label = 's1.walls', mode = 'build', orders = 0, defense = 1, chunks = abs_chunks(walls)},
+                {label = 's2.door', mode = 'build', orders = 0, defense = 1, chunks = abs_chunks(doors)}}
+    end
+  end
   local d = {v = 2, tpl = 'repair', site = 'repair', class = 'defense',
-             params = (type(opts) == 'table' and opts.peace) and obj{peace = 1} or obj{}, rot = 0,
-             anchor = {list[1][1], list[1][2], list[1][3]}, manifest = {v = 2}, materials = obj{},
-             stages = {{label = 's1.build', mode = 'build', orders = 0, defense = 1, chunks = abs_chunks(list)}}}
-  local ok, err = register(K, id, d, 2, 'repair')
+             params = cl and obj{peace = 1, cl = 1} or (type(opts) == 'table' and opts.peace) and obj{peace = 1} or obj{},
+             rot = 0, anchor = {list[1][1], list[1][2], list[1][3]}, manifest = {v = 2}, materials = obj{},
+             stages = stages}
+  local ok, err = register(K, id, d, cl and 1 or 2, 'repair')
   if not ok then return false, err end
   save(K)
   K.log('info', 'repair %s queued: %d cells (%s)', id, #list, tostring(why or ''))
