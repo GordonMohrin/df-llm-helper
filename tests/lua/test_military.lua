@@ -494,6 +494,7 @@ T.test('combat value per soldier, metal % (iron/steel body armor), soldiers on s
   local units = {}
   for i = 1, 50 do units[i] = X.cit(i, {skills = {AXE = (i % 3) * 2, SHIELD = 2, ARMOR = 1, DODGING = 3, CROSSBOW = 1}}) end
   local W = X.world{units = units}
+  W.K.cfg.baseline.military = {rotation = {on = false}}      -- FR-79: the militia squad B is filled by the rotation's rank, not by combat value
   X.load(W, {'military'}, {X.runner('P5')}, {'sense'}); W.state()
   W.run(9, {skip = 9})
   T.eq(kpi(W).cv, 10, 'the 8 best fighters: axe 4 + shield 2 + armor 1 + dodging 3')

@@ -428,7 +428,7 @@ def snapshot_errors(path: str | Path | None = None) -> list[str]:
     return errs
 
 
-# BUG-050 / FR-71 / BUG-051 / BUG-052 (lua/dfllm/military.lua M.conf): config/baseline.json "military". unstick = the monthly
+# BUG-050 / FR-71 / BUG-051 / BUG-052 / FR-79 (lua/dfllm/military.lua M.conf): config/baseline.json "military". unstick = the monthly
 # uniform-unstick (on; drop = the opt-in for --drop; every = ticks between two runs; below = it runs only while the worn %
 # is below this; drop_after = plain runs with a proven conflict before --drop), militia = squad key (A, B, C) -> the
 # months (0-11) it is on duty, free_months = the months the elite is free (default: the union of the militia windows),
@@ -439,6 +439,11 @@ MILITARY_UNSTICK_LIM: dict = {"on": "bool", "drop": "bool", "every": (1200, 4032
                               "drop_after": (0, 12)}
 MILITARY_LIM: dict = {"early_pop": (0, 250), "station_r": (1, 10)}
 MILITARY_KEYS = ("A", "B", "C")
+# FR-79 (military.lua M.ROT_DEF / M.ROT_LIM): military.rotation = the kernel swaps the members of the militia squads (the
+# keys of `militia`) for the next cohort at the close of their window. on = false keeps the members as before, per_day = the
+# most members one game day changes (batches are a day apart), worn_min = no turnover of members who wear kit while the
+# army's worn % is below it (0 = never held)
+MILITARY_ROTATION_LIM: dict = {"on": "bool", "per_day": (1, 10), "worn_min": (0, 100)}
 
 
 def military_errors(path: str | Path | None = None) -> list[str]:
@@ -488,6 +493,19 @@ def military_errors(path: str | Path | None = None) -> list[str]:
         elif k == "free_months":
             if not months(v):
                 errs.append(f"{name}: military.free_months: a list of months 0..11 expected, got {v!r}")
+        elif k == "rotation":
+            if not isinstance(v, dict):
+                errs.append(f"{name}: military.rotation must be an object")
+                continue
+            for rk, rv in v.items():
+                lim = MILITARY_ROTATION_LIM.get(rk)
+                if lim is None:
+                    errs.append(f"{name}: military.rotation.{rk}: unknown key")
+                elif lim == "bool":
+                    if not isinstance(rv, bool):
+                        errs.append(f"{name}: military.rotation.{rk}: true or false expected, got {rv!r}")
+                elif not is_int(rv, *lim):
+                    errs.append(f"{name}: military.rotation.{rk}: int {lim[0]}..{lim[1]} expected, got {rv!r}")
         elif k in MILITARY_LIM:
             if not is_int(v, *MILITARY_LIM[k]):
                 lo, hi = MILITARY_LIM[k]

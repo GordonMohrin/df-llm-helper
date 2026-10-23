@@ -1,5 +1,81 @@
 # CHANGELOG dfpilot
 
+## The kernel rotates the citizens through the militia: cohorts by militia windows served, turnover at the close of a window, a squad refill that no longer stalls (FR-79, BUG-076, 2026-10-23, package D1; offline, live-untested)
+- **Why (Run 14 Trussroads y578-y582; notes 64 and 67, Gordon's own request 23.10.):** goal Z12 "every adult citizen who is not
+  elite serves three months a year in the militia" could only be followed by hand: FR-71 gave every militia squad its months, but
+  nothing changed WHO sat in squad B. military.lua `fill` topped the squad up with the best fighters and kept them (add below the
+  target, remove only above target + 2), `M.windows` only logged the window and `off_season` only switched the routine; a cohort
+  set by hand was overwritten by the next top-up (the squads that "change within seconds" are the 3,600-tick PEACE upkeep seen at
+  timestream speed, about 8 s; SIEGE_FILL/HOLD_MIN act in SIEGE/BREACH only). Reading `fill` also showed BUG-076.
+- **FR-79 (lua/dfllm/rotation.lua, military.lua `rot_*`; docs in docs/feature-requests/README.md):**
+  - *Who:* for every squad of the militia table (config `military.militia`; the elite squads never take part) the next cohort is
+    the first `want - 1` of the eligible citizens ranked by militia windows served (persist `m.military` `served`, one count per
+    unit id), then by unit id; eligible = adults in no other squad, no noble, no mood, no patient or wounded, no tool labor, not
+    refused by `addToSquad` lately, not the only civilian holder of a key labor (MASON, CARPENTER, BREWER, PLANT, COOK, MECHANIC,
+    DIAGNOSE, SMELT, FORGE_*, MILLER, SURGERY, BONE_SETTING; counted greedily, so of two cooks one may serve). Everybody serves
+    once before anybody twice. The squad's leader (the militia captain) stays.
+  - *When:* at the CLOSE of the window (cyclic months: {9, 10, 11} closes in month 0, {11, 0, 1} in month 2). The members are
+    credited with the window they served; then the members who are not in the next cohort leave in swaps with the entrants
+    (`squad_remove` + `squad_add`, the squads screen), the most served first. The new cohort sits in the squad through the
+    months off duty, so its kit is fetched before the window opens. Only in PEACE with `military.danger` clear (no ALERT,
+    SIEGE, BREACH, DRILL, RECOVERY, lockdown or hostile in sight); a turnover that waits keeps the whole off period; one that
+    could not run before the window reopens lapses (the same members serve again, kern.log says why, `ms` counts it). The
+    first sight of a squad, an old state without the keys, an adopted squad or a reclaimed fort only record the last close:
+    nobody is moved before the next one; a clock that went back (an older save) starts the squad over.
+  - *Ownership:* outside a siege the rotation owns the militia squad's membership: `fill` takes its candidates from the rotation's
+    order (the cohort first) and sends away the most served member when the squad is over target. In SIEGE/BREACH the fill rules
+    are the old ones (healthy core civilians by combat value, HOLD_MIN).
+  - *Equipment (c):* a turnover calls `squad_remove` and `squad_add` only; the kernel drops, unequips and moves nothing (a test
+    pins the act list). A vacated position keeps the squad's uniform specs (`p.equipment.uniform`, per position), bare positions
+    get them from `ensure_uniform`/`ensure_weapons`, which run again in the same step; DF's equipment pass (the update flags
+    `addToSquad` sets, act.lua:600-607) assigns the kit. The hazard of a leaver's kit is bounded: at most `rotation.per_day` (3)
+    members a game day (batches a day apart), no turnover of members who wear kit while the army's worn % is below
+    `rotation.worn_min` (40), and the close of the window means the kit settles in the months off duty. kern.log follows every
+    turnover at +1,200 and +8,400 ticks: `militia turnover T ticks ago (squad B, 3 swapped): worn X% before, Y% now, N soldiers
+    fetching kit`.
+  - *Observability:* state `mil.rot.<A|B|C>` {w window, on, n members, z target, e eligible, lo/hi served, nx days to the next
+    close, rt turnovers, mv swaps, why}; status line `militia B 9-11 off duty: 4/4 sit, 45 eligible, served 0-1, turnover in 98 d;
+    held: lockdown` (`no squad`, `target 0`, `last: same cohort: 3 eligible for 3 seats`, `last: fewer eligible than seats: 2 for
+    3`, `held: worn 23% < 40%`); kern.log per batch and per hold (once per edge and reason); event MILITIA_ROTATED (B) with counts
+    only (squad, out, into, size, eligible, lo, hi, win, left, worn, edge).
+  - *Config:* `military.rotation {on (true), per_day (3, 1-10), worn_min (40, 0-100)}` with `fairplay.MILITARY_ROTATION_LIM` and
+    `lint --config`; the rotation acts only on squads in the militia table, so a fort with `militia: {}` behaves as before.
+  - *Changes you will notice:* squad B (the militia) is filled by the rotation's rank, no longer by combat value; A and C (the
+    elite) are unchanged. The squads are filled in the order A, B, C, so B takes its citizens before C picks the best of the rest.
+    Cohort size follows the army share (D-12: 3 members beside the leader at 60 citizens), so a cycle through 48 citizens takes
+    years; raise D-12 for a bigger militia.
+- **BUG-076 (military.lua `fill`; bugs/BUG-076):** the backoff of a refused `addToSquad` was never cleared (every later refusal
+  waited twice as long, up to a game month) and the refused unit stayed first in line (the loop `break`s and the same unit is
+  first at the next upkeep). Now a success clears the backoff, a refused unit is passed over for 33,600 ticks, the next
+  candidate is tried (3 refusals per refill), and kern.log names the unit and the act's text.
+- **Contracts:** `schema.py` MILITIA_ROTATED, state `mil.rot` (+ `contract.lua` event and state spec), `config/baseline.json`
+  `military.rotation`, `fairplay.military_errors`, CONTRACTS §7 (military.rot_cohort/rot_pool), §9.3 (`mil.rot`), §9.17, event
+  table and appendix (regenerated), DESIGN §4 cost row, DOCTRINE (military). RULES.md unchanged (class B event).
+- **Tests (each new one fails on 9bcb14f):** `tests/lua/test_military_d1.lua` (new: a fort of 60 over four years, the turnover at
+  the close, the cohort fairness, the no-turnover cases: SIEGE, BREACH, DRILL, ALERT, lockdown, hostile in sight, a noble, a mood,
+  a patient, a wound, a tool labor, a child, the only holder of a key labor, too few eligible, the same cohort; per_day and worn
+  bounds; fill and rotation; a reload in the middle of a window and between two batches; an old state; a clock that went back;
+  forts of 7 and 80; an adopted squad; BUG-076), `tests/lua/test_rotation_lib.lua` (new: edges across the year change, ranking,
+  plan), `tests/test_military_d1.py` (new: config validation, the Lua defaults mirror, event, state, status line). Changed
+  expectations: `tests/lua/test_military.lua` (the cv test runs with `rotation.on = false`: squad B is no longer filled by combat
+  value), `tests/test_military_a3.py` and `tests/test_wp6_files.py` (the shipped config and the state carry `rotation` / `mil.rot`).
+- **Not decided offline (live data, read-only):** (1) what DFHack's `removeFromSquad` does to the vacated position's assigned
+  items and what DF does with the leaver's worn kit: the kern.log follow-up lines `militia turnover ... worn X% before, Y% now,
+  N soldiers fetching kit` after the first turnover; to see it directly, before and after one swap: `#p.equipment.assigned_items`
+  and the `assigned` sizes of the position's `uniform` specs, the leaver's worn inventory a day later and his job, the entrant's
+  PickupEquipment time. If the follow-up shows worn falling for weeks, lower `rotation.per_day` to 1 or raise `worn_min`, or set
+  `rotation.on` false (config/baseline.json, `dfhack-run dfllm reload`). (2) Whether a leader can be rotated too (`removeFromSquad`
+  at position 0 must free the leader assignment): not tried, the leader stays.
+- **Live check (Run 14 or the next fort), after `git pull`, `dfhack-run dfllm reload` and a restart of `dfllm follow`:**
+  - `dfllm status`: a `militia B 9-11 ...` line (`on duty` / `off duty`, `4/4 sit`, `eligible`, `served lo-hi`, `turnover in N d`);
+    kern.log `militia squad B: rotation on (window months 9-11, last close month 0)` once per boot of a new state;
+  - at the next close of a window (month 0 for B): kern.log `militia squad B rotated: 3 out, 3 in (window 9-11 closed; 45
+    eligible, served 0..1); worn X%`, the event `MILITIA_ROTATED`, and a day and a week later `militia turnover ... worn X% before,
+    Y% now, N soldiers fetching kit` (Y not far below X; N falling to 0 within the off months);
+  - a lockdown or siege at the close: `the turnover at the close of month 0 waits (lockdown)`, status `held: lockdown`, the turnover
+    after it; at the window reopening without it: `did not run before the window reopened`;
+  - persist `m.military` `served`: counts of 0-2 after a few years, spread `lo..hi` at most 1; `rot.B` {c, e, n, mv, ms, lw}.
+
 ## Hospital posts per location, the kernel orders the memorial slab itself (BUG-077, BUG-078, 2026-10-23, package D2; offline, live-untested)
 - **Why (Run 14 Trussroads y582, game session notes 68, 69):** after the hospital moved, the four doctors still held their
   posts at the old, zoneless locations 0 and 16; the live location 27 kept four vacant posts for ever. And `autoslab` was on,

@@ -572,6 +572,8 @@ def line_def(ctx: Ctx) -> str:
         free = {k: v for k, v in (m.get("free") or {}).items() if v}
         if free:                               # FR-46: free metal gear by category (loot included)
             out.append("free metal " + " ".join(f"{k} {v}" for k, v in sorted(free.items())))
+        for key, r in sorted((m.get("rot") or {}).items()):        # FR-79: the militia rotation per squad
+            out.append(line_rot(key, r))
     wv = s.get("wave")
     if wv:                                     # intake waves and the sortie through O1 (Gordon 2026-10-16)
         out.append(f"intake {wv['ph']} (waves {wv['n']})" + (f": {wv['why']}" if wv.get("why") else "")
@@ -582,6 +584,21 @@ def line_def(ctx: Ctx) -> str:
     if tr and tr["caravan"]:
         out.append("CARAVAN on map")
     return _join(out)
+
+
+def line_rot(key: str, r: dict) -> str:
+    """FR-79 (state mil.rot): 'militia B 9-11 off duty: 4/4 sit, 45 eligible, served 0-1, turnover in 98 d; held: lockdown'. The
+    counts, never names; `why` is what holds the turnover or how the last one ended."""
+    if "n" not in r:                           # no squad to rotate (yet), or its target is 0
+        return f"militia {key} {r.get('w', '?')}: {r.get('why', 'no squad')}"
+    txt = (f"militia {key} {r.get('w', '?')} {'on duty' if r.get('on') else 'off duty'}: {r.get('n', '?')}/{r.get('z', '?')} sit,"
+           f" {r.get('e', '?')} eligible, served {r.get('lo', 0)}-{r.get('hi', 0)}")
+    nx = r.get("nx")
+    if nx is not None:
+        txt += ", turnover due" if nx == 0 else f", turnover in {nx} d"
+    if r.get("why"):
+        txt += f"; {r['why']}"
+    return txt
 
 
 def line_alert(al: dict) -> str:
