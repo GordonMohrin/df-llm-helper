@@ -78,6 +78,7 @@ local function fort(o)
   W.burrow('Tiefe+', {5, 5, Z - 4, 10, 10, Z - 4})
   if o.cfg then W.K.cfg.baseline = {v = 2, burrow = {guard = o.cfg}} end
   W.gone = {}
+  for _, n in ipairs(o.gone or {}) do W.gone[n] = true end          -- gone before the kernel boots (a load)
   local find = dfhack.burrows.findByName
   dfhack.burrows.findByName = function(n)
     if W.gone[n] then return nil end
@@ -251,6 +252,11 @@ T.test('FR-80: a burrow that is smaller after a load than at the last reading be
   e = evs(W2, 'BURROW_SHRUNK')
   T.eq(#e, 2)
   T.eq(e[2].d.cause, 'runtime')
+  -- the refuge missing after the load: gone, `load`, made again from the record
+  local W3 = fort{persist = saved, gone = {'Tiefe+'}}
+  local e3 = evs(W3, 'BURROW_SHRUNK')
+  T.eq({#e3, e3[1].d.burrow, e3[1].d.gone, e3[1].d.cause, e3[1].d.crit}, {1, 'Tiefe+', 1, 'load', {'refuge'}})
+  T.eq(count('Tiefe+', Z - 4, 0, 0, 40, 30), 36, 'made again at the load')
 end)
 
 T.test('FR-80: an old kernel state after a reload: no record, a record of another adoption (a reclaimed or re-adopted fort), ' ..

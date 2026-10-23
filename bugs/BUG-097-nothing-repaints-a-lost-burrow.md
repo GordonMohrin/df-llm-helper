@@ -47,6 +47,10 @@ made again at all; the rest of Kern+ (about one tile left of thousands) was not 
   baseline), when the burrow is above the line again and no repair is possible (`regrown`), or `burrow.guard.settle_days` (14)
   after the last progress (`settled`: the loss is the new baseline; a burrow that stays gone leaves the record). `repair_per_day`
   0 makes the guard a sensor; `on` false switches it off.
+- Fair play: the paint is the burrows screen's (`act.burrow_tiles`); the record holds the coordinates of the burrow's own tiles, no
+  terrain; a tile is painted only after its `hidden` flag was read as false (`rev`), as every other seal read. The kernel cannot
+  tell a hand from a fault: a DELIBERATE erase of more than `shrink_pct` % of Kern+ or the refuge is painted again within a game day
+  (set `burrow.guard.repair_per_day` 0 first to make the guard a sensor, or `on` false).
 - Safe at every size: one reading and one paint pass a game day and `burrow.guard.every_s` (120) real seconds apart, the work sliced by
   seal's bucket (a fort of 80: 600 blocks of Kern+ are about 150,000 work units, 800 a frame, 6,000 a second); a fort of 7 reads one block; an old kernel state (no record) starts from the
   reading without an event.

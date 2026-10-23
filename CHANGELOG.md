@@ -26,6 +26,8 @@
     burrow is back above the line without a repair, or `settle_days` (14) after the last progress.
   - Config `burrow.guard {on, shrink_pct, repair_per_day, settle_days, every_s}` in config/baseline.json (`fairplay.BURROW_GUARD_LIM`, `lint --config`);
     contracts in schema.py and contract.lua (2 events, the state key, the persist key, `blost`), CONTRACTS regenerated.
+- **Caution:** the guard cannot tell a hand from a fault: a deliberate erase of more than `shrink_pct` % of Kern+ or the refuge is painted
+  again within a game day; `burrow.guard.repair_per_day` 0 makes it a sensor, `on` false switches it off.
 - **Not decided offline:** why the burrows lost their tiles (DF's save/load of burrow masks, a retire/reclaim resetting the list, the
   console `burrow` command or a script of the game session); the first BURROW_SHRUNK carries the data that decides it (`cause`, `id` vs
   `rid`, `nl`/`nx`, blocks then and now), `commands.log` shows every quickfort burrow call (`undo`, `unburrow`) and kern.log every

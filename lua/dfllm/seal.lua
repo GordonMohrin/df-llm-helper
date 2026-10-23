@@ -4482,7 +4482,13 @@ local function job_bguard(K, why)
   local ok_n, retry = 0, false
   for _, name in ipairs(names) do
     local rd = BG.read(name)
-    if rd == false then retry = true
+    if rd == false then
+      retry = true
+      if not mem.bg_warned then                          -- once a boot: a guard that never reads would be silent otherwise
+        mem.bg_warned = true
+        K.log('warn', 'seal: burrow %s cannot be read now (its blocks changed under the read, or a block has no position): '
+              .. 'again in %d ticks', name, CFG.bg_retry)
+      end
     else
       ok_n = ok_n + 1
       BG.apply(K, name, refuge, mem.bgr, rd, cfg, mem.bg_boot == true)
