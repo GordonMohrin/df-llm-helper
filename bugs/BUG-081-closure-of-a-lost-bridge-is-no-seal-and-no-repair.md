@@ -1,5 +1,5 @@
 # BUG-081 The wall + door that replaces a lost bridge: the door is refused beside planned walls, a stuck door keeps the fort open for ever, the rebuild policy pauses it, and care's drink nook has no kind
-Status: fixed in the I2 commit (offline, live-untested): `runner.repair` `opts.closure` (walls stage, then door stage, prio 1,
+Status: fixed in 565e4d1 (offline, live-untested): `runner.repair` `opts.closure` (walls stage, then door stage, prio 1,
 `params.cl`), the closure keeps the seal clock (SEAL_STUCK with the cause, the BUG-044 wall fallback) and pauses nobody, kind
 `repair` for the rebuild policy; `mood_drink` is kind `mood` (never paused by an open seal, runs in the rebuild policy);
 `KP.standing` counts a wall on the door tile as closed

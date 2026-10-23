@@ -1,5 +1,5 @@
 # BUG-082 A parked lever (BUG-068) still counts as a pull to wait for: the lockdown's civ alert waits up to 1500 ticks for it
-Status: fixed in the I2 commit (offline, live-untested): `gate.lua` `NO_PULL.no_effect`; `gate.pulls()` counts the bridge in
+Status: fixed in 565e4d1 (offline, live-untested): `gate.lua` `NO_PULL.no_effect`; `gate.pulls()` counts the bridge in
 `parked`, not in `left`
 Severity: high (the alert of a lockdown sounds up to 1500 ticks late, citizens outside keep working while an invader comes)
 Found: 2026-10-23, integration audit I2 (C2 BUG-068 against BUG-013)
