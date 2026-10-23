@@ -41,6 +41,16 @@ def test_order_add_args():
     assert schema.validate_args("order.add", {"job": "BrewDrink", "amount": 1, "frequency": "Hourly"})
 
 
+def test_order_add_engrave_slab_args():
+    """BUG-078: the memorial slab order names its figure; hf belongs to EngraveSlab only."""
+    ok = {"job": "EngraveSlab", "amount": 1, "hf": 6001}
+    assert schema.validate_args("order.add", ok) == []
+    assert schema.validate_args("order.add", {"job": "EngraveSlab", "amount": 1})
+    assert schema.validate_args("order.add", dict(ok, amount=2))
+    assert schema.validate_args("order.add", {"job": "ConstructSlab", "amount": 1, "hf": 6001})
+    assert schema.validate_args("order.add", dict(ok, hf=-1))
+
+
 def test_jobs_release_and_inspect_args():
     assert schema.validate_args("jobs.release", {}) == []
     assert schema.validate_args("jobs.release", {"all": True, "preventblocking": False}) == []

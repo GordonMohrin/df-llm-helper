@@ -509,4 +509,149 @@ T.test('review: the jam scan reads an order once, not once per job it holds in t
   T.ok(n > 0 and n <= 6, 'order_reasons calls in a day: ' .. n)
 end)
 
+---------------------------------------------------------------- BUG-078 (Run 14 note 69)
+-- ghosts 1..n are units with historical figures 6000 + id; census.g (what sense publishes) is refreshed each day
+local function ghost_world(opts)
+  opts = opts or {}
+  local ids = {}
+  for i = 1, opts.n or 2 do ids[i] = i end
+  local W, ctl = world{ghosts = #ids, boulders = 40, slabs = opts.slabs or {blank = 3}, eco = opts.eco, setup = function(W)
+    for _, i in ipairs(ids) do W.unit(i).hist_figure_id = (opts.nohf and opts.nohf[i]) and -1 or (6000 + i) end
+    W.act_result('engrave_order', function(hf)
+      local mo = df.global.world.manager_orders
+      local id = mo.manager_order_next_id
+      mo.manager_order_next_id = id + 1
+      mo.all:insert('#', {id = id, job_type = df.job_type.EngraveSlab, amount_left = 1, amount_total = 1,
+                          specdata = {hist_figure_id = hf}, frequency = ONE, item_conditions = kmock.vec{},
+                          item_subtype = -1, mat_type = -1, mat_index = -1, status = {validated = true}})
+      return true, id
+    end)
+    if opts.setup then opts.setup(W) end
+  end}
+  ctl.ids = ids
+  return W, ctl
+end
+local function gdays(W, ctl, n)
+  for _ = 1, n do
+    W.K.census.g = {tick = W.K.now().tick, n = #ctl.ids, ids = ctl.ids}
+    days(W, 1)
+  end
+end
+local function engraved_for()
+  local r = {}
+  for _, o in ipairs(df.global.world.manager_orders.all) do
+    if o.job_type == df.job_type.EngraveSlab then r[#r + 1] = o.specdata.hist_figure_id end
+  end
+  table.sort(r)
+  return r
+end
+
+T.test('BUG-078: ghosts older than slabs.engrave_days with blank slabs and no engrave order get an EngraveSlab order each', function()
+  local W, ctl = ghost_world{n = 2}
+  gdays(W, ctl, 2)
+  T.eq(#acts(W, 'engrave_order'), 0, 'the plugin has its days first')
+  gdays(W, ctl, 3)
+  T.eq(engraved_for(), {6001, 6002}, 'one order per ghost')
+  T.ok(logged(W, 'for ghost unit 1 (hf 6001'), 'the log names the ghost')
+  T.ok(logged(W, 'plugin queued none'), 'and why the kernel steps in')
+  local n = #acts(W, 'engrave_order')
+  gdays(W, ctl, 4)
+  T.eq(#acts(W, 'engrave_order'), n, 'B2 does not trim them (they are within the blank slabs), none is ordered twice')
+  T.eq(#acts(W, 'order_remove'), 0)
+end)
+
+T.test('BUG-078: no order for a ghost the plugin served (order for its figure), a memorial exists, or no blank slab', function()
+  local W, ctl = ghost_world{n = 3, slabs = {blank = 5, memorial = 0}, setup = function(W)
+    F.item(W, 'SLAB', {engraving_type = 0, topic = 6002})                        -- ghost 2 has its memorial
+    F.order(W, {job_type = df.job_type.EngraveSlab, amount_left = 1, specdata = {hist_figure_id = 6003},
+                material_category = {}, frequency = ONE, status = {validated = true}, item_conditions = kmock.vec{},
+                item_subtype = -1, mat_type = -1, mat_index = -1})              -- the plugin queued ghost 3's
+  end}
+  gdays(W, ctl, 6)
+  T.eq(engraved_for(), {6001, 6003}, 'only ghost 1 got a new order; 6003 is the plugin\'s')
+  local W2, c2 = ghost_world{n = 2, slabs = {blank = 0}}
+  gdays(W2, c2, 6)
+  T.eq(#acts(W2, 'engrave_order'), 0, 'no blank slab: ConstructSlab first, no engrave order')
+  T.eq(#acts(W2, 'workorder', 'dfllm:slab'), 1)
+end)
+
+T.test('BUG-078: at most max_orders and at most the blank slabs; engrave_days 0 switches it off', function()
+  local W, ctl = ghost_world{n = 5, slabs = {blank = 2}}
+  gdays(W, ctl, 6)
+  T.eq(engraved_for(), {6001, 6002}, 'two blank slabs, two orders')
+  local W2, c2 = ghost_world{n = 5, slabs = {blank = 9}}
+  gdays(W2, c2, 6)
+  T.eq(#engraved_for(), 3, 'slabs.max_orders 3')
+  local W3, c3 = ghost_world{n = 2, eco = {slabs = {max_orders = 3, restock_cap = 5, drop_per_day = 60, trigger_ticks = 600,
+                                                    scan_max = 2000, jam_min = 3, engrave_days = 0}}}
+  gdays(W3, c3, 6)
+  T.eq(#acts(W3, 'engrave_order'), 0)
+end)
+
+T.test('BUG-078: a ghost without a historical figure cannot be served: reported once, never retried', function()
+  local W, ctl = ghost_world{n = 2, nohf = {[2] = true}}
+  gdays(W, ctl, 5)
+  T.eq(engraved_for(), {6001})
+  local n = 0
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find('ghost unit 2 has no historical figure', 1, true) then n = n + 1 end end
+  T.eq(n, 1, 'one report')
+  gdays(W, ctl, 8)
+  n = 0
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find('ghost unit 2 has no historical figure', 1, true) then n = n + 1 end end
+  T.eq(n, 1, 'and not again')
+  T.eq(W.inbox('inspect', {what = 'orders'}).data.slabs.unserved, 1)
+end)
+
+T.test('BUG-078: a census.g older than two days is not trusted (no order from a stale ghost list)', function()
+  local W, ctl = ghost_world{n = 2}
+  gdays(W, ctl, 1)
+  for _ = 1, 6 do days(W, 1) end                                 -- sense stopped: census.g keeps its old tick
+  T.eq(#acts(W, 'engrave_order'), 0)
+  gdays(W, ctl, 1)                                               -- sense is back: the ghosts are old by now
+  T.eq(#acts(W, 'engrave_order'), 2)
+end)
+
+T.test('BUG-078: a failed order is not retried for 7 days; a ghost served by a memorial later leaves the books', function()
+  local W, ctl = ghost_world{n = 1}
+  W.act_result('engrave_order', function() return false, 'boom' end)
+  gdays(W, ctl, 5)
+  local n = #acts(W, 'engrave_order')
+  T.eq(n, 1, 'one try')
+  gdays(W, ctl, 3)
+  T.eq(#acts(W, 'engrave_order'), 1, 'backed off')
+  gdays(W, ctl, 5)
+  T.eq(#acts(W, 'engrave_order'), 2, 'again after 7 days')
+  ctl.ids = {}
+  gdays(W, ctl, 1)
+  local p = W.K.persist.get('m.economy')
+  T.eq(next(p.slab_ghost), nil, 'the ghost is gone: no record')
+end)
+
+T.test('BUG-078: the 79 blank slabs standing as buildings are held, not blank: B2 trims the plugin\'s orders, ConstructSlab', function()
+  local W, ctl = ghost_world{n = 2, slabs = {blank = 0}, setup = function(W)
+    for _ = 1, 79 do F.item(W, 'SLAB', {engraving_type = -1, topic = -1, flags = {in_building = true}}) end
+    F.order(W, {job_type = df.job_type.EngraveSlab, amount_left = 1, specdata = {hist_figure_id = 6001},
+                material_category = {}, frequency = ONE, status = {validated = true}, item_conditions = kmock.vec{},
+                item_subtype = -1, mat_type = -1, mat_index = -1})
+  end}
+  gdays(W, ctl, 1)
+  local s = W.inbox('inspect', {what = 'orders'}).data.slabs
+  T.eq({s.blank, s.held, s.built, s.removed}, {0, 79, 79, 1}, 'built slabs are not free: the order for them could never run')
+  T.eq(#acts(W, 'engrave_order'), 0)
+end)
+
+T.test('BUG-078: order.add knows EngraveSlab: it needs the figure (hf), one slab, and hf belongs to no other job', function()
+  local W = ghost_world{n = 1}
+  settle(W)
+  local r = W.inbox('order.add', {job = 'EngraveSlab', amount = 1})
+  T.eq(r.ok, false)
+  T.ok(r.msg:find('hf', 1, true), r.msg)
+  T.eq(W.inbox('order.add', {job = 'EngraveSlab', amount = 3, hf = 6001}).ok, false)
+  T.eq(W.inbox('order.add', {job = 'ConstructSlab', amount = 1, hf = 6001}).ok, false)
+  r = W.inbox('order.add', {job = 'EngraveSlab', amount = 1, hf = 6001})
+  T.eq(r.ok, true, r.msg)
+  T.eq(engraved_for(), {6001})
+  T.eq(#acts(W, 'workorder', 'dfllm:cmd'), 0, 'not through the workorder command (it knows no figure)')
+end)
+
 T.done()

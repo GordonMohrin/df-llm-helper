@@ -185,7 +185,7 @@
              "unval_days": 2},
   "office": {"table": true, "retry_days": 7, "max_tiles": 400},
   "slabs": {"max_orders": 3, "restock_cap": 5, "drop_per_day": 60, "trigger_ticks": 600, "scan_max": 2000,
-            "jam_min": 3},
+            "jam_min": 3, "engrave_days": 3},
   "stale": {"days": 10, "wait_days": 3, "per_day": 6, "jobs_max": 2000},
   "standing": {"from_phase": "P1", "amount": 30, "frequency": "Monthly", "request_days": 14,
                "list": [

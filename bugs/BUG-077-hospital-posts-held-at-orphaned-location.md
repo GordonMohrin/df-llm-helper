@@ -1,5 +1,5 @@
 # BUG-077 Doctors who still hold posts at an orphaned hospital location are never put on the live hospital's posts
-Status: fixed in HASH077 (offline, live-untested): holders are the living citizens with a post anywhere except a hospital
+Status: fixed in 6afe3c7 (offline, live-untested): holders are the living citizens with a post anywhere except a hospital
 post of a zoneless location; those doctors take the live location's vacant posts; the orphan posts count nowhere
 Severity: high (wrong decision: the live hospital stood without doctors, "with no hospital post filled the game posts no
 care jobs")

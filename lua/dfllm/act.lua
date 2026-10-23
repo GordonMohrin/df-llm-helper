@@ -1475,6 +1475,41 @@ local function impls(state)
     return false, 'no order created: ' .. trim(out, 120)
   end
 
+  -- work orders screen > add > Engrave memorial slab (BUG-078, Run 14 note 69): one EngraveSlab order for the dead
+  -- historical figure hf, as DFHack's autoslab plugin queues it (autoslab.cpp createSlabJob: job EngraveSlab, item
+  -- SLAB, stone, one slab, specdata.hist_figure_id = the ghost's figure). The job name is EngraveSlab (not
+  -- EngraveStoneSlab). An order for the figure that still has one is 'already'; a manager_order without the
+  -- specdata field is deleted again (never an order that would engrave for nobody). Returns ok, order id | 'already'.
+  function I.engrave_order(hf_id)
+    local hf = int(hf_id)
+    if not hf or hf < 0 then return false, 'a historical figure id is required' end
+    local jt, it = df.job_type and df.job_type.EngraveSlab, df.item_type and df.item_type.SLAB
+    if type(jt) ~= 'number' then return false, 'no job EngraveSlab in this DF' end
+    local mo = df.global.world.manager_orders
+    for _, o in ipairs(mo.all) do
+      local ok, same = pcall(function() return o.job_type == jt and o.amount_left > 0 and o.specdata.hist_figure_id == hf end)
+      if ok and same then return true, 'already' end
+    end
+    local o = df.manager_order:new()
+    local ok, err = pcall(function()
+      o.job_type, o.item_type, o.item_subtype = jt, it or -1, -1
+      o.mat_type, o.mat_index = -1, -1
+      o.material_category.stone = true
+      o.amount_left, o.amount_total = 1, 1
+      o.frequency = df.workquota_frequency_type.OneTime
+      o.status.validated, o.status.active = false, false
+      o.specdata.hist_figure_id = hf
+      o.id = mo.manager_order_next_id
+    end)
+    if not ok then
+      pcall(function() o:delete() end)
+      return false, 'manager_order has no such field: ' .. trim(err, 100)
+    end
+    mo.manager_order_next_id = o.id + 1
+    mo.all:insert('#', o)
+    return true, o.id
+  end
+
   function I.order_suspend(order_id, on)
     return false, 'manager orders have no verified suspend flag in DF 53 [S5]'
   end

@@ -1,5 +1,32 @@
 # CHANGELOG dfpilot
 
+## Hospital posts per location, the kernel orders the memorial slab itself (BUG-077, BUG-078, 2026-10-23, package D2; offline, live-untested)
+- **Why (Run 14 Trussroads y582, game session notes 68, 69):** after the hospital moved, the four doctors still held their
+  posts at the old, zoneless locations 0 and 16; the live location 27 kept four vacant posts for ever. And `autoslab` was on,
+  blank slabs existed, two ghosts had waited for years (one with no body) and `manager_orders` held no engraving order.
+- **BUG-077 (bugs/BUG-077):** `care.hospital_posts` marked every living holder of any post a holder (care.lua:2126), whatever
+  the location, so `phase_doctors_run` skipped all four doctors for all four live posts on every run (BUG-056 had only
+  limited the vacant posts). Now a hospital post at a location without a hospital zone makes nobody a holder (the same
+  zone test as BUG-056, no second helper); the doctors take the live posts through the unchanged `act.hospital_post`, the old
+  orphan posts stay as they are, and `doctors.orphan_held` counts the ones still waiting.
+- **BUG-078 (bugs/BUG-078):** B2's trim is not the cause of the silence (the live kernel was older), but it does remove every
+  order while the slabs stand as buildings (`in_building` = held, `slab.built` counts them now). The plugin's silence is not
+  provable offline (its source is not here). The kernel now orders the engraving itself: a ghost (census.g) that stood
+  `economy.slabs.engrave_days` (3, 0 = off) days with a historical figure, no memorial and no EngraveSlab order for its figure
+  gets one order through the new `act.engrave_order` (job `EngraveSlab`, stone, 1, `specdata.hist_figure_id`), at most
+  `slabs.max_orders` standing and no more than the free blank slabs, so the trim keeps them. The log says which ghost and
+  that the plugin queued none; a ghost without a figure is reported once and never retried; a failed act waits 7 days.
+  `order.add` takes `{job: EngraveSlab, amount: 1, hf}`.
+- **Contracts / config:** act `engrave_order` (schema.py ACT, contract.lua, CONTRACTS §5), `order.add` arg `hf` (CONTRACTS §9,
+  appendix), `economy.slabs.engrave_days` (baseline.json, `lint --config` 0..112), care state `doctors.orphan_held`,
+  `inspect orders` `slabs` {built, engraved, unserved, aged}.
+- **Live check:** (1) after a hospital move: kern.log `hospital post ... filled` and `inspect tombs` `doctors.orphan_held` 0;
+  a unit sheet with two occupations must still work the care jobs. (2) With ghosts and blank slabs: `inspect orders` -> `slabs`
+  (`blank`, `held`, `built`, `engraved`, `unserved`) and kern.log `EngraveSlab order N for ghost unit ...`; the order must
+  appear in the manager list with the figure named and a mason must take it (a wrong `specdata` path shows as ACT_FAIL
+  `manager_order has no such field`). (3) To learn why autoslab queued nothing: `plug autoslab`, then its debug log
+  (`debugfilter set Debug autoslab log`) in `dfhack-run`.
+
 ## Saves, freezes and status gaps: `dfllm save` follows the real save, every frame gap has a cause, status keeps pop and stock, the idle line is broken down (BUG-069, BUG-070, BUG-071, FR-77, 2026-10-23; offline, live-untested)
 - **Why (Runs 11-13, y456-y506, game session notes 1, 4, 7, 39):** Wheelsblows y506 autumn d11: `dfllm save` said QUICKSAVE_FAILED
   after 122 s ("no fortress save folder newer than the call (dfhack-run printed nothing)") while the newest save was an

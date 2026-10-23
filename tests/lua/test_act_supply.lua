@@ -306,4 +306,35 @@ T.test('order_top (Run 11 siege 8, seal first): the named orders move to the top
   T.eq({env.api.order_top({'x'})}, {false, 'bad order id x'})
 end)
 
+T.test('BUG-078: engrave_order makes one EngraveSlab order for the figure (specdata), once; a missing field leaves nothing', function()
+  H.world{tag = 'eng'}
+  df.job_type = {EngraveSlab = 77, [77] = 'EngraveSlab'}
+  df.item_type = {SLAB = 55, [55] = 'SLAB'}
+  df.workquota_frequency_type = {OneTime = 0}
+  local mo = df.global.world.manager_orders
+  local made = 0
+  df.manager_order = {new = function()
+    made = made + 1
+    return {material_category = {}, specdata = {}, status = {}, delete = function() end}
+  end}
+  local env = mk('economy')
+  T.eq({mk('care').api.engrave_order(6001)}, {false, 'not owner'})
+  T.eq({env.api.engrave_order(-1)}, {false, 'a historical figure id is required'})
+  local ok, id = env.api.engrave_order(6001)
+  T.eq(ok, true)
+  local o = mo.all[#mo.all - 1]
+  T.eq({o.id, o.job_type, o.item_type, o.amount_left, o.amount_total, o.specdata.hist_figure_id, o.material_category.stone,
+        o.status.validated, mo.manager_order_next_id}, {id, 77, 55, 1, 1, 6001, true, false, id + 1})
+  T.eq({env.api.engrave_order(6001)}, {true, 'already'}, 'one order per figure')
+  T.eq(made, 1)
+  local n = #mo.all
+  df.manager_order = {new = function() return setmetatable({delete = function() end}, {__newindex = function(t, k, v)
+    if k == 'specdata' then error('no field specdata') end rawset(t, k, v) end,
+    __index = function(t, k) if k == 'material_category' or k == 'status' then return {} end end}) end}
+  local ok2, err = env.api.engrave_order(6002)
+  T.eq(ok2, false)
+  T.ok(tostring(err):find('no such field', 1, true), err)
+  T.eq(#mo.all, n, 'nothing was added')
+end)
+
 T.done()

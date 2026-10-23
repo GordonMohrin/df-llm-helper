@@ -30,10 +30,11 @@ function OF.memorial_type()
 end
 
 -- {blank = free blank slabs (not forbidden, in a job, built or carried off), busy = blank slabs a running job holds
---  (its order must stay), held = the other blank slabs that are not free, memorial = engraved memorials, other =
+--  (its order must stay), held = the other blank slabs that are not free (built = of those, the ones standing as a
+--  building: no job takes them again), memorial = engraved memorials, other =
 --  engraved otherwise, n = items read, topics = {hf id = true} of the memorials}; at most `limit` items are read
 function OF.slabs(limit)
-  local r = {blank = 0, busy = 0, held = 0, memorial = 0, other = 0, n = 0, topics = {}}
+  local r = {blank = 0, busy = 0, held = 0, built = 0, memorial = 0, other = 0, n = 0, topics = {}}
   local ok, vec = pcall(function() return df.global.world.items.other.SLAB end)
   if not ok or vec == nil then return r end
   local blank, mem = OF.blank_type(), OF.memorial_type()
@@ -48,7 +49,9 @@ function OF.slabs(limit)
         if get(f, k) == true then skip = true; break end
       end
       if get(f, 'in_job') == true then r.busy = r.busy + 1
-      elseif skip then r.held = r.held + 1
+      elseif skip then
+        r.held = r.held + 1
+        if get(f, 'in_building') == true then r.built = r.built + 1 end    -- BUG-078: a slab standing as a building
       else r.blank = r.blank + 1 end
     elseif et == mem then
       r.memorial = r.memorial + 1

@@ -83,7 +83,7 @@ ACT = {
     "popcap": ["readiness"],
     "quickfort": ["runner"], "order_top": ["runner"],     # Run 11 siege 8: a seal's manager orders to the top
     "orders_import": ["economy"], "orders": ["economy"], "workorder": ["economy", "water", "care"],
-    "order_suspend": ["economy"], "kitchen_exclude": ["economy"], "appoint": ["economy"],
+    "order_suspend": ["economy"], "engrave_order": ["economy"], "kitchen_exclude": ["economy"], "appoint": ["economy"],
     "work_detail": ["economy", "water"], "order_material": ["economy"], "order_remove": ["economy"],
     "job_resume": ["economy"], "farm_crop": ["economy"], "plant_gather": ["economy"], "plant_ungather": ["economy"],
     "work_detail_prune": ["economy"],
@@ -750,10 +750,15 @@ VERB_ARGS: dict[str, Obj] = {
                              opt={"item_subtype": Str(r"^ITEM_[A-Z0-9_]{1,60}$"), "material": Str(r"^[A-Z0-9_:]{1,80}$"),
                                   "material_category": Arr(Str(r"^[a-z0-9_]{1,20}$"), lo=1, hi=8),
                                   "reaction": Str(r"^[A-Z0-9_]{1,60}$"),
+                                  "hf": Int(0, 2147483647),
                                   "frequency": Str(enum=["OneTime", "Daily", "Monthly", "Seasonally", "Yearly"])}),
                          lambda a: (f"{a['job']} needs item_subtype (ITEM_...): DF 53.16 crashes without one (FR-39)"
-                                    if a["job"] in SUBTYPE_JOBS and "item_subtype" not in a else None),
-                         "item-definition jobs need item_subtype (FR-39)"),
+                                    if a["job"] in SUBTYPE_JOBS and "item_subtype" not in a else
+                                    "EngraveSlab needs hf (the ghost's historical figure) and amount 1 (BUG-078)"
+                                    if a["job"] == "EngraveSlab" and ("hf" not in a or a["amount"] != 1) else
+                                    "hf belongs to EngraveSlab only (BUG-078)"
+                                    if "hf" in a and a["job"] != "EngraveSlab" else None),
+                         "item-definition jobs need item_subtype (FR-39); EngraveSlab needs hf (BUG-078)"),
     "jobs.release": Obj(opt={"all": Bool(), "preventblocking": Bool()}),
     "perimeter.record": Obj(),
     # BUG-030 rebuild policy: the player's answer to DECISION_NEEDED bridge_rebuild: rebuild that bridge anyway
