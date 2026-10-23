@@ -94,3 +94,20 @@ See `docs/v2/DECISIONS.md`, section "Decided by the development session (2026-10
 and `--no-auto`, 3 perimeter and bridge_rebuild, 4 seal-first and explore, 5 recall, 6 wet wells only, 7 one food
 stockpile per place call, 8 no cavern water, 9 parked projects and farms, 10 gather zone, 11 seal-first fault event,
 12 lone thieves and confinement, 13 popups, 14 loose tools, 15 mood dwarves, 16 population.
+
+## Status after the first pass (2026-10-23, main 724fa33)
+All eleven packages are merged, each reviewed by a second engineer and gated (pytest, Lua suites, lint, config, RULES 300
+lines). Everything is "offline, live-untested": each bug file names its live checks. Notes that are only partly closed:
+
+| Note | What is still open | Where it goes |
+|---|---|---|
+| 23 | the recall part of siege 14 (BUG-035 is live-untested for it) and the cause of on_station=0 (diagnostics only, BUG-052) | live data |
+| 25 | the militia commander is not appointed by the kernel (it would orphan the vacant assignment squad creation needs); the verbs `appoint`, `squad.create`, `squad.leader` exist | BUG-055 |
+| 26 | metal-gear causes beyond the unstick (too little metal, no armor orders) | BUG-050 follow-up, FR-71 |
+| 30, 31 | no memory of a failed fortcore site (breach:damp); rooms other than workshops are only counted in `adopt` | FR-76 follow-up |
+| 34 | loose picks on another walk group are not fixed (the tool pile skips them) | BUG-053 |
+| 43 | the culprit is named (BUG-064), the rebuild text of the keeper does not read it | BUG-048 |
+| 52 | who closes an opened tomb zone again 90 s later (TOMBS_LOCKED answers it live) | BUG-062 |
+| 54 | who removed 22 hand-added Planters members (the audit line answers it live); the 10 FPS clamp after a gremlin alarm | BUG-057, BUG-065 |
+| 64 | member turnover per militia window (squad_remove/add drops the kit) | FR-71 follow-up |
+| 69 (game session, later) | autoslab makes no EngraveSlab orders although ghosts and free slabs exist | BUG-061 follow-up |

@@ -60,14 +60,36 @@ switches (D-01..D-14 stay Gordon's). The packages that carry them out are in `do
 12. **Lone thieves still start a lockdown** (Gordon 2026-10-15: "einzelne Diebe machst du richtig"), but the confinement
     is bounded: it ends by itself after a limit, the brief names the cause (unit, position), and a harmless intruder
     far from the fort is answered with a sortie offer instead of months of confinement.
-13. **The kernel acknowledges harmless popups itself** (migrants, trade, mood announcements; the game's own dismiss
-    key, a UI action). An ambush, invasion or siege popup is handled by the arrival reflex first and acknowledged after.
+13. **The kernel acknowledges harmless popups itself** (the game's own dismiss input, a UI action). Built (FR-75): the
+    pest (gremlin, thief) and arrival popups, logged per kind; threats, undead and the embark intro are never cleared;
+    any other text stays for the player unless `popups.other` is switched on (default off).
 14. **Loose tools:** the kernel may give tools a stockpile and make the labor details ask for them the way the game's
     own equipment update does (`tools.equip_update`); it never moves an item itself.
 15. **Mood dwarves:** no direct job or item for them (fair play). The levers are an earlier mood check, a drink stockpile
     beside the mood workshop, material delivery first, and an alert that names the dwarf.
 16. **Population decline and missing migrants are diagnosed, not steered:** the status says whether children are counted
     as adults, which deaths, and the migration conditions the game documents.
+
+### Confirmed or adjusted by the dev session after the review of the packages (2026-10-23)
+17. **Decision 3 as built (A2):** besides the loss to building destroyers, a bridge that vanished `perimeter.vanish_after`
+    (3) times with no destroyer in sight is replaced by wall + door too (a loop breaker against a ghost or a tantrum
+    tearing the same bridge down; 0 = off). Only the first row or column of a wide footprint is closed.
+18. **A stuck seal door becomes a wall (A1, BUG-044):** `seal_first.wall_days` (2) after SEAL_STUCK a door piece that
+    cannot be built is replaced by a wall when another way in or out exists; the only way stays a door.
+19. **Fort size guards:** the vacant-office blocker (A4) and the open-perimeter hold (A2) apply only from
+    `perimeter.hold_pop` (30) citizens, so a young fort is never stopped from growing by what it cannot yet fill.
+20. **Autofarm (B1):** the kernel disables `autofarm` below 30 food days or at the first emptied slot it filled (`farms.autofarm`
+    'auto'; 'off' and 'keep' are config choices) and enables it again from 90 days. `disable autofarm` is on the allowlist
+    (a player may run it). The thread/cloth reserve depends on autofarm's fibers: watch the live log.
+21. **Military (A3):** the monthly unstick runs without `--drop`; the drill needs bridges, soldiers and a barracks, no
+    longer phase P5, and only danger holds it (not merchants); a fort of 40+ citizens with a barracks staffs squad A before P2.
+22. **Reclaimed forts (C2):** from 100 forbidden drink + food units the kernel unforbids them (400 a day, `forbid.burst_min`
+    0 turns it off), because a reclaimed fort's whole stock is forbidden.
+23. **Known open points (not decided offline, live data named in the bug files):** who removed the hand-added Planters
+    members (BUG-057), who closes an opened tomb zone again (BUG-062), the cause of the 10 FPS clamp after a gremlin
+    alarm (BUG-065), why the live seal door was suspended (BUG-044), what DF does with a door on a closure that waits
+    behind door orders, the metal-gear causes of note 26 beyond the unstick, member turnover for the militia rotation
+    (note 64), the recall part of note 23.
 
 ### Answered by Gordon (2026-10-16, chat)
 - **`tools.equip_update` on (BUG-023):** yes. A fair-play exception: when `act.work_detail` switches a tool labor on
