@@ -439,6 +439,20 @@ def busy(saves: Path) -> bool:
     return (saves / "current" / "world.sav").is_file()
 
 
+def writing(saves: Path) -> tuple[int, float]:
+    """BUG-069: (files, newest mtime) below save/current. DF fills it during a save or an autosave (world.sav last, so
+    `busy` only sees the end of a long write) and empties it after the move; (0, 0.0) when nothing is there."""
+    n, newest = 0, 0.0
+    for root, _dirs, names in os.walk(saves / "current"):
+        for name in names:
+            try:
+                mt = os.stat(os.path.join(root, name)).st_mtime
+            except OSError:
+                continue
+            n, newest = n + 1, max(newest, mt)
+    return n, newest
+
+
 def ident_of(saves: list, active: str | None) -> list | None:
     s = next((e for e in saves if e["name"] == active), None)
     return s["marker"][:2] if s and s["marker"] else None

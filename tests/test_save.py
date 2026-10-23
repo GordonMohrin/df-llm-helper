@@ -111,8 +111,9 @@ def test_quicksave_that_writes_nothing_is_a_loud_failure(W, capsys):
     assert qs.run(args(), W.save, env=W.env) == 1
     rec = record(W)
     assert rec["ok"] == 0 and rec["folder"] == "" and rec["fails"] == 1 and rec["secs"] == qs.WAIT_S
-    assert rec["why"] == ("no fortress save folder newer than the call after 120 s (dfhack-run printed nothing); "
-                          "the newest save is 'region7' from 60 min ago")
+    assert rec["why"] == (f"no fortress save folder newer than the call after {qs.WAIT_S} s (dfhack-run printed nothing; "
+                          "DF started no save: save/current stayed empty); the newest save is 'region7' from 60 min ago")
+    assert rec["state"] == "failed" and rec["kind"] == "silent"           # BUG-069
     out = capsys.readouterr().out
     assert out.startswith("QUICKSAVE_FAILED: no fortress save folder newer than the call") and "follow wakes" in out
     assert "QUICKSAVE_FAILED no fortress save" in (W.save / "cli.log").read_text("utf-8")
@@ -125,8 +126,9 @@ def test_another_forts_save_or_a_save_in_progress_does_not_count(W):
     rec = qs.quicksave(W.env, W.save, timeout=30)
     assert rec["ok"] == 0 and "no fortress save folder newer than the call after 30 s" in rec["why"]
     W.os.what = "slow"
-    rec = qs.quicksave(W.env, W.save, timeout=30)
-    assert rec["ok"] == 0 and rec["why"].startswith("DF was still writing save/current")
+    rec = qs.quicksave(W.env, W.save, timeout=30, max_wait=90)
+    # BUG-069: a save DF is still writing is "running", not a failure (the file is stale after WRITE_FRESH_S)
+    assert rec["ok"] == 0 and rec["state"] == "running" and rec["why"].startswith("still being written after")
 
 
 def test_dfhack_run_failure_waits_only_briefly(W):

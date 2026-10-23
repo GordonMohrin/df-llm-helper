@@ -555,6 +555,70 @@ def zones_errors(path: str | Path | None = None) -> list[str]:
     return errs
 
 
+# BUG-069 (dfpilot/save.py limits()): config/baseline.json "save": the wait for a quicksave folder when DF shows no sign of
+# writing, the longest wait while it writes save/current, and the age below which a verified autosave counts as the save.
+# save.py keeps its default for a value of another type or out of range; lint --config refuses it.
+SAVE_LIM: dict = {"wait_s": (30, 900), "max_wait_s": (60, 1800), "autosave_fresh_s": (0, 3600)}
+
+
+def save_errors(path: str | Path | None = None) -> list[str]:
+    """Problems of the optional "save" part of config/baseline.json (BUG-069): unknown keys, values dfllm save ignores,
+    a max_wait_s below wait_s. A missing file or part is fine."""
+    p = Path(path or BASELINE_PATH)
+    if not p.exists():
+        return []
+    name = "config/baseline.json"
+    try:
+        doc = json.loads(_read(p))
+    except ValueError as e:
+        return [f"{name}: not JSON ({e})"]
+    sec = doc.get("save", {}) if isinstance(doc, dict) else {}
+    if not isinstance(sec, dict):
+        return [f"{name}: save must be an object"]
+    errs = []
+    for k, v in sec.items():
+        lim = SAVE_LIM.get(k)
+        if lim is None:
+            errs.append(f"{name}: save.{k}: unknown key")
+        elif not (isinstance(v, int) and not isinstance(v, bool) and lim[0] <= v <= lim[1]):
+            errs.append(f"{name}: save.{k}: int {lim[0]}..{lim[1]} expected, got {v!r}")
+    w, m = sec.get("wait_s"), sec.get("max_wait_s")
+    if all(isinstance(x, int) and not isinstance(x, bool) for x in (w, m)) and m < w:
+        errs.append(f"{name}: save.max_wait_s {m} < wait_s {w} (dfllm save uses wait_s)")
+    return errs
+
+
+# BUG-070/071 (lua/dfllm/kern.lua M.PERF): config/baseline.json "perf": quiet_s = how long heavy background work waits after a
+# new year or a frame gap a DF save explains (0 = never), carry_days = how long a status key whose module gave nothing is
+# published from its last known value (0 = never). kern.lua keeps its default for a value of another type or out of range;
+# lint --config refuses it (tests/test_status_keep.py compares the numbers with kern.lua).
+PERF_LIM: dict = {"quiet_s": (0, 600), "carry_days": (0, 400)}
+
+
+def perf_errors(path: str | Path | None = None) -> list[str]:
+    """Problems of the optional "perf" part of config/baseline.json (BUG-070/071): unknown keys, values the kernel
+    ignores (another type, out of range). A missing file or part is fine."""
+    p = Path(path or BASELINE_PATH)
+    if not p.exists():
+        return []
+    name = "config/baseline.json"
+    try:
+        doc = json.loads(_read(p))
+    except ValueError as e:
+        return [f"{name}: not JSON ({e})"]
+    sec = doc.get("perf", {}) if isinstance(doc, dict) else {}
+    if not isinstance(sec, dict):
+        return [f"{name}: perf must be an object"]
+    errs = []
+    for k, v in sec.items():
+        lim = PERF_LIM.get(k)
+        if lim is None:
+            errs.append(f"{name}: perf.{k}: unknown key")
+        elif not (isinstance(v, int) and not isinstance(v, bool) and lim[0] <= v <= lim[1]):
+            errs.append(f"{name}: perf.{k}: int {lim[0]}..{lim[1]} expected, got {v!r}")
+    return errs
+
+
 # BUG-042 (lua/dfllm/economy.lua M.DEFAULTS): the economy knobs of the drink line, the unvalidated-order watch, the
 # manager's office and the drink gatherers ("bool", else an int range); economy.conf takes the file's part as it is,
 # so a bad value here would reach the kernel: lint --config refuses it. Other economy keys are checked by the mirror

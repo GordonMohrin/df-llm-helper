@@ -25,6 +25,19 @@ M.CAD = {state_ms = 2000, events_ms = 1000, inbox_ms = 500, heartbeat_ms = 5000,
          load_ms = 5000,                        -- fort-size load refresh (units from sense, #items.all)
          persist_big_bytes = 8192, persist_big_ms = 60000}   -- big site-data keys: written at most every 60 s
 local CAD = M.CAD
+-- BUG-070/071 knobs (config/baseline.json "perf", checked by lint --config): {default, min, max}. quiet_s: after a new
+-- year or a frame gap that a DF save explains, heavy background work (snapshot exports, seal's background jobs, the timed
+-- persist flush) waits this long; 0 = never. carry_days: how long a state key whose module gave nothing is published
+-- from its last known value (with its age in `stale`); 0 = never.
+M.PERF = {quiet_s = {60, 0, 600}, carry_days = {28, 0, 400}}
+function M.perf_cfg(st, key)
+  local lim = M.PERF[key]
+  local b = st.cfg and st.cfg.baseline
+  local p = type(b) == 'table' and b.perf or nil
+  local v = type(p) == 'table' and math.tointeger(p[key]) or nil
+  if v and v >= lim[2] and v <= lim[3] then return v end
+  return lim[1]
+end
 local KN = C.KERN               -- fault backoff and slowness numbers (CONTRACTS §3.3.5-3.3.6)
 local SEASON = C.TICKS.SEASON
 local LEVELS = {debug = true, info = true, warn = true, error = true}
@@ -129,11 +142,12 @@ local function build(o)
               buckets = {}, p = {ms = 0, frames = 0, gap_max = 0, gaps3 = 0, unpaused_ms = 0, mods = {}, via = {}},
               dropped = 0, report_any = false, report_types = {}, ev_listen = {}, kern_faults = 0,
               rot_warned = {}, io_warned = {}, cum = {}, cum_via = {}, cum_ms = 0, load = sched.load(-1, 0),
-              pool = sched.pool(), frame_paced = 0, boosts = {}, top_ring = {}}
+              pool = sched.pool(), frame_paced = 0, boosts = {}, top_ring = {}, carry = {}, gaps = {}, quiet_until = 0}
   st.now = {tick = abs_now(), ytick = df.global.cur_year_tick, year = df.global.cur_year,
             season = df.global.cur_year_tick // SEASON, ms = dfhack.getTickCount(), wall = os.time(),
             paused = df.global.pause_state == true, frame = 0}
   st.cal_year, st.cal_season = st.now.year, st.now.season
+  st.save_seen = o.save                       -- BUG-070: the save folder name DF had at the last look (a rename = a DF save)
   local K = {census = {}}
   st.K = K
 
@@ -254,6 +268,7 @@ local function build(o)
     local ok, v = pcall(f)
     return ok and type(v) == 'string' and v ~= '' and clean(v, 80) or nil
   end
+  st.doing = doing
 
   -- cost per owner: the perf window (perf.csv) and the cumulative totals (selftest's 1-min budget check)
   local function book(name, ms)
@@ -389,7 +404,15 @@ local function build(o)
     if not st.marked then return end
     local dis = {}
     for _, e in ipairs(st.entries) do if e.disabled then dis[#dis + 1] = e.name end end
-    as_kern(papi.set, 'kern', {v = 2, ev = st.ev_n, seq = st.seq, boots = st.boots or 0, disabled = json.array(dis)})
+    local rec = {v = 2, ev = st.ev_n, seq = st.seq, boots = st.boots or 0, disabled = json.array(dis)}
+    local carry = {}                                        -- BUG-071: the last known status values (oldest leaf's tick)
+    for top, c in pairs(st.carry or {}) do
+      local at, v = nil, {}
+      for leaf, val in pairs(c.v) do v[leaf] = val; at = math.min(at or c.at[leaf], c.at[leaf]) end
+      if at then carry[top] = {at = at, v = v} end
+    end
+    if next(carry) then rec.carry = carry end
+    as_kern(papi.set, 'kern', rec)
   end
   st.persist_rec = persist_rec
 
@@ -448,6 +471,7 @@ local function build(o)
       local b = e.boost
       if b and b.busy and st.now.ms < b.until_ms then return name, b.why end
     end
+    if st.now.ms < st.quiet_until and st.mode == 'PEACE' then return 'save', st.quiet_why end   -- BUG-070: PEACE only
     return nil
   end
   function K.emit(etype, cls, msg, d) return emit_as(st.current, etype, cls, msg, d) end
@@ -655,8 +679,44 @@ local function window(st)
   return {ms_s = (ms + secs // 2) // secs, tps = math.max(0, tps), gap = gap, fmax = fmax}
 end
 
-local SHRINK = {'proj', 'alert', 'mil', 'trade', 'care', 'labor', 'stock', 'ready', 'bridges', 'threat', 'pop',
+-- BUG-071: pop and stock are what status shows first: they go last (a >4 KB document used to lose stock before ready,
+-- bridges and threat). `stale` (the age of a carried value) goes after them: a carried value must never show as a live one.
+local SHRINK = {'proj', 'alert', 'mil', 'trade', 'care', 'ready', 'bridges', 'threat', 'labor', 'stock', 'pop', 'stale',
                 'phase'}
+
+-- BUG-071 (Run 13: status showed only the clock line after a year change or a hang): the keys status needs first. When
+-- their module gives nothing (disabled, not yet run after a boot: economy publishes stock only after its first daily run)
+-- the kernel publishes the last known integer leaf and says how old it is in `stale` (key -> game ticks); the last known
+-- values also survive a reboot (persist kern.carry).
+M.CARRY = {pop = {'cit', 'adults', 'soldiers'}, stock = {'drink_d', 'food_d', 'meals'}, labor = {'starving', 'idle'}}
+function M.carry(st, doc)
+  local tick = st.now.tick
+  local max = M.perf_cfg(st, 'carry_days') * C.TICKS.DAY
+  local stale
+  for top, leaves in pairs(M.CARRY) do
+    local part = type(doc[top]) == 'table' and doc[top] or nil
+    local rec = st.carry[top]
+    if not rec then rec = {at = {}, v = {}}; st.carry[top] = rec end
+    local filled = false
+    for _, leaf in ipairs(leaves) do
+      local v = part and part[leaf]
+      if math.type(v) == 'integer' then
+        rec.v[leaf], rec.at[leaf] = v, tick
+      elseif max > 0 and rec.v[leaf] ~= nil and rec.at[leaf] <= tick and tick - rec.at[leaf] <= max then
+        if not filled then
+          local cp = {}
+          for k, x in pairs(part or {}) do cp[k] = x end
+          part, filled = cp, true
+          doc[top] = cp
+        end
+        part[leaf] = rec.v[leaf]
+        stale = stale or {}
+        stale[top] = math.max(stale[top] or 0, tick - rec.at[leaf])
+      end
+    end
+  end
+  doc.stale = stale
+end
 
 -- BUG-033: the top cost owner of the last minute for state k.top (doctor and status name it in one line), e.g.
 -- 'runner 35 (snapshot 20)': the owner's ms per real second and, in brackets, the module its K.calls spent the most
@@ -732,6 +792,7 @@ local function compose(st)
       end
     end
   end
+  M.carry(st, doc)
   -- schema check (CONTRACTS §9.3, R1): drop invalid optional keys so one module's slip cannot blind
   -- the readers; errors in kern's required keys are logged and the document is written anyway
   local dropped, errs = C.prune_state(doc)
@@ -759,7 +820,13 @@ local function compose(st)
   local i = 1
   while #enc > 4096 and SHRINK[i] do
     if doc[SHRINK[i]] ~= nil then
-      st.log_as('kern', 'warn', 'state > 4 KB: dropped ' .. SHRINK[i])
+      -- once per key per 10 min (a document that stays too big dropped the same key every 2 s)
+      st.prune_warned = st.prune_warned or {}
+      local wk = 'shrink.' .. SHRINK[i]
+      if not st.prune_warned[wk] or now.ms - st.prune_warned[wk] >= KN.slow_window_ms then
+        st.prune_warned[wk] = now.ms
+        st.log_as('kern', 'warn', 'state > 4 KB: dropped ' .. SHRINK[i])
+      end
       doc[SHRINK[i]] = nil
       enc = json.encode(doc)
     end
@@ -924,6 +991,12 @@ local function kern_verb(st, verb, args, cmd)
     local d = {ms_s = w.ms_s, tps = w.tps, gap_max_ms = w.gap, ms_max = w.fmax, dropped = st.dropped,
                load = M.load_info(st), budget = sched.budget(st.load), pool_ms_s = round(st.pool.rate),
                pool_pct = round(st.pool.g * 100)}
+    -- BUG-070: the last frame gaps >= 3 s with their cause (module, save, external), and the quiet window
+    local gl = {}
+    for i, g in ipairs(st.gaps) do gl[i] = {wall = g.wall, tick = g.tick, ms = round(g.ms), cause = g.cause, task = g.task} end
+    d.gaps = json.array(gl)
+    d.quiet_s = math.max(0, (st.quiet_until - st.now.ms) // 1000)
+    d.quiet_why = d.quiet_s > 0 and st.quiet_why or nil
     if st.mods.perf and not st.mods.perf.disabled then
       local ok, ok2, stats = K.call('perf', 'stats')
       if ok and type(stats) == 'table' then d.perf = stats end
@@ -1107,11 +1180,49 @@ local function note_floor(st, e, cont)
                                           e.floor_n or 0))
 end
 
+-- BUG-070 (Run 13 y456/y483: freezes of 24-27 s at the year change and at saves, 13 gaps > 3 s, max 172 s): a frame gap
+-- of CAD.gap_ms or more gets ONE cause. `module` (or kern): our own previous frame took most of it (the top owner, with
+-- what it said it was doing); `save`: not ours and a DF save explains it (the save folder was renamed 'autosave N', or the
+-- year changed across the gap: the yearly autosave); `external`: not ours and nothing explains it (DF, the OS, a sleep).
+-- The cause goes to kern.log ("(blame X)"), the ring `st.gaps` (inspect perf), perf.csv (`gap:<cause>` ms and
+-- `gapn:<cause>` count per row) and PERF_DEGRADED d.cause; a `save` also opens the quiet window.
+function M.note_gap(st, gap, prev_cost, prev_year)
+  local now = st.now
+  local cause, extra = 'external', ''
+  local sname = save_name()
+  if prev_cost * 2 >= gap then
+    cause = st.prev_top or 'kern'
+    if st.prev_task then extra = ' in ' .. st.prev_task end
+  elseif sname and st.save_seen and sname ~= st.save_seen then
+    cause, extra = 'save', string.format(' (save folder %s > %s)', st.save_seen, sname)
+  elseif now.year ~= prev_year then
+    cause, extra = 'save', ' (new year: the yearly autosave)'
+  end
+  if sname then st.save_seen = sname end
+  local p = st.p
+  p.gapby, p.gapn = p.gapby or {}, p.gapn or {}
+  p.gapby[cause], p.gapn[cause] = (p.gapby[cause] or 0) + gap, (p.gapn[cause] or 0) + 1
+  if gap > p.gap_max then p.gap_max, p.gap_cause = gap, cause end
+  local ring = st.gaps
+  ring[#ring + 1] = {wall = now.wall, tick = now.tick, ms = gap, cause = cause, task = st.prev_task and trunc(st.prev_task, 40) or nil}
+  if #ring > 12 then table.remove(ring, 1) end
+  st.log_as('kern', 'warn', string.format('frame gap %d ms (blame %s)%s', gap, cause, extra))
+  if cause == 'save' then M.quiet(st, 'after a DF save') end
+end
+
+-- BUG-070: heavy background work waits for config perf.quiet_s after a new year or a DF-save gap (K.busy() answers 'save':
+-- snapshot exports and seal's background jobs wait, the timed persist flush waits); urgent work never does
+function M.quiet(st, why)
+  local q = M.perf_cfg(st, 'quiet_s')
+  if q <= 0 or st.mode ~= 'PEACE' then return end                  -- a fight never waits for a save
+  st.quiet_until, st.quiet_why = st.now.ms + q * 1000, why
+end
+
 local function frame(st)
   local t0, c0 = dfhack.getTickCount(), cost_ms()
   st.frame_n = st.frame_n + 1
   local now = st.now
-  local prev_tick, prev_start, prev_cost = now.tick, st.frame_start, st.frame_cost or 0
+  local prev_tick, prev_start, prev_cost, prev_year = now.tick, st.frame_start, st.frame_cost or 0, now.year
   local g = df.global
   now.year, now.ytick = g.cur_year, g.cur_year_tick
   now.tick = C.abs_tick(now.year, now.ytick)
@@ -1125,12 +1236,10 @@ local function frame(st)
     local gap = t0 - prev_start
     dt_frame = gap
     if gap > b.gap then b.gap = gap end
-    if gap > st.p.gap_max then st.p.gap_max = gap end
     if gap >= CAD.gap_ms then
       st.p.gaps3 = st.p.gaps3 + 1
-      local blame = (prev_cost * 2 >= gap) and (st.prev_top or 'kern') or 'external'
-      st.log_as('kern', 'warn', string.format('frame gap %d ms (blame %s)', gap, blame))
-    end
+      M.note_gap(st, gap, prev_cost, prev_year)
+    elseif gap > st.p.gap_max then st.p.gap_max = gap end
   end
   st.frame_top_ms, st.frame_top = 0, nil
   local ticking = now.tick > prev_tick
@@ -1142,11 +1251,15 @@ local function frame(st)
   for _, e in ipairs(st.entries) do       -- backoff over: re-enable (CONTRACTS §3.3.5)
     if e.disabled and e.disabled_until and t0 >= e.disabled_until then enable(st, e, 'backoff over') end
   end
-  if not st.load_at or t0 - st.load_at >= CAD.load_ms then refresh_load(st) end
+  if not st.load_at or t0 - st.load_at >= CAD.load_ms then
+    refresh_load(st)
+    st.save_seen = save_name() or st.save_seen     -- BUG-070: a rename without a gap is no evidence for the next one
+  end
   st.current = 'kern'
   if ticking and (now.year ~= st.cal_year or now.season ~= st.cal_season) then
     if now.year ~= st.cal_year then
       st.emit_as('kern', 'YEAR_REVIEW', 'A', 'year ' .. st.cal_year .. ' done', {year = st.cal_year})
+      M.quiet(st, 'new year (the yearly autosave)')
     end
     st.emit_as('kern', 'SEASON', 'C', 'season ' .. now.season, {year = now.year, season = now.season})
     st.cal_year, st.cal_season = now.year, now.season
@@ -1199,12 +1312,15 @@ local function frame(st)
   if st.marked and (st.last_hb_ms == nil or now.ms - st.last_hb_ms >= CAD.heartbeat_ms) then
     st.kern_in('k.io', heartbeat, st)
   end
-  if st.persist_now or (st.marked and now.ms - st.last_persist_ms >= CAD.persist_ms and st.pstore.dirty()) then
+  if st.persist_now or (st.marked and now.ms - st.last_persist_ms >= CAD.persist_ms and st.pstore.dirty()
+                        and (now.ms >= st.quiet_until or st.mode ~= 'PEACE')) then
     st.kern_in('k.persist', flush_persist, st, st.persist_now)
   end
   if st.flush_events_now or now.ms - st.last_ev_flush_ms >= CAD.events_ms then st.kern_in('k.io', flush_files, st) end
   local cost = cost_ms() - c0
   st.frame_cost, st.prev_top = cost, st.frame_top
+  -- BUG-070: a frame this long may be followed by a gap that is ours: remember what its top owner was doing
+  st.prev_task = (cost >= 1000 and st.frame_top and st.mods[st.frame_top]) and st.doing(st.mods[st.frame_top]) or nil
   b.ms = b.ms + cost
   b.paced = b.paced + math.min(cost, st.frame_paced)
   if cost > b.fmax then b.fmax = cost end
@@ -1360,6 +1476,19 @@ function M.boot(opts)
   -- persisted kernel state (arbiter.init heals a crashed restore.json before it captures settings)
   local kp = K.persist.get('kern') or {}
   st.boots = (math.tointeger(kp.boots) or 0) + 1
+  if type(kp.carry) == 'table' then            -- BUG-071: the last known status values of the session before
+    for top, leaves in pairs(M.CARRY) do
+      local c = kp.carry[top]
+      if type(c) == 'table' and math.type(c.at) == 'integer' and c.at <= st.now.tick and type(c.v) == 'table' then
+        local rec = {at = {}, v = {}}
+        for _, leaf in ipairs(leaves) do
+          local x = c.v[leaf]
+          if math.type(x) == 'integer' and x >= 0 then rec.v[leaf], rec.at[leaf] = x, c.at end
+        end
+        st.carry[top] = rec
+      end
+    end
+  end
   st.seq = math.max(math.tointeger(kp.seq) or 0, disk_seq(paths))
   st.ev_n = math.max(math.tointeger(kp.ev) or 0, disk_ev(paths))
   local pm = K.persist.get('mode')

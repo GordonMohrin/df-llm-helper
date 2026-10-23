@@ -20,6 +20,9 @@ LOAD_UNITS, BUDGET_PER_UNIT, BUDGET_MAX = 150, 6, 40
 NOT_OWNERS = ("repeat",)
 # BUG-033: a snapshot request waiting this long (state snap.old_s) is a starving export queue
 SNAP_STARVE_S = 300
+# BUG-070: perf.csv carries the frame gaps > 3 s by cause as `gap:<cause>` (ms) and `gapn:<cause>` (count); the cause is a
+# module name (ours), `save` (a DF save explains it: DESIGN §10 target <= 15 s) or `external` (nothing explains it)
+SAVE_FREEZE_BAD_MS = 60000
 
 
 def budget_for(units: int) -> int:
@@ -65,14 +68,25 @@ def perf_summary(rows: list[dict]) -> dict:
     mods: dict[str, int] = {}
     cross: dict[str, int] = {}
     via: dict[str, int] = {}
+    gap_ms: dict[str, int] = {}
+    gap_n: dict[str, int] = {}
     for r in rows:
         for k, v in r["mods"].items():
-            d = via if ">" in k else cross if k in NOT_OWNERS else mods
-            d[k] = d.get(k, 0) + v
+            if k.startswith("gap:"):
+                gap_ms[k[4:]] = gap_ms.get(k[4:], 0) + v
+            elif k.startswith("gapn:"):
+                gap_n[k[5:]] = gap_n.get(k[5:], 0) + v
+            else:
+                d = via if ">" in k else cross if k in NOT_OWNERS else mods
+                d[k] = d.get(k, 0) + v
+    gaps3 = sum(r["gaps3"] for r in rows)
     return {"rows": len(rows), "span_s": span, "last": rows[-1],
             "tps": {m: (int(statistics.median(v)), min(v), max(v)) for m, v in by_mode.items()},
             "ms_s_avg": round(sum(r["ms_s"] for r in rows) / len(rows)), "ms_s_max": max(r["ms_s"] for r in rows),
-            "gap_max": max(r["gap_max_ms"] for r in rows), "gaps3": sum(r["gaps3"] for r in rows),
+            "gap_max": max(r["gap_max_ms"] for r in rows), "gaps3": gaps3,
+            # BUG-070: (cause, count, ms) most ms first, and the gaps an older kernel logged without a cause
+            "gap_by": sorted(((c, gap_n.get(c, 0), ms) for c, ms in gap_ms.items()), key=lambda x: -x[2]),
+            "gap_unattributed": max(0, gaps3 - sum(gap_n.values())),
             "mods": sorted(((k, v / span) for k, v in mods.items()), key=lambda x: -x[1]),
             "via": sorted(((k, v / span) for k, v in via.items()), key=lambda x: -x[1]),
             "repeat": cross["repeat"] / span if "repeat" in cross else None,
@@ -93,6 +107,35 @@ def top_cost(s: dict) -> str | None:
     out = f"top cost: {name} {ms:.1f} ms/s"
     if edges and edges[0][1] >= 0.1:
         out += f" ({edges[0][0]} {edges[0][1]:.1f} of it, in its calls)"
+    return out
+
+
+def gap_lines(s: dict) -> list[str]:
+    """BUG-070: 'frame gaps > 3 s by cause: save 9 (210 s), runner 2 (8 s), external 2 (7 s)' (nothing without gaps)."""
+    parts = [f"{c} {n} ({ms // 1000} s)" for c, n, ms in s.get("gap_by", [])]
+    if s.get("gap_unattributed"):
+        parts.append(f"no cause logged {s['gap_unattributed']}")
+    return [f"frame gaps > 3 s by cause: {', '.join(parts)}"] if parts else []
+
+
+def gap_problems(s: dict) -> list[str]:
+    """BUG-070: what is the kernel's to fix. Gaps ours (a module) or unknown (external, or an older kernel's rows without
+    a cause) are a problem; DF's own save freeze only past SAVE_FREEZE_BAD_MS (the target is 15 s, DESIGN §10)."""
+    by = s.get("gap_by", [])
+    ours = [(c, n, ms) for c, n, ms in by if c not in ("save", "external")]
+    ext = sum(n for c, n, _ in by if c == "external") + s.get("gap_unattributed", 0)
+    out = []
+    if ours or ext:
+        n_ours = sum(n for _, n, _ in ours)
+        who = ", ".join(f"{c} {n}" for c, n, _ in ours)
+        out.append(f"{n_ours + ext} frame gap(s) > 3 s in {s['span_s'] // 60} min that are not DF's save: {n_ours} ours"
+                   + (f" ({who})" if who else "") + f", {ext} unknown (dfllm cmd inspect what=perf lists the last gaps; "
+                   "kern.log 'frame gap' lines name the blame)")
+    save = next(((n, ms) for c, n, ms in by if c == "save"), None)
+    worst = s.get("gap_max", 0)
+    if save and worst >= SAVE_FREEZE_BAD_MS and not ours and not ext:     # then the worst gap is a save's
+        out.append(f"DF save freeze {worst // 1000} s (> 15 s target): DF's own write of a big world; the kernel waits "
+                   "out the window (perf.quiet_s) and adds nothing")
     return out
 
 
@@ -161,8 +204,8 @@ def diagnose(save_dir: Path) -> tuple[list[str], list[str]]:
             owners = ", ".join(f"{k} {v:.0f}" for k, v in s["mods"][:3])
             bad.append(f"kernel {s['ms_s_avg']} ms/s > {s['budget']}" + (f" ({units} units)" if s["budget"] != KERN_MS_S else "")
                        + (f": top {owners}" if owners else ""))
-        if s["gaps3"]:
-            bad.append(f"{s['gaps3']} frame gap(s) > 3 s in {s['span_s'] // 60} min (autosave?)")
+        out.extend(gap_lines(s))
+        bad.extend(gap_problems(s))
     else:
         out.append("perf.csv: no rows")
     off = files.follow_off(d)

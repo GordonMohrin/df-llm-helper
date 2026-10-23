@@ -274,13 +274,14 @@ T.test('FR-72: a job type nobody holds the labor for is named in the idle line (
   T.eq(r.ok, true, r.msg)
   T.eq(r.data.nolabor, {{job = 'GatherPlants', n = 60, labor = 'HERBALIST'}})
   T.eq(r.data.idle_nolabor, 6)
-  T.ok(r.msg:find('6 with no labor holder for the open jobs: GatherPlants 60 need HERBALIST', 1, true), r.msg)
-  T.ok(not r.msg:find('0 without reachable work', 1, true), r.msg)
+  T.ok(r.msg:find('no labor holder 6 (GatherPlants 60 need HERBALIST)', 1, true), r.msg)   -- FR-77 clause + FR-72 detail
+  T.eq(r.data.idle_why.nolabor, 6)
+  T.ok(not r.msg:find('no reachable work', 1, true), r.msg)
   -- one citizen holds the labor: the old wording
   local W2 = world{jobs = many('GatherPlants', 60, 20), cover = {on = false}, labors = {[1] = {HERBALIST = true}}}
   days(W2, 1)
   local r2 = W2.inbox('inspect', {what = 'workload'})
-  T.ok(r2.msg:find('(0 without reachable work), 60 unclaimed jobs', 1, true), r2.msg)
+  T.ok(not r2.msg:find('no labor holder', 1, true), r2.msg)         -- a holder exists: not the labor's fault
 end)
 
 T.test('FR-72: another job type of cover.labors with more than min_jobs unclaimed jobs and no holder gets idle citizens ' ..
