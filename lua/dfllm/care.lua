@@ -2110,8 +2110,12 @@ end
 -- zoneless (stale) location are none: the old loop sorted every vacant post by id, the stale locations' older ids came
 -- first, and with a few doctors (one post each) the live hospital's posts stayed empty. Third value: the vacant posts
 -- of zoneless locations that were left out, and their locations (kern.log, inspect tombs).
+-- BUG-077 (Run 14 note 68): a doctor who still holds a post at such a zoneless location (the hospital moved) is no
+-- holder: `holders` are the living citizens with a post anywhere else (a live hospital, a tavern, ...), so the live
+-- location's posts are filled from them. Fifth value: the doctors held at orphans only (they wait to be moved).
 local function hospital_posts()
   local locs, posts, holders, live, stale, stale_locs = {}, {}, {}, {}, 0, {}
+  local orphans = {}
   pcall(function()
     local site = dfhack.world.getCurrentSite()                                   -- Lua API.txt:2205
     for _, l in ipairs(site and site.buildings or {}) do
@@ -2123,7 +2127,10 @@ local function hospital_posts()
     for _, o in ipairs(df.global.world.occupations.all) do
       local uid = num(o.unit_id) or -1
       local dead = uid < 0 or unit_dead(uid)
-      if not dead then holders[uid] = true end
+      local orphan_post = locs[o.location_id] and not live[o.location_id] and M.POSTS[df.occupation_type[o.type] or '']
+      if not dead then
+        if orphan_post then orphans[uid] = true else holders[uid] = true end
+      end
       if locs[o.location_id] and M.POSTS[df.occupation_type[o.type] or ''] and dead then
         if live[o.location_id] then
           posts[#posts + 1] = {id = o.id, type = df.occupation_type[o.type], held = uid}
@@ -2136,7 +2143,9 @@ local function hospital_posts()
   table.sort(posts, function(a, b) return a.id < b.id end)
   local n = 0
   for _ in pairs(stale_locs) do n = n + 1 end
-  return posts, holders, stale, n
+  local waiting = 0
+  for uid in pairs(orphans) do if not holders[uid] then waiting = waiting + 1 end end
+  return posts, holders, stale, n, waiting
 end
 
 local function phase_doctors_run(K, c, r, p)
@@ -2174,7 +2183,7 @@ local function phase_doctors_run(K, c, r, p)
     K.log('warn', 'doctors: only %d of %d and no free adult to train', #docs, want)
   end
   -- hospital posts held by nobody or by the dead: a (civilian) doctor without another post, best skill first
-  local posts, holders, stale, stale_n = hospital_posts()
+  local posts, holders, stale, stale_n, waiting = hospital_posts()
   table.sort(docs, function(a, b) if a.sk ~= b.sk then return a.sk > b.sk end return a.id < b.id end)
   local filled = 0
   for _, post in ipairs(posts) do
@@ -2191,7 +2200,8 @@ local function phase_doctors_run(K, c, r, p)
       end
     end
   end
-  r.doctors = {have = #docs, want = want, added = #added, posts = #posts, filled = filled, stale = stale}
+  r.doctors = {have = #docs, want = want, added = #added, posts = #posts, filled = filled, stale = stale,
+                orphan_held = waiting}
   if stale > 0 and p.stale_posts ~= stale then      -- BUG-056: once per change
     p.stale_posts = stale
     K.log('info', 'doctors: %d vacant post(s) of %d hospital location(s) without a zone left alone (BUG-056)', stale,

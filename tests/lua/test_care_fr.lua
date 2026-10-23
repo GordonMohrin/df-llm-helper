@@ -445,6 +445,67 @@ T.test('BUG-056 (Run 11: 8 hospital locations stayed after their zones were dele
   df.global.world.occupations = nil
 end)
 
+T.test('BUG-077 (Run 14 note 68): doctors who hold posts at orphaned hospital locations (no zone) are moved to the live ' ..
+       'location\'s posts; orphan posts count nowhere (old: holders were global, nobody was placed)', function()
+  local W, Cm = medic_world(function(W)
+    for _, id in ipairs({0, 16, 27}) do
+      W.site.buildings:insert('#', {id = id, getType = function() return df.abstract_building_type.HOSPITAL end})
+    end
+    F.building(W, 'ANY_ZONE', {x1 = 10, y1 = 10, x2 = 14, y2 = 14, z = 5, location_id = 27})     -- only 27 has a zone
+    for _, i in ipairs({1, 2, 7, 8}) do W.unit(i).status.labors = {[10] = true, [11] = true, [12] = true} end
+    W.add_unit{id = 99, dead = true}
+    df.global.world.occupations = {all = kmock.vec{
+      {id = 1, type = df.occupation_type.DOCTOR, location_id = 0, unit_id = 1},
+      {id = 2, type = df.occupation_type.DIAGNOSTICIAN, location_id = 0, unit_id = 2},
+      {id = 3, type = df.occupation_type.SURGEON, location_id = 0, unit_id = 7},
+      {id = 4, type = df.occupation_type.BONE_DOCTOR, location_id = 0, unit_id = 8},
+      {id = 5, type = df.occupation_type.DOCTOR, location_id = 16, unit_id = 99},
+      {id = 10, type = df.occupation_type.DOCTOR, location_id = 27, unit_id = -1},
+      {id = 11, type = df.occupation_type.DIAGNOSTICIAN, location_id = 27, unit_id = -1},
+      {id = 12, type = df.occupation_type.SURGEON, location_id = 27, unit_id = -1},
+      {id = 13, type = df.occupation_type.BONE_DOCTOR, location_id = 27, unit_id = -1},
+    }}
+  end)
+  W.run(2)
+  local p = {}
+  for _, a in ipairs(W.find_acts('hospital_post')) do p[#p + 1] = {a.args[1], a.args[2]} end
+  T.eq(p, {{10, 1}, {11, 2}, {12, 7}, {13, 8}}, 'the four live posts get the four doctors of the orphaned location')
+  local d = Cm.kpi(W.K).doctors
+  T.eq({d.posts, d.filled, d.stale, d.orphan_held}, {4, 4, 1, 4}, 'orphan posts: 1 vacant left alone, 4 held; not counted as posts')
+  -- the next run: the doctors hold the live posts now, nothing more is placed
+  local o = df.global.world.occupations.all
+  for i, uid in ipairs({1, 2, 7, 8}) do
+    for _, x in ipairs(o) do if x.id == 9 + i then x.unit_id = uid end end
+  end
+  local before = #W.find_acts('hospital_post')
+  CW.day(W, 2)
+  T.eq(#W.find_acts('hospital_post'), before, 'doctors on live posts are holders')
+  T.eq(Cm.kpi(W.K).doctors.orphan_held, 0, 'moved: nobody waits at the orphan any more')
+  df.global.world.occupations = nil
+end)
+
+T.test('BUG-077: a doctor with a non-hospital post stays a holder; a doctor at a live location is not placed twice', function()
+  local W = medic_world(function(W)
+    W.site.buildings:insert('#', {id = 27, getType = function() return df.abstract_building_type.HOSPITAL end})
+    W.site.buildings:insert('#', {id = 0, getType = function() return df.abstract_building_type.HOSPITAL end})
+    F.building(W, 'ANY_ZONE', {x1 = 10, y1 = 10, x2 = 14, y2 = 14, z = 5, location_id = 27})
+    for _, i in ipairs({1, 2, 7}) do W.unit(i).status.labors = {[10] = true, [11] = true, [12] = true} end
+    df.global.world.occupations = {all = kmock.vec{
+      {id = 1, type = df.occupation_type.TAVERN_KEEPER, location_id = 5, unit_id = 1},   -- a tavern keeper: no doctor post
+      {id = 2, type = df.occupation_type.DOCTOR, location_id = 27, unit_id = 2},        -- already on a live post
+      {id = 3, type = df.occupation_type.DOCTOR, location_id = 0, unit_id = 7},         -- orphan
+      {id = 10, type = df.occupation_type.SURGEON, location_id = 27, unit_id = -1},
+      {id = 11, type = df.occupation_type.BONE_DOCTOR, location_id = 27, unit_id = -1},
+    }}
+  end)
+  W.run(2)
+  local p = {}
+  for _, a in ipairs(W.find_acts('hospital_post')) do p[#p + 1] = {a.args[1], a.args[2]} end
+  T.eq(p[1], {10, 7}, 'unit 7 (orphan holder) first by skill; units 1 and 2 hold other posts')
+  for _, q in ipairs(p) do T.ok(q[2] ~= 1 and q[2] ~= 2, 'unit ' .. q[2]) end
+  df.global.world.occupations = nil
+end)
+
 ---------------------------------------------------------------- mood survival (FR-44)
 local function filter(t, spec)
   local f = {item_type = t and df.item_type[t] or -1, mat_type = -1, mat_index = -1, quantity = 1, flags2 = {}}
