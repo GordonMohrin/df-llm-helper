@@ -1,5 +1,37 @@
 # CHANGELOG dfpilot
 
+## One food stockpile per quickfort call, wet wells only in the refuge rating, a reachable gather zone, the seal-first fault as an event (BUG-072 to BUG-075, DECISIONS 6, 7, 10, 11, 2026-10-23; offline, live-untested)
+- **Why (Run 11, y451 to y479, Kilrudrabed; the decisions of the dev session):** one place call with three food stockpiles
+  took 68,603 ms (BUG-039: quickfort imports the food preset per pile); seal rated the refuge by every built well while
+  readiness counted wet ones (one dry well freed Tiefe+ from the 7-day window); the temporary gather zone covered a square
+  around the fort, so 46 of its GatherPlants jobs could not be reached; a fault inside the seal-first count was a kern.log
+  error line only.
+- **What changed:**
+  - **BUG-072** `runner.lua`: a `place` chunk with two or more food cells (key with `f`) is applied as one quickfort call per
+    food cell, one per slice, the cells between them together, in the document's order (`m.runner p.<id>.pc`); a pile whose
+    name stands on its corner tiles is not placed again; a chunk with one food cell goes whole (stockroom without a still,
+    fortcore, refuge_drink). Every place call with food logs its ms and the world's creature raws. A cheaper form of one
+    pile is not decided offline (bugs/BUG-072).
+  - **BUG-073** `seal.lua`: the burrow audit counts the wells water calls wet (`wet_wells`) as the refuge's drink, the built
+    wells only while water is silent; `refuge_drink().wet` and the WET/window rules follow; REFUGE_FAIL says `1 well, none
+    wet`. The BUG-040 test that pinned the old rating is updated.
+  - **BUG-074** `runner.lua`: the gather zone is cut to the walk group most citizens stand on (rectangles, `gather_rects` 60,
+    levels chosen by reachable open tiles); the log names the tiles left out; a zone of an older kernel is redrawn once;
+    the group unknown: the whole square as before.
+  - **BUG-075** `runner.lua`: the seal-first fault raises KERN_FAULT (A, module runner, `backoff_s` 0) once per distinct
+    message (util/cadence); KERN_FAULT `by` is `any` (schema.py, contract.lua); CONTRACTS §12/§7/`refuge_drink`, RULES §7
+    KERN_FAULT row (in place), DESIGN (refuge rating, gather zone) updated; digest regenerated.
+- Tests (each new one fails on f17e2b3): `tests/lua/test_runner_c4.lua` (new), `tests/lua/test_seal_refuge.lua` (BUG-073).
+- **Live check (Run 11/12):** after `git pull` and `dfhack-run dfllm reload`:
+  - the next stockroom/refuge_drink/fortcore place stage: kern.log `<proj> <stage> chunk N call k/n: quickfort place with 1
+    food pile took MS ms (R creature raws)` once per pile, no step of 60 s (`KERNEL_SLOW`/frame gap); with a still, three calls;
+  - below 30 food days in spring to autumn: `gather zone at X,Y on z Z: N tiles in K rects on the citizens' walk group G,
+    M tiles of the SxS square left out`; `inspect workload`: fewer unreachable GatherPlants than 46; an older zone: `gather
+    zone of an older kernel (the whole square) removed`;
+  - a refuge with a dry well: `inspect refuge` `wet` false, `dfllm status` `refuge_dry` and the alert agree; REFUGE_FAIL
+    `drink 0<N, 1 well, none wet`;
+  - a seal-first fault (none expected): events.jsonl KERN_FAULT with `module runner`, `backoff_s 0`, and `dfllm doctor`.
+
 ## The audit and sites snapshots fit again: one box of the fort's pieces, explore shafts as narrow columns, margin steps, a cap of 400,000 tiles and a refusal that names what stretches the box (BUG-043, 2026-10-17; offline, live-untested)
 - **Why (Run 11, y479):** Kilrudrabed site98, y479 winter d79, kernel 2eea070: `dfllm audit` -> `audit: snapshot refused:
   bbox has 252108 tiles > 250000`, `bp sites <tpl> --fresh` the same; kern.log `readiness: audit snapshot not exported:
