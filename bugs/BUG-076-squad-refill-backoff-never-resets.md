@@ -1,5 +1,5 @@
 # BUG-076 A refused addToSquad backs a squad off for good, and one refused unit blocks the refill of the whole squad
-Status: fixed in HASH (offline, live-untested): a successful refill clears the squad's backoff; a unit `addToSquad` refuses is
+Status: fixed in 23c1ab9 (offline, live-untested): a successful refill clears the squad's backoff; a unit `addToSquad` refuses is
 passed over for `M.ADD_BAD` (33,600 ticks) and the next candidate is tried (`M.ADD_TRIES` = 3 refusals per refill before the
 squad backs off); the refusal's text goes to kern.log (at most every `NOTE_EVERY` ticks per squad)
 Severity: medium (wrong decision: a squad stays under strength for up to a game month per refusal; it was in the way of
