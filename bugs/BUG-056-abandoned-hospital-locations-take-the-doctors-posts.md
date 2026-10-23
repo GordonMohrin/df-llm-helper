@@ -1,5 +1,5 @@
 # BUG-056 Abstract HOSPITAL locations stay after their zones were deleted and take the doctors' posts
-Status: fixed (see Fix commits at the end; offline, live-untested): a hospital is a location with a zone; the posts of a
+Status: fixed in 3713b78 (offline, live-untested): a hospital is a location with a zone; the posts of a
 zoneless location are left alone; every water count already went by zones and now says how many locations are stale;
 no player action deletes a location (documented)
 Severity: medium (wrong decision: the live hospital's posts stayed empty)

@@ -1,5 +1,5 @@
 # BUG-054 Patients die of thirst in a served hospital: 4 caregivers for 5 patients counted as "present", nothing raised them, nothing escalated
-Status: fixed (see Fix commits at the end; offline, live-untested): caregivers scale with the patients through the
+Status: fixed in 3713b78, 46203be (offline, live-untested): caregivers scale with the patients through the
 Orderlies work detail, patient_thirst names the shortfall, PATIENT_DYING (A) at thirst 60,000 with the caregivers' state;
 why the game's own GiveWater jobs did not keep up is NOT decided offline (live data below)
 Severity: critical (loses citizens: 5 patients dead of thirst at once, the run went from 49 citizens to 1)

@@ -1,5 +1,60 @@
 # CHANGELOG dfpilot
 
+## Patients no longer die of thirst beside enough water: caregivers scale, PATIENT_DYING; vacant offices are filled and named; appoint and squad verbs; zoneless hospital locations; zone.place and bp sites around a position (BUG-054, BUG-055, BUG-056, FR-78, 2026-10-23; offline, live-untested)
+- **Why (Runs 11 and 14, notes 11, 18, 24, 25, 61, 64, 65 of bugs/RUN11-offene-bugs-und-FR.md):** Run 11 y497: 3-5 patients at thirst
+  30,000-40,293 with 24-27 of 62 buckets free and 4 caregivers, `patient_thirst` said "water, buckets and caregivers present", five
+  died of thirst together (75,000) in a fort that reported "hospital ok", 49 citizens became 1. Run 11 y497 and Run 14 y577: the
+  CHIEF_MEDICAL_DWARF office stood vacant for good, no squads without a captain, and `appoint` / the squads screen were no verbs (the
+  game session replayed act.lua by hand); 8 abstract HOSPITAL locations stayed after their zones were deleted; Run 14 Trussroads: a
+  pen and a pit zone had to be built by hand with constructBuilding.
+- **BUG-054 (water.lua):** nothing ever gave anybody the FEED_WATER_CIVILIANS labor; the caregivers were the game's own Orderlies
+  detail (4 of 49), the cause text knew "none" only, a wet hospital got no action (the removal acts on a dry one), and 60,000 was the
+  same line as 30,000. Now `water.M.carers`: `carers_per_patient` (1) each, `carers_min` 2 .. `carers_max` 8, `carers_urgent` +2 while a
+  patient is over 30,000, added to the Orderlies detail through act.work_detail (idle first, then nearest the hospital; never a soldier,
+  a dwarf in a mood, a noble, a miner/woodcutter/hunter, a child or a patient), `carers_per_run` 2, never more than `carers_max`
+  of the kernel's own members, they leave one a run `carers_hold_days` (14) after the last patient; patient_thirst names the shortfall
+  ("caregivers short: 3 of 7 wanted for 5 patient(s), 2 added to Orderlies now"; its `q` leads with the recipe); new class A event
+  PATIENT_DYING at `dying_thirst` 60,000 (units, thirst, caregivers/want/idle/added, citizens giving water, GiveWater/GiveFood jobs
+  open/running, free buckets, hospital ok|dry|none, cause) under the cadence rule; `inspect water_sources` `carers`. Not decided
+  offline: why the game's own jobs did not keep up (live data in the bug file).
+- **BUG-055:** economy fills CHIEF_MEDICAL_DWARF (best healer, never a squad member) like manager, bookkeeper and broker and keeps
+  the vacancies (`economy.offices`, `inspect offices`); readiness R0 `office` (config `offices.blocker_days` 7) names a vacant manager
+  or chief medical dwarf office, or squads that cannot get a leader, with the command (`ready.office`, SIEGE_UNREADY `office`, status
+  `next:`, wake hint); the militia posts are NOT pre-appointed (squad creation needs the vacant assignment, act.lua:600-613). Verbs
+  `appoint {code, unit}`, `squad.create`, `squad.leader`, `squad.add`, `squad.uniform` (squads: PEACE/ALERT/RECOVERY only);
+  the DECISION_NEEDED `squads` text names the act's refusal and the verbs.
+- **BUG-056:** care counted the vacant doctor posts of every HOSPITAL location, the stale ones (older ids) first, so the live
+  hospital's posts stayed empty; now only locations with a zone count (`doctors.stale`, kern.log once per change); water reports
+  `locs` {total, live, stale}; every other count already went by zones. No player action deletes a location: documented.
+- **FR-78:** verb `zone.place {type, bbox, name?}` (pen, pit, pond, sand, clay, fishing, meeting; runner; PEACE/ALERT/RECOVERY):
+  `lua/dfllm/zonelib.lua` builds a one-cell quickfort zone blueprint (`n(4x3)`, `p(4x3)` a pit, `p{pond=true}(4x3)`), `act.zone_place`
+  draws it, finds the new zone and sets the zone sheet's "keep filled" for a pit/pond; refuses hidden, rock, open-air and water tiles,
+  boxes over `zones.max_tiles` (400) or on two levels, and conflicting zones (same type, locations, room zones for animals,
+  pit/pond against pen/meeting); returns the zone id. `dfllm bp sites <tpl> --near x,y,z [--within N]` / `--at x,y,z` (`rank(near=,
+  within=, at=)`) ranks around a position and prints the label `A<x>_<y>_<z>_<rot>` for `bp.place`; never cached.
+- Contracts: CONTRACTS section 5 (`work_detail` owners, `zone_place`), 7 (`economy.offices`, `military.leader_state`, `bp.sites`),
+  9.3 (`ready.office`), 9.17 (`water.carers_*`, `dying_*`, `offices`, `zones`), 12 (PATIENT_DYING, SIEGE_UNREADY `office`), 13 (six
+  verbs, `inspect offices`), appendix regenerated; RULES sections 5-7 (rows merged in place, 300 lines); DESIGN hospital water bullet.
+- Tests (each new one fails on f17e2b3): `tests/lua/test_water.lua` (y497 replay, bounds, candidates, hysteresis, missing detail,
+  PATIENT_DYING, stale locations), `tests/lua/test_care_fr.lua` (posts of zoneless locations), `tests/lua/test_a4_offices.lua`,
+  `tests/lua/test_readiness.lua` (`office`), `tests/lua/test_zone_place.lua` (cell text, refusals, act, verb),
+  `tests/bp/test_bp_sites_near.py`, `tests/test_a4_health.py` (schemas, config, texts, CLI). Two old assertions changed with the
+  behaviour: test_water "present" became "short" for 2 of 4 wanted caregivers, test_hospital_water pins the new baseline keys.
+- **Live check (next run):** after `git pull` and `dfhack-run dfllm reload`:
+  - `dfllm cmd inspect '{"what":"water_sources"}'` with a patient: `carers` {have, want, idle, give, mine}; `labor_info.work_details`
+    names `Orderlies` on the save (an `ACT_FAIL` `no work detail Orderlies` means the name differs: tell the repo); after a day `mine`
+    members appear and `have` grows; a patient at 60,000: PATIENT_DYING with `idle`/`give`/`open`/`run` (open jobs while caregivers
+    stand idle = a path or priority problem; no jobs = the game posts none);
+  - `dfllm cmd inspect '{"what":"offices"}'`: vacant offices with days and candidate; CHIEF_MEDICAL_DWARF filled within a game day of
+    flags.ACTIVE; kern.log `CHIEF_MEDICAL_DWARF appointed: unit N`; `squads` there when a squad creation was refused (the act's text);
+    `dfllm cmd appoint '{"code":"CHIEF_MEDICAL_DWARF","unit":N}'` on a vacant office;
+  - kern.log `doctors: N vacant post(s) of M hospital location(s) without a zone left alone` once; the live hospital's posts filled;
+  - `dfllm cmd zone.place '{"type":"pen","bbox":[x0,y0,z,x1,y1,z]}'` beside a barracks: the reply has the zone id, the zones screen shows
+    a Pen/Pasture zone; `{"type":"pit",...}`: Pit/Pond zone that is not kept filled (reply `pond: false`); `{"type":"pond",...}` kept
+    filled; a box over the barracks is refused with the zone named; `dfllm bp sites tombs --near x,y,z --within 20` prints labels;
+  - if a refusal text names a zone that is not in the way: `inspect` the zone (type name from `df.civzone_type`), the conflict sets
+    are `zonelib.lua` `Z.ROOMS` and the rules in `Z.conflict`.
+
 ## The audit and sites snapshots fit again: one box of the fort's pieces, explore shafts as narrow columns, margin steps, a cap of 400,000 tiles and a refusal that names what stretches the box (BUG-043, 2026-10-17; offline, live-untested)
 - **Why (Run 11, y479):** Kilrudrabed site98, y479 winter d79, kernel 2eea070: `dfllm audit` -> `audit: snapshot refused:
   bbox has 252108 tiles > 250000`, `bp sites <tpl> --fresh` the same; kern.log `readiness: audit snapshot not exported:

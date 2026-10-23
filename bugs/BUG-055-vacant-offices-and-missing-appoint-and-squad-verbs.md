@@ -1,5 +1,5 @@
 # BUG-055 Vacant offices nobody fills or reports (chief medical dwarf, squad leaders); appoint and the squads screen are no verbs
-Status: fixed (see Fix commits at the end; offline, live-untested): economy fills CHIEF_MEDICAL_DWARF, readiness R0
+Status: fixed in 3713b78, 46203be (offline, live-untested): economy fills CHIEF_MEDICAL_DWARF, readiness R0
 `office` names every vacant manager/chief medical dwarf office and squads without a leader with the command that fixes it,
 verbs `appoint`, `squad.create`, `squad.leader`, `squad.add`, `squad.uniform`, `inspect offices`; why the kernel could
 not create a squad in Run 11 is NOT decided offline (live data below)
