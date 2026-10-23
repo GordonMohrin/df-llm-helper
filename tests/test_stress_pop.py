@@ -147,3 +147,20 @@ def test_status_and_brief_name_the_stress_sources_and_the_population(save):
     for n in ("a", "b"):
         (save / f"state.{n}.json").write_text(json.dumps(s), encoding="utf-8")
     assert "pop trend" not in brief.status_text(save) and "pop trend" in brief.brief_text(save)
+
+
+def test_a_small_young_fort_without_a_wave_is_not_a_trend(save):
+    """review: seven citizens that have seen no wave yet are no decline; the status stays without the line (the brief has it)."""
+    state = files.read_state(save)
+    s = copy.deepcopy(state)
+    s["care"]["stressed_pct"] = 5
+    s["care"]["pop"] = {"kids": 0, "res": 0, "peak": 7, "dy": 0, "waves": 0, "mig": 0, "lastw": -1}
+    s["pop"] = {**s["pop"], "cit": 7, "adults": 7}
+    assert schema.validate("state", s) == []
+    for n in ("a", "b"):
+        (save / f"state.{n}.json").write_text(json.dumps(s), encoding="utf-8")
+    assert "pop trend" not in brief.status_text(save) and "pop trend" in brief.brief_text(save)
+    s["care"]["pop"]["peak"] = 12                                      # a real loss (5 of 12) is shown
+    for n in ("a", "b"):
+        (save / f"state.{n}.json").write_text(json.dumps(s), encoding="utf-8")
+    assert "pop trend: 7 of peak 12" in brief.status_text(save)

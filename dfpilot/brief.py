@@ -11,6 +11,7 @@ from .events import SEASON, YEAR, clip, est_tokens, fmt_age, fmt_d, fmt_event, f
 STATUS_TOKENS, BRIEF_TOKENS = 300, 1500
 SUPPLY_MIN = {"drink_d": 170, "food_d": 60}
 SRC_LABEL = {"beds": "no beds", "drink": "no drink", "food": "no food", "toppled": "toppled buildings"}   # FR-74
+POP_QUIET_MIN = 10                        # FR-74: "no migrant wave in a year" is shown in the status from this many citizens
 STRESS_SHOW = 20                          # show the stress sources from this share of stressed citizens
 # FR-74 / decision 16: what the game documents about migrants (docs: the Immigration page of the wiki, DFHack's
 # fix/population-cap and pop-control): the diagnosis names them, nothing steers the migrants
@@ -260,7 +261,7 @@ def pop_diag(ctx: Ctx) -> str:
     if not isinstance(pd, dict) or not isinstance(cit, int):
         return ""
     shrunk = pd["peak"] - cit >= max(3, pd["peak"] // 10)
-    quiet = pd["waves"] == 0
+    quiet = pd["waves"] == 0 and cit >= POP_QUIET_MIN       # review: a young small fort has seen no wave yet, that is no trend
     if not (ctx.full or shrunk or quiet):
         return ""
     ad = (ctx.s.get("pop") or {}).get("adults")
