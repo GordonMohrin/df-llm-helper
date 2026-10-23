@@ -1,5 +1,60 @@
 # CHANGELOG dfpilot
 
+## Integration audit: a made-again order keeps its tag, fiber crops without autofarm, no autofarm enable on a load (BUG-083, BUG-084, 2026-10-23, audit I3 of the merged economy, labor, orders, military and care packages; offline, live-untested)
+- **Why:** eleven packages (BUG-044 to BUG-075, FR-70 to FR-78) were reviewed one by one on their branches; this pass read the
+  combination (B1 cover details, farm slots, autofarm policy; B2 stale orders, slabs, standing cloth orders; A3 tools and military;
+  A4 Orderlies through water, offices; C2 forbidden burst; C3 status carry; B3 tombs) for bugs that exist only together.
+- **BUG-083 (bugs/BUG-083):** B2's stale pass makes a simple order again as `dfllm:redo_<id>` and removes the old one, but the
+  kernel's own orders (pieces, idle backlog, slab) are registered in `m.economy orders[tag] = id`: the removed id stayed there and the
+  planner entered the order a second time; the made-again order started a new clock, so an order nothing can run was entered and
+  removed every 3 to 10 days for ever with an ORDER_STUCK each time. The tag now follows the new order; `economy.stale.redo_max`
+  (2) ends the chain (reported once, then left alone).
+- **BUG-084 (bugs/BUG-084):** with autofarm off for good (food between 30 and 90 days, 'off', two wipes: DECISIONS 20) nothing
+  planted the fiber crops of the standing SpinThread / WeaveCloth / ProcessPlants and plan_cloth. While cloth is short and food is
+  not, `economy.farms.fiber_slots` (2) empty slots a season take a fiber crop with usable seeds (a planted slot is never
+  replaced), and kern.log names the cloth autofarm does not plant once a week. Baseline re-applied its whole plan on every load,
+  `enable autofarm` included, against economy's persisted policy; the slots autofarm emptied before the first daily run counted as
+  its wipes (two keep it off for good). The enable is skipped while `m.economy af.off` stands (mode 'auto').
+- **Contracts / config:** `economy.stale.redo_max` and `economy.farms.fiber_slots` in config/baseline.json, `fairplay.ECONOMY_LIM`
+  (`python -m dfpilot.lint --config`), the CONTRACTS config paragraph; no event, field or verb is new.
+- **Live check:** (1) kern.log `cloth short by N ... autofarm is off` and `farm plots: ... filled` with flax/hemp/pig tail in the plots
+  after a week of low food; the standing orders' thread. (2) After a load with autofarm off: `run` log has no `enable autofarm`;
+  `dfllm cmd inspect '{"what":"orders"}'` for the `dfllm:redo_` orders: at most two in a chain, ORDER_STUCK `only reported` once.
+
+### Integration audit I3 (economy, labor, orders, military, care)
+Proved from the code (file:line at 9bcb14f) and refuted or fixed:
+1. **Work detail owners** (refuted): economy writes Miners / Woodcutters / Hunters / Fisherdwarves / Planters / Plant gatherers, water
+   writes only Orderlies (`act.work_detail` callers economy, water; `water.lua` M.carers adds, only its own `p.cw` leave). The cover
+   specs are Planters and Plant gatherers (cover.labors: PLANT, HERBALIST); `M.TOOL_DETAILS` and `gather_cand` do not touch Orderlies,
+   so nobody adds and removes the same member. The 50 % cover share (`cap_all`, economy.lua cover_plan) counts the cover details
+   only; A4's carers (carers_max 8, labors are additive, only while a patient lives) are outside it by design. Left open: the Miners
+   candidate list (`tools`, soft_ok) does not exclude doctors, cover members or carers (gather_cand excludes doctors and tool
+   members); a farmer can become a miner and keep PLANT.
+2. **Autofarm x thread / cloth** (BUG-084, fixed): see above. DECISIONS 20 asked for exactly this log line.
+3. **Forbidden items** (refuted): care's reserve classes (boulders, logs, bone, shell, leather, cloth, thread, gems, bars) are not
+   food, drink, seeds, containers or picks/axes, which are all T.forbid touches (census `fix`, `st.tneed`); the building-site and
+   material unforbids skip `care.held_ids` (economy.lua held_set). Rotten, dumped, trader and removed items never enter the census
+   (`SKIP`). The burst (>= 100 forbidden drink + food units) does release a player's deliberate stock of that size: DECISIONS 22.
+4. **Order churn** (BUG-083, fixed): a daily recreate-and-remove cycle does not exist; the shortest loop was the stale redo every 3
+   days. The runner's door orders (BUG-042 cap, seal past the cap) count open orders by job, so a redo does not double them; drink,
+   fruit drink, barrels and food orders are `keep_order` (never stale, never pruned); standing orders are Monthly and skipped by stale.
+   Left open: a made-again order goes to the end of the list; a seal's door order the runner moved to the top loses its place when
+   it is redone in stone (the in-place wood re-entry comes first).
+5. **Cost per day** (no defect): the new daily tasks each end their slice with a command (cover, slabs, stale per ORDER_SLICE of 50,
+   slotnow, forbid per burst slice of 25) or return at once (toolpile); `jam_scan` reads at most `stale.jobs_max` (2000) workshop jobs
+   and one `order_reasons` per distinct order once a day; `pile_site` reads at most `pile_reads` (300) tiles once per `pile_every`
+   (28) days; nothing scans per tick.
+6. **Military** (no defect): early squads (40 citizens + barracks) are latched in `st.early` and end below half or without a
+   barracks; the drill gate is bridges + soldiers + barracks + no danger (DECISIONS 21); the unstick runs without `--drop`; a fort of
+   40 with a barracks and no commander: the refused creation (`create_why`) blocks R0 after `offices.blocker_days` (7) and stays at
+   the R0 cap 55 until the player makes the squad or the commander (cleared when no wanted squad lacks a leader), which is A4's design.
+7. **Care** (no defect found): B3's open pass writes `no_citizens` on unassigned closed tomb zones only; zone.place draws pens, pits,
+   ponds, sand, clay, fishing and meeting zones (zonelib.lua `Z.TYPES`), never a tomb, so care's removal of a 1x1 tomb zone without a
+   coffin cannot hit one; hospital posts are no tomb business, and entomb's own closing of an assigned zone is left alone; nothing
+   runs in SIEGE/BREACH.
+Open risks: the 4 KB state document now carries many more keys (the shrink order keeps pop, stock, labor last); the live check of
+B1's cover details (who removed the hand-added Planters members, DECISIONS 23).
+
 ## Saves, freezes and status gaps: `dfllm save` follows the real save, every frame gap has a cause, status keeps pop and stock, the idle line is broken down (BUG-069, BUG-070, BUG-071, FR-77, 2026-10-23; offline, live-untested)
 - **Why (Runs 11-13, y456-y506, game session notes 1, 4, 7, 39):** Wheelsblows y506 autumn d11: `dfllm save` said QUICKSAVE_FAILED
   after 122 s ("no fortress save folder newer than the call (dfhack-run printed nothing)") while the newest save was an
