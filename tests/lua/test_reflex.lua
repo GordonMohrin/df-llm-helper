@@ -784,7 +784,7 @@ T.test('BUG-065: a great danger in reach, or an undead wave, keeps the lockdown 
   S.run(W, 3 * 1200 + 1300)
   W.inbox('ack', {})
   T.eq(#events(W, 'LOCKDOWN_END'), 0, 'the great danger keeps it')
-  T.eq(W.state().alarm.lock, 1)
+  T.eq({W.state().alarm.lock, W.K.mode(), W.state().alarm.lim}, {1, 'SIEGE', 3 * 1200}, 'a siege: no limit applies')
 end)
 
 

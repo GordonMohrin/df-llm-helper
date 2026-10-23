@@ -1,5 +1,45 @@
 # CHANGELOG dfpilot
 
+## A lockdown for a lone harmless intruder ends by itself; the cause is named; popups of pests and arrivals clear themselves (BUG-065, FR-75, 2026-10-23; offline, live-untested)
+- **Why (Run 14, y543-y557, notes 40, 49, 50, 54, 57 of bugs/RUN11-offene-bugs-und-FR.md; kernel of f17e2b3):** a gremlin in the
+  caves (z91, the fort's walk group) kept the Kern+ lockdown on for months: every project outside Kern+ stalled, no squad was sent,
+  the drill was blocked for more than an hour, a mood dwarf neared lethal thirst in the confinement, the last memorial slab stayed
+  suspended. `civ_alert` cleared by hand came back within 15 s while the brief said `threat 0 vis`; the game stood on a popup
+  ("A gremlin!  Drive it away!", arrivals) about every 15 minutes until the player's popup.lua ran.
+- **Causes (bugs/BUG-065):** the lockdown had no clock of its own (a visible invader within `lockdown_near` of a citizen
+  outside Kern+ stops the quiet clock for ever, reflex.lua `far_now`/`quiet_step`; every trigger, the same intruder's unacked
+  INTRUDER default included, restarts it, `engage`); `civ_alert` is a held, level-triggered decision (siege `alert_held` ->
+  `alert_wanted` -> `set_alert`), so a hand-cleared alert is sounded again in the next pass; the brief printed the census `vis` and
+  never the lockdown's cause; nothing offered the sortie; the gremlin popup text was in no arbiter list, so the front popup stood.
+- **What changed (Decision 12, 13):**
+  - `alarm` state (contract.lua, schema.py) and `status`/`brief`: `by` (unit, race, kind, position, tiles to the nearest
+    citizen outside Kern+ and to the nearest entrance, harmless, size), `age`/`lim`, `qw` (why the quiet clock does not run);
+    `lockdown arrival:invader 4.2 of 10 days: cause inv 300 GREMLIN at ..., size 4000, harmless; quiet clock: a hostile is near`,
+    `threat 0 vis (lockdown holds: quiet clock recent)`; census list entries carry `sz` and `pr`.
+  - `confine.max_days` (config/reflex.json, 10 game days, 0 = off): in PEACE/ALERT a lockdown ends (LOCKDOWN_END cause `limit`)
+    unless a dangerous hostile is near, a trigger came in the last 2,400 ticks, threat is armed, or a great danger / undead wave /
+    siege-sized army is in reach. Harmless = no great danger, undead, building destroyer, large predator, trap avoider or flier,
+    body size <= `harmless_size` (20000 cm3) or race in `harmless_races`, at most `lone_max` (2). The released intruders are cleared
+    (`m.reflex` `far.hl` on the expired-far path): no new arrival, INTRUDER, ack default or civ_alert for them until another hostile is
+    in sight or one is inside Kern+; `threat.assess` and siege `anchor_dist` skip them; the clock returns with the release.
+  - DECISION_NEEDED `intruder_sortie` (A): the `squad.sortie` command with the squad `military.sortie_squad` names, for a harmless
+    intruder after `offer_days` (1) and for a dangerous one past the limit; `confined_need` (A) for a mood dwarf or patient over
+    `need_thirst`/`need_hunger` behind the alert, which also ends the lockdown (cause `need`) when nothing dangerous is near.
+  - arbiter: kinds `mischief` ("drive it away") and `arrival` ("has arrived"/"have arrived", never with an `arbiter.DENY` word: the
+    undead, ambush, siege, army, titan, demon, vampire, the embark intro) are cleared like the existing ones, threats first through
+    the reflex; one kern.log line per kind and period (`popups.log_s`), one per unclassified text left for the player, the 10-minute
+    `pause` question names the text; `popups.other` (off by default) clears unknown text after `other_s` seconds; every FPS-cap change
+    is a kern.log line (`fps cap 250 -> 30 (arrival:invader)`).
+  - Config `confine` and `popups` in config/reflex.json (`python -m dfpilot.lint --config`), CONTRACTS §6.2/§9.18/§12, RULES §7 (INTRUDER
+    row), DESIGN (reflex, pause rows), wake hints for both decisions.
+- **Not decided offline:** the gremlin's race and body size on DF 53.16 (`by.sz` unproven; `size unknown` or > 20000 = set
+  `confine.harmless_races` / `harmless_size`), whether it is an invader or a wild danger (`by.k`), the cause of "10 FPS" (the new
+  `fps cap` log lines), the live texts of the popups that still stand (the `popup left for the player` lines).
+- **Live check:** next gremlin alarm: `dfllm status` shows the `lockdown ... cause ...` line with race, size, `harmless`; after
+  `intruder_sortie` (1 day) the command is in the wake line; with nobody acting, `LOCKDOWN_END` cause `limit` after `max_days`, doors
+  open, `civ_alert_idx` 0 and no second ARRIVAL for the same unit; kern.log: `fps cap 30 -> 250 (free)`, `popup mischief acknowledged`,
+  and any `popup left for the player (unclassified)`; turn on `popups.other` only after reading those lines.
+
 ## The audit and sites snapshots fit again: one box of the fort's pieces, explore shafts as narrow columns, margin steps, a cap of 400,000 tiles and a refusal that names what stretches the box (BUG-043, 2026-10-17; offline, live-untested)
 - **Why (Run 11, y479):** Kilrudrabed site98, y479 winter d79, kernel 2eea070: `dfllm audit` -> `audit: snapshot refused:
   bbox has 252108 tiles > 250000`, `bp sites <tpl> --fresh` the same; kern.log `readiness: audit snapshot not exported:
