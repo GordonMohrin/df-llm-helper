@@ -212,7 +212,7 @@
            "mat_scan": 2000, "fail_alarm": 3, "depot_move_after": 5, "move_days": 28, "move_r": 12, "move_dz": 2,
            "move_gap": 3, "move_probes": 150},
   "farms": {"per_day": 16, "now_max": 24, "autofarm": "auto", "af_off_days": 30, "af_on_days": 90, "af_hold_days": 14},
-  "forbid": {"per_day": 30},
+  "forbid": {"per_day": 30, "burst_per_day": 400, "burst_min": 100},
   "starve": {"days": 0, "hunger": 50000, "plants_max": 200, "plants_per_slice": 400, "report_days": 2, "gatherers": 4,
              "planters": 4, "plants": ["GRASS_WHEAT_CAVE", "MUSHROOM_HELMET_PLUMP", "POD_SWEET", "BUSH_QUARRY",
                                        "MUSHROOM_CUP_DIMPLE"],
@@ -298,7 +298,8 @@
  "runner": {
   "seal_first": {"on": true, "stuck_days": 3, "food_d": 30, "drink_d": 30, "wall": true, "wall_days": 2},
   "rebuild": {"pop": 10, "off": 12},
-  "queue": {"yield_days": 7, "park_days": 30}
+  "queue": {"yield_days": 7, "park_days": 30},
+  "reclaim": {"on": true, "gone_scans": 2, "min_ws": 3, "ask_days": 3}
  },
  "snapshot": {"max_tiles": 400000},
  "military": {

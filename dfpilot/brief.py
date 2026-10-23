@@ -391,6 +391,31 @@ def _hospital(s: dict, st: dict) -> str:
     return f" water {'ok' if st['hosp_water'] else 'NO'}" if "hosp_water" in st else ""
 
 
+def mandatory_fix(miss: list) -> str:
+    """FR-76: the placement that builds exactly the missing mandatory workshops (follow does it itself on the kernel's
+    request; `only` is cmd.place's list of shops to build)."""
+    return "dfllm cmd bp.place tpl=workshops site=S1 only=" + ",".join(miss)
+
+
+def adopt_line(s: dict) -> str:
+    """FR-76 (state adopt, runner): what stands in the fort the kernel adopted (a reclaimed one has workshops no project of
+    ours built), the manifest repairs (BUG-066: workshops gone from it) and the mandatory workshops it lacks, with the fix."""
+    a = s.get("adopt")
+    if not isinstance(a, dict) or not (a.get("rec") or a.get("gone") or a.get("miss")):
+        return ""                                       # a fort the kernel built itself: nothing worth a line
+    bits = [f"{a['ws']} workshops standing"]
+    if a.get("new"):
+        bits.append(f"{a['new']} adopted")
+    if a.get("gone"):
+        bits.append(f"{a['gone']} destroyed, out of the manifest")
+    bits += [f"{a[k]} {k}" for k in ("stock", "wells", "beds", "doors") if k in a]
+    txt = ("adopted fort: " if a.get("rec") else "manifest: ") + ", ".join(bits)
+    miss = a.get("miss") or []
+    if miss:
+        txt += f"; MISSING {', '.join(miss)}: follow places them, or `{mandatory_fix(miss)}`"
+    return txt
+
+
 def line_supply(ctx: Ctx) -> str:
     s, out = ctx.s, []
     st = s.get("stock")
@@ -414,6 +439,14 @@ def line_supply(ctx: Ctx) -> str:
         # BUG-042: why the stills do not brew while drink is below the target (the kernel's own cause)
         if st.get("dwhy"):
             out.append(f"drink: {st['dwhy']}")
+        # FR-76 (Run 12 Trussroads, reclaimed: 3026 of 3058 drinks forbidden, "drink 46d!"): the forbidden stock the days
+        # above do not count, and what the kernel does about it
+        if st.get("dforb") or st.get("fforb"):
+            parts = [f"{st[k]} {name} items forbidden" for k, name in (("dforb", "drink"), ("fforb", "food")) if st.get(k)]
+            out.append(", ".join(parts) + " (not in the days above; the kernel unforbids them)")
+    ad = adopt_line(s)
+    if ad:
+        out.append(ad)
     od = s.get("orders")
     if isinstance(od, dict) and od.get("mgr"):
         # BUG-042: orders wait for the manager: how many, how long, why (the office's chair/table, ...)
@@ -435,7 +468,10 @@ def line_supply(ctx: Ctx) -> str:
         if cf and (cf["want"] > c["tombs_free"] or cf["order"] or cf["proj"]):
             # FR-61 coffin provisioner: free tombs wanted, slots missing, coffin items, open orders, project
             out.append(f"coffins want {cf['want']} short {cf['short']} stock {cf['stock']} order {cf['order']}"
-                       + (f" proj {cf['proj']}" if cf["proj"] else ""))
+                       + (f" proj {cf['proj']}" if cf["proj"] else "")
+                       # FR-76 (Run 12 reclaim: the kernel only said "short coffins"): no Carpenters workshop, no coffin
+                       + (" (no Carpenters workshop stands: see adopted fort)"
+                          if "Carpenters" in ((s.get("adopt") or {}).get("miss") or []) and cf["short"] else ""))
     lb = s.get("labor")
     if lb:
         out.append(f"idle {lb['idle']}% starving {lb['starving']}")

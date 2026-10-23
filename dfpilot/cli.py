@@ -147,7 +147,8 @@ def run_bp(args, save_dir: Path | None) -> int:
                 print(f"no snapshot {cid} within {args.timeout:.0f}s")
                 return 3
         where = _where(args)
-        sites, snap_id, ranked = free_sites(save_dir, args.tpl, params, snap, where=where)
+        held: list = []
+        sites, snap_id, ranked = free_sites(save_dir, args.tpl, params, snap, where=where, taken=held)
         if where:
             print(f"free sites for {args.tpl}{fmt_params(params)} {_where_text(where)} on snapshot {snap_id} ({ranked} "
                   f"ranked; place by the label: dfllm cmd bp.place tpl={args.tpl} site=<label>{fmt_params(params)} --by llm):")
@@ -161,7 +162,9 @@ def run_bp(args, save_dir: Path | None) -> int:
             lbl = f" label {s['label']}" if s.get("label") else ""
             print(f"  {s.get('id')} anchor {s.get('anchor')} rot {s.get('rot')} score {s.get('score')}{lbl}: {s.get('why', '')}")
         if not sites:
-            print("  none (taken by other projects or no valid site): try --fresh")
+            from .cmd import no_site_hint
+            why = no_site_hint(save_dir, args.tpl, snap_id, ranked, sorted(set(held)))      # BUG-067
+            print(f"  none ({ranked} ranked, {len(set(held))} project(s) hold them): try --fresh" + (f"; {why}" if why else ""))
         return 0
     except (BpError, BpUnavailable, RuntimeError, ValueError) as e:
         print(f"bp: {e}")

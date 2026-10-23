@@ -62,6 +62,8 @@ def parse_kv(tokens: list[str]) -> dict:
 # ---------------------------------------------------------------- blueprints (WP3, lazy)
 SAME = "same"        # site label: reuse the anchor/rot of this template's last placement (fortcore stages 2-4)
 RANK_N = 12          # candidates ranked per template; label S<k> = the k-th one that is free of other projects
+RANK_WIDE = 60       # BUG-067: when the best RANK_N are all taken or unusable, place() looks this far down the ranking
+EXPLORE_DEPTHS = (12, 9, 6, 4, 2)    # the explore template's default depth first, then shallower (plan propose, place hints)
 STAGE_MAX = 8        # a staged template (params.stage) reserves its later stages up to here (fortcore: 4)
 _LABEL = re.compile(r"S([1-9]\d?)")
 _EXT = re.compile(r"\((-?\d+)x(-?\d+)\)\s*$")     # quickfort extent suffix, e.g. d(5x1), b{...}(3x3)
@@ -146,15 +148,31 @@ def cache_manifest(save_dir: Path, manifest) -> bool:
     return False
 
 
+def _without_gone(frag: dict, gone: list, mtime: float) -> dict:
+    """BUG-066 (Run 14 y560: a toppled MetalsmithsForge stayed `built` and "bp sites workshops" said "nothing left to
+    build"): the fragment of a bp file without the workshops the kernel found gone (manifest.gone: type and pos, w =
+    the wall clock of the loss). A file written after the loss (mtime > w) is a rebuild and keeps its workshops."""
+    if not gone or not isinstance(frag.get("workshops"), list):
+        return frag
+    lost = {(g.get("type"), tuple(g.get("pos") or ())): g.get("w") for g in gone if isinstance(g, dict)}
+    keep = [w for w in frag["workshops"]
+            if not (isinstance(w, dict) and (w.get("type"), tuple(w.get("pos") or ())) in lost
+                    and (lost[(w.get("type"), tuple(w.get("pos") or ()))] is None
+                         or mtime <= lost[(w.get("type"), tuple(w.get("pos") or ()))]))]
+    return dict(frag, workshops=keep) if len(keep) != len(frag["workshops"]) else frag
+
+
 def fort_manifest(save_dir: Path) -> dict:
     """Manifest for site ranking (bp.sites.rank needs zones.Z4 for rooms): the cached kern manifest merged with
     the fragment of every bp/*.json in write order (applied projects, running or done) by the CONTRACTS §11
-    rule (bp.primitives.merge_manifest). Offline, no inspect round trip and no 8 KB limit."""
+    rule (bp.primitives.merge_manifest). Offline, no inspect round trip and no 8 KB limit. BUG-066: the workshops the
+    kernel found gone (manifest.gone) are not counted from the fragments written before the loss."""
     base = files.read_manifest(save_dir) or files.read_json(Path(save_dir) / MANIFEST_CACHE)
     m = base if isinstance(base, dict) and not schema.validate("manifest", base) else {"v": 2}
     merge = getattr(load_bp("primitives"), "merge_manifest", None)
     if not callable(merge):
         return m
+    gone = [g for g in m.get("gone") or [] if isinstance(g, dict)]
 
     def mtime(p):
         try:
@@ -166,7 +184,7 @@ def fort_manifest(save_dir: Path) -> dict:
         frag = doc.get("manifest") if isinstance(doc, dict) else None
         if isinstance(frag, dict):
             try:
-                m = merge(m, frag)
+                m = merge(m, _without_gone(frag, gone, mtime(p)))
             except Exception:                  # noqa: BLE001 - one malformed fragment must not block ranking
                 continue
     return m
@@ -926,6 +944,71 @@ def log_seal(save_dir: Path, doc: dict, by: str) -> list[str]:
     return lines
 
 
+def _proj_status(save_dir: Path, pid: str) -> str:
+    """'explore, parked: breach:damp' / 'fortcore s1.dig 40%' / 'done' for a placed project: its template from the bp
+    file, the kernel's row from state.proj (the first 8 projects) when it has one."""
+    doc = files.read_json(Path(save_dir) / "bp" / f"{pid}.json")
+    tpl = doc.get("tpl") if isinstance(doc, dict) else None
+    row = next((r for r in (files.read_state(save_dir) or {}).get("proj") or []
+                if isinstance(r, list) and r and r[0] == pid), None)
+    what = str(tpl or "?")
+    if row:
+        what += f" {row[1]} {row[2]}%" + (f", blocked {row[3]}" if len(row) > 3 and row[3] else "")
+    return f"{pid} ({what})"
+
+
+def no_site_hint(save_dir: Path, tpl: str, snap_id: str, ranked: int, holders: list[str]) -> str:
+    """BUG-067 (Run 12/13, notes 5, 31, 41): why a placement found no free site and what to do. Taken: the projects that
+    hold the ranked sites and their state (a parked or build_lost one keeps its tiles until `bp.cancel <id>`).
+    Nothing ranked for a room template: its sites hang on the dug public Z4 floor of the fortcore, so a fortcore that
+    is placed but not dug yet (bp.place fortcore, then plan propose: farms/dining/office @S1 gave `0 free sites`) has
+    none; the order is bp.place fortcore -> wait for s1.dig -> `bp sites <tpl> --fresh` -> plan propose / check."""
+    out = []
+    if holders:
+        out.append("taken by " + ", ".join(_proj_status(save_dir, h) for h in holders[:4])
+                   + (f" +{len(holders) - 4}" if len(holders) > 4 else "")
+                   + "; a parked or blocked project keeps its tiles: `dfllm cmd bp.cancel proj=<id>` frees them")
+    if ranked == 0 and tpl not in ("fortcore", "seal", "explore", "plug", "repair"):
+        cores = []
+        for p in bp_files(save_dir):
+            d = files.read_json(p)
+            if isinstance(d, dict) and d.get("tpl") == "fortcore":
+                cores.append(p.stem)
+        if cores:
+            out.append(f"no ranked site: {tpl} rooms open from the dug Z4 floor of the fortcore ({', '.join(cores[:3])} "
+                       f"placed; snapshot {snap_id} may predate its dig). Order: bp.place fortcore, wait for s1.dig "
+                       f"(`status` proj), `dfllm bp sites {tpl} --fresh`, then plan propose / check")
+        else:
+            out.append(f"no ranked site: no fortcore project placed (room sites hang on its Z4 floor): bp.place fortcore "
+                       f"first, then `dfllm bp sites {tpl} --fresh`")
+    return "; ".join(out)
+
+
+def depth_hint(save_dir: Path, tpl: str, params: dict | None, snap: dict | None, occ: "Occupancy", err: str) -> str:
+    """BUG-067 (note 5: explore depth 12 always refused, the caverns at z127/z131): when every anchor's shaft of the asked
+    depth reaches an avoided level, the deepest shallower depth (EXPLORE_DEPTHS) that has a free site, as `p.depth=N`."""
+    if tpl != "explore" or "avoided level" not in err:
+        return ""
+    cur = (params or {}).get("depth")
+    cur = cur if isinstance(cur, int) and not isinstance(cur, bool) else EXPLORE_DEPTHS[0]
+    for d in EXPLORE_DEPTHS:
+        if d >= cur:
+            continue
+        try:
+            sites, _ = rank_sites(save_dir, tpl, {**(params or {}), "depth": d}, snap)
+        except (BpError, BpUnavailable):
+            continue
+        for s in sites:
+            try:
+                doc = emit_at(tpl, {**(params or {}), "depth": d}, s, "S0", "probe")
+            except BpError:
+                continue
+            if not occ.clash(doc):
+                return (f"depth {d} would be accepted at {s.get('anchor')}: p.depth={d} "
+                        f"(`dfllm bp sites explore depth={d}`)")
+    return "no shallower depth (" + "/".join(str(d) for d in EXPLORE_DEPTHS if d < cur) + ") has a free site either"
+
+
 def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str, occ: Occupancy | None = None,
           same: dict | None = None, snap: dict | None = None, need: list | tuple = ()) -> dict:
     """Emit tpl for a site label without overlapping other projects (occ, default: every bp/*.json but bp_id).
@@ -936,6 +1019,18 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
     (BUG-038: economy's fishery request; the fort manifest keeps a destroyed fishery), kept although the manifest
     lists them."""
     params = dict(params or {})
+    if tpl == "workshops" and params.get("only"):          # FR-76: exactly these shops (the mandatory ones of a reclaim)
+        want = [t.strip() for t in str(params.pop("only")).split(",") if t.strip()]
+        mood, extra = _moodable(), _extra_shops()
+        bad = [t for t in want if t not in mood and t not in extra]
+        if bad:
+            raise BpError(f"workshops only={','.join(want)}: unknown types {bad}; known: {', '.join(mood + extra)}")
+        params["skip"] = ",".join(m for m in mood if m not in want)
+        if any(t in extra for t in want):
+            params["add"] = ",".join(t for t in want if t in extra)
+        else:
+            params.pop("add", None)
+        need = tuple(need) + tuple(want)                   # named by the caller: kept although the manifest lists them
     if tpl == "seal":                                      # absolute openings; at=last: the current open ways in
         params["at"], SEAL_NOTES[bp_id] = seal_openings(save_dir, params.get("at"), snap,
                                                         params.get("close") or "auto")
@@ -976,31 +1071,88 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
     if not m:
         raise BpError(f"site {label!r}: use S1..S{RANK_N} (S1 = best free site of `dfllm bp sites {tpl}`) or '{SAME}'")
     k = int(m.group(1))
-    sites, snap_id = ranking(save_dir, tpl, params, snap)
+    try:
+        sites, snap_id = ranking(save_dir, tpl, params, snap)
+    except BpError as e:
+        hint = depth_hint(save_dir, tpl, params, snap, occ, str(e))
+        if hint:
+            raise BpError(f"{e}; {hint}") from e
+        raise
     free, taken, bad = 0, [], []
+    tried: set = set()
+
+    def scan(lst):
+        nonlocal free
+        for s in lst:
+            key = (tuple(s.get("anchor") or ()), s.get("rot"))
+            if key in tried:
+                continue
+            tried.add(key)
+            try:
+                doc = emit_at(tpl, params, s, label, bp_id)
+            except BpError as e:
+                bad.append(f"{s.get('anchor')}: {e}")
+                continue
+            hit = occ.clash(doc)
+            if hit:
+                taken.append(f"{s.get('anchor')}~{hit[0]}")
+                continue
+            free += 1
+            if free == k:
+                return doc
+        return None
+    doc = scan(sites)
+    if doc is not None:
+        return doc
+    ranked = len(sites)
+    if ranked >= RANK_N:        # BUG-067: the best RANK_N all taken or unusable: look further down the ranking
+        wide, _ = rank_sites(save_dir, tpl, params, snap or sites_snapshot(save_dir), n=RANK_WIDE)
+        doc = scan(wide)
+        if doc is not None:
+            return doc
+        ranked = len(wide)
+    holders = sorted({t.split("~", 1)[1] for t in taken})
+    why = "; ".join(x for x in (f"taken {', '.join(taken[:3])}" if taken else "", bad[0] if bad else "") if x)
+    hint = no_site_hint(save_dir, tpl, snap_id, ranked, holders)
+    raise BpError(f"site {label}: only {free} free site(s) for {tpl}{fmt_params(params)} on snapshot {snap_id} "
+                  f"({ranked} ranked{'; ' + why if why else ''}); try `dfllm bp sites {tpl} --fresh`"
+                  + (f"; {hint}" if hint else ""))
+
+
+def _free_scan(tpl: str, params: dict | None, sites: list, occ: "Occupancy", n: int, out: list, taken: list,
+               tried: set, where: dict | None = None) -> bool:
+    """Append the free sites of `sites` to `out` (relabelled S1..), the projects that hold the others to `taken`;
+    True once `out` holds n."""
     for s in sites:
+        key = (tuple(s.get("anchor") or ()), s.get("rot"))
+        if key in tried:
+            continue
+        tried.add(key)
         try:
-            doc = emit_at(tpl, params, s, label, bp_id)
-        except BpError as e:
-            bad.append(f"{s.get('anchor')}: {e}")
+            doc = emit_at(tpl, params or {}, s, "S0", "probe")
+        except BpError:
             continue
         hit = occ.clash(doc)
         if hit:
-            taken.append(f"{s.get('anchor')}~{hit[0]}")
+            taken.append(hit[0])
             continue
-        free += 1
-        if free == k:
-            return doc
-    why = "; ".join(x for x in (f"taken {', '.join(taken[:3])}" if taken else "", bad[0] if bad else "") if x)
-    raise BpError(f"site {label}: only {free} free site(s) for {tpl}{fmt_params(params)} on snapshot {snap_id} "
-                  f"({len(sites)} ranked{'; ' + why if why else ''}); try `dfllm bp sites {tpl} --fresh`")
+        k = dict(s, id=f"S{len(out) + 1}")
+        if where:                                          # FR-78: the explicit anchor label bp.place takes
+            a = s["anchor"]
+            k["label"] = f"A{a[0]}_{a[1]}_{a[2]}_{s.get('rot', 0)}"
+        out.append(k)
+        if len(out) == n:
+            return True
+    return False
 
 
 def free_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict | None = None,
-               n: int = 3, where: dict | None = None) -> tuple[list[dict], str, int]:
+               n: int = 3, where: dict | None = None, taken: list | None = None) -> tuple[list[dict], str, int]:
     """(the first n free sites relabelled S1.., snapshot id, ranked count): what `bp.place site=S<k>` resolves.
     With `where` (FR-78: near / within / at, see rank_sites) the sites of that spot, each with `label`, the explicit
-    anchor label `bp.place site=<label>` takes."""
+    anchor label `bp.place site=<label>` takes. BUG-067: when the best RANK_N are all taken or unusable it looks down to
+    RANK_WIDE, as place() does (not for a `where` ranking); `taken` (a list) gets the ids of the projects that hold
+    ranked sites."""
     if tpl == "seal":                                      # as place(): at=last etc. become explicit openings
         params = {**(params or {}), "at": seal_openings(save_dir, (params or {}).get("at"), snap,
                                                         (params or {}).get("close") or "auto")[0]}
@@ -1009,21 +1161,15 @@ def free_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict 
     else:
         sites, snap_id = rank_sites(save_dir, tpl, params, snap) if snap else ranking(save_dir, tpl, params)
     occ = occupancy(save_dir)
-    out = []
-    for s in sites:
-        try:
-            doc = emit_at(tpl, params or {}, s, "S0", "probe")
-        except BpError:
-            continue
-        if not occ.clash(doc):
-            k = dict(s, id=f"S{len(out) + 1}")
-            if where:
-                a = s["anchor"]
-                k["label"] = f"A{a[0]}_{a[1]}_{a[2]}_{s.get('rot', 0)}"
-            out.append(k)
-            if len(out) == n:
-                break
-    return out, snap_id, len(sites)
+    out: list = []
+    held: list = [] if taken is None else taken
+    tried: set = set()
+    ranked = len(sites)
+    if not _free_scan(tpl, params, sites, occ, n, out, held, tried, where) and ranked >= RANK_N and not where:
+        wide, _ = rank_sites(save_dir, tpl, params, snap or sites_snapshot(save_dir), n=RANK_WIDE)
+        _free_scan(tpl, params, wide, occ, n, out, held, tried)
+        ranked = len(wide)
+    return out, snap_id, ranked
 
 
 def resolve_site(save_dir: Path, tpl: str, label: str, params: dict | None = None) -> dict:

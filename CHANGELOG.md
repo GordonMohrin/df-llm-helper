@@ -1,5 +1,53 @@
 # CHANGELOG dfpilot
 
+## Reclaimed forts adopt what stands, destroyed workshops leave the manifest, sites past the best twelve, levers without effect are parked (FR-76, BUG-066, BUG-067, BUG-068, 2026-10-23, package C2; offline, live-untested)
+- **Why (Run 12 Trussroads y497, Run 13 Wheelsblows, Run 14 y560; notes 5, 28-31, 41, 51, 59):** a reclaimed fort started with
+  13386 items forbidden (3026 of 3058 drinks, all food, 61 barrels: status `drink 46d!`), no workshops (the kernel only said "short
+  coffins"), fortcore S1 `breach:damp`, `bp sites fortcore` `none (taken ...)` and a stage 2 `site: same` marked done without its
+  stage 1; the kernel pulled lever 11808 of the old bridge X11814 six times in a second and logged `act.run failed for baseline:
+  nil`; in Run 14 a toppled MetalsmithsForge stayed in the manifest as built, so `bp sites workshops` said "nothing left to
+  build" while a mood dwarf had no shop; `plan check explore` said "only 0 free site(s)" with sites free, and farms/dining/office
+  at S1 found none right after `bp.place(fortcore)`.
+- **Causes (bugs/BUG-066, 067, 068):** the manifest only grew (runner.lua merge_manifest) and python merged every bp fragment on
+  top of it; `place()` looked at the best 12 ranked sites only (cmd.py:950) and room sites hang on the dug Z4 floor of the core
+  (sites.py `_anchor_tiles`); a lever whose job leaves the queue without the bridge moving is retried every SETTLE (50) ticks
+  for ever (gate.lua:1364, `pick` resets its `bad` set); drink items forbidden by themselves count as unusable and are
+  unforbidden only in a starvation, 30 a day (economy.lua:772, T.forbid); `proj_reached`/`finish` counted a stage-2 project as
+  stage 1 delivered (labels_done counts the stages below a document's first one as done).
+- **Runner, once a game day (`runner.reclaim`: on, gone_scans 2, min_ws 3, ask_days 3):** the manifest's workshops are compared with
+  the workshop and furnace vectors. Missing for two scans: out of `manifest.workshops` and into `manifest.gone` `{type, pos, w}`
+  (cap 50); standing, built and unknown: adopted (building centre, cap 100); `merge_manifest` cancels a `gone` entry a finished project
+  rebuilds. State `adopt` {ws, new, gone, stock, wells, beds, doors, rec, miss}. A fort that adopts >= 3 workshops at its first scan
+  is a reclaimed one: its missing mandatory workshops (Carpenters, Masons, Craftsdwarfs, Still, Kitchen) are requested after 3 days
+  in PEACE with no workshops project pending (`PROJECT_REQUEST workshops why=mandatory types=[...]`, once per 7 days).
+- **Stages:** a project whose first stage is >= 2 and whose predecessor never ran (hist, another live project, or fortcore zones in the
+  manifest of an older kernel) is not counted in `hist` and does not pass `proj` deliverables; kern.log and PROJECT_DONE (`pre`)
+  say so.
+- **Economy:** from `economy.forbid.burst_min` (100) forbidden drink + food units the items themselves are unforbidden whatever
+  their reason, `burst_per_day` (400) a day, 25 a frame, revealed and reachable tiles in PEACE/RECOVERY only; census list cap 500;
+  state `stock.dforb`/`fforb`.
+- **Gate:** the verdict on a pull waits SETTLE ticks; `gate.noeffect_max` (3) pulls without effect park the lever for `noeffect_wait`
+  (1200, a quarter of it in SIEGE/BREACH/DRILL, doubled per parking up to 8x); LEVER_NOEFFECT (B) {bridge, lever, pulls, state, wait, worker} once per lever (cadence,
+  persisted); all levers parked: GATE_FAIL `no_effect`; a mode change or a pull that works clears it. ACT_FAIL carries `cmd`
+  (the command line of a failed `run`) and `error(nil)` reads "raised an error without a message".
+- **Python:** `fort_manifest` drops the workshops of `manifest.gone` from bp files written before the loss (every dedupe: `workshops_missing`,
+  `place`, follow's starter); `place()` and `bp sites` rank 60 sites when the best 12 are taken and every failure names the holders with their
+  state and `bp.cancel proj=<id>`, the missing core ("Order: bp.place fortcore, wait for s1.dig, bp sites <tpl> --fresh") and, for an
+  explore refused at an avoided level, the shallower depth it accepts; `plan propose`/`check` print the order while the core digs;
+  follow places `why=mandatory` requests (`only=` is a new `bp.place` parameter of `workshops`); status lines for the forbidden
+  stock, the adopted fort and what it lacks, with the fix.
+- **Contracts:** state `adopt.*` (runner), `stock.dforb/fforb`; manifest `gone`; events LEVER_NOEFFECT (B), PROJECT_DONE `pre`,
+  PROJECT_REQUEST `types`, ACT_FAIL `cmd`; config `gate.noeffect_*`, `runner.reclaim.*`, `economy.forbid.burst_*` (validated by
+  `python -m dfpilot.lint --config`); CONTRACTS appendix regenerated.
+- **Tests:** `tests/lua/test_runner_manifest.lua`, `test_gate_noeffect.lua`, `test_economy_supply.lua` (FR-76), `test_kern_act.lua`
+  (ACT_FAIL), `tests/test_c2_reclaim.py`; the old `phases: workshops ...` test in `test_runner.lua` now has its Masons stand.
+- **Live check:** reload on a reclaimed fort: kern.log `reclaimed fort: N standing workshops adopted`, `dfllm status` shows
+  `adopted fort: ...` with `MISSING ...` and the fix, and the forbidden drink count falls by up to 400 a day (`3026 drink items
+  forbidden` first); `PROJECT_REQUEST workshops why=mandatory` is placed by follow; destroy a workshop and see
+  `manifest: workshop X at x,y,z no longer stands` two game days later and `bp sites workshops` offering it; a lever without effect
+  gives one LEVER_NOEFFECT with `worker` 0 or more (the answer to "why did lever 11808 never work", bugs/BUG-068) and the next
+  ACT_FAIL for a baseline command names it. Not decided offline: bugs/BUG-066/067/068 "Not decided offline".
+
 ## A lockdown for a lone harmless intruder ends by itself; the cause is named; popups of pests and arrivals clear themselves (BUG-065, FR-75, 2026-10-23; offline, live-untested)
 - **Why (Run 14, y543-y557, notes 40, 49, 50, 54, 57 of bugs/RUN11-offene-bugs-und-FR.md; kernel of f17e2b3):** a gremlin in the
   caves (z91, the fort's walk group) kept the Kern+ lockdown on for months: every project outside Kern+ stalled, no squad was sent,

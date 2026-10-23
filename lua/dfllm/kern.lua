@@ -398,13 +398,14 @@ local function build(o)
     allowlist = function() return st.cfg and st.cfg.allowlist or actlib.BUILTIN_ALLOWLIST end,
     log_cmd = log_cmd,
     clock = cost_ms, on_cost = st.on_act_cost,      -- BUG-039: the slowest act call of a huge step
-    fail = function(fn, err, module)
-      local key = 'ACT_FAIL' .. fn .. module .. err
+    fail = function(fn, err, module, what)
+      local key = 'ACT_FAIL' .. fn .. module .. err .. tostring(what or '')       -- BUG-068: per command line too
       local last = st.once[key]
       if last and st.now.tick - last < C.TICKS.DAY then return end
       st.once[key] = st.now.tick
-      emit_as('kern', 'ACT_FAIL', 'B', 'act.' .. fn .. ' failed for ' .. module .. ': ' .. err,
-              {fn = fn, err = err, module = module})
+      emit_as('kern', 'ACT_FAIL', 'B', 'act.' .. fn .. ' failed for ' .. module .. ': ' .. err ..
+              (what and what ~= '' and (' [' .. what .. ']') or ''),
+              {fn = fn, err = err, module = module, cmd = what})
     end,
   }
 

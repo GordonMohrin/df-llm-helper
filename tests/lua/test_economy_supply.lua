@@ -151,6 +151,53 @@ T.test('FR-50: drink in a forbidden TOOL pot counts as forbidden; the pot is unf
   T.eq(pot2.flags.forbid, true)
 end)
 
+T.test('FR-76 (Run 12 Trussroads, reclaimed fort): a forbidden stock (150 drink items and 40 food items forbidden) is ' ..
+       'unforbidden in bursts of M.BURST_SLICE a frame, drink and food alike, no starvation needed; state stock.dforb ' ..
+       'and stock.fforb say how much was forbidden', function()
+  local drinks, foods = {}, {}
+  local W = world{setup = function(W)
+    for i = 1, 150 do
+      drinks[#drinks + 1] = F.item(W, 'DRINK', {stack_size = 20, flags = {forbid = true}, _pos = {5 + i % 20, 5, 100}})
+    end
+    for i = 1, 40 do
+      foods[#foods + 1] = F.item(W, 'FOOD', {stack_size = 2, subtype = 1, flags = {forbid = true}, _pos = {5 + i % 20, 6, 100}})
+    end
+    F.item(W, 'DRINK', {stack_size = 9, flags = {forbid = true, trader = true}, _pos = {5, 5, 100}})   -- a merchant's
+    F.item(W, 'DRINK', {stack_size = 7, flags = {forbid = true}, _pos = {99, 5, 100}})                 -- cut off
+  end}
+  days(W, 1)
+  local s0 = W.state().stock
+  T.eq({s0.dforb, s0.fforb}, {150 * 20 + 7, 40 * 2}, 'the census of the run: the merchant\'s drink is no stock of the fort')
+  local left = 0
+  for _, it in ipairs(drinks) do if it.flags.forbid then left = left + 1 end end
+  for _, it in ipairs(foods) do if it.flags.forbid then left = left + 1 end end
+  T.eq(left, 0, 'all 190 items unforbidden within a day (old code: 30 a day, food not at all)')
+  T.eq(#W.find_acts('item_flag'), 190, 'the merchant\'s and the cut-off drink stay')
+  local logged
+  for _, l in ipairs(W.logs) do if l.msg:find('a forbidden stock', 1, true) then logged = l end end
+  T.ok(logged, 'kern.log names the burst')
+  -- below burst_min forbidden units nothing changes: forbidden food stays forbidden outside a starvation
+  local few = {}
+  local W2 = world{setup = function(W)
+    for i = 1, 5 do few[i] = F.item(W, 'FOOD', {stack_size = 2, subtype = 1, flags = {forbid = true}, _pos = {5, 6, 100}}) end
+  end}
+  days(W2, 2)
+  for _, it in ipairs(few) do T.eq(it.flags.forbid, true) end
+  T.eq(#W2.find_acts('item_flag'), 0)
+  -- burst_min 0 turns the burst off: own-forbidden drink items stay forbidden (the old behaviour)
+  local own = {}
+  local W3 = world{setup = function(W)
+    for i = 1, 60 do own[i] = F.item(W, 'DRINK', {stack_size = 20, flags = {forbid = true}, _pos = {5 + i % 20, 5, 100}}) end
+    W.K.cfg.baseline = W.K.cfg.baseline or {}
+    W.K.cfg.baseline.economy = {forbid = {per_day = 30, burst_per_day = 400, burst_min = 0}}
+  end}
+  days(W3, 1)
+  for _ = 1, 100 do W3.run(1) end
+  local left = 0
+  for _, it in ipairs(own) do if it.flags.forbid then left = left + 1 end end
+  T.eq(left, 60)
+end)
+
 T.test('FR-25: starvation marks shrubs, staffs gatherers and planters, unforbids food, names who is cut off', function()
   local ctl = {}
   local W = world{cit = 6, food = 1, starve_days = 10, hungry = {[1] = 60000, [3] = 70000},

@@ -164,6 +164,8 @@ C.EVENTS = {
   MANAGER_OFFICE = {cls = 'B', by = 'economy'},
   -- BUG-032: military moved a squad station off a bridge footprint and its ring (bridge, chain, none, hold)
   STATION_MOVED = {cls = 'B', by = 'military'},
+  -- BUG-068: a lever pulled gate.noeffect_max times in a row without the bridge moving is parked (once per lever)
+  LEVER_NOEFFECT = {cls = 'B', by = 'gate'},
   -- C: log only
   SIEGE_STATUS = {cls = 'C', by = 'siege'}, SEASON = {cls = 'C', by = 'kern'},
   PROJECT_STAGE = {cls = 'C', by = 'runner'}, MODE = {cls = 'C', by = 'kern'},
@@ -248,14 +250,14 @@ C.ACT = {
 C.STATE_OWNERS = {
   ['v'] = 'kern', ['seq'] = 'kern', ['ev'] = 'kern', ['t.*'] = 'kern', ['mode'] = 'kern',
   ['save'] = 'kern', ['k.*'] = 'kern',
-  ['phase'] = 'runner', ['proj'] = 'runner', ['sched.*'] = 'runner',
+  ['phase'] = 'runner', ['proj'] = 'runner', ['sched.*'] = 'runner', ['adopt.*'] = 'runner',
   ['pop.cit'] = 'sense', ['pop.adults'] = 'sense', ['pop.soldiers'] = 'sense',
   ['pop.cap'] = 'readiness', ['pop.gate_cap'] = 'readiness', ['ready.*'] = 'readiness',
   ['stock.drink_d'] = 'economy', ['stock.food_d'] = 'economy', ['stock.meals'] = 'economy',
   ['stock.ore'] = 'economy', ['stock.bars'] = 'economy', ['stock.leather'] = 'economy', ['stock.metal'] = 'economy',
   ['stock.mood_miss'] = 'economy', ['stock.rock'] = 'economy', ['stock.rock_need'] = 'economy',
   ['stock.picks'] = 'economy', ['stock.pick_want'] = 'economy', ['stock.mshort'] = 'economy', ['stock.melt'] = 'economy',
-  ['stock.dwhy'] = 'economy', ['stock.hungry'] = 'economy',
+  ['stock.dwhy'] = 'economy', ['stock.hungry'] = 'economy', ['stock.dforb'] = 'economy', ['stock.fforb'] = 'economy',
   ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['labor.*'] = 'economy', ['orders.*'] = 'economy',
   ['threat.*'] = 'threat', ['bridges'] = 'gate', ['owners.*'] = 'arbiter',
   ['mil.*'] = 'military', ['trade.*'] = 'trade',
@@ -376,7 +378,8 @@ C.STATE_SPEC = obj({
                     metal = str(24), mood_miss = arr(str(12), 0, 8), rock = NAT, rock_need = NAT, picks = NAT,
                     pick_want = NAT, mshort = FLAG, melt = NAT,     -- Run 11: metal short, items marked for melting
                     dwhy = str(80),                 -- BUG-042: why the stills do not brew below the drink target
-                    hungry = NAT}),                 -- BUG-059: citizens past DF's "hungry" line (hunger_timer >= starve.hunger)
+                    hungry = NAT,                   -- BUG-059: citizens past DF's "hungry" line (hunger_timer >= starve.hunger)
+                    dforb = NAT, fforb = NAT}),     -- FR-76: drink / food units the census counts as forbidden
   care = obj({stressed_pct = PCT, naked = NAT, ghosts = NAT, corpses_old = NAT, tombs_free = NAT, moods = NAT},
              {coffins = obj({want = NAT, short = NAT, stock = NAT, order = NAT, proj = str(40)}),
               died = obj(nil, nil, NAT), tombs_locked = NAT,
@@ -391,6 +394,11 @@ C.STATE_SPEC = obj({
   orders = obj({n = NAT, bad = NAT, stuck = NAT}, {unval = NAT, uval_d = NAT, mgr = str(80), stuck_ws = NAT,
                                                    stuck_lab = NAT, ws = str(60), jam = str(80)}),
   threat = obj({vis = NAT, armed = FLAG}),
+  -- BUG-066 / FR-76 (runner): workshops that stand, adopted into the manifest (new) and pruned from it (gone); standing
+  -- stockpiles, wells, beds, doors (counts); rec = a reclaimed fort (>= runner.reclaim.min_ws adopted at the first
+  -- scan); miss = the mandatory workshops of a reclaimed fort that nothing builds yet
+  adopt = obj({ws = NAT, new = NAT}, {gone = NAT, stock = NAT, wells = NAT, beds = NAT, doors = NAT, rec = FLAG,
+                                      miss = arr(str(24), 0, 8)}),
   proj = arr({t = 'tup', items = {str(nil, nil, 'id'), str(24), PCT, str(40)}}, 0, 8),
   -- Run 11 siege 8: seal first (the leading open seal or plug: pieces open, projects it pauses, other open seals,
   -- stuck 1 = it built nothing for stuck_days, days) and the rebuild policy (citizens, its bounds, projects paused)

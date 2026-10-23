@@ -436,7 +436,12 @@ M.DEFAULTS = {
   -- the kernel disables it below `af_off_days` food days or when a slot it filled was emptied again, and enables it
   -- again from `af_on_days` food days after `af_hold_days`; 'off' = disabled at every boot; 'keep' = never touched
   farms = {per_day = 16, now_max = 24, autofarm = 'auto', af_off_days = 30, af_on_days = 90, af_hold_days = 14},
-  forbid = {per_day = 30},
+  forbid = {per_day = 30,
+            -- FR-76 (Run 12 Trussroads, a reclaimed fort: 3026 of 3058 drinks, all food and 61 barrels forbidden, the
+            -- status said "drink 46d!"): from burst_min forbidden drink + food units the items themselves are
+            -- unforbidden whatever their reason (the 30 a day and "food only in a starvation" kept them forbidden for
+            -- ever), burst_per_day a day, M.BURST_SLICE per frame; 0 = never a burst
+            burst_per_day = 400, burst_min = 100},
   -- FR-25: below `days` food days with citizens over `hunger` (DF's "hungry" is 50000)
   starve = {days = 0, hunger = 50000, plants_max = 200, plants_per_slice = 400, report_days = 2, gatherers = 4,
             planters = 4, plants = {'GRASS_WHEAT_CAVE', 'MUSHROOM_HELMET_PLUMP', 'POD_SWEET', 'BUSH_QUARRY',
@@ -686,7 +691,8 @@ local function gear_ok(it)
 end
 
 -- an item (or its container) to unforbid later (FR-23/FR-25/FR-50): ids only, the flags are read again then
-local FIX_MAX = 200
+M.BURST_SLICE = 25                -- FR-76: unforbids per frame in a burst (T.forbid)
+local FIX_MAX = 500                -- FR-76: a reclaimed fort's forbidden stock (T.forbid burst) needs more than 200
 local WEB_PROBES = 200               -- BUG-024: webs a census probes for the citizens' walk group
 local function fix(a, it, why)
   local id = it and it.id
@@ -7818,10 +7824,16 @@ end
 -- reachable tiles are unforbidden; in a starvation forbidden food too (FR-25)
 function T.forbid(K, c, r)
   if not HUNT_MODES[K.mode()] then return true end
+  local fc, dfl = c.forbid or M.DEFAULTS.forbid, M.DEFAULTS.forbid
   if not r.fx then
     r.fx, r.fx_n, r.fx_why = {}, 0, {}
+    -- FR-76: a fort whose stock was forbidden in bulk (a reclaimed one: 3026 of 3058 drinks) is not a player's choice
+    local inv = K.census.i or {}
+    local nf = (inv.drink_forb or 0) + (inv.food_forb or 0)
+    local bmin = math.tointeger(fc.burst_min) or dfl.burst_min
+    r.burst = bmin > 0 and nf >= bmin and nf or nil
     for _, e in ipairs(st.fix or {}) do
-      if e.why ~= 'food' or r.p.starve then r.fx[#r.fx + 1] = e end
+      if e.why ~= 'food' or r.p.starve or r.burst then r.fx[#r.fx + 1] = e end
     end
     -- BUG-023 (Run 11): forbidden picks/axes nobody carries, as many as members of a tool detail lack that tool while
     -- its jobs wait (tool_check's st.tneed)
@@ -7832,7 +7844,9 @@ function T.forbid(K, c, r)
       end
     end
   end
-  local lim = (c.forbid or M.DEFAULTS.forbid).per_day or 30
+  local lim = r.burst and (math.tointeger(fc.burst_per_day) or dfl.burst_per_day) or fc.per_day or 30
+  local per_call = r.burst and M.BURST_SLICE or 1               -- FR-76: item flags are cheap, a burst takes many a frame
+  local did = 0
   while #r.fx > 0 and r.fx_n < lim do
     local e = table.remove(r.fx, 1)
     local it = df.item.find(e.id)
@@ -7841,15 +7855,19 @@ function T.forbid(K, c, r)
       local x, y, z = dfhack.items.getPosition(it)
       if x and known_tile(K, x, y, z) and not far(K, x, y, z) then
         r.cmds = r.cmds + 1
+        did = did + 1
         if K.act.item_flag(e.id, 'forbid', false) then
           r.fx_n = r.fx_n + 1
           r.fx_why[e.why] = (r.fx_why[e.why] or 0) + 1
         end
-        if #r.fx > 0 and r.fx_n < lim then return false end
+        if #r.fx > 0 and r.fx_n < lim and did >= per_call then return false end
       end
     end
   end
-  if r.fx_n > 0 then K.log('info', 'unforbidden: %s', why_line(r.fx_why, 4)) end
+  if r.fx_n > 0 then
+    K.log('info', 'unforbidden: %s%s', why_line(r.fx_why, 4),
+          r.burst and string.format(' (a forbidden stock: %d drink + food units, up to %d a day)', r.burst, lim) or '')
+  end
   return true
 end
 
@@ -8364,6 +8382,9 @@ function M.state(K)
     -- BUG-042: why the stills do not brew while drink is below the target ('no validated brew order: manager office
     -- 18631 has no chair')
     if st.dwhy then r.stock.dwhy = tostring(st.dwhy):sub(1, 80) end
+    -- FR-76: drink and food units the census counts as forbidden (a reclaimed fort's stock: the status says so)
+    if (math.tointeger(inv.drink_forb) or 0) > 0 then r.stock.dforb = math.tointeger(inv.drink_forb) end
+    if (math.tointeger(inv.food_forb) or 0) > 0 then r.stock.fforb = math.tointeger(inv.food_forb) end
   end
   local od = st.orders
   if od then r.orders = {n = od.n or 0, bad = od.bad or 0, stuck = od.stuck or 0} end   -- FR-01/FR-39

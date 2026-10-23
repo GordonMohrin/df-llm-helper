@@ -1966,7 +1966,8 @@ end
 ---------------------------------------------------------------- the act table K.act
 -- env = {who = fn() -> module|nil, tick = fn() -> abs tick, allowlist = fn() -> doc,
 --        log_cmd = fn(origin, what, args_json, result), fail = fn(fn, err, module),
---        optional: clock = fn() -> ms (the cost clock), on_cost = fn(fn, ms, args) after each call (BUG-039)}
+--        optional: clock = fn() -> ms (the cost clock), on_cost = fn(fn, ms, args) after each call (BUG-039);
+--        fail's 4th argument (BUG-068) is the command line of a failed `run`}
 function A.new(env)
   local state = {own_jobs = {}, who = env.who, allowlist = env.allowlist}
   -- the cost clock in ms (kern's: os.clock in game, the mock clock in tests); os.clock without one
@@ -1992,14 +1993,25 @@ function A.new(env)
         local c0 = clock()
         local pok, a, b = pcall(f, ...)
         cost = math.floor(clock() - c0 + 0.5)
-        if not pok then ok, res = false, tostring(a)
+        -- BUG-068 (Run 12 reclaim, `act.run failed for baseline: nil`): error(nil) leaves tostring(nil) = 'nil' as the
+        -- reason; say so, and ACT_FAIL names the command line (below)
+        if not pok then ok, res = false, a == nil and 'raised an error without a message' or tostring(a)
         else ok, res = a and true or false, b end
       end
       local result = ok and 'ok' or ('ERR ' .. tostring(res))
       -- BUG-039: kern keeps the slowest act call of the running module call (its huge-step line names it)
       if cost and env.on_cost then pcall(env.on_cost, fn, cost, args) end
       env.log_cmd(who or 'kern', 'act.' .. fn, describe(fn, args, cost), result)
-      if not ok then env.fail(fn, trim(res, 160), who or 'kern') end
+      if not ok then
+        -- BUG-068: the command line of a failed `run` (<= 80 bytes), so the ACT_FAIL says which command it was
+        local what
+        if fn == 'run' then
+          local parts = {}
+          for i = 1, args.n do parts[i] = tostring(args[i]) end
+          what = trim(table.concat(parts, ' '), 80)
+        end
+        env.fail(fn, trim(res, 160), who or 'kern', what)
+      end
       return ok, res
     end
   end

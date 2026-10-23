@@ -95,7 +95,7 @@ ACT = {
 
 STATE_OWNERS = {
     "v": "kern", "seq": "kern", "ev": "kern", "t.*": "kern", "mode": "kern", "save": "kern", "k.*": "kern",
-    "phase": "runner", "proj": "runner", "sched.*": "runner",
+    "phase": "runner", "proj": "runner", "sched.*": "runner", "adopt.*": "runner",
     "pop.cit": "sense", "pop.adults": "sense", "pop.soldiers": "sense",
     "pop.cap": "readiness", "pop.gate_cap": "readiness", "ready.*": "readiness",
     "stock.drink_d": "economy", "stock.food_d": "economy", "stock.meals": "economy",
@@ -103,6 +103,7 @@ STATE_OWNERS = {
     "stock.hungry": "economy", "stock.mood_miss": "economy", "stock.rock": "economy", "stock.rock_need": "economy",
     "stock.picks": "economy",
     "stock.pick_want": "economy", "stock.mshort": "economy", "stock.melt": "economy", "stock.dwhy": "economy",
+    "stock.dforb": "economy", "stock.fforb": "economy",
     "stock.hosp_water": "care", "care.*": "care", "labor.*": "economy", "orders.*": "economy",
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
     "clock.*": "arbiter", "alarm.*": "reflex", "lever.*": "gate",
@@ -645,14 +646,19 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "READY_CHANGE": ("B", "readiness", _d(opt="from:i to:i fail:sa")),
     "POPCAP": ("B", "readiness", _d("cap:i", "why:s")),
     "AUDIT": ("B", "readiness", _d(opt="ok:f fails:sa min_traps:i")),
-    "PROJECT_DONE": ("B", "runner", _d("proj:s", "tpl:s walled:sa")),       # Run 11: walled as PROJECT_BLOCKED
-    "PROJECT_REQUEST": ("B", "any", _d("tpl:s", "n:i why:s bars:i short:i")),
+    # FR-76: pre = the stage before this one that never ran (a follow-up stage finished without its predecessor: not
+    # counted as delivered)
+    "PROJECT_DONE": ("B", "runner", _d("proj:s", "tpl:s walled:sa pre:i")),       # Run 11: walled as PROJECT_BLOCKED
+    # FR-76: types = the mandatory workshops a reclaimed fort lacks (why mandatory)
+    "PROJECT_REQUEST": ("B", "any", _d("tpl:s", "n:i why:s bars:i short:i types:sa")),
     "PHASE": ("B", "runner", _d(opt="from:s to:s")),
     "PAUSE": ("B", "arbiter", _d("on:f", "by:s ttl:i")),
     "DEATH": ("B", "care", _d(opt="unit:i citizen:f cause:s src:s why:s found:f dtype:s by:s killer:i mood:s "
                                   "thirst:i hunger:i patient:f pos:p job:s revised:f bridge:s")),
     "DEATH_CLUSTER": ("B", "care", _CLUSTER),
-    "ACT_FAIL": ("B", "kern", _d("fn:s", "err:s module:s")),
+    # BUG-068: cmd = the command line of a failed act.run (<= 80 bytes), err 'raised an error without a message' when
+    # the command raised error(nil)
+    "ACT_FAIL": ("B", "kern", _d("fn:s", "err:s module:s cmd:s")),
     # BUG-059: kind = workshop (a mandatory workshop is missing), worker (nobody holds the labor), input
     "ORDER_STUCK": ("B", "economy", _d("order:i job:s why:s", "n:i days:i dropped:f kind:s")),
     "JOBS_SUSPENDED": ("B", "economy", _d(opt="suspended:i released:i kept:i planned:i why:s resuspended:i "
@@ -680,6 +686,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # fort can make (pieces 'door x1, wall x2'; why = the reasons 'no rock, no logs'; rock = free stone, logs, n = the
     # pieces); once per set of kinds and reasons (util/cadence)
     "MATERIAL_SHORT": ("B", "economy", _d("pieces:s why:sa", "n:i rock:i logs:i boulders:i")),
+    # BUG-068: lever `lever` of `bridge` was pulled `pulls` times without the bridge moving (it stays `state`); no pull
+    # for `wait` ticks; worker = how many of those pulls a worker took (0: DF dropped every job unclaimed)
+    "LEVER_NOEFFECT": ("B", "gate", _d("bridge:s lever:i", "pulls:i state:s wait:i worker:i")),
     # BUG-042: the manager's office zone without its chair/table (he validates no work order): what economy placed
     # (`placed` 'chair at x,y,z, table at x,y,z', the repair project) or why it could not
     "MANAGER_OFFICE": ("B", "economy", _d("zone:i why:s", "chair:i table:i placed:s proj:s")),
@@ -825,7 +834,9 @@ STATE = Obj(
                            # BUG-042: why the stills do not brew while drink is below the plan's target
                            "dwhy": Str(maxbytes=80),
                            # BUG-059: citizens past DF's "hungry" line (hunger_timer >= starve.hunger)
-                           "hungry": NAT}),
+                           "hungry": NAT,
+                           # FR-76: drink / food units the census counts as forbidden (a reclaimed fort's stock)
+                           "dforb": NAT, "fforb": NAT}),
          "care": Obj(req={"stressed_pct": PCT, "naked": NAT, "ghosts": NAT, "corpses_old": NAT,
                           "tombs_free": NAT, "moods": NAT},
                      # FR-61 coffin provisioner: wanted free coffins, missing slots, coffin items, open orders, project
@@ -848,6 +859,12 @@ STATE = Obj(
                        opt={"unval": NAT, "uval_d": NAT, "mgr": Str(maxbytes=80), "stuck_ws": NAT, "stuck_lab": NAT,
                             "ws": Str(maxbytes=60), "jam": Str(maxbytes=80)}),
          "threat": Obj(req={"vis": NAT, "armed": FLAG}),
+         # BUG-066 / FR-76 (runner): workshops that stand, adopted into the manifest (new) and pruned from it (gone);
+         # standing stockpiles, wells, beds, doors (counts); rec = a reclaimed fort (>= runner.reclaim.min_ws adopted at
+         # the first scan); miss = the mandatory workshops of a reclaimed fort that nothing builds yet
+         "adopt": Obj(req={"ws": NAT, "new": NAT},
+                      opt={"gone": NAT, "stock": NAT, "wells": NAT, "beds": NAT, "doors": NAT, "rec": FLAG,
+                           "miss": Arr(Str(maxbytes=24), hi=8)}),
          "proj": Arr(Tup([ID, Str(maxbytes=24), PCT, Str(maxbytes=40)]), hi=8),
          # Run 11 siege 8: seal first (the leading open seal or plug: pieces open, projects it pauses, other open seals,
          # stuck 1 = it built nothing for stuck_days, days) and the rebuild policy (citizens, its bounds, projects paused)
@@ -994,6 +1011,9 @@ MANIFEST = named("manifest", Obj(
          "rooms": Arr(Obj(req={"id": ID, "tpl": TPL, "use": Str(enum=["used", "utility"]), "bbox": BBOX,
                               "tier": NAT}), hi=200),
          "workshops": Arr(Obj(req={"type": Str(maxbytes=40), "pos": POS}), hi=100),
+         # BUG-066: workshops that were in the manifest and no longer stand (the kernel's daily comparison with the
+         # building vectors); w = the wall clock (epoch s) when it left: a bp file written after it is a rebuild
+         "gone": Arr(Obj(req={"type": Str(maxbytes=40), "pos": POS}, opt={"w": NAT}), hi=50),
          # Run 11: tiles where a dig broke into a cavern (the runner's BREACH_STOP cavern/cavern_lake and shaft check):
          # the explore ranking keeps every shaft above their levels
          "caverns": Arr(POS, hi=32),

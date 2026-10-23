@@ -1093,9 +1093,12 @@ T.test('phases: workshops pass through the manifest or a built workshop of the t
   local W = fresh{tag = 'wsph', phases = ph, persist = {manifest = {v = 2, workshops = {{type = 'Masons', pos = {1, 2, 3}}}}}}
   df.workshop_type = {Masons = 2, Jewelers = 4, [2] = 'Masons', [4] = 'Jewelers'}
   df.furnace_type = {}
+  local other = df.global.world.buildings.other
+  -- BUG-066: the manifest's Masons stands (the daily scan drops a manifest workshop nothing stands on)
+  other.WORKSHOP_ANY:insert('#', {type = 2, x1 = 0, y1 = 1, x2 = 2, y2 = 3, z = 3,
+                                  getBuildStage = function() return 1 end, getMaxBuildStage = function() return 1 end})
   H.runs(W, 1)
   T.eq(W.state().phase, 'P0')
-  local other = df.global.world.buildings.other
   other.WORKSHOP_ANY:insert('#', {type = 4, getBuildStage = function() return 0 end, getMaxBuildStage = function() return 1 end})
   H.runs(W, 1)
   T.eq(W.state().phase, 'P0', 'an unbuilt jeweler does not count')

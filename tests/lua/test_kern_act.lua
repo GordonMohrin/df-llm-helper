@@ -31,6 +31,24 @@ local AL = {v = 2, armok_exceptions = {}, blocked = {'fastdwarf', 'caravan exten
               ['prioritize'] = {rw = 'w', args = {'', '-a defaults'}},
             }}
 
+T.test('BUG-068: a run whose command raises error(nil) fails as "raised an error without a message", and the failure ' ..
+       'carries the command line (Run 12 reclaim: `act.run failed for baseline: nil`)', function()
+  H.world{tag = 'runnil'}
+  local fails = {}
+  local api = actlib.new{
+    who = function() return 'baseline' end,
+    allowlist = function() return AL end,
+    log_cmd = function() end,
+    fail = function(fn, err, module, what) fails[#fails + 1] = {fn, err, module, what} end,
+  }
+  local old = dfhack.run_command_silent
+  dfhack.run_command_silent = function() error(nil) end
+  local ok, err = api.run('control-panel', 'enable', 'timestream')
+  dfhack.run_command_silent = old
+  T.eq({ok, err}, {false, 'raised an error without a message'})
+  T.eq(fails, {{'run', 'raised an error without a message', 'baseline', 'control-panel enable timestream'}})
+end)
+
 T.test('allowlist: *, **, "", empty args, blocked prefixes and flags', function()
   local function ok(cmd, ...) return (actlib.allowed(AL, cmd, {...})) end
   T.ok(ok('control-panel', 'enable', 'autochop'))
