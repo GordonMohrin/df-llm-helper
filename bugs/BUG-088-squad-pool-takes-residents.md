@@ -1,5 +1,5 @@
 # BUG-088 The recruit list and the militia cohort take residents, whom the squads screen does not list
-Status: fixed in the integration audit J1 commit (offline, live-untested): `military.recruits` and the rotation's pool
+Status: fixed in fb84d83 (offline, live-untested): `military.recruits` and the rotation's pool
 (`rot_pool`) take adult citizens only (`dfhack.units.isCitizen`); residents stay in the census and in every count
 Severity: low (fair play: the kernel enlists a unit the squads screen offers no player; DF may refuse the add, which costs a
 swap, a leaver gone and a month of passing the unit over)

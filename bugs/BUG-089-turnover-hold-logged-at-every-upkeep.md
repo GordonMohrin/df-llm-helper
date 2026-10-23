@@ -1,5 +1,5 @@
 # BUG-089 The turnover's hold for the army's worn % is logged at every upkeep the % moves
-Status: fixed in the integration audit J1 commit (offline, live-untested): the log line of a hold is keyed by its reason
+Status: fixed in fb84d83 (offline, live-untested): the log line of a hold is keyed by its reason
 without the numbers, once per close and reason; the state still shows the current %
 Severity: low (noise: kern.log line every 3,600 ticks, 8 real seconds at ~450 ticks a second, for up to nine months of
 game time)

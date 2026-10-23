@@ -1,5 +1,5 @@
 # BUG-087 military.danger counts every hostile in sight, also the ones reflex cleared and wildlife out of reach: the unstick, the drill and the militia turnover wait for them for ever
-Status: fixed in the integration audit J1 commit (offline, live-untested): `military.danger` takes threat's reading of the
+Status: fixed in fb84d83 (offline, live-untested): `military.danger` takes threat's reading of the
 census (`threat.assess`), so a hostile reflex cleared (BUG-065's released harmless intruder, an invader whose lockdown
 expired far) and wildlife out of reach no longer hold the unstick, the automatic drill and the FR-79 turnover; a great
 danger, an undead, an invader not cleared, a hostile inside or in reach and a hostile the census list does not show still do
