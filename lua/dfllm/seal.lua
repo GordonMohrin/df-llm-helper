@@ -65,7 +65,18 @@
 -- (not a box over hidden rock), burrow sizes are cached and a periodic audit with unchanged inputs is skipped.
 -- BUG-026: a background job waits while another module holds a busy kernel boost (K.busy(): trade with the trade screen
 -- open); urgent jobs run as always.
+-- BUG-096/BUG-097/FR-80 (Run 14 note 70: Kern+ shrank to about one tile and Tiefe+ vanished, nobody saw it): the burrow guard
+--   bguard    once a game day (and at least burrow.guard.every_s real seconds apart) and at a load (background job) it reads Kern+ and the refuge (blocks, tiles, id; the tiles as
+--             runs) and keeps the last good reading in the persist key `burrows`. A burrow that lost more than
+--             burrow.guard.shrink_pct % or is gone opens an episode: BURROW_SHRUNK (A, once, util/cadence; cause `load` when
+--             it is the first reading after a boot), an R0 blocker (readiness burrow_lost) when the lost tiles held a
+--             well or the refuge, and, in PEACE/RECOVERY, the missing tiles of the last good reading are painted again
+--             (act.burrow_tiles; burrow.guard.repair_per_day a day, the ones near the hospital, wells and refuge first,
+--             never a hidden tile, a gone burrow created again under its name only when the tile set is known, else
+--             DECISION_NEEDED burrow_gone). BURROW_REPAIRED (B) per day. Lever/interior burrows are painted by seal itself.
+--             The code is in lua/dfllm/burrowkeep.lua (rules) and the BG table below (reads and paints)
 local CAD = require('dfllm.util.cadence')   -- BUG-008: a standing class-A condition is announced again only with news
+local BK = require('dfllm.burrowkeep')      -- BUG-096/FR-80: burrow guard rules (library, no module)
 local M = {name = 'seal', every = {ticks = 50}, verbs = {}, on = {}, inspect = {}}
 
 local DAY = 1200
@@ -155,6 +166,11 @@ M.CFG = {
   -- is a stockpile of this name with tiles on the refuge burrow (dfpilot/bp/rooms.py refuge_drink, DRINK_PILE); an
   -- audit reads at most store_piles such piles and store_tiles tiles of each
   store = 'dfllm-drink', store_piles = 4, store_tiles = 100,
+  -- BUG-096/FR-80: the burrow guard reads Kern+ and the refuge once a day and at least burrow.guard.every_s real seconds apart
+  -- (bg_boot ticks after a boot; a burrow that could not be read is tried again after bg_retry), keeps at most bg_runs runs
+  -- per burrow (burrowkeep.RUNS_MAX), charges bg_block work units for a block (256 tile reads), paints paint_chunk tiles per
+  -- frame. The knobs are config/baseline.json burrow.guard (burrowkeep.conf)
+  bg_boot = 100, bg_retry = 600, bg_runs = BK.RUNS_MAX, bg_block = 256,
 }
 local CFG = M.CFG
 
@@ -527,7 +543,7 @@ end
 
 ---------------------------------------------------------------- scheduling
 -- priority among urgent jobs, then among background ones
-local ORDER = {'perim', 'gates', 'seal', 'split', 'rpath', 'quick', 'audit', 'items', 'scan', 'paint', 'edges'}
+local ORDER = {'perim', 'gates', 'seal', 'split', 'rpath', 'quick', 'audit', 'items', 'scan', 'paint', 'edges', 'bguard'}
 
 -- one pending run per job: the earliest tick and the strongest reason (an event beats 'periodic'/'retire', a
 -- post-siege diff beats everything), so no request is lost
@@ -3177,6 +3193,7 @@ local function publish(K)
       if n then mem.pub.ref.ws = {n.src[1], n.src[2], n.src[3]} end
     end
   end
+  mem.pub.bg = M.bg_state(K)                    -- BUG-096: the open burrow episode (status 'burrows ...'), nil when none
 end
 
 -- Run 11 (siege 8, y441: the refuge switched between Tiefe+ and Kern+ during the fight; every switch walks the
@@ -4171,6 +4188,357 @@ local function watch(K, t)
   end
 end
 
+---------------------------------------------------------------- BUG-096/BUG-097, FR-80: the burrow guard
+-- Run 14 (note 70, y586): Kern+ held about one tile and Tiefe+ was gone from plotinfo.burrows.list; the hospital zone lay
+-- outside the alert burrow for the fourth time, and the fort had no record of when or why. Nothing in this repository
+-- shrinks a burrow by itself (docs: bugs/BUG-096): the writers are quickfort `e` cells and the undo of a `create=true`
+-- cell, both limited to a project's own rectangle; what took the rest is DF, DFHack or a hand outside the kernel. So the
+-- kernel watches. Once a game day and at a load (job bguard, background) it reads Kern+ and the refuge: tiles, blocks and
+-- id, and the tiles as runs (burrowkeep.pack). The last good reading is the baseline (persist key `burrows`, owner seal).
+-- A drop below it by more than burrow.guard.shrink_pct %, or a burrow that is gone, opens an episode (r.ep) that keeps the
+-- baseline: BURROW_SHRUNK (A, once per episode and for news: the lost tiles held a well or the refuge, util/cadence), an R0
+-- blocker for those two (readiness burrow_lost; the hospital has hospital_out), and the repair: in PEACE/RECOVERY the baseline
+-- tiles the burrow lacks are painted again with act.burrow_tiles (the burrows screen's paint), at most
+-- burrow.guard.repair_per_day a game day, the runs near the hospital, the wells and the refuge anchor first, never a
+-- hidden tile. A burrow that is gone is made again under its name only when its tile set is known; else DECISION_NEEDED
+-- burrow_gone. Never in SIEGE/BREACH/ALERT or a lockdown (a tile added outside the walls would pull the citizens there).
+-- The episode ends when nothing is left to paint, when the burrow is back above the line without a repair possible, or
+-- settle_days after the last progress (the loss is taken as the new baseline). Persisted: tiles, blocks, id and runs per
+-- burrow; for a fort of 80 some thousand runs, about 14 bytes each (a cap of RUNS_MAX = 8000 runs per burrow, ~110 KB).
+local BG = {}
+
+-- the managed burrows: Kern+ and the refuge by the manifest roles (seal's lever and interior burrows are painted whole by
+-- seal itself, a burrow of the player is not ours)
+function BG.names(K)
+  local kern, refuge = burrow_names(K)
+  return refuge ~= kern and {kern, refuge} or {kern}, kern, refuge
+end
+
+function BG.conf(K) return BK.conf(type(K.cfg) == 'table' and K.cfg.baseline or nil) end
+
+function BG.adopted(K)
+  local ok, mk = pcall(K.persist.get, 'marker')
+  return ok and type(mk) == 'table' and int(mk.adopted) or 0
+end
+
+function BG.save(K) K.persist.set('burrows', mem.bgr) end
+
+-- one burrow read: {exists = false} when it is not in the list, false when it cannot be read now (blocks changed under
+-- the read), else {exists, id, n (tiles), nb (blocks), k (runs, flat), runs, part}
+function BG.read(name)
+  local b = burrow(name)
+  if not b then return {exists = false, n = 0, nb = 0} end
+  local blocks = block_list(name)
+  if not blocks then return false end
+  spend(1)
+  local rows, nb, id = {}, #blocks, int(b.id) or -1
+  for i = 1, nb do
+    local bb = burrow(name)                                        -- never keep a DF pointer across frames
+    local blk = bb and blocks[i]
+    local mp = blk and blk.map_pos
+    if not mp then return false end
+    for y = 0, 15 do
+      local x0
+      for x = 0, 16 do
+        local on = x < 16 and dfhack.burrows.isAssignedBlockTile(bb, blk, x, y)
+        if on then x0 = x0 or x
+        elseif x0 then
+          rows[#rows + 1] = {mp.z, mp.y + y, mp.x + x0, mp.x + x - 1}
+          x0 = nil
+        end
+      end
+    end
+    spend(CFG.bg_block)
+  end
+  local flat, n, nr, part = BK.pack(rows, CFG.bg_runs)
+  return {exists = true, id = id, n = n, nb = nb, k = flat, runs = nr, part = part}
+end
+
+-- the points whose runs are painted first: the hospital zones outside both burrows (water), the accepted water sources,
+-- the refuge anchor of the manifest
+function BG.points(K)
+  local pts = {}
+  local okh, ho = K.call('water', 'hospital_out')
+  for _, z in ipairs(okh and type(ho) == 'table' and type(ho.zones) == 'table' and ho.zones or {}) do
+    if int(z.x) and int(z.y) and int(z.z) then pts[#pts + 1] = {z.x, z.y, z.z} end
+  end
+  local wv = K.view().water
+  for _, s in ipairs(type(wv) == 'table' and type(wv.src) == 'table' and wv.src or {}) do
+    if type(s) == 'table' and int(s[1]) and int(s[2]) and int(s[3]) then pts[#pts + 1] = {s[1], s[2], s[3]} end
+  end
+  local a = type(K.manifest().refuge) == 'table' and K.manifest().refuge.anchor
+  if type(a) == 'table' and int(a[1]) and int(a[2]) and int(a[3]) then pts[#pts + 1] = {a[1], a[2], a[3]} end
+  return pts
+end
+
+-- what the lost tiles held: 'well' (an accepted source of water's state lay on the baseline tiles and is off the burrow
+-- now), 'refuge' (the refuge burrow itself, or the manifest refuge anchor), 'hospital' (water: zones outside Kern+/the
+-- refuge; readiness has its own blocker hospital_out for it). b = the burrow now (nil: gone)
+function BG.crit(K, name, refuge, r, b)
+  local crit = {}
+  local function lost(x, y, z) return BK.has(r.k, x, y, z) and not (b and in_burrow(b, x, y, z)) end
+  local wv = K.view().water
+  for _, s in ipairs(type(wv) == 'table' and type(wv.src) == 'table' and wv.src or {}) do
+    if type(s) == 'table' and int(s[1]) and int(s[2]) and int(s[3]) and lost(s[1], s[2], s[3]) then
+      crit[#crit + 1] = 'well'
+      break
+    end
+  end
+  local a = type(K.manifest().refuge) == 'table' and K.manifest().refuge.anchor
+  if name == refuge or (type(a) == 'table' and int(a[1]) and int(a[2]) and int(a[3]) and lost(a[1], a[2], a[3])) then
+    crit[#crit + 1] = 'refuge'
+  end
+  local okh, ho = K.call('water', 'hospital_out')
+  if okh and type(ho) == 'table' and (int(ho.n) or 0) > 0 then crit[#crit + 1] = 'hospital' end
+  return crit
+end
+
+local function bg_assigned(name)
+  local b, fr
+  return function(x, y, z)
+    spend(1)
+    if b == nil or fr ~= mem.fr then b, fr = burrow(name), mem.fr end   -- a DF pointer is fetched again after a frame boundary
+    return b ~= nil and in_burrow(b, x, y, z)
+  end
+end
+
+-- paints `list` ({x, y, z}) into burrow `name` in chunks (a burrow that is gone is created with the first one); returns the
+-- tiles added and the first refusal
+function BG.paint(K, name, list)
+  local n, err = 0, nil
+  local i = 1
+  while i <= #list do
+    local chunk = {}
+    for j = i, math.min(#list, i + CFG.paint_chunk - 1) do chunk[#chunk + 1] = list[j] end
+    i = i + #chunk
+    local ok, r = K.act.burrow_tiles(name, chunk, burrow(name) == nil)
+    if not ok then err = tostring(r); break end
+    n = n + (int(r) or 0)
+    spend(CFG.work)                                          -- one chunk per frame
+  end
+  return n, err
+end
+
+local KIND_TXT = {well = 'a well', refuge = 'the refuge', hospital = 'the hospital'}
+
+function BG.text(name, r, ep, st_txt)
+  local lost = r.base - ep.now
+  local what
+  if ep.gone == 1 then what = string.format('%s is gone (was %d tiles in %d blocks, %s)', name, r.base, ep.nbw, ep.cause)
+  else
+    what = string.format('%s lost %d of %d tiles (%d%%; %d -> %d blocks, %s)', name, lost, r.base,
+                         r.base > 0 and (lost * 100 // r.base) or 0, ep.nbw, ep.nb, ep.cause)
+  end
+  local held = {}
+  for _, c in ipairs(ep.crit) do held[#held + 1] = KIND_TXT[c] or c end
+  if #held > 0 then what = what .. ': it held ' .. table.concat(held, ', ') end
+  return trunc(what .. '; ' .. st_txt, 200)
+end
+
+local function bg_status(cfg, can, quiet)
+  if cfg.repair_per_day <= 0 then return 'repair off' end
+  if not can then return mem.bg_reset and 'list empty' or 'tiles unknown' end
+  if not quiet then return 'waits for peace' end
+  return 'repairing'
+end
+
+-- an episode closes: how = 'repaired' (the baseline stands), 'regrown' | 'settled' (the reading is the new baseline)
+function BG.close(K, name, r, rd, how)
+  local ep = r.ep
+  r.ep = nil
+  r.cad = CAD.quiet(r.cad)
+  if how ~= 'repaired' then
+    if rd.exists then
+      r.base, r.nb, r.id, r.k, r.kp = rd.n, rd.nb, rd.id, rd.k, rd.part and 1 or nil
+      if #r.k == 0 then r.k = nil end
+    else mem.bgr.b[name] = nil end                             -- a burrow that stays gone is no longer watched
+  end
+  K.log(how == 'settled' and 'warn' or 'info', 'seal: burrow %s: episode over (%s) after %d repainted tiles, baseline %d tiles',
+        name, how, ep.fx, rd.exists and r.base or 0)
+  mem.bsize[name] = nil
+  due('audit', now_t(K), 'burrow ' .. how)
+end
+
+-- one reading of one burrow against its record (BK.judge)
+function BG.apply(K, name, refuge, rec, rd, cfg, after_load)
+  local t = now_t(K)
+  local r = rec.b[name]
+  local kind = BK.judge(r, rd, cfg.shrink_pct)
+  if kind == 'none' then return end
+  if kind == 'first' or kind == 'ok' then
+    local k = rd.n > 0 and rd.k or nil
+    if not r or r.base ~= rd.n or r.nb ~= rd.nb or r.id ~= rd.id or not BK.same(r.k, k) then
+      rec.b[name] = {base = rd.n, nb = rd.nb, id = rd.id, t = t, k = k, kp = rd.part and 1 or nil, cad = r and r.cad}
+      mem.bg_dirty = true
+    else r.t = t end
+    return
+  end
+  if kind == 'shrunk' or kind == 'gone' then
+    r.ep = {t = t, was = r.base, now = rd.n, nbw = r.nb, nb = rd.nb, cause = after_load and 'load' or 'runtime',
+            gone = (not rd.exists) and 1 or nil, day = -1, fd = 0, fx = 0, z = t, crit = {}, rid = r.id,
+            id = rd.exists and rd.id or nil}
+    mem.bsize[name] = nil
+    mem.bg_dirty = true
+  end
+  local ep = r.ep
+  ep.now, ep.nb, ep.gone = rd.n, rd.nb, (not rd.exists) and 1 or nil
+  local above = rd.exists and not BK.shrunk(r.base, rd.n, cfg.shrink_pct)
+  local b = rd.exists and burrow(name) or nil
+  ep.crit = above and {} or BG.crit(K, name, refuge, r, b)
+  -- the repair: PEACE/RECOVERY only (a tile added in a fight may lie outside the walls), a hidden tile never
+  local mode = K.mode()
+  local quiet = (mode == 'PEACE' or mode == 'RECOVERY') and not held(K)
+  -- plotinfo.burrows.list empty: every burrow is gone, not the two of ours (a reclaimed or retired fort starts with none):
+  -- the record may be another fort's layout, so the kernel asks instead of painting it
+  local can = cfg.repair_per_day > 0 and r.k ~= nil and not mem.bg_reset
+  ep.st = bg_status(cfg, can, quiet)
+  if can and not quiet then ep.z = t end                     -- a fight or a lockdown does not run the settle clock out
+  -- the announcement: the first of an episode at once, then only news (a well or the refuge among the lost tiles)
+  local toks = {ep.gone == 1 and 'gone' or 'shrunk'}
+  for _, c in ipairs(ep.crit) do toks[#toks + 1] = c end
+  local now = K.now()
+  if CAD.due(r.cad, now, {name}, toks, {ticks = DAY}) then
+    local fix = not can and (cfg.repair_per_day <= 0 and 'off' or 'ask') or (quiet and 'repair' or 'wait')
+    local txt = BG.text(name, r, ep, fix == 'repair' and string.format('repairing, %d tiles a day', cfg.repair_per_day)
+                        or (fix == 'wait' and ('repair waits for peace (' .. mode .. ')')
+                            or (fix == 'off' and 'repair off (burrow.guard.repair_per_day 0)'
+                                or 'its tile set is not known')))
+    -- what decides the cause later (docs: bugs/BUG-096): how many burrows the list holds and the id the next one gets (ids
+    -- below the old ones: the list was reset, a reclaim; the old id gone and next_id grown: a burrow was deleted)
+    local okl, nl, nx = pcall(function()
+      local l = df.global.plotinfo.burrows
+      return #l.list, int(l.next_id)
+    end)
+    K.emit('BURROW_SHRUNK', 'A', txt, {burrow = name, was = r.base, now = rd.n, cause = ep.cause, nbw = ep.nbw, nb = rd.nb,
+                                       id = rd.exists and rd.id or -1, rid = r.id, gone = rd.exists and 0 or 1,
+                                       pct = r.base > 0 and ((r.base - rd.n) * 100 // r.base) or 0,
+                                       crit = #ep.crit > 0 and ep.crit or nil, fix = fix, rep = cfg.repair_per_day,
+                                       nl = okl and nl or nil, nx = okl and nx or nil})
+    K.log('warn', 'seal: %s', txt)
+    r.cad = CAD.mark(now, {name}, toks)
+    mem.bg_dirty = true
+  end
+  local painted, left, finished = 0, nil, false
+  mem.bg_skip = 0
+  if can and quiet then
+    local day = t // DAY
+    if ep.day ~= day then ep.day, ep.fd = day, 0 end
+    local cap = cfg.repair_per_day - ep.fd
+    if cap > 0 then
+      local miss, _, complete = BK.missing(r.k, bg_assigned(name), cap, BG.points(K), BK.NEAR)
+      local todo, skipped = {}, 0
+      for _, p in ipairs(miss) do
+        spend(1)
+        if rev(p[1], p[2], p[3]) then todo[#todo + 1] = p else skipped = skipped + 1 end
+      end
+      local err
+      painted, err = BG.paint(K, name, todo)
+      if err then K.log('warn', 'seal: burrow %s: painting %d tiles failed: %s', name, #todo, err) end
+      ep.fd, ep.fx = ep.fd + painted, ep.fx + painted
+      if painted > 0 then ep.z = t end
+      mem.bsize[name] = nil
+      if painted > 0 then due('audit', t, 'burrow painted') end
+      finished = complete and not err and painted == #todo
+      mem.bg_skip = skipped
+      left = finished and 0 or math.max(0, r.base - rd.n - painted)
+      if painted > 0 or skipped > 0 then
+        K.log('info', 'seal: burrow %s: %d of %d missing tiles painted again%s (%d today, %d in all)', name, painted,
+              #miss, skipped > 0 and string.format(', %d hidden left out', skipped) or '', ep.fd, ep.fx)
+      end
+      if painted > 0 then
+        K.emit('BURROW_REPAIRED', 'B', trunc(string.format('%s: %d tiles painted again (%d today), %s', name, painted, ep.fd,
+               finished and 'nothing left to paint' or string.format('about %d left', left)), 200),
+               {burrow = name, n = painted, was = r.base, now = rd.n + painted, left = left, done = finished and 1 or 0,
+                day = ep.fd})
+      end
+    end
+  end
+  if not can and cfg.repair_per_day > 0 and not ep.ask and not above then
+    ep.ask = 1                                               -- no tile set to paint from: ask once per episode
+    local q = trunc(string.format(mem.bg_reset and '%s %s and no burrow is left at all (a reclaimed fort?): the kernel does '
+                                  .. 'not paint an old layout; paint it in the burrows screen (hospital, wells, refuge)'
+                                  or '%s %s and the kernel has no record of its tiles: paint it again in the burrows screen '
+                                  .. '(the hospital, the wells, the refuge) or place the rooms again', name,
+                                  rd.exists and 'shrank' or 'is gone'), 200)
+    K.emit('DECISION_NEEDED', 'A', q, {id = 'burrow_gone', q = q, burrow = name, was = r.base})
+  end
+  -- the end of the episode
+  if finished then BG.close(K, name, r, rd, (mem.bg_skip or 0) == 0 and 'repaired' or 'partial')
+  elseif not (can and quiet) and above then BG.close(K, name, r, rd, 'regrown')
+  elseif t - ep.z >= cfg.settle_days * DAY then BG.close(K, name, r, rd, 'settled') end
+  mem.bg_dirty = true
+end
+
+local function job_bguard(K, why)
+  local cfg = BG.conf(K)
+  local t = now_t(K)
+  mem.bg_nt, mem.bg_nw = t + DAY, ((K.now().ms or 0) // 1000) + cfg.every_s      -- the next reading: a day and every_s seconds on
+  if not cfg.on then return end
+  local okm, nmb = pcall(function() local mb = df.global.world.map.map_blocks; return mb and #mb end)
+  if okm and nmb == 0 then mem.bg_nt, mem.bg_nw = t + CFG.bg_retry, 0; return end    -- the map is not there yet
+  local names, _, refuge = BG.names(K)
+  local okl, nl = pcall(function() return #df.global.plotinfo.burrows.list end)
+  mem.bg_reset = okl and nl == 0
+  local ok_n, retry = 0, false
+  for _, name in ipairs(names) do
+    local rd = BG.read(name)
+    if rd == false then
+      retry = true
+      if not mem.bg_warned then                          -- once a boot: a guard that never reads would be silent otherwise
+        mem.bg_warned = true
+        K.log('warn', 'seal: burrow %s cannot be read now (its blocks changed under the read, or a block has no position): '
+              .. 'again in %d ticks', name, CFG.bg_retry)
+      end
+    else
+      ok_n = ok_n + 1
+      BG.apply(K, name, refuge, mem.bgr, rd, cfg, mem.bg_boot == true)
+    end
+  end
+  if ok_n > 0 then mem.bg_boot = false end
+  local done = now_t(K)
+  mem.bg_nt, mem.bg_nw = done + (retry and CFG.bg_retry or DAY), ((K.now().ms or 0) // 1000) + (retry and 5 or cfg.every_s)
+  if mem.bg_dirty then
+    mem.bg_dirty = false
+    BG.save(K)
+  end
+end
+
+-- public (state alert.bg, status): the worst open episode, nil when none: {n, b = burrow, was, now, c = cause, fx = tiles
+-- painted again, st = what the repair does, crit = 'well,refuge'}
+function M.bg_state(K)
+  local rec = mem and mem.bgr
+  if not rec then return nil end
+  local n, pick = 0, nil
+  for _, name in ipairs(sorted_keys(rec.b)) do
+    local r = rec.b[name]
+    if r.ep then
+      n = n + 1
+      if not pick or (r.base - r.ep.now) > (rec.b[pick].base - rec.b[pick].ep.now) then pick = name end
+    end
+  end
+  if not pick then return nil end
+  local r = rec.b[pick]
+  local o = {n = n, b = trunc(pick, 24), was = r.base, now = r.ep.now, c = r.ep.cause, fx = r.ep.fx,
+             st = trunc(r.ep.st or '', 16)}
+  if #r.ep.crit > 0 then o.crit = trunc(table.concat(r.ep.crit, ','), 24) end
+  return o
+end
+
+-- public (readiness burrow_lost, inspect refuge): the open episodes {{name, was, now, gone, cause, crit = {...}, fx, since}}
+function M.burrow_guard(K)
+  local out = {}
+  local rec = mem and mem.bgr
+  if not rec then return out end
+  for _, name in ipairs(sorted_keys(rec.b)) do
+    local r = rec.b[name]
+    if r.ep then
+      out[#out + 1] = {name = name, was = r.base, now = r.ep.now, gone = r.ep.gone == 1, cause = r.ep.cause,
+                       crit = r.ep.crit, fx = r.ep.fx, since = r.ep.t, st = r.ep.st}
+    end
+  end
+  return out
+end
+
 ---------------------------------------------------------------- jobs
 local JOBS = {
   audit = function(K, d) job_audit(K, d.why) end,
@@ -4184,6 +4552,7 @@ local JOBS = {
   paint = function(K, d) job_paint(K, d.why) end,
   split = function(K) job_split(K) end,
   rpath = function(K) job_rpath(K) end,
+  bguard = function(K, d) job_bguard(K, d.why) end,
 }
 
 local function schedule_periodic(K, t)
@@ -4197,6 +4566,10 @@ local function schedule_periodic(K, t)
   per('seal', mem.seal and mem.seal.tick, CFG.seal_every)
   per('edges', mem.edges and mem.edges.tick, CFG.edges_every)
   per('scan', mem.scan and mem.scan.tick, CFG.scan_every)
+  -- BUG-096: the burrow guard, a game day and every_s real seconds after the last reading ended
+  if not mem.run.bguard and t >= (mem.bg_nt or 0) and ((K.now().ms or 0) // 1000) >= (mem.bg_nw or 0) then
+    due('bguard', t, 'periodic')
+  end
   if peace and not st.pep and t - (mem.retire_t or -CFG.seal_every) >= CFG.seal_every then
     mem.retire_t = t
     due('perim', t, 'retire')
@@ -4368,6 +4741,10 @@ function M.init(K)
   end
   mem = {tt = {}, due = {}, run = {}, pend = {}, npend = 0, fresh = {}, done_info = {}, left = 0, bsize = {},
          stats = {}, split = {}, split_q = {}}
+  -- BUG-096: the burrow guard's record (another adoption's is dropped); the first reading comes bg_boot ticks after the boot
+  -- and counts as the one after a load
+  mem.bgr = BK.load(K.persist.get('burrows'), BG.adopted(K))
+  mem.bg_boot, mem.bg_nt, mem.bg_nw = true, now_t(K) + CFG.bg_boot, 0
   local e = p.edges
   if type(e) == 'table' and int(e.t) and type(e.k) == 'table' then
     local list = {}
@@ -4863,6 +5240,7 @@ M.inspect.refuge = function(K, args)
                              p.burrow ~= '' and p.burrow or 'no confinement',
          p.tiles, p.inside, au.cit, p.why ~= '' and (' (' .. p.why .. ')') or ''),
          {tick = au.tick, cit = au.cit, burrows = b, choice = choice, swap = st.swap, trust = M.refuge_trust(K),
+          bg = #M.burrow_guard(K) > 0 and M.burrow_guard(K) or nil,         -- BUG-096: the open burrow episodes
           quiet = quiet(K) == math.huge and -1 or quiet(K), need = need, bsince = st.bsince, hint = hint,
           dry = st.dry,                         -- BUG-031 (b): burrows the citizens went thirsty or hungry in
           supply = mem.core,                    -- BUG-028 (d): drink and food inside Kern+/the refuge vs the stock

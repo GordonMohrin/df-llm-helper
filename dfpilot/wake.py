@@ -62,8 +62,8 @@ PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", 
         "PATIENT_DYING", "MOOD_CRITICAL",     # I1: a patient or a mood dwarf at the death line comes before the housekeeping types
         "DEATHS_PREVENTABLE", "KERN_FAULT", "HB_STALE", "SUPERVISE", "QUICKSAVE_FAILED",
         "SIEGE_END",
-        "DRILL_FAIL", "SIEGE_UNREADY", "PERF_DEGRADED", "DECISION_NEEDED", "SEAL_STUCK", "PROJECT_BLOCKED",
-        "PLAN_EXHAUSTED", "YEAR_REVIEW", "AUTO_FAIL"]
+        "DRILL_FAIL", "BURROW_SHRUNK", "SIEGE_UNREADY", "PERF_DEGRADED", "DECISION_NEEDED", "SEAL_STUCK",
+        "PROJECT_BLOCKED", "PLAN_EXHAUSTED", "YEAR_REVIEW", "AUTO_FAIL"]
 URGENT = {"BREACH", "SIEGE_START", "INVASION", "LOCKDOWN"} | set(schema.INTERRUPTS)
 URGENT_REPEAT_S = 60
 _IRQ_NEXT = "dfllm ack; dfllm status (the kernel already locked down)"
@@ -111,6 +111,10 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
         "PERIMETER_BROKEN": "dfllm status; dfllm cmd inspect what=perimeter; tell Gordon; the kernel rebuilds lost "
                             "walls, doors and bridges in quiet PEACE; nothing tactical",
         "SIEGE_DEEP": "dfllm status (civilians in the refuge, squads in the core); tell Gordon; nothing tactical",
+        # BUG-096/FR-80 (Run 14 note 70): the kernel paints Kern+ / the refuge again in quiet modes (d.fix repair | wait);
+        # ask (no tile set known) comes with DECISION_NEEDED burrow_gone; off = burrow.guard.repair_per_day 0
+        "BURROW_SHRUNK": "dfllm status (burrows: tiles, cause load|runtime, painted again); tell Gordon; d.cause load = "
+                         "after a load, d.rid != d.id = made again; fix ask: paint it in the burrows screen",
         # Run 11: a dig broke into a cavern; the kernel plugs an explore shaft itself (failed/none: by hand)
         "CAVERN_PLUG": "tell Gordon (queued: the kernel walls the shaft; failed/none: a constructed wall by hand); "
                        "bp.cancel the explore without undo",
