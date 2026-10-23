@@ -279,6 +279,23 @@ T.test('BUG-061: the masons\' slots full of cancelling jobs are the reason (ORDE
   T.ok(r.data.slabs and r.data.slabs.blank == 0)
 end)
 
+T.test('J2: engraving jobs that hold the only blank slabs (in_job) are no jam: the order is not blocked for want of a slab', function()
+  local W, ctl = world{boulders = 40, ghosts = 3, setup = function(W)
+    engrave(W, 3)                                                      -- ids 1-3, one running job each
+    for _ = 1, 3 do F.item(W, 'SLAB', {engraving_type = -1, topic = -1, flags = {in_job = true}}) end
+  end}
+  local jobs = {}
+  for i = 1, 3 do jobs[i] = {job_type = df.job_type.EngraveSlab, order_id = i, flags = {working = true}} end
+  ctl.shops.Masons.jobs = kmock.vec(jobs)
+  days(W, 4)
+  local r = W.inbox('inspect', {what = 'orders'})
+  T.eq({r.data.slabs.blank, r.data.slabs.busy, r.data.slabs.engrave}, {0, 3, 3}, 'three jobs hold the three slabs')
+  T.eq(W.state().orders.jam, nil, 'no jam')
+  T.eq(#stuck(W, "slots full"), 0, 'no ORDER_STUCK about the masons')
+  T.eq(#stuck(W, 'EngraveSlab'), 0, 'and none for orders that are being worked')
+  T.eq(#acts(W, 'order_remove'), 0, 'the trim keeps them')
+end)
+
 T.test('BUG-061: 4 jobs of 10 blocked is no jam (fewer than half), 2 of 2 is none either (jam_min 3)', function()
   local OF = require('dfllm.orderfix')
   local e = {jobs = 10, list = {}}
@@ -625,6 +642,33 @@ T.test('BUG-078: a failed order is not retried for 7 days; a ghost served by a m
   gdays(W, ctl, 1)
   local p = W.K.persist.get('m.economy')
   T.eq(next(p.slab_ghost), nil, 'the ghost is gone: no record')
+end)
+
+T.test('J2: an order the "Needs ..." pruner removed (10 cancels) is not made again for orders.backoff_days (BUG-078 x BUG-005)', function()
+  local W, ctl = ghost_world{n = 1, slabs = {blank = 3}}
+  W.act_result('engrave_order', function(hf)
+    local mo = df.global.world.manager_orders
+    local id = mo.manager_order_next_id
+    mo.manager_order_next_id = id + 1
+    mo.all:insert('#', {id = id, job_type = df.job_type.EngraveSlab, amount_left = 1, amount_total = 1, _name = 'Engrave Memorial Slab',
+                        specdata = {hist_figure_id = hf}, frequency = ONE, item_conditions = kmock.vec{},
+                        item_subtype = -1, mat_type = -1, mat_index = -1, status = {validated = true}})
+    return true, id
+  end)
+  gdays(W, ctl, 5)
+  T.eq(engraved_for(), {6001}, 'the kernel ordered the slab')
+  -- the blank slabs are counted but DF finds none it can reach: the job cancels, again and again
+  for _ = 1, 10 do
+    W.event('REPORT', {type = 'CANCEL_JOB', text = 'Urist cancels Engrave Memorial Slab: Needs unengraved slab.'})
+    W.run(1)
+  end
+  T.eq(engraved_for(), {}, 'the pruner removed the order after orders.needs_drop cancels')
+  gdays(W, ctl, 3)
+  T.eq(engraved_for(), {}, 'and the ghost\'s order waits orders.backoff_days (an own order\'s rule), no order-cancel-remove loop')
+  T.eq(#acts(W, 'engrave_order'), 1)
+  gdays(W, ctl, 9)
+  T.eq(engraved_for(), {6001}, 'after the backoff the slab is ordered again')
+  T.eq(#acts(W, 'engrave_order'), 2)
 end)
 
 T.test('BUG-078: the 79 blank slabs standing as buildings are held, not blank: B2 trims the plugin\'s orders, ConstructSlab', function()

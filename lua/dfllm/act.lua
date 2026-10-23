@@ -1476,15 +1476,22 @@ local function impls(state)
   end
 
   -- work orders screen > add > Engrave memorial slab (BUG-078, Run 14 note 69): one EngraveSlab order for the dead
-  -- historical figure hf, as DFHack's autoslab plugin queues it (autoslab.cpp createSlabJob: job EngraveSlab, item
-  -- SLAB, stone, one slab, specdata.hist_figure_id = the ghost's figure). The job name is EngraveSlab (not
-  -- EngraveStoneSlab). An order for the figure that still has one is 'already'; a manager_order without the
-  -- specdata field is deleted again (never an order that would engrave for nobody). Returns ok, order id | 'already'.
+  -- historical figure hf, made field for field as DFHack's autoslab plugin queues it (autoslab.cpp createSlabJob: id,
+  -- job_type EngraveSlab, specdata.hist_figure_id, amount_left = amount_total = 1, frequency OneTime; nothing else).
+  -- The job name is EngraveSlab (not EngraveStoneSlab) and names no item type (df.job.xml: ConstructSlab has `item` SLAB,
+  -- EngraveSlab has none), so item_type and the materials stay at the structure's defaults. J2: this wrote
+  -- material_category.stone, a bit job_material_category does not have (plant wood cloth silk leather bone shell wood2
+  -- soap tooth horn pearl yarn strand): DFHack raises on it, so the order was never made live. An order for the figure
+  -- that still has one is 'already'; a figure the game does not know is refused (workorder.lua does the same); a
+  -- manager_order without the specdata field is deleted again (never an order that would engrave for nobody). Returns
+  -- ok, order id | 'already'.
   function I.engrave_order(hf_id)
     local hf = int(hf_id)
     if not hf or hf < 0 then return false, 'a historical figure id is required' end
-    local jt, it = df.job_type and df.job_type.EngraveSlab, df.item_type and df.item_type.SLAB
+    local jt = df.job_type and df.job_type.EngraveSlab
     if type(jt) ~= 'number' then return false, 'no job EngraveSlab in this DF' end
+    local hfs = df.historical_figure
+    if type(hfs) == 'table' and hfs.find and not hfs.find(hf) then return false, 'no historical figure ' .. hf end
     local mo = df.global.world.manager_orders
     for _, o in ipairs(mo.all) do
       local ok, same = pcall(function() return o.job_type == jt and o.amount_left > 0 and o.specdata.hist_figure_id == hf end)
@@ -1492,9 +1499,7 @@ local function impls(state)
     end
     local o = df.manager_order:new()
     local ok, err = pcall(function()
-      o.job_type, o.item_type, o.item_subtype = jt, it or -1, -1
-      o.mat_type, o.mat_index = -1, -1
-      o.material_category.stone = true
+      o.job_type = jt
       o.amount_left, o.amount_total = 1, 1
       o.frequency = df.workquota_frequency_type.OneTime
       o.status.validated, o.status.active = false, false
