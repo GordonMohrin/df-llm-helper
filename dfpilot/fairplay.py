@@ -650,7 +650,8 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400)},
                                "engrave_days": (0, 112)},
                      "stale": {"days": (1, 112), "wait_days": (1, 112), "per_day": (0, 50), "jobs_max": (100, 20000),
                                "redo_max": (0, 20)},
-                     "standing": {"amount": (1, 200), "request_days": (1, 112)},
+                     # J3: from_phase = the phase the standing orders start in ("P0".."P7"; a number made the daily task raise)
+                     "standing": {"amount": (1, 200), "request_days": (1, 112), "from_phase": "phase"},
                      "gather": {"drink_d": (0, 400), "drink_off": (0, 400)},
                      "barrels": {"brew_wait": (0, 200)},
                      # BUG-058: the running season's slots at once, autofarm 'auto' | 'off' | 'keep' and its food-day lines
@@ -669,6 +670,7 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400)},
                      # FR-76: a forbidden stock (>= burst_min drink + food units) is unforbidden burst_per_day a day
                      "forbid": {"per_day": (0, 5000), "burst_per_day": (0, 5000), "burst_min": (0, 100000)}}
 ECONOMY_OWN = ("drink", "office", "farms", "cover", "slabs", "stale")   # parts whose every key is listed above
+_PHASE_RE = re.compile(r"^P[0-7]$")
 _LABOR_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,40}$")
 _JOB_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]{1,40}$")
 STANDING_FREQ = ("OneTime", "Daily", "Monthly", "Seasonally", "Yearly")
@@ -702,6 +704,9 @@ def economy_errors(path: str | Path | None = None) -> list[str]:
             elif lim == "bool":
                 if not isinstance(x, bool):
                     errs.append(f"{name}: economy.{part}.{k}: true or false expected, got {x!r}")
+            elif lim == "phase":
+                if not (isinstance(x, str) and _PHASE_RE.match(x)):
+                    errs.append(f"{name}: economy.{part}.{k}: a phase P0..P7 expected, got {x!r}")
             elif lim == "labors":
                 ok = isinstance(x, dict) and len(x) <= 40 and all(
                     isinstance(a, str) and _JOB_RE.match(a) and isinstance(b, str) and _LABOR_RE.match(b)

@@ -81,6 +81,21 @@ T.test('eventful events and emitted events arrive next frame', function()
   T.eq(got, {'R:CARAVAN_ARRIVAL', 'I:7', 'E:D-07'})
 end)
 
+T.test('J3: a string in an event\'s d is at most 200 bytes (schema.py _DT, the cap every emitter must keep)', function()
+  local W = kmock.new{}
+  W.load({name = 'gate', every = {ticks = 25}})
+  T.raises(function() W.K.emit('DECISION_NEEDED', 'A', 'q', {id = 'squads', q = string.rep('a', 201)}) end, 'longer than 200')
+  T.raises(function() W.K.emit('DECISION_NEEDED', 'A', 'q', {id = 'x', opts = {'ok', string.rep('b', 300)}}) end,
+           'longer than 200')
+  T.ok(W.K.emit('DECISION_NEEDED', 'A', 'q', {id = 'squads', q = string.rep('a', 200)}), '200 bytes are fine')
+  local W2 = kmock.new{strict = false}
+  W2.load({name = 'gate', every = {ticks = 25}})
+  local n, why = W2.K.emit('DECISION_NEEDED', 'A', 'q', {id = 'squads', q = string.rep('a', 201)})
+  T.eq(n, false)
+  T.ok(tostring(why):find('d.q is longer than 200', 1, true), why)
+  T.eq(#W2.events, 0, 'a refused event is not recorded')
+end)
+
 T.test('event registry is enforced', function()
   local W = kmock.new{}
   local M = {name = 'gate', every = {ticks = 25}}

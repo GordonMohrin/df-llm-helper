@@ -119,3 +119,4 @@ lines). Everything is "offline, live-untested": each bug file names its live che
 | 68 | hospital posts held at a location without a zone | BUG-077 |
 | 69 | memorial slabs for old ghosts | BUG-078 |
 | (audit) | four integration audits over everything merged so far | BUG-079 .. BUG-086 |
+| (audit J3) | the whole tree after waves A-D and the four audits: the status ranking of the militia rotation, the standing-order phase in `lint --config`, DECISION_NEEDED questions over the event schema's 200 bytes, module counts and verb arguments in the documents | BUG-093 .. BUG-095 |

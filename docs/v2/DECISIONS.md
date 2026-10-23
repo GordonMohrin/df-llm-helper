@@ -88,8 +88,9 @@ switches (D-01..D-14 stay Gordon's). The packages that carry them out are in `do
 23. **Known open points (not decided offline, live data named in the bug files):** who removed the hand-added Planters
     members (BUG-057), who closes an opened tomb zone again (BUG-062), the cause of the 10 FPS clamp after a gremlin
     alarm (BUG-065), why the live seal door was suspended (BUG-044), what DF does with a door on a closure that waits
-    behind door orders, the metal-gear causes of note 26 beyond the unstick, member turnover for the militia rotation
-    (note 64), the recall part of note 23.
+    behind door orders, the metal-gear causes of note 26 beyond the unstick, what DF does with the kit of a leaver in the
+    militia turnover (FR-79, built offline for note 64: kern.log follows the worn % after every turnover), the recall
+    part of note 23.
 
 ### Answered by Gordon (2026-10-16, chat)
 - **`tools.equip_update` on (BUG-023):** yes. A fair-play exception: when `act.work_detail` switches a tool labor on
