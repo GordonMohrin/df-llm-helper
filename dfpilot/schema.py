@@ -505,7 +505,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "CISTERN_DRY": ("B", "water", _d("room:s days:i fill:s", "proj:s well:i pos:p pond:i src:p d:i")),
     # BUG-063: ws = the workshop type the mood claimed (-> MOOD_CRITICAL: pos = its first tile, name = the dwarf, nook = the
     # drink stockpile the kernel queued beside it or why none)
-    "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i nosrc:sa route:s ws:s")),
+    # K3 (BUG-100): slots = one text per open slot of the mood job, 'blocks(metal) x2: none in the fort [0/0/0 of 225]' (slot, count,
+    # blocker: none in the fort | none free | none reachable | enough exist; [in the fort/free/reachable of every item of the type])
+    "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i nosrc:sa route:s ws:s slots:sa")),
     "MOOD_CRITICAL": ("A", "care", _d("unit:i why:s", "kind:s thirst:i hunger:i ws:s name:s pos:p missing:sa nook:s")),
     # class A since Run 9 (an army walked in while these were digest-only): they wake at once
     "SIEGE_START": ("A", "siege", _d(opt="vis:i inv:i great:i why:s")),
@@ -624,7 +626,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # from the entrances: BREACH or the deep defense); to '' = the alert off (no usable burrow)
     "REFUGE_SWITCH": ("B", "seal", _d("from:s to:s why:s mode:s", "level:s")),
     "MOOD_START": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
-    "MOOD_NEED": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
+    "MOOD_NEED": ("B", "care", _d(opt="unit:i kind:s need:s ok:f slots:sa")),
     "MOOD_END": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
     # BUG-016/026: why (failure reason), focus (blocked), ph/ph_ms/ph_act/ph_runs (the phase that ended the attempt: real
     # ms, ms on the module's own clock, runs), left (ticks the caravan still stays, -1 unknown)

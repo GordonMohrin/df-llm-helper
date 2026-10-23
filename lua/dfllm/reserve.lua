@@ -59,6 +59,12 @@ local SUBFLAG = {silk = 'SILK', plant = 'THREAD_PLANT', yarn = 'YARN'}   -- mate
 R.BUSY = {'in_building', 'in_job', 'trader', 'removed', 'garbage_collect', 'construction', 'hostile', 'artifact',
           'on_fire', 'rotten', 'owned', 'encased', 'hidden', 'spider_web'}
 
+-- K3 (BUG-100): of R.BUSY the flags that take an item out of the fort's stock altogether (built in, gone, foreign, a
+-- web). The others (in_job, owned, artifact, on_fire, rotten) leave it in the fort but not free: a mood report counts
+-- the two apart (in the fort / free / reachable)
+R.GONE = {'in_building', 'trader', 'removed', 'garbage_collect', 'construction', 'hostile', 'encased', 'hidden',
+          'spider_web'}
+
 local function int(v) return math.type(v) == 'integer' and v or (type(v) == 'number' and math.tointeger(v)) or nil end
 
 -- a field that may not exist (DFHack raises on unknown names); no closure per call: matching runs per item
@@ -85,6 +91,12 @@ R.tname = tname_of
 -- a pcall per flag cost about 13 closures per item; the callers' scan pcall catches a broken item
 function R.busy(it)
   local f, B = it.flags, R.BUSY
+  for i = 1, #B do if f[B[i]] then return true end end
+  return false
+end
+
+function R.gone(it)
+  local f, B = it.flags, R.GONE
   for i = 1, #B do if f[B[i]] then return true end end
   return false
 end
@@ -158,6 +170,38 @@ function R.label(nd, n)
   return s:sub(1, 60)
 end
 
+-- K3 (BUG-100): the filter of one job_item in a few words, e.g. 'metal', 'iron', 'plant', 'non_economic'. The cloth kind
+-- and a named material first, then the flags a player reads on the job's item list (job_item flags1..3, the material
+-- category bits, an ore filter). Only plain strings leave this function: nd.ji is valid in its frame alone.
+local FILTER_FLAGS = {'metal', 'hard', 'non_economic', 'soap', 'glass'}
+local FILTER_CATS = {'wood', 'cloth', 'silk', 'leather', 'bone', 'shell', 'yarn', 'plant', 'soap'}
+function R.words(ji, nd)
+  local out, seen = {}, {}
+  local function add(w) if w and not seen[w] then seen[w] = true; out[#out + 1] = w end end
+  add(nd.sub)
+  if (nd.mat_index or -1) >= 0 then add(mat_name(nd.mat_type, nd.mat_index)) end
+  local fl = {get(ji, 'flags1'), get(ji, 'flags2'), get(ji, 'flags3')}
+  for _, name in ipairs(FILTER_FLAGS) do
+    for i = 1, 3 do if fl[i] and bit(fl[i], name) then add(name) end end
+  end
+  local cat = get(ji, 'material_category')
+  if cat then for _, name in ipairs(FILTER_CATS) do if bit(cat, name) then add(name) end end end
+  if (int(get(ji, 'metal_ore')) or -1) >= 0 then add('ore') end
+  return table.concat(out, '/'):sub(1, 24)
+end
+
+-- 'blocks(metal)', 'cloth(plant)', 'bars(iron)', 'bone': the slot as a player names it, the filter in a few words
+-- (nd.words, read with the job_item); no filter word: the bare name
+function R.slot_name(nd)
+  local base = nd.cls
+  if nd.cls == 'other' then base = (nd.tname or 'item'):lower() end
+  if nd.part == 'part' then base = 'body part' elseif nd.part == 'horn' then base = 'horn'
+  elseif nd.part == 'tooth' then base = 'ivory' elseif nd.part == 'pearl' then base = 'pearl' end
+  local w = nd.words
+  if type(w) == 'string' and w ~= '' then base = base .. '(' .. w .. ')' end
+  return base
+end
+
 -- one filter -> a need, or nil when the job already holds enough. got = items attached for this filter.
 -- nd.ji is the DF job_item itself: valid only in the frame it was read (DF frees it with a finished or
 -- cancelled mood job), so a caller that keeps a need across frames looks it up again first (care
@@ -176,6 +220,7 @@ function R.need_of(ji, idx, got)
   local nd = {idx = idx, ji = ji, itype = itype, tname = tname, mat_type = mt, mat_index = mi, cls = cls,
               vecs = vecs, part = part, sub = sub, n = left, non_economic = bit(f2, 'non_economic')}
   nd.label = R.label(nd)
+  nd.words = R.words(ji, nd)
   return nd
 end
 

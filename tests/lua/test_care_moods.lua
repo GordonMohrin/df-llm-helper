@@ -170,6 +170,10 @@ T.test('acquisitions: autobutcher policy run and a stone dig request, rate-limit
   CW.day(W, 5)
   T.eq(#W.find_events('DECISION_NEEDED'), 1, 'day 8: still one')
   CW.day(W)
+  -- K3: the reminder follows util/cadence too (a game week alone is 20 s at timestream speed): the wall clock must pass
+  T.eq(#W.find_events('DECISION_NEEDED'), 1, 'a week of game time, 10 minutes not yet')
+  W.ms = W.ms + 600000
+  CW.day(W)
   T.eq(#W.find_events('DECISION_NEEDED'), 2, 'a week after the first wake')
 end)
 
@@ -374,7 +378,7 @@ T.test('BUG-017: items attached without a filter index still cover the filters t
   local r = W.find_events('MOOD_RISK')
   T.eq(#r, 1)
   T.eq(r[1].d.missing, {'boulders'})
-  T.ok(r[1].msg:find('starts without boulders x1;', 1, true), r[1].msg)
+  T.ok(r[1].msg:find('starts without boulders x1: none in the fort [0/0/0]', 1, true), r[1].msg)
   T.eq(W.find_events('MOOD_NEED')[1].d.list, {'boulders x1'})
 end)
 
@@ -397,7 +401,7 @@ T.test('BUG-017: an item the dwarf attaches while the run scans the stock is not
   T.eq(W.find_events('MOOD_NEED'), {})
 end)
 
-T.test('BUG-017: a class without any item in the fort is named: leather: no source in the fort', function()
+T.test('BUG-017: a class without any item in the fort is named: leather x1: none in the fort', function()
   local W = CW.world{setup = function(W)
     moody(W, 1, 'Macabre', {
       filter('SKIN_TANNED'),
@@ -412,18 +416,19 @@ T.test('BUG-017: a class without any item in the fort is named: leather: no sour
   local r = W.find_events('MOOD_RISK')
   T.eq(#r, 1)
   T.eq({r[1].d.missing, r[1].d.nosrc}, {{'leather', 'bone'}, {'leather'}})
-  T.ok(r[1].msg:find('starts without leather x1, bone x1; leather: no source in the fort', 1, true), r[1].msg)
+  T.ok(r[1].msg:find('starts without leather x1: none in the fort [0/0/0]; bone x1: none free [1/0/0, 1 forbidden]', 1, true),
+       r[1].msg)
   local n = W.find_events('MOOD_NEED')[1]
-  T.ok(n.msg:find('; leather: no source in the fort', 1, true), n.msg)
+  T.ok(n.msg:find('leather x1: none in the fort', 1, true), n.msg)
   T.eq(n.d.nosrc, {'leather'})
   W.unit(1).counters2.thirst_timer = 31000
   CW.day(W)
   r = W.find_events('MOOD_RISK')
-  T.ok(r[2] and r[2].msg:find('missing leather,bone (leather: no source in the fort); a mood job', 1, true),
-       r[2] and r[2].msg)
+  T.ok(r[2] and r[2].msg:find('missing leather x1: none in the fort [0/0/0]; bone x1: none free', 1, true) and
+       r[2].msg:find('a mood job cannot be cancelled', 1, true), r[2] and r[2].msg)
   CW.day(W, 2)
   local dn = W.find_events('DECISION_NEEDED')
-  T.ok(dn[1] and dn[1].d.q:find('leather: no source in the fort', 1, true), dn[1] and dn[1].d.q)
+  T.ok(dn[1] and dn[1].d.q:find('leather x1: none in the fort', 1, true), dn[1] and dn[1].d.q)
 end)
 
 T.test('BUG-017 (Run 10 y418): a plant-cloth mood next to wool cloth: the kind is named with its stock, trade is ' ..
@@ -439,8 +444,9 @@ T.test('BUG-017 (Run 10 y418): a plant-cloth mood next to wool cloth: the kind i
   W.run(1)
   local r = W.find_events('MOOD_RISK')
   T.eq(#r, 1)
-  T.ok(r[1].msg:find('starts without cloth(plant) x1, thread(yarn) x1; cloth(plant) 0 in stock; thread(yarn) 1 in ' ..
-       'stock', 1, true), r[1].msg)
+  -- K3: seven wool cloth are in the fort but fit no plant filter ('of 7'); the thread is in the fort, forbidden and out of reach
+  T.ok(r[1].msg:find('starts without cloth(plant) x1: none in the fort [0/0/0 of 7, thread 0]; thread(yarn) x1: none free ' ..
+       '[1/0/0, 1 forbidden]', 1, true), r[1].msg)
   T.eq({r[1].d.missing, r[1].d.nosrc}, {{'cloth', 'thread'}, {'cloth(plant)'}})
   local w = Cm.mood_wants(W.K)
   T.eq({w[1].cls, w[1].buy, w[2].cls, w[2].buy}, {'cloth', 'cloth:plant', 'thread', 'thread:yarn'})
@@ -468,7 +474,7 @@ T.test('Run 10: MOOD_RISK names the supply route of a missing class (economy.rou
   W.unit(1).counters2.thirst_timer = 31000
   CW.day(W)
   r = W.find_events('MOOD_RISK')
-  T.ok(r[2] and r[2].msg:find('missing leather (leather: no source in the fort); route leather: no tannery', 1, true),
+  T.ok(r[2] and r[2].msg:find('missing leather x2: none in the fort [0/0/0]; route leather: no tannery', 1, true),
        r[2] and r[2].msg)
   T.eq(r[2].d.why, 'thirst')
   T.ok(r[2].d.route:find('hunt: no bolts', 1, true), r[2].d.route)

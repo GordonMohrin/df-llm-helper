@@ -1,5 +1,27 @@
 # CHANGELOG dfpilot
 
+## K3: the mood report names the slot, its filter, the counts and the real blocker (BUG-100, 2026-10-23, offline, live-untested)
+- **Why:** Run 14 y587 (note 72): a Weaponsmith's strange mood died of thirst after 55 game days of `blocks: no source in the fort`
+  while 225 blocks stood in the stock. The text counted items at the job_item's own filter (the veto of `dfhack.job.isSuitableItem` /
+  `isSuitableMaterial`), printed the count as a fact about the fort, never named the filter, folded items in use, forbidden, unseen
+  or out of reach into the same word, and never said that the two cloth (no thread, no plant cloth) were the actual wall.
+- **What changed (care.lua, reserve.lua; bugs/BUG-100):** each open slot of the mood job is counted at its real filter in the fort / free
+  / reachable (the same walk-group hook as before) and reported as `blocks(metal) x2: none in the fort [0/0/0 of 225]`, with the
+  blocker in a fixed vocabulary (none in the fort / none free / none reachable / enough exist) and the other unmet slots listed;
+  a slot the job holds enough for is never reported, items the dwarf attached are neither stock nor missing, a cloth slot shows the
+  thread stock (`thread 0`). MOOD_RISK (start and thirst/hunger), MOOD_NEED and the DECISION_NEEDED `q` carry the texts (200 bytes,
+  whole slots, `+N more`), `slots` is a new optional field of MOOD_RISK and MOOD_NEED. MOOD_NEED repeats when a blocker changed
+  (after max(`mood_risk_every`, `wake_wall_s`)); the DECISION_NEEDED weekly reminder now needs the wall clock too (util/cadence) and
+  a new blocker is news. The thirst line also names typed items (BLOCKS, TOOL, ...): it matched item names against classes before.
+  No economy change: a mood with an open cloth slot already makes `plan_cloth` the first planner (WeaveCloth, SpinThread, fiber
+  crops); a DF work order has no priority and no thread means the orders cannot run, which the report now says.
+- **Tests:** tests/lua/test_care_mood_slots.lua (new, 11: the note-72 fixture with 225 stone blocks against a metal filter, each blocker
+  class, two slots unmet, the limits of d, the cadence, an older state), tests/test_k3_mood.py, five texts of test_care_moods.lua
+  and one of tests/test_care_fr_files.py follow the new wording. Ten of the eleven Lua tests fail on b2b9435.
+- **Live check:** at the next strange mood read `MOOD_NEED.slots` / `MOOD_RISK.slots` in events.jsonl or the wake line: every unmet
+  filter has its own text with three counts. For a stuck slot dump `job_items.elements[i]` (flags1..3, mat_type, mat_index,
+  material_category, metal_ore, min_dimension) and compare with `isSuitableMaterial` for five items of the type (bugs/BUG-100).
+
 ## Integration audit: the whole tree read as one piece (BUG-093, BUG-094, BUG-095, documents, 2026-10-23, audit J3 of waves A-D and the four audits; offline, live-untested)
 - **Why:** eleven packages (BUG-044 .. BUG-075, FR-70 .. FR-78), four integration audits (BUG-079 .. BUG-086) and wave D (FR-79,
   BUG-076 .. BUG-078) were merged one after the other; the audits read the first pass, nobody read wave D with the rest. This
