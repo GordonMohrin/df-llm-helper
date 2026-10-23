@@ -394,7 +394,9 @@ M.DEFAULTS = {
   -- unchanged amount for `days` days (`wait_days` when a planned building waits for that piece) is stale: a stone
   -- furniture order is re-entered in wood, else a simple order is made again, else it is reported; at most `per_day`
   -- a day, only in PEACE and RECOVERY; `jobs_max` workshop jobs are read
-  stale = {days = 10, wait_days = 3, per_day = 6, jobs_max = 2000},
+  -- (I3: `redo_max` = how often one order may be made again in a row; the made-again order starts its own clock, so an
+  -- order nothing can run was entered, removed and entered again every `days` days for ever; 0 = never made again)
+  stale = {days = 10, wait_days = 3, per_day = 6, jobs_max = 2000, redo_max = 2},
   -- FR-73 (Run 14 y558-y561: silk, yarn and plant cloth missing in three moods in a row, no standing thread or cloth
   -- order): from `from_phase` (the moodable workshops' phase) each entry is ordered once, `amount` a `frequency`, when
   -- its workshops stand (`ws`, none: always); the farmer's workshop comes with the plan (P1 workshops, or economy's
@@ -435,7 +437,11 @@ M.DEFAULTS = {
   -- `now_max` slots of the running season are filled at once (T.slotnow, right after the census); autofarm: 'auto' =
   -- the kernel disables it below `af_off_days` food days or when a slot it filled was emptied again, and enables it
   -- again from `af_on_days` food days after `af_hold_days`; 'off' = disabled at every boot; 'keep' = never touched
-  farms = {per_day = 16, now_max = 24, autofarm = 'auto', af_off_days = 30, af_on_days = 90, af_hold_days = 14},
+  -- (I3: with autofarm off for good -- 'off', or two wipes -- nothing planted the fiber crops the thread and cloth chain
+  -- lives on; `fiber_slots` = at most that many empty slots of a season take a fiber crop (c.cloth.fiber) while cloth is
+  -- short and food is not; 0 = never)
+  farms = {per_day = 16, now_max = 24, autofarm = 'auto', af_off_days = 30, af_on_days = 90, af_hold_days = 14,
+           fiber_slots = 2},
   forbid = {per_day = 30,
             -- FR-76 (Run 12 Trussroads, a reclaimed fort: 3026 of 3058 drinks, all food and 61 barrels forbidden, the
             -- status said "drink 46d!"): from burst_min forbidden drink + food units the items themselves are
@@ -4398,8 +4404,18 @@ end
 -- the crop for empty slot s (0-based) of a plot whose crops are `crops` (raw indices): a crop of the plot that
 -- grows then with usable seeds, else the crop with the most usable seeds that grows then and there, else the
 -- plot's own crop that grows then (underground crops grow all year)
-function M.slot_crop(crops, under, s, seeds, food)
+function M.slot_crop(crops, under, s, seeds, food, fiber)
   local function fits(inf) return inf and inf.under == under and inf.seasons[s + 1] == true end
+  -- I3: a fiber crop first while the kernel is the only farmer (fiber = M.fiber_plan, left[s] = slots still allowed)
+  if fiber and not food and (fiber.left[s] or 0) > 0 then
+    local best, bn
+    for id, n in pairs(seeds) do
+      local pid = plant_index(id)
+      local inf = pid and fiber.set[pid] and plant_info(pid)
+      if fits(inf) and inf.crop and n > 0 and (not bn or n > bn or (n == bn and pid < best)) then best, bn = pid, n end
+    end
+    if best then fiber.left[s] = fiber.left[s] - 1; return best end
+  end
   -- BUG-058: with `food` (food low) the edible crops go first (a dye or fiber crop with the most seeds feeds nobody)
   for pass = 1, food and 2 or 1 do
     local function ok(pid) return not (food and pass == 1) or M.food_plant(pid) end
@@ -4435,9 +4451,21 @@ end
 -- {plot id, season, crop} for every empty slot of the built farm plots (and every slot holding a crop of the wrong kind
 -- for the plot: a surface crop underground or the reverse); st.farm counts plots and empty slots.
 -- `only` = one season (0..3, T.slotnow: the running season), else all; `food` = the edible crops first
-local function farm_fills(K, max, only, food)
+local function farm_fills(K, max, only, food, fiber)
   local fills, plots, empty = {}, 0, 0
   pcall(function()
+    if fiber then                                   -- I3: the fiber slots a season already holds count against the cap
+      fiber.left = {}
+      for sn = 0, 3 do fiber.left[sn] = fiber.max end
+      for _, b in ipairs(df.global.world.buildings.other.FARM_PLOT) do
+        if built(b) then
+          for sn = 0, 3 do
+            local pid = b.plant_id[sn]
+            if pid and fiber.set[pid] then fiber.left[sn] = math.max(0, fiber.left[sn] - 1) end
+          end
+        end
+      end
+    end
     for _, b in ipairs(df.global.world.buildings.other.FARM_PLOT) do
       if built(b) then
         plots = plots + 1
@@ -4458,7 +4486,7 @@ local function farm_fills(K, max, only, food)
             local wrong = tile ~= nil and inf ~= nil and inf.under ~= tile
             if not pid or pid < 0 or wrong then
               if not wrong then empty = empty + 1 end
-              local crop = under ~= nil and #fills < max and M.slot_crop(crops, under, s, st.seeds or {}, food) or nil
+              local crop = under ~= nil and #fills < max and M.slot_crop(crops, under, s, st.seeds or {}, food, fiber) or nil
               -- a crop of the wrong kind is replaced only by one with usable seeds (a wrong reading of the tile must not
               -- cost a planted slot)
               if crop and wrong then
@@ -4474,6 +4502,42 @@ local function farm_fills(K, max, only, food)
   end)
   if only == nil then st.farm = {plots = plots, empty = empty} end
   return fills
+end
+
+-- I3: autofarm off for good ('off', two wipes) is the kernel as the only farmer; the thread and cloth chain (standing
+-- SpinThread / WeaveCloth / ProcessPlants, plan_cloth) lives on fiber crops autofarm used to plant (Run 14: silk, yarn
+-- and plant cloth missing in three moods). While cloth is short and food is not, up to farms.fiber_slots empty slots a
+-- season take a fiber crop with usable seeds; nil when none is due. Never replaces a planted slot.
+function M.fiber_plan(K, c, r)
+  local fc = c.farms or M.DEFAULTS.farms
+  local n = math.tointeger(fc.fiber_slots)
+  if n == nil then n = M.DEFAULTS.farms.fiber_slots end
+  local cl = st.cloth
+  if n <= 0 or not st.af_off or type(cl) ~= 'table' or (cl.deficit or 0) <= 0 or M.food_low(c, r) then return nil end
+  local set = {}
+  for _, id in ipairs((c.cloth or {}).fiber or {}) do
+    local pid = plant_index(id)
+    if pid then set[pid] = true end
+  end
+  if next(set) == nil then return nil end
+  return {set = set, max = n}
+end
+
+-- I3 (daily, once a week): the cloth the farms do not plant, in words (kern.log); what autofarm's silence costs
+function M.fiber_note(K, c, r, fp)
+  local p = r.p
+  if type(p.af) ~= 'table' then p.af = {} end
+  local af = p.af
+  local cl = st.cloth
+  if not st.af_off or type(cl) ~= 'table' or (cl.deficit or 0) <= 0 then af.fnote = nil; return end
+  if af.fnote and r.now - (math.tointeger(af.fnote) or 0) < 7 * DAY then return end
+  af.fnote = r.now
+  local seeds = 0
+  for _, id in ipairs((c.cloth or {}).fiber or {}) do if (st.seeds or {})[id] then seeds = seeds + 1 end end
+  K.log('warn', 'cloth short by %d (thread %d) and autofarm is off (%s): the kernel plants fiber crops itself (%s; %d fiber ' ..
+        'seed kinds in stock)', cl.deficit or 0, cl.thread or 0, tostring(af.why or (c.farms or {}).autofarm or '?'),
+        fp and string.format('at most %d slots a season', fp.max) or 'none now: food low, farms.fiber_slots 0 or no fiber crop',
+        seeds)
 end
 
 ---------------------------------------------------------------- unforbid (FR-23, FR-25, FR-50)
@@ -6981,13 +7045,20 @@ function T.stale(K, c, r)
         local spec = M.OF.simple_spec(o, e.job, mc2)
         local ok_mat = spec and ((mc2 == 'rock' and stone_free(c, r) >= e.left) or
                                  (mc2 == 'wood' and M.wood_left(c, r, def) >= e.left))
-        if ok_mat then
+        local rd = math.tointeger(rec.redo) or 0
+        if ok_mat and rd < (math.tointeger(sc.redo_max) or M.DEFAULTS.stale.redo_max) then
           spec.tag = 'dfllm:redo_' .. tostring(e.id)
           r.cmds = r.cmds + 1
-          local ok = K.act.workorder(spec)
+          local ok, nid = K.act.workorder(spec)
           if ok and K.act.order_remove(e.id) then
             act, dropped = 'again' .. (mc2 ~= e.mc and ' in stone' or ''), 1
             p.ostale[e.key] = nil
+            -- I3: the kernel's own order (a piece, a slab, the idle backlog) keeps its tag on the new order: else the
+            -- planner saw its tag gone and entered the same order a second time beside the made-again one
+            if int(nid) then
+              for tag, oid in pairs(p.orders) do if oid == e.id then p.orders[tag] = nid end end
+              p.ostale[tostring(nid)] = {left = e.left, since = r.now, redo = rd + 1}
+            end
           end
         end
       end
@@ -7753,7 +7824,7 @@ end
 -- FR-17 (daily): every empty season slot of a built farm plot gets a crop that grows then and there
 function T.farmslots(K, c, r)
   if not r.fills then
-    r.fills = farm_fills(K, (c.farms or M.DEFAULTS.farms).per_day or 16, nil, M.food_low(c, r))
+    r.fills = farm_fills(K, (c.farms or M.DEFAULTS.farms).per_day or 16, nil, M.food_low(c, r), M.fiber_plan(K, c, r))
     if K.census.i and st.farm then K.census.i.farm_plots, K.census.i.farm_empty = st.farm.plots, st.farm.empty end
     r.filled = 0
   end
@@ -7856,7 +7927,9 @@ function T.slotnow(K, c, r)
   end
   local sn = r.sn
   if not sn.fills then
-    sn.fills = farm_fills(K, fc.now_max or 24, K.now().season, M.food_low(c, r))
+    local fp = M.fiber_plan(K, c, r)
+    M.fiber_note(K, c, r, fp)
+    sn.fills = farm_fills(K, fc.now_max or 24, K.now().season, M.food_low(c, r), fp)
     sn.n = 0
   end
   local f = table.remove(sn.fills, 1)

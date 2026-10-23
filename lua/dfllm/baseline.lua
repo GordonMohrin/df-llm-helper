@@ -369,7 +369,15 @@ function M.plan(K, c)
   end
   -- BUG-058: economy.farms.autofarm 'off' (the kernel is the sole writer of the farm season slots): autofarm is not enabled
   local ec = type(K.cfg.baseline) == 'table' and K.cfg.baseline.economy
-  local af_off = type(ec) == 'table' and type(ec.farms) == 'table' and ec.farms.autofarm == 'off'
+  local af_mode = type(ec) == 'table' and type(ec.farms) == 'table' and ec.farms.autofarm or 'auto'
+  local af_off = af_mode == 'off'
+  -- I3: the plan runs on every load; economy's policy ('auto') keeps autofarm off in its persisted state (af.off), and an
+  -- enable here let autofarm empty the slots the kernel filled until economy's first daily run -- which it then counted
+  -- as autofarm's wipes (two of them keep autofarm off for good)
+  if af_mode == 'auto' then
+    local pe = K.persist.get('m.economy')
+    af_off = type(pe) == 'table' and type(pe.af) == 'table' and pe.af.off ~= nil
+  end
   for _, p in ipairs(c.plugins or {}) do
     if not (p == 'autofarm' and af_off) then cmd('en:' .. p, 'enable', p) end
   end
