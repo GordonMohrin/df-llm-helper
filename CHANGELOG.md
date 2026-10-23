@@ -1,5 +1,47 @@
 # CHANGELOG dfpilot
 
+## Saves, freezes and status gaps: `dfllm save` follows the real save, every frame gap has a cause, status keeps pop and stock, the idle line is broken down (BUG-069, BUG-070, BUG-071, FR-77, 2026-10-23; offline, live-untested)
+- **Why (Runs 11-13, y456-y506, game session notes 1, 4, 7, 39):** Wheelsblows y506 autumn d11: `dfllm save` said QUICKSAVE_FAILED
+  after 122 s ("no fortress save folder newer than the call (dfhack-run printed nothing)") while the newest save was an
+  autosave 12 min old and quicksaves in that world take 54-110 s. PERF_DEGRADED freezes of 24-27 s at the year change and at
+  saves (y456, y483); doctor y483: max frame gap 172,094 ms, 13 gaps > 3 s, DF `Responding=False` up to 4 min. `dfllm
+  status` showed only the clock line right after a year change or a hang. The idle line read "N of M adults without a job (0
+  without reachable work)" with 40-70 % idle.
+- **BUG-069 (bugs/BUG-069):** the wait was a fixed 120 s and the only "DF is writing" sign was `save/current/world.sav`, which DF
+  writes last; a slow save and a dropped request were one `ok 0` record and a retry after 120 s would have started a second
+  save. Now the wait goes on while a file below `save/current` is fresh (`save.wait_s` 180, `save.max_wait_s` 600, `--timeout`,
+  `--max-wait`); a save still being written at the limit is `state running` (exit 4, `QUICKSAVE_RUNNING`, no wake); `settle`
+  corrects a record when the folder lands later (`late`) or the write vanished; no quicksave while DF writes or a verified
+  autosave of this fort is younger than 300 s (exit 0, "not needed"; `--min-gap 0` forces); failures say `call`, `silent` (DF
+  started no save) or `vanished`. tools/run_watch.py waits 900 s for the CLI.
+- **BUG-070 (bugs/BUG-070):** the 24-27 s are DF's own yearly autosave (profile `autosave = YEARLY`), not ours to change. The
+  kernel now gives every frame gap >= 3 s one cause: our module (and what its `M.doing()` said), `save` (the save folder was
+  renamed `autosave N` or the year changed across the gap) or `external`. It goes to kern.log `(blame save) (new year: ...)`,
+  `inspect perf` (`gaps`), perf.csv (`gap:<cause>` ms, `gapn:<cause>` count), PERF_DEGRADED `d.cause` and doctor ("frame gaps >
+  3 s by cause: ..."; only ours and unknown gaps, and a DF save freeze from 60 s, are problems). After a new year or a save
+  gap, in PEACE only, snapshot exports, seal's background jobs, the timed persist flush and the periodic selftest wait
+  `perf.quiet_s` (60 s; `K.busy()` answers `save`). Nothing runs more often; PERF_DEGRADED and the supervisor's rule are unchanged.
+- **BUG-071 (bugs/BUG-071):** four ways to a bare status: the 300-token fit dropped lines from the end (a long UNREADY plus
+  alarm lines pushed pop and stock out), a >4 KB state shed `stock` and `labor` before `ready`/`bridges`/`threat` (and logged it
+  every 2 s), economy publishes stock and labor only after its first daily run since the boot, a disabled module leaves its
+  keys out. Now `fit_ranked` keeps the clock line, pop, stock and the warnings and drops or cuts the rest by rank; the kernel
+  carries the last pop/stock/labor leaves (`stale`: key -> ticks; persisted in `persist.kern.carry`, `perf.carry_days` 28)
+  and status says `(last known 2d ago)`; the shrink order puts labor, stock, pop last and logs once per key per 10 min.
+- **FR-77:** `inspect workload` gives every idle adult one reason (`idle_why`: rest, hurt, mood, held, nolabor, noreach, nowork,
+  free; `soldiers`, `held_projects`, `idle_probe` with raw fields of `free` ones) and the message names the non-zero classes;
+  the daily scan publishes `labor.why` {rest, hurt, mood, free}, `n`, `sold`, `held` and status says `idle 54% = 7 of 13 adults
+  (rest 2, hurt 1, mood 1, no job 3; 6 soldiers not counted; the kernel holds 2 projects: ...)`.
+- **Contracts / config:** state `labor` (n, sold, held, why) and `stale`; `persist.kern.carry`; PERF_DEGRADED `cause`; quicksave
+  record `state`, `kind`, `limit`, `late`; perf.csv `gap:`/`gapn:` fields; config/baseline.json `save` {wait_s, max_wait_s,
+  autosave_fresh_s} and `perf` {quiet_s, carry_days} (`python -m dfpilot.lint --config`); CONTRACTS §9.3, §9.11, §9.19, §10, §12
+  and the appendix; RULES §3 and §7 rows (existing lines).
+- **Live check:** (1) the next `dfllm save` in a big world: `quicksave.json` `state`/`kind`/`secs`/`late`, cli.log; a folder
+  newer than the call after a `failed` = the old failure was a slow save. (2) After the next year change: `dfllm doctor` ("frame
+  gaps > 3 s by cause"), `dfllm cmd inspect '{"what":"perf"}'` (`gaps`, `quiet_s`), kern.log `frame gap` lines; `save` gaps with
+  the folder rename seen = DF's autosave. (3) `dfllm status` right after a boot: pop and stock with `(last known ...)`; kern.log
+  `state > 4 KB` lines. (4) `dfllm cmd inspect '{"what":"workload"}'`: `idle_why`, and `idle_probe` of the `free` ones (what
+  is left over decides whether rest needs a better test than `sleepiness_timer`).
+
 ## The audit and sites snapshots fit again: one box of the fort's pieces, explore shafts as narrow columns, margin steps, a cap of 400,000 tiles and a refusal that names what stretches the box (BUG-043, 2026-10-17; offline, live-untested)
 - **Why (Run 11, y479):** Kilrudrabed site98, y479 winter d79, kernel 2eea070: `dfllm audit` -> `audit: snapshot refused:
   bbox has 252108 tiles > 250000`, `bp sites <tpl> --fresh` the same; kern.log `readiness: audit snapshot not exported:
