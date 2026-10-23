@@ -204,7 +204,9 @@ def workshops(p: dict) -> Plan:
     bad = add - set(EXTRA_TYPES)
     if bad:
         raise ValueError(f"workshops: unknown add types {sorted(bad)}; known: {EXTRA_TYPES}")
-    todo = [(k, n) for k, n in MOODABLE if n not in skip] + [(k, n) for k, n in EXTRA if n in add]
+    # BUG-046 (Run 12 note 32: the kitchen waited behind a forge that was never built, kitchens 0, food 10 days): the food
+    # shops (Still, Kitchen, Butchers, Fishery) come first, the first planned building gets buildingplan's materials first
+    todo = [(k, n) for k, n in EXTRA if n in add] + [(k, n) for k, n in MOODABLE if n not in skip]
     if not todo:
         raise ValueError("workshops: nothing left to build")
     P = Plan("workshops", "infra")

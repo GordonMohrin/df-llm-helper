@@ -3247,6 +3247,39 @@ function M.entrance_doors(K, refresh)
   return x
 end
 
+-- BUG-044 (public, runner's wall fallback for a seal door that stays stuck): the ways a citizen has around the tile of a
+-- piece, from the last entrance check (mem.seal.openings: the independent routes between the map edge and the interior).
+-- {known = false} before the first check; else {known = true, age (ticks since the check), routes (openings in all),
+-- here (an opening's inside tile or outside tile, or a tile it leads in by beside its door, lies within one tile of
+-- x,y,z), here_closable (the tile is one of those beside a door or a bridge on the same opening: a wall there leaves
+-- the door tile as the way; the opening's own tile does not count, a door further along its route would be cut off
+-- by a wall on it), others (the other openings that have a door or a bridge: the ways in and out that stay when the
+-- tile is walled)}. Read-only, no frame work.
+function M.opening_ways(K, x, y, z)
+  local s = mem.seal
+  if not (s and type(s.openings) == 'table') then return {known = false} end
+  local function near(p)
+    return type(p) == 'table' and int(p[1]) and math.abs(p[1] - x) <= 1 and math.abs(p[2] - y) <= 1
+           and math.abs(p[3] - z) <= 1
+  end
+  local function closable(o) return o.gate == 1 or #(o.doors or {}) > 0 end
+  local r = {known = true, age = math.max(0, now_t(K) - (int(s.tick) or 0)), routes = #s.openings, here = false,
+             here_closable = false, others = 0}
+  local first
+  for i, o in ipairs(s.openings) do
+    local core = near(o.pos) or near(o.out)
+    local gap = false
+    for _, g in ipairs(o.gap or {}) do if near(g) then gap = true; break end end
+    if (core or gap) and not first then
+      first = i
+      r.here, r.here_closable = true, gap and closable(o)
+    elseif closable(o) then
+      r.others = r.others + 1
+    end
+  end
+  return r
+end
+
 -- public (reflex, the lockdown's doors): the citizens (soldiers excluded, as for the gates) on the outside side of
 -- each door in `ids`: on a revealed open-sky tile of the door's walk group, on the porch of an opening the door closes
 -- (the last entrance check), or in the doorway. A door is forbidden only once nobody is left there, so nobody is

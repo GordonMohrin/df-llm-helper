@@ -141,6 +141,10 @@ C.EVENTS = {
   ORDER_STUCK = {cls = 'B', by = 'economy'}, JOBS_SUSPENDED = {cls = 'B', by = 'economy'},
   TRADE_LEDGER = {cls = 'B', by = 'trade'},
   SEAL = {cls = 'B', by = 'seal'}, REACH = {cls = 'B', by = 'seal'},
+  -- BUG-044: a seal door still not built seal_first.wall_days after SEAL_STUCK, replaced by a constructed wall on its
+  -- tile (d.proj, at 'x,y,z', was 'door', days, why = the SEAL_STUCK wait); PROJECT_BLOCKED d.parts (BUG-046): the parts
+  -- of a stalled build stage that wait
+  SEAL_WALLED = {cls = 'B', by = 'runner'},
   -- Gordon 2026-10-16: intake waves in SIEGE (muster, open, close, clear, back, abort, refused) and the sortie
   -- through O1 (gather, open, out, recall, close, done, abort)
   INTAKE = {cls = 'B', by = 'siege'}, SORTIE = {cls = 'B', by = 'siege'},

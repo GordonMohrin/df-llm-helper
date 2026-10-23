@@ -31,6 +31,12 @@ class BpError(ValueError):
     pass
 
 
+class SealClosed(BpError):
+    """BUG-047 (Run 11 note 8): a seal that has nothing to close because what it names is closed already (a door or
+    hatch stands there, a seal project built or is building its piece) or no way in is open now. `bp.place` still
+    refuses it (an error to the caller, as before); plan check passes it and plan apply leaves its bp out."""
+
+
 # ---------------------------------------------------------------- args
 def parse_kv(tokens: list[str]) -> dict:
     """['{"a":1}'] -> {'a': 1}; ['bridge=O1', 'n=20', 'undo=true'] -> {...}; values are JSON if they parse."""
@@ -730,6 +736,20 @@ def _geo_try(fn, notes: list[str], label: str, *a):
         return None
 
 
+# BUG-047: the notes of seal_openings that say an opening is closed already (or a seal project has it); a note of any other
+# kind (a tile not on the snapshot, a failed search, no tile that closes the route) is a gap in what we know
+CLOSED_NOTES = ("(closed)", "(closed, or no floor/ramp/stair)", "left out, sealed by", "builds its piece",
+                "a seal under way closes its route", "(a seal project builds them)")
+
+
+def _all_closed(notes: list[str], key: str, entries: list) -> bool:
+    """Nothing is left to close because every opening is closed (or a seal has it), or none is open now (`last`, `all`,
+    `audit` name none): the seal is done, not impossible."""
+    if notes:
+        return all(any(p in n for p in CLOSED_NOTES) for n in notes)
+    return not entries and key in SEAL_LAST + ("audit", "all")
+
+
 def seal_openings(save_dir: Path, at, snap: dict | None = None, close: str = "auto") -> tuple[str, list[str]]:
     """The seal template's `at` with every kind filled: at = '' / 'last' / 'entrances' -> the current open ways in
     (current_openings: SEAL_LEAK, the entrance check, REFUGE_FAIL); 'audit' -> the walls the newest audit names
@@ -870,11 +890,12 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None, close: str = "au
         notes.append(f"{len(rest)} more for the next seal (place it again once this one is placed): "
                      + dmod.format_openings(rest[:4]))
     if not keep:
+        closed = _all_closed(notes, key, entries)
         why = "; ".join(notes) or ("the last entrance check names no open way in" if key in SEAL_LAST
                                    else "the last audit names no wall" if key == "audit"
                                    else "no refuge stair head in the manifest and no REFUGE_FAIL tile"
                                    if key in SEAL_REFUGE else "no opening named")
-        raise BpError(f"seal: nothing to close ({why})")
+        raise (SealClosed if closed else BpError)(f"seal: nothing to close ({why})")
     return dmod.format_openings(keep), notes
 
 

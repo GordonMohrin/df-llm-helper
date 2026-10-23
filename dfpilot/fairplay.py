@@ -280,7 +280,10 @@ def water_errors(path: str | Path | None = None) -> list[str]:
 # pop 0 = off). runner.conf keeps the default for a value of another type or out of range.
 # BUG-037: queue = the slot rules (a slot holder without own progress for yield_days yields its slot; a project blocked
 # for good is parked after park_days: out of the pause, the keepers and PLAN_EXHAUSTED, announced once with bp.cancel)
-RUNNER_LIM: dict = {"seal_first": {"on": "bool", "stuck_days": (1, 60), "food_d": (0, 400), "drink_d": (0, 400)},
+# BUG-044: seal_first.wall / wall_days = a seal door still not built wall_days (0-60, default 2) after SEAL_STUCK becomes a
+# constructed wall when the citizens keep another way (wall false = never)
+RUNNER_LIM: dict = {"seal_first": {"on": "bool", "stuck_days": (1, 60), "food_d": (0, 400), "drink_d": (0, 400),
+                                   "wall": "bool", "wall_days": (0, 60)},
                     "rebuild": {"pop": (0, 250), "off": (0, 250)},
                     "queue": {"yield_days": (1, 60), "park_days": (1, 400)}}
 

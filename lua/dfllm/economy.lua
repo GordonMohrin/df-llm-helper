@@ -6002,6 +6002,128 @@ local function need_class(nd)
   elseif nd.bm then return BM_VECS, 'building material' end
 end
 
+-- BUG-044 (Run 11 y483-y497, the seal door 115,73,143 stood open for 14 game years, status said only "stalled"): what the
+-- building on one tile and its construction job wait for, read-only (the building sheet and the job list). {none = true}
+-- when nothing stands there, else {id, kind, sub, stage, max, built, job, susp, work, who, planned, kept, items, need,
+-- cancel, site, line}. `who` names the component that keeps a suspended job suspended: 'buildingplan' (a planned building
+-- suspends its job itself until its materials are attached; a resume by hand is undone at once), 'suspendmanager'
+-- (isKeptSuspended: preventblocking, water, a designation in the way), else 'DF' (the builder cancelled: the latest
+-- CANCEL_JOB report near the tile, else the items on the tile, else no cause is readable). `line` is the one-line answer
+-- (SEAL_STUCK wait, PROJECT_BLOCKED parts, kern.log). The classes a planned building waits for carry what the fort has:
+-- free items of the class and the items its open piece orders still make (`piece_ord` = open / not validated).
+function M.build_state(K, x, y, z)
+  x, y, z = int(x), int(y), int(z)
+  if not (x and y and z) then return nil end
+  local okf, b = pcall(dfhack.buildings.findAtTile, x, y, z)
+  if not (okf and b) then return {none = true, line = string.format('nothing stands at %d,%d,%d', x, y, z)} end
+  local rec = {}
+  building_info(rec, nil, b)
+  rec.id = rec.bld
+  local oks, mx = pcall(function() return b:getMaxBuildStage() end)
+  rec.max = oks and int(mx) or nil
+  rec.built = rec.stage ~= nil and rec.max ~= nil and rec.stage >= rec.max
+  if rec.kind == 'Workshop' or rec.kind == 'Furnace' then
+    local okt, sub = pcall(function() return (rec.kind == 'Workshop' and df.workshop_type or df.furnace_type)[b.type] end)
+    if okt and type(sub) == 'string' then rec.sub = sub end
+  end
+  if rec.built then rec.line = 'built'; return rec end
+  local j
+  pcall(function()
+    local cb = df.job_type.ConstructBuilding
+    for _, jb in ipairs(b.jobs) do if jb.job_type == cb then j = jb; break end end
+  end)
+  if not j then rec.line = 'no construction job'; return rec end
+  rec.job = j.id
+  local oksu, su = pcall(function() return j.flags.suspend == true end)
+  rec.susp = oksu and su
+  local okw, wk = pcall(dfhack.job.getWorker, j)
+  rec.work = okw and wk ~= nil
+  local oki, ni = pcall(function() return #j.items end)
+  rec.items = oki and int(ni) or 0
+  local head = string.format('job %s', tostring(rec.job))
+  if not rec.susp then
+    rec.line = rec.work and (head .. ' runs: a builder works at it') or (head .. ' not suspended, no builder has taken it')
+    return rec
+  end
+  local sm, bp = plugin('suspendmanager'), plugin('buildingplan')
+  local plan_f = first_fn(bp, {'isPlannedBuilding'})
+  local kept_f = first_fn(sm, {'isKeptSuspended', 'suspendmanager_isKeptSuspended'})
+  local desc_f = first_fn(sm, {'suspensionDescription', 'suspendmanager_suspensionDescription', 'getSuspendReason'})
+  if plan_f then
+    local okp, v = pcall(plan_f, b)
+    rec.planned = okp and v == true
+  end
+  if not rec.planned and kept_f then
+    local okk, v = pcall(kept_f, j)
+    if okk and v then
+      rec.kept = true
+      local okd, d = false, nil
+      if desc_f then okd, d = pcall(desc_f, j) end
+      rec.desc = okd and type(d) == 'string' and d ~= '' and dfhack.df2utf(d):sub(1, 60) or 'kept suspended'
+    end
+  end
+  if rec.planned then
+    rec.who, rec.need = 'buildingplan', job_missing(j)
+    local parts = {}
+    local inv = K.census.i or {}
+    for _, nd in ipairs(rec.need) do
+      local vecs, label = need_class(nd)
+      label = label or 'item'
+      local part = string.format('%s x%d', label, nd.n)
+      local e = M.PIECES[label]
+      local key = vecs and nd.t >= 0 and M.PIECE_INV[df.item_type[nd.t] or '']
+      if e or key then
+        local tail = {}
+        if key then tail[#tail + 1] = string.format('%d free', int(inv[key]) or 0) end
+        if e then
+          local jt, n, uv = df.job_type[e.job], 0, 0
+          for _, o in ipairs(orders_all()) do
+            if o.job_type == jt and (int(o.amount_left) or 0) > 0 then
+              n = n + int(o.amount_left)
+              local okv, valid = pcall(function() return o.status.validated end)
+              if okv and valid == false then uv = uv + int(o.amount_left) end
+            end
+          end
+          rec.piece_ord = {n, uv}
+          tail[#tail + 1] = string.format('%d ordered', n) .. (uv > 0 and string.format(', %d not validated', uv) or '')
+        end
+        part = part .. ' (' .. table.concat(tail, ', ') .. ')'
+      end
+      parts[#parts + 1] = part
+    end
+    rec.line = string.format('%s suspended by buildingplan: waits for %s', head,
+                             #parts > 0 and table.concat(parts, ', ') or 'its materials')
+  elseif rec.kept then
+    rec.who = 'suspendmanager'
+    rec.line = string.format('%s suspended by suspendmanager: %s', head, rec.desc)
+  else
+    rec.who = 'DF'
+    rec.cancel = cancel_at(rec.rect)
+    local bits = {}
+    if rec.cancel then bits[#bits + 1] = 'cancelled "' .. rec.cancel .. '"' end
+    if rec.rect then
+      local oki2, items = K.call('snapshot', 'items_at', rec.rect.x1, rec.rect.y1, rec.rect.x2, rec.rect.y2, rec.rect.z)
+      if oki2 and type(items) == 'table' then
+        local site = {forb = 0, other = 0}
+        for _, e in ipairs(items) do
+          local it = df.item.find(int(e[1]) or -1)
+          local f = it and it.flags
+          if f and not (f.in_job or f.in_building or f.trader or f.removed or f.garbage_collect or f.construction) then
+            if f.forbid then site.forb = site.forb + 1 else site.other = site.other + 1 end
+          end
+        end
+        rec.site = site
+        if site.forb + site.other > 0 then
+          bits[#bits + 1] = string.format('%d forbidden and %d other items on the tile', site.forb, site.other)
+        end
+      end
+    end
+    rec.line = string.format('%s suspended by DF (not buildingplan, not suspendmanager): %s', head,
+                             #bits > 0 and table.concat(bits, '; ') or 'no cause readable')
+  end
+  return rec
+end
+
 -- one usable loose item of a class: {free = not forbidden, take = forbidden and fit to unforbid}
 local function mat_item(K, jb, it, nd)
   local f = it.flags
@@ -7061,6 +7183,12 @@ end
 
 M.inspect.workload = function(K, args)
   if type(args) == 'table' and args.key == 'tools' then return M.inspect_tools(K) end
+  -- BUG-044: key 'build:x,y,z' = what the building on that tile and its job wait for (build_state), read-only
+  local bx, by, bz = tostring(type(args) == 'table' and args.key or ''):match('^build:(%-?%d+),(%-?%d+),(%-?%d+)$')
+  if bx then
+    local r = M.build_state(K, tonumber(bx), tonumber(by), tonumber(bz))
+    return r ~= nil, r and r.line or 'bad tile', r
+  end
   local cu = K.census.u or {}
   local sold = {}
   for _, id in ipairs(cu.soldier_ids or {}) do sold[id] = true end

@@ -105,7 +105,10 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
         "SEAL_STUCK": "tell Gordon the open way in; dfllm cmd inspect '{\"what\":\"workload\"}' (material); no "
                       "material: logs, a stone dig; a refused tile: bp.cancel, then bp.place tpl=seal at=last or by hand; "
                       "d.wait (BUG-041): a job nobody has the labor for (Gordon: work details) or a piece no citizen "
-                      "reaches (a wall on another tile)"}
+                      "reaches (a wall on another tile); BUG-044: d.wait names who suspends a door's job (buildingplan: "
+                      "the door item is missing; suspendmanager: jobs.release preventblocking=false; DF: the cancel "
+                      "reason), a door still unbuilt 2 days later is replaced by a wall (SEAL_WALLED) when the citizens "
+                      "keep another way"}
 SUPERVISE_EVERY_S = 15                         # supervise.json read cadence
 SUPERVISE_FRESH_S = 3600                       # alerts logged longer ago than this never wake
 HB_STALE_S = 300

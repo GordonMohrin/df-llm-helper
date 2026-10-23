@@ -19,6 +19,7 @@ from . import files, paths, schema
 from .cmd import (SAME, SEAL_AUDIT, WATER_NEAR, BpError, BpUnavailable, _moodable, audit_routes, bp_files, fmt_reply,
                   fort_manifest, free_sites, last_entrances, load_bp, log_seal, occupancy, place, rank_sites, refuge_head,
                   refuge_open, seal_openings, send, sites_snapshot, template_info, template_names, water_near, write_bp)
+from .cmd import SealClosed
 
 R_CAPS = {0: 55, 1: 55, 2: 75, 3: 250}    # DESIGN §5.4; R3 (>= 80) only with D-01 = B
 OPTION_A_MAX = 75
@@ -404,13 +405,15 @@ def _food_shops(p: dict) -> bool:
 
 
 def build_kind(b: dict) -> str:
-    """What a plan build is to the runner's seal first and rebuild policy (runner.lua kind_of): seal, tombs, supply,
-    beds, defense or work (a plan build is never a depot or repair: the kernel queues those)."""
+    """What a plan build is to the runner's seal first and rebuild policy (runner.lua kind_of): seal, tombs, explore,
+    supply, beds, defense or work (a plan build is never a depot or repair: the kernel queues those)."""
     tpl, p = b["tpl"], b.get("p") or {}
     if tpl == SEAL:
         return "seal"
     if tpl == "tombs":
         return "tombs"
+    if tpl == EXPLORE:                                    # DECISIONS 4: the ore search is paused by no open seal
+        return "explore"
     if tpl in SUPPLY_TPLS or (tpl == "workshops" and _food_shops(p)):
         return "supply"
     if tpl in BEDS_TPLS:
@@ -1415,11 +1418,15 @@ def applied_plan(save_dir: Path) -> dict | None:
     return prev if isinstance(prev, dict) and not schema.validate("plan", prev) else None
 
 
-def place_all(save_dir: Path, doc: dict, prev: dict | None) -> tuple[list[dict], int, list[str]]:
+def place_all(save_dir: Path, doc: dict, prev: dict | None,
+              left_out: list[str] | None = None) -> tuple[list[dict], int, list[str]]:
     """Emit every new build of doc in plan order (all or nothing; raises BpError/BpUnavailable).
     Kept builds (same-year plan, valid bp file) are not emitted again. Each build takes the first free site
     for its label against every other bp/*.json plus the builds emitted before it. Returns
-    (docs, kept count, one line per build)."""
+    (docs, kept count, one line per build). BUG-047 (Run 11 note 8: plan check said ERROR "seal: nothing to close" for
+    the refuge hatch that stood): a seal build with nothing left to close (every opening is closed, or a seal project
+    has it) is no error; it is left out (no bp file; the kernel logs that and queues nothing) and, when `left_out` is
+    given, named there."""
     year = doc["year"]
     keep = {(si, bi) for si, se in enumerate(prev["seasons"]) for bi in range(len(se["build"]))} \
         if prev and prev["year"] == year else set()
@@ -1441,8 +1448,15 @@ def place_all(save_dir: Path, doc: dict, prev: dict | None) -> tuple[list[dict],
                 lines.append(f"s{si} {b['tpl']}@{b['site']} kept {o['id']} at {o['anchor']}")
                 continue
             bid = bp_id(year, si, bi)
-            d = place(save_dir, b["tpl"], b.get("p") or {}, b["site"], bid, occ=occ, snap=snap,
-                      same=placed.get(b["tpl"]) if b["site"] == SAME else None)
+            try:
+                d = place(save_dir, b["tpl"], b.get("p") or {}, b["site"], bid, occ=occ, snap=snap,
+                          same=placed.get(b["tpl"]) if b["site"] == SAME else None)
+            except SealClosed as e:
+                why = str(e).removeprefix("seal: ")
+                lines.append(f"s{si} {b['tpl']}@{b['site']} left out: {why}")
+                if left_out is not None:
+                    left_out.append(f"seasons[{si}].build[{bi}] seal@{b['site']}: {why}; no blueprint is written")
+                continue
             occ.add(d)
             placed[b["tpl"]] = {"anchor": d["anchor"], "rot": d["rot"]}
             docs.append(d)
@@ -1458,11 +1472,12 @@ def apply(save_dir: Path, doc: dict, by: str = "llm", wait_s: float = 5.0, dry_r
     errs, _ = check(doc, state, tpls=templates(), prev=prev, fort=fort_facts(save_dir, state))
     if errs:
         return errs, "not applied"
+    left: list[str] = []
     try:
-        docs, kept, _ = place_all(save_dir, doc, prev)      # emit everything first: all or nothing
+        docs, kept, _ = place_all(save_dir, doc, prev, left)      # emit everything first: all or nothing
     except (BpError, BpUnavailable) as e:
         return [f"blueprint: {e}"], "not applied"
-    note = f" ({kept} kept)" if kept else ""
+    note = (f" ({kept} kept)" if kept else "") + (f" ({len(left)} seal left out: nothing to close)" if left else "")
     if dry_run:
         return [], f"dry run ok: {len(docs)} blueprint(s) would be written{note}"
     for d in docs:
@@ -1520,8 +1535,10 @@ def run(args, save_dir: Path) -> int:
         errs, warn = check(doc, state, tpls=templates(), prev=prev, fort=fort_facts(save_dir, state))
         lines: list[str] = []
         if not errs:
+            left: list[str] = []
             try:
-                _, _, lines = place_all(save_dir, doc, prev)          # dry run: what apply would emit
+                _, _, lines = place_all(save_dir, doc, prev, left)        # dry run: what apply would emit
+                warn.extend(left)
             except BpUnavailable as e:
                 warn.append(f"placement not checked: {e}")
             except BpError as e:

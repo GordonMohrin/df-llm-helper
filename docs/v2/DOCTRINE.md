@@ -76,6 +76,7 @@ Sources: [W] dwarffortresswiki.org (v50+ namespace, fetched today); [D] the inst
 **Sealed-fort principle:**
 - Only **raised drawbridges and constructed or natural walls** count as barriers. A raised bridge is "invulnerable to building destroyers", and climbing over a raised bridge or a protruding floor is impossible [W Drawbridge, Climbing].
 - Doors and forbidden doors stopped nothing in Run 6.
+- An open way in is worse than a missing door (Run 11 y483-y497: a seal door never built, 60 citizens lost through it): a seal door still unbuilt two days after SEAL_STUCK becomes a constructed wall wherever the citizens keep another way (BUG-044); the only way in or out stays a door.
 - Invaders climb walls [W]. Smoothed natural walls cannot be climbed. A floor overhang (2 tiles is safe) blocks climbing. Fortifications and overhanging walls can be climbed from 1 z below [W Climbing]. So: smooth the outer natural walls, give constructed perimeters a 1-2 tile overhang, and roof the courtyard.
 - Besiegers retreat "after being sufficiently successful … killing sufficient attackers, waiting them out, or some combination" [W Siege]. A goblin siege that cannot path in eventually leaves [? the duration is not documented; expect weeks to a season]. Necromancer sieges can take "a year or more" [W].
 - The fort must therefore be self-sufficient while sealed: underground farms, a well or cistern, stockpiles, workshops, hospital and tombs, all behind the inner gate.
