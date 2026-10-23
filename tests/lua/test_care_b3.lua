@@ -505,4 +505,15 @@ T.test('FR-74: the population diagnosis: children and residents apart, the peak,
   T.ok(p.lastw >= 340)
 end)
 
+T.test("FR-74: economy's MIGRANTS event reaches care through the kernel's event queue", function()
+  local W = world{cit = 6}
+  W.load({name = 'economy', every = {ticks = 600}, step = function(K)
+    if not W.sent then W.sent = true; K.emit('MIGRANTS', 'B', '5 migrants', {n = 5}) end
+  end})
+  W.run(2)
+  CW.day(W, 2)
+  local p = W.state().care.pop
+  T.eq({p.waves, p.mig}, {1, 5})
+end)
+
 T.done()

@@ -3682,9 +3682,14 @@ function M.state(K)
       care.src = json.object{}
       for k, n in pairs(st.src) do care.src[k] = n end
     end
-    if next(st.died_y or {}) then
+    if next(st.died_y or {}) then            -- the five commonest causes, the rest as 'other' (the state is 4 KB)
+      local list = top5(st.died_y)
+      local shown = 0
       care.died_y = json.object{}
-      for k, n in pairs(st.died_y) do care.died_y[k] = n end
+      for _, e in ipairs(list) do care.died_y[e[1]] = e[2]; shown = shown + e[2] end
+      local all = 0
+      for _, n in pairs(st.died_y) do all = all + n end
+      if all > shown then care.died_y.other = all - shown end
     end
   end
   local v = st.cof

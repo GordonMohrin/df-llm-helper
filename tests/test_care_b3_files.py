@@ -66,7 +66,10 @@ def test_care_config_is_checked(tmp_path):
     p.write_text(json.dumps({"care": {"tomb_open_per_run": 5000, "far_check": "x"}}), encoding="utf-8")
     errs = fairplay.care_errors(p)
     assert len(errs) == 2 and "tomb_open_per_run" in errs[0] and "far_check" in errs[1]
-    p.write_text(json.dumps({"care": {"tomb_open_per_run": 0}}), encoding="utf-8")
+    p.write_text(json.dumps({"care": {"mood_nook": 1, "mood_take": "a b", "stress_high": 0, "mood_crit": 99999999}}),
+                 encoding="utf-8")
+    assert len(fairplay.care_errors(p)) == 4
+    p.write_text(json.dumps({"care": {"tomb_open_per_run": 0, "mood_nook": False, "mood_take": "my-pile"}}), encoding="utf-8")
     assert fairplay.care_errors(p) == [] and fairplay.care_errors(tmp_path / "none.json") == []
 
 

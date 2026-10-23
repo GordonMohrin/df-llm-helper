@@ -1,5 +1,51 @@
 # CHANGELOG dfpilot
 
+## Care: tomb zones open for the dead, ghosts counted by the units, moods checked on the announcement with a drink nook, "toppled by" culprits, the stress sources and the population diagnosis (BUG-062, BUG-063, BUG-064, FR-74, 2026-10-23; offline, live-untested)
+- **Why (Run 14 Trussroads y529-y577 and Run 11/14 y484-y558, 2026):** 163, then 284 of 287 tomb zones stood `no_citizens`,
+  26-44 citizens lay unburied, ghosts went 1 -> 30 (the brief said 12), every care round `freed 20`; strange-mood dwarves died
+  of thirst (63,000-75,000) while MOOD_RISK said "nothing missing" and the game session's own check ran every 15 minutes;
+  bridges, levers and workshops vanished in PEACE ("0 building destroyers") while DF's reports said "toppled by <dwarf>";
+  stress stood at 52-78 % for years and the population fell 50 -> 33 with no migrants since y481.
+- **Causes (bugs/BUG-062 .. 064):** DFHack `entomb` closes the zone it assigns (entomb.lua:152-154); care spent its 20 acts a run
+  on frees and assignments and opened the rest last; a closed zone counted as a free tomb (so no coffin was provisioned);
+  the ghost number came from the 200 deaths care recorded; a body on another walk group was `no_coffin`; the mood check was
+  one phase of the 1,200-tick, demotable run; nobody read the toppled-by reports.
+- **BUG-062 (care, sense):** every closed unassigned zone over a usable coffin is opened on its own budget
+  (`tomb_open_per_run` 120); closed zones are no free tombs (`zone_locked`, state `care.tombs_locked`); `corpse_far` for a
+  body no citizen can walk to (no zone, no entomb, no coffin for it; GHOSTS `far`); the ghost number counts the ghostly units
+  (sense publishes `census.g`, CONTRACTS §6.5); TOMBS_LOCKED (B) with what was found, opened, closed again by owner (entomb
+  apart), re-given by DF after a free (`churn`) and the frees by reason; `inspect tombs` `lock`, `again`, `unusable`, `far_n`.
+- **BUG-063 (care, runner):** the STRANGE_MOOD / MOOD_BUILDING_CLAIMED reports start the mood check at once; while a mood is
+  open care runs the cheap mood check every `mood_fast` 300 ticks; MOOD_RISK names thirst, hunger (line 40,000) and the
+  workshop; MOOD_CRITICAL (A) at thirst 50,000 names the dwarf and the workshop; from 40,000 `runner.mooddrink` queues a
+  one-barrel drink stockpile `dfllm-mood` beside the claimed workshop (PEACE/RECOVERY, once per mood; never a job or an item
+  for the dwarf).
+- **BUG-064 (care, gate):** BUILDING_TOPPLED (B) from the toppled-by reports with the culprit, his stress and tantrum;
+  `care.toppled` and BRIDGE_DESTROYED name the culprit near the footprint (`tby`, `tunit`, `tcat`, `tghost`).
+- **FR-74 (care, plan, brief):** stress sources (`care.src`), STRESS_HIGH (B), `plan propose` drafts a temple and a tavern,
+  `plan check` warns without them; population diagnosis (`care.pop`, `died_y`: children vs adults, peak, deaths of the year by
+  cause, migrant waves, the game's conditions) in status (when shrinking or no wave) and brief; no steering of migrants.
+- Contracts: CONTRACTS §6.5 and the appendix (TOMBS_LOCKED, BUILDING_TOPPLED, STRESS_HIGH, MOOD_CRITICAL, GHOSTS `far`,
+  MOOD_RISK `ws`, BRIDGE_DESTROYED `tby`.., state `care.tombs_locked/src/pop/died_y`, REPORTS); config/baseline.json `care`
+  (`tomb_open_per_run`, `far_check`, `mood_hunger` 40000, `mood_act`, `mood_crit`, `mood_crit_hunger`, `mood_fast`,
+  `mood_nook`, `mood_take`, `mood_nook_retry`, `topple_every/win/r`, `stress_high/days/every`; `lint --config`); RULES §7
+  (GHOSTS, MOOD_RISK / MOOD_CRITICAL rows edited in place); DESIGN §5.9, §5.10 and the stress KPI; FR-74 entry.
+- Tests (each new one fails on f17e2b3): `tests/lua/test_care_b3.lua`, `tests/lua/test_sense_ghosts.lua`,
+  `tests/lua/test_bridge_toppled.lua`, `tests/test_care_b3_files.py` (+ `tests/lua/care_b3_scenario.lua` on the real kernel),
+  `tests/test_stress_pop.py`; `tests/lua/test_care_fr.lua`: the 'unreachable' case walks to the citizens but not to its coffin.
+- **Live check (Trussroads):** after `git pull`, `dfhack-run dfllm reload` and a restart of `dfllm follow`:
+  - `dfllm cmd inspect '{"what":"tombs"}'`: `lock.free` and `locked` fall to 0 within a few care runs; `again.free` > 0 means
+    something other than DF's assignment or entomb closes unowned zones (look for a plugin or script), `again.churn` > 0 that
+    DF gives the zones care frees to other bodies (then `unusable` says why the coffins cannot take them); the digest has
+    TOMBS_LOCKED; `care.tombs_free` in `dfllm status` counts open tombs only;
+  - GHOSTS `far` names the bodies on another walk group; `dfllm status` `ghosts` equals the count of ghostly units
+    (`dfhack-run lua` read-only over `world.units.active`); kern.log `care: N ghostly citizen(s) were not in the death record`;
+  - the next strange mood: MOOD_START within seconds of the game's announcement, `mood nook:` in kern.log at thirst/hunger
+    40,000, MOOD_RISK with `workshop`, MOOD_CRITICAL at 50,000; does the dwarf's thirst fall once the nook stands (MOOD_END)?
+  - the next "toppled by" report in the game log: BUILDING_TOPPLED with the culprit; if absent, note the report's
+    `df.announcement_type` name and text (bugs/BUG-064);
+  - `dfllm status`/`brief`: `pop trend` and the stress sources; `dfllm plan propose` drafts temple/tavern at stress >= 30 %.
+
 ## The audit and sites snapshots fit again: one box of the fort's pieces, explore shafts as narrow columns, margin steps, a cap of 400,000 tiles and a refusal that names what stretches the box (BUG-043, 2026-10-17; offline, live-untested)
 - **Why (Run 11, y479):** Kilrudrabed site98, y479 winter d79, kernel 2eea070: `dfllm audit` -> `audit: snapshot refused:
   bbox has 252108 tiles > 250000`, `bp sites <tpl> --fresh` the same; kern.log `readiness: audit snapshot not exported:

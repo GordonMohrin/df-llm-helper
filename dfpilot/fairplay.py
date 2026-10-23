@@ -328,7 +328,12 @@ def runner_errors(path: str | Path | None = None) -> list[str]:
 # the stress response (FR-74): "bool", else an int range. care.conf takes the file's part as it is, so a bad value here
 # would reach the kernel: lint --config refuses it. The other care keys are checked by the mirror test
 # (tests/lua/test_care.lua: config/baseline.json == care.DEFAULTS).
-CARE_LIM: dict = {"tomb_open_per_run": (0, 1000), "far_check": (0, 500)}
+CARE_LIM: dict = {
+    "tomb_open_per_run": (0, 1000), "far_check": (0, 500),
+    "mood_hunger": _THIRST, "mood_act": _THIRST, "mood_crit": _THIRST, "mood_crit_hunger": _THIRST, "mood_fast": (0, 3600),
+    "mood_nook": "bool", "mood_take": "pile", "mood_nook_retry": _TICKS,
+    "topple_every": _TICKS, "topple_win": _TICKS, "topple_r": (0, 50),
+    "stress_high": (1, 100), "stress_days": (1, 400), "stress_every": _TICKS}
 
 
 def care_errors(path: str | Path | None = None) -> list[str]:
@@ -353,6 +358,9 @@ def care_errors(path: str | Path | None = None) -> list[str]:
         if lim == "bool":
             if not isinstance(v, bool):
                 errs.append(f"{name}: care.{k}: true or false expected, got {v!r}")
+        elif lim == "pile":                    # a stockpile name for take_from (runner.mooddrink: <= 20 characters)
+            if not (isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,20}", v)):
+                errs.append(f"{name}: care.{k}: a stockpile name (1-20 letters, digits, _ or -) expected, got {v!r}")
         elif not (isinstance(v, int) and not isinstance(v, bool) and lim[0] <= v <= lim[1]):
             errs.append(f"{name}: care.{k}: int {lim[0]}..{lim[1]} expected, got {v!r}")
     return errs
