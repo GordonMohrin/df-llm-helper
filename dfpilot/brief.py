@@ -206,6 +206,38 @@ def line_unready(ctx: Ctx) -> str:
     return _join(out)
 
 
+QUIET_WHY = {"near": "a hostile is near", "inside": "a hostile inside Kern+", "great": "a great danger in reach",
+             "recent": "a trigger within the last 2,400 ticks", "armed": "the threat scan is armed",
+             "stale": "no fresh census", "run": "running"}
+
+
+def lockdown_text(al: dict) -> str:
+    """BUG-065 (Run 14, a gremlin held a lockdown for months while the brief said 'threat 0 vis'): the lockdown with its
+    age and limit, its cause (unit, race, position, tiles to the nearest citizen outside Kern+ and entrance, harmless
+    or dangerous) or that nothing is in sight, and why the quiet clock does not run."""
+    txt = f"lockdown {al['why']}"
+    if "age" in al:
+        days = al["age"] / 1200
+        lim = al.get("lim", 0)
+        txt += (f" {days:.1f} of {lim / 1200:g} days" + (" (past the limit)" if al["age"] > lim else "")
+                if lim else f" {days:.1f} days, no limit")
+    by = al.get("by")
+    if by:
+        near = [f"{by['dc']} tiles from a citizen outside Kern+"] if by["dc"] >= 0 else []
+        if by["de"] >= 0:
+            near.append(f"{by['de']} from an entrance")
+        txt += (f": cause {by['k']} {by['id']} {by['race']} at {','.join(str(c) for c in by['pos'])}"
+                + "".join(f", {x}" for x in near)
+                + (f", size {by['sz']}" if "sz" in by else ", size unknown")
+                + (", harmless" if by.get("hl") else ", dangerous")
+                + (f" (+{by['n'] - 1} more)" if by.get("n", 1) > 1 else ""))
+    elif "qw" in al:
+        txt += ": no hostile in sight"
+    if al.get("qw"):
+        txt += f"; quiet clock: {QUIET_WHY.get(al['qw'], al['qw'])}"
+    return txt
+
+
 def line_alarm(ctx: Ctx) -> str:
     """FR-51/53/55/58: the clock governor, the lockdown, unacked interrupts, lever latency and the arrival ETA."""
     s, out = ctx.s, []
@@ -218,7 +250,7 @@ def line_alarm(ctx: Ctx) -> str:
     al = s.get("alarm")
     if al:
         if al["lock"]:
-            out.append(f"lockdown {al['why']}")
+            out.append(lockdown_text(al))
             if "doors" in al:                  # BUG-012: doors forbidden, and those waiting for citizens outside
                 out.append(f"doors {al['doors']} forbidden" + (f", {al['dwait']} waiting for {al.get('dout', 0)}"
                                                                f" citizens outside" if al.get("dwait") else "")
@@ -362,7 +394,11 @@ def line_def(ctx: Ctx) -> str:
     s, out = ctx.s, []
     th = s.get("threat")
     if th:
-        out.append(f"threat {th['vis']} vis" + (" ARMED" if th["armed"] else ""))
+        al = s.get("alarm")
+        out.append(f"threat {th['vis']} vis" + (" ARMED" if th["armed"] else "")
+                   # BUG-065: a held lockdown is not 'nothing': say what holds it
+                   + (f" (lockdown holds: quiet clock {al['qw']})" if th["vis"] == 0 and al and al.get("lock")
+                      and al.get("qw") else ""))
     if s.get("bridges"):
         # BUG-030: a destroyed bridge stands out (an open way, no pulls for it)
         out.append("bridges " + " ".join(f"{b} {'DESTROYED' if v == 'destroyed' else v}"

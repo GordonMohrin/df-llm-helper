@@ -380,7 +380,13 @@ C.STATE_SPEC = obj({
   alarm = obj({defcon = int(1, 5), unacked = NAT, last = NAT, ack = NAT, lock = FLAG, why = str(24)},
               {eta = int(-1), doors = NAT, dwait = NAT, dout = NAT, dref = NAT, far = NAT,
                -- BUG-035: the open recall: called, still out of rto, left since, cannot come
-               rn = NAT, rleft = NAT, rnew = NAT, rstuck = NAT, rto = str(24)}),
+               rn = NAT, rleft = NAT, rnew = NAT, rstuck = NAT, rto = str(24),
+               -- BUG-065: the lockdown's age and limit (ticks, lim 0 = off), why its quiet clock does not run (near,
+               -- inside, great, recent, armed, stale, run), and the cause: the nearest counted hostile, its race, kind,
+               -- position, tiles to the nearest citizen outside Kern+ (dc) and entrance (de), harmless (hl), how many (n), its body size (sz)
+               age = NAT, lim = NAT, qw = str(8),
+               by = obj({id = NAT, race = str(24), k = str(8), pos = {t = 'tup', items = {NAT, NAT, NAT}},
+                         dc = int(-1), de = int(-1)}, {hl = FLAG, n = NAT, sz = NAT})}),
   lever = obj({lat_s = int(-1), lat_t = int(-1), pend = NAT, wait_s = NAT}),
   alert = obj({want = str(24), burrow = str(24), tiles = NAT, inside = NAT, ok = FLAG},
               {why = str(40), core_d = NAT, core_f = NAT,           -- BUG-028: drink/food days inside the core

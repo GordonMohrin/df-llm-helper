@@ -462,6 +462,11 @@ local function consider(hs, u)
                  k = great and 'great' or (undead and 'undead') or (inv and 'inv') or 'danger'}
   if rf.bd then entry.bd, hs.bd = 1, hs.bd + 1 end
   if an then entry.an = 1 end
+  -- BUG-065 (Run 14, a gremlin in the caves): the unit's own body size (cm3; a dwarf is 60000) and the large-predator
+  -- flag go to the census, so reflex can tell a small harmless intruder from a dangerous one [size field: ? live]
+  if rf.p then entry.pr = 1 end
+  local okz, sz = pcall(function() return u.body.size_info.size_cur end)
+  if okz and math.type(sz) == 'integer' and sz >= 0 then entry.sz = sz end
   list[#list + 1] = entry
   -- integer sort key: the zone (past B1, then the intake area), then distance (O1, else nearest outside citizen),
   -- then scan order

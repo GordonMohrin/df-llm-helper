@@ -197,9 +197,31 @@ def next_hint(etype: str, e: dict) -> str:
         return HOSPITAL_OUT_HINT
     if etype == "DECISION_NEEDED" and d.get("id") == "bridge_rebuild":
         return rebuild_hint(d)
+    if etype == "DECISION_NEEDED" and d.get("id") == "intruder_sortie":
+        return sortie_hint(d)
+    if etype == "DECISION_NEEDED" and d.get("id") == "confined_need":
+        return need_hint(d)
     if etype == "PROJECT_BLOCKED" and d.get("park") is not None and d.get("proj"):
         return park_hint(d)
     return NEXT.get(etype, "dfllm brief")
+
+
+def sortie_hint(d: dict) -> str:
+    """BUG-065: an intruder holds a lockdown. A harmless one: the lockdown ends by itself at the limit, the sortie is the
+    faster way; a dangerous one past the limit: the lockdown stays while it is near, the sortie is the way out."""
+    cmd = d.get("cmd")
+    how = f"; to send the squad: {cmd} (approve:true is a logged decision)" if cmd else "; no squad to send"
+    if d.get("hl"):
+        return f"tell Gordon{how}; otherwise the lockdown ends by itself at its limit (confine.max_days)"
+    return (f"tell Gordon: the lockdown stays while this one is near{how} (only if the squad can win); "
+            "dfllm status shows the cause")
+
+
+def need_hint(d: dict) -> str:
+    """BUG-065: a mood dwarf or patient confined by the lockdown is in need (thirst/hunger)."""
+    return (f"tell Gordon: {d.get('why', 'citizen')} {d.get('unit', '?')} (thirst {d.get('thirst', '?')}) is confined by the "
+            "lockdown; with nothing dangerous near the kernel ended it, else STRANDED relax is the rescue for the "
+            "others and a sortie against the cause (dfllm status) ends the lockdown")
 
 
 def park_hint(d: dict) -> str:

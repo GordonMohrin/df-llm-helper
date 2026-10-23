@@ -768,10 +768,15 @@ local function anchor_dist(K, g)
   local o1 = g.man.bridges and g.man.bridges[g.outer[1]]
   if o1 then pts[#pts + 1] = geom.bbox_center(o1.fp) end
   local best = -1
+  -- BUG-065: a hostile the lockdown cleared (reflex far list) holds the ALERT civ alert for nothing
+  local okf, far = K.call('reflex', 'far_ids')
+  far = okf and type(far) == 'table' and far or {}
   for _, e in ipairs(type(h) == 'table' and h.list or {}) do
-    for _, p in ipairs(pts) do
-      local d = geom.dist(e, p)
-      if best < 0 or d < best then best = d end
+    if not (far[e.id] and e.k ~= 'great') then
+      for _, p in ipairs(pts) do
+        local d = geom.dist(e, p)
+        if best < 0 or d < best then best = d end
+      end
     end
   end
   return best

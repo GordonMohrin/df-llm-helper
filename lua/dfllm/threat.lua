@@ -172,6 +172,18 @@ function M.assess(K)
     end
   end
   a.rel, a.great_rel, a.near_dangers, a.far = rel, great_rel, near, nfar
+  if nfar > 0 then
+    -- BUG-065: a hostile the lockdown cleared (reflex far list: expired far, or a harmless intruder released at the
+    -- confinement limit) counts for nothing in the distances either: the ALERT civ alert follows near_cit
+    local nc, no = -1, -1
+    for _, e in ipairs(h.list or {}) do
+      if not (far and far[e.id] and e.k ~= 'great') then
+        if type(e.dc) == 'number' and e.dc >= 0 and (nc < 0 or e.dc < nc) then nc = e.dc end
+        if type(e.d_o1) == 'number' and e.d_o1 >= 0 and (no < 0 or e.d_o1 < no) then no = e.d_o1 end
+      end
+    end
+    a.near_cit, a.near_o1 = nc, no
+  end
   a.inv = math.max(0, a.inv - far_inv)     -- Run 11: invaders whose lockdown expired far count again on approach
   local inv_armed = now < st.inv
   if great_rel > 0 then a.siege = 'great'

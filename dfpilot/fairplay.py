@@ -138,7 +138,7 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
         return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
     for k in doc:
         if k not in ("v", "about", "clock", "hold_quiet_days", "ack_timeout_s", "defaults", "refuge", "gate", "intake",
-                     "sortie", "predator_near", "lockdown_near", "stations", "perimeter"):
+                     "sortie", "predator_near", "lockdown_near", "stations", "perimeter") and k not in REFLEX_EXTRA:
             errs.append(f"{name}: unknown key {k!r}")
     clock = doc.get("clock", {})
     if not isinstance(clock, dict):
@@ -196,13 +196,18 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
                 errs.append(f"{name}: gate.{k}: unknown key")
     # intake waves and the sortie through O1 (Gordon 2026-10-16; lua/dfllm/siege.lua M.IK_LIM / M.SO_LIM)
     for blk, lims in (("intake", INTAKE_LIM), ("sortie", SORTIE_LIM), ("stations", STATIONS_LIM),
-                      ("perimeter", PERIMETER_LIM)):
+                      ("perimeter", PERIMETER_LIM), ("confine", CONFINE_LIM), ("popups", POPUPS_LIM)):
         sec = doc.get(blk, {})
         if not isinstance(sec, dict):
             errs.append(f"{name}: {blk} must be an object")
             continue
         for k, v in sec.items():
             lim = lims.get(k)
+            if blk == "confine" and k == "harmless_races":      # BUG-065: creature tokens (reflex.lua `harmless`)
+                if not isinstance(v, list) or len(v) > 16 or any(
+                        not (isinstance(x, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{0,39}", x)) for x in v):
+                    errs.append(f"{name}: confine.harmless_races: a list of at most 16 creature tokens (GREMLIN) expected")
+                continue
             if lim is None:
                 errs.append(f"{name}: {blk}.{k}: unknown key")
             elif lim == "bool":
@@ -211,6 +216,14 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
             elif not is_int(v, *lim):
                 errs.append(f"{name}: {blk}.{k}: int {lim[0]}..{lim[1]} expected, got {v!r}")
     return errs
+
+
+# BUG-065 / FR-75: the confinement limit and the popup knobs of config/reflex.json (lua/dfllm/reflex.lua `cfg`,
+# lua/dfllm/arbiter.lua `popup_cfg`; a bad value = the default)
+CONFINE_LIM: dict = {"max_days": (0, 365), "harmless_size": (0, 5000000), "lone_max": (1, 10), "offer_days": (0, 365),
+                     "need_thirst": (10000, 75000), "need_hunger": (10000, 100000)}
+POPUPS_LIM: dict = {"other": "bool", "other_s": (5, 600), "log_s": (60, 86400)}
+REFLEX_EXTRA = ("confine", "popups")
 
 
 # the kernel's limits for config/reflex.json intake / sortie (siege.lua M.IK_LIM, M.SO_LIM; a bad value = the default)
