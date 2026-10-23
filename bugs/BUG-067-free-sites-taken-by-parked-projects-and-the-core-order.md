@@ -1,5 +1,5 @@
 # BUG-067 "only 0 free site(s)" with sites free: ranked sites held by parked projects, depth 12 refused, rooms before a dug core
-Status: fixed in FIXCOMMITS (offline, live-untested): `place()` looks down to 60 ranked sites when the best 12 are all taken,
+Status: fixed in 304535f, docs d77a187 (offline, live-untested): `place()` looks down to 60 ranked sites when the best 12 are all taken,
 every "no free site" names the holders with their state and the way out, an explore refused at depth 12 names the
 shallower depth it accepts, and `plan propose`/`check` and the placement error give the order fortcore -> dug -> sites
 Severity: medium (wrong report that blocks growth: `plan check` rejects a plan for lack of sites that exist)

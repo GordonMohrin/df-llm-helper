@@ -1,5 +1,5 @@
 # BUG-068 A lever whose pull has no effect is pulled again every 50 ticks, for ever; `act.run failed for baseline: nil`
-Status: fixed in FIXCOMMITS (offline, live-untested): a lever pulled `gate.noeffect_max` (3) times in a row without its bridge
+Status: fixed in 304535f, docs d77a187 (offline, live-untested): a lever pulled `gate.noeffect_max` (3) times in a row without its bridge
 moving is parked for `gate.noeffect_wait` (1200) ticks (a quarter of it in SIEGE/BREACH/DRILL), doubled per further parking; LEVER_NOEFFECT (B) reports it once per
 lever; a bridge with every lever parked fails as GATE_FAIL `no_effect`; ACT_FAIL names the command line of a failed
 `act.run` and says "raised an error without a message" for `error(nil)`

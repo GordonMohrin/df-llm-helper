@@ -1,5 +1,5 @@
 # BUG-066 A destroyed workshop stays in the manifest as built; `bp sites workshops` says "nothing left to build"
-Status: fixed in FIXCOMMITS (offline, live-untested): once a game day the runner
+Status: fixed in 304535f, docs d77a187 (offline, live-untested): once a game day the runner
 compares the manifest's workshops with the workshops that stand, a missing one leaves the manifest after two scans and
 is listed in `manifest.gone`; follow/cmd take the workshops of `gone` out of every bp fragment older than the loss
 Severity: high (wrong decision: a strange mood has no workshop, the fort asks for none and the dwarf is lost)
