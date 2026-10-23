@@ -160,6 +160,9 @@ T.test('BUG-037: projects blocked for good are parked after queue.park_days: las
   T.eq(W.K.call('runner', 'pending', 'farms'), true)
   local _, n = W.K.call('runner', 'pending', 'farms')
   T.eq(n, 1, 'not parked yet')
+  -- BUG-058 (DECISIONS 9): lost for good (retries spent), parked or not: economy asks for no further farms project
+  T.eq({W.K.call('runner', 'lost', 'farms')}, {true, 1, 'fm'})
+  T.eq({W.K.call('runner', 'lost', 'tombs')}, {true, 0, nil}, 'another template')
   H.dig(W); H.runs(W, 2); H.build(W)
   for _ = 1, 60 do H.runs(W, 1) end                      -- 31 days
   T.eq(H.proj(W, 'bd').done, 1)
@@ -189,6 +192,7 @@ T.test('BUG-037: projects blocked for good are parked after queue.park_days: las
   T.ok(W.inbox('bp.cancel', {proj = 'fm'}).ok)
   H.runs(W, 1)
   T.eq(W.K.persist.get('m.runner').park.fm, nil)
+  T.eq({W.K.call('runner', 'lost', 'farms')}, {true, 0, nil}, 'cancelled: the cause is gone')
   -- a seal blocked for good: stuck, then parked: no seal-first entry, nothing paused (old: SEAL_STUCK state for good)
   local W2 = world{tag = 'parkseal', cfg = {queue = {park_days = 5}}}
   H.place(W2, 'sl', seal_at(W2, SX))

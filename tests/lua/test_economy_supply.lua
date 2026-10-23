@@ -7,6 +7,7 @@ local kmock = require('dfllm.util.k_mock')
 local function fresh(mod) package.loaded['dfllm.' .. mod] = nil; return require('dfllm.' .. mod) end
 
 local SEASONS = {SPRING = true, SUMMER = true, AUTUMN = true, WINTER = true}
+local TILES = {}
 local function raw(id, flags, depth)
   local f = {SEED = true}
   for k, v in pairs(flags) do f[k] = v end
@@ -20,6 +21,7 @@ local function world(opts)
   for i = 1, cit do units[i] = {id = i, citizen = true, name = 'Urist ' .. i, pos = {10 + i, 10, 100}} end
   local cfg = F.cfg()
   if opts.starve_days then cfg.economy.starve.days = opts.starve_days end
+  if opts.cfg then opts.cfg(cfg) end
   local W = F.world{cfg = {baseline = cfg}, units = units, mode = opts.mode}
   local ids = {}
   for i = 1, cit do
@@ -56,13 +58,25 @@ local function world(opts)
     W.load({name = 'snapshot', every = {ticks = 100},
             tile = function(K, x, y, z) if x == 66 then return nil end return {c = '.'} end,   -- x 66: hidden
             far = function(K, x, y, z) return x == 99 end,                                 -- x 99: cut off
-            reach = function(K, a, b) return a.x ~= 13 end})                             -- unit 3 is shut in
+            reach = function(K, a, b) return a.x ~= 13 end,                              -- unit 3 is shut in
+            -- BUG-058: the plot's tile (snapshot.plot_under): under the open sky, subterranean, or unknown (no entry)
+            plot_under = function(K, x, y, z)
+              local t = TILES[z]
+              if not t or t.hidden then return nil end
+              if t.outside then return false end
+              return t.subterranean == true
+            end})
   end
   if opts.setup then opts.setup(W) end
   W.load(fresh('economy'))
   return W
 end
 
+local function logs_like(W, pat)
+  local r = {}
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find(pat, 1, true) then r[#r + 1] = l.msg end end
+  return r
+end
 local function settle(W) for _ = 1, 80 do W.run(1) end end
 local function days(W, n) for _ = 1, n do W.run(1200, {skip = 100}); settle(W) end end
 local function plot(W, crops)
@@ -87,7 +101,8 @@ T.test('FR-17: every empty season slot gets a crop that grows then and there (un
   T.eq(surf.plant_id[3], -1, 'winter: no surface crop grows')
   T.eq({empty.plant_id[0], empty.plant_id[3]}, {-1, -1})
   local ci = W.K.census.i
-  T.eq({ci.farm_plots, ci.farm_empty}, {3, 10}, 'counted before the fill')
+  -- BUG-058: the slot of the running season (spring) was filled at once by T.slotnow; the daily fill counts the other 9
+  T.eq({ci.farm_plots, ci.farm_empty}, {3, 9}, 'counted before the daily fill')
   days(W, 1)
   T.eq(W.K.census.i.farm_empty, 5, 'the empty plot (4) and winter on the surface plot (1)')
 end)
@@ -203,6 +218,153 @@ T.test('FR-25: nothing without hungry citizens, and no work details in modern la
   days(W2, 1)
   T.eq(#W2.find_acts('plant_gather'), 1)
   T.eq(#W2.find_acts('work_detail'), 0, 'labormanager (modern) owns the details')
+end)
+
+-- BUG-058 (Run 13 y512/y513, Wheelsblows: 8 plots stood at -1 for the running season for weeks, autofarm emptied the slots
+-- the kernel set within 30 s, the new plots on z149 held surface crops and made no PlantSeeds job): the slots of the
+-- running season are filled at once (T.slotnow), the edible crops first when food is low, a crop of the wrong kind for the
+-- plot's tile is replaced, and autofarm steps aside (disable) when it works against the kernel.
+local SURFACE = {hidden = false, outside = true, subterranean = false}
+local UNDER = {hidden = false, outside = false, subterranean = true}
+local function tiles(by_z) TILES = by_z end            -- plot level -> tile flags (snapshot.plot_under above reads them)
+local function crop_world(opts)
+  opts = opts or {}
+  opts.setup = function(W)
+    df.global.world.raws.plants.all = kmock.vec{
+      raw('MUSHROOM_HELMET_PLUMP', SEASONS, 1),                         -- 0: underground, all year
+      raw('STRAWBERRY', {SPRING = true, SUMMER = true, AUTUMN = true}), -- 1: surface
+      raw('CARROT', SEASONS),                                           -- 2: surface, all year, edible
+      raw('MADDER', SEASONS),                                           -- 3: surface, all year, a dye (no food)
+      raw('TURNIP', SEASONS),                                           -- 4: surface
+      raw('GRASS_WHEAT_CAVE', SEASONS, 1)}                              -- 5: underground
+    df.global.world.raws.plants.all[2].growths = kmock.vec{{mat_type = 419, mat_index = 63}}
+    F.mat(W, 419, 63, {token = 'PLANT:CARROT:ROOT', flags = {EDIBLE_RAW = true}})
+    F.mat(W, 419, 64, {token = 'PLANT:MADDER:SEED'})
+    F.mat(W, 419, 65, {token = 'PLANT:GRASS_WHEAT_CAVE:SEED'})
+    if opts.plots then opts.plots(W) end
+  end
+  return world(opts)
+end
+
+T.test('BUG-058: the running season\'s slot of an all-empty plot is filled at once from the plot\'s tile; edible crops first ' ..
+       'when food is low', function()
+  local function run(food)
+    local plot_, W
+    W = crop_world{food = food, plots = function(W)
+      tiles({[100] = SURFACE})
+      F.item(W, 'SEEDS', {mat_type = 419, mat_index = 64, stack_size = 50})         -- madder: the most seeds
+      F.item(W, 'SEEDS', {mat_type = 419, mat_index = 62, stack_size = 4})          -- carrot (mat 62 = CARROT seed)
+      plot_ = plot(W, {-1, -1, -1, -1})
+    end}
+    days(W, 1)
+    return W, plot_
+  end
+  local W, p1 = run(500)
+  T.eq(p1.plant_id[0], 3, 'food fine: the crop with the most seeds that grows now (madder)')
+  T.ok(#logs_like(W, 'slots of the running season filled at once') == 1, 'one kern.log line')
+  local W2, p2 = run(1)
+  T.eq(p2.plant_id[0], 2, 'food low: the edible carrot first')
+end)
+
+T.test('BUG-058: surface crops on an underground plot are replaced by crops that grow underground; the surface plot stays',
+       function()
+  local under, surf
+  local W = crop_world{plots = function(W)
+    tiles({[90] = UNDER, [100] = SURFACE})
+    F.item(W, 'SEEDS', {mat_type = 419, mat_index = 65, stack_size = 9})            -- cave wheat
+    F.item(W, 'SEEDS', {mat_type = 419, mat_index = 60, stack_size = 5})            -- plump helmet
+    F.item(W, 'SEEDS', {mat_type = 419, mat_index = 62, stack_size = 4})
+    under = F.building(W, 'FARM_PLOT', {x1 = 0, y1 = 0, x2 = 2, y2 = 2, z = 90, plant_id = {[0] = 4, 2, -1, 1},
+                                        getType = function() return df.building_type.FarmPlot end})
+    surf = plot(W, {2, 2, 2, 2})
+  end}
+  days(W, 1)
+  for s = 0, 3 do
+    local pid = under.plant_id[s]
+    T.ok(pid == 0 or pid == 5, string.format('slot %d of the underground plot holds %s', s, tostring(pid)))
+  end
+  T.eq({surf.plant_id[0], surf.plant_id[1], surf.plant_id[2], surf.plant_id[3]}, {2, 2, 2, 2}, 'the surface plot is right')
+end)
+
+T.test('BUG-058: autofarm is disabled below af_off_days food days, enabled again from af_on_days after af_hold_days; ' ..
+       'keep never touches it', function()
+  local W = crop_world{food = 1, plots = function(W) tiles({[100] = SURFACE}); plot(W, {2, -1, -1, -1}) end}
+  days(W, 2)
+  local n = 0
+  for _, l in ipairs(F.runs(W)) do if l == 'disable autofarm' then n = n + 1 end end
+  T.eq(n, 1, 'one disable autofarm')
+  T.ok(#logs_like(W, 'autofarm disabled (food') == 1, 'logged once')
+  for _, l in ipairs(F.runs(W)) do T.ok(l:sub(1, 17) ~= 'autofarm threshold', l) end
+  W.add_food = F.item(W, 'FOOD', {stack_size = 3000, subtype = 1})
+  days(W, 10)
+  for _, l in ipairs(F.runs(W)) do T.ok(l ~= 'enable autofarm' or false, 'held 14 days: not yet') end
+  days(W, 6)
+  local e = 0
+  for _, l in ipairs(F.runs(W)) do if l == 'enable autofarm' then e = e + 1 end end
+  T.eq(e, 1, 'food back and held: enabled again')
+  local Wk = crop_world{food = 1, cfg = function(c) c.economy.farms.autofarm = 'keep' end,
+                        plots = function(W) tiles({[100] = SURFACE}); plot(W, {2, -1, -1, -1}) end}
+  days(Wk, 2)
+  for _, l in ipairs(F.runs(Wk)) do T.ok(l ~= 'disable autofarm', 'keep') end
+end)
+
+T.test('BUG-058: a slot the kernel filled and autofarm emptied again switches autofarm off (evidence); twice: for good',
+       function()
+  local pl
+  local W = crop_world{food = 500, plots = function(W)
+    tiles({[100] = SURFACE})
+    F.item(W, 'SEEDS', {mat_type = 419, mat_index = 62, stack_size = 4})
+    pl = plot(W, {-1, -1, -1, -1})
+  end}
+  days(W, 1)
+  T.eq(pl.plant_id[0], 2)
+  for _, l in ipairs(F.runs(W)) do T.ok(l ~= 'disable autofarm', 'food fine, nothing wiped yet') end
+  pl.plant_id[0] = -1                                           -- autofarm: nothing short, no crop
+  days(W, 1)
+  local n = 0
+  for _, l in ipairs(F.runs(W)) do if l == 'disable autofarm' then n = n + 1 end end
+  T.eq(n, 1)
+  T.ok(#logs_like(W, 'slots it emptied or changed again') >= 1, 'the log names the cause')
+  T.eq(pl.plant_id[0], 2, 'and the slot is filled again')
+  T.eq(W.K.persist.get('m.economy').af.wiped, 1)
+  local function count(what)
+    local k = 0
+    for _, l in ipairs(F.runs(W)) do if l == what then k = k + 1 end end
+    return k
+  end
+  F.item(W, 'FOOD', {stack_size = 3000, subtype = 1})            -- food back: autofarm is allowed again after 14 days
+  days(W, 20)
+  T.eq(count('enable autofarm'), 1)
+  pl.plant_id[0] = -1                                           -- emptied a second time
+  days(W, 1)
+  T.eq(count('disable autofarm'), 2)
+  T.eq(W.K.persist.get('m.economy').af.wiped, 2)
+  days(W, 30)
+  T.eq(count('enable autofarm'), 1, 'wiped twice: autofarm stays off')
+end)
+
+T.test("BUG-058: farms.autofarm 'off' disables autofarm at the first run, whatever the food", function()
+  local W = crop_world{food = 500, cfg = function(c) c.economy.farms.autofarm = 'off' end,
+                       plots = function(W) tiles({[100] = SURFACE}); plot(W, {2, -1, -1, -1}) end}
+  days(W, 1)
+  local n = 0
+  for _, l in ipairs(F.runs(W)) do if l == 'disable autofarm' then n = n + 1 end end
+  T.eq(n, 1)
+  days(W, 3)
+  n = 0
+  for _, l in ipairs(F.runs(W)) do if l == 'disable autofarm' then n = n + 1 end end
+  T.eq(n, 1, 'once')
+end)
+
+T.test('BUG-058: a wrong-kind crop is replaced only when the right kind has usable seeds', function()
+  local under
+  local W = crop_world{plots = function(W)
+    tiles({[90] = UNDER})
+    under = F.building(W, 'FARM_PLOT', {x1 = 0, y1 = 0, x2 = 2, y2 = 2, z = 90, plant_id = {[0] = 4, 2, -1, 1},
+                                        getType = function() return df.building_type.FarmPlot end})
+  end}
+  days(W, 1)
+  T.eq({under.plant_id[0], under.plant_id[1], under.plant_id[3]}, {4, 2, 1}, 'no cave seeds: the crops stay as they are')
 end)
 
 T.done()

@@ -183,7 +183,7 @@ Sources: [W] dwarffortresswiki.org (v50+ namespace, fetched today); [D] the inst
   - Priority order: dining hall (everyone eats there daily) → own bedrooms → temple → tavern → library.
 - **Temple:** a temple with no specific deity satisfies worshippers of local gods; foreign gods need their own temple. Shrine <2,000, Temple ≥2,000, Temple Complex ≥10,000. A sect of 10 petitions for a 2,000-value temple [W Temple].
 - **Tavern:** needs a tavern keeper, drinks and mugs (`library/basic` makes mugs). **Library:** bookcase, tables and chairs. **Guildhalls:** on petition.
-- **Food and drink:** keep stock in days, not item counts: drink ≥170 days, food ≥60 days [R]. Have ≥5 kinds of meals and booze. `seedwatch` only on farmed crops at 10-15 (`seedwatch all` caused the Run 2 lockout).
+- **Food and drink:** keep stock in days, not item counts: drink ≥170 days, food ≥60 days [R]. Have ≥5 kinds of meals and booze. `seedwatch` only on farmed crops at 10-15 (`seedwatch all` caused the Run 2 lockout). "Food 41 d" with meals 0 counts raw plants nobody cooks: watch the hungry count first. The kernel is the sole writer of the farm season slots (autofarm empties them; it is switched off below 30 food days); an empty Planters or Plant gatherers detail with PlantSeeds/GatherPlants jobs waiting is the kernel's fault to fix, not a reason to set labors by hand (hand-written detail entries without the labor are probably dropped by the game, BUG-057) [R: Runs 12-14].
 - **Clothing:** `tailor` with `materials silk cloth yarn` keeps leather for armor. The `confiscate` default removes ownership, which collides with fair-play rule FP13 → Gordon decides [D].
 - **Dead:**
   - one 1x1 tomb zone per coffin, with free tombs ≥ open corpses + 6;

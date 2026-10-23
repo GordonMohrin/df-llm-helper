@@ -95,6 +95,22 @@ T.test('plant_gather: shrubs at the positions get the gather designation, once',
   T.eq((env.api.plant_gather('x')), false)
 end)
 
+T.test('plant_ungather (BUG-057/FR-72): the gather designation of the shrubs at the positions is cancelled', function()
+  H.world{tag = 'pu'}
+  local un = {}
+  local function shrub(x) return {pos = {x = x, y = 2, z = 3}} end
+  local a, b, c = shrub(1), shrub(2), shrub(3)
+  df.global.world.plants = {shrub_dry = kmock.vec{a, b}, shrub_wet = kmock.vec{c}}
+  dfhack.designations = {isPlantMarked = function(p) return p ~= b end,
+                         unmarkPlant = function(p) un[#un + 1] = p.pos.x; return true end}
+  local env = mk('economy')
+  T.eq({env.api.plant_ungather({{1, 2, 3}, {2, 2, 3}, {3, 2, 3}, {9, 9, 9}})}, {true, 2})
+  T.eq(un, {1, 3}, 'a shrub that is not marked is left alone')
+  T.eq({env.api.plant_ungather({})}, {true, 0})
+  T.eq((env.api.plant_ungather('x')), false)
+  T.eq((mk('military').api.plant_ungather({{1, 2, 3}})), false, 'only economy')
+end)
+
 T.test('work_detail_prune: ids of dead or departed units leave every detail; insane citizens stay', function()
   local W = H.world{tag = 'wdp', units = {{id = 1, citizen = true}, {id = 2, citizen = true, dead = true},
                                           {id = 3, citizen = true, insane = true}}}

@@ -404,8 +404,19 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400)},
                      "orders": {"unval_days": (1, 60)},
                      "office": {"table": "bool", "retry_days": (1, 112), "max_tiles": (1, 10000)},
                      "gather": {"drink_d": (0, 400), "drink_off": (0, 400)},
-                     "barrels": {"brew_wait": (0, 200)}}
-ECONOMY_OWN = ("drink", "office")             # parts whose every key is listed above
+                     "barrels": {"brew_wait": (0, 200)},
+                     # BUG-058: the running season's slots at once, autofarm 'auto' | 'off' | 'keep' and its food-day lines
+                     "farms": {"per_day": (1, 200), "now_max": (1, 200), "autofarm": ["auto", "off", "keep"],
+                               "af_off_days": (0, 400), "af_on_days": (0, 400), "af_hold_days": (1, 112)},
+                     # BUG-057/FR-72: the work details follow the unclaimed jobs ("labors": job type -> labor name)
+                     "cover": {"on": "bool", "min_jobs": (1, 1000), "gather_jobs": (1, 1000), "farm_per": (1, 100),
+                               "farm_min": (1, 50), "farm_max": (1, 50), "gather_per": (1, 100), "gather_min": (1, 50),
+                               "gather_max": (1, 50), "other_per": (1, 100), "other_max": (1, 20), "share": (5, 100),
+                               "step": (1, 20), "idle_days": (1, 112), "stale_days": (1, 365), "unmark_max": (1, 400),
+                               "labors": "labors"}}
+ECONOMY_OWN = ("drink", "office", "farms", "cover")   # parts whose every key is listed above
+_LABOR_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,40}$")
+_JOB_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]{1,40}$")
 
 
 def economy_errors(path: str | Path | None = None) -> list[str]:
@@ -436,6 +447,15 @@ def economy_errors(path: str | Path | None = None) -> list[str]:
             elif lim == "bool":
                 if not isinstance(x, bool):
                     errs.append(f"{name}: economy.{part}.{k}: true or false expected, got {x!r}")
+            elif lim == "labors":
+                ok = isinstance(x, dict) and len(x) <= 40 and all(
+                    isinstance(a, str) and _JOB_RE.match(a) and isinstance(b, str) and _LABOR_RE.match(b)
+                    for a, b in x.items())
+                if not ok:
+                    errs.append(f"{name}: economy.{part}.{k}: an object of job type -> LABOR names expected, got {x!r}")
+            elif isinstance(lim, list):
+                if x not in lim:
+                    errs.append(f"{name}: economy.{part}.{k}: one of {lim} expected, got {x!r}")
             elif not (isinstance(x, int) and not isinstance(x, bool) and lim[0] <= x <= lim[1]):
                 errs.append(f"{name}: economy.{part}.{k}: int {lim[0]}..{lim[1]} expected, got {x!r}")
     return errs

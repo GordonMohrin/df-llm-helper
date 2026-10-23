@@ -1510,6 +1510,35 @@ local function impls(state)
     return true, marked
   end
 
+  -- designations > gather plants, cancelled (BUG-057/FR-72): the shrubs at these positions lose their gather designation
+  -- (dfhack.designations.unmarkPlant, what the player's cancel does). economy passes the positions of GatherPlants jobs
+  -- nobody worked on for days or that lie off the citizens' walk group (<= 400). Returns ok, withdrawn.
+  function I.plant_ungather(positions)
+    if type(positions) ~= 'table' then return false, 'positions required' end
+    local want, n = {}, 0
+    for i, p in ipairs(positions) do
+      if i > 400 then break end
+      local x, y, z = xyz(p)
+      x, y, z = int(x), int(y), int(z)
+      if x and y and z then want[string.format('%d,%d,%d', x, y, z)] = true; n = n + 1 end
+    end
+    if n == 0 then return true, 0 end
+    local des = dfhack.designations
+    local done = 0
+    for _, vn in ipairs({'shrub_dry', 'shrub_wet'}) do
+      local okv, vec = pcall(function() return df.global.world.plants[vn] end)
+      for _, pl in ipairs(okv and vec or {}) do
+        local p = pl.pos
+        local k = string.format('%d,%d,%d', p.x, p.y, p.z)
+        if want[k] then
+          want[k] = nil
+          if des.isPlantMarked(pl) and des.unmarkPlant(pl) then done = done + 1 end
+        end
+      end
+    end
+    return true, done
+  end
+
   -- kitchen screen (Lua API.txt:2650-2660); idempotent
   function I.kitchen_exclude(item_type, subtype, mat_type, mat_index, what)
     if what ~= 'Cook' and what ~= 'Brew' then return false, "what must be 'Cook' or 'Brew'" end

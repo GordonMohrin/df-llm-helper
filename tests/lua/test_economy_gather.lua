@@ -42,7 +42,10 @@ local function world(opts)
   local cit = opts.cit or 12
   local units = {}
   for i = 1, cit do units[i] = {id = i, citizen = true, name = 'Urist ' .. i} end
-  local W = F.world{cfg = {baseline = F.cfg()}, units = units, mode = opts.wmode}
+  local bc = F.cfg()
+  bc.economy.cover = bc.economy.cover or {}
+  bc.economy.cover.on = false                               -- BUG-057's demand rule has its own tests (test_economy_cover)
+  local W = F.world{cfg = {baseline = bc}, units = units, mode = opts.wmode}
   add_jobs({'Dig', 'FellTree', 'GatherPlants'})
   df.work_detail_mode = {Default = 0, EverybodyDoesThis = 1, NobodyDoesThis = 2, OnlySelectedDoesThis = 3}
   df.unit_labor = {MINE = MINE, HERBALIST = HERB, COOK = COOK, DIAGNOSE = DIAG, [MINE] = 'MINE', [HERB] = 'HERBALIST',

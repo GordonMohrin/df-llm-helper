@@ -314,4 +314,26 @@ T.test('Run 11: sand marks: revealed sand floors only, kept for snapshot.sand ac
   T.eq(select(2, W.K.call('snapshot', 'sand')).tiles, {{1, 0, Z}, {2, 0, Z}, {2, 1, Z}, {8, 1, Z}})
 end)
 
+-- BUG-058 (economy's farm plots): is the plot tile underground (true), on the surface (false), or unknown (nil)?
+T.test('plot_under(): open sky is the surface, subterranean underground, roofed and not subterranean/hidden/no tile unknown',
+       function()
+  local W = world()
+  local orig = dfhack.maps.getTileFlags
+  dfhack.maps.getTileFlags = function(x, y, z)
+    local des, oc = orig(x, y, z)
+    if des and y == 0 then
+      des.outside = x == 1
+      des.subterranean = x == 3 or x == 5
+    end
+    return des, oc
+  end
+  local function u(x, y) local ok, r = W.K.call('snapshot', 'plot_under', x, y, Z); return ok, r end
+  T.eq({u(1, 0)}, {true, false}, 'under the open sky: the surface')
+  T.eq({u(3, 0)}, {true, true}, 'subterranean: underground')
+  T.eq({u(7, 0)}, {true, nil}, 'a roofed tile that is not subterranean: unknown (not guessed)')
+  T.eq({u(1, 2)}, {true, nil}, 'hidden')
+  T.eq({u(2, 0)}, {true, nil}, 'no tile')
+  dfhack.maps.getTileFlags = orig
+end)
+
 T.done()

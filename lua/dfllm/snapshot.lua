@@ -267,6 +267,20 @@ function M.tile(K, x, y, z)
           cav = des.feature_global == true, ice = tt_info(dfhack.maps.getTileType(x, y, z)).ice == true}
 end
 
+-- BUG-058 (economy's farm plots; Run 13 y513: surface crops on a plot on z149 made no PlantSeeds job): does the plot tile
+-- lie underground (true: `subterranean`, the sheet lists the underground crops), on the surface (false: under the open
+-- sky) or is that unknown (hidden; a roofed tile that is not subterranean may or may not offer underground crops: nil)?
+-- Read-only, one tile.
+function M.plot_under(K, x, y, z)
+  x, y, z = int(x), int(y), int(z)
+  if not (x and y and z) then return nil end
+  local des = dfhack.maps.getTileFlags(x, y, z)
+  if not des or des.hidden then return nil end
+  if des.outside then return false end
+  if des.subterranean == true then return true end
+  return nil
+end
+
 -- water tiles of one level rect (FR-47, water's water_sources scan): {{x, y, flow, cavern}} of revealed, non-magma
 -- tiles with flow >= min (default 1), at most M.CFG.liquid_tiles tiles read and 512 returned per call (the
 -- caller slices the box). Hidden tiles are skipped: no water_table, no unrevealed water. cavern = 1 on a revealed
