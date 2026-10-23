@@ -1,5 +1,5 @@
 # BUG-078 autoslab queued no engrave orders for two ghosts that waited for years; the kernel ordered none either
-Status: fixed in HASH078 (offline, live-untested): the kernel orders the memorial slab itself for a ghost that stood
+Status: fixed in 0cb9c33 (offline, live-untested): the kernel orders the memorial slab itself for a ghost that stood
 `economy.slabs.engrave_days` (3) days without an order or a memorial; unserveable ghosts are reported once
 Severity: high (wrong decision: ghosts of the dead kept haunting; the cause of the plugin's silence is not decided offline)
 Found: 2026-10-23, Run 14 Trussroads y582 (note 69), kernel of 9bcb14f
