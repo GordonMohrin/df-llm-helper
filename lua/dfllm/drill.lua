@@ -11,12 +11,18 @@
 -- siege a citizen locked out by O1 at T+450, or a bucket carrier on its way back from the brook, stands outside
 -- with the attackers (and R2 raises the pop cap on a passed drill). DRILL_RESULT also carries the outer
 -- bridge's raise time (goal T+600), the lever-job take time and the lever pullers (gate.kpi).
--- Starts: inbox `drill`, drill.start(why), or automatically in PEACE without merchants: yearly,
+-- Starts: inbox `drill`, drill.start(why), or automatically in PEACE: yearly,
 -- every season while the plan wants R2 growth, after a siege, and after a failed drill: a month,
 -- doubling per further failure up to a season, and never while the failure is structural (no Kern+,
 -- or too few uniform specs to reach 90 %) until that input changes. Automatic drills also need an
--- outer/inner bridge in the manifest, phase >= P5 (if known), soldiers and 2 days since the load;
+-- outer/inner bridge in the manifest, soldiers, a barracks and 2 days since the load;
 -- drill.hold() names the missing one (FR-65: state ready.dhold, `status`: `drill never (auto: no bridges)`).
+-- BUG-051 (Run 13 Wheelsblows: the drill never ran, 'phase P0<P5' and 'merchants on the map'; note 2: traders stay
+-- for weeks): a drill is refused only for danger (military.danger: a mode other than PEACE, a lockdown, a hostile in
+-- sight) and, for the length of one trade session, while the broker is at the trade screen (trade.clock: the civ alert
+-- would call him home); merchants standing on the map and the runner's phase hold nothing. The phase gate P5 stood for
+-- 'stage 3 is built'; what a drill needs is what it uses: bridges to raise, squads to measure (soldiers) and the
+-- barracks they stand in (military.barracks).
 local geom = require('dfllm.util.geom')
 
 local M = {name = 'drill', every = {ticks = 600}, verbs = {}, on = {}}
@@ -37,7 +43,6 @@ M.RETRY_FAIL = 33600     -- a month after the first failed drill, x2 per further
 M.RETRY_CAP = 100800     -- at most a season between retries
 M.RETRY_ABORT = 6000     -- 5 days after a drill a real threat interrupted
 M.SETTLE = 2400          -- no automatic drill in the first 2 days after a load
-M.AUTO_PHASE = 5         -- automatic drills from phase P5 (drill 1); always if no phase is known
 M.KEEP = 5
 local R1_CAP = 55
 
@@ -66,7 +71,8 @@ local function gate_bridges(man)
   return r
 end
 
--- merchants on the map: trade state, else a caravan approaching/at the depot/leaving (caravan.lua:99)
+-- merchants on the map: trade state, else a caravan approaching/at the depot/leaving (caravan.lua:99). BUG-051: no
+-- longer a reason to refuse a drill (kept for status and tests)
 function M.merchants(K)
   local tr = K.view().trade
   if type(tr) == 'table' and tr.caravan == 1 then return true end
@@ -146,12 +152,30 @@ local function walking_home(K, cu)
   return n
 end
 
+-- BUG-051: why no drill now because of danger (military.danger: 'mode ALERT', 'lockdown', 'hostile'), else nil; without a
+-- military module only the mode counts
+local function danger(K)
+  local ok, why = K.call('military', 'danger')
+  if ok then return why end
+  return K.mode() ~= 'PEACE' and ('mode ' .. K.mode()) or nil
+end
+
+-- BUG-051: the broker is at the trade screen (trade.clock): the drill waits for the end of that session
+function M.trading(K)
+  local ok, why = K.call('trade', 'clock')
+  return ok and why == 'trade'
+end
+
 ---------------------------------------------------------------- start / measure / end
--- public (CONTRACTS §7): PEACE only, no merchants on the map, one drill at a time
+-- public (CONTRACTS §7): PEACE only, no danger, no trade session under way, one drill at a time
 function M.start(K, why)
   if st.t0 then return false, 'a drill is running' end
-  if K.mode() ~= 'PEACE' then return false, 'drill only in PEACE (now ' .. K.mode() .. ')' end
-  if M.merchants(K) then return false, 'merchants on the map' end
+  local d = danger(K)
+  if d then
+    if d:sub(1, 5) == 'mode ' then return false, 'drill only in PEACE (now ' .. K.mode() .. ')' end
+    return false, 'drill refused: ' .. (d == 'lockdown' and 'a lockdown holds' or 'a hostile is in sight')
+  end
+  if M.trading(K) then return false, 'a trade session is under way (the broker would be called home)' end
   local now = K.now().tick
   K.call('gate', 'reset_kpi')                     -- raise ticks and double toggles count from T0
   st.t0, st.why, st.try, rt.home = now, cut(why or 'drill', 40), now, nil
@@ -287,20 +311,19 @@ end
 -- why an automatic drill is due now (1st value), else why it is held (2nd value, <= 24 chars; FR-65 status)
 local function check(K, now)
   if st.t0 then return nil, 'running' end
-  local mode = K.mode()
-  if mode ~= 'PEACE' then return nil, 'mode ' .. mode end
+  local d = danger(K)
+  if d then return nil, d end
   if now - rt.boot < M.SETTLE then return nil, 'settling' end
   if st.try and now - st.try < M.RETRY_ABORT then          -- 5 days after the last start (finished or aborted)
     local newest = rec.last[#rec.last]
     return nil, (newest and newest.tick >= st.try) and 'just drilled' or 'aborted'
   end
   if #gate_bridges(K.manifest()) == 0 then return nil, 'no bridges' end
-  local ph = K.view().phase
-  local pn = type(ph) == 'string' and tonumber(ph:match('^P(%d)$')) or nil
-  if pn and pn < M.AUTO_PHASE then return nil, string.format('phase %s<P%d', ph, M.AUTO_PHASE) end
   local okm, mk = K.call('military', 'kpi')
   if not okm or type(mk) ~= 'table' then return nil, 'military?' end
   if (mk.soldiers or 0) == 0 then return nil, 'no soldiers' end
+  local okb, bk = K.call('military', 'barracks')
+  if okb and bk == false then return nil, 'no barracks' end
   local newest = rec.last[#rec.last]
   if not newest then return 'first' end
   if newest.pass == 0 then
@@ -320,11 +343,11 @@ end
 -- why an automatic drill is due now, or nil
 function M.due(K, now) return (check(K, now)) end
 
--- public (FR-65, readiness -> state ready.dhold): why no automatic drill starts now ('no bridges', 'phase P3<P5',
--- 'no soldiers', 'mode ALERT', 'blocked:no_kern', 'retry wait', 'passed', 'merchants', ...); nil = one is due
+-- public (FR-65, readiness -> state ready.dhold): why no automatic drill starts now ('no bridges', 'no barracks',
+-- 'no soldiers', 'mode ALERT', 'lockdown', 'hostile', 'blocked:no_kern', 'retry wait', 'passed', 'trading', ...); nil = one is due
 function M.hold(K)
   local why, held = check(K, K.now().tick)
-  if why and M.merchants(K) then return 'merchants' end
+  if why and M.trading(K) then return 'trading' end
   return held
 end
 

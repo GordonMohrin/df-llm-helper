@@ -426,7 +426,10 @@ _CLUSTER = _d("cause:s n:i", "units:ia causes:sa total:i days:i patients:i pos:p
 
 # type -> (cls, by, d spec)
 EVENTS: dict[str, tuple[str, str, Obj]] = {
-    "SIEGE_END": ("A", "siege", _d(opt="hostiles:i killed:i lost:i captures:i sealed_ticks:i")),
+    # BUG-052: sol0/soldiers = soldiers at the start/end of the episode, on_station = the best count seen, on_t = ticks
+    # until half of them stood at their stations (-1 never)
+    "SIEGE_END": ("A", "siege", _d(opt="hostiles:i killed:i lost:i captures:i sealed_ticks:i sol0:i soldiers:i "
+                                       "on_station:i on_t:i")),
     "GATE_FAIL": ("A", "gate", _d("bridge:s", "want:s why:s units:ia pos:p")),
     "BREACH": ("A", "siege", _d("why:s", "bridge:s")),
     "DEATHS_3PLUS": ("A", "care", _d(opt="n:i ids:ia causes:sa")),
@@ -629,7 +632,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-042: the manager's office zone without its chair/table (he validates no work order): what economy placed
     # (`placed` 'chair at x,y,z, table at x,y,z', the repair project) or why it could not
     "MANAGER_OFFICE": ("B", "economy", _d("zone:i why:s", "chair:i table:i placed:s proj:s")),
-    "SIEGE_STATUS": ("C", "siege", _d(opt="vis:i worn:i on_station:i deaths:i captures:i")),
+    # BUG-052: off = why soldiers are off their station ('equip 5, far 2': equip, hurt, level, far, nost)
+    "SIEGE_STATUS": ("C", "siege", _d(opt="vis:i worn:i on_station:i deaths:i captures:i off:s")),
     "SEASON": ("C", "kern", _d(opt="year:i season:i")),
     "PROJECT_STAGE": ("C", "runner", _d("proj:s", "stage:s pct:i")),
     "MODE": ("C", "kern", _d("from:s to:s", "why:s")),

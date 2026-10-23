@@ -103,9 +103,9 @@ T.test('real act: popcap runs pop-control set max-pop; squads from the UI are fi
   H.run(W, 3700, {skip = 9})                            -- the next upkeep: uniform-unstick (allowlisted)
   local un = false
   for _, c in ipairs(W.commands) do
-    if c[1] == 'uniform-unstick' and c[2] == '--all' and c[3] == '--drop' and c[4] == '--free' then un = true end
+    if c[1] == 'uniform-unstick' and c[2] == '--all' and c[3] == '--free' and c[4] == nil then un = true end   -- BUG-050
   end
-  T.ok(un, 'uniform-unstick --all --drop --free ran through act.run')
+  T.ok(un, 'uniform-unstick --all --free ran through act.run (allowlisted, no --drop)')
   H.run(W, 40, {paused = true})
   for _, e in ipairs(H.events(W)) do T.ok(e.type ~= 'ACT_FAIL' and e.type ~= 'KERN_FAULT', e.msg) end
   local s = H.state(W)

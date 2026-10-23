@@ -249,6 +249,13 @@
   "queue": {"yield_days": 7, "park_days": 30}
  },
  "snapshot": {"max_tiles": 400000},
+ "military": {
+  "unstick": {"on": true, "drop": false, "every": 33600, "below": 100, "drop_after": 2},
+  "militia": {"B": [9, 10, 11]},
+  "free_months": [9, 10, 11],
+  "early_pop": 40,
+  "station_r": 3
+ },
  "reserve": {
   "from_phase": "P1",
   "share": {"boulders": 0.25, "logs": 0.25}, "share_min": 5,
