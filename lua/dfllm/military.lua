@@ -46,6 +46,7 @@
 local geom = require('dfllm.util.geom')
 local C = require('dfllm.util.contract')
 local SL = require('dfllm.stations')       -- BUG-032: stations clear of the bridge footprints (library, no module)
+local ROT = require('dfllm.rotation')      -- FR-79: window edges, fairness ranking, swap plan (library, no module)
 
 local M = {name = 'military', every = {ticks = 3600}, verbs = {}, on = {}}
 
@@ -136,6 +137,13 @@ M.UNSTICK_DEF = {on = true, drop = false, every = M.UNSTICK, below = 100, drop_a
 M.UNSTICK_LIM = {every = {1200, 403200}, below = {1, 100}, drop_after = {0, 12}}
 M.EARLY_POP, M.EARLY_LIM = 40, {0, 250}
 M.STATION_R_LIM = {1, 10}
+-- FR-79 (note 67: the kernel rotates the citizens through the militia itself): rotation {on, per_day, worn_min}. on = false
+-- keeps the members of a militia squad as before; per_day = the most members a turnover changes per game day (batches are at
+-- least a day apart); worn_min = no turnover of members who wear kit while the army's worn % is below it (0 = never held).
+M.ROT_DEF = {on = true, per_day = 3, worn_min = 40}
+M.ROT_LIM = {per_day = {1, 10}, worn_min = {0, 100}}
+M.ADD_TRIES = 3             -- BUG-076: refused candidates tried per refill before the squad backs off
+M.ADD_BAD = 33600           -- BUG-076: a unit addToSquad refused is passed over this many ticks
 
 local function int(v) return type(v) == 'number' and math.tointeger(v) or nil end
 
@@ -197,6 +205,13 @@ function M.conf(K)
   c.early_pop = (ep and ep >= M.EARLY_LIM[1] and ep <= M.EARLY_LIM[2]) and ep or M.EARLY_POP
   local sr = int(b.station_r)
   c.station_r = (sr and sr >= M.STATION_R_LIM[1] and sr <= M.STATION_R_LIM[2]) and sr or M.STATION_R
+  local rb = type(b.rotation) == 'table' and b.rotation or {}                 -- FR-79
+  c.rot = {on = M.ROT_DEF.on}
+  if type(rb.on) == 'boolean' then c.rot.on = rb.on end
+  for k, lim in pairs(M.ROT_LIM) do
+    local x = int(rb[k])
+    c.rot[k] = (x and x >= lim[1] and x <= lim[2]) and x or M.ROT_DEF[k]
+  end
   return c
 end
 
@@ -1217,29 +1232,371 @@ function seat_leader(K, k, s, recruits)
   stuck(K)
 end
 
--- siege (Run 11 siege 3): in SIEGE/BREACH only a squad below half its target is refilled, from M.recruits(K, true)
-local function fill(K, k, s, want, recruits, siege)
+-- siege (Run 11 siege 3): in SIEGE/BREACH only a squad below half its target is refilled, from M.recruits(K, true).
+-- BUG-076 (found beside FR-79): a refused addToSquad backed the squad off and nothing ever cleared that backoff, so every
+-- later refusal waited twice as long (1,200 .. 33,600 ticks) for good; and the refused unit stayed the first candidate,
+-- so one unit DF would not take blocked the refill of the whole squad. Now a success clears the backoff, a refused unit
+-- is passed over for ADD_BAD ticks and the next candidate is tried (ADD_TRIES refusals per refill), and the refusal's
+-- text goes to kern.log (at most every NOTE_EVERY ticks per squad). rot (FR-79): the candidates come in the rotation's
+-- order and the member over the target who leaves is the most served one, not the weakest fighter.
+local function fill(K, k, s, want, recruits, siege, rot)
   local mem = members(s)
   local n = #mem
   local low = not siege or n < (want + 1) // 2
+  local now = now_tick(K)
   if n < want and low and retry_ok(K, 'add' .. k) and leader_set(s) then
-    local added, ids = 0, {}
+    local added, ids, fails = 0, {}, 0
+    for uid, t in pairs(rt.add_bad) do if t <= now then rt.add_bad[uid] = nil end end
     while n < want and added < M.ADD_PER_STEP and #recruits() > 0 do
       local uid = table.remove(recruits(), 1)
-      if K.act.squad_add(s.id, uid) then n, added, ids[#ids + 1] = n + 1, added + 1, uid
-      else backoff(K, 'add' .. k); break end
+      if (rt.add_bad[uid] or 0) <= now then
+        local ok, err = K.act.squad_add(s.id, uid)
+        if ok then
+          n, added, ids[#ids + 1] = n + 1, added + 1, uid
+          cleared('add' .. k)
+        else
+          fails = fails + 1
+          rt.add_bad[uid] = now + M.ADD_BAD
+          local last = rt.add_note[k]
+          if last == nil or now < last or now - last >= M.NOTE_EVERY then
+            rt.add_note[k] = now
+            K.log('warn', 'military: squad %s: unit %d was not taken in (%s); passed over for %d ticks', k, uid,
+                  tostring(err), M.ADD_BAD)
+          end
+          if fails >= M.ADD_TRIES then break end
+        end
+      end
     end
+    if fails > 0 and (added == 0 or fails >= M.ADD_TRIES) then backoff(K, 'add' .. k) end
     if siege and added > 0 then
       rt.kpi = nil
       K.log('warn', 'military: %s refill: squad %s %d -> %d of %d with healthy civilians from the core: %s',
             K.mode(), k, n - added, n, want, table.concat(ids, ','))
     end
   elseif n > want + M.KEEP_EXTRA and K.mode() == 'PEACE' then
-    local worst                                  -- lowest combat value, never the leader
+    local worst                                  -- lowest combat value (rotation: the most served), never the leader
     for _, m in ipairs(mem) do
-      if m.pos ~= 0 and (worst == nil or M.cv(m.unit) < M.cv(worst.unit)) then worst = m end
+      if m.pos ~= 0 then
+        if worst == nil then worst = m
+        elseif rot then
+          local a, b = st.served[m.unit.id] or 0, st.served[worst.unit.id] or 0
+          if a > b or (a == b and m.unit.id > worst.unit.id) then worst = m end
+        elseif M.cv(m.unit) < M.cv(worst.unit) then worst = m end
+      end
     end
     if worst then K.act.squad_remove(s.id, worst.unit.id) end
+  end
+end
+
+---------------------------------------------------------------- FR-79: the militia rotation
+-- Gordon 2026-10-23 (note 67, goal Z12 "every adult citizen who is not elite serves three months a year in the
+-- militia"): the kernel moves the citizens through the militia squads itself. Before, nothing but fill() changed WHO sat
+-- in squad B: it topped the squad up with the best fighters and let them stay (fill adds when n < want and removes only
+-- when n > want + KEEP_EXTRA), M.windows only logged the windows and off_season only switched the routine, so the same
+-- pool served window after window; a hand-made cohort lost the race against fill's top-up in PEACE (the SIEGE_FILL
+-- rules of the note only act in SIEGE/BREACH). Rules (the pure parts are in dfllm.rotation):
+--   * squads: the keys of the militia table (config military.militia); the elite squads (A, C by default) never take part;
+--     the squad's leader (the militia captain, an appointed office) stays, the members rotate; cohort size = the squad's
+--     target `want` (army share D-12, gear cap) minus the leader
+--   * eligible: adults who are in no squad, no noble, in no mood, no patient or wounded, with no tool labor (the Miners,
+--     Woodcutters, Hunters and Fisherdwarves keep their picks and axes), and not the only civilian holder of a key labor;
+--     ranked by the militia windows served (persisted `served`), then by unit id: everybody serves once before anybody twice
+--   * edge: a window CLOSES at its last month; then the members are credited with the window they served, and the next cohort
+--     takes the squad: members who are in it stay (their kit stays), the others leave in swaps with the entrants (squad_remove,
+--     squad_add: the squads screen), the most served first; the cohort sits in the squad through the months off duty and
+--     is equipped when the window opens. A turnover that could not run before the window reopens lapses (the same members
+--     serve again; `ms`), the first sight of a squad only records the last close (no turnover at once).
+--   * bounds: PEACE only and no lockdown, no hostile in sight (military.danger), at most `per_day` members a game day (one
+--     batch a day), and not while the army's worn % is below `worn_min` when a leaver wears kit; the kernel never drops,
+--     unequips or moves an item (a leaver's kit is DF's equipment pass; a new member's position keeps the squad's
+--     uniform specs, bare positions get them from ensure_uniform at once). In SIEGE/BREACH the existing fill rules hold.
+-- Observability: state mil.rot, kern.log, MILITIA_ROTATED (B).
+function M.rot_on(K, key)
+  local c = M.conf(K)
+  return c.rot.on and c.militia[key] ~= nil
+end
+
+M.ROT_LABORS = {'MASON', 'CARPENTER', 'BREWER', 'PLANT', 'COOK', 'MECHANIC', 'DIAGNOSE', 'SMELT', 'FORGE_WEAPON',
+                'FORGE_ARMOR', 'MILLER', 'SURGERY', 'BONE_SETTING'}
+
+local function patient(u)
+  return try(function()
+    if u.health and u.health.flags.needs_healthcare then return true end
+    return #u.body.wounds > 0
+  end) == true
+end
+
+local function abs_month()
+  return ROT.abs_month(try(function() return df.global.cur_year end), try(function() return df.global.cur_year_tick end))
+end
+
+-- the citizens who may sit in squad s: {{id, held = key labors}}, civilians per key labor, and why the others may not
+function M.rot_pool(K, s)
+  local cu = K.census.u
+  local why = {squad = 0, child = 0, tool = 0, noble = 0, mood = 0, hurt = 0, refused = 0}
+  local now = now_tick(K)
+  local adults = {}
+  for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
+    local u = df.unit.find(id)
+    if u and not dfhack.units.isDead(u) then
+      if dfhack.units.isAdult(u) then adults[#adults + 1] = u else why.child = why.child + 1 end
+    end
+  end
+  local lead = try(function() return s.positions[0].occupant end) or -1
+  local tools, civ, cand = tool_members(), {}, {}
+  for _, u in ipairs(adults) do
+    local sid = try(function() return u.military.squad_id end) or -1
+    local mine = sid == s.id
+    local boss = mine and lead >= 0 and u.hist_figure_id == lead
+    local lab = labors(u)
+    local held, tool_labor = {}, false
+    if lab then
+      for _, l in ipairs(M.ROT_LABORS) do if try(function() return lab[l] end) then held[#held + 1] = l end end
+      for _, l in ipairs(M.TOOL_LABORS) do if try(function() return lab[l] end) then tool_labor = true end end
+    end
+    if (sid < 0 or mine) and not boss then
+      for _, l in ipairs(held) do civ[l] = (civ[l] or 0) + 1 end    -- who would be a civilian
+    end
+    local mood = try(function() return u.mood end)
+    if boss then -- the leader stays
+    elseif sid >= 0 and not mine then why.squad = why.squad + 1
+    elseif tools[u.id] or tool_labor then why.tool = why.tool + 1
+    elseif noble(u) then why.noble = why.noble + 1
+    elseif mood ~= nil and mood >= 0 then why.mood = why.mood + 1
+    elseif patient(u) then why.hurt = why.hurt + 1
+    elseif (rt.add_bad[u.id] or 0) > now then why.refused = why.refused + 1     -- BUG-076: DF would not take him in
+    else cand[#cand + 1] = {id = u.id, held = held} end
+  end
+  return cand, civ, why
+end
+
+-- the next cohort of squad s: {picks = ids (rank order, at most size), order = every eligible id in rank order, eligible,
+-- lo, hi (served counts of the eligible), why}; the sole civilian holder of a key labor is passed over
+function M.rot_cohort(K, s, size)
+  local cand, civ, why = M.rot_pool(K, s)
+  local by, ids = {}, {}
+  for _, c in ipairs(cand) do by[c.id] = c; ids[#ids + 1] = c.id end
+  local ranked = ROT.rank(ids, st.served)
+  local order, refused = ROT.pick(ranked, #ranked, function(id)
+    local held = by[id].held
+    for _, l in ipairs(held) do if (civ[l] or 0) <= 1 then return false end end
+    for _, l in ipairs(held) do civ[l] = civ[l] - 1 end
+    return true
+  end)
+  why.sole = #refused
+  local picks = {}
+  for i = 1, math.min(size, #order) do picks[i] = order[i] end
+  local lo, hi = ROT.spread(ranked, st.served)
+  return {picks = picks, order = order, eligible = #ids - #refused, lo = lo, hi = hi, why = why}
+end
+
+-- fill()'s candidates for a rotation squad: the eligible in rank order, the cohort first (nobody who is a member already);
+-- the ones after the cohort are the next in line when DF refuses a unit (BUG-076)
+function M.rot_source(K, s, want)
+  local list
+  return function()
+    if not list then
+      list = {}
+      local have = {}
+      for _, m in ipairs(members(s)) do have[m.unit.id] = true end
+      for _, id in ipairs(M.rot_cohort(K, s, math.max(0, want - 1)).order) do
+        if not have[id] then list[#list + 1] = id end
+      end
+    end
+    return list
+  end
+end
+
+-- soldiers who are fetching their kit (a PickupEquipment job)
+local function fetching()
+  local pk = df.job_type and df.job_type.PickupEquipment
+  local n = 0
+  if pk == nil then return 0 end
+  for _, sp in ipairs(M.SQUADS) do
+    local e = st.sq[sp.key]
+    local s = e and squad(e.id)
+    for _, m in ipairs(s and members(s) or {}) do
+      if try(function() return m.unit.job.current_job.job_type end) == pk then n = n + 1 end
+    end
+  end
+  return n
+end
+
+-- kern.log once per squad and reason (and edge): a turnover that waits, a cohort that stays; a reason that flips back and
+-- forth (a hostile coming and going) is logged at most every NOTE_EVERY ticks, the state shows the current one
+local function rot_note(K, k, sig, fmt, ...)
+  if rt.rot_why[k] == sig then return end
+  local now = now_tick(K)
+  local last = rt.rot_t[k]
+  if last and now >= last and now - last < M.NOTE_EVERY then return end
+  rt.rot_why[k], rt.rot_t[k] = sig, now
+  K.log('info', fmt, ...)
+end
+
+-- the turnover of squad s at the close of a window: one batch of swaps. Returns true when members changed.
+local function rot_turn(K, sp, s, want, r, ed, info, c, now)
+  local k = sp.key
+  local function hold(why, ...)
+    info.why = 'held: ' .. string.format(why, ...)
+    rt.rot_last[k] = info.why:sub(7)
+    rot_note(K, k, ed.close .. info.why, 'military: militia squad %s: the turnover at the close of month %d waits (%s)', k,
+             ed.close % 12, info.why:sub(7))
+    return false
+  end
+  if want < 2 then                                                -- a squad of the leader alone: nothing to rotate
+    r.e, r.lw, r.me, dirty = ed.close, 'no seats beside the leader', nil, true
+    return false
+  end
+  local danger = M.danger(K)
+  if danger then return hold('%s', danger) end
+  if not leader_set(s) then return hold('no leader') end
+  if r.t and now >= r.t and now - r.t < 1200 then
+    info.why = 'next batch tomorrow'
+    return false
+  end
+  local mem, ids, by = members(s), {}, {}
+  for _, m in ipairs(mem) do
+    if m.pos ~= 0 then ids[#ids + 1] = m.unit.id; by[m.unit.id] = m end
+  end
+  local co = M.rot_cohort(K, s, want - 1)
+  info.e, info.lo, info.hi = co.eligible, co.lo, co.hi
+  local out, into = ROT.plan(ids, co.picks, st.served)
+  local few = co.eligible < want - 1 and (r.me or 0) == 0           -- fewer eligible than seats: the cohort cannot be formed
+  if few or #out == 0 or #into == 0 then                          -- nothing (more) to swap: the turnover is over
+    r.e, dirty = ed.close, true
+    if (r.me or 0) > 0 then
+      r.n, r.lw = r.n + 1, 'rotated'
+    else
+      r.lw = few and string.format('fewer eligible than seats: %d for %d', co.eligible, want - 1)
+             or string.format('same cohort: %d eligible for %d seats', co.eligible, want - 1)
+      rot_note(K, k, 'end' .. ed.close, 'military: militia squad %s: no turnover at the close of month %d: %s', k,
+               ed.close % 12, r.lw)
+    end
+    r.me = nil
+    return false
+  end
+  local n = math.min(c.rot.per_day, #out, #into)
+  local worn = M.kpi(K).worn
+  if worn < c.rot.worn_min then
+    for i = 1, n do
+      local m = by[out[i]]
+      local _, filled = uniform_counts(m.p, m.unit, st.sq[k].kind)
+      if filled > 0 then return hold('worn %d%% < %d%%', worn, c.rot.worn_min) end
+    end
+  end
+  local moved = 0
+  for i = 1, n do
+    local okr, errr = K.act.squad_remove(s.id, out[i])
+    local oka, erra = false, nil
+    if okr then oka, erra = K.act.squad_add(s.id, into[i]) end
+    if not (okr and oka) then
+      rot_note(K, k, 'fail' .. ed.close .. i, 'military: militia squad %s: swap of %d for %d failed (%s)', k, out[i],
+               into[i], tostring(okr and erra or errr))
+      if okr then rt.add_bad[into[i]] = now + M.ADD_BAD end     -- BUG-076: the next batch takes another
+      break
+    end
+    moved = moved + 1
+  end
+  r.t, r.me, dirty = now, (r.me or 0) + moved, true
+  if moved == 0 then info.why = 'swap refused'; return false end
+  r.mv = r.mv + moved
+  local left = math.min(#out, #into) - moved
+  if left <= 0 then r.e, r.n, r.me, r.lw = ed.close, r.n + 1, nil, 'rotated' end
+  rt.rot_look = {t = now, w = worn, key = k, n = moved, i = 1}
+  info.why = left > 0 and string.format('%d more to swap', left) or nil
+  local txt = string.format('militia squad %s rotated: %d out, %d in (window %s closed; %d eligible, served %d..%d)', k,
+                            moved, moved, info.w or '?', co.eligible, co.lo, co.hi)
+  K.log('info', 'military: %s; worn %d%%%s', txt, worn, left > 0 and string.format('; %d swaps follow', left) or '')
+  K.emit('MILITIA_ROTATED', 'B', txt:sub(1, 200), {squad = k, out = moved, into = moved, size = want, eligible = co.eligible,
+         lo = co.lo, hi = co.hi, win = info.w, left = left, worn = worn, edge = ed.close % 12})
+  return true
+end
+
+-- one militia squad in the upkeep: credit the window that closed, run the turnover while it is due, publish rt.rot[k].
+-- Returns true when members changed (the caller refreshes the uniforms).
+function M.rot_step(K, sp, s, want, now)
+  local k = sp.key
+  local c = M.conf(K)
+  local win = c.militia[k]
+  if not (c.rot.on and win) then rt.rot[k] = nil; return false end
+  local info = {w = ROT.months_text(win), z = want}
+  rt.rot[k] = info
+  local a = abs_month()
+  local ed = ROT.edges(win, a)
+  if not ed then info.why = 'no window edge'; return false end
+  info.on = ed.open and 1 or 0
+  local r = st.rot[k]
+  if r and (r.c > a or r.e > a) then r = nil end                  -- the clock went back (an older save): start over
+  if not r then
+    r = {c = ed.close, e = ed.close, n = 0, mv = 0, ms = 0}
+    st.rot[k], dirty = r, true
+    K.log('info', 'military: militia squad %s: rotation on (window months %s, last close month %d): the first turnover is at '
+          .. 'the next close', k, info.w, ed.close % 12)
+  end
+  local mem = members(s)
+  info.n = #mem
+  if r.c < ed.close then                                          -- the window that closed: its members served it
+    local live = {}
+    for _, id in ipairs(type(K.census.u) == 'table' and K.census.u.ids or {}) do live[id] = true end
+    for _, m in ipairs(mem) do st.served[m.unit.id] = (st.served[m.unit.id] or 0) + 1 end
+    if next(live) then for id in pairs(st.served) do if not live[id] then st.served[id] = nil end end end
+    r.c, r.me, dirty = ed.close, 0, true
+  end
+  local changed = false
+  if r.e < ed.close then
+    if ed.open then                                               -- the window reopened first: the same members serve again
+      local why = rt.rot_last[k]
+      r.e, r.ms, r.me, dirty = ed.close, r.ms + 1, nil, true
+      r.lw = 'lapsed' .. (why and (': ' .. why) or '')
+      K.log('warn', 'military: militia squad %s: the turnover at the close of month %d did not run before the window '
+            .. 'reopened%s: the same members serve again', k, ed.close % 12, why and (' (' .. why .. ')') or '')
+    else
+      changed = rot_turn(K, sp, s, want, r, ed, info, c, now)
+    end
+  end
+  if info.e == nil then                                           -- the numbers of the state (a scan at most every 3,600 ticks)
+    local cc = rt.rot_cc and rt.rot_cc[k]
+    if not cc or now < cc.t or now - cc.t >= M.SLOW then
+      local co = M.rot_cohort(K, s, math.max(0, want - 1))
+      cc = {t = now, e = co.eligible, lo = co.lo, hi = co.hi}
+      rt.rot_cc = rt.rot_cc or {}
+      rt.rot_cc[k] = cc
+    end
+    info.e, info.lo, info.hi = cc.e, cc.lo, cc.hi
+  end
+  info.rt, info.mv = r.n, r.mv
+  local to = r.e < ed.close and 0 or ed.next_close
+  info.nx = ROT.days_to(to, try(function() return df.global.cur_year_tick end))
+  if not info.why and r.lw and r.e == ed.close then info.why = 'last: ' .. r.lw end
+  if info.why then info.why = info.why:sub(1, 60) end
+  if changed then info.n = #members(s) end
+  return changed
+end
+
+-- what the militia squads of this kernel look like after the member sets changed: the follow-up lines of a turnover
+-- (worn % and soldiers fetching kit a day and a week later: the equipment cost of squad_remove/squad_add, live data)
+function M.rot_look(K, now)
+  local l = rt.rot_look
+  if not l or not M.US_LOOK[l.i] or now < l.t then return end
+  if now - l.t >= M.US_LOOK[l.i] then
+    K.log('info', 'military: militia turnover %d ticks ago (squad %s, %d swapped): worn %d%% before, %d%% now, %d soldiers '
+          .. 'fetching kit', now - l.t, l.key, l.n, l.w, rt.kpi and rt.kpi.worn or 0, fetching())
+    l.i = l.i + 1
+  end
+end
+
+-- a militia squad that cannot rotate because it does not exist or its target is 0: the state says so (no squad B)
+local function rot_idle(K, key, why)
+  local c = M.conf(K)
+  local win = c.militia[key]
+  rt.rot[key] = (c.rot.on and win) and {w = ROT.months_text(win), why = why} or nil
+end
+
+-- the unit ids of the shared recruit list that sit in a squad now (a rotation squad took them from its own list)
+local function drop_seated(list)
+  for i = #list, 1, -1 do
+    local u = df.unit.find(list[i])
+    if not u or (try(function() return u.military.squad_id end) or -1) >= 0 then table.remove(list, i) end
   end
 end
 
@@ -2261,8 +2618,28 @@ function M.init(K)
                        auto = int(e.auto) == 1 and 1 or nil, nw = nw}
     end
   end
+  -- FR-79: rot[key] = {c = absolute month of the last window close whose members were credited, e = of the last one whose
+  -- turnover ended, t = tick of the last batch, me = members swapped at the open edge, n = turnovers, mv = members changed,
+  -- ms = lapsed turnovers, lw = how the last one ended}; served[unit id] = militia windows served (JSON keys come back
+  -- as strings)
+  st.rot, st.served = {}, {}
+  if type(p.rot) == 'table' then
+    for _, sp in ipairs(M.SQUADS) do
+      local r = p.rot[sp.key]
+      if type(r) == 'table' and int(r.c) and int(r.e) then
+        st.rot[sp.key] = {c = int(r.c), e = int(r.e), t = int(r.t), n = int(r.n) or 0, mv = int(r.mv) or 0,
+                          ms = int(r.ms) or 0, me = int(r.me), lw = type(r.lw) == 'string' and r.lw:sub(1, 60) or nil}
+      end
+    end
+  end
+  if type(p.served) == 'table' then
+    for k, v in pairs(p.served) do
+      local id, n = int(tonumber(k)), int(v)
+      if id and n and n > 0 then st.served[id] = n end
+    end
+  end
   rt = {retry = {}, order = {}, station = {}, kpi = nil, kpi_tick = 0, create_fails = 0, mats = {}, wk = {},
-        no_wpn = {}, held = {}, over = {}}
+        no_wpn = {}, held = {}, over = {}, rot = {}, add_bad = {}, add_note = {}, rot_why = {}, rot_t = {}, rot_last = {}}
   dirty = false
   M.every = {ticks = K.mode() == 'PEACE' and M.SLOW or M.FAST}
 end
@@ -2330,10 +2707,16 @@ function M.step(K, budget, ctx)
         if want > 0 and not leader_set(s) then seat_leader(K, sp.key, s, recruits) end   -- addToSquad needs one
         ensure_uniform(K, sp.key, s, want)
         ensure_weapons(K, sp.key, s)
-        fill(K, sp.key, s, want, recruits, siege)
+        local rot = want > 0 and M.rot_on(K, sp.key)                      -- FR-79: the rotation owns the militia squad
+        if rot then
+          if M.rot_step(K, sp, s, want, now) then ensure_uniform(K, sp.key, s, want); ensure_weapons(K, sp.key, s) end
+        else rot_idle(K, sp.key, 'target 0') end
+        local own = rot and not siege                                      -- (in a siege the fill rules stay as they were)
+        fill(K, sp.key, s, want, own and M.rot_source(K, s, want) or recruits, siege, own)
+        if own and list then drop_seated(list) end
         if siege then siege_short(K, sp.key, s, want, recruits, why) end
-      end
-    end
+      else rot_idle(K, sp.key, 'no squad yet') end
+    else rot_idle(K, sp.key, 'no squad') end
   end
   -- review A4 (BUG-055): a refused creation is news only while a wanted squad is missing or leaderless; squads that were
   -- made on the squads screen (verb squad.create, the player) are adopted above without reaching the creation, so
@@ -2353,6 +2736,7 @@ function M.step(K, budget, ctx)
   for _, sp in ipairs(M.SQUADS) do apply_squad(K, sp.key, false) end   -- drift only
   release_tools(K)                                                     -- BUG-023: after the specs settled
   rt.kpi, rt.kpi_tick = compute(K), now
+  M.rot_look(K, now)                                                   -- FR-79
   local okl, err = pcall(loot, K)
   if not okl then K.log('warn', 'loot: %s', tostring(err)) end
   save(K)
@@ -2378,6 +2762,12 @@ function M.state(K)
                on_station = k.on_station}
   local g = rt.gear                                  -- Run 11: the melee squads follow the gear
   if g then mil.cap = {sets = g.sets, melee = g.melee, want = g.want, xbow = g.xbow} end
+  for key, info in pairs(rt.rot) do                  -- FR-79: the militia rotation per squad (counts, no names)
+    local r = {}
+    for f, v in pairs(info) do r[f] = v end
+    mil.rot = mil.rot or {}
+    mil.rot[key] = r
+  end
   if rt.free then                                    -- FR-46: free metal gear per category (only the ones held)
     local free = {}
     for cat, n in pairs(rt.free) do if n > 0 then free[cat] = n end end

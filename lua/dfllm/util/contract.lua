@@ -164,6 +164,8 @@ C.EVENTS = {
   MANAGER_OFFICE = {cls = 'B', by = 'economy'},
   -- BUG-032: military moved a squad station off a bridge footprint and its ring (bridge, chain, none, hold)
   STATION_MOVED = {cls = 'B', by = 'military'},
+  -- FR-79: the members of a militia squad were swapped for the next cohort at the close of its window (counts only)
+  MILITIA_ROTATED = {cls = 'B', by = 'military'},
   -- BUG-068: a lever pulled gate.noeffect_max times in a row without the bridge moving is parked (once per lever)
   LEVER_NOEFFECT = {cls = 'B', by = 'gate'},
   -- C: log only
@@ -352,6 +354,8 @@ local function arr(items, lo, hi) return {t = 'arr', items = items, lo = lo or 0
 local function obj(req, opt, extra, keys) return {t = 'obj', req = req or {}, opt = opt or {}, extra = extra, keys = keys} end
 local NAT, FLAG, PCT, BOOL = int(0), int(0, 1), int(0, 100), {t = 'bool'}
 local MODULE = str(nil, nil, 'module')
+local ROT_ONE = obj(nil, {w = str(24), on = int(0, 1), n = NAT, z = NAT, e = NAT, lo = NAT, hi = NAT, nx = NAT, rt = NAT,
+                         mv = NAT, why = str(60)})
 
 C.STATE_SPEC = obj({
   v = {t = 'const', v = C.V}, seq = NAT,
@@ -419,7 +423,9 @@ C.STATE_SPEC = obj({
   mil = obj({squads = NAT, soldiers = NAT, worn = PCT, cv = NAT, metal_pct = PCT, on_station = NAT},
             {free = obj(nil, {weapon = NAT, body = NAT, head = NAT, pants = NAT, gloves = NAT, shoes = NAT,
                               shield = NAT, ammo = NAT}),
-             cap = obj({sets = NAT, melee = NAT, want = NAT, xbow = NAT})}),   -- Run 11: melee follows the gear
+             cap = obj({sets = NAT, melee = NAT, want = NAT, xbow = NAT}),     -- Run 11: melee follows the gear
+             -- FR-79: the militia rotation per squad key (schema.py _ROT)
+             rot = obj(nil, {A = ROT_ONE, B = ROT_ONE, C = ROT_ONE})}),
   trade = obj({caravan = FLAG, ratio = NAT, done = NAT}),
   clock = obj({cap = NAT, orig = NAT, ts = int(-1, 1000), held = FLAG, why = str(24)}),
   alarm = obj({defcon = int(1, 5), unacked = NAT, last = NAT, ack = NAT, lock = FLAG, why = str(24)},

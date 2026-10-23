@@ -111,7 +111,7 @@ Gameplay modules run on `cur_year_tick` deltas, which stay correct under timestr
 | gate controller | 25 in SIEGE/BREACH/DRILL, otherwise 600 | — | ≤0.2 ms |
 | runner (≤3 active projects; 1 apply chunk ≤40 tiles per slice) | 600 per project | 1.2 s | ≤3 ms per chunk [S6] |
 | economy · care | 1,200 | 2.4 s | ≤2 ms, sliced |
-| military upkeep · `uniform-unstick --all --free` (BUG-050: no `--drop`) | 3,600 · 33,600 | 7 s · 67 s | ≤1 ms |
+| military upkeep (FR-79: one pass over the adults per militia squad) · `uniform-unstick --all --free` (BUG-050: no `--drop`) | 3,600 · 33,600 | 7 s · 67 s | ≤1 ms |
 | readiness check; snapshot export on request | 33,600 + after any defense-zone stage; 2,000 tiles per slice | 67 s | ≤2 ms per slice |
 | state a/b · events flush · inbox listdir · heartbeat · perf row | ≥2 s and on mode change · 1 s · 0.5 s · 5 s · 30 s (real time) | — | ≤1 ms each |
 | Python follow · supervisor | 1 s file tail · 60 s task | — | 0 DF calls |

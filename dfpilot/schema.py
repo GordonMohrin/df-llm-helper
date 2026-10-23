@@ -678,6 +678,12 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # station held a raise: the squad re-stationed at once); station/first = chain entries, from/to positions, bridge
     # and d = the footprint that held it and its distance, squad/key/units for hold
     "STATION_MOVED": ("B", "military", _d("why:s", "station:s first:s from:p to:p bridge:s d:i squad:i key:s units:ia")),
+    # FR-79 (note 67): the kernel swapped members of the militia squad `squad` (A, B, C) for the next cohort at the close of
+    # its window: out/into = members swapped in this batch (at most military.rotation.per_day), size = the squad's target,
+    # eligible = citizens who may sit in it, lo/hi = militia windows served by the eligible (counts, no names), win = the
+    # window's months ('9-11'), left = swaps still to follow on the next days, worn = the army's worn %, edge = the month
+    # (0-11) the window closed in
+    "MILITIA_ROTATED": ("B", "military", _d("squad:s out:i into:i", "size:i eligible:i lo:i hi:i win:s left:i worn:i edge:i")),
     # Run 11: economy's glass chain for strange moods is blocked: why = no_sand (no revealed sand floor), no_bags (no
     # spare cloth/leather or shop for ConstructBag), no_fuel (no charcoal and no wood furnace or wood, no magma glass
     # furnace); raw/cut = the raw and cut glass wanted; once per set of blockers (util/cadence)
@@ -706,6 +712,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "BOOT": ("C", "kern", _d(opt="save:s v:i boots:i")),
     "UNLOAD": ("C", "kern", _d()),
 }
+
+# FR-79: one squad's militia rotation line in state mil.rot (military.lua M.state)
+_ROT = Obj(opt={"w": Str(maxbytes=24), "on": Int(0, 1), "n": NAT, "z": NAT, "e": NAT, "lo": NAT, "hi": NAT, "nx": NAT,
+                "rt": NAT, "mv": NAT, "why": Str(maxbytes=60)})
 
 # FR-53 interrupt types: a class-A subset written to <save>/alarm.txt at once; `dfllm wait --until-interrupt` returns
 # on them and `dfllm ack` acknowledges them (unacked for reflex ack_timeout_s -> the kernel's lockdown default)
@@ -893,7 +903,12 @@ STATE = Obj(
                                                            "shield", "ammo")}),
                          # Run 11: the melee squads follow the gear (military.gear_fill): sets, melee filled to, melee
                          # wanted, crossbow positions added while metal is short
-                         "cap": Obj(req={"sets": NAT, "melee": NAT, "want": NAT, "xbow": NAT})}),
+                         "cap": Obj(req={"sets": NAT, "melee": NAT, "want": NAT, "xbow": NAT}),
+                         # FR-79: the militia rotation per squad key: w = window months, on = 1 inside the window, n = members
+                         # now, z = squad target, e = eligible citizens, lo/hi = windows served by the eligible, nx = game days
+                         # to the next close (0 = the turnover is due), rt = turnovers done, mv = members swapped in all, why =
+                         # what holds it or how the last one ended
+                         "rot": Obj(opt={k: _ROT for k in ("A", "B", "C")})}),
          "trade": Obj(req={"caravan": FLAG, "ratio": NAT, "done": NAT}),
          # FR-51 clock governor (arbiter): the vanilla FPS cap it drives, the captured original, timestream fps
          "clock": Obj(req={"cap": NAT, "orig": NAT, "ts": Int(-1, 1000), "held": FLAG, "why": Str(maxbytes=24)}),

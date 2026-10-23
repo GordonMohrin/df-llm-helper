@@ -306,6 +306,7 @@
   "unstick": {"on": true, "drop": false, "every": 33600, "below": 100, "drop_after": 2},
   "militia": {"B": [9, 10, 11]},
   "free_months": [9, 10, 11],
+  "rotation": {"on": true, "per_day": 3, "worn_min": 40},
   "early_pop": 40,
   "station_r": 3
  },
