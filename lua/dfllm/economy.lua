@@ -5488,6 +5488,22 @@ function M.brew_need(K, r)
   return ((tgt - dd) * (st.rate.drink_d or 0) // 1000 + 4) // 5, have
 end
 
+-- BUG-057 (note 35: the four PLANT holders became the gatherers while 122 PlantSeeds waited): while farm jobs wait above
+-- cover.min_jobs, the food_low gatherers are not taken from the farm detail's members nor from the PLANT holders
+-- (gather_cand options), as M.cover_plan keeps them apart. nil = no farm backlog
+function M.gather_apart(K, c)
+  local cv, jc = c.cover, st.jobc
+  if type(cv) ~= 'table' or type(jc) ~= 'table' then return nil end
+  if (math.tointeger(jc.plant_open) or 0) <= (math.tointeger(cv.min_jobs) or 20) then return nil end
+  local sc = c.starve or M.DEFAULTS.starve
+  local name, wd = find_detail((sc.details or {}).planters, 'PLANT')
+  local excl = {}
+  if name and not M.TOOL_DETAILS[name] then
+    for _, id in ipairs(wd.assigned_units) do excl[id] = true end
+  end
+  return {excl = excl, noprefer = 'PLANT'}
+end
+
 function M.gather_low(K, c, r)
   local g, p = c.gather, r.p
   if type(g) ~= 'table' or (math.tointeger(g.n) or 0) <= 0 then st.gather = nil; return end
@@ -5547,7 +5563,7 @@ function M.gather_low(K, c, r)
     if uid and not mine[uid] then mine[uid], ids[#ids + 1] = true, uid end
   end
   -- enough members on a "nobody does this" detail (the player's): the first of them sets it to only selected
-  local list = have >= want and {wd.assigned_units[0]} or M.gather_cand(K, c, member)
+  local list = have >= want and {wd.assigned_units[0]} or M.gather_cand(K, c, member, M.gather_apart(K, c))
   local flipped = false
   for _, id in ipairs(list) do
     if have >= want and not nobody then break end
@@ -5671,6 +5687,11 @@ function M.cv_audit(K, p, name, wd, now_ids, labor)
       lost[#lost + 1] = uid
     end
   end
+  -- the marks of the kernel's own removals are spent once the audit has seen them (review: they grew without bound and
+  -- hid a later loss of a member the kernel had taken off and added again)
+  for key in pairs(st.wd_off or {}) do
+    if key:sub(1, #name + 1) == name .. ':' then st.wd_off[key] = nil end
+  end
   local mode = wd.flags and math.tointeger(wd.flags.mode)
   local was = math.tointeger(cvp.mode[name])
   local wm = df.work_detail_mode or {}
@@ -5766,12 +5787,13 @@ function M.cover_plan(K, c, r)
       local zk = s.key
       cvp.zero[zk] = row.open == 0 and (math.tointeger(cvp.zero[zk]) or 0) + 1 or 0
       local mine = type(cvp.mine[s.name]) == 'table' and cvp.mine[s.name] or {}
-      local ml = {}
+      local ml, dup = {}, {}
       for _, id in ipairs(mine) do
         local uid = math.tointeger(id)
-        if uid and mem.set[uid] and alive[uid] then ml[#ml + 1] = uid end
+        if uid and mem.set[uid] and alive[uid] and not dup[uid] then dup[uid], ml[#ml + 1] = true, uid end
       end
       row.mine = ml
+      cvp.mine[s.name] = ml                       -- review: only the members still there (it grew with every re-add)
       if not safe then
         row.why = 'not in PEACE/RECOVERY or labormanager modern'
       elseif wm.EverybodyDoesThis ~= nil and row.mode == wm.EverybodyDoesThis then
@@ -5927,9 +5949,13 @@ function M.cover_run(K, c, r)
     if ok and list then
       r.cmds = r.cmds + 1
       local okw, n = K.act.plant_ungather(list)
-      K.log('info', 'gather: %d GatherPlants designations withdrawn (%d off the walk group, %d unworked for %d days)',
-            okw and math.tointeger(n) or 0, nf or 0, ns or 0, math.tointeger(c.cover.stale_days) or 30)
-      cx.withdrawn = okw and math.tointeger(n) or 0
+      n = okw and math.tointeger(n) or 0
+      -- (review: nothing withdrawn -- the shrubs were not marked any more -- is no line every day)
+      if n > 0 then
+        K.log('info', 'gather: %d GatherPlants designations withdrawn (%d off the walk group, %d unworked for %d days)',
+              n, nf or 0, ns or 0, math.tointeger(c.cover.stale_days) or 30)
+      end
+      cx.withdrawn = n
       return false
     elseif not ok then K.log('warn', 'details: withdraw failed: %s', tostring(list)) end
   end

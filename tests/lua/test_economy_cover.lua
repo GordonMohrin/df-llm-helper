@@ -364,4 +364,40 @@ T.test('BUG-057: the cover state survives a save/load round trip (an old state, 
   T.eq(#members(ctl2, 'Planters'), 4)
 end)
 
+-- review of BUG-057 (note 35 for the food_low path): gather_low took the PLANT holders as gatherers while farm jobs waited
+T.test('BUG-057 review: at food_low the gatherers are not the PLANT holders nor the Planters while PlantSeeds wait; without a backlog they may be',
+       function()
+  local lab = {[9] = {PLANT = true}, [10] = {PLANT = true}}
+  local W, ctl = world{cover = {on = false}, food = 8, jobs = cat(many("PlantSeeds", 40), many("GatherPlants", 60, 20)),
+                       labors = lab, members = {Planters = {11}}}
+  days(W, 2)
+  local ga = members(ctl, 'Plant gatherers')
+  T.ok(#ga >= 1, 'gatherers join at food_low')
+  for _, id in ipairs({9, 10, 11}) do T.ok(not has(ga, id), 'unit ' .. id .. ' plants, it does not gather') end
+  local W2, ctl2 = world{cover = {on = false}, food = 8, jobs = many("GatherPlants", 60, 20), labors = lab}
+  days(W2, 2)
+  T.ok(has(members(ctl2, 'Plant gatherers'), 9), 'no farm backlog: an idle PLANT holder may gather')
+end)
+
+-- review: the marks of the kernel's own removals are spent after one audit and the kernel's list stays bounded
+T.test('BUG-057 review: a member the kernel took off and added again and the game then drops is named lost; the mine list holds no duplicates',
+       function()
+  local W, ctl = world{jobs = many('PlantSeeds', 40)}
+  days(W, 1)
+  local before = members(ctl, 'Planters')
+  T.eq(#before, 4)
+  job_list({}); days(W, 9)                                       -- the demand is gone: the kernel takes its own off
+  T.eq(#members(ctl, 'Planters'), 2, 'down to farm_min')
+  job_list(many('PlantSeeds', 40)); days(W, 2)                   -- back: the kernel adds again
+  T.eq(#members(ctl, 'Planters'), 4)
+  local v = ctl.wds.Planters.assigned_units
+  v:erase(0)                                                     -- the game drops one now
+  days(W, 1)
+  T.eq(#logs(W, 'details: Planters lost 1 members'), 1, 'a removal the kernel did long ago must not hide this one')
+  local p = W.K.persist.get('m.economy')
+  local seen = {}
+  for _, id in ipairs(p.cover.mine.Planters) do T.ok(not seen[id], 'duplicate ' .. id); seen[id] = true end
+  T.ok(#p.cover.mine.Planters <= 4, 'the list holds the members that are there')
+end)
+
 T.done()

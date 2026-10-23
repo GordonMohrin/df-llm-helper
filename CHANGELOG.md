@@ -36,6 +36,9 @@
   - BUG-059: state `stock.hungry`; status `stock HUNGRY 12 drink .. food 41d meals 0 (raw food is not cooked)`; kern.log warning
     (7 days); food_low names `hungry` first; ORDER_STUCK `no Farmer's Workshop` with `kind` workshop | worker | input, state
     `orders.stuck_ws/ws/stuck_lab`, status `orders 40 stuck 6 (workshop missing 4: Farmer's Workshop x4; no worker 2)`.
+  - Review: the food_low gatherers (`M.gather_low`) keep out of the Planters members and the PLANT holders while PlantSeeds +
+    HarvestPlants wait above `cover.min_jobs` (`M.gather_apart`; note 35 had hit that path too); the audit's marks for the kernel's own
+    removals are spent after one pass and `cover.mine` holds each member once; "0 designations withdrawn" is no daily line.
 - **Live check:** (1) after the reload: `dfllm cmd inspect '{"what":"workload","key":"details"}'`: Planters / Plant gatherers / Fisherdwarves
   members, `mine`, `lost`, the cover rows; with PlantSeeds above 20 unclaimed the next daily pass adds farmers (kern.log `details: Planters
   +4`). (2) kern.log `details: ... lost N members the kernel did not take off (... K of them still hold PLANT)` answers note 54. (3) A
