@@ -388,7 +388,8 @@ M.DEFAULTS = {
   -- there are unengraved slabs, the rest are removed (at most `drop_per_day`; again at the first "unengraved slab"
   -- cancel past `trigger_ticks`); ConstructSlab is ordered first for the ghosts and the open engrave orders (at most
   -- `restock_cap` blank slabs); `jam_min` blocked jobs in a workshop type's slots (half of them at least) are a jam
-  slabs = {max_orders = 3, restock_cap = 5, drop_per_day = 60, trigger_ticks = 600, scan_max = 2000, jam_min = 3},
+  slabs = {max_orders = 3, restock_cap = 5, drop_per_day = 60, trigger_ticks = 600, scan_max = 2000, jam_min = 3,
+           engrave_days = 3},
   -- BUG-060 (Run 13 y508: 11 ConstructDoor INORGANIC orders, validated, made no job for months, five builds waited for
   -- doors; wood doors ordered by hand were built at once): a one-time validated order with no job in any workshop and an
   -- unchanged amount for `days` days (`wait_days` when a planned building waits for that piece) is stale: a stone
@@ -6847,11 +6848,14 @@ function M.slab_pass(K, c, r)
   if type(sc) ~= 'table' or jt == nil then return end
   local p, now = r.p, r.now
   local cs = df.job_type.ConstructSlab
-  local eng, cons = {}, 0
+  local eng, cons, engf = {}, 0, {}
   for _, o in ipairs(orders_all()) do
     local n = math.tointeger(o.amount_left) or 0
     if n > 0 then
-      if o.job_type == jt then eng[#eng + 1] = o.id
+      if o.job_type == jt then
+        eng[#eng + 1] = o.id
+        local okf, hf = pcall(function() return o.specdata.hist_figure_id end)     -- BUG-078: whose slab
+        engf[o.id] = okf and math.tointeger(hf) or -1
       elseif cs ~= nil and o.job_type == cs then cons = cons + n end
     end
   end
@@ -6859,8 +6863,8 @@ function M.slab_pass(K, c, r)
   local sl = OF.slabs(sc.scan_max)
   local care = (K.view() or {}).care
   local ghosts = math.tointeger(type(care) == 'table' and care.ghosts or 0) or 0
-  local sb = {blank = sl.blank, busy = sl.busy, held = sl.held, memorial = sl.memorial, engrave = #eng, cons = cons,
-              ghosts = ghosts, removed = 0, ordered = 0}
+  local sb = {blank = sl.blank, busy = sl.busy, held = sl.held, built = sl.built, memorial = sl.memorial, engrave = #eng,
+              cons = cons, ghosts = ghosts, removed = 0, ordered = 0, engraved = 0, unserved = 0}
   st.slab, st.slab_t = sb, now
   local function cmd() if r.cmds then r.cmds = r.cmds + 1 end end
   -- the EngraveSlab orders that may stand
@@ -6894,8 +6898,9 @@ function M.slab_pass(K, c, r)
   elseif #drop == 0 then
     p.slab_ann = CAD.quiet(p.slab_ann)
   end
+  M.slab_engrave(K, c, r, sl, sb, eng, engf, removed)
   -- ConstructSlab first
-  local n, want = OF.restock(sl.blank, cons, ghosts, #eng - #removed, sc.restock_cap)
+  local n, want = OF.restock(sl.blank, cons, ghosts, #eng - #removed + sb.engraved, sc.restock_cap)
   sb.want = want
   if n > 0 then
     local f = r.f or {}
@@ -6920,6 +6925,83 @@ function M.slab_pass(K, c, r)
     end
   end
   K.persist.touch('m.economy')
+end
+
+-- BUG-078 (Run 14 note 69: autoslab enabled, 79 slabs, two ghosts waiting for years, 0 EngraveSlab orders): a ghost that
+-- stood `slabs.engrave_days` days (0 = off; the plugin queues one order per ghost every 1289 ticks, so it has had its
+-- chance) with a figure, no memorial and no EngraveSlab order of its own gets one through act.engrave_order, as many as
+-- the free blank slabs and slabs.max_orders allow after the trim above (so the next pass does not remove them). The
+-- ghost list is census.g (sense; not trusted older than two days); the age is the first day this module saw the ghost
+-- (persisted p.slab_ghost). A ghost without a historical figure (unit.hist_figure_id < 0) cannot be served by the plugin
+-- or by us: reported once (p.slab_skip), never retried; an act failure is retried after 7 days. sb.unserved counts them.
+function M.slab_engrave(K, c, r, sl, sb, eng, engf, removed)
+  local sc, p, now = c.slabs, r.p, r.now
+  local days = sc.engrave_days
+  if days == nil then days = 3 end
+  local cg = K.census.g
+  if days <= 0 or type(cg) ~= 'table' or type(cg.ids) ~= 'table'
+     or now - (math.tointeger(cg.tick) or -DAY * 3) >= DAY * 2 then return end
+  local seen = json.object(type(p.slab_ghost) == 'table' and p.slab_ghost or {})
+  local skip = json.object(type(p.slab_skip) == 'table' and p.slab_skip or {})
+  local isghost, ids = {}, {}
+  for _, id in ipairs(cg.ids) do
+    local sid = tostring(math.tointeger(id) or id)
+    isghost[sid] = true
+    ids[#ids + 1] = {id = math.tointeger(id), sid = sid}
+    if seen[sid] == nil then seen[sid] = now end
+  end
+  for sid in pairs(seen) do if not isghost[sid] then seen[sid] = nil end end
+  for sid in pairs(skip) do if not isghost[sid] then skip[sid] = nil end end
+  p.slab_ghost, p.slab_skip = seen, skip
+  local gone = {}
+  for _, id in ipairs(removed or {}) do gone[id] = true end
+  local ordered = {}
+  for _, id in ipairs(eng) do if not gone[id] and (engf[id] or -1) >= 0 then ordered[engf[id]] = true end end
+  local cand = {}
+  table.sort(ids, function(a, b)
+    local sa, sb2 = seen[a.sid], seen[b.sid]
+    if sa ~= sb2 then return sa < sb2 end
+    return (a.id or 0) < (b.id or 0)
+  end)
+  for _, g in ipairs(ids) do
+    if g.id and now - seen[g.sid] >= days * DAY then
+      local u = df.unit.find(g.id)
+      local hf = u and math.tointeger(u.hist_figure_id) or -1
+      local sk = skip[g.sid]
+      if hf < 0 then
+        sb.unserved = sb.unserved + 1
+        if sk == nil then
+          skip[g.sid] = json.object{why = 'no_hf', t = now}
+          K.log('warn', 'EngraveSlab: ghost unit %d has no historical figure: no slab can be ordered for it (reported once)',
+                g.id)
+        end
+      elseif sl.topics[hf] or ordered[hf] then
+        skip[g.sid] = nil                                      -- served: a memorial exists or the plugin's order stands
+      elseif type(sk) == 'table' and sk.why ~= 'no_hf' and now - (math.tointeger(sk.t) or 0) < 7 * DAY then
+        sb.unserved = sb.unserved + 1                           -- an act failure: back off
+      else
+        cand[#cand + 1] = {id = g.id, hf = hf, sid = g.sid, age = (now - seen[g.sid]) // DAY}
+      end
+    end
+  end
+  sb.aged = #cand
+  if #cand == 0 then return end
+  local standing = #eng - #removed
+  local room = math.min((sc.max_orders or 3) - standing, sl.blank - math.max(0, standing - sl.busy))
+  for i = 1, math.min(room, #cand) do
+    local g = cand[i]
+    if r.cmds then r.cmds = r.cmds + 1 end
+    local ok, res = K.act.engrave_order(g.hf)
+    if ok then
+      sb.engraved = sb.engraved + 1
+      K.log('info', 'EngraveSlab order %s for ghost unit %d (hf %d, %d days without a memorial or an order): the autoslab ' ..
+            'plugin queued none (%d blank slabs, %d orders standing, %d ghosts)', tostring(res), g.id, g.hf, g.age, sl.blank,
+            standing, #ids)
+    else
+      skip[g.sid] = json.object{why = tostring(res):sub(1, 40), t = now}
+      sb.unserved = sb.unserved + 1
+    end
+  end
 end
 
 -- the first "unengraved slab" cancel of a window (slabs.trigger_ticks): the pass now, outside a daily run
@@ -8545,6 +8627,18 @@ M.verbs['order.add'] = function(K, args, cmd)
   if not amount or amount < 1 or amount > 999 then return false, 'amount must be 1..999' end
   if OL.unsafe(job, args.item_subtype) then
     return false, job .. ' needs item_subtype (ITEM_...): DF 53.16 crashes without one (FR-39)'
+  end
+  -- BUG-078: the memorial slab order names its dead figure (the job is EngraveSlab); only that job takes `hf`
+  if job == 'EngraveSlab' then
+    local hf = math.tointeger(args.hf)
+    if not hf or hf < 0 then return false, 'EngraveSlab needs hf (the historical figure of the ghost)' end
+    if amount ~= 1 then return false, 'EngraveSlab: amount must be 1 (one slab per figure)' end
+    local oke, res = K.act.engrave_order(hf)
+    if not oke then return false, 'engrave_order: ' .. tostring(res) end
+    K.log('info', 'order EngraveSlab for hf %d added by %s (%s)', hf, tostring(cmd and cmd.by), tostring(res))
+    return true, string.format('order %s EngraveSlab hf %d', tostring(res), hf), {order = math.tointeger(res) or -1}
+  elseif args.hf ~= nil then
+    return false, 'hf belongs to EngraveSlab only'
   end
   local spec = {job = job, amount_total = amount, frequency = 'OneTime', tag = 'dfllm:cmd'}
   if args.frequency ~= nil then
