@@ -171,6 +171,8 @@ function OF.simple_spec(o, job, mc)
   if (math.tointeger(get(o, 'item_subtype')) or -1) >= 0 then return nil end
   local rn = get(o, 'reaction_name')
   if rn ~= nil and tostring(rn) ~= '' then return nil end
+  -- a stone the order names (obsidian, marble) is not "any stone": the player's choice stays, nothing is made again
+  if (math.tointeger(get(o, 'mat_type')) or -1) == 0 and (math.tointeger(get(o, 'mat_index')) or -1) >= 0 then return nil end
   local spec = {job = job, amount_total = left, frequency = 'OneTime'}
   if mc == 'rock' then spec.material = 'INORGANIC'
   elseif mc == 'wood' then spec.material_category = {'wood'}

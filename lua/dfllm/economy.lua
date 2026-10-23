@@ -5891,10 +5891,11 @@ function M.jam_scan(K, c, oq)
   table.sort(keys)
   for _, key in ipairs(keys) do
     local e = shops.keys[key]
-    local blocked, why_of = {}, {}
+    local blocked, why_of, checked = {}, {}, {}
     for _, j in ipairs(e.list) do
       local o = by[j.order]
-      if o and not blocked[j.order] then
+      if o and not checked[j.order] then
+        checked[j.order] = true                  -- one reading per order, not per job (a jam holds dozens of its jobs)
         local why = M.order_reasons(o, oq.ctx)
         if why then blocked[j.order], why_of[j.job] = true, why:sub(1, 40) end
       end

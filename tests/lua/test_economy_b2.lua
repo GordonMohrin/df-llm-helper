@@ -483,4 +483,30 @@ T.test('FR-73: no farmers\' shop at P1: PROJECT_REQUEST workshops why=farmers, e
   T.eq(#W3.find_events('PROJECT_REQUEST'), 0, 'a farmers\' shop stands')
 end)
 
+T.test('review: a stale order for a named stone is not made again as any stone (the choice stays)', function()
+  local W = world{boulders = 40, shops = {'Masons'}, setup = function(W)
+    local o = order(W, {job = 'ConstructDoor', mat_type = 0, left = 5})
+    o.mat_index = 5                                                   -- granite, named by the player
+  end}
+  days(W, 25)
+  T.eq(#acts(W, 'workorder', 'dfllm:redo_'), 0, 'no generic stone order in its place')
+  T.eq(#acts(W, 'order_remove'), 0, 'the order stays')
+  T.eq(#stuck(W, 'stale'), 1, 'reported once')
+  T.ok(stuck(W, 'stale')[1].msg:find('only reported', 1, true))
+end)
+
+T.test('review: the jam scan reads an order once, not once per job it holds in the workshop', function()
+  local W, ctl = world{boulders = 40, wood = 20, setup = function(W)
+    order(W, {job = 'ConstructDoor', mat_type = 0, left = 4})
+    engrave(W, 1)
+  end}
+  local jobs = {}
+  for i = 1, 40 do jobs[i] = {job_type = df.job_type.ConstructDoor, order_id = 1, flags = {working = true}} end
+  ctl.shops.Masons.jobs = kmock.vec(jobs)
+  local n, orig = 0, ctl.E.order_reasons
+  ctl.E.order_reasons = function(...) n = n + 1; return orig(...) end
+  days(W, 1)
+  T.ok(n > 0 and n <= 6, 'order_reasons calls in a day: ' .. n)
+end)
+
 T.done()
