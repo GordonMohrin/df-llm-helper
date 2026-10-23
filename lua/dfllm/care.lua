@@ -88,7 +88,11 @@ local OL = require('dfllm.orderlib')   -- library: an order's material class (th
 local CAD = require('dfllm.util.cadence')   -- BUG-008: when a standing class-A condition is announced again
 local DT = require('dfllm.deaths')          -- library (FR-64): the cause of a citizen's death, death clusters
 
-local M = {name = 'care', every = {ticks = 1200}, on = {}, verbs = {}}
+local M = {name = 'care', every = {ticks = 1200}, on = {}, verbs = {},
+           -- BUG-063: the game's own announcements of a strange mood start the mood check at once
+           -- BUG-064: "X toppled by <dwarf>": stressed citizens in a tantrum and ghosts tear down workshops, levers, bridges
+           reports = {STRANGE_MOOD = true, MOOD_BUILDING_CLAIMED = true, BUILDING_TOPPLED_BY_GHOST = true,
+                      BUILDING_DESTROYED_OR_TOPPLED = true, CITIZEN_TANTRUM = true, POSSESSED_TANTRUM = true}}
 local DAY = C.TICKS.DAY
 -- Optional walk-group hook, proposed for CONTRACTS §7 (live L4): snapshot.reach(a, b) -> bool, i.e.
 -- dfhack.maps.canWalkBetween asked at call time (care may not read tiles itself, CONTRACTS §1.4). Feature-
@@ -109,8 +113,19 @@ M.DEFAULTS = {
   unforbid_per_need = 5, corpse_acts_per_run = 30, barrels_per_run = 20, mood_nojob_ticks = 1200,
   stress_week = 8400,
   tomb_repair = true, tomb_acts_per_run = 20, entomb_per_run = 8, entomb_retry = 2400, entomb_tries = 3,
-  ghost_every = 8400, doctors = 4, posts_per_run = 4, mood_thirst = 30000, mood_hunger = 50000,
+  tomb_open_per_run = 120, far_check = 60,         -- BUG-062: flag-only opens a run (own budget); bodies checked for another walk group
+  ghost_every = 8400, doctors = 4, posts_per_run = 4, mood_thirst = 30000, mood_hunger = 40000,
   mood_risk_every = 2400, wake_wall_s = 600,
+  -- BUG-063: the drink nook from mood_act on, MOOD_CRITICAL from mood_crit (thirst) / mood_crit_hunger, the mood check every
+  -- mood_fast ticks while a mood is open (0: the care cadence), the nook's source pile and its retry
+  mood_act = 40000, mood_crit = 50000, mood_crit_hunger = 60000, mood_fast = 300, mood_nook = true,
+  mood_take = 'dfllm-stock', mood_nook_retry = 3600,
+  -- BUG-064: one BUILDING_TOPPLED per culprit per topple_every ticks; gate asks for a culprit near a vanished bridge
+  -- within topple_win ticks and topple_r tiles
+  topple_every = 2400, topple_win = 4800, topple_r = 6,
+  -- FR-74: STRESS_HIGH (B) once stressed_pct has stood at stress_high for stress_days game days (again every stress_every
+  -- ticks); plan propose / check read stress_high too (a temple and a tavern for the stressed fort)
+  stress_high = 30, stress_days = 14, stress_every = 33600,
   coffins = true, coffin_reserve = 10, coffin_batch = 30, coffin_scan_r = 16, coffin_min_side = 4,
   coffin_entrance_r = 10, coffin_retry = 3600, coffin_wood_keep = 20, coffin_wake = 2400, coffin_prio = 3,
   death_window = 33600, death_same = 2, death_any = 3, death_every = 1200, death_recheck = 100800,
@@ -165,7 +180,7 @@ local function pstate(K)
     p = {v = 2, dead = {}, deaths = {}, petitions = {}}
     K.persist.set('m.care', p)
   end
-  for _, k in ipairs({'moods', 'captives', 'corpses', 'burial'}) do
+  for _, k in ipairs({'moods', 'captives', 'corpses', 'burial', 'nook'}) do
     p[k] = json.object(type(p[k]) == 'table' and p[k] or {})
   end
   for _, rec in pairs(p.moods) do rec.needs = json.object(type(rec.needs) == 'table' and rec.needs or {}) end
@@ -188,6 +203,9 @@ local function pstate(K)
   if type(p.died) ~= 'table' then p.died = {} end
   p.mend = json.object(type(p.mend) == 'table' and p.mend or {})
   p.clus = json.object(type(p.clus) == 'table' and p.clus or {})
+  -- FR-74: the population record: deaths of the last year {t, cause}, migrant waves {t, n}, the peak {n, t}
+  if type(p.dlog) ~= 'table' then p.dlog = {} end
+  if type(p.waves) ~= 'table' then p.waves = {} end
   return p
 end
 
@@ -287,11 +305,25 @@ local function vec(path)
 end
 
 ---------------------------------------------------------------- units: stress, naked, moods
-local function thoughts(u, counts)
+-- FR-74 (Run 13/14 note 12: stress 52-78 % for years, nobody knew from what): the thought types (df.unit_thought_type,
+-- df.personality.xml) that name a source the fort can act on, by source. A stressed citizen counts once per source.
+M.STRESS_SRC = {
+  GhostNightmare = 'ghosts', GhostHaunt = 'ghosts', AttackedByDead = 'ghosts',
+  WitnessDeath = 'deaths', UnexpectedDeath = 'deaths', Death = 'deaths', SawDeadBody = 'deaths',
+  LackBedroom = 'beds', BedroomQuality = 'beds', SleptMud = 'beds', SleptDirt = 'beds', SleepNoise = 'beds',
+  Thirsty = 'drink', Dehydrated = 'drink', Hungry = 'food', Starving = 'food',
+  NoDining = 'rooms', DiningQuality = 'rooms', NoRooms = 'rooms', RoomPretension = 'rooms',
+}
+local function thoughts(u, counts, src)
   pcall(function()
+    local seen = {}
     for _, e in ipairs(u.status.current_soul.personality.emotions) do   -- fixnaked.lua:12
       local name = df.unit_thought_type[e.thought]
-      if name then counts[name] = (counts[name] or 0) + 1 end
+      if name then
+        counts[name] = (counts[name] or 0) + 1
+        local g = M.STRESS_SRC[name]
+        if g and src and not seen[g] then seen[g] = true; src[g] = (src[g] or 0) + 1 end
+      end
     end
   end)
 end
@@ -427,6 +459,13 @@ local function route_note(K, classes, glassy)
   return table.concat(out, '; ')
 end
 
+local mood_relief   -- forward: BUG-063, defined after occ_index (the drink nook beside the claimed workshop)
+
+local function uname(u)
+  local ok, n = pcall(function() return dfhack.df2utf(dfhack.units.getReadableName(u)) end)
+  return ok and type(n) == 'string' and trunc(n, 40) or ''
+end
+
 local function mood_seen(K, c, r, p, u, kind)
   local sid, now = fmt(u.id), K.now().tick
   local child = is_child(u)
@@ -450,23 +489,53 @@ local function mood_seen(K, c, r, p, u, kind)
   local T = K.now()
   local last = rec.risk and {t = rec.risk, w = rec.risk_w, ids = {sid}, toks = {rec.risk_why}} or nil
   local job = u.job and u.job.current_job
+  local ws = job and M.mood_workshop(job)
+  -- BUG-063 (Run 14 y484/y485/y558: three moods, thirst 63,513 - 75,002, MOOD_RISK said 'nothing missing'): material
+  -- first (the missing classes, the route), then the drink: at mood_act the kernel puts a one-barrel drink stockpile
+  -- beside the claimed workshop (runner.mooddrink; never a job or an item for the dwarf), at mood_crit the
+  -- escalation MOOD_CRITICAL (A) names the dwarf and the workshop. MOOD_RISK names thirst and hunger both.
+  local act = th >= c.mood_act or hu >= c.mood_act
+  local nook = ''
+  if act then nook = mood_relief(K, c, p, u, rec, job, ws) or '' end
   if risk and CAD.due(last, T, {sid}, {risk}, {ticks = c.mood_risk_every, wall_s = c.wake_wall_s}) then
     rec.risk, rec.risk_why, rec.risk_w = now, risk, T.wall
     local miss = still_missing(job, rec)
     rec.missing = miss
     local rn = #miss > 0 and route_note(K, miss, rec.glass) or ''
-    K.emit('MOOD_RISK', 'A', trunc(string.format('mood unit %d (%s%s) %s %d, dies at 75000: %s%s; a mood job cannot be '
-                                                 .. 'cancelled%s', u.id, kind, child and ', child' or '', risk,
-                                                 risk == 'thirst' and th or hu,
+    K.emit('MOOD_RISK', 'A', trunc(string.format('mood unit %d (%s%s%s) thirst %d hunger %d, dies at 75000: %s%s; a mood job '
+                                                 .. 'cannot be cancelled%s%s', u.id, kind, child and ', child' or '',
+                                                 ws and (', ' .. ws) or '', th, hu,
                                                  #miss > 0 and ('missing ' .. table.concat(miss, ',') .. nosrc_text(rec, miss))
                                                    or 'nothing missing', rn ~= '' and ('; ' .. rn) or '',
-                                                 #miss > 0 and ', supply it' or ''), 200),
+                                                 #miss > 0 and ', supply it' or '', nook ~= '' and ('; ' .. nook) or ''), 200),
            {unit = u.id, why = risk, kind = kind, missing = miss, thirst = th, hunger = hu,
-            route = rn ~= '' and trunc(rn, 200) or nil})
+            route = rn ~= '' and trunc(rn, 200) or nil, ws = ws})
   elseif not risk then
     rec.risk_why = nil                         -- quiet: the time stays, a new risk within the cadence waits
   end
-  local ws = job and M.mood_workshop(job)
+  if th >= c.mood_crit or hu >= c.mood_crit_hunger then
+    local why = th >= c.mood_crit and 'thirst' or 'hunger'
+    local crec = rec.crit and {t = rec.crit, w = rec.crit_w, ids = {sid}, toks = {why}} or nil
+    if CAD.due(crec, T, {sid}, {why}, {ticks = c.mood_risk_every, wall_s = c.wake_wall_s}) then
+      rec.crit, rec.crit_w = now, T.wall
+      local miss = still_missing(job, rec)
+      local wb, wpos = nil, nil
+      pcall(function()
+        wb = dfhack.job.getHolder(job)
+        wpos = {math.tointeger(tonumber(wb.x1)), math.tointeger(tonumber(wb.y1)), math.tointeger(tonumber(wb.z))}
+      end)
+      K.emit('MOOD_CRITICAL', 'A', trunc(string.format('mood unit %d %s (%s) %s %d (thirst %d, hunger %d), dies at 75000: '
+                                                       .. 'workshop %s%s; %s%s', u.id, uname(u), kind, why,
+                                                       why == 'thirst' and th or hu, th, hu, ws or 'none claimed',
+                                                       (wpos and wpos[1] and wpos[2] and wpos[3])
+                                                         and string.format(' at %d,%d,%d', wpos[1], wpos[2], wpos[3]) or '',
+                                                       #miss > 0 and ('missing ' .. table.concat(miss, ',')) or 'nothing missing',
+                                                       nook ~= '' and ('; ' .. nook) or ''), 200),
+             {unit = u.id, why = why, kind = kind, thirst = th, hunger = hu, ws = ws, name = uname(u),
+              pos = (wpos and wpos[1] and wpos[2] and wpos[3]) and wpos or nil, missing = miss,
+              nook = nook ~= '' and trunc(nook, 80) or nil})
+    end
+  end
   if not ws and (not job or R.is_mood_job(job)) then   -- no workshop claimed yet (a mood job without a holder too)
     if rec.nojob < 0 then rec.nojob = now end
     if rec.ws == 0 and now - rec.nojob >= c.mood_nojob_ticks then
@@ -509,8 +578,11 @@ local function look_unit(K, c, r, p, u)
   a.n = a.n + 1
   if dfhack.units.getStressCategory(u) <= 1 then           -- Lua API.txt:1904: 0 worst .. 6
     a.stressed = a.stressed + 1
-    thoughts(u, a.thoughts)
+    thoughts(u, a.thoughts, a.src)
   end
+  -- FR-74: who the census counts (children and residents are in `cit`; `adults` is isAdult = neither BABY nor CHILD)
+  if is_child(u) then a.kids = a.kids + 1 end
+  if not dfhack.units.isCitizen(u) then a.res = a.res + 1 end
   if not dfhack.units.isBaby(u) and not has_shirt(u) then a.naked = a.naked + 1 end
   local kind = df.mood_type[u.mood]
   -- live L6: a dead moody citizen kept u.mood and woke the LLM five times after his death
@@ -536,6 +608,7 @@ local function phase_units(K, c, r, p)
       if not (alive and M.STRANGE[mood]) then
         local ok = (alive and not M.FAILED[mood]) and 1 or 0
         p.moods[sid] = nil
+        p.nook[sid] = nil
         -- FR-64: a death after a failed mood (insane) or during the mood is a mood death (dfllm.deaths)
         p.mend[sid] = {t = K.now().tick, kind = rec.kind, ok = ok, alive = alive and 1 or 0}
         K.emit('MOOD_END', 'B', string.format('mood (%s) unit %s %s', rec.kind, sid, ok == 1 and 'done' or 'failed'),
@@ -827,10 +900,13 @@ local function good_zone(T, uid)
   end
 end
 
-local function free_zones(T)
+-- free zones: standing, unassigned, over a usable coffin. BUG-062: a zone closed to citizens (no_citizens) is no free
+-- tomb (DF hands no unburied citizen to it, a coffin counted free because of it hid the missing coffins): they are the
+-- `locked` ones (free_zones(T, true)), which care opens first
+local function free_zones(T, locked)
   local out = {}
   for _, z in ipairs(T.zones) do
-    if not z.drop and z.active and z.unit < 0 then
+    if not z.drop and z.active and z.unit < 0 and (z.closed == true) == (locked == true) then
       for _, e in ipairs(z.coffins) do
         if usable(e, nil) then out[#out + 1] = z; break end
       end
@@ -875,13 +951,46 @@ local function in_pile(T, pos)
   return false
 end
 
+-- BUG-062: the unburied bodies no citizen can walk to (another walk group than the first three citizens: an old
+-- battlefield on the surface). Needs snapshot's reach hook (canWalkBetween); without it nothing is far. At most
+-- far_check bodies are asked per run (lowest unit id first). Returns the set and its size.
+local function far_bodies(K, c, r)
+  local far, n = {}, 0
+  local cu, anchors = K.census.u, {}
+  for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
+    if #anchors >= 3 then break end
+    local pos = unit_pos(df.unit.find(id))
+    if pos then anchors[#anchors + 1] = pos end
+  end
+  if #anchors == 0 then return far, 0 end
+  local ids = {}
+  for uid in pairs(r.bodies) do ids[#ids + 1] = uid end
+  table.sort(ids)
+  for i, uid in ipairs(ids) do
+    if i > (num(c.far_check) or 60) then break end
+    local b = r.bodies[uid]
+    if b.pos then
+      local near = false
+      for _, a in ipairs(anchors) do
+        if reach_ok(K, b.pos, a) then near = true; break end
+      end
+      if not near then far[uid], n = true, n + 1 end
+    end
+  end
+  return far, n
+end
+
 -- why one unburied citizen still lies around (before this run's repair)
 local function body_causes(K, c, r, p, T, uid, now, nfree)
   local b, out = r.bodies[uid], {}
   local function add(s) out[#out + 1] = s end
   local mine = T.by_unit[uid] or {}
-  if #mine == 0 then
-    add(nfree > 0 and 'no_zone' or 'no_coffin')
+  if r.far and r.far[uid] then
+    -- BUG-062 (Run 14 note 56: nine ghosts whose bodies lay in walk group 859 against the fort's 9): no coffin, zone
+    -- or hauler helps a body nobody can walk to; it is its own cause, not no_coffin
+    add('corpse_far')
+  elseif #mine == 0 then
+    add(nfree > 0 and 'no_zone' or ((T.nlocked or 0) > 0 and 'zone_locked' or 'no_coffin'))
   else
     local z = mine[1]
     local e = z.coffins[1]
@@ -917,6 +1026,66 @@ local function burial_jobs()
     return c
   end)
   return ok and n or -1
+end
+
+-- BUG-062: what care knows about the zone lock, since boot: the zones it opened (id -> tick) and the zones it
+-- entombed a body into (entomb.lua:152-154 closes the zone it assigns: no_pets and no_citizens), so a zone found
+-- closed again can be told apart: unassigned (nobody owns it: DF or a plugin closed it), assigned (an owner: DF's own
+-- assignment or care's entomb)
+function M.lockstate()
+  local lk = st.lk
+  if not lk then
+    lk = {opened = {}, entombed = {}, freed = {}, assigned = {}, again_free = 0, again_owned = 0, by_entomb = 0, churn = 0,
+          pend = {free = 0, owned = 0, entomb = 0, churn = 0}}
+    st.lk = lk
+  end
+  return lk
+end
+
+-- the lock census of the index before the repair (read only): closed zones by kind, and the zones care opened that
+-- are closed again now (each counted once; a zone gone from the index is forgotten)
+local function lock_scan(T, readonly)
+  local lk = M.lockstate()
+  local c = {closed = 0, free = 0, usable = 0, owned = 0, inactive = 0, again_free = 0, again_owned = 0, by_entomb = 0,
+             churn = 0}
+  local live = {}
+  for _, z in ipairs(T.zones) do
+    live[z.id] = true
+    -- a zone care freed (its dead owner had no remains here, or its coffin could not take them) that has an owner again
+    -- and care did not assign it: DF handed it to another body (the freed-20-every-round loop of Run 14, if that is it)
+    if lk.freed[z.id] and z.unit >= 0 and not lk.assigned[z.id] then
+      c.churn = c.churn + 1
+      if not readonly then lk.freed[z.id] = nil end
+    end
+    if not z.drop and z.closed then
+      c.closed = c.closed + 1
+      if not z.active then c.inactive = c.inactive + 1
+      elseif z.unit < 0 then c.free = c.free + 1
+      else c.owned = c.owned + 1 end
+      if lk.opened[z.id] then
+        if z.unit < 0 then c.again_free = c.again_free + 1
+        else
+          c.again_owned = c.again_owned + 1
+          if lk.entombed[z.id] then c.by_entomb = c.by_entomb + 1 end
+        end
+        if not readonly then lk.opened[z.id] = nil end
+      end
+    end
+  end
+  for _, z in ipairs(free_zones(T, true)) do c.usable = c.usable + 1 end
+  if readonly then return c end
+  for id in pairs(lk.opened) do if not live[id] then lk.opened[id] = nil end end
+  for id in pairs(lk.entombed) do if not live[id] then lk.entombed[id] = nil end end
+  for id in pairs(lk.freed) do if not live[id] then lk.freed[id] = nil end end
+  for id in pairs(lk.assigned) do if not live[id] then lk.assigned[id] = nil end end
+  lk.again_free, lk.again_owned = lk.again_free + c.again_free, lk.again_owned + c.again_owned
+  lk.by_entomb = lk.by_entomb + c.by_entomb
+  lk.churn = lk.churn + c.churn
+  lk.pend.churn = lk.pend.churn + c.churn
+  -- not yet announced (the cadence may hold TOMBS_LOCKED back): lock_event reports and resets them
+  lk.pend.free, lk.pend.owned, lk.pend.entomb = lk.pend.free + c.again_free, lk.pend.owned + c.again_owned,
+                                                 lk.pend.entomb + c.by_entomb
+  return c
 end
 
 -- the repair plan (marks on the index) and its acts; returns the act counts
@@ -987,6 +1156,9 @@ local function tomb_repair(K, c, r, p, T, now)
     if not z or z.free then need[#need + 1] = uid end
   end
   table.sort(need)
+  for i = #need, 1, -1 do                         -- BUG-062: no zone for a body nobody can reach
+    if r.far and r.far[need[i]] then table.remove(need, i) end
+  end
   for _, uid in ipairs(need) do
     local z = table.remove(free, 1)
     if not z then break end
@@ -1010,16 +1182,52 @@ local function tomb_repair(K, c, r, p, T, now)
       if act('remove', z) then acts.removed, z.gone = acts.removed + 1, true end
     end
   end
-  for _, z in ipairs(T.zones) do
-    if z.free and not z.drop and act('free', z) then acts.freed, z.unit, z.closed = acts.freed + 1, -1, false end
+  local lk = M.lockstate()
+  -- BUG-062: the frees an unburied body is waiting for come first, then the assignments, then the rest of the frees with
+  -- what is left of the budget (160 stale owners freed 20 at a time used to take the whole budget before any body got
+  -- its zone)
+  local function release(z)
+    if act('free', z) then
+      acts.freed, z.unit, z.closed = acts.freed + 1, -1, false
+      lk.opened[z.id], lk.freed[z.id], lk.assigned[z.id] = now, now, nil
+      acts.why = acts.why or {}
+      acts.why[z.free] = (acts.why[z.free] or 0) + 1                 -- bad | stale | elsewhere
+    end
+  end
+  for _, z in ipairs(T.zones) do                              -- a body's own bad zone, and the zones the bodies are given
+    if z.free and (z.assign or z.free == 'bad') and not z.drop then release(z) end
   end
   for _, z in ipairs(T.zones) do
     if z.assign and not z.drop and z.unit < 0 and act('assign', z, z.assign) then
       acts.assigned, z.unit = acts.assigned + 1, z.assign
+      lk.assigned[z.id] = now
     end
   end
-  for _, z in ipairs(free) do
-    if z.closed and z.unit < 0 and act('open', z) then acts.opened, z.closed = acts.opened + 1, false end
+  for _, z in ipairs(T.zones) do
+    if z.free and not z.assign and z.free ~= 'bad' and not z.drop then release(z) end
+  end
+  -- BUG-062 (Run 14 y529-y577: 163, then 284 of 287 tomb zones closed to citizens, 26-44 unburied, ghosts 1 -> 30, after
+  -- the player opened them 32 burial jobs came at once): every standing unassigned zone over a usable coffin that is
+  -- closed is opened, on its own budget (tomb_open_per_run: a flag write per zone, the shared 20 acts went to frees
+  -- and assignments first and left the opens to wait for years); the ones the budget or a failed act left closed are
+  -- no free tombs (free_zones) and the next run goes on
+  local ob = num(c.tomb_open_per_run) or 120
+  for _, z in ipairs(T.zones) do
+    if ob <= 0 then break end
+    if not z.drop and z.closed and z.unit < 0 and z.active and (st.bad_zone[z.id] or 0) < 3 then
+      local usable_z = false
+      for _, e in ipairs(z.coffins) do if usable(e, nil) then usable_z = true; break end end
+      if usable_z then
+        ob = ob - 1
+        if K.act.tomb_zone('open', z.id) then
+          acts.opened, z.closed = acts.opened + 1, false
+          lk.opened[z.id] = now
+        else
+          st.bad_zone[z.id] = (st.bad_zone[z.id] or 0) + 1
+          acts.failed = acts.failed + 1
+        end
+      end
+    end
   end
   -- the index now shows what stands: a failed removal keeps its zone
   for _, z in ipairs(T.zones) do z.drop = z.gone end
@@ -1037,7 +1245,7 @@ local function entomb_bodies(K, c, r, p, T, now, acts)
   for _, uid in ipairs(ids) do
     if n >= c.entomb_per_run then break end
     local b = r.bodies[uid]
-    if not b.job and b.pos and good_zone(T, uid) then
+    if not b.job and b.pos and good_zone(T, uid) and not (r.far and r.far[uid]) then
       local x, y, z = b.pos.x, b.pos.y, b.pos.z
       if (r.clean_ok or inside(r, x, y, z)) and revealed(K, x, y, z) then
         local sid = fmt(uid)
@@ -1047,7 +1255,11 @@ local function entomb_bodies(K, c, r, p, T, now, acts)
           local ok = K.act.run('entomb', '--unit', sid, '--haul-now')
           p.burial[sid] = {t = now, n = tries + 1}
           n = n + 1
-          if ok then acts.entombed = acts.entombed + 1 end
+          if ok then
+            acts.entombed = acts.entombed + 1
+            local gz = good_zone(T, uid)
+            if gz then M.lockstate().entombed[gz.id] = now end      -- BUG-062: it closes this zone
+          end
         end
       end
     end
@@ -1059,7 +1271,7 @@ end
 
 local LEGEND = 'coffins: p pos, b built, occ body inside, bed in a Bedroom zone, oz other zones, z [zone, unit, open]; '
                .. 'causes: no_coffin no_zone coffin_taken zone_shared bedroom zone_owner unflagged unreachable '
-               .. 'in_stockpile undiscovered no_job zone_off'
+               .. 'in_stockpile undiscovered no_job zone_off zone_locked corpse_far'
 
 -- the inspect what=tombs document, built from the last run's plain index on request
 local function tomb_report(src)
@@ -1091,6 +1303,24 @@ local function tomb_report(src)
   local out = {tick = now, coffins = #T.coffins, zones = #T.zones, free = #free_zones(T), jobs = jobs,
                repaired = repaired and 1 or 0, acts = acts, list = list, loose = loose, unburied = unb,
                ghosts = ghosts, unburied_n = unb_n, legend = LEGEND}
+  -- BUG-062: the zone lock (closed counts of the last run, then the cumulative 'closed again' tally since boot) and
+  -- why coffins are no free tombs (live data for who closes the zones and why none is free)
+  out.locked = #free_zones(T, true)
+  out.far_n = src.far_n or 0
+  if src.lock then out.lock = src.lock end
+  local lks = M.lockstate()
+  out.again = {free = lks.again_free, owned = lks.again_owned, by_entomb = lks.by_entomb, churn = lks.churn}
+  local un = {unbuilt = 0, bedroom = 0, other_zone = 0, occupied = 0, zones = 0}
+  for _, e in ipairs(T.coffins) do
+    local zn = 0
+    for _, z in ipairs(e.zones) do if not z.drop then zn = zn + 1 end end
+    if not e.built then un.unbuilt = un.unbuilt + 1
+    elseif e.bed then un.bedroom = un.bedroom + 1
+    elseif e.other > 0 then un.other_zone = un.other_zone + 1
+    elseif e.occ ~= nil then un.occupied = un.occupied + 1
+    elseif zn ~= 1 then un.zones = un.zones + 1 end
+  end
+  out.unusable = un
   -- BUG-003: the acts of the last run that changed anything (an entomb run is followed by runs with nothing to do),
   -- the remains inside coffins counted as buried, and whether this index was rebuilt for the inspect
   if src.last then out.last = src.last end
@@ -1108,20 +1338,69 @@ end
 
 local coffin_census    -- forward: the coffin provisioner (FR-61) counts on the repaired index
 
+-- BUG-062: TOMBS_LOCKED (B): zones found closed to citizens (free = unassigned ones, usable = of them over a usable coffin,
+-- owned = held by a dead citizen), what care opened and what is left closed (a failed or budget-limited open), and
+-- the zones it opened that were closed again since (again_free: nobody owns them, so DF or a plugin closed them;
+-- again_owned: they have an owner now, by_entomb of them care's own entomb); once per set of news
+-- (util/cadence: the tokens closed, left, again_free, again_owned)
+local function lock_event(K, c, p, lk0, lk1, acts, unburied)
+  local toks, pend = {}, M.lockstate().pend
+  if lk0.usable > 0 then toks[#toks + 1] = 'closed' end
+  if lk1.left > 0 then toks[#toks + 1] = 'left' end
+  if pend.free > 0 then toks[#toks + 1] = 'again_free' end
+  if pend.owned > 0 then toks[#toks + 1] = 'again_owned' end
+  if pend.churn > 0 then toks[#toks + 1] = 'churn' end
+  if acts.freed > 0 then toks[#toks + 1] = 'freed' end
+  if #toks == 0 then p.lockev = CAD.quiet(p.lockev); return end
+  local T = K.now()
+  if not CAD.due(type(p.lockev) == 'table' and p.lockev or nil, T, {}, toks, {ticks = c.ghost_every, wall_s = c.wake_wall_s}) then
+    return
+  end
+  p.lockev = CAD.mark(T, {}, toks)
+  local w = acts.why or {}
+  local msg = string.format('tomb zones closed to citizens: %d (%d unassigned, %d held, %d off); opened %d%s', lk0.closed, lk0.free,
+                            lk0.owned, lk0.inactive, acts.opened, lk1.left > 0 and (', ' .. lk1.left .. ' still closed') or '')
+  if pend.free + pend.owned > 0 then
+    msg = msg .. string.format('; closed again: %d unassigned, %d owned (%d by entomb)', pend.free, pend.owned, pend.entomb)
+  end
+  if pend.churn > 0 then msg = msg .. string.format('; %d freed re-given by DF', pend.churn) end
+  if acts.freed > 0 then
+    msg = msg .. string.format('; freed %d (bad %d, stale %d, elsewhere %d)', acts.freed, w.bad or 0, w.stale or 0, w.elsewhere or 0)
+  end
+  msg = msg .. string.format('; %d unburied', unburied)
+  K.emit('TOMBS_LOCKED', 'B', trunc(msg, 200),
+         {closed = lk0.closed, free = lk0.free, usable = lk0.usable, owned = lk0.owned, inactive = lk0.inactive,
+          opened = acts.opened, left = lk1.left, again_free = pend.free, again_owned = pend.owned,
+          by_entomb = pend.entomb, unburied = unburied, churn = pend.churn, freed = acts.freed,
+          bad = acts.why and acts.why.bad or nil, stale = acts.why and acts.why.stale or nil,
+          elsewhere = acts.why and acts.why.elsewhere or nil})
+  pend.free, pend.owned, pend.entomb, pend.churn = 0, 0, 0, 0
+end
+
 local function phase_tombs_run(K, c, r, p)
   local now = K.now().tick
   local T = tomb_index(K, r)
   index_units(T)
+  r.far, r.far_n = far_bodies(K, c, r)
   local nfree = #free_zones(T)
+  T.nlocked = #free_zones(T, true)
   local causes = {}
   for uid in pairs(r.bodies) do causes[uid] = body_causes(K, c, r, p, T, uid, now, nfree) end
   r.causes = causes
+  local lk0 = lock_scan(T)
   local acts, repaired = tomb_repair(K, c, r, p, T, now)
   if repaired then entomb_bodies(K, c, r, p, T, now, acts) end
   r.burial_jobs = burial_jobs()
   r.tombs_free = #free_zones(T)
+  local lk1 = {left = #free_zones(T, true)}
+  T.nlocked = lk1.left
+  r.tombs_locked = lk1.left
+  local pend = M.lockstate().pend
+  if repaired or pend.free + pend.owned + pend.churn > 0 then
+    lock_event(K, c, p, lk0, lk1, acts, count(r.bodies))
+  end
   r.tomb_src = {T = T, bodies = r.bodies, causes = causes, acts = acts, now = now, repaired = repaired,
-                jobs = r.burial_jobs, loose_buried = r.loose_buried}
+                jobs = r.burial_jobs, loose_buried = r.loose_buried, lock = lk0, far = r.far, far_n = r.far_n}
   local moved = acts.removed + acts.freed + acts.opened + acts.assigned + acts.entombed
   if moved > 0 or acts.failed > 0 then
     K.log('info', 'tombs: removed %d, freed %d, opened %d, assigned %d, entomb %d, failed %d; %d burial jobs',
@@ -1238,12 +1517,13 @@ end
 
 coffin_census = function(K, c, r, T)
   -- the unburied citizen bodies without a usable tomb of their own (an assigned one waits for its hauler)
-  local bodies, open = 0, 0
+  local bodies, open, far = 0, 0, 0
   for uid in pairs(r.bodies) do
     bodies = bodies + 1
-    if not good_zone(T, uid) then open = open + 1 end
+    if r.far and r.far[uid] then far = far + 1               -- BUG-062: no coffin helps a body nobody can walk to
+    elseif not good_zone(T, uid) then open = open + 1 end
   end
-  local q = {bodies = bodies, open = open, want = open + (num(c.coffin_reserve) or 0), free = r.tombs_free or 0,
+  local q = {bodies = bodies, open = open, far = far, want = open + (num(c.coffin_reserve) or 0), free = r.tombs_free or 0,
              planned = 0, idle = 0, core = (K.manifest().zones or {}).Z4 ~= nil}
   for _, e in ipairs(T.coffins) do
     if not e.bed and e.other == 0 and e.occ == nil then
@@ -1253,7 +1533,17 @@ coffin_census = function(K, c, r, T)
       elseif zn == 0 then q.idle = q.idle + 1 end
     end
   end
-  q.slots = q.free + q.planned + q.idle
+  -- BUG-062: a coffin whose zone is held by a dead owner without remains here (stale, or buried elsewhere) is a free tomb
+  -- once the zone is freed, which the act budget may leave to the next run: it is a slot, not a missing coffin
+  q.pending = 0
+  for _, z in ipairs(T.zones) do
+    if z.free and z.free ~= 'bad' and not z.assign and not z.drop and z.unit >= 0 then
+      for _, e in ipairs(z.coffins) do
+        if usable(e, nil) then q.pending = q.pending + 1; break end
+      end
+    end
+  end
+  q.slots = q.free + q.planned + q.idle + q.pending
   q.short = math.max(0, q.want - q.slots)
   local inv = K.census.i
   q.census = type(inv) == 'table'
@@ -1330,6 +1620,77 @@ local function occ_index(bb, taken)
     end
   end
   return occ
+end
+
+-- BUG-063 (fair play: a stockpile is a zone, nothing is given to the dwarf): a free floor tile within MOOD_NOOK_R of the
+-- workshop a strange mood claimed (revealed '.', no building, zone, stockpile or designation, walkable from the
+-- workshop), nearest first; at most MOOD_NOOK_PROBES tiles are read
+local MOOD_NOOK_R, MOOD_NOOK_PROBES = 3, 40
+local function nook_site(K, job)
+  local b
+  local okh = pcall(function() b = dfhack.job.getHolder(job) end)
+  local rc = okh and b and rect_of(b)
+  if not rc then return nil end
+  local R = MOOD_NOOK_R
+  local occ = occ_index({rc.x1 - R, rc.y1 - R, rc.z, rc.x2 + R, rc.y2 + R, rc.z}, {})
+  local cand = {}
+  for y = rc.y1 - R, rc.y2 + R do
+    for x = rc.x1 - R, rc.x2 + R do
+      local dx = x < rc.x1 and rc.x1 - x or (x > rc.x2 and x - rc.x2 or 0)
+      local dy = y < rc.y1 and rc.y1 - y or (y > rc.y2 and y - rc.y2 or 0)
+      local d = math.max(dx, dy)
+      if d >= 1 and not occ[key3(x, y, rc.z)] then cand[#cand + 1] = {d, dx + dy, y, x} end
+    end
+  end
+  table.sort(cand, function(a, b2)                -- nearest first, a tile touching the workshop's side before a corner
+    for k = 1, 4 do if a[k] ~= b2[k] then return a[k] < b2[k] end end
+    return false
+  end)
+  for i = 1, math.min(#cand, MOOD_NOOK_PROBES) do
+    local x, y = cand[i][4], cand[i][3]
+    local ok, t = K.call('snapshot', 'tile', x, y, rc.z)
+    if ok and type(t) == 'table' and t.c == '.' and (t.bld == nil or t.bld == '') and (t.dig == nil or t.dig == '')
+       and reach_ok(K, {x = x, y = y, z = rc.z}, {x = rc.x1, y = rc.y1, z = rc.z}) then
+      return {x, y, rc.z}
+    end
+  end
+end
+
+-- BUG-063: the drink side of a mood at thirst/hunger mood_act (material delivery is the first lever, MOOD_NEED and the
+-- reserve): a one-barrel drink stockpile `dfllm-mood` beside the claimed workshop, taking from the fort's drink pile
+-- (runner.mooddrink, a quickfort place of our own), once per mood, in PEACE/RECOVERY. Returns the text MOOD_RISK and
+-- MOOD_CRITICAL carry (nil: nothing to say). Live data that decides whether it helps: kern.log 'mood nook', and
+-- the dwarf's thirst after the nook stands (inspect census / MOOD_END).
+mood_relief = function(K, c, p, u, rec, job, ws)
+  if c.mood_nook == false or not (job and ws) then return nil end
+  local sid = fmt(u.id)
+  local done = type(p.nook) == 'table' and p.nook[sid]
+  if type(done) == 'table' then return done.txt end
+  local mode, now = K.mode(), K.now().tick
+  if mode ~= 'PEACE' and mode ~= 'RECOVERY' then return nil end
+  if now - (num(rec.nook_try) or -c.mood_nook_retry) < c.mood_nook_retry then return rec.nook_why end
+  rec.nook_try = now
+  local site = nook_site(K, job)
+  if not site then
+    rec.nook_why = 'no free floor within 3 tiles of the workshop for a drink nook'
+    return rec.nook_why
+  end
+  local okp, pend = K.call('runner', 'pending', 'mood_drink')
+  if okp and type(pend) == 'number' and pend > 0 then
+    rec.nook_why = 'a drink nook is queued already'
+    return rec.nook_why
+  end
+  local ok, okr, id = K.call('runner', 'mooddrink', site, c.mood_take, 'unit ' .. sid)
+  if not (ok and okr) then
+    rec.nook_why = 'drink nook refused: ' .. trunc(tostring(ok and id or okr), 60)
+    K.log('warn', 'mood nook for unit %s: runner.mooddrink refused: %s', sid, tostring(ok and id or okr))
+    return rec.nook_why
+  end
+  local txt = string.format('drink nook queued at %d,%d,%d (%s)', site[1], site[2], site[3], tostring(id))
+  p.nook = json.object(type(p.nook) == 'table' and p.nook or {})
+  p.nook[sid] = {t = now, id = tostring(id), txt = txt}
+  K.log('info', 'mood nook: unit %s (%s %s): %s', sid, rec.kind or '?', ws, txt)
+  return txt
 end
 
 local function entrance_list(K)
@@ -1683,7 +2044,7 @@ end
 local function coffin_view(K, q, p, cs)
   local pc = p.cof
   local v = {active = q.active and 1 or 0, own = q.own and 1 or 0, want = q.want, bodies = q.bodies, open = q.open,
-             free = q.free,
+             far = q.far or 0, pending = q.pending or 0, free = q.free,
              planned = q.planned, idle = q.idle, slots = q.slots, short = q.short, stock = q.stock, order = q.order,
              stuck = q.stuck, items = q.items, make = q.make, missing = q.missing or 0, stone = q.stone,
              wood = q.wood, masons = q.masons and 1 or 0, carpenters = q.carp and 1 or 0, pend = q.pend or 0,
@@ -2496,7 +2857,8 @@ local function new_run(K, c, p)
   end
   local mode, now = K.mode(), K.now().tick
   return {ph = 1, idx = 0, left = 0, ids = ids, have_units = type(cu) == 'table' and type(cu.ids) == 'table',
-          acc = {n = 0, stressed = 0, naked = 0, thoughts = {}}, moody = {}, mood_list = {}, mood_cls = {},
+          acc = {n = 0, stressed = 0, naked = 0, thoughts = {}, src = {}, kids = 0, res = 0}, moody = {}, mood_list = {},
+          mood_cls = {},
           claimed = {}, member = {}, res_ids = res_ids, res_hold = {}, res_floor = {}, rc = R.conf(K.cfg.baseline),
           dead = dead, open = {}, acts = 0, fixed = 0, errs = 0, now = now, tombs_free = 0,
           bodies = {}, interred = {}, held_by = {},
@@ -2590,9 +2952,12 @@ local function ghost_alarm(K, c, r, p, ghost_ids, old_ids, open, now)
   local parts = {}
   for i = 1, math.min(4, #order) do parts[i] = order[i] .. ' ' .. tally[order[i]] end
   local hint = tally.no_body and '; slab for no_body' or ''
+  -- BUG-062: a body in another walk group is no coffin problem; only a memorial slab can lay its ghost to rest
+  if tally.corpse_far then hint = hint .. '; slab for corpse_far (another walk group, no coffin helps)' end
   K.emit('GHOSTS', 'A', trunc(string.format('%d ghost(s), %d citizen(s) unburied > %d d: %s%s; inspect tombs, tombs.repair',
                                            #ghost_ids, #old_ids, c.corpse_old // DAY, table.concat(parts, ', '), hint), 200),
-         {ghosts = #ghost_ids, corpses = open, old = #old_ids, units = units, causes = causes})
+         {ghosts = #ghost_ids, corpses = open, old = #old_ids, units = units, causes = causes,
+          far = tally.corpse_far or 0})
 end
 
 ---------------------------------------------------------------- deaths (FR-64)
@@ -2787,6 +3152,83 @@ local function death_recheck(K, c, p)
   end
 end
 
+-- FR-74 (Run 13/14 notes 12 and 15: stress 52-78 % for years; the population fell from 50 to 33 in peace, no migrants since
+-- y481): what the fort can see of both, read only. Stress sources: the stressed citizens (category 0-1) that carry a
+-- thought of a source (M.STRESS_SRC) this run. Population: the census split (isAdult = not BABY and not CHILD,
+-- Units.cpp:321, so the rest of `cit` are children, babies and residents), the peak, the deaths of the last year by
+-- cause and the migrant waves seen (economy's MIGRANTS). Nothing steers the migrants (decision 16); plan propose reads
+-- the state for a temple and a tavern, STRESS_HIGH (B) says it in the digest.
+local SRC_LABEL = {ghosts = 'ghosts', deaths = 'deaths', beds = 'no beds', drink = 'no drink', food = 'no food',
+                   rooms = 'rooms'}
+local function pop_stress(K, c, r, p, now)
+  local a = r.acc
+  local src, parts = {}, {}
+  for _, g in ipairs({'ghosts', 'deaths', 'beds', 'drink', 'food', 'rooms'}) do
+    if (a.src[g] or 0) > 0 then
+      src[g] = a.src[g]
+      parts[#parts + 1] = string.format('%s %d', SRC_LABEL[g], a.src[g])
+    end
+  end
+  local recent = 0
+  for _, t in ipairs(type(p.top) == 'table' and p.top or {}) do
+    if type(t) == 'table' and now - (num(t.t) or -1e9) <= DAY * 14 then recent = recent + 1 end
+  end
+  if recent > 0 then src.toppled = recent; parts[#parts + 1] = string.format('toppled buildings %d', recent) end
+  local cu = K.census.u
+  local cit = type(cu) == 'table' and num(cu.cit) or a.n
+  local peak = type(p.peak) == 'table' and p.peak or {n = 0, t = now}
+  if cit > (num(peak.n) or 0) then peak = {n = cit, t = now} end
+  p.peak = peak
+  -- deaths of the last year, by cause (the cause at the time of death; a death still missing counts as unknown)
+  local keep, dy, by = {}, 0, {}
+  for _, e in ipairs(p.dlog) do
+    if type(e) == 'table' and now - (num(e.t) or -1e9) <= C.TICKS.YEAR then
+      keep[#keep + 1] = e
+      dy = dy + 1
+      by[tostring(e.c)] = (by[tostring(e.c)] or 0) + 1
+    end
+  end
+  while #keep > 300 do table.remove(keep, 1) end
+  p.dlog = keep
+  local waves, mig, lastw = 0, 0, -1
+  local wk = {}
+  for _, w in ipairs(p.waves) do
+    if type(w) == 'table' and now - (num(w.t) or -1e9) <= C.TICKS.YEAR * 3 then
+      wk[#wk + 1] = w
+      if now - w.t <= C.TICKS.YEAR then waves, mig = waves + 1, mig + (num(w.n) or 0) end
+      local ago = (now - w.t) // DAY
+      if lastw < 0 or ago < lastw then lastw = ago end
+    end
+  end
+  p.waves = wk
+  st.pop = {kids = a.kids, res = a.res, peak = num(peak.n) or cit, dy = dy, waves = waves, mig = mig, lastw = lastw}
+  st.died_y = by
+  st.src = src
+  -- STRESS_HIGH: the share of stressed citizens stood at stress_high for stress_days game days; sources and the tallies
+  local pct = st.out.stressed_pct
+  if pct >= c.stress_high then
+    p.sthi = num(p.sthi) or now
+    if now - p.sthi >= c.stress_days * DAY then
+      local T = K.now()
+      local toks = {}
+      for g in pairs(src) do toks[#toks + 1] = g end
+      table.sort(toks)
+      if CAD.due(type(p.stev) == 'table' and p.stev or nil, T, {}, toks, {ticks = c.stress_every, wall_s = c.wake_wall_s}) then
+        p.stev = CAD.mark(T, {}, toks)
+        K.emit('STRESS_HIGH', 'B', trunc(string.format('%d%% of the citizens stressed for %d days: %s; deaths in the last year %d, ghosts %d; '
+                                                       .. 'plan propose drafts a temple and a tavern', pct, (now - p.sthi) // DAY,
+                                                       #parts > 0 and table.concat(parts, ', ') or 'no source named',
+                                                       dy, st.out.ghosts or 0), 200),
+               {pct = pct, days = (now - p.sthi) // DAY, src = parts, deaths = dy, ghosts = st.out.ghosts or 0,
+                cit = cit})
+      end
+    end
+  else
+    p.sthi = nil
+    p.stev = CAD.quiet(type(p.stev) == 'table' and p.stev or nil)
+  end
+end
+
 local function finish(K, c, r, p)
   local now = K.now().tick
   -- open citizen corpses: first seen -> age
@@ -2801,15 +3243,38 @@ local function finish(K, c, r, p)
     end
   end
   table.sort(old_ids)
-  local ghosts, ghost_ids = 0, {}
+  -- BUG-062 (Run 14 note 52: the brief said 12 ghosts, a count over the unit list 30): the ghostly units themselves
+  -- first (sense walks the unit list and publishes the fort's own ghosts in census.g, fresh within two days), then the
+  -- death record's: the number is checked against the units that are ghostly, not only against the deaths care saw
+  local ghosts, ghost_ids, gseen = 0, {}, {}
+  local known = {}
+  for _, id in ipairs(p.dead) do known[id] = true end
+  local cg = K.census.g
+  local fresh = type(cg) == 'table' and type(cg.ids) == 'table' and now - (num(cg.tick) or -DAY * 3) < DAY * 2
+  for _, id in ipairs(fresh and cg.ids or {}) do
+    if not gseen[id] then
+      gseen[id] = true
+      ghosts = ghosts + 1
+      ghost_ids[#ghost_ids + 1] = id
+    end
+  end
   for _, id in ipairs(p.dead) do
     local u = df.unit.find(id)
-    if u and dfhack.units.isGhost(u) then                               -- Lua API.txt:1508
+    if not gseen[id] and u and dfhack.units.isGhost(u) then              -- Lua API.txt:1508
+      gseen[id] = true
       ghosts = ghosts + 1
       ghost_ids[#ghost_ids + 1] = id
     end
   end
   table.sort(ghost_ids)
+  local unrecorded = 0
+  for _, id in ipairs(ghost_ids) do
+    if not known[id] then unrecorded = unrecorded + 1; remember_dead(p, id) end
+  end
+  if unrecorded > 0 and unrecorded ~= st.unrec then
+    K.log('warn', 'care: %d ghostly citizen(s) were not in the death record (%d in all): counted now', unrecorded, ghosts)
+  end
+  st.unrec = unrecorded
   ghost_alarm(K, c, r, p, ghost_ids, old_ids, open, now)
   if r.tomb_src then
     local gl = {}
@@ -2821,7 +3286,7 @@ local function finish(K, c, r, p)
   -- tombs: free >= open corpses + margin; ask only once the core exists or somebody is unburied. The coffin
   -- provisioner (FR-61) owns the request when runner.coffins is there: it places coffins itself and asks for a dug
   -- tombs room only when no free space is found
-  local need = open + c.tomb_margin - r.tombs_free
+  local need = open - (r.far_n or 0) + c.tomb_margin - r.tombs_free
   local core = (K.manifest().zones or {}).Z4 ~= nil
   local okp, pend = K.call('runner', 'pending', 'tombs')
   local queued = okp and type(pend) == 'number' and pend > 0      -- live L1: a tombs project every 3 days
@@ -2864,12 +3329,14 @@ local function finish(K, c, r, p)
   local a = r.acc
   st.out = {stressed_pct = r.have_units and (a.n > 0 and a.stressed * 100 // a.n or 0) or (prev.stressed_pct or 0),
             naked = r.have_units and a.naked or (prev.naked or 0), ghosts = ghosts, corpses_old = old,
-            tombs_free = r.tombs_free or 0, moods = count(p.moods), hosp_water = r.hosp_water or 0}
+            tombs_free = r.tombs_free or 0, tombs_locked = r.tombs_locked or 0, moods = count(p.moods),
+            hosp_water = r.hosp_water or 0}
   -- FR-64: deaths still missing, a cluster that grew while its cadence held it back, the season's tally
   death_recheck(K, c, p)
   died_prune(c, p, now)
   cluster_scan(K, c, p)
   st.died = died_tally(p, now)
+  if r.have_units then pop_stress(K, c, r, p, now) end
   K.persist.touch('m.care')
 end
 
@@ -2879,10 +3346,186 @@ function M.init(K)
   pstate(K)
 end
 
+-- BUG-063 (Run 14 y558: a mood noticed too late, 'Raving'; the game session's own check ran every 15 minutes, a year
+-- of game time at timestream speed): the mood check is its own, cheap pass. It runs (a) at once when the game
+-- announces a strange mood (STRANGE_MOOD, MOOD_BUILDING_CLAIMED reports), and (b) every mood_fast ticks while a
+-- mood is open (care's cadence is switched to it, `M.every` is read every frame), reading only the citizens'
+-- mood and the moody dwarves' thirst and hunger (mood_seen: MOOD_START, MOOD_NEED, MOOD_RISK, MOOD_CRITICAL, the drink
+-- nook). The full run (corpses, tombs, reserve, ...) keeps its own period: the gap measured between two default calls.
+local BASE_EVERY = 1200
+local function set_every(c, p)
+  local want = ((c.mood_fast or 0) > 0 and next(p.moods) ~= nil) and c.mood_fast or BASE_EVERY
+  if M.every.ticks ~= want then M.every = {ticks = want} end
+end
+
+local function mood_watch(K, c, p)
+  local cu = K.census.u
+  local r = {moody = {}, mood_list = {}, mood_cls = {}}
+  local n = 0
+  for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
+    local u = df.unit.find(id)
+    local kind = u and df.mood_type[u.mood]
+    if kind and M.STRANGE[kind] and not dfhack.units.isDead(u) then
+      n = n + 1
+      local ok, err = pcall(mood_seen, K, c, r, p, u, kind)
+      if not ok then K.log('warn', 'care mood check %d: %s', id, tostring(err)) end
+    end
+  end
+  st.watch_tick = K.now().tick
+  set_every(c, p)
+  K.persist.touch('m.care')
+  return n
+end
+
+-- BUG-064 (Run 13/14 note 55: 19 reports "X toppled by <dwarf>", a manager in a tantrum 5 times and a ghost, while the
+-- kernel said BRIDGE_DESTROYED '0 building destroyers'): the culprit of a toppled building, with his stress. The
+-- report text is read for what fell and who did it; the culprit is looked up among the citizens, the fort's ghosts and
+-- the death record by name (one match only). The last M.TOPPLE_KEEP are kept (persisted p.top) for M.toppled, which
+-- gate asks when a bridge vanishes; BUILDING_TOPPLED (B) once per culprit per topple_every ticks (n = buildings since).
+M.TOPPLE_KEEP = 20
+local function topple_parse(text)
+  local t = tostring(text or '')
+  local what, who = t:match('^(.-)%s+toppled by%s+(.-)%s*[%.!]*$')
+  if not what then what, who = t:match('^(.-)%s+destroyed by%s+(.-)%s*[%.!]*$') end
+  if not what or who == '' then return nil end
+  what = what:gsub('%s+has been$', ''):gsub('%s+was$', ''):gsub('%s+is$', '')
+  what = what:gsub('^[Tt]he%s+', ''):gsub('^[Aa]n?%s+', '')
+  return trunc(what, 40), trunc(who, 60)
+end
+
+local function topple_find(K, p, who)
+  local w = who:lower()
+  local cand, seen = {}, {}
+  local function add(id) if math.type(id) == 'integer' and not seen[id] then seen[id] = true; cand[#cand + 1] = id end end
+  local cu, cg = K.census.u, K.census.g
+  for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do add(id) end
+  for _, id in ipairs(type(cg) == 'table' and type(cg.ids) == 'table' and cg.ids or {}) do add(id) end
+  for _, id in ipairs(p.dead) do add(id) end
+  local hit
+  for _, id in ipairs(cand) do
+    local u = df.unit.find(id)
+    local n = u and uname(u):lower() or ''
+    if n ~= '' and (n:find(w, 1, true) or w:find(n, 1, true)) then
+      if hit then return nil end            -- two dwarves of that name: no guess
+      hit = id
+    end
+  end
+  return hit
+end
+
+local function topple_record(K, c, p, ev)
+  local what, who = topple_parse(ev.text)
+  local ghost = ev.type == 'BUILDING_TOPPLED_BY_GHOST'
+  if not what then
+    if not ghost then return end
+    what, who = trunc(ev.text, 40), 'a ghost'
+  end
+  local unit = topple_find(K, p, who)
+  if not unit and ghost then
+    local cg = K.census.g
+    if type(cg) == 'table' and type(cg.ids) == 'table' and #cg.ids == 1 then unit = cg.ids[1] end
+  end
+  local rec = {t = ev.tick or K.now().tick, what = what, by = who, unit = unit or -1, ghost = ghost and 1 or 0}
+  local u = unit and df.unit.find(unit)
+  if u then
+    if dfhack.units.isGhost(u) then rec.ghost = 1 end
+    local ok, s = pcall(function() return u.status.current_soul.personality.stress end)
+    if ok and math.type(s) == 'integer' then rec.stress = s end
+    local okc, cat = pcall(dfhack.units.getStressCategory, u)
+    if okc and math.type(cat) == 'integer' then rec.cat = cat end
+  end
+  local pos = ev.pos
+  if type(pos) == 'table' and math.type(pos.x) == 'integer' then rec.x, rec.y, rec.z = pos.x, pos.y, pos.z end
+  rec.tantrum = st.tantrum and st.tantrum[who:lower()] and 1 or 0
+  return rec
+end
+
+local function topple_event(K, c, p, rec)
+  p.top = type(p.top) == 'table' and p.top or {}
+  p.top[#p.top + 1] = rec
+  while #p.top > M.TOPPLE_KEEP do table.remove(p.top, 1) end
+  st.topev = st.topev or {}
+  local key = rec.unit >= 0 and ('u' .. rec.unit) or ('n' .. rec.by:lower())
+  local e = st.topev[key]
+  if e and rec.t - e.t < (c.topple_every or 2400) then e.n = e.n + 1; return end
+  local n = e and e.n or 0
+  st.topev[key] = {t = rec.t, n = 0}
+  local msg = string.format('%s toppled by %s%s%s%s', rec.what, rec.by, rec.ghost == 1 and ' (a ghost)' or '',
+                            rec.cat and string.format(', stress %d (category %d of 6, 0 worst)', rec.stress or 0, rec.cat) or '',
+                            rec.tantrum == 1 and ', after a tantrum' or '')
+  K.emit('BUILDING_TOPPLED', 'B', trunc(msg, 200),
+         {what = rec.what, by = rec.by, unit = rec.unit >= 0 and rec.unit or nil, ghost = rec.ghost,
+          stress = rec.stress, cat = rec.cat, tantrum = rec.tantrum == 1 and 1 or nil, n = n > 0 and n or nil,
+          pos = rec.x and {rec.x, rec.y, rec.z} or nil})
+  K.persist.touch('m.care')
+end
+
+M.on.REPORT = function(K, ev)
+  local c, p = M.conf(K), pstate(K)
+  if ev.type == 'STRANGE_MOOD' or ev.type == 'MOOD_BUILDING_CLAIMED' then
+    pcall(mood_watch, K, c, p)
+    st.full_now = true                    -- material first: the next step runs the full pass (needs, reserve) at once
+  elseif ev.type == 'CITIZEN_TANTRUM' or ev.type == 'POSSESSED_TANTRUM' then
+    -- "<name> is throwing a tantrum!": remembered by name for the next toppled building
+    local who = tostring(ev.text or ''):match('^(.-)%s+is throwing a tantrum') or tostring(ev.text or ''):match('^(.-)%s+has')
+    st.tantrum = st.tantrum or {}
+    if who and who ~= '' then st.tantrum[who:lower()] = ev.tick or K.now().tick end
+    local n = 0
+    for k, t in pairs(st.tantrum) do
+      if (ev.tick or K.now().tick) - t > DAY * 2 then st.tantrum[k] = nil else n = n + 1 end
+      if n > 40 then st.tantrum[k] = nil end
+    end
+  else
+    local ok, rec = pcall(topple_record, K, c, p, ev)
+    if ok and rec then pcall(topple_event, K, c, p, rec)
+    elseif not ok then K.log('warn', 'care toppled report: %s', tostring(rec)) end
+  end
+end
+
+-- public (BUG-064, gate's BRIDGE_DESTROYED): the newest toppled-building record of the last `win` ticks (default
+-- topple_win) at or within topple_r tiles of x,y,z (a record without a position counts when its building is a bridge,
+-- gate or lever), as a copy {by, unit, ghost, cat, stress, what, t}; nil when none
+function M.toppled(K, x, y, z)
+  local c, p = M.conf(K), pstate(K)
+  local now = K.now().tick
+  local best
+  for _, r in ipairs(type(p.top) == 'table' and p.top or {}) do
+    if type(r) == 'table' and now - (num(r.t) or -1e9) <= c.topple_win then
+      local near
+      if num(r.x) and num(x) and num(y) and num(z) then
+        near = math.abs(r.x - x) <= c.topple_r and math.abs(r.y - y) <= c.topple_r and math.abs((num(r.z) or z) - z) <= 1
+      else
+        local w = tostring(r.what or ''):lower()
+        near = w:find('bridge', 1, true) or w:find('gate', 1, true) or w:find('lever', 1, true)
+      end
+      if near and (not best or r.t >= best.t) then best = r end
+    end
+  end
+  if not best then return nil end
+  local out = {}
+  for k, v in pairs(best) do out[k] = v end
+  return out
+end
+
 function M.step(K, budget, ctx)
   local c = M.conf(K)
   local p = pstate(K)
-  if not (ctx and ctx.cont) or not st.run then st.run = new_run(K, c, p)
+  if not (ctx and ctx.cont) or not st.run then
+    local now = K.now().tick
+    local fast = (c.mood_fast or 0) > 0 and next(p.moods) ~= nil
+    if fast then
+      set_every(c, p)
+      if not st.full_now and st.last_full and now - st.last_full < (st.gap or BASE_EVERY) then
+        mood_watch(K, c, p)               -- only the mood check; the full run is not due yet
+        st.prev_fast = true
+        return
+      end
+    else
+      set_every(c, p)
+      if not st.prev_fast and ctx and (ctx.dt or 0) > 0 then st.gap = ctx.dt end
+    end
+    st.prev_fast, st.full_now, st.last_full = fast, nil, now
+    st.run = new_run(K, c, p)
   else st.run.kern = kern_burrow(K) end        -- no burrow pointer from an earlier frame (it may be gone)
   local r = st.run
   r.left, r.now = c.items_per_slice, K.now().tick
@@ -2893,6 +3536,7 @@ function M.step(K, budget, ctx)
   end
   st.run = nil
   finish(K, c, r, p)
+  set_every(c, p)                          -- BUG-063: the fast mood cadence while a mood is open
 end
 
 -- citizen deaths: DEATH (B) each with its cause (FR-64), DEATHS_3PLUS (A) at 3 within a day, then the clusters
@@ -2917,6 +3561,7 @@ M.on.UNIT_DEATH = function(K, ev)
   local rec = {t = now, u = id}
   died_set(rec, res)
   p.died[#p.died + 1] = rec
+  p.dlog[#p.dlog + 1] = {t = now, c = res.found and tostring(res.cause) or 'unknown'}      -- FR-74: a year of deaths
   died_prune(c, p, now)
   K.emit('DEATH', 'B', DT.text(id, res, false), death_d(id, res, false))
   local recent = {}
@@ -2941,6 +3586,15 @@ M.on.UNIT_DEATH = function(K, ev)
   K.persist.touch('m.care')
 end
 
+-- FR-74: migrant waves, from economy's MIGRANTS (B) after the census caught up with the arrival report (n may be 0)
+M.on['EV:MIGRANTS'] = function(K, ev)
+  local n = type(ev.d) == 'table' and num(ev.d.n) or 0
+  local p = pstate(K)
+  p.waves[#p.waves + 1] = {t = ev.tick or K.now().tick, n = n}
+  while #p.waves > 40 do table.remove(p.waves, 1) end
+  K.persist.touch('m.care')
+end
+
 -- BUG-003: an index older than one care period is rebuilt for the inspect (read-only: the corpse vector, the
 -- coffins and zones, the causes; no repair, no entomb, no flag writes); the last run's acts stay. At most
 -- TOMB_SCAN corpse items are read (the rest of a huge vector is left out: `partial`).
@@ -2960,7 +3614,9 @@ local function fresh_tombs(K, c, p)
   buried_in_coffins(r)
   local T = tomb_index(K, r)
   index_units(T)
+  r.far, r.far_n = far_bodies(K, c, r)
   local nfree = #free_zones(T)
+  T.nlocked = #free_zones(T, true)
   local causes = {}
   for uid in pairs(r.bodies) do causes[uid] = body_causes(K, c, r, p, T, uid, now, nfree) end
   r.causes = causes
@@ -2973,7 +3629,8 @@ local function fresh_tombs(K, c, p)
   return {T = T, bodies = r.bodies, causes = causes, now = now, jobs = burial_jobs(), ghosts = gl,
           acts = old and old.acts or {removed = 0, freed = 0, opened = 0, assigned = 0, entombed = 0, failed = 0},
           repaired = old and old.repaired or false, loose_buried = r.loose_buried, fresh = true,
-          run_tick = old and old.now or -1, partial = #v > n and 1 or nil}
+          run_tick = old and old.now or -1, partial = #v > n and 1 or nil, lock = lock_scan(T, true), far = r.far,
+          far_n = r.far_n}
 end
 
 -- inspect what=tombs (kern routes it here; FR-27): the last run's coffins and tomb zones, the unburied citizens
@@ -3036,6 +3693,24 @@ function M.state(K)
   if not o then return {} end
   local care = {stressed_pct = math.max(0, math.min(100, o.stressed_pct)), naked = o.naked, ghosts = o.ghosts,
                 corpses_old = o.corpses_old, tombs_free = o.tombs_free, moods = o.moods}
+  if (o.tombs_locked or 0) > 0 then care.tombs_locked = o.tombs_locked end      -- BUG-062: closed zones left
+  if st.pop then                              -- FR-74: stress sources and the population diagnosis
+    care.pop = {kids = st.pop.kids, res = st.pop.res, peak = st.pop.peak, dy = st.pop.dy, waves = st.pop.waves,
+                mig = st.pop.mig, lastw = st.pop.lastw}
+    if next(st.src or {}) then
+      care.src = json.object{}
+      for k, n in pairs(st.src) do care.src[k] = n end
+    end
+    if next(st.died_y or {}) then            -- the five commonest causes, the rest as 'other' (the state is 4 KB)
+      local list = top5(st.died_y)
+      local shown = 0
+      care.died_y = json.object{}
+      for _, e in ipairs(list) do care.died_y[e[1]] = e[2]; shown = shown + e[2] end
+      local all = 0
+      for _, n in pairs(st.died_y) do all = all + n end
+      if all > shown then care.died_y.other = all - shown end
+    end
+  end
   local v = st.cof
   if v and v.active == 1 then                 -- FR-61: the coffin provisioner
     care.coffins = {want = v.want, short = v.short, stock = v.stock, order = v.order, proj = trunc(v.proj, 40)}

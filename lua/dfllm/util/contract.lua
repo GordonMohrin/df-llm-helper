@@ -66,6 +66,8 @@ C.EVENTS = {
   YEAR_REVIEW = {cls = 'A', by = 'kern'},
   -- FR-04/26 ghosts and unburied citizens, FR-34 a hospital without accepted water, FR-44 a strange mood at risk
   GHOSTS = {cls = 'A', by = 'care'}, HOSPITAL_DRY = {cls = 'A', by = 'water'}, MOOD_RISK = {cls = 'A', by = 'care'},
+  -- BUG-063: a strange-mood dwarf's thirst (hunger) passed mood_crit (mood_crit_hunger): the dwarf, his workshop, the nook
+  MOOD_CRITICAL = {cls = 'A', by = 'care'},
   -- BUG-034: the zones of a hospital without accepted water were removed while a patient was over water.patient_thirst
   HOSPITAL_REMOVED = {cls = 'A', by = 'water'},
   -- BUG-036: in a fight, patients lie outside the burrow the civ alert confines to (once per fight; they cannot walk)
@@ -126,6 +128,9 @@ C.EVENTS = {
   -- alert's burrow during a fight (d.from, to, why, mode)
   RECALL = {cls = 'B', by = 'reflex'}, REFUGE_SWITCH = {cls = 'B', by = 'seal'},
   MOOD_START = {cls = 'B', by = 'care'}, MOOD_NEED = {cls = 'B', by = 'care'},
+  TOMBS_LOCKED = {cls = 'B', by = 'care'},      -- BUG-062: tomb zones closed to citizens (counts, who closed them again)
+  BUILDING_TOPPLED = {cls = 'B', by = 'care'},  -- BUG-064: a building fell to a stressed citizen or a ghost (culprit, stress)
+  STRESS_HIGH = {cls = 'B', by = 'care'},       -- FR-74: stress at stress_high for stress_days; the sources named
   MOOD_END = {cls = 'B', by = 'care'}, CARAVAN = {cls = 'B', by = 'trade'},
   MIGRANTS = {cls = 'B', by = 'economy'}, PETITION = {cls = 'B', by = 'care'},
   STOCK_LOW = {cls = 'B', by = 'economy'}, CANCEL_LOOP = {cls = 'B', by = 'economy'},
@@ -307,6 +312,8 @@ C.REPORTS = {
   STRANGE_MOOD = 'care', MOOD_BUILDING_CLAIMED = 'care', ARTIFACT_BEGUN = 'care', MADE_ARTIFACT = 'care',
   CITIZEN_DEATH = 'care', ANIMAL_TRAP_CATCH = 'care', STRESSED_CITIZEN = 'care', CITIZEN_TANTRUM = 'care',
   GHOST_ATTACK = 'care',
+  -- BUG-064: "X toppled by <dwarf>" (a tantrum, a ghost): care names the culprit and his stress (BUILDING_TOPPLED)
+  BUILDING_TOPPLED_BY_GHOST = 'care', BUILDING_DESTROYED_OR_TOPPLED = 'care', POSSESSED_TANTRUM = 'care',
   DIG_CANCEL_DAMP = 'runner', DIG_CANCEL_WARM = 'runner', CAVE_COLLAPSE = 'runner', FEATURE_DISCOVERY = 'runner',
   UNDEAD_ATTACK = 'threat', NIGHT_ATTACK_STARTS = 'threat', MEGABEAST_ARRIVAL = 'threat',
   WEREBEAST_ARRIVAL = 'threat', BEAST_AMBUSH = 'threat', AMBUSH_AMBUSHER = 'threat',
@@ -352,7 +359,12 @@ C.STATE_SPEC = obj({
                     dwhy = str(80)}),               -- BUG-042: why the stills do not brew below the drink target
   care = obj({stressed_pct = PCT, naked = NAT, ghosts = NAT, corpses_old = NAT, tombs_free = NAT, moods = NAT},
              {coffins = obj({want = NAT, short = NAT, stock = NAT, order = NAT, proj = str(40)}),
-              died = obj(nil, nil, NAT)}),
+              died = obj(nil, nil, NAT), tombs_locked = NAT,
+              -- FR-74: stressed citizens by source (ghosts, deaths, beds, drink, food, rooms, toppled), the population
+              -- split and record (kids = children and babies, res = residents, peak, deaths and migrant waves in the last
+              -- year, days since the last wave or -1) and the deaths of the last year by cause
+              src = obj(nil, nil, NAT), died_y = obj(nil, nil, NAT),
+              pop = obj({kids = NAT, res = NAT, peak = NAT, dy = NAT, waves = NAT, mig = NAT, lastw = int(-1)})}),
   labor = obj({starving = NAT, idle = PCT}),
   -- BUG-042: unvalidated live orders, the days the oldest waits, why the manager validates nothing (past unval_days)
   orders = obj({n = NAT, bad = NAT, stuck = NAT}, {unval = NAT, uval_d = NAT, mgr = str(80)}),

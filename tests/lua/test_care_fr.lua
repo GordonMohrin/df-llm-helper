@@ -113,7 +113,8 @@ end)
 ---------------------------------------------------------------- causes per body (FR-26)
 T.test('causes: coffin_taken, zone_shared, bedroom, zone_owner, unflagged, in_stockpile, undiscovered, unreachable', function()
   local incidents = {}
-  local W = world{cit = 12, reach = function(a, b) return not (a.x == 9 and a.y == 9) end, mode = 'SIEGE',
+  -- BUG-062: 'unreachable' = the body walks to the citizens but not to its coffin (36,10); a body nobody walks to is corpse_far
+  local W = world{cit = 12, reach = function(a, b) return not (a.x == 9 and a.y == 9 and b.x == 36) end, mode = 'SIEGE',
                   setup = function(W)
     df.incident = {find = function(id) return incidents[id] end}
     local cofA = CW.tomb(W, 30, 10, 5, {unit = 3})              -- coffin A holds unit 11's body

@@ -3717,6 +3717,31 @@ function M.coffins(K, tiles, why, prio)
   return true, id
 end
 
+-- BUG-063 (care; Run 14 y484/y485/y558: strange-mood dwarves died of thirst at 63,000 - 75,000, a mood dwarf neither drinks
+-- nor eats while the job waits): a one-barrel drink-only stockpile `dfllm-mood` on one free floor tile beside the
+-- claimed workshop (quickfort `place`, a player's own stockpile; the haulers fill it from `take`), so a drink stands
+-- beside the workshop. Nothing is given to the dwarf and no job is made for him. tile = {x, y, z}; take = the pile it
+-- takes from ('' none). Returns ok, project id. Cell text is at most 64 bytes (check_doc): the source pile is dropped
+-- when its name does not fit.
+function M.mooddrink(K, tile, take, why)
+  local x, y, z
+  if type(tile) == 'table' then x, y, z = int(tile[1] or tile.x), int(tile[2] or tile.y), int(tile[3] or tile.z) end
+  if not (x and y and z) or not on_map(x, y, z) then return false, 'bad tile' end
+  local props = 'name=dfllm-mood barrels=1'
+  if type(take) == 'string' and take:match('^[%w_%-]+$') and #take <= 20 then props = props .. ' take_from=' .. take end
+  local cell = 'f{' .. props .. '}:=booze(1x1)'
+  if #cell > 64 then cell = 'f{name=dfllm-mood barrels=1}:=booze(1x1)' end
+  local id = new_id(K, 'mdr')
+  local d = {v = 2, tpl = 'mood_drink', site = 'care', class = 'living', params = obj{n = 1}, rot = 0,
+             anchor = {x, y, z}, manifest = {v = 2}, materials = obj{},
+             stages = {{label = 'mood.drink', mode = 'place', orders = 0, defense = 0, chunks = abs_chunks({{x, y, z, cell}})}}}
+  local ok, err = register(K, id, d, 1, 'mood_drink')
+  if not ok then return false, err end
+  save(K)
+  K.log('info', 'mood drink nook %s queued at %d,%d,%d (%s)', id, x, y, z, trunc(why, 80))
+  return true, id
+end
+
 -- Run 11: explore shafts open to a cavern whose top wall does not stand yet (readiness keeps R0 `caverns` for them,
 -- threat counts hostiles near them): n, {{x, y, z_top, z_bottom}, ...}
 function M.cavern_open(K)

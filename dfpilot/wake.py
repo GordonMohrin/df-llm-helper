@@ -86,6 +86,8 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
         "HOSPITAL_REMOVED": "tell Gordon; dfllm cmd inspect '{\"what\":\"water_sources\"}'; next plan: water before "
                             "a hospital (plan check refuses one without it)",
         "MOOD_RISK": "dfllm brief; supply the missing class (never cancel the mood)",
+        # BUG-063: thirst past 50,000: the dwarf and his workshop are named; material first, the drink nook is the kernel's
+        "MOOD_CRITICAL": "tell Gordon (unit, workshop, thirst); dfllm brief; supply the missing class; never cancel the mood",
         # FR-64: >= 2 citizens dehydrated or starved within a month: access, not supply, as a rule
         "DEATHS_PREVENTABLE": "dfllm cmd inspect '{\"what\":\"reach\"}', then refuge; patients: water_sources",
         # BUG-015: a lockdown door that does not hold its forbidden flag (the kernel tries it once more itself)

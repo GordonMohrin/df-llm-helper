@@ -450,7 +450,23 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i missing:sa retry:i mat:s walled:sa "
                                                     "park:i")),
     "YEAR_REVIEW": ("A", "kern", _d(opt="year:i")),
-    "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa")),
+    # BUG-062: far = of them, the bodies lying in another walk group than the citizens' (corpse_far: no coffin helps)
+    "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa far:i")),
+    # BUG-062 (Run 14: 163, then 284 of 287 tomb zones closed to citizens): closed = zones found closed, free = of them
+    # unassigned (usable: over a usable coffin), owned = held by a dead citizen, inactive = switched off; opened = what
+    # care opened, left = usable ones still closed; again_free / again_owned = zones care opened that are closed again
+    # (no owner: DF or a plugin closed them; an owner: by_entomb of them care's own entomb); unburied citizens
+    # BUG-064 (Run 13/14: 19 "toppled by" reports): what = the building as the report names it, by = the culprit's name in
+    # the report, unit = his id (only when one citizen, ghost or recorded dead matches the name), ghost, stress = his
+    # personality.stress and cat its category (0 worst .. 6; >= 50000 is 0), tantrum = a tantrum report named him first,
+    # n = further buildings toppled by him since the last event, pos = the report's position
+    # FR-74: the share of stressed citizens (pct) stood at care.stress_high for `days` game days; src = the sources named
+    # ("ghosts 12", "deaths 30", "no beds 8", "toppled buildings 3"), deaths of the last year, ghosts, citizens
+    "STRESS_HIGH": ("B", "care", _d("pct:i days:i", "src:sa deaths:i ghosts:i cit:i")),
+    "BUILDING_TOPPLED": ("B", "care", _d("what:s by:s", "unit:i ghost:f stress:i cat:i tantrum:f n:i pos:p")),
+    # churn = zones care freed that DF gave to another body since (freed / bad / stale / elsewhere: this run's frees by reason)
+    "TOMBS_LOCKED": ("B", "care", _d(opt="closed:i free:i usable:i owned:i inactive:i opened:i left:i again_free:i "
+                                         "again_owned:i by_entomb:i unburied:i churn:i freed:i bad:i stale:i elsewhere:i")),
     # BUG-031: cistern = why the nearest cistern room does not serve the hospital (no well, its well over 0/7, too far)
     "HOSPITAL_DRY": ("A", "water", _d("why:s", "patients:i zone:i near:i recipe:s cistern:s")),
     # BUG-034: the zones of a hospital without accepted water went while a patient was over water.patient_thirst: zones,
@@ -467,7 +483,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # (pond: bucket-fed with its pond zone; pond_removed: water removed that pond as a loop; pipe: its floodgate lever;
     # none), pond (zone id), src/d (the nearest accepted water to carry from, tiles)
     "CISTERN_DRY": ("B", "water", _d("room:s days:i fill:s", "proj:s well:i pos:p pond:i src:p d:i")),
-    "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i nosrc:sa route:s")),
+    # BUG-063: ws = the workshop type the mood claimed (-> MOOD_CRITICAL: pos = its first tile, name = the dwarf, nook = the
+    # drink stockpile the kernel queued beside it or why none)
+    "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i nosrc:sa route:s ws:s")),
+    "MOOD_CRITICAL": ("A", "care", _d("unit:i why:s", "kind:s thirst:i hunger:i ws:s name:s pos:p missing:sa nook:s")),
     # class A since Run 9 (an army walked in while these were digest-only): they wake at once
     "SIEGE_START": ("A", "siege", _d(opt="vis:i inv:i great:i why:s")),
     "INVASION": ("A", "threat", _d(opt="id:i")),
@@ -528,8 +547,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "WAVE_FAIL": ("A", "siege", _d("kind:s why:s", "wave:i squad:s lost:i units:ia n:i pos:p ticks:i")),
     # BUG-030: a manifest bridge gate saw complete is gone from its footprint (destroyed or removed): no pulls for it
     # rebuild policy: n = its losses so far, bd = those with building destroyers in sight, destroyers = this one, races
+    # BUG-064: tby = the citizen or ghost the reports "X toppled by <name>" named near its footprint (care.toppled), tunit
+    # his id, tcat his stress category (0 worst), tghost a ghost
     "BRIDGE_DESTROYED": ("A", "gate", _d("bridge:s", "bid:i role:s last:s mode:s pos:p n:i bd:i destroyers:f "
-                                                     "races:sa")),
+                                                     "races:sa tby:s tunit:i tcat:i tghost:f")),
     # Run 11: a dig broke into a cavern: phase queued (the explore shaft's plug project), done (the wall stands), failed
     # (refused, cancelled, blocked), none (no automatic plug: by hand); shaft = its top tile, z1 its bottom z, walls
     # 'x,y,z' (the lower one first), n = water tiles of a cavern lake, hint = why failed / none; state = the explore's
@@ -757,7 +778,15 @@ STATE = Obj(
                      opt={"coffins": Obj(req={"want": NAT, "short": NAT, "stock": NAT, "order": NAT,
                                               "proj": Str(maxbytes=40)}),
                           # FR-64: citizen deaths of the last season (100,800 ticks) by cause
-                          "died": Obj(extra=NAT)}),
+                          "died": Obj(extra=NAT),
+                          # BUG-062: tomb zones left closed to citizens by the last run (none counted as free tombs)
+                          "tombs_locked": NAT,
+                          # FR-74: stressed citizens by source, deaths of the last year by cause, the population split
+                          # and record (kids: children and babies; res: residents; waves/mig/dy: the last year; lastw:
+                          # days since the last migrant wave, -1 none seen)
+                          "src": Obj(extra=NAT), "died_y": Obj(extra=NAT),
+                          "pop": Obj(req={"kids": NAT, "res": NAT, "peak": NAT, "dy": NAT, "waves": NAT, "mig": NAT,
+                                          "lastw": Int(-1)})}),
          "labor": Obj(req={"starving": NAT, "idle": PCT}),
          # BUG-042: unvalidated live orders, the days the oldest waits, why the manager validates nothing
          "orders": Obj(req={"n": NAT, "bad": NAT, "stuck": NAT},

@@ -1317,13 +1317,22 @@ local function gone_check(K, name, r, spec, now)
   local c = geom.bbox_center(spec.fp)
   local mode = K.mode()
   local L, by = lose(K, name, seen, now, mode)
-  local txt = string.format('%s destroyed: no bridge on its footprint at %d,%d,%d any more (building %d, last %s, %s); '
+  -- BUG-064 (Run 13 note 55/43: bridges vanished in PEACE with '0 building destroyers'; DF's reports said "toppled by
+  -- <dwarf>"): the stressed citizen or ghost care saw topple something near the footprint, with his stress
+  local okt, tp = K.call('care', 'toppled', c.x, c.y, c.z)
+  tp = okt and type(tp) == 'table' and tp.by and tp or nil
+  local txt = string.format('%s destroyed%s: no bridge on its footprint at %d,%d,%d any more (building %d, last %s, %s); '
                             .. 'no pulls for it, an open way until it is rebuilt; lost %dx, %d with building '
-                            .. 'destroyers in sight%s', name, c.x, c.y, c.z, seen.bid, last, mode, L.n, L.bd,
+                            .. 'destroyers in sight%s', name,
+                            tp and string.format(' (toppled by %s%s%s)', tp.by, tp.ghost == 1 and ', a ghost' or '',
+                                                 tp.cat and (', stress category ' .. tp.cat) or '') or '',
+                            c.x, c.y, c.z, seen.bid, last, mode, L.n, L.bd,
                             by and #L.races > 0 and (' (' .. table.concat(L.races, ',') .. ')') or '')
   K.emit('BRIDGE_DESTROYED', 'A', cut(txt, 200), {bridge = name, bid = seen.bid, role = tostring(spec.role or ''),
                                                   last = last, mode = mode, pos = {c.x, c.y, c.z}, n = L.n, bd = L.bd,
-                                                  destroyers = by and 1 or 0, races = L.races})
+                                                  destroyers = by and 1 or 0, races = L.races,
+                                                  tby = tp and tp.by or nil, tunit = tp and tp.unit >= 0 and tp.unit or nil,
+                                                  tcat = tp and tp.cat or nil, tghost = tp and tp.ghost == 1 and 1 or nil})
   K.log('warn', 'gate: %s', txt)
   return true
 end
