@@ -66,6 +66,9 @@ SEAL_PAUSES = {"work", "beds", "supply"}                           # paused whil
 STUCK_SHORT_D = 28            # BUG-041: a seal stuck this long (a game month) gets one short plan check line
 REBUILD_KINDS = {"seal", "tombs", "supply", "beds", "depot", "repair"}
 REBUILD_DEF = (10, 12)                    # config/baseline.json runner.rebuild {pop, off} defaults (runner.lua M.CFG)
+STRESS_TPLS = ("temple", "tavern")        # FR-74: the stress response the game allows (bp/rooms.py templates)
+STRESS_DEF = 30                           # config/baseline.json care.stress_high (care.lua M.DEFAULTS): % stressed citizens
+STRESS_MIN_POP = 10                       # no temple or tavern for a fort this small
 SIEGE_EVENTS = ("SIEGE_START", "SIEGE_END", "BREACH")
 SIEGE_MODES = ("SIEGE", "BREACH", "RECOVERY")
 # DESIGN §11.4 always-blocked commands and banned terms (CONTRACTS §1.4); config/allowlist.json adds more
@@ -171,6 +174,7 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             or any(t == GALLERY for t, _ in applied),
             "stockroom": any(isinstance(r, dict) and r.get("tpl") == STOCKROOM for r in rooms)
             or any(t == STOCKROOM for t, _ in applied),
+            "social": social_rooms(applied, rooms),                 # FR-74: temple / tavern standing or under way
             "sieged": sieged(save_dir, state),
             "audit": audit_routes(save_dir, state),
             "refuge": refuge_projects(save_dir, state, applied),
@@ -428,6 +432,59 @@ def rebuild_cfg() -> tuple[int, int]:
     lo = rb["pop"] if ok[0] else REBUILD_DEF[0]
     hi = rb["off"] if ok[1] else REBUILD_DEF[1]
     return lo, max(lo, hi)
+
+
+def stress_cfg() -> int:
+    """config/baseline.json care.stress_high (percent of citizens stressed); the default for a missing or bad value."""
+    doc = files.read_json(paths.config_dir() / "baseline.json")
+    v = ((doc.get("care") or {}).get("stress_high") if isinstance(doc, dict) else None)
+    return v if isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 100 else STRESS_DEF
+
+
+def stress_high(s: dict | None) -> dict | None:
+    """FR-74 (Run 13/14: stress 52-78 % for years, no countermeasure): the fort's stress when state care.stressed_pct
+    is at or over care.stress_high and the fort has STRESS_MIN_POP citizens: {pct, src (the sources care named, most
+    first: 'ghosts 12, deaths 30'), ghosts}; None otherwise."""
+    s = s or {}
+    care = s.get("care") or {}
+    pct = care.get("stressed_pct")
+    if not isinstance(pct, int) or isinstance(pct, bool) or pct < stress_cfg():
+        return None
+    if ((s.get("pop") or {}).get("cit") or 0) < STRESS_MIN_POP:
+        return None
+    src = care.get("src") if isinstance(care.get("src"), dict) else {}
+    parts = [f"{k} {v}" for k, v in sorted(src.items(), key=lambda kv: (-kv[1], kv[0]))]
+    return {"pct": pct, "src": ", ".join(parts) or "no source named", "ghosts": care.get("ghosts") or 0}
+
+
+def social_rooms(applied: set, rooms: list) -> list[str]:
+    """The stress rooms (temple, tavern) the fort has or has under way: manifest rooms and applied projects."""
+    have = {r.get("tpl") for r in rooms if isinstance(r, dict)} | {t for t, _ in applied}
+    return sorted(t for t in STRESS_TPLS if t in have)
+
+
+def stress_drafts(s: dict | None, fort: dict | None, done: set, info: dict | None) -> list[dict]:
+    """propose (FR-74): a temple and a tavern at S1 while stress_high holds and the fort has neither standing, applied nor
+    planned (the stress sources are in the notes). Known templates only (info None: not checked)."""
+    if not stress_high(s):
+        return []
+    have = set((fort or {}).get("social") or [])
+    return [{"tpl": t, "site": "S1"} for t in STRESS_TPLS
+            if t not in have and (t, None) not in done and (info is None or t in info)]
+
+
+def stress_gate(doc: dict, s: dict | None, fort: dict | None) -> list[str]:
+    """check (FR-74): a warning while stress_high holds and neither a temple nor a tavern stands, is applied or is in the plan."""
+    hi = stress_high(s)
+    if not hi:
+        return []
+    have = set((fort or {}).get("social") or []) | {b["tpl"] for se in doc["seasons"] for b in se["build"]}
+    missing = [t for t in STRESS_TPLS if t not in have]
+    if not missing:
+        return []
+    adds = ", ".join(json.dumps({"tpl": t, "site": "S1"}, separators=(",", ":")) for t in missing)
+    return [f"stress: {hi['pct']} % of the citizens are stressed (sources: {hi['src']}): add {adds} (FR-74; the digest says "
+            "STRESS_HIGH; ghosts: a memorial slab, deaths: burials, no beds: bedrooms, no drink: stills and barrels)"]
 
 
 def rebuild_state(s: dict | None) -> dict | None:
@@ -1000,6 +1057,7 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     errs += se
     warn += sw
     warn += seal_gate(doc, s, fort or {}, prev)   # Run 11 siege 8: seal first; the rebuild policy
+    warn += stress_gate(doc, s, fort)             # FR-74: stress at care.stress_high: a temple and a tavern
     if pol["beauty"] == "used_rooms" and lvl < 1:
         warn.append("beauty used_rooms waits for R1 (runner gates it)")
     seen_libs: set[str] = set()
@@ -1318,6 +1376,12 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         all(b["tpl"] not in STONE_DIGS for b in builds) else None
     if stone:
         builds.append(copy.deepcopy(STONE_DIG))
+    # FR-74: stress at stress_high: a temple and a tavern (the stress response the game allows), noted
+    stress, sdrafts = stress_high(s), []
+    for b in stress_drafts(s, fort, done, info):
+        if all(_build_key(x) != _build_key(b) for x in builds):
+            builds.append(b)
+            sdrafts.append(b["tpl"])
     # BUG-034: the hospital only with accepted water near its site; else the cistern in its place (once), noted
     hw = hospital_water(s, fort)
     held, cistern = None, False
@@ -1375,6 +1439,8 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb else tp)   # rebuild: no explore
     if stone:
         doc["notes"] += f"; {stone}: bedrooms@S1 n=4 first (a stone dig)"
+    if stress and sdrafts and not rb:
+        doc["notes"] += f"; stress {stress['pct']} % ({stress['src']}): " + " and ".join(sdrafts) + "@S1 drafted (FR-74)"
     if rb:
         doc["notes"] += (f"; rebuild (pop {rb['pop']} < {rb['lo']}, until {rb['hi']}): only seal/tombs/food/beds drafted"
                          + (f" (left out: {', '.join(sorted(set(left_out)))})" if left_out else "")

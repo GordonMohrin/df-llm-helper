@@ -123,6 +123,9 @@ M.DEFAULTS = {
   -- BUG-064: one BUILDING_TOPPLED per culprit per topple_every ticks; gate asks for a culprit near a vanished bridge
   -- within topple_win ticks and topple_r tiles
   topple_every = 2400, topple_win = 4800, topple_r = 6,
+  -- FR-74: STRESS_HIGH (B) once stressed_pct has stood at stress_high for stress_days game days (again every stress_every
+  -- ticks); plan propose / check read stress_high too (a temple and a tavern for the stressed fort)
+  stress_high = 30, stress_days = 14, stress_every = 33600,
   coffins = true, coffin_reserve = 10, coffin_batch = 30, coffin_scan_r = 16, coffin_min_side = 4,
   coffin_entrance_r = 10, coffin_retry = 3600, coffin_wood_keep = 20, coffin_wake = 2400, coffin_prio = 3,
   death_window = 33600, death_same = 2, death_any = 3, death_every = 1200, death_recheck = 100800,
@@ -200,6 +203,9 @@ local function pstate(K)
   if type(p.died) ~= 'table' then p.died = {} end
   p.mend = json.object(type(p.mend) == 'table' and p.mend or {})
   p.clus = json.object(type(p.clus) == 'table' and p.clus or {})
+  -- FR-74: the population record: deaths of the last year {t, cause}, migrant waves {t, n}, the peak {n, t}
+  if type(p.dlog) ~= 'table' then p.dlog = {} end
+  if type(p.waves) ~= 'table' then p.waves = {} end
   return p
 end
 
@@ -299,11 +305,25 @@ local function vec(path)
 end
 
 ---------------------------------------------------------------- units: stress, naked, moods
-local function thoughts(u, counts)
+-- FR-74 (Run 13/14 note 12: stress 52-78 % for years, nobody knew from what): the thought types (df.unit_thought_type,
+-- df.personality.xml) that name a source the fort can act on, by source. A stressed citizen counts once per source.
+M.STRESS_SRC = {
+  GhostNightmare = 'ghosts', GhostHaunt = 'ghosts', AttackedByDead = 'ghosts',
+  WitnessDeath = 'deaths', UnexpectedDeath = 'deaths', Death = 'deaths', SawDeadBody = 'deaths',
+  LackBedroom = 'beds', BedroomQuality = 'beds', SleptMud = 'beds', SleptDirt = 'beds', SleepNoise = 'beds',
+  Thirsty = 'drink', Dehydrated = 'drink', Hungry = 'food', Starving = 'food',
+  NoDining = 'rooms', DiningQuality = 'rooms', NoRooms = 'rooms', RoomPretension = 'rooms',
+}
+local function thoughts(u, counts, src)
   pcall(function()
+    local seen = {}
     for _, e in ipairs(u.status.current_soul.personality.emotions) do   -- fixnaked.lua:12
       local name = df.unit_thought_type[e.thought]
-      if name then counts[name] = (counts[name] or 0) + 1 end
+      if name then
+        counts[name] = (counts[name] or 0) + 1
+        local g = M.STRESS_SRC[name]
+        if g and src and not seen[g] then seen[g] = true; src[g] = (src[g] or 0) + 1 end
+      end
     end
   end)
 end
@@ -558,8 +578,11 @@ local function look_unit(K, c, r, p, u)
   a.n = a.n + 1
   if dfhack.units.getStressCategory(u) <= 1 then           -- Lua API.txt:1904: 0 worst .. 6
     a.stressed = a.stressed + 1
-    thoughts(u, a.thoughts)
+    thoughts(u, a.thoughts, a.src)
   end
+  -- FR-74: who the census counts (children and residents are in `cit`; `adults` is isAdult = neither BABY nor CHILD)
+  if is_child(u) then a.kids = a.kids + 1 end
+  if not dfhack.units.isCitizen(u) then a.res = a.res + 1 end
   if not dfhack.units.isBaby(u) and not has_shirt(u) then a.naked = a.naked + 1 end
   local kind = df.mood_type[u.mood]
   -- live L6: a dead moody citizen kept u.mood and woke the LLM five times after his death
@@ -2792,7 +2815,8 @@ local function new_run(K, c, p)
   end
   local mode, now = K.mode(), K.now().tick
   return {ph = 1, idx = 0, left = 0, ids = ids, have_units = type(cu) == 'table' and type(cu.ids) == 'table',
-          acc = {n = 0, stressed = 0, naked = 0, thoughts = {}}, moody = {}, mood_list = {}, mood_cls = {},
+          acc = {n = 0, stressed = 0, naked = 0, thoughts = {}, src = {}, kids = 0, res = 0}, moody = {}, mood_list = {},
+          mood_cls = {},
           claimed = {}, member = {}, res_ids = res_ids, res_hold = {}, res_floor = {}, rc = R.conf(K.cfg.baseline),
           dead = dead, open = {}, acts = 0, fixed = 0, errs = 0, now = now, tombs_free = 0,
           bodies = {}, interred = {}, held_by = {},
@@ -3086,6 +3110,83 @@ local function death_recheck(K, c, p)
   end
 end
 
+-- FR-74 (Run 13/14 notes 12 and 15: stress 52-78 % for years; the population fell from 50 to 33 in peace, no migrants since
+-- y481): what the fort can see of both, read only. Stress sources: the stressed citizens (category 0-1) that carry a
+-- thought of a source (M.STRESS_SRC) this run. Population: the census split (isAdult = not BABY and not CHILD,
+-- Units.cpp:321, so the rest of `cit` are children, babies and residents), the peak, the deaths of the last year by
+-- cause and the migrant waves seen (economy's MIGRANTS). Nothing steers the migrants (decision 16); plan propose reads
+-- the state for a temple and a tavern, STRESS_HIGH (B) says it in the digest.
+local SRC_LABEL = {ghosts = 'ghosts', deaths = 'deaths', beds = 'no beds', drink = 'no drink', food = 'no food',
+                   rooms = 'rooms'}
+local function pop_stress(K, c, r, p, now)
+  local a = r.acc
+  local src, parts = {}, {}
+  for _, g in ipairs({'ghosts', 'deaths', 'beds', 'drink', 'food', 'rooms'}) do
+    if (a.src[g] or 0) > 0 then
+      src[g] = a.src[g]
+      parts[#parts + 1] = string.format('%s %d', SRC_LABEL[g], a.src[g])
+    end
+  end
+  local recent = 0
+  for _, t in ipairs(type(p.top) == 'table' and p.top or {}) do
+    if type(t) == 'table' and now - (num(t.t) or -1e9) <= DAY * 14 then recent = recent + 1 end
+  end
+  if recent > 0 then src.toppled = recent; parts[#parts + 1] = string.format('toppled buildings %d', recent) end
+  local cu = K.census.u
+  local cit = type(cu) == 'table' and num(cu.cit) or a.n
+  local peak = type(p.peak) == 'table' and p.peak or {n = 0, t = now}
+  if cit > (num(peak.n) or 0) then peak = {n = cit, t = now} end
+  p.peak = peak
+  -- deaths of the last year, by cause (the cause at the time of death; a death still missing counts as unknown)
+  local keep, dy, by = {}, 0, {}
+  for _, e in ipairs(p.dlog) do
+    if type(e) == 'table' and now - (num(e.t) or -1e9) <= C.TICKS.YEAR then
+      keep[#keep + 1] = e
+      dy = dy + 1
+      by[tostring(e.c)] = (by[tostring(e.c)] or 0) + 1
+    end
+  end
+  while #keep > 300 do table.remove(keep, 1) end
+  p.dlog = keep
+  local waves, mig, lastw = 0, 0, -1
+  local wk = {}
+  for _, w in ipairs(p.waves) do
+    if type(w) == 'table' and now - (num(w.t) or -1e9) <= C.TICKS.YEAR * 3 then
+      wk[#wk + 1] = w
+      if now - w.t <= C.TICKS.YEAR then waves, mig = waves + 1, mig + (num(w.n) or 0) end
+      local ago = (now - w.t) // DAY
+      if lastw < 0 or ago < lastw then lastw = ago end
+    end
+  end
+  p.waves = wk
+  st.pop = {kids = a.kids, res = a.res, peak = num(peak.n) or cit, dy = dy, waves = waves, mig = mig, lastw = lastw}
+  st.died_y = by
+  st.src = src
+  -- STRESS_HIGH: the share of stressed citizens stood at stress_high for stress_days game days; sources and the tallies
+  local pct = st.out.stressed_pct
+  if pct >= c.stress_high then
+    p.sthi = num(p.sthi) or now
+    if now - p.sthi >= c.stress_days * DAY then
+      local T = K.now()
+      local toks = {}
+      for g in pairs(src) do toks[#toks + 1] = g end
+      table.sort(toks)
+      if CAD.due(type(p.stev) == 'table' and p.stev or nil, T, {}, toks, {ticks = c.stress_every, wall_s = c.wake_wall_s}) then
+        p.stev = CAD.mark(T, {}, toks)
+        K.emit('STRESS_HIGH', 'B', trunc(string.format('%d%% of the citizens stressed for %d days: %s; deaths in the last year %d, ghosts %d; '
+                                                       .. 'plan propose drafts a temple and a tavern', pct, (now - p.sthi) // DAY,
+                                                       #parts > 0 and table.concat(parts, ', ') or 'no source named',
+                                                       dy, st.out.ghosts or 0), 200),
+               {pct = pct, days = (now - p.sthi) // DAY, src = parts, deaths = dy, ghosts = st.out.ghosts or 0,
+                cit = cit})
+      end
+    end
+  else
+    p.sthi = nil
+    p.stev = CAD.quiet(type(p.stev) == 'table' and p.stev or nil)
+  end
+end
+
 local function finish(K, c, r, p)
   local now = K.now().tick
   -- open citizen corpses: first seen -> age
@@ -3193,6 +3294,7 @@ local function finish(K, c, r, p)
   died_prune(c, p, now)
   cluster_scan(K, c, p)
   st.died = died_tally(p, now)
+  if r.have_units then pop_stress(K, c, r, p, now) end
   K.persist.touch('m.care')
 end
 
@@ -3417,6 +3519,7 @@ M.on.UNIT_DEATH = function(K, ev)
   local rec = {t = now, u = id}
   died_set(rec, res)
   p.died[#p.died + 1] = rec
+  p.dlog[#p.dlog + 1] = {t = now, c = res.found and tostring(res.cause) or 'unknown'}      -- FR-74: a year of deaths
   died_prune(c, p, now)
   K.emit('DEATH', 'B', DT.text(id, res, false), death_d(id, res, false))
   local recent = {}
@@ -3438,6 +3541,15 @@ M.on.UNIT_DEATH = function(K, ev)
   end
   cluster_scan(K, c, p)
   st.died = died_tally(p, now)
+  K.persist.touch('m.care')
+end
+
+-- FR-74: migrant waves, from economy's MIGRANTS (B) after the census caught up with the arrival report (n may be 0)
+M.on['EV:MIGRANTS'] = function(K, ev)
+  local n = type(ev.d) == 'table' and num(ev.d.n) or 0
+  local p = pstate(K)
+  p.waves[#p.waves + 1] = {t = ev.tick or K.now().tick, n = n}
+  while #p.waves > 40 do table.remove(p.waves, 1) end
   K.persist.touch('m.care')
 end
 
@@ -3540,6 +3652,18 @@ function M.state(K)
   local care = {stressed_pct = math.max(0, math.min(100, o.stressed_pct)), naked = o.naked, ghosts = o.ghosts,
                 corpses_old = o.corpses_old, tombs_free = o.tombs_free, moods = o.moods}
   if (o.tombs_locked or 0) > 0 then care.tombs_locked = o.tombs_locked end      -- BUG-062: closed zones left
+  if st.pop then                              -- FR-74: stress sources and the population diagnosis
+    care.pop = {kids = st.pop.kids, res = st.pop.res, peak = st.pop.peak, dy = st.pop.dy, waves = st.pop.waves,
+                mig = st.pop.mig, lastw = st.pop.lastw}
+    if next(st.src or {}) then
+      care.src = json.object{}
+      for k, n in pairs(st.src) do care.src[k] = n end
+    end
+    if next(st.died_y or {}) then
+      care.died_y = json.object{}
+      for k, n in pairs(st.died_y) do care.died_y[k] = n end
+    end
+  end
   local v = st.cof
   if v and v.active == 1 then                 -- FR-61: the coffin provisioner
     care.coffins = {want = v.want, short = v.short, stock = v.stock, order = v.order, proj = trunc(v.proj, 40)}

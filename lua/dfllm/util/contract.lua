@@ -130,6 +130,7 @@ C.EVENTS = {
   MOOD_START = {cls = 'B', by = 'care'}, MOOD_NEED = {cls = 'B', by = 'care'},
   TOMBS_LOCKED = {cls = 'B', by = 'care'},      -- BUG-062: tomb zones closed to citizens (counts, who closed them again)
   BUILDING_TOPPLED = {cls = 'B', by = 'care'},  -- BUG-064: a building fell to a stressed citizen or a ghost (culprit, stress)
+  STRESS_HIGH = {cls = 'B', by = 'care'},       -- FR-74: stress at stress_high for stress_days; the sources named
   MOOD_END = {cls = 'B', by = 'care'}, CARAVAN = {cls = 'B', by = 'trade'},
   MIGRANTS = {cls = 'B', by = 'economy'}, PETITION = {cls = 'B', by = 'care'},
   STOCK_LOW = {cls = 'B', by = 'economy'}, CANCEL_LOOP = {cls = 'B', by = 'economy'},
@@ -358,7 +359,12 @@ C.STATE_SPEC = obj({
                     dwhy = str(80)}),               -- BUG-042: why the stills do not brew below the drink target
   care = obj({stressed_pct = PCT, naked = NAT, ghosts = NAT, corpses_old = NAT, tombs_free = NAT, moods = NAT},
              {coffins = obj({want = NAT, short = NAT, stock = NAT, order = NAT, proj = str(40)}),
-              died = obj(nil, nil, NAT), tombs_locked = NAT}),
+              died = obj(nil, nil, NAT), tombs_locked = NAT,
+              -- FR-74: stressed citizens by source (ghosts, deaths, beds, drink, food, rooms, toppled), the population
+              -- split and record (kids = children and babies, res = residents, peak, deaths and migrant waves in the last
+              -- year, days since the last wave or -1) and the deaths of the last year by cause
+              src = obj(nil, nil, NAT), died_y = obj(nil, nil, NAT),
+              pop = obj({kids = NAT, res = NAT, peak = NAT, dy = NAT, waves = NAT, mig = NAT, lastw = int(-1)})}),
   labor = obj({starving = NAT, idle = PCT}),
   -- BUG-042: unvalidated live orders, the days the oldest waits, why the manager validates nothing (past unval_days)
   orders = obj({n = NAT, bad = NAT, stuck = NAT}, {unval = NAT, uval_d = NAT, mgr = str(80)}),

@@ -400,4 +400,84 @@ T.test('BUG-064: care.toppled finds the record near a position within topple_win
   T.eq(({W.K.call('care', 'toppled', 22, 25, 9)})[2], nil, 'older than topple_win')
 end)
 
+---------------------------------------------------------------- FR-74: stress sources, population
+local kmock = require('dfllm.util.k_mock')
+
+local function stressed(W, id, thoughts, cat)
+  local u = W.unit(id)
+  u._m.stress = cat or 0
+  u.status.current_soul.personality.emotions = kmock.vec(thoughts)
+end
+
+T.test('FR-74: the stress sources are the thoughts of the stressed citizens, once per citizen and source', function()
+  local W = world{cit = 8, setup = function(W)
+    df.unit_thought_type = {[10] = 'GhostHaunt', [11] = 'WitnessDeath', [12] = 'LackBedroom', [13] = 'Rain',
+                            [14] = 'Thirsty', [15] = 'GhostNightmare'}
+  end}
+  stressed(W, 1, {{thought = 10}, {thought = 15}, {thought = 11}})           -- ghosts (twice, counted once), deaths
+  stressed(W, 2, {{thought = 10}, {thought = 12}})
+  stressed(W, 3, {{thought = 11}, {thought = 13}})
+  stressed(W, 4, {{thought = 14}}, 1)                                           -- category 1 still counts
+  stressed(W, 5, {{thought = 10}, {thought = 12}, {thought = 11}}, 3)           -- not stressed: not counted
+  W.run(2)
+  local c = W.state().care
+  T.eq(c.src, {ghosts = 2, deaths = 2, beds = 1, drink = 1})
+  T.eq(c.stressed_pct, 50, '4 of 8')
+end)
+
+T.test('FR-74: STRESS_HIGH (B) after stress_days over stress_high, with the sources; calm forts say nothing', function()
+  local W = world{cit = 4, setup = function(W)
+    df.unit_thought_type = {[10] = 'GhostHaunt', [11] = 'WitnessDeath'}
+  end}
+  for i = 1, 3 do stressed(W, i, {{thought = 10}, {thought = 11}}) end
+  W.run(2)
+  CW.day(W, 10)
+  T.eq(W.find_events('STRESS_HIGH'), {}, 'ten days: not yet')
+  W.ms = W.ms + 600000
+  CW.day(W, 6)
+  local e = W.find_events('STRESS_HIGH')
+  T.eq(#e, 1)
+  T.eq(e[1].cls, 'B')
+  T.eq({e[1].d.pct, e[1].d.src, e[1].d.cit}, {75, {'ghosts 3', 'deaths 3'}, 4})
+  T.ok(e[1].d.days >= 14 and e[1].msg:find('plan propose drafts a temple and a tavern', 1, true), e[1].msg)
+  CW.day(W, 3)
+  T.eq(#W.find_events('STRESS_HIGH'), 1, 'the same set: not again')
+  local W2 = world{cit = 4}
+  CW.day(W2, 20)
+  T.eq(W2.find_events('STRESS_HIGH'), {})
+end)
+
+T.test('FR-74: the population diagnosis: children and residents apart, the peak, the deaths of the year, the migrant waves', function()
+  local units = {}
+  for i = 1, 4 do units[#units + 1] = {id = 10 + i, citizen = true, pos = {5, 5, 5}, adult = false} end   -- children
+  units[#units + 1] = {id = 20, resident = true, pos = {5, 5, 5}}                                          -- a resident
+  local W, care = world{cit = 6, units = units}
+  local ids = {}
+  for i = 1, 6 do ids[#ids + 1] = i end
+  for i = 1, 4 do ids[#ids + 1] = 10 + i end
+  ids[#ids + 1] = 20
+  W.set_census('u', F.census_u(ids))
+  W.K.census.u.cit = 50
+  W.run(2)
+  local p = W.state().care.pop
+  T.eq({p.kids, p.res, p.peak, p.dy, p.waves, p.mig, p.lastw}, {4, 1, 50, 0, 0, 0, -1})
+  W.K.census.u.cit = 33                                     -- the fort shrank in peace
+  dead(W, 2)
+  dead(W, 3)
+  care.on['EV:MIGRANTS'](W.K, {d = {n = 7}, tick = W.K.now().tick})
+  CW.day(W, 3)
+  p = W.state().care.pop
+  T.eq({p.peak, p.dy, p.waves, p.mig, p.lastw}, {50, 2, 1, 7, 3}, 'peak stays, 2 deaths, 1 wave of 7, seen 3 days ago')
+  T.eq(next(W.state().care.died_y) ~= nil, true)
+  local n = 0
+  for _, v in pairs(W.state().care.died_y) do n = n + v end
+  T.eq(n, 2)
+  -- a year later the deaths and the wave are out of the window
+  W.ms = W.ms + 600000
+  CW.day(W, 340)
+  p = W.state().care.pop
+  T.eq({p.dy, p.waves, p.mig}, {0, 0, 0})
+  T.ok(p.lastw >= 340)
+end)
+
 T.done()

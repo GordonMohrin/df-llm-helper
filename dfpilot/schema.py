@@ -460,6 +460,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # the report, unit = his id (only when one citizen, ghost or recorded dead matches the name), ghost, stress = his
     # personality.stress and cat its category (0 worst .. 6; >= 50000 is 0), tantrum = a tantrum report named him first,
     # n = further buildings toppled by him since the last event, pos = the report's position
+    # FR-74: the share of stressed citizens (pct) stood at care.stress_high for `days` game days; src = the sources named
+    # ("ghosts 12", "deaths 30", "no beds 8", "toppled buildings 3"), deaths of the last year, ghosts, citizens
+    "STRESS_HIGH": ("B", "care", _d("pct:i days:i", "src:sa deaths:i ghosts:i cit:i")),
     "BUILDING_TOPPLED": ("B", "care", _d("what:s by:s", "unit:i ghost:f stress:i cat:i tantrum:f n:i pos:p")),
     "TOMBS_LOCKED": ("B", "care", _d(opt="closed:i free:i usable:i owned:i inactive:i opened:i left:i again_free:i "
                                          "again_owned:i by_entomb:i unburied:i")),
@@ -776,7 +779,13 @@ STATE = Obj(
                           # FR-64: citizen deaths of the last season (100,800 ticks) by cause
                           "died": Obj(extra=NAT),
                           # BUG-062: tomb zones left closed to citizens by the last run (none counted as free tombs)
-                          "tombs_locked": NAT}),
+                          "tombs_locked": NAT,
+                          # FR-74: stressed citizens by source, deaths of the last year by cause, the population split
+                          # and record (kids: children and babies; res: residents; waves/mig/dy: the last year; lastw:
+                          # days since the last migrant wave, -1 none seen)
+                          "src": Obj(extra=NAT), "died_y": Obj(extra=NAT),
+                          "pop": Obj(req={"kids": NAT, "res": NAT, "peak": NAT, "dy": NAT, "waves": NAT, "mig": NAT,
+                                          "lastw": Int(-1)})}),
          "labor": Obj(req={"starving": NAT, "idle": PCT}),
          # BUG-042: unvalidated live orders, the days the oldest waits, why the manager validates nothing
          "orders": Obj(req={"n": NAT, "bad": NAT, "stuck": NAT},

@@ -10,6 +10,12 @@ from .events import SEASON, YEAR, clip, est_tokens, fmt_age, fmt_d, fmt_event, f
 
 STATUS_TOKENS, BRIEF_TOKENS = 300, 1500
 SUPPLY_MIN = {"drink_d": 170, "food_d": 60}
+SRC_LABEL = {"beds": "no beds", "drink": "no drink", "food": "no food", "toppled": "toppled buildings"}   # FR-74
+STRESS_SHOW = 20                          # show the stress sources from this share of stressed citizens
+# FR-74 / decision 16: what the game documents about migrants (docs: the Immigration page of the wiki, DFHack's
+# fix/population-cap and pop-control): the diagnosis names them, nothing steers the migrants
+MIGRANT_RULES = ("the game: waves 1-2 fixed, later ones follow the wealth the last departing dwarf caravan reported, "
+                 "deaths + insane of the last 5 years (>= 10 dangerous), population_cap and max-pop; none is steered")
 # B digest order (most useful first); unlisted B types follow alphabetically
 DIGEST_ORDER = ["ALERT_START", "ALERT_END", "LOCKDOWN_END", "STOCK_LOW", "MATERIAL_SHORT", "MOOD_NEED",
                 "MOOD_START", "MOOD_END", "CANCEL_LOOP", "BREACH_STOP", "PROJECT_REQUEST", "DEATH_CLUSTER", "DEATH",
@@ -44,6 +50,7 @@ class Ctx:
         self.decisions: dict[str, dict] = {}   # id -> newest DECISION_NEEDED
         self.a, self.b, self.cmds = [], [], []  # ascending after the scan
         self.mode_ev: dict | None = None
+        self.full = full
         self._scan(full)
 
     def _scan(self, full: bool) -> None:
@@ -242,6 +249,30 @@ def line_alarm(ctx: Ctx) -> str:
     return _join(out)
 
 
+def pop_diag(ctx: Ctx) -> str:
+    """FR-74 (Run 13/14: 50 -> 33 in peace, no migrants since y481): who the citizens are (adults = not BABY and not
+    CHILD; the rest are children, babies and residents), the peak, the deaths of the last year by cause and the migrant
+    waves seen. In status only while the fort lost a tenth of its peak or saw no wave in a year; the brief always, with
+    the game's migration conditions."""
+    care = ctx.s.get("care") or {}
+    pd = care.get("pop")
+    cit = (ctx.s.get("pop") or {}).get("cit")
+    if not isinstance(pd, dict) or not isinstance(cit, int):
+        return ""
+    shrunk = pd["peak"] - cit >= max(3, pd["peak"] // 10)
+    quiet = pd["waves"] == 0
+    if not (ctx.full or shrunk or quiet):
+        return ""
+    ad = (ctx.s.get("pop") or {}).get("adults")
+    died = care.get("died_y") if isinstance(care.get("died_y"), dict) else {}
+    by = ", ".join(f"{k} {v}" for k, v in sorted(died.items(), key=lambda kv: (-kv[1], kv[0]))[:4])
+    last = "none seen" if pd["lastw"] < 0 else f"last {pd['lastw']} d ago"
+    out = (f"pop trend: {cit} of peak {pd['peak']}, {ad if isinstance(ad, int) else '?'} adults + {pd['kids']} children/babies"
+           f" + {pd['res']} residents; deaths in 365 d: {pd['dy']}" + (f" ({by})" if by else "")
+           + f"; migrants in 365 d: {pd['waves']} waves, {pd['mig']} people ({last})")
+    return out + ("; " + MIGRANT_RULES if ctx.full and (shrunk or quiet) else "")
+
+
 def line_pop(ctx: Ctx) -> str:
     s = ctx.s
     out = []
@@ -249,6 +280,7 @@ def line_pop(ctx: Ctx) -> str:
     if p:
         out.append(f"pop {p.get('cit', '?')} ({p.get('adults', '?')}ad {p.get('soldiers', '?')}sol)"
                    f" cap {p.get('cap', '?')} gate {p.get('gate_cap', '?')}")
+    out.append(pop_diag(ctx))
     r = s.get("ready")
     if r:
         a = r["audit"]
@@ -337,8 +369,13 @@ def line_supply(ctx: Ctx) -> str:
         out.append(f"orders: {od.get('unval', 0)} unvalidated, oldest {od.get('uval_d', 0)} d: {od['mgr']}")
     c = s.get("care")
     if c:
-        out.append(f"stress {c['stressed_pct']}% naked {c['naked']} ghosts {c['ghosts']} corpses {c['corpses_old']}"
-                   f" tombs {c['tombs_free']} moods {c['moods']}")
+        # FR-74: the sources of a high stress; BUG-062: tomb zones left closed to citizens
+        src = c.get("src") if isinstance(c.get("src"), dict) else {}
+        srcs = ", ".join(f"{SRC_LABEL.get(k, k)} {v}" for k, v in sorted(src.items(), key=lambda kv: (-kv[1], kv[0])))
+        out.append(f"stress {c['stressed_pct']}%" + (f" ({srcs})" if srcs and c["stressed_pct"] >= STRESS_SHOW else "")
+                   + f" naked {c['naked']} ghosts {c['ghosts']} corpses {c['corpses_old']}"
+                   f" tombs {c['tombs_free']}" + (f" ({c['tombs_locked']} closed to citizens)" if c.get("tombs_locked") else "")
+                   + f" moods {c['moods']}")
         died = c.get("died")
         if died:                               # FR-64: citizen deaths of the last season by cause
             out.append("deaths (season) " + ", ".join(f"{k} {n}" for k, n in sorted(died.items(),
