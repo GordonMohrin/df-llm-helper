@@ -109,5 +109,13 @@ lines). Everything is "offline, live-untested": each bug file names its live che
 | 43 | the culprit is named (BUG-064), the rebuild text of the keeper does not read it | BUG-048 |
 | 52 | who closes an opened tomb zone again 90 s later (TOMBS_LOCKED answers it live) | BUG-062 |
 | 54 | who removed 22 hand-added Planters members (the audit line answers it live); the 10 FPS clamp after a gremlin alarm | BUG-057, BUG-065 |
-| 64 | member turnover per militia window (squad_remove/add drops the kit) | FR-71 follow-up |
-| 69 (game session, later) | autoslab makes no EngraveSlab orders although ghosts and free slabs exist | BUG-061 follow-up |
+| 64 | member turnover per militia window (squad_remove/add drops the kit) | FR-79 (kernel rotation; what DF does with the leaver's kit is read live) |
+| 69 (game session, later) | autoslab makes no EngraveSlab orders although ghosts and free slabs exist | BUG-078 (kernel orders the slab after 3 days; why the plugin queued nothing stays open) |
+
+## Second pass (2026-10-23, main after the merge of waves D and I)
+| Note | What | Where |
+|---|---|---|
+| 67 | militia rotation by the kernel, cohorts by militia window | FR-79, BUG-076 (a refused addToSquad stalled the refill) |
+| 68 | hospital posts held at a location without a zone | BUG-077 |
+| 69 | memorial slabs for old ghosts | BUG-078 |
+| (audit) | four integration audits over everything merged so far | BUG-079 .. BUG-086 |
