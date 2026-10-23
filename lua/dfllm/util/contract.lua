@@ -54,7 +54,7 @@ C.EVENTS = {
   -- A: wakes the LLM
   SIEGE_END = {cls = 'A', by = 'siege'}, GATE_FAIL = {cls = 'A', by = 'gate'},
   BREACH = {cls = 'A', by = 'siege'}, DEATHS_3PLUS = {cls = 'A', by = 'care'},
-  DRILL_FAIL = {cls = 'A', by = 'drill'}, KERN_FAULT = {cls = 'A', by = 'kern'},
+  DRILL_FAIL = {cls = 'A', by = 'drill'}, KERN_FAULT = {cls = 'A', by = 'any'},   -- BUG-075: kern (back-off), runner (caught fault)
   -- DECISION_NEEDED food_low/famine (economy): food, block, opts and, BUG-038, auto (fishery: its request is out or
   -- queued; gather: plant gatherers added): what the kernel does itself, never an option for the player; BUG-042:
   -- drink_low (drink = days; block: still, brew, unvalidated, plants, barrels, brewer; auto: brew, office, barrels,

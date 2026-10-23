@@ -1,5 +1,37 @@
 # CHANGELOG dfpilot
 
+## One food stockpile per quickfort call, wet wells only in the refuge rating, a reachable gather zone, the seal-first fault as an event (BUG-072 to BUG-075, DECISIONS 6, 7, 10, 11, 2026-10-23; offline, live-untested)
+- **Why (Run 11, y451 to y479, Kilrudrabed; the decisions of the dev session):** one place call with three food stockpiles
+  took 68,603 ms (BUG-039: quickfort imports the food preset per pile); seal rated the refuge by every built well while
+  readiness counted wet ones (one dry well freed Tiefe+ from the 7-day window); the temporary gather zone covered a square
+  around the fort, so 46 of its GatherPlants jobs could not be reached; a fault inside the seal-first count was a kern.log
+  error line only.
+- **What changed:**
+  - **BUG-072** `runner.lua`: a `place` chunk with two or more food cells (key with `f`) is applied as one quickfort call per
+    food cell, one per slice, the cells between them together, in the document's order (`m.runner p.<id>.pc`); a pile whose
+    name stands on its corner tiles is not placed again; a chunk with one food cell goes whole (stockroom without a still,
+    fortcore, refuge_drink). Every place call with food logs its ms and the world's creature raws. A cheaper form of one
+    pile is not decided offline (bugs/BUG-072).
+  - **BUG-073** `seal.lua`: the burrow audit counts the wells water calls wet (`wet_wells`) as the refuge's drink, the built
+    wells only while water is silent; `refuge_drink().wet` and the WET/window rules follow; REFUGE_FAIL says `1 well, none
+    wet`. The BUG-040 test that pinned the old rating is updated.
+  - **BUG-074** `runner.lua`: the gather zone is cut to the walk group most citizens stand on (rectangles, `gather_rects` 60,
+    levels chosen by reachable open tiles); the log names the tiles left out; a zone of an older kernel is redrawn once;
+    the group unknown: the whole square as before.
+  - **BUG-075** `runner.lua`: the seal-first fault raises KERN_FAULT (A, module runner, `backoff_s` 0) once per distinct
+    message (util/cadence); KERN_FAULT `by` is `any` (schema.py, contract.lua); CONTRACTS §12/§7/`refuge_drink`, RULES §7
+    KERN_FAULT row (in place), DESIGN (refuge rating, gather zone) updated; digest regenerated.
+- Tests (each new one fails on f17e2b3): `tests/lua/test_runner_c4.lua` (new), `tests/lua/test_seal_refuge.lua` (BUG-073).
+- **Live check (Run 11/12):** after `git pull` and `dfhack-run dfllm reload`:
+  - the next stockroom/refuge_drink/fortcore place stage: kern.log `<proj> <stage> chunk N call k/n: quickfort place with 1
+    food pile took MS ms (R creature raws)` once per pile, no step of 60 s (`KERNEL_SLOW`/frame gap); with a still, three calls;
+  - below 30 food days in spring to autumn: `gather zone at X,Y on z Z: N tiles in K rects on the citizens' walk group G,
+    M tiles of the SxS square left out`; `inspect workload`: fewer unreachable GatherPlants than 46; an older zone: `gather
+    zone of an older kernel (the whole square) removed`;
+  - a refuge with a dry well: `inspect refuge` `wet` false, `dfllm status` `refuge_dry` and the alert agree; REFUGE_FAIL
+    `drink 0<N, 1 well, none wet`;
+  - a seal-first fault (none expected): events.jsonl KERN_FAULT with `module runner`, `backoff_s 0`, and `dfllm doctor`.
+
 ## Patients no longer die of thirst beside enough water: caregivers scale, PATIENT_DYING; vacant offices are filled and named; appoint and squad verbs; zoneless hospital locations; zone.place and bp sites around a position (BUG-054, BUG-055, BUG-056, FR-78, 2026-10-23; offline, live-untested)
 - **Why (Runs 11 and 14, notes 11, 18, 24, 25, 61, 64, 65 of bugs/RUN11-offene-bugs-und-FR.md):** Run 11 y497: 3-5 patients at thirst
   30,000-40,293 with 24-27 of 62 buckets free and 4 caregivers, `patient_thirst` said "water, buckets and caregivers present", five
@@ -274,7 +306,7 @@
     (kern.log `details: ...`), `inspect workload key=details`.
   - FR-72: `inspect workload` says `N with no labor holder for the open jobs: GatherPlants 60 need HERBALIST`; new `act.plant_ungather`
     withdraws GatherPlants designations off the walk group (two daily passes, no raised gate bridge) and unworked for 30 days (not
-    below the food pre-alarm line), at most 200 a day; the runner's `dfllm-gather` zone shrinks to the walk group (`snapshot.far`).
+    below the food pre-alarm line), at most 200 a day; the runner's `dfllm-gather` zone is cut to rectangles on the walk group (BUG-074 replaced the first shrink-by-`snapshot.far` variant of this entry).
   - BUG-058: `T.slotnow` fills the running season's slots right after the census (edible crops first at food low), the plot's tile
     (`snapshot.plot_under`) decides surface or underground and replaces wrong-kind crops; autofarm is disabled below 30 food days or
     at the first slot it emptied, enabled again from 90 days after 14 (`farms.autofarm` auto | off | keep; `disable autofarm`

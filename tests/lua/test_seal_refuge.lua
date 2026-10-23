@@ -487,8 +487,8 @@ end)
 
 ---------------------------------------------------------------- BUG-040 (Run 11, y453)
 T.test('BUG-040 (Run 11 y453: Tiefe+ drink 0, wells 1, the alert on the dry Tiefe+): refuge_drink and inspect say ' ..
-       'how many of its wells the water module calls wet (the alert\'s own rule still counts every built well: it ' ..
-       'holds a dry refuge until the citizens get thirsty, BUG-031 (b)), where the refuge lies and how far its nearest ' ..
+       'how many of its wells the water module calls wet (BUG-073: the alert\'s rating counts the wet ones too), where ' ..
+       'the refuge lies and how far its nearest ' ..
        'tile is from the nearest accepted water (state alert.ref box/wd/ws)', function()
   local wf
   wf = SW.fake('water', {
@@ -506,7 +506,8 @@ T.test('BUG-040 (Run 11 y453: Tiefe+ drink 0, wells 1, the alert on the dry Tief
   local t = d.burrows['Tiefe+']
   T.eq({t.wells, t.wwet}, {1, 0})
   local rd = select(2, W.K.call('seal', 'refuge_drink'))
-  T.eq({rd.wells, rd.wwet, rd.wet}, {1, 0, true}, 'old code: no wwet')
+  -- BUG-073: the rating follows readiness (a dry well is no drink); it was {1, 0, true}, every built well counted
+  T.eq({rd.wells, rd.wwet, rd.wet}, {1, 0, false}, 'old code: no wwet')
   T.eq(rd.box, {5, 5, 5, 8, 8, 8})
   T.eq({rd.near.d, rd.near.src}, {4, {12, 6, 9}})
   T.eq({t.box, t.near.d}, {{5, 5, 5, 8, 8, 8}, 4})
@@ -521,7 +522,65 @@ T.test('BUG-040 (Run 11 y453: Tiefe+ drink 0, wells 1, the alert on the dry Tief
   -- no water module (an older kernel, water backed off): not known
   local W2 = fort{door = true, well = true}
   rd = select(2, W2.K.call('seal', 'refuge_drink'))
-  T.eq({rd.wells, rd.wwet, rd.wet, rd.near}, {1, nil, true, nil})
+  T.eq({rd.wells, rd.wwet, rd.wet, rd.near}, {1, nil, true, nil}, 'water silent: the built wells count, as before')
+end)
+
+---------------------------------------------------------------- BUG-073 (DECISIONS 6)
+T.test('BUG-073 (DECISIONS 6; Run 11 y453: Tiefe+ with one dry well): the alert rates the refuge by its WET wells, as ' ..
+       'readiness does: a dry well frees nobody from the breach_days window (old: wet = true, Tiefe+ taken at the WET ' ..
+       'level for ever while readiness said refuge_dry), a wet one does; REFUGE_FAIL names the dry well', function()
+  local wf
+  wf = SW.fake('water', {
+    wet_wells = function(K, name) if name == 'Tiefe+' then return wf.wet, 1 end end,
+    state = function(K)
+      return {water = {patients = 0, thirst_max = 0, hosp_ok = 0, refuge_ok = wf.wet, buckets_free = 0, hosp = 0, src = {}}}
+    end})
+  wf.wet = 0
+  local W = fort{door = true, well = true, mods = {wf}}
+  W.state()
+  W.set_mode('SIEGE')
+  inspect(W, 'refuge', 'refresh')
+  W.run(1200, {skip = 9})
+  local rd = select(2, W.K.call('seal', 'refuge_drink'))
+  T.eq({rd.wells, rd.wwet, rd.wet}, {1, 0, false}, 'a dry well is no drink')
+  local _, pick, note, short = W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')
+  T.eq({pick, short}, {'Kern+', 'REFUGE_FAIL Tiefe+'}, note)
+  T.ok(note:find('REFUGE_FAIL Tiefe+: no drink (drink 0<3, 1 well, none wet)', 1, true), note)
+  T.eq(inspect(W, 'refuge').bsince, nil, 'no breach days: the refuge is not taken')
+  -- water calls the well wet: the refuge has its drink again
+  wf.wet = 1
+  W.state()
+  inspect(W, 'refuge', 'refresh')
+  W.run(1200, {skip = 9})
+  rd = select(2, W.K.call('seal', 'refuge_drink'))
+  T.eq({rd.wells, rd.wwet, rd.wet}, {1, 1, true})
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')), 'Tiefe+', 'a wet well is a drink')
+  -- the window (an entrance open into Kern+, the BUG-031 episode): the days without counts end after breach_days; a
+  -- dry well does not free the refuge from them (old: rwet kept Tiefe+ for ever), a wet one does
+  local function episode(wet)
+    local wf2
+    wf2 = SW.fake('water', {
+      wet_wells = function(K, name) if name == 'Tiefe+' then return wf2.wet, 1 end end,
+      state = function(K)
+        return {water = {patients = 0, thirst_max = 0, hosp_ok = 0, refuge_ok = wf2.wet, buckets_free = 0, hosp = 0, src = {}}}
+      end})
+    wf2.wet = wet
+    local W2 = fort{well = true, mods = {wf2}}
+    W2.state()
+    T.eq(select(2, W2.K.call('seal', 'alert_burrow', 'PEACE', 'Kern+', true)), 'Tiefe+', 'a lockdown opens the window')
+    W2.run(1200, {skip = 9})
+    W2.run(12000, {skip = 9})
+    W2.set_mode('SIEGE')
+    T.eq(select(2, W2.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+')), 'Tiefe+', 'a new episode, a new window')
+    W2.run(9600, {skip = 9})                                                      -- eight days of siege
+    local _, pick, note, _, flee = W2.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+')
+    return pick, flee, note
+  end
+  local pick3, flee3, note3 = episode(0)
+  T.eq({pick3, flee3}, {nil, true}, 'a dry well: the days are spent, the citizens flee on their own')
+  T.ok(note3:find('no separated burrow (Tiefe+: the 7 days without counts are spent', 1, true), note3)
+  local pick4, flee4 = episode(1)
+  T.eq({pick4, flee4}, {'Tiefe+', false}, 'a wet well: the refuge holds past the days')
 end)
 
 ---------------------------------------------------------------- FR-69 (Run 11, y477)

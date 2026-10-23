@@ -72,7 +72,7 @@ Module: `lua/dfllm/economy.lua` (tools, T.starve, M.gather_low, fish_want), `lua
 - **Gather zone and withdrawal** (FR-72, DECISIONS 10): `act.plant_ungather` withdraws GatherPlants designations seen off the
   citizens' walk group in two daily passes in a row (not while a gate bridge is not down, not outside PEACE/RECOVERY) and every
   sampled one when no GatherPlants job had a worker for `stale_days` 30 (not below the food pre-alarm line), at most
-  `unmark_max` 200 a day; the runner's temporary `dfllm-gather` zone shrinks to the walk group (`snapshot.far`).
+  `unmark_max` 200 a day; the runner's temporary `dfllm-gather` zone is cut to rectangles on the walk group (BUG-074, package C4 replaced the shrink-by-`snapshot.far` first built here).
 - Contracts and docs: CONTRACTS §7 (`inspect` key, `runner.lost`, `snapshot.plot_under`, `act.plant_ungather`), §9.17
   (`economy.cover`, `economy.farms`), WORK_DETAIL `why` `cover` / `cover idle`.
 

@@ -591,10 +591,15 @@ local function burrow_audit(K, ncit, a)
   if not a.exists then why[1] = 'missing'
   else
     if a.tiles < need.tiles then why[#why + 1] = string.format('%d tiles<%d', a.tiles, need.tiles) end
-    -- BUG-040: a built well still counts here even when water calls it dry (a.wwet): the civ alert keeps a dry
-    -- refuge until its citizens get thirsty (BUG-031 (b), M.dry) instead of only the 7 breach days; the reports
-    -- (refuge_drink.wwet, readiness refuge_dry by water's refuge_ok) say the truth
-    if a.drink < need.drink and a.wells == 0 then why[#why + 1] = string.format('drink %d<%d', a.drink, need.drink) end
+    -- BUG-073 (DECISIONS 6; BUG-040 had counted every built well): only a well water calls wet counts (a.wwet, water's
+    -- wet_wells, the helper readiness' refuge_ok is built from), so one dry well no longer frees Tiefe+ from the
+    -- breach_days window while readiness says refuge_dry. wwet nil = water has not said (no module, no run yet, no
+    -- burrow of that name): the built wells count, as before, so a boot never reads a dry refuge from silence
+    local wells = a.wwet ~= nil and a.wwet or a.wells
+    if a.drink < need.drink and wells == 0 then
+      why[#why + 1] = string.format('drink %d<%d%s', a.drink, need.drink,
+                                    a.wells > wells and string.format(' (%d well%s, none wet)', a.wells, a.wells == 1 and '' or 's') or '')
+    end
     if a.food < need.food then why[#why + 1] = string.format('food %d<%d', a.food, need.food) end
     a.sup = #why == 0
     if a.beds < need.beds then
@@ -605,7 +610,7 @@ local function burrow_audit(K, ncit, a)
   a.ok = a.sup and not a.bed_short                       -- the counts in full (the rating adds the separation)
   a.room = a.exists and a.tiles >= need.tiles            -- BUG-011: big enough to be kept for a lockdown
   -- Run 11 (siege 8: Tiefe+ had no drink): the SIEGE level's drink rule alone (drink >= citizens or a well)
-  a.wet = a.exists == true and (a.drink >= need.drink or a.wells > 0)
+  a.wet = a.exists == true and (a.drink >= need.drink or (a.wwet ~= nil and a.wwet or a.wells) > 0)
   a.dneed = need.drink
   a.why = table.concat(why, ', ')
   return a, need, pct
@@ -3051,7 +3056,9 @@ local function rate(K, au, name, lvl, t)
   if lvl == 'BREACH' or lvl == 'DEAD' or lvl == 'WET' then
     if a.tiles < CFG.breach_tiles then return false, string.format('%d tiles<%d', a.tiles, CFG.breach_tiles) end
     if lvl == 'WET' and not a.wet then
-      return false, string.format('no drink (drink %d<%d, no well)', int(a.drink) or 0, int(a.dneed) or 0)
+      local nw = int(a.wells) or 0        -- BUG-073: built wells that are dry are named, not "no well"
+      return false, string.format('no drink (drink %d<%d, %s)', int(a.drink) or 0, int(a.dneed) or 0,
+                                  nw > 0 and string.format('%d well%s, none wet', nw, nw == 1 and '' or 's') or 'no well')
     end
     return true
   end
@@ -3361,7 +3368,7 @@ end
 
 -- public (Run 11, readiness: siege 8's Tiefe+ had no drink): the refuge burrow's drink by the last audit: {name,
 -- exists, drink (units: drink items, FR-59), need (citizens x drink_per_cit), wells (built wells on it), wet (drink >= need
--- or a well: the SIEGE level's drink rule)}; nil before the first audit. FR-69: store = its drink store (drink_store:
+-- or a wet well, BUG-073: the SIEGE level's drink rule)}; nil before the first audit. FR-69: store = its drink store (drink_store:
 -- {n, tiles, drink, at}; nil none)
 function M.refuge_drink(K)
   local au = mem and mem.audit and mem.audit.burrows
@@ -3371,8 +3378,8 @@ function M.refuge_drink(K)
   if not a then return nil end
   return {name = refuge, exists = a.exists == true, drink = int(a.drink) or 0, need = int(a.dneed) or 0,
           wells = int(a.wells) or 0, wet = a.wet == true,
-          -- BUG-040: the wells water calls wet (nil unknown; `wet` above still counts every built well, the alert's
-          -- rule), the tiles' bbox, the tile nearest to an accepted source
+          -- BUG-040: the wells water calls wet (nil unknown: `wet` above then counts the built wells; BUG-073: it counts
+          -- the wet ones otherwise, readiness' rule), the tiles' bbox, the tile nearest to an accepted source
           wwet = a.wwet, box = a.box, near = a.near, store = a.store}
 end
 

@@ -441,7 +441,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "BREACH": ("A", "siege", _d("why:s", "bridge:s")),
     "DEATHS_3PLUS": ("A", "care", _d(opt="n:i ids:ia causes:sa")),
     "DRILL_FAIL": ("A", "drill", _d(opt="streak:i fails:sa")),
-    "KERN_FAULT": ("A", "kern", _d("module:s", "err:s n:i backoff_s:i")),
+    "KERN_FAULT": ("A", "any", _d("module:s", "err:s n:i backoff_s:i")),     # BUG-075: the runner too (backoff_s 0)
     "PERF_DEGRADED": ("A", "perf", _d(opt="tps:i base:i pct:i why:s")),
     # Run 11: food_low/famine add food (days), block (blocker ids: fishery, kitchen, cook, fish_zone, hunt, farms,
     # butcher, gather) and opts (the options, the blockers' first); BUG-038: auto (what the kernel does itself:

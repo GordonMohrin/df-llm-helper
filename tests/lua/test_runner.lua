@@ -1186,18 +1186,6 @@ T.test('live L6: food < 30 days (not in winter) -> one temporary gather zone nea
   H.runs(W3, 1)
   T.eq(zones(W3), {{'g{name=dfllm-gather}(20x20)', 90, 90, 63}, {'g{name=dfllm-gather}(20x20)', 90, 90, 62}},
        'two levels of 20x20 = 800 tiles')
-  -- DECISIONS 10: the zone covers the citizens' walk group only. Open tiles snapshot.far puts on another group shrink the
-  -- square (by 6 a step, not below 10); right at the anchor: no zone, said once
-  local W4 = world('gath4', 0)
-  W4.snap.far = function(K, x, y, z) return x >= 107 end
-  H.runs(W4, 1)
-  T.eq(zones(W4), {{'g{name=dfllm-gather}(10x10)', 95, 95, 62}}, 'shrunk from 28 until x 107 lies outside')
-  T.ok(logged(W4, 'warn', 'shrunk from 28'), 'logged')
-  local W5 = world('gath5', 0)
-  W5.snap.far = function(K, x, y, z) return x >= 103 end
-  H.runs(W5, 6)
-  T.eq(zones(W5), {}, 'off the walk group right beside the anchor: no zone')
-  T.ok(logged(W5, 'warn', 'lie off the citizens'), 'said')
 end)
 
 T.test('merge_manifest: maps per key, id/pos lists per entry, plain lists appended once', function()
