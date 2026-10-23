@@ -367,7 +367,7 @@ T.test('BUG-063: from 40,000 a one-barrel drink stockpile is queued beside the c
   end
 end)
 
-T.test('BUG-063: no nook in a fight; a nook only beside a claimed workshop; no free floor is said', function()
+T.test('BUG-063: no nook in a fight; a nook only beside a claimed workshop; no tile is said (BUG-102 counts)', function()
   local W = nook_world{mode = 'SIEGE'}
   moody(W, 2, 'Fey', 41000, 0)
   W.run(1)
@@ -380,7 +380,7 @@ T.test('BUG-063: no nook in a fight; a nook only beside a claimed workshop; no f
   local W3, _ = CW.world{cit = 6, runner = true, tile = function() return {c = '#', dig = '', bld = ''} end}
   moody(W3, 2, 'Fey', 41000, 0)
   W3.run(1)
-  T.ok(risks(W3, 'thirst')[1].msg:find('no free floor within 3 tiles', 1, true), risks(W3, 'thirst')[1].msg)
+  T.ok(risks(W3, 'thirst')[1].msg:find('no nook within 3: 72 wrong shape', 1, true), risks(W3, 'thirst')[1].msg)
 end)
 
 ---------------------------------------------------------------- BUG-064: toppled by

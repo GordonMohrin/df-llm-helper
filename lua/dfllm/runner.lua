@@ -1601,6 +1601,15 @@ local function apply(K, P, st, R)
   end
   local bad = int(stats.invalid_keys) or 0
   if bad > 0 then K.log('warn', '%s %s chunk %d: %d invalid quickfort keys', P.id, st.label, P.chunk, bad) end
+  if P.tpl == 'mood_drink' and st.mode == 'place' then    -- BUG-102: quickfort's "Stockpile tiles skipped (tile occupied)"
+    local des, occ = int(stats.place_designated), int(stats.place_occupied) or 0
+    local c = ch.cells[1]
+    if c and (occ > 0 or des == 0) then
+      P.refused = string.format('%d,%d,%d', ch.pos[1] + c[1], ch.pos[2] + c[2], ch.pos[3] + c[3])
+      K.log('warn', '%s mood drink nook refused by quickfort at %s (%d tiles occupied, %d stockpiles designated)', P.id,
+            P.refused, occ, des or -1)
+    end
+  end
   if st.mode == 'dig' then                  -- tiles quickfort did not designate (dig.lua:829, 862, 867)
     local oob, inv, eng = int(stats.out_of_bounds) or 0, int(stats.dig_invalid_tiles) or 0,
                           int(stats.dig_protected_engraving) or 0
@@ -1851,6 +1860,7 @@ local function finish(K, P, d)
   S.rt.p[P.id] = nil
   forget(P.id)
   K.emit('PROJECT_DONE', 'B', trunc(P.id .. ' (' .. P.tpl .. ') done' .. (wn and ('; ' .. wn) or '') ..
+                                    (P.refused and ('; refused by quickfort at ' .. P.refused .. ' (tile occupied)') or '') ..
                                     (pre and '' or ('; stage ' .. (first - 1) .. ' never ran: not counted')), 200),
          {proj = P.id, tpl = P.tpl, walled = wl, pre = (not pre) and (first - 1) or nil})
   K.log('info', '%s (%s) done', P.id, P.tpl)  -- BUG-039: kern.log names every project that leaves the open list
@@ -4443,6 +4453,17 @@ function M.mooddrink(K, tile, take, why)
   save(K)
   K.log('info', 'mood drink nook %s queued at %d,%d,%d (%s)', id, x, y, z, trunc(why, 80))
   return true, id
+end
+
+-- public (BUG-102, care's drink nook): what became of the mood_drink project `id`: 'pending' (not finished), 'refused'
+-- (finished, but quickfort designated no stockpile: second value 'x,y,z' of the tile), 'placed' (finished, or the fake
+-- quickfort answered no place stats); nil when the project is not on the list (pruned after done_keep, or unknown)
+function M.nook_state(K, id)
+  local P = type(id) == 'string' and find(id) or nil
+  if not P then return nil end
+  if P.done ~= 1 then return 'pending' end
+  if P.refused then return 'refused', P.refused end
+  return 'placed'
 end
 
 -- Run 11: explore shafts open to a cavern whose top wall does not stand yet (readiness keeps R0 `caverns` for them,

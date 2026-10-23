@@ -504,7 +504,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # none), pond (zone id), src/d (the nearest accepted water to carry from, tiles)
     "CISTERN_DRY": ("B", "water", _d("room:s days:i fill:s", "proj:s well:i pos:p pond:i src:p d:i")),
     # BUG-063: ws = the workshop type the mood claimed (-> MOOD_CRITICAL: pos = its first tile, name = the dwarf, nook = the
-    # drink stockpile the kernel queued beside it or why none)
+    # drink stockpile the kernel queued beside it or why none). BUG-102 / FR-82: why none is 'no nook within 6: 9 occupied,
+    # 4 unreachable, 2 wrong shape, 3 too far' (<= 80 bytes; the radius is the widest step searched), a nook past the normal
+    # radius ends 'r6', one quickfort refused says 'quickfort refused the drink nook at x,y,z (tile occupied)'
     # K3 (BUG-100): slots = one text per open slot of the mood job, 'blocks(metal) x2: none in the fort [0/0/0 of 225]' (slot, count,
     # blocker: none in the fort | none free | none reachable | enough exist; [in the fort/free/reachable of every item of the type])
     "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i nosrc:sa route:s ws:s slots:sa")),

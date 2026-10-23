@@ -1,5 +1,28 @@
 # CHANGELOG dfpilot
 
+## L1: the drink nook says why it is refused, judges a tile like quickfort, skips a tile quickfort refuses and widens for a critical mood (BUG-102, FR-82, 2026-10-23, offline, live-untested)
+- **Why:** Run 14 note 73: a strange-mood dwarf stood at thirst 64,976/75,000 with `no free floor within 3 tiles of the workshop`. By-hand
+  reads showed free floor; quickfort then skipped the three nearest tiles as occupied and took tiles 4-5 further out. The kernel's
+  tile check ignored items, plants, planned occupancy and the shapes place mode refuses, never read quickfort's answer for a nook
+  (a refused nook counted as standing for the rest of the mood), gave no reason, and never searched beyond 3 tiles.
+- **What changed (care.lua, runner.lua, snapshot.lua; bugs/BUG-102, FR-82):** a refusal is `no nook within 6: 9 occupied, 4 unreachable,
+  2 wrong shape, 3 too far` (<= 80 bytes, logged once per reason and unit; the breakdown by building / zone / designation / plant /
+  item is in kern.log). A tile must be open floor of a shape place mode takes, with building occupancy 0 (`snapshot.tile` now returns
+  `shape`, `plant`, `occ`), no building, zone, stockpile, designation, plant or floor item (new `snapshot.item_tiles`), outside caverns,
+  and reachable from the workshop's first tile or from the dwarf. A `mood_drink` project quickfort skipped (`place_occupied`,
+  `place_designated` 0) is recorded on the project (`runner.nook_state`), care drops the nook, remembers the tile and queues the next
+  site at once, at most `mood_nook_tries` (4) per unit and game day. A critical mood (thirst past `mood_crit`, hunger past
+  `mood_crit_hunger`) widens the search 3 -> 6 -> 9 (`mood_nook_r`, `mood_nook_step`, `mood_nook_rmax`; 0 or <= r: never), also inside
+  the hour-long retry window; a risk does not. New config keys `mood_nook_r`, `mood_nook_rmax`, `mood_nook_step`, `mood_nook_probes`,
+  `mood_nook_tries` (baseline.json, `fairplay.CARE_LIM`, CONTRACTS). No new event or field: `MOOD_RISK` / `MOOD_CRITICAL.nook` carry the
+  text. Siege, breach, alert: still no nook; a relief that worked is unchanged.
+- **Tests:** tests/lua/test_care_nook.lua (15), test_runner_nook.lua (2), test_snapshot_nook.lua (2), tests/test_l1_nook.py (3); all fail
+  on 3045b94; one assertion of test_care_b3.lua follows the new wording.
+- **Live check:** at the next strange mood with thirst or hunger past 40,000 read `kern.log mood nook:` and the nook text of
+  MOOD_RISK/MOOD_CRITICAL. A refusal's counts say which class held the tiles; `refused by quickfort at x,y,z` names a tile the kernel
+  judged free that quickfort did not (then dump, read-only: tiletype shape name, `occupancy.building`, `findAtTile`, the block's items
+  at that position, `getWalkableGroup` of the workshop's first tile and of a tile beside it; bugs/BUG-102 "Not decided offline").
+
 ## K3: the mood report names the slot, its filter, the counts and the real blocker (BUG-100, 2026-10-23, offline, live-untested)
 - **Why:** Run 14 y587 (note 72): a Weaponsmith's strange mood died of thirst after 55 game days of `blocks: no source in the fort`
   while 225 blocks stood in the stock. The text counted items at the job_item's own filter (the veto of `dfhack.job.isSuitableItem` /
