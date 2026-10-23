@@ -286,8 +286,9 @@ local function phase_units(K, c, r)
         local x, y, z = dfhack.units.getPosition(u)
         if x then r.home[#r.home + 1] = {x = x, y = y, z = z} end
       end
-      -- BUG-054: who the kernel could ask to carry water (not a caregiver yet; a sample of at most pool_max)
-      if not is_carer and #r.pool < M.POOL_MAX and M.carer_ok(u) then
+      -- BUG-054: who the kernel could ask to carry water (not a caregiver yet; at most POOL_MAX; M.carers asks
+      -- M.carer_ok only for the ones it would pick, and only when it needs more caregivers)
+      if not is_carer and #r.pool < M.POOL_MAX then
         local x, y, z = dfhack.units.getPosition(u)
         if x then r.pool[#r.pool + 1] = {id = id, x = x, y = y, z = z, idle = M.idle(u)} end
       end
@@ -1110,12 +1111,18 @@ function M.carers(K, c, r, p, now, over)
   end
   local out = {have = have, want = want, idle = r.carers_idle, added = {}, dropped = {}}
   if np > 0 then p.cw_t = now end
+  local mine = 0
   for sid in pairs(p.cw) do                                       -- a unit that died or left is forgotten
     local u = df.unit.find(math.tointeger(tonumber(sid)) or -1)
-    if not u or dfhack.units.isDead(u) then p.cw[sid] = nil end
+    if not u or dfhack.units.isDead(u) then p.cw[sid] = nil else mine = mine + 1 end
   end
+  out.mine = mine
   if not M.can('work_detail') then out.err = 'water may not change work details'; return out end
-  if have < want and now >= (math.tointeger(p.cw_off) or 0) then
+  if have < want and mine >= c.carers_max then
+    -- the kernel already put carers_max citizens into the detail and they are not caregivers: its labors do not grant
+    -- FEED_WATER_CIVILIANS (or the game took them off); more members would change nothing
+    out.err = string.format('%d citizens added to %s hold no FEED_WATER_CIVILIANS labor', mine, M.CARER_DETAIL)
+  elseif have < want and now >= (math.tointeger(p.cw_off) or 0) then
     local ref = r.hosp[1] or (r.patients[1] and {x1 = r.patients[1].x or 0, y1 = r.patients[1].y or 0,
                                                  x2 = r.patients[1].x or 0, y2 = r.patients[1].y or 0,
                                                  z = r.patients[1].z or 0})
@@ -1127,15 +1134,18 @@ function M.carers(K, c, r, p, now, over)
       return a.cd.id < b.cd.id
     end)
     for _, e in ipairs(pool) do
-      if #out.added >= c.carers_per_run or have + #out.added >= want then break end
-      local ok, res = K.act.work_detail(M.CARER_DETAIL, e.cd.id, true, {select = true})
-      if ok then
-        out.added[#out.added + 1] = e.cd.id
-        p.cw[fmt(e.cd.id)] = now
-      else
-        out.err = tostring(res)
-        if out.err:find('no work detail', 1, true) then p.cw_off = now + NO_WAIT end
-        break                                                    -- an ACT_FAIL (B) names it; the next run tries again
+      if #out.added >= c.carers_per_run or have + #out.added >= want or mine + #out.added >= c.carers_max then break end
+      local cu = df.unit.find(e.cd.id)
+      if cu and not p.cw[fmt(e.cd.id)] and M.carer_ok(cu) then      -- (one of ours without the labor: the next one)
+        local ok, res = K.act.work_detail(M.CARER_DETAIL, e.cd.id, true, {select = true})
+        if ok then
+          out.added[#out.added + 1] = e.cd.id
+          p.cw[fmt(e.cd.id)] = now
+        else
+          out.err = tostring(res)
+          if out.err:find('no work detail', 1, true) then p.cw_off = now + NO_WAIT end
+          break                                                  -- an ACT_FAIL (B) names it; the next run tries again
+        end
       end
     end
   elseif np == 0 and next(p.cw) and now - (math.tointeger(p.cw_t) or now) >= c.carers_hold_days * DAY then
@@ -1313,7 +1323,12 @@ local function finish(K, c, r, p)
     p.hosp = p.hosp or now
     local pids, toks = {}, {}
     for i, pt in ipairs(r.patients) do pids[i] = pt.id end
-    for i, cs in ipairs(cause) do toks[i] = (cs:gsub('%d+', 'N')) end      -- a distance is no new cause
+    for i, cs in ipairs(cause) do
+      local t = cs:gsub('%d+', 'N')                                        -- a distance is no new cause
+      if t:find('^caregivers short') then t = 'caregivers short'           -- BUG-054: nor is how many were added now
+      elseif t:find('^caregivers raised') then t = 'caregivers raised' end
+      toks[i] = t
+    end
     if planned then toks[#toks + 1] = 'planned' end
     local last = p.hosp_t and {t = p.hosp_t, w = p.hosp_w, ids = p.hosp_ids or {}, toks = p.hosp_toks or {}} or nil
     if woke then
@@ -1386,8 +1401,6 @@ local function finish(K, c, r, p)
                ordered = ordered, missing = math.max(0, missing), carers = after, gate = gate and 1 or 0,
                hosp = nh, give = r.give, removed = removed and #removed.zones or 0, src = srcs, src_l = slbl,
                rwells = rwells, rwet = rwet, hosp_out = ho.n}
-  local mine = 0
-  for _ in pairs(type(p.cw) == 'table' and p.cw or {}) do mine = mine + 1 end
   -- BUG-056 (Run 11: 8 HOSPITAL locations stayed after their zones were deleted): a hospital is a location with a zone;
   -- every count here (r.hosp, hosp, hosp_out, the dry gate, the removal) goes by zones, a zoneless location is only counted
   local live_locs, nlive = {}, 0
@@ -1402,7 +1415,7 @@ local function finish(K, c, r, p)
             out.locs.stale, nlive)
     end
   end
-  out.cw = {have = after, want = cs.want, idle = cs.idle, give = r.give, mine = mine, err = cs.err}   -- BUG-054, inspect
+  out.cw = {have = after, want = cs.want, idle = cs.idle, give = r.give, mine = cs.mine, err = cs.err}   -- BUG-054, inspect
   local prev = st.out or {}
   if prev.hosp_ok ~= out.hosp_ok or prev.refuge_ok ~= out.refuge_ok or prev.patients ~= out.patients
      or prev.hosp ~= out.hosp or prev.rwells ~= out.rwells or prev.hosp_out ~= out.hosp_out or fixed > 0

@@ -201,6 +201,8 @@ C.VERBS = {
   ['squad.leader'] = {mod = 'military', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
   ['squad.add'] = {mod = 'military', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
   ['squad.uniform'] = {mod = 'military', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
+  -- FR-78 (Run 14 note 65): a civzone (pen, pit, pond, sand, clay, fishing, meeting) in a box, quickfort zone mode
+  ['zone.place'] = {mod = 'runner', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
 }
 -- Verbs accepted only from these `by` origins (§9.5). `by` is a label, not authentication: the
 -- hook (WP4) keeps the LLM from writing these origins; this check is the second line.
@@ -216,6 +218,7 @@ C.ACT = {
   squad_unequip = {'military'}, squad_release = {'military'}, animal_slaughter = {'economy'}, zone_remove = {'runner'}, manager_office = {'economy'}, pond_remove = {'water'},
   hospital_remove = {'water'},                     -- BUG-034: the zones of a dry hospital while a patient is thirsty
   sand_zone = {'economy'}, fish_zone = {'economy'},
+  zone_place = {'runner'},                         -- FR-78: the verb zone.place (zonelib)
   pull = {'gate'}, cancel_own_lever_job = {'gate'}, link_lever = {'gate'}, burrow_units = {'gate'},
   door_forbid = {'reflex'},
   burrow_tiles = {'seal'},

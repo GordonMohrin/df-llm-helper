@@ -1519,7 +1519,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if ok else 1
     if argv[:1] == ["--config"]:
         errs = (fairplay.decision_errors() + fairplay.reflex_errors() + fairplay.water_errors() + fairplay.runner_errors()
-                + fairplay.economy_errors() + fairplay.snapshot_errors() + fairplay.offices_errors())
+                + fairplay.economy_errors() + fairplay.snapshot_errors() + fairplay.offices_errors()
+                + fairplay.zones_errors())
         try:
             fairplay.allowlist()
         except Exception as e:                               # noqa: BLE001 - report any invalid file

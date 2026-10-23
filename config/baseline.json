@@ -257,6 +257,7 @@
  },
  "snapshot": {"max_tiles": 400000},
  "offices": {"blocker_days": 7},
+ "zones": {"max_tiles": 400},
  "reserve": {
   "from_phase": "P1",
   "share": {"boulders": 0.25, "logs": 0.25}, "share_min": 5,

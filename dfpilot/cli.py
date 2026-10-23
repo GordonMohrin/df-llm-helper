@@ -34,6 +34,10 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("params", nargs="*", help="template params k=v")
     p.add_argument("--site", help="preview at a ranked site label (default: at the origin)")
     p.add_argument("--fresh", action="store_true", help="sites: request a new snapshot first and wait for it")
+    p.add_argument("--near", help="sites (FR-78): x,y,z; only sites within --within tiles of it, nearest first "
+                                  "(\"beside building X\": give its position); place by the printed A<x>_<y>_<z>_<rot> label")
+    p.add_argument("--within", type=int, help="sites --near: tiles from the point (default 12)")
+    p.add_argument("--at", help="sites (FR-78): x,y,z; only the site anchored exactly there, else why not")
     p.add_argument("--timeout", type=float, default=60.0)
     doctor.add_parser(sub)
     save.add_parser(sub)
@@ -142,14 +146,20 @@ def run_bp(args, save_dir: Path | None) -> int:
             if snap is None:
                 print(f"no snapshot {cid} within {args.timeout:.0f}s")
                 return 3
-        sites, snap_id, ranked = free_sites(save_dir, args.tpl, params, snap)
-        print(f"free sites for {args.tpl}{fmt_params(params)} on snapshot {snap_id} ({ranked} ranked; place: "
-              f"dfllm cmd bp.place tpl={args.tpl} site=S1{fmt_params(params)} --by llm):")
+        where = _where(args)
+        sites, snap_id, ranked = free_sites(save_dir, args.tpl, params, snap, where=where)
+        if where:
+            print(f"free sites for {args.tpl}{fmt_params(params)} {_where_text(where)} on snapshot {snap_id} ({ranked} "
+                  f"ranked; place by the label: dfllm cmd bp.place tpl={args.tpl} site=<label>{fmt_params(params)} --by llm):")
+        else:
+            print(f"free sites for {args.tpl}{fmt_params(params)} on snapshot {snap_id} ({ranked} ranked; place: "
+                  f"dfllm cmd bp.place tpl={args.tpl} site=S1{fmt_params(params)} --by llm):")
         note = water_note(save_dir, args.tpl)
         if note:
             print(f"  {note}")
         for s in sites:
-            print(f"  {s.get('id')} anchor {s.get('anchor')} rot {s.get('rot')} score {s.get('score')}: {s.get('why', '')}")
+            lbl = f" label {s['label']}" if s.get("label") else ""
+            print(f"  {s.get('id')} anchor {s.get('anchor')} rot {s.get('rot')} score {s.get('score')}{lbl}: {s.get('why', '')}")
         if not sites:
             print("  none (taken by other projects or no valid site): try --fresh")
         return 0
@@ -157,6 +167,38 @@ def run_bp(args, save_dir: Path | None) -> int:
         print(f"bp: {e}")
         files.log_cli(save_dir, "cli", f"bp.{args.action}", {"tpl": args.tpl}, f"ERR {e}")
         return 1
+
+
+def _xyz(text: str, what: str) -> list[int]:
+    try:
+        v = [int(t) for t in text.replace(" ", "").split(",")]
+    except ValueError:
+        v = []
+    if len(v) != 3:
+        raise ValueError(f"{what} needs x,y,z (three integers), got {text!r}")
+    return v
+
+
+def _where(args) -> dict | None:
+    """FR-78: --near x,y,z [--within N] | --at x,y,z -> bp.sites.rank's near / within / at, None without them."""
+    if args.near and args.at:
+        raise ValueError("use --near or --at, not both")
+    if args.within is not None and not args.near:
+        raise ValueError("--within goes with --near")
+    if args.within is not None and args.within < 0:
+        raise ValueError("--within must be 0 or more")
+    if args.near:
+        return {"near": _xyz(args.near, "--near"), "within": args.within}
+    if args.at:
+        return {"at": _xyz(args.at, "--at")}
+    return None
+
+
+def _where_text(where: dict) -> str:
+    if where.get("at"):
+        return "at " + ",".join(str(v) for v in where["at"])
+    w = where.get("within")
+    return "within " + (str(w) if w is not None else "12") + " tiles of " + ",".join(str(v) for v in where["near"])
 
 
 def water_note(save_dir: Path, tpl: str) -> str:

@@ -118,8 +118,8 @@ helper is experimental; procedure and fair-play limits: `tools/embark/README.md`
 | Verb | Args | When |
 |---|---|---|
 | `plan.reload` | `{}` | after `plan apply` (apply sends it) |
-| `bp.place` | `{tpl, site, p?, prio?}` | place a template at a ranked site |
-| `bp.cancel` | `{proj, undo?}` | stop a project |
+| `bp.place` / `bp.cancel` | `{tpl, site, p?, prio?}` / `{proj, undo?}` | place a template at a ranked site (S1.. of `dfllm bp sites <tpl>`, or the label `A<x>_<y>_<z>_<rot>` that `bp sites <tpl> --near x,y,z [--within N]` / `--at x,y,z` prints for a spot, FR-78) / stop a project |
+| `zone.place` | `{type, bbox, name?}` | PEACE/ALERT/RECOVERY; a pen, pit, pond, sand, clay, fishing or meeting zone (type) in a one-level box, quickfort zone mode; refused on hidden, rock or water tiles, over a conflicting zone, above `zones.max_tiles`; the reply has the zone id |
 | `drill` | `{why?}` | PEACE only; the reflex acceptance test |
 | `snapshot` | `{bbox?, purpose?}` | export revealed tiles (audit runs automatically); goes ahead of the kernel's exports; a refusal names the queue; leave out `bbox` (the fort's own box; BUG-043: an explicit audit box that leaves fort pieces out fails the audit) |
 | `audit` | `bp.topo.audit` result | sent by `follow` or `dfllm audit` (they compute it), never `dfllm cmd audit` |

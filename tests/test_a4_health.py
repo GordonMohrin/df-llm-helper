@@ -3,6 +3,7 @@ appoint/squad verbs (BUG-055), abandoned hospital locations (BUG-056), the civzo
 the contracts (events, verbs, config keys), the status texts and the blueprint text; the Lua side is tests/lua."""
 import json
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,8 @@ from test_cli_status import _r0_state
 from dfpilot import brief, fairplay, files, schema, wake
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "tools"))
+import luahost  # noqa: E402
 
 
 # ---------------------------------------------------------------- BUG-054
@@ -49,6 +52,7 @@ def test_carer_config_errors_name_the_key(tmp_path):
     p.write_text(json.dumps({"v": 2, "water": {"carers_max": 99, "carers_per_patient": "many", "dying_thirst": 80000}}),
                  encoding="utf-8")
     errs = fairplay.water_errors(p)
+    assert not any("unknown key" in e for e in errs), errs
     assert any("water.carers_max" in e for e in errs)
     assert any("water.carers_per_patient" in e for e in errs)
     assert any("water.dying_thirst" in e for e in errs)
@@ -83,6 +87,7 @@ def save(tmp_path, monkeypatch):
     ("squad.uniform", {"squad": "C", "kind": "pike"}, False),
 ])
 def test_office_and_squad_verb_args(verb, args, ok):
+    assert verb in schema.VERBS, f"{verb} is no verb"
     doc = {"id": "c1", "verb": verb, "args": args, "by": schema.VERB_BY.get(verb, ["llm"])[0]}
     assert (schema.validate("inbox", doc) == []) is ok, schema.validate("inbox", doc)
 
@@ -130,3 +135,96 @@ def test_wake_hint_for_a_siege_unready_office():
     hint = wake.next_hint("SIEGE_UNREADY", {"d": {"fails": ["office"]}})
     assert "appoint" in hint and "squad.create" in hint and "offices" in hint
     assert wake.next_hint("SIEGE_UNREADY", {"d": {"fails": ["audit"]}}) != hint
+
+
+# ---------------------------------------------------------------- FR-78
+def test_bp_sites_cli_near_and_at(save, capsys):
+    """`dfllm bp sites <tpl> --near x,y,z [--within N]` / `--at x,y,z`: a spot, never cached (the S labels stay the general
+    ranking's), placed by the printed explicit-anchor label."""
+    from dfpilot import cmd
+    from dfpilot.cli import main
+    for p in cmd.bp_files(save):
+        p.unlink()
+    base = ["--runtime", str(save.parent), "bp", "sites", "tombs"]
+    assert main(base) == 0
+    plain = capsys.readouterr().out
+    cache = (save / "bp" / ".sites-tombs.json").read_bytes()
+    assert main(base + ["--near", "60,45,120", "--within", "30"]) == 0
+    out = capsys.readouterr().out
+    assert "within 30 tiles of 60,45,120" in out and "place by the label: dfllm cmd bp.place tpl=tombs site=<label>" in out
+    m = re.search(r"label (A\d+_\d+_\d+_[0-3])", out)
+    assert m, out
+    assert (save / "bp" / ".sites-tombs.json").read_bytes() == cache, "the near ranking is not cached"
+    label = m.group(1)
+    x, y, z, rot = (int(v) for v in re.match(r"A(\d+)_(\d+)_(\d+)_([0-3])", label).groups())
+    assert main(base + ["--at", f"{x},{y},{z}"]) == 0
+    assert f"label A{x}_{y}_{z}_" in capsys.readouterr().out
+    assert main(base + ["--at", "9999,9999,120"]) == 1
+    assert "is no valid anchor" in capsys.readouterr().out
+    assert main(base + ["--near", "9999,9999,120", "--within", "3"]) == 1
+    assert "no site within 3 tiles of 9999,9999,120" in capsys.readouterr().out
+    assert main(base + ["--near", "1,2"]) == 1 and "needs x,y,z" in capsys.readouterr().out
+    assert main(base + ["--near", "1,2,3", "--at", "1,2,3"]) == 1 and "not both" in capsys.readouterr().out
+    assert main(base + ["--within", "4"]) == 1 and "--within goes with --near" in capsys.readouterr().out
+    # the explicit label places it (bp.place resolves A<x>_<y>_<z>_<rot>)
+    doc = cmd.place(save, "tombs", {}, label, "t1")
+    assert doc["anchor"] == [x, y, z] and doc["rot"] == rot
+    assert plain.startswith("free sites for tombs")
+
+
+@pytest.mark.parametrize("args,ok", [
+    ({"type": "pen", "bbox": [10, 20, 5, 13, 22, 5]}, True),
+    ({"type": "pit", "bbox": [10, 20, 5, 13, 22, 5], "name": "two words"}, False),
+    ({"type": "pit", "bbox": [10, 20, 5, 13, 22, 5], "name": "Gruben-1"}, True),
+    ({"type": "pit", "bbox": [10, 20, 5, 13, 22, 5], "name": "pit_1"}, True),
+    ({"type": "pond", "bbox": [10, 20, 5, 13, 22, 5]}, True),
+    ({"type": "garden", "bbox": [10, 20, 5, 13, 22, 5]}, False),
+    ({"type": "pen"}, False),
+    ({"type": "pen", "bbox": [13, 20, 5, 10, 22, 5]}, False),
+    ({"type": "pen", "bbox": [10, 20, 5, 13, 22]}, False),
+    ({"type": "meeting", "bbox": [10, 20, 5, 13, 22, 5], "z": 5}, False),
+])
+def test_zone_place_args(args, ok):
+    assert "zone.place" in schema.VERBS
+    doc = {"id": "c1", "verb": "zone.place", "args": args, "by": "llm"}
+    assert (schema.validate("inbox", doc) == []) is ok, schema.validate("inbox", doc)
+
+
+def test_zone_place_is_a_registered_verb_outside_fights_with_its_act_and_rules_row():
+    assert schema.VERBS["zone.place"] == ("runner", ["PEACE", "ALERT", "RECOVERY"], False)
+    assert schema.ACT["zone_place"] == ["runner"]
+    text = (ROOT / "RULES.md").read_text(encoding="utf-8")
+    assert "`zone.place`" in text and "--near" in text
+    assert schema.ZONE_TYPES == ["pen", "pit", "pond", "sand", "clay", "fishing", "meeting"]
+
+
+@pytest.mark.skipif(not luahost.available(), reason="no Lua 5.3 for luahost")
+def test_zone_cells_are_valid_quickfort_zone_cells(tmp_path):
+    """The blueprint text the kernel builds (zonelib) uses only quickfort zone keys the repo knows (bp validate
+    ZONE_KEYS) and parses as a cell with an extent; the types match schema.ZONE_TYPES."""
+    import importlib
+    validate = importlib.import_module("dfpilot.bp.validate")      # (dfpilot.bp.validate the name is the function)
+    from dfpilot.bp.primitives import parse_cell
+    f = tmp_path / "probe.lua"
+    f.write_text("local Z = require('dfllm.zonelib'); for _, ty in ipairs(Z.ORDER) do "
+                 "print('cell ' .. ty .. ' ' .. Z.cell(ty, {x0 = 1, y0 = 2, x1 = 4, y1 = 3, z = 0}, 'zn')) end",
+                 encoding="utf-8")
+    r = luahost.run_file(f, [], timeout=20)
+    assert r.ok, r.out + r.err
+    cells = dict(line[5:].split(" ", 1) for line in r.out.splitlines() if line.startswith("cell "))
+    assert list(cells) == schema.ZONE_TYPES
+    for ty, text in cells.items():
+        key, props, ext, err = parse_cell(text)
+        assert err is None and ext == (4, 2) and key in validate.ZONE_KEYS and "name=zn" in props, (ty, text)
+        assert len(text) <= 64
+    assert parse_cell(cells["pond"])[1].startswith("pond=true") and "pond" not in parse_cell(cells["pit"])[1]
+
+
+def test_zones_config_is_validated(tmp_path):
+    cfg = json.loads((ROOT / "config" / "baseline.json").read_text(encoding="utf-8"))
+    assert cfg["zones"] == {"max_tiles": 400}
+    assert fairplay.zones_errors() == []
+    p = tmp_path / "baseline.json"
+    p.write_text(json.dumps({"v": 2, "zones": {"max_tiles": 0, "side": 5}}), encoding="utf-8")
+    assert fairplay.zones_errors(p) == ["config/baseline.json: zones.max_tiles: int 1..10000 expected, got 0",
+                                        "config/baseline.json: zones.side: unknown key"]

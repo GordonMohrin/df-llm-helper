@@ -172,15 +172,51 @@ def _check(rects, ax, ay, az, rot, bad, hid, mk, allow_below: bool, wet=None):
     return unknown, len(missing), (min(xs), min(ys), min(zs), max(xs), max(ys), max(zs))
 
 
+NEAR_WITHIN = 12            # FR-78: `near` keeps the sites whose footprint lies within this many tiles of the point
+
+
+def _near_point(cands: list, tpl: str, near, within: int | None, at) -> list:
+    """FR-78 (Run 14 note 65: `bp sites` ranked automatically and could not be asked for "beside building X"): the
+    candidates whose footprint lies within `within` tiles of the point `near` (Chebyshev, z included, as water.lua's
+    dist_box), nearest first (the score breaks ties); with `at` only the candidates whose anchor is that tile. ValueError
+    when none is left, naming the nearest candidate and the explicit-anchor label that places it."""
+    if at is not None:
+        pt = [int(v) for v in at]
+        out = [{**c, "_d": 0, "why": c["why"] + f", at {_pos(pt)}"} for c in cands if list(c["anchor"]) == pt]
+        if out:
+            return out
+        if not cands:
+            raise ValueError(f"{tpl}: no valid site on the snapshot")
+        c = min(cands, key=lambda c: (box_dist(pt, c["box"]), -c["score"]))
+        raise ValueError(f"{tpl}: {_pos(pt)} is no valid anchor (the footprint meets a wall, liquid or hidden rock, leaves the "
+                         f"map or is not level); the nearest valid anchor is {_pos(c['anchor'])} rot{c['rot']}, "
+                         f"{box_dist(pt, c['box'])} tiles from it: bp.place site=A{c['anchor'][0]}_{c['anchor'][1]}_"
+                         f"{c['anchor'][2]}_{c['rot']}")
+    pt = [int(v) for v in near]
+    w = NEAR_WITHIN if within is None else int(within)
+    scored = [(box_dist(pt, c["box"]), c) for c in cands]
+    out = [{**c, "_d": d, "why": c["why"] + f", {d} tiles from {_pos(pt)}"} for d, c in scored if d <= w]
+    if out:
+        return out
+    if not scored:
+        raise ValueError(f"{tpl}: no valid site on the snapshot")
+    d, c = min(scored, key=lambda t: (t[0], -t[1]["score"]))
+    raise ValueError(f"{tpl}: no site within {w} tiles of {_pos(pt)}; the nearest candidate {_pos(c['anchor'])} rot{c['rot']} is "
+                     f"{d} tiles away: --within {d} or bp.place at an explicit anchor A<x>_<y>_<z>")
+
+
 def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None = None,
-         n: int = 3, water: dict | None = None) -> list[dict]:
+         n: int = 3, water: dict | None = None, near=None, within: int | None = None, at=None) -> list[dict]:
     """Top `n` sites, best first: [{id:'S1'.., anchor:[x,y,z], rot, score:int, why:str}].
     Room templates need `manifest` (the fort manifest, `inspect manifest`) with zones.Z4.
     `water` (BUG-040, WATER_TPLS only): {src: [[x,y,z]..] accepted sources, near, lbl?: labels parallel to src,
-    refuge?: {name, box, wd, ws}}: only sites near accepted water, each with water {d, src}; None = not filtered."""
+    refuge?: {name, box, wd, ws}}: only sites near accepted water, each with water {d, src}; None = not filtered.
+    `near` (FR-78): [x, y, z], only sites whose footprint lies within `within` (default NEAR_WITHIN) tiles of it, nearest
+    first; `at`: [x, y, z], only the sites anchored exactly there (the reason when there is none). Both apply to room,
+    explore and fortcore sites; the defense builds have the one site the manifest fixes."""
     p = check_params(tpl, params)
     if tpl in defense.BUILD:
-        return _defense(snap, tpl, p, manifest)[:n]
+        return _defense(snap, tpl, p, manifest)[:n]          # one site the manifest fixes: near/at do not apply
     if tpl != "fortcore" and not ((manifest or {}).get("zones") or {}).get("Z4"):
         raise ValueError(f"{tpl}: room sites need the fort manifest with zones.Z4 (inspect manifest)")
     marks = [tuple(q) for k in MARKS for q in snap.get("marks", {}).get(k, [])]
@@ -199,7 +235,9 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
             raise ValueError(_no_store(snap, p, manifest, bad, hid, mk, wet))
     if tpl in WATER_TPLS and water is not None:
         cands = _near_water(cands, tpl, p, water)
-    cands.sort(key=lambda c: (-c["score"], c["anchor"][2], c["anchor"][1], c["anchor"][0], c["rot"]))
+    if near is not None or at is not None:                 # FR-78: a position asked for; nearest first
+        cands = _near_point(cands, tpl, near, within, at)
+    cands.sort(key=lambda c: (c.get("_d", 0), -c["score"], c["anchor"][2], c["anchor"][1], c["anchor"][0], c["rot"]))
     out: list[dict] = []
     for c in cands:
         if all(not _overlap(c["box"], o["box"]) for o in out):

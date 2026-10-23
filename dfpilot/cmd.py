@@ -170,7 +170,8 @@ def _digest(doc) -> str:
     return hashlib.sha1(files.dumps(doc).encode("utf-8")).hexdigest()[:16]
 
 
-def _rank(snap: dict, tpl: str, params: dict | None, n: int, manifest: dict | None, water: dict | None = None) -> list:
+def _rank(snap: dict, tpl: str, params: dict | None, n: int, manifest: dict | None, water: dict | None = None,
+          where: dict | None = None) -> list:
     fn = load_bp("sites").rank
     try:
         names = inspect.signature(fn).parameters    # WP3 extensions; CONTRACTS §15 has rank(snap, tpl, params)
@@ -181,6 +182,9 @@ def _rank(snap: dict, tpl: str, params: dict | None, n: int, manifest: dict | No
         kw["manifest"] = manifest
     if "water" in names and water is not None:
         kw["water"] = water
+    for k, v in (where or {}).items():                  # FR-78: near / within / at (bp.sites.rank extensions)
+        if k in names and v is not None:
+            kw[k] = v
     sites = _call_bp(f"bp.sites.rank({tpl})", fn, snap, tpl, params or None, **kw)
     if not isinstance(sites, list):
         raise BpError(f"bp.sites.rank returned {type(sites).__name__}, expected a list")
@@ -226,15 +230,19 @@ def water_ctx(save_dir: Path, tpl: str, state: dict | None = None) -> dict | Non
 
 
 def rank_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict | None = None,
-               n: int = RANK_N, manifest: dict | None = None) -> tuple[list, str]:
+               n: int = RANK_N, manifest: dict | None = None, where: dict | None = None) -> tuple[list, str]:
     """Rank tpl on `snap` (default: sites_snapshot) with the fort manifest (and, BUG-040, the accepted water for a
-    hospital); cache the raw ranking with its params, snapshot id, manifest and water digests."""
+    hospital); cache the raw ranking with its params, snapshot id, manifest and water digests. `where` (FR-78):
+    {near: [x, y, z], within?: int, at?: [x, y, z]}: a ranking for one spot, never cached (the S labels of
+    `bp.place` stay the general ranking's; this one is placed by its explicit anchor label A<x>_<y>_<z>_<rot>)."""
     snap = snap or sites_snapshot(save_dir)
     if snap is None:
         raise BpError("no snapshot: run `dfllm bp sites <tpl> --fresh` (or `dfllm cmd snapshot purpose=sites`)")
     manifest = manifest if manifest is not None else fort_manifest(save_dir)
     water = water_ctx(save_dir, tpl)
-    sites = _rank(snap, tpl, params, n, manifest, water)
+    sites = _rank(snap, tpl, params, n, manifest, water, where)
+    if where:
+        return sites, snap["id"]
     files.write_json_atomic(_sites_cache(save_dir, tpl), {"v": 2, "tpl": tpl, "snap": snap["id"], "n": n,
                                                           "params": params or {}, "man": _digest(manifest),
                                                           "water": _digest(water), "sites": sites})
@@ -968,12 +976,17 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
 
 
 def free_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict | None = None,
-               n: int = 3) -> tuple[list[dict], str, int]:
-    """(the first n free sites relabelled S1.., snapshot id, ranked count): what `bp.place site=S<k>` resolves."""
+               n: int = 3, where: dict | None = None) -> tuple[list[dict], str, int]:
+    """(the first n free sites relabelled S1.., snapshot id, ranked count): what `bp.place site=S<k>` resolves.
+    With `where` (FR-78: near / within / at, see rank_sites) the sites of that spot, each with `label`, the explicit
+    anchor label `bp.place site=<label>` takes."""
     if tpl == "seal":                                      # as place(): at=last etc. become explicit openings
         params = {**(params or {}), "at": seal_openings(save_dir, (params or {}).get("at"), snap,
                                                         (params or {}).get("close") or "auto")[0]}
-    sites, snap_id = rank_sites(save_dir, tpl, params, snap) if snap else ranking(save_dir, tpl, params)
+    if where:
+        sites, snap_id = rank_sites(save_dir, tpl, params, snap, n=RANK_N, where=where)
+    else:
+        sites, snap_id = rank_sites(save_dir, tpl, params, snap) if snap else ranking(save_dir, tpl, params)
     occ = occupancy(save_dir)
     out = []
     for s in sites:
@@ -982,7 +995,11 @@ def free_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict 
         except BpError:
             continue
         if not occ.clash(doc):
-            out.append(dict(s, id=f"S{len(out) + 1}"))
+            k = dict(s, id=f"S{len(out) + 1}")
+            if where:
+                a = s["anchor"]
+                k["label"] = f"A{a[0]}_{a[1]}_{a[2]}_{s.get('rot', 0)}"
+            out.append(k)
             if len(out) == n:
                 break
     return out, snap_id, len(sites)

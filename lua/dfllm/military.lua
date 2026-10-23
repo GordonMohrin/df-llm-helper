@@ -1554,7 +1554,8 @@ M.verbs['squad.add'] = function(K, args, cmd)
 end
 
 -- the uniform template of the squad's kind (M.UNIFORM, the metal sets) for every position, as ensure_uniform gives it
--- to a fresh squad; the weapon guard (BUG-023: the soldiers never take the Miners' and Woodcutters' tools) applies
+-- to a fresh squad; the weapon guard (BUG-023: the soldiers never take the Miners' and Woodcutters' tools) applies; a
+-- `kind` other than the squad's is applied once, the squad stays what military's plan says
 M.verbs['squad.uniform'] = function(K, args, cmd)
   local s, key = squad_arg(args.squad)
   local e = key and st.sq[key]
@@ -1574,7 +1575,7 @@ M.verbs['squad.uniform'] = function(K, args, cmd)
   if guarded then
     for _, m in ipairs(members(s)) do nw_set(e, m.pos, true) end
   end
-  e.kind, e.uni, dirty = kind, 1, true
+  e.uni, dirty = 1, true                  -- (the squad keeps its kind: military's own plan names it)
   rt.kpi = nil
   return true, string.format('squad %s: %s uniform on %s positions', key, kind, tostring(res)), {squad = s.id}
 end

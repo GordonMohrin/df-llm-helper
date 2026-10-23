@@ -61,7 +61,9 @@ the add fail with `no work detail Orderlies` (named in the line, asked again aft
 
 ## Safety
 SIEGE/BREACH: only a work-detail membership changes (a labor flag), no movement order; the adds are bounded per run and
-by `carers_max`; nobody on a squad, in a mood, a miner/woodcutter/hunter or a noble is taken. A fort of 7: `carers_min` 2
+by `carers_max` (the kernel never holds more than `carers_max` members: if they hold no FEED_WATER_CIVILIANS labor, i.e.
+the detail does not grant it on this save, the adds stop and the cause says `N citizens added to Orderlies hold no
+FEED_WATER_CIVILIANS labor`; units of ours are not picked twice); nobody on a squad, in a mood, a miner/woodcutter/hunter or a noble is taken. A fort of 7: `carers_min` 2
 of 7 adults, never a patient. A fort of 80: at most 8 caregivers. An old kernel state: `m.water.cw` absent = nothing of
 ours to remove. A reload loses no member (persisted). No `Orderlies` detail: no write, the line says so.
 

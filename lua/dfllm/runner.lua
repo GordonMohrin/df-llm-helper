@@ -3804,6 +3804,8 @@ M.on = {
 }
 
 M.verbs = {
+  -- FR-78 (Run 14 note 65): a civzone in a box through quickfort's zone mode (lua/dfllm/zonelib.lua)
+  ['zone.place'] = function(K, args, cmd) return require('dfllm.zonelib').verb(K, args, cmd) end,
   ['bp.place'] = function(K, args, cmd)
     if type(args.tpl) ~= 'string' then return false, 'tpl required' end
     local id = type(cmd) == 'table' and cmd.id

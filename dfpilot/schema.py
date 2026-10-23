@@ -74,7 +74,7 @@ ACT = {
     "squad_routine": ["military"], "squad_order": ["military"], "squad_uniform": ["military"],
     "squad_unequip": ["military"], "squad_release": ["military"], "animal_slaughter": ["economy"], "zone_remove": ["runner"], "manager_office": ["economy"], "pond_remove": ["water"],
     "hospital_remove": ["water"],                  # BUG-034: the zones of a dry hospital while a patient is thirsty
-    "sand_zone": ["economy"], "fish_zone": ["economy"],
+    "sand_zone": ["economy"], "fish_zone": ["economy"], "zone_place": ["runner"],
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
     "door_forbid": ["reflex"],
     "burrow_tiles": ["seal"],
@@ -387,6 +387,7 @@ TPL = named("tpl", Str(TPL_RE))
 BRIDGE = Str(BRIDGE_RE)
 SQUAD = AnyOf(NAT, Str(enum=["A", "B", "C"]))                  # BUG-055: a squad key or the game's squad id
 SQUAD_MODES = ["PEACE", "ALERT", "RECOVERY"]                   # the squads screen is not touched in a fight
+ZONE_TYPES = ["pen", "pit", "pond", "sand", "clay", "fishing", "meeting"]    # FR-78: lua/dfllm/zonelib.lua Z.TYPES
 MODULE = named("module", Str(MODULE_RE))
 MODE = named("mode", Str(enum=MODES))
 PHASE = named("phase", Str(PHASE_RE))
@@ -710,6 +711,8 @@ VERB_ARGS: dict[str, Obj] = {
     "squad.leader": Obj(req={"squad": SQUAD, "unit": NAT}),
     "squad.add": Obj(req={"squad": SQUAD, "unit": NAT}),
     "squad.uniform": Obj(req={"squad": Str(enum=["A", "B", "C"])}, opt={"kind": Str(enum=["melee", "xbow"])}),
+    # FR-78 (Run 14 note 65): a civzone of `type` in `bbox` (one z level) through quickfort's zone mode
+    "zone.place": Obj(req={"type": Str(enum=ZONE_TYPES), "bbox": BBOX}, opt={"name": Str(r"^[A-Za-z0-9_-]{1,24}$")}),
 }
 # verb -> (handler module, allowed modes or None, needs approve)
 VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
@@ -730,6 +733,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "appoint": ("economy", None, False),
     "squad.create": ("military", SQUAD_MODES, False), "squad.leader": ("military", SQUAD_MODES, False),
     "squad.add": ("military", SQUAD_MODES, False), "squad.uniform": ("military", SQUAD_MODES, False),
+    "zone.place": ("runner", SQUAD_MODES, False),
 }
 # verbs accepted only from these `by` origins (CONTRACTS §9.5; `by` is a label, the hook is the guard)
 VERB_BY: dict[str, list[str]] = {"audit": ["follow", "test"]}

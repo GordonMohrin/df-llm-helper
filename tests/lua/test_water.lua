@@ -138,7 +138,12 @@ end)
 
 T.test('hospital gate (FR-31/34): HOSPITAL_DRY when the dry episode starts; BUG-008: again only for news, after max(a week, 10 min)', function()
   local W, M = world{patients = {{id = 2, thirst = 1000, care = true}},
-                     setup = function(W) F.hospital(W, {10, 10, 14, 14, 5}) end}
+                     setup = function(W)
+                       F.hospital(W, {10, 10, 14, 14, 5})
+                       df.unit_labor = {FEED_WATER_CIVILIANS = 40}           -- (BUG-054: the added caregivers take the labor)
+                       for i = 1, 4 do W.unit(i).status = {labors = {[40] = false}} end
+                       W.act_result('work_detail', function(name, id, on) W.unit(id).status.labors[40] = on; return true end)
+                     end}
   day(W)
   local hd = W.find_events('HOSPITAL_DRY')
   T.eq(#hd, 1)
@@ -964,6 +969,22 @@ T.test('BUG-054: the candidates: idle first, then the nearest the hospital; neve
   df.unit_labor = nil
 end)
 
+T.test('BUG-054: the kernel never holds more than carers_max members in the detail when its labors grant no caregiver ' ..
+       '(the act changes nothing the census sees): the shortfall says so', function()
+  local pats = {}
+  for i = 1, 5 do pats[i] = {id = 3 + i, thirst = 31000, care = true} end
+  local W, M = carer_world{cit = 20, patients = pats, carers = {1}}
+  day(W, 12)
+  local added = 0
+  for _, d in ipairs(details(W)) do if d[3] == true then added = added + 1 end end
+  T.eq(added, 8, 'carers_max 8 members, then no more')
+  local ins = W.inbox('inspect', {what = 'water_sources'})
+  T.eq({ins.data.carers.have, ins.data.carers.want, ins.data.carers.mine}, {1, 7, 8})
+  T.eq(ins.data.carers.err, '8 citizens added to Orderlies hold no FEED_WATER_CIVILIANS labor')
+  T.eq(M.kpi(W.K).carers, 1)
+  df.unit_labor = nil
+end)
+
 T.test('BUG-054: hysteresis: the kernel\'s own additions leave one a run, carers_hold_days after the last patient', function()
   local W, M = carer_world{patients = {{id = 5, thirst = 41000, care = true}}, carers = {1}}
   W.act_result('work_detail', function(name, id, on)
@@ -1017,6 +1038,10 @@ T.test('BUG-054: a patient at the death-risk line is PATIENT_DYING (A) with the 
     df.job_type.GiveWater, df.job_type[78] = 78, 'GiveWater'
     W.unit(1).job = {current_job = {job_type = 78}}                   -- one is giving water, one stands idle
   end}
+  W.act_result('work_detail', function(name, id, on)
+    W.unit(id).status.labors[FEED] = on
+    return true, 'added'
+  end)
   day(W)
   local ev = W.find_events('PATIENT_DYING')
   T.eq(#ev, 1)

@@ -387,6 +387,35 @@ def offices_errors(path: str | Path | None = None) -> list[str]:
     return errs
 
 
+# FR-78 (lua/dfllm/zonelib.lua Z.MAX_TILES): config/baseline.json "zones": max_tiles = the tiles one zone.place box may
+# cover (a bad value keeps the default 400)
+ZONES_LIM: dict = {"max_tiles": (1, 10000)}
+
+
+def zones_errors(path: str | Path | None = None) -> list[str]:
+    """Problems of the optional "zones" part of config/baseline.json (FR-78): unknown keys and values the kernel ignores
+    (another type, out of range). A missing file or part is fine."""
+    p = Path(path or BASELINE_PATH)
+    if not p.exists():
+        return []
+    name = "config/baseline.json"
+    try:
+        doc = json.loads(_read(p))
+    except ValueError as e:
+        return [f"{name}: not JSON ({e})"]
+    sec = doc.get("zones", {}) if isinstance(doc, dict) else {}
+    if not isinstance(sec, dict):
+        return [f"{name}: zones must be an object"]
+    errs = []
+    for k, v in sec.items():
+        lim = ZONES_LIM.get(k)
+        if lim is None:
+            errs.append(f"{name}: zones.{k}: unknown key")
+        elif not (isinstance(v, int) and not isinstance(v, bool) and lim[0] <= v <= lim[1]):
+            errs.append(f"{name}: zones.{k}: int {lim[0]}..{lim[1]} expected, got {v!r}")
+    return errs
+
+
 # BUG-042 (lua/dfllm/economy.lua M.DEFAULTS): the economy knobs of the drink line, the unvalidated-order watch, the
 # manager's office and the drink gatherers ("bool", else an int range); economy.conf takes the file's part as it is,
 # so a bad value here would reach the kernel: lint --config refuses it. Other economy keys are checked by the mirror
