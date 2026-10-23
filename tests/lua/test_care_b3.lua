@@ -115,13 +115,38 @@ T.test('BUG-062: zones care opened and found closed again are counted by owner, 
   ev = W.find_events('TOMBS_LOCKED')
   T.eq(#ev, 2, 'news: zones closed again')
   T.eq({ev[2].d.again_free, ev[2].d.again_owned, ev[2].d.by_entomb}, {1, 2, 1})
-  T.ok(ev[2].msg:find('closed again since: 1 unassigned, 2 assigned (1 by entomb)', 1, true), ev[2].msg)
+  T.ok(ev[2].msg:find('closed again: 1 unassigned, 2 owned (1 by entomb)', 1, true), ev[2].msg)
   local d = inspect(W)
-  T.eq(d.again, {free = 1, owned = 2, by_entomb = 1})
+  T.eq(d.again, {free = 1, owned = 2, by_entomb = 1, churn = 0})
   T.eq(by_id[6].zone_settings.tomb.flags.no_citizens, false, 'the unassigned one is opened again')
   T.eq(by_id[2].zone_settings.tomb.flags.no_citizens, true, 'an assigned zone belongs to its dead: left alone')
   T.eq(by_id[4].assigned_unit_id, -1, 'the bodiless dead\'s zone is freed (FR-41) and open')
   T.eq(by_id[4].zone_settings.tomb.flags.no_citizens, false)
+end)
+
+T.test('BUG-062: a zone care freed that DF gave to another body is counted as churn, the frees by reason', function()
+  local W = world{cit = 6, setup = function(W)
+    CW.tomb(W, 30, 10, 5, {unit = 3, closed = true})            -- zone 2: unit 3 died without a body here (stale)
+    CW.tomb(W, 31, 10, 5)                                       -- zone 4: free
+    dead(W, 3)
+  end}
+  local by_id = {}
+  for _, z in ipairs(df.global.world.buildings.other.ZONE_TOMB) do by_id[z.id] = z end
+  W.run(2)
+  T.eq(CW.tacts(W, 'free'), {{'free', 2}})
+  local ev = W.find_events('TOMBS_LOCKED')
+  T.eq(#ev, 1)
+  T.eq({ev[1].d.freed, ev[1].d.stale, ev[1].d.bad, ev[1].d.churn}, {1, 1, nil, 0})
+  -- DF hands the freed zone to another dead citizen and closes it
+  dead(W, 4)
+  by_id[2].assigned_unit_id, by_id[2].zone_settings.tomb.flags.no_citizens = 4, true
+  W.ms = W.ms + 600000
+  CW.day(W, 8)
+  ev = W.find_events('TOMBS_LOCKED')
+  T.eq(#ev, 2)
+  T.eq(ev[2].d.churn, 1)
+  T.ok(ev[2].msg:find('1 freed re-given by DF', 1, true), ev[2].msg)
+  T.eq(inspect(W).again.churn, 1)
 end)
 
 T.test('BUG-062: inspect names why coffins are no free tombs', function()

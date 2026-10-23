@@ -464,8 +464,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # ("ghosts 12", "deaths 30", "no beds 8", "toppled buildings 3"), deaths of the last year, ghosts, citizens
     "STRESS_HIGH": ("B", "care", _d("pct:i days:i", "src:sa deaths:i ghosts:i cit:i")),
     "BUILDING_TOPPLED": ("B", "care", _d("what:s by:s", "unit:i ghost:f stress:i cat:i tantrum:f n:i pos:p")),
+    # churn = zones care freed that DF gave to another body since (freed / bad / stale / elsewhere: this run's frees by reason)
     "TOMBS_LOCKED": ("B", "care", _d(opt="closed:i free:i usable:i owned:i inactive:i opened:i left:i again_free:i "
-                                         "again_owned:i by_entomb:i unburied:i")),
+                                         "again_owned:i by_entomb:i unburied:i churn:i freed:i bad:i stale:i elsewhere:i")),
     # BUG-031: cistern = why the nearest cistern room does not serve the hospital (no well, its well over 0/7, too far)
     "HOSPITAL_DRY": ("A", "water", _d("why:s", "patients:i zone:i near:i recipe:s cistern:s")),
     # BUG-034: the zones of a hospital without accepted water went while a patient was over water.patient_thirst: zones,

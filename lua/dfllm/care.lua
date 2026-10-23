@@ -1035,8 +1035,8 @@ end
 function M.lockstate()
   local lk = st.lk
   if not lk then
-    lk = {opened = {}, entombed = {}, again_free = 0, again_owned = 0, by_entomb = 0,
-          pend = {free = 0, owned = 0, entomb = 0}}
+    lk = {opened = {}, entombed = {}, freed = {}, assigned = {}, again_free = 0, again_owned = 0, by_entomb = 0, churn = 0,
+          pend = {free = 0, owned = 0, entomb = 0, churn = 0}}
     st.lk = lk
   end
   return lk
@@ -1046,10 +1046,17 @@ end
 -- are closed again now (each counted once; a zone gone from the index is forgotten)
 local function lock_scan(T, readonly)
   local lk = M.lockstate()
-  local c = {closed = 0, free = 0, usable = 0, owned = 0, inactive = 0, again_free = 0, again_owned = 0, by_entomb = 0}
+  local c = {closed = 0, free = 0, usable = 0, owned = 0, inactive = 0, again_free = 0, again_owned = 0, by_entomb = 0,
+             churn = 0}
   local live = {}
   for _, z in ipairs(T.zones) do
     live[z.id] = true
+    -- a zone care freed (its dead owner had no remains here, or its coffin could not take them) that has an owner again
+    -- and care did not assign it: DF handed it to another body (the freed-20-every-round loop of Run 14, if that is it)
+    if lk.freed[z.id] and z.unit >= 0 and not lk.assigned[z.id] then
+      c.churn = c.churn + 1
+      if not readonly then lk.freed[z.id] = nil end
+    end
     if not z.drop and z.closed then
       c.closed = c.closed + 1
       if not z.active then c.inactive = c.inactive + 1
@@ -1069,8 +1076,12 @@ local function lock_scan(T, readonly)
   if readonly then return c end
   for id in pairs(lk.opened) do if not live[id] then lk.opened[id] = nil end end
   for id in pairs(lk.entombed) do if not live[id] then lk.entombed[id] = nil end end
+  for id in pairs(lk.freed) do if not live[id] then lk.freed[id] = nil end end
+  for id in pairs(lk.assigned) do if not live[id] then lk.assigned[id] = nil end end
   lk.again_free, lk.again_owned = lk.again_free + c.again_free, lk.again_owned + c.again_owned
   lk.by_entomb = lk.by_entomb + c.by_entomb
+  lk.churn = lk.churn + c.churn
+  lk.pend.churn = lk.pend.churn + c.churn
   -- not yet announced (the cadence may hold TOMBS_LOCKED back): lock_event reports and resets them
   lk.pend.free, lk.pend.owned, lk.pend.entomb = lk.pend.free + c.again_free, lk.pend.owned + c.again_owned,
                                                  lk.pend.entomb + c.by_entomb
@@ -1175,12 +1186,15 @@ local function tomb_repair(K, c, r, p, T, now)
   for _, z in ipairs(T.zones) do
     if z.free and not z.drop and act('free', z) then
       acts.freed, z.unit, z.closed = acts.freed + 1, -1, false
-      lk.opened[z.id] = now
+      lk.opened[z.id], lk.freed[z.id], lk.assigned[z.id] = now, now, nil
+      acts.why = acts.why or {}
+      acts.why[z.free] = (acts.why[z.free] or 0) + 1                 -- bad | stale | elsewhere
     end
   end
   for _, z in ipairs(T.zones) do
     if z.assign and not z.drop and z.unit < 0 and act('assign', z, z.assign) then
       acts.assigned, z.unit = acts.assigned + 1, z.assign
+      lk.assigned[z.id] = now
     end
   end
   -- BUG-062 (Run 14 y529-y577: 163, then 284 of 287 tomb zones closed to citizens, 26-44 unburied, ghosts 1 -> 30, after
@@ -1286,7 +1300,7 @@ local function tomb_report(src)
   out.far_n = src.far_n or 0
   if src.lock then out.lock = src.lock end
   local lks = M.lockstate()
-  out.again = {free = lks.again_free, owned = lks.again_owned, by_entomb = lks.by_entomb}
+  out.again = {free = lks.again_free, owned = lks.again_owned, by_entomb = lks.by_entomb, churn = lks.churn}
   local un = {unbuilt = 0, bedroom = 0, other_zone = 0, occupied = 0, zones = 0}
   for _, e in ipairs(T.coffins) do
     local zn = 0
@@ -1326,23 +1340,32 @@ local function lock_event(K, c, p, lk0, lk1, acts, unburied)
   if lk1.left > 0 then toks[#toks + 1] = 'left' end
   if pend.free > 0 then toks[#toks + 1] = 'again_free' end
   if pend.owned > 0 then toks[#toks + 1] = 'again_owned' end
+  if pend.churn > 0 then toks[#toks + 1] = 'churn' end
+  if acts.freed > 0 then toks[#toks + 1] = 'freed' end
   if #toks == 0 then p.lockev = CAD.quiet(p.lockev); return end
   local T = K.now()
   if not CAD.due(type(p.lockev) == 'table' and p.lockev or nil, T, {}, toks, {ticks = c.ghost_every, wall_s = c.wake_wall_s}) then
     return
   end
   p.lockev = CAD.mark(T, {}, toks)
-  local msg = string.format('tomb zones closed to citizens: %d (%d unassigned, %d held by a dead citizen%s); care opened %d%s%s; '
-                            .. '%d unburied citizen(s)', lk0.closed, lk0.free, lk0.owned,
-                            lk0.inactive > 0 and (', ' .. lk0.inactive .. ' off') or '', acts.opened,
-                            lk1.left > 0 and (', ' .. lk1.left .. ' still closed') or '',
-                            (pend.free + pend.owned) > 0 and string.format('; closed again since: %d unassigned, %d '
-                              .. 'assigned (%d by entomb)', pend.free, pend.owned, pend.entomb) or '', unburied)
+  local w = acts.why or {}
+  local msg = string.format('tomb zones closed to citizens: %d (%d unassigned, %d held, %d off); opened %d%s', lk0.closed, lk0.free,
+                            lk0.owned, lk0.inactive, acts.opened, lk1.left > 0 and (', ' .. lk1.left .. ' still closed') or '')
+  if pend.free + pend.owned > 0 then
+    msg = msg .. string.format('; closed again: %d unassigned, %d owned (%d by entomb)', pend.free, pend.owned, pend.entomb)
+  end
+  if pend.churn > 0 then msg = msg .. string.format('; %d freed re-given by DF', pend.churn) end
+  if acts.freed > 0 then
+    msg = msg .. string.format('; freed %d (bad %d, stale %d, elsewhere %d)', acts.freed, w.bad or 0, w.stale or 0, w.elsewhere or 0)
+  end
+  msg = msg .. string.format('; %d unburied', unburied)
   K.emit('TOMBS_LOCKED', 'B', trunc(msg, 200),
          {closed = lk0.closed, free = lk0.free, usable = lk0.usable, owned = lk0.owned, inactive = lk0.inactive,
           opened = acts.opened, left = lk1.left, again_free = pend.free, again_owned = pend.owned,
-          by_entomb = pend.entomb, unburied = unburied})
-  pend.free, pend.owned, pend.entomb = 0, 0, 0
+          by_entomb = pend.entomb, unburied = unburied, churn = pend.churn, freed = acts.freed,
+          bad = acts.why and acts.why.bad or nil, stale = acts.why and acts.why.stale or nil,
+          elsewhere = acts.why and acts.why.elsewhere or nil})
+  pend.free, pend.owned, pend.entomb, pend.churn = 0, 0, 0, 0
 end
 
 local function phase_tombs_run(K, c, r, p)
@@ -1364,7 +1387,7 @@ local function phase_tombs_run(K, c, r, p)
   T.nlocked = lk1.left
   r.tombs_locked = lk1.left
   local pend = M.lockstate().pend
-  if repaired or pend.free + pend.owned > 0 then
+  if repaired or pend.free + pend.owned + pend.churn > 0 then
     lock_event(K, c, p, lk0, lk1, acts, count(r.bodies))
   end
   r.tomb_src = {T = T, bodies = r.bodies, causes = causes, acts = acts, now = now, repaired = repaired,
