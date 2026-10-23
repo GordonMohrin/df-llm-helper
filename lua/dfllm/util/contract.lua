@@ -68,6 +68,9 @@ C.EVENTS = {
   GHOSTS = {cls = 'A', by = 'care'}, HOSPITAL_DRY = {cls = 'A', by = 'water'}, MOOD_RISK = {cls = 'A', by = 'care'},
   -- BUG-034: the zones of a hospital without accepted water were removed while a patient was over water.patient_thirst
   HOSPITAL_REMOVED = {cls = 'A', by = 'water'},
+  -- BUG-054 (Run 11 y497: 5 patients dead of thirst at once): a patient at water.dying_thirst (60,000), with the
+  -- caregivers' state (the Orderlies work detail is scaled by water: act.work_detail)
+  PATIENT_DYING = {cls = 'A', by = 'water'},
   -- BUG-036: in a fight, patients lie outside the burrow the civ alert confines to (once per fight; they cannot walk)
   PATIENTS_OUT = {cls = 'B', by = 'water'},
   -- BUG-040: a done cistern whose well stood dry for water.cistern_dry_days (once per dry spell, with what fills it)
@@ -192,6 +195,12 @@ C.VERBS = {
   ['perimeter.record'] = {mod = 'seal'},
   -- BUG-030 rebuild policy: the player's answer to DECISION_NEEDED bridge_rebuild (rebuild that bridge anyway)
   ['bridge.rebuild'] = {mod = 'seal'},
+  -- BUG-055: the nobles screen and the squads screen (outside a fight) as verbs
+  ['appoint'] = {mod = 'economy'},
+  ['squad.create'] = {mod = 'military', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
+  ['squad.leader'] = {mod = 'military', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
+  ['squad.add'] = {mod = 'military', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
+  ['squad.uniform'] = {mod = 'military', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
 }
 -- Verbs accepted only from these `by` origins (§9.5). `by` is a label, not authentication: the
 -- hook (WP4) keeps the LLM from writing these origins; this check is the second line.
@@ -213,7 +222,7 @@ C.ACT = {
   popcap = {'readiness'},
   quickfort = {'runner'}, order_top = {'runner'},  -- Run 11 siege 8: a seal's manager orders to the top (seal first)
   orders_import = {'economy'}, orders = {'economy'}, workorder = {'economy', 'water', 'care'},
-  order_suspend = {'economy'}, kitchen_exclude = {'economy'}, appoint = {'economy'}, work_detail = {'economy'},
+  order_suspend = {'economy'}, kitchen_exclude = {'economy'}, appoint = {'economy'}, work_detail = {'economy', 'water'},
   order_material = {'economy'}, order_remove = {'economy'}, job_resume = {'economy'}, farm_crop = {'economy'},
   plant_gather = {'economy'}, work_detail_prune = {'economy'},
   item_flag = {'care', 'water', 'economy', 'military'}, zone_assign = {'care'},
@@ -344,7 +353,8 @@ C.STATE_SPEC = obj({
                audit = obj({ok = FLAG, age = int(-1), min_traps = NAT}, {why = str(80), cov = str(40)}),
                fail = arr(str(24), 0, 8)},
               {open = int(-1), ents = arr(str(24), 0, 3), dhold = str(24),     -- FR-65
-               route = str(60)}),          -- the last audit's first attacker-route finding (bypass, refuge)
+               route = str(60),            -- the last audit's first attacker-route finding (bypass, refuge)
+               office = str(200)}),        -- BUG-055: the vacant office (or squad leader post) R0 `office` names, with the fix
   -- Run 10: ore/bars/leather stock, the metal route and the classes moods missed (plan propose/check supply goals)
   stock = obj(nil, {drink_d = NAT, food_d = NAT, meals = NAT, hosp_water = FLAG, ore = NAT, bars = NAT, leather = NAT,
                     metal = str(24), mood_miss = arr(str(12), 0, 8), rock = NAT, rock_need = NAT, picks = NAT,

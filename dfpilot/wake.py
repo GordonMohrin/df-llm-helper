@@ -85,6 +85,9 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
         # BUG-034: the kernel already removed the dry hospital's zones; water (a cistern) comes before a new hospital
         "HOSPITAL_REMOVED": "tell Gordon; dfllm cmd inspect '{\"what\":\"water_sources\"}'; next plan: water before "
                             "a hospital (plan check refuses one without it)",
+        # BUG-054: a patient at thirst 60,000; the kernel scales the Orderlies detail itself, the line names the state
+        "PATIENT_DYING": "tell Gordon at once; dfllm cmd inspect '{\"what\":\"water_sources\"}' (hospital water, "
+                         "caregivers, GiveWater jobs); nothing by hand that the kernel does not do",
         "MOOD_RISK": "dfllm brief; supply the missing class (never cancel the mood)",
         # FR-64: >= 2 citizens dehydrated or starved within a month: access, not supply, as a rule
         "DEATHS_PREVENTABLE": "dfllm cmd inspect '{\"what\":\"reach\"}', then refuge; patients: water_sources",
@@ -195,6 +198,8 @@ def next_hint(etype: str, e: dict) -> str:
         return REFUGE_DRY_HINT
     if etype == "SIEGE_UNREADY" and "hospital_out" in (d.get("fails") or []):
         return HOSPITAL_OUT_HINT
+    if etype == "SIEGE_UNREADY" and "office" in (d.get("fails") or []):
+        return OFFICE_HINT
     if etype == "DECISION_NEEDED" and d.get("id") == "bridge_rebuild":
         return rebuild_hint(d)
     if etype == "PROJECT_BLOCKED" and d.get("park") is not None and d.get("proj"):
@@ -227,6 +232,12 @@ REFUGE_DRY_HINT = ("the refuge has no drink: next plan its drink store (tpl refu
 # BUG-040 (y453: Tiefe+ had no accepted water): then Kern+ next to the water
 HOSPITAL_OUT_HINT = ("the hospital lies outside the core: plan it next to accepted water inside Tiefe+, or in Kern+ when "
                      "Tiefe+ has none (bp sites hospital names the water), then remove the old zones")
+
+
+# BUG-055 (Run 14 y577: the CHIEF_MEDICAL_DWARF office stood vacant for good; Run 11 note 25: squads without a leader):
+# readiness R0 office; the line's msg carries the exact command
+OFFICE_HINT = ("a vacant office or squads without a leader: dfllm cmd inspect '{\"what\":\"offices\"}', then "
+               "dfllm cmd appoint / squad.create / squad.leader (the msg names the unit)")
 
 
 def wake_line(burst: dict[str, dict], state: dict | None, held_s: float = 0) -> str:

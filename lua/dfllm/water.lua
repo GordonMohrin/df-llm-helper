@@ -81,6 +81,14 @@ M.DEFAULTS = {
   patient_thirst = 25000, hosp_remove = true, remove_per_run = 8,
   -- BUG-040: a done cistern whose built well stays dry this many days is reported once (CISTERN_DRY, B)
   cistern_dry_days = 30,
+  -- BUG-054 (Run 11 y497: 5 patients dead of thirst at once with 4 caregivers, 24-27 free buckets and "hospital ok"):
+  -- caregivers (the FEED_WATER_CIVILIANS labor, the Orderlies work detail) scale with the patients: carers_per_patient
+  -- each (at least carers_min while there is a patient, at most carers_max), carers_urgent more while a patient is over
+  -- thirst_alarm; at most carers_per_run are added a run; the ones the kernel added leave after carers_hold_days without
+  -- any patient (hysteresis). A patient over dying_thirst (60,000: death follows at ~75,000) is PATIENT_DYING (A), again
+  -- only for news and not before dying_every ticks. carers_max 0 switches the scaling off.
+  carers_per_patient = 1, carers_min = 2, carers_max = 8, carers_urgent = 2, carers_per_run = 2, carers_hold_days = 14,
+  dying_thirst = 60000, dying_every = 2 * DAY,
 }
 M.SRC_MAX = 8                                -- accepted sources in the state (water.src), nearest first
 M.SRC_LBL = 4                                -- BUG-040: labels of the first ones (water.src_l: 'well 19098 in Kern+')
@@ -268,11 +276,20 @@ local function phase_units(K, c, r)
       local x, y, z = dfhack.units.getPosition(u)
       r.patients[#r.patients + 1] = {id = id, thirst = th, x = x, y = y, z = z}
     elseif u then
-      if carer(u) then r.carers[#r.carers + 1] = id end
+      local is_carer = carer(u)
+      if is_carer then
+        r.carers[#r.carers + 1] = id
+        if M.idle(u) then r.carers_idle = r.carers_idle + 1 end
+      end
       if giving(u) then r.give = r.give + 1 end
       if #r.home < 60 then
         local x, y, z = dfhack.units.getPosition(u)
         if x then r.home[#r.home + 1] = {x = x, y = y, z = z} end
+      end
+      -- BUG-054: who the kernel could ask to carry water (not a caregiver yet; a sample of at most pool_max)
+      if not is_carer and #r.pool < M.POOL_MAX and M.carer_ok(u) then
+        local x, y, z = dfhack.units.getPosition(u)
+        if x then r.pool[#r.pool + 1] = {id = id, x = x, y = y, z = z, idle = M.idle(u)} end
       end
     end
   end
@@ -291,6 +308,8 @@ local function phase_sites(K, c, r)
                                  built = done, below = info}                  -- BUG-031: what the shaft ends on
   end
   local locs = hospital_locations()
+  r.locs_total = 0
+  for _ in pairs(locs) do r.locs_total = r.locs_total + 1 end
   local wsrc = df.civzone_type and df.civzone_type.WaterSource
   local zones, seen = {}, {}                                 -- a Lua list: never write into a DF vector
   for _, zn in ipairs(vec(function() return other.ZONE_WATER_SOURCE end)) do
@@ -1011,6 +1030,126 @@ local function patients_out(K, r, kern, refuge, kname, rname, ho)
   K.log('warn', 'water: %s', msg)
 end
 
+---------------------------------------------------------------- BUG-054: caregivers scale with the patients
+-- Run 11 y497 (the game session's notes 18, 24): patient_thirst said "water, buckets and caregivers present" while 3-5
+-- patients stood at thirst 30,000-40,293 with 24-27 of 62 buckets free and 4 caregivers; five of them died of thirst
+-- together (75,000, hunger 80-119k) in a fort that reported "hospital ok", and the fort went from 49 citizens to 1.
+-- What the code proves: nothing in the kernel ever gave the FEED_WATER_CIVILIANS labor to anybody (it only counts the
+-- citizens who have it, `carer`), so the number of caregivers was whatever the game's own Orderlies work detail held;
+-- the cause text only said "no caregiver" for ZERO of them, 4 for 5 patients counted as "present"; and a wet hospital
+-- got no action at all: the only act was the removal of a DRY hospital's zones (remove_dry) and one weekly line.
+-- Now: want = carers_per_patient per patient (carers_min .. carers_max, + carers_urgent while a patient is over
+-- thirst_alarm); missing caregivers are added to the Orderlies work detail (the work details screen: act.work_detail,
+-- the best candidate first: idle, then nearest the hospital; never a soldier, a dwarf in a mood, a noble, a child or
+-- a miner/woodcutter/hunter); the ones added leave again carers_hold_days after the last patient. Not decided offline:
+-- why the game's own jobs did not keep up (busy carers, no job posted, unreachable water): `give_jobs` and the
+-- caregivers' state (idle, GiveWater jobs running/open) go into PATIENT_DYING and inspect water_sources.
+M.CARER_DETAIL = 'Orderlies'
+M.POOL_MAX = 200
+local NO_WAIT = 7 * DAY                 -- a missing Orderlies detail is not asked for again for a week
+
+function M.idle(u)
+  local ok, yes = pcall(function() return u.job == nil or u.job.current_job == nil end)
+  return ok and yes == true
+end
+
+-- a citizen the kernel may ask to carry water: adult, no squad, no mood, no noble post, no tool labor (Miners,
+-- Woodcutters and Hunters are specialists), not a patient (the caller)
+function M.carer_ok(u)
+  local ok, yes = pcall(function()
+    if dfhack.units.isDead(u) or not dfhack.units.isAdult(u) then return false end
+    if (u.military.squad_id or -1) >= 0 then return false end
+    if (u.mood or -1) >= 0 then return false end
+    for _, name in ipairs({'MINE', 'CUTWOOD', 'HUNT'}) do
+      local l = df.unit_labor and df.unit_labor[name]
+      if l ~= nil and u.status.labors[l] == true then return false end
+    end
+    return true
+  end)
+  if not (ok and yes == true) then return false end
+  local okn, np = pcall(dfhack.units.getNoblePositions, u)
+  if okn and type(np) == 'table' and #np > 0 then return false end
+  return true
+end
+
+-- GiveWater/GiveFood jobs on the job list: open (no worker) and running; nil when this DF has neither job type.
+-- One bounded pass, only called while a patient is thirsty (water's own cadence, a game day)
+function M.give_jobs()
+  local types = {}
+  for _, n in ipairs({'GiveWater', 'GiveWater2', 'GiveFood'}) do
+    local t = df.job_type and df.job_type[n]
+    if type(t) == 'number' then types[t] = true end
+  end
+  if next(types) == nil then return nil end
+  local open, run, i = 0, 0, 0
+  pcall(function()
+    local link = df.global.world.jobs.list.next
+    while link and i < 20000 do
+      local j = link.item
+      if j and types[j.job_type] then
+        local okw, w = pcall(dfhack.job.getWorker, j)
+        if okw and w == nil then open = open + 1 else run = run + 1 end
+      end
+      link, i = link.next, i + 1
+    end
+  end)
+  return open, run
+end
+
+-- the plan of one run: {have, want, idle, added = {ids}, dropped = {ids}, err}. `over` = a patient is over thirst_alarm.
+-- Adds through act.work_detail (water must be an owner of it: feature detection) and only the kernel's own additions
+-- (p.cw: id -> tick) ever leave again
+function M.carers(K, c, r, p, now, over)
+  p.cw = json.object(type(p.cw) == 'table' and p.cw or {})
+  local np, have = #r.patients, #r.carers
+  local want = 0
+  if np > 0 and c.carers_max > 0 then
+    want = math.max(c.carers_min, np * c.carers_per_patient)
+    if over then want = want + c.carers_urgent end
+    want = math.min(want, c.carers_max)
+  end
+  local out = {have = have, want = want, idle = r.carers_idle, added = {}, dropped = {}}
+  if np > 0 then p.cw_t = now end
+  for sid in pairs(p.cw) do                                       -- a unit that died or left is forgotten
+    local u = df.unit.find(math.tointeger(tonumber(sid)) or -1)
+    if not u or dfhack.units.isDead(u) then p.cw[sid] = nil end
+  end
+  if not M.can('work_detail') then out.err = 'water may not change work details'; return out end
+  if have < want and now >= (math.tointeger(p.cw_off) or 0) then
+    local ref = r.hosp[1] or (r.patients[1] and {x1 = r.patients[1].x or 0, y1 = r.patients[1].y or 0,
+                                                 x2 = r.patients[1].x or 0, y2 = r.patients[1].y or 0,
+                                                 z = r.patients[1].z or 0})
+    local pool = {}
+    for _, cd in ipairs(r.pool) do pool[#pool + 1] = {cd = cd, d = ref and dist_box(cd.x, cd.y, cd.z, ref) or 0} end
+    table.sort(pool, function(a, b)
+      if a.cd.idle ~= b.cd.idle then return a.cd.idle end
+      if a.d ~= b.d then return a.d < b.d end
+      return a.cd.id < b.cd.id
+    end)
+    for _, e in ipairs(pool) do
+      if #out.added >= c.carers_per_run or have + #out.added >= want then break end
+      local ok, res = K.act.work_detail(M.CARER_DETAIL, e.cd.id, true, {select = true})
+      if ok then
+        out.added[#out.added + 1] = e.cd.id
+        p.cw[fmt(e.cd.id)] = now
+      else
+        out.err = tostring(res)
+        if out.err:find('no work detail', 1, true) then p.cw_off = now + NO_WAIT end
+        break                                                    -- an ACT_FAIL (B) names it; the next run tries again
+      end
+    end
+  elseif np == 0 and next(p.cw) and now - (math.tointeger(p.cw_t) or now) >= c.carers_hold_days * DAY then
+    local sids = {}
+    for sid in pairs(p.cw) do sids[#sids + 1] = sid end
+    table.sort(sids)
+    local id = math.tointeger(tonumber(sids[1]))
+    if id and K.act.work_detail(M.CARER_DETAIL, id, false) then out.dropped[1] = id end
+    p.cw[sids[1]] = nil                                          -- gone either way (a refusal: the player's member now)
+  end
+  out.have_after = have + #out.added
+  return out
+end
+
 local function finish(K, c, r, p)
   local now = K.now().tick
   local T = K.now()
@@ -1045,6 +1184,11 @@ local function finish(K, c, r, p)
   for _, h in ipairs(r.hosp) do if h.want and h.want > want then want = h.want end end
   want = math.min(c.buckets_max, want + c.bucket_per_patient * #r.patients)
   local fixed, ordered, missing = supply_buckets(K, c, r, p, want)
+  -- BUG-054: caregivers scale with the patients (before the cause text: it names what was added)
+  local over_alarm = false
+  for _, pt in ipairs(r.patients) do if pt.thirst > c.thirst_alarm then over_alarm = true end end
+  local cs = M.carers(K, c, r, p, now, over_alarm)
+  local after = cs.have_after or cs.have
   -- patients over the alarm: one class-A line for all of them, with the cause (cadence: M.DEFAULTS)
   local thirsty, tmax = 0, 0
   local dry = not hosp_ok and #r.hosp > 0
@@ -1058,7 +1202,16 @@ local function finish(K, c, r, p)
   end
   if wet == 0 then cause[#cause + 1] = 'no accepted water at all' end
   if r.free + fixed == 0 then cause[#cause + 1] = 'no free bucket' end
-  if #r.carers == 0 then cause[#cause + 1] = 'no caregiver with FEED_WATER_CIVILIANS' end
+  local gerr = cs.err and #cs.added == 0 and (' (could not add: ' .. trunc(cs.err, 60) .. ')') or ''
+  if after == 0 and #r.patients > 0 then
+    cause[#cause + 1] = 'no caregiver with FEED_WATER_CIVILIANS' .. gerr
+  elseif cs.want > after then              -- BUG-054: 4 caregivers for 5 patients are not "present"
+    cause[#cause + 1] = string.format('caregivers short: %d of %d wanted for %d patient(s)%s', after, cs.want,
+                                      #r.patients, #cs.added > 0 and string.format(', %d added to %s now', #cs.added,
+                                                                                    M.CARER_DETAIL) or gerr)
+  elseif #cs.added > 0 then
+    cause[#cause + 1] = string.format('caregivers raised to %d (%d added to %s now)', after, #cs.added, M.CARER_DETAIL)
+  end
   local why = #cause > 0 and table.concat(cause, ', ') or 'water, buckets and caregivers present'
   -- FR-34: the one-line recipe (Run 9: deleting the hospital zone made the survivor stand up, drink and eat; Run 11:
   -- GiveWater jobs ran again, BUG-034). With the removal on, a dry hospital is left only when the removal failed
@@ -1109,10 +1262,42 @@ local function finish(K, c, r, p)
     K.emit('DECISION_NEEDED', 'A', trunc(string.format('%d patient(s) over thirst %d, unit %d at %d: %s; %s', #over,
                                                        c.thirst_alarm, top.id, top.thirst, why, recipe), 200),
            {id = 'patient_thirst', unit = top.id, thirst = top.thirst, units = ids, n = #over, carers = carers,
-            n_carers = #r.carers, buckets = r.free + fixed, buckets_all = r.buckets,
-            q = trunc(string.format('units %s thirsty (%s): %s; carers %d (FEED_WATER_CIVILIANS: %s), buckets %d free '
-                                    .. 'of %d', table.concat(ids, ','), why, recipe, #r.carers,
-                                    #carers > 0 and table.concat(carers, ',') or 'none', r.free + fixed, r.buckets), 200)})
+            n_carers = after, want = cs.want, added = #cs.added, buckets = r.free + fixed, buckets_all = r.buckets,
+            q = trunc(string.format('units %s thirsty: %s; carers %d of %d wanted (FEED_WATER_CIVILIANS: %s), buckets %d '
+                                    .. 'free of %d; %s', table.concat(ids, ','), recipe, after, cs.want,
+                                    #carers > 0 and table.concat(carers, ',') or 'none', r.free + fixed, r.buckets, why),
+                      200)})
+  end
+  -- BUG-054: a patient at the death-risk line (dying_thirst; death follows at ~75,000) is a class-A line of its own, with
+  -- the caregivers' state; the cadence rule (util/cadence.lua): at once for a new patient or a changed cause, else not
+  -- before dying_every ticks and the wall-clock wait
+  local dying, dids = {}, {}
+  for _, pt in ipairs(r.patients) do
+    if pt.thirst >= c.dying_thirst then dying[#dying + 1] = pt end
+  end
+  if #dying > 0 then
+    table.sort(dying, function(a, b) return a.thirst > b.thirst end)
+    for i, pt in ipairs(dying) do dids[i] = pt.id end
+    local hs = #r.hosp == 0 and 'none' or (hosp_ok and 'ok' or 'dry')
+    local toks = {'hospital ' .. hs, after >= cs.want and 'caregivers enough' or 'caregivers short',
+                  r.free + fixed > 0 and 'buckets' or 'no buckets', r.give > 0 and 'giving' or 'nobody giving'}
+    if CAD.due(p.dying, T, dids, toks, {ticks = c.dying_every, wall_s = c.wake_wall_s}) then
+      p.dying = CAD.mark(T, dids, toks)
+      local gopen, grun = M.give_jobs()
+      local top = dying[1]
+      local shown = {}
+      for i = 1, math.min(8, #dids) do shown[i] = dids[i] end
+      local msg = string.format('%d patient(s) near death of thirst (>= %d), unit %d at %d: hospital %s, caregivers %d of %d '
+                                .. 'wanted (%d idle), %d giving water; %s', #dying, c.dying_thirst, top.id, top.thirst, hs,
+                                after, cs.want, cs.idle, r.give, why)
+      K.emit('PATIENT_DYING', 'A', trunc(msg, 200),
+             {units = shown, n = #dying, thirst = top.thirst, carers = after, want = cs.want, hosp = hs,
+              idle = cs.idle, added = #cs.added, give = r.give, open = gopen or -1, run = grun or -1,
+              buckets = r.free + fixed, why = trunc(why, 120)})
+      K.log('warn', 'water: %s (GiveWater/GiveFood jobs: %s open, %s running)', msg, tostring(gopen), tostring(grun))
+    end
+  else
+    p.dying = CAD.quiet(p.dying)
   end
   -- hospital gate (FR-31/34): a hospital location, or a hospital project while no accepted water exists at all,
   -- without an accepted source wakes the LLM when the dry episode starts (not in a run that sent patient_thirst);
@@ -1198,9 +1383,26 @@ local function finish(K, c, r, p)
   local out = {patients = #r.patients, thirsty = thirsty, thirst_max = tmax, wells = wells, wet = wet,
                hosp_ok = hosp_ok and 1 or 0, refuge_ok = refuge_ok and 1 or 0, buckets = r.buckets,
                buckets_free = r.free + fixed, buckets_full = r.full, buckets_want = want, unforbid = fixed,
-               ordered = ordered, missing = math.max(0, missing), carers = #r.carers, gate = gate and 1 or 0,
+               ordered = ordered, missing = math.max(0, missing), carers = after, gate = gate and 1 or 0,
                hosp = nh, give = r.give, removed = removed and #removed.zones or 0, src = srcs, src_l = slbl,
                rwells = rwells, rwet = rwet, hosp_out = ho.n}
+  local mine = 0
+  for _ in pairs(type(p.cw) == 'table' and p.cw or {}) do mine = mine + 1 end
+  -- BUG-056 (Run 11: 8 HOSPITAL locations stayed after their zones were deleted): a hospital is a location with a zone;
+  -- every count here (r.hosp, hosp, hosp_out, the dry gate, the removal) goes by zones, a zoneless location is only counted
+  local live_locs, nlive = {}, 0
+  for _, h in ipairs(r.hosp) do
+    if not live_locs[h.loc] then live_locs[h.loc], nlive = true, nlive + 1 end
+  end
+  out.locs = {total = r.locs_total or nlive, live = nlive, stale = math.max(0, (r.locs_total or nlive) - nlive)}
+  if out.locs.stale ~= (st.stale_locs or 0) then
+    st.stale_locs = out.locs.stale
+    if out.locs.stale > 0 then
+      K.log('info', 'water: %d hospital location(s) without a zone are left alone (%d with zones; BUG-056)',
+            out.locs.stale, nlive)
+    end
+  end
+  out.cw = {have = after, want = cs.want, idle = cs.idle, give = r.give, mine = mine, err = cs.err}   -- BUG-054, inspect
   local prev = st.out or {}
   if prev.hosp_ok ~= out.hosp_ok or prev.refuge_ok ~= out.refuge_ok or prev.patients ~= out.patients
      or prev.hosp ~= out.hosp or prev.rwells ~= out.rwells or prev.hosp_out ~= out.hosp_out or fixed > 0
@@ -1227,7 +1429,7 @@ local function new_run(K)
   local ids = {}
   for _, id in ipairs(type(cu) == 'table' and cu.ids or {}) do ids[#ids + 1] = id end
   return {ph = 1, idx = 0, ids = ids, patients = {}, sources = {}, hosp = {}, buckets = 0, free = 0, full = 0,
-          forbidden = {}, ponds = {}, carers = {}, home = {}, give = 0}
+          forbidden = {}, ponds = {}, carers = {}, home = {}, give = 0, pool = {}, carers_idle = 0}
 end
 
 function M.init(K)
@@ -1301,7 +1503,8 @@ function M.inspect(K, what, key)
   rm = type(rm) == 'table' and rm or nil
   if not st.ws then
     return true, 'water_sources: scan queued for the next water run',
-           {tick = now, queued = queued, deep = c.deep, sources = srcs, removed = rm, refuge = ref}
+           {tick = now, queued = queued, deep = c.deep, sources = srcs, removed = rm, refuge = ref,
+            carers = st.out and st.out.cw or nil, locs = st.out and st.out.locs or nil}
   end
   local w = st.ws
   local reach = 0
@@ -1310,12 +1513,15 @@ function M.inspect(K, what, key)
                              reach, #srcs),
          {tick = w.tick, age = now - w.tick, queued = queued, deep = w.deep, boxes = w.boxes, tiles = w.tiles,
           levels = w.levels, bodies = w.bodies, sources = srcs, err = w.err, removed = rm, refuge = ref,
+          carers = st.out and st.out.cw or nil, locs = st.out and st.out.locs or nil,
           note = 'sources [kind, id, x, y, z, accepted, depth under a well (-1 unknown), burrow]; refuge: its bbox, d = '
                  .. 'its nearest tile to the nearest accepted source (-1 none); bank: stand there and fill or zone the '
                  .. 'water; dig: opening '
                  .. 'the last wall floods the dug tiles (dig from above or behind a floodgate); cavern 1: cavern water, '
                  .. 'never offered (caverns stay sealed); removed: the last dry hospital removal (t, zones, locs, '
-                 .. 'n patients, tmax, give = GiveWater jobs then, after = a day later)'}
+                 .. 'n patients, tmax, give = GiveWater jobs then, after = a day later); locs (BUG-056): hospital locations, total / '
+                 .. 'with a zone (live) / without (stale: ignored by every count); carers (BUG-054): have, want, idle ones, '
+                 .. 'give = citizens giving water, mine = added by the kernel (Orderlies), err = why none was added'}
 end
 
 -- last summary (brief, tests): patients, thirst, wells, hospital/refuge water, buckets

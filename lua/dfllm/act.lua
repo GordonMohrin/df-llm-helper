@@ -16,7 +16,8 @@ local ITEM_FLAGS = {forbid = true, dump = true, melt = true}
 -- fishers too, economy staffs them while food is short and a fishing zone exists; FR-25: the planters and the
 -- plant gatherers in a starvation, by the names DF 53 may give the gathering detail [live-untested])
 A.TOOL_DETAILS = {Miners = true, Woodcutters = true, Hunters = true, Fisherdwarves = true, Planters = true,
-                  ['Plant gatherers'] = true, Gatherers = true, Herbalists = true}
+                  ['Plant gatherers'] = true, Gatherers = true, Herbalists = true,
+                  Orderlies = true}      -- BUG-054: water adds caregivers (FEED_WATER_CIVILIANS) for the patients
 -- the details whose labor needs a tool (pick, axe, crossbow, rod): a specialist (work_detail opts.only) keeps them
 A.TOOL_LABOR_DETAILS = {Miners = true, Woodcutters = true, Hunters = true, Fisherdwarves = true}
 -- BUG-023 (Run 11): the tool labors one dwarf may hold only one of (DFHack manipulator.cpp `special` columns: MINE,

@@ -402,6 +402,7 @@ T.test('hospital posts: vacant or held by the dead are filled with doctors who h
     local hosp = {id = 600, getType = function() return df.abstract_building_type.HOSPITAL end}
     local tav = {id = 601, getType = function() return df.abstract_building_type.INN_TAVERN end}
     W.site.buildings:insert('#', hosp); W.site.buildings:insert('#', tav)
+    F.building(W, 'ANY_ZONE', {x1 = 10, y1 = 10, x2 = 14, y2 = 14, z = 5, location_id = 600})   -- BUG-056: a zone makes it a hospital
     W.unit(3).status.labors = {[10] = true, [11] = true, [12] = true}      -- a soldier doctor: no post
     W.add_unit{id = 99, dead = true}
     df.global.world.occupations = {all = kmock.vec{
@@ -416,6 +417,30 @@ T.test('hospital posts: vacant or held by the dead are filled with doctors who h
   local p = {}
   for _, a in ipairs(W.find_acts('hospital_post')) do p[#p + 1] = {a.args[1], a.args[2]} end
   T.eq(p, {{1, 2}, {2, 8}}, 'unit 1 and 7 hold posts; the soldier doctor 3 neither counts nor gets a post')
+  df.global.world.occupations = nil
+end)
+
+T.test('BUG-056 (Run 11: 8 hospital locations stayed after their zones were deleted): the posts of a location without ' ..
+       'a zone are left alone, so the doctors fill the live hospital\'s posts (old: the stale locations\' older ids came first)',
+       function()
+  local W, Cm = medic_world(function(W)
+    for id = 600, 603 do
+      W.site.buildings:insert('#', {id = id, getType = function() return df.abstract_building_type.HOSPITAL end})
+    end
+    F.building(W, 'ANY_ZONE', {x1 = 10, y1 = 10, x2 = 14, y2 = 14, z = 5, location_id = 603})   -- only 603 has a zone
+    df.global.world.occupations = {all = kmock.vec{
+      {id = 1, type = df.occupation_type.DOCTOR, location_id = 600, unit_id = -1},
+      {id = 2, type = df.occupation_type.SURGEON, location_id = 601, unit_id = -1},
+      {id = 3, type = df.occupation_type.DIAGNOSTICIAN, location_id = 602, unit_id = -1},
+      {id = 4, type = df.occupation_type.DOCTOR, location_id = 603, unit_id = -1},
+      {id = 5, type = df.occupation_type.SURGEON, location_id = 603, unit_id = -1},
+    }}
+  end)
+  W.run(2)
+  local p = {}
+  for _, a in ipairs(W.find_acts('hospital_post')) do p[#p + 1] = {a.args[1], a.args[2]} end
+  T.eq(p, {{4, 1}, {5, 2}}, 'posts 4 and 5 of the live location; 1-3 belong to locations without a zone')
+  T.eq(Cm.kpi(W.K).doctors.stale, 3)
   df.global.world.occupations = nil
 end)
 
