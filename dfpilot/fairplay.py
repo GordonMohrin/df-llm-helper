@@ -629,13 +629,15 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400)},
                      # B2: BUG-061 slab pass, BUG-060 stale orders, FR-73 standing orders (list, frequency: checked below)
                      "slabs": {"max_orders": (0, 20), "restock_cap": (0, 30), "drop_per_day": (0, 500),
                                "trigger_ticks": (100, 33600), "scan_max": (100, 20000), "jam_min": (2, 50)},
-                     "stale": {"days": (1, 112), "wait_days": (1, 112), "per_day": (0, 50), "jobs_max": (100, 20000)},
+                     "stale": {"days": (1, 112), "wait_days": (1, 112), "per_day": (0, 50), "jobs_max": (100, 20000),
+                               "redo_max": (0, 20)},
                      "standing": {"amount": (1, 200), "request_days": (1, 112)},
                      "gather": {"drink_d": (0, 400), "drink_off": (0, 400)},
                      "barrels": {"brew_wait": (0, 200)},
                      # BUG-058: the running season's slots at once, autofarm 'auto' | 'off' | 'keep' and its food-day lines
                      "farms": {"per_day": (1, 200), "now_max": (1, 200), "autofarm": ["auto", "off", "keep"],
-                               "af_off_days": (0, 400), "af_on_days": (0, 400), "af_hold_days": (1, 112)},
+                               "af_off_days": (0, 400), "af_on_days": (0, 400), "af_hold_days": (1, 112),
+                               "fiber_slots": (0, 50)},
                      # BUG-057/FR-72: the work details follow the unclaimed jobs ("labors": job type -> labor name)
                      "cover": {"on": "bool", "min_jobs": (1, 1000), "gather_jobs": (1, 1000), "farm_per": (1, 100),
                                "farm_min": (1, 50), "farm_max": (1, 50), "gather_per": (1, 100), "gather_min": (1, 50),
