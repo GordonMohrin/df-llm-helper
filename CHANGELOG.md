@@ -1,5 +1,57 @@
 # CHANGELOG dfpilot
 
+## Crash recovery after DFHack 53.16-r3: the title-screen load, a loud alarm when nothing loads, the version watch (BUG-098, BUG-099, FR-81, 2026-10-23, package K2, note 71; offline, live-untested)
+- **Why:** the game session saw DFHack go from 53.16-r2 to 53.16-r3 (probably the Steam auto-update), DF crashed, and `dfpilot supervise`
+  could not bring the fort back: the stock `load-save` died with "Cannot write field viewscreen_titlest.sel_menu_line: not found" (the
+  field is `selected` now) and writing it moves nothing, the title menu follows the mouse. Every crash needed a human click on Continue,
+  and nothing said so: `supervise --once` printed "no dfllm fort loaded" and made a backup; the one alert was a bare `restart_failed`
+  without save, version or screen, shown a pass late, lost to a follow that started afterwards, and read by no command but the wake.
+- **What changed:** three parts. (1) The restart chain loads a save by clicking the title screen when DFHack's `load-save` fails. (2) A chain that loads nothing is a loud, cadenced alarm with the save, the DFHack version and the screen rows. (3) The DFHack version is recorded and a change is warned about once. In detail:
+- **BUG-098 (tools/embark/loadsave.lua, embark.lua, dfpilot/supervise.py; bugs/BUG-098):** the embark runner has a `load` mode: pure text
+  functions decide from the rows of the screen (main menu -> "Continue ..." else "Load ..."; the list -> the entry that shows the folder
+  name as a whole token, `autosave 1` is not `autosave 10`; a popup -> Okay/Yes/Load; loading -> wait; click again when the screen did
+  not change) and the proven hover-then-click engine clicks them; it reads both field names of `viewscreen_titlest`
+  (`sel_menu_line`, `selected`), calls DFHack's `load-save` first only where the old field exists, clicks only on the title family of
+  screens (never a fort, a map, an unknown screen, never a popup that talks of deleting), writes nothing to the title screen and logs the
+  rows it saw and the pixel it clicked (`status.json` `results`). supervise tries the stock script first as before; when it fails with
+  anything but "can't find save" (no clicks: DFHack does not know the folder) and "cannot reach DFHack yet" (and "can't find title" for
+  90 s), it starts the click run (one `dfhack-run lua -f embark.lua run <spec>`, then `<runtime>/embark/status.json` is read; a run is
+  stopped after 150 s; runs are 20 s, 40 s ... 300 s apart), the retry loops and limits are the old ones, the second load takes the same
+  path, and a fort that the player brought up meanwhile ends the loop. `python tools/embark/embark.py load SAVE [--entry T] [--no-stock]`
+  runs it by hand (prints every click with tile and pixel, the last rows and the title fields). The refusal for `dfhack-run lua -f
+  .../embark.lua` names that form; no new allowlist entry is needed (Python drives it, RULES 1.2).
+- **BUG-099 (supervise.py, wake.py, doctor.py; bugs/BUG-099):** a chain that cannot load (15 min without a load, or a click-through that
+  brings up no fort) records `needs_click {save, ver, why, screen}`, fails with `... on DFHack 53.16-r3: <reasons>` and raises the alert in
+  the SAME pass: "click Continue by hand: save 'autosave 1', DFHack 53.16-r3; the automatic load failed: ...; screen: ...". The follower
+  wakes it as NEEDS_CLICK (first move "tell Gordon at once"; also for a follow that starts while supervise's last pass still carries it);
+  `alert()` says it at once and then every 30 minutes at most, `restart_failed` does not repeat it, `dfllm doctor` lists it as a
+  problem. The alarm is a message, not a latch: no `norestart.flag`, no blocker; the next crash restarts as before, a live fort pops
+  it. RULES section 7: the QUICKSAVE_FAILED row is QUICKSAVE_FAILED / NEEDS_CLICK now (the file stays at 300 lines).
+- **FR-81 (supervise.py; docs/feature-requests):** the chain reads `dfhack-run version` when DFHack first answers and stores `dfhack {ver,
+  changed, warned}` and `last_loaded.ver` in `supervise.json`; a version other than the one of the last successful load is the alert
+  `dfhack_version`, said once per pair (also when the new version then loads the save); the pass summary, `dfllm doctor` and every
+  failure text name the version; `supervise --check-version` reads and records it on demand. Steady state still makes no DF call.
+- **Safety:** the click path runs only with no fort loaded (a restart chain, or by hand at the title screen), so a SIEGE, BREACH or lockdown, a
+  fort of 7 or 80, a reclaimed fort and an older kernel state are untouched; every run is bounded (150 s, 14 clicks, 4 identical screens, 20 s ... 300 s
+  apart, 15 minutes per chain); `norestart.flag` or a held `live.lock` stops new runs; a list entry must show the folder name as a whole token, so no
+  older save is chosen; an old `supervise.json` without the new keys warns about nothing. Details: bugs/BUG-098 "Safety".
+- **Contracts / config:** no registry event, verb or config key (NEEDS_CLICK is a follower wake like HB_STALE and QUICKSAVE_FAILED, not
+  in `schema.EVENTS`); CONTRACTS section 8 (`supervise.json`, `embark/`), the follower wakes and section 15 say what is new;
+  `tools/embark/ui.json` has the `load` limits; `tests/test_integration_docs.py` knows NEEDS_CLICK as a follower wake.
+- **Tests (each fails on b2b9435):** tests/lua/test_loadsave.lua and test_loadsave_entry.lua (pure functions, the flows on the fake DF, the
+  entry against fake `dfhack`/`df`/`gui`), tests/test_supervise_k2.py (fake OS and DFHack: stock first, fallback, bounds, the alarm and its
+  cadence, later attempts, versions), tests/test_k2_surfaces.py (wake, doctor, shell policy, `embark.py load`, documents).
+  tests/test_supervise.py: the fake OS answers `version` and the title run, its two verb assertions expect `version`.
+- **Live check:** (nothing here ran in a game) at the title screen of a test fort, `python tools/embark/embark.py screen title53`, then
+  `python tools/embark/embark.py load "<newest save>"`: the printed clicks (tile, pixel), rows and `title` fields decide the labels, the
+  pixel and whether a second click is needed; if the list shows no folder name add `--entry <text>`. Then kill DF and let the task run:
+  `supervise.log` has one `title run` line per run, the fort comes back, `supervise.json` `last_loaded.ver` is `53.16-r3`. To see the
+  alarm: rename `tools/embark/embark.lua`, kill DF, wait 15 min: NEEDS_CLICK wake, `dfllm doctor` problem, `supervise.log` ALERT line;
+  put the file back and click Continue: the next pass pops it. `python -m dfpilot supervise --check-version` prints the version.
+- **Not decided offline:** see bugs/BUG-098 and BUG-099 (labels and pixel of the 53.16-r3 menu, one click or two, whether the list shows the
+  folder name, whether "Continue" without a list loads the newest save, how dfhack-run words an unreachable DFHack, whether the Steam
+  install keeps its release name in a file under `hack/` for a warning before the next restart).
+
 ## Package K1: Kern+ and the refuge are watched and painted again (BUG-096, BUG-097, FR-80, 2026-10-23; offline, live-untested)
 - **Why:** Run 14 (note 70, y586): Kern+ shrank to about one tile and Tiefe+ vanished from `plotinfo.burrows.list`; the hospital zone lay
   outside the alert burrow for the fourth time and the game session painted its 35 tiles back by hand. The kernel reads the burrows all

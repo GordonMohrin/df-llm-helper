@@ -82,6 +82,7 @@ function V.capture(src)
   v.focus = src.focus and src.focus() or {}
   v.cs = src.cs and src.cs() or nil
   v.prep = src.prep and src.prep() or nil
+  v.title = src.title and src.title() or nil   -- viewscreen_titlest fields (loadsave.lua); nil off the title screen
   return v
 end
 
@@ -89,7 +90,7 @@ function V.from_lines(lines, extra)  -- for fixtures and tests
   local v = setmetatable({w = 0, h = #lines, lines = lines}, View)
   for _, l in ipairs(lines) do if #l > v.w then v.w = #l end end
   extra = extra or {}
-  v.focus, v.cs, v.prep = extra.focus or {}, extra.cs, extra.prep
+  v.focus, v.cs, v.prep, v.title = extra.focus or {}, extra.cs, extra.prep, extra.title
   return v
 end
 

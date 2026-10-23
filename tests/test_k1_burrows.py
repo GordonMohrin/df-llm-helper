@@ -428,7 +428,7 @@ def test_documents_name_the_new_numbers():
     rules = read("RULES.md")
     assert "BURROW_SHRUNK" in rules and "burrow_lost" in rules and rules.count("\n") <= 300
     assert "burrow_lost" in read("docs/v2/DESIGN.md") and "BURROW_SHRUNK" in read("docs/v2/CONTRACTS.md")
-    assert "BUG-096" in read("CHANGELOG.md").split("\n## ")[1] and "FR-80" in read("CHANGELOG.md").split("\n## ")[1]
+    assert any("BUG-096" in s and "FR-80" in s for s in read("CHANGELOG.md").split("\n## ")[1:]), "one entry names BUG-096 and FR-80"
 
 
 # ---------------------------------------------------------------- the real kernel (tests/lua/burrow_guard_scenario.lua)

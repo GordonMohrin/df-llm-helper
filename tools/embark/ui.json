@@ -8,8 +8,10 @@
  "citizens": [10, 9, 3],
  "tabs": {"dwarves": "Dwarves", "items": "Items", "animals": "Animals"},
  "buy": {"dx": 0}, "buy_hover_ms": 400, "buy_after_ms": 300, "buy_settle_ms": 400,
+ "load": {"tries": 14, "timeout_ms": 120000, "settle_ms": 2500, "stale": 4, "unknown_polls": 12},
  "calibrate": ["world_click: percent of the window; closed loop corrects the tile, the click only has to land on the map",
                "local_tile_px/local_k (live L0, 1716x1000): placing rectangle min = cam_local + k + floor((held px - window centre px) / 16); closed loop re-measures k",
                "citizens: [x, y0, dy] tile of dwarf 0 in the Prepare carefully list and rows per dwarf (startdwarf.lua: 3 rows, list at x=5 y=9)",
                "tabs: tab labels on Prepare carefully",
-               "buy.dx: column offset from the item name to the clickable +1 control (abs_x: fixed column instead)"]}
+               "buy.dx: column offset from the item name to the clickable +1 control (abs_x: fixed column instead)",
+               "load (K2, loadsave.lua): tries = clicks before 'not done'; timeout_ms = the click phase; settle_ms = wait after a click before the screen is judged (a second click only goes out when the screen did not change); stale = identical screens in a row that end the run; unknown_polls = polls on a title screen with neither the main menu nor the save before the run says so"]}

@@ -90,7 +90,7 @@ def test_every_event_is_a_row_of_the_contracts_event_table():
 def test_every_rules_section_7_row_names_events_that_exist():
     rules = read("RULES.md")
     sec = rules.split("## 7.")[1].split("## 8.")[0]
-    synthetic = {"QUICKSAVE_FAILED"}                      # follow's own wake reasons (wake.SYNTH), not kernel events
+    synthetic = {"QUICKSAVE_FAILED", "NEEDS_CLICK"}       # follow's own wake reasons (wake.SYNTH), not kernel events
     names = set()
     for line in sec.splitlines():
         if line.startswith("|") and not line.startswith("|---") and not line.startswith("| Event"):

@@ -740,6 +740,8 @@ function S.build(spec, cfg, loadout)
     prep_steps(out, spec, cfg, loadout)
   elseif spec.mode == 'steps' then  -- Lua-built step list (embark.lua 'click')
     out = spec.steps
+  elseif spec.mode == 'load' then   -- K2: a saved fort from the title screen (loadsave.lua)
+    out = require('embark.loadsave').steps(spec, cfg)
   else
     error('unknown mode ' .. tostring(spec.mode))
   end

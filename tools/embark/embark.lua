@@ -1,6 +1,7 @@
 -- tools/embark/embark.lua: in-game embark helper, run BEFORE `dfllm adopt` (no kernel yet).
 --   dfhack-run lua -f <repo>/tools/embark/embark.lua <cmd> [args]
 --   state | check | screen [name] | click <text> [occ] | key <KEY> | run <spec.json> | status | stop
+--   load <save folder> [--entry TEXT] [--no-stock]   K2: load a saved fort from the title screen (loadsave.lua)
 -- Fair play: reads only what the vanilla embark screens show (text buffer, focus strings,
 -- the selected rectangle, points/picks left). Writes only UI state, all in W below: mouse
 -- position, simulated input, camera centre, list selection. No world data, no hidden tiles,
@@ -90,6 +91,19 @@ local function source()
         zoom_world = {scr.zoom_cent_x // 16, scr.zoom_cent_y // 16},
         emb_min = {l.embark_pos_min.x, l.embark_pos_min.y}, emb_max = {l.embark_pos_max.x, l.embark_pos_max.y},
         cam_world = {scr.region_cent_x, scr.region_cent_y}, cam_local = {scr.zoom_cent_x, scr.zoom_cent_y}}
+    end,
+    -- K2: the fields of viewscreen_titlest the load run logs. DFHack 53.16-r3 renamed sel_menu_line to `selected`
+    -- (old_field = the old name still exists); a missing field raises in DFHack, hence pcall. Read only.
+    title = function()
+      local okc, cls = pcall(function() return df.viewscreen_titlest end)
+      if not (okc and cls and cls:is_instance(scr)) then return nil end
+      local function field(name)
+        local ok, val = pcall(function() return scr[name] end)
+        if ok then return tonumber(val) or tostring(val) end
+        return nil
+      end
+      return {old_field = field('sel_menu_line') ~= nil, sel_menu_line = field('sel_menu_line'),
+        selected = field('selected'), selected_r = field('selected_r'), mode = field('mode')}
     end,
     prep = function()
       if not df.viewscreen_setupdwarfgamest:is_instance(scr) then return nil end
@@ -187,6 +201,14 @@ function W.claim() set_focus(true) end
 -- read (not write) the mouse pixel DF holds; input.lua probe() learns the cached OS cursor from it
 local function peek() local g = df.global.gps return g.precise_mouse_x, g.precise_mouse_y end
 function W.sim(keys) gui.simulateInput(native(), keys) end                       -- gui.lua:58
+-- K2: DFHack's own stock `load-save` (RULES 1.2 allows it), called only where viewscreen_titlest still has the
+-- field it writes (loadsave.lua checks `old_field`); true, output | false, why
+function W.stock_load(save)
+  local ok, out, cr = pcall(dfhack.run_command_silent, 'load-save', save)
+  if not ok then return false, tostring(out) end
+  if cr ~= nil and cr ~= 0 then return false, tostring(out or cr) end
+  return true, tostring(out or '')
+end
 function W.camera(which, x, y)  -- = scrolling the map; changes nothing in the world
   local scr = native()
   if not df.viewscreen_choose_start_sitest:is_instance(scr) then return end
@@ -286,6 +308,18 @@ elseif cmd == 'click' then
 elseif cmd == 'key' then
   W.sim(args[2])
   print('sent ' .. tostring(args[2]))
+elseif cmd == 'load' then
+  -- K2: load <save folder> [--entry TEXT] [--no-stock]; the same run as `run` with a spec of mode load (embark.py load
+  -- and `dfpilot supervise` write the spec file and use `run`)
+  local save, entry, stock = args[2], nil, true
+  if not save or save == '' or save:sub(1, 2) == '--' then qerror('usage: load <save folder> [--entry TEXT] [--no-stock]') end
+  local i = 3
+  while args[i] do
+    if args[i] == '--entry' then entry = args[i + 1]; i = i + 2
+    elseif args[i] == '--no-stock' then stock = false; i = i + 1
+    else qerror('load: unknown argument ' .. tostring(args[i])) end
+  end
+  start({v = 2, id = 'load' .. os.time(), mode = 'load', save = save, entry = entry, stock = stock})
 elseif cmd == 'run' then
   local spec = read_json(args[2] or '')
   if not spec then qerror('cannot read spec ' .. tostring(args[2])) end

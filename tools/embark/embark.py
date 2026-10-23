@@ -6,6 +6,7 @@
     python tools/embark/embark.py embark WX,WY[,LX,LY] [--waive ID ...] [--accept ID ... --reason TEXT]
                                         [--play-now] [--allow-unspent]
     python tools/embark/embark.py prep [--play-now] [--allow-unspent]
+    python tools/embark/embark.py load SAVE [--entry TEXT] [--no-stock]    (K2: a saved fort from the title screen)
 
 A run costs ONE dfhack-run call (`embark.lua run <spec>`); afterwards only
 <DF>/dfllm-runtime/embark/status.json is read. Stdlib only. Env DFLLM_DF = DF folder.
@@ -63,9 +64,18 @@ def parse_site(text: str) -> list[int]:
 
 def make_spec(mode: str, *, run_id: str | None = None, world: str | None = None, cands=None, site=None,
               waive=(), accept=(), reason: str | None = None, play_now: bool = False, allow_unspent: bool = False,
-              tiles: bool | None = None, now: float | None = None) -> dict:
+              tiles: bool | None = None, now: float | None = None, save: str | None = None,
+              entry: str | None = None, stock: bool = True) -> dict:
     spec = {"v": 2, "id": run_id or f"{mode}{int(now if now is not None else time.time())}", "mode": mode}
-    if mode == "newgame":
+    if mode == "load":
+        name = " ".join(str(save or "").split())
+        if not name or "/" in name or "\\" in name or name in (".", ".."):
+            raise ValueError(f"load needs a save folder name (no path): {save!r}")
+        spec["save"] = name
+        if entry:
+            spec["entry"] = " ".join(str(entry).split())[:80]
+        spec["stock"] = bool(stock)
+    elif mode == "newgame":
         spec["world"] = world or "Zilirr"
     elif mode == "scan":
         if not cands:
@@ -154,15 +164,44 @@ def summarize(doc: dict | None) -> list[str]:
     if not doc:
         return ["no status (is DF running and the run started?)"]
     lines = [f"{doc['id']}: {doc['state']} at {doc.get('step') or '-'} ({doc.get('i')}/{doc.get('n')}) {doc.get('msg', '')}"]
-    rows = sorted(doc.get("results") or [], key=lambda r: (ORDER.get(r.get("verdict"), 3), -r.get("score", 0)))
+    res = doc.get("results")
+    rows = sorted(res, key=lambda r: (ORDER.get(r.get("verdict"), 3), -r.get("score", 0))) if isinstance(res, list) else []
     for r in rows:
         w, e, s = r.get("world") or ["?", "?"], r.get("emb") or ["?", "?"], r.get("size") or ["?", "?"]
         lines.append(f"  {r['tag']}: world {w[0]},{w[1]} rect {e[0]},{e[1]} {s[0]}x{s[1]} -> {r['verdict']} {r.get('score')}"
                      f" fail={','.join(r.get('fails') or []) or '-'} warn={','.join(r.get('warns') or []) or '-'}"
                      f" unknown={','.join(r.get('unknown') or []) or '-'}")
+    if isinstance(res, dict):
+        lines.extend(load_lines(res))
     for w in doc.get("warnings") or []:
         lines.append(f"  warning: {w}")
     return lines
+
+
+def load_lines(res: dict) -> list[str]:
+    """K2: what a load run saw and clicked (the first live use is calibrated from these lines)."""
+    out = []
+    for c in res.get("clicks") or []:
+        out.append(f"  click {c.get('n')}: {c.get('kind')} \"{c.get('text')}\" tile {c.get('tx')},{c.get('ty')} "
+                   f"pixel {c.get('px')},{c.get('py')}")
+    if res.get("title"):
+        out.append("  title screen fields: " + json.dumps(res["title"], sort_keys=True))
+    if res.get("rows"):
+        out.append(f"  last screen ({res.get('screen')}): {res['rows']}")
+    return out
+
+
+def load_verdict(doc: dict | None) -> str:
+    """K2: the one line a load run ends with: LOAD OK or LOAD FAILED and the reason (screen text found or not, no such save)."""
+    if not doc:
+        return "LOAD UNKNOWN: no status (is DF running at the title screen and the run started?)"
+    res = doc.get("results") if isinstance(doc.get("results"), dict) else {}
+    clicks = len(res.get("clicks") or [])
+    if doc.get("state") == "done":
+        how = f"after {clicks} click(s)" if clicks else "by DFHack's own load-save"
+        return f"LOAD OK: left the title screen ({res.get('outcome') or '?'}) {how}"
+    why = doc.get("msg") or doc.get("state")
+    return f"LOAD {str(doc.get('state')).upper()}: {why}"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -172,6 +211,10 @@ def main(argv: list[str] | None = None) -> int:
         sub.add_parser(name)
     sp = sub.add_parser("screen")
     sp.add_argument("name", nargs="?")
+    sp = sub.add_parser("load", help="K2: load a saved fort from the title screen (Continue / Load game, then the list)")
+    sp.add_argument("save", help="the save folder name, e.g. 'autosave 1'")
+    sp.add_argument("--entry", help="the text to click in the list when it does not show the folder name")
+    sp.add_argument("--no-stock", action="store_true", help="do not try DFHack's own load-save first")
     sp = sub.add_parser("newgame")
     sp.add_argument("--world", default="Zilirr", help="ASCII part of the world name (accents read as '?')")
     sp = sub.add_parser("scan")
@@ -208,7 +251,9 @@ def main(argv: list[str] | None = None) -> int:
                          accept=getattr(a, "accept", ()), reason=getattr(a, "reason", None),
                          play_now=getattr(a, "play_now", False), allow_unspent=getattr(a, "allow_unspent", False),
                          tiles=(True if getattr(a, "tiles", False) else False if getattr(a, "no_tiles", False)
-                                else None))
+                                else None),
+                         save=getattr(a, "save", None), entry=getattr(a, "entry", None),
+                         stock=not getattr(a, "no_stock", False))
     except ValueError as e:
         ap.error(str(e))
     log_accept(spec, out)
@@ -218,6 +263,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     doc = wait(spec["id"], out, a.timeout)
     print("\n".join(summarize(doc)))
+    if a.cmd == "load":
+        print(load_verdict(doc))
     return 0 if doc and doc.get("state") == "done" else 1
 
 
