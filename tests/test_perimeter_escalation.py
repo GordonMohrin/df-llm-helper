@@ -183,6 +183,10 @@ def test_plan_check_refuses_a_phase_raise_while_the_perimeter_is_open(save):
     errs, warn = plan.check(doc, st, decisions={}, banned=plan.BANNED, prev=prev)
     assert not [e for e in errs if e.startswith("perimeter")]
     assert any(w.startswith("perimeter: open for 12 days") for w in warn), warn
+    st["phase"] = "P1"                                                # before B1 (P2) the entrance is open by design
+    errs, warn = plan.check(doc, st, decisions={}, banned=plan.BANNED, prev=prev)
+    assert not [e for e in errs if e.startswith("perimeter")], errs
+    assert any(w.startswith("perimeter: open for 12 days") and "by design" in w for w in warn), warn
     closed = _state(save, fail=["audit"], pd=None, pw=None)
     closed["phase"] = "P2"
     errs, warn = plan.check(doc, closed, decisions={}, banned=plan.BANNED, prev=prev)

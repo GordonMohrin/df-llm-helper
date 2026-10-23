@@ -22,6 +22,7 @@
   now): `ready.pd`/`pw`, status `PERIMETER OPEN N days`, SIEGE_UNREADY repeating every `escalate_every` (5) days and 5 real minutes from `escalate_days` (2) days on,
   max-pop held from `hold_pop` (30) citizens, `plan check` refusing a phase raise. `follow --no-auto`: heartbeat `auto 0`, status `auto-seal off, N openings`, every wake line
   `AUTO-SEAL OFF, N openings`.
+- **Review fix (FR-70):** `plan check` refuses a phase raise while the perimeter is open only from phase P2 on (`plan.PERIMETER_GATE_FROM`); before B1 (the P2 build) the entrance is open by design, so a raise from P0/P1 is the way to close it and gets a warning only.
 - **DECISIONS 1:** `plans/year1.json`, DESIGN §5.2/§5.12, DOCTRINE and the fortcore docstring: stage 3 (O1, B2, refuge) is the first P3 build (stage 4 stays P6);
   `plan.stage3_gate` (check: no phase_target P3+ while O1 or B2 do not stand unless stage 3 is under way or planned before the other new builds; a lost gate after stage 3 is a
   warning for the keeper), `plan propose` drafts stage 3 first (also for a fort whose phase list had it later); `O1_PHASE` P3, the gallery warning keeps P5 (`GALLERY_PHASE`).

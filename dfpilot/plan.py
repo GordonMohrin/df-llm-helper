@@ -27,6 +27,7 @@ BUILDS_PER_SEASON = 3                     # runner runs <= 3 projects at once
 CORE_DAYS = 90                            # BUG-028: drink/food days wanted inside Kern+ and the refuge (seal.CFG.sup_days)
 O1_PHASE = "P3"                           # DECISIONS 1: plans/year1.json: fortcore stage 3 (O1, B2, the refuge) is a P3 build
 GALLERY_PHASE = "P5"                      # plans/year1.json: the outward gallery over O1 comes with P5 (Run 10)
+PERIMETER_GATE_FROM = "P2"                # FR-70: phase raises are refused while the perimeter is open from this phase on
 STAGE3_PHASE = O1_PHASE                   # no phase_target at or above it without O1, B2 and the refuge (stage3_gate)
 BRIDGE_STANDING = ("up", "down", "moving", "replaced")      # state.bridges: a gate that stands (BUG-048: or a wall + door)
 GALLERY = "gallery_o1"                    # bp/defense.py: the outward crossbow gallery over the O1 approach (Run 10)
@@ -803,10 +804,15 @@ def perimeter_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[l
     days, pw = r.get("pd"), r.get("pw") or "?"
     open_for = f" for {days} day{'s' if days != 1 else ''}" if isinstance(days, int) else ""
     cur = s.get("phase") or "P0"
-    if doc["phase_target"] > cur:
+    # Before P2 the entrance tunnel is open by design (B1, the first gate, is the P2 build: fortcore stage 2), so a raise
+    # from P0 or P1 is the way to close it and is never refused; the days still count in the warning
+    if doc["phase_target"] > cur and cur >= PERIMETER_GATE_FROM:
         return [f"perimeter: raising phase_target {cur} -> {doc['phase_target']} while the perimeter is open{open_for} "
                 f"({pw}; readiness R0 open_perimeter): seal first (dfllm cmd bp.place tpl=seal site=S1 at=last; a "
                 "lost bridge: dfllm cmd inspect what=defense)"], []
+    if cur < PERIMETER_GATE_FROM:
+        return [], [f"perimeter: open{open_for} ({pw}; readiness R0 open_perimeter): by design until B1 stands (P2); the "
+                    "phase may rise"]
     return [], [f"perimeter: open{open_for} ({pw}; readiness R0 open_perimeter): max-pop and the phase stay held until "
                 "it is closed; seal first (dfllm cmd bp.place tpl=seal site=S1 at=last)"]
 
