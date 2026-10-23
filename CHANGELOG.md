@@ -1,5 +1,43 @@
 # CHANGELOG dfpilot
 
+## Integration audit: state size, status ranking and token budgets of the merged packages (BUG-079, BUG-080, 2026-10-23; offline, live-untested)
+- **Why:** BUG-044..075 and FR-70..78 were reviewed one by one; nobody read the combination. A maximal fixture (a fort of 80, every
+  optional field of every module, all R0 blockers, a lockdown held by a gremlin, a reclaimed fort that lost a fifth of its peak)
+  shows what the sum does to the 4 KB state document, to `dfllm status` (300 tokens), to `dfllm brief` (1,500) and to the wake line.
+- **BUG-079 (bugs/BUG-079):** `compose` shed keys from the document and then published the shed document as `K.view()`; the kernel's
+  own modules (gate's caravan window, drill, economy's walk-group split, care's coffin project) lost `trade`, `bridges`, `proj` in
+  a big fort. Now the view is a shallow copy of the complete document made before the shed; the file and `inspect state` are
+  shed as before.
+- **BUG-080 (bugs/BUG-080):** `status_text` ranked the pop and supply bundles as rank 1, so a long adopted-fort, stress, coffins and
+  idle clause pushed the lockdown's cause (BUG-065) out of the status; the parts now have their own ranks (`pop_items`,
+  `supply_items`, `alarm_items`; the brief joins them as before) and `fit_ranked` cuts the rank-2 lines to 60 tokens before it
+  drops one whole. `wake.PRIO` lacked PATIENT_DYING and MOOD_CRITICAL (a dying patient woke behind YEAR_REVIEW with its hint).
+- **Integration audit I1 (what was checked):**
+  (1) State size. A hand-built maximal state is 5.5 KB (schema maximum with every string full: 7.4 KB). SHRINK sheds proj, alert,
+  mil, trade and care first (about 1.5 KB, to 3.97 KB), so `ready` (the R0 blockers, 752 B), `alarm` (not in SHRINK, never shed),
+  `mode`, `pop` and `stock` survive; only above the schema maximum would `ready` go. `sched`, `adopt`, `snap`, `water`, `orders`,
+  `wave`, `k` are not in SHRINK and stay (about 2.9 KB at the schema maximum): left alone, plan check reads `sched` and `water`.
+  CONTRACTS named `stale` before `ready` in the shed order; the code has it after `pop` (9642ffe): the text is corrected.
+  (2) Budgets. Maximal fixture: status 295 of 300 tokens (head, UNREADY clipped, the lockdown with its cause, pop, the stock
+  sentence), brief 1,474 of 1,500 (the head section alone: the sections behind it, open decisions among them, would drop at
+  that size: left as it is, see the open risk). The 600-token promise is the orchestrator's `dfpilot check` of the game project,
+  not this repository's: STATUS_TOKENS 300 / BRIEF_TOKENS 1500 / WAKE_TOKENS 150 are the limits here.
+  (3) Wake line. SIEGE_UNREADY (escalation, auto-seal off, office hint) + PATIENT_DYING + MOOD_CRITICAL + sortie decision + YEAR_REVIEW:
+  144 of 150 tokens, the head and tail cost about 95, the items shrink to 8-token stubs ("PATIENT_DYING: 3 patien~") but the
+  line stays within WAKE_TOKENS and the order now follows PRIO.
+  (4) Events. Every class-A `K.emit` added since f17e2b3 (MOOD_RISK, MOOD_CRITICAL, PATIENT_DYING, SIEGE_UNREADY, both
+  DECISION_NEEDED, KERN_FAULT runner, PERIMETER_BROKEN, SIEGE_END, PERF_DEGRADED) runs behind util/cadence or once per episode;
+  PERF_DEGRADED freeze keeps its pre-existing once per game day (a freeze that repeats at timestream speed can emit every 3 s of
+  wall time: not changed here, not new).
+  (5) Inspect replies (8 KB, `reply()` replaces a bigger one by `{trunc=1}`): `build:x,y,z`, `offices` and `details` are bounded by
+  the config and the vacant posts; `refuge` and `perimeter` by their caps (60 pieces, 40 gone); `defense` (16 bridges cap) is
+  about 6.6 KB for 8 bridges that were all lost, so it fits; `water_sources` about 6 KB at 12 bodies and 30 sources.
+- **Tests:** tests/lua/test_i1_state.lua (the view), tests/test_i1_state.py (five tests: busy fort, alarm parts, maximal state
+  within both budgets, the rank-2 cut, the wake order); all fail on 9bcb14f.
+- **Open risk:** the brief's head section (unready, alarm, pop, supply, defense, sched, proj, kern, snap) is not ranked inside the
+  1,500 tokens: a state as big as the maximal one leaves nothing for plan, open decisions and class-A events (they come through
+  the wake line and `dfllm events` as before).
+
 ## Saves, freezes and status gaps: `dfllm save` follows the real save, every frame gap has a cause, status keeps pop and stock, the idle line is broken down (BUG-069, BUG-070, BUG-071, FR-77, 2026-10-23; offline, live-untested)
 - **Why (Runs 11-13, y456-y506, game session notes 1, 4, 7, 39):** Wheelsblows y506 autumn d11: `dfllm save` said QUICKSAVE_FAILED
   after 122 s ("no fortress save folder newer than the call (dfhack-run printed nothing)") while the newest save was an
