@@ -120,3 +120,12 @@ lines). Everything is "offline, live-untested": each bug file names its live che
 | 69 | memorial slabs for old ghosts | BUG-078 |
 | (audit) | four integration audits over everything merged so far | BUG-079 .. BUG-086 |
 | (audit J3) | the whole tree after waves A-D and the four audits: the status ranking of the militia rotation, the standing-order phase in `lint --config`, DECISION_NEEDED questions over the event schema's 200 bytes, module counts and verb arguments in the documents | BUG-093 .. BUG-095 |
+
+## Third pass (2026-10-23, notes 70-72 and the audit round J)
+| Note | What | Where |
+|---|---|---|
+| 70 | Kern+ lost its tiles and Tiefe+ vanished, hospital_out the 4th time | BUG-096, BUG-097, FR-80 (burrow guard in seal: reading, BURROW_SHRUNK, repair; the cause itself is read live from the event data) |
+| 71 | load-save broken by DFHack 53.16-r3, crash recovery silent | BUG-098, BUG-099, FR-81 (title-screen load by mouse click, `needs_click` alarm, version watch) |
+| 72 | "blocks: no source in the fort" with 225 blocks, mood death | BUG-100 (real filter, free/reachable counts, every unmet slot incl. the cloth wall) |
+| (audit J) | wave D read together with the rest | BUG-087 .. BUG-095 |
+
