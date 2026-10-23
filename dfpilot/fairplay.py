@@ -637,6 +637,50 @@ def perf_errors(path: str | Path | None = None) -> list[str]:
     return errs
 
 
+# BUG-096/BUG-097/FR-80 (lua/dfllm/burrowkeep.lua M.DEF / M.LIM): config/baseline.json "burrow": {"guard": {...}} = seal's burrow
+# guard (Kern+ and the refuge are read once a game day and at a load). on = false switches it off (no reading, no record),
+# shrink_pct = the share of its tiles a burrow may lose between two readings before BURROW_SHRUNK (a burrow that is gone always
+# counts), repair_per_day = the tiles painted again a game day (0 = a sensor only, nothing is painted), settle_days = days
+# without progress after which a loss is taken as the new baseline, every_s = the fewest real seconds between two readings (a
+# game day lasts 2-12 s at the speeds of the runs; a big burrow costs a quarter of a second to read). burrowkeep.conf keeps its default for a value of another
+# type or out of range; lint --config refuses it.
+BURROW_GUARD_LIM: dict = {"on": "bool", "shrink_pct": (5, 95), "repair_per_day": (0, 20000), "settle_days": (1, 365),
+                          "every_s": (10, 3600)}
+
+
+def burrow_errors(path: str | Path | None = None) -> list[str]:
+    """Problems of the optional "burrow" part of config/baseline.json (BUG-096): unknown keys, values the kernel ignores
+    (another type, out of range). A missing file or part is fine."""
+    p = Path(path or BASELINE_PATH)
+    if not p.exists():
+        return []
+    name = "config/baseline.json"
+    try:
+        doc = json.loads(_read(p))
+    except ValueError as e:
+        return [f"{name}: not JSON ({e})"]
+    sec = doc.get("burrow", {}) if isinstance(doc, dict) else {}
+    if not isinstance(sec, dict):
+        return [f"{name}: burrow must be an object"]
+    errs = []
+    for k, v in sec.items():
+        if k != "guard":
+            errs.append(f"{name}: burrow.{k}: unknown key")
+        elif not isinstance(v, dict):
+            errs.append(f"{name}: burrow.guard must be an object")
+        else:
+            for gk, gv in v.items():
+                lim = BURROW_GUARD_LIM.get(gk)
+                if lim is None:
+                    errs.append(f"{name}: burrow.guard.{gk}: unknown key")
+                elif lim == "bool":
+                    if not isinstance(gv, bool):
+                        errs.append(f"{name}: burrow.guard.{gk}: true or false expected, got {gv!r}")
+                elif not (isinstance(gv, int) and not isinstance(gv, bool) and lim[0] <= gv <= lim[1]):
+                    errs.append(f"{name}: burrow.guard.{gk}: int {lim[0]}..{lim[1]} expected, got {gv!r}")
+    return errs
+
+
 # BUG-042 (lua/dfllm/economy.lua M.DEFAULTS): the economy knobs of the drink line, the unvalidated-order watch, the
 # manager's office and the drink gatherers ("bool", else an int range); economy.conf takes the file's part as it is,
 # so a bad value here would reach the kernel: lint --config refuses it. Other economy keys are checked by the mirror

@@ -221,6 +221,12 @@ def line_unready(ctx: Ctx) -> str:
         else:
             nxt.append("the hospital lies outside Kern+/Tiefe+: plan it inside Tiefe+ next to accepted water (a cistern "
                        "there first), then remove the old zones")
+    if "burrow_lost" in fails:                 # BUG-096 (Run 14 note 70): Kern+ or the refuge lost a well or the refuge
+        bg = (ctx.s.get("alert") or {}).get("bg")
+        bg = bg if isinstance(bg, dict) else {}
+        nxt.append(f"{bg.get('b') or 'Kern+/Tiefe+'} lost tiles that held {bg.get('crit') or 'a well or the refuge'}: the kernel "
+                   f"paints them again ({bg.get('st') or 'see status `burrows`'}); where it cannot, paint them in the burrows "
+                   "screen (w) or place the room again")
     if "office" in fails:                      # BUG-055 (Run 14 y577): a vacant office the kernel could not fill
         office = r.get("office") if isinstance(r.get("office"), str) else ""
         nxt.append(office or "a vacant office or squads without a leader: dfllm cmd inspect what=offices")
@@ -622,6 +628,21 @@ def line_alert(al: dict) -> str:
     return txt
 
 
+def line_burrow(ctx: Ctx) -> str:
+    """BUG-096/FR-80 (state alert.bg, seal's burrow guard): 'burrows: Kern+ 9 of 121 tiles (runtime), 40 painted again, repairing;
+    held: well,refuge' while a burrow is below its last good reading (the worst one; '+N more' for others), '' when none."""
+    bg = (ctx.s.get("alert") or {}).get("bg")
+    if not isinstance(bg, dict):
+        return ""
+    txt = (f"burrows: {bg.get('b', '?')} {bg.get('now', '?')} of {bg.get('was', '?')} tiles ({bg.get('c', '?')}), "
+           f"{bg.get('fx', 0)} painted again" + (f", {bg['st']}" if bg.get("st") else ""))
+    if bg.get("crit"):
+        txt += f"; held: {bg['crit']}"
+    if bg.get("n", 1) > 1:
+        txt += f" (+{bg['n'] - 1} more)"
+    return txt
+
+
 def line_proj(ctx: Ctx, n: int = 3) -> str:
     pr = ctx.s.get("proj") or []
     if not pr:
@@ -755,7 +776,8 @@ def status_text(save_dir: Path) -> str:
     else:
         lines += [(2, line_unready(ctx))] + alarm_items(ctx) + pop_items(ctx) + supply_items(ctx)
         core, extra = def_parts(ctx)
-        lines += [(3, _join(core)), (3, line_sched(ctx)), (4, line_proj(ctx)), (4, line_kern(ctx)), (4, line_snap(ctx)),
+        lines += [(3, _join(core)), (3, line_burrow(ctx)), (3, line_sched(ctx)), (4, line_proj(ctx)), (4, line_kern(ctx)),
+                  (4, line_snap(ctx)),
                   (5, _join(extra))]                                 # J3: the army's detail is the first line to go
     return fit_ranked(lines, STATUS_TOKENS)
 
@@ -872,7 +894,7 @@ def brief_text(save_dir: Path, budget: int = BRIEF_TOKENS) -> str:
         head.append(_no_state(ctx))
     else:
         core, extra = def_parts(ctx)                   # J3: the army's detail last: it goes first
-        head += [x for x in (line_unready(ctx), line_alarm(ctx), line_pop(ctx), line_supply(ctx), _join(core),
+        head += [x for x in (line_unready(ctx), line_alarm(ctx), line_pop(ctx), line_supply(ctx), _join(core), line_burrow(ctx),
                              line_sched(ctx), line_proj(ctx, 8), line_kern(ctx), line_snap(ctx), _join(extra)) if x]
     sections = [head]
     for title, lines in (("## plan", sec_plan(ctx)), ("## decisions open (ask Gordon)", sec_decisions(ctx)),

@@ -16,7 +16,9 @@
 -- cavern until its plug wall stands, runner.cavern_open), no_kern, no_refuge (burrows), refuge_dry (Run 11, siege 8:
 -- the refuge holds no drink by seal's audit, seal.refuge_drink: drink < citizens and no well, or its wells are dry by
 -- water's state refuge_ok 0; SIEGE_UNREADY says what to build: FR-69 the refuge drink store, or that it waits for
--- barrels), hospital_out (BUG-036, Run 11 siege 9: a hospital
+-- barrels), burrow_lost (BUG-096, Run 14 note 70: seal's burrow guard found Kern+ or the refuge shrunk or gone and the
+-- lost tiles held a well or the refuge, seal.burrow_guard; the kernel paints them again), hospital_out (BUG-036, Run 11
+-- siege 9: a hospital
 -- zone with tiles outside Kern+ and the refuge by water's state hosp_out; its lying patients cannot walk to the refuge),
 -- no_outer, no_inner (no manifest bridge of that role), bridge:<B> (gate does not know it), levers:<B> (< 2 linked),
 -- lost:<B> (BUG-030 rebuild policy, BUG-048: a bridge the perimeter keeper replaces by a wall + door after
@@ -405,6 +407,24 @@ local function evaluate(K, why)
                                 z and string.format('; zone %d at %d,%d,%d', int(z.id) or -1, int(z.x) or -1,
                                                     int(z.y) or -1, int(z.z) or -1) or '', dest), 200)
   end
+  -- BUG-096/FR-80 (Run 14 note 70: Kern+ shrank to about one tile and Tiefe+ vanished): seal's burrow guard found a burrow
+  -- that lost tiles holding a well or the refuge. The hospital has hospital_out above (not counted twice); an episode over
+  -- other tiles is in the status only (alert.bg), no blocker
+  rt.blost = nil
+  local okb, bgl = K.call('seal', 'burrow_guard')
+  for _, e in ipairs(okb and type(bgl) == 'table' and bgl or {}) do
+    local held = {}
+    for _, c in ipairs(type(e.crit) == 'table' and e.crit or {}) do
+      if c == 'well' then held[#held + 1] = 'a well' elseif c == 'refuge' then held[#held + 1] = 'the refuge' end
+    end
+    if #held > 0 then
+      f1[#f1 + 1] = 'burrow_lost'
+      rt.blost = cut(string.format('%s %s (%d -> %d tiles) and held %s: %s', tostring(e.name),
+                                   e.gone and 'is gone' or 'lost its tiles', int(e.was) or 0, int(e.now) or 0,
+                                   table.concat(held, ' and '), tostring(e.st or 'see status')), 200)
+      break
+    end
+  end
   -- BUG-055 (Run 14 y577: the CHIEF_MEDICAL_DWARF office stood vacant for good, nobody noticed): an office the kernel did
   -- not fill within offices.blocker_days, or squads it cannot give a leader
   rt.office = nil
@@ -563,7 +583,7 @@ local function route_fix(route)
   return route .. ' (no wall tile: inspect entrances)'
 end
 
-local function unready_msg(fails, routes, open, ents, traps, route, rdry, hout, perim, office)
+local function unready_msg(fails, routes, open, ents, traps, route, rdry, hout, perim, office, blost)
   local ent
   if routes < 0 then ent = 'entrances not checked yet'
   elseif open == 0 then ent = string.format('%d way%s in, all with a door or bridge', routes, routes == 1 and '' or 's')
@@ -579,6 +599,7 @@ local function unready_msg(fails, routes, open, ents, traps, route, rdry, hout, 
   if fix then head = head .. fix .. '; ' end
   if rdry then head = head .. rdry .. '; ' end                 -- Run 11: the refuge without drink
   if hout then head = head .. hout .. '; ' end                 -- BUG-036: the hospital outside Kern+/the refuge
+  if blost then head = head .. blost .. '; ' end               -- BUG-096: a burrow lost its wells or the refuge
   if office then head = head .. office .. '; ' end             -- BUG-055: a vacant office, squads without a leader
   local tail = '; traps ' .. (traps >= 0 and tostring(traps) or '? (no audit)')
   if #head + #ent + #tail > 200 and open > 0 then              -- the list stands in d.ents: keep the traps visible
@@ -619,9 +640,10 @@ local function unready(K)
   end
   local routes, open = rt.routes or -1, rt.open or -1
   local perim = rt.pd and string.format('perimeter OPEN %d d (%s)', rt.pd, rt.pw or '?') or nil
-  K.emit('SIEGE_UNREADY', 'A', unready_msg(fails, routes, open, ents, traps, rt.route, rt.rdry, rt.hout, perim, rt.office),
+  K.emit('SIEGE_UNREADY', 'A', unready_msg(fails, routes, open, ents, traps, rt.route, rt.rdry, rt.hout, perim, rt.office, rt.blost),
          {fails = fails, afails = afails, routes = routes, open = open, ents = ents, traps = traps,
           age = a and math.max(0, now.tick - a.tick) or -1, rdry = rt.rdry, hout = rt.hout, office = rt.office,
+          blost = rt.blost,
           pd = rt.pd, pw = rt.pd and rt.pw or nil})
   st.unready, dirty = CAD.mark(now, ents, toks), true
 end

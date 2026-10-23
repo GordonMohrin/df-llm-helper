@@ -1,5 +1,45 @@
 # CHANGELOG dfpilot
 
+## Package K1: Kern+ and the refuge are watched and painted again (BUG-096, BUG-097, FR-80, 2026-10-23; offline, live-untested)
+- **Why:** Run 14 (note 70, y586): Kern+ shrank to about one tile and Tiefe+ vanished from `plotinfo.burrows.list`; the hospital zone lay
+  outside the alert burrow for the fourth time and the game session painted its 35 tiles back by hand. The kernel reads the burrows all
+  day (sense, siege, seal, water, readiness) and kept no count over time; readiness asked whether a burrow of the NAME exists, seal kept a
+  tile count for 7 days, and nothing painted a burrow again. A cause hunt over this repository (bugs/BUG-096, every path with file:line) found
+  no writer that can take "almost all" of a burrow: the quickfort `e` cells and the undo of a `create=true` cell are limited to one
+  project's rectangle, `act.burrow_tiles`, the burrow plugin and `gui/civ-alert` only add. The cause is DF, DFHack or a hand outside the
+  kernel and cannot be proved offline, so the kernel now watches, says how, and repairs.
+- **What changed:**
+  - `lua/dfllm/burrowkeep.lua` (new library, pure): runs (`pack`), the share rule, the judgement of a reading, the missing tiles in
+    priority order, the knobs, the persisted record. seal's job `bguard` (`lua/dfllm/seal.lua`, BG table): once a game day (and at least `every_s`, 120, real seconds apart)
+    and 100 ticks after a boot it reads Kern+ and the refuge (manifest roles) and keeps the last good reading in the new persist key `burrows` (owner seal;
+    not the state document; per burrow tiles, blocks, id, runs; about 14 bytes a run, cap 8,000 runs; a record of another adoption is dropped).
+  - BURROW_SHRUNK (A) when a burrow loses more than `burrow.guard.shrink_pct` (30) % between two readings or is gone: once per episode,
+    again for news (a well or the refuge among the lost tiles), `cause` `load` for the first reading after a boot else `runtime`, with
+    `id`/`rid`, blocks and `nl`/`nx` (burrows in the list, next id) so the next loss tells how it happened; state `alert.bg`, status/brief line
+    `burrows: ...`, wake hint, RULES section 7 (merged into the REFUGE_FAIL row; the file stays at 300 lines).
+  - readiness R0 `burrow_lost` only when the lost tiles held an accepted well or the refuge (hospital: `hospital_out`, one blocker);
+    SIEGE_UNREADY `blost`.
+  - The repair (BUG-097): in PEACE/RECOVERY, never in a fight or lockdown, the baseline tiles the burrow lacks are painted again with
+    `act.burrow_tiles`, at most `burrow.guard.repair_per_day` (2000) a game day, runs near the hospital zones outside the burrow, the wells and
+    the refuge anchor first, hidden tiles never; BURROW_REPAIRED (B); a gone burrow is made again under its name when its runs are known, else
+    DECISION_NEEDED `burrow_gone` (also when the whole burrow list is empty, a reclaimed fort); an episode ends when nothing is left, when the
+    burrow is back above the line without a repair, or `settle_days` (14) after the last progress.
+  - Config `burrow.guard {on, shrink_pct, repair_per_day, settle_days, every_s}` in config/baseline.json (`fairplay.BURROW_GUARD_LIM`, `lint --config`);
+    contracts in schema.py and contract.lua (2 events, the state key, the persist key, `blost`), CONTRACTS regenerated.
+- **Not decided offline:** why the burrows lost their tiles (DF's save/load of burrow masks, a retire/reclaim resetting the list, the
+  console `burrow` command or a script of the game session); the first BURROW_SHRUNK carries the data that decides it (`cause`, `id` vs
+  `rid`, `nl`/`nx`, blocks then and now), `commands.log` shows every quickfort burrow call (`undo`, `unburrow`) and kern.log every
+  `cancelled at stage`. Whether DF paints 2,000 tiles in 5 chunks without a hitch at timestream speed.
+- **Tests:** tests/lua/test_burrow_guard.lua (19: reading, shrink, slow drop, small baseline, vanish, unknown tile set, load, old/foreign/
+  malformed record, empty list, daily cap, sensor only, off, player's burrow, hidden tile, siege/breach/alert, long fight, fort of 7, cadence,
+  order), test_burrowkeep.lua (7), test_burrow_guard_ready.lua (3), tests/test_k1_burrows.py (contracts, config limits, status/brief/wake,
+  record size, the quickfort burrow model applied to the real blueprints, the cause inventory with its file:line). They fail on b2b9435.
+- **Live check:** `dfllm status` of a fort with Kern+ and Tiefe+ shows no `burrows:` line; `dfllm cmd inspect '{"what":"persist"}'` lists
+  `burrows` (a few KB to some tens); take a burrow away in the burrows screen (erase 60 % of Kern+): within a game day BURROW_SHRUNK wakes
+  with `fix repair`, `status` says `burrows: Kern+ 1200 of 3000 tiles (runtime), N painted again, repairing`, kern.log has `painted again`,
+  BURROW_REPAIRED, then `episode over (repaired)` and the line is gone; load the save and compare: the first reading says `cause load` only
+  if the burrow is smaller than at the last reading before the load.
+
 ## Integration audit: the whole tree read as one piece (BUG-093, BUG-094, BUG-095, documents, 2026-10-23, audit J3 of waves A-D and the four audits; offline, live-untested)
 - **Why:** eleven packages (BUG-044 .. BUG-075, FR-70 .. FR-78), four integration audits (BUG-079 .. BUG-086) and wave D (FR-79,
   BUG-076 .. BUG-078) were merged one after the other; the audits read the first pass, nobody read wave D with the rest. This

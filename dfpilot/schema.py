@@ -128,7 +128,7 @@ PERSIST = {
     "projects": ("dfllm.projects", "runner"), "plan": ("dfllm.plan", "kern"),
     "phase": ("dfllm.phase", "runner"), "mode": ("dfllm.mode", "kern"),
     "drill": ("dfllm.drill", "drill"), "restore": ("dfllm.restore", "arbiter"),
-    "kern": ("dfllm.kern", "kern"),
+    "kern": ("dfllm.kern", "kern"), "burrows": ("dfllm.burrows", "seal"),
 }
 
 
@@ -547,8 +547,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # FR-70: pd = game days the perimeter has been open (open_perimeter), pw = what is open; from escalate_days on the
     # wake repeats every escalate_every days. BUG-055: office = a vacant office (or squads without a leader) that blocks
     # (R0 `office`), with its fix
+    # BUG-096: blost = Kern+ or the refuge lost a well or the refuge's tiles (blocker burrow_lost) and what the kernel does
     "SIEGE_UNREADY": ("A", "readiness", _d(opt="fails:sa afails:sa routes:i open:i ents:sa traps:i age:i rdry:s "
-                                               "hout:s pd:i pw:s office:s")),
+                                               "hout:s pd:i pw:s office:s blost:s")),
     # BUG-015: an entrance door the lockdown forbade lost its forbidden flag before the next pass (refused)
     "LOCKDOWN_PARTIAL": ("A", "reflex", _d("doors:i", "refused:ia pos:p retry:f items:i units:i")),
     # BUG-023 / Run 10: tool detail members without their pick or axe while its jobs wait and free tools exist; Run 11:
@@ -570,6 +571,20 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
                                              "left:i hostile:i burrow:s")),
     # BUG-028: the main part of a drink or food stock lies outside Kern+ and the refuge; days = what lies inside
     "SUPPLY_OUTSIDE": ("A", "seal", _d("cls:s", "inside:i total:i pct:i days:i want:i hint:s also:s")),
+    # BUG-096/FR-80 (Run 14 note 70: Kern+ shrank to about one tile and Tiefe+ vanished): the burrow guard of seal read Kern+ or
+    # the refuge (burrow) below the line: was = tiles at the last good reading, now = tiles now, cause = `load` (the first
+    # reading after a boot) or `runtime`, nbw/nb = blocks then and now, id = its burrow id now (-1 gone), rid = at the last
+    # good reading (another id: the burrow was made again), gone = 1 when it is missing, pct = the share lost, crit = what
+    # the lost tiles held (well, refuge, hospital), fix = repair (painted again in PEACE), wait (not in a fight), ask (no
+    # tile set known: DECISION_NEEDED burrow_gone), off (burrow.guard.repair_per_day 0), rep = tiles a day; nl/nx = the burrows
+    # in plotinfo.burrows.list and the id the next one gets (ids below the old ones: the list was reset, a reclaim; the old
+    # id gone and next_id grown: a burrow was deleted) - the read-only data that tells how a burrow was lost
+    "BURROW_SHRUNK": ("A", "seal", _d("burrow:s was:i now:i cause:s",
+                                      "nbw:i nb:i id:i rid:i gone:f pct:i crit:sa fix:s rep:i nl:i nx:i")),
+    # FR-80: tiles of a burrow painted again from the last good reading: n = this pass (a game day at the most), was = the
+    # baseline, now = tiles after the pass, left = about how many are still missing, done = 1 when nothing is left to
+    # paint, day = painted today
+    "BURROW_REPAIRED": ("B", "seal", _d("burrow:s n:i", "was:i now:i left:i done:f day:i")),
     # Gordon 2026-10-16: an intake wave (kind intake) or a sortie through O1 (kind sortie) went wrong: why losses,
     # past_b1 (a hostile past B1), stuck (the field not clear in time), left_outside (O1 raised with members outside)
     "WAVE_FAIL": ("A", "siege", _d("kind:s why:s", "wave:i squad:s lost:i units:ia n:i pos:p ticks:i")),
@@ -955,7 +970,14 @@ STATE = Obj(
                                                              "dr": NAT, "dn": NAT, "st": NAT,
                                                              # BUG-049: trusted (1) or not (0) and the first reason
                                                              # (separation fresh, hatch stands, nobody inside)
-                                                             "tr": FLAG, "trw": Str(maxbytes=40)})}),
+                                                             "tr": FLAG, "trw": Str(maxbytes=40)}),
+                                             # BUG-096/FR-80: the worst open burrow episode: how many, the burrow, its tiles
+                                             # at the last good reading and now, the cause (load | runtime), the tiles
+                                             # painted again, what the repair does ('repairing', 'waits for peace', 'repair
+                                             # off', 'tiles unknown'), what the lost tiles held ('well,refuge')
+                                             "bg": Obj(req={"n": NAT, "b": Str(maxbytes=24), "was": NAT, "now": NAT},
+                                                       opt={"c": Str(maxbytes=8), "fx": NAT, "st": Str(maxbytes=16),
+                                                            "crit": Str(maxbytes=24)})}),
          # intake waves (siege, Gordon 2026-10-16): phase, waves so far, the last refusal, the sortie (squad phase)
          # BUG-030: deep = the deep defense's reasons ("destroyers,army,weak")
          "wave": Obj(req={"ph": Str(maxbytes=8), "n": NAT}, opt={"why": Str(maxbytes=40), "so": Str(maxbytes=24),
@@ -1141,13 +1163,31 @@ PERSIST_DRILL = Obj(req={"v": Const(V), "streak_fail": NAT, "last": Arr(Obj(req=
 PERSIST_KERN = Obj(req={"v": Const(V), "ev": NAT, "seq": NAT, "boots": NAT, "disabled": Arr(MODULE)},
                    opt={"carry": Obj(extra=Obj(req={"at": TICK, "v": Obj(extra=NAT)}))})
 
+# BUG-096/FR-80: seal's burrow guard. ad = the adoption tick the record belongs to (another adoption's is dropped), b = per
+# managed burrow (Kern+, the refuge): base = tiles at the last good reading, nb = blocks, id = burrow id, t = the tick of the
+# last reading, k = its tiles as runs {z, y, x0, x1, ...} (sorted, merged; at most RUNS_MAX = 8000 runs; kp = 1 when cut),
+# cad = the announcement record (util/cadence), ep = the open episode (t = opened, was/now = tiles, nbw/nb = blocks, cause,
+# gone, day/fd = the day and the tiles painted that day, fx = painted in all, z = tick of the last progress, crit, ask,
+# st = what the repair does, rid/id = burrow ids)
+_BURROW_EP = Obj(req={"t": TICK, "was": NAT, "now": NAT, "cause": Str(enum=["load", "runtime"]), "fd": NAT, "fx": NAT,
+                      "z": TICK, "crit": Arr(Str(maxbytes=12), hi=4)},
+                 opt={"nbw": NAT, "nb": NAT, "gone": FLAG, "day": INT, "ask": FLAG, "st": Str(maxbytes=16), "rid": INT,
+                      "id": INT})
+# (util/json writes an empty table as `[]`: an empty `b` is an empty array)
+PERSIST_BURROWS = Obj(req={"v": Const(V), "ad": TICK,
+                           "b": AnyOf(Arr(AnyV(), hi=0),
+                                      Obj(extra=Obj(req={"base": NAT, "nb": NAT, "id": INT, "t": TICK},
+                                                    opt={"k": Arr(INT, hi=32000), "kp": FLAG, "cad": AnyV(),
+                                                         "ep": _BURROW_EP}),
+                                          keys=r"^.{1,40}$"))})
+
 SCHEMAS: dict[str, Spec] = {
     "state": STATE, "heartbeat": HEARTBEAT, "event": EVENT, "inbox": INBOX, "outbox": OUTBOX,
     "plan": PLAN, "phases": PHASES, "bp": BP, "manifest": MANIFEST, "snapshot": SNAPSHOT,
     "restore": RESTORE, "lock": LOCK, "allowlist": ALLOWLIST, "quicksave": QUICKSAVE,
     "persist.marker": PERSIST_MARKER, "persist.projects": PERSIST_PROJECTS, "persist.plan": PERSIST_PLAN,
     "persist.phase": PERSIST_PHASE, "persist.mode": PERSIST_MODE, "persist.drill": PERSIST_DRILL,
-    "persist.kern": PERSIST_KERN,
+    "persist.kern": PERSIST_KERN, "persist.burrows": PERSIST_BURROWS,
 }
 KINDS = list(SCHEMAS)
 

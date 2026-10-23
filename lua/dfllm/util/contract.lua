@@ -106,6 +106,9 @@ C.EVENTS = {
   STRANDED = {cls = 'A', by = 'siege'},
   -- BUG-028: the main part of the drink or food stock lies outside the lockable core (Kern+ and the refuge)
   SUPPLY_OUTSIDE = {cls = 'A', by = 'seal'},
+  -- BUG-096/FR-80 (Run 14 note 70): Kern+ or the refuge lost more than burrow.guard.shrink_pct % of its tiles, or is gone
+  -- (d.burrow, was, now, cause load | runtime, nbw/nb blocks, id/rid, gone, pct, crit = well | refuge | hospital, fix)
+  BURROW_SHRUNK = {cls = 'A', by = 'seal'},
   -- Gordon 2026-10-16: an intake wave or a sortie through O1 went wrong (losses, a hostile past B1, the field not
   -- clear, soldiers left outside)
   WAVE_FAIL = {cls = 'A', by = 'siege'},
@@ -130,6 +133,8 @@ C.EVENTS = {
   -- units still out, called, burrow, eta; BUG-035: why stuck, reasons, stuck, pull, nnew, newu); a switch of the civ
   -- alert's burrow during a fight (d.from, to, why, mode)
   RECALL = {cls = 'B', by = 'reflex'}, REFUGE_SWITCH = {cls = 'B', by = 'seal'},
+  -- FR-80: tiles of Kern+ or the refuge painted again from the last good reading (d.burrow, n, was, now, left, done, day)
+  BURROW_REPAIRED = {cls = 'B', by = 'seal'},
   MOOD_START = {cls = 'B', by = 'care'}, MOOD_NEED = {cls = 'B', by = 'care'},
   TOMBS_LOCKED = {cls = 'B', by = 'care'},      -- BUG-062: tomb zones closed to citizens (counts, who closed them again)
   BUILDING_TOPPLED = {cls = 'B', by = 'care'},  -- BUG-064: a building fell to a stressed citizen or a ghost (culprit, stress)
@@ -279,6 +284,8 @@ C.PERSIST = {
   drill = {key = 'dfllm.drill', owner = 'drill'},
   restore = {key = 'dfllm.restore', owner = 'arbiter'},
   kern = {key = 'dfllm.kern', owner = 'kern'},
+  -- BUG-096/FR-80: seal's burrow guard: per managed burrow the last good reading (tiles, blocks, id, runs) and the open episode
+  burrows = {key = 'dfllm.burrows', owner = 'seal'},
 }
 function C.persist_key(k)
   local e = C.PERSIST[k]
@@ -449,7 +456,10 @@ C.STATE_SPEC = obj({
                           -- FR-69: drink units on its tiles, drink wanted, tiles of its drink store (0 none)
                           dr = NAT, dn = NAT, st = NAT,
                           -- BUG-049: trusted (1) or not (0) and the first reason
-                          tr = FLAG, trw = str(40)})}),
+                          tr = FLAG, trw = str(40)}),
+               -- BUG-096/FR-80: the worst open burrow episode: how many, the burrow, its tiles at the last good reading and
+               -- now, the cause (load | runtime), tiles painted again, what the repair does, what the lost tiles held
+               bg = obj({n = NAT, b = str(24), was = NAT, now = NAT}, {c = str(8), fx = NAT, st = str(16), crit = str(24)})}),
   -- intake waves (siege, Gordon 2026-10-16): phase, wave count, the last refusal, the sortie squad and phase; BUG-030:
   -- deep = the deep defense's reasons ('destroyers,army,weak')
   wave = obj({ph = str(8), n = NAT}, {why = str(40), so = str(24), deep = str(24)}),
