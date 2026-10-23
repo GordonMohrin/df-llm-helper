@@ -13,7 +13,8 @@ local function days(W, n) for _ = 1, n do W.run(1200, {skip = 100}); settle(W) e
 -- W, ctl: ctl.pending (runner.pending('farms')), ctl.status (autofarm status text), ctl.mode (labormanager mode)
 local function world(opts)
   opts = opts or {}
-  local ctl = {pending = opts.pending or 0, status = opts.status or '', mode = 'Mode: monitor (labormanager)'}
+  local ctl = {pending = opts.pending or 0, status = opts.status or '', mode = 'Mode: monitor (labormanager)',
+               lost = opts.lost or 0}
   local units = {}
   for i = 1, opts.cit or 10 do units[i] = {id = i, citizen = true} end
   local W = F.world{cfg = {baseline = F.cfg()}, units = units, mode = opts.mode}
@@ -26,7 +27,11 @@ local function world(opts)
   for _ = 1, 4 do F.item(W, 'BARREL', {}) end
   F.item(W, 'DRINK', {stack_size = 2000})
   W.load({name = 'runner', every = {ticks = 600}, dig_backlog = function() return 0 end,
-          pending = function(_, tpl) return tpl == 'farms' and ctl.pending or 0 end})
+          pending = function(_, tpl) return tpl == 'farms' and ctl.pending or 0 end,
+          lost = function(_, tpl)
+            local n = tpl == 'farms' and ctl.lost or 0
+            return n, n > 0 and 'c1a1farms' or nil
+          end})
   W.act_result('run', function(cmd, a1)
     if cmd == 'labormanager' and a1 == 'mode' then return true, ctl.mode end
     if cmd == 'autofarm' and a1 == 'status' then return true, ctl.status end
@@ -86,6 +91,25 @@ T.test('farms request: food short, too few tiles, nothing pending -> PROJECT_REQ
   days(W, 4)
   T.eq(#requests(W), 2, 'still short after 14 days: asks again')
   T.eq(F.bad_runs(W), {})
+end)
+
+-- BUG-058 (DECISIONS 9; Run 11: five farms projects 'build_lost, parked' one after the other, no soil there): a farms
+-- project lost for good stops the requests until it is cancelled or the farms are placed elsewhere
+T.test('BUG-058: a farms project lost to build_lost stops the farms requests; cancelled, they go on', function()
+  local W, ctl = world{cit = 53, lost = 1, setup = function(W)
+    F.item(W, 'FOOD', {stack_size = 26, subtype = 1})
+    plot(W, 5, 7); plot(W, 5, 7); plot(W, 5, 2)
+  end}
+  settle(W)
+  days(W, 20)
+  T.eq(#requests(W), 0, 'food short and farms wanted, but the last project is lost')
+  local n = 0
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find('c1a1farms lost to build_lost', 1, true) then n = n + 1 end end
+  T.eq(n, 1, 'told once')
+  ctl.lost = 0                                                  -- bp.cancel: the cause is gone
+  days(W, 1)
+  T.eq(#requests(W), 1)
+  T.eq(requests(W)[1].tpl, 'farms')
 end)
 
 T.test('farms request: never while a farms project is pending, never with enough tiles, at most plots_max', function()
@@ -349,6 +373,51 @@ T.test('fishery: one PrepareRawFish order holds up to one fish per citizen', fun
   settle(W2)
   days(W2, 1)
   T.eq(order(W2, 'dfllm:fish').amount_total, 30, 'at least fish.max')
+end)
+
+-- BUG-059 (Run 12 y503 autumn: 12 dwarves starved in a season, 17 corpses, "food 41 d", meals 0): raw plants and seeds
+-- count as food days and nobody cooks them. Hungry citizens and no prepared meal are warned about above the pre-alarm
+-- line (kern.log, state stock.hungry for the status line), and the food_low decision names them first.
+T.test('BUG-059: hungry citizens and meals 0 at 41 food days: stock.hungry, a kern.log warning; food_low names them first',
+       function()
+  local function hungry_world(food_raw)
+    local W = world{cit = 12, setup = function(W)
+      F.item(W, 'PLANT', {stack_size = food_raw, mat_type = 419, mat_index = 53})     -- raw peaches: edible raw, no meal
+    end}
+    for i = 1, 5 do W.unit(i).counters2 = {thirst_timer = 0, hunger_timer = 60000} end
+    for i = 6, 12 do W.unit(i).counters2 = {thirst_timer = 0, hunger_timer = 1000} end
+    return W
+  end
+  local W = hungry_world(500)
+  settle(W)
+  days(W, 1)
+  local fd = W.state().stock.food_d
+  T.ok(fd >= 30, 'above the pre-alarm line: ' .. tostring(fd))
+  T.eq(W.state().stock.hungry, 5)
+  local l = {}
+  for _, g in ipairs(W.logs) do if tostring(g.msg):find('citizens hungry and no prepared meal', 1, true) then l[#l + 1] = g.msg end end
+  T.eq(#l, 1, 'one warning')
+  T.ok(l[1]:find('5 citizens hungry', 1, true) and l[1]:find('raw plants and seeds are not cooked', 1, true), l[1])
+  days(W, 3)
+  local n = 0
+  for _, g in ipairs(W.logs) do if tostring(g.msg):find('citizens hungry and no prepared meal', 1, true) then n = n + 1 end end
+  T.eq(n, 1, 'again only after 7 days or when the count doubled')
+  -- below the pre-alarm line the decision says it first
+  local W2 = hungry_world(8)
+  settle(W2)
+  days(W2, 1)
+  local d
+  for _, e in ipairs(W2.find_events('DECISION_NEEDED')) do if e.d.id == 'food_low' then d = e end end
+  T.ok(d, 'food_low')
+  T.eq(d.d.block[1], 'hungry')
+  T.ok(d.msg:find('5 hungry, 0 meals: raw food is not cooked', 1, true), d.msg)
+  T.ok(d.d.q:find('5 hungry', 1, true), d.d.q)
+  -- nobody hungry, or a meal at hand: no warning
+  local W3 = world{cit = 12, setup = function(W)
+    F.item(W, 'PLANT', {stack_size = 500, mat_type = 419, mat_index = 53})
+  end}
+  days(W3, 2)
+  T.eq(W3.state().stock.hungry, nil)
 end)
 
 T.done()

@@ -83,7 +83,8 @@ ACT = {
     "orders_import": ["economy"], "orders": ["economy"], "workorder": ["economy", "water", "care"],
     "order_suspend": ["economy"], "kitchen_exclude": ["economy"], "appoint": ["economy"],
     "work_detail": ["economy"], "order_material": ["economy"], "order_remove": ["economy"],
-    "job_resume": ["economy"], "farm_crop": ["economy"], "plant_gather": ["economy"], "work_detail_prune": ["economy"],
+    "job_resume": ["economy"], "farm_crop": ["economy"], "plant_gather": ["economy"], "plant_ungather": ["economy"],
+    "work_detail_prune": ["economy"],
     "item_flag": ["care", "water", "economy", "military"],
     "zone_assign": ["care"], "tomb_zone": ["care"], "medic": ["care"], "hospital_post": ["care"],
     "trade": ["trade"],
@@ -97,7 +98,8 @@ STATE_OWNERS = {
     "pop.cap": "readiness", "pop.gate_cap": "readiness", "ready.*": "readiness",
     "stock.drink_d": "economy", "stock.food_d": "economy", "stock.meals": "economy",
     "stock.ore": "economy", "stock.bars": "economy", "stock.leather": "economy", "stock.metal": "economy",
-    "stock.mood_miss": "economy", "stock.rock": "economy", "stock.rock_need": "economy", "stock.picks": "economy",
+    "stock.hungry": "economy", "stock.mood_miss": "economy", "stock.rock": "economy", "stock.rock_need": "economy",
+    "stock.picks": "economy",
     "stock.pick_want": "economy", "stock.mshort": "economy", "stock.melt": "economy", "stock.dwhy": "economy",
     "stock.hosp_water": "care", "care.*": "care", "labor.*": "economy", "orders.*": "economy",
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
@@ -600,7 +602,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
                                   "thirst:i hunger:i patient:f pos:p job:s revised:f bridge:s")),
     "DEATH_CLUSTER": ("B", "care", _CLUSTER),
     "ACT_FAIL": ("B", "kern", _d("fn:s", "err:s module:s")),
-    "ORDER_STUCK": ("B", "economy", _d("order:i job:s why:s", "n:i days:i dropped:f")),
+    # BUG-059: kind = workshop (a mandatory workshop is missing), worker (nobody holds the labor), input
+    "ORDER_STUCK": ("B", "economy", _d("order:i job:s why:s", "n:i days:i dropped:f kind:s")),
     "JOBS_SUSPENDED": ("B", "economy", _d(opt="suspended:i released:i kept:i planned:i why:s resuspended:i "
                                               "forbidden:i other:i unforbidden:i missing:s blocked:i")),
     "TRADE_LEDGER": ("B", "trade", _d(opt="civ:s ok:f ratio:i sold:i sold_v:i bought:i bought_v:i unmet:sa")),
@@ -750,7 +753,9 @@ STATE = Obj(
                            # metal items marked for melting (the invaders' gear in the melt pile)
                            "mshort": FLAG, "melt": NAT,
                            # BUG-042: why the stills do not brew while drink is below the plan's target
-                           "dwhy": Str(maxbytes=80)}),
+                           "dwhy": Str(maxbytes=80),
+                           # BUG-059: citizens past DF's "hungry" line (hunger_timer >= starve.hunger)
+                           "hungry": NAT}),
          "care": Obj(req={"stressed_pct": PCT, "naked": NAT, "ghosts": NAT, "corpses_old": NAT,
                           "tombs_free": NAT, "moods": NAT},
                      # FR-61 coffin provisioner: wanted free coffins, missing slots, coffin items, open orders, project
@@ -761,7 +766,9 @@ STATE = Obj(
          "labor": Obj(req={"starving": NAT, "idle": PCT}),
          # BUG-042: unvalidated live orders, the days the oldest waits, why the manager validates nothing
          "orders": Obj(req={"n": NAT, "bad": NAT, "stuck": NAT},
-                       opt={"unval": NAT, "uval_d": NAT, "mgr": Str(maxbytes=80)}),
+                       # BUG-059: of the stuck orders, how many miss a workshop (which, most missed first), a worker
+                       opt={"unval": NAT, "uval_d": NAT, "mgr": Str(maxbytes=80), "stuck_ws": NAT, "stuck_lab": NAT,
+                            "ws": Str(maxbytes=60)}),
          "threat": Obj(req={"vis": NAT, "armed": FLAG}),
          "proj": Arr(Tup([ID, Str(maxbytes=24), PCT, Str(maxbytes=40)]), hi=8),
          # Run 11 siege 8: seal first (the leading open seal or plug: pieces open, projects it pauses, other open seals,

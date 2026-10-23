@@ -317,9 +317,13 @@ def line_supply(ctx: Ctx) -> str:
     st = s.get("stock")
     if st:
         lo = {k for k, m in SUPPLY_MIN.items() if k in st and st[k] < m}
-        out.append("stock " + " ".join(
+        # BUG-059 (Run 12 y503: 12 starved under "food 41 d", meals 0): the hungry citizens come first, and no prepared
+        # meal beside them says that the food days count raw food nobody cooks
+        hungry = st.get("hungry", 0)
+        out.append("stock " + (f"HUNGRY {hungry} " if hungry else "") + " ".join(
             f"{k[:-2]} {st[k]}d" + ("!" if k in lo else "") for k in ("drink_d", "food_d") if k in st)
             + (f" meals {st['meals']}" if "meals" in st else "")
+            + (" (raw food is not cooked)" if hungry and st.get("meals") == 0 else "")
             + _hospital(s, st)
             # Run 10: the ore search and the leather a mood missed (plan propose/check read them too)
             + (f" ore {st['ore']} bars {st.get('bars', '?')}" + (" (explore)" if st.get("metal") == "explore" else "")
@@ -353,7 +357,11 @@ def line_supply(ctx: Ctx) -> str:
         out.append(f"idle {lb['idle']}% starving {lb['starving']}")
     od = s.get("orders")
     if od:                                     # FR-01/FR-39: orders that cannot run, crash-class orders
+        # BUG-059: of the stuck orders, the ones that miss a workshop (named) apart from the ones that miss a worker
+        why = [x for x in (f"workshop missing {od['stuck_ws']}: {od.get('ws', '?')}" if od.get("stuck_ws") else "",
+                           f"no worker {od['stuck_lab']}" if od.get("stuck_lab") else "") if x]
         out.append(f"orders {od['n']}" + (f" stuck {od['stuck']}" if od["stuck"] else "")
+                   + (f" ({'; '.join(why)})" if why else "")
                    + (f" UNSAFE {od['bad']} (no item_subtype: DF crash)" if od["bad"] else ""))
     return _join(out)
 

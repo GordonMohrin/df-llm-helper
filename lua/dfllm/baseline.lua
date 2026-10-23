@@ -367,7 +367,12 @@ function M.plan(K, c)
       for _, tool in ipairs(c.decision_tools[id]) do cmd('cp:' .. tool, 'control-panel', 'enable', tool) end
     end
   end
-  for _, p in ipairs(c.plugins or {}) do cmd('en:' .. p, 'enable', p) end
+  -- BUG-058: economy.farms.autofarm 'off' (the kernel is the sole writer of the farm season slots): autofarm is not enabled
+  local ec = type(K.cfg.baseline) == 'table' and K.cfg.baseline.economy
+  local af_off = type(ec) == 'table' and type(ec.farms) == 'table' and ec.farms.autofarm == 'off'
+  for _, p in ipairs(c.plugins or {}) do
+    if not (p == 'autofarm' and af_off) then cmd('en:' .. p, 'enable', p) end
+  end
   cmd('prioritize', 'prioritize', table.unpack(c.prioritize))
   for i, e in ipairs(c.prioritize_extra or {}) do cmd('prioritize:' .. i, 'prioritize', table.unpack(e)) end
   cmd('autochop', 'autochop', 'target', fmt(c.autochop.max), fmt(c.autochop.min))

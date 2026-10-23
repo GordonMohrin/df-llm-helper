@@ -195,7 +195,10 @@ M.DEFAULTS = {
                        mood = 1, need = 2, ammo_min = 1, mood_keys = {'bone', 'shell', 'leather'}},
                       -- live L5: one fisher per `per` citizens (at most `max`) while food is below food.want_days
                       -- and a fishing zone exists (zones are the runner's or the LLM's); outside PEACE/RECOVERY none
-                      {name = 'Fisherdwarves', skill = 'FISH', labor = 'FISH', fish = true, per = 15, max = 3}}},
+                      -- BUG-057 (Run 13/14): a fishing zone with raw fish or open Fish jobs wants `min` fishers (one per
+                      -- `min_per` citizens, at least one) whatever the food stock says
+                      {name = 'Fisherdwarves', skill = 'FISH', labor = 'FISH', fish = true, per = 15, max = 3,
+                       min = 3, min_per = 6}}},
   -- live L3: the hunter caught nothing for a year; no visible game is no unit census economy may read, so a
   -- hunt without a new hide, bone, leather or shell for trial_days pauses for backoff_days
   hunt = {trial_days = 10, backoff_days = 20},
@@ -379,7 +382,11 @@ M.DEFAULTS = {
           mat_scan = 2000, fail_alarm = 3, depot_move_after = 5, move_days = 28, move_r = 12, move_dz = 2,
           move_gap = 3, move_probes = 150},
   -- FR-17 farm season slots filled per day; FR-23/FR-50/FR-25 unforbids per day (containers, seeds, food)
-  farms = {per_day = 16},
+  -- BUG-058 (Run 13 y512: 8 plots had plant_id -1 for the running season and autofarm emptied what the kernel set):
+  -- `now_max` slots of the running season are filled at once (T.slotnow, right after the census); autofarm: 'auto' =
+  -- the kernel disables it below `af_off_days` food days or when a slot it filled was emptied again, and enables it
+  -- again from `af_on_days` food days after `af_hold_days`; 'off' = disabled at every boot; 'keep' = never touched
+  farms = {per_day = 16, now_max = 24, autofarm = 'auto', af_off_days = 30, af_on_days = 90, af_hold_days = 14},
   forbid = {per_day = 30},
   -- FR-25: below `days` food days with citizens over `hunger` (DF's "hungry" is 50000)
   starve = {days = 0, hunger = 50000, plants_max = 200, plants_per_slice = 400, report_days = 2, gatherers = 4,
@@ -393,6 +400,21 @@ M.DEFAULTS = {
   -- to the drink target (5 drinks a plant); the members stay until food >= off_days and drink >= drink_off (or enough
   -- brewable plants)
   gather = {n = 4, min_jobs = 10, off_days = 60, drink_d = 60, drink_off = 100},
+  -- BUG-057/FR-72 (Run 12-14: PlantSeeds 122-421 and GatherPlants 250-565 unclaimed for years, 30-70 % of the adults idle,
+  -- Planters / Fisherdwarves / Plant gatherers at 0 members): the details follow the demand (M.cover_run, daily).
+  -- Farmers (PLANT, detail Planters) for PlantSeeds + HarvestPlants unclaimed above `min_jobs` (one per `farm_per`,
+  -- `farm_min`..`farm_max`), gatherers (HERBALIST, detail Plant gatherers) for GatherPlants above `gather_jobs` (one per
+  -- `gather_per`, `gather_min`..`gather_max`), kept apart; any other job type of `labors` (type -> labor) with
+  -- more than `min_jobs` unclaimed jobs and no citizen holding the labor gets `min`..`other_max` idle citizens through a
+  -- detail that grants the labor. All these details together hold at most `share` percent of the adults, `step` added a
+  -- day to one detail. The details
+  -- never shrink while unclaimed jobs exist; the members the kernel added leave after `idle_days` days without any.
+  -- GatherPlants designations nobody worked on for `stale_days` days, and the ones off the citizens' walk group, are
+  -- withdrawn (at most `unmark_max` a day)
+  cover = {on = true, min_jobs = 20, gather_jobs = 10, farm_per = 10, farm_min = 2, farm_max = 12, gather_per = 25,
+           gather_min = 2, gather_max = 8, other_per = 20, other_max = 3, share = 50, step = 4, idle_days = 7,
+           stale_days = 30, unmark_max = 200,
+           labors = {GatherPlants = 'HERBALIST', PlantSeeds = 'PLANT', HarvestPlants = 'PLANT'}},
 }
 
 local st = {}
@@ -427,7 +449,7 @@ end
 
 -- persist m.economy; maps are re-tagged as objects (a decoded empty map is an array, json.lua:104)
 local MAPS = {'imported', 'orders', 'low', 'tools', 'meta', 'needs', 'reserves', 'explore', 'ostuck', 'ocancel',
-              'badseen', 'jres', 'tblk', 'mseen'}
+              'badseen', 'jres', 'tblk', 'mseen', 'cover', 'af'}
 local function pstate(K)
   local p = K.persist.get('m.economy')
   if type(p) ~= 'table' then
@@ -1569,9 +1591,16 @@ local function fish_want(K, c, r)
   if not st.fishzone then return 0, 'no zone' end
   local fc = c.food or {}
   local d = (r.days or {}).food_d or 9999
-  if not r.p.famine and d >= (fc.want_days or 90) then return 0, 'stock' end
+  -- BUG-057 (Run 13 y512: Fisherdwarves at 0 members beside a fishing zone): raw fish in the fort or open Fish jobs
+  -- want `min` fishers (one per `min_per` citizens, at least one) whatever the stock says
+  local fl, jc = 0, st.jobc
+  if (spec.min or 0) > 0 and (((r.inv or {}).fish_raw or 0) >= ((c.fish or {}).min or 5) or
+                              (type(jc) == 'table' and (jc.fish_open or 0) > 0)) then
+    fl = clamp((r.cit or 0) // math.max(1, spec.min_per or 6), 1, spec.min)
+  end
+  if not r.p.famine and d >= (fc.want_days or 90) then return fl, fl > 0 and 'fish' or 'stock' end
   local per = math.max(1, spec.per or 15)
-  return clamp(((r.cit or 0) + per - 1) // per, 1, spec.max or 3), r.p.famine and 'famine' or 'food'
+  return math.max(fl, clamp(((r.cit or 0) + per - 1) // per, 1, spec.max or 3)), r.p.famine and 'famine' or 'food'
 end
 
 -- Run 10 (Handlelock): no tanner's shop stood and a fey mood died for two leather. Without one, while hides lie or a
@@ -2728,25 +2757,34 @@ local JOB_NAME = {dig = 'dig', fell = 'FellTree'}
 -- one pass over the job list: designation dig jobs and FellTree jobs, all and unclaimed (no worker, not suspended)
 -- (also digging nobody planned through the runner); BUG-038: GatherPlants too (M.gather_low reads them, no scan of its
 -- own)
-local function tool_jobs()
-  local r = {dig = 0, dig_open = 0, fell = 0, fell_open = 0, gather = 0, gather_open = 0, dig_pts = {}, fell_pts = {}}
+-- BUG-057: Fish and PlantSeeds + HarvestPlants too (the fishers' and farmers' demand), the first open positions of
+-- GatherPlants (400) and of the farm jobs (200) for the walk-group check, and `want` = {job type name = true}: the
+-- open count of any other job type M.cover_run covers (r.by / r.by_open)
+M.JOB_KIND = {FellTree = 'fell', GatherPlants = 'gather', Fish = 'fish', PlantSeeds = 'plant', HarvestPlants = 'plant'}
+M.PTS_CAP = {gather = 400, plant = 200}
+local function tool_jobs(want)
+  local r = {dig = 0, dig_open = 0, fell = 0, fell_open = 0, gather = 0, gather_open = 0, fish = 0, fish_open = 0,
+             plant = 0, plant_open = 0, dig_pts = {}, fell_pts = {}, gather_pts = {}, plant_pts = {}, by = {}, by_open = {}}
   pcall(function()
     local link, i = df.global.world.jobs.list.next, 0
     while link and i < 20000 do
       local j = link.item
       local tn = j and df.job_type[j.job_type]
-      local kind = tn and (DIG_JOBS[tn] and 'dig' or (tn == 'FellTree' and 'fell') or (tn == 'GatherPlants' and 'gather'))
-                   or nil
-      if kind then
-        r[kind] = r[kind] + 1
+      local kind = tn and (DIG_JOBS[tn] and 'dig' or M.JOB_KIND[tn]) or nil
+      local extra = tn and not kind and type(want) == 'table' and want[tn] and tn or nil
+      if kind or extra then
+        if kind then r[kind] = r[kind] + 1 else r.by[extra] = (r.by[extra] or 0) + 1 end
         local okw, w = pcall(dfhack.job.getWorker, j)
         if okw and w == nil and not j.flags.suspend then
-          r[kind .. '_open'] = r[kind .. '_open'] + 1
-          -- BUG-023 round 5: where the first open ones lie (the tool diagnosis: can the members take one?)
-          local pts = r[kind .. '_pts']
-          if pts and #pts < 40 then
-            local okp, x, y, z = pcall(function() return j.pos.x, j.pos.y, j.pos.z end)
-            if okp and math.tointeger(x) then pts[#pts + 1] = {x, y, z} end
+          if extra then r.by_open[extra] = (r.by_open[extra] or 0) + 1 end
+          if kind then
+            r[kind .. '_open'] = r[kind .. '_open'] + 1
+            -- BUG-023 round 5: where the first open ones lie (the tool diagnosis: can the members take one?)
+            local pts = r[kind .. '_pts']
+            if pts and #pts < (M.PTS_CAP[kind] or 40) then
+              local okp, x, y, z = pcall(function() return j.pos.x, j.pos.y, j.pos.z end)
+              if okp and math.tointeger(x) then pts[#pts + 1] = {x, y, z} end
+            end
           end
         end
       end
@@ -2754,6 +2792,15 @@ local function tool_jobs()
     end
   end)
   return r
+end
+
+-- BUG-057/FR-72: the job types of cover.labors the job census counts besides its own kinds
+function M.cover_types(c)
+  local cv, w = c.cover, {}
+  for tn in pairs(type(cv) == 'table' and type(cv.labors) == 'table' and cv.labors or {}) do
+    if not M.JOB_KIND[tn] then w[tn] = true end
+  end
+  return w
 end
 
 -- weapons usable as the detail's tool (picks, axes, crossbows and bows not carried by soldiers), from the census
@@ -3393,16 +3440,19 @@ local function tools(K, c, p, inv, engine, r)
   p.tblk = json.object(type(p.tblk) == 'table' and p.tblk or {})
   st.fixes = st.fixes or {}
   local now, changes, taken = K.now().tick, 0, {}
-  local jc = tool_jobs()
+  local jc = tool_jobs(M.cover_types(c))
   st.jobc = jc
   local function opts_of(spec)
     local only = spec.only == true and not p.starve
-    return {only = only or nil, keep = only and tc.keep_labors or nil, equip = tc.equip_update == true or nil}
+    -- BUG-057: a fishers' detail on "nobody does this" is set to only selected with its first member
+    return {only = only or nil, keep = only and tc.keep_labors or nil, equip = tc.equip_update == true or nil,
+            select = spec.fish and true or nil}
   end
   local function set(spec, id, on, why, tgt)
     local ok = K.act.work_detail(spec.name, id, on, opts_of(spec))
     if ok then
       changes = changes + 1
+      if not on then M.cv_off(spec.name, id) end                 -- BUG-057: taken off by the kernel itself
       -- a member added now got the equipment update with its labor: its tool repair waits repair_days
       if on then st.fixes[spec.name .. ':' .. id] = now end
       local u = df.unit.find(id)
@@ -3640,6 +3690,18 @@ local function food_plan(K, c, r)
   if tiles >= need or not (fd < (fc.want_days or 90) or falling) then return end
   local okp, pend = K.call('runner', 'pending', 'farms')
   if okp and (math.tointeger(pend) or 0) > 0 then return end
+  -- BUG-058 (DECISIONS 9; Run 11: five farms projects build_lost and parked, no soil): one lost for good stops the
+  -- requests until it is cancelled or the farms are placed elsewhere
+  local okl, nl, lid = K.call('runner', 'lost', 'farms')
+  if okl and (math.tointeger(nl) or 0) > 0 then
+    if st.farm_lost ~= lid then
+      K.log('warn', 'farms: project %s lost to build_lost (no soil there?): no further farms request until it is ' ..
+            'cancelled (bp.cancel) or the farms are placed elsewhere', tostring(lid))
+    end
+    st.farm_lost = lid
+    return
+  end
+  st.farm_lost = nil
   if p.farm_req and r.now - (math.tointeger(p.farm_req) or 0) < (fc.request_days or 14) * DAY then return end
   local pt = math.max(1, math.tointeger(fc.plot_tiles) or 35)
   local plots = clamp((need - tiles + pt - 1) // pt, 1, fc.plots_max or 4)
@@ -3878,16 +3940,37 @@ function M.order_reasons(o, ctx)
     ws = OL.workshops(job, mc)
     labors = OL.labors(job, mc, ws)
   end
-  local why = {}
-  if ws and not ws_any(ctx.f, ws) then why[#why + 1] = 'no ' .. (ws[1]:match(':(.+)$') or ws[1]) end
+  local why, kind = {}, {}
+  if ws and not ws_any(ctx.f, ws) then
+    -- BUG-059 (Run 14 y577: 'no Farmers' for ProcessPlants sent the game session to the work details; it meant that no
+    -- Farmer's Workshop stood): the workshop is named as one, not as a person
+    local label = M.ws_label(ws[1])
+    why[#why + 1] = 'no ' .. label
+    kind.ws = label
+  end
   if job ~= 'CustomReaction' then
     local tok = (mc == 'metal' or job == 'SmeltOre') and (o.mat_index or -1) >= 0 and mat_token(0, o.mat_index) or nil
     local key = OL.input(job, mc, tok)
-    if key and not ctx.has(key) then why[#why + 1] = 'no ' .. (ctx.label and ctx.label(key) or key) end
+    if key and not ctx.has(key) then why[#why + 1] = 'no ' .. (ctx.label and ctx.label(key) or key); kind.input = true end
   end
-  if labors and not ctx.labor_ok(labors) then why[#why + 1] = 'no worker ' .. table.concat(labors, '/') end
+  if labors and not ctx.labor_ok(labors) then
+    why[#why + 1] = 'no worker ' .. table.concat(labors, '/')
+    kind.worker = table.concat(labors, '/')
+  end
   if #why == 0 then return nil, job end
-  return table.concat(why, ', '), job
+  return table.concat(why, ', '), job, kind
+end
+
+-- BUG-059: a workshop key as words: 'workshop:Farmers' -> "Farmer's Workshop", 'workshop:Masons' -> 'Masons workshop',
+-- 'furnace:Smelter' -> 'Smelter furnace'
+M.WS_NAMES = {Farmers = "Farmer's Workshop", MetalsmithsForge = "Metalsmith's Forge", Craftsdwarfs = "Craftsdwarf's workshop",
+              Jewelers = "Jeweler's workshop", Bowyers = "Bowyer's workshop", Leatherworks = 'Leatherworks',
+              Clothiers = "Clothier's shop", Tanners = "Tanner's shop", Butchers = "Butcher's shop", Siege = 'Siege workshop'}
+function M.ws_label(key)
+  local kind, name = tostring(key):match('^(%a+):(.+)$')
+  if not name then return tostring(key) end
+  if M.WS_NAMES[name] then return M.WS_NAMES[name] end
+  return name .. (kind == 'furnace' and ' furnace' or ' workshop')
 end
 
 local function order_name(o)
@@ -4046,30 +4129,51 @@ end
 -- the crop for empty slot s (0-based) of a plot whose crops are `crops` (raw indices): a crop of the plot that
 -- grows then with usable seeds, else the crop with the most usable seeds that grows then and there, else the
 -- plot's own crop that grows then (underground crops grow all year)
-function M.slot_crop(crops, under, s, seeds)
+function M.slot_crop(crops, under, s, seeds, food)
   local function fits(inf) return inf and inf.under == under and inf.seasons[s + 1] == true end
-  for _, pid in ipairs(crops) do
-    local inf = plant_info(pid)
-    if fits(inf) and (seeds[inf.id] or 0) > 0 then return pid end
+  -- BUG-058: with `food` (food low) the edible crops go first (a dye or fiber crop with the most seeds feeds nobody)
+  for pass = 1, food and 2 or 1 do
+    local function ok(pid) return not (food and pass == 1) or M.food_plant(pid) end
+    for _, pid in ipairs(crops) do
+      local inf = plant_info(pid)
+      if fits(inf) and (seeds[inf.id] or 0) > 0 and ok(pid) then return pid end
+    end
+    local best, bn
+    for id, n in pairs(seeds) do
+      local pid = plant_index(id)
+      local inf = pid and plant_info(pid)
+      if fits(inf) and inf.crop and n > 0 and ok(pid) and (not bn or n > bn or (n == bn and pid < best)) then
+        best, bn = pid, n
+      end
+    end
+    if best then return best end
+    for _, pid in ipairs(crops) do if fits(plant_info(pid)) and ok(pid) then return pid end end
   end
-  local best, bn
-  for id, n in pairs(seeds) do
-    local pid = plant_index(id)
-    local inf = pid and plant_info(pid)
-    if fits(inf) and inf.crop and n > 0 and (not bn or n > bn or (n == bn and pid < best)) then best, bn = pid, n end
-  end
-  if best then return best end
-  for _, pid in ipairs(crops) do if fits(plant_info(pid)) then return pid end end
 end
 
--- {plot id, season, crop} for every empty slot of the built farm plots; st.farm counts plots and empty slots
-local function farm_fills(max)
+-- BUG-058 (Run 13 y513: the new plots on z149 held surface crops, TURNIP, PARSNIP, QUINOA, and made no PlantSeeds job):
+-- does the plot lie underground (true), on the surface (false) or is that unknown (nil)? The tile of the plot's corner
+-- (snapshot.plot_under: a revealed tile under the open sky is the surface, a `subterranean` one underground; the plot
+-- sheet's crop list follows the same flag)
+function M.plot_under(K, b)
+  local okp, x, y, z = pcall(function() return b.x1, b.y1, b.z end)
+  if not okp then return nil end
+  local ok, v = K.call('snapshot', 'plot_under', x, y, z)
+  if ok and (v == true or v == false) then return v end
+  return nil
+end
+
+-- {plot id, season, crop} for every empty slot of the built farm plots (and every slot holding a crop of the wrong kind
+-- for the plot: a surface crop underground or the reverse); st.farm counts plots and empty slots.
+-- `only` = one season (0..3, T.slotnow: the running season), else all; `food` = the edible crops first
+local function farm_fills(K, max, only, food)
   local fills, plots, empty = {}, 0, 0
   pcall(function()
     for _, b in ipairs(df.global.world.buildings.other.FARM_PLOT) do
       if built(b) then
         plots = plots + 1
-        local crops, under = {}, nil
+        local tile = M.plot_under(K, b)
+        local crops, under = {}, tile
         for s = 0, 3 do
           local pid = b.plant_id[s]
           if pid and pid >= 0 then
@@ -4079,17 +4183,27 @@ local function farm_fills(max)
           end
         end
         for s = 0, 3 do
-          local pid = b.plant_id[s]
-          if not pid or pid < 0 then
-            empty = empty + 1
-            local crop = under ~= nil and #fills < max and M.slot_crop(crops, under, s, st.seeds or {}) or nil
-            if crop then fills[#fills + 1] = {id = b.id, s = s, crop = crop} end
+          if only == nil or s == only then
+            local pid = b.plant_id[s]
+            local inf = pid and pid >= 0 and plant_info(pid) or nil
+            local wrong = tile ~= nil and inf ~= nil and inf.under ~= tile
+            if not pid or pid < 0 or wrong then
+              if not wrong then empty = empty + 1 end
+              local crop = under ~= nil and #fills < max and M.slot_crop(crops, under, s, st.seeds or {}, food) or nil
+              -- a crop of the wrong kind is replaced only by one with usable seeds (a wrong reading of the tile must not
+              -- cost a planted slot)
+              if crop and wrong then
+                local ci = plant_info(crop)
+                if not (ci and ((st.seeds or {})[ci.id] or 0) > 0) then crop = nil end
+              end
+              if crop and crop ~= pid then fills[#fills + 1] = {id = b.id, s = s, crop = crop, wrong = wrong or nil} end
+            end
           end
         end
       end
     end
   end)
-  st.farm = {plots = plots, empty = empty}
+  if only == nil then st.farm = {plots = plots, empty = empty} end
   return fills
 end
 
@@ -4124,6 +4238,9 @@ local function edible(i, list)
   ecache[i] = v
   return v
 end
+
+-- BUG-058: a plant raw that feeds (an edible structural or growth material); M.slot_crop's `food` pass
+function M.food_plant(pid) return edible(pid, nil) == true end
 
 local function hungry_ids(K, lim)
   local r = {}
@@ -4197,6 +4314,9 @@ function T.days(K, c, r)
     days[key .. '_d'] = M.days(stock, p.hist[key])
   end
   r.days, st.days = days, days
+  -- BUG-059 (Run 12 y503: 12 starved under 'food 41 d' with meals 0): the citizens past DF's "hungry" line, daily
+  st.hungry_n = #hungry_ids(K, (c.starve or M.DEFAULTS.starve).hunger or 50000)
+  M.hungry_warn(K, c, r)
   local sup = K.plan.supply or {}
   stock_low(K, p, 'drink_d', days.drink_d, math.tointeger(sup.drink_d) or 170, true)
   stock_low(K, p, 'food_d', days.food_d, math.tointeger(sup.food_d) or 60, true)
@@ -5307,7 +5427,11 @@ M.MEDIC = {'DIAGNOSE', 'SURGERY', 'BONE_SETTING'}
 M.TOOL_DETAILS = {Miners = true, Woodcutters = true, Hunters = true, Fisherdwarves = true}
 
 -- the citizens who may join the gatherers, best first: {id, ...}
-function M.gather_cand(K, c, member)
+-- BUG-057: `o` = {skill = job_skill name (default HERBALISM), excl = {unit id = true} (the other farm detail's members),
+-- prefer = labor name (holders of it first, among the idle), noprefer = labor name (its holders are left to their own
+-- detail), labor = the detail's own labor (a sole holder of it may join)}
+function M.gather_cand(K, c, member, o)
+  o = o or {}
   local cu = K.census.u or {}
   local sold, cnt, holder, tool_m = {}, {}, {}, {}
   for _, id in ipairs(cu.soldier_ids or {}) do sold[id] = true end
@@ -5327,20 +5451,24 @@ function M.gather_cand(K, c, member)
     end
   end
   local sole = {}
-  for l, n in pairs(cnt) do if n == 1 then sole[holder[l]] = true end end
-  local sid = df.job_skill and df.job_skill.HERBALISM
+  for l, n in pairs(cnt) do if n == 1 and l ~= o.labor then sole[holder[l]] = true end end
+  local sid = o.skill ~= false and df.job_skill and df.job_skill[o.skill or 'HERBALISM'] or nil   -- false: no skill ranking
+  local excl = o.excl or {}
   local cand = {}
   for _, u in ipairs(adults) do
     local id, doc = u.id, false
     for _, l in ipairs(M.MEDIC) do if labor_on(u, l) then doc = true end end
     local squad = u.military and math.tointeger(u.military.squad_id) or -1
-    if not (member[id] or sold[id] or tool_m[id] or sole[id] or doc or squad >= 0 or noble(u) or (u.mood or -1) >= 0) then
+    if not (member[id] or sold[id] or tool_m[id] or sole[id] or excl[id] or doc or squad >= 0 or noble(u) or
+            (u.mood or -1) >= 0 or (o.noprefer and labor_on(u, o.noprefer))) then
       cand[#cand + 1] = {id = id, idle = (u.job == nil or u.job.current_job == nil) and 1 or 0,
-                         sk = sid and dfhack.units.getNominalSkill(u, sid, true) or 0}
+                         sk = sid and dfhack.units.getNominalSkill(u, sid, true) or 0,
+                         pf = o.prefer and labor_on(u, o.prefer) and 1 or 0}
     end
   end
   table.sort(cand, function(a, b)
     if a.idle ~= b.idle then return a.idle > b.idle end
+    if a.pf ~= b.pf then return a.pf > b.pf end
     if a.sk ~= b.sk then return a.sk > b.sk end
     return a.id < b.id
   end)
@@ -5376,6 +5504,7 @@ function M.gather_low(K, c, r)
     for _, id in ipairs(pg.ids) do
       local uid = math.tointeger(id)
       if uid and K.act.work_detail(pg.d, uid, false) then
+        M.cv_off(pg.d, uid)
         out[#out + 1] = unit_name(uid)
         K.emit('WORK_DETAIL', 'B', string.format('%s - %s (food back at %d days, drink %d days)', pg.d, unit_name(uid),
                                                  fd, dd),
@@ -5449,11 +5578,403 @@ end
 
 function T.gather(K, c, r) if r.day then M.gather_low(K, c, r) end end
 
+---------------------------------------------------------------- work details follow the demand (BUG-057, FR-72)
+-- Run 12-14 (Wheelsblows, Kilrudrabed): PlantSeeds 122-421 and GatherPlants 250-565 stayed unclaimed for years with 30-70 %
+-- of the adults idle, the details Planters / Fisherdwarves / Plant gatherers stood at 0 members, and the only code that
+-- staffed Planters was FR-25's starvation (food_d <= 0 with hungry citizens). Daily (M.cover_run), in PEACE/RECOVERY and
+-- not in labormanager's modern mode: the farmers (PLANT, detail Planters) and the gatherers (HERBALIST, detail Plant
+-- gatherers) follow the unclaimed reachable jobs of their kind (config economy.cover), kept apart (a gatherer is not taken
+-- from the farmers, a farmer not from the gatherers, the PLANT holders are not made gatherers while farm jobs wait); any
+-- other job type of cover.labors with more than min_jobs unclaimed jobs and no holder of its labor gets idle citizens through
+-- a detail that grants the labor. A detail never shrinks while unclaimed jobs of its kind exist; the members the kernel
+-- added (persist m.economy.cover.mine) leave after idle_days passes without any; the player's members stay. A member
+-- without the detail's labor gets it again (every tools.repair_days). Every pass audits Planters, Plant gatherers and
+-- Fisherdwarves: members that vanished without the kernel taking them off, and a mode change, go to kern.log and
+-- `inspect workload key=details` (the live answer to "who resets the details", note 54).
+-- GatherPlants designations nobody worked on for cover.stale_days days and the ones off the citizens' walk group (two passes
+-- in a row) are withdrawn (act.plant_ungather, the designation screen's cancel), at most cover.unmark_max a day.
+M.COVER = {
+  {key = 'farm', det = 'planters', labor = 'PLANT', skill = 'PLANT', kind = 'plant', per = 'farm_per', min = 'farm_min',
+   max = 'farm_max', jobs = 'min_jobs', types = {'PlantSeeds', 'HarvestPlants'}},
+  {key = 'gather', det = 'gatherers', labor = 'HERBALIST', skill = 'HERBALISM', kind = 'gather', per = 'gather_per',
+   min = 'gather_min', max = 'gather_max', jobs = 'gather_jobs', types = {'GatherPlants'}},
+}
+
+-- the kernel took a member off a detail (tools, gather_low, cover): a member that vanishes without it was taken off by
+-- somebody else (the game, a plugin, the player)
+function M.cv_off(name, id)
+  st.wd_off = st.wd_off or {}
+  st.wd_off[name .. ':' .. tostring(id)] = true
+end
+
+-- the cover specs: the farm and gather ones, then one per further labor of cover.labors (sorted; tool labors have
+-- their own details and are left to M.tools)
+function M.cover_specs(cv)
+  local out = {}
+  for _, s in ipairs(M.COVER) do out[#out + 1] = s end
+  local seen, names, by = {}, {}, {}
+  for _, s in ipairs(M.COVER) do seen[s.labor] = true end
+  for tn, lab in pairs(type(cv.labors) == 'table' and cv.labors or {}) do
+    if type(lab) == 'string' and not seen[lab] and not M.JOB_KIND[tn] then
+      by[lab] = by[lab] or {}
+      by[lab][#by[lab] + 1] = tn
+    end
+  end
+  for lab in pairs(by) do names[#names + 1] = lab end
+  table.sort(names)
+  for _, lab in ipairs(names) do
+    table.sort(by[lab])
+    out[#out + 1] = {key = lab:lower(), labor = lab, kind = 'by', types = by[lab], jobs = 'min_jobs', per = 'other_per',
+                     max = 'other_max', other = true}
+  end
+  return out
+end
+
+-- open jobs of a kind the citizens can walk to: (reachable open, off the walk group, the sampled positions' flags)
+function M.cv_reach(K, jc, kind)
+  local open = math.tointeger(jc[kind .. '_open']) or 0
+  local pts = jc[kind .. '_pts'] or {}
+  if open == 0 or #pts == 0 then return open, 0, {} end
+  local cpts = {}
+  for _, id in ipairs((K.census.u or {}).ids or {}) do
+    local u = df.unit.find(id)
+    local okp, x, y, z = pcall(function() return u.pos.x, u.pos.y, u.pos.z end)
+    if u and okp and math.tointeger(x) then cpts[#cpts + 1] = {x, y, z} end
+  end
+  local okc, cg = K.call('snapshot', 'groups', cpts, false)
+  local okj, jg = K.call('snapshot', 'groups', pts, true)
+  if not (okc and okj and type(cg) == 'table' and type(jg) == 'table') then return open, 0, {} end
+  local home = {}
+  for _, g in ipairs(cg) do if math.type(g) == 'integer' and g > 0 then home[g] = true end end
+  if next(home) == nil then return open, 0, {} end
+  local far, nf = {}, 0
+  for k = 1, #pts do
+    local g = math.tointeger(jg[k]) or -1
+    if g >= 0 and not home[g] then far[k], nf = true, nf + 1 end
+  end
+  local off = math.min(open, nf * open // #pts)
+  return open - off, off, far
+end
+
+-- one detail's audit: the members that vanished without the kernel (p.cover.seen against the list now), a mode change
+function M.cv_audit(K, p, name, wd, now_ids, labor)
+  local cvp = p.cover
+  local seen = type(cvp.seen[name]) == 'table' and cvp.seen[name] or {}
+  local have = {}
+  for _, id in ipairs(now_ids) do have[id] = true end
+  local lost = {}
+  for _, id in ipairs(seen) do
+    local uid = math.tointeger(id)
+    local u = uid and df.unit.find(uid)
+    if uid and not have[uid] and not (st.wd_off or {})[name .. ':' .. uid] and u and not dfhack.units.isDead(u)
+       and dfhack.units.isCitizen(u) and (u.military == nil or (math.tointeger(u.military.squad_id) or -1) < 0) then
+      lost[#lost + 1] = uid
+    end
+  end
+  local mode = wd.flags and math.tointeger(wd.flags.mode)
+  local was = math.tointeger(cvp.mode[name])
+  local wm = df.work_detail_mode or {}
+  if #lost > 0 then
+    cvp.lost[name] = (math.tointeger(cvp.lost[name]) or 0) + #lost
+    -- do they still hold the detail's labor? (DF drops a member whose labor flag is not set: a hand-written
+    -- assigned_units entry without the labor, note 54, would show 0 here)
+    local still = 0
+    for _, id in ipairs(lost) do
+      local u = df.unit.find(id)
+      if u and labor and labor_on(u, labor) then still = still + 1 end
+    end
+    K.log('warn', 'details: %s lost %d members the kernel did not take off (%d left, mode %s, %d of them still hold %s): %s',
+          name, #lost, #now_ids, tostring(wm[mode] or mode), still, tostring(labor), table.concat(lost, ' '):sub(1, 120))
+  end
+  if mode and was and mode ~= was then
+    K.log('warn', 'details: %s changed its mode %s -> %s (not the kernel)', name, tostring(wm[was] or was),
+          tostring(wm[mode] or mode))
+  end
+  if mode then cvp.mode[name] = mode end
+  return #lost
+end
+
+-- the plan of one daily pass (no DF write): rows per spec, the queue of adds and removals
+function M.cover_plan(K, c, r)
+  local cv, p, jc = c.cover, r.p, st.jobc
+  local sc = c.starve or M.DEFAULTS.starve
+  local li = df.global.plotinfo.labor_info
+  local cu = K.census.u or {}
+  local wm = df.work_detail_mode or {}
+  local cvp = p.cover
+  for _, k in ipairs({'mine', 'seen', 'zero', 'mode', 'lost'}) do cvp[k] = type(cvp[k]) == 'table' and cvp[k] or {} end
+  local specs = M.cover_specs(cv)
+  local adults, hold, alive = {}, {}, {}
+  for _, id in ipairs(cu.ids or {}) do
+    local u = df.unit.find(id)
+    if u and not dfhack.units.isDead(u) then
+      alive[id] = true
+      if dfhack.units.isAdult(u) then
+        adults[#adults + 1] = u
+        for _, s in ipairs(specs) do if labor_on(u, s.labor) then hold[s.labor] = (hold[s.labor] or 0) + 1 end end
+      end
+    end
+  end
+  local wds = {}
+  for _, w in ipairs(li.work_details) do wds[dfhack.df2utf(w.name)] = w end
+  local safe = HUNT_MODES[K.mode()] == true and st.engine ~= 'modern'
+  local cap_all = math.max(1, #adults * (math.tointeger(cv.share) or 50) // 100)    -- all the cover details together
+  local rows, queue, members = {}, {}, {}
+  local now = K.now().tick
+  -- the details first: members per name (farm and gather exclude each other)
+  for _, s in ipairs(specs) do
+    local name, wd = find_detail(s.det and (sc.details or {})[s.det] or nil, s.labor)
+    if name and M.TOOL_DETAILS[name] then name, wd = nil, nil end
+    s.name, s.wd = name, wd
+    if wd then
+      local set, list = {}, {}
+      for _, id in ipairs(wd.assigned_units) do
+        set[id] = true
+        if alive[id] then list[#list + 1] = id end
+      end
+      members[name] = {set = set, list = list}
+    end
+  end
+  local in_cover = 0                                        -- members of the cover details now (each detail once)
+  for _, m in pairs(members) do in_cover = in_cover + #m.list end
+  for _, s in ipairs(specs) do
+    local row = {key = s.key, labor = s.labor, name = s.name, holders = hold[s.labor] or 0, open = 0, reach = 0, far = 0,
+                 cur = 0, want = 0, add = 0, rem = 0}
+    rows[#rows + 1] = row
+    if s.kind == 'by' then
+      for _, tn in ipairs(s.types) do row.open = row.open + (math.tointeger((jc.by_open or {})[tn]) or 0) end
+      row.reach = row.open
+    else
+      row.reach, row.far = M.cv_reach(K, jc, s.kind)
+      row.open = math.tointeger(jc[s.kind .. '_open']) or 0
+    end
+    local wd = s.wd
+    if not wd then
+      row.why = row.open > 0 and 'no work detail grants ' .. s.labor or nil
+    else
+      local mem = members[s.name]
+      row.cur, row.mode = #mem.list, math.tointeger(wd.flags and wd.flags.mode)
+      M.cv_audit(K, p, s.name, wd, mem.list, s.labor)
+      local thr = math.tointeger(cv[s.jobs]) or 20
+      local per = math.max(1, math.tointeger(cv[s.per]) or 20)
+      local mn = math.tointeger(cv[s.min or '']) or 1
+      local mx = math.max(mn, math.tointeger(cv[s.max]) or 3)
+      local want = 0
+      if row.reach > thr then want = clamp((row.reach + per - 1) // per, mn, mx) end
+      -- all the cover details together hold at most `share` percent of the adults (members that are there stay)
+      row.want = math.max(math.min(want, cap_all - (in_cover - #mem.list)), math.min(want, #mem.list))
+      local zk = s.key
+      cvp.zero[zk] = row.open == 0 and (math.tointeger(cvp.zero[zk]) or 0) + 1 or 0
+      local mine = type(cvp.mine[s.name]) == 'table' and cvp.mine[s.name] or {}
+      local ml = {}
+      for _, id in ipairs(mine) do
+        local uid = math.tointeger(id)
+        if uid and mem.set[uid] and alive[uid] then ml[#ml + 1] = uid end
+      end
+      row.mine = ml
+      if not safe then
+        row.why = 'not in PEACE/RECOVERY or labormanager modern'
+      elseif wm.EverybodyDoesThis ~= nil and row.mode == wm.EverybodyDoesThis then
+        row.why = 'everybody-does-this (the jobs wait for another reason)'
+      elseif row.want > row.cur then
+        local excl = {}
+        for _, o in ipairs(specs) do
+          if o.key ~= s.key and o.name and members[o.name] and (s.key == 'farm' or s.key == 'gather') and
+             (o.key == 'farm' or o.key == 'gather') then
+            for id in pairs(members[o.name].set) do excl[id] = true end
+          end
+        end
+        local farm_up = false                                -- farm jobs above the threshold: the PLANT holders plant
+        for _, o in ipairs(rows) do
+          if o.key == 'farm' and o.reach > (math.tointeger(cv.min_jobs) or 20) then farm_up = true end
+        end
+        local cand = M.gather_cand(K, c, mem.set, {skill = s.skill or false, excl = excl, labor = s.labor,
+                                                   prefer = s.key == 'farm' and 'PLANT' or nil,
+                                                   noprefer = s.key == 'gather' and farm_up and 'PLANT' or nil})
+        local n = math.min(row.want - row.cur, math.max(1, math.tointeger(cv.step) or 4), #cand)
+        for i = 1, n do queue[#queue + 1] = {name = s.name, id = cand[i], on = true, why = 'cover', n = row.want} end
+        row.add = n
+        if n < row.want - row.cur then row.why = string.format('no free citizen (%d of %d)', row.cur + n, row.want) end
+      elseif (math.tointeger(cvp.zero[zk]) or 0) >= (math.tointeger(cv.idle_days) or 7) and #ml > 0 and row.cur > mn then
+        table.sort(ml, function(a, b) return a > b end)
+        for _, id in ipairs(ml) do
+          if row.cur - row.rem <= mn then break end
+          queue[#queue + 1] = {name = s.name, id = id, on = false, why = 'cover idle', n = mn}
+          row.rem = row.rem + 1
+        end
+      end
+      -- a member without the detail's labor gets it through the detail again, at most every repair_days
+      if safe then
+        local rd = (c.tools or {}).repair_days or 7
+        st.fixes = st.fixes or {}
+        for _, id in ipairs(mem.list) do
+          local u = df.unit.find(id)
+          local key = s.name .. ':' .. id
+          if u and not labor_on(u, s.labor) and now - (st.fixes[key] or -1e12) >= rd * DAY then
+            st.fixes[key] = now
+            queue[#queue + 1] = {name = s.name, id = id, on = true, why = 'cover labor', n = row.want, labor = s.labor}
+          end
+        end
+      end
+    end
+  end
+  -- Fisherdwarves: audit only (M.tools staffs it)
+  local fs
+  for _, d in ipairs((c.tools or {}).details or {}) do if d.fish then fs = d.name end end
+  if fs and wds[fs] then
+    local list = {}
+    for _, id in ipairs(wds[fs].assigned_units) do if alive[id] then list[#list + 1] = id end end
+    M.cv_audit(K, p, fs, wds[fs], list, 'FISH')
+    rows[#rows + 1] = {key = 'fish', name = fs, labor = 'FISH', holders = 0, open = math.tointeger(jc.fish_open) or 0,
+                       reach = 0, far = 0, cur = #list, want = st.fish_want or 0, add = 0, rem = 0, audit = true}
+  end
+  return rows, queue, wds, alive
+end
+
+-- GatherPlants designations to withdraw: the ones off the walk group in two passes in a row, and every sampled one when
+-- nobody worked on any GatherPlants job for stale_days (not while food or drink is low: gatherers are wanted then)
+function M.cover_unmark(K, c, r, rows)
+  local cv, p, jc = c.cover, r.p, st.jobc
+  local cvp = p.cover
+  if not HUNT_MODES[K.mode()] then return nil end
+  local reach, off, far = M.cv_reach(K, jc, 'gather')
+  local pts = jc.gather_pts or {}
+  local prev, now_far = st.cv_far or {}, {}
+  local list, seen = {}, {}
+  local lim = math.tointeger(cv.unmark_max) or 200
+  local n_far, n_stale = 0, 0
+  -- a gate bridge that is not down splits the walk groups (the plants outside the wall lie off the citizens' group
+  -- until it falls): then nothing is "off the walk group" for good
+  local br = K.view().bridges
+  local split = false
+  for _, v in pairs(type(br) == 'table' and br or {}) do if v ~= 'down' then split = true end end
+  for k, pt in ipairs(pts) do
+    if far[k] and not split then
+      local key = pt[1] .. ',' .. pt[2] .. ',' .. pt[3]
+      now_far[key] = true
+      if prev[key] and #list < lim and not seen[key] then seen[key] = true; list[#list + 1] = pt; n_far = n_far + 1 end
+    end
+  end
+  st.cv_far = now_far
+  local open = math.tointeger(jc.gather_open) or 0
+  local taken = (math.tointeger(jc.gather) or 0) - open
+  if open > 0 and taken == 0 then
+    if not tonumber(cvp.gstale) then cvp.gstale = r.now end
+  else cvp.gstale = nil end
+  local fd = (r.days or {}).food_d or 9999
+  local pre = (c.food or {}).pre_days or 30
+  local stale = tonumber(cvp.gstale) and r.now - cvp.gstale >= (math.tointeger(cv.stale_days) or 30) * DAY
+  if stale and fd >= pre and not p.famine then
+    for k, pt in ipairs(pts) do
+      local key = pt[1] .. ',' .. pt[2] .. ',' .. pt[3]
+      if #list < lim and not seen[key] then seen[key] = true; list[#list + 1] = pt; n_stale = n_stale + 1 end
+    end
+  end
+  if #list == 0 then return nil end
+  return list, n_far, n_stale
+end
+
+function M.cover_run(K, c, r)
+  local cv, p = c.cover, r.p
+  if type(cv) ~= 'table' or cv.on == false then st.cover = nil; return true end
+  if st.engine == 'modern' or st.engine == nil or type(st.jobc) ~= 'table' or not df.global.plotinfo.labor_info then
+    return true
+  end
+  if type(p.cover) ~= 'table' then p.cover = {} end
+  local cx = r.cv
+  if not cx then
+    local ok, rows, queue = pcall(M.cover_plan, K, c, r)
+    if not ok then K.log('warn', 'details: cover plan failed: %s', tostring(rows)); return true end
+    cx = {rows = rows, q = queue, added = {}, removed = {}}
+    r.cv = cx
+    r.cmds = r.cmds + 1
+    return false
+  end
+  local e = table.remove(cx.q, 1)
+  if e then
+    r.cmds = r.cmds + 1
+    if K.act.work_detail(e.name, e.id, e.on, {select = e.on or nil}) then
+      local tgt = cx.added
+      if e.on then
+        if e.why == 'cover' then
+          local m = type(p.cover.mine) == 'table' and p.cover.mine or {}
+          p.cover.mine = m
+          local l = type(m[e.name]) == 'table' and m[e.name] or {}
+          l[#l + 1] = e.id
+          m[e.name] = l
+        end
+      else
+        M.cv_off(e.name, e.id)
+        local l = p.cover.mine and p.cover.mine[e.name]
+        for i = #(l or {}), 1, -1 do if math.tointeger(l[i]) == e.id then table.remove(l, i) end end
+        tgt = cx.removed
+      end
+      if e.why == 'cover labor' then
+        K.log('info', 'details: %s %s had no %s labor: set through the detail', e.name, unit_name(e.id), e.labor or '?')
+      else
+        tgt[e.name] = tgt[e.name] or {}
+        tgt[e.name][#tgt[e.name] + 1] = e.id
+        K.emit('WORK_DETAIL', 'B', string.format('%s %s %s (%s, target %d)', e.name, e.on and '+' or '-',
+                                                 unit_name(e.id), e.why, e.n),
+               {detail = e.name, unit = e.id, on = e.on and 1 or 0, n = e.n, why = e.why})
+      end
+    end
+    return false
+  end
+  if not cx.unmarked then
+    cx.unmarked = true
+    local ok, list, nf, ns = pcall(M.cover_unmark, K, c, r, cx.rows)
+    if ok and list then
+      r.cmds = r.cmds + 1
+      local okw, n = K.act.plant_ungather(list)
+      K.log('info', 'gather: %d GatherPlants designations withdrawn (%d off the walk group, %d unworked for %d days)',
+            okw and math.tointeger(n) or 0, nf or 0, ns or 0, math.tointeger(c.cover.stale_days) or 30)
+      cx.withdrawn = okw and math.tointeger(n) or 0
+      return false
+    elseif not ok then K.log('warn', 'details: withdraw failed: %s', tostring(list)) end
+  end
+  -- finish: log the changes, remember the members (the next pass's audit) and the rows (inspect)
+  local li = df.global.plotinfo.labor_info
+  local wds = {}
+  for _, w in ipairs(li.work_details) do wds[dfhack.df2utf(w.name)] = w end
+  for _, row in ipairs(cx.rows) do
+    local nm = row.name
+    if nm and wds[nm] then
+      local ids = {}
+      for _, id in ipairs(wds[nm].assigned_units) do ids[#ids + 1] = id end
+      p.cover.seen[nm] = json.array(ids)
+      row.now = #ids
+    end
+    local a, d = cx.added[nm or ''], cx.removed[nm or '']
+    if a or d then
+      local who = {}
+      for _, id in ipairs(a or {}) do who[#who + 1] = unit_name(id) end
+      K.log('info', 'details: %s %s%s (%s %d unclaimed, %d reachable; target %d; holders %d)', nm,
+            a and ('+' .. #a .. ' (' .. table.concat(who, ', '):sub(1, 90) .. ')') or '',
+            d and (' -' .. #d) or '', row.key, row.open, row.reach, row.want, row.holders)
+    end
+  end
+  for _, k in ipairs({'mine', 'seen', 'zero', 'mode', 'lost'}) do
+    local t = p.cover[k]
+    if getmetatable(t) == nil then p.cover[k] = json.object(t) end
+  end
+  for k, v in pairs(p.cover.mine) do p.cover.mine[k] = json.array(v) end
+  st.cover = {rows = cx.rows, withdrawn = cx.withdrawn or 0, day = r.now}
+  K.persist.touch('m.economy')
+  return true
+end
+
+function T.cover(K, c, r) if r.day then return M.cover_run(K, c, r) end end
+
 -- what keeps food from coming, for the food_low and famine decisions: {{id, text}} by weight, and what the kernel
 -- does about it itself (BUG-038): {{id, text}} (the fishery request, the gatherers)
 function M.food_block(K, c, r, inv)
   local f, out, auto = M.facts_now(K, r), {}, {}
   local function put(id, txt) out[#out + 1] = {id, txt} end
+  -- BUG-059: hungry citizens and no prepared meal: the food days count raw food nobody cooks, say so first
+  if (st.hungry_n or 0) > 0 and (inv.meals or 0) == 0 then
+    put('hungry', string.format('%d hungry, 0 meals: raw food is not cooked', st.hungry_n))
+  end
   local raw = inv.fish_raw or 0
   if raw > 0 and not ws_any(f, M.FISHERY) then
     if st.fishery == 'asked' or st.fishery == 'queued' then          -- BUG-038: follow places it, nothing to decide
@@ -5484,13 +6005,34 @@ function M.food_block(K, c, r, inv)
   end
   local fs = st.food or {}
   if (fs.need or 0) > (fs.tiles or 0) then
-    put('farms', string.format('farms %d/%d tiles', fs.tiles or 0, fs.need or 0))
+    put('farms', st.farm_lost and string.format('farms %d/%d tiles; %s lost (build_lost): cancel it, place elsewhere',
+                                                fs.tiles or 0, fs.need or 0, tostring(st.farm_lost):sub(1, 12))
+                 or string.format('farms %d/%d tiles', fs.tiles or 0, fs.need or 0))
   end
   local ca = K.census.a
   if type(ca) == 'table' and (math.tointeger(ca.n) or 0) > 0 and not ws_any(f, (c.slaughter or {}).ws) then
     put('butcher', "no butcher's shop")
   end
   return out, auto
+end
+
+-- BUG-059 (Run 12 y503: 12 starved under "food 41 d", meals 0): hungry citizens while no prepared meal stands and the
+-- food days are above the pre-alarm line (below it the food_low decision names it): one kern.log line, again after
+-- 7 days or when the hungry count doubled
+function M.hungry_warn(K, c, r)
+  local p, n = r.p, st.hungry_n or 0
+  local inv = r.inv or {}
+  local fd = (r.days or {}).food_d or 9999
+  if n == 0 or (inv.meals or 0) > 0 or fd < ((c.food or {}).pre_days or 30) then
+    p.hungry_w = nil
+    return
+  end
+  local w = type(p.hungry_w) == 'table' and p.hungry_w or nil
+  if w and r.now - (math.tointeger(w.t) or 0) < 7 * DAY and n < 2 * (math.tointeger(w.n) or 0) then return end
+  p.hungry_w = {t = r.now, n = n}
+  K.log('warn', 'food %d days but %d citizens hungry and no prepared meal: raw plants and seeds are not cooked (%d cook ' ..
+        'ingredients, kitchen %s, COOK labor %s)', fd, n, M.cook_n(inv), ws_any(M.facts_now(K, r), {'workshop:Kitchen'}) and
+        'built' or 'missing', M.labor_holder(K, 'COOK') and 'held' or 'on nobody')
 end
 
 -- the decision text: numbers, blockers (each names its fix), what the kernel does itself (BUG-038: `auto: ...`, never
@@ -5506,7 +6048,8 @@ function M.food_q(fd, r, inv, bl, auto)
   for _, o in ipairs(M.FOOD_MORE) do opts[#opts + 1] = o end
   for _, a in ipairs(auto or {}) do au[#au + 1] = a[2]:sub(1, 44) end
   local ap = #au > 0 and ('; auto: ' .. table.concat(au, ', ')) or ''
-  local q = string.format('food %d d (%d cit, %d meals)', fd, r and r.cit or 0, inv.meals or 0) ..
+  local q = string.format('food %d d (%d cit, %s%d meals)', fd, r and r.cit or 0,
+                          (st.hungry_n or 0) > 0 and (st.hungry_n .. ' hungry, ') or '', inv.meals or 0) ..
             (#parts > 0 and (': ' .. table.concat(parts, '; ')) or '')
   local tail = '. Also: ' .. table.concat(M.FOOD_MORE, ', ')
   if #q + #ap + #tail > 200 then q = q:sub(1, math.max(30, 197 - #ap - #tail)) .. '...' end
@@ -5544,6 +6087,7 @@ function T.plan(K, c, r)
   r.hunt, r.hunt_why = hunt_want(K, c, r)
   st.hunt = {n = r.hunt, why = r.hunt_why}          -- M.route (care's MOOD_RISK names the leather route)
   r.fish, r.fish_why = fish_want(K, c, r)
+  st.fish_want = r.fish
   r.gear = gear_pre(K, c, r, r.hunt)
   -- priority: needs (moods) first, then drink and food, then soldiers, then stock
   local urgent = {leather = need_n(r.p, 'leather', r.now) > 0, cloth = need_n(r.p, 'cloth', r.now) +
@@ -5635,7 +6179,7 @@ end
 -- fiber_off stands in when status names none
 function T.farm(K, c, r)
   local Cc = c.cloth
-  if type(Cc) ~= 'table' then return true end
+  if type(Cc) ~= 'table' or st.af_off then return true end         -- BUG-058: autofarm disabled: no thresholds
   local crops = {}
   for _, id in ipairs(Cc.fiber or {}) do if (st.seeds[id] or 0) > 0 then crops[#crops + 1] = id end end
   if #crops == 0 then return true end
@@ -5665,7 +6209,7 @@ end
 -- and again after status_days (live L5: re-reading on every change of the seed kinds read it 13 times in 62 days).
 function T.crops(K, c, r)
   local fc = c.food
-  if type(fc) ~= 'table' or not r.day then return true end
+  if type(fc) ~= 'table' or not r.day or st.af_off then return true end
   local cs = st.crops
   if type(cs) ~= 'table' or r.now - cs.read >= (fc.status_days or 7) * DAY then
     r.cmds = r.cmds + 1
@@ -5788,7 +6332,8 @@ function T.guard(K, c, r)
     for _, e in ipairs(r.bad) do live[tostring(e.id)] = true end
     for key in pairs(p.badseen) do if not live[key] then p.badseen[key] = nil end end
     for _, o in ipairs(orders_all()) do if (o.amount_left or 0) > 0 then n = n + 1 end end
-    st.orders = {n = n, bad = st.bad, stuck = st.orders and st.orders.stuck or 0}
+    st.orders = {n = n, bad = st.bad, stuck = st.orders and st.orders.stuck or 0, sws = st.orders and st.orders.sws,
+                 slab = st.orders and st.orders.slab, ws = st.orders and st.orders.ws}
   end
   local e = table.remove(r.bad, 1)
   if not e then return true end
@@ -5822,14 +6367,15 @@ function T.ocheck(K, c, r)
   if not oq then
     local ids = {}
     for _, o in ipairs(orders_all()) do if (o.amount_left or 0) > 0 then ids[#ids + 1] = o.id end end
-    oq = {ids = ids, i = 1, ctx = order_ctx(K, c, r), seen = {}, stuck = 0, told = 0, steel = {}, steel_left = 0}
+    oq = {ids = ids, i = 1, ctx = order_ctx(K, c, r), seen = {}, stuck = 0, told = 0, steel = {}, steel_left = 0,
+          sws = 0, slab = 0, wsn = {}}
     r.oq = oq
   end
   local last = math.min(#oq.ids, oq.i + ORDER_SLICE - 1)
   for k = oq.i, last do
     local o = order_by_id(oq.ids[k])
-    local why, job
-    if o and (o.amount_left or 0) > 0 then why, job = M.order_reasons(o, oq.ctx) end
+    local why, job, kind
+    if o and (o.amount_left or 0) > 0 then why, job, kind = M.order_reasons(o, oq.ctx) end
     if why then
       local key = tostring(o.id)
       oq.seen[key] = true
@@ -5840,13 +6386,17 @@ function T.ocheck(K, c, r)
       local rec = p.ostuck[key]
       if type(rec) ~= 'table' then rec = {since = r.now}; p.ostuck[key] = rec end
       rec.why, rec.job = why:sub(1, 120), tostring(job):sub(1, 40)   -- Run 11: room for the cook ingredients' why
+      -- BUG-059: a missing mandatory workshop is told apart from a labor or detail problem (and from a missing input)
+      rec.kind = kind and (kind.ws and 'workshop' or kind.worker and 'worker' or 'input') or nil
       local days = (r.now - (math.tointeger(rec.since) or r.now)) // DAY
       if days >= (oc.stuck_days or 3) then
         oq.stuck = oq.stuck + 1
+        if kind and kind.ws then oq.sws, oq.wsn[kind.ws] = oq.sws + 1, (oq.wsn[kind.ws] or 0) + 1 end
+        if kind and kind.worker then oq.slab = oq.slab + 1 end
         if rec.told ~= 1 and oq.told < (oc.report_per_day or 3) then
           rec.told, oq.told = 1, oq.told + 1
           K.emit('ORDER_STUCK', 'B', string.format('order %d %s cannot run for %d days: %s', o.id, rec.job, days, rec.why),
-                 {order = o.id, job = rec.job, why = rec.why, days = days, dropped = 0})
+                 {order = o.id, job = rec.job, why = rec.why, days = days, dropped = 0, kind = rec.kind})
         end
       end
     end
@@ -5855,7 +6405,13 @@ function T.ocheck(K, c, r)
   r.cmds = r.cmds + 1                            -- a slice of its own (orders, labor holders)
   if oq.i <= #oq.ids then return false end
   for key in pairs(p.ostuck) do if not oq.seen[key] then p.ostuck[key] = nil end end
-  st.orders = {n = #oq.ids, bad = st.bad or 0, stuck = oq.stuck}
+  local wl = {}
+  for label, n in pairs(oq.wsn) do wl[#wl + 1] = {label, n} end
+  table.sort(wl, function(a, b) if a[2] ~= b[2] then return a[2] > b[2] end return a[1] < b[1] end)
+  local ws = {}
+  for i = 1, math.min(3, #wl) do ws[i] = string.format('%s x%d', wl[i][1], wl[i][2]) end
+  st.orders = {n = #oq.ids, bad = st.bad or 0, stuck = oq.stuck, sws = oq.sws, slab = oq.slab,
+               ws = table.concat(ws, ', '):sub(1, 60)}
   st.steel = {n = #oq.steel, left = oq.steel_left, ids = {table.unpack(oq.steel, 1, math.min(10, #oq.steel))}}
   return true
 end
@@ -6441,7 +6997,7 @@ end
 -- FR-17 (daily): every empty season slot of a built farm plot gets a crop that grows then and there
 function T.farmslots(K, c, r)
   if not r.fills then
-    r.fills = farm_fills((c.farms or M.DEFAULTS.farms).per_day or 16)
+    r.fills = farm_fills(K, (c.farms or M.DEFAULTS.farms).per_day or 16, nil, M.food_low(c, r))
     if K.census.i and st.farm then K.census.i.farm_plots, K.census.i.farm_empty = st.farm.plots, st.farm.empty end
     r.filled = 0
   end
@@ -6451,8 +7007,113 @@ function T.farmslots(K, c, r)
     return true
   end
   r.cmds = r.cmds + 1
-  if K.act.farm_crop(f.id, f.s, f.crop) then r.filled = r.filled + 1 end
+  if K.act.farm_crop(f.id, f.s, f.crop) then r.filled = r.filled + 1; M.af_note(r.p, f) end
   return #r.fills == 0 and r.filled == 0
+end
+
+-- food below the pre-alarm line (or a famine): the slots take the edible crops first, autofarm steps aside
+function M.food_low(c, r)
+  return ((r.days or {}).food_d or 9999) < ((c.food or {}).pre_days or 30) or (r.p and r.p.famine ~= nil) or false
+end
+
+-- BUG-058 (Run 13 y512: the slot of the running season was -1 again 30 s after the kernel set it): the slots the kernel
+-- wrote are remembered (p.af.fs: 'plot:season' -> crop), and a later pass counts the ones found emptied or changed
+function M.af_note(p, f)
+  if type(p.af) ~= 'table' then p.af = {} end
+  if type(p.af.fs) ~= 'table' then p.af.fs = {} end
+  p.af.fs[tostring(f.id) .. ':' .. f.s] = f.crop
+end
+
+function M.af_wiped(p)
+  local af = p.af
+  if type(af) ~= 'table' or type(af.fs) ~= 'table' then return 0, 0 end
+  local n, gone = 0, 0
+  for key, crop in pairs(af.fs) do
+    local id, s = key:match('^(%d+):(%d)$')
+    local b = id and df.building.find(math.tointeger(tonumber(id)))
+    local cur = nil
+    if b then pcall(function() cur = b.plant_id[math.tointeger(tonumber(s))] end) end
+    if cur == nil then af.fs[key] = nil; gone = gone + 1
+    elseif cur ~= crop then
+      n = n + 1
+      af.fs[key] = nil
+    end
+  end
+  return n, gone
+end
+
+-- BUG-058: the kernel is the sole writer of the season slots. farms.autofarm 'auto': autofarm is disabled below
+-- af_off_days food days (it sets a slot to -1 when its own counts say nothing is short) or when slots the kernel wrote
+-- were emptied or changed again, and enabled again from af_on_days food days after af_hold_days, never after two wipes;
+-- 'off': disabled at every boot; 'keep': never touched. One DFHack command a player may run (disable / enable autofarm).
+-- Returns true when it issued a command.
+function M.af_policy(K, c, r, wiped)
+  local fc = c.farms or M.DEFAULTS.farms
+  local mode = fc.autofarm or 'auto'
+  local p = r.p
+  if mode == 'keep' then st.af_off = false; return false end
+  if type(p.af) ~= 'table' then p.af = {} end
+  local af = p.af
+  local fd = (r.days or {}).food_d or 9999
+  if wiped > 0 then af.wiped = (math.tointeger(af.wiped) or 0) + wiped end
+  local off = tonumber(af.off)
+  local want, why
+  if mode == 'off' then want, why = true, 'config'
+  elseif off then
+    local back = r.now - off >= (fc.af_hold_days or 14) * DAY and fd >= (fc.af_on_days or 90) and not p.famine and
+                 (math.tointeger(af.wiped) or 0) < 2
+    want = not back
+  else
+    want = fd < (fc.af_off_days or 30) or wiped > 0
+    why = wiped > 0 and string.format('%d season slots it emptied or changed again', wiped) or
+          string.format('food %d days', fd)
+  end
+  st.af_off = want and true or false
+  if want and (not off or not st.af_sent) then
+    st.af_sent = true
+    if K.act.run('disable', 'autofarm') then
+      if not off then
+        af.off, af.why = r.now, why
+        K.log('warn', 'autofarm disabled (%s): the kernel fills the season slots', why)
+      end
+    end
+    return true
+  elseif not want and off then
+    if K.act.run('enable', 'autofarm') then
+      af.off, af.why, st.af_sent = nil, nil, nil
+      K.log('info', 'autofarm enabled again (food %d days)', fd)
+    end
+    return true
+  end
+  return false
+end
+
+-- BUG-058 (Run 13 y512/513): the slots of the running season are filled at once, right after the census (the daily
+-- farmslots task sits near the end of the run and the module was demoted: 8 plots stood at -1 for weeks), the edible crops
+-- first when food is low, and a crop of the wrong kind for the plot (surface crops underground) is replaced
+function T.slotnow(K, c, r)
+  local fc = c.farms or M.DEFAULTS.farms
+  if not r.sn then
+    local wiped = M.af_wiped(r.p)
+    r.sn = {issued = false, wiped = wiped}
+    if M.af_policy(K, c, r, wiped) then r.cmds = r.cmds + 1; r.sn.issued = true; return false end
+  end
+  local sn = r.sn
+  if not sn.fills then
+    sn.fills = farm_fills(K, fc.now_max or 24, K.now().season, M.food_low(c, r))
+    sn.n = 0
+  end
+  local f = table.remove(sn.fills, 1)
+  if not f then
+    if sn.n > 0 then
+      K.log('info', 'farm plots: %d slots of the running season filled at once%s', sn.n,
+            M.food_low(c, r) and ' (food low: edible crops first)' or '')
+    end
+    return true
+  end
+  r.cmds = r.cmds + 1
+  if K.act.farm_crop(f.id, f.s, f.crop) then sn.n = sn.n + 1; M.af_note(r.p, f) end
+  return false
 end
 
 -- FR-23/FR-50 (daily, PEACE/RECOVERY): forbidden containers of drink/food/seeds and forbidden seeds on revealed,
@@ -6624,14 +7285,15 @@ function T.finish(K, c, r)
       if M.mood_missed(c, r.p, key, r.now) and #key <= 12 then miss[#miss + 1] = key end
     end
     table.sort(miss)
-    st.out = {drink_d = r.days.drink_d, food_d = r.days.food_d, meals = r.inv.meal_kinds,
+    st.out = {drink_d = r.days.drink_d, food_d = r.days.food_d, meals = r.inv.meal_kinds, hungry = st.hungry_n or 0,
               starving = st.starving or 0, idle = st.idle or 0, mood_miss = {table.unpack(miss, 1, math.min(8, #miss))}}
   end
   K.persist.touch('m.economy')
 end
 
 local FULL = {'guard', 'days', 'kitchen', 'appoint', 'food', 'fishz', 'gather', 'watch', 'cmdq', 'engine', 'labor_fix',
-              'scan', 'ocheck', 'slaughter', 'plan', 'prune', 'tools', 'starve', 'forbid', 'jobs', 'jsite', 'jmat', 'jmake', 'jfree', 'jresume',
+              'scan', 'slotnow', 'ocheck', 'slaughter', 'plan', 'prune', 'tools', 'cover', 'starve', 'forbid', 'jobs',
+              'jsite', 'jmat', 'jmake', 'jfree', 'jresume',
               'jcheck', 'jmove', 'pb', 'orders', 'wood', 'chop', 'crops',
               'farm', 'farmslots', 'imports', 'piles', 'status', 'idle', 'finish'}
 local RUSH = {'guard', 'scan', 'plan', 'tools', 'orders', 'wood', 'chop', 'farm', 'finish'}
@@ -6839,6 +7501,7 @@ function M.state(K)
   local r = {}
   if o then
     r.stock = {drink_d = o.drink_d, food_d = o.food_d, meals = o.meals}
+    if (o.hungry or 0) > 0 then r.stock.hungry = o.hungry end              -- BUG-059
     r.labor = {starving = o.starving, idle = math.max(0, math.min(100, o.idle))}
     -- Run 10 (plan propose/check: ore exploration and leather as plan goals): metal ore boulders, bars and leather
     -- (care's forbidden reserve included), the metal route ('explore' = no ore while metal is wanted) and the classes a
@@ -6864,6 +7527,9 @@ function M.state(K)
   end
   local od = st.orders
   if od then r.orders = {n = od.n or 0, bad = od.bad or 0, stuck = od.stuck or 0} end   -- FR-01/FR-39
+  -- BUG-059: of the stuck orders, the ones that miss a workshop (and which), the ones that miss a worker
+  if r.orders and (od.sws or 0) > 0 then r.orders.stuck_ws, r.orders.ws = od.sws, od.ws end
+  if r.orders and (od.slab or 0) > 0 then r.orders.stuck_lab = od.slab end
   -- BUG-042: orders waiting for validation, the days the oldest waits, and why (once past orders.unval_days)
   local uv = st.unval
   if r.orders and type(uv) == 'table' then
@@ -6988,7 +7654,7 @@ M.inspect.orders = function(K, args)
         if okn and OL.unsafe(job, o.item_subtype) then e.unsafe, rank = 1, 0 end
         local rec = p.ostuck[key]
         if type(rec) == 'table' then
-          e.why, e.days = rec.why, (now - (math.tointeger(rec.since) or now)) // DAY
+          e.why, e.days, e.kind = rec.why, (now - (math.tointeger(rec.since) or now)) // DAY, rec.kind
           rank = math.min(rank, 1)
         end
         local cr = p.ocancel[key]
@@ -7059,8 +7725,53 @@ local function job_board()
   return ok and n > 0 and set or nil
 end
 
+-- inspect what=workload key=details (BUG-057, note 54: who resets the work details?): Planters, the plant gathering
+-- detail and Fisherdwarves with their mode, members, the ones the kernel added, the ones that vanished without the
+-- kernel, and the last cover pass (jobs unclaimed / reachable / holders / members / target / why not)
+function M.inspect_details(K)
+  local p = K.persist.get('m.economy')
+  p = type(p) == 'table' and p or {}
+  local cvp = type(p.cover) == 'table' and p.cover or {}
+  local c = M.conf(K)
+  local wm = df.work_detail_mode or {}
+  local names = {}
+  for _, s in ipairs(M.cover_specs(type(c.cover) == 'table' and c.cover or {})) do
+    local nm = find_detail(s.det and ((c.starve or {}).details or {})[s.det] or nil, s.labor)
+    if nm and not M.TOOL_DETAILS[nm] then names[#names + 1] = nm end
+  end
+  for _, d in ipairs((c.tools or {}).details or {}) do if d.fish then names[#names + 1] = d.name end end
+  local list, parts = {}, {}
+  for _, w in ipairs(df.global.plotinfo.labor_info.work_details) do
+    local nm = dfhack.df2utf(w.name)
+    for _, want in ipairs(names) do
+      if nm == want then
+        local mode = math.tointeger(w.flags and w.flags.mode)
+        local mine = type((cvp.mine or {})[nm]) == 'table' and #cvp.mine[nm] or 0
+        local lost = math.tointeger((cvp.lost or {})[nm]) or 0
+        list[#list + 1] = {detail = nm, mode = tostring(wm[mode] or mode), members = #w.assigned_units, mine = mine,
+                           lost = lost}
+        parts[#parts + 1] = string.format('%s %d members (%s%s%s)', nm, #w.assigned_units, tostring(wm[mode] or mode),
+                                          mine > 0 and (', ' .. mine .. ' added by the kernel') or '',
+                                          lost > 0 and (', ' .. lost .. ' vanished without it') or '')
+      end
+    end
+  end
+  local rows = {}
+  for _, row in ipairs((st.cover or {}).rows or {}) do
+    rows[#rows + 1] = {key = row.key, detail = row.name, labor = row.labor, open = row.open, reach = row.reach,
+                       far = row.far, holders = row.holders, cur = row.cur, want = row.want, add = row.add, rem = row.rem,
+                       why = row.why}
+  end
+  local af = type(p.af) == 'table' and p.af or {}
+  return true, (#parts > 0 and table.concat(parts, '; ') or 'no detail found'):sub(1, 400),
+         {details = json.array(list), rows = json.array(rows), withdrawn = (st.cover or {}).withdrawn or 0,
+          autofarm = {off = af.off ~= nil and 1 or 0, why = af.why, wiped = math.tointeger(af.wiped) or 0,
+                      engine_off = st.af_off and 1 or 0}}
+end
+
 M.inspect.workload = function(K, args)
   if type(args) == 'table' and args.key == 'tools' then return M.inspect_tools(K) end
+  if type(args) == 'table' and args.key == 'details' then return M.inspect_details(K) end
   local cu = K.census.u or {}
   local sold = {}
   for _, id in ipairs(cu.soldier_ids or {}) do sold[id] = true end
@@ -7107,7 +7818,19 @@ M.inspect.workload = function(K, args)
   local home = {}
   for _, g in ipairs(cg) do if math.type(g) == 'integer' and g > 0 then home[g] = true end end
   local known = next(home) ~= nil
-  local open, far, by_grp, n_open, n_far = {}, {}, {}, 0, 0
+  -- FR-72 (Run 12 y504: 275 GatherPlants jobs, HERBALIST on nobody, '0 without reachable work'): a job type of
+  -- cover.labors whose labor no adult citizen holds is not work for the idle: counted apart, named in the line
+  local lab_of = type(M.conf(K).cover) == 'table' and type(M.conf(K).cover.labors) == 'table' and M.conf(K).cover.labors
+                 or {}
+  local hold = {}
+  for _, lb in pairs(lab_of) do hold[lb] = 0 end
+  for _, id in ipairs(cu.ids or {}) do
+    local u = not sold[id] and df.unit.find(id)
+    if u and dfhack.units.isAdult(u) then
+      for lb in pairs(hold) do if labor_on(u, lb) then hold[lb] = hold[lb] + 1 end end
+    end
+  end
+  local open, far, by_grp, by_nl, n_open, n_far, nolab = {}, {}, {}, {}, 0, 0, {}
   for k, tn in ipairs(open_t) do
     local g = math.tointeger(jg[k]) or -1
     if known and g >= 0 and not home[g] then
@@ -7115,14 +7838,19 @@ M.inspect.workload = function(K, args)
     else
       open[tn], n_open = (open[tn] or 0) + 1, n_open + 1
       local key = g > 0 and g or 'any'
-      by_grp[key] = (by_grp[key] or 0) + 1
+      if lab_of[tn] and hold[lab_of[tn]] == 0 then
+        by_nl[key] = (by_nl[key] or 0) + 1
+        nolab[tn] = (nolab[tn] or 0) + 1
+      else by_grp[key] = (by_grp[key] or 0) + 1 end
     end
   end
-  local noreach = 0
+  local noreach, idle_nl = 0, 0
   if n_open + n_far > 0 then
     for k in ipairs(idle) do
       local g = math.tointeger(cg[idle_at[k]]) or -1
-      if g > 0 and (by_grp[g] or 0) + (by_grp.any or 0) == 0 then noreach = noreach + 1 end
+      if g > 0 and (by_grp[g] or 0) + (by_grp.any or 0) == 0 then
+        if (by_nl[g] or 0) + (by_nl.any or 0) > 0 then idle_nl = idle_nl + 1 else noreach = noreach + 1 end
+      end
     end
   end
   local why = {}
@@ -7156,7 +7884,11 @@ M.inspect.workload = function(K, args)
     cloth.why = near > 0 and string.format('no collected thread: %d webs on the walk group (weavers collect them)', near)
                 or 'no collected thread: the webs lie off the citizens\' walk group'
   end
-  local data = {adults = adults, idle = #idle, idle_noreach = noreach, idle_units = names, jobs = total,
+  local nl_list = {}
+  for tn, n in pairs(nolab) do nl_list[#nl_list + 1] = {job = tn, n = n, labor = lab_of[tn]} end
+  table.sort(nl_list, function(a, b) if a.n ~= b.n then return a.n > b.n end return a.job < b.job end)
+  local data = {adults = adults, idle = #idle, idle_noreach = noreach, idle_nolabor = idle_nl,
+                nolabor = json.array(nl_list), idle_units = names, jobs = total,
                 suspended = sus, waiting = posted and waiting or nil,
                 unclaimed = jobs_of(open, 12), unreachable = jobs_of(far, 8), cancels = top(why, 8),
                 tools = M.tool_counts(inv),
@@ -7170,8 +7902,17 @@ M.inspect.workload = function(K, args)
   -- runner's queue is named as the reason ('runner: 6 projects queued behind 3 slot holders without progress (...)')
   local rq, rd = runner_queue(K)
   data.runner = rd
-  return true, string.format('%d of %d adults without a job (%d without reachable work), %d unclaimed jobs, %d unreachable',
-                             #idle, adults, noreach, n_open, n_far) .. (rq and ('; ' .. rq) or ''), data
+  local paren = string.format('%d without reachable work', noreach)
+  if #nl_list > 0 then
+    local ds = {}
+    for i = 1, math.min(2, #nl_list) do
+      ds[i] = string.format('%s %d need %s', nl_list[i].job, nl_list[i].n, nl_list[i].labor)
+    end
+    paren = (noreach > 0 and (paren .. ', ') or '') ..
+            string.format('%d with no labor holder for the open jobs: %s', idle_nl, table.concat(ds, ', '))
+  end
+  return true, string.format('%d of %d adults without a job (%s), %d unclaimed jobs, %d unreachable',
+                             #idle, adults, paren, n_open, n_far) .. (rq and ('; ' .. rq) or ''), data
 end
 
 return M

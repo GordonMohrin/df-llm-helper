@@ -66,7 +66,8 @@
                          "jobs": "fell", "wood": [60, 150], "n": [2, 1, 0]},
                         {"name": "Hunters", "skill": "CROSSBOW", "labor": "HUNT", "ranged": ["CROSSBOW", "BOW"], "famine": 2,
                          "mood": 1, "need": 2, "ammo_min": 1, "mood_keys": ["bone", "shell", "leather"]},
-                        {"name": "Fisherdwarves", "skill": "FISH", "labor": "FISH", "fish": true, "per": 15, "max": 3}]},
+                        {"name": "Fisherdwarves", "skill": "FISH", "labor": "FISH", "fish": true, "per": 15, "max": 3,
+                         "min": 3, "min_per": 6}]},
   "hunt": {"trial_days": 10, "backoff_days": 20},
   "stages": [
    {"lib": "library/basic", "any": ["migrants", "cit>=10"]},
@@ -185,13 +186,17 @@
   "jobs": {"release_per_day": 20, "held_days": 3, "preventblocking": "keep", "sites_per_day": 40, "unforbid_per_day": 60,
            "mat_scan": 2000, "fail_alarm": 3, "depot_move_after": 5, "move_days": 28, "move_r": 12, "move_dz": 2,
            "move_gap": 3, "move_probes": 150},
-  "farms": {"per_day": 16},
+  "farms": {"per_day": 16, "now_max": 24, "autofarm": "auto", "af_off_days": 30, "af_on_days": 90, "af_hold_days": 14},
   "forbid": {"per_day": 30},
   "starve": {"days": 0, "hunger": 50000, "plants_max": 200, "plants_per_slice": 400, "report_days": 2, "gatherers": 4,
              "planters": 4, "plants": ["GRASS_WHEAT_CAVE", "MUSHROOM_HELMET_PLUMP", "POD_SWEET", "BUSH_QUARRY",
                                        "MUSHROOM_CUP_DIMPLE"],
              "details": {"planters": ["Planters"], "gatherers": ["Plant gatherers", "Gatherers", "Herbalists"]}},
-  "gather": {"n": 4, "min_jobs": 10, "off_days": 60, "drink_d": 60, "drink_off": 100}
+  "gather": {"n": 4, "min_jobs": 10, "off_days": 60, "drink_d": 60, "drink_off": 100},
+  "cover": {"on": true, "min_jobs": 20, "gather_jobs": 10, "farm_per": 10, "farm_min": 2, "farm_max": 12,
+            "gather_per": 25, "gather_min": 2, "gather_max": 8, "other_per": 20, "other_max": 3, "share": 50,
+            "step": 4, "idle_days": 7, "stale_days": 30, "unmark_max": 200,
+            "labors": {"GatherPlants": "HERBALIST", "PlantSeeds": "PLANT", "HarvestPlants": "PLANT"}}
  },
  "care": {
   "units_per_slice": 50,

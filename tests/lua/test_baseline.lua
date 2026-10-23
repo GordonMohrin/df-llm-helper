@@ -471,4 +471,18 @@ T.test('idle-crafting uses act.idle_crafting when the kernel offers it', functio
   T.eq(W.K.persist.get('m.baseline').pending, {'melt', 'trade_piles'})
 end)
 
+-- BUG-058: with economy.farms.autofarm 'off' the kernel is the sole writer of the farm season slots: baseline does not
+-- enable autofarm (economy disables it at its first run)
+T.test("BUG-058: autofarm is enabled by default and not when economy.farms.autofarm is 'off'", function()
+  local W = world()
+  drain(W)
+  T.ok(F.has(F.runs(W), 'enable autofarm'), 'default: enabled')
+  local cfg = F.cfg()
+  cfg.economy.farms.autofarm = 'off'
+  local W2 = world{cfg = cfg}
+  drain(W2)
+  T.ok(not F.has(F.runs(W2), 'enable autofarm'), 'off: not enabled')
+  T.ok(F.has(F.runs(W2), 'enable burrow'), 'the others are')
+end)
+
 T.done()

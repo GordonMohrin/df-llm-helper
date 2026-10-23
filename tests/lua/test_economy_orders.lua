@@ -336,4 +336,40 @@ T.test('Run 11/BUG-042: an unvalidated order with an available manager names why
   T.ok(dn[1].d.q:find('Office zone with a chair and a table', 1, true), dn[1].d.q)
 end)
 
+-- BUG-059 (Run 14 y577): "no Farmers" for ProcessPlants meant that no Farmer's Workshop stood, not that no dwarf may
+-- farm; the game session chased work details for hours. The workshop is named as one, the state and the event tell a
+-- missing mandatory workshop from a missing worker.
+T.test("BUG-059: a missing Farmer's Workshop is told as a workshop (kind workshop), not as 'no Farmers'; a missing worker apart",
+       function()
+  local function run(with_shop, with_labor)
+    local W = world{setup = function(W)
+      add_jobs({'ProcessPlants'})
+      df.unit_labor.PROCESS_PLANT, df.unit_labor[7] = 7, 'PROCESS_PLANT'
+      F.order(W, {job_type = df.job_type.ProcessPlants, mat_type = -1, mat_index = -1, amount_left = 6,
+                  material_category = {}, _name = 'Process plants'})
+      if with_shop then F.workshop(W, 'Farmers') end
+    end}
+    for i = 1, 6 do W.unit(i).status.labors = {[7] = with_labor} end
+    days(W, 4)
+    return W
+  end
+  local W = run(false, true)
+  local ev = W.find_events('ORDER_STUCK')
+  T.eq(#ev, 1)
+  T.ok(ev[1].d.why:find("no Farmer's Workshop", 1, true), ev[1].d.why)
+  T.ok(not ev[1].d.why:find('no Farmers', 1, true), ev[1].d.why)
+  T.eq(ev[1].d.kind, 'workshop')
+  local od = W.state().orders
+  T.eq({od.stuck, od.stuck_ws, od.ws, od.stuck_lab}, {1, 1, "Farmer's Workshop x1", nil})
+  local r = W.inbox('inspect', {what = 'orders'})
+  T.eq(r.data.list[1].kind, 'workshop')
+  local W2 = run(true, false)
+  local ev2 = W2.find_events('ORDER_STUCK')
+  T.eq(#ev2, 1)
+  T.ok(ev2[1].d.why:find('no worker PROCESS_PLANT', 1, true), ev2[1].d.why)
+  T.eq(ev2[1].d.kind, 'worker')
+  local od2 = W2.state().orders
+  T.eq({od2.stuck, od2.stuck_ws, od2.ws, od2.stuck_lab}, {1, nil, nil, 1})
+end)
+
 T.done()

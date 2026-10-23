@@ -92,7 +92,8 @@ local SNAP = {name = 'snapshot', every = {ticks = 100},
 
 T.test('Run 10 (FR-40): unclaimed = no worker, on the job board, on a citizen\'s walk group; idle without reachable work',
   function()
-  local W = world{cit = 4, idle = {[3] = true, [4] = true}, pos = {[3] = {55, 5, 1}}, snapshot = SNAP, setup = function()
+  local W = world{cit = 4, idle = {[3] = true, [4] = true}, pos = {[3] = {55, 5, 1}}, snapshot = SNAP, setup = function(W)
+    W.unit(1).status.labors = {PLANT = true, HERBALIST = true}            -- FR-72: the labors of these jobs are held
     jobs({{'PlantSeeds', {6, 5, 1}, true}, {'PlantSeeds', {6, 6, 1}, true}, {'PlantSeeds', {6, 7, 1}, false},
           {'GatherPlants', {40, 40, 1}, true}, {'GatherPlants', {41, 40, 1}, true}, {'GatherPlants', {42, 40, 1}, true},
           {'Dig', {7, 9, 1}, true}, {'PlantSeeds', {6, 8, 1}, nil, {id = 1}}})

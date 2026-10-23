@@ -15,7 +15,7 @@
    "enable autobutcher", "enable autochop", "enable autonestbox", "enable autoslab", "enable autotraining", "enable combine",
    "enable fix/dead-units", "enable fix/empty-wheelbarrows", "enable nestboxes", "enable pop-control", "enable preserve-tombs",
    "enable prioritize", "enable seedwatch", "enable suspendmanager", "enable tailor", "enable timestream"]},
-  "disable": {"rw": "w", "args": ["work-now", "agitation-rebalance", "emigration", "deteriorate", "autotraining"]},
+  "disable": {"rw": "w", "args": ["work-now", "agitation-rebalance", "emigration", "deteriorate", "autotraining", "autofarm"]},
   "enable": {"rw": "w", "args": ["autobutcher", "autochop", "autofarm", "autolabor", "autonestbox", "autoslab", "autotraining", "buildingplan", "burrow",
    "idle-crafting", "logistics", "nestboxes", "pop-control", "preserve-rooms", "preserve-tombs",
    "prioritize", "seedwatch", "suspendmanager", "tailor"]},

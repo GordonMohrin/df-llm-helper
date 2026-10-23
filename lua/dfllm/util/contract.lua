@@ -215,7 +215,7 @@ C.ACT = {
   orders_import = {'economy'}, orders = {'economy'}, workorder = {'economy', 'water', 'care'},
   order_suspend = {'economy'}, kitchen_exclude = {'economy'}, appoint = {'economy'}, work_detail = {'economy'},
   order_material = {'economy'}, order_remove = {'economy'}, job_resume = {'economy'}, farm_crop = {'economy'},
-  plant_gather = {'economy'}, work_detail_prune = {'economy'},
+  plant_gather = {'economy'}, plant_ungather = {'economy'}, work_detail_prune = {'economy'},
   item_flag = {'care', 'water', 'economy', 'military'}, zone_assign = {'care'},
   tomb_zone = {'care'}, medic = {'care'}, hospital_post = {'care'},
   trade = {'trade'},
@@ -233,7 +233,7 @@ C.STATE_OWNERS = {
   ['stock.ore'] = 'economy', ['stock.bars'] = 'economy', ['stock.leather'] = 'economy', ['stock.metal'] = 'economy',
   ['stock.mood_miss'] = 'economy', ['stock.rock'] = 'economy', ['stock.rock_need'] = 'economy',
   ['stock.picks'] = 'economy', ['stock.pick_want'] = 'economy', ['stock.mshort'] = 'economy', ['stock.melt'] = 'economy',
-  ['stock.dwhy'] = 'economy',
+  ['stock.dwhy'] = 'economy', ['stock.hungry'] = 'economy',
   ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['labor.*'] = 'economy', ['orders.*'] = 'economy',
   ['threat.*'] = 'threat', ['bridges'] = 'gate', ['owners.*'] = 'arbiter',
   ['mil.*'] = 'military', ['trade.*'] = 'trade',
@@ -349,13 +349,16 @@ C.STATE_SPEC = obj({
   stock = obj(nil, {drink_d = NAT, food_d = NAT, meals = NAT, hosp_water = FLAG, ore = NAT, bars = NAT, leather = NAT,
                     metal = str(24), mood_miss = arr(str(12), 0, 8), rock = NAT, rock_need = NAT, picks = NAT,
                     pick_want = NAT, mshort = FLAG, melt = NAT,     -- Run 11: metal short, items marked for melting
-                    dwhy = str(80)}),               -- BUG-042: why the stills do not brew below the drink target
+                    dwhy = str(80),                 -- BUG-042: why the stills do not brew below the drink target
+                    hungry = NAT}),                 -- BUG-059: citizens past DF's "hungry" line (hunger_timer >= starve.hunger)
   care = obj({stressed_pct = PCT, naked = NAT, ghosts = NAT, corpses_old = NAT, tombs_free = NAT, moods = NAT},
              {coffins = obj({want = NAT, short = NAT, stock = NAT, order = NAT, proj = str(40)}),
               died = obj(nil, nil, NAT)}),
   labor = obj({starving = NAT, idle = PCT}),
   -- BUG-042: unvalidated live orders, the days the oldest waits, why the manager validates nothing (past unval_days)
-  orders = obj({n = NAT, bad = NAT, stuck = NAT}, {unval = NAT, uval_d = NAT, mgr = str(80)}),
+  -- BUG-059: of the stuck orders, how many miss a workshop (and which, the most missed first) and how many a worker
+  orders = obj({n = NAT, bad = NAT, stuck = NAT}, {unval = NAT, uval_d = NAT, mgr = str(80), stuck_ws = NAT,
+                                                   stuck_lab = NAT, ws = str(60)}),
   threat = obj({vis = NAT, armed = FLAG}),
   proj = arr({t = 'tup', items = {str(nil, nil, 'id'), str(24), PCT, str(40)}}, 0, 8),
   -- Run 11 siege 8: seal first (the leading open seal or plug: pieces open, projects it pauses, other open seals,

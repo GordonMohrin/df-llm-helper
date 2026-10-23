@@ -2940,17 +2940,22 @@ local function gather_zone(K)
   if not c then return end
   S.rt.gc = c
   local half, step = M.CFG.gather_side // 2, M.CFG.gather_step
+  -- DECISIONS 10 (Run 11-14: 46 GatherPlants jobs off the citizens' walk group): the zone covers the walk group only; the
+  -- open tiles snapshot.far puts on another group do not count for the level and shrink the square (below)
   local lv = {}
   for _, dz in ipairs(M.CFG.gather_dz) do
-    local z, n = c[3] + dz, 0
+    local z, n, off = c[3] + dz, 0, {}
     for x = c[1] - half, c[1] + half, step do
       for y = c[2] - half, c[2] + half, step do
         local ok, v = K.call('snapshot', 'tile', x, y, z)
         S.slice.probes = S.slice.probes + 1
-        if ok and type(v) == 'table' and OPEN[v.c] then n = n + 1 end
+        if ok and type(v) == 'table' and OPEN[v.c] then
+          local okf, away = K.call('snapshot', 'far', x, y, z)
+          if okf and away == true then off[#off + 1] = {x, y} else n = n + 1 end
+        end
       end
     end
-    lv[#lv + 1] = {z = z, n = n}
+    lv[#lv + 1] = {z = z, n = n, off = off}
   end
   table.sort(lv, function(a, b) if a.n ~= b.n then return a.n > b.n end return a.z > b.z end)
   if lv[1].n == 0 then
@@ -2962,6 +2967,24 @@ local function gather_zone(K)
   local levels = {lv[1].z}
   if lv[2] and lv[2].n * 3 >= lv[1].n then levels[2] = lv[2].z end
   local side = math.min(M.CFG.gather_side, math.floor(math.sqrt(M.CFG.gather_cap / #levels)))
+  -- the square shrinks (by two sample steps) until no sampled open tile off the walk group lies inside it
+  local function off_in(sd)
+    local k, h = 0, sd // 2
+    for _, e in ipairs(lv) do
+      if e.z == levels[1] or e.z == levels[2] then
+        for _, q in ipairs(e.off) do if math.abs(q[1] - c[1]) <= h and math.abs(q[2] - c[2]) <= h then k = k + 1 end end
+      end
+    end
+    return k
+  end
+  local was = side
+  while off_in(side) > 0 and side - 2 * step >= 10 do side = side - 2 * step end
+  if off_in(side) > 0 then
+    S.rt.gather = {z = {}, t = now(K)}   -- open tiles off the citizens' walk group right at the anchor: no zone
+    dirty()
+    K.log('warn', 'gather zone: the open tiles around %d,%d,%d lie off the citizens\' walk group: no zone', c[1], c[2], c[3])
+    return
+  end
   local x0, y0 = c[1] - side // 2, c[2] - side // 2
   if not on_map(x0, y0, levels[1]) then x0, y0 = math.max(1, x0), math.max(1, y0) end
   local cell = string.format('g{name=%s}(%dx%d)', GATHER, side, side)
@@ -2971,8 +2994,9 @@ local function gather_zone(K)
   end
   S.rt.gather = {z = made, x = x0, y = y0, side = side, t = now(K)}
   dirty()
-  K.log('warn', 'food %d days: gather zone %dx%d at %d,%d on z %s (%d tiles)', fd, side, side, x0, y0,
-        table.concat(made, ','), side * side * #made)
+  K.log('warn', 'food %d days: gather zone %dx%d at %d,%d on z %s (%d tiles)%s', fd, side, side, x0, y0,
+        table.concat(made, ','), side * side * #made,
+        side < was and (' (shrunk from ' .. was .. ' to stay on the walk group)') or '')
 end
 
 ---------------------------------------------------------------- depot keeper (FR-43)
@@ -3760,6 +3784,19 @@ function M.pending(K, tpl)
   local n = 0
   for _, P in ipairs(S.pd and S.pd.list or {}) do if P.tpl == tpl and Q.live(K, P) then n = n + 1 end end
   return n
+end
+
+-- BUG-058 (DECISIONS 9; Run 11: five farms projects 'build_lost, parked', one after the other, no soil): the projects of a
+-- template blocked for good by build_lost (its retries spent), whether parked yet or not: count, the first project's id.
+-- economy asks for no further farms project while one stands; cancelling it (bp.cancel) or placing it elsewhere ends it.
+function M.lost(K, tpl)
+  local n, first = 0, nil
+  for _, P in ipairs(S.pd and S.pd.list or {}) do
+    if P.tpl == tpl and P.done ~= 1 and P.blocked == 'build_lost' and Q.terminal(P) then
+      n, first = n + 1, first or P.id
+    end
+  end
+  return n, first
 end
 
 M.on = {
