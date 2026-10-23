@@ -75,6 +75,7 @@ ACT = {
     "squad_unequip": ["military"], "squad_release": ["military"], "animal_slaughter": ["economy"], "zone_remove": ["runner"], "manager_office": ["economy"], "pond_remove": ["water"],
     "hospital_remove": ["water"],                  # BUG-034: the zones of a dry hospital while a patient is thirsty
     "sand_zone": ["economy"], "fish_zone": ["economy"],
+    "tool_pile": ["economy"],                      # BUG-053: a weapons stockpile for the miners' picks near the mines
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
     "door_forbid": ["reflex"],
     "burrow_tiles": ["seal"],
@@ -512,9 +513,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # forb = forbidden tools (no free one needed), blk/bk = the blockers' texts/keys of economy's diagnosis (labor,
     # tool2, alert, burrow, walk, jobs, pair, flag, pool, upair, fetch, pending, none), picks/units = compact records, civ =
     # the civ alert's burrows, ww = DF's work tool pairs
+    # BUG-053: forbidden / off_group / owned (population level) join the keys; pile = the tool pile's state
     "TOOL_BLOCKED": ("A", "economy", _d("detail:s tool:s n:i", "members:ia jobs:i days:i free:i bins:i reserved:i "
                                                                "why:s who:s hint:s pos:p eq:i eq_days:i forb:i blk:s "
-                                                               "bk:s picks:sa units:sa civ:i ww:i")),
+                                                               "bk:s picks:sa units:sa civ:i ww:i pile:s")),
     # BUG-027: a SIEGE/BREACH raise went ahead onto units on or next to the footprint (a hostile within force_near)
     "GATE_FORCED": ("A", "gate", _d("bridge:s", "units:ia hostile:i pos:p job:i")),
     # BUG-027: a unit died on or next to a bridge just pulled or moving (gate's move records, dfllm.deaths.bridge)

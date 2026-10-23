@@ -63,3 +63,35 @@ def test_siege_events_carry_the_station_numbers():
     assert schema.validate_event_d("SIEGE_STATUS", {"vis": 3, "worn": 36, "on_station": 0, "deaths": 1, "captures": 0,
                                                     "off": "equip 5, far 2"}) == []
     assert schema.validate_event_d("SIEGE_END", {"on_t": "never"}) != []
+
+
+def test_config_economy_tools_pile(tmp_path):
+    """BUG-053: economy.tools stale_days / pile_* (lua/dfllm/economy.lua M.DEFAULTS.tools) are in the shipped config and
+    checked by lint --config."""
+    assert fairplay.economy_errors() == []
+    t = json.loads(fairplay.BASELINE_PATH.read_text("utf-8"))["economy"]["tools"]
+    assert (t["stale_days"], t["pile"], t["pile_days"], t["pile_w"], t["pile_h"], t["pile_r"], t["pile_reads"],
+            t["pile_every"]) == (14, True, 7, 3, 2, 12, 300, 28)
+    p = tmp_path / "baseline.json"
+    p.write_text(json.dumps({"v": 2, "economy": {"tools": {"stale_days": 0, "pile": "yes", "pile_days": 999,
+                                                           "pile_w": 6, "pile_h": 0, "pile_r": 1, "pile_reads": 5,
+                                                           "pile_every": True}}}), encoding="utf-8")
+    errs = fairplay.economy_errors(p)
+    for needle in ("tools.stale_days: int 1..400", "tools.pile: true or false", "tools.pile_days: int 1..400",
+                   "tools.pile_w: int 1..5", "tools.pile_h: int 1..5", "tools.pile_r: int 2..40",
+                   "tools.pile_reads: int 20..2000", "tools.pile_every: int 1..400"):
+        assert any(needle in e for e in errs), (needle, errs)
+    src = (fairplay.REPO / "lua" / "dfllm" / "economy.lua").read_text("utf-8")
+    assert ("stale_days = 14, pile = true, pile_days = 7, pile_w = 3, pile_h = 2, pile_r = 12, pile_reads = 300,\n"
+            "           pile_every = 28,") in src
+
+
+def test_tool_pile_act_and_event_field():
+    """BUG-053: act.tool_pile belongs to economy (contract.lua and schema.py agree); TOOL_BLOCKED carries `pile`."""
+    assert schema.ACT["tool_pile"] == ["economy"]
+    lua = (fairplay.REPO / "lua" / "dfllm" / "util" / "contract.lua").read_text("utf-8")
+    assert "tool_pile = {'economy'}" in lua
+    d = {"detail": "Miners", "tool": "pick", "n": 5, "pile": "dfllm-tools placed at 61,40,5 (3x2)",
+         "bk": "off_group,jobs"}
+    assert schema.validate_event_d("TOOL_BLOCKED", d) == []
+    assert schema.validate_event_d("TOOL_BLOCKED", dict(d, pile=5)) != []

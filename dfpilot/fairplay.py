@@ -431,7 +431,10 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400)},
                      "orders": {"unval_days": (1, 60)},
                      "office": {"table": "bool", "retry_days": (1, 112), "max_tiles": (1, 10000)},
                      "gather": {"drink_d": (0, 400), "drink_off": (0, 400)},
-                     "barrels": {"brew_wait": (0, 200)}}
+                     "barrels": {"brew_wait": (0, 200)},
+                     # BUG-053: stale tools, the tool pile (the part's other keys are checked by the mirror test)
+                     "tools": {"stale_days": (1, 400), "pile": "bool", "pile_days": (1, 400), "pile_w": (1, 5),
+                               "pile_h": (1, 5), "pile_r": (2, 40), "pile_reads": (20, 2000), "pile_every": (1, 400)}}
 ECONOMY_OWN = ("drink", "office")             # parts whose every key is listed above
 
 
