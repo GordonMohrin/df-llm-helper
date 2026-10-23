@@ -11,7 +11,8 @@
   the ghost number came from the 200 deaths care recorded; a body on another walk group was `no_coffin`; the mood check was
   one phase of the 1,200-tick, demotable run; nobody read the toppled-by reports.
 - **BUG-062 (care, sense):** every closed unassigned zone over a usable coffin is opened on its own budget
-  (`tomb_open_per_run` 120); closed zones are no free tombs (`zone_locked`, state `care.tombs_locked`); `corpse_far` for a
+  (`tomb_open_per_run` 120), the frees a body waits for and the assignments come before the bulk frees, a zone about to be
+  freed is a provisioner slot (`prov.pending`); closed zones are no free tombs (`zone_locked`, state `care.tombs_locked`); `corpse_far` for a
   body no citizen can walk to (no zone, no entomb, no coffin for it; GHOSTS `far`); the ghost number counts the ghostly units
   (sense publishes `census.g`, CONTRACTS §6.5); TOMBS_LOCKED (B) with what was found, opened, closed again by owner (entomb
   apart), re-given by DF after a free (`churn`) and the frees by reason; `inspect tombs` `lock`, `again`, `unusable`, `far_n`.

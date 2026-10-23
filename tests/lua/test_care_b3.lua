@@ -149,6 +149,25 @@ T.test('BUG-062: a zone care freed that DF gave to another body is counted as ch
   T.eq(inspect(W).again.churn, 1)
 end)
 
+T.test('BUG-062: the frees a body waits for come first, and zones about to be freed are slots, not missing coffins', function()
+  local units = {}
+  for i = 0, 42 do units[#units + 1] = {id = 100 + i, citizen = true, pos = {5, 5, 5}} end
+  local W = world{cit = 6, units = units, setup = function(W)
+    for i = 0, 39 do
+      CW.tomb(W, 30 + i, 10, 5, {unit = 100 + i})              -- 40 zones held by dead owners without remains here
+      W.kill(100 + i)
+    end
+    for i = 140, 142 do dead(W, i); corpse(W, i) end            -- three unburied citizens
+  end}
+  W.run(2)
+  T.eq(#CW.tacts(W, 'assign'), 3, 'the three bodies got their zones in the first run, not after 40 frees')
+  T.eq(#CW.tacts(W, 'free'), 17, 'the rest of the budget of 20 acts frees more stale zones')
+  local d = inspect(W)
+  T.eq(d.prov.pending, 23, 'the 23 stale zones not freed yet are slots for the provisioner, not missing coffins')
+  CW.day(W)
+  T.eq(#CW.tacts(W, 'free'), 37, 'the next run frees 20 more (the last ones next time)')
+end)
+
 T.test('BUG-062: inspect names why coffins are no free tombs', function()
   local W = world{cit = 6, setup = function(W)
     CW.tomb(W, 30, 10, 5, {built = false})                      -- unbuilt coffin

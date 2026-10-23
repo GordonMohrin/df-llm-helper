@@ -46,6 +46,9 @@ Module: `lua/dfllm/care.lua` (tomb_repair, free_zones, body_causes, finish), `lu
   assignments, every standing unassigned closed zone over a usable coffin is opened (`act.tomb_zone open`, a flag write);
   a failed open counts against the zone (3 strikes, as before). An assigned zone stays as it is: it belongs to its dead
   (entomb closes it again).
+- **The frees a body waits for come first** (his own bad zone, the zones he is given), then the assignments, then the rest of
+  the frees with what is left of the 20 acts: 40 stale owners used to take all 20 before any body got a zone. A zone about
+  to be freed (a dead owner without remains here) is a slot of the coffin provisioner (`prov.pending`), not a missing coffin.
 - **Locked zones are no free tombs** (`free_zones(T, locked)`): `care.tombs_free`, the provisioner's `free` and the
   `zone_locked` cause (a body with free-but-closed zones only) count open ones; the closed ones left after a failed or
   budget-limited open are `care.tombs_locked` (state, optional), `inspect tombs` `locked`.
@@ -81,7 +84,7 @@ Module: `lua/dfllm/care.lua` (tomb_repair, free_zones, body_causes, finish), `lu
   closing; decide with the `churn` numbers).
 
 ## Tests
-`tests/lua/test_care_b3.lua` (the BUG-062 group: the 60 closed zones opened in one run, a failed open is no free tomb and
+`tests/lua/test_care_b3.lua` (the BUG-062 group: the 60 closed zones opened in one run, the assignments before 40 stale frees, a failed open is no free tomb and
 the body says `zone_locked`, closed again by owner with entomb apart, churn, why coffins are no free tombs, `corpse_far`
 and no reach hook, the ghost number against `census.g`), `tests/lua/test_sense_ghosts.lua` (`census.g`),
 `tests/lua/test_care_fr.lua` (the 'unreachable' case now walks to the citizens but not to its coffin),

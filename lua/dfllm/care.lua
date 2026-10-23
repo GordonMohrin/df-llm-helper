@@ -1183,19 +1183,28 @@ local function tomb_repair(K, c, r, p, T, now)
     end
   end
   local lk = M.lockstate()
-  for _, z in ipairs(T.zones) do
-    if z.free and not z.drop and act('free', z) then
+  -- BUG-062: the frees an unburied body is waiting for come first, then the assignments, then the rest of the frees with
+  -- what is left of the budget (160 stale owners freed 20 at a time used to take the whole budget before any body got
+  -- its zone)
+  local function release(z)
+    if act('free', z) then
       acts.freed, z.unit, z.closed = acts.freed + 1, -1, false
       lk.opened[z.id], lk.freed[z.id], lk.assigned[z.id] = now, now, nil
       acts.why = acts.why or {}
       acts.why[z.free] = (acts.why[z.free] or 0) + 1                 -- bad | stale | elsewhere
     end
   end
+  for _, z in ipairs(T.zones) do                              -- a body's own bad zone, and the zones the bodies are given
+    if z.free and (z.assign or z.free == 'bad') and not z.drop then release(z) end
+  end
   for _, z in ipairs(T.zones) do
     if z.assign and not z.drop and z.unit < 0 and act('assign', z, z.assign) then
       acts.assigned, z.unit = acts.assigned + 1, z.assign
       lk.assigned[z.id] = now
     end
+  end
+  for _, z in ipairs(T.zones) do
+    if z.free and not z.assign and z.free ~= 'bad' and not z.drop then release(z) end
   end
   -- BUG-062 (Run 14 y529-y577: 163, then 284 of 287 tomb zones closed to citizens, 26-44 unburied, ghosts 1 -> 30, after
   -- the player opened them 32 burial jobs came at once): every standing unassigned zone over a usable coffin that is
@@ -1524,7 +1533,17 @@ coffin_census = function(K, c, r, T)
       elseif zn == 0 then q.idle = q.idle + 1 end
     end
   end
-  q.slots = q.free + q.planned + q.idle
+  -- BUG-062: a coffin whose zone is held by a dead owner without remains here (stale, or buried elsewhere) is a free tomb
+  -- once the zone is freed, which the act budget may leave to the next run: it is a slot, not a missing coffin
+  q.pending = 0
+  for _, z in ipairs(T.zones) do
+    if z.free and z.free ~= 'bad' and not z.assign and not z.drop and z.unit >= 0 then
+      for _, e in ipairs(z.coffins) do
+        if usable(e, nil) then q.pending = q.pending + 1; break end
+      end
+    end
+  end
+  q.slots = q.free + q.planned + q.idle + q.pending
   q.short = math.max(0, q.want - q.slots)
   local inv = K.census.i
   q.census = type(inv) == 'table'
@@ -2025,7 +2044,7 @@ end
 local function coffin_view(K, q, p, cs)
   local pc = p.cof
   local v = {active = q.active and 1 or 0, own = q.own and 1 or 0, want = q.want, bodies = q.bodies, open = q.open,
-             far = q.far or 0, free = q.free,
+             far = q.far or 0, pending = q.pending or 0, free = q.free,
              planned = q.planned, idle = q.idle, slots = q.slots, short = q.short, stock = q.stock, order = q.order,
              stuck = q.stuck, items = q.items, make = q.make, missing = q.missing or 0, stone = q.stone,
              wood = q.wood, masons = q.masons and 1 or 0, carpenters = q.carp and 1 or 0, pend = q.pend or 0,
