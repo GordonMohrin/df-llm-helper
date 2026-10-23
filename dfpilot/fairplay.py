@@ -187,6 +187,12 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
             if k == "force_near":
                 if not is_int(v, 0, 30):
                     errs.append(f"{name}: gate.force_near: int 0..30 expected, got {v!r}")
+            elif k == "noeffect_max":              # BUG-068: pulls in a row without effect before a lever is parked
+                if not is_int(v, 1, 20):
+                    errs.append(f"{name}: gate.noeffect_max: int 1..20 expected, got {v!r}")
+            elif k == "noeffect_wait":             # BUG-068: ticks of the first parking (doubled per further parking)
+                if not is_int(v, 100, 24000):
+                    errs.append(f"{name}: gate.noeffect_wait: int 100..24000 expected, got {v!r}")
             elif k == "manual":
                 if not isinstance(v, list) or len(v) > 32 or any(
                         not (is_int(x, 0, 2**31 - 1) or (isinstance(x, str) and re.match(schema.BRIDGE_RE, x)))
@@ -282,7 +288,9 @@ def water_errors(path: str | Path | None = None) -> list[str]:
 # for good is parked after park_days: out of the pause, the keepers and PLAN_EXHAUSTED, announced once with bp.cancel)
 RUNNER_LIM: dict = {"seal_first": {"on": "bool", "stuck_days": (1, 60), "food_d": (0, 400), "drink_d": (0, 400)},
                     "rebuild": {"pop": (0, 250), "off": (0, 250)},
-                    "queue": {"yield_days": (1, 60), "park_days": (1, 400)}}
+                    "queue": {"yield_days": (1, 60), "park_days": (1, 400)},
+                    # BUG-066 / FR-76: the manifest follows the standing workshops (runner.lua Q.sync)
+                    "reclaim": {"on": "bool", "gone_scans": (1, 10), "min_ws": (1, 50), "ask_days": (1, 60)}}
 
 
 def runner_errors(path: str | Path | None = None) -> list[str]:
@@ -362,7 +370,9 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400)},
                      "orders": {"unval_days": (1, 60)},
                      "office": {"table": "bool", "retry_days": (1, 112), "max_tiles": (1, 10000)},
                      "gather": {"drink_d": (0, 400), "drink_off": (0, 400)},
-                     "barrels": {"brew_wait": (0, 200)}}
+                     "barrels": {"brew_wait": (0, 200)},
+                     # FR-76: a forbidden stock (>= burst_min drink + food units) is unforbidden burst_per_day a day
+                     "forbid": {"per_day": (0, 5000), "burst_per_day": (0, 5000), "burst_min": (0, 100000)}}
 ECONOMY_OWN = ("drink", "office")             # parts whose every key is listed above
 
 

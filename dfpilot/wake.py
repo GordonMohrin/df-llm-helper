@@ -13,7 +13,9 @@ not wake; the follower acts on two of them without the LLM:
   PROJECT_REQUEST tpl=workshops -> the same (care asks when a strange mood finds no workshop); why=fishery (economy:
                                   raw fish and no fishery, Run 11) -> only the fishery (p.add Fishery, every moodable
                                   type skipped) at prio 1, also while the fort manifest still lists a destroyed one
-                                  (BUG-038: the kernel asks only while none stands)
+                                  (BUG-038: the kernel asks only while none stands); why=mandatory (runner, FR-76:
+                                  a reclaimed fort lacks Carpenters, Masons, Craftsdwarfs, Still or Kitchen) -> only
+                                  the missing types of d.types, at prio 1
   PROJECT_REQUEST tpl=farms why=food -> the same with p.plots = n (1-4) at prio 1 (economy asks when the farm
                                   tiles fall short of the citizens and food is low or falling; live L5)
   PROJECT_REQUEST tpl=bedrooms why=mood_rock|rock -> a bedrooms dig (p.n = n, 1-6) at prio 1: a strange mood waits
@@ -113,7 +115,8 @@ FOLLOW_HB_EVERY_S = 10                         # FR-29: follow's own heartbeat (
 AUTO_TIMEOUT_S = 60
 TOMBS_COOLDOWN_S = 600
 CODE = files.code_stamp()                      # BUG-042: the dfpilot code this follow process imported
-PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "rock", "farms", "seal", "fishery")   # automatic placements (one each)
+PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "rock", "farms", "seal", "fishery",
+              "mandatory")                    # automatic placements (one each)
 SEAL_HINT = ("dfllm cmd bp.place tpl=seal site=S1 at=audit (walls the audit's bypass; follow places it itself "
              "unless --no-auto); then dfllm audit")
 AUTO_REQUESTS = ("tombs", "workshops")            # PROJECT_REQUEST templates follow places itself
@@ -418,6 +421,17 @@ class Follower:
                 # kernel saw none on the map, so the manifest's dedupe of `add` must not drop it
                 self._request_place("fishery", "workshops", {"add": "Fishery", "skip": ",".join(_moodable())}, "S1",
                                     now, prio=1, need=["Fishery"])
+            elif t == "PROJECT_REQUEST" and d.get("tpl") == "workshops" and d.get("why") == "mandatory":
+                # FR-76 (Run 12 Trussroads, reclaimed: no carpenter, no craftsdwarf, no kitchen): the types the runner
+                # saw missing on the map, whatever the fort manifest lists (kept by `need`, BUG-066)
+                from .cmd import _extra_shops, _moodable
+                mood, extra = _moodable(), set(_extra_shops())
+                want = [x for x in d.get("types") or [] if isinstance(x, str) and (x in mood or x in extra)]
+                if want:
+                    params = {"skip": ",".join(x for x in mood if x not in want)}
+                    if any(x in extra for x in want):
+                        params["add"] = ",".join(x for x in want if x in extra)
+                    self._request_place("mandatory", "workshops", params, "S1", now, prio=1, need=want)
             elif t == "PROJECT_REQUEST" and d.get("tpl") in AUTO_REQUESTS:
                 # live L1: a strange mood needs a shop; BUG-042: economy's tannery request names the Tanners the map
                 # lacks, kept although the fort manifest lists a destroyed one (as the fishery, BUG-038)

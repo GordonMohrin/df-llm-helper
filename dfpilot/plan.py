@@ -15,7 +15,7 @@ import json
 import re
 from pathlib import Path
 
-from . import files, paths, schema
+from . import cmd as _cmd, files, paths, schema
 from .cmd import (SAME, SEAL_AUDIT, WATER_NEAR, BpError, BpUnavailable, _moodable, audit_routes, bp_files, fmt_reply,
                   fort_manifest, free_sites, last_entrances, load_bp, log_seal, occupancy, place, rank_sites, refuge_head,
                   refuge_open, seal_openings, send, sites_snapshot, template_info, template_names, water_near, write_bp)
@@ -42,7 +42,7 @@ SEAL_LAST = {"tpl": "seal", "site": "S1", "p": {"at": "last"}}          # doors 
 SEAL_REFUGE = {"tpl": "seal", "site": "S1", "p": {"at": "refuge"}}      # BUG-031: the refuge's stair-head hatch + tiles
 EXPLORE = "explore"                       # bp/mine.py: stair shaft + side tunnels below the core (Run 10: no ore)
 METAL_WORN = 80                           # soldiers' worn % below which metal is a plan goal (P6 deliverable metal 80)
-EXPLORE_DEPTHS = (12, 9, 6, 4, 2)         # propose tries the explore template's default depth first, then shallower
+EXPLORE_DEPTHS = _cmd.EXPLORE_DEPTHS        # propose tries the explore template's default depth first, then shallower
 # Run 11 (Kilrudrabed y432: 1 boulder, ~110 orders 'no rock', 2 picks, 1 bar, idle 46-64 %): a stone dig while the free
 # stone is below what the rock orders and walls want (state stock.rock / rock_need) and no dig template is under way;
 # picks first in trade.want while the fort has fewer than the Miners want (stock.picks / pick_want) and no bars
@@ -1238,6 +1238,24 @@ def fit_explore(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
     return f"{EXPLORE}: no site at depth {EXPLORE_DEPTHS[-1]}..{EXPLORE_DEPTHS[0]}: not drafted"
 
 
+CORE_FREE_TPLS = ("fortcore", "seal", "explore", "plug", "repair", "captives", "barracks")   # not sited on the Z4 floor
+
+
+def core_order_note(doc: dict, state: dict | None) -> str | None:
+    """BUG-067 (note 41: after bp.place(fortcore) the drafts for farms, dining and office @S1 found '0 free sites'): room
+    builds open from the dug public Z4 floor of the fortcore, so while its stage 1 is still digging (state.proj label
+    s1.*) `plan check` cannot site them. The order is bp.place fortcore -> wait for s1.dig -> `bp sites <tpl> --fresh`
+    -> plan propose / check. A line for the CLI, None when the draft has no such build or the core is dug."""
+    core = next((r for r in (state or {}).get("proj") or []
+                 if isinstance(r, list) and len(r) >= 3 and isinstance(r[1], str) and r[1].startswith("s1.")), None)
+    rooms = sorted({b["tpl"] for se in doc["seasons"] for b in se["build"] if b["tpl"] not in CORE_FREE_TPLS})
+    if core is None or not rooms:
+        return None
+    return (f"order: fortcore stage 1 ({core[0]}: {core[1]} {core[2]}%) is not dug yet; {', '.join(rooms)} open from its "
+            f"dug Z4 floor, so `plan check` finds no site for them until s1.dig is done and `dfllm bp sites <tpl> --fresh` "
+            f"ranks on a snapshot after it (bp.place fortcore, wait for s1.dig, bp sites --fresh, plan propose / check)")
+
+
 # ---------------------------------------------------------------- propose
 def _build_key(b: dict) -> tuple:
     return b["tpl"], (b.get("p") or {}).get("stage")
@@ -1506,6 +1524,9 @@ def run(args, save_dir: Path) -> int:
         print(f"draft {path}: {_summary(doc)}")
         if fit:
             print(f"  {fit}")
+        order = core_order_note(doc, state)
+        if order:
+            print(f"  {order}")
         errs, warn = check(doc, state, tpls=templates(), prev=prev, fort=fort)
         _print_check(errs, warn)
         print("edit the draft, then: dfllm plan check; dfllm plan apply" + ("" if phases else
@@ -1529,6 +1550,9 @@ def run(args, save_dir: Path) -> int:
         _print_check(errs, warn)
         for ln in lines[:16]:
             print(f"  {ln}")
+        order = core_order_note(doc, state) if errs else None      # BUG-067: why a room build may have found no site
+        if order:
+            print(f"  {order}")
         print(f"plan {'OK' if not errs else 'REJECTED'}: {path}" + (f" ({_summary(doc)})" if not errs else ""))
         return 1 if errs else 0
     errs, msg = apply(save_dir, doc, by=args.by, wait_s=args.wait, dry_run=args.dry_run)

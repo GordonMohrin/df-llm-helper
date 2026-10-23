@@ -71,7 +71,7 @@
 -- `inspect defense` shows it. A new footprint in the manifest starts a new record.
 local geom = require('dfllm.util.geom')
 local DT = require('dfllm.deaths')      -- BUG-027: the bridge-death match (library, no module)
-
+local CAD = require('dfllm.util.cadence')   -- BUG-068: LEVER_NOEFFECT once per lever
 local M = {name = 'gate', every = {ticks = 600}, critical = true, verbs = {},
            reports = {MIGRANT_ARRIVAL = true, MIGRANT_ARRIVAL_NAMED = true, D_MIGRANTS_ARRIVAL = true,
                       CARAVAN_ARRIVAL = true, FIRST_CARAVAN_ARRIVAL = true}}
@@ -119,13 +119,21 @@ M.WIN_LEVER = 2400         -- ... an inbox `lever` down keeps that bridge open t
 M.GONE_RECHECK = 1200      -- BUG-030: a destroyed bridge's footprint is searched for a rebuilt one once a game day
 M.LOST_BD = 2400           -- loss history: building destroyers in sight this many ticks before a loss make it theirs
 M.LOST_EV, M.LOST_RACES = 6, 4   -- ... the newest losses and the destroyer races kept per bridge
+-- BUG-068 (Run 12 Trussroads, a reclaimed fort: lever 11808 of the old fort's bridge X11814 pulled six times in one
+-- second at timestream speed with no effect): a pull whose job left the queue without the bridge moving counted
+-- against that lever only until the other levers were tried; a bridge with one lever (or all failed) was pulled again
+-- SETTLE ticks later, for ever. Now NE_MAX such pulls in a row park the lever for NE_WAIT ticks (a quarter of it in
+-- SIEGE/BREACH/DRILL), doubling per further parking up to NE_TIMES times (config/reflex.json gate.noeffect_max and
+-- gate.noeffect_wait). LEVER_NOEFFECT (B) reports it once per lever (util/cadence, persisted m.gate.ne), and a bridge
+-- with a parked lever fails as GATE_FAIL `no_effect`. A pull that moved the bridge, or a mode change, clears the record.
+M.NE_MAX, M.NE_WAIT, M.NE_TIMES = 3, 1200, 8
 
 local FAST_MODES = {SIEGE = true, BREACH = true, DRILL = true}
 local FORCE_MODES = {SIEGE = true, BREACH = true}       -- may RAISE onto a unit, only with a hostile at the gate
 local LOCK_MODES = {SIEGE = true, BREACH = true}        -- raise the unmanaged bridges even without the reflex module
 local GATE_ROLES = {outer = true, inner = true}         -- the bridges a lockdown and the peace gates hold up
 local FAIL_WHY = {blocked = 'blocked', no_lever = 'no_lever', no_worker = 'no_worker', outside = 'outside_alert',
-                  manual = 'manual', slow = 'slow'}
+                  manual = 'manual', slow = 'slow', no_effect = 'no_effect'}
 
 local st      -- persisted m.gate: {v, br = {<b> = {want, why, since, deadline, failed}}, kpi = {...},
               --   ex = {X<id> = {bid, raised}} (unmanaged bridges in hand), lat = {s, t}, win = tick, winb = {<b> = tick},
@@ -788,10 +796,16 @@ end
 -- linked lever to pull next: first one that has not failed in this epoch, rotating after failures;
 -- the link is re-checked right before the pull (a lever may have been unlinked or removed)
 local function pick(K, r, now)
-  local cand = {}
-  for _, lid in ipairs(r.levers) do if r.linked[lid] then cand[#cand + 1] = lid end end
+  local cand, parked = {}, 0
+  if r.park and r.pm ~= K.mode() then r.park, r.ne = nil, nil end      -- BUG-068: a new mode, a new try
+  for _, lid in ipairs(r.levers) do
+    if r.linked[lid] then
+      if r.park and (r.park[lid] or 0) > now then parked = parked + 1       -- BUG-068: parked, no effect
+      else cand[#cand + 1] = lid end
+    end
+  end
   local n = #cand
-  if n == 0 then return nil end
+  if n == 0 then return nil, parked > 0 and 'parked' or nil end
   if n > 1 then order(K, r, cand, now) end
   local start
   for i, lid in ipairs(cand) do if not r.bad[lid] then start = i; break end end
@@ -943,6 +957,57 @@ local function manual(K, name, bid)
     if v == name or (bid ~= nil and math.tointeger(v) == bid) then return true end
   end
   return false
+end
+
+-- BUG-068: config/reflex.json gate.noeffect_max (1..20 pulls in a row without effect) and gate.noeffect_wait (100..24000
+-- ticks of the first parking); bad values fall back to the defaults
+function M.ne_cfg(K)
+  local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.gate) == 'table' and K.cfg.reflex.gate or {}
+  local n, w = math.tointeger(r.noeffect_max), math.tointeger(r.noeffect_wait)
+  if not n or n < 1 or n > 20 then n = M.NE_MAX end
+  if not w or w < 100 or w > 24000 then w = M.NE_WAIT end
+  return n, w
+end
+
+-- BUG-068: a pull of lever `lid` left the queue and bridge `name` still stands in `s`. NE_MAX in a row park the lever
+-- (NE_WAIT ticks, doubled per parking in a row up to NE_TIMES times), LEVER_NOEFFECT (B) once per lever (worker = how
+-- many of those pulls a worker took: 0 means DF dropped every job unclaimed, e.g. no path to the lever)
+function M.noeffect(K, name, r, lid, s, now, taken)
+  local max, wait = M.ne_cfg(K)
+  r.ne = r.ne or {}
+  local e = r.ne[lid] or {n = 0, tot = 0, k = 0, w = 0}
+  r.ne[lid] = e
+  e.n, e.tot = e.n + 1, e.tot + 1
+  if taken then e.w = e.w + 1 end                        -- pulls a worker took (else DF dropped the job unclaimed)
+  if e.n < max then return end
+  e.n, e.k = 0, math.min(e.k + 1, 30)
+  if FAST_MODES[K.mode()] then wait = math.max(100, wait // 4) end        -- a fight: look again sooner
+  local w = wait * math.min(1 << (e.k - 1), M.NE_TIMES)
+  r.park = r.park or {}
+  r.park[lid], r.pm = now + w, K.mode()
+  st.ne = type(st.ne) == 'table' and st.ne or {}
+  local key = tostring(lid)
+  if CAD.due(st.ne[key], K.now(), {lid}, {}) then
+    st.ne[key], dirty = CAD.mark(K.now(), {lid}, {}), true
+    K.log('warn', 'gate: lever %d of %s pulled %d times without effect (bridge stays %s): no pull for %d ticks', lid, name,
+          e.tot, s, w)
+    K.emit('LEVER_NOEFFECT', 'B', string.format('lever %d of %s: %d pulls without effect, bridge stays %s; no pull for %d ticks',
+                                                lid, name, e.tot, s, w),
+           {bridge = name, lever = lid, pulls = e.tot, state = s, wait = w, worker = e.w})
+  end
+end
+
+-- BUG-068: has any lever of the bridge been parked for no effect (a fail between two tries still says why)
+function M.ne_any(r)
+  for _, e in pairs(r.ne or {}) do if (e.k or 0) > 0 then return true end end
+  return false
+end
+
+-- BUG-068: the lever moved its bridge: its record goes (the report may come again in a later episode)
+function M.ne_clear(r, lid)
+  if r.ne and r.ne[lid] then r.ne[lid] = nil end
+  if r.park and r.park[lid] then r.park[lid] = nil end
+  if st.ne and st.ne[tostring(lid)] then st.ne[tostring(lid)], dirty = CAD.quiet(st.ne[tostring(lid)]), true end
 end
 
 -- min Chebyshev distance of a listed visible hostile to a footprint (unmanaged bridges: sense only measures the
@@ -1354,6 +1419,11 @@ local function control(K, name, spec, now)
       r.near = sc and {t = now, list = sc.list} or nil
     end
   else r.near = nil end
+  if r.nec and now >= r.nec.at then                  -- BUG-068: did the pull move the bridge?
+    local x = r.nec
+    r.nec = nil
+    if s == x.before then M.noeffect(K, name, r, x.lid, s, now, x.taken) else M.ne_clear(r, x.lid) end
+  end
   observe(K, name, r, s, now, spec.fp, prev, sc)
   if r.mv and sc then mv_note(r.mv, sc.list, now) end       -- who stands near it while it moves
   -- 1. our own queued pull
@@ -1362,7 +1432,12 @@ local function control(K, name, spec, now)
     local j = lv and job_on(lv, r.job.id)
     if not j then                                     -- done, or dropped by DF
       if s == r.job.before then r.bad[r.job.lever] = true
-      else note_take(K, name, r.job, now) end
+      else
+        note_take(K, name, r.job, now)
+        M.ne_clear(r, r.job.lever)
+      end
+      -- BUG-068: judged after SETTLE ticks (the top of a pass): the bridge may start to move a moment after the job left
+      r.nec = {lid = r.job.lever, before = r.job.before, taken = r.job.taken ~= nil, at = now + M.SETTLE}
       r.job, r.settle = nil, now + M.SETTLE
     else
       local w0 = worker(j)
@@ -1429,7 +1504,12 @@ local function control(K, name, spec, now)
     r.stuck = worker(fj) and 'pending' or 'no_worker'
     return s
   end
-  if w == nil or w == s then unblock(r, now); r.block_ev = nil; return s end
+  if w == nil or w == s then
+    unblock(r, now); r.block_ev = nil
+    if r.ne or r.park then for _, lid in ipairs(r.levers) do M.ne_clear(r, lid) end; r.ne, r.park = nil, nil end   -- BUG-068
+    r.nec = nil
+    return s
+  end
   if s == 'unknown' then r.stuck = 'no_lever'; return s end
   if s == 'moving' or now < (r.settle or 0) then return s end
   if w == 'down' and down_guard(K, name) then r.stuck = 'guard'; return s end
@@ -1448,8 +1528,12 @@ local function control(K, name, spec, now)
     return s
   end
   unblock(r, now)
-  local lid = pick(K, r, now)
-  if not lid then r.stuck, r.resolved = 'no_lever', nil; return s end
+  local lid, why = pick(K, r, now)
+  if not lid then
+    if why == 'parked' then r.stuck = 'no_effect'; return s end      -- BUG-068: every linked lever is parked
+    r.stuck, r.resolved = 'no_lever', nil
+    return s
+  end
   r.last_lever = lid
   local ok, job = K.act.pull(lid)
   if not ok then                                   -- 'no building', 'not a lever', ...: resolve again
@@ -1537,7 +1621,8 @@ local function check_fail(K, name, now, mode)
     end
   end
   br.failed, dirty = true, true
-  local why = FAIL_WHY[r.stuck] or (slow and FAIL_WHY.slow) or (r.nw > 0 and 'no_worker') or 'timeout'
+  local why = FAIL_WHY[r.stuck] or (slow and FAIL_WHY.slow) or (M.ne_any(r) and FAIL_WHY.no_effect) or
+              (r.nw > 0 and 'no_worker') or 'timeout'
   if why == 'no_worker' then                          -- BUG-013: nobody may take it while the alert sounds
     local out = r.nw_out                              -- seen at a no-worker cancel; else now, in a step only (a
     if out == nil and mode == nil then                -- mode change has just moved the alert to another burrow)
@@ -1791,6 +1876,13 @@ function M.init(K)
     end
     if type(p.lat) == 'table' and int(p.lat.s) and int(p.lat.t) then st.lat = {s = int(p.lat.s), t = int(p.lat.t)} end
     st.win = int(p.win)
+    st.ne = {}                                    -- BUG-068: LEVER_NOEFFECT cadence records per lever id
+    for k, x in pairs(type(p.ne) == 'table' and p.ne or {}) do
+      if type(k) == 'string' and k:match('^%d+$') and type(x) == 'table' and int(x.t) then
+        st.ne[k] = {t = int(x.t), w = int(x.w), ids = type(x.ids) == 'table' and x.ids or {},
+                    toks = type(x.toks) == 'table' and x.toks or {}}
+      end
+    end
     for name, t in pairs(type(p.winb) == 'table' and p.winb or {}) do
       if type(name) == 'string' and int(t) then st.winb[name] = int(t) end
     end

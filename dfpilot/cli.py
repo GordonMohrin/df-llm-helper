@@ -142,7 +142,8 @@ def run_bp(args, save_dir: Path | None) -> int:
             if snap is None:
                 print(f"no snapshot {cid} within {args.timeout:.0f}s")
                 return 3
-        sites, snap_id, ranked = free_sites(save_dir, args.tpl, params, snap)
+        held: list = []
+        sites, snap_id, ranked = free_sites(save_dir, args.tpl, params, snap, taken=held)
         print(f"free sites for {args.tpl}{fmt_params(params)} on snapshot {snap_id} ({ranked} ranked; place: "
               f"dfllm cmd bp.place tpl={args.tpl} site=S1{fmt_params(params)} --by llm):")
         note = water_note(save_dir, args.tpl)
@@ -151,7 +152,9 @@ def run_bp(args, save_dir: Path | None) -> int:
         for s in sites:
             print(f"  {s.get('id')} anchor {s.get('anchor')} rot {s.get('rot')} score {s.get('score')}: {s.get('why', '')}")
         if not sites:
-            print("  none (taken by other projects or no valid site): try --fresh")
+            from .cmd import no_site_hint
+            why = no_site_hint(save_dir, args.tpl, snap_id, ranked, sorted(set(held)))      # BUG-067
+            print(f"  none ({ranked} ranked, {len(set(held))} project(s) hold them): try --fresh" + (f"; {why}" if why else ""))
         return 0
     except (BpError, BpUnavailable, RuntimeError, ValueError) as e:
         print(f"bp: {e}")

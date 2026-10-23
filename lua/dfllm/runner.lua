@@ -94,6 +94,15 @@ M.CFG = {
   -- task that yields task_slices times in a row is skipped this run (kern.log); state sched.run once no run ended for
   -- run_idle_d days
   yield_days = 7, park_days = 30, task_slices = 600, run_idle_d = 3,
+  -- BUG-066 (Run 14 y560: a toppled MetalsmithsForge stayed `built` in manifest.json and "bp sites workshops" said
+  -- "nothing left to build" while a mood dwarf had no workshop) and FR-76 (Run 12 Trussroads, a reclaimed fort with
+  -- workshops no project of ours built): once a game day the manifest's workshops are compared with the workshops that
+  -- stand. One missing for rec_scans scans in a row leaves the manifest (and is listed in manifest.gone, so the
+  -- fragments of the bp files older than the loss no longer count either); a standing built one the manifest lacks is
+  -- added (adoption). rec_min = standing workshops adopted at the first scan that make the fort a reclaimed one;
+  -- rec_ask = days a mandatory workshop of a reclaimed fort may be missing before PROJECT_REQUEST workshops
+  -- why=mandatory. config/baseline.json "runner": {reclaim: {on, gone_scans, min_ws, ask_days}}
+  rec_scans = 2, rec_min = 3, rec_ask = 3,
 }
 local MODES = {dig = true, build = true, place = true, zone = true, burrow = true}
 local CLASSES = {defense = true, infra = true, living = true, beauty = true}
@@ -401,7 +410,9 @@ function M.merge_manifest(dst, frag)
     elseif LISTS[k] and type(v) == 'table' then
       dst[k] = obj(dst[k])
       for kk, list in pairs(v) do dst[k][kk] = append_unique(dst[k][kk], list, LISTS[k]) end
-    elseif BY[k] then dst[k] = replace_by(dst[k], v, BY[k][1], BY[k][2])
+    elseif BY[k] then
+      dst[k] = replace_by(dst[k], v, BY[k][1], BY[k][2])
+      if k == 'workshops' and type(dst.gone) == 'table' then dst.gone = Q.ungone(dst.gone, v) end   -- BUG-066
     elseif k == 'edge' then dst[k] = append_unique(dst[k], v, 200)
     else dst[k] = copy(v) end                              -- refuge, pit, depot
   end
@@ -1632,15 +1643,55 @@ local function keep_box(P, d)
   if KEEP_BOX[P.tpl] == 'kind' then S.rt.kk[P.id] = P.tpl end
 end
 
+-- FR-76 (Run 12 Trussroads: fortcore stage 2 "site: same" finished at once, its tiles already open in the old fort, with
+-- stage 1 parked at breach:damp and never done; the plan then counted stage 1 as delivered): the lowest stage a document
+-- works on (params.stage, else its lowest sN.* label) and whether the stage before it ran (the finished stages of the
+-- template, another live project of it that passed that stage, or, for a fort of an older kernel, a merged fortcore:
+-- zones in the manifest)
+function Q.first_stage(d)
+  local st = type(d.params) == 'table' and int(d.params.stage) or nil
+  if st and st > 0 then return st end
+  local lo
+  for _, s in ipairs(d.stages) do
+    local n = int(tostring(s.label):match('^s([0-9]+)%.'))
+    if n and (not lo or n < lo) then lo = n end
+  end
+  return lo or 1
+end
+
+function Q.pre_ran(K, P, d, before)
+  local h = S.rt.hist[P.tpl]
+  if type(h) == 'table' and ((int(h.ps) or 0) >= before or (int(h.ls) or 0) >= before) then return true end
+  for _, P2 in ipairs(S.pd.list) do
+    if P2.tpl == P.tpl and P2.id ~= P.id and P2.done ~= 1 then
+      local d2 = doc(K, P2.id)
+      if d2 and Q.first_stage(d2) <= before and labels_done(d2, P2.stage) >= before then return true end
+    end
+  end
+  if P.tpl == 'fortcore' then
+    for _, list in pairs(type(K.manifest().zones) == 'table' and K.manifest().zones or {}) do
+      if type(list) == 'table' and #list > 0 then return true end
+    end
+  end
+  return false
+end
+
 local function finish(K, P, d)
   if KEEP_BOX[P.tpl] then keep_box(P, d) end
   local man = K.manifest()
   M.merge_manifest(man, d.manifest)
   K.persist.set('manifest', man)
+  local first = Q.first_stage(d)
+  local pre = first < 2 or Q.pre_ran(K, P, d, first - 1)
   local h = obj(S.rt.hist[P.tpl])
   h.n = (h.n or 0) + 1
-  h.ps = math.max(h.ps or 0, int(type(d.params) == 'table' and d.params.stage) or 0)
-  h.ls = math.max(h.ls or 0, labels_done(d, #d.stages))
+  if pre then                                -- FR-76: a stage whose predecessor never ran is not counted as delivered
+    h.ps = math.max(h.ps or 0, int(type(d.params) == 'table' and d.params.stage) or 0)
+    h.ls = math.max(h.ls or 0, labels_done(d, #d.stages))
+  else
+    K.log('warn', '%s (%s) stage %d done, but stage %d never ran: not counted as delivered (place stage %d)', P.id, P.tpl,
+          first, first - 1, first - 1)
+  end
   S.rt.hist[P.tpl] = h
   P.done, P.pct, P.blocked, P.since = 1, 100, '', now(K)
   local xr = note_shaft(K, P, d)              -- Run 11: a finished explore's shaft stays open: the shaft check watches it
@@ -1649,8 +1700,9 @@ local function finish(K, P, d)
   K.persist.set('bp.' .. P.id, nil)
   S.rt.p[P.id] = nil
   forget(P.id)
-  K.emit('PROJECT_DONE', 'B', trunc(P.id .. ' (' .. P.tpl .. ') done' .. (wn and ('; ' .. wn) or ''), 200),
-         {proj = P.id, tpl = P.tpl, walled = wl})
+  K.emit('PROJECT_DONE', 'B', trunc(P.id .. ' (' .. P.tpl .. ') done' .. (wn and ('; ' .. wn) or '') ..
+                                    (pre and '' or ('; stage ' .. (first - 1) .. ' never ran: not counted')), 200),
+         {proj = P.id, tpl = P.tpl, walled = wl, pre = (not pre) and (first - 1) or nil})
   K.log('info', '%s (%s) done', P.id, P.tpl)  -- BUG-039: kern.log names every project that leaves the open list
   K.flush()
   dirty()
@@ -2331,6 +2383,10 @@ local function conf(K)
              pop = nat(rb.pop, 0, 250, M.CFG.rebuild_pop), off = nat(rb.off, 0, 250, M.CFG.rebuild_off),
              yield = nat(q.yield_days, 1, 60, M.CFG.yield_days) * DAY,     -- BUG-037
              park = nat(q.park_days, 1, 400, M.CFG.park_days) * DAY}
+  -- BUG-066 / FR-76: the manifest follows the workshops that stand (reclaim = config runner.reclaim)
+  local rc = type(c.reclaim) == 'table' and c.reclaim or {}
+  r.rec = {on = rc.on ~= false, scans = nat(rc.gone_scans, 1, 10, M.CFG.rec_scans),
+           min = nat(rc.min_ws, 1, 50, M.CFG.rec_min), ask = nat(rc.ask_days, 1, 60, M.CFG.rec_ask) * DAY}
   if type(sf.on) == 'boolean' then r.on = sf.on end
   r.off = math.max(r.off, r.pop)
   return r
@@ -2759,7 +2815,11 @@ local function proj_reached(K, tpl, stage)
   for _, P in ipairs(S.pd.list) do
     if P.tpl == tpl and P.done ~= 1 then
       local d = doc(K, P.id)
-      if d and labels_done(d, P.stage) >= stage then return true end
+      -- FR-76: a project that starts at stage 2 or later passes the stages before it only when they ran
+      if d and labels_done(d, P.stage) >= stage then
+        local first = Q.first_stage(d)
+        if first < 2 or Q.pre_ran(K, P, d, first - 1) then return true end
+      end
     end
   end
   return false
@@ -3094,6 +3154,159 @@ local function keepers(K)
   end
 end
 
+---------------------------------------------------------------- the manifest follows what stands (BUG-066, FR-76)
+-- Workshops and furnaces that stand, from the game's building vectors: {t = type name, x1, y1, x2, y2, z, b = built}.
+-- nil when a vector cannot be read (nothing is then pruned: a failed read says nothing about what stands).
+function Q.stand()
+  local out = {}
+  local oth = df.global.world.buildings.other
+  for _, spec in ipairs({{'WORKSHOP_ANY', 'workshop_type'}, {'FURNACE_ANY', 'furnace_type'}}) do
+    local vec, enum = oth[spec[1]], df[spec[2]]
+    if vec == nil or enum == nil then return nil end
+    for _, b in ipairs(vec) do
+      local name = enum[b.type]
+      local x1, y1, x2, y2, z = int(b.x1), int(b.y1), int(b.x2), int(b.y2), int(b.z)
+      if type(name) == 'string' and name ~= 'Custom' and x1 and y1 and x2 and y2 and z then
+        local okb, done = pcall(built, b)
+        out[#out + 1] = {t = name, x1 = x1, y1 = y1, x2 = x2, y2 = y2, z = z, b = not okb or done == true}
+      end
+    end
+  end
+  return out
+end
+
+function Q.covers(b, name, pos)
+  return b.t == name and b.z == pos[3] and pos[1] >= b.x1 and pos[1] <= b.x2 and pos[2] >= b.y1 and pos[2] <= b.y2
+end
+
+function Q.pos3(p)
+  if type(p) ~= 'table' then return nil end
+  local x, y, z = int(p[1]), int(p[2]), int(p[3])
+  return x and y and z and {x, y, z} or nil
+end
+
+-- manifest.gone entries a (re)built workshop of `frag` ({{type, pos}}) cancels
+function Q.ungone(gone, frag)
+  local out = {}
+  for _, g in ipairs(gone) do
+    local hit = false
+    for _, w in ipairs(frag) do
+      local a, b = Q.pos3(g.pos), Q.pos3(w.pos)
+      if type(w) == 'table' and w.type == g.type and a and b and a[1] == b[1] and a[2] == b[2] and a[3] == b[3] then
+        hit = true
+      end
+    end
+    if not hit then out[#out + 1] = g end
+  end
+  return out
+end
+
+-- once a game day: prune the manifest's workshops that no longer stand, adopt the standing built ones it lacks, count
+-- what stands (rt.ad: the state's `adopt`), and ask for the mandatory workshops a reclaimed fort lacks
+function Q.sync(K, t)
+  local rc = conf(K).rec
+  if not rc.on or (S.rt.wsy and t - S.rt.wsy < DAY) then return end
+  S.rt.wsy = t
+  dirty()
+  local oks, stand = pcall(Q.stand)
+  if not oks or type(stand) ~= 'table' then return end
+  local man = K.manifest()
+  local list, keep, changed = type(man.workshops) == 'table' and man.workshops or {}, {}, false
+  S.rt.wm = type(S.rt.wm) == 'table' and S.rt.wm or obj{}
+  local gone = type(man.gone) == 'table' and man.gone or {}
+  local pruned, added, nbuilt, have = 0, 0, 0, {}
+  for _, b in ipairs(stand) do
+    have[b.t] = true
+    if b.b then nbuilt = nbuilt + 1 end
+  end
+  for _, w in ipairs(list) do
+    local p = type(w) == 'table' and Q.pos3(w.pos)
+    local key = p and (tostring(w.type) .. '@' .. table.concat(p, ','))
+    local here = false
+    if p then
+      for _, b in ipairs(stand) do if Q.covers(b, w.type, p) then here = true; break end end
+    end
+    if not p or here then
+      keep[#keep + 1] = w
+      if key then S.rt.wm[key] = nil end
+    else
+      local n = (int(S.rt.wm[key]) or 0) + 1
+      if n >= rc.scans then
+        S.rt.wm[key] = nil
+        pruned, changed = pruned + 1, true
+        gone[#gone + 1] = {type = tostring(w.type), pos = p, w = K.now().wall}
+        K.log('warn', 'manifest: workshop %s at %d,%d,%d no longer stands (%d scans): out of the manifest', tostring(w.type),
+              p[1], p[2], p[3], n)
+      else
+        S.rt.wm[key] = n
+        keep[#keep + 1] = w
+      end
+    end
+  end
+  for _, b in ipairs(stand) do
+    if b.b then
+      local known = false
+      for _, w in ipairs(keep) do
+        local p = type(w) == 'table' and Q.pos3(w.pos)
+        if p and Q.covers(b, w.type, p) then known = true; break end
+      end
+      if not known and #keep < 100 then
+        keep[#keep + 1] = {type = b.t, pos = {(b.x1 + b.x2) // 2, (b.y1 + b.y2) // 2, b.z}}
+        added, changed = added + 1, true
+      end
+    end
+  end
+  if added > 0 or pruned > 0 then
+    local g2 = {}
+    for _, g in ipairs(gone) do                   -- a workshop that stands again is no longer gone
+      local back = false
+      for _, w in ipairs(keep) do
+        local a, c2 = Q.pos3(g.pos), Q.pos3(w.pos)
+        if w.type == g.type and a and c2 and a[1] == c2[1] and a[2] == c2[2] and a[3] == c2[3] then back = true end
+      end
+      if not back then g2[#g2 + 1] = g end
+    end
+    while #g2 > 50 do table.remove(g2, 1) end
+    man.workshops, man.gone = keep, g2
+    K.persist.set('manifest', man)
+    if added > 0 then K.log('info', 'manifest: %d standing workshop%s adopted (%d in all)', added, added == 1 and '' or 's', #keep) end
+  end
+  -- the adoption record and the fort's other standing rooms (counts only; the vectors are not walked)
+  local ad = S.rt.ad
+  if type(ad) ~= 'table' then
+    ad = {t = t, new = 0, gone = 0, rec = added >= rc.min and 1 or 0}
+    S.rt.ad = ad
+    if ad.rec == 1 then
+      K.log('warn', 'reclaimed fort: %d standing workshops adopted into the manifest at the first scan', added)
+    end
+  end
+  ad.ws, ad.new, ad.gone = nbuilt, (int(ad.new) or 0) + added, (int(ad.gone) or 0) + pruned
+  local oth = df.global.world.buildings.other
+  for _, k in ipairs({{'stock', 'STOCKPILE'}, {'wells', 'WELL'}, {'beds', 'BED'}, {'doors', 'DOOR'}}) do
+    local okn, n = pcall(function() return #oth[k[2]] end)
+    ad[k[1]] = okn and int(n) or nil
+  end
+  local miss = {}
+  for _, name in ipairs(Q.MANDATORY) do if not have[name] then miss[#miss + 1] = name end end
+  ad.miss = miss
+  if ad.rec == 1 and #miss > 0 then
+    S.rt.wmiss = int(S.rt.wmiss) or t
+    if K.mode() == 'PEACE' and t - S.rt.wmiss >= rc.ask and M.pending(K, 'workshops') == 0
+       and (not S.rt.req.wsm or t - S.rt.req.wsm >= M.CFG.req_cool) then
+      S.rt.req.wsm = t
+      local names = table.concat(miss, ', ')
+      K.log('warn', 'reclaimed fort without %s: workshops project requested (dfllm bp sites workshops; the fort cannot ' ..
+            'make coffins, crafts or meals without them)', names)
+      K.emit('PROJECT_REQUEST', 'B', trunc('workshops x' .. #miss .. ': mandatory ' .. names .. ' missing', 200),
+             {tpl = 'workshops', n = #miss, why = 'mandatory', types = miss})
+    end
+  else
+    S.rt.wmiss = nil
+  end
+  dirty()
+end
+Q.MANDATORY = {'Carpenters', 'Masons', 'Craftsdwarfs', 'Still', 'Kitchen'}
+
 ---------------------------------------------------------------- build_lost: missing pieces and the retry (BUG-022)
 
 -- the name of a piece: the manifest bridge whose footprint holds the cell (B1), a bridge's lever ('lever B1'),
@@ -3349,6 +3562,8 @@ local function end_run(K)
     elseif type(r) == 'table' and #(r.ids or {}) > 0 and not Q.parked(K, P, pt) then S.rt.park[id] = CAD.quiet(r); dirty() end
   end
   plug_watch(K)                              -- Run 11: the plug's wall (every mode); the check ran as its own task
+  local oks, err = pcall(Q.sync, K, t)       -- BUG-066 / FR-76: a fault here must not stop the run
+  if not oks then K.log('error', 'manifest sync failed: %s', trunc(err, 160)) end
   phases(K)
   if K.mode() == 'PEACE' then exhausted(K) end
   if DEPOT_MODES[K.mode()] then M.depot_keep(K, 'keeper') end
@@ -3545,13 +3760,28 @@ function Q.run_state(K)
   return out
 end
 
+-- FR-76: what stands (workshops, stockpiles, wells, beds, doors) and the manifest's repairs, nil before the first scan
+function Q.adopt_state()
+  local ad = S.rt.ad
+  if type(ad) ~= 'table' or ad.ws == nil then return nil end
+  local r = {ws = math.max(0, int(ad.ws) or 0), new = math.max(0, int(ad.new) or 0)}
+  if (int(ad.gone) or 0) > 0 then r.gone = int(ad.gone) end
+  for _, k in ipairs({'stock', 'wells', 'beds', 'doors'}) do if int(ad[k]) then r[k] = math.max(0, int(ad[k])) end end
+  if ad.rec == 1 then r.rec = 1 end
+  if type(ad.miss) == 'table' and #ad.miss > 0 and ad.rec == 1 then
+    r.miss = {}
+    for i, n in ipairs(ad.miss) do if i <= 8 then r.miss[i] = trunc(n, 24) end end
+  end
+  return r
+end
+
 function M.state(K)
   local sc, q, run, pk = S.sched, S.q, Q.run_state(K), (S.npk or 0) > 0 and S.npk or nil
   if q or run or pk then
     sc = sc and copy(sc) or {}
     sc.q, sc.run, sc.pk = q, run, pk
   end
-  return {phase = S.phase, proj = S.rows, sched = sc}
+  return {phase = S.phase, proj = S.rows, sched = sc, adopt = Q.adopt_state()}
 end
 
 -- BUG-037 (economy's inspect workload and idle rule): the runner's queue in one clause, nil when nothing waits;
