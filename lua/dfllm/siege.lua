@@ -77,9 +77,11 @@ end
 local function geometry(K)
   local man = K.manifest()
   local g = {outer = {}, inner = {}, core = {}, all = {}, man = man}
+  local okr, rep = K.call('seal', 'replaced')         -- BUG-048: a bridge seal replaced by a wall and a door is no gate
+  rep = okr and type(rep) == 'table' and rep or {}
   for _, name in ipairs(sorted_keys(man.bridges)) do
     local b = man.bridges[name]
-    if type(b) == 'table' and type(b.fp) == 'table' and g[b.role] then
+    if type(b) == 'table' and type(b.fp) == 'table' and g[b.role] and not rep[name] then
       local list = g[b.role]
       list[#list + 1] = name
       g.all[#g.all + 1] = name

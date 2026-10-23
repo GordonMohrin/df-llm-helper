@@ -389,6 +389,34 @@ T.test('BUG-030: O1 destroyed in a siege with every gate up: BREACH at once (why
   T.eq(W.state().bridges.O1, 'destroyed')
 end)
 
+T.test('BUG-048: O1 replaced by a wall + door (seal.replaced): no open way in a siege (no BREACH destroyed), state ' ..
+       'replaced, B1 and B2 still go up', function()
+  -- old code: O1 stayed 'destroyed' for ever; a siege was a BREACH at once ("O1 destroyed: an open way")
+  local W = fort{}
+  W.K.cfg.reflex = {v = 2, perimeter = {vanish_after = 1}}
+  W.rcells = {}
+  W.load(SW.fake('runner', {repair = function(K, cells, why, opts)
+    W.rcells[#W.rcells + 1] = {cells = cells, peace = type(opts) == 'table' and opts.peace == true}
+    return true, 'rp' .. #W.rcells
+  end}))
+  run(W, 1200)
+  destroy(W, 'O1')                                  -- no destroyer in sight: the first loss is the last (vanish_after 1)
+  run(W, 2600)
+  T.eq(W.rcells, {{cells = {{30, 15, Z, 'd'}}, peace = true}}, 'a door in place of O1')
+  SW.draw(W, Z, {'+'}, 30, 15)                      -- the builders are done
+  SW.regroup(W)
+  run(W, 2600)
+  T.eq(W.state().bridges.O1, 'replaced')
+  local t0 = W.K.now().tick
+  army(W)
+  run(W, 900)
+  T.eq(W.K.mode(), 'SIEGE')
+  run(W, 1500)
+  T.eq(#since(evs(W, 'BREACH'), t0), 0, 'no BREACH: the door is no open way')
+  T.eq({W.K.mode(), up(W, 'B1')}, {'SIEGE', true}, 'B1 goes up as in any siege')
+  T.eq(#since(evs(W, 'GATE_FAIL'), t0), 0, 'no GATE_FAIL')
+end)
+
 ---------------------------------------------------------------- BUG-031 (b): the confinement, not a bridge
 T.test('BUG-031 (b) + Run 11 (siege 8: the refuge switched Tiefe+/Kern+ during the fight): a goblin in Kern+ sends ' ..
        'the citizens to Tiefe+ (a core room without drink: the BREACH refuge, REFUGE_SWITCH breached); the goblin is ' ..

@@ -130,7 +130,7 @@ T.test('BUG-019: in BREACH (a goblin inside Kern+) the dead end Tiefe+ is taken 
   T.eq(#evs(W, 'REFUGE_FAIL'), 0)
   T.eq(W.state().alert, {want = 'Tiefe+', burrow = 'Tiefe+', tiles = 19, inside = 0, ok = 1, why = '',
                          ref = {ex = 1, sep = 1, beds = 0, need = 1, box = {5, 5, 5, 8, 8, 8}, wd = -1,   -- BUG-040
-                                dr = 0, dn = 3, st = 0}})                                                   -- FR-69
+                                dr = 0, dn = 3, st = 0, tr = 1}})                                           -- FR-69, BUG-049
 end)
 
 T.test('BUG-019 live (Run 10 y419: "REFUGE_FAIL Tiefe+: 63 tiles<109, beds 8<28 -> confining to Kern+"): 30 ' ..
@@ -201,10 +201,10 @@ T.test('Run 10 (Tiefe+ open to the entrance, beds 8<27): the state carries the r
   -- BUG-040: plus where it lies (box) and its nearest accepted water (wd -1: none known)
   -- FR-69: its drink, the drink it wants, its drink store's tiles
   T.eq(W.state().alert.ref, {ex = 1, sep = 0, beds = 0, need = 3, box = {5, 5, 5, 8, 8, 8}, wd = -1, dr = 0, dn = 9,
-                             st = 0})
+                             st = 0, tr = 0, trw = 'exposed: open to 1 entrance 20,10,9 stai'})   -- BUG-049
   local W2 = fort{door = true, citizens = 9}
   T.eq(W2.state().alert.ref, {ex = 1, sep = 1, beds = 0, need = 3, box = {5, 5, 5, 8, 8, 8}, wd = -1, dr = 0, dn = 9,
-                              st = 0})
+                              st = 0, tr = 1})
   local W3 = fort{shaft = false}                     -- no dead end: no refuge burrow at all
   T.eq(W3.state().alert.ref, {ex = 0, sep = -1, beds = 0, need = 1})
   local W4 = fort{door = true, citizens = 9, cfg = {bed_pct = 50}}
@@ -473,7 +473,7 @@ T.test('Run 11 (siege 8: the alert switched between Tiefe+ and Kern+ during the 
   T.eq(select(2, W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+', false, 'Tiefe+')), 'Kern+')
   local sw = evs(W, 'REFUGE_SWITCH')
   T.eq({#sw, sw[1].d.from, sw[1].d.to, sw[1].d.why, sw[1].d.mode}, {1, 'Tiefe+', 'Kern+', 'breached', 'SIEGE'})
-  T.ok(sw[1].msg:find('alert burrow Tiefe+ -> Kern+ during the SIEGE: Tiefe+ breached (a hostile inside)', 1, true),
+  T.ok(sw[1].msg:find('alert burrow Tiefe+ -> Kern+ during the SIEGE: Tiefe+ breached (hostile inside at 6,7,5)', 1, true),
        sw[1].msg)
   W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+', false, 'Tiefe+')
   T.eq(#evs(W, 'REFUGE_SWITCH'), 1, 'once per switch')
@@ -556,6 +556,132 @@ T.test('FR-69 (Run 11 y477: Tiefe+ drink 0 while 1199 of 1493 drinks lay in one 
   ref = W.state().alert.ref
   T.eq({ref.dr, ref.st}, {4, 3})
   T.eq(inspect(W, 'refuge').burrows['Tiefe+'].drink, 4)
+end)
+
+---------------------------------------------------------------- BUG-049 (Run 13 y525: the refuge was occupied)
+-- Run 13 (Wheelsblows y525): B1, B2 and O1 lost and never rebuilt, the refuge Tiefe+ reachable for the enemy; at the
+-- alarm the citizens found it occupied (REFUGE_FAIL "hostile inside"). The kernel trusts the refuge only while its
+-- separation is fresh (audited), nothing in its way is open (the stair-head hatch stands) and no hostile is inside;
+-- every hostile inside is reported with its position; sense counts the ones inside even behind a full hostile list.
+local function refuge_h(W, list, extra)
+  local h = {tick = W.K.now().tick, vis = #list, armed = 1, inside = 0, list = list}
+  for k, v in pairs(extra or {}) do h[k] = v end
+  W.set_census('h', h)
+end
+
+T.test('BUG-049: REFUGE_FAIL "hostile inside" names where (x,y,z, how many) and the choice moves at once: the refuge ' ..
+       'with a goblin in it is refused in BREACH, Kern+ is taken (old: no position)', function()
+  local W = fort{door = true}
+  -- a goblin in the dead end behind the stair (room x5-8 y5-8 z5), another in the shaft
+  refuge_h(W, {{id = 300, x = 7, y = 6, z = Z - 4}, {id = 301, x = 6, y = 6, z = Z - 2}})
+  W.set_mode('BREACH')
+  local ok, pick, note, short = W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')
+  T.eq({ok, pick}, {true, 'Kern+'})
+  local f = evs(W, 'REFUGE_FAIL')
+  T.eq(#f, 1)
+  T.eq({f[1].d.burrow, f[1].d.fallback, f[1].d.hostile, f[1].d.at}, {'Tiefe+', 'Kern+', 2, {7, 6, Z - 4}})
+  T.ok(f[1].msg:find('hostile inside at 7,6,5 (2 hostiles)', 1, true), f[1].msg)
+  T.ok(note:find('hostile inside at 7,6,5', 1, true), note)
+  -- a goblin in Kern+ instead: the refuge is the BREACH pick again at once
+  refuge_h(W, {{id = 300, x = 10, y = 12, z = Z}}, {inside = 1})
+  ok, pick = W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')
+  T.eq(pick, 'Tiefe+')
+  -- the citizens are confined in it when a goblin gets in: they leave at once (REFUGE_SWITCH breached)
+  refuge_h(W, {{id = 300, x = 7, y = 6, z = Z - 4}})
+  ok, pick = W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+', false, 'Tiefe+')
+  T.eq(pick, 'Kern+')
+  local sw = evs(W, 'REFUGE_SWITCH')
+  T.ok(#sw == 1 and sw[1].d.why == 'breached' and sw[1].msg:find('hostile inside at 7,6,5', 1, true), T.show(sw))
+end)
+
+T.test('BUG-049: a hostile that walks about inside the refuge is no news for REFUGE_FAIL (cadence: one per episode, ' ..
+       'the position is not a cause token)', function()
+  local W = fort{door = true}
+  W.set_mode('BREACH')
+  for _, p in ipairs({{7, 6}, {7, 7}, {8, 7}, {8, 8}}) do
+    refuge_h(W, {{id = 300, x = p[1], y = p[2], z = Z - 4}})
+    W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')
+    W.run(100, {skip = 9})
+  end
+  T.eq(#evs(W, 'REFUGE_FAIL'), 1, 'one REFUGE_FAIL for the whole stay')
+  T.eq({evs(W, 'REFUGE_FAIL')[1].d.hostile, evs(W, 'REFUGE_FAIL')[1].d.at}, {1, {7, 6, Z - 4}}, 'with the first place')
+  refuge_h(W, {{id = 300, x = 8, y = 8, z = Z - 4}, {id = 301, x = 7, y = 6, z = Z - 4}})
+  W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')
+  T.eq(#evs(W, 'REFUGE_FAIL'), 1, 'a second hostile is no new cause either')
+end)
+
+T.test('BUG-049: census.h.rin (sense counts the hostiles inside the refuge) refuses it even when the 40-entry list ' ..
+       'does not hold them (a siege of 58 goblins: the list keeps the nearest to O1)', function()
+  local W = fort{door = true}
+  refuge_h(W, {}, {rin = 2, vis = 2})                  -- 2 inside the refuge, none of them in the list
+  W.set_mode('BREACH')
+  local ok, pick = W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')
+  T.eq(pick, 'Kern+')
+  local f = evs(W, 'REFUGE_FAIL')
+  T.eq(#f, 1)
+  T.eq({f[1].d.hostile, f[1].d.at}, {2, nil})
+  T.ok(f[1].msg:find('hostile inside (2 hostiles)', 1, true), f[1].msg)
+end)
+
+T.test('BUG-049: the refuge is trusted only while its separation is fresh, the hatch at its stair head stands and ' ..
+       'nobody is inside: state alert.ref.tr / trw, seal.refuge_trust, inspect refuge', function()
+  -- the manifest's refuge: the civilians' stair comes down from 6,6,9 to the dead end at z5 (Tiefe+); its head is
+  -- 6,6,6, the tile above the refuge level (Z-4 = 5)
+  local W, M = fort{door = true}
+  local man = {v = 2, burrows = {['Kern+'] = {role = 'kern'}, ['Tiefe+'] = {role = 'refuge'}},
+               refuge = {anchor = {5, 5, Z - 4}, burrow = 'Tiefe+'}, stairs = {civ = {{6, 6, Z - 4, Z}}}}
+  W.K.persist.set('manifest', man)
+  inspect(W, 'refuge', 'refresh')
+  W.run(1200, {skip = 9})
+  local ok, tr = W.K.call('seal', 'refuge_trust')
+  T.ok(ok and tr.ok == false, T.show(tr))
+  T.eq(tr.why, {'no hatch at 6,6,6'})
+  T.eq(tr.hatch, {pos = {6, 6, Z - 3}, state = 'missing'})
+  local ref = W.state().alert.ref
+  T.eq({ref.tr, ref.trw}, {0, 'no hatch at 6,6,6'})
+  T.ok(inspect(W, 'refuge').trust.why[1] == 'no hatch at 6,6,6')
+  -- the hatch is built on the stair head: trusted
+  local hatch = SW.building(W, 'DOOR', 'Hatch', 6, 6, Z - 3)
+  W.dyn[SW.key(6, 6, Z - 3)] = hatch
+  W.tiles[SW.key(6, 6, Z - 3)].occ.building = df.tile_building_occ.Dynamic
+  inspect(W, 'refuge', 'refresh')
+  W.run(1200, {skip = 9})
+  ok, tr = W.K.call('seal', 'refuge_trust')
+  T.ok(tr.ok, T.show(tr))
+  T.eq(tr.hatch.state, 'ok')
+  T.eq({W.state().alert.ref.tr, W.state().alert.ref.trw}, {1, nil})
+  -- a hostile inside: not trusted, and where
+  refuge_h(W, {{id = 300, x = 7, y = 6, z = Z - 4}})
+  ok, tr = W.K.call('seal', 'refuge_trust')
+  T.eq({tr.ok, tr.why, tr.hostile}, {false, {'hostile inside at 7,6,5'}, {n = 1, at = {7, 6, Z - 4}}})
+  refuge_h(W, {})
+  -- the separation answer is older than CFG.sep_fresh: stale (seal's own job stopped running)
+  M.CFG.sep_fresh = 600
+  W.run(1800, {skip = 9})
+  ok, tr = W.K.call('seal', 'refuge_trust')
+  T.ok(not tr.ok and tr.why[1]:find('separation not checked for', 1, true), T.show(tr))
+  M.CFG.sep_fresh = 35 * 1200
+  -- the last audit (readiness) says the refuge is not separated in the worst case (a hatch is no barrier there)
+  local audit = {name = 'readiness', every = {ticks = 100000}}
+  function audit.refuge_audit(K) return {sep = 0, age = 300} end
+  W.load(audit)
+  ok, tr = W.K.call('seal', 'refuge_trust')
+  T.ok(not tr.ok and tr.why[1] == 'audit: refuge_sep failed 300 t ago', T.show(tr))
+  T.eq(tr.audit, {sep = 0, age = 300})
+  audit.refuge_audit = function(K) return {sep = 1, age = 300} end
+  ok, tr = W.K.call('seal', 'refuge_trust')
+  T.ok(tr.ok, T.show(tr))
+end)
+
+T.test('BUG-049: an opening that reaches the refuge (no door on the way) is untrusted "exposed"; a burrow the kernel ' ..
+       'does not know yet is "unverified"', function()
+  local W = fort()                                    -- no door: the entrance leads into the hall and down the shaft
+  local ok, tr = W.K.call('seal', 'refuge_trust')
+  T.ok(ok and not tr.ok and tr.why[1]:find('exposed: open to 1 entrance', 1, true), T.show(tr))
+  T.eq(tr.sep, 0)
+  local W2 = fort{door = true, settle = 1}
+  local _, tr2 = W2.K.call('seal', 'refuge_trust')
+  T.ok(tr2 == nil or tr2.ok == false, T.show(tr2))
 end)
 
 T.done()

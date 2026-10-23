@@ -357,6 +357,11 @@ def audit(snap: dict, manifest: dict | None, graph: Graph | None = None, info: d
     hall (for `dfllm audit` and follow's log; never sent)."""
     g = graph or Graph(snap)
     m = manifest or {}
+    # BUG-048: a bridge the kernel replaced by a wall and a door (snapshot bridges: `replaced`) is a door entrance now:
+    # no footprint or lever finding for a gate that is gone for good, and its footprint blocks nobody in the model
+    gone = {n for n, v in (snap.get("bridges") or {}).items() if v == "replaced"}
+    if gone and isinstance(m.get("bridges"), dict):
+        m = {**m, "bridges": {n: b for n, b in m["bridges"].items() if n not in gone}}
     fails: list[str] = []
     res = {"ok": False, "fails": fails, "min_traps": 0, "bypass": True, "refuge_sep": False,
            "civ_sep": False, "caverns": True}

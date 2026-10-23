@@ -434,7 +434,7 @@ T.test('BUG-019 + Run 11: in BREACH a refuge without drink is taken only once Ke
   local sw = evs(W, 'REFUGE_SWITCH')
   T.eq({#sw, sw[1] and sw[1].cls, sw[1] and sw[1].d.from, sw[1] and sw[1].d.to, sw[1] and sw[1].d.why},
        {1, 'B', 'Kern+', 'Tiefe+', 'breached'})
-  T.ok(sw[1].msg:find('alert burrow Kern+ -> Tiefe+ during the BREACH: Kern+ breached (a hostile inside)', 1, true),
+  T.ok(sw[1].msg:find('alert burrow Kern+ -> Tiefe+ during the BREACH: Kern+ breached (hostile inside at 4,4,5)', 1, true),   -- BUG-049: where
        sw[1].msg)
   -- the goblin is gone: the free pick is Kern+ again, but the citizens stay in the refuge while it holds
   W.set_census('h', {tick = W.K.now().tick, vis = 0, armed = 1, inside = 0, list = {}})

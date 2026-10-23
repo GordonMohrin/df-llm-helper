@@ -185,6 +185,43 @@ T.test('BUG-030 rebuild policy: a bridge the perimeter keeper no longer rebuilds
   T.eq(ready(W).fail, {'lost:O1'})
 end)
 
+T.test('BUG-049 (Run 13 y525: the refuge was reachable and occupied): seal.refuge_trust keeps R0 refuge_trust while ' ..
+       'the refuge is exposed, has no hatch on its stair head or its separation answer is stale; hostiles inside and ' ..
+       'the audit have their own handling; readiness.refuge_audit tells seal what the last audit said', function()
+  -- old code: no such blocker (only the audit's refuge_sep)
+  local s = seal_fake({tick = 1, sealed = 1, routes = 1, doors = {}, open = {}})
+  s.trust = {ok = false, sep = 0, why = {'exposed: open to 1 entrance 20,10,9 stair_up (5 steps)'}}
+  function s.refuge_trust(K) return s.trust end
+  local W = world{seal = s}
+  day(W)
+  audit(W)
+  T.eq(lvl(W), 0)
+  T.eq(ready(W).fail, {'refuge_trust'})
+  s.trust = {ok = false, sep = 1, hatch = {pos = {6, 6, 6}, state = 'missing'}, why = {'no hatch at 6,6,6'}}
+  day(W)
+  T.eq(ready(W).fail, {'refuge_trust'})
+  s.trust = {ok = false, sep = 1, why = {'separation not checked for 40 days'}}
+  day(W)
+  T.eq(ready(W).fail, {'refuge_trust'})
+  for _, why in ipairs({'hostile inside at 7,6,5', 'audit: refuge_sep failed 300 t ago',
+                        'unverified: its separation is not checked yet'}) do
+    s.trust = {ok = false, sep = 1, why = {why}}
+    day(W)
+    T.eq(lvl(W), 1, why)
+  end
+  s.trust = {ok = true, sep = 1, why = {}}
+  day(W)
+  T.eq(lvl(W), 1)
+  -- the audit's own word for seal
+  local ra = X.call(W, 'readiness', 'refuge_audit')
+  T.eq(ra.sep, 1)
+  T.ok(ra.age >= 0)
+  audit(W, {ok = false, refuge_sep = false, fails = {'refuge: reachable'}})
+  T.eq(X.call(W, 'readiness', 'refuge_audit').sep, 0)
+  local W0 = world()
+  T.eq(X.call(W0, 'readiness', 'refuge_audit'), nil, 'no audit yet')
+end)
+
 ---------------------------------------------------------------- R2 / R3 and caps
 T.test('R2: drill, army share, >= 8 soldiers, cv, traps, stock; cap 75 only if the plan ceiling allows', function()
   local W = world{drill = NOW0 - 500}
@@ -435,22 +472,21 @@ end)
 ---------------------------------------------------------------- FR-65 siege readiness gate
 local function unready(W) return W.find_events('SIEGE_UNREADY') end
 
-T.test('FR-65 SIEGE_UNREADY (A): R0 in PEACE names blockers, ways in without door or bridge, traps; monthly', function()
+local SEALED = {tick = 1, sealed = 1, routes = 1, doors = {{id = 9, pos = {74, 70, 117}}}, open = {}}
+
+T.test('FR-65 SIEGE_UNREADY (A): R0 in PEACE names blockers, ways in without door or bridge, traps; monthly while ' ..
+       'the fort is closed (an open perimeter repeats faster: FR-70, tests/lua/test_open_perimeter.lua)', function()
   local man = X.S.manifest()
   man.bridges.O1 = nil
-  local W = world{manifest = man, seal = seal_fake(LEAKY)}
+  local W = world{manifest = man, seal = seal_fake(SEALED)}
   day(W)
   T.eq(#unready(W), 0, 'not in the first 2 days after a load')
   day(W, 2)
   local u = unready(W)
   T.eq(#u, 1)
   T.eq(u[1].cls, 'A')
-  T.eq(u[1].d, {fails = {'audit', 'no_outer'}, afails = {}, routes = 3, open = 2,
-                ents = {'55,62,117 stair_updown', '61,55,117 floor'}, traps = -1, age = -1})
-  T.eq(u[1].msg, 'siege unready (R0: audit, no_outer); 2 of 3 ways in without door or bridge: '
-                 .. '55,62,117 stair_updown, 61,55,117 floor; traps ? (no audit)')
-  local r = ready(W)
-  T.eq({r.open, r.ents}, {2, {'55,62,117 stair_updown', '61,55,117 floor'}})
+  T.eq(u[1].d, {fails = {'audit', 'no_outer'}, afails = {}, routes = 1, open = 0, ents = {}, traps = -1, age = -1})
+  T.eq(u[1].msg, 'siege unready (R0: audit, no_outer); 1 way in, all with a door or bridge; traps ? (no audit)')
   -- unchanged: again only after a game month AND 30 real minutes (a month is 75 s at timestream speed)
   day(W, 29)
   T.eq(#unready(W), 1, 'a month, but not 30 real minutes')
@@ -490,17 +526,28 @@ T.test('FR-65 SIEGE_UNREADY (A): R0 in PEACE names blockers, ways in without doo
   T.ok(u[1].msg:find('entrances not checked yet', 1, true), u[1].msg)
   T.eq(ready(W3).open, -1)
   T.eq(ready(W3).ents, nil)
+  -- the ways in without door or bridge are listed (FR-70: and R0 by themselves, see test_open_perimeter.lua)
+  local W4 = world{manifest = man, seal = seal_fake(LEAKY)}
+  day(W4, 3)
+  u = unready(W4)
+  T.eq(#u, 1)
+  T.eq({u[1].d.open, u[1].d.ents, u[1].d.routes}, {2, {'55,62,117 stair_updown', '61,55,117 floor'}, 3})
+  T.eq(u[1].msg, 'siege unready (R0: open_perimeter, audit, no_outer); perimeter OPEN 2 d (2 ways in); 2 of 3 ways in '
+                 .. 'without door or bridge: 55,62,117 stair_updown, 61,55,117 floor; traps ? (no audit)')
+  T.eq({u[1].d.pd, u[1].d.pw, u[1].d.fails}, {2, '2 ways in', {'open_perimeter', 'audit', 'no_outer'}})
+  local r = ready(W4)
+  T.eq({r.open, r.ents}, {2, {'55,62,117 stair_updown', '61,55,117 floor'}})
 end)
 
 T.test('FR-65: no SIEGE_UNREADY at R1; R0 again (audit_old) is a new episode; a sealed fort says so', function()
-  local W = world{seal = seal_fake(LEAKY)}
+  local W = world{seal = seal_fake(SEALED)}
   day(W)
   audit(W)
   T.eq(lvl(W), 1)
   W.ms = W.ms + 3600 * 1000
   day(W, 40)
   T.eq(#unready(W), 0, 'R1: quiet')
-  T.eq(ready(W).open, 2, 'the open ways in are still published')
+  T.eq(ready(W).open, 0, 'the entrance check is still published')
   W.ms = W.ms + 3600 * 1000
   day(W, 60)
   local u = unready(W)
@@ -510,6 +557,12 @@ T.test('FR-65: no SIEGE_UNREADY at R1; R0 again (audit_old) is a new episode; a 
   local W2 = world{seal = seal_fake{tick = 1, sealed = 1, routes = 0, doors = {}, open = {}}}
   day(W2, 3)
   T.ok(unready(W2)[1].msg:find('0 ways in, all with a door or bridge', 1, true), unready(W2)[1].msg)
+  -- FR-70: ways in without door or bridge are not R1 (they were "published" only): R0, open_perimeter
+  local W3 = world{seal = seal_fake(LEAKY)}
+  day(W3)
+  audit(W3)
+  T.eq(lvl(W3), 0)
+  T.eq(ready(W3).fail[1], 'open_perimeter')
 end)
 
 T.test('Run 11 (siege 8: Tiefe+ had no drink): a refuge without drink is the R0 blocker refuge_dry; SIEGE_UNREADY says ' ..

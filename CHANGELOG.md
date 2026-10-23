@@ -1,5 +1,52 @@
 # CHANGELOG dfpilot
 
+## Lost bridges are rebuilt or replaced by wall + door, an open perimeter is a stop signal, stage 3 comes before P3, the refuge is trusted only while it is (BUG-048, BUG-049, FR-70, DECISIONS 1-3, 2026-10-23; offline, live-untested)
+- **Why (Run 11 Kilrudrabed y483-y497 and Run 13 Wheelsblows y507-y525):** O1 destroyed 14 times and its question (DECISION_NEEDED `bridge_rebuild`) never answered,
+  B1/B2 and their levers lost for years (`lost:O1,bridge:B1,levers:B1,bridge:B2,levers:B2`), PERIMETER_BROKEN `bridge 113,106,142 requeued=0` in PEACE for 35 days,
+  a door open from y483 to the end of the run; siege 13 (y487) cost 36 and siege 14 (y497) 24 citizens (`sealed 0 ticks`). Run 13: B2 (y507) and O1 (y509) vanished in
+  PEACE with no destroyer in sight (`bridge.rebuild`: "no lost bridge waits"), audit FAIL from y507 to the end under `follow --no-auto`, and in y525 the fort fell over
+  the open O1 with the refuge Tiefe+ already occupied (REFUGE_FAIL "hostile inside").
+- **Cause (bugs/BUG-048, BUG-049):** (1) the PEACE retire pass dropped the piece of a bridge that vanished in PEACE; (2) a manifest bridge no defense project had
+  recorded had no quickfort text, the diff queued nothing (`requeued=0`); (3) the stop rule asked a question nobody answered; (4) a rebuild nobody built was given up for
+  good after 60 days; (5) the hostile list of 40 (nearest to O1) can hide an intruder deep in the refuge, REFUGE_FAIL gave no place, and nothing said whether the
+  refuge could be trusted before the alarm. Each has a test that fails on f17e2b3.
+- **seal (BUG-048):** a lost bridge enters `m.seal.gq` the moment gate reports BRIDGE_DESTROYED (PEACE, no lockdown) or at the diff after an episode, never retired; its
+  text comes from gate's raise direction (`gate.bridge_key`, `seen.key`) and the footprint (`gw(3x1)`); the repair, the log and `inspect defense` say `no destroyer in
+  sight` when none was. After `perimeter.stop_after` (2) losses to building destroyers, `perimeter.vanish_after` (3, new) losses with none in sight (the loop breaker) or a
+  rebuild nobody built in 60 days, the keeper queues a wall + door (`runner.repair`, peace-only: walls on the footprint's first row across the way, the door on the middle tile
+  of its long side) and reports it once (PERIMETER_BROKEN `replaced`); DECISION_NEEDED `bridge_rebuild` is not emitted any more; old held entries convert; `bridge.rebuild`
+  is the player's order (refused for a replaced bridge and while its closure is queued). `seal.replaced()`: gate reads state `replaced`, siege leaves the bridge out (no
+  BREACH "open way"), readiness drops its `bridge:`/`levers:` blockers (`no_outer`/`no_inner` remain), the snapshot says `replaced`, `bp.topo.audit` takes the footprint for a
+  door entrance.
+- **FR-70, DECISIONS 2:** readiness R0 `open_perimeter` (a way in without door or bridge, a lost bridge, a lost lever of a bridge seen whole, in PEACE; levers checked daily
+  now): `ready.pd`/`pw`, status `PERIMETER OPEN N days`, SIEGE_UNREADY repeating every `escalate_every` (5) days and 5 real minutes from `escalate_days` (2) days on,
+  max-pop held from `hold_pop` (30) citizens, `plan check` refusing a phase raise. `follow --no-auto`: heartbeat `auto 0`, status `auto-seal off, N openings`, every wake line
+  `AUTO-SEAL OFF, N openings`.
+- **Review fix (FR-70):** `plan check` refuses a phase raise while the perimeter is open only from phase P2 on (`plan.PERIMETER_GATE_FROM`); before B1 (the P2 build) the entrance is open by design, so a raise from P0/P1 is the way to close it and gets a warning only.
+- **DECISIONS 1:** `plans/year1.json`, DESIGN §5.2/§5.12, DOCTRINE and the fortcore docstring: stage 3 (O1, B2, refuge) is the first P3 build (stage 4 stays P6);
+  `plan.stage3_gate` (check: no phase_target P3+ while O1 or B2 do not stand unless stage 3 is under way or planned before the other new builds; a lost gate after stage 3 is a
+  warning for the keeper), `plan propose` drafts stage 3 first (also for a fort whose phase list had it later); `O1_PHASE` P3, the gallery warning keeps P5 (`GALLERY_PHASE`).
+- **BUG-049:** `seal.refuge_trust` (separation answer fresh and not exposed, last audit's `refuge_sep`, a closer on the stair head, nobody inside): state `alert.ref.tr`/`trw`, status
+  `refuge NOT TRUSTED: ...`, `inspect refuge` `trust`, R0 `refuge_trust` (exposed, no stair-head closer, stale answer); REFUGE_FAIL `hostile`/`at` and the text `hostile inside at
+  7,6,5 (2 hostiles)`; sense `census.h.rin` (listed first, never cut by the 40-entry list).
+- Contracts: state `bridges` `replaced`, `ready.pd`/`pw`, `alert.ref.tr`/`trw`; events PERIMETER_BROKEN `replaced`, SIEGE_UNREADY `pd`/`pw`, REFUGE_FAIL `hostile`/`at`; config
+  `perimeter.vanish_after`/`escalate_days`/`escalate_every`/`hold_pop` (config/reflex.json, `fairplay.PERIMETER_LIM`); CONTRACTS §6.2 `rin`, §7 `gate.bridge_key`, `seal.replaced`,
+  `seal.refuge_trust`, `readiness.refuge_audit`, tracker row PK, appendix regenerated; schema.py/contract.lua; RULES §7/§8 rows edited in place (300 lines); DESIGN §5, DOCTRINE;
+  feature request FR-70.
+- Tests (each new one fails on f17e2b3): `tests/lua/test_perimeter_keeper.lua` (new), `tests/lua/test_open_perimeter.lua` (new), `tests/lua/test_stranded.lua`, `test_siege_sense.lua`,
+  `test_seal_refuge.lua`, `test_readiness.lua`, `tests/test_plan_stage3.py` (new), `tests/test_perimeter_escalation.py` (new), `tests/bp/test_bp_topo.py`; adjusted with reasons:
+  `test_bridge_rebuild.lua` (the question became a door), `test_readiness.lua` (open ways are R0), `test_seal.lua`/`test_seal_refuge.lua` (texts and goldens), `test_cli_plan.py`
+  (stage 3 first), `tests/fixtures/v2/phases.json`, `test_bridge_rebuild.py`.
+- **Live check (Run 11 / Run 13 forts):** after `git pull`, `dfhack-run dfllm reload`, a restart of `dfllm follow` (without `--no-auto`):
+  - `dfllm status`: a lost bridge or open way shows `PERIMETER OPEN N days: ...` in line 2; `dfllm cmd inspect '{"what":"defense"}'`: per lost bridge `waits`/`queued`/`closing`/`replaced`,
+    `how` (`destroyers` or `none`); kern.log `seal: lost bridge O1 at ... queued again as rp... (quiet PEACE, no destroyer in sight)` within a day of a PEACE loss;
+  - a second loss to building destroyers: PERIMETER_BROKEN `replaced` once, an `rp` project with `Cw`/`d` cells on the footprint, no DECISION_NEEDED; after it is built
+    `dfllm audit` shows no `footprint is not a bridge`, `inspect entrances` no new open way (check the geometry; a 2x2 footprint closes only its first column), `status` bridges `replaced`;
+  - `dfllm cmd inspect '{"what":"persist","key":"m.gate","field":"seen"}'`: `key` per bridge (`gw`, ...); if it is missing the text falls back to `gw` and `building_bridgest.direction` is named otherwise;
+  - the old Run 11 state (`lost:O1` held): the next quiet PEACE queues the closure, `status` no longer says the question; `bridge.rebuild` on it is refused with the project named;
+  - `dfllm status` `refuge NOT TRUSTED: ...` names the reason, `inspect refuge` `trust` the rest; a REFUGE_FAIL with a hostile in Tiefe+ has `at`; **the open question:** whether an unforbidden stair-head hatch
+    stops invaders: in the next BREACH read `trust.hatch.pos`, the hatch's `door_flags.forbidden` and `census.h.rin` (bugs/BUG-049).
+
 ## A seal door that is never built is named, ordered and, as the last bounded step, walled; a designation DF took in an alert is restored; a refused part is placed again beside one that waits; plan check passes a closed seal (BUG-044, BUG-045, BUG-046, BUG-047, 2026-10-23; offline, live-untested)
 - Fix commit 73b429d.
 - **Why (Run 11, y483-y497, Kilrudrabed; Run 12):** the seal door 115,73,143 (project c1a14b92909f3d7801, y483 summer d69)
