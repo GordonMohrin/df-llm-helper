@@ -1,5 +1,5 @@
 # BUG-062 Hundreds of tomb zones closed to citizens: no burials, 26-44 unburied citizens, ghosts 1 -> 30, "0 free" every round
-Status: fixed in 2cca90e, 207163f (offline, live-untested; who closes the unassigned zones is not decided offline, the
+Status: fixed in 2cca90e, 207163f, 3b2b53a (offline, live-untested; who closes the unassigned zones is not decided offline, the
 fix does not depend on it and TOMBS_LOCKED answers it live)
 Severity: critical (the dead of a fort lie unburied for years, ghosts break buildings and stress the citizens)
 Found: Run 14 (Trussroads, unretired, region2-site90) y529-y531 and y577 (23.10.2026), from the game session's notes 48,
