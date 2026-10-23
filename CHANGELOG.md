@@ -1,5 +1,54 @@
 # CHANGELOG dfpilot
 
+## The work details follow the demand, the kernel writes the farm slots, the food line names the hungry (BUG-057, BUG-058, BUG-059, FR-72, 2026-10-23; offline, live-untested)
+- **Why (Runs 12-14, y501-y577):** PlantSeeds 122-421 and GatherPlants 250-565 stayed unclaimed for years with 30-70 % of the
+  adults idle; Planters, Fisherdwarves and Plant gatherers stood at 0 members (or "reset to 6"); in Run 12 only four dwarves held
+  PLANT and the kernel made exactly those the gatherers; HERBALIST had no holder and the idle line said "0 without reachable
+  work". Run 13 y512: eight plots at -1 for the running season (autofarm emptied what the kernel set), the new underground plots
+  held surface crops, food 17 d. Run 12 y503: 12 starved under "food 41 d" with meals 0. Run 14 y577: `no Farmers` meant that no
+  Farmer's Workshop stood. Run 11: five farms projects `build_lost, parked` in a row. (Notes 3, 6, 33, 35-38, 44, 46, 54, 62, 63 of
+  `bugs/RUN11-offene-bugs-und-FR.md`; DECISIONS 9 and 10.)
+- **Cause (bugs/BUG-057/058/059, file:line at f17e2b3):** the only code that staffed Planters was the starvation handler
+  (economy.lua:6500, `food_d <= 0` with hungry citizens); Plant gatherers only at food_low (5363); the food_low step took the four
+  PLANT holders as gatherers (5310); Fisherdwarves followed `food_d < 90` only (1562); the slots were filled by the 34th of 39 daily
+  tasks (6442) from the first filled slot's crop kind (4066), by the most seeds, with autofarm writing the same field unnoticed; a
+  parked build_lost project is no pending project (food_plan 3642); `no Farmers` was `ws[1]:match(':(.+)$')` (3882); nothing counted
+  the hungry beside `food 41d meals 0`. The "reset to 6" is in no kernel path (every membership write is listed in BUG-057); the
+  leading hypothesis is the game dropping a member without the labor flag.
+- **What changed:**
+  - `economy.cover` + `M.cover_run` (daily): Planters follows the reachable unclaimed PlantSeeds + HarvestPlants above 20 (one farmer
+    per 10, 2-12), Plant gatherers GatherPlants above 10 (one per 25, 2-8), kept apart; every other job type of `cover.labors` with
+    more than 20 unclaimed jobs and no labor holder gets idle citizens through a detail that grants the labor; all together at most
+    `share` 50 % of the adults, 4 a day per detail; never a soldier, doctor, noble, mood dwarf, tool-detail member, sole holder of a
+    key labor; PEACE/RECOVERY and not labormanager modern; never shrinking while jobs wait (the kernel's members leave after 7 daily
+    passes without any), the player's members stay; WORK_DETAIL `why` `cover` / `cover idle`.
+  - Fisherdwarves: `min` 3 fishers (one per 6 citizens, at least one) beside a fishing zone with raw fish or open Fish jobs, whatever the
+    stock; the detail is set to "only selected" with its first member.
+  - Audit of Planters / Plant gatherers / Fisherdwarves: members that vanished without the kernel taking them off, a mode change
+    (kern.log `details: ...`), `inspect workload key=details`.
+  - FR-72: `inspect workload` says `N with no labor holder for the open jobs: GatherPlants 60 need HERBALIST`; new `act.plant_ungather`
+    withdraws GatherPlants designations off the walk group (two daily passes, no raised gate bridge) and unworked for 30 days (not
+    below the food pre-alarm line), at most 200 a day; the runner's `dfllm-gather` zone shrinks to the walk group (`snapshot.far`).
+  - BUG-058: `T.slotnow` fills the running season's slots right after the census (edible crops first at food low), the plot's tile
+    (`snapshot.plot_under`) decides surface or underground and replaces wrong-kind crops; autofarm is disabled below 30 food days or
+    at the first slot it emptied, enabled again from 90 days after 14 (`farms.autofarm` auto | off | keep; `disable autofarm`
+    allowlisted); `runner.lost`: no further farms request while a project is lost to build_lost (cancel it or place elsewhere).
+  - BUG-059: state `stock.hungry`; status `stock HUNGRY 12 drink .. food 41d meals 0 (raw food is not cooked)`; kern.log warning
+    (7 days); food_low names `hungry` first; ORDER_STUCK `no Farmer's Workshop` with `kind` workshop | worker | input, state
+    `orders.stuck_ws/ws/stuck_lab`, status `orders 40 stuck 6 (workshop missing 4: Farmer's Workshop x4; no worker 2)`.
+- **Live check:** (1) after the reload: `dfllm cmd inspect '{"what":"workload","key":"details"}'`: Planters / Plant gatherers / Fisherdwarves
+  members, `mine`, `lost`, the cover rows; with PlantSeeds above 20 unclaimed the next daily pass adds farmers (kern.log `details: Planters
+  +4`). (2) kern.log `details: ... lost N members the kernel did not take off (... K of them still hold PLANT)` answers note 54. (3) A
+  fishing zone with raw fish: `Fisherdwarves` 3 members at any food stock. (4) Read `getTileFlags(x1, y1, z)` of a surface and an
+  underground plot (`outside` / `subterranean`) against the crops `autofarm status` lists. (5) kern.log `autofarm disabled (...)` after a
+  kernel fill that autofarm undid. (6) `food N days but M citizens hungry and no prepared meal` at meals 0.
+- Contracts: CONTRACTS §7 (`act.plant_ungather`, `snapshot.plot_under`, `runner.lost`, `inspect` key), §9.3 (`stock.hungry`,
+  `orders.stuck_ws/stuck_lab/ws`), §9.14 (allowlist `disable autofarm`), §9.17 (`economy.farms`, `economy.cover`), §12 (WORK_DETAIL why,
+  ORDER_STUCK kind), tracker row B1, appendix regenerated; schema.py / contract.lua; fairplay `ECONOMY_LIM`; DESIGN (the work details row, the food paragraphs).
+- Tests: `tests/lua/test_economy_cover.lua` (new), `test_economy_supply.lua`, `test_economy_food.lua`, `test_economy_orders.lua`,
+  `test_runner.lua`, `test_runner_queue.lua`, `test_snapshot.lua`, `test_baseline.lua`, `test_act_supply.lua`;
+  `tests/test_bug057_059.py`; each new test fails on f17e2b3.
+
 ## The audit and sites snapshots fit again: one box of the fort's pieces, explore shafts as narrow columns, margin steps, a cap of 400,000 tiles and a refusal that names what stretches the box (BUG-043, 2026-10-17; offline, live-untested)
 - **Why (Run 11, y479):** Kilrudrabed site98, y479 winter d79, kernel 2eea070: `dfllm audit` -> `audit: snapshot refused:
   bbox has 252108 tiles > 250000`, `bp sites <tpl> --fresh` the same; kern.log `readiness: audit snapshot not exported:
