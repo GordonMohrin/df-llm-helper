@@ -88,7 +88,11 @@ local OL = require('dfllm.orderlib')   -- library: an order's material class (th
 local CAD = require('dfllm.util.cadence')   -- BUG-008: when a standing class-A condition is announced again
 local DT = require('dfllm.deaths')          -- library (FR-64): the cause of a citizen's death, death clusters
 
-local M = {name = 'care', every = {ticks = 1200}, on = {}, verbs = {}}
+local M = {name = 'care', every = {ticks = 1200}, on = {}, verbs = {},
+           -- BUG-063: the game's own announcements of a strange mood start the mood check at once
+           -- BUG-064: "X toppled by <dwarf>": stressed citizens in a tantrum and ghosts tear down workshops, levers, bridges
+           reports = {STRANGE_MOOD = true, MOOD_BUILDING_CLAIMED = true, BUILDING_TOPPLED_BY_GHOST = true,
+                      BUILDING_DESTROYED_OR_TOPPLED = true, CITIZEN_TANTRUM = true, POSSESSED_TANTRUM = true}}
 local DAY = C.TICKS.DAY
 -- Optional walk-group hook, proposed for CONTRACTS §7 (live L4): snapshot.reach(a, b) -> bool, i.e.
 -- dfhack.maps.canWalkBetween asked at call time (care may not read tiles itself, CONTRACTS §1.4). Feature-
@@ -110,8 +114,15 @@ M.DEFAULTS = {
   stress_week = 8400,
   tomb_repair = true, tomb_acts_per_run = 20, entomb_per_run = 8, entomb_retry = 2400, entomb_tries = 3,
   tomb_open_per_run = 120, far_check = 60,         -- BUG-062: flag-only opens a run (own budget); bodies checked for another walk group
-  ghost_every = 8400, doctors = 4, posts_per_run = 4, mood_thirst = 30000, mood_hunger = 50000,
+  ghost_every = 8400, doctors = 4, posts_per_run = 4, mood_thirst = 30000, mood_hunger = 40000,
   mood_risk_every = 2400, wake_wall_s = 600,
+  -- BUG-063: the drink nook from mood_act on, MOOD_CRITICAL from mood_crit (thirst) / mood_crit_hunger, the mood check every
+  -- mood_fast ticks while a mood is open (0: the care cadence), the nook's source pile and its retry
+  mood_act = 40000, mood_crit = 50000, mood_crit_hunger = 60000, mood_fast = 300, mood_nook = true,
+  mood_take = 'dfllm-stock', mood_nook_retry = 3600,
+  -- BUG-064: one BUILDING_TOPPLED per culprit per topple_every ticks; gate asks for a culprit near a vanished bridge
+  -- within topple_win ticks and topple_r tiles
+  topple_every = 2400, topple_win = 4800, topple_r = 6,
   coffins = true, coffin_reserve = 10, coffin_batch = 30, coffin_scan_r = 16, coffin_min_side = 4,
   coffin_entrance_r = 10, coffin_retry = 3600, coffin_wood_keep = 20, coffin_wake = 2400, coffin_prio = 3,
   death_window = 33600, death_same = 2, death_any = 3, death_every = 1200, death_recheck = 100800,
@@ -166,7 +177,7 @@ local function pstate(K)
     p = {v = 2, dead = {}, deaths = {}, petitions = {}}
     K.persist.set('m.care', p)
   end
-  for _, k in ipairs({'moods', 'captives', 'corpses', 'burial'}) do
+  for _, k in ipairs({'moods', 'captives', 'corpses', 'burial', 'nook'}) do
     p[k] = json.object(type(p[k]) == 'table' and p[k] or {})
   end
   for _, rec in pairs(p.moods) do rec.needs = json.object(type(rec.needs) == 'table' and rec.needs or {}) end
@@ -428,6 +439,13 @@ local function route_note(K, classes, glassy)
   return table.concat(out, '; ')
 end
 
+local mood_relief   -- forward: BUG-063, defined after occ_index (the drink nook beside the claimed workshop)
+
+local function uname(u)
+  local ok, n = pcall(function() return dfhack.df2utf(dfhack.units.getReadableName(u)) end)
+  return ok and type(n) == 'string' and trunc(n, 40) or ''
+end
+
 local function mood_seen(K, c, r, p, u, kind)
   local sid, now = fmt(u.id), K.now().tick
   local child = is_child(u)
@@ -451,23 +469,53 @@ local function mood_seen(K, c, r, p, u, kind)
   local T = K.now()
   local last = rec.risk and {t = rec.risk, w = rec.risk_w, ids = {sid}, toks = {rec.risk_why}} or nil
   local job = u.job and u.job.current_job
+  local ws = job and M.mood_workshop(job)
+  -- BUG-063 (Run 14 y484/y485/y558: three moods, thirst 63,513 - 75,002, MOOD_RISK said 'nothing missing'): material
+  -- first (the missing classes, the route), then the drink: at mood_act the kernel puts a one-barrel drink stockpile
+  -- beside the claimed workshop (runner.mooddrink; never a job or an item for the dwarf), at mood_crit the
+  -- escalation MOOD_CRITICAL (A) names the dwarf and the workshop. MOOD_RISK names thirst and hunger both.
+  local act = th >= c.mood_act or hu >= c.mood_act
+  local nook = ''
+  if act then nook = mood_relief(K, c, p, u, rec, job, ws) or '' end
   if risk and CAD.due(last, T, {sid}, {risk}, {ticks = c.mood_risk_every, wall_s = c.wake_wall_s}) then
     rec.risk, rec.risk_why, rec.risk_w = now, risk, T.wall
     local miss = still_missing(job, rec)
     rec.missing = miss
     local rn = #miss > 0 and route_note(K, miss, rec.glass) or ''
-    K.emit('MOOD_RISK', 'A', trunc(string.format('mood unit %d (%s%s) %s %d, dies at 75000: %s%s; a mood job cannot be '
-                                                 .. 'cancelled%s', u.id, kind, child and ', child' or '', risk,
-                                                 risk == 'thirst' and th or hu,
+    K.emit('MOOD_RISK', 'A', trunc(string.format('mood unit %d (%s%s%s) thirst %d hunger %d, dies at 75000: %s%s; a mood job '
+                                                 .. 'cannot be cancelled%s%s', u.id, kind, child and ', child' or '',
+                                                 ws and (', ' .. ws) or '', th, hu,
                                                  #miss > 0 and ('missing ' .. table.concat(miss, ',') .. nosrc_text(rec, miss))
                                                    or 'nothing missing', rn ~= '' and ('; ' .. rn) or '',
-                                                 #miss > 0 and ', supply it' or ''), 200),
+                                                 #miss > 0 and ', supply it' or '', nook ~= '' and ('; ' .. nook) or ''), 200),
            {unit = u.id, why = risk, kind = kind, missing = miss, thirst = th, hunger = hu,
-            route = rn ~= '' and trunc(rn, 200) or nil})
+            route = rn ~= '' and trunc(rn, 200) or nil, ws = ws})
   elseif not risk then
     rec.risk_why = nil                         -- quiet: the time stays, a new risk within the cadence waits
   end
-  local ws = job and M.mood_workshop(job)
+  if th >= c.mood_crit or hu >= c.mood_crit_hunger then
+    local why = th >= c.mood_crit and 'thirst' or 'hunger'
+    local crec = rec.crit and {t = rec.crit, w = rec.crit_w, ids = {sid}, toks = {why}} or nil
+    if CAD.due(crec, T, {sid}, {why}, {ticks = c.mood_risk_every, wall_s = c.wake_wall_s}) then
+      rec.crit, rec.crit_w = now, T.wall
+      local miss = still_missing(job, rec)
+      local wb, wpos = nil, nil
+      pcall(function()
+        wb = dfhack.job.getHolder(job)
+        wpos = {math.tointeger(tonumber(wb.x1)), math.tointeger(tonumber(wb.y1)), math.tointeger(tonumber(wb.z))}
+      end)
+      K.emit('MOOD_CRITICAL', 'A', trunc(string.format('mood unit %d %s (%s) %s %d (thirst %d, hunger %d), dies at 75000: '
+                                                       .. 'workshop %s%s; %s%s', u.id, uname(u), kind, why,
+                                                       why == 'thirst' and th or hu, th, hu, ws or 'none claimed',
+                                                       (wpos and wpos[1] and wpos[2] and wpos[3])
+                                                         and string.format(' at %d,%d,%d', wpos[1], wpos[2], wpos[3]) or '',
+                                                       #miss > 0 and ('missing ' .. table.concat(miss, ',')) or 'nothing missing',
+                                                       nook ~= '' and ('; ' .. nook) or ''), 200),
+             {unit = u.id, why = why, kind = kind, thirst = th, hunger = hu, ws = ws, name = uname(u),
+              pos = (wpos and wpos[1] and wpos[2] and wpos[3]) and wpos or nil, missing = miss,
+              nook = nook ~= '' and trunc(nook, 80) or nil})
+    end
+  end
   if not ws and (not job or R.is_mood_job(job)) then   -- no workshop claimed yet (a mood job without a holder too)
     if rec.nojob < 0 then rec.nojob = now end
     if rec.ws == 0 and now - rec.nojob >= c.mood_nojob_ticks then
@@ -537,6 +585,7 @@ local function phase_units(K, c, r, p)
       if not (alive and M.STRANGE[mood]) then
         local ok = (alive and not M.FAILED[mood]) and 1 or 0
         p.moods[sid] = nil
+        p.nook[sid] = nil
         -- FR-64: a death after a failed mood (insane) or during the mood is a mood death (dfllm.deaths)
         p.mend[sid] = {t = K.now().tick, kind = rec.kind, ok = ok, alive = alive and 1 or 0}
         K.emit('MOOD_END', 'B', string.format('mood (%s) unit %s %s', rec.kind, sid, ok == 1 and 'done' or 'failed'),
@@ -1506,6 +1555,77 @@ local function occ_index(bb, taken)
     end
   end
   return occ
+end
+
+-- BUG-063 (fair play: a stockpile is a zone, nothing is given to the dwarf): a free floor tile within MOOD_NOOK_R of the
+-- workshop a strange mood claimed (revealed '.', no building, zone, stockpile or designation, walkable from the
+-- workshop), nearest first; at most MOOD_NOOK_PROBES tiles are read
+local MOOD_NOOK_R, MOOD_NOOK_PROBES = 3, 40
+local function nook_site(K, job)
+  local b
+  local okh = pcall(function() b = dfhack.job.getHolder(job) end)
+  local rc = okh and b and rect_of(b)
+  if not rc then return nil end
+  local R = MOOD_NOOK_R
+  local occ = occ_index({rc.x1 - R, rc.y1 - R, rc.z, rc.x2 + R, rc.y2 + R, rc.z}, {})
+  local cand = {}
+  for y = rc.y1 - R, rc.y2 + R do
+    for x = rc.x1 - R, rc.x2 + R do
+      local dx = x < rc.x1 and rc.x1 - x or (x > rc.x2 and x - rc.x2 or 0)
+      local dy = y < rc.y1 and rc.y1 - y or (y > rc.y2 and y - rc.y2 or 0)
+      local d = math.max(dx, dy)
+      if d >= 1 and not occ[key3(x, y, rc.z)] then cand[#cand + 1] = {d, dx + dy, y, x} end
+    end
+  end
+  table.sort(cand, function(a, b2)                -- nearest first, a tile touching the workshop's side before a corner
+    for k = 1, 4 do if a[k] ~= b2[k] then return a[k] < b2[k] end end
+    return false
+  end)
+  for i = 1, math.min(#cand, MOOD_NOOK_PROBES) do
+    local x, y = cand[i][4], cand[i][3]
+    local ok, t = K.call('snapshot', 'tile', x, y, rc.z)
+    if ok and type(t) == 'table' and t.c == '.' and (t.bld == nil or t.bld == '') and (t.dig == nil or t.dig == '')
+       and reach_ok(K, {x = x, y = y, z = rc.z}, {x = rc.x1, y = rc.y1, z = rc.z}) then
+      return {x, y, rc.z}
+    end
+  end
+end
+
+-- BUG-063: the drink side of a mood at thirst/hunger mood_act (material delivery is the first lever, MOOD_NEED and the
+-- reserve): a one-barrel drink stockpile `dfllm-mood` beside the claimed workshop, taking from the fort's drink pile
+-- (runner.mooddrink, a quickfort place of our own), once per mood, in PEACE/RECOVERY. Returns the text MOOD_RISK and
+-- MOOD_CRITICAL carry (nil: nothing to say). Live data that decides whether it helps: kern.log 'mood nook', and
+-- the dwarf's thirst after the nook stands (inspect census / MOOD_END).
+mood_relief = function(K, c, p, u, rec, job, ws)
+  if c.mood_nook == false or not (job and ws) then return nil end
+  local sid = fmt(u.id)
+  local done = type(p.nook) == 'table' and p.nook[sid]
+  if type(done) == 'table' then return done.txt end
+  local mode, now = K.mode(), K.now().tick
+  if mode ~= 'PEACE' and mode ~= 'RECOVERY' then return nil end
+  if now - (num(rec.nook_try) or -c.mood_nook_retry) < c.mood_nook_retry then return rec.nook_why end
+  rec.nook_try = now
+  local site = nook_site(K, job)
+  if not site then
+    rec.nook_why = 'no free floor within 3 tiles of the workshop for a drink nook'
+    return rec.nook_why
+  end
+  local okp, pend = K.call('runner', 'pending', 'mood_drink')
+  if okp and type(pend) == 'number' and pend > 0 then
+    rec.nook_why = 'a drink nook is queued already'
+    return rec.nook_why
+  end
+  local ok, okr, id = K.call('runner', 'mooddrink', site, c.mood_take, 'unit ' .. sid)
+  if not (ok and okr) then
+    rec.nook_why = 'drink nook refused: ' .. trunc(tostring(ok and id or okr), 60)
+    K.log('warn', 'mood nook for unit %s: runner.mooddrink refused: %s', sid, tostring(ok and id or okr))
+    return rec.nook_why
+  end
+  local txt = string.format('drink nook queued at %d,%d,%d (%s)', site[1], site[2], site[3], tostring(id))
+  p.nook = json.object(type(p.nook) == 'table' and p.nook or {})
+  p.nook[sid] = {t = now, id = tostring(id), txt = txt}
+  K.log('info', 'mood nook: unit %s (%s %s): %s', sid, rec.kind or '?', ws, txt)
+  return txt
 end
 
 local function entrance_list(K)
@@ -3082,10 +3202,186 @@ function M.init(K)
   pstate(K)
 end
 
+-- BUG-063 (Run 14 y558: a mood noticed too late, 'Raving'; the game session's own check ran every 15 minutes, a year
+-- of game time at timestream speed): the mood check is its own, cheap pass. It runs (a) at once when the game
+-- announces a strange mood (STRANGE_MOOD, MOOD_BUILDING_CLAIMED reports), and (b) every mood_fast ticks while a
+-- mood is open (care's cadence is switched to it, `M.every` is read every frame), reading only the citizens'
+-- mood and the moody dwarves' thirst and hunger (mood_seen: MOOD_START, MOOD_NEED, MOOD_RISK, MOOD_CRITICAL, the drink
+-- nook). The full run (corpses, tombs, reserve, ...) keeps its own period: the gap measured between two default calls.
+local BASE_EVERY = 1200
+local function set_every(c, p)
+  local want = ((c.mood_fast or 0) > 0 and next(p.moods) ~= nil) and c.mood_fast or BASE_EVERY
+  if M.every.ticks ~= want then M.every = {ticks = want} end
+end
+
+local function mood_watch(K, c, p)
+  local cu = K.census.u
+  local r = {moody = {}, mood_list = {}, mood_cls = {}}
+  local n = 0
+  for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
+    local u = df.unit.find(id)
+    local kind = u and df.mood_type[u.mood]
+    if kind and M.STRANGE[kind] and not dfhack.units.isDead(u) then
+      n = n + 1
+      local ok, err = pcall(mood_seen, K, c, r, p, u, kind)
+      if not ok then K.log('warn', 'care mood check %d: %s', id, tostring(err)) end
+    end
+  end
+  st.watch_tick = K.now().tick
+  set_every(c, p)
+  K.persist.touch('m.care')
+  return n
+end
+
+-- BUG-064 (Run 13/14 note 55: 19 reports "X toppled by <dwarf>", a manager in a tantrum 5 times and a ghost, while the
+-- kernel said BRIDGE_DESTROYED '0 building destroyers'): the culprit of a toppled building, with his stress. The
+-- report text is read for what fell and who did it; the culprit is looked up among the citizens, the fort's ghosts and
+-- the death record by name (one match only). The last M.TOPPLE_KEEP are kept (persisted p.top) for M.toppled, which
+-- gate asks when a bridge vanishes; BUILDING_TOPPLED (B) once per culprit per topple_every ticks (n = buildings since).
+M.TOPPLE_KEEP = 20
+local function topple_parse(text)
+  local t = tostring(text or '')
+  local what, who = t:match('^(.-)%s+toppled by%s+(.-)%s*[%.!]*$')
+  if not what then what, who = t:match('^(.-)%s+destroyed by%s+(.-)%s*[%.!]*$') end
+  if not what or who == '' then return nil end
+  what = what:gsub('%s+has been$', ''):gsub('%s+was$', ''):gsub('%s+is$', '')
+  what = what:gsub('^[Tt]he%s+', ''):gsub('^[Aa]n?%s+', '')
+  return trunc(what, 40), trunc(who, 60)
+end
+
+local function topple_find(K, p, who)
+  local w = who:lower()
+  local cand, seen = {}, {}
+  local function add(id) if math.type(id) == 'integer' and not seen[id] then seen[id] = true; cand[#cand + 1] = id end end
+  local cu, cg = K.census.u, K.census.g
+  for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do add(id) end
+  for _, id in ipairs(type(cg) == 'table' and type(cg.ids) == 'table' and cg.ids or {}) do add(id) end
+  for _, id in ipairs(p.dead) do add(id) end
+  local hit
+  for _, id in ipairs(cand) do
+    local u = df.unit.find(id)
+    local n = u and uname(u):lower() or ''
+    if n ~= '' and (n:find(w, 1, true) or w:find(n, 1, true)) then
+      if hit then return nil end            -- two dwarves of that name: no guess
+      hit = id
+    end
+  end
+  return hit
+end
+
+local function topple_record(K, c, p, ev)
+  local what, who = topple_parse(ev.text)
+  local ghost = ev.type == 'BUILDING_TOPPLED_BY_GHOST'
+  if not what then
+    if not ghost then return end
+    what, who = trunc(ev.text, 40), 'a ghost'
+  end
+  local unit = topple_find(K, p, who)
+  if not unit and ghost then
+    local cg = K.census.g
+    if type(cg) == 'table' and type(cg.ids) == 'table' and #cg.ids == 1 then unit = cg.ids[1] end
+  end
+  local rec = {t = ev.tick or K.now().tick, what = what, by = who, unit = unit or -1, ghost = ghost and 1 or 0}
+  local u = unit and df.unit.find(unit)
+  if u then
+    if dfhack.units.isGhost(u) then rec.ghost = 1 end
+    local ok, s = pcall(function() return u.status.current_soul.personality.stress end)
+    if ok and math.type(s) == 'integer' then rec.stress = s end
+    local okc, cat = pcall(dfhack.units.getStressCategory, u)
+    if okc and math.type(cat) == 'integer' then rec.cat = cat end
+  end
+  local pos = ev.pos
+  if type(pos) == 'table' and math.type(pos.x) == 'integer' then rec.x, rec.y, rec.z = pos.x, pos.y, pos.z end
+  rec.tantrum = st.tantrum and st.tantrum[who:lower()] and 1 or 0
+  return rec
+end
+
+local function topple_event(K, c, p, rec)
+  p.top = type(p.top) == 'table' and p.top or {}
+  p.top[#p.top + 1] = rec
+  while #p.top > M.TOPPLE_KEEP do table.remove(p.top, 1) end
+  st.topev = st.topev or {}
+  local key = rec.unit >= 0 and ('u' .. rec.unit) or ('n' .. rec.by:lower())
+  local e = st.topev[key]
+  if e and rec.t - e.t < (c.topple_every or 2400) then e.n = e.n + 1; return end
+  local n = e and e.n or 0
+  st.topev[key] = {t = rec.t, n = 0}
+  local msg = string.format('%s toppled by %s%s%s%s', rec.what, rec.by, rec.ghost == 1 and ' (a ghost)' or '',
+                            rec.cat and string.format(', stress %d (category %d of 6, 0 worst)', rec.stress or 0, rec.cat) or '',
+                            rec.tantrum == 1 and ', after a tantrum' or '')
+  K.emit('BUILDING_TOPPLED', 'B', trunc(msg, 200),
+         {what = rec.what, by = rec.by, unit = rec.unit >= 0 and rec.unit or nil, ghost = rec.ghost,
+          stress = rec.stress, cat = rec.cat, tantrum = rec.tantrum == 1 and 1 or nil, n = n > 0 and n or nil,
+          pos = rec.x and {rec.x, rec.y, rec.z} or nil})
+  K.persist.touch('m.care')
+end
+
+M.on.REPORT = function(K, ev)
+  local c, p = M.conf(K), pstate(K)
+  if ev.type == 'STRANGE_MOOD' or ev.type == 'MOOD_BUILDING_CLAIMED' then
+    pcall(mood_watch, K, c, p)
+    st.full_now = true                    -- material first: the next step runs the full pass (needs, reserve) at once
+  elseif ev.type == 'CITIZEN_TANTRUM' or ev.type == 'POSSESSED_TANTRUM' then
+    -- "<name> is throwing a tantrum!": remembered by name for the next toppled building
+    local who = tostring(ev.text or ''):match('^(.-)%s+is throwing a tantrum') or tostring(ev.text or ''):match('^(.-)%s+has')
+    st.tantrum = st.tantrum or {}
+    if who and who ~= '' then st.tantrum[who:lower()] = ev.tick or K.now().tick end
+    local n = 0
+    for k, t in pairs(st.tantrum) do
+      if (ev.tick or K.now().tick) - t > DAY * 2 then st.tantrum[k] = nil else n = n + 1 end
+      if n > 40 then st.tantrum[k] = nil end
+    end
+  else
+    local ok, rec = pcall(topple_record, K, c, p, ev)
+    if ok and rec then pcall(topple_event, K, c, p, rec)
+    elseif not ok then K.log('warn', 'care toppled report: %s', tostring(rec)) end
+  end
+end
+
+-- public (BUG-064, gate's BRIDGE_DESTROYED): the newest toppled-building record of the last `win` ticks (default
+-- topple_win) at or within topple_r tiles of x,y,z (a record without a position counts when its building is a bridge,
+-- gate or lever), as a copy {by, unit, ghost, cat, stress, what, t}; nil when none
+function M.toppled(K, x, y, z)
+  local c, p = M.conf(K), pstate(K)
+  local now = K.now().tick
+  local best
+  for _, r in ipairs(type(p.top) == 'table' and p.top or {}) do
+    if type(r) == 'table' and now - (num(r.t) or -1e9) <= c.topple_win then
+      local near
+      if num(r.x) and num(x) and num(y) and num(z) then
+        near = math.abs(r.x - x) <= c.topple_r and math.abs(r.y - y) <= c.topple_r and math.abs((num(r.z) or z) - z) <= 1
+      else
+        local w = tostring(r.what or ''):lower()
+        near = w:find('bridge', 1, true) or w:find('gate', 1, true) or w:find('lever', 1, true)
+      end
+      if near and (not best or r.t >= best.t) then best = r end
+    end
+  end
+  if not best then return nil end
+  local out = {}
+  for k, v in pairs(best) do out[k] = v end
+  return out
+end
+
 function M.step(K, budget, ctx)
   local c = M.conf(K)
   local p = pstate(K)
-  if not (ctx and ctx.cont) or not st.run then st.run = new_run(K, c, p)
+  if not (ctx and ctx.cont) or not st.run then
+    local now = K.now().tick
+    local fast = (c.mood_fast or 0) > 0 and next(p.moods) ~= nil
+    if fast then
+      set_every(c, p)
+      if not st.full_now and st.last_full and now - st.last_full < (st.gap or BASE_EVERY) then
+        mood_watch(K, c, p)               -- only the mood check; the full run is not due yet
+        st.prev_fast = true
+        return
+      end
+    else
+      set_every(c, p)
+      if not st.prev_fast and ctx and (ctx.dt or 0) > 0 then st.gap = ctx.dt end
+    end
+    st.prev_fast, st.full_now, st.last_full = fast, nil, now
+    st.run = new_run(K, c, p)
   else st.run.kern = kern_burrow(K) end        -- no burrow pointer from an earlier frame (it may be gone)
   local r = st.run
   r.left, r.now = c.items_per_slice, K.now().tick
@@ -3096,6 +3392,7 @@ function M.step(K, budget, ctx)
   end
   st.run = nil
   finish(K, c, r, p)
+  set_every(c, p)                          -- BUG-063: the fast mood cadence while a mood is open
 end
 
 -- citizen deaths: DEATH (B) each with its cause (FR-64), DEATHS_3PLUS (A) at 3 within a day, then the clusters

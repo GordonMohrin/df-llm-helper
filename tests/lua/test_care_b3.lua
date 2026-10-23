@@ -199,4 +199,205 @@ T.test('BUG-062: the ghost number is the ghostly units (census.g), not only the 
   T.eq(W.state().care.ghosts, 12)
 end)
 
+---------------------------------------------------------------- BUG-063: moods
+local function filter(t, spec)
+  local f = {item_type = t and df.item_type[t] or -1, mat_type = -1, mat_index = -1, quantity = 1, flags2 = {}}
+  for k, v in pairs(spec or {}) do f[k] = v end
+  return f
+end
+
+-- a strange mood: unit `id` claims a Craftsdwarfs workshop at 22..24,22..24 z5 and needs one bone (available)
+local function moody(W, id, kind, thirst, hunger, shop)
+  local u = W.unit(id)
+  u.mood = df.mood_type[kind]
+  u.counters2 = {thirst_timer = thirst or 0, hunger_timer = hunger or 0}
+  shop = shop or F.workshop(W, 'Craftsdwarfs')
+  shop.x1, shop.y1, shop.x2, shop.y2, shop.z = 22, 22, 24, 24, 5
+  u.job.current_job = CW.mood_job(W, 900 + id, shop, {filter(nil, {quantity = 1, flags2 = {bone = true, body_part = true}})})
+  return u, shop
+end
+
+local function risks(W, why)
+  local r = {}
+  for _, e in ipairs(W.find_events('MOOD_RISK')) do if why == nil or e.d.why == why then r[#r + 1] = e end end
+  return r
+end
+
+T.test('BUG-063: the game announcing a strange mood starts the check at once, not at the next care run', function()
+  local W = world{cit = 6}
+  W.run(1)
+  T.eq(W.find_events('MOOD_START'), {})
+  moody(W, 2, 'Fey', 0, 0)
+  W.event('REPORT', {type = 'STRANGE_MOOD', text = 'Urist has been taken by a fey mood!'})
+  W.run(3)
+  local s = W.find_events('MOOD_START')
+  T.eq(#s, 1, 'noticed within a few ticks of the report (care runs every 1,200)')
+  T.eq(s[1].d.unit, 2)
+end)
+
+T.test('BUG-063: while a mood is open the thirst and hunger are read every mood_fast ticks, not every care run', function()
+  local W = world{cit = 6}
+  moody(W, 2, 'Fey', 1000, 0)
+  W.run(1)
+  T.eq(#W.find_events('MOOD_START'), 1)
+  W.unit(2).counters2.thirst_timer = 31000
+  W.run(450, {skip = 50})
+  T.eq(#risks(W, 'thirst'), 1, 'MOOD_RISK within 450 ticks of the thirst passing the line (the full run is 1,200 apart)')
+  T.eq(W.K.persist.get('m.care') ~= nil, true)
+  -- the quiet fort keeps its cadence
+  local W2 = world{cit = 6}
+  W2.run(1)
+  W2.unit(1).counters2 = {thirst_timer = 0, hunger_timer = 0}
+  W2.run(450, {skip = 50})
+  T.eq(W2.find_events('MOOD_START'), {})
+end)
+
+T.test('BUG-063: hunger above 40,000 is a MOOD_RISK too; the line names thirst, hunger and the workshop', function()
+  local W = world{cit = 6}
+  moody(W, 2, 'Possessed', 12000, 41000)
+  W.run(1)
+  local r = risks(W, 'hunger')
+  T.eq(#r, 1)
+  T.eq({r[1].d.thirst, r[1].d.hunger, r[1].d.ws}, {12000, 41000, 'Craftsdwarfs'})
+  T.ok(r[1].msg:find('thirst 12000 hunger 41000', 1, true) and r[1].msg:find('Craftsdwarfs', 1, true), r[1].msg)
+  T.ok(#r[1].msg <= 200)
+end)
+
+T.test('BUG-063: thirst past 50,000 is MOOD_CRITICAL (A): the dwarf and the workshop named, once per cadence', function()
+  local W = world{cit = 6}
+  moody(W, 2, 'Fey', 20000, 0)
+  W.run(1)
+  T.eq(W.find_events('MOOD_CRITICAL'), {})
+  W.unit(2).counters2.thirst_timer = 50500
+  W.run(450, {skip = 50})
+  local c = W.find_events('MOOD_CRITICAL')
+  T.eq(#c, 1)
+  T.eq(c[1].cls, 'A')
+  T.eq({c[1].d.unit, c[1].d.why, c[1].d.kind, c[1].d.ws, c[1].d.thirst, c[1].d.pos}, {2, 'thirst', 'Fey', 'Craftsdwarfs', 50500, {22, 22, 5}})
+  T.ok(c[1].msg:find('Unit 2', 1, true) and c[1].msg:find('workshop Craftsdwarfs at 22,22,5', 1, true), c[1].msg)
+  W.run(900, {skip = 100})
+  T.eq(#W.find_events('MOOD_CRITICAL'), 1, 'the same cause is not repeated within the cadence')
+end)
+
+local function nook_world(o)
+  o = o or {}
+  local floor = {}
+  for y = 18, 28 do for x = 18, 28 do floor[x .. ',' .. y .. ',5'] = true end end
+  local W, Cm = CW.world{cit = 6, runner = true, mode = o.mode, tile = function(x, y, z)
+    return {c = floor[x .. ',' .. y .. ',' .. z] and '.' or '#', dig = '', bld = ''}
+  end, setup = function(W)
+    df.global.building_next_id = 1000
+    W.qf = {}
+    W.act_result('quickfort', function(p)
+      W.qf[#W.qf + 1] = {mode = p.mode, pos = p.pos, data = p.data}
+      return true, {}
+    end)
+  end}
+  return W, Cm
+end
+
+T.test('BUG-063: from 40,000 a one-barrel drink stockpile is queued beside the claimed workshop (never a job for the dwarf)', function()
+  local W = nook_world()
+  moody(W, 2, 'Fey', 41000, 0)
+  W.run(1)
+  local r = risks(W, 'thirst')
+  T.eq(#r, 1)
+  T.ok(r[1].msg:find('drink nook queued at 22,21,5', 1, true), r[1].msg)
+  local P
+  for _, x in ipairs((W.K.persist.get('projects') or {}).list or {}) do if x.tpl == 'mood_drink' then P = x end end
+  T.ok(P, 'a mood_drink project')
+  local d = W.K.persist.get('bp.' .. P.id)
+  T.eq(d.stages[1].mode, 'place')
+  local c = d.stages[1].chunks[1]
+  T.eq({c.pos, c.cells[1][4]}, {{22, 21, 5}, 'f{name=dfllm-mood barrels=1 take_from=dfllm-stock}:=booze(1x1)'})
+  T.ok(#c.cells[1][4] <= 64)
+  -- once per mood: not again, whatever the thirst does
+  W.unit(2).counters2.thirst_timer = 52000
+  W.run(900, {skip = 100})
+  local n = 0
+  for _, x in ipairs((W.K.persist.get('projects') or {}).list or {}) do if x.tpl == 'mood_drink' then n = n + 1 end end
+  T.eq(n, 1)
+  T.ok(W.find_events('MOOD_CRITICAL')[1].msg:find('drink nook queued at 22,21,5', 1, true))
+  for _, a in ipairs(W.acts) do
+    T.ok(a.fn ~= 'job' and a.fn ~= 'item_flag', 'no act on the dwarf or his items: ' .. a.fn)
+  end
+end)
+
+T.test('BUG-063: no nook in a fight; a nook only beside a claimed workshop; no free floor is said', function()
+  local W = nook_world{mode = 'SIEGE'}
+  moody(W, 2, 'Fey', 41000, 0)
+  W.run(1)
+  T.eq(#risks(W, 'thirst'), 1)
+  T.ok(not risks(W, 'thirst')[1].msg:find('nook', 1, true))
+  local W2 = world{cit = 6}                    -- no runner module: no nook, no fault
+  moody(W2, 2, 'Fey', 41000, 0)
+  W2.run(1)
+  T.ok(risks(W2, 'thirst')[1].msg:find('dies at 75000', 1, true))
+  local W3, _ = CW.world{cit = 6, runner = true, tile = function() return {c = '#', dig = '', bld = ''} end}
+  moody(W3, 2, 'Fey', 41000, 0)
+  W3.run(1)
+  T.ok(risks(W3, 'thirst')[1].msg:find('no free floor within 3 tiles', 1, true), risks(W3, 'thirst')[1].msg)
+end)
+
+---------------------------------------------------------------- BUG-064: toppled by
+local function toppled(W) return W.find_events('BUILDING_TOPPLED') end
+
+T.test('BUG-064: "X toppled by <dwarf>" names the culprit, his stress and a tantrum before it', function()
+  local W = world{cit = 6}
+  local u = W.unit(3)
+  u._m.name, u._m.stress = 'Kel Becordastot, Manager', 0
+  u.status.current_soul.personality.stress = 61234
+  W.event('REPORT', {type = 'CITIZEN_TANTRUM', text = 'Kel Becordastot, Manager is throwing a tantrum!'})
+  W.event('REPORT', {type = 'BUILDING_DESTROYED_OR_TOPPLED', text = "The Mason's Workshop was toppled by Kel Becordastot.",
+                     pos = {x = 30, y = 40, z = 5}})
+  W.run(3)
+  local e = toppled(W)
+  T.eq(#e, 1)
+  T.eq(e[1].cls, 'B')
+  T.eq({e[1].d.what, e[1].d.by, e[1].d.unit, e[1].d.ghost, e[1].d.stress, e[1].d.cat, e[1].d.pos},
+       {"Mason's Workshop", 'Kel Becordastot', 3, 0, 61234, 0, {30, 40, 5}})
+  T.ok(e[1].msg:find("Mason's Workshop toppled by Kel Becordastot, stress 61234", 1, true), e[1].msg)
+end)
+
+T.test('BUG-064: a ghost that toppled a lever (one ghost in the census: its id), two buildings by one dwarf in a day: one event', function()
+  local W = world{cit = 6, units = {{id = 50, citizen = true, pos = {5, 5, 5}}}}
+  W.kill(50)
+  W.unit(50)._m.ghost = true
+  W.K.census.g = {tick = W.K.now().tick, n = 1, ids = {50}}
+  W.event('REPORT', {type = 'BUILDING_TOPPLED_BY_GHOST', text = 'A lever was toppled by a ghost!', pos = {x = 10, y = 10, z = 5}})
+  W.run(3)
+  local e = toppled(W)
+  T.eq(#e, 1)
+  T.eq({e[1].d.what, e[1].d.by, e[1].d.unit, e[1].d.ghost}, {'lever', 'a ghost', 50, 1})
+  for i = 1, 3 do
+    W.event('REPORT', {type = 'BUILDING_TOPPLED_BY_GHOST', text = 'A table was toppled by a ghost!', pos = {x = 10 + i, y = 10, z = 5}})
+  end
+  W.run(3)
+  T.eq(#toppled(W), 1, 'the same culprit within topple_every ticks: counted, not announced again')
+  CW.day(W, 3)
+  W.event('REPORT', {type = 'BUILDING_TOPPLED_BY_GHOST', text = 'A door was toppled by a ghost!', pos = {x = 20, y = 10, z = 5}})
+  W.run(3)
+  e = toppled(W)
+  T.eq(#e, 2)
+  T.eq(e[2].d.n, 3, 'three buildings since the last event')
+end)
+
+T.test('BUG-064: care.toppled finds the record near a position within topple_win ticks; two dwarves of one name are not guessed', function()
+  local W, care = world{cit = 6}
+  W.unit(3)._m.name = 'Urist McSame'
+  W.unit(4)._m.name = 'Urist McSame'
+  W.event('REPORT', {type = 'BUILDING_DESTROYED_OR_TOPPLED', text = 'A Bridge was toppled by Urist McSame.',
+                     pos = {x = 20, y = 25, z = 9}})
+  W.event('REPORT', {type = 'BUILDING_DESTROYED_OR_TOPPLED', text = 'A Statue was toppled by Somebody Else.',
+                     pos = {x = 50, y = 50, z = 9}})
+  W.run(3)
+  local ok, r = W.K.call('care', 'toppled', 22, 25, 9)
+  T.ok(ok and type(r) == 'table')
+  T.eq({r.by, r.what, r.unit}, {'Urist McSame', 'Bridge', -1})
+  T.eq(({W.K.call('care', 'toppled', 22, 25, 12)})[2], nil, 'another level')
+  T.eq(({W.K.call('care', 'toppled', 40, 25, 9)})[2], nil, 'too far')
+  CW.day(W, 5)
+  T.eq(({W.K.call('care', 'toppled', 22, 25, 9)})[2], nil, 'older than topple_win')
+end)
+
 T.done()

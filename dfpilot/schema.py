@@ -456,6 +456,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # unassigned (usable: over a usable coffin), owned = held by a dead citizen, inactive = switched off; opened = what
     # care opened, left = usable ones still closed; again_free / again_owned = zones care opened that are closed again
     # (no owner: DF or a plugin closed them; an owner: by_entomb of them care's own entomb); unburied citizens
+    # BUG-064 (Run 13/14: 19 "toppled by" reports): what = the building as the report names it, by = the culprit's name in
+    # the report, unit = his id (only when one citizen, ghost or recorded dead matches the name), ghost, stress = his
+    # personality.stress and cat its category (0 worst .. 6; >= 50000 is 0), tantrum = a tantrum report named him first,
+    # n = further buildings toppled by him since the last event, pos = the report's position
+    "BUILDING_TOPPLED": ("B", "care", _d("what:s by:s", "unit:i ghost:f stress:i cat:i tantrum:f n:i pos:p")),
     "TOMBS_LOCKED": ("B", "care", _d(opt="closed:i free:i usable:i owned:i inactive:i opened:i left:i again_free:i "
                                          "again_owned:i by_entomb:i unburied:i")),
     # BUG-031: cistern = why the nearest cistern room does not serve the hospital (no well, its well over 0/7, too far)
@@ -474,7 +479,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # (pond: bucket-fed with its pond zone; pond_removed: water removed that pond as a loop; pipe: its floodgate lever;
     # none), pond (zone id), src/d (the nearest accepted water to carry from, tiles)
     "CISTERN_DRY": ("B", "water", _d("room:s days:i fill:s", "proj:s well:i pos:p pond:i src:p d:i")),
-    "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i nosrc:sa route:s")),
+    # BUG-063: ws = the workshop type the mood claimed (-> MOOD_CRITICAL: pos = its first tile, name = the dwarf, nook = the
+    # drink stockpile the kernel queued beside it or why none)
+    "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i nosrc:sa route:s ws:s")),
+    "MOOD_CRITICAL": ("A", "care", _d("unit:i why:s", "kind:s thirst:i hunger:i ws:s name:s pos:p missing:sa nook:s")),
     # class A since Run 9 (an army walked in while these were digest-only): they wake at once
     "SIEGE_START": ("A", "siege", _d(opt="vis:i inv:i great:i why:s")),
     "INVASION": ("A", "threat", _d(opt="id:i")),
@@ -535,8 +543,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "WAVE_FAIL": ("A", "siege", _d("kind:s why:s", "wave:i squad:s lost:i units:ia n:i pos:p ticks:i")),
     # BUG-030: a manifest bridge gate saw complete is gone from its footprint (destroyed or removed): no pulls for it
     # rebuild policy: n = its losses so far, bd = those with building destroyers in sight, destroyers = this one, races
+    # BUG-064: tby = the citizen or ghost the reports "X toppled by <name>" named near its footprint (care.toppled), tunit
+    # his id, tcat his stress category (0 worst), tghost a ghost
     "BRIDGE_DESTROYED": ("A", "gate", _d("bridge:s", "bid:i role:s last:s mode:s pos:p n:i bd:i destroyers:f "
-                                                     "races:sa")),
+                                                     "races:sa tby:s tunit:i tcat:i tghost:f")),
     # Run 11: a dig broke into a cavern: phase queued (the explore shaft's plug project), done (the wall stands), failed
     # (refused, cancelled, blocked), none (no automatic plug: by hand); shaft = its top tile, z1 its bottom z, walls
     # 'x,y,z' (the lower one first), n = water tiles of a cavern lake, hint = why failed / none; state = the explore's
