@@ -38,7 +38,8 @@ MODE_SETTERS = {"siege": "*", "drill": ["DRILL>PEACE", "PEACE>DRILL"]}
 # READY_IN (BUG-029): every squad at the inner station; INTAKE (Gordon 2026-10-16): field and gallery during a wave;
 # CORE (BUG-030): every squad at the core station in the deep defense
 POSTURES = ["TRAIN", "STATION_B1", "READY_STATION", "B2_HOLD", "READY_IN", "INTAKE", "CORE"]
-BRIDGE_STATES = ["up", "down", "moving", "unknown", "destroyed"]   # BUG-030: destroyed = gone from its footprint
+BRIDGE_STATES = ["up", "down", "moving", "unknown", "destroyed", "replaced"]   # BUG-030: destroyed = gone from its footprint;
+# BUG-048: replaced = seal made it a wall and a door (no gate, no open way)
 ORDER_LIBS = ["library/basic", "library/furnace", "library/smelting", "library/military",
               "library/rockstock", "library/glassstock"]
 SNAP_LEGEND = "?_.#SCF<>Xrv+=H^Bw~%T "     # BUG-043: " " = not exported (outside every part of a union export)
@@ -486,23 +487,29 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "DEPOT_MISSING": ("A", "trade", _d(opt="civ:s planned:f proj:s stalled:f why:s mat:s")),
     # BUG-021: unit/upos/grp = a cut-off citizen and his walk group, at/agrp = a stock tile of the class and its group
     "CUTOFF": ("A", "seal", _d("cls:s n:i", "pos:p why:s grp:i main:i unit:i upos:p at:p agrp:i")),
-    # BUG-030 rebuild policy: wait = lost bridges built again only in quiet PEACE, held = not rebuilt (DECISION_NEEDED)
-    "PERIMETER_BROKEN": ("A", "seal", _d("n:i", "pos:p kinds:sa requeued:i why:s wait:sa held:sa")),
+    # BUG-030 rebuild policy: wait = lost bridges built again only in quiet PEACE; BUG-048: replaced = bridges the keeper
+    # replaced by a wall and a door (stop_after losses to building destroyers, vanish_after without one, a rebuild nobody
+    # built; no question), held = legacy (the old kernel's DECISION_NEEDED bridge_rebuild)
+    "PERIMETER_BROKEN": ("A", "seal", _d("n:i", "pos:p kinds:sa requeued:i why:s wait:sa held:sa replaced:sa")),
     "SEAL_LEAK": ("A", "seal", _d("routes:i", "pos:p bld:s state:s why:s")),
     # BUG-018/019, FR-67: level of the fallback (SIEGE, SOFT, HOLD, BREACH, DEAD), flee (no separated burrow: no
     # confinement), open (the entrances that reach the refused burrow, "x,y,z kind"); BUG-031: open = the tiles they
     # lead in by (also beside a door that leaves them open), fix = the seal template's `at` that closes them, dry = a
     # burrow was refused because the citizens it held went thirsty or hungry there
+    # BUG-049 (Run 13 y525: the citizens found the refuge occupied): hostile = how many hostiles stand in the refused
+    # burrow, at = where the first one stands
     "REFUGE_FAIL": ("A", "seal", _d("burrow:s", "fallback:s why:s tiles:i inside:i mode:s level:s flee:f open:sa "
-                                                "fix:s dry:f")),
+                                                "fix:s dry:f hostile:i at:p")),
     "AUTOLABOR_LEGACY": ("A", "baseline", _d("fixed:f", "why:s after:s")),
     # FR-64: >= 2 citizens died of dehydration or starvation within a month (the class-A twin of DEATH_CLUSTER)
     "DEATHS_PREVENTABLE": ("A", "care", _CLUSTER),
     # FR-65: readiness R0 in PEACE: R1 blockers, the audit's own fails, ways in (seal), those without door or bridge;
     # Run 11: rdry = the refuge without drink and what to build (blocker refuge_dry)
     # BUG-036: hout = the hospital outside Kern+ and the refuge and what to do (blocker hospital_out)
+    # FR-70: pd = game days the perimeter has been open (open_perimeter), pw = what is open; from escalate_days on the
+    # wake repeats every escalate_every days
     "SIEGE_UNREADY": ("A", "readiness", _d(opt="fails:sa afails:sa routes:i open:i ents:sa traps:i age:i rdry:s "
-                                               "hout:s")),
+                                               "hout:s pd:i pw:s")),
     # BUG-015: an entrance door the lockdown forbade lost its forbidden flag before the next pass (refused)
     "LOCKDOWN_PARTIAL": ("A", "reflex", _d("doors:i", "refused:ia pos:p retry:f items:i units:i")),
     # BUG-023 / Run 10: tool detail members without their pick or axe while its jobs wait and free tools exist; Run 11:
@@ -737,8 +744,9 @@ STATE = Obj(
                            "fail": Arr(Str(maxbytes=24), hi=8)},
                       # FR-65: ways in without door or bridge (-1 unknown), the first of them, why no auto drill;
                       # route: the last audit's first attacker-route finding (bypass / refuge on the attack path)
+                      # FR-70: pd = game days the perimeter has been open in PEACE (open_perimeter), pw = what is open
                       opt={"open": Int(-1), "ents": Arr(Str(maxbytes=24), hi=3), "dhold": Str(maxbytes=24),
-                           "route": Str(maxbytes=60)}),
+                           "route": Str(maxbytes=60), "pd": NAT, "pw": Str(maxbytes=60)}),
          # Run 10: ore/bars/leather stock, the metal route ('explore' = no ore, metal wanted), the classes strange
          # moods missed within a year (plan propose/check supply goals)
          # Run 11: free stone and what the open rock orders, walls and needs want (rock_need); picks in the fort and the
@@ -814,7 +822,10 @@ STATE = Obj(
                                                              # FR-69: drink units on its tiles, drink wanted
                                                              # (citizens x drink_per_cit), tiles of its drink store
                                                              # (stockpiles dfllm-drink on it; 0 none)
-                                                             "dr": NAT, "dn": NAT, "st": NAT})}),
+                                                             "dr": NAT, "dn": NAT, "st": NAT,
+                                                             # BUG-049: trusted (1) or not (0) and the first reason
+                                                             # (separation fresh, hatch stands, nobody inside)
+                                                             "tr": FLAG, "trw": Str(maxbytes=40)})}),
          # intake waves (siege, Gordon 2026-10-16): phase, waves so far, the last refusal, the sortie (squad phase)
          # BUG-030: deep = the deep defense's reasons ("destroyers,army,weak")
          "wave": Obj(req={"ph": Str(maxbytes=8), "n": NAT}, opt={"why": Str(maxbytes=40), "so": Str(maxbytes=24),

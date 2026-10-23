@@ -44,9 +44,8 @@ def test_reflex_config_perimeter(tmp_path):
     """perimeter.stop_after: the shipped value is seal.lua's default (CFG.stop_after) within the kernel's limits."""
     shipped = json.loads((fairplay.REPO / "config" / "reflex.json").read_text(encoding="utf-8"))
     lua = (fairplay.REPO / "lua" / "dfllm" / "seal.lua").read_text(encoding="utf-8")
-    assert shipped["perimeter"] == {"stop_after": int(re.search(r"\bstop_after = (\d+),", lua).group(1))} \
-        == {"stop_after": 2}
-    assert "v >= 0 and v <= 20" in lua and fairplay.PERIMETER_LIM == {"stop_after": (0, 20)}
+    assert shipped["perimeter"]["stop_after"] == int(re.search(r"\bstop_after = (\d+),", lua).group(1)) == 2
+    assert "v >= 0 and v <= 20" in lua and fairplay.PERIMETER_LIM["stop_after"] == (0, 20)   # + BUG-048/FR-70 keys: test_perimeter_escalation.py
     p = tmp_path / "reflex.json"
     p.write_text(json.dumps({"v": 2, "perimeter": {"stop_after": 21, "zap": 1}}), encoding="utf-8")
     errs = fairplay.reflex_errors(p)

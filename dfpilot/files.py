@@ -142,6 +142,24 @@ def read_follow_hb(save_dir: Path, now: float | None = None) -> tuple[dict | Non
     return (doc if isinstance(doc, dict) else None), max(0.0, (time.time() if now is None else now) - mt)
 
 
+def follow_auto(save_dir: Path, now: float | None = None) -> bool | None:
+    """DECISIONS 2: whether a running `dfllm follow` places things itself (True) or runs with --no-auto (False); None
+    when no follow beats for this save (or an older one that does not say). With --no-auto the auto-seal never runs."""
+    doc, age = read_follow_hb(save_dir, now)
+    if doc is None or age is None or age > FOLLOW_STALE_S:
+        return None
+    v = doc.get("auto")
+    return None if isinstance(v, bool) or not isinstance(v, int) else v == 1
+
+
+def auto_seal_off(save_dir: Path, openings: int, now: float | None = None) -> str | None:
+    """DECISIONS 2 (Run 13: follow --no-auto, 14 years of an open door): 'auto-seal off, N openings' when a follow with
+    --no-auto is running and the entrance check lists `openings` ways in without door or bridge; else None."""
+    if openings > 0 and follow_auto(save_dir, now) is False:
+        return f"auto-seal off, {openings} opening{'s' if openings != 1 else ''}"
+    return None
+
+
 def code_stamp() -> str:
     """BUG-042: a digest of the dfpilot package's .py files (path, size, mtime): what a long-running `follow` imported
     against what lies on disk now (Run 11: the BUG-038 placement fix was pulled while an older follow kept running)."""

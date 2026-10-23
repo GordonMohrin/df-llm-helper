@@ -224,8 +224,12 @@ SORTIE_LIM: dict = {"worn": (0, 100), "losses": (1, 30), "max_ticks": (300, 3360
 # a station lies more than gate's margin + spread tiles from every bridge footprint)
 STATIONS_LIM: dict = {"core_ratio": (1, 50), "worn": (0, 100), "metal": (0, 100), "spread": (0, 5)}
 # BUG-030 rebuild policy (seal.lua CFG.stop_after): a manifest bridge destroyed stop_after times by building destroyers
-# since the player's last answer (verb bridge.rebuild) is not rebuilt automatically any more; 0 = always rebuilt
-PERIMETER_LIM: dict = {"stop_after": (0, 20)}
+# since the player's last answer (verb bridge.rebuild) is replaced by a wall and a door (BUG-048; it used to ask a
+# question nobody answered); 0 = always rebuilt. vanish_after: the same for losses with no destroyer in sight (the loop
+# breaker). FR-70 (readiness.lua M.PERIM / M.PERIM_LIM): escalate_days = days of an open perimeter in PEACE before the
+# wake repeats every escalate_every days and max-pop freezes at the population (hold_pop citizens or more; 0 = never)
+PERIMETER_LIM: dict = {"stop_after": (0, 20), "vanish_after": (0, 20), "escalate_days": (0, 30),
+                       "escalate_every": (1, 30), "hold_pop": (0, 250)}
 
 BASELINE_PATH = REPO / "config" / "baseline.json"
 _THIRST = (1000, 75000)                   # DF's thirst timer: "thirsty" ~25,000-50,000, dehydration kills ~75,000

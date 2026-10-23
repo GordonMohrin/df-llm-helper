@@ -106,8 +106,8 @@ C.EVENTS = {
   WAVE_FAIL = {cls = 'A', by = 'siege'},
   -- BUG-030: a manifest bridge gate saw complete is gone from its footprint (destroyed; d.n/bd/destroyers/races: its
   -- loss history, gate.losses); the siege's deep defense (building destroyers in sight, an army over
-  -- stations.core_ratio x the soldiers, weak squads): refuge and core. PERIMETER_BROKEN d.wait/held and
-  -- DECISION_NEEDED id bridge_rebuild (bridge, n, bd, reb, items, mat, links, races, years, stop): the rebuild policy
+  -- stations.core_ratio x the soldiers, weak squads): refuge and core. PERIMETER_BROKEN d.wait/replaced (BUG-048: a lost
+  -- bridge the keeper replaces by a wall and a door; DECISION_NEEDED id bridge_rebuild is not asked any more): the rebuild policy
   BRIDGE_DESTROYED = {cls = 'A', by = 'gate'}, SIEGE_DEEP = {cls = 'A', by = 'siege'},
   -- Run 11: a dig broke into a cavern (lake): the explore shaft's plug (queued, done, failed) or none (by hand); the
   -- daily shaft check (any explore state, field state) queues it too
@@ -344,7 +344,8 @@ C.STATE_SPEC = obj({
                audit = obj({ok = FLAG, age = int(-1), min_traps = NAT}, {why = str(80), cov = str(40)}),
                fail = arr(str(24), 0, 8)},
               {open = int(-1), ents = arr(str(24), 0, 3), dhold = str(24),     -- FR-65
-               route = str(60)}),          -- the last audit's first attacker-route finding (bypass, refuge)
+               route = str(60),            -- the last audit's first attacker-route finding (bypass, refuge)
+               pd = NAT, pw = str(60)}),   -- FR-70: days the perimeter has been open (PEACE), and what is open
   -- Run 10: ore/bars/leather stock, the metal route and the classes moods missed (plan propose/check supply goals)
   stock = obj(nil, {drink_d = NAT, food_d = NAT, meals = NAT, hosp_water = FLAG, ore = NAT, bars = NAT, leather = NAT,
                     metal = str(24), mood_miss = arr(str(12), 0, 8), rock = NAT, rock_need = NAT, picks = NAT,
@@ -368,7 +369,7 @@ C.STATE_SPEC = obj({
                     q = obj({n = NAT, by = arr({t = 'tup', items = {str(nil, nil, 'id'), str(16), NAT}}, 0, 8)}),
                     run = obj({d = NAT}, {i = NAT, n = NAT, task = str(40), sl = NAT, age = NAT}),
                     pk = NAT}),
-  bridges = obj(nil, nil, str(nil, {'up', 'down', 'moving', 'unknown', 'destroyed'}), 'bridge'),   -- BUG-030
+  bridges = obj(nil, nil, str(nil, {'up', 'down', 'moving', 'unknown', 'destroyed', 'replaced'}), 'bridge'),   -- BUG-030, BUG-048
   owners = obj({pause = {t = 'any', of = {{t = 'null'}, str(nil, {'inbox', 'gordon', 'popup', 'df'})}},
                 tempo = str(nil, {'mode', 'inbox', 'brake', 'clock'})}),
   mil = obj({squads = NAT, soldiers = NAT, worn = PCT, cv = NAT, metal_pct = PCT, on_station = NAT},
@@ -390,7 +391,9 @@ C.STATE_SPEC = obj({
                          {box = {t = 'tup', items = {int(), int(), int(), int(), int(), int()}}, wd = int(-1),
                           ws = {t = 'tup', items = {NAT, NAT, NAT}},
                           -- FR-69: drink units on its tiles, drink wanted, tiles of its drink store (0 none)
-                          dr = NAT, dn = NAT, st = NAT})}),
+                          dr = NAT, dn = NAT, st = NAT,
+                          -- BUG-049: trusted (1) or not (0) and the first reason
+                          tr = FLAG, trw = str(40)})}),
   -- intake waves (siege, Gordon 2026-10-16): phase, wave count, the last refusal, the sortie squad and phase; BUG-030:
   -- deep = the deep defense's reasons ('destroyers,army,weak')
   wave = obj({ph = str(8), n = NAT}, {why = str(40), so = str(24), deep = str(24)}),

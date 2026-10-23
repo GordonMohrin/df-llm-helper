@@ -95,8 +95,12 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
         "TOOL_BLOCKED": "dfllm cmd inspect '{\"what\":\"workload\",\"key\":\"tools\"}' (d.bk names the blocker), "
                         "then tell Gordon (RULES 7)",
         # BUG-030: the kernel already acted (no pulls for a destroyed bridge; the deep defense); tell the player
-        "BRIDGE_DESTROYED": "dfllm status; tell Gordon; the kernel rebuilds it in quiet PEACE (or asks: "
-                            "DECISION_NEEDED bridge_rebuild); nothing tactical",
+        "BRIDGE_DESTROYED": "dfllm status; tell Gordon; the kernel rebuilds it in quiet PEACE, or replaces it by wall + "
+                            "door after perimeter.stop_after losses to building destroyers (BUG-048: no question); "
+                            "nothing tactical",
+        # BUG-048: replaced = bridges now a wall + door; wait = lost bridges waiting for quiet PEACE
+        "PERIMETER_BROKEN": "dfllm status; dfllm cmd inspect what=perimeter; tell Gordon; the kernel rebuilds lost "
+                            "walls, doors and bridges in quiet PEACE; nothing tactical",
         "SIEGE_DEEP": "dfllm status (civilians in the refuge, squads in the core); tell Gordon; nothing tactical",
         # Run 11: a dig broke into a cavern; the kernel plugs an explore shaft itself (failed/none: by hand)
         "CAVERN_PLUG": "tell Gordon (queued: the kernel walls the shaft; failed/none: a constructed wall by hand); "
@@ -229,14 +233,19 @@ HOSPITAL_OUT_HINT = ("the hospital lies outside the core: plan it next to accept
                      "Tiefe+ has none (bp sites hospital names the water), then remove the old zones")
 
 
-def wake_line(burst: dict[str, dict], state: dict | None, held_s: float = 0) -> str:
-    """'WAKE y3 sum d20 PEACE | SIEGE_END: msg | GATE_FAIL x2: msg | next: ...' within WAKE_TOKENS."""
+def wake_line(burst: dict[str, dict], state: dict | None, held_s: float = 0, auto: bool = True) -> str:
+    """'WAKE y3 sum d20 PEACE | SIEGE_END: msg | GATE_FAIL x2: msg | next: ...' within WAKE_TOKENS. DECISIONS 2: with
+    follow --no-auto (auto False) and ways in without door or bridge, every wake line says 'auto-seal off, N openings'."""
     t = (state or {}).get("t") or {}
     when = fmt_tick(t.get("abs", t["y"] * schema.TICKS["YEAR"] + t["tick"])) if t else "?"
     head = f"WAKE {when} {(state or {}).get('mode', '?')}"
     types = sorted(burst, key=_prio)
     ns = [p["n0"] for p in burst.values() if isinstance(p.get("n0"), int)]
     hint = next_hint(types[0], burst[types[0]]["e"])
+    openings = ((state or {}).get("ready") or {}).get("open")
+    if not auto and isinstance(openings, int) and openings > 0:     # the follow process places nothing: say so every time
+        head += f" | AUTO-SEAL OFF, {openings} opening{'s' if openings != 1 else ''} (follow --no-auto)"
+        hint = "seal by hand: dfllm cmd bp.place tpl=seal site=S1 at=last; " + hint
     tail = f" | next: {hint}" + (f"; dfllm events --cls A --since {min(ns) - 1}" if ns else "")
     room = WAKE_TOKENS - est_tokens(head + tail) - 4
     items, used = [], 0
@@ -381,7 +390,7 @@ class Follower:
             files.prune_outbox(self.dir)
         burst = self.gate.flush(now)
         if burst:
-            line = wake_line(burst, files.read_state(self.dir))
+            line = wake_line(burst, files.read_state(self.dir), auto=self.auto)
             self.out(line)
             printed.append(line)
             files.log_cli(self.dir, "follow", "wake", sorted(burst), line)
@@ -441,7 +450,8 @@ class Follower:
         self._beat = now
         try:
             files.write_follow_hb(self.dir, {"v": 2, "wall": int(now), "last_n": self.tail.last_n if self.tail else 0,
-                                             "code": CODE})       # BUG-042: status names a follow on old code
+                                             "code": CODE,        # BUG-042: status names a follow on old code
+                                             "auto": 1 if self.auto else 0})   # DECISIONS 2: --no-auto places nothing
         except OSError as e:
             sys.stderr.write(f"follow: cannot write heartbeat: {e}\n")
 

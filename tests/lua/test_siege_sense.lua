@@ -63,6 +63,25 @@ T.test('census.h: visible only; distances to O1, bridges and outside citizens; i
   T.eq(W.K.census.u.caged, {205})
 end)
 
+T.test('BUG-049 (Run 13 y525: the refuge was occupied): hostiles inside Tiefe+ are counted (census.h.rin), flagged ' ..
+       '(rf = 1) and listed first, also behind 40 hostiles nearer to O1', function()
+  local units = {S.cit(1, 60, 70)}
+  for i = 1, 50 do units[#units + 1] = S.inv(200 + i, 100 + i, 10) end
+  units[#units + 1] = S.inv(500, 65, 65, Z - 6)            -- Tiefe+ is x60-80 y60-80 z3-5
+  units[#units + 1] = S.inv(501, 70, 70, Z - 6)
+  local W = world(units)
+  W.run(10)
+  local h = W.K.census.h
+  T.eq({h.vis, h.rin, #h.list}, {52, 2, 40})
+  T.eq({h.list[1].id, h.list[1].rf, h.list[2].id, h.list[2].rf}, {500, 1, 501, 1}, 'old code: cut from the list')
+  T.eq(h.list[3].rf, nil)
+  T.eq(h.inside, 0, 'Kern+ is not the refuge')
+  -- none inside: rin 0
+  local W2 = world{S.cit(1, 60, 70), S.inv(201, 51, 30)}
+  W2.run(10)
+  T.eq(W2.K.census.h.rin, 0)
+end)
+
 T.test('census.h: the ghost of a dead citizen is no hostile (live L1b: it held the fort in BREACH)', function()
   local W = world{
     S.cit(1, 60, 70),

@@ -146,9 +146,10 @@ def test_propose_from_phases(save, base):
     # applied same-year builds keep their index (= project id); new ones are appended from the current season;
     # already-planned tpls are skipped; a staged template reuses the earlier anchor (site 'same')
     assert doc["seasons"][0] == prev["seasons"][0] and doc["seasons"][2] == prev["seasons"][2]
+    # DECISIONS 1: fortcore stage 3 (a P3 deliverable now, P5 before) is the first new build
     assert doc["seasons"][1]["build"] == prev["seasons"][1]["build"] + [
-        {"tpl": "tombs", "site": "S1"}, {"tpl": "temple", "site": "S1"},
-        {"tpl": "fortcore", "site": "same", "p": {"stage": 3}}]
+        {"tpl": "fortcore", "site": "same", "p": {"stage": 3}},
+        {"tpl": "tombs", "site": "S1"}, {"tpl": "temple", "site": "S1"}]
     assert doc["orders"]["import"] == ["library/furnace", "library/smelting", "library/military"]
     assert plan.stable_ids(doc, prev) == []
     # year 4: hospital (y3s0b1, running), bedrooms and tavern were applied in y3 -> never drafted again
@@ -156,8 +157,8 @@ def test_propose_from_phases(save, base):
     for nxt in (plan.propose(s4, phases, prev, decisions={}, tinfo=tinfo),
                 plan.propose(s4, phases, None, decisions={}, tinfo=tinfo, applied=plan.applied_builds(save, s4))):
         built = [b for se in nxt["seasons"] for b in se["build"]]
-        assert nxt["year"] == 4 and built == [{"tpl": "tombs", "site": "S1"}, {"tpl": "temple", "site": "S1"},
-                                              {"tpl": "fortcore", "site": "same", "p": {"stage": 3}}], built
+        assert nxt["year"] == 4 and built == [{"tpl": "fortcore", "site": "same", "p": {"stage": 3}},
+                                              {"tpl": "tombs", "site": "S1"}, {"tpl": "temple", "site": "S1"}], built
     applied = plan.applied_builds(save, state)
     assert {("hospital", None), ("bedrooms", None), ("tavern", None), ("workshops", None)} <= applied
     assert ("fortcore", 2) in applied                     # proj 'fortcore' at s2.build (no bp file)
@@ -346,7 +347,7 @@ def test_plan_cli_propose_check_apply(save, monkeypatch, capsys):
     assert (save / "plan.draft.json").exists()
     assert main(["--runtime", rt, "plan", "check"]) == 0
     out = capsys.readouterr().out
-    assert "plan OK" in out and "tombs@S1 -> y3s1b1 at [" in out and "kept y3s0b0" in out   # placement dry run
+    assert "plan OK" in out and "tombs@S1 -> y3s1b2 at [" in out and "kept y3s0b0" in out   # placement dry run
     assert main(["--runtime", rt, "plan", "apply", "--dry-run"]) == 0
     assert "dry run ok: 3 blueprint(s)" in capsys.readouterr().out
     bad = json.loads((save / "plan.draft.json").read_text("utf-8"))
@@ -766,7 +767,8 @@ def test_propose_drafts_the_refuge_first(save, base):
     for st, ft in ((with_refuge(state), fort), (beds, {"refuge": dict(fort["refuge"], beds=20)}),
                    (with_refuge(state, ex=0, sep=-1, beds=0), {"refuge": dict(fort["refuge"], fortcore=False)}),
                    (with_refuge(state, sep=0), {"refuge": dict(fort["refuge"], ents=0)})):
-        got = new(plan.propose(st, phases, prev, decisions={}, tinfo=tinfo, fort=ft))
+        got = [b for b in new(plan.propose(st, phases, prev, decisions={}, tinfo=tinfo, fort=ft)) if b != STAGE3]
+        # (stage 3 is a P3 deliverable now, DECISIONS 1: the fixture state is at P3, so the draft brings it as well)
         assert got[0] == {"tpl": "tombs", "site": "S1"} and all(b["tpl"] not in ("refuge_beds", "seal") for b in got)
     early = copy.deepcopy(phases)
     for ph in early["phases"]:
@@ -782,7 +784,7 @@ def test_propose_drafts_the_refuge_first(save, base):
     assert _ref(errs_of(doc, s1, prev=prev, fort=nosite)) == ([], [
         "refuge: Tiefe+ has 8 beds < 28; no refuge room takes refuge_beds yet (fortcore stage 3 builds it; dfllm bp "
         "sites refuge_beds)"])
-    # below P3 no refuge burrow is no gate (fortcore stage 3 belongs to P5)
+    # below P3 no refuge burrow is no gate (fortcore stage 3 belongs to P3, DECISIONS 1)
     none1 = dict(with_refuge(state, ex=0, sep=-1, beds=0), phase="P1")
     doc = plan.propose(none1, early, prev, decisions={}, tinfo=tinfo, fort=fort)
     assert STAGE3 not in [b for se in doc["seasons"] for b in se["build"]]

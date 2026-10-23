@@ -14,7 +14,9 @@ hidden tile above an up stair (the gallery stayed solid rock for three years). E
 walls are natural rock and every area is roofed (the bailey's walls/overhang requirement).
 
 Each doctrine stage is its own project (params.stage 1..4) so the gate gets B1 when stage 2 is done
-(CONTRACTS §9.8: split defense geometry). Manifest fragments are cumulative (the §11 merge is idempotent).
+(CONTRACTS §9.8: split defense geometry). DECISIONS 1 (2026-10-23): stage 3 (O1, B2, the refuge) is the first build of
+phase P3 (plans/year1.json), not P5: runs 10, 11 and 13 fell between pop 54 and 60 with an open or missing refuge;
+`plan check` refuses phase_target P3+ without it; stage 4 (the traps) stays P6. Manifest fragments are cumulative (the §11 merge is idempotent).
 Stage 1 digs the future trap-hall route as the entrance tunnel, so no shortcut ever has to be walled off.
 Stage 4 arms it with 41 stone-fall traps. Live L2: with the traps inside stages 2-3, buildingplan gave the
 scarce mechanisms to the traps and none to the six levers, so the bridges never reached the manifest; bridges,

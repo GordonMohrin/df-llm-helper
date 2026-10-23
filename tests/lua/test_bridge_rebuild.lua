@@ -4,8 +4,8 @@
 -- history per manifest bridge (count, with building destroyers in sight, races, years, rebuilds, items, lever links;
 -- persisted), seal's bridge queue (a lost bridge is queued again only in quiet PEACE, never in SIEGE, BREACH, ALERT,
 -- RECOVERY or a lockdown, as a peace-only repair project), the stop rule (destroyed perimeter.stop_after times by
--- building destroyers: no rebuild, DECISION_NEEDED bridge_rebuild with the history and the options), the player's
--- answer (verb bridge.rebuild), a walled footprint, `inspect defense`. k_mock (strict) + tests/lua/seal_world.lua with
+-- building destroyers: replaced by a wall and a door, BUG-048; it used to be a DECISION_NEEDED bridge_rebuild nobody
+-- answered), the player's order (verb bridge.rebuild), a walled footprint, `inspect defense`. k_mock (strict) + tests/lua/seal_world.lua with
 -- the real gate and seal, fake reflex (lockdown) and runner (repair) modules.
 local T = require('testlib')
 local SW = require('seal_world')
@@ -188,8 +188,8 @@ end)
 
 ---------------------------------------------------------------- seal: the bridge queue (the Run 11 replay)
 T.test('Run 11 replay: O1 destroyed by dragons: the wall is re-queued in RECOVERY, O1 only in quiet PEACE (a ' ..
-       'peace-only repair); destroyed a second time: not rebuilt, DECISION_NEEDED bridge_rebuild (A) once with the ' ..
-       'history and the options, inspect defense says held; bridge.rebuild queues it and the count starts again',
+       'peace-only repair); destroyed a second time: a door instead (BUG-048), never a question; bridge.rebuild ' ..
+       'orders the rebuild and the count starts again',
        function()
   -- old code: RECOVERY re-queued O1 together with the wall ({{20,25,9,'gw(1x1)'}, {40,26,9,'Cw'}}), after every
   -- siege, with no question to the player
@@ -218,48 +218,41 @@ T.test('Run 11 replay: O1 destroyed by dragons: the wall is re-queued in RECOVER
   pb = evs(W, 'PERIMETER_BROKEN')
   T.eq(#pb, 2)
   T.eq({pb[2].d.n, pb[2].d.requeued, pb[2].d.wait}, {1, 0, {'O1'}})
+  -- BUG-048 (DECISIONS 3): the answer is no question; before the player could answer (the fort is not in PEACE yet) he
+  -- orders the rebuild: the count starts again
+  local r = W.inbox('bridge.rebuild', {bridge = 'O1'})
+  T.ok(r.ok and r.msg:find('rebuild queued for the next quiet PEACE (mode RECOVERY now)', 1, true), r.msg)
+  T.ok(r.msg:find('replaced by wall + door after 2 more losses to building destroyers', 1, true), r.msg)
   W.K.set_mode('PEACE', 'test')
   run(W, 300)
-  T.eq(#W.cells, 2, 'not rebuilt: destroyed twice by building destroyers')
-  local q = decisions(W)
-  T.eq(#q, 1)
-  local d = q[1].d
-  T.eq({q[1].cls, d.bridge, d.n, d.bd, d.reb, d.items, d.mat, d.links, d.races, d.years, d.stop},
-       {'A', 'O1', 2, 2, 1, 3, 'granite blocks', 1, {'DRAGON'}, {3}, 2})
-  T.ok(q[1].msg:find('O1 destroyed 2x by building destroyers (DRAGON; y3), rebuilt 1x (3 items in the lost bridges, ' ..
-                     'granite blocks, 1 lever link): no automatic rebuild after 2', 1, true), q[1].msg)
-  T.eq(d.opts[1], 'rebuild: dfllm cmd bridge.rebuild {"bridge":"O1"}')
-  T.eq(#d.opts, 4)
+  T.eq(#W.cells, 3, 'the answer rebuilds it')
+  T.eq({W.cells[3].cells, W.cells[3].peace}, {{{20, 25, G, 'gw(1x1)'}}, true})
+  T.eq(#decisions(W), 0, 'bridge_rebuild is never asked')
   local ok, lost = W.K.call('seal', 'lost_gates')
-  T.ok(ok and lost.O1 and lost.O1.bd == 2 and lost.O1.asked == 2, T.show(lost))
-  local r = W.inbox('inspect', {what = 'defense'})
-  T.ok(r.ok and r.msg:find('O1 destroyed/- 0lev lost 2x (2 bd) held', 1, true), r.msg)
-  local o1 = r.data.bridges[1]
-  T.eq({o1.lost.n, o1.lost.bd, o1.rebuild.state, o1.rebuild.stop_after}, {2, 2, 'held', 2})
-  run(W, 4000)
-  T.eq(#decisions(W), 1, 'asked once')
-  -- the player answers: rebuild anyway
-  r = W.inbox('bridge.rebuild', {bridge = 'O1'})
-  T.ok(r.ok and r.msg:find('O1: rebuild queued as rp3', 1, true), r.msg)
-  T.eq({r.data.queued, r.data.bd, r.data.stop}, {1, 2, 2})
-  T.eq({W.cells[2 + 1].cells, W.cells[3].peace}, {{{20, 25, G, 'gw(1x1)'}}, true})
-  ok, lost = W.K.call('seal', 'lost_gates')
   T.eq(lost, {})
-  -- the third loss is rebuilt again (one since the answer), the fourth is held and asked again
+  -- the third loss is rebuilt again (one since the answer), the fourth is replaced by a door, nobody is asked
   rebuild(W)
   run(W, 9000)
   siege(W)
   W.K.set_mode('PEACE', 'test')
   run(W, 300)
-  T.eq({#W.cells, #decisions(W)}, {4, 1})
+  T.eq({#W.cells, #decisions(W)}, {4, 0})
   rebuild(W)
   run(W, 9000)
   siege(W)
   W.K.set_mode('PEACE', 'test')
   run(W, 300)
-  T.eq({#W.cells, #decisions(W)}, {4, 2})
-  T.eq({decisions(W)[2].d.bd, decisions(W)[2].d.n}, {4, 4})
-  T.eq(#bridge_cells(W), 3)
+  T.eq({#W.cells, #decisions(W)}, {5, 0})
+  T.eq(W.cells[5].cells, {{20, 25, G, 'd'}}, 'the fourth: a door in place of the gate')
+  ok, lost = W.K.call('seal', 'lost_gates')
+  T.ok(ok and lost.O1 and lost.O1.bd == 4 and lost.O1.cl == 'rp5', T.show(lost))
+  r = W.inbox('inspect', {what = 'defense'})
+  local o1 = r.data.bridges[1]
+  T.eq({o1.lost.n, o1.lost.bd, o1.rebuild.state, o1.rebuild.stop_after}, {4, 4, 'closing', 2})
+  T.ok(r.msg:find('O1 destroyed/- 0lev lost 4x (4 bd) closing', 1, true), r.msg)
+  r = W.inbox('bridge.rebuild', {bridge = 'O1'})
+  T.ok(not r.ok and r.msg:find('its wall + door is queued as rp5', 1, true), r.msg)
+  T.eq(#bridge_cells(W), 3, 'three bridges built, the fourth loss a door')
 end)
 
 -- a fake gate: O1 lost W.L (gate.losses), state 'unknown' with the tick it was destroyed while it is gone
@@ -318,25 +311,28 @@ T.test('a footprint the player walled is retired (never rebuilt); stop_after 0 a
   W2.K.set_mode('PEACE', 'test')
   run(W2, 300)
   T.eq({#W2.cells, #decisions(W2)}, {1, 0})
-  -- held with the default (2), the answer and the queue across a reload
+  -- BUG-048: the default (2): the door, no question; the verb's order and the queue across a reload (a bridge that
+  -- still waits for quiet PEACE)
   local g3 = fake_gate()
   g3.L = {n = 2, bd = 2, reb = 1, it = 3, lk = 1, races = {'DRAGON'}, ev = {}}
   local W3 = fort{gate = g3}
   record(W3)
   siege(W3)
+  local saved = reloaded(W3)
   local r = W3.inbox('bridge.rebuild', {bridge = 'X9'})
   T.ok(not r.ok and r.msg:find('X9 is no manifest bridge', 1, true), r.msg)
   W3.K.set_mode('PEACE', 'test')
   run(W3, 300)
-  T.eq({#W3.cells, #decisions(W3)}, {0, 1})
+  T.eq({#W3.cells, #decisions(W3)}, {1, 0})
+  T.eq(W3.cells[1].cells, {{20, 25, G, 'd'}}, 'a door in place of the gate')
   local g4 = fake_gate()
   g4.L = g3.L
-  local W4 = fort{gate = g4, persist = reloaded(W3), no_o1 = true}
-  W4.K.set_mode('PEACE', 'test')
+  local W4 = fort{gate = g4, persist = saved, no_o1 = true}
+  W4.K.set_mode('ALERT', 'test')
   run(W4, 2600)
-  T.eq({#W4.cells, #decisions(W4)}, {0, 0}, 'still held, not asked again')
+  T.eq({#W4.cells, #decisions(W4)}, {0, 0}, 'waits for quiet PEACE, nobody asked')
   local ok, lost = W4.K.call('seal', 'lost_gates')
-  T.ok(ok and lost.O1 ~= nil, T.show(lost))
+  T.ok(ok and lost.O1 ~= nil and lost.O1.cl == nil, T.show(lost))
   W4.K.set_mode('SIEGE', 'test')                    -- answered during a fight: queued for the next quiet PEACE
   run(W4, 100)
   r = W4.inbox('bridge.rebuild', {bridge = 'O1'})
@@ -352,7 +348,7 @@ T.test('a footprint the player walled is retired (never rebuilt); stop_after 0 a
   run(W5, 300)
   local o1 = W5.inbox('inspect', {what = 'defense'}).data.bridges[1]
   T.eq({o1.name, o1.state, o1.lost.bd, o1.rebuild.ans, o1.rebuild.state, o1.rebuild.proj},
-       {'O1', 'destroyed', 2, 2, 'queued', 'rp1'}, 'the answer and the queued repair survive a reload')
+       {'O1', 'destroyed', 2, 2, 'queued', 'rp1'}, 'the order and the queued repair survive a reload')
   T.eq(#W5.cells, 0, 'not queued twice')
 end)
 

@@ -26,8 +26,9 @@
 --             wall, door, gate or bridge around an opening the entrance check finds sealed, and on the verb
 --             perimeter.record the closers on the boundary of the citizens' group; persisted in m.seal. After an
 --             episode (a siege, an ALERT, a reflex lockdown: see `episode`) they are compared with the map, lost pieces
---             re-queued (runner.repair) and PERIMETER_BROKEN (A) raised; a piece already gone in PEACE or when an
---             episode begins is retired, never rebuilt
+--             re-queued (runner.repair) and PERIMETER_BROKEN (A) raised; a wall, door or hatch already gone in PEACE
+--             or when an episode begins is retired, never rebuilt; a lost bridge never is (BUG-048: it enters the
+--             bridge queue, rebuilt in quiet PEACE or replaced by a wall + door, see below)
 --   defense   (FR-24) every bridge's real gate_flags, the walk groups on its sides and its levers' links
 --   refuge    (FR-33/37/57) burrow audits (tiles, citizens inside, drink, food, beds) and alert_burrow(mode): the
 --             civ-alert burrow siege uses. Kern+ normally, the refuge (Tiefe+) in BREACH and until CFG.back_days
@@ -138,9 +139,15 @@ M.CFG = {
   levers_max = 64,
   perim_max = 1500, requeue_cool = 7 * DAY,
   -- BUG-030 rebuild policy (Run 11: O1 destroyed in five sieges, rebuilt each time): a manifest bridge destroyed this
-  -- many times by building destroyers since the player's last answer is not rebuilt automatically any more
-  -- (config/reflex.json perimeter.stop_after, 0 = always rebuilt); the bridge queue is looked at daily in quiet PEACE
+  -- many times by building destroyers since the player's last order is replaced by a wall + door (BUG-048;
+  -- config/reflex.json perimeter.stop_after, 0 = always rebuilt); the bridge queue is looked at daily in quiet PEACE
   stop_after = 2, gates_every = DAY, gq_max = 16, gq_keep = 60 * DAY,
+  -- BUG-048: a bridge that vanished this many times with no building destroyer in sight (perimeter.vanish_after, 0 =
+  -- always rebuilt) is replaced by a wall and a door too, so the rebuild loop has an end
+  vanish_after = 3,
+  -- BUG-049: the refuge's separation answer (the entrance BFS and its flood run at least every bfs_every days in PEACE)
+  -- is trusted for this long; older means seal's check stopped running
+  sep_fresh = 35 * DAY,
   -- BUG-035 (Run 11 siege 9: two citizens stood idle outside the alert burrow for 4,800 ticks): the recall's path check
   -- visits at most rpath_max tiles per citizen and crosses at most rpath_doors forbidden doors; ids per call
   rpath_max = 6000, rpath_doors = 2, rpath_ids = 8,
@@ -1366,7 +1373,7 @@ local function perim_manifest(K, t)
   for _, name in ipairs(sorted_keys(man.bridges)) do
     local b = man.bridges[name]
     local fp = type(b) == 'table' and b.fp
-    if type(fp) == 'table' and #fp == 6 then
+    if type(fp) == 'table' and #fp == 6 and not st.rep[name] then       -- BUG-048: not one replaced by wall + door
       local k = kstr(fp[1], fp[2], fp[3])
       local piece = {k = 'bridge', fp = {fp[1], fp[2], fp[3], fp[4], fp[5], fp[6]}, name = name, src = 'manifest'}
       if not perim_add(k, piece, t) and st.perim[k] and st.perim[k].k == 'bridge' and st.perim[k].name ~= name then
@@ -1414,11 +1421,13 @@ end
 -- the post-siege diff re-queued it in RECOVERY every time, the builders went out to its footprint, and the next siege
 -- broke it again. Now a lost bridge waits in the bridge queue (persisted m.seal.gq) and is queued again only in quiet
 -- PEACE (no reflex lockdown), as its own `repair` project that the runner builds only then (runner.repair
--- opts.peace); walls, doors and the rest keep the RECOVERY repair. A manifest bridge destroyed perimeter.stop_after
--- (config/reflex.json, default 2; 0 = always rebuilt) times by building destroyers since the player's last answer
--- (gate.losses: bd) is held instead: no rebuild, DECISION_NEEDED bridge_rebuild (A, once per loss count) with its
--- history and the options, readiness says lost:<B>; the verb bridge.rebuild (the player's answer) rebuilds it and the
--- count starts again. A footprint the player walled is retired, a bridge that stands again leaves the queue.
+-- opts.peace); walls, doors and the rest keep the RECOVERY repair. BUG-048 (DECISIONS 3): a manifest bridge destroyed
+-- perimeter.stop_after (config/reflex.json, default 2; 0 = always rebuilt) times by building destroyers since the
+-- player's last order (gate.losses: bd) is replaced by a wall and a door instead (KP.close: a constructed closure
+-- through the runner, reported once as PERIMETER_BROKEN replaced; the question DECISION_NEEDED bridge_rebuild is not
+-- asked any more), readiness says lost:<B> until it stands; the verb bridge.rebuild is the player's order to rebuild
+-- anyway and the counts start again. A footprint the player walled is replaced too, a bridge that stands again leaves
+-- the queue.
 local function stop_after(K)
   local r = type(K.cfg) == 'table' and type(K.cfg.reflex) == 'table' and K.cfg.reflex.perimeter or nil
   local v = type(r) == 'table' and int(r.stop_after) or nil
@@ -1469,12 +1478,87 @@ local function walled(fp)
   return false
 end
 
--- held: a manifest bridge destroyed stop_after times by building destroyers since the player's last answer
-local function gate_held(K, g, stop)
-  if not g.name or stop <= 0 then return false end
-  local L = losses(K, g.name)
-  local bd = L and int(L.bd) or 0
-  return bd - (int(st.ans[g.name]) or 0) >= stop, L
+-- BUG-048 (Run 11 y487-y497, Run 13 y507-y525): the keeper's own helpers live in one table (seal.lua is near Lua's
+-- limit of 200 locals). A lost manifest bridge enters the queue the moment gate reports it (PEACE without a lockdown)
+-- or at the next perimeter diff (an episode, the PEACE retire pass), whatever its history: the PEACE retire pass used
+-- to drop the piece of a bridge that vanished in PEACE (nothing waited: bridge.rebuild "no lost bridge waits"), and a
+-- manifest bridge no defense project had ever built had no quickfort text (the diff queued nothing: requeued=0, for
+-- ever). Its text now comes from gate (the raise direction it read from the complete building) and the footprint.
+-- DECISIONS 3: a bridge lost perimeter.stop_after times to building destroyers (and perimeter.vanish_after times with no
+-- destroyer in sight: the loop breaker) is replaced by a wall and a door; a rebuild nobody built in gq_keep days too.
+local KP = {}
+
+-- config/reflex.json perimeter.vanish_after (0-20, default CFG.vanish_after; 0 = always rebuilt)
+function KP.vanish(K)
+  local r = type(K.cfg) == 'table' and type(K.cfg.reflex) == 'table' and K.cfg.reflex.perimeter or nil
+  local v = type(r) == 'table' and int(r.vanish_after) or nil
+  if v and v >= 0 and v <= 20 then return v end
+  return CFG.vanish_after
+end
+
+-- the newest loss of a bridge: 'destroyers' (building destroyers were in sight) or 'none' (it vanished)
+function KP.how(L)
+  local e = type(L) == 'table' and type(L.ev) == 'table' and L.ev[#L.ev]
+  if type(e) ~= 'table' then return nil end
+  return e.bd == 1 and 'destroyers' or 'none'
+end
+
+-- the quickfort text that builds the bridge again: the one a defense project recorded, else gate's raise direction
+-- key (gw when it never read one: what fortcore builds) over the footprint's extents
+function KP.text(K, name, p)
+  if type(p.q) == 'string' and p.q ~= '' then return p.q:sub(1, 64) end
+  local key
+  if name then
+    local ok, v = K.call('gate', 'bridge_key', name)
+    if ok and type(v) == 'string' then key = v end
+  end
+  local fp = p.fp
+  return string.format('%s(%dx%d)', key or 'gw', fp[4] - fp[1] + 1, fp[5] - fp[2] + 1)
+end
+
+-- a lost bridge piece enters the bridge queue: a manifest bridge or one a defense project built (a bridge the player
+-- built and the keeper never saw is the player's), not one already replaced
+function KP.add(K, k, p, t)
+  if st.gq[k] or p.k ~= 'bridge' or type(p.fp) ~= 'table' or #p.fp ~= 6 then return false end
+  local name = bridge_name(K, k, p)
+  if (name and st.rep[name]) or st.rep[k] then return false end
+  if not (name or p.q) then return false end
+  local n = 0
+  for _ in pairs(st.gq) do n = n + 1 end
+  if n >= CFG.gq_max then return false end
+  st.gq[k] = {q = KP.text(K, name, p), fp = {p.fp[1], p.fp[2], p.fp[3], p.fp[4], p.fp[5], p.fp[6]}, name = name, t = t}
+  dirty = true
+  return true
+end
+
+-- the wall and the door that replace a bridge: the footprint's first row across the way (its shorter side is the way
+-- through; a square one counts as x), walls on all of it but the middle tile of the long side, which gets the door
+function KP.cells(fp)
+  local w, h, z, c = fp[4] - fp[1] + 1, fp[5] - fp[2] + 1, fp[3], {}
+  if w <= h then
+    local mid = fp[2] + (h - 1) // 2
+    for y = fp[2], fp[5] do c[#c + 1] = {fp[1], y, z, y == mid and 'd' or 'Cw'} end
+  else
+    local mid = fp[1] + (w - 1) // 2
+    for x = fp[1], fp[4] do c[#c + 1] = {x, fp[2], z, x == mid and 'd' or 'Cw'} end
+  end
+  return c
+end
+
+-- the closure stands: constructed walls and a built door on every cell
+function KP.standing(cells)
+  for _, c in ipairs(cells) do
+    spend(2)
+    if not rev(c[1], c[2], c[3]) then return false end
+    if c[4] == 'd' then
+      local b = bld_at(c[1], c[2], c[3])
+      if not (b and btype(b) == 'Door' and built(b)) then return false end
+    else
+      local s = shape(c[1], c[2], c[3])
+      if not (s and (s.shape == 'WALL' or s.shape == 'FORTIFICATION')) then return false end
+    end
+  end
+  return true
 end
 
 -- the years of the losses with building destroyers in sight ({434, 438})
@@ -1486,92 +1570,154 @@ local function loss_years(L)
   return ys
 end
 
--- DECISION_NEEDED bridge_rebuild (A): the history (losses, destroyers, years, what the rebuilds took) and the options
-local function ask(K, g, L, stop)
-  local yt, races = {}, type(L.races) == 'table' and L.races or {}
-  local reb, it, lk = int(L.reb) or 0, int(L.it) or 0, int(L.lk) or 0
-  for i, y in ipairs(loss_years(L)) do yt[i] = 'y' .. y end
-  local spent = reb > 0 and string.format('rebuilt %dx', reb) or 'never rebuilt'
-  if it > 0 or lk > 0 then
-    spent = spent .. string.format(' (%d items in the lost bridges%s, %d lever link%s)', it,
-                                   L.mat and (', ' .. L.mat) or '', lk, lk == 1 and '' or 's')
+-- 'rebuild', or 'replace' and the reason: building destroyers broke the bridge stop_after times since the player's last
+-- answer, it vanished vanish_after times with none in sight, its rebuild was never built (g.force), or the closure is
+-- already under way (g.cl)
+function KP.verdict(K, g, stop, van)
+  if g.cl then return 'replace', g.why or 'closure under way' end
+  if g.force then return 'replace', g.force end
+  local L = g.name and losses(K, g.name)
+  if not L then return 'rebuild' end
+  local n, bd = int(L.n) or 0, int(L.bd) or 0
+  local nd = n - bd
+  if stop > 0 and bd - (int(st.ans[g.name]) or 0) >= stop then
+    local yt = {}
+    for i, y in ipairs(loss_years(L)) do yt[i] = 'y' .. y end
+    return 'replace', trunc(string.format('lost %dx to building destroyers (%s%s)', bd,
+                                          #L.races > 0 and table.concat(L.races, ',') or '?',
+                                          #yt > 0 and ('; ' .. table.concat(yt, ',')) or ''), 120)
   end
-  local q = trunc(string.format('%s destroyed %dx by building destroyers (%s; %s), %s: no automatic rebuild after %d; '
-                                .. 'rebuild, wall, outer gate or leave?', g.name, L.bd,
-                                #races > 0 and table.concat(races, ',') or '?', table.concat(yt, ','), spent,
-                                stop), 200)
-  local opts = {trunc(string.format('rebuild: dfllm cmd bridge.rebuild {"bridge":"%s"}', g.name), 60),
-                'wall: walls on its footprint + a door entrance (plan)',
-                'gate: a second outer gate further out (plan, by hand)',
-                'leave: no rebuild (default); the deep defense holds'}
-  K.emit('DECISION_NEEDED', 'A', q, {id = 'bridge_rebuild', q = q, bridge = g.name, n = int(L.n), bd = L.bd, reb = reb,
-                                     items = it, mat = L.mat, links = lk, races = races, years = loss_years(L),
-                                     stop = stop, opts = opts})
-  K.log('warn', 'seal: %s', q)
+  if van > 0 and nd - (int(st.ansv[g.name]) or 0) >= van then
+    return 'replace', string.format('lost %dx with no destroyer in sight', nd)
+  end
+  return 'rebuild', nil, KP.how(L)
 end
 
--- the bridge queue in quiet PEACE: {<key> = outcome} (queued now, pending: queued before, held, walled, ok; wait
--- outside quiet PEACE) and the repair projects queued now. An entry stays until its bridge stands again (its piece
--- keeps the build text: the retire passes leave it alone), or gq_keep ticks after its repair was queued
+-- queue the closure: walls and a door through the runner, built in quiet PEACE only
+function KP.close(K, k, g, t, why)
+  local ok, r1, r2 = K.call('runner', 'repair', KP.cells(g.fp),
+                            trunc(string.format('bridge %s replaced by wall + door (%s)', g.name or k, why), 120),
+                            {peace = true})
+  if not (ok and r1) then
+    K.log('warn', 'seal: bridge %s: wall + door not queued: %s', g.name or k, tostring(r2 or r1))
+    return false
+  end
+  g.proj, g.qt, g.cl, g.why, dirty = tostring(r2), t, 1, trunc(why, 120), true
+  K.log('info', 'seal: bridge %s at %s replaced by wall + door as %s (%s)', g.name or '?', k, g.proj, why)
+  return true
+end
+
+-- the bridge is a gate no more: the closure stands, or the player walled the footprint
+function KP.done(K, k, g, t, how)
+  local name = g.name or k
+  local L = g.name and losses(K, g.name)
+  st.rep[name] = {t = t, k = k, fp = {g.fp[1], g.fp[2], g.fp[3], g.fp[4], g.fp[5], g.fp[6]},
+                  n = L and int(L.n) or 0, how = how}
+  st.gq[k], st.perim[k], dirty = nil, nil, true
+  perim_count()
+  K.log('info', 'seal: bridge %s at %s is replaced (%s): no gate any more', name, k, how)
+end
+
+-- PERIMETER_BROKEN (A) once for the bridges replaced by wall + door in this pass
+function KP.report(K, reps)
+  if #reps == 0 then return end
+  local names, parts = {}, {}
+  for i, r in ipairs(reps) do
+    names[i] = r.name
+    parts[i] = string.format('bridge %s %s: replaced by wall + door at %d,%d,%d (%s, built in quiet PEACE)', r.name,
+                             r.why, r.fp[1], r.fp[2], r.fp[3], r.proj)
+  end
+  K.emit('PERIMETER_BROKEN', 'A', trunc(table.concat(parts, '; ') .. '; no question: the other bridges stay', 200),
+         {n = #reps, pos = {reps[1].fp[1], reps[1].fp[2], reps[1].fp[3]}, kinds = {'bridge'}, requeued = #reps,
+          why = 'replaced', replaced = names})
+end
+
+-- the bridge queue in quiet PEACE: {<key> = outcome} (queued now, closing now, pending: queued before, replaced,
+-- walled, ok; wait outside quiet PEACE), the repair projects queued now and the replaced bridges to report. An entry
+-- stays until its bridge stands again or the closure does. A rebuild nobody built within gq_keep days becomes the
+-- closure; a closure nobody built is queued again.
 local function gates_pass(K, t, why)
-  local out, projs = {}, {}
-  if not next(st.gq) then return out, projs end
+  local out, projs, reps = {}, {}, {}
+  for _, name in ipairs(sorted_keys(st.rep)) do       -- a bridge built again on a replaced footprint is a gate again
+    local r = st.rep[name]
+    spend(2)
+    if piece_state(r.k, {k = 'bridge', fp = r.fp}) == 'ok' then
+      st.rep[name], dirty = nil, true
+      K.log('info', 'seal: bridge %s stands again on its footprint: no longer replaced', name)
+    end
+  end
+  if not next(st.gq) then return out, projs, reps end
   if not quiet_peace(K) then
     for k, g in pairs(st.gq) do out[k] = g.proj and 'pending' or 'wait' end
-    return out, projs
+    return out, projs, reps
   end
-  local stop = stop_after(K)
+  local stop, van = stop_after(K), KP.vanish(K)
   for _, k in ipairs(sorted_keys(st.gq)) do
     local g = st.gq[k]
     spend(4)
     local s = piece_state(k, {k = 'bridge', fp = g.fp})
-    if s == 'ok' then                                 -- it stands again (its repair, or by hand)
+    if g.cl and KP.standing(KP.cells(g.fp)) then
+      KP.done(K, k, g, t, 'wall + door')
+      out[k] = 'replaced'
+    elseif s == 'ok' then                             -- it stands again (its repair, or by hand)
       st.gq[k], dirty, out[k] = nil, true, 'ok'
       K.log('info', 'seal: lost bridge %s at %s stands again', g.name or '?', k)
-    elseif s == 'gone' and walled(g.fp) then          -- the player walled its footprint: retired, never rebuilt
-      st.gq[k], st.perim[k], dirty, out[k] = nil, nil, true, 'walled'
-      perim_count()
-      K.log('info', 'seal: lost bridge %s at %s: its footprint is walled now, not rebuilt', g.name or '?', k)
-    elseif s == 'gone' and g.proj then
-      if t - (g.qt or t) > CFG.gq_keep then           -- its repair never built it (cancelled?): given up
-        st.gq[k], dirty, out[k] = nil, true, 'given_up'
-        K.log('warn', 'seal: lost bridge %s at %s: %s did not build it in %d days, not rebuilt again', g.name or '?',
-              k, g.proj, CFG.gq_keep // DAY)
-      else out[k] = 'pending' end
+    elseif s == 'gone' and not g.cl and walled(g.fp) then   -- the player walled its footprint: replaced, never rebuilt
+      KP.done(K, k, g, t, 'walled')
+      out[k] = 'walled'
     elseif s == 'gone' then
-      local hold, L = gate_held(K, g, stop)
-      if hold then
-        out[k] = 'held'
-        if g.held ~= 1 or g.asked ~= L.bd then
-          g.held, g.asked, dirty = 1, L.bd, true
-          ask(K, g, L, stop)
+      if g.proj and t - (g.qt or t) > CFG.gq_keep then
+        K.log('warn', 'seal: lost bridge %s at %s: %s did not build %s in %d days', g.name or '?', k, g.proj,
+              g.cl and 'its wall + door' or 'it', CFG.gq_keep // DAY)
+        if not g.cl then
+          g.force = string.format('its rebuild %s was not built in %d days', g.proj, CFG.gq_keep // DAY)
         end
+        g.proj, dirty = nil, true
+      end
+      if g.proj then out[k] = 'pending'
       else
-        local x, y, z = dec(k)
-        local q = g.q:gsub('%((%-?%d+)x(%-?%d+)%)', function(w, h)   -- the anchor is the min corner: positive extents
-          return string.format('(%dx%d)', math.abs(tonumber(w)), math.abs(tonumber(h)))
-        end)
-        local ok, r1, r2 = K.call('runner', 'repair', {{x, y, z, q}}, string.format('bridge %s after the fight (%s)',
-                                  g.name or k, why), {peace = true})
-        if ok and r1 then
-          g.proj, g.qt, g.held, dirty, out[k] = tostring(r2), t, nil, true, 'queued'
-          projs[#projs + 1] = g.proj
-          K.log('info', 'seal: lost bridge %s at %s queued again as %s (quiet PEACE)', g.name or '?', k, g.proj)
+        local v, vwhy, how = KP.verdict(K, g, stop, van)
+        if v == 'replace' then
+          if KP.close(K, k, g, t, vwhy) then
+            out[k] = 'closing'
+            projs[#projs + 1] = g.proj
+            if g.rep ~= 1 then
+              g.rep = 1
+              reps[#reps + 1] = {name = g.name or k, why = vwhy, proj = g.proj, fp = g.fp}
+            end
+          else out[k] = 'wait' end
         else
-          out[k] = 'wait'
-          K.log('warn', 'seal: lost bridge %s: repair not queued: %s', g.name or k, tostring(r2 or r1))
+          local x, y, z = dec(k)
+          local q = g.q:gsub('%((%-?%d+)x(%-?%d+)%)', function(w, h)   -- the anchor is the min corner: positive extents
+            return string.format('(%dx%d)', math.abs(tonumber(w)), math.abs(tonumber(h)))
+          end)
+          local label = how == 'none' and string.format('bridge %s lost, no destroyer in sight (%s)', g.name or k, why)
+                        or string.format('bridge %s after the fight (%s)', g.name or k, why)
+          local ok, r1, r2 = K.call('runner', 'repair', {{x, y, z, q}}, label, {peace = true})
+          if ok and r1 then
+            g.proj, g.qt, g.how, dirty, out[k] = tostring(r2), t, how, true, 'queued'
+            projs[#projs + 1] = g.proj
+            K.log('info', 'seal: lost bridge %s at %s queued again as %s (quiet PEACE%s)', g.name or '?', k, g.proj,
+                  how == 'none' and ', no destroyer in sight' or '')
+          else
+            out[k] = 'wait'
+            K.log('warn', 'seal: lost bridge %s: repair not queued: %s', g.name or k, tostring(r2 or r1))
+          end
         end
       end
     end
   end
-  return out, projs
+  return out, projs, reps
 end
 
-local function job_gates(K, why) gates_pass(K, now_t(K), why) end
+local function job_gates(K, why)
+  local _, _, reps = gates_pass(K, now_t(K), why)
+  KP.report(K, reps)
+end
 
--- pre: a siege begins: pieces already gone are retired (a wall the player removed is never rebuilt);
--- retire: the same in PEACE; post: after the siege, lost pieces are re-queued and reported (lost bridges go to the
--- bridge queue, built again only in quiet PEACE)
+-- pre: a siege begins: pieces already gone are retired (a wall the player removed is never rebuilt), a lost bridge goes
+-- to the bridge queue; retire: the same in PEACE; post: after the siege, lost pieces are re-queued and reported (lost
+-- bridges go to the bridge queue, built again only in quiet PEACE)
 local function job_perim(K, why)
   local t = now_t(K)
   perim_manifest(K, t)
@@ -1585,7 +1731,12 @@ local function job_perim(K, why)
   if why ~= 'post' then
     local kept = 0
     for _, k in ipairs(gone) do
-      if st.gq[k] then kept = kept + 1 else st.perim[k] = nil end     -- a lost bridge waiting for its rebuild stays
+      local p = st.perim[k]
+      if st.gq[k] then kept = kept + 1
+      elseif p and p.k == 'bridge' and KP.add(K, k, p, t) then      -- BUG-048: a lost bridge is not retired
+        kept = kept + 1
+        due('gates', t, 'lost')
+      else st.perim[k] = nil end
     end
     if #gone > kept then
       dirty = true
@@ -1603,9 +1754,7 @@ local function job_perim(K, why)
   for _, k in ipairs(fresh) do
     local p = st.perim[k]
     if not kseen[p.k] then kseen[p.k] = true; kinds[#kinds + 1] = p.k end
-    if p.k == 'bridge' and p.q and type(p.fp) == 'table' and #p.fp == 6 and #sorted_keys(st.gq) < CFG.gq_max then
-      st.gq[k] = {q = p.q, fp = {p.fp[1], p.fp[2], p.fp[3], p.fp[4], p.fp[5], p.fp[6]}, name = bridge_name(K, k, p),
-                  t = t}
+    if p.k == 'bridge' and KP.add(K, k, p, t) then
       lost[#lost + 1] = k
     else
       local q = p.q or QF_OF[p.k]
@@ -1622,27 +1771,28 @@ local function job_perim(K, why)
     if ok and r1 then queued, proj = #cells, r2
     else K.log('warn', 'seal: repair not queued: %s', tostring(r2 or r1)) end
   end
-  local res, projs = gates_pass(K, t, 'post')
-  if #fresh == 0 then return end
+  local res, projs, reps = gates_pass(K, t, 'post')
+  if #fresh == 0 then KP.report(K, reps); return end
   dirty = true
-  local wait, held, parts = {}, {}, {}
+  local wait, parts = {}, {}
+  local rnames = {}
+  for _, r in ipairs(reps) do rnames[#rnames + 1] = r.name end
   for _, k in ipairs(lost) do
     local name = st.gq[k] and st.gq[k].name or bridge_name(K, k, st.perim[k] or {}) or k
     if res[k] == 'queued' then queued = queued + 1
-    elseif res[k] == 'held' then held[#held + 1] = name
     elseif res[k] == 'wait' then wait[#wait + 1] = name end
   end
   if #projs > 0 then proj = proj and (proj .. ',' .. table.concat(projs, ',')) or table.concat(projs, ',') end
   if #wait > 0 then parts[#parts + 1] = '; bridge ' .. table.concat(wait, ',') .. ' after the fight (quiet PEACE)' end
-  if #held > 0 then
-    parts[#parts + 1] = '; bridge ' .. table.concat(held, ',') .. ' not rebuilt (building destroyers): DECISION_NEEDED'
+  for _, r in ipairs(reps) do
+    parts[#parts + 1] = string.format('; bridge %s %s: replaced by wall + door (%s)', r.name, r.why, r.proj)
   end
   local x, y, z = dec(fresh[1])
   local p0 = st.perim[fresh[1]]
   K.emit('PERIMETER_BROKEN', 'A', trunc(string.format('%d perimeter pieces lost (%s %s): %d re-queued%s%s', #fresh,
          p0.k, fresh[1], queued, proj and (' as ' .. proj) or '', table.concat(parts)), 200),
          {n = #fresh, pos = {x, y, z}, kinds = kinds, requeued = queued, why = why,
-          wait = #wait > 0 and wait or nil, held = #held > 0 and held or nil})
+          wait = #wait > 0 and wait or nil, replaced = #rnames > 0 and rnames or nil})
 end
 
 ---------------------------------------------------------------- entrances (FR-54)
@@ -2756,8 +2906,11 @@ local function sep_of(name)
   return e
 end
 
--- BUG-018: a visible hostile (sense's census) stands on a tile of burrow `name` (Run 9: "BREACH: hostile inside Kern+"
--- and the alert kept every citizen in there); per tick and census
+-- BUG-018: how many visible hostiles (sense's census) stand on tiles of burrow `name` (Run 9: "BREACH: hostile inside
+-- Kern+" and the alert kept every citizen in there) and the first one's position; per tick and census. BUG-049 (Run 13
+-- y525: the citizens found the refuge occupied): sense also counts the ones inside the refuge (census.h.rin) when the
+-- 40-entry list does not hold them, and the position goes into REFUGE_FAIL, the switch text and the refuge's trust.
+-- Returns n (0 none) and {x, y, z} (nil when only the count says so)
 local function hostile_in(K, name, t)
   local h = K.census.h
   local c = mem.hin
@@ -2767,19 +2920,92 @@ local function hostile_in(K, name, t)
   end
   local v = c.by[name]
   if v == nil then
-    v = false
+    v = {0}
     local b = type(h) == 'table' and (int(h.vis) or 0) > 0 and burrow(name)
     if b then
       for _, e in ipairs(type(h.list) == 'table' and h.list or {}) do
         if type(e) == 'table' and int(e.x) and int(e.y) and int(e.z) and in_burrow(b, e.x, e.y, e.z) then
-          v = true
-          break
+          v[1] = v[1] + 1
+          v[2] = v[2] or {e.x, e.y, e.z}
         end
       end
+      local _, refuge = burrow_names(K)
+      if name == refuge and (int(h.rin) or 0) > v[1] then v[1] = int(h.rin) end
     end
     c.by[name] = v
   end
-  return v
+  return v[1], v[2]
+end
+
+-- 'hostile inside at 7,6,5 (2 hostiles)' (no position when only sense's count says so)
+local function hostile_txt(n, at)
+  return string.format('hostile inside%s%s', at and string.format(' at %d,%d,%d', at[1], at[2], at[3]) or '',
+                       n > 1 and string.format(' (%d hostiles)', n) or '')
+end
+
+-- BUG-049 (Run 13 y525): the tile above the refuge level on the civilians' stair down to it, from the fort manifest
+-- (refuge anchor, stairs.civ {x, y, z0, z1}), as dfpilot.cmd.refuge_head reads it; a hatch there separates the refuge on
+-- its own. nil without a manifest refuge or such a stair
+local function refuge_head(K)
+  local man = K.manifest()
+  local a = type(man.refuge) == 'table' and man.refuge.anchor
+  if type(a) ~= 'table' or not int(a[3]) then return nil end
+  for _, c in ipairs(type(man.stairs) == 'table' and type(man.stairs.civ) == 'table' and man.stairs.civ or {}) do
+    if type(c) == 'table' and #c == 4 and int(c[1]) and int(c[2]) and int(c[3]) and int(c[4]) then
+      local lo, hi = math.min(c[3], c[4]), math.max(c[3], c[4])
+      if lo == a[3] and hi > a[3] then return {c[1], c[2], a[3] + 1} end
+    end
+  end
+end
+
+-- public (BUG-049, readiness, inspect refuge, state alert.ref.tr/trw): is the refuge trusted? Only while (1) the
+-- kernel's own separation answer exists, says no opening reaches it and is at most CFG.sep_fresh ticks old (its BFS
+-- runs at least every bfs_every days in PEACE), (2) the last Python audit (readiness.refuge_audit) did not find it
+-- unseparated in the worst case (a hatch is no barrier there), (3) a closer stands on the stair head (the manifest's
+-- civilian stair into it) and (4) no hostile is inside. {ok, why = {text, ...}, sep (-1 unknown, 0 exposed, 1), age
+-- (ticks since the separation answer), audit = {sep, age}|nil, hatch = {pos, state ok|missing}|nil, hostile =
+-- {n, at}|nil}; nil before the first audit. why[1] is the first reason (status, state, REFUGE_FAIL tail)
+function M.refuge_trust(K)
+  if not (mem and mem.audit) then return nil end
+  local _, refuge = burrow_names(K)
+  local t = now_t(K)
+  local a = mem.audit.burrows and mem.audit.burrows[refuge]
+  if not (a and a.exists) then return {ok = false, why = {'no refuge burrow ' .. refuge}, sep = -1} end
+  local why, r = {}, {sep = -1}
+  local sp = sep_of(refuge)
+  local sepr = mem.sepr
+  if sp == nil then
+    r.sep = -1
+    why[#why + 1] = 'unverified: its separation is not checked yet'
+  elseif sp.exp then
+    r.sep = 0
+    why[#why + 1] = 'exposed: ' .. tostring(sp.why)
+  else
+    r.sep = 1
+    if sepr and t - sepr.tick > CFG.sep_fresh then
+      r.age = t - sepr.tick
+      why[#why + 1] = string.format('separation not checked for %d days', r.age // DAY)
+    end
+  end
+  if sepr then r.age = t - sepr.tick end
+  local oka, au = K.call('readiness', 'refuge_audit')
+  if oka and type(au) == 'table' and int(au.age) then
+    r.audit = {sep = au.sep == 0 and 0 or 1, age = int(au.age)}
+    if au.sep == 0 then why[#why + 1] = string.format('audit: refuge_sep failed %d t ago', int(au.age)) end
+  end
+  local head = refuge_head(K)
+  if head then
+    local hk = sep_closer(key3(head[1], head[2], head[3]))
+    r.hatch = {pos = head, state = hk and 'ok' or 'missing'}
+    if not hk then why[#why + 1] = string.format('no hatch at %d,%d,%d', head[1], head[2], head[3]) end
+  end
+  local hn, hat = hostile_in(K, refuge, t)
+  if hn > 0 then
+    r.hostile = {n = hn, at = hat}
+    why[#why + 1] = hat and string.format('hostile inside at %d,%d,%d', hat[1], hat[2], hat[3]) or 'hostile inside'
+  end
+  r.ok, r.why = #why == 0, why
+  return r
 end
 
 -- BUG-019: the BREACH level and the dead end hold for breach_days after the first such pick of an episode. BUG-031
@@ -2819,7 +3045,8 @@ local function rate(K, au, name, lvl, t)
   if dw then return false, dw, false, true end
   local s = sep_of(name)
   if s and s.exp and not (lvl == 'DEAD' and (s.d or 0) >= CFG.dead_gap) then return false, s.why, true end
-  if hostile_in(K, name, t) then return false, 'hostile inside', true end
+  local hn, hat = hostile_in(K, name, t)
+  if hn > 0 then return false, hostile_txt(hn, hat), true end
   if a.reach == 0 then return false, 'out of the citizens\' reach' end
   if lvl == 'BREACH' or lvl == 'DEAD' or lvl == 'WET' then
     if a.tiles < CFG.breach_tiles then return false, string.format('%d tiles<%d', a.tiles, CFG.breach_tiles) end
@@ -2923,6 +3150,12 @@ local function publish(K)
     local s = ex and sep_of(refuge) or nil
     mem.pub.ref = {ex = ex and 1 or 0, sep = s == nil and -1 or (s.exp and 0 or 1),
                    beds = ex and math.max(0, int(ra.beds) or 0) or 0, need = math.max(0, int(need.beds) or 0)}
+    -- BUG-049: trusted (1) or not (0) and why (the first reason): separation fresh, hatch standing, nobody inside
+    local tr = ex and M.refuge_trust(K) or nil
+    if tr then
+      mem.pub.ref.tr = tr.ok and 1 or 0
+      if not tr.ok then mem.pub.ref.trw = trunc(tr.why[1], 40) end
+    end
     -- FR-69: its drink, the drink it wants (refuge_dry's rule) and its drink store's tiles (plan check/propose)
     if ex then
       mem.pub.ref.dr, mem.pub.ref.dn = math.max(0, int(ra.drink) or 0), math.max(0, int(ra.dneed) or 0)
@@ -2951,7 +3184,8 @@ local function leave_why(K, au, cur, refuge, t)
   if dw then return 'dry', dw end
   local s = sep_of(cur)
   if s and s.exp and not (cur == refuge and (s.d or 0) >= CFG.dead_gap) then return 'unseparated', tostring(s.why) end
-  if hostile_in(K, cur, t) then return 'breached', 'a hostile inside' end
+  local hn, hat = hostile_in(K, cur, t)
+  if hn > 0 then return 'breached', hostile_txt(hn, hat) end
   if a.reach == 0 then return 'unreachable', 'out of the citizens\' reach' end
   if cur == refuge and not a.wet and not breach_open(K, t) then
     return 'window', string.format('no drink, and the %d days without counts are spent', rcfg(K).breach_days)
@@ -3078,13 +3312,16 @@ function M.alert_burrow(K, mode, default, hold, cur)
     -- BUG-008: once per episode, again only when the refused burrow, the fallback or the reason changed, and then
     -- not before max(1 game day, 60 s wall clock) (util/cadence; the unconditional daily repeat was 3 s at timestream)
     local ids = {want .. '>' .. tostring(pick)}
-    local toks, now = {trunc(why, 60), forced and 'forced' or (r.flee and 'flee' or (r.level or ''))}, K.now()
+    -- (BUG-049: a hostile that moves inside the refuge is no news: the position and the count stay out of the token)
+    local cause = why:gsub(' at %-?%d+,%-?%d+,%-?%d+', ''):gsub(' %(%d+ hostiles%)', '')
+    local toks, now = {trunc(cause, 60), forced and 'forced' or (r.flee and 'flee' or (r.level or ''))}, K.now()
     -- (no separated burrow is news that goes out at once: the alert is switched off)
     local o = r.flee and {ticks = 0, wall_s = 0} or {ticks = DAY, wall_s = 60}
     if CAD.due(st.refuge_rec, now, ids, toks, o) then
       st.refuge_rec, dirty = CAD.mark(now, ids, toks), true
       local a = pick and (au or {})[pick]
       local ws = sep_of(want)
+      local hn, hat = hostile_in(K, want, t)           -- BUG-049: the hostiles in the refused burrow and where
       -- BUG-031: what closes the entrances that reach it (the seal template's `at`; SIEGE_UNREADY lists them too, so
       -- `seal at=last` takes them)
       local fix = ws and ws.exp and ws.fix ~= nil and ws.fix ~= '' and ws.fix or nil
@@ -3094,7 +3331,7 @@ function M.alert_burrow(K, mode, default, hold, cur)
              {burrow = want, fallback = pick or '', why = trunc(why .. (tail or ''), 120), tiles = a and a.tiles or 0,
               inside = a and a.inside or 0, mode = mode, level = r.level, flee = r.flee and 1 or 0,
               open = ws and ws.exp and ws.open or nil, fix = fix and trunc(fix, 200) or nil,
-              dry = r.dry and 1 or nil})
+              dry = r.dry and 1 or nil, hostile = hn > 0 and hn or nil, at = hat})
     end
   end
   if pick == want and st.refuge_rec then st.refuge_rec, dirty = nil, true end   -- the episode ended
@@ -3924,7 +4161,7 @@ local function schedule_periodic(K, t)
     due('perim', t, 'retire')
   end
   -- BUG-030 rebuild policy: the lost bridges are looked at daily in PEACE (built again, held, walled, standing)
-  if peace and next(st.gq) and t - (mem.gates_t or -CFG.gates_every) >= CFG.gates_every then
+  if peace and (next(st.gq) or next(st.rep)) and t - (mem.gates_t or -CFG.gates_every) >= CFG.gates_every then
     mem.gates_t = t
     due('gates', t, 'periodic')
   end
@@ -4028,7 +4265,7 @@ end
 function M.init(K)
   local p = K.persist.get('m.seal')
   p = type(p) == 'table' and p or {}
-  st = {v = 2, perim = {}, cut = {}, req = {}, open = {}, gq = {}, ans = {}, hostile = int(p.hostile),
+  st = {v = 2, perim = {}, cut = {}, req = {}, open = {}, gq = {}, ans = {}, ansv = {}, rep = {}, hostile = int(p.hostile),
         painted = int(p.painted), flag_sig = type(p.flag_sig) == 'string' and p.flag_sig or nil, pep = int(p.pep),
         bsince = int(p.bsince), sup_rec = type(p.sup_rec) == 'table' and p.sup_rec or nil}
   -- BUG-031 (b): the burrows the citizens went thirsty or hungry in during this episode
@@ -4056,12 +4293,28 @@ function M.init(K)
     for i = 1, 6 do ok = ok and int(fp[i]) ~= nil end
     if ok then
       st.gq[k] = {q = g.q:sub(1, 64), fp = {fp[1], fp[2], fp[3], fp[4], fp[5], fp[6]}, t = int(g.t) or 0,
-                  name = type(g.name) == 'string' and g.name or nil, asked = int(g.asked), held = int(g.held),
-                  proj = type(g.proj) == 'string' and g.proj:sub(1, 40) or nil, qt = int(g.qt)}
+                  name = type(g.name) == 'string' and g.name or nil,
+                  proj = type(g.proj) == 'string' and g.proj:sub(1, 40) or nil, qt = int(g.qt),
+                  how = (g.how == 'none' or g.how == 'destroyers') and g.how or nil, cl = int(g.cl) == 1 and 1 or nil,
+                  why = type(g.why) == 'string' and g.why:sub(1, 120) or nil, rep = int(g.rep) == 1 and 1 or nil,
+                  force = type(g.force) == 'string' and g.force:sub(1, 120) or nil}
     end
   end
   for name, v in pairs(type(p.ans) == 'table' and p.ans or {}) do
     if type(name) == 'string' and int(v) then st.ans[name] = int(v) end
+  end
+  for name, v in pairs(type(p.ansv) == 'table' and p.ansv or {}) do
+    if type(name) == 'string' and int(v) then st.ansv[name] = int(v) end
+  end
+  -- BUG-048: the bridges that are a wall and a door now
+  for name, v in pairs(type(p.rep) == 'table' and p.rep or {}) do
+    local fp = type(v) == 'table' and v.fp
+    local ok = type(name) == 'string' and type(fp) == 'table' and #fp == 6 and type(v.k) == 'string'
+    for i = 1, 6 do ok = ok and type(fp) == 'table' and int(fp[i]) ~= nil end
+    if ok then
+      st.rep[name] = {t = int(v.t) or 0, k = v.k, fp = {fp[1], fp[2], fp[3], fp[4], fp[5], fp[6]}, n = int(v.n) or 0,
+                      how = v.how == 'walled' and 'walled' or 'wall + door'}
+    end
   end
   if type(p.swap) == 'table' and int(p.swap.since) then st.swap = {since = int(p.swap.since)} end
   if type(p.seal) == 'table' then st.seal = p.seal end
@@ -4135,17 +4388,47 @@ end
 
 function M.state(K) return mem and mem.pub and {alert = mem.pub} or {} end
 
--- public (BUG-030 rebuild policy; readiness, inspect defense): the manifest bridges the perimeter keeper does not
--- rebuild automatically any more (lost, destroyed perimeter.stop_after times by building destroyers since the player's
--- last answer): {<name> = {n, bd, since (tick lost), asked (the loss count the DECISION_NEEDED named, nil: not yet)}}
+-- public (BUG-030 rebuild policy, BUG-048; readiness, inspect defense): the manifest bridges the keeper replaces by a
+-- wall and a door and that do not stand yet (lost perimeter.stop_after times to building destroyers since the player's
+-- last answer, perimeter.vanish_after times with no destroyer, or a rebuild nobody built; the closure is queued or
+-- waits for quiet PEACE): {<name> = {n, bd, since (tick lost), cl (the closure's project, nil: not queued yet)}}
 function M.lost_gates(K)
-  local r, stop = {}, stop_after(K)
+  local r, stop, van = {}, stop_after(K), KP.vanish(K)
   for _, k in ipairs(sorted_keys(st.gq)) do
     local g = st.gq[k]
-    local hold, L = gate_held(K, g, stop)
-    if hold and not g.proj then r[g.name] = {n = L.n, bd = L.bd, since = g.t, asked = g.asked} end
+    if g.name and (g.cl or KP.verdict(K, g, stop, van) == 'replace') then
+      local L = losses(K, g.name) or {}
+      r[g.name] = {n = int(L.n) or 0, bd = int(L.bd) or 0, since = g.t, cl = g.cl and g.proj or nil}
+    end
   end
   return r
+end
+
+-- public (BUG-048; siege, readiness, snapshot, gate): the bridges that are a wall and a door now (the closure stands,
+-- or the player walled the footprint): {<name or anchor key> = {t, n (losses), how ('wall + door'|'walled'), fp}}
+function M.replaced(K)
+  local r = {}
+  for name, v in pairs(st.rep) do r[name] = {t = v.t, n = v.n, how = v.how, fp = v.fp} end
+  return r
+end
+
+-- a lost bridge reported by gate: in PEACE without an episode or a lockdown it enters the queue at once (the
+-- retire pass is up to seal_every days away), else the diff after the episode takes it
+M.on['EV:BRIDGE_DESTROYED'] = function(K, ev)
+  local d = type(ev.d) == 'table' and ev.d or {}
+  if K.mode() ~= 'PEACE' or st.pep or type(d.bridge) ~= 'string' then return end
+  local spec = K.manifest().bridges and K.manifest().bridges[d.bridge]
+  local fp = type(spec) == 'table' and spec.fp
+  if type(fp) ~= 'table' or #fp ~= 6 then return end
+  local k = kstr(fp[1], fp[2], fp[3])
+  local t = now_t(K)
+  local p = st.perim[k] or {k = 'bridge', fp = fp, name = d.bridge, src = 'manifest', t = t}
+  if KP.add(K, k, p, t) then
+    K.log('info', 'seal: bridge %s lost (%s): queued for a rebuild in quiet PEACE', d.bridge,
+          (tonumber(d.destroyers) or 0) > 0 and 'building destroyers in sight' or 'no destroyer in sight')
+    due('gates', t, 'lost')
+    save(K)
+  end
 end
 
 M.on.MODE = function(K, ev)
@@ -4219,9 +4502,11 @@ local function sync(fn, ...)
   if not ok then error(err, 0) end
 end
 
--- verb bridge.rebuild {bridge} (BUG-030 rebuild policy): the player's answer to DECISION_NEEDED bridge_rebuild:
--- rebuild that manifest bridge anyway. The count of losses to building destroyers starts again from here (asked again
--- after perimeter.stop_after more); a held bridge is queued now in quiet PEACE, else in the next one
+-- verb bridge.rebuild {bridge} (BUG-030 rebuild policy, BUG-048): the player's order to build that manifest bridge
+-- again whatever its history: the counts of losses (to building destroyers, with none in sight) start again from here,
+-- so the wall + door rule comes back only after stop_after / vanish_after more; a lost bridge waits for it in the
+-- queue is queued now in quiet PEACE, else in the next one. Refused once it is a wall and a door (or the closure is
+-- queued): the player takes those down, or cancels the project, first
 M.verbs['bridge.rebuild'] = function(K, args, cmd)
   local name = args.bridge
   local man = K.manifest()
@@ -4229,22 +4514,32 @@ M.verbs['bridge.rebuild'] = function(K, args, cmd)
   if type(spec) ~= 'table' or type(spec.fp) ~= 'table' or #spec.fp ~= 6 then
     return false, 'bridge.rebuild: ' .. tostring(name) .. ' is no manifest bridge'
   end
-  local L = losses(K, name)
-  local bd, stop = L and L.bd or 0, stop_after(K)
-  st.ans[name], dirty = bd, true
   local key
   for _, k in ipairs(sorted_keys(st.gq)) do if st.gq[k].name == name then key = k end end
+  local g = key and st.gq[key]
+  if st.rep[name] then
+    return false, string.format('%s is replaced by wall + door (%s since tick %d): take the door and the walls down in '
+                                .. 'the game first, then build the bridge by hand or with a bp; the keeper rebuilds '
+                                .. 'only a bridge it lost', name, st.rep[name].how, st.rep[name].t)
+  end
+  if g and g.cl and g.proj then
+    return false, string.format('%s: its wall + door is queued as %s (%s): cancel it first (bp.cancel %s)', name, g.proj,
+                                tostring(g.why), g.proj)
+  end
+  local L = losses(K, name)
+  local bd, stop = L and L.bd or 0, stop_after(K)
+  local nd = (L and L.n or 0) - bd
+  st.ans[name], st.ansv[name], dirty = bd, nd, true
   local t = now_t(K)
   local res, projs = {}, {}
-  local g = key and st.gq[key]
   if g and not g.proj then
-    g.held = nil
+    g.cl, g.why, g.force = nil, nil, nil
     if quiet_peace(K) then sync(function() res, projs = gates_pass(K, t, 'answer') end)
     else due('gates', t, 'answer') end
   end
   save(K)
-  local after = stop > 0 and string.format('asked again after %d more losses to building destroyers', stop)
-                or 'perimeter.stop_after 0: always rebuilt'
+  local after = stop > 0 and string.format('replaced by wall + door after %d more losses to building destroyers',
+                                           stop) or 'perimeter.stop_after 0: always rebuilt'
   local msg
   if not g then
     msg = string.format('%s: no lost bridge waits for a rebuild (lost %d times, %d with building destroyers); '
@@ -4418,27 +4713,32 @@ M.inspect.defense = function(K)
     for _, o in ipairs(out) do if o.name == n then seen = true end end
     if not seen then                                  -- BUG-030: gate saw it complete there: destroyed
       local _, _, _, gone = K.call('gate', 'state', n)
-      out[#out + 1] = {name = n, fp = man.bridges[n].fp, state = gone and 'destroyed' or 'missing', gone = gone}
+      out[#out + 1] = {name = n, fp = man.bridges[n].fp, state = st.rep[n] and 'replaced'
+                       or (gone and 'destroyed' or 'missing'), gone = gone}
     end
   end
-  -- BUG-030 rebuild policy: each manifest bridge's loss history (gate) and what the perimeter keeper does about it
-  local stop, held = stop_after(K), M.lost_gates(K)
+  -- BUG-030 rebuild policy, BUG-048: each manifest bridge's loss history (gate) and what the perimeter keeper does
+  -- about it: auto (nothing waits), waits (quiet PEACE), queued (its rebuild), closing (wall + door queued or waiting
+  -- for quiet PEACE), replaced (the wall + door stand); how = the newest loss: destroyers / none (no destroyer in sight)
+  local stop, held, van = stop_after(K), M.lost_gates(K), KP.vanish(K)
   local waits = {}
   for _, k in ipairs(sorted_keys(st.gq)) do if st.gq[k].name then waits[st.gq[k].name] = k end end
   for _, o in ipairs(out) do
     local L = losses(K, o.name)
-    if L then
+    if L or st.rep[o.name] then
+      local g = waits[o.name] and st.gq[waits[o.name]]
       o.lost = L
-      o.rebuild = {stop_after = stop, ans = st.ans[o.name],
-                   state = held[o.name] and 'held' or (waits[o.name] and (st.gq[waits[o.name]].proj and 'queued'
-                           or 'waits')) or 'auto', proj = waits[o.name] and st.gq[waits[o.name]].proj or nil}
+      o.rebuild = {stop_after = stop, vanish_after = van, ans = st.ans[o.name], how = KP.how(L),
+                   state = st.rep[o.name] and 'replaced' or (held[o.name] and 'closing')
+                           or (g and (g.proj and 'queued' or 'waits')) or 'auto', proj = g and g.proj or nil}
     end
   end
   local parts = {}
   for _, o in ipairs(out) do
     local nl = 0
     for _, l in ipairs(o.levers or {}) do if l.linked == 1 then nl = nl + 1 end end
-    local lost = o.lost and string.format(' lost %dx (%d bd) %s', o.lost.n, o.lost.bd, o.rebuild.state) or ''
+    local lost = o.rebuild and string.format(' lost %dx (%d bd) %s', o.lost and o.lost.n or 0, o.lost and o.lost.bd or 0,
+                                             o.rebuild.state) or ''
     parts[#parts + 1] = string.format('%s %s/%s %dlev%s', o.name, o.state, o.walk and o.walk.through or '-', nl, lost)
   end
   return true, trunc(#out > 0 and table.concat(parts, ', ') or 'no bridges', 300), {bridges = out}
@@ -4521,7 +4821,7 @@ M.inspect.refuge = function(K, args)
   return true, string.format('alert %s: %s, %d tiles, %d/%d inside%s', K.mode(),
                              p.burrow ~= '' and p.burrow or 'no confinement',
          p.tiles, p.inside, au.cit, p.why ~= '' and (' (' .. p.why .. ')') or ''),
-         {tick = au.tick, cit = au.cit, burrows = b, choice = choice, swap = st.swap,
+         {tick = au.tick, cit = au.cit, burrows = b, choice = choice, swap = st.swap, trust = M.refuge_trust(K),
           quiet = quiet(K) == math.huge and -1 or quiet(K), need = need, bsince = st.bsince, hint = hint,
           dry = st.dry,                         -- BUG-031 (b): burrows the citizens went thirsty or hungry in
           supply = mem.core,                    -- BUG-028 (d): drink and food inside Kern+/the refuge vs the stock

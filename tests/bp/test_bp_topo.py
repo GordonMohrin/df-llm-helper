@@ -77,6 +77,24 @@ def test_raised_bridges_do_not_count(built):
     assert bp.audit(raised, man) == bp.audit(snap, man)
 
 
+def test_bug048_a_replaced_bridge_is_a_door_entrance(built):
+    """BUG-048: seal replaced O1 by a wall and a door (the snapshot says `replaced`). The audit takes it for what it is:
+    no `footprint is not a bridge` and no lever finding for a gate that is gone for good; the same footprint without
+    the `replaced` state (a destroyed bridge, an open way) still fails."""
+    snap, man = built
+    fp = man["bridges"]["O1"]["fp"]
+    xs = range(fp[0], fp[3] + 1)
+    ys = range(fp[1], fp[4] + 1)
+    tiles = [(x, y, fp[2]) for x in xs for y in ys]
+    mid = tiles[len(tiles) // 2]
+    s2 = set_tiles(set_tiles(snap, tiles, "C"), [mid], "+")
+    open_way = bp.audit({**s2, "bridges": {**snap["bridges"], "O1": "destroyed"}}, man)
+    assert any(f.startswith("bridge O1: footprint is not a bridge") for f in open_way["fails"])
+    res = bp.audit({**s2, "bridges": {**snap["bridges"], "O1": "replaced"}}, man)
+    assert not any("O1" in f for f in res["fails"]), res["fails"]
+    assert S.validate("snapshot", {**s2, "bridges": {**snap["bridges"], "O1": "replaced"}}) == []
+
+
 def test_bypass_and_trap_hall_removal(built):
     snap, man = built
     s2 = set_tiles(snap, shortcut(), ".")

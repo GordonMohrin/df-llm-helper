@@ -19,9 +19,18 @@
 -- barrels), hospital_out (BUG-036, Run 11 siege 9: a hospital
 -- zone with tiles outside Kern+ and the refuge by water's state hosp_out; its lying patients cannot walk to the refuge),
 -- no_outer, no_inner (no manifest bridge of that role), bridge:<B> (gate does not know it), levers:<B> (< 2 linked),
--- lost:<B> (BUG-030 rebuild policy: a bridge the perimeter keeper no longer rebuilds after perimeter.stop_after losses
--- to building destroyers, seal.lost_gates; it stands for bridge:<B> and levers:<B>: the fix is the player's answer to
--- DECISION_NEEDED bridge_rebuild, not a fortcore piece).
+-- lost:<B> (BUG-030 rebuild policy, BUG-048: a bridge the perimeter keeper replaces by a wall + door after
+-- perimeter.stop_after losses to building destroyers, seal.lost_gates; it stands for bridge:<B> and levers:<B> until the
+-- closure stands: the kernel queues it, no question), refuge_trust (BUG-049: seal.refuge_trust says the refuge is
+-- exposed, has no closer on its stair head or its separation answer is stale), open_perimeter (FR-70, below).
+-- open_perimeter (FR-70, Run 11 y483-y497 and Run 13 y507-y525: a door open for 14 years, O1/B1/B2 and their levers
+-- lost for 18, 60 citizens lost in two sieges and a fort fallen over an open O1): a way in without door or bridge, a
+-- lost bridge (gate found it destroyed and it is no wall + door yet) or a lost lever (a bridge whose 2 linked levers
+-- were seen once) in PEACE is a stop signal, not a state to live with. R0 at once; from perimeter.escalate_days days on
+-- the SIEGE_UNREADY wake repeats every perimeter.escalate_every days (and 5 real minutes) instead of monthly, with the
+-- days counted; a fort of perimeter.hold_pop citizens or more holds max-pop where it stands (the cap never rises while
+-- the perimeter is open). state ready.pd = the days, ready.pw = what is open. Outside PEACE the signal keeps its last
+-- answer (a lockdown's open gates are no news). A bridge seal replaced by a wall + door is no lost bridge.
 -- FR-65 siege readiness gate: while R0 fails in PEACE, SIEGE_UNREADY (A) names the blockers, the ways in without a
 -- door or bridge (seal.entrance_doors) and the trap count of the last audit; first at once (2 days after a load),
 -- then again after a game month and 30 real minutes, or 10 when it got worse (util/cadence).
@@ -39,7 +48,12 @@ M.DRILL_VALID = 100800   -- a passed drill counts for one season
 M.AUDIT_VALID = 100800   -- an audit counts for one season
 M.AUDIT_EVERY = 33600    -- re-audit monthly
 M.AUDIT_GAP = 1200       -- at most one audit request per day
-M.LEVERS_EVERY = 33600
+M.LEVERS_EVERY = 1200    -- FR-70: lost levers are looked for daily (a few findAtTile reads); it was a month
+-- FR-70 (config/reflex.json perimeter): days of an open perimeter before the wake repeats faster and max-pop freezes,
+-- days between those wakes, the citizens from which the freeze applies (0 = never), real seconds between the wakes
+M.PERIM = {escalate_days = 2, escalate_every = 5, hold_pop = 30}
+M.PERIM_LIM = {escalate_days = {0, 30}, escalate_every = {1, 30}, hold_pop = {0, 250}}
+M.PERIM_WALL_S = 300
 M.MIN_LEVERS, M.TRAPS, M.METAL, M.R2_SOLDIERS = 2, 30, 20, 8
 M.STOCK_HYST = 90        -- % of a stock minimum that keeps R2 once reached (no flapping)
 -- FR-65 SIEGE_UNREADY cadence (util/cadence): a game month, and at least UNREADY_WALL_S real seconds for an unchanged
@@ -128,10 +142,14 @@ end
 
 -- bridges and levers: outer + inner exist, every bridge known to gate, >= 2 linked levers each
 local function check_levers(K, man)
-  local fails, roles = {}, {}
+  local fails, roles, good = {}, {}, {}
+  -- BUG-048: a bridge seal replaced by a wall and a door is no gate: no bridge:/levers: blocker, and its role is
+  -- missing (no_outer / no_inner say so: the doctrine wants a gate there)
+  local okr, rep = K.call('seal', 'replaced')
+  rep = okr and type(rep) == 'table' and rep or {}
   for _, name in ipairs(sorted_keys(man.bridges)) do
     local b = man.bridges[name]
-    if type(b) == 'table' and type(b.fp) == 'table' and #b.fp == 6 then
+    if type(b) == 'table' and type(b.fp) == 'table' and #b.fp == 6 and not rep[name] then
       roles[b.role or '?'] = true
       local ok, s = K.call('gate', 'state', name)
       if not ok or s == 'unknown' then fails[#fails + 1] = 'bridge:' .. name end
@@ -139,12 +157,13 @@ local function check_levers(K, man)
       for _, p in ipairs(type(b.levers) == 'table' and b.levers or {}) do
         if type(p) == 'table' and lever_ok(p, b.fp) then n = n + 1 end
       end
-      if n < M.MIN_LEVERS then fails[#fails + 1] = 'levers:' .. name end
+      if n < M.MIN_LEVERS then fails[#fails + 1] = 'levers:' .. name
+      elseif ok and s ~= 'unknown' then good[#good + 1] = name end      -- FR-70: once seen whole, losing one is news
     end
   end
   if not roles.outer then table.insert(fails, 1, 'no_outer') end
   if not roles.inner then table.insert(fails, 1, 'no_inner') end
-  return {tick = K.now().tick, fails = fails}
+  return {tick = K.now().tick, fails = fails, good = good}
 end
 
 ---------------------------------------------------------------- audit requests
@@ -253,6 +272,42 @@ local function audit_fails(K, now)
   return f
 end
 
+-- FR-70 knobs: config/reflex.json perimeter.escalate_days / escalate_every / hold_pop (bad value: the default)
+local function pcfg(K, key)
+  local r = type(K.cfg) == 'table' and type(K.cfg.reflex) == 'table' and K.cfg.reflex.perimeter or nil
+  local v = type(r) == 'table' and int(r[key]) or nil
+  local lim = M.PERIM_LIM[key]
+  if v and v >= lim[1] and v <= lim[2] then return v end
+  return M.PERIM[key]
+end
+
+-- FR-70: what is open in the perimeter now, {ways in, lost bridges, lost levers} as a short text, or nil. Called with
+-- the entrance check (rt.open) and the lever check (rt.lev) of this evaluation. A bridge gate found destroyed counts
+-- until it stands again or seal made it a wall + door; levers only for a bridge whose levers were seen whole once.
+local function open_perimeter(K, man)
+  local why, lostb, lostl = {}, {}, {}
+  local okr, rep = K.call('seal', 'replaced')
+  rep = okr and type(rep) == 'table' and rep or {}
+  for _, name in ipairs(sorted_keys(man.bridges)) do
+    local b = man.bridges[name]
+    if type(b) == 'table' and type(b.fp) == 'table' and #b.fp == 6 and not rep[name] then
+      local ok, _, _, gone = K.call('gate', 'state', name)
+      if ok and gone then lostb[#lostb + 1] = name end
+    end
+  end
+  local isl = {}
+  for _, b in ipairs(lostb) do isl[b] = true end
+  for _, f in ipairs(rt.lev and rt.lev.fails or {}) do
+    local b = f:match('^levers:(.+)$')
+    if b and st.lvok and st.lvok[b] and not isl[b] and not rep[b] then lostl[#lostl + 1] = b end
+  end
+  local open = rt.open or -1
+  if open > 0 then why[#why + 1] = string.format('%d way%s in', open, open == 1 and '' or 's') end
+  if #lostb > 0 then why[#why + 1] = 'bridges lost: ' .. table.concat(lostb, ',') end
+  if #lostl > 0 then why[#why + 1] = 'levers lost: ' .. table.concat(lostl, ',') end
+  return #why > 0 and cut(table.concat(why, '; '), 60) or nil
+end
+
 local function evaluate(K, why)
   local now = K.now().tick
   local man = K.manifest()
@@ -270,6 +325,7 @@ local function evaluate(K, why)
     for _, f in ipairs(f1) do if f == 'caverns' then has = true end end
     if not has then f1[#f1 + 1] = 'caverns' end
   end
+  rt.routes, rt.open, rt.ents = entrances(K)                       -- FR-65 (FR-70: before the blockers)
   local kern, refuge = burrow_names(man)
   if not dfhack.burrows.findByName(kern) then f1[#f1 + 1] = 'no_kern' end
   rt.rdry = nil
@@ -330,6 +386,41 @@ local function evaluate(K, why)
     local b = f:match('^bridge:(.+)$') or f:match('^levers:(.+)$')
     if not (b and lost[b]) then f1[#f1 + 1] = f end
   end
+  -- FR-70: the open perimeter. A bridge seen whole with 2 linked levers is remembered (a lost lever is news)
+  for _, name in ipairs(rt.lev.good or {}) do
+    st.lvok = st.lvok or {}
+    if not st.lvok[name] then st.lvok[name], dirty = 1, true end
+  end
+  -- BUG-049 (Run 13 y525: the refuge was reachable and occupied): the kernel's own reading of the refuge. Exposed, no
+  -- hatch on its stair head, or a separation answer gone stale keep R0 (hostiles inside are a fight, the audit has its
+  -- own blockers)
+  local okt, tr = K.call('seal', 'refuge_trust')
+  rt.rtrust = nil
+  if okt and type(tr) == 'table' and tr.ok == false then
+    local why = tr.why and tr.why[1] or '?'
+    if tr.sep == 0 or (tr.hatch and tr.hatch.state == 'missing') or why:find('^separation not checked') then
+      f1[#f1 + 1] = 'refuge_trust'
+      rt.rtrust = cut(why, 80)
+    end
+  end
+  local peace = K.mode() == 'PEACE'
+  if peace then
+    rt.pw = open_perimeter(K, man)
+    if rt.pw and not st.pt then st.pt, dirty = now, true
+    elseif not rt.pw and st.pt then st.pt, st.phold, dirty = nil, nil, true end
+  end
+  rt.pd = st.pt and math.max(0, (now - st.pt) // 1200) or nil     -- game days (TICKS.DAY)
+  if st.pt then
+    if not rt.pw then rt.pw = st.pw end
+    table.insert(f1, 1, 'open_perimeter')
+  end
+  if st.pw ~= rt.pw and st.pt then st.pw, dirty = rt.pw, true end
+  -- the freeze: from escalate_days days on, a fort of hold_pop citizens or more keeps max-pop where it stands
+  local hp, cit0 = pcfg(K, 'hold_pop'), type(cu) == 'table' and cu.cit or nil
+  if st.pt and hp > 0 and rt.pd >= pcfg(K, 'escalate_days') and cit0 and cit0 >= hp then
+    if not st.phold then st.phold, dirty = cit0, true end
+  elseif st.phold and not (st.pt and hp > 0 and cit0 and cit0 >= hp) then st.phold, dirty = nil, true end
+  rt.phold = st.phold
   -- R2
   local f2 = {}
   local pass, last = drills(K)
@@ -368,7 +459,6 @@ local function evaluate(K, why)
   rt.fail = out
   rt.cv = cv
   rt.worn = last and int(last.worn) or (kpi and kpi.worn) or 0   -- worn measured by the last drill
-  rt.routes, rt.open, rt.ents = entrances(K)                       -- FR-65
   local okd, hold = K.call('drill', 'hold')
   rt.dhold = okd and type(hold) == 'string' and cut(hold, 24) or nil
   local route = route_of(st.audit)
@@ -398,6 +488,7 @@ function M.ceiling(K, lvl)
   if pc and pc < c then c, why = pc, 'plan' end
   local ib = inbox_cap(K)
   if ib and ib < c then c, why = ib, 'inbox' end
+  if rt and rt.phold and rt.phold < c then c, why = rt.phold, 'open_perimeter' end     -- FR-70
   return c, why
 end
 
@@ -431,7 +522,7 @@ local function route_fix(route)
   return route .. ' (no wall tile: inspect entrances)'
 end
 
-local function unready_msg(fails, routes, open, ents, traps, route, rdry, hout)
+local function unready_msg(fails, routes, open, ents, traps, route, rdry, hout, perim)
   local ent
   if routes < 0 then ent = 'entrances not checked yet'
   elseif open == 0 then ent = string.format('%d way%s in, all with a door or bridge', routes, routes == 1 and '' or 's')
@@ -442,6 +533,7 @@ local function unready_msg(fails, routes, open, ents, traps, route, rdry, hout)
                         open > #shown and ', ...' or '')
   end
   local head = string.format('siege unready (R0: %s); ', #fails > 0 and table.concat(fails, ', ') or '?')
+  if perim then head = head .. perim .. '; ' end               -- FR-70: the days, what is open
   local fix = route_fix(route)
   if fix then head = head .. fix .. '; ' end
   if rdry then head = head .. rdry .. '; ' end                 -- Run 11: the refuge without drink
@@ -464,8 +556,18 @@ local function unready(K)
   end
   if K.mode() ~= 'PEACE' or now.tick - rt.boot < M.UNREADY_SETTLE then return end
   local fails, ents = rt.fail or {}, rt.ents or {}
-  local due = CAD.due(st.unready, now, ents, fails, {ticks = M.UNREADY_EVERY, wall_s = M.UNREADY_NEWS_S})
-              or CAD.elapsed(st.unready, now, M.UNREADY_EVERY, M.UNREADY_WALL_S)
+  -- FR-70: an open perimeter for escalate_days days: the wake repeats every escalate_every days and 5 real minutes
+  -- (news after 5 real minutes), the first time at once
+  local esc = rt.pd ~= nil and rt.pd >= pcfg(K, 'escalate_days')
+  local toks = fails
+  if esc then
+    toks = {table.unpack(fails)}
+    toks[#toks + 1] = 'escalated'
+  end
+  local every, wall, nticks, nwall = M.UNREADY_EVERY, M.UNREADY_WALL_S, M.UNREADY_EVERY, M.UNREADY_NEWS_S
+  if esc then every, wall, nticks, nwall = pcfg(K, 'escalate_every') * 1200, M.PERIM_WALL_S, 0, M.PERIM_WALL_S end
+  local due = CAD.due(st.unready, now, ents, toks, {ticks = nticks, wall_s = nwall})
+              or CAD.elapsed(st.unready, now, every, wall)
   if not due then return end
   local a = st.audit
   local traps = a and int(a.min_traps) or -1
@@ -474,10 +576,12 @@ local function unready(K)
     afails[i] = cut(a.fails[i], 60)
   end
   local routes, open = rt.routes or -1, rt.open or -1
-  K.emit('SIEGE_UNREADY', 'A', unready_msg(fails, routes, open, ents, traps, rt.route, rt.rdry, rt.hout),
+  local perim = rt.pd and string.format('perimeter OPEN %d d (%s)', rt.pd, rt.pw or '?') or nil
+  K.emit('SIEGE_UNREADY', 'A', unready_msg(fails, routes, open, ents, traps, rt.route, rt.rdry, rt.hout, perim),
          {fails = fails, afails = afails, routes = routes, open = open, ents = ents, traps = traps,
-          age = a and math.max(0, now.tick - a.tick) or -1, rdry = rt.rdry, hout = rt.hout})
-  st.unready, dirty = CAD.mark(now, ents, fails), true
+          age = a and math.max(0, now.tick - a.tick) or -1, rdry = rt.rdry, hout = rt.hout,
+          pd = rt.pd, pw = rt.pd and rt.pw or nil})
+  st.unready, dirty = CAD.mark(now, ents, toks), true
 end
 
 local function refresh(K, why)
@@ -492,6 +596,13 @@ end
 function M.level(K) return st.lvl or 0 end
 -- public (BUG-035): the refuge_dry text of the last evaluation (nil while the refuge has drink or a wet well)
 function M.refuge_dry(K) return rt.rdry end
+-- public (BUG-049, seal.refuge_trust): what the last Python audit said about the refuge's separation in the worst case
+-- (a hatch is no barrier there): {sep = 1|0, age = ticks since that audit}, nil before the first audit
+function M.refuge_audit(K)
+  local a = st.audit
+  if type(a) ~= 'table' or not int(a.tick) then return nil end
+  return {sep = a.refuge_sep == 1 and 1 or 0, age = math.max(0, K.now().tick - a.tick)}
+end
 function M.cap(K) return st.cap or rt.gate_cap or M.CAPS[0] end
 
 ---------------------------------------------------------------- verbs
@@ -582,6 +693,13 @@ function M.init(K)
         audit_due = int(p.audit_due) or 0, audit_snap = p.audit_snap,
         audit_why = type(p.audit_why) == 'string' and p.audit_why or nil}
   if type(p.audit) == 'table' and int(p.audit.tick) then st.audit = p.audit end
+  -- FR-70: the tick the open perimeter began (nil: closed), what was open, the population max-pop is held at, the
+  -- bridges seen whole with their levers
+  st.pt, st.phold = int(p.pt), int(p.phold)
+  st.pw = type(p.pw) == 'string' and p.pw:sub(1, 60) or nil
+  for name, v in pairs(type(p.lvok) == 'table' and p.lvok or {}) do
+    if type(name) == 'string' and int(v) == 1 then st.lvok = st.lvok or {}; st.lvok[name] = 1 end
+  end
   if type(p.inbox) == 'table' and int(p.inbox.cap) then st.inbox = {cap = int(p.inbox.cap), plan = int(p.inbox.plan)} end
   local u = p.unready                                          -- FR-65: the last SIEGE_UNREADY (util/cadence record)
   if type(u) == 'table' and int(u.t) then
@@ -616,6 +734,7 @@ function M.state(K)
                       why = st.audit_why, cov = a and type(a.cov) == 'string' and a.cov ~= '' and a.cov or nil},
              fail = rt.fail,
              open = math.max(-1, rt.open or -1)}                -- FR-65: ways in without door or bridge (-1 unknown)
+  if rt.pd then r.pd, r.pw = rt.pd, rt.pw and cut(rt.pw, 60) or nil end    -- FR-70: days open, what is open
   if rt.ents and #rt.ents > 0 then
     local e = {}
     for i = 1, math.min(#rt.ents, 3) do e[i] = rt.ents[i] end

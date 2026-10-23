@@ -159,6 +159,13 @@ def line_unready(ctx: Ctx) -> str:
     fails, a = r.get("fail") or [], r.get("audit") or {}
     out = [f"SIEGE UNREADY (R0): {','.join(fails) or '?'}"]
     n, ents = r.get("open", -1), r.get("ents") or []
+    pd = r.get("pd")
+    if isinstance(pd, int):                    # FR-70: an open perimeter in PEACE is a stop signal; count the days
+        out.append(f"PERIMETER OPEN {pd} day{'s' if pd != 1 else ''}: {r.get('pw') or '?'}")
+    off = files.auto_seal_off(ctx.dir, n if isinstance(n, int) else 0) if getattr(ctx, "dir", None) else None
+                                               # DECISIONS 2: follow --no-auto places nothing
+    if off:
+        out.append(off.replace("auto-seal off", "AUTO-SEAL OFF", 1) if isinstance(pd, int) else off)
     if n > 0:
         out.append(f"{n} way{'s' if n != 1 else ''} in without door or bridge: " + ", ".join(ents)
                    + (", ..." if n > len(ents) else ""))
@@ -184,6 +191,10 @@ def line_unready(ctx: Ctx) -> str:
         nxt.append("dfllm audit")
     if n > 0:
         nxt.append("close the open ways in (dfllm cmd bp.place tpl=seal site=S1 at=last)")
+    if "open_perimeter" in fails:              # FR-70: max-pop and the ★ phases stay held until it is closed
+        nxt.append("open perimeter: seal first (max-pop is held at the population from perimeter.hold_pop citizens "
+                   "and `plan check` refuses a higher phase_target); a lost bridge: the keeper rebuilds it in quiet "
+                   "PEACE or replaces it by wall + door (dfllm cmd inspect what=defense)")
     if any(f.startswith(R0_FORTCORE) for f in fails):
         nxt.append("build the missing fortcore pieces (plan)")
     where, far, lbl = refuge_place(ctx.s)      # BUG-040: where Tiefe+ lies and its nearest accepted water
@@ -198,9 +209,9 @@ def line_unready(ctx: Ctx) -> str:
             nxt.append("the hospital lies outside Kern+/Tiefe+: plan it inside Tiefe+ next to accepted water (a cistern "
                        "there first), then remove the old zones")
     lost = [f.split(":", 1)[1] for f in fails if f.startswith("lost:")]
-    if lost:                                   # BUG-030 rebuild policy: held for the player, not a fortcore piece
-        nxt.append(f"{','.join(lost)} lost to building destroyers: Gordon's answer (DECISION_NEEDED bridge_rebuild: "
-                   f"dfllm cmd bridge.rebuild, a wall or a second outer gate in the plan)")
+    if lost:                                   # BUG-048: the keeper replaces it by wall + door (no question any more)
+        nxt.append(f"{','.join(lost)} lost to building destroyers: the kernel replaces it by wall + door in quiet PEACE "
+                   f"(dfllm cmd inspect what=defense; dfllm cmd bridge.rebuild only on Gordon's word)")
     if nxt:
         out.append("next: " + "; ".join(nxt))
     return _join(out)
@@ -398,6 +409,9 @@ def line_alert(al: dict) -> str:
     txt = f"alert {b}" + (f" {al['tiles']}t {al['inside']} in" if al["burrow"] else "")
     if not al["ok"]:
         txt += f" ({al['want']} refused" + (f": {al['why']}" if al.get("why") else "") + ")"
+    ref = al.get("ref") if isinstance(al.get("ref"), dict) else {}
+    if ref.get("tr") == 0:                     # BUG-049: Tiefe+ is trusted only while separated (fresh), hatched, empty
+        txt += f" | refuge NOT TRUSTED: {ref.get('trw') or '?'}"
     return txt
 
 

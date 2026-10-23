@@ -1223,6 +1223,22 @@ local function bridge_items(b)
   return n, okm and type(mat) == 'string' and mat:sub(1, 40) or nil
 end
 
+-- BUG-048: the quickfort key of a bridge's raise direction (build.lua: ga left, gd right, gw up, gx down, gs
+-- retracting), read from the building when gate first sees it complete; nil when DF does not say (seal then takes the
+-- key fortcore builds, gw)
+local DIR_KEY = {Left = 'ga', Right = 'gd', Up = 'gw', Down = 'gx', Retracting = 'gs'}
+local function bridge_key(b)
+  local ok, v = pcall(function()
+    local d = b.direction
+    if math.type(d) == 'integer' then
+      local e = df.building_bridgest and df.building_bridgest.T_direction
+      d = e and e[d] or d
+    end
+    return d
+  end)
+  return ok and DIR_KEY[tostring(v)] or nil
+end
+
 -- loss history: the races of the building destroyers in sight now (census.h.list entries with bd = 1), sorted
 local function destroyer_races(h)
   local seen, races = {}, {}
@@ -1294,7 +1310,7 @@ local function gone_check(K, name, r, spec, now)
     local done = b ~= nil and complete(b)
     if done and not (seen and seen.bid == r.bid) then
       local it, mat = bridge_items(b)
-      st.seen[name], dirty = {bid = r.bid, fp = sig, it = it, mat = mat}, true
+      st.seen[name], dirty = {bid = r.bid, fp = sig, it = it, mat = mat, key = bridge_key(b)}, true
     end
     if st.gone[name] then
       if not done then return true end            -- a new one is being built: still no barrier
@@ -1328,18 +1344,24 @@ local function gone_check(K, name, r, spec, now)
   return true
 end
 
+-- BUG-048: a destroyed bridge seal replaced by a wall and a door reads 'replaced' (no gate, no open way), else 'destroyed'
+local function gone_name(K, name)
+  local ok, rep = K.call('seal', 'replaced')
+  return (ok and type(rep) == 'table' and rep[name] ~= nil) and 'replaced' or 'destroyed'
+end
+
 -- one controller pass for one bridge; returns the observed state
 local function control(K, name, spec, now)
   local r = runtime(name)
   -- BUG-030: a destroyed bridge gets no pull; its footprint is looked at again once a game day
   if st.gone[name] then
-    if r.gone_next and now < r.gone_next and r.gone_next - now <= M.GONE_RECHECK then return 'destroyed' end
+    if r.gone_next and now < r.gone_next and r.gone_next - now <= M.GONE_RECHECK then return gone_name(K, name) end
     r.gone_next, r.resolved = now + M.GONE_RECHECK, nil
   end
   local br = st.br[name]
   local w = br and br.want
   resolve(r, spec, now, w ~= nil and w ~= r.last)
-  if gone_check(K, name, r, spec, now) then return 'destroyed' end
+  if gone_check(K, name, r, spec, now) then return gone_name(K, name) end
   local s = read(r)
   r.foot, r.spec, r.stuck = spec.fp, spec, nil
   if w ~= nil and w ~= s and not r.want_ms then r.want_ms = K.now().ms end      -- GATE_FAIL names real seconds
@@ -1757,7 +1779,8 @@ function M.init(K)
     for name, x in pairs(type(p.seen) == 'table' and p.seen or {}) do
       if type(name) == 'string' and type(x) == 'table' and int(x.bid) and type(x.fp) == 'string' then
         st.seen[name] = {bid = int(x.bid), fp = x.fp, it = int(x.it),
-                         mat = type(x.mat) == 'string' and x.mat:sub(1, 40) or nil}
+                         mat = type(x.mat) == 'string' and x.mat:sub(1, 40) or nil,
+                         key = type(x.key) == 'string' and x.key:match('^g[adwxs]$') or nil}
       end
     end
     -- the loss history per manifest bridge (BUG-030 rebuild policy)
@@ -2064,6 +2087,13 @@ function M.losses(K, name)
   local r = {}
   for n, L in pairs(st.lost) do r[n] = copy_lost(L) end
   return r
+end
+
+-- public (BUG-048, seal): the quickfort key of the raise direction of manifest bridge `name` as gate read it from the
+-- complete building (ga/gd/gw/gx/gs), nil when it never saw it complete or DF did not say
+function M.bridge_key(K, name)
+  local x = st.seen[name]
+  return x and x.key or nil
 end
 
 function M.kpi(K)

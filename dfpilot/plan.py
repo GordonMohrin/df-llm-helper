@@ -25,7 +25,10 @@ OPTION_A_MAX = 75
 SUPPLY_MIN = {"drink_d": 170, "food_d": 60, "mood_stock": 10}
 BUILDS_PER_SEASON = 3                     # runner runs <= 3 projects at once
 CORE_DAYS = 90                            # BUG-028: drink/food days wanted inside Kern+ and the refuge (seal.CFG.sup_days)
-O1_PHASE = "P5"                           # plans/year1.json: fortcore stage 3 builds the outer bridge O1
+O1_PHASE = "P3"                           # DECISIONS 1: plans/year1.json: fortcore stage 3 (O1, B2, the refuge) is a P3 build
+GALLERY_PHASE = "P5"                      # plans/year1.json: the outward gallery over O1 comes with P5 (Run 10)
+STAGE3_PHASE = O1_PHASE                   # no phase_target at or above it without O1, B2 and the refuge (stage3_gate)
+BRIDGE_STANDING = ("up", "down", "moving", "replaced")      # state.bridges: a gate that stands (BUG-048: or a wall + door)
 GALLERY = "gallery_o1"                    # bp/defense.py: the outward crossbow gallery over the O1 approach (Run 10)
 STOCKROOM = "stockroom"                   # bp/rooms.py: food stockpile with barrels + still inside the core (BUG-028)
 REFUGE_PHASE = "P3"                       # Run 10: no P3+ without a separated refuge with beds (alert.ref, bed_pct)
@@ -754,6 +757,73 @@ def refuge_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list
     return errs, warn
 
 
+def stage3_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list[str], list[str]]:
+    """DECISIONS 1 (2026-10-23; Run 13 y507-y525: B1, B2 and O1 lost and never rebuilt, the refuge reachable): a plan
+    cannot raise phase_target to P3 or beyond while O1 or B2 do not stand (state bridges), unless fortcore stage 3 is
+    under way (fort.refuge.stage3) or this plan builds it no later than its other new builds. A fort that built stage 3
+    and lost a gate gets a warning (BUG-048: the kernel rebuilds it in quiet PEACE or replaces it by wall + door). A fort
+    without a refuge is refuge_gate's (it asks for stage 3 as well); an older kernel (no bridges, no alert.ref) is not
+    checked."""
+    pt = doc["phase_target"]
+    br, ref = s.get("bridges"), (s.get("alert") or {}).get("ref")
+    if pt < STAGE3_PHASE or not isinstance(br, dict) or not isinstance(ref, dict) or not ref.get("ex"):
+        return [], []
+    miss = [n for n in ("O1", "B2") if br.get(n) not in BRIDGE_STANDING]
+    if not miss:
+        return [], []
+    names = ", ".join(miss)
+    if (fort or {}).get("o1"):                         # stage 3 was built: the gate was lost (BUG-048: the keeper's)
+        gone = ", ".join(f"{n} {br.get(n, 'missing')}" for n in miss)
+        return [], [f"stage 3: {names} {'does' if len(miss) == 1 else 'do'} not stand ({gone}): the kernel rebuilds it "
+                    "in quiet PEACE or replaces it by wall + door (dfllm cmd inspect what=defense)"]
+    if ((fort or {}).get("refuge") or {}).get("stage3"):
+        return [], []                                   # being built
+    adds = new_builds(doc, prev)
+    planned = min((si for si, _, b in adds if _refuge_stage(b)), default=None)
+    limit = min((si for si, _, b in adds if not _refuge_fix(b)), default=3)
+    text = (f"stage 3: phase_target {pt} (P3+) needs O1, B2 and the refuge standing or being built first (fortcore stage "
+            f"3 builds all three): {names} {'does' if len(miss) == 1 else 'do'} not stand; add {_compact(REFUGE_STAGE)} "
+            "as the first build (dfllm plan propose drafts it)")
+    if planned is None:
+        return [text], []
+    if planned > limit:
+        return [f"stage 3: planned in seasons[{planned}]: move it to seasons[{limit}], before the other new builds "
+                f"(phase_target {pt} needs {names} first)"], []
+    return [], []
+
+
+def perimeter_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list[str], list[str]]:
+    """FR-70 (Run 11 y483-y497: a door open for 14 years; Run 13 y507-y525: O1, B1, B2 lost for 18): while readiness says
+    R0 open_perimeter (a way in without door or bridge, a lost bridge or lever, in PEACE; state ready.pd = the days) a
+    plan cannot raise phase_target: the fort seals first (seal builds and the lost bridges' rebuild run next to it,
+    DECISIONS 4). A plan that keeps the phase gets a warning that counts the days. An older kernel is not checked."""
+    r = s.get("ready") or {}
+    if "open_perimeter" not in (r.get("fail") or []):
+        return [], []
+    days, pw = r.get("pd"), r.get("pw") or "?"
+    open_for = f" for {days} day{'s' if days != 1 else ''}" if isinstance(days, int) else ""
+    cur = s.get("phase") or "P0"
+    if doc["phase_target"] > cur:
+        return [f"perimeter: raising phase_target {cur} -> {doc['phase_target']} while the perimeter is open{open_for} "
+                f"({pw}; readiness R0 open_perimeter): seal first (dfllm cmd bp.place tpl=seal site=S1 at=last; a "
+                "lost bridge: dfllm cmd inspect what=defense)"], []
+    return [], [f"perimeter: open{open_for} ({pw}; readiness R0 open_perimeter): max-pop and the phase stay held until "
+                "it is closed; seal first (dfllm cmd bp.place tpl=seal site=S1 at=last)"]
+
+
+def stage3_due(s: dict, fort: dict, done: set, builds: list) -> bool:
+    """propose (DECISIONS 1): O1 or B2 does not stand (state bridges) while the refuge burrow exists, a fortcore stands to
+    anchor stage 3 on, and no stage 3 is applied, under way or drafted already (a fort without a refuge burrow gets it
+    from refuge_drafts)."""
+    br, ref = s.get("bridges"), (s.get("alert") or {}).get("ref")
+    f = fort.get("refuge") or {}
+    if not isinstance(br, dict) or not isinstance(ref, dict) or not ref.get("ex"):
+        return False
+    return any(br.get(n) not in BRIDGE_STANDING for n in ("O1", "B2")) and bool(f.get("fortcore")) \
+        and not f.get("stage3") and ("fortcore", 3) not in done and not fort.get("o1") \
+        and not any(_refuge_stage(b) for b in builds)
+
+
 def refuge_drafts(s: dict, fort: dict, done: set, early: bool = False) -> list[dict]:
     """What propose drafts first for the refuge (refuge_gate): fortcore stage 3 when there is no refuge (a fortcore
     to anchor it on; not `early`, below P3); one seal: `at=refuge` (BUG-031: the hatch at the refuge's stair head and
@@ -915,7 +985,7 @@ def _outer_gallery(doc: dict, s: dict, fort: dict) -> str | None:
     builds = [b for se in doc["seasons"] for b in se["build"]]
     o1 = bool(fort.get("o1")) or "O1" in (s.get("bridges") or {}) or any(
         b["tpl"] == "fortcore" and (_stage_of(b.get("p")) or 0) >= 3 for b in builds)
-    if not o1 or max(doc["phase_target"], s.get("phase") or "P0") < O1_PHASE:
+    if not o1 or max(doc["phase_target"], s.get("phase") or "P0") < GALLERY_PHASE:
         return None
     if fort.get("gallery") or any(b["tpl"] == GALLERY for b in builds):
         return None
@@ -991,6 +1061,12 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     re_, rw = refuge_gate(doc, s, fort or {}, prev)         # Run 10: no P3+ without a separated refuge with beds
     errs += re_
     warn += rw
+    s3e, s3w = stage3_gate(doc, s, fort or {}, prev)        # DECISIONS 1: no P3+ without O1, B2 and the refuge
+    errs += s3e
+    warn += s3w
+    pe, pw_ = perimeter_gate(doc, s, fort or {}, prev)      # FR-70: no phase raise while the perimeter is open
+    errs += pe
+    warn += pw_
     warn += drink_gate(doc, s, fort or {}, prev)            # FR-69: refuge_dry -> the refuge drink store
     he, hw_ = hospital_gate(doc, s, fort or {}, prev)       # BUG-034: no hospital without accepted water near it
     errs += he
@@ -1308,6 +1384,10 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     for b in refuge_drafts(s, fort or {}, done, early=target < REFUGE_PHASE):
         if info is None or b["tpl"] in info:
             builds.append(b)
+    # DECISIONS 1: from P3 on fortcore stage 3 (O1, B2) comes before every other new build, also in a fort whose phase
+    # list had it later (stage3_gate refuses the plan otherwise)
+    if target >= STAGE3_PHASE and stage3_due(s, fort or {}, done, builds) and (info is None or "fortcore" in info):
+        builds.append(copy.deepcopy(REFUGE_STAGE))
     # BUG-028: drink or food inside the core below CORE_DAYS -> a stockroom first (food only: without the still)
     al = s.get("alert") or {}
     low = [k for k in ("core_d", "core_f") if isinstance(al.get(k), int) and al[k] < CORE_DAYS]

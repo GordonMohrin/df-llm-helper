@@ -182,7 +182,7 @@ local function hscan_begin(K, now, armed)
   local g = st.geo or geometry(K)
   st.geo = g
   st.hs = {i = 0, seen = {}, list = {}, keys = {}, vis = 0, inv = 0, great = 0, undead = 0, inside = 0, crazed = 0,
-           zin = 0, zpast = 0, dz = 0, dz_o1 = -1, bd = 0, an = 0,
+           zin = 0, zpast = 0, dz = 0, dz_o1 = -1, bd = 0, an = 0, rin = 0,
            near_o1 = -1, near_cit = -1, near_bridge = {}, caged = {}, units = 0, tick = now.tick,
            armed = armed and 1 or 0, geo = g, out_pos = st.out_pos or {},
            count = now.tick - (st.count_tick or -M.COUNT_EVERY) >= M.COUNT_EVERY, animals = {}}
@@ -457,15 +457,23 @@ local function consider(hs, u)
     hs.dz = hs.dz + 1
     if d_o1 >= 0 then hs.dz_o1 = minpos(hs.dz_o1, d_o1) end
   end
+  -- BUG-049 (Run 13 y525: the citizens found the refuge occupied): the hostiles inside the refuge burrow are counted
+  -- and listed first, so a full list (the 40 nearest to O1) never hides one
+  local rin = false
+  if hs.rb then
+    P.x, P.y, P.z = x, y, z
+    if dfhack.burrows.isAssignedTile(hs.rb, P) then rin, hs.rin = true, hs.rin + 1 end
+  end
   local list = hs.list
   local entry = {id = id, x = x, y = y, z = z, d_o1 = d_o1, dc = dcit, zn = zn, dz = dz,
                  k = great and 'great' or (undead and 'undead') or (inv and 'inv') or 'danger'}
+  if rin then entry.rf = 1 end
   if rf.bd then entry.bd, hs.bd = 1, hs.bd + 1 end
   if an then entry.an = 1 end
   list[#list + 1] = entry
   -- integer sort key: the zone (past B1, then the intake area), then distance (O1, else nearest outside citizen),
   -- then scan order
-  local d = zn == 2 and 0 or (zn == 1 and 1 or 2 + (d_o1 >= 0 and d_o1 or (dcit >= 0 and dcit or 999999)))
+  local d = rin and -1 or zn == 2 and 0 or (zn == 1 and 1 or 2 + (d_o1 >= 0 and d_o1 or (dcit >= 0 and dcit or 999999)))
   hs.keys[#hs.keys + 1] = d * 16777216 + #list
   return 10
 end
@@ -474,6 +482,7 @@ end
 local function hscan_slice()
   local hs = st.hs
   hs.kb = dfhack.burrows.findByName(hs.geo.kern)    -- never keep a DF pointer across frames
+  hs.rb = dfhack.burrows.findByName(hs.geo.refuge)
   local vec = df.global.world.units.active
   local n = #vec
   local i, work = hs.i, 0
@@ -499,6 +508,7 @@ local function hscan_finish(K)
     K.census.a = {tick = hs.tick, n = #hs.animals, list = hs.animals}
   end
   K.census.h = {tick = hs.tick, vis = hs.vis, inv = hs.inv, great = hs.great, undead = hs.undead, inside = hs.inside,
+                rin = hs.rin,
                 near_o1 = hs.near_o1, near_cit = hs.near_cit, near_bridge = hs.near_bridge, list = list,
                 armed = hs.armed, crazed = hs.crazed, friends = hs.friends, zin = hs.zin, zpast = hs.zpast,
                 dz = hs.dz, dz_o1 = hs.dz_o1, bd = hs.bd, an = hs.an}
