@@ -650,4 +650,119 @@ T.test('FR-68: PEACE stop restores all; ALERT holds the alert cap; dfllm restore
   T.eq({cap(), W3.ts_fps}, {30, -1})
 end)
 
+
+T.test('BUG-065: every change of the FPS cap is a kern.log line naming who lowered it (Run 14: "10 FPS" after a gremlin)',
+       function()
+  local W = H.world{tag = 'capLog'}
+  local K = boot(W)
+  K.set_mode('ALERT', 'test')
+  K.set_mode('SIEGE', 'test')
+  K.set_mode('RECOVERY', 'test')
+  K.set_mode('PEACE', 'test')
+  kern.K().flush(); H.run(W, 3, {paused = true})
+  local log = H.read(W.sd .. '/kern.log') or ''
+  T.ok(log:find('fps cap 250 -> 100 (alert)', 1, true), log)
+  T.ok(log:find('fps cap 100 -> 30 (siege)', 1, true), log)
+  T.ok(log:find('fps cap 30 -> 250 (free)', 1, true), log)
+  kern.stop()
+end)
+
+
+---------------------------------------------------------------- FR-75 (Run 14): popups that halted the fort every ~15 minutes
+local function logged(W, pat)
+  local n = 0
+  kern.K().flush(); H.run(W, 3, {paused = true})
+  local txt = H.read(W.sd .. '/kern.log') or ''
+  for line in txt:gmatch('[^\r\n]+') do if line:find(pat, 1, true) then n = n + 1 end end
+  return n
+end
+
+T.test('FR-75: the gremlin and arrival announcements are cleared; the kind is logged once per period, not per popup',
+       function()
+  local W = H.world{tag = 'popup75', ms_per_frame = 100}
+  boot(W)
+  local popups = df.global.world.status.popups
+  df.global.pause_state = false
+  for _ = 1, 5 do
+    popups:insert('#', {text = 'A gremlin!  Drive it away!'})        -- AMBUSH_MISCHIEVOUS, Run 3 / Run 14
+    H.run(W, 6, {paused = false})
+  end
+  T.eq(#popups, 0, 'old code: unknown, the fort stood until popup.lua')
+  T.eq(df.global.pause_state, false)
+  T.eq(logged(W, 'popup mischief acknowledged'), 1, 'one line per period, with the count of the period after it')
+  popups:insert('#', {text = 'A group of petitioners has arrived at the fortress.'})
+  H.run(W, 6, {paused = false})
+  T.eq(#popups, 0, 'a harmless arrival notice')
+  T.eq(logged(W, 'popup arrival acknowledged'), 1)
+  W.ms = W.ms + 901000                                                -- the next period
+  popups:insert('#', {text = 'A gremlin!  Drive it away!'})
+  H.run(W, 6, {paused = false})
+  T.eq(logged(W, 'popup mischief acknowledged'), 2)
+  kern.stop()
+end)
+
+T.test('FR-75: a threat notice is handed to the reflex first; the arrival words never clear a threat or the embark intro',
+       function()
+  local W = H.world{tag = 'popup75b', ms_per_frame = 100}
+  boot(W)
+  local popups = df.global.world.status.popups
+  df.global.pause_state = false
+  popups:insert('#', {text = 'Some visitors have arrived at the fortress.'})
+  H.run(W, 6, {paused = false})
+  T.eq(#popups, 0, 'a harmless arrival notice is cleared (old code: it stood)')
+  popups:insert('#', {text = 'A vile force of darkness has arrived!'})   -- the threat list comes first
+  H.run(W, 6, {paused = false})
+  T.eq(#popups, 0)
+  T.eq(logged(W, 'popup siege handed to the reflex'), 0, 'no reflex module in this world: the arbiter held the clock itself')
+  local arr = {}
+  for _, e in ipairs(H.events(W)) do if e.type == 'ARRIVAL' then arr[#arr + 1] = e end end
+  T.eq(#arr, 1, 'ARRIVAL before the dismissal')
+  popups:insert('#', {text = 'The undead army has arrived. The dead walk! Hide while you still can!'})
+  H.run(W, 6, {paused = false})
+  T.eq(#popups, 1, 'a broad arrival word never clears a notice with a threat word in it')
+  popups:erase(0)
+  popups:insert('#', {text = 'Your expedition has arrived. Strike the earth!'})
+  H.run(W, 6, {paused = false})
+  T.eq(#popups, 1, 'the embark intro stays for the player')
+  popups:erase(0)
+  kern.stop()
+end)
+
+T.test('FR-75: unknown popups stay (their text is logged once per period); popups.other clears them after a grace, ' ..
+       'never a threat or the intro', function()
+  local W = H.world{tag = 'popup75c', ms_per_frame = 100}
+  local K = boot(W)
+  local popups = df.global.world.status.popups
+  df.global.pause_state = false
+  popups:insert('#', {text = 'The dwarves have found something unusual.'})
+  H.run(W, 40, {paused = false})
+  T.eq(#popups, 1, 'off by default')
+  T.eq(logged(W, 'popup left for the player'), 1, 'the unclassified text is logged once')
+  K.cfg.reflex = {v = 2, popups = {other = true, other_s = 20, log_s = 900}}
+  H.run(W, 100, {paused = false})                                    -- 10 s: inside the grace
+  T.eq(#popups, 1, 'a grace so the player at the game can read it')
+  H.run(W, 120, {paused = false})                                    -- 22 s
+  T.eq(#popups, 0)
+  T.eq(logged(W, 'popup other acknowledged'), 1)
+  popups:insert('#', {text = 'Something about the necromancer in the tower.'})
+  popups:insert('#', {text = 'The dead walk!'})
+  H.run(W, 400, {paused = false})
+  T.eq(#popups, 2, 'threat words are never cleared by the catch-all')
+  kern.stop()
+end)
+
+T.test('FR-75: the 10-minute pause question names the popup text', function()
+  local W = H.world{tag = 'popup75d', ms_per_frame = 100}
+  boot(W)
+  df.global.world.status.popups:insert('#', {text = 'The dwarves have found something unusual.'})
+  df.global.pause_state = false
+  H.run(W, 6, {paused = false})
+  W.ms = W.ms + 620000
+  H.run(W, 10, {paused = false})
+  local q
+  for _, e in ipairs(H.events(W)) do if e.type == 'DECISION_NEEDED' and e.d.id == 'pause' then q = e.d.q end end
+  T.ok(q and q:find('The dwarves have found something unusual.', 1, true), tostring(q))
+  kern.stop()
+end)
+
 T.done()

@@ -72,7 +72,13 @@ M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
             -- whose Secretive mood failed). Nothing in v2 reacts while the game is halted, so an unattended fort
             -- stood still; the citizens and soldiers deal with a berserker as after a click on OK. The notice is
             -- dismissed and wakes the LLM (DECISION_NEEDED berserk) so Gordon hears of it.
-            berserk = {'has gone berserk'}}   -- live L1: "<name>, Ghostly Bowyer has been put to rest."   -- live L1: "The Misty Company, a farmers guild, has been established."
+            berserk = {'has gone berserk'},
+            -- FR-75 (Run 14: the game stood on popups about every 15 minutes, until the player's popup.lua ran):
+            -- "A gremlin!  Drive it away!" (AMBUSH_MISCHIEVOUS, Run 3 / Run 14) is a pest notice, not an army; the
+            -- sighting of the gremlin is reflex's business (BUG-065). 'arrival' is the broad harmless word for visitors,
+            -- petitioners and the like: it never clears a notice with a word of M.DENY in it (classify)
+            mischief = {'drive it away'},
+            arrival = {'has arrived', 'have arrived'}}   -- live L1: "<name>, Ghostly Bowyer has been put to rest."   -- live L1: "The Misty Company, a farmers guild, has been established."
 -- FR-36 threat popups (Run 9: "Snatcher! Protect the children!" froze the game for minutes; "A vile force of darkness
 -- has arrived!" stood while the army walked in). The reflex module issues the arrival reflexes (gates up, entrance doors
 -- forbidden, civ alert, clock held) and emits ARRIVAL (A) with the text; only then is the popup dismissed and the game
@@ -81,6 +87,14 @@ M.POPUPS = {migrants = {'migrants have arrived', 'migrant has arrived'},
 -- module the arbiter holds the clock itself for FALLBACK_TICKS and emits ARRIVAL (fail-open).
 M.THREAT_POPUPS = {siege = {'vile force of darkness'}, ambush = {'an ambush'}, snatcher = {'snatcher'},
                    beast = {'has come'}}
+-- FR-75: words that keep a popup for the player and the reflex, whatever else it says: threats, the undead, the embark
+-- intro ("Strike the earth!", live L6: erasing it left a fort where nobody took a job). Lower case, plain markers
+M.DENY = {'dead walk', 'undead', 'zombie', 'necromancer', 'ambush', 'siege', 'invad', 'army', 'force of darkness',
+          'forgotten beast', 'titan', 'demon', 'werebeast', 'vampire', 'strike the earth', 'snatcher', 'kidnap'}
+-- FR-75 knobs (config/reflex.json `popups`): other = also clear popups of unknown text (not M.DENY) after other_s real
+-- seconds on the screen (default off: the player decides what the kernel may not name), log_s = real seconds between two
+-- kern.log lines per popup kind
+M.POPUP_CFG = {other = false, other_s = 20, log_s = 900}
 M.DEPOT_POPUP = 'need a trade depot'   -- a caravan popup that is also the NO_DEPOT interrupt (FR-43/53)
 M.FALLBACK_TICKS = 4800
 M.ASK_AFTER_MS = 600000            -- foreign pause older than this -> DECISION_NEEDED
@@ -353,13 +367,19 @@ end
 
 -- the vanilla FPS cap follows desired(): the lowest of mode cap, clamp, brake and inbox tempo, never above the
 -- captured original, which comes back as soon as nothing lowers it
-local function apply_cap(K, cap)
+local function apply_cap(K, cap, why)
   local orig = st.orig and st.orig.fps_cap
   if not orig then return end
   local want = cap and math.min(orig, cap) or orig
   if st.cap == want then return end
   local ok = K.act.setting('fps_cap', want)
-  if ok then st.cap = want end
+  if ok then
+    -- BUG-065 (Run 14: 'timestream at 10 FPS after every gremlin alarm'): every change of the cap says who lowered it
+    if (st.cap or orig) ~= want then
+      K.log('info', 'fps cap %d -> %d (%s)', st.cap or orig, want, want >= orig and 'free' or tostring(why or '?'))
+    end
+    st.cap = want
+  end
 end
 
 -- idempotent: write timestream only when the desired value changed (or the live value drifted);
@@ -384,7 +404,7 @@ function M.apply(K)
     st.trade = tw
   end
   local fps, by, cap, cwhy = desired(K)
-  apply_cap(K, cap)
+  apply_cap(K, cap, cwhy)
   st.cap_why, st.ts_want = cwhy, fps
   if not acc then st.tempo_by = 'mode'; return false end
   st.tempo_by = by
@@ -427,6 +447,11 @@ end
 
 -- public (FR-68: the stop guard dismisses the same popups): kind, threat for a popup text; threat = true for
 -- M.THREAT_POPUPS (checked first); nil for a popup that stays for the player
+local function denied(low)
+  for _, w in ipairs(M.DENY) do if low:find(w, 1, true) then return true end end
+  return false
+end
+
 function M.classify(text)
   if type(text) ~= 'string' then return nil end
   local low = text:lower()                -- live L1b: "Merchants have arrived and ..." starts upper case
@@ -434,16 +459,79 @@ function M.classify(text)
     for _, m in ipairs(marks) do if low:find(m:lower(), 1, true) then return kind, true end end
   end
   for kind, marks in pairs(M.POPUPS) do
-    for _, m in ipairs(marks) do if low:find(m:lower(), 1, true) then return kind, false end end
+    if kind ~= 'arrival' then
+      for _, m in ipairs(marks) do if low:find(m:lower(), 1, true) then return kind, false end end
+    end
   end
+  -- FR-75: the broad arrival words last (a caravan keeps its kind) and only without a threat word
+  for _, m in ipairs(M.POPUPS.arrival or {}) do
+    if low:find(m:lower(), 1, true) and not denied(low) then return 'arrival', false end
+  end
+end
+
+-- FR-75: the popups config (config/reflex.json `popups`; a bad value keeps the default)
+local function popup_cfg(K)
+  local c = {other = M.POPUP_CFG.other, other_s = M.POPUP_CFG.other_s, log_s = M.POPUP_CFG.log_s}
+  local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.popups) == 'table' and K.cfg.reflex.popups or {}
+  if type(r.other) == 'boolean' then c.other = r.other end
+  local a, b = int(r.other_s), int(r.log_s)
+  if a and a >= 5 and a <= 600 then c.other_s = a end
+  if b and b >= 60 and b <= 86400 then c.log_s = b end
+  return c
+end
+
+-- the text of the front popup (nil: none, unreadable)
+local function front_text()
+  local ok, text = pcall(function() return dfhack.df2utf(df.global.world.status.popups[0].text) end)
+  if ok and type(text) == 'string' then return text end
 end
 
 -- kind, text, threat of the front popup
 local function popup_kind()
-  local ok, text = pcall(function() return dfhack.df2utf(df.global.world.status.popups[0].text) end)
-  if not ok or type(text) ~= 'string' then return nil end
+  local text = front_text()
+  if not text then return nil end
   local kind, threat = M.classify(text)
   if kind then return kind, text, threat end
+end
+
+-- FR-75: one kern.log line per popup kind and period (popup_cfg.log_s real seconds), with the count of the period
+-- before it; st.pk[kind] = {n, t}. Text of an unclassified popup that stays for the player: st.pu[text] = t, the same cadence
+local function note_ack(K, kind, text)
+  local now = K.now().ms
+  st.pk = st.pk or {}
+  local r = st.pk[kind]
+  if not r then r = {n = 0}; st.pk[kind] = r end
+  r.n = r.n + 1
+  if r.t == nil or now < r.t or now - r.t >= popup_cfg(K).log_s * 1000 then
+    K.log('info', 'popup %s acknowledged (%d since the last line): "%s"', kind, r.n, tostring(text):sub(1, 80))
+    r.t, r.n = now, 0
+  end
+end
+
+local function note_left(K, text)
+  local now = K.now().ms
+  st.pu = st.pu or {}
+  local key = text:sub(1, 80)
+  local t = st.pu[key]
+  if t == nil or now < t or now - t >= popup_cfg(K).log_s * 1000 then
+    st.pu[key] = now
+    K.log('info', 'popup left for the player (unclassified): "%s"', key)
+  end
+end
+
+-- FR-75, popups.other: the front popup has no kind; with the knob on, it is cleared once it has stood other_s real
+-- seconds and carries no word of M.DENY. Returns 'other', text or nil
+local function other_popup(K)
+  local text = front_text()
+  if not text then return nil end
+  local c = popup_cfg(K)
+  note_left(K, text)
+  if not c.other or denied(text:lower()) then st.unk = nil; return nil end
+  local now = K.now().ms
+  if not st.unk or st.unk.text ~= text or now < st.unk.since then st.unk = {text = text, since = now} end
+  if now - st.unk.since < c.other_s * 1000 then return nil end
+  st.unk = nil
+  return 'other', text
 end
 
 -- FR-36: hand a threat (or depot) popup to the reflex module once per popup, before anything dismisses it. Without
@@ -507,7 +595,9 @@ local function track_pause(K)
   local popup_only = popup_count() > 0 and df.global.pause_state ~= true and not st.hold
   if st.pause_by == 'popup' or popup_only or (st.pause_by == 'inbox' and not st.hold and popup_count() > 0) then
     local kind, text = popup_kind()
+    if not kind then kind, text = other_popup(K) end            -- FR-75: unknown text, only with popups.other
     if kind and K.act.dismiss_popup(kind) then
+      note_ack(K, kind, text)
       if kind == 'berserk' then
         K.emit('DECISION_NEEDED', 'A', 'berserk: ' .. text:sub(1, 120),
                {id = 'berserk', q = text:sub(1, 120) .. ' The fort runs on; citizens and soldiers deal with it. ' ..
@@ -518,8 +608,10 @@ local function track_pause(K)
   end
   if st.pause_by ~= 'inbox' and not st.asked and now.ms - st.pause_since >= M.ASK_AFTER_MS then
     st.asked = true
+    local what = st.pause_by == 'popup' and front_text()          -- FR-75: say which popup it is
     K.emit('DECISION_NEEDED', 'A', 'game paused by ' .. st.pause_by .. ' for 10 min',
-           {id = 'pause', q = 'paused by ' .. st.pause_by .. '; Gordon unpauses in DF (the inbox cannot release it)'})
+           {id = 'pause', q = 'paused by ' .. st.pause_by .. (what and (' ("' .. what:sub(1, 100) .. '")') or '')
+                              .. '; Gordon unpauses in DF (the inbox cannot release it)'})
   end
 end
 
