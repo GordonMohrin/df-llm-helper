@@ -84,7 +84,7 @@
 --     default) until another hostile is in sight or one comes inside Kern+, so the civ alert, the clock clamp and the
 --     doors do not come back for the same intruder; the clock returns to the mode's own cap with the release;
 --   * a harmless intruder that held the lockdown for confine.offer_days gets a sortie offer (DECISION_NEEDED
---     intruder_sortie: the exact squad.sortie command, once per offer_days); a dangerous one past the limit is reported
+--     intruder_sortie: the exact squad.sortie command, once per unit and cause; a repeat needs another unit, at the earliest after offer_days); a dangerous one past the limit is reported
 --     the same way (the lockdown stays: the sortie is the way out);
 --   * a mood dwarf or a patient behind the sounding alert over confine.need_thirst / need_hunger is reported
 --     (DECISION_NEEDED confined_need); with nothing dangerous near the lockdown ends for him (cause need), else the
@@ -1992,7 +1992,7 @@ local function sortie_cmd(K, cs)
 end
 
 -- DECISION_NEEDED intruder_sortie (A): a harmless intruder that holds the lockdown (after offer_days) or a dangerous one
--- past the limit; once per offer_days (CAD), again at once only for another unit
+-- past the limit; once per episode and unit (CAD.due: a repeat needs another unit or a changed cause)
 local function offer_step(K, h, now)
   local hd, cs = st.hold, rt.cause
   if not hd or not cs or not cs.near or K.mode() ~= 'ALERT' then return end
@@ -2006,8 +2006,10 @@ local function offer_step(K, h, now)
   end
   local T = K.now()
   local rec = st.cf and st.cf.o
-  local o = {ticks = math.max(1, c.offer_days) * 1200, wall_s = 60}
-  if rec and not CAD.elapsed(rec, T, o.ticks, o.wall_s) then return end      -- once per offer_days
+  -- review C1: a repeat needs news (another unit, or harmless -> dangerous), never the same offer every offer_days for as
+  -- long as a dangerous intruder keeps the lockdown (BUG-008's rule for standing class-A conditions)
+  local tok = cs.hl == 1 and 'harmless' or 'dangerous'
+  if not CAD.due(rec, T, {cs.id}, {tok}, {ticks = math.max(1, c.offer_days) * 1200, wall_s = 60}) then return end
   local cmd, key, n = sortie_cmd(K, cs)
   local days = string.format('%.1f', age / 1200)
   local q
@@ -2023,7 +2025,7 @@ local function offer_step(K, h, now)
                       'no squad to send')
   end
   st.cf = st.cf or {}
-  st.cf.o, dirty = CAD.mark(T, {cs.id}, {cs.hl == 1 and 'harmless' or 'dangerous'}), true
+  st.cf.o, dirty = CAD.mark(T, {cs.id}, {tok}), true
   local d = {id = 'intruder_sortie', q = q, unit = cs.id, pos = cs.pos, race = cs.race, hl = cs.hl, dc = cs.dc, de = cs.de,
              age = age, lim = lim}
   if cmd then d.squad, d.cmd = key, cmd end

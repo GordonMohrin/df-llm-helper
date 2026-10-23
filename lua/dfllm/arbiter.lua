@@ -95,6 +95,7 @@ M.DENY = {'dead walk', 'undead', 'zombie', 'necromancer', 'ambush', 'siege', 'in
 -- seconds on the screen (default off: the player decides what the kernel may not name), log_s = real seconds between two
 -- kern.log lines per popup kind
 M.POPUP_CFG = {other = false, other_s = 20, log_s = 900}
+M.PU_MAX = 64              -- texts of unclassified popups remembered for the log cadence
 M.DEPOT_POPUP = 'need a trade depot'   -- a caravan popup that is also the NO_DEPOT interrupt (FR-43/53)
 M.FALLBACK_TICKS = 4800
 M.ASK_AFTER_MS = 600000            -- foreign pause older than this -> DECISION_NEEDED
@@ -514,6 +515,10 @@ local function note_left(K, text)
   local key = text:sub(1, 80)
   local t = st.pu[key]
   if t == nil or now < t or now - t >= popup_cfg(K).log_s * 1000 then
+    if t == nil then                                    -- review C1: bounded (texts carry names; forget all past 64)
+      st.pu_n = (st.pu_n or 0) + 1
+      if st.pu_n > M.PU_MAX then st.pu, st.pu_n = {}, 1 end
+    end
     st.pu[key] = now
     K.log('info', 'popup left for the player (unclassified): "%s"', key)
   end

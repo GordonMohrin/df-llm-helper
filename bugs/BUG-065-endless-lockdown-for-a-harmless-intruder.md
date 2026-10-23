@@ -81,7 +81,7 @@ alert_wanted, set_alert, anchor_dist), `lua/dfllm/threat.lua` (assess), `lua/dfl
   squad (`military.sortie_squad`: the melee squad with the most soldiers) and the command `dfllm cmd squad.sortie
   '{"squad":"A","target":[x,y,z],"approve":true}'`: for a harmless lone intruder after `confine.offer_days` (1) of
   lockdown, for a dangerous one past the limit (it says the lockdown stays while it is near); ALERT only (the verb's
-  modes), once per `offer_days` (util/cadence). The wake line's next move (`wake.sortie_hint`) repeats the command and says
+  modes), once per unit and cause (util/cadence: a repeat needs another unit or a changed cause, at the earliest after `offer_days`). The wake line's next move (`wake.sortie_hint`) repeats the command and says
   the lockdown ends by itself. `approve:true` stays the player's decision.
 - **A mood dwarf or patient in need** (`need_step`, every 300 ticks, 60 citizens a look): behind the sounding civ alert,
   over `confine.need_thirst` (40000) or `need_hunger` (60000): DECISION_NEEDED `confined_need` (A, once per news) with the

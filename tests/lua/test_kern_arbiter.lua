@@ -751,6 +751,31 @@ T.test('FR-75: unknown popups stay (their text is logged once per period); popup
   kern.stop()
 end)
 
+T.test('review C1: the memory of unclassified popup texts is bounded', function()
+  local W = H.world{tag = 'popup75e', ms_per_frame = 100}
+  boot(W)
+  local popups = df.global.world.status.popups
+  df.global.pause_state = false
+  local A = require('dfllm.arbiter')
+  local keep = A.PU_MAX
+  A.PU_MAX = 5
+  for i = 1, 8 do
+    popups:insert('#', {text = 'Unusual thing number ' .. i .. ' happened.'})
+    H.run(W, 3, {paused = false})
+    popups:erase(0)
+    H.run(W, 2, {paused = false})
+  end
+  T.eq(logged(W, 'thing number 1 happened'), 1, 'each distinct text is logged once')
+  df.global.pause_state = false
+  H.run(W, 10, {paused = false})
+  popups:insert('#', {text = 'Unusual thing number 1 happened.'})
+  H.run(W, 5, {paused = false})
+  T.eq(logged(W, 'thing number 1 happened'), 2, 'the oldest entry was forgotten (bounded list)')
+  popups:erase(0)
+  A.PU_MAX = keep
+  kern.stop()
+end)
+
 T.test('FR-75: the 10-minute pause question names the popup text', function()
   local W = H.world{tag = 'popup75d', ms_per_frame = 100}
   boot(W)

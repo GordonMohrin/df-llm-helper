@@ -788,4 +788,20 @@ T.test('BUG-065: a great danger in reach, or an undead wave, keeps the lockdown 
 end)
 
 
+T.test('review C1: an unchanged dangerous intruder past the limit is offered once, not once per game day', function()
+  with_sortie(function()
+    local W = setup{tag = 'gremonce', manifest = false, cfg = CONFINE}
+    raws()
+    W.move(2, 100, 20, Z)
+    gremlin(W, 300, 110, 20, 60000)
+    S.run(W, 120)
+    W.inbox('ack', {})
+    for _ = 1, 4 do S.run(W, 1900); W.ms = W.ms + 120000; W.inbox("ack", {}) end   -- 7,600 ticks: 6.3 days, 3.3 past the limit
+    T.eq(#decisions(W, 'intruder_sortie'), 1, 'the same unit and cause: one offer (a repeat needs news)')
+    gremlin(W, 301, 111, 20, 60000)                                -- another one: news
+    for _ = 1, 3 do S.run(W, 1900); W.ms = W.ms + 120000; W.inbox("ack", {}) end
+    T.ok(#decisions(W, 'intruder_sortie') <= 3, 'bounded')
+  end)
+end)
+
 T.done()
