@@ -1,5 +1,5 @@
 # BUG-048 Lost bridges and gates stay lost for years: PEACE drops them, a bridge without a text queues nothing, the question nobody answers
-Status: fixed in FIXHASH (offline, live-untested): a lost bridge enters the keeper's queue the moment gate reports it (PEACE without a lockdown) or at the diff after an episode, never retired in PEACE; a bridge no defense project recorded gets its quickfort text from gate's raise direction and the footprint; after `perimeter.stop_after` losses to building destroyers (and `perimeter.vanish_after` losses with no destroyer in sight, or a rebuild nobody built in 60 days) the bridge is replaced by a wall and a door through the runner, reported once (PERIMETER_BROKEN `replaced`), the other bridges kept; DECISION_NEEDED `bridge_rebuild` is not asked any more (DECISIONS 3); old held state converts
+Status: fixed in 04043c3 (offline, live-untested): a lost bridge enters the keeper's queue the moment gate reports it (PEACE without a lockdown) or at the diff after an episode, never retired in PEACE; a bridge no defense project recorded gets its quickfort text from gate's raise direction and the footprint; after `perimeter.stop_after` losses to building destroyers (and `perimeter.vanish_after` losses with no destroyer in sight, or a rebuild nobody built in 60 days) the bridge is replaced by a wall and a door through the runner, reported once (PERIMETER_BROKEN `replaced`), the other bridges kept; DECISION_NEEDED `bridge_rebuild` is not asked any more (DECISIONS 3); old held state converts
 Severity: critical (Run 11: siege 13 and 14 cost 36 and 24 citizens with O1, B1, B2 and their levers lost for years; Run 13 fell in y525 over an open O1)
 Found: 2026-10-23 from the game session's notes 13, 17, 20, 23, 26, 43 (`bugs/RUN11-offene-bugs-und-FR.md`) and causes 1 and 3 of `docs/v2/POSTMORTEM-run13-wheelsblows-y525.md`
 Module: `lua/dfllm/seal.lua` (the perimeter keeper, bridge queue `m.seal.gq`), `lua/dfllm/gate.lua` (`seen.key`, `bridge_key`, state `replaced`), `lua/dfllm/siege.lua` (`geometry`), `lua/dfllm/readiness.lua` (`check_levers`), `lua/dfllm/snapshot.lua`, `dfpilot/bp/topo.py` (`audit`), `dfpilot/wake.py`, `dfpilot/brief.py`
@@ -33,7 +33,7 @@ replaced by a constructed closure, not left open and not made a question. The st
 4. **A rebuild nobody builds is given up for good.** `:1536` `if t - (g.qt or t) > CFG.gq_keep then ... given up`: the entry left the queue after 60 days
    (cancelled or starved repair project) and the retire pass of cause 1 then dropped the piece.
 
-## Fix (FIXHASH)
+## Fix (04043c3)
 - **Intake.** `KP.add` (the keeper's helpers live in one table: seal.lua is near Lua's limit of 200 locals) enters a lost bridge into `m.seal.gq`; called from
   `M.on['EV:BRIDGE_DESTROYED']` (PEACE, no episode, no lockdown: at once, `due('gates')` runs the pass), from the `pre`/`retire` passes (a bridge piece with a
   manifest name or a recorded text is kept instead of retired) and from the post-episode diff. A bridge the player built and the keeper never saw (no name, no

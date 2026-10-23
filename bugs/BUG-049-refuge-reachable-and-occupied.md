@@ -1,5 +1,5 @@
 # BUG-049 The refuge was reachable for the enemy and occupied when the citizens came: nothing told whether it could be trusted
-Status: fixed in FIXHASH (offline, live-untested): `seal.refuge_trust` (separation answer fresh, nothing open on the way, stair-head closer standing, nobody inside), state `alert.ref.tr`/`trw`, R0 `refuge_trust`, REFUGE_FAIL `hostile`/`at` with the position, sense counts the hostiles inside the refuge (`census.h.rin`, listed first); one open question for the live run (does an unforbidden hatch stop invaders?)
+Status: fixed in 04043c3 (offline, live-untested): `seal.refuge_trust` (separation answer fresh, nothing open on the way, stair-head closer standing, nobody inside), state `alert.ref.tr`/`trw`, R0 `refuge_trust`, REFUGE_FAIL `hostile`/`at` with the position, sense counts the hostiles inside the refuge (`census.h.rin`, listed first); one open question for the live run (does an unforbidden hatch stop invaders?)
 Severity: critical (Run 13 fell in y525 with the citizens finding Tiefe+ occupied)
 Found: 2026-10-23, post-mortem Run 13 (Wheelsblows y525) cause 3: "Zuflucht unsicher: Tiefe+ war fuer Feinde erreichbar; beim Alarm fanden die Buerger sie besetzt" (REFUGE_FAIL "hostile inside")
 Module: `lua/dfllm/seal.lua` (`hostile_in`, `rate`, `leave_why`, `alert_burrow`, `publish`, new `refuge_trust`), `lua/dfllm/sense.lua` (hostile scan), `lua/dfllm/readiness.lua`, `dfpilot/brief.py`
@@ -21,7 +21,7 @@ The choice logic already refused a burrow with a visible hostile in it (`seal.lu
    (`dfpilot/cmd.refuge_head`, BUG-031) is a plan-check finding only, and a separation answer from a stopped seal job is as good as a fresh one.
    Test: "the refuge is trusted only while ...".
 
-## Fix (FIXHASH)
+## Fix (04043c3)
 - **sense:** `census.h.rin` counts the visible hostiles on tiles of the manifest's refuge burrow; their list entries carry `rf = 1` and sort first (key -1),
   so the 40-entry cut never hides one.
 - **seal:** `hostile_in` returns the count (the list's entries inside the burrow, or `h.rin` when larger) and the first position; `rate`/`leave_why` use
