@@ -45,6 +45,8 @@ def test_state_orders_jam_is_in_the_contract_and_in_the_status(save):
     put_state(save, orders={"n": 40, "bad": 0, "stuck": 6, "jam": jam})
     out = brief.status_text(save)
     assert f"JAM {jam}" in out, out
+    from dfpilot import doctor
+    assert any(jam in b for b in doctor.diagnose(save)[1]), doctor.diagnose(save)       # doctor flags it
     put_state(save, orders={"n": 40, "bad": 0, "stuck": 0})
     st = json.loads((save / "state.b.json").read_text("utf-8"))
     st["orders"]["jam"] = "x" * 81

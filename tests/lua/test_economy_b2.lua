@@ -153,10 +153,13 @@ T.test('orderfix: engrave_split keeps min(max, blank) of the oldest, restock cov
 end)
 
 T.test('orderfix: the slab census reads engraving_type (Slab = -1 blank, Memorial = 0) and the free flags', function()
-  local W = world{slabs = {blank = 3, memorial = 4, forbidden = 2}}
+  local W = world{slabs = {blank = 3, memorial = 4, forbidden = 2}, setup = function(W)
+    F.item(W, 'SLAB', {engraving_type = -1, topic = -1, flags = {in_job = true}})          -- held by a running job
+    F.item(W, 'SLAB', {engraving_type = 3, topic = -1})                                    -- some sign slab
+  end}
   local OF = require('dfllm.orderfix')
   local s = OF.slabs()
-  T.eq({s.blank, s.held, s.memorial, s.other, s.n}, {3, 2, 4, 0, 9})
+  T.eq({s.blank, s.busy, s.held, s.memorial, s.other, s.n}, {3, 1, 2, 4, 1, 11})
   T.ok(s.topics[3801] and s.topics[3804], 'memorial topics = historical figures')
 end)
 
@@ -172,7 +175,7 @@ T.test('BUG-061: 31 EngraveSlab orders and no unengraved slab: all removed (name
   T.eq(#cs, 1)
   T.eq({cs[1].args[1].job, cs[1].args[1].amount_total, cs[1].args[1].material}, {'ConstructSlab', 5, 'INORGANIC'},
        'min(restock_cap 5, max(6 ghosts, 31 orders))')
-  T.ok(logged(W, 'EngraveSlab: 31 orders, 0 unengraved slabs'), 'the log line names the pass')
+  T.ok(logged(W, 'EngraveSlab: 31 orders, 0 unengraved slabs (0 in jobs, 0 held), 6 ghosts'), 'the log line names the pass')
   T.ok(logged(W, 'orders 1,2,3,4,5,6,7,8,9,10,11,12 +19 removed, 0 kept'), 'and the orders')
   local ev = stuck(W, 'EngraveSlab')
   T.eq(#ev, 1)
@@ -192,6 +195,13 @@ T.test('BUG-061: with unengraved slabs the oldest min(3, slabs) orders stay', fu
   local W3 = world{boulders = 40, slabs = {forbidden = 4, blank = 0}, setup = function(W) engrave(W, 2) end}
   days(W3, 1)
   T.eq(ids_of('EngraveSlab'), {}, 'forbidden slabs are no blank slabs')
+  -- a blank slab a running job holds keeps that job's order (one slab, five orders: the oldest stays)
+  local W4 = world{boulders = 40, setup = function(W)
+    F.item(W, 'SLAB', {engraving_type = -1, topic = -1, flags = {in_job = true}})
+    engrave(W, 5)
+  end}
+  days(W4, 1)
+  T.eq(ids_of('EngraveSlab'), {1})
 end)
 
 T.test('BUG-061: the first "unengraved slab" cancel cuts the orders back at once, once per window', function()

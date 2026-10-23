@@ -5999,12 +5999,13 @@ function M.slab_pass(K, c, r)
   local sl = OF.slabs(sc.scan_max)
   local care = (K.view() or {}).care
   local ghosts = math.tointeger(type(care) == 'table' and care.ghosts or 0) or 0
-  local sb = {blank = sl.blank, held = sl.held, memorial = sl.memorial, engrave = #eng, cons = cons, ghosts = ghosts,
-              removed = 0, ordered = 0}
+  local sb = {blank = sl.blank, busy = sl.busy, held = sl.held, memorial = sl.memorial, engrave = #eng, cons = cons,
+              ghosts = ghosts, removed = 0, ordered = 0}
   st.slab, st.slab_t = sb, now
   local function cmd() if r.cmds then r.cmds = r.cmds + 1 end end
   -- the EngraveSlab orders that may stand
-  local _, drop = OF.engrave_split(eng, sl.blank, sc.max_orders)
+  -- a blank slab a running job holds keeps that job's order (removing it would orphan the job)
+  local _, drop = OF.engrave_split(eng, sl.blank + sl.busy, sc.max_orders)
   local day = now // DAY
   if p.slab_day ~= day then p.slab_day, p.slab_n = day, 0 end
   local removed = {}
@@ -6020,8 +6021,8 @@ function M.slab_pass(K, c, r)
   sb.removed = #removed
   if #removed > 0 then
     local list = table.concat(removed, ',', 1, math.min(#removed, 12)) .. (#removed > 12 and (' +' .. (#removed - 12)) or '')
-    K.log('warn', 'EngraveSlab: %d orders, %d unengraved slabs (%d held), %d ghosts: orders %s removed, %d kept (at most %d)',
-          #eng, sl.blank, sl.held, ghosts, list, #eng - #removed, sc.max_orders or 3)
+    K.log('warn', 'EngraveSlab: %d orders, %d unengraved slabs (%d in jobs, %d held), %d ghosts: orders %s removed, %d kept ' ..
+          '(at most %d)', #eng, sl.blank, sl.busy, sl.held, ghosts, list, #eng - #removed, sc.max_orders or 3)
     local T0 = K.now()
     local why = sl.blank == 0 and 'no unengraved slab' or 'more orders than unengraved slabs'
     if CAD.due(p.slab_ann, T0, {}, {why}, {ticks = CAD.TICKS, wall_s = CAD.WALL_S}) then

@@ -29,11 +29,11 @@ function OF.memorial_type()
   return type(t) == 'table' and math.tointeger(t.Memorial) or 0
 end
 
--- {blank = free blank slabs (not forbidden, in a job, built or carried off), held = blank slabs a job or the
---  stockpile rules keep, memorial = engraved memorials, other = engraved otherwise, n = items read,
---  topics = {hf id = true} of the memorials}; at most `limit` items are read
+-- {blank = free blank slabs (not forbidden, in a job, built or carried off), busy = blank slabs a running job holds
+--  (its order must stay), held = the other blank slabs that are not free, memorial = engraved memorials, other =
+--  engraved otherwise, n = items read, topics = {hf id = true} of the memorials}; at most `limit` items are read
 function OF.slabs(limit)
-  local r = {blank = 0, held = 0, memorial = 0, other = 0, n = 0, topics = {}}
+  local r = {blank = 0, busy = 0, held = 0, memorial = 0, other = 0, n = 0, topics = {}}
   local ok, vec = pcall(function() return df.global.world.items.other.SLAB end)
   if not ok or vec == nil then return r end
   local blank, mem = OF.blank_type(), OF.memorial_type()
@@ -47,7 +47,9 @@ function OF.slabs(limit)
       for _, k in ipairs(OF.SLAB_SKIP) do
         if get(f, k) == true then skip = true; break end
       end
-      if skip then r.held = r.held + 1 else r.blank = r.blank + 1 end
+      if get(f, 'in_job') == true then r.busy = r.busy + 1
+      elseif skip then r.held = r.held + 1
+      else r.blank = r.blank + 1 end
     elseif et == mem then
       r.memorial = r.memorial + 1
       local hf = math.tointeger(get(it, 'topic'))

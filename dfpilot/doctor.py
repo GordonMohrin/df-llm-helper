@@ -172,6 +172,8 @@ def diagnose(save_dir: Path) -> tuple[list[str], list[str]]:
     if od and od.get("bad"):                   # FR-39: DF 53.16 crashes on make-item orders without a subtype
         bad.append(f"{od['bad']} manager order(s) of MakeArmor/Pants/Shoes/Gloves/Helm/Weapon/Ammo/Shield type without "
                    f"item_subtype: DF crashes when a dwarf takes the job (dfllm cmd inspect what=orders)")
+    if od and od.get("jam"):                   # BUG-061: a workshop type's slots are full of jobs that cancel at once
+        bad.append(f"orders: {od['jam']} (dfllm cmd inspect what=orders: slabs, shops)")
     if state:
         k = state["k"]
         out.append(f"state: tps {state['t']['tps']} ms/s {k['ms_s']} gap {k['gap_max_ms']} ms faults {k['faults']}"
