@@ -679,8 +679,8 @@ local function window(st)
 end
 
 -- BUG-071: pop and stock are what status shows first: they go last (a >4 KB document used to lose stock before ready,
--- bridges and threat)
-local SHRINK = {'proj', 'alert', 'mil', 'trade', 'care', 'stale', 'ready', 'bridges', 'threat', 'labor', 'stock', 'pop',
+-- bridges and threat). `stale` (the age of a carried value) goes after them: a carried value must never show as a live one.
+local SHRINK = {'proj', 'alert', 'mil', 'trade', 'care', 'ready', 'bridges', 'threat', 'labor', 'stock', 'pop', 'stale',
                 'phase'}
 
 -- BUG-071 (Run 13: status showed only the clock line after a year change or a hang): the keys status needs first. When

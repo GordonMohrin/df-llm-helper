@@ -248,4 +248,23 @@ T.test('BUG-071: a document over 4 KB sheds proj, care, ready, bridges, threat b
   kern.stop()
 end)
 
+T.test('BUG-071 review: a carried value keeps its stale marker while the document sheds other keys', function()
+  local W = H.world{tag = 'shrink_stale', ms_per_frame = 500}
+  local show = {pop = true, stock = true}
+  local gate = {name = 'gate', every = {ticks = 10}, state = function()
+    local b = {}
+    for i = 1, 400 do b[string.format('B%04d', i)] = 'down' end
+    return {bridges = b}
+  end}
+  H.boot(W, {modules = {pop_mod(show), econ_mod(show), gate}, strict = false})
+  H.run(W, 50, {skip = 10})
+  show.stock = false                                    -- economy gives no stock now: the kernel carries the last one
+  H.run(W, 100, {skip = 10})
+  local s = H.state(W)
+  T.eq(s.bridges, nil, 'the big key was shed')
+  T.eq(s.stock.drink_d, 200, 'the carried value is still published')
+  T.ok(s.stale and s.stale.stock ~= nil, 'and still marked as carried')
+  kern.stop()
+end)
+
 T.done()

@@ -39,7 +39,7 @@ Four independent ways to the same picture, each proven from the code and reprodu
   they are (status: `pop 36 (30ad 6sol) cap 55 gate 55 (last known 2d ago)`). Kept in `persist.kern.carry` (oldest leaf's
   tick) so a reboot starts with them; used for `perf.carry_days` 28 game days (config `perf`, 0 = never), never read from a
   persist record younger than the clock (an older save).
-- **Shrink order:** `proj, alert, mil, trade, care, stale, ready, bridges, threat, labor, stock, pop, phase`; the warning
+- **Shrink order:** `proj, alert, mil, trade, care, ready, bridges, threat, labor, stock, pop, stale, phase` (`stale` after the values it marks: a carried value never shows as a live one; review); the warning
   is logged once per key per 10 minutes.
 
 ## Not decided offline (live data that decides it)
@@ -51,4 +51,4 @@ and `economy` disabled/paced lines and the time of the first `economy` daily run
 ## Tests
 `tests/test_status_keep.py` (new, 7: long UNREADY + lockdown keep pop and stock; rank order; `last known` ages; the idle
 clause; the config mirror and validation), `tests/lua/test_kern_gaps.lua` (a silent module keeps its values with age; they
-survive a reboot; `carry_days` 0 switches it off; a 4 KB document sheds `bridges` before `stock`, once in the log).
+survive a reboot; `carry_days` 0 switches it off; a 4 KB document sheds `bridges` before `stock`, once in the log; a carried value keeps its `stale` marker while others are shed).
