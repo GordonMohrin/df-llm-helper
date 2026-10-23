@@ -265,40 +265,47 @@ def lockdown_text(al: dict) -> str:
     return txt
 
 
-def line_alarm(ctx: Ctx) -> str:
-    """FR-51/53/55/58: the clock governor, the lockdown, unacked interrupts, lever latency and the arrival ETA."""
+def alarm_items(ctx: Ctx) -> list[tuple[int, str]]:
+    """FR-51/53/55/58: the clock governor, the lockdown, unacked interrupts, lever latency and the arrival ETA. I1: ranked
+    parts for the status (the lockdown with its cause, the unacked interrupts and the ETA are rank 2 and stay when the
+    clock, the doors, the recall, the far invaders and the lever latency (rank 3) are cut); the brief joins them."""
     s, out = ctx.s, []
     c = s.get("clock")
     if c:
         if c["held"] or (c["orig"] and c["cap"] < c["orig"]):
-            out.append(f"clock: held {c['cap']} t/s, reason {c['why'] or '?'}")
+            out.append((3, f"clock: held {c['cap']} t/s, reason {c['why'] or '?'}"))
         else:
-            out.append(f"clock: free (cap {c['cap'] or '?'}" + (f", timestream {c['ts']}" if c["ts"] > 0 else "") + ")")
+            out.append((3, f"clock: free (cap {c['cap'] or '?'}" + (f", timestream {c['ts']}" if c["ts"] > 0 else "") + ")"))
     al = s.get("alarm")
     if al:
         if al["lock"]:
-            out.append(lockdown_text(al))
+            out.append((2, lockdown_text(al)))
             if "doors" in al:                  # BUG-012: doors forbidden, and those waiting for citizens outside
-                out.append(f"doors {al['doors']} forbidden" + (f", {al['dwait']} waiting for {al.get('dout', 0)}"
-                                                               f" citizens outside" if al.get("dwait") else "")
-                           + (f", {al['dref']} refused (flag reset)" if al.get("dref") else ""))   # BUG-015
+                out.append((3, f"doors {al['doors']} forbidden" + (f", {al['dwait']} waiting for {al.get('dout', 0)}"
+                                                                   f" citizens outside" if al.get("dwait") else "")
+                            + (f", {al['dref']} refused (flag reset)" if al.get("dref") else "")))   # BUG-015
             if al.get("rn"):                   # BUG-035: the open recall (called, still out, who cannot come)
-                out.append(f"recall: {al.get('rleft', al['rn'])} of {al['rn']} still outside {al.get('rto') or '?'}"
-                           + (f" ({al['rstuck']} cannot come: RECALL stuck names them)" if al.get("rstuck") else "")
-                           + (f", +{al['rnew']} more out since" if al.get("rnew") else ""))
+                out.append((3, f"recall: {al.get('rleft', al['rn'])} of {al['rn']} still outside {al.get('rto') or '?'}"
+                            + (f" ({al['rstuck']} cannot come: RECALL stuck names them)" if al.get("rstuck") else "")
+                            + (f", +{al['rnew']} more out since" if al.get("rnew") else "")))
         if al.get("far"):                      # Run 11: invaders a lockdown expired far (they re-arm on approach)
-            out.append(f"{al['far']} invaders far (lockdown expired; re-arm within lockdown_near)")
+            out.append((3, f"{al['far']} invaders far (lockdown expired; re-arm within lockdown_near)"))
         if al["unacked"]:
-            out.append(f"{al['unacked']} interrupts unacked (last #{al['last']}, acked #{al['ack']}): dfllm ack")
+            out.append((2, f"{al['unacked']} interrupts unacked (last #{al['last']}, acked #{al['ack']}): dfllm ack"))
         eta = al.get("eta", -1)
         if eta >= 0:
             tps = (s.get("t") or {}).get("tps") or 0
-            out.append(f"eta ~{eta} t" + (f" (~{round(eta / tps)} s)" if tps > 0 else "") + " to the nearest entrance")
+            out.append((2, f"eta ~{eta} t" + (f" (~{round(eta / tps)} s)" if tps > 0 else "") + " to the nearest entrance"))
     lv = s.get("lever")
     if lv:
-        out.append("lever_latency_s " + (f"{lv['lat_s']} ({lv['lat_t']} t)" if lv["lat_t"] >= 0 else "-")
-                   + (f", {lv['pend']} pulls pending {lv['wait_s']} s" if lv["pend"] else ""))
-    return _join(out)
+        out.append((3, "lever_latency_s " + (f"{lv['lat_s']} ({lv['lat_t']} t)" if lv["lat_t"] >= 0 else "-")
+                    + (f", {lv['pend']} pulls pending {lv['wait_s']} s" if lv["pend"] else "")))
+    return out
+
+
+def line_alarm(ctx: Ctx) -> str:
+    """FR-51/53/55/58 as one line (the brief): alarm_items joined."""
+    return _join(t for _, t in alarm_items(ctx))
 
 
 def pop_diag(ctx: Ctx) -> str:
@@ -331,14 +338,16 @@ def stale_note(s: dict, key: str) -> str:
     return f" (last known {fmt_ticks(age)} ago)" if isinstance(age, int) else ""
 
 
-def line_pop(ctx: Ctx) -> str:
+def pop_items(ctx: Ctx) -> list[tuple[int, str]]:
+    """Ranked parts of the pop line (I1: status ranks them apart, so the long pop trend and the readiness summary go before
+    the lockdown line does; the brief joins them): pop (1), the pop trend (3), the readiness summary (3)."""
     s = ctx.s
-    out = []
+    out: list[tuple[int, str]] = []
     p = s.get("pop")
     if p:
-        out.append(f"pop {p.get('cit', '?')} ({p.get('adults', '?')}ad {p.get('soldiers', '?')}sol)"
-                   f" cap {p.get('cap', '?')} gate {p.get('gate_cap', '?')}" + stale_note(s, "pop"))
-    out.append(pop_diag(ctx))
+        out.append((1, f"pop {p.get('cit', '?')} ({p.get('adults', '?')}ad {p.get('soldiers', '?')}sol)"
+                       f" cap {p.get('cap', '?')} gate {p.get('gate_cap', '?')}" + stale_note(s, "pop")))
+    out.append((3, pop_diag(ctx)))
     r = s.get("ready")
     if r:
         a = r["audit"]
@@ -354,9 +363,13 @@ def line_pop(ctx: Ctx) -> str:
         if a.get("cov"):                       # BUG-043: what its snapshot covered (margin, shafts, pieces out)
             audit += f" ({a['cov']})"
         low = any(str(f).startswith("traps<") for f in r["fail"]) and a["age"] >= 0
-        out.append(f"{head} worn {r['worn']}% cv {r['cv']} {drill} {audit} traps {a['min_traps']}"
-                   + (" (dfllm audit: where the cheapest route enters the hall)" if low else ""))
-    return _join(out)
+        out.append((3, f"{head} worn {r['worn']}% cv {r['cv']} {drill} {audit} traps {a['min_traps']}"
+                       + (" (dfllm audit: where the cheapest route enters the hall)" if low else "")))
+    return out
+
+
+def line_pop(ctx: Ctx) -> str:
+    return _join(t for _, t in pop_items(ctx))
 
 
 def src_name(w: dict, i: int) -> str:
@@ -452,15 +465,18 @@ def idle_clause(lb: dict) -> str:
     return f"idle {lb['idle']}% = {idle_n} of {n} adults ({tail}{hint}) starving {lb['starving']}"
 
 
-def line_supply(ctx: Ctx) -> str:
-    s, out = ctx.s, []
+def supply_items(ctx: Ctx) -> list[tuple[int, str]]:
+    """Ranked parts of the supply line (I1: one rank-1 bundle of stock, forbidden, adopted fort, orders, stress, deaths,
+    coffins and idle pushed the lockdown line out of the status): the stock sentence with its cause (why the stills do not
+    brew, the forbidden stock) stays rank 1; the rest is three rank-4 lines (adopted fort and the manager note, care, work and orders) that go first. The brief joins them all."""
+    s, out, fort, care, work = ctx.s, [], [], [], []
     st = s.get("stock")
     if st:
         lo = {k for k, m in SUPPLY_MIN.items() if k in st and st[k] < m}
         # BUG-059 (Run 12 y503: 12 starved under "food 41 d", meals 0): the hungry citizens come first, and no prepared
         # meal beside them says that the food days count raw food nobody cooks
         hungry = st.get("hungry", 0)
-        out.append("stock " + (f"HUNGRY {hungry} " if hungry else "") + " ".join(
+        out.append((1, "stock " + (f"HUNGRY {hungry} " if hungry else "") + " ".join(
             f"{k[:-2]} {st[k]}d" + ("!" if k in lo else "") for k in ("drink_d", "food_d") if k in st)
             + (f" meals {st['meals']}" if "meals" in st else "")
             + (" (raw food is not cooked)" if hungry and st.get("meals") == 0 else "")
@@ -472,57 +488,62 @@ def line_supply(ctx: Ctx) -> str:
                if "ore" in st else "")
             + (f" leather {st['leather']}" if "leather" in st else "")
             + (f" moods missed {','.join(st['mood_miss'])}" if st.get("mood_miss") else "")
-            + stale_note(s, "stock"))
+            + stale_note(s, "stock")))
         # BUG-042: why the stills do not brew while drink is below the target (the kernel's own cause)
         if st.get("dwhy"):
-            out.append(f"drink: {st['dwhy']}")
+            out.append((1, f"drink: {st['dwhy']}"))
         # FR-76 (Run 12 Trussroads, reclaimed: 3026 of 3058 drinks forbidden, "drink 46d!"): the forbidden stock the days
         # above do not count, and what the kernel does about it
         if st.get("dforb") or st.get("fforb"):
             parts = [f"{st[k]} {name} items forbidden" for k, name in (("dforb", "drink"), ("fforb", "food")) if st.get(k)]
-            out.append(", ".join(parts) + " (not in the days above; the kernel unforbids them)")
+            out.append((1, ", ".join(parts) + " (not in the days above; the kernel unforbids them)"))
     ad = adopt_line(s)
     if ad:
-        out.append(ad)
+        fort.append(ad)
     od = s.get("orders")
     if isinstance(od, dict) and od.get("mgr"):
         # BUG-042: orders wait for the manager: how many, how long, why (the office's chair/table, ...)
-        out.append(f"orders: {od.get('unval', 0)} unvalidated, oldest {od.get('uval_d', 0)} d: {od['mgr']}")
+        fort.append(f"orders: {od.get('unval', 0)} unvalidated, oldest {od.get('uval_d', 0)} d: {od['mgr']}")
     c = s.get("care")
     if c:
         # FR-74: the sources of a high stress; BUG-062: tomb zones left closed to citizens
         src = c.get("src") if isinstance(c.get("src"), dict) else {}
         srcs = ", ".join(f"{SRC_LABEL.get(k, k)} {v}" for k, v in sorted(src.items(), key=lambda kv: (-kv[1], kv[0])))
-        out.append(f"stress {c['stressed_pct']}%" + (f" ({srcs})" if srcs and c["stressed_pct"] >= STRESS_SHOW else "")
+        care.append(f"stress {c['stressed_pct']}%" + (f" ({srcs})" if srcs and c["stressed_pct"] >= STRESS_SHOW else "")
                    + f" naked {c['naked']} ghosts {c['ghosts']} corpses {c['corpses_old']}"
                    f" tombs {c['tombs_free']}" + (f" ({c['tombs_locked']} closed to citizens)" if c.get("tombs_locked") else "")
                    + f" moods {c['moods']}")
         died = c.get("died")
         if died:                               # FR-64: citizen deaths of the last season by cause
-            out.append("deaths (season) " + ", ".join(f"{k} {n}" for k, n in sorted(died.items(),
+            care.append("deaths (season) " + ", ".join(f"{k} {n}" for k, n in sorted(died.items(),
                                                                                    key=lambda kv: (-kv[1], kv[0]))))
         cf = c.get("coffins")
         if cf and (cf["want"] > c["tombs_free"] or cf["order"] or cf["proj"]):
             # FR-61 coffin provisioner: free tombs wanted, slots missing, coffin items, open orders, project
-            out.append(f"coffins want {cf['want']} short {cf['short']} stock {cf['stock']} order {cf['order']}"
+            care.append(f"coffins want {cf['want']} short {cf['short']} stock {cf['stock']} order {cf['order']}"
                        + (f" proj {cf['proj']}" if cf["proj"] else "")
                        # FR-76 (Run 12 reclaim: the kernel only said "short coffins"): no Carpenters workshop, no coffin
                        + (" (no Carpenters workshop stands: see adopted fort)"
                           if "Carpenters" in ((s.get("adopt") or {}).get("miss") or []) and cf["short"] else ""))
     lb = s.get("labor")
     if lb:
-        out.append(idle_clause(lb) + stale_note(s, "labor"))
+        work.append(idle_clause(lb) + stale_note(s, "labor"))
     od = s.get("orders")
     if od:                                     # FR-01/FR-39: orders that cannot run, crash-class orders
         # BUG-059: of the stuck orders, the ones that miss a workshop (named) apart from the ones that miss a worker
         why = [x for x in (f"workshop missing {od['stuck_ws']}: {od.get('ws', '?')}" if od.get("stuck_ws") else "",
                            f"no worker {od['stuck_lab']}" if od.get("stuck_lab") else "") if x]
-        out.append(f"orders {od['n']}" + (f" stuck {od['stuck']}" if od["stuck"] else "")
+        work.append(f"orders {od['n']}" + (f" stuck {od['stuck']}" if od["stuck"] else "")
                    + (f" ({'; '.join(why)})" if why else "")
                    + (f" UNSAFE {od['bad']} (no item_subtype: DF crash)" if od["bad"] else "")
                    # BUG-061: a workshop type's slots are full of jobs that cancel at once
                    + (f" JAM {od['jam']}" if od.get("jam") else ""))
-    return _join(out)
+    # three rank-4 lines (each as before: parts joined by ' | '); the last goes first, a line that does not fit goes whole
+    return out + [(4, _join(g)) for g in (fort, care, work) if g]
+
+
+def line_supply(ctx: Ctx) -> str:
+    return _join(t for _, t in supply_items(ctx))
 
 
 def line_def(ctx: Ctx) -> str:
@@ -682,10 +703,11 @@ def fit_ranked(items: list[tuple[int, str]], budget: int, clip_tokens: int = 90)
         return True
     while est_tokens(text()) > budget and drop(3):
         pass
-    if est_tokens(text()) > budget:
-        for it in its:
-            if it[0] == 2:
-                it[1] = clip(it[1], clip_tokens)
+    for cut in (clip_tokens, 60):          # I1: cut the rank-2 lines harder before one of them goes whole
+        if est_tokens(text()) > budget:
+            for it in its:
+                if it[0] == 2:
+                    it[1] = clip(it[1], min(cut, clip_tokens))
     while est_tokens(text()) > budget and drop(2):
         pass
     while est_tokens(text()) > budget:
@@ -705,8 +727,8 @@ def status_text(save_dir: Path) -> str:
     if ctx.state is None:
         lines.append((1, _no_state(ctx)))
     else:
-        lines += [(2, line_unready(ctx)), (2, line_alarm(ctx)), (1, line_pop(ctx)), (1, line_supply(ctx)),
-                  (3, line_def(ctx)), (3, line_sched(ctx)), (4, line_proj(ctx)), (4, line_kern(ctx)), (4, line_snap(ctx))]
+        lines += [(2, line_unready(ctx))] + alarm_items(ctx) + pop_items(ctx) + supply_items(ctx)
+        lines += [(3, line_def(ctx)), (3, line_sched(ctx)), (4, line_proj(ctx)), (4, line_kern(ctx)), (4, line_snap(ctx))]
     return fit_ranked(lines, STATUS_TOKENS)
 
 

@@ -817,6 +817,10 @@ local function compose(st)
     for _, k in ipairs(SHRINK) do doc[k] = nil end
     enc = json.encode(doc)
   end
+  -- I1: K.view() (gate: the caravan window, drill, care, economy, readiness read it) is the complete document; only the
+  -- file the readers see is shed to 4 KB. A shallow copy: the shed keys are removed from `doc`, not from the view.
+  local full = {}
+  for k, v in pairs(doc) do full[k] = v end
   local i = 1
   while #enc > 4096 and SHRINK[i] do
     if doc[SHRINK[i]] ~= nil then
@@ -832,7 +836,7 @@ local function compose(st)
     end
     i = i + 1
   end
-  st.view = doc
+  st.view = full
   st.flush_req = false
   st.last_state_ms = now.ms
   if st.marked then
