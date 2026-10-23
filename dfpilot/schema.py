@@ -450,7 +450,14 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i missing:sa retry:i mat:s walled:sa "
                                                     "park:i")),
     "YEAR_REVIEW": ("A", "kern", _d(opt="year:i")),
-    "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa")),
+    # BUG-062: far = of them, the bodies lying in another walk group than the citizens' (corpse_far: no coffin helps)
+    "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa far:i")),
+    # BUG-062 (Run 14: 163, then 284 of 287 tomb zones closed to citizens): closed = zones found closed, free = of them
+    # unassigned (usable: over a usable coffin), owned = held by a dead citizen, inactive = switched off; opened = what
+    # care opened, left = usable ones still closed; again_free / again_owned = zones care opened that are closed again
+    # (no owner: DF or a plugin closed them; an owner: by_entomb of them care's own entomb); unburied citizens
+    "TOMBS_LOCKED": ("B", "care", _d(opt="closed:i free:i usable:i owned:i inactive:i opened:i left:i again_free:i "
+                                         "again_owned:i by_entomb:i unburied:i")),
     # BUG-031: cistern = why the nearest cistern room does not serve the hospital (no well, its well over 0/7, too far)
     "HOSPITAL_DRY": ("A", "water", _d("why:s", "patients:i zone:i near:i recipe:s cistern:s")),
     # BUG-034: the zones of a hospital without accepted water went while a patient was over water.patient_thirst: zones,
@@ -757,7 +764,9 @@ STATE = Obj(
                      opt={"coffins": Obj(req={"want": NAT, "short": NAT, "stock": NAT, "order": NAT,
                                               "proj": Str(maxbytes=40)}),
                           # FR-64: citizen deaths of the last season (100,800 ticks) by cause
-                          "died": Obj(extra=NAT)}),
+                          "died": Obj(extra=NAT),
+                          # BUG-062: tomb zones left closed to citizens by the last run (none counted as free tombs)
+                          "tombs_locked": NAT}),
          "labor": Obj(req={"starving": NAT, "idle": PCT}),
          # BUG-042: unvalidated live orders, the days the oldest waits, why the manager validates nothing
          "orders": Obj(req={"n": NAT, "bad": NAT, "stuck": NAT},

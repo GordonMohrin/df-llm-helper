@@ -126,6 +126,7 @@ C.EVENTS = {
   -- alert's burrow during a fight (d.from, to, why, mode)
   RECALL = {cls = 'B', by = 'reflex'}, REFUGE_SWITCH = {cls = 'B', by = 'seal'},
   MOOD_START = {cls = 'B', by = 'care'}, MOOD_NEED = {cls = 'B', by = 'care'},
+  TOMBS_LOCKED = {cls = 'B', by = 'care'},      -- BUG-062: tomb zones closed to citizens (counts, who closed them again)
   MOOD_END = {cls = 'B', by = 'care'}, CARAVAN = {cls = 'B', by = 'trade'},
   MIGRANTS = {cls = 'B', by = 'economy'}, PETITION = {cls = 'B', by = 'care'},
   STOCK_LOW = {cls = 'B', by = 'economy'}, CANCEL_LOOP = {cls = 'B', by = 'economy'},
@@ -352,7 +353,7 @@ C.STATE_SPEC = obj({
                     dwhy = str(80)}),               -- BUG-042: why the stills do not brew below the drink target
   care = obj({stressed_pct = PCT, naked = NAT, ghosts = NAT, corpses_old = NAT, tombs_free = NAT, moods = NAT},
              {coffins = obj({want = NAT, short = NAT, stock = NAT, order = NAT, proj = str(40)}),
-              died = obj(nil, nil, NAT)}),
+              died = obj(nil, nil, NAT), tombs_locked = NAT}),
   labor = obj({starving = NAT, idle = PCT}),
   -- BUG-042: unvalidated live orders, the days the oldest waits, why the manager validates nothing (past unval_days)
   orders = obj({n = NAT, bad = NAT, stuck = NAT}, {unval = NAT, uval_d = NAT, mgr = str(80)}),

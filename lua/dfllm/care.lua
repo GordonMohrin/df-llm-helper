@@ -109,6 +109,7 @@ M.DEFAULTS = {
   unforbid_per_need = 5, corpse_acts_per_run = 30, barrels_per_run = 20, mood_nojob_ticks = 1200,
   stress_week = 8400,
   tomb_repair = true, tomb_acts_per_run = 20, entomb_per_run = 8, entomb_retry = 2400, entomb_tries = 3,
+  tomb_open_per_run = 120, far_check = 60,         -- BUG-062: flag-only opens a run (own budget); bodies checked for another walk group
   ghost_every = 8400, doctors = 4, posts_per_run = 4, mood_thirst = 30000, mood_hunger = 50000,
   mood_risk_every = 2400, wake_wall_s = 600,
   coffins = true, coffin_reserve = 10, coffin_batch = 30, coffin_scan_r = 16, coffin_min_side = 4,
@@ -827,10 +828,13 @@ local function good_zone(T, uid)
   end
 end
 
-local function free_zones(T)
+-- free zones: standing, unassigned, over a usable coffin. BUG-062: a zone closed to citizens (no_citizens) is no free
+-- tomb (DF hands no unburied citizen to it, a coffin counted free because of it hid the missing coffins): they are the
+-- `locked` ones (free_zones(T, true)), which care opens first
+local function free_zones(T, locked)
   local out = {}
   for _, z in ipairs(T.zones) do
-    if not z.drop and z.active and z.unit < 0 then
+    if not z.drop and z.active and z.unit < 0 and (z.closed == true) == (locked == true) then
       for _, e in ipairs(z.coffins) do
         if usable(e, nil) then out[#out + 1] = z; break end
       end
@@ -875,13 +879,46 @@ local function in_pile(T, pos)
   return false
 end
 
+-- BUG-062: the unburied bodies no citizen can walk to (another walk group than the first three citizens: an old
+-- battlefield on the surface). Needs snapshot's reach hook (canWalkBetween); without it nothing is far. At most
+-- far_check bodies are asked per run (lowest unit id first). Returns the set and its size.
+local function far_bodies(K, c, r)
+  local far, n = {}, 0
+  local cu, anchors = K.census.u, {}
+  for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
+    if #anchors >= 3 then break end
+    local pos = unit_pos(df.unit.find(id))
+    if pos then anchors[#anchors + 1] = pos end
+  end
+  if #anchors == 0 then return far, 0 end
+  local ids = {}
+  for uid in pairs(r.bodies) do ids[#ids + 1] = uid end
+  table.sort(ids)
+  for i, uid in ipairs(ids) do
+    if i > (num(c.far_check) or 60) then break end
+    local b = r.bodies[uid]
+    if b.pos then
+      local near = false
+      for _, a in ipairs(anchors) do
+        if reach_ok(K, b.pos, a) then near = true; break end
+      end
+      if not near then far[uid], n = true, n + 1 end
+    end
+  end
+  return far, n
+end
+
 -- why one unburied citizen still lies around (before this run's repair)
 local function body_causes(K, c, r, p, T, uid, now, nfree)
   local b, out = r.bodies[uid], {}
   local function add(s) out[#out + 1] = s end
   local mine = T.by_unit[uid] or {}
-  if #mine == 0 then
-    add(nfree > 0 and 'no_zone' or 'no_coffin')
+  if r.far and r.far[uid] then
+    -- BUG-062 (Run 14 note 56: nine ghosts whose bodies lay in walk group 859 against the fort's 9): no coffin, zone
+    -- or hauler helps a body nobody can walk to; it is its own cause, not no_coffin
+    add('corpse_far')
+  elseif #mine == 0 then
+    add(nfree > 0 and 'no_zone' or ((T.nlocked or 0) > 0 and 'zone_locked' or 'no_coffin'))
   else
     local z = mine[1]
     local e = z.coffins[1]
@@ -917,6 +954,55 @@ local function burial_jobs()
     return c
   end)
   return ok and n or -1
+end
+
+-- BUG-062: what care knows about the zone lock, since boot: the zones it opened (id -> tick) and the zones it
+-- entombed a body into (entomb.lua:152-154 closes the zone it assigns: no_pets and no_citizens), so a zone found
+-- closed again can be told apart: unassigned (nobody owns it: DF or a plugin closed it), assigned (an owner: DF's own
+-- assignment or care's entomb)
+function M.lockstate()
+  local lk = st.lk
+  if not lk then
+    lk = {opened = {}, entombed = {}, again_free = 0, again_owned = 0, by_entomb = 0,
+          pend = {free = 0, owned = 0, entomb = 0}}
+    st.lk = lk
+  end
+  return lk
+end
+
+-- the lock census of the index before the repair (read only): closed zones by kind, and the zones care opened that
+-- are closed again now (each counted once; a zone gone from the index is forgotten)
+local function lock_scan(T, readonly)
+  local lk = M.lockstate()
+  local c = {closed = 0, free = 0, usable = 0, owned = 0, inactive = 0, again_free = 0, again_owned = 0, by_entomb = 0}
+  local live = {}
+  for _, z in ipairs(T.zones) do
+    live[z.id] = true
+    if not z.drop and z.closed then
+      c.closed = c.closed + 1
+      if not z.active then c.inactive = c.inactive + 1
+      elseif z.unit < 0 then c.free = c.free + 1
+      else c.owned = c.owned + 1 end
+      if lk.opened[z.id] then
+        if z.unit < 0 then c.again_free = c.again_free + 1
+        else
+          c.again_owned = c.again_owned + 1
+          if lk.entombed[z.id] then c.by_entomb = c.by_entomb + 1 end
+        end
+        if not readonly then lk.opened[z.id] = nil end
+      end
+    end
+  end
+  for _, z in ipairs(free_zones(T, true)) do c.usable = c.usable + 1 end
+  if readonly then return c end
+  for id in pairs(lk.opened) do if not live[id] then lk.opened[id] = nil end end
+  for id in pairs(lk.entombed) do if not live[id] then lk.entombed[id] = nil end end
+  lk.again_free, lk.again_owned = lk.again_free + c.again_free, lk.again_owned + c.again_owned
+  lk.by_entomb = lk.by_entomb + c.by_entomb
+  -- not yet announced (the cadence may hold TOMBS_LOCKED back): lock_event reports and resets them
+  lk.pend.free, lk.pend.owned, lk.pend.entomb = lk.pend.free + c.again_free, lk.pend.owned + c.again_owned,
+                                                 lk.pend.entomb + c.by_entomb
+  return c
 end
 
 -- the repair plan (marks on the index) and its acts; returns the act counts
@@ -987,6 +1073,9 @@ local function tomb_repair(K, c, r, p, T, now)
     if not z or z.free then need[#need + 1] = uid end
   end
   table.sort(need)
+  for i = #need, 1, -1 do                         -- BUG-062: no zone for a body nobody can reach
+    if r.far and r.far[need[i]] then table.remove(need, i) end
+  end
   for _, uid in ipairs(need) do
     local z = table.remove(free, 1)
     if not z then break end
@@ -1010,16 +1099,40 @@ local function tomb_repair(K, c, r, p, T, now)
       if act('remove', z) then acts.removed, z.gone = acts.removed + 1, true end
     end
   end
+  local lk = M.lockstate()
   for _, z in ipairs(T.zones) do
-    if z.free and not z.drop and act('free', z) then acts.freed, z.unit, z.closed = acts.freed + 1, -1, false end
+    if z.free and not z.drop and act('free', z) then
+      acts.freed, z.unit, z.closed = acts.freed + 1, -1, false
+      lk.opened[z.id] = now
+    end
   end
   for _, z in ipairs(T.zones) do
     if z.assign and not z.drop and z.unit < 0 and act('assign', z, z.assign) then
       acts.assigned, z.unit = acts.assigned + 1, z.assign
     end
   end
-  for _, z in ipairs(free) do
-    if z.closed and z.unit < 0 and act('open', z) then acts.opened, z.closed = acts.opened + 1, false end
+  -- BUG-062 (Run 14 y529-y577: 163, then 284 of 287 tomb zones closed to citizens, 26-44 unburied, ghosts 1 -> 30, after
+  -- the player opened them 32 burial jobs came at once): every standing unassigned zone over a usable coffin that is
+  -- closed is opened, on its own budget (tomb_open_per_run: a flag write per zone, the shared 20 acts went to frees
+  -- and assignments first and left the opens to wait for years); the ones the budget or a failed act left closed are
+  -- no free tombs (free_zones) and the next run goes on
+  local ob = num(c.tomb_open_per_run) or 120
+  for _, z in ipairs(T.zones) do
+    if ob <= 0 then break end
+    if not z.drop and z.closed and z.unit < 0 and z.active and (st.bad_zone[z.id] or 0) < 3 then
+      local usable_z = false
+      for _, e in ipairs(z.coffins) do if usable(e, nil) then usable_z = true; break end end
+      if usable_z then
+        ob = ob - 1
+        if K.act.tomb_zone('open', z.id) then
+          acts.opened, z.closed = acts.opened + 1, false
+          lk.opened[z.id] = now
+        else
+          st.bad_zone[z.id] = (st.bad_zone[z.id] or 0) + 1
+          acts.failed = acts.failed + 1
+        end
+      end
+    end
   end
   -- the index now shows what stands: a failed removal keeps its zone
   for _, z in ipairs(T.zones) do z.drop = z.gone end
@@ -1037,7 +1150,7 @@ local function entomb_bodies(K, c, r, p, T, now, acts)
   for _, uid in ipairs(ids) do
     if n >= c.entomb_per_run then break end
     local b = r.bodies[uid]
-    if not b.job and b.pos and good_zone(T, uid) then
+    if not b.job and b.pos and good_zone(T, uid) and not (r.far and r.far[uid]) then
       local x, y, z = b.pos.x, b.pos.y, b.pos.z
       if (r.clean_ok or inside(r, x, y, z)) and revealed(K, x, y, z) then
         local sid = fmt(uid)
@@ -1047,7 +1160,11 @@ local function entomb_bodies(K, c, r, p, T, now, acts)
           local ok = K.act.run('entomb', '--unit', sid, '--haul-now')
           p.burial[sid] = {t = now, n = tries + 1}
           n = n + 1
-          if ok then acts.entombed = acts.entombed + 1 end
+          if ok then
+            acts.entombed = acts.entombed + 1
+            local gz = good_zone(T, uid)
+            if gz then M.lockstate().entombed[gz.id] = now end      -- BUG-062: it closes this zone
+          end
         end
       end
     end
@@ -1059,7 +1176,7 @@ end
 
 local LEGEND = 'coffins: p pos, b built, occ body inside, bed in a Bedroom zone, oz other zones, z [zone, unit, open]; '
                .. 'causes: no_coffin no_zone coffin_taken zone_shared bedroom zone_owner unflagged unreachable '
-               .. 'in_stockpile undiscovered no_job zone_off'
+               .. 'in_stockpile undiscovered no_job zone_off zone_locked corpse_far'
 
 -- the inspect what=tombs document, built from the last run's plain index on request
 local function tomb_report(src)
@@ -1091,6 +1208,24 @@ local function tomb_report(src)
   local out = {tick = now, coffins = #T.coffins, zones = #T.zones, free = #free_zones(T), jobs = jobs,
                repaired = repaired and 1 or 0, acts = acts, list = list, loose = loose, unburied = unb,
                ghosts = ghosts, unburied_n = unb_n, legend = LEGEND}
+  -- BUG-062: the zone lock (closed counts of the last run, then the cumulative 'closed again' tally since boot) and
+  -- why coffins are no free tombs (live data for who closes the zones and why none is free)
+  out.locked = #free_zones(T, true)
+  out.far_n = src.far_n or 0
+  if src.lock then out.lock = src.lock end
+  local lks = M.lockstate()
+  out.again = {free = lks.again_free, owned = lks.again_owned, by_entomb = lks.by_entomb}
+  local un = {unbuilt = 0, bedroom = 0, other_zone = 0, occupied = 0, zones = 0}
+  for _, e in ipairs(T.coffins) do
+    local zn = 0
+    for _, z in ipairs(e.zones) do if not z.drop then zn = zn + 1 end end
+    if not e.built then un.unbuilt = un.unbuilt + 1
+    elseif e.bed then un.bedroom = un.bedroom + 1
+    elseif e.other > 0 then un.other_zone = un.other_zone + 1
+    elseif e.occ ~= nil then un.occupied = un.occupied + 1
+    elseif zn ~= 1 then un.zones = un.zones + 1 end
+  end
+  out.unusable = un
   -- BUG-003: the acts of the last run that changed anything (an entomb run is followed by runs with nothing to do),
   -- the remains inside coffins counted as buried, and whether this index was rebuilt for the inspect
   if src.last then out.last = src.last end
@@ -1108,20 +1243,60 @@ end
 
 local coffin_census    -- forward: the coffin provisioner (FR-61) counts on the repaired index
 
+-- BUG-062: TOMBS_LOCKED (B): zones found closed to citizens (free = unassigned ones, usable = of them over a usable coffin,
+-- owned = held by a dead citizen), what care opened and what is left closed (a failed or budget-limited open), and
+-- the zones it opened that were closed again since (again_free: nobody owns them, so DF or a plugin closed them;
+-- again_owned: they have an owner now, by_entomb of them care's own entomb); once per set of news
+-- (util/cadence: the tokens closed, left, again_free, again_owned)
+local function lock_event(K, c, p, lk0, lk1, acts, unburied)
+  local toks, pend = {}, M.lockstate().pend
+  if lk0.usable > 0 then toks[#toks + 1] = 'closed' end
+  if lk1.left > 0 then toks[#toks + 1] = 'left' end
+  if pend.free > 0 then toks[#toks + 1] = 'again_free' end
+  if pend.owned > 0 then toks[#toks + 1] = 'again_owned' end
+  if #toks == 0 then p.lockev = CAD.quiet(p.lockev); return end
+  local T = K.now()
+  if not CAD.due(type(p.lockev) == 'table' and p.lockev or nil, T, {}, toks, {ticks = c.ghost_every, wall_s = c.wake_wall_s}) then
+    return
+  end
+  p.lockev = CAD.mark(T, {}, toks)
+  local msg = string.format('tomb zones closed to citizens: %d (%d unassigned, %d held by a dead citizen%s); care opened %d%s%s; '
+                            .. '%d unburied citizen(s)', lk0.closed, lk0.free, lk0.owned,
+                            lk0.inactive > 0 and (', ' .. lk0.inactive .. ' off') or '', acts.opened,
+                            lk1.left > 0 and (', ' .. lk1.left .. ' still closed') or '',
+                            (pend.free + pend.owned) > 0 and string.format('; closed again since: %d unassigned, %d '
+                              .. 'assigned (%d by entomb)', pend.free, pend.owned, pend.entomb) or '', unburied)
+  K.emit('TOMBS_LOCKED', 'B', trunc(msg, 200),
+         {closed = lk0.closed, free = lk0.free, usable = lk0.usable, owned = lk0.owned, inactive = lk0.inactive,
+          opened = acts.opened, left = lk1.left, again_free = pend.free, again_owned = pend.owned,
+          by_entomb = pend.entomb, unburied = unburied})
+  pend.free, pend.owned, pend.entomb = 0, 0, 0
+end
+
 local function phase_tombs_run(K, c, r, p)
   local now = K.now().tick
   local T = tomb_index(K, r)
   index_units(T)
+  r.far, r.far_n = far_bodies(K, c, r)
   local nfree = #free_zones(T)
+  T.nlocked = #free_zones(T, true)
   local causes = {}
   for uid in pairs(r.bodies) do causes[uid] = body_causes(K, c, r, p, T, uid, now, nfree) end
   r.causes = causes
+  local lk0 = lock_scan(T)
   local acts, repaired = tomb_repair(K, c, r, p, T, now)
   if repaired then entomb_bodies(K, c, r, p, T, now, acts) end
   r.burial_jobs = burial_jobs()
   r.tombs_free = #free_zones(T)
+  local lk1 = {left = #free_zones(T, true)}
+  T.nlocked = lk1.left
+  r.tombs_locked = lk1.left
+  local pend = M.lockstate().pend
+  if repaired or pend.free + pend.owned > 0 then
+    lock_event(K, c, p, lk0, lk1, acts, count(r.bodies))
+  end
   r.tomb_src = {T = T, bodies = r.bodies, causes = causes, acts = acts, now = now, repaired = repaired,
-                jobs = r.burial_jobs, loose_buried = r.loose_buried}
+                jobs = r.burial_jobs, loose_buried = r.loose_buried, lock = lk0, far = r.far, far_n = r.far_n}
   local moved = acts.removed + acts.freed + acts.opened + acts.assigned + acts.entombed
   if moved > 0 or acts.failed > 0 then
     K.log('info', 'tombs: removed %d, freed %d, opened %d, assigned %d, entomb %d, failed %d; %d burial jobs',
@@ -1238,12 +1413,13 @@ end
 
 coffin_census = function(K, c, r, T)
   -- the unburied citizen bodies without a usable tomb of their own (an assigned one waits for its hauler)
-  local bodies, open = 0, 0
+  local bodies, open, far = 0, 0, 0
   for uid in pairs(r.bodies) do
     bodies = bodies + 1
-    if not good_zone(T, uid) then open = open + 1 end
+    if r.far and r.far[uid] then far = far + 1               -- BUG-062: no coffin helps a body nobody can walk to
+    elseif not good_zone(T, uid) then open = open + 1 end
   end
-  local q = {bodies = bodies, open = open, want = open + (num(c.coffin_reserve) or 0), free = r.tombs_free or 0,
+  local q = {bodies = bodies, open = open, far = far, want = open + (num(c.coffin_reserve) or 0), free = r.tombs_free or 0,
              planned = 0, idle = 0, core = (K.manifest().zones or {}).Z4 ~= nil}
   for _, e in ipairs(T.coffins) do
     if not e.bed and e.other == 0 and e.occ == nil then
@@ -1683,7 +1859,7 @@ end
 local function coffin_view(K, q, p, cs)
   local pc = p.cof
   local v = {active = q.active and 1 or 0, own = q.own and 1 or 0, want = q.want, bodies = q.bodies, open = q.open,
-             free = q.free,
+             far = q.far or 0, free = q.free,
              planned = q.planned, idle = q.idle, slots = q.slots, short = q.short, stock = q.stock, order = q.order,
              stuck = q.stuck, items = q.items, make = q.make, missing = q.missing or 0, stone = q.stone,
              wood = q.wood, masons = q.masons and 1 or 0, carpenters = q.carp and 1 or 0, pend = q.pend or 0,
@@ -2590,9 +2766,12 @@ local function ghost_alarm(K, c, r, p, ghost_ids, old_ids, open, now)
   local parts = {}
   for i = 1, math.min(4, #order) do parts[i] = order[i] .. ' ' .. tally[order[i]] end
   local hint = tally.no_body and '; slab for no_body' or ''
+  -- BUG-062: a body in another walk group is no coffin problem; only a memorial slab can lay its ghost to rest
+  if tally.corpse_far then hint = hint .. '; slab for corpse_far (another walk group, no coffin helps)' end
   K.emit('GHOSTS', 'A', trunc(string.format('%d ghost(s), %d citizen(s) unburied > %d d: %s%s; inspect tombs, tombs.repair',
                                            #ghost_ids, #old_ids, c.corpse_old // DAY, table.concat(parts, ', '), hint), 200),
-         {ghosts = #ghost_ids, corpses = open, old = #old_ids, units = units, causes = causes})
+         {ghosts = #ghost_ids, corpses = open, old = #old_ids, units = units, causes = causes,
+          far = tally.corpse_far or 0})
 end
 
 ---------------------------------------------------------------- deaths (FR-64)
@@ -2801,15 +2980,38 @@ local function finish(K, c, r, p)
     end
   end
   table.sort(old_ids)
-  local ghosts, ghost_ids = 0, {}
+  -- BUG-062 (Run 14 note 52: the brief said 12 ghosts, a count over the unit list 30): the ghostly units themselves
+  -- first (sense walks the unit list and publishes the fort's own ghosts in census.g, fresh within two days), then the
+  -- death record's: the number is checked against the units that are ghostly, not only against the deaths care saw
+  local ghosts, ghost_ids, gseen = 0, {}, {}
+  local known = {}
+  for _, id in ipairs(p.dead) do known[id] = true end
+  local cg = K.census.g
+  local fresh = type(cg) == 'table' and type(cg.ids) == 'table' and now - (num(cg.tick) or -DAY * 3) < DAY * 2
+  for _, id in ipairs(fresh and cg.ids or {}) do
+    if not gseen[id] then
+      gseen[id] = true
+      ghosts = ghosts + 1
+      ghost_ids[#ghost_ids + 1] = id
+    end
+  end
   for _, id in ipairs(p.dead) do
     local u = df.unit.find(id)
-    if u and dfhack.units.isGhost(u) then                               -- Lua API.txt:1508
+    if not gseen[id] and u and dfhack.units.isGhost(u) then              -- Lua API.txt:1508
+      gseen[id] = true
       ghosts = ghosts + 1
       ghost_ids[#ghost_ids + 1] = id
     end
   end
   table.sort(ghost_ids)
+  local unrecorded = 0
+  for _, id in ipairs(ghost_ids) do
+    if not known[id] then unrecorded = unrecorded + 1; remember_dead(p, id) end
+  end
+  if unrecorded > 0 and unrecorded ~= st.unrec then
+    K.log('warn', 'care: %d ghostly citizen(s) were not in the death record (%d in all): counted now', unrecorded, ghosts)
+  end
+  st.unrec = unrecorded
   ghost_alarm(K, c, r, p, ghost_ids, old_ids, open, now)
   if r.tomb_src then
     local gl = {}
@@ -2821,7 +3023,7 @@ local function finish(K, c, r, p)
   -- tombs: free >= open corpses + margin; ask only once the core exists or somebody is unburied. The coffin
   -- provisioner (FR-61) owns the request when runner.coffins is there: it places coffins itself and asks for a dug
   -- tombs room only when no free space is found
-  local need = open + c.tomb_margin - r.tombs_free
+  local need = open - (r.far_n or 0) + c.tomb_margin - r.tombs_free
   local core = (K.manifest().zones or {}).Z4 ~= nil
   local okp, pend = K.call('runner', 'pending', 'tombs')
   local queued = okp and type(pend) == 'number' and pend > 0      -- live L1: a tombs project every 3 days
@@ -2864,7 +3066,8 @@ local function finish(K, c, r, p)
   local a = r.acc
   st.out = {stressed_pct = r.have_units and (a.n > 0 and a.stressed * 100 // a.n or 0) or (prev.stressed_pct or 0),
             naked = r.have_units and a.naked or (prev.naked or 0), ghosts = ghosts, corpses_old = old,
-            tombs_free = r.tombs_free or 0, moods = count(p.moods), hosp_water = r.hosp_water or 0}
+            tombs_free = r.tombs_free or 0, tombs_locked = r.tombs_locked or 0, moods = count(p.moods),
+            hosp_water = r.hosp_water or 0}
   -- FR-64: deaths still missing, a cluster that grew while its cadence held it back, the season's tally
   death_recheck(K, c, p)
   died_prune(c, p, now)
@@ -2960,7 +3163,9 @@ local function fresh_tombs(K, c, p)
   buried_in_coffins(r)
   local T = tomb_index(K, r)
   index_units(T)
+  r.far, r.far_n = far_bodies(K, c, r)
   local nfree = #free_zones(T)
+  T.nlocked = #free_zones(T, true)
   local causes = {}
   for uid in pairs(r.bodies) do causes[uid] = body_causes(K, c, r, p, T, uid, now, nfree) end
   r.causes = causes
@@ -2973,7 +3178,8 @@ local function fresh_tombs(K, c, p)
   return {T = T, bodies = r.bodies, causes = causes, now = now, jobs = burial_jobs(), ghosts = gl,
           acts = old and old.acts or {removed = 0, freed = 0, opened = 0, assigned = 0, entombed = 0, failed = 0},
           repaired = old and old.repaired or false, loose_buried = r.loose_buried, fresh = true,
-          run_tick = old and old.now or -1, partial = #v > n and 1 or nil}
+          run_tick = old and old.now or -1, partial = #v > n and 1 or nil, lock = lock_scan(T, true), far = r.far,
+          far_n = r.far_n}
 end
 
 -- inspect what=tombs (kern routes it here; FR-27): the last run's coffins and tomb zones, the unburied citizens
@@ -3036,6 +3242,7 @@ function M.state(K)
   if not o then return {} end
   local care = {stressed_pct = math.max(0, math.min(100, o.stressed_pct)), naked = o.naked, ghosts = o.ghosts,
                 corpses_old = o.corpses_old, tombs_free = o.tombs_free, moods = o.moods}
+  if (o.tombs_locked or 0) > 0 then care.tombs_locked = o.tombs_locked end      -- BUG-062: closed zones left
   local v = st.cof
   if v and v.active == 1 then                 -- FR-61: the coffin provisioner
     care.coffins = {want = v.want, short = v.short, stock = v.stock, order = v.order, proj = trunc(v.proj, 40)}

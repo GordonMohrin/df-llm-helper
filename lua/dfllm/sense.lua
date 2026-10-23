@@ -97,6 +97,8 @@ local function threat_armed(K)
   return ok and flag == 1
 end
 
+M.GHOST_MAX = 200      -- BUG-062: census.g.ids, the fort's own ghosts met in a hostile scan
+
 ---------------------------------------------------------------- citizens (§6.1)
 local P = {x = 0, y = 0, z = 0}   -- scratch coord for burrow lookups (a table coord, cf. item.lua:12)
 
@@ -191,6 +193,7 @@ local function hscan_begin(K, now, armed)
   local okw, wb = K.call('gate', 'watch')       -- BUG-027: friendly non-citizens near the footprints with work
   st.hs.watch = okw and type(wb) == 'table' and #wb > 0 and wb or nil
   st.hs.friends, st.hs.fseen = {}, {}
+  st.hs.ghosts = {}                              -- BUG-062: the fort's own ghosts met in the scan
   st.h_tick = now.tick
 end
 
@@ -387,6 +390,9 @@ local function consider(hs, u)
     -- BREACH: every civilian sat in Tiefe+, nobody pulled a lever, buried the body or fetched a drink
     if U.isGhost and U.isGhost(u) and ((U.isOwnGroup and U.isOwnGroup(u))
                                        or (u.civ_id ~= -1 and u.civ_id == df.global.plotinfo.civ_id)) then
+      -- BUG-062 (Run 14 note 52: the brief said 12 ghosts, a count over the units 30): care's ghost number reads
+      -- census.g, the ghosts met here (sense is the one that walks the unit list)
+      if #hs.ghosts < M.GHOST_MAX then hs.ghosts[#hs.ghosts + 1] = id end
       return 7
     end
   end
@@ -494,6 +500,8 @@ local function hscan_finish(K)
   for i = 1, math.min(#hs.keys, M.LIST_MAX) do list[i] = hs.list[hs.keys[i] % 16777216] end
   table.sort(hs.caged)
   st.caged = hs.caged
+  table.sort(hs.ghosts)
+  K.census.g = {tick = hs.tick, n = #hs.ghosts, ids = hs.ghosts}
   if hs.count then
     st.units, st.count_tick = hs.units, hs.tick
     K.census.a = {tick = hs.tick, n = #hs.animals, list = hs.animals}
