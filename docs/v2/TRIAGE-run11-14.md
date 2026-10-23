@@ -1,6 +1,6 @@
 # Triage of the Run 11-14 backlog (bulk handover, 2026-10-23)
 
-Source: `bugs/RUN11-offene-bugs-und-FR.md` (64 notes of the game session, runs 11-14) and
+Source: `bugs/RUN11-offene-bugs-und-FR.md` (65 notes of the game session, runs 11-14) and
 `docs/v2/POSTMORTEM-run13-wheelsblows-y525.md`. Decisions: `docs/v2/DECISIONS.md` section "Decided by the development
 session (2026-10-23)". Numbers below are reserved for the packages; an unused number stays unused.
 
@@ -16,7 +16,7 @@ with "Why / What changed / Live check".
 | A1 seal-door | A | the seal door that never gets built, designations lost, project parts blocking each other | BUG-044 .. BUG-047 | 8, 16, 21, 22, 23 (door part), 32, 47 |
 | A2 perimeter | A | bridges and gates lost for good, escalation at an open entrance, refuge integrity | BUG-048, BUG-049, FR-70 | 13, 17, 20, 23, 26, 43 (rebuild part), Run 13 causes 1 and 3 |
 | A3 military | A | uniform-unstick strips armor, militia rotation, drill gate, soldiers not on station, loose tools | BUG-050 .. BUG-053, FR-71 | 2, 19, 34, 53, 64 (rotation), 23 (on_station=0), Run 13 cause 2 |
-| A4 health | A | patients dying of thirst, vacant offices, appoint verbs, abandoned hospital locations | BUG-054 .. BUG-056 | 11, 18, 24, 25, 61, 64 (verb registry) |
+| A4 health | A | patients dying of thirst, vacant offices, appoint verbs, abandoned hospital locations, the civzone build verb | BUG-054 .. BUG-056, FR-78 | 11, 18, 24, 25, 61, 64 (verb registry), 65 |
 | B1 labor | B | empty or reset work details, farming slots, misleading messages, labor coverage | BUG-057 .. BUG-059, FR-72 | 3, 6, 33, 35, 36, 37, 38, 44, 46, 54 (details), 62, 63 |
 | B2 orders | B | stale stone-door orders, EngraveSlab jam, autoslab restock, cloth and thread orders | BUG-060, BUG-061, FR-73 | 42, 45, 56 (slabs), 60, 10 |
 | B3 care | B | tomb zones closed for citizens, ghosts, mood deaths, toppled-by reports, stress | BUG-062 .. BUG-064, FR-74 | 12, 14, 15, 48, 52, 55, 56 (reporting), 58 |
@@ -87,6 +87,7 @@ with "Why / What changed / Live check".
 | 62 | "no Farmers" means no Farmer's Workshop | B1 | BUG-059 |
 | 63 | labormanager is not the cause of the Planters reset; Fisherdwarves and gatherers at 0 | B1 | BUG-057 |
 | 64 | militia rotation: one window, one squad; squad verbs not registered | A3 / A4 | FR-71, BUG-055 |
+| 65 | no verb or template for civzones (pen/pasture, pit/pond, collection zones, fishing area, meeting hall), `bp sites` cannot take a position | A4 | FR-78 |
 
 ## Decisions that shape the packages
 See `docs/v2/DECISIONS.md`, section "Decided by the development session (2026-10-23)": 1 stage 3 before P3, 2 auto-seal
