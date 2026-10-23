@@ -408,6 +408,20 @@ T.test('squad.sortie needs approval, runs only in combat modes, kills in a killb
   T.eq(X.squad_of(W, 'A').orders[0].kind, 'station')
 end)
 
+T.test('BUG-065: sortie_squad names the squad the intruder offer would send (melee first, most soldiers), nil without one',
+       function()
+  local W = setup(50)
+  local key, n = X.call(W, 'military', 'sortie_squad')
+  T.ok(key == 'A' or key == 'B', 'a melee squad')
+  T.ok(n >= 1)
+  local K = W.K
+  local ok, k2 = K.call('military', 'sortie_squad')
+  T.eq({ok, k2}, {true, key})
+  local W2 = boot({n = 5, phase = false})
+  local ok2, k3 = W2.K.call('military', 'sortie_squad')
+  T.eq({ok2, k3}, {true, nil}, 'no squad yet')
+end)
+
 ---------------------------------------------------------------- KPIs
 T.test('worn %: worn assigned uniform items / uniform slots; assigned-only and unassigned do not count', function()
   local W = setup(50)

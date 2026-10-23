@@ -1606,6 +1606,23 @@ function M.kill(K, ids, opts)
   return n > 0, #t
 end
 
+-- public (BUG-065, reflex's intruder_sortie offer): the squad a sortie would send, key and member count: the melee squad
+-- with the most soldiers (A first on a tie), else the crossbow squad; squads a sortie of siege holds are left out; nil
+-- when no squad has a member
+function M.sortie_squad(K)
+  local best, bk, bn = nil, nil, 0
+  for _, sp in ipairs(M.SQUADS) do
+    local e = st.sq[sp.key]
+    local s = e and squad(e.id)
+    local n = s and #members(s) or 0
+    if n > 0 and not rt.held[sp.key] then
+      local rank = (sp.kind == 'melee' and 1000 or 0) + n
+      if not best or rank > best then best, bk, bn = rank, sp.key, n end
+    end
+  end
+  return bk, bn
+end
+
 -- inbox squad.sortie (approval checked by kern): kill the visible hostiles in a killbox, else move there.
 -- args.gate (Gordon 2026-10-16): a sortie through that outer bridge; siege runs it (gather in the bailey, open, kill,
 -- recall, close) and answers

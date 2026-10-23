@@ -456,12 +456,12 @@ end)
 -- Live: ALERT and an arrival:ambush lockdown for 45 days (clock 30 t/s, 6 doors forbidden, idle 68 %, 9 t/s instead of
 -- 400) for ONE invader, ELK_BIRD 28188 at 184,1,144 at the map edge (the citizens' walk group, 100+ tiles from
 -- everybody): LOCKDOWN_END needed threat 0 for hold_quiet_days, which never came.
-local ELK, GOB = 88, 89
+local ELK, GOB, GREM = 88, 89, 90
 local function raws()
   local elk = {flags = {CAN_LEARN = false, CAN_SPEAK = false, MOUNT_EXOTIC = true}}
   local gob = {flags = {CAN_LEARN = true, CAN_SPEAK = true}}
   df.creature_raw = {find = function(r)
-    if r == ELK then return {caste = {[0] = elk}} elseif r == GOB then return {caste = {[0] = gob}} end
+    if r == ELK then return {caste = {[0] = elk}} elseif r == GOB or r == GREM then return {caste = {[0] = gob}} end
   end}
 end
 local function add(W, spec, race)
@@ -600,6 +600,208 @@ T.test('Run 11: the ack timeout applies no default for an INTRUDER whose unit is
   S.run(W, 9 * 140)
   local l = events(W, 'LOCKDOWN')
   T.eq({#l, l[1].d.type, l[1].d.n}, {1, 'INTRUDER', intr[2].n})
+end)
+
+---------------------------------------------------------------- BUG-065 (Run 14): the endless confinement
+-- Live: a gremlin in the caves (z91, the fort's walk group) kept the Kern+ lockdown on for months: every project outside
+-- Kern+ stalled, no squad went, civ_alert cleared by hand came back within 15 s (the lockdown holds it, level-triggered),
+-- the brief said "threat 0 vis". The lockdown had no clock of its own: a hostile near a citizen kept the quiet clock off
+-- for ever, and every unacked INTRUDER default engaged it again.
+local function gremlin(W, id, x, y, size)
+  local u = add(W, S.inv(id, x, y, Z, {race = 'GREMLIN'}), GREM)
+  u.body = {size_info = {size_cur = size or 4000}}
+  return u
+end
+local function decisions(W, id)
+  local r = {}
+  for _, e in ipairs(events(W, 'DECISION_NEEDED')) do if e.d.id == id then r[#r + 1] = e end end
+  return r
+end
+local function with_sortie(f)                           -- the military stand-in names a squad to send
+  local orig = S.military
+  S.military = function() local m = orig(); m.sortie_squad = function() return 'A', 6 end; return m end
+  local ok, err = pcall(f)
+  S.military = orig
+  assert(ok, err)
+end
+local CONFINE = {reflex = {v = 2, confine = {max_days = 3, offer_days = 1}}}
+
+T.test('BUG-065: a lone small intruder near a citizen holds the lockdown only for confine.max_days: named, a sortie ' ..
+       'offered, then the lockdown ends, civ_alert stays off, the clock is free and the cleared unit counts for nothing',
+       function() with_sortie(function()
+  local W = setup{tag = 'grem', manifest = false, cfg = CONFINE}
+  raws()
+  W.move(2, 100, 20, Z)                                  -- a woodcutter outside Kern+
+  gremlin(W, 300, 110, 20)                               -- 10 tiles from him, in the fort's walk group
+  S.run(W, 120)
+  local arr = events(W, 'ARRIVAL')
+  T.eq({#arr, arr[1].d.kind, arr[1].d.src}, {1, 'invader', 'sighting'}, 'a lone intruder still starts a lockdown')
+  W.inbox('ack', {})
+  local a = W.state().alarm
+  T.eq(a.lock, 1)
+  T.eq({a.by.id, a.by.race, a.by.k, a.by.pos, a.by.dc, a.by.hl, a.by.n}, {300, 'GREMLIN', 'inv', {110, 20, Z}, 10, 1, 1},
+       'the state names the cause: unit, race, position, distance to the nearest citizen outside Kern+')
+  T.ok(a.by.de >= 0, 'and to the nearest entrance')
+  T.eq({a.lim, a.qw}, {3 * 1200, 'near'}, 'the limit, and why the quiet clock does not run')
+  T.eq(C.check_state(W.state()), {})
+  S.run(W, 1300)
+  W.inbox('ack', {})
+  local o = decisions(W, 'intruder_sortie')
+  T.eq(#o, 1, 'a sortie is offered after offer_days, once')
+  T.eq({o[1].cls, o[1].d.unit, o[1].d.squad, o[1].d.hl, o[1].d.pos}, {'A', 300, 'A', 1, {110, 20, Z}})
+  T.ok(o[1].d.q:find('squad.sortie', 1, true) and o[1].d.q:find('"target":[110,20,10]', 1, true)
+       and o[1].d.q:find('"squad":"A"', 1, true), o[1].d.q)
+  T.ok(o[1].d.q:find('GREMLIN', 1, true) and o[1].d.q:find('10 tiles', 1, true), o[1].d.q)
+  S.run(W, 1300)
+  W.inbox('ack', {})
+  T.eq(#events(W, 'LOCKDOWN_END'), 0, 'inside the limit it holds')
+  T.eq(df.global.plotinfo.alerts.civ_alert_idx, 1)
+  df.global.plotinfo.alerts.civ_alert_idx = 0            -- cleared by hand: the lockdown sounds it again (level-triggered)
+  S.run(W, 120)
+  T.eq(df.global.plotinfo.alerts.civ_alert_idx, 1)
+  S.run(W, 1300)
+  W.inbox('ack', {})
+  local e = events(W, 'LOCKDOWN_END')
+  T.eq(#e, 1, 'old code: never')
+  T.eq({e[1].d.cause, e[1].d.nfar, e[1].d.far}, {'limit', 1, {'inv 300 GREMLIN at 110,20,10 (10 tiles)'}})
+  T.ok(e[1].msg:find('confinement limit of 3 days', 1, true) and e[1].msg:find('harmless', 1, true), e[1].msg)
+  T.eq({W.state().alarm.lock, W.state().alarm.far}, {0, 1})
+  T.eq(W.doors.entrance.door_flags.forbidden, false, 'its doors open again')
+  S.run(W, 700)                                          -- ALERT's own 600-tick hold on the civ alert runs out
+  T.eq(df.global.plotinfo.alerts.civ_alert_idx, 0, 'civ_alert off and not sounded again')
+  S.run(W, 1700)
+  T.eq(W.K.mode(), 'PEACE', 'ALERT ends with it')
+  T.eq({cap(W), W.timestream_fps}, {250, 500}, 'the clock is back to the normal cap')
+  T.eq(df.global.plotinfo.alerts.civ_alert_idx, 0)
+  S.run(W, 4000)
+  T.eq({#events(W, 'ARRIVAL'), #events(W, 'LOCKDOWN'), W.state().alarm.lock}, {1, 0, 0}, 'no re-arm while it stays')
+  local p = json.decode(W.persist_raw['dfllm.m.reflex'])
+  T.eq({p.far.ids, p.far.hl}, {{300}, {300}}, 'the cleared list survives a reload')
+  -- another hostile in sight: the picture is not a lone harmless intruder any more, the cleared one counts again
+  W.add_unit(S.inv(301, 150, 30, Z)).race = GOB
+  S.run(W, 120)
+  T.eq(#events(W, 'ARRIVAL'), 2, 'counted again')
+  T.eq(W.state().alarm.lock, 1)
+end) end)
+
+T.test('BUG-065: the limit is config: max_days 0 keeps the old rule; a dangerous (big) hostile near keeps the lockdown ' ..
+       'and the offer says so; three small ones are a group, not a lone intruder', function() with_sortie(function()
+  local W = setup{tag = 'gremdanger', manifest = false, cfg = CONFINE}
+  raws()
+  W.move(2, 100, 20, Z)
+  local g = gremlin(W, 300, 110, 20, 60000)              -- a goblin-sized thief
+  S.run(W, 120)
+  W.inbox('ack', {})
+  T.eq(W.state().alarm.by.hl, 0)
+  S.run(W, 3 * 1200 + 1300)
+  W.inbox('ack', {})
+  T.eq(#events(W, 'LOCKDOWN_END'), 0, 'a dangerous hostile within the near radius keeps it')
+  local o = decisions(W, 'intruder_sortie')
+  T.ok(#o >= 1 and o[#o].d.hl == 0, 'the offer for a dangerous one names the confinement')
+  T.ok(o[1].d.q:find('lockdown', 1, true), o[1].d.q)
+  local W2 = setup{tag = 'gremgroup', manifest = false, cfg = CONFINE}
+  raws()
+  W2.move(2, 100, 20, Z)
+  for i = 0, 2 do gremlin(W2, 300 + i, 110 + i, 20) end
+  S.run(W2, 120)
+  W2.inbox('ack', {})
+  S.run(W2, 3 * 1200 + 1300)
+  T.eq(#events(W2, 'LOCKDOWN_END'), 0, 'more than confine.lone_max small ones: not harmless')
+  local W3 = setup{tag = 'gremoff', manifest = false, cfg = {reflex = {v = 2, confine = {max_days = 0}}}}
+  raws()
+  W3.move(2, 100, 20, Z)
+  gremlin(W3, 300, 110, 20)
+  S.run(W3, 120)
+  W3.inbox('ack', {})
+  S.run(W3, 6 * 1200)
+  T.eq(#events(W3, 'LOCKDOWN_END'), 0, 'max_days 0: the old rule')
+  T.eq(W3.state().alarm.lim, 0)
+end) end)
+
+T.test('BUG-065: no hostile in sight: the state says why the lockdown still holds (quiet clock), nothing is guessed',
+       function()
+  local W = setup{tag = 'gremnone', manifest = false}
+  W.event('REPORT', {type = 'AMBUSH_AMBUSHER', text = 'An ambush! Curse them!'})
+  S.run(W, 60)
+  local a = W.state().alarm
+  T.eq({a.lock, a.by, a.qw}, {1, nil, 'recent'}, 'a trigger within the last 2,400 ticks')
+  T.eq(a.lim, 10 * 1200, 'the default limit is 10 game days')
+  S.run(W, 2600)
+  T.eq(W.state().alarm.qw, 'run', 'the quiet clock runs')
+  T.eq(C.check_state(W.state()), {})
+end)
+
+T.test('BUG-065: a mood dwarf or a patient dying of thirst inside the confinement is reported; with no dangerous ' ..
+       'hostile near the lockdown ends for him, with one near it holds and says so', function()
+  local W = setup{tag = 'gremneed', manifest = false}
+  raws()
+  W.move(2, 100, 20, Z)
+  gremlin(W, 300, 110, 20)
+  S.run(W, 120)
+  W.inbox('ack', {})
+  S.run(W, 2600)                                         -- the alert sounds, no trigger for 2,400 ticks
+  T.eq(df.global.plotinfo.alerts.civ_alert_idx, 1)
+  W.inbox('ack', {})
+  local u = W.unit(3)
+  u.mood, u.counters2 = 1, {thirst_timer = 63513, hunger_timer = 0}
+  S.run(W, 700)
+  local d = decisions(W, 'confined_need')
+  T.eq(#d, 1, 'reported once')
+  T.eq({d[1].cls, d[1].d.units, d[1].d.thirst, d[1].d.why}, {'A', {3}, 63513, 'mood'})
+  local e = events(W, 'LOCKDOWN_END')
+  T.eq(#e, 1, 'nothing dangerous near: the confinement ends for him')
+  T.eq(e[1].d.cause, 'need')
+  S.run(W, 700)
+  T.eq(df.global.plotinfo.alerts.civ_alert_idx, 0)
+  -- a dangerous hostile near: reported, the lockdown stays
+  local W2 = setup{tag = 'gremneed2', manifest = false}
+  raws()
+  W2.move(2, 100, 20, Z)
+  gremlin(W2, 300, 110, 20, 60000)
+  S.run(W2, 120)
+  W2.inbox('ack', {})
+  S.run(W2, 2600)
+  W2.inbox('ack', {})
+  local p = W2.unit(3)
+  p.counters2, p.health = {thirst_timer = 52000, hunger_timer = 0}, {flags = {needs_healthcare = true}}
+  S.run(W2, 700)
+  local d2 = decisions(W2, 'confined_need')
+  T.eq(#d2, 1)
+  T.eq({d2[1].d.why, d2[1].d.units}, {'patient', {3}})
+  T.eq({#events(W2, 'LOCKDOWN_END'), W2.state().alarm.lock}, {0, 1})
+end)
+
+
+T.test('BUG-065: a great danger in reach, or an undead wave, keeps the lockdown at any distance (the limit is for a ' ..
+       'lone harmless intruder, not for a siege)', function()
+  local W = setup{tag = 'gremgreat', manifest = false, cfg = CONFINE}
+  raws()
+  W.move(2, 100, 20, Z)
+  gremlin(W, 300, 110, 20)
+  W.add_unit(S.inv(400, 150, 30, Z, {great = true, race = 'DRAGON'}))      -- a megabeast 98 tiles away, in reach
+  S.run(W, 120)
+  W.inbox('ack', {})
+  S.run(W, 3 * 1200 + 1300)
+  W.inbox('ack', {})
+  T.eq(#events(W, 'LOCKDOWN_END'), 0, 'the great danger keeps it')
+  T.eq({W.state().alarm.lock, W.K.mode(), W.state().alarm.lim}, {1, 'SIEGE', 3 * 1200}, 'a siege: no limit applies')
+end)
+
+
+T.test('review C1: an unchanged dangerous intruder past the limit is offered once, not once per game day', function()
+  with_sortie(function()
+    local W = setup{tag = 'gremonce', manifest = false, cfg = CONFINE}
+    raws()
+    W.move(2, 100, 20, Z)
+    gremlin(W, 300, 110, 20, 60000)
+    S.run(W, 120)
+    W.inbox('ack', {})
+    for _ = 1, 4 do S.run(W, 1900); W.ms = W.ms + 120000; W.inbox("ack", {}) end   -- 7,600 ticks: 6.3 days, 3.3 past the limit
+    T.eq(#decisions(W, 'intruder_sortie'), 1, 'the same unit and cause: one offer (a repeat needs news)')
+    gremlin(W, 301, 111, 20, 60000)                                -- another one: news
+    for _ = 1, 3 do S.run(W, 1900); W.ms = W.ms + 120000; W.inbox("ack", {}) end
+    T.ok(#decisions(W, 'intruder_sortie') <= 3, 'bounded')
+  end)
 end)
 
 T.done()

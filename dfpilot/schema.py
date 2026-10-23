@@ -882,7 +882,17 @@ STATE = Obj(
                                                        # BUG-035: the open recall (called, still out of rto,
                                                        # left since, cannot come)
                                                        "rn": NAT, "rleft": NAT, "rnew": NAT, "rstuck": NAT,
-                                                       "rto": Str(maxbytes=24)}),
+                                                       "rto": Str(maxbytes=24),
+                                                       # BUG-065: the lockdown's age and limit (ticks; lim 0 = off), why
+                                                       # its quiet clock does not run (near, inside, great, recent,
+                                                       # armed, stale, run) and its cause: the nearest counted hostile
+                                                       # (race, kind, position, tiles to the nearest citizen outside
+                                                       # Kern+ and entrance, harmless, how many)
+                                                       "age": NAT, "lim": NAT, "qw": Str(maxbytes=8),
+                                                       "by": Obj(req={"id": NAT, "race": Str(maxbytes=24),
+                                                                      "k": Str(maxbytes=8), "pos": Tup([NAT, NAT, NAT]),
+                                                                      "dc": Int(-1), "de": Int(-1)},
+                                                                 opt={"hl": FLAG, "n": NAT, "sz": NAT})}),
          # FR-55 lever latency (gate): last pull -> wanted state, in s and ticks (-1 never); pending own pulls
          "lever": Obj(req={"lat_s": Int(-1), "lat_t": Int(-1), "pend": NAT, "wait_s": NAT}),
          "alert": Obj(req={"want": Str(maxbytes=24), "burrow": Str(maxbytes=24), "tiles": NAT, "inside": NAT,
