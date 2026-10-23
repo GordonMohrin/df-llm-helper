@@ -1993,6 +1993,7 @@ local function station_watch(K, now)
   if on > (ep.onmax or 0) then ep.onmax, dirty = on, true end
   if sol > 0 and on * 2 >= sol and (ep.ont or -1) < 0 then ep.ont, dirty = now - ep.start, true end
   if sol == 0 or on * 2 >= sol or now - ep.start < M.STATION_WAIT then return end
+  if wave_busy() or next(mem.kill_set or {}) then return end          -- a wave, a sortie or a kill order: elsewhere on purpose
   if mem.stn_re and now - mem.stn_re < M.STATION_WAIT then return end
   mem.stn_re = now
   if not mem.stn_warn then

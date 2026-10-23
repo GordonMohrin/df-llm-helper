@@ -143,6 +143,9 @@ end
 
 T.test('FR-71: the default config keeps the old behaviour: B trains in months 9-11, A and C are free then', function()
   local W = setup(50)
+  local c = mil().conf(W.K)
+  T.eq(c.militia, {B = {[9] = true, [10] = true, [11] = true}}, 'M.MILITIA is a table squad key -> months')
+  T.eq(c.free, {[9] = true, [10] = true, [11] = true})
   T.eq(routines_for(W, 10), {A = 'Off duty', B = 'Constant training', C = 'Off duty'})
   T.eq(routines_for(W, 2), {A = 'Constant training', B = 'Off duty', C = 'Constant training'})
 end)

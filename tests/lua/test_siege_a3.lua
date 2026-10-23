@@ -68,13 +68,34 @@ T.test('BUG-052: nobody ever on station: on_t -1, SIEGE_STATUS names the causes,
   T.eq(n, 1, 'the warning is logged once per siege')
 end)
 
-T.test('BUG-052: soldiers on station by half: no warning, no forced posture', function()
+T.test('BUG-052: soldiers on station by half: no warning, no forced posture, SIEGE_END says so', function()
   local W = world(units(S.army(6, 51, 0)), function(t)
     return {squads = 3, soldiers = 16, worn = 90, cv = 10, metal_pct = 0, on_station = 12}
   end)
-  S.run(W, 4000)
+  S.run(W, 4000, {at = {{1000, kill_all(army_ids(6))}}})
   T.eq(logged(W, 'soldiers stand at their stations'), nil)
   for _, p in ipairs(W.mil.postures) do T.ok(not p.force, 'no forced posture') end
+  S.run(W, 12200)
+  local se = W.find_events('SIEGE_END')[1]
+  T.ok(se, 'a SIEGE_END')
+  T.eq({se.d.sol0, se.d.soldiers, se.d.on_station}, {16, 16, 12})
+  T.ok(se.d.on_t >= 0 and se.d.on_t <= 200, 'half stood at once: ' .. tostring(se.d.on_t))
+  T.eq(W.find_events('SIEGE_STATUS')[1].d.off, nil, 'no cause to name')
+end)
+
+T.test('BUG-052: a running kill order has the squads off their station on purpose: no warning, no station order over it', function()
+  local W = world(units(S.army(6, 150, 150), S.inv(301, 50, 28), S.inv(302, 51, 29)), function(t)
+    return {squads = 3, soldiers = 16, worn = 90, cv = 10, metal_pct = 0, on_station = 0}
+  end)
+  S.run(W, 4000)
+  T.ok(#W.mil.kills >= 1, 'hostiles in the killing field: kill orders were given')
+  T.eq(logged(W, 'soldiers stand at their stations'), nil)
+  for _, p in ipairs(W.mil.postures) do T.ok(not p.force, 'no forced posture over a kill order') end
+  S.run(W, 200, {at = {{100, kill_all({301, 302, 201, 202, 203, 204, 205, 206})}}})
+  S.run(W, 12200)
+  local se = W.find_events('SIEGE_END')[1]
+  T.ok(se, 'a SIEGE_END')
+  T.eq({se.d.sol0, se.d.on_station, se.d.on_t}, {16, 0, -1}, 'nobody stood at a station: the numbers say so')
 end)
 
 T.done()
