@@ -2352,8 +2352,18 @@ local function needs_cancel(K, c, oid, job, why)
   p.ocancel[key] = rec
   K.persist.touch('m.economy')
   if rec.n < (oc.needs_drop or 10) then return end
+  -- J2 (BUG-078 x the pruner): a memorial order names its figure; the kernel's own (act.engrave_order) is untagged, so the
+  -- backoff below cannot hold it back: slab_engrave remembers the figure (p.slab_drop) and does not order it again at once
+  local hf
+  pcall(function()
+    if o.job_type == df.job_type.EngraveSlab then hf = math.tointeger(o.specdata.hist_figure_id) end
+  end)
   local ok = K.act.order_remove(oid)
   if not ok then return end
+  if hf and hf >= 0 then
+    p.slab_drop = json.object(type(p.slab_drop) == 'table' and p.slab_drop or {})
+    p.slab_drop[tostring(hf)] = now
+  end
   p.ocancel[key] = nil
   for tag, id in pairs(p.orders) do
     if id == oid then                            -- an own order: not entered again for backoff_days
@@ -4142,7 +4152,9 @@ local function order_ctx(K, c, r)
   function ctx.has(key)
     if key == 'cook' then return M.cook_n(inv) > 0
     elseif key == 'fish_raw' then return (inv.fish_raw or 0) > 0
-    elseif key == 'slab_blank' then return st.slab == nil or (st.slab.blank or 0) > 0 end   -- B2: M.slab_pass counts them
+    -- B2: M.slab_pass counts them; J2: a blank slab a running job holds is the job's (the trim keeps blank + busy orders),
+    -- the order is not blocked for want of one: three engravings at work were a "jam" of three cancelling jobs
+    elseif key == 'slab_blank' then return st.slab == nil or (st.slab.blank or 0) + (st.slab.busy or 0) > 0 end
     local n = key == 'rock' and stone_free(c, r) or stock_of(r, key)
     if n <= 0 then return false end
     return type(reach) ~= 'table' or reach[key] == true
@@ -4530,9 +4542,12 @@ function M.fiber_note(K, c, r, fp)
   if type(p.af) ~= 'table' then p.af = {} end
   local af = p.af
   local cl = st.cloth
-  if not st.af_off or type(cl) ~= 'table' or (cl.deficit or 0) <= 0 then af.fnote = nil; return end
-  if af.fnote and r.now - (math.tointeger(af.fnote) or 0) < 7 * DAY then return end
-  af.fnote = r.now
+  if not st.af_off or type(cl) ~= 'table' or (cl.deficit or 0) <= 0 then af.fnote = CAD.quiet(af.fnote); return end
+  -- J2: util/cadence -- a game week is 19 s at timestream speed, so the week alone repeated the line three times a minute
+  -- while the condition stood; the repeat waits max(7 game days, 10 min); an old state held a tick number (no record)
+  local T0 = K.now()
+  if type(af.fnote) == 'table' and not CAD.elapsed(af.fnote, T0, 7 * DAY, CAD.WALL_S) then return end
+  af.fnote = CAD.mark(T0, {}, {})
   local seeds = 0
   for _, id in ipairs((c.cloth or {}).fiber or {}) do if (st.seeds or {})[id] then seeds = seeds + 1 end end
   K.log('warn', 'cloth short by %d (thread %d) and autofarm is off (%s): the kernel plants fiber crops itself (%s; %d fiber ' ..
@@ -6933,7 +6948,8 @@ end
 -- the free blank slabs and slabs.max_orders allow after the trim above (so the next pass does not remove them). The
 -- ghost list is census.g (sense; not trusted older than two days); the age is the first day this module saw the ghost
 -- (persisted p.slab_ghost). A ghost without a historical figure (unit.hist_figure_id < 0) cannot be served by the plugin
--- or by us: reported once (p.slab_skip), never retried; an act failure is retried after 7 days. sb.unserved counts them.
+-- or by us: reported once (p.slab_skip), never retried; an act failure is retried after 7 days; a figure whose order the
+-- "Needs ..." pruner removed (needs_cancel, p.slab_drop) waits orders.backoff_days (J2). sb.unserved counts them.
 function M.slab_engrave(K, c, r, sl, sb, eng, engf, removed)
   local sc, p, now = c.slabs, r.p, r.now
   local days = sc.engrave_days
@@ -6953,6 +6969,11 @@ function M.slab_engrave(K, c, r, sl, sb, eng, engf, removed)
   for sid in pairs(seen) do if not isghost[sid] then seen[sid] = nil end end
   for sid in pairs(skip) do if not isghost[sid] then skip[sid] = nil end end
   p.slab_ghost, p.slab_skip = seen, skip
+  -- J2: figures whose order the "Needs ..." pruner removed wait orders.backoff_days (an own order's rule)
+  local drop = json.object(type(p.slab_drop) == 'table' and p.slab_drop or {})
+  local bo = ((c.orders or M.DEFAULTS.orders).backoff_days or 10) * DAY
+  for k, t in pairs(drop) do if now - (math.tointeger(t) or 0) >= bo then drop[k] = nil end end
+  p.slab_drop = drop
   local gone = {}
   for _, id in ipairs(removed or {}) do gone[id] = true end
   local ordered = {}
@@ -6977,6 +6998,8 @@ function M.slab_engrave(K, c, r, sl, sb, eng, engf, removed)
         end
       elseif sl.topics[hf] or ordered[hf] then
         skip[g.sid] = nil                                      -- served: a memorial exists or the plugin's order stands
+      elseif drop[tostring(hf)] then
+        sb.unserved = sb.unserved + 1                          -- J2: its order was removed after the cancels: back off
       elseif type(sk) == 'table' and sk.why ~= 'no_hf' and now - (math.tointeger(sk.t) or 0) < 7 * DAY then
         sb.unserved = sb.unserved + 1                           -- an act failure: back off
       else

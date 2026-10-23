@@ -158,4 +158,15 @@ T.test('I3: no fiber slot in food shortage, with fiber_slots 0, or while autofar
   T.eq(count(pk, 0, 6), 0, 'autofarm is on (keep): its business')
 end)
 
+T.test('J2: the fiber note repeats after max(7 game days, 10 minutes), not after a game week alone (timestream)', function()
+  local W = crop_world{food = 500, cfg = function(c) c.economy.farms.autofarm = 'off' end}
+  days(W, 2)
+  T.eq(#logs_like(W, 'autofarm is off'), 1, 'the first line goes out at once')
+  days(W, 8)                                         -- more than a game week, a few seconds of the wall clock
+  T.eq(#logs_like(W, 'autofarm is off'), 1, 'a game week is 19 s at 450 ticks a second: the line waits for the wall clock too')
+  W.ms = W.ms + 700 * 1000                           -- ten minutes later
+  days(W, 1)
+  T.eq(#logs_like(W, 'autofarm is off'), 2, 'then it speaks again')
+end)
+
 T.done()

@@ -1,5 +1,65 @@
 # CHANGELOG dfpilot
 
+## Integration audit: the kernel's memorial order was never made, its removal was made again, engravings at work were a jam, the cloth note by the game week (BUG-090, BUG-091, BUG-092, 2026-10-23, audit J2 of economy, orders, hospital posts and ghosts; offline, live-untested)
+- **Why:** wave D (BUG-077 hospital posts per location, BUG-078 the kernel orders the memorial slab) was merged after the four audits of
+  the first pass; nobody had read it together with B1 (farm slots, autofarm, cover details), B2 (slab trim, stale orders, standing
+  orders), B3 (ghosts, tomb zones), A4 (caregivers, offices) and FR-77 (idle breakdown). This pass checked the economy, order and
+  care code against the structures the game ships (df-structures, DFHack's autoslab.cpp, the order library `data/orders/basic.json`,
+  the plugin docs) instead of the fakes of the tests.
+- **BUG-090 (high):** `act.engrave_order` (BUG-078) set `material_category.stone`; `job_material_category` has no such bit, DFHack raises
+  on a write to a flag that does not exist, the act caught it and deleted the order: the kernel's memorial order and `order.add
+  EngraveSlab` could never succeed live (an ACT_FAIL per ghost every 7 days). The fake `manager_order` of the test took any key. The act
+  now writes the fields autoslab.cpp `createSlabJob` writes and nothing else (no item type: df.job.xml gives EngraveSlab none), and
+  refuses a figure the game does not know (`workorder.lua` does the same). The test builds the order on a struct with exactly the
+  df-structures fields that raises on the others.
+- **BUG-091 (medium):** (1) `needs_cancel` removes an order after 10 "Needs ..." cancels and holds back only an own, tagged order; the
+  kernel's memorial order has no tag, so a figure whose order was removed got the same order at the next daily pass: made, cancelled ten
+  times, removed, made again. `p.slab_drop` keeps the figure for `orders.backoff_days` (10). (2) The trim keeps `blank + busy` orders, the
+  order check `has('slab_blank')` counted `blank`: three engravings at work (`slabs.max_orders` 3 = `jam_min` 3) were reported as
+  "masons' slots full of cancelling jobs". `has` counts `blank + busy` now.
+- **BUG-092 (low):** the BUG-084 cloth note waited a game week only; 19 s at timestream speed. It follows `util/cadence` now.
+- **Contracts / config:** none new (same act, same arguments, no event, no key); CONTRACTS section 5 row `engrave_order` says what the order is.
+- **Tests (each fails on c038ce9):** `tests/lua/test_act_supply.lua` (the strict struct), `tests/lua/test_economy_b2.lua` (the pruner's
+  removal waits; engravings at work are no jam), `tests/lua/test_integration_i3_farm.lua` (the note's cadence).
+- **Integration audit J2** (hypotheses of the assignment, with the evidence; "real" = fixed above):
+  1. *The kernel's EngraveSlab order races the B2 trim (made, trimmed, made again):* refuted for the trim. `slab_engrave` allows
+     `min(max_orders - standing, blank - max(0, standing - busy))` new orders (economy.lua:7013), the trim keeps
+     `min(max_orders, blank + busy)` (orderfix.lua:143): the sum never exceeds what the next pass keeps; with a plugin that queues one
+     order per ghost every day (simulated over 20 days, 6 ghosts, 3 blank slabs) the kernel made none and the trim removed the plugin's
+     three newest a day, as before BUG-078. The loop that does exist runs through the pruner (BUG-091 part 1): real.
+  2. *The redo chain (BUG-083) makes a kernel EngraveSlab or standing order again with a wrong tag:* refuted. `OF.REDO_JOBS` has no
+     EngraveSlab (orderfix.lua:161), `T.stale` skips the job (economy.lua:7101), standing orders are Monthly and listed in `oq.stand`
+     (economy.lua:7098); ConstructSlab (`dfllm:slab`) is in REDO_JOBS and keeps its tag since 8d23f4c.
+  3. *max_orders / blank counts:* no code reserves a slab for a memorial zone (there are no memorial zones; care's mood reserve holds
+     boulders, not slabs); an engraved slab is `memorial`/`topics` and serves its figure whether or not it is built; a ghost without a
+     figure is reported once and never ordered; a ghost whose body is never found is served by its figure (autoslab.cpp does the
+     same). Found here: the `busy` mismatch of BUG-091 part 2 (real). Left alone: `ghosts` (care) also counts the ghosts nobody can
+     serve, so ConstructSlab restocks up to `restock_cap` (5) blank slabs for them, a few boulders.
+  4. *Hospital posts (BUG-077) with the Orderlies, the chief medical dwarf, two posts, no live location:* refuted. Posts are
+     occupations, the Orderlies are a work detail (`water.carer_ok` skips nobles, so a chief medical dwarf is no caregiver), the
+     office is an entity assignment; a doctor placed on a live post is a holder at once (`holders[d.id] = true`, care.lua:2195; the next run
+     reads his live post as a holder, care.lua:2132) and never takes a second one; with no live location `posts` is empty, nothing is done and `doctors.orphan_held` counts the waiting.
+     Not decided offline: DF with two occupations on one unit (note 68 says it works).
+  5. *Autofarm off and the fiber crops in winter or on an underground plot:* refuted. `slot_crop` takes a fiber crop only where it
+     fits the plot (`inf.under == under`) and the season flag (a surface plot has none in winter: the normal rule runs), only on
+     empty slots, `fiber.left[season]` counts the planted ones, `fiber_plan` is nil in a food shortage.
+  6. *Idle breakdown (FR-77) against the cover details:* refuted as to effect. The breakdown is read only (`inspect workload`,
+     `st.idle_why`); the cover details decide from the unclaimed job counts and their own candidate filters (`gather_cand`: no
+     soldier, noble, doctor, mood, tool member, sole key-labor holder). A hurt idle citizen can still be chosen; left alone.
+  7. *Cadence of the weekly messages:* real for the cloth note (BUG-092); the slab ORDER_STUCK, the ghost, lock and stress events
+     use `util/cadence`; the doctors line (`p.doc_warn`) is older and left alone.
+  8. *Config validation:* refuted. `engrave_days`, `redo_max` and `fiber_slots` have limits in `fairplay.ECONOMY_LIM`, a default in
+     baseline.json and in `M.DEFAULTS` (the mirror test), and the counts a nonsense value would multiply are bounded by the blank
+     slabs, the ghosts (200), the orders and the empty slots; `lint --config` refuses 0, negative and huge values.
+  9. *Field paths of `act.engrave_order` against DFHack:* real (BUG-090). Checked against df-structures with no further finding:
+     `specdata.hist_figure_id`, `status.validated/active`, `frequency`, `manager_order_next_id`, `all:insert`, the item fields of
+     `OF.slabs`, `job.order_id` and `job.flags.working`, `civzone_pondst.flag.keep_filled`, `civzone_tombst.flags.no_citizens`, the
+     work detail fields, the unit counters of `idle_flags`, the announcement names of care's report filter, the stockpiles CLI of the
+     tool pile, quickfort's zone keys. `ENGRAVER` is a real `unit_labor`.
+- **Open (not decided offline):** the engraved slab must still be built before the ghost rests, no kernel code does that; a fort
+  without a dwarf with the ENGRAVER labor keeps the order for ever (ORDER_STUCK `no worker ENGRAVER`, nothing switches the labor on).
+  Live: `dfllm cmd order.add` EngraveSlab with a ghost's figure, `inspect orders` -> `slabs` (`busy`, `unserved`), the manager's list.
+
 ## The kernel rotates the citizens through the militia: cohorts by militia windows served, turnover at the close of a window, a squad refill that no longer stalls (FR-79, BUG-076, 2026-10-23, package D1; offline, live-untested)
 - **Why (Run 14 Trussroads y578-y582; notes 64 and 67, Gordon's own request 23.10.):** goal Z12 "every adult citizen who is not
   elite serves three months a year in the militia" could only be followed by hand: FR-71 gave every militia squad its months, but

@@ -306,28 +306,75 @@ T.test('order_top (Run 11 siege 8, seal first): the named orders move to the top
   T.eq({env.api.order_top({'x'})}, {false, 'bad order id x'})
 end)
 
-T.test('BUG-078: engrave_order makes one EngraveSlab order for the figure (specdata), once; a missing field leaves nothing', function()
+-- A DFHack struct as df-structures defines it (library/xml/df.workquota.xml, df.d_basics.xml): DFHack raises on a read or
+-- write of any field the structure does not list (LuaWrapper lookup_field: "Cannot write field X.y: not found."). The
+-- fakes the other tests use accept anything, which hid that job_material_category has no `stone` bit.
+local function dfstruct(name, fields, init, wrote)
+  local data = {}
+  for k, v in pairs(init or {}) do data[k] = v end
+  return setmetatable({}, {
+    __index = function(_, k)
+      if k == 'delete' then return function() end end
+      if not fields[k] then error('Cannot read field ' .. name .. '.' .. tostring(k) .. ': not found.') end
+      return data[k]
+    end,
+    __newindex = function(_, k, v)
+      if not fields[k] then error('Cannot write field ' .. name .. '.' .. tostring(k) .. ': not found.') end
+      data[k] = v
+      wrote[#wrote + 1] = name .. '.' .. k
+    end})
+end
+local function set_of(list) local s = {} for _, k in ipairs(list) do s[k] = true end return s end
+local MATCAT = set_of{'plant', 'wood', 'cloth', 'silk', 'leather', 'bone', 'shell', 'wood2', 'soap', 'tooth', 'horn', 'pearl',
+                      'yarn', 'strand'}
+local SPECDATA = set_of{'hist_figure_id', 'race', 'improvement', 'dye_object_desired_post_dye_color_index'}
+local STATUS = set_of{'validated', 'active'}
+local ORDER = set_of{'id', 'job_type', 'item_type', 'item_subtype', 'reaction_name', 'mat_type', 'mat_index', 'specflag',
+                     'specdata', 'material_category', 'art_spec', 'amount_left', 'amount_total', 'status', 'frequency',
+                     'finished_year', 'finished_year_tick', 'workshop_id', 'max_workshops', 'item_conditions',
+                     'order_conditions', 'items'}
+local function dfhack_order(wrote)
+  return dfstruct('manager_order', ORDER, {
+    item_type = -1, item_subtype = -1, mat_type = 0, mat_index = -1, workshop_id = 0, max_workshops = 0, amount_left = 0,
+    amount_total = 0, frequency = -1, material_category = dfstruct('job_material_category', MATCAT, {}, wrote),
+    specdata = dfstruct('job_spec_data', SPECDATA, {}, wrote), status = dfstruct('manager_order_status', STATUS, {}, wrote),
+  }, wrote)
+end
+
+T.test('BUG-078: engrave_order makes one EngraveSlab order for the figure as autoslab does, on a struct that has only the real fields',
+       function()
   H.world{tag = 'eng'}
   df.job_type = {EngraveSlab = 77, [77] = 'EngraveSlab'}
   df.item_type = {SLAB = 55, [55] = 'SLAB'}
   df.workquota_frequency_type = {OneTime = 0}
+  df.historical_figure = {find = function(id) return (id == 6001 or id == 6002) and {id = id} or nil end}
   local mo = df.global.world.manager_orders
-  local made = 0
-  df.manager_order = {new = function()
-    made = made + 1
-    return {material_category = {}, specdata = {}, status = {}, delete = function() end}
-  end}
+  local made, wrote = 0, {}
+  df.manager_order = {new = function() made = made + 1; return dfhack_order(wrote) end}
   local env = mk('economy')
   T.eq({mk('care').api.engrave_order(6001)}, {false, 'not owner'})
   T.eq({env.api.engrave_order(-1)}, {false, 'a historical figure id is required'})
   local ok, id = env.api.engrave_order(6001)
-  T.eq(ok, true)
+  T.eq(ok, true, 'the order is made on a struct that lists the real fields only: ' .. tostring(id))
   local o = mo.all[#mo.all - 1]
-  T.eq({o.id, o.job_type, o.item_type, o.amount_left, o.amount_total, o.specdata.hist_figure_id, o.material_category.stone,
-        o.status.validated, mo.manager_order_next_id}, {id, 77, 55, 1, 1, 6001, true, false, id + 1})
+  T.eq({o.id, o.job_type, o.amount_left, o.amount_total, o.specdata.hist_figure_id, o.status.validated, o.frequency,
+        mo.manager_order_next_id}, {id, 77, 1, 1, 6001, false, 0, id + 1})
+  -- autoslab.cpp createSlabJob sets id, job_type, specdata.hist_figure_id, amount_left, amount_total, frequency and nothing
+  -- else; EngraveSlab has no `item` attribute in df.job.xml (ConstructSlab has SLAB), so item_type stays NONE
+  T.eq(o.item_type, -1, 'the job names no item type')
+  local names = {}
+  for _, w in ipairs(wrote) do names[w] = true end
+  for w in pairs(names) do
+    T.ok(({['manager_order.id'] = 1, ['manager_order.job_type'] = 1, ['manager_order.amount_left'] = 1,
+           ['manager_order.amount_total'] = 1, ['manager_order.frequency'] = 1, ['job_spec_data.hist_figure_id'] = 1,
+           ['manager_order_status.validated'] = 1, ['manager_order_status.active'] = 1})[w], 'wrote ' .. w)
+  end
   T.eq({env.api.engrave_order(6001)}, {true, 'already'}, 'one order per figure')
   T.eq(made, 1)
+  -- workorder.lua refuses a figure that does not exist ("Missing historical figure for manager order"); so does this
   local n = #mo.all
+  T.eq({env.api.engrave_order(9999)}, {false, 'no historical figure 9999'})
+  T.eq({made, #mo.all}, {1, n}, 'and makes nothing')
   df.manager_order = {new = function() return setmetatable({delete = function() end}, {__newindex = function(t, k, v)
     if k == 'specdata' then error('no field specdata') end rawset(t, k, v) end,
     __index = function(t, k) if k == 'material_category' or k == 'status' then return {} end end}) end}

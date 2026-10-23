@@ -65,3 +65,6 @@ bounds, no figure reported once, stale census, back-off, the 79 built slabs, ord
 (`engrave_order`), `tests/test_fr_econ.py` (schema). Each fails on 9bcb14f.
 
 Related: BUG-061, FR-10; note 69
+
+Update (integration audit J2): the act built its order on a field the game's structure does not have, so no kernel order was ever made live
+(BUG-090); the pruner's removal of such an order was made again at once (BUG-091).
