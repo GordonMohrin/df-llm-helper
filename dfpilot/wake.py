@@ -113,7 +113,7 @@ FOLLOW_HB_EVERY_S = 10                         # FR-29: follow's own heartbeat (
 AUTO_TIMEOUT_S = 60
 TOMBS_COOLDOWN_S = 600
 CODE = files.code_stamp()                      # BUG-042: the dfpilot code this follow process imported
-PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "rock", "farms", "seal", "fishery")   # automatic placements (one each)
+PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "rock", "farms", "seal", "fishery", "farmers")   # automatic placements (one each)
 SEAL_HINT = ("dfllm cmd bp.place tpl=seal site=S1 at=audit (walls the audit's bypass; follow places it itself "
              "unless --no-auto); then dfllm audit")
 AUTO_REQUESTS = ("tombs", "workshops")            # PROJECT_REQUEST templates follow places itself
@@ -418,6 +418,12 @@ class Follower:
                 # kernel saw none on the map, so the manifest's dedupe of `add` must not drop it
                 self._request_place("fishery", "workshops", {"add": "Fishery", "skip": ",".join(_moodable())}, "S1",
                                     now, prio=1, need=["Fishery"])
+            elif t == "PROJECT_REQUEST" and d.get("tpl") == "workshops" and d.get("why") == "farmers":
+                # FR-73 (Run 14: no Farmer's Workshop in the whole fort, thread and cloth orders waited for months): the
+                # farmer's shop alone, kept although the fort manifest lists a destroyed one (as the fishery, BUG-038)
+                from .cmd import _moodable
+                self._request_place("farmers", "workshops", {"add": "Farmers", "skip": ",".join(_moodable())}, "S1",
+                                    now, prio=1, need=["Farmers"])
             elif t == "PROJECT_REQUEST" and d.get("tpl") in AUTO_REQUESTS:
                 # live L1: a strange mood needs a shop; BUG-042: economy's tannery request names the Tanners the map
                 # lacks, kept although the fort manifest lists a destroyed one (as the fishery, BUG-038)

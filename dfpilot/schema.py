@@ -761,7 +761,7 @@ STATE = Obj(
          "labor": Obj(req={"starving": NAT, "idle": PCT}),
          # BUG-042: unvalidated live orders, the days the oldest waits, why the manager validates nothing
          "orders": Obj(req={"n": NAT, "bad": NAT, "stuck": NAT},
-                       opt={"unval": NAT, "uval_d": NAT, "mgr": Str(maxbytes=80)}),
+                       opt={"unval": NAT, "uval_d": NAT, "mgr": Str(maxbytes=80), "jam": Str(maxbytes=80)}),
          "threat": Obj(req={"vis": NAT, "armed": FLAG}),
          "proj": Arr(Tup([ID, Str(maxbytes=24), PCT, Str(maxbytes=40)]), hi=8),
          # Run 11 siege 8: seal first (the leading open seal or plug: pieces open, projects it pauses, other open seals,

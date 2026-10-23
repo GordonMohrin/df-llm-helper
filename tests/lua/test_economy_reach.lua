@@ -125,8 +125,11 @@ T.test('BUG-024: spider webs are no thread: "no collected thread", the webs\' re
   T.ok(ev[1].d.why:find('no collected thread (5 webs, none on the walk group)', 1, true), ev[1].d.why)
   local r = W.inbox('inspect', {what = 'workload'})
   T.eq(r.data.cloth.why, 'no collected thread: the webs lie off the citizens\' walk group')
-  T.eq(#W.find_acts('workorder') > 0 and W.find_acts('workorder')[1].args[1].job == 'WeaveCloth', false,
-       'no weave order from webs')
+  local weave = false                          -- FR-73's standing weave orders only take collected thread
+  for _, a in ipairs(W.find_acts('workorder')) do
+    if a.args[1].job == 'WeaveCloth' and a.args[1].tag:sub(1, 12) ~= 'dfllm:stand_' then weave = true end
+  end
+  T.eq(weave, false, 'no weave order from webs')
   -- webs the citizens can walk to: the hint names them
   local W2 = world{cit = 4, phase = 'P1', snapshot = SNAP, setup = function(W)
     F.workshop(W, 'Loom')

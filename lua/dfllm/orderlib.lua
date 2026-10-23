@@ -86,6 +86,9 @@ O.WS = {
   PrepareRawFish = any({W'Fishery'}), ExtractFromRawFish = any({W'Fishery'}),
   ProcessPlants = any({W'Farmers'}), ProcessPlantsBag = any({W'Farmers'}), ProcessPlantsVial = any({W'Farmers'}),
   ProcessPlantsBarrel = any({W'Farmers'}), MillPlants = any({W'Quern', W'Millstone'}),
+  -- B2 (BUG-061, FR-73): memorial slabs are engraved at the masons', thread is spun at the farmer's workshop
+  -- (ShearCreature is a Gathering job in df.job_type: no workshop is claimed for it)
+  EngraveSlab = any(MASONS), SpinThread = any({W'Farmers'}),
   WeaveCloth = any({W'Loom'}), MakeCharcoal = any({F'WoodFurnace'}), MakeAsh = any({F'WoodFurnace'}),
   SmeltOre = any({F'Smelter', F'MagmaSmelter'}), CutGems = any({W'Jewelers'}),
   ConstructCatapultParts = any({W'Siege'}), ConstructBallistaParts = any({W'Siege'}),
@@ -109,7 +112,7 @@ local FORGE_LABOR = {MakeWeapon = 'FORGE_WEAPON', MakeAmmo = 'FORGE_WEAPON', Mak
                      MakeGloves = 'FORGE_ARMOR', MakeShoes = 'FORGE_ARMOR', MakeShield = 'FORGE_ARMOR'}
 local CRAFT_LABOR = {rock = 'STONE_CRAFT', wood = 'WOOD_CRAFT', bone = 'BONE_CARVE'}
 -- jobs whose labor is not the workshop's (DFHack autolabor joblabormapper.cpp: CollectSand is item hauling)
-O.JOB_LABOR = {CollectSand = 'HAUL_ITEM'}
+O.JOB_LABOR = {CollectSand = 'HAUL_ITEM', SpinThread = 'SPINNER', ShearCreature = 'SHEARER', EngraveSlab = 'ENGRAVER'}
 
 -- workshop keys an order may run in (nil = unknown: not checked), material class
 function O.workshops(job, mc)
@@ -145,6 +148,7 @@ function O.input(job, mc, mat_token)
   if job == 'MakeRawGlass' then return 'sand' end
   if job == 'CollectSand' then return 'bags' end
   if job == 'CutGlass' then return 'glass' end
+  if job == 'EngraveSlab' then return 'slab_blank' end         -- B2: an unengraved slab (economy's slab pass counts them)
   if not (O.WS[job] or WEAR_JOBS[job]) then return nil end
   if mc == 'wood' then return 'wood'
   elseif mc == 'rock' then return 'rock'

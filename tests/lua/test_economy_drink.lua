@@ -26,7 +26,9 @@ local function world(opts)
   local cit = opts.cit or 12
   local units = {}
   for i = 1, cit do units[i] = {id = i, citizen = true, name = 'Urist ' .. i} end
-  local W = F.world{cfg = {baseline = F.cfg()}, units = units}
+  local cfg = F.cfg()
+  cfg.economy.standing = false                   -- FR-73's standing orders would be unvalidated orders of their own here
+  local W = F.world{cfg = {baseline = cfg}, units = units}
   df.unit_labor = {BREWER = BREWER, [BREWER] = 'BREWER'}
   local ids = {}
   for i = 1, cit do

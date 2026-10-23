@@ -84,7 +84,12 @@
 --     unforbidden, and DECISION_NEEDED starvation names the citizens who cannot reach food;
 --   * Run 11 (Kilrudrabed): cook ingredients counted as a kitchen does (cook_in), ORDER_STUCK names why a kitchen
 --     cooks nothing, a fishery request for raw fish, the fishing zone on safe revealed water, and the food_low/famine
---     decisions name the blockers and the options (section "fishing and the food blockers").
+--     decisions name the blockers and the options (section "fishing and the food blockers");
+--   * B2 (lua/dfllm/orderfix.lua; Run 13 y508/y523, Run 14 y558-y577): at most slabs.max_orders EngraveSlab orders, never
+--     more than there are unengraved slabs, ConstructSlab first (T.slabs, M.slab_pass); a workshop type whose slots are
+--     full of jobs that cannot run is the reason of the orders behind it (M.jam_scan, orders.jam); one-time orders with
+--     no job in any workshop (job.order_id) for stale.days go wood, are made again or reported (T.stale); the standing
+--     thread and cloth orders from P1 and the farmer's workshop request (T.stand, M.farmers_request).
 local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
 local OL = require('dfllm.orderlib')
@@ -93,6 +98,7 @@ local CAD = require('dfllm.util.cadence')   -- BUG-008: when a standing class-A 
 local M = {name = 'economy', every = {ticks = 1200}, on = {}, verbs = {}, inspect = {}, MASK_CHECK = 300,
            reports = {MIGRANT_ARRIVAL = true, MIGRANT_ARRIVAL_NAMED = true, D_MIGRANTS_ARRIVAL = true,
                       CANCEL_JOB = true}}
+M.OF = require('dfllm.orderfix')   -- B2: slab census, workshop job lists, the stale-order rules (a library, a field: no new local)
 local DAY = C.TICKS.DAY
 local EVERY = 1200
 local COAL = 7                       -- df.builtin_mats.COAL: charcoal and coke bars (fuel)
@@ -366,6 +372,42 @@ M.DEFAULTS = {
   -- missing one is placed on a free floor tile of the zone (runner.repair: quickfort build, buildingplan waits for the
   -- item) at most every retry_days; zones larger than max_tiles are searched only that far
   office = {table = true, retry_days = 7, max_tiles = 400},
+  -- BUG-061 (Run 13 y523: 31 EngraveSlab orders, "Needs unengraved slab", filled the masons' slots with jobs that
+  -- cancelled at once; doors, coffins, tables and blocks waited ten game years; autoslab.cpp queues one EngraveSlab order
+  -- per ghost every 1289 ticks and no ConstructSlab): at most `max_orders` EngraveSlab orders stand, never more than
+  -- there are unengraved slabs, the rest are removed (at most `drop_per_day`; again at the first "unengraved slab"
+  -- cancel past `trigger_ticks`); ConstructSlab is ordered first for the ghosts and the open engrave orders (at most
+  -- `restock_cap` blank slabs); `jam_min` blocked jobs in a workshop type's slots (half of them at least) are a jam
+  slabs = {max_orders = 3, restock_cap = 5, drop_per_day = 60, trigger_ticks = 600, scan_max = 2000, jam_min = 3},
+  -- BUG-060 (Run 13 y508: 11 ConstructDoor INORGANIC orders, validated, made no job for months, five builds waited for
+  -- doors; wood doors ordered by hand were built at once): a one-time validated order with no job in any workshop and an
+  -- unchanged amount for `days` days (`wait_days` when a planned building waits for that piece) is stale: a stone
+  -- furniture order is re-entered in wood, else a simple order is made again, else it is reported; at most `per_day`
+  -- a day, only in PEACE and RECOVERY; `jobs_max` workshop jobs are read
+  stale = {days = 10, wait_days = 3, per_day = 6, jobs_max = 2000},
+  -- FR-73 (Run 14 y558-y561: silk, yarn and plant cloth missing in three moods in a row, no standing thread or cloth
+  -- order): from `from_phase` (the moodable workshops' phase) each entry is ordered once, `amount` a `frequency`, when
+  -- its workshops stand (`ws`, none: always); the farmer's workshop comes with the plan (P1 workshops, or economy's
+  -- PROJECT_REQUEST workshops why=farmers every `request_days`)
+  standing = {from_phase = 'P1', amount = 30, frequency = 'Monthly', request_days = 14,
+              list = {{tag = 'dfllm:stand_spin', ws = {'workshop:Farmers'}, spec = {job = 'SpinThread'}},
+                      {tag = 'dfllm:stand_weave_plant', ws = {'workshop:Loom'},
+                       spec = {job = 'WeaveCloth', material_category = {'plant'},
+                               item_conditions = {{condition = 'AtLeast', value = 1, item_type = 'THREAD',
+                                                   flags = {'collected', 'plant'}}}}},
+                      {tag = 'dfllm:stand_weave_silk', ws = {'workshop:Loom'},
+                       spec = {job = 'WeaveCloth', material_category = {'silk'},
+                               item_conditions = {{condition = 'AtLeast', value = 1, item_type = 'THREAD',
+                                                   flags = {'collected', 'silk'}}}}},
+                      {tag = 'dfllm:stand_weave_yarn', ws = {'workshop:Loom'},
+                       spec = {job = 'WeaveCloth', material_category = {'yarn'},
+                               item_conditions = {{condition = 'AtLeast', value = 1, item_type = 'THREAD',
+                                                   flags = {'collected', 'yarn'}}}}},
+                      {tag = 'dfllm:stand_process', ws = {'workshop:Farmers'},
+                       spec = {job = 'ProcessPlants',
+                               item_conditions = {{condition = 'AtLeast', value = 1, item_type = 'PLANT',
+                                                   flags = {'unrotten', 'processable'}}}}},
+                      {tag = 'dfllm:stand_shear', spec = {job = 'ShearCreature'}}}},
   -- BUG-042: below low_d drink days (and above alarm.days, where the thirst decision speaks) a class-A DECISION_NEEDED
   -- drink_low names why the stills do not brew (M.drink_why) and what the kernel did; again with news after 7 days
   drink = {low_d = 60},
@@ -427,7 +469,7 @@ end
 
 -- persist m.economy; maps are re-tagged as objects (a decoded empty map is an array, json.lua:104)
 local MAPS = {'imported', 'orders', 'low', 'tools', 'meta', 'needs', 'reserves', 'explore', 'ostuck', 'ocancel',
-              'badseen', 'jres', 'tblk', 'mseen'}
+              'badseen', 'jres', 'tblk', 'mseen', 'ostale'}
 local function pstate(K)
   local p = K.persist.get('m.economy')
   if type(p) ~= 'table' then
@@ -2221,6 +2263,12 @@ local function cancel(K, ev)
   st.cancels[key] = (st.cancels[key] or 0) + 1
   local n = st.cancels[key]
   local oid
+  -- BUG-061: a job cancelled for want of an unengraved slab: the EngraveSlab orders are cut back now, not at the next
+  -- daily pass (autoslab queues them again every 1289 ticks)
+  if OL.needs(why) and tostring(why):lower():find('unengraved slab', 1, true) then
+    local oks, errs = pcall(M.slab_event, K, c)
+    if not oks then K.log('warn', 'slab event: %s', tostring(errs)) end
+  end
   if OL.needs(why) then
     oid = find_order_named(key)
     -- Run 11: "Needs rock" while no stone is free: re-entered in wood or removed now, not after needs_drop cancels
@@ -3818,7 +3866,8 @@ local function order_ctx(K, c, r)
   end
   function ctx.has(key)
     if key == 'cook' then return M.cook_n(inv) > 0
-    elseif key == 'fish_raw' then return (inv.fish_raw or 0) > 0 end
+    elseif key == 'fish_raw' then return (inv.fish_raw or 0) > 0
+    elseif key == 'slab_blank' then return st.slab == nil or (st.slab.blank or 0) > 0 end   -- B2: M.slab_pass counts them
     local n = key == 'rock' and stone_free(c, r) or stock_of(r, key)
     if n <= 0 then return false end
     return type(reach) ~= 'table' or reach[key] == true
@@ -3826,6 +3875,7 @@ local function order_ctx(K, c, r)
   -- BUG-024: a loom waits for collected thread; loose spider webs are none (a weaver must collect them first)
   function ctx.label(key)
     if key == 'cook' then return M.cook_why(inv, ctx.f) end     -- Run 11: 'no cook' read like a missing cook
+    if key == 'slab_blank' then return 'unengraved slab' end
     if key ~= 'thread' then return key end
     local w, near = inv.webs or 0, inv.webs_near or 0
     if w == 0 then return 'collected thread' end
@@ -3886,6 +3936,18 @@ function M.order_reasons(o, ctx)
     if key and not ctx.has(key) then why[#why + 1] = 'no ' .. (ctx.label and ctx.label(key) or key) end
   end
   if labors and not ctx.labor_ok(labors) then why[#why + 1] = 'no worker ' .. table.concat(labors, '/') end
+  -- BUG-061: nothing of its own keeps the order from running, but the slots of its workshop type are full of jobs that
+  -- cancel at once (the pre-pass of T.ocheck found the jam): that is the reason, and T.stale may help it
+  if #why == 0 and ctx.jam and ws then
+    for _, w in ipairs(ws) do
+      if ctx.jam[w] then
+        ctx.jam_ids = ctx.jam_ids or {}
+        ctx.jam_ids[o.id] = true
+        why[1] = ctx.jam[w]
+        break
+      end
+    end
+  end
   if #why == 0 then return nil, job end
   return table.concat(why, ', '), job
 end
@@ -5812,6 +5874,41 @@ function T.guard(K, c, r)
   return #r.bad == 0
 end
 
+-- BUG-061 (daily, the start of T.ocheck): the job lists of the built workshops (OF.shops: building.jobs, each job names
+-- its order) and which of those jobs belong to an order that cannot run (M.order_reasons): a workshop type with at least
+-- slabs.jam_min of them, half of its jobs or more, has its slots full of cancelling jobs. oq.ctx.jam[key] = the line,
+-- st.jam the first one (state orders.jam), oq.shops the lists (T.stale, inspect orders)
+function M.jam_scan(K, c, oq)
+  local sc, sk = c.slabs or M.DEFAULTS.slabs, c.stale or M.DEFAULTS.stale
+  local shops = M.OF.shops(built, sk.jobs_max)
+  oq.shops = shops
+  st.jam = nil
+  if shops.n == 0 then return end
+  local by = {}
+  for _, o in ipairs(orders_all()) do by[o.id] = o end
+  local jam, keys = {}, {}
+  for key in pairs(shops.keys) do keys[#keys + 1] = key end
+  table.sort(keys)
+  for _, key in ipairs(keys) do
+    local e = shops.keys[key]
+    local blocked, why_of = {}, {}
+    for _, j in ipairs(e.list) do
+      local o = by[j.order]
+      if o and not blocked[j.order] then
+        local why = M.order_reasons(o, oq.ctx)
+        if why then blocked[j.order], why_of[j.job] = true, why:sub(1, 40) end
+      end
+    end
+    local text, n = M.OF.jam_text(key, e, blocked, why_of, sc.jam_min)
+    e.blocked = n
+    if text then
+      jam[key] = text
+      st.jam = st.jam or text:sub(1, 80)
+    end
+  end
+  if next(jam) then oq.ctx.jam = jam end
+end
+
 -- FR-01 (daily): orders that cannot run (workshop, input on the citizens' walk group, worker) for stuck_days;
 -- sliced: ORDER_SLICE orders per frame
 local ORDER_SLICE = 50
@@ -5822,14 +5919,22 @@ function T.ocheck(K, c, r)
   if not oq then
     local ids = {}
     for _, o in ipairs(orders_all()) do if (o.amount_left or 0) > 0 then ids[#ids + 1] = o.id end end
-    oq = {ids = ids, i = 1, ctx = order_ctx(K, c, r), seen = {}, stuck = 0, told = 0, steel = {}, steel_left = 0}
+    oq = {ids = ids, i = 1, ctx = order_ctx(K, c, r), seen = {}, stuck = 0, told = 0, steel = {}, steel_left = 0,
+          stand = {}}
     r.oq = oq
+    -- FR-73: the standing cloth orders wait for thread and plants by design: no stuck report for them
+    for tag, id in pairs(p.orders) do
+      if tostring(tag):sub(1, 12) == 'dfllm:stand_' then oq.stand[id] = true end
+    end
+    -- BUG-061: which workshop types have their slots full of jobs that cannot run (their orders get the reason)
+    local okj, errj = pcall(M.jam_scan, K, c, oq)
+    if not okj then K.log('warn', 'jam scan: %s', tostring(errj)) end
   end
   local last = math.min(#oq.ids, oq.i + ORDER_SLICE - 1)
   for k = oq.i, last do
     local o = order_by_id(oq.ids[k])
     local why, job
-    if o and (o.amount_left or 0) > 0 then why, job = M.order_reasons(o, oq.ctx) end
+    if o and (o.amount_left or 0) > 0 and not oq.stand[o.id] then why, job = M.order_reasons(o, oq.ctx) end
     if why then
       local key = tostring(o.id)
       oq.seen[key] = true
@@ -5855,9 +5960,297 @@ function T.ocheck(K, c, r)
   r.cmds = r.cmds + 1                            -- a slice of its own (orders, labor holders)
   if oq.i <= #oq.ids then return false end
   for key in pairs(p.ostuck) do if not oq.seen[key] then p.ostuck[key] = nil end end
-  st.orders = {n = #oq.ids, bad = st.bad or 0, stuck = oq.stuck}
+  st.orders = {n = #oq.ids, bad = st.bad or 0, stuck = oq.stuck, jam = st.jam}
+  oq.done = true
+  local sh = {}                                   -- BUG-061: the workshops' job lists (inspect orders)
+  for key, e in pairs(oq.shops and oq.shops.keys or {}) do
+    sh[#sh + 1] = {ws = key, shops = e.shops, jobs = e.jobs, working = e.working, blocked = e.blocked or 0}
+  end
+  table.sort(sh, function(a, b) return a.ws < b.ws end)
+  st.shops = sh
   st.steel = {n = #oq.steel, left = oq.steel_left, ids = {table.unpack(oq.steel, 1, math.min(10, #oq.steel))}}
   return true
+end
+
+---------------------------------------------------------------- B2: slabs, stale orders, standing cloth orders
+-- BUG-061 (Run 13 y523, 31 EngraveSlab orders: the masons' slots held jobs that cancelled at once). The slab pass:
+--   * counts the unengraved slabs (OF.slabs) and the EngraveSlab / ConstructSlab orders;
+--   * keeps min(slabs.max_orders, unengraved slabs) EngraveSlab orders (the oldest) and removes the rest, naming them
+--     in kern.log; ORDER_STUCK (B) once per episode (util/cadence); autoslab.cpp queues an order per ghost again every
+--     1289 ticks, so the same pass runs at the first "unengraved slab" cancel report too (M.slab_event);
+--   * orders ConstructSlab first (slabs.restock_cap blank slabs at most) when ghosts or engrave orders want slabs and
+--     the stock and the open ConstructSlab orders do not cover them (note 56: autoslab ran, no blank slab for the new
+--     ghosts); state in st.slab (inspect orders).
+function M.slab_pass(K, c, r)
+  local sc, OF = c.slabs, M.OF
+  local jt = df.job_type.EngraveSlab
+  if type(sc) ~= 'table' or jt == nil then return end
+  local p, now = r.p, r.now
+  local cs = df.job_type.ConstructSlab
+  local eng, cons = {}, 0
+  for _, o in ipairs(orders_all()) do
+    local n = math.tointeger(o.amount_left) or 0
+    if n > 0 then
+      if o.job_type == jt then eng[#eng + 1] = o.id
+      elseif cs ~= nil and o.job_type == cs then cons = cons + n end
+    end
+  end
+  table.sort(eng)
+  local sl = OF.slabs(sc.scan_max)
+  local care = (K.view() or {}).care
+  local ghosts = math.tointeger(type(care) == 'table' and care.ghosts or 0) or 0
+  local sb = {blank = sl.blank, held = sl.held, memorial = sl.memorial, engrave = #eng, cons = cons, ghosts = ghosts,
+              removed = 0, ordered = 0}
+  st.slab, st.slab_t = sb, now
+  local function cmd() if r.cmds then r.cmds = r.cmds + 1 end end
+  -- the EngraveSlab orders that may stand
+  local _, drop = OF.engrave_split(eng, sl.blank, sc.max_orders)
+  local day = now // DAY
+  if p.slab_day ~= day then p.slab_day, p.slab_n = day, 0 end
+  local removed = {}
+  for _, id in ipairs(drop) do
+    if (p.slab_n or 0) >= (sc.drop_per_day or 60) then break end
+    cmd()
+    if K.act.order_remove(id) then
+      p.slab_n = (p.slab_n or 0) + 1
+      removed[#removed + 1] = id
+      for tag, oid in pairs(p.orders) do if oid == id then p.orders[tag] = nil end end
+    end
+  end
+  sb.removed = #removed
+  if #removed > 0 then
+    local list = table.concat(removed, ',', 1, math.min(#removed, 12)) .. (#removed > 12 and (' +' .. (#removed - 12)) or '')
+    K.log('warn', 'EngraveSlab: %d orders, %d unengraved slabs (%d held), %d ghosts: orders %s removed, %d kept (at most %d)',
+          #eng, sl.blank, sl.held, ghosts, list, #eng - #removed, sc.max_orders or 3)
+    local T0 = K.now()
+    local why = sl.blank == 0 and 'no unengraved slab' or 'more orders than unengraved slabs'
+    if CAD.due(p.slab_ann, T0, {}, {why}, {ticks = CAD.TICKS, wall_s = CAD.WALL_S}) then
+      p.slab_ann = CAD.mark(T0, {}, {why})
+      K.emit('ORDER_STUCK', 'B', string.format('%d EngraveSlab orders removed (%s: %d unengraved slabs, %d ghosts): %s',
+                                               #removed, why, sl.blank, ghosts, list):sub(1, 200),
+             {order = removed[1], job = 'EngraveSlab', why = ('slab: ' .. why):sub(1, 60), n = #removed, dropped = 1})
+    end
+  elseif #drop == 0 then
+    p.slab_ann = CAD.quiet(p.slab_ann)
+  end
+  -- ConstructSlab first
+  local n, want = OF.restock(sl.blank, cons, ghosts, #eng - #removed, sc.restock_cap)
+  sb.want = want
+  if n > 0 then
+    local f = r.f or {}
+    local free = stone_free(c, r)
+    if not f['workshop:Masons'] then sb.why = 'no Masons'
+    elseif free < n then sb.why = string.format('%d free boulders for %d slabs', free, n)
+    else
+      local tag = 'dfllm:slab'
+      if not live(p.orders[tag]) and now >= (st.backoff[tag] or 0) then
+        cmd()
+        local ok, id = K.act.workorder({job = 'ConstructSlab', material = 'INORGANIC', frequency = 'OneTime',
+                                        amount_total = n, tag = tag})
+        if ok then
+          p.orders[tag] = id
+          sb.ordered = n
+          r.planned = r.planned or {}
+          r.planned.rock = (r.planned.rock or 0) + n
+          K.log('info', 'order %s x%d (slabs: %d unengraved, %d ghosts, %d engrave orders)', tag, n, sl.blank, ghosts,
+                #eng - #removed)
+        else st.backoff[tag] = now + 3 * DAY end
+      end
+    end
+  end
+  K.persist.touch('m.economy')
+end
+
+-- the first "unengraved slab" cancel of a window (slabs.trigger_ticks): the pass now, outside a daily run
+function M.slab_event(K, c)
+  local sc = c.slabs
+  if type(sc) ~= 'table' then return end
+  local now = K.now().tick
+  if st.slab_t and now - st.slab_t < (sc.trigger_ticks or 600) then return end
+  M.slab_pass(K, c, M.view_run(K))
+end
+
+function T.slabs(K, c, r)
+  local ok, err = pcall(M.slab_pass, K, c, r)
+  if not ok then K.log('warn', 'slab pass: %s', tostring(err)) end
+  r.cmds = r.cmds + 1
+  return true
+end
+
+-- BUG-060 (Run 13 y508): why a stale order gets no job, in the words of what the pre-pass saw
+function M.stale_reason(c, r, oq, o, job, mc, days)
+  local parts = {}
+  local ws = OL.workshops(job, mc) or {}
+  local key
+  for _, w in ipairs(ws) do if r.f[w] then key = w; break end end
+  local e = key and oq.shops and oq.shops.keys[key]
+  if oq.ctx.jam_ids and oq.ctx.jam_ids[o.id] and oq.ctx.jam and key and oq.ctx.jam[key] then
+    parts[#parts + 1] = oq.ctx.jam[key]
+  elseif e then
+    parts[#parts + 1] = string.format('%s: %d shop%s, %d jobs (%d working), none from this order', key:match(':(.+)$') or key,
+                                      e.shops, e.shops == 1 and '' or 's', e.jobs, e.working)
+  end
+  if mc == 'rock' then parts[#parts + 1] = string.format('%d free boulders', stone_free(c, r))
+  elseif mc == 'wood' then parts[#parts + 1] = string.format('%d logs', r.inv.wood or 0) end
+  return table.concat(parts, '; '):sub(1, 110)
+end
+
+-- BUG-060 (daily, after T.ocheck): one-time validated orders without conditions that make no job. The state per order
+-- (p.ostale: amount left, since when) restarts when the amount changes or a job from the order stands in a workshop
+-- (job.order_id); `stale.days` (`stale.wait_days` while a planned building waits for that piece) later it is stale:
+--   1. a stone furniture order with a wood variant, logs and a carpenter's shop: re-entered in wood (act.order_material,
+--      the work orders screen: the carpenters built the 11 doors of Run 13 at once);
+--   2. else a simple order (job, stone or wood, amount) is made again (a new one first, then the old one removed);
+--   3. else it is reported only. ORDER_STUCK (B) once per order, at most stale.per_day actions a day; only in PEACE and
+--   RECOVERY (the clock stands still otherwise). Orders with a known blocker are ORDER_STUCK's (T.ocheck), except the
+--   victims of a jam (oq.ctx.jam_ids).
+function T.stale(K, c, r)
+  local sc, oq = c.stale, r.oq
+  if type(sc) ~= 'table' or not (oq and oq.done) or not oq.shops then return true end
+  local p = r.p
+  local sq = r.sq
+  local one = df.workquota_frequency_type.OneTime
+  if not sq then
+    sq = {i = 1, cand = {}, wait = {}, seen = {}}
+    r.sq = sq
+    for _, q in ipairs(r.jb and r.jb.mq or {}) do
+      local e = M.PIECES[q.label]
+      if e and (q.n or 0) > 0 then sq.wait[e.job] = true end
+    end
+  end
+  local calm = HUNT_MODES[K.mode()] == true
+  local jam_ids = oq.ctx.jam_ids or {}
+  local last = math.min(#oq.ids, sq.i + ORDER_SLICE - 1)
+  for k = sq.i, last do
+    local o = order_by_id(oq.ids[k])
+    local left = o and math.tointeger(o.amount_left) or 0
+    local okv, valid = false, false
+    if o then okv, valid = pcall(function() return o.status.validated == true end) end
+    local okn, job = false, nil
+    if o then okn, job = pcall(job_name, o) end
+    if o and left > 0 and okv and valid and okn and type(job) == 'string' and o.frequency == one and not keep_order(o)
+       and (o.item_conditions == nil or #o.item_conditions == 0) and not oq.stand[o.id]
+       and (not oq.seen[tostring(o.id)] or jam_ids[o.id]) then
+      local mc = OL.mat_class(o, M.is_metal)
+      if OL.workshops(job, mc) and job ~= 'EngraveSlab' and not OL.unsafe(job, o.item_subtype) then
+        local key = tostring(o.id)
+        sq.seen[key] = true
+        local rec = p.ostale[key]
+        local has = oq.shops.by_order[o.id] ~= nil
+        if type(rec) ~= 'table' or rec.left ~= left or has then
+          rec = {left = left, since = r.now}
+          p.ostale[key] = rec
+        elseif not calm then
+          rec.since = math.min(r.now, (math.tointeger(rec.since) or r.now) + DAY)    -- the clock waits for PEACE
+        end
+        local days = (r.now - (math.tointeger(rec.since) or r.now)) // DAY
+        local need = sq.wait[job] and (sc.wait_days or 3) or (sc.days or 10)
+        if days >= need and calm then
+          sq.cand[#sq.cand + 1] = {o = o, id = o.id, key = key, rec = rec, days = days, job = job, mc = mc, left = left}
+        end
+      end
+    end
+  end
+  sq.i = last + 1
+  r.cmds = r.cmds + 1
+  if sq.i <= #oq.ids then return false end
+  for key in pairs(p.ostale) do if not sq.seen[key] then p.ostale[key] = nil end end
+  table.sort(sq.cand, function(a, b) if a.days ~= b.days then return a.days > b.days end return a.id < b.id end)
+  local day = r.now // DAY
+  if p.stale_day ~= day then p.stale_day, p.stale_n = day, 0 end
+  local wj = {}
+  for _, j in ipairs((c.wood_orders or {}).jobs or {}) do wj[j] = true end
+  for _, e in ipairs(sq.cand) do
+    if (p.stale_n or 0) >= (sc.per_day or 6) then break end
+    local o, rec = order_by_id(e.id), e.rec
+    if o and (math.tointeger(o.amount_left) or 0) == e.left then
+      local def = false
+      for _, pe in pairs(M.PIECES) do if pe.job == e.job then def = pe.def == true end end
+      local why = M.stale_reason(c, r, oq, o, e.job, e.mc, e.days)
+      local act, dropped = nil, 0
+      if rec.sw ~= 1 and e.mc == 'rock' and wj[e.job] and (r.f or {})['workshop:Carpenters']
+         and M.wood_left(c, r, def) >= e.left and K.act.order_material(e.id, 'wood') then
+        act = 'wood'
+        rec.sw, rec.since = 1, r.now
+        r.planned.wood = (r.planned.wood or 0) + e.left
+        if r.rk then r.rk = r.rk - e.left end
+      else
+        -- made again in the other class when that one has the room (a wood order the carpenters never take, stone
+        -- plenty), else in its own
+        local mc2 = e.mc
+        if e.mc == 'wood' and wj[e.job] and (r.f or {})['workshop:Masons'] and stone_free(c, r) >= e.left + 10 then
+          mc2 = 'rock'
+        end
+        local spec = M.OF.simple_spec(o, e.job, mc2)
+        local ok_mat = spec and ((mc2 == 'rock' and stone_free(c, r) >= e.left) or
+                                 (mc2 == 'wood' and M.wood_left(c, r, def) >= e.left))
+        if ok_mat then
+          spec.tag = 'dfllm:redo_' .. tostring(e.id)
+          r.cmds = r.cmds + 1
+          local ok = K.act.workorder(spec)
+          if ok and K.act.order_remove(e.id) then
+            act, dropped = 'again' .. (mc2 ~= e.mc and ' in stone' or ''), 1
+            p.ostale[e.key] = nil
+          end
+        end
+      end
+      if act or rec.told ~= 1 then
+        p.stale_n = (p.stale_n or 0) + 1
+        rec.told = 1
+        local verb = act == 'wood' and 're-entered in wood' or (act and ('made ' .. act) or 'only reported')
+        K.log('warn', 'order %d %s x%d: no job for %d days (%s): %s', e.id, e.job, e.left, e.days, why, verb)
+        K.emit('ORDER_STUCK', 'B', string.format('order %d %s x%d stale: no job for %d days (%s): %s', e.id, e.job, e.left,
+                                                 e.days, why, verb):sub(1, 200),
+               {order = e.id, job = e.job, why = ('stale: ' .. why):sub(1, 100), n = e.left, days = e.days,
+                dropped = dropped})
+      end
+    end
+  end
+  K.persist.touch('m.economy')
+  return true
+end
+
+-- FR-73 (daily): the standing thread and cloth orders (config standing.list), each once its workshops stand, from the
+-- phase of the moodable workshops. Monthly orders sit at amount 0 between their months, so "ordered" means the order
+-- still exists, not that it has an amount left. A removal (the "Needs ..." pruner) waits orders.backoff_days.
+function T.stand(K, c, r)
+  local sc = c.standing
+  if type(sc) ~= 'table' or not phase_ok(K, sc.from_phase or 'P1') then return true end
+  local p, list = r.p, sc.list or {}
+  r.si = r.si or 1
+  while r.si <= #list do
+    local e = list[r.si]
+    r.si = r.si + 1
+    if type(e) == 'table' and type(e.tag) == 'string' and e.tag:sub(1, 12) == 'dfllm:stand_' and type(e.spec) == 'table'
+       and not order_by_id(p.orders[e.tag]) and (e.ws == nil or ws_any(r.f, e.ws)) and r.now >= (st.backoff[e.tag] or 0) then
+      local spec = copy(e.spec)
+      spec.tag, spec.amount_total, spec.frequency = e.tag, sc.amount or 30, sc.frequency or 'Monthly'
+      r.cmds = r.cmds + 1
+      local ok, id = K.act.workorder(spec)
+      if ok then
+        p.orders[e.tag] = id
+        K.log('info', 'standing order %s: %s x%d %s', e.tag, spec.job, spec.amount_total, spec.frequency)
+      else st.backoff[e.tag] = r.now + 3 * DAY end
+      return r.si > #list
+    end
+  end
+  M.farmers_request(K, c, r)
+  return true
+end
+
+-- FR-73: the Farmer's Workshop (ProcessPlants, SpinThread) is the plan's: P1 builds it with the moodable shops; a fort
+-- that went past P1 without one (reclaimed, adopted late) asks follow for it, at most every standing.request_days and
+-- never while a workshops project is pending (like the tannery request)
+function M.farmers_request(K, c, r)
+  local sc = c.standing
+  local p = r.p
+  if ws_any(r.f, {'workshop:Farmers'}) then p.farm_req = nil; return end
+  if p.farm_req and r.now - (math.tointeger(p.farm_req) or 0) < (sc.request_days or 14) * DAY then return end
+  local okp, pend = K.call('runner', 'pending', 'workshops')
+  if okp and type(pend) == 'number' and pend > 0 then return end
+  p.farm_req = r.now
+  K.emit('PROJECT_REQUEST', 'B', "workshops: no farmer's workshop (thread, cloth and plant processing wait for it)",
+         {tpl = 'workshops', n = 1, why = 'farmers'})
 end
 
 -- FR-16 (daily): suspended ConstructBuilding jobs. BUG-009/004/005 (Run 9 live test: 25 construction jobs suspended
@@ -6631,8 +7024,9 @@ function T.finish(K, c, r)
 end
 
 local FULL = {'guard', 'days', 'kitchen', 'appoint', 'food', 'fishz', 'gather', 'watch', 'cmdq', 'engine', 'labor_fix',
-              'scan', 'ocheck', 'slaughter', 'plan', 'prune', 'tools', 'starve', 'forbid', 'jobs', 'jsite', 'jmat', 'jmake', 'jfree', 'jresume',
-              'jcheck', 'jmove', 'pb', 'orders', 'wood', 'chop', 'crops',
+              'scan', 'slabs', 'ocheck', 'slaughter', 'plan', 'prune', 'tools', 'starve', 'forbid', 'jobs', 'jsite', 'jmat', 'stale',
+              'jmake', 'jfree', 'jresume',
+              'jcheck', 'jmove', 'pb', 'orders', 'stand', 'wood', 'chop', 'crops',
               'farm', 'farmslots', 'imports', 'piles', 'status', 'idle', 'finish'}
 local RUSH = {'guard', 'scan', 'plan', 'tools', 'orders', 'wood', 'chop', 'farm', 'finish'}
 M.TASKS = {full = FULL, rush = RUSH}
@@ -6864,6 +7258,7 @@ function M.state(K)
   end
   local od = st.orders
   if od then r.orders = {n = od.n or 0, bad = od.bad or 0, stuck = od.stuck or 0} end   -- FR-01/FR-39
+  if od and od.jam then r.orders.jam = tostring(od.jam):sub(1, 80) end   -- BUG-061: a workshop type's slots are jammed
   -- BUG-042: orders waiting for validation, the days the oldest waits, and why (once past orders.unval_days)
   local uv = st.unval
   if r.orders and type(uv) == 'table' then
@@ -6998,7 +7393,21 @@ M.inspect.orders = function(K, args)
     end
   end
   table.sort(all, function(a, b) if a[1] ~= b[1] then return a[1] < b[1] end return a[2].id < b[2].id end)
-  local list, bytes = {}, 0
+  -- B2: the slab pass (BUG-061), the workshops' job lists and jam, the orders that wait without a job (BUG-060)
+  local extra = {}
+  if st.slab then extra.slabs = st.slab end
+  if st.shops then extra.shops = json.array(st.shops) end
+  if st.jam then extra.jam = st.jam end
+  local stale = {}
+  for key, rec in pairs(p.ostale) do
+    local d = (now - (math.tointeger(rec.since) or now)) // DAY
+    if d >= 1 then stale[#stale + 1] = {id = math.tointeger(tonumber(key)) or -1, days = d, left = rec.left} end
+  end
+  table.sort(stale, function(a, b) if a.days ~= b.days then return a.days > b.days end return a.id < b.id end)
+  while #stale > 12 do table.remove(stale) end
+  if #stale > 0 then extra.stale = json.array(stale) end
+  local oke, enc0 = pcall(json.encode, extra)
+  local list, bytes = {}, oke and #enc0 or 0
   for _, x in ipairs(all) do
     local ok, enc = pcall(json.encode, x[2])
     bytes = bytes + (ok and #enc or 200) + 1
@@ -7006,8 +7415,10 @@ M.inspect.orders = function(K, args)
     list[#list + 1] = x[2]
   end
   local od = st.orders or {}
-  return true, string.format('%d open orders, %d stuck, %d unsafe', n, od.stuck or 0, od.bad or 0),
-         {n = n, stuck = od.stuck or 0, bad = od.bad or 0, list = json.array(list), more = n - #list}
+  local data = {n = n, stuck = od.stuck or 0, bad = od.bad or 0, list = json.array(list), more = n - #list}
+  for k, v in pairs(extra) do data[k] = v end
+  return true, string.format('%d open orders, %d stuck, %d unsafe%s', n, od.stuck or 0, od.bad or 0,
+                             st.jam and (', JAM ' .. st.jam) or ''), data
 end
 
 -- the census' pick and axe counts (inspect workload `tools`): all, free (nobody carries them), of them in a bin,
