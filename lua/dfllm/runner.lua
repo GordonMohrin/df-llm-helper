@@ -1383,6 +1383,54 @@ local function door_walls(K, P, d, st, ch, n)
   return got
 end
 
+-- BUG-072 (Run 11 y451: one place call with three food stockpiles took 68,603 ms): quickfort's configure_stockpile imports
+-- library/cat_food for every pile (place.lua:256-260), and the food import copies all raw materials per element
+-- (StockpileSerializer.cpp:479-484, OrganicMatLookup.cpp:28), so the cost grows with the piles in a call and with the
+-- age of the world. A place chunk with two or more food cells (a key with `f`) is applied as separate calls, one per
+-- food cell, one per slice; the cells between them (other piles) stay together in one call. Order and cells are the
+-- document's. Q.pile_part answers the cells of the next call and {k = its number, n = calls of the chunk} (R.pc =
+-- {c = chunk, n = calls done}); a pile that stands (a stockpile of its name, else any, on its first and last tile) is
+-- not placed again. nil: the chunk is applied whole, as before
+function Q.food_cell(cell) return (cell[4]:match('^[^{(:/]*') or ''):find('f', 1, true) ~= nil end
+function Q.pile_stands(ch, cell)
+  local find = dfhack.buildings and dfhack.buildings.findAtTile
+  if not (find and df.building_type and df.building_type.Stockpile) then return false end
+  local name = cell[4]:match('name=([^%s}]+)')
+  local tl = {}
+  cell_tiles(ch, cell, tl)
+  for _, t in ipairs({tl[1], tl[#tl]}) do
+    local ok, b = pcall(find, t[1], t[2], t[3])
+    if not (ok and b) then return false end
+    local okt, ty = pcall(function() return b:getType() end)
+    if not okt or ty ~= df.building_type.Stockpile then return false end
+    if name and b.name ~= name then return false end
+  end
+  return true
+end
+function Q.pile_part(K, P, st, ch, R)
+  local nfood = 0
+  for _, c in ipairs(ch.cells) do if Q.food_cell(c) then nfood = nfood + 1 end end
+  if nfood < 2 then return ch, nil end
+  local calls, rest = {}, {}
+  for _, c in ipairs(ch.cells) do
+    if Q.food_cell(c) then
+      if #rest > 0 then calls[#calls + 1] = rest; rest = {} end
+      calls[#calls + 1] = {c}
+    else rest[#rest + 1] = c end
+  end
+  if #rest > 0 then calls[#calls + 1] = rest end
+  local done = type(R.pc) == 'table' and R.pc.c == P.chunk and int(R.pc.n) or 0
+  local pc = done
+  while pc < #calls and #calls[pc + 1] == 1 and Q.food_cell(calls[pc + 1][1]) and Q.pile_stands(ch, calls[pc + 1][1]) do
+    local c = calls[pc + 1][1]
+    K.log('info', '%s %s chunk %d: the food pile at %d,%d,%d stands, not placed again', P.id, st.label, P.chunk,
+          ch.pos[1] + c[1], ch.pos[2] + c[2], ch.pos[3] + c[3])
+    pc = pc + 1
+  end
+  if pc ~= done then R.pc = {c = P.chunk, n = pc} end
+  return {pos = ch.pos, cells = calls[pc + 1] or {}}, {k = pc + 1, n = #calls}
+end
+
 local function apply(K, P, st, R)
   local ch = st.chunks[P.chunk + 1]
   if P.tpl == 'plug' then
@@ -1415,15 +1463,36 @@ local function apply(K, P, st, R)
     ch, skip = Q.nogather(P, ch)
     if skip > 0 and #ch.cells == 0 then P.chunk = P.chunk + 1; moved(K, R); dirty(); return true end
   end
+  local part                                  -- BUG-072: a place chunk with several food piles, one call per pile
+  if st.mode == 'place' then
+    ch, part = Q.pile_part(K, P, st, ch, R)
+    if part and part.k > part.n then            -- every call is done (the piles stand): the chunk is
+      P.chunk = P.chunk + 1; R.pc = nil; moved(K, R); dirty(); return true
+    end
+  end
   local p = {mode = st.mode, data = chunk_data(ch), pos = ch.pos}
-  Q.doing(P, st, string.format('chunk %d/%d', P.chunk + 1, #st.chunks))
+  Q.doing(P, st, part and string.format('chunk %d/%d call %d/%d', P.chunk + 1, #st.chunks, part.k, part.n)
+                  or string.format('chunk %d/%d', P.chunk + 1, #st.chunks))
   if st.mode == 'dig' then p.priority = dprio(P) end
   local pre = st.mode == 'build' and pre_occupied(K, ch, R) or 0
   -- FR-22: seal remembers the closing cells (walls, doors, bridges) and takes a reach baseline before they are queued
   if st.mode == 'build' then K.call('seal', 'closing', P.id, P.tpl, P.class, ch) end
   -- quickfort allocates the ids of the buildings it places (build.lua:1259 constructBuilding)
   local n0 = st.mode == 'build' and df.global.building_next_id or nil
+  local t0 = st.mode == 'place' and dfhack.getTickCount and dfhack.getTickCount() or nil
   local ok, stats = qf(K, p)
+  if t0 then                                  -- BUG-072: what a place call cost, for the next live read (food cells only)
+    local nf = 0
+    for _, c in ipairs(ch.cells) do if Q.food_cell(c) then nf = nf + 1 end end
+    if nf > 0 then
+      -- the live datum that decides whether a cheaper blueprint is needed: ms per call against the creature raws of the world
+      local okr, nraws = pcall(function() return #df.global.world.raws.creatures.all end)
+      K.log('info', '%s %s chunk %d%s: %s with %d food pile%s took %d ms%s', P.id, st.label, P.chunk,
+            part and string.format(' call %d/%d', part.k, part.n) or '', ok and 'quickfort place' or 'quickfort place failed',
+            nf, nf == 1 and '' or 's', int(dfhack.getTickCount() - t0) or 0,
+            okr and int(nraws) and string.format(' (%d creature raws)', nraws) or '')
+    end
+  end
   if not ok then
     R.fail = (R.fail or 0) + 1
     if R.fail >= M.CFG.fail_max then set_blocked(K, P, 'apply_fail') end
@@ -1432,6 +1501,12 @@ local function apply(K, P, st, R)
   end
   stats = type(stats) == 'table' and stats or {}
   R.fail = 0
+  if part and part.k < part.n then            -- BUG-072: the next pile goes in the next slice
+    R.pc = {c = P.chunk, n = part.k}
+    moved(K, R); dirty()
+    return true
+  end
+  R.pc = nil
   if P.tpl == 'plug' then                    -- Run 11: quickfort refused the channel or the wall on this tile
     local no = st.mode == 'dig' and (int(stats.dig_invalid_tiles) or 0) + (int(stats.out_of_bounds) or 0)
                or st.mode == 'build' and (int(stats.build_unsuitable) or 0) or 0
@@ -2906,6 +2981,7 @@ end
 -- again (act.zone_remove, the zones screen's remove). Never whole-map designations.
 M.CFG.gather_below, M.CFG.gather_off, M.CFG.gather_cap, M.CFG.gather_side = 30, 120, 800, 28
 M.CFG.gather_dz, M.CFG.gather_step = {0, 1, -1, 2}, 3
+M.CFG.gather_rects = 60   -- BUG-074: rectangles per level (the zone follows the citizens' walk group; the largest are kept)
 local GATHER = 'dfllm-gather'
 local OPEN = {['.'] = true, T = true}
 
@@ -2921,11 +2997,81 @@ local function fort_center(K)
   if type(dp) == 'table' and int(dp[1]) and int(dp[2]) and int(dp[3]) then return {int(dp[1]), int(dp[2]), int(dp[3]) + 2} end
 end
 
+-- BUG-074 (Run 11 y479: 46 of the GatherPlants jobs of the zone were unreachable, 250-450 stood unclaimed): the zone covers
+-- the tiles of the citizens' walk group only. home_group = the group most citizens stand on (census ids, their
+-- positions, snapshot.groups); nil when unknown (no citizen read, a fault): the zone is drawn whole, as before.
+function Q.home_group(K)
+  local cu, pts = K.census.u, {}
+  for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
+    if #pts >= 50 then break end
+    local u = df.unit.find(id)
+    local ok, x, y, z
+    if u then ok, x, y, z = pcall(dfhack.units.getPosition, u) end
+    if ok and int(x) then pts[#pts + 1] = {x, y, z} end
+  end
+  if #pts == 0 then return nil end
+  local ok, g = K.call('snapshot', 'groups', pts, false)
+  if not ok or type(g) ~= 'table' then return nil end
+  local cnt, best = {}, nil
+  for i = 1, #pts do
+    local v = int(g[i])
+    if v and v > 0 then
+      cnt[v] = (cnt[v] or 0) + 1
+      if not best or cnt[v] > cnt[best] or (cnt[v] == cnt[best] and v < best) then best = v end
+    end
+  end
+  return best
+end
+
+-- the tiles of the square (x0, y0, side) on level z that lie on group g (snapshot.groups, near: a tree trunk answers the
+-- group of its neighbours), as rectangles {x, y, w, h}: row runs, equal runs of consecutive rows joined; at most `cap`
+-- (the largest) are kept. Returns rects, tiles in them, tiles left out (of the square: not on g, or cut by the cap)
+function Q.gather_rects(K, g, x0, y0, side, z, cap)
+  local pts = {}
+  for y = y0, y0 + side - 1 do for x = x0, x0 + side - 1 do pts[#pts + 1] = {x, y, z} end end
+  local ok, gr = K.call('snapshot', 'groups', pts, true)
+  if not ok or type(gr) ~= 'table' then return nil end
+  local rects, prev = {}, {}
+  for r = 0, side - 1 do
+    local runs, x = {}, 0
+    while x < side do
+      if int(gr[r * side + x + 1]) == g then
+        local w = 0
+        while x + w < side and int(gr[r * side + x + w + 1]) == g do w = w + 1 end
+        local key = x .. ':' .. w
+        local rc = prev[key]
+        if rc then rc[4] = rc[4] + 1 else rc = {x0 + x, y0 + r, w, 1}; rects[#rects + 1] = rc end
+        runs[key] = rc
+        x = x + w
+      else x = x + 1 end
+    end
+    prev = runs
+  end
+  table.sort(rects, function(a, b)
+    if a[3] * a[4] ~= b[3] * b[4] then return a[3] * a[4] > b[3] * b[4] end
+    if a[2] ~= b[2] then return a[2] < b[2] end
+    return a[1] < b[1]
+  end)
+  local keep, tiles = {}, 0
+  for i = 1, math.min(#rects, cap) do keep[i] = rects[i]; tiles = tiles + rects[i][3] * rects[i][4] end
+  return keep, tiles, side * side - tiles
+end
+
 local function gather_zone(K)
   local st = K.view().stock
   local fd = type(st) == 'table' and int(st.food_d) or nil
   if not fd then return end
   local g = S.rt.gather
+  -- BUG-074: a zone an older kernel drew (no v) covers its whole square, unreachable plants included: while food is still
+  -- short it is removed once and drawn again on the citizens' walk group (when that group is known)
+  if type(g) == 'table' and g.v ~= 2 and type(g.z) == 'table' and #g.z > 0 and fd < M.CFG.gather_below
+     and (K.now().season or 0) < 3 and Q.home_group(K) then
+    local ok, n = K.act.zone_remove(GATHER)
+    K.log('info', 'gather zone of an older kernel (the whole square) removed, %s zones: drawn again on the citizens\' walk group',
+          ok and tostring(n) or 'failed')
+    S.rt.gather, g = nil, nil
+    dirty()
+  end
   if type(g) == 'table' then
     if fd > M.CFG.gather_off then
       local ok, n = K.act.zone_remove(GATHER)
@@ -2940,15 +3086,22 @@ local function gather_zone(K)
   if not c then return end
   S.rt.gc = c
   local half, step = M.CFG.gather_side // 2, M.CFG.gather_step
+  local home = Q.home_group(K)                -- BUG-074: nil = unknown, the zone is drawn whole
   local lv = {}
   for _, dz in ipairs(M.CFG.gather_dz) do
-    local z, n = c[3] + dz, 0
+    local z, n, pts = c[3] + dz, 0, {}
     for x = c[1] - half, c[1] + half, step do
       for y = c[2] - half, c[2] + half, step do
         local ok, v = K.call('snapshot', 'tile', x, y, z)
         S.slice.probes = S.slice.probes + 1
-        if ok and type(v) == 'table' and OPEN[v.c] then n = n + 1 end
+        if ok and type(v) == 'table' and OPEN[v.c] then pts[#pts + 1] = {x, y, z} end
       end
+    end
+    n = #pts
+    if home and n > 0 then                    -- only the open tiles on the citizens' walk group count
+      local okg, gr = K.call('snapshot', 'groups', pts, true)
+      n = 0
+      for i = 1, #pts do if okg and type(gr) == 'table' and int(gr[i]) == home then n = n + 1 end end
     end
     lv[#lv + 1] = {z = z, n = n}
   end
@@ -2956,7 +3109,8 @@ local function gather_zone(K)
   if lv[1].n == 0 then
     S.rt.gather = {z = {}, t = now(K)}   -- nothing open is revealed there: no retry until food recovers
     dirty()
-    K.log('warn', 'gather zone: no revealed open tile around %d,%d,%d', c[1], c[2], c[3])
+    K.log('warn', 'gather zone: no revealed open tile %saround %d,%d,%d', home and 'on the citizens\' walk group ' or '',
+          c[1], c[2], c[3])
     return
   end
   local levels = {lv[1].z}
@@ -2964,15 +3118,38 @@ local function gather_zone(K)
   local side = math.min(M.CFG.gather_side, math.floor(math.sqrt(M.CFG.gather_cap / #levels)))
   local x0, y0 = c[1] - side // 2, c[2] - side // 2
   if not on_map(x0, y0, levels[1]) then x0, y0 = math.max(1, x0), math.max(1, y0) end
-  local cell = string.format('g{name=%s}(%dx%d)', GATHER, side, side)
-  local made = {}
+  local made, drawn, out, nrect, whole = {}, 0, 0, 0, false
   for _, z in ipairs(levels) do
-    if qf(K, {mode = 'zone', data = {[0] = {[0] = {[0] = cell}}}, pos = {x0, y0, z}}) then made[#made + 1] = z end
+    local rects, tiles, left
+    if home then rects, tiles, left = Q.gather_rects(K, home, x0, y0, side, z, M.CFG.gather_rects) end
+    local cells
+    if rects == nil then                      -- the walk group is unknown (or its read failed): the whole square, as before
+      cells, tiles, left, whole = {[0] = {[0] = string.format('g{name=%s}(%dx%d)', GATHER, side, side)}}, side * side, 0, true
+      nrect = nrect + 1
+    elseif #rects > 0 then
+      cells = {}
+      for _, r in ipairs(rects) do
+        local row = cells[r[2] - y0] or {}
+        cells[r[2] - y0] = row
+        row[r[1] - x0] = string.format('g{name=%s}(%dx%d)', GATHER, r[3], r[4])
+      end
+      nrect = nrect + #rects
+    else out = out + left end                 -- nothing of this level lies on the group
+    if cells and qf(K, {mode = 'zone', data = {[0] = cells}, pos = {x0, y0, z}}) then
+      made[#made + 1] = z
+      drawn, out = drawn + tiles, out + left
+    end
   end
-  S.rt.gather = {z = made, x = x0, y = y0, side = side, t = now(K)}
+  S.rt.gather = {v = 2, z = made, x = x0, y = y0, side = side, t = now(K), g = home, n = drawn, out = out}
   dirty()
-  K.log('warn', 'food %d days: gather zone %dx%d at %d,%d on z %s (%d tiles)', fd, side, side, x0, y0,
-        table.concat(made, ','), side * side * #made)
+  if home and not whole then
+    K.log('warn', 'food %d days: gather zone at %d,%d on z %s: %d tiles in %d rects on the citizens\' walk group %d, ' ..
+          '%d tiles of the %dx%d square left out (not on that group, or past the %d-rect cap)', fd, x0, y0,
+          table.concat(made, ','), drawn, nrect, home, out, side, side, M.CFG.gather_rects)
+  else
+    K.log('warn', 'food %d days: gather zone %dx%d at %d,%d on z %s (%d tiles; the citizens\' walk group is unknown, ' ..
+          'nothing left out)', fd, side, side, x0, y0, table.concat(made, ','), side * side * #made)
+  end
 end
 
 ---------------------------------------------------------------- depot keeper (FR-43)
@@ -3357,6 +3534,24 @@ local function end_run(K)
   rows(K)
 end
 
+-- BUG-075 (DECISIONS 11): a fault inside the seal-first count is an event, not only a log line. KERN_FAULT (A, module
+-- runner, backoff_s 0: the module is not backed off, this run goes on without seal first and the rebuild policy), once
+-- per distinct message (util/cadence: a message announced in this episode is never repeated; a new one waits 7 days and
+-- 10 min after the last announcement; a run that counts again ends the episode). S.fc = runs that faulted in a row
+function Q.fault(K, err)
+  S.fc = (S.fc or 0) + 1
+  err = err:gsub('^.*[/\\]([%w_]+%.lua:)', '%1')      -- the file name, not the install path
+  local T, rec = K.now(), S.fev
+  if not CAD.due(rec, T, {}, {err}) then return end
+  local toks = {}
+  for _, v in ipairs(type(rec) == 'table' and type(rec.toks) == 'table' and rec.toks or {}) do toks[#toks + 1] = v end
+  toks[#toks + 1] = err
+  while #toks > 8 do table.remove(toks, 1) end
+  S.fev = CAD.mark(T, {}, toks)
+  K.emit('KERN_FAULT', 'A', trunc('runner: seal first/rebuild failed, this run goes on without them: ' .. err, 200),
+         {module = 'runner', err = err, n = S.fc, backoff_s = 0})
+end
+
 local function begin_run(K)
   sync_plan(K)
   S.snap_ok = K.enabled('snapshot')
@@ -3367,8 +3562,9 @@ local function begin_run(K)
   if not okf then
     local err = trunc(f, 160)
     if S.ferr ~= err then S.ferr = err; K.log('error', 'seal first/rebuild failed, this run without them: %s', err) end
+    Q.fault(K, err)
     f = {c = conf(K), n = 0, more = 0, stuck = {}, stk = {}}
-  else S.ferr = nil end
+  else S.ferr, S.fc, S.fev = nil, nil, CAD.quiet(S.fev) end
   S.focus = f
   local tasks, n, t, c = {}, 0, now(K), f.c
   local list = sorted()
