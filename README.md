@@ -27,10 +27,11 @@ A Lua kernel runs inside DFHack on every frame. It watches the fort, raises the 
 Dwarf Fortress 53.x + DFHack
 ├─ DFHack natives, set up by `baseline`: buildingplan, suspendmanager, labormanager (monitor), autochop,
 │  autofarm, autobutcher, tailor, logistics, burial/preserve-tombs, pop-control, timestream, orders library ...
-└─ lua/dfllm kernel: ONE frame dispatcher + 17 modules, budget 25 ms per real second
+└─ lua/dfllm kernel: ONE frame dispatcher + 19 modules, budget 25 ms per real second
      SENSE   sense, snapshot        visible units and revealed tiles only
-     DECIDE  siege, threat, gate, military, drill, readiness, runner, economy, care, water, trade, baseline
+     DECIDE  reflex, siege, threat, gate, seal, military, drill, readiness, runner, economy, care, water, trade, baseline
      ACT     arbiter (pause, tempo) + act.lua, the only writer; every act function is a UI action
+     CHECK   perf, selftest         ticks/s and frame gaps; the in-game self-test
      IO      <DF>/dfllm-runtime/<save>/  state.a|b.json, events.jsonl, inbox/ -> outbox/, snap/, perf.csv
                  │ files only (0 DF calls)                       ▲ inbox: closed verb set
                  ▼                                               │
@@ -85,7 +86,7 @@ Sources: `docs/v2/ASIS-ANALYSIS.md` (v1) and the KPI tables in `docs/v2/STATUS.m
    - `python tools/migrate_v2.py --revert` undoes it.
 4. Offline check: `python -m dfpilot lint` prints `0 finding(s)`.
 5. Start DF through DFHack. `"<DF>/hack/dfhack-run.exe" dfllm selftest --mock` reports `0 fail`.
-6. Load or embark a fort, then once: `dfhack-run dfllm adopt`. This writes the `dfllm` marker into the save, loads the phases of `plans/year1.json` and boots the 17 modules. Check `dfhack-run dfllm status` (no module `DISABLED`) and `dfhack-run dfllm selftest full`.
+6. Load or embark a fort, then once: `dfhack-run dfllm adopt`. This writes the `dfllm` marker into the save, loads the phases of `plans/year1.json` and boots the 19 modules. Check `dfhack-run dfllm status` (no module `DISABLED`) and `dfhack-run dfllm selftest full`.
 7. `python -m dfpilot doctor` and `python -m dfpilot status`. Unpause DF yourself: the kernel never releases a pause by you or by DF (a loaded save starts paused).
 8. Keep `python -m dfpilot follow` running (a terminal, or the agent's Monitor) and make the year plan: `plan propose <file>`, edit, `plan check <file>`, `plan apply <file>`.
 
@@ -104,7 +105,7 @@ Python, run from the clone: `python -m dfpilot <command>` (the docs write it as 
 | `events [--cls A] [--since N] [--type T]` | Read the event log |
 | `plan propose\|check\|apply [file]` | Year plan: draft from the phases and the state, validate (schema, fair play, cap), send |
 | `cmd <verb> [json or k=v]` | Send one inbox verb from the closed set (RULES.md §6) |
-| `bp list \| preview <tpl> \| sites <tpl> [--fresh]` | Templates, an ASCII preview, the top free sites (`list` and `preview` also work before `adopt`) |
+| `bp list \| preview <tpl> \| sites <tpl> [--fresh] [--near x,y,z [--within N] \| --at x,y,z]` | Templates, an ASCII preview, the top free sites; `--near`/`--at` rank the sites around a position (FR-78: "beside building X"); `list` and `preview` also work before `adopt` |
 | `doctor` | ticks/s, kernel ms per module, frame gaps, stalls |
 | `supervise --once [--dry-run]` | Liveness, save backups, restart rules (the restart is not live-tested) |
 | `lint [paths] \| --cmd STR \| --hook` | Fair-play lint for Lua files and shell commands; the hook entry |
@@ -137,7 +138,7 @@ Timestream (a DFHack plugin) speeds up the calendar in peace; that is decision D
 ## Status (2026-10-11)
 
 **Live-proven** on one test fort (Castlerisen: one world, DF 53.16 + DFHack 53.16-r2, Windows 11), game years 280-295, in seven live slots L0-L5 (`docs/v2/STATUS.md` §0-§0f). Each slot was an engineering session: bugs found live were fixed in code between them.
-- Embark through the vanilla UI (DF's default seven, `--play-now`), `adopt`, 17 modules booted, in-game selftest green.
+- Embark through the vanilla UI (DF's default seven, `--play-now`), `adopt`, the kernel's modules booted, in-game selftest green.
 - 0 `dfhack-run` calls by the product; the Python side only reads files.
 - Templates built by the runner: fortress core stages 1-3 (bridges, levers, killing field, gallery, refuge), workshops, dining, bedrooms, tombs, temple, tavern, furnaces, office, farms, cistern. Phases P0 to P5, readiness R1.
 - Levers linked, squads created with leaders, uniform specs written, all through `act`; 0 double lever toggles.
@@ -155,8 +156,8 @@ Timestream (a DFHack plugin) speeds up the calendar in peace; that is decision D
 ## Development
 
 ```
-python -m pytest -q                               # all Python tests (1241 passed, 0 skipped; gate: docs/v2/STATUS.md §5)
-python tools/luahost.py --tests tests/lua         # Lua suites on DFHack's hack/lua53.dll (33 suites, 573 passed)
+python -m pytest -q                               # all Python tests (1937 tests; gate: docs/v2/STATUS.md §5)
+python tools/luahost.py --tests tests/lua         # Lua suites on DFHack's hack/lua53.dll (105 suites, 1419 passed)
 python -m dfpilot lint                      # fair-play lint of lua/dfllm: 0 finding(s)
 python -m dfpilot.lint --config             # config files: config ok
 ```
@@ -165,7 +166,7 @@ python -m dfpilot.lint --config             # config files: config ok
 
 ```
 RULES.md          the LLM's always-read rules (<= 300 lines)
-lua/dfllm.lua     in-game entry; lua/dfllm/ kernel, 17 modules, util/ (json, contract, k_mock)
+lua/dfllm.lua     in-game entry; lua/dfllm/ kernel, 19 modules, util/ (json, contract, k_mock)
 dfpilot/    Python CLI (stdlib) and bp/ (templates, emitter, path audit, site ranking)
 plans/ config/    year-1 phases; allowlist, baseline, decisions
 tools/            migrate_v2.py, embark/, luahost.py, win/

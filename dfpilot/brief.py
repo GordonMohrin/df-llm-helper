@@ -546,8 +546,12 @@ def line_supply(ctx: Ctx) -> str:
     return _join(t for _, t in supply_items(ctx))
 
 
-def line_def(ctx: Ctx) -> str:
-    s, out = ctx.s, []
+def def_parts(ctx: Ctx) -> tuple[list[str], list[str]]:
+    """The defense line in two parts. J3: the core is what a siege needs (threat, bridges, alert with the refuge's trust, the
+    army's count, intake, caravan); the detail (the melee sets, the free metal gear, the militia rotation of FR-79: 40-100
+    tokens) comes last in status and brief. One atomic line used to leave status whole when its detail grew: at 80
+    citizens one rotation line took the bridges and `refuge NOT TRUSTED` with it, and in a siege the line did not fit at all."""
+    s, out, extra = ctx.s, [], []
     th = s.get("threat")
     if th:
         al = s.get("alarm")
@@ -567,13 +571,13 @@ def line_def(ctx: Ctx) -> str:
                    f" station {m['on_station']}")
         cap = m.get("cap")
         if cap:                                # Run 11: the melee squads follow the armor + weapon + shield sets
-            out.append(f"melee {cap['melee']}/{cap['want']} (gear sets {cap['sets']})"
-                       + (f", +{cap['xbow']} crossbow (metal short)" if cap["xbow"] else ""))
+            extra.append(f"melee {cap['melee']}/{cap['want']} (gear sets {cap['sets']})"
+                         + (f", +{cap['xbow']} crossbow (metal short)" if cap["xbow"] else ""))
         free = {k: v for k, v in (m.get("free") or {}).items() if v}
         if free:                               # FR-46: free metal gear by category (loot included)
-            out.append("free metal " + " ".join(f"{k} {v}" for k, v in sorted(free.items())))
+            extra.append("free metal " + " ".join(f"{k} {v}" for k, v in sorted(free.items())))
         for key, r in sorted((m.get("rot") or {}).items()):        # FR-79: the militia rotation per squad
-            out.append(line_rot(key, r))
+            extra.append(line_rot(key, r))
     wv = s.get("wave")
     if wv:                                     # intake waves and the sortie through O1 (Gordon 2026-10-16)
         out.append(f"intake {wv['ph']} (waves {wv['n']})" + (f": {wv['why']}" if wv.get("why") else "")
@@ -583,7 +587,12 @@ def line_def(ctx: Ctx) -> str:
     tr = s.get("trade")
     if tr and tr["caravan"]:
         out.append("CARAVAN on map")
-    return _join(out)
+    return out, extra
+
+
+def line_def(ctx: Ctx) -> str:
+    core, extra = def_parts(ctx)
+    return _join(core + extra)
 
 
 def line_rot(key: str, r: dict) -> str:
@@ -745,7 +754,9 @@ def status_text(save_dir: Path) -> str:
         lines.append((1, _no_state(ctx)))
     else:
         lines += [(2, line_unready(ctx))] + alarm_items(ctx) + pop_items(ctx) + supply_items(ctx)
-        lines += [(3, line_def(ctx)), (3, line_sched(ctx)), (4, line_proj(ctx)), (4, line_kern(ctx)), (4, line_snap(ctx))]
+        core, extra = def_parts(ctx)
+        lines += [(3, _join(core)), (3, line_sched(ctx)), (4, line_proj(ctx)), (4, line_kern(ctx)), (4, line_snap(ctx)),
+                  (5, _join(extra))]                                 # J3: the army's detail is the first line to go
     return fit_ranked(lines, STATUS_TOKENS)
 
 
@@ -860,8 +871,9 @@ def brief_text(save_dir: Path, budget: int = BRIEF_TOKENS) -> str:
     if ctx.state is None:
         head.append(_no_state(ctx))
     else:
-        head += [x for x in (line_unready(ctx), line_alarm(ctx), line_pop(ctx), line_supply(ctx), line_def(ctx),
-                             line_sched(ctx), line_proj(ctx, 8), line_kern(ctx), line_snap(ctx)) if x]
+        core, extra = def_parts(ctx)                   # J3: the army's detail last: it goes first
+        head += [x for x in (line_unready(ctx), line_alarm(ctx), line_pop(ctx), line_supply(ctx), _join(core),
+                             line_sched(ctx), line_proj(ctx, 8), line_kern(ctx), line_snap(ctx), _join(extra)) if x]
     sections = [head]
     for title, lines in (("## plan", sec_plan(ctx)), ("## decisions open (ask Gordon)", sec_decisions(ctx)),
                          ("## class A, newest first", sec_class_a(ctx)),

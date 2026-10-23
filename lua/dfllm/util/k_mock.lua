@@ -391,6 +391,19 @@ function M.new(opts)
     end
     if d ~= nil and type(d) ~= 'table' then return violation(etype .. ': d must be a table') end
     d = copy(d or {}) -- kern serializes at emit time; later mutation must not change the record
+    -- J3: every string of an event's d is at most 200 bytes (schema.py _DT 's'; audit J3 found three DECISION_NEEDED emitters
+    -- with a `q` of 245-345 bytes that no reader validates): a longer one is a contract violation
+    local function long(v, path, depth)
+      if type(v) == 'string' then return #v > 200 and path or nil end
+      if type(v) == 'table' and depth < 4 then
+        for k, x in pairs(v) do
+          local hit = long(x, path .. '.' .. tostring(k), depth + 1)
+          if hit then return hit end
+        end
+      end
+    end
+    local hit = long(d, 'd', 0)
+    if hit then return violation(etype .. ': ' .. hit .. ' is longer than 200 bytes (CONTRACTS section 12)') end
     local ok, enc = pcall(json.encode, d)
     if not ok then return violation(etype .. ': d not encodable: ' .. tostring(enc)) end
     if #enc > 1024 then d = {trunc = 1} end

@@ -2026,8 +2026,9 @@ local function offer_step(K, h, now)
   end
   st.cf = st.cf or {}
   st.cf.o, dirty = CAD.mark(T, {cs.id}, {tok}), true
-  local d = {id = 'intruder_sortie', q = q, unit = cs.id, pos = cs.pos, race = cs.race, hl = cs.hl, dc = cs.dc, de = cs.de,
-             age = age, lim = lim}
+  -- J3: d.q is at most 200 bytes (schema.py; the command is d.cmd), the log keeps the whole sentence
+  local d = {id = 'intruder_sortie', q = q:sub(1, 200), unit = cs.id, pos = cs.pos, race = cs.race, hl = cs.hl, dc = cs.dc,
+             de = cs.de, age = age, lim = lim}
   if cmd then d.squad, d.cmd = key, cmd end
   K.emit('DECISION_NEEDED', 'A', q, d)
   K.log('info', 'reflex: %s', q)
@@ -2098,7 +2099,7 @@ local function need_step(K, h, now)
   st.cf.n, dirty = CAD.mark(T, idl, toks), true
   local units = {}
   for i = 1, math.min(#idl, 10) do units[i] = idl[i] end
-  K.emit('DECISION_NEEDED', 'A', q, {id = 'confined_need', q = q, unit = w1.id, units = units, why = w1.why,
+  K.emit('DECISION_NEEDED', 'A', q, {id = 'confined_need', q = q:sub(1, 200), unit = w1.id, units = units, why = w1.why,
                                       thirst = w1.th, hunger = w1.hu, n = #who})
   K.log('warn', 'reflex: %s', q)
   if end_it then release(K, now, 'need', pic, who) end

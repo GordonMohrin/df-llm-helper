@@ -725,9 +725,13 @@ local function stuck(K)
   if #parts == 0 then parts[1] = 'check the squads screen' end
   -- BUG-055: the act's refusal and the verbs that do it (Run 11 note 25: "appoint a militia commander/captain" with no
   -- word on why the kernel could not, nor on how to do it without replaying act.lua by hand)
-  local q = table.concat(parts, '; ') .. '. dfllm then fills, equips and trains them (seating a leader failed here)'
-  if rt.create_why then q = q .. '; refused: ' .. rt.create_why:sub(1, 60) end
-  q = q .. '; fix: dfllm cmd squad.create {name, leader} / squad.leader {squad, unit} / appoint {code, unit}; inspect offices'
+  -- J3: d.q is at most 200 bytes (schema.py, a longer one broke the contract): the squads first, then the act's refusal, the
+  -- fix whole at the end (the verbs take their arguments from RULES section 6)
+  local fix = '; fix: dfllm cmd squad.create/squad.leader/appoint, inspect offices'
+  local why = rt.create_why and ('; refused: ' .. rt.create_why:sub(1, 40)) or ''
+  local head = table.concat(parts, '; ')
+  if #head > 200 - #fix - #why then head = head:sub(1, 200 - #fix - #why - 3) .. '...' end
+  local q = head .. why .. fix
   local msg = 'squads [S2]: ' .. parts[1]
   K.emit('DECISION_NEEDED', 'A', #msg > 200 and msg:sub(1, 200) or msg, {id = 'squads', q = q})
 end

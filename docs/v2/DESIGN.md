@@ -354,7 +354,7 @@ The verb set is closed: `plan.reload, bp.place, bp.cancel, drill, snapshot, audi
 | `events [--cls A] [--since N]` | read events |
 | `plan propose\|check\|apply` | propose drafts from phases and state |
 | `cmd <verb> [json]` | send an inbox verb |
-| `bp list\|preview\|sites <tpl>` | ASCII preview, materials, top 3 sites |
+| `bp list\|preview\|sites <tpl> [--near x,y,z [--within N]\|--at x,y,z]` | ASCII preview, materials, top 3 sites; FR-78: `--near`/`--at` rank the sites around a position |
 | `doctor` | ticks/s, kernel ms per module, frame gaps, stalls |
 | `supervise [--once]` | liveness, backup, restart |
 | `lint [paths\|--cmd STR]` | also used as the hook entry |

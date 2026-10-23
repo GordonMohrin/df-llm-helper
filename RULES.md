@@ -133,7 +133,7 @@ helper is experimental; procedure and fair-play limits: `tools/embark/README.md`
 | `lever` | `{bridge, want}` | PEACE only |
 | `inspect` | `{what, key?}` | read-only, ≤ 8 KB; `what=reach`, `entrances`, `defense`, `perimeter`, `refuge` (seal), `what=tombs`, `water_sources`, `what=offices` (vacant offices, squad leaders), `what=orders` (blocked orders), `workload` (idle adults, unclaimed jobs, cancel reasons, free picks/axes), `trade` (merchant goods at the depot, last trades) |
 | `tombs.repair` | `{}` | GHOSTS: the next care run repairs the tombs (any mode) and retries entomb |
-| `order.add` | `{job, amount, item_subtype?, material?, material_category?, reaction?, frequency?}` | one manager order; make-item jobs need `item_subtype` (`ITEM_…`), else DF 53.16 crashes (refused) |
+| `order.add` | `{job, amount, item_subtype?, material?, material_category?, reaction?, hf?, frequency?}` | one manager order; make-item jobs need `item_subtype` (`ITEM_…`), else DF 53.16 crashes (refused); `EngraveSlab` needs `hf` (a ghost's historical figure, amount 1, BUG-078) |
 | `jobs.release` | `{all?, preventblocking?}` | resume suspended constructions; `preventblocking` is a lasting fort decision |
 | `perimeter.record` | `{}` | no fortcore manifest: record the walls, doors and gates that seal the fort now, so PERIMETER_BROKEN can diff them after a siege |
 | `bridge.rebuild` | `{bridge}` | the player's order to rebuild that gate whatever its history (in quiet PEACE; the wall + door rule counts again after `perimeter.stop_after` more losses; refused once it is a wall + door) |

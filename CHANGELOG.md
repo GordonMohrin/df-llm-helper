@@ -1,5 +1,81 @@
 # CHANGELOG dfpilot
 
+## Integration audit: the whole tree read as one piece (BUG-093, BUG-094, BUG-095, documents, 2026-10-23, audit J3 of waves A-D and the four audits; offline, live-untested)
+- **Why:** eleven packages (BUG-044 .. BUG-075, FR-70 .. FR-78), four integration audits (BUG-079 .. BUG-086) and wave D (FR-79,
+  BUG-076 .. BUG-078) were merged one after the other; the audits read the first pass, nobody read wave D with the rest. This
+  audit read the tree as a whole and tested the combinations with data instead of reading: every event and every inbox call
+  the Lua suites produce, every state document they compose, every nonsense value of every config key added since f17e2b3.
+- **BUG-093 (dfpilot/brief.py; bugs/BUG-093):** the militia rotation lines of FR-79 (`mil.rot`, 35-45 tokens a squad) were parts
+  of the one defense line (threat, bridges, alert + `refuge NOT TRUSTED`, army, intake, caravan), which `fit_ranked` drops
+  whole. A fort of 80 in PEACE with the optional fields a game year fills: 265 tokens without the rotation, 183 with squad B's
+  line and the whole defense line gone; a siege status (213 tokens without the line) never fitted it. `def_parts` splits the
+  line: the core stays rank 3, the detail (melee sets, free metal gear, the rotation) is rank 5, the first to go in the status
+  and the end of the brief's head (before `proj`, `kern`, the snapshot queue). `line_def` still joins both.
+- **BUG-094 (dfpilot/fairplay.py; bugs/BUG-094):** `lint --config` accepted any value for `economy.standing.from_phase` (the one
+  new key all five nonsense values passed); a number makes `T.stand` raise once per daily run and the standing thread and cloth
+  orders are never made. `ECONOMY_LIM` knows a phase (`P0`..`P7`).
+- **BUG-095 (military.lua, reflex.lua, k_mock.lua; bugs/BUG-095):** the DECISION_NEEDED questions `squads` (A4), `intruder_sortie` and
+  `confined_need` (C1) sent a `d.q` of 245-345 bytes; the event schema caps every string of `d` at 200 and no reader validates
+  events. They keep `q` within 200 bytes now (the sortie command is `d.cmd`), and k_mock treats a longer string in any event's
+  `d` as a contract violation (strict worlds raise): the suites would have found it.
+- **Documents (tests/test_j3_whole.py, five fail on c038ce9):** RULES section 6 `order.add` names `hf?` (BUG-078, the row was
+  edited in place, 300 lines); README and QUICKSTART said 17 modules, the contract has 19 (diagram: reflex, seal, perf and selftest
+  named); README's `bp` row and DESIGN's command table name `--near`, `--within`, `--at` (FR-78); CONTRACTS section 9.17 describes
+  the config keys of this run that only bug files explained (`care.far_check`, `mood_nook`, `mood_take`, `mood_nook_retry`,
+  `topple_win`, `topple_r`, `economy.slabs.trigger_ticks`, `scan_max`, `jam_min`, `standing.from_phase`), section 4 and the
+  DECISION_NEEDED row the 200-byte rule; DECISIONS 23 no longer lists the militia turnover as an open design point (it is FR-79;
+  open is what DF does with a leaver's kit); README's development block carries the current test counts.
+- **Tests:** tests/test_j3_whole.py (new: the status of a fort of 80 and of a siege keep bridges, alert and refuge trust with a
+  rotation line; the brief of the maximal state plus three rotation lines keeps `proj` and `kern`; nine nonsense phases are
+  refused, four pass; the document checks), tests/lua/test_k_mock.lua (the 200-byte guard), `#d.q <= 200` in test_a4_offices.lua
+  and test_reflex.lua (the sortie command is read from `d.cmd` there). All fail on c038ce9 (the Lua assertions with k_mock's guard
+  applied alone: the two scenario suites raise the contract violation).
+- **Live check:** `dfllm status` of a fort with a militia squad in PEACE: `bridges ...`, `alert ...` and `refuge NOT TRUSTED`
+  (when it applies) stay, the `militia B ...` line shows only while there is room (`dfllm brief` ends its head with it);
+  `lint --config` with `"from_phase": 5` in config/baseline.json answers `economy.standing.from_phase: a phase P0..P7 expected`;
+  a squad that cannot be led: the DECISION_NEEDED `squads` in events.jsonl has a `q` of at most 200 bytes ending in `fix: dfllm cmd squad.create/...`.
+- **Integration audit J3 (what was checked; refuted hypotheses are results too):**
+  (1) *State document.* A fort of 80 in PEACE with every optional field of every package, wave D's `mil.rot` for squad B included
+  (stress sources, coffins, population record, idle breakdown, adopted workshops, jam, bridges, alert + refuge, sched, water): 3,464
+  bytes, so over 4 KB only in a siege or a busy year (audit I1's maximal state: 5.5 KB, plus about 120 bytes per rotation line),
+  where `proj` (225-513 B) goes first, then `alert`, `mil`. Not a defect: a reload reads only `seq` from the state files (`disk_seq`), the
+  carried leaves are persisted in `kern.carry`, the kernel's own readers use the complete `K.view()` (BUG-079); the Python readers
+  survive every shed prefix of the order (all 14 prefixes of the maximal and of the peace state through status, brief, doctor,
+  plan propose and check, `fort_facts`, the wake line: no exception). One misleading text: with `alert` shed, `plan check` says
+  "the state has no alert.ref (dfhack-run dfllm reload)"; a reload does not bring it back (only above 4 KB; left). Persisted
+  tables of this run are pruned (`served`, `slab_ghost`, `slab_skip`, `cw`, `nook`, `ostale`, `waves`, `dlog`, `top`); not new and
+  slow: `m.economy` `ocancel` keeps a record of every order that ever had a "Needs" cancel and never reached `needs_drop` (a few
+  dozen bytes each).
+  (2) *Contracts.* 104 events: each has a CONTRACTS row (the three combined rows count), a contract.lua entry with the same class and
+  owner, every class A event stands in the first column of a RULES section 7 row and every such row names an existing event; the 29
+  verbs each have an owner in contract.lua and a handler (kern: plan.reload, inspect, module.enable); every `act.run` call site
+  of the Lua code passes the allowlist (`fairplay.check_run`, incl. `uniform-unstick --all --drop --free`, `disable autofarm`, the
+  tool pile's `stockpiles import`). What the consistency tests did not cover and the data did: 10,324 events from the Lua suites
+  (101 of 104 types; ACT_FAIL, BOOT and PERF_DEGRADED are emitted by kern/perf outside k_mock and bounded in code) validated with
+  `schema.validate('event')`: only BUG-095; 930 inbox calls with `schema.validate_args`: every call a handler accepted is valid;
+  446 distinct state documents composed in the suites (valid against the spec; two test-made violations only) through status
+  and brief: worst 289 of 300 and 1,191 of 1,500 tokens, no exception; 3,000 random bursts of the class A events through the wake
+  line: worst 150 of 150. Config: every key added since f17e2b3 set to a string, -7, 10^12, null, 1.5 (and every section to a
+  string, list, null, int): only `standing.from_phase` passed (BUG-094); `care.mood_take` accepts any pile name by design.
+  (3) *Cadence.* The 22 `K.emit` and 87 `K.log` lines added since f17e2b3: each sits behind util/cadence, a change test or a
+  once-per-episode record; the repeats by game time only (`hungry_warn` 7 days = 19 s at 450 ticks/s) are log lines, not events.
+  PERF_DEGRADED: decided and left. Its freeze event needs a frame gap of 20 s, so two of them are 20 s of real time apart at
+  least, whatever a game day is (the 1,200-tick guard only matters when the game barely advances), and the wake gate passes one
+  per type in 5 minutes; a save freeze (`cause` save) is one event per save, not a flood.
+  (4) *Scans and cost.* The code added since f17e2b3 reads only category vectors (ACTIVITY_ZONE, FARM_PLOT, STOCKPILE, ANY_ZONE,
+  WORKSHOP_ANY, FURNACE_ANY, SLAB up to `slabs.scan_max` 2,000), none `items.all`; `tests/lua/load_bench.lua` (18,743 items, the real
+  economy and care): 12.3 ms/s now, 12.7 on f17e2b3. The militia rotation costs 0.8 / 1.8 / 4 ms per upkeep at 60 / 150 / 300
+  citizens on k_mock's cheap units (one pass over the adults per squad, cached for the state for 3,600 ticks); DF's unit access is
+  dearer, a call over 5 ms is a slow call and demotes `military` (x2 period) like any module: live data (`inspect modules`).
+  (5) *Documents.* Fixed above. Left: the paragraphs FR-70 .. FR-79 in docs/feature-requests/README.md stand in merge order (77,
+  76, 75, 78, 71, 79, 70, 72, 73, 74; only FR-01 .. FR-21 have a table), reordering would conflict with every branch that adds an FR;
+  the contract table of module periods (`schema.MODULES`) lists nominal periods that differ from the modules' own `every` (siege 25 vs 1,
+  gate 25 vs 600, readiness 33,600 vs 1,200, snapshot 100 ticks vs 250 ms), older than this run.
+  (6) *Budgets.* Status, brief and wake: see (2); the new rotation lines were the only addition that moved them.
+  (7) *Model names* (reported, not changed): RULES.md lines 17 and 99, DESIGN.md lines 43, 66 and 364, ASIS-ANALYSIS.md lines 45 and 72.
+  (8) *Config validation.* See (2). (9) *CLI help.* `dfllm cmd --help` lists the verbs from `schema.VERBS` (appoint, squad.*, zone.place
+  included), `dfllm bp --help` the FR-78 flags; RULES section 6 now has every argument of `order.add`.
+
 ## The kernel rotates the citizens through the militia: cohorts by militia windows served, turnover at the close of a window, a squad refill that no longer stalls (FR-79, BUG-076, 2026-10-23, package D1; offline, live-untested)
 - **Why (Run 14 Trussroads y578-y582; notes 64 and 67, Gordon's own request 23.10.):** goal Z12 "every adult citizen who is not
   elite serves three months a year in the militia" could only be followed by hand: FR-71 gave every militia squad its months, but

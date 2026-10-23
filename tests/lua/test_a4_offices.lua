@@ -140,6 +140,7 @@ T.test('BUG-055: a refused squad creation is named (why, the posts) in leader_st
   T.ok(dn[1].d.q:find('refused: assignment_id required [S2]', 1, true), dn[1].d.q)
   T.ok(dn[1].d.q:find('fix: dfllm cmd squad.create', 1, true), dn[1].d.q)
   T.ok(#dn[1].msg <= 200)
+  T.ok(#dn[1].d.q <= 200, 'J3: d.q is at most 200 bytes (schema.py): ' .. #dn[1].d.q)
   -- the inspect view carries it
   local r = W.inbox('inspect', {what = 'offices'})
   -- (economy is not loaded in this world: only military answers through its own leader_state)

@@ -8616,7 +8616,7 @@ end
 ---------------------------------------------------------------- inbox verbs
 local FREQ = {OneTime = true, Daily = true, Monthly = true, Seasonally = true, Yearly = true}
 
--- order.add {job, amount, item_subtype?, material?, material_category?, reaction?, frequency?} (FR-39): one
+-- order.add {job, amount, item_subtype?, material?, material_category?, reaction?, hf?, frequency?} (FR-39, hf: BUG-078): one
 -- manager order through act.workorder (tag dfllm:cmd); make-item jobs without item_subtype are refused
 M.verbs['order.add'] = function(K, args, cmd)
   local job = args.job
