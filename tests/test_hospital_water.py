@@ -84,7 +84,10 @@ def test_water_config_mirrors_water_lua_and_validates(tmp_path):
     keys = set(re.findall(r"(?<![\w.])([a-z_]+) = ", re.sub(r"--[^\n]*", "", block)))
     assert keys == set(fairplay.WATER_LIM), keys ^ set(fairplay.WATER_LIM)
     cfg = json.loads((ROOT / "config" / "baseline.json").read_text(encoding="utf-8"))
-    assert cfg["water"] == {"patient_thirst": 25000, "hosp_remove": True, "remove_per_run": 8}
+    assert cfg["water"] == {"patient_thirst": 25000, "hosp_remove": True, "remove_per_run": 8,
+                            # BUG-054: the caregivers' scaling and the death-risk line
+                            "carers_per_patient": 1, "carers_min": 2, "carers_max": 8, "carers_urgent": 2,
+                            "carers_per_run": 2, "carers_hold_days": 14, "dying_thirst": 60000}
     assert fairplay.water_errors() == []
     p = tmp_path / "baseline.json"
     p.write_text(json.dumps({"v": 2, "water": {"patient_thirst": "high", "hosp_remove": 1, "remove_per_run": 99,

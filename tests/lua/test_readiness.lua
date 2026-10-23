@@ -772,4 +772,74 @@ T.test('Run 10: the last audit names a bypass with its wall: R0, SIEGE_UNREADY a
   T.eq(ready(W).route, nil)
 end)
 
+T.test('BUG-055 x FR-70: a fort below perimeter.hold_pop (30) citizens is not stopped by a vacant office (it cannot always ' ..
+       'fill it), one at or above is', function()
+  local W = world{n = 7}
+  W.econ.offices = function(K) return {{code = 'CHIEF_MEDICAL_DWARF', n = 1, days = 9, cand = 7}} end
+  day(W)
+  T.ok(not has(ready(W).fail, 'office'), '7 citizens: no office blocker')
+  local W2 = world{n = 40}
+  W2.econ.offices = function(K) return {{code = 'CHIEF_MEDICAL_DWARF', n = 1, days = 9, cand = 7}} end
+  day(W2)
+  T.ok(has(ready(W2).fail, 'office'), '40 citizens: the office blocks')
+end)
+
+T.test('BUG-055 (Run 14 y577: the chief medical dwarf office stood vacant for good): a vacant manager or chief medical ' ..
+       'dwarf the kernel could not fill for offices.blocker_days (7) is the R0 blocker office with the appoint command; ' ..
+       'squads without a leader too; other offices, fewer days and blocker_days 0 are none', function()
+  local W = world()
+  local offs = {}
+  W.econ.offices = function(K) return offs end
+  day(W)
+  T.ok(not has(ready(W).fail, 'office'), 'nothing vacant')
+  offs = {{code = 'CHIEF_MEDICAL_DWARF', n = 1, days = 3, cand = 7}}
+  day(W)
+  T.ok(not has(ready(W).fail, 'office'), '3 days: the kernel is still trying')
+  offs = {{code = 'BOOKKEEPER', n = 1, days = 30, cand = 3}}
+  day(W)
+  T.ok(not has(ready(W).fail, 'office'), 'a bookkeeper is no blocker')
+  offs = {{code = 'CHIEF_MEDICAL_DWARF', n = 1, days = 9, cand = 7}}
+  day(W)
+  local r = ready(W)
+  T.ok(has(r.fail, 'office'), 'office is an R0 blocker')
+  T.eq(r.office, 'CHIEF_MEDICAL_DWARF vacant 9 days (ACTIVE): dfllm cmd appoint {"code":"CHIEF_MEDICAL_DWARF","unit":7}')
+  W.ms = W.ms + 600000                         -- a new blocker wakes after a game month and UNREADY_NEWS_S
+  day(W, 28)
+  W.ms = W.ms + 600000
+  day(W, 2)
+  local u = unready(W)
+  T.ok(#u >= 1)
+  T.eq(u[#u].d.office, r.office)
+  T.ok(u[#u].msg:find('CHIEF_MEDICAL_DWARF vacant 9 days', 1, true), u[#u].msg)
+  T.ok(#u[#u].msg <= 200)
+  offs = {{code = 'MANAGER', n = 1, days = 8, why = 'no adult citizen outside the squads'}}
+  day(W)
+  T.eq(ready(W).office, 'MANAGER vacant 8 days (ACTIVE, no adult citizen outside the squads): no adult citizen outside the squads')
+  W.K.cfg.baseline.offices = {blocker_days = 0}
+  day(W)
+  T.ok(not has(ready(W).fail, 'office'), 'blocker_days 0: never')
+  W.K.cfg.baseline.offices = {blocker_days = 'x'}
+  day(W)
+  T.ok(has(ready(W).fail, 'office'), 'a bad value keeps the default 7')
+  W.K.cfg.baseline.offices = nil
+  offs = {}
+  day(W)
+  T.ok(not has(ready(W).fail, 'office'), 'filled: the blocker goes')
+  -- squads that cannot get a leader (military.leader_state)
+  local since = W.K.now().tick - 8 * 1200
+  W.mods.military.M.leader_state = function(K)
+    return {why = 'squad creation refused 3 time(s): no militia assignment for a new squad (ACTIVE militia posts: none; ' ..
+                  'vacant assignments without a squad: 0)', since = since, fails = 3, active = {}, free = 0, squads = 0}
+  end
+  day(W)
+  r = ready(W)
+  T.ok(has(r.fail, 'office'))
+  T.ok(r.office:find('no militia assignment for a new squad', 1, true) and r.office:find('fix: dfllm cmd squad.create', 1, true),
+       r.office)
+  T.ok(#r.office <= 200)
+  since = W.K.now().tick - 2 * 1200
+  day(W)
+  T.ok(not has(ready(W).fail, 'office') or since == nil, 'the squad trouble is old enough only after 7 days')
+end)
+
 T.done()

@@ -2373,9 +2373,15 @@ end
 -- library and every supply order do nothing. Vacant economy positions are filled like a player does on
 -- the nobles screen (act.appoint): the citizen with the best matching skills, no soldier, nobody who
 -- already holds a position when someone else can.
+-- BUG-055 (Run 14 y577: the CHIEF_MEDICAL_DWARF office stood vacant with flags.ACTIVE and an able candidate for good: this
+-- list had three offices only): the hospital's administrator joins, the best healer (never a squad member: a soldier on
+-- duty trains and marches; appoint_vacant skips every squad member). The militia commander and captain are NOT in the
+-- list: military creates a squad together with its leader on a VACANT assignment (act.squad_create), an appointment
+-- made before would take that assignment out of its reach (free_assignment/squad_assignment need histfig -1)
 M.POSITIONS = {{code = 'MANAGER', skills = {'ORGANIZATION'}},
                {code = 'BOOKKEEPER', skills = {'RECORD_KEEPING'}},
-               {code = 'BROKER', skills = {'APPRAISAL', 'NEGOTIATION', 'JUDGING_INTENT'}}}
+               {code = 'BROKER', skills = {'APPRAISAL', 'NEGOTIATION', 'JUDGING_INTENT'}},
+               {code = 'CHIEF_MEDICAL_DWARF', skills = {'DIAGNOSE', 'SURGERY', 'SET_BONE', 'SUTURE', 'DRESS_WOUNDS'}}}
 
 -- {code -> true} of vacant offered positions, and the histfig ids holding any position
 local function positions()
@@ -2387,7 +2393,7 @@ local function positions()
   for _, a in ipairs(ent.positions.assignments) do
     local code = code_of[a.position_id]
     if a.histfig >= 0 then held[a.histfig] = true
-    elseif code then vac[code] = true end
+    elseif code then vac[code] = (vac[code] or 0) + 1 end
   end
   return vac, held
 end
@@ -2401,14 +2407,22 @@ local function skill_score(u, skills)
   return s
 end
 
+-- BUG-055: the vacant offices of the last pass, {code -> {n = vacant assignments, since = tick first seen vacant, cand =
+-- the best candidate's id, why = why none was appointed}}; M.offices answers readiness/status/inspect from it
 function M.appoint_vacant(K)
   local ok, vac, held = pcall(positions)
   if not ok then return 0 end
   local cu = K.census.u
   if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then return 0 end
-  local n = 0
+  local p, now, n = pstate(K), K.now().tick, 0
+  p.vac = json.object(type(p.vac) == 'table' and p.vac or {})
+  st.offices = {}
   for _, pos in ipairs(M.POSITIONS) do
     if vac[pos.code] then
+      local since = math.tointeger(p.vac[pos.code]) or now
+      p.vac[pos.code] = since
+      local o = {n = vac[pos.code], since = since}
+      st.offices[pos.code] = o
       local best, bscore
       for _, id in ipairs(cu.ids) do
         local u = df.unit.find(id)
@@ -2418,16 +2432,77 @@ function M.appoint_vacant(K)
         end
       end
       if best then
-        local aok = K.act.appoint(pos.code, best.id)
+        o.cand = best.id
+        local aok, res = K.act.appoint(pos.code, best.id)
         if aok then
           held[best.hist_figure_id] = true
           n = n + 1
+          st.offices[pos.code], p.vac[pos.code] = nil, nil
           K.log('info', '%s appointed: unit %d (%s)', pos.code, best.id, dfhack.df2utf(dfhack.units.getReadableName(best)))
+        else
+          o.why = tostring(res):sub(1, 60)
         end
+      else
+        o.why = 'no adult citizen outside the squads'
       end
+    else
+      p.vac[pos.code] = nil
     end
   end
   return n
+end
+
+-- BUG-055: the offices that stand vacant (flags.ACTIVE, a vacant assignment) after the last daily pass, longest first:
+-- {{code, n, days, cand, why}} (cand = the best candidate's unit id, why = why the appointment did not happen);
+-- an old kernel state or no pass yet: {}. Read by readiness (R0 blocker `office`), status, inspect offices
+function M.offices(K)
+  local out, now = {}, K.now().tick
+  for code, o in pairs(st.offices or {}) do
+    out[#out + 1] = {code = code, n = o.n, days = math.max(0, (now - o.since) // DAY), cand = o.cand, why = o.why}
+  end
+  table.sort(out, function(a, b)
+    if a.days ~= b.days then return a.days > b.days end
+    return a.code < b.code
+  end)
+  return out
+end
+
+-- verb appoint {code, unit} (BUG-055, Run 14 note 61: `I.appoint` existed in act.lua but was no verb, the game session
+-- replayed seat_figure by hand): the nobles screen's "choose a candidate" for a vacant, offered position. A soldier on
+-- duty (squad member) is no candidate for any post but the militia's own (the commander and captain lead squads)
+M.SQUAD_POSTS = {MILITIA_CAPTAIN = true, MILITIA_COMMANDER = true}
+M.verbs.appoint = function(K, args, cmd)
+  if type(args.code) ~= 'string' or not math.tointeger(args.unit) then return false, 'appoint needs {code, unit}' end
+  local u = df.unit.find(args.unit)
+  if not u then return false, 'no unit ' .. tostring(args.unit) end
+  if not M.SQUAD_POSTS[args.code] and (u.military.squad_id or -1) >= 0 then
+    return false, string.format('unit %d is a squad member: a soldier on duty is no candidate for %s', args.unit, args.code)
+  end
+  local ok, res = K.act.appoint(args.code, args.unit)
+  if not ok then return false, 'appoint: ' .. tostring(res) end
+  local p = pstate(K)
+  if type(p.vac) == 'table' then p.vac[args.code] = nil end
+  if st.offices then st.offices[args.code] = nil end
+  K.log('info', '%s appointed by verb: unit %d (assignment %s)', args.code, args.unit, tostring(res))
+  return true, string.format('%s: unit %d appointed', args.code, args.unit), {assignment = res}
+end
+
+M.inspect.offices = function(K)
+  local list = M.offices(K)
+  local txt = {}
+  for _, o in ipairs(list) do
+    txt[#txt + 1] = string.format('%s vacant %d d%s%s', o.code, o.days, o.cand and (', candidate unit ' .. o.cand) or '',
+                                  o.why and (' (' .. o.why .. ')') or '')
+  end
+  local okm, ls = K.call('military', 'leader_state')          -- the militia posts: military fills them with a squad
+  ls = okm and type(ls) == 'table' and ls or nil
+  if ls and ls.why then txt[#txt + 1] = 'squad leaders: ' .. ls.why end
+  return true, #txt == 0 and 'offices: none vacant' or ('offices: ' .. table.concat(txt, '; ')),
+         {offices = list, squads = ls,
+          note = 'offices: vacant posts with flags.ACTIVE after the last daily pass (MANAGER, BOOKKEEPER, BROKER, '
+                 .. 'CHIEF_MEDICAL_DWARF; fix: dfllm cmd appoint {code, unit}); squads: the militia posts as military sees '
+                 .. 'them (active codes, vacant assignments without a squad, why the last squad creation failed; fix: '
+                 .. 'dfllm cmd squad.create / squad.leader)'}
 end
 
 -- Manager orders that never get validated (live L1: the MANAGER position has required_office 1, so above

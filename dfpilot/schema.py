@@ -75,7 +75,7 @@ ACT = {
     "squad_routine": ["military"], "squad_order": ["military"], "squad_uniform": ["military"],
     "squad_unequip": ["military"], "squad_release": ["military"], "animal_slaughter": ["economy"], "zone_remove": ["runner"], "manager_office": ["economy"], "pond_remove": ["water"],
     "hospital_remove": ["water"],                  # BUG-034: the zones of a dry hospital while a patient is thirsty
-    "sand_zone": ["economy"], "fish_zone": ["economy"],
+    "sand_zone": ["economy"], "fish_zone": ["economy"], "zone_place": ["runner"],
     "tool_pile": ["economy"],                      # BUG-053: a weapons stockpile for the miners' picks near the mines
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
     "door_forbid": ["reflex"],
@@ -84,7 +84,7 @@ ACT = {
     "quickfort": ["runner"], "order_top": ["runner"],     # Run 11 siege 8: a seal's manager orders to the top
     "orders_import": ["economy"], "orders": ["economy"], "workorder": ["economy", "water", "care"],
     "order_suspend": ["economy"], "kitchen_exclude": ["economy"], "appoint": ["economy"],
-    "work_detail": ["economy"], "order_material": ["economy"], "order_remove": ["economy"],
+    "work_detail": ["economy", "water"], "order_material": ["economy"], "order_remove": ["economy"],
     "job_resume": ["economy"], "farm_crop": ["economy"], "plant_gather": ["economy"], "plant_ungather": ["economy"],
     "work_detail_prune": ["economy"],
     "item_flag": ["care", "water", "economy", "military"],
@@ -389,6 +389,9 @@ TICK = Int(0)
 ID = named("id", Str(ID_RE))
 TPL = named("tpl", Str(TPL_RE))
 BRIDGE = Str(BRIDGE_RE)
+SQUAD = AnyOf(NAT, Str(enum=["A", "B", "C"]))                  # BUG-055: a squad key or the game's squad id
+SQUAD_MODES = ["PEACE", "ALERT", "RECOVERY"]                   # the squads screen is not touched in a fight
+ZONE_TYPES = ["pen", "pit", "pond", "sand", "clay", "fishing", "meeting"]    # FR-78: lua/dfllm/zonelib.lua Z.TYPES
 MODULE = named("module", Str(MODULE_RE))
 MODE = named("mode", Str(enum=MODES))
 PHASE = named("phase", Str(PHASE_RE))
@@ -484,6 +487,12 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # refused removals, and the nearest accepted source (src, d tiles) if any
     "HOSPITAL_REMOVED": ("A", "water", _d("zones:ia", "locs:ia units:ia n:i thirst:i patients:i give:i failed:i near:i "
                                                       "d:i src:p")),
+    # BUG-054 (Run 11 y497: 5 patients dead of thirst at once, 4 caregivers): patients at water.dying_thirst (60,000):
+    # units (thirstiest first), n, the top thirst, the caregivers (carers, the want, idle ones, added this run), the
+    # hospital (ok, dry, none), GiveWater/GiveFood jobs running (give: citizens giving now, run/open on the job list,
+    # -1 unknown), free buckets, the cause
+    "PATIENT_DYING": ("A", "water", _d("units:ia n:i thirst:i carers:i want:i hosp:s",
+                                       "idle:i added:i give:i open:i run:i buckets:i why:s")),
     # BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds in the BREACH): in SIEGE/BREACH, once per fight,
     # n of the patients lie outside the burrow the civ alert confines to (burrow; Kern+/Tiefe+ while it is silent):
     # units, all patients, mode, hosp_out = hospital zones outside Kern+ and the refuge
@@ -535,9 +544,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # Run 11: rdry = the refuge without drink and what to build (blocker refuge_dry)
     # BUG-036: hout = the hospital outside Kern+ and the refuge and what to do (blocker hospital_out)
     # FR-70: pd = game days the perimeter has been open (open_perimeter), pw = what is open; from escalate_days on the
-    # wake repeats every escalate_every days
+    # wake repeats every escalate_every days. BUG-055: office = a vacant office (or squads without a leader) that blocks
+    # (R0 `office`), with its fix
     "SIEGE_UNREADY": ("A", "readiness", _d(opt="fails:sa afails:sa routes:i open:i ents:sa traps:i age:i rdry:s "
-                                               "hout:s pd:i pw:s")),
+                                               "hout:s pd:i pw:s office:s")),
     # BUG-015: an entrance door the lockdown forbade lost its forbidden flag before the next pass (refused)
     "LOCKDOWN_PARTIAL": ("A", "reflex", _d("doors:i", "refused:ia pos:p retry:f items:i units:i")),
     # BUG-023 / Run 10: tool detail members without their pick or axe while its jobs wait and free tools exist; Run 11:
@@ -720,7 +730,8 @@ VERB_ARGS: dict[str, Obj] = {
     "lever": Obj(req={"bridge": BRIDGE, "want": Str(enum=["up", "down"])}),
     "inspect": Obj(req={"what": Str(enum=["state", "modules", "census", "manifest", "projects", "persist",
                                           "perf", "mode", "plan", "tombs", "water_sources", "orders", "workload",
-                                          "trade", "reach", "entrances", "defense", "perimeter", "refuge"])},
+                                          "trade", "reach", "entrances", "defense", "perimeter", "refuge",
+                                          "offices"])},
                    opt={"key": Str(maxbytes=80), "field": Str(r"^[A-Za-z0-9_]{1,40}$")}),
     "selftest": Obj(opt={"suite": Str(enum=["quick", "full"])}),
     "module.enable": Obj(req={"module": MODULE}),
@@ -738,6 +749,15 @@ VERB_ARGS: dict[str, Obj] = {
     "perimeter.record": Obj(),
     # BUG-030 rebuild policy: the player's answer to DECISION_NEEDED bridge_rebuild: rebuild that bridge anyway
     "bridge.rebuild": Obj(req={"bridge": BRIDGE}),
+    # BUG-055 (Run 11 note 25, Run 14 notes 61/64): the nobles screen (appoint) and the squads screen (create a squad,
+    # choose its leader, add a soldier, give the kind's uniform) as verbs; a squad is a key A/B/C or the game's squad id
+    "appoint": Obj(req={"code": Str(r"^[A-Z_]{3,40}$"), "unit": NAT}),
+    "squad.create": Obj(req={"name": Str(r"^[A-Za-z0-9 _-]{1,30}$")}, opt={"leader": NAT, "assignment": NAT}),
+    "squad.leader": Obj(req={"squad": SQUAD, "unit": NAT}),
+    "squad.add": Obj(req={"squad": SQUAD, "unit": NAT}),
+    "squad.uniform": Obj(req={"squad": Str(enum=["A", "B", "C"])}, opt={"kind": Str(enum=["melee", "xbow"])}),
+    # FR-78 (Run 14 note 65): a civzone of `type` in `bbox` (one z level) through quickfort's zone mode
+    "zone.place": Obj(req={"type": Str(enum=ZONE_TYPES), "bbox": BBOX}, opt={"name": Str(r"^[A-Za-z0-9_-]{1,24}$")}),
 }
 # verb -> (handler module, allowed modes or None, needs approve)
 VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
@@ -754,6 +774,11 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "ack": ("reflex", None, False),
     "order.add": ("economy", None, False), "jobs.release": ("economy", None, False),
     "perimeter.record": ("seal", None, False), "bridge.rebuild": ("seal", None, False),
+    # BUG-055: office appointments any time; the squads screen only outside a fight
+    "appoint": ("economy", None, False),
+    "squad.create": ("military", SQUAD_MODES, False), "squad.leader": ("military", SQUAD_MODES, False),
+    "squad.add": ("military", SQUAD_MODES, False), "squad.uniform": ("military", SQUAD_MODES, False),
+    "zone.place": ("runner", SQUAD_MODES, False),
 }
 # verbs accepted only from these `by` origins (CONTRACTS §9.5; `by` is a label, the hook is the guard)
 VERB_BY: dict[str, list[str]] = {"audit": ["follow", "test"]}
@@ -784,7 +809,9 @@ STATE = Obj(
                       # route: the last audit's first attacker-route finding (bypass / refuge on the attack path)
                       # FR-70: pd = game days the perimeter has been open in PEACE (open_perimeter), pw = what is open
                       opt={"open": Int(-1), "ents": Arr(Str(maxbytes=24), hi=3), "dhold": Str(maxbytes=24),
-                           "route": Str(maxbytes=60), "pd": NAT, "pw": Str(maxbytes=60)}),
+                           "route": Str(maxbytes=60), "pd": NAT, "pw": Str(maxbytes=60),
+                           # BUG-055: the vacant office (or squad leader post) R0 `office` names, with its fix
+                           "office": Str(maxbytes=200)}),
          # Run 10: ore/bars/leather stock, the metal route ('explore' = no ore, metal wanted), the classes strange
          # moods missed within a year (plan propose/check supply goals)
          # Run 11: free stone and what the open rock orders, walls and needs want (rock_need); picks in the fort and the

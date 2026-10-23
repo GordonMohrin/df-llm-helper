@@ -248,6 +248,10 @@ WATER_LIM: dict = {
     "patient_thirst": _THIRST, "hosp_remove": "bool", "remove_per_run": (0, 32),
     # BUG-040: a done cistern whose well stays dry this many days is reported once (CISTERN_DRY, B)
     "cistern_dry_days": (1, 400),
+    # BUG-054: caregivers (Orderlies) per patient, the bounds, the urgent extra, the additions a run, the hold in days;
+    # the death-risk line of PATIENT_DYING and its cadence
+    "carers_per_patient": (0, 10), "carers_min": (0, 20), "carers_max": (0, 40), "carers_urgent": (0, 20),
+    "carers_per_run": (0, 20), "carers_hold_days": (0, 400), "dying_thirst": _THIRST, "dying_every": _TICKS,
 }
 
 
@@ -469,6 +473,64 @@ def military_errors(path: str | Path | None = None) -> list[str]:
                 errs.append(f"{name}: military.{k}: int {lo}..{hi} expected, got {v!r}")
         else:
             errs.append(f"{name}: military.{k}: unknown key")
+    return errs
+
+
+# BUG-055 (lua/dfllm/readiness.lua M.OFFICES): config/baseline.json "offices": blocker_days = the days a vacant office
+# (manager, chief medical dwarf) or squads without a leader may stand before readiness R0 `office` names them (0 = never)
+OFFICES_LIM: dict = {"blocker_days": (0, 400)}
+
+
+def offices_errors(path: str | Path | None = None) -> list[str]:
+    """Problems of the optional "offices" part of config/baseline.json (BUG-055): unknown keys and values the kernel
+    ignores (another type, out of range). A missing file or part is fine."""
+    p = Path(path or BASELINE_PATH)
+    if not p.exists():
+        return []
+    name = "config/baseline.json"
+    try:
+        doc = json.loads(_read(p))
+    except ValueError as e:
+        return [f"{name}: not JSON ({e})"]
+    sec = doc.get("offices", {}) if isinstance(doc, dict) else {}
+    if not isinstance(sec, dict):
+        return [f"{name}: offices must be an object"]
+    errs = []
+    for k, v in sec.items():
+        lim = OFFICES_LIM.get(k)
+        if lim is None:
+            errs.append(f"{name}: offices.{k}: unknown key")
+        elif not (isinstance(v, int) and not isinstance(v, bool) and lim[0] <= v <= lim[1]):
+            errs.append(f"{name}: offices.{k}: int {lim[0]}..{lim[1]} expected, got {v!r}")
+    return errs
+
+
+# FR-78 (lua/dfllm/zonelib.lua Z.MAX_TILES): config/baseline.json "zones": max_tiles = the tiles one zone.place box may
+# cover (a bad value keeps the default 400)
+ZONES_LIM: dict = {"max_tiles": (1, 10000)}
+
+
+def zones_errors(path: str | Path | None = None) -> list[str]:
+    """Problems of the optional "zones" part of config/baseline.json (FR-78): unknown keys and values the kernel ignores
+    (another type, out of range). A missing file or part is fine."""
+    p = Path(path or BASELINE_PATH)
+    if not p.exists():
+        return []
+    name = "config/baseline.json"
+    try:
+        doc = json.loads(_read(p))
+    except ValueError as e:
+        return [f"{name}: not JSON ({e})"]
+    sec = doc.get("zones", {}) if isinstance(doc, dict) else {}
+    if not isinstance(sec, dict):
+        return [f"{name}: zones must be an object"]
+    errs = []
+    for k, v in sec.items():
+        lim = ZONES_LIM.get(k)
+        if lim is None:
+            errs.append(f"{name}: zones.{k}: unknown key")
+        elif not (isinstance(v, int) and not isinstance(v, bool) and lim[0] <= v <= lim[1]):
+            errs.append(f"{name}: zones.{k}: int {lim[0]}..{lim[1]} expected, got {v!r}")
     return errs
 
 

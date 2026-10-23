@@ -216,6 +216,9 @@ def line_unready(ctx: Ctx) -> str:
         else:
             nxt.append("the hospital lies outside Kern+/Tiefe+: plan it inside Tiefe+ next to accepted water (a cistern "
                        "there first), then remove the old zones")
+    if "office" in fails:                      # BUG-055 (Run 14 y577): a vacant office the kernel could not fill
+        office = r.get("office") if isinstance(r.get("office"), str) else ""
+        nxt.append(office or "a vacant office or squads without a leader: dfllm cmd inspect what=offices")
     lost = [f.split(":", 1)[1] for f in fails if f.startswith("lost:")]
     if lost:                                   # BUG-048: the keeper replaces it by wall + door (no question any more)
         nxt.append(f"{','.join(lost)} lost to building destroyers: the kernel replaces it by wall + door in quiet PEACE "

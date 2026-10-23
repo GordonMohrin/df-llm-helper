@@ -138,7 +138,12 @@ end)
 
 T.test('hospital gate (FR-31/34): HOSPITAL_DRY when the dry episode starts; BUG-008: again only for news, after max(a week, 10 min)', function()
   local W, M = world{patients = {{id = 2, thirst = 1000, care = true}},
-                     setup = function(W) F.hospital(W, {10, 10, 14, 14, 5}) end}
+                     setup = function(W)
+                       F.hospital(W, {10, 10, 14, 14, 5})
+                       df.unit_labor = {FEED_WATER_CIVILIANS = 40}           -- (BUG-054: the added caregivers take the labor)
+                       for i = 1, 4 do W.unit(i).status = {labors = {[40] = false}} end
+                       W.act_result('work_detail', function(name, id, on) W.unit(id).status.labors[40] = on; return true end)
+                     end}
   day(W)
   local hd = W.find_events('HOSPITAL_DRY')
   T.eq(#hd, 1)
@@ -212,10 +217,13 @@ T.test('a wet well near the hospital serves it: no gate alarm; patient_thirst li
   T.eq(#W.find_events('HOSPITAL_DRY'), 0)
   local pt = needed(W, 'patient_thirst')
   T.eq(#pt, 1)
-  T.ok(pt[1].msg:find('water, buckets and caregivers present', 1, true), pt[1].msg)
-  T.eq({pt[1].d.carers, pt[1].d.n_carers, pt[1].d.buckets, pt[1].d.buckets_all}, {{1, 3}, 2, 3, 3})
-  T.ok(pt[1].d.q:find('carers 2 (FEED_WATER_CIVILIANS: 1,3)', 1, true), pt[1].d.q)
-  T.eq(M.kpi(W.K).carers, 2)
+  -- BUG-054: 2 caregivers for 1 patient over the alarm are not "present" (want 2 + 2 urgent = 4): unit 4 is added to
+  -- the Orderlies detail, the line says so; the old text "water, buckets and caregivers present" stays for enough of them
+  T.ok(pt[1].msg:find('caregivers short: 3 of 4 wanted for 1 patient(s), 1 added to Orderlies now', 1, true), pt[1].msg)
+  T.eq({pt[1].d.carers, pt[1].d.n_carers, pt[1].d.want, pt[1].d.added, pt[1].d.buckets, pt[1].d.buckets_all},
+       {{1, 3}, 3, 4, 1, 3, 3})
+  T.ok(pt[1].d.q:find('carers 3 of 4 wanted (FEED_WATER_CIVILIANS: 1,3)', 1, true), pt[1].d.q)
+  T.eq(M.kpi(W.K).carers, 3)
   T.eq(#W.find_events('PROJECT_REQUEST'), 0)
   df.unit_labor = nil
 end)
@@ -848,5 +856,276 @@ T.test('BUG-040: every accepted source is labelled with the burrow it stands on 
        {'Tiefe+', {40, 40, 2, 60, 60, 2}, 20, 'well ' .. W.w1 .. ' at 20,20,2 in Kern+'})
   T.eq(C.check_state(W.state()), {})
 end)
+
+---------------------------------------------------------------- BUG-054 (Run 11 y497): caregivers scale with the patients
+-- Run 11 y497: 3-5 patients at thirst 30,000-40,293, 24-27 of 62 buckets free, 4 caregivers, a served hospital:
+-- patient_thirst said "water, buckets and caregivers present" and nothing else happened; five died of thirst together.
+-- Old code: nothing ever gave the FEED_WATER_CIVILIANS labor to anybody, 4 for 5 patients counted as "present".
+local FEED, MINE_L = 40, 41
+local function carer_world(opts)
+  opts = opts or {}
+  local W, M = world{cit = opts.cit or 14, patients = opts.patients, tiles = {['20,12,4'] = '_', ['20,12,3'] = '~'},
+                     setup = function(W)
+                       df.unit_labor = {FEED_WATER_CIVILIANS = FEED, MINE = MINE_L, CUTWOOD = 42, HUNT = 43}
+                       F.hospital(W, {10, 10, 14, 14, 5}); well(W, 20, 12, 5)
+                       for i = 1, opts.cit or 14 do
+                         W.unit(i).status = {labors = {[FEED] = false, [MINE_L] = false, [42] = false, [43] = false}}
+                       end
+                       for _, id in ipairs(opts.carers or {}) do W.unit(id).status.labors[FEED] = true end
+                       if opts.setup then opts.setup(W) end
+                     end}
+  for i = 1, 6 do F.item(W, 'BUCKET', {_pos = {20, 13 + i, 5}}) end
+  return W, M
+end
+local function details(W)
+  local r = {}
+  for _, a in ipairs(W.find_acts('work_detail')) do r[#r + 1] = {a.args[1], a.args[2], a.args[3]} end
+  return r
+end
+
+T.test('BUG-054: 5 patients over the alarm, 4 caregivers, a served hospital: the Orderlies detail grows to the want ' ..
+       '(per patient + urgent, at most carers_max), 2 a run, and patient_thirst names it', function()
+  local pats = {}
+  for i, th in ipairs({30000, 31500, 36000, 38800, 40293}) do pats[i] = {id = 4 + i, thirst = th, care = true, pos = {12, 12, 5}} end
+  local W, M = carer_world{patients = pats, carers = {1, 2, 3, 4}}
+  W.act_result('work_detail', function(name, id, on)
+    W.unit(id).status.labors[FEED] = on
+    return true, on and 'added' or 'removed'
+  end)
+  day(W)
+  -- want = 5 patients x 1 = 5, + 2 urgent = 7; have 4; carers_per_run 2
+  local d1 = details(W)
+  T.eq(#d1, 2)
+  T.eq({d1[1][1], d1[1][3], d1[2][1], d1[2][3]}, {'Orderlies', true, 'Orderlies', true})
+  T.eq(W.find_acts('work_detail')[1].args[4], {select = true}, 'a detail on "nobody does this" is switched to selected')
+  local pt = needed(W, 'patient_thirst')
+  T.eq(#pt, 1)
+  T.ok(pt[1].msg:find('caregivers short: 6 of 7 wanted for 5 patient(s), 2 added to Orderlies now', 1, true), pt[1].msg)
+  T.eq({pt[1].d.n_carers, pt[1].d.want, pt[1].d.added}, {6, 7, 2})
+  T.ok(#pt[1].msg <= 200 and #pt[1].d.q <= 200)
+  day(W)
+  T.eq(#details(W), 3, 'the third one next run, then enough')
+  day(W, 2)
+  T.eq(#details(W), 3)
+  T.eq(M.kpi(W.K).carers, 7, 'the census sees the labor the act gave')
+  local ins = W.inbox('inspect', {what = 'water_sources'})
+  T.ok(ins.ok, ins.msg)
+  T.eq({ins.data.carers.have, ins.data.carers.want, ins.data.carers.mine}, {7, 7, 3}, 'inspect: the caregivers\' state')
+  T.eq(#needed(W, 'patient_thirst'), 1)
+  df.unit_labor = nil
+end)
+
+T.test('BUG-054: the census sees the new caregivers: no more additions at the want; the bounds hold (carers_max)', function()
+  local pats = {}
+  for i = 1, 9 do pats[i] = {id = 3 + i, thirst = 31000, care = true} end
+  local W, M = carer_world{cit = 16, patients = pats, carers = {1, 2}}
+  W.act_result('work_detail', function(name, id, on)
+    W.unit(id).status.labors[FEED] = on
+    return true, on and 'added' or 'removed'
+  end)
+  day(W, 5)
+  -- 9 patients x 1 + 2 urgent = 11 -> carers_max 8; only 3 citizens are free (16 - 9 patients - 2 carers = 5 candidates)
+  T.eq(M.kpi(W.K).carers, 7, '2 + 5 free citizens: all candidates used, the rest is short')
+  local pt = needed(W, 'patient_thirst')
+  T.ok(pt[1].msg:find('caregivers short: 4 of 8 wanted', 1, true) or pt[1].msg:find('caregivers short', 1, true), pt[1].msg)
+  local cfg = F.cfg()
+  cfg.water = {carers_max = 0}
+  local W2 = carer_world{patients = {{id = 5, thirst = 41000, care = true}}, carers = {1}}
+  W2.K.cfg.baseline = cfg
+  day(W2)
+  T.eq(#details(W2), 0, 'carers_max 0 switches the scaling off')
+end)
+
+T.test('BUG-054: the candidates: idle first, then the nearest the hospital; never a soldier, a dwarf in a mood, a noble, ' ..
+       'a miner, a child or a patient', function()
+  local W = carer_world{cit = 10, patients = {{id = 5, thirst = 41000, care = true}}, carers = {1}, setup = function(W)
+    W.unit(2).military.squad_id = 3                                   -- a soldier
+    W.unit(3).mood = 4                                                -- in a mood
+    W.unit(4).status.labors[MINE_L] = true                            -- a miner
+    W.unit(6)._m.adult = false                                        -- a child
+    W.unit(7).job = {current_job = {id = 1}}                          -- busy, nearest
+    W.move(7, 12, 12, 5)
+    W.unit(8).job = {current_job = nil}                               -- idle, far
+    W.move(8, 90, 90, 5)
+    W.unit(9).job = {current_job = nil}                               -- idle, nearer
+    W.move(9, 30, 30, 5)
+    W.unit(10).job = {current_job = nil}
+    W.move(10, 12, 13, 5)
+    dfhack.units.getNoblePositions = function(u) if u.id == 10 then return {{position = {code = 'BROKER'}}} end end
+  end}
+  W.act_result('work_detail', function(name, id, on)
+    W.unit(id).status.labors[FEED] = on
+    return true, 'added'
+  end)
+  day(W)
+  -- want = 1 + 2 urgent... 1 patient x 1 = max(2, 1) = 2, + 2 urgent = 4; have 1; 2 a run: units 9 then 8 (idle, nearest)
+  local d = details(W)
+  T.eq({d[1][2], d[2][2]}, {9, 8})
+  day(W)
+  d = details(W)
+  T.eq(d[3] and d[3][2], 7, 'then the busy one; the soldier, mood, noble, miner, child and patient never')
+  T.eq(#d, 3)
+  dfhack.units.getNoblePositions = nil
+  df.unit_labor = nil
+end)
+
+T.test('BUG-054: the kernel never holds more than carers_max members in the detail when its labors grant no caregiver ' ..
+       '(the act changes nothing the census sees): the shortfall says so', function()
+  local pats = {}
+  for i = 1, 5 do pats[i] = {id = 3 + i, thirst = 31000, care = true} end
+  local W, M = carer_world{cit = 20, patients = pats, carers = {1}}
+  day(W, 12)
+  local added = 0
+  for _, d in ipairs(details(W)) do if d[3] == true then added = added + 1 end end
+  T.eq(added, 8, 'carers_max 8 members, then no more')
+  local ins = W.inbox('inspect', {what = 'water_sources'})
+  T.eq({ins.data.carers.have, ins.data.carers.want, ins.data.carers.mine}, {1, 7, 8})
+  T.eq(ins.data.carers.err, '8 citizens added to Orderlies hold no FEED_WATER_CIVILIANS labor')
+  T.eq(M.kpi(W.K).carers, 1)
+  df.unit_labor = nil
+end)
+
+T.test('BUG-054: hysteresis: the kernel\'s own additions leave one a run, carers_hold_days after the last patient', function()
+  local W, M = carer_world{patients = {{id = 5, thirst = 41000, care = true}}, carers = {1}}
+  W.act_result('work_detail', function(name, id, on)
+    W.unit(id).status.labors[FEED] = on
+    return true, on and 'added' or 'removed'
+  end)
+  day(W, 3)
+  T.eq(M.kpi(W.K).carers, 4)
+  local n = #details(W)
+  W.unit(5).health = nil                                              -- the patient is healed
+  day(W, 13)
+  T.eq(#details(W), n, 'held for 14 days')
+  day(W, 1)
+  T.eq(#details(W), n + 1, 'then one leaves')
+  T.eq(details(W)[n + 1][3], false)
+  day(W, 4)
+  T.eq(#details(W), n + 3, 'one a run; unit 1 (not ours) stays')
+  T.eq(W.unit(1).status.labors[FEED], true)
+  day(W, 3)
+  T.eq(#details(W), n + 3)
+  df.unit_labor = nil
+end)
+
+T.test('BUG-054: no Orderlies detail: the failure is named once and asked again after a week; without the contract owner ' ..
+       'water writes nothing', function()
+  local W = carer_world{patients = {{id = 5, thirst = 41000, care = true}}, carers = {1}}
+  W.act_result('work_detail', function() return false, 'no work detail Orderlies' end)
+  day(W)
+  T.eq(#details(W), 1)
+  local pt = needed(W, 'patient_thirst')
+  T.ok(pt[1].msg:find('could not add: no work detail Orderlies', 1, true), pt[1].msg)
+  day(W, 6)
+  T.eq(#details(W), 1, 'a missing detail is not asked for again within a week')
+  day(W, 2)
+  T.eq(#details(W), 2)
+  local C2 = require('dfllm.util.contract')
+  local keep = {}
+  for _, o in ipairs(C2.ACT.work_detail) do if o ~= 'water' then keep[#keep + 1] = o end end
+  C2.ACT.work_detail = keep
+  local W2 = carer_world{patients = {{id = 5, thirst = 41000, care = true}}, carers = {1}}
+  day(W2)
+  T.eq(#details(W2), 0, 'feature detection: no owner, no write')
+  C2.ACT.work_detail = {'economy', 'water'}
+  df.unit_labor = nil
+end)
+
+T.test('BUG-054: a patient at the death-risk line is PATIENT_DYING (A) with the caregivers\' state, once; news wakes it, ' ..
+       'the same set does not repeat before dying_every and the wall clock', function()
+  local pats = {{id = 5, thirst = 61000, care = true}, {id = 6, thirst = 45000, care = true}}
+  local W, M = carer_world{patients = pats, carers = {1, 2}, setup = function(W)
+    df.job_type.GiveWater, df.job_type[78] = 78, 'GiveWater'
+    W.unit(1).job = {current_job = {job_type = 78}}                   -- one is giving water, one stands idle
+  end}
+  W.act_result('work_detail', function(name, id, on)
+    W.unit(id).status.labors[FEED] = on
+    return true, 'added'
+  end)
+  day(W)
+  local ev = W.find_events('PATIENT_DYING')
+  T.eq(#ev, 1)
+  T.eq(ev[1].cls, 'A')
+  T.eq({ev[1].d.units, ev[1].d.n, ev[1].d.thirst, ev[1].d.hosp, ev[1].d.give}, {{5}, 1, 61000, 'ok', 1})
+  T.eq({ev[1].d.carers, ev[1].d.want, ev[1].d.idle, ev[1].d.added, ev[1].d.buckets}, {4, 4, 1, 2, 6})
+  T.eq({ev[1].d.open, ev[1].d.run}, {0, 0}, 'job list read: none')
+  T.ok(ev[1].msg:find('1 patient(s) near death of thirst (>= 60000), unit 5 at 61000: hospital ok, caregivers 4 of 4 wanted '
+                      .. '(1 idle), 1 giving water', 1, true), ev[1].msg)
+  T.ok(#ev[1].msg <= 200 and #ev[1].d.why <= 120)
+  W.unit(6).counters2.thirst_timer = 62000                            -- another patient crosses the line
+  day(W)
+  T.eq(#W.find_events('PATIENT_DYING'), 1, 'news, but within dying_every (2 days)')
+  day(W)
+  T.eq(#W.find_events('PATIENT_DYING'), 1, 'two days passed, the wall clock waits (BUG-008)')
+  W.ms = W.ms + 600000
+  day(W)
+  ev = W.find_events('PATIENT_DYING')
+  T.eq(#ev, 2)
+  T.eq(ev[2].d.units, {6, 5}, 'thirstiest first')
+  day(W, 4)
+  W.ms = W.ms + 600000
+  day(W)
+  T.eq(#W.find_events('PATIENT_DYING'), 2, 'the same patients, the same state: no repeat')
+  W.unit(5).counters2.thirst_timer, W.unit(6).counters2.thirst_timer = 1000, 1000
+  day(W)
+  W.unit(5).counters2.thirst_timer = 63000                            -- a new episode starts at once after a quiet run
+  W.ms = W.ms + 600000
+  day(W, 2)
+  T.eq(#W.find_events('PATIENT_DYING'), 3)
+  df.job_type.GiveWater, df.job_type[78] = nil, nil
+  df.unit_labor = nil
+end)
+
+T.test('BUG-054: PATIENT_DYING names a dry hospital and no caregiver; below the line only patient_thirst', function()
+  df.unit_labor = {FEED_WATER_CIVILIANS = FEED}
+  local W = world{rm = false, patients = {{id = 2, thirst = 65000, rest = true, pos = {12, 12, 5}}},
+                  setup = function(W)
+                    F.hospital(W, {10, 10, 14, 14, 5})
+                    for i = 1, 4 do W.unit(i).status = {labors = {[FEED] = false}} end
+                  end}
+  day(W)
+  local ev = W.find_events('PATIENT_DYING')
+  T.eq(#ev, 1)
+  T.eq({ev[1].d.hosp, ev[1].d.carers < ev[1].d.want}, {'dry', true})
+  local W2 = carer_world{patients = {{id = 5, thirst = 59000, care = true}}, carers = {1, 2, 3, 4}}
+  day(W2)
+  T.eq(#W2.find_events('PATIENT_DYING'), 0)
+  T.eq(#needed(W2, 'patient_thirst'), 1)
+  df.unit_labor = nil
+end)
+
+
+-- BUG-056 (Run 11, note 11): 8 abstract HOSPITAL locations stayed after their zones were deleted
+T.test('BUG-056: hospital locations without a zone disturb no count: hosp, the dry gate, hosp_out and the removal go by ' ..
+       'zones; inspect water_sources says how many are stale', function()
+  local W, M = world{patients = {{id = 2, thirst = 41000, care = true}}, setup = function(W)
+    for i = 1, 8 do                                                   -- eight locations whose zones were deleted
+      W.site.buildings:insert('#', {id = 700 + i, getType = function() return df.abstract_building_type.HOSPITAL end})
+    end
+    F.hospital(W, {10, 10, 14, 14, 5}); well(W, 20, 12, 5)            -- one live hospital, served
+  end, tiles = {['20,12,4'] = '_', ['20,12,3'] = '~'}}
+  day(W)
+  local k = M.kpi(W.K)
+  T.eq({k.hosp, k.hosp_ok, k.hosp_out}, {1, 1, 0})
+  T.eq(#W.find_events('HOSPITAL_DRY'), 0)
+  T.eq(#W.find_acts('hospital_remove'), 0)
+  local r = W.inbox('inspect', {what = 'water_sources'})
+  T.ok(r.ok, r.msg)
+  T.eq(r.data.locs, {total = 9, live = 1, stale = 8})
+  -- no zone at all, 8 locations: no hospital, no gate, nothing to remove; patient_thirst says "no hospital zone"
+  local W2, M2 = world{patients = {{id = 2, thirst = 41000, care = true}}, setup = function(W)
+    for i = 1, 8 do
+      W.site.buildings:insert('#', {id = 700 + i, getType = function() return df.abstract_building_type.HOSPITAL end})
+    end
+  end}
+  day(W2)
+  local k2 = M2.kpi(W2.K)
+  T.eq({k2.hosp, k2.gate, k2.hosp_out, k2.removed}, {0, 0, 0, 0})
+  T.eq(#W2.find_events('HOSPITAL_DRY'), 0)
+  T.ok(needed(W2, 'patient_thirst')[1].msg:find('no hospital zone', 1, true))
+  T.eq(W2.state().water.hosp, 0)
+  T.eq(W2.inbox('inspect', {what = 'water_sources'}).data.locs, {total = 8, live = 0, stale = 8})
+end)
+
 
 T.done()

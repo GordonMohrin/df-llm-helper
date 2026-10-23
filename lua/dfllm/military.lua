@@ -708,7 +708,11 @@ local function stuck(K)
     parts[#parts + 1] = 'create squads named ' .. table.concat(make, ', ') .. ' with a leader (squads screen)'
   end
   if #parts == 0 then parts[1] = 'check the squads screen' end
+  -- BUG-055: the act's refusal and the verbs that do it (Run 11 note 25: "appoint a militia commander/captain" with no
+  -- word on why the kernel could not, nor on how to do it without replaying act.lua by hand)
   local q = table.concat(parts, '; ') .. '. dfllm then fills, equips and trains them (seating a leader failed here)'
+  if rt.create_why then q = q .. '; refused: ' .. rt.create_why:sub(1, 60) end
+  q = q .. '; fix: dfllm cmd squad.create {name, leader} / squad.leader {squad, unit} / appoint {code, unit}; inspect offices'
   local msg = 'squads [S2]: ' .. parts[1]
   K.emit('DECISION_NEEDED', 'A', #msg > 200 and msg:sub(1, 200) or msg, {id = 'squads', q = q})
 end
@@ -760,11 +764,14 @@ local function ensure_squad(K, spec, recruits)
   local ok, id = K.act.squad_create(k, {assignment_id = free_assignment(), leader = leader, kind = spec.kind})
   s = ok and squad(id)
   if not s then
+    rt.create_why = ok and 'the new squad was not found' or tostring(id)          -- BUG-055: named in the DECISION
+    rt.create_since = rt.create_since or now_tick(K)
     backoff(K, 'create' .. k)
     stuck(K)
     return nil
   end
   cleared('create' .. k)
+  rt.create_why, rt.create_since = nil, nil
   st.sq[k], dirty = {id = s.id, kind = spec.kind, uni = 0, auto = 1}, true
   if leader_set(s) then
     K.log('info', 'military: created squad %s (id %d, leader %d)', k, s.id, leader)
@@ -1635,6 +1642,109 @@ M.verbs['squad.sortie'] = function(K, args, cmd)
   return true, 'sortie ' .. k .. ': ' .. what
 end
 
+---------------------------------------------------------------- BUG-055: the squads screen as verbs
+-- Run 11 note 25 / Run 14 note 64: the game session replayed act.lua's squad_create / squad_leader / squad_add /
+-- squad_uniform by hand in scratch scripts, because they were internal functions only. A player does these on the squads
+-- screen; the verbs below are the same actions, for the fight-free modes (kern: PEACE, ALERT, RECOVERY). A squad named A,
+-- B or C (squad.create name) is adopted by this module on its next run and equipped like its own.
+local function squad_arg(a)
+  local e = type(a) == 'string' and st.sq[a] or nil
+  local s, key = e and squad(e.id), a
+  if type(a) == 'number' then
+    s, key = squad(int(a)), nil
+    for k, x in pairs(st.sq) do if s and x.id == s.id then key = k end end
+  end
+  return s, key
+end
+
+M.verbs['squad.create'] = function(K, args, cmd)
+  if type(args.name) ~= 'string' or args.name == '' then return false, 'squad.create needs a name' end
+  local ok, id = K.act.squad_create(args.name, {assignment_id = args.assignment or free_assignment(), leader = args.leader})
+  if not ok then return false, 'squad.create: ' .. tostring(id) end
+  local s = squad(id)
+  local led = s ~= nil and leader_set(s)
+  K.log('info', 'military: squad.create %s: id %s%s', tostring(args.name), tostring(id), led and ' with a leader' or ' without a leader')
+  return true, string.format('squad %s created (id %s)%s', tostring(args.name), tostring(id),
+                             led and '' or ', no leader yet: squad.leader'), {squad = id, leader = led}
+end
+
+M.verbs['squad.leader'] = function(K, args, cmd)
+  if not int(args.unit) then return false, 'squad.leader needs {squad, unit}' end
+  local s = squad_arg(args.squad)
+  if not s then return false, 'no squad ' .. tostring(args.squad) end
+  local ok, res = K.act.squad_leader(s.id, args.unit)
+  if not ok then return false, 'squad.leader: ' .. tostring(res) end
+  rt.kpi = nil
+  return true, string.format('unit %d leads squad %d (%s)', args.unit, s.id, tostring(res)), {squad = s.id}
+end
+
+M.verbs['squad.add'] = function(K, args, cmd)
+  if not int(args.unit) then return false, 'squad.add needs {squad, unit}' end
+  local s = squad_arg(args.squad)
+  if not s then return false, 'no squad ' .. tostring(args.squad) end
+  if not leader_set(s) then return false, 'squad ' .. s.id .. ' has no leader: squad.leader first' end
+  local ok, res = K.act.squad_add(s.id, args.unit)
+  if not ok then return false, 'squad.add: ' .. tostring(res) end
+  rt.kpi = nil
+  return true, string.format('unit %d joined squad %d', args.unit, s.id), {squad = s.id}
+end
+
+-- the uniform template of the squad's kind (M.UNIFORM, the metal sets) for every position, as ensure_uniform gives it
+-- to a fresh squad; the weapon guard (BUG-023: the soldiers never take the Miners' and Woodcutters' tools) applies; a
+-- `kind` other than the squad's is applied once, the squad stays what military's plan says
+M.verbs['squad.uniform'] = function(K, args, cmd)
+  local s, key = squad_arg(args.squad)
+  local e = key and st.sq[key]
+  if not s or not e then return false, 'squad ' .. tostring(args.squad) .. ' is not one of A, B, C (squad.create name A|B|C first)' end
+  local kind = args.kind or e.kind
+  local base = M.UNIFORM[kind]
+  if not base then return false, 'no uniform kind ' .. tostring(kind) end
+  local guarded = rt.wguard ~= nil and kind ~= 'xbow'
+  if guarded then
+    local b = {}
+    for k2, v in pairs(base) do b[k2] = v end
+    b.no_weapon, base = true, b
+  end
+  rt.mats[key] = rt.mats[key] or best_mats(math.max(1, #members(s)))
+  local ok, res = K.act.squad_uniform(s.id, with_mats(base, rt.mats[key]))
+  if not ok then return false, 'squad.uniform: ' .. tostring(res) end
+  if guarded then
+    for _, m in ipairs(members(s)) do nw_set(e, m.pos, true) end
+  end
+  e.uni, dirty = 1, true                  -- (the squad keeps its kind: military's own plan names it)
+  rt.kpi = nil
+  return true, string.format('squad %s: %s uniform on %s positions', key, kind, tostring(res)), {squad = s.id}
+end
+
+-- BUG-055 (Run 11 note 25): the militia posts as the squads see them, for `inspect offices` and the DECISION text:
+-- {active = codes of the ACTIVE militia positions, free = vacant assignments without a squad, squads = fort squads,
+-- fails = failed squad creations, why = the sentence for the player (nil while all is well)}
+function M.leader_state(K)
+  local r = {active = {}, free = 0, squads = 0, fails = rt and rt.create_fails or 0}
+  try(function()
+    local ent = df.global.plotinfo.main.fortress_entity
+    local codes = {}
+    for _, p in ipairs(ent.positions.own) do
+      if M.SQUAD_POSITIONS[p.code] then
+        codes[p.id] = p.code
+        if p.flags.ACTIVE then r.active[#r.active + 1] = p.code end
+      end
+    end
+    for _, a in ipairs(ent.positions.assignments) do
+      if codes[a.position_id] and a.histfig == -1 and a.squad_id == -1 then r.free = r.free + 1 end
+    end
+  end)
+  table.sort(r.active)
+  for _ in pairs(st and st.sq or {}) do r.squads = r.squads + 1 end
+  if rt and rt.create_why then
+    r.why = string.format('squad creation refused %d time(s): %s (ACTIVE militia posts: %s; vacant assignments without a '
+                          .. 'squad: %d)', r.fails, rt.create_why:sub(1, 80), #r.active > 0 and table.concat(r.active, ',')
+                          or 'none', r.free)
+    r.since = rt.create_since
+  end
+  return r
+end
+
 ---------------------------------------------------------------- intake waves and the sortie (siege, Gordon 2026-10-16)
 local function order_sig(o)
   if o.kind == 'station' and o.pos then return string.format('station:%d,%d,%d', o.pos.x, o.pos.y, o.pos.z) end
@@ -2207,6 +2317,20 @@ function M.step(K, budget, ctx)
         if siege then siege_short(K, sp.key, s, want, recruits, why) end
       end
     end
+  end
+  -- review A4 (BUG-055): a refused creation is news only while a wanted squad is missing or leaderless; squads that were
+  -- made on the squads screen (verb squad.create, the player) are adopted above without reaching the creation, so
+  -- the refusal would stay for good and keep readiness R0 `office` set
+  if rt.create_why then
+    local open = false
+    for _, sp in ipairs(M.SQUADS) do
+      local e = st.sq[sp.key]
+      if (per[sp.key] or 0) > 0 or e then
+        local s = e and squad(e.id)
+        if not (s and leader_set(s)) then open = true end
+      end
+    end
+    if not open then rt.create_why, rt.create_since = nil, nil end
   end
   if st.posture == nil then st.posture, st.pt, dirty = 'TRAIN', now, true end
   for _, sp in ipairs(M.SQUADS) do apply_squad(K, sp.key, false) end   -- drift only

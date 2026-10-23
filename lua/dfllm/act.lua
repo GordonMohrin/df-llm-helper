@@ -16,7 +16,8 @@ local ITEM_FLAGS = {forbid = true, dump = true, melt = true}
 -- fishers too, economy staffs them while food is short and a fishing zone exists; FR-25: the planters and the
 -- plant gatherers in a starvation, by the names DF 53 may give the gathering detail [live-untested])
 A.TOOL_DETAILS = {Miners = true, Woodcutters = true, Hunters = true, Fisherdwarves = true, Planters = true,
-                  ['Plant gatherers'] = true, Gatherers = true, Herbalists = true}
+                  ['Plant gatherers'] = true, Gatherers = true, Herbalists = true,
+                  Orderlies = true}      -- BUG-054: water adds caregivers (FEED_WATER_CIVILIANS) for the patients
 -- the details whose labor needs a tool (pick, axe, crossbow, rod): a specialist (work_detail opts.only) keeps them
 A.TOOL_LABOR_DETAILS = {Miners = true, Woodcutters = true, Hunters = true, Fisherdwarves = true}
 -- BUG-023 (Run 11): the tool labors one dwarf may hold only one of (DFHack manipulator.cpp `special` columns: MINE,
@@ -1065,6 +1066,39 @@ local function impls(state)
     local n = type(stats) == 'table' and int(stats.place_designated) or nil
     if n == 0 then return false, 'quickfort designated no stockpile there' end
     return true, n or 1
+  end
+
+  -- zones screen > add zone (FR-78, Run 14 note 65: a pen and a pit had to be built by hand with constructBuilding): ONE
+  -- zone from a one-cell quickfort zone blueprint (zonelib builds `spec.cell`, e.g. 'n{name=pasture}(4x3)', and `spec.pos`,
+  -- its north-west corner; the caller read the tiles: revealed floor, no conflicting zone, act reads none). The zones that
+  -- appear are returned; a pit/pond zone gets the zone sheet's "fill with water" setting its type means (spec.pond: false
+  -- for a pit, true for a pond; read back). Returns ok, {ids, pond} (ok false: quickfort designated no zone).
+  function I.zone_place(spec)
+    if type(spec) ~= 'table' or type(spec.cell) ~= 'string' or #spec.cell == 0 or #spec.cell > 64 then
+      return false, 'spec.cell required (<= 64 characters)'
+    end
+    local x, y, z = xyz(spec.pos)
+    x, y, z = int(x), int(y), int(z)
+    if not (x and y and z) then return false, 'spec.pos must be {x,y,z}' end
+    local before = {}
+    for _, zn in ipairs(df.global.world.buildings.other.ACTIVITY_ZONE) do before[zn.id] = true end
+    local ok, stats = I.quickfort({mode = 'zone', data = {[0] = {[0] = {[0] = spec.cell}}}, pos = {x, y, z}})
+    if not ok then return false, stats end
+    local ids, pond = {}, nil
+    for _, zn in ipairs(df.global.world.buildings.other.ACTIVITY_ZONE) do
+      if not before[zn.id] then
+        ids[#ids + 1] = zn.id
+        if type(spec.pond) == 'boolean' then
+          pcall(function()
+            local f = zn.zone_settings.pond.flag
+            if f.keep_filled ~= spec.pond then f.keep_filled = spec.pond end
+            pond = f.keep_filled == true
+          end)
+        end
+      end
+    end
+    if #ids == 0 then return false, 'quickfort designated no zone there' end
+    return true, {ids = ids, pond = pond}
   end
 
   -- live L6 (Paddletribes): removes ONE Pond zone by id (as the player deletes the zone on its sheet); water

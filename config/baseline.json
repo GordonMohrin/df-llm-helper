@@ -286,7 +286,14 @@
  "water": {
   "patient_thirst": 25000,
   "hosp_remove": true,
-  "remove_per_run": 8
+  "remove_per_run": 8,
+  "carers_per_patient": 1,
+  "carers_min": 2,
+  "carers_max": 8,
+  "carers_urgent": 2,
+  "carers_per_run": 2,
+  "carers_hold_days": 14,
+  "dying_thirst": 60000
  },
  "runner": {
   "seal_first": {"on": true, "stuck_days": 3, "food_d": 30, "drink_d": 30, "wall": true, "wall_days": 2},
@@ -301,6 +308,8 @@
   "early_pop": 40,
   "station_r": 3
  },
+ "offices": {"blocker_days": 7},
+ "zones": {"max_tiles": 400},
  "reserve": {
   "from_phase": "P1",
   "share": {"boulders": 0.25, "logs": 0.25}, "share_min": 5,

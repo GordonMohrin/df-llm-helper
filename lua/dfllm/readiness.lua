@@ -258,6 +258,33 @@ local function refuge_where(K, rd)
   return s .. string.format(', nearest accepted water: %s, %d tiles', lbl, n.d), lbl, dry
 end
 
+---------------------------------------------------------------- BUG-055: vacant offices
+-- config/baseline.json "offices": blocker_days (7, 0 = never a blocker); the offices that block are the manager (no order
+-- is validated without one) and the hospital's chief medical dwarf; squads that cannot get a leader block too
+M.OFFICES = {days = 7, codes = {MANAGER = true, CHIEF_MEDICAL_DWARF = true}}
+function M.office_blocker(K, now)
+  local c = type(K.cfg.baseline) == 'table' and K.cfg.baseline.offices
+  local days = type(c) == 'table' and int(c.blocker_days) or M.OFFICES.days
+  if days == nil or days < 0 or days > 400 then days = M.OFFICES.days end
+  if days == 0 then return nil end
+  local okc, offs = K.call('economy', 'offices')
+  if okc and type(offs) == 'table' then
+    for _, o in ipairs(offs) do
+      if M.OFFICES.codes[o.code] and (int(o.days) or 0) >= days then
+        local fix = o.cand and string.format('dfllm cmd appoint {"code":"%s","unit":%d}', o.code, o.cand)
+                    or (o.why or 'no candidate')
+        return cut(string.format('%s vacant %d days (ACTIVE%s): %s', o.code, o.days, o.why and (', ' .. o.why) or '', fix),
+                   200)
+      end
+    end
+  end
+  local okm, ls = K.call('military', 'leader_state')
+  if okm and type(ls) == 'table' and ls.why and int(ls.since) and now - ls.since >= days * 1200 then
+    return cut(ls.why .. '; fix: dfllm cmd squad.create {name, leader} or appoint {code, unit}', 200)
+  end
+  return nil
+end
+
 ---------------------------------------------------------------- levels
 local function audit_fails(K, now)
   local a = st.audit
@@ -377,6 +404,18 @@ local function evaluate(K, why)
                                 okh and type(ho) == 'table' and int(ho.total) or (int(wv.hosp) or 0),
                                 z and string.format('; zone %d at %d,%d,%d', int(z.id) or -1, int(z.x) or -1,
                                                     int(z.y) or -1, int(z.z) or -1) or '', dest), 200)
+  end
+  -- BUG-055 (Run 14 y577: the CHIEF_MEDICAL_DWARF office stood vacant for good, nobody noticed): an office the kernel did
+  -- not fill within offices.blocker_days, or squads it cannot give a leader
+  rt.office = nil
+  local otext = M.office_blocker(K, now)
+  -- a young fort cannot always fill an office and must not stop growing for it (the same small-fort guard as FR-70's
+  -- perimeter hold, perimeter.hold_pop citizens)
+  local hp0, cu0 = pcfg(K, 'hold_pop'), K.census and K.census.u
+  if otext and hp0 > 0 and type(cu0) == 'table' and (int(cu0.cit) or 0) < hp0 then otext = nil end
+  if otext then
+    f1[#f1 + 1] = 'office'
+    rt.office = otext
   end
   if not rt.lev or now - rt.lev.tick >= M.LEVERS_EVERY then rt.lev = check_levers(K, man) end
   local okl, lost = K.call('seal', 'lost_gates')             -- BUG-030 rebuild policy: held bridges
@@ -522,7 +561,7 @@ local function route_fix(route)
   return route .. ' (no wall tile: inspect entrances)'
 end
 
-local function unready_msg(fails, routes, open, ents, traps, route, rdry, hout, perim)
+local function unready_msg(fails, routes, open, ents, traps, route, rdry, hout, perim, office)
   local ent
   if routes < 0 then ent = 'entrances not checked yet'
   elseif open == 0 then ent = string.format('%d way%s in, all with a door or bridge', routes, routes == 1 and '' or 's')
@@ -538,6 +577,7 @@ local function unready_msg(fails, routes, open, ents, traps, route, rdry, hout, 
   if fix then head = head .. fix .. '; ' end
   if rdry then head = head .. rdry .. '; ' end                 -- Run 11: the refuge without drink
   if hout then head = head .. hout .. '; ' end                 -- BUG-036: the hospital outside Kern+/the refuge
+  if office then head = head .. office .. '; ' end             -- BUG-055: a vacant office, squads without a leader
   local tail = '; traps ' .. (traps >= 0 and tostring(traps) or '? (no audit)')
   if #head + #ent + #tail > 200 and open > 0 then              -- the list stands in d.ents: keep the traps visible
     ent = string.format('%d of %d ways in without door or bridge', open, routes)
@@ -577,9 +617,9 @@ local function unready(K)
   end
   local routes, open = rt.routes or -1, rt.open or -1
   local perim = rt.pd and string.format('perimeter OPEN %d d (%s)', rt.pd, rt.pw or '?') or nil
-  K.emit('SIEGE_UNREADY', 'A', unready_msg(fails, routes, open, ents, traps, rt.route, rt.rdry, rt.hout, perim),
+  K.emit('SIEGE_UNREADY', 'A', unready_msg(fails, routes, open, ents, traps, rt.route, rt.rdry, rt.hout, perim, rt.office),
          {fails = fails, afails = afails, routes = routes, open = open, ents = ents, traps = traps,
-          age = a and math.max(0, now.tick - a.tick) or -1, rdry = rt.rdry, hout = rt.hout,
+          age = a and math.max(0, now.tick - a.tick) or -1, rdry = rt.rdry, hout = rt.hout, office = rt.office,
           pd = rt.pd, pw = rt.pd and rt.pw or nil})
   st.unready, dirty = CAD.mark(now, ents, toks), true
 end
@@ -742,6 +782,7 @@ function M.state(K)
   end
   if rt.dhold then r.dhold = rt.dhold end                     -- why no automatic drill starts (drill.hold)
   if rt.route then r.route = rt.route end                     -- the bypass / refuge route the last audit names
+  if rt.office then r.office = rt.office end                  -- BUG-055: the vacant office R0 `office` names
   return {ready = r, pop = {cap = M.cap(K), gate_cap = rt.gate_cap or M.CAPS[0]}}
 end
 
