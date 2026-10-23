@@ -102,8 +102,9 @@ def test_events_validate_and_the_new_class_a_events_come(run):
     assert g["cls"] == "A" and g["d"]["ghosts"] == 1 and g["d"]["causes"] == ["6:zone_shared"]
     assert "bank 19,12,5 is reachable" in by["HOSPITAL_DRY"][0]["d"]["recipe"]
     # BUG-017: no bar in the fort at all: the class is named as without a source
+    # K3: and the slot says so with its filter and counts
     assert by["MOOD_RISK"][0]["d"] == {"unit": 3, "why": "missing", "kind": "Fey", "missing": ["bars"],
-                                       "nosrc": ["bars"]}
+                                       "nosrc": ["bars"], "slots": ["bars x1: none in the fort [0/0/0]"]}
     fails = [e for e in by.get("ACT_FAIL", []) if e["d"]["fn"] in ("run", "tomb_zone", "medic", "hospital_post")]
     assert fails == []
 
