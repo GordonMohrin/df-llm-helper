@@ -414,6 +414,10 @@ end
 
 local function labors(u) return try(function() return u.status.labors end) end
 
+-- BUG-088: the census (sense) holds the fort's residents too, who are no citizens; the squads screen lists living adult
+-- citizens only (BUG-085), so recruits and the militia cohort are citizens
+local function citizen(u) return try(function() return dfhack.units.isCitizen(u) end) == true end
+
 -- Run 11 siege 3: the manifest's Kern+ and refuge burrows (roles kern/refuge, refuge.burrow wins), as gate reads them
 local function core_home(K)
   local man = K.manifest()
@@ -470,7 +474,7 @@ function M.recruits(K, siege)
     local u = df.unit.find(id)
     if u and not dfhack.units.isDead(u) then
       if not dfhack.units.isAdult(u) then why.child = why.child + 1
-      else adults[#adults + 1] = u end
+      elseif citizen(u) then adults[#adults + 1] = u end
     end
   end
   -- sole holders of a key labor
@@ -1339,7 +1343,8 @@ function M.rot_pool(K, s)
   for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
     local u = df.unit.find(id)
     if u and not dfhack.units.isDead(u) then
-      if dfhack.units.isAdult(u) then adults[#adults + 1] = u else why.child = why.child + 1 end
+      if not dfhack.units.isAdult(u) then why.child = why.child + 1
+      elseif citizen(u) then adults[#adults + 1] = u end
     end
   end
   local lead = try(function() return s.positions[0].occupant end) or -1
@@ -1439,8 +1444,9 @@ local function rot_turn(K, sp, s, want, r, ed, info, c, now)
   local function hold(why, ...)
     info.why = 'held: ' .. string.format(why, ...)
     rt.rot_last[k] = info.why:sub(7)
-    rot_note(K, k, ed.close .. info.why, 'military: militia squad %s: the turnover at the close of month %d waits (%s)', k,
-             ed.close % 12, info.why:sub(7))
+    -- BUG-089: the reason is the signature, not its numbers ('worn 38% < 40%' moves with every upkeep): once per close
+    rot_note(K, k, ed.close .. info.why:gsub('%d+', '#'), 'military: militia squad %s: the turnover at the close of month '
+             .. '%d waits (%s)', k, ed.close % 12, info.why:sub(7))
     return false
   end
   if want < 2 then                                                -- a squad of the leader alone: nothing to rotate
@@ -2459,14 +2465,25 @@ function M.conflicts(K)
 end
 
 -- not PEACE (ALERT, SIEGE, BREACH, RECOVERY, DRILL), a lockdown holds, or a hostile is in sight: the reason, else nil.
--- military's repairs and drill's start both ask (BUG-050, BUG-051)
+-- military's repairs and drill's start both ask (BUG-050, BUG-051), and the militia turnover (FR-79).
+-- BUG-087: "a hostile in sight" was the raw census count, a second opinion beside threat's. threat counts for nothing
+-- the hostiles reflex cleared (BUG-065: a harmless intruder released at the confinement limit; Run 11: an invader whose
+-- lockdown expired far, reflex.far_ids) and the wildlife out of reach (an ELK_BIRD at the map edge, a beast in a sealed
+-- cavern); military kept counting them as long as they were in sight (Run 14: a gremlin for years), so the unstick, the
+-- drill and the turnover waited for them for ever. Now threat's reading decides (its `hostile`: an invader not cleared,
+-- a hostile inside or in reach), and a great danger, an undead and a hostile the census list does not show (it holds the
+-- nearest LIST_MAX) still count; without a threat module or a scan every hostile in sight counts, as before.
 function M.danger(K)
   local mode = K.mode()
   if mode ~= 'PEACE' then return 'mode ' .. mode end
   local okr, why = K.call('reflex', 'holding')
   if okr and why then return 'lockdown' end
   local h = K.census.h
-  if type(h) == 'table' and (int(h.vis) or 0) > 0 then return 'hostile' end
+  if type(h) ~= 'table' or (int(h.vis) or 0) == 0 then return nil end
+  local oka, a = K.call('threat', 'assess')
+  if not (oka and type(a) == 'table') then return 'hostile' end
+  local listed = type(h.list) == 'table' and #h.list or 0
+  if a.hostile or (a.great or 0) > 0 or (a.undead or 0) > 0 or int(h.vis) > listed then return 'hostile' end
   return nil
 end
 
