@@ -80,7 +80,7 @@ local TRAP_CH = {WeaponTrap = 'W', StoneFallTrap = 'S', CageTrap = 'C', Pressure
 local function tt_info(tt)
   local r = tt_cache[tt]
   if r then return r end
-  r = {c = '?', soil = false, plant = false, ice = false}
+  r = {c = '?', soil = false, plant = false, ice = false, shape = ''}
   pcall(function()
     local a = df.tiletype.attrs[tt]
     local shape = df.tiletype_shape[a.shape]
@@ -93,6 +93,7 @@ local function tt_info(tt)
     end
     r.c, r.soil, r.plant = c, SOIL_MAT[mat] == true and SOIL_SHAPE[shape] == true, PLANT_SHAPE[shape] or false
     r.ice = mat == 'FROZEN_LIQUID'               -- Run 11: frozen water (winter ice) is no water to fish or fill from
+    r.shape = shape                              -- BUG-102: the tiletype shape name (care's nook judges it like place.lua)
   end)
   tt_cache[tt] = r
   return r
@@ -257,14 +258,18 @@ function M.tile(K, x, y, z)
   if not live_traps or now - live_traps.tick >= M.CFG.trap_ttl or now < live_traps.tick then
     live_traps = {tick = now, idx = trap_index(nil)}
   end
-  local c, bld = classify(x, y, z, des, oc, live_traps.idx, nil)
+  local c, bld, _, plant = classify(x, y, z, des, oc, live_traps.idx, nil)
+  local info = tt_info(dfhack.maps.getTileType(x, y, z))
   local dig = designation(des, oc)
   if dig == '' and designation_jobs(now)[string.format('%d,%d,%d', x, y, z)] then dig = 'job' end
   -- flow: liquid depth 0..7 of this revealed tile, magma: true for magma (runner: light-aquifer seepage); cav: the
   -- revealed tile belongs to a cavern (designation.feature_global, the export's cavern mark; runner: Run 11 cavern lake);
-  -- ice: frozen water (tiletype material FROZEN_LIQUID; Run 11, economy's fishing zone)
+  -- ice: frozen water (tiletype material FROZEN_LIQUID; Run 11, economy's fishing zone). BUG-102 (care's drink nook judges a
+  -- tile the way quickfort's place mode does, place.lua:29-43): shape = the tiletype shape name ('FLOOR', 'BRANCH', ...),
+  -- plant = 'shrub' | 'sapling' | false, occ = the building occupancy value (tile_building_occ: 1 Planned counts there)
   return {c = c, dig = dig, bld = bld, flow = des.flow_size or 0, magma = des.liquid_type == true,
-          cav = des.feature_global == true, ice = tt_info(dfhack.maps.getTileType(x, y, z)).ice == true}
+          cav = des.feature_global == true, ice = info.ice == true, shape = info.shape, plant = plant or false,
+          occ = oc and int(oc.building) or 0}
 end
 
 -- BUG-058 (economy's farm plots; Run 13 y513: surface crops on a plot on z149 made no PlantSeeds job): does the plot tile
@@ -342,6 +347,37 @@ function M.items_at(K, x0, y0, x1, y1, z)
     end
   end
   table.sort(out, function(a, b) return a[1] < b[1] end)
+  return out
+end
+
+-- floor items by tile (BUG-102, care's drink nook: quickfort's place mode ignores items, a barrel pile on a tile with
+-- loose items beside the workshop is still no nook): {['x,y'] = count} of the items on the ground of the revealed tiles
+-- of a level rect, one pass over the map blocks it touches; at most M.CFG.nook_tiles tiles per call. Items in a building,
+-- a container or a unit's hands, hidden tiles and other levels stay out.
+M.CFG.nook_tiles = 1024
+function M.item_tiles(K, x0, y0, x1, y1, z)
+  x0, y0, x1, y1, z = int(x0), int(y0), int(x1), int(y1), int(z)
+  local out = {}
+  if not (x0 and y0 and x1 and y1 and z) or x1 < x0 or y1 < y0 then return out end
+  if (x1 - x0 + 1) * (y1 - y0 + 1) > M.CFG.nook_tiles then return nil, 'rect too large' end
+  local getTileFlags, seen = dfhack.maps.getTileFlags, {}
+  for by = y0 // 16, y1 // 16 do
+    for bx = x0 // 16, x1 // 16 do
+      local blk = dfhack.maps.getTileBlock(math.max(x0, bx * 16), math.max(y0, by * 16), z)
+      for _, id in ipairs(blk and blk.items or {}) do
+        local it = not seen[id] and df.item.find(id)
+        seen[id] = true
+        local p = it and it.flags.on_ground and it.pos
+        if p and p.z == z and p.x >= x0 and p.x <= x1 and p.y >= y0 and p.y <= y1 then
+          local des = getTileFlags(p.x, p.y, p.z)
+          if des and not des.hidden then
+            local k = p.x .. ',' .. p.y
+            out[k] = (out[k] or 0) + 1
+          end
+        end
+      end
+    end
+  end
   return out
 end
 

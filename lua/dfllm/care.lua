@@ -120,6 +120,9 @@ M.DEFAULTS = {
   -- mood_fast ticks while a mood is open (0: the care cadence), the nook's source pile and its retry
   mood_act = 40000, mood_crit = 50000, mood_crit_hunger = 60000, mood_fast = 300, mood_nook = true,
   mood_take = 'dfllm-stock', mood_nook_retry = 3600,
+  -- BUG-102 / FR-82: the nook search radius (3), the widest a critical mood may widen it to in steps (3 -> 6 -> 9; rmax <= r:
+  -- never), the tiles read in full per step, the nooks queued per unit and game day (quickfort may refuse a tile)
+  mood_nook_r = 3, mood_nook_rmax = 9, mood_nook_step = 3, mood_nook_probes = 40, mood_nook_tries = 4,
   -- BUG-064: one BUILDING_TOPPLED per culprit per topple_every ticks; gate asks for a culprit near a vanished bridge
   -- within topple_win ticks and topple_r tiles
   topple_every = 2400, topple_win = 4800, topple_r = 6,
@@ -561,8 +564,9 @@ local function mood_seen(K, c, r, p, u, kind)
   -- beside the claimed workshop (runner.mooddrink; never a job or an item for the dwarf), at mood_crit the
   -- escalation MOOD_CRITICAL (A) names the dwarf and the workshop. MOOD_RISK names thirst and hunger both.
   local act = th >= c.mood_act or hu >= c.mood_act
+  local crit = th >= c.mood_crit or hu >= c.mood_crit_hunger           -- FR-82: the bar MOOD_CRITICAL uses
   local nook = ''
-  if act then nook = mood_relief(K, c, p, u, rec, job, ws) or '' end
+  if act then nook = mood_relief(K, c, p, u, rec, job, ws, crit) or '' end
   if risk and CAD.due(last, T, {sid}, {risk}, {ticks = c.mood_risk_every, wall_s = c.wake_wall_s}) then
     rec.risk, rec.risk_why, rec.risk_w = now, risk, T.wall
     local miss = still_missing(job, rec)
@@ -588,7 +592,7 @@ local function mood_seen(K, c, r, p, u, kind)
   elseif not risk then
     rec.risk_why = nil                         -- quiet: the time stays, a new risk within the cadence waits
   end
-  if th >= c.mood_crit or hu >= c.mood_crit_hunger then
+  if crit then
     local why = th >= c.mood_crit and 'thirst' or 'hunger'
     local crec = rec.crit and {t = rec.crit, w = rec.crit_w, ids = {sid}, toks = {why}} or nil
     if CAD.due(crec, T, {sid}, {why}, {ticks = c.mood_risk_every, wall_s = c.wake_wall_s}) then
@@ -1691,8 +1695,12 @@ local function occ_index(bb, taken)
       local rc = rect_of(b)
       if rc and rc.z >= bb[3] and rc.z <= bb[6] and rc.x2 >= bb[1] and rc.x1 <= bb[4] and rc.y2 >= bb[2]
          and rc.y1 <= bb[5] then
+        local kind = name == 'IN_PLAY' and 'building' or 'zone'       -- BUG-102: the nook's refusal names which
         for y = math.max(rc.y1, bb[2]), math.min(rc.y2, bb[5]) do
-          for x = math.max(rc.x1, bb[1]), math.min(rc.x2, bb[4]) do occ[key3(x, y, rc.z)] = true end
+          for x = math.max(rc.x1, bb[1]), math.min(rc.x2, bb[4]) do
+            local k = key3(x, y, rc.z)
+            occ[k] = occ[k] or kind
+          end
         end
       end
     end
@@ -1700,38 +1708,142 @@ local function occ_index(bb, taken)
   return occ
 end
 
--- BUG-063 (fair play: a stockpile is a zone, nothing is given to the dwarf): a free floor tile within MOOD_NOOK_R of the
--- workshop a strange mood claimed (revealed '.', no building, zone, stockpile or designation, walkable from the
--- workshop), nearest first; at most MOOD_NOOK_PROBES tiles are read
+-- BUG-063 (fair play: a stockpile is a zone, nothing is given to the dwarf): a free floor tile within mood_nook_r of the
+-- workshop a strange mood claimed, nearest first. BUG-102 (Run 11/14 note 73: "no free floor within 3 tiles" although the
+-- tiles looked free): a tile is judged the way quickfort's place mode judges it (scripts/internal/quickfort/place.lua:29-43
+-- is_valid_stockpile_tile: not hidden, occupancy.building == 0, a shape in NOOK_SHAPE) and by what the player sees: no
+-- building, zone or stockpile (occ_index), no designation, no plant, no item on the floor, a walk group the dwarf or the
+-- workshop reaches. A refusal counts the tiles by reason. FR-82: a critical mood widens the search 3 -> 6 -> 9.
+-- At most mood_nook_probes tiles per step are read in full (the cheap verdicts, a wall, a building, do not count).
 local MOOD_NOOK_R, MOOD_NOOK_PROBES = 3, 40
-local function nook_site(K, job)
+local NOOK_SHAPE = {FLOOR = true, BOULDER = true, PEBBLES = true, TWIG = true, SAPLING = true, SHRUB = true, RAMP = true,
+                    STAIR_UP = true, STAIR_DOWN = true, STAIR_UPDOWN = true}
+local NOOK_OCC = {'building', 'item', 'plant', 'designation', 'zone', 'refused'}   -- the "occupied" reasons (log line)
+local NOOK_BAD_MAX = 12                                -- tiles quickfort refused, remembered per mood
+
+local function nook_steps(c, crit)
+  local r = math.max(1, num(c.mood_nook_r) or MOOD_NOOK_R)
+  local steps = {r}
+  local rmax, st = num(c.mood_nook_rmax) or 9, math.max(1, num(c.mood_nook_step) or 3)
+  if crit and rmax > r then
+    local s = r + st
+    while s < rmax do steps[#steps + 1] = s; s = s + st end
+    steps[#steps + 1] = rmax
+  end
+  return steps
+end
+
+-- "no nook within 6: 9 occupied, 4 unreachable, 2 wrong shape, 3 too far" (<= 80 bytes)
+local function nook_text(R, cnt)
+  local occ = 0
+  for _, k in ipairs(NOOK_OCC) do occ = occ + (cnt[k] or 0) end
+  local parts = {}
+  if occ > 0 then parts[#parts + 1] = occ .. ' occupied' end
+  if (cnt.unreach or 0) > 0 then parts[#parts + 1] = cnt.unreach .. ' unreachable' end
+  if (cnt.shape or 0) > 0 then parts[#parts + 1] = cnt.shape .. ' wrong shape' end
+  if (cnt.far or 0) > 0 then parts[#parts + 1] = cnt.far .. ' too far' end
+  if #parts == 0 then parts[1] = 'no tile beside the workshop' end
+  return string.format('no nook within %d: %s', R, table.concat(parts, ', '))
+end
+
+local function nook_log_detail(cnt)
+  local l = {}
+  for _, k in ipairs(NOOK_OCC) do l[#l + 1] = string.format('%s %d', k, cnt[k] or 0) end
+  return table.concat(l, ', ')
+end
+
+-- site, radius (nil, text, counts when no tile is free). u: the moody dwarf (his position is a second walk anchor, the
+-- workshop's first tile the first: either reaching the tile is enough); rec.bad: tiles quickfort refused
+local function nook_site(K, c, job, u, rec, crit)
   local b
   local okh = pcall(function() b = dfhack.job.getHolder(job) end)
   local rc = okh and b and rect_of(b)
-  if not rc then return nil end
-  local R = MOOD_NOOK_R
-  local occ = occ_index({rc.x1 - R, rc.y1 - R, rc.z, rc.x2 + R, rc.y2 + R, rc.z}, {})
+  if not rc then return nil, 'no nook: the workshop is not readable', {} end
+  local steps = nook_steps(c, crit)
+  local Rmax = steps[#steps]
+  local probes = math.max(1, num(c.mood_nook_probes) or MOOD_NOOK_PROBES)
+  local occ = occ_index({rc.x1 - Rmax, rc.y1 - Rmax, rc.z, rc.x2 + Rmax, rc.y2 + Rmax, rc.z}, {})
+  local bad = {}
+  for _, k in ipairs(type(rec.bad) == 'table' and rec.bad or {}) do bad[k] = true end
   local cand = {}
-  for y = rc.y1 - R, rc.y2 + R do
-    for x = rc.x1 - R, rc.x2 + R do
+  for y = rc.y1 - Rmax, rc.y2 + Rmax do
+    for x = rc.x1 - Rmax, rc.x2 + Rmax do
       local dx = x < rc.x1 and rc.x1 - x or (x > rc.x2 and x - rc.x2 or 0)
       local dy = y < rc.y1 and rc.y1 - y or (y > rc.y2 and y - rc.y2 or 0)
       local d = math.max(dx, dy)
-      if d >= 1 and not occ[key3(x, y, rc.z)] then cand[#cand + 1] = {d, dx + dy, y, x} end
+      if d >= 1 then cand[#cand + 1] = {d, dx + dy, y, x} end
     end
   end
   table.sort(cand, function(a, b2)                -- nearest first, a tile touching the workshop's side before a corner
     for k = 1, 4 do if a[k] ~= b2[k] then return a[k] < b2[k] end end
     return false
   end)
-  for i = 1, math.min(#cand, MOOD_NOOK_PROBES) do
-    local x, y = cand[i][4], cand[i][3]
-    local ok, t = K.call('snapshot', 'tile', x, y, rc.z)
-    if ok and type(t) == 'table' and t.c == '.' and (t.bld == nil or t.bld == '') and (t.dig == nil or t.dig == '')
-       and reach_ok(K, {x = x, y = y, z = rc.z}, {x = rc.x1, y = rc.y1, z = rc.z}) then
-      return {x, y, rc.z}
+  local corner, upos = {x = rc.x1, y = rc.y1, z = rc.z}, unit_pos(u)
+  local items                                      -- nil: not read yet, false: unavailable (no item check then)
+  local function floor_items()
+    if items == nil then
+      local ok, r = K.call('snapshot', 'item_tiles', rc.x1 - Rmax, rc.y1 - Rmax, rc.x2 + Rmax, rc.y2 + Rmax, rc.z)
+      items = (ok and type(r) == 'table') and r or false
+    end
+    return items
+  end
+  -- the cheap verdicts: nil = the tile is open floor so far (and t its tile read)
+  local function first(cd)
+    local x, y, z = cd[4], cd[3], rc.z
+    local k = occ[key3(x, y, z)]
+    if k then return k end
+    if bad[x .. ',' .. y .. ',' .. z] then return 'refused' end
+    local ok, t = K.call('snapshot', 'tile', x, y, z)
+    if not (ok and type(t) == 'table') then return 'shape' end              -- hidden or unreadable
+    if (type(t.bld) == 'string' and t.bld ~= '') or (num(t.occ) or 0) ~= 0 then return 'building' end
+    if t.c ~= '.' or (type(t.shape) == 'string' and t.shape ~= '' and not NOOK_SHAPE[t.shape]) then return 'shape' end
+    return nil, t
+  end
+  local function deep(cd, t)
+    local x, y, z = cd[4], cd[3], rc.z
+    if type(t.dig) == 'string' and t.dig ~= '' then return 'designation' end
+    if t.plant then return 'plant' end
+    local fi = floor_items()
+    if fi and fi[x .. ',' .. y] then return 'item' end
+    if t.cav == true then return 'unreach' end                              -- never a nook in a cavern
+    local tile = {x = x, y = y, z = z}
+    if reach_ok(K, tile, corner) or (upos and upos.z == z and reach_ok(K, tile, upos)) then return nil end
+    return 'unreach'
+  end
+  local verdict = {}
+  for _, R in ipairs(steps) do
+    local reads = 0
+    for i, cd in ipairs(cand) do
+      if cd[1] > R then break end
+      if verdict[i] == nil then
+        local v, t = first(cd)
+        if v == nil then
+          if reads >= probes then break end
+          reads = reads + 1
+          v = deep(cd, t)
+          if v == nil then return {cd[4], cd[3], rc.z}, R end
+        end
+        verdict[i] = v
+      end
     end
   end
+  local Rlast, cnt = steps[#steps], {}
+  for i, cd in ipairs(cand) do
+    if cd[1] <= Rlast then
+      local v = verdict[i] or 'far'
+      cnt[v] = (cnt[v] or 0) + 1
+    end
+  end
+  return nil, nook_text(Rlast, cnt), cnt
+end
+
+-- BUG-102: a tile quickfort refused is skipped by every later search of this mood
+local function nook_bad(rec, at)
+  if type(at) ~= 'string' then return end
+  rec.bad = type(rec.bad) == 'table' and rec.bad or {}
+  for _, k in ipairs(rec.bad) do if k == at then return end end
+  rec.bad[#rec.bad + 1] = at
+  while #rec.bad > NOOK_BAD_MAX do table.remove(rec.bad, 1) end
 end
 
 -- BUG-063: the drink side of a mood at thirst/hunger mood_act (material delivery is the first lever, MOOD_NEED and the
@@ -1739,18 +1851,43 @@ end
 -- (runner.mooddrink, a quickfort place of our own), once per mood, in PEACE/RECOVERY. Returns the text MOOD_RISK and
 -- MOOD_CRITICAL carry (nil: nothing to say). Live data that decides whether it helps: kern.log 'mood nook', and
 -- the dwarf's thirst after the nook stands (inspect census / MOOD_END).
-mood_relief = function(K, c, p, u, rec, job, ws)
+-- BUG-102: a nook whose project quickfort refused ("tile occupied", runner.nook_state) is dropped, its tile skipped and the
+-- next site tried (at most mood_nook_tries queued per unit and game day); a refusal says why in counts.
+-- FR-82: crit (thirst past mood_crit, hunger past mood_crit_hunger) widens the search at once, also inside the retry window.
+mood_relief = function(K, c, p, u, rec, job, ws, crit)
   if c.mood_nook == false or not (job and ws) then return nil end
   local sid = fmt(u.id)
+  local now = K.now().tick
   local done = type(p.nook) == 'table' and p.nook[sid]
+  if type(done) == 'table' and done.ok ~= true then
+    local okq, state, at = K.call('runner', 'nook_state', done.id)
+    if okq and state == 'refused' then
+      p.nook[sid], done = nil, nil
+      nook_bad(rec, at)
+      rec.nook_try = nil                                  -- search again at once, within the day's tries
+      rec.nook_why = string.format('quickfort refused the drink nook at %s (tile occupied)', tostring(at))
+      K.log('warn', 'mood nook: unit %s: %s; the tile is skipped', sid, rec.nook_why)
+    elseif okq and state == 'placed' then
+      done.ok = true
+    end
+  end
   if type(done) == 'table' then return done.txt end
-  local mode, now = K.mode(), K.now().tick
+  local mode = K.mode()
   if mode ~= 'PEACE' and mode ~= 'RECOVERY' then return nil end
-  if now - (num(rec.nook_try) or -c.mood_nook_retry) < c.mood_nook_retry then return rec.nook_why end
+  local r0 = math.max(1, num(c.mood_nook_r) or MOOD_NOOK_R)
+  local widen = crit and (num(c.mood_nook_rmax) or 9) > r0 and not rec.nook_wide     -- the first critical look widens at once
+  if now - (num(rec.nook_try) or -c.mood_nook_retry) < c.mood_nook_retry and not widen then return rec.nook_why end
+  if rec.nook_day and (now - num(rec.nook_day) >= DAY or now < num(rec.nook_day)) then rec.nook_n, rec.nook_day = 0, nil end
+  if (num(rec.nook_n) or 0) >= math.max(1, num(c.mood_nook_tries) or 4) then return rec.nook_why end
   rec.nook_try = now
-  local site = nook_site(K, job)
+  if crit then rec.nook_wide = true end
+  local site, R, cnt = nook_site(K, c, job, u, rec, crit)
   if not site then
-    rec.nook_why = 'no free floor within 3 tiles of the workshop for a drink nook'
+    rec.nook_why = R
+    if rec.nook_log ~= R then                             -- the same reason for the same unit is logged once
+      rec.nook_log = R
+      K.log('info', 'mood nook: unit %s (%s %s): %s [%s]', sid, rec.kind or '?', ws, R, nook_log_detail(cnt or {}))
+    end
     return rec.nook_why
   end
   local okp, pend = K.call('runner', 'pending', 'mood_drink')
@@ -1764,9 +1901,13 @@ mood_relief = function(K, c, p, u, rec, job, ws)
     K.log('warn', 'mood nook for unit %s: runner.mooddrink refused: %s', sid, tostring(ok and id or okr))
     return rec.nook_why
   end
-  local txt = string.format('drink nook queued at %d,%d,%d (%s)', site[1], site[2], site[3], tostring(id))
+  local txt = string.format('drink nook queued at %d,%d,%d (%s)%s', site[1], site[2], site[3], tostring(id),
+                            R > r0 and (' r' .. R) or '')
   p.nook = json.object(type(p.nook) == 'table' and p.nook or {})
   p.nook[sid] = {t = now, id = tostring(id), txt = txt}
+  if (num(rec.nook_n) or 0) == 0 then rec.nook_day = now end
+  rec.nook_n = (num(rec.nook_n) or 0) + 1
+  rec.nook_log = nil
   K.log('info', 'mood nook: unit %s (%s %s): %s', sid, rec.kind or '?', ws, txt)
   return txt
 end

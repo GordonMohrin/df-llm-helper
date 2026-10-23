@@ -364,6 +364,8 @@ CARE_LIM: dict = {
     "tomb_open_per_run": (0, 1000), "far_check": (0, 500),
     "mood_hunger": _THIRST, "mood_act": _THIRST, "mood_crit": _THIRST, "mood_crit_hunger": _THIRST, "mood_fast": (0, 3600),
     "mood_nook": "bool", "mood_take": "pile", "mood_nook_retry": _TICKS,
+    "mood_nook_r": (1, 12), "mood_nook_rmax": (0, 12), "mood_nook_step": (1, 6), "mood_nook_probes": (1, 200),
+    "mood_nook_tries": (1, 12),
     "topple_every": _TICKS, "topple_win": _TICKS, "topple_r": (0, 50),
     "stress_high": (1, 100), "stress_days": (1, 400), "stress_every": _TICKS}
 

@@ -127,5 +127,6 @@ lines). Everything is "offline, live-untested": each bug file names its live che
 | 70 | Kern+ lost its tiles and Tiefe+ vanished, hospital_out the 4th time | BUG-096, BUG-097, FR-80 (burrow guard in seal: reading, BURROW_SHRUNK, repair; the cause itself is read live from the event data) |
 | 71 | load-save broken by DFHack 53.16-r3, crash recovery silent | BUG-098, BUG-099, FR-81 (title-screen load by mouse click, `needs_click` alarm, version watch) |
 | 72 | "blocks: no source in the fort" with 225 blocks, mood death | BUG-100 (real filter, free/reachable counts, every unmet slot incl. the cloth wall) |
+| 73 | drink nook refused with "no free floor within 3 tiles" at thirst 64,976; quickfort called the nearest tiles occupied | BUG-102, FR-82 (L1: the refusal in counts, quickfort's tile rule, a refused nook is skipped, a critical mood widens 3 -> 6 -> 9; what made the three tiles occupied is read live) |
 | (audit J) | wave D read together with the rest | BUG-087 .. BUG-095 |
 

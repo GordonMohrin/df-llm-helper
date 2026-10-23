@@ -67,6 +67,7 @@ C.EVENTS = {
   -- FR-04/26 ghosts and unburied citizens, FR-34 a hospital without accepted water, FR-44 a strange mood at risk
   GHOSTS = {cls = 'A', by = 'care'}, HOSPITAL_DRY = {cls = 'A', by = 'water'}, MOOD_RISK = {cls = 'A', by = 'care'},
   -- BUG-063: a strange-mood dwarf's thirst (hunger) passed mood_crit (mood_crit_hunger): the dwarf, his workshop, the nook
+  -- (BUG-102: d.nook says 'no nook within N: <counts>' when none; FR-82: past that bar the search widens 3 -> 6 -> 9)
   MOOD_CRITICAL = {cls = 'A', by = 'care'},
   -- BUG-034: the zones of a hospital without accepted water were removed while a patient was over water.patient_thirst
   HOSPITAL_REMOVED = {cls = 'A', by = 'water'},
