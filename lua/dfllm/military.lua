@@ -2036,6 +2036,20 @@ function M.step(K, budget, ctx)
       end
     end
   end
+  -- review A4 (BUG-055): a refused creation is news only while a wanted squad is missing or leaderless; squads that were
+  -- made on the squads screen (verb squad.create, the player) are adopted above without reaching the creation, so
+  -- the refusal would stay for good and keep readiness R0 `office` set
+  if rt.create_why then
+    local open = false
+    for _, sp in ipairs(M.SQUADS) do
+      local e = st.sq[sp.key]
+      if (per[sp.key] or 0) > 0 or e then
+        local s = e and squad(e.id)
+        if not (s and leader_set(s)) then open = true end
+      end
+    end
+    if not open then rt.create_why, rt.create_since = nil, nil end
+  end
   if st.posture == nil then st.posture, st.pt, dirty = 'TRAIN', now, true end
   for _, sp in ipairs(M.SQUADS) do apply_squad(K, sp.key, false) end   -- drift only
   release_tools(K)                                                     -- BUG-023: after the specs settled

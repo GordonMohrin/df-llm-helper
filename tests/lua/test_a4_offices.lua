@@ -146,6 +146,25 @@ T.test('BUG-055: a refused squad creation is named (why, the posts) in leader_st
   T.ok(not r.ok or r.data ~= nil)
 end)
 
+T.test('review A4: the squad.create verb (adoption) clears the refused-creation blocker (no stale R0 office)', function()
+  local W = X.world{n = 50, create_mode = 'fail'}
+  X.load(W, {'military'}, {X.runner('P5')}, {'sense'}); W.state()
+  df.global.plotinfo.main = {fortress_entity = entity{{code = 'MILITIA_CAPTAIN', active = true}}}
+  W.run(9, {skip = 9})
+  W.run(3600 * 3, {skip = 9})
+  T.ok(X.call(W, 'military', 'leader_state').why ~= nil, 'refused first')
+  -- the fix the DECISION names: the squads screen makes squad A with a leader; military adopts it on its next run
+  W.create_mode = 'ok'
+  for i, k in ipairs{'A', 'B', 'C'} do
+    local r = W.inbox('squad.create', {name = k, leader = 40 + i})
+    T.ok(r.ok, r.msg)
+  end
+  W.run(3600 * 3, {skip = 9})
+  local ls = X.call(W, 'military', 'leader_state')
+  T.eq(ls.why, nil, 'the squad stands: no stale "squad creation refused" (it would block R0 office for good)')
+  T.eq(ls.since, nil)
+end)
+
 T.test('BUG-055: verbs squad.create / squad.leader / squad.add / squad.uniform: the squads screen outside a fight', function()
   local W = mil_world{n = 50, phase = false}
   local mil = X.mod('military')

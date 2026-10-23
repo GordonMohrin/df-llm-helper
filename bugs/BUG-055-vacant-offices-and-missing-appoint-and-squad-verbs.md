@@ -56,6 +56,11 @@ three). The verbs refuse fights (SIEGE/BREACH/DRILL) for the squads screen; `app
 R0 `office` freezes max-pop growth only after 7 days of failure (a fort of 7 has candidates; a fort whose every adult is a
 soldier shows `no adult citizen outside the squads`). No change to squad creation itself.
 
+Review fix: `military.leader_state` read `rt.create_why`, which only the creation path cleared; squads made by the verb
+`squad.create` (or on the squads screen) are adopted without reaching it, so the refusal stayed and R0 `office` stayed set
+after the very fix it names. The main loop now clears it when no wanted squad is missing or leaderless
+(`test_a4_offices.lua`, "review A4").
+
 ## Tests
 `tests/lua/test_a4_offices.lua` (fill by skill, never a soldier; the view with days/candidate/reason; verb appoint and its
 refusals; leader_state and the DECISION text; the squad verbs and their modes; uniform), `tests/lua/test_readiness.lua`
