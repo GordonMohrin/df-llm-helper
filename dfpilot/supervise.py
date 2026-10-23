@@ -9,6 +9,12 @@ Steady state makes 0 DF calls: it reads ACTIVE, heartbeat, perf.csv, events.json
             perf.csv (kernel PERF_DEGRADED events of this load are hints only) -> restart only in PEACE, unpaused,
             right after an autosave: re-check -> kill DF -> backup -> Steam -> wait for the window ->
             vdesk_move.ps1 (desktop 1) -> wait for DFHack -> load-save.
+  load      DFHack's own `load-save` first. K2 (BUG-098, DFHack 53.16-r3 renamed the title screen field it writes): when it
+            fails (anything but "can't find save" and "DFHack does not answer yet") the same save is loaded from the
+            title screen by clicking visible text, tools/embark/embark.lua mode load (one dfhack-run call, then
+            <runtime>/embark/status.json is read). When nothing loads in LOAD_MAX_S, `needs_click` (BUG-099) is the
+            alarm for a human: save, DFHack version, reason and the last screen rows; `dfhack_version` (FR-81) warns once
+            when DFHack is not the version of the last successful load.
 Hard rules: never pauses or unpauses, writes no inbox verbs, never loads a save older than the newest one, never
 loads a save without the dfllm marker or from another session. A DEGRADED kill is deferred to the next autosave if
 the reload would silently undo something (a command or class A/B event after the save, pending inbox files, a
@@ -60,6 +66,17 @@ NORESTART = "norestart.flag"
 # emitted by the year boundary or the save freeze itself: a reload onto that save does not undo anything of these
 AFTER_SAVE_OK = frozenset({"YEAR_REVIEW", "PERF_DEGRADED", "KERNEL_SLOW"})
 CONFIRM_RE = re.compile(r"untested|warning|confirm|again", re.I)   # neustart.py: DFHack asked to confirm
+# K2: the title-screen load (tools/embark/embark.lua, mode load) when the stock load-save fails
+TITLE_RUN_MAX_S = 150             # one title-screen run is stopped after this long (it must never click unseen)
+TITLE_GRACE_S = 90                # "Can't find title or load game screen" this long after DFHack answered: click anyway
+TITLE_GAP_S = 20                  # between the starts of two title-screen runs; doubles after each run, at most:
+TITLE_GAP_MAX_S = 300
+CLICK_KEY = "needs_click"         # alert key (BUG-099): only a human can load the save now; wake.py wakes NEEDS_CLICK
+VERSION_KEY = "dfhack_version"    # alert key (FR-81): DFHack is not the version of the last successful load
+VERSION_RE = re.compile(r"\d+\.\d+(?:\.\d+)?(?:-[A-Za-z0-9]+)?")          # 53.16-r3
+UNREACHABLE_RE = re.compile(r"could\s*not\s*connect|cannot\s*connect|can't\s*connect|unable\s*to\s*connect|"
+                            r"failed\s*to\s*connect|connection\s*(?:refused|reset|failed)|timeoutexpired|"
+                            r"filenotfounderror|^missing ", re.I | re.M)   # dfhack-run cannot reach DFHack (yet)
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
@@ -803,6 +820,7 @@ def restart(env: Env, st: dict, s: dict, why: str, kill: bool, flush: Callable[[
         if held:
             return step("aborted", held)
     st.setdefault("restarts", []).append(int(t0))
+    st.pop(CLICK_KEY, None)                    # a new attempt replaces the alarm of the last one (set again if it fails)
     killed = started = False
     try:
         if kill:
@@ -829,6 +847,213 @@ def restart(env: Env, st: dict, s: dict, why: str, kill: bool, flush: Callable[[
         return fail(f"{type(e).__name__}: {e}"[:200])
 
 
+# ---------------------------------------------------------------- K2: loading from the title screen
+def _clip(s: Any, n: int) -> str:
+    s = " ".join(str(s or "").split())
+    return s if len(s) <= n else s[:n - 1].rstrip() + "~"
+
+
+def parse_version(text: str) -> str | None:
+    """'53.16-r3' out of what `dfhack-run version` prints (FR-81); None if the text holds no version."""
+    m = VERSION_RE.search(text or "")
+    return m.group(0) if m else None
+
+
+def probe_version(env: Env) -> tuple[str | None, bool]:
+    """(version, answered): `dfhack-run version` (read only). answered is False while dfhack-run cannot reach DFHack
+    (it is still starting); a version is never worth a broken restart, so any error is (None, ...)."""
+    try:
+        ok, out = env.os.dfhack("version", timeout=15)
+    except Exception:  # noqa: BLE001
+        return None, False
+    if not ok:
+        return None, not UNREACHABLE_RE.search(out or "")
+    return parse_version(out), True
+
+
+def load_kind(ok: bool, out: str) -> str:
+    """How a `load-save` call ended: ok | nosave | unreachable (dfhack-run cannot reach DFHack yet) | notitle (no title
+    screen yet) | broken (the field error of DFHack 53.16-r3, BUG-098, and every other failure)."""
+    low = (out or "").lower()
+    if ok:
+        return "ok"
+    if "can't find save" in low:
+        return "nosave"
+    if UNREACHABLE_RE.search(out or ""):
+        return "unreachable"
+    if "can't find title" in low:
+        return "notitle"
+    return "broken"
+
+
+def _embark_lua(env: Env) -> Path:
+    return env.repo / "tools" / "embark" / "embark.lua"
+
+
+def screen_rows(env: Env) -> str:
+    """The rows of the DF screen now (embark.lua screen, read only) on one line; '' when DFHack does not answer."""
+    try:
+        ok, out = env.os.dfhack("lua", "-f", _embark_lua(env).as_posix(), "screen", timeout=30)
+    except Exception:  # noqa: BLE001
+        return ""
+    parts: list[str] = []
+    for ln in (out or "").splitlines() if ok else []:
+        m = re.match(r"^\s*\d+ (.*)$", ln)                  # view.lua dump: '%3d %s' per non-blank row
+        if m:
+            parts += [x for x in re.split(r"\s{2,}", m.group(1).strip()) if x]
+    return _clip(" | ".join(parts), 200)
+
+
+def title_run(env: Env, name: str) -> dict:
+    """One click run at the title screen: tools/embark/embark.lua `run <spec>` with mode load (ONE dfhack-run call), then
+    <runtime>/embark/status.json is polled until the run ends; a run that outlives TITLE_RUN_MAX_S is stopped, so
+    nothing keeps clicking unseen. Returns {ok, state, msg, rows, screen, clicks, title, id}; clicks lists what was
+    clicked as 'kind "text" @px,py' (the first live use is calibrated from these and from the rows)."""
+    o, clk = env.os, env.clock
+    lua = _embark_lua(env)
+    res: dict = {"ok": False, "state": "start", "msg": "", "rows": "", "screen": "", "clicks": [], "title": None, "id": ""}
+    if not lua.is_file():
+        res["msg"] = "tools/embark/embark.lua is missing (the repo of this dfpilot)"
+        return res
+    edir = env.runtime / "embark"
+    rid = res["id"] = f"load{int(clk())}"
+    spec = edir / f"spec-{rid}.json"
+    tmp = edir / f".spec-{rid}.json.tmp"
+    try:
+        edir.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps({"v": 2, "id": rid, "mode": "load", "save": name, "stock": False}), encoding="utf-8")
+        os.replace(tmp, spec)
+    except OSError as e:
+        res["msg"] = f"cannot write {spec.name}: {e}"
+        return res
+    run = ("lua", "-f", lua.as_posix(), "run", spec.as_posix())
+    ok, out = o.dfhack(*run, timeout=60)
+    if not ok and "is active" in (out or ""):               # a run of an earlier pass is still going: end it, start ours
+        o.dfhack("lua", "-f", lua.as_posix(), "stop", timeout=30)
+        ok, out = o.dfhack(*run, timeout=60)
+    if not ok:
+        res["msg"] = f"the title run did not start: {_clip(out, 160)}"
+        return res
+    t, doc = clk(), None
+    while True:
+        env.sleep(1)
+        d = _read_json(edir / "status.json")
+        if isinstance(d, dict) and d.get("id") == rid:
+            doc = d
+            if d.get("state") != "running":
+                break
+        if clk() - t > TITLE_RUN_MAX_S:
+            o.dfhack("lua", "-f", lua.as_posix(), "stop", timeout=30)
+            res["state"] = "timeout"
+            res["msg"] = f"the title run did not end within {TITLE_RUN_MAX_S} s and was stopped"
+            break
+    if doc:
+        r = doc.get("results") if isinstance(doc.get("results"), dict) else {}
+        if res["state"] != "timeout":
+            res["state"], res["msg"] = str(doc.get("state")), _clip(doc.get("msg"), 220)
+        res["ok"] = res["state"] == "done"
+        res["rows"], res["screen"] = _clip(r.get("rows"), 200), str(r.get("screen") or "")
+        res["title"] = r.get("title") if isinstance(r.get("title"), dict) else None
+        res["clicks"] = [f"{c.get('kind')} \"{c.get('text')}\" @{c.get('px')},{c.get('py')}"
+                         for c in r.get("clicks") or [] if isinstance(c, dict)]
+    return res
+
+
+def _load_once(env: Env, st: dict, s: dict, ctx: dict, step: Callable) -> tuple[bool, str, str]:
+    """One try to start loading `s`: DFHack's own load-save first; when it fails with anything but "can't find save"
+    or "DFHack does not answer yet", the title-screen run (BUG-098). Returns (ok, text, how) with how = stock | title
+    | nosave | unreachable | notitle | broken."""
+    o, clk = env.os, env.clock
+    name = s["name"]
+    if ctx["ver"] is None and ctx["ver_tries"] < 5:         # the first answer of DFHack: its version (FR-81)
+        ctx["ver"], answered = probe_version(env)
+        if answered:
+            ctx["ver_tries"] += 1
+            if ctx["t_ready"] is None:
+                ctx["t_ready"] = clk()
+        if ctx["ver"]:
+            _note_version(st, ctx["ver"], clk())
+            st.get("restart", {})["dfhack"] = ctx["ver"]
+    ok, out = o.dfhack("load-save", name, timeout=60)
+    if ok and CONFIRM_RE.search(out or ""):
+        ok, out = o.dfhack("load-save", name, timeout=60)
+    kind = load_kind(ok, out)
+    if kind == "ok":
+        return True, out, "stock"
+    ctx["stock_why"] = _clip(re.sub(r"^\S*load-save\.lua:\d+:\s*", "", out or ""), 110)   # the path adds nothing
+    if kind in ("nosave", "unreachable"):
+        return False, out, kind
+    if ctx["t_ready"] is None:
+        ctx["t_ready"] = clk()
+    if kind == "notitle" and clk() - ctx["t_ready"] < TITLE_GRACE_S:
+        return False, out, kind                             # the title screen is not up yet: wait as before
+    if clk() - ctx["t_title"] < min(TITLE_GAP_MAX_S, TITLE_GAP_S * 2 ** max(0, ctx["runs"] - 1)):
+        return False, out, kind                             # a failed run is not repeated at once: 20 s, 40 s, 80 s ...
+    held = _hands_off(env)
+    if held:                                                # the player took over: not a click while he works at the menu
+        ctx["title_why"] = f"no click run: {held}"
+        return False, out, kind
+    ctx["t_title"] = clk()
+    ctx["runs"] += 1
+    res = title_run(env, name)
+    ctx["title_why"] = (_clip(re.sub(r"; rows: .*$", "", res["msg"]), 120) if not res["ok"] else   # rows: ctx["screen"]
+                        f"clicked through ({len(res['clicks'])} clicks) but the game did not come up")
+    ctx["screen"] = res["rows"] or ctx["screen"]
+    st.get("restart", {}).setdefault("title", []).append(
+        {"id": res["id"], "state": res["state"], "msg": _clip(res["msg"], 120), "clicks": res["clicks"][:6]})
+    _log(env, f"title run {res['id']} for '{name}': {res['state']} {res['msg']}; clicks {res['clicks']}; "
+              f"screen {res['screen']}: {res['rows']}; title fields {res['title']}")
+    step("load", f"stock load-save failed ({ctx['stock_why']}); title run {res['id']}: {res['state']} {res['msg']}"
+                 f" clicks {len(res['clicks'])}")
+    if res["ok"]:
+        return True, f"title screen: {res['msg']}", "title"
+    return False, res["msg"], kind
+
+
+def _hands_off(env: Env) -> str | None:
+    """norestart.flag or a held live.lock: a player is at the game, no click run starts (checked before every run)."""
+    if (env.runtime / NORESTART).exists():
+        return f"{NORESTART} present"
+    held = live_lock(env.runtime, env.clock())
+    return f"live.lock held by {held}" if held else None
+
+
+def _note_version(st: dict, ver: str, now: float) -> None:
+    """Record the DFHack version this restart runs on (FR-81); a different one than the last successful load used is
+    kept as `changed` for _pass to warn about once."""
+    d = st.setdefault("dfhack", {})
+    d["ver"], d["wall"] = ver, int(now)
+    prev = (st.get("last_loaded") or {}).get("ver")
+    if prev and prev != ver:
+        d["changed"] = {"from": prev, "to": ver, "ok": False}
+    else:
+        d.pop("changed", None)
+
+
+def _no_load(env: Env, st: dict, s: dict, ctx: dict, fail: Callable, what: str) -> dict:
+    """The chain could not load the save: say why with the DFHack version (BUG-098) and raise `needs_click` for a human
+    (BUG-099; _pass turns it into the alert)."""
+    ver = ctx["ver"]
+    if ctx["t_ready"] is None:
+        why = "DFHack did not answer (dfhack-run could not connect)"
+    elif ctx["title_why"] or ctx["stock_why"]:
+        why = "; ".join(x for x in (f"title screen: {ctx['title_why']}" if ctx["title_why"] else "",
+                                    f"stock load-save: {ctx['stock_why']}" if ctx["stock_why"] else "") if x)
+    else:
+        why = "no reason recorded"
+    screen = screen_rows(env) or ctx["screen"]           # what the screen shows now, else what the last run saw
+    st[CLICK_KEY] = {"save": s["name"], "ver": ver, "why": _clip(why, 260), "screen": _clip(screen, 200),
+                     "wall": int(env.clock()), "runs": ctx["runs"]}
+    return fail(f"{what} on DFHack {ver or '?'}: {_clip(why, 260)}")
+
+
+def _fort_live(env: Env, since: float) -> bool:
+    """A dfllm fort booted after `since`: ACTIVE and its heartbeat were written then (the kernel's first beat)."""
+    name, amt = read_active(env.runtime)
+    hb = _mtime(env.runtime / name / "heartbeat") if name else None
+    return bool(name and amt is not None and amt >= since - 5 and hb is not None and hb >= since - 5)
+
+
 def _start_and_load(env: Env, st: dict, s: dict, step: Callable, fail: Callable, t0: float) -> dict:
     o, clk = env.os, env.clock
     ok, out = o.start_df()
@@ -838,38 +1063,45 @@ def _start_and_load(env: Env, st: dict, s: dict, step: Callable, fail: Callable,
     step("steam", out)
     moved = _move_window(env, step, t_start)
     step("window", f"moved {moved} window(s) to desktop {DESKTOP}" if moved else "no DF window moved (focus?)")
+    ctx: dict = {"ver": None, "ver_tries": 0, "t_ready": None, "t_title": -1e9, "stock_why": "", "title_why": "",
+                 "screen": "", "runs": 0}
     t1, retried = clk(), False
     while True:
         if clk() - t1 > LOAD_MAX_S:
-            return fail(f"load-save did not start within {LOAD_MAX_S // 60} min")
+            return _no_load(env, st, s, ctx, fail, f"load did not start within {LOAD_MAX_S // 60} min")
         if o.df_proc()[0] == "down":                       # a cold Steam start can be slow
             if clk() - t_start > START_MAX_S:
                 return fail(f"DF not running {START_MAX_S} s after the Steam start")
             env.sleep(5)
             continue
-        ok, out = o.dfhack("load-save", s["name"], timeout=60)
-        if ok and CONFIRM_RE.search(out or ""):
-            ok, out = o.dfhack("load-save", s["name"], timeout=60)
+        if _fort_live(env, t_start):                       # somebody clicked Continue meanwhile: nothing left to load
+            ok, out, how = True, "a fort is live already", "human"
+            break
+        ok, out, how = _load_once(env, st, s, ctx, step)
         if ok:
             break
-        if "can't find save" in (out or "").lower():
-            return fail(f"load-save: {out.strip()[:120]}")
+        if how == "nosave":                                # DFHack does not know the folder: a different problem, no clicks
+            return fail(f"load-save: {_clip(out, 100)} (DFHack {ctx['ver'] or '?'})")
         env.sleep(5)
-    step("load", f"load-save '{s['name']}' {(out or '').strip()[:100]}")
+    step("load", f"{how} load of '{s['name']}' {(out or '').strip()[:100]}")
     t2 = clk()
     while clk() - t2 <= MAP_MAX_S:
-        name, amt = read_active(env.runtime)
-        hb = _mtime(env.runtime / name / "heartbeat") if name else None
-        if name and amt is not None and amt >= t2 - 5 and hb is not None and hb >= t2 - 5:
-            st["last_loaded"] = {"name": s["name"], "mt": s["mt"]}
+        if _fort_live(env, t2):
+            name = read_active(env.runtime)[0]
+            st["last_loaded"] = {"name": s["name"], "mt": s["mt"],
+                                 "ver": ctx["ver"] or (st.get("last_loaded") or {}).get("ver")}
             st.pop("failed", None)
+            st.pop(CLICK_KEY, None)
+            ch = (st.get("dfhack") or {}).get("changed")
+            if ch:
+                ch["ok"] = True                            # the new version loaded this save
             return step("done", f"'{name}' live {int(clk() - t0)} s after the start")
-        if not retried and clk() - t2 > LOAD_RETRY_S:      # neustart.py: one more load-save if still at the title
+        if not retried and clk() - t2 > LOAD_RETRY_S:      # neustart.py: one more try if still at the title
             retried = True
-            _ok, out = o.dfhack("load-save", s["name"], timeout=60)
-            step("load", f"2nd load-save: {(out or '').strip()[:100]}")
+            _ok, out, how = _load_once(env, st, s, ctx, step)
+            step("load", f"2nd load ({how}): {(out or '').strip()[:100]}")
         env.sleep(5)
-    return fail(f"fort not live {MAP_MAX_S // 60} min after load-save")
+    return _no_load(env, st, s, ctx, fail, f"fort not live {MAP_MAX_S // 60} min after the load")
 
 
 def _move_window(env: Env, step: Callable, t0: float) -> int:
@@ -1038,7 +1270,7 @@ def _pass(env: Env, st: dict, r: dict, now: float, dry_run: bool) -> None:
     else:
         r["live"], r["why"] = True, "ok"
         st.pop("failed", None)
-    if st.get("failed") and not r["live"]:
+    if st.get("failed") and not r["live"] and not st.get(CLICK_KEY):     # needs_click says the same, with the screen
         alert("restart_failed", f"automatic restart failed: {st['failed']['msg']} - human needed")
 
     if proc == "down" and name:                # DF is down: back up first, then restart
@@ -1049,8 +1281,50 @@ def _pass(env: Env, st: dict, r: dict, now: float, dry_run: bool) -> None:
             _degraded(env, st, r, saves, name, amt, hb, hb_age, is_busy, now, dry_run, alert, flush)
         if r["restart"] is None:
             r["backup"] = _backup_step(env, st, saves, is_busy, now, dry_run)
+    _alarms(st, r, alert)
     if r["backup"] and r["backup"].get("ok") is False:
         alert("backup", f"backup: {r['backup'].get('why') or r['backup'].get('skip')}")
+
+
+def click_text(nc: dict) -> str:
+    """BUG-099: the alert for a save nobody can load now: what to click, the DFHack version, why the automatic load
+    failed and what the screen showed (the wake line keeps the first 200 characters)."""
+    s = (f"click Continue by hand: save '{nc.get('save')}', DFHack {nc.get('ver') or '?'}; "
+         f"the automatic load failed: {_clip(nc.get('why'), 70)}")
+    scr = _clip(nc.get("screen"), 90)
+    return s + (f"; screen: {scr}" if scr else "")
+
+
+def version_text(ch: dict) -> str:
+    """FR-81: DFHack is not the version the last successful load ran on."""
+    tail = ("that version loaded the save" if ch.get("ok") else
+            "the title-screen load is untested there; if the fort does not come up, click Continue by hand")
+    return f"DFHack changed {ch.get('from')} -> {ch.get('to')} since the last successful load (Steam update?); {tail}"
+
+
+def _alarms(st: dict, r: dict, alert: Callable) -> None:
+    """The standing alarms, after this pass's restart chain. needs_click (BUG-099) stands while no fort is live and is
+    said again only at SAY_EVERY_S (alert()); it blocks nothing: the next crash or DEGRADED restart runs as before.
+    dfhack_version (FR-81) is said once per pair of versions."""
+    nc = st.get(CLICK_KEY)
+    if nc and r["live"]:
+        st.pop(CLICK_KEY, None)                            # a human click or a later restart loaded the fort
+        nc = None
+    if nc:
+        r[CLICK_KEY] = nc
+        alert(CLICK_KEY, click_text(nc))
+    d = st.get("dfhack")
+    if not d:
+        return
+    r["dfhack"] = {"ver": d.get("ver"), "loaded": (st.get("last_loaded") or {}).get("ver")}
+    ch = d.get("changed")
+    if ch:
+        pair = f"{ch.get('from')}>{ch.get('to')}"
+        if d.get("warned") != pair:
+            d["warned"] = pair
+            alert(VERSION_KEY, version_text(ch))
+        if ch.get("ok"):
+            d.pop("changed", None)
 
 
 def _backup_step(env: Env, st: dict, saves: list, is_busy: bool, now: float, dry_run: bool) -> dict | None:
@@ -1138,10 +1412,39 @@ def _degraded(env, st, r, saves, name, amt, hb, hb_age, is_busy, now, dry_run, a
 
 
 # ---------------------------------------------------------------- CLI
+def check_version(env: Env) -> tuple[int, str]:
+    """FR-81, on demand: read the running DFHack's version, record it in supervise.json and say whether it differs from
+    the version of the last successful load. (A scheduled pass raises the alert once; this only reports.)"""
+    lock = _run_lock(env, env.clock())                       # not while a pass or a restart chain writes supervise.json
+    if lock is None:
+        return 1, "supervise: another run holds supervise.lock (a restart chain records the DFHack version itself)"
+    try:
+        ver, _answered = probe_version(env)
+        if not ver:
+            return 1, "supervise: DFHack did not answer `version` (is DF running with DFHack?)"
+        st = load_state(env)
+        _note_version(st, ver, env.clock())
+        prev = (st.get("last_loaded") or {}).get("ver")
+        ch = st["dfhack"].get("changed")
+        if not _write_json(env.runtime / "supervise.json", st, env.sleep):
+            return 1, f"supervise: DFHack {ver} (supervise.json could not be written)"
+    finally:
+        try:
+            lock.unlink()
+        except OSError:
+            pass
+    if ch:
+        return 0, f"supervise: DFHack {ver} - {version_text(ch)}"
+    return 0, (f"supervise: DFHack {ver}" +
+               (f" (the last successful load ran on {prev})" if prev else " (no successful load recorded yet)"))
+
+
 def summary(r: dict) -> str:
     parts = [f"supervise: DF {r['df']}", f"fort {r['active'] or '-'}", r["why"]]
     if r["hb_age"] is not None:
         parts.append(f"hb {r['hb_age']} s {r['mode'] or '?'}{' paused' if r['paused'] else ''}")
+    if (r.get("dfhack") or {}).get("ver"):
+        parts.append(f"DFHack {r['dfhack']['ver']}")
     d = r.get("degraded")
     if d:
         parts.append(f"degraded {'YES' if d['on'] else 'no'} ({d['why']})")
@@ -1158,19 +1461,27 @@ def main(argv: list[str] | None = None, env: Env | None = None) -> int:
     ap.add_argument("--once", action="store_true", help="one pass (what the DF-Aufsicht task runs)")
     ap.add_argument("--every", type=int, default=60, help="loop period in seconds without --once")
     ap.add_argument("--dry-run", action="store_true", help="decide only: no kill, start, load, backup or state write")
-    ap.add_argument("--reset", action="store_true", help="forget restart history, failures and stale ACTIVE")
+    ap.add_argument("--reset", action="store_true", help="forget restart history, failures, the needs_click alarm and "
+                    "stale ACTIVE")
+    ap.add_argument("--check-version", action="store_true", help="FR-81: read the running DFHack's version now "
+                    "(`dfhack-run version`, the only DF call) and record it; says if it differs from the version of the "
+                    "last successful load")
     ap.add_argument("--json", action="store_true", help="print the result as JSON")
     a = ap.parse_args(argv)
     env = env or default_env()
     if a.reset:
         st = load_state(env)
-        for k in ("restarts", "failed", "restart", "stale_active", "down"):
+        for k in ("restarts", "failed", "restart", "stale_active", "down", CLICK_KEY):
             st.pop(k, None)
         if not _write_json(env.runtime / "supervise.json", st):
             print("supervise: supervise.json could not be written (locked?)", file=sys.stderr)
             return 1
         print("supervise: restart history cleared")
         return 0
+    if a.check_version:
+        code, line = check_version(env)
+        print(line)
+        return code
     while True:
         r = once(env=env, dry_run=a.dry_run)
         print(json.dumps(r, ensure_ascii=False) if a.json else summary(r), flush=True)

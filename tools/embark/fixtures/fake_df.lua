@@ -4,6 +4,11 @@
 -- the world-map centre click lands one tile off, the rectangle offset differs from ui.json,
 -- the placing rectangle follows the mouse until a click opens the Confirm popup, and preparing
 -- the map / loading the fort take opt.prep_frames / opt.load_frames frames (20 ms each).
+-- K2 (load a saved fort from the title screen): opt.saves = {{name=, label=?}, ...} adds a "Continue playing"
+-- button to the title screen and the screens savelist, loadpopup and loadsave; opt.flow = 'list' (Continue opens
+-- the list, an entry loads) | 'direct' (Continue loads the latest at once) | 'confirm' (an entry opens a popup
+-- first) | 'danger' (... a popup that talks of deleting) | 'select_load' (an entry only selects, Load loads); opt.skip = {[text] = n} ignores the
+-- first n clicks on that text (a menu that needs a second click); opt.old_field makes the stock load-save work.
 local V = require('embark.view')
 local F = {}
 
@@ -33,7 +38,10 @@ function F.new(opt)
     sites = opt.sites or {}, points = opt.points or 200, selected = 0, units = {}, frames = 0,
     row_select = opt.row_select ~= false, skill_clicks = opt.skill_clicks ~= false, bought = {}, clicks = 0,
     prep_frames = opt.prep_frames or 40, load_frames = opt.load_frames or 40, follow = opt.follow ~= false,
-    ignore = opt.ignore or {}, pressed = {}}
+    ignore = opt.ignore or {}, pressed = {}, saves = opt.saves, flow = opt.flow or 'list', skip = opt.skip or {},
+    old_field = opt.old_field == true, continue_label = opt.continue_label or 'Continue playing', loaded = nil,
+    chosen = nil, stock_calls = {}, other_text = opt.other_text}
+
   for i = 1, 7 do D.units[i] = {picks = 10, lv = {}} end
 
   -- the highlighted rectangle: fixed while the popup is open, else (placing) under the mouse.
@@ -60,7 +68,29 @@ function F.new(opt)
     local s, b = D.screen, {}
     local function add(x, y, t, fn) b[#b + 1] = {x, y, t, fn} end
     local function go(to) return function() D.screen = to; D.frames = 0 end end
-    if s == 'title' then add(60, 22, 'Start new game in existing world', go('worlds'))
+    if s == 'title' then
+      if D.saves then
+        add(60, 18, D.continue_label, go(D.flow == 'direct' and 'loadsave' or 'savelist'))
+      end
+      add(60, 22, 'Start new game in existing world', go('worlds'))
+      if D.other_text then add(60, 40, D.other_text) end
+    elseif s == 'savelist' then
+      add(50, 6, 'Select a game to continue')
+      for i, sv in ipairs(D.saves or {}) do
+        add(30, 10 + 2 * (i - 1), sv.label or sv.name, function()
+          D.chosen = sv.name
+          if D.flow == 'select_load' then return end
+          go(D.flow == 'confirm' and 'loadpopup' or D.flow == 'danger' and 'loadpopup_danger' or 'loadsave')()
+        end)
+      end
+      if D.flow == 'select_load' then add(100, 40, 'Load', function() if D.chosen then go('loadsave')() end end) end
+      add(100, 44, 'Back', go('title'))
+    elseif s == 'loadpopup' then
+      add(50, 20, 'This game was saved with a different version.'); add(50, 21, 'Load it anyway?')
+      add(55, 24, 'Okay', go('loadsave')); add(75, 24, 'Cancel', go('savelist'))
+    elseif s == 'loadpopup_danger' then
+      add(50, 20, 'This will delete the save.'); add(50, 21, 'Are you sure?'); add(55, 24, 'Okay', go('loadsave'))
+    elseif s == 'loadsave' then add(60, 20, 'Loading game...')
     elseif s == 'worlds' then add(60, 22, 'Zilirr?th', go('gametype'))
     elseif s == 'gametype' then add(50, 10, 'Select a game type to begin!'); add(60, 20, 'Fortress', go('loading'))
     elseif s == 'loading' then add(50, 20, 'Loading world to start new game')
@@ -128,6 +158,8 @@ function F.new(opt)
   end
 
   local FOCUS = {title = 'title/Default', worlds = 'title/Default', gametype = 'choose_game_type',
+    savelist = 'title/Default', loadpopup = 'title/Default', loadpopup_danger = 'title/Default',
+    loadsave = 'title/Default',
     loading = 'adopt_region', preparing = 'choose_start_site', fort = 'dwarfmode/Default', loading_fort = 'loadgame',
     prep_default = 'setupdwarfgame/Default', prep_dwarves = 'setupdwarfgame/Dwarves',
     prep_items = 'setupdwarfgame/Items', prep_animals = 'setupdwarfgame/Animals', prep_sure = 'setupdwarfgame/Dwarves'}
@@ -150,6 +182,10 @@ function F.new(opt)
         if D.screen:sub(1, 5) ~= 'prep_' then return nil end
         return {selected = D.selected, points = D.points, units = D.units}
       end,
+      title = function()  -- the viewscreen_titlest fields (embark.lua reads them with pcall); only with saved games
+        if not D.saves or FOCUS[D.screen] ~= 'title/Default' then return nil end
+        return {old_field = D.old_field, selected = 0, selected_r = -1, mode = 0}
+      end,
     }
   end
 
@@ -161,6 +197,7 @@ function F.new(opt)
         if b[4] and ty == b[2] and tx >= b[1] and tx < b[1] + #b[3] then
           D.pressed[b[3]] = (D.pressed[b[3]] or 0) + 1
           if D.ignore[b[3]] then return end
+          if (D.skip[b[3]] or 0) > 0 then D.skip[b[3]] = D.skip[b[3]] - 1 return end
           return b[4]()
         end
       end
@@ -185,13 +222,24 @@ function F.new(opt)
     end,
     tile_px = function() return D.tpx, D.tpy end, win = function() return D.w, D.h end}
   D.w_api = {camera = function(which, x, y) if which == 'world' then D.cent = {x, y} else D.zoom = {x, y} end end,
-    select_unit = function(i) D.selected = i end}
+    select_unit = function(i) D.selected = i end,
+    -- DFHack's stock load-save: works only where the old field exists (DFHack before 53.16-r3)
+    stock_load = function(save)
+      D.stock_calls[#D.stock_calls + 1] = save
+      if not D.old_field then return false, 'Cannot write field viewscreen_titlest.sel_menu_line: not found.' end
+      D.chosen = save
+      D.screen, D.frames = 'loadsave', 0
+      return true, 'loading ' .. save
+    end}
 
   function D.tick()
     D.frames = D.frames + 1
     if D.screen == 'loading' and D.frames > 40 then D.screen = 'tutorial' end
     if D.screen == 'preparing' and D.frames > D.prep_frames then D.screen = 'prep_default' end
     if D.screen == 'loading_fort' and D.frames > D.load_frames then D.screen = 'fort' end
+    if D.screen == 'loadsave' and D.frames > D.load_frames then
+      D.screen, D.loaded = 'fort', D.chosen or '(latest)'
+    end
   end
 
   function D.capture() return V.capture(D.source()) end

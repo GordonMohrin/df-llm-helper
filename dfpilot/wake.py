@@ -32,7 +32,9 @@ not wake; the follower acts on two of them without the LLM:
 The outbox reply of every automatic command is read; a refusal or no reply within AUTO_TIMEOUT_S
 wakes as AUTO_FAIL (a refused bp.place is rolled back). Unread replies are pruned after 10 min.
 Only wake lines go to stdout (one line = one Monitor notification); details go to <save>/cli.log.
-Supervisor alerts (<runtime>/supervise.json, each logged alert key) wake as SUPERVISE (STATUS §6.8, live L1).
+Supervisor alerts (<runtime>/supervise.json, each logged alert key) wake as SUPERVISE (STATUS §6.8, live L1). The key
+`needs_click` (K2/BUG-099: the restart chain could not load the save, DF waits at the title screen) wakes as NEEDS_CLICK,
+also for a follow that starts while the alarm stands (supervise's last pass, at most 10 minutes old, still carries it).
 A failed `dfllm save` (<save>/quicksave.json with ok 0 newer than the last one seen; Run 10: a quicksave after a graphics
 crash wrote nothing) wakes as QUICKSAVE_FAILED, also when it failed while follow was not running (within an hour).
 `dfllm audit [--snap ID]`: request a fresh audit snapshot (or take an audit snapshot of this boot), then the same
@@ -53,12 +55,13 @@ from .events import clip, est_tokens, fmt_tick
 
 WAKE_TOKENS = 150
 WAKE_TYPES = {t for t, (c, _, _) in schema.EVENTS.items() if c == "A"}
-SYNTH = {"HB_STALE", "AUTO_FAIL", "SUPERVISE", "QUICKSAVE_FAILED"}   # follower's own wake reasons (not kern events)
+SYNTH = {"HB_STALE", "AUTO_FAIL", "SUPERVISE", "QUICKSAVE_FAILED", "NEEDS_CLICK"}   # follower's own wake reasons (not kern events)
 # Run 9: an army walked in while SIEGE_START/INVASION waited in the digest; they and the interrupts come right
 # after BREACH and wake at once (URGENT: no merge wait, no hourly limit, one per type per URGENT_REPEAT_S)
 PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", "LOCKDOWN", "SIEGE_DEEP",
         "BRIDGE_DESTROYED", "GATE_FAIL",
         "DEATHS_3PLUS", "NO_DEPOT",
+        "NEEDS_CLICK",                        # K2: no fort runs at all; nothing else in the burst can be acted on first
         "PATIENT_DYING", "MOOD_CRITICAL",     # I1: a patient or a mood dwarf at the death line comes before the housekeeping types
         "DEATHS_PREVENTABLE", "KERN_FAULT", "HB_STALE", "SUPERVISE", "QUICKSAVE_FAILED",
         "SIEGE_END",
@@ -74,6 +77,9 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
         "DECISION_NEEDED": "ask Gordon in chat, then config/decisions.yaml", "KERN_FAULT": "dfllm doctor",
         "PERF_DEGRADED": "dfllm doctor", "HB_STALE": "dfllm doctor", "AUTO_FAIL": "dfllm doctor",
         "SUPERVISE": "dfllm supervise --once --dry-run",
+        # K2/BUG-099: the restart chain loaded nothing; the msg names the save, the DFHack version and the screen rows
+        "NEEDS_CLICK": "tell Gordon at once (DF waits at the title screen, no fort runs): he clicks Continue and the save "
+                       "named; or python tools/embark/embark.py load <save> after reading the rows; then dfllm doctor",
         # Run 10: the game is NOT saved; a restart would load the older save
         "QUICKSAVE_FAILED": "tell Gordon at once (the game is not saved); dfllm save again in 2 min or Esc > Save",
         "GHOSTS": "dfllm cmd inspect '{\"what\":\"tombs\"}', then tombs.repair",
@@ -124,6 +130,8 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
                       "keep another way"}
 SUPERVISE_EVERY_S = 15                         # supervise.json read cadence
 SUPERVISE_FRESH_S = 3600                       # alerts logged longer ago than this never wake
+CLICK_KEY = "needs_click"                      # supervise.CLICK_KEY (K2): the alarm for a save only a human can load now
+CLICK_PASS_S = 600                             # a standing needs_click wakes a follow that starts late if supervise ran this recently
 HB_STALE_S = 300
 FOLLOW_HB_EVERY_S = 10                         # FR-29: follow's own heartbeat (<save>/.follow.hb)
 AUTO_TIMEOUT_S = 60
@@ -537,16 +545,23 @@ class Follower:
             return
         said = doc.get("said") if isinstance(doc.get("said"), dict) else {}
         said = {str(k): float(v) for k, v in said.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
-        if self.sup_seen is None:              # first look: remember, do not wake on old alerts
-            self.sup_seen = said
-            return
         last = doc.get("last") if isinstance(doc.get("last"), dict) else {}
         msgs = {a.get("key"): a.get("msg") for a in last.get("alerts") or [] if isinstance(a, dict)}
+        if self.sup_seen is None:              # first look: remember, do not wake on old alerts ...
+            self.sup_seen = said
+            # ... except a fort that waits for a click right now: supervise's last pass still carries the alarm
+            wall = last.get("wall") if isinstance(last.get("wall"), (int, float)) else 0
+            if isinstance(doc.get(CLICK_KEY), dict) and msgs.get(CLICK_KEY) and 0 <= now - wall <= CLICK_PASS_S:
+                self._synth("NEEDS_CLICK", str(msgs[CLICK_KEY]), now)
+            return
         for key, t in sorted(said.items()):
             if t > self.sup_seen.get(key, 0.0):
                 self.sup_seen[key] = t
                 if now - t <= SUPERVISE_FRESH_S:
-                    self._synth("SUPERVISE", f"{key}: {msgs.get(key) or 'see supervise.log'}", now)
+                    if key == CLICK_KEY:
+                        self._synth("NEEDS_CLICK", str(msgs.get(key) or "see supervise.log"), now)
+                    else:
+                        self._synth("SUPERVISE", f"{key}: {msgs.get(key) or 'see supervise.log'}", now)
 
     def _check_quicksave(self, now: float) -> None:
         """Run 10: a `dfllm save` that found no new save folder (<save>/quicksave.json ok 0) -> one QUICKSAVE_FAILED wake

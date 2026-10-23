@@ -107,7 +107,7 @@ Python, run from the clone: `python -m dfpilot <command>` (the docs write it as 
 | `cmd <verb> [json or k=v]` | Send one inbox verb from the closed set (RULES.md §6) |
 | `bp list \| preview <tpl> \| sites <tpl> [--fresh] [--near x,y,z [--within N] \| --at x,y,z]` | Templates, an ASCII preview, the top free sites; `--near`/`--at` rank the sites around a position (FR-78: "beside building X"); `list` and `preview` also work before `adopt` |
 | `doctor` | ticks/s, kernel ms per module, frame gaps, stalls |
-| `supervise --once [--dry-run]` | Liveness, save backups, restart rules (the restart is not live-tested) |
+| `supervise --once [--dry-run]`, `supervise --check-version` | Liveness, save backups, restart rules (the restart is not live-tested); a save that `load-save` cannot load is clicked in from the title screen, `needs_click` alarms when nothing loads, `--check-version` reads and records the DFHack version |
 | `lint [paths] \| --cmd STR \| --hook` | Fair-play lint for Lua files and shell commands; the hook entry |
 
 In game, through `"<DF>/hack/dfhack-run.exe" dfllm <sub>`:

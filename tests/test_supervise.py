@@ -62,6 +62,16 @@ class FakeOS:
         self.window_delay, self.dfhack_ready, self.title_ready, self.boot_delay = 5, 30, 40, 20
         self.load_out = "loading"
         self.hwnds = [(0, 4242)]               # (seconds after start, hwnd)
+        # K2: DFHack 53.16-r3 and the title-screen run (tools/embark/embark.lua, mode load)
+        self.version = "53.16-r2"              # what `dfhack-run version` prints
+        self.stock_broken = False              # load-save fails with the renamed-field error of 53.16-r3 (BUG-098)
+        self.stock_error = None                # load-save fails with this text instead (any other failure)
+        self.title_modes = ["ok"]              # one per title run (the last repeats): ok | ok_noboot | fail | hang | start_fail
+        self.title_run_s = 6                   # a title run ends this long after its start
+        self.run_active = False
+        self.lua_calls = []                    # (clock, args after '-f <script>')
+        self.specs = []                        # the spec files the runs were started with
+        self.screen_rows = "Select a game to continue | region2 | autosave 10 | Back"
 
     def df_proc(self):
         return ("up", self.started) if self.up else ("down", None)
@@ -86,16 +96,8 @@ class FakeOS:
         self.calls.append(("move", h, desktop))
         return True, "MOVED hr=0"
 
-    def dfhack(self, *args, timeout=60):
-        self.calls.append(("dfhack",) + args)
-        el = self.clock() - self.started
-        if el < self.dfhack_ready:
-            return False, "error: could not connect"
-        if el < self.title_ready:
-            return False, "Can't find title or load game screen"
-        if self.load_out.startswith("Can't find save"):
-            return False, self.load_out
-        boot_at, name = self.clock() + self.boot_delay, args[1]
+    def boot_fort(self, name):
+        boot_at = self.clock() + self.boot_delay
 
         def boot(t):
             if t >= boot_at and self.up:
@@ -103,7 +105,74 @@ class FakeOS:
                 hb(self.env, name, t)
                 self.clock.hooks.remove(boot)
         self.clock.hooks.append(boot)
+
+    def dfhack(self, *args, timeout=60):
+        self.calls.append(("dfhack",) + args)
+        el = self.clock() - self.started
+        if el < self.dfhack_ready:
+            return False, "error: could not connect"
+        if args[0] == "version":
+            return True, self.version
+        if args[0] == "lua":
+            return self.lua(el, *args[1:])
+        if el < self.title_ready:
+            return False, "Can't find title or load game screen"
+        if self.load_out.startswith("Can't find save"):
+            return False, self.load_out
+        if self.stock_error:
+            return False, self.stock_error
+        if self.stock_broken:
+            return False, "dfhack/scripts/load-save.lua:17: Cannot write field viewscreen_titlest.sel_menu_line: not found."
+        self.boot_fort(args[1])
         return True, self.load_out
+
+    def status_doc(self, rid, state, msg, results):
+        put(self.env.runtime / "embark" / "status.json", json.dumps(
+            {"v": 2, "id": rid, "state": state, "step": "load.drive", "msg": msg, "results": results}))
+
+    def lua(self, el, *a):
+        """`lua -f <embark.lua> run <spec> | stop | screen`: the title-screen run of tools/embark (K2)."""
+        cmd = a[2]
+        self.lua_calls.append((self.clock(), a[2:]))
+        if cmd == "stop":
+            self.run_active = False
+            return True, "stopped"
+        if cmd == "screen":
+            return True, "focus title/Default 171x66\n  6                         " + "   ".join(
+                self.screen_rows.split(" | ")) + "\n"
+        spec = json.loads(Path(a[3]).read_text(encoding="utf-8"))
+        self.specs.append(spec)
+        mode = self.title_modes.pop(0) if len(self.title_modes) > 1 else self.title_modes[0]
+        if mode == "start_fail":
+            return False, "error: cannot open file"
+        if self.run_active:
+            return False, "run load1 is active; use stop"
+        rid, save, end = spec["id"], spec["save"], self.clock() + self.title_run_s
+        self.run_active = True
+        shown = {"rows": self.screen_rows, "screen": "other"}
+        if mode in ("ok", "ok_noboot"):
+            done = {"clicks": [{"kind": "main", "text": "Continue playing", "px": 95, "py": 97, "n": 1},
+                               {"kind": "entry", "text": save, "px": 355, "py": 187, "n": 2}],
+                    "rows": "Loading game...", "screen": "loading", "outcome": "loading", "title": {"old_field": False}}
+            if mode == "ok":
+                self.boot_fort(save)
+        elif mode == "fail":
+            done = dict(shown, clicks=[{"kind": "main", "text": "Continue playing", "px": 95, "py": 97, "n": 1}])
+        else:                                   # hang: the run never ends by itself
+            return True, f"embark run {rid} started"
+
+        def finish(t):
+            if t >= end and self.run_active:
+                self.run_active = False
+                if mode == "fail":
+                    self.status_doc(rid, "failed", f'load.drive: "{save}" is not on the screen (nothing clicked here); '
+                                                   f"rows: {self.screen_rows}", done)
+                else:
+                    self.status_doc(rid, "done", "all steps done", done)
+            if t >= end:
+                self.clock.hooks.remove(finish)
+        self.clock.hooks.append(finish)
+        return True, f"embark run {rid} started"
 
     def dfhack_verbs(self):
         return {c[1] for c in self.calls if isinstance(c, tuple) and c[0] == "dfhack"}
@@ -116,6 +185,7 @@ def W(tmp_path):
                  backups=tmp_path / "bk", repo=tmp_path / "repo", os=object(), clock=clock, sleep=clock.sleep)
     env.os = FakeOS(env, clock)
     env.saves.mkdir(parents=True)
+    put(env.repo / "tools" / "embark" / "embark.lua", "-- stub of the embark helper (K2: the title-screen run)")
     return SimpleNamespace(env=env, clock=clock, os=env.os, tmp=tmp_path)
 
 
@@ -221,7 +291,7 @@ def test_crash_restart_chain(W):
     assert "kill" not in W.os.calls and W.os.calls[0] == "start"
     assert ("move", 4242, 1) in W.os.calls
     assert ("dfhack", "load-save", "autosave 1") in W.os.calls
-    assert W.os.dfhack_verbs() == {"load-save"}                 # never pause/unpause/lua
+    assert W.os.dfhack_verbs() == {"load-save", "version"}      # never pause/unpause/lua (version: FR-81)
     st = state(W)
     assert st["last_loaded"]["name"] == "autosave 1" and len(st["restarts"]) == 1 and "failed" not in st
     assert not (W.env.runtime / "inbox").exists()
@@ -480,7 +550,7 @@ def test_degraded_restart_right_after_autosave(W):
     calls = W.os.calls
     assert calls[0] == "kill" and calls.index("kill") < calls.index("start")
     assert ("move", 4242, 1) in calls and ("dfhack", "load-save", "autosave 1") in calls
-    assert W.os.dfhack_verbs() == {"load-save"}
+    assert W.os.dfhack_verbs() == {"load-save", "version"}
     bks = sv.list_backups(W.env.backups)
     assert [b["src"] for b in bks] == ["autosave 1"]               # copy of exactly what was loaded
 

@@ -1341,6 +1341,11 @@ def dfhack_line(toks: list[str], dev: bool = False, cwd: str | None = None, al: 
     if b:
         return False, f"blocked: {b}"
     if head == "lua":
+        if any(re.search(r"tools[\\/]embark[\\/]embark\.lua", t) for t in toks[1:]):
+            # K2: the embark helper (and its title-screen load of a saved fort) is driven from Python, which writes the
+            # spec and reads the status; RULES 1.2 allows that form, never the raw lua call
+            return False, ("the embark helper is not called through dfhack-run lua; use python tools/embark/embark.py "
+                           "(state | screen | load SAVE | ...): it writes the spec and reads the status")
         return False, "inline lua is not allowed (game writes go through the kernel; dev: dfllm selftest --exec)"
     if head == "claude" or head.startswith("claude/"):
         return False, "v1 claude/* scripts are retired in v2"

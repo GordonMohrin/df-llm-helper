@@ -62,7 +62,9 @@ loading). Each step below is marked
 - camera centre `region_cent_x/y` (world map) and `zoom_cent_x/y` (local map). This equals
   scrolling the map and changes nothing in the world;
 - list selection `selected_u` on "Prepare carefully", only as a fallback when a click on the dwarf
-  row is ignored. DFHack's own `startdwarf` overlay does the same (startdwarf.lua:48).
+  row is ignored. DFHack's own `startdwarf` overlay does the same (startdwarf.lua:48);
+- K2: DFHack's own stock `load-save` through `W.stock_load` (RULES 1.2 allows it), only at the title screen and only where the
+  field it writes still exists (§9).
 
 **Never used**, even when a step fails:
 - world data (`world_data`, `region_map`, `geo_biomes`, `sites`): the v1 `kandidaten_eisen.py`
@@ -90,6 +92,7 @@ Gordon's own history.
 | `checklist.lua` | DESIGN §5.1 → `ok` / `review` / `reject`, score, per-criterion pass/warn/fail/unknown |
 | `input.lua` | click = hover (mouse held) → one press → hold, played over frames |
 | `runner.lua` | steps: wait → act → settle → check; tries, stale progress, timeouts, `wait` results that spend no try, `status.json` |
+| `loadsave.lua` | K2: load a saved fort from the title screen by clicks (§9); pure text functions + the two steps of mode `load` |
 | `steps.lua` | the procedure (§4) and run specs (`newgame`, `scan`, `embark`, `prep`) |
 | `embark.py` | Python driver: writes a spec, ONE `dfhack-run` call, then only reads `status.json` |
 | `ui.json` | calibration (§5); `rules.json` checklist thresholds; `loadout.json` skills and buys |
@@ -236,3 +239,32 @@ Never write skills, picks or points directly.
 | `kandidaten_eisen.py` (world-data pickles) | dropped: not vanilla-screen information |
 | Run 6 direct skill writes | dropped: clicks or the fallbacks in §6 |
 The v1 scratch copies listed above were removed from this folder; they remain in tag `v1-final`.
+
+## 9. Load a saved fort from the title screen (K2, BUG-098)
+DFHack 53.16-r3 renamed `viewscreen_titlest.sel_menu_line` to `selected`: the stock `load-save` dies with "Cannot write field
+viewscreen_titlest.sel_menu_line: not found", and writing `selected` plus `simulateInput(SELECT)` moves nothing (the title menu
+follows the mouse). `dfpilot supervise` therefore falls back to this helper when `load-save` fails (anything but "can't find
+save" and "DFHack does not answer yet"); a player or the orchestrator can run it by hand at the title screen:
+```
+python tools/embark/embark.py load "autosave 1"                  # stock load-save first where it can work, then the clicks
+python tools/embark/embark.py load "autosave 1" --no-stock       # clicks only (what supervise sends; it tried the stock script)
+python tools/embark/embark.py load "autosave 1" --entry Ostlysh  # the text to click in the list when it shows no folder name
+```
+It is the `load` mode of the same runner (`embark.lua run <spec>` with `{"v":2,"id":"load…","mode":"load","save":…}`; `embark.lua
+load <save> [--entry T] [--no-stock]` writes the spec itself). **Fair play:** it reads the text buffer and clicks visible text, only
+on the title family of screens (main menu, list of saved games, a confirming popup); on a fort, a map, an embark screen or any
+screen it does not know it clicks nothing; no title screen field is written, no save file is touched, and the list entry must show
+the folder name as a whole token (`autosave 1` is not `autosave 10`, `region2` not `region2-spr-0050`), else the run fails and says
+what it saw. A popup that talks of delete, erase, overwrite, abandon or retire stops the run (the player's decision).
+
+| Step | UI action | Done when |
+|---|---|---|
+| `load.stock` (optional) | DFHack's `load-save`, only where `viewscreen_titlest.sel_menu_line` still exists (older DFHack) and `stock` is not false | the screen says loading, or a fort |
+| `load.drive` | per screen: main menu → click "Continue …" (else "Load …"); the list → click the entry named; a popup → click Okay/Yes/Load/…; loading → wait; again when the screen did not change (`tries`, `stale`, `settle_ms` in `ui.json` `load`) | loading or the fort, after a click of ours |
+
+`status.json` `results` of a load run: `screen` and `rows` (the last screen as cells), `title` (the title screen fields read: both
+names, `old_field`, `selected`, `selected_r`, `mode`), `clicks` (kind, text, tile and pixel of every click: the first live use is
+calibrated from these), `outcome`, `stock`. `embark.py load` prints them; supervise copies them into `supervise.log`.
+**Not decided offline (first live use):** the exact labels of the 53.16-r3 menu and list, whether the list shows the folder name
+(else `--entry`), whether one click is enough (the run clicks again when the screen did not change), whether an entry loads at once
+or needs a Load button (both are handled), and whether "Continue" loads the newest save (supervise only wants the newest).

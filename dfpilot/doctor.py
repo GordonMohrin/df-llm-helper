@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import statistics
+import time
 from pathlib import Path
 
 from . import files, paths
@@ -248,6 +249,27 @@ def diagnose(save_dir: Path) -> tuple[list[str], list[str]]:
     lock = files.read_json(paths.runtime_root() / "live.lock")
     if isinstance(lock, dict):
         out.append(f"live.lock: {lock.get('holder')} {lock.get('purpose')}")
+    out_k2, bad_k2 = supervise_lines(files.read_json(paths.runtime_root() / "supervise.json"), time.time())
+    return out + out_k2, bad + bad_k2
+
+
+def supervise_lines(doc, now: float) -> tuple[list[str], list[str]]:
+    """K2: what supervise.json says about the load of the save (BUG-099: a fort that waits for a click is a problem, not a
+    quiet title screen; FR-81: the DFHack version of the running game and of the last successful load)."""
+    out, bad = [], []
+    if not isinstance(doc, dict):
+        return out, bad
+    d = doc.get("dfhack") if isinstance(doc.get("dfhack"), dict) else {}
+    last = (doc.get("last_loaded") or {}).get("ver") if isinstance(doc.get("last_loaded"), dict) else None
+    if d.get("ver"):
+        out.append(f"supervise: DFHack {d['ver']}" + (f", the last successful load ran on {last}" if last else "")
+                   + (" (changed since: the title-screen load is untested there)" if d.get("changed") else ""))
+    nc = doc.get("needs_click")
+    if isinstance(nc, dict):
+        wall = nc.get("wall") if isinstance(nc.get("wall"), (int, float)) else now
+        bad.append(f"no fort runs: supervise could not load '{nc.get('save')}' for {fmt_age(max(0, now - wall))} "
+                   f"(DFHack {nc.get('ver') or '?'}: {nc.get('why')}); click Continue by hand"
+                   + (f"; the screen showed: {nc['screen']}" if nc.get("screen") else ""))
     return out, bad
 
 
