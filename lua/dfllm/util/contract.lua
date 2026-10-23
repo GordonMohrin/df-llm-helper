@@ -370,7 +370,7 @@ C.STATE_SPEC = obj({
   -- BUG-042: unvalidated live orders, the days the oldest waits, why the manager validates nothing (past unval_days)
   -- BUG-059: of the stuck orders, how many miss a workshop (and which, the most missed first) and how many a worker
   orders = obj({n = NAT, bad = NAT, stuck = NAT}, {unval = NAT, uval_d = NAT, mgr = str(80), stuck_ws = NAT,
-                                                   stuck_lab = NAT, ws = str(60)}),
+                                                   stuck_lab = NAT, ws = str(60), jam = str(80)}),
   threat = obj({vis = NAT, armed = FLAG}),
   proj = arr({t = 'tup', items = {str(nil, nil, 'id'), str(24), PCT, str(40)}}, 0, 8),
   -- Run 11 siege 8: seal first (the leading open seal or plug: pieces open, projects it pauses, other open seals,

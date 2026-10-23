@@ -400,7 +400,9 @@ def line_supply(ctx: Ctx) -> str:
                            f"no worker {od['stuck_lab']}" if od.get("stuck_lab") else "") if x]
         out.append(f"orders {od['n']}" + (f" stuck {od['stuck']}" if od["stuck"] else "")
                    + (f" ({'; '.join(why)})" if why else "")
-                   + (f" UNSAFE {od['bad']} (no item_subtype: DF crash)" if od["bad"] else ""))
+                   + (f" UNSAFE {od['bad']} (no item_subtype: DF crash)" if od["bad"] else "")
+                   # BUG-061: a workshop type's slots are full of jobs that cancel at once
+                   + (f" JAM {od['jam']}" if od.get("jam") else ""))
     return _join(out)
 
 

@@ -797,7 +797,7 @@ STATE = Obj(
          "orders": Obj(req={"n": NAT, "bad": NAT, "stuck": NAT},
                        # BUG-059: of the stuck orders, how many miss a workshop (which, most missed first), a worker
                        opt={"unval": NAT, "uval_d": NAT, "mgr": Str(maxbytes=80), "stuck_ws": NAT, "stuck_lab": NAT,
-                            "ws": Str(maxbytes=60)}),
+                            "ws": Str(maxbytes=60), "jam": Str(maxbytes=80)}),
          "threat": Obj(req={"vis": NAT, "armed": FLAG}),
          "proj": Arr(Tup([ID, Str(maxbytes=24), PCT, Str(maxbytes=40)]), hi=8),
          # Run 11 siege 8: seal first (the leading open seal or plug: pieces open, projects it pauses, other open seals,

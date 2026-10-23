@@ -22,7 +22,9 @@ def producible_workshops() -> set[str]:
     """Workshop/furnace types some v2 template writes into the manifest (runner checks `workshops` there)."""
     out = set()
     for tpl in bp.TEMPLATES:
-        for params in ([{"stage": n} for n in (1, 2, 3)] if tpl == "fortcore" else [{}]):
+        # FR-73: the farmer's shop (and the other non-moodable shops) come through the workshops template's `add`
+        extra = {"add": ",".join(bp.rooms.EXTRA_TYPES)} if tpl == "workshops" else {}
+        for params in ([{"stage": n} for n in (1, 2, 3)] if tpl == "fortcore" else [extra]):
             doc = bp.emit(tpl, params, {"id": "S1", "anchor": [60, 60, 100], "rot": 0})
             out |= {w["type"] for w in doc["manifest"].get("workshops", [])}
     return out

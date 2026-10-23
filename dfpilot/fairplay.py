@@ -403,6 +403,11 @@ def snapshot_errors(path: str | Path | None = None) -> list[str]:
 ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400)},
                      "orders": {"unval_days": (1, 60)},
                      "office": {"table": "bool", "retry_days": (1, 112), "max_tiles": (1, 10000)},
+                     # B2: BUG-061 slab pass, BUG-060 stale orders, FR-73 standing orders (list, frequency: checked below)
+                     "slabs": {"max_orders": (0, 20), "restock_cap": (0, 30), "drop_per_day": (0, 500),
+                               "trigger_ticks": (100, 33600), "scan_max": (100, 20000), "jam_min": (2, 50)},
+                     "stale": {"days": (1, 112), "wait_days": (1, 112), "per_day": (0, 50), "jobs_max": (100, 20000)},
+                     "standing": {"amount": (1, 200), "request_days": (1, 112)},
                      "gather": {"drink_d": (0, 400), "drink_off": (0, 400)},
                      "barrels": {"brew_wait": (0, 200)},
                      # BUG-058: the running season's slots at once, autofarm 'auto' | 'off' | 'keep' and its food-day lines
@@ -414,9 +419,10 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400)},
                                "gather_max": (1, 50), "other_per": (1, 100), "other_max": (1, 20), "share": (5, 100),
                                "step": (1, 20), "idle_days": (1, 112), "stale_days": (1, 365), "unmark_max": (1, 400),
                                "labors": "labors"}}
-ECONOMY_OWN = ("drink", "office", "farms", "cover")   # parts whose every key is listed above
+ECONOMY_OWN = ("drink", "office", "farms", "cover", "slabs", "stale")   # parts whose every key is listed above
 _LABOR_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,40}$")
 _JOB_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]{1,40}$")
+STANDING_FREQ = ("OneTime", "Daily", "Monthly", "Seasonally", "Yearly")
 
 
 def economy_errors(path: str | Path | None = None) -> list[str]:
@@ -458,6 +464,21 @@ def economy_errors(path: str | Path | None = None) -> list[str]:
                     errs.append(f"{name}: economy.{part}.{k}: one of {lim} expected, got {x!r}")
             elif not (isinstance(x, int) and not isinstance(x, bool) and lim[0] <= x <= lim[1]):
                 errs.append(f"{name}: economy.{part}.{k}: int {lim[0]}..{lim[1]} expected, got {x!r}")
+    # FR-73: the standing orders are work orders (act.workorder: a dfllm: tag, a job type name), nothing else
+    st = sec.get("standing")
+    if isinstance(st, dict):
+        if st.get("frequency", "Monthly") not in STANDING_FREQ:
+            errs.append(f"{name}: economy.standing.frequency: one of {', '.join(STANDING_FREQ)} expected")
+        lst = st.get("list", [])
+        if not isinstance(lst, list):
+            errs.append(f"{name}: economy.standing.list must be a list")
+        else:
+            for i, e in enumerate(lst):
+                spec = e.get("spec") if isinstance(e, dict) else None
+                if not (isinstance(e, dict) and isinstance(e.get("tag"), str) and e["tag"].startswith("dfllm:stand_")
+                        and isinstance(spec, dict) and isinstance(spec.get("job"), str)
+                        and re.fullmatch(r"[A-Za-z]+", spec["job"])):
+                    errs.append(f"{name}: economy.standing.list[{i}]: needs a dfllm:stand_ tag and a spec with a job name")
     return errs
 
 

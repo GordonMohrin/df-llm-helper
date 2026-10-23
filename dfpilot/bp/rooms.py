@@ -25,7 +25,9 @@ MOODABLE_TYPES = [n for _, n in MOODABLE]
 # non-moodable shops a phase may ask for (`workshops` deliverable; live L6: year-1 P0 wants a still and a butcher's
 # shop, fortcore stage 1 builds both; `add` lets an older fort get the missing ones). Run 11: raw fish lay uncleaned
 # with no fishery (food fell to 5 days); economy asks `workshops why=fishery`, follow adds only the fishery
-EXTRA = [("wl", "Still"), ("wz", "Kitchen"), ("wu", "Butchers"), ("wh", "Fishery")]
+# FR-73 (Run 14: no Farmer's Workshop in the whole fort, ProcessPlants and SpinThread waited for months): the farmer's
+# shop (quickfort `ww`) is the plan's, P1 builds it with the moodable shops
+EXTRA = [("wl", "Still"), ("wz", "Kitchen"), ("wu", "Butchers"), ("wh", "Fishery"), ("ww", "Farmers")]
 EXTRA_TYPES = [n for _, n in EXTRA]
 
 COMMON = {"burrow": ("Kern+", None, None)}
@@ -195,7 +197,7 @@ def temple(p: dict) -> Plan:
 
 def workshops(p: dict) -> Plan:
     """All 12 moodable workshop types (DESIGN §5.9), minus `skip` (comma-separated df type names), plus the
-    non-moodable `add` types (EXTRA_TYPES: Still, Kitchen, Butchers, Fishery)."""
+    non-moodable `add` types (EXTRA_TYPES: Still, Kitchen, Butchers, Fishery, Farmers)."""
     skip = {s.strip() for s in p["skip"].split(",") if s.strip()}
     bad = skip - set(MOODABLE_TYPES)
     if bad:
@@ -209,7 +211,7 @@ def workshops(p: dict) -> Plan:
         raise ValueError("workshops: nothing left to build")
     P = Plan("workshops", "infra")
     cols, rows = min(len(todo), 6), -(-len(todo) // 6)
-    box = _box(P, 4 * cols + 1, 4 if rows == 1 else 8)
+    box = _box(P, 4 * cols + 1, 4 if rows == 1 else 4 * rows)       # FR-73: a third row of shops gets its own 4 rows
     b = P.stage("build", "build", orders=1)
     for i, (key, name) in enumerate(todo):
         r, c = divmod(i, 6)
