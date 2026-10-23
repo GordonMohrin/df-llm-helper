@@ -1,5 +1,74 @@
 # CHANGELOG dfpilot
 
+## Integration audit: the militia rotation read with the defence code: the danger gate follows threat (a cleared intruder no longer stops the unstick, the drill and the turnover), the squad pool takes citizens only, a hold is logged once per close (BUG-087, BUG-088, BUG-089, 2026-10-23, audit J1; offline, live-untested)
+- **Why:** FR-79 (rotation, D1) was reviewed on its branch beside BUG-076; nobody had read it with the defence code merged before it
+  (A3 `military.danger`, C1 BUG-065 and the Run 11 far rule, I4 BUG-085) and after it (readiness, drill, siege, kern state). Ten
+  hypotheses were proved or refuted from the code (below); three combinations were defects.
+- **BUG-087 (military.lua `M.danger`; bugs/BUG-087):** `danger` (the gate of the monthly unstick, the automatic drill and now the
+  turnover) answered `hostile` for every `census.h.vis` above 0. Since BUG-065 and Run 11 a hostile reflex has cleared (a harmless
+  intruder released at `confine.max_days`, an invader whose lockdown expired far, `reflex.far_ids`) and wildlife out of reach count
+  for nothing in threat and siege, but they stay visible: a gremlin in the caves (Run 14, years) or an ELK_BIRD at the map edge (Run 11,
+  45 days) therefore stopped the unstick, the drill that R2 needs and the militia turnover (it lapsed at the next window, kern.log
+  `did not run before the window reopened (hostile)`). Now `danger` takes threat's reading (`threat.assess`: `hostile`, a great
+  danger or an undead in sight, a census with more hostiles than its 40-entry list); without a threat module every hostile in sight
+  still counts. SIEGE, BREACH, ALERT, RECOVERY, DRILL and a lockdown refuse as before.
+- **BUG-088 (military.lua `M.recruits`, `M.rot_pool`; bugs/BUG-088):** the census holds residents (`getCitizens(false, true)`);
+  BUG-085 closed the `squad.add` verb to citizens because the squads screen lists nothing else, but the recruit list (squads A and C,
+  leaders) and the rotation pool kept every adult of the census: a resident of the lowest id led squad A and was among the first
+  entrants of every cohort. Both lists take adult citizens only now; the counts of the census are unchanged.
+- **BUG-089 (military.lua `rot_turn`; bugs/BUG-089):** the kern.log line of a turnover hold was keyed by its text, and the worn hold's
+  text carries the army's worn %: one line per upkeep (8 real seconds at ~450 ticks a second) for up to nine game months. The key is
+  the reason without its numbers: once per close and reason, as the FR-79 entry says; the state still shows the current %.
+- **Contracts:** none new (no event, field, verb or config key); CONTRACTS §7 rows `military.danger()` and `military.rot_cohort`,
+  DOCTRINE (militia) say what the gate and the pool take. RULES.md unchanged.
+- **Tests (each new one fails on c038ce9):** `tests/lua/test_integration_j1.lua` (new, 6 tests): the danger gate with a cleared invader,
+  a second invader, an unlisted hostile, a great danger, wildlife 250 tiles out, in reach and near a citizen; the turnover and the
+  monthly unstick with a cleared intruder in sight (and the uncleared control that lapses); a resident among the lowest ids; the worn
+  hold logged once.
+- **Live check:** a gremlin or an animal in sight in a quiet fort: `dfllm status` shows `militia B ... turnover due` becoming a
+  turnover at the next upkeep after the close (kern.log `militia squad B rotated`), `uniform-unstick` in the run log, `drill` leaving
+  `hostile` in `drill.hold`; a mood or hostile list with a resident: no `squad_add` of a unit that is no citizen in commands.log.
+
+### Integration audit J1 (the militia rotation FR-79 and BUG-076 with siege, gate, reflex, readiness, drill, kern; state c038ce9)
+Proved from the code (file:line at c038ce9) and refuted or fixed:
+1. **Turnover just before a siege or a caravan** (refuted as a defect, bounded): a batch is `squad_remove` + `squad_add` pairs, at most
+   `rotation.per_day` (3) a game day (military.lua:1487-1505), only in PEACE with `danger` clear (:1450); a caravan is no mode and
+   changes nothing; the alert stops the batches (`held: mode ...`) and leaves a half-turned squad whose entrants fetch their kit like
+   any refilled position (`fill`, BUG-076). Worn falls by the entrants' share (B is about a third of 10 soldiers) until DF's pass has
+   dressed them: intake waves (worn >= 80) and the sortie wait, the deep defense (worn < 60) is the conservative side. Live: the
+   `militia turnover ... worn X% before, Y% now, N soldiers fetching kit` lines after the first turnover.
+2. **A leaver's assignments counted as armed** (refuted): `compute` reads worn, cv and metal % from the inventory of the position's
+   current occupant only (military.lua:2542-2590, `uniform_counts` 323-345); a spec holding the leaver's item id is not worn by the
+   entrant, and the leaver is in no squad. economy's `gear_ok` (economy.lua:693) leaves a civilian's gear out of the sets, so the
+   leavers' kit lowers `gear.sets` until it is dropped: a transient, bounded by the gear cap's floor of 2.
+3. **Guard figures at the window close** (refuted): `on_station` is 0 in PEACE (no station in TRAIN), `soldiers` and the army share do
+   not change (remove and add in one call), readiness R2 reads soldiers, cv, share, drill, traps, stock (readiness.lua:473-493) and
+   R3 `metal_pct`; only `worn` dips, and its readers are the drill (worn >= 90 at T+1,200, retried after a month, doubling) and
+   economy's metal-short rule (worn < 80 and no ore and bars short). No R0 blocker reads it. Open: `cv` is an average over all
+   soldiers, so the militia (picked by rank, not by skill) can lower R2's `cv_min` (12) margin; A3 had the same dilution with B.
+4. **Cohort members** (one defect): dead (`isDead`), gone (not in the census), noble, mood, patient or wounded (any wound record), child that grew up (`isAdult`), key-labor holder (greedy account; of N holders N-1 may serve), migrants (served 0,
+   id last) are handled (military.lua:1334-1374); **residents were not** (BUG-088).
+5. **Served counts** (refuted): `m.military` is a persist key (site data), not the 4 KB state document that `SHRINK` sheds
+   (kern.lua:684, 825); `served` is pruned to the census at every credit (:1541-1542), so it holds at most the population; the JSON
+   keys survive as integers (military.lua M.init), a dense table decodes as an array and is read the same way; a reload keeps the
+   cohort (test_military_d1 pins it).
+6. **No militia table, renamed or deleted squad, under 12 citizens** (refuted): the default `{B = 9-11}` applies; the squad is held by
+   id (a rename changes nothing, a deletion is adopted or created again and `st.rot` goes on); before P5 only squad A exists (`active`),
+   and a squad of the leader alone says `no seats beside the leader` (tested at 7).
+7. **Cadence at timestream speed** (one defect): batches are a game day apart (2.7 real seconds), events are class B per batch;
+   the worn hold logged every upkeep (BUG-089). A 30-year run of the full stack with random invaders, drills, deaths, migrants and
+   nobles (scratch, 4 seeds) gave 29-30 turnovers, no fault and no squad over its target.
+8. **Status, brief, wake** (refuted): the militia line is part of the rank-3 defence line of the status (`line_def`); in the worst-case
+   state of `test_status_worst_case_budget` plus the longest `mil.rot` it still fits 300 tokens, and only the rank-4 stress/idle lines
+   yield (ranks, not position); class B events do not wake. `mil` is the third key the 4 KB state file sheds (the view is whole).
+9. **DRILL and the drill gate with soldiers fetching kit** (open, not decidable offline): the drill measures worn >= 90 at T+1,200
+   after the squads left Off duty; whether soldiers who just got the Ready routine have dressed by then is the live data above. The
+   gate itself is BUG-087.
+10. **A lockdown that ends by itself at the window close** (defect, BUG-087): the hold lifts at the next upkeep, but the intruder
+    BUG-065 released stays in sight and `danger` kept counting it.
+Open risks: economy's work-detail candidates also read `census.u.ids` (residents), outside this audit; `fill` trims an over-target
+rotation squad in PEACE without asking `danger`; a swap removes the leaver before the add (a refused add costs the seat for a month).
+
 ## The kernel rotates the citizens through the militia: cohorts by militia windows served, turnover at the close of a window, a squad refill that no longer stalls (FR-79, BUG-076, 2026-10-23, package D1; offline, live-untested)
 - **Why (Run 14 Trussroads y578-y582; notes 64 and 67, Gordon's own request 23.10.):** goal Z12 "every adult citizen who is not
   elite serves three months a year in the militia" could only be followed by hand: FR-71 gave every militia squad its months, but
