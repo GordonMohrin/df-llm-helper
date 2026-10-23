@@ -125,6 +125,8 @@ function M.init(K)
 end
 
 function M.step(K)
+  -- BUG-070: the periodic quick suite waits out the quiet window after a new year / a DF save (next run in 60 s)
+  if type(K.busy) == 'function' and K.busy() == 'save' then return end
   local r = M.run(K, 'quick')
   local key = table.concat(r.failed, ',')
   local now = K.now().ms

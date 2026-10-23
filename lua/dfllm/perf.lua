@@ -27,7 +27,9 @@ M.HEADER = 'wall,tick,mode,tps,pop,units,items,ms_s,gap_max_ms,gaps3,mods'
 
 local st = {}
 
-local function new_acc() return {ms = 0, frames = 0, gap_max = 0, gaps3 = 0, unpaused_ms = 0, mods = {}, via = {}} end
+local function new_acc()
+  return {ms = 0, frames = 0, gap_max = 0, gaps3 = 0, unpaused_ms = 0, mods = {}, via = {}, gapby = {}, gapn = {}}
+end
 
 -- arbiter's desired timestream fps (WP1-internal K.call); 'na' without an arbiter or with D-11 off
 local function target(K)
@@ -72,6 +74,15 @@ local function mods_field(acc, extra)
   for n, ms in pairs(acc.via or {}) do if ri(ms) > 0 then edges[#edges + 1] = n end end
   table.sort(edges)
   for _, n in ipairs(edges) do parts[#parts + 1] = string.format('%s=%d', n, ri(acc.via[n])) end
+  -- BUG-070: frame gaps >= 3 s by cause (module name, save, external): `gap:<cause>` = ms, `gapn:<cause>` = count; not
+  -- owners either (doctor splits them out)
+  local gaps = {}
+  for n in pairs(acc.gapby or {}) do gaps[#gaps + 1] = n end
+  table.sort(gaps)
+  for _, n in ipairs(gaps) do
+    parts[#parts + 1] = string.format('gap:%s=%d', n, ri(acc.gapby[n]))
+    parts[#parts + 1] = string.format('gapn:%s=%d', n, acc.gapn[n] or 0)
+  end
   return table.concat(parts, ';')
 end
 
@@ -152,9 +163,14 @@ function M.step(K)
     if take.gap_max > acc.gap_max then acc.gap_max = take.gap_max end
     for n, ms in pairs(take.mods) do acc.mods[n] = (acc.mods[n] or 0) + ms end
     for n, ms in pairs(take.via or {}) do acc.via[n] = (acc.via[n] or 0) + ms end
+    for n, ms in pairs(take.gapby or {}) do acc.gapby[n] = (acc.gapby[n] or 0) + ms end
+    for n, c in pairs(take.gapn or {}) do acc.gapn[n] = (acc.gapn[n] or 0) + c end
     if take.gap_max >= M.FREEZE_MS and (not st.freeze_tick or now.tick - st.freeze_tick >= 1200) then
       st.freeze_tick = now.tick
-      K.emit('PERF_DEGRADED', 'A', string.format('frame freeze %d ms', take.gap_max), {why = 'freeze'})
+      local cause = take.gap_cause or 'external'
+      K.emit('PERF_DEGRADED', 'A', string.format('frame freeze %d ms (%s)', take.gap_max,
+                                                 cause == 'save' and 'DF save' or cause == 'external' and 'not ours, cause unknown'
+                                                 or 'ours: ' .. cause), {why = 'freeze', cause = cause})
     end
   end
   local dt_ms = now.ms - st.t0.ms

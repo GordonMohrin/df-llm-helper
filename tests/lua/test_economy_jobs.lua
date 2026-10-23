@@ -205,7 +205,9 @@ T.test('BUG-037 (Run 11 y449: 15 of 27 adults idle, 0 unclaimed jobs, six projec
   end}
   days(W, 8)                                              -- idle 83 %: combine on day 3, then nothing useful left
   local r = W.inbox('inspect', {what = 'workload'})
-  T.eq(r.msg, '5 of 6 adults without a job (0 without reachable work), 0 unclaimed jobs, 0 unreachable; ' .. Q)
+  -- FR-77: the six queued projects are the kernel's own hold: the five idle ones are "held by the kernel"
+  T.eq(r.msg, '5 of 6 adults without a job (held by the kernel 5), 0 unclaimed jobs, 0 unreachable; ' .. Q)
+  T.eq(r.data.idle_why.held, 5)
   T.eq(r.data.runner, {n = 6})
   local hit
   for _, l in ipairs(W.logs) do if l.msg:find('useful backlog empty: no action; ' .. Q, 1, true) then hit = l end end

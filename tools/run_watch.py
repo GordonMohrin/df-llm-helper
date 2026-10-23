@@ -45,9 +45,9 @@ def run(cmd, timeout=90):
 
 def save_verified():
     """(exit code, last output line) of `python -m dfpilot save --by cli`: 0 verified, 1 failed (QUICKSAVE_FAILED),
-    3 refused, other: the CLI did not run."""
+    3 refused, 4 still being written (BUG-069), other: the CLI did not run. The CLI waits up to 600 s while DF writes."""
     try:
-        r = subprocess.run(CLI + ["save", "--by", "cli"], capture_output=True, text=True, timeout=300, cwd=REPO)
+        r = subprocess.run(CLI + ["save", "--by", "cli"], capture_output=True, text=True, timeout=900, cwd=REPO)
     except Exception as e:  # noqa: BLE001
         return 2, f"dfllm save did not run: {e}"
     lines = (r.stdout or "").strip().splitlines()
@@ -355,12 +355,12 @@ def report(full=True, journal=False):
         n = int(tries.get(str(year), 0))
         if n < SAVE_TRIES:
             code, out = save_verified()
-            n += 0 if code == 3 else 1       # a refusal (rate limit, siege) is no attempt
+            n += 0 if code in (3, 4) else 1  # a refusal (rate limit, siege) or a save still running is no attempt
             st["save_tries"] = {str(year): n}
             if code == 0:
                 st["saved_year"] = year
                 print(f"  Quicksave Jahr {year} verifiziert: {out}")
-            elif code == 3:
+            elif code in (3, 4):
                 print(f"  Quicksave Jahr {year} aufgeschoben: {out}")
             else:
                 print(f"  !! ALARM Quicksave Jahr {year} FEHLGESCHLAGEN (Versuch {n}/{SAVE_TRIES}): {out}")

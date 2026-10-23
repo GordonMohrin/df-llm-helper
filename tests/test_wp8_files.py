@@ -64,7 +64,7 @@ def test_state_slots_validate_and_carry_wp8_keys(run):
     keys = {"drink_d", "food_d", "meals", "hosp_water", "ore", "bars", "leather", "metal", "picks", "pick_want",
             "mshort", "melt"}
     assert keys <= set(best["stock"]) <= keys | {"mood_miss", "rock", "rock_need", "dwhy"}
-    assert set(best["labor"]) == {"starving", "idle"}
+    assert set(best["labor"]) - {"n", "sold", "held", "why"} == {"starving", "idle"}      # FR-77: the idle breakdown
     assert set(best["care"]) - {"coffins", "died"} == {"stressed_pct", "naked", "ghosts", "corpses_old", "tombs_free",
                                                          "moods"}
     assert set(best["care"].get("coffins", {})) <= {"want", "short", "stock", "order", "proj"}   # FR-61, optional

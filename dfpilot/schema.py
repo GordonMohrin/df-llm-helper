@@ -102,7 +102,7 @@ STATE_OWNERS = {
     "stock.hosp_water": "care", "care.*": "care", "labor.*": "economy", "orders.*": "economy",
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
     "clock.*": "arbiter", "alarm.*": "reflex", "lever.*": "gate",
-    "alert.*": "seal", "wave.*": "siege", "snap.*": "snapshot", "water.*": "water",
+    "alert.*": "seal", "wave.*": "siege", "snap.*": "snapshot", "water.*": "water", "stale.*": "kern",
 }
 
 # kernel fault and slowness rules (CONTRACTS §3.3.5-3.3.6), mirrors contract.KERN
@@ -432,7 +432,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "DEATHS_3PLUS": ("A", "care", _d(opt="n:i ids:ia causes:sa")),
     "DRILL_FAIL": ("A", "drill", _d(opt="streak:i fails:sa")),
     "KERN_FAULT": ("A", "kern", _d("module:s", "err:s n:i backoff_s:i")),
-    "PERF_DEGRADED": ("A", "perf", _d(opt="tps:i base:i pct:i why:s")),
+    "PERF_DEGRADED": ("A", "perf", _d(opt="tps:i base:i pct:i why:s cause:s")),
     # Run 11: food_low/famine add food (days), block (blocker ids: fishery, kitchen, cook, fish_zone, hunt, farms,
     # butcher, gather) and opts (the options, the blockers' first); BUG-038: auto (what the kernel does itself:
     # fishery = its fishery request is out or queued, gather = plant gatherers added); BUG-030 rebuild policy: id
@@ -758,7 +758,13 @@ STATE = Obj(
                                               "proj": Str(maxbytes=40)}),
                           # FR-64: citizen deaths of the last season (100,800 ticks) by cause
                           "died": Obj(extra=NAT)}),
-         "labor": Obj(req={"starving": NAT, "idle": PCT}),
+         # FR-77: why the adults have no job (the daily scan's own-state classes rest/hurt/mood/free), the adults counted
+         # (soldiers apart), the soldiers, the projects the kernel holds back by a rule (seal first, rebuild, slot queue)
+         "labor": Obj(req={"starving": NAT, "idle": PCT},
+                      opt={"n": NAT, "sold": NAT, "held": NAT, "why": Obj(extra=NAT)}),
+         # BUG-071: keys the kernel published from its last known values because their module gave none this time
+         # (disabled, not yet run after a boot): key -> age in game ticks
+         "stale": Obj(extra=NAT),
          # BUG-042: unvalidated live orders, the days the oldest waits, why the manager validates nothing
          "orders": Obj(req={"n": NAT, "bad": NAT, "stuck": NAT},
                        opt={"unval": NAT, "uval_d": NAT, "mgr": Str(maxbytes=80)}),
@@ -968,7 +974,11 @@ LOCK = Obj(req={"holder": Str(maxbytes=40), "purpose": Str(maxbytes=200), "expir
 # <save>/quicksave.json (Python only, `dfllm save`, Run 10): the last quicksave attempt, verified by the save folder
 QUICKSAVE = Obj(req={"v": Const(V), "wall": NAT, "ok": FLAG, "by": Str(enum=BY), "why": Str(maxbytes=200)},
                 opt={"folder": Str(maxbytes=120), "secs": NAT, "last": Str(maxbytes=120), "last_age": Int(-1),
-                     "fails": NAT, "paused": FLAG})
+                     "fails": NAT, "paused": FLAG,
+                     # BUG-069: ok | failed | running (DF still writes save/current at the limit), the kind (quicksave,
+                     # autosave, late, call, silent, writing, vanished), the wait limit used, the seconds a save landed
+                     # after the end of the wait
+                     "state": Str(enum=["ok", "failed", "running"]), "kind": Str(maxbytes=24), "limit": NAT, "late": NAT})
 ALLOWLIST = Obj(req={"v": Const(V),
                      "commands": Obj(extra=Obj(req={"rw": Str(enum=["r", "w"]),
                                                     "args": Arr(Str(maxbytes=200), hi=50)}),
@@ -988,7 +998,10 @@ PERSIST_MODE = Obj(req={"v": Const(V), "mode": MODE, "since": TICK, "why": Str(m
 PERSIST_DRILL = Obj(req={"v": Const(V), "streak_fail": NAT, "last": Arr(Obj(req={
     "tick": TICK, "pass": FLAG, "raised": Int(-1), "worn": PCT, "outside": NAT, "dbl": NAT,
     "fails": Arr(Str(maxbytes=40), hi=20)}), hi=5)})
-PERSIST_KERN = Obj(req={"v": Const(V), "ev": NAT, "seq": NAT, "boots": NAT, "disabled": Arr(MODULE)})
+# BUG-071: carry = the last published pop/stock/labor values {key: {at: tick, v: {leaf: int}}}, so the status keeps them
+# (with their age) across a reboot until the module publishes again
+PERSIST_KERN = Obj(req={"v": Const(V), "ev": NAT, "seq": NAT, "boots": NAT, "disabled": Arr(MODULE)},
+                   opt={"carry": Obj(extra=Obj(req={"at": TICK, "v": Obj(extra=NAT)}))})
 
 SCHEMAS: dict[str, Spec] = {
     "state": STATE, "heartbeat": HEARTBEAT, "event": EVENT, "inbox": INBOX, "outbox": OUTBOX,

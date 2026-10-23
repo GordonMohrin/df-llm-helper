@@ -238,7 +238,7 @@ C.STATE_OWNERS = {
   ['threat.*'] = 'threat', ['bridges'] = 'gate', ['owners.*'] = 'arbiter',
   ['mil.*'] = 'military', ['trade.*'] = 'trade',
   ['clock.*'] = 'arbiter', ['alarm.*'] = 'reflex', ['lever.*'] = 'gate',
-  ['alert.*'] = 'seal', ['wave.*'] = 'siege', ['snap.*'] = 'snapshot', ['water.*'] = 'water',
+  ['alert.*'] = 'seal', ['wave.*'] = 'siege', ['snap.*'] = 'snapshot', ['water.*'] = 'water', ['stale.*'] = 'kern',
 }
 
 -- Persistent site-data keys (§10). Stored as dfhack.persistent site strings encoded with util/json.
@@ -353,7 +353,10 @@ C.STATE_SPEC = obj({
   care = obj({stressed_pct = PCT, naked = NAT, ghosts = NAT, corpses_old = NAT, tombs_free = NAT, moods = NAT},
              {coffins = obj({want = NAT, short = NAT, stock = NAT, order = NAT, proj = str(40)}),
               died = obj(nil, nil, NAT)}),
-  labor = obj({starving = NAT, idle = PCT}),
+  -- FR-77: why the adults have no job (rest/hurt/mood/free), adults counted, soldiers, projects the kernel holds back
+  labor = obj({starving = NAT, idle = PCT}, {n = NAT, sold = NAT, held = NAT, why = obj(nil, nil, NAT)}),
+  -- BUG-071: keys published from the last known values (key -> age in game ticks)
+  stale = obj(nil, nil, NAT),
   -- BUG-042: unvalidated live orders, the days the oldest waits, why the manager validates nothing (past unval_days)
   orders = obj({n = NAT, bad = NAT, stuck = NAT}, {unval = NAT, uval_d = NAT, mgr = str(80)}),
   threat = obj({vis = NAT, armed = FLAG}),

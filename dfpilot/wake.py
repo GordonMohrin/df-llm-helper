@@ -484,8 +484,17 @@ class Follower:
         if now - self._qs_read < SUPERVISE_EVERY_S or self.dir is None:
             return
         self._qs_read = now
-        from .save import read_record
+        from .save import read_record, settle
         rec = read_record(self.dir)
+        if rec is not None and rec.get("state") == "running":
+            # BUG-069: a save still being written is no failure; settle it (landed late / vanished) and look again
+            try:
+                from .supervise import default_env
+                rec = settle(default_env(), self.dir, now) or rec
+            except Exception:                  # noqa: BLE001 - no DF folder known: keep waiting
+                return
+            if rec.get("state") == "running":
+                return
         if rec is None or (self.qs_seen is not None and rec["wall"] <= self.qs_seen):
             return
         self.qs_seen = rec["wall"]

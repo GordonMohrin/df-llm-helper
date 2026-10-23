@@ -104,7 +104,8 @@ T.test('Run 10 (FR-40): unclaimed = no worker, on the job board, on a citizen\'s
   T.eq(r.data.unreachable, {{job = 'GatherPlants', n = 3}}, 'outside the wall: nobody can reach them')
   T.eq(r.data.waiting, 1, 'no worker, not on the job board: taken between workers or waiting')
   T.eq({r.data.idle, r.data.idle_noreach}, {2, 1}, 'the dwarf in the lone cave has no reachable work')
-  T.ok(r.msg:find('(1 without reachable work), 3 unclaimed jobs, 3 unreachable', 1, true), r.msg)
+  -- FR-77: the clause adds up; the lone-cave dwarf is "no reachable work", the other idle one has reachable work waiting
+  T.ok(r.msg:find('2 of 4 adults without a job (no reachable work 1, free 1), 3 unclaimed jobs, 3 unreachable', 1, true), r.msg)
 end)
 
 T.test('BUG-024: spider webs are no thread: "no collected thread", the webs\' reach, no weave order', function()

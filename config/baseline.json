@@ -249,6 +249,8 @@
   "queue": {"yield_days": 7, "park_days": 30}
  },
  "snapshot": {"max_tiles": 400000},
+ "save": {"wait_s": 180, "max_wait_s": 600, "autosave_fresh_s": 300},
+ "perf": {"quiet_s": 60, "carry_days": 28},
  "reserve": {
   "from_phase": "P1",
   "share": {"boulders": 0.25, "logs": 0.25}, "share_min": 5,

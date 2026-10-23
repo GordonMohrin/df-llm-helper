@@ -120,6 +120,11 @@ def line_save(save_dir: Path, now: float | None = None) -> str:
     now = time.time() if now is None else now
     if rec is None or rec["ok"] or now - rec["wall"] > 86400:
         return ""
+    if rec.get("state") == "running":      # BUG-069: DF was still writing at the limit; not a failure yet
+        age = max(0.0, now - rec["wall"])
+        if age > 1800:                     # nobody settled it (no dfllm save, no follow): do not call it running for ever
+            return f"QUICKSAVE UNSETTLED {fmt_age(age)} ago (never confirmed; dfllm save settles it): {clip(rec['why'], 90)}"
+        return f"QUICKSAVE RUNNING {fmt_age(age)} ago: {clip(rec['why'], 120)}"
     return f"QUICKSAVE FAILED {fmt_age(max(0.0, now - rec['wall']))} ago: {clip(rec['why'], 120)}"
 
 
@@ -242,13 +247,19 @@ def line_alarm(ctx: Ctx) -> str:
     return _join(out)
 
 
+def stale_note(s: dict, key: str) -> str:
+    """BUG-071: ' (last known 2d ago)' when the kernel published `key` from its last known value (state stale: game ticks)."""
+    age = (s.get("stale") or {}).get(key)
+    return f" (last known {fmt_ticks(age)} ago)" if isinstance(age, int) else ""
+
+
 def line_pop(ctx: Ctx) -> str:
     s = ctx.s
     out = []
     p = s.get("pop")
     if p:
         out.append(f"pop {p.get('cit', '?')} ({p.get('adults', '?')}ad {p.get('soldiers', '?')}sol)"
-                   f" cap {p.get('cap', '?')} gate {p.get('gate_cap', '?')}")
+                   f" cap {p.get('cap', '?')} gate {p.get('gate_cap', '?')}" + stale_note(s, "pop"))
     r = s.get("ready")
     if r:
         a = r["audit"]
@@ -312,6 +323,31 @@ def _hospital(s: dict, st: dict) -> str:
     return f" water {'ok' if st['hosp_water'] else 'NO'}" if "hosp_water" in st else ""
 
 
+IDLE_NAMES = (("rest", "rest"), ("hurt", "hurt"), ("mood", "mood"), ("free", "no job"))
+
+
+def idle_clause(lb: dict) -> str:
+    """FR-77: 'idle 54% = 7 of 13 adults (rest 2, hurt 1, mood 1, no job 3; 6 soldiers not counted; the kernel holds 2
+    projects: dfllm cmd inspect what=workload splits the rest) starving 0'. The kernel's daily scan knows a unit's own state
+    (rest, hurt, mood); `no job` is the rest, which `inspect workload` splits further (held by a kernel rule, no labor
+    holder, no reachable work). Without the breakdown (an older kernel): 'idle 20% starving 0'."""
+    why, n = lb.get("why"), lb.get("n")
+    if not isinstance(why, dict) or not isinstance(n, int):
+        return f"idle {lb['idle']}% starving {lb['starving']}"
+    parts = [f"{label} {why[k]}" for k, label in IDLE_NAMES if why.get(k)]
+    idle_n = sum(v for v in why.values() if isinstance(v, int))
+    extra = []
+    if lb.get("sold"):
+        extra.append(f"{lb['sold']} soldiers not counted")
+    held = lb.get("held", 0)
+    if held:
+        extra.append(f"the kernel holds {held} project{'s' if held != 1 else ''}")
+    inner = ", ".join(parts) or "no reason of its own state"
+    tail = "; ".join(([inner] if not extra else [inner] + extra))
+    hint = ": dfllm cmd inspect what=workload splits the rest" if why.get("free") or held else ""
+    return f"idle {lb['idle']}% = {idle_n} of {n} adults ({tail}{hint}) starving {lb['starving']}"
+
+
 def line_supply(ctx: Ctx) -> str:
     s, out = ctx.s, []
     st = s.get("stock")
@@ -327,7 +363,8 @@ def line_supply(ctx: Ctx) -> str:
                + (" METAL SHORT" if st.get("mshort") else "") + (f" melt {st['melt']}" if st.get("melt") else "")
                if "ore" in st else "")
             + (f" leather {st['leather']}" if "leather" in st else "")
-            + (f" moods missed {','.join(st['mood_miss'])}" if st.get("mood_miss") else ""))
+            + (f" moods missed {','.join(st['mood_miss'])}" if st.get("mood_miss") else "")
+            + stale_note(s, "stock"))
         # BUG-042: why the stills do not brew while drink is below the target (the kernel's own cause)
         if st.get("dwhy"):
             out.append(f"drink: {st['dwhy']}")
@@ -350,7 +387,7 @@ def line_supply(ctx: Ctx) -> str:
                        + (f" proj {cf['proj']}" if cf["proj"] else ""))
     lb = s.get("labor")
     if lb:
-        out.append(f"idle {lb['idle']}% starving {lb['starving']}")
+        out.append(idle_clause(lb) + stale_note(s, "labor"))
     od = s.get("orders")
     if od:                                     # FR-01/FR-39: orders that cannot run, crash-class orders
         out.append(f"orders {od['n']}" + (f" stuck {od['stuck']}" if od["stuck"] else "")
@@ -488,15 +525,52 @@ def _no_state(ctx: Ctx) -> str:
 
 
 # ---------------------------------------------------------------- status
+def fit_ranked(items: list[tuple[int, str]], budget: int, clip_tokens: int = 90) -> str:
+    """BUG-071: join the lines in order, within the token budget, by RANK instead of position. Rank 0 (the clock line) and
+    rank 1 (pop, stock, the warnings) stay. Over budget: whole lines of rank >= 3 go (highest rank, latest first); then the
+    long rank-2 lines (UNREADY, alarm) are cut to clip_tokens; then those go; only then are the rank-1 lines shortened.
+    (The old fit dropped lines from the end, so a long UNREADY or alarm line pushed pop and stock out and status showed the
+    clock line alone.)"""
+    its = [[r, t] for r, t in items if t]
+
+    def text() -> str:
+        return "\n".join(t for _, t in its)
+
+    def drop(min_rank: int) -> bool:
+        low = [i for i, (r, _) in enumerate(its) if r >= min_rank]
+        if not low:
+            return False
+        worst = max(its[i][0] for i in low)
+        its.pop(max(i for i in low if its[i][0] == worst))
+        return True
+    while est_tokens(text()) > budget and drop(3):
+        pass
+    if est_tokens(text()) > budget:
+        for it in its:
+            if it[0] == 2:
+                it[1] = clip(it[1], clip_tokens)
+    while est_tokens(text()) > budget and drop(2):
+        pass
+    while est_tokens(text()) > budget:
+        mid = [i for i, (r, _) in enumerate(its) if r == 1 and est_tokens(its[i][1]) > 12]
+        if not mid:
+            its[0][1] = clip(its[0][1], budget)
+            break
+        i = max(mid, key=lambda k: est_tokens(its[k][1]))
+        its[i][1] = clip(its[i][1], max(10, est_tokens(its[i][1]) - 20))
+    return text()
+
+
 def status_text(save_dir: Path) -> str:
     ctx = Ctx(save_dir, full=False)
-    lines = [line_head(ctx), line_guard(save_dir), files.follow_off(save_dir), line_save(save_dir)]   # FR-68, FR-29
+    lines = [(0, line_head(ctx)), (1, line_guard(save_dir)), (1, files.follow_off(save_dir)),   # FR-68, FR-29
+             (1, line_save(save_dir))]
     if ctx.state is None:
-        lines.append(_no_state(ctx))
+        lines.append((1, _no_state(ctx)))
     else:
-        lines += [line_unready(ctx), line_alarm(ctx), line_pop(ctx), line_supply(ctx), line_def(ctx), line_sched(ctx),
-                  line_proj(ctx), line_kern(ctx), line_snap(ctx)]
-    return fit([[x for x in lines if x]], STATUS_TOKENS)
+        lines += [(2, line_unready(ctx)), (2, line_alarm(ctx)), (1, line_pop(ctx)), (1, line_supply(ctx)),
+                  (3, line_def(ctx)), (3, line_sched(ctx)), (4, line_proj(ctx)), (4, line_kern(ctx)), (4, line_snap(ctx))]
+    return fit_ranked(lines, STATUS_TOKENS)
 
 
 # ---------------------------------------------------------------- brief

@@ -2056,20 +2056,72 @@ local function stale_filter(K, c, p, n, age, job)
   return n - floor
 end
 
+-- FR-77 (Run 13: "N of M adults without a job (0 without reachable work)" with 40-70 % idle): why an adult has no job.
+-- flags: mood (a strange mood or insanity), hurt (needs health care, or a wound), rest (drowsy: sleepiness_timer at DF's
+-- "drowsy" mark, or lying down); idle_class names the first that holds (mood, hurt, rest) or nil. Every read is guarded:
+-- a field the game does not have is no flag. Module fields, not locals (this file sits at Lua's 200-locals limit).
+M.IDLE_SLEEPY = 57600
+M.IDLE_CLASSES = {'rest', 'hurt', 'mood', 'held', 'nolabor', 'noreach', 'nowork', 'free'}
+M.JOB_LABOR = {GatherPlants = 'HERBALIST', PlantSeeds = 'PLANT', HarvestPlants = 'PLANT', FellTree = 'CUTWOOD',
+               Dig = 'MINE', DigChannel = 'MINE', CarveUpwardStaircase = 'MINE', CarveDownwardStaircase = 'MINE',
+               CarveUpDownStaircase = 'MINE', CarveRamp = 'MINE', Fish = 'FISH', Hunt = 'HUNT'}
+function M.idle_flags(u)
+  local f = {}
+  pcall(function() f.mood = type(u.mood) == 'number' and u.mood >= 0 end)
+  pcall(function()
+    f.hurt = (u.health ~= nil and u.health.flags.needs_healthcare == true) or (u.body ~= nil and #u.body.wounds > 0)
+  end)
+  pcall(function()
+    local t = u.counters2 and u.counters2.sleepiness_timer
+    f.rest = type(t) == 'number' and t >= M.IDLE_SLEEPY
+    if not f.rest and u.actions then
+      for _, a in ipairs(u.actions) do
+        local n = df.unit_action_type and df.unit_action_type[a.type]
+        if n == 'Sleep' or n == 'LieDown' then f.rest = true; break end
+      end
+    end
+  end)
+  return f
+end
+function M.idle_class(f)
+  if f.mood then return 'mood' elseif f.hurt then return 'hurt' elseif f.rest then return 'rest' end
+end
+-- projects the kernel holds back by a rule of its own (seal first, the rebuild policy, the slot queue): from the published
+-- runner state (sched.seal.paused, sched.rb.paused, sched.q.n)
+function M.held_projects(K, queued)
+  local sc = (K.view() or {}).sched
+  if type(sc) ~= 'table' then sc = {} end
+  local n = 0
+  for _, k in ipairs({'seal', 'rb'}) do
+    local e = sc[k]
+    if type(e) == 'table' then n = n + (math.tointeger(e.paused) or 0) end
+  end
+  -- the slot queue: the runner's own answer when the caller has it (inspect), else the published state
+  n = n + (math.tointeger(queued) or (type(sc.q) == 'table' and math.tointeger(sc.q.n)) or 0)
+  return n
+end
+
 local function idle_pct(K)
   local cu = K.census.u
-  if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then return nil end
+  if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then st.idle_why = nil; return nil end
   local sold = {}
   for _, id in ipairs(cu.soldier_ids or {}) do sold[id] = true end
-  local n, idle = 0, 0
+  local n, idle, why = 0, 0, {rest = 0, hurt = 0, mood = 0, free = 0}
   for _, id in ipairs(cu.ids) do
     local u = not sold[id] and df.unit.find(id)
     if u and not dfhack.units.isChild(u) and not dfhack.units.isBaby(u) then
       n = n + 1
       local j = u.job
-      if j == nil or j.current_job == nil then idle = idle + 1 end
+      if j == nil or j.current_job == nil then
+        idle = idle + 1
+        local c = M.idle_class(M.idle_flags(u)) or 'free'
+        why[c] = why[c] + 1
+      end
     end
   end
+  -- the daily scan knows what a unit's own state says; what the job board and the walk groups add (held, no labor
+  -- holder, no reachable work) is `inspect workload` (a job scan). soldiers: not counted in n
+  st.idle_why = {n = n, sold = #(cu.soldier_ids or {}), held = M.held_projects(K), why = why}
   return n > 0 and idle * 100 // n or 0
 end
 
@@ -6840,6 +6892,11 @@ function M.state(K)
   if o then
     r.stock = {drink_d = o.drink_d, food_d = o.food_d, meals = o.meals}
     r.labor = {starving = o.starving, idle = math.max(0, math.min(100, o.idle))}
+    local iw = st.idle_why     -- FR-77: why the adults have no job (the daily scan's own-state classes)
+    if iw then
+      r.labor.n, r.labor.sold, r.labor.held = iw.n, iw.sold, iw.held
+      r.labor.why = {rest = iw.why.rest, hurt = iw.why.hurt, mood = iw.why.mood, free = iw.why.free}
+    end
     -- Run 10 (plan propose/check: ore exploration and leather as plan goals): metal ore boulders, bars and leather
     -- (care's forbidden reserve included), the metal route ('explore' = no ore while metal is wanted) and the classes a
     -- strange mood missed within leather.memory_days
@@ -7118,13 +7175,59 @@ M.inspect.workload = function(K, args)
       by_grp[key] = (by_grp[key] or 0) + 1
     end
   end
-  local noreach = 0
-  if n_open + n_far > 0 then
-    for k in ipairs(idle) do
-      local g = math.tointeger(cg[idle_at[k]]) or -1
-      if g > 0 and (by_grp[g] or 0) + (by_grp.any or 0) == 0 then noreach = noreach + 1 end
+  -- FR-77: every idle adult gets one reason: his own state (mood, hurt, rest: M.idle_flags), else the job board and the
+  -- walk groups: no reachable work, no labor holder (every reachable open job needs a labor nobody holds), no work at all
+  -- (held when the kernel holds projects back by a rule of its own, else nowork), or free (reachable work with a holder
+  -- exists and he has none yet). `idle_probe` lists the raw fields of a few `free` ones for the next live look.
+  local sold_n = #(cu.soldier_ids or {})
+  local rq, rd = runner_queue(K)
+  local held_n = M.held_projects(K, type(rd) == 'table' and rd.n or nil)
+  local all_unheld = n_open > 0
+  if all_unheld then
+    local holders = {}
+    pcall(function()
+      for _, id in ipairs(cu.ids or {}) do
+        local u = not sold[id] and df.unit.find(id)
+        if u and dfhack.units.isAdult(u) then
+          for tn in pairs(open) do
+            local ln = M.JOB_LABOR[tn]
+            local lid = ln and df.unit_labor and df.unit_labor[ln]
+            if type(lid) == 'number' and u.status.labors[lid] == true then holders[tn] = true end
+          end
+        end
+      end
+    end)
+    for tn in pairs(open) do
+      local ln = M.JOB_LABOR[tn]
+      -- a job type without a known labor, or a labor this game does not name, is not judged
+      if not ln or holders[tn] or type(df.unit_labor and df.unit_labor[ln]) ~= 'number' then all_unheld = false; break end
     end
   end
+  local why_n = {}
+  for _, c in ipairs(M.IDLE_CLASSES) do why_n[c] = 0 end
+  local probe = {}
+  for k, id in ipairs(idle) do
+    local u = df.unit.find(id)
+    local c = u and M.idle_class(M.idle_flags(u))
+    if not c then
+      local g = math.tointeger(cg[idle_at[k]]) or -1
+      if n_open + n_far > 0 and g > 0 and (by_grp[g] or 0) + (by_grp.any or 0) == 0 then c = 'noreach'
+      elseif n_open == 0 then c = (n_far == 0 and held_n > 0) and 'held' or 'nowork'
+      elseif all_unheld then c = 'nolabor'
+      else c = 'free' end
+    end
+    why_n[c] = why_n[c] + 1
+    if c == 'free' and #probe < 5 and u then
+      local o = {id = id}
+      pcall(function() o.sleepy = u.counters2.sleepiness_timer end)
+      pcall(function() o.tired = u.counters2.exhaustion end)
+      pcall(function() o.hunger, o.thirst = u.counters2.hunger_timer, u.counters2.thirst_timer end)
+      pcall(function() o.mood = u.mood end)
+      pcall(function() o.acts = #u.actions end)
+      probe[#probe + 1] = o
+    end
+  end
+  local noreach = why_n.noreach
   local why = {}
   for k, v in pairs(st.why_prev or {}) do why[k] = v end
   for k, v in pairs(st.why or {}) do why[k] = (why[k] or 0) + v end
@@ -7156,7 +7259,8 @@ M.inspect.workload = function(K, args)
     cloth.why = near > 0 and string.format('no collected thread: %d webs on the walk group (weavers collect them)', near)
                 or 'no collected thread: the webs lie off the citizens\' walk group'
   end
-  local data = {adults = adults, idle = #idle, idle_noreach = noreach, idle_units = names, jobs = total,
+  local data = {adults = adults, idle = #idle, idle_noreach = noreach, idle_why = why_n, soldiers = sold_n,
+                held_projects = held_n, idle_probe = json.array(probe), idle_units = names, jobs = total,
                 suspended = sus, waiting = posted and waiting or nil,
                 unclaimed = jobs_of(open, 12), unreachable = jobs_of(far, 8), cancels = top(why, 8),
                 tools = M.tool_counts(inv),
@@ -7168,10 +7272,18 @@ M.inspect.workload = function(K, args)
                                  marked = sv.marked, added = sv.added, unreach = sv.unreach} or json.object{}}
   -- BUG-037 (Run 11 y449: '15 without reachable work, 0 unclaimed jobs' while six projects stood queued for months): the
   -- runner's queue is named as the reason ('runner: 6 projects queued behind 3 slot holders without progress (...)')
-  local rq, rd = runner_queue(K)
   data.runner = rd
-  return true, string.format('%d of %d adults without a job (%d without reachable work), %d unclaimed jobs, %d unreachable',
-                             #idle, adults, noreach, n_open, n_far) .. (rq and ('; ' .. rq) or ''), data
+  -- the clause names the classes that are not zero (the reply is cut at 300 bytes; all numbers are in data.idle_why)
+  local CL = {rest = 'rest', hurt = 'hurt', mood = 'mood', held = 'held by the kernel', nolabor = 'no labor holder',
+              noreach = 'no reachable work', nowork = 'no work', free = 'free'}
+  local parts = {}
+  for _, c in ipairs(M.IDLE_CLASSES) do
+    if why_n[c] > 0 then parts[#parts + 1] = string.format('%s %d', CL[c], why_n[c]) end
+  end
+  if sold_n > 0 then parts[#parts + 1] = string.format('%d soldiers not counted', sold_n) end
+  return true, string.format('%d of %d adults without a job (%s), %d unclaimed jobs, %d unreachable', #idle, adults,
+                             #parts > 0 and table.concat(parts, ', ') or 'none', n_open, n_far)
+                .. (rq and ('; ' .. rq) or ''), data
 end
 
 return M
