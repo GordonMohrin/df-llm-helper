@@ -27,6 +27,48 @@ Gordon answers each decision once. The answer goes into `config/decisions.yaml` 
 | D-13 | Automatic beauty pause at high wealth | `no`, `yes` | `no` | runner | yes: beauty projects pause above a wealth threshold (to be defined); without it, wealth is only logged with every threat event |
 | D-14 | `peace_gates`: state of the gate bridges in PEACE (FR-49/55) | `down`, `up` | `down` | gate, siege | up: in PEACE the manifest outer/inner bridges stay up, and so do the lever-linked bridges a lockdown raised; they open only for a window (a caravan on the map, migrants arriving, an inbox `lever` down for that bridge), each while no hostile is visible, and close 600 ticks after it; RECOVERY lowers only the core seal |
 
+### Decided by the development session (2026-10-23, delegated by Gordon: "triff du selber die entscheidungen")
+Design questions that stood open between the dev session and the game session. They are not `config/decisions.yaml`
+switches (D-01..D-14 stay Gordon's). The packages that carry them out are in `docs/v2/TRIAGE-run11-14.md`.
+1. **Fortcore stage 3 (O1, B2, the refuge) comes before P3.** Runs 10, 11 and 13 lost forts between pop 54 and 60 with an
+   open or missing refuge. The refuge gate of `plan check` already refuses P3+ without a separated refuge with beds;
+   the phase table, the fortcore docs and the plan order now say P3 instead of P5. Stage 4 (the traps) stays P6.
+2. **Auto-seal needs auto follow.** `follow --no-auto` stays an explicit opt-out. status and wake say "auto-seal off, N
+   openings" instead of staying silent.
+3. **Lost bridges (`perimeter.stop_after` stays 2, per bridge).** After the second loss to building destroyers the
+   keeper does not ask a question nobody answers (`bridge_rebuild` DECISION_NEEDED): it replaces the bridge by a wall
+   and a door (Run 13 lesson: "replace destroyed gates and bridges at once, or close them with wall + door; an audit
+   FAIL is a stop signal"), reports it once and keeps the other bridges. A bridge lost to anything else is rebuilt in
+   PEACE without the old waits.
+4. **Seal first keeps its shape, with one change.** Defense builds (fortcore stages, barracks, gallery) run next to an
+   open seal. The ore search does not pause for a seal ("explore never rests", post-mortem run 11).
+5. **Recall (BUG-035/036) as built:** a door the lockdown locked may be opened again for a citizen who can only come
+   through it (never with a hostile within 15 tiles); the larger "outside Tiefe+" numbers stay; `hospital_out` freezes
+   max-pop until the hospital stands in Kern+/Tiefe+ next to accepted water.
+6. **The refuge's drink counts wet wells only.** seal's alert rating follows readiness (`water.refuge_ok`): a dry well
+   no longer frees Tiefe+ from the `breach_days` window.
+7. **One food stockpile per quickfort `place` call.** DFHack's food import copies all raw materials per element (68 s
+   for three piles in an old world, BUG-039). The runner splits place stages that hold food piles.
+8. **No cavern water, ever.** No well over a lake, no piped cistern from a cavern lake, no opened shaft: the doctrine
+   "caverns only behind a doubly sealed lock" stands (Run 3 fell to an opened shaft). Water for Tiefe+ comes from the
+   drink store (FR-69) and, later and only if a source is accepted, a bucket-filled reservoir inside the fort.
+9. **Parked projects stay parked, nothing is cancelled by the kernel (BUG-037).** One exception: after a `build_lost`
+   farms project for lack of soil the kernel requests no further farms project until the cause changes (a new site).
+10. **The gather zone covers reachable tiles only** (the citizens' walk group), and a designation that nobody works for N
+    days is withdrawn (the 46 "unreachable" and the 250-450 unclaimed GatherPlants jobs).
+11. **A fault inside the seal-first count is an event, not only a log line** (it must not hide behind a pcall).
+12. **Lone thieves still start a lockdown** (Gordon 2026-10-15: "einzelne Diebe machst du richtig"), but the confinement
+    is bounded: it ends by itself after a limit, the brief names the cause (unit, position), and a harmless intruder
+    far from the fort is answered with a sortie offer instead of months of confinement.
+13. **The kernel acknowledges harmless popups itself** (migrants, trade, mood announcements; the game's own dismiss
+    key, a UI action). An ambush, invasion or siege popup is handled by the arrival reflex first and acknowledged after.
+14. **Loose tools:** the kernel may give tools a stockpile and make the labor details ask for them the way the game's
+    own equipment update does (`tools.equip_update`); it never moves an item itself.
+15. **Mood dwarves:** no direct job or item for them (fair play). The levers are an earlier mood check, a drink stockpile
+    beside the mood workshop, material delivery first, and an alert that names the dwarf.
+16. **Population decline and missing migrants are diagnosed, not steered:** the status says whether children are counted
+    as adults, which deaths, and the migration conditions the game documents.
+
 ### Answered by Gordon (2026-10-16, chat)
 - **`tools.equip_update` on (BUG-023):** yes. A fair-play exception: when `act.work_detail` switches a tool labor on
   (Miners/MINE, Woodcutters/CUTWOOD), it also sets the member's equipment update request (`uniform.pickup_flags.update`,

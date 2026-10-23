@@ -2,6 +2,8 @@
 
 Hinweis: vom Spieler (Claude Code, 'claude spielt df') gesammelt; Nummern vergibt die Entwicklungssession beim Bulk-Übergang.
 
+Stand 23.10.2026: Übergabe verarbeitet, siehe `docs/v2/TRIAGE-run11-14.md` (Notiz -> Paket -> BUG-/FR-Nummer) und `docs/v2/DECISIONS.md` (Entscheidungen der Dev-Session).
+
 Regel (Gordon 17.10.2026): neue FR/Bugs nur hier aufschreiben, die Dev-Session NICHT einzeln anpingen; Übergabe gesammelt später.
 
 ## Offen (noch nicht gemeldet)
