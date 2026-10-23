@@ -1550,14 +1550,15 @@ function KP.cells(fp)
   return c
 end
 
--- the closure stands: constructed walls and a built door on every cell
+-- the closure stands: constructed walls and a built door on every cell (BUG-081: or a wall where the runner replaced a
+-- door that stayed unbuilt, runner.stuck_walls: the footprint is closed all the same)
 function KP.standing(cells)
   for _, c in ipairs(cells) do
     spend(2)
     if not rev(c[1], c[2], c[3]) then return false end
-    if c[4] == 'd' then
-      local b = bld_at(c[1], c[2], c[3])
-      if not (b and btype(b) == 'Door' and built(b)) then return false end
+    local b = c[4] == 'd' and bld_at(c[1], c[2], c[3])
+    if b and btype(b) == 'Door' and built(b) then
+      -- the door stands
     else
       local s = shape(c[1], c[2], c[3])
       if not (s and (s.shape == 'WALL' or s.shape == 'FORTIFICATION')) then return false end
@@ -1602,7 +1603,7 @@ end
 function KP.close(K, k, g, t, why)
   local ok, r1, r2 = K.call('runner', 'repair', KP.cells(g.fp),
                             trunc(string.format('bridge %s replaced by wall + door (%s)', g.name or k, why), 120),
-                            {peace = true})
+                            {peace = true, closure = true})        -- BUG-081: walls first, the door next, a stuck-door fallback
   if not (ok and r1) then
     K.log('warn', 'seal: bridge %s: wall + door not queued: %s', g.name or k, tostring(r2 or r1))
     return false

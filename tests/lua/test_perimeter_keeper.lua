@@ -48,7 +48,8 @@ local function fort(o)
   W.load(SW.fake('reflex', {holding = function() return W.lock end}))
   W.cells = {}
   W.load(SW.fake('runner', {repair = function(K, cells, why, opts)
-    W.cells[#W.cells + 1] = {cells = cells, why = why, peace = type(opts) == 'table' and opts.peace == true}
+    W.cells[#W.cells + 1] = {cells = cells, why = why, peace = type(opts) == 'table' and opts.peace == true,
+                             closure = type(opts) == 'table' and opts.closure == true}
     return true, 'rp' .. #W.cells
   end}))
   W.act_result('link_lever', function(lid, bid)
@@ -295,6 +296,27 @@ T.test('a rebuild that is not built within 60 days becomes the closure instead o
   T.eq(#W.cells, 2)
   T.eq(W.cells[2].cells, {{20, 25, G, 'd'}})
   T.ok(W.cells[2].why:find('not built', 1, true), W.cells[2].why)
+end)
+
+---------------------------------------------------------------- (g) BUG-081: the runner walled a door that stayed unbuilt
+T.test('BUG-081: the closure stands when the runner replaced its stuck door by a wall (runner.stuck_walls); the closure is ' ..
+       'asked for as a closure (opts.closure: walls first, the door next)', function()
+  local W = fort({fp = {20, 24, G, 20, 26, G}})
+  record(W, 'gw(1x3)')
+  siege(W)
+  rebuild(W)
+  run(W, 3000)
+  siege(W)
+  T.eq(#W.cells, 2)
+  T.eq(W.cells[2].closure, true, 'old code: the closure was an ordinary peace-only repair')
+  for _, c in ipairs(W.cells[2].cells) do SW.build_wall(W, c[1], c[2], c[3]) end    -- the door tile holds a wall too
+  SW.regroup(W)
+  run(W, 2600)
+  local ok, lost = W.K.call('seal', 'lost_gates')
+  T.eq(lost, {}, 'a walled footprint is closed')
+  local _, rep = W.K.call('seal', 'replaced')
+  T.ok(rep and rep.O1 ~= nil, 'the bridge is replaced')
+  T.eq(#W.cells, 2, 'not queued again')
 end)
 
 T.done()
