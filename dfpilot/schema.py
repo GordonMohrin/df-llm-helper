@@ -449,8 +449,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # Run 11: mat = why economy cannot make a seal's missing pieces ('no material for door: no rock, no logs');
     # walled = the seal doors quickfort refused (no wall beside them) that the runner planned as walls ('x,y,z')
     # BUG-037: park = days a project blocked for good stood before it was parked (its cancel command is in msg)
+    # BUG-046: parts = the parts of a stalled build stage that wait (<= 3, joined by '; ': 'MetalsmithsForge x,y,z: job
+    # 22236 suspended by buildingplan: waits for building material x1'); walled also lists the doors replaced by walls
+    # (BUG-044)
     "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i missing:sa retry:i mat:s walled:sa "
-                                                    "park:i")),
+                                                    "park:i parts:s")),
     "YEAR_REVIEW": ("A", "kern", _d(opt="year:i")),
     # BUG-062: far = of them, the bodies lying in another walk group than the citizens' (corpse_far: no coffin helps)
     "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa far:i")),
@@ -565,6 +568,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # kernel can tell ('FellTree at x,y,z: Wood cutting enabled for 0 of 26 citizens: nobody takes it', 'no citizen
     # reaches wall x,y,z or a tile beside it (walk groups 5018; citizens 7827)')
     "SEAL_STUCK": ("A", "runner", _d("proj:s", "tpl:s stage:s days:i n:i pieces:sa mat:s blocked:s wait:s")),
+    # BUG-044 (Run 11 y483-y497, the seal door 115,73,143): a seal door still not built seal_first.wall_days after
+    # SEAL_STUCK was replaced by a constructed wall on its tile (PEACE; the citizens keep another way: seal.opening_ways):
+    # at = 'x,y,z', was = the piece (door), days = days it stood stuck, why = the SEAL_STUCK wait (the job and who
+    # suspends it)
+    "SEAL_WALLED": ("B", "runner", _d("proj:s at:s", "was:s days:i why:s")),
     # BUG-030: the siege's deep defense: why = destroyers (building destroyers in sight), army (> stations.core_ratio x
     # soldiers), weak (worn or iron/steel below stations.worn/metal); civilians to the separated refuge, squads at the core
     "SIEGE_DEEP": ("A", "siege", _d("why:sa", "bd:i races:sa units:ia vis:i soldiers:i worn:i metal:i refuge:s "

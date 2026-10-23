@@ -1,5 +1,78 @@
 # CHANGELOG dfpilot
 
+## A seal door that is never built is named, ordered and, as the last bounded step, walled; a designation DF took in an alert is restored; a refused part is placed again beside one that waits; plan check passes a closed seal (BUG-044, BUG-045, BUG-046, BUG-047, 2026-10-23; offline, live-untested)
+- Fix commit 73b429d.
+- **Why (Run 11, y483-y497, Kilrudrabed; Run 12):** the seal door 115,73,143 (project c1a14b92909f3d7801, y483 summer d69)
+  stayed open for 14 game years. Its ConstructBuilding job was "SUSPENDED again and again" (suspendmanager's text "Blocks
+  another build job"; suspended again with suspendmanager disabled too; the site read "none" once and was placed anew),
+  the status said "stalled", the fort held 110 open ConstructDoor orders. Sieges 13 (y487 autumn: pop 51 -> 21, sealed 0
+  ticks) and 14 (y497 summer: 24 lost, `on_station=0`) came through it and a second open entrance. Beside it: the stair
+  designation at z127 of the deep shaft vanished after a BREACH and was never restored (note 47); the workshops project of
+  Run 12 stood at 62 % behind a forge that was never built and its kitchen was never placed again (note 32); `plan check`
+  said ERROR "seal: nothing to close" for the refuge hatch that stood (note 8).
+- **Cause (bugs/BUG-044..047, proved from the code at f17e2b3):** the kernel suspends nothing (no write of the flag but
+  `act.job_resume` setting it false); a planned building's job is suspended by buildingplan itself until its items are
+  attached and a resume by hand is undone at once. In the kernel: `measure_build` waited for ever on a pending building
+  (runner.lua:687), with no report; a seal's door cells were subject to the BUG-042 cap (runner.lua:1558: 110 open door
+  orders -> no door order of the seal's own; T.jmake counts those orders as made), SEAL_STUCK `wait` knew nothing of a
+  build stage. The same line 687 returned before the lost parts were looked at, so a refused part waited for the last
+  pending one; a wall without designation that the measure never saw was "never designated" (487) and a seen one was
+  re-marked once, then `dig_lost` (543), whatever the cause; `cmd.seal_openings` raised for a closed seal (cmd.py:877).
+  Which candidate suspended the live door is not decided offline (BUG-044 names the read-only data).
+- **economy.build_state(x, y, z)** (read-only; on demand `dfllm cmd inspect '{"what":"workload","key":"build:x,y,z"}'`):
+  the building on a tile, its job, `who` keeps it suspended (`buildingplan` with what it waits for, the free items and the
+  open piece orders, validated or not; `suspendmanager` with its own text; `DF` with the cancel report and the items on
+  the tile), `work`, one `line`.
+- **SEAL_STUCK `wait`** for a build stage: `door 115,73,143: job 4711 suspended by buildingplan: waits for door x1 (0
+  free, 110 ordered, 100 not validated)`. **PROJECT_BLOCKED `parts`** (BUG-046): a stalled build stage names the parts
+  that wait (`blocked: stalled at build; waits: MetalsmithsForge 72,61,129: job 22236 suspended by buildingplan: ...`).
+- **Orders:** a seal's door and hatch cells ignore `orders_cap`, at most `orders_seal` (12) door/hatch items for one seal
+  project in all (m.runner `so`); other projects stay capped.
+- **The bounded fallback:** a door cell of the current build stage still unbuilt `seal_first.wall_days` (2, 0-60) after
+  SEAL_STUCK, in PEACE, with no lockdown holding and nobody building it, becomes a constructed wall on the same tile: the
+  planned door is removed (quickfort undo, verified, three tries), the cell becomes `Cw` in `bp.<id>`, the chunk is applied
+  again, **SEAL_WALLED** (B, runner; once per piece), PROJECT_DONE names it. Only where `seal.opening_ways` (the last
+  entrance check, at most 60 days old) shows the citizens another way: the tile beside the door or bridge of its own
+  opening, or another opening with a door or a bridge. The only way in or out stays a door (kern.log says why, once).
+  Hatches, walls and grates are never replaced. Config `runner.seal_first.wall` (true) and `wall_days` (2).
+- **Dig designations (BUG-045):** a dig project frozen by a mode, or by the civil alert being on (any mode), marks the
+  freeze (m.runner `p.fz`); once the alert is off, the chunk's walls that lost their designation (seen before, or never
+  seen: `probe` answers `skip, 'wall'`) are designated anew by quickfort, once per freeze and chunk, at most 6 times a
+  chunk, and do not count against the second-loss block `dig_lost`; a damp or warm cancel report near the stage keeps
+  the BREACH_STOP rule.
+- **Parts (BUG-046):** `measure_build` places a lost or refused part again whatever the other parts wait for: at once as
+  before, then up to 6 more times a game day apart (`reapply_max`, `reapply_gap`). The `workshops` template lists the
+  food shops (Still, Kitchen, Butchers, Fishery) first.
+- **plan check/apply (BUG-047):** `cmd.SealClosed(BpError)` for a seal whose every opening is closed or built by a seal
+  project, or that names no open way; `place_all` leaves such a build out (a warning, no blueprint, `apply` says `(1 seal
+  left out: nothing to close)`, the plan keeps the build and the ids stay); the kernel logs a missing seal blueprint and
+  queues nothing. A gap in what is known (no refuge stair head, a tile off the snapshot) stays an error.
+- **Decisions (docs/v2/DECISIONS.md, development session 2026-10-23):** no. 4: the explore is no longer paused by an open
+  seal (runner `kind_of` -> `explore`, `plan.build_kind`; the rebuild policy still pauses it). No. 11 (a fault inside
+  the seal-first count as an event) is package C4's; the wall fallback has its own pcall and a log line.
+- Contracts: CONTRACTS §7 `economy.build_state`, `seal.opening_ways`; §9.8 (freeze, order bound, parts); §9.17 `seal_first`
+  `wall`/`wall_days`; §12 SEAL_STUCK `wait`, SEAL_WALLED, PROJECT_BLOCKED `parts`/`walled`; tracker row SD; appendix
+  regenerated; schema.py/contract.lua (SEAL_WALLED, `parts`); fairplay `RUNNER_LIM`; config/baseline.json; RULES §7
+  SEAL_STUCK row and the seal-first row edited in place (300 lines); DESIGN (seal first).
+- Tests (each new one fails on f17e2b3): `tests/lua/test_runner_seal_door.lua` (new: wait by cause, the order bound, the
+  fallback and its refusals, parts, designations after an alert, the explore, the plan build without a blueprint),
+  `tests/lua/test_economy_build_state.lua` (new), `tests/lua/test_seal_ways.lua` (new), `tests/test_plan_seal_closed.py`
+  (new), `tests/test_bug044_files.py` (new); `tests/test_seal_first.py` (the baseline `runner` dict).
+- **Live check (Run 11/12 forts):** after `git pull`, `dfhack-run dfllm reload` and a restart of `dfllm follow`:
+  - a stuck seal door, on demand: `dfllm cmd inspect '{"what":"workload","key":"build:115,73,143"}'` (replace the tile);
+    the SEAL_STUCK event / kern.log `seal first: ... built nothing for N days ...; door x,y,z: job J
+    suspended by <buildingplan|suspendmanager|DF> ...` (`dfllm events --type SEAL_STUCK --limit 1`), the cause for the notes
+    21/22; `dfllm cmd inspect orders` for the ConstructDoor orders (validated? rock?);
+  - two days later, in PEACE with another way in or out: `SEAL_WALLED`, kern.log `door x,y,z stuck N days replaced by a
+    wall`, then `dfhack-run lua "print(dfhack.buildings.findAtTile(X,Y,Z):getType())"` shows a Construction (the planned
+    wall) and the seal ends `done`; on the only way in or out: kern.log `door x,y,z stays a door: ...` once;
+  - a dig project after a BREACH: kern.log `<id> <stage> chunk N: K tiles lost their designation (an alert froze the
+    project): designated again (n/6)`; `dfllm cmd inspect persist key=m.runner field=p` (`fz`, `fd`, `ar`);
+  - a stalled workshops/furnaces project: PROJECT_BLOCKED `parts`; a plan with `seal at=refuge` after the hatch stands:
+    `dfllm plan check` -> `plan OK` with the warning, kern.log `plan build ... (seal): no blueprint`;
+  - not read offline: whether quickfort `undo` removes a planned (unbuilt) door; if not, kern.log `door x stays a door:
+    quickfort undo did not remove the planned door (3 tries)` and the door stands as before.
+
 ## The EngraveSlab jam, orders without a job and the standing thread and cloth orders: at most 3 engrave orders and only for unengraved slabs, ConstructSlab first, stale orders go wood, SpinThread/WeaveCloth/ProcessPlants/ShearCreature from P1 with a farmer's workshop (BUG-060, BUG-061, FR-73, 2026-10-23; offline, live-untested)
 - **Why (Run 13 Wheelsblows y508/y523, Run 14 Trussroads y558-y577):** 31 active EngraveSlab orders ("Needs unengraved slab", queued by autoslab: one per ghost every 1289 ticks, no blank slab) filled the masons' five slots with jobs that cancelled at once and pushed out every other mason job for ten game years (doors, coffins, tables, blocks, slabs; 15 old ghosts never calmed). Eleven `ConstructDoor INORGANIC` orders (validated, active) made no job for months with 635 boulders and five buildings waited for doors; wood doors ordered by hand were built at once. Three moods in a row failed for silk, yarn and plant cloth with no thread or cloth order in the fort, which had no Farmer's Workshop at all.
 - **Cause (bugs/BUG-061, bugs/BUG-060):** nothing in the kernel knew EngraveSlab (no rule, no slab count, no ConstructSlab); `orderlib` had no entry for it, so the stuck analysis was silent; the cancel pruner removes one order per 10 cancels while autoslab queues it again within 1289 ticks. `M.piece_orders` counted any open rock order of a piece as made (`economy.lua:4694`), so a stale stone door order blocked the wood fallback for ever, and BUG-042's cap of 10 door orders kept the runner from ordering more. No code read `job.order_id`, so "validated, active, no job" was invisible. Why DF made no job for the 11 doors is most likely the same jam (not proven offline; the live data that decides it is in the bug file).
