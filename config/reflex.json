@@ -5,7 +5,7 @@
  "predator_near": 40,
  "lockdown_near": 40,
  "ack_timeout_s": 60,
- "gate": {"force_near": 3, "manual": []},
+ "gate": {"force_near": 3, "manual": [], "noeffect_max": 3, "noeffect_wait": 1200},
  "defaults": {"ARRIVAL": ["clock", "gates", "doors", "alert"],
               "INTRUDER": ["clock", "gates", "doors", "alert"],
               "PREDATOR": ["clock", "alert"],
