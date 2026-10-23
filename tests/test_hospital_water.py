@@ -87,7 +87,8 @@ def test_water_config_mirrors_water_lua_and_validates(tmp_path):
     assert cfg["water"] == {"patient_thirst": 25000, "hosp_remove": True, "remove_per_run": 8,
                             # BUG-054: the caregivers' scaling and the death-risk line
                             "carers_per_patient": 1, "carers_min": 2, "carers_max": 8, "carers_urgent": 2,
-                            "carers_per_run": 2, "carers_hold_days": 14, "dying_thirst": 60000}
+                            "carers_per_run": 2, "carers_hold_days": 14, "dying_thirst": 60000,
+                            "dying_every": 2400}   # audit I4: the file carries every first-pass key
     assert fairplay.water_errors() == []
     p = tmp_path / "baseline.json"
     p.write_text(json.dumps({"v": 2, "water": {"patient_thirst": "high", "hosp_remove": 1, "remove_per_run": 99,

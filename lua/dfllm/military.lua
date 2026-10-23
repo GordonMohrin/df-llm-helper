@@ -1700,6 +1700,11 @@ M.verbs['squad.add'] = function(K, args, cmd)
   local s = squad_arg(args.squad)
   if not s then return false, 'no squad ' .. tostring(args.squad) end
   if not leader_set(s) then return false, 'squad ' .. s.id .. ' has no leader: squad.leader first' end
+  -- audit I4 (fair play: the squads screen lists living adult citizens only; addToSquad itself takes any figure)
+  local u = df.unit.find(int(args.unit))
+  if not u or dfhack.units.isDead(u) or not dfhack.units.isCitizen(u) or not dfhack.units.isAdult(u) then
+    return false, 'unit ' .. tostring(args.unit) .. ' is not an adult living citizen'
+  end
   local ok, res = K.act.squad_add(s.id, args.unit)
   if not ok then return false, 'squad.add: ' .. tostring(res) end
   rt.kpi = nil

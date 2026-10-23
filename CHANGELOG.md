@@ -1,5 +1,38 @@
 # CHANGELOG dfpilot
 
+## Integration audit: the first pass read as one piece (BUG-085, BUG-086, documents and config of BUG-044 .. BUG-075, 2026-10-23; offline, live-untested)
+- **Why:** eleven packages (A1-A4, B1-B3, C1-C4) were merged one after the other into main (f17e2b3..9bcb14f); each had been
+  reviewed alone, nobody had read the combination. This audit read the merges, the contracts, the configs and the documents
+  as one piece; the gate was run three times on the base (pytest and the Lua suites green each time).
+- **Code (two small defects, tests fail on 9bcb14f):** BUG-085 `squad.add` enlisted any unit the game knows (a visitor, a child,
+  a dead figure), the squads screen lists living adult citizens only: the verb refuses them like `squad.leader` does.
+  BUG-086 `perimeter.hold_pop` 0 ("the perimeter never holds max-pop") also switched off the small-fort guard of the office
+  blocker (A4 read A2's key): a fort of 7 was stopped by a vacant office it cannot fill; 0 now keeps the default 30 for that guard.
+- **Config:** `config/reflex.json` gate lacked `noeffect_max` 3 / `noeffect_wait` 1200 (read by gate.lua, validated by
+  fairplay, documented in `about`, absent from the file) and `config/baseline.json` water lacked `dying_every` 2400: both added
+  with the code's defaults; `tests/lua/test_integration_i4.lua` compares every first-pass key of reflex.json and
+  baseline.json (perimeter, confine, popups, gate, military, offices, zones, perf, water carers, runner seal_first/reclaim)
+  with the default the code uses.
+- **Documents (tests/test_integration_docs.py, four fail on 9bcb14f):** bugs/README.md: BUG-065 had two columns and BUG-069,
+  070, 071 four (a table row needs Status, Severity, Title, Module), and the rows ran 069-071, 066-068, 065, 072-075, 054-056,
+  050-053, 048-049 after 043: now one complete row per bug file, ascending. CONTRACTS.md: the four package B3 events
+  MOOD_CRITICAL (A), TOMBS_LOCKED, BUILDING_TOPPLED, STRESS_HIGH (B) had no row in the event table (rows added from schema.py
+  and care.lua), and a blank line in the section 19 table cut the B1 row off its table (merge debris). RULES.md section 11:
+  the P3 and P5 rows still put fortcore stage 3 in P5 (plans/year1.json, DESIGN 5.12, DECISIONS 1: P3), edited in place, 300 lines.
+- **Live check:** nothing live: `dfllm cmd squad.add` with a non-citizen id answers `not an adult living citizen`; a young fort
+  with `perimeter.hold_pop` 0 and a vacant office shows no `office` in `ready.fail`; `python -m dfpilot.lint --config` ok.
+- **Integration audit I4:** checked and found sound: every new actuator (disable/enable autofarm, stockpiles import, tool_pile,
+  zone_place, plant_ungather, Orderlies through work_detail, appoint, squad verbs, unforbid burst, popup dismiss, order_remove)
+  is a player's action, has an act function with its owner list in contract.lua and schema.py, an allowlist entry or a verb
+  with modes, and no OWNED command is run through act.run; schema.py and contract.lua agree (events, `by`, verbs, ACT, state
+  spec, bridge states), the CONTRACTS appendix needs no change, every class A event has a RULES section 7 row and every row
+  names an existing event (QUICKSAVE_FAILED is follow's own wake), every module emits only its own events and calls only
+  acts it owns, economy's FULL and RUSH task lists name defined tasks only, no global variable typo in lua/dfllm (luac -l),
+  no merge marker, all 11 packages have a CHANGELOG heading, numbers BUG-044..075 and FR-70..78 exist once. Not changed:
+  five commits since f17e2b3 lack the trailer lines (four are the player's own notes, one is a plain merge of main), RULES.md
+  and DESIGN.md/ASIS-ANALYSIS.md name models in role descriptions older than the first pass (RULES.md lines may not be edited
+  for this), the autofarm switch-off (B1) has no counterpart while economy is backed off (open: live data).
+
 ## Saves, freezes and status gaps: `dfllm save` follows the real save, every frame gap has a cause, status keeps pop and stock, the idle line is broken down (BUG-069, BUG-070, BUG-071, FR-77, 2026-10-23; offline, live-untested)
 - **Why (Runs 11-13, y456-y506, game session notes 1, 4, 7, 39):** Wheelsblows y506 autumn d11: `dfllm save` said QUICKSAVE_FAILED
   after 122 s ("no fortress save folder newer than the call (dfhack-run printed nothing)") while the newest save was an

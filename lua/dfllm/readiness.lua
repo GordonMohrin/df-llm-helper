@@ -411,7 +411,9 @@ local function evaluate(K, why)
   local otext = M.office_blocker(K, now)
   -- a young fort cannot always fill an office and must not stop growing for it (the same small-fort guard as FR-70's
   -- perimeter hold, perimeter.hold_pop citizens)
+  -- (audit I4: hold_pop 0 means "the perimeter never holds max-pop"; it must not switch this guard off)
   local hp0, cu0 = pcfg(K, 'hold_pop'), K.census and K.census.u
+  if hp0 == 0 then hp0 = M.PERIM.hold_pop end
   if otext and hp0 > 0 and type(cu0) == 'table' and (int(cu0.cit) or 0) < hp0 then otext = nil end
   if otext then
     f1[#f1 + 1] = 'office'

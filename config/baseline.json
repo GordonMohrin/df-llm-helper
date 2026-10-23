@@ -293,7 +293,8 @@
   "carers_urgent": 2,
   "carers_per_run": 2,
   "carers_hold_days": 14,
-  "dying_thirst": 60000
+  "dying_thirst": 60000,
+  "dying_every": 2400
  },
  "runner": {
   "seal_first": {"on": true, "stuck_days": 3, "food_d": 30, "drink_d": 30, "wall": true, "wall_days": 2},
