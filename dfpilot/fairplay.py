@@ -403,6 +403,75 @@ def snapshot_errors(path: str | Path | None = None) -> list[str]:
     return errs
 
 
+# BUG-050 / FR-71 / BUG-051 / BUG-052 (lua/dfllm/military.lua M.conf): config/baseline.json "military". unstick = the monthly
+# uniform-unstick (on; drop = the opt-in for --drop; every = ticks between two runs; below = it runs only while the worn %
+# is below this; drop_after = plain runs with a proven conflict before --drop), militia = squad key (A, B, C) -> the
+# months (0-11) it is on duty, free_months = the months the elite is free (default: the union of the militia windows),
+# early_pop = citizens from which a fort with a barracks staffs its squads before P2 (0 = off), station_r = the base
+# radius of "on station". military.lua keeps its default for a value of another type or out of range (a bad militia
+# table is dropped as a whole); lint --config refuses it.
+MILITARY_UNSTICK_LIM: dict = {"on": "bool", "drop": "bool", "every": (1200, 403200), "below": (1, 100),
+                              "drop_after": (0, 12)}
+MILITARY_LIM: dict = {"early_pop": (0, 250), "station_r": (1, 10)}
+MILITARY_KEYS = ("A", "B", "C")
+
+
+def military_errors(path: str | Path | None = None) -> list[str]:
+    """Problems of the optional "military" part of config/baseline.json (BUG-050, FR-71, BUG-051, BUG-052): unknown keys
+    and values the kernel ignores. A missing file or part is fine."""
+    p = Path(path or BASELINE_PATH)
+    if not p.exists():
+        return []
+    name = "config/baseline.json"
+    try:
+        doc = json.loads(_read(p))
+    except ValueError as e:
+        return [f"{name}: not JSON ({e})"]
+    sec = doc.get("military", {}) if isinstance(doc, dict) else {}
+    if not isinstance(sec, dict):
+        return [f"{name}: military must be an object"]
+    errs = []
+
+    def is_int(v, lo, hi):
+        return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
+
+    def months(v):
+        return isinstance(v, list) and all(is_int(m, 0, 11) for m in v)
+    for k, v in sec.items():
+        if k == "unstick":
+            if not isinstance(v, dict):
+                errs.append(f"{name}: military.unstick must be an object")
+                continue
+            for uk, uv in v.items():
+                lim = MILITARY_UNSTICK_LIM.get(uk)
+                if lim is None:
+                    errs.append(f"{name}: military.unstick.{uk}: unknown key")
+                elif lim == "bool":
+                    if not isinstance(uv, bool):
+                        errs.append(f"{name}: military.unstick.{uk}: true or false expected, got {uv!r}")
+                elif not is_int(uv, *lim):
+                    errs.append(f"{name}: military.unstick.{uk}: int {lim[0]}..{lim[1]} expected, got {uv!r}")
+        elif k == "militia":
+            if not isinstance(v, dict):
+                errs.append(f"{name}: military.militia must be an object (squad key -> months)")
+                continue
+            for mk, mv in v.items():
+                if mk not in MILITARY_KEYS:
+                    errs.append(f"{name}: military.militia.{mk}: not a squad key ({', '.join(MILITARY_KEYS)})")
+                elif not months(mv):
+                    errs.append(f"{name}: military.militia.{mk}: a list of months 0..11 expected, got {mv!r}")
+        elif k == "free_months":
+            if not months(v):
+                errs.append(f"{name}: military.free_months: a list of months 0..11 expected, got {v!r}")
+        elif k in MILITARY_LIM:
+            if not is_int(v, *MILITARY_LIM[k]):
+                lo, hi = MILITARY_LIM[k]
+                errs.append(f"{name}: military.{k}: int {lo}..{hi} expected, got {v!r}")
+        else:
+            errs.append(f"{name}: military.{k}: unknown key")
+    return errs
+
+
 # BUG-042 (lua/dfllm/economy.lua M.DEFAULTS): the economy knobs of the drink line, the unvalidated-order watch, the
 # manager's office and the drink gatherers ("bool", else an int range); economy.conf takes the file's part as it is,
 # so a bad value here would reach the kernel: lint --config refuses it. Other economy keys are checked by the mirror
@@ -425,7 +494,10 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400)},
                                "farm_min": (1, 50), "farm_max": (1, 50), "gather_per": (1, 100), "gather_min": (1, 50),
                                "gather_max": (1, 50), "other_per": (1, 100), "other_max": (1, 20), "share": (5, 100),
                                "step": (1, 20), "idle_days": (1, 112), "stale_days": (1, 365), "unmark_max": (1, 400),
-                               "labors": "labors"}}
+                               "labors": "labors"},
+                     # BUG-053: stale tools, the tool pile (the part's other keys are checked by the mirror test)
+                     "tools": {"stale_days": (1, 400), "pile": "bool", "pile_days": (1, 400), "pile_w": (1, 5),
+                               "pile_h": (1, 5), "pile_r": (2, 40), "pile_reads": (20, 2000), "pile_every": (1, 400)}}
 ECONOMY_OWN = ("drink", "office", "farms", "cover", "slabs", "stale")   # parts whose every key is listed above
 _LABOR_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,40}$")
 _JOB_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]{1,40}$")

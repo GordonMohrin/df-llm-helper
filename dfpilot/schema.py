@@ -76,6 +76,7 @@ ACT = {
     "squad_unequip": ["military"], "squad_release": ["military"], "animal_slaughter": ["economy"], "zone_remove": ["runner"], "manager_office": ["economy"], "pond_remove": ["water"],
     "hospital_remove": ["water"],                  # BUG-034: the zones of a dry hospital while a patient is thirsty
     "sand_zone": ["economy"], "fish_zone": ["economy"],
+    "tool_pile": ["economy"],                      # BUG-053: a weapons stockpile for the miners' picks near the mines
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
     "door_forbid": ["reflex"],
     "burrow_tiles": ["seal"],
@@ -429,7 +430,10 @@ _CLUSTER = _d("cause:s n:i", "units:ia causes:sa total:i days:i patients:i pos:p
 
 # type -> (cls, by, d spec)
 EVENTS: dict[str, tuple[str, str, Obj]] = {
-    "SIEGE_END": ("A", "siege", _d(opt="hostiles:i killed:i lost:i captures:i sealed_ticks:i")),
+    # BUG-052: sol0/soldiers = soldiers at the start/end of the episode, on_station = the best count seen, on_t = ticks
+    # until half of them stood at their stations (-1 never)
+    "SIEGE_END": ("A", "siege", _d(opt="hostiles:i killed:i lost:i captures:i sealed_ticks:i sol0:i soldiers:i "
+                                       "on_station:i on_t:i")),
     "GATE_FAIL": ("A", "gate", _d("bridge:s", "want:s why:s units:ia pos:p")),
     "BREACH": ("A", "siege", _d("why:s", "bridge:s")),
     "DEATHS_3PLUS": ("A", "care", _d(opt="n:i ids:ia causes:sa")),
@@ -540,9 +544,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # forb = forbidden tools (no free one needed), blk/bk = the blockers' texts/keys of economy's diagnosis (labor,
     # tool2, alert, burrow, walk, jobs, pair, flag, pool, upair, fetch, pending, none), picks/units = compact records, civ =
     # the civ alert's burrows, ww = DF's work tool pairs
+    # BUG-053: forbidden / off_group / owned (population level) join the keys; pile = the tool pile's state
     "TOOL_BLOCKED": ("A", "economy", _d("detail:s tool:s n:i", "members:ia jobs:i days:i free:i bins:i reserved:i "
                                                                "why:s who:s hint:s pos:p eq:i eq_days:i forb:i blk:s "
-                                                               "bk:s picks:sa units:sa civ:i ww:i")),
+                                                               "bk:s picks:sa units:sa civ:i ww:i pile:s")),
     # BUG-027: a SIEGE/BREACH raise went ahead onto units on or next to the footprint (a hostile within force_near)
     "GATE_FORCED": ("A", "gate", _d("bridge:s", "units:ia hostile:i pos:p job:i")),
     # BUG-027: a unit died on or next to a bridge just pulled or moving (gate's move records, dfllm.deaths.bridge)
@@ -668,7 +673,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-042: the manager's office zone without its chair/table (he validates no work order): what economy placed
     # (`placed` 'chair at x,y,z, table at x,y,z', the repair project) or why it could not
     "MANAGER_OFFICE": ("B", "economy", _d("zone:i why:s", "chair:i table:i placed:s proj:s")),
-    "SIEGE_STATUS": ("C", "siege", _d(opt="vis:i worn:i on_station:i deaths:i captures:i")),
+    # BUG-052: off = why soldiers are off their station ('equip 5, far 2': equip, hurt, level, far, nost)
+    "SIEGE_STATUS": ("C", "siege", _d(opt="vis:i worn:i on_station:i deaths:i captures:i off:s")),
     "SEASON": ("C", "kern", _d(opt="year:i season:i")),
     "PROJECT_STAGE": ("C", "runner", _d("proj:s", "stage:s pct:i")),
     "MODE": ("C", "kern", _d("from:s to:s", "why:s")),

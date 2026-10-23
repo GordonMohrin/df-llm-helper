@@ -140,16 +140,13 @@ T.test('a citizen outside Kern+ fails the drill (bridges still go up at T+600)',
 end)
 
 ---------------------------------------------------------------- refusals, aborts, reload
-T.test('refused outside PEACE, with merchants, while running; inbox drill only in PEACE', function()
+T.test('refused outside PEACE, while running; inbox drill only in PEACE (merchants no longer refuse: BUG-051)', function()
   local W = world()
   W.K.set_mode('ALERT', 'test')
   local ok, msg = start(W)
   T.eq(ok, false)
   T.ok(msg:find('PEACE'))
   W.K.set_mode('PEACE', 'test')
-  df.global.plotinfo.caravans:insert('#', {trade_state = df.caravan_state.T_trade_state.AtDepot})
-  T.eq({start(W)}, {false, 'merchants on the map'})
-  df.global.plotinfo.caravans = require('dfllm.util.k_mock').vec{}
   local r = W.inbox('drill', {why = 'llm check'}, {by = 'llm'})
   T.ok(r.ok, r.msg)
   T.eq(W.K.mode(), 'DRILL')
@@ -208,7 +205,7 @@ T.test('automatic drills: P5, settle, soldiers, bridges; first, yearly, keep R2,
   T.eq(M.due(K, now + 2400), 'first')
   W.runner.phase = 'P4'
   W.state()
-  T.eq(M.due(K, now + 2400), nil, 'before P5')
+  T.eq(M.due(K, now + 2400), 'first', 'BUG-051: the runner phase gates nothing; barracks and squads do')
   W.runner.phase = 'P5'
   W.state()
   -- the automatic first drill runs by itself (drill steps every 600 ticks: at boot + 2,400)
@@ -345,19 +342,21 @@ end)
 T.test('FR-65 drill.hold: why no automatic drill starts; readiness publishes it as ready.dhold', function()
   local W = world{auto = true}                   -- P5: squads A-C set up and equipped
   T.eq(X.call(W, 'drill', 'hold'), 'settling', 'the first 2 days after a load')
-  W.runner.phase = 'P3'
-  W.state()
+  local call, lock = W.K.call, true              -- BUG-051: the held states now are danger (a lockdown), not the phase
+  W.K.call = function(mod, name, ...)
+    if lock and mod == 'reflex' and name == 'holding' then return true, 'arrival' end
+    return call(mod, name, ...)
+  end
   X.run(W, 1200)
-  T.eq(X.call(W, 'drill', 'hold'), 'phase P3<P5')
+  T.eq(X.call(W, 'drill', 'hold'), 'lockdown')
   X.run(W, 1200)                                 -- readiness evaluates every 1,200 ticks
-  T.eq(W.state().ready.dhold, 'phase P3<P5')
-  W.runner.phase = 'P5'
+  T.eq(W.state().ready.dhold, 'lockdown')
+  lock = false
   W.state()
   X.equip_all(W)                                 -- the recruits military added meanwhile
   df.global.plotinfo.caravans:insert('#', {trade_state = df.caravan_state.T_trade_state.AtDepot})
-  T.eq(X.call(W, 'drill', 'hold'), 'merchants', 'due, but merchants on the map')
+  T.eq(X.call(W, 'drill', 'hold'), nil, 'due, merchants on the map hold nothing (BUG-051)')
   df.global.plotinfo.caravans = require('dfllm.util.k_mock').vec{}
-  T.eq(X.call(W, 'drill', 'hold'), nil, 'due: it starts on the next drill step')
   X.run(W, 700)
   T.eq(W.K.mode(), 'DRILL')
   T.eq(X.call(W, 'drill', 'hold'), 'running')

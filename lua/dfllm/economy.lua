@@ -187,7 +187,14 @@ M.DEFAULTS = {
   -- A member without its `tool` in hand for `block_days` while `jobs` wait and free tools exist: TOOL_BLOCKED (A).
   -- equip_update [live-untested, BUG-023]: act.work_detail also requests the equipment update. On since Gordon's yes
   -- (2026-10-16, a fair-play exception: RULES §1.1, docs/v2/DECISIONS.md).
+  -- BUG-053 (Run 11 y487: 16 free picks 'loose' for 1081 days; Run 12 y501, a reclaimed fort: pick_free 100 for 144 days):
+  -- free tools a detail's members lack for `stale_days` (no member-side cause: labor, tool2) stop counting as stock
+  -- (plan_picks, metal_plan: the forge and the caravans make up the picks); usable ones that lie loose get a weapons
+  -- stockpile `dfllm-tools` after `pile_days` (act.tool_pile, `pile_w` x `pile_h`, on revealed plain floor within
+  -- `pile_r` tiles of the open jobs, at most `pile_reads` tile reads, one attempt per `pile_every` days); `pile` false = none
   tools = {shrink_days = 3, block_days = 3, repair_days = 7, equip_update = true,
+           stale_days = 14, pile = true, pile_days = 7, pile_w = 3, pile_h = 2, pile_r = 12, pile_reads = 300,
+           pile_every = 28,
            keep_labors = {'FEED_WATER_CIVILIANS', 'RECOVER_WOUNDED'},
            key_labors = {'MASON', 'CARPENTER', 'BREWER', 'PLANT', 'COOK', 'MECHANIC', 'DIAGNOSE', 'SMELT',
                          'FORGE_WEAPON', 'FORGE_ARMOR'},
@@ -792,6 +799,28 @@ end
 -- BUG-023 (Run 11): a forbidden pick or axe nobody carries is no free tool, but the tool details may want it: counted
 -- (w_pick_forb, w_axe_forb) and listed (tool_items, forb) so T.forbid unforbids it while a member lacks that tool
 M.TOOL_LIST = 8                       -- tools of each kind the census lists (free first come, forbidden too)
+-- BUG-053: a free tool on another walk group gives its place in the list to one on the citizens' group (the first eight in
+-- the item vector were the unreachable ones: the report and the unforbid saw nothing the members could use)
+function M.tool_listed(a, k, e, isfar)
+  local list = a.tool_items[k]
+  if #list < M.TOOL_LIST then list[#list + 1] = e; return end
+  if isfar then return end
+  for i = #list, 1, -1 do
+    if list[i].far then list[i] = e; return end
+  end
+end
+-- the order the diagnosis reads the listed tools in: free on the citizens' group, free on another, forbidden
+function M.tool_rank(e) return e.forb and 3 or (e.far and 2 or 1) end
+-- the listed tools of a kind (tests, inspect): copies of {id, forb?, far?, bin?, own?, ...}
+function M.tool_list(kind)
+  local r = {}
+  for i, e in ipairs((st.tool_items or {})[kind] or {}) do
+    local c = {}
+    for k2, v in pairs(e) do c[k2] = v end
+    r[i] = c
+  end
+  return r
+end
 function M.tool_forb(a, it)
   local k = weapon_kind(it)
   if (k ~= 'pick' and k ~= 'axe') or holder(it) then return end
@@ -1009,11 +1038,13 @@ local function classify(it, a, cat)
         -- year) or owned by a dwarf: no work tool for anybody else
         if f.melt then a['w_' .. k .. '_melt'] = a['w_' .. k .. '_melt'] + 1 end
         if f.owned then a['w_' .. k .. '_own'] = a['w_' .. k .. '_own'] + 1 end
-        local list = a.tool_items[k]
-        if #list < M.TOOL_LIST then
-          list[#list + 1] = {id = it.id, bin = cont and cont.id or nil, res = res or nil, melt = f.melt or nil,
-                             own = f.owned or nil}
-        end
+        -- BUG-053: on another walk group than the citizens (members and haulers cannot reach it): _far; free, reachable,
+        -- unowned and not marked for melting: _use (what a member could be handed)
+        local isfar = a.far ~= nil and a.far(it) == true
+        if isfar then a['w_' .. k .. '_far'] = a['w_' .. k .. '_far'] + 1
+        elseif not f.owned and not f.melt then a['w_' .. k .. '_use'] = a['w_' .. k .. '_use'] + 1 end
+        M.tool_listed(a, k, {id = it.id, bin = cont and cont.id or nil, res = res or nil, melt = f.melt or nil,
+                             own = f.owned or nil, far = isfar or nil}, isfar)
       end
     elseif k == 'xbow' or k == 'bow' then
       local u = holder(it)
@@ -1044,6 +1075,7 @@ local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'ge
               'w_pick_bin', 'w_axe_bin', 'w_pick_res', 'w_axe_res', 'webs', 'webs_near', 'glass', 'gems_glass', 'sand',
               'bags', 'doors', 'hatches', 'grates', 'blocks_free', 'cook_in', 'cook_ban', 'cook_ban_g', 'food_inedible', 'food_far',
               'w_pick_forb', 'w_axe_forb', 'w_pick_melt', 'w_axe_melt', 'w_pick_own', 'w_axe_own', 'melt',
+              'w_pick_far', 'w_axe_far', 'w_pick_use', 'w_axe_use',
               'brew_p', 'brew_g', 'chairs', 'tables'}
 local function new_acc(c)
   local fs = {}
@@ -2997,9 +3029,9 @@ end
 -- block_days -> TOOL_BLOCKED (A, util/cadence: again only for a new member or cause). Woodcutters never fetched the two
 -- axes from a bin (19 FellTree jobs, a year without logs); six of eight miners held no pick while 4 lay free.
 local function tool_where(kind)               -- where the first free tool of the census lies (a bin: the bin's tile)
-  for pass = 1, 2 do                          -- a free one first, a forbidden one (BUG-023, Run 11) only without
+  for pass = 1, 3 do                          -- one on the citizens' group first, a far one, a forbidden one (BUG-023, Run 11) last
     for _, e in ipairs((st.tool_items or {})[kind] or {}) do
-      if (pass == 1) == not e.forb then
+      if pass == M.tool_rank(e) then
         local it = df.item.find(e.id)
         local ok, x, y, z = pcall(function() return dfhack.items.getPosition(it) end)
         if it and ok and x then return {x, y, z} end
@@ -3078,8 +3110,8 @@ end
 
 -- the diagnosis of a blocked tool detail: {picks = {per free tool}, units = {per member without it}, keys (blockers in
 -- order), key, why (the first blocker's text), whys (all), civ, ww}
-function M.tool_diag(K, spec, kind, without, cur, jc)
-  local dg = {picks = {}, units = {}, keys = {}, texts = {}, civ = 0, ww = 0}
+function M.tool_diag(K, spec, kind, without, cur, jc, pop)
+  local dg = {picks = {}, units = {}, keys = {}, texts = {}, civ = 0, ww = 0, pop = pop}
   pcall(function() dg.upw = df.global.plotinfo.equipment.update.weapon == true or nil end)   -- DF has not run it yet
   local okp, pool, ww, wu, wn = pcall(M.td_pool)
   if not okp then pool, ww, wu, wn = nil, {}, {}, 0 end
@@ -3097,9 +3129,9 @@ function M.tool_diag(K, spec, kind, without, cur, jc)
   local members = {}
   for _, u in ipairs(cur or {}) do members[u.id] = true end
   local items, list = {}, (st.tool_items or {})[kind] or {}
-  for pass = 1, 2 do                                        -- the free tools first, then the forbidden ones
+  for pass = 1, 3 do                                        -- the free tools first (BUG-053: those on the citizens' group), then the forbidden ones
     for _, e in ipairs(list) do
-      if #items < M.TD_PICKS and (pass == 1) == not e.forb then
+      if #items < M.TD_PICKS and pass == M.tool_rank(e) then
         local it = df.item.find(e.id)
         if it and not holder(it) then items[#items + 1] = it end
       end
@@ -3234,6 +3266,25 @@ function M.td_blockers(dg, spec, kind, nwo)
     return r
   end
   local U, P = dg.units, dg.picks
+  -- BUG-053 (population level, from the census): every tool of the kind forbidden, the free ones on another walk group
+  -- than the citizens (members and haulers cannot reach them), the free ones owned by a dwarf
+  local pop = dg.pop
+  if pop then
+    if pop.free == 0 and pop.forb > 0 then
+      add('forbidden', string.format('all %d %ss are forbidden (the daily unforbid could not free them)', pop.forb, kind))
+    end
+    if pop.free > 0 and pop.use == 0 then
+      if pop.far > 0 then
+        add('off_group', string.format('%d of %d free %ss lie on another walk group than the citizens%s', pop.far,
+                                       pop.free, kind, pop.pos and string.format(' (the first at %d,%d,%d)', pop.pos[1],
+                                                                                 pop.pos[2], pop.pos[3]) or ''))
+      end
+      if pop.own > 0 then
+        add('owned', string.format('%d of %d free %ss are owned by a dwarf (flag owned: no work tool for anybody else)',
+                                   pop.own, pop.free, kind))
+      end
+    end
+  end
   local nolab = where{U, function(r) return not r.lab end}
   if #nolab > 0 then add('labor', string.format('%d of %d lack the %s labor', #nolab, nwo, tostring(spec.labor))) end
   local two = where{U, function(r) return #r.xl > 0 end}
@@ -3349,11 +3400,11 @@ local function tool_check(K, tc, r, spec, cur, jc, fixed)
   table.sort(without)
   local free = inv['w_' .. kind .. '_free'] or 0
   local forb = inv['w_' .. kind .. '_forb'] or 0                  -- BUG-023 (Run 11): forbidden ones, unforbidden
-  st.tblk, st.tneed, st.tdiag = st.tblk or {}, st.tneed or {}, st.tdiag or {}
+  st.tblk, st.tneed, st.tdiag, st.tstale = st.tblk or {}, st.tneed or {}, st.tdiag or {}, st.tstale or {}
   -- the members lack this tool while its jobs wait: T.forbid may unforbid that many forbidden ones
   st.tneed[kind] = #without > 0 and open > 0 and #without or nil
   if #without == 0 or open == 0 or free + forb == 0 then
-    st.tblk[spec.name], st.tdiag[spec.name] = nil, nil
+    st.tblk[spec.name], st.tdiag[spec.name], st.tstale[kind] = nil, nil, nil
     p.tblk[spec.name] = rec.ann and json.object{ann = CAD.quiet(rec.ann)} or nil
     return
   end
@@ -3382,11 +3433,31 @@ local function tool_check(K, tc, r, spec, cur, jc, fixed)
   local seen = {}
   for _, t in ipairs(fixed or {}) do if not seen[t] then seen[t] = true; toks[#toks + 1] = t end end
   -- what keeps DF from handing the tools out (M.tool_diag); its blockers are cause tokens too, so a new one is news
-  local okd, dg = pcall(M.tool_diag, K, spec, kind, without, cur, jc)
+  local pos = tool_where(kind)
+  local pop = {free = free, forb = forb, own = inv['w_' .. kind .. '_own'] or 0, far = inv['w_' .. kind .. '_far'] or 0,
+               use = inv['w_' .. kind .. '_use'] or 0, pos = pos}
+  local okd, dg = pcall(M.tool_diag, K, spec, kind, without, cur, jc, pop)
   if not okd then K.log('warn', '%s: tool diagnosis failed: %s', spec.name, tostring(dg)); dg = nil end
   local ctoks = {table.unpack(toks)}
   for _, k in ipairs(dg and dg.keys or {}) do ctoks[#ctoks + 1] = 'b:' .. k end
-  local pos = tool_where(kind)
+  -- BUG-053: free tools the members lack for stale_days with no member-side cause stop counting as stock; usable ones
+  -- that lie loose get a tool pile (T.toolpile) after pile_days
+  local memberside = false
+  for _, k in ipairs(dg and dg.keys or {}) do if k == 'labor' or k == 'tool2' then memberside = true end end
+  -- the count is fixed when the tools turn stale (rec.stn): picks made or bought afterwards are stock again, or the forge
+  -- would go on making picks for members DF hands none to
+  if days >= (tc.stale_days or 14) and free > 0 and not memberside then
+    rec.stn = math.min(free, math.tointeger(rec.stn) or free)
+    st.tstale[kind] = rec.stn
+  else
+    rec.stn, st.tstale[kind] = nil, nil
+  end
+  if tc.pile ~= false and days >= (tc.pile_days or 7) and pop.use > 0 and not memberside then
+    local at = M.pile_center(K, spec, jc, cur, pos)
+    st.tpile_req = at and {kind = kind, spec = spec.name, at = at} or nil
+  end
+  local ptok = M.pile_text(r.p, true)
+  if ptok then ctoks[#ctoks + 1] = ptok end
   local where = {}
   if bins > 0 then where[#where + 1] = string.format('%d in bins', bins) end
   if free - bins > 0 then where[#where + 1] = string.format('%d loose', free - bins) end
@@ -3437,6 +3508,8 @@ local function tool_check(K, tc, r, spec, cur, jc, fixed)
       if pos then d.pos = pos end
       if eqn > 0 then d.eq, d.eq_days = eqn, eqd or 0 end
       if forb > 0 then d.forb = forb end
+      local ptxt = M.pile_text(r.p)
+      if ptxt then d.pile = ptxt end
       if dg then M.td_event(d, dg) end
       K.log('warn', '%s', msg)
       if not logged then diag_line('warn') end
@@ -5058,9 +5131,16 @@ end
 
 -- Run 11: picks for the Miners (their demand before the tool cap, BUG-023, against every pick in the fort): a pick
 -- from the first metal with a spare bar at a forge, else economy.trade_wants asks the caravans for them
+-- BUG-053: the tools of a kind the fort can hand out: every tool of the census less the free ones the members lacked for
+-- tools.stale_days without a member-side cause (tool_check's st.tstale; 16 and 100 loose picks counted as stock for 1081
+-- and 144 days while the miners held none, so no pick was made or asked for)
+function M.tools_have(inv, kind)
+  return math.max(0, (inv['w_' .. kind] or 0) - ((st.tstale or {})[kind] or 0))
+end
+
 function M.plan_picks(K, c, r)
   local pc = c.picks
-  local want, have = (st.want or {}).pick or 0, r.inv.w_pick or 0
+  local want, have = (st.want or {}).pick or 0, M.tools_have(r.inv, 'pick')
   local pk = {have = have, want = want, short = math.max(0, want - have), route = ''}
   st.picks = pk
   if type(pc) ~= 'table' or pk.short == 0 then return end
@@ -5108,7 +5188,7 @@ function M.metal_plan(K, c, r)
   if not short then return end
   local why = string.format('metal short: worn %d%%, %d bars, no ore, %d bars wanted', worn, bars, g.bars_short)
   for _, k in ipairs({'pick', 'axe'}) do              -- military's tools-first rule: no melee squad below `tools` each
-    local have = inv['w_' .. k] or 0
+    local have = M.tools_have(inv, k)
     local n = math.max((ms.tools or 3) - have, ((st.want or {})[k] or 0) - have)
     if n > 0 then mt.wants[#mt.wants + 1] = {buy = k, n = n, why = string.format('%d %ss; %s', have, k, why), metal = 1} end
   end
@@ -7698,6 +7778,148 @@ function T.forbid(K, c, r)
   return true
 end
 
+---------------------------------------------------------------- BUG-053: the tool pile
+-- Run 11 y487 (16 free picks 'loose' at 157,57,139 for 1081 days) and Run 12 y501 (a reclaimed fort, pick_free 100 for 144
+-- days): the only weapon pile the kernel builds, fortcore's melt pile, refuses picks and battle axes on purpose
+-- (baseline melt_keep), nothing else gives a tool a home, so a free tool lies where it fell. Once usable tools (free, on
+-- the citizens' walk group, unowned) lie loose while members lack them for `pile_days`, tool_check asks for a weapons
+-- stockpile `dfllm-tools` (act.tool_pile, the stockpiles screen) on revealed plain floor near the detail's open jobs;
+-- DF's haulers fill it and the kernel never moves an item itself. Afterwards the pile is restricted to picks and battle
+-- axes (stockpiles import, as baseline does for the melt pile). One attempt per `pile_every` days.
+
+-- where the detail works: the first open job on the citizens' walk group, else a member, else the first loose tool
+function M.pile_center(K, spec, jc, cur, pos)
+  for _, p in ipairs(type(jc) == 'table' and jc[(spec.jobs or '') .. '_pts'] or {}) do
+    if not far(K, p[1], p[2], p[3]) then return {p[1], p[2], p[3]} end
+  end
+  for _, u in ipairs(cur or {}) do
+    local ok, x, y, z = pcall(function() return u.pos.x, u.pos.y, u.pos.z end)
+    x, y, z = ok and math.tointeger(x), ok and math.tointeger(y), ok and math.tointeger(z)
+    if x and y and z then return {x, y, z} end
+  end
+  return pos and not far(K, pos[1], pos[2], pos[3]) and {pos[1], pos[2], pos[3]} or nil
+end
+
+-- the ids of the stockpile buildings named dfllm-tools
+function M.tool_piles()
+  local ids = {}
+  pcall(function()
+    for _, sp in ipairs(df.global.world.buildings.other.STOCKPILE) do
+      if dfhack.df2utf(sp.name or '') == 'dfllm-tools' then ids[#ids + 1] = sp.id end
+    end
+  end)
+  table.sort(ids)
+  return ids
+end
+
+-- the pile's state for TOOL_BLOCKED: its text (d.pile) or, with token, a cause token (a new state is news)
+function M.pile_text(p, token)
+  local rec = type(p) == 'table' and type(p.tpile) == 'table' and p.tpile or nil
+  if not rec or not rec.state then return nil end
+  if token then return 'pile:' .. tostring(rec.state) end
+  local at = type(rec.at) == 'table' and rec.at or nil
+  if rec.state == 'placed' and at then
+    return string.format('dfllm-tools placed at %d,%d,%d (%dx%d)', at[1], at[2], at[3], rec.w or 3, rec.h or 2):sub(1, 80)
+  elseif rec.state == 'exists' then return 'dfllm-tools stands'
+  end
+  return (tostring(rec.state) .. ': ' .. tostring(rec.why or '?')):sub(1, 80)
+end
+
+-- the nearest w x h block of revealed plain floor to the centre q.at on its level (the citizens' walk group, off the attack
+-- path, no building, no pending designation): its top-left tile, or nil and why; at most `pile_reads` tile reads
+function M.pile_site(K, tc, q)
+  local w, h = tc.pile_w or 3, tc.pile_h or 2
+  local R, budget = tc.pile_r or 12, tc.pile_reads or 300
+  local cx, cy, cz = q.at[1], q.at[2], q.at[3]
+  local reads, seen = 0, {}
+  local function floor_at(x, y)
+    local key = x * 100000 + y
+    if seen[key] ~= nil then return seen[key] end
+    reads = reads + 1
+    local ok, t = K.call('snapshot', 'tile', x, y, cz)
+    local good = ok and type(t) == 'table' and t.c == '.' and (t.bld == nil or t.bld == '') and (t.dig == nil or t.dig == '')
+                 and not t.cav and not far(K, x, y, cz) and not M.attack_path(K, {x, y, cz})
+    seen[key] = good == true
+    return seen[key]
+  end
+  for d = 0, R do
+    for dx = -d, d do
+      for dy = -d, d do
+        if math.max(math.abs(dx), math.abs(dy)) == d then
+          local ax, ay, fit = cx + dx, cy + dy, true
+          for ix = 0, w - 1 do
+            for iy = 0, h - 1 do
+              if reads >= budget then return nil, string.format('the %d tile reads are spent', budget) end
+              if not floor_at(ax + ix, ay + iy) then fit = false; break end
+            end
+            if not fit then break end
+          end
+          if fit then return {ax, ay, cz} end
+        end
+      end
+    end
+  end
+  return nil, string.format('no %dx%d plain floor within %d tiles of %d,%d,%d', w, h, R, cx, cy, cz)
+end
+
+-- the lacking members ask for the equipment update again at the next pass (the tools have a new home: tools.equip_update)
+function M.pile_ask_again(spec)
+  for key in pairs(st.fixes or {}) do
+    if type(key) == 'string' and key:sub(1, #spec + 1) == spec .. ':' then st.fixes[key] = nil end
+  end
+end
+
+-- daily (after T.forbid): restrict a pile that stands (once), else place one when tool_check asked for it
+function T.toolpile(K, c, r)
+  if not r.day or not HUNT_MODES[K.mode()] then return true end       -- PEACE / RECOVERY, as the unforbid
+  local tc, p = c.tools or {}, r.p
+  local q = st.tpile_req
+  st.tpile_req = nil                                   -- tool_check asks again every day the need lasts
+  local rec = type(p.tpile) == 'table' and p.tpile or {}
+  local ids = M.tool_piles()
+  if #ids > 0 then
+    if rec.set ~= 1 and (rec.fail or 0) < 3 then
+      local id = string.format('%d', ids[1])
+      r.cmds = r.cmds + 1
+      local ok1 = K.act.run('stockpiles', 'import', '-m', 'disable', 'cat_weapons', '-s', id)
+      local ok2 = ok1 and K.act.run('stockpiles', 'import', '-m', 'enable', 'cat_weapons', '-f', 'pick,battle axe', '-s', id)
+      if ok2 then
+        rec.set = 1
+        K.log('info', 'tool pile: dfllm-tools (%s) takes picks and battle axes only', id)
+        if type(rec.spec) == 'string' then M.pile_ask_again(rec.spec) end
+      else
+        rec.fail = (rec.fail or 0) + 1
+        K.log('warn', 'tool pile: dfllm-tools (%s) could not be restricted to picks and battle axes (try %d)', id, rec.fail)
+      end
+    end
+    if rec.state ~= 'placed' then rec.state = 'exists' end
+    p.tpile = json.object(rec)
+    return true
+  end
+  if not q or tc.pile == false or type(K.act.tool_pile) ~= 'function' then return true end
+  if rec.t and r.now - rec.t < (tc.pile_every or 28) * DAY then return true end
+  local site, why = M.pile_site(K, tc, q)
+  r.cmds = r.cmds + 1
+  local out = {t = r.now}
+  if site then
+    local ok, n = K.act.tool_pile(site, tc.pile_w or 3, tc.pile_h or 2)
+    if ok then
+      out.state, out.at, out.w, out.h, out.spec = 'placed', json.array(site), tc.pile_w or 3, tc.pile_h or 2, q.spec
+      M.pile_ask_again(q.spec)
+      K.log('info', 'tool pile: dfllm-tools %dx%d at %d,%d,%d for the %ss lying loose (%s lack them)', out.w, out.h, site[1],
+            site[2], site[3], q.kind, q.spec)
+    else
+      out.state, out.why = 'refused', tostring(n):sub(1, 60)
+      K.log('warn', 'tool pile: dfllm-tools at %d,%d,%d refused: %s', site[1], site[2], site[3], tostring(n))
+    end
+  else
+    out.state, out.why = 'nosite', tostring(why):sub(1, 60)
+    K.log('warn', 'tool pile: no site: %s', tostring(why))
+  end
+  p.tpile = json.object(out)
+  return true
+end
+
 -- FR-25 (daily): food_d <= starve.days with hungry citizens. Steps over frames: gatherers and planters join
 -- their details (not in modern labormanager mode), reachable visible edible shrubs are marked for gathering,
 -- and the citizens who cannot reach food are named (DECISION_NEEDED starvation, every report_days)
@@ -7835,7 +8057,7 @@ function T.finish(K, c, r)
 end
 
 local FULL = {'guard', 'days', 'kitchen', 'appoint', 'food', 'fishz', 'gather', 'watch', 'cmdq', 'engine', 'labor_fix',
-              'scan', 'slabs', 'slotnow', 'ocheck', 'slaughter', 'plan', 'prune', 'tools', 'cover', 'starve', 'forbid',
+              'scan', 'slabs', 'slotnow', 'ocheck', 'slaughter', 'plan', 'prune', 'tools', 'cover', 'starve', 'forbid', 'toolpile',
               'jobs', 'jsite', 'jmat', 'stale', 'jmake', 'jfree', 'jresume',
               'jcheck', 'jmove', 'pb', 'orders', 'stand', 'wood', 'chop', 'crops',
               'farm', 'farmslots', 'imports', 'piles', 'status', 'idle', 'finish'}
@@ -8242,7 +8464,7 @@ function M.tool_counts(inv)
   local t = {}
   for _, k in ipairs({'pick', 'axe'}) do
     t[k] = inv['w_' .. k] or 0
-    for _, s in ipairs({'free', 'bin', 'res', 'forb', 'melt', 'own'}) do t[k .. '_' .. s] = inv['w_' .. k .. '_' .. s] or 0 end
+    for _, s in ipairs({'free', 'bin', 'res', 'forb', 'melt', 'own', 'far', 'use'}) do t[k .. '_' .. s] = inv['w_' .. k .. '_' .. s] or 0 end
   end
   return t
 end
@@ -8261,8 +8483,11 @@ function M.inspect_tools(K)
   end
   table.sort(out, function(x, y) return x.detail < y.detail end)
   local first = out[1]
+  local okp, p = pcall(pstate, K)
   return true, first and string.format('%d tool details blocked; %s: %s', #out, first.detail, first.why[1] or '?') or
-                 'no tool detail blocked', {blocked = json.array(out), tools = M.tool_counts(K.census.i or {})}
+                 'no tool detail blocked', {blocked = json.array(out), tools = M.tool_counts(K.census.i or {}),
+                                            pile = okp and M.pile_text(p) or nil, piles = #M.tool_piles(),
+                                            stale = {pick = (st.tstale or {}).pick or 0, axe = (st.tstale or {}).axe or 0}}
 end
 
 -- inspect what=workload (FR-40): adults without a job, unclaimed jobs by type, top cancel reasons, free tools,

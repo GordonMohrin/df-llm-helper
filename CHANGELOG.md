@@ -1,5 +1,64 @@
 # CHANGELOG dfpilot
 
+## Military and loose tools (package A3): no `--drop` in the monthly unstick, militia windows per squad, the drill refused only for danger, station numbers in the siege report, a home for loose picks (BUG-050, BUG-051, BUG-052, BUG-053, FR-71, 2026-10-23; offline, live-untested)
+- **Why (runs 11-14, y487-y535):** *Run 14 y529-y535:* the armor coverage fell from 53 % to 4 % several times; the monthly
+  `uniform-unstick --all --drop --free` (military.lua, one game month, whatever the uniforms looked like) made every soldier
+  drop his kit (note 53). *Run 13 Wheelsblows y504-y525:* pop 47-59 for twenty years at P0, the drill never ran ('phase
+  P0<P5', 'merchants on the map'), no squad existed below P2, worn 9-23 % when the summer ambush came (cause 2 of the
+  post-mortem; note 2: traders stay for weeks). *Run 14 Trussroads:* one militia window and one militia squad cannot give
+  "every dwarf three months a year" (note 64). *Run 11 siege 14 y497:* `on_station=0`, soldiers 16 -> 6 and 20 -> 9, 24 lost
+  (note 23). *Run 11 y487 / Run 12 y501:* miners without a pick for 1081 and 144 days beside 16 and 100 free picks 'loose'
+  (notes 19, 34; a reclaim's picks): the only weapon pile the kernel builds, the melt pile, refuses picks and axes on purpose,
+  and `plan_picks` counted every pick as stock, so none was ever made or asked for.
+- **What changed:**
+  - **BUG-050 (military.lua):** the monthly run is `uniform-unstick --all --free` and only while a uniform slot is empty (worn
+    below `unstick.below`, 100); `--drop` is an opt-in (`unstick.drop`) after `drop_after` (2) plain runs found the same
+    proven conflict (`M.conflicts`: a soldier wearing an armor piece no spec of its category holds while that category has an
+    empty slot); never outside PEACE, in a lockdown or with a hostile in sight (`M.danger`); kern.log `uniform-unstick T
+    ticks ago (...): worn X% before, Y% now` at +1,200 and +8,400 ticks. Config `military.unstick`.
+  - **FR-71:** `M.MILITIA` is a table squad key -> months (config `military.militia`, `free_months`): several militia squads
+    rotate in windows of their own; the elite is free in `free_months` (default: the union of the windows); the default config
+    is the old behaviour; kern.log names each window that opens or closes. Not done: member turnover (needs live proof, see
+    docs/feature-requests/README.md).
+  - **BUG-051 (drill.lua, military.lua):** a drill is refused for danger only (`M.danger`: not PEACE, `reflex.holding`, a
+    hostile in sight) and for one trade session (`trade.clock`); merchants and the runner's phase hold nothing; automatic
+    drills need bridges, soldiers and a barracks (`M.barracks`: fortcore station, manifest room or a Barracks civzone;
+    unknown holds nothing); `ready.dhold` words `lockdown`, `hostile`, `no barracks`, `trading`. A fort of 40+ citizens with
+    a barracks staffs squad A before P2 (`M.early`, latched, config `military.early_pop`, 0 = off).
+  - **BUG-052 (military.lua, siege.lua):** on station = `station_r` (3) + (n-1)//4 tiles; `kpi.off` = {equip, hurt, level, far,
+    nost}; the siege episode keeps `sol0`, the best `on_station` and `on_t` (ticks until half stood, -1 never): SIEGE_END
+    `sol0`/`soldiers`/`on_station`/`on_t` and its text, SIEGE_STATUS `off`; 1,800 ticks in with under half on station the
+    posture is issued again (every 1,800 ticks, one kern.log warning, never over a wave, a sortie or a kill order).
+  - **BUG-053 (economy.lua, act.lua):** census `w_pick_far`/`w_pick_use` (and axe); the listed tools prefer the citizens' walk
+    group; blockers `forbidden`, `off_group`, `owned`; free tools unused for `tools.stale_days` (14) with no labor/tool2
+    cause stop counting in `plan_picks`/`metal_plan` (the count is fixed when they turn stale: no endless picks); usable loose
+    tools get a weapons stockpile `dfllm-tools` after `pile_days` (7) near the first open dig job (`act.tool_pile`, 3 x 2,
+    revealed plain floor, off the attack path, PEACE/RECOVERY, one try per 28 days), restricted to picks and battle axes
+    (`stockpiles import`), and the lacking members ask for the equipment update again at once; TOOL_BLOCKED `d.pile`;
+    `inspect workload key=tools` `pick_far`, `pick_use`, `pile`, `piles`, `stale`. Config `economy.tools` `stale_days`,
+    `pile`, `pile_days`, `pile_w`, `pile_h`, `pile_r`, `pile_reads`, `pile_every`.
+  - Contracts: `config/baseline.json` `military` and `economy.tools` keys with `fairplay.military_errors` /
+    `ECONOMY_LIM` (`lint --config`); `schema.py` SIEGE_END, SIEGE_STATUS, TOOL_BLOCKED, `ACT` `tool_pile` (+ `util/contract.lua`);
+    CONTRACTS §5, §7, §9.17, §12 (appendix regenerated); RULES §7 rows SIEGE_END and TOOL_BLOCKED edited in place (300 lines);
+    DESIGN §3/§4, DOCTRINE. Bug files `bugs/BUG-050` .. `BUG-053`, FR-71 in docs/feature-requests/README.md.
+- **Tests (each new one fails on f17e2b3):** `tests/lua/test_military_a3.lua`, `test_drill_a3.lua`, `test_siege_a3.lua`,
+  `test_economy_tools_a3.lua` (new), `test_act_supply.lua` (`tool_pile`), the changed expectations in `test_military.lua`,
+  `test_drill.lua`, `test_wp6_kern.lua`, `test_economy_jobs.lua`; `tests/test_military_a3.py` (new: config validation, the
+  Lua defaults mirror, the act table, the event fields).
+- **Live check (Run 14 or the next fort), after `git pull`, `dfhack-run dfllm reload` and a restart of `dfllm follow`:**
+  - kern.log, one game year: `military: uniform-unstick T ticks ago (--all --free): worn X% before, Y% now` - Y not far below X
+    (otherwise the plain run strips gear too: `military.unstick.on = false`); no `--drop` unless `unstick.drop` is set;
+  - a caravan on the map in PEACE: `dfllm status` shows no `drill never (auto: merchants)`; `ready.dhold` reads `nil` /
+    `trading` / `lockdown`; after the first automatic drill DRILL_RESULT; at pop 40+ with a barracks and phase < P2 kern.log
+    `military: N citizens and a barracks (station) at phase P0: the squads are staffed before P2`;
+  - the next siege: SIEGE_STATUS `on_station` and `off` at T0, +600, +1,200; SIEGE_END `sol0 -> soldiers`, `on_t`
+    (-1 = never half); a warning `N ticks into the SIEGE only X of Y soldiers stand at their stations (...)` names the cause;
+  - `dfllm cmd inspect '{"what":"workload","key":"tools"}'`: `pick_far`, `pick_use`, `stale`, `pile`; TOOL_BLOCKED `bk`
+    with `off_group` / `owned` / `forbidden`; after 7 days of usable loose picks kern.log `tool pile: dfllm-tools 3x2 at x,y,z`,
+    then `takes picks and battle axes only` (or `could not be restricted`: check `stockpiles import` by hand); after 14
+    days `economy.trade_wants` asks for picks (`pick` in the trade list) or a `dfllm:pick` forge order stands; the Miners
+    hold picks a few days after the pile (if not, the DF-side cause is one of `pool`/`pair`/`upair`: BUG-053 "Not decided").
+
 ## Lost bridges are rebuilt or replaced by wall + door, an open perimeter is a stop signal, stage 3 comes before P3, the refuge is trusted only while it is (BUG-048, BUG-049, FR-70, DECISIONS 1-3, 2026-10-23; offline, live-untested)
 - **Why (Run 11 Kilrudrabed y483-y497 and Run 13 Wheelsblows y507-y525):** O1 destroyed 14 times and its question (DECISION_NEEDED `bridge_rebuild`) never answered,
   B1/B2 and their levers lost for years (`lost:O1,bridge:B1,levers:B1,bridge:B2,levers:B2`), PERIMETER_BROKEN `bridge 113,106,142 requeued=0` in PEACE for 35 days,

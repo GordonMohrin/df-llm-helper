@@ -93,7 +93,7 @@ Claude Code orchestrator (≤60k ctx, Monitor on `dfllm follow`) → fresh Sonne
 | SIEGE | ≥6 visible invaders; or INVASION armed + ≥1 visible invader; or a visible great danger, megabeast, FB or titan; or UNDEAD_ATTACK/NIGHT_ATTACK report + visible undead | −1 (off), FPS cap 30 (Run 9, FR-51; was 250) | on (Kern+; the separated refuge at the BREACH level in the deep defense, BUG-030) | all Ready at the inner station (READY_IN, BUG-029: `stations.melee`, `stations.b2` while B2 is not down); killing field and gallery only during an intake wave (INTAKE); every squad at the core station (CORE: `stations.core`, else `stations.b2`) in the deep defense (BUG-030: building destroyers in sight, an army > 3x our soldiers, weak squads) | up by T+600 / up by T+600 / down; an intake wave lowers B1 (muster, back) or O1 (open), never both | defense repairs inside only | frozen |
 | BREACH | a bridge not up at T+900, a destroyed outer/inner bridge (at once, BUG-030), or a visible hostile inside Kern+ | off | on (Tiefe+) | melee hold the B2 choke | up / up / up | none | frozen |
 | RECOVERY | 0 visible invaders map-wide ∧ 0 visible dangers within 40 tiles of O1, for 2,400 ticks | 250 | on until B1 is lowered | training; squad A stays inside B1 | lowered stepwise (§4) | cleanup | frozen until re-drill |
-| DRILL | inbox `drill`, or yearly in PEACE with no merchants on the map | off, FPS cap 30 | on | as SIEGE | as SIEGE, then lowered | frozen | — |
+| DRILL | inbox `drill`, or yearly in PEACE with no danger (BUG-051: merchants on the map hold nothing) | off, FPS cap 30 | on | as SIEGE | as SIEGE, then lowered | frozen | — |
 
 ## 4. Control loops, cadences, siege reflex
 Gameplay modules run on `cur_year_tick` deltas, which stay correct under timestream's skips of up to 9 ticks. I/O runs on `getTickCount` and also works while paused.
@@ -111,7 +111,7 @@ Gameplay modules run on `cur_year_tick` deltas, which stay correct under timestr
 | gate controller | 25 in SIEGE/BREACH/DRILL, otherwise 600 | — | ≤0.2 ms |
 | runner (≤3 active projects; 1 apply chunk ≤40 tiles per slice) | 600 per project | 1.2 s | ≤3 ms per chunk [S6] |
 | economy · care | 1,200 | 2.4 s | ≤2 ms, sliced |
-| military upkeep · `uniform-unstick --all --drop --free` | 3,600 · 33,600 | 7 s · 67 s | ≤1 ms |
+| military upkeep · `uniform-unstick --all --free` (BUG-050: no `--drop`) | 3,600 · 33,600 | 7 s · 67 s | ≤1 ms |
 | readiness check; snapshot export on request | 33,600 + after any defense-zone stage; 2,000 tiles per slice | 67 s | ≤2 ms per slice |
 | state a/b · events flush · inbox listdir · heartbeat · perf row | ≥2 s and on mode change · 1 s · 0.5 s · 5 s · 30 s (real time) | — | ≤1 ms each |
 | Python follow · supervisor | 1 s file tail · 60 s task | — | 0 DF calls |
@@ -221,7 +221,7 @@ Gameplay modules run on `cur_year_tick` deltas, which stay correct under timestr
   follow logs the same; status adds `(counted as if the bypass were walled)` / `(a bypass skips the hall)` at R0 and
   `(dfllm audit: where the cheapest route enters the hall)` while `traps<30` blocks R2.
 - **Siege readiness gate (FR-65):** while R0 fails in PEACE, readiness emits SIEGE_UNREADY (A): the blockers, the ways in without a door or bridge from seal's last entrance check (`x,y,z kind`), the last audit's trap count and its own fail texts; first 2 days after a load at the earliest, then after a game month and 30 real minutes (10 when a blocker or an open way in is new; `util/cadence`). `status` never shows a plain PEACE then: line 1 reads `PEACE UNREADY`, line 2 `SIEGE UNREADY (R0): … | 2 ways in without door or bridge: … | traps 0 | next: …`.
-- **Drills** start by themselves (drill.lua: the first one, yearly, every season while the plan wants R2, after a siege, retries after a failure), only in PEACE without merchants, ≥ 2 days after a load, with an outer/inner manifest bridge, phase ≥ P5 and soldiers. `drill.hold()` names what is missing (state `ready.dhold`; `status`: `drill never (auto: no bridges; run dfllm cmd drill)`); `dfllm cmd drill` runs one by hand in PEACE (without bridges it fails `no_bridges`, but it exercises the alert and the squads).
+- **Drills** start by themselves (drill.lua: the first one, yearly, every season while the plan wants R2, after a siege, retries after a failure), only in PEACE without danger (a lockdown, a hostile in sight; BUG-051: merchants on the map and the runner's phase hold nothing), ≥ 2 days after a load, with an outer/inner manifest bridge, soldiers and a barracks. `drill.hold()` names what is missing (state `ready.dhold`; `status`: `drill never (auto: no bridges; run dfllm cmd drill)`); `dfllm cmd drill` runs one by hand in PEACE (without bridges it fails `no_bridges`, but it exercises the alert and the squads).
 
 **5.5 Economy and labor.**
 - **Baseline on adopt and on every load:** `control-panel enable` for the native list in §3; `prioritize -a defaults`; autochop with wood ≥14; autobutcher with low targets and ≤2 cats; `tailor materials silk cloth yarn`; `pop-control set max-pop 55` and `wave-size 8`; `labormanager mode monitor`.

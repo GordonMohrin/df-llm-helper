@@ -1048,6 +1048,25 @@ local function impls(state)
     return true, n
   end
 
+  -- stockpiles screen > add stockpile > Weapons (BUG-053, Run 11/12: 16 and 100 free picks lay loose for 1081 and 144 days; the
+  -- only weapon pile the kernel builds, fortcore's melt pile, refuses picks and axes on purpose): a w x h stockpile named
+  -- dfllm-tools with its top-left tile at pos, quickfort place mode key `p`. The caller picks revealed, plain, unbuilt floor on
+  -- the citizens' walk group near the mines (act reads no tiles) and restricts the pile to picks and axes afterwards
+  -- (stockpiles import). The haulers fill it; nothing is moved by the kernel. Returns ok, stockpiles designated (0 =
+  -- quickfort skipped the tiles: refused).
+  function I.tool_pile(pos, w, h)
+    local x, y, z = xyz(pos)
+    x, y, z = int(x), int(y), int(z)
+    if not (x and y and z) then return false, 'pos must be {x,y,z}' end
+    w, h = math.max(1, math.min(int(w) or 3, 5)), math.max(1, math.min(int(h) or 2, 5))
+    local cell = string.format('p{name=dfllm-tools}(%dx%d)', w, h)
+    local ok, stats = I.quickfort({mode = 'place', data = {[0] = {[0] = {[0] = cell}}}, pos = {x, y, z}})
+    if not ok then return false, stats end
+    local n = type(stats) == 'table' and int(stats.place_designated) or nil
+    if n == 0 then return false, 'quickfort designated no stockpile there' end
+    return true, n or 1
+  end
+
   -- live L6 (Paddletribes): removes ONE Pond zone by id (as the player deletes the zone on its sheet); water
   -- uses it for ponds that only recycle the water of the well beside them. Never touches other zones.
   function I.pond_remove(id)

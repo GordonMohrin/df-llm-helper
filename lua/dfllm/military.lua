@@ -54,7 +54,7 @@ M.SIZE = 10                 -- DF squads have 10 positions; position 0 is the le
 M.R2_MIN, M.R2_ADULTS = 8, 40   -- R2 needs >= 8 soldiers; aim for it once 8 is <= 20 % of adults
 M.XBOW_SHARE = 30           -- % of the army in the crossbow squad (doctrine: 4-5 of 15)
 M.FAST, M.SLOW = 600, 3600  -- upkeep cadence outside / in PEACE
-M.UNSTICK = 33600           -- uniform-unstick --all --drop --free, monthly, PEACE only (DESIGN §4)
+M.UNSTICK = 33600           -- uniform-unstick --all --free (BUG-050: --drop only on an opt-in), at most monthly, PEACE only
 M.ADD_PER_STEP = 5
 M.KEEP_EXTRA = 2            -- remove soldiers only when a squad is this far above its target
 M.KPI_TTL = 25
@@ -88,8 +88,12 @@ M.ROUTINES = {train = {'constant training', 'constant'}, ready = {'ready', 'read
 -- their jobs) train only those three months. Months are 0-based (28 days = 33600 ticks); the free months of
 -- the elite are the training months of the militia, so somebody always trains. Only in the TRAIN posture
 -- in PEACE; every alert posture overrides this.
-M.FREE_MONTHS = {[9] = true, [10] = true, [11] = true}
-M.MILITIA = {B = true}                       -- squad keys that are militia; the others are elite
+-- FR-71 (Run 14 Trussroads: one window, one squad cannot give every citizen three months a year): M.MILITIA is a table
+-- squad key -> the months that squad is on duty, so several militia squads rotate in windows of their own; the elite
+-- is free in M.FREE_MONTHS, which defaults to the union of the windows when config/baseline.json "military" names
+-- none (the old pair: militia B in 9-11, the elite free in 9-11). Both are read through M.conf (fairplay.MILITARY_LIM).
+M.MILITIA = {B = {9, 10, 11}}                -- squad keys that are militia -> months on duty; the others are elite
+M.FREE_MONTHS = {9, 10, 11}                  -- the elite's free months (nil: the union of the militia windows)
 M.ROUTINE_FALLBACK = {ready = 'train'}   -- no Ready routine: keep training (never Off duty)
 
 -- uniform specs for act.squad_uniform [S2: act maps them to squad_uniform_spec / an entity template]
@@ -125,13 +129,83 @@ M.LOOT = {per_run = 40, every = 3600, cats = {{'WEAPON', 'weapon'}, {'ARMOR', 'b
                                 {'GLOVES', 'gloves'}, {'SHOES', 'shoes'}, {'SHIELD', 'shield'}, {'AMMO', 'ammo'}}}
 local WORN_ROLES = {'Worn', 'Weapon', 'Strapped'}
 
+-- config/baseline.json "military" (dfpilot/fairplay.py MILITARY_LIM; a value of another type or out of range = the
+-- default): unstick {on, drop, every, below, drop_after} (BUG-050), militia {key: [months]} and free_months [months]
+-- (FR-71), early_pop (BUG-051), station_r (BUG-052). Module fields, not locals.
+M.UNSTICK_DEF = {on = true, drop = false, every = M.UNSTICK, below = 100, drop_after = 2}
+M.UNSTICK_LIM = {every = {1200, 403200}, below = {1, 100}, drop_after = {0, 12}}
+M.EARLY_POP, M.EARLY_LIM = 40, {0, 250}
+M.STATION_R_LIM = {1, 10}
+
+local function int(v) return type(v) == 'number' and math.tointeger(v) or nil end
+
+-- {9, 10, 11} -> {[9] = true, ...}; nil unless a list of months 0-11
+local function window_set(list)
+  if type(list) ~= 'table' then return nil end
+  local set = {}
+  for k, m in pairs(list) do
+    m = int(m)
+    if not (int(k) and m and m >= 0 and m <= 11) then return nil end
+    set[m] = true
+  end
+  return set
+end
+
+local function squad_key(k)
+  for _, sp in ipairs(M.SQUADS) do if sp.key == k then return true end end
+  return false
+end
+
+function M.conf(K)
+  local b = type(K.cfg) == 'table' and type(K.cfg.baseline) == 'table' and K.cfg.baseline.military
+  b = type(b) == 'table' and b or {}
+  local c, u = {unstick = {}}, type(b.unstick) == 'table' and b.unstick or {}
+  for k, def in pairs(M.UNSTICK_DEF) do
+    local x = u[k]
+    if type(def) == 'boolean' then
+      if type(x) == 'boolean' then c.unstick[k] = x else c.unstick[k] = def end
+    else
+      local lim = M.UNSTICK_LIM[k]
+      x = int(x)
+      c.unstick[k] = (x and x >= lim[1] and x <= lim[2]) and x or def
+    end
+  end
+  local mil
+  if type(b.militia) == 'table' then             -- one bad entry and the whole table is the default
+    mil = {}
+    for k, list in pairs(b.militia) do
+      local set = window_set(list)
+      if type(k) == 'string' and squad_key(k) and set then mil[k] = set else mil = nil; break end
+    end
+  end
+  local given = mil ~= nil
+  if not mil then
+    mil = {}
+    for k, list in pairs(M.MILITIA) do mil[k] = window_set(list) end
+  end
+  local free = window_set(b.free_months)
+  if not free then
+    if given or not M.FREE_MONTHS then              -- named windows, no free months: the elite is free in their union
+      free = {}
+      for _, set in pairs(mil) do for m in pairs(set) do free[m] = true end end
+    else
+      free = window_set(M.FREE_MONTHS)
+    end
+  end
+  c.militia, c.free = mil, free
+  local ep = int(b.early_pop)
+  c.early_pop = (ep and ep >= M.EARLY_LIM[1] and ep <= M.EARLY_LIM[2]) and ep or M.EARLY_POP
+  local sr = int(b.station_r)
+  c.station_r = (sr and sr >= M.STATION_R_LIM[1] and sr <= M.STATION_R_LIM[2]) and sr or M.STATION_R
+  return c
+end
+
 local seat_leader   -- defined after the squad helpers
 local SIEGE_FILL, hold_floor, siege_short   -- Run 11 siege 3, defined before M.step
 local st      -- persisted m.military: {v, sq = {A = {id, uni, kind, auto}}, posture, pt, unstick}
 local rt      -- runtime: retry ticks, applied orders, kpi cache, notified flags
 local dirty
 
-local function int(v) return type(v) == 'number' and math.tointeger(v) or nil end
 local function pct(a, b) if b <= 0 then return 0 end return (200 * a + b) // (2 * b) end
 local function save(K) if dirty then K.persist.set('m.military', st); dirty = false end end
 local function now_tick(K) return K.now().tick end
@@ -456,6 +530,66 @@ local function phase_no(K)
   return n
 end
 
+-- BUG-051: is there a barracks? A fortcore station for the melee squads (stage 2 builds the gatehouse barracks with it),
+-- a manifest room `barracks`, or a Barracks zone in the game (the player's, or a ruin's). Returns true/false and the
+-- evidence ('station', 'room', 'zone', 'none'); nil when the zones cannot be read and the manifest says nothing (unknown
+-- is no verdict). Cached for a day (the zone list is read, not scanned per tick).
+function M.barracks(K)
+  local now = now_tick(K)
+  local c = rt.bk
+  if c and now >= c.tick and now - c.tick < 1200 then return c.v, c.why end
+  local man = K.manifest()
+  local v, why
+  if type(man.stations) == 'table' and man.stations.melee then v, why = true, 'station' end
+  if not v then
+    for _, rm in ipairs(type(man.rooms) == 'table' and man.rooms or {}) do
+      if type(rm) == 'table' and rm.tpl == 'barracks' then v, why = true, 'room'; break end
+    end
+  end
+  if not v then
+    local ok, found = pcall(function()
+      local ty = df.civzone_type and df.civzone_type.Barracks
+      if ty == nil then error('no civzone_type.Barracks') end
+      for _, z in ipairs(df.global.world.buildings.other.ANY_ZONE) do if z.type == ty then return true end end
+      return false
+    end)
+    if ok then v, why = found, found and 'zone' or 'none' else v, why = nil, 'unread' end
+  end
+  rt.bk = {tick = now, v = v, why = why}
+  return v, why
+end
+
+-- BUG-051 (Run 13 Wheelsblows: pop 47-59 for twenty years at P0 because a deliverable never finished: no squads, no
+-- drill, worn 9-23 %): a fort of conf.early_pop (40) citizens with a barracks staffs its squads whatever phase the runner
+-- reports. Latched in st.early so a fort near the threshold does not release its soldiers (and their kit) with every
+-- death: it ends below half of early_pop citizens or without a barracks. early_pop 0 = off (the phase gates as before).
+function M.early(K)
+  local c = M.conf(K)
+  if c.early_pop == 0 then
+    if st.early then st.early, dirty = nil, true end
+    return false
+  end
+  local cu = K.census.u
+  local cit = type(cu) == 'table' and int(cu.cit) or nil
+  if not cit then return st.early == 1 end
+  local bk, why = M.barracks(K)
+  if st.early == 1 then
+    if bk == false or cit < c.early_pop // 2 then
+      st.early, dirty = nil, true
+      K.log('info', 'military: early squads end (%d citizens, barracks %s): the phase gates the squads again', cit, tostring(bk))
+      return false
+    end
+    return true
+  end
+  if cit >= c.early_pop and bk == true then
+    st.early, dirty = 1, true
+    K.log('info', 'military: %d citizens and a barracks (%s) at phase %s: the squads are staffed before P2', cit, why,
+          tostring(K.view().phase))
+    return true
+  end
+  return false
+end
+
 -- wanted squad keys in order: phases P2-P4 only squad A, from P5 all (DESIGN §5.12); none before P2
 local function active(K)
   local mil = type(K.plan) == 'table' and type(K.plan.military) == 'table' and K.plan.military or {}
@@ -463,7 +597,7 @@ local function active(K)
   local melee = math.min(2, math.max(0, int(sq.melee) or 2))
   local xbow = math.min(1, math.max(0, int(sq.xbow) or 1))
   local ph = phase_no(K)
-  if ph and ph < 2 then return {} end
+  if ph and ph < 2 and not M.early(K) then return {} end          -- BUG-051: a big fort with a barracks needs its squads
   local r = {}
   for _, s in ipairs(M.SQUADS) do
     if s.kind == 'melee' and melee > 0 then r[#r + 1] = s; melee = melee - 1
@@ -487,7 +621,7 @@ function M.targets(K)
   local act = active(K)
   local zero, short
   local ph = phase_no(K)
-  if ph and ph < 2 then zero = 'phase' end
+  if ph and ph < 2 and not M.early(K) then zero = 'phase' end
   -- live L6: the soldiers took the fort's only two (battle) axes for a year, so nobody cut wood and every
   -- build stalled. Tools first: no melee soldiers while the fort has fewer than TOOLS_MIN axes or picks in
   -- all. Live L7 (Paddletribes, no metal for years): crossbowmen carry no axe or pick, so the crossbow
@@ -1318,13 +1452,15 @@ local function posture_station(K, man, stations, P, kind, first_melee)
   return which, r.pos or (r.first and r.first.pos), src
 end
 
--- is this squad on its free months right now? (see M.FREE_MONTHS)
+-- is this squad off duty right now? FR-71: a militia squad (M.conf militia) is on duty only in its own window, an
+-- elite squad is free in the free months (see M.MILITIA, M.FREE_MONTHS)
 local function off_season(K, k)
   if st.posture ~= 'TRAIN' or K.mode() ~= 'PEACE' then return false end
   local month = (try(function() return df.global.cur_year_tick end) or 0) // 33600
-  local free = M.FREE_MONTHS[month] == true
-  if M.MILITIA[k] then return not free end   -- militia: on duty only in the elite's free months
-  return free
+  local c = M.conf(K)
+  local win = c.militia[k]
+  if win then return win[month] ~= true end    -- militia: on duty only in its own window
+  return c.free[month] == true
 end
 
 -- bring one squad to the posture; force = re-issue even if it looks applied. Returns ok.
@@ -1784,10 +1920,143 @@ local function loot(K)
   if n > 0 then K.log('info', 'loot: %d forbidden metal weapons, armor and ammo unforbidden for the armory', n) end
 end
 
+---------------------------------------------------------------- BUG-050: the monthly uniform-unstick
+-- Run 14 (y529-y535): the armor coverage fell from 53 % to 4 % several times. military ran `uniform-unstick --all --drop
+-- --free` every month in PEACE, whatever the uniforms looked like, and `--drop` makes every soldier drop what the uniform
+-- names; the dropped kit lay on the floor and the soldiers hung in PickupEquipment for weeks. Now: `--all --free` only,
+-- and only while a uniform slot is empty (worn < unstick.below, 100); `--drop` only on an opt-in (unstick.drop) and
+-- only once `drop_after` plain runs in a row found the same proven conflict (a soldier wearing an armor piece no
+-- spec of his category holds while that category has an empty slot: M.conflicts), never in a lockdown or with a
+-- hostile in sight. kern.log names the worn % before and a day and a week after every run.
+M.US_LOOK = {1200, 8400}
+
+-- the armor item type of a uniform category (weapons and shields are the tool details' business)
+M.CAT_TYPE = {body = 'ARMOR', head = 'HELM', pants = 'PANTS', gloves = 'GLOVES', shoes = 'SHOES'}
+
+-- does this soldier wear an item of a category's type that none of its specs holds, while a spec of the category is empty?
+local function conflict(p, u)
+  return try(function()
+    local R, worn = roles(), {}
+    for _, inv in ipairs(u.inventory) do
+      if R[inv.mode] and inv.item then worn[inv.item.id] = inv.item:getType() end
+    end
+    for cat, tname in pairs(M.CAT_TYPE) do
+      local ty, own, empty = df.item_type[tname], {}, false
+      for _, sp in ipairs(p.equipment.uniform[cat]) do
+        local hit = false
+        if int(sp.item) ~= nil and sp.item >= 0 then own[sp.item] = true; hit = worn[sp.item] ~= nil end
+        for _, id in ipairs(sp.assigned or {}) do own[id] = true; if worn[id] then hit = true end end
+        if not hit then empty = true end
+      end
+      if empty then
+        for id, t in pairs(worn) do if t == ty and not own[id] then return true end end
+      end
+    end
+    return false
+  end) == true
+end
+
+-- soldiers with a proven conflict, and their ids
+function M.conflicts(K)
+  local n, who = 0, {}
+  for _, sp in ipairs(M.SQUADS) do
+    local e = st.sq[sp.key]
+    local s = e and squad(e.id)
+    for _, m in ipairs(s and members(s) or {}) do
+      if conflict(m.p, m.unit) then n, who[#who + 1] = n + 1, m.unit.id end
+    end
+  end
+  return n, who
+end
+
+-- not PEACE (ALERT, SIEGE, BREACH, RECOVERY, DRILL), a lockdown holds, or a hostile is in sight: the reason, else nil.
+-- military's repairs and drill's start both ask (BUG-050, BUG-051)
+function M.danger(K)
+  local mode = K.mode()
+  if mode ~= 'PEACE' then return 'mode ' .. mode end
+  local okr, why = K.call('reflex', 'holding')
+  if okr and why then return 'lockdown' end
+  local h = K.census.h
+  if type(h) == 'table' and (int(h.vis) or 0) > 0 then return 'hostile' end
+  return nil
+end
+
+-- the worn % after a run (kern.log), the run itself
+function M.unstick(K, now)
+  local c = M.conf(K).unstick
+  local worn = rt.kpi and rt.kpi.worn or 0
+  if st.unstick and st.us_w and rt.us_i and M.US_LOOK[rt.us_i] and now - st.unstick >= M.US_LOOK[rt.us_i] then
+    K.log('info', 'military: uniform-unstick %d ticks ago (%s): worn %d%% before, %d%% now', now - st.unstick,
+          st.us_a or '?', st.us_w, worn)
+    rt.us_i = rt.us_i + 1
+  end
+  if not c.on or (st.unstick ~= nil and now - st.unstick < c.every) then return end
+  if worn >= c.below or M.danger(K) then return end
+  local n = M.conflicts(K)
+  st.us_n = n > 0 and (int(st.us_n) or 0) + 1 or 0
+  local args = {'uniform-unstick', '--all', '--free'}
+  if c.drop and st.us_n > c.drop_after then
+    args = {'uniform-unstick', '--all', '--drop', '--free'}
+    K.log('warn', 'military: uniform-unstick --drop: %d soldiers keep an armor piece no spec holds after %d plain runs',
+          n, st.us_n - 1)
+    st.us_n = 0
+  end
+  K.act.run(table.unpack(args))
+  st.unstick, st.us_w, st.us_a, dirty = now, worn, table.concat(args, ' ', 2), true
+  rt.us_i = 1
+end
+
+-- FR-71: a militia squad's window opens or closes (kern.log once per change; the first look only records)
+function M.windows(K)
+  local c = M.conf(K)
+  local month = (try(function() return df.global.cur_year_tick end) or 0) // 33600
+  rt.win = rt.win or {}
+  for _, sp in ipairs(M.SQUADS) do
+    local set = c.militia[sp.key]
+    if set then
+      local on = set[month] == true
+      if rt.win[sp.key] ~= nil and rt.win[sp.key] ~= on then
+        local e = st.sq[sp.key]
+        local s = e and squad(e.id)
+        local ms = {}
+        for m in pairs(set) do ms[#ms + 1] = m end
+        table.sort(ms)
+        local cu = K.census.u
+        K.log('info', 'military: militia squad %s %s (months %s): %d members, %d citizens', sp.key,
+              on and 'on duty' or 'off duty', #ms > 0 and (ms[1] .. '-' .. ms[#ms]) or '-', s and #members(s) or 0,
+              type(cu) == 'table' and cu.cit or 0)
+      end
+      rt.win[sp.key] = on
+    end
+  end
+end
+
 ---------------------------------------------------------------- KPIs
+-- BUG-052: the tiles around its station point a squad of n stands in: DF spreads the soldiers over the tiles around the
+-- point (a block in a room, a line along a corridor: Run 11 y497 read 'on_station 0' beside soldiers who stood in the
+-- gatehouse); conf station_r (3) + one tile per four soldiers beyond the first
+function M.station_radius(n, base)
+  return (base or M.STATION_R) + math.max(0, ((n or 1) - 1) // 4)
+end
+
+-- why a soldier is not at his squad's station (kpi off): 'equip' (a PickupEquipment job: the kit lies on the floor,
+-- BUG-050), 'hurt' (a wound, unconscious, thirsty or hungry past SIEGE_THIRST/HUNGER), 'level' (another z), else 'far'
+local function off_reason(u, up, spos)
+  local jt = try(function() local j = u.job and u.job.current_job; return j and j.job_type end)
+  local pk = df.job_type and df.job_type.PickupEquipment
+  if pk ~= nil and jt == pk then return 'equip' end
+  if not healthy(u) then return 'hurt' end
+  if up.z ~= spos.z then return 'level' end
+  return 'far'
+end
+
 local function compute(K)
   local k = {squads = 0, soldiers = 0, worn = 0, cv = 0, metal_pct = 0, on_station = 0}
   local slots, worn, specs, cv, metal = 0, 0, 0, 0, 0
+  local conf, off = M.conf(K), {}
+  local man = K.manifest()
+  local stations = type(man.stations) == 'table' and man.stations or {}
+  local first = first_melee_key()
   for _, sp in ipairs(M.SQUADS) do
     local e = st.sq[sp.key]
     local s = e and squad(e.id)
@@ -1795,6 +2064,13 @@ local function compute(K)
       local mem = members(s)
       if #mem > 0 then k.squads = k.squads + 1 end
       local spos = rt.station[sp.key]
+      local R = M.station_radius(#mem, conf.station_r)
+      -- the posture names a station for this squad and none was found (no manifest station): all of them are off it
+      local want = false
+      if not spos and #mem > 0 and st.posture then
+        local _, chain = station_of(K, man, st.posture, e.kind, sp.key == first, stations)
+        want = chain ~= nil
+      end
       for _, m in ipairs(mem) do
         local u = m.unit
         k.soldiers = k.soldiers + 1
@@ -1804,7 +2080,13 @@ local function compute(K)
         if iron_or_steel(u) then metal = metal + 1 end
         if spos then
           local up = try(function() return {x = u.pos.x, y = u.pos.y, z = u.pos.z} end)
-          if up and up.z == spos.z and geom.dist(up, spos) <= M.STATION_R then k.on_station = k.on_station + 1 end
+          if up and up.z == spos.z and geom.dist(up, spos) <= R then k.on_station = k.on_station + 1
+          elseif up then
+            local why = off_reason(u, up, spos)
+            off[why] = (off[why] or 0) + 1
+          end
+        elseif want then
+          off.nost = (off.nost or 0) + 1
         end
       end
     end
@@ -1813,6 +2095,7 @@ local function compute(K)
   k.metal_pct = pct(metal, k.soldiers)
   if k.soldiers > 0 then k.cv = (2 * cv + k.soldiers) // (2 * k.soldiers) end
   k.slots, k.specs = slots, specs
+  if next(off) then k.off = off end
   return k
 end
 
@@ -1838,7 +2121,8 @@ function M.init(K)
   local p = K.persist.get('m.military')
   p = type(p) == 'table' and p or {}
   st = {v = 2, sq = {}, posture = type(p.posture) == 'string' and p.posture or nil, pt = int(p.pt),
-        unstick = int(p.unstick)}
+        unstick = int(p.unstick), us_w = int(p.us_w), us_n = int(p.us_n), early = int(p.early) == 1 and 1 or nil,
+        us_a = type(p.us_a) == 'string' and p.us_a:sub(1, 40) or nil}
   for _, sp in ipairs(M.SQUADS) do
     local e = type(p.sq) == 'table' and p.sq[sp.key]
     if type(e) == 'table' and int(e.id) then
@@ -1894,10 +2178,8 @@ function M.step(K, budget, ctx)
   if M.every.ticks ~= want_every then M.every = {ticks = want_every} end
   if type(K.census.u) ~= 'table' then return end
   local soldiers = rt.kpi and rt.kpi.soldiers or 0
-  if mode == 'PEACE' and soldiers > 0 and (st.unstick == nil or now - st.unstick >= M.UNSTICK) then
-    K.act.run('uniform-unstick', '--all', '--drop', '--free')
-    st.unstick, dirty = now, true
-  end
+  if mode == 'PEACE' and soldiers > 0 then M.unstick(K, now) end    -- BUG-050
+  M.windows(K)                                                      -- FR-71
   local _, per, zero, short, gear = M.targets(K)
   if zero and mode == 'PEACE' then release(K, zero)
   elseif short and mode == 'PEACE' then release(K, 'tools', 'melee') end

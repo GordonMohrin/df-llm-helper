@@ -266,6 +266,31 @@ T.test('fish_zone: a side x side dfllm-fish zone (quickfort zone key f) centred 
   T.eq(calls[#calls].data[0][0][0], 'f{name=dfllm-fish}(7x7)', 'side capped at 7')
 end)
 
+-- BUG-053 (Run 11/12: 16 and 100 free picks lay loose for 1081 and 144 days): the stockpiles screen's Weapons pile, a
+-- w x h pile named dfllm-tools through quickfort place mode (economy only)
+T.test('tool_pile: a w x h dfllm-tools weapons stockpile (quickfort place key p) at the position; economy only', function()
+  local W = H.world{tag = 'tp'}
+  local calls = {}
+  local n = 1
+  W.scripts['quickfort'] = {apply_blueprint = function(p)
+    calls[#calls + 1] = p
+    return {place_designated = {label = 'Stockpiles designated', value = n}}
+  end}
+  local env = mk('economy')
+  T.eq({env.api.tool_pile({60, 40, 5}, 3, 2)}, {true, 1})
+  T.eq({calls[1].mode, calls[1].command, calls[1].pos}, {'place', 'run', {x = 60, y = 40, z = 5}})
+  T.eq(calls[1].data[0][0][0], 'p{name=dfllm-tools}(3x2)')
+  T.eq({env.api.tool_pile({60, 40, 5})}, {true, 1})
+  T.eq(calls[2].data[0][0][0], 'p{name=dfllm-tools}(3x2)', 'defaults 3 x 2')
+  T.eq({env.api.tool_pile({60, 40, 5}, 9, 9)}, {true, 1})
+  T.eq(calls[3].data[0][0][0], 'p{name=dfllm-tools}(5x5)', 'capped at 5 x 5')
+  T.eq((mk('runner').api.tool_pile({60, 40, 5}, 3, 2)), false, 'not owner')
+  T.eq((env.api.tool_pile({60, 40}, 3, 2)), false, 'bad position')
+  n = 0
+  T.eq({env.api.tool_pile({61, 40, 5}, 3, 2)}, {false, 'quickfort designated no stockpile there'})
+  T.eq(#calls, 4)
+end)
+
 T.test('order_top (Run 11 siege 8, seal first): the named orders move to the top in the given order (runner only)',
        function()
   H.world{tag = 'otop'}

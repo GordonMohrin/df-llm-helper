@@ -51,6 +51,11 @@ M.REC_INNER, M.REC_OUTER, M.REC_PEACE = 1200, 2400, 8400
 M.ALERT_CIV_ON, M.ALERT_CIV_OFF, M.ALERT_CIV_HOLD, M.ALERT_O1 = 30, 40, 600, 30
 M.ANCHORS = 20             -- alert anchors kept (positions of citizens outside at alert-on)
 M.STATUS, M.RETRY, M.POSTURE_REASSERT, M.KILL_EVERY = 600, 600, 3600, 100
+-- BUG-052 (Run 11 siege 14, y497: 24 lost, soldiers 16 -> 6, 'on_station=0'): the episode keeps the soldiers it started with
+-- (ep.sol0), the best on-station count (ep.onmax) and the ticks until half of them stood at their stations (ep.ont, -1:
+-- never); looked at every STATION_LOOK ticks. Still under half STATION_WAIT ticks in, the posture is issued again (every
+-- STATION_WAIT while it lasts) and kern.log names the soldiers' causes once per episode (military.kpi off).
+M.STATION_LOOK, M.STATION_WAIT = 100, 1800
 M.DRILL_MAX = 3600         -- a drill normally ends at T+1,200 (drill module)
 
 -- BUG-029: SIEGE stands the squads at the inner station (READY_IN; INTAKE only while a wave runs)
@@ -185,9 +190,15 @@ local function go(K, to, why, a, bridge)
     K.emit('ALERT_END', 'B', 'alert over', {vis = vis})
   elseif to == 'PEACE' and from == 'RECOVERY' and ep then
     local hostiles = math.max(ep.hmax or 0, ep.seen or 0)
-    K.emit('SIEGE_END', 'A', string.format('%d hostiles, %d killed, %d lost, sealed %d ticks',
-           hostiles, ep.killed, ep.lost, ep.sealed),
-           {hostiles = hostiles, killed = ep.killed, lost = ep.lost, captures = ep.caps, sealed_ticks = ep.sealed})
+    local okm, mk = K.call('military', 'kpi')
+    local sol = okm and type(mk) == 'table' and int(mk.soldiers) or 0
+    local sol0 = (ep.sol0 or 0) > 0 and ep.sol0 or sol
+    local ont = ep.ont or -1
+    K.emit('SIEGE_END', 'A', string.format('%d hostiles, %d killed, %d lost, sealed %d ticks; soldiers %d -> %d, on station %d%s',
+           hostiles, ep.killed, ep.lost, ep.sealed, sol0, sol, ep.onmax or 0,
+           ont >= 0 and (' (half after ' .. ont .. ' ticks)') or ' (never half)'),
+           {hostiles = hostiles, killed = ep.killed, lost = ep.lost, captures = ep.caps, sealed_ticks = ep.sealed,
+            sol0 = sol0, soldiers = sol, on_station = ep.onmax or 0, on_t = ont})
   end
   return true
 end
@@ -1959,9 +1970,46 @@ local function note_citizens(K)
   end
 end
 
+-- BUG-052: "soldiers 3, 6 on station" (military.kpi off) as a short text: `equip 5, far 2` (alphabetical), nil without any
+local function off_text(off)
+  if type(off) ~= 'table' then return nil end
+  local keys = {}
+  for k, n in pairs(off) do if type(k) == 'string' and int(n) and n > 0 then keys[#keys + 1] = k end end
+  if #keys == 0 then return nil end
+  table.sort(keys)
+  local parts = {}
+  for _, k in ipairs(keys) do parts[#parts + 1] = k .. ' ' .. off[k] end
+  return (table.concat(parts, ', '):sub(1, 60))
+end
+
+-- BUG-052: the episode's station numbers, and the re-issue of a posture whose squads are not at their stations
+local function station_watch(K, now)
+  local ep, mode = st.ep, K.mode()
+  if not ep or (mode ~= 'SIEGE' and mode ~= 'BREACH') then return end
+  if now - (mem.stn_t or -M.STATION_LOOK) < M.STATION_LOOK then return end
+  mem.stn_t = now
+  local ok, k = K.call('military', 'kpi')
+  if not (ok and type(k) == 'table') then return end
+  local sol, on = int(k.soldiers) or 0, int(k.on_station) or 0
+  if (ep.sol0 or 0) == 0 and sol > 0 then ep.sol0, dirty = sol, true end
+  if on > (ep.onmax or 0) then ep.onmax, dirty = on, true end
+  if sol > 0 and on * 2 >= sol and (ep.ont or -1) < 0 then ep.ont, dirty = now - ep.start, true end
+  if sol == 0 or on * 2 >= sol or now - ep.start < M.STATION_WAIT then return end
+  if wave_busy() or next(mem.kill_set or {}) then return end          -- a wave, a sortie or a kill order: elsewhere on purpose
+  if mem.stn_re and now - mem.stn_re < M.STATION_WAIT then return end
+  mem.stn_re = now
+  if not mem.stn_warn then
+    mem.stn_warn = true
+    K.log('warn', 'siege: %d ticks into the %s only %d of %d soldiers stand at their stations (%s): the orders are issued again',
+          now - ep.start, mode, on, sol, off_text(k.off) or 'no cause read')
+  end
+  if mem.posture then K.call('military', 'posture', mem.posture, true) end
+end
+
 local function track(K, g, now, dt)
   local ep = st.ep
   if not ep or not EPISODE[K.mode()] then return end
+  station_watch(K, now)
   note_citizens(K)
   local h, cu = K.census.h, K.census.u
   if type(h) == 'table' then
@@ -1995,7 +2043,10 @@ local function status(K, a, now)
   st.ls, dirty = now, true
   local d = {vis = a and a.vis or 0, deaths = ep.lost, captures = ep.caps}
   local ok, k = K.call('military', 'kpi')
-  if ok and type(k) == 'table' then d.worn, d.on_station = int(k.worn), int(k.on_station) end
+  if ok and type(k) == 'table' then
+    d.worn, d.on_station = int(k.worn), int(k.on_station)
+    d.off = off_text(k.off)                                  -- BUG-052: why soldiers are off their station
+  end
   K.emit('SIEGE_STATUS', 'C', string.format('%s: %d visible, %d lost', K.mode(), d.vis, ep.lost), d)
 end
 
@@ -2120,7 +2171,10 @@ function M.init(K)
   st.deep_rec = type(p.deep_rec) == 'table' and p.deep_rec or nil
   if type(p.ep) == 'table' then
     st.ep = {}
-    for _, f in ipairs({'start', 'hmax', 'seen', 'killed', 'lost', 'caps', 'sealed'}) do st.ep[f] = int(p.ep[f]) or 0 end
+    for _, f in ipairs({'start', 'hmax', 'seen', 'killed', 'lost', 'caps', 'sealed', 'sol0', 'onmax'}) do
+      st.ep[f] = int(p.ep[f]) or 0
+    end
+    st.ep.ont = int(p.ep.ont) or -1
   end
   if type(p.civ_at) == 'table' then
     st.civ_at = {}
@@ -2170,7 +2224,8 @@ M.on = {
     if to == 'RECOVERY' then st.rq, st.rl, st.b1low = 0, now, false end
     if to == 'ALERT' then st.civ, st.far, st.civ_at = false, nil, nil end
     if (to == 'SIEGE' or to == 'BREACH') and not st.ep then
-      st.ep = {start = now, hmax = 0, seen = 0, killed = 0, lost = 0, caps = 0, sealed = 0}
+      st.ep = {start = now, hmax = 0, seen = 0, killed = 0, lost = 0, caps = 0, sealed = 0, sol0 = 0, onmax = 0, ont = -1}
+      mem.stn_t, mem.stn_re, mem.stn_warn = nil, nil, nil
       mem.hseen, mem.nseen, mem.caps, mem.caged0 = {}, 0, {}, nil
       mem.cit_ever, mem.cit_src = {}, nil
       note_citizens(K)

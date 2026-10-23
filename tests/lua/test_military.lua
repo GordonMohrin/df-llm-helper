@@ -79,14 +79,18 @@ end)
 T.test('phase gating: no squads before P2, only squad A in P2-P4, all from P5', function()
   local W = boot({n = 50}, {X.runner('P1')})
   local M, K = mil(), W.K
-  local function per(phase)
+  local function per(phase, cit)
     W.mods.runner.M.phase = phase
     W.state()
-    W.set_census('u', {tick = 0, cit = 50, adults = 50, ids = {}})
+    W.set_census('u', {tick = 0, cit = cit or 50, adults = 50, ids = {}})
     local n, p = M.targets(K)
     return {n, p.A, p.B, p.C}
   end
-  T.eq(per('P1'), {0, nil, nil, nil})
+  T.eq(per('P1', 30), {0, nil, nil, nil}, 'BUG-051: below early_pop (40) citizens the phase gates')
+  T.eq(per('P1'), {8, 8, nil, nil}, 'BUG-051: 50 citizens and a barracks (the fake manifest has the melee station): squad A')
+  W.K.cfg.baseline.military = {early_pop = 0}
+  T.eq(per('P1'), {0, nil, nil, nil}, 'early_pop 0: the phase gates as before')
+  W.K.cfg.baseline.military = nil
   T.eq(per('P2'), {8, 8, nil, nil})
   T.eq(per('P4'), {8, 8, nil, nil})
   T.eq(per('P5'), {8, 3, 3, 2})
@@ -505,7 +509,8 @@ T.test('uniform-unstick monthly in PEACE with soldiers only (allowlisted args)',
   W.run(3600 * 10, {skip = 9})
   local runs = X.acts(W, 'run')
   T.ok(#runs >= 1 and #runs <= 2, 'monthly: ' .. #runs)
-  T.eq({runs[1].args[1], runs[1].args[2], runs[1].args[3], runs[1].args[4]}, {'uniform-unstick', '--all', '--drop', '--free'})
+  T.eq({runs[1].args[1], runs[1].args[2], runs[1].args[3], runs[1].args[4]}, {'uniform-unstick', '--all', '--free', nil},
+       'BUG-050: no --drop')
   local n = #runs
   W.K.set_mode('SIEGE', 'test')
   W.run(33600 * 2, {skip = 9})
@@ -637,6 +642,7 @@ T.test('live L6: a known phase before P2 releases the soldiers; outside PEACE no
   T.eq(#X.acts(W, 'squad_remove'), 0, 'ALERT: the soldiers stay')
   W.K.set_mode('PEACE', 'test')
   W.set_census('i', {tick = 0, w_axe = 20, w_pick = 20})
+  W.K.cfg.baseline.military = {early_pop = 0}      -- BUG-051: 50 citizens and a barracks would keep their squads at P1
   W.mods.runner.M.phase = 'P1'
   W.state()
   local _, _, why = mil().targets(W.K)
