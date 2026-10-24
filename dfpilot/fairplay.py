@@ -850,7 +850,7 @@ OWNED = {
     "gui/civ-alert": "act.civ_alert / act.alert_burrows (siege)",
 }
 # the R0 cap: baseline sets it only while readiness is not loaded (lua/dfllm/baseline.lua:198)
-OWNED_EXEMPT = frozenset({"pop-control set max-pop 55"})
+OWNED_EXEMPT = frozenset({"pop-control set max-pop 100"})
 _WRAPPERS = (["enable"], ["disable"], ["control-panel", "enable"], ["control-panel", "disable"])
 
 
