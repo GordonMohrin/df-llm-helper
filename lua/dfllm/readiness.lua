@@ -44,7 +44,7 @@ local CAD = require('dfllm.util.cadence')
 
 local M = {name = 'readiness', every = {ticks = 1200}, verbs = {}, on = {}}
 
-M.CAPS = {[0] = 55, [1] = 55, [2] = 75, [3] = 250}
+M.CAPS = {[0] = 100, [1] = 100, [2] = 100, [3] = 250}
 M.SIEGE_TRIGGER = 80     -- difficulty "enemy population trigger" [S10: read it]; R2 ceiling = trigger - 5
 M.DRILL_VALID = 100800   -- a passed drill counts for one season
 M.AUDIT_VALID = 100800   -- an audit counts for one season
