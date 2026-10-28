@@ -60,7 +60,8 @@ SYNTH = {"HB_STALE", "AUTO_FAIL", "SUPERVISE", "QUICKSAVE_FAILED", "NEEDS_CLICK"
 # after BREACH and wake at once (URGENT: no merge wait, no hourly limit, one per type per URGENT_REPEAT_S)
 PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", "LOCKDOWN", "SIEGE_DEEP",
         "BRIDGE_DESTROYED", "GATE_FAIL",
-        "DEATHS_3PLUS", "NO_DEPOT",
+        "TRANSFORM", "CURSED",                # BUG-115: a were-form among the citizens, then a curse (interrupts)
+        "DEATHS_3PLUS", "NO_DEPOT", "CURSE_MOON",
         "NEEDS_CLICK",                        # K2: no fort runs at all; nothing else in the burst can be acted on first
         "PATIENT_DYING", "MOOD_CRITICAL",     # I1: a patient or a mood dwarf at the death line comes before the housekeeping types
         "DEATHS_PREVENTABLE", "KERN_FAULT", "HB_STALE", "SUPERVISE", "QUICKSAVE_FAILED",
@@ -74,6 +75,13 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
         "SIEGE_START": "dfllm status (the kernel already locked down)", "INVASION": _IRQ_NEXT, "ARRIVAL": _IRQ_NEXT,
         "INTRUDER": _IRQ_NEXT, "PREDATOR": _IRQ_NEXT, "LOCKDOWN": _IRQ_NEXT, "DEATHS_3PLUS": "dfllm ack; dfllm brief",
         "NO_DEPOT": "dfllm ack; place a trade depot (bp.place)",
+        # BUG-115 (Run 14 y707: a curse nobody read, 23 werecavies): the recipe is the brief's "## curse" section
+        "CURSED": "tell Gordon at once; dfllm ack; dfllm cmd inspect what=curse; before the full moon lock ALL the cursed in "
+                  "ONE room (burrow + forbidden door, by hand in DF); never kill a citizen without his yes",
+        "TRANSFORM": "tell Gordon at once; dfllm ack; the were-form is an enemy among the citizens: keep the others away "
+                     "(a locked door), kill only on his yes (DECISION_NEEDED curse_kill); inspect what=curse; watch the bitten",
+        "CURSE_MOON": "tell Gordon: lock the cursed (ids in the line) in ONE room now, before the full moon "
+                      "(burrow + forbidden door, by hand in DF)",
         "DECISION_NEEDED": "ask Gordon in chat, then config/decisions.yaml", "KERN_FAULT": "dfllm doctor",
         "PERF_DEGRADED": "dfllm doctor", "HB_STALE": "dfllm doctor", "AUTO_FAIL": "dfllm doctor",
         "SUPERVISE": "dfllm supervise --once --dry-run",
@@ -232,6 +240,9 @@ def next_hint(etype: str, e: dict) -> str:
         return sortie_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "confined_need":
         return need_hint(d)
+    if etype == "DECISION_NEEDED" and d.get("id") == "curse_kill":
+        return ("ask Gordon: a kill order on the were-form (dfllm cmd squad.sortie, approve:true is the logged decision; "
+                "a squad and its target position) or keep them apart in a locked room; no answer = no kill")
     if etype == "PROJECT_BLOCKED" and d.get("park") is not None and d.get("proj"):
         return park_hint(d)
     return NEXT.get(etype, "dfllm brief")

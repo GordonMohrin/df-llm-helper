@@ -66,7 +66,7 @@ def test_state_slots_validate_and_carry_wp8_keys(run):
     assert keys <= set(best["stock"]) <= keys | {"mood_miss", "rock", "rock_need", "dwhy"}
     assert set(best["labor"]) - {"n", "sold", "held", "why"} == {"starving", "idle"}      # FR-77: the idle breakdown
     # FR-74 / BUG-062: src, pop and died_y once a run finished, tombs_locked while a zone stays closed
-    assert set(best["care"]) - {"coffins", "died", "src", "pop", "died_y", "tombs_locked"} == {
+    assert set(best["care"]) - {"coffins", "died", "src", "pop", "died_y", "tombs_locked", "s0"} == {
         "stressed_pct", "naked", "ghosts", "corpses_old", "tombs_free", "moods"}
     assert set(best["care"].get("coffins", {})) <= {"want", "short", "stock", "order", "proj"}   # FR-61, optional
     assert all(isinstance(n, int) and n > 0 for n in best["care"].get("died", {}).values())    # FR-64, optional

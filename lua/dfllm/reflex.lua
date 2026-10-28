@@ -91,7 +91,7 @@
 --     siege module's relax path (STRANDED) is the existing rescue and the lockdown stays.
 --
 -- Interrupt channel (FR-53). INTERRUPTS (contract): ARRIVAL; INTRUDER (a visible invader, undead or great danger on
--- the citizens' walkable group); PREDATOR (a visible wild danger on a roofed tile of that group); DEATHS_3PLUS (care);
+-- the citizens' walkable group); PREDATOR (a visible wild danger on a roofed tile of that group); DEATHS_3PLUS, CURSED, TRANSFORM (care);
 -- NO_DEPOT (merchants need a trade depot; once per caravan visit, BUG-008). Each goes to <save>/alarm.txt at once (a DEFCON line, then the last
 -- interrupts), `dfllm wait --until-interrupt` returns on it, and verb `ack` records the operator's ack. An interrupt
 -- still unacked after ack_timeout_s (real seconds, measured on K.now().ms, which also runs while paused) gets its type's lockdown default (config/reflex.json `defaults`)
@@ -119,7 +119,10 @@ M.CFG = {
   -- BUG-065: the confinement limit and the harmless-intruder picture (see the header)
   confine = {max_days = 10, harmless_size = 20000, lone_max = 2, offer_days = 1, need_thirst = 40000, need_hunger = 60000},
   defaults = {ARRIVAL = {'clock', 'gates', 'doors', 'alert'}, INTRUDER = {'clock', 'gates', 'doors', 'alert'},
-              PREDATOR = {'clock', 'alert'}, DEATHS_3PLUS = {'clock'}, NO_DEPOT = {}},
+              PREDATOR = {'clock', 'alert'}, DEATHS_3PLUS = {'clock'}, NO_DEPOT = {},
+              -- BUG-115: a curse changes nothing at once (the full moon is days away); a were-form unit inside the fort slows the
+              -- clock so the player can answer (never a lockdown: the beast is among the citizens, not at the gate)
+              CURSED = {}, TRANSFORM = {'clock'}},
 }
 M.ARM = 2400               -- ticks after the last trigger before the quiet clock may start (threat's armed window)
 M.KEEP = 20                -- interrupts kept for alarm.txt and the ack bookkeeping
@@ -2262,6 +2265,15 @@ M.on = {
     if kind then arrival(K, kind, 'report', ev.text ~= '' and ev.text or ev.type) end
   end,
   ['EV:DEATHS_3PLUS'] = function(K, ev)
+    record(K, ev.n, ev.type, ev.msg)
+    save(K)
+  end,
+  -- BUG-115: care's CURSED and TRANSFORM are interrupts too (alarm.txt, `dfllm ack`, the default after ack_timeout_s)
+  ['EV:CURSED'] = function(K, ev)
+    record(K, ev.n, ev.type, ev.msg)
+    save(K)
+  end,
+  ['EV:TRANSFORM'] = function(K, ev)
     record(K, ev.n, ev.type, ev.msg)
     save(K)
   end,

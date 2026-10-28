@@ -89,8 +89,11 @@ M.THREAT_POPUPS = {siege = {'vile force of darkness'}, ambush = {'an ambush'}, s
                    beast = {'has come'}}
 -- FR-75: words that keep a popup for the player and the reflex, whatever else it says: threats, the undead, the embark
 -- intro ("Strike the earth!", live L6: erasing it left a fort where nobody took a job). Lower case, plain markers
+-- BUG-115 (Run 14: "has been cursed by Ok!" was clicked away unread, 23 dwarves became werecavies): curses and
+-- transformations too ('were' + a letter: werecavy, werewolf, but not "were " or "weren't": M.were)
 M.DENY = {'dead walk', 'undead', 'zombie', 'necromancer', 'ambush', 'siege', 'invad', 'army', 'force of darkness',
-          'forgotten beast', 'titan', 'demon', 'werebeast', 'vampire', 'strike the earth', 'snatcher', 'kidnap'}
+          'forgotten beast', 'titan', 'demon', 'werebeast', 'vampire', 'strike the earth', 'snatcher', 'kidnap',
+          'cursed', 'transformed', 'transforms into'}
 -- FR-75 knobs (config/reflex.json `popups`): other = also clear popups of unknown text (not M.DENY) after other_s real
 -- seconds on the screen (default off: the player decides what the kernel may not name), log_s = real seconds between two
 -- kern.log lines per popup kind
@@ -446,11 +449,19 @@ local function popup_count()
   return ok and n or 0
 end
 
+-- BUG-115: a word that starts with "were" and goes on with a letter (werecavy, werewolf, werebeast) but is not "weren't"
+function M.were(low)
+  for rest in tostring(low):gmatch('%f[%a]were(%a)') do
+    if rest ~= 'n' then return true end
+  end
+  return false
+end
+
 -- public (FR-68: the stop guard dismisses the same popups): kind, threat for a popup text; threat = true for
 -- M.THREAT_POPUPS (checked first); nil for a popup that stays for the player
 local function denied(low)
   for _, w in ipairs(M.DENY) do if low:find(w, 1, true) then return true end end
-  return false
+  return M.were(low)
 end
 
 function M.classify(text)
@@ -531,6 +542,11 @@ local function other_popup(K)
   if not text then return nil end
   local c = popup_cfg(K)
   note_left(K, text)
+  -- BUG-115: a curse popup is left for the player, but care learns of it (a report of an unknown type may not have arrived)
+  if denied(text:lower()) and st.curse_told ~= text then
+    st.curse_told = text                                -- once per popup text, not every step it stands
+    K.call('care', 'curse_text', text)
+  end
   if not c.other or denied(text:lower()) then st.unk = nil; return nil end
   local now = K.now().ms
   if not st.unk or st.unk.text ~= text or now < st.unk.since then st.unk = {text = text, since = now} end

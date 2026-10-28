@@ -1,5 +1,37 @@
 # CHANGELOG dfpilot
 
+## M4: curses and transformations are seen: CURSED, TRANSFORM, CURSE_MOON, the unit sheet and the desperate list (BUG-115, FR-83, FR-84, 2026-10-28, offline, live-untested)
+- **Why:** Run 14 y707 (note 84, post-mortem): a miner toppled a statue in a tantrum, "has been cursed by Ok!", became a werecavy,
+  and 23 dwarves followed (pop 54 -> 10). care listened to the toppled-building reports only, kern delivers a report by its
+  announcement type, the arbiter left the popup "unclassified" (and its catch-all would have cleared it), no event woke anyone, the
+  bites ran as "killed by dwarf" and patient deaths. Note 93: no command told how one dwarf was doing.
+- **What changed (curse.lua new, care.lua, kern.lua, arbiter.lua, reflex.lua, contracts, wake.py, brief.py; bugs/BUG-115, FR-83, FR-84):**
+  kern routes a report to a module by `M.report_text` whatever its type (care: `has been cursed`, `been cursed by`, `transformed into`,
+  `has transformed`, `transforms into`); `lua/dfllm/curse.lua` (a library of care) parses it, finds the citizen by name (one match
+  only), the trigger (his BUILDING_TOPPLED record or tantrum), keeps a bounded persisted list (`care.cur`, `curse_keep` 60), reads the
+  unit sheet in care's own sliced scan (`unit.curse.name` as a string when visible; a race name containing `were`) and forgets the
+  dead. Events: CURSED and TRANSFORM (A, interrupts: alarm.txt, `ack`; defaults none / clock only, never a lockdown), CURSE_MOON (A,
+  four days before the full moon, once per moon and again for a new cursed unit), one event per kind per `curse_every` (600) ticks
+  with the burst merged (23 curses = 2 events), DECISION_NEEDED `curse_kill` for a were-form unit (a kill order only after the
+  player's yes). State `curse` {n, tf, ids, mo, mi, dead}, status `CURSED 3 (ids ..), 1 in were-form, next full moon ~d206 (in 4 d)`,
+  `inspect what=curse`, the wake `next:` recipe and the brief's `## curse (recipe)` (all the cursed in ONE room before the moon: a
+  burrow and a forbidden door by the player in DF; a were-form unit is an enemy; watch the bitten). Arbiter: `cursed`, `transformed`,
+  `transforms into` and the `were...` words (not "were " or "weren't") on the DENY list; care is told of such a popup once. FR-83:
+  `inspect what=unit key=<id|name>` (stress and level, mood, thoughts, curse, wounds, job, place, relatives; `unread` names what the
+  game did not give), `care.s0` and the brief line `stress level 0 (desperate): N units: id name ...`. FR-84: the brief's stress
+  line (top cause with its countermeasure, the buildings tantrums tore down, statues and temple objects first). New config keys
+  (baseline.json `care`, `fairplay.CARE_LIM`): `curse`, `curse_every`, `curse_keep`, `curse_ids`, `curse_moon_cycles`,
+  `curse_moon_lead`, `curse_trig_win`, `s0_ids`; reflex `defaults` CURSED / TRANSFORM. SIEGE, BREACH, lockdown: no new action
+  (TRANSFORM's clock default is DEATHS_3PLUS's); a fort of 7 and a fort of 80 differ only in the lists' bounds; an old state without
+  `care.cur` works; the sheet scan adds a few guarded reads to each citizen of care's run, no new per-tick scan.
+- **Tests:** tests/lua/test_curse.lua (23), test_curse_kern.lua (2), one in test_reflex.lua, tests/test_m4_curse.py (16); all fail on
+  32994bb (the base also has 4 red Lua suites and some red pytest cases from the D-01 cap commit e3c0c77: not touched here).
+- **Live check:** at the first curse read `ann` of the CURSED event (the announcement type name DF uses), then on the cursed unit
+  `dfllm cmd inspect what=unit key=<id>`: `curse.name`, `curse.form`, `curse.tf`, `unread`; after the first transformation
+  `inspect what=curse` must say `calibrated 1` and the next CURSE_MOON must come 4 days before the next wave. Read-only for the open
+  questions (bugs/BUG-115 "Not decided offline"): `dfhack.units.isCitizen(u, true)`, `isDanger(u)` and `getRaceName(u)` of a
+  were-form unit.
+
 ## L1: the drink nook says why it is refused, judges a tile like quickfort, skips a tile quickfort refuses and widens for a critical mood (BUG-102, FR-82, 2026-10-23, offline, live-untested)
 - **Why:** Run 14 note 73: a strange-mood dwarf stood at thirst 64,976/75,000 with `no free floor within 3 tiles of the workshop`. By-hand
   reads showed free floor; quickfort then skipped the three nearest tiles as occupied and took tiles 4-5 further out. The kernel's

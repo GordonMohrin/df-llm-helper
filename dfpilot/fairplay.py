@@ -367,7 +367,10 @@ CARE_LIM: dict = {
     "mood_nook_r": (1, 12), "mood_nook_rmax": (0, 12), "mood_nook_step": (1, 6), "mood_nook_probes": (1, 200),
     "mood_nook_tries": (1, 12),
     "topple_every": _TICKS, "topple_win": _TICKS, "topple_r": (0, 50),
-    "stress_high": (1, 100), "stress_days": (1, 400), "stress_every": _TICKS}
+    "stress_high": (1, 100), "stress_days": (1, 400), "stress_every": _TICKS,
+    # BUG-115 / FR-83: curses and transformations (lua/dfllm/curse.lua)
+    "curse": "bool", "curse_every": _TICKS, "curse_keep": (1, 200), "curse_ids": (1, 8), "curse_moon_cycles": (1, 40),
+    "curse_moon_lead": (0, 30), "curse_trig_win": _TICKS, "s0_ids": (0, 6)}
 
 
 def care_errors(path: str | Path | None = None) -> list[str]:

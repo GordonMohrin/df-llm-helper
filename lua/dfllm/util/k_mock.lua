@@ -750,7 +750,14 @@ function M.new(opts)
   local function deliver(e, name, ev)
     local h = e.M.on and e.M.on[name]
     if not h then return end
-    if name == 'REPORT' and e.M.reports and not e.M.reports[ev.type] then return end
+    if name == 'REPORT' and e.M.reports and not e.M.reports[ev.type] then
+      -- BUG-115: kern also routes a report by M.report_text, whatever its announcement type
+      local low, hit = tostring(ev.text or ''):lower(), false
+      for _, m in ipairs(type(e.M.report_text) == 'table' and e.M.report_text or {}) do
+        if low:find(m, 1, true) then hit = true; break end
+      end
+      if not hit then return end
+    end
     call_in(e, 'on.' .. name, h, ev)
   end
 
@@ -859,7 +866,7 @@ function M.new(opts)
     end,
     inspect = function(args)
       local what = args.what
-      local by = ({tombs = 'care', water_sources = 'water'})[what]    -- module topics, as kern routes them
+      local by = ({tombs = 'care', water_sources = 'water', curse = 'care', unit = 'care'})[what]    -- module topics, as kern routes them
       if by then
         local okc, ok, msg, data = K.call(by, 'inspect', what, args.key)
         if not okc then return false, by .. ': ' .. tostring(ok) end

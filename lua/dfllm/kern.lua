@@ -140,7 +140,7 @@ local function build(o)
               last_state_ms = nil, last_hb_ms = nil, last_inbox_ms = nil, last_ev_flush_ms = 0,
               last_persist_ms = 0, inbox_pending = {}, inbox_retry = {}, inbox_stuck = {}, once = {},
               buckets = {}, p = {ms = 0, frames = 0, gap_max = 0, gaps3 = 0, unpaused_ms = 0, mods = {}, via = {}},
-              dropped = 0, report_any = false, report_types = {}, ev_listen = {}, kern_faults = 0,
+              dropped = 0, report_any = false, report_types = {}, report_text = {}, ev_listen = {}, kern_faults = 0,
               rot_warned = {}, io_warned = {}, cum = {}, cum_via = {}, cum_ms = 0, load = sched.load(-1, 0),
               pool = sched.pool(), frame_paced = 0, boosts = {}, top_ring = {}, carry = {}, gaps = {}, quiet_until = 0}
   st.now = {tick = abs_now(), ytick = df.global.cur_year_tick, year = df.global.cur_year,
@@ -596,6 +596,9 @@ local function load_all(st)
         for t in pairs(e.M.reports) do st.report_types[t] = true end
       else st.report_any = true end
     end
+    if on.REPORT and type(e.M.report_text) == 'table' then
+      for _, m in ipairs(e.M.report_text) do st.report_text[#st.report_text + 1] = tostring(m):lower() end
+    end
     for k in pairs(on) do
       local t = type(k) == 'string' and k:match('^EV:(.+)$')
       if t then st.ev_listen[t] = true end
@@ -682,7 +685,7 @@ end
 -- BUG-071: pop and stock are what status shows first: they go last (a >4 KB document used to lose stock before ready,
 -- bridges and threat). `stale` (the age of a carried value) goes after them: a carried value must never show as a live one.
 local SHRINK = {'proj', 'alert', 'mil', 'trade', 'care', 'ready', 'bridges', 'threat', 'labor', 'stock', 'pop', 'stale',
-                'phase'}
+                'phase', 'curse'}      -- BUG-115: a cursed fort's list goes last
 
 -- BUG-071 (Run 13: status showed only the clock line after a year change or a hang): the keys status needs first. When
 -- their module gives nothing (disabled, not yet run after a boot: economy publishes stock only after its first daily run)
@@ -890,7 +893,7 @@ end
 local INSPECT = {state = true, modules = true, census = true, manifest = true, projects = true, persist = true,
                  perf = true, mode = true, plan = true}
 -- inspect topics a module answers itself: M.inspect(K, what, key) -> ok, msg, data (FR-27 tombs, FR-47 water)
-local INSPECT_BY = {tombs = 'care', water_sources = 'water'}
+local INSPECT_BY = {tombs = 'care', water_sources = 'water', curse = 'care', unit = 'care'}   -- BUG-115, FR-83
 
 local function kern_verb(st, verb, args, cmd)
   local K = st.K
@@ -1093,10 +1096,18 @@ local function poll_inbox(st)
 end
 
 ---------------------------------------------------------------- the frame
+-- BUG-115: a module that names report texts (M.report_text) gets a report of ANY announcement type whose text holds one
+-- of them: the type of "has been cursed by" is not known offline. (care, curse texts)
+local function text_hit(markers, low)
+  for _, m in ipairs(markers) do if low:find(m, 1, true) then return true end end
+  return false
+end
+
 local function deliver(st, e, name, ev)
   local h = e.M.on and e.M.on[name]
   if not h then return end
-  if name == 'REPORT' and type(e.M.reports) == 'table' and not e.M.reports[ev.type] then return end
+  if name == 'REPORT' and type(e.M.reports) == 'table' and not e.M.reports[ev.type]
+     and not (ev.low and type(e.M.report_text) == 'table' and text_hit(e.M.report_text, ev.low)) then return end
   st.call_in(e, 'on.' .. name, h, ev)
 end
 
@@ -1104,11 +1115,17 @@ local function report_event(st, id)
   local rep = df.report.find(id)
   if not rep then return nil end
   local tname = df.announcement_type[rep.type]
-  if not tname or not (st.report_any or st.report_types[tname]) then return nil end
+  local wanted = tname and (st.report_any or st.report_types[tname])
+  local low
+  if not wanted and #st.report_text > 0 then
+    low = tostring(rep.text or ''):lower()
+    wanted = text_hit(st.report_text, low)
+  end
+  if not wanted then return nil end
   local p = rep.pos
   local has_pos = p and p.x and p.x >= 0
-  return {id = id, type = tname, text = clean(dfhack.df2utf(rep.text or ''), 200),
-          pos = has_pos and {x = p.x, y = p.y, z = p.z} or nil}
+  return {id = id, type = tname or '?', text = clean(dfhack.df2utf(rep.text or ''), 200),
+          pos = has_pos and {x = p.x, y = p.y, z = p.z} or nil, low = low}
 end
 
 local function run_step(st, e, cont)

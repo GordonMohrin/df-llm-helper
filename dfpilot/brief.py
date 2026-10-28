@@ -338,6 +338,77 @@ def pop_diag(ctx: Ctx) -> str:
     return out + ("; " + MIGRANT_RULES if ctx.full and (shrunk or quiet) else "")
 
 
+def curse_items(ctx: Ctx) -> list[tuple[int, str]]:
+    """BUG-115 (Run 14 y707: 23 dwarves became werecavies and nobody knew): 'CURSED 3 (ids 12,45,78), 1 in were-form, next full
+    moon ~d206 (in 4 d)'. Rank 2: it stays when the clock, the doors and the readiness detail are cut. The moon is an estimate
+    until a transformation wave was seen (state curse.mo calibrates from it)."""
+    c = ctx.s.get("curse")
+    if not isinstance(c, dict):
+        return []
+    ids = c.get("ids") or []
+    total = c["n"] + c["tf"]
+    txt = f"CURSED {total}" + (f" (ids {','.join(str(i) for i in ids)}" + (f" +{total - len(ids)}" if total > len(ids) else "") + ")"
+                               if ids else "")
+    txt += f", {c['tf']} in were-form" if c["tf"] else ""
+    if "mo" in c:
+        txt += f", next full moon ~d{c['mo']} (in {c.get('mi', '?')} d)"
+    if c.get("dead"):
+        txt += f", {c['dead']} died"
+    return [(2, txt)]
+
+
+def line_stress0(ctx: Ctx) -> str:
+    """FR-83 (note 93): 'stress level 0 (desperate): 4 units: 12 Urist, 40 Kel ...'; the names the unit sheets show."""
+    s0 = (ctx.s.get("care") or {}).get("s0")
+    if not isinstance(s0, dict) or not s0.get("n"):
+        return ""
+    ids, nm = s0.get("ids") or [], s0.get("nm") or []
+    who = ", ".join(f"{i} {n}" for i, n in zip(ids, nm))
+    return (f"stress level 0 (desperate): {s0['n']} units" + (f": {who}" if who else "")
+            + (f" +{s0['n'] - len(ids)}" if s0["n"] > len(ids) else "") + " (dfllm cmd inspect what=unit key=<id>)")
+
+
+# FR-84: the countermeasure of each stress source the kernel names (care.src keys), the top one is shown in the brief
+STRESS_FIX = {"ghosts": "a slab and a tomb for every dead (autoslab, tombs.repair)",
+              "deaths": "bury the dead at once (coffins, tombs), no body left lying",
+              "beds": "bedrooms (bp.place bedrooms)", "drink": "brew and keep drink in stock",
+              "food": "farms, kitchen, meals", "rooms": "a dining hall and rooms (plan propose)",
+              "toppled": "a temple and a tavern (plan propose); the culprits are named by BUILDING_TOPPLED"}
+TANTRUM_SHOWN = 3
+TARGET_WORDS = ("statue", "altar", "temple", "throne", "pedestal", "shrine")
+
+
+def tantrum_targets(ctx: Ctx) -> dict[str, int]:
+    """FR-84: buildings toppled in tantrums in the last year (BUILDING_TOPPLED, the `n` further ones counted), by name."""
+    out: dict[str, int] = {}
+    for e in ctx.b:
+        if e.get("type") == "BUILDING_TOPPLED":
+            d = _d(e)
+            w = str(d.get("what") or "?")
+            out[w] = out.get(w, 0) + 1 + (d.get("n") if isinstance(d.get("n"), int) else 0)
+    return out
+
+
+def line_stress(ctx: Ctx) -> str:
+    """FR-84 (note 84e): the top stress source with its countermeasure, and what the tantrums tore down (statues and temple
+    objects first: the Run 14 curse followed a toppled statue). Brief only; nothing when there is nothing to say."""
+    c = ctx.s.get("care") or {}
+    src = c.get("src") if isinstance(c.get("src"), dict) else {}
+    parts = []
+    if src and c.get("stressed_pct", 0) >= STRESS_SHOW:
+        k, v = sorted(src.items(), key=lambda kv: (-kv[1], kv[0]))[0]
+        parts.append(f"stress {c['stressed_pct']}%: top cause {SRC_LABEL.get(k, k)} {v} -> {STRESS_FIX.get(k, 'see plan propose')}")
+    tg = tantrum_targets(ctx)
+    if tg:
+        order = sorted(tg.items(), key=lambda kv: (not any(w in kv[0].lower() for w in TARGET_WORDS), -kv[1], kv[0]))
+        shown = ", ".join(f"{w} {n}" for w, n in order[:TANTRUM_SHOWN])
+        art = any(any(w in k.lower() for w in TARGET_WORDS) for k in tg)
+        parts.append(f"tantrums tore down {sum(tg.values())} buildings in a year ({shown}"
+                     + (f", +{len(tg) - TANTRUM_SHOWN} kinds" if len(tg) > TANTRUM_SHOWN else "") + ")"
+                     + ("; a toppled statue or temple object preceded the Run 14 curse: calm the stressed first" if art else ""))
+    return " | ".join(parts)
+
+
 def stale_note(s: dict, key: str) -> str:
     """BUG-071: ' (last known 2d ago)' when the kernel published `key` from its last known value (state stale: game ticks)."""
     age = (s.get("stale") or {}).get(key)
@@ -774,7 +845,11 @@ def status_text(save_dir: Path) -> str:
     if ctx.state is None:
         lines.append((1, _no_state(ctx)))
     else:
-        lines += [(2, line_unready(ctx))] + alarm_items(ctx) + pop_items(ctx) + supply_items(ctx)
+        lines += [(2, line_unready(ctx))] + curse_items(ctx) + alarm_items(ctx) + pop_items(ctx) + supply_items(ctx)
+        s0 = (ctx.s.get("care") or {}).get("s0")
+        if isinstance(s0, dict) and s0.get("n"):
+            lines.append((4, f"desperate (stress 0): {s0['n']}" + (f" ids {','.join(str(i) for i in s0.get('ids') or [])}"
+                                                                   if s0.get("ids") else "")))
         core, extra = def_parts(ctx)
         lines += [(3, _join(core)), (3, line_burrow(ctx)), (3, line_sched(ctx)), (4, line_proj(ctx)), (4, line_kern(ctx)),
                   (4, line_snap(ctx)),
@@ -825,6 +900,19 @@ def sec_decisions(ctx: Ctx) -> list[str]:
         if did in pend:
             out.append(f"OPEN {did}: {_d(e).get('q') or e.get('msg', '')}")
     return out
+
+
+def sec_curse(ctx: Ctx) -> list[str]:
+    """BUG-115 (note 84c): what to do while citizens are cursed. No verb isolates a unit: the burrow and the door are the
+    player's (UI); a kill order stays his decision (RULES 1: citizens)."""
+    c = ctx.s.get("curse")
+    if not isinstance(c, dict):
+        return []
+    return ["1 before the full moon (curse line above) put ALL the cursed (dfllm cmd inspect what=curse) in ONE room: a burrow "
+            "they are restricted to + a forbidden door; tell Gordon (no kernel verb does it)",
+            "2 a were-form unit is an enemy: keep the rest away; a kill order only after Gordon's yes (DECISION_NEEDED "
+            "curse_kill; squad.sortie approve:true is the logged decision)",
+            "3 watch the bitten: patients with bite wounds turn at the next moon (TRANSFORM bite=1 names them)"]
 
 
 def sec_class_a(ctx: Ctx, n: int = 8) -> list[str]:
@@ -894,10 +982,12 @@ def brief_text(save_dir: Path, budget: int = BRIEF_TOKENS) -> str:
         head.append(_no_state(ctx))
     else:
         core, extra = def_parts(ctx)                   # J3: the army's detail last: it goes first
-        head += [x for x in (line_unready(ctx), line_alarm(ctx), line_pop(ctx), line_supply(ctx), _join(core), line_burrow(ctx),
+        head += [x for x in (line_unready(ctx), _join(t for _, t in curse_items(ctx)), line_alarm(ctx), line_pop(ctx),
+                             line_supply(ctx), line_stress0(ctx), line_stress(ctx), _join(core), line_burrow(ctx),
                              line_sched(ctx), line_proj(ctx, 8), line_kern(ctx), line_snap(ctx), _join(extra)) if x]
     sections = [head]
     for title, lines in (("## plan", sec_plan(ctx)), ("## decisions open (ask Gordon)", sec_decisions(ctx)),
+                         ("## curse (recipe)", sec_curse(ctx)),
                          ("## class A, newest first", sec_class_a(ctx)),
                          ("## deaths (last season)", sec_deaths(ctx)), ("## failed commands", sec_failures(ctx)),
                          ("## digest B (last year)", sec_digest(ctx))):
