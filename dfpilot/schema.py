@@ -740,6 +740,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-068: lever `lever` of `bridge` was pulled `pulls` times without the bridge moving (it stays `state`); no pull
     # for `wait` ticks; worker = how many of those pulls a worker took (0: DF dropped every job unclaimed)
     "LEVER_NOEFFECT": ("B", "gate", _d("bridge:s lever:i", "pulls:i state:s wait:i worker:i")),
+    # BUG-121 (Run 14 note 101): boot found the game clock (tick_neu) before the last tick the runtime folder saw (tick_alt): an
+    # older save was loaded. n_alt = the last event number of the discarded timeline (numbers continue after it); readers drop
+    # events before this marker whose tick is later than tick_neu
+    "TIMELINE_RESET": ("B", "kern", _d("n_alt:i tick_alt:i tick_neu:i")),
     # BUG-042: the manager's office zone without its chair/table (he validates no work order): what economy placed
     # (`placed` 'chair at x,y,z, table at x,y,z', the repair project) or why it could not
     "MANAGER_OFFICE": ("B", "economy", _d("zone:i why:s", "chair:i table:i placed:s proj:s")),

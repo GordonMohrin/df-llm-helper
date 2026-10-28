@@ -1,5 +1,31 @@
 # CHANGELOG dfpilot
 
+## TIMELINE_RESET: a boot whose clock jumped back marks the discarded timeline; follow, events and brief drop it (BUG-121, 2026-10-28, note 101; offline, live-untested)
+- **Why:** Run 14 note 101: after the player loaded an older save, `events.jsonl` still held the events up to #29900 of the line he had left
+  (ticks far ahead of the loaded clock) and `alarm.txt` its lockdown; `follow` replayed BREACH, INTRUDER and DEATHS_3PLUS of the abandoned line while
+  `status` said PEACE.
+- **What changed:** (1) kern.lua: at boot, before `BOOT`, the clock is compared with the newest tick the runtime folder remembers (last event of
+  `events.jsonl`/`events.1.jsonl`, state slot with the highest seq); a smaller clock writes the class-B event `TIMELINE_RESET {n_alt, tick_alt,
+  tick_neu}` and deletes `alarm.txt`. A clock moving forward (timestream), a first boot and every boot after the reset write nothing. (2) reflex.lua
+  init: persisted interrupts and a lockdown hold stamped after the clock are not taken over. (3) files.py: `iter_events_rev`/`tail_events` skip
+  events before a marker whose tick is later than its `tick_neu` (every later marker cuts) and, with `max_tick`, events later than the current tick
+  (+ `TICK_SLACK`, one game day); `EventTail(tick_fn)` does the same for follow and wait, its cursor passes the dropped events; `events`, `brief`/`status`
+  (Ctx), `wait` and `guide` pass the state's tick; `alarm.read_alarm(max_tick)` ignores items stamped after the clock; follow forgets its auto jobs and
+  `plan_auto` on the marker; the brief digest lists the marker first.
+- **Safety:** class B, wakes nobody; reads only, plus one `os.remove` of the runtime's own `alarm.txt` at a reset boot (reflex rewrites it in its first
+  step from the loaded save's persist). No game call, no new verb. A reset needs a clock before the log, so a log without a clock reading (state and
+  heartbeat missing) drops nothing.
+- **Contracts / config:** schema `EVENTS` + `TIMELINE_RESET` (B, kern), contract.lua; CONTRACTS §12 row, §9.4 sentence and appendix; TRIAGE note 101; no
+  RULES row (class B), no config key.
+- **Tests (marker, filter and cap tests fail on f3f684b, the no-trigger tests pin the boundaries):** tests/lua/test_timeline_reset.lua (10), tests/test_bug121_timeline.py (20).
+- **Live check:** load an older save of an adopted fort and `dfllm boot`; `dfllm events --type TIMELINE_RESET` shows one marker with n_alt, tick_alt and
+  tick_neu (kern.log: `timeline reset`), `dfllm events --cls A` and `dfllm brief` list nothing of the abandoned line, a restarted `follow` (also with
+  `--since` inside the old line) stays silent about it, alarm.txt shows the loaded save's own DEFCON; a second `dfllm boot` and a timestream
+  restart write no second marker.
+- **Not decided offline:** whether `cur_year_tick` already shows the older clock when `dfllm boot` runs after the load; keeping the shared past
+  (events with a tick up to `tick_neu` before the marker stay) against dropping everything before the marker; `snap/`, `bp/` and pending `inbox/` files of the
+  old line are not touched.
+
 ## M7: a garbage dump zone, a trash view and the reason a dump job cancels; loading the newest complete save at the title screen; the title-screen status (FR-90, FR-91, BUG-120, 2026-10-28, package M7, notes 98 and 99; offline, live-untested)
 - **Why:** Run 14 note 98: garbage had no verb (`zone.place` knew no dump zone) and "Dump item cancelled 5 times today" (y701, y703, y707) gave no
   reason. Note 99: after a DF restart the fort stood at the main menu for more than ten minutes (`load-save` broken in DFHack 53.16-r3, the click

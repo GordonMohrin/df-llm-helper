@@ -481,7 +481,7 @@ class Follower:
                 files.log_cli(d, "follow", "resume", {}, f"ignored bad .follow.json: {type(e).__name__}: {e}")
             if since is None and isinstance(st.get("last_n"), int) and not isinstance(st.get("last_n"), bool):
                 since = st["last_n"]
-        self.tail = files.EventTail(d, since)
+        self.tail = files.EventTail(d, since, tick_fn=lambda: files.current_tick(d))    # BUG-121
         self.since = None
         self._pruned = 0.0
         files.prune_snaps(d)
@@ -564,9 +564,21 @@ class Follower:
         self.save_state()
         return printed
 
+    def _timeline_reset(self, e: dict) -> None:
+        """BUG-121: kern found the clock before the log (an older save was loaded). What follow had in flight (audits, tomb and
+        seal placements, command replies, the year its minimal plan was tried) belongs to the discarded line; the wake gate
+        is wall-clock bound and stays. The events before the marker never reach this point (EventTail drops them)."""
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        files.log_cli(self.dir, "follow", "timeline_reset", {"n": e.get("n")},
+                      f"older save loaded: tick {d.get('tick_alt')} -> {d.get('tick_neu')}; dropped jobs {sorted(self.jobs)}")
+        self.jobs, self.plan_auto, self._plan_read = {}, {}, 0.0
+
     def _on_event(self, e: dict, now: float) -> None:
         t, d = e.get("type"), e.get("d")
         d = d if isinstance(d, dict) else {}
+        if t == files.TIMELINE_RESET:
+            self._timeline_reset(e)
+            return
         if t in WAKE_TYPES and e.get("cls") == "A":
             self.gate.add(e, now)
         if not (self.auto or (self.audit and t == "SNAPSHOT_READY")):

@@ -177,6 +177,9 @@ C.EVENTS = {
   MILITIA_ROTATED = {cls = 'B', by = 'military'},
   -- BUG-068: a lever pulled gate.noeffect_max times in a row without the bridge moving is parked (once per lever)
   LEVER_NOEFFECT = {cls = 'B', by = 'gate'},
+  -- BUG-121 (Run 14 note 101): boot found the game clock before the last tick the runtime folder saw (an older save was
+  -- loaded): events before this marker with a later tick belong to the discarded timeline
+  TIMELINE_RESET = {cls = 'B', by = 'kern'},
   -- C: log only
   SIEGE_STATUS = {cls = 'C', by = 'siege'}, SEASON = {cls = 'C', by = 'kern'},
   PROJECT_STAGE = {cls = 'C', by = 'runner'}, MODE = {cls = 'C', by = 'kern'},

@@ -18,14 +18,14 @@ STRESS_SHOW = 20                          # show the stress sources from this sh
 MIGRANT_RULES = ("the game: waves 1-2 fixed, later ones follow the wealth the last departing dwarf caravan reported, "
                  "deaths + insane of the last 5 years (>= 10 dangerous), population_cap and max-pop; none is steered")
 # B digest order (most useful first); unlisted B types follow alphabetically
-DIGEST_ORDER = ["ALERT_START", "ALERT_END", "LOCKDOWN_END", "STOCK_LOW", "MATERIAL_SHORT", "MOOD_NEED",
+DIGEST_ORDER = ["TIMELINE_RESET", "ALERT_START", "ALERT_END", "LOCKDOWN_END", "STOCK_LOW", "MATERIAL_SHORT", "MOOD_NEED",
                 "MOOD_START", "MOOD_END", "CANCEL_LOOP", "BREACH_STOP", "PROJECT_REQUEST", "DEATH_CLUSTER", "DEATH",
                 "CAPTURE", "CARAVAN", "MIGRANTS", "PETITION", "READY_CHANGE", "POPCAP", "AUDIT", "DRILL_RESULT",
                 "PHASE", "PROJECT_DONE", "KERNEL_SLOW", "ACT_FAIL", "WEALTH", "PAUSE"]
 
 
 LIMITS = {"A": 50, "B": 500, "CMD": 50}   # newest events kept per section (all DECISION_NEEDED of the year)
-NO_D = {"DEATH", "DEATH_CLUSTER"}       # digest types whose msg already says everything (FR-64: cause, evidence)
+NO_D = {"DEATH", "DEATH_CLUSTER", "TIMELINE_RESET"}       # digest types whose msg already says everything (FR-64: cause, evidence)
 
 
 def _d(e: dict) -> dict:
@@ -57,7 +57,8 @@ class Ctx:
     def _scan(self, full: bool) -> None:
         now = self.now_tick()
         min_tick = now - YEAR if isinstance(now, int) else None
-        for e in files.iter_events_rev(self.dir, 0, min_tick):
+        max_tick = now + files.TICK_SLACK if isinstance(now, int) else None     # BUG-121: not the discarded timeline
+        for e in files.iter_events_rev(self.dir, 0, min_tick, max_tick):
             t, c = e.get("type"), e.get("cls")
             if t == "MODE" and self.mode_ev is None:
                 self.mode_ev = e

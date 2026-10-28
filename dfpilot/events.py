@@ -78,7 +78,8 @@ def fmt_event(e: dict, with_d: bool = True) -> str:
 def run(args, save_dir) -> int:
     cls = args.cls.upper() if args.cls else None
     types = {t.strip().upper() for t in args.type.split(",")} if args.type else None
-    evs = files.tail_events(save_dir, since_n=args.since or 0, limit=args.limit or None, cls=cls, types=types)
+    evs = files.tail_events(save_dir, since_n=args.since or 0, limit=args.limit or None, cls=cls, types=types,
+                            max_tick=files.tick_cap(save_dir))     # BUG-121: nothing of a discarded timeline
     for e in evs:
         print(files.dumps(e) if args.json else fmt_event(e))
     if not evs and not args.json:

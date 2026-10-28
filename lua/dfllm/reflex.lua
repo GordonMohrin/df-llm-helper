@@ -2357,8 +2357,10 @@ function M.init(K)
     end
     if type(p.prec) == 'table' then st.prec = p.prec end
     if type(p.ack) == 'table' then st.ack = {n = int(p.ack.n) or 0, wall = int(p.ack.wall) or 0} end
+    local now0 = K.now().tick
     for _, r in ipairs(type(p.irq) == 'table' and p.irq or {}) do
-      if type(r) == 'table' and int(r.n) and type(r.type) == 'string' then
+      -- BUG-121: an interrupt stamped after the clock belongs to a discarded timeline (an older save was loaded)
+      if type(r) == 'table' and int(r.n) and type(r.type) == 'string' and (int(r.tick) or 0) <= now0 then
         st.irq[#st.irq + 1] = {n = int(r.n), type = r.type, tick = int(r.tick) or 0, wall = int(r.wall) or 0,
                                ms = int(r.ms) or K.now().ms, msg = tostring(r.msg or ''),
                                done = (int(r.done) == 1 or int(r.done) == 2) and int(r.done) or 0, u = int(r.u)}
@@ -2370,6 +2372,11 @@ function M.init(K)
       for e, v in pairs(dp.ents) do if v == 1 then st.depot.ents[tostring(e)] = 1 end end
     end
     local h = p.hold
+    if type(h) == 'table' and type(h.why) == 'string' and (int(h.since) or 0) > now0 then
+      K.log('warn', 'reflex: lockdown hold since tick %d is later than the clock (%d): a discarded timeline, not taken over',
+            int(h.since), now0)
+      h = nil
+    end
     if type(h) == 'table' and type(h.why) == 'string' then
       st.hold = {why = h.why, kinds = {}, acts = {}, since = int(h.since) or 0, last = int(h.last) or 0, qs = nil,
                  alert_on = h.alert_on == true, alert_at = int(h.alert_at), doors_at = int(h.doors_at),

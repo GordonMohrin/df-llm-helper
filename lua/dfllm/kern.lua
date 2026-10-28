@@ -1421,6 +1421,27 @@ local function disk_ev(p)
   return best
 end
 
+-- BUG-121: the newest game tick the runtime folder remembers: the last event (events.jsonl, else its rotation) and the
+-- newest state slot (the highest seq: the other slot may still hold an older line). The persisted site data belongs to
+-- the loaded save and says nothing about a discarded timeline. nil when the folder holds neither.
+local function disk_tick(p)
+  local best
+  for _, f in ipairs({p.save .. '/events.jsonl', fio.rotated(p.save .. '/events.jsonl')}) do
+    local line = fio.last_line(f)
+    local d = line and json.try_decode(line)
+    if type(d) == 'table' and math.type(d.tick) == 'integer' then best = d.tick; break end
+  end
+  local seq, tick = -1, nil
+  for _, s in ipairs({'a', 'b'}) do
+    local d = fio.read_json(p.save .. '/state.' .. s .. '.json')
+    if type(d) == 'table' and math.type(d.seq) == 'integer' and d.seq > seq and type(d.t) == 'table' then
+      seq, tick = d.seq, math.tointeger(d.t.abs)
+    end
+  end
+  if tick and (not best or tick > best) then best = tick end
+  return best
+end
+
 local function heal(st, marked)
   local A = load_module(st.opts, 'arbiter')
   if type(A) ~= 'table' or type(A.heal) ~= 'function' then return end
@@ -1512,6 +1533,21 @@ function M.boot(opts)
   end
   st.seq = math.max(math.tointeger(kp.seq) or 0, disk_seq(paths))
   st.ev_n = math.max(math.tointeger(kp.ev) or 0, disk_ev(paths))
+  -- BUG-121 (Run 14 note 101): the clock stands before what the runtime folder last saw = an older save was loaded.
+  -- The marker comes before every other event of this boot; follow, events and brief drop what lies before it, and the
+  -- alarm.txt of the discarded line goes (reflex writes the loaded save's own in its first step).
+  local tick_alt = disk_tick(paths)
+  if tick_alt and st.now.tick < tick_alt then
+    local d = {n_alt = st.ev_n, tick_alt = tick_alt, tick_neu = st.now.tick}
+    st.current = 'kern'
+    st.emit_as('kern', 'TIMELINE_RESET', 'B', string.format(
+      'game clock jumped back (older save loaded): tick %d -> %d; events up to #%d belong to the discarded timeline',
+      tick_alt, st.now.tick, st.ev_n), d)
+    st.current = nil
+    fio.remove(paths.save .. '/alarm.txt')
+    st.log_as('kern', 'warn', string.format('timeline reset: tick %d -> %d, event numbers continue after #%d',
+                                            tick_alt, st.now.tick, st.ev_n))
+  end
   local pm = K.persist.get('mode')
   if type(pm) == 'table' and C.TRANSITIONS[pm.mode] then
     st.mode, st.mode_since = pm.mode, math.tointeger(pm.since) or st.now.tick

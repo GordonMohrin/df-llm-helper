@@ -245,10 +245,49 @@ def _parse_event(line: bytes) -> dict | None:
     return None
 
 
-def iter_events_rev(save_dir: Path, since_n: int = 0, min_tick: int | None = None) -> Iterator[dict]:
+TIMELINE_RESET = "TIMELINE_RESET"      # BUG-121: kern's marker at a boot whose game clock stands before the log's last tick
+TICK_SLACK = schema.TICKS["DAY"]       # a state or heartbeat may lag the newest event by a few seconds of timestream
+
+
+def mark_tick(e: dict) -> int | None:
+    """tick_neu of a TIMELINE_RESET event (d.tick_neu, else the event's own tick); None for any other event."""
+    if e.get("type") != TIMELINE_RESET:
+        return None
+    d = e.get("d") if isinstance(e.get("d"), dict) else {}
+    t = d.get("tick_neu", e.get("tick"))
+    return t if isinstance(t, int) and not isinstance(t, bool) else None
+
+
+def current_tick(save_dir: Path) -> int | None:
+    """The game tick the kernel last published (state, else heartbeat), None when it never did."""
+    state = read_state(Path(save_dir))
+    t = (state or {}).get("t") if isinstance(state, dict) else None
+    if isinstance(t, dict):
+        a = t.get("abs")
+        if isinstance(a, int) and not isinstance(a, bool):
+            return a
+        if isinstance(t.get("y"), int) and isinstance(t.get("tick"), int):
+            return t["y"] * schema.TICKS["YEAR"] + t["tick"]
+    hb, _age = read_heartbeat(Path(save_dir))
+    tick = (hb or {}).get("tick") if isinstance(hb, dict) else None
+    return tick if isinstance(tick, int) and not isinstance(tick, bool) else None
+
+
+def tick_cap(save_dir: Path) -> int | None:
+    """BUG-121: events with a later tick than this belong to a timeline the loaded save left (the current tick plus a slack
+    for a state that lags); None when the clock is unknown."""
+    now = current_tick(save_dir)
+    return None if now is None else now + TICK_SLACK
+
+
+def iter_events_rev(save_dir: Path, since_n: int = 0, min_tick: int | None = None,
+                    max_tick: int | None = None) -> Iterator[dict]:
     """Events newest first from events.jsonl, then the rotated events.1.jsonl (deduplicated by n).
-    Stops at the first event with n <= since_n or tick < min_tick (older than the window)."""
+    Stops at the first event with n <= since_n or tick < min_tick (older than the window).
+    BUG-121: events of a discarded timeline are skipped: an event before a TIMELINE_RESET marker (smaller n) whose tick is
+    later than the marker's tick_neu (every later marker cuts too), and, with max_tick, any event with a later tick."""
     save_dir, seen = Path(save_dir), set()
+    cut = max_tick
     for name in ("events.jsonl", "events.1.jsonl"):
         for ln in _rev_lines(save_dir / name):
             e = _parse_event(ln)
@@ -258,15 +297,21 @@ def iter_events_rev(save_dir: Path, since_n: int = 0, min_tick: int | None = Non
             if e["n"] <= since_n or (min_tick is not None and isinstance(tick, int) and tick < min_tick):
                 return
             seen.add(e["n"])
-            yield e
+            gone = cut is not None and isinstance(tick, int) and tick > cut    # a later marker may drop a marker too
+            mt = mark_tick(e)
+            if mt is not None:
+                cut = mt if cut is None else min(cut, mt)
+            if not gone:
+                yield e
 
 
 def tail_events(save_dir: Path, since_n: int = 0, limit: int | None = None, cls: str | None = None,
-                types: set[str] | None = None, min_tick: int | None = None) -> list[dict]:
+                types: set[str] | None = None, min_tick: int | None = None, max_tick: int | None = None) -> list[dict]:
     """Events with n > since_n (and tick >= min_tick), ascending, from events.jsonl and events.1.jsonl.
-    limit keeps the newest `limit` matches (0/None = all); cls ('A', 'AB', ...) and types filter."""
+    limit keeps the newest `limit` matches (0/None = all); cls ('A', 'AB', ...) and types filter. BUG-121: events of a
+    discarded timeline are left out (iter_events_rev); max_tick also drops events later than the current clock."""
     out = []
-    for e in iter_events_rev(save_dir, since_n, min_tick):
+    for e in iter_events_rev(save_dir, since_n, min_tick, max_tick):
         if (cls and e.get("cls") not in cls) or (types and e.get("type") not in types):
             continue
         out.append(e)
@@ -289,12 +334,17 @@ class EventTail:
     """Incremental tail of events.jsonl for `follow`: byte offset + n filter, survives rotation
     (kern renames the current file to events.1.jsonl and starts a new one)."""
 
-    def __init__(self, save_dir: Path, since_n: int | None = None):
+    def __init__(self, save_dir: Path, since_n: int | None = None, tick_fn: Callable[[], int | None] | None = None):
         self.dir = Path(save_dir)
         self.path = self.dir / "events.jsonl"
         self.last_n = last_event_n(self.dir) if since_n is None else since_n
         self.pos, self.ident = 0, None
         self.bad_lines = 0
+        # BUG-121: tick_fn = the current game tick (events beyond it + TICK_SLACK are of a discarded timeline);
+        # marks = {n: tick_neu} of the TIMELINE_RESET markers: with no replay (since_n None) every event this tail
+        # returns is newer than all of them, so only a replay reads the old ones
+        self.tick_fn = tick_fn
+        self.marks: dict[int, int] = self._scan_marks() if since_n is not None else {}
         if since_n is None:                 # start at the end: no replay of history
             st = self._stat()
             if st:
@@ -303,6 +353,31 @@ class EventTail:
             self._backlog = True
 
     _backlog = False
+
+    def _scan_marks(self) -> dict[int, int]:
+        marks: dict[int, int] = {}
+        for name in ("events.1.jsonl", "events.jsonl"):
+            try:
+                data = (self.dir / name).read_bytes()
+            except OSError:
+                continue
+            if TIMELINE_RESET.encode() not in data:
+                continue
+            for ln in data.splitlines():
+                if TIMELINE_RESET.encode() in ln:
+                    e = _parse_event(ln)
+                    mt = mark_tick(e) if e else None
+                    if mt is not None:
+                        marks[e["n"]] = mt
+        return marks
+
+    def _discarded(self, e: dict, cap: int | None) -> bool:
+        tick = e.get("tick")
+        if not isinstance(tick, int):
+            return False
+        if cap is not None and tick > cap:
+            return True
+        return any(mn > e["n"] and tick > mt for mn, mt in self.marks.items())
 
     def _stat(self):
         try:
@@ -363,14 +438,21 @@ class EventTail:
         return self._finish(out + new)
 
     def _finish(self, evs: list[dict]) -> list[dict]:
-        res, seen = [], set()
+        cands, seen = [], set()
         for e in sorted(evs, key=lambda e: e["n"]):
             if e["n"] > self.last_n and e["n"] not in seen:
                 seen.add(e["n"])
-                res.append(e)
-        if res:
-            self.last_n = res[-1]["n"]
-        return res
+                cands.append(e)
+        if not cands:
+            return []
+        for e in cands:                     # BUG-121: a marker in this batch cuts the events before it
+            mt = mark_tick(e)
+            if mt is not None:
+                self.marks[e["n"]] = mt
+        now = self.tick_fn() if self.tick_fn else None
+        cap = now + TICK_SLACK if isinstance(now, int) else None
+        self.last_n = cands[-1]["n"]        # the cursor passes the discarded ones too
+        return [e for e in cands if not self._discarded(e, cap)]
 
 
 # ---------------------------------------------------------------- inbox / outbox

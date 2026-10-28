@@ -80,7 +80,7 @@ def gather(save_dir: Path) -> dict:
     ctx = brief.Ctx(Path(save_dir))
     s = ctx.s
     f = {"state": ctx.state, "plan": ctx.plan, "hb_age": ctx.hb_age, "active": ctx.active, "a": ctx.a, "b": ctx.b,
-         "now": ctx.now_tick(), "alarm": alarm.read_alarm(Path(save_dir)), "draft": None, "hosp_proj": False,
+         "now": ctx.now_tick(), "alarm": alarm.read_alarm(Path(save_dir), files.tick_cap(Path(save_dir))), "draft": None, "hosp_proj": False,
          "seal_proj": bool((s.get("sched") or {}).get("seal"))}
     draft = Path(save_dir) / "plan.draft.json"
     doc = files.read_json(draft, retry=False) if draft.exists() else None

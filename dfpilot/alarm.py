@@ -25,8 +25,10 @@ _HEAD = re.compile(r"^DEFCON (\d)\b")
 _ACK = re.compile(r"\| ack (\d+)\b")
 
 
-def read_alarm(save_dir: Path) -> dict | None:
-    """{defcon, head, ack, items: [{n, wall, tick, type, status, msg}]} from <save>/alarm.txt; None if missing or torn."""
+def read_alarm(save_dir: Path, max_tick: int | None = None) -> dict | None:
+    """{defcon, head, ack, items: [{n, wall, tick, type, status, msg}]} from <save>/alarm.txt; None if missing or torn.
+    BUG-121: with max_tick, items stamped after it belong to a discarded timeline (an older save was loaded): they are left
+    out and counted in `ignored`."""
     try:
         text = (Path(save_dir) / ALARM).read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -45,7 +47,12 @@ def read_alarm(save_dir: Path) -> dict | None:
                               "status": parts[4], "msg": parts[5]})
             except ValueError:
                 continue
-    return {"defcon": int(m.group(1)), "head": lines[0], "ack": int(a.group(1)) if a else 0, "items": items}
+    doc = {"defcon": int(m.group(1)), "head": lines[0], "ack": int(a.group(1)) if a else 0, "items": items}
+    if max_tick is not None:
+        keep = [it for it in items if it["tick"] <= max_tick]
+        if len(keep) != len(items):
+            doc["items"], doc["ignored"] = keep, len(items) - len(keep)
+    return doc
 
 
 def fmt_item(it: dict) -> str:
@@ -58,12 +65,13 @@ def wait_interrupt(save_dir: Path, since: int | None = None, timeout: float = WA
     """Interrupts with n > since (default: the kernel's acked n, else the newest event now) as soon as there are any,
     or [] after `timeout` seconds. Returns (items, alarm)."""
     save_dir = Path(save_dir)
-    alarm = read_alarm(save_dir)
+    cap = files.tick_cap(save_dir)                         # BUG-121: nothing stamped after the clock
+    alarm = read_alarm(save_dir, cap)
     base = since if since is not None else (alarm["ack"] if alarm else files.last_event_n(save_dir))
-    tail = files.EventTail(save_dir, None)                 # events from now on (the fallback channel)
+    tail = files.EventTail(save_dir, None, tick_fn=lambda: files.current_tick(save_dir))   # events from now on (the fallback channel)
     t0 = clock()
     while True:
-        alarm = read_alarm(save_dir)
+        alarm = read_alarm(save_dir, files.tick_cap(save_dir))
         new = [it for it in (alarm["items"] if alarm else []) if it["n"] > base]
         seen = {it["n"] for it in new}
         for e in tail.poll():
