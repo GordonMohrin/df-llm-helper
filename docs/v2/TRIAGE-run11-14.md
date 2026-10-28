@@ -1,5 +1,7 @@
 # Triage of the Run 11-14 backlog (bulk handover, 2026-10-23)
 
+> Handover (2026-10-28): the open to-dos and live checks are in `docs/v2/HANDOVER.md`.
+
 Source: `bugs/RUN11-offene-bugs-und-FR.md` (65 notes of the game session, runs 11-14) and
 `docs/v2/POSTMORTEM-run13-wheelsblows-y525.md`. Decisions: `docs/v2/DECISIONS.md` section "Decided by the development
 session (2026-10-23)". Numbers below are reserved for the packages; an unused number stays unused.
