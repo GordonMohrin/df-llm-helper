@@ -59,6 +59,37 @@
   state right after the key) and whether DF ignores the key while a popup is open (the popups are dismissed first, as the arbiter does for the kinds
   it knows); the exact interface-key name in DFHack 53.16-r3 (the note names `D_PAUSE`).
 
+## A refuge stair that is not on the map is a warning, not a blocker; the hatch moves to a revealed tile; life builds never wait for the seal (BUG-123, BUG-124, BUG-125, 2026-10-28, note 102; offline, live-untested)
+- **Why:** Run 14 y710 (pop 12): `plan check` demanded `{"tpl":"seal","site":"S1","p":{"at":"refuge"}}` as the first build because the
+  manifest named a civilians' stair entering Tiefe+ at 77,68,125. The player looked: undug, unrevealed rock, no stair. The seal then failed
+  ("the tile is not revealed"), so every build including the hospital was blocked and only an empty plan could be applied. The kernel
+  asked for the same hatch for ever (`no hatch at ...`, R0 `refuge_trust`).
+- **What changed:** (1) BUG-123 (`cmd.refuge_stair`, `plan.refuge_projects`/`refuge_gate`, `seal.refuge_stair`/`refuge_trust`): the
+  stair head is read on revealed tiles only (newest snapshot; in the kernel `rev`/`shape`). A manifest stair that is no stair on the map
+  (head revealed and no stair, or nothing of the column revealed as a stair) is state `nostair`: `plan check` warns `refuge: no stair found
+  (not dug) at the manifest's stair head x,y,z; the stale manifest entry is kept, no hatch is demanded`, `seal at=refuge` for it is a
+  `SealClosed` (checked with a note, left out on apply), the kernel asks for no hatch and flags it (`inspect what=refuge`
+  `trust.hatch.state = nostair`). The manifest entry is not deleted. (2) BUG-124: a real stair whose head tile is not revealed moves the
+  hatch to the nearest revealed tile of the same stair above the refuge level (state `moved`; plan check demands the seal there, the
+  kernel wants the hatch there, `trust.hatch.man` keeps the manifest tile); with none, but a revealed stair tile at the refuge level
+  (state `hidden`), plan check warns and the kernel raises one `DECISION_NEEDED refuge_hatch` (`util/cadence`, a game month and 30
+  min, again for a changed tile only) asking the player to look at the tile in the game; `refuge_trust` says `hatch tile x,y,z not
+  revealed` (no R0 blocker). `bp.sites._seal` names the tile, the snapshot and the way out. (3) BUG-125: `plan.LIFE_TPLS` (hospital,
+  tombs, farms, stockroom, cistern, refuge_drink) are no "other new builds" of `refuge_gate`: they never wait for the seal; a real
+  exposed refuge (open stair, revealed head tile, no hatch) is still demanded first for every other build.
+- **Safety:** nothing is revealed or read on a hidden tile (RULES 1.1); the manifest is never edited; a stair that is real but
+  unreadable stays untrusted (not R0), the player is asked once.
+- **Contracts / config:** none (`fort.refuge` gets `head_state`, `head_man`, `head_note`; `DECISION_NEEDED` id `refuge_hatch`); RULES section 8
+  rows edited in place (300 lines).
+- **Tests (each fails on f3f684b):** tests/test_refuge_stair_102.py (8), tests/lua/test_seal_refuge.lua (4 new); tests/test_cli_plan.py
+  follows the new `fort.refuge` keys.
+- **Live check:** in a fort whose manifest stair was never dug: `dfllm plan check` shows the warning and no refuge ERROR, a hospital in
+  the plan passes; `dfllm cmd inspect '{"what":"refuge"}'` -> `trust.hatch.state` is `nostair`, no `refuge_trust` in `status`. With a real
+  stair whose head is hidden: `trust.hatch` `moved` (and `man`) or `hidden` and one `DECISION_NEEDED refuge_hatch` in `dfllm events`;
+  after looking at the tile `bp sites seal --fresh` and `plan check` demand the seal there.
+- **Not decided offline:** whether the live map really leaves such a stair head unrevealed while a tile above or below it is revealed
+  (the `hidden`/`moved` cases are built from the note's wording); whether a hatch on a higher tile of the stair separates the refuge in the
+  audit (the kernel's own separation check decides: `refuge_trust` stays red if not).
 
 ## M7: a garbage dump zone, a trash view and the reason a dump job cancels; loading the newest complete save at the title screen; the title-screen status (FR-90, FR-91, BUG-120, 2026-10-28, package M7, notes 98 and 99; offline, live-untested)
 - **Why:** Run 14 note 98: garbage had no verb (`zone.place` knew no dump zone) and "Dump item cancelled 5 times today" (y701, y703, y707) gave no

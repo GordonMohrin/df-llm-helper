@@ -743,4 +743,99 @@ T.test('BUG-049: an opening that reaches the refuge (no door on the way) is untr
   T.ok(tr2 == nil or tr2.ok == false, T.show(tr2))
 end)
 
+---------------------------------------------------------------- BUG-123/124 (Run 14 note 102, y710)
+-- The manifest named a civilians' stair whose head 77,68,125 was undug, unrevealed rock; the kernel (like the plan check)
+-- wanted a hatch there for ever ("no hatch at ...": R0 refuge_trust). The stair is read on revealed tiles only: no stair
+-- (never dug) is flagged and asks for nothing; a real stair with an unrevealed head moves the hatch to the nearest
+-- revealed tile of it; with none the player is asked once (DECISION_NEEDED refuge_hatch, util/cadence).
+-- A stair column apart from the fort (x30 y20, z5-9: < X X X >) stands for "the manifest's stair"
+local function stair_column(W, x, y, hide)
+  SW.fill(W, Z - 4, x, y, x, y, '<')
+  for z = Z - 3, Z - 1 do SW.fill(W, z, x, y, x, y, 'X') end
+  SW.fill(W, Z, x, y, x, y, '>')
+  for _, z in ipairs(hide or {}) do W.tiles[SW.key(x, y, z)].des.hidden = true end
+  SW.regroup(W)
+end
+
+local function with_manifest(W, x, y)
+  W.K.persist.set('manifest', {v = 2, burrows = {['Kern+'] = {role = 'kern'}, ['Tiefe+'] = {role = 'refuge'}},
+                               refuge = {anchor = {5, 5, Z - 4}, burrow = 'Tiefe+'}, stairs = {civ = {{x, y, Z - 4, Z}}}})
+  inspect(W, 'refuge', 'refresh')
+  W.run(1200, {skip = 9})
+end
+
+T.test('BUG-123: a manifest stair that is no stair on the map (head tile unrevealed rock, or revealed rock) is "nostair": ' ..
+       'trusted without a hatch, the entry flagged in trust.hatch (old: "no hatch at 6,6,6" for ever, R0 refuge_trust)',
+       function()
+  for _, hidden in ipairs({true, false}) do
+    local W = fort{door = true}
+    if hidden then                                      -- undug AND unrevealed: the whole column is hidden rock
+      for z = Z - 4, Z do W.tiles[SW.key(30, 20, z)].des.hidden = true end
+    end
+    with_manifest(W, 30, 20)
+    local ok, tr = W.K.call('seal', 'refuge_trust')
+    T.ok(ok and tr.ok, T.show(tr))
+    T.eq(tr.hatch, {pos = {30, 20, Z - 3}, state = 'nostair'})
+    local _, rs = W.K.call('seal', 'refuge_stair')
+    T.eq({rs.state, rs.pos, rs.man}, {'nostair', nil, {30, 20, Z - 3}})
+    T.eq({W.state().alert.ref.tr, W.state().alert.ref.trw}, {1, nil})
+    T.eq(#evs(W, 'DECISION_NEEDED'), 0, 'no stair, nobody is asked')
+    T.eq(inspect(W, 'refuge').trust.hatch.state, 'nostair')
+  end
+end)
+
+T.test('BUG-124: a real stair whose head tile is not revealed: the hatch goes to the nearest revealed tile of the same ' ..
+       'stair (refuge_stair moved, refuge_trust wants it there), trusted once it stands', function()
+  local W = fort{door = true}
+  stair_column(W, 30, 20, {Z - 3})                      -- head 30,20,6 hidden; 30,20,7 is the nearest revealed stair
+  with_manifest(W, 30, 20)
+  local _, rs = W.K.call('seal', 'refuge_stair')
+  T.eq({rs.state, rs.pos, rs.man}, {'moved', {30, 20, Z - 2}, {30, 20, Z - 3}})
+  local ok, tr = W.K.call('seal', 'refuge_trust')
+  T.ok(ok and not tr.ok, T.show(tr))
+  T.eq(tr.why, {'no hatch at 30,20,7'})
+  T.eq(tr.hatch, {pos = {30, 20, Z - 2}, state = 'missing', man = {30, 20, Z - 3}})
+  T.eq(#evs(W, 'DECISION_NEEDED'), 0)
+  local hatch = SW.building(W, 'DOOR', 'Hatch', 30, 20, Z - 2)
+  W.dyn[SW.key(30, 20, Z - 2)] = hatch
+  W.tiles[SW.key(30, 20, Z - 2)].occ.building = df.tile_building_occ.Dynamic
+  _, tr = W.K.call('seal', 'refuge_trust')
+  T.ok(tr.ok and tr.hatch.state == 'ok', T.show(tr))
+end)
+
+T.test('BUG-124: a real stair with no revealed tile above its refuge level: not trusted ("hatch tile 30,20,6 not ' ..
+       'revealed"), the player is asked once (DECISION_NEEDED refuge_hatch, cadence), no R0 blocker', function()
+  local W = fort{door = true}
+  stair_column(W, 30, 20, {Z - 3, Z - 2, Z - 1, Z})     -- only the refuge level 30,20,5 is revealed
+  with_manifest(W, 30, 20)
+  local _, rs = W.K.call('seal', 'refuge_stair')
+  T.eq({rs.state, rs.pos, rs.real}, {'hidden', nil, {30, 20, Z - 4}})
+  local _, tr = W.K.call('seal', 'refuge_trust')
+  T.eq({tr.ok, tr.why, tr.hatch}, {false, {'hatch tile 30,20,6 not revealed'}, {pos = {30, 20, Z - 3}, state = 'hidden'}})
+  T.eq(W.state().alert.ref.trw, 'hatch tile 30,20,6 not revealed')
+  local d = evs(W, 'DECISION_NEEDED')
+  T.eq(#d, 1, T.show(d))
+  T.eq(d[1].d.id, 'refuge_hatch')
+  T.ok(d[1].msg:find('30,20,6 is not revealed: look at it in the game', 1, true) and #d[1].msg <= 200, d[1].msg)
+  W.run(3 * 1200, {skip = 9})                           -- unchanged, within the cadence: not again
+  T.eq(#evs(W, 'DECISION_NEEDED'), 1, 'cadence: once')
+  -- the player looks at the tile: it is revealed, the question ends and the hatch is wanted there
+  W.tiles[SW.key(30, 20, Z - 3)].des.hidden = false
+  W.run(1200, {skip = 9})
+  _, rs = W.K.call('seal', 'refuge_stair')
+  T.eq({rs.state, rs.pos}, {'ok', {30, 20, Z - 3}})
+  _, tr = W.K.call('seal', 'refuge_trust')
+  T.eq(tr.why, {'no hatch at 30,20,6'})
+end)
+
+T.test('BUG-123: the real fort stair keeps working: head revealed -> state ok, hatch missing is still the reason ' ..
+       '(a real exposed refuge stays untrusted)', function()
+  local W = fort{door = true}
+  with_manifest(W, 6, 6)
+  local _, rs = W.K.call('seal', 'refuge_stair')
+  T.eq({rs.state, rs.pos}, {'ok', {6, 6, Z - 3}})
+  local _, tr = W.K.call('seal', 'refuge_trust')
+  T.eq(tr.why, {'no hatch at 6,6,6'})
+end)
+
 T.done()

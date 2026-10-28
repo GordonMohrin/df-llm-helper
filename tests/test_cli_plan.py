@@ -680,6 +680,7 @@ def test_refuge_projects_under_way(save, base):
     f = plan.fort_facts(save, state)["refuge"]
     assert f == {"stage3": False, "beds": 0, "seal": False, "fortcore": True, "ents": 0,   # fixture: fortcore at s2
                  "seal_n": 0, "refuge_n": 0, "open": [], "burrow": "", "head": None, "head_open": False,
+                 "head_state": None, "head_man": None, "head_note": "",             # BUG-123/124
                  "bed_site": None, "drink": 0, "drink_room": False, "drink_fit": None, "drink_why": None}   # FR-69
     assert plan.fort_facts(save, {**state, "proj": []})["refuge"]["fortcore"] is False
     cmd.write_bp(save, stub("c1", "fortcore", {"stage": 3, "depth": 3, "refuge": 3, "beds": 8, "retrofit": 0}))
@@ -849,7 +850,7 @@ def test_refuge_gate_from_the_forts_start(base):
     assert "the refuge comes first (Run 11): raising phase_target P1 -> P2 waits for it" in e
     # P3+: the pieces may not come after the plan's other new builds either
     late = copy.deepcopy(prev)
-    late["seasons"][1]["build"].append({"tpl": "tombs", "site": "S1"})
+    late["seasons"][1]["build"].append({"tpl": "temple", "site": "S1"})        # BUG-125: tombs/hospital/food never count
     late["seasons"][2]["build"].append({"tpl": "refuge_beds", "site": "S1", "p": {"n": 10}})
     (e,), _ = _ref(errs_of(late, with_refuge(state, beds=4, need=14), prev=prev))
     assert e.endswith("(planned in seasons[2]: move it to seasons[1], before the other new builds)")

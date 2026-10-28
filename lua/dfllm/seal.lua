@@ -3168,18 +3168,66 @@ local function hostile_txt(n, at)
 end
 
 -- BUG-049 (Run 13 y525): the tile above the refuge level on the civilians' stair down to it, from the fort manifest
--- (refuge anchor, stairs.civ {x, y, z0, z1}), as dfpilot.cmd.refuge_head reads it; a hatch there separates the refuge on
+-- (refuge anchor, stairs.civ {x, y, z0, z1}), as dfpilot.cmd.refuge_stair reads it; a hatch there separates the refuge on
 -- its own. nil without a manifest refuge or such a stair
-local function refuge_head(K)
+local function refuge_column(K)
   local man = K.manifest()
   local a = type(man.refuge) == 'table' and man.refuge.anchor
   if type(a) ~= 'table' or not int(a[3]) then return nil end
   for _, c in ipairs(type(man.stairs) == 'table' and type(man.stairs.civ) == 'table' and man.stairs.civ or {}) do
     if type(c) == 'table' and #c == 4 and int(c[1]) and int(c[2]) and int(c[3]) and int(c[4]) then
       local lo, hi = math.min(c[3], c[4]), math.max(c[3], c[4])
-      if lo == a[3] and hi > a[3] then return {c[1], c[2], a[3] + 1} end
+      if lo == a[3] and hi > a[3] then return {c[1], c[2], a[3], hi} end
     end
   end
+end
+
+-- BUG-123/124 (Run 14 note 102, y710: "no hatch at 77,68,125" for a stair that was never dug there, undug unrevealed rock):
+-- the refuge's stair head as the revealed map shows it. A revealed tile only (rev: a hidden tile is never read, fair play).
+-- {state, pos = {x, y, z} of the tile a hatch goes on, man = {x, y, z} the manifest's head, real = {x, y, z} a revealed
+-- stair tile of the column}|nil:
+--   ok       the head is a revealed stair (or a closer stands on it): pos = man
+--   moved    the head tile is not revealed, a tile of the same stair above it is: pos = the nearest one
+--   hidden   the head tile is not revealed and no tile above it is, but the refuge level of the stair is a stair: the stair
+--            is real and its hatch has no tile (the player is asked once, hatch_ask)
+--   nostair  the head tile is revealed and no stair (or nothing of the column is revealed as a stair): never dug. The
+--            stale manifest entry stays; nothing demands a hatch for it
+function M.refuge_stair(K)
+  local col = refuge_column(K)
+  if not col then return nil end
+  local x, y, zr, top = col[1], col[2], col[3], col[4]
+  local man = {x, y, zr + 1}
+  local function stair_at(z)               -- true a revealed stair or closer, false revealed and none, nil not revealed
+    local des = rev(x, y, z)
+    if not des then return nil end
+    local sh = shape(x, y, z)
+    spend(2)
+    return (sh ~= nil and STAIR_KIND[sh.shape] ~= nil) or sep_closer(key3(x, y, z))
+  end
+  local h = stair_at(zr + 1)
+  if h then return {state = 'ok', pos = man, man = man} end
+  if h == false then return {state = 'nostair', man = man} end
+  for z = zr + 2, top do
+    if stair_at(z) then return {state = 'moved', pos = {x, y, z}, man = man} end
+  end
+  if stair_at(zr) then return {state = 'hidden', man = man, real = {x, y, zr}} end
+  return {state = 'nostair', man = man}
+end
+
+-- BUG-124: a real stair whose hatch tile is not revealed and no other tile of it is: DECISION_NEEDED refuge_hatch once
+-- (util/cadence: a game month and 30 min; again only for a changed tile), the player looks at the tile in the game
+function M.hatch_ask(K, rs)
+  local now = K.now()
+  if not (rs and rs.state == 'hidden') then
+    if st.hatch_rec and st.hatch_rec.ids and #st.hatch_rec.ids > 0 then st.hatch_rec, dirty = CAD.quiet(st.hatch_rec), true end
+    return
+  end
+  local at = string.format('%d,%d,%d', rs.man[1], rs.man[2], rs.man[3])
+  if not CAD.due(st.hatch_rec, now, {at}, {'hidden'}, {ticks = 28 * DAY, wall_s = 1800}) then return end
+  st.hatch_rec, dirty = CAD.mark(now, {at}, {'hidden'}), true
+  local q = trunc(string.format('refuge: the civilians\' stair is real but its hatch tile %s is not revealed: look at it in ' ..
+                                'the game (dfllm reveals nothing); then plan the hatch: bp.place tpl=seal at=refuge', at), 200)
+  K.emit('DECISION_NEEDED', 'A', q, {id = 'refuge_hatch', q = q})
 end
 
 -- public (BUG-049, readiness, inspect refuge, state alert.ref.tr/trw): is the refuge trusted? Only while (1) the
@@ -3217,11 +3265,20 @@ function M.refuge_trust(K)
     r.audit = {sep = au.sep == 0 and 0 or 1, age = int(au.age)}
     if au.sep == 0 then why[#why + 1] = string.format('audit: refuge_sep failed %d t ago', int(au.age)) end
   end
-  local head = refuge_head(K)
-  if head then
+  local rs = M.refuge_stair(K)
+  if rs and rs.pos then
+    local head = rs.pos
     local hk = sep_closer(key3(head[1], head[2], head[3]))
     r.hatch = {pos = head, state = hk and 'ok' or 'missing'}
+    if rs.state == 'moved' then r.hatch.man = rs.man end            -- BUG-124: the manifest's head is not revealed
     if not hk then why[#why + 1] = string.format('no hatch at %d,%d,%d', head[1], head[2], head[3]) end
+  elseif rs then
+    -- BUG-123/124: nothing to check a hatch on. nostair: never dug, flagged (the manifest entry stays), no reason;
+    -- hidden: a real stair whose hatch tile cannot be read, so the refuge cannot be trusted yet
+    r.hatch = {pos = rs.man, state = rs.state}
+    if rs.state == 'hidden' then
+      why[#why + 1] = string.format('hatch tile %d,%d,%d not revealed', rs.man[1], rs.man[2], rs.man[3])
+    end
   end
   local hn, hat = hostile_in(K, refuge, t)
   if hn > 0 then
@@ -3407,6 +3464,7 @@ local function publish(K)
       mem.pub.ref.tr = tr.ok and 1 or 0
       if not tr.ok then mem.pub.ref.trw = trunc(tr.why[1], 40) end
     end
+    M.hatch_ask(K, ex and M.refuge_stair(K) or nil)                 -- BUG-124: once, a real stair with a hidden head
     -- FR-69: its drink, the drink it wants (refuge_dry's rule) and its drink store's tiles (plan check/propose)
     if ex then
       mem.pub.ref.dr, mem.pub.ref.dn = math.max(0, int(ra.drink) or 0), math.max(0, int(ra.dneed) or 0)
@@ -4937,7 +4995,8 @@ function M.init(K)
   st = {v = 2, perim = {}, cut = {}, req = {}, open = {}, gq = {}, ans = {}, ansv = {}, rep = {}, hostile = int(p.hostile),
         painted = int(p.painted), flag_sig = type(p.flag_sig) == 'string' and p.flag_sig or nil, pep = int(p.pep),
         bsince = int(p.bsince), sup_rec = type(p.sup_rec) == 'table' and p.sup_rec or nil,
-        floor_rec = type(p.floor_rec) == 'table' and p.floor_rec or nil}
+        floor_rec = type(p.floor_rec) == 'table' and p.floor_rec or nil,
+        hatch_rec = type(p.hatch_rec) == 'table' and p.hatch_rec or nil}
   -- BUG-031 (b): the burrows the citizens went thirsty or hungry in during this episode
   for name, d in pairs(type(p.dry) == 'table' and p.dry or {}) do
     if type(name) == 'string' and type(d) == 'table' and int(d.t) then

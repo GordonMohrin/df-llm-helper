@@ -167,4 +167,4 @@ lines). Everything is "offline, live-untested": each bug file names its live che
 |---|---|---|
 | 100 | `dfllm resume` for a game paused by DF | wave N: N1 |
 | 101 | follow replays events of a discarded timeline after a load | BUG-121 (`TIMELINE_RESET`) |
-| 102 | plan check demands an unplaceable refuge seal (the stair never existed) | wave N: N2 |
+| 102 | plan check demands an unplaceable refuge seal (the stair never existed) | BUG-123 (stair not on the map: warning, entry kept), BUG-124 (hatch to the nearest revealed tile of the stair, else DECISION_NEEDED), BUG-125 (hospital, tombs, food, drink never wait) |
