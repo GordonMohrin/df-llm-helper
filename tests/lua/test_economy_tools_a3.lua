@@ -208,12 +208,13 @@ T.test('BUG-053 note 34 (Run 12 y501, a reclaimed fort): 100 usable picks lie lo
   T.ok(r.data.pile and r.data.pile:find('dfllm-tools placed at', 1, true), tostring(r.data.pile))
   T.eq({r.data.piles, r.data.stale.pick}, {1, 0}, 'one pile; not stale yet (day 12 of 14)')
   days(W, 40)
-  T.eq(W.inbox('inspect', {what = 'workload', key = 'tools'}).data.stale.pick, 100, 'the 100 loose picks are stale now')
+  -- BUG-128: at most stock - (members + 2) of the reachable ones: 100 - 8
+  T.eq(W.inbox('inspect', {what = 'workload', key = 'tools'}).data.stale.pick, 92, 'the 100 loose picks are stale now (capped)')
   T.eq(#ctl.piles, 1, 'a pile named dfllm-tools stands: no second one')
   local n = 0
   for _, r in ipairs(F.runs(W)) do if r:find('stockpiles import', 1, true) then n = n + 1 end end
   T.eq(n, 2, 'the restriction is imported once')
-  T.ok(want_of(W, 'pick'), 'the picks nobody got in 14 days are no stock')
+  T.eq(want_of(W, 'pick'), nil, 'BUG-128: eight usable picks still count for six miners: none made or bought')
 end)
 
 T.test('BUG-053: the miners ask for the equipment update again when the tools have a home (not after repair_days)', function()

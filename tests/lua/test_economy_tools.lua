@@ -160,6 +160,7 @@ T.test('Run 10: the player\'s members stay, count toward the target and make no 
   T.eq(#W.find_events('WORK_DETAIL'), 0)
   -- a member the kernel added is its own to shrink
   local W2, ctl2 = world{cit = 22, picks = 6, dig = 40, miners = {8}}
+  W2.K.cfg.baseline.economy.tools.keep_days = 0          -- BUG-128's minimum stay off: the shrink order is tested
   days(W2, 1)
   T.eq(members(ctl2, 'Miners'), {1, 5, 7, 8}, 'the player\'s 8 counts: three added for 40 jobs')
   job_list({})

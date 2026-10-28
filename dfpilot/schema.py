@@ -584,9 +584,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # tool2, alert, burrow, walk, jobs, pair, flag, pool, upair, fetch, pending, none), picks/units = compact records, civ =
     # the civ alert's burrows, ww = DF's work tool pairs
     # BUG-053: forbidden / off_group / owned (population level) join the keys; pile = the tool pile's state
+    # BUG-128: src = the stockpile the tools sit in, g = the guards that applied (kept members, skipped patients/doctors,
+    # a fresh request not pending, loose pairs as fetch, the stale cap, the pile's source)
     "TOOL_BLOCKED": ("A", "economy", _d("detail:s tool:s n:i", "members:ia jobs:i days:i free:i bins:i reserved:i "
                                                                "why:s who:s hint:s pos:p eq:i eq_days:i forb:i blk:s "
-                                                               "bk:s picks:sa units:sa civ:i ww:i pile:s tell:s care:s")),
+                                                               "bk:s picks:sa units:sa civ:i ww:i pile:s tell:s care:s src:i g:s")),
     # BUG-027: a SIEGE/BREACH raise went ahead onto units on or next to the footprint (a hostile within force_near)
     "GATE_FORCED": ("A", "gate", _d("bridge:s", "units:ia hostile:i pos:p job:i")),
     # BUG-027: a unit died on or next to a bridge just pulled or moving (gate's move records, dfllm.deaths.bridge)

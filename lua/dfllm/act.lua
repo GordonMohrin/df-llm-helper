@@ -1079,12 +1079,15 @@ local function impls(state)
   -- the citizens' walk group near the mines (act reads no tiles) and restricts the pile to picks and axes afterwards
   -- (stockpiles import). The haulers fill it; nothing is moved by the kernel. Returns ok, stockpiles designated (0 =
   -- quickfort skipped the tiles: refused).
-  function I.tool_pile(pos, w, h)
+  function I.tool_pile(pos, w, h, take)
     local x, y, z = xyz(pos)
     x, y, z = int(x), int(y), int(z)
     if not (x and y and z) then return false, 'pos must be {x,y,z}' end
     w, h = math.max(1, math.min(int(w) or 3, 5)), math.max(1, math.min(int(h) or 2, 5))
-    local cell = string.format('p{name=dfllm-tools}(%dx%d)', w, h)
+    -- BUG-128: no bins (the stockpile sheet's bin count 0, quickfort `bins=0`); `take` = the stockpile the tools sit in
+    -- (the sheet's "take from" link, quickfort `take_from=<building id>`): DF does not re-haul stored items otherwise
+    local tk = int(take)
+    local cell = string.format('p{name=dfllm-tools bins=0%s}(%dx%d)', tk and tk >= 0 and (' take_from=' .. tk) or '', w, h)
     local ok, stats = I.quickfort({mode = 'place', data = {[0] = {[0] = {[0] = cell}}}, pos = {x, y, z}})
     if not ok then return false, stats end
     local n = type(stats) == 'table' and int(stats.place_designated) or nil

@@ -279,16 +279,21 @@ T.test('tool_pile: a w x h dfllm-tools weapons stockpile (quickfort place key p)
   local env = mk('economy')
   T.eq({env.api.tool_pile({60, 40, 5}, 3, 2)}, {true, 1})
   T.eq({calls[1].mode, calls[1].command, calls[1].pos}, {'place', 'run', {x = 60, y = 40, z = 5}})
-  T.eq(calls[1].data[0][0][0], 'p{name=dfllm-tools}(3x2)')
+  T.eq(calls[1].data[0][0][0], 'p{name=dfllm-tools bins=0}(3x2)')
   T.eq({env.api.tool_pile({60, 40, 5})}, {true, 1})
-  T.eq(calls[2].data[0][0][0], 'p{name=dfllm-tools}(3x2)', 'defaults 3 x 2')
+  T.eq(calls[2].data[0][0][0], 'p{name=dfllm-tools bins=0}(3x2)', 'defaults 3 x 2')
   T.eq({env.api.tool_pile({60, 40, 5}, 9, 9)}, {true, 1})
-  T.eq(calls[3].data[0][0][0], 'p{name=dfllm-tools}(5x5)', 'capped at 5 x 5')
+  T.eq(calls[3].data[0][0][0], 'p{name=dfllm-tools bins=0}(5x5)', 'capped at 5 x 5')
   T.eq((mk('runner').api.tool_pile({60, 40, 5}, 3, 2)), false, 'not owner')
   T.eq((env.api.tool_pile({60, 40}, 3, 2)), false, 'bad position')
   n = 0
   T.eq({env.api.tool_pile({61, 40, 5}, 3, 2)}, {false, 'quickfort designated no stockpile there'})
   T.eq(#calls, 4)
+  -- BUG-128: the stockpile the tools sit in as its source (the sheet's take-from link, by building id), no bins
+  n = 1
+  T.eq({env.api.tool_pile({60, 40, 5}, 3, 2, 77)}, {true, 1})
+  T.eq(calls[5].data[0][0][0], 'p{name=dfllm-tools bins=0 take_from=77}(3x2)')
+  T.ok(#calls[5].data[0][0][0] <= 64)
 end)
 
 T.test('order_top (Run 11 siege 8, seal first): the named orders move to the top in the given order (runner only)',
