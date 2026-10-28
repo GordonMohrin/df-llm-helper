@@ -336,7 +336,8 @@ REFUGE_DRY_HINT = ("the refuge has no drink: next plan its drink store (tpl refu
 # BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds outside the refuge): readiness R0 hospital_out;
 # BUG-040 (y453: Tiefe+ had no accepted water): then Kern+ next to the water
 HOSPITAL_OUT_HINT = ("the hospital lies outside the core: plan it next to accepted water inside Tiefe+, or in Kern+ when "
-                     "Tiefe+ has none (bp sites hospital names the water), then remove the old zones")
+                     "Tiefe+ has none (bp sites hospital names the water), then remove the old zones: status names the "
+                     "blocking zone and its dfllm cmd hospital.retire (BUG-131)")
 
 
 # BUG-055 (Run 14 y577: the CHIEF_MEDICAL_DWARF office stood vacant for good; Run 11 note 25: squads without a leader):

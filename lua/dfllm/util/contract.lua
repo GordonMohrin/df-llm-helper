@@ -234,6 +234,9 @@ C.VERBS = {
   ['zone.place'] = {mod = 'runner', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
   -- FR-88 (Run 14 note 95): the camera; no mode list (a fight needs by=gordon, viewlib refuses it)
   ['view'] = {mod = 'arbiter'},
+  -- BUG-131 (Run 14): the zones screen's remove for one hospital zone outside Kern+/Tiefe+ (no patient in it; a finished
+  -- hospital inside or approve:true from the player)
+  ['hospital.retire'] = {mod = 'water', modes = {PEACE = true}},
 }
 -- Verbs accepted only from these `by` origins (§9.5). `by` is a label, not authentication: the
 -- hook (WP4) keeps the LLM from writing these origins; this check is the second line.
@@ -249,7 +252,7 @@ C.ACT = {
   squad_create = {'military'}, squad_leader = {'military'}, squad_add = {'military'}, squad_remove = {'military'},
   squad_routine = {'military'}, squad_order = {'military'}, squad_uniform = {'military'},
   squad_unequip = {'military'}, squad_release = {'military'}, animal_slaughter = {'economy'}, zone_remove = {'runner'}, manager_office = {'economy'}, pond_remove = {'water'},
-  hospital_remove = {'water'},                     -- BUG-034: the zones of a dry hospital while a patient is thirsty
+  hospital_remove = {'water'},                     -- BUG-034: a dry hospital's zones; BUG-131: hospital.retire
   sand_zone = {'economy'}, fish_zone = {'economy'},
   tool_pile = {'economy'},                         -- BUG-053: a weapons stockpile for the miners' picks near the mines
   zone_place = {'runner'},                         -- FR-78: the verb zone.place (zonelib)
@@ -508,7 +511,10 @@ C.STATE_SPEC = obj({
               -- in Kern+')
               {hosp_out = NAT, src_l = arr(str(32), 0, 8),
                -- BUG-106: the tokens of the hospital's gaps (no_table, no_thread, ...), the first eight; inspect what=hospital
-               gaps = arr(str(16), 0, 8)}),
+               gaps = arr(str(16), 0, 8),
+               -- BUG-131: the first blocking hospital zone outside the core: id, centre, ok 1 = a finished hospital inside
+               -- (hospital.retire needs no approve), pat = patients lying in it
+               hout = obj({z = NAT, at = {t = 'tup', items = {NAT, NAT, NAT}}, ok = FLAG}, {pat = NAT})}),
 })
 
 -- string formats (§1.1); explicit byte ranges, so LC_CTYPE cannot change them
