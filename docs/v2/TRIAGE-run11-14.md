@@ -168,3 +168,4 @@ lines). Everything is "offline, live-untested": each bug file names its live che
 | 100 | `dfllm resume` for a game paused by DF | wave N: N1 |
 | 101 | follow replays events of a discarded timeline after a load | wave N: N1 |
 | 102 | plan check demands an unplaceable refuge seal (the stair never existed) | wave N: N2 |
+| 103 | coffins not ordered for the short ones, a coffin project that never ends, untruthful `inspect tombs` | BUG-126, BUG-127 |

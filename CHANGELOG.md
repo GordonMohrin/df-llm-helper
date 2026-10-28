@@ -1,5 +1,32 @@
 # CHANGELOG dfpilot
 
+## The coffin provisioner orders the short coffins and drops a project that never ends; `inspect tombs` tells the truth (BUG-126, BUG-127, 2026-10-28, note 103; offline, live-untested)
+- **Why:** Run 14 note 103: `brief` said `coffins want 67, short 10, stock 4, order 0, proj cof272266509` for three game years (62 bodies, 21 ghosts,
+  509 tombs, none usable); the session had to order `ConstructCoffin` by hand. Proof from the code (reproduced with the k_mock before the fix): the items
+  to order were `min(want - free - idle, planned + rows placed this run)`, so the short coffins (no building yet) never counted; the space search runs
+  only with no tombs project pending (`proj` kept in the brief = pending for three years); the runner parks a project only when it is blocked for
+  good, a `tombs.build` stage that waits for a coffin is live for ever, and the kernel never cancels a project. With stock >= planned: `make = 0`.
+- **What changed:** (1) care.lua `coffin_order`: items = planned + short (at most want - free - idle) while a citizen body waits (else the rows placed
+  in that run, as before), batch 30, minus stock and the open orders that can run; the reserve for critical logs still counts only the planned coffins. Wood first (`material_category wood`, beyond `coffin_wood_keep`), then hard
+  stone as `material = INORGANIC` (never `material_category` stone, which the game refuses); neither: DECISION_NEEDED `coffin_material` (cadence-limited).
+  (2) `coffin_proj`: the provisioner's own project is read each run (`runner.coffins_state`); forgotten when the runner lost it; dropped with
+  `runner.coffins_drop` (cancel, no undo: the planned coffins stay) when `stage:chunk:pct` stood still for `care.coffin_stale` (15 game days of PEACE).
+  (3) BUG-127: `inspect tombs` and the brief show the stuck orders, the project's percent and idle days, dropped projects, a refused order's text and a
+  missing item census; `state.care.coffins` gains optional `stuck` and `stale`. (4) Stock coffins: an item is no tomb, only a coffin building in a
+  tomb zone is; the buildings come from the provisioner's project, which the stale project had blocked (see BUG-127; re-using empty tomb zones as coffin
+  sites is not built).
+- **Contracts / config:** `runner.coffins_state`, `runner.coffins_drop` (CONTRACTS rows); schema + `contract.lua` `care.coffins.stuck/stale`; config
+  `care.coffin_stale` 18000 (baseline.json, `care.DEFAULTS`); RULES GHOSTS row edited in place (300 lines); DESIGN FR-61 paragraph.
+- **Tests (fail on f3f684b):** tests/lua/test_care_coffins.lua (7 new, 3 FR-61 material tests follow the new counts and the wood-first order),
+  tests/test_care_coffins_files.py (state schema, brief line, config key).
+- **Live check:** `dfllm cmd inspect '{"what":"tombs"}'` in a fort that is short of coffins: the message ends with `coffins want W, short S, stock K, on order O`
+  and, while a project stands still, `project cof... N% (no progress D d)`; after 15 days of PEACE kern.log shows `coffins: project cof... made no progress
+  for 15 d ... dropped`, the next care run places a new project and a `ConstructCoffin` order (`dfllm cmd order.list` / work orders screen); with
+  neither wood nor hard stone a DECISION_NEEDED `coffin_material` appears once.
+- **Not decided offline:** why the live project's coffins were never built (buildingplan's state is not readable by the kernel); whether wood-first
+  (as asked) or the old stone-first suits a hard-stone map better (`coffin_wood_keep` is the knob); whether 15 days is the right `coffin_stale` for a
+  fort with one slow carpenter.
+
 ## M7: a garbage dump zone, a trash view and the reason a dump job cancels; loading the newest complete save at the title screen; the title-screen status (FR-90, FR-91, BUG-120, 2026-10-28, package M7, notes 98 and 99; offline, live-untested)
 - **Why:** Run 14 note 98: garbage had no verb (`zone.place` knew no dump zone) and "Dump item cancelled 5 times today" (y701, y703, y707) gave no
   reason. Note 99: after a DF restart the fort stood at the main menu for more than ten minutes (`load-save` broken in DFHack 53.16-r3, the click

@@ -288,6 +288,7 @@
   "coffin_wood_keep": 20,
   "coffin_wake": 2400,
   "coffin_prio": 3,
+  "coffin_stale": 18000,
   "death_window": 33600,
   "death_same": 2,
   "death_any": 3,

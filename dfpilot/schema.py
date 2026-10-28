@@ -911,7 +911,9 @@ STATE = Obj(
                           "tombs_free": NAT, "moods": NAT},
                      # FR-61 coffin provisioner: wanted free coffins, missing slots, coffin items, open orders, project
                      opt={"coffins": Obj(req={"want": NAT, "short": NAT, "stock": NAT, "order": NAT,
-                                              "proj": Str(maxbytes=40)}),
+                                              "proj": Str(maxbytes=40)},
+                                         # BUG-126: open ConstructCoffin orders that cannot run; days the project made no progress
+                                         opt={"stuck": NAT, "stale": NAT}),
                           # FR-64: citizen deaths of the last season (100,800 ticks) by cause
                           "died": Obj(extra=NAT),
                           # BUG-062: tomb zones left closed to citizens by the last run (none counted as free tombs)

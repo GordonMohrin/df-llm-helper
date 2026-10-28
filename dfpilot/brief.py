@@ -661,7 +661,10 @@ def supply_items(ctx: Ctx) -> list[tuple[int, str]]:
         if cf and (cf["want"] > c["tombs_free"] or cf["order"] or cf["proj"]):
             # FR-61 coffin provisioner: free tombs wanted, slots missing, coffin items, open orders, project
             care.append(f"coffins want {cf['want']} short {cf['short']} stock {cf['stock']} order {cf['order']}"
+                       + (f" stuck {cf['stuck']}" if cf.get("stuck") else "")
                        + (f" proj {cf['proj']}" if cf["proj"] else "")
+                       # BUG-126: the project stands still (days); care drops it after coffin_stale
+                       + (f" (idle {cf['stale']}d)" if cf["proj"] and cf.get("stale") else "")
                        # FR-76 (Run 12 reclaim: the kernel only said "short coffins"): no Carpenters workshop, no coffin
                        + (" (no Carpenters workshop stands: see adopted fort)"
                           if "Carpenters" in ((s.get("adopt") or {}).get("miss") or []) and cf["short"] else ""))

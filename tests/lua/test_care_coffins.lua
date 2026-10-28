@@ -327,7 +327,7 @@ T.test('FR-61 material: hard stone with a mason -> rock; soft stone only -> wood
     W.run(60)
     return W
   end
-  -- 5 planned coffins wait for items; want 10, free 0: 5 coffins to make
+  -- 5 planned coffins wait for items; want 10, free 0: 5 coffins to make (nobody is dead: the spare reserve gets no order)
   local W1 = scene{census_i = {rock = 30}}
   T.eq(coffin_orders(W1), {{5, 'INORGANIC', 'dfllm:coffin'}})
   local W2 = scene{census_i = {rock = 30, rock_bad = 30, wood = 23}, carpenters = true}
@@ -339,8 +339,10 @@ T.test('FR-61 material: hard stone with a mason -> rock; soft stone only -> wood
   local W3 = scene{census_i = {rock = 30, rock_bad = 30, wood = 60}, masons = false}
   T.eq(coffin_orders(W3), {}, 'logs but no carpenter')
   local W4 = scene{census_i = {rock = 3, wood = 60}, carpenters = true}
-  T.eq(coffin_orders(W4), {{3, 'INORGANIC', 'dfllm:coffin'}, {2, 'wood', 'dfllm:coffin'}}, 'stone first, then wood')
+  T.eq(coffin_orders(W4), {{5, 'wood', 'dfllm:coffin'}}, 'BUG-126: wood first (beyond the keep)')
   T.eq(events(W4, 'DECISION_NEEDED', 'coffin_material'), {})
+  local W5 = scene{census_i = {rock = 4, wood = 23}, carpenters = true}
+  T.eq(coffin_orders(W5), {{3, 'wood', 'dfllm:coffin'}, {2, 'INORGANIC', 'dfllm:coffin'}}, 'then hard stone for the rest')
 end)
 
 T.test('FR-61 material: stock and open orders that can run count; a stuck rock order does not', function()
@@ -368,6 +370,10 @@ T.test('FR-61 material: stock and open orders that can run count; a stuck rock o
   T.eq(coffin_orders(W2), {{5, 'wood', 'dfllm:coffin'}}, 'a rock order on soft stone is stuck: wood')
   local v = W2.inbox('inspect', {what = 'tombs'}).data.prov
   T.eq({v.stuck, v.order, v.mat}, {5, 5, 'wood'})
+  -- BUG-126: with a body waiting the short ones are made too (5 planned + 5 short + 1 for the dead = 11 items)
+  local W3 = scene{census_i = {rock = 30, rock_bad = 30, wood = 60}, carpenters = true,
+                   setup = function(W) dead(W, 4); corpse(W, 4) end}
+  T.eq(coffin_orders(W3), {{11, 'wood', 'dfllm:coffin'}})
 end)
 
 ---------------------------------------------------------------- when not
@@ -396,6 +402,133 @@ T.test('FR-61: a pending tombs project waits; no core and nobody dead: nothing',
   W2.K.persist.set('manifest', {v = 2})
   W2.run(120)
   T.eq(project(W2), nil)
+end)
+
+---------------------------------------------------------------- BUG-126 / BUG-127 (Run 14 note 103)
+-- the live state: a care `tombs` project whose planned coffins are never built stays "not done and not parked" for
+-- good; coffin items stand in stock that the planned coffins do not take (the mock's buildingplan takes none); the
+-- order vanished; the wish grew. The proof of why nothing was ordered, branch by branch:
+--   1. coffin_order: items = min(want - free - idle, planned + cs.new): never more than the PLANNED coffins, the
+--      `short` ones (no building yet) are not counted, so make = items - stock - order = 0 with stock >= planned
+--   2. phase_coffins_run: the search runs only with q.pend == 0, and the pending project never ends: cs stays nil
+--   3. runner.Q.live: only a blocked project with spent retries is parked, one that waits is live for ever
+local function stale_scene(o)
+  o = o or {}
+  local W = world{carpenters = o.carpenters ~= false, census_i = o.census_i or {rock = 50, wood = 60},
+                  setup = function(W) for _, id in ipairs({4, 5, 6}) do dead(W, id); corpse(W, id) end end}
+  W.run(120)
+  local P = project(W)
+  T.ok(P, 'the first wave placed 13 coffins')
+  local mo = df.global.world.manager_orders
+  for i = #mo.all - 1, 0, -1 do mo.all:erase(i) end                 -- the order vanished
+  for _ = 1, 13 do F.item(W, 'COFFIN', {_pos = {30, 30, 5}}) end    -- coffins stand in stock, unused
+  W.K.cfg.baseline.care = {coffin_reserve = 20}                      -- more wanted: short 10
+  return W, P
+end
+
+-- Run on f3f684b (before the fix) this very scene gave: want 23, short 10, stock 13, order 0, pend 1, planned 13,
+-- items 13, make 0, no workorder act, probes nil (no search), one tombs project, for as long as the scene ran (the
+-- reproduction of `want 67, short 10, stock 4, order 0, proj cof...`).
+T.test('BUG-126: short coffins are ordered while a project that cannot finish is pending (before: order 0, nothing placed)', function()
+  local W, P = stale_scene()
+  local n0 = #W.find_acts('workorder')
+  CW.day(W, 5)
+  local v = W.inbox('inspect', {what = 'tombs'}).data.prov
+  T.eq({v.want, v.short, v.stock, v.order, v.pend, v.proj}, {23, 10, 13, 10, 1, P.id})
+  T.eq({v.planned, v.items, v.make}, {13, 23, 0}, 'items: the planned and the short coffins; 13 in stock + 10 ordered')
+  T.eq(#W.find_acts('workorder') - n0, 1, 'one order for the 10 short, none again')
+  T.eq(coffin_orders(W)[#coffin_orders(W)], {10, 'wood', 'dfllm:coffin'})
+  T.eq(v.probes, nil, 'no search while the project is pending and young')
+  local nproj = 0
+  for _, Q in ipairs(W.K.persist.get('projects').list) do if Q.tpl == 'tombs' then nproj = nproj + 1 end end
+  T.eq(nproj, 1)
+end)
+
+T.test('BUG-126: a project without progress for coffin_stale days is dropped; the search places the short coffins', function()
+  local W, P = stale_scene()
+  CW.day(W, 10)
+  T.eq(project(W).id, P.id, 'ten days without progress are no reason yet')
+  CW.day(W, 7)
+  local P2 = project(W)
+  T.ok(P2 and P2.id ~= P.id, 'the stale project is gone, a new one for the short coffins')
+  local v = W.inbox('inspect', {what = 'tombs'}).data.prov
+  T.eq({v.planned, v.short, v.dropped}, {23, 0, 1})
+  T.eq(v.proj, P2.id)
+  -- 23 planned coffins = 13 in stock + the 10 ordered on day 1 (wood first): nothing more to make
+  local co = coffin_orders(W)
+  T.eq({#co, co[#co]}, {2, {10, 'wood', 'dfllm:coffin'}})
+end)
+
+T.test('BUG-126: a project that moves (a coffin built now and then) is not stale', function()
+  local W, P = stale_scene()
+  for day = 1, 5 do
+    CW.day(W, 5)
+    local b = df.global.world.buildings.other.COFFIN[day - 1]
+    b._st = 1                                                         -- one more coffin stands
+  end
+  T.eq(project(W).id, P.id)
+  T.eq(W.inbox('inspect', {what = 'tombs'}).data.prov.dropped or 0, 0)
+end)
+
+T.test('BUG-126: the short coffins are ordered although no space is found yet; wood first, then stone as INORGANIC', function()
+  local W = world{floor = {}, carpenters = true, census_i = {rock = 30, wood = 25},
+                  setup = function(W) for _, id in ipairs({4, 5, 6}) do dead(W, id); corpse(W, id) end end}
+  W.run(300)
+  T.eq(project(W), nil, 'no space: no project')
+  T.eq(coffin_orders(W), {{5, 'wood', 'dfllm:coffin'}, {8, 'INORGANIC', 'dfllm:coffin'}},
+       '13 short: 5 logs beyond the keep, the rest in hard stone')
+  for _, a in ipairs(W.find_acts('workorder')) do
+    local mc = a.args[1].material_category or {}
+    for _, m in ipairs(mc) do T.ok(m ~= 'stone', 'stone is no material_category (the game refuses it)') end
+  end
+  CW.day(W, 2)
+  T.eq(#coffin_orders(W), 2, 'the open orders cover them: nothing again')
+  local v = W.inbox('inspect', {what = 'tombs'}).data.prov
+  T.eq({v.short, v.order, v.items}, {13, 13, 13})
+end)
+
+T.test('BUG-126: neither wood nor hard stone for the short coffins: DECISION_NEEDED coffin_material, once a week', function()
+  local W = world{carpenters = true, census_i = {rock = 30, rock_bad = 30, wood = 10},
+                  setup = function(W) for _, id in ipairs({4, 5, 6}) do dead(W, id); corpse(W, id) end end}
+  W.run(300)
+  T.eq(coffin_orders(W), {})
+  CW.day(W, 3)
+  local dn = events(W, 'DECISION_NEEDED', 'coffin_material')
+  T.eq(#dn, 1)
+  T.eq({dn[1].cls, dn[1].d.short, dn[1].d.make}, {'A', 0, 13}, '13 planned by the project, no item can be made')
+  CW.day(W, 3)
+  T.eq(#events(W, 'DECISION_NEEDED', 'coffin_material'), 1, 'cadence: not again within the week')
+end)
+
+T.test('BUG-126: inspect and the state tell the days a project stands still; a project the runner lost is not shown', function()
+  local W, P = stale_scene()
+  CW.day(W, 10)
+  local v = W.inbox('inspect', {what = 'tombs'})
+  T.ok(v.msg:find('project ' .. P.id .. ' 0% (no progress ', 1, true), v.msg)
+  T.ok(v.data.prov.stale >= 8 and v.data.prov.stale <= 10, 'days: ' .. tostring(v.data.prov.stale))
+  T.eq(v.data.prov.stage, 'tombs.build')
+  local cf = W.state().care.coffins
+  T.eq({cf.proj, cf.stale}, {P.id, v.data.prov.stale})
+  T.eq(W.bad_vectors, {})
+  T.ok(W.inbox('bp.cancel', {proj = P.id}).ok)
+  CW.day(W, 2)
+  v = W.inbox('inspect', {what = 'tombs'})
+  T.ok(not v.msg:find('project ' .. P.id, 1, true), v.msg)
+  T.ok(v.data.prov.proj ~= P.id, 'the cancelled project is gone; a new one stands for the short coffins')
+end)
+
+T.test('BUG-126: a rock order that cannot run is shown as stuck and the coffins are ordered in wood', function()
+  local W = world{carpenters = true, masons = false, census_i = {rock = 30, wood = 60},
+                  setup = function(W)
+                    dead(W, 4); corpse(W, 4)
+                    df.global.world.manager_orders.all:insert('#', {id = 900, job_type = df.job_type.ConstructCoffin,
+                                                                    amount_left = 4, mat_type = 0, mat_index = -1})
+                  end}
+  W.run(300)
+  local r = W.inbox('inspect', {what = 'tombs'})
+  T.ok(r.msg:find('4 stuck', 1, true), r.msg)
+  T.eq(r.data.prov.stuck, 4)
+  T.eq(coffin_orders(W), {{11, 'wood', 'dfllm:coffin'}})
 end)
 
 T.done()

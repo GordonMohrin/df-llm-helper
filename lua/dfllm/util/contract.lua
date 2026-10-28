@@ -402,7 +402,8 @@ C.STATE_SPEC = obj({
                     hungry = NAT,                   -- BUG-059: citizens past DF's "hungry" line (hunger_timer >= starve.hunger)
                     dforb = NAT, fforb = NAT}),     -- FR-76: drink / food units the census counts as forbidden
   care = obj({stressed_pct = PCT, naked = NAT, ghosts = NAT, corpses_old = NAT, tombs_free = NAT, moods = NAT},
-             {coffins = obj({want = NAT, short = NAT, stock = NAT, order = NAT, proj = str(40)}),
+             {coffins = obj({want = NAT, short = NAT, stock = NAT, order = NAT, proj = str(40)},
+                            {stuck = NAT, stale = NAT}),     -- BUG-126: orders that cannot run; days the project stands still
               died = obj(nil, nil, NAT), tombs_locked = NAT,
               corpses_unreach = NAT,       -- BUG-105: citizen bodies on a tile nobody can path to (apart from corpses_old)
               -- FR-74: stressed citizens by source (ghosts, deaths, beds, drink, food, rooms, toppled), the population
