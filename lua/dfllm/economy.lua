@@ -395,8 +395,9 @@ M.DEFAULTS = {
   -- per ghost every 1289 ticks and no ConstructSlab): at most `max_orders` EngraveSlab orders stand, never more than
   -- there are unengraved slabs, the rest are removed (at most `drop_per_day`; again at the first "unengraved slab"
   -- cancel past `trigger_ticks`); ConstructSlab is ordered first for the ghosts and the open engrave orders (at most
-  -- `restock_cap` blank slabs); `jam_min` blocked jobs in a workshop type's slots (half of them at least) are a jam
-  slabs = {max_orders = 3, restock_cap = 5, drop_per_day = 60, trigger_ticks = 600, scan_max = 2000, jam_min = 3,
+  -- `restock_cap` blank slabs, BUG-133: and never more than the ghosts that still want one); `jam_min` blocked jobs in a
+  -- workshop type's slots (half of them at least) are a jam
+  slabs = {max_orders = 3, restock_cap = 20, drop_per_day = 60, trigger_ticks = 600, scan_max = 2000, jam_min = 3,
            engrave_days = 3},
   -- BUG-060 (Run 13 y508: 11 ConstructDoor INORGANIC orders, validated, made no job for months, five builds waited for
   -- doors; wood doors ordered by hand were built at once): a one-time validated order with no job in any workshop and an
@@ -7052,11 +7053,14 @@ function M.slab_pass(K, c, r)
     p.slab_ann = CAD.quiet(p.slab_ann)
   end
   M.slab_engrave(K, c, r, sl, sb, eng, engf, removed)
-  -- ConstructSlab first
-  local n, want = OF.restock(sl.blank, cons, ghosts, #eng - #removed + sb.engraved, sc.restock_cap)
+  -- ConstructSlab first. BUG-133 (Run 14: 41 ghosts, ConstructSlab x3, x1, x4 in 200 game years at restock_cap 5): the
+  -- cap is min(ghosts, restock_cap 20), and the ghosts counted are the ones that still want a blank slab: no memorial
+  -- (loose, in a build job or placed) and no EngraveSlab order (sb.gneed; every ghost while census.g is stale)
+  local gneed = sb.gneed or ghosts
+  local n, want = OF.restock(sl.blank, cons, gneed, #eng - #removed + sb.engraved, math.min(ghosts, sc.restock_cap or 20))
   sb.want = want
+  local f = r.f or {}
   if n > 0 then
-    local f = r.f or {}
     local free = stone_free(c, r)
     if not f['workshop:Masons'] then sb.why = 'no Masons'
     elseif free < n then sb.why = string.format('%d free boulders for %d slabs', free, n)
@@ -7077,7 +7081,33 @@ function M.slab_pass(K, c, r)
       end
     end
   end
+  M.slab_why(K, c, r, sb, ghosts, f)
   K.persist.touch('m.economy')
+end
+
+-- BUG-133 (Run 14: sb.why 'no Masons' stood for years in inspect orders only; the masons' shop was lost at 284.35M and the
+-- rebuild policy held the workshops project): the reason no blank slab is ordered goes to kern.log once per reason and
+-- again only after util/cadence's window; while ghosts stand and no mason's workshop does, PROJECT_REQUEST workshops
+-- why=slabs types=[Masons] (follow places the masons' shop alone, the rebuild policy lets it run while ghosts wait) at
+-- most every food.request_days (p.slab_wsreq)
+function M.slab_why(K, c, r, sb, ghosts, f)
+  local p, now = r.p, r.now
+  local T0 = K.now()
+  if sb.why and sb.why ~= '' then
+    if CAD.due(p.slab_why, T0, {}, {sb.why}, {ticks = CAD.TICKS, wall_s = CAD.WALL_S}) then
+      p.slab_why = CAD.mark(T0, {}, {sb.why})
+      K.log('warn', 'slabs: no ConstructSlab for %d ghosts (%d want a slab, %d blank, %d memorials): %s', ghosts,
+            sb.gneed or ghosts, sb.blank, sb.memorial, sb.why)
+    end
+  else p.slab_why = CAD.quiet(p.slab_why) end
+  if ghosts <= 0 or f['workshop:Masons'] then return end
+  local every = ((c.food or {}).request_days or 14) * DAY
+  local last = math.tointeger(p.slab_wsreq)
+  if last and now - last < every and now >= last then return end
+  p.slab_wsreq = now
+  sb.asked = 1
+  K.emit('PROJECT_REQUEST', 'B', string.format("workshops: no mason's workshop for the memorial slabs of %d ghost(s)", ghosts),
+         {tpl = 'workshops', n = 1, why = 'slabs', types = {'Masons'}})
 end
 
 -- BUG-078 (Run 14 note 69: autoslab enabled, 79 slabs, two ghosts waiting for years, 0 EngraveSlab orders): a ghost that
@@ -7093,8 +7123,7 @@ function M.slab_engrave(K, c, r, sl, sb, eng, engf, removed)
   local days = sc.engrave_days
   if days == nil then days = 3 end
   local cg = K.census.g
-  if days <= 0 or type(cg) ~= 'table' or type(cg.ids) ~= 'table'
-     or now - (math.tointeger(cg.tick) or -DAY * 3) >= DAY * 2 then return end
+  if type(cg) ~= 'table' or type(cg.ids) ~= 'table' or now - (math.tointeger(cg.tick) or -DAY * 3) >= DAY * 2 then return end
   local seen = json.object(type(p.slab_ghost) == 'table' and p.slab_ghost or {})
   local skip = json.object(type(p.slab_skip) == 'table' and p.slab_skip or {})
   local isghost, ids = {}, {}
@@ -7116,6 +7145,18 @@ function M.slab_engrave(K, c, r, sl, sb, eng, engf, removed)
   for _, id in ipairs(removed or {}) do gone[id] = true end
   local ordered = {}
   for _, id in ipairs(eng) do if not gone[id] and (engf[id] or -1) >= 0 then ordered[engf[id]] = true end end
+  -- BUG-133: served = a memorial placed or in a build job; a loose one waits for care to place it (no second order);
+  -- gneed = the ghosts with a figure that have neither a memorial nor an order (they want a blank slab)
+  sb.served, sb.loose, sb.gneed = 0, 0, 0
+  for _, g in ipairs(ids) do
+    local u = g.id and df.unit.find(g.id)
+    local hf = u and math.tointeger(u.hist_figure_id) or -1
+    if hf >= 0 then
+      if sl.placed[hf] or sl.build[hf] then sb.served = sb.served + 1
+      elseif sl.loose[hf] then sb.loose = sb.loose + 1
+      elseif not ordered[hf] then sb.gneed = sb.gneed + 1 end
+    end
+  end
   local cand = {}
   table.sort(ids, function(a, b)
     local sa, sb2 = seen[a.sid], seen[b.sid]
@@ -7123,7 +7164,7 @@ function M.slab_engrave(K, c, r, sl, sb, eng, engf, removed)
     return (a.id or 0) < (b.id or 0)
   end)
   for _, g in ipairs(ids) do
-    if g.id and now - seen[g.sid] >= days * DAY then
+    if days > 0 and g.id and now - seen[g.sid] >= days * DAY then
       local u = df.unit.find(g.id)
       local hf = u and math.tointeger(u.hist_figure_id) or -1
       local sk = skip[g.sid]

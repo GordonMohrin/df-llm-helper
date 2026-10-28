@@ -1,5 +1,34 @@
 # CHANGELOG dfpilot
 
+## Ghost care: care places the memorial slabs, the slab orders follow the ghosts, the tomb repair stops its free loop (BUG-133, 2026-10-28, Run 14; offline, live-untested)
+- **Why:** Run 14 region2-site90 (y502-y716): ghosts 0 -> 49. Nothing in the kernel ever placed a slab (autoslab only queues engrave orders) and
+  every engraved memorial counted as a served ghost; economy removed 47 EngraveSlab orders for want of a blank slab and ordered ConstructSlab
+  three times at `restock_cap` 5; `sb.why 'no Masons'` stood in `inspect orders` only while the rebuild policy paused the workshops project;
+  `tombs: freed 20, opened 0, assigned 0, entomb 0` 631 times (a coffin's second body was not seen, its zone freed as `elsewhere`, DF gave
+  it away again); `inspect tombs` said 20 ghosts for 28.
+- **What changed:** (1) act.lua `slab_place(item, x, y, z)` (care): Build > Furniture > Slab with that slab chosen (`constructBuilding{type =
+  Slab, items = {slab}}`), the forbid toggle cleared, a slab in a job, built in, carried or unreachable refused (lint: `canWalkBetween`
+  allowed in `slab_place`). (2) care.lua memorial phase: each ghost's slab state none/order/loose/build/placed/nohf; up to `care.memorials`
+  (2) loose memorials a run placed in PEACE/RECOVERY on the inner tile of a free roofed 3x3 near the crypt/core/citizens (the coffin
+  search's floor rules, never a way, door or stair), a refusal retried a day later, three times; GHOSTS `d.slabs`/`d.mem`, `inspect tombs`
+  ghosts `[unit, cause, slab]`, `mem`, `mem_why`, `ghosts_n` (every ghost, msg `+N more not listed`). (3) orderfix `OF.slabs` `placed`/`build`/
+  `loose`; economy: a ghost is served only by a placed or building memorial, a loose one gets no second order, ConstructSlab for the ghosts
+  without memorial and order capped at min(ghosts, `restock_cap` 20), the reason for no slab order in kern.log (cadence), PROJECT_REQUEST
+  workshops why=slabs types [Masons] while ghosts stand and no mason's shop does (follow places it like why=mandatory). (4) runner: in the
+  rebuild a workshops project of Masons/Carpenters only runs while care reports ghosts, old bodies or short coffins. (5) tomb_repair: several
+  bodies per coffin, never a free over an occupied coffin (`acts.kept_occ`), assignments first on `care.tomb_assign_per_run` (20).
+- **Contracts / config:** schema ACT `slab_place` (care) and contract.lua; GHOSTS `slabs:sa mem:s`; config `care.tomb_assign_per_run` 20,
+  `care.memorials` 2 (`fairplay.CARE_LIM`), `economy.slabs.restock_cap` 5 -> 20; CONTRACTS §5 row, §12 GHOSTS and PROJECT_REQUEST, inspect
+  tombs, config text and appendix; RULES §7 GHOSTS row (in place); bugs/BUG-133.
+- **Tests (each fails on dec5132):** tests/lua/test_care_ghosts.lua (8), test_economy_b2.lua (+4; BUG-061's cap 5 -> 6), test_runner_seal_first.lua
+  (+1), test_act_supply.lua (+1), test_care_b3.lua / test_care_fr.lua (the acts' new order), tests/test_bug133_ghosts.py (4).
+- **Live check:** `dfllm inspect what=tombs`: the ghost count matches the units screen, `memorials: ...` and each ghost's slab state; a loose
+  memorial turns `build` within a care run in PEACE (kern.log `memorial: slab ... placed at x,y,z`), `placed` once built, and its ghost leaves
+  the list; `inspect orders` slabs `gneed`/`served`/`loose`, `want` <= 20; without masons kern.log `slabs: no ConstructSlab ... no Masons` once and
+  PROJECT_REQUEST why=slabs, follow places the masons' shop and it runs in the rebuild; kern.log `tombs:` shows `assigned` > 0 while bodies wait,
+  TOMBS_LOCKED `churn` stays 0.
+- **Not decided offline:** whether 53.16's constructBuilding accepts an engraved memorial in `items` as the Build menu does (buildingplan and
+  quickfort make planned slabs that way; the real item list was not read).
 ## TIMELINE_RESET: a boot whose clock jumped back marks the discarded timeline; follow, events and brief drop it (BUG-121, 2026-10-28, note 101; offline, live-untested)
 - **Why:** Run 14 note 101: after the player loaded an older save, `events.jsonl` still held the events up to #29900 of the line he had left
   (ticks far ahead of the loaded clock) and `alarm.txt` its lockdown; `follow` replayed BREACH, INTRUDER and DEATHS_3PLUS of the abandoned line while

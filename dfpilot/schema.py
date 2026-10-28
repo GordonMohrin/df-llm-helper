@@ -91,6 +91,7 @@ ACT = {
     "work_detail_prune": ["economy"],
     "item_flag": ["care", "water", "economy", "military"],
     "zone_assign": ["care"], "tomb_zone": ["care"], "medic": ["care"], "hospital_post": ["care"],
+    "slab_place": ["care"],                        # BUG-133: Build > Furniture > Slab with a ghost's engraved slab
     "trade": ["trade"],
     "run": ["baseline", "economy", "care", "military", "trade", "arbiter", "selftest", "runner"],
 }
@@ -485,7 +486,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "YEAR_REVIEW": ("A", "kern", _d(opt="year:i")),
     # BUG-062: far = of them, the bodies lying in another walk group than the citizens' (corpse_far: no coffin helps)
     # BUG-105: unreach = of the far bodies, those on a tile nobody can path to (corpse_unreachable, not in old)
-    "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa far:i unreach:i")),
+    # BUG-133: slabs = the memorial slab state of each listed unit (none | order | loose | build | placed | nohf), mem = the
+    # count per state over every ghost ("none 3, loose 1, placed 2")
+    "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa far:i unreach:i slabs:sa mem:s")),
     # BUG-062 (Run 14: 163, then 284 of 287 tomb zones closed to citizens): closed = zones found closed, free = of them
     # unassigned (usable: over a usable coffin), owned = held by a dead citizen, inactive = switched off; opened = what
     # care opened, left = usable ones still closed; again_free / again_owned = zones care opened that are closed again

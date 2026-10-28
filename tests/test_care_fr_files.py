@@ -119,7 +119,8 @@ def test_inspect_and_repair_replies(run):
     tombs = replies[4]["data"]
     assert tombs["coffins"] == 2 and tombs["free"] == 0
     assert {e["u"] for e in tombs["unburied"]} == {6, 7}
-    assert tombs["ghosts"] == [[6, tombs["ghosts"][0][1]]]
+    # BUG-133: each ghost is [unit, cause, memorial slab state]; unit 6 of the scenario has no historical figure
+    assert tombs["ghosts"] == [[6, tombs["ghosts"][0][1], "nohf"]] and tombs["ghosts_n"] == 1
     assert all(len(c["z"]) == 1 for c in tombs["list"]), "one zone per coffin after the repair"
     water = replies[5]["data"]
     assert water["bodies"][0]["bank"] == [19, 12, 5] and water["bodies"][0]["max"] == 7
