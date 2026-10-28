@@ -104,7 +104,7 @@ STATE_OWNERS = {
     "stock.picks": "economy",
     "stock.pick_want": "economy", "stock.mshort": "economy", "stock.melt": "economy", "stock.dwhy": "economy",
     "stock.dforb": "economy", "stock.fforb": "economy",
-    "stock.hosp_water": "care", "care.*": "care", "labor.*": "economy", "orders.*": "economy",
+    "stock.hosp_water": "care", "care.*": "care", "curse.*": "care", "labor.*": "economy", "orders.*": "economy",
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
     "clock.*": "arbiter", "alarm.*": "reflex", "lever.*": "gate",
     "alert.*": "seal", "wave.*": "siege", "snap.*": "snapshot", "water.*": "water", "stale.*": "kern",
@@ -443,6 +443,17 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "GATE_FAIL": ("A", "gate", _d("bridge:s", "want:s why:s units:ia pos:p pulls:i wait:i lever:i")),
     "BREACH": ("A", "siege", _d("why:s", "bridge:s")),
     "DEATHS_3PLUS": ("A", "care", _d(opt="n:i ids:ia causes:sa")),
+    # BUG-115 (Run 14 y707: a curse, then 23 werecavies, no event): CURSED = a citizen was cursed by a god (the report "has been
+    # cursed by <god>!", or the unit sheet showed it: ann "sheet"): n = cursed citizens alive now (were-form included), unit,
+    # name, god, trig (the building he toppled or the tantrum before, from care's records), ann (the announcement type name of
+    # the report: the live data that tells which type DF uses), kind (were | vampire | ?), ids (<= curse_ids; the units of a
+    # merged burst), more (further units in the burst), moon/mi (the next full moon: day of the year, days until).
+    # TRANSFORM = a citizen changed form: dir beast | back, to (the form), n = were-form units now, cursed, bite = 1 for a unit
+    # no curse report named (bitten); a beast also asks DECISION_NEEDED id curse_kill. CURSE_MOON = the full moon is
+    # `curse_moon_lead` days away or less and citizens are cursed: moon, mi, n, ids. CURSED and TRANSFORM are interrupts.
+    "CURSED": ("A", "care", _d("n:i", "unit:i name:s god:s trig:s ann:s kind:s ids:ia more:i moon:i mi:i")),
+    "TRANSFORM": ("A", "care", _d("n:i dir:s", "unit:i name:s to:s ann:s bite:f ids:ia more:i cursed:i")),
+    "CURSE_MOON": ("A", "care", _d("moon:i mi:i n:i", "ids:ia")),
     "DRILL_FAIL": ("A", "drill", _d(opt="streak:i fails:sa")),
     "KERN_FAULT": ("A", "any", _d("module:s", "err:s n:i backoff_s:i")),     # BUG-075: the runner too (backoff_s 0)
     "PERF_DEGRADED": ("A", "perf", _d(opt="tps:i base:i pct:i why:s cause:s")),
@@ -752,7 +763,7 @@ _ROT = Obj(opt={"w": Str(maxbytes=24), "on": Int(0, 1), "n": NAT, "z": NAT, "e":
 
 # FR-53 interrupt types: a class-A subset written to <save>/alarm.txt at once; `dfllm wait --until-interrupt` returns
 # on them and `dfllm ack` acknowledges them (unacked for reflex ack_timeout_s -> the kernel's lockdown default)
-INTERRUPTS = ["ARRIVAL", "INTRUDER", "PREDATOR", "DEATHS_3PLUS", "NO_DEPOT"]
+INTERRUPTS = ["ARRIVAL", "INTRUDER", "PREDATOR", "DEATHS_3PLUS", "NO_DEPOT", "CURSED", "TRANSFORM"]   # BUG-115
 
 EVENT = Obj(req={"n": NAT, "tick": TICK, "type": Str(TYPE_RE), "cls": Str(enum=["A", "B", "C"]),
                  "msg": Str(maxbytes=200), "d": OPEN})
@@ -783,7 +794,7 @@ VERB_ARGS: dict[str, Obj] = {
     "inspect": Obj(req={"what": Str(enum=["state", "modules", "census", "manifest", "projects", "persist",
                                           "perf", "mode", "plan", "tombs", "water_sources", "hospital", "orders",
                                           "workload", "trade", "reach", "entrances", "defense", "perimeter", "refuge",
-                                          "offices"])},
+                                          "offices", "curse", "unit"])},
                    opt={"key": Str(maxbytes=80), "field": Str(r"^[A-Za-z0-9_]{1,40}$")}),
     "selftest": Obj(opt={"suite": Str(enum=["quick", "full"])}),
     "module.enable": Obj(req={"module": MODULE}),
@@ -902,7 +913,13 @@ STATE = Obj(
                           # days since the last migrant wave, -1 none seen)
                           "src": Obj(extra=NAT), "died_y": Obj(extra=NAT),
                           "pop": Obj(req={"kids": NAT, "res": NAT, "peak": NAT, "dy": NAT, "waves": NAT, "mig": NAT,
-                                          "lastw": Int(-1)})}),
+                                          "lastw": Int(-1)}),
+                          # FR-83: citizens at stress category 0 (the worst): how many, the first ids and their names
+                          "s0": Obj(req={"n": NAT}, opt={"ids": Arr(NAT, hi=6), "nm": Arr(Str(maxbytes=28), hi=6)})}),
+         # BUG-115: cursed citizens alive (n), of them in were-form now (tf), the first ids (the transformed first), the next
+         # full moon (mo = day of the year, 1-based; mi = whole days until it), the cursed who died (dead)
+         "curse": Obj(req={"n": NAT, "tf": NAT},
+                      opt={"ids": Arr(NAT, hi=8), "mo": Int(1, 400), "mi": NAT, "dead": NAT}),
          # FR-77: why the adults have no job (the daily scan's own-state classes rest/hurt/mood/free), the adults counted
          # (soldiers apart), the soldiers, the projects the kernel holds back by a rule (seal first, rebuild, slot queue)
          "labor": Obj(req={"starving": NAT, "idle": PCT},

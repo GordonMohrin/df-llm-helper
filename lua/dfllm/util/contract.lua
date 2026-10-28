@@ -54,6 +54,8 @@ C.EVENTS = {
   -- A: wakes the LLM
   SIEGE_END = {cls = 'A', by = 'siege'}, GATE_FAIL = {cls = 'A', by = 'gate'},
   BREACH = {cls = 'A', by = 'siege'}, DEATHS_3PLUS = {cls = 'A', by = 'care'},
+  -- BUG-115 (Run 14 y707: a curse, then 23 werecavies): a citizen cursed by a god, a citizen changing form, the full moon near
+  CURSED = {cls = 'A', by = 'care'}, TRANSFORM = {cls = 'A', by = 'care'}, CURSE_MOON = {cls = 'A', by = 'care'},
   DRILL_FAIL = {cls = 'A', by = 'drill'}, KERN_FAULT = {cls = 'A', by = 'any'},   -- BUG-075: kern (back-off), runner (caught fault)
   -- DECISION_NEEDED food_low/famine (economy): food, block, opts and, BUG-038, auto (fishery: its request is out or
   -- queued; gather: plant gatherers added): what the kernel does itself, never an option for the player; BUG-042:
@@ -185,7 +187,8 @@ C.EVENTS = {
 
 -- Interrupt types (FR-53): a class-A subset that goes to <save>/alarm.txt at once and waits for the
 -- operator's `ack`; unacked for reflex ack_timeout_s, the kernel applies the type's lockdown default itself.
-C.INTERRUPTS = {ARRIVAL = true, INTRUDER = true, PREDATOR = true, DEATHS_3PLUS = true, NO_DEPOT = true}
+C.INTERRUPTS = {ARRIVAL = true, INTRUDER = true, PREDATOR = true, DEATHS_3PLUS = true, NO_DEPOT = true,
+                CURSED = true, TRANSFORM = true}   -- BUG-115
 
 -- Inbox verbs (§13). mod = handler ('kern' = kernel itself); modes = allowed modes (nil = any);
 -- approve = args.approve must be true.
@@ -267,7 +270,7 @@ C.STATE_OWNERS = {
   ['stock.mood_miss'] = 'economy', ['stock.rock'] = 'economy', ['stock.rock_need'] = 'economy',
   ['stock.picks'] = 'economy', ['stock.pick_want'] = 'economy', ['stock.mshort'] = 'economy', ['stock.melt'] = 'economy',
   ['stock.dwhy'] = 'economy', ['stock.hungry'] = 'economy', ['stock.dforb'] = 'economy', ['stock.fforb'] = 'economy',
-  ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['labor.*'] = 'economy', ['orders.*'] = 'economy',
+  ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['curse.*'] = 'care', ['labor.*'] = 'economy', ['orders.*'] = 'economy',
   ['threat.*'] = 'threat', ['bridges'] = 'gate', ['owners.*'] = 'arbiter',
   ['mil.*'] = 'military', ['trade.*'] = 'trade',
   ['clock.*'] = 'arbiter', ['alarm.*'] = 'reflex', ['lever.*'] = 'gate',
@@ -401,7 +404,12 @@ C.STATE_SPEC = obj({
               -- split and record (kids = children and babies, res = residents, peak, deaths and migrant waves in the last
               -- year, days since the last wave or -1) and the deaths of the last year by cause
               src = obj(nil, nil, NAT), died_y = obj(nil, nil, NAT),
-              pop = obj({kids = NAT, res = NAT, peak = NAT, dy = NAT, waves = NAT, mig = NAT, lastw = int(-1)})}),
+              pop = obj({kids = NAT, res = NAT, peak = NAT, dy = NAT, waves = NAT, mig = NAT, lastw = int(-1)}),
+              -- FR-83: citizens at stress category 0 (the worst): how many, the first ids and their names
+              s0 = obj({n = NAT}, {ids = arr(NAT, 0, 6), nm = arr(str(28), 0, 6)})}),
+  -- BUG-115: cursed citizens alive (n), of them in were-form now (tf), the first ids (the transformed first), the next full
+  -- moon (mo = day of the year, 1-based; mi = whole days until it) and the cursed who died (dead)
+  curse = obj({n = NAT, tf = NAT}, {ids = arr(NAT, 0, 8), mo = int(1, 400), mi = NAT, dead = NAT}),
   -- FR-77: why the adults have no job (rest/hurt/mood/free), adults counted, soldiers, projects the kernel holds back
   labor = obj({starving = NAT, idle = PCT}, {n = NAT, sold = NAT, held = NAT, why = obj(nil, nil, NAT)}),
   -- BUG-071: keys published from the last known values (key -> age in game ticks)

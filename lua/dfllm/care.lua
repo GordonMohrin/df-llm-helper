@@ -87,12 +87,16 @@ local R = require('dfllm.reserve')     -- library (not a kernel module): mood fi
 local OL = require('dfllm.orderlib')   -- library: an order's material class (the coffin provisioner)
 local CAD = require('dfllm.util.cadence')   -- BUG-008: when a standing class-A condition is announced again
 local DT = require('dfllm.deaths')          -- library (FR-64): the cause of a citizen's death, death clusters
+local CU = require('dfllm.curse')           -- library (BUG-115, FR-83): curses and transformations, the unit sheet
 
 local M = {name = 'care', every = {ticks = 1200}, on = {}, verbs = {},
            -- BUG-063: the game's own announcements of a strange mood start the mood check at once
            -- BUG-064: "X toppled by <dwarf>": stressed citizens in a tantrum and ghosts tear down workshops, levers, bridges
            reports = {STRANGE_MOOD = true, MOOD_BUILDING_CLAIMED = true, BUILDING_TOPPLED_BY_GHOST = true,
-                      BUILDING_DESTROYED_OR_TOPPLED = true, CITIZEN_TANTRUM = true, POSSESSED_TANTRUM = true}}
+                      BUILDING_DESTROYED_OR_TOPPLED = true, CITIZEN_TANTRUM = true, POSSESSED_TANTRUM = true},
+           -- BUG-115: "<name> has been cursed by <god>!", "<name> has transformed into a ...": kern also routes a report of
+           -- any announcement type whose text holds one of these (the type's name is not known offline)
+           report_text = CU.TEXTS}
 local DAY = C.TICKS.DAY
 M.citizen = require('dfllm.util.who').citizen       -- BUG-103: a citizen of the player (the census also holds residents)
 -- Optional walk-group hook, proposed for CONTRACTS §7 (live L4): snapshot.reach(a, b) -> bool, i.e.
@@ -130,6 +134,11 @@ M.DEFAULTS = {
   -- FR-74: STRESS_HIGH (B) once stressed_pct has stood at stress_high for stress_days game days (again every stress_every
   -- ticks); plan propose / check read stress_high too (a temple and a tavern for the stressed fort)
   stress_high = 30, stress_days = 14, stress_every = 33600,
+  -- BUG-115 / FR-83: curses and transformations: on, the ticks between two CURSED / TRANSFORM events, the records kept, the ids
+  -- an event or the state lists, the moon's period (cycles a year) and the days ahead CURSE_MOON comes, the window in which a
+  -- toppled building or a tantrum counts as the trigger, the desperate citizens (stress category 0) listed by name
+  curse = true, curse_every = 600, curse_keep = 60, curse_ids = 8, curse_moon_cycles = 13, curse_moon_lead = 4,
+  curse_trig_win = 4800, s0_ids = 6,
   coffins = true, coffin_reserve = 10, coffin_batch = 30, coffin_scan_r = 16, coffin_min_side = 4,
   coffin_entrance_r = 10, coffin_retry = 3600, coffin_wood_keep = 20, coffin_wake = 2400, coffin_prio = 3,
   death_window = 33600, death_same = 2, death_any = 3, death_every = 1200, death_recheck = 100800,
@@ -667,9 +676,19 @@ end
 local function look_unit(K, c, r, p, u)
   local a = r.acc
   a.n = a.n + 1
-  if dfhack.units.getStressCategory(u) <= 1 then           -- Lua API.txt:1904: 0 worst .. 6
+  local cat = dfhack.units.getStressCategory(u)             -- Lua API.txt:1904: 0 worst .. 6
+  if cat <= 1 then
     a.stressed = a.stressed + 1
     thoughts(u, a.thoughts, a.src)
+  end
+  -- FR-83: stress level 0 by name (the brief lists them); BUG-115: the sheet's curse and form
+  if cat == 0 then
+    a.s0n = a.s0n + 1
+    if #a.s0 < (c.s0_ids or 6) then a.s0[#a.s0 + 1] = {u.id, uname(u)} end
+  end
+  if c.curse then
+    local okc, errc = pcall(CU.look, K, c, p, u, M.curse_env())
+    if not okc then K.log('warn', 'care curse look %d: %s', u.id, tostring(errc)) end
   end
   -- FR-74: who the census counts (children and residents are in `cit`; `adults` is isAdult = neither BABY nor CHILD)
   if is_child(u) then a.kids = a.kids + 1 end
@@ -3185,7 +3204,8 @@ local function new_run(K, c, p)
   end
   local mode, now = K.mode(), K.now().tick
   return {ph = 1, idx = 0, left = 0, ids = ids, have_units = type(cu) == 'table' and type(cu.ids) == 'table',
-          acc = {n = 0, stressed = 0, naked = 0, thoughts = {}, src = {}, kids = 0, res = 0}, moody = {}, mood_list = {},
+          acc = {n = 0, stressed = 0, naked = 0, thoughts = {}, src = {}, kids = 0, res = 0, s0n = 0, s0 = {}},
+          moody = {}, mood_list = {},
           mood_cls = {},
           claimed = {}, member = {}, res_ids = res_ids, res_hold = {}, res_floor = {}, rc = R.conf(K.cfg.baseline),
           dead = dead, open = {}, acts = 0, fixed = 0, errs = 0, now = now, tombs_free = 0,
@@ -3671,13 +3691,40 @@ local function finish(K, c, r, p)
   cluster_scan(K, c, p)
   st.died = died_tally(p, now)
   if r.have_units then pop_stress(K, c, r, p, now) end
+  -- FR-83: the desperate citizens (stress category 0) of this run, named; BUG-115: curses and transformations
+  if r.have_units then st.s0 = {n = r.acc.s0n, list = r.acc.s0} end
+  if c.curse then
+    local okc, errc = pcall(CU.finish, K, c, p, M.curse_env())
+    if not okc then K.log('warn', 'care curse: %s', tostring(errc)) end
+  end
   K.persist.touch('m.care')
 end
 
 ---------------------------------------------------------------- module
 function M.init(K)
   st = {run = nil}
+  CU.reset()
   pstate(K)
+end
+
+-- the events of the curse library are care's (the registry names care): one literal emit each
+function M.curse_emit(K, kind, msg, d)
+  if kind == 'CURSED' then return K.emit('CURSED', 'A', msg, d)
+  elseif kind == 'TRANSFORM' then return K.emit('TRANSFORM', 'A', msg, d)
+  elseif kind == 'CURSE_MOON' then return K.emit('CURSE_MOON', 'A', msg, d)
+  elseif kind == 'DECISION_NEEDED' then return K.emit('DECISION_NEEDED', 'A', msg, d) end
+end
+
+-- what the curse library needs of care: the name reader, the tantrums seen (name -> tick) and the emitter
+function M.curse_env() return {nm = uname, tantrum = st.tantrum, emit = M.curse_emit} end
+
+-- pull hook (arbiter, BUG-115): the text of a popup it leaves for the player; a curse already known from its report is no news
+function M.curse_text(K, text)
+  local c = M.conf(K)
+  if not c.curse or not CU.parse(text) then return false end
+  CU.report(K, c, pstate(K), {text = text, type = 'POPUP', tick = K.now().tick}, M.curse_env())
+  K.persist.touch('m.care')
+  return true
 end
 
 -- BUG-063 (Run 14 y558: a mood noticed too late, 'Raving'; the game session's own check ran every 15 minutes, a year
@@ -3796,6 +3843,13 @@ end
 
 M.on.REPORT = function(K, ev)
   local c, p = M.conf(K), pstate(K)
+  if c.curse and CU.parse(ev.text) then
+    -- BUG-115: a curse or a transformation, whatever the announcement type
+    local ok, err = pcall(CU.report, K, c, p, ev, M.curse_env())
+    if not ok then K.log('warn', 'care curse report: %s', tostring(err)) end
+    K.persist.touch('m.care')
+    return
+  end
   if ev.type == 'STRANGE_MOOD' or ev.type == 'MOOD_BUILDING_CLAIMED' then
     pcall(mood_watch, K, c, p)
     st.full_now = true                    -- material first: the next step runs the full pass (needs, reserve) at once
@@ -3971,7 +4025,9 @@ end
 -- with their causes, ghosts, free usable tombs, PlaceItemInTomb jobs and the repair acts; <= 8 KB. BUG-003: rebuilt
 -- when older than TOMB_STALE ticks; `last` = the acts of the last run that changed anything
 function M.inspect(K, what, key)
-  if what ~= 'tombs' then return false, 'care answers what=tombs only' end
+  if what == 'curse' then return CU.inspect_curse(K, M.conf(K), pstate(K)) end      -- BUG-115
+  if what == 'unit' then return CU.inspect_unit(K, M.conf(K), pstate(K), key, M.curse_env()) end   -- FR-83
+  if what ~= 'tombs' then return false, 'care answers what=tombs, curse and unit only' end
   if not st.tombs then return true, 'tombs: no care run finished yet', {tick = K.now().tick} end
   local src = st.tombs
   if K.now().tick - (num(src.now) or 0) >= M.TOMB_STALE then
@@ -4047,6 +4103,11 @@ function M.state(K)
       if all > shown then care.died_y.other = all - shown end
     end
   end
+  local s0 = st.s0
+  if s0 and s0.n > 0 then                     -- FR-83: the desperate citizens (stress category 0), named
+    care.s0 = {n = s0.n, ids = {}, nm = {}}
+    for i, e in ipairs(s0.list) do care.s0.ids[i], care.s0.nm[i] = e[1], trunc(e[2], 28) end
+  end
   local v = st.cof
   if v and v.active == 1 then                 -- FR-61: the coffin provisioner
     care.coffins = {want = v.want, short = v.short, stock = v.stock, order = v.order, proj = trunc(v.proj, 40)}
@@ -4056,7 +4117,7 @@ function M.state(K)
     for k, n in pairs(st.died) do died[k] = n end
     care.died = died
   end
-  return {care = care, stock = {hosp_water = o.hosp_water}}
+  return {care = care, stock = {hosp_water = o.hosp_water}, curse = CU.view()}
 end
 
 local function deep(t)
