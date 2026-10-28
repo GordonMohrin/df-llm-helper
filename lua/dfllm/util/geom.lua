@@ -42,6 +42,41 @@ function G.bbox_size(b)
   return b[4] - b[1] + 1, b[5] - b[2] + 1, b[6] - b[3] + 1
 end
 
+-- BUG-129 (Run 14: a seal's walls far apart made one box over the whole map): the tiles {{x, y, z}, ...} as boxes
+-- {{x0, y0, z0, x1, y1, z1}, ...}: a tile within gap {gx, gy, gz} of a box joins it, boxes that come that close merge;
+-- over `max` boxes the pair whose union adds the fewest tiles merges (first-seen order kept)
+local function vol(b) return (b[4] - b[1] + 1) * (b[5] - b[2] + 1) * (b[6] - b[3] + 1) end
+local function near(a, b, g)
+  return a[1] - g[1] <= b[4] and b[1] - g[1] <= a[4] and a[2] - g[2] <= b[5] and b[2] - g[2] <= a[5]
+     and a[3] - g[3] <= b[6] and b[3] - g[3] <= a[6]
+end
+function G.clusters(tiles, gap, max)
+  local out = {}
+  for _, t in ipairs(tiles or {}) do
+    local b = {t[1], t[2], t[3], t[1], t[2], t[3]}
+    local hit
+    for i, c in ipairs(out) do if near(c, b, gap) then hit = i; break end end
+    if hit then
+      out[hit] = G.bbox_union(out[hit], b)
+      local i = hit + 1                                      -- the grown box may reach later ones
+      while i <= #out do
+        if near(out[hit], out[i], gap) then out[hit] = G.bbox_union(out[hit], table.remove(out, i)) else i = i + 1 end
+      end
+    else out[#out + 1] = b end
+  end
+  while #out > math.max(1, max or 1) do
+    local bi, bj, best
+    for i = 1, #out - 1 do
+      for j = i + 1, #out do
+        local cost = vol(G.bbox_union(out[i], out[j])) - vol(out[i]) - vol(out[j])
+        if not best or cost < best then bi, bj, best = i, j, cost end
+      end
+    end
+    out[bi] = G.bbox_union(out[bi], table.remove(out, bj))
+  end
+  return out
+end
+
 function G.near_any(p, list, r)
   for _, q in ipairs(list or {}) do
     if G.dist(p, q) <= r then return true end

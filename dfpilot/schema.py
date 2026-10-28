@@ -763,8 +763,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "GATE": ("C", "gate", _d("bridge:s", "state:s units:ia")),
     "LEVER": ("C", "gate", _d("bridge:s", "lever:i job:i")),
     # BUG-043: margin = a default box's margin when it shrank ('8,8,1'), cols = its explore shaft columns, out/first =
-    # the fort pieces an explicit audit box left out (readiness fails such an audit: `coverage: ...`)
-    "SNAPSHOT_READY": ("C", "snapshot", _d("id:s path:s", "purpose:s margin:s cols:i out:i first:s")),
+    # the fort pieces an explicit audit box left out (readiness fails such an audit: `coverage: ...`); BUG-129: regions =
+    # the parts of an audit box exported as the fort core plus far parts, drop/dropped = the far pieces it dropped (their
+    # tiles count as outside, no coverage fail)
+    "SNAPSHOT_READY": ("C", "snapshot", _d("id:s path:s",
+                                           "purpose:s margin:s cols:i out:i first:s regions:i drop:i dropped:s")),
     "CMD": ("C", "kern", _d("id:s verb:s ok:f")),
     "BOOT": ("C", "kern", _d(opt="save:s v:i boots:i")),
     "UNLOAD": ("C", "kern", _d()),

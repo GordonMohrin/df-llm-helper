@@ -68,6 +68,9 @@ M.CFG = {
   -- shaft open to a cavern is plugged at once (a constructed wall on its two top stair tiles; the lower one is given
   -- up when a step of it waits plug_wait). Projects stopped as damp/water/cavern look again every `recheck`.
   lake_r = 12, lake_min = 30, plug_wait = DAY, recheck = DAY, cav_keep = 16,
+  -- BUG-129 (Run 14: a seal's walls far apart spanned the map as one audit box): boxes() names a project's tile
+  -- clusters (tiles within part_gap join) as parts, at most part_max of them
+  part_gap = {6, 6, 1}, part_max = 8,
   lake_r0 = 4,           -- BUG-033: the first wider box; lake_r only when the flood reaches its edge
   -- Run 11 (c1a14676 stood 'stalled' with its shaft open to a cavern lake): every explore shaft is looked at daily
   -- whatever its project's state, at most shaft_n per run, reading at most shaft_probe of its dug tiles for water
@@ -251,6 +254,7 @@ local function forget(id)
   for k in pairs(S.tiles) do if k:sub(1, #id + 1) == id .. '/' then S.tiles[k] = nil end end
   if S.own then S.own[id] = nil end                -- BUG-033: own_tiles cache
   S.bbox[id], S.meas[id] = nil, nil
+  if S.cl then S.cl[id] = nil end                   -- BUG-129: tile clusters
   if S.rt and S.rt.skip then S.rt.skip[id], S.rt.rty[id], S.rt.pb[id] = nil, nil, nil end   -- BUG-022 records
   if S.rt and S.rt.br then S.rt.br[id] = nil end    -- Run 11: the breach record (m.runner cav outlives the project)
   if S.rt and S.rt.dw then S.rt.dw[id] = nil end    -- Run 11: the seal doors planned as walls (door_walls)
@@ -1805,6 +1809,23 @@ local KEEP_BOX = {cistern = true, bedrooms = true, tombs = true, hall = true, gu
 local function keep_box(P, d)
   S.rt.keep[P.id] = project_bbox(P.id, d)
   if KEEP_BOX[P.tpl] == 'kind' then S.rt.kk[P.id] = P.tpl end
+  S.rt.kp[P.id] = Q.tile_parts(P.id, d)                  -- BUG-129: the clusters of its tiles (nil: one)
+end
+
+-- BUG-129: the clusters of a project's tiles (all stages) when there are two or more, else nil (cached)
+function Q.tile_parts(id, d)
+  S.cl = S.cl or {}
+  local c = S.cl[id]
+  if c == nil then
+    local tl = {}
+    for si = 0, #d.stages - 1 do
+      for _, list in ipairs(stage_tiles(id, d, si)) do for _, t in ipairs(list) do tl[#tl + 1] = t end end
+    end
+    c = geom.clusters(tl, M.CFG.part_gap, M.CFG.part_max)
+    c = #c > 1 and c or false
+    S.cl[id] = c
+  end
+  return c or nil
 end
 
 -- FR-76 (Run 12 Trussroads: fortcore stage 2 "site: same" finished at once, its tiles already open in the old fort, with
@@ -4223,6 +4244,7 @@ function M.init(K)
   rt.sw = obj(rt.sw)                                                 -- BUG-044: stuck seal doors replaced by walls
   rt.so = obj(rt.so)                                                 -- BUG-044: door/hatch order items per seal project
   rt.kk = obj(rt.kk)                                                 -- BUG-043: the template of a kept seal/explore box
+  rt.kp = obj(rt.kp)                                                 -- BUG-129: the tile clusters of a kept box
   rt.park = obj(rt.park)                                             -- BUG-037: parked projects announced
   if type(rt.cz) ~= 'table' then rt.cz = {} end                      -- Run 11: cavern breach tiles
   if type(rt.exh) ~= 'string' then rt.exh = '' end
@@ -4360,16 +4382,17 @@ function M.queue(K)
                        table.concat(names, ', ')), data
 end
 
--- public (live L2, BUG-043): the boxes of the projects the audit snapshot holds, named: {{b, id, tpl}}: the projects
--- not done yet and the kept boxes of finished ones (KEEP_BOX; a kept seal, plug, repair or explore by m.runner kk,
--- else the list's template or 'done'). snapshot's default audit box is made of them (an explore as a column part)
+-- public (live L2, BUG-043): the boxes of the projects the audit snapshot holds, named: {{b, id, tpl, parts?, done?}}:
+-- the projects not done yet and the kept boxes of finished ones (KEEP_BOX; a kept seal, plug, repair or explore by
+-- m.runner kk, else the list's template or 'done'; done = true). snapshot's default audit box is made of them (an
+-- explore as a column part). BUG-129: parts = the clusters of its tiles when they lie apart (m.runner kp for a kept one)
 function M.boxes(K)
   local r, tpl = {}, {}
   for _, P in ipairs(S.pd.list) do
     tpl[P.id] = P.tpl
     if P.done ~= 1 then
       local d = doc(K, P.id)
-      if d then r[#r + 1] = {b = project_bbox(P.id, d), id = P.id, tpl = P.tpl} end
+      if d then r[#r + 1] = {b = project_bbox(P.id, d), id = P.id, tpl = P.tpl, parts = Q.tile_parts(P.id, d)} end
     elseif KEEP_BOX[P.tpl] and not S.rt.keep[P.id] then   -- finished before the box was kept: its bp file
       local d = read_bp(K, P.id)
       if d and not check_doc(d, P.tpl) then keep_box(P, d); forget(P.id); dirty() end
@@ -4379,7 +4402,7 @@ function M.boxes(K)
   for id in pairs(S.rt.keep) do ids[#ids + 1] = id end
   table.sort(ids)
   for _, id in ipairs(ids) do
-    r[#r + 1] = {b = S.rt.keep[id], id = id, tpl = S.rt.kk[id] or tpl[id] or 'done'}
+    r[#r + 1] = {b = S.rt.keep[id], id = id, tpl = S.rt.kk[id] or tpl[id] or 'done', parts = S.rt.kp[id], done = true}
   end
   return r
 end
