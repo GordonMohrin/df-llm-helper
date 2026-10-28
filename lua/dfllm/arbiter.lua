@@ -548,7 +548,7 @@ local function popup_watch(K)
   local n = popup_count()
   local erased = require('dfllm.act').popups_erased or 0
   local pw = st.pw
-  st.pw = {n = n, text = front_text(), erased = erased}
+  st.pw = {n = n, text = n > 0 and front_text() or (pw and pw.text), erased = erased}   -- no popup: nothing to read (the last text stays for the log line)
   if not pw or n >= pw.n then return end
   local gone = (pw.n - n) - (erased - pw.erased)
   if gone <= 0 then return end
