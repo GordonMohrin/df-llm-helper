@@ -51,11 +51,12 @@ from pathlib import Path
 from typing import Callable
 
 from . import files, paths, schema
+from . import plan as plan_mod
 from .events import clip, est_tokens, fmt_tick
 
 WAKE_TOKENS = 150
 WAKE_TYPES = {t for t, (c, _, _) in schema.EVENTS.items() if c == "A"}
-SYNTH = {"HB_STALE", "AUTO_FAIL", "SUPERVISE", "QUICKSAVE_FAILED", "NEEDS_CLICK"}   # follower's own wake reasons (not kern events)
+SYNTH = {"HB_STALE", "AUTO_FAIL", "SUPERVISE", "QUICKSAVE_FAILED", "NEEDS_CLICK", "PLAN_AUTO"}   # follower's own wake reasons (not kern events)
 # Run 9: an army walked in while SIEGE_START/INVASION waited in the digest; they and the interrupts come right
 # after BREACH and wake at once (URGENT: no merge wait, no hourly limit, one per type per URGENT_REPEAT_S)
 PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", "LOCKDOWN", "SIEGE_DEEP",
@@ -66,11 +67,12 @@ PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", 
         "DEATHS_PREVENTABLE", "KERN_FAULT", "HB_STALE", "SUPERVISE", "QUICKSAVE_FAILED",
         "SIEGE_END",
         "DRILL_FAIL", "BURROW_SHRUNK", "SIEGE_UNREADY", "PERF_DEGRADED", "DECISION_NEEDED", "SEAL_STUCK",
-        "PROJECT_BLOCKED", "PLAN_EXHAUSTED", "YEAR_REVIEW", "AUTO_FAIL"]
+        "PROJECT_BLOCKED", "PLAN_EXHAUSTED", "PLAN_AUTO", "YEAR_REVIEW", "AUTO_FAIL"]
 URGENT = {"BREACH", "SIEGE_START", "INVASION", "LOCKDOWN"} | set(schema.INTERRUPTS)
 URGENT_REPEAT_S = 60
 _IRQ_NEXT = "dfllm ack; dfllm status (the kernel already locked down)"
-NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propose",
+NEXT = {"YEAR_REVIEW": "dfllm plan propose y.json, fix its ERROR lines, plan check, plan apply",
+        "PLAN_EXHAUSTED": "dfllm plan propose",
         "SIEGE_START": "dfllm status (the kernel already locked down)", "INVASION": _IRQ_NEXT, "ARRIVAL": _IRQ_NEXT,
         "INTRUDER": _IRQ_NEXT, "PREDATOR": _IRQ_NEXT, "LOCKDOWN": _IRQ_NEXT, "DEATHS_3PLUS": "dfllm ack; dfllm brief",
         "NO_DEPOT": "dfllm ack; place a trade depot (bp.place)",
@@ -132,6 +134,9 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
                       "the door item is missing; suspendmanager: jobs.release preventblocking=false; DF: the cancel "
                       "reason), a door still unbuilt 2 days later is replaced by a wall (SEAL_WALLED) when the citizens "
                       "keep another way"}
+# FR-86: follow applied a minimal plan itself after plan.stale_apply_years years without a `plan apply`
+NEXT["PLAN_AUTO"] = ("tell Gordon (nobody approved a plan for years; follow applied the minimal one: seal, tombs, hospital, "
+                     "food/drink, refuge, no star phase); then dfllm plan propose y.json, plan check, plan apply replaces it")
 SUPERVISE_EVERY_S = 15                         # supervise.json read cadence
 SUPERVISE_FRESH_S = 3600                       # alerts logged longer ago than this never wake
 CLICK_KEY = "needs_click"                      # supervise.CLICK_KEY (K2): the alarm for a save only a human can load now
@@ -148,6 +153,8 @@ SEAL_HINT = ("dfllm cmd bp.place tpl=seal site=S1 at=audit (walls the audit's by
 AUTO_REQUESTS = ("tombs", "workshops")            # PROJECT_REQUEST templates follow places itself
 AUTO_PHASES = ("P0", "P1")                    # PLAN_EXHAUSTED auto-start only for the basic infrastructure
 PRUNE_EVERY_S = 60
+PLAN_CHECK_EVERY_S = 300                       # FR-86: how often follow looks at the age of the applied plan
+PLAN_AUTO_KEYS = ("first_y", "tried_y", "applied_y")
 AUDIT_PREFIX = "aud"                           # snapshot ids of `dfllm audit` (it audits them itself, follow does not)
 AUDIT_SNAP_S = 60                              # `dfllm audit`: seconds to wait for its fresh snapshot
 ERR_EVERY_S = 60                               # stderr 'poll error' at most once per minute
@@ -288,9 +295,52 @@ OFFICE_HINT = ("a vacant office or squads without a leader: dfllm cmd inspect '{
                "dfllm cmd appoint / squad.create / squad.leader (the msg names the unit)")
 
 
-def wake_line(burst: dict[str, dict], state: dict | None, held_s: float = 0, auto: bool = True) -> str:
+SHOW_FIGHT = ("SIEGE", "BREACH", "ALERT", "DRILL")     # viewlib.lua V.FIGHT: the camera is the player's there
+SHOW_CAUSE = ("BREACH", "SIEGE_START", "INVASION", "LOCKDOWN")      # no unit in their d: the lockdown's cause in the state
+
+
+def view_target(etype: str, d: dict, state: dict | None = None) -> str | None:
+    """FR-88: the target of a ready `view` for an event: its unit (d.id for INTRUDER/PREDATOR/INVASION, d.unit for the mood
+    types, the first of d.units for patients), else its position (d.pos 'x,y,z'); the SHOW_CAUSE types take the lockdown's
+    cause (state alarm.by id, else its pos). None when the event names nothing to look at."""
+    def num(v):
+        return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None
+    uid = num(d.get("id")) if etype in ("INTRUDER", "PREDATOR", "INVASION") else num(d.get("unit"))
+    units = d.get("units")
+    if uid is None and isinstance(units, list) and units:
+        uid = num(units[0])
+    if uid is not None:
+        return str(uid)
+    pos = d.get("pos")
+    if isinstance(pos, list) and len(pos) == 3 and all(isinstance(v, int) and not isinstance(v, bool) for v in pos):
+        return ",".join(str(v) for v in pos)
+    if etype in SHOW_CAUSE:
+        by = ((state or {}).get("alarm") or {}).get("by")
+        if isinstance(by, dict):
+            if num(by.get("id")) is not None:
+                return str(by["id"])
+            return view_target("", {"pos": by.get("pos")})
+    return None
+
+
+def show_hint(burst: dict[str, dict], state: dict | None) -> str:
+    """FR-88: 'show: dfllm cmd view target=39230', the camera on the first event of the burst (wake order) that names a
+    unit or a place. In a fight the camera is the player's (V.FIGHT): then the command is his, with --by gordon."""
+    for ty in sorted(burst, key=_prio):
+        e = burst[ty]["e"]
+        t = view_target(ty, e.get("d") if isinstance(e.get("d"), dict) else {}, state)
+        if t:
+            cmd = f"dfllm cmd view target={t}"
+            return (f"show (the player, in a fight): {cmd} --by gordon" if (state or {}).get("mode") in SHOW_FIGHT
+                    else f"show: {cmd}")
+    return ""
+
+
+def wake_line(burst: dict[str, dict], state: dict | None, held_s: float = 0, auto: bool = True,
+              review: str = "") -> str:
     """'WAKE y3 sum d20 PEACE | SIEGE_END: msg | GATE_FAIL x2: msg | next: ...' within WAKE_TOKENS. DECISIONS 2: with
-    follow --no-auto (auto False) and ways in without door or bridge, every wake line says 'auto-seal off, N openings'."""
+    follow --no-auto (auto False) and ways in without door or bridge, every wake line says 'auto-seal off, N openings'.
+    FR-86: `review` (plan.review_note: PLAN STALE, the ERROR fixes of this year's draft) rides on the YEAR_REVIEW item."""
     t = (state or {}).get("t") or {}
     when = fmt_tick(t.get("abs", t["y"] * schema.TICKS["YEAR"] + t["tick"])) if t else "?"
     head = f"WAKE {when} {(state or {}).get('mode', '?')}"
@@ -301,7 +351,8 @@ def wake_line(burst: dict[str, dict], state: dict | None, held_s: float = 0, aut
     if not auto and isinstance(openings, int) and openings > 0:     # the follow process places nothing: say so every time
         head += f" | AUTO-SEAL OFF, {openings} opening{'s' if openings != 1 else ''} (follow --no-auto)"
         hint = "seal by hand: dfllm cmd bp.place tpl=seal site=S1 at=last; " + hint
-    tail = f" | next: {hint}" + (f"; dfllm events --cls A --since {min(ns) - 1}" if ns else "")
+    show = show_hint(burst, state)
+    tail = f" | next: {hint}" + (f"; dfllm events --cls A --since {min(ns) - 1}" if ns else "") + (f" | {show}" if show else "")
     room = WAKE_TOKENS - est_tokens(head + tail) - 4
     items, used = [], 0
     for i, ty in enumerate(types):
@@ -310,6 +361,8 @@ def wake_line(burst: dict[str, dict], state: dict | None, held_s: float = 0, aut
         d = e.get("d") if isinstance(e.get("d"), dict) else {}
         bridge = d.get("bridge") or d.get("module") or ""
         item = f"{ty}{' x%d' % p['c'] if p['c'] > 1 else ''}{' ' + bridge if bridge else ''}: {e.get('msg', '')}"
+        if ty == "YEAR_REVIEW" and review:
+            item += f" | {review}"
         left = len(types) - i - 1
         budget = max(8, (room - used) // (left + 1) if left else room - used)
         item = clip(item, budget)
@@ -342,6 +395,8 @@ class Follower:
         self._sup_read = 0.0
         self.qs_seen: int | None = None        # Run 10: wall of the last <save>/quicksave.json record seen
         self._qs_read = 0.0
+        self.plan_auto: dict = {}              # FR-86: first_y (the year follow first saw no plan), tried_y, applied_y
+        self._plan_read = 0.0
         self._beat = -1e18
 
     @staticmethod
@@ -356,6 +411,7 @@ class Follower:
         if self.dir is not None:
             self.save_state()
         self.dir, self.jobs, self.hb_woken, self._saved, self.qs_seen = d, {}, False, "", None
+        self.plan_auto, self._plan_read = {}, 0.0
         st = files.read_json(self._state_path())
         since = self.since
         if isinstance(st, dict) and st.get("v") == 2:
@@ -368,6 +424,9 @@ class Follower:
                                      if isinstance(v, (int, float)) and not isinstance(v, bool)}
                 qs = st.get("qs_seen")
                 self.qs_seen = qs if isinstance(qs, int) and not isinstance(qs, bool) else None
+                pa = st.get("plan_auto")                     # FR-86: survives a restart of follow (a reload of the game)
+                self.plan_auto = {k: v for k, v in pa.items() if k in PLAN_AUTO_KEYS and isinstance(v, int)
+                                  and not isinstance(v, bool)} if isinstance(pa, dict) else {}
             except Exception as e:             # noqa: BLE001 - a corrupt .follow.json must not block attaching
                 self.gate.__init__(self.gate.per_type_s, self.gate.merge_s, self.gate.quiet_s, self.gate.per_hour)
                 self.jobs = {}
@@ -407,6 +466,8 @@ class Follower:
             doc["sup_seen"] = self.sup_seen
         if self.qs_seen is not None:
             doc["qs_seen"] = self.qs_seen
+        if self.plan_auto:
+            doc["plan_auto"] = self.plan_auto
         text = files.dumps(doc)
         if text == self._saved:
             return                             # unchanged: no disk write every second
@@ -438,6 +499,7 @@ class Follower:
         self._check_heartbeat(now)
         self._check_supervise(now)
         self._check_quicksave(now)
+        self._check_plan(now)
         if self.auto or self.audit:
             self._run_jobs(now)
         if now - self._pruned >= PRUNE_EVERY_S:
@@ -445,7 +507,9 @@ class Follower:
             files.prune_outbox(self.dir)
         burst = self.gate.flush(now)
         if burst:
-            line = wake_line(burst, files.read_state(self.dir), auto=self.auto)
+            state = files.read_state(self.dir)
+            review = plan_mod.review_note(self.dir, state) if "YEAR_REVIEW" in burst else ""     # FR-86
+            line = wake_line(burst, state, auto=self.auto, review=review)
             self.out(line)
             printed.append(line)
             files.log_cli(self.dir, "follow", "wake", sorted(burst), line)
@@ -591,6 +655,39 @@ class Follower:
             self._synth("QUICKSAVE_FAILED", f"quicksave ({rec['by']}) wrote nothing: {rec['why']}", now)
 
     # ------------------------------------------------------------ auto actions (no LLM)
+    def _check_plan(self, now: float) -> None:
+        """FR-86 (Run 14: plan.json of y503 in y708, 190 YEAR_REVIEW wakes, no `plan apply`): after plan.stale_apply_years
+        game years without an applied plan (0 = off; follow --no-auto never) follow applies the minimal plan itself,
+        once per game year, in PEACE only, and wakes PLAN_AUTO; when it cannot (a check ERROR the minimal repairs do not
+        clear), AUTO_FAIL says why. The year it counts from is the applied plan's, else the first year follow saw none
+        (`plan_auto.first_y`, in .follow.json: it survives a restart)."""
+        if not self.auto or self.dir is None or now - self._plan_read < PLAN_CHECK_EVERY_S:
+            return
+        self._plan_read = now
+        try:
+            years = plan_mod.stale_years()
+            state = files.read_state(self.dir)
+            year = ((state or {}).get("t") or {}).get("y")
+            if years <= 0 or not isinstance(year, int) or (state or {}).get("mode") != "PEACE":
+                return
+            plan = plan_mod.applied_plan(self.dir)
+            if plan is not None:
+                ref = plan["year"]
+            else:
+                ref = self.plan_auto.setdefault("first_y", year)
+            if year - ref < years or self.plan_auto.get("tried_y") == year:
+                return
+            self.plan_auto["tried_y"] = year           # one try a game year, whatever comes out
+            self.save_state()
+            errs, msg = plan_mod.apply_minimal(self.dir, by="follow")
+            if errs:
+                self._fail("minimal plan", "; ".join(errs[:3]), now)
+                return
+            self.plan_auto["applied_y"] = year
+            self._synth("PLAN_AUTO", f"no plan applied since y{ref}, now y{year}: follow applied the minimal plan ({msg})", now)
+        except Exception as ex:                        # noqa: BLE001 - the plan check must never stop the follower
+            self._fail("minimal plan", f"{type(ex).__name__}: {ex}", now)
+
     def _send(self, verb: str, args: dict, what: str | None, now: float, snap: dict | None = None,
               need: list | None = None) -> str:
         """Send without waiting; with `what`, the reply is read in _run_jobs (refusal/timeout -> AUTO_FAIL)."""

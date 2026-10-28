@@ -118,7 +118,23 @@ def line_head(ctx: Ctx) -> str:
     unready = " UNREADY" if unready_r0(ctx) else ""            # FR-65: never a plain "PEACE" while R0 fails
     return (f"{defcon} | {ctx.save}{df} {fmt_tick(ctx.now_tick())} {mode}" + (f"({_ago(ctx, since)})" if since else "")
             + unready + (f" {s['phase']}" if "phase" in s else "") + f" {t.get('tps', '?')}t/s {run}{hold}"
-            + f" hb {fmt_age(ctx.hb_age)}")
+            + f" hb {fmt_age(ctx.hb_age)}" + plan_flag(ctx))
+
+
+def plan_flag(ctx: Ctx) -> str:
+    """FR-86 (Run 14: plan.json of y503 in y708, 190 YEAR_REVIEW wakes, no apply): ' | PLAN STALE: applied y503, now y708'
+    once the applied plan is more than a year old, ' | PLAN NONE' while none was ever applied, ' | PLAN MINIMAL' while the
+    plan is the one follow applied itself (replace it). Nothing while the plan is current or the year is unknown."""
+    year = (ctx.s.get("t") or {}).get("y")
+    if ctx.state is None or not isinstance(year, int):
+        return ""
+    from .plan import STALE_SHOW, is_minimal
+    p = ctx.plan
+    if p is None:
+        return " | PLAN NONE: no plan applied (dfllm plan propose)"
+    if year - p["year"] > STALE_SHOW:
+        return f" | PLAN STALE: applied y{p['year']}, now y{year}" + (" (minimal, by follow)" if is_minimal(p) else "")
+    return " | PLAN MINIMAL (by follow): replace it with dfllm plan propose" if is_minimal(p) else ""
 
 
 def line_save(save_dir: Path, now: float | None = None) -> str:

@@ -177,6 +177,7 @@ C.EVENTS = {
   -- C: log only
   SIEGE_STATUS = {cls = 'C', by = 'siege'}, SEASON = {cls = 'C', by = 'kern'},
   PROJECT_STAGE = {cls = 'C', by = 'runner'}, MODE = {cls = 'C', by = 'kern'},
+  POPUP_GONE = {cls = 'C', by = 'arbiter'},       -- FR-87: a popup vanished without the kernel's dismiss (text, kind)
   GATE = {cls = 'C', by = 'gate'}, LEVER = {cls = 'C', by = 'gate'},
   SNAPSHOT_READY = {cls = 'C', by = 'snapshot'}, CMD = {cls = 'C', by = 'kern'},
   BOOT = {cls = 'C', by = 'kern'}, UNLOAD = {cls = 'C', by = 'kern'},
@@ -222,6 +223,8 @@ C.VERBS = {
   ['squad.uniform'] = {mod = 'military', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
   -- FR-78 (Run 14 note 65): a civzone (pen, pit, pond, sand, clay, fishing, meeting) in a box, quickfort zone mode
   ['zone.place'] = {mod = 'runner', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
+  -- FR-88 (Run 14 note 95): the camera; no mode list (a fight needs by=gordon, viewlib refuses it)
+  ['view'] = {mod = 'arbiter'},
 }
 -- Verbs accepted only from these `by` origins (§9.5). `by` is a label, not authentication: the
 -- hook (WP4) keeps the LLM from writing these origins; this check is the second line.
@@ -231,6 +234,7 @@ C.VERB_BY = {audit = {follow = true, test = true}}
 C.ACT = {
   set_paused = {'arbiter'}, timestream = {'arbiter'}, setting = {'arbiter'},
   overlay = {'arbiter'}, dismiss_popup = {'arbiter'},
+  view_to = {'arbiter'}, view_window = {'arbiter'},   -- FR-88: the camera (viewport) like a click on a report
   civ_alert = {'siege'}, alert_burrows = {'siege'},
   squad_create = {'military'}, squad_leader = {'military'}, squad_add = {'military'}, squad_remove = {'military'},
   squad_routine = {'military'}, squad_order = {'military'}, squad_uniform = {'military'},

@@ -70,6 +70,7 @@ DECISIONS = {
 ACT = {
     "set_paused": ["arbiter"], "timestream": ["arbiter"], "setting": ["arbiter"], "overlay": ["arbiter"],
     "dismiss_popup": ["arbiter"], "civ_alert": ["siege"], "alert_burrows": ["siege"],
+    "view_to": ["arbiter"], "view_window": ["arbiter"],      # FR-88: the camera (viewport), arbiter hosts the verb `view`
     "squad_create": ["military"], "squad_leader": ["military"], "squad_add": ["military"],
     "squad_remove": ["military"],
     "squad_routine": ["military"], "squad_order": ["military"], "squad_uniform": ["military"],
@@ -721,6 +722,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "SIEGE_STATUS": ("C", "siege", _d(opt="vis:i worn:i on_station:i deaths:i captures:i off:s")),
     "SEASON": ("C", "kern", _d(opt="year:i season:i")),
     "PROJECT_STAGE": ("C", "runner", _d("proj:s", "stage:s pct:i")),
+    # FR-87 (Run 14 y707: a private script deleted the curse popup): a popup left the screen and the kernel did not dismiss
+    # it (the player's click looks the same): n popups gone, text = the front one as last seen, kind = the arbiter's class
+    "POPUP_GONE": ("C", "arbiter", _d("n:i", "text:s kind:s")),
     "MODE": ("C", "kern", _d("from:s to:s", "why:s")),
     "GATE": ("C", "gate", _d("bridge:s", "state:s units:ia")),
     "LEVER": ("C", "gate", _d("bridge:s", "lever:i job:i")),
@@ -747,6 +751,7 @@ EVENT = Obj(req={"n": NAT, "tick": TICK, "type": Str(TYPE_RE), "cls": Str(enum=[
 # FR-39: make-item jobs whose manager order must name the item def (lua/dfllm/orderlib.lua O.SUBTYPE_JOBS)
 SUBTYPE_JOBS = frozenset({"MakeArmor", "MakePants", "MakeShoes", "MakeGloves", "MakeHelm", "MakeWeapon", "MakeAmmo",
                           "MakeShield", "MakeTrapComponent", "MakeTool", "MakeToy"})
+VIEW_TARGET = named("view_target", AnyOf(NAT, POS, Str(r"^[^\x00-\x1f]{1,60}$")))
 VERB_ARGS: dict[str, Obj] = {
     "plan.reload": Obj(opt={"phases": Bool()}),
     "bp.place": Obj(req={"tpl": TPL, "site": Str(ID_RE)},
@@ -799,6 +804,9 @@ VERB_ARGS: dict[str, Obj] = {
     "squad.leader": Obj(req={"squad": SQUAD, "unit": NAT}),
     "squad.add": Obj(req={"squad": SQUAD, "unit": NAT}),
     "squad.uniform": Obj(req={"squad": Str(enum=["A", "B", "C"])}, opt={"kind": Str(enum=["melee", "xbow"])}),
+    # FR-88 (Run 14 note 95): the camera. target = a unit id (int), x,y,z (list or "x,y,z"), "bld:<id>" (a building), a
+    # project id or a part of a unit's name (strings); no target = back to the player's last view
+    "view": Obj(opt={"target": VIEW_TARGET, "follow": Bool(), "ttl_s": Int(1, 3600), "why": Str(maxbytes=200)}),
     # FR-78 (Run 14 note 65): a civzone of `type` in `bbox` (one z level) through quickfort's zone mode
     "zone.place": Obj(req={"type": Str(enum=ZONE_TYPES), "bbox": BBOX}, opt={"name": Str(r"^[A-Za-z0-9_-]{1,24}$")}),
 }
@@ -822,6 +830,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "squad.create": ("military", SQUAD_MODES, False), "squad.leader": ("military", SQUAD_MODES, False),
     "squad.add": ("military", SQUAD_MODES, False), "squad.uniform": ("military", SQUAD_MODES, False),
     "zone.place": ("runner", SQUAD_MODES, False),
+    "view": ("arbiter", None, False),      # FR-88: modes are the verb's own rule (a fight needs by=gordon)
 }
 # verbs accepted only from these `by` origins (CONTRACTS §9.5; `by` is a label, the hook is the guard)
 VERB_BY: dict[str, list[str]] = {"audit": ["follow", "test"]}
