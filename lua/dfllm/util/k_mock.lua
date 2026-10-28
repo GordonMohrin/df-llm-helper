@@ -823,6 +823,13 @@ function M.new(opts)
         if e.factor > 1 and (ticking or ev.ms) and sched.quiet(e, W.ms_per_frame, W.ms) then
           W.logs[#W.logs + 1] = {level = 'info', module = 'kern', msg = e.name .. ' promoted to x' .. e.factor}
         end
+        -- BUG-136: the watch pass as in kern (own tick clock, never paced or demoted)
+        local we = e.M.watch_every
+        if ticking and type(we) == 'table' and type(e.M.watch) == 'function' and math.type(we.ticks) == 'integer'
+           and (e.watch_tick == nil or now.tick < e.watch_tick or now.tick - e.watch_tick >= we.ticks) then
+          e.watch_tick = now.tick
+          call_in(e, 'watch', e.M.watch)
+        end
         if e.cont or sched.due(e, now, ticking) then
           -- shares only (x alert_mult outside PEACE); the PEACE pool needs kern's measured frame cost
           if sched.paced(e, W.ms, nil, W.mode == 'PEACE' and 1 or sched.PACE.alert_mult) then e.paced_n = e.paced_n + 1

@@ -4059,11 +4059,23 @@ end
 -- what the curse library needs of care: the name reader, the tantrums seen (name -> tick) and the emitter
 function M.curse_env() return {nm = uname, tantrum = st.tantrum, emit = M.curse_emit} end
 
+-- BUG-136 (live i2: the curse logic lived in the full run, 10-31 game days apart under pacing): the daily curse pass on
+-- kern's watch clock (CONTRACTS §3.2: never paced, never demoted): the form of the cursed, a new were-cursed unit,
+-- the dead, CURSE_MOON, the state view
+M.watch_every = {ticks = DAY}
+function M.watch(K)
+  local c = M.conf(K)
+  if not c.curse then return end
+  local ok, err = pcall(CU.watch, K, c, pstate(K), M.curse_env())
+  if not ok then K.log('warn', 'care curse watch: %s', tostring(err)) end
+end
+
 -- pull hook (arbiter, BUG-115): the text of a popup it leaves for the player; a curse already known from its report is no news
 function M.curse_text(K, text)
   local c = M.conf(K)
   if not c.curse or not CU.parse(text) then return false end
-  CU.report(K, c, pstate(K), {text = text, type = 'POPUP', tick = K.now().tick}, M.curse_env())
+  -- BUG-138: the announcement type of the text (a recent report with it, else the type 53.16 uses), not 'POPUP'
+  CU.report(K, c, pstate(K), {text = text, type = CU.popup_type(text), tick = K.now().tick}, M.curse_env())
   K.persist.touch('m.care')
   return true
 end
@@ -4468,7 +4480,7 @@ function M.state(K)
     for k, n in pairs(st.died) do died[k] = n end
     care.died = died
   end
-  return {care = care, stock = {hosp_water = o.hosp_water}, curse = CU.view()}
+  return {care = care, stock = {hosp_water = o.hosp_water}, curse = CU.view(K)}
 end
 
 local function deep(t)

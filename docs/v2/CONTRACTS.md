@@ -96,6 +96,7 @@ local M = {
   reports = {CARAVAN_ARRIVAL = true},    -- optional REPORT filter (df.announcement_type names)
   share = 3,                             -- optional: pacing share in ms per real second (§3.3.8)
   scale = true,                          -- optional: stretch the cadence with the fort-size load (§3.3.8)
+  watch_every = {ticks = 1200},          -- optional (BUG-136): the cadence of M.watch
 }
 function M.init(K) end                   -- once per boot, after persist/plan/cfg are loaded
 function M.step(K, budget_ms, ctx) end   -- return 'more' to get another slice next frame
@@ -104,12 +105,17 @@ M.on = {MODE = function(K, ev) end, REPORT = ..., INVASION = ..., UNIT_DEATH = .
 M.verbs = {lever = function(K, args, cmd) return ok, msg, data end}
 function M.state(K) return {bridges = {...}} end   -- partial state doc, see §9.3
 function M.doing() return 'work y451s3b0 s2.place chunk 1/1 (task 1/3, slice 1)' end   -- optional (BUG-039, §3.3.6)
+function M.watch(K) end                  -- optional (BUG-136): a cheap pass every watch_every.ticks, see below
 function M.want(K, bridge, want, why) end          -- public API: first arg is always K
 return M
 ```
 - `ctx = {dt = <ticks since this module's previous step start; 0 on the first run and on continuation slices>, dt_ms = <same in ms>, cont = <true on a 'more' continuation>, slice = <n-th slice of this run, 1-based>, load = <fort-size load factor >= 1, §3.3.8>}`.
 - `budget_ms` is advisory (2 for normal, 1 for critical modules). Slice by work units (≤2,000 tiles, ≤200 items, ≤50 units per slice), not by measuring time.
 - `state(K)` must be O(1)-cheap (return precomputed values) and only contain keys the module owns (§9.3).
+- `M.watch(K)` (BUG-136, live i2: care's curse logic lived in its full run, which pacing and demotion stretched to 10-31 game
+  days): a cheap pass on its own tick clock, every `watch_every.ticks` game ticks (not while paused), run before the step check
+  of the same frame and also while the module has a run in hand; it is never paced, never demoted and not stretched by the
+  fort-size load (its cost is still booked and charged to the module). care uses it for the daily curse pass.
 
 ### 3.3 Scheduling semantics (kern and k_mock implement exactly this)
 1. Each frame (`repeat-util` 1 frame), kern computes `now`, delivers queued events (§4.1), then runs modules in `contract.MODULES` order.
@@ -801,8 +807,8 @@ The fort-specific geometry, written by templates (bp `manifest` fragments) and m
 | BRIDGE_DESTROYED | A | gate | **bridge** (str), bid (the building gate saw), role (str), last (str: its last state), mode (str), pos (int[3], the footprint's centre) — BUG-030: a manifest bridge gate saw complete is gone from its footprint (destroyed by building destroyers, or removed); once per destruction; gate drops its want and pull, refuses wants for it, emits no GATE_FAIL for it; siege treats it as an open way (no raise hold or STRANDED, BREACH at once for O1/B1 in SIEGE, lowered for RECOVERY); a complete bridge on the footprint again is GATE C `rebuilt`. Rebuild policy: n (its losses so far), bd (those with building destroyers in sight), destroyers (flag: this one), races (str[]): `gate.losses`; the msg ends `lost Nx, M with building destroyers in sight (RACE,...)` |
 | SIEGE_DEEP | A | siege | **why** (str[]: destroyers, army, weak), bd (visible building destroyers), races (str[] `TROLL x6`), units (int[] ≤ 20 destroyer ids), vis, soldiers, worn, metal, refuge (str), pos (int[3], the core station) — BUG-030: the deep defense started (or a reason or destroyer race is new; util/cadence): civilians to the separated refuge (seal's BREACH ask: Run 11, the refuge with its drink; one without drink only once Kern+ is breached or open, else REFUGE_FAIL and Kern+), every squad at the core station (CORE), no kill orders, no intake wave |
 | DEATHS_3PLUS | A | care | n, ids (int[]), causes (str[] `unit:cause`) — the text names the causes (`3 citizens died within a day: drowned 2, dehydrated 1`) |
-| CURSED | A | care | **n** (cursed citizens alive now, were-form included), unit, name, god, trig (str: what he toppled / `a tantrum`, from care's BUG-064 records), ann (str: the announcement type name of the report, `sheet` when the unit sheet showed it, `POPUP` from a popup the arbiter left: the live data that tells which type DF uses), kind (str: were, vampire, ?), ids (int[] ≤ 8, the burst), more, moon (day of the year of the next full moon), mi (days until it) — BUG-115: a citizen was cursed by a god (`<name> has been cursed by <god>!`, any announcement type: kern routes a report by `care.report_text`; or found on the unit sheet); one event per `care.curse_every` ticks, the burst merged (`more`); an interrupt (default: no action) |
-| TRANSFORM | A | care | **n** (were-form citizens now), **dir** (str: beast, back), unit, name, to (str: the form, `werecavy`), ann, bite (flag: no curse report named him), ids (int[] ≤ 8), more, cursed — BUG-115: a citizen changed form (`has transformed into a werecavy!`, or the unit sheet's race did); a beast also asks DECISION_NEEDED `curse_kill` (a kill order only after the player's yes); the first beast of a wave calibrates the moon; an interrupt (default: the clock only) |
+| CURSED | A | care | **n** (cursed citizens alive now, were-form included), unit, name, god, trig (str: what he toppled / `a tantrum`, from care's BUG-064 records), ann (str: the announcement type name of the report, live 53.16 `DEITY_CURSE`; `sheet` when the unit sheet showed it, `syndrome` for a were-curse the game keeps on the unit before its first moon (BUG-135: curse_year + a body-transformation syndrome); a popup the arbiter left carries the type of its report or `DEITY_CURSE`, BUG-138), kind (str: were, vampire, ?), ids (int[] ≤ 8, the burst), more, moon (day of the year of the next full moon), mi (days until it) — BUG-115: a citizen was cursed by a god (`<name> has been cursed by <god>!`, any announcement type: kern routes a report by `care.report_text`; or found on the unit sheet); one event per `care.curse_every` ticks, the burst merged (`more`); an interrupt (default: no action) |
+| TRANSFORM | A | care | **n** (were-form citizens now), **dir** (str: beast, back), unit, name, to (str: the form, `werecavy`), ann (the type of this report, live `BODY_TRANSFORMATION`, BUG-138; `sheet`), bite (flag: no curse report named him), ids (int[] ≤ 8), more, cursed — BUG-115: a citizen changed form (`has transformed into a werecavy!`, or the unit sheet's race did); a beast also asks DECISION_NEEDED `curse_kill` (a kill order only after the player's yes); the first beast of a wave calibrates the moon; an interrupt (default: the clock only) |
 | CURSE_MOON | A | care | **moon** (day of the year of the full moon), **mi** (days until it), **n** (cursed alive), ids (int[] ≤ 8) — BUG-115: the full moon is `care.curse_moon_lead` days away or less and citizens are cursed; once per moon (util/cadence), again when a unit joins |
 | DRILL_FAIL | A | drill | streak, fails (str[]) — emitted on the 2nd consecutive failed drill |
 | KERN_FAULT | A | any | **module** (str), err (str), n, backoff_s — every back-off (§3.3.5); `err:'slow'` for a slow critical module (§3.3.6); BUG-075: the runner for a fault it caught inside its seal-first count (`backoff_s` 0, once per distinct message, util/cadence) |
@@ -1091,7 +1097,7 @@ Each item names the WP that must adapt its code; WP0 changed the contract, `cont
 Generated by `python -m dfpilot.schema --write-appendix docs/v2/CONTRACTS.md`; `tests/test_schema.py` fails if this block is stale. The digest covers every schema and registry in `schema.py`, so any contract change shows up here.
 
 <!-- BEGIN GENERATED SCHEMAS -->
-Contract digest: `8bff47608ec864688c0fb4efb276249d53c7e09bfa4739b4ede8fdece8091061`
+Contract digest: `e38930da6d535c49957dfa24b3d9b7ca1b8f225a2219521a1fd62725d6b092cf`
 
 DESIGN §6 formats and the inbox verb args. Other kinds: `python -m dfpilot.schema --json-schema <kind>` with kind in heartbeat, phases, bp, restore, lock, allowlist, quicksave, persist.marker, persist.projects, persist.plan, persist.phase, persist.mode, persist.drill, persist.kern, persist.burrows. Per-type event `d` (§12) and per-verb `args` are checked by `validate()`; the envelopes leave them open. Compact JSON, keys sorted.
 
@@ -1207,7 +1213,7 @@ DESIGN §6 formats and the inbox verb args. Other kinds: `python -m dfpilot.sche
 
 **inbox.args.inspect**
 ```json
-{"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"field":{"pattern":"^[A-Za-z0-9_]{1,40}$","type":"string"},"key":{"maxLength":80,"type":"string"},"what":{"enum":["state","modules","census","manifest","projects","persist","perf","mode","plan","tombs","water_sources","hospital","orders","workload","trade","reach","entrances","defense","perimeter","refuge","offices","curse","unit","items"],"type":"string"}},"required":["what"],"title":"inbox.args.inspect","type":"object"}
+{"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"field":{"pattern":"^[A-Za-z0-9_]{1,40}$","type":"string"},"key":{"anyOf":[{"minimum":0,"type":"integer"},{"maxLength":80,"type":"string"}]},"what":{"enum":["state","modules","census","manifest","projects","persist","perf","mode","plan","tombs","water_sources","hospital","orders","workload","trade","reach","entrances","defense","perimeter","refuge","offices","curse","unit","items"],"type":"string"}},"required":["what"],"title":"inbox.args.inspect","type":"object"}
 ```
 
 **inbox.args.selftest**

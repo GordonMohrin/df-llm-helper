@@ -118,6 +118,33 @@
   TOMBS_LOCKED `churn` stays 0.
 - **Not decided offline:** whether 53.16's constructBuilding accepts an engraved memorial in `items` as the Build menu does (buildingplan and
   quickfort make planned slabs that way; the real item list was not read).
+## Curse package after the live test: names without nicknames, the 53.16 sheet, a daily curse pass, one event per emit (BUG-134..139, 2026-10-28; offline, live-untested)
+- **Why:** the live test i2 of the M4 curse package (DF 53.16, E:/DF-test2, y717; real DEITY_CURSE popup, real were syndrome 188, the game's own
+  full-moon transformations) and its verifier: every curse record stayed `n:<name>` because the game names a citizen without his nickname
+  (no ids, no `curse_kill`, dead werecavies counted for months); `unit.curse` does not exist in 53.16; no CURSE_MOON in six moons and a status
+  moon 20 days past, because care's full run came every 10-31 game days under pacing; `inspect what=unit` never read thoughts or wounds and
+  refused `key=<id>` from the CLI; CURSED said `ann=POPUP`; every unacked TRANSFORM got two LOCKDOWNs. i1: a popup naming nobody stood for good.
+- **What changed:** (1) curse.lua: names compared without the quoted nickname, in UTF-8 (CP437 converted); a name-only record is re-keyed to its
+  unit, a duplicate dropped, an unmatched one expires after a moon cycle (`inspect what=curse` `unresolved`); `curse_kill` also by name
+  (BUG-134). (2) `M.sheet` reads `uwss_use_display_name`/`uwss_display_name_sing`, the were-form race, and a were-curse by `curse_year` plus a
+  body-transformation syndrome (source `syndrome`; vampires stay hidden; fair-play decision in bugs/BUG-135); a failed read is logged once
+  (BUG-135). (3) kern and k_mock: optional `M.watch(K)` every `M.watch_every.ticks`, never paced, demoted or stretched (CONTRACTS section 3.2);
+  care's daily curse pass (the race of the cursed, new were-cursed citizens, forget, CURSE_MOON, the view); state `curse` computes `mo`/`mi`
+  when it is published; a failing moon check is logged (BUG-136). (4) `inspect what=unit`: thoughts from the 0-based emotions, bleeding from
+  the wound parts, no mood -1, `DEAD`, `late spouse`, a name without the nickname or the first name, `sense.own_ids` before the first census;
+  schema `inspect.key` takes an id; `view` names in UTF-8 (BUG-137). (5) a curse popup carries the type of its report or `DEITY_CURSE`, a
+  TRANSFORM its own type (BUG-138). (6) kern swaps both event queues whenever either is delivered; reflex records an event number once
+  (BUG-139). guide: "1 cursed citizen".
+- **Contracts / config:** CONTRACTS section 3.2 (`watch_every`, `M.watch`), section 12 CURSED/TRANSFORM `ann` text, the appendix (inspect key);
+  schema `inspect.key` AnyOf(NAT, Str); no new event, no new config key, RULES row of `inspect` in place.
+- **Tests (all fail on dec5132):** tests/lua/test_curse_live.lua (9), tests/lua/test_curse_live_kern.lua (2), tests/test_curse_live.py (3);
+  tests/lua/test_curse.lua moved to the 53.16 fields.
+- **Live check:** on a fort with nicknamed citizens put up a DEITY_CURSE for a citizen (as i2 did): CURSED has `d.unit`, `d.ids` and
+  `ann=DEITY_CURSE`, `status` names the id; `cmd inspect what=unit key=<id>` and `key=<name without nickname>` answer with thoughts and wounds (no
+  `unread`); kern.log has no `cannot read unit.` line (else the field name is wrong); a bitten citizen (curse_year set) appears in
+  `inspect what=curse` with `src syndrome` before his first moon; CURSE_MOON comes 4 days before the full moon while care is demoted
+  (`doctor`); the status moon counts down day by day; at the full moon a TRANSFORM with `unit` and `ann=BODY_TRANSFORMATION`, one DECISION_NEEDED
+  `curse_kill` and, unacked, ONE LOCKDOWN; a dead werecavy leaves the list (`dead` counts him).
 ## TIMELINE_RESET: a boot whose clock jumped back marks the discarded timeline; follow, events and brief drop it (BUG-121, 2026-10-28, note 101; offline, live-untested)
 - **Why:** Run 14 note 101: after the player loaded an older save, `events.jsonl` still held the events up to #29900 of the line he had left
   (ticks far ahead of the loaded clock) and `alarm.txt` its lockdown; `follow` replayed BREACH, INTRUDER and DEATHS_3PLUS of the abandoned line while

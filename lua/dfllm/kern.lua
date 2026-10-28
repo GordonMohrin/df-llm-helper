@@ -1291,8 +1291,10 @@ local function frame(st)
   st.current = nil
   local eq, q = st.evq, st.eventq
   local neq, nq = #eq, #q
-  if neq > 0 then st.evq = {} end
-  if nq > 0 then st.eventq = {} end
+  -- BUG-139 (live i2: two LOCKDOWNs 1-9 ticks apart for every unacked TRANSFORM): both queues are swapped whenever either
+  -- is delivered, so an event a handler emits now (care's TRANSFORM from a REPORT) lands in the fresh queue and arrives next
+  -- frame once, instead of in the delivered table (same frame) and again next frame
+  if neq > 0 or nq > 0 then st.evq, st.eventq = {}, {} end
   if neq > 0 or nq > 0 then st.kern_in('k.events', deliver_queues, st, eq, q) end
   -- due modules in contract order (§3.3); non-critical ones over their share wait (pacing, §3.3.8: in PEACE
   -- also on the pool, elsewhere with larger shares); a demoted module earns its promotion in frames in which
@@ -1308,6 +1310,14 @@ local function frame(st)
       if e.factor > 1 and (ticking or ms_mod) and sched.quiet(e, dt_frame, t0) then
         st.log_as('kern', 'info', e.name .. ' promoted to x' .. e.factor)
         st.flush_req = true
+      end
+      -- BUG-136: the optional watch pass (M.watch, M.watch_every = {ticks}): its own tick clock, never paced, never demoted,
+      -- not stretched, also while a run is in hand (CONTRACTS §3.2)
+      local we = e.M.watch_every
+      if ticking and type(we) == 'table' and type(e.M.watch) == 'function' and math.type(we.ticks) == 'integer'
+         and (e.watch_tick == nil or now.tick < e.watch_tick or now.tick - e.watch_tick >= we.ticks) then
+        e.watch_tick = now.tick
+        st.call_in(e, 'watch', e.M.watch)
       end
       local cont, due = e.cont, e.cont
       if not cont and ev ~= NO_EVERY then   -- sched.due, inlined: this loop runs every frame

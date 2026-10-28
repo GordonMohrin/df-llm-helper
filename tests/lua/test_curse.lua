@@ -1,6 +1,7 @@
 -- care + dfllm.curse (BUG-115, FR-83, FR-84): curses and transformations were invisible (Run 14 y707: a miner toppled a
 -- statue in a tantrum, "has been cursed by Ok!", became a werecavy, 23 dwarves followed, pop 54 -> 10; no event, no wake).
--- Every test here fails on the commit before the package (32994bb).
+-- Every test here fails on the commit before the package (32994bb). BUG-135: the sheet fields are those of DF 53.16
+-- (uwss_use_display_name / uwss_display_name_sing; `unit.curse` does not exist there).
 local T = require('testlib')
 local CW = require('care_world')
 local kmock = require('dfllm.util.k_mock')
@@ -175,8 +176,8 @@ end)
 ---------------------------------------------------------------- the unit sheet
 T.test('BUG-115: units cursed before the kernel booted are found on their sheets; a hidden curse stays hidden', function()
   local W = world()
-  W.unit(3).curse = {name = 'werecavy', name_visible = true}
-  W.unit(4).curse = {name = 'vampire', name_visible = false}      -- a vampire the sheet does not show
+  W.unit(3).uwss_use_display_name, W.unit(3).uwss_display_name_sing = true, 'werecavy'
+  W.unit(4).uwss_use_display_name, W.unit(4).uwss_display_name_sing = false, 'vampire'      -- a vampire the sheet does not show
   CW.day(W, 1)
   local e = events(W, 'CURSED')
   T.eq(#e, 1)
@@ -186,7 +187,7 @@ end)
 
 T.test('BUG-115: the were-form race on the sheet is TRANSFORM (sheet), and the way back too; no event twice', function()
   local W = world()
-  W.unit(2).curse = {name = 'werecavy', name_visible = true}
+  W.unit(2).uwss_use_display_name, W.unit(2).uwss_display_name_sing = true, 'werecavy'
   CW.day(W, 1)
   W.unit(2).race = 2                                             -- the werecavy
   CW.day(W, 1)
@@ -218,11 +219,11 @@ end)
 
 T.test('BUG-115: a curse name that is not a string (a struct) is never read as a curse', function()
   local W = world()
-  W.unit(3).curse = {name = setmetatable({}, {__tostring = function() return '<struct>' end}), name_visible = true}
+  W.unit(3).uwss_use_display_name, W.unit(3).uwss_display_name_sing = true, setmetatable({}, {__tostring = function() return '<struct>' end})
   CW.day(W, 1)
   T.eq(#events(W, 'CURSED'), 0)
   T.eq(W.state().curse, nil)
-  W.unit(4).curse = {name = 'werecavy', name_visible = true}          -- a string name is read
+  W.unit(4).uwss_use_display_name, W.unit(4).uwss_display_name_sing = true, 'werecavy'          -- a string name is read
   CW.day(W, 1)
   T.eq({#events(W, 'CURSED'), W.state().curse.ids}, {1, {4}})
 end)
@@ -242,7 +243,7 @@ end)
 
 T.test('BUG-115: a fort of 80 with 40 cursed on their sheets: one merged event, ids bounded, one care run', function()
   local W = world{cit = 80}
-  for i = 1, 40 do W.unit(i).curse = {name = 'werecavy', name_visible = true} end
+  for i = 1, 40 do W.unit(i).uwss_use_display_name, W.unit(i).uwss_display_name_sing = true, 'werecavy' end
   CW.day(W, 2)
   local e = events(W, 'CURSED')
   T.ok(#e <= 2 and #e >= 1, 'merged: ' .. #e)
@@ -306,7 +307,7 @@ T.test('BUG-115: curse = false switches the reading off', function()
   W.K.cfg.baseline.care = W.K.cfg.baseline.care or {}
   W.K.cfg.baseline.care.curse = false
   cursed_report(W, 'Oddom Letmoscog, Miner', 'Ok')
-  W.unit(3).curse = {name = 'werecavy', name_visible = true}
+  W.unit(3).uwss_use_display_name, W.unit(3).uwss_display_name_sing = true, 'werecavy'
   CW.day(W, 1)
   T.eq(#events(W, 'CURSED'), 0)
   T.eq(W.state().curse, nil)
@@ -323,9 +324,10 @@ T.test('FR-83: inspect what=unit reads the sheet: stress and its level, mood, th
   u._m.stress = 0
   u.status = {current_soul = {personality = {stress = 81234, emotions = kmock.vec{
     {thought = df.unit_thought_type and df.unit_thought_type.Death or 1}}}}}
-  u.body = {wounds = kmock.vec{{bleeding = 3}, {bleeding = 0}}, blood_count = 4000, blood_max = 5000}
+  u.body = {wounds = kmock.vec{{parts = kmock.vec{{bleeding = 3}}}, {parts = kmock.vec{{bleeding = 0}}}}, blood_count = 4000,
+            blood_max = 5000}     -- BUG-137: a wound bleeds in its parts
   u.job = {current_job = nil}
-  u.curse = {name = 'werecavy', name_visible = true}
+  u.uwss_use_display_name, u.uwss_display_name_sing = true, 'werecavy'
   W.event('REPORT', {type = ANY, text = 'Oddom Letmoscog, Miner has been cursed by Ok!'})
   W.run(3)
   local r = W.inbox('inspect', {what = 'unit', key = '1'})
@@ -349,7 +351,7 @@ end)
 
 T.test('FR-83: the sheet of a unit that is no citizen or resident is not read (fair play: only the fort\'s own)', function()
   local W = world{units = {{id = 90, pos = {5, 5, 5}}}}
-  W.unit(90).curse = {name = 'vampire', name_visible = true}
+  W.unit(90).uwss_use_display_name, W.unit(90).uwss_display_name_sing = true, 'vampire'
   local r = W.inbox('inspect', {what = 'unit', key = '90'})
   T.eq(r.ok, false)
   T.ok(r.msg:find('not a citizen or resident', 1, true), r.msg)
