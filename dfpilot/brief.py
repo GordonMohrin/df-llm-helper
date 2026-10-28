@@ -271,6 +271,9 @@ def line_unready(ctx: Ctx) -> str:
         else:
             nxt.append("the hospital lies outside Kern+/Tiefe+: plan it inside Tiefe+ next to accepted water (a cistern "
                        "there first), then remove the old zones")
+        hz = hospital_retire_hint(ctx.s)       # BUG-131: the zone that blocks and the verb that retires it
+        if hz:
+            nxt.append(hz)
     if "burrow_lost" in fails:                 # BUG-096 (Run 14 note 70): Kern+ or the refuge lost a well or the refuge
         bg = (ctx.s.get("alert") or {}).get("bg")
         bg = bg if isinstance(bg, dict) else {}
@@ -429,6 +432,26 @@ def line_stress0(ctx: Ctx) -> str:
 
 
 # FR-84: the countermeasure of each stress source the kernel names (care.src keys), the top one is shown in the brief
+def hospital_retire_hint(s: dict) -> str | None:
+    """BUG-131 (Run 14: an old zone outside the core kept R0 hospital_out red the whole run): the kernel's first blocking
+    hospital zone (state water.hout: z, at, ok 1 = a finished hospital inside, pat = patients lying in it) and the verb
+    hospital.retire for it; None for an older kernel without it."""
+    w = s.get("water") if isinstance(s.get("water"), dict) else {}
+    h = w.get("hout")
+    if not isinstance(h, dict) or not isinstance(h.get("z"), int):
+        return None
+    at = ",".join(str(v) for v in h.get("at") or [])
+    cmd = f"dfllm cmd hospital.retire zone={h['z']}"
+    pat = h.get("pat") if isinstance(h.get("pat"), int) else 0
+    lie = f"{pat} patient{'s lie' if pat != 1 else ' lies'} in it; " if pat > 0 else ""
+    if h.get("ok") == 1:
+        when = "once they are up: " if pat > 0 else ""
+        return f"zone {h['z']} at {at} blocks it: {lie}{when}{cmd}"
+    up = "they are up and " if pat > 0 else ""
+    return (f"zone {h['z']} at {at} blocks it: {lie}once {up}the hospital inside has a bed, {cmd} (sooner only on "
+            "Gordon's word: approve=true)")
+
+
 STRESS_FIX = {"ghosts": "a slab and a tomb for every dead (autoslab, tombs.repair)",
               "deaths": "bury the dead at once (coffins, tombs), no body left lying",
               "beds": "bedrooms (bp.place bedrooms)", "drink": "brew and keep drink in stock",

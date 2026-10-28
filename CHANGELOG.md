@@ -46,6 +46,29 @@
   `fortcore@same`; after apply the new stage 1 digs, and with O1/B1 standing `ready.fail` loses `no_outer`/`no_inner` and the drill runs.
 - **Not decided offline:** `BREACH_R` 10 and `LAYER_MIN` 2 are guesses (an aquifer's extent is hidden); a standalone lever-linked drawbridge on a dry
   entrance (a `gate` template) is not built, so the no-dry-site closure keeps no_outer/no_inner red on purpose.
+## Stale hospital zones: `hospital_out` ignores idle or superseded zones outside the core, verb `hospital.retire` (BUG-131, 2026-10-28; offline, live-untested)
+- **Why:** Run 14 (site90): readiness R0 `hospital_out` stayed red the whole run because of an old hospital zone, 24422 at 88,28,129, outside
+  Kern+/Tiefe+ ("1 of 3 zones"). A hospital inside the core existed or was being built. The playbook does not let the session delete zones, so goal
+  G3 could never turn green.
+- **What changed:** (1) water.lua `M.hosp_sort`: a hospital zone outside the core no longer counts in `hosp_out` when it is idle or superseded.
+  Idle means no patient lies in it, no bed stands in it and its location holds no supply; unknown counts as present. Superseded means a finished
+  hospital (a zone wholly inside with a bed) exists and no patient lies in the old zone. `water.hospital_out()` returns `ign`, `fin` and `raw`, and
+  kern.log has a line when the ignored count changes. (2) New verb `hospital.retire {zone, approve?}` (water, PEACE): the zones screen remove
+  (`act.hospital_remove`) for one hospital zone outside the core. It is refused for a zone inside, an unknown zone, a zone with a patient lying in
+  it, and, without `approve:true` on the player's word, when no finished hospital stands inside. The reply names the zone, its centre and its
+  location: a location left with no zone is ignored by every count (BUG-056) and care moves its doctors' posts (BUG-077). The zone leaves
+  `hosp_out` at once. (3) State `water.hout {z, at, ok, pat?}`: `status`/`brief` add `zone Z at x,y,z blocks it: ... dfllm cmd hospital.retire
+  zone=Z` to the R0 line, `dfllm next` gives the command when a finished hospital stands inside, and the SIEGE_UNREADY hint points there.
+- **Safety:** removing a zone is a UI action (the zones screen) that BUG-034 already uses. It is never done by the kernel on its own (only the verb), never
+  for a zone where a patient lies, never outside PEACE. The location itself stays.
+- **Contracts:** schema `VERB_ARGS`/`VERBS` `hospital.retire`, state `water.hout`; contract.lua `C.VERBS`, `STATE_SPEC.water.hout`; CONTRACTS
+  appendix; RULES §6 (row `tombs.repair` / `hospital.retire`), §7 PATIENTS_OUT, §8 `hospital_out` in place (300 lines).
+- **Tests (fail on dec5132):** tests/lua/test_water.lua (3 new), tests/test_bug131_hospital_retire.py (5).
+- **Live check:** in PEACE, `dfllm status` with an old hospital zone outside the core. Either `hospital_out` is gone (kern.log `do not block
+  (BUG-131)`), or the R0 line names `zone N at x,y,z` and `dfllm cmd hospital.retire zone=N`. Send it (`approve=true` only on Gordon's word),
+  check the reply and DF's zones screen, then `ready.fail` without `hospital_out` after the next readiness run.
+- **Not decided offline:** a bed is what makes a hospital "finished"; a superseded zone with a patient lying in it still blocks (BUG-036);
+  whether `findAtTile` sees every bed of a live zone.
 ## TIMELINE_RESET: a boot whose clock jumped back marks the discarded timeline; follow, events and brief drop it (BUG-121, 2026-10-28, note 101; offline, live-untested)
 - **Why:** Run 14 note 101: after the player loaded an older save, `events.jsonl` still held the events up to #29900 of the line he had left
   (ticks far ahead of the loaded clock) and `alarm.txt` its lockdown; `follow` replayed BREACH, INTRUDER and DEATHS_3PLUS of the abandoned line while

@@ -851,6 +851,10 @@ VERB_ARGS: dict[str, Obj] = {
     "view": Obj(opt={"target": VIEW_TARGET, "follow": Bool(), "ttl_s": Int(1, 3600), "why": Str(maxbytes=200)}),
     # FR-78 (Run 14 note 65): a civzone of `type` in `bbox` (one z level) through quickfort's zone mode
     "zone.place": Obj(req={"type": Str(enum=ZONE_TYPES), "bbox": BBOX}, opt={"name": Str(r"^[A-Za-z0-9_-]{1,24}$")}),
+    # BUG-131 (Run 14: an old zone outside the core kept R0 hospital_out red the whole run): the zones screen's remove for
+    # one hospital zone outside Kern+/Tiefe+; refused while a patient lies in it and, without approve:true (the player's
+    # word), while no finished hospital (a zone with a bed) stands inside
+    "hospital.retire": Obj(req={"zone": NAT}, opt={"approve": Bool()}),
 }
 # verb -> (handler module, allowed modes or None, needs approve)
 VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
@@ -874,6 +878,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "squad.add": ("military", SQUAD_MODES, False), "squad.uniform": ("military", SQUAD_MODES, False),
     "zone.place": ("runner", SQUAD_MODES, False),
     "view": ("arbiter", None, False),      # FR-88: modes are the verb's own rule (a fight needs by=gordon)
+    "hospital.retire": ("water", ["PEACE"], False),     # BUG-131: approve is optional (the verb's own rule)
 }
 # verbs accepted only from these `by` origins (CONTRACTS §9.5; `by` is a label, the hook is the guard)
 VERB_BY: dict[str, list[str]] = {"audit": ["follow", "test"]}
@@ -1079,7 +1084,11 @@ STATE = Obj(
                       # BUG-036: hospital zones with tiles outside Kern+ and the refuge (readiness R0 hospital_out);
                       # BUG-040: src_l = a label per src ('well 19098 in Kern+': kind, id, the burrow it is on)
                       # BUG-106: gaps = the tokens of the hospital's gaps (no_table, no_thread, ...), the first eight
-                      opt={"hosp_out": NAT, "src_l": Arr(Str(maxbytes=32), hi=8), "gaps": Arr(Str(maxbytes=16), hi=8)})})
+                      # BUG-131: hout = the first blocking hospital zone outside the core (z id, at its centre, ok 1 = a
+                      # finished hospital inside: hospital.retire needs no approve, pat = patients lying in it); a zone
+                      # outside that is idle or superseded by a finished hospital inside is not counted in hosp_out
+                      opt={"hosp_out": NAT, "src_l": Arr(Str(maxbytes=32), hi=8), "gaps": Arr(Str(maxbytes=16), hi=8),
+                           "hout": Obj(req={"z": NAT, "at": Tup([NAT, NAT, NAT]), "ok": FLAG}, opt={"pat": NAT})})})
 
 HEARTBEAT = Obj(req={"v": Const(V), "wall": NAT, "frame": NAT, "tick": TICK, "paused": Bool(), "mode": MODE,
                      "seq": NAT})

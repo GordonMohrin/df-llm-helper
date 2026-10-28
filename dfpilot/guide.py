@@ -303,7 +303,13 @@ def _r0(f: dict, s: dict) -> list[Step]:
         why = a.get("why") if isinstance(a.get("why"), str) and a.get("why") else ""
         out.append(Step("r0", "dfllm audit", _txt("R0 audit: " + ("the audit is old" if "audit_old" in fails else "no audit yet")
                                                   + (f"; the last request was refused: {why}" if why else ""))))
-    if "hospital_out" in fails and not f.get("hosp_proj"):
+    hout = (s.get("water") or {}).get("hout") if isinstance(s.get("water"), dict) else None
+    if "hospital_out" in fails and isinstance(hout, dict) and hout.get("ok") == 1 and not hout.get("pat"):
+        at = ",".join(str(v) for v in hout.get("at") or [])     # BUG-131: a finished hospital inside: retire the old zone
+        out.append(Step("r0", f"dfllm cmd hospital.retire zone={hout.get('z')}",
+                        _txt(f"R0 hospital_out: zone {hout.get('z')} at {at} lies outside Kern+/Tiefe+ and a finished "
+                             "hospital stands inside: retire the old zone (the zones screen's remove)")))
+    elif "hospital_out" in fails and not f.get("hosp_proj"):
         out.append(Step("r0", HOSPITAL_CMD, "R0 hospital_out: no hospital inside Kern+/Tiefe+, patients die on the way "
                                             "(sites follow the accepted water)",
                         "The hospital lies outside the safe core; patients cannot reach the refuge."))

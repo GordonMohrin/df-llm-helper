@@ -55,6 +55,8 @@
 --     nojob / run, with the job, caregiver and bucket counts); `added` of patient_thirst counts caregivers put into the Orderlies
 --     detail, never jobs (the kernel creates none);
 --   * BUG-106: `inspect what=hospital` and the state's water.gaps list the gaps of the wound care (M.audit), once per run.
+--   * BUG-131: a hospital zone outside the core that is idle or superseded does not count in hosp_out (M.hosp_sort); the
+--     verb hospital.retire removes one such zone (the zones screen's remove, act.hospital_remove; M.verbs).
 -- Fair play: reads citizens by census id (thirst, health flags, current job, position, labors), buildings.other
 -- vectors (WELL, ZONE_WATER_SOURCE or ANY_ZONE), items.other.BUCKET (flags, position, whether a bucket still
 -- holds water: such a bucket is no free bucket), manager orders, site locations, burrow
@@ -67,7 +69,7 @@ local C = require('dfllm.util.contract')
 local CAD = require('dfllm.util.cadence')   -- BUG-008: when a standing class-A condition is announced again
 local WHO = require('dfllm.util.who')       -- BUG-103: a citizen of the player (the census also holds residents)
 
-local M = {name = 'water', every = {ticks = 1200}, on = {}}
+local M = {name = 'water', every = {ticks = 1200}, on = {}, verbs = {}}
 local DAY = C.TICKS.DAY
 
 -- Wake cadence (review): one patient_thirst line per patient every 3 game days came about every 8 s at 450
@@ -1454,6 +1456,69 @@ function M.audit(K, c, r, ctx)
   return a
 end
 
+---------------------------------------------------------------- BUG-131: stale hospital zones outside the core
+-- Run 14 (site90): R0 hospital_out stayed red the whole run over an old zone (24422 at 88,28, "1 of 3 zones") while a
+-- hospital inside the core stood or was being built; the playbook forbids the session to delete zones, so goal G3 never
+-- turned green. A zone outside Kern+/Tiefe+ does not block (state water.hosp_out) when it is idle (no patient lies in it,
+-- no bed stands in it and its location holds no supply, all three known) or superseded (a finished hospital, a zone
+-- wholly inside with a bed, exists and no patient lies in it). Unknown furniture or supplies count as present: the zone
+-- blocks. ho.ign lists the ignored ones with `why`, ho.fin is the finished hospital inside, ho.raw all zones outside.
+M.SORT_ZONES = 12          -- hospital zones whose furniture is read per run (the rest are unknown: they block)
+
+function M.zone_patients(pts, h)
+  local n = 0
+  for _, pt in ipairs(pts) do
+    if pt.x and pt.z == h.z and pt.x >= h.x1 and pt.x <= h.x2 and pt.y >= h.y1 and pt.y <= h.y2 then n = n + 1 end
+  end
+  return n
+end
+
+-- the supplies a hospital location holds (its count_* fields summed), nil when it shows none of them
+function M.loc_supply(loc)
+  if not loc then return nil end
+  local sum, known = 0, false
+  for _, sp in ipairs(M.SUPPLY) do
+    local _, have = supply_of(loc, sp[2])
+    if have ~= nil then known, sum = true, sum + have end
+  end
+  return known and sum or nil
+end
+
+function M.hosp_sort(K, r, ho)
+  ho.raw, ho.ign = ho.n, {}
+  if ho.n == 0 then return ho end
+  local zl, rect, out_ids, beds = {}, {}, {}, {}
+  for i, h in ipairs(r.hosp) do
+    rect[h.id] = h
+    if i <= M.SORT_ZONES then zl[i] = h end
+  end
+  for _, z in ipairs(ho.zones) do out_ids[z.id] = true end
+  local fur, fur_ok = zone_furniture(zl)
+  for i, h in ipairs(zl) do
+    if fur_ok then beds[h.id] = fur[i].bed end
+    if fur_ok and not out_ids[h.id] and fur[i].bed > 0 and not ho.fin then ho.fin = h.id end
+  end
+  local locs = hospital_locations()
+  local keep = {}
+  for _, z in ipairs(ho.zones) do
+    z.pat, z.beds, z.sup = M.zone_patients(r.patients, rect[z.id]), beds[z.id], M.loc_supply(locs[z.loc])
+    local why
+    if z.pat == 0 and z.beds == 0 and z.sup == 0 then why = 'idle'
+    elseif z.pat == 0 and ho.fin then why = 'superseded' end
+    if why then z.why = why; ho.ign[#ho.ign + 1] = z else keep[#keep + 1] = z end
+  end
+  ho.zones, ho.n = keep, #keep
+  if #ho.ign ~= (st.ign_n or 0) then
+    st.ign_n = #ho.ign
+    if #ho.ign > 0 then
+      local z = ho.ign[1]
+      K.log('info', 'water: %d hospital zone(s) outside %s/%s do not block (BUG-131): zone %d at %d,%d,%d %s; '
+            .. 'hospital.retire removes it', #ho.ign, ho.kern, ho.refuge, z.id, z.x, z.y, z.z, z.why)
+    end
+  end
+  return ho
+end
+
 local function finish(K, c, r, p)
   local now = K.now().tick
   local T = K.now()
@@ -1466,8 +1531,8 @@ local function finish(K, c, r, p)
   end
   local refuge, rname = burrow(K, 'refuge', 'Tiefe+')
   local kern, kname = burrow(K, 'kern', 'Kern+')
-  local ho = hospital_out(r, kern, refuge, kname, rname)    -- BUG-036
-  st.hout = ho
+  local ho = M.hosp_sort(K, r, hospital_out(r, kern, refuge, kname, rname))    -- BUG-036, BUG-131
+  st.hout, st.hz = ho, r.hosp
   patients_out(K, r, kern, refuge, kname, rname, ho)
   local refuge_ok, rwells, rwet = false, 0, 0          -- BUG-035: the wells in the refuge and the wet ones of them
   for _, s in ipairs(r.sources) do
@@ -1911,6 +1976,13 @@ function M.state(K)
   local w = {patients = o.patients, thirst_max = o.thirst_max, hosp_ok = o.hosp_ok, refuge_ok = o.refuge_ok,
              buckets_free = o.buckets_free, hosp = o.hosp, src = o.src or json.array{}, hosp_out = o.hosp_out,
              src_l = o.src_l}
+  -- BUG-131: the first blocking hospital zone outside the core (z, its centre, ok 1 = a finished hospital inside exists, pat =
+  -- the patients lying in it): status/brief name it and the verb hospital.retire
+  local ho = st.hout
+  local z = ho and ho.n > 0 and ho.zones[1] or nil
+  if z and C.STATE_SPEC.opt.water.opt.hout then
+    w.hout = {z = z.id, at = json.array{z.x, z.y, z.z}, ok = ho.fin and 1 or 0, pat = z.pat}
+  end
   -- BUG-106: the tokens of the hospital's gaps, while a hospital stands or a patient lies (a fort without either has none
   -- to fix yet); `inspect what=hospital` lists them with their counts
   local a = st.audit
@@ -1953,6 +2025,72 @@ end
 -- first run
 function M.hospital_out(K)
   return st.hout or {n = 0, total = 0, zones = {}}
+end
+
+-- verb hospital.retire {zone, approve?} (BUG-131, Run 14: an old zone outside the core kept R0 hospital_out red the whole
+-- run): the zones screen's remove (act.hospital_remove) for ONE hospital zone outside Kern+/Tiefe+ of the last water run.
+-- PEACE only (contract); refused while a patient lies in it (read now, approve or not) and without a finished hospital
+-- inside the core (ho.fin) unless the player said approve:true. The location stays (no script can delete it): with no
+-- zone left every count ignores it (BUG-056) and care moves its doctors' posts to the live hospital (BUG-077).
+M.verbs['hospital.retire'] = function(K, args, cmd)
+  local id = math.tointeger(args.zone)
+  if not id then return false, 'hospital.retire: zone must be a zone id' end
+  local ho = st.hout
+  if not ho or not st.out then return false, 'hospital.retire: no water run finished yet; try again in a game day' end
+  local z, h
+  for _, list in ipairs({ho.zones or {}, ho.ign or {}}) do
+    for _, x in ipairs(list) do if x.id == id then z = x end end
+  end
+  for _, x in ipairs(st.hz or {}) do if x.id == id then h = x end end
+  if not h then return false, string.format('hospital.retire: no hospital zone %d (last water run)', id) end
+  local at = string.format('%d,%d,%d', (h.x1 + h.x2) // 2, (h.y1 + h.y2) // 2, h.z)
+  local core = string.format('%s/%s', tostring(ho.kern or 'Kern+'), tostring(ho.refuge or 'Tiefe+'))
+  if not z then return false, string.format('hospital.retire: zone %d at %s lies inside %s: it stays', id, at, core) end
+  local pts = {}
+  local cu = K.census.u
+  for _, uid in ipairs(type(cu) == 'table' and cu.ids or {}) do
+    local u = df.unit.find(uid)
+    if u and WHO.citizen(u) and patient(u) then
+      local x, y, zz = dfhack.units.getPosition(u)
+      pts[#pts + 1] = {x = x, y = y, z = zz}
+    end
+  end
+  local n = M.zone_patients(pts, h)
+  if n > 0 then
+    return false, string.format('hospital.retire: zone %d at %s: %d patient%s in it: it stays until %s', id, at, n,
+                                n == 1 and ' lies' or 's lie', n == 1 and 'he is up or moved' or 'they are up or moved')
+  end
+  local approve = args.approve == true
+  if not ho.fin and not approve then
+    return false, string.format('hospital.retire: zone %d at %s: no finished hospital inside %s (a zone with a bed): '
+                                .. "build it first, or approve:true on the player's word", id, at, core)
+  end
+  local ok, err = K.act.hospital_remove(id)
+  if not ok then return false, string.format('hospital.retire: zone %d at %s: %s', id, at, tostring(err)) end
+  local left, keep_hz = 0, {}
+  for _, x in ipairs(st.hz or {}) do
+    if x.id ~= id then
+      keep_hz[#keep_hz + 1] = x
+      if x.loc == h.loc then left = left + 1 end
+    end
+  end
+  st.hz = keep_hz
+  for _, key in ipairs({'zones', 'ign'}) do
+    local keep = {}
+    for _, x in ipairs(ho[key] or {}) do if x.id ~= id then keep[#keep + 1] = x end end
+    ho[key] = keep
+  end
+  ho.n, ho.total = #ho.zones, math.max(0, (ho.total or 1) - 1)
+  st.out.hosp_out = ho.n
+  local loc = math.tointeger(h.loc) or -1
+  local msg = string.format('retired hospital zone %d at %s (location %d, zones screen remove%s); %s', id, at, loc,
+                            approve and ', approved by the player' or '',
+                            left == 0 and 'the location has no zone left: every count ignores it (BUG-056), its '
+                                          .. "doctors' posts move to the live hospital (BUG-077)"
+                            or string.format('location %d keeps %d zone%s', loc, left, left == 1 and '' or 's'))
+  K.log('info', 'water: %s; %d zone(s) outside %s still block', msg, ho.n, core)
+  return true, msg, {zone = id, at = json.array{(h.x1 + h.x2) // 2, (h.y1 + h.y2) // 2, h.z}, loc = loc, left = left,
+                     approve = approve and 1 or 0, why = z.why, blocking = ho.n}
 end
 
 return M

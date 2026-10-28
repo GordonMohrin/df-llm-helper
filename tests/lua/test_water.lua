@@ -1127,5 +1127,137 @@ T.test('BUG-056: hospital locations without a zone disturb no count: hosp, the d
   T.eq(W2.inbox('inspect', {what = 'water_sources'}).data.locs, {total = 8, live = 0, stale = 8})
 end)
 
+---------------------------------------------------------------- BUG-131 (Run 14)
+-- Run 14 (site90): readiness R0 hospital_out stayed red the whole run: an old hospital zone 24422 at 88,28 lay outside
+-- Kern+/Tiefe+ ("1 of 3 zones") while the fort had or built a hospital inside; the session may not delete zones, so goal
+-- G3 never turned green. o: old_beds (beds in the old zone outside), new (a hospital zone inside Kern+), new_beds (1),
+-- sup (the old location's contents; false: no fields), nofind (no findAtTile: the furniture is unknown), patients
+local function loc_of(W, id)
+  for _, l in ipairs(W.site.buildings) do if l.id == id then return l end end
+end
+local SUP0 = {count_splints = 0, count_thread = 0, count_cloth = 0, count_crutches = 0, count_powder = 0, count_soap = 0,
+              count_buckets = 0}
+local function b131(o)
+  o = o or {}
+  return world{patients = o.patients, setup = function(W)
+    W.burrow('Kern+', {0, 0, 0, 30, 30, 20})             -- the core: x0-30 y0-30
+    df.building_type.TractionBench = df.building_type.TractionBench or 98
+    W.old = F.hospital(W, {86, 26, 90, 30, 5})           -- the old zone outside, centre 88,28,5
+    local loc = loc_of(W, W.old.location_id)
+    if o.sup ~= false then
+      loc.contents = {}
+      for k, v in pairs(o.sup or SUP0) do loc.contents[k] = v end
+    end
+    local beds = {}
+    local function bed(x, y, z)
+      beds[x .. ',' .. y .. ',' .. z] = {id = 9000 + x * 100 + y, getType = function() return df.building_type.Bed end}
+    end
+    for i = 1, o.old_beds or 0 do bed(86 + i, 27, 5) end
+    if o.new then
+      W.new = F.hospital(W, {10, 10, 14, 14, 5})
+      for i = 1, o.new_beds or 1 do bed(10 + i, 11, 5) end
+    end
+    if o.second then W.second = zone_of(W, W.old.location_id, {86, 40, 88, 42, 5}) end
+    if not o.nofind then
+      dfhack.buildings.findAtTile = function(x, y, z) return beds[x .. ',' .. y .. ',' .. z] end
+    end
+    removable(W)
+    if o.setup then o.setup(W) end
+  end}
+end
+local function hout(W, M) return M.kpi(W.K).hosp_out, M.hospital_out(W.K) end
+
+T.test('BUG-131 (Run 14: hospital_out red the whole run over the old zone 24422 at 88,28): a hospital zone outside the ' ..
+       'core with no patient, no bed and no supply does not block; one with a bed, a patient lying in it, a supply or ' ..
+       'unknown furniture or supplies does (old code: every zone outside blocked)', function()
+  local W, M = b131{}
+  day(W)
+  local n, ho = hout(W, M)
+  T.eq({n, ho.n, ho.raw, ho.total}, {0, 0, 1, 1}, 'old code: hosp_out 1')
+  T.eq({#ho.ign, ho.ign[1] and ho.ign[1].id, ho.ign[1] and ho.ign[1].why}, {1, W.old.id, 'idle'})
+  T.eq(W.state().water.hosp_out, 0)
+  T.eq(W.state().water.hout, nil, 'nothing blocks: no blocking zone in the state')
+  T.eq(#W.find_acts('hospital_remove'), 0, 'ignored, never removed by the kernel itself')
+  local cases = {{{old_beds = 1}, 'a bed'}, {{patients = {{id = 2, thirst = 1000, rest = true, pos = {88, 28, 5}}}},
+                 'a patient lying in it'}, {{sup = {count_splints = 3}}, 'a supply'}, {{sup = false}, 'supplies unknown'},
+                 {{nofind = true}, 'furniture unknown'}}
+  for _, cs in ipairs(cases) do
+    local W2, M2 = b131(cs[1])
+    day(W2)
+    local n2, ho2 = hout(W2, M2)
+    T.eq({n2, ho2.n, #ho2.ign}, {1, 1, 0}, cs[2])
+  end
+end)
+
+T.test('BUG-131: an old hospital outside the core is superseded by a finished hospital inside Kern+/Tiefe+ (a zone ' ..
+       'with a bed): it does not block unless a patient lies in it; the state names the blocking zone (hout)', function()
+  local W, M = b131{old_beds = 2, new = true}
+  day(W)
+  local n, ho = hout(W, M)
+  T.eq({n, ho.raw, ho.fin}, {0, 1, W.new.id}, 'old code: hosp_out 1')
+  T.eq({ho.ign[1].id, ho.ign[1].why}, {W.old.id, 'superseded'})
+  -- a patient still lies in the old zone: it blocks; the state names it, retire allowed once he is gone (ok 1)
+  local W2, M2 = b131{old_beds = 2, new = true, patients = {{id = 2, thirst = 1000, rest = true, pos = {87, 27, 5}}}}
+  day(W2)
+  T.eq(hout(W2, M2), 1)
+  T.eq(W2.state().water.hout, {z = W2.old.id, at = {88, 28, 5}, ok = 1, pat = 1})
+  -- the new hospital is still being built (no bed yet): the old one blocks, retire only with approve (ok 0)
+  local W3, M3 = b131{old_beds = 2, new = true, new_beds = 0}
+  day(W3)
+  T.eq(hout(W3, M3), 1)
+  T.eq(W3.state().water.hout, {z = W3.old.id, at = {88, 28, 5}, ok = 0, pat = 0})
+end)
+
+T.test('BUG-131: verb hospital.retire {zone} = the zones screen remove for a hospital zone outside the core: PEACE only, ' ..
+       'no patient lying in it, a finished hospital inside Kern+/Tiefe+ or approve:true; the reply names the zone, its ' ..
+       'place and what becomes of its location (BUG-056/077)', function()
+  local W, M = b131{old_beds = 2}
+  day(W)
+  local id = W.old.id
+  W.set_mode('ALERT')
+  local r = W.inbox('hospital.retire', {zone = id})
+  T.eq(r.ok, false)
+  T.ok(r.msg:find('not allowed in ALERT', 1, true), r.msg)
+  W.set_mode('PEACE')
+  r = W.inbox('hospital.retire', {zone = id})
+  T.eq(r.ok, false, 'no finished hospital inside and no approve')
+  T.ok(r.msg:find('no finished hospital inside Kern+/Tiefe+', 1, true) and r.msg:find('approve:true', 1, true), r.msg)
+  T.eq(#W.find_acts('hospital_remove'), 0)
+  r = W.inbox('hospital.retire', {zone = 4242})
+  T.eq(r.ok, false)
+  T.ok(r.msg:find('no hospital zone 4242', 1, true), r.msg)
+  r = W.inbox('hospital.retire', {zone = id, approve = true})
+  T.ok(r.ok, r.msg)
+  T.eq(#W.find_acts('hospital_remove'), 1)
+  T.eq(W.find_acts('hospital_remove')[1].args[1], id)
+  T.ok(r.msg:find(string.format('retired hospital zone %d at 88,28,5 (location %d', id, W.old.location_id), 1, true), r.msg)
+  T.ok(r.msg:find('no zone left', 1, true), r.msg)
+  T.eq({r.data.zone, r.data.at, r.data.loc, r.data.left, r.data.approve}, {id, {88, 28, 5}, W.old.location_id, 0, 1})
+  T.ok(#r.msg <= 300)
+  local n, ho = hout(W, M)
+  T.eq({n, ho.n}, {0, 0}, 'the blocker goes at once')
+  T.eq(W.state().water.hosp_out, 0)
+  day(W)
+  T.eq(hout(W, M), 0)
+  -- a patient lying in it: refused, even with approve
+  local W2 = b131{old_beds = 2, new = true, patients = {{id = 2, thirst = 1000, rest = true, pos = {87, 27, 5}}}}
+  day(W2)
+  r = W2.inbox('hospital.retire', {zone = W2.old.id, approve = true})
+  T.eq(r.ok, false)
+  T.ok(r.msg:find('1 patient lies in it', 1, true), r.msg)
+  -- a zone inside the core: refused
+  r = W2.inbox('hospital.retire', {zone = W2.new.id, approve = true})
+  T.eq(r.ok, false)
+  T.ok(r.msg:find('inside Kern+/Tiefe+', 1, true), r.msg)
+  T.eq(#W2.find_acts('hospital_remove'), 0)
+  -- superseded by a finished hospital inside: no approve needed; the location keeps its second zone
+  local W3 = b131{old_beds = 2, new = true, second = true}
+  day(W3)
+  r = W3.inbox('hospital.retire', {zone = W3.old.id})
+  T.ok(r.ok, r.msg)
+  T.ok(r.msg:find('keeps 1 zone', 1, true), r.msg)
+  T.eq({r.data.left, r.data.approve}, {1, 0})
+end)
+
 
 T.done()
