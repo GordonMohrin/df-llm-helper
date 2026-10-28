@@ -324,6 +324,7 @@
    "workshop": 8
   },
   "params": {
+   "aquifer": "",
    "beds": 8,
    "depth": 3,
    "refuge": 3,
@@ -1990,6 +1991,7 @@
    "weapon_rack": 2
   },
   "params": {
+   "aquifer": "",
    "beds": 8,
    "depth": 3,
    "refuge": 3,
@@ -2862,6 +2864,7 @@
    "well": 1
   },
   "params": {
+   "aquifer": "",
    "beds": 8,
    "depth": 3,
    "refuge": 3,
@@ -3687,6 +3690,7 @@
    "stonefall_trap": 41
   },
   "params": {
+   "aquifer": "",
    "beds": 8,
    "depth": 3,
    "refuge": 3,

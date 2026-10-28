@@ -125,6 +125,9 @@ C.EVENTS = {
   -- Run 11: a dig broke into a cavern (lake): the explore shaft's plug (queued, done, failed) or none (by hand); the
   -- daily shaft check (any explore state, field state) queues it too
   CAVERN_PLUG = {cls = 'A', by = 'runner'},
+  -- FR-95: a heavy aquifer (water >= 4/7 or a rising flow in our own dug tiles): the dig stopped for good
+  -- (breach:heavy_aquifer), a shaft plugged (CAVERN_PLUG); d.proj, z, flow, why flow | rising, pos, plug
+  AQ_HEAVY = {cls = 'A', by = 'runner'},
   -- Run 11 siege 8: an open seal or plug built nothing for runner seal_first.stuck_days; the others run again (d.proj,
   -- tpl, stage, days, n, pieces 'door x,y,z', mat, blocked; BUG-041 wait: the job and its labor, a piece no citizen
   -- reaches)
@@ -149,6 +152,9 @@ C.EVENTS = {
   STOCK_LOW = {cls = 'B', by = 'economy'}, CANCEL_LOOP = {cls = 'B', by = 'economy'},
   LABOR_STARVED = {cls = 'B', by = 'economy'}, WORK_DETAIL = {cls = 'B', by = 'economy'},
   CAPTURE = {cls = 'B', by = 'care'}, BREACH_STOP = {cls = 'B', by = 'runner'},
+  -- FR-95: the aquifer pass: observe mode began (a damp report, no park), a shaft level sealed, seepage seen, a shaft passed
+  AQ_OBSERVE = {cls = 'B', by = 'runner'}, AQ_LEVEL_SEALED = {cls = 'B', by = 'runner'},
+  AQ_SEEP = {cls = 'B', by = 'runner'}, AQ_PASS_DONE = {cls = 'B', by = 'runner'},
   KERNEL_SLOW = {cls = 'B', by = 'kern'}, WEALTH = {cls = 'B', by = 'siege'},
   DRILL_RESULT = {cls = 'B', by = 'drill'}, READY_CHANGE = {cls = 'B', by = 'readiness'},
   POPCAP = {cls = 'B', by = 'readiness'}, AUDIT = {cls = 'B', by = 'readiness'},

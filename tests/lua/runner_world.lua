@@ -118,7 +118,7 @@ end
 -- W.qf_fail fails every call, W.qf_fail_cmd only calls with that command
 function H.fake_qf(W, p)
   W.qf[#W.qf + 1] = {mode = p.mode, command = p.command or 'run', dry = p.dry_run == true, frame = W.frame_n,
-                     pos = p.pos, data = p.data, priority = p.priority}
+                     pos = p.pos, data = p.data, priority = p.priority, marker = p.marker}   -- FR-95: damp marker
   local cmd = p.command or 'run'
   if W.qf_fail or W.qf_fail_cmd == cmd then return false, 'quickfort failed' end
   local st = {invalid_keys = 0, out_of_bounds = 0}
@@ -215,8 +215,10 @@ function H.world(opts)
                       if t.hidden then return nil end
                       local bid = W.bld_at[x .. ',' .. y .. ',' .. z]
                       local bb = bid and W.buildings[bid]
+                      -- FR-95: aq = the aquifer flag of this revealed tile (W.tile().aq), soilmat = a soil tile (W.soil)
                       return {c = t.c, dig = t.dig, bld = bid and (bb and bb._bld or 'Bed') or '',
-                              flow = t.flow or ((t.c == '~' and 7) or (t.c == 'w' and 2) or 0), cav = t.cav == true}
+                              flow = t.flow or ((t.c == '~' and 7) or (t.c == 'w' and 2) or 0), cav = t.cav == true,
+                              aq = t.aq == true, soilmat = W.soil[x .. ',' .. y .. ',' .. z] == true}
                     end,
                     -- BUG-041: walk groups per point (snapshot.groups: -1 hidden or off the map, else W.tile().g or 0)
                     groups = function(K, pts)

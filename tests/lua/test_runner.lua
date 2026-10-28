@@ -11,6 +11,7 @@ local CFG0 = {}
 for k, v in pairs(runner.CFG) do CFG0[k] = v end
 local function fresh(opts)
   for k, v in pairs(CFG0) do runner.CFG[k] = v end
+  require('dfllm.aqshaft').CFG.on = true
   local W = H.world(opts)
   W.load(runner)
   return W
@@ -259,6 +260,7 @@ end)
 
 T.test('BREACH_STOP: a damp cancel report near a digging project stops it and undoes its designations', function()
   local W = fresh{tag = 'damp'}
+  require('dfllm.aqshaft').CFG.on = false   -- FR-95: the legacy stop (observe off); test_aqshaft.lua: observe mode
   H.place(W, 'c1', H.dig_doc(5))
   H.place(W, 'far', H.dig_doc(2, {x = 80}))
   H.runs(W, 1)
@@ -332,6 +334,7 @@ end)
 
 T.test('tile checks: a lost designation with a damp report in the announcement log is a damp breach', function()
   local W = fresh{tag = 'tileslog'}
+  require('dfllm.aqshaft').CFG.on = false   -- FR-95: the legacy stop (observe off); test_aqshaft.lua: observe mode
   H.place(W, 'c1', H.dig_doc(2))
   H.runs(W, 2)
   -- the report reached the log but not the runner (e.g. the kernel was stopped when DF announced it)
@@ -369,6 +372,7 @@ end)
 
 T.test('a probe breach undoes in the same run; a plain cancel waits for that undo', function()
   local W = fresh{tag = 'probeundo'}
+  require('dfllm.aqshaft').CFG.on = false   -- FR-95: the legacy stop (observe off); test_aqshaft.lua: observe mode
   H.place(W, 'c1', H.dig_doc(3))
   H.runs(W, 2)
   W.tile(10, 12, 100).c = '~'                    -- water revealed in the last chunk

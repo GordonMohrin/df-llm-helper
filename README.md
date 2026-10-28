@@ -126,7 +126,7 @@ Tools: `tools/migrate_v2.py` (install and `--revert`), `tools/embark/embark.py` 
 ## Fair play
 
 Only what a human player could do through the UI, enforced in code (DESIGN §11):
-- **Reads:** only `sense.lua` and `snapshot.lua` read units and tiles; units count only when visible and not hidden, tiles only when revealed. No `water_table`, prospect or locate-ore; damp, warm and cavern knowledge comes from vanilla reports.
+- **Reads:** only `sense.lua` and `snapshot.lua` read units and tiles; units count only when visible and not hidden, tiles only when revealed. No `water_table` of hidden tiles (only a revealed tile's aquifer flag, FR-95), no prospect or locate-ore; damp, warm and cavern knowledge comes from vanilla reports.
 - **Writes:** only `act.lua` writes to the game, and each of its functions maps to a UI action (designations, quickfort with own blueprints, work orders, stockpile and kitchen settings, squads and uniforms, civ alert, lever pull jobs, pop-control, timestream, dismissing harmless popups).
 - **Lint:** rejects writes outside `act.lua`, unit or tile scans outside the two readers, `createItem`, `.hidden=`, teleports and edits of skills, bodies, positions or timers.
 - **Commands:** `act.run` uses an explicit allowlist, cross-checked at boot against DFHack's `armok` tag. Always blocked: createitem, dig-now, build-now, reveal, fastdwarf, `digv`/`digvx`, `digtype --hidden`, `caravan extend|happy`, autodump, locate-ore, prospect, showmood, `fix/retrieve-units`.

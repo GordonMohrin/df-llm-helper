@@ -177,7 +177,9 @@ LUA_RULES = {
     "io": "file missing or unreadable",
 }
 
-_FORBIDDEN_NAMES = {          # any occurrence, every file (Lua API.txt names)
+# FR-95: the snapshot function that may read `water_table` (revealed tiles only; LuaChecker.aquifer_ok)
+AQUIFER_READER = "revealed_aquifer"
+_FORBIDDEN_NAMES = {          # any occurrence, every file (Lua API.txt names; water_table: see AQUIFER_READER)
     "createItem": "create", "createitem": "create", "leverPullInstant": "instant",
     "water_table": "hidden-read", "isTileAquifer": "hidden-read", "isTileHeavyAquifer": "hidden-read",
     "setTileAquifer": "hidden-read", "removeTileAquifer": "hidden-read", "feature_map": "hidden-read",
@@ -707,9 +709,21 @@ class _Lint:
         if self.op(i - 1, "[") and self.op(i + 1, "]"):
             self.check_ref(tk.v, self.qual(i + 1), tk.line)
 
+    def _func(self) -> dict | None:
+        """The innermost function block on the stack (None at the top level)."""
+        return next((e for e in reversed(self.stack) if e["k"] == "func"), None)
+
+    def aquifer_ok(self, v: str) -> bool:
+        """FR-95 (DECISIONS 2026-10-28): the one allowed read of the aquifer flag: `water_table` in snapshot.lua, inside
+        its function `revealed_aquifer`, after that function looked at `hidden` (a revealed tile only, what the drip icon
+        shows). Anywhere else, or before the hidden check, it stays hidden-read."""
+        f = self._func()
+        return (v == "water_table" and self.role == "snapshot" and f is not None
+                and f.get("fname") == AQUIFER_READER and bool(f.get("saw_hidden")))
+
     def check_ref(self, v: str, q: str, line: int) -> None:
         """Rules on a resolved access path q whose last part is v (a name or a string index)."""
-        if v in _FORBIDDEN_NAMES:
+        if v in _FORBIDDEN_NAMES and not self.aquifer_ok(v):
             self.add(line, _FORBIDDEN_NAMES[v])
         if v == "features" and q.endswith("world.features"):
             self.add(line, "hidden-read")
@@ -769,6 +783,9 @@ class _Lint:
             self.add(line, "perf-loop")
         if v in ("isVisible", "isHidden", "hidden"):
             self.flags.add(v)
+            f = self._func() if v == "hidden" else None
+            if f is not None:
+                f["saw_hidden"] = True                     # FR-95: the hidden check before the aquifer read
         # q, not the token: `local rc = dfhack.run_command; rc('fastdwarf')` is checked too
         if (called or self.pcall_arg(i)) and (q.endswith("act.run") or q.rsplit(".", 1)[-1] in _RUN_LAST
                                               or q in COMMAND_FNS):

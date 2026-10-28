@@ -189,6 +189,7 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "stone_dig": stone_digs(save_dir),
             "hosp": hospital_facts(save_dir, state, rooms),
             "metal": metal_facts(save_dir, man, applied),
+            "aqshaft": any(t == AQSHAFT for t, _ in applied),       # FR-95: an aquifer shaft placed (any state)
             "seals": open_seals(save_dir, state)}
 
 
@@ -1151,6 +1152,7 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     errs += se
     warn += sw
     warn += seal_gate(doc, s, fort or {}, prev)   # Run 11 siege 8: seal first; the rebuild policy
+    warn += aquifer_gate(doc, s, fort or {})      # FR-95: a breach:damp park, a heavy aquifer, fortcore p.aquifer pass
     warn += stress_gate(doc, s, fort)             # FR-74: stress at care.stress_high: a temple and a tavern
     if pol["beauty"] == "used_rooms" and lvl < 1:
         warn.append("beauty used_rooms waits for R1 (runner gates it)")
@@ -1178,6 +1180,40 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
             if _has_term(text, term):
                 (warn if p.endswith("notes") else errs).append(f"fair play: {p} mentions {term!r}")
     return errs, warn
+
+
+# ---------------------------------------------------------------- FR-95: the aquifer pass
+AQSHAFT = "aqshaft"
+AQ_HINT = '{"tpl":"aqshaft","site":"S1","p":{"x":X,"y":Y,"top":Z}}'
+
+
+def aquifer_gate(doc: dict, s: dict, fort: dict) -> list[str]:
+    """Warnings (FR-95; Run 14 site90: fortcore, bedrooms, stockroom and tombs parked at breach:damp for good). A project
+    row at breach:damp (also parked): the kernel resumes it in observe mode at its next boot (an older kernel parked it),
+    and an aquifer below it is passed with an aqshaft; a heavy aquifer: keep the fort above it. A sealing or watched
+    aqshaft is progress (its row has no block): nothing to say. A fortcore build with p.aquifer pass and no aqshaft in the
+    plan or under way waits for ever."""
+    warn: list[str] = []
+    for row in s.get("proj") or []:
+        if not (isinstance(row, list) and len(row) >= 4):
+            continue
+        pid, label, st = str(row[0]), str(row[1]), str(row[-1])
+        if "breach:damp" in st:
+            warn.append(f"{pid} ({label}) stopped at breach:damp: the kernel resumes it in observe mode at its next boot "
+                        "(FR-95: digging on with the damp marker, the walls beside the damp tiles smoothed; it stops only on "
+                        "water >= 4/7 or a rising flow in its own tiles); to pass an aquifer below it place "
+                        f"{AQ_HINT} (the stair column) and the fortcore below it with p.aquifer pass")
+        elif "breach:heavy_aquifer" in st:
+            warn.append(f"{pid} ({label}) hit a heavy aquifer (breach:heavy_aquifer, plugged): keep the fort above it "
+                        "(fortcore p.aquifer above; bp sites keeps rooms off the manifest's aquifer_levels); a pump stack "
+                        "through it is the player's call")
+    builds = [b for se in doc["seasons"] for b in se["build"]]
+    shaft = bool(fort.get("aqshaft")) or any(b["tpl"] == AQSHAFT for b in builds)
+    for b in builds:
+        if b["tpl"] == "fortcore" and (b.get("p") or {}).get("aquifer") == "pass" and not shaft:
+            warn.append(f"fortcore p.aquifer pass waits for a passed aqshaft: add {AQ_HINT} before it (FR-95)")
+            break
+    return warn
 
 
 # ---------------------------------------------------------------- supply goals (Run 10)

@@ -92,6 +92,25 @@ switches (D-01..D-14 stay Gordon's). The packages that carry them out are in `do
     militia turnover (FR-79, built offline for note 64: kern.log follows the worn % after every turnover), the recall
     part of note 23.
 
+### Decided by the orchestrator on Gordon's behalf (2026-10-28, FR-95; Gordon delegated both questions to the orchestrator)
+Runs 2, 4, 6, 9 and 14 lost their forts or their cores to aquifers: a level opened before its seal flooded, digs parked at
+`breach:damp` for good (Run 14 site90: fortcore, bedrooms, stockroom and tombs). The aquifer research of 2026-10-28 (DFHack
+53.16 docs: a natural rough aquifer wall feeds the open tiles beside and below it; a smoothed or constructed wall does not)
+decided:
+24. **Re-designating a dig after a damp report is allowed, because the lined-shaft procedure seals each level right away.**
+    RULES §10 and DOCTRINE §1 change from "stop, never re-designate" to "observe and seal; stop only on visible water in our
+    own dug tiles or a heavy aquifer". A damp report starts observe mode (AQ_OBSERVE) instead of a park; an aquifer is passed
+    by `aqshaft` (dig, seal, watch per level). The damp acknowledgement is the one the code can set as the player does: the
+    DFHack dig tool's damp marker (`dig.warmdamptoolbar`: the mining toolbar's "damp dig" button, Ctrl-D), applied through
+    quickfort `marker = {damp = true}` on the designations of an aqshaft and of a dig in observe mode. The vanilla standing
+    order of 53.12 ("mining designations ignore new warm/damp stone warnings") is not set: its field is not proven offline,
+    and an unproven write is no UI action. Water >= 4/7 or a rising flow in our own tiles stops the dig for good
+    (`breach:heavy_aquifer`, AQ_HEAVY, the shaft plugged). The old stop stays as a switch (`aqshaft.CFG.on`).
+25. **The kernel may read the aquifer flag (`water_table`) of REVEALED tiles only**: what the vanilla drip icon and DFHack's
+    warmdamp overlay show the player. Unrevealed tiles stay forbidden. The only reader is `snapshot.revealed_aquifer`, which
+    checks `designation.hidden == false` before it looks at the flag (`snapshot.tile` `aq`); the lint rule hidden-read allows
+    `water_table` only inside that function after its hidden check, and tests prove that a hidden tile's flag is never read.
+
 ### Answered by Gordon (2026-10-16, chat)
 - **`tools.equip_update` on (BUG-023):** yes. A fair-play exception: when `act.work_detail` switches a tool labor on
   (Miners/MINE, Woodcutters/CUTWOOD), it also sets the member's equipment update request (`uniform.pickup_flags.update`,
@@ -135,6 +154,7 @@ stays above the time an army needs from the map edge to the gate. On a fort with
 lockdown raised are held up; the kernel does not know which of them a caravan needs.
 
 ## What is never a decision
-These stay blocked whatever the file says (allowlist `blocked`, lint, hook): `digv`/`digvx`/`digl`, `digtype --hidden`, `fastdwarf`, `caravan extend|happy`, `autodump`, `locate-ore`, `prospect`, `showmood`, `reveal`, `createitem`, `dig-now`, `build-now`, `fix/retrieve-units`, `teleport`, `lever --instant` (the lever script is used only through `act.pull`, which queues a pull job), every other armok-tagged tool, inline `lua` and the v1 `claude/*` scripts. Reads of hidden tiles, `water_table` or aquifer flags are lint errors.
+These stay blocked whatever the file says (allowlist `blocked`, lint, hook): `digv`/`digvx`/`digl`, `digtype --hidden`, `fastdwarf`, `caravan extend|happy`, `autodump`, `locate-ore`, `prospect`, `showmood`, `reveal`, `createitem`, `dig-now`, `build-now`, `fix/retrieve-units`, `teleport`, `lever --instant` (the lever script is used only through `act.pull`, which queues a pull job), every other armok-tagged tool, inline `lua` and the v1 `claude/*` scripts. Reads of hidden tiles (their `water_table` too) and the aquifer APIs are lint errors; the aquifer flag of a revealed
+tile is read only by `snapshot.revealed_aquifer` (decision 25).
 
 Actuators with a dedicated act function stay out of the allowlist too (DESIGN §3, one writer each; `fairplay.OWNED`, lint rule `owned-actuator`, hook): `timestream` (arbiter), `pop-control set max-pop` other than the R0 cap 55 (readiness), `overlay enable|disable` (arbiter), `quickfort` (runner, in-memory chunks only), `orders` and `workorder` (economy, `dfllm:` tag), `zone` (care), `burrow` (runner/siege), and disabling `timestream`, `pop-control`, `overlay` or `suspendmanager`.

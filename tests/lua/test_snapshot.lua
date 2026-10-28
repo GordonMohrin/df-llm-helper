@@ -63,6 +63,22 @@ T.test('tile(): legend classes, hidden is nil, designations, buildings', functio
   T.eq(t(3, 1).c, '_')
 end)
 
+T.test('FR-95: tile() aq = the aquifer flag of a revealed tile only (the drip icon); a hidden tile is never read', function()
+  local W, S = world{rows = {'#?#.o'}}
+  W.tiles['0,0,' .. Z].des.water_table = true
+  -- a hidden tile whose aquifer flag must not even be looked at
+  W.tiles['1,0,' .. Z].des = setmetatable({hidden = true, flow_size = 0, dig = 0, smooth = 0}, {__index = function(_, k)
+    if k == 'water_table' then error('the aquifer flag of a hidden tile was read') end
+  end})
+  local function t(x) local _, r = W.K.call('snapshot', 'tile', x, 0, Z); return r end
+  T.eq({t(0).aq, t(1), t(2).aq}, {true, nil, false})
+  T.eq({t(0).soilmat, t(4).soilmat, t(4).c}, {false, true, '#'}, 'soilmat: a soil wall')
+  T.eq(S.revealed_aquifer(W.tiles['1,0,' .. Z].des), nil, 'hidden: refused, never read')
+  T.eq(S.revealed_aquifer({hidden = false, water_table = true}), true)
+  T.eq(S.revealed_aquifer({water_table = true}), nil, 'no hidden flag: refused')
+  T.eq(S.revealed_aquifer(nil), nil)
+end)
+
 T.test('tile() cav (Run 11): a revealed cavern tile (designation.feature_global) says so, others do not', function()
   local W = world{rows = {'#c~.'}}
   local function t(x) local _, r = W.K.call('snapshot', 'tile', x, 0, Z); return r end

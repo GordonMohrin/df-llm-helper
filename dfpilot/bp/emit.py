@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-from . import defense, fortcore, mine, rooms
+from . import aquifer, defense, fortcore, mine, rooms
 from .primitives import BRIDGE_KEYS, Plan, Xform, transform_manifest
 
 MAX_W = 40
@@ -23,7 +23,9 @@ TEMPLATES = {"fortcore": (fortcore.build, fortcore.PARAMS, "doctrine fortress co
                 for n, f in rooms.BUILD.items()},
              **{n: (f, dict(defense.PARAMS.get(n, {})), (f.__doc__ or n).strip().split("\n")[0])
                 for n, f in defense.BUILD.items()},
-             **{n: (f, dict(mine.PARAMS[n]), (f.__doc__ or n).strip().split("\n")[0]) for n, f in mine.BUILD.items()}}
+             **{n: (f, dict(mine.PARAMS[n]), (f.__doc__ or n).strip().split("\n")[0]) for n, f in mine.BUILD.items()},
+             **{n: (f, dict(aquifer.PARAMS[n]), (f.__doc__ or n).strip().split("\n")[0])
+                for n, f in aquifer.BUILD.items()}}         # FR-95: the aquifer pass
 ATTACHED = dict(defense.ATTACHED)     # tpl -> the template whose tiles it is built against (cmd occupancy)
 FREE = frozenset(defense.FREE)        # templates that build only on existing open tiles (no occupancy clash)
 _BURROW_RE = r"^[A-Za-z0-9_+-]{0,20}$"
@@ -86,9 +88,13 @@ def parse_site(site) -> tuple[list[int], int, str]:
 def emit(tpl: str, params: dict | None = None, site=None) -> dict:
     p = check_params(tpl, params)
     anchor, rot, sid = parse_site(site if site is not None else ([0, 0, 0], 0))
+    build = TEMPLATES[tpl][0]
+    own = getattr(build, "anchor_of_params", None)            # FR-95: aqshaft p.x/p.y/p.top name the column
+    col = own(p) if own else None
+    if col:
+        anchor, rot = [int(c) for c in col], 0
     if any(c < 0 for c in anchor):
         raise ValueError(f"anchor {anchor} outside the map")
-    build = TEMPLATES[tpl][0]
     plan: Plan = build(p, anchor, rot) if getattr(build, "sited", False) else build(p)   # seal: absolute tiles
     X = Xform(anchor, rot)
     stages = [s for s in (_stage(st, X) for st in plan.stages) if s["chunks"]]
