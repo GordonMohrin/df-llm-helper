@@ -56,7 +56,11 @@ def test_bug144_the_drill_hint_never_offers_a_command_that_is_refused():
     r["dref"] = 1
     t = line(r)
     assert "drill never (auto: no_inner) [1 refused: build fortcore stage 2/3 first]" in t and "run dfllm cmd drill" not in t, t
+    r.pop("dhold")                             # refused drills but no auto-hold reason: still no 'run dfllm cmd drill'
+    t = line(r)
+    assert "drill never [1 refused: build fortcore stage 2/3 first]" in t and "run dfllm cmd drill" not in t, t
     r.pop("dref")
+    assert "drill never (run dfllm cmd drill)" in line(r), line(r)
     r["dhold"] = "no barracks"
     assert "drill never (auto: no barracks; run dfllm cmd drill)" in line(r)
 

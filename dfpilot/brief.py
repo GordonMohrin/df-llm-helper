@@ -498,7 +498,10 @@ def pop_items(ctx: Ctx) -> list[tuple[int, str]]:
         gap = bool(r.get("dref")) or any(w in str(r.get("dhold") or "") for w in ("no_outer", "no_inner", "no bridges"))
         if r["drill_age"] < 0:                 # FR-65: say why no drill ran and how to run one
             how = "" if r.get("dref") else ("; build fortcore stage 2/3 first" if gap else "; run dfllm cmd drill")
-            drill += (f" (auto: {r['dhold']}{how})" if r.get("dhold") else f" ({how[2:] or 'run dfllm cmd drill'})")
+            if r.get("dhold"):
+                drill += f" (auto: {r['dhold']}{how})"
+            elif not r.get("dref"):                # (with dref the [N refused: ...] below says what to do)
+                drill += f" ({how[2:]})"
         if r.get("dref"):                      # BUG-110: drills refused for want of O1/B1 (counted once a game day)
             drill += f" [{r['dref']} refused: build fortcore stage 2/3 first]"
         audit = (f"audit {'ok' if a['ok'] else 'FAIL'} {fmt_ticks(a['age'])}" if a["age"] >= 0
