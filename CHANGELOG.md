@@ -1,5 +1,44 @@
 # CHANGELOG dfpilot
 
+## M7: a garbage dump zone, a trash view and the reason a dump job cancels; loading the newest complete save at the title screen; the title-screen status (FR-90, FR-91, BUG-120, 2026-10-28, package M7, notes 98 and 99; offline, live-untested)
+- **Why:** Run 14 note 98: garbage had no verb (`zone.place` knew no dump zone) and "Dump item cancelled 5 times today" (y701, y703, y707) gave no
+  reason. Note 99: after a DF restart the fort stood at the main menu for more than ten minutes (`load-save` broken in DFHack 53.16-r3, the click
+  path needed an alarm and a human), the session reported old pop/day numbers from the unloaded fort, and nothing excluded a half-written
+  `autosave 3_tmp` from the newest-save choice.
+- **What changed:** (1) FR-90 (zonelib.lua, trash.lua new, economy.lua): `zone.place` type `dump` (quickfort key `d`), refused beside water or
+  within `zones.dump_path_gap` (2) tiles of a stair, ramp, door or bridge, on a building, over rooms, pens, ponds, meeting areas, locations or
+  another dump zone (and the other types do not go over a dump zone); `inspect what=items key=trash` (loose, marked, on the zone, DumpItem jobs
+  and waiting ones, per zone tiles/walk/free/reach, reason, the game's own cancel words); CANCEL_LOOP of `Dump item` adds `d.why` (`no_zone`,
+  `unreachable`, `no_free_tile`, `ok`) and the reason in words. Nothing is built or pulled by the kernel. (2) FR-91 (loadsave.py, loadnow.py new,
+  supervise.py, doctor.py): incomplete saves (`*_tmp`, no or empty world.sav, a file all siblings have) are never chosen, backed up or waited
+  for; `supervise --load [SAVE] [--dry-run]` loads the newest complete save at the title screen through the restart chain's load (stock
+  `load-save`, then the title-screen click run), says save, fort, game time and age and what it skipped; `supervise --saves` lists the saves and
+  why one is not loadable; `supervise.json` `load_save` and `dfllm doctor` `load_save: broken (DFHack 53.16-r3)`. (3) BUG-120 (brief.py,
+  dfllm.lua): status and brief print `DF at title screen: no fort loaded` (or `DF is not running: ...`) instead of the last fort's numbers when
+  the last supervise pass saw DF up with no live fort. (4) The title-screen run records what the screen shows once per run when it finds no label
+  (loadsave.lua `L.dump`: viewscreen stack, rows, cells, titlest fields); supervise.log and `title_dump`.
+- **Safety:** `--load` never runs over a fort (it refuses when ACTIVE belongs to this DF session), never with `norestart.flag` or a held
+  `live.lock`, never kills or starts DF, never loads an older save than the newest complete one of the fort or an unmarked save; it is bounded
+  (300 s + 300 s) and a failure is the same `needs_click` alarm as the chain's. The dump zone is a zone designation (zones > Garbage Dump) in
+  PEACE/ALERT/RECOVERY only, small by `zones.max_tiles`, on revealed dry floor away from routes; a fort of 7 and of 80 are alike; SIEGE, BREACH
+  and a lockdown refuse the verb as for the other zones. The trash view scans at most 60000 items, only when asked. `status` changes only when
+  supervise itself says DF is up with no fort (an old or missing supervise.json prints the old status), a fresh heartbeat of the fort wins.
+- **Contracts / config:** schema `ZONE_TYPES` + `dump`, `inspect` what + `items`, CANCEL_LOOP `d.why` (optional string); config/baseline.json
+  `zones.dump_path_gap` (0..8, default 2; `fairplay.ZONES_LIM`); RULES zone.place and inspect rows edited in place (300 lines); CONTRACTS rows and
+  appendix; `supervise.json` keys `load_save`, `title_dump`.
+- **Tests (each fails on 32994bb):** tests/test_m7_load.py (21), tests/test_m7_dump.py (4), tests/lua/test_m7_dump.lua (9),
+  tests/lua/test_loadsave_dump.lua (6), tests/lua/test_m7_title.lua (1); tests/lua/test_zone_place.lua and tests/test_a4_health.py follow the
+  new type list and config.
+- **Live check:** at the title screen `python -m dfpilot supervise --saves` (the table shows `NOT LOADABLE` for a `_tmp` folder), `dfllm status`
+  (the title line), `python -m dfpilot supervise --load --dry-run` (save, fort, game time, age), then `supervise --load`; if it fails, the dump in
+  supervise.log (`title screen dump for ...`) holds the viewscreens, rows and cells of the 53.16-r3 menu. For the dump zone: `bp`/map read of a dry
+  spot, `dfllm cmd zone.place '{"type":"dump","bbox":[...]}'`, then `dfllm cmd inspect '{"what":"items","key":"trash"}'` (zone reach/free, loose
+  items, waiting jobs); the next CANCEL_LOOP of `Dump item` names the reason and `cancel_why` holds the game's words.
+- **Not decided offline:** the labels of the 53.16-r3 title menu (the dump decides); whether DF names an interrupted autosave `<name>_tmp` with a
+  `world.sav` inside and keeps `world.dat` in a complete save (the companion rule is silent below two siblings); the civzone enum name of the dump
+  zone (`Dump` or `GarbageDump`, both accepted); the exact text of a Dump item cancel; whether `getWorker` tells a taken DumpItem job; a kernel
+  routine that places the dump zone by itself and "zone full" (not built: see FR-90).
+
 ## M6: orders and economy: care first, a missing mood workshop is a blocker, a cloth floor, more shop types, training weapons (BUG-116, BUG-117, BUG-118, BUG-119, FR-89, 2026-10-28, offline, live-untested)
 - **Why:** Run 14 notes 75, 80, 83, 92, 82 and 89. The hospital stood outside the refuge for 60 game years while expansion projects held the
   runner's slots and the miners found no pick (note 89); 151 of 453 citizen deaths were failed strange moods, the Loom was missing and cloth ran

@@ -2453,6 +2453,7 @@ local function cancel(K, ev)
   local key = job:lower()
   st.cancels[key] = (st.cancels[key] or 0) + 1
   local n = st.cancels[key]
+  if key == 'dump item' then st.dump = {n = n, why = wk, day = day} end   -- FR-90: the game's own words, for inspect items trash
   local oid
   -- BUG-061: a job cancelled for want of an unengraved slab: the EngraveSlab orders are cut back now, not at the next
   -- daily pass (autoslab queues them again every 1289 ticks)
@@ -2471,9 +2472,13 @@ local function cancel(K, ev)
   oid = oid or find_order_named(key)
   -- Run 11: a rock loop while the free stone is below the rock orders' need: a recheck only posts the jobs again
   local rock = M.rock_why(why) and M.rock_short(c, M.view_run(K))
-  K.emit('CANCEL_LOOP', 'B', string.format('%s cancelled %d times today%s', job, n,
-                                           rock and ' (stone short of the rock orders: no recheck)' or ''),
-         {order = oid or -1, job = job, n = n})
+  -- FR-90: a dump job that keeps cancelling names its reason from facts (no zone, not reachable, no free tile)
+  local okt, tw, tc = pcall(function() return require('dfllm.trash').reason(K, job) end)
+  tw = okt and tw or nil
+  K.emit('CANCEL_LOOP', 'B', string.format('%s cancelled %d times today%s%s', job, n,
+                                           rock and ' (stone short of the rock orders: no recheck)' or '',
+                                           tw and (': ' .. tw) or ''),
+         {order = oid or -1, job = job, n = n, why = tw and tostring(tc) or nil})
   if st.rechecked ~= day and not rock then   -- orders.txt: recheck stops cancellation spam of stale conditions
     st.rechecked = day
     K.act.orders('recheck')
@@ -9028,6 +9033,14 @@ function M.inspect_details(K)
          {details = json.array(list), rows = json.array(rows), withdrawn = (st.cover or {}).withdrawn or 0,
           autofarm = {off = af.off ~= nil and 1 or 0, why = af.why, wiped = math.tointeger(af.wiped) or 0,
                       engine_off = st.af_off and 1 or 0}}
+end
+
+-- FR-90 (Run 14 note 98): inspect what=items key=trash, read only: loose items, DumpItem jobs, the dump zones, the reason the
+-- jobs cancel (lua/dfllm/trash.lua); st.dump = what cancel() saw of the "Dump item" cancels today
+M.inspect.items = function(K, args)
+  local key = type(args) == 'table' and args.key or nil
+  if key ~= 'trash' then return false, 'items: key must be trash' end
+  return require('dfllm.trash').inspect(K, st.dump)
 end
 
 M.inspect.workload = function(K, args)

@@ -225,7 +225,7 @@ C.VERBS = {
   ['squad.leader'] = {mod = 'military', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
   ['squad.add'] = {mod = 'military', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
   ['squad.uniform'] = {mod = 'military', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
-  -- FR-78 (Run 14 note 65): a civzone (pen, pit, pond, sand, clay, fishing, meeting) in a box, quickfort zone mode
+  -- FR-78 (Run 14 note 65): a civzone (pen, pit, pond, sand, clay, fishing, meeting, dump) in a box, quickfort zone mode
   ['zone.place'] = {mod = 'runner', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
   -- FR-88 (Run 14 note 95): the camera; no mode list (a fight needs by=gordon, viewlib refuses it)
   ['view'] = {mod = 'arbiter'},

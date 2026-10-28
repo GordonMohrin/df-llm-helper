@@ -37,7 +37,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from . import schema
+from . import loadsave, schema
 
 HB_MAX_S = 120                    # liveness: heartbeat mtime older than this = stale
 DOWN_RUNS = 2                     # crash: DF missing in this many consecutive runs
@@ -425,9 +425,11 @@ def marker_of(p: Path) -> list | None:
     return None
 
 
-def scan_saves(saves: Path, cache: dict, now: float) -> list[dict]:
+def scan_saves(saves: Path, cache: dict, now: float, partial: bool = False) -> list[dict]:
     """Fortress saves (folders with world.sav, not 'current'), newest first. cache (in supervise.json) keeps the
-    folder walk and the marker per world.sav mtime/size; recent saves are re-walked every time."""
+    folder walk and the marker per world.sav mtime/size; recent saves are re-walked every time. FR-91: every entry says
+    whether it may be loaded (loadsave.mark: `bad` = why not, '' = complete; `tmp`, `writing`); partial=True also lists the
+    folders without world.sav (a save DF died writing), for `supervise --saves` and the manual load."""
     out = []
     try:
         dirs = [d for d in saves.iterdir() if d.is_dir() and d.name != "current"]
@@ -437,18 +439,30 @@ def scan_saves(saves: Path, cache: dict, now: float) -> list[dict]:
         try:
             ws = (d / "world.sav").stat()
         except OSError:
+            if partial:
+                fi = folder_info(d)
+                out.append({"name": d.name, "path": str(d), "mt": fi["newest"], "size": fi["size"], "files": fi["files"],
+                            "newest": fi["newest"], "marker": None, "ws": False, "wss": 0, "names": _names(d)})
             continue
         c = cache.get(d.name)
-        if not c or c["wsm"] != ws.st_mtime or c["wss"] != ws.st_size or now - c["newest"] < 60:
-            c = {"wsm": ws.st_mtime, "wss": ws.st_size, **folder_info(d), "marker": marker_of(d)}
+        if not c or c["wsm"] != ws.st_mtime or c["wss"] != ws.st_size or now - c["newest"] < 60 or "names" not in c:
+            c = {"wsm": ws.st_mtime, "wss": ws.st_size, **folder_info(d), "marker": marker_of(d), "names": _names(d)}
         cache[d.name] = c
         out.append({"name": d.name, "path": str(d), "mt": c["wsm"], "size": c["size"], "files": c["files"],
-                    "newest": c["newest"], "marker": c["marker"]})
-    names = {e["name"] for e in out}
+                    "newest": c["newest"], "marker": c["marker"], "ws": True, "wss": c["wss"], "names": c["names"]})
+    names = {e["name"] for e in out if e["ws"]}
     for k in [k for k in cache if k not in names]:
         del cache[k]
     out.sort(key=lambda e: e["mt"], reverse=True)
-    return out
+    return loadsave.mark(out, now)
+
+
+def _names(d: Path) -> list[str]:
+    """Top-level names in a save folder (completeness sign, loadsave.COMPANIONS); [] when unreadable."""
+    try:
+        return sorted(os.listdir(d))
+    except OSError:
+        return []
 
 
 def busy(saves: Path) -> bool:
@@ -477,12 +491,20 @@ def ident_of(saves: list, active: str | None) -> list | None:
 
 def pick_save(saves: list, now: float, *, active: str | None, since: float | None, ident: list | None = None,
               is_busy: bool = False, last_mt: float = 0.0, max_age: float = SAVE_MAX_AGE_S) -> tuple[dict | None, str]:
-    """The newest save if it may be loaded, else (None, reason). Never an older one (no save scumming)."""
+    """The newest COMPLETE save if it may be loaded, else (None, reason). Never an older one (no save scumming): FR-91 a
+    half-written `autosave 3_tmp` is skipped (DF died writing it) and the newest complete save before it is the candidate;
+    one DF is writing right now holds the choice back."""
     if not saves:
         return None, "no fortress save"
-    s = saves[0]
     if is_busy:
         return None, "DF is writing a save (save/current/world.sav)"
+    for e in saves:
+        if e.get("writing") and e["mt"] >= max((x["mt"] for x in saves if not x.get("bad")), default=0.0):
+            return None, f"{e['name']} is still being written"
+    ok = loadsave.complete(saves)
+    if not ok:
+        return None, "no complete fortress save (" + "; ".join(f"{e['name']}: {e['bad']}" for e in saves[:3]) + ")"
+    s = ok[0]
     if now - s["newest"] < STABLE_S:
         return None, f"{s['name']} is still being written"
     if not s["marker"]:
@@ -491,7 +513,7 @@ def pick_save(saves: list, now: float, *, active: str | None, since: float | Non
         return None, f"newest save '{s['name']}' belongs to another fort"
     if not (s["name"] == active or (since is not None and s["mt"] >= since - 5)):
         return None, f"newest save '{s['name']}' is not from the session of '{active}'"
-    same = [e["size"] for e in saves[1:] if e["marker"] and e["marker"][:2] == s["marker"][:2]][:3]
+    same = [e["size"] for e in ok[1:] if e["marker"] and e["marker"][:2] == s["marker"][:2]][:3]
     if same and s["size"] < sum(same) / len(same) * BROKEN_PCT / 100:
         return None, f"newest save '{s['name']}' looks broken ({s['size']} B)"
     if s["mt"] < last_mt:
@@ -791,14 +813,10 @@ def pre_kill(env: Env, st: dict, active: str | None, floor: int) -> str | None:
     return "; ".join(b) or None
 
 
-def restart(env: Env, st: dict, s: dict, why: str, kill: bool, flush: Callable[[], None],
-            active: str | None = None, floor: int = 0) -> dict:
-    """Blocking chain: [pre-kill check, kill] -> backup -> Steam -> window to desktop 1 -> load-save -> kern boot
-    (ACTIVE + heartbeat). `floor` is a tick seen before save s was written (pre_kill)."""
-    o, clk = env.os, env.clock
-    t0 = clk()
-    rs = st["restart"] = {"why": why, "save": s["name"], "save_mt": s["mt"], "kill": kill, "t0": int(t0),
-                          "phase": "start", "log": []}
+def chain_log(env: Env, st: dict, rs: dict, t0: float, flush: Callable[[], None]) -> tuple[Callable, Callable]:
+    """(step, fail) of a restart or manual load chain: step(phase, msg) logs into rs and supervise.log and keeps the run
+    lock fresh; fail(msg) records st["failed"] and ends in phase `failed`."""
+    clk = env.clock
 
     def step(phase: str, msg: str) -> dict:
         rs["phase"] = phase
@@ -814,7 +832,18 @@ def restart(env: Env, st: dict, s: dict, why: str, kill: bool, flush: Callable[[
     def fail(msg: str) -> dict:
         st["failed"] = {"wall": int(clk()), "msg": msg}
         return step("failed", msg)
+    return step, fail
 
+
+def restart(env: Env, st: dict, s: dict, why: str, kill: bool, flush: Callable[[], None],
+            active: str | None = None, floor: int = 0) -> dict:
+    """Blocking chain: [pre-kill check, kill] -> backup -> Steam -> window to desktop 1 -> load-save -> kern boot
+    (ACTIVE + heartbeat). `floor` is a tick seen before save s was written (pre_kill)."""
+    o, clk = env.os, env.clock
+    t0 = clk()
+    rs = st["restart"] = {"why": why, "save": s["name"], "save_mt": s["mt"], "kill": kill, "t0": int(t0),
+                          "phase": "start", "log": []}
+    step, fail = chain_log(env, st, rs, t0, flush)
     if kill:
         held = pre_kill(env, st, active, floor)
         if held:
@@ -911,7 +940,8 @@ def title_run(env: Env, name: str) -> dict:
     clicked as 'kind "text" @px,py' (the first live use is calibrated from these and from the rows)."""
     o, clk = env.os, env.clock
     lua = _embark_lua(env)
-    res: dict = {"ok": False, "state": "start", "msg": "", "rows": "", "screen": "", "clicks": [], "title": None, "id": ""}
+    res: dict = {"ok": False, "state": "start", "msg": "", "rows": "", "screen": "", "clicks": [], "title": None, "id": "",
+                 "dump": None}
     if not lua.is_file():
         res["msg"] = "tools/embark/embark.lua is missing (the repo of this dfpilot)"
         return res
@@ -954,6 +984,7 @@ def title_run(env: Env, name: str) -> dict:
         res["ok"] = res["state"] == "done"
         res["rows"], res["screen"] = _clip(r.get("rows"), 200), str(r.get("screen") or "")
         res["title"] = r.get("title") if isinstance(r.get("title"), dict) else None
+        res["dump"] = r.get("dump") if isinstance(r.get("dump"), dict) else None      # FR-91: the screen no label was found on
         res["clicks"] = [f"{c.get('kind')} \"{c.get('text')}\" @{c.get('px')},{c.get('py')}"
                          for c in r.get("clicks") or [] if isinstance(c, dict)]
     return res
@@ -978,9 +1009,12 @@ def _load_once(env: Env, st: dict, s: dict, ctx: dict, step: Callable) -> tuple[
     if ok and CONFIRM_RE.search(out or ""):
         ok, out = o.dfhack("load-save", name, timeout=60)
     kind = load_kind(ok, out)
+    ctx["stock_why"] = _clip(re.sub(r"^\S*load-save\.lua:\d+:\s*", "", out or ""), 110) if kind != "ok" else ""
+    if kind in ("ok", "broken"):                            # FR-91: does DFHack's own load-save work on this version?
+        st["load_save"] = {"state": kind if kind == "ok" else "broken", "ver": ctx["ver"], "wall": int(clk()),
+                           "why": ctx["stock_why"]}
     if kind == "ok":
         return True, out, "stock"
-    ctx["stock_why"] = _clip(re.sub(r"^\S*load-save\.lua:\d+:\s*", "", out or ""), 110)   # the path adds nothing
     if kind in ("nosave", "unreachable"):
         return False, out, kind
     if ctx["t_ready"] is None:
@@ -1003,11 +1037,33 @@ def _load_once(env: Env, st: dict, s: dict, ctx: dict, step: Callable) -> tuple[
         {"id": res["id"], "state": res["state"], "msg": _clip(res["msg"], 120), "clicks": res["clicks"][:6]})
     _log(env, f"title run {res['id']} for '{name}': {res['state']} {res['msg']}; clicks {res['clicks']}; "
               f"screen {res['screen']}: {res['rows']}; title fields {res['title']}")
+    if res.get("dump") and not ctx.get("dumped"):         # FR-91: once per chain, the first screen a label was missing on
+        ctx["dumped"] = True
+        _log(env, f"title screen dump for '{name}': {dump_text(res['dump'], 2500)}")
+        st["title_dump"] = dump_record(res["dump"], name, clk())
     step("load", f"stock load-save failed ({ctx['stock_why']}); title run {res['id']}: {res['state']} {res['msg']}"
                  f" clicks {len(res['clicks'])}")
     if res["ok"]:
         return True, f"title screen: {res['msg']}", "title"
     return False, res["msg"], kind
+
+
+def dump_text(d: dict, limit: int) -> str:
+    """The title-screen dump of a run (tools/embark/loadsave.lua L.dump) on one log line: why, viewscreen stack, kind, size,
+    titlest fields, rows and cells with their tiles; clipped to `limit` characters."""
+    parts = [f"why={_clip(d.get('why'), 100)}", f"focus={d.get('focus')}", f"kind={d.get('kind')}", f"size={d.get('size')}",
+             f"title={json.dumps(d.get('title'), sort_keys=True)}"]
+    for k in ("rows", "cells"):
+        v = d.get(k)
+        parts.append(f"{k}=" + json.dumps(v if isinstance(v, list) else [], ensure_ascii=False))
+    return _clip(" ".join(parts), limit)
+
+
+def dump_record(d: dict, name: str, now: float) -> dict:
+    """What supervise.json keeps of the dump (doctor shows it): small, the full dump is in supervise.log."""
+    rows = [_clip(x, 100) for x in (d.get("rows") if isinstance(d.get("rows"), list) else [])[:25]]
+    return {"save": name, "wall": int(now), "why": _clip(d.get("why"), 120), "focus": _clip(d.get("focus"), 120),
+            "kind": _clip(d.get("kind"), 20), "rows": rows}
 
 
 def _hands_off(env: Env) -> str | None:
@@ -1063,12 +1119,20 @@ def _start_and_load(env: Env, st: dict, s: dict, step: Callable, fail: Callable,
     step("steam", out)
     moved = _move_window(env, step, t_start)
     step("window", f"moved {moved} window(s) to desktop {DESKTOP}" if moved else "no DF window moved (focus?)")
+    return load_chain(env, st, s, step, fail, t0, t_start)
+
+
+def load_chain(env: Env, st: dict, s: dict, step: Callable, fail: Callable, t0: float, t_start: float,
+               load_max: int = LOAD_MAX_S, map_max: int = MAP_MAX_S) -> dict:
+    """DF runs (or starts): load `s` (stock load-save, then the title-screen run), then wait for the kernel's first beat.
+    The restart chain calls it with the 15-minute limits; the manual load (loadnow.py) with shorter ones."""
+    o, clk = env.os, env.clock
     ctx: dict = {"ver": None, "ver_tries": 0, "t_ready": None, "t_title": -1e9, "stock_why": "", "title_why": "",
                  "screen": "", "runs": 0}
     t1, retried = clk(), False
     while True:
-        if clk() - t1 > LOAD_MAX_S:
-            return _no_load(env, st, s, ctx, fail, f"load did not start within {LOAD_MAX_S // 60} min")
+        if clk() - t1 > load_max:
+            return _no_load(env, st, s, ctx, fail, f"load did not start within {load_max // 60} min")
         if o.df_proc()[0] == "down":                       # a cold Steam start can be slow
             if clk() - t_start > START_MAX_S:
                 return fail(f"DF not running {START_MAX_S} s after the Steam start")
@@ -1085,7 +1149,7 @@ def _start_and_load(env: Env, st: dict, s: dict, step: Callable, fail: Callable,
         env.sleep(5)
     step("load", f"{how} load of '{s['name']}' {(out or '').strip()[:100]}")
     t2 = clk()
-    while clk() - t2 <= MAP_MAX_S:
+    while clk() - t2 <= map_max:
         if _fort_live(env, t2):
             name = read_active(env.runtime)[0]
             st["last_loaded"] = {"name": s["name"], "mt": s["mt"],
@@ -1101,7 +1165,7 @@ def _start_and_load(env: Env, st: dict, s: dict, step: Callable, fail: Callable,
             _ok, out, how = _load_once(env, st, s, ctx, step)
             step("load", f"2nd load ({how}): {(out or '').strip()[:100]}")
         env.sleep(5)
-    return _no_load(env, st, s, ctx, fail, f"fort not live {MAP_MAX_S // 60} min after the load")
+    return _no_load(env, st, s, ctx, fail, f"fort not live {map_max // 60} min after the load")
 
 
 def _move_window(env: Env, step: Callable, t0: float) -> int:
@@ -1132,7 +1196,8 @@ def wait_for_save(env: Env, st: dict, active: str, since: float, ident: list | N
     heartbeat tick of the last poll that saw no new save and no save in progress (a lower bound of its tick)."""
     clk = env.clock
     deadline = clk() + max(0.0, secs) + AUTOSAVE_MAX_S
-    base = max((e["mt"] for e in scan_saves(env.saves, st.setdefault("scan", {}), clk())), default=0.0)
+    base = max((e["mt"] for e in scan_saves(env.saves, st.setdefault("scan", {}), clk()) if not e.get("bad")),
+               default=0.0)
     floor = hb["tick"]
     while clk() <= deadline:
         env.sleep(1)
@@ -1147,7 +1212,7 @@ def wait_for_save(env: Env, st: dict, active: str, since: float, ident: list | N
         held = holds(env, st, now, "degraded", active, hb)
         if held:
             return None, "; ".join(held), floor
-        if doc and not is_busy and max((e["mt"] for e in saves), default=0.0) <= base:
+        if doc and not is_busy and max((e["mt"] for e in saves if not e.get("bad")), default=0.0) <= base:
             floor = max(floor, doc["tick"])
     return None, "no autosave came", floor
 
@@ -1328,7 +1393,7 @@ def _alarms(st: dict, r: dict, alert: Callable) -> None:
 
 
 def _backup_step(env: Env, st: dict, saves: list, is_busy: bool, now: float, dry_run: bool) -> dict | None:
-    marked = [e for e in saves if e["marker"]]
+    marked = [e for e in saves if e["marker"] and not e.get("bad")]      # FR-91: never a half-written _tmp save
     if not marked:
         return None
     s, b = marked[0], st.setdefault("backup", {})
@@ -1461,17 +1526,31 @@ def main(argv: list[str] | None = None, env: Env | None = None) -> int:
     ap.add_argument("--once", action="store_true", help="one pass (what the DF-Aufsicht task runs)")
     ap.add_argument("--every", type=int, default=60, help="loop period in seconds without --once")
     ap.add_argument("--dry-run", action="store_true", help="decide only: no kill, start, load, backup or state write")
-    ap.add_argument("--reset", action="store_true", help="forget restart history, failures, the needs_click alarm and "
-                    "stale ACTIVE")
+    ap.add_argument("--reset", action="store_true", help="forget restart history, failures, the needs_click alarm, the "
+                    "load_save record and stale ACTIVE")
     ap.add_argument("--check-version", action="store_true", help="FR-81: read the running DFHack's version now "
                     "(`dfhack-run version`, the only DF call) and record it; says if it differs from the version of the "
                     "last successful load")
+    ap.add_argument("--load", nargs="?", const="", metavar="SAVE", help="FR-91: load a save at the title screen without a "
+                    "player (DF must run, no dfllm fort loaded): the newest COMPLETE save of a dfllm fort (never an older "
+                    "one, never *_tmp), or SAVE if it is that one. Says which save (name, fort, game year/day, age); "
+                    "--dry-run only says it")
+    ap.add_argument("--saves", action="store_true", help="FR-91: list the save folders, newest first, with the reason "
+                    "a half-written one is never loaded")
     ap.add_argument("--json", action="store_true", help="print the result as JSON")
     a = ap.parse_args(argv)
     env = env or default_env()
+    if a.saves or a.load is not None:
+        from . import loadnow
+        if a.saves:
+            print("\n".join(loadnow.saves_lines(env, load_state(env), env.clock())))
+            return 0
+        code, line = loadnow.load_now(env, a.load or None, dry_run=a.dry_run)
+        print(line)
+        return code
     if a.reset:
         st = load_state(env)
-        for k in ("restarts", "failed", "restart", "stale_active", "down", CLICK_KEY):
+        for k in ("restarts", "failed", "restart", "stale_active", "down", CLICK_KEY, "load_save", "title_dump"):
             st.pop(k, None)
         if not _write_json(env.runtime / "supervise.json", st):
             print("supervise: supervise.json could not be written (locked?)", file=sys.stderr)

@@ -152,6 +152,39 @@ def line_save(save_dir: Path, now: float | None = None) -> str:
     return f"QUICKSAVE FAILED {fmt_age(max(0.0, now - rec['wall']))} ago: {clip(rec['why'], 120)}"
 
 
+TITLE_FRESH_S, TITLE_HB_S = 240, 120      # BUG-120: supervise's last pass counts for this long; a heartbeat this young is a live fort
+
+
+def title_lines(save_dir: Path, now: float | None = None) -> list[str]:
+    """BUG-120 (Run 14 note 99): DF runs but no dfllm fort is loaded (title screen after a restart), or DF is not running at
+    all: supervise.json `last` (written every minute by the task) says so, and the saved state of the last fort is NOT
+    live. Status and brief then print this instead of that fort's old pop/day/stock numbers (the game session reported
+    'day 61, pop 44' from them after a restart). [] when supervise has not written lately, when it saw a fort, or when the
+    fort's own heartbeat is fresh (the files of the fort win over a pass that is a minute old)."""
+    now = time.time() if now is None else now
+    doc = files.read_json(Path(save_dir).parent / "supervise.json")
+    last = doc.get("last") if isinstance(doc, dict) else None
+    wall = last.get("wall") if isinstance(last, dict) else None
+    if not isinstance(wall, (int, float)) or isinstance(wall, bool) or not 0 <= now - wall <= TITLE_FRESH_S:
+        return []
+    df = last.get("df")
+    if df not in ("up", "down") or last.get("active") is not None or last.get("live"):
+        return []
+    _hb, age = files.read_heartbeat(save_dir, now)
+    if age is not None and age <= TITLE_HB_S and paths.active_save() == Path(save_dir).name:
+        return []
+    out = ["DF at title screen: no fort loaded" if df == "up" else "DF is not running: no fort loaded"]
+    nc = doc.get("needs_click") if isinstance(doc.get("needs_click"), dict) else None
+    out.append(("no dfllm fort is running (supervise sees DF up and no ACTIVE fort; an unmarked fort looks the same)"
+                if df == "up" else "supervise restarts it after a crash (see `dfllm doctor`)")
+               + f"; the saved state of '{Path(save_dir).name}' is "
+               + (f"{fmt_age(age)} old" if age is not None else "from an earlier run") + " and NOT live, its numbers are withheld"
+               + "; `dfllm supervise --load` loads the newest complete save")
+    if nc:
+        out.append(f"needs_click: save '{nc.get('save')}', DFHack {nc.get('ver') or '?'}: {clip(str(nc.get('why') or ''), 120)}")
+    return out
+
+
 def line_guard(save_dir: Path) -> str:
     """FR-68: the stop guard `dfllm stop` left running in a dangerous mode (<save>/guard.json)."""
     g, age = files.read_guard(save_dir)
@@ -883,6 +916,9 @@ def fit_ranked(items: list[tuple[int, str]], budget: int, clip_tokens: int = 90)
 
 
 def status_text(save_dir: Path) -> str:
+    t = title_lines(save_dir)                                    # BUG-120: no fort loaded: no cached numbers
+    if t:
+        return "\n".join(t)
     ctx = Ctx(save_dir, full=False)
     lines = [(0, line_head(ctx)), (1, line_guard(save_dir)), (1, files.follow_off(save_dir)),   # FR-68, FR-29
              (1, line_save(save_dir))]
@@ -1011,6 +1047,9 @@ def sec_failures(ctx: Ctx) -> list[str]:
 
 
 def brief_text(save_dir: Path, budget: int = BRIEF_TOKENS) -> str:
+    t = title_lines(save_dir)                                    # BUG-120
+    if t:
+        return "\n".join(["# brief " + t[0]] + t[1:])
     ctx = Ctx(save_dir)
     head = [f"# brief {line_head(ctx)}"]
     guard = line_guard(save_dir)                   # FR-68

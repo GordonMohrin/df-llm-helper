@@ -19,7 +19,7 @@
 -- change: `ui.json` `load` (tries, timeouts), `embark.py load SAVE --entry TEXT` (the text to click in the list).
 --
 -- Pure functions (no DF calls; tests/lua/test_loadsave.lua): norm, token, find_all, choose_entry, target, is_main,
--- main_button, confirm_button, danger, loading, screen, brief, signature. Steps: L.steps(spec, cfg).
+-- main_button, confirm_button, danger, loading, screen, brief, dump, signature. Steps: L.steps(spec, cfg).
 local V = require('embark.view')
 local L = {}
 
@@ -82,6 +82,24 @@ function L.brief(v, max)
   max = max or 240
   if #s > max then s = s:sub(1, max - 3) .. '...' end
   return s
+end
+
+-- FR-91 (Run 14 note 99): everything the labels of the 53.16-r3 title menu are unknown offline. When the run cannot find a
+-- label it records WHAT THE SCREEN SHOWS, once per run, bounded: the viewscreen stack (focus strings), the kind the model
+-- derives, the screen size, the viewscreen_titlest fields, the non-blank rows (<= 40, <= 100 columns) and the text cells with
+-- their tile (<= 60). Read only; the data decides the labels (`--entry`, MAIN_MARKERS, OK_BUTTONS) without another run.
+L.DUMP_ROWS, L.DUMP_COLS, L.DUMP_CELLS = 40, 100, 60
+function L.dump(v, why)
+  local rows, cells = {}, {}
+  for y, line in ipairs(v.lines) do
+    local t = line:gsub(' +$', '')
+    if #t > 0 and #rows < L.DUMP_ROWS then rows[#rows + 1] = string.format('%d %s', y - 1, t:sub(1, L.DUMP_COLS)) end
+  end
+  for _, c in ipairs(v:cells()) do
+    if #cells < L.DUMP_CELLS then cells[#cells + 1] = string.format('%d,%d %s', c.x, c.y, c.text:sub(1, 40)) end
+  end
+  return {why = tostring(why or ''), focus = table.concat(v.focus or {}, '|'), kind = v:kind(), size = v.w .. 'x' .. v.h,
+    title = v.title, rows = rows, cells = cells}
 end
 
 -- what the screen looks like, for the runner's "no progress" count
@@ -167,14 +185,23 @@ local function results(ctx)
   return r
 end
 
+-- the first screen a label was missing on is dumped (L.dump); later ones are not: once per run
+local function dump_once(ctx, v, why)
+  local r = results(ctx)
+  if not r.dump then r.dump = L.dump(v, why) end
+end
+
 -- queue one click on `m` ({x, y, len}) and log it: the pixel is what the run reports for the calibration
-local function click(ui, ctx, mem, m, text, kind)
+local function click(ui, ctx, mem, m, text, kind, v)
   local tpx, tpy = ui.env.tile_px()
   local t = L.target(m, tpx, tpy)
   ui:click_px(t.px, t.py)
   mem.clicks = (mem.clicks or 0) + 1
   local r = results(ctx)
   r.clicks[#r.clicks + 1] = {kind = kind, text = text, tx = t.tx, ty = t.ty, px = t.px, py = t.py, n = mem.clicks}
+  if mem.clicks >= 3 then   -- the third click and the screen still is not ours: look at it (once per run)
+    dump_once(ctx, v, 'clicked ' .. mem.clicks .. ' times; the last was ' .. kind .. ' "' .. text .. '"')
+  end
   return nil, string.format('clicked %s "%s" at tile %d,%d pixel %d,%d', kind, text, t.tx, t.ty, t.px, t.py)
 end
 
@@ -226,30 +253,32 @@ local function drive_step(spec, name, c)
       elseif s == 'main' then
         local cell = L.main_button(v)
         if not cell then
+          dump_once(ctx, v, 'the title menu has no Continue or Load entry')
           return 'fail', 'the title menu has no Continue or Load entry; rows: ' .. L.brief(v)
         end
-        return click(ui, ctx, mem, {x = cell.x, y = cell.y, len = #cell.text}, cell.text, 'main')
+        return click(ui, ctx, mem, {x = cell.x, y = cell.y, len = #cell.text}, cell.text, 'main', v)
       elseif s == 'list' then
         mem.list = (mem.list or 0) + 1
         -- the first visit clicks the entry; if the screen is still the list afterwards, a confirming button
         -- (an entry that only selects, a Load button) on even visits, the entry again otherwise
         if mem.list % 2 == 0 then
           local b = L.confirm_button(v)
-          if b then return click(ui, ctx, mem, {x = b.x, y = b.y, len = #b.text}, b.text, 'confirm') end
+          if b then return click(ui, ctx, mem, {x = b.x, y = b.y, len = #b.text}, b.text, 'confirm', v) end
         end
         local m, note = L.choose_entry(v, name)
         if note then results(ctx).note = note end
-        return click(ui, ctx, mem, m, v.lines[m.y + 1]:sub(m.x + 1, m.x + m.len), 'entry')
+        return click(ui, ctx, mem, m, v.lines[m.y + 1]:sub(m.x + 1, m.x + m.len), 'entry', v)
       elseif s == 'confirm' then
         local d = L.danger(v)
         if d then
           return 'fail', 'a popup mentions "' .. d .. '", left to the player; rows: ' .. L.brief(v)
         end
         local b = L.confirm_button(v)
-        return click(ui, ctx, mem, {x = b.x, y = b.y, len = #b.text}, b.text, 'confirm')
+        return click(ui, ctx, mem, {x = b.x, y = b.y, len = #b.text}, b.text, 'confirm', v)
       end
       -- a screen we do not know: nothing is clicked; wait for a transition, then say what was seen
       mem.unk = (mem.unk or 0) + 1
+      dump_once(ctx, v, why)
       if mem.unk > unknown_polls then
         return 'fail', tostring(why) .. ' (nothing clicked here); rows: ' .. L.brief(v)
       end
