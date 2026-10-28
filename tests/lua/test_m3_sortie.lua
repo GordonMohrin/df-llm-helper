@@ -258,4 +258,21 @@ T.test('BUG-113: a kept sortie ends (more_hostiles) at once when the census show
   T.eq({#ab, ab[1].d.why}, {1, 'more_hostiles'})
 end)
 
+
+T.test('review M3: a kill sortie follows the target through the census only; out of sight for idle_ticks it ends: gone', function()
+  local W = setup({X.S.inv(201, 100, 100, Z)}, {worn = 0, kill_near = 5, idle_ticks = 600, hold_ticks = 4800})
+  lone_ids = {201}
+  W.inbox('squad.sortie', {squad = 'A', target = {101, 100, Z}, approve = true})
+  W.run(100, {skip = 9})
+  W.unit(201)._m.hidden = true                           -- out of sight, alive
+  W.move(201, 130, 100, Z)                               -- (a real player could not see where it walked)
+  W.run(300, {skip = 9})
+  T.eq(#sorties(W, 'abort'), 0, 'not yet')
+  T.eq(X.mod('military').sortie_of(W.K, 'A').kind, 'kill')
+  W.run(500, {skip = 9})
+  local ab = sorties(W, 'abort')
+  T.eq({#ab, ab[1].d.why}, {1, 'gone'}, 'old code read the hidden unit position and never gave up before hold_ticks')
+  T.eq(ab[1].d.pos, {100, 100, Z}, 'the last position seen, not the hidden one')
+end)
+
 T.done()

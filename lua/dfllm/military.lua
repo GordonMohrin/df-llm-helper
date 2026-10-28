@@ -2166,9 +2166,10 @@ local function sortie_pass(K, now)
             for _, id in ipairs(alive) do if h.id == id then cur = cur or h; seen[id] = true end end
           end
           so.ids = alive
-          local p1 = unit_xyz(alive[1])
-          if p1 then tp, so.tgt = p1, p1 end
-          if cur or p1 then so.unseen = 0 else so.unseen = so.unseen + dt end
+          -- fair play: the target's position is read from the census (units in sight) only; out of sight the last known
+          -- position stays and the unseen clock runs
+          if cur then tp, so.tgt, so.unseen = {x = cur.x, y = cur.y, z = cur.z}, {x = cur.x, y = cur.y, z = cur.z}, 0
+          else so.unseen = so.unseen + dt end
           if so.unseen >= c.idle_ticks then
             so_end(K, key, 'abort', 'gone', string.format('sortie %s ended: target %s out of sight for %d ticks', key, so_ids_txt(so.ids), so.unseen))
             goto continue

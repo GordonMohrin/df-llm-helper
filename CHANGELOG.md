@@ -32,7 +32,9 @@
   `counters.unconscious` of the id if the soldiers stand beside it anyway), `lone harmless intruder ... kernel kill order: ...`,
   `dfllm events --type SORTIE` (does `arrived` come, does the target die, is it `not_attackable`), and in a BREACH the `BREACH since N d:
   waiting for ...` line. For a bridge that stays down: the GATE_FAIL `no_effect` text (worker took the pulls or DF dropped every job)
-  and `units.isUnitInBox` / items on the footprint. Open: what unit 39230 was, why the real BREACH did not end with 0 visible (offline it
+  and `units.isUnitInBox` / items on the footprint. Review fix (fair play): a running kill sortie follows its target through the census
+  only (units in sight); out of sight the last position stays and `idle_ticks` out of sight end it as `gone` (it used to read the hidden
+  unit's position and never gave up before `hold_ticks`). Open: what unit 39230 was, why the real BREACH did not end with 0 visible (offline it
   does after 2,400 quiet ticks), whether `body.wounds` grows when a soldier hits.
 
 ## L1: the drink nook says why it is refused, judges a tile like quickfort, skips a tile quickfort refuses and widens for a critical mood (BUG-102, FR-82, 2026-10-23, offline, live-untested)
