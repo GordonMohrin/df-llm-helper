@@ -1,5 +1,30 @@
 # CHANGELOG dfpilot
 
+## Live test i1 fixes: next repeat memory, trash no_jobs, save marker per fort, reply text, view, doctor hook (BUG-147..152, 2026-10-28; offline, live-untested)
+- **Why:** the live test of instance i1 (region2-site90 Trussroads y715) and its verifier confirmed: `next` offered a skipped command again every
+  4th call and after any other command (FR-85-88a, NEW2); `inspect what=items key=trash` said `ok` while 1056 marked items got no dump job and
+  named the 2-tile zone (FR-90b); zone.place zones kept site_realization 0 (NEW8); `supervise --saves` labelled every region2 save Wheelsblows
+  (NEW1); replies read `view: view: ...` (NEW3) and carried CP437 names (NEW9, i2 NEW5); a bare view after the player ended a follow said "no saved
+  player position" (NEW4); doctor's hook text blamed a parent folder in the repo (NEW5).
+- **What changed:** (1) guide.py: `.next.json` v2 `{cmd, n, wall, cmds:{cmd:{n, wall}}}` counts per command; the "tried N x" step keeps it, a
+  green answer clears it (BUG-147). (2) trash.lua: reason `no_jobs` (usable zone, marked items, 0 DumpItem jobs) with `marked_forbid`,
+  `marked_far` (<= 400 asked), `marked_bld`; the usable zone with the most free tiles is named; act.zone_place sets site_realization_building_id /
+  sul_id 0 -> -1 on its new zones (BUG-148). (3) kern.lua writes world data `dfllm.active {save, fort}` at boot; supervise `markers_of` /
+  `marker_of` / `same_fort` / `ident_of(.., key)`: the active fort's marker, an ambiguous folder matches any of its forts and names none; pick_save,
+  save.py and loadnow use them (BUG-149). (4) cmd.fmt_reply drops a leading `<verb>: `; viewlib converts names with df2utf (BUG-150). (5) viewlib:
+  after the player took the camera a bare view answers "it is his, nothing to restore" (BUG-151). (6) doctor: three inactive-hook texts (BUG-152).
+- **Safety:** reads only, except the world data key (one string per boot, marked saves only) and the two zone fields on zones zone.place just
+  created (the value the zones screen gives). No new verb, no event, no config key, no RULES row.
+- **Contracts:** CONTRACTS §10 world data paragraph, §13 `inspect items` reason `no_jobs` and the three counts; appendix regenerated.
+- **Tests (each fails on dec5132 except the pins named in the bug files):** tests/test_bug147_next_repeat.py, test_bug149_save_marker.py,
+  test_bug150_reply_text.py, test_bug152_doctor_hook.py, tests/lua/test_bug148_trash.lua, test_bug149_active_fort.lua, test_bug150_151_view.lua;
+  tests/lua/test_view.lua expects the BUG-151 text.
+- **Live check:** `dfllm next` 6x on a fort with one stuck step: three times the command, then `NEXT: nothing (tried 3x ...)` until 30 min pass;
+  `dfllm cmd inspect what=items key=trash` in Trussroads: reason `no_jobs` with the counts and zone 26126 named; `dfllm boot`, a save, then
+  `supervise --saves`: the save reads fort Trussroads (older saves `? (N forts: ...)`); `dfllm cmd view` refusals name the verb once, umlauts
+  read right; view follow, scroll, bare view: "it is his"; doctor in the repo with `{}` settings names the repo's own file.
+- **Skipped:** NEW7 (brief trims the TIMELINE_RESET marker: not reproduced by the verifier), NEW6 (curse popup without a unit and the plural:
+  the curse area).
 ## Big forts are audited as regions instead of being refused (BUG-129, 2026-10-28, BUG-043 follow-up; offline, live-untested)
 - **Why:** Run 14 (region2-site90): `audit snapshot refused: bbox 190x192x45 = 1641600 tiles > 400000 at margin 0,0,0 (x 0-189 y 0-191 z 90-134;
   stretched most by seal c1a14d660b9fb1de01 (+2 more) at z90 ...); file box ... > 1500000`; audit_old/audit_fail held readiness at R0 for ~190

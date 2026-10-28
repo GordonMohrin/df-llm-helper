@@ -20,7 +20,9 @@ checked by tests/test_m5_guide.py against the CLI parser and the verb registry (
 
 Repeat memory (`<save>/.next.json`): the same command printed more than REPEAT_MAX times within REPEAT_WINDOW_S with no
 change is not printed again: the next step is offered, and when nothing else applies `NEXT: nothing` says "tried N x" and
-asks the player (the 635 `inspect` calls were this loop). The `danger` wait is exempt: polling is its job.
+asks the player (the 635 `inspect` calls were this loop). The `danger` wait is exempt: polling is its job. BUG-147: the
+count is kept per command (another command in between does not reset it), the "tried N x" answer keeps the memory, only
+a green answer (nothing applies, nothing skipped) clears it; an entry expires REPEAT_WINDOW_S after its last print.
 """
 from __future__ import annotations
 
@@ -59,6 +61,7 @@ class Step:
     tell: str | None = None
     show: str | None = None             # a `dfllm cmd view target=...` line; in a fight it is the player's (--by gordon)
     show_by_player: bool = False
+    stuck: bool = False                 # the "tried N x" idle step: it keeps the repeat memory (BUG-147)
 
     def lines(self) -> list[str]:
         out = [f"NEXT: {self.cmd or 'nothing'}", f"WHY: {self.why}"]
@@ -340,7 +343,8 @@ def decide(f: dict, tried: tuple[str, ...] | list[str] = ()) -> Step:
         return c
     if skipped:
         return Step("idle", None, _txt(f"tried {REPEAT_MAX}x with no change: {skipped[0]}; nothing else applies"),
-                    _txt(f"I am stuck: `{skipped[0]}` did not change anything after {REPEAT_MAX} tries. Please look."))
+                    _txt(f"I am stuck: `{skipped[0]}` did not change anything after {REPEAT_MAX} tries. Please look."),
+                    stuck=True)
     s = f.get("state") or {}
     r = s.get("ready") if isinstance(s.get("ready"), dict) else {}
     waits = ""
@@ -353,29 +357,42 @@ def decide(f: dict, tried: tuple[str, ...] | list[str] = ()) -> Step:
 
 # ---------------------------------------------------------------- repeat memory
 def read_memory(save_dir: Path, now: float | None = None) -> dict:
+    """{"cmd", "n", "wall"} of the last command printed plus "cmds" {cmd: {n, wall}} of every command printed within
+    REPEAT_WINDOW_S (BUG-147); {} when nothing is left. A v1 file (one command) is read as one entry."""
     now = time.time() if now is None else now
     m = files.read_json(Path(save_dir) / STATE_FILE, retry=False)
-    if isinstance(m, dict) and isinstance(m.get("cmd"), str) and isinstance(m.get("n"), int) \
-            and isinstance(m.get("wall"), (int, float)) and 0 <= now - m["wall"] <= REPEAT_WINDOW_S:
-        return m
-    return {}
+    if not isinstance(m, dict):
+        return {}
+    raw = m.get("cmds") if isinstance(m.get("cmds"), dict) else {}
+    if not raw and isinstance(m.get("cmd"), str):
+        raw = {m["cmd"]: {"n": m.get("n"), "wall": m.get("wall")}}
+    cmds = {c: {"n": e["n"], "wall": e["wall"]} for c, e in raw.items()
+            if isinstance(c, str) and isinstance(e, dict) and isinstance(e.get("n"), int)
+            and isinstance(e.get("wall"), (int, float)) and 0 <= now - e["wall"] <= REPEAT_WINDOW_S}
+    if not cmds:
+        return {}
+    last = m.get("cmd") if m.get("cmd") in cmds else max(cmds, key=lambda c: cmds[c]["wall"])
+    return {"cmd": last, "n": cmds[last]["n"], "wall": cmds[last]["wall"], "cmds": cmds}
 
 
 def tried_cmds(mem: dict) -> tuple[str, ...]:
-    return (mem["cmd"],) if mem and mem.get("n", 0) >= REPEAT_MAX else ()
+    return tuple(c for c, e in (mem.get("cmds") or {}).items() if e.get("n", 0) >= REPEAT_MAX)
 
 
 def remember(save_dir: Path, mem: dict, step: Step, now: float | None = None) -> None:
-    """Count the command just printed. A step without a command (idle) clears the memory. Never raises."""
+    """Count the command just printed (per command, BUG-147). The "tried N x" idle step keeps the memory; a green idle step
+    (nothing skipped) clears it. Never raises."""
     now = time.time() if now is None else now
     try:
         p = Path(save_dir) / STATE_FILE
         if step.cmd is None:
-            if p.exists():
+            if not step.stuck and p.exists():
                 p.unlink()
             return
-        n = mem.get("n", 0) + 1 if mem.get("cmd") == step.cmd else 1
-        files.write_json_atomic(p, {"v": 1, "cmd": step.cmd, "n": n, "wall": now})
+        cmds = dict(mem.get("cmds") or {})
+        n = (cmds.get(step.cmd) or {}).get("n", 0) + 1
+        cmds[step.cmd] = {"n": n, "wall": now}
+        files.write_json_atomic(p, {"v": 2, "cmd": step.cmd, "n": n, "wall": now, "cmds": cmds})
     except OSError:
         pass
 

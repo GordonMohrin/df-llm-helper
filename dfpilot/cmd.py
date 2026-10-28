@@ -1419,7 +1419,10 @@ def fmt_reply(cmd_id: str, verb: str, reply: dict | None, save_dir: Path | None 
         age = files.read_heartbeat(save_dir)[1] if save_dir else None
         hb = f"heartbeat {int(age)}s old" if age is not None else "no heartbeat"
         return f"sent {cmd_id} {verb}: no reply yet ({hb}); check later: dfllm events --type CMD"
-    out = f"{'ok' if reply.get('ok') else 'ERR'} {cmd_id} {verb}: {reply.get('msg', '')}"
+    msg = str(reply.get("msg", ""))
+    if msg.startswith(verb + ": "):            # BUG-150: the Lua verbs name themselves; the line names the verb once
+        msg = msg[len(verb) + 2:]
+    out = f"{'ok' if reply.get('ok') else 'ERR'} {cmd_id} {verb}: {msg}"
     if reply.get("data") not in (None, {}):
         out += " " + files.dumps(reply["data"])
     return out

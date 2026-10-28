@@ -149,6 +149,10 @@ function V.verb(K, st, args, cmd)
   end
   if args.target == nil then
     local h = st.home
+    if not h and st.given then                 -- BUG-151: the player ended a follow by moving the camera
+      st.given = nil
+      return true, 'the player has moved the camera since the last view: it is his, nothing to restore'
+    end
     if not h then return false, 'view: no saved player position (no view has moved the camera yet)' end
     local now = V.cam()
     st.view = nil
@@ -163,7 +167,7 @@ function V.verb(K, st, args, cmd)
   end
   local t, why = V.resolve(K, args.target)
   if not t then return false, 'view: ' .. why end
-  if st.home == nil then st.home = V.cam() end              -- the player's position before the first view of a series
+  if st.home == nil then st.home, st.given = V.cam(), nil end   -- the player's position before the first view of a series
   local ok, err = K.act.view_to(t.x, t.y, t.z)
   if not ok then return false, 'view: ' .. tostring(err) end
   st.after = V.cam()
@@ -201,7 +205,7 @@ function V.step(K, st)
   if V.FIGHT[K.mode()] and v.by ~= 'gordon' then return stop(K.mode() .. ' (the camera is the player\'s in a fight)') end
   local cam = V.cam()
   if cam and v.cam and moved(cam, v.cam) then
-    st.home, st.after = nil, nil                            -- his camera now: nothing to give back
+    st.home, st.after, st.given = nil, nil, true            -- his camera now: nothing to give back (BUG-151: say so)
     return stop('the player moved the camera')
   end
   local u = df.unit.find(v.id)

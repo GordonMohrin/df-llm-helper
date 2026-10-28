@@ -19,6 +19,7 @@ local guard = require('dfllm.guard')         -- FR-68: what `dfllm stop` leaves 
 
 local M = {}
 M.KEY = 'dfllm'
+M.ACTIVE_KEY = 'dfllm.active'   -- BUG-149: world data, the fort booted last {save, fort} (supervise.marker_of)
 M.BY = {llm = true, gordon = true, cli = true, follow = true, supervise = true, test = true}
 M.CAD = {state_ms = 2000, events_ms = 1000, inbox_ms = 500, heartbeat_ms = 5000, persist_ms = 10000,
          inbox_per_frame = 4, slow_ms = 5, fault_window_ms = 600000, eventq_max = 2000, gap_ms = 3000,
@@ -1526,6 +1527,9 @@ function M.boot(opts)
   end
   fio.ensure(paths)
   fio.write(paths.runtime .. '/ACTIVE', M.runtime_key(marker, save))
+  -- BUG-149: a world save keeps the marker of every fort adopted in that world; this names the one that is loaded
+  pcall(dfhack.persistent.saveWorldDataString, M.ACTIVE_KEY,
+        json.encode({save = M.runtime_key(marker, save), fort = clean(tostring(marker.fort or ''), 60)}))
   st.cfg = load_cfg(st, repo, marker)
   st.K.cfg = st.cfg
   local K = st.K

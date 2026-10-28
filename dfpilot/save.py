@@ -87,10 +87,10 @@ def _fresh_autosave(env: supervise.Env, save_dir: Path, now: float, fresh_s: flo
     """A verified autosave of this fort younger than fresh_s (a complete folder, same marker)."""
     cache: dict = {}
     saves = supervise.scan_saves(env.saves, cache, now)
-    ident = supervise.ident_of(saves, supervise.loaded_save(env.runtime, Path(save_dir).name))
+    ident = supervise.ident_of(saves, supervise.loaded_save(env.runtime, Path(save_dir).name), Path(save_dir).name)
     for e in saves:
         if (e["name"].startswith("autosave") and 0 <= now - e["mt"] < fresh_s and now - e["newest"] >= supervise.STABLE_S
-                and not (ident and e["marker"] and e["marker"][:2] != list(ident[:2])) and (ident or e["marker"])):
+                and not (ident and e["marker"] and not supervise.same_fort(e, ident)) and (ident or e["marker"])):
             return e
     return None
 
@@ -131,12 +131,12 @@ def settle(env: supervise.Env, save_dir: Path, now: float | None = None) -> dict
         return rec
     cache: dict = {}
     saves = supervise.scan_saves(env.saves, cache, now)
-    ident = supervise.ident_of(saves, supervise.loaded_save(env.runtime, Path(save_dir).name))
+    ident = supervise.ident_of(saves, supervise.loaded_save(env.runtime, Path(save_dir).name), Path(save_dir).name)
     n, _age = is_writing(env.saves, now)
     secs = rec.get("secs", 0)
     # only a folder close to the call is its save: an autosave an hour later says nothing about it
     fresh = [e for e in saves if rec["wall"] - SLACK_S <= e["mt"] <= rec["wall"] + secs + LATE_MAX_S
-             and not (ident and e["marker"] and e["marker"][:2] != list(ident[:2]))]
+             and not (ident and e["marker"] and not supervise.same_fort(e, ident))]
     if fresh and not n and not supervise.busy(env.saves) and now - fresh[0]["newest"] >= supervise.STABLE_S:
         got = fresh[0]
         after = max(0, int(got["mt"] - rec["wall"]))
@@ -166,7 +166,7 @@ def quicksave(env: supervise.Env, save_dir: Path, by: str = "cli", timeout: floa
     cache: dict = {}
     before = supervise.scan_saves(env.saves, cache, t0)
     loaded = supervise.loaded_save(env.runtime, Path(save_dir).name)
-    ident = supervise.ident_of(before, loaded)
+    ident = supervise.ident_of(before, loaded, Path(save_dir).name)
     last = before[0] if before else None
     ok_run, out = env.os.dfhack("quicksave", timeout=CALL_S)
     out = _clip(out, 120)
@@ -180,7 +180,7 @@ def quicksave(env: supervise.Env, save_dir: Path, by: str = "cli", timeout: floa
         busy = supervise.busy(env.saves)
         wn, wage = is_writing(env.saves, now)
         fresh = [e for e in saves if e["mt"] >= t0 - SLACK_S
-                 and not (ident and e["marker"] and e["marker"][:2] != list(ident[:2]))]
+                 and not (ident and e["marker"] and not supervise.same_fort(e, ident))]
         if fresh and not busy and not wn and now - fresh[0]["newest"] >= supervise.STABLE_S:
             got = fresh[0]
             break
