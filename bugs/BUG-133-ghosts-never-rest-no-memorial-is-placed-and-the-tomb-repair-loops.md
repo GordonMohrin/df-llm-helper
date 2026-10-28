@@ -64,3 +64,10 @@ in the rebuild. kern.log `tombs:` lines show `assigned` > 0 when bodies wait; TO
 ## Not decided offline
 Whether DF 53.16's constructBuilding takes an engraved memorial in `items` as the Build menu does (buildingplan and quickfort place slabs
 that way; the item list of the real menu was not read); whether a built slab building of another figure's memorial nearby needs distance.
+
+## Review
+- A planned Slab building holds its slab in the ConstructBuilding job (`Buildings::constructWithItems` attaches the items to
+  the job; `contained_items` fills only once it is built), so `OF.slab_buildings` reads the job items too: a placed memorial
+  waiting for its builder said `loose` (and `slab ... in job`) from the next run on. The test mock now puts the slab in the job.
+- economy's why=slabs request is not sent while a workshops project is queued (`runner.pending`, as the tannery request):
+  follow would place a second masons' shop beside a paused one every request_days.

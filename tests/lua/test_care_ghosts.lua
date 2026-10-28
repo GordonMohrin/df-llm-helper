@@ -49,7 +49,9 @@ local function slab_acts(W)
     local b = F.building(W, 'SLAB', {x1 = x, y1 = y, x2 = x, y2 = y, z = z, _st = 0})
     b.getBuildStage = function(self) return self._st end
     b.getMaxBuildStage = function() return 1 end
-    b.contained_items = kmock.vec{{item = it, use_mode = 2}}
+    -- as Buildings::constructWithItems: the slab is attached to the ConstructBuilding job, contained_items stays empty
+    b.jobs = kmock.vec{{job_type = df.job_type.ConstructBuilding, items = kmock.vec{{item = it, role = 0}}}}
+    b.contained_items = kmock.vec{}
     it.flags.in_job, it.flags.forbid = true, false
     W.slabs_placed[#W.slabs_placed + 1] = {id, x, y, z}
     return true, b.id
@@ -59,6 +61,9 @@ local function build_slabs(W)
   do
     for _, b in ipairs(df.global.world.buildings.other.SLAB) do
       b._st = 1
+      local items = {}
+      for _, j in ipairs(b.jobs or {}) do for _, ref in ipairs(j.items) do items[#items + 1] = {item = ref.item, use_mode = 2} end end
+      b.jobs, b.contained_items = kmock.vec{}, kmock.vec(items)
       for _, ci in ipairs(b.contained_items) do ci.item.flags.in_job, ci.item.flags.in_building = false, true end
     end
   end
@@ -122,6 +127,11 @@ T.test('BUG-133: a ghost\'s loose memorial is placed on a free roofed tile insid
   local d, msg = inspect(W)
   T.eq(ghost_row(d, 7), {7, 'no_body', 'build'})
   T.ok(msg:find('memorials: 1 build', 1, true), msg)
+  -- review: a day later, still planned (the slab sits in the ConstructBuilding job, not in contained_items): build
+  CW.day(W)
+  T.eq(#W.slabs_placed, 1, 'not placed twice while planned')
+  d = inspect(W)
+  T.eq(ghost_row(d, 7), {7, 'no_body', 'build'}, 'the planned building\'s job holds the slab')
   build_slabs(W)
   CW.day(W)
   T.eq(#W.slabs_placed, 1, 'placed once')

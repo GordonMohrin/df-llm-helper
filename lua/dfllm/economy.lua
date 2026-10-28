@@ -7104,6 +7104,10 @@ function M.slab_why(K, c, r, sb, ghosts, f)
   local every = ((c.food or {}).request_days or 14) * DAY
   local last = math.tointeger(p.slab_wsreq)
   if last and now - last < every and now >= last then return end
+  -- review: a workshops project already queued (paused by the rebuild policy, still digging) is not asked for again:
+  -- follow would place a second masons' shop beside it (as the tannery request, runner.pending)
+  local okp, pend = K.call('runner', 'pending', 'workshops')
+  if okp and type(pend) == 'number' and pend > 0 then sb.asked = 'queued'; return end
   p.slab_wsreq = now
   sb.asked = 1
   K.emit('PROJECT_REQUEST', 'B', string.format("workshops: no mason's workshop for the memorial slabs of %d ghost(s)", ghosts),

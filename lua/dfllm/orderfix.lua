@@ -30,14 +30,28 @@ function OF.memorial_type()
 end
 
 -- BUG-133: the items of the Slab buildings (buildings.other.SLAB, building.contained_items): {item id = true when the
--- building stands built, false while it is planned (its build job holds the slab)}
+-- building stands built, false while it is planned (its build job holds the slab)}. Review: a planned building's slab is
+-- in its ConstructBuilding job (building.jobs[0].items: Buildings::constructWithItems attaches the items to the job,
+-- contained_items fills only when the building is finished), so the job items are read too, and a building with a
+-- construct job still standing is planned whatever its build stage says
 function OF.slab_buildings()
   local r = {}
+  local cb = df.job_type and df.job_type.ConstructBuilding
   pcall(function()
     for _, b in ipairs(df.global.world.buildings.other.SLAB) do
+      local planned = false
+      for _, j in ipairs(get(b, 'jobs') or {}) do
+        if cb == nil or get(j, 'job_type') == cb then
+          planned = true
+          for _, ref in ipairs(get(j, 'items') or {}) do
+            local id = math.tointeger(get(get(ref, 'item'), 'id'))
+            if id and r[id] == nil then r[id] = false end
+          end
+        end
+      end
       local okb, done = pcall(function() return b:getBuildStage() >= b:getMaxBuildStage() end)
-      local stands = not okb or done == true
-      for _, ci in ipairs(b.contained_items or {}) do
+      local stands = not planned and (not okb or done == true)
+      for _, ci in ipairs(get(b, 'contained_items') or {}) do
         local id = math.tointeger(get(get(ci, 'item'), 'id'))
         if id then r[id] = stands end
       end

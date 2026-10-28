@@ -45,6 +45,7 @@ local function world(opts)
   end
   W.set_census('u', F.census_u(ids))
   W.load({name = 'runner', every = {ticks = 600}, dig_backlog = function() return 0 end,
+          pending = function(K, tpl) return (opts.pending or {})[tpl] or 0 end,
           state = function() return {phase = ctl.phase} end})
   W.load({name = 'care', every = {ticks = 1200},
           state = function() return {care = {stressed_pct = 0, naked = 0, ghosts = ctl.ghosts, corpses_old = 0,
@@ -778,6 +779,10 @@ T.test('BUG-133: no mason\'s workshop: kern.log says why (once), PROJECT_REQUEST
   local W3 = world{ghosts = 3, boulders = 40}
   days(W3, 2)
   T.eq(#slabreq(W3), 0, 'the masons stand')
+  -- review: a workshops project already queued (paused by the rebuild policy) is not asked for again
+  local W4 = world{ghosts = 3, boulders = 40, shops = {'Carpenters'}, pending = {workshops = 1}}
+  days(W4, 2)
+  T.eq(#slabreq(W4), 0, 'a workshops project is queued')
 end)
 
 T.done()
