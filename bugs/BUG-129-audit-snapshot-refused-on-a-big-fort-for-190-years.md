@@ -22,8 +22,8 @@ The way out was no way out: the stretching seals are finished, and `bp.cancel` r
 ## Fix
 - snapshot.lua `M.regions`: an audit box that fits at no margin as one box is exported as regions: the fort core (the manifest geometry) at
   the first margin step that keeps nothing out, plus every runner piece outside it as parts of its own (its tile clusters, else its box, each
-  + `col_margin` 2,2,1), nearest to the core first. A piece whose parts break `max_tiles` (400,000, unchanged), `grid_max` (1,500,000) or
-  `parts_max` (24) is dropped and named: reply/SNAPSHOT_READY `N regions, drops N far pieces: <first> (done; its tiles count as outside |
+  + `col_margin` 2,2,1), nearest to the core first; past `parts_max` (24) a part joins the far part it grows least (review: a dropped explore shaft
+  would leave its stair over unread tiles, a false bypass). A piece whose parts break `max_tiles` (400,000, unchanged) or `grid_max` (1,500,000) is dropped and named: reply/SNAPSHOT_READY `N regions, drops N far pieces: <first> (done; its tiles count as outside |
   bp.cancel <proj> if it can go)`, d `regions`/`drop`/`dropped`. Only the fort core alone over the cap is refused (`fort core WxHxD = ...`),
   naming its own stretcher. A finished piece is never offered to `bp.cancel` (also in the one-box refusal).
 - runner.lua `boxes`: `parts` = the clusters of a project's tiles (`geom.clusters`, gap 6,6,1, at most 8) when they lie apart, for a running
@@ -35,9 +35,9 @@ The way out was no way out: the stretching seals are finished, and `bp.cancel` r
   `ready.audit.cov` `drop N: <piece>`). The pieces an explicit box leaves out still fail it (BUG-043).
 
 ## Tests (fail on dec5132)
-tests/lua/test_bug129_audit_regions.lua (4: the site90 geometry with seals at z90, a map-wide kept box, a scattered seal, a dig beside the
+tests/lua/test_bug129_audit_regions.lua (5: the site90 geometry with seals at z90, a map-wide kept box, a scattered seal, a dig beside the
 core, a shaft; a dropped running piece names bp.cancel; the core over the cap is refused, a fort that fits stays one box; the file of a region
-export), tests/lua/test_bug129_runner_parts.lua (2), tests/lua/test_readiness.lua (1), tests/test_bug129_audit_regions.py (3).
+export; review: 30 shafts past parts_max share parts, none dropped), tests/lua/test_bug129_runner_parts.lua (2), tests/lua/test_readiness.lua (1), tests/test_bug129_audit_regions.py (3).
 
 ## Live check
 On site90: `dfllm audit`; the reply says `margin 8,8,1, N regions[, drops N far pieces: ...]` instead of the refusal, `status` shows an audit

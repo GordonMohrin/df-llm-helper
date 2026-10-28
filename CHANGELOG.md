@@ -7,7 +7,7 @@
   stretched the one default box, and the offered way out (`bp.cancel` of a finished seal) is refused by the runner.
 - **What changed:** (1) snapshot.lua `M.regions`: an audit box that fits at no margin as one box becomes the fort core (manifest geometry, first
   margin step that drops nothing) plus every runner piece outside it as parts of its own (tile clusters, else its box, + `col_margin`), nearest
-  first; a piece whose parts break `max_tiles`, `grid_max` or `parts_max` is dropped and named (reply/SNAPSHOT_READY `N regions, drops N far
+  first (past `parts_max` a part joins the far part it grows least); a piece whose parts break `max_tiles` or `grid_max` is dropped and named (reply/SNAPSHOT_READY `N regions, drops N far
   pieces: <first> (done; its tiles count as outside | bp.cancel <proj> if it can go)`, d `regions`/`drop`/`dropped`); only the core alone over
   the cap is refused (`fort core ...`); a finished piece is never offered to `bp.cancel`. The cap (400,000) is unchanged. (2) runner.lua `boxes`:
   `parts` (geom.clusters of the tiles, gap 6,6,1, at most 8; kept with the box in m.runner `kp`) and `done`. (3) bp/topo.py `sources`: besides a
@@ -15,7 +15,7 @@
   beside open space over one start attackers, so a region audit is as strict as one box over the fort (a dropped piece only adds fails).
   (4) readiness: a dropped piece is no coverage fail; `ready.audit.cov` `drop N: <piece>` first. Contracts: schema SNAPSHOT_READY, CONTRACTS §7
   (`snapshot.export`, `runner.boxes`), §9.10, §12 and appendix; RULES §8 row edited in place; DESIGN §5.4 row.
-- **Tests (fail on dec5132):** tests/lua/test_bug129_audit_regions.lua (4, a synthetic site90-size fort), tests/lua/test_bug129_runner_parts.lua
+- **Tests (fail on dec5132):** tests/lua/test_bug129_audit_regions.lua (5, a synthetic site90-size fort; the 5th, from the review, 30 shafts past `parts_max`), tests/lua/test_bug129_runner_parts.lua
   (2), tests/lua/test_readiness.lua (1), tests/test_bug129_audit_regions.py (3).
 - **Live check:** on site90 run `dfllm audit`: the reply names `margin 8,8,1, N regions` (and any dropped piece) instead of the refusal; the
   AUDIT event follows, `status` shows a fresh audit age. A bypass the new audit names from the core's lowest level is a real worst-case route

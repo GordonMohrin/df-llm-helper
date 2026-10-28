@@ -141,4 +141,18 @@ T.test('BUG-129: the file of a region export: each part read, the rest " ", drop
   T.eq({ev.d.regions, ev.d.drop, ev.d.dropped, ev.d.out, ev.d.cols}, {1, 1, 'seal swide', nil, nil})
 end)
 
+T.test('BUG-129 review: more far pieces than parts_max share parts (as BUG-043 columns), none is dropped', function()
+  -- 30 finished explore shafts east of the core (a dropped shaft would leave a stair over unread tiles: a false bypass)
+  local list = {{b = {0, 0, 95, 189, 191, 134}, id = 'old_wide', tpl = 'seal', done = true}}
+  for i = 0, 29 do
+    local x, y = 140 + (i % 5) * 10, 5 + (i // 5) * 30
+    list[#list + 1] = {b = {x, y, 95, x, y, 115}, id = string.format('x%02d', i), tpl = 'explore', done = true}
+  end
+  local W = world{tag = 'many', list = list}
+  local r = W.inbox('snapshot', {purpose = 'audit'}, {id = 'aud1', by = 'cli'})
+  T.eq(r.ok, true, r.msg)
+  T.eq({r.data.regions, r.data.drop, r.data.dropped}, {23, 1, 'seal old_wide'}, r.msg)
+  T.ok(r.data.tiles <= 400000, tostring(r.data.tiles))
+end)
+
 T.done()

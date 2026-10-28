@@ -818,9 +818,10 @@ end
 -- finished seals 26 levels below, seals whose walls lie far apart and an old kept box over the whole map stretched the
 -- one box. An audit box that does not fit as one box is now made of regions: the fort core (the manifest geometry at
 -- the first margin step that fits) plus every runner piece outside it as parts of its own (its tile clusters, else its
--- box, each + col_margin), nearest to the core first; a piece whose parts do not fit (the cap, grid_max, parts_max) is
--- dropped and named. The verdict stays as strict as one box: a tile no part read is the outside (bp.topo: a walkable
--- tile beside one, or a stair or ramp over or under one, starts attackers), so a dropped piece can only add fails.
+-- box, each + col_margin), nearest to the core first (past parts_max a part joins a far part); a piece whose parts do
+-- not fit (the cap, grid_max) is dropped and named. The verdict stays as strict as one box: a tile no part read is the
+-- outside (bp.topo: a walkable tile beside one, or a stair or ramp over or under one, starts attackers), so a dropped
+-- piece can only add fails.
 -- BUG-043: parts a covers parts b (every part of b lies in one of a)
 local function covers(a, b)
   for _, q in ipairs(b) do
@@ -877,7 +878,24 @@ local function regions_at(core, far, m, cap)
       if n <= cap and ntiles(fb) <= M.CFG.grid_max and #parts + #add <= M.CFG.parts_max then
         for _, q in ipairs(add) do parts[#parts + 1] = q end
         tiles = n
-      else drops[#drops + 1] = p end
+      else
+        -- review: past parts_max a part joins the far part it grows least (as BUG-043 columns share the last part)
+        local np = {table.unpack(parts)}
+        for _, q in ipairs(add) do
+          if #np < M.CFG.parts_max then np[#np + 1] = q
+          else
+            local bk, bc
+            for k = 2, #np do
+              local cost = ntiles(union(np[k], q)) - ntiles(np[k])
+              if not bc or cost < bc then bk, bc = k, cost end
+            end
+            if bk then np[bk] = union(np[bk], q) else np = nil; break end
+          end
+        end
+        local nt = np and union_tiles(np)
+        if np and nt <= cap and ntiles(bbox_of(np)) <= M.CFG.grid_max then parts, tiles = np, nt
+        else drops[#drops + 1] = p end
+      end
     end
   end
   local d1 = drops[1]
