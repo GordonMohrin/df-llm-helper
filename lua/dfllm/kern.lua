@@ -11,6 +11,7 @@
 local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
 local sched = require('dfllm.util.sched')
+local NUM = require('dfllm.util.num')         -- BUG-143: decimals without the locale's comma
 local fio = require('dfllm.io')
 local persistlib = require('dfllm.persist')
 local actlib = require('dfllm.act')
@@ -1173,8 +1174,8 @@ local function refresh_load(st)
     local s = sched.stretch(e, l)
     if s ~= e.stretch then
       if math.abs(s - e.stretch) >= 0.5 or s == 1 then
-        st.log_as('kern', 'info', string.format('%s cadence x%.1f for the fort size (%d units, %d items)',
-                                                e.name, s, l.units, l.items))
+        st.log_as('kern', 'info', string.format('%s cadence x%s for the fort size (%d units, %d items)',   -- BUG-143
+                                                e.name, NUM.dec(s), l.units, l.items))
       end
       e.stretch = s
     end

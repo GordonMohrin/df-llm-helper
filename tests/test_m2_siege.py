@@ -77,7 +77,7 @@ def test_status_shows_the_refused_drills(save):
                    "fail": ["no_inner", "no_outer"], "open": 0, "dhold": "no bridges", "dref": 320}
     (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
     out = brief.status_text(save)
-    assert "drill never (auto: no bridges; run dfllm cmd drill) [320 refused: build fortcore stage 2/3 first]" in out
+    assert "drill never (auto: no bridges) [320 refused: build fortcore stage 2/3 first]" in out
     st["ready"].pop("dref")
     (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
     assert "refused" not in brief.status_text(save)

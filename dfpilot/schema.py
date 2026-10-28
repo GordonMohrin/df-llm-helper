@@ -1018,7 +1018,9 @@ STATE = Obj(
                                                        "by": Obj(req={"id": NAT, "race": Str(maxbytes=24),
                                                                       "k": Str(maxbytes=8), "pos": Tup([NAT, NAT, NAT]),
                                                                       "dc": Int(-1), "de": Int(-1)},
-                                                                 opt={"hl": FLAG, "n": NAT, "sz": NAT}),
+                                                                 # BUG-144: hw = the rule that makes it dangerous
+                                                                 opt={"hl": FLAG, "n": NAT, "sz": NAT,
+                                                                      "hw": Str(maxbytes=24)}),
                                                        # M3 (BUG-111/112): invaders left out of the hostiles
                                                        # (`id:why`: merchant, diplomat, visitor, restrained, child) and
                                                        # the lone harmless intruder's clock in SIEGE/BREACH (age ticks,
@@ -1031,6 +1033,8 @@ STATE = Obj(
          "lever": Obj(req={"lat_s": Int(-1), "lat_t": Int(-1), "pend": NAT, "wait_s": NAT}),
          "alert": Obj(req={"want": Str(maxbytes=24), "burrow": Str(maxbytes=24), "tiles": NAT, "inside": NAT,
                            "ok": FLAG}, opt={"why": Str(maxbytes=40), "core_d": NAT, "core_f": NAT,
+                                             # BUG-146: ticks since the last refuge audit, only when it is overdue
+                                             "aud": NAT,
                                              # Run 10: the refuge burrow (Tiefe+): exists, separated (1, 0 an
                                              # opening reaches it, -1 not known yet), beds, beds wanted (bed_pct)
                                              "ref": Obj(req={"ex": FLAG, "sep": Int(-1, 1), "beds": NAT,

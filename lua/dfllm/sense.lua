@@ -368,7 +368,9 @@ local function benign_why(u, U)
      and not yes(function() return u.flags1.active_invader end) and not yes(function() return u.flags1.marauder end) then
     return 'visitor'
   end
-  if yes(function() return u.flags2.restrained end) or yes(function() return u.flags1.chained end) then return 'restrained' end
+  -- BUG-144 (live i3: DF 53.16 has no unit_flags2.restrained; reading it raised and pcall hid it): bound to a chain is
+  -- flags1.chained (DF sets it again every tick while the chain holds); a caged unit never reaches here (census.h.caged)
+  if yes(function() return u.flags1.chained end) then return 'restrained' end
   if yes(function() return U.isChild(u) end) or yes(function() return U.isBaby(u) end) then return 'child' end
 end
 M.BENIGN_MAX = 10      -- census.h.benign: units left out of the hostiles, with the reason

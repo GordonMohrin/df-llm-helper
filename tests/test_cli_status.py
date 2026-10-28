@@ -149,7 +149,7 @@ def test_status_r0_is_loud_never_plain_peace(save):
                         "55,62,117 stair_updown, 61,55,117 floor | traps ? (no audit) | next: dfllm audit; close the "
                         "open ways in (dfllm cmd bp.place tpl=seal site=S1 at=last); build the missing fortcore "
                         "pieces (plan)")
-    assert "R0 UNREADY worn 0% cv 3 drill never (auto: no bridges; run dfllm cmd drill) audit never (run dfllm audit)" \
+    assert "R0 UNREADY worn 0% cv 3 drill never (auto: no bridges; build fortcore stage 2/3 first) audit never (run dfllm audit)" \
         in out
     assert "fail:audit" not in out                             # the blockers stand once, in the UNREADY line
     assert est_tokens(out) <= brief.STATUS_TOKENS

@@ -469,7 +469,7 @@ C.STATE_SPEC = obj({
                -- position, tiles to the nearest citizen outside Kern+ (dc) and entrance (de), harmless (hl), how many (n), its body size (sz)
                age = NAT, lim = NAT, qw = str(8),
                by = obj({id = NAT, race = str(24), k = str(8), pos = {t = 'tup', items = {NAT, NAT, NAT}},
-                         dc = int(-1), de = int(-1)}, {hl = FLAG, n = NAT, sz = NAT}),
+                         dc = int(-1), de = int(-1)}, {hl = FLAG, n = NAT, sz = NAT, hw = str(24)}),   -- BUG-144: hw = why dangerous
                -- M3 (BUG-111/112): invaders left out of the hostiles (`id:why`: merchant, diplomat, visitor, restrained,
                -- child) and the lone harmless intruder's clock in SIEGE/BREACH (age ticks, how many, ticks until the
                -- limit releases it, the kernel's own kill order: running or why refused)
@@ -478,6 +478,7 @@ C.STATE_SPEC = obj({
   lever = obj({lat_s = int(-1), lat_t = int(-1), pend = NAT, wait_s = NAT}),
   alert = obj({want = str(24), burrow = str(24), tiles = NAT, inside = NAT, ok = FLAG},
               {why = str(40), core_d = NAT, core_f = NAT,           -- BUG-028: drink/food days inside the core
+               aud = NAT,                                           -- BUG-146: ticks since the last refuge audit (when overdue)
                -- Run 10: the refuge burrow: exists, separated (1, 0 open, -1 unknown), beds, beds wanted (bed_pct)
                ref = obj({ex = FLAG, sep = int(-1, 1), beds = NAT, need = NAT},
                          -- BUG-040: its tiles' bbox and its nearest tile's distance to the nearest accepted source ws

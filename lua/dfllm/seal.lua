@@ -4897,8 +4897,30 @@ end
 -- urgent jobs run at CFG.rate_urgent and before every background job: a lever pull, a siege, a construction outside
 -- PEACE, perimeter.record, a CUTOFF re-check, a mode change, the first result after a load
 local URGENT_SEAL = {lever = true, siege = true, record = true, inspect = true, lockdown = true}
+
+-- BUG-146 (live i3: inspect refuge 60,000 ticks old, seal demoted x8 and its other background jobs ahead of the audit in
+-- ORDER): the ticks since the last refuge audit when they are over 2 x its period (audit_every in PEACE, audit_alert
+-- else), else nil. Such an audit runs as an urgent job (the refuge choice, REFUGE_FAIL and REFUGE_STOCK work from it)
+-- and state alert.aud shows its age
+function M.audit_overdue(K)
+  local last = mem and mem.last_audit
+  if not last then return nil end
+  local age = now_t(K) - last
+  local every = K.mode() == 'PEACE' and CFG.audit_every or CFG.audit_alert
+  if age >= 2 * every then return age end
+  return nil
+end
+
 local function urgent(K, name, d)
   if name == 'quick' then return true end
+  if name == 'audit' and M.audit_overdue(K) then
+    if not M.od_log or now_t(K) < M.od_log or now_t(K) - M.od_log >= CFG.audit_alert then
+      M.od_log = now_t(K)
+      K.log('warn', 'seal: the refuge audit is overdue (%d ticks old, over 2 x its period): it runs as an urgent job',
+            M.audit_overdue(K))
+    end
+    return true
+  end
   if name == 'split' then return K.mode() ~= 'PEACE' or held(K) end     -- BUG-028: siege waits for it to raise
   if (name == 'edges' and not mem.edges) or (name == 'audit' and not mem.reach) or (name == 'scan' and not mem.scan)
      or (name == 'seal' and not mem.seal) then return true end
@@ -5125,6 +5147,7 @@ function M.step(K, budget, ctx)
   end
   local r = run_jobs(K, t)
   if not next(mem.run) then publish(K) end
+  if mem.pub then mem.pub.aud = M.audit_overdue(K) end           -- BUG-146: the data's age while it is overdue
   save(K)
   return r
 end

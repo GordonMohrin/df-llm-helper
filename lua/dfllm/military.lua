@@ -1833,6 +1833,23 @@ local function reloc(K, man, brs, p, blk, clear, o)
   return q
 end
 
+-- BUG-142 (live i3: stations.b2 48,40,127 and gallery 64,47,130 were walls on walk group 0; the squads ordered there
+-- scattered, on_station 0 of 8): the legend char when the revealed station tile is no ground a soldier can stand on
+-- (wall, smoothed or constructed wall, fortification, tree, open space), else nil (a floor, a stair, a ramp, or hidden:
+-- no evidence, fair play). Cached per position for RELOC_TTL
+M.NO_FLOOR = {['#'] = true, S = true, C = true, F = true, T = true, _ = true}
+function M.no_floor(K, p)
+  local now = now_tick(K)
+  rt.nofl = rt.nofl or {}
+  local key = pstr(p)
+  local c = rt.nofl[key]
+  if c and now >= c.t and now - c.t < M.RELOC_TTL then return c.v or nil end
+  local t = tile_reader(K)(p.x, p.y, p.z)
+  local v = type(t) == 'table' and M.NO_FLOOR[t.c] and t.c or false
+  rt.nofl[key] = {t = now, v = v}
+  return v or nil
+end
+
 -- the station of a chain: the first entry that lies clear of every bridge footprint (o.need_by: a stricter clearance
 -- for a bridge; o.side: an inner side it must lie on), else moved to the nearest revealed floor on the inner side of
 -- the footprints that hold it, else the next entry (alt entries only after one failed; o.all: every entry).
@@ -1850,7 +1867,9 @@ local function pick(K, man, stations, chain, o)
         if not r.first then r.first = {name = name, pos = p} end
         local blk = SL.blockers(brs, p, clear, o.need_by)
         local inside = not o.side or o.side(p.x, p.y, p.z)
-        if #blk == 0 and inside and not seek then r.pos, r.name = p, name; return r end
+        local wall = not seek and M.no_floor(K, p)               -- BUG-142: a revealed wall is no station
+        if #blk == 0 and inside and not seek and not wall then r.pos, r.name = p, name; return r end
+        if wall and r.first.name == name then r.first.wall = wall end
         local q = reloc(K, man, brs, p, blk, clear, o)
         if q then r.pos, r.name, r.from = q, name, (not seek) and p or nil; r.blk = r.blk or blk[1]; return r end
         r.blk = r.blk or blk[1] or (not inside and {name = o.bridge or '?', d = -1}) or nil
@@ -1883,7 +1902,12 @@ local function note_pick(K, r)
   local clear, margin = clearance(K)
   local b = r.blk
   local why, txt
-  if to and r.name == f.name then
+  if f.wall and not b then                       -- BUG-142 (a bridge that holds it is named first, as before)
+    why = 'wall'
+    txt = string.format('station %s %s is no floor (%s): %s', f.name, pstr(f.pos), f.wall,
+                        to and string.format('moved to %s%s', r.name ~= f.name and (r.name .. ' ') or '', pstr(to))
+                        or 'no revealed floor near it and no other station of its chain: no station order')
+  elseif to and r.name == f.name then
     why = 'bridge'
     txt = string.format('station %s %s lies%s: moved to %s (the nearest revealed floor on its inner side)', f.name,
                         pstr(f.pos), blk_txt(b, clear, margin), pstr(to))
@@ -1910,7 +1934,8 @@ local function posture_station(K, man, stations, P, kind, first_melee)
   local r = pick(K, man, stations, chain)
   note_pick(K, r)
   local src = r.first and (r.first.name .. '@' .. pstr(r.first.pos)) or nil
-  return which, r.pos or (r.first and r.first.pos), src
+  -- BUG-142: never the first entry's position when it is a wall (the squad would scatter)
+  return which, r.pos or (r.first and not r.first.wall and r.first.pos) or nil, src
 end
 
 -- is this squad off duty right now? FR-71: a militia squad (M.conf militia) is on duty only in its own window, an
@@ -2219,10 +2244,21 @@ local function sortie_pass(K, now)
       local dt = math.max(1, now - (so.last or now))
       so.last = now
       local info = s and M.squad_info(K, key)
+      -- BUG-140 (live i3: a killed target ended as abort more_hostiles): a kill sortie whose targets are all dead ends
+      -- `dead` before any picture test (the dead leave the census, so reflex answers 'stale' or 'group'); the
+      -- lone-harmless test asks only for the living targets
+      local alive0
+      if so.kind == 'kill' then
+        alive0 = {}
+        for _, id in ipairs(so.ids or {}) do if not unit_dead(id) then alive0[#alive0 + 1] = id end end
+      end
       local lone, lwhy
-      if so.keep then lone, lwhy = M.lone_of(K, so.ids) end
+      if so.keep and not (alive0 and #alive0 == 0) then lone, lwhy = M.lone_of(K, alive0 or so.ids) end
       if rt.held[key] then
         rt.so[key] = nil
+      elseif alive0 and #alive0 == 0 then
+        so_end(K, key, 'dead', 'killed', string.format('sortie %s: target %s dead after %d ticks', key, so_ids_txt(so.ids),
+               now - so.t0))
       elseif not s or not info or info.n == 0 then
         so_end(K, key, 'abort', 'no_squad', 'sortie ' .. key .. ' ended: the squad has no members')
       elseif mode == 'PEACE' then
@@ -2232,10 +2268,11 @@ local function sortie_pass(K, now)
                so.arrived and 'arrived, the target is still there' or 'the squad has not arrived'))
       elseif so.keep and info.worn < c.worn then
         so_end(K, key, 'abort', 'worn', string.format('sortie %s ended: worn %d%% < %d%%', key, info.worn, c.worn))
-      elseif so.keep and not lone and (lwhy == 'group' or lwhy == 'dangerous' or (lwhy ~= 'none' and (so.nolone or 0) + dt >= M.SO_EVERY * 2)) then
+      elseif so.keep and not lone and (lwhy == 'group' or lwhy == 'dangerous' or (lwhy ~= 'none' and (so.nolone or 0) + 1 >= 2)) then
         so_end(K, key, 'abort', 'more_hostiles', 'sortie ' .. key .. ' ended: the picture is no lone harmless intruder any more')
       else
-        so.nolone = (so.keep and not lone and lwhy ~= 'none') and (so.nolone or 0) + dt or nil     -- (reflex's census scan may lag one pass)
+        -- (reflex's census scan may lag one pass) BUG-140: counted in looks, not ticks (a demoted pass spans 1,200 ticks)
+        so.nolone = (so.keep and not lone and lwhy ~= 'none') and (so.nolone or 0) + 1 or nil
         -- members near the target
         local tp = so.tgt
         if so.kind == 'kill' then

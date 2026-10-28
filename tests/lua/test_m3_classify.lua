@@ -16,7 +16,7 @@ T.test('BUG-111: an invader that is a merchant, diplomat, visitor, restrained or
   local W = world{
     S.cit(1, 60, 70),
     S.inv(201, 51, 30), S.inv(202, 52, 30, Z, {merchant = true}), S.inv(203, 53, 30, Z, {diplomat = true}),
-    S.inv(204, 54, 30, Z, {visitor = true}), S.inv(205, 55, 30, Z, {restrained = true}),
+    S.inv(204, 54, 30, Z, {visitor = true}), S.inv(205, 55, 30, Z, {chained = true}),
     S.inv(206, 56, 30, Z, {adult = false}), S.inv(207, 57, 30, Z, {baby = true, adult = false}),
     -- never excluded: an uninvited visitor (thief, ambusher), an active invader or marauder flagged as visitor
     S.inv(208, 58, 30, Z, {visitor = true, visitor_uninvited = true}), S.inv(209, 59, 30, Z, {visitor = true, active_invader = true}),

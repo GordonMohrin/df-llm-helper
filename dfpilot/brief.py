@@ -315,7 +315,7 @@ def lockdown_text(al: dict) -> str:
         txt += (f": cause {by['k']} {by['id']} {by['race']} at {','.join(str(c) for c in by['pos'])}"
                 + "".join(f", {x}" for x in near)
                 + (f", size {by['sz']}" if "sz" in by else ", size unknown")
-                + (", harmless" if by.get("hl") else ", dangerous")
+                + (", harmless" if by.get("hl") else ", dangerous" + (f" ({by['hw']})" if by.get("hw") else ""))   # BUG-144
                 + (f" (+{by['n'] - 1} more)" if by.get("n", 1) > 1 else ""))
     elif "qw" in al:
         txt += ": no hostile in sight"
@@ -353,7 +353,8 @@ def alarm_items(ctx: Ctx) -> list[tuple[int, str]]:
                         + (f", released in {ln['rel'] / 1200:.1f} d" if "rel" in ln else ", no release (confine.siege_release off)")
                         + (f"; kernel kill order: {ln['kill']}" if ln.get("kill") else "")))
         if al.get("ben"):                      # M3 (BUG-111): invaders by DF's flag that are no hostile to the player
-            out.append((3, "not counted as hostile (id:why): " + ", ".join(al["ben"])))
+            # BUG-144: rank 2 (kept by the status) while a lockdown or a lone intruder's clock holds: that is when it matters
+            out.append((2 if al["lock"] or al.get("ln") else 3, "not counted as hostile (id:why): " + ", ".join(al["ben"])))
         if al.get("far"):                      # Run 11: invaders a lockdown expired far (they re-arm on approach)
             out.append((3, f"{al['far']} invaders far (lockdown expired; re-arm within lockdown_near)"))
         if al["unacked"]:
@@ -493,8 +494,11 @@ def pop_items(ctx: Ctx) -> list[tuple[int, str]]:
         else:
             head = f"R{r['lvl']}" + (f" fail:{','.join(r['fail'])}" if r["fail"] else " ok")
         drill = f"drill {fmt_ticks(r['drill_age'])}"
+        # BUG-144 (live i3): never 'run dfllm cmd drill' when drill refuses it (no O1/B1: drill.gap, or no bridge at all)
+        gap = bool(r.get("dref")) or any(w in str(r.get("dhold") or "") for w in ("no_outer", "no_inner", "no bridges"))
         if r["drill_age"] < 0:                 # FR-65: say why no drill ran and how to run one
-            drill += (f" (auto: {r['dhold']}; run dfllm cmd drill)" if r.get("dhold") else " (run dfllm cmd drill)")
+            how = "" if r.get("dref") else ("; build fortcore stage 2/3 first" if gap else "; run dfllm cmd drill")
+            drill += (f" (auto: {r['dhold']}{how})" if r.get("dhold") else f" ({how[2:] or 'run dfllm cmd drill'})")
         if r.get("dref"):                      # BUG-110: drills refused for want of O1/B1 (counted once a game day)
             drill += f" [{r['dref']} refused: build fortcore stage 2/3 first]"
         audit = (f"audit {'ok' if a['ok'] else 'FAIL'} {fmt_ticks(a['age'])}" if a["age"] >= 0
@@ -769,6 +773,8 @@ def line_alert(al: dict) -> str:
     ref = al.get("ref") if isinstance(al.get("ref"), dict) else {}
     if ref.get("tr") == 0:                     # BUG-049: Tiefe+ is trusted only while separated (fresh), hatched, empty
         txt += f" | refuge NOT TRUSTED: {ref.get('trw') or '?'}"
+    if isinstance(al.get("aud"), int):         # BUG-146: the refuge audit is overdue (it runs as an urgent job)
+        txt += f" | refuge data {al['aud'] / 1200:.1f} d old"
     return txt
 
 

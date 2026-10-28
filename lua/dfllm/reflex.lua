@@ -101,6 +101,7 @@
 local fio = require('dfllm.io')
 local geom = require('dfllm.util.geom')
 local CAD = require('dfllm.util.cadence')   -- BUG-008: NO_DEPOT without a readable caravan
+local NUM = require('dfllm.util.num')       -- BUG-143: decimals without the locale's comma
 
 local M = {name = 'reflex', every = {ticks = 10}, critical = true, verbs = {},
            reports = {AMBUSH_AMBUSHER = true, AMBUSH_SNATCHER = true, BEAST_AMBUSH = true, MEGABEAST_ARRIVAL = true,
@@ -1621,6 +1622,8 @@ local function alarm_write(K, force)
 end
 
 local function record(K, n, etype, msg, u)
+  -- BUG-145 (live i3: DEATHS_3PLUS #32617 twice in alarm.txt, 2 ticks apart, two ack-timeout lines): one record per event
+  for _, r in ipairs(st.irq) do if r.n == n then return end end
   local now = K.now()
   st.irq[#st.irq + 1] = {n = n, type = etype, tick = now.tick, wall = now.wall, ms = now.ms,
                          msg = tostring(msg):sub(1, 200), done = 0, u = int(u)}
@@ -1923,17 +1926,26 @@ M.NEED_SLICE = 60          -- citizens looked at per look (a bigger fort takes s
 -- is census entry e a harmless intruder? Never a great danger, undead, building destroyer, large predator, trap avoider
 -- or flier; small (its own body size up to confine.harmless_size, cm3: a dwarf is 60000) or a race of confine.harmless_races.
 -- An unreadable size is no evidence (not harmless)
-local function harmless(e, c)
-  if e.k == 'great' or e.k == 'undead' or e.dz == 1 or e.bd or e.pr then return false end
-  if e.uc == 1 then return true end                    -- M3: unconscious (sense marks it): it cannot act; it wakes, the size rule applies
+-- BUG-144 (live i3: 'size 5767, dangerous' with no reason): M.danger_why names the rule that makes e dangerous (nil:
+-- harmless), at most 24 bytes: 'great danger', 'undead', 'building destroyer', 'large predator', 'flier/trap avoider',
+-- 'size N > harmless_size', 'size unknown'
+function M.danger_why(e, c)
+  if e.k == 'great' then return 'great danger' end
+  if e.k == 'undead' then return 'undead' end
+  if e.bd and e.bd ~= 0 then return 'building destroyer' end
+  if e.pr and e.pr ~= 0 then return 'large predator' end
+  if e.dz == 1 then return 'flier/trap avoider' end
+  if e.uc == 1 then return nil end                     -- M3: unconscious (sense marks it): it cannot act; it wakes, the size rule applies
   local sz = int(e.sz)
-  if sz and c.harmless_size > 0 and sz <= c.harmless_size then return true end
+  if sz and c.harmless_size > 0 and sz <= c.harmless_size then return nil end
   if #c.harmless_races > 0 then
     local r = race_of(e.id):upper():gsub('[^%w]+', '_')
-    for _, v in ipairs(c.harmless_races) do if v == r then return true end end
+    for _, v in ipairs(c.harmless_races) do if v == r then return nil end end
   end
-  return false
+  if not sz then return 'size unknown' end
+  return string.format('size %d > %d', sz, c.harmless_size):sub(1, 24)
 end
+local function harmless(e, c) return M.danger_why(e, c) == nil end
 
 -- the counted hostiles of the fresh census (not expired far, not cleared): near = inside Kern+, within lockdown_near or
 -- of unknown distance. Returns {near = {ap}, dangerous = the first near one that is not a harmless lone intruder (or the
@@ -1992,7 +2004,8 @@ local function cause_scan(K, h)
   if best then
     local e = best.a.e
     rt.cause = {id = e.id, k = e.an == 1 and 'animal' or e.k, pos = {e.x, e.y, e.z}, dc = best.a.dc, de = best.a.de,
-                hl = harmless(e, c) and 1 or 0, n = n, near = best.a.near == true, sz = int(e.sz)}
+                hl = harmless(e, c) and 1 or 0, n = n, near = best.a.near == true, sz = int(e.sz),
+                hw = M.danger_why(e, c)}                  -- BUG-144: why it is not harmless
     local rc = rt.cause_race
     if not rc or rc.id ~= e.id then rc = {id = e.id, race = race_of(e.id)}; rt.cause_race = rc end
     rt.cause.race = rc.race:upper():gsub('[^%w]+', '_'):sub(1, 24)
@@ -2039,7 +2052,7 @@ local function offer_step(K, h, now)
   local tok = cs.hl == 1 and 'harmless' or 'dangerous'
   if not CAD.due(rec, T, {cs.id}, {tok}, {ticks = math.max(1, c.offer_days) * 1200, wall_s = 60}) then return end
   local cmd, key, n = sortie_cmd(K, cs)
-  local days = string.format('%.1f', age / 1200)
+  local days = NUM.dec(age / 1200)                       -- BUG-143: never the locale's comma
   local q
   if cs.hl == 1 then
     q = string.format('harmless lone intruder %s holds the lockdown %s for %s days (it ends by itself after %d): %s',
@@ -2171,7 +2184,10 @@ local function lone_step(K, h, now)
     end
     return
   end
-  if not st.lone or st.lone.sig ~= pic.sig then st.lone, dirty = {t = now, sig = pic.sig}, true end
+  if not st.lone or st.lone.sig ~= pic.sig then
+    st.lone, dirty = {t = now, sig = pic.sig}, true
+    if rt.kl and rt.kl.sig ~= pic.sig then rt.kl, rt.kl_t = nil, nil end    -- BUG-145: another picture, not its kill order
+  end
   if st.lone.seen ~= now then st.lone.seen = now end
   local age = now - st.lone.t
   rt.lone = {age = age, pic = pic}
@@ -2182,7 +2198,8 @@ local function lone_step(K, h, now)
      and (not rt.kl_t or now < rt.kl_t or now - rt.kl_t >= wait) then
     rt.kl_t = now
     local ok, started, msg = K.call('military', 'kill_lone', pic.ids, 'reflex')
-    rt.kl = {ok = ok and started == true, msg = tostring(ok and msg or started or 'no military module'):sub(1, 80), t = now}
+    rt.kl = {ok = ok and started == true, msg = tostring(ok and msg or started or 'no military module'):sub(1, 80), t = now,
+             sig = pic.sig}
     if rt.kl.ok and not tostring(msg):find('is running', 1, true) then st.lone.kn, dirty = (st.lone.kn or 0) + 1, true end
   end
   local kl = rt.kl and rt.kl.t and now - rt.kl.t < 2 * M.KILL_RETRY and rt.kl or nil
@@ -2194,8 +2211,8 @@ local function lone_step(K, h, now)
     if CAD.due(st.cf and st.cf.k, T, pic.ids, {tok}, {ticks = math.max(1, c.ask_days) * 1200, wall_s = 60}) then
       local cmd, key, n = lone_cmd(K, pic)
       local race = race_of(e.id):upper():gsub('[^%w]+', '_'):sub(1, 24)
-      local q = string.format('harmless lone %s %d (%s) at %d,%d,%d has held the %s for %.1f days%s; %s', e.k == 'inv' and 'inv' or e.k,
-                              e.id, race, e.x, e.y, e.z, mode, age / 1200,
+      local q = string.format('harmless lone %s %d (%s) at %d,%d,%d has held the %s for %s days%s; %s', e.k == 'inv' and 'inv' or e.k,
+                              e.id, race, e.x, e.y, e.z, mode, NUM.dec(age / 1200),
                               kl and (kl.ok and ('; kernel kill order: ' .. kl.msg) or ('; kernel kill order refused: ' .. kl.msg)) or '',
                               cmd and string.format('send squad %s (%d soldiers): %s', key, n, cmd) or 'no squad to send')
       st.cf = st.cf or {}
@@ -2210,17 +2227,22 @@ local function lone_step(K, h, now)
   end
   -- the release: the lockdown limit holds in SIEGE/BREACH too, with the soldiers at their stations
   if c.siege_release and c.max_days > 0 and age >= c.max_days * 1200 and soldiers_on_station(K) then
+    -- BUG-145 (live i3: LOCKDOWN_END far listed 41875 twice, nfar 2): with a lockdown, release()'s far_mark names the
+    -- units beyond lockdown_near itself; only the near (or unmeasured) ones go to hl_clear
     local near = {}
     for _, e in ipairs(pic.ents) do
-      near[#near + 1] = {e = e, d = (rt.ap[e.id] and rt.ap[e.id].d) or -1, how = rt.ap[e.id] and rt.ap[e.id].how}
+      local a = rt.ap[e.id]
+      if not st.hold or not a or a.near or a.unknown then
+        near[#near + 1] = {e = e, d = (a and a.d) or -1, how = a and a.how}
+      end
     end
     local ig = {}
     for _, e in ipairs(pic.ents) do ig[#ig + 1] = e.id end
     if st.hold then release(K, now, 'limit', {near = near}) else hl_clear(K, now, {near = near}) end
     for _, id in ipairs(ig) do M.ignore(K, id, 'lone harmless intruder, ' .. mode .. ' limit') end
     st.lone, rt.lone, dirty = nil, nil, true
-    K.log('info', 'reflex: lone harmless intruder %s cleared after %.1f days in %s with the soldiers at their stations',
-          table.concat(ig, ','), age / 1200, mode)
+    K.log('info', 'reflex: lone harmless intruder %s cleared after %s days in %s with the soldiers at their stations',
+          table.concat(ig, ','), NUM.dec(age / 1200), mode)
   end
 end
 
@@ -2547,7 +2569,12 @@ function M.state(K)
     local c = cfg(K).confine
     a.ln = {age = rt.lone.age, n = #rt.lone.pic.ids}
     if c.siege_release and c.max_days > 0 then a.ln.rel = math.max(0, c.max_days * 1200 - rt.lone.age) end
-    if rt.kl and rt.kl.msg then a.ln.kill = rt.kl.msg:sub(1, 80) end
+    -- BUG-145 (live i3: 'kernel kill order: kill order on 41877' for 10 days of the next intruder): only this picture's order,
+    -- while it is recent (the retry cadence plus one look)
+    local kl, now = rt.kl, K.now().tick
+    if kl and kl.msg and kl.sig == rt.lone.pic.sig and now - (kl.t or -1e9) < 2 * M.KILL_RETRY + M.CF_EVERY then
+      a.ln.kill = kl.msg:sub(1, 80)
+    end
   end
   if st.hold then                                    -- BUG-065: the lockdown's age, its limit, why it holds, its cause
     local now = K.now().tick
@@ -2556,7 +2583,8 @@ function M.state(K)
     a.qw = rt.qw or 'stale'
     local cs = rt.cause
     if cs then
-      a.by = {id = cs.id, race = cs.race, k = cs.k, pos = cs.pos, dc = cs.dc, de = cs.de, hl = cs.hl, n = cs.n, sz = cs.sz}
+      a.by = {id = cs.id, race = cs.race, k = cs.k, pos = cs.pos, dc = cs.dc, de = cs.de, hl = cs.hl, n = cs.n, sz = cs.sz,
+              hw = cs.hw}
     end
   end
   return {alarm = a}

@@ -1006,31 +1006,34 @@ local function pull_story(r)
   return table.concat(parts, '; ')
 end
 
--- M3 (BUG-114): the give-up. Every linked lever is parked for the wait, GATE_FAIL (A) says why. Returns true (handled)
-function M.giveup(K, name, r, s, now, tot)
+-- M3 (BUG-114): the give-up. Every linked lever is parked for the wait, GATE_FAIL (A) says why. Returns true (handled).
+-- BUG-141: why = 'blocked' when the pulls were cancelled for units on or next to the footprint (lever = the last one pulled)
+function M.giveup(K, name, r, s, now, tot, why, lever)
   local _, gwait = M.gu_cfg(K)
   local gu = r.gu or {n = 0}
   gu.n = gu.n + 1
   local w = gwait * math.min(1 << (gu.n - 1), 8)
-  gu.untl, gu.pulls = now + w, tot
+  gu.untl, gu.pulls, gu.why = now + w, tot, why
   r.gu = gu
   r.park = r.park or {}
   for _, lid in ipairs(r.levers or {}) do if r.linked[lid] then r.park[lid] = now + w end end
   r.pm = K.mode()
   local story = pull_story(r)
   gu.story = story
-  K.log('warn', 'gate: %s: %d pulls without effect, no pull for %d ticks (give-up %d): %s', name, tot, w, gu.n, story)
+  local what = why == 'blocked' and 'pulls cancelled for units on or next to it' or 'pulls without effect'
+  K.log('warn', 'gate: %s: %d %s, no pull for %d ticks (give-up %d): %s', name, tot, what, w, gu.n, story)
   local br = st.br[name]
   if br then br.failed, dirty = true, true end
   if K.mode() == 'DRILL' then return true end
   r.fail_tick = now                                   -- (the waits are days apart: no extra cadence; this one names the reason)
-  local d = {bridge = name, want = br and br.want or 'up', why = FAIL_WHY.no_effect, pulls = tot, wait = w}
+  local d = {bridge = name, want = br and br.want or 'up', why = why == 'blocked' and FAIL_WHY.blocked or FAIL_WHY.no_effect,
+             pulls = tot, wait = w}
   if type(r.block) == 'table' and #r.block > 0 then d.units, d.pos = ids_of(r.block), {r.block[1].x, r.block[1].y, r.block[1].z} end
   local lids = {}
   for lid in pairs(r.ne or {}) do lids[#lids + 1] = lid end
   table.sort(lids)
-  if lids[1] then d.lever = lids[1] end
-  K.emit('GATE_FAIL', 'A', string.format('%s not up: %d pulls without effect, no pull for %d ticks; %s', name, tot, w,
+  if lids[1] or lever then d.lever = lids[1] or lever end
+  K.emit('GATE_FAIL', 'A', string.format('%s not up: %d %s, no pull for %d ticks; %s', name, tot, what, w,
                                          story ~= '' and story or 'no unit near the footprint'):sub(1, 200), d)
   return true
 end
@@ -1493,6 +1496,25 @@ local function gone_name(K, name)
   return (ok and type(rep) == 'table' and rep[name] ~= nil) and 'replaced' or 'destroyed'
 end
 
+-- BUG-141 (live i3: B1 'replaced/-' kept want up, BREACH 'waiting for B1 up: no_lever', GATE_FAIL each epoch): a
+-- manifest bridge seal replaced by a wall and a door, with no bridge standing on its footprint, is gone for gate (no
+-- want, no pull, no GATE_FAIL, not in not_up) without BRIDGE_DESTROYED news; gone_check lifts it once a bridge stands
+-- there again. seal.replaced is asked once per tick
+local rep_cache = {t = nil, v = {}}
+local function rep_check(K, name, r, now)
+  if st.gone[name] or r.bid then return false end
+  if rep_cache.t ~= now then
+    local ok, rep = K.call('seal', 'replaced')
+    rep_cache.t, rep_cache.v = now, (ok and type(rep) == 'table') and rep or {}
+  end
+  if rep_cache.v[name] == nil then return false end
+  if r.job then K.act.cancel_own_lever_job(r.job.id); r.job = nil end
+  r.stuck, r.near, r.last, r.gone_next = nil, nil, 'destroyed', now + M.GONE_RECHECK
+  st.gone[name], st.br[name], dirty = {t = now, bid = -1, last = 'replaced', rep = true}, nil, true
+  K.log('info', 'gate: %s is replaced by a wall and a door (seal): no want, no pull, no GATE_FAIL for it', name)
+  return true
+end
+
 -- one controller pass for one bridge; returns the observed state
 local function control(K, name, spec, now)
   local r = runtime(name)
@@ -1504,7 +1526,7 @@ local function control(K, name, spec, now)
   local br = st.br[name]
   local w = br and br.want
   resolve(r, spec, now, w ~= nil and w ~= r.last)
-  if gone_check(K, name, r, spec, now) then return gone_name(K, name) end
+  if rep_check(K, name, r, now) or gone_check(K, name, r, spec, now) then return gone_name(K, name) end
   local s = read(r)
   r.foot, r.spec, r.stuck = spec.fp, spec, nil
   if w ~= nil and w ~= s and not r.want_ms then r.want_ms = K.now().ms end      -- GATE_FAIL names real seconds
@@ -1552,6 +1574,14 @@ local function control(K, name, spec, now)
       -- pending pull in every mode and both ways (live L4: the margin); only a forced raise goes on (GATE_FORCED)
       if not stale then
         local hold, hd = holders(K, name, spec.fp, sc, dir)
+        -- BUG-141 (live i3: lever 25729 two tiles from X25718's footprint): the job's own worker has to stand at the
+        -- lever; next to the footprint (not on it) he holds nothing, else we cancel our own pull for ever
+        local wid = (w0 and unit_id(w0)) or r.job.wid
+        if wid and #hold > 0 then
+          local keep = {}
+          for _, e in ipairs(hold) do if e.id ~= wid or e.d == 0 then keep[#keep + 1] = e end end
+          if #keep < #hold then hold = keep end
+        end
         if hd then forced_event(K, name, spec.fp, hold, hd, r.job.id)
         elseif #hold > 0 then
           stale = 'blocked'
@@ -1594,7 +1624,20 @@ local function control(K, name, spec, now)
         K.log('info', 'gate: %s pull on lever %d lies outside the alert burrows, a lever inside them instead', name,
               r.job.lever)
       end
+      -- BUG-141: pulls cancelled for a unit beside the footprint count toward gate.pull_cap in this mode; then the
+      -- give-up (GATE_FAIL blocked naming the units) instead of a new pull every few hundred ticks for weeks
+      local blid = r.job.lever
       r.job = nil
+      if stale == 'blocked' then
+        local m = K.mode()
+        if not r.bc or r.bc.m ~= m then r.bc = {n = 0, m = m} end
+        r.bc.n = r.bc.n + 1
+        if r.bc.n >= (M.gu_cfg(K)) then
+          local n = r.bc.n
+          r.bc = nil
+          M.giveup(K, name, r, s, now, n, 'blocked', blid)
+        end
+      end
       if not ok then r.settle = now + M.SETTLE; return s end -- it may be completing right now
     end
   end
@@ -1607,7 +1650,7 @@ local function control(K, name, spec, now)
   if w == nil or w == s then
     unblock(r, now); r.block_ev = nil
     if r.ne or r.park then for _, lid in ipairs(r.levers) do M.ne_clear(r, lid) end; r.ne, r.park = nil, nil end   -- BUG-068
-    r.nec = nil
+    r.nec, r.bc = nil, nil                            -- BUG-141: the blocked-cancel count of the want ends too
     return s
   end
   if s == 'unknown' then r.stuck = 'no_lever'; return s end
@@ -2140,8 +2183,8 @@ function M.not_up(K)
     if br.want == 'up' and r and r.last ~= 'up' and not st.gone[name] then
       local why
       if r.gu and r.park and K.now().tick < (r.gu.untl or 0) then
-        why = string.format('no effect: %d pulls, no pull for %d more ticks (%s)', r.gu.pulls or 0, r.gu.untl - K.now().tick,
-                            (r.gu.story or ''):sub(1, 60))
+        why = string.format('%s: %d pulls, no pull for %d more ticks (%s)', r.gu.why == 'blocked' and 'blocked' or 'no effect',
+                            r.gu.pulls or 0, r.gu.untl - K.now().tick, (r.gu.story or ''):sub(1, 60))
       elseif r.stuck == 'blocked' and type(r.block) == 'table' and #r.block > 0 then
         why = who(r.block, r.foot)
       elseif r.stuck == 'no_effect' then why = 'every lever parked after pulls without effect'
@@ -2396,7 +2439,7 @@ M.on = {
       local r = runtime(name)
       if not st.gone[name] then resolve(r, man.bridges[name], now) end
       -- BUG-030: a destroyed bridge has no epoch (one found destroyed now is BRIDGE_DESTROYED, never GATE_FAIL)
-      if not (st.gone[name] or gone_check(K, name, r, man.bridges[name], now)) then
+      if not (st.gone[name] or rep_check(K, name, r, now) or gone_check(K, name, r, man.bridges[name], now)) then
         observe(K, name, r, read(r), now, man.bridges[name].fp)
         check_fail(K, name, now, ev.from) -- settle the old epoch first (SIEGE->BREACH at T+900 = its deadline)
         local br = st.br[name]
