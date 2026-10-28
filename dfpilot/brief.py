@@ -364,6 +364,8 @@ def pop_items(ctx: Ctx) -> list[tuple[int, str]]:
         drill = f"drill {fmt_ticks(r['drill_age'])}"
         if r["drill_age"] < 0:                 # FR-65: say why no drill ran and how to run one
             drill += (f" (auto: {r['dhold']}; run dfllm cmd drill)" if r.get("dhold") else " (run dfllm cmd drill)")
+        if r.get("dref"):                      # BUG-110: drills refused for want of O1/B1 (counted once a game day)
+            drill += f" [{r['dref']} refused: build fortcore stage 2/3 first]"
         audit = (f"audit {'ok' if a['ok'] else 'FAIL'} {fmt_ticks(a['age'])}" if a["age"] >= 0
                  else "audit never (run dfllm audit)")
         if a.get("cov"):                       # BUG-043: what its snapshot covered (margin, shafts, pieces out)

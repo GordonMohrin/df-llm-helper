@@ -250,7 +250,9 @@ T.test('Run 10: reflex.predator_near 0 keeps the old rule (any roofed wild dange
 end)
 
 T.test('ack timeout: an unacked DEATHS_3PLUS gets its default (clock) and LOCKDOWN says so; acked ones do not', function()
-  local W = setup{tag = 'acktimeout', manifest = false, ms_per_frame = 500}
+  local units = S.fort_units()
+  units[#units + 1] = S.danger(400, 45, 7)           -- BUG-108: a visible hostile (at threat 0 the default is skipped)
+  local W = setup{tag = 'acktimeout', manifest = false, ms_per_frame = 500, units = units}
   W.K.emit('DEATHS_3PLUS', 'A', '3 citizens died today', {n = 3, ids = {1, 2, 3}})
   S.run(W, 20)
   T.ok(alarm_txt(W):find('\tDEATHS_3PLUS\tunacked\t3 citizens died today'), alarm_txt(W))

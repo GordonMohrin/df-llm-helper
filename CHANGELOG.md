@@ -1,5 +1,34 @@
 # CHANGELOG dfpilot
 
+## M2: the siege refuge by supplies, no lockdown without an enemy, a bridge replacement that closes the route, no drill without bridges (BUG-107, BUG-108, BUG-109, BUG-110, FR-83, 2026-10-28, offline, live-untested)
+- **Why:** Run 14 notes 78, 88, 76, 87. 37 citizens died in hours of a siege while the civ alert stood on a Kern+ with food 1 and no drink and a
+  fed Innen+ failed the area; an unacked DEATHS_3PLUS started a lockdown at threat 0 (fourteen times in a year); a bridge replaced by wall +
+  door left the ramp beside it open and R0 stayed; 320 drills ran without O1/B1, each calling everybody into Kern+.
+- **What changed (seal.lua, reflex.lua, drill.lua, readiness.lua; bugs/BUG-107 .. BUG-110, FR-83):**
+  - **Refuge by supplies (BUG-107):** `choice.<mode>.want` is the default, not the pick (the note's reading is refuted); the real defects are a WET level that
+    counts the drink only and takes the first burrow of the chain, no level for a fed burrow that lacks area or beds, a held burrow never left
+    for supplies, a depleted pick that is the wanted burrow never reported. New level FED (food and drink held, area and beds waived) before
+    HOLD; WET takes the best supplied burrow; REFUGE_FAIL carries the counts in `sup` and is sent for a short pick that is the wanted burrow
+    too; REFUGE_SWITCH `supply` when the held Kern+/Innen+ is under `refuge.supply_switch` % (50) of the need in food or drink and the free pick has both
+    (never out of the refuge). Standing floor: REFUGE_STOCK (A) when Kern+ or the refuge holds less than `refuge.floor_pct` (100) % of the siege need, forts of
+    `refuge.floor_pop` (30) or more, PEACE/ALERT/RECOVERY, with the existing command (stockroom / `refuge_drink`), once per episode.
+  - **No lockdown without an enemy (BUG-108):** new `reflex.inner` (DEATHS_3PLUS): unacked at threat 0 (a fresh census with no hostile in sight, threat scan
+    not armed) it applies no default (no clock clamp, no civ alert, no LOCKDOWN); alarm.txt shows `far`. A visible hostile keeps the old default.
+  - **Bridge replacement (BUG-109):** the bridge is replaced as before; then the entrance check's gap tiles within 3 tiles of the footprint (a check newer
+    than the last construction) become a second stage (ramp: wall on its top, floor: door) until the route is closed, two rounds at most
+    (`inspect defense` `rebuild.follow`).
+  - **Drill (BUG-110):** `drill.start`, the inbox verb and the automatic start refuse with `no lever-linked bridge: build fortcore stage 2/3 first` when
+    the manifest lacks a standing outer or inner bridge; the mode, the alert and the FPS stay; `ready.dref` counts the refusals once a game day.
+  - Contracts: event REFUGE_STOCK, REFUGE_FAIL `sup`, `ready.dref`, config `refuge.floor_pct/floor_pop/supply_switch` and `inner`; RULES section 7 rows edited in place.
+- **Tests:** tests/lua/test_m2_refuge.lua (7), test_m2_lockdown.lua (3), test_m2_bridge.lua (2), test_m2_drill.lua (5), tests/test_m2_siege.py; all fail on
+  32994bb. `test_reflex.lua` (ack timeout with a visible hostile), `reflex_scenario.lua` (`inner` empty: the old rule), `test_drill.lua` (the refusal), `test_alarm.py` (the shipped `refuge` keys) follow the new rules. The four Lua suites that
+  already failed on 32994bb (test_baseline, test_open_perimeter, test_readiness, test_wp8_kern: max-pop 100 against 55) and the 13 pytest
+  failures that go with them (the same set on 32994bb) are not touched; this commit adds none.
+- **Live check:** at the next SIEGE or lockdown read `inspect refuge` (`choice.*.level` FED/WET, `burrows[].fed`), REFUGE_FAIL `sup`, REFUGE_SWITCH `supply`;
+  after a death wave with nothing in sight that no LOCKDOWN follows (kern.log `inner cause at threat 0`); after a bridge loss that `kern.log seal: bridge ...
+  the entrance check still finds a way in beside its closure` names the tiles and `lost:<B>` ends with the route; `status` after a refused drill shows
+  `[N refused ...]`. Bugs' "Not decided offline" name the read-only data for the open points.
+
 ## L1: the drink nook says why it is refused, judges a tile like quickfort, skips a tile quickfort refuses and widens for a critical mood (BUG-102, FR-82, 2026-10-23, offline, live-untested)
 - **Why:** Run 14 note 73: a strange-mood dwarf stood at thirst 64,976/75,000 with `no free floor within 3 tiles of the workshop`. By-hand
   reads showed free floor; quickfort then skipped the three nearest tiles as occupied and took tiles 4-5 further out. The kernel's

@@ -124,6 +124,10 @@ M.CFG = {
   -- has enough (a dwarf without a bed sleeps on the floor: a bad thought; refusing the refuge sends everybody somewhere
   -- worse). config/reflex.json refuge.bed_pct
   bed_pct = 25,
+  -- BUG-107 (Run 14 note 78): the standing floor of food and drink inside each potential refuge, % of the SIEGE need
+  -- (floor_pct), for forts of floor_pop citizens or more; a siege leaves a burrow whose food or drink is under
+  -- supply_switch % of the need (0 = never) for a fed one. config/reflex.json refuge.floor_pct / floor_pop / supply_switch
+  floor_pct = 100, floor_pop = 30, supply_switch = 50,
   -- BUG-019/FR-67: the BREACH level (separated and reachable, no drink, food or bed counts) and the dead end hold for
   -- breach_days after the first such pick of an episode (a dwarf goes thirsty after about 20 days without a drink;
   -- config/reflex.json refuge.breach_days), on a burrow of breach_tiles tiles at least
@@ -156,6 +160,11 @@ M.CFG = {
   -- BUG-048: a bridge that vanished this many times with no building destroyer in sight (perimeter.vanish_after, 0 =
   -- always rebuilt) is replaced by a wall and a door too, so the rebuild loop has an end
   vanish_after = 3,
+  -- BUG-109 (Run 14 note 76): after the wall + door of a replaced bridge stands, the entrance check may still find the
+  -- way in beside it (a ramp or the floor above its door). Its gap tiles within ramp_near tiles of the footprint
+  -- become a second closure stage (a ramp: a wall on its top, a floor: a door), at most ramp_rounds times, waiting
+  -- ramp_wait for a check that ran after the closure stood
+  ramp_near = 3, ramp_rounds = 2, ramp_wait = 3 * DAY,
   -- BUG-049: the refuge's separation answer (the entrance BFS and its flood run at least every bfs_every days in PEACE)
   -- is trusted for this long; older means seal's check stopped running
   sep_fresh = 35 * DAY,
@@ -582,16 +591,47 @@ local function bgroup(b)
   end
 end
 
--- the refuge knobs the player may set (config/reflex.json `refuge`, CONTRACTS §9.18); a bad value keeps the default
+-- the refuge knobs the player may set (config/reflex.json `refuge`, CONTRACTS §9.18); a bad value keeps the default.
+-- BUG-107: floor_pct = the standing food/drink floor of each potential refuge (Kern+, the refuge) in % of the SIEGE
+-- level's need (citizens x per_cit; 0 = no floor event), floor_pop = the fewest citizens that have it (a young fort has
+-- no stockroom yet), supply_switch = a siege leaves a burrow whose food or drink is under this % of the need for one that
+-- holds both (0 = never)
 local function rcfg(K)
-  local c = {bed_pct = CFG.bed_pct, breach_days = CFG.breach_days}
+  local c = {bed_pct = CFG.bed_pct, breach_days = CFG.breach_days, floor_pct = CFG.floor_pct,
+             floor_pop = CFG.floor_pop, supply_switch = CFG.supply_switch}
   local r = type(K.cfg) == 'table' and type(K.cfg.reflex) == 'table' and K.cfg.reflex.refuge or nil
   if type(r) == 'table' then
     local b, d = int(r.bed_pct), int(r.breach_days)
     if b and b >= 0 and b <= 100 then c.bed_pct = b end
     if d and d >= 0 and d <= 60 then c.breach_days = d end
+    local fp, fo, sw = int(r.floor_pct), int(r.floor_pop), int(r.supply_switch)
+    if fp and fp >= 0 and fp <= 300 then c.floor_pct = fp end
+    if fo and fo >= 0 and fo <= 1000 then c.floor_pop = fo end
+    if sw and sw >= 0 and sw <= 100 then c.supply_switch = sw end
   end
   return c
+end
+
+-- BUG-107: the refuge supply helpers live in one table (seal.lua is near Lua's limit of 200 locals)
+local RF = {}
+
+-- 'food 1/63, drink 0/63' of a burrow audit (the SIEGE level's counts; a wet well covers the drink)
+function RF.txt(a)
+  return string.format('food %d/%d, drink %d/%d%s', a.food, a.fneed or 0, a.drink, a.dneed or 0,
+                       (a.wet and a.drink < (a.dneed or 0)) and ' (well)' or '')
+end
+
+-- is the burrow's food (or its drink, unless a wet well covers it) under pct % of the need?
+function RF.under(a, pct)
+  if (a.fneed or 0) > 0 and 100 * a.food < pct * a.fneed then return true end
+  return not a.wet and (a.dneed or 0) > 0 and 100 * a.drink < pct * a.dneed
+end
+
+-- how well a burrow is supplied (higher is better): the share of its food need, then of its drink need (a wet well = all)
+function RF.score(a)
+  local f = (a.fneed or 0) > 0 and math.min(100, 100 * a.food // a.fneed) or 100
+  local d = a.wet and 100 or ((a.dneed or 0) > 0 and math.min(100, 100 * a.drink // a.dneed) or 100)
+  return f * 101 + d
 end
 
 -- the SIEGE level's counts (FR-37): tiles >= max(min_tiles, citizens), drink >= citizens x drink_per_cit (or a well),
@@ -628,6 +668,8 @@ local function burrow_audit(K, ncit, a)
   -- Run 11 (siege 8: Tiefe+ had no drink): the SIEGE level's drink rule alone (drink >= citizens or a well)
   a.wet = a.exists == true and (a.drink >= need.drink or (a.wwet ~= nil and a.wwet or a.wells) > 0)
   a.dneed = need.drink
+  a.fneed = need.food                                    -- BUG-107: fed = the food need held and the drink covered
+  a.fed = a.wet and a.food >= need.food
   a.why = table.concat(why, ', ')
   return a, need, pct
 end
@@ -1156,6 +1198,54 @@ local function supply_check(K, R)
           hint = trunc(hint, 120), also = #bad > 1 and bad[2] or nil})
 end
 
+-- BUG-107 (Run 14 note 78): the standing floor. Each potential refuge (Kern+ and the refuge Tiefe+; Innen+ holds what
+-- the fort holds) keeps refuge.floor_pct % of the SIEGE level's food and drink need (a wet well covers the drink), for
+-- a fort of refuge.floor_pop citizens or more, in the modes that can still build (PEACE, ALERT, RECOVERY). Under it:
+-- REFUGE_STOCK (A) with the existing command that builds the store, once per episode and again only with news
+-- (util/cadence, a game week and 30 min). No actuator of its own: the stockroom is a bp.place the player's session sends
+function RF.floor(K, R)
+  local c = rcfg(K)
+  local mode = K.mode()
+  if c.floor_pct == 0 or R.cit.n < c.floor_pop or not (mode == 'PEACE' or mode == 'ALERT' or mode == 'RECOVERY') then return end
+  local ids, toks, rows, seen = {}, {}, {}, {}
+  for _, n in ipairs({R.names.kern, R.names.refuge}) do
+    local b = R.burrows[n]
+    if b and b.exists and not seen[n] then
+      seen[n] = true
+      local nf = (b.fneed * c.floor_pct + 99) // 100
+      local nd = (b.dneed * c.floor_pct + 99) // 100
+      local wells = b.wwet ~= nil and b.wwet or b.wells
+      local lf, ld = b.food < nf, b.drink < nd and wells == 0
+      if lf or ld then
+        local what = (lf and ld) and 'food+drink' or (lf and 'food' or 'drink')
+        ids[#ids + 1], toks[#toks + 1] = n, n .. ':' .. what
+        rows[#rows + 1] = {n = n, what = what, b = b, nf = nf, nd = nd}
+      end
+    end
+  end
+  if #rows == 0 then
+    if st.floor_rec and st.floor_rec.ids and #st.floor_rec.ids > 0 then st.floor_rec, dirty = CAD.quiet(st.floor_rec), true end
+    return
+  end
+  local now = K.now()
+  if not CAD.due(st.floor_rec, now, ids, toks, {ticks = 7 * DAY, wall_s = 1800}) then return end
+  st.floor_rec, dirty = CAD.mark(now, ids, toks), true
+  local x = rows[1]
+  local cmd
+  if x.n == R.names.refuge and x.n ~= R.names.kern then
+    cmd = x.what == 'drink' and 'dfllm cmd bp.place \'{"tpl":"refuge_drink","site":"S1"}\''
+          or 'the refuge level has no food store template: stock it from the next plan (refuge_drink holds drink only)'
+  else
+    cmd = string.format('dfllm cmd bp.place \'{"tpl":"stockroom","site":"S1","p":{"burrow":"%s"}}\'', x.n)
+  end
+  local fort = string.format('fort holds food %d, drink %d', R.cls.food.n, R.cls.drink.n)
+  K.emit('REFUGE_STOCK', 'A', trunc(string.format('%s holds %s, under %d%% of the siege need (%d citizens); %s: %s%s', x.n,
+         RF.txt(x.b), c.floor_pct, R.cit.n, fort, cmd, #rows > 1 and ('; also ' .. rows[2].n) or ''), 200),
+         {burrow = x.n, short = x.what, food = x.b.food, fneed = x.nf, drink = x.b.drink, dneed = x.nd,
+          pct = c.floor_pct, cit = R.cit.n, total_f = R.cls.food.n, total_d = R.cls.drink.n, cmd = trunc(cmd, 160),
+          also = #rows > 1 and rows[2].n or nil})
+end
+
 local function commit_audit(K, R, cits)
   local t = now_t(K)
   local totals, by_cls = {}, {}
@@ -1226,6 +1316,7 @@ local function commit_audit(K, R, cits)
   mem.fresh, mem.done_info = {}, {}
   mem.audit = {tick = t, burrows = R.burrows, names = R.names, cit = R.cit.n, need = R.need}
   supply_check(K, R)
+  RF.floor(K, R)                                         -- BUG-107: the standing food/drink floor of the refuges
   -- FR-33: Kern+ fails its audit (counts, or BUG-018: an opening reaches it) -> keep the whole-interior burrow ready
   local kb = R.burrows[R.names.kern]
   local ib = R.burrows[CFG.interior]
@@ -1583,6 +1674,101 @@ function KP.standing(cells)
   return true
 end
 
+-- BUG-109: the gap tiles of the last entrance check beside a closure as closure cells, nil unless the check (its BFS and
+-- its exposure flood) ran after the last change of a construction, door or bridge (mem.fp_t). A ramp gets a wall on its
+-- top, a floor a door (what the seal template does); a tile with an unbuilt door, a stair or the like is left to the
+-- player (`seal at=last`).
+-- Returns cells ({} none near: the fort is as closed as the check can tell), or nil and why (the check is too old)
+function KP.gaps(K, fp)
+  local sl = mem.seal
+  if not sl then return nil, 'no entrance check yet' end
+  local ft = mem.fp_t or -1
+  if sl.sealed then return (int(sl.tick) or -1) >= ft and {} or nil, 'check older than the last construction' end
+  local sp = mem.sepr
+  if not ((int(sl.bfs) or -1) >= ft and sp and (int(sp.tick) or -1) >= ft) then
+    return nil, 'check older than the last construction'
+  end
+  local R, cells, seen = CFG.ramp_near, {}, {}
+  for _, o in ipairs(type(sl.openings) == 'table' and sl.openings or {}) do
+    local near = false
+    for _, g in ipairs(o.gate ~= 1 and type(o.gap) == 'table' and o.gap or {}) do
+      if g[1] >= fp[1] - R and g[1] <= fp[4] + R and g[2] >= fp[2] - R and g[2] <= fp[5] + R
+         and g[3] >= fp[3] - 1 and g[3] <= fp[6] + 1 then near = true end
+    end
+    for _, g in ipairs(near and o.gap or {}) do
+      local c
+      if g[4] == 'ramp' then c = {g[1], g[2], g[3] + 1, 'Cw'}
+      elseif g[4] == 'floor' and not g[5] then c = {g[1], g[2], g[3], 'd'} end
+      local k = c and kstr(c[1], c[2], c[3])
+      if c and not seen[k] and #cells < CFG.seal_max then seen[k] = true; cells[#cells + 1] = c end
+    end
+  end
+  return cells
+end
+
+-- the extension cells stand: a wall (or fortification) on a 'Cw' tile, a built door on a 'd' tile
+function KP.cells_standing(cells)
+  for _, c in ipairs(cells) do
+    spend(2)
+    if not rev(c[1], c[2], c[3]) then return false end
+    local b = c[4] == 'd' and bld_at(c[1], c[2], c[3])
+    if not (b and btype(b) == 'Door' and built(b)) then
+      local sh = shape(c[1], c[2], c[3])
+      if not (sh and (sh.shape == 'WALL' or sh.shape == 'FORTIFICATION')) then return false end
+    end
+  end
+  return true
+end
+
+-- the closure of g stands (the footprint's wall + door): is the way in beside it closed too? Returns nil (nothing more to
+-- do: the bridge is replaced), or 'wait' (a check that ran after the closure is pending, or the extra walls are being
+-- built) / 'queued' (a second stage was queued now)
+function KP.extend(K, k, g, t)
+  local ex = g.ex or {n = 0}
+  g.ex = ex
+  if ex.cells then                                       -- the second stage is out
+    if KP.cells_standing(ex.cells) then
+      ex.cells, ex.proj, g.sd, dirty = nil, nil, t, true  -- ... and stands: a check after it decides
+    elseif t - (ex.t or t) > CFG.gq_keep then
+      K.log('warn', 'seal: bridge %s: the ramp walls %s were not built in %d days: given up', k,
+            tostring(ex.proj), CFG.gq_keep // DAY)
+      return nil
+    else return 'wait' end
+  end
+  if not g.sd then g.sd, dirty = t, true end
+  local cells, why = KP.gaps(K, g.fp)
+  if not cells then
+    if t - g.sd > CFG.ramp_wait then
+      K.log('info', 'seal: bridge %s: no entrance check after the closure within %d days (%s): left as it is',
+            k, CFG.ramp_wait // DAY, why)
+      return nil
+    end
+    if not (g.sq and t - g.sq < DAY and t >= g.sq) then g.sq, dirty = t, true; due('seal', t, 'refuge') end
+    return 'wait'
+  end
+  local todo = {}
+  for _, c in ipairs(cells) do
+    if not KP.cells_standing({c}) then todo[#todo + 1] = c end
+  end
+  if #todo == 0 then return nil end
+  if ex.n >= CFG.ramp_rounds then
+    K.log('warn', 'seal: bridge %s: the way in beside its closure stays open after %d extra stages (%d tiles): ' ..
+          '`seal at=last` is the player\'s', k, ex.n, #todo)
+    return nil
+  end
+  local ok, r1, r2 = K.call('runner', 'repair', todo,
+                            trunc(string.format('bridge %s: the way in beside its wall + door (%d tiles)', g.name or k, #todo), 120),
+                            {peace = true, closure = true})
+  if not (ok and r1) then
+    K.log('warn', 'seal: bridge %s: the extra closure stage was not queued: %s', g.name or k, tostring(r2 or r1))
+    return 'wait'
+  end
+  ex.n, ex.proj, ex.t, ex.cells, dirty = ex.n + 1, tostring(r2), t, todo, true
+  K.log('info', 'seal: bridge %s: the entrance check still finds a way in beside its closure; %d tiles (ramp: wall on its ' ..
+        'top, floor: door) queued as %s', k, #todo, ex.proj)
+  return 'queued'
+end
+
 -- the years of the losses with building destroyers in sight ({434, 438})
 local function loss_years(L)
   local ys, seen = {}, {}
@@ -1635,6 +1821,8 @@ function KP.done(K, k, g, t, how)
   local L = g.name and losses(K, g.name)
   st.rep[name] = {t = t, k = k, fp = {g.fp[1], g.fp[2], g.fp[3], g.fp[4], g.fp[5], g.fp[6]},
                   n = L and int(L.n) or 0, how = how}
+  -- BUG-109: the way in beside a closure the keeper built is looked at by the entrance check (KP.extend, gates_pass)
+  if how == 'wall + door' and CFG.ramp_rounds > 0 then st.rep[name].ex, st.rep[name].sd = {n = 0}, t end
   st.gq[k], st.perim[k], dirty = nil, nil, true
   perim_count()
   K.log('info', 'seal: bridge %s at %s is replaced (%s): no gate any more', name, k, how)
@@ -1666,6 +1854,15 @@ local function gates_pass(K, t, why)
     if piece_state(r.k, {k = 'bridge', fp = r.fp}) == 'ok' then
       st.rep[name], dirty = nil, true
       K.log('info', 'seal: bridge %s stands again on its footprint: no longer replaced', name)
+    end
+  end
+  if quiet_peace(K) then                              -- BUG-109: the way in beside a replaced bridge's closure
+    for _, name in ipairs(sorted_keys(st.rep)) do
+      local r = st.rep[name]
+      if r.ex then
+        spend(4)
+        if not KP.extend(K, name, r, t) then r.ex, r.sd, r.sq, dirty = nil, nil, nil, true end
+      end
     end
   end
   if not next(st.gq) then return out, projs, reps end
@@ -3070,13 +3267,14 @@ local function rate(K, au, name, lvl, t)
   local hn, hat = hostile_in(K, name, t)
   if hn > 0 then return false, hostile_txt(hn, hat), true end
   if a.reach == 0 then return false, 'out of the citizens\' reach' end
-  if lvl == 'BREACH' or lvl == 'DEAD' or lvl == 'WET' then
+  if lvl == 'BREACH' or lvl == 'DEAD' or lvl == 'WET' or lvl == 'FED' then
     if a.tiles < CFG.breach_tiles then return false, string.format('%d tiles<%d', a.tiles, CFG.breach_tiles) end
-    if lvl == 'WET' and not a.wet then
+    if (lvl == 'WET' or lvl == 'FED') and not a.wet then
       local nw = int(a.wells) or 0        -- BUG-073: built wells that are dry are named, not "no well"
       return false, string.format('no drink (drink %d<%d, %s)', int(a.drink) or 0, int(a.dneed) or 0,
                                   nw > 0 and string.format('%d well%s, none wet', nw, nw == 1 and '' or 's') or 'no well')
     end
+    if lvl == 'FED' and not a.fed then return false, string.format('food %d<%d', a.food, a.fneed) end
     return true
   end
   if lvl == 'HOLD' then return a.room == true, a.why end
@@ -3101,8 +3299,12 @@ end
 --      breach_days (one with its drink for longer)
 --   6. nil = no confinement; flee when there is danger, a BREACH or (BUG-031) a burrow the citizens went thirsty or
 --      hungry in (BUG-018: siege turns the alert off even in a lockdown, the citizens flee on their own)
+-- BUG-107 (Run 14 note 78: Kern+ food 1, drink 0 against Innen+ food 12100, drink 3156 that failed the area): FED
+-- (after SIEGE and SOFT): separated, reachable, no hostile, >= breach_tiles, the food and the drink held (a wet well
+-- covers the drink), the area and the beds waived; WET picks the best supplied burrow of the chain (food share first),
+-- not the first, and r.short says that even that one lacks food (it holds the citizens, REFUGE_FAIL has the counts).
 -- Returns {pick, want, why (the first refusal of an existing burrow), level, forced (the kept interior's own failure),
--- danger, flee, dry (a refusal for thirst/hunger), rwhy (why the refuge was refused, BUG-031)}.
+-- danger, flee, dry (a refusal for thirst/hunger), rwhy (why the refuge was refused, BUG-031), short (BUG-107)}.
 local function choose(K, mode, want, hold)
   local kern, refuge = burrow_names(K)
   want = want or (mode == 'BREACH' and refuge or kern)
@@ -3111,28 +3313,48 @@ local function choose(K, mode, want, hold)
   local au = mem.audit and mem.audit.burrows
   if not au then r.pick = want; return r end              -- no audit yet (it runs at boot): as before
   local t = now_t(K)
-  local function try(name, lvl)
-    local ok, why, danger, dry = rate(K, au, name, lvl, t)
-    if ok then r.pick, r.level = name, lvl; return true end
+  local chain, seen = {}, {}
+  for _, n in ipairs({want, kern, CFG.interior, refuge}) do
+    if not seen[n] then seen[n] = true; chain[#chain + 1] = n end
+  end
+  local function refused(name, why, danger, dry)
     if danger then r.danger = true end
     if dry then r.dry = true; r.dwhy = r.dwhy or (name .. ': ' .. tostring(why)) end
     if not r.why and au[name] and au[name].exists then r.why = name .. ': ' .. tostring(why) end
     if name == refuge and au[name] and au[name].exists then r.rwhy = name .. ': ' .. tostring(why) end
+  end
+  local function try(name, lvl)
+    local ok, why, danger, dry = rate(K, au, name, lvl, t)
+    if ok then r.pick, r.level = name, lvl; return true end
+    refused(name, why, danger, dry)
+    return false
+  end
+  -- BUG-107 (Run 14 note 78): of the chain's burrows that pass `lvl`, the best supplied one (RF.score), not the first:
+  -- the chain order puts Kern+ before Innen+, and Kern+ with a well and food 1 passed the drink-only WET level
+  local function try_best(lvl)
+    local best, bs
+    for _, n in ipairs(chain) do
+      local ok, why, danger, dry = rate(K, au, n, lvl, t)
+      if ok then
+        local sc = RF.score(au[n])
+        if not bs or sc > bs then best, bs = n, sc end
+      else refused(n, why, danger, dry) end
+    end
+    if best then r.pick, r.level = best, lvl; return true end
     return false
   end
   local bwin = breach_open(K, t)
   local rwet = au[refuge] ~= nil and au[refuge].wet == true      -- Run 11: its drink frees it from the window
   local held_refuge = want == refuge and (mode == 'BREACH' or st.swap ~= nil)
   if held_refuge and try(refuge, 'WET') then return r end
-  local chain, seen = {}, {}
-  for _, n in ipairs({want, kern, CFG.interior, refuge}) do
-    if not seen[n] then seen[n] = true; chain[#chain + 1] = n end
-  end
   for _, lvl in ipairs({'SIEGE', 'SOFT'}) do
     for _, n in ipairs(chain) do if try(n, lvl) then return r end end
   end
+  -- BUG-107: a burrow that holds the food and the drink but lacks the area or the beds beats one that lacks the food
+  -- or the drink (the lockdown's HOLD level takes Innen+ whatever it lacks, so this comes first)
+  if try_best('FED') then return r end
   if hold and try(CFG.interior, 'HOLD') then r.forced = au[CFG.interior].why; return r end
-  for _, n in ipairs(chain) do if try(n, 'WET') then return r end end
+  if try_best('WET') then r.short = not au[r.pick].fed; return r end
   if r.danger or mode == 'BREACH' then
     if bwin or rwet then
       if try(refuge, 'BREACH') then return r end
@@ -3156,7 +3378,7 @@ local function publish(K)
   local r = (mem.keep_sig and FIGHT[mode] and mem.keep_r) or choose(K, mode == 'PEACE' and 'ALERT' or mode, nil, held(K))
   local au = mem.audit and mem.audit.burrows or {}
   local a = r.pick and au[r.pick]
-  local ok = r.pick ~= nil and r.pick == r.want
+  local ok = r.pick ~= nil and r.pick == r.want and not r.short       -- BUG-107: a pick short of food passed no audit
   local why = ok and '' or (r.why or '')
   if r.flee then why = 'flee: ' .. why end
   mem.pub = {want = trunc(r.want, 24), burrow = trunc(r.pick or '', 24), tiles = a and a.tiles or 0,
@@ -3202,7 +3424,7 @@ end
 -- gone (the burrow is missing), dry (seal.dry: siege found them dehydrating or starving there, its fight mark),
 -- unseparated (an opening reaches it; the refuge keeps the dead-end tolerance, dead_gap), breached (a visible hostile
 -- stands in it), unreachable, window (a refuge without drink after breach_days)
-local function leave_why(K, au, cur, refuge, t)
+local function leave_why(K, au, cur, refuge, t, r)
   local a = au[cur]
   if not (a and a.exists) then return 'gone', 'missing' end
   local dw = dry_why(cur, a)
@@ -3215,6 +3437,15 @@ local function leave_why(K, au, cur, refuge, t)
   if cur == refuge and not a.wet and not breach_open(K, t) then
     return 'window', string.format('no drink, and the %d days without counts are spent', rcfg(K).breach_days)
   end
+  -- BUG-107 (Run 14 note 78): the burrow the alert holds lacks food or drink (below the SIEGE level's need) while the
+  -- free pick has both: leave it before the citizens go thirsty there (seal.dry marks it only then). Never the refuge: its
+  -- days without counts are the deep defense's own plan (the 'window' reason ends them)
+  local pa = r and r.pick and r.pick ~= cur and au[r.pick]
+  local sw = rcfg(K).supply_switch
+  if pa and pa.fed and a.fed == false and cur ~= refuge and sw > 0 and RF.under(a, sw) then
+    return 'supply', string.format('%s is under %d%% of its food or drink (%s) and %s has both (%s)', cur, sw, RF.txt(a),
+                                   r.pick, RF.txt(pa))
+  end
 end
 
 -- the switch rule on choose's answer r (a fight, the alert sounding on `cur`, r.pick another burrow or none): a move
@@ -3222,7 +3453,7 @@ end
 -- (REFUGE_SWITCH, B, once per switch; kern.log), anything else keeps `cur` (r.level KEEP, r.kept = the free pick;
 -- kern.log once per pair)
 local function fight_rule(K, r, cur, refuge, au, t)
-  local key, txt = leave_why(K, au, cur, refuge, t)
+  local key, txt = leave_why(K, au, cur, refuge, t, r)
   local mode = K.mode()
   if not key and r.pick ~= refuge then
     r.kept = {pick = r.pick, level = r.level, flee = r.flee, why = r.why}
@@ -3303,7 +3534,21 @@ function M.alert_burrow(K, mode, default, hold, cur)
   -- BUG-011: a lockdown without a usable interior burrow paints one now (at most once a day; scan, paint and the
   -- audit after it run as urgent jobs), so the next ask confines instead of leaving the whole fort open
   local tail
+  local pa = pick and au and au[pick]
+  local others                                     -- BUG-107: the other candidates' counts, for the text and d.sup
+  if pa and (r.level == 'FED' or r.short) then
+    local o = {}
+    for _, n in ipairs({want, kern, CFG.interior, refuge}) do
+      if n ~= pick and au[n] and au[n].exists and not o[n] then o[n] = true; o[#o + 1] = n .. ' ' .. RF.txt(au[n]) end
+    end
+    others = table.concat(o, '; ')
+  end
   if forced then tail = string.format('; %s kept for the lockdown although %s', CFG.interior, forced)
+  elseif r.level == 'FED' then
+    tail = string.format('; %s has the food and drink (%s) but not the area or beds: confining to it', pick, RF.txt(pa))
+  elseif r.short then
+    tail = string.format('; no burrow has its food and drink: confining to the best supplied, %s (%s)%s', pick, RF.txt(pa),
+                         others ~= '' and ('; ' .. others) or '')
   elseif r.level == 'BREACH' or r.level == 'DEAD' then
     if pick ~= want then
       tail = string.format('; %s is %s: no drink, food or bed counts for %d days', pick,
@@ -3333,13 +3578,16 @@ function M.alert_burrow(K, mode, default, hold, cur)
              .. itail .. dtail
     elseif ipaint then tail = itail end
   end
-  if pick ~= want and why and not keep then
+  -- BUG-107: a pick short of food or drink with no better burrow is reported although it is the wanted one
+  local lacking = r.short and pick == want and why and not keep
+  if (pick ~= want or lacking) and why and not keep then
     -- BUG-008: once per episode, again only when the refused burrow, the fallback or the reason changed, and then
     -- not before max(1 game day, 60 s wall clock) (util/cadence; the unconditional daily repeat was 3 s at timestream)
     local ids = {want .. '>' .. tostring(pick)}
     -- (BUG-049: a hostile that moves inside the refuge is no news: the position and the count stay out of the token)
     local cause = why:gsub(' at %-?%d+,%-?%d+,%-?%d+', ''):gsub(' %(%d+ hostiles%)', '')
-    local toks, now = {trunc(cause, 60), forced and 'forced' or (r.flee and 'flee' or (r.level or ''))}, K.now()
+    local toks, now = {trunc(cause, 60), forced and 'forced' or (r.flee and 'flee' or (r.level or '')) ..
+                       (r.short and '+short' or '')}, K.now()
     -- (no separated burrow is news that goes out at once: the alert is switched off)
     local o = r.flee and {ticks = 0, wall_s = 0} or {ticks = DAY, wall_s = 60}
     if CAD.due(st.refuge_rec, now, ids, toks, o) then
@@ -3356,10 +3604,12 @@ function M.alert_burrow(K, mode, default, hold, cur)
              {burrow = want, fallback = pick or '', why = trunc(why .. (tail or ''), 120), tiles = a and a.tiles or 0,
               inside = a and a.inside or 0, mode = mode, level = r.level, flee = r.flee and 1 or 0,
               open = ws and ws.exp and ws.open or nil, fix = fix and trunc(fix, 200) or nil,
-              dry = r.dry and 1 or nil, hostile = hn > 0 and hn or nil, at = hat})
+              dry = r.dry and 1 or nil, hostile = hn > 0 and hn or nil, at = hat,
+              sup = pa and (r.level == 'FED' or r.short) and trunc(pick .. ' ' .. RF.txt(pa) .. (others and others ~= '' and
+                    ('; ' .. others) or ''), 120) or nil})
     end
   end
-  if pick == want and st.refuge_rec then st.refuge_rec, dirty = nil, true end   -- the episode ended
+  if pick == want and not r.short and st.refuge_rec then st.refuge_rec, dirty = nil, true end   -- the episode ended
   mem.keep_r = keep and r or nil
   publish(K)
   save(K)
@@ -3375,8 +3625,8 @@ function M.alert_burrow(K, mode, default, hold, cur)
     brief = (why and ('REFUGE_FAIL ' .. want) or (want .. ' missing')) .. (forced and ', lockdown fallback' or '')
     if r.flee and r.dry and not r.danger and mode ~= 'BREACH' then brief = brief .. ', alert off (no drink/food in it)'
     elseif r.flee then brief = brief .. ', citizens flee'
-    elseif r.level == 'BREACH' or r.level == 'DEAD' or r.level == 'WET' then
-      brief = brief .. (r.level == 'DEAD' and ', dead end ' or ', ') .. tostring(pick)
+    elseif r.level == 'BREACH' or r.level == 'DEAD' or r.level == 'WET' or r.level == 'FED' then
+      brief = brief .. (r.level == 'DEAD' and ', dead end ' or ', ') .. tostring(pick) .. (r.short and ' (short)' or '')
     elseif tail and not forced then
       brief = brief .. ', ' .. CFG.interior .. ((ia and ia.exists) and ' too small' or ' missing')
     end
@@ -4681,7 +4931,8 @@ function M.init(K)
   p = type(p) == 'table' and p or {}
   st = {v = 2, perim = {}, cut = {}, req = {}, open = {}, gq = {}, ans = {}, ansv = {}, rep = {}, hostile = int(p.hostile),
         painted = int(p.painted), flag_sig = type(p.flag_sig) == 'string' and p.flag_sig or nil, pep = int(p.pep),
-        bsince = int(p.bsince), sup_rec = type(p.sup_rec) == 'table' and p.sup_rec or nil}
+        bsince = int(p.bsince), sup_rec = type(p.sup_rec) == 'table' and p.sup_rec or nil,
+        floor_rec = type(p.floor_rec) == 'table' and p.floor_rec or nil}
   -- BUG-031 (b): the burrows the citizens went thirsty or hungry in during this episode
   for name, d in pairs(type(p.dry) == 'table' and p.dry or {}) do
     if type(name) == 'string' and type(d) == 'table' and int(d.t) then
@@ -4727,7 +4978,17 @@ function M.init(K)
     for i = 1, 6 do ok = ok and type(fp) == 'table' and int(fp[i]) ~= nil end
     if ok then
       st.rep[name] = {t = int(v.t) or 0, k = v.k, fp = {fp[1], fp[2], fp[3], fp[4], fp[5], fp[6]}, n = int(v.n) or 0,
-                      how = v.how == 'walled' and 'walled' or 'wall + door'}
+                      how = v.how == 'walled' and 'walled' or 'wall + door', sd = int(v.sd), sq = int(v.sq)}
+      local ex = type(v.ex) == 'table' and v.ex or nil           -- BUG-109: the second closure stage under way
+      if ex and int(ex.n) then
+        local cells = {}
+        for _, c in ipairs(type(ex.cells) == 'table' and ex.cells or {}) do
+          if type(c) == 'table' and int(c[1]) and int(c[2]) and int(c[3]) and (c[4] == 'Cw' or c[4] == 'd')
+             and #cells < CFG.seal_max then cells[#cells + 1] = {int(c[1]), int(c[2]), int(c[3]), c[4]} end
+        end
+        st.rep[name].ex = {n = int(ex.n), t = int(ex.t), proj = type(ex.proj) == 'string' and ex.proj:sub(1, 40) or nil,
+                           cells = #cells > 0 and cells or nil}
+      end
     end
   end
   if type(p.swap) == 'table' and int(p.swap.since) then st.swap = {since = int(p.swap.since)} end
@@ -5145,10 +5406,13 @@ M.inspect.defense = function(K)
     local L = losses(K, o.name)
     if L or st.rep[o.name] then
       local g = waits[o.name] and st.gq[waits[o.name]]
+      local rp = st.rep[o.name]
       o.lost = L
       o.rebuild = {stop_after = stop, vanish_after = van, ans = st.ans[o.name], how = KP.how(L),
-                   state = st.rep[o.name] and 'replaced' or (held[o.name] and 'closing')
-                           or (g and (g.proj and 'queued' or 'waits')) or 'auto', proj = g and g.proj or nil}
+                   state = rp and 'replaced' or (held[o.name] and 'closing')
+                           or (g and (g.proj and 'queued' or 'waits')) or 'auto', proj = g and g.proj or nil,
+                   -- BUG-109: the second closure stage beside the wall + door (rounds queued, its project, tiles out)
+                   follow = rp and rp.ex and {n = rp.ex.n, proj = rp.ex.proj, tiles = rp.ex.cells and #rp.ex.cells or 0} or nil}
     end
   end
   local parts = {}
@@ -5204,7 +5468,8 @@ M.inspect.refuge = function(K, args)
                sep = s == nil and -1 or (s.exp and 0 or 1), open = s and s.exp and s.open or nil,
                exp = s and s.exp and s.n or nil, steps = s and s.exp and s.d or nil, reach = a.reach, why = why,
                fix = s and s.exp and s.fix ~= '' and s.fix or nil,                  -- BUG-031: seal at=...
-               dry = dry_why(name, a), store = a.store}                            -- FR-69: the drink store
+               dry = dry_why(name, a), store = a.store,                           -- FR-69: the drink store
+               fed = a.fed and 1 or 0, fneed = a.fneed, dneed = a.dneed}          -- BUG-107: the food/drink cover
   end
   local choice = {}
   local function ch(m, hold)

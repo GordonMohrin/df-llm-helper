@@ -67,8 +67,10 @@ run(2400 + 8400 + 1000)
 expect('PEACE')
 assert(S.bstate(W, 'O1') == 'down', 'lowered again in PEACE')
 assert(math.floor(df.global.enabler.fps) == 250 and W.ts_fps == 500, 'clock free')
--- 4. three deaths in a day, nobody acks: after ack_timeout_s the kernel holds the clock itself (LOCKDOWN)
+-- 4. three deaths in a day, nobody acks: after ack_timeout_s the kernel holds the clock itself (LOCKDOWN). BUG-108: at
+-- threat 0 that is the old rule only with reflex.inner empty (by default an inner cause only wakes the player)
 do
+  K.cfg.reflex = {v = 2, inner = {}}
   local prev = W.ms_per_frame
   local st = care
   st.step = function(KK)

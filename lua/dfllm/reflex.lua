@@ -120,6 +120,10 @@ M.CFG = {
   confine = {max_days = 10, harmless_size = 20000, lone_max = 2, offer_days = 1, need_thirst = 40000, need_hunger = 60000},
   defaults = {ARRIVAL = {'clock', 'gates', 'doors', 'alert'}, INTRUDER = {'clock', 'gates', 'doors', 'alert'},
               PREDATOR = {'clock', 'alert'}, DEATHS_3PLUS = {'clock'}, NO_DEPOT = {}},
+  -- BUG-108 (Run 14 note 88): interrupt types whose cause lies inside the fort (patients, moods, a curse, a tantrum).
+  -- Unacked at threat 0 they only wake the player: no default (no clock clamp, no civ alert); with a visible
+  -- hostile, or no fresh reading, their default applies as before. {} = the old rule for every type.
+  inner = {'DEATHS_3PLUS'},
 }
 M.ARM = 2400               -- ticks after the last trigger before the quiet clock may start (threat's armed window)
 M.KEEP = 20                -- interrupts kept for alarm.txt and the ack bookkeeping
@@ -166,9 +170,17 @@ local function save(K) if dirty then K.persist.set('m.reflex', st); dirty = fals
 ---------------------------------------------------------------- config (config/reflex.json via K.cfg.reflex)
 local function cfg(K)
   local c = {hold_quiet_days = M.CFG.hold_quiet_days, ack_timeout_s = M.CFG.ack_timeout_s,
-             predator_near = M.CFG.predator_near, lockdown_near = M.CFG.lockdown_near, defaults = {}}
+             predator_near = M.CFG.predator_near, lockdown_near = M.CFG.lockdown_near, defaults = {}, inner = {}}
   for t, acts in pairs(M.CFG.defaults) do c.defaults[t] = acts end
+  for _, t in ipairs(M.CFG.inner) do c.inner[t] = true end
   local r = type(K.cfg.reflex) == 'table' and K.cfg.reflex or {}
+  if type(r.inner) == 'table' then                       -- BUG-108: a list of interrupt types; a bad entry keeps the default
+    local ok, l = true, {}
+    for _, t in ipairs(r.inner) do
+      if type(t) == 'string' and M.CFG.defaults[t] then l[t] = true else ok = false end
+    end
+    if ok then c.inner = l end
+  end
   local q, a = int(r.hold_quiet_days), int(r.ack_timeout_s)
   if q and q >= 0 and q <= 30 then c.hold_quiet_days = q end
   if a and a >= 5 and a <= 3600 then c.ack_timeout_s = a end
@@ -2105,7 +2117,20 @@ local function need_step(K, h, now)
   if end_it then release(K, now, 'need', pic, who) end
 end
 
--- ack timeout: an interrupt unacked for ack_timeout_s gets its type's lockdown default, and LOCKDOWN (A) says so
+-- BUG-108 (Run 14 note 88): threat 0 = a fresh census that shows no hostile at all (not one far away, none inside, no
+-- invader) and a threat scan that is not armed. Anything else (a stale reading, no census) is not threat 0.
+local function threat_zero(K)
+  local h = K.census.h
+  if type(h) ~= 'table' or K.now().tick - (int(h.tick) or -1e9) > M.FRESH then return false end
+  if (int(h.vis) or 0) > 0 or (int(h.inv) or 0) > 0 or (int(h.inside) or 0) > 0 then return false end
+  local ok, armed = K.call('threat', 'armed')
+  return not (ok and armed == 1)
+end
+
+-- ack timeout: an interrupt unacked for ack_timeout_s gets its type's lockdown default, and LOCKDOWN (A) says so.
+-- BUG-108: an inner-cause interrupt (cfg inner: DEATHS_3PLUS) at threat 0 gets none: the event woke the player, and a
+-- clock clamp or civ alert for a cause no enemy shares (patients, moods, a curse) only slows the fort and sends the
+-- carers away from the hospital
 local function ack_step(K, now)
   local c = cfg(K)
   local ms = K.now().ms
@@ -2124,6 +2149,10 @@ local function ack_step(K, now)
               r.n, r.type, age, r.u, far, c.lockdown_near)
       elseif #acts == 0 then
         K.log('info', 'reflex: interrupt #%d %s unacked for %d s; no default action', r.n, r.type, age)
+      elseif c.inner[r.type] and threat_zero(K) then
+        r.done = 2
+        K.log('info', 'reflex: interrupt #%d %s unacked for %d s; inner cause at threat 0: no lockdown default, no ' ..
+              'civ alert (reflex.inner)', r.n, r.type, age)
       else
         local parts, d = engage(K, 'unacked', 'unacked:' .. r.type, acts, now)
         d.why, d.n, d.type = 'ack_timeout', r.n, r.type

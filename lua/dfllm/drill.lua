@@ -23,9 +23,17 @@
 -- would call him home); merchants standing on the map and the runner's phase hold nothing. The phase gate P5 stood for
 -- 'stage 3 is built'; what a drill needs is what it uses: bridges to raise, squads to measure (soldiers) and the
 -- barracks they stand in (military.barracks).
+-- BUG-110 (Run 14 note 87: 320 drills by hand and ~5 automatic retries a year, every one 'failed: raised -1' because
+-- the fort had no O1 or B1; each pulled everybody into Kern+ and clamped the FPS): a drill raises the outer AND the
+-- inner bridge, so with either role missing (readiness' no_outer / no_inner; a bridge seal replaced by wall + door is
+-- no gate) `drill.start`, the inbox verb and the automatic start all refuse with NOBRIDGE before they touch the mode:
+-- no alert, no recall, no FPS change. The refusals are counted (state ready.dref, once a game day) and logged once a day.
 local geom = require('dfllm.util.geom')
+local CAD = require('dfllm.util.cadence')
 
 local M = {name = 'drill', every = {ticks = 600}, verbs = {}, on = {}}
+M.NOBRIDGE = 'no lever-linked bridge: build fortcore stage 2/3 first'   -- the fixed refusal sentence
+M.DAY = 1200
 
 M.MEASURE = 1200         -- KPIs at T+1,200
 M.HOME_WINDOW = 100      -- outside citizens sampled at T+1,100: who got closer to the entry since then ...
@@ -61,6 +69,36 @@ local function sorted_keys(t)
   table.sort(r)
   return r
 end
+
+-- BUG-110: 'no_outer', 'no_inner' or 'no_outer,no_inner' when the manifest has no (standing) bridge of that role, else nil
+function M.gap(K)
+  local man = K.manifest()
+  local okr, rep = K.call('seal', 'replaced')
+  rep = okr and type(rep) == 'table' and rep or {}
+  local roles = {}
+  for name, b in pairs(type(man.bridges) == 'table' and man.bridges or {}) do
+    if type(b) == 'table' and type(b.fp) == 'table' and #b.fp == 6 and not rep[name] then roles[b.role or '?'] = true end
+  end
+  local g = {}
+  if not roles.outer then g[#g + 1] = 'no_outer' end
+  if not roles.inner then g[#g + 1] = 'no_inner' end
+  return #g > 0 and table.concat(g, ',') or nil
+end
+
+-- BUG-110: a refused drill is counted (st.ref); st.refp, what state shows, moves once a game day (and at most once a
+-- minute of wall clock, util/cadence), and so does the log line
+local function note_refusal(K, gap)
+  st.ref = (st.ref or 0) + 1
+  local now = K.now()
+  if CAD.elapsed(st.rrec, now, M.DAY, 60) then
+    st.rrec, st.refp = CAD.mark(now, {}, {}), st.ref
+    K.log('info', 'drill: refused (%s): %s (%d refused so far)', gap, M.NOBRIDGE, st.ref)
+  end
+  save(K)
+end
+
+-- public (readiness -> state ready.dref): drills refused for want of a bridge, as of the last game day's count
+function M.refused(K) return st.refp or 0 end
 
 local function gate_bridges(man)
   local r = {}
@@ -170,6 +208,11 @@ end
 -- public (CONTRACTS §7): PEACE only, no danger, no trade session under way, one drill at a time
 function M.start(K, why)
   if st.t0 then return false, 'a drill is running' end
+  local gap = M.gap(K)
+  if gap then
+    note_refusal(K, gap)
+    return false, M.NOBRIDGE, {gap = gap, refused = st.ref}
+  end
   local d = danger(K)
   if d then
     if d:sub(1, 5) == 'mode ' then return false, 'drill only in PEACE (now ' .. K.mode() .. ')' end
@@ -319,6 +362,8 @@ local function check(K, now)
     return nil, (newest and newest.tick >= st.try) and 'just drilled' or 'aborted'
   end
   if #gate_bridges(K.manifest()) == 0 then return nil, 'no bridges' end
+  local gap = M.gap(K)                                      -- BUG-110: both roles, or no drill at all
+  if gap then return nil, gap end
   local okm, mk = K.call('military', 'kpi')
   if not okm or type(mk) ~= 'table' then return nil, 'military?' end
   if (mk.soldiers or 0) == 0 then return nil, 'no soldiers' end
@@ -355,7 +400,8 @@ end
 function M.init(K)
   local p = K.persist.get('m.drill')
   p = type(p) == 'table' and p or {}
-  st = {v = 2, t0 = int(p.t0), why = p.why, try = int(p.try), siege = int(p.siege)}
+  st = {v = 2, t0 = int(p.t0), why = p.why, try = int(p.try), siege = int(p.siege), ref = int(p.ref),
+        rrec = type(p.rrec) == 'table' and p.rrec or nil, refp = int(p.refp)}
   local d = K.persist.get('drill')
   rec = {v = 2, streak_fail = 0, last = {}}
   if type(d) == 'table' then

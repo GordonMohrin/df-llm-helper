@@ -91,6 +91,11 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
                      "(walls); tell Gordon",
         "REFUGE_FAIL": "dfllm cmd inspect '{\"what\":\"refuge\"}'; dfllm cmd bp.place tpl=seal site=S1 at=refuge "
                        "(its stair hatch and the line's tiles); next plan: refuge pieces first",
+        # BUG-107: a potential refuge holds less food/drink than refuge.floor_pct % of the siege need; d.cmd is the existing
+        # command that builds the store (stockroom in Kern+, refuge_drink in the refuge); d.total_f/total_d: if the whole fort
+        # holds too little, make food/drink first
+        "REFUGE_STOCK": "dfllm cmd inspect '{\"what\":\"refuge\"}'; send the line's d.cmd (stockroom / refuge_drink) when the "
+                        "fort's own stock covers it, else food and drink first; tell Gordon",
         "HOSPITAL_DRY": "dfllm cmd inspect '{\"what\":\"water_sources\"}'",
         # BUG-034: the kernel already removed the dry hospital's zones; water (a cistern) comes before a new hospital
         "HOSPITAL_REMOVED": "tell Gordon; dfllm cmd inspect '{\"what\":\"water_sources\"}'; next plan: water before "

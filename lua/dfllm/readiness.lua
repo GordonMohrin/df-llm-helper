@@ -522,6 +522,8 @@ local function evaluate(K, why)
   rt.worn = last and int(last.worn) or (kpi and kpi.worn) or 0   -- worn measured by the last drill
   local okd, hold = K.call('drill', 'hold')
   rt.dhold = okd and type(hold) == 'string' and cut(hold, 24) or nil
+  local okf, nref = K.call('drill', 'refused')                -- BUG-110: drills refused for want of a bridge
+  rt.dref = okf and int(nref) and int(nref) > 0 and int(nref) or nil
   local route = route_of(st.audit)
   rt.route = route and cut(route, 60) or nil
   if lvl ~= st.lvl then
@@ -805,6 +807,7 @@ function M.state(K)
     r.ents = e
   end
   if rt.dhold then r.dhold = rt.dhold end                     -- why no automatic drill starts (drill.hold)
+  if rt.dref then r.dref = rt.dref end                        -- BUG-110: drills refused (no O1 / B1), counted once a day
   if rt.route then r.route = rt.route end                     -- the bypass / refuge route the last audit names
   if rt.office then r.office = rt.office end                  -- BUG-055: the vacant office R0 `office` names
   return {ready = r, pop = {cap = M.cap(K), gate_cap = rt.gate_cap or M.CAPS[0]}}
