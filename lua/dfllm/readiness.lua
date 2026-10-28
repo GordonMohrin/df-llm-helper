@@ -1,6 +1,6 @@
 -- readiness (WP6): levels R0-R3 (DESIGN §5.4) and the ONLY max-pop writer (act.popcap ->
 -- `pop-control set max-pop N`, pop-control.lua:52-63). Growth is earned:
---   R0  cap 55
+--   R0  cap 100 (Gordon's D-01 = B, 2026-10-24; was 55; option A plans still say 55 through plan.policy.pop_ceiling)
 --   R1  "sealed": worst-case audit passes (inbox `audit` from bp.topo.audit), Kern+ and Tiefe+ exist,
 --       an outer and an inner bridge exist and every manifest bridge has 2 linked levers
 --   R2  R1 + a drill passed <= 100,800 ticks ago (and after the last siege), soldiers >= D-12 share
@@ -607,7 +607,8 @@ end
 -- readiness ceiling for a level and the binding limit
 function M.ceiling(K, lvl)
   local c, why = M.CAPS[lvl] or M.CAPS[0], 'R' .. lvl
-  if lvl == 2 then c = math.min(c, M.SIEGE_TRIGGER - 5) end
+  -- BUG-132: the siege-trigger ceiling of R2 never falls below the R1 cap (R0..R2 100: reaching R2 froze the cap at 75)
+  if lvl == 2 then c = math.max(math.min(M.CAPS[1] or c, c), math.min(c, M.SIEGE_TRIGGER - 5)) end
   local pc = plan_num(K, 'policy', 'pop_ceiling', nil)
   if pc and pc < c then c, why = pc, 'plan' end
   local ib = inbox_cap(K)

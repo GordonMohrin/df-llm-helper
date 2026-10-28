@@ -153,7 +153,8 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose y.json, fix its ERROR lines, plan che
                       "keep another way"}
 # FR-86: follow applied a minimal plan itself after plan.stale_apply_years years without a `plan apply`
 NEXT["PLAN_AUTO"] = ("tell Gordon (nobody approved a plan for years; follow applied the minimal one: seal, tombs, hospital, "
-                     "food/drink, refuge, no star phase); then dfllm plan propose y.json, plan check, plan apply replaces it")
+                     "food/drink, refuge, no star phase; after each quiet year one phase more, BUG-132; `ERROR held back` "
+                     "= what it left out: fix those); then dfllm plan propose y.json, plan check, plan apply replaces it")
 SUPERVISE_EVERY_S = 15                         # supervise.json read cadence
 SUPERVISE_FRESH_S = 3600                       # alerts logged longer ago than this never wake
 CLICK_KEY = "needs_click"                      # supervise.CLICK_KEY (K2): the alarm for a save only a human can load now
@@ -743,7 +744,9 @@ class Follower:
                 ref = plan["year"]
             else:
                 ref = self.plan_auto.setdefault("first_y", year)
-            if year - ref < years or self.plan_auto.get("tried_y") == year:
+            # BUG-132: under the minimal plan a quiet game year is enough: the next automatic plan raises one phase
+            rise = year - ref < years and plan_mod.raise_due(self.dir, state, plan)
+            if (year - ref < years and not rise) or self.plan_auto.get("tried_y") == year:
                 return
             self.plan_auto["tried_y"] = year           # one try a game year, whatever comes out
             self.save_state()
@@ -752,7 +755,12 @@ class Follower:
                 self._fail("minimal plan", "; ".join(errs[:3]), now)
                 return
             self.plan_auto["applied_y"] = year
-            self._synth("PLAN_AUTO", f"no plan applied since y{ref}, now y{year}: follow applied the minimal plan ({msg})", now)
+            if rise:
+                self._synth("PLAN_AUTO", f"minimal plan y{ref}, a quiet year, now y{year}: follow applied the next "
+                                         f"automatic plan ({msg})", now)
+            else:
+                self._synth("PLAN_AUTO", f"no plan applied since y{ref}, now y{year}: follow applied the minimal plan "
+                                         f"({msg})", now)
         except Exception as ex:                        # noqa: BLE001 - the plan check must never stop the follower
             self._fail("minimal plan", f"{type(ex).__name__}: {ex}", now)
 

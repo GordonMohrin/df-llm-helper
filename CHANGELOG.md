@@ -1,5 +1,25 @@
 # CHANGELOG dfpilot
 
+## The automatic plan raises one phase after a quiet year; the pop ceiling follows D-01 = B (100) (BUG-132, 2026-10-28; offline, live-untested)
+- **Why:** goal audit of Run 14 site90: PLAN_AUTO (FR-86, y715) applied a minimal plan with phase_target P0, 0 builds and pop_ceiling 55, so G2 was green
+  while nothing moved; and although Gordon answered D-01 = B with cap 100, `status` said `cap 55 gate 55` (plan.R_CAPS still 55, the kernel's no-plan
+  default 55, and the R2 ceiling 75 would have lowered the cap again).
+- **What changed:** (1) plan.py `raise_due` (minimal plan >= 1 game year old, PEACE, no siege/breach in the last year), `next_phase` (never a star
+  phase), `auto_plan`: `propose(upto=next)` with every build it drafts and the `add {...}` repairs; ERRORs: the largest error-free subset in draft order,
+  else the plain minimal plan, and the full draft's ERRORs go into the message (`N ERROR held back: ...`); `minimal_plan`/`apply_minimal` use it.
+  wake.py `_check_plan` calls it after one quiet year under a minimal plan (once per game year; else after `stale_apply_years` as before); PLAN_AUTO
+  says `a quiet year` and the raise `Pn -> Pn+1`. (2) `R_CAPS = {0: 100, 1: 100, 2: 100, 3: 250}` (D-01 = B, = readiness.lua M.CAPS), `R_CAPS_A`
+  55/55/75 for D-01 = A; kern.lua `with_defaults` takes the decisions (no plan: option B, ceiling 100; A: 55); readiness R2 ceiling never below the R1
+  cap. RULES §5 YEAR_REVIEW row and §8 R0 row edited in place. Tests that pinned the 55 ceiling under D-01 = B were updated (test_cli_plan,
+  test_wp6_files, test_wp6_kern.lua).
+- **Effective cap (D-01 = B):** min(readiness cap 100 at R0..R2 / 250 at R3, plan pop_ceiling, inbox popcap.lower, FR-70 hold); a falling ceiling
+  holds at min(last cap, citizens), outside PEACE it never rises. A plan applied before this keeps 55 until the next apply.
+- **Contracts / config:** none (no event, verb or state key; the PLAN_AUTO text only).
+- **Tests (fail on dec5132):** tests/test_bug132_plan_raise.py (6), tests/lua/test_bug132_cap.lua (2).
+- **Live check:** on a fort whose plan.json is the minimal one and a game year old without a siege, `follow` (auto) wakes `PLAN_AUTO ... a quiet year
+  ... Pn -> Pn+1`; plan.json shows phase_target one higher, `pop_ceiling` 100 and the next phase's builds; `status` shows `cap 100 gate 100` (or the
+  current population while the demotion freeze or the FR-70 hold applies); a `plan check` ERROR appears as `ERROR held back` in the wake.
+
 ## TIMELINE_RESET: a boot whose clock jumped back marks the discarded timeline; follow, events and brief drop it (BUG-121, 2026-10-28, note 101; offline, live-untested)
 - **Why:** Run 14 note 101: after the player loaded an older save, `events.jsonl` still held the events up to #29900 of the line he had left
   (ticks far ahead of the loaded clock) and `alarm.txt` its lockdown; `follow` replayed BREACH, INTRUDER and DEATHS_3PLUS of the abandoned line while

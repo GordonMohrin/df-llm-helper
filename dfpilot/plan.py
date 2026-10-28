@@ -21,7 +21,8 @@ from .cmd import (SAME, SEAL_AUDIT, WATER_NEAR, BpError, BpUnavailable, _moodabl
                   refuge_open, seal_openings, send, sites_snapshot, template_info, template_names, water_near, write_bp)
 from .cmd import SealClosed
 
-R_CAPS = {0: 55, 1: 55, 2: 75, 3: 250}    # DESIGN §5.4; R3 (>= 80) only with D-01 = B
+R_CAPS = {0: 100, 1: 100, 2: 100, 3: 250}  # D-01 = B (Gordon 2026-10-24): readiness.lua M.CAPS, baseline popcap.max_pop
+R_CAPS_A = {0: 55, 1: 55, 2: 75}           # D-01 = A: DESIGN §5.4 (R2 = siege trigger 80 - 5; no R3)
 OPTION_A_MAX = 75
 SUPPLY_MIN = {"drink_d": 170, "food_d": 60, "mood_stock": 10}
 BUILDS_PER_SEASON = 3                     # runner runs <= 3 projects at once
@@ -93,9 +94,11 @@ def load_decisions() -> dict:
 
 
 def level_cap(lvl: int, d01: str) -> int:
-    if lvl >= 3 and d01 == "B":
-        return R_CAPS[3]
-    return R_CAPS[max(0, min(lvl, 2))]
+    """The readiness cap of a level under D-01. BUG-132: with B (Gordon's answer) R0..R2 are 100 like the kernel's
+    readiness caps (its R2 siege-trigger ceiling never falls below R1), R3 250; A keeps 55/55/75."""
+    if d01 == "B":
+        return R_CAPS[max(0, min(lvl, 3))]
+    return R_CAPS_A[max(0, min(lvl, 2))]
 
 
 def load_phases(path: Path | None = None) -> dict | None:
@@ -1438,7 +1441,8 @@ def applied_builds(save_dir: Path, state: dict | None = None) -> set[tuple]:
 
 
 def propose(state: dict | None, phases: dict | None, prev: dict | None, decisions: dict | None = None,
-            tinfo: dict | None = None, applied: set | None = None, fort: dict | None = None) -> dict:
+            tinfo: dict | None = None, applied: set | None = None, fort: dict | None = None,
+            upto: str | None = None) -> dict:
     """Draft plan: phase_target = last phase before the next ★ phase; builds = `proj` deliverables of the
     phases up to it (a template with a `stage` param gets p.stage; stage >= 2 reuses the anchor: site 'same').
     Deliverables in `applied` (applied_builds) or in the previous plan (any year) are not drafted again.
@@ -1460,6 +1464,8 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     for p in plist:
         if p["id"] <= cur:
             continue
+        if upto is not None and p["id"] > upto:     # BUG-132: the automatic plan raises one phase at a time
+            break
         if p["approve"]:
             star = p["id"]
             break
@@ -1724,53 +1730,154 @@ def minimal_ok(b: dict) -> bool:
     return build_kind(b) in ("seal", "tombs", "supply") or b["tpl"] in MINIMAL_TPLS or _refuge_stage(b)
 
 
-def minimal_plan(save_dir: Path, state: dict | None, phases: dict | None = None, tinfo: dict | None = None,
-                 decisions: dict | None = None, tpls: list[str] | None = None) -> tuple[dict, list[str], list[str]]:
-    """(plan, errors, warnings) of the smallest plan that keeps the fort supplied and safe when nobody approves one: the
-    draft of `propose`, cut to the NEW builds that minimal_ok allows (applied builds keep their ids), phase_target = the
-    current phase (no star phase, no phase raise), the order libraries of the plan it replaces; then up to FIX_ROUNDS times `check`, and every repair
-    its ERRORs name (fixes_of) that minimal_ok allows is added to the current season, ahead of the other new builds.
-    Errors left after that are returned: the caller applies nothing."""
+RAISE_QUIET_Y = 1                         # BUG-132: game years without a siege or breach before the minimal plan rises a phase
+
+
+def raise_due(save_dir: Path, state: dict | None, prev: dict | None) -> bool:
+    """BUG-132 (Run 14 site90: the minimal plan of y715 kept P0 with 0 builds, G2 green and nothing moved): the applied plan
+    is the minimal one (FR-86), it is RAISE_QUIET_Y game years old or more, the fort is in PEACE and no siege or breach
+    (SIEGE_START/SIEGE_END/BREACH, MODE to SIEGE/BREACH) was logged in the last game year. Then the next automatic plan
+    proposes the next phase."""
     s = state or {}
-    prev = applied_plan(save_dir)
-    fort = fort_facts(save_dir, state)
-    doc = propose(state, phases if phases is not None else load_phases(), prev, decisions=decisions, tinfo=tinfo,
-                  applied=applied_builds(save_dir, state), fort=fort)
-    doc["phase_target"] = s.get("phase") or "P0"
-    doc["orders"] = copy.deepcopy((prev or {}).get("orders") or {"import": []})      # no new library, the old ones stay
-    drop = {(si, bi) for si, bi, b in new_builds(doc, prev) if not minimal_ok(b)}
-    for si, se in enumerate(doc["seasons"]):
-        se["build"] = [b for bi, b in enumerate(se["build"]) if (si, bi) not in drop]
+    year = (s.get("t") or {}).get("y")
+    if not is_minimal(prev) or not isinstance(year, int) or year - prev["year"] < RAISE_QUIET_Y or s.get("mode") != "PEACE":
+        return False
+    now = files.current_tick(save_dir)
+    if not isinstance(now, int):
+        return False
+    for e in files.iter_events_rev(save_dir, min_tick=now - schema.TICKS["YEAR"], max_tick=now):
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        if e.get("type") in SIEGE_EVENTS or (e.get("type") == "MODE" and d.get("to") in ("SIEGE", "BREACH")):
+            return False
+    return True
+
+
+def next_phase(phases: dict | None, cur: str) -> str | None:
+    """The phase after cur, None when there is none or it is a star phase (approve: never automatic)."""
+    later = sorted((p for p in (phases or {}).get("phases", []) if p["id"] > cur), key=lambda p: p["id"])
+    return later[0]["id"] if later and not later[0]["approve"] else None
+
+
+def _with_new(doc: dict, prev: dict | None, new: list[tuple[int, dict]]) -> dict:
+    """doc with its new builds replaced by `new` ((season, build), in order); the applied same-year builds stay."""
+    out = copy.deepcopy(doc)
     same = bool(prev) and prev.get("year") == doc["year"]
-    season = (s.get("t") or {}).get("season", 0)
+    for si, se in enumerate(out["seasons"]):
+        old = copy.deepcopy(prev["seasons"][si]["build"]) if same else []
+        se["build"] = old + [copy.deepcopy(b) for k, b in new if k == si]
+    return out
+
+
+def _fix_rounds(doc: dict, state, prev, fort, decisions, tp, season: int, ok) -> tuple[list[str], list[str]]:
+    """check, then add every repair its ERRORs name that ok() allows to the current season (ahead of the other new
+    builds), at most FIX_ROUNDS times. (errors, warnings) of the last check."""
+    same = bool(prev) and prev.get("year") == doc["year"]
     errs: list[str] = []
     warn: list[str] = []
-    tp = tpls if tpls is not None else templates()
     for _ in range(FIX_ROUNDS + 1):
         errs, warn = check(doc, state, decisions=decisions, tpls=tp, prev=prev, fort=fort)
         have = [(b["tpl"], b["site"], b.get("p") or {}) for se in doc["seasons"] for b in se["build"]]
-        add = [fx for fx in fixes_of(errs) if minimal_ok(fx) and (fx["tpl"], fx["site"], fx.get("p") or {}) not in have]
+        add = [fx for fx in fixes_of(errs) if ok(fx) and (fx["tpl"], fx["site"], fx.get("p") or {}) not in have]
         if not errs or not add:
             break
         base = len(prev["seasons"][season]["build"]) if same else 0
         for k, fx in enumerate(add):
             doc["seasons"][season]["build"].insert(base + k, fx)
+    return errs, warn
+
+
+def _subset(cand: dict, state, prev, fort, decisions, tp) -> tuple[dict, list[str]] | None:
+    """BUG-132: the largest error-free subset of cand's new builds, taken greedily in draft order (each build is kept
+    when the plan with it still checks without ERROR); None when not even the plan without new builds checks."""
+    kept: list[tuple[int, dict]] = []
+    best = None
+    for si, _, b in new_builds(cand, prev):
+        trial = _with_new(cand, prev, kept + [(si, b)])
+        te, tw = check(trial, state, decisions=decisions, tpls=tp, prev=prev, fort=fort)
+        if not te:
+            kept.append((si, b))
+            best = (trial, tw)
+    if best is None:
+        trial = _with_new(cand, prev, [])
+        te, tw = check(trial, state, decisions=decisions, tpls=tp, prev=prev, fort=fort)
+        best = None if te else (trial, tw)
+    return best
+
+
+def auto_plan(save_dir: Path, state: dict | None, phases: dict | None = None, tinfo: dict | None = None,
+              decisions: dict | None = None, tpls: list[str] | None = None) -> dict:
+    """The plan follow applies itself (FR-86, BUG-132): {doc, errs, warn, held, raised}.
+    Minimal: the draft of `propose`, cut to the NEW builds that minimal_ok allows (applied builds keep their ids),
+    phase_target = the current phase, the order libraries of the plan it replaces; then up to FIX_ROUNDS times `check`,
+    and every repair its ERRORs name that minimal_ok allows goes into the current season, ahead of the other new builds.
+    Raise (raise_due: the applied plan is minimal and a quiet year passed): the draft of `propose` for the next phase only
+    (never a star phase; every build it drafts: the refuge, seal at=audit, hospital and fortcore stages first, and every
+    repair its ERRORs name). When that draft checks with ERRORs, the error-free subset at the next phase (_subset) is
+    taken, else the minimal plan; `held` = the ERRORs of the full draft the applied plan does not have (the wake names
+    them). errs = ERRORs of the plan returned (the caller applies nothing then); raised = (from, to) or None."""
+    s = state or {}
+    prev = applied_plan(save_dir)
+    fort = fort_facts(save_dir, state)
+    ph = phases if phases is not None else load_phases()
+    applied = applied_builds(save_dir, state)
+    cur = s.get("phase") or "P0"
+    season = (s.get("t") or {}).get("season", 0)
+    tp = tpls if tpls is not None else templates()
+    doc = propose(state, ph, prev, decisions=decisions, tinfo=tinfo, applied=applied, fort=fort)
+    doc["phase_target"] = cur
+    doc["orders"] = copy.deepcopy((prev or {}).get("orders") or {"import": []})      # no new library, the old ones stay
+    doc = _with_new(doc, prev, [(si, b) for si, _, b in new_builds(doc, prev) if minimal_ok(b)])
+    errs, warn = _fix_rounds(doc, state, prev, fort, decisions, tp, season, minimal_ok)
+    out = {"doc": doc, "errs": errs, "warn": warn, "held": [], "raised": None}
+    nxt = next_phase(ph, cur) if raise_due(save_dir, state, prev) else None
+    if nxt:
+        cand = propose(state, ph, prev, decisions=decisions, tinfo=tinfo, applied=applied, fort=fort, upto=nxt)
+        if cand["phase_target"] == nxt:                       # the rebuild policy keeps the phase (propose)
+            cerrs, cwarn = _fix_rounds(cand, state, prev, fort, decisions, tp, season, lambda b: True)
+            best = (cand, cwarn) if not cerrs else _subset(cand, state, prev, fort, decisions, tp)
+            if best is not None:
+                out.update(doc=best[0], errs=[], warn=best[1], raised=(cur, nxt))
+            if cerrs:
+                left = check(out["doc"], state, decisions=decisions, tpls=tp, prev=prev, fort=fort)[0]
+                out["held"] = [e for e in cerrs if e not in left]
+    doc = out["doc"]
+    same = bool(prev) and prev.get("year") == doc["year"]
     n = sum(len(se["build"]) for se in doc["seasons"]) - (sum(len(se["build"]) for se in prev["seasons"]) if same else 0)
+    if out["raised"]:
+        what = f"phase_target {out['raised'][0]} -> {out['raised'][1]} after a quiet year (no star phase)"
+    else:
+        what = f"only seal, tombs, hospital, food/drink and refuge, phase_target {doc['phase_target']} (no star phase)"
+    held = f"; {len(out['held'])} ERROR held back" if out["held"] else ""
     doc["notes"] = (f"{MINIMAL_TAG}: follow applied it after {stale_years()} years without a plan apply; {n} new build"
-                    f"{'s' if n != 1 else ''}, only seal, tombs, hospital, food/drink and refuge, phase_target "
-                    f"{doc['phase_target']} (no star phase). Replace it: dfllm plan propose y.json")
-    return doc, errs, warn
+                    f"{'s' if n != 1 else ''}, {what}{held}. Replace it: dfllm plan propose y.json")
+    return out
+
+
+def minimal_plan(save_dir: Path, state: dict | None, phases: dict | None = None, tinfo: dict | None = None,
+                 decisions: dict | None = None, tpls: list[str] | None = None) -> tuple[dict, list[str], list[str]]:
+    """(plan, errors, warnings) of the plan follow applies when nobody approves one (auto_plan): the minimal plan, or
+    after a quiet year under a minimal plan the next phase (BUG-132). Errors left: the caller applies nothing."""
+    r = auto_plan(save_dir, state, phases, tinfo=tinfo, decisions=decisions, tpls=tpls)
+    return r["doc"], r["errs"], r["warn"]
 
 
 def apply_minimal(save_dir: Path, by: str = "follow", wait_s: float = 5.0) -> tuple[list[str], str]:
-    """Build and apply the minimal plan (follow's FR-86 fallback). (errors, message); nothing is written on errors."""
+    """Build and apply the automatic plan (follow's FR-86 fallback, BUG-132 raise). (errors, message); nothing is
+    written on errors. The message names a raise and the ERRORs of a raise draft that were held back."""
     state = files.read_state(save_dir)
     if state is None:
         return ["no valid state: nothing to plan from"], "not applied"
-    doc, errs, _ = minimal_plan(save_dir, state)
+    r = auto_plan(save_dir, state)
+    if r["errs"]:
+        return r["errs"], "not applied"
+    errs, msg = apply(save_dir, r["doc"], by=by, wait_s=wait_s)
     if errs:
-        return errs, "not applied"
-    return apply(save_dir, doc, by=by, wait_s=wait_s)
+        return errs, msg
+    if r["raised"]:
+        msg = f"{r['raised'][0]} -> {r['raised'][1]}; " + msg
+    if r["held"]:
+        msg += f"; {len(r['held'])} ERROR held back: " + "; ".join(e[:120] for e in r["held"][:2])
+    return [], msg
 
 
 def review_note(save_dir: Path, state: dict | None = None) -> str:
