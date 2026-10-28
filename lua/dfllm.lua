@@ -54,6 +54,9 @@ elseif cmd == 'status' then
   local s = kern.status()
   if not s then
     local g = require('dfllm.guard').active()
+    -- BUG-120 (Run 14 note 99): no map is no fort: the title screen has no cached numbers to show
+    local okm, map = pcall(function() return dfhack.isMapLoaded() end)
+    if okm and map == false then print('dfllm: DF at title screen: no fort loaded (kernel not running)'); return end
     print('dfllm: kernel not running' .. (g and ('; stop guard on: ' .. g.text .. (g.err and (' (error: ' .. g.err .. ')')
           or '') .. '; dfllm boot resumes, dfllm restore releases the clock') or ''))
     return

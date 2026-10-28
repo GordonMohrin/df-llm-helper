@@ -264,6 +264,15 @@ def supervise_lines(doc, now: float) -> tuple[list[str], list[str]]:
     if d.get("ver"):
         out.append(f"supervise: DFHack {d['ver']}" + (f", the last successful load ran on {last}" if last else "")
                    + (" (changed since: the title-screen load is untested there)" if d.get("changed") else ""))
+    ls = doc.get("load_save")                                  # FR-91: does DFHack's own load-save work on this version?
+    if isinstance(ls, dict) and ls.get("state") in ("ok", "broken"):
+        out.append(f"load_save: {ls['state']} (DFHack {ls.get('ver') or '?'})"
+                   + (f": {ls['why']}; supervise loads by title-screen clicks" if ls["state"] == "broken" and ls.get("why")
+                      else "; supervise loads by title-screen clicks" if ls["state"] == "broken" else ""))
+    td = doc.get("title_dump")                                 # FR-91: the screen the title run found no label on
+    if isinstance(td, dict) and td.get("focus"):
+        out.append(f"title screen dump ({td.get('save')}): {td.get('why')}; viewscreens {td['focus']}, {len(td.get('rows') or [])} "
+                   "rows kept (the whole dump is in supervise.log)")
     nc = doc.get("needs_click")
     if isinstance(nc, dict):
         wall = nc.get("wall") if isinstance(nc.get("wall"), (int, float)) else now
