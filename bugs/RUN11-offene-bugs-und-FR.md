@@ -171,3 +171,34 @@ FR: `squad.uniform` um ein drittes `kind`-Enum-Mitglied erweitern (z.B. `kind: t
 
 ## FR 83 (25.10./26.10., Run 14): bp.place tpl=workshops kennt kein Millstone/Quern
 only=Millstone und only=Quern werden mit "unknown types" abgelehnt (bekannt: Carpenters, Masons, Craftsdwarfs, Jewelers, MetalsmithsForge, Bowyers, Clothiers, Leatherworks, Tanners, Loom, GlassFurnace, Mechanics, Still, Kitchen, Butchers, Fishery, Farmers). Metalsmith's Forge x76 stuck orders (Run 14, y707 aut d31) konnte per MetalsmithsForge neu platziert werden, Millstone/Quern-Werkstätten fehlen aber weiter in diesem Enum und mussten unangetastet bleiben.
+
+## Run 14 Auswertung (Opus, 28.10.2026) - Notizen 84-92
+Beleg für alles: `docs/v2/POSTMORTEM-run14-trussroads-y708.md`. Reihenfolge = Wichtigkeit.
+
+## 84 KRITISCH: Flüche und Werbestien werden nicht erkannt
+y707 d074: Bergmann stürzt im Wutanfall eine Statue um -> "has been cursed by Ók!" -> Werecavy. Bis y708 verwandelten sich 23 Zwerge (auch Chefarzt, Knochenarzt, Manager); Pop 54 -> 10. Kein Event, kein Wake: der Arbiter ließ das Popup nur "unclassified" stehen, die Bisse liefen als "killed by dwarf"/Patienten-Tode.
+Wunsch: (a) Event CURSED (Klasse A, Interrupt) aus Popup/Report "has been cursed by" mit Einheit, Gottheit, Auslöser (BUILDING_TOPPLED derselben Einheit); TRANSFORM aus "has transformed into a were…"/"…into a dwarf". (b) `status`/`brief`: `cursed: N (ids), next moon ~dNNN`. (c) Rezept im Wake: Verfluchte vor Vollmond in einen Isolationsraum (Burrow + verbotene Tür; evtl. Template `isolation`), verwandelte Einheit = Feind (Kill-Order nur nach Spieler-Ja), Gebissene beobachten. (d) "cursed", "transformed", "were", "vampire" auf die DENY-Liste des Arbiters (nie automatisch wegklicken). (e) Vorbeugung: Statuen/Tempelobjekte als Wutanfall-Ziel im brief melden, Stress-Topursache mit Gegenmaßnahme.
+
+## 85 WICHTIGSTER WUNSCH für schwächere Modelle: `dfllm next`
+Die Session las 635x `inspect`, wusste aber nie, was zu tun ist. Wunsch: ein Befehl, der die EINE dringendste Aktion als fertige Kommandozeile ausgibt, z. B. `NEXT: dfllm ack` / `NEXT: dfllm plan propose y.json` / `NEXT: dfllm cmd bp.place '{"tpl":"hospital","site":"S1"}'`, plus 1 Zeile Grund und optional `TELL PLAYER: …`. Feste Priorität: unquittierte Interrupts -> sichtbare Gefahr/Fluch -> sterbende Patienten -> MOOD_CRITICAL -> Jahresplan fällig/veraltet -> R0-Blocker (seal, audit, hospital_out, refuge) -> Leerlauf. `NEXT: nothing` wenn alles grün.
+
+## 86 Veralteter Jahresplan bleibt unsichtbar
+`plan.json` von y503, Spiel in y708: 190 YEAR_REVIEW-Wakes, 67x `plan propose`, 0x `plan apply`. Phase blieb P0/P2, das Fort baute 180 Jahre nichts Neues. Wunsch: `status` Zeile 1 `PLAN STALE: applied y503, now y708`, sobald > 1 Jahr ohne apply; YEAR_REVIEW nennt die ERROR-Fixes fertig zum Einfügen; nach 2 Jahren ohne apply wendet follow einen Minimalplan an (nur seal, tombs, hospital, food/drink, refuge; kein ★).
+
+## 87 Drill ohne Brücken ablehnen
+O1 und B1 fehlen (no_outer, no_inner): jeder Drill endet "failed: raised -1". Trotzdem 320x per Hand + Auto-Retry ~5/Jahr; jeder Drill ruft alle ins Kern+ und setzt FPS 30. Wunsch: `drill` und Auto-Retry verweigern mit "no lever-linked bridge: build fortcore stage 2/3 first".
+
+## 88 Lockdown-Default ohne Feind schadet
+DEATHS_3PLUS unquittiert -> Lockdown (Takt 30, Zivilalarm Kern+) auch bei threat 0; y707 14x. Das Krankenhaus lag außerhalb Kern+, die Pfleger kamen nicht hin. Wunsch: bei threat 0 und innerer Ursache (Patienten, Mood, Fluch, Wutanfall) nur Wake, kein Zivilalarm; Lockdown nur bei sichtbarem Feind.
+
+## 89 Krankenhaus braucht Vorrang wie seal-first
+`hospital_out` von y526 bis zum Ende, 7 Platzierungen. Die letzte stand bei "dig 0 %, slot yielded", weil die Bergleute keine Spitzhacke fanden (TOOL_BLOCKED, 109 Picks in Kisten) und Ausbau-Projekte die Slots hielten. Wunsch: care-first: bei `hospital_out` oder Patienten > 0 bekommt das Hospital-Projekt den ersten Slot und pausiert Wohn-/Ausbau-Projekte; ein dadurch blockiertes TOOL_BLOCKED wird Klasse A mit klarer Spieler-Anweisung.
+
+## 90 Wundversorgung prüfen (Patienten verbluten/ersticken)
+care vergibt nur DIAGNOSE/SURGERY/BONE_SETTING; 52 verblutet + 87 erstickt, meist "patient". Wunsch (DF-Regeln live prüfen): `inspect what=hospital` mit allen Lücken: Ärzte mit Nähen und Wundverband, Vorräte in der Zone (Faden, Stoff, Schienen, Krücken, Gips, Seife, Eimer), Tisch für Operationen (Template ohne Tisch), Pfleger erreichbar, Zone in Kern+. GiveWater-Lücke ("caregivers 95 of 5 wanted, 0 giving water") siehe Bug 79.
+
+## 91 Fair-Play-Hook lief für die Spielsession nie
+Der PreToolUse-Hook steht in `dfpilot-public/.claude/settings.json`; die Spielsession lief im Elternordner `claude gordons projects` -> Hook inaktiv. So lief jede Runde ein eigenes `routine.lua` per `dfhack-run lua -f` (Popups löschen, Uniform-Specs editieren, manager_orders direkt einfügen) und hat das Fluch-Popup gelöscht. Wunsch: QUICKSTART verlangt Start im Repo-Ordner oder den Hook im Startordner; `dfllm doctor` meldet "hook: not active in this session"; Kernel loggt Popups, die ohne seinen Dismiss verschwinden.
+
+## 92 Moods sind die häufigste Todesursache
+Run 14: 151 von 453 Bürgertoden = gescheiterte Strange Moods, 66x MOOD_CRITICAL. Das Loom fehlte zeitweise (Belagerung), Stoff lief erst mit einer Hilfsroutine. Wunsch: MOOD_RISK nennt den fehlenden Werkstatt-Typ als fertigen `bp.place`-Befehl; fehlende Mood-Werkstatt (Loom, Craftsdwarf, Jeweler …) = R0-Blocker `mood_ws`.
