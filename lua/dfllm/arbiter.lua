@@ -100,6 +100,10 @@ M.DENY = {'dead walk', 'undead', 'zombie', 'necromancer', 'ambush', 'siege', 'in
 -- kern.log lines per popup kind
 M.POPUP_CFG = {other = false, other_s = 20, log_s = 900}
 M.PU_MAX = 64              -- texts of unclassified popups remembered for the log cadence
+-- FR-94 (Run 14 note 100): the verb `resume` and the wake PAUSED_BY_DF. wake_min = real minutes a pause by DF (a load, a restart,
+-- a popup) may stand before the wake comes (config/reflex.json `resume`, 0 = no wake); gap_s = real seconds between two uses of
+-- the verb; max_popups = popups one use may read and dismiss
+M.RESUME = {wake_min = 5, gap_s = 60, max_popups = 8}
 M.DEPOT_POPUP = 'need a trade depot'   -- a caravan popup that is also the NO_DEPOT interrupt (FR-43/53)
 M.FALLBACK_TICKS = 4800
 M.ASK_AFTER_MS = 600000            -- foreign pause older than this -> DECISION_NEEDED
@@ -493,10 +497,27 @@ local function popup_cfg(K)
   return c
 end
 
+-- FR-94: the resume config (config/reflex.json `resume`; a bad value keeps the default)
+local function resume_cfg(K)
+  local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.resume) == 'table' and K.cfg.reflex.resume or {}
+  local w = int(r.wake_min)
+  return {wake_min = (w and w >= 0 and w <= 240) and w or M.RESUME.wake_min}
+end
+
 -- the text of the front popup (nil: none, unreadable)
 local function front_text()
   local ok, text = pcall(function() return dfhack.df2utf(df.global.world.status.popups[0].text) end)
   if ok and type(text) == 'string' then return text end
+end
+
+-- FR-94: the texts of every open popup, front first (the queue is read, never changed)
+local function popup_texts()
+  local out = {}
+  local ok = pcall(function()
+    local popups = df.global.world.status.popups
+    for i = 0, #popups - 1 do out[#out + 1] = dfhack.df2utf(popups[i].text) end
+  end)
+  return ok and out or {}
 end
 
 -- kind, text, threat of the front popup
@@ -620,13 +641,39 @@ local function observe(K)
   local paused = df.global.pause_state == true or popup_count() > 0
   if paused and not st.pause_by then
     st.pause_by, st.pause_since, st.asked = (popup_count() > 0) and 'popup' or 'gordon', K.now().ms, false
-    st.hold = nil
+    st.hold, st.pdf_told = nil, nil
     pause_event(K, true, st.pause_by)
   elseif not paused and st.pause_by then
     pause_event(K, false, st.pause_by)
-    st.pause_by = nil
+    st.pause_by, st.pdf_told = nil, nil
   end
   return paused
+end
+
+-- FR-94: the game has stood paused by DF (a load, a restart, an unknown popup) for resume.wake_min minutes: wake the session
+-- (class A, once per pause). The text of the popup that stands is in the wake, never silent; a threat or curse popup is flagged
+-- (`deny`): `resume` refuses it, the player clicks it away.
+local function paused_by_df(K, now)
+  local by = st.pause_by
+  if (by ~= 'df' and by ~= 'popup') or st.pdf_told then return end
+  local mins = resume_cfg(K).wake_min
+  if mins <= 0 or now.ms < st.pause_since or now.ms - st.pause_since < mins * 60000 then return end
+  st.pdf_told = true
+  local min = math.max(mins, (now.ms - st.pause_since) // 60000)
+  local d = {by = by, min = int(min)}
+  local text = front_text()
+  local msg = string.format('PAUSED_BY_DF for %d min: dfllm cmd resume', min)
+  if text then
+    d.popup = text:sub(1, 100)
+    local _, threat = M.classify(text)
+    if denied(text:lower()) or threat then
+      d.deny = 1
+      msg = string.format('PAUSED_BY_DF for %d min: popup "%s" has a threat or curse word, resume refuses it', min, d.popup:sub(1, 80))
+    else
+      msg = msg .. string.format(' (popup "%s")', d.popup:sub(1, 80))
+    end
+  end
+  K.emit('PAUSED_BY_DF', 'A', msg, d)
 end
 
 local function track_pause(K)
@@ -658,12 +705,15 @@ local function track_pause(K)
       if popup_count() == 0 then K.act.set_paused(false) end
     end
   end
+  paused_by_df(K, now)
   if st.pause_by ~= 'inbox' and not st.asked and now.ms - st.pause_since >= M.ASK_AFTER_MS then
     st.asked = true
     local what = st.pause_by == 'popup' and front_text()          -- FR-75: say which popup it is
+    local df_set = st.pause_by == 'df' or st.pause_by == 'popup'  -- FR-94: `resume` releases these (not a threat popup)
     K.emit('DECISION_NEEDED', 'A', 'game paused by ' .. st.pause_by .. ' for 10 min',
            {id = 'pause', q = 'paused by ' .. st.pause_by .. (what and (' ("' .. what:sub(1, 100) .. '")') or '')
-                              .. '; Gordon unpauses in DF (the inbox cannot release it)'})
+                              .. (df_set and '; dfllm cmd resume releases it (refused for a threat or curse popup: Gordon clicks that in DF)'
+                                  or '; Gordon unpauses in DF (the inbox cannot release it)')})
   end
 end
 
@@ -763,6 +813,71 @@ M.verbs.pause = function(K, args, cmd)
     pause_event(K, true, 'inbox', ttl)
   end
   return true, string.format('paused for %d s', ttl)
+end
+
+-- FR-94 (Run 14 note 100): release a pause that DF set (a save loaded paused, a restart, a popup) with the player's key.
+-- Allowed only as pause:df or pause:popup; refused while any open popup carries a DENY word or is a threat notice (the reflex
+-- and the player read those); once per M.RESUME.gap_s real seconds, a key that did not take counts too. Every popup read is
+-- named in the reply (an unknown one is dismissed like a click on "OK" after its text is read: never silent).
+local function resume_refuse(msg, data) return false, 'resume: ' .. msg, data end
+
+M.verbs.resume = function(K, args, cmd)
+  local now = K.now()
+  if not observe(K) then return resume_refuse('the game is not paused (nothing to release)') end
+  local by = st.pause_by or 'gordon'
+  if by ~= 'df' and by ~= 'popup' then
+    if by == 'inbox' then
+      return resume_refuse('paused by inbox; unpause releases it (resume releases only pause:df and pause:popup)')
+    end
+    return resume_refuse('paused by ' .. by .. ", the player's own pause; resume releases only pause:df and pause:popup")
+  end
+  for _, text in ipairs(popup_texts()) do
+    local _, threat = M.classify(text)
+    if denied(text:lower()) or threat then
+      K.log('info', 'resume refused: a popup with a threat or curse word stands: "%s"', text:sub(1, 80))
+      return resume_refuse(string.format('the popup "%s" has a threat or curse word (DENY list); the player reads it in DF, the pause stays',
+                                         text:sub(1, 80)), {was = 'pause:' .. by, popups = {text:sub(1, 100)}})
+    end
+  end
+  local gap = M.RESUME.gap_s * 1000
+  if st.resume_ms and now.ms >= st.resume_ms and now.ms - st.resume_ms < gap then
+    return resume_refuse(string.format('once per %d s; wait %d more s', M.RESUME.gap_s,
+                                       math.ceil((gap - (now.ms - st.resume_ms)) / 1000)))
+  end
+  st.resume_ms = now.ms
+  local was, seen = 'pause:' .. by, {}
+  for _ = 1, M.RESUME.max_popups do          -- the text is read first, then the popup is clicked away
+    local text = popup_texts()[1]
+    if not text then break end
+    local kind = M.classify(text) or 'other'
+    local ok, err = K.act.dismiss_popup(kind)
+    if not ok then
+      return resume_refuse('the popup "' .. text:sub(1, 80) .. '" did not close: ' .. tostring(err), {was = was, popups = seen})
+    end
+    seen[#seen + 1] = text:sub(1, 100)
+    if kind == 'other' then K.log('info', 'resume dismissed a popup of unknown kind: "%s"', text:sub(1, 80))
+    else note_ack(K, kind, text) end
+  end
+  local key_err
+  if df.global.pause_state == true then
+    local ok, res = K.act.press_pause()
+    if not ok then key_err = tostring(res) end
+  end
+  local paused = observe(K)
+  local state = paused and ('pause:' .. tostring(st.pause_by)) or 'running'
+  local data = {was = was, now = state}
+  local shown = ''
+  if #seen > 0 then
+    data.popups = seen
+    local q = {}
+    for i, t in ipairs(seen) do q[i] = '"' .. t:sub(1, 80) .. '"' end
+    shown = string.format('; dismissed popup%s %s', #seen > 1 and 's' or '', table.concat(q, ' | '))
+  end
+  if paused then
+    return resume_refuse(string.format('was %s, still paused (%s) after the pause key%s%s', was, state,
+                                       key_err and (' (' .. key_err .. ')') or '', shown), data)
+  end
+  return true, string.format('resumed: was %s, now %s%s', was, state, shown), data
 end
 
 -- FR-88 (Run 14 note 95): the camera; the arbiter hosts it because it owns what the player sees of the clock (lua/dfllm/viewlib.lua)

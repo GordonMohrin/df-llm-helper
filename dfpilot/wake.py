@@ -66,6 +66,7 @@ PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", 
         "NEEDS_CLICK",                        # K2: no fort runs at all; nothing else in the burst can be acted on first
         "PATIENT_DYING", "PATIENTS_OUT", "MOOD_CRITICAL",     # I1: a patient or a mood dwarf at the death line comes before the housekeeping types
         "DEATHS_PREVENTABLE", "KERN_FAULT", "HB_STALE", "SUPERVISE", "QUICKSAVE_FAILED",
+        "PAUSED_BY_DF",                       # FR-94: the game stands (a load, a popup); one `dfllm cmd resume` runs it again
         "SIEGE_END",
         "DRILL_FAIL", "BURROW_SHRUNK", "SIEGE_UNREADY", "PERF_DEGRADED", "DECISION_NEEDED", "SEAL_STUCK",
         "PROJECT_BLOCKED", "PLAN_EXHAUSTED", "PLAN_AUTO", "YEAR_REVIEW", "AUTO_FAIL"]
@@ -84,6 +85,8 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose y.json, fix its ERROR lines, plan che
                      "(a locked door), kill only on his yes (DECISION_NEEDED curse_kill); inspect what=curse; watch the bitten",
         "CURSE_MOON": "tell Gordon: lock the cursed (ids in the line) in ONE room now, before the full moon "
                       "(burrow + forbidden door, by hand in DF)",
+        # FR-94 (Run 14 note 100): the pause key, once per 60 s, only pause:df / pause:popup; the reply names the popups it read
+        "PAUSED_BY_DF": "dfllm cmd resume (the reply names what it released and every popup it read); then dfllm status",
         "DECISION_NEEDED": "ask Gordon in chat, then config/decisions.yaml", "KERN_FAULT": "dfllm doctor",
         "PERF_DEGRADED": "dfllm doctor", "HB_STALE": "dfllm doctor", "AUTO_FAIL": "dfllm doctor",
         "SUPERVISE": "dfllm supervise --once --dry-run",
@@ -259,6 +262,9 @@ def next_hint(etype: str, e: dict) -> str:
         return lone_hint(d)
     if etype == "PATIENTS_OUT":
         return patients_hint(d)
+    if etype == "PAUSED_BY_DF" and d.get("deny"):
+        return ("tell Gordon at once: a popup with a threat or curse word holds the game; resume refuses it, he reads and "
+                "clicks it in DF (dfllm cmd inspect what=curse if it names a curse)")
     if etype == "DECISION_NEEDED" and d.get("id") == "curse_kill":
         return ("ask Gordon: a kill order on the were-form (dfllm cmd squad.sortie, approve:true is the logged decision; "
                 "a squad and its target position) or keep them apart in a locked room; no answer = no kill")
@@ -409,6 +415,8 @@ def wake_line(burst: dict[str, dict], state: dict | None, held_s: float = 0, aut
         d = e.get("d") if isinstance(e.get("d"), dict) else {}
         bridge = d.get("bridge") or d.get("module") or ""
         item = f"{ty}{' x%d' % p['c'] if p['c'] > 1 else ''}{' ' + bridge if bridge else ''}: {e.get('msg', '')}"
+        if str(e.get("msg", "")).startswith(ty + " ") and p["c"] == 1 and not bridge:
+            item = str(e["msg"])                               # FR-94: the message already names its type ("PAUSED_BY_DF for 5 min: ...")
         if ty == "YEAR_REVIEW" and review:
             item += f" | {review}"
         left = len(types) - i - 1

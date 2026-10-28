@@ -442,6 +442,16 @@ local function impls(state)
     return true
   end
 
+  -- FR-94 (Run 14 note 100): the player's Space on the main screen. The pause key goes to the main DF viewscreen through
+  -- gui.simulateInput (the call the trade and embark helpers use); no pause_state write. The key TOGGLES, so it is sent only
+  -- while the game is paused. Returns the state read right after the key. [S8: 'D_PAUSE' on the dwarfmode screen, live-untested]
+  function I.press_pause()
+    if df.global.pause_state ~= true then return false, 'the game is not paused: the key would pause it' end
+    local ok, err = pcall(function() gui_proxy().simulateInput(dfhack.gui.getDFViewscreen(true), 'D_PAUSE') end)
+    if not ok then return false, 'pause key: ' .. tostring(err) end
+    return true, df.global.pause_state == true and 'paused' or 'running'
+  end
+
   function I.timestream(fps)
     fps = int(fps)
     if not fps or (fps ~= -1 and (fps < 10 or fps > 1000)) then return false, 'fps must be -1 or 10..1000' end

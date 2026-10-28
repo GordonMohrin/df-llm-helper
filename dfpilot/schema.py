@@ -70,6 +70,7 @@ DECISIONS = {
 ACT = {
     "set_paused": ["arbiter"], "timestream": ["arbiter"], "setting": ["arbiter"], "overlay": ["arbiter"],
     "dismiss_popup": ["arbiter"], "civ_alert": ["siege"], "alert_burrows": ["siege"],
+    "press_pause": ["arbiter"],      # FR-94: the pause key to the main DF viewscreen (verb `resume`)
     "view_to": ["arbiter"], "view_window": ["arbiter"],      # FR-88: the camera (viewport), arbiter hosts the verb `view`
     "squad_create": ["military"], "squad_leader": ["military"], "squad_add": ["military"],
     "squad_remove": ["military"],
@@ -469,6 +470,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "DECISION_NEEDED": ("A", "any", _d("id:s", "q:s food:i drink:i block:sa opts:sa auto:sa bridge:s n:i bd:i reb:i "
                                                "items:i mat:s links:i races:sa years:ia stop:i")),
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
+    # FR-94 (Run 14 note 100): the game stood paused by DF (a save loaded paused, a restart, an unknown popup) for `min`
+    # real minutes (reflex.json resume.wake_min): by = df | popup; popup = the text that stands (<= 100 bytes), deny = 1
+    # when it carries a threat or curse word (`resume` refuses it, the player clicks it away)
+    "PAUSED_BY_DF": ("A", "arbiter", _d("by:s min:i", "popup:s deny:i")),
     # Run 11: mat = why economy cannot make a seal's missing pieces ('no material for door: no rock, no logs');
     # walled = the seal doors quickfort refused (no wall beside them) that the runner planned as walls ('x,y,z')
     # BUG-037: park = days a project blocked for good stood before it was parked (its cancel command is in msg)
@@ -794,6 +799,9 @@ VERB_ARGS: dict[str, Obj] = {
     "tempo.lower": Obj(req={"fps": Int(10, 1000), "ttl_s": Int(1, 3600)}),
     "pause": Obj(req={"ttl_s": Int(1, 600)}, opt={"why": Str(maxbytes=200)}),
     "unpause": Obj(),
+    # FR-94 (Run 14 note 100): release a pause DF set (pause:df, pause:popup) with the pause key; the reply names the old
+    # reason and the new state (data.was / data.now) and every popup it read (data.popups)
+    "resume": Obj(opt={"why": Str(maxbytes=200)}),
     "trade.want": Obj(opt={"want": Arr(TOKEN, hi=40), "sell": Arr(TOKEN, hi=40)}),
     "trade.retry": Obj(opt={"civ": Str(maxbytes=40), "want": Arr(TOKEN, hi=40), "sell": Arr(TOKEN, hi=40)}),
     # gate (Gordon 2026-10-16): a sortie through that outer bridge (siege: gather in the bailey, open, kill, recall)
@@ -846,6 +854,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "snapshot": ("snapshot", None, False), "audit": ("readiness", None, False),
     "popcap.lower": ("readiness", None, False), "tempo.lower": ("arbiter", None, False),
     "pause": ("arbiter", None, False), "unpause": ("arbiter", None, False),
+    "resume": ("arbiter", None, False),
     "trade.want": ("trade", None, False), "trade.retry": ("trade", ["PEACE"], False),
     "squad.sortie": ("military", ["ALERT", "SIEGE", "BREACH", "RECOVERY"], True),
     "lever": ("gate", ["PEACE"], False), "inspect": ("kern", None, False),

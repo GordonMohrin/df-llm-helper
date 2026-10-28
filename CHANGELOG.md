@@ -25,6 +25,40 @@
 - **Not decided offline:** whether `cur_year_tick` already shows the older clock when `dfllm boot` runs after the load; keeping the shared past
   (events with a tick up to `tick_neu` before the marker stay) against dropping everything before the marker; `snap/`, `bp/` and pending `inbox/` files of the
   old line are not touched.
+## FR-94: `dfllm cmd resume` releases a pause that DF set, and PAUSED_BY_DF wakes the session (FR-94, 2026-10-28, note 100; offline, live-untested)
+- **Why:** Run 14 note 100: after a load, a restart or a popup the game stood paused (`status` pause:df / pause:popup, 0 ticks/s, once for more
+  than an hour, the 15-minute loop only reported "waiting"). RULES 1.3 allowed the session to resume it, but no verb did: `unpause` answers
+  "paused by df; the inbox releases only its own pause", inline Lua is blocked by the fair-play hook and the key needs the DF window on desktop 1.
+- **What changed:** verb `resume {why?}` (arbiter.lua) with the new actuator `act.press_pause` (act.lua): `gui.simulateInput(dfhack.gui.getDFViewscreen(true),
+  'D_PAUSE')`, the player's Space on the main screen, sent only while `pause_state` is true (the key toggles); no `pause_state` write. Allowed only
+  in pause:df and pause:popup. Refused: not paused; the player's pause (`gordon`) or an inbox pause (the reply names `unpause`); any open popup
+  with a word of `arbiter.DENY` or a threat notice (curse, transform, were-beast, vampire, ambush, siege, undead, the embark intro ...; the popup
+  stays, the reply quotes it); a second use within 60 real seconds (a key that did not take counts). Popups of unknown kind are read first, then
+  dismissed with the arbiter's own `act.dismiss_popup` (at most 8), their texts stand in the reply (`data.popups`) and in kern.log. The reply names
+  the old reason and the new state (`resumed: was pause:df, now running`; `... still paused (pause:df) after the pause key` when the game did not
+  move). Wake PAUSED_BY_DF (class A, once per pause): after `config/reflex.json` `resume.wake_min` (5, 0 = off, `fairplay.RESUME_LIM` 0..240)
+  real minutes of a pause by DF the line says `PAUSED_BY_DF for N min: dfllm cmd resume` and carries the text of the popup that stands; `deny` 1 and
+  the hint "tell Gordon at once" when the popup has a threat or curse word (resume would refuse it). The 10-minute DECISION_NEEDED `pause` names
+  `resume` for pause:df / pause:popup. A wake line no longer says the type twice when the message starts with it.
+- **Safety:** UI-equal only (RULES 1.1): one key to the main screen after the popups were clicked away, the same two actuators the player has; nothing
+  is written into game state; a threat, curse or transformation popup is never dismissed here (the reflex and the player read those); the verb
+  cannot toggle a running game into a pause; the player's own pause is never released.
+- **Contracts / config:** verb `resume` (schema `VERB_ARGS`, `VERBS`, contract.lua), act `press_pause`, event PAUSED_BY_DF (A, `by min popup? deny?`),
+  config reflex.json `resume.wake_min`; RULES 1.3, step 5 of §4, the §6 `pause`/`unpause`/`resume` row and the §7 QUICKSAVE_FAILED / NEEDS_CLICK /
+  PAUSED_BY_DF row edited in place (300 lines); CONTRACTS rows and appendix; FR-94 in docs/feature-requests/README.md.
+- **Tests (each fails on f3f684b):** tests/lua/test_resume.lua (11: success pause:df, refusals for not paused / inbox / player, DENY popups incl. one
+  behind an unknown one, the 60 s limit with a key that did not take, unknown popups read and dismissed, popup on top of pause:df, the wake with
+  threshold / popup text / off / no wake for the player's pause / deny flag, the shipped config); tests/test_fr94_resume.py (11: args, CLI, contract
+  parity, key without state write, config lint, wake lines).
+- **Live check:** load a save (DF starts paused): `dfllm status` (pause:df), `dfllm cmd resume` -> `resumed: was pause:df, now running` and ticks
+  advance; run it again within a minute -> "once per 60 s". If it says "still paused after the pause key", `D_PAUSE` needs another frame or does not
+  reach the screen: read `commands.log` (`act.press_pause`) and run it once more after 60 s before changing anything. With an unknown popup open
+  (for example the brawling notice): the reply quotes it and the popup is gone; with a "has been cursed" popup: refused, the popup stays. Leave a
+  load paused for 5 minutes and look for the PAUSED_BY_DF wake line.
+- **Not decided offline:** whether `D_PAUSE` through `gui.simulateInput` on the dwarfmode screen takes effect in the same frame (the reply reads the
+  state right after the key) and whether DF ignores the key while a popup is open (the popups are dismissed first, as the arbiter does for the kinds
+  it knows); the exact interface-key name in DFHack 53.16-r3 (the note names `D_PAUSE`).
+
 
 ## M7: a garbage dump zone, a trash view and the reason a dump job cancels; loading the newest complete save at the title screen; the title-screen status (FR-90, FR-91, BUG-120, 2026-10-28, package M7, notes 98 and 99; offline, live-untested)
 - **Why:** Run 14 note 98: garbage had no verb (`zone.place` knew no dump zone) and "Dump item cancelled 5 times today" (y701, y703, y707) gave no
