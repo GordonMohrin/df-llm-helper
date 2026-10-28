@@ -96,10 +96,10 @@ T.test('real act: popcap runs pop-control set max-pop; squads from the UI are fi
   T.eq(X.members(X.squad_of(W, 'A')) + X.members(X.squad_of(W, 'B')) + X.members(X.squad_of(W, 'C')), 8)
   local found = false
   for _, c in ipairs(W.commands) do
-    if c[1] == 'pop-control' and c[2] == 'set' and c[3] == 'max-pop' and c[4] == '55' then found = true end
+    if c[1] == 'pop-control' and c[2] == 'set' and c[3] == 'max-pop' and c[4] == '100' then found = true end
   end
-  T.ok(found, 'pop-control set max-pop 55')
-  T.eq(df.global.d_init.dwarf.population_cap, 55)
+  T.ok(found, 'pop-control set max-pop 100 (no plan yet: the D-01 = B ceiling, BUG-132)')
+  T.eq(df.global.d_init.dwarf.population_cap, 100)
   H.run(W, 3700, {skip = 9})                            -- the next upkeep: uniform-unstick (allowlisted)
   local un = false
   for _, c in ipairs(W.commands) do
@@ -110,7 +110,7 @@ T.test('real act: popcap runs pop-control set max-pop; squads from the UI are fi
   for _, e in ipairs(H.events(W)) do T.ok(e.type ~= 'ACT_FAIL' and e.type ~= 'KERN_FAULT', e.msg) end
   local s = H.state(W)
   T.eq(s.mil.soldiers, 8)
-  T.eq(s.pop.cap, 55)
+  T.eq(s.pop.cap, 100)
   H.kern().stop('test')
 end)
 

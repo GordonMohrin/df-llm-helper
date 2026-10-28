@@ -106,12 +106,15 @@ local function abs_now()
   return C.abs_tick(df.global.cur_year, df.global.cur_year_tick)
 end
 
-function M.with_defaults(plan, phases_doc)
+-- BUG-132: the ceiling of a fort without an applied plan follows D-01 (Gordon 2026-10-24: B, R0 cap 100; A keeps 55)
+M.NO_PLAN_CEIL = {A = 55, B = 100}
+function M.with_defaults(plan, phases_doc, decisions)
   local p = copy(plan)
   if type(p) ~= 'table' or p == json.null then
+    local opt = (type(decisions) == 'table' and decisions['D-01'] or C.DECISIONS['D-01']) == 'B' and 'B' or 'A'
     p = {v = 2, year = df.global.cur_year, phase_target = 'P0',
          seasons = {{build = {}}, {build = {}}, {build = {}}, {build = {}}},
-         policy = {option = 'A', pop_ceiling = 55, beauty = 'used_rooms'}}
+         policy = {option = opt, pop_ceiling = M.NO_PLAN_CEIL[opt], beauty = 'used_rooms'}}
   end
   for k, v in pairs(PLAN_DEFAULTS) do if p[k] == nil then p[k] = copy(v) end end
   if type(phases_doc) == 'table' and phases_doc ~= json.null then p.phases = phases_doc.phases end
@@ -908,7 +911,7 @@ local function kern_verb(st, verb, args, cmd)
     local prev = K.persist.get('plan')
     local doc = prev and prev.plan
     if doc == json.null then doc = nil end
-    K.plan = M.with_defaults(doc, ph)
+    K.plan = M.with_defaults(doc, ph, K.cfg and K.cfg.decisions)
     st.as_kern(K.persist.set, 'plan', {v = 2, plan = doc or json.null, phases = ph, loaded = st.now.tick})
     return true, string.format('phases reloaded (%d)', #ph.phases), {phases = #ph.phases}
   end
@@ -918,7 +921,7 @@ local function kern_verb(st, verb, args, cmd)
     if doc.v ~= 2 or type(doc.seasons) ~= 'table' or #doc.seasons ~= 4 then return false, 'plan.json is not a v2 plan' end
     local prev = K.persist.get('plan')
     local phases = prev and prev.phases
-    K.plan = M.with_defaults(doc, phases)
+    K.plan = M.with_defaults(doc, phases, K.cfg and K.cfg.decisions)
     st.as_kern(K.persist.set, 'plan', {v = 2, plan = doc, phases = phases or json.null, loaded = st.now.tick})
     local n = 0
     for _, s in ipairs(doc.seasons) do n = n + #(s.build or {}) end
@@ -1555,7 +1558,7 @@ function M.boot(opts)
     st.mode, st.mode_since = 'PEACE', st.now.tick
   end
   local pp = K.persist.get('plan')
-  K.plan = M.with_defaults(pp and pp.plan, pp and pp.phases)
+  K.plan = M.with_defaults(pp and pp.plan, pp and pp.phases, st.cfg and st.cfg.decisions)
   marker.boots = (math.tointeger(marker.boots) or 0) + 1
   st.as_kern(K.persist.set, 'marker', marker)
   if type(kp.disabled) == 'table' and #kp.disabled > 0 then

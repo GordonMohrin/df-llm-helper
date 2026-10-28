@@ -81,7 +81,8 @@ def test_schema_errors_reported(base):
 @pytest.mark.parametrize("lvl,ceiling,d01,option,ok", [
     (0, 55, "A", "A", True), (1, 56, "A", "A", False), (1, 75, "A", "A", False), (2, 75, "A", "A", True),
     (2, 76, "A", "A", False), (3, 80, "A", "A", False), (3, 80, "A", "B", False), (3, 120, "B", "B", True),
-    (2, 75, "B", "B", True), (2, 80, "B", "B", False)])
+    (2, 75, "B", "B", True), (2, 100, "B", "B", True), (2, 101, "B", "B", False),
+    (0, 100, "B", "B", True), (0, 101, "B", "B", False)])   # BUG-132: D-01 = B, R0..R2 cap 100
 def test_pop_ceiling_vs_readiness(base, lvl, ceiling, d01, option, ok):
     doc, state = base
     doc["policy"].update(pop_ceiling=ceiling, option=option)
@@ -91,9 +92,9 @@ def test_pop_ceiling_vs_readiness(base, lvl, ceiling, d01, option, ok):
 
 def test_no_state_assumes_r0(base):
     doc, _ = base
-    doc["policy"]["pop_ceiling"] = 60
+    doc["policy"]["pop_ceiling"] = 101
     errs, _ = errs_of(doc, None)
-    assert any("R0 cap 55" in e and "no state" in e for e in errs)
+    assert any("R0 cap 100" in e and "no state" in e for e in errs)     # BUG-132: D-01 = B
 
 
 def test_semantic_rejections(base):
@@ -162,7 +163,7 @@ def test_propose_from_phases(save, base):
     applied = plan.applied_builds(save, state)
     assert {("hospital", None), ("bedrooms", None), ("tavern", None), ("workshops", None)} <= applied
     assert ("fortcore", 2) in applied                     # proj 'fortcore' at s2.build (no bp file)
-    assert doc["policy"] == {"option": "B", "pop_ceiling": 55, "beauty": "used_rooms"}   # D-01 = B (Gordon 2026-10-24)
+    assert doc["policy"] == {"option": "B", "pop_ceiling": 100, "beauty": "used_rooms"}  # D-01 = B: R1 cap 100 (BUG-132)
     assert doc["military"]["squads"] == {"melee": 2, "xbow": 1} and doc["military"]["pct"] == 15
     assert errs_of(doc, state)[0] == []
 
@@ -178,8 +179,9 @@ def test_propose_r2_option_b(base):
     doc = plan.propose(with_lvl(state, 3, cit=70), None, None, decisions={"D-01": "B"})
     assert doc["policy"]["option"] == "B" and doc["policy"]["pop_ceiling"] == plan.R_CAPS[3]
     assert doc["military"]["pct"] == 20
-    doc = plan.propose(with_lvl(state, 2), None, None, decisions={})
+    doc = plan.propose(with_lvl(state, 2), None, None, decisions={"D-01": "A"})
     assert doc["policy"]["pop_ceiling"] == 75
+    assert plan.propose(with_lvl(state, 2), None, None, decisions={})["policy"]["pop_ceiling"] == 100   # BUG-132: B
 
 
 # ---------------------------------------------------------------- apply
@@ -315,7 +317,7 @@ def test_apply_refuses_bad_plan_and_writes_nothing(save, base, monkeypatch):
     install_fake_bp(monkeypatch)
     doc, _ = base
     doc["year"] = 4
-    doc["policy"]["pop_ceiling"] = 75
+    doc["policy"]["pop_ceiling"] = 101                                # over the R1 cap 100 (D-01 = B, BUG-132)
     before = (save / "plan.json").read_text("utf-8")
     bp_before = sorted(p.name for p in (save / "bp").iterdir())
     errs, msg = plan.apply(save, doc, wait_s=0)
@@ -351,7 +353,7 @@ def test_plan_cli_propose_check_apply(save, monkeypatch, capsys):
     assert main(["--runtime", rt, "plan", "apply", "--dry-run"]) == 0
     assert "dry run ok: 3 blueprint(s)" in capsys.readouterr().out
     bad = json.loads((save / "plan.draft.json").read_text("utf-8"))
-    bad["policy"]["pop_ceiling"] = 99
+    bad["policy"]["pop_ceiling"] = 101
     files.write_json_atomic(save / "bad.json", bad)
     assert main(["--runtime", rt, "plan", "check", str(save / "bad.json")]) == 1
     out = capsys.readouterr().out
