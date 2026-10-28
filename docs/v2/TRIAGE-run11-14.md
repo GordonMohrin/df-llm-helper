@@ -138,3 +138,31 @@ lines). Everything is "offline, live-untested": each bug file names its live che
 | 94 | one harmless goblin holds BREACH 17+ days: question with a ready command, release at the limit, PATIENTS_OUT as a class-A wake | BUG-111, BUG-112 (`kill_lone_intruder`, `siege_release`), PATIENTS_OUT class A with a recipe, FR-93 |
 | 96 | `squad.sortie` to a position kills nothing; the soldiers stand beside a unit DF does not treat as an enemy | BUG-113 (kill order, SORTIE result events, kept against the posture, `not_attackable`, walk-group refusal), BUG-111 (classification by DF's flags), FR-93 |
 | 97 | BREACH never ends, bridge X25718 stays down, lever pulled for weeks | BUG-114 (`gate.pull_cap` give-up + GATE_FAIL reason, `breach.stuck_ticks` fallback, `BREACH since N d` line; why the real BREACH did not end with 0 visible stays open), FR-93 |
+
+## Fourth pass, the other packages (2026-10-28, notes 74-99, post-mortem Run 14)
+| Note | What | Where |
+|---|---|---|
+| 74 | MOOD_CRITICAL for a merchant of a foreign civ | BUG-103 (care, water, reflex, economy ignore non-citizens) |
+| 75 | EngraveSlab order scan error on a foreign order | BUG-116 area (M6: checked against BUG-078/090/091/092) |
+| 76 | bridge replacement leaves the ramp neighbour open | BUG-109 (second closure stage) |
+| 78 | refuge Kern+ without food/drink in a siege, 37 dead | BUG-107, FR-92 (FED level, supply switch, REFUGE_STOCK floor) |
+| 79 | GiveWater added=0 | BUG-104 (the line names why no job runs; the cause in the game stays a live read) |
+| 80 | mood death while cloth was in stock | BUG-117 (R0 mood_ws, cloth floor) |
+| 81 | corpses in tree crowns | BUG-105 (corpse_unreachable apart from corpses_old) |
+| 82 | no `kind: training` for squad.uniform | FR-89 |
+| 83 | bp.place has no Millstone / Quern | BUG-118 |
+| 84 | curse / werebeast invisible | BUG-115, FR-83, FR-84 |
+| 85, 86, 91, 95 | `dfllm next`, stale plan, hook check, camera `view` | FR-85, FR-86, FR-87, FR-88 |
+| 87, 88 | drill without bridges, lockdown without an enemy | BUG-110, BUG-108 |
+| 89, 92 | hospital first, mood workshop blocker | BUG-116 (care first), BUG-117 |
+| 90 | wound care audit | BUG-106 (`inspect what=hospital`) |
+| 93 | unit sheet | FR-83 (`inspect what=unit`) |
+| 98 | garbage dump zone | FR-90 |
+| 99 | load from the title screen, status at the main menu | FR-91, BUG-120 |
+
+## Fifth pass (notes 100-102, wave N)
+| Note | What | Where |
+|---|---|---|
+| 100 | `dfllm resume` for a game paused by DF | wave N: N1 |
+| 101 | follow replays events of a discarded timeline after a load | wave N: N1 |
+| 102 | plan check demands an unplaceable refuge seal (the stair never existed) | wave N: N2 |
