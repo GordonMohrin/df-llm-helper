@@ -116,6 +116,21 @@
 - **Not decided offline:** why the live project's coffins were never built (buildingplan's state is not readable by the kernel); whether wood-first
   (as asked) or the old stone-first suits a hard-stone map better (`coffin_wood_keep` is the knob); whether 15 days is the right `coffin_stale` for a
   fort with one slow carpenter.
+## BUG-128: the miners hold no pick: tool detail churn guard, better candidates, honest TOOL_BLOCKED blockers, the stale cap, a linked tool pile (2026-10-28, offline, live-untested)
+- **Why:** Run 14 region2-site90 (and site84/97/98): the miners held no pick while 97-109 picks lay in the fort. The Miners rotated with every
+  TOOL_BLOCKED (`- basis 0` 23 times), new members were patients and doctors, "for N days" counted per detail, `pending` was the kernel's own
+  request of the same pass, `upair` fired for a pair with a loose pick outside the 4-pick sample, the stale count let the forge make picks without
+  end (222 free axes), and dfllm-tools stayed empty while the picks sat in a binned weapons pile.
+- **What changed:** economy.lua: a kernel-added Miners/Woodcutters member stays `tools.keep_days` (14) and while he holds the tool or has a DF
+  work tool pair; the target stays >= 1 while dig/FellTree jobs exist; no patient (needs healthcare, Rest) or doctor-labor unit joins, the
+  profession breaks a skill tie; TOOL_BLOCKED `days` = the oldest member without the tool; no `pending` for a request < 1 game day (`upd0`); a
+  pair with a loose tool is `fetch`; the stale count excludes at most stock - (members + 2) reachable tools (far ones all); a new dfllm-tools is
+  placed with `bins=0` and `take_from=` the stockpile the tools sit in (act.tool_pile `take`). TOOL_BLOCKED `d.src` (that stockpile) and `d.g`
+  (the guards that applied). Config `tools.keep_days` (0..400); RULES TOOL_BLOCKED row in place; CONTRACTS appendix. Tests:
+  tests/lua/test_economy_tools_b128.lua (8, each fails on f3f684b), test_act_supply.lua tool_pile.
+- **Live check:** `dfllm cmd inspect '{"what":"workload","key":"tools"}'` (blocked, stale, pile); WORK_DETAIL Miners shows no `-` within 14
+  days of a `+`; the next TOOL_BLOCKED carries `d.g`/`d.src`, kern.log `tools: Miners blocked` has no `pending` on the day of a request; after a
+  new pile: its `storage.max_bins` is 0 and `links.take_from_pile` holds `d.src`. An old dfllm-tools keeps its settings: link it by hand.
 
 ## M7: a garbage dump zone, a trash view and the reason a dump job cancels; loading the newest complete save at the title screen; the title-screen status (FR-90, FR-91, BUG-120, 2026-10-28, package M7, notes 98 and 99; offline, live-untested)
 - **Why:** Run 14 note 98: garbage had no verb (`zone.place` knew no dump zone) and "Dump item cancelled 5 times today" (y701, y703, y707) gave no

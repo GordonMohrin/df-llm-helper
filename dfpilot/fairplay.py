@@ -810,7 +810,7 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400)},
                                "step": (1, 20), "idle_days": (1, 112), "stale_days": (1, 365), "unmark_max": (1, 400),
                                "labors": "labors"},
                      # BUG-053: stale tools, the tool pile (the part's other keys are checked by the mirror test)
-                     "tools": {"stale_days": (1, 400), "pile": "bool", "pile_days": (1, 400), "pile_w": (1, 5),
+                     "tools": {"stale_days": (1, 400), "keep_days": (0, 400), "pile": "bool", "pile_days": (1, 400), "pile_w": (1, 5),
                                "pile_h": (1, 5), "pile_r": (2, 40), "pile_reads": (20, 2000), "pile_every": (1, 400)},
                      # FR-76: a forbidden stock (>= burst_min drink + food units) is unforbidden burst_per_day a day
                      "forbid": {"per_day": (0, 5000), "burst_per_day": (0, 5000), "burst_min": (0, 100000)}}
