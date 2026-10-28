@@ -24,7 +24,9 @@
 -- lost:<B> (BUG-030 rebuild policy, BUG-048: a bridge the perimeter keeper replaces by a wall + door after
 -- perimeter.stop_after losses to building destroyers, seal.lost_gates; it stands for bridge:<B> and levers:<B> until the
 -- closure stands: the kernel queues it, no question), refuge_trust (BUG-049: seal.refuge_trust says the refuge is
--- exposed, has no closer on its stair head or its separation answer is stale), open_perimeter (FR-70, below).
+-- exposed, has no closer on its stair head or its separation answer is stale), mood_ws (BUG-117, Run 14 note 92: a moodable
+-- workshop type missing for offices.mood_ws_days days in a fort of offices.mood_ws_pop citizens; M.mood_ws_blocker), open_perimeter
+-- (FR-70, below).
 -- open_perimeter (FR-70, Run 11 y483-y497 and Run 13 y507-y525: a door open for 14 years, O1/B1/B2 and their levers
 -- lost for 18, 60 citizens lost in two sieges and a fort fallen over an open O1): a way in without door or bridge, a
 -- lost bridge (gate found it destroyed and it is no wall + door yet) or a lost lever (a bridge whose 2 linked levers
@@ -287,6 +289,58 @@ function M.office_blocker(K, now)
   return nil
 end
 
+---------------------------------------------------------------- BUG-117: moodable workshops missing
+-- config/baseline.json "offices": mood_ws_days (7, 0 = never a blocker) and mood_ws_pop (20, citizens from which it
+-- counts; a strange mood needs a fort of that size, and a fort of 7 builds its shops by its plan). Run 14 note 92: 151
+-- of 453 citizen deaths were failed strange moods, the Loom was missing for a while. A moodable workshop type
+-- (economy.mood_shops: from mood_from_phase on) missing on the map for mood_ws_days game days is the R0 blocker `mood_ws`
+-- with the ready bp.place command for the first three types no `workshops` project builds yet (one that does is named).
+-- The days count from the first look that found it missing in a fort of that size (state mws: type -> tick)
+M.MWS = {days = 7, pop = 20}
+function M.mood_ws_blocker(K, now)
+  local c = type(K.cfg.baseline) == 'table' and K.cfg.baseline.offices
+  c = type(c) == 'table' and c or {}
+  local days, pop = int(c.mood_ws_days), int(c.mood_ws_pop)
+  if days == nil or days < 0 or days > 400 then days = M.MWS.days end
+  if pop == nil or pop < 0 or pop > 250 then pop = M.MWS.pop end
+  local cu = K.census and K.census.u
+  local cit = type(cu) == 'table' and int(cu.cit) or 0
+  local okm, ms = false, nil
+  if days > 0 and cit >= math.max(pop, 1) then okm, ms = K.call('economy', 'mood_shops') end
+  if not (okm and type(ms) == 'table' and type(ms.missing) == 'table') then
+    if st.mws then st.mws, dirty = nil, true end              -- nothing known or nothing to ask: the clocks start again
+    return nil
+  end
+  local miss = {}
+  for _, t in ipairs(ms.missing) do miss[t] = true end
+  st.mws = st.mws or {}
+  for t in pairs(st.mws) do if not miss[t] then st.mws[t], dirty = nil, true end end
+  local list, oldest = {}, 0
+  for _, t in ipairs(ms.missing) do
+    if type(t) == 'string' then
+      if not st.mws[t] then st.mws[t], dirty = now, true end
+      local age = math.max(0, (now - st.mws[t]) // 1200)
+      if age >= days then list[#list + 1] = t; oldest = math.max(oldest, age) end
+    end
+  end
+  if #list == 0 then return nil end
+  local ask, queued = {}, {}
+  local qd = type(ms.queued) == 'table' and ms.queued or {}
+  for _, t in ipairs(list) do
+    if type(qd[t]) == 'table' then queued[#queued + 1] = string.format('%s %s %s%%', t, cut(qd[t].id, 12), tostring(int(qd[t].pct) or 0))
+    else ask[#ask + 1] = t end
+  end
+  local head = string.format('mood shops missing %d days: %s%s', oldest, table.concat(list, ',', 1, math.min(#list, 3)),
+                             #list > 3 and string.format(' +%d', #list - 3) or '')
+  local parts = {head}
+  if #ask > 0 then
+    local only = table.concat(ask, ',', 1, math.min(#ask, 3))
+    parts[#parts + 1] = string.format('dfllm cmd bp.place {"tpl":"workshops","site":"S1","p":{"only":"%s"}}', only)
+  end
+  if #queued > 0 then parts[#parts + 1] = 'queued ' .. table.concat(queued, ', ', 1, math.min(#queued, 2)) end
+  return cut(table.concat(parts, '; '), 200)
+end
+
 ---------------------------------------------------------------- levels
 local function audit_fails(K, now)
   local a = st.audit
@@ -439,6 +493,13 @@ local function evaluate(K, why)
     f1[#f1 + 1] = 'office'
     rt.office = otext
   end
+  -- BUG-117 (Run 14 note 92): a moodable workshop type missing for mood_ws_days days in a fort that can have a mood
+  rt.mws = nil
+  local mtext = M.mood_ws_blocker(K, now)
+  if mtext then
+    f1[#f1 + 1] = 'mood_ws'
+    rt.mws = mtext
+  end
   if not rt.lev or now - rt.lev.tick >= M.LEVERS_EVERY then rt.lev = check_levers(K, man) end
   local okl, lost = K.call('seal', 'lost_gates')             -- BUG-030 rebuild policy: held bridges
   lost = okl and type(lost) == 'table' and lost or {}
@@ -583,7 +644,7 @@ local function route_fix(route)
   return route .. ' (no wall tile: inspect entrances)'
 end
 
-local function unready_msg(fails, routes, open, ents, traps, route, rdry, hout, perim, office, blost)
+local function unready_msg(fails, routes, open, ents, traps, route, rdry, hout, perim, office, blost, mws)
   local ent
   if routes < 0 then ent = 'entrances not checked yet'
   elseif open == 0 then ent = string.format('%d way%s in, all with a door or bridge', routes, routes == 1 and '' or 's')
@@ -601,6 +662,7 @@ local function unready_msg(fails, routes, open, ents, traps, route, rdry, hout, 
   if hout then head = head .. hout .. '; ' end                 -- BUG-036: the hospital outside Kern+/the refuge
   if blost then head = head .. blost .. '; ' end               -- BUG-096: a burrow lost its wells or the refuge
   if office then head = head .. office .. '; ' end             -- BUG-055: a vacant office, squads without a leader
+  if mws then head = head .. mws .. '; ' end                   -- BUG-117: moodable shops missing
   local tail = '; traps ' .. (traps >= 0 and tostring(traps) or '? (no audit)')
   if #head + #ent + #tail > 200 and open > 0 then              -- the list stands in d.ents: keep the traps visible
     ent = string.format('%d of %d ways in without door or bridge', open, routes)
@@ -640,10 +702,10 @@ local function unready(K)
   end
   local routes, open = rt.routes or -1, rt.open or -1
   local perim = rt.pd and string.format('perimeter OPEN %d d (%s)', rt.pd, rt.pw or '?') or nil
-  K.emit('SIEGE_UNREADY', 'A', unready_msg(fails, routes, open, ents, traps, rt.route, rt.rdry, rt.hout, perim, rt.office, rt.blost),
+  K.emit('SIEGE_UNREADY', 'A', unready_msg(fails, routes, open, ents, traps, rt.route, rt.rdry, rt.hout, perim, rt.office, rt.blost, rt.mws),
          {fails = fails, afails = afails, routes = routes, open = open, ents = ents, traps = traps,
           age = a and math.max(0, now.tick - a.tick) or -1, rdry = rt.rdry, hout = rt.hout, office = rt.office,
-          blost = rt.blost,
+          blost = rt.blost, mws = rt.mws,
           pd = rt.pd, pw = rt.pd and rt.pw or nil})
   st.unready, dirty = CAD.mark(now, ents, toks), true
 end
@@ -764,6 +826,9 @@ function M.init(K)
   for name, v in pairs(type(p.lvok) == 'table' and p.lvok or {}) do
     if type(name) == 'string' and int(v) == 1 then st.lvok = st.lvok or {}; st.lvok[name] = 1 end
   end
+  for name, v in pairs(type(p.mws) == 'table' and p.mws or {}) do          -- BUG-117: when a moodable shop was first missed
+    if type(name) == 'string' and int(v) then st.mws = st.mws or {}; st.mws[name] = int(v) end
+  end
   if type(p.inbox) == 'table' and int(p.inbox.cap) then st.inbox = {cap = int(p.inbox.cap), plan = int(p.inbox.plan)} end
   local u = p.unready                                          -- FR-65: the last SIEGE_UNREADY (util/cadence record)
   if type(u) == 'table' and int(u.t) then
@@ -807,6 +872,7 @@ function M.state(K)
   if rt.dhold then r.dhold = rt.dhold end                     -- why no automatic drill starts (drill.hold)
   if rt.route then r.route = rt.route end                     -- the bypass / refuge route the last audit names
   if rt.office then r.office = rt.office end                  -- BUG-055: the vacant office R0 `office` names
+  if rt.mws then r.mws = rt.mws end                           -- BUG-117: the moodable shops R0 `mood_ws` names
   return {ready = r, pop = {cap = M.cap(K), gate_cap = rt.gate_cap or M.CAPS[0]}}
 end
 

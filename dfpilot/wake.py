@@ -108,7 +108,7 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
         # BUG-023: tool detail members without pick/axe; the fair-play remedy is the player's (RULES 7); Run 11: d.bk/blk
         # name the blocker, key=tools gives every record of the diagnosis
         "TOOL_BLOCKED": "dfllm cmd inspect '{\"what\":\"workload\",\"key\":\"tools\"}' (d.bk names the blocker), "
-                        "then tell Gordon (RULES 7)",
+                        "then tell Gordon what d.tell says (RULES 7; BUG-116: d.care = the hospital waiting for the pick)",
         # BUG-030: the kernel already acted (no pulls for a destroyed bridge; the deep defense); tell the player
         "BRIDGE_DESTROYED": "dfllm status; tell Gordon; the kernel rebuilds it in quiet PEACE, or replaces it by wall + "
                             "door after perimeter.stop_after losses to building destroyers (BUG-048: no question); "
@@ -226,6 +226,8 @@ def next_hint(etype: str, e: dict) -> str:
         return HOSPITAL_OUT_HINT
     if etype == "SIEGE_UNREADY" and "office" in (d.get("fails") or []):
         return OFFICE_HINT
+    if etype == "SIEGE_UNREADY" and "mood_ws" in (d.get("fails") or []):
+        return MOOD_WS_HINT
     if etype == "DECISION_NEEDED" and d.get("id") == "bridge_rebuild":
         return rebuild_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "intruder_sortie":
@@ -286,6 +288,10 @@ HOSPITAL_OUT_HINT = ("the hospital lies outside the core: plan it next to accept
 # readiness R0 office; the line's msg carries the exact command
 OFFICE_HINT = ("a vacant office or squads without a leader: dfllm cmd inspect '{\"what\":\"offices\"}', then "
                "dfllm cmd appoint / squad.create / squad.leader (the msg names the unit)")
+
+# BUG-117 (Run 14 note 92) readiness R0 mood_ws: moodable workshop types missing; the line's msg carries the command
+MOOD_WS_HINT = ("moodable workshops missing: run the bp.place command the line names (dfllm cmd bp.place "
+                "'{\"tpl\":\"workshops\",\"site\":\"S1\",\"p\":{\"only\":\"Loom\"}}'); follow places the rest")
 
 
 def wake_line(burst: dict[str, dict], state: dict | None, held_s: float = 0, auto: bool = True) -> str:

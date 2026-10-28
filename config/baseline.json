@@ -120,7 +120,7 @@
               "spec": {"job": "CustomReaction", "reaction": "TAN_A_HIDE",
                        "item_conditions": [{"condition": "AtLeast", "value": 1, "flags": ["unrotten"],
                                             "reaction_product": "TAN_MAT"}]}},
-  "cloth": {"from_phase": "P1", "per_naked": 3, "max_jobs": 10, "loom": ["workshop:Loom"],
+  "cloth": {"from_phase": "P1", "per_naked": 3, "max_jobs": 10, "floor": 20, "loom": ["workshop:Loom"],
             "weave": [{"kind": "plant", "tag": "dfllm:cloth"}, {"kind": "silk", "tag": "dfllm:cloth_silk"},
                       {"kind": "yarn", "tag": "dfllm:cloth_yarn"}],
             "thread": {"tag": "dfllm:thread", "ws": ["workshop:Farmers"],
@@ -166,6 +166,7 @@
              "wood": {"job": "MakeAmmo", "sub": "ITEM_AMMO_BOLTS", "ws": ["workshop:Craftsdwarfs", "workshop:Bowyers"]},
              "bone": {"job": "MakeAmmo", "sub": "ITEM_AMMO_BOLTS", "ws": ["workshop:Craftsdwarfs"]}}
            ]},
+  "training": {"on": true, "from_phase": "P1", "spare": 2, "max_jobs": 5, "tag": "dfllm:train", "ws": ["workshop:Carpenters"]},
   "idle": {
    "pct": 40, "days": 3, "boulders_min": 30, "blocks_cap": 200, "crafts_cap": 60, "combine_every": 8400, "wood_min": 60,
    "craft_cats": ["FIGURINE", "AMULET", "RING", "EARRING", "BRACELET", "SCEPTER", "CROWN", "TOTEM"],
@@ -304,6 +305,7 @@
  "runner": {
   "seal_first": {"on": true, "stuck_days": 3, "food_d": 30, "drink_d": 30, "wall": true, "wall_days": 2},
   "rebuild": {"pop": 10, "off": 12},
+  "care_first": {"on": true, "stuck_days": 10, "patients": 1},
   "queue": {"yield_days": 7, "park_days": 30},
   "reclaim": {"on": true, "gone_scans": 2, "min_ws": 3, "ask_days": 3}
  },
@@ -316,7 +318,7 @@
   "early_pop": 40,
   "station_r": 3
  },
- "offices": {"blocker_days": 7},
+ "offices": {"blocker_days": 7, "mood_ws_days": 7, "mood_ws_pop": 20},
  "zones": {"max_tiles": 400},
  "save": {"wait_s": 180, "max_wait_s": 600, "autosave_fresh_s": 300},
  "perf": {"quiet_s": 60, "carry_days": 28},

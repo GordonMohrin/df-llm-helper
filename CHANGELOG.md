@@ -1,5 +1,46 @@
 # CHANGELOG dfpilot
 
+## M6: orders and economy: care first, a missing mood workshop is a blocker, a cloth floor, more shop types, training weapons (BUG-116, BUG-117, BUG-118, BUG-119, FR-89, 2026-10-28, offline, live-untested)
+- **Why:** Run 14 notes 75, 80, 83, 92, 82 and 89. The hospital stood outside the refuge for 60 game years while expansion projects held the
+  runner's slots and the miners found no pick (note 89); 151 of 453 citizen deaths were failed strange moods, the Loom was missing and cloth ran
+  dry (notes 80, 92); `bp.place workshops` knew no Quern or Millstone (83); the game session wanted wooden drill weapons (82); `order.add
+  EngraveSlab` failed for 7 of 8 ghosts (75).
+- **What changed:**
+  - **BUG-116 care first (runner.lua `Q.care_lead`, `sorted`, `paused`; economy.lua `M.tool_tell`):** in PEACE, while water's `hosp_out` is set or a patient
+    lies in the fort, the first live hospital project that is not halted leads the slots (right after the seals, never yielding) and the `work` and `beds`
+    kinds pause; seals, tombs, the depot, repairs, defense, mood nooks and food/drink projects never; a hospital without progress for
+    `runner.care_first.stuck_days` (10) stops pausing (latched, kern.log warns, state `sched.care.stuck`). State `sched.care`, status line, config
+    `runner.care_first {on, stuck_days, patients}`. TOOL_BLOCKED (class A already) gains `d.tell`, the player's sentence (unforbid the pick, a free chest,
+    the labor, ...), and `d.care`, the hospital project that leads and needs the miners (public `runner.care_first`).
+  - **BUG-117 mood workshops (readiness.lua `M.mood_ws_blocker`, economy.lua `M.mood_shops`, care.lua `M.ws_fix`):** R0 blocker `mood_ws` when one of the 12
+    moodable workshop types is missing on the map for `offices.mood_ws_days` (7) game days in a fort of `offices.mood_ws_pop` (20) citizens, from P1;
+    text with the ready `bp.place workshops p.only=<type>` command (`ready.mws`, `SIEGE_UNREADY.mws`, brief, wake hint); `MOOD_RISK.fix` and the
+    `mood_workshop` decision name the shop of the dwarf's best skill (`care.SKILL_WS`). `economy.cloth.floor` (20): the weave and thread orders keep 20 free
+    cloth from P1 on even when the mood stock (10) is met (the fiber crops follow the target only): the kernel's own MOOD_CLOTH_WATCH.
+  - **BUG-118 (dfpilot/bp/rooms.py):** `workshops` knows Quern and Millstone (1x1), Ashery, Dyers, MagmaForge and the 5x5 Kennels and Siege (own strip below the
+    rows; the usual layout and its golden files are unchanged). Soap Maker's and Screw Press are Custom workshops without a `df.workshop_type` name: left out.
+  - **BUG-119:** note 75 is solved already: the error text is the write of `material_category.stone` that BUG-090 removed (at 0cb9c33 line 1497 is that write),
+    the scan is in a `pcall` per order. `act.engrave_order` now also guards the whole walk; tests pin both.
+  - **FR-89 (military.lua `M.uniform_training`, `M.train_apply`, `M.training_need`; economy.lua `M.plan_training`):** `squad.uniform kind=training` sets the training
+    weapon of each position's class (axe, short sword, spear), lists the positions that have none (hammer, mace, pick, ...), keeps the policy per squad (state
+    `tr`) for recruits and the rotation, and economy orders the missing training weapons at the carpenters (`economy.training`, bounded). A `_TRAINING` raw is no
+    work tool for the tool guard.
+- **Contracts:** schema.py + contract.lua: `SIEGE_UNREADY.mws`, `MOOD_RISK.fix`, `TOOL_BLOCKED.tell/care`, state `ready.mws`, `sched.care`, `squad.uniform` kind
+  `training`; config `offices.mood_ws_days/mood_ws_pop`, `runner.care_first`, `economy.cloth.floor`, `economy.training` (baseline.json, fairplay, `lint --config`).
+  No new event (TOOL_BLOCKED, SIEGE_UNREADY and MOOD_RISK are class A already, RULES section 7 rows extended in place). CONTRACTS regenerated.
+- **Safety:** care first runs only in PEACE, never pauses a seal, tomb, depot, repair, defense, mood or food project, lifts by itself, and a fault in it costs only that rule
+  (own pcall); mood_ws needs P1, 20 citizens and 7 days, `mood_ws_days 0` switches it off; the cloth floor changes weave orders only; training needs a verb call by the
+  player and a carpenter's shop; a fort of 7, a fort of 80, a lockdown, a siege, a reclaimed fort and an old kernel state (no `cf`, `mws`, `tr` keys) behave as before.
+- **Tests (every new test fails on 32994bb except the guards of unchanged behaviour: care first without a need, `on` false, a halted hospital, a seal ahead of the hospital, the first BUG-119 test, the default shop layout, an unknown shop name):** tests/lua/test_m6_care_first.lua (8), test_m6_economy.lua (3), test_m6_training.lua (4), test_readiness.lua (2),
+  test_care_moods.lua (2), test_economy_tools_a3.lua (2), test_economy_chains.lua (2), test_act_supply.lua (2), tests/test_m6_orders.py. The 13 Lua failures of
+  test_baseline / test_open_perimeter / test_readiness / test_wp8_kern (max-pop 100 against 55, commit e3c0c77) stand on 32994bb exactly the same.
+- **Live check:** `kern.log` lines `care first:` during a `hospital_out`, `inspect projects` and the status line `care first:`; at the next TOOL_BLOCKED read
+  `d.tell` and `d.care`; remove a Loom in a test fort and wait 7 days for `mood_ws` in the status and the SIEGE_UNREADY line, run its command; at the next mood
+  with no workshop read `MOOD_RISK.fix`; `dfllm cmd squad.uniform '{"squad":"A","kind":"training"}'` then the squads screen (weapons) a day later and
+  `economy` orders `dfllm:train_axe`; `dfllm cmd bp.place '{"tpl":"workshops","site":"S1","p":{"only":"Quern"}}'`.
+- **Not decided offline:** bugs/BUG-116 (whether the miners fetch a pick from a chest; whether care first lifts the Run 14 stall), BUG-117 (the cause of unit 39015's
+  49 days), BUG-118 (Millstone power, the 5x5 room), FR-89 (whether a held metal weapon is swapped at once).
+
 ## L1: the drink nook says why it is refused, judges a tile like quickfort, skips a tile quickfort refuses and widens for a critical mood (BUG-102, FR-82, 2026-10-23, offline, live-untested)
 - **Why:** Run 14 note 73: a strange-mood dwarf stood at thirst 64,976/75,000 with `no free floor within 3 tiles of the workshop`. By-hand
   reads showed free floor; quickfort then skipped the three nearest tiles as occupied and took tiles 4-5 further out. The kernel's

@@ -27,8 +27,15 @@ MOODABLE_TYPES = [n for _, n in MOODABLE]
 # with no fishery (food fell to 5 days); economy asks `workshops why=fishery`, follow adds only the fishery
 # FR-73 (Run 14: no Farmer's Workshop in the whole fort, ProcessPlants and SpinThread waited for months): the farmer's
 # shop (quickfort `ww`) is the plan's, P1 builds it with the moodable shops
-EXTRA = [("wl", "Still"), ("wz", "Kitchen"), ("wu", "Butchers"), ("wh", "Fishery"), ("ww", "Farmers")]
+# BUG-118 (Run 14 note 83: `only=Millstone` / `only=Quern` were refused as unknown types): the other shops df.workshop_type
+# offers that quickfort places (build.lua: wq Quern and wM Millstone are exactly 1x1, wy Ashery, wd Dyer's Shop, wv Magma
+# Forge, k Kennels and ws Siege Workshop exactly 5x5). Not here: Soap Maker (wS) and Screw Press (wp), Custom workshops with
+# no df.workshop_type name of their own (the manifest and the kernel's census know shops by that name)
+EXTRA = [("wl", "Still"), ("wz", "Kitchen"), ("wu", "Butchers"), ("wh", "Fishery"), ("ww", "Farmers"),
+         ("wq", "Quern"), ("wM", "Millstone"), ("wy", "Ashery"), ("wd", "Dyers"), ("wv", "MagmaForge"),
+         ("k", "Kennels"), ("ws", "Siege")]
 EXTRA_TYPES = [n for _, n in EXTRA]
+SHOP_SIZE = {"Quern": 1, "Millstone": 1, "Kennels": 5, "Siege": 5}      # side of the footprint; 3 for every other shop
 
 COMMON = {"burrow": ("Kern+", None, None)}
 PARAMS = {
@@ -212,14 +219,27 @@ def workshops(p: dict) -> Plan:
     if not todo:
         raise ValueError("workshops: nothing left to build")
     P = Plan("workshops", "infra")
-    cols, rows = min(len(todo), 6), -(-len(todo) // 6)
-    box = _box(P, 4 * cols + 1, 4 if rows == 1 else 4 * rows)       # FR-73: a third row of shops gets its own 4 rows
+    # BUG-118: 3x3 cells in rows of six, 4 apart; a 1x1 shop sits in the middle of its cell; the 5x5 shops (Kennels, Siege)
+    # follow in a strip of their own below the rows (6 apart), so the layout of the usual 3x3 shops does not change
+    small = [(k, n) for k, n in todo if SHOP_SIZE.get(n, 3) < 5]
+    big = [(k, n) for k, n in todo if SHOP_SIZE.get(n, 3) == 5]
+    cols, rows = min(len(small), 6), -(-len(small) // 6)
+    h_small = 0 if not small else 4 if rows == 1 else 4 * rows       # FR-73: a third row of shops gets its own 4 rows
+    width = max(4 * cols + 1 if small else 0, 6 * len(big) + 1 if big else 0)
+    box = _box(P, width, h_small + (6 if big else 0))
     b = P.stage("build", "build", orders=1)
-    for i, (key, name) in enumerate(todo):
+    for i, (key, name) in enumerate(small):
         r, c = divmod(i, 6)
         u, v = box[0] + 1 + 4 * c, box[1] + 1 + 4 * r
-        b.ent(u, v, u + 2, v + 2, 0, key)
+        if SHOP_SIZE.get(name, 3) == 1:
+            b.tile(u + 1, v + 1, 0, key)
+        else:
+            b.ent(u, v, u + 2, v + 2, 0, key)
         P.workshops.append((name, (u + 1, v + 1, 0)))
+    for i, (key, name) in enumerate(big):
+        u, v = box[0] + 1 + 6 * i, box[1] + h_small + 1
+        b.ent(u, v, u + 4, v + 4, 0, key)
+        P.workshops.append((name, (u + 2, v + 2, 0)))
     _finish(P, p, box)
     return P
 

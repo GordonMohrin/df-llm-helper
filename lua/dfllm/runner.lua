@@ -92,6 +92,11 @@ M.CFG = {
   -- plug, tombs, food/drink, beds, wall repairs and the depot run, until rebuild_off. config/baseline.json "runner":
   -- {seal_first: {on, stuck_days, food_d, drink_d}, rebuild: {pop, off}} (fairplay.RUNNER_LIM; a bad value: default)
   seal_first = true, seal_stuck_days = 3, emerg_food_d = 30, emerg_drink_d = 30, rebuild_pop = 10, rebuild_off = 12,
+  -- BUG-116 (Run 14 note 89: hospital_out for 60 game years, the hospital placed seven times and parked at "dig 0 %, slot
+  -- yielded"): care first. While hospital_out is set or care_patients patients lie in the fort the hospital project runs first
+  -- and the work and housing projects pause (PEACE); one that makes no progress for care_stuck_days stops pausing them.
+  -- config/baseline.json "runner": {care_first: {on, stuck_days, patients}}
+  care_first = true, care_stuck_days = 10, care_patients = 1,
   hold_n = 3,            -- paused projects in a dig stage watched per run (miners dig what is designated: a breach)
   -- BUG-037 (Run 11 y449: bedrooms, stockroom, tavern, tombs and a prio-2 depot 'queued' at 0 % for months, 15 of 27
   -- adults idle): a slot holder whose own progress (a chunk applied, manager orders made, measured progress, a stage
@@ -2469,8 +2474,9 @@ end
 local function sorted()
   local r = {}
   for _, P in ipairs(S.pd.list) do if P.done ~= 1 then r[#r + 1] = P end end
+  local care = S.care_id                        -- BUG-116: the hospital that runs first, after the seals
   table.sort(r, function(a, b)
-    local sa, sb = SEALS[a.tpl] and 0 or 1, SEALS[b.tpl] and 0 or 1
+    local sa, sb = SEALS[a.tpl] and 0 or care == a.id and 1 or 2, SEALS[b.tpl] and 0 or care == b.id and 1 or 2
     if sa ~= sb then return sa < sb end
     if a.prio ~= b.prio then return a.prio < b.prio end
     if a.created ~= b.created then return a.created < b.created end
@@ -2543,6 +2549,7 @@ local function conf(K)
   local sf = type(c.seal_first) == 'table' and c.seal_first or {}
   local rb = type(c.rebuild) == 'table' and c.rebuild or {}
   local q = type(c.queue) == 'table' and c.queue or {}
+  local cf = type(c.care_first) == 'table' and c.care_first or {}           -- BUG-116
   local r = {on = M.CFG.seal_first, stuck = nat(sf.stuck_days, 1, 60, M.CFG.seal_stuck_days) * DAY,
              wall = M.CFG.seal_wall, wall_days = nat(sf.wall_days, 0, 60, M.CFG.seal_wall_days) * DAY,
              food_d = nat(sf.food_d, 0, 400, M.CFG.emerg_food_d), drink_d = nat(sf.drink_d, 0, 400, M.CFG.emerg_drink_d),
@@ -2553,6 +2560,9 @@ local function conf(K)
   local rc = type(c.reclaim) == 'table' and c.reclaim or {}
   r.rec = {on = rc.on ~= false, scans = nat(rc.gone_scans, 1, 10, M.CFG.rec_scans),
            min = nat(rc.min_ws, 1, 50, M.CFG.rec_min), ask = nat(rc.ask_days, 1, 60, M.CFG.rec_ask) * DAY}
+  r.care = {on = M.CFG.care_first, stuck = nat(cf.stuck_days, 1, 60, M.CFG.care_stuck_days) * DAY,
+            patients = nat(cf.patients, 1, 250, M.CFG.care_patients)}
+  if type(cf.on) == 'boolean' then r.care.on = cf.on end
   if type(sf.on) == 'boolean' then r.on = sf.on end
   if type(sf.wall) == 'boolean' then r.wall = sf.wall end
   r.off = math.max(r.off, r.pop)
@@ -2821,11 +2831,77 @@ local function fallen(K, c)
   return (int(S.rt.pk) or 0) >= c.off or (pnum(S.phase) or 0) >= 2
 end
 
+-- BUG-116 (Run 14 note 89): care first. The hospital project that runs first while the hospital lies outside the burrows
+-- (water state hosp_out) or care.patients patients lie in the fort, in PEACE: the first project after the seals, the work and
+-- housing projects pause (Q.CARE_PAUSES; seals, tombs, the depot, repairs, defense, mood nooks and food/drink projects never).
+-- The first live hospital project that is not halted leads. Its progress is watched like a seal's (state m.runner cf = {id,
+-- sig, t, st}): no stage, chunk or percent change for care_first.stuck_days latches st = 1, the others run again (kern.log
+-- warns once) until the hospital moves; the clock waits while the mode is not PEACE. Returns {id, why} or nil
+Q.CARE_PAUSES = {work = true, beds = true}
+function Q.care_lead(K, c, t)
+  local cf = c.care
+  local w = K.view().water
+  local out = type(w) == 'table' and int(w.hosp_out) or 0
+  local pat = type(w) == 'table' and int(w.patients) or 0
+  local need = cf.on and (out > 0 or pat >= cf.patients)
+  local rec = S.rt.cf
+  if not need then
+    if rec ~= nil then S.rt.cf = nil; dirty() end
+    return nil
+  end
+  local lead
+  for _, P in ipairs(sorted()) do
+    if P.tpl == 'hospital' and P.done ~= 1 and not halted(P) and P.blocked ~= 'cancel' and not Q.parked(K, P, c.park) then
+      lead = P
+      break
+    end
+  end
+  if not lead then
+    if rec ~= nil then S.rt.cf = nil; dirty() end
+    return nil
+  end
+  local R = S.rt.p[lead.id]
+  local sig = string.format('%d:%d:%d:%d', lead.stage, lead.chunk, lead.pct or 0, type(R) == 'table' and int(R.prog) or 0)
+  if type(rec) ~= 'table' or rec.id ~= lead.id or rec.sig ~= sig then
+    rec = {id = lead.id, sig = sig, t = t, st = 0}
+    S.rt.cf = rec
+    dirty()
+  elseif K.mode() ~= 'PEACE' then
+    if rec.t ~= t then rec.t = t; dirty() end                    -- the clock waits while the mode freezes the project
+  elseif rec.st ~= 1 and t - rec.t >= cf.stuck then
+    rec.st = 1
+    dirty()
+    K.log('warn', 'care first: %s made no progress for %d days: the other projects run again (it leads again when it moves)',
+          lead.id, cf.stuck // DAY)
+  end
+  local why = out > 0 and string.format('hospital_out %d', out) or plural(pat, 'patient')
+  if rec.st == 1 then return {id = lead.id, why = why, stuck = true, days = (t - rec.t) // DAY} end
+  if K.mode() ~= 'PEACE' then return nil end
+  return {id = lead.id, why = why}
+end
+
+-- BUG-116 public (economy's TOOL_BLOCKED names the hospital that waits for a pick): {proj, why, stuck?} while care first
+-- leads (or is latched stuck), else nil. Read-only
+function M.care_first(K)
+  local f = S.focus
+  if f and f.care then return {proj = f.care, why = f.care_why, stuck = f.care_stuck} end
+  return nil
+end
+
 -- once a run (begin_run): the open seals and their progress clocks (m.runner sf[<proj>] = {sig, t, st, ev}), the
 -- rebuild switch (m.runner rb, pk) and what the pause rules need now (S.focus)
 local function focus(K)
   local c, t = conf(K), now(K)
   local f = {c = c, n = 0, more = 0, stuck = {}, stk = {}, emerg = emergency(K, c), rock = rock_short(K)}
+  -- BUG-116: care first. Own pcall: a fault costs only this rule, never the seal-first count
+  S.care_id = nil
+  local okc, cl = pcall(Q.care_lead, K, c, t)
+  if okc and cl then
+    f.care, f.care_why, f.care_stuck, f.care_days = cl.id, cl.why, cl.stuck, cl.days
+    if not cl.stuck then S.care_id = cl.id end
+  elseif not okc then
+    K.log('error', 'care first failed, this run without it: %s', trunc(cl, 160))
+  end
   S.rt.sf = obj(S.rt.sf)
   local open = {}
   for _, P in ipairs(sorted()) do
@@ -2988,6 +3064,10 @@ local function paused(K, P, d)
     local st = d and d.stages[P.stage + 1]
     if not (f.rock and st and st.mode == 'dig') then return 'seal ' .. f.lead end
   end
+  -- BUG-116: care first (the hospital leads, the work and housing projects wait; never the hospital itself)
+  if f.care and not f.care_stuck and f.care ~= P.id and m == 'PEACE' and Q.CARE_PAUSES[k] then
+    return 'care ' .. f.care
+  end
   if f.rb and (m == 'PEACE' or m == 'RECOVERY') and not REBUILD_RUNS[k] then
     return string.format('rebuild pop %d<%d', f.rb.pop, f.rb.lo)
   end
@@ -3009,6 +3089,8 @@ local function note_pause(K, pz)
       head = string.format('seal first: %s with %s open%s runs first', f.lead, plural(f.n, 'piece'),
                            #f.names > 0 and (' (' .. table.concat(f.names, ', ') .. ')') or '')
       if f.emerg then head = head .. ' (' .. f.emerg .. ': food/drink projects go on)' end
+    elseif why:sub(1, 5) == 'care ' then
+      head = string.format('care first: %s with %s runs first', f.care, f.care_why or '?')
     elseif f.rb then
       head = string.format('rebuild: pop %d < %d (until %d), only seal/tombs/food/beds', f.rb.pop, f.rb.lo, f.rb.hi)
     end
@@ -3033,9 +3115,15 @@ end
 
 -- state.sched (status: `seal open: 3 pieces (c1a147c261), others paused`; `rebuild: pop 2 < 10, ...`)
 local function sched_state(f, pz)
-  local ns, nr = 0, 0
-  for _, e in ipairs(pz) do if e.why:sub(1, 5) == 'seal ' then ns = ns + 1 else nr = nr + 1 end end
+  local ns, nr, nc = 0, 0, 0
+  for _, e in ipairs(pz) do
+    if e.why:sub(1, 5) == 'seal ' then ns = ns + 1 elseif e.why:sub(1, 5) == 'care ' then nc = nc + 1 else nr = nr + 1 end
+  end
   local s = {}
+  if f.care then                                  -- BUG-116
+    s.care = {proj = f.care, paused = nc, why = trunc(f.care_why or '', 24)}
+    if f.care_stuck then s.care.stuck, s.care.days = 1, f.care_days or 0 end
+  end
   if f.lead then
     s.seal = {proj = f.lead, n = f.n, paused = ns, more = f.more + #f.stuck, stuck = 0}
   elseif #f.stuck > 0 then
@@ -4023,6 +4111,7 @@ local function begin_run(K)
     if S.ferr ~= err then S.ferr = err; K.log('error', 'seal first/rebuild failed, this run without them: %s', err) end
     Q.fault(K, err)
     f = {c = conf(K), n = 0, more = 0, stuck = {}, stk = {}}
+    S.care_id = nil                           -- BUG-116: no care lead without a focus
   else S.ferr, S.fc, S.fev = nil, nil, CAD.quiet(S.fev) end
   S.focus = f
   -- BUG-045: the civil alert confines the miners to its burrow in every mode: a dig project with applied chunks is frozen
@@ -4055,6 +4144,7 @@ local function begin_run(K)
   -- idleness (R.ps), holding one is
   local function second(P, R)
     if SEALS[P.tpl] and c.on and not f.stk[P.id] then return false end
+    if S.care_id == P.id and P.blocked ~= 'stalled' then return false end         -- BUG-116: the hospital never yields
     if P.blocked == 'stalled' or (SEALS[P.tpl] and f.stk[P.id]) then return true end
     return type(R) == 'table' and R.si == P.stage and t - (int(R.ps) or t) >= c.yield
   end

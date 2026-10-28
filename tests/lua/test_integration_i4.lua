@@ -90,6 +90,7 @@ T.test('I4: config/baseline.json carries every key the first pass reads, with th
   T.eq(months(mil.conf({cfg = {}}).militia.B), B.military.militia.B, 'FR-71 militia B')
   T.eq(months(mil.conf({cfg = {}}).free), B.military.free_months, 'FR-71 free_months')
   T.eq(B.offices.blocker_days, ready.OFFICES.days, 'BUG-055')
+  T.eq({B.offices.mood_ws_days, B.offices.mood_ws_pop}, {ready.MWS.days, ready.MWS.pop}, 'BUG-117')
   T.eq(B.zones.max_tiles, zl.MAX_TILES, 'FR-78')
   for k, lim in pairs(kern.PERF) do T.eq(B.perf[k], lim[1], 'BUG-070/071 perf.' .. k) end
   for k, v in pairs(water.DEFAULTS) do

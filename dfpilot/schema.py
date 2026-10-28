@@ -509,7 +509,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # radius ends 'r6', one quickfort refused says 'quickfort refused the drink nook at x,y,z (tile occupied)'
     # K3 (BUG-100): slots = one text per open slot of the mood job, 'blocks(metal) x2: none in the fort [0/0/0 of 225]' (slot, count,
     # blocker: none in the fort | none free | none reachable | enough exist; [in the fort/free/reachable of every item of the type])
-    "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i nosrc:sa route:s ws:s slots:sa")),
+    "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i nosrc:sa route:s ws:s slots:sa fix:s")),
     "MOOD_CRITICAL": ("A", "care", _d("unit:i why:s", "kind:s thirst:i hunger:i ws:s name:s pos:p missing:sa nook:s")),
     # class A since Run 9 (an army walked in while these were digest-only): they wake at once
     "SIEGE_START": ("A", "siege", _d(opt="vis:i inv:i great:i why:s")),
@@ -553,7 +553,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # (R0 `office`), with its fix
     # BUG-096: blost = Kern+ or the refuge lost a well or the refuge's tiles (blocker burrow_lost) and what the kernel does
     "SIEGE_UNREADY": ("A", "readiness", _d(opt="fails:sa afails:sa routes:i open:i ents:sa traps:i age:i rdry:s "
-                                               "hout:s pd:i pw:s office:s blost:s")),
+                                               "hout:s pd:i pw:s office:s blost:s mws:s")),
     # BUG-015: an entrance door the lockdown forbade lost its forbidden flag before the next pass (refused)
     "LOCKDOWN_PARTIAL": ("A", "reflex", _d("doors:i", "refused:ia pos:p retry:f items:i units:i")),
     # BUG-023 / Run 10: tool detail members without their pick or axe while its jobs wait and free tools exist; Run 11:
@@ -563,7 +563,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-053: forbidden / off_group / owned (population level) join the keys; pile = the tool pile's state
     "TOOL_BLOCKED": ("A", "economy", _d("detail:s tool:s n:i", "members:ia jobs:i days:i free:i bins:i reserved:i "
                                                                "why:s who:s hint:s pos:p eq:i eq_days:i forb:i blk:s "
-                                                               "bk:s picks:sa units:sa civ:i ww:i pile:s")),
+                                                               "bk:s picks:sa units:sa civ:i ww:i pile:s tell:s care:s")),
     # BUG-027: a SIEGE/BREACH raise went ahead onto units on or next to the footprint (a hostile within force_near)
     "GATE_FORCED": ("A", "gate", _d("bridge:s", "units:ia hostile:i pos:p job:i")),
     # BUG-027: a unit died on or next to a bridge just pulled or moving (gate's move records, dfllm.deaths.bridge)
@@ -798,7 +798,7 @@ VERB_ARGS: dict[str, Obj] = {
     "squad.create": Obj(req={"name": Str(r"^[A-Za-z0-9 _-]{1,30}$")}, opt={"leader": NAT, "assignment": NAT}),
     "squad.leader": Obj(req={"squad": SQUAD, "unit": NAT}),
     "squad.add": Obj(req={"squad": SQUAD, "unit": NAT}),
-    "squad.uniform": Obj(req={"squad": Str(enum=["A", "B", "C"])}, opt={"kind": Str(enum=["melee", "xbow"])}),
+    "squad.uniform": Obj(req={"squad": Str(enum=["A", "B", "C"])}, opt={"kind": Str(enum=["melee", "xbow", "training"])}),
     # FR-78 (Run 14 note 65): a civzone of `type` in `bbox` (one z level) through quickfort's zone mode
     "zone.place": Obj(req={"type": Str(enum=ZONE_TYPES), "bbox": BBOX}, opt={"name": Str(r"^[A-Za-z0-9_-]{1,24}$")}),
 }
@@ -854,7 +854,9 @@ STATE = Obj(
                       opt={"open": Int(-1), "ents": Arr(Str(maxbytes=24), hi=3), "dhold": Str(maxbytes=24),
                            "route": Str(maxbytes=60), "pd": NAT, "pw": Str(maxbytes=60),
                            # BUG-055: the vacant office (or squad leader post) R0 `office` names, with its fix
-                           "office": Str(maxbytes=200)}),
+                           "office": Str(maxbytes=200),
+                           # BUG-117: the moodable workshops R0 `mood_ws` names, with the bp.place command
+                           "mws": Str(maxbytes=200)}),
          # Run 10: ore/bars/leather stock, the metal route ('explore' = no ore, metal wanted), the classes strange
          # moods missed within a year (plan propose/check supply goals)
          # Run 11: free stone and what the open rock orders, walls and needs want (rock_need); picks in the fort and the
@@ -911,6 +913,10 @@ STATE = Obj(
          "sched": Obj(opt={"seal": Obj(req={"proj": ID, "n": NAT, "paused": NAT},
                                        opt={"more": NAT, "stuck": FLAG, "days": NAT}),
                            "rb": Obj(req={"pop": NAT, "lo": NAT, "paused": NAT}, opt={"hi": NAT}),
+                           # BUG-116: care first (the hospital project that leads, projects it pauses, why: hospital_out N
+                           # | N patients; stuck 1 = it made no progress for care_first.stuck_days, days)
+                           "care": Obj(req={"proj": ID, "paused": NAT},
+                                       opt={"why": Str(maxbytes=24), "stuck": FLAG, "days": NAT}),
                            # BUG-037: projects waiting for a slot and the slot holders (id, template, days without own
                            # progress); no run ended for d days (the run in hand: task i of n, its label, slices, age
                            # in days); parked projects (blocked for good past runner queue.park_days)

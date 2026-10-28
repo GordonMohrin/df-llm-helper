@@ -154,6 +154,13 @@ M.MAT_VEC = {bone = 'CORPSEPIECE', shell = 'CORPSEPIECE', rock = 'BOULDER', wood
 M.MOOD_SKILLS = {'CARPENTRY', 'MASONRY', 'BONECARVE', 'STONECRAFT', 'WOODCRAFT', 'CUTGEM', 'ENCRUSTGEM',
                  'FORGE_WEAPON', 'FORGE_ARMOR', 'FORGE_FURNITURE', 'METALCRAFT', 'GLASSMAKER', 'LEATHERWORK',
                  'TANNER', 'CLOTHESMAKING', 'WEAVING', 'BOWYER', 'MECHANICS'}
+-- BUG-117 (Run 14 note 92): the workshop type a strange mood of that skill claims (df.job_skill name -> df.workshop_type /
+-- df.furnace_type name; the 12 moodable types of runner.MOODABLE). METALCRAFT is made at a Craftsdwarf's workshop
+M.SKILL_WS = {CARPENTRY = 'Carpenters', MASONRY = 'Masons', BONECARVE = 'Craftsdwarfs', STONECRAFT = 'Craftsdwarfs',
+              WOODCRAFT = 'Craftsdwarfs', METALCRAFT = 'Craftsdwarfs', CUTGEM = 'Jewelers', ENCRUSTGEM = 'Jewelers',
+              FORGE_WEAPON = 'MetalsmithsForge', FORGE_ARMOR = 'MetalsmithsForge', FORGE_FURNITURE = 'MetalsmithsForge',
+              GLASSMAKER = 'GlassFurnace', LEATHERWORK = 'Leatherworks', TANNER = 'Tanners', CLOTHESMAKING = 'Clothiers',
+              WEAVING = 'Loom', BOWYER = 'Bowyers', MECHANICS = 'Mechanics'}
 local UNIT_COST = 4                  -- slice budget units per citizen looked at
 
 local st = {}
@@ -378,6 +385,31 @@ local function best_skill(u)
   return best
 end
 
+-- BUG-117: a ready command for the moodable workshop a dwarf without one needs: the shop of his best skill when economy
+-- sees it missing (queued: the project that builds it), else the first three missing types; nil when the shop stands, the
+-- skill has no shop type or economy does not answer. <= 140 bytes
+function M.ws_fix(K, skill)
+  local ok, ms = K.call('economy', 'mood_shops')
+  if not (ok and type(ms) == 'table' and type(ms.missing) == 'table' and #ms.missing > 0) then return nil end
+  local want = M.SKILL_WS[skill or '']
+  local ask, queued = {}, {}
+  local qd = type(ms.queued) == 'table' and ms.queued or {}
+  for _, t in ipairs(ms.missing) do
+    if want == nil or t == want then
+      if type(qd[t]) == 'table' then queued[#queued + 1] = string.format('%s queued as %s (%s%%)', t, tostring(qd[t].id), tostring(qd[t].pct or 0))
+      else ask[#ask + 1] = t end
+    end
+  end
+  local parts = {}
+  if #ask > 0 then
+    parts[1] = string.format('dfllm cmd bp.place {"tpl":"workshops","site":"S1","p":{"only":"%s"}}',
+                             table.concat(ask, ',', 1, math.min(#ask, 3)))
+  end
+  if #queued > 0 then parts[#parts + 1] = table.concat(queued, ', ', 1, math.min(#queued, 2)) end
+  if #parts == 0 then return nil end
+  return trunc(table.concat(parts, '; '), 140)
+end
+
 local function is_child(u)
   local ok, yes = pcall(function() return dfhack.units.isChild(u) or dfhack.units.isBaby(u) end)
   return ok and yes == true
@@ -576,7 +608,10 @@ local function mood_seen(K, c, r, p, u, kind)
     local sl = #miss > 0 and open_slots(job, rec) or nil
     local head = string.format('mood unit %d (%s%s%s) thirst %d hunger %d, dies at 75000: ', u.id, kind,
                                child and ', child' or '', ws and (', ' .. ws) or '', th, hu)
-    local tailp = (rn ~= '' and trunc('; ' .. rn, 80) or '') .. (nook ~= '' and ('; ' .. nook) or '')
+    -- BUG-117 (Run 14 note 92): no workshop claimed and one of his shop types missing: the ready bp.place command first
+    local wsfix = (not ws) and M.ws_fix(K, best_skill(u)) or nil
+    local tailp = (wsfix and trunc('; no shop: ' .. wsfix, 130) or '') ..
+                  (rn ~= '' and trunc('; ' .. rn, 80) or '') .. (nook ~= '' and ('; ' .. nook) or '')
     local body = 'nothing missing'
     if #miss > 0 then
       body = 'missing ' .. ((sl and #sl > 0) and fit_slots(sl, math.max(60, 200 - #head - #tailp - 8))
@@ -588,7 +623,8 @@ local function mood_seen(K, c, r, p, u, kind)
     for i = 1, math.min(4, sl and #sl or 0) do slt[i] = sl[i].t end
     K.emit('MOOD_RISK', 'A', trunc(msg, 200),
            {unit = u.id, why = risk, kind = kind, missing = miss, thirst = th, hunger = hu,
-            route = rn ~= '' and trunc(rn, 200) or nil, ws = ws, slots = #slt > 0 and slt or nil})
+            route = rn ~= '' and trunc(rn, 200) or nil, ws = ws, slots = #slt > 0 and slt or nil,
+            fix = wsfix and trunc(wsfix, 140) or nil})
   elseif not risk then
     rec.risk_why = nil                         -- quiet: the time stays, a new risk within the cadence waits
   end
@@ -626,9 +662,12 @@ local function mood_seen(K, c, r, p, u, kind)
              {unit = u.id, kind = kind, need = 'workshop', skill = skill})
       -- live L1: two fey moods failed for want of a workshop; the moody dwarves went insane and one died
       -- of thirst. A failed mood is lost within days: wake the LLM and ask for the moodable workshops.
+      -- BUG-117: the missing shop type as a ready command (nil: the shop stands or economy does not answer)
+      local fix = M.ws_fix(K, skill)
       K.emit('DECISION_NEEDED', 'A', string.format('strange mood: unit %d has no workshop (best skill %s)', u.id, skill),
-             {id = 'mood_workshop', q = string.format('unit %d needs a workshop for %s now (workshops template or one shop)',
-                                                     u.id, skill):sub(1, 200)})
+             {id = 'mood_workshop', q = (fix and string.format('unit %d (%s) has no workshop: %s', u.id, skill, fix) or
+                                         string.format('unit %d needs a workshop for %s now (workshops template or one shop)',
+                                                       u.id, skill)):sub(1, 200)})
       local okp, pend = K.call('runner', 'pending', 'workshops')
       if not (okp and type(pend) == 'number' and pend > 0) then
         K.emit('PROJECT_REQUEST', 'B', string.format('workshops for a strange mood (unit %d, %s)', u.id, skill),

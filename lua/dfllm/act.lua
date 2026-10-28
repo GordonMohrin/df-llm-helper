@@ -1493,10 +1493,22 @@ local function impls(state)
     local hfs = df.historical_figure
     if type(hfs) == 'table' and hfs.find and not hfs.find(hf) then return false, 'no historical figure ' .. hf end
     local mo = df.global.world.manager_orders
-    for _, o in ipairs(mo.all) do
-      local ok, same = pcall(function() return o.job_type == jt and o.amount_left > 0 and o.specdata.hist_figure_id == hf end)
-      if ok and same then return true, 'already' end
-    end
+    -- BUG-119 (Run 14 note 75): the scan reads foreign orders only and never decides the answer by a fault. The note blamed
+    -- this read for "Cannot write field job_material_ca..."; that text is the WRITE of material_category.stone below (BUG-090,
+    -- the error is wrapped as 'manager_order has no such field'), and a read here sits in a pcall per order. Now the whole
+    -- walk is one pcall too (a vector that faults midway), and a specdata other than hist_figure_id's is read only for an
+    -- EngraveSlab order (specdata is a union: the other jobs keep job_material_category or a race there). A scan that
+    -- faults finds nothing: the order is made (a second memorial order costs one slab; a missing one costs a ghost)
+    local okscan, again = pcall(function()
+      for _, o in ipairs(mo.all) do
+        local ok, same = pcall(function()
+          return o.job_type == jt and o.amount_left > 0 and o.specdata.hist_figure_id == hf
+        end)
+        if ok and same then return true end
+      end
+      return false
+    end)
+    if okscan and again then return true, 'already' end
     local o = df.manager_order:new()
     local ok, err = pcall(function()
       o.job_type = jt

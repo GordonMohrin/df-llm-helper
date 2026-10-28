@@ -523,4 +523,65 @@ T.test('Run 11: MOOD_RISK names the glass route for cut gems and raw glass, the 
   T.ok(th and th.d.route:find('cut glass', 1, true), th and th.d.route)
 end)
 
+
+-- BUG-117 (Run 14 note 92: the Loom was missing for a while, 151 of 453 citizen deaths were failed moods): MOOD_RISK and the
+-- DECISION_NEEDED mood_workshop name the missing workshop type of the dwarf's best skill as a ready bp.place command
+local function shops_fake(missing, queued)
+  return {name = 'economy', every = {ticks = 1200}, mood_shops = function(K) return {missing = missing, queued = queued or {}} end}
+end
+
+T.test('BUG-117: a moody dwarf without a workshop: MOOD_RISK and the decision carry the bp.place command of his shop', function()
+  local W = CW.world{setup = function(W)
+    W.load(shops_fake({'Loom', 'Jewelers'}))
+    local u = W.unit(1)
+    u.mood = df.mood_type.Fey
+    u.job.current_job = nil
+    u._m.skills = {WEAVING = 8, CUTGEM = 3}
+    u.counters2 = {thirst_timer = 41000, hunger_timer = 0}
+  end}
+  CW.day(W, 2)
+  local r = W.find_events('MOOD_RISK')
+  T.ok(#r >= 1, 'MOOD_RISK')
+  T.eq(r[1].d.fix, 'dfllm cmd bp.place {"tpl":"workshops","site":"S1","p":{"only":"Loom"}}', 'only the shop of his skill')
+  T.ok(r[1].msg:find('no shop: dfllm cmd bp.place', 1, true) and #r[1].msg <= 200, r[1].msg)
+  local dn = W.find_events('DECISION_NEEDED')
+  T.eq(dn[1].d.id, 'mood_workshop')
+  T.eq(dn[1].d.q, 'unit 1 (WEAVING) has no workshop: dfllm cmd bp.place {"tpl":"workshops","site":"S1","p":{"only":"Loom"}}')
+end)
+
+T.test('BUG-117: no skill names the first three missing types; a queued shop is named; a shop that stands, no economy: no fix',
+       function()
+  local W = CW.world{setup = function(W)
+    W.load(shops_fake({'Masons', 'Tanners', 'Loom', 'Mechanics'}, {Tanners = {id = 'c1a147c261d9', pct = 40}}))
+    local u = W.unit(1)
+    u.mood = df.mood_type.Secretive
+    u.job.current_job = nil
+    u.counters2 = {thirst_timer = 41000, hunger_timer = 0}
+  end}
+  CW.day(W, 2)
+  local r = W.find_events('MOOD_RISK')
+  T.eq(r[1].d.fix, 'dfllm cmd bp.place {"tpl":"workshops","site":"S1","p":{"only":"Masons,Loom,Mechanics"}}; ' ..
+                   'Tanners queued as c1a147c261d9 (40%)')
+  local W2 = CW.world{setup = function(W)
+    W.load(shops_fake({'Jewelers'}))
+    local u = W.unit(1)
+    u.mood = df.mood_type.Fey
+    u.job.current_job = nil
+    u._m.skills = {WEAVING = 8}                                     -- his shop (Loom) stands
+    u.counters2 = {thirst_timer = 41000, hunger_timer = 0}
+  end}
+  CW.day(W2, 2)
+  T.eq(W2.find_events('MOOD_RISK')[1].d.fix, nil, 'the Loom stands: nothing to place')
+  T.eq(W2.find_events('DECISION_NEEDED')[1].d.q, 'unit 1 needs a workshop for WEAVING now (workshops template or one shop)')
+  local W3 = CW.world{setup = function(W)
+    local u = W.unit(1)
+    u.mood = df.mood_type.Fey
+    u.job.current_job = nil
+    u.counters2 = {thirst_timer = 41000, hunger_timer = 0}
+  end}
+  CW.day(W3, 2)
+  T.eq(W3.find_events('MOOD_RISK')[1].d.fix, nil, 'no economy module: the old text')
+end)
+
+
 T.done()
