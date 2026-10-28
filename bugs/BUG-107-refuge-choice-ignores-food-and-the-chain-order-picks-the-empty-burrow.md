@@ -41,7 +41,7 @@ The note reads `inspect refuge` `choice.SIEGE.want = Kern+` as "hard-coded Kern+
   `window` ends them). Key `refuge.supply_switch` (0-100, 50; 0 = the old rule).
 - **Standing floor** (`RF.floor`, run with every audit): Kern+ and the refuge keep `refuge.floor_pct` % (100) of the SIEGE need (citizens x 1
   each; a wet well covers the drink) for forts of `refuge.floor_pop` (30) citizens or more, in PEACE/ALERT/RECOVERY. Under it **REFUGE_STOCK**
-  (A) names the burrow, the counts, the fort's own total and the existing command (`bp.place` stockroom with `p.burrow`, `refuge_drink` for the
+  (A) names the burrow, the counts, the fort's own total and the existing command (`bp.place` stockroom, `refuge_drink` for the
   refuge's drink), once per episode and again only with news (util/cadence, a game week and 30 minutes). No actuator of its own.
 - Not changed: SIEGE/SOFT order, HOLD for a lockdown without a fed burrow, the BREACH/DEAD levels (no counts for `breach_days`), a fed Kern+
   stays first and silent.

@@ -17,6 +17,8 @@
   - **Bridge replacement (BUG-109):** the bridge is replaced as before; then the entrance check's gap tiles within 3 tiles of the footprint (a check newer
     than the last construction) become a second stage (ramp: wall on its top, floor: door) until the route is closed, two rounds at most
     (`inspect defense` `rebuild.follow`).
+    A runner that refuses the stage for `gq_keep` (60) days ends the follow-up (kern.log). Review fix: the REFUGE_STOCK stockroom command had a `p.burrow`
+    the template does not know (bp.place refused it); it is now the plain `stockroom` call.
   - **Drill (BUG-110):** `drill.start`, the inbox verb and the automatic start refuse with `no lever-linked bridge: build fortcore stage 2/3 first` when
     the manifest lacks a standing outer or inner bridge; the mode, the alert and the FPS stay; `ready.dref` counts the refusals once a game day.
   - Contracts: event REFUGE_STOCK, REFUGE_FAIL `sup`, `ready.dref`, config `refuge.floor_pct/floor_pop/supply_switch` and `inner`; RULES section 7 rows edited in place.

@@ -145,7 +145,7 @@ T.test('BUG-107: Kern+ under its food/drink floor in PEACE: REFUGE_STOCK (A) wit
   T.eq({e[1].cls, e[1].d.burrow, e[1].d.short, e[1].d.food, e[1].d.fneed, e[1].d.drink, e[1].d.dneed, e[1].d.pct, e[1].d.cit},
        {'A', 'Kern+', 'food+drink', 1, 30, 0, 30, 100, 30})
   T.ok(e[1].d.cmd:find('bp.place', 1, true) and e[1].d.cmd:find('"tpl":"stockroom"', 1, true) and
-       e[1].d.cmd:find('"burrow":"Kern+"', 1, true), e[1].d.cmd)
+       not e[1].d.cmd:find('"burrow"', 1, true), e[1].d.cmd)       -- the stockroom template has no burrow param
   T.ok(e[1].msg:find('Kern+ holds food 1/30, drink 0/30, under 100%', 1, true), e[1].msg)
   W.run(9 * 1200 * 3, {skip = 9})                                     -- three game days more: no repeat of an unchanged condition
   T.eq(#evs(W, 'REFUGE_STOCK'), 1)

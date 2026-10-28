@@ -45,6 +45,7 @@ local function fort(o)
   W.load(SW.fake('reflex', {holding = function() return W.lock end}))
   W.cells = {}
   W.load(SW.fake('runner', {repair = function(K, cells, why, opts)
+    if W.refuse then return false, 'runner busy' end
     W.cells[#W.cells + 1] = {cells = cells, why = why, peace = type(opts) == 'table' and opts.peace == true,
                              closure = type(opts) == 'table' and opts.closure == true}
     return true, 'rp' .. #W.cells
@@ -245,6 +246,34 @@ T.test('BUG-109: the second stage is tried twice at most; then the bridge counts
   local told
   for _, l in ipairs(W.logs) do if tostring(l.msg):find('stays open after 2 extra stages', 1, true) then told = l.msg end end
   T.ok(told ~= nil, 'kern.log says what stays open')
+end)
+
+T.test('review BUG-109: a runner that refuses the second stage for good is given up after gq_keep days (no warn every day forever)', function()
+  local W = fort({fp = {20, 24, G, 20, 26, G}})
+  W.burrow('Kern+', {21, 21, G, 39, 29, G})
+  local c = second_loss(W)
+  bypass(W)
+  build_closure(W, c.cells)
+  W.refuse = true
+  run(W, 5000)
+  T.eq(#W.cells, 2, 'refused: nothing queued')
+  local function warns()
+    local n = 0
+    for _, l in ipairs(W.logs) do if tostring(l.msg):find('extra closure stage was not queued', 1, true) then n = n + 1 end end
+    return n
+  end
+  local n0 = warns()
+  T.ok(n0 >= 1, 'the refusal is logged')
+  run(W, 70 * 1200)
+  local n1 = warns()
+  run(W, 70 * 1200)
+  T.eq(warns(), n1, 'given up: no further refusals')
+  local told
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find('given up', 1, true) and tostring(l.msg):find('closure stage', 1, true) then told = true end end
+  T.ok(told, 'kern.log says it was given up')
+  T.ok(select(2, W.K.call('seal', 'replaced')).O1 ~= nil, 'replaced all along')
+  local d = W.inbox('inspect', {what = 'defense'})
+  T.eq(d.data.bridges[1].rebuild.follow, nil, 'no follow-up any more')
 end)
 
 T.done()

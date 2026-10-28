@@ -107,3 +107,16 @@ def test_the_documents_name_the_four_bugs_and_the_fr():
     assert "FR-83" in top and len(re.findall(r"^\*\*FR-83\b", read("docs/feature-requests/README.md"), re.M)) == 1
     rules = read("RULES.md")
     assert rules.count("\n") <= 300 and "REFUGE_STOCK" in rules and "BUG-108" in rules and "BUG-110" in rules
+
+
+def test_the_refuge_stock_commands_are_valid_bp_place_calls():
+    """review: the command REFUGE_STOCK names must pass the template's own parameter check (the stockroom has no
+    `burrow` param: a call with one is refused 'unknown params')"""
+    from dfpilot.bp.emit import check_params
+
+    src = read("lua/dfllm/seal.lua")
+    cmds = re.findall(r"bp\.place \\'(\{[^']*\})\\'", src[src.index("function RF.floor"):src.index("local function commit_audit")])
+    assert len(cmds) == 2, cmds
+    for c in cmds:
+        call = json.loads(c)
+        check_params(call["tpl"], call.get("p"))

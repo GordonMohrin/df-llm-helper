@@ -1236,7 +1236,7 @@ function RF.floor(K, R)
     cmd = x.what == 'drink' and 'dfllm cmd bp.place \'{"tpl":"refuge_drink","site":"S1"}\''
           or 'the refuge level has no food store template: stock it from the next plan (refuge_drink holds drink only)'
   else
-    cmd = string.format('dfllm cmd bp.place \'{"tpl":"stockroom","site":"S1","p":{"burrow":"%s"}}\'', x.n)
+    cmd = 'dfllm cmd bp.place \'{"tpl":"stockroom","site":"S1"}\'' -- (the template has no burrow param: its pile joins Kern+)
   end
   local fort = string.format('fort holds food %d, drink %d', R.cls.food.n, R.cls.drink.n)
   K.emit('REFUGE_STOCK', 'A', trunc(string.format('%s holds %s, under %d%% of the siege need (%d citizens); %s: %s%s', x.n,
@@ -1761,6 +1761,11 @@ function KP.extend(K, k, g, t)
                             {peace = true, closure = true})
   if not (ok and r1) then
     K.log('warn', 'seal: bridge %s: the extra closure stage was not queued: %s', g.name or k, tostring(r2 or r1))
+    if t - g.sd > CFG.gq_keep then                        -- review: a runner that never takes it ends the follow-up too
+      K.log('warn', 'seal: bridge %s: the extra closure stage was refused for %d days: given up (`seal at=last` is the ' ..
+            'player\'s)', g.name or k, CFG.gq_keep // DAY)
+      return nil
+    end
     return 'wait'
   end
   ex.n, ex.proj, ex.t, ex.cells, dirty = ex.n + 1, tostring(r2), t, todo, true
