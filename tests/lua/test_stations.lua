@@ -209,7 +209,7 @@ T.test('BUG-032: stations clear of every footprint stay where they are (no tile 
   breach(W)
   T.eq(orders_of(W, 'A'), 'station@51,63,10')
   T.eq(#evs(W, 'STATION_MOVED'), 0)
-  T.eq(W.reads, 0, 'nothing relocated: no tile read')
+  T.ok(W.reads <= 4, 'nothing relocated: one tile read per station (BUG-142: is it a floor?): ' .. W.reads)
   T.eq(X.call(W, 'military', 'safe_pos', {51, 11, Z}, 'bailey'), {51, 13, Z}, 'O1 y=10: the bailey side, 3 tiles')
   T.eq(X.call(W, 'military', 'station_for', 'CORE'), {51, 63, Z})
 end)
@@ -278,6 +278,24 @@ T.test('BUG-032: a soldier only passing over the footprint (three tiles from his
                                       A.id), 1, true), w and w.msg or 'no GATE blocked')
   W.unit(id)._m.pinned = nil
   T.ok(until_(W, 600, function() return S.bstate(W, 'B2') == 'up' end), 'up once he is at his station')
+end)
+
+T.test('BUG-142 (live i3: stations.b2 48,40,127 was a stone wall, the soldiers scattered, on_station 0 of 8 blocked ' ..
+       'siege_release and bridge_stuck): a station on a revealed wall moves to the nearest revealed floor, STATION_MOVED wall',
+       function()
+  local W = world{tiles = {['51,63,10'] = '#'}}
+  breach(W)
+  T.eq(orders_of(W, 'A'), 'station@50,63,10', 'old code: the squad ordered onto the wall at 51,63,10')
+  local mv = evs(W, 'STATION_MOVED', 'wall')
+  T.eq(#mv, 1)
+  T.eq({mv[1].d.station, mv[1].d.from, mv[1].d.to}, {'b2', {51, 63, Z}, {50, 63, Z}})
+  T.ok(mv[1].msg:find('station b2 51,63,10 is no floor (#)', 1, true) and mv[1].msg:find('moved to 50,63,10', 1, true),
+       mv[1].msg)
+  -- a hidden station tile is no evidence (fair play): it stays
+  local W2 = world{tiles = {['51,63,10'] = false}, tag = 'st3'}
+  breach(W2)
+  T.eq(orders_of(W2, 'A'), 'station@51,63,10')
+  T.eq(#evs(W2, 'STATION_MOVED'), 0)
 end)
 
 T.done()

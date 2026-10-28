@@ -322,8 +322,8 @@ function M.new(opts)
                flags1 = view(m, {caged = 'caged', inactive = 'offmap', on_ground = 'lying', rider = 'carried',
                                  chained = 'chained', merchant = 'merchant', diplomat = 'diplomat', active_invader = 'active_invader',
                                  marauder = 'marauder'}),
-               flags2 = view(m, {killed = 'dead', restrained = 'restrained', visitor = 'visitor',
-                                 visitor_uninvited = 'visitor_uninvited'}),
+               -- BUG-144: unit_flags2 has no 'restrained' in DF 53.16 (a bound unit is flags1.chained)
+               flags2 = view(m, {killed = 'dead', visitor = 'visitor', visitor_uninvited = 'visitor_uninvited'}),
                counters = setmetatable({}, {__index = function(_, k) return k == 'unconscious' and (m.unconscious or 0) or 0 end}),
                military = {squad_id = m.squad or -1, squad_position = -1}, civ_id = m.civ_id or -1,
                inventory = vec{}, status = {}, _m = m}

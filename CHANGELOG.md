@@ -145,6 +145,34 @@
   `inspect what=curse` with `src syndrome` before his first moon; CURSE_MOON comes 4 days before the full moon while care is demoted
   (`doctor`); the status moon counts down day by day; at the full moon a TRANSFORM with `unit` and `ann=BODY_TRANSFORMATION`, one DECISION_NEEDED
   `curse_kill` and, unacked, ONE LOCKDOWN; a dead werecavy leaves the list (`dead` counts him).
+## Live test i3, area siege: sortie result, gate pull loop, replaced bridge, walled stations, locale decimals, intruder texts, stale records, starved refuge audit (BUG-140..146, 2026-10-29; offline, live-untested)
+- **Why:** the live test of instance i3 (Trussroads y717, workflow wf_190bd773-8de) and its verifier confirmed: a killed sortie target ended as
+  `abort more_hostiles`; 100 lever pulls of X25718 because gate cancelled its own pull for the puller standing beside the bridge, no GATE_FAIL;
+  B1, replaced by a wall and a door, kept BREACH `waiting for B1 up: no_lever`; stations.b2 on a stone wall left on_station 0 of 8, so
+  siege_release and bridge_stuck never fired; texts read `1,0 days` (German LC_NUMERIC); the cause said `dangerous` without the rule, the benign
+  line was cut from the status, the drill hint offered a refused command; the status kept a dead intruder's kill order for the next one,
+  LOCKDOWN_END named a far unit twice, DEATHS_3PLUS was recorded twice; the refuge audit was 60,000 ticks old.
+- **What changed:** BUG-140 military `sortie_pass`: all targets dead -> `dead` first, the picture test asks for the living ones, the lag allowance
+  counts looks. BUG-141 gate: the pending pull's own worker beside the footprint holds nothing; cancelled-for-units pulls count toward
+  `gate.pull_cap` -> give-up, GATE_FAIL `blocked` with pulls/wait/units/lever; a `seal.replaced` bridge with no bridge on its footprint is gone
+  for gate (no want, pull, GATE_FAIL, not_up). BUG-142 military `no_floor`: a revealed wall/tree/open-space station moves to the nearest floor
+  (STATION_MOVED `wall`), never the fallback. BUG-143 `util/num.lua` `dec()` (integer math, always `.`) in reflex and kern; a pytest rule forbids
+  `%.Nf`/`%g`/`%e` in `lua/dfllm`. BUG-144 `reflex.danger_why` -> state `alarm.by.hw`, brief `dangerous (large predator)`; sense drops the
+  non-existent `flags2.restrained`; the benign line is rank 2 during a lockdown or lone clock; the drill hint says `build fortcore stage 2/3
+  first` when drill refuses. BUG-145 reflex: the kill order belongs to its picture, far units are named once, one record per interrupt number.
+  BUG-146 seal: an audit older than 2 x its period runs as an urgent job, kern.log says so, state `alert.aud`, brief `refuge data N d old`.
+- **Refuted by the verifier (not changed):** M2-refuge (FED level and REFUGE_SWITCH supply are unreachable while Kern+ passes SIEGE: a test-setup
+  limit, not a defect); the per-race raw cache of M3-classify (raws do not change in a real game). Caged units were already left out (census.h.caged).
+- **Contracts:** `alarm.by.hw` (str 24), `alert.aud` (int) in schema.py and contract.lua, CONTRACTS appendix; RULES GATE_FAIL/BREACH row
+  (`blocked` give-up, replaced bridge); no new event, no config key.
+- **Tests (each fails on dec5132):** tests/lua/test_bug140_sortie_dead.lua (3), test_bug141_gate_puller.lua (3), test_stations.lua BUG-142,
+  test_bug143_145_reflex.lua (6), test_bug146_seal_audit.lua (1), tests/test_live_siege_i3.py (8); test_m3_classify uses `chained`, the
+  drill-hint pins in test_m2_siege/test_cli_status follow the new text.
+- **Live check:** after a `squad.sortie` kill read `dfllm events --type SORTIE` (`dead`, never `more_hostiles` for a dead target); on a lever
+  beside its bridge the pull completes with the puller next to it, and a unit standing beside the footprint ends in one GATE_FAIL `blocked`
+  after 15 cancelled pulls; with B1 replaced the BREACH line no longer waits for B1; inspect defense / STATION_MOVED `wall` for b2 48,40,127 and
+  military kpi on_station > 0 at the stations; kern.log and DECISION_NEEDED texts with `1.0 days`; status `dangerous (large predator)` and
+  `not counted as hostile` during a lockdown; brief `refuge data N d old` vanishes after the urgent audit (inspect reach age < 2 x audit_every).
 ## TIMELINE_RESET: a boot whose clock jumped back marks the discarded timeline; follow, events and brief drop it (BUG-121, 2026-10-28, note 101; offline, live-untested)
 - **Why:** Run 14 note 101: after the player loaded an older save, `events.jsonl` still held the events up to #29900 of the line he had left
   (ticks far ahead of the loaded clock) and `alarm.txt` its lockdown; `follow` replayed BREACH, INTRUDER and DEATHS_3PLUS of the abandoned line while
