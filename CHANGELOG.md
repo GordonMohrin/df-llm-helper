@@ -25,6 +25,10 @@
     weapon of each position's class (axe, short sword, spear), lists the positions that have none (hammer, mace, pick, ...), keeps the policy per squad (state
     `tr`) for recruits and the rotation, and economy orders the missing training weapons at the carpenters (`economy.training`, bounded). A `_TRAINING` raw is no
     work tool for the tool guard.
+  - **Review fixes (military.lua `ensure_weapons`, `weapon_plan`; economy.lua `M.tool_tell`):** the training policy is a PEACE/DRILL one: in ALERT, SIEGE, BREACH or
+    RECOVERY the positions that carry a training weapon get individual choice (or a planned real weapon) back and the wooden ones return with PEACE, so a
+    squad never meets an army with wooden weapons; a wooden spare is never planned for a metal squad (`weapon_plan`); `tool_tell` answers the diagnosis key
+    `jobs` (the alert/burrow text was bound to keys that never exist).
 - **Contracts:** schema.py + contract.lua: `SIEGE_UNREADY.mws`, `MOOD_RISK.fix`, `TOOL_BLOCKED.tell/care`, state `ready.mws`, `sched.care`, `squad.uniform` kind
   `training`; config `offices.mood_ws_days/mood_ws_pop`, `runner.care_first`, `economy.cloth.floor`, `economy.training` (baseline.json, fairplay, `lint --config`).
   No new event (TOOL_BLOCKED, SIEGE_UNREADY and MOOD_RISK are class A already, RULES section 7 rows extended in place). CONTRACTS regenerated.

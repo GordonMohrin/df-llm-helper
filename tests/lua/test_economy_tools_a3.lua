@@ -340,6 +340,13 @@ T.test('BUG-116: TOOL_BLOCKED carries d.tell, the player\'s instruction, for for
   T.eq(e3[1].d.tell, 'turn on the MINE labor of the Miners detail members (work details screen): they lack it')
 end)
 
+T.test('review: tool_tell speaks for the diagnosis key `jobs` (members cut off by walk group or burrows), not a key that never exists',
+       function()
+  local W = world{miners = {1, 2, 3}, picks = 4, pick_pos = {30, 40, 5}, dig = 14}
+  local tell = W.mods.economy.M.tool_tell({name = 'Miners', labor = 'MINE'}, 'pick', {keys = {'jobs'}, forb = 0, free = 4, res = 0, bins = 0})
+  T.ok(tell:find('alert/burrow', 1, true), tell)
+end)
+
 T.test('BUG-116: with care first leading, TOOL_BLOCKED names the hospital project that needs the miners', function()
   local W = world{miners = {1, 2, 3, 4, 5, 6}, picks = 12, pick_pos = {30, 40, 5}, dig = 14}
   W.mods.runner.M.care_first = function(K) return {proj = 'c1a147c261', why = 'hospital_out 1'} end

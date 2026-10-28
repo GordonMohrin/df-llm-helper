@@ -3654,7 +3654,7 @@ function M.tool_tell(spec, kind, c)
   elseif keys.off_group then
     t = string.format('the free %ss lie on another walk group than the dwarves: carry them over or make a tool stockpile '
                       .. 'near the mines', kind)
-  elseif keys.alert or keys.burrow then
+  elseif keys.jobs then                        -- (review: the diagnosis' key for members cut off by walk group or burrows)
     t = string.format('the alert/burrow keeps the %s members from the %ss: lift the civilian alert or widen the burrow', spec.name,
                       kind)
   else

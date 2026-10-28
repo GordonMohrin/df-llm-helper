@@ -1060,7 +1060,8 @@ local function weapon_plan(g, n)
     for _, it in ipairs(df.global.world.items.other.WEAPON) do
       local w = free_item(it) and weapon_kind(it:getSubtype())
       if w then
-        if w.k == 'melee' then stock[w.token] = (stock[w.token] or 0) + 1
+        if w.k == 'melee' then
+          if not tostring(w.token):find('_TRAINING$') then stock[w.token] = (stock[w.token] or 0) + 1 end   -- review: no wooden spare
         elseif w.k == 'axe' or w.k == 'pick' then tool_tok[w.k] = tool_tok[w.k] or w.token end
       end
     end
@@ -1178,7 +1179,12 @@ local function ensure_weapons(K, k, s)
   local g = rt.wguard
   -- FR-89: a squad on the training policy gives every occupied position the training weapon of its class (a vacant position
   -- keeps the kit's individual-choice spec, so a recruit's metal weapon is changed here); the classes without one go on below
-  if e.tr == 1 then
+  -- review: the policy is a PEACE/DRILL one. In any other mode (ALERT, SIEGE, BREACH, RECOVERY) the positions that carry a
+  -- training weapon get individual choice (or a planned real weapon while guarded) back below, and the wooden ones are put on
+  -- again once PEACE returns: a squad never meets an army with wooden weapons
+  local mode = K.mode()
+  local trn = e.tr == 1 and (mode == 'PEACE' or mode == 'DRILL')
+  if trn then
     local tr = M.train_apply(K, s, nil)
     for _, p in ipairs(tr.set) do nw_set(e, p, false) end
     if #tr.set > 0 then
@@ -1198,6 +1204,7 @@ local function ensure_weapons(K, k, s)
     local ws = weapon_specs(m.p)
     local bad = #ws == 0 and (g ~= nil or nw_has(e, m.pos))
     if g and not bad then for _, sub in ipairs(ws) do if sub < 0 then bad = true end end end
+    if e.tr == 1 and not trn and not bad and M.weapon_class(m) == 'TRAINING' then bad = true end     -- review: see above
     if bad then need[#need + 1] = m.pos; marked[m.pos] = true end
   end
   -- BUG-023: tool specs beyond the spare tools are re-planned, the soldiers without that tool in hand first

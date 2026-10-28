@@ -150,4 +150,25 @@ T.test('FR-89: a crossbow squad is refused (no training crossbow exists), whatev
 end)
 
 
+T.test('review: the training policy yields in a fight: a SIEGE gives the positions their real weapons back, PEACE the wooden ones again',
+       function()
+  local W = mil_world{n = 50}
+  local A = X.squad_of(W, 'A')
+  arm(W, A, {{skills = {AXE = 8}, spec = 'ITEM_WEAPON_AXE_BATTLE'}, {skills = {SWORD = 5}, spec = 'ITEM_WEAPON_SWORD_SHORT'}})
+  T.ok(W.inbox('squad.uniform', {squad = 'A', kind = 'training'}).ok)
+  T.eq(weapon_subs(A, 0), {X.WIDX.ITEM_WEAPON_AXE_TRAINING})
+  W.set_mode('SIEGE')
+  W.run(3600 * 3, {skip = 9})
+  for pos = 0, 1 do
+    for _, sub in ipairs(weapon_subs(A, pos)) do
+      T.ok(sub < 0 or X.WEAPONS[sub + 1][1]:find('TRAINING', 1, true) == nil, 'no wooden weapon in a siege, pos ' .. pos)
+    end
+    T.ok(#weapon_subs(A, pos) > 0, 'the position keeps a weapon spec (individual choice)')
+  end
+  W.set_mode('PEACE')
+  W.run(3600 * 3, {skip = 9})
+  T.eq(weapon_subs(A, 0), {X.WIDX.ITEM_WEAPON_AXE_TRAINING}, 'back in PEACE the policy puts the wooden weapons on again')
+end)
+
+
 T.done()
