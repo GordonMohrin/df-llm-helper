@@ -748,7 +748,10 @@ M.on['EV:SNAPSHOT_READY'] = function(K, ev)
   local list = rt.snaps
   list[#list + 1] = d.id
   rt.cov[d.id] = {margin = type(d.margin) == 'string' and d.margin or nil, cols = int(d.cols) or 0,
-                  out = int(d.out) or 0, first = type(d.first) == 'string' and d.first or nil}
+                  out = int(d.out) or 0, first = type(d.first) == 'string' and d.first or nil,
+                  -- BUG-129: a region box: its parts and the far pieces it dropped (their tiles count as outside)
+                  regions = int(d.regions) or 0, drop = int(d.drop) or 0,
+                  dropped = type(d.dropped) == 'string' and d.dropped or nil}
   while #list > M.SNAPS_KEPT do rt.cov[table.remove(list, 1)] = nil end
 end
 
@@ -764,14 +767,19 @@ local function take_snap(id)
   return false
 end
 
--- BUG-043: 'margin 8,8,1, 2 shafts' / 'out 3: explore y451s0b0' (state ready.audit.cov), '' for a full default box
+-- BUG-043: 'margin 8,8,1, 2 shafts' / 'out 3: explore y451s0b0' (state ready.audit.cov), '' for a full default box;
+-- BUG-129: 'drop 1: seal c1a14d660b9fb1de01' first, '7 regions'; a later item only when it fits whole
 local function cov_text(c)
   if type(c) ~= 'table' then return '' end
   local t = {}
   if (c.out or 0) > 0 then t[#t + 1] = string.format('out %d: %s', c.out, tostring(c.first)) end
+  if (c.drop or 0) > 0 then t[#t + 1] = string.format('drop %d: %s', c.drop, tostring(c.dropped)) end
   if c.margin then t[#t + 1] = 'margin ' .. c.margin end
   if (c.cols or 0) > 0 then t[#t + 1] = string.format('%d shaft%s', c.cols, c.cols == 1 and '' or 's') end
-  return cut(table.concat(t, ', '), 40)
+  if (c.regions or 0) > 0 then t[#t + 1] = string.format('%d region%s', c.regions, c.regions == 1 and '' or 's') end
+  local s = t[1] and cut(t[1], 40) or ''
+  for i = 2, #t do if #s + 2 + #t[i] <= 40 then s = s .. ', ' .. t[i] end end
+  return s
 end
 
 M.verbs.audit = function(K, args, cmd)

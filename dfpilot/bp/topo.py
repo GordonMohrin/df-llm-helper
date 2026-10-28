@@ -246,7 +246,30 @@ def sources(g: Graph, manifest: dict) -> list[int]:
                 x, y = i % W, (i // W) % H
                 if any(0 <= x + dx < W and 0 <= y + dy < H and t[i + dy * W + dx] == NOSCAN for dx, dy in N8):
                     src.add(i)
+                elif _vertical_source(g, i, x, y):
+                    src.add(i)
     return sorted(src)
+
+
+def _vertical_source(g: Graph, i: int, x: int, y: int) -> bool:
+    """BUG-129: a region export (the fort core plus far parts) leaves levels above and below a part unread (' '); as
+    strict as one box over the whole fort, a way from there counts as the outside: a stair or ramp (or a cling) that
+    leads up or down to an unread tile, a ramp top (`v`) over one, a walkable tile beside open space (`_`) over one
+    (a ramp below may climb to it). The file box's own top and bottom faces stay no source (as before)."""
+    t, WH, N, W, H = g.t, g.WH, g.N, g.W, g.H
+    c = t[i]
+    up, dn = i + WH, i - WH
+    if up < N and t[up] == NOSCAN and (c in UPC or c == "r" or g.cling[i]):
+        return True
+    if dn >= 0 and t[dn] == NOSCAN and (c in DNC or c == "v" or g.cling[i]):
+        return True
+    if g.walk[i]:
+        for dx, dy in N8:
+            if 0 <= x + dx < W and 0 <= y + dy < H:
+                j = i + dy * W + dx
+                if t[j] in "_v" and j - WH >= 0 and t[j - WH] == NOSCAN:
+                    return True
+    return False
 
 
 CHOKE_TRY = 4           # candidate tiles a choke search re-checks with a BFS (the first that closes every route wins)

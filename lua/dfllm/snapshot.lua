@@ -647,9 +647,18 @@ end
 -- stations, the edge, stairs, refuge, pit, depot); for an audit also runner.boxes (col: an explore's shaft)
 local function pieces(K, purpose)
   local out, man = {}, K.manifest()
-  local function add(what, p, col, proj)
+  local function add(what, p, col, proj, e)
     local b = box6(p)
-    if b then out[#out + 1] = {b = b, what = what, col = col == true, proj = proj} end
+    if not b then return end
+    local q = {b = b, what = what, col = col == true, proj = proj}
+    if e then                                       -- BUG-129: a runner piece: its tile clusters, done (kept)
+      q.done = e.done == true
+      for _, c in ipairs(type(e.parts) == 'table' and e.parts or {}) do
+        local cb = box6(c)
+        if cb then q.parts = q.parts or {}; q.parts[#q.parts + 1] = cb end
+      end
+    end
+    out[#out + 1] = q
   end
   local br = type(man.bridges) == 'table' and man.bridges or {}
   for _, name in ipairs(sorted_keys(br)) do
@@ -684,7 +693,8 @@ local function pieces(K, purpose)
     local ok, list = K.call('runner', 'boxes')
     for _, e in ipairs(ok and type(list) == 'table' and list or {}) do
       if type(e) == 'table' then
-        add(tostring(e.tpl or 'project') .. ' ' .. tostring(e.id or '?'), e.b, e.tpl == 'explore', tostring(e.id or ''))
+        add(tostring(e.tpl or 'project') .. ' ' .. tostring(e.id or '?'), e.b, e.tpl == 'explore', tostring(e.id or ''),
+            e)
       end
     end
   end
@@ -781,9 +791,9 @@ end
 
 -- 'bbox 117x62x14 = 101556 tiles > 100000 at margin 0,0,0 (x 59-175 y 52-113 z 132-145; stretched most by room
 -- cistern118_88_132r0 at z132: 29016 tiles less without it); way out: ...' (<= 300 bytes)
-local function refusal(c, main, cap)
+local function refusal(c, main, cap, label)
   local b = c.parts[1]
-  local s = string.format('bbox %s%s = %d tiles > %d at margin %s (%s', dims(b),
+  local s = string.format('%s %s%s = %d tiles > %d at margin %s (%s', label or 'bbox', dims(b),
                           c.cols > 0 and string.format(' + %d shaft column%s', c.cols, c.cols == 1 and '' or 's') or '',
                           c.tiles, cap, mstr(c.margin), span(b))
   local st = stretcher(main, c.margin)
@@ -794,13 +804,138 @@ local function refusal(c, main, cap)
   end
   s = s .. ')'
   if ntiles(c.bbox) > M.CFG.grid_max then s = s .. string.format('; file box %s > %d', dims(c.bbox), M.CFG.grid_max) end
-  local out = st and st.p.proj and st.p.proj ~= '' and string.format('bp.cancel %s if it can go, or ', st.p.proj) or ''
+  -- BUG-129: a finished (kept) piece cannot be cancelled
+  local out = st and st.p.proj and st.p.proj ~= '' and not st.p.done and
+              string.format('bp.cancel %s if it can go, or ', st.p.proj) or ''
   return (s .. '; way out: ' .. out .. 'raise snapshot.max_tiles in config/baseline.json (<= ' .. M.CAP_LIM[2] ..
           '), dfhack-run dfllm reload'):sub(1, 300)
 end
 
+---------------------------------------------------------------- BUG-129: an audit box as regions
+-- Run 14 (region2-site90, up to y717): 'audit snapshot refused: bbox 190x192x45 = 1641600 tiles > 400000 at margin
+-- 0,0,0 (x 0-189 y 0-191 z 90-134; stretched most by seal c1a14d660b9fb1de01 (+2 more) at z90 ...); file box 190x192x45
+-- > 1500000', so audit_old/audit_fail held R0 for ~190 game years. The manifest geometry (the fort core) fitted at 8,8,1;
+-- finished seals 26 levels below, seals whose walls lie far apart and an old kept box over the whole map stretched the
+-- one box. An audit box that does not fit as one box is now made of regions: the fort core (the manifest geometry at
+-- the first margin step that fits) plus every runner piece outside it as parts of its own (its tile clusters, else its
+-- box, each + col_margin), nearest to the core first (past parts_max a part joins a far part); a piece whose parts do
+-- not fit (the cap, grid_max) is dropped and named. The verdict stays as strict as one box: a tile no part read is the
+-- outside (bp.topo: a walkable tile beside one, or a stair or ramp over or under one, starts attackers), so a dropped
+-- piece can only add fails.
+-- BUG-043: parts a covers parts b (every part of b lies in one of a)
+local function covers(a, b)
+  for _, q in ipairs(b) do
+    local inside = false
+    for _, p in ipairs(a) do if contains(p, q) then inside = true; break end end
+    if not inside then return false end
+  end
+  return true
+end
+
+M.CFG.drop_note = 40                -- bytes of the first dropped piece's label in the reply and SNAPSHOT_READY
+
+-- the tiles of box q no part of `parts` covers
+local function fresh_tiles(parts, q)
+  local n = 0
+  for z = q[3], q[6] do
+    for y = q[2], q[5] do
+      local w = q[4] - q[1] + 1
+      for _, sp in ipairs(row_spans(parts, y, z)) do
+        local a, b = math.max(sp[1], q[1]), math.min(sp[2], q[4])
+        if a <= b then w = w - (b - a + 1) end
+      end
+      n = n + w
+    end
+  end
+  return n
+end
+
+-- the tiles between box b and box c along each axis, summed (0: they touch or overlap)
+local function gap_of(b, c)
+  local n = 0
+  for i = 1, 3 do n = n + math.max(0, b[i] - c[i + 3], c[i] - b[i + 3]) end
+  return n
+end
+
+-- the region parts at margin m: {parts, bbox, tiles, margin, cols = 0, out = 0, regions, drop, dropped, dway} or nil
+-- (the core over the cap or the map)
+local function regions_at(core, far, m, cap)
+  local main = clamp_bbox(grown(core, m))
+  if not main or ntiles(main) > cap then return nil end
+  local parts, tiles, drops = {main}, ntiles(main), {}
+  for _, p in ipairs(far) do
+    local add, n, fb = {}, tiles, bbox_of(parts)
+    for _, b in ipairs(p.parts or {p.b}) do
+      local q = clamp_bbox(grown(b, M.CFG.col_margin))
+      if q and not covers(parts, {q}) and not covers(add, {q}) then
+        local all = {table.unpack(parts)}
+        for _, a in ipairs(add) do all[#all + 1] = a end
+        n = n + fresh_tiles(all, q)
+        add[#add + 1], fb = q, union(fb, q)
+      end
+    end
+    if #add > 0 then
+      if n <= cap and ntiles(fb) <= M.CFG.grid_max and #parts + #add <= M.CFG.parts_max then
+        for _, q in ipairs(add) do parts[#parts + 1] = q end
+        tiles = n
+      else
+        -- review: past parts_max a part joins the far part it grows least (as BUG-043 columns share the last part)
+        local np = {table.unpack(parts)}
+        for _, q in ipairs(add) do
+          if #np < M.CFG.parts_max then np[#np + 1] = q
+          else
+            local bk, bc
+            for k = 2, #np do
+              local cost = ntiles(union(np[k], q)) - ntiles(np[k])
+              if not bc or cost < bc then bk, bc = k, cost end
+            end
+            if bk then np[bk] = union(np[bk], q) else np = nil; break end
+          end
+        end
+        local nt = np and union_tiles(np)
+        if np and nt <= cap and ntiles(bbox_of(np)) <= M.CFG.grid_max then parts, tiles = np, nt
+        else drops[#drops + 1] = p end
+      end
+    end
+  end
+  local d1 = drops[1]
+  return {parts = parts, bbox = bbox_of(parts), tiles = tiles, margin = m, cols = 0, out = 0, regions = #parts - 1,
+          drop = #drops, dropped = d1 and d1.what:sub(1, M.CFG.drop_note) or nil,
+          dway = d1 and (d1.done and 'done; its tiles count as outside' or
+                         (d1.proj and d1.proj ~= '' and string.format('bp.cancel %s if it can go', d1.proj))) or nil}
+end
+
+-- an audit box as regions -> c, or nil, why (the fort core alone over the cap: its refusal). The first margin step
+-- that drops nothing wins, else the one that drops the fewest pieces
+function M.regions(K, pcs, cap)
+  local core, far = {}, {}
+  for _, p in ipairs(pcs) do if p.proj then far[#far + 1] = p else core[#core + 1] = p end end
+  if #core == 0 or #far == 0 then return nil end
+  local cb = bbox_of(core, 'b')
+  for _, p in ipairs(far) do p.gap, p.n = gap_of(p.b, cb), ntiles(p.b) end
+  table.sort(far, function(a, b)
+    if a.gap ~= b.gap then return a.gap < b.gap end
+    if a.n ~= b.n then return a.n < b.n end
+    return a.what < b.what
+  end)
+  local best
+  for _, m in ipairs(M.CFG.margin_steps) do
+    local c = regions_at(cb, far, m, cap)
+    if c and c.drop == 0 then return c end
+    if c and (not best or c.drop < best.drop) then best = c end
+  end
+  if best then return best end
+  local b0 = clamp_bbox(cb)
+  if not b0 then return nil, 'bbox outside the map' end
+  local m0 = M.CFG.margin_steps[#M.CFG.margin_steps]
+  local last = {parts = {clamp_bbox(grown(cb, m0)) or b0}, cols = 0, margin = m0}
+  last.tiles, last.bbox = ntiles(last.parts[1]), last.parts[1]
+  return nil, refusal(last, core, cap, 'fort core')
+end
+
 -- the default box of a purpose: {parts, bbox, tiles, margin?, cols, out = 0} or nil, why. The first margin step whose
--- union fits the cap wins; without fort pieces the surface around the map centre (no margin, no columns)
+-- union fits the cap wins; without fort pieces the surface around the map centre (no margin, no columns). BUG-129: an
+-- audit box over the cap as one box: as regions (M.regions)
 local function compose(K, purpose)
   local pcs = pieces(K, purpose)
   local main, cols = {}, {}
@@ -819,6 +954,10 @@ local function compose(K, purpose)
     end
   end
   if not last then return nil, 'bbox outside the map' end
+  if purpose == 'audit' then
+    local c, why = M.regions(K, pcs, cap)
+    if c or why then return c, why end
+  end
   return nil, refusal(last, main, cap)
 end
 
@@ -919,21 +1058,17 @@ local function enqueue(j)
   return at
 end
 
--- BUG-043: parts a covers parts b (every part of b lies in one of a)
-local function covers(a, b)
-  for _, q in ipairs(b) do
-    local inside = false
-    for _, p in ipairs(a) do if contains(p, q) then inside = true; break end end
-    if not inside then return false end
-  end
-  return true
-end
 
 -- BUG-043: what the reply and SNAPSHOT_READY say about a job's box ('margin 8,8,1', shaft columns, pieces left out)
 local function cov_note(j)
   local t = {}
   if j.margin and j.step and j.step > 1 then t[#t + 1] = 'margin ' .. mstr(j.margin) end
   if (j.cols or 0) > 0 then t[#t + 1] = string.format('%d shaft column%s', j.cols, j.cols == 1 and '' or 's') end
+  if (j.regions or 0) > 0 then t[#t + 1] = string.format('%d region%s', j.regions, j.regions == 1 and '' or 's') end
+  if (j.drop or 0) > 0 then                      -- BUG-129: the far pieces a region box dropped, the first one's way out
+    t[#t + 1] = string.format('drops %d far piece%s: %s%s', j.drop, j.drop == 1 and '' or 's', tostring(j.dropped),
+                              j.dway and (' (' .. j.dway .. ')') or '')
+  end
   if (j.out or 0) > 0 then
     t[#t + 1] = string.format('leaves out %d fort piece%s: %s', j.out, j.out == 1 and '' or 's', tostring(j.first))
   end
@@ -992,16 +1127,29 @@ function M.export(K, opts)
       end
       for i, m in ipairs(M.CFG.margin_steps) do if mstr(m) == ms then c.step = i; break end end
     end
+    if c.regions then                              -- BUG-129: log once per shape which region box was used
+      local key = string.format('%s/%d/%d', mstr(c.margin), c.regions, c.drop)
+      if margin_used['reg:' .. purpose] ~= key then
+        K.log('warn', 'snapshot: the %s box is over %d tiles as one box: %d tiles as the fort core (margin %s) and %d '
+              .. 'region%s%s', purpose, cap_of(K), c.tiles, mstr(c.margin), c.regions, c.regions == 1 and '' or 's',
+              c.drop > 0 and string.format(', drops %d far piece%s: %s', c.drop, c.drop == 1 and '' or 's',
+                                           tostring(c.dropped)) or '')
+        margin_used['reg:' .. purpose] = key
+      end
+    end
   end
   local n, bbox = c.tiles, c.bbox
   local user, by = opts.user == true, tostring(opts.by or 'kernel'):sub(1, 24)
   local info = {tiles = n, margin = c.margin and mstr(c.margin) or nil, cols = c.cols > 0 and c.cols or nil,
-                out = c.out > 0 and c.out or nil, first = c.out > 0 and c.first or nil}
+                out = c.out > 0 and c.out or nil, first = c.out > 0 and c.first or nil,
+                regions = (c.regions or 0) > 0 and c.regions or nil, drop = (c.drop or 0) > 0 and c.drop or nil,
+                dropped = (c.drop or 0) > 0 and c.dropped or nil}
   -- BUG-033: the same purpose, one box holding the other: one scan answers both (a waiting job only)
   for _, q in ipairs(queue) do
     if not q.rows and q.purpose == purpose and (covers(q.parts, c.parts) or covers(c.parts, q.parts)) then
       if not covers(q.parts, c.parts) then
         q.parts, q.bbox, q.tiles, q.margin, q.step, q.cols = c.parts, bbox, n, c.margin, c.step, c.cols
+        q.regions, q.drop, q.dropped, q.dway = c.regions, c.drop, c.dropped, c.dway      -- BUG-129
       end
       if (c.out or 0) < (q.out or 0) then q.out, q.first = c.out, c.first end
       q.alias = q.alias or {}
@@ -1015,7 +1163,9 @@ function M.export(K, opts)
       return true, id, string.format('joins %s (%s by %s, %d tiles%s)', q.id, q.purpose, q.by, q.tiles,
                                      note ~= '' and ('; ' .. note) or ''),
              {tiles = q.tiles, margin = q.margin and mstr(q.margin) or nil, cols = (q.cols or 0) > 0 and q.cols or nil,
-              out = (q.out or 0) > 0 and q.out or nil, first = (q.out or 0) > 0 and q.first or nil}
+              out = (q.out or 0) > 0 and q.out or nil, first = (q.out or 0) > 0 and q.first or nil,
+              regions = (q.regions or 0) > 0 and q.regions or nil, drop = (q.drop or 0) > 0 and q.drop or nil,
+              dropped = (q.drop or 0) > 0 and q.dropped or nil}
     end
   end
   if #queue >= M.CFG.queue then
@@ -1026,7 +1176,8 @@ function M.export(K, opts)
     drop(K, v, string.format('the queue was full and %s (%s by %s) goes first', id, purpose, by))
   end
   local j = {id = id, purpose = purpose, bbox = bbox, parts = c.parts, tiles = n, margin = c.margin, step = c.step,
-             cols = c.cols, out = c.out, first = c.first, by = by, user = user, t = now}
+             cols = c.cols, out = c.out, first = c.first, by = by, user = user, t = now,
+             regions = c.regions, drop = c.drop, dropped = c.dropped, dway = c.dway}
   local note = cov_note(j)
   note = note ~= '' and ('; ' .. note) or ''
   if not job and #queue == 0 then job = j; return true, id, 'next' .. note, info end    -- it starts at the next step
@@ -1216,7 +1367,9 @@ local function finish(K, j)
                                                   note ~= '' and ('; ' .. note) or ''),
              {id = id, path = rel, purpose = j.purpose, margin = (j.step or 1) > 1 and mstr(j.margin) or nil,
               cols = (j.cols or 0) > 0 and j.cols or nil, out = (j.out or 0) > 0 and j.out or nil,
-              first = (j.out or 0) > 0 and tostring(j.first):sub(1, 60) or nil})
+              first = (j.out or 0) > 0 and tostring(j.first):sub(1, 60) or nil,
+              regions = (j.regions or 0) > 0 and j.regions or nil, drop = (j.drop or 0) > 0 and j.drop or nil,
+              dropped = (j.drop or 0) > 0 and tostring(j.dropped):sub(1, 60) or nil})
     end
   end
   local now = K.now().ms

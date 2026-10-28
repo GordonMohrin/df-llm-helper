@@ -1,5 +1,28 @@
 # CHANGELOG dfpilot
 
+## Big forts are audited as regions instead of being refused (BUG-129, 2026-10-28, BUG-043 follow-up; offline, live-untested)
+- **Why:** Run 14 (region2-site90): `audit snapshot refused: bbox 190x192x45 = 1641600 tiles > 400000 at margin 0,0,0 (x 0-189 y 0-191 z 90-134;
+  stretched most by seal c1a14d660b9fb1de01 (+2 more) at z90 ...); file box ... > 1500000`; audit_old/audit_fail held readiness at R0 for ~190
+  game years. The fort's own geometry fits (298,908 tiles at 8,8,1); finished seals 26 levels down and a seal box over the whole map width
+  stretched the one default box, and the offered way out (`bp.cancel` of a finished seal) is refused by the runner.
+- **What changed:** (1) snapshot.lua `M.regions`: an audit box that fits at no margin as one box becomes the fort core (manifest geometry, first
+  margin step that drops nothing) plus every runner piece outside it as parts of its own (tile clusters, else its box, + `col_margin`), nearest
+  first (past `parts_max` a part joins the far part it grows least); a piece whose parts break `max_tiles` or `grid_max` is dropped and named (reply/SNAPSHOT_READY `N regions, drops N far
+  pieces: <first> (done; its tiles count as outside | bp.cancel <proj> if it can go)`, d `regions`/`drop`/`dropped`); only the core alone over
+  the cap is refused (`fort core ...`); a finished piece is never offered to `bp.cancel`. The cap (400,000) is unchanged. (2) runner.lua `boxes`:
+  `parts` (geom.clusters of the tiles, gap 6,6,1, at most 8; kept with the box in m.runner `kp`) and `done`. (3) bp/topo.py `sources`: besides a
+  walkable tile beside an unread tile on its level, a stair, ramp or cling leading up or down to one, a ramp top over one and a walkable tile
+  beside open space over one start attackers, so a region audit is as strict as one box over the fort (a dropped piece only adds fails).
+  (4) readiness: a dropped piece is no coverage fail; `ready.audit.cov` `drop N: <piece>` first. Contracts: schema SNAPSHOT_READY, CONTRACTS §7
+  (`snapshot.export`, `runner.boxes`), §9.10, §12 and appendix; RULES §8 row edited in place; DESIGN §5.4 row.
+- **Tests (fail on dec5132):** tests/lua/test_bug129_audit_regions.lua (5, a synthetic site90-size fort; the 5th, from the review, 30 shafts past `parts_max`), tests/lua/test_bug129_runner_parts.lua
+  (2), tests/lua/test_readiness.lua (1), tests/test_bug129_audit_regions.py (3).
+- **Live check:** on site90 run `dfllm audit`: the reply names `margin 8,8,1, N regions` (and any dropped piece) instead of the refusal; the
+  AUDIT event follows, `status` shows a fresh audit age. A bypass the new audit names from the core's lowest level is a real worst-case route
+  (a stair down to unread levels): the wall it names closes it. Watch the export time (kern.log `written T after the request`).
+- **Not decided offline:** whether the map-wide piece on site90 is a kept seal without tiles (dropped) or a running one (named with
+  `bp.cancel`); old kept boxes have no clusters (`kp`), only seals finished after this change do.
+
 ## TIMELINE_RESET: a boot whose clock jumped back marks the discarded timeline; follow, events and brief drop it (BUG-121, 2026-10-28, note 101; offline, live-untested)
 - **Why:** Run 14 note 101: after the player loaded an older save, `events.jsonl` still held the events up to #29900 of the line he had left
   (ticks far ahead of the loaded clock) and `alarm.txt` its lockdown; `follow` replayed BREACH, INTRUDER and DEATHS_3PLUS of the abandoned line while
