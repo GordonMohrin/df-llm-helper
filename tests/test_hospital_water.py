@@ -230,19 +230,19 @@ def test_status_shows_the_kernels_hospital_water(save, capsys):
 def test_bug036_contracts_hosp_out_state_patients_out_event_and_unready_hout(base):
     """Run 11 siege 9 (y445): two cave dragons struck down 8 citizens in the BREACH, 7 of them patients in hospital
     beds outside the refuge. The kernel's water state counts the hospital zones outside Kern+/Tiefe+ (hosp_out),
-    PATIENTS_OUT (B) says in a fight how many patients lie outside the alert burrow, SIEGE_UNREADY carries hout."""
+    PATIENTS_OUT (A since M3, note 94) says in a fight how many patients lie outside the alert burrow, SIEGE_UNREADY carries hout."""
     _, state = base
     s = watered(state, src=[(60, 12, 5)])
     s["water"]["hosp_out"] = 2
     assert schema.validate("state", s) == []
     assert any("hosp_out" in e for e in schema.validate("state", dict(s, water=dict(s["water"], hosp_out=-1))))
-    e = {"n": 9100, "tick": 5, "type": "PATIENTS_OUT", "cls": "B",
+    e = {"n": 9100, "tick": 5, "type": "PATIENTS_OUT", "cls": "A",
          "msg": "BREACH: 7 of 7 patients lie outside the alert burrow Tiefe+ (28392 at 115,77,144): they cannot walk "
                 "there, only a rescue moves them",
          "d": {"n": 7, "patients": 7, "burrow": "Tiefe+", "units": [1, 2, 3, 4, 5, 6, 7], "mode": "BREACH",
                "hosp_out": 1}}
     assert schema.validate("event", e) == []
-    assert schema.EVENTS["PATIENTS_OUT"][:2] == ("B", "water")
+    assert schema.EVENTS["PATIENTS_OUT"][:2] == ("A", "water")
     assert any("burrow: missing" in x for x in schema.validate("event", dict(e, d={"n": 1})))
     u = {"fails": ["hospital_out"], "hout": "the hospital lies outside Kern+/Tiefe+ (1 of 2 zones; zone 34 at "
                                             "115,77,144): its patients cannot walk to the refuge; move it into Tiefe+ "

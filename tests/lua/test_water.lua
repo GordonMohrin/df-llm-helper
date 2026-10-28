@@ -427,7 +427,7 @@ T.test('BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds by cav
 end)
 
 T.test('BUG-036: in a fight (SIEGE/BREACH) the patients outside the burrow the alert confines to are reported once ' ..
-       'per fight (PATIENTS_OUT, B): they cannot walk there, only a rescue moves them', function()
+       'per fight (PATIENTS_OUT, class A since M3 note 94): they cannot walk there, only a rescue moves them', function()
   local W, M = world{patients = {{id = 2, thirst = 9000, rest = true, pos = {72, 71, 5}},
                                  {id = 3, thirst = 9000, rest = true, pos = {43, 43, 2}}},
                      setup = function(W)
@@ -444,7 +444,7 @@ T.test('BUG-036: in a fight (SIEGE/BREACH) the patients outside the burrow the a
   day(W)
   local po = W.find_events('PATIENTS_OUT')
   T.eq(#po, 1)
-  T.eq(po[1].cls, 'B')
+  T.eq(po[1].cls, 'A')
   T.eq({po[1].d.n, po[1].d.patients, po[1].d.burrow, po[1].d.units, po[1].d.mode, po[1].d.hosp_out},
        {1, 2, 'Tiefe+', {2}, 'BREACH', 1})
   T.ok(po[1].msg:find('BREACH: 1 of 2 patients lie outside the alert burrow Tiefe+ (2 at 72,71,5)', 1, true), po[1].msg)

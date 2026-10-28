@@ -117,7 +117,10 @@ M.CFG = {
   -- lockdown expires after hold_quiet_days without one, invaders visible farther away included (0 = off)
   lockdown_near = 40,
   -- BUG-065: the confinement limit and the harmless-intruder picture (see the header)
-  confine = {max_days = 10, harmless_size = 20000, lone_max = 2, offer_days = 1, need_thirst = 40000, need_hunger = 60000},
+  -- M3 (BUG-112): a lone harmless intruder in SIEGE/BREACH: ask_days = the kill_lone_intruder question, kill_hours =
+  -- the kernel's own kill order for one inside Kern+ (BREACH; 0 = off), siege_release = the lockdown limit applies there too
+  confine = {max_days = 10, harmless_size = 20000, lone_max = 2, offer_days = 1, need_thirst = 40000, need_hunger = 60000,
+             ask_days = 3, kill_hours = 24, siege_release = true},
   defaults = {ARRIVAL = {'clock', 'gates', 'doors', 'alert'}, INTRUDER = {'clock', 'gates', 'doors', 'alert'},
               PREDATOR = {'clock', 'alert'}, DEATHS_3PLUS = {'clock'}, NO_DEPOT = {}},
   -- BUG-108 (Run 14 note 88): interrupt types whose cause lies inside the fort (patients, moods, a curse, a tantrum).
@@ -191,10 +194,12 @@ local function cfg(K)
   for k, v in pairs(M.CFG.confine) do c.confine[k] = v end
   local cf = type(r.confine) == 'table' and r.confine or {}
   for k, lim in pairs({max_days = {0, 365}, harmless_size = {0, 5000000}, lone_max = {1, 10}, offer_days = {0, 365},
-                       need_thirst = {10000, 75000}, need_hunger = {10000, 100000}}) do
+                       need_thirst = {10000, 75000}, need_hunger = {10000, 100000}, ask_days = {0, 365},
+                       kill_hours = {0, 720}}) do
     local v = int(cf[k])
     if v and v >= lim[1] and v <= lim[2] then c.confine[k] = v end
   end
+  if type(cf.siege_release) == 'boolean' then c.confine.siege_release = cf.siege_release end
   for _, v in ipairs(type(cf.harmless_races) == 'table' and cf.harmless_races or {}) do
     if type(v) == 'string' and v:match('^[A-Z][A-Z0-9_]*$') and #v <= 40 and #c.confine.harmless_races < 16 then
       c.confine.harmless_races[#c.confine.harmless_races + 1] = v
@@ -587,17 +592,19 @@ M.FAR_PRUNE = 1200         -- ticks between looks at expired-far units not liste
 local FAR_MODES = {PEACE = true, ALERT = true}   -- the quiet clock runs past far invaders only there (never in a siege)
 
 local function far_set()
-  local f, hl = {}, {}
+  local f, hl, ig = {}, {}, {}
   for _, id in ipairs(st.far and st.far.ids or {}) do f[id] = true end
   for _, id in ipairs(st.far and st.far.hl or {}) do if f[id] then hl[id] = true end end   -- BUG-065: cleared harmless ones
-  rt.fset, rt.hlset = f, hl
+  for _, id in ipairs(st.far and st.far.ig or {}) do if hl[id] then ig[id] = true end end  -- M3: stay cleared inside Kern+ too
+  rt.fset, rt.hlset, rt.igset = f, hl, ig
 end
 
 local function far_drop(gone)
-  local keep, khl = {}, {}
+  local keep, khl, kig = {}, {}, {}
   for _, id in ipairs(st.far.ids) do if not gone[id] then keep[#keep + 1] = id end end
   for _, id in ipairs(st.far.hl or {}) do if not gone[id] then khl[#khl + 1] = id end end
-  st.far.ids, st.far.hl, dirty = keep, khl, true
+  for _, id in ipairs(st.far.ig or {}) do if not gone[id] then kig[#kig + 1] = id end end
+  st.far.ids, st.far.hl, st.far.ig, dirty = keep, khl, kig, true
   far_set()
 end
 
@@ -652,7 +659,7 @@ local function far_scan(K, h, now)
     elseif r.d < 0 then r.unknown = true end
     ap[e.id] = r
     -- BUG-065: a cleared harmless intruder stays cleared when it is near (only inside Kern+ it counts again)
-    if fs[e.id] and r.near and not (rt.hlset[e.id] and r.how ~= 'inside') then
+    if fs[e.id] and r.near and not (rt.hlset[e.id] and (r.how ~= 'inside' or rt.igset[e.id])) then
       gone = gone or {}
       gone[e.id] = true
       local what = r.how == 'inside' and 'inside Kern+' or string.format('%d tiles of %s', r.how == 'citizen' and dc or de,
@@ -1478,6 +1485,9 @@ local function hl_clear(K, now, pic)
   for _, id in ipairs(st.far.ids) do have[id] = true end
   for _, id in ipairs(st.far.hl) do if have[id] then keep[#keep + 1] = id end end
   st.far.hl, st.far.t, dirty = keep, now, true
+  local kig = {}
+  for _, id in ipairs(st.far.ig or {}) do if have[id] then kig[#kig + 1] = id end end
+  st.far.ig = kig
   far_set()
   return names, #names
 end
@@ -1540,7 +1550,7 @@ local function release(K, now, how, pic, who)
     d.far, d.nfar = {}, nfar
     for i = 1, math.min(#names, M.FAR_SHOWN) do d.far[i] = names[i] end
   end
-  st.cf = {o = CAD.quiet(st.cf and st.cf.o), n = CAD.quiet(st.cf and st.cf.n)}    -- BUG-065: a new episode waits
+  st.cf = {o = CAD.quiet(st.cf and st.cf.o), n = CAD.quiet(st.cf and st.cf.n), k = CAD.quiet(st.cf and st.cf.k)}    -- BUG-065: a new episode waits
   K.emit('LOCKDOWN_END', 'B', msg, d)
   K.log('info', 'reflex: %s', msg)
 end
@@ -1872,7 +1882,9 @@ local function quiet_block(K, h, now)
   local hd = st.hold
   local fresh = type(h) == 'table' and now - (h.tick or -1e9) <= M.FRESH
   if not fresh then return 'stale' end
-  if (h.inside or 0) > 0 then return 'inside' end
+  local ign = 0
+  for _, e in ipairs(h.list or {}) do if e.ik == 1 and rt.igset[e.id] then ign = ign + 1 end end   -- M3
+  if (h.inside or 0) - ign > 0 then return 'inside' end
   if (h.inv or 0) > 0 and not far_now(K, h) then return 'near' end
   if (h.great or 0) > 0 then
     local ok, a = K.call('threat', 'assess')
@@ -1910,6 +1922,7 @@ M.NEED_SLICE = 60          -- citizens looked at per look (a bigger fort takes s
 -- An unreadable size is no evidence (not harmless)
 local function harmless(e, c)
   if e.k == 'great' or e.k == 'undead' or e.dz == 1 or e.bd or e.pr then return false end
+  if e.uc == 1 then return true end                    -- M3: unconscious (sense marks it): it cannot act; it wakes, the size rule applies
   local sz = int(e.sz)
   if sz and c.harmless_size > 0 and sz <= c.harmless_size then return true end
   if #c.harmless_races > 0 then
@@ -2058,6 +2071,156 @@ local function confine_step(K, h, now)
   if pic and not pic.dangerous then release(K, now, 'limit', pic) end
 end
 
+---------------------------------------------------------------- M3 (BUG-112, Run 14 y640 note 77, y707 notes 94 and 96)
+-- A lone harmless intruder held the fort for weeks: 48 days in SIEGE (threat's quiet clock counts every invader on the
+-- map; the confinement limit above runs in PEACE/ALERT only) and 26 days in BREACH (one unit inside Kern+; the same
+-- limit, and the cleared list drops a unit that is inside Kern+). In SIEGE/BREACH the picture "every counted hostile is
+-- harmless, at most confine.lone_max of them" now has a clock of its own (st.lone: since, signature of the ids; a
+-- visible gap up to LONE_GRACE ticks keeps it):
+--   * confine.kill_hours: BREACH, the unit inside Kern+: the kernel itself orders the best squad to kill it
+--     (military.kill_lone: a squad order, the squads screen), when the squad stands at confine/sortie `worn`;
+--   * confine.ask_days: DECISION_NEEDED kill_lone_intruder (A) with the ready squad.sortie command and the state of the
+--     kernel's own attempt (refused: why / running / the soldiers stood beside it and no attack came);
+--   * confine.max_days (lockdown limit, siege_release): with the soldiers at their stations the unit is cleared (far.hl,
+--     far.ig: also inside Kern+), the lockdown (if any) ends (LOCKDOWN_END cause limit), threat counts it for nothing and
+--     the mode falls back by its own rules (quiet clock 2,400 ticks, RECOVERY, PEACE).
+M.LONE_GRACE = 1200        -- ticks the picture may be gone before the clock restarts
+M.KILL_RETRY = 600         -- ticks between two attempts of the kernel's own kill order
+M.KILL_MAX = 5             -- orders the kernel starts per lone-intruder picture (it then only asks and, at the limit, releases)
+
+-- every counted hostile of the fresh census (not cleared) is harmless and there are at most lone_max of them; {ents, inside,
+-- ids (sorted), sig} or nil, why ('none' = nobody in sight)
+local function lone_picture(K, h, now)
+  if type(h) ~= 'table' or now - (h.tick or -1e9) > M.FRESH or not rt.ap or rt.ftick ~= h.tick then return nil, 'stale' end
+  local c = cfg(K).confine
+  local ents = {}
+  for _, e in ipairs(h.list or {}) do
+    if not rt.fset[e.id] then ents[#ents + 1] = e end
+  end
+  if #ents == 0 then return nil, 'none' end
+  if #ents > c.lone_max or (h.vis or 0) > #(h.list or {}) or (h.great or 0) > 0 or (h.undead or 0) > 0 then return nil, 'group' end
+  local ids, inside = {}, false
+  for _, e in ipairs(ents) do
+    if not harmless(e, c) then return nil, 'dangerous' end
+    ids[#ids + 1] = e.id
+    local a = rt.ap[e.id]
+    if a and a.how == 'inside' then inside = true end
+  end
+  table.sort(ids)
+  return {ents = ents, ids = ids, inside = inside, sig = table.concat(ids, ',')}
+end
+
+-- public (military, the sortie's "target is lone and harmless" test): the ids of the lone harmless picture, or nil
+function M.lone_ids(K)
+  if not st then return nil, 'stale' end
+  local h = K.census.h
+  local pic, why = lone_picture(K, h, K.now().tick)
+  return pic and pic.ids or nil, why
+end
+
+-- public (military): a hostile the soldiers stood beside without an attack (DF does not treat it as an enemy) is cleared
+-- like a released harmless intruder, inside Kern+ too; returns true when it was added
+function M.ignore(K, id, why)
+  id = int(id)
+  if not (st and id) then return false end
+  local have, hl, ig = {}, {}, {}
+  for _, v in ipairs(st.far.ids) do have[v] = true end
+  for _, v in ipairs(st.far.hl) do hl[v] = true end
+  for _, v in ipairs(st.far.ig) do ig[v] = true end
+  if not have[id] then st.far.ids[#st.far.ids + 1] = id end
+  if not hl[id] then st.far.hl[#st.far.hl + 1] = id end
+  if not ig[id] then st.far.ig[#st.far.ig + 1] = id end
+  while #st.far.ids > M.FAR_MAX do table.remove(st.far.ids, 1) end
+  st.far.t, dirty = K.now().tick, true
+  far_set()
+  K.log('info', 'reflex: unit %d cleared (%s): it counts for nothing until another hostile is in sight', id, tostring(why))
+  return true
+end
+
+local function soldiers_on_station(K)
+  local ok, k = K.call('military', 'kpi')
+  if not (ok and type(k) == 'table') then return false end
+  local sol, on = int(k.soldiers) or 0, int(k.on_station) or 0
+  return sol > 0 and on * 2 >= sol
+end
+
+local function lone_cmd(K, pic)
+  local e = pic.ents[1]
+  local ok, key, n = K.call('military', 'sortie_squad')
+  if not (ok and type(key) == 'string') then return nil, nil, 0 end
+  return string.format('dfllm cmd squad.sortie \'{"squad":"%s","target":[%d,%d,%d],"approve":true}\'', key, e.x, e.y, e.z),
+         key, int(n) or 0
+end
+
+local function lone_step(K, h, now)
+  if rt.lo_t and now >= rt.lo_t and now - rt.lo_t < M.CF_EVERY then return end
+  rt.lo_t = now
+  local mode = K.mode()
+  local c = cfg(K).confine
+  local pic, why
+  if mode == 'SIEGE' or mode == 'BREACH' then pic, why = lone_picture(K, h, now) end
+  rt.lone = nil
+  if not pic then
+    -- nobody in sight keeps the clock for LONE_GRACE ticks (a unit that walks in and out of sight); anything else ends it
+    if st.lone and not ((why == 'none' or why == 'stale') and (mode == 'SIEGE' or mode == 'BREACH')
+                        and now - (st.lone.seen or st.lone.t) <= M.LONE_GRACE) then
+      st.lone, dirty = nil, true
+    end
+    return
+  end
+  if not st.lone or st.lone.sig ~= pic.sig then st.lone, dirty = {t = now, sig = pic.sig}, true end
+  if st.lone.seen ~= now then st.lone.seen = now end
+  local age = now - st.lone.t
+  rt.lone = {age = age, pic = pic}
+  -- the kernel's own kill order: BREACH, the unit inside Kern+
+  -- (a refused order is tried again every KILL_RETRY ticks; one that started, once a game day and at most KILL_MAX times per picture)
+  local wait = (rt.kl and rt.kl.ok) and 2 * M.KILL_RETRY or M.KILL_RETRY
+  if c.kill_hours > 0 and mode == 'BREACH' and pic.inside and age >= c.kill_hours * 50 and (st.lone.kn or 0) < M.KILL_MAX
+     and (not rt.kl_t or now < rt.kl_t or now - rt.kl_t >= wait) then
+    rt.kl_t = now
+    local ok, started, msg = K.call('military', 'kill_lone', pic.ids, 'reflex')
+    rt.kl = {ok = ok and started == true, msg = tostring(ok and msg or started or 'no military module'):sub(1, 80), t = now}
+    if rt.kl.ok and not tostring(msg):find('is running', 1, true) then st.lone.kn, dirty = (st.lone.kn or 0) + 1, true end
+  end
+  local kl = rt.kl and rt.kl.t and now - rt.kl.t < 2 * M.KILL_RETRY and rt.kl or nil
+  -- the question
+  if c.ask_days > 0 and age >= c.ask_days * 1200 then
+    local T = K.now()
+    local e = pic.ents[1]
+    local tok = (kl and (kl.ok and 'running' or kl.msg:sub(1, 20))) or 'none'
+    if CAD.due(st.cf and st.cf.k, T, pic.ids, {tok}, {ticks = math.max(1, c.ask_days) * 1200, wall_s = 60}) then
+      local cmd, key, n = lone_cmd(K, pic)
+      local race = race_of(e.id):upper():gsub('[^%w]+', '_'):sub(1, 24)
+      local q = string.format('harmless lone %s %d (%s) at %d,%d,%d has held the %s for %.1f days%s; %s', e.k == 'inv' and 'inv' or e.k,
+                              e.id, race, e.x, e.y, e.z, mode, age / 1200,
+                              kl and (kl.ok and ('; kernel kill order: ' .. kl.msg) or ('; kernel kill order refused: ' .. kl.msg)) or '',
+                              cmd and string.format('send squad %s (%d soldiers): %s', key, n, cmd) or 'no squad to send')
+      st.cf = st.cf or {}
+      st.cf.k, dirty = CAD.mark(T, pic.ids, {tok}), true
+      local d = {id = 'kill_lone_intruder', q = q:sub(1, 200), unit = e.id, pos = {e.x, e.y, e.z}, race = race,
+                 hl = 1, age = age, mode = mode, inside = pic.inside and 1 or 0}
+      if cmd then d.squad, d.cmd = key, cmd end
+      if kl then d.kill = kl.msg end
+      K.emit('DECISION_NEEDED', 'A', q, d)
+      K.log('info', 'reflex: %s', q)
+    end
+  end
+  -- the release: the lockdown limit holds in SIEGE/BREACH too, with the soldiers at their stations
+  if c.siege_release and c.max_days > 0 and age >= c.max_days * 1200 and soldiers_on_station(K) then
+    local near = {}
+    for _, e in ipairs(pic.ents) do
+      near[#near + 1] = {e = e, d = (rt.ap[e.id] and rt.ap[e.id].d) or -1, how = rt.ap[e.id] and rt.ap[e.id].how}
+    end
+    local ig = {}
+    for _, e in ipairs(pic.ents) do ig[#ig + 1] = e.id end
+    if st.hold then release(K, now, 'limit', {near = near}) else hl_clear(K, now, {near = near}) end
+    for _, id in ipairs(ig) do M.ignore(K, id, 'lone harmless intruder, ' .. mode .. ' limit') end
+    st.lone, rt.lone, dirty = nil, nil, true
+    K.log('info', 'reflex: lone harmless intruder %s cleared after %.1f days in %s with the soldiers at their stations',
+          table.concat(ig, ','), age / 1200, mode)
+  end
+end
+
 -- a mood dwarf or a patient behind the sounding alert over confine.need_thirst / need_hunger: DECISION_NEEDED
 -- confined_need (CAD) and, with nothing dangerous near, the lockdown ends for him. Soldiers and children are looked at
 -- like the rest; the siege module's relax path (STRANDED) stays the rescue for the others
@@ -2170,7 +2333,7 @@ end
 ---------------------------------------------------------------- module
 function M.init(K)
   local p = K.persist.get('m.reflex')
-  st = {v = 2, doors = {}, ack = {n = 0, wall = 0}, irq = {}, vfy = {}, ref = {}, far = {t = 0, ids = {}, hl = {}}}
+  st = {v = 2, doors = {}, ack = {n = 0, wall = 0}, irq = {}, vfy = {}, ref = {}, far = {t = 0, ids = {}, hl = {}, ig = {}}}
   if type(p) == 'table' then
     for _, id in ipairs(type(p.doors) == 'table' and p.doors or {}) do
       if int(id) then st.doors[#st.doors + 1] = int(id) end
@@ -2238,6 +2401,11 @@ function M.init(K)
       for _, id in ipairs(type(f.hl) == 'table' and f.hl or {}) do      -- BUG-065: the cleared harmless intruders
         if int(id) and inf[int(id)] then st.far.hl[#st.far.hl + 1] = int(id) end
       end
+      local inh = {}
+      for _, id in ipairs(st.far.hl) do inh[id] = true end
+      for _, id in ipairs(type(f.ig) == 'table' and f.ig or {}) do      -- M3: cleared even inside Kern+
+        if int(id) and inh[int(id)] then st.far.ig[#st.far.ig + 1] = int(id) end
+      end
     end
     local cf = p.cf                                      -- BUG-065: the offer and need cadences
     if type(cf) == 'table' then
@@ -2248,7 +2416,11 @@ function M.init(K)
         for _, v in ipairs(type(r.toks) == 'table' and r.toks or {}) do if type(v) == 'string' then o.toks[#o.toks + 1] = v end end
         return o
       end
-      st.cf = {o = rec(cf.o), n = rec(cf.n)}
+      st.cf = {o = rec(cf.o), n = rec(cf.n), k = rec(cf.k)}
+    end
+    local lo = p.lone                                     -- M3: the lone harmless intruder's clock survives a reload
+    if type(lo) == 'table' and int(lo.t) and type(lo.sig) == 'string' then
+      st.lone = {t = int(lo.t), sig = lo.sig:sub(1, 60), seen = int(lo.seen), kn = int(lo.kn)}
     end
   end
   rt, dirty = {}, false
@@ -2277,6 +2449,7 @@ function M.step(K, budget, ctx)
   cause_scan(K, h)                                         -- BUG-065: the cause for state/status, then the limit
   offer_step(K, h, now)
   confine_step(K, h, now)
+  lone_step(K, h, now)                                     -- M3 (BUG-112)
   need_step(K, h, now)
   ack_step(K, now)
   depot_visits(K, now)
@@ -2345,6 +2518,18 @@ function M.state(K)
     a.rto = rc_where(K, rc):sub(1, 24)
   end
   if #st.far.ids > 0 then a.far = #st.far.ids end   -- Run 11: hostiles whose lockdown expired far
+  -- M3 (BUG-111/112): units left out of the hostiles (`id:why`), the lone harmless intruder's clock in SIEGE/BREACH
+  local hh = K.census.h
+  if type(hh) == 'table' and (hh.nben or 0) > 0 then
+    a.ben = {}
+    for i = 1, math.min(#(hh.benign or {}), 5) do a.ben[i] = string.format('%d:%s', hh.benign[i].id, hh.benign[i].why):sub(1, 24) end
+  end
+  if rt.lone then
+    local c = cfg(K).confine
+    a.ln = {age = rt.lone.age, n = #rt.lone.pic.ids}
+    if c.siege_release and c.max_days > 0 then a.ln.rel = math.max(0, c.max_days * 1200 - rt.lone.age) end
+    if rt.kl and rt.kl.msg then a.ln.kill = rt.kl.msg:sub(1, 80) end
+  end
   if st.hold then                                    -- BUG-065: the lockdown's age, its limit, why it holds, its cause
     local now = K.now().tick
     a.age = math.max(0, now - st.hold.since)

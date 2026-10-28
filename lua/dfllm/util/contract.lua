@@ -75,7 +75,7 @@ C.EVENTS = {
   -- caregivers' state (the Orderlies work detail is scaled by water: act.work_detail)
   PATIENT_DYING = {cls = 'A', by = 'water'},
   -- BUG-036: in a fight, patients lie outside the burrow the civ alert confines to (once per fight; they cannot walk)
-  PATIENTS_OUT = {cls = 'B', by = 'water'},
+  PATIENTS_OUT = {cls = 'A', by = 'water'},        -- M3 (note 94 c): a class-A wake with a recipe (once per fight)
   -- BUG-040: a done cistern whose well stood dry for water.cistern_dry_days (once per dry spell, with what fills it)
   CISTERN_DRY = {cls = 'B', by = 'water'},
   -- A since Run 9 (an army walked in while these were digest-only): wake at once
@@ -162,7 +162,7 @@ C.EVENTS = {
   SEAL_WALLED = {cls = 'B', by = 'runner'},
   -- Gordon 2026-10-16: intake waves in SIEGE (muster, open, close, clear, back, abort, refused) and the sortie
   -- through O1 (gather, open, out, recall, close, done, abort)
-  INTAKE = {cls = 'B', by = 'siege'}, SORTIE = {cls = 'B', by = 'siege'},
+  INTAKE = {cls = 'B', by = 'siege'}, SORTIE = {cls = 'B', by = 'any'},       -- M3: military reports the position sorties too
   -- Run 11: economy's glass chain for strange moods is blocked (no sand revealed, no bags, no fuel; once per set)
   GLASS_BLOCKED = {cls = 'B', by = 'economy'},
   -- Run 11: pieces planned buildings wait for that nothing in the fort can make (no rock, no logs; once per set)
@@ -447,7 +447,12 @@ C.STATE_SPEC = obj({
                -- position, tiles to the nearest citizen outside Kern+ (dc) and entrance (de), harmless (hl), how many (n), its body size (sz)
                age = NAT, lim = NAT, qw = str(8),
                by = obj({id = NAT, race = str(24), k = str(8), pos = {t = 'tup', items = {NAT, NAT, NAT}},
-                         dc = int(-1), de = int(-1)}, {hl = FLAG, n = NAT, sz = NAT})}),
+                         dc = int(-1), de = int(-1)}, {hl = FLAG, n = NAT, sz = NAT}),
+               -- M3 (BUG-111/112): invaders left out of the hostiles (`id:why`: merchant, diplomat, visitor, restrained,
+               -- child) and the lone harmless intruder's clock in SIEGE/BREACH (age ticks, how many, ticks until the
+               -- limit releases it, the kernel's own kill order: running or why refused)
+               ben = arr(str(24), 0, 5),
+               ln = obj({age = NAT, n = NAT}, {rel = NAT, kill = str(80)})}),
   lever = obj({lat_s = int(-1), lat_t = int(-1), pend = NAT, wait_s = NAT}),
   alert = obj({want = str(24), burrow = str(24), tiles = NAT, inside = NAT, ok = FLAG},
               {why = str(40), core_d = NAT, core_f = NAT,           -- BUG-028: drink/food days inside the core
@@ -465,7 +470,8 @@ C.STATE_SPEC = obj({
                bg = obj({n = NAT, b = str(24), was = NAT, now = NAT}, {c = str(8), fx = NAT, st = str(16), crit = str(24)})}),
   -- intake waves (siege, Gordon 2026-10-16): phase, wave count, the last refusal, the sortie squad and phase; BUG-030:
   -- deep = the deep defense's reasons ('destroyers,army,weak')
-  wave = obj({ph = str(8), n = NAT}, {why = str(40), so = str(24), deep = str(24)}),
+  -- M3 (BUG-114): in BREACH ba = ticks since it began, bw = what it waits for (the bridges not up and why, the quiet clock)
+  wave = obj({ph = str(8), n = NAT}, {why = str(40), so = str(24), deep = str(24), ba = NAT, bw = str(100)}),
   -- BUG-033: the snapshot export queue: requests waiting (the running one included), the oldest one's age (s), exports
   -- written and requests dropped this boot; the running (else the first waiting) export: id, purpose, who asked,
   -- progress, why it waits

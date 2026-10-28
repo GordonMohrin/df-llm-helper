@@ -1843,6 +1843,8 @@ local function apply_squad(K, k, force)
   local s = e and squad(e.id)
   if not s then return true end
   if rt.held[k] then return true end                 -- siege holds this squad's sortie order (hold_order)
+  local so = rt.so[k]
+  if so and so.keep then return true end             -- M3 (BUG-113): a sortie against a lone harmless intruder is kept until sortie_pass ends it
   local man = K.manifest()
   local stations = type(man.stations) == 'table' and man.stations or {}
   local which, pos, src = posture_station(K, man, stations, st.posture, e.kind, k == first_melee_key())
@@ -1990,9 +1992,306 @@ function M.sortie_squad(K)
   return bk, bn
 end
 
--- inbox squad.sortie (approval checked by kern): kill the visible hostiles in a killbox, else move there.
--- args.gate (Gordon 2026-10-16): a sortie through that outer bridge; siege runs it (gather in the bailey, open, kill,
--- recall, close) and answers
+---------------------------------------------------------------- M3 (BUG-113): the sortie to a position, tracked
+-- Run 14 y707 note 96: `squad.sortie` with a position set a station order only ("move to"); the soldiers walked there, the
+-- order was consumed on arrival, the next upkeep (military.lua step, drift) gave the BREACH posture back, nothing said
+-- whether they arrived, and the kernel never killed the one goblin. Now (config/reflex.json `sortie`, read through
+-- siege.so_conf): a position with a visible hostile within `kill_near` tiles sets a KILL order on it (a station order
+-- otherwise, and a kill order as soon as the squad has arrived and one stands there); the sortie is tracked in rt.so
+-- (SORTIE events, class B: phase go / arrived / dead / abort with why); a sortie against a lone harmless intruder is kept
+-- against the posture (rt.so[k].keep, apply_squad) while the squad is worn >= `worn` percent; soldiers who stand beside
+-- the target `idle_ticks` without an attack (DF does not treat it as an enemy) end it as `not_attackable` and the
+-- reflex clears the unit; a target on another walk group is refused with the groups named. `no killbox` falls back to a
+-- kill order on the one hostile in sight. military.kill_lone is the kernel's own order (reflex, BREACH).
+M.SO_DEF = {worn = 80, kill_near = 5, idle_ticks = 1200, hold_ticks = 4800}
+M.SO_EVERY = 100           -- ticks between two looks at a running position sortie
+M.SO_ARRIVE, M.SO_ADJ = 3, 2   -- tiles: a member this close to the target has arrived / stands beside the unit
+M.SO_REISSUE = 3           -- a kill order DF dropped while the target lives is given again this often
+
+local function so_conf(K)
+  local ok, c = K.call('siege', 'so_conf')
+  local r = {}
+  for k, v in pairs(M.SO_DEF) do r[k] = (ok and type(c) == 'table' and int(c[k])) or v end
+  return r
+end
+
+local function so_event(K, key, phase, txt, d)
+  d = d or {}
+  d.phase, d.squad = phase, key
+  K.emit('SORTIE', 'B', txt:sub(1, 200), d)
+  K.log('info', 'military: sortie %s %s: %s', tostring(key), phase, txt:sub(1, 160))
+end
+
+local function unit_dead(id)
+  local u = try(function() return df.unit.find(id) end)
+  if not u then return true end
+  return try(function() return dfhack.units.isDead(u) or not dfhack.units.isActive(u) end) == true
+end
+
+local function unit_xyz(id)
+  local u = try(function() return df.unit.find(id) end)
+  if not u then return nil end
+  local ok, x, y, z = pcall(dfhack.units.getPosition, u)
+  return ok and x and {x = x, y = y, z = z} or nil
+end
+
+local function cheb(a, b) return math.max(math.abs(a.x - b.x), math.abs(a.y - b.y), math.abs(a.z - b.z)) end
+
+-- the visible hostiles of the census within r tiles of p, nearest first
+local function hostiles_near(K, p, r)
+  local h = K.census.h
+  local out = {}
+  for _, e in ipairs(type(h) == 'table' and h.list or {}) do
+    local d = cheb(e, p)
+    if d <= r then out[#out + 1] = {id = e.id, d = d, e = e} end
+  end
+  table.sort(out, function(a, b) if a.d ~= b.d then return a.d < b.d end return a.id < b.id end)
+  return out
+end
+
+-- why the squad cannot walk to p: the walk groups differ (a raised bridge, a wall), or nil (same group / unknown). Asked
+-- through snapshot.groups (revealed tiles only; 0, hidden and unknown give no verdict)
+local function unreachable(K, s, p)
+  local pts = {{x = p.x, y = p.y, z = p.z}}
+  for _, m in ipairs(members(s)) do
+    local mp = try(function() return {x = m.unit.pos.x, y = m.unit.pos.y, z = m.unit.pos.z} end)
+    if mp then pts[#pts + 1] = mp end
+  end
+  local ok, g = K.call('snapshot', 'groups', pts, true)
+  if not (ok and type(g) == 'table') then return nil end
+  local gt = int(g[1])
+  if not gt or gt <= 0 then return nil end
+  local gs
+  for i = 2, #pts do
+    local x = int(g[i])
+    if x and x > 0 then
+      if x == gt then return nil end                       -- one member can walk there
+      gs = gs or x
+    end
+  end
+  if not gs then return nil end
+  return string.format('target unreachable: %s is on walk group %d, the squad on %d (a raised bridge, a wall or a closed door between)',
+                       pstr(p), gt, gs)
+end
+
+local function so_ids_txt(ids)
+  local l = {}
+  for i = 1, math.min(#ids, 3) do l[i] = tostring(ids[i]) end
+  return table.concat(l, ',') .. (#ids > 3 and ('+' .. (#ids - 3)) or '')
+end
+
+-- begin a tracked sortie of squad `key` with `order` (station or kill); meta: cmd, by, keep
+local function so_begin(K, key, s, order, meta)
+  local ok, err = K.act.squad_order(s.id, order)
+  if not ok then return false, 'order failed: ' .. tostring(err) end
+  local now = now_tick(K)
+  rt.order[key] = 'sortie:' .. tostring(meta.cmd or '?')
+  rt.kpi = nil
+  local old = rt.so[key]
+  rt.so[key] = {cmd = tostring(meta.cmd or '?'), by = meta.by or 'verb', t0 = old and old.t0 or now, last = now, kind = order.kind,
+                ids = order.units, tgt = order.pos or (old and old.tgt), keep = meta.keep == true, adj = 0, re = 0,
+                arrived = old and old.arrived or false, unseen = 0, mode = K.mode(), w0 = nil}
+  if order.kind == 'kill' then
+    rt.so[key].tgt = rt.so[key].tgt or unit_xyz(order.units[1])
+  end
+  if M.every.ticks > M.SO_EVERY then M.every = {ticks = M.SO_EVERY} end
+  return true
+end
+
+local function so_end(K, key, phase, why, txt, d)
+  local so = rt.so[key]
+  rt.so[key] = nil
+  rt.order[key] = nil
+  rt.kpi = nil
+  d = d or {}
+  d.why = why
+  if so and so.ids then d.units = so.ids end
+  if so and so.tgt then d.pos = {so.tgt.x, so.tgt.y, so.tgt.z} end
+  if so then d.ticks = now_tick(K) - so.t0 end
+  so_event(K, key, phase, txt, d)
+  apply_squad(K, key, true)
+end
+
+local function sum_wounds(id)
+  local u = try(function() return df.unit.find(id) end)
+  if not u then return nil end
+  return try(function() return #u.body.wounds end)
+end
+
+-- one look at every running position sortie (military's step, every SO_EVERY ticks while one runs)
+local function sortie_pass(K, now)
+  if next(rt.so) == nil then return false end
+  local c = so_conf(K)
+  local mode = K.mode()
+  for _, sp in ipairs(M.SQUADS) do
+    local key = sp.key
+    local so = rt.so[key]
+    if so then
+      local e = st.sq[key]
+      local s = e and squad(e.id)
+      local dt = math.max(1, now - (so.last or now))
+      so.last = now
+      local info = s and M.squad_info(K, key)
+      local lone, lwhy
+      if so.keep then lone, lwhy = M.lone_of(K, so.ids) end
+      if rt.held[key] then
+        rt.so[key] = nil
+      elseif not s or not info or info.n == 0 then
+        so_end(K, key, 'abort', 'no_squad', 'sortie ' .. key .. ' ended: the squad has no members')
+      elseif mode == 'PEACE' then
+        so_end(K, key, 'abort', 'mode', 'sortie ' .. key .. ' ended: the mode is PEACE')
+      elseif now - so.t0 >= c.hold_ticks then
+        so_end(K, key, 'abort', 'timeout', string.format('sortie %s ended after %d ticks: %s', key, now - so.t0,
+               so.arrived and 'arrived, the target is still there' or 'the squad has not arrived'))
+      elseif so.keep and info.worn < c.worn then
+        so_end(K, key, 'abort', 'worn', string.format('sortie %s ended: worn %d%% < %d%%', key, info.worn, c.worn))
+      elseif so.keep and not lone and (lwhy == 'group' or lwhy == 'dangerous' or (lwhy ~= 'none' and (so.nolone or 0) + dt >= M.SO_EVERY * 2)) then
+        so_end(K, key, 'abort', 'more_hostiles', 'sortie ' .. key .. ' ended: the picture is no lone harmless intruder any more')
+      else
+        so.nolone = (so.keep and not lone and lwhy ~= 'none') and (so.nolone or 0) + dt or nil     -- (reflex's census scan may lag one pass)
+        -- members near the target
+        local tp = so.tgt
+        if so.kind == 'kill' then
+          local alive, seen = {}, {}
+          for _, id in ipairs(so.ids) do
+            if not unit_dead(id) then alive[#alive + 1] = id end
+          end
+          if #alive == 0 then
+            so_end(K, key, 'dead', 'killed', string.format('sortie %s: target %s dead after %d ticks', key, so_ids_txt(so.ids),
+                   now - so.t0))
+            goto continue
+          end
+          local cur
+          for _, h in ipairs(type(K.census.h) == 'table' and K.census.h.list or {}) do
+            for _, id in ipairs(alive) do if h.id == id then cur = cur or h; seen[id] = true end end
+          end
+          so.ids = alive
+          -- fair play: the target's position is read from the census (units in sight) only; out of sight the last known
+          -- position stays and the unseen clock runs
+          if cur then tp, so.tgt, so.unseen = {x = cur.x, y = cur.y, z = cur.z}, {x = cur.x, y = cur.y, z = cur.z}, 0
+          else so.unseen = so.unseen + dt end
+          if so.unseen >= c.idle_ticks then
+            so_end(K, key, 'abort', 'gone', string.format('sortie %s ended: target %s out of sight for %d ticks', key, so_ids_txt(so.ids), so.unseen))
+            goto continue
+          end
+        end
+        local near_n, adj_n = 0, 0
+        for _, m in ipairs(members(s)) do
+          local mp = try(function() return {x = m.unit.pos.x, y = m.unit.pos.y, z = m.unit.pos.z} end)
+          if mp and tp then
+            local d = cheb(mp, tp)
+            if d <= M.SO_ARRIVE then near_n = near_n + 1 end
+            if d <= M.SO_ADJ then adj_n = adj_n + 1 end
+          end
+        end
+        if near_n > 0 and not so.arrived then
+          so.arrived = true
+          so_event(K, key, 'arrived', string.format('sortie %s arrived at %s after %d ticks (%d of %d near)', key, pstr(tp),
+                   now - so.t0, near_n, info.n), {n = near_n, pos = {tp.x, tp.y, tp.z}, ticks = now - so.t0})
+        end
+        if so.kind == 'station' then
+          if so.arrived then
+            local hs = hostiles_near(K, tp, c.kill_near)
+            if #hs > 0 then
+              local ids = {}
+              for _, h in ipairs(hs) do ids[#ids + 1] = h.id end
+              table.sort(ids)
+              local ok2 = so_begin(K, key, s, {kind = 'kill', units = ids}, {cmd = so.cmd, by = so.by, keep = so.keep})
+              if ok2 then
+                so_event(K, key, 'go', string.format('sortie %s: arrived and %d hostile%s within %d tiles: kill order on %s', key,
+                         #ids, #ids == 1 and '' or 's', c.kill_near, so_ids_txt(ids)), {units = ids, why = 'kill', pos = {tp.x, tp.y, tp.z}})
+              end
+            else
+              so_end(K, key, 'done', 'no_target', string.format('sortie %s ended at %s: nobody within %d tiles to attack', key,
+                     pstr(tp), c.kill_near))
+            end
+          end
+        else
+          -- a kill order: soldiers beside the target and no attack
+          if adj_n > 0 then
+            so.adj = so.adj + dt
+            local w = sum_wounds(so.ids[1])
+            if so.w0 == nil then so.w0 = w end
+            if w ~= so.w0 then so.adj, so.w0 = 0, w end      -- it was hit: the attack is on
+          else so.adj, so.w0 = 0, nil end
+          if so.adj >= c.idle_ticks then
+            local id = so.ids[1]
+            if so.keep then K.call('reflex', 'ignore', id, 'not_attackable') end     -- only a lone harmless one is cleared
+            so_end(K, key, 'abort', 'not_attackable', string.format('sortie %s ended: soldiers stood beside %s for %d ticks and no ' ..
+                   'attack came: DF does not treat it as an enemy (visitor, diplomat, captive or a child?)%s',
+                   key, so_ids_txt(so.ids), so.adj, so.keep and '; the unit is cleared' or ''))
+          elseif order_count(s) == 0 then
+            -- DF dropped the order while the target lives
+            if so.re >= M.SO_REISSUE then
+              so_end(K, key, 'abort', 'order_dropped', string.format('sortie %s ended: DF dropped the kill order %d times while %s lives',
+                     key, so.re, so_ids_txt(so.ids)))
+            else
+              local ok2 = K.act.squad_order(s.id, {kind = 'kill', units = so.ids})
+              so.re = so.re + 1
+              if not ok2 then so.re = M.SO_REISSUE end
+            end
+          end
+        end
+      end
+    end
+    ::continue::
+  end
+  return next(rt.so) ~= nil
+end
+
+-- the ids (of `ids`) when the census shows a lone harmless intruder picture around them, else nil
+function M.lone_of(K, ids)
+  if type(ids) ~= 'table' then return nil, 'stale' end
+  local ok, l, why = K.call('reflex', 'lone_ids')
+  if not (ok and type(l) == 'table' and #l > 0) then return nil, ok and why or 'stale' end
+  local have = {}
+  for _, id in ipairs(l) do have[id] = true end
+  for _, id in ipairs(ids) do if not have[id] then return nil, 'group' end end
+  return l
+end
+
+-- public (reflex, BREACH: a lone harmless intruder inside Kern+ for confine.kill_hours): the best squad gets a kill order on
+-- it. Returns true, msg (running or started) or false, why
+function M.kill_lone(K, ids, by)
+  if K.mode() == 'PEACE' then return false, 'PEACE' end
+  local key = M.sortie_squad(K)
+  if not key then return false, 'no squad to send' end
+  if rt.so[key] then return true, 'sortie ' .. key .. ' is running' end
+  local e = st.sq[key]
+  local s = e and squad(e.id)
+  local c = so_conf(K)
+  local info = s and M.squad_info(K, key)
+  if not info or info.n == 0 then return false, 'squad ' .. key .. ' has no members' end
+  if info.worn < c.worn then return false, string.format('squad %s worn %d%% < %d%%', key, info.worn, c.worn) end
+  local seen = {}
+  for _, h in ipairs(type(K.census.h) == 'table' and K.census.h.list or {}) do seen[h.id] = true end
+  local vis = {}
+  for _, id in ipairs(ids or {}) do if seen[id] then vis[#vis + 1] = id end end
+  table.sort(vis)
+  if #vis == 0 then return false, 'the target is not in sight' end
+  local p = unit_xyz(vis[1])
+  local why = p and unreachable(K, s, p)
+  if why then return false, why end
+  local ok, err = so_begin(K, key, s, {kind = 'kill', units = vis}, {cmd = 'kernel', by = by or 'reflex', keep = true})
+  if not ok then return false, err end
+  rt.so[key].tgt = p
+  so_event(K, key, 'go', string.format('sortie %s: the kernel orders a kill on %s %s inside the fort (%d soldiers)', key,
+           #vis == 1 and 'the lone harmless intruder' or 'the harmless intruders', so_ids_txt(vis), info.n),
+           {units = vis, why = 'kill', pos = p and {p.x, p.y, p.z} or nil, n = info.n, worn = info.worn})
+  return true, 'kill order on ' .. so_ids_txt(vis)
+end
+
+-- public (tests, status): the running position sortie of a squad, or nil
+function M.sortie_of(K, key)
+  local so = rt.so[key]
+  if not so then return nil end
+  return {kind = so.kind, ids = so.ids, keep = so.keep, arrived = so.arrived, by = so.by, t0 = so.t0}
+end
+
+-- inbox squad.sortie (approval checked by kern): kill the visible hostiles in a killbox, else move there. A position
+-- with a visible hostile within sortie.kill_near tiles is a kill order on it (M3, BUG-113); a killbox id the manifest does
+-- not have falls back to a kill order on the one hostile in sight (M3). args.gate (Gordon 2026-10-16): a sortie through that
+-- outer bridge; siege runs it (gather in the bailey, open, kill, recall, close) and answers
 M.verbs['squad.sortie'] = function(K, args, cmd)
   if args.gate ~= nil then
     local ok, r, msg = K.call('siege', 'sortie', args, cmd and cmd.id)
@@ -2004,25 +2303,65 @@ M.verbs['squad.sortie'] = function(K, args, cmd)
   local s = e and squad(e.id)
   if not s or #members(s) == 0 then return false, 'no squad ' .. tostring(k) end
   local target, order, what = args.target, nil, nil
+  local c = so_conf(K)
+  local pos_target
   if type(target) == 'string' then
+    local x, y, z = target:match('^%s*(-?%d+)%s*,%s*(-?%d+)%s*,%s*(-?%d+)%s*$')     -- "77,67,128" is a position
+    if x then pos_target = posp({tonumber(x), tonumber(y), tonumber(z)}) end
+  end
+  if type(target) == 'string' and not pos_target then
     local man = K.manifest()
     local box
     for _, kb in ipairs(type(man.killboxes) == 'table' and man.killboxes or {}) do if kb.id == target then box = kb end end
-    if not box then return false, 'no killbox ' .. target end
-    local ids = {}
-    for _, h in ipairs(type(K.census.h) == 'table' and K.census.h.list or {}) do ids[#ids + 1] = h.id end
-    local t = valid_targets(K, ids, target)
-    if #t > 0 then order, what = {kind = 'kill', units = t}, 'kill ' .. #t .. ' in ' .. target
-    else order, what = {kind = 'station', pos = geom.bbox_center(box.bbox)}, 'move to ' .. target end
+    if not box then
+      -- M3: no killbox of that name (a fort without a killbox manifest): the one hostile in sight is the target
+      local list = type(K.census.h) == 'table' and K.census.h.list or {}
+      if #list == 1 then
+        local p = {x = list[1].x, y = list[1].y, z = list[1].z}
+        local why = unreachable(K, s, p)
+        if why then return false, 'no killbox ' .. target .. '; ' .. why end
+        order = {kind = 'kill', units = {list[1].id}}
+        what = string.format('no killbox %s: kill order on the lone hostile %d at %s', target, list[1].id, pstr(p))
+        pos_target = p
+      elseif #list == 0 then return false, 'no killbox ' .. target .. ' and no visible hostile; give a position [x,y,z]'
+      else return false, string.format('no killbox %s and %d hostiles in sight; give a position [x,y,z]', target, #list) end
+    else
+      local ids = {}
+      for _, h in ipairs(type(K.census.h) == 'table' and K.census.h.list or {}) do ids[#ids + 1] = h.id end
+      local t = valid_targets(K, ids, target)
+      if #t > 0 then order, what = {kind = 'kill', units = t}, 'kill ' .. #t .. ' in ' .. target
+      else order, what = {kind = 'station', pos = geom.bbox_center(box.bbox)}, 'move to ' .. target end
+      local ok, err = K.act.squad_order(s.id, order)
+      if not ok then return false, 'order failed: ' .. tostring(err) end
+      rt.order[k] = 'sortie:' .. tostring(cmd and cmd.id or '?')
+      rt.kpi = nil
+      return true, 'sortie ' .. k .. ': ' .. what
+    end
   else
-    local p = posp(target)
+    local p = pos_target or posp(target)
     if not p then return false, 'target must be a killbox id or [x,y,z]' end
-    order, what = {kind = 'station', pos = p}, string.format('move to %d,%d,%d', p.x, p.y, p.z)
+    pos_target = p
+    local why = unreachable(K, s, p)
+    if why then return false, why end
+    local near = hostiles_near(K, p, c.kill_near)
+    if #near > 0 then
+      local ids = {}
+      for _, h in ipairs(near) do ids[#ids + 1] = h.id end
+      table.sort(ids)
+      order = {kind = 'kill', units = ids}
+      what = string.format('kill order on %s (%d visible hostile%s within %d tiles of %s)', so_ids_txt(ids), #ids,
+                           #ids == 1 and '' or 's', c.kill_near, pstr(p))
+    else
+      order, what = {kind = 'station', pos = p}, string.format('move to %s (no visible hostile within %d tiles)', pstr(p), c.kill_near)
+    end
   end
-  local ok, err = K.act.squad_order(s.id, order)
-  if not ok then return false, 'order failed: ' .. tostring(err) end
-  rt.order[k] = 'sortie:' .. tostring(cmd and cmd.id or '?')
-  rt.kpi = nil
+  local keep = false
+  if order.kind == 'kill' then keep = M.lone_of(K, order.units) ~= nil end
+  local ok, err = so_begin(K, k, s, order, {cmd = cmd and cmd.id, by = 'verb', keep = keep})
+  if not ok then return false, err end
+  rt.so[k].tgt = pos_target or rt.so[k].tgt
+  so_event(K, k, 'go', string.format('sortie %s: %s%s', k, what, keep and '; kept against the posture while the squad is worn >= ' ..
+           c.worn .. '%' or ''), {why = order.kind, units = order.units, pos = pos_target and {pos_target.x, pos_target.y, pos_target.z} or nil})
   return true, 'sortie ' .. k .. ': ' .. what
 end
 
@@ -2665,7 +3004,8 @@ function M.init(K)
     end
   end
   rt = {retry = {}, order = {}, station = {}, kpi = nil, kpi_tick = 0, create_fails = 0, mats = {}, wk = {},
-        no_wpn = {}, held = {}, over = {}, rot = {}, add_bad = {}, add_note = {}, rot_why = {}, rot_t = {}, rot_last = {}}
+        no_wpn = {}, held = {}, over = {}, rot = {}, add_bad = {}, add_note = {}, rot_why = {}, rot_t = {}, rot_last = {},
+        so = {}}
   dirty = false
   M.every = {ticks = K.mode() == 'PEACE' and M.SLOW or M.FAST}
 end
@@ -2705,7 +3045,11 @@ function M.step(K, budget, ctx)
   local now = now_tick(K)
   local mode = K.mode()
   local want_every = mode == 'PEACE' and M.SLOW or M.FAST
+  local so_run = sortie_pass(K, now)                                -- M3 (BUG-113)
+  if so_run and want_every > M.SO_EVERY then want_every = M.SO_EVERY end
   if M.every.ticks ~= want_every then M.every = {ticks = want_every} end
+  if so_run and rt.up_t and now >= rt.up_t and now - rt.up_t < M.FAST then return end   -- the full upkeep keeps its own pace
+  rt.up_t = now
   if type(K.census.u) ~= 'table' then return end
   local soldiers = rt.kpi and rt.kpi.soldiers or 0
   if mode == 'PEACE' and soldiers > 0 then M.unstick(K, now) end    -- BUG-050
@@ -2804,6 +3148,7 @@ end
 
 M.on.MODE = function(K, ev)
   local want = ev.to == 'PEACE' and M.SLOW or M.FAST
+  if rt and rt.so and next(rt.so) then want = M.SO_EVERY end    -- M3: a running sortie ends at its next look (PEACE: mode)
   if M.every.ticks ~= want then M.every = {ticks = want} end
 end
 

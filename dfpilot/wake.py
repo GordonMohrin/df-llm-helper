@@ -62,7 +62,7 @@ PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", 
         "BRIDGE_DESTROYED", "GATE_FAIL",
         "DEATHS_3PLUS", "NO_DEPOT",
         "NEEDS_CLICK",                        # K2: no fort runs at all; nothing else in the burst can be acted on first
-        "PATIENT_DYING", "MOOD_CRITICAL",     # I1: a patient or a mood dwarf at the death line comes before the housekeeping types
+        "PATIENT_DYING", "PATIENTS_OUT", "MOOD_CRITICAL",     # I1: a patient or a mood dwarf at the death line comes before the housekeeping types
         "DEATHS_PREVENTABLE", "KERN_FAULT", "HB_STALE", "SUPERVISE", "QUICKSAVE_FAILED",
         "SIEGE_END",
         "DRILL_FAIL", "BURROW_SHRUNK", "SIEGE_UNREADY", "PERF_DEGRADED", "DECISION_NEEDED", "SEAL_STUCK",
@@ -238,6 +238,10 @@ def next_hint(etype: str, e: dict) -> str:
         return sortie_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "confined_need":
         return need_hint(d)
+    if etype == "DECISION_NEEDED" and d.get("id") == "kill_lone_intruder":
+        return lone_hint(d)
+    if etype == "PATIENTS_OUT":
+        return patients_hint(d)
     if etype == "PROJECT_BLOCKED" and d.get("park") is not None and d.get("proj"):
         return park_hint(d)
     return NEXT.get(etype, "dfllm brief")
@@ -252,6 +256,27 @@ def sortie_hint(d: dict) -> str:
         return f"tell Gordon{how}; otherwise the lockdown ends by itself at its limit (confine.max_days)"
     return (f"tell Gordon: the lockdown stays while this one is near{how} (only if the squad can win); "
             "dfllm status shows the cause")
+
+
+def lone_hint(d: dict) -> str:
+    """M3 (BUG-112, notes 94 and 96): a harmless lone intruder holds a SIEGE/BREACH for days. The kernel kills one inside Kern+
+    itself after confine.kill_hours when a squad stands at sortie.worn; this is the question when it is still there."""
+    cmd = d.get("cmd")
+    how = f"; to send the squad now: {cmd} (approve:true is a logged decision)" if cmd else "; no squad to send"
+    kill = f" (the kernel's own kill order: {d['kill']})" if d.get("kill") else ""
+    return (f"tell Gordon{how}{kill}; otherwise the kernel releases it at confine.max_days when the soldiers stand at "
+            "their stations (LOCKDOWN_END limit); dfllm events --type SORTIE says whether the soldiers arrived, killed it or "
+            "stood beside it (not_attackable: DF does not treat it as an enemy)")
+
+
+PATIENTS_OUT_HINT = ("patients lie outside the alert burrow and cannot walk there: only a rescue moves them. Tell Gordon; "
+                     "recipe for the next peace: plan the hospital inside Kern+ or Tiefe+ next to accepted water (dfllm bp "
+                     "sites hospital names the water), then remove the old zones (readiness hospital_out)")
+
+
+def patients_hint(d: dict) -> str:
+    """M3 (note 94 c): a class-A wake for patients outside the burrow the civ alert confines to, with the recipe."""
+    return PATIENTS_OUT_HINT + (f" ({d['n']} of {d['patients']} patients, units {d.get('units', [])[:5]})" if "patients" in d else "")
 
 
 def need_hint(d: dict) -> str:

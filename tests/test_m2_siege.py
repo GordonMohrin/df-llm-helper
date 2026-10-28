@@ -101,7 +101,7 @@ def test_the_documents_name_the_four_bugs_and_the_fr():
         for head in ("Status:", "## Actual", "## Cause", "## Fix", "## Not decided offline", "## Tests"):
             assert head in body, (n, head)
     changelog = read("CHANGELOG.md")
-    top = changelog.split("\n## ")[1]
+    top = next(e for e in changelog.split("\n## ")[1:] if "BUG-107" in e and "BUG-110" in e)   # merges reorder the entries
     for n in (107, 108, 109, 110):
         assert f"BUG-{n}" in top
     assert "FR-92" in top and len(re.findall(r"^\*\*FR-92\b", read("docs/feature-requests/README.md"), re.M)) == 1

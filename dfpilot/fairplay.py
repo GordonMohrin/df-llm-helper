@@ -198,6 +198,12 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
             elif k == "noeffect_wait":             # BUG-068: ticks of the first parking (doubled per further parking)
                 if not is_int(v, 100, 24000):
                     errs.append(f"{name}: gate.noeffect_wait: int 100..24000 expected, got {v!r}")
+            elif k == "pull_cap":                  # M3 (BUG-114): pulls without effect in a mode before gate gives up
+                if not is_int(v, 3, 100):
+                    errs.append(f"{name}: gate.pull_cap: int 3..100 expected, got {v!r}")
+            elif k == "giveup_wait":               # M3 (BUG-114): ticks without a pull after the give-up (doubled per give-up)
+                if not is_int(v, 600, 100800):
+                    errs.append(f"{name}: gate.giveup_wait: int 600..100800 expected, got {v!r}")
             elif k == "manual":
                 if not isinstance(v, list) or len(v) > 32 or any(
                         not (is_int(x, 0, 2**31 - 1) or (isinstance(x, str) and re.match(schema.BRIDGE_RE, x)))
@@ -207,7 +213,8 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
                 errs.append(f"{name}: gate.{k}: unknown key")
     # intake waves and the sortie through O1 (Gordon 2026-10-16; lua/dfllm/siege.lua M.IK_LIM / M.SO_LIM)
     for blk, lims in (("intake", INTAKE_LIM), ("sortie", SORTIE_LIM), ("stations", STATIONS_LIM),
-                      ("perimeter", PERIMETER_LIM), ("confine", CONFINE_LIM), ("popups", POPUPS_LIM)):
+                      ("perimeter", PERIMETER_LIM), ("confine", CONFINE_LIM), ("popups", POPUPS_LIM),
+                      ("breach", BREACH_LIM)):
         sec = doc.get(blk, {})
         if not isinstance(sec, dict):
             errs.append(f"{name}: {blk} must be an object")
@@ -232,9 +239,12 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
 # BUG-065 / FR-75: the confinement limit and the popup knobs of config/reflex.json (lua/dfllm/reflex.lua `cfg`,
 # lua/dfllm/arbiter.lua `popup_cfg`; a bad value = the default)
 CONFINE_LIM: dict = {"max_days": (0, 365), "harmless_size": (0, 5000000), "lone_max": (1, 10), "offer_days": (0, 365),
-                     "need_thirst": (10000, 75000), "need_hunger": (10000, 100000)}
+                     "need_thirst": (10000, 75000), "need_hunger": (10000, 100000), "ask_days": (0, 365),
+                     "kill_hours": (0, 720), "siege_release": "bool"}
 POPUPS_LIM: dict = {"other": "bool", "other_s": (5, 600), "log_s": (60, 86400)}
-REFLEX_EXTRA = ("confine", "popups")
+# M3 (BUG-114): siege.lua breach_stuck: ticks of a BREACH whose failed bridges stay down before it falls back to SIEGE (0 = off)
+BREACH_LIM: dict = {"stuck_ticks": (0, 4032000)}
+REFLEX_EXTRA = ("confine", "popups", "breach")
 
 
 # the kernel's limits for config/reflex.json intake / sortie (siege.lua M.IK_LIM, M.SO_LIM; a bad value = the default)
@@ -242,7 +252,8 @@ INTAKE_LIM: dict = {"on": "bool", "wave": (1, 40), "min_soldiers": (1, 30), "wor
                     "cooldown": (0, 33600), "danger_dist": (0, 200), "stable": (0, 33600), "losses": (1, 30),
                     "muster": (100, 33600), "fight": (300, 100800)}
 SORTIE_LIM: dict = {"worn": (0, 100), "losses": (1, 30), "max_ticks": (300, 33600), "gather": (100, 33600),
-                    "foe_cv": (0, 100), "near": (1, 50)}
+                    "foe_cv": (0, 100), "near": (1, 50), "kill_near": (0, 50), "idle_ticks": (300, 33600),
+                    "hold_ticks": (300, 100800)}
 # BUG-030: the deep defense (siege.lua M.ST / M.ST_LIM): an army over core_ratio x soldiers, worn % or the iron/steel
 # share below worn / metal; BUG-032: spread = tiles around its station point a squad stands on (military.lua M.SPREAD:
 # a station lies more than gate's margin + spread tiles from every bridge footprint)

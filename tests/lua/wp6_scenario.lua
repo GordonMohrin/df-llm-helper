@@ -66,7 +66,7 @@ run(200)
 -- 4. a raid in the killing field: SIEGE, kill orders to the crossbows, an approved sortie
 run(300, {{0, function() for i = 201, 206 do W.unit(i)._m.hidden = false end end}})
 expect('SIEGE')
-H.inbox(W, 's2', 'squad.sortie', {squad = 'B', target = {55, 30, S.Z}, approve = true}, 'llm')
+H.inbox(W, 's2', 'squad.sortie', {squad = 'B', target = {58, 36, S.Z}, approve = true}, 'llm')     -- M3: more than 5 tiles from the raiders (a kill order within 5)
 run(300)
 local ev = package.loaded['plugins.eventful']
 for i = 201, 206 do W.kill(i); ev.onUnitDeath[kern.KEY](i) end
