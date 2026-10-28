@@ -629,11 +629,9 @@ def refuge_open(save_dir: Path, state: dict | None = None) -> tuple[str, list[st
     return "", [], 0, []
 
 
-def refuge_head(save_dir: Path) -> str | None:
-    """'x,y,z kind' of the tile above the refuge level on the civilians' stair down to it, from the fort manifest
-    (refuge anchor, stairs.civ). BUG-031: fortcore's Tiefe+ hangs below Kern+ on that stair without a door or hatch, so
-    whatever reaches Kern+ reaches the refuge; a hatch there separates it on its own. None without a manifest refuge
-    or such a stair."""
+def _refuge_column(save_dir: Path) -> tuple[int, int, int, int] | None:
+    """(x, y, zr, top) of the civilians' stair that comes down to the refuge level zr (fort manifest: refuge anchor,
+    stairs.civ {x, y, z0, z1}); the manifest's stair head is (x, y, zr + 1). None without a manifest refuge or such a stair."""
     try:
         m = fort_manifest(save_dir)
     except BpUnavailable:
@@ -643,10 +641,82 @@ def refuge_head(save_dir: Path) -> str | None:
         return None
     zr = a[2]
     for c in (m.get("stairs") or {}).get("civ") or []:
-        if isinstance(c, list) and len(c) == 4 and all(isinstance(v, int) for v in c) and min(c[2:]) == zr \
-                and max(c[2:]) > zr:
-            return "%d,%d,%d %s" % (c[0], c[1], zr + 1, "stair_down" if max(c[2:]) == zr + 1 else "stair_updown")
+        if isinstance(c, list) and len(c) == 4 and all(isinstance(v, int) for v in c) and min(c[2:]) == zr                 and max(c[2:]) > zr:
+            return c[0], c[1], zr, max(c[2:])
     return None
+
+
+NOSTAIR = ("refuge: no stair found (not dug) at the manifest's stair head {}; the stale manifest entry is kept, no hatch "
+           "is demanded (dfllm cmd inspect what=refuge, trust.hatch)")
+STAIR_CHARS = "<>X"                    # snapshot legend: stair up, down, up/down
+HEAD_KIND = {"<": "stair_up", ">": "stair_down", "X": "stair_updown", "+": "stair_updown"}
+
+
+def _snap_char(snap: dict | None, x: int, y: int, z: int) -> str | None:
+    """Legend char of a snapshot tile; None when the snapshot is missing, does not cover it or did not export it."""
+    try:
+        x0, y0, z0, x1, y1, z1 = snap["bbox"]            # type: ignore[index]
+        if not (x0 <= x <= x1 and y0 <= y <= y1 and z0 <= z <= z1):
+            return None
+        c = snap["rows"][f"z{z}"][y - y0][x - x0]       # type: ignore[index]
+    except (TypeError, KeyError, IndexError, ValueError):
+        return None
+    return None if c == " " else c
+
+
+def refuge_stair(save_dir: Path, snap: dict | None = None) -> dict:
+    """BUG-123/124 (Run 14 note 102: `seal at=refuge` was demanded for a manifest stair on undug rock, then failed with "the
+    tile is not revealed"): the refuge's stair head as the map shows it, from revealed tiles only (the newest snapshot; fair
+    play: nothing is revealed). {state, head, man, note}:
+      None      no manifest refuge or stair (head/man None);
+      ok        the head is a revealed stair, a hatch or door stands on it, or the snapshot does not tell (as given);
+      moved     the head tile is not revealed, another tile of the same stair above the refuge level is: the hatch goes
+                to the nearest one (head = that tile, man = the manifest's);
+      hidden    the head tile is not revealed and no other tile above it is, but a tile of the stair at or below the
+                refuge level is a stair: the stair is real, the hatch has no tile (head None; the kernel asks once);
+      nostair   the head tile is revealed and not a stair, or nothing of the stair column is revealed as a stair: it was
+                never dug (head None; the manifest entry stays, flagged).
+    head = 'x,y,z kind' of the tile `seal at=refuge` closes (None for hidden and nostair); note = the plan check's text."""
+    col = _refuge_column(save_dir)
+    if col is None:
+        return {"state": None, "head": None, "man": None, "note": ""}
+    x, y, zr, top = col
+    snap = snap if snap is not None else sites_snapshot(save_dir)
+    c0 = _snap_char(snap, x, y, zr + 1)
+    man = "%d,%d,%d %s" % (x, y, zr + 1, "stair_down" if top == zr + 1 else "stair_updown")
+    xyz = "%d,%d,%d" % (x, y, zr + 1)
+    out = {"state": "ok", "head": man, "man": man, "note": ""}
+    if c0 is None or c0 in STAIR_CHARS + "+":
+        return out                                      # unknown (no snapshot) or a stair: as given
+    if c0 != "?":
+        out.update(state="nostair", head=None, note=NOSTAIR.format(xyz))
+        return out
+    for z in range(zr + 2, top + 1):                   # the head tile is not revealed: the nearest revealed tile above it
+        c = _snap_char(snap, x, y, z)
+        if c is not None and c in STAIR_CHARS + "+":
+            to = "%d,%d,%d" % (x, y, z)
+            return {"state": "moved", "man": man, "head": f"{to} {HEAD_KIND[c]}",
+                    "note": f"refuge: the stair head {xyz} is not revealed; hatch moved to {to} (same stair, nearest "
+                            "revealed tile)"}
+    real = next(("%d,%d,%d" % (x, y, z) for z in range(zr, top + 1) if z != zr + 1
+                 and (_snap_char(snap, x, y, z) or " ") in STAIR_CHARS + "+"), None)
+    if real is None:
+        out.update(state="nostair", head=None, note=NOSTAIR.format(xyz))
+        return out
+    out.update(state="hidden", head=None,
+               note=f"refuge: the civilians' stair is real ({real} is a stair) but its hatch tile {xyz} is not revealed: "
+                    "look at the tile in the game, then dfllm bp sites seal --fresh (the kernel asks once: DECISION_NEEDED "
+                    "refuge_hatch)")
+    return out
+
+
+def refuge_head(save_dir: Path, snap: dict | None = None) -> str | None:
+    """'x,y,z kind' of the tile `seal at=refuge` closes: the tile above the refuge level on the civilians' stair down to it
+    (fort manifest: refuge anchor, stairs.civ). BUG-031: fortcore's Tiefe+ hangs below Kern+ on that stair without a door or
+    hatch, so whatever reaches Kern+ reaches it; a hatch there separates it on its own. BUG-123/124: read on the newest
+    snapshot (refuge_stair): another tile of the same stair when the head is not revealed, None when the stair is not on
+    the map (never dug) or has no revealed tile for the hatch. None without a manifest refuge or such a stair."""
+    return refuge_stair(save_dir, snap)["head"]
 
 
 def current_openings(save_dir: Path, state: dict | None = None) -> list[dict]:
@@ -765,7 +835,8 @@ def _geo_try(fn, notes: list[str], label: str, *a):
 # BUG-047: the notes of seal_openings that say an opening is closed already (or a seal project has it); a note of any other
 # kind (a tile not on the snapshot, a failed search, no tile that closes the route) is a gap in what we know
 CLOSED_NOTES = ("(closed)", "(closed, or no floor/ramp/stair)", "left out, sealed by", "builds its piece",
-                "a seal under way closes its route", "(a seal project builds them)")
+                "a seal under way closes its route", "(a seal project builds them)",
+                "no stair found (not dug)", "is not revealed: look at the tile", "hatch moved to")
 
 
 def _all_closed(notes: list[str], key: str, entries: list) -> bool:
@@ -793,10 +864,14 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None, close: str = "au
     key = text.lower()
     notes: list[str] = []
     entries: list[dict] = []
+    snap = snap if snap is not None else sites_snapshot(save_dir)
     if key in SEAL_LAST + ("all",):
         entries = current_openings(save_dir)
     if key in SEAL_REFUGE + ("all",):
-        head = refuge_head(save_dir)
+        rs = refuge_stair(save_dir, snap)                  # BUG-123/124: the head as the revealed map shows it
+        head = rs["head"]
+        if rs["state"] in ("nostair", "hidden", "moved"):
+            notes.append(rs["note"])
         o = dmod.parse_openings(head)[0] if head else None
         if o and all(e["pos"] != tuple(o["pos"]) for e in entries):
             entries.append({"pos": tuple(o["pos"]), "kind": o["kind"], "piece": "", "src": "head", "tick": -1})
@@ -825,7 +900,6 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None, close: str = "au
     if routes and routes["pending"]:                       # a seal project builds them already: never twice
         notes.append("left out (a seal project builds them): " + ", ".join(
             f"{w.rsplit(' ', 2)[0]} ({pid})" for w, pid in routes["pending"].items()))
-    snap = snap if snap is not None else sites_snapshot(save_dir)
     try:
         geo_cls = getattr(load_bp("topo"), "SealGeo", None)
     except BpUnavailable:

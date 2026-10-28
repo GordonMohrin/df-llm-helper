@@ -33,7 +33,7 @@ Nothing is in flight: no worktree, no open branch, no unmerged commit.
    and `follow` replays its events as fresh wakes. The kernel writes a marker event `TIMELINE_RESET (n_alt, tick_alt, tick_neu)` at boot when the
    clock jumped back; `follow`, `events` and `brief` drop events newer than the current tick or older than the last marker; lockdown and
    `alarm.txt` state of the old line are not taken over. A timestream restart must not trigger it; first boot without a log.
-3. **Note 102 refuge check without a stair** (BUG-123..125): `plan check` demands `seal at=refuge` as the first build for a manifest stair at
+3. **Note 102 refuge check without a stair** (BUG-123..125; DONE offline in branch `fix-refuge-seal-102`, see CHANGELOG): `plan check` demands `seal at=refuge` as the first build for a manifest stair at
    77,68,125 that is undug, unrevealed rock; the seal then fails with "the tile is not revealed", so even the hospital is blocked. Wanted:
    a manifest stair that is not a stair on the map is "refuge: no stair found (not dug)", a warning, not an error; the stale entry is flagged, not
    deleted; a real stair whose hatch tile is not revealed moves the hatch to the nearest revealed tile of the same stair or asks the player once

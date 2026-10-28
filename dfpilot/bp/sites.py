@@ -413,7 +413,10 @@ def _seal(snap: dict, p: dict) -> list[dict]:
     for pc in pcs:
         c = at(*pc["pos"])
         if c == "?":
-            raise ValueError(f"seal: {pc['why']}: the tile is not revealed")
+            raise ValueError(f"seal: {pc['why']}: tile {pc['pos'][0]},{pc['pos'][1]},{pc['pos'][2]} is not revealed on "
+                             f"snapshot {snap.get('id', '?')} (undug or unexplored rock: there may be no opening there): "
+                             "look at the tile in the game, then dfllm bp sites seal --fresh; never reveal it by tool "
+                             "(fair play). `seal at=refuge` moves a stair hatch to the nearest revealed tile of the same stair")
         want = SEAL_OPEN.get(pc["kind"], ".")
         if c is not None and c not in want:
             raise ValueError(f"seal: {pc['why']}: the snapshot shows {c!r}, not the {pc['kind']} (closed already?)")

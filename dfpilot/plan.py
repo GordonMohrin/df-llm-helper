@@ -17,7 +17,7 @@ from pathlib import Path
 
 from . import cmd as _cmd, files, paths, schema
 from .cmd import (SAME, SEAL_AUDIT, WATER_NEAR, BpError, BpUnavailable, _moodable, audit_routes, bp_files, fmt_reply,
-                  fort_manifest, free_sites, last_entrances, load_bp, log_seal, occupancy, place, rank_sites, refuge_head,
+                  fort_manifest, free_sites, last_entrances, load_bp, log_seal, occupancy, place, rank_sites, refuge_stair,
                   refuge_open, seal_openings, send, sites_snapshot, template_info, template_names, water_near, write_bp)
 from .cmd import SealClosed
 
@@ -44,6 +44,9 @@ REFUGE_BEDS_MAX = 30                      # its `n` limit
 REFUGE_DRINK = "refuge_drink"             # bp/rooms.py: drink-only stockpile with barrels, takes from dfllm-stock
 REFUGE_STAGE = {"tpl": "fortcore", "site": SAME, "p": {"stage": 3}}     # the fortcore refuge (with O1 and B2)
 SEAL_LAST = {"tpl": "seal", "site": "S1", "p": {"at": "last"}}          # doors on the open ways in (BUG-018)
+# BUG-125 (Run 14 note 102): life comes before the refuge. A hospital, coffins and tombs, food and drink builds are never held
+# back by the seal demand (they are no "other new build" the refuge's pieces must precede)
+LIFE_TPLS = ("hospital", "tombs", "farms", "stockroom", "cistern", "refuge_drink")
 SEAL_REFUGE = {"tpl": "seal", "site": "S1", "p": {"at": "refuge"}}      # BUG-031: the refuge's stair-head hatch + tiles
 EXPLORE = "explore"                       # bp/mine.py: stair shaft + side tunnels below the core (Run 10: no ore)
 METAL_WORN = 80                           # soldiers' worn % below which metal is a plan goal (P6 deliverable metal 80)
@@ -665,12 +668,15 @@ def refuge_projects(save_dir: Path, state: dict | None = None, applied: set | No
     (any fortcore stage applied: stage 3 can reuse its anchor) and ents (open ways in the last entrance check names).
     Run 11: seal_n / refuge_n (the openings `seal at=last` / `seal at=refuge` would close now: pending and built ones
     left out; None unknown), open and burrow (the entrances a current REFUGE_FAIL names and its burrow), head (the
-    refuge's stair head, cmd.refuge_head) and head_open (`seal at=refuge` would put its hatch there: no closer stands,
+    refuge's stair head, cmd.refuge_stair: BUG-123/124 the tile `seal at=refuge` closes; None when the stair is not on the
+    map or its head is not revealed, head_state ok/moved/hidden/nostair, head_man the manifest's head, head_note the
+    warning text) and head_open (`seal at=refuge` would put its hatch there: no closer stands,
     none is under way), bed_site (refuge_beds has a site; None unknown or not short). "Not done" = no PROJECT_DONE in
     events.jsonl and its rotation (a project older than the rotated log counts as under way)."""
     done = done_projects(save_dir)
     burrow, op, _, _ = refuge_open(save_dir, state if state is not None else {})
-    head = refuge_head(save_dir)
+    rs = refuge_stair(save_dir)                    # BUG-123/124: the stair head as the revealed map shows it
+    head = rs["head"]
     last, ref = _seal_at(save_dir, "last"), _seal_at(save_dir, "refuge")
     out = {"stage3": False, "beds": 0, "seal": False,
            "fortcore": any(t == "fortcore" for t, _ in (applied if applied is not None
@@ -678,6 +684,7 @@ def refuge_projects(save_dir: Path, state: dict | None = None, applied: set | No
            "ents": len(last_entrances(save_dir)), "seal_n": None if last is None else len(last),
            "refuge_n": None if ref is None else len(ref), "open": op, "burrow": burrow, "head": head,
            "head_open": bool(head and ref and any(x.split()[0] == head.split()[0] for x in ref)),
+           "head_state": rs["state"], "head_man": rs["man"], "head_note": rs["note"],
            "bed_site": _bed_site(save_dir, state), "drink": 0, "drink_room": _drink_room(save_dir)}
     for p in bp_files(save_dir):
         doc = files.read_json(p)
@@ -744,7 +751,7 @@ def refuge_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list
         return [], []                          # below P3 the refuge comes with fortcore stage 3 (or seal's dead end)
     f = fort.get("refuge") or {}
     adds = new_builds(doc, prev)
-    others = [(si, b) for si, _, b in adds if not _refuge_fix(b)]
+    others = [(si, b) for si, _, b in adds if not _refuge_fix(b) and b["tpl"] not in LIFE_TPLS]
     limit = min((si for si, _ in others), default=3)
     hard = True
     if not late:
@@ -772,6 +779,8 @@ def refuge_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list
              "dfllm plan propose drafts it)", -1 if f.get("stage3") else first(_refuge_stage))
         return errs, warn                      # its beds and its separation are checked once it exists
     sn, rn = f.get("seal_n"), f.get("refuge_n")
+    if f.get("head_note") and f.get("head_state") in ("nostair", "hidden", "moved"):
+        warn.append(f["head_note"])             # BUG-123/124: never an error; the demand below follows the moved tile
     if f.get("head_open") and f.get("head"):
         need(f"refuge: the civilians' stair enters Tiefe+ below {f['head'].split()[0]} without a hatch (whatever "
              f"reaches Kern+ reaches it, BUG-031); {want}: add {_compact(SEAL_REFUGE)} (the hatch at its stair head and "
